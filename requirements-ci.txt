@@ -11,3 +11,4 @@ loguru>=0.7.2
 aiohttp>=3.9.0
 colorama>=0.4.6
 httpx>=0.24.0  # starlette.testclient 的传递依赖，conftest.py 导入 TestClient 时必需
+jinja2>=3.1.0  # fastapi.Jinja2Templates 的传递依赖，src/web/admin.py 里用
