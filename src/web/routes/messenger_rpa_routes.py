@@ -61,7 +61,7 @@ def register_messenger_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            return {
+            st: Dict[str, Any] = {
                 "available": False,
                 "enabled_cfg": bool(
                     (config_manager.config or {})
@@ -73,8 +73,19 @@ def register_messenger_rpa_routes(
                     "在 config.yaml 中开启后重启进程"
                 ),
             }
-        st = svc.status()
-        st["available"] = True
+        else:
+            st = svc.status()
+            st["available"] = True
+        # escalation 占位行计数：store-derived 字段，svc 无关，两路都附加
+        store = _get_store(request)
+        if store is not None:
+            try:
+                st["pending_empty_count"] = store.count_approvals(
+                    status="pending", reply_text_empty=True,
+                )
+            except Exception:
+                logger.exception("pending_empty_count 查询失败")
+                st["pending_empty_count"] = -1
         return st
 
     @app.get("/api/messenger-rpa/recent")
@@ -92,6 +103,7 @@ def register_messenger_rpa_routes(
         status: Optional[str] = "pending",
         limit: int = 50,
         chat_key: Optional[str] = None,
+        reply_text_empty: Optional[bool] = None,
     ):
         api_auth(request)
         store = _get_store(request)
@@ -102,7 +114,10 @@ def register_messenger_rpa_routes(
         )
         return {
             "approvals": store.list_approvals(
-                status=norm_status, chat_key=chat_key, limit=int(limit or 50)
+                status=norm_status,
+                chat_key=chat_key,
+                reply_text_empty=reply_text_empty,
+                limit=int(limit or 50),
             ),
         }
 
