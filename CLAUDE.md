@@ -9,17 +9,25 @@
 
 ## Claude 在本 repo 工作时的约定
 
-### 回归命令（contacts/handoff 改动必跑）
+### 回归命令
 
+**全量**（pytest.ini 已 `--ignore` 14 个预存不稳 file，本地/CI 统一）：
+```bash
+python -m pytest tests/ -n auto -q
+```
+预期 **912 passed, 8 skipped ~9 秒**。CI 用同一命令。
+
+**仅 contacts/handoff 主线**（快速回归）：
 ```bash
 python -m pytest tests/test_contacts_*.py tests/test_gateway_*.py \
   tests/test_account_limiter.py tests/test_handoff_readiness.py \
   tests/test_intimacy_engine.py tests/test_reactivation_scheduler.py \
   tests/test_handoff_*.py tests/test_cap_alert.py \
-  tests/test_rpa_contact_hooks_wireup.py -q --tb=line -p no:warnings
+  tests/test_rpa_contact_hooks_wireup.py -q --tb=line
 ```
+预期 **266 全绿**（是全量 912 的子集）。
 
-预期 **266+ 全绿**。全量 `pytest tests/` 有一批预存失败/collection errors（aiohttp 未装等），不要被淹没；用定向 glob。
+预存不稳的 14 个 file 清单见 memory `reference_broken_tests_scope.md`；每修一个从 pytest.ini `addopts --ignore` 删一行。
 
 ### Feature flag 约定
 

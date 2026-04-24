@@ -38,7 +38,7 @@ def config_dir(tmp_path):
 @pytest.fixture
 def cm(config_dir):
     mgr = ConfigManager(str(config_dir / "config.yaml"))
-    asyncio.get_event_loop().run_until_complete(mgr.load())
+    asyncio.run(mgr.load())
     return mgr
 
 

@@ -45,13 +45,13 @@ def config_dir(tmp_path):
 @pytest.fixture
 def skill(config_dir):
     cm = ConfigManager(str(config_dir / "config.yaml"))
-    asyncio.get_event_loop().run_until_complete(cm.load())
+    asyncio.run(cm.load())
     ai = MagicMock()
     return EnhancedQuotaConfigSkill(cm, ai)
 
 
 def run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 class TestPermission:
