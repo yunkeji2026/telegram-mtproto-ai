@@ -11,11 +11,11 @@
 
 ### 回归命令
 
-**全量**（pytest.ini 已 `--ignore` 14 个预存不稳 file，本地/CI 统一）：
+**全量**（pytest.ini `asyncio_mode=auto` + pytest-asyncio plugin，0 ignore）：
 ```bash
 python -m pytest tests/ -n auto -q
 ```
-预期 **912 passed, 8 skipped ~9 秒**。CI 用同一命令。
+预期 **1090 passed, 8 skipped ~15 秒**。CI 用同一命令。
 
 **仅 contacts/handoff 主线**（快速回归）：
 ```bash
@@ -25,9 +25,7 @@ python -m pytest tests/test_contacts_*.py tests/test_gateway_*.py \
   tests/test_handoff_*.py tests/test_cap_alert.py \
   tests/test_rpa_contact_hooks_wireup.py -q --tb=line
 ```
-预期 **266 全绿**（是全量 912 的子集）。
-
-预存不稳的 14 个 file 清单见 memory `reference_broken_tests_scope.md`；每修一个从 pytest.ini `addopts --ignore` 删一行。
+预期 **266 全绿**（是全量 1090 的子集）。
 
 ### Feature flag 约定
 

@@ -209,36 +209,30 @@ class TestPriorityQueue:
         q = PriorityMessageQueue({})
         assert q.enabled is False
 
-    def test_enqueue_dequeue_order(self):
+    async def test_enqueue_dequeue_order(self):
         cfg = {"message_queue": {"enabled": True, "max_size": 10}}
         q = PriorityMessageQueue(cfg)
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(q.enqueue("low", PRIORITY_LOW))
-        loop.run_until_complete(q.enqueue("high", PRIORITY_HIGH))
-        loop.run_until_complete(q.enqueue("normal", PRIORITY_NORMAL))
-        first = loop.run_until_complete(q.dequeue(1))
-        assert first == "high"
-        second = loop.run_until_complete(q.dequeue(1))
-        assert second == "normal"
-        third = loop.run_until_complete(q.dequeue(1))
-        assert third == "low"
+        await q.enqueue("low", PRIORITY_LOW)
+        await q.enqueue("high", PRIORITY_HIGH)
+        await q.enqueue("normal", PRIORITY_NORMAL)
+        assert await q.dequeue(1) == "high"
+        assert await q.dequeue(1) == "normal"
+        assert await q.dequeue(1) == "low"
 
-    def test_backpressure_drops_low(self):
+    async def test_backpressure_drops_low(self):
         cfg = {"message_queue": {"enabled": True, "max_size": 5, "backpressure_threshold": 0.5}}
         q = PriorityMessageQueue(cfg)
-        loop = asyncio.get_event_loop()
         for i in range(3):
-            loop.run_until_complete(q.enqueue(f"msg{i}", PRIORITY_NORMAL))
-        ok = loop.run_until_complete(q.enqueue("lowmsg", PRIORITY_LOW))
+            await q.enqueue(f"msg{i}", PRIORITY_NORMAL)
+        ok = await q.enqueue("lowmsg", PRIORITY_LOW)
         assert ok is False
         stats = q.get_stats()
         assert stats["dropped"] >= 1
 
-    def test_stats(self):
+    async def test_stats(self):
         cfg = {"message_queue": {"enabled": True, "max_size": 100}}
         q = PriorityMessageQueue(cfg)
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(q.enqueue("test"))
+        await q.enqueue("test")
         stats = q.get_stats()
         assert stats["enqueued"] == 1
         assert stats["size"] == 1
