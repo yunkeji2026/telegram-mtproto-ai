@@ -160,9 +160,7 @@ class AudioPipeline:
             return rv
 
         t0 = time.monotonic()
-        loaded = await asyncio.get_event_loop().run_in_executor(
-            None, self._load_model,
-        )
+        loaded = await asyncio.to_thread(self._load_model)
         if not loaded:
             rv.error = f"model_load_failed: {self._last_error[:200]}"
             return rv
@@ -205,7 +203,7 @@ class AudioPipeline:
 
         try:
             rv = await asyncio.wait_for(
-                asyncio.get_event_loop().run_in_executor(None, _do_transcribe),
+                asyncio.to_thread(_do_transcribe),
                 timeout=timeout_sec,
             )
         except asyncio.TimeoutError:
