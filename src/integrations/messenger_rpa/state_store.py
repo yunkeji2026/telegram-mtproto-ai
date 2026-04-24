@@ -691,6 +691,37 @@ class MessengerRpaStateStore:
             rows = c.execute(sql, tuple(params)).fetchall()
         return [dict(r) for r in rows]
 
+    def count_approvals(
+        self,
+        *,
+        status: Optional[str] = None,
+        chat_key: Optional[str] = None,
+        reply_text_empty: Optional[bool] = None,
+    ) -> int:
+        """统计审批行数；过滤语义与 ``list_approvals`` 一致。
+
+        为 ``/status`` 观测字段 ``pending_empty_count``（escalation 占位行堆积）
+        提供 O(1) 走索引的计数路径，避免 ``len(list_approvals(...))`` 全行
+        物化的 O(n) 开销。
+        """
+        clauses: List[str] = []
+        params: List[Any] = []
+        if status:
+            clauses.append("status=?")
+            params.append(status)
+        if chat_key:
+            clauses.append("chat_key=?")
+            params.append(chat_key)
+        if reply_text_empty is True:
+            clauses.append("reply_text = ''")
+        elif reply_text_empty is False:
+            clauses.append("reply_text <> ''")
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        sql = f"SELECT COUNT(*) AS n FROM messenger_rpa_approvals {where}"
+        with self._lock, self._conn() as c:
+            row = c.execute(sql, tuple(params)).fetchone()
+        return int(row["n"]) if row else 0
+
     def get_approval(self, approval_id: int) -> Optional[Dict[str, Any]]:
         with self._lock, self._conn() as c:
             row = c.execute(

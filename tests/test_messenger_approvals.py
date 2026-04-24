@@ -207,6 +207,73 @@ def test_list_approvals_combined_filters(store: MessengerRpaStateStore) -> None:
     assert rows_none == []
 
 
+# ───────────────── count_approvals ─────────────────
+
+
+def test_count_approvals_empty_store(store: MessengerRpaStateStore) -> None:
+    assert store.count_approvals() == 0
+    assert store.count_approvals(status="pending") == 0
+    assert store.count_approvals(reply_text_empty=True) == 0
+
+
+def test_count_approvals_matches_list_approvals(
+    store: MessengerRpaStateStore,
+) -> None:
+    """count 与 list 在相同过滤条件下数字一致（不依赖 limit）。"""
+    _seed(store)  # 2 pending (1 empty + 1 nonempty) + 1 approved
+    assert store.count_approvals() == 3
+    assert store.count_approvals(status="pending") == 2
+    assert store.count_approvals(status="approved") == 1
+    assert store.count_approvals(status="rejected") == 0
+
+
+def test_count_approvals_reply_text_empty_filter(
+    store: MessengerRpaStateStore,
+) -> None:
+    """这是 /status pending_empty_count 监控字段的数据来源。"""
+    _seed(store)
+    assert store.count_approvals(
+        status="pending", reply_text_empty=True
+    ) == 1
+    assert store.count_approvals(
+        status="pending", reply_text_empty=False
+    ) == 1
+    assert store.count_approvals(
+        status="pending", reply_text_empty=None
+    ) == 2
+
+
+def test_count_approvals_ignores_list_limit(
+    store: MessengerRpaStateStore,
+) -> None:
+    """list_approvals 有 limit 截断；count 必须返回完整总数，不受 limit 影响。"""
+    for i in range(60):
+        store.enqueue_approval(
+            chat_key=f"ck:{i}", chat_name=f"C{i}",
+            peer_text="q", peer_kind="text", reply_text="r",
+        )
+    # list_approvals 默认 limit=50
+    assert len(store.list_approvals(status="pending")) == 50
+    # count 应返回全部 60
+    assert store.count_approvals(status="pending") == 60
+
+
+def test_count_approvals_combined_filters(
+    store: MessengerRpaStateStore,
+) -> None:
+    ids = _seed(store)
+    # ck:a 有 n1 (pending) + n2 (approved)
+    assert store.count_approvals(chat_key="ck:a") == 2
+    assert store.count_approvals(
+        chat_key="ck:a", status="pending"
+    ) == 1
+    # ck:b 只有 1 个 escalation 占位行
+    assert store.count_approvals(
+        chat_key="ck:b", status="pending", reply_text_empty=True
+    ) == 1
+    del ids  # 仅用来建数据
+
+
 def test_get_approval_existing_and_missing(
     store: MessengerRpaStateStore,
 ) -> None:
