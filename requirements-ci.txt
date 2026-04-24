@@ -1,0 +1,12 @@
+# CI 精简依赖 — 仅覆盖 contacts/handoff 定向回归所需
+# 完整 requirements.txt 含 whisper/torch ~2.5GB 拖慢 CI，且定向测试用不到
+
+pytest>=7.4.0
+PyYAML>=6.0.1
+fastapi>=0.100.0
+uvicorn>=0.22.0
+itsdangerous>=2.1.0
+python-multipart>=0.0.6
+loguru>=0.7.2
+aiohttp>=3.9.0
+colorama>=0.4.6
