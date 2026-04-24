@@ -63,7 +63,7 @@ def general_config_dir(tmp_path):
 @pytest.fixture()
 def general_app(general_config_dir):
     cm = ConfigManager(str(general_config_dir / "config.yaml"))
-    asyncio.get_event_loop().run_until_complete(cm.load())
+    asyncio.run(cm.load())
     audit = AuditStore(db_path=general_config_dir / "audit.db")
     return create_app(cm, audit_store=audit, boot_ts=0)
 

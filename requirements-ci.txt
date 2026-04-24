@@ -14,3 +14,4 @@ httpx>=0.24.0       # starlette.testclient 的传递依赖，conftest.py 导入 
 jinja2>=3.1.0       # fastapi.Jinja2Templates 的传递依赖，src/web/admin.py 里用
 pytest-xdist>=3.0   # -n auto 并行; file 级隔离缓解 fixture 污染
 Pillow>=10.0.0      # tests/test_line_rpa_screen.py 等 PIL 相关测试 collection 需要
+requests>=2.28.0    # src/integrations/line_rpa/chat_list_scanner.py 用的 HTTP client
