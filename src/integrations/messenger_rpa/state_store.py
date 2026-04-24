@@ -608,13 +608,17 @@ class MessengerRpaStateStore:
         run_id: str = "",
         extra: Optional[Dict[str, Any]] = None,
         ai_tier: str = "",
+        allow_empty_reply: bool = False,
     ) -> int:
         """把待审批的回复写进 approvals 表；返回 row id。
 
         P6-3：``ai_tier`` 用于批量审批时按 tier 过滤（premium/normal/low）。
         旧调用者可忽略（默认空字符串）。
+
+        ``allow_empty_reply=True``：允许 reply_text 空入队（"等人工 Suggest
+        More 生成" 场景）；默认 False 保留防御性校验防意外空入队。
         """
-        if not reply_text.strip():
+        if not allow_empty_reply and not reply_text.strip():
             raise ValueError("reply_text 为空，不能入队审批")
         if not chat_key.strip():
             raise ValueError("chat_key 不能为空")

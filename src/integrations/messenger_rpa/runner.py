@@ -561,6 +561,7 @@ class MessengerRpaRunner:
                         peer_text=result.get("peer_text", ""),
                         peer_kind=peer_msg.kind,
                         reply_text="",  # 无预生成，等人工处理
+                        allow_empty_reply=True,  # 合法 pending 场景
                         screenshot_path=result.get("screenshot_path", ""),
                         run_id=run_id,
                         extra={
