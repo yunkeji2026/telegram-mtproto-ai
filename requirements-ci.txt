@@ -10,3 +10,4 @@ python-multipart>=0.0.6
 loguru>=0.7.2
 aiohttp>=3.9.0
 colorama>=0.4.6
+httpx>=0.24.0  # starlette.testclient 的传递依赖，conftest.py 导入 TestClient 时必需
