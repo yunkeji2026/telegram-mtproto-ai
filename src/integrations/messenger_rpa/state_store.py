@@ -660,9 +660,15 @@ class MessengerRpaStateStore:
         *,
         status: Optional[str] = None,
         chat_key: Optional[str] = None,
+        reply_text_empty: Optional[bool] = None,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
-        """列审批；status=None 时返回所有。"""
+        """列审批；status=None 时返回所有。
+
+        ``reply_text_empty``：None 不过滤；True 仅空 reply_text（escalation
+        占位行）；False 仅非空（正常 auto-reply 待审）。入队时 reply_text
+        已 strip，因此空判等于 ``reply_text = ''``。
+        """
         clauses: List[str] = []
         params: List[Any] = []
         if status:
@@ -671,6 +677,10 @@ class MessengerRpaStateStore:
         if chat_key:
             clauses.append("chat_key=?")
             params.append(chat_key)
+        if reply_text_empty is True:
+            clauses.append("reply_text = ''")
+        elif reply_text_empty is False:
+            clauses.append("reply_text <> ''")
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
         params.append(max(int(limit or 50), 1))
         sql = (

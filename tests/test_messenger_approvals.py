@@ -136,3 +136,233 @@ def test_enqueue_approval_default_and_optin_coexist(
 
     pending = store.list_approvals(status="pending")
     assert {r["id"] for r in pending} == {normal_id, esc_id}
+
+
+# ───────────────── list_approvals / get_approval ─────────────────
+
+
+def _seed(store: MessengerRpaStateStore) -> dict:
+    """建 3 条审批：normal pending / empty pending(escalation) / normal approved。"""
+    ids = {}
+    ids["n1"] = store.enqueue_approval(
+        chat_key="ck:a", chat_name="A",
+        peer_text="q1", peer_kind="text", reply_text="r1",
+    )
+    ids["esc"] = store.enqueue_approval(
+        chat_key="ck:b", chat_name="B",
+        peer_text="q2", peer_kind="text", reply_text="",
+        allow_empty_reply=True,
+        extra={"escalation": True},
+    )
+    ids["n2"] = store.enqueue_approval(
+        chat_key="ck:a", chat_name="A",
+        peer_text="q3", peer_kind="text", reply_text="r3",
+    )
+    # 把 n2 decided 掉，留 pending 只剩 n1 + esc
+    assert store.decide_approval(ids["n2"], approve=True) is True
+    return ids
+
+
+def test_list_approvals_filter_status(store: MessengerRpaStateStore) -> None:
+    ids = _seed(store)
+    pending_ids = {r["id"] for r in store.list_approvals(status="pending")}
+    assert pending_ids == {ids["n1"], ids["esc"]}
+    approved_ids = {r["id"] for r in store.list_approvals(status="approved")}
+    assert approved_ids == {ids["n2"]}
+
+
+def test_list_approvals_filter_chat_key(store: MessengerRpaStateStore) -> None:
+    ids = _seed(store)
+    rows = store.list_approvals(chat_key="ck:a")
+    assert {r["id"] for r in rows} == {ids["n1"], ids["n2"]}
+
+
+def test_list_approvals_reply_text_empty_filter(
+    store: MessengerRpaStateStore,
+) -> None:
+    """新增 reply_text_empty 过滤：True 仅 escalation 占位行，False 仅实体草稿。"""
+    ids = _seed(store)
+    empty_pending = store.list_approvals(
+        status="pending", reply_text_empty=True
+    )
+    assert {r["id"] for r in empty_pending} == {ids["esc"]}
+
+    nonempty_pending = store.list_approvals(
+        status="pending", reply_text_empty=False
+    )
+    assert {r["id"] for r in nonempty_pending} == {ids["n1"]}
+
+    all_pending = store.list_approvals(
+        status="pending", reply_text_empty=None
+    )
+    assert {r["id"] for r in all_pending} == {ids["n1"], ids["esc"]}
+
+
+def test_list_approvals_combined_filters(store: MessengerRpaStateStore) -> None:
+    """chat_key + reply_text_empty 组合可精确定位单个 chat 的 escalation 占位行。"""
+    ids = _seed(store)
+    rows = store.list_approvals(chat_key="ck:b", reply_text_empty=True)
+    assert {r["id"] for r in rows} == {ids["esc"]}
+    rows_none = store.list_approvals(chat_key="ck:a", reply_text_empty=True)
+    assert rows_none == []
+
+
+def test_get_approval_existing_and_missing(
+    store: MessengerRpaStateStore,
+) -> None:
+    aid = store.enqueue_approval(
+        chat_key="ck:x", chat_name="X",
+        peer_text="q", peer_kind="text", reply_text="r",
+    )
+    row = store.get_approval(aid)
+    assert row is not None
+    assert row["reply_text"] == "r"
+    assert store.get_approval(999_999) is None
+
+
+# ───────────────── update_approval_reply ─────────────────
+
+
+def test_update_approval_reply_on_pending_succeeds(
+    store: MessengerRpaStateStore,
+) -> None:
+    aid = store.enqueue_approval(
+        chat_key="ck", chat_name="C",
+        peer_text="q", peer_kind="text", reply_text="",
+        allow_empty_reply=True,
+    )
+    ok = store.update_approval_reply(aid, reply_text="human filled")
+    assert ok is True
+    row = store.get_approval(aid)
+    assert row is not None
+    assert row["reply_text"] == "human filled"
+    assert row["status"] == "pending"  # 只改文案不改状态
+
+
+def test_update_approval_reply_on_non_pending_noop(
+    store: MessengerRpaStateStore,
+) -> None:
+    """approved/rejected 状态下 update_approval_reply 返回 False 不修改。"""
+    aid = store.enqueue_approval(
+        chat_key="ck", chat_name="C",
+        peer_text="q", peer_kind="text", reply_text="r",
+    )
+    assert store.decide_approval(aid, approve=True) is True
+    ok = store.update_approval_reply(aid, reply_text="attempt overwrite")
+    assert ok is False
+    row = store.get_approval(aid)
+    assert row["reply_text"] == "r"  # 原文案不变
+
+
+def test_update_approval_reply_on_missing_id_noop(
+    store: MessengerRpaStateStore,
+) -> None:
+    assert store.update_approval_reply(999_999, reply_text="x") is False
+
+
+# ───────────────── decide_approval ─────────────────
+
+
+def test_decide_approval_approve_and_reject(
+    store: MessengerRpaStateStore,
+) -> None:
+    a1 = store.enqueue_approval(
+        chat_key="c1", chat_name="C",
+        peer_text="q", peer_kind="text", reply_text="r1",
+    )
+    a2 = store.enqueue_approval(
+        chat_key="c2", chat_name="C",
+        peer_text="q", peer_kind="text", reply_text="r2",
+    )
+    assert store.decide_approval(a1, approve=True, decided_by="admin") is True
+    assert store.decide_approval(a2, approve=False, decision_note="spam") is True
+
+    r1 = store.get_approval(a1)
+    assert r1["status"] == "approved"
+    assert r1["decided_by"] == "admin"
+    assert r1["decided_at"] > 0
+
+    r2 = store.get_approval(a2)
+    assert r2["status"] == "rejected"
+    assert r2["decision_note"] == "spam"
+
+
+def test_decide_approval_override_applies_only_on_approve(
+    store: MessengerRpaStateStore,
+) -> None:
+    """reply_text_override：approve 时覆盖，reject 时忽略保留原文。"""
+    a1 = store.enqueue_approval(
+        chat_key="c1", chat_name="C",
+        peer_text="q", peer_kind="text", reply_text="orig",
+    )
+    a2 = store.enqueue_approval(
+        chat_key="c2", chat_name="C",
+        peer_text="q", peer_kind="text", reply_text="orig",
+    )
+    store.decide_approval(a1, approve=True, reply_text_override="edited")
+    store.decide_approval(a2, approve=False, reply_text_override="ignored")
+
+    assert store.get_approval(a1)["reply_text"] == "edited"
+    assert store.get_approval(a2)["reply_text"] == "orig"
+
+
+def test_decide_approval_non_pending_returns_false(
+    store: MessengerRpaStateStore,
+) -> None:
+    """已 decided 的 approval 不能再次 decide。"""
+    aid = store.enqueue_approval(
+        chat_key="c", chat_name="C",
+        peer_text="q", peer_kind="text", reply_text="r",
+    )
+    assert store.decide_approval(aid, approve=True) is True
+    assert store.decide_approval(aid, approve=False) is False
+    row = store.get_approval(aid)
+    assert row["status"] == "approved"  # 状态未被二次覆盖
+
+
+def test_decide_approval_missing_id_returns_false(
+    store: MessengerRpaStateStore,
+) -> None:
+    assert store.decide_approval(999_999, approve=True) is False
+
+
+# ───────────────── escalation 端到端流程 ─────────────────
+
+
+def test_escalation_full_workflow_enqueue_update_decide(
+    store: MessengerRpaStateStore,
+) -> None:
+    """PR #6 启用的 escalation 工作流：入队空行 → 人工填文案 → 批准发送。"""
+    aid = store.enqueue_approval(
+        chat_key="ck:esc", chat_name="EscChat",
+        peer_text="urgent", peer_kind="text", reply_text="",
+        allow_empty_reply=True,
+        extra={"escalation": True, "escalation_reason": "keyword:人工"},
+    )
+    # 观测：escalation 占位行能被 reply_text_empty=True 过滤器定位
+    placeholders = store.list_approvals(
+        status="pending", reply_text_empty=True
+    )
+    assert [r["id"] for r in placeholders] == [aid]
+
+    # 人工 Suggest More → update_approval_reply 回填
+    assert store.update_approval_reply(aid, reply_text="人工回复草稿") is True
+
+    # 回填后不再是空占位，但仍 pending
+    assert store.list_approvals(
+        status="pending", reply_text_empty=True
+    ) == []
+    assert len(store.list_approvals(
+        status="pending", reply_text_empty=False
+    )) == 1
+
+    # 人工批准（可带 override 再改一次文案）
+    assert store.decide_approval(
+        aid, approve=True, decided_by="ops",
+        reply_text_override="最终版本",
+    ) is True
+
+    final = store.get_approval(aid)
+    assert final["status"] == "approved"
+    assert final["reply_text"] == "最终版本"
+    assert final["decided_by"] == "ops"
