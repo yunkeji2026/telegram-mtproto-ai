@@ -1,0 +1,22 @@
+# General domain KB categories
+
+categories:
+  - name: "常见问题"
+    description: "高频问答与说明"
+    triggers: ["怎么", "为什么", "FAQ", "帮助"]
+
+  - name: "使用帮助"
+    description: "功能入口、操作步骤"
+    triggers: ["怎么用", "设置", "教程"]
+
+  - name: "功能介绍"
+    description: "产品能力与限制"
+    triggers: ["功能", "支持", "能做什么"]
+
+  - name: "反馈建议"
+    description: "反馈渠道与期望"
+    triggers: ["反馈", "建议", "改进"]
+
+  - name: "其他"
+    description: "未归类内容"
+    triggers: ["其他", "misc"]

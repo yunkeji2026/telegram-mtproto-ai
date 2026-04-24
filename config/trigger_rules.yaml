@@ -1,0 +1,632 @@
+l1_rule_trigger:
+  enabled: true
+  priority: 1
+  image_with_text:
+    enabled: true
+    description: 用户发送图片并附带任何文字时立即触发
+    min_text_length: 1
+    examples:
+    - 这个
+    - 收到吗
+    - 怎么还没
+    - 单子呢
+    - 图片
+  high_frequency_keywords:
+    enabled: true
+    case_sensitive: false
+    require_exact_match: false
+    categories:
+      greeting:
+      - 你好
+      - 在吗
+      - 有人吗
+      - 有人在吗
+      - 您好
+      - 嗨
+      - 喂
+      - hello
+      - hi
+      - 说话
+      - 有人
+      order_related:
+      - 订单
+      - 单子
+      - 单号
+      - 查
+      - 查询
+      - 收到
+      - 没收到
+      payment_related:
+      - 支付
+      - 失败
+      - 退款
+      - 成功
+      - 超时
+      channel_related:
+      - 通道
+      - 状态
+      - 正常
+      - 限额
+      - 额度
+      - 能过多少
+      - 最大多少
+      - 多少额度
+      - 成功率
+      - 汇率
+      - 余额
+      - EP
+      - JC
+      - JZ
+      - ja
+      - jz
+      - EasyPaisa
+      - JazzCash
+      - 代收
+      - 代付
+      - 介绍
+      - 介绍一下
+      - 说说
+      - 讲一下
+      - 详细
+      - 详细说说
+      - 下发
+      - 交易
+      - 跑单
+      - 跑交易
+      - 波动
+      - 稳定
+      - 没到账
+      - 代付没到账
+      - 没收到钱
+      - 未到账
+      - 钱没到
+      - 单笔
+      - 限制
+      - 单笔限制
+      - 单笔限额
+      - 优化
+      general_business:
+      - 客服
+      - 帮助
+      - 有问题
+      - 怎么用
+      - camille
+      - 支持
+    all_keywords:
+    - 你好
+    - 在吗
+    - 有人吗
+    - 有人在吗
+    - 您好
+    - 嗨
+    - 喂
+    - hello
+    - hi
+    - 说话
+    - 有人
+    - 订单
+    - 单子
+    - 单号
+    - 查
+    - 查询
+    - 收到
+    - 没收到
+    - 支付
+    - 失败
+    - 退款
+    - 成功
+    - 超时
+    - 通道
+    - 状态
+    - 正常
+    - 限额
+    - 额度
+    - 能过多少
+    - 最大多少
+    - 多少额度
+    - 成功率
+    - 汇率
+    - 余额
+    - EP
+    - JC
+    - JZ
+    - ja
+    - jz
+    - EasyPaisa
+    - JazzCash
+    - 代收
+    - 代付
+    - 介绍
+    - 介绍一下
+    - 说说
+    - 讲一下
+    - 详细
+    - 详细说说
+    - 下发
+    - 回调
+    - 可用
+    - 什么时候
+    - 多久
+    - 到账
+    - 调出来
+    - 回调出来
+    - 什么时候回调
+    - 多久回调
+    - 查单
+    - 查订单
+    - 查看订单
+    - 帮我查
+    - 查一下
+    - 查到了吗
+    - 查新订单
+    - 交易
+    - 跑单
+    - 跑交易
+    - 波动
+    - 可以跑
+    - 能跑
+    - 稳定
+    - 没到账
+    - 代付没到账
+    - 没收到钱
+    - 未到账
+    - 钱没到
+    - 单笔
+    - 限制
+    - 单笔限制
+    - 单笔限额
+    - 优化
+    - 你能做什么
+    - 能做什么
+    - 有什么功能
+    - 可以做什么
+    - 服务什么
+    - 有什么服务
+    - order
+    - inquiry
+    - orderinquiry
+    - check
+    - status
+    - payment
+    - channel
+    - refund
+    - balance
+    - rate
+    - fee
+    - limit
+    - amount
+    - success rate
+    - transaction
+    - transfer
+    - withdraw
+    - deposit
+    - collection
+    - payout
+    - payin
+    - disbursement
+    - callback
+    - help
+    - support
+    - optimize
+    - /qhyy
+    - /tjcy
+    - /mnds
+    - /cxds
+    - /htds
+    - /cxdf
+    - /htdf
+    - /utr
+    - /hl
+    - /cxye
+    - /cgl
+    # Arabic
+    - طلب
+    - استفسار
+    - حالة
+    - دفع
+    - قناة
+    - رصيد
+    - سعر
+    - تحويل
+    - رسوم
+    - نجاح
+    - فشل
+    - استرجاع
+    - مساعدة
+    - حد
+    - مبلغ
+    # Urdu
+    - آرڈر
+    - ادائیگی
+    - حیثیت
+    - بیلنس
+    - ریٹ
+    - حد
+    - رقم
+    - ٹرانسفر
+    - واپسی
+    - مدد
+    - چینل
+    - فیس
+    - کامیابی
+    - ناکامی
+    # Hindi
+    - ऑर्डर
+    - भुगतान
+    - स्थिति
+    - बैलेंस
+    - दर
+    - सीमा
+    - राशि
+    - स्थानांतरण
+    - वापसी
+    - सहायता
+    - चैनल
+    - शुल्क
+    - सफलता
+    - विफल
+    # Turkish
+    - sipariş
+    - sorgu
+    - durum
+    - ödeme
+    - kanal
+    - bakiye
+    - oran
+    - tutar
+    - transfer
+    - iade
+    - yardım
+    - başarı
+    - ücret
+    # Portuguese
+    - pedido
+    - consulta
+    - pagamento
+    - canal
+    - saldo
+    - taxa
+    - valor
+    - transferência
+    - reembolso
+    - ajuda
+    - sucesso
+    - limite
+    # Spanish
+    - pedido
+    - consulta
+    - estado
+    - pago
+    - canal
+    - saldo
+    - tasa
+    - monto
+    - transferencia
+    - reembolso
+    - ayuda
+    - éxito
+    - límite
+    # French
+    - commande
+    - enquête
+    - statut
+    - paiement
+    - chaîne
+    - solde
+    - taux
+    - montant
+    - virement
+    - remboursement
+    - aide
+    - succès
+    - frais
+    # German
+    - Bestellung
+    - Anfrage
+    - Zahlung
+    - Kanal
+    - Guthaben
+    - Kurs
+    - Betrag
+    - Überweisung
+    - Rückerstattung
+    - Hilfe
+    - Erfolg
+    - Gebühr
+    # Italian
+    - ordine
+    - richiesta
+    - stato
+    - pagamento
+    - canale
+    - saldo
+    - tasso
+    - importo
+    - trasferimento
+    - rimborso
+    - aiuto
+    - successo
+    - tariffa
+    # Russian
+    - заказ
+    - запрос
+    - статус
+    - оплата
+    - канал
+    - баланс
+    - курс
+    - сумма
+    - перевод
+    - возврат
+    - помощь
+    - успех
+    - комиссия
+    # Japanese
+    - 注文
+    - 支払い
+    - 状態
+    - チャネル
+    - 残高
+    - レート
+    - 送金
+    - 返金
+    - ヘルプ
+    # Korean
+    - 주문
+    - 결제
+    - 상태
+    - 채널
+    - 잔액
+    - 환율
+    - 송금
+    - 환불
+    - 도움
+    # Vietnamese
+    - đơn hàng
+    - thanh toán
+    - trạng thái
+    - kênh
+    - số dư
+    - tỷ giá
+    - chuyển khoản
+    - hoàn tiền
+    - hỗ trợ
+    # Thai
+    - คำสั่งซื้อ
+    - การชำระเงิน
+    - สถานะ
+    - ช่องทาง
+    - ยอดเงิน
+    - อัตรา
+    - โอนเงิน
+    - คืนเงิน
+    - ช่วยเหลือ
+    # Malay/Indonesian
+    - pesanan
+    - pembayaran
+    - saluran
+    - saldo
+    - kadar
+    - pemindahan
+    - bayaran balik
+    - bantuan
+  order_number_patterns:
+    enabled: true
+    patterns:
+    - ^0[0-9]{3}[0-9]+$
+    - ^2[0-9]{3}[0-9]+$
+    - ^[FT]2603[0-9]+$
+    - ^[A-Z0-9]{8,}$
+    validation:
+      min_length: 6
+      max_length: 24
+  mention_trigger:
+    enabled: true
+    usernames:
+    - '@ai_zkw'
+    - Camille
+    - camille
+    - 客服
+  logging:
+    enabled: true
+    level: INFO
+    record_all_triggers: true
+l2_semantic_trigger:
+  enabled: true
+  priority: 2
+  confidence_thresholds:
+    reply_threshold: 0.75
+    human_review_threshold: 0.6
+    silent_threshold: 0.6
+  small_talk_filter:
+    enabled: true
+    filter_keywords:
+    - 哈哈
+    - 😂
+    - 拜拜
+    - 再见
+    - 天气
+    - 今天
+    - 吃饭
+    - 睡觉
+    - 无聊
+    - 聊天
+    - 聊会
+    - 有空吗
+    prompt_instruction: '请判断用户消息是否是业务咨询（支持任何语言）：
+
+      1. 如果是业务咨询（订单、支付、通道、客服相关问题），无论用什么语言表达，请返回高置信度（≥0.88）
+
+      2. 如果是闲聊或非业务内容（问候、闲聊、玩笑等），请返回低置信度（<0.75）
+
+      3. 如果是模糊查询，请根据上下文判断
+
+      4. 特别注意：用户可能用英语、乌尔都语、印地语、阿拉伯语、葡萄牙语、西班牙语、法语、德语、俄语、日语、韩语、越南语、泰语、土耳其语、印尼语等任何语言提问业务问题，只要内容与业务相关，就应返回高置信度
+
+      '
+  ai_model:
+    model: deepseek-v3
+    temperature: 0.3
+    max_tokens: 128
+    timeout: 10
+  cache:
+    enabled: true
+    ttl: 300
+    max_size: 1000
+l3_context_filter:
+  enabled: true
+  priority: 3
+  small_talk_detection:
+    enabled: true
+    look_back_messages: 10
+    max_small_talk_sequence: 3
+    small_talk_keywords:
+    - 哈哈
+    - 😂
+    - 😊
+    - 👍
+    - 不错
+    - 拜拜
+    - 再见
+    - 晚安
+    - 早上好
+    - 中午好
+    - 晚上好
+    - 无聊
+    - 聊天
+    - 聊会
+    business_keywords:
+    - 订单
+    - 支付
+    - 问题
+    - 帮助
+    - 客服
+    - 怎么
+    - 为什么
+    - 怎么办
+    - 通道
+    - 交易
+    - 额度
+    - 代付
+    - 代收
+    - 没到账
+    - 未到账
+    - 没收到钱
+    - 成功率
+    - 收到
+    - 查
+    - 回调
+    - 波动
+    - 稳定
+    - 到账
+    - 状态
+    - 单号
+    - order
+    - payment
+    - channel
+    - transaction
+    - balance
+    - refund
+    - transfer
+    - status
+    - help
+    - support
+    - fee
+    - rate
+    - limit
+  multi_user_filter:
+    enabled: true
+    min_users_to_skip: 3
+    check_window: 10
+    exceptions:
+    - 包含@提及
+    - 包含高频关键词
+    - 包含订单号
+    - 用户明确求助
+  cooldown:
+    enabled: true
+    default_cooldown: 90
+    smart_cooldown:
+      enabled: true
+      business_conversation_cooldown: 30
+      small_talk_cooldown: 120
+    per_user_cooldown: 90
+    exceptions:
+    - L1规则触发
+    - 紧急关键词（失败、超时、错误）
+    - 用户首次咨询
+  user_behavior:
+    enabled: true
+    track_small_talk_ratio: true
+    max_small_talk_ratio: 0.7
+    history_size: 100
+l4_human_fallback:
+  enabled: true
+  priority: 4
+  logging:
+    enabled: true
+    level: DETAILED
+    record_fields:
+    - timestamp
+    - chat_id
+    - user_id
+    - message_text
+    - l1_trigger_result
+    - l2_confidence_score
+    - l3_filter_result
+    - final_decision
+    - reason
+    - processing_time
+    file_path: logs/trigger_decisions.log
+    max_size_mb: 50
+    backup_count: 10
+  human_review:
+    enabled: true
+    review_cases:
+    - confidence 0.75-0.87
+    - ambiguous_trigger
+    - first_time_user
+    - high_value_user
+    notification:
+      enabled: false
+  silent_mode:
+    enabled: true
+    silent_cases:
+    - confidence < 0.75
+    - pure_small_talk
+    - multi_user_chat_without_help
+    - in_cooldown_period
+    action: log_only
+  monitoring:
+    enabled: true
+    metrics:
+    - trigger_rate_by_layer
+    - false_positive_rate
+    - false_negative_rate
+    - average_confidence
+    - cooldown_applications
+    - small_talk_filtered
+    realtime_monitoring: false
+    alert_thresholds:
+      false_positive_rate: 0.03
+      false_negative_rate: 0.03
+      avg_response_time: 5000
+global:
+  enabled: true
+  processing_mode: sequential
+  timeout:
+    total_timeout: 15
+    layer_timeout: 5
+  debug:
+    enabled: false
+    log_decision_process: true
+    log_confidence_scores: true
+    simulate_only: false
+  performance:
+    enable_caching: true
+    cache_ttl: 600
+    batch_processing: false
+    concurrent_layers: false
+  version: 1.0.0
+  config_version: '2026-03-08'
+  description: 四层触发机制配置 - 防误判率 < 3%

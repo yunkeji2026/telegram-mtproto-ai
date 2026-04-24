@@ -1,0 +1,40 @@
+system_reply_seeds:
+  - title: "新人入群欢迎"
+    category: "新手引导"
+    triggers: ["新人", "刚进群", "hello", "大家好"]
+    scenario: "When user just joined or says hello as a newcomer"
+    steps: "1. 欢迎并点名置顶/群规位置。2. 提示勿发广告与私加骚扰。3. 引导有问题先搜公告。"
+    example_reply: "欢迎进群～先看置顶群规和活动公告，有问题在群里问，管理员看到会回复。"
+    reply_mode: "ai_guided"
+
+  - title: "群规广告与刷屏"
+    category: "群规FAQ"
+    triggers: ["广告", "刷屏", "拉人", "私加"]
+    scenario: "When user asks what is not allowed"
+    steps: "1. 概括禁止项（广告、恶意拉人、刷屏）。2. 说明轻则提醒重则移出。3. 引导查看完整群规。"
+    example_reply: "群内禁止发广告、恶意拉人和刷屏；具体以置顶群规为准，屡次违规可能会被移出。"
+    reply_mode: "ai_guided"
+
+  - title: "活动报名怎么操作"
+    category: "活动公告"
+    triggers: ["报名", "活动", "怎么参加"]
+    scenario: "When user asks how to join an announced event"
+    steps: "1. 指向最新活动公告。2. 说明报名渠道（表单/私信管理员/回复关键词）。3. 提醒截止时间。"
+    example_reply: "请看最新活动公告里的报名方式和截止时间；若公告没写清楚，可@管理员确认。"
+    reply_mode: "ai_guided"
+
+  - title: "被警告或移出申诉"
+    category: "违规处理"
+    triggers: ["申诉", "误封", "为什么踢我"]
+    scenario: "When user disputes moderation action"
+    steps: "1. 说明需要私信管理或按公告申诉渠道。2. 提醒提供截图与时间。3. 强调以管理组裁定为准。"
+    example_reply: "若认为处理有误，请按公告里的申诉方式私信管理组，并附上相关截图与时间，由管理组复核。"
+    reply_mode: "ai_guided"
+
+  - title: "管理员常用指令说明"
+    category: "常见问题"
+    triggers: ["/admin", "管理员", "指令"]
+    scenario: "When admin or user asks about mod commands"
+    steps: "1. 仅给出公开、安全的说明。2. 提醒权限以机器人和群设置为准。3. 敏感操作建议私聊超级管理员。"
+    example_reply: "具体指令以群内机器人帮助为准；涉及封禁、全员禁言等操作建议由超级管理员在后台执行。"
+    reply_mode: "ai_guided"

@@ -1,0 +1,27 @@
+domain:
+  name: it_helpdesk
+  display_name: "IT帮助台"
+  version: "1.0"
+
+ai:
+  reply_style: concise
+  ai_name: "IT小助"
+
+skills:
+  enabled:
+    - greeting
+    - complaint
+    - small_talk
+    - test
+
+kb:
+  categories:
+    - "账号权限"
+    - "系统故障"
+    - "VPN网络"
+    - "软件安装"
+    - "常见问题"
+
+emotion_enhancer_skip:
+  phrases: []
+  patterns: []

@@ -1,0 +1,43 @@
+在项目目录下重新安装依赖：
+cd C:\openclaw\openclaw-workspace-tg-deepseek\telegram-mtproto-ai
+pip install -r requirements.txt
+
+ 程序运行
+python main.py
+ 程序运行
+cd C:\openclaw\openclaw-workspace-tg-deepseek\telegram-mtproto-ai
+python main.py
+
+cd C:\openclaw\openclaw-workspace-tg-deepseek\telegram-mtproto-ai; $env:PYTHONIOENCODING='utf-8'; python main.py
+
+Web 管理面板已启动: http://127.0.0.1:8080 ✓
+监控 API 已启动: http://127.0.0.1:9090 ✓
+
+访问地址（ngrok 重启会变，以本机 http://127.0.0.1:4040/api/tunnels 为准）
+https://b8f1-122-54-137-215.ngrok-free.app
+外网首次访问 — 会弹一个 ngrok 警告页，点 "Visit Site" 即可跳过
+用户名：admin
+新后台密码已改为：
+UIIWHX9Vid$1d5lgXhIg
+
+
+
+需要你做的一步
+在 config/config.yaml 第 27 行 allowed_user_ids: [] 中填入你的 Telegram 数字用户 ID，否则配置管理命令不会对任何人生效。获取方法：在 Telegram 中向 @userinfobot 发送任意消息即可获得你的数字 ID。
+
+
+# 窗口1: 启动系统
+cd telegram-mtproto-ai
+$env:PYTHONIOENCODING='utf-8'; python main.py
+
+# 窗口2: 监控日志 (另开PowerShell)
+cd telegram-mtproto-ai
+.\monitor_system.ps1 -Action monitor
+
+监控 API（Bot 运行时可用）
+
+# 健康检查
+curl http://127.0.0.1:9090/api/health
+
+# 查看运行状态
+curl http://127.0.0.1:9090/api/status

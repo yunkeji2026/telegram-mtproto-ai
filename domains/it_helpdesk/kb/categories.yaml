@@ -1,0 +1,22 @@
+# IT helpdesk domain KB categories
+
+categories:
+  - name: "账号权限"
+    description: "登录失败、MFA、角色与权限申请"
+    triggers: ["登录", "密码", "权限", "MFA", "账号锁定"]
+
+  - name: "系统故障"
+    description: "蓝屏、崩溃、服务不可用、报错码"
+    triggers: ["报错", "崩溃", "蓝屏", "502", "无法访问"]
+
+  - name: "VPN网络"
+    description: "VPN、代理、内网、DNS"
+    triggers: ["VPN", "连不上", "网络", "DNS", "超时"]
+
+  - name: "软件安装"
+    description: "安装、更新、许可证、兼容"
+    triggers: ["安装", "更新", "license", "版本"]
+
+  - name: "常见问题"
+    description: "打印机、邮箱、会议、文件共享"
+    triggers: ["打印机", "Outlook", "Teams", "共享盘"]

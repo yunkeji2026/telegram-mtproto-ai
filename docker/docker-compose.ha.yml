@@ -1,0 +1,67 @@
+# P7-1：异地多活依赖栈（热备方案）
+#
+# 组件：
+#   redis      —— leader lock + 跨节点状态（轻量，< 20MB 内存）
+#   minio      —— S3 兼容对象存储，接收 litestream 流式增量
+#   litestream —— 将 primary 节点的 SQLite（data/*.sqlite）实时推到 minio
+#
+# 使用：
+#   docker compose -f docker/docker-compose.ha.yml up -d
+#
+# 然后在 config.yaml 里把 ha.backend=redis, ha.redis_url=redis://127.0.0.1:6379/0
+# litestream 容器会挂载本项目 data/ 目录，一旦 sqlite 变化立即增量推到 minio bucket。
+#
+# standby 节点上执行：
+#   litestream restore -o data/messenger_rpa.sqlite s3://rpa-backup/messenger_rpa
+# 然后启动主程序（会看到 leader 锁被 primary 持有，进入 standby 模式循环等待）
+
+version: "3.8"
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: rpa-ha-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - ha_redis:/data
+
+  minio:
+    image: minio/minio:latest
+    container_name: rpa-ha-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: rpa-admin
+      MINIO_ROOT_PASSWORD: ChangeMe-Prod-Strong-Password
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - ha_minio:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  litestream:
+    image: litestream/litestream:latest
+    container_name: rpa-ha-litestream
+    restart: unless-stopped
+    depends_on:
+      minio:
+        condition: service_healthy
+    command: ["replicate", "-config", "/etc/litestream.yml"]
+    environment:
+      LITESTREAM_ACCESS_KEY_ID: rpa-admin
+      LITESTREAM_SECRET_ACCESS_KEY: ChangeMe-Prod-Strong-Password
+    volumes:
+      - ../data:/data:ro          # 只读挂载 sqlite 目录
+      - ../docker/litestream.yml:/etc/litestream.yml:ro
+
+volumes:
+  ha_redis:
+  ha_minio:

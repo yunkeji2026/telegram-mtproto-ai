@@ -1,0 +1,447 @@
+"""
+发送 Mixin：消息发送、回复分段、术语替换、日志脱敏
+"""
+
+import asyncio
+import html
+import random
+import re
+import time
+from typing import Any, Dict, List, Optional
+
+
+class TelegramSenderMixin:
+
+    def _reply_to_message_id_for_send(self, original_message) -> Optional[int]:
+        """Telegram reply / quote bar: off for natural chat when configured or conversion domain."""
+        tg = (self.config.get("telegram") or {}) if getattr(self, "config", None) else {}
+        if "reply_to_user_message" in tg:
+            return int(original_message.id) if tg.get("reply_to_user_message") else None
+        try:
+            from src.utils.domain_policy import effective_domain_name
+
+            raw = self.config.config if hasattr(self.config, "config") else {}
+            if isinstance(raw, dict) and effective_domain_name(raw) == "conversion":
+                return None
+        except Exception:
+            pass
+        return int(original_message.id)
+
+    def _sanitize_parenthetical_stage_directions(self, text: str) -> str:
+        """Strip short （…）/(...) asides typical of LLM stage directions; conversion domain only."""
+        if not text:
+            return text
+        try:
+            from src.utils.domain_policy import effective_domain_name
+
+            raw = self.config.config if hasattr(self.config, "config") else {}
+            if not isinstance(raw, dict) or effective_domain_name(raw) != "conversion":
+                return text
+        except Exception:
+            return text
+        t = text
+        t = re.sub(r"（[^）]{1,28}）", "", t)
+        t = re.sub(r"\([^)]{1,32}\)", "", t)
+        return re.sub(r"[ \t\f\v]{2,}", " ", t).strip()
+
+    def _rewrite_companion_helpdesk_ping(
+        self, reply: str, user_message: str
+    ) -> str:
+        """conversion 域：用户短寒暄/探询（在吗等）时，避免「有什么可以帮」类客服套话。"""
+        if not reply or not (user_message or "").strip():
+            return reply
+        try:
+            from src.utils.domain_policy import effective_domain_name
+
+            raw = self.config.config if hasattr(self.config, "config") else {}
+            if not isinstance(raw, dict) or effective_domain_name(raw) != "conversion":
+                return reply
+        except Exception:
+            return reply
+        try:
+            from src.utils.greeting_lexicon import (
+                is_greeting_message,
+                is_standalone_zai_query,
+            )
+        except Exception:
+            return reply
+        u = (user_message or "").strip()
+        if len(u) > 36:
+            return reply
+        if not (is_greeting_message(u) or is_standalone_zai_query(u)):
+            return reply
+        markers = (
+            "有什么可以帮",
+            "请问有什么",
+            "需要什么服务",
+            "竭诚为您",
+            "为您服务",
+        )
+        if not any(m in reply for m in markers):
+            return reply
+        if len(reply) <= 80:
+            return random.choice(
+                (
+                    "嗯嗯我在～怎么啦？",
+                    "在呀，找我呢？",
+                    "在的，你说～",
+                    "来啦～刚还在看手机",
+                )
+            )
+        for old, new in (
+            ("在的，有什么可以帮您的？", "在呀～"),
+            ("在的，有什么可以帮您？", "在呀～"),
+            ("有什么可以帮您的？", "怎么啦？"),
+            ("有什么可以帮您？", "怎么啦？"),
+        ):
+            if old in reply:
+                reply = reply.replace(old, new, 1)
+        return reply
+
+    def _apply_terminology(self, text: str) -> str:
+        if not (text and isinstance(text, str)):
+            return text or ""
+        terms = (self.config.get("ai") or {}).get("terminology") or {}
+        if not isinstance(terms, dict):
+            return text
+        for wrong, right in sorted(terms.items(), key=lambda x: -len(x[0])):
+            if wrong and right is not None:
+                text = text.replace(wrong, str(right))
+        return text
+
+    def _split_at_safe_boundary(self, text: str, max_pos: int) -> int:
+        if max_pos >= len(text):
+            return len(text)
+        pay_in = re.search(r"Pay\s+in", text, re.I)
+        if pay_in:
+            a, b = pay_in.start(), pay_in.end()
+            if a < max_pos < b:
+                return a if max_pos - a <= b - max_pos else b
+        pay_out = re.search(r"Pay\s+out", text, re.I)
+        if pay_out:
+            a, b = pay_out.start(), pay_out.end()
+            if a < max_pos < b:
+                return a if max_pos - a <= b - max_pos else b
+        for m in re.finditer(r"\bEP\b|\bJC\b", text):
+            a, b = m.start(), m.end()
+            if a < max_pos < b:
+                return a if max_pos - a <= 1 else b
+        for m in re.finditer(r"\d{4,}", text):
+            a, b = m.start(), m.end()
+            if a < max_pos < b:
+                return a if max_pos - a < b - max_pos else b
+        slice_ = text[:max_pos]
+        for sep in ("\n", "。", "！", "？", ".", "!", "?", "，", ",", ";", "；"):
+            idx = slice_.rfind(sep)
+            if idx >= max_pos // 2:
+                return idx + 1
+        idx = slice_.rfind(" ")
+        if idx >= max_pos // 2:
+            return idx + 1
+        return max_pos
+
+    def _chunk_segment_safe(self, seg: str, max_chars: int) -> List[str]:
+        seg = seg.strip()
+        if not seg:
+            return []
+        if len(seg) <= max_chars:
+            return [seg]
+        out: List[str] = []
+        rest = seg
+        while len(rest) > max_chars:
+            cut = self._split_at_safe_boundary(rest, max_chars)
+            if cut <= 0:
+                cut = max_chars
+            piece = rest[:cut].strip()
+            if piece:
+                out.append(piece)
+            rest = rest[cut:].strip()
+        if rest:
+            out.append(rest)
+        return out if out else [seg]
+
+    def _split_reply_for_send(
+        self,
+        text: str,
+        max_chars_per_message: int = 120,
+        min_segments_to_split: int = 2,
+    ) -> List[str]:
+        s = (text or "").strip()
+        if not s:
+            return []
+        if len(s) <= max_chars_per_message:
+            return [s]
+        segments = [t.strip() for t in re.split(r"\n\s*\n", s) if t.strip()]
+        if len(segments) < min_segments_to_split:
+            return self._chunk_segment_safe(s, max_chars_per_message)
+        chunks: List[str] = []
+        for seg in segments:
+            if len(seg) <= max_chars_per_message:
+                chunks.append(seg)
+            else:
+                sentences = re.split(r"(?<=[。！？.!?])\s*", seg)
+                sentences = [x.strip() for x in sentences if x.strip()]
+                current = ""
+                for sent in sentences:
+                    if len(sent) > max_chars_per_message:
+                        if current:
+                            chunks.append(current)
+                            current = ""
+                        chunks.extend(self._chunk_segment_safe(sent, max_chars_per_message))
+                        continue
+                    if not current:
+                        current = sent
+                    elif len(current) + len(sent) + 1 <= max_chars_per_message:
+                        current = (current + " " + sent) if current else sent
+                    else:
+                        if current:
+                            chunks.append(current)
+                        current = sent
+                if current:
+                    chunks.append(current)
+        return chunks if chunks else [s]
+
+    def _log_safe_text(self, text: str, max_chars: Optional[int] = None) -> str:
+        log_cfg = (self.config.get("logging") or {}).get("desensitize") or {}
+        if not log_cfg.get("enabled", False):
+            return (text or "")[: max_chars or 500]
+        max_c = int(log_cfg.get("max_chars", 80) or 80)
+        max_digit = int(log_cfg.get("max_digit_run", 6) or 6)
+        s = text or ""
+        if max_digit > 0:
+            s = re.sub(r"\d{%d,}" % max_digit, "***", s)
+        if len(s) > max_c:
+            s = s[:max_c] + "…"
+        return s
+
+    async def _send_reply(self, original_message, reply_text: str, parse_mode=None):
+        try:
+            split_cfg = self.config.get("reply", {}).get("split_send", {})
+            min_interval = float(split_cfg.get("min_interval_seconds", 0) or 0)
+            if min_interval > 0 and self._last_send_wallclock > 0:
+                elapsed = time.time() - self._last_send_wallclock
+                if elapsed < min_interval:
+                    await asyncio.sleep(min_interval - elapsed)
+            if not self.client:
+                self.logger.error("客户端未初始化，无法发送回复")
+                return
+            _out_text = self._sanitize_parenthetical_stage_directions(reply_text)
+            _rt = self._reply_to_message_id_for_send(original_message)
+            send_kw: Dict[str, Any] = dict(
+                chat_id=original_message.chat.id,
+                text=_out_text,
+            )
+            if _rt is not None:
+                send_kw["reply_to_message_id"] = _rt
+            if parse_mode is not None:
+                send_kw["parse_mode"] = parse_mode
+            await self.client.send_message(**send_kw)
+            self._last_send_wallclock = time.time()
+            if getattr(original_message, 'from_user', None) and getattr(original_message.from_user, 'id', None):
+                self._record_session_reply(original_message.chat.id, original_message.from_user.id)
+                if getattr(self, 'four_layer_trigger', None):
+                    self.four_layer_trigger.update_cooldown(
+                        f"group_{original_message.chat.id}",
+                        str(original_message.from_user.id),
+                    )
+            self.logger.info("已回复消息: %s", self._log_safe_text(reply_text))
+        except Exception as e:
+            self.logger.error("发送回复失败: %s", e)
+
+    async def send_message(self, chat_id: int, text: str) -> bool:
+        try:
+            if not self.client:
+                self.logger.error("客户端未初始化")
+                return False
+            await self.client.send_message(chat_id, text)
+            self.logger.info("已发送消息到 %s: %s...", chat_id, text[:50])
+            return True
+        except Exception as e:
+            self.logger.error("发送消息失败: %s", e)
+            return False
+
+    async def _send_escalation_private_jump_hint(
+        self,
+        peer: Any,
+        spec: Dict[str, Any],
+        message_id: int,
+        *,
+        after_forward_ok: bool,
+    ) -> None:
+        """
+        私聊内追加一条「可点击定位」说明：HTML 正文 + 内联按钮（t.me 或 tg://openmessage）。
+        解决仅靠转发条在部分客户端无法跳回群内指定消息的问题。
+        """
+        if not self.client:
+            return
+        he_cfg = (self.config.get("human_escalation") or {}) if self.config else {}
+        if not bool(he_cfg.get("forward_private_jump_hint", True)):
+            return
+        from src.utils.human_escalation import build_telegram_message_link
+
+        from_chat_id = spec.get("from_chat_id")
+        chat_username = spec.get("chat_username")
+        chat_title = (spec.get("chat_title") or "").strip()
+        url = build_telegram_message_link(
+            from_chat_id, int(message_id), chat_username
+        )
+
+        try:
+            from pyrogram.enums import ParseMode
+            from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+        except Exception:
+            ParseMode = None  # type: ignore
+            InlineKeyboardButton = None  # type: ignore
+            InlineKeyboardMarkup = None  # type: ignore
+
+        if after_forward_ok:
+            head = (
+                "👆 上一条为<strong>群内用户原话</strong>（转发）。\n"
+                "若转发预览无法点进群里，请用下方<strong>按钮</strong>或<strong>链接</strong>直达该条消息。"
+            )
+        else:
+            head = (
+                "⚠️ 未能转发群内原消息到私聊，请用下方<strong>按钮</strong>或<strong>链接</strong>"
+                "进入群内查看对应话术。"
+            )
+        parts: List[str] = [head]
+        if chat_title:
+            parts.append(f"群：{html.escape(chat_title)}")
+        parse_mode = ParseMode.HTML if ParseMode else None
+        reply_markup = None
+
+        if url:
+            parts.append(
+                f'直达消息：<a href="{html.escape(url, quote=True)}">打开 #msg{message_id}</a>'
+            )
+            if InlineKeyboardMarkup and InlineKeyboardButton:
+                try:
+                    reply_markup = InlineKeyboardMarkup(
+                        [
+                            [
+                                InlineKeyboardButton(
+                                    "📍 打开群内该条消息", url=url
+                                )
+                            ]
+                        ]
+                    )
+                except Exception:
+                    reply_markup = None
+            body = "\n".join(parts)
+            try:
+                await self.client.send_message(
+                    chat_id=peer,
+                    text=body,
+                    parse_mode=parse_mode,
+                    reply_markup=reply_markup,
+                )
+                self.logger.info(
+                    "人工转接: 已向客服 peer=%s 发送私聊定位提示 msg_id=%s",
+                    peer,
+                    message_id,
+                )
+            except Exception as e:
+                self.logger.warning(
+                    "人工转接: 私聊定位提示(HTML)失败 peer=%s: %s，尝试纯文本",
+                    peer,
+                    e,
+                )
+                try:
+                    await self.client.send_message(
+                        chat_id=peer,
+                        text=f"打开群内消息：\n{url}",
+                    )
+                except Exception as e2:
+                    self.logger.warning(
+                        "人工转接: 私聊定位纯文本也失败 peer=%s: %s", peer, e2
+                    )
+        else:
+            tail = (
+                "当前无法生成 t.me / openmessage 直达链接（例如非标准会话 id）。\n"
+                "请点按上一条「转发」顶栏进入群，或向管理员索取群邀请链接。"
+            )
+            try:
+                await self.client.send_message(
+                    chat_id=peer,
+                    text="\n".join(parts + [tail]),
+                    parse_mode=parse_mode,
+                )
+            except Exception as e:
+                self.logger.warning(
+                    "人工转接: 私聊定位说明(无 URL)失败 peer=%s: %s", peer, e
+                )
+
+    async def _forward_escalation_user_to_agents(self, spec) -> None:
+        """
+        人工转接触发且群内回复已发出后：把用户在该群的原消息转发到各客服私聊，
+        并可选再发一条带内联按钮 + 直达链接的说明（forward_private_jump_hint，默认开）。
+        spec: from_chat_id, message_id, targets, chat_username?, chat_title?
+        """
+        if not spec or not self.client:
+            return
+        from_chat_id = spec.get("from_chat_id")
+        mid = spec.get("message_id")
+        targets = spec.get("targets") or []
+        if from_chat_id is None or mid is None:
+            return
+        try:
+            mid_int = int(mid)
+        except (TypeError, ValueError):
+            return
+        if mid_int <= 0:
+            return
+        for t in targets:
+            uid = int(t.get("user_id") or 0)
+            un = (t.get("username") or "").strip().lstrip("@")
+            peer = uid if uid > 0 else (un or None)
+            if peer is None:
+                continue
+            forward_ok = False
+            try:
+                await self.client.forward_messages(
+                    chat_id=peer,
+                    from_chat_id=from_chat_id,
+                    message_ids=mid_int,
+                )
+                forward_ok = True
+                self.logger.info(
+                    "人工转接: 已转发用户原消息 → 客服 peer=%s from_chat=%s msg_id=%s",
+                    peer,
+                    from_chat_id,
+                    mid_int,
+                )
+            except Exception as e:
+                self.logger.warning(
+                    "人工转接: 转发至客服 peer=%s 失败: %s", peer, e
+                )
+            try:
+                await self._send_escalation_private_jump_hint(
+                    peer,
+                    spec,
+                    mid_int,
+                    after_forward_ok=forward_ok,
+                )
+            except Exception as ex:
+                self.logger.warning(
+                    "人工转接: 私聊定位跟进异常 peer=%s: %s", peer, ex
+                )
+
+        group_target = spec.get("group_target")
+        if isinstance(group_target, dict):
+            group_id = (group_target.get("group_id") or "").strip()
+            if group_id:
+                try:
+                    group_peer = int(group_id) if group_id.lstrip("-").isdigit() else group_id
+                    await self.client.forward_messages(
+                        chat_id=group_peer,
+                        from_chat_id=from_chat_id,
+                        message_ids=mid_int,
+                    )
+                    self.logger.info(
+                        "人工转接: 已转发用户原消息 → 客服群 group=%s msg_id=%s",
+                        group_id, mid_int,
+                    )
+                except Exception as e:
+                    self.logger.warning(
+                        "人工转接: 转发至客服群 group=%s 失败: %s", group_id, e
+                    )

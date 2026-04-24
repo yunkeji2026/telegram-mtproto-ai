@@ -1,0 +1,268 @@
+{% extends "base.html" %}
+{% block title %}实时日志 · {{ site_name|default('智控王客户转化聊天系统') }}{% endblock %}
+{% block page_title %}实时日志{% endblock %}
+{% block head %}
+<style>
+/* toolbar */
+.log-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:.6rem;margin-bottom:.8rem}
+.log-search-wrap{position:relative;flex:1;min-width:180px}
+.log-search-wrap svg{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);width:15px;height:15px;color:var(--t3)}
+#log-search{padding-left:2.3rem;padding-right:.8rem}
+.level-filters{display:flex;gap:.4rem;flex-wrap:wrap}
+.lf-btn{display:inline-flex;align-items:center;gap:.3rem;padding:.3rem .7rem;border-radius:7px;font-size:.76rem;font-weight:700;cursor:pointer;border:1.5px solid var(--bd);background:var(--input);color:var(--t3);font-family:inherit;transition:.15s;user-select:none}
+.lf-btn.on-DEBUG{border-color:rgba(107,114,128,.4);background:rgba(107,114,128,.1);color:var(--t2)}
+.lf-btn.on-INFO{border-color:rgba(91,124,246,.4);background:var(--ps);color:var(--p)}
+.lf-btn.on-WARNING{border-color:rgba(245,158,11,.4);background:var(--as);color:var(--amber)}
+.lf-btn.on-ERROR{border-color:rgba(239,68,68,.4);background:var(--rs);color:var(--red)}
+.lf-btn.on-CRITICAL{border-color:rgba(139,92,246,.4);background:var(--prs);color:var(--purple)}
+/* log terminal */
+.log-wrap{background:var(--nav);border:1px solid var(--bd);border-radius:var(--r);overflow:hidden}
+.log-term-hd{display:flex;align-items:center;justify-content:space-between;padding:.55rem .9rem;border-bottom:1px solid rgba(255,255,255,.06);background:rgba(0,0,0,.2)}
+.term-dots{display:flex;gap:.4rem}
+.term-dot{width:12px;height:12px;border-radius:50%}
+.t-red{background:#ff5f57}.t-yellow{background:#ffbd2e}.t-green{background:#28ca41}
+.live-indicator{display:flex;align-items:center;gap:.4rem;font-size:.77rem;color:rgba(255,255,255,.45)}
+.live-dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);animation:pulse 1.5s infinite}
+.live-dot.paused{background:var(--amber);box-shadow:0 0 6px var(--amber);animation:none}
+.term-btns{display:flex;gap:.4rem}
+.term-btn{background:rgba(255,255,255,.07);border:none;cursor:pointer;color:rgba(255,255,255,.55);padding:.3rem .6rem;border-radius:6px;font-size:.76rem;font-family:inherit;transition:.15s;display:flex;align-items:center;gap:.3rem}
+.term-btn:hover{background:rgba(255,255,255,.12);color:rgba(255,255,255,.9)}
+.term-btn svg{width:13px;height:13px}
+#log-box{height:440px;overflow-y:auto;padding:.6rem .9rem;font-family:'Consolas','JetBrains Mono','Courier New',monospace;font-size:.8rem;line-height:1.65}
+.log-line{display:flex;gap:.5rem;padding:.08rem 0;border-bottom:1px solid rgba(255,255,255,.03)}
+.log-line:last-child{border-bottom:none}
+.log-ts{color:rgba(255,255,255,.28);white-space:nowrap;font-size:.74rem;min-width:75px}
+.log-lvl{font-weight:800;min-width:58px;text-align:center;border-radius:3px;font-size:.72rem;padding:.05rem .2rem}
+.log-msg{color:rgba(255,255,255,.75);flex:1;word-break:break-all}
+.log-msg .hl{background:rgba(245,158,11,.3);color:#fbbf24;border-radius:2px;padding:0 .15rem}
+/* level colors */
+.lvl-DEBUG .log-lvl{color:#64748b}
+.lvl-INFO .log-lvl{color:#6b8af8;background:rgba(107,138,248,.15)}
+.lvl-WARNING .log-lvl{color:#f59e0b;background:rgba(245,158,11,.12)}
+.lvl-ERROR .log-lvl{color:#ef4444;background:rgba(239,68,68,.12)}
+.lvl-ERROR .log-msg{color:#fca5a5}
+.lvl-CRITICAL .log-lvl{color:#c084fc;background:rgba(192,132,252,.15)}
+.lvl-CRITICAL .log-msg{color:#e9d5ff}
+/* count badge */
+#log-count{font-size:.76rem;color:rgba(255,255,255,.35);margin-left:auto;padding-right:.3rem}
+/* no-match */
+#no-match{display:none;text-align:center;padding:2rem;color:rgba(255,255,255,.3);font-size:.85rem}
+</style>
+{% endblock %}
+{% block content %}
+{% set active="logs" %}
+
+{% if ui_mode == 'simple' %}
+<div style="background:linear-gradient(135deg,rgba(245,158,11,.08),rgba(91,124,246,.06));border:1px solid rgba(245,158,11,.2);border-radius:10px;padding:.7rem 1rem;margin-bottom:.8rem;font-size:.82rem;color:var(--t2);display:flex;align-items:center;gap:.6rem">
+  <span style="font-size:1.1rem;flex-shrink:0">📋</span>
+  <div><strong style="color:var(--t)">高级功能</strong> — 实时日志供技术排查使用。<a href="/cases" style="color:var(--p);font-weight:600">返回案例</a></div>
+</div>
+{% endif %}
+
+<!-- toolbar -->
+<div class="log-toolbar fa">
+  <div class="log-search-wrap">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    <input type="search" id="log-search" placeholder="关键词过滤…" oninput="applyFilter()" style="width:100%">
+  </div>
+  <div class="level-filters" id="lf-wrap">
+    <button class="lf-btn on-DEBUG" data-level="DEBUG" data-help="DEBUG" onclick="toggleLevel(this)">DEBUG</button>
+    <button class="lf-btn on-INFO" data-level="INFO" data-help="INFO" onclick="toggleLevel(this)">INFO</button>
+    <button class="lf-btn on-WARNING" data-level="WARNING" data-help="WARNING" onclick="toggleLevel(this)">WARN</button>
+    <button class="lf-btn on-ERROR" data-level="ERROR" data-help="ERROR" onclick="toggleLevel(this)">ERROR</button>
+    <button class="lf-btn on-CRITICAL" data-level="CRITICAL" data-help="CRITICAL" onclick="toggleLevel(this)">CRIT</button>
+  </div>
+  <button class="btn btn-s btn-sm" onclick="clearSearch()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    清除过滤
+  </button>
+</div>
+
+<!-- log terminal -->
+<div class="card fa fa2" style="padding:0">
+  <div class="log-wrap">
+    <div class="log-term-hd">
+      <div class="term-dots">
+        <div class="term-dot t-red"></div>
+        <div class="term-dot t-yellow"></div>
+        <div class="term-dot t-green"></div>
+      </div>
+      <div class="live-indicator">
+        <div class="live-dot" id="live-dot"></div>
+        <span id="live-label">实时流</span>
+      </div>
+      <div class="term-btns">
+        <span id="log-count">0 行</span>
+        <button class="term-btn" onclick="togglePause()" id="pause-btn" data-help="btn_pause">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+          暂停
+        </button>
+        <button class="term-btn" onclick="clearLogs()" title="清空当前显示的日志（不影响服务器日志文件）">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+          清空
+        </button>
+        <button class="term-btn" onclick="downloadLogs()" data-help="btn_export">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          下载
+        </button>
+        <button class="term-btn" id="scroll-btn" onclick="toggleScroll()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/></svg>
+          跟随
+        </button>
+      </div>
+    </div>
+    <div id="log-box">
+      <div id="no-match">无匹配日志</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const SSE_URL = '/logs/stream';
+let es = null, paused = false, autoScroll = true;
+let allLines = [], activeLevels = new Set(['DEBUG','INFO','WARNING','ERROR','CRITICAL']);
+
+function parseLogLine(raw) {
+  const m = raw.match(/^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(?:\.\d+)?)\s+\[?(DEBUG|INFO|WARNING|ERROR|CRITICAL)\]?\s*(.*)/s);
+  if (m) return { ts: m[1].slice(11,19), level: m[2], msg: m[3].trim() };
+  return { ts: '', level: 'INFO', msg: raw };
+}
+
+function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
+
+function highlightKw(msg, kw) {
+  if (!kw) return escHtml(msg);
+  const esc = kw.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  return escHtml(msg).replace(new RegExp(esc,'gi'), m => `<span class="hl">${m}</span>`);
+}
+
+function renderLine(line) {
+  const kw = document.getElementById('log-search').value.trim();
+  const div = document.createElement('div');
+  div.className = `log-line lvl-${line.level}`;
+  div.dataset.level = line.level;
+  div.dataset.raw = line.ts + line.msg;
+  div.innerHTML = `<span class="log-ts">${line.ts}</span><span class="log-lvl">${line.level}</span><span class="log-msg">${highlightKw(line.msg, kw)}</span>`;
+  return div;
+}
+
+function addLine(raw) {
+  if (!raw.trim()) return;
+  const line = parseLogLine(raw);
+  allLines.push(line);
+  if (allLines.length > 2000) allLines.shift();
+  const box = document.getElementById('log-box');
+  const visible = activeLevels.has(line.level);
+  const kw = document.getElementById('log-search').value.trim().toLowerCase();
+  const kwMatch = !kw || line.msg.toLowerCase().includes(kw) || line.ts.includes(kw);
+  if (visible && kwMatch) {
+    const el = renderLine(line);
+    box.appendChild(el);
+    if (autoScroll) box.scrollTop = box.scrollHeight;
+  }
+  updateCount();
+}
+
+function updateCount() {
+  const visible = document.querySelectorAll('#log-box .log-line:not([style*="display:none"])').length;
+  document.getElementById('log-count').textContent = visible + ' 行';
+  document.getElementById('no-match').style.display = visible === 0 && allLines.length > 0 ? 'block' : 'none';
+}
+
+function applyFilter() {
+  const kw = document.getElementById('log-search').value.trim().toLowerCase();
+  const box = document.getElementById('log-box');
+  box.querySelectorAll('.log-line').forEach(el => {
+    const lvl = el.dataset.level;
+    const raw = el.dataset.raw.toLowerCase();
+    const show = activeLevels.has(lvl) && (!kw || raw.includes(kw));
+    el.style.display = show ? '' : 'none';
+    if (show && kw) {
+      const msgSpan = el.querySelector('.log-msg');
+      if (msgSpan) {
+        const line = allLines.find(l => l.ts + l.msg === el.dataset.raw);
+        if (line) msgSpan.innerHTML = highlightKw(line.msg, kw);
+      }
+    }
+  });
+  updateCount();
+}
+
+function toggleLevel(btn) {
+  const lvl = btn.dataset.level;
+  if (activeLevels.has(lvl)) { activeLevels.delete(lvl); btn.style.opacity = '.4'; }
+  else { activeLevels.add(lvl); btn.style.opacity = '1'; }
+  applyFilter();
+}
+
+function clearSearch() {
+  document.getElementById('log-search').value = '';
+  activeLevels = new Set(['DEBUG','INFO','WARNING','ERROR','CRITICAL']);
+  document.querySelectorAll('.lf-btn').forEach(b => b.style.opacity = '1');
+  applyFilter();
+}
+
+function togglePause() {
+  paused = !paused;
+  const btn = document.getElementById('pause-btn');
+  const dot = document.getElementById('live-dot');
+  const lbl = document.getElementById('live-label');
+  btn.querySelector('span') && (btn.querySelector('span').textContent = paused ? '继续' : '暂停');
+  btn.lastChild.textContent = paused ? ' 继续' : ' 暂停';
+  dot.classList.toggle('paused', paused);
+  lbl.textContent = paused ? '已暂停' : '实时流';
+}
+
+function clearLogs() {
+  allLines = [];
+  const box = document.getElementById('log-box');
+  box.querySelectorAll('.log-line').forEach(el => el.remove());
+  updateCount();
+}
+
+function toggleScroll() {
+  autoScroll = !autoScroll;
+  document.getElementById('scroll-btn').style.opacity = autoScroll ? '1' : '.45';
+  if (autoScroll) document.getElementById('log-box').scrollTop = document.getElementById('log-box').scrollHeight;
+}
+
+function downloadLogs() {
+  const txt = allLines.map(l => `${l.ts} [${l.level}] ${l.msg}`).join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/plain;charset=utf-8,' + encodeURIComponent(txt);
+  a.download = 'bot-logs-' + new Date().toISOString().slice(0,10) + '.txt';
+  a.click();
+}
+
+/* ── SSE 指数退避重连 ─────────────────────── */
+let _retryDelay = 2000, _retryCount = 0, _retryTimer = null;
+const MAX_RETRY_DELAY = 30000;
+
+function connect() {
+  if (es) { try{es.close()}catch(e){} es = null; }
+  if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
+  es = new EventSource(SSE_URL);
+  es.onopen = () => {
+    _retryDelay = 2000; _retryCount = 0;
+    document.getElementById('live-dot').classList.remove('paused');
+    document.getElementById('live-label').textContent = '实时流';
+  };
+  es.onmessage = e => {
+    if (e.data === 'ping') return; // heartbeat, ignore
+    if (!paused) addLine(e.data);
+  };
+  es.onerror = () => {
+    if (es) { try{es.close()}catch(e){} es = null; }
+    _retryCount++;
+    const label = `重连中… (第${_retryCount}次 / ${(_retryDelay/1000).toFixed(0)}s)`;
+    document.getElementById('live-dot').classList.add('paused');
+    document.getElementById('live-label').textContent = label;
+    _retryTimer = setTimeout(() => {
+      _retryDelay = Math.min(_retryDelay * 2, MAX_RETRY_DELAY);
+      connect();
+    }, _retryDelay);
+  };
+}
+connect();
+</script>
+{% endblock %}

@@ -1,0 +1,24 @@
+name: general
+display_name: "通用助手"
+version: "1.0"
+description: "通用对话域 — 日常问答与产品使用帮助"
+
+skills: []
+
+config_files:
+  - defaults.yaml
+
+kb:
+  categories: kb/categories.yaml
+  seeds: kb/seeds.yaml
+
+prompts:
+  system_prompt: prompts/system_prompt.txt
+
+hooks: true
+
+i18n:
+  zh: i18n/zh.yaml
+  en: i18n/en.yaml
+
+web_routes: false

@@ -1,0 +1,226 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+shtools/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+.pybuilder/
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# poetry
+poetry.lock
+
+# pdm
+.pdm.toml
+__pypackages__/
+
+# PEP 582; used by PDM
+__pypackages__/
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# PyCharm
+.idea/
+*.iws
+out/
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# Telegram会话文件
+sessions/*.session
+sessions/*.session-journal
+!sessions/.gitkeep
+
+# 日志 — 全目录 ignore（drafts.json / trigger_decisions.log / KB trace 可能含 PII）
+# 用 **/logs/ 覆盖根目录和任何子目录（如 config/logs/kb_direct_trace.jsonl）
+**/logs/*
+!**/logs/.gitkeep
+
+# 配置文件（不包含实际凭证）
+config/config.yaml
+
+# SQLite 数据库（所有变体，含 WAL/SHM/备份）
+*.db
+*.db-shm
+*.db-wal
+*.db.bak*
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+
+# Config 运行时产物 — 含设备 IP/序列号校准、配置历史快照、备份
+config/data/
+config/backups/
+config/snapshots/
+
+# Messenger RPA 截图 + replays（含他人对话）
+tmp_messenger_rpa/
+
+# Temp 缓存
+temp/
+
+# ML 模型权重
+models/**/*.pt
+models/**/*.bin
+models/**/*.onnx
+models/**/*.pth
+models/**/*.safetensors
+
+# APK 二进制
+*.apk
+
+# Claude Code 运行时状态
+.claude/scheduled_tasks.lock
+.claude/**/*.log
+
+# 数据文件
+data/
+
+# 临时文件
+*.tmp
+*.temp
+_package_out/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 备份文件
+*.bak
+*.backup
+*.old
+
+# 密钥文件
+*.pem
+*.key
+*.crt
+*.csr
+
+# 压缩文件
+*.zip
+*.tar.gz
+*.tgz
+*.rar
+
+# 文档
+*.pdf
+*.doc
+*.docx
+*.xls
+*.xlsx

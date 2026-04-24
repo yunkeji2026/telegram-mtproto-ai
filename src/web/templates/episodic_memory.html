@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}情景记忆 · {{ site_name|default('智控王客户转化聊天系统') }}{% endblock %}
+{% block page_title %}情景记忆{% endblock %}
+{% block head %}
+<style>
+.em-filters{display:flex;flex-wrap:wrap;gap:.6rem;align-items:flex-end;margin-bottom:1rem}
+.em-filters input{min-width:200px}
+.table-wrap{overflow-x:auto}
+.em-table{width:100%;border-collapse:collapse;font-size:.82rem}
+.em-table th,.em-table td{padding:.55rem .65rem;border-bottom:1px solid var(--bd);text-align:left;vertical-align:top}
+.em-table th{color:var(--t3);font-weight:600;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
+.em-table tr:hover td{background:rgba(91,124,246,.04)}
+.badge-emb{display:inline-block;padding:.1rem .4rem;border-radius:4px;font-size:.65rem;font-weight:600}
+.badge-emb.on{background:rgba(16,185,129,.15);color:var(--green)}
+.badge-emb.off{background:var(--input);color:var(--t3)}
+.mono{font-family:Consolas,monospace;font-size:.76rem;word-break:break-all}
+.btn-del{background:none;border:none;color:var(--red);cursor:pointer;font-size:.78rem;font-weight:600;padding:.2rem .4rem;border-radius:6px}
+.btn-del:hover{background:var(--rs)}
+</style>
+{% endblock %}
+{% block content %}
+{% set active="episodic" %}
+
+<div class="card fa">
+  <h2>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+    用户长期记忆条目
+    <span style="font-size:.75rem;font-weight:400;color:var(--t2);margin-left:.4rem">向量检索与关键词融合注入模型时使用</span>
+  </h2>
+  <div class="em-filters">
+    <div class="f-grp">
+      <label class="f-lb">筛选 memory_key</label>
+      <input type="text" id="em-prefix" placeholder="用户 id 或 群id_用户id" class="f-input">
+    </div>
+    <div class="f-grp">
+      <label class="f-lb">条数</label>
+      <input type="number" id="em-limit" value="80" min="1" max="500" class="f-input" style="width:90px">
+    </div>
+    <button type="button" class="btn btn-p" onclick="emLoad()">加载</button>
+    {% if user_role in ('master', 'admin') %}
+    <button type="button" class="btn" id="em-backfill-btn" onclick="emBackfill()" title="为无向量条目调用 embedding 补全">补全向量</button>
+    {% endif %}
+  </div>
+  <p id="em-status" style="font-size:.8rem;color:var(--t2);margin-bottom:.6rem"></p>
+  <div class="table-wrap">
+    <table class="em-table" id="em-table">
+      <thead>
+        <tr>
+          <th style="width:70px">ID</th>
+          <th style="min-width:140px">memory_key</th>
+          <th>内容</th>
+          <th style="width:90px">向量</th>
+          <th style="width:160px">时间</th>
+          <th style="width:70px">操作</th>
+        </tr>
+      </thead>
+      <tbody id="em-body"><tr><td colspan="6" style="padding:2rem;color:var(--t3)">点击「加载」</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const emCanDelete = {{ 'true' if user_role != 'viewer' else 'false' }};
+async function emLoad() {
+  const prefix = document.getElementById('em-prefix').value.trim();
+  const limit = document.getElementById('em-limit').value || 80;
+  const st = document.getElementById('em-status');
+  const body = document.getElementById('em-body');
+  st.textContent = '加载中…';
+  body.innerHTML = '<tr><td colspan="6" style="padding:2rem">…</td></tr>';
+  try {
+    const q = new URLSearchParams({ limit: String(limit) });
+    if (prefix) q.set('prefix', prefix);
+    const res = await fetch('/api/episodic-memory?' + q.toString());
+    if (!res.ok) { st.textContent = '错误 ' + res.status; return; }
+    const d = await res.json();
+    const items = d.items || [];
+    st.textContent = '共 ' + (d.count || items.length) + ' 条';
+    if (!items.length) {
+      body.innerHTML = '<tr><td colspan="6" style="padding:2rem;color:var(--t3)">无记录</td></tr>';
+      return;
+    }
+    body.innerHTML = items.map(function(it) {
+      var ts = it.created_at ? new Date(it.created_at * 1000).toLocaleString() : '—';
+      var emb = it.has_embedding ? '<span class="badge-emb on">已索引</span>' : '<span class="badge-emb off">无向量</span>';
+      var op = emCanDelete
+        ? '<button type="button" class="btn-del" onclick="emDel(' + it.id + ')">删除</button>'
+        : '<span style="color:var(--t3);font-size:.75rem">—</span>';
+      return '<tr data-id="' + it.id + '"><td>' + it.id + '</td><td class="mono">' + (it.memory_key || '').replace(/</g,'&lt;') + '</td><td>' + (it.content || '').replace(/</g,'&lt;') + '</td><td>' + emb + '</td><td class="mono">' + ts + '</td><td>' + op + '</td></tr>';
+    }).join('');
+  } catch (e) {
+    st.textContent = '请求失败: ' + e;
+  }
+}
+async function emDel(id) {
+  if (!confirm('删除记忆 ID ' + id + ' ?')) return;
+  try {
+    const res = await fetch('/api/episodic-memory/' + id, { method: 'DELETE' });
+    if (!res.ok) { alert('删除失败 ' + res.status); return; }
+    emLoad();
+  } catch (e) { alert(e); }
+}
+async function emBackfill() {
+  const lim = document.getElementById('em-limit').value || 20;
+  const st = document.getElementById('em-status');
+  const btn = document.getElementById('em-backfill-btn');
+  if (btn) btn.disabled = true;
+  st.textContent = '补全向量请求中…';
+  try {
+    const pfx = document.getElementById('em-prefix').value.trim();
+    const q = new URLSearchParams({ limit: String(lim) });
+    if (pfx) q.set('prefix', pfx);
+    const res = await fetch('/api/episodic-memory/backfill?' + q.toString(), { method: 'POST' });
+    const d = await res.json().catch(function() { return {}; });
+    function _detailMsg(obj) {
+      var x = obj && obj.detail;
+      if (x == null) return '';
+      if (typeof x === 'string') return x;
+      if (Array.isArray(x)) return x.map(function(e) { return (e && e.msg) || ''; }).filter(Boolean).join('; ');
+      return String(x);
+    }
+    if (!res.ok) {
+      st.textContent = '补全失败 ' + res.status + (_detailMsg(d) ? ' ' + _detailMsg(d) : '');
+      return;
+    }
+    if (d.ok === false) { st.textContent = '无法补全：' + (d.error || 'unknown'); return; }
+    st.textContent = '补全完成：处理 ' + (d.processed || 0) + ' 条，成功写入 ' + (d.updated || 0) + ' 条';
+    emLoad();
+  } catch (e) { st.textContent = '请求失败: ' + e; }
+  finally { if (btn) btn.disabled = false; }
+}
+document.addEventListener('DOMContentLoaded', function() { emLoad(); });
+</script>
+{% endblock %}

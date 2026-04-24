@@ -1,0 +1,286 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "row",
+      "id": 100,
+      "title": "概览",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "collapsed": false
+    },
+    {
+      "type": "stat",
+      "id": 1,
+      "title": "服务是否在跑",
+      "datasource": {"type": "prometheus", "uid": "$DS_PROMETHEUS"},
+      "targets": [
+        {"expr": "messenger_rpa_service_running", "legendFormat": "running"}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}}},
+            {"type": "value", "options": {"1": {"text": "UP", "color": "green"}}}
+          ],
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "red", "value": null},
+            {"color": "green", "value": 1}
+          ]}
+        }
+      },
+      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 1}
+    },
+    {
+      "type": "stat",
+      "id": 2,
+      "title": "账号风控",
+      "datasource": {"type": "prometheus", "uid": "$DS_PROMETHEUS"},
+      "targets": [
+        {"expr": "messenger_rpa_risk_status", "legendFormat": "status"}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {"type": "value", "options": {"0": {"text": "NORMAL", "color": "green"}}},
+            {"type": "value", "options": {"1": {"text": "WARN", "color": "yellow"}}},
+            {"type": "value", "options": {"2": {"text": "BLOCKED", "color": "red"}}}
+          ],
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": null},
+            {"color": "yellow", "value": 1},
+            {"color": "red", "value": 2}
+          ]}
+        }
+      },
+      "gridPos": {"h": 4, "w": 4, "x": 4, "y": 1}
+    },
+    {
+      "type": "stat",
+      "id": 3,
+      "title": "节奏决策",
+      "datasource": {"type": "prometheus", "uid": "$DS_PROMETHEUS"},
+      "targets": [
+        {"expr": "messenger_rpa_pace_decision", "legendFormat": "pace"}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {"type": "value", "options": {"-1": {"text": "ERR", "color": "red"}}},
+            {"type": "value", "options": {"0": {"text": "ALLOW", "color": "green"}}},
+            {"type": "value", "options": {"1": {"text": "THROTTLE", "color": "yellow"}}},
+            {"type": "value", "options": {"2": {"text": "DENY", "color": "red"}}}
+          ]
+        }
+      },
+      "gridPos": {"h": 4, "w": 4, "x": 8, "y": 1}
+    },
+    {
+      "type": "stat",
+      "id": 4,
+      "title": "今日已发",
+      "datasource": {"type": "prometheus", "uid": "$DS_PROMETHEUS"},
+      "targets": [
+        {"expr": "messenger_rpa_sends_today", "legendFormat": "sent"}
+      ],
+      "gridPos": {"h": 4, "w": 4, "x": 12, "y": 1}
+    },
+    {
+      "type": "stat",
+      "id": 5,
+      "title": "审批 pending",
+      "datasource": {"type": "prometheus", "uid": "$DS_PROMETHEUS"},
+      "targets": [
+        {"expr": "messenger_rpa_approvals_pending"},
+        {"expr": "messenger_rpa_approvals_overdue", "legendFormat": "overdue"}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": null},
+            {"color": "yellow", "value": 1},
+            {"color": "red", "value": 5}
+          ]}
+        }
+      },
+      "gridPos": {"h": 4, "w": 4, "x": 16, "y": 1}
+    },
+    {
+      "type": "stat",
+      "id": 6,
+      "title": "低信用 chat 数",
+      "datasource": {"type": "prometheus", "uid": "$DS_PROMETHEUS"},
+      "targets": [
+        {"expr": "messenger_rpa_chat_credit_low_total"}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": null},
+            {"color": "yellow", "value": 1},
+            {"color": "red", "value": 10}
+          ]}
+        }
+      },
+      "gridPos": {"h": 4, "w": 4, "x": 20, "y": 1}
+    },
+    {
+      "type": "row",
+      "id": 101,
+      "title": "延迟",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5},
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "id": 10,
+      "title": "Run duration p50/p95/p99",
+      "datasource": {"type": "prometheus", "uid": "$DS_PROMETHEUS"},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by(le) (rate(messenger_rpa_run_duration_seconds_bucket[5m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by(le) (rate(messenger_rpa_run_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by(le) (rate(messenger_rpa_run_duration_seconds_bucket[5m])))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6}
+    },
+    {
+      "type": "timeseries",
+      "id": 11,
+      "title": "Phase latency p95",
+      "datasource": {"type": "prometheus", "uid": "$DS_PROMETHEUS"},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by(phase, le) (rate(messenger_rpa_phase_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{phase}}"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6}
+    },
+    {
+      "type": "row",
+      "id": 102,
+      "title": "outcomes / pace / caption",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 14},
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "id": 20,
+      "title": "Run outcomes rate/min",
+      "datasource": {"type": "prometheus", "uid": "$DS_PROMETHEUS"},
+      "targets": [
+        {
+          "expr": "rate(messenger_rpa_runs_total[5m]) * 60",
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 15}
+    },
+    {
+      "type": "timeseries",
+      "id": 21,
+      "title": "Pace ratio vs historical median",
+      "datasource": {"type": "prometheus", "uid": "$DS_PROMETHEUS"},
+      "targets": [
+        {"expr": "messenger_rpa_pace_ratio", "legendFormat": "ratio"},
+        {"expr": "messenger_rpa_pace_current_hour_count", "legendFormat": "current"},
+        {"expr": "messenger_rpa_pace_hist_median", "legendFormat": "median"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 15}
+    },
+    {
+      "type": "piechart",
+      "id": 22,
+      "title": "Caption source breakdown",
+      "datasource": {"type": "prometheus", "uid": "$DS_PROMETHEUS"},
+      "targets": [
+        {
+          "expr": "messenger_rpa_caption_source_total",
+          "legendFormat": "{{source}}"
+        }
+      ],
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 23}
+    },
+    {
+      "type": "piechart",
+      "id": 23,
+      "title": "Chat credit distribution",
+      "datasource": {"type": "prometheus", "uid": "$DS_PROMETHEUS"},
+      "targets": [
+        {
+          "expr": "messenger_rpa_chat_credit_distribution",
+          "legendFormat": "{{bucket}}"
+        }
+      ],
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 23}
+    },
+    {
+      "type": "timeseries",
+      "id": 24,
+      "title": "SLA pending / overdue",
+      "datasource": {"type": "prometheus", "uid": "$DS_PROMETHEUS"},
+      "targets": [
+        {"expr": "messenger_rpa_approvals_pending", "legendFormat": "pending"},
+        {"expr": "messenger_rpa_approvals_overdue", "legendFormat": "overdue"},
+        {"expr": "messenger_rpa_approvals_oldest_age_seconds / 60", "legendFormat": "oldest_min"}
+      ],
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 23}
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["messenger_rpa", "ai"],
+  "templating": {
+    "list": [
+      {
+        "current": {"text": "default", "value": "default"},
+        "hide": 0,
+        "includeAll": false,
+        "label": "Prometheus",
+        "multi": false,
+        "name": "DS_PROMETHEUS",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": {"from": "now-1h", "to": "now"},
+  "timepicker": {},
+  "timezone": "",
+  "title": "Messenger RPA Overview",
+  "uid": "messenger-rpa-overview",
+  "version": 1,
+  "weekStart": ""
+}

@@ -1,0 +1,670 @@
+{% extends "base.html" %}
+{% block title %}通道管理 · {{ site_name|default('智控王客户转化聊天系统') }}{% endblock %}
+{% block page_title %}通道管理{% endblock %}
+{% block head %}
+<style>
+/* ═══════════════════════════════════════
+   色彩系统 — 代收蓝 / 代付琥珀
+   ═══════════════════════════════════════ */
+:root{
+  --pi:#3b82f6;--pi-l:#dbeafe;--pi-bg:rgba(59,130,246,.06);--pi-bd:rgba(59,130,246,.16);--pi-hd:rgba(59,130,246,.11);
+  --po:#f59e0b;--po-l:#fef3c7;--po-bg:rgba(245,158,11,.06);--po-bd:rgba(245,158,11,.16);--po-hd:rgba(245,158,11,.11);
+  --int-c:#0ea5e9;--int-bg:#e0f2fe;--int-bd:#7dd3fc;
+  --hun-c:#8b5cf6;--hun-bg:#ede9fe;--hun-bd:#c4b5fd;
+  --sr-alert-bg:rgba(239,68,68,.06);
+  --dirty-bg:#fffbeb;--dirty-dot:#f97316;
+}
+[data-theme="dark"]{
+  --pi:#60a5fa;--pi-l:rgba(96,165,250,.15);--pi-bg:rgba(96,165,250,.07);--pi-bd:rgba(96,165,250,.20);--pi-hd:rgba(96,165,250,.13);
+  --po:#fbbf24;--po-l:rgba(251,191,36,.15);--po-bg:rgba(251,191,36,.07);--po-bd:rgba(251,191,36,.20);--po-hd:rgba(251,191,36,.13);
+  --int-c:#38bdf8;--int-bg:rgba(56,189,248,.12);--int-bd:rgba(56,189,248,.3);
+  --hun-c:#a78bfa;--hun-bg:rgba(167,139,250,.12);--hun-bd:rgba(167,139,250,.3);
+  --sr-alert-bg:rgba(239,68,68,.08);
+  --dirty-bg:rgba(245,158,11,.08);
+}
+
+/* ═══════════════════════════════════════
+   卡片网格
+   ═══════════════════════════════════════ */
+.ch-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(720px,1fr));gap:1.4rem;margin-bottom:1.4rem}
+@media(max-width:780px){.ch-grid{grid-template-columns:1fr}}
+
+.ch-card{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:1.4rem;transition:all .3s;position:relative;overflow:hidden}
+[data-theme="dark"] .ch-card{backdrop-filter:blur(8px)}
+.ch-card:hover{box-shadow:var(--s1);transform:translateY(-1px)}
+.ch-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;opacity:.8}
+.ch-card.st-ok::before{background:linear-gradient(90deg,var(--green),#34d399)}
+.ch-card.st-maint::before{background:linear-gradient(90deg,var(--amber),#fbbf24)}
+.ch-card.st-wave::before{background:linear-gradient(90deg,#a855f7,#c084fc)}
+.ch-card.st-disabled{pointer-events:auto}
+.ch-card.st-disabled::before{background:linear-gradient(90deg,var(--red),#f87171)}
+.ch-card.st-disabled .ch-body{opacity:.45;filter:grayscale(.5);pointer-events:none}
+.ch-card.st-disabled .ch-hd .badge{background:#fee2e2!important;color:#dc2626!important}
+.ch-card.alert{border-color:var(--red);box-shadow:0 0 0 1px var(--rs)}
+.ch-card.dirty-card{outline:2px solid var(--dirty-dot);outline-offset:-1px}
+.ch-card.save-flash{outline:2px solid var(--green)!important;outline-offset:-1px;transition:outline-color .5s}
+
+/* ═══════════════════════════════════════
+   卡片头部
+   ═══════════════════════════════════════ */
+.ch-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:.9rem}
+.ch-name{font-weight:700;font-size:1.05rem;display:flex;align-items:center;gap:.5rem}
+.ch-id{font-size:.7rem;color:var(--t3);font-family:'Consolas',monospace;margin-top:.1rem}
+
+/* ═══════════════════════════════════════
+   顶部属性行（金额类型 + 最后更新）
+   ═══════════════════════════════════════ */
+.ch-top-row{display:flex;align-items:center;gap:.8rem;flex-wrap:wrap}
+.ch-field{background:var(--input);border-radius:8px;padding:.5rem .65rem}
+.ch-field-lbl{font-size:.68rem;font-weight:600;color:var(--t3);margin-bottom:.2rem;display:flex;align-items:center;gap:.25rem}
+.ch-field-lbl .tip{cursor:help;opacity:.5;font-size:.58rem;background:var(--bd2);width:13px;height:13px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center}
+
+/* ── 金额类型药丸 ── */
+.amt-pills{display:flex;gap:.35rem}
+.amt-pill{position:relative;cursor:pointer;user-select:none}
+.amt-pill input{position:absolute;opacity:0;width:0;height:0}
+.amt-pill span{display:block;padding:.25rem .7rem;border-radius:20px;font-size:.75rem;font-weight:700;border:1.5px solid var(--bd);transition:all .2s;letter-spacing:.3px}
+.amt-pill:hover span{transform:scale(1.03)}
+.amt-pill.is-int span{color:var(--int-c);border-color:var(--int-bd)}
+.amt-pill.is-hun span{color:var(--hun-c);border-color:var(--hun-bd)}
+.amt-pill.is-int input:checked~span{background:var(--int-c);color:#fff;border-color:var(--int-c);box-shadow:0 2px 8px rgba(14,165,233,.25)}
+.amt-pill.is-hun input:checked~span{background:var(--hun-c);color:#fff;border-color:var(--hun-c);box-shadow:0 2px 8px rgba(139,92,246,.25)}
+
+/* ═══════════════════════════════════════
+   双列并排
+   ═══════════════════════════════════════ */
+.dir-duo{display:grid;grid-template-columns:1fr 1fr;gap:.8rem}
+@media(max-width:580px){.dir-duo{grid-template-columns:1fr}}
+
+.dir-col{border-radius:12px;padding:.85rem;position:relative;transition:box-shadow .2s}
+.dir-col.is-payin{background:var(--pi-bg);border:1.5px solid var(--pi-bd)}
+.dir-col.is-payout{background:var(--po-bg);border:1.5px solid var(--po-bd)}
+.dir-col:hover{box-shadow:0 2px 12px rgba(0,0,0,.04)}
+
+.dir-hd{display:flex;align-items:center;gap:.4rem;margin:-.85rem -.85rem .7rem;padding:.5rem .85rem;border-radius:10px 10px 0 0;font-weight:700;font-size:.82rem}
+.dir-col.is-payin .dir-hd{background:var(--pi-hd);color:var(--pi)}
+.dir-col.is-payout .dir-hd{background:var(--po-hd);color:var(--po)}
+.dir-hd .dir-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.dir-col.is-payin .dir-dot{background:var(--pi);box-shadow:0 0 8px var(--pi-bd)}
+.dir-col.is-payout .dir-dot{background:var(--po);box-shadow:0 0 8px var(--po-bd)}
+
+/* ═══════════════════════════════════════
+   方向内字段
+   ═══════════════════════════════════════ */
+.dir-fields{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
+.df{background:rgba(255,255,255,.5);border-radius:8px;padding:.5rem .6rem;position:relative;transition:background .3s,border-color .3s}
+[data-theme="dark"] .df{background:rgba(255,255,255,.04)}
+.df-lbl{font-size:.65rem;font-weight:700;color:var(--t3);margin-bottom:.25rem;text-transform:uppercase;letter-spacing:.4px}
+
+/* ── 字段修改标记 ── */
+.df.is-dirty{background:var(--dirty-bg)!important}
+.df.is-dirty::after{content:'';position:absolute;top:5px;right:5px;width:6px;height:6px;border-radius:50%;background:var(--dirty-dot);box-shadow:0 0 4px var(--dirty-dot)}
+
+/* ── 差异高亮（代收≠代付） ── */
+.df.diff{border:1.5px solid var(--amber)}
+
+/* ═══════════════════════════════════════
+   成功率 Hero 环（48px）
+   ═══════════════════════════════════════ */
+.sr-hero{display:flex;align-items:center;gap:.6rem}
+.sr-ring{position:relative;width:48px;height:48px;flex-shrink:0}
+.sr-ring svg{width:48px;height:48px;transform:rotate(-90deg)}
+.sr-ring circle{fill:none;stroke-width:4.5}
+.sr-ring .bg{stroke:var(--bd2)}
+.sr-ring .fg{stroke-linecap:round;transition:stroke-dashoffset .6s ease,stroke .3s}
+.sr-pct{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:.65rem}
+.sr-ctrl{display:flex;flex-direction:column;gap:.2rem}
+.sr-big{font-weight:800;font-size:1rem;line-height:1}
+.sr-alert-bg{background:var(--sr-alert-bg)!important;border:1px solid rgba(239,68,68,.12)}
+
+/* ── 步进器 ── */
+.rate-step{display:flex;align-items:center;gap:.25rem}
+.rate-step button{width:24px;height:24px;border-radius:6px;border:1px solid var(--bd);background:var(--card);color:var(--t);cursor:pointer;font-size:.9rem;display:flex;align-items:center;justify-content:center;transition:.15s}
+.rate-step button:hover{background:var(--ps);border-color:var(--p);color:var(--p)}
+.rate-step button:active{transform:scale(.92)}
+.rate-step .rate-v{font-weight:700;font-size:.85rem;min-width:48px;text-align:center}
+.sr-input{width:48px;padding:.2rem .25rem;font-size:.8rem;font-weight:700;border:1.5px solid var(--bd);border-radius:6px;background:var(--card);color:var(--t);text-align:center}
+
+/* ═══════════════════════════════════════
+   限额 + 快选标签
+   ═══════════════════════════════════════ */
+.lim-row{display:flex;align-items:center;gap:.3rem}
+.lim-row input[type=number]{width:62px;padding:.22rem .35rem;font-size:.78rem;border:1.5px solid var(--bd);border-radius:6px;background:var(--card);color:var(--t);font-weight:600;text-align:center}
+.lim-sep{color:var(--t3);font-weight:600;font-size:.78rem}
+.lim-tags{display:flex;gap:.25rem;margin-top:.3rem;flex-wrap:wrap}
+.lim-tag{font-size:.62rem;font-weight:600;padding:.15rem .4rem;border-radius:4px;background:var(--input);color:var(--t3);cursor:pointer;border:1px solid transparent;transition:.15s;user-select:none}
+.lim-tag:hover{border-color:var(--p);color:var(--p);background:var(--ps)}
+.lim-tag:active{transform:scale(.95)}
+
+/* ═══════════════════════════════════════
+   处理时间选择器
+   ═══════════════════════════════════════ */
+.pt-sel{font-size:.78rem;font-weight:600;border:1.5px solid var(--bd);border-radius:6px;background:var(--card);color:var(--t);padding:.2rem .3rem;width:100%;cursor:pointer;appearance:auto}
+.pt-custom{margin-top:.3rem;display:none;width:100%;padding:.2rem .35rem;font-size:.78rem;border:1.5px solid var(--bd);border-radius:6px;background:var(--card);color:var(--t);font-weight:600}
+.pt-custom.show{display:block}
+
+/* ═══════════════════════════════════════
+   状态选择器（带圆点图标）
+   ═══════════════════════════════════════ */
+.st-sel{display:flex;gap:.3rem;flex-wrap:wrap}
+.st-sel label{padding:0;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;border:1.5px solid var(--bd);transition:all .2s;user-select:none}
+.st-sel label:hover{border-color:var(--t3);transform:scale(1.02)}
+.st-sel input{display:none}
+.st-sel label span{display:flex;align-items:center;gap:.3rem;padding:.25rem .5rem;border-radius:5px;transition:all .2s}
+.st-sel label span::before{content:'';width:7px;height:7px;border-radius:50%;flex-shrink:0;transition:box-shadow .2s}
+.st-sel .s-ok span::before{background:var(--green)}
+.st-sel .s-mt span::before{background:var(--amber)}
+.st-sel .s-wv span::before{background:#a855f7}
+.st-sel .s-off span::before{background:var(--red)}
+.st-sel input:checked+span{color:#fff}
+.st-sel .s-ok input:checked+span{background:var(--green);border-color:var(--green)}
+.st-sel .s-ok input:checked+span::before{background:#fff;box-shadow:0 0 4px rgba(255,255,255,.5)}
+.st-sel .s-mt input:checked+span{background:var(--amber);border-color:var(--amber)}
+.st-sel .s-mt input:checked+span::before{background:#fff;box-shadow:0 0 4px rgba(255,255,255,.5)}
+.st-sel .s-wv input:checked+span{background:#a855f7;border-color:#a855f7}
+.st-sel .s-wv input:checked+span::before{background:#fff;box-shadow:0 0 4px rgba(255,255,255,.5)}
+.st-sel .s-off input:checked+span{background:var(--red);border-color:var(--red)}
+.st-sel .s-off input:checked+span::before{background:#fff;box-shadow:0 0 4px rgba(255,255,255,.5)}
+
+/* ═══════════════════════════════════════
+   保存按钮（滑入动画）
+   ═══════════════════════════════════════ */
+.ch-foot{display:flex;align-items:center;justify-content:flex-end;padding-top:.7rem;border-top:1px solid var(--bd);margin-top:.4rem}
+.ch-save-btn{opacity:0;transform:translateY(6px);pointer-events:none;transition:opacity .3s ease,transform .3s ease}
+.ch-save-btn.show{opacity:1;transform:translateY(0);pointer-events:auto}
+
+/* ═══════════════════════════════════════
+   批量操作栏
+   ═══════════════════════════════════════ */
+.batch-bar{position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%) translateY(80px);background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:.75rem 1.2rem;box-shadow:var(--s2);z-index:100;display:flex;align-items:center;gap:.8rem;min-width:340px;opacity:0;pointer-events:none;transition:transform .3s ease,opacity .3s ease}
+.batch-bar.show{transform:translateX(-50%) translateY(0);opacity:1;pointer-events:auto}
+.batch-cnt{font-weight:700;color:var(--p)}
+</style>
+{% endblock %}
+
+{% block content %}
+{% set active="ch" %}
+
+{% if msg %}
+<div class="msg {{ 'msg-ok' if '成功' in msg or '更新' in msg else 'msg-err' }}">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">{% if '成功' in msg or '更新' in msg %}<polyline points="20 6 9 17 4 12"/>{% else %}<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>{% endif %}</svg>
+  {{ msg }}
+</div>
+{% endif %}
+
+{% if ui_mode == 'simple' %}
+{% set ch_ok = channels|selectattr('payin_status', 'in', ['正常','active','启用'])|list|length + channels|selectattr('payout_status', 'in', ['正常','active','启用'])|list|length %}
+{% set ch_disabled = channels|selectattr('payin_status', 'in', ['禁用','disabled','停用'])|list|length %}
+<div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-bottom:1rem">
+  <div style="flex:1;min-width:100px;background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:.7rem 1rem;text-align:center">
+    <div style="font-size:1.6rem;font-weight:800;color:var(--p)">{{ channels|length }}</div>
+    <div style="font-size:.75rem;color:var(--t3)">总通道</div>
+  </div>
+  <div style="flex:1;min-width:100px;background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:.7rem 1rem;text-align:center">
+    <div style="font-size:1.6rem;font-weight:800;color:var(--green)">{{ ch_ok }}</div>
+    <div style="font-size:.75rem;color:var(--t3)">在线</div>
+  </div>
+  <div style="flex:1;min-width:100px;background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:.7rem 1rem;text-align:center">
+    <div style="font-size:1.6rem;font-weight:800;color:var(--red)">{{ ch_disabled }}</div>
+    <div style="font-size:.75rem;color:var(--t3)">禁用</div>
+  </div>
+</div>
+<div style="background:var(--ps);border:1px solid rgba(91,124,246,.15);border-radius:8px;padding:.55rem .9rem;margin-bottom:1rem;font-size:.8rem;color:var(--t2);display:flex;align-items:center;gap:.5rem">
+  <span style="font-size:1rem">🔒</span> 简洁模式下通道数据为只读。如需修改，请 <a href="/set_ui_mode?mode=full" style="color:var(--p);font-weight:600">切换到完整模式</a>。
+</div>
+{% endif %}
+<div class="p-head fa">
+  <div>
+    <h1>{% if ui_mode == 'simple' %}通道概览{% else %}通道管理{% endif %}</h1>
+    <p style="font-size:.82rem;color:var(--t3);margin-top:.2rem">
+      共 {{ channels|length }} 个通道 ·
+      <span style="color:var(--pi)">●</span> 代收
+      <span style="color:var(--po);margin-left:.3rem">●</span> 代付
+      {{ '· 并排对比' if ui_mode != 'simple' else '' }}
+    </p>
+  </div>
+  <div style="display:flex;gap:.6rem" class="pro-only">
+    <label style="display:flex;align-items:center;gap:.5rem;font-size:.83rem;color:var(--t2);cursor:pointer">
+      <input type="checkbox" id="select-all" onchange="toggleAll(this)" style="width:16px;height:16px;accent-color:var(--p)"> 全选
+    </label>
+  </div>
+</div>
+
+{% if channels %}
+<div class="ch-grid">
+  {% for ch in channels %}
+  {% set pi_sr = ch.get('payin_success_rate', 0) or 0 %}
+  {% set po_sr = ch.get('payout_success_rate', 0) or 0 %}
+  {% set avg_sr = ((pi_sr + po_sr) / 2)|round(1) %}
+  {% set is_alert = avg_sr < (ch.get('alert_threshold', 80) or 80) %}
+  {% set pi_st = ch.get('payin_status', '正常') or '正常' %}
+  {% set po_st = ch.get('payout_status', '正常') or '正常' %}
+  {% set both_disabled = pi_st in ('禁用','disabled','停用') and po_st in ('禁用','disabled','停用') %}
+  {% set any_ok = pi_st in ('正常','active','启用') or po_st in ('正常','active','启用') %}
+  {% set any_maint = pi_st in ('维护中','maintenance') or po_st in ('维护中','maintenance') %}
+  {% set st_class = 'st-disabled' if both_disabled else ('st-ok' if any_ok else ('st-maint' if any_maint else 'st-wave')) %}
+
+  <div class="ch-card {{ st_class }} {{ 'alert' if is_alert }} fa" id="ch-{{ ch.name }}" data-name="{{ ch.name }}">
+    <!-- ── 卡片头部 ── -->
+    <div class="ch-hd">
+      <div>
+        <div class="ch-name">
+          <input type="checkbox" class="ch-cb" data-name="{{ ch.name }}" style="width:16px;height:16px;accent-color:var(--p)" onchange="updateBatch()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" style="color:var(--p)"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+          {{ ch.display_name or ch.name }}
+        </div>
+        <div class="ch-id">{{ ch.name }}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:.5rem">
+        <span class="badge {{ 'b-g' if st_class=='st-ok' else ('b-a' if st_class=='st-maint' else '') }}"
+              style="{{ 'background:#f3e8ff;color:#a855f7;' if st_class=='st-wave' else '' }}{{ 'background:#fee2e2;color:#dc2626;' if st_class=='st-disabled' else '' }}">
+          {% if both_disabled %}禁用{% elif any_ok %}正常{% elif any_maint %}维护中{% else %}波动{% endif %}
+        </span>
+      </div>
+    </div>
+
+    <div class="ch-body">
+      {% if ch.last_updated %}
+      <div class="ch-top-row">
+        <div class="ch-field">
+          <div class="ch-field-lbl">最后更新</div>
+          <div style="font-size:.78rem;color:var(--t3);font-weight:600">{{ ch.last_updated }}</div>
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- ══ 代收 / 代付 并排 ══ -->
+      <div class="dir-duo">
+        {% for dir, dir_label, dir_cls in [('payin','代收 Payin','is-payin'), ('payout','代付 Payout','is-payout')] %}
+        {% set d_sr = ch.get(dir ~ '_success_rate', 0) or 0 %}
+        {% set d_fee = ch.get(dir ~ '_fee_rate', '-') or '-' %}
+        {% set d_min = (ch.get(dir ~ '_minimum_amount', '100') or '100')|replace(',','') %}
+        {% set d_max = (ch.get(dir ~ '_maximum_amount', '100000') or '100000')|replace(',','') %}
+        {% set d_status = ch.get(dir ~ '_status', '正常') or '正常' %}
+        {% set d_pt = ch.get(dir ~ '_processing_time', '') or ch.get('processing_time', '') or '' %}
+        {% set d_amt = ch.get(dir ~ '_amount_type', '') or ch.get('amount_type', 'integer') or 'integer' %}
+        {% set pct = d_sr|round(1) %}
+        {% set circ = 113 %}
+        {% set offset = circ - (circ * pct / 100) %}
+        {% set sr_color = 'var(--green)' if pct >= 80 else ('var(--amber)' if pct >= 60 else 'var(--red)') %}
+
+        <div class="dir-col {{ dir_cls }}">
+          <div class="dir-hd">
+            <span class="dir-dot"></span>
+            {{ dir_label }}
+          </div>
+
+          <div class="dir-fields">
+            <!-- 成功率 Hero -->
+            <div class="df {{ 'sr-alert-bg' if pct < 60 }}" style="grid-column:span 2" id="df-sr-{{ ch.name }}-{{ dir }}">
+              <div class="df-lbl">成功率</div>
+              <div class="sr-hero">
+                <div class="sr-ring">
+                  <svg viewBox="0 0 48 48"><circle class="bg" cx="24" cy="24" r="18"/><circle class="fg" id="ring-fg-{{ ch.name }}-{{ dir }}" cx="24" cy="24" r="18" stroke="{{ sr_color }}" stroke-dasharray="{{ circ }}" stroke-dashoffset="{{ offset }}"/></svg>
+                  <span class="sr-pct" id="ring-pct-{{ ch.name }}-{{ dir }}" style="color:{{ sr_color }}">{{ pct }}%</span>
+                </div>
+                <div class="sr-ctrl">
+                  <div class="rate-step">
+                    <button onclick="stepSR('{{ ch.name }}','{{ dir }}',-1)">−</button>
+                    <input type="number" class="sr-input" id="sr-{{ ch.name }}-{{ dir }}" value="{{ pct }}" min="0" max="100" step="0.1"
+                           onchange="updateSRRing('{{ ch.name }}','{{ dir }}');markDirty('{{ ch.name }}');checkDiff('{{ ch.name }}')" oninput="updateSRRing('{{ ch.name }}','{{ dir }}')">
+                    <button onclick="stepSR('{{ ch.name }}','{{ dir }}',1)">+</button>
+                    <span style="font-size:.68rem;color:var(--t3)">%</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 金额类型 -->
+            <div class="df" id="df-amt-{{ ch.name }}-{{ dir }}">
+              <div class="df-lbl">金额类型</div>
+              <div class="amt-pills">
+                <label class="amt-pill is-int"><input type="radio" name="amt-{{ ch.name }}-{{ dir }}" value="integer" {{ 'checked' if d_amt != 'hundred' }} onchange="markDirty('{{ ch.name }}');checkDiff('{{ ch.name }}')"><span>整数</span></label>
+                <label class="amt-pill is-hun"><input type="radio" name="amt-{{ ch.name }}-{{ dir }}" value="hundred" {{ 'checked' if d_amt == 'hundred' }} onchange="markDirty('{{ ch.name }}');checkDiff('{{ ch.name }}')"><span>整百</span></label>
+              </div>
+            </div>
+
+            <!-- 费率 -->
+            <div class="df" id="df-fee-{{ ch.name }}-{{ dir }}">
+              <div class="df-lbl">费率</div>
+              <div class="rate-step">
+                <button onclick="stepRate('{{ ch.name }}','{{ dir }}',-0.1)">−</button>
+                <span class="rate-v" id="rate-{{ ch.name }}-{{ dir }}">{{ d_fee }}</span>
+                <button onclick="stepRate('{{ ch.name }}','{{ dir }}',0.1)">+</button>
+              </div>
+            </div>
+
+            <!-- 处理时间 -->
+            <div class="df" id="df-pt-{{ ch.name }}-{{ dir }}">
+              <div class="df-lbl">处理时间</div>
+              <select class="pt-sel" id="ptsel-{{ ch.name }}-{{ dir }}" onchange="onPtChange('{{ ch.name }}','{{ dir }}')">
+                <option value="即时" {{ 'selected' if d_pt == '即时' }}>即时</option>
+                <option value="1-5分钟" {{ 'selected' if d_pt == '1-5分钟' }}>1-5分钟</option>
+                <option value="5-15分钟" {{ 'selected' if d_pt == '5-15分钟' }}>5-15分钟</option>
+                <option value="15-30分钟" {{ 'selected' if d_pt == '15-30分钟' }}>15-30分钟</option>
+                <option value="请咨询客服" {{ 'selected' if d_pt == '请咨询客服' }}>请咨询客服</option>
+                <option value="__custom" {{ 'selected' if d_pt and d_pt not in ['即时','1-5分钟','5-15分钟','15-30分钟','请咨询客服'] }}>自定义...</option>
+              </select>
+              <input class="pt-custom {{ 'show' if d_pt and d_pt not in ['即时','1-5分钟','5-15分钟','15-30分钟','请咨询客服'] }}"
+                     id="pt-{{ ch.name }}-{{ dir }}"
+                     value="{{ d_pt if d_pt not in ['即时','1-5分钟','5-15分钟','15-30分钟','请咨询客服'] else '' }}"
+                     placeholder="输入自定义时间" onchange="markDirty('{{ ch.name }}');checkDiff('{{ ch.name }}')">
+            </div>
+
+            <!-- 限额 + 快选 -->
+            <div class="df" style="grid-column:span 2" id="df-lim-{{ ch.name }}-{{ dir }}">
+              <div class="df-lbl">限额</div>
+              <div class="lim-row">
+                <input type="number" id="min-{{ ch.name }}-{{ dir }}" value="{{ d_min }}" min="0" onchange="markDirty('{{ ch.name }}');checkDiff('{{ ch.name }}')">
+                <span class="lim-sep">—</span>
+                <input type="number" id="max-{{ ch.name }}-{{ dir }}" value="{{ d_max }}" min="0" onchange="markDirty('{{ ch.name }}');checkDiff('{{ ch.name }}')">
+              </div>
+              <div class="lim-tags">
+                <span class="lim-tag" onclick="setLim('{{ ch.name }}','{{ dir }}',100,20000)">100-20,000</span>
+                <span class="lim-tag" onclick="setLim('{{ ch.name }}','{{ dir }}',100,50000)">100-50,000</span>
+                <span class="lim-tag" onclick="setLim('{{ ch.name }}','{{ dir }}',100,100000)">100-100,000</span>
+              </div>
+            </div>
+
+            <!-- 状态 -->
+            <div class="df" style="grid-column:span 2">
+              <div class="df-lbl">状态</div>
+              <div class="st-sel">
+                <label class="s-ok"><input type="radio" name="dst-{{ ch.name }}-{{ dir }}" value="正常" {{ 'checked' if d_status in ('正常','active','启用') }} onchange="markDirty('{{ ch.name }}')"><span>启用</span></label>
+                <label class="s-mt"><input type="radio" name="dst-{{ ch.name }}-{{ dir }}" value="维护中" {{ 'checked' if d_status == '维护中' }} onchange="markDirty('{{ ch.name }}')"><span>维护中</span></label>
+                <label class="s-wv"><input type="radio" name="dst-{{ ch.name }}-{{ dir }}" value="波动" {{ 'checked' if d_status == '波动' }} onchange="markDirty('{{ ch.name }}')"><span>波动</span></label>
+                <label class="s-off"><input type="radio" name="dst-{{ ch.name }}-{{ dir }}" value="禁用" {{ 'checked' if d_status in ('禁用','disabled','停用') }} onchange="markDirty('{{ ch.name }}')"><span>禁用</span></label>
+              </div>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- ── 保存按钮 ── -->
+    <div class="ch-foot">
+      <button class="btn btn-p btn-xs ch-save-btn" id="save-{{ ch.name }}" onclick="saveChannel('{{ ch.name }}')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="12" height="12"><polyline points="20 6 9 17 4 12"/></svg> 保存
+      </button>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card fa">
+  <div class="empty">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/></svg>
+    <p>暂无通道数据</p>
+  </div>
+</div>
+{% endif %}
+
+<!-- 批量操作栏 -->
+<div class="batch-bar pro-only" id="batch-bar">
+  <span>已选 <strong class="batch-cnt" id="batch-cnt">0</strong> 个通道</span>
+  <button class="btn btn-p btn-sm" onclick="batchStatus('正常')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><polyline points="20 6 9 17 4 12"/></svg>
+    批量启用
+  </button>
+  <button class="btn btn-sm" style="background:var(--as);color:var(--amber);border:1px solid var(--amber)" onclick="batchStatus('维护中')">维护</button>
+  <button class="btn btn-sm" style="background:#f3e8ff;color:#a855f7;border:1px solid #a855f7" onclick="batchStatus('波动')">波动</button>
+  <button class="btn btn-sm" style="background:#fee2e2;color:#dc2626;border:1px solid #dc2626" onclick="batchStatus('禁用')">禁用</button>
+  <button class="btn btn-s btn-sm" onclick="clearBatch()">取消</button>
+</div>
+
+<script>
+/* ═══════════════════════════════════════
+   State management
+   ═══════════════════════════════════════ */
+const dirty = new Set();
+const originals = {};
+
+function captureOriginals(name) {
+  if (originals[name]) return;
+  const o = {};
+  for (const dir of ['payin','payout']) {
+    o['sr_'+dir]  = val('sr-'+name+'-'+dir);
+    o['fee_'+dir] = txt('rate-'+name+'-'+dir);
+    o['min_'+dir] = val('min-'+name+'-'+dir);
+    o['max_'+dir] = val('max-'+name+'-'+dir);
+    o['pt_'+dir]  = getPtValue(name, dir);
+    const st = document.querySelector('input[name="dst-'+name+'-'+dir+'"]:checked');
+    o['st_'+dir]  = st ? st.value : '';
+    const amt = document.querySelector('input[name="amt-'+name+'-'+dir+'"]:checked');
+    o['amt_'+dir] = amt ? amt.value : '';
+  }
+  originals[name] = o;
+}
+function val(id) { const e = document.getElementById(id); return e ? e.value : ''; }
+function txt(id) { const e = document.getElementById(id); return e ? e.textContent : ''; }
+
+function markDirty(name) {
+  captureOriginals(name);
+  dirty.add(name);
+  const card = document.getElementById('ch-'+name);
+  if (card) card.classList.add('dirty-card');
+  const b = document.getElementById('save-'+name);
+  if (b) b.classList.add('show');
+  updateDirtyFields(name);
+}
+
+function updateDirtyFields(name) {
+  const o = originals[name];
+  if (!o) return;
+  for (const dir of ['payin','payout']) {
+    toggleFieldDirty('df-sr-'+name+'-'+dir, val('sr-'+name+'-'+dir) !== o['sr_'+dir]);
+    toggleFieldDirty('df-fee-'+name+'-'+dir, txt('rate-'+name+'-'+dir) !== o['fee_'+dir]);
+    toggleFieldDirty('df-lim-'+name+'-'+dir, val('min-'+name+'-'+dir) !== o['min_'+dir] || val('max-'+name+'-'+dir) !== o['max_'+dir]);
+    toggleFieldDirty('df-pt-'+name+'-'+dir, getPtValue(name, dir) !== o['pt_'+dir]);
+    const curAmt = document.querySelector('input[name="amt-'+name+'-'+dir+'"]:checked');
+    toggleFieldDirty('df-amt-'+name+'-'+dir, (curAmt ? curAmt.value : '') !== o['amt_'+dir]);
+  }
+}
+function toggleFieldDirty(id, isDirty) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('is-dirty', isDirty);
+}
+
+/* ═══════════════════════════════════════
+   Success rate ring (48px, circ=113)
+   ═══════════════════════════════════════ */
+function stepSR(name, dir, delta) {
+  const el = document.getElementById('sr-'+name+'-'+dir);
+  if (!el) return;
+  let v = parseFloat(el.value) || 0;
+  v = Math.max(0, Math.min(100, Math.round((v+delta)*10)/10));
+  el.value = v;
+  updateSRRing(name, dir); markDirty(name); checkDiff(name);
+}
+function updateSRRing(name, dir) {
+  const el = document.getElementById('sr-'+name+'-'+dir);
+  const fg = document.getElementById('ring-fg-'+name+'-'+dir);
+  const pctEl = document.getElementById('ring-pct-'+name+'-'+dir);
+  const wrap = document.getElementById('df-sr-'+name+'-'+dir);
+  if (!el||!fg||!pctEl) return;
+  const v = Math.max(0, Math.min(100, parseFloat(el.value)||0));
+  const circ = 113, offset = circ-(circ*v/100);
+  const color = v>=80?'var(--green)':v>=60?'var(--amber)':'var(--red)';
+  fg.setAttribute('stroke', color);
+  fg.setAttribute('stroke-dashoffset', offset);
+  pctEl.textContent = Math.round(v*10)/10+'%';
+  pctEl.style.color = color;
+  if (wrap) wrap.classList.toggle('sr-alert-bg', v<60);
+}
+
+/* ═══════════════════════════════════════
+   Fee rate stepper
+   ═══════════════════════════════════════ */
+function stepRate(name, dir, delta) {
+  const el = document.getElementById('rate-'+name+'-'+dir);
+  if (!el) return;
+  let v = parseFloat(el.textContent.replace('%','')) || 0;
+  v = Math.max(0, Math.round((v+delta)*10)/10);
+  el.textContent = v+'%';
+  markDirty(name); checkDiff(name);
+}
+
+/* ═══════════════════════════════════════
+   Processing time
+   ═══════════════════════════════════════ */
+function onPtChange(name, dir) {
+  const sel = document.getElementById('ptsel-'+name+'-'+dir);
+  const inp = document.getElementById('pt-'+name+'-'+dir);
+  if (!sel||!inp) return;
+  if (sel.value === '__custom') {
+    inp.classList.add('show');
+    inp.focus();
+  } else {
+    inp.classList.remove('show');
+    inp.value = '';
+  }
+  markDirty(name); checkDiff(name);
+}
+function getPtValue(name, dir) {
+  const sel = document.getElementById('ptsel-'+name+'-'+dir);
+  const inp = document.getElementById('pt-'+name+'-'+dir);
+  if (!sel) return '';
+  return sel.value === '__custom' ? (inp ? inp.value : '') : sel.value;
+}
+
+/* ═══════════════════════════════════════
+   Limit quick-select
+   ═══════════════════════════════════════ */
+function setLim(name, dir, lo, hi) {
+  const minEl = document.getElementById('min-'+name+'-'+dir);
+  const maxEl = document.getElementById('max-'+name+'-'+dir);
+  if (minEl) minEl.value = lo;
+  if (maxEl) maxEl.value = hi;
+  markDirty(name); checkDiff(name);
+}
+
+/* ═══════════════════════════════════════
+   Diff check (payin vs payout)
+   ═══════════════════════════════════════ */
+function checkDiff(name) {
+  const checks = [
+    { piId:'sr-'+name+'-payin', poId:'sr-'+name+'-payout', pfx:'df-sr-'+name, mode:'val' },
+    { piId:null, poId:null, pfx:'df-amt-'+name, mode:'radio', rname:'amt-'+name },
+    { piId:'rate-'+name+'-payin', poId:'rate-'+name+'-payout', pfx:'df-fee-'+name, mode:'txt' },
+    { piId:null, poId:null, pfx:'df-pt-'+name, mode:'pt', name:name },
+    { piId:'min-'+name+'-payin', poId:'min-'+name+'-payout', pfx:'df-lim-'+name, mode:'val' },
+  ];
+  for (const c of checks) {
+    let piV, poV;
+    if (c.mode === 'val') {
+      piV = val(c.piId); poV = val(c.poId);
+    } else if (c.mode === 'txt') {
+      piV = txt(c.piId); poV = txt(c.poId);
+    } else if (c.mode === 'pt') {
+      piV = getPtValue(c.name,'payin'); poV = getPtValue(c.name,'payout');
+    } else if (c.mode === 'radio') {
+      const a = document.querySelector('input[name="'+c.rname+'-payin"]:checked');
+      const b = document.querySelector('input[name="'+c.rname+'-payout"]:checked');
+      piV = a ? a.value : ''; poV = b ? b.value : '';
+    }
+    const isDiff = piV !== poV && piV !== '' && poV !== '';
+    for (const dir of ['payin','payout']) {
+      const el = document.getElementById(c.pfx+'-'+dir);
+      if (el) el.classList.toggle('diff', isDiff);
+    }
+  }
+}
+
+/* ═══════════════════════════════════════
+   Save
+   ═══════════════════════════════════════ */
+function saveChannel(name) {
+  const fd = new FormData();
+  fd.append('channel', name);
+
+  for (const dir of ['payin','payout']) {
+    const rateEl = document.getElementById('rate-'+name+'-'+dir);
+    const srEl   = document.getElementById('sr-'+name+'-'+dir);
+    const minEl  = document.getElementById('min-'+name+'-'+dir);
+    const maxEl  = document.getElementById('max-'+name+'-'+dir);
+    const stEl   = document.querySelector('input[name="dst-'+name+'-'+dir+'"]:checked');
+    const amtEl  = document.querySelector('input[name="amt-'+name+'-'+dir+'"]:checked');
+    if (rateEl) fd.append(dir+'_fee_rate', rateEl.textContent);
+    if (srEl)   fd.append(dir+'_success_rate', srEl.value);
+    if (minEl)  fd.append(dir+'_minimum_amount', minEl.value);
+    if (maxEl)  fd.append(dir+'_maximum_amount', maxEl.value);
+    if (stEl)   fd.append(dir+'_status', stEl.value);
+    if (amtEl)  fd.append(dir+'_amount_type', amtEl.value);
+    fd.append(dir+'_processing_time', getPtValue(name, dir));
+  }
+
+  fetch('/channels/update', { method:'POST', body:fd })
+    .then(r => {
+      if (!r.ok) throw new Error('HTTP '+r.status);
+      showToast(name+' 已保存', 'ok');
+      dirty.delete(name);
+      delete originals[name];
+      const card = document.getElementById('ch-'+name);
+      if (card) {
+        card.classList.remove('dirty-card');
+        card.classList.add('save-flash');
+        setTimeout(() => card.classList.remove('save-flash'), 1500);
+        card.querySelectorAll('.is-dirty').forEach(el => el.classList.remove('is-dirty'));
+      }
+      const b = document.getElementById('save-'+name);
+      if (b) b.classList.remove('show');
+    })
+    .catch(() => showToast('保存失败', 'err'));
+}
+
+/* ═══════════════════════════════════════
+   Batch operations
+   ═══════════════════════════════════════ */
+function toggleAll(cb) { document.querySelectorAll('.ch-cb').forEach(c => { c.checked = cb.checked }); updateBatch(); }
+function updateBatch() {
+  const n = document.querySelectorAll('.ch-cb:checked').length;
+  document.getElementById('batch-cnt').textContent = n;
+  document.getElementById('batch-bar').classList.toggle('show', n > 0);
+}
+function clearBatch() {
+  document.querySelectorAll('.ch-cb').forEach(c => c.checked = false);
+  document.getElementById('select-all').checked = false;
+  document.getElementById('batch-bar').classList.remove('show');
+}
+
+const STATUS_LABELS = {'正常':'启用','维护中':'维护中','波动':'波动','暂停':'波动','禁用':'禁用'};
+function batchStatus(status) {
+  const names = [...document.querySelectorAll('.ch-cb:checked')].map(c => c.dataset.name);
+  if (!names.length) return;
+  const label = STATUS_LABELS[status] || status;
+  confirmAction('确认将选中的 '+names.length+' 个通道（代收+代付）设置为「'+label+'」？', { danger:status==='禁用', okText:'确认'+label })
+    .then(async function(ok) {
+      if (!ok) return;
+      try {
+        const r = await fetch('/api/batch-channels', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ names, status })
+        });
+        const d = await r.json();
+        if (r.ok && d.ok) {
+          showToast('已批量'+label+' '+d.updated.length+' 个通道', 'ok');
+          setTimeout(() => location.reload(), 800);
+        } else { showToast(d.detail||'操作失败', 'err'); }
+      } catch(e) { showToast('网络错误', 'err'); }
+    });
+}
+
+/* ═══════════════════════════════════════
+   Unsaved changes warning
+   ═══════════════════════════════════════ */
+window.addEventListener('beforeunload', function(e) {
+  if (dirty.size > 0) { e.preventDefault(); e.returnValue = ''; }
+});
+
+/* ═══════════════════════════════════════
+   Init
+   ═══════════════════════════════════════ */
+document.addEventListener('DOMContentLoaded', function() {
+  document.querySelectorAll('.ch-card').forEach(function(card) {
+    const name = card.dataset.name;
+    if (name) checkDiff(name);
+  });
+});
+</script>
+{% endblock %}

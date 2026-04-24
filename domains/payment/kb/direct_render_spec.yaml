@@ -1,0 +1,32 @@
+# Payment domain direct-render specification
+# Defines how KB entries with reply_mode=direct render their templates
+# using live data from exchange_rates.yaml
+
+placeholders:
+  channel:
+    source: "exchange_rates.yaml"
+    section: "channels"
+    fields:
+      channel_key: "key"
+      channel_display_name: "display_name"
+      channel_fee_rate: "fee_rate"
+      channel_fee_description: "fee_description"
+      channel_status: "status"
+      channel_status_description: "status_description"
+      channel_limits: "limits.description"
+      channel_processing_time: "processing_time"
+      channel_success_rate: "success_rate"
+      channel_notes: "notes"
+
+  exchange_rate:
+    source: "exchange_rates.yaml"
+    section: "exchange_rates"
+    fields:
+      usd_to_pkr: "usd_to_pkr"
+      pkr_to_usd: "pkr_to_usd"
+
+branch_status_mapping:
+  maintenance: ["维护", "暂停", "停用"]
+  volatile: ["波动", "不稳定"]
+  normal: ["正常", "稳定"]
+  unknown: []

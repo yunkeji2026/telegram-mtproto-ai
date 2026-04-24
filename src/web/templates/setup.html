@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>初始化设置 · {{ site_name|default('智控王客户转化聊天系统') }}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"></noscript>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#eef1f8;--card:#fff;--t:#111827;--t2:#6b7280;--bd:rgba(0,0,0,.09);
+  --p:#5b7cf6;--ps:rgba(91,124,246,.12);--g:linear-gradient(135deg,#5b7cf6,#8b5cf6);
+  --input:#f4f6fc;--red:#ef4444;--rs:rgba(239,68,68,.1);
+  --green:#10b981;--gs:rgba(16,185,129,.1);--amber:#f59e0b;
+  --r:12px;
+}
+[data-theme="dark"]{
+  --bg:#080c14;--card:rgba(15,21,36,.9);--t:#e2e8f0;--t2:#94a3b8;--bd:rgba(255,255,255,.07);
+  --p:#6b8af8;--ps:rgba(107,138,248,.15);--input:rgba(20,28,46,.8);
+}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t);min-height:100vh;
+     display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
+     padding:2rem 1rem 3rem;position:relative;overflow-x:hidden;transition:background .3s}
+/* orbs */
+.orb{position:fixed;border-radius:50%;filter:blur(80px);opacity:.3;pointer-events:none;animation:float linear infinite}
+.orb1{width:520px;height:520px;background:radial-gradient(circle,#5b7cf6,transparent 70%);top:-180px;left:-180px;animation-duration:22s}
+.orb2{width:440px;height:440px;background:radial-gradient(circle,#8b5cf6,transparent 70%);bottom:-160px;right:-140px;animation-duration:18s;animation-direction:reverse}
+@keyframes float{0%{transform:translate(0,0)}33%{transform:translate(30px,-20px)}66%{transform:translate(-20px,25px)}100%{transform:translate(0,0)}}
+/* setup card */
+.setup-card{position:relative;z-index:10;background:var(--card);border:1px solid var(--bd);border-radius:20px;
+  padding:2.4rem 2.6rem;width:500px;max-width:95vw;
+  box-shadow:0 20px 60px rgba(0,0,0,.12);animation:up .5s cubic-bezier(.4,0,.2,1)}
+[data-theme="dark"] .setup-card{backdrop-filter:blur(20px);background:rgba(14,20,35,.88);box-shadow:0 24px 64px rgba(0,0,0,.7)}
+@keyframes up{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
+/* logo */
+.logo{display:flex;align-items:center;gap:.75rem;margin-bottom:2rem}
+.logo-icon{width:44px;height:44px;background:var(--g);border-radius:13px;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 18px rgba(91,124,246,.4);animation:breathe 3s ease-in-out infinite;flex-shrink:0}
+@keyframes breathe{0%,100%{box-shadow:0 6px 18px rgba(91,124,246,.4)}50%{box-shadow:0 8px 28px rgba(91,124,246,.65)}}
+.logo-icon svg{width:22px;height:22px;color:#fff}
+.logo-text h1{font-size:1.1rem;font-weight:800;line-height:1.2}
+.logo-text p{font-size:.78rem;color:var(--t2);margin-top:.15rem}
+/* step indicator */
+.steps{display:flex;gap:0;margin-bottom:2rem;position:relative}
+.steps::before{content:'';position:absolute;top:14px;left:14px;right:14px;height:2px;background:var(--bd);z-index:0}
+.step{display:flex;flex-direction:column;align-items:center;flex:1;position:relative;z-index:1}
+.step-dot{width:28px;height:28px;border-radius:50%;background:var(--bd);border:2px solid var(--bd);
+  display:flex;align-items:center;justify-content:center;font-size:.72rem;font-weight:700;color:var(--t2);
+  transition:all .3s;margin-bottom:.4rem}
+.step.active .step-dot{background:var(--p);border-color:var(--p);color:#fff;box-shadow:0 0 0 4px var(--ps)}
+.step.done .step-dot{background:var(--green);border-color:var(--green);color:#fff}
+.step-lbl{font-size:.7rem;color:var(--t3,#9ca3af);font-weight:500;text-align:center}
+.step.active .step-lbl{color:var(--p)}
+/* section */
+.section{margin-bottom:1.6rem}
+.section-hd{display:flex;align-items:center;gap:.6rem;margin-bottom:1rem;padding-bottom:.6rem;border-bottom:1px solid var(--bd)}
+.section-num{width:24px;height:24px;border-radius:50%;background:var(--g);color:#fff;font-size:.72rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.section-title{font-weight:700;font-size:.88rem}
+.section-sub{font-size:.75rem;color:var(--t2);margin-left:auto}
+/* form fields */
+.f-grp{margin-bottom:.9rem}
+.f-lbl{display:block;font-size:.78rem;font-weight:600;color:var(--t2);margin-bottom:.3rem}
+.f-inp{width:100%;padding:.55rem .85rem;border:1.5px solid var(--bd);border-radius:10px;
+  font-size:.87rem;font-family:inherit;background:var(--input);color:var(--t);outline:none;transition:all .2s}
+.f-inp:focus{border-color:var(--p);box-shadow:0 0 0 3px var(--ps)}
+.f-inp:disabled{opacity:.5;cursor:not-allowed}
+.f-hint{font-size:.72rem;color:var(--t2);margin-top:.3rem}
+.f-row{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+/* password strength */
+.pw-strength{height:3px;border-radius:2px;background:var(--bd);margin-top:.35rem;overflow:hidden}
+.pw-strength-bar{height:100%;border-radius:2px;transition:width .3s,background .3s;width:0}
+/* optional badge */
+.opt-badge{font-size:.65rem;padding:.1rem .45rem;border-radius:10px;background:var(--bd);color:var(--t2);font-weight:600;vertical-align:middle}
+/* test btn */
+.test-btn{margin-top:.4rem;font-size:.78rem;padding:.35rem .8rem;border-radius:8px;
+  background:var(--ps);color:var(--p);border:1px solid var(--p);cursor:pointer;transition:.2s;font-family:inherit}
+.test-btn:hover{background:var(--p);color:#fff}
+.test-result{font-size:.78rem;margin-top:.4rem;padding:.35rem .6rem;border-radius:7px;display:none}
+.test-result.ok{background:var(--gs);color:var(--green)}
+.test-result.err{background:var(--rs);color:var(--red)}
+/* alert */
+.alert{padding:.7rem .9rem;border-radius:9px;font-size:.83rem;font-weight:500;margin-bottom:.9rem;display:flex;align-items:center;gap:.5rem}
+.alert.err{background:var(--rs);color:var(--red);border:1px solid rgba(239,68,68,.2)}
+.alert.ok{background:var(--gs);color:var(--green);border:1px solid rgba(16,185,129,.2)}
+/* submit */
+.btn-submit{width:100%;padding:.7rem;background:var(--g);color:#fff;border:none;border-radius:10px;
+  font-size:.95rem;font-weight:700;font-family:inherit;cursor:pointer;transition:all .2s;
+  box-shadow:0 4px 14px rgba(91,124,246,.3);margin-top:.4rem}
+.btn-submit:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(91,124,246,.45)}
+.btn-submit:disabled{opacity:.6;cursor:not-allowed;transform:none}
+/* skip link */
+.skip-lbl{text-align:center;margin-top:.8rem;font-size:.78rem;color:var(--t2)}
+.skip-lbl a{color:var(--p);text-decoration:none}
+/* success screen */
+#done-screen{display:none;text-align:center;padding:1rem 0}
+.done-icon{width:60px;height:60px;background:var(--gs);border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 1rem;font-size:1.8rem}
+.done-title{font-size:1.15rem;font-weight:800;margin-bottom:.4rem}
+.done-sub{font-size:.83rem;color:var(--t2);margin-bottom:1.2rem}
+/* footer */
+.setup-foot{text-align:center;margin-top:1rem}
+.th-link{background:none;border:none;cursor:pointer;font-size:.78rem;color:var(--t2);font-family:inherit;transition:.2s;padding:.3rem .5rem;border-radius:6px}
+.th-link:hover{color:var(--p);background:var(--ps)}
+</style>
+</head>
+<body>
+<div class="orb orb1"></div>
+<div class="orb orb2"></div>
+
+<div class="setup-card" id="setup-card">
+  <!-- Logo -->
+  <div class="logo">
+    <div class="logo-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+    </div>
+    <div class="logo-text">
+      <h1>{{ site_name|default('智控王客户转化聊天系统') }}</h1>
+      <p>首次使用 · 初始化向导</p>
+    </div>
+  </div>
+
+  <!-- Step indicator -->
+  <div class="steps">
+    <div class="step active" id="step1">
+      <div class="step-dot">1</div>
+      <div class="step-lbl">账户</div>
+    </div>
+    <div class="step" id="step2">
+      <div class="step-dot">2</div>
+      <div class="step-lbl">AI 配置</div>
+    </div>
+    <div class="step" id="step3">
+      <div class="step-dot">3</div>
+      <div class="step-lbl">完成</div>
+    </div>
+  </div>
+
+  <!-- Alert -->
+  <div class="alert err" id="alert-box" style="display:none"></div>
+
+  <!-- Setup form -->
+  <form id="setup-form" onsubmit="doSetup(event)">
+
+    <!-- Section 1: 账户设置 -->
+    <div class="section" id="sec1">
+      <div class="section-hd">
+        <div class="section-num">1</div>
+        <div class="section-title">创建管理员账户</div>
+      </div>
+
+      <div class="f-grp">
+        <label class="f-lbl">用户名</label>
+        <input class="f-inp" type="text" id="f-username" placeholder="admin" autocomplete="username" required>
+      </div>
+
+      <div class="f-row">
+        <div class="f-grp">
+          <label class="f-lbl">密码</label>
+          <input class="f-inp" type="password" id="f-password" placeholder="至少 6 位"
+                 autocomplete="new-password" oninput="checkPwStrength()">
+          <div class="pw-strength"><div class="pw-strength-bar" id="pw-bar"></div></div>
+        </div>
+        <div class="f-grp">
+          <label class="f-lbl">确认密码</label>
+          <input class="f-inp" type="password" id="f-confirm" placeholder="再次输入"
+                 autocomplete="new-password">
+        </div>
+      </div>
+    </div>
+
+    <!-- Section 2: AI 配置 -->
+    <div class="section" id="sec2">
+      <div class="section-hd">
+        <div class="section-num">2</div>
+        <div class="section-title">AI 接口配置</div>
+        <span class="section-sub opt-badge">可选</span>
+      </div>
+      <div style="font-size:.78rem;color:var(--t2);margin-bottom:.85rem;line-height:1.5">
+        配置 AI API 后，知识库语义搜索和自动翻译功能将自动启用。稍后也可在配置文件中修改。
+      </div>
+
+      <div class="f-grp">
+        <label class="f-lbl">API Key</label>
+        <input class="f-inp" type="password" id="f-apikey"
+               placeholder="sk-…"
+               value="{{ ai_cfg.get('api_key','') if ai_cfg else '' }}">
+      </div>
+
+      <div class="f-row">
+        <div class="f-grp">
+          <label class="f-lbl">Base URL</label>
+          <input class="f-inp" type="text" id="f-baseurl"
+                 placeholder="https://api.deepseek.com"
+                 value="{{ ai_cfg.get('base_url','') if ai_cfg else '' }}">
+        </div>
+        <div class="f-grp">
+          <label class="f-lbl">模型</label>
+          <input class="f-inp" type="text" id="f-model"
+                 placeholder="deepseek-chat"
+                 value="{{ ai_cfg.get('model','') if ai_cfg else '' }}">
+        </div>
+      </div>
+
+      <button type="button" class="test-btn" onclick="testApi()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12" style="margin-right:.3rem"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        测试连接
+      </button>
+      <div class="test-result" id="test-result"></div>
+    </div>
+
+    <button type="submit" class="btn-submit" id="submit-btn">完成初始化</button>
+  </form>
+
+  <!-- 成功界面 -->
+  <div id="done-screen">
+    <div class="done-icon">&#x2705;</div>
+    <div class="done-title">初始化完成！</div>
+    <div class="done-sub" id="done-msg">账户已创建，正在跳转到登录页…</div>
+    <a href="/login" class="btn-submit" style="text-decoration:none;display:block;text-align:center;margin-top:.5rem">前往登录</a>
+  </div>
+
+  <div class="setup-foot">
+    <button class="th-link" onclick="toggleTheme()">🌓 深色 / 浅色</button>
+  </div>
+</div>
+
+<script>
+(function(){const s=localStorage.getItem('theme');if(s)document.documentElement.setAttribute('data-theme',s);else if(window.matchMedia?.('(prefers-color-scheme:dark)').matches)document.documentElement.setAttribute('data-theme','dark')})();
+
+function toggleTheme(){const h=document.documentElement,n=h.getAttribute('data-theme')==='dark'?'light':'dark';h.setAttribute('data-theme',n);localStorage.setItem('theme',n)}
+
+// ── 密码强度 ─────────────────────────────────
+function checkPwStrength(){
+  const pw = document.getElementById('f-password').value;
+  const bar = document.getElementById('pw-bar');
+  let score = 0;
+  if(pw.length >= 6) score++;
+  if(pw.length >= 10) score++;
+  if(/[A-Z]/.test(pw)) score++;
+  if(/[0-9]/.test(pw)) score++;
+  if(/[^A-Za-z0-9]/.test(pw)) score++;
+  const pct = [0,20,40,60,80,100][score];
+  const col = ['#ef4444','#ef4444','#f59e0b','#f59e0b','#10b981','#10b981'][score];
+  bar.style.width  = pct + '%';
+  bar.style.background = col;
+}
+
+// ── 步骤指示器 ───────────────────────────────
+function setStep(n){
+  for(let i=1;i<=3;i++){
+    const el=document.getElementById('step'+i);
+    el.className='step'+(i<n?' done':i===n?' active':'');
+  }
+}
+
+// ── API 测试 ──────────────────────────────────
+async function testApi(){
+  const key    = document.getElementById('f-apikey').value.trim();
+  const base   = document.getElementById('f-baseurl').value.trim();
+  const model  = document.getElementById('f-model').value.trim();
+  const resEl  = document.getElementById('test-result');
+  if(!key){ resEl.className='test-result err'; resEl.style.display=''; resEl.textContent='请先填写 API Key'; return; }
+  resEl.className='test-result'; resEl.style.display=''; resEl.textContent='测试中…';
+  try{
+    const r = await fetch('/api/setup/test-ai', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({api_key:key, base_url:base||undefined, model:model||undefined}),
+    });
+    const d = await r.json();
+    resEl.className = 'test-result ' + (d.ok ? 'ok' : 'err');
+    resEl.textContent = (d.ok ? '✓ ' : '✗ ') + d.msg;
+    setStep(d.ok ? 2 : 1);
+  } catch(e){
+    resEl.className='test-result err'; resEl.textContent='请求失败：'+e.message;
+  }
+}
+
+// ── 提交 ─────────────────────────────────────
+async function doSetup(evt){
+  evt.preventDefault();
+  const alertEl = document.getElementById('alert-box');
+  const btn = document.getElementById('submit-btn');
+  alertEl.style.display = 'none';
+
+  const username = document.getElementById('f-username').value.trim();
+  const password = document.getElementById('f-password').value;
+  const confirm  = document.getElementById('f-confirm').value;
+
+  if(!username){ showAlert('请填写用户名'); return; }
+  if(password.length < 6){ showAlert('密码至少 6 位'); return; }
+  if(password !== confirm){ showAlert('两次输入的密码不一致'); return; }
+
+  btn.disabled = true;
+  btn.textContent = '初始化中…';
+
+  try{
+    const r = await fetch('/api/setup',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        username,
+        password,
+        confirm,
+        api_key:   document.getElementById('f-apikey').value.trim(),
+        base_url:  document.getElementById('f-baseurl').value.trim(),
+        model:     document.getElementById('f-model').value.trim(),
+      }),
+    });
+    const d = await r.json();
+    if(!r.ok){ showAlert(d.detail || '初始化失败'); btn.disabled=false; btn.textContent='完成初始化'; return; }
+    // Success
+    setStep(3);
+    document.getElementById('setup-form').style.display='none';
+    document.getElementById('done-screen').style.display='block';
+    document.getElementById('done-msg').textContent = `账户「${d.username}」已创建，3 秒后跳转…`;
+    setTimeout(()=>{ location.href='/login'; }, 3000);
+  } catch(e){
+    showAlert('请求失败：'+e.message);
+    btn.disabled = false;
+    btn.textContent = '完成初始化';
+  }
+}
+
+function showAlert(msg){
+  const el = document.getElementById('alert-box');
+  el.textContent = msg;
+  el.style.display = 'flex';
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,69 @@
+# 客服额度回复规则配置（与《客服额度回复规则最终方案》一致）
+# 运营可通过修改本文件更新群名单与额度；支持热更新时无需重启进程。
+# 也可通过对话命令修改（见 config.yaml 中 telegram.quota_config_commands；用对话命令写回后本文件可能被重新格式化，注释可能减少）。
+# 特殊客户群名必须与 Telegram 群标题完全一致（空格、大小写、符号）；后续增删群只改 special_groups 即可。
+
+# 通道定义：names 为触发匹配用别名（不区分大小写），default_range 普通客户，special_range 仅 EP 特殊客户
+channels:
+  ep:
+    names: ["EP", "ep", "EasyPaisa"]
+    default_range: "100-20000"      # 普通客户：100 – 20,000
+    special_range: "100-100000"      # 特殊客户：100 – 100,000
+  jc:
+    names: ["JC", "jc", "ja", "jz", "JazzCash"]
+    default_range: "100-100000"     # 固定 100 – 100,000
+
+# 额度问询触发词（包含匹配、不区分大小写）
+quota_keywords:
+  - "额度"
+  - "限额"
+  - "能过多少"
+  - "最大多少"
+  - "多少额度"
+  - "额度多少"
+  - "EP额度"
+  - "JC额度"
+  - "ep额度"
+  - "jc额度"
+
+# 特殊客户群名列表（高额度 EP：该群内问 EP 额度回复 special_range）
+# 以下为客服主管确认的 12 个群名，与 Telegram 群标题完全一致
+special_groups:
+  - "GXP-巴基斯坦-p999-10221-jc2.8+1.5 ep4.5+1.5"
+  - "GXP-巴基斯坦-z777-10121 jc2.8+1.5 ep4.5+1.5"
+  - "GXP-巴基斯坦-c444-10125 jc2.8+1.5 ep 4.5+1.5"
+  - "GXP-巴基斯坦-r789-10169 jc2.8+1.5 ep4.5+1.5"
+  - "GXP-巴基斯坦-666P-10198 jc 2.8+1.5 ep 4.5+1.5"
+  - "GXP-巴基斯坦-x666-10110 jc2.8+1.5ep 4.5+1.5"
+  - "GXP-巴基斯坦-h555 -10108 jc2.8+1.5 ep4.5+1.5"
+  - "GXP-巴基斯坦-q789-10197 jc2.8+1.5 ep4.5+1.5"
+  - "GXP-巴基斯坦-y999-10222-jc2.8+1.5 ep4.5+1.5"
+  - "GXP-巴基斯坦-666w-10254 jc2.8+1.5 ep4.5+1.5"
+  - "GXP-巴基斯坦-y888-10165 jc2.8+1.5 ep 4.5+1.5"
+  - "GXP-巴基斯坦-666D-10153 jc2.8+2 ep4.5+1.5"
+
+# 黑名单群名 → 各通道定制回复（精确匹配群名）
+# 当前无黑名单群；若后续需要，按下列格式添加：群名: { ep: "EP话术", jc: "JC话术" }
+blacklist_groups: {}
+# 示例（新增时取消注释并替换群名与话术）：
+# XX受限群:
+#   ep: "当前EP渠道受限，请使用其他渠道或联系客服处理。"
+#   jc: "当前JC额度：50 – 5,000，请以实际提交为准。"
+
+# 额度说明补充（可选）：追加在额度回复末尾，用于说明用尽恢复、每日限额变化等；额度或规则变更时只改此处即可
+quota_note_supplement: |
+  额度用尽后：特殊EP会恢复为100–20,000；普通额度100–20,000用尽后为100–3,900。交易限额根据当日交易量会有变化，具体以实际提交为准。
+
+# 标准回复模板（可微调话术）
+templates:
+  # 有指定通道时：{channel_name} 如 EP/JC，{range} 如 100 – 20,000
+  line: "当前额度如下：\n{channel_name}：{range}\n\n如有特殊情况需补充说明：\n当前通道额度根据实时情况会有调整，请以实际提交为准。"
+  # 未指定通道时引导（同时覆盖「额度/限额」「代收代付限额」表述，与商户常问一致）
+  ask_channel: "请问您需要查询哪个通道的额度/限额（代收代付限额）？目前支持的通道有：EP, JC\n请回复具体通道代号获取详细信息。"
+  # 英文用户粗判命中时使用
+  en:
+    line: "Current limits:\n{channel_name}: {range}\n\nNote: limits may change in real time; please refer to actual submission."
+    line_only: "{channel_name}: {range}"
+    ask_channel: "Which channel do you need? Supported: EP, JC. Reply with the channel code for details."
+  footer_zh: "\n\n如有特殊情况需补充说明：\n当前通道额度根据实时情况会有调整，请以实际提交为准。"
+  footer_en: "\n\nNote: limits may change in real time; please refer to actual submission."

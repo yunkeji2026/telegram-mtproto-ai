@@ -1,0 +1,292 @@
+{% extends "base.html" %}
+{% block title %}智能学习 · {{ site_name|default('智控王客户转化聊天系统') }}{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <div>
+    <h1 class="page-title">智能学习</h1>
+    <p class="page-desc">自动收集未命中问题 → AI 生成知识草稿 → 人工审核入库</p>
+  </div>
+  <div style="display:flex;gap:.5rem">
+    <button class="btn btn-outline" onclick="loadDrafts()" data-help="btn_refresh">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+      刷新
+    </button>
+    <button class="btn btn-primary pro-only" onclick="runLearning()" id="btn-run">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
+      立即学习
+    </button>
+  </div>
+</div>
+
+{% if ui_mode == 'simple' %}
+<div class="simple-guide" style="background:linear-gradient(135deg,rgba(139,92,246,.06),rgba(91,124,246,.06));border:1px solid rgba(139,92,246,.15);border-radius:10px;padding:.7rem 1rem;margin-bottom:.8rem;font-size:.82rem;color:var(--t2);display:flex;align-items:flex-start;gap:.6rem">
+  <span style="font-size:1.1rem;flex-shrink:0;margin-top:.1rem">🧠</span>
+  <div>
+    <strong style="color:var(--t);font-size:.85rem">操作说明</strong>
+    <div style="margin-top:.25rem;line-height:1.6">AI 自动分析用户未命中的问题并生成知识草稿。请审核每条草稿：点击 <strong style="color:var(--green)">通过入库</strong> 将其加入知识库，或点击 <strong style="color:var(--red)">拒绝</strong> 丢弃。也可先 <strong>编辑</strong> 再通过。</div>
+    <button onclick="this.closest('.simple-guide').style.display='none';localStorage.setItem('_guide_learner','1')" style="background:none;border:none;color:var(--p);cursor:pointer;font-size:.78rem;font-weight:600;padding:0;margin-top:.3rem">知道了，不再显示</button>
+  </div>
+</div>
+<script>if(localStorage.getItem('_guide_learner')==='1')document.querySelector('.simple-guide').style.display='none';</script>
+{% endif %}
+<!-- Stats Cards -->
+<div class="row g-3 mb-4" id="stats-row">
+  <div class="col-4">
+    <div class="card p-3 text-center">
+      <div class="stat-value" id="stat-pending" style="font-size:2rem;font-weight:800;color:var(--amber)">-</div>
+      <div class="text-muted" style="font-size:.82rem">待审核</div>
+    </div>
+  </div>
+  <div class="col-4 pro-only">
+    <div class="card p-3 text-center">
+      <div class="stat-value" id="stat-approved" style="font-size:2rem;font-weight:800;color:var(--green)">-</div>
+      <div class="text-muted" style="font-size:.82rem">已通过</div>
+    </div>
+  </div>
+  <div class="col-4 pro-only">
+    <div class="card p-3 text-center">
+      <div class="stat-value" id="stat-rejected" style="font-size:2rem;font-weight:800;color:var(--red)">-</div>
+      <div class="text-muted" style="font-size:.82rem">已拒绝</div>
+    </div>
+  </div>
+</div>
+
+<!-- Filter Tabs -->
+<div class="card mb-4">
+  <div style="display:flex;align-items:center;gap:.5rem;padding:.75rem 1rem;border-bottom:1px solid var(--bd)">
+    <button class="btn btn-sm active" onclick="filterDrafts('pending',this)" data-filter="pending">待审核</button>
+    <button class="btn btn-sm pro-only" onclick="filterDrafts('approved',this)" data-filter="approved">已通过</button>
+    <button class="btn btn-sm pro-only" onclick="filterDrafts('rejected',this)" data-filter="rejected">已拒绝</button>
+    <button class="btn btn-sm pro-only" onclick="filterDrafts('all',this)" data-filter="all">全部</button>
+    <div style="flex:1"></div>
+    <button class="btn btn-sm btn-green" onclick="approveAll()" id="btn-approve-all" style="display:none">
+      全部通过
+    </button>
+  </div>
+
+  <div id="drafts-container" style="min-height:200px">
+    <div style="padding:3rem;text-align:center;color:var(--t3)">加载中...</div>
+  </div>
+</div>
+
+<!-- Edit Modal -->
+<div id="edit-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.5);backdrop-filter:blur(4px)">
+  <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:min(600px,90vw);max-height:80vh;overflow-y:auto;background:var(--card);border-radius:var(--r-lg);box-shadow:var(--s2);padding:1.5rem">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+      <h3 style="margin:0;font-size:1.1rem">编辑草稿</h3>
+      <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;font-size:1.3rem;color:var(--t3)">&times;</button>
+    </div>
+    <input type="hidden" id="edit-id">
+    <div class="form-group" style="margin-bottom:.75rem">
+      <label style="font-size:.82rem;font-weight:600;margin-bottom:.3rem;display:block">原始问题</label>
+      <div id="edit-query" style="padding:.5rem .75rem;background:var(--input);border-radius:var(--r-sm);color:var(--t2);font-size:.88rem"></div>
+    </div>
+    <div class="form-group" style="margin-bottom:.75rem">
+      <label style="font-size:.82rem;font-weight:600;margin-bottom:.3rem;display:block">分类</label>
+      <input type="text" id="edit-category" class="form-input" style="width:100%;padding:.45rem .75rem;border:1px solid var(--bd);border-radius:var(--r-sm);background:var(--input)">
+    </div>
+    <div class="form-group" style="margin-bottom:.75rem">
+      <label style="font-size:.82rem;font-weight:600;margin-bottom:.3rem;display:block">标题</label>
+      <input type="text" id="edit-title" class="form-input" style="width:100%;padding:.45rem .75rem;border:1px solid var(--bd);border-radius:var(--r-sm);background:var(--input)">
+    </div>
+    <div class="form-group" style="margin-bottom:.75rem">
+      <label style="font-size:.82rem;font-weight:600;margin-bottom:.3rem;display:block">触发词（逗号分隔）</label>
+      <input type="text" id="edit-triggers" class="form-input" style="width:100%;padding:.45rem .75rem;border:1px solid var(--bd);border-radius:var(--r-sm);background:var(--input)">
+    </div>
+    <div class="form-group" style="margin-bottom:1rem">
+      <label style="font-size:.82rem;font-weight:600;margin-bottom:.3rem;display:block">建议回复</label>
+      <textarea id="edit-reply" rows="4" style="width:100%;padding:.45rem .75rem;border:1px solid var(--bd);border-radius:var(--r-sm);background:var(--input);resize:vertical;font-family:inherit"></textarea>
+    </div>
+    <div style="display:flex;gap:.5rem;justify-content:flex-end">
+      <button class="btn btn-outline" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="saveDraft()">保存修改</button>
+    </div>
+  </div>
+</div>
+
+<style>
+.row{display:flex;gap:.75rem;flex-wrap:wrap}
+.col-4{flex:1;min-width:120px}
+.draft-card{padding:1rem;border-bottom:1px solid var(--bd);transition:background .15s}
+.draft-card:hover{background:var(--input)}
+.draft-card:last-child{border-bottom:none}
+.draft-header{display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem}
+.draft-source{font-size:.7rem;padding:.15rem .45rem;border-radius:4px;font-weight:600}
+.source-miss{background:var(--rs);color:var(--red)}
+.source-negative_feedback{background:var(--as);color:var(--amber)}
+.source-weak_hit{background:var(--prs);color:var(--purple)}
+.draft-query{font-weight:600;font-size:.92rem;flex:1}
+.draft-count{font-size:.75rem;color:var(--t3)}
+.draft-body{margin:.4rem 0;font-size:.85rem;color:var(--t2)}
+.draft-ai{font-style:italic;color:var(--t3);font-size:.78rem;margin-top:.3rem}
+.draft-actions{display:flex;gap:.4rem;margin-top:.5rem}
+.btn-sm{font-size:.78rem;padding:.3rem .65rem;border-radius:6px;border:1px solid var(--bd);background:var(--card);color:var(--t);cursor:pointer;transition:.15s;font-weight:500}
+.btn-sm:hover{border-color:var(--p);color:var(--p)}
+.btn-sm.active{background:var(--p);color:#fff;border-color:var(--p)}
+.btn-green{background:var(--green)!important;color:#fff!important;border-color:var(--green)!important}
+.btn-green:hover{opacity:.85}
+.btn-red{background:none;color:var(--red);border-color:var(--red)}
+.btn-red:hover{background:var(--rs)}
+.draft-title{font-size:.85rem;margin-bottom:.2rem}
+.draft-title b{color:var(--p)}
+.draft-triggers{font-size:.78rem;color:var(--t3)}
+.draft-triggers span{background:var(--ps);color:var(--p);padding:.1rem .4rem;border-radius:4px;margin-right:.25rem;font-size:.72rem}
+.draft-reply{background:var(--input);padding:.5rem .75rem;border-radius:var(--r-sm);font-size:.82rem;margin-top:.4rem;border-left:3px solid var(--p);line-height:1.5}
+.status-badge{font-size:.7rem;padding:.15rem .45rem;border-radius:4px;font-weight:600}
+.status-approved{background:var(--gs);color:var(--green)}
+.status-rejected{background:var(--rs);color:var(--red)}
+.status-pending{background:var(--as);color:var(--amber)}
+.empty-state{padding:3rem;text-align:center;color:var(--t3)}
+.empty-state svg{width:48px;height:48px;margin-bottom:.75rem;opacity:.3}
+</style>
+
+<script>
+let currentFilter='pending';
+
+async function loadStats(){
+  try{
+    const r=await fetch('/api/learner/stats');
+    const d=await r.json();
+    document.getElementById('stat-pending').textContent=d.pending||0;
+    document.getElementById('stat-approved').textContent=d.approved||0;
+    document.getElementById('stat-rejected').textContent=d.rejected||0;
+    document.getElementById('btn-approve-all').style.display=(d.pending>0&&currentFilter==='pending')?'':'none';
+  }catch(e){}
+}
+
+async function loadDrafts(){
+  loadStats();
+  const c=document.getElementById('drafts-container');
+  c.innerHTML='<div style="padding:2rem;text-align:center;color:var(--t3)">加载中...</div>';
+  try{
+    const r=await fetch('/api/learner/drafts?status='+currentFilter);
+    const d=await r.json();
+    renderDrafts(d.drafts||[]);
+  }catch(e){
+    var _sm2=document.documentElement.getAttribute('data-ui-mode')==='simple';
+    c.innerHTML=_sm2?'<div class="empty-state"><p style="font-weight:600;color:var(--red)">加载失败</p><p style="font-size:.82rem;color:var(--t3);margin-top:.3rem">请点击「刷新」重试</p></div>':'<div class="empty-state">加载失败</div>';
+  }
+}
+
+function renderDrafts(drafts){
+  const c=document.getElementById('drafts-container');
+  if(!drafts.length){
+    var _sm=document.documentElement.getAttribute('data-ui-mode')==='simple';
+    const msgs={pending:_sm?'当前没有待审核的草稿，请稍后再来查看。':'暂无待审核草稿。点击「立即学习」让 AI 分析未命中问题并生成草稿。',
+                approved:'暂无已通过的草稿',rejected:'暂无已拒绝的草稿',all:'暂无草稿'};
+    c.innerHTML='<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg><p>'+(msgs[currentFilter]||msgs.all)+'</p></div>';
+    return;
+  }
+  const srcLabels={miss:'未命中',negative_feedback:'负反馈',weak_hit:'弱命中'};
+  let html='';
+  drafts.forEach(d=>{
+    const src=srcLabels[d.source]||d.source;
+    const triggers=(d.triggers||'').split(',').filter(Boolean).map(t=>'<span>'+t.trim()+'</span>').join('');
+    html+=`<div class="draft-card" data-id="${d.id}">
+      <div class="draft-header">
+        <span class="draft-source source-${d.source}">${src}</span>
+        <span class="draft-query">${esc(d.query)}</span>
+        <span class="draft-count">${d.hit_count}次</span>
+        ${d.status!=='pending'?'<span class="status-badge status-'+d.status+'">'+(d.status==='approved'?'已通过':'已拒绝')+'</span>':''}
+      </div>
+      <div class="draft-title"><b>${esc(d.title)}</b> · ${esc(d.category)}</div>
+      <div class="draft-triggers">${triggers}</div>
+      ${d.example_reply?'<div class="draft-reply">'+esc(d.example_reply)+'</div>':''}
+      ${d.ai_reasoning?'<div class="draft-ai">AI: '+esc(d.ai_reasoning)+'</div>':''}
+      <div class="draft-actions">
+        ${d.status==='pending'?`
+          <button class="btn-sm btn-green" onclick="approveDraft('${d.id}')">通过入库</button>
+          <button class="btn-sm btn-red" onclick="rejectDraft('${d.id}')">拒绝</button>
+          <button class="btn-sm" onclick="editDraft('${d.id}')">编辑</button>
+        `:''}
+      </div>
+    </div>`;
+  });
+  c.innerHTML=html;
+}
+
+function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+
+function filterDrafts(status,btn){
+  currentFilter=status;
+  document.querySelectorAll('[data-filter]').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  loadDrafts();
+}
+
+async function runLearning(){
+  const btn=document.getElementById('btn-run');
+  btn.disabled=true;btn.textContent='学习中...';
+  try{
+    const r=await fetch('/api/learner/run',{method:'POST'});
+    const d=await r.json();
+    if(typeof showToast==='function')showToast(`学习完成: 收集 ${d.collected} 条, 生成 ${d.generated} 条草稿, 保存 ${d.saved} 条`,'success');
+    loadDrafts();
+  }catch(e){
+    if(typeof showToast==='function')showToast('学习失败: '+e.message,'error');
+  }finally{
+    btn.disabled=false;btn.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg> 立即学习';
+  }
+}
+
+async function approveDraft(id){
+  if(!confirm('确认将此草稿入库为正式知识条目？'))return;
+  try{
+    await fetch('/api/learner/drafts/'+id+'/approve',{method:'POST'});
+    if(typeof showToast==='function')showToast('已通过入库','success');
+    loadDrafts();
+  }catch(e){if(typeof showToast==='function')showToast('操作失败','error')}
+}
+
+async function rejectDraft(id){
+  try{
+    await fetch('/api/learner/drafts/'+id+'/reject',{method:'POST'});
+    if(typeof showToast==='function')showToast('已拒绝','info');
+    loadDrafts();
+  }catch(e){}
+}
+
+async function approveAll(){
+  if(!confirm('确认将所有待审核草稿全部通过并入库？'))return;
+  try{
+    const r=await fetch('/api/learner/drafts/approve-all',{method:'POST'});
+    const d=await r.json();
+    if(typeof showToast==='function')showToast(`已批量通过 ${d.approved} 条`,'success');
+    loadDrafts();
+  }catch(e){}
+}
+
+function editDraft(id){
+  fetch('/api/learner/drafts/'+id).then(r=>r.json()).then(d=>{
+    document.getElementById('edit-id').value=d.id;
+    document.getElementById('edit-query').textContent=d.query;
+    document.getElementById('edit-category').value=d.category||'';
+    document.getElementById('edit-title').value=d.title||'';
+    document.getElementById('edit-triggers').value=d.triggers||'';
+    document.getElementById('edit-reply').value=d.example_reply||'';
+    document.getElementById('edit-modal').style.display='block';
+  });
+}
+
+function closeModal(){document.getElementById('edit-modal').style.display='none'}
+
+async function saveDraft(){
+  const id=document.getElementById('edit-id').value;
+  const body={
+    category:document.getElementById('edit-category').value,
+    title:document.getElementById('edit-title').value,
+    triggers:document.getElementById('edit-triggers').value,
+    example_reply:document.getElementById('edit-reply').value,
+  };
+  try{
+    await fetch('/api/learner/drafts/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(typeof showToast==='function')showToast('已保存','success');
+    closeModal();
+    loadDrafts();
+  }catch(e){if(typeof showToast==='function')showToast('保存失败','error')}
+}
+
+loadDrafts();
+</script>
+{% endblock %}

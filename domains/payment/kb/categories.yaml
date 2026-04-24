@@ -1,0 +1,35 @@
+# Payment domain KB categories
+# These map to the KB_CATEGORIES list in kb_store.py
+
+categories:
+  - name: "订单查询"
+    description: "订单状态、查单、交易号相关"
+    triggers: ["查单", "订单状态", "单号", "查询订单", "order", "order status"]
+
+  - name: "余额汇率"
+    description: "汇率查询、余额查询"
+    triggers: ["汇率", "余额", "exchange rate", "balance"]
+
+  - name: "通道状态"
+    description: "通道可用性、成功率、代收代付状态"
+    triggers: ["通道", "状态", "成功率", "代收", "代付", "channel", "status"]
+
+  - name: "退款投诉"
+    description: "退款申请、投诉处理"
+    triggers: ["退款", "投诉", "refund", "complaint"]
+
+  - name: "常规咨询"
+    description: "一般业务咨询"
+    triggers: ["帮助", "怎么用", "客服"]
+
+  - name: "系统指令"
+    description: "系统命令和自动化指令"
+    triggers: []
+
+  - name: "系统话术"
+    description: "话术模板和兜底回复"
+    triggers: []
+
+  - name: "其他"
+    description: "未分类问题"
+    triggers: []

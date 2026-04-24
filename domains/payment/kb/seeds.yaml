@@ -1,0 +1,75 @@
+# Payment domain KB seed data
+# Corresponds to SYSTEM_REPLY_SEEDS in kb_store.py
+
+system_reply_seeds:
+  - category: "系统话术"
+    title: "全局兜底话术"
+    template_key: "global_fallback"
+    reply_mode: "direct"
+    fallback_group: "global"
+    triggers: "[]"
+    example_reply_zh: |
+      在的，请您稍等一下～
+      ---
+      收到，马上为您处理。
+      ---
+      好的亲，稍等我看一下～
+      ---
+      您好，请稍等片刻～
+      ---
+      收到啦，这就帮您查看。
+
+  - category: "系统话术"
+    title: "问候兜底"
+    template_key: "greeting_fallback"
+    reply_mode: "direct"
+    fallback_group: "greeting"
+    triggers: "[]"
+    example_reply_zh: |
+      在的～有啥可以帮您的？
+      ---
+      亲，我们24小时竭诚为您服务，请把您的需求发给我。
+      ---
+      宝，有什么可以为您效劳呀，请把需求告诉我。
+
+  - category: "系统话术"
+    title: "订单查询兜底（无单号）"
+    template_key: "order_query_fallback"
+    reply_mode: "direct"
+    fallback_group: "order_query"
+    triggers: "[]"
+    example_reply_zh: "暂未看到订单信息，请发订单号或清晰付款截图，我帮您查。"
+
+  - category: "系统话术"
+    title: "订单查询兜底（有单号）"
+    template_key: "order_query_with_number_fallback"
+    reply_mode: "direct"
+    fallback_group: "order_query"
+    triggers: "[]"
+    template_vars: '["order_number"]'
+    example_reply_zh: |
+      已收到订单号 {order_number}，稍等我帮您核查。
+      ---
+      订单 {order_number} 已收到，马上为您查询～
+
+  - category: "系统话术"
+    title: "通道状态兜底"
+    template_key: "channel_status_fallback"
+    reply_mode: "direct"
+    fallback_group: "channel_status"
+    triggers: "[]"
+    example_reply_zh: |
+      目前各通道运行正常，具体以实际提交为准哈。
+      ---
+      通道状态正常，如有波动会及时通知您。
+
+  - category: "系统话术"
+    title: "投诉兜底"
+    template_key: "complaint_fallback"
+    reply_mode: "direct"
+    fallback_group: "complaint"
+    triggers: "[]"
+    example_reply_zh: |
+      非常抱歉给您带来了不好的体验，我马上帮您处理。
+      ---
+      您的反馈我已记录，会尽快跟进处理，请放心。

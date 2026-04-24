@@ -1,0 +1,9 @@
+# Payment domain i18n — English
+gxp_timeout: "Query timed out ({sec}s no response). Please try again.\nCommand: {cmd}"
+gxp_result_fail: "Query result: {text}"
+gxp_result_ok: "Query result:\n{text}"
+gxp_result_other: "GXP reply:\n{text}"
+batch_preview_title: "📋 Batch change preview — All channel rates\n"
+batch_confirm_hint: "Reply 'confirm batch' to execute, or ignore to cancel."
+batch_done: "Batch updated {n} channel rates"
+order_ask_intent: "Order #{order} received. What do you need?\n1. Check deposit order\n2. Check withdrawal order\n3. Callback deposit\n4. Callback withdrawal\nReply 1-4"

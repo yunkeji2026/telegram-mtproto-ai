@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI智能客服系统 · 客服培训演示</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+SC:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg0:#070a14;--bg1:#0f1629;--bg2:#151d35;
+  --glass:rgba(18,26,48,.72);--glass2:rgba(255,255,255,.06);
+  --bd:rgba(255,255,255,.1);--bd2:rgba(255,255,255,.16);
+  --p1:#6366f1;--p2:#8b5cf6;--cyan:#22d3ee;--mint:#34d399;
+  --g:linear-gradient(135deg,var(--p1),var(--p2));
+  --g2:linear-gradient(135deg,rgba(99,102,241,.4),rgba(139,92,246,.25));
+  --t:#f8fafc;--t2:#94a3b8;--t3:#64748b;
+  --ok:#34d399;--warn:#fbbf24;--bad:#fb7185;
+  --r:18px;--r2:14px;
+  --shadow:0 24px 80px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.06) inset;
+  --pad:clamp(1.25rem,4vw,2.75rem);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font-family:"Noto Sans SC","Inter",system-ui,sans-serif;
+  color:var(--t);
+  overflow:hidden;
+  background:
+    radial-gradient(1200px 600px at 10% -10%,rgba(99,102,241,.35),transparent 55%),
+    radial-gradient(900px 500px at 95% 10%,rgba(34,211,238,.12),transparent 50%),
+    radial-gradient(700px 400px at 50% 100%,rgba(139,92,246,.2),transparent 45%),
+    linear-gradient(165deg,var(--bg0),var(--bg1) 40%,#0a0e18);
+}
+/* 噪点叠层 */
+body::before{
+  content:"";position:fixed;inset:0;pointer-events:none;opacity:.035;z-index:0;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+.deck{height:100%;position:relative;z-index:1}
+.slide-wrap{
+  position:absolute;inset:0;padding:var(--pad);
+  display:none;align-items:center;justify-content:center;
+  padding-bottom:5.5rem;
+}
+.slide-wrap.active{display:flex;animation:slideEnter .45s cubic-bezier(.22,1,.36,1)}
+@keyframes slideEnter{from{opacity:0;filter:blur(4px)}to{opacity:1;filter:none}}
+.slide{
+  width:100%;max-width:1040px;
+  background:var(--glass);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  border:1px solid var(--bd);border-radius:24px;box-shadow:var(--shadow);
+  padding:clamp(1.5rem,3.5vw,2.35rem) clamp(1.35rem,3vw,2.5rem);
+  position:relative;overflow:hidden;
+}
+.slide::before{
+  content:"";position:absolute;top:0;left:0;right:0;height:3px;background:var(--g);opacity:.95;
+}
+.slide::after{
+  content:"";position:absolute;right:-80px;top:-80px;width:200px;height:200px;border-radius:50%;
+  background:radial-gradient(circle,rgba(99,102,241,.15),transparent 70%);pointer-events:none;
+}
+.chapter-strip{
+  position:absolute;left:0;top:0;bottom:0;width:6px;background:linear-gradient(180deg,var(--cyan),var(--p2));border-radius:24px 0 0 24px;opacity:.85;
+}
+.badge{
+  display:inline-flex;align-items:center;gap:.4rem;padding:.32rem .85rem;border-radius:999px;
+  font-size:.72rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;
+  background:var(--g2);color:#e0e7ff;border:1px solid rgba(99,102,241,.35);
+  box-shadow:0 0 20px rgba(99,102,241,.2);
+}
+h1{
+  font-size:clamp(1.65rem,4.2vw,2.45rem);font-weight:800;line-height:1.18;margin:.65rem 0 .55rem;
+  background:linear-gradient(120deg,#fff 0%,#c7d2fe 45%,#a5f3fc 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+}
+h1.solid{-webkit-text-fill-color:unset;background:none;color:var(--t)}
+.sub{color:var(--t2);font-size:clamp(.9rem,1.9vw,1.05rem);max-width:46rem;line-height:1.7;margin-top:.25rem}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(248px,1fr));gap:1rem;margin-top:1.15rem}
+.card{
+  background:linear-gradient(145deg,rgba(255,255,255,.07),rgba(255,255,255,.02));
+  border:1px solid var(--bd);border-radius:var(--r);padding:1.1rem 1.2rem;
+  transition:transform .2s,border-color .2s,box-shadow .2s;
+}
+.card:hover{transform:translateY(-3px);border-color:rgba(99,102,241,.4);box-shadow:0 12px 40px rgba(0,0,0,.25)}
+.card h3{font-size:.95rem;margin-bottom:.45rem;display:flex;align-items:center;gap:.5rem;color:var(--t)}
+.card p,.card li{font-size:.84rem;color:var(--t2);line-height:1.58}
+.card ul{margin:.45rem 0 0 1.05rem}
+.icon{
+  width:38px;height:38px;border-radius:12px;background:var(--g);
+  display:flex;align-items:center;justify-content:center;font-size:1.05rem;flex-shrink:0;
+  box-shadow:0 6px 20px rgba(99,102,241,.35);
+}
+.flow{display:flex;flex-wrap:wrap;align-items:center;gap:.45rem;margin-top:1rem;font-size:.8rem}
+.flow .step{
+  background:rgba(255,255,255,.06);border:1px solid var(--bd);padding:.5rem .9rem;border-radius:12px;font-weight:700;color:#e2e8f0;
+  transition:background .2s;
+}
+.flow .step:hover{background:rgba(99,102,241,.2);border-color:rgba(99,102,241,.35)}
+.flow .arr{color:var(--cyan);font-weight:900;font-size:.9rem}
+.lane{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:.75rem;margin-top:1rem}
+.lane .box{
+  border:1px solid rgba(34,211,238,.25);border-radius:var(--r);padding:1rem;font-size:.8rem;color:var(--t2);
+  background:rgba(34,211,238,.06);
+}
+.lane .box strong{display:block;color:var(--t);font-size:.85rem;margin-bottom:.4rem}
+table{width:100%;border-collapse:separate;border-spacing:0;margin-top:1rem;font-size:.82rem;border-radius:14px;overflow:hidden;border:1px solid var(--bd)}
+th,td{padding:.6rem .75rem;text-align:left}
+th{background:rgba(99,102,241,.22);color:#e0e7ff;font-weight:700}
+tr:nth-child(even) td{background:rgba(255,255,255,.02)}
+td{border-top:1px solid var(--bd)}
+.placeholder{
+  background:rgba(251,191,36,.12);border:1px solid rgba(251,191,36,.4);color:#fde68a;
+  padding:.15rem .5rem;border-radius:8px;font-weight:700;
+}
+.mermaid-note{font-size:.74rem;color:var(--t3);margin-top:.85rem;line-height:1.55}
+.check li{margin:.4rem 0;color:var(--t2);font-size:.84rem;line-height:1.5}
+.diagram{
+  font-family:"JetBrains Mono","Consolas",monospace;font-size:.68rem;line-height:1.5;
+  background:rgba(0,0,0,.4);border-radius:16px;padding:1.1rem;overflow:auto;border:1px solid var(--bd);
+  color:#cbd5e1;margin-top:.85rem;white-space:pre;box-shadow:inset 0 0 40px rgba(0,0,0,.25);
+}
+/* 入场动画 */
+.slide-wrap.active .slide > .badge{animation:pop .5s cubic-bezier(.34,1.56,.64,1) backwards}
+.slide-wrap.active .slide > h1{animation:pop .55s .06s cubic-bezier(.34,1.56,.64,1) backwards}
+.slide-wrap.active .slide > .sub{animation:fadeUp .5s .1s ease backwards}
+.slide-wrap.active .slide .grid2 .card{animation:fadeUp .5s ease backwards}
+.slide-wrap.active .slide .grid2 .card:nth-child(1){animation-delay:.14s}
+.slide-wrap.active .slide .grid2 .card:nth-child(2){animation-delay:.2s}
+.slide-wrap.active .slide .grid2 .card:nth-child(3){animation-delay:.26s}
+.slide-wrap.active .slide table{animation:fadeUp .55s .12s ease backwards}
+.slide-wrap.active .slide .flow{animation:fadeUp .5s .15s ease backwards}
+.slide-wrap.active .slide .diagram{animation:fadeUp .55s .12s ease backwards}
+@keyframes pop{from{opacity:0;transform:scale(.92) translateY(8px)}to{opacity:1;transform:none}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+/* 互动：可勾选 */
+.chk-list{list-style:none;margin:.85rem 0 0;padding:0}
+.chk-item{
+  display:flex;align-items:flex-start;gap:.65rem;padding:.65rem .85rem;margin-bottom:.5rem;border-radius:14px;
+  cursor:pointer;border:1px solid var(--bd);background:rgba(255,255,255,.04);transition:all .2s;font-size:.84rem;color:var(--t2);
+}
+.chk-item:hover{border-color:rgba(99,102,241,.45);background:rgba(99,102,241,.1)}
+.chk-item.done{border-color:rgba(52,211,153,.45);background:rgba(52,211,153,.1);color:var(--t)}
+.chk-item.done .chk-box{background:var(--ok);border-color:var(--ok)}
+.chk-item.done .chk-text{text-decoration:line-through;opacity:.75}
+.chk-box{
+  width:22px;height:22px;border-radius:7px;border:2px solid var(--t3);flex-shrink:0;margin-top:.1rem;
+  display:flex;align-items:center;justify-content:center;font-size:.7rem;font-weight:900;color:transparent;
+  transition:all .2s;
+}
+.chk-item.done .chk-box{color:#0f172a}
+/* 测验 */
+.quiz-q{font-weight:700;color:var(--t);margin:1rem 0 .5rem;font-size:.92rem}
+.quiz-btns{display:flex;flex-wrap:wrap;gap:.5rem;margin:.35rem 0 .75rem}
+.quiz-btn{
+  padding:.55rem 1.1rem;border-radius:12px;border:1px solid var(--bd);background:rgba(255,255,255,.06);
+  color:var(--t);font-weight:700;font-size:.82rem;cursor:pointer;font-family:inherit;transition:all .2s;
+}
+.quiz-btn:hover{background:rgba(99,102,241,.25);border-color:rgba(99,102,241,.5)}
+.quiz-reveal{
+  display:none;padding:.75rem 1rem;border-radius:12px;font-size:.82rem;line-height:1.55;margin-top:.35rem;
+  border:1px solid rgba(52,211,153,.4);background:rgba(52,211,153,.1);color:#a7f3d0;
+}
+.quiz-reveal.show{display:block;animation:fadeUp .35s ease}
+.quiz-reveal.bad{border-color:rgba(251,113,133,.45);background:rgba(251,113,133,.1);color:#fecdd3}
+/* XP 条 */
+.xp-wrap{margin-top:1rem}
+.xp-label{display:flex;justify-content:space-between;font-size:.72rem;color:var(--t3);margin-bottom:.35rem}
+.xp-bar{height:10px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden;border:1px solid var(--bd)}
+.xp-fill{height:100%;border-radius:999px;background:var(--g);width:6%;transition:width .45s cubic-bezier(.22,1,.36,1);box-shadow:0 0 16px rgba(99,102,241,.6)}
+/* 导航 */
+.progress{position:fixed;top:0;left:0;height:4px;background:var(--g);transition:width .35s cubic-bezier(.22,1,.36,1);z-index:100;box-shadow:0 0 12px rgba(99,102,241,.5)}
+.dots{
+  position:fixed;bottom:4.5rem;left:50%;transform:translateX(-50%);display:flex;gap:.35rem;z-index:90;
+  padding:.35rem .6rem;background:rgba(15,23,42,.65);backdrop-filter:blur(8px);border-radius:999px;border:1px solid var(--bd);
+  max-width:92vw;flex-wrap:wrap;justify-content:center;
+}
+.dot{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.2);cursor:pointer;transition:all .2s;border:none;padding:0}
+.dot:hover{background:rgba(255,255,255,.45);transform:scale(1.15)}
+.dot.on{background:var(--cyan);box-shadow:0 0 10px var(--cyan);transform:scale(1.2)}
+.nav{
+  position:fixed;bottom:1rem;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:.6rem;z-index:95;
+  background:rgba(15,23,42,.88);backdrop-filter:blur(12px);padding:.55rem 1rem 0.55rem 1.15rem;border-radius:999px;border:1px solid var(--bd2);
+  box-shadow:0 12px 40px rgba(0,0,0,.4);
+}
+.nav button{
+  background:var(--g);border:none;color:#fff;font-weight:800;padding:.5rem 1.15rem;border-radius:999px;cursor:pointer;font-size:.82rem;font-family:inherit;
+  transition:transform .15s,filter .15s;
+}
+.nav button:active{transform:scale(.96)}
+.nav button.secondary{background:rgba(255,255,255,.1);border:1px solid var(--bd)}
+.nav span{font-size:.74rem;color:var(--t2);min-width:5.5rem;text-align:center;font-weight:600;font-variant-numeric:tabular-nums}
+.hint-keys{position:fixed;top:.85rem;left:50%;transform:translateX(-50%);font-size:.68rem;color:var(--t3);z-index:90;white-space:nowrap}
+.footer-note{position:fixed;top:.85rem;right:1rem;font-size:.65rem;color:rgba(148,163,184,.55);z-index:90;max-width:140px;text-align:right;line-height:1.35}
+.celebrate{position:fixed;inset:0;pointer-events:none;z-index:200;display:none;align-items:center;justify-content:center}
+.celebrate.show{display:flex;animation:cele .8s ease forwards}
+@keyframes cele{0%{opacity:0}15%{opacity:1}100%{opacity:0}}
+.celebrate span{font-size:3rem;animation:float2 1s ease infinite;filter:drop-shadow(0 0 20px rgba(251,191,36,.6))}
+@keyframes float2{50%{transform:translateY(-12px)}}
+kbd{font-family:inherit;font-size:.68rem;padding:.12rem .35rem;border-radius:6px;background:rgba(255,255,255,.1);border:1px solid var(--bd)}
+</style>
+</head>
+<body>
+<div class="progress" id="prog" style="width:0%"></div>
+<p class="footer-note">内部培训 · 勿外传</p>
+<p class="hint-keys"><kbd>←</kbd> <kbd>→</kbd> 翻页 · <kbd>空格</kbd> 下一页 · 点击圆点跳转</p>
+
+<div class="deck" id="deck">
+
+<!-- 1 -->
+<div class="slide-wrap active" data-i="0"><div class="slide">
+  <div class="chapter-strip" aria-hidden="true"></div>
+  <span class="badge">第 1 章 · 欢迎</span>
+  <h1>AI智能客服系统</h1>
+  <p class="sub">本培训面向 <strong>接线客服、班组长、需要操作后台的同事</strong>。只讲「点哪里、为什么、常见坑」；界面默认 <strong>简洁模式</strong>。向下翻页开始闯关，进度条会跟着涨。</p>
+  <div class="xp-wrap"><div class="xp-label"><span>学习进度</span><span id="xp-pct">6%</span></div><div class="xp-bar"><div class="xp-fill" id="xp-fill"></div></div></div>
+  <div class="grid2">
+    <div class="card"><h3><span class="icon">📋</span>你会学到</h3><p>登录、界面、知识库全流程、沙盒、人工转接、FAQ 与结业测验。</p></div>
+    <div class="card"><h3><span class="icon">🎯</span>学完能做什么</h3><p>改触发词、沙盒验收、识别灰度条目、知道 @ 人工规则。</p></div>
+  </div>
+</div></div>
+
+<!-- 2 -->
+<div class="slide-wrap" data-i="1"><div class="slide">
+  <div class="chapter-strip"></div>
+  <span class="badge">第 2 章 · 价值</span>
+  <h1 class="solid">对我和用户有什么好处？</h1>
+  <div class="grid2">
+    <div class="card"><h3><span class="icon">🤖</span>AI 先答一轮</h3><ul><li>常见问题不用重复打字</li><li>多语言同一套知识维护</li></ul></div>
+    <div class="card"><h3><span class="icon">🧑‍💼</span>难的事找人工</h3><ul><li>重复追问可升级到 @人工</li><li>排班、话术可配置</li></ul></div>
+    <div class="card"><h3><span class="icon">📊</span>能复盘</h3><ul><li>案例、操作记录、数据概览</li><li>沙盒验证再上真实环境</li></ul></div>
+  </div>
+</div></div>
+
+<!-- 3 -->
+<div class="slide-wrap" data-i="2"><div class="slide">
+  <div class="chapter-strip"></div>
+  <span class="badge">第 3 章 · 安全登录</span>
+  <h1 class="solid">登录后台</h1>
+  <table>
+    <tr><th>项目</th><th>说明（由主管 / 运维填写）</th></tr>
+    <tr><td>访问地址</td><td><span class="placeholder">https://你的域名/login</span></td></tr>
+    <tr><td>用户名</td><td><span class="placeholder">主管单独发放</span></td></tr>
+    <tr><td>密码</td><td><span class="placeholder">首次登录后修改</span> · 勿发微信群</td></tr>
+    <tr><td>界面</td><td>默认简洁模式；需要更多菜单再切完整模式</td></tr>
+  </table>
+  <p class="mermaid-note">💡 互动：登录后可在侧栏找到「修改密码」。</p>
+</div></div>
+
+<!-- 4 -->
+<div class="slide-wrap" data-i="3"><div class="slide">
+  <div class="chapter-strip"></div>
+  <span class="badge">第 4 章 · 界面</span>
+  <h1 class="solid">简洁模式 vs 完整模式</h1>
+  <div class="lane">
+    <div class="box"><strong>简洁（默认）</strong>案例、知识库、通道、概览、分析、记录、人工转接、帮助…日常接线够用。</div>
+    <div class="box"><strong>完整</strong>策略、模板、日志、导入导出、用户管理、开发者工具…主管 / 运维常用。</div>
+  </div>
+  <div class="flow" style="margin-top:1.1rem">
+    <span class="step">侧栏底部</span><span class="arr">→</span>
+    <span class="step">切换完整模式</span><span class="arr">→</span>
+    <span class="step">维护 / 向量化</span>
+  </div>
+</div></div>
+
+<!-- 5 -->
+<div class="slide-wrap" data-i="4"><div class="slide">
+  <div class="chapter-strip"></div>
+  <span class="badge">第 5 章 · 一天工作流</span>
+  <h1 class="solid">推荐点击顺序</h1>
+  <div class="diagram">登录
+  │
+  ├─► 数据概览 —— 有无异常？
+  ├─► 待处理案例 —— 回复 / 标记
+  ├─► 知识库 —— 改话术 + 沙盒
+  ├─► 通道状态 —— 核对实时数据（以面板为准）
+  └─► Telegram —— 响应 @人工</div>
+</div></div>
+
+<!-- 6 -->
+<div class="slide-wrap" data-i="5"><div class="slide">
+  <div class="chapter-strip"></div>
+  <span class="badge">第 6 章 · 知识库入口</span>
+  <h1 class="solid">知识库在哪里？</h1>
+  <p class="sub"><strong>知识库</strong> → Tab：<strong>知识条目</strong> / 错误码 / 对话示例 / <strong>沙盒测试</strong>（简洁模式也可用沙盒）。</p>
+  <div class="flow">
+    <span class="step">用户消息</span><span class="arr">→</span>
+    <span class="step">检索 KB</span><span class="arr">→</span>
+    <span class="step">命中则参考</span><span class="arr">→</span>
+    <span class="step">AI / 直接回复</span>
+  </div>
+</div></div>
+
+<!-- 7 -->
+<div class="slide-wrap" data-i="6"><div class="slide">
+  <div class="chapter-strip"></div>
+  <span class="badge">第 7 章 · 写条目</span>
+  <h1 class="solid">新建到上线</h1>
+  <div class="flow" style="overflow-x:auto;flex-wrap:nowrap;padding-bottom:.2rem">
+    <span class="step">新建</span><span class="arr">→</span>
+    <span class="step">标题/分类</span><span class="arr">→</span>
+    <span class="step">触发词</span><span class="arr">→</span>
+    <span class="step">场景/示例</span><span class="arr">→</span>
+    <span class="step">沙盒</span><span class="arr">→</span>
+    <span class="step">保存</span><span class="arr">→</span>
+    <span class="step">启用</span>
+  </div>
+  <ul class="check" style="margin-top:.85rem">
+    <li>触发词 = 用户<strong>真的会打的字</strong>（多写几个同义说法）。</li>
+    <li>保存时若与他人<strong>重复 / 包含</strong>会弹窗，请看清再确认。</li>
+  </ul>
+</div></div>
+
+<!-- 8 -->
+<div class="slide-wrap" data-i="7"><div class="slide">
+  <div class="chapter-strip"></div>
+  <span class="badge">第 8 章 · 灰度条目</span>
+  <h1 class="solid">灰 = 停用 = 机器人不用</h1>
+  <p class="sub">列表里半透明卡片 = 未启用，<strong>不会</strong>参与检索。草稿也会先灰着，等主管放行。</p>
+  <div class="grid2">
+    <div class="card"><h3><span class="icon">✅</span>要上线</h3><p>核对内容 → 勾选启用 → 沙盒再测一遍。</p></div>
+    <div class="card"><h3><span class="icon">⏸</span>要下线</h3><p>取消启用；大促临时下线单条话术常用。</p></div>
+  </div>
+</div></div>
+
+<!-- 9 -->
+<div class="slide-wrap" data-i="8"><div class="slide">
+  <div class="chapter-strip"></div>
+  <span class="badge">第 9 章 · 沙盒</span>
+  <h1 class="solid">沙盒怎么玩？</h1>
+  <ol class="check" style="list-style:decimal;margin-left:1.2rem;margin-top:.5rem">
+    <li>知识库 → <strong>沙盒测试</strong> Tab。</li>
+    <li>粘贴<strong>真实用户原话</strong>。</li>
+    <li>看命中是不是你想要的那一条；不对就回去改触发词。</li>
+    <li>至少 <strong>3 种说法</strong>（中/英/缩写）各测一次。</li>
+  </ol>
+</div></div>
+
+<!-- 10 -->
+<div class="slide-wrap" data-i="9"><div class="slide">
+  <div class="chapter-strip"></div>
+  <span class="badge">第 10 章 · 验收清单</span>
+  <h1 class="solid">上线前点一点（可勾选）</h1>
+  <p class="sub">点击下方每一行，打勾表示「我做过啦」——仅本页纪念，刷新会清空。</p>
+  <ul class="chk-list" id="chklist">
+    <li class="chk-item" data-q="1"><span class="chk-box">✓</span><span class="chk-text">沙盒 3 条用例命中正确条目</span></li>
+    <li class="chk-item" data-q="2"><span class="chk-box">✓</span><span class="chk-text">处理过通道数据冲突提示（或已请示主管）</span></li>
+    <li class="chk-item" data-q="3"><span class="chk-box">✓</span><span class="chk-text">关键条目已启用，无灰度误留</span></li>
+    <li class="chk-item" data-q="4"><span class="chk-box">✓</span><span class="chk-text">真实群 / 私聊各测一轮</span></li>
+  </ul>
+</div></div>
+
+<!-- 11 -->
+<div class="slide-wrap" data-i="10"><div class="slide">
+  <div class="chapter-strip"></div>
+  <span class="badge">第 11 章 · 转接入口</span>
+  <h1 class="solid">人工转接去哪配？</h1>
+  <p class="sub">简洁模式：<strong>人工转接</strong> 或 <strong>AI 与转接设置</strong> → <code>/settings</code> 相关区块。完整模式：<strong>系统设置</strong> 同样入口。</p>
+  <div class="card" style="margin-top:1rem"><h3><span class="icon">⚙️</span>常见项</h3>
+    <ul><li>TG 用户名（被 @ 的人）</li><li>重复次数、冷却</li><li>排班</li><li>升级话术</li></ul>
+  </div>
+</div></div>
+
+<!-- 12 -->
+<div class="slide-wrap" data-i="11"><div class="slide">
+  <div class="chapter-strip"></div>
+  <span class="badge">第 12 章 · 转接逻辑</span>
+  <h1 class="solid">什么时候会 @ 人工？</h1>
+  <div class="diagram">用户多次「相似」提问
+       │
+       ▼ 达阈值？
+    否→继续 AI   是→冷却 OK？
+                    否→等   是→排班 OK？
+                              否→不升  是→群内 @人工</div>
+</div></div>
+
+<!-- 13 -->
+<div class="slide-wrap" data-i="12"><div class="slide">
+  <div class="chapter-strip"></div>
+  <span class="badge">第 13 章 · TG 侧动作</span>
+  <h1 class="solid">被 @ 之后怎么做</h1>
+  <ul class="check">
+    <li>TG <strong>用户名</strong>必须和后台填的一致。</li>
+    <li>被 @ → <strong>尽快</strong>认领回复。</li>
+    <li>收尾简短；复杂引导私聊 / 工单。</li>
+    <li>从没被 @ → 找主管查阈值、排班、用户名。</li>
+  </ul>
+</div></div>
+
+<!-- 14 -->
+<div class="slide-wrap" data-i="13"><div class="slide">
+  <div class="chapter-strip"></div>
+  <span class="badge">第 14 章 · 权限</span>
+  <h1 class="solid">角色分工</h1>
+  <table>
+    <tr><th>角色</th><th>能做什么（典型）</th></tr>
+    <tr><td>主账号</td><td>用户管理、系统设置、开发者菜单…</td></tr>
+    <tr><td>管理员</td><td>知识库、案例、通道编辑…</td></tr>
+    <tr><td>观察员</td><td>只读旁听</td></tr>
+  </table>
+</div></div>
+
+<!-- 15 -->
+<div class="slide-wrap" data-i="14"><div class="slide">
+  <div class="chapter-strip"></div>
+  <span class="badge">第 15 章 · FAQ</span>
+  <h1 class="solid">不生效先查啥？</h1>
+  <ul class="check">
+    <li>灰度 / 停用？</li>
+    <li>沙盒命中吗？</li>
+    <li>触发词和别人打架？</li>
+    <li>通道类是否程序接管？数字以通道面板为准。</li>
+  </ul>
+</div></div>
+
+<!-- 16 测验 -->
+<div class="slide-wrap" data-i="15"><div class="slide">
+  <div class="chapter-strip"></div>
+  <span class="badge">第 16 章 · 闯关测验</span>
+  <h1 class="solid">3 道题，点选项看解析</h1>
+  <div class="quiz-q">1）灰度半透明的知识条目，机器人还会用来回答吗？</div>
+  <div class="quiz-btns" data-a="1">
+    <button type="button" class="quiz-btn" data-correct="0">会</button>
+    <button type="button" class="quiz-btn" data-correct="1">不会</button>
+  </div>
+  <div class="quiz-reveal" id="r1">对：停用条目不参与检索。记得启用 + 沙盒再验。</div>
+
+  <div class="quiz-q">2）改完触发词，上线前最推荐先做？</div>
+  <div class="quiz-btns" data-a="2">
+    <button type="button" class="quiz-btn" data-correct="1">沙盒测 3 种说法</button>
+    <button type="button" class="quiz-btn" data-correct="0">直接下班</button>
+  </div>
+  <div class="quiz-reveal" id="r2">对：沙盒能提前发现「串题」「不命中」。</div>
+
+  <div class="quiz-q">3）群里被 Bot @ 到你了，优先？</div>
+  <div class="quiz-btns" data-a="3">
+    <button type="button" class="quiz-btn" data-correct="1">先看上下文再回复用户</button>
+    <button type="button" class="quiz-btn" data-correct="0">假装没看见</button>
+  </div>
+  <div class="quiz-reveal" id="r3">对：尽快认领，按业务话术安抚；避免用户刷屏。</div>
+</div></div>
+
+<!-- 17 -->
+<div class="slide-wrap" data-i="16"><div class="slide">
+  <div class="chapter-strip"></div>
+  <span class="badge">第 17 章 · 结业</span>
+  <h1 class="solid">恭喜通关 🎉</h1>
+  <p class="sub">文字版：<code>docs/AI智能客服系统_学习与使用指南.md</code>。正式环境地址与账号由主管发放。技术问题找运维 / 开发。</p>
+  <div class="grid2" style="margin-top:1rem">
+    <div class="card"><h3><span class="icon">🖥</span>放映</h3><p>F11 全屏；浏览器打印可存 PDF（勿含密码）。</p></div>
+    <div class="card"><h3><span class="icon">🔗</span>入口</h3><p>帮助中心 → 打开培训演示；或地址栏 <code>/training</code></p></div>
+  </div>
+</div></div>
+
+</div>
+
+<div class="dots" id="dots" aria-label="章节导航"></div>
+<div class="nav">
+  <button type="button" class="secondary" id="prev">上一页</button>
+  <span id="num">1 / 17</span>
+  <button type="button" id="next">下一页</button>
+</div>
+<div class="celebrate" id="celebrate" aria-hidden="true"><span>🎊✨🏆✨🎊</span></div>
+
+<script>
+(function(){
+  const wraps=[...document.querySelectorAll('.slide-wrap')];
+  const n=wraps.length;
+  let i=0;
+  const num=document.getElementById('num');
+  const prog=document.getElementById('prog');
+  const dots=document.getElementById('dots');
+  const xpFill=document.getElementById('xp-fill');
+  const xpPct=document.getElementById('xp-pct');
+  const celeb=document.getElementById('celebrate');
+
+  dots.innerHTML=wraps.map((_,j)=>'<button type="button" class="dot'+(j===0?' on':'')+'" data-j="'+j+'" aria-label="第'+(j+1)+'章"></button>').join('');
+
+  function xpW(){return Math.round((i+1)/n*100);}
+  function show(idx){
+    i=(idx+n)%n;
+    wraps.forEach((w,j)=>w.classList.toggle('active',j===i));
+    [...dots.querySelectorAll('.dot')].forEach((d,j)=>d.classList.toggle('on',j===i));
+    num.textContent=(i+1)+' / '+n;
+    prog.style.width=xpW()+'%';
+    if(xpFill){xpFill.style.width=xpW()+'%';xpPct.textContent=xpW()+'%';}
+    if(i===n-1){
+      celeb.classList.add('show');
+      setTimeout(()=>celeb.classList.remove('show'),900);
+    }
+  }
+  dots.addEventListener('click',e=>{
+    const b=e.target.closest('.dot'); if(!b) return;
+    show(+b.dataset.j);
+  });
+  document.getElementById('next').onclick=()=>show(i+1);
+  document.getElementById('prev').onclick=()=>show(i-1);
+  document.addEventListener('keydown',e=>{
+    if(e.key==='ArrowRight'||e.key==='PageDown'||e.key===' '){e.preventDefault();show(i+1);}
+    if(e.key==='ArrowLeft'||e.key==='PageUp'){e.preventDefault();show(i-1);}
+    if(e.key==='Home') show(0);
+    if(e.key==='End') show(n-1);
+  });
+
+  document.querySelectorAll('.chk-item').forEach(li=>{
+    li.addEventListener('click',()=>li.classList.toggle('done'));
+  });
+
+  document.querySelectorAll('.quiz-btns').forEach(box=>{
+    const rid='r'+box.dataset.a;
+    const rev=document.getElementById(rid);
+    box.querySelectorAll('.quiz-btn').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        const ok=btn.dataset.correct==='1';
+        rev.classList.toggle('bad',!ok);
+        rev.classList.add('show');
+      });
+    });
+  });
+})();
+</script>
+</body>
+</html>

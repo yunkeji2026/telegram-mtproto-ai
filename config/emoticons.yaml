@@ -1,0 +1,130 @@
+# 表情符号配置 - Telegram客服专用
+# 根据情绪和场景智能使用表情符号
+
+# 情绪相关表情
+emoticons:
+  # 积极情绪 - 用户满意、感谢、高兴时使用
+  positive:
+    - "😊"  # 微笑：表示友好和满意
+    - "👍"  # 点赞：表示认可和鼓励
+    - "🙏"  # 合十：表示感谢和尊重
+    - "🎉"  # 庆祝：表示成功和喜悦
+    - "💪"  # 肌肉：表示支持和加油
+    - "🌟"  # 星星：表示优秀和突出
+    - "❤️"   # 爱心：表示喜爱和关怀
+  
+  # 中性情绪 - 日常陪聊（弱化「查单/搜索」暗示）
+  neutral:
+    - "💭"
+    - "✨"
+    - "🤗"
+    - "⏰"  # 时钟：表示时间和等待
+    - "📊"  # 图表：表示数据和统计
+    - "📍"  # 图钉：表示定位和关注
+    - "📋"  # 剪贴板：表示清单和任务
+  
+  # 消极情绪 - 用户不满、投诉、失望时使用
+  negative:
+    - "😔"  # 难过：表示理解和同情
+    - "🙁"  # 担忧：表示关心和重视
+    - "😥"  # 失望：表示遗憾和抱歉
+    - "💔"  # 心碎：表示严重问题
+    - "⚠️"   # 警告：表示需要注意
+    - "🔄"  # 循环：表示重新处理
+    - "🔧"  # 扳手：表示修复和处理
+  
+  # 业务相关表情 - 根据业务场景使用
+  business:
+    - "💰"  # 钱袋：价格、费用、支付相关
+    - "📦"  # 包裹：订单、发货、物流相关
+    - "🔄"  # 循环：流程、处理中、更新
+    - "✅"  # 对勾：完成、确认、成功
+    - "❌"  # 叉号：取消、拒绝、错误
+    - "⏳"  # 沙漏：等待、处理中、耐心
+    - "📄"  # 文档：文件、合同、协议
+  
+  # 客服专用表情 - 客服场景使用
+  customer_service:
+    - "👋"  # 挥手：欢迎、问候
+    - "🙋"  # 举手：提供帮助、服务
+    - "💬"  # 对话框：对话、沟通
+    - "📞"  # 电话：联系、支持
+    - "🛠️"   # 工具：技术支持、修复
+    - "🆘"  # 求救：紧急帮助
+    - "🎯"  # 靶心：精准解决
+
+# 表情包配置 (图片表情)
+stickers:
+  enabled: false  # 暂不启用图片表情包，避免复杂化
+  folder: "./stickers"  # 表情包图片存储目录
+  
+  # 表情包映射 (如果启用)
+  mapping:
+    welcome: "welcome.webp"      # 欢迎表情
+    success: "success.webp"      # 成功表情
+    error: "error.webp"          # 错误表情
+    processing: "processing.webp" # 处理中表情
+    thank_you: "thank_you.webp"  # 感谢表情
+
+# 使用规则配置
+rules:
+  # 频率控制 - 避免过度使用
+  max_emoticons_per_message: 3    # 每条消息最多使用3个表情
+  min_message_length_for_emoticon: 10  # 至少10字符才添加表情
+  
+  # 场景限制 - 某些场景避免使用表情
+  avoid_emoticons_in:
+    - "serious_complaints"    # 严重投诉
+    - "legal_issues"          # 法律问题
+    - "emergency_situations"  # 紧急情况
+    - "technical_errors"      # 技术错误
+  
+  # 情绪匹配规则
+  emotion_matching:
+    enabled: true
+    default_emotion: "neutral"  # 默认情绪
+  
+  # 业务关键词触发特定表情
+  keyword_triggers:
+    - keywords: ["价格", "费用", "多少钱", "费率"]
+      emoticons: ["💰", "📊"]
+    - keywords: ["订单", "发货", "物流", "包裹"]
+      emoticons: ["📦", "🔄"]
+    - keywords: ["谢谢", "感谢", "辛苦了"]
+      emoticons: ["🙏", "😊"]
+    - keywords: ["投诉", "不满", "生气", "失望"]
+      emoticons: ["😔", "🙁"]
+    - keywords: ["帮助", "支持", "客服", "人工"]
+      emoticons: ["🙋", "💬"]
+
+# 表情自然化（P0）：模拟真人疏密，避免固定句首水印
+# 详见 docs/PRD_陪伴关系与表情策略_v1.md
+naturalization:
+  enabled: true
+  # 本轮完全不追加新表情（语气微调仍可能生效）
+  skip_emoticon_pass_probability: 0.32
+  # 忽略上下文「建议表情」，减少与 context_manager 强绑定
+  ignore_context_suggestions_probability: 0.28
+  # 连续若干条都带了自动表情后，下一条强制纯文本装饰
+  max_consecutive_decorated: 2
+  # 永不自动追加的符号（历史水印）
+  forbidden_emoticons:
+    - "👉"
+    - "📝"
+
+# 随机选择配置
+randomization:
+  enabled: true
+  # 每个情绪类别中随机选择的权重
+  weights:
+    positive: 1.0
+    neutral: 0.8
+    negative: 0.6
+    business: 0.7
+    customer_service: 0.9
+
+# 调试模式
+debug:
+  enabled: false
+  log_emoticon_selection: true
+  log_emotion_detection: true

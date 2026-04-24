@@ -1,0 +1,58 @@
+# Payment domain default configuration
+# These values can be overridden in the main config.yaml
+
+domain:
+  name: payment
+  display_name: "支付通道客服"
+  version: "1.0"
+
+ai:
+  reply_style: concise
+  ai_name: "小优"
+  terminology:
+    "Pay y in": "Pay in"
+    "Pay y out": "Pay out"
+    "代代付": "代付"
+    "代代收": "代收"
+
+skills:
+  enabled:
+    - greeting
+    - complaint
+    - small_talk
+    - test
+    - gxp_command
+    - order_query
+    - price_check
+    - status_check
+    - channel_info
+    - quota_config
+    - enhanced_quota_config
+
+kb:
+  categories:
+    - "订单查询"
+    - "余额汇率"
+    - "通道状态"
+    - "退款投诉"
+    - "常规咨询"
+    - "系统指令"
+    - "系统话术"
+    - "其他"
+
+quota_config_commands:
+  enabled: true
+  description: "通过对话命令修改额度配置"
+
+emotion_enhancer_skip:
+  phrases:
+    - "当前额度如下"
+    - "请问您需要查询哪个通道的额度"
+    # 含后台/费率引导的回复不做语气与表情增强，避免扭曲合规话术
+    - "商户后台"
+    - "首页左下角"
+  patterns:
+    - all_of: ["100"]
+      any_of: ["EP", "JC"]
+    - all_of: []
+      any_of: ["代收", "代付", "Pay in", "Pay out"]

@@ -1,0 +1,27 @@
+name: ecommerce
+display_name: "电商客服"
+version: "1.0"
+description: "电商行业客服域 — 商品查询、物流追踪、退款退货"
+
+skills:
+  - product_query
+  - shipping_track
+  - return_refund
+
+config_files:
+  - defaults.yaml
+  - trigger_keywords.yaml
+
+kb:
+  categories: kb/categories.yaml
+  seeds: kb/seeds.yaml
+
+prompts:
+  system_prompt: prompts/system_prompt.txt
+  terminology: prompts/terminology.yaml
+
+i18n:
+  zh: i18n/zh.yaml
+  en: i18n/en.yaml
+
+web_routes: false

@@ -1,0 +1,35 @@
+repos:
+  - repo: local
+    hooks:
+      - id: web-admin-tests
+        name: Web Admin Tests
+        language: python
+        entry: python -m pytest
+        args:
+          - tests/test_web_auth.py
+          - tests/test_web_templates.py
+          - tests/test_web_users.py
+          - tests/test_web_diff_rollback.py
+          - tests/test_web_api.py
+          - tests/test_web_alert.py
+          - "--tb=short"
+          - "-q"
+          - "-p"
+          - "no:warnings"
+        pass_filenames: false
+        always_run: false
+        # Only run when web source files change
+        files: "^(src/web/|src/utils/|tests/)"
+        stages: [pre-push]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: "^docs/"
+      - id: end-of-file-fixer
+        exclude: "^docs/"
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: debug-statements
+        language_version: python3

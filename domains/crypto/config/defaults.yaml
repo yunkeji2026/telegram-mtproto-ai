@@ -1,0 +1,27 @@
+domain:
+  name: crypto
+  display_name: "加密货币社群"
+  version: "1.0"
+
+ai:
+  reply_style: concise
+  ai_name: "行情分析师"
+
+skills:
+  enabled:
+    - greeting
+    - complaint
+    - small_talk
+    - test
+
+kb:
+  categories:
+    - "行情分析"
+    - "交易教学"
+    - "项目介绍"
+    - "风险提示"
+    - "常见问题"
+
+emotion_enhancer_skip:
+  phrases: []
+  patterns: []

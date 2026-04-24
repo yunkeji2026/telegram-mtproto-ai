@@ -1,0 +1,40 @@
+system_reply_seeds:
+  - title: "无法登录公司账号"
+    category: "账号权限"
+    triggers: ["登不上", "密码错误", "账号锁定", "login"]
+    scenario: "When user cannot sign in"
+    steps: "1. 区分本地账号与域账号。2. 检查大小写/CapsLock/MFA。3. 指引自助重置或联系管理员解锁。"
+    example_reply: "先确认是否开启了大小写与 MFA；若多次失败可能被锁定，请走自助解锁或联系 IT 提供员工编号。"
+    reply_mode: "ai_guided"
+
+  - title: "带错误代码的报错"
+    category: "系统故障"
+    triggers: ["错误代码", "error", "0x", "报错"]
+    scenario: "When user pastes an error code"
+    steps: "1. 记录完整代码与发生操作。2. 给通用排查（重启/更新/磁盘空间）。3. 建议附截图开工单。"
+    example_reply: "请把完整错误代码、出现步骤、系统版本一起发给 IT；可先尝试重启应用与检查磁盘空间。"
+    reply_mode: "ai_guided"
+
+  - title: "VPN 连接失败"
+    category: "VPN网络"
+    triggers: ["VPN", "连不上", "超时", "tunnel"]
+    scenario: "When VPN does not connect"
+    steps: "1. 检查网络与系统时间。2. 切换节点或重装客户端。3. 排除本地防火墙/代理冲突。"
+    example_reply: "先确认外网正常与系统时间正确；仍失败可尝试更新 VPN 客户端并暂时关闭冲突代理，必要时提交工单附日志。"
+    reply_mode: "ai_guided"
+
+  - title: "软件安装权限不足"
+    category: "软件安装"
+    triggers: ["安装不了", "没有权限", "管理员"]
+    scenario: "When user cannot install software"
+    steps: "1. 说明是否允许自助安装。2. 指引软件中心/包管理。3. 需要提权则走审批工单。"
+    example_reply: "若策略限制安装，请使用公司软件中心申请安装包；需管理员权限请提交安装申请工单并说明业务用途。"
+    reply_mode: "ai_guided"
+
+  - title: "引用工单号跟进"
+    category: "常见问题"
+    triggers: ["工单", "ticket", "INC", "REQ"]
+    scenario: "When user mentions a ticket ID"
+    steps: "1. 请用户保留工单号。2. 说明通常处理时效。3. 提醒补充日志或联系方式。"
+    example_reply: "请保留工单号并在原工单补充最新截图与可联系时段，方便工程师继续处理。"
+    reply_mode: "ai_guided"

@@ -1,0 +1,22 @@
+# Crypto domain KB categories
+
+categories:
+  - name: "行情分析"
+    description: "趋势、支撑阻力、量能、宏观面（讨论级）"
+    triggers: ["行情", "趋势", "K线", "分析", "走势"]
+
+  - name: "交易教学"
+    description: "订单类型、杠杆、风控、仓位"
+    triggers: ["交易", "杠杆", "止损", "止盈", "仓位"]
+
+  - name: "项目介绍"
+    description: "公链、Layer2、DeFi 概念级介绍"
+    triggers: ["项目", "白皮书", "代币", "生态"]
+
+  - name: "风险提示"
+    description: "诈骗、钓鱼、私钥、合规"
+    triggers: ["风险", "诈骗", "钓鱼", "私钥", "rug"]
+
+  - name: "常见问题"
+    description: "入金出金、手续费、链上基础"
+    triggers: ["gas", "手续费", "钱包", "转账"]

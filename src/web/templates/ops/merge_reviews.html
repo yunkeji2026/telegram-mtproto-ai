@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>Merge Reviews · Ops</title>
+<style>
+body{font-family:-apple-system,Segoe UI,sans-serif;max-width:1100px;margin:20px auto;padding:0 20px;background:#fafafa;color:#222}
+h1{font-size:20px;margin-bottom:4px}
+.card{background:#fff;border:1px solid #ddd;border-radius:8px;padding:14px 18px;margin:12px 0}
+.conf{font-weight:600;color:#2563eb}
+.breakdown{font-size:12px;color:#555;margin:6px 0}
+.breakdown span{display:inline-block;padding:2px 6px;background:#f3f4f6;border-radius:3px;margin-right:4px}
+.actions{margin-top:10px}
+button{padding:6px 14px;margin-right:8px;border:1px solid #ccc;border-radius:5px;background:#fff;cursor:pointer;font-size:13px}
+.btn-ok{background:#10b981;color:#fff;border-color:#10b981}
+.btn-reject{background:#ef4444;color:#fff;border-color:#ef4444}
+.empty{padding:40px;text-align:center;color:#888}
+.nav{margin-bottom:20px}
+.nav a{margin-right:14px;font-size:13px;color:#2563eb;text-decoration:none}
+</style></head>
+<body>
+<div class="nav">
+  <a href="/ops/contacts">联系人</a>
+  <a href="/ops/merge-reviews">合并审核</a>
+</div>
+<h1>合并审核队列</h1>
+<div id="list"></div>
+<script>
+function escapeHtml(s){return (s+'').replace(/[&<>"']/g,c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+async function load(){
+  const data = await fetch('/api/merge-reviews').then(r=>r.json());
+  const list = document.getElementById('list');
+  if(!data.items||data.items.length===0){
+    list.innerHTML='<div class="empty">没有待审核项</div>';return;
+  }
+  list.innerHTML = data.items.map(it=>{
+    const cand = it.candidate_ci||{};
+    const tgt = it.target_contact||{};
+    const bd = Object.entries(it.breakdown||{}).map(([k,v])=>`<span>${escapeHtml(k)}: ${v}</span>`).join('');
+    return `<div class="card" id="card-${it.review_id}">
+      <div><b>候选</b>：${escapeHtml(cand.display_name||'-')} 在 <b>${escapeHtml(cand.channel||'-')}</b> (${escapeHtml(cand.external_id||'-')})</div>
+      <div><b>目标</b>：${escapeHtml(tgt.primary_name||'-')} (lang=${escapeHtml(tgt.language_hint||'-')} tz=${escapeHtml(tgt.timezone_hint||'-')})</div>
+      <div>置信度 <span class="conf">${(it.confidence*100).toFixed(1)}%</span></div>
+      <div class="breakdown">${bd}</div>
+      <div class="actions">
+        <button class="btn-ok" onclick="act('${it.review_id}','approve')">通过合并</button>
+        <button class="btn-reject" onclick="act('${it.review_id}','reject')">拒绝</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+async function act(rid, kind){
+  const r = await fetch(`/api/merge-reviews/${rid}/${kind}`, {method:'POST'});
+  if(r.ok){
+    document.getElementById(`card-${rid}`).style.opacity='0.4';
+    setTimeout(load, 500);
+  } else {
+    alert('操作失败 status='+r.status);
+  }
+}
+load().catch(e=>document.body.innerHTML+='<p style="color:red">加载失败: '+e+'</p>');
+</script>
+</body></html>

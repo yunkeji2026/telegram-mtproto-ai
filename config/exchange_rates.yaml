@@ -1,0 +1,93 @@
+channels:
+  ep:
+    names:
+    - EP
+    - ep
+    - EasyPaisa
+    - easypaisa
+    display_name: EP通道
+    payin:
+      fee_rate: 0.5%
+      success_rate: 58.0
+      minimum_amount: '100'
+      maximum_amount: '50000'
+      status: 正常
+      processing_time: 即时
+      amount_type: integer
+    payout:
+      fee_rate: 0.5%
+      success_rate: 78.0
+      minimum_amount: '100'
+      maximum_amount: '100000'
+      status: 正常
+      processing_time: 即时
+      amount_type: integer
+    limits:
+      default: 100-20,000
+      special: 100-100,000
+      description: 额度100-20,000（普通）/ 100-100,000（特殊）
+    notes: 支持7x24小时服务
+    last_updated: '2026-03-11'
+  jc:
+    names:
+    - JC
+    - jc
+    - JazzCash
+    - jazzcash
+    - JP
+    - jp
+    display_name: JC通道
+    payin:
+      fee_rate: 0.6%
+      success_rate: 60.0
+      minimum_amount: '100'
+      maximum_amount: '100000'
+      status: 正常
+      processing_time: 即时
+      amount_type: integer
+    payout:
+      fee_rate: 0.6%
+      success_rate: 80.0
+      minimum_amount: '100'
+      maximum_amount: '100000'
+      status: 正常
+      processing_time: 即时
+      amount_type: integer
+    limits:
+      default: 100-100,000
+      description: 额度100-100,000
+    notes: 即时到账，支持大额
+    last_updated: '2026-03-11'
+  other:
+    names:
+    - PIX
+    - pix
+    - 其他
+    - other
+    - PIX通道
+    display_name: PIX通道
+    payin:
+      fee_rate: 请咨询客服
+      success_rate: 90.0
+      minimum_amount: '100'
+      maximum_amount: '10000'
+      status: 禁用
+      processing_time: 请咨询客服
+      amount_type: integer
+    payout:
+      fee_rate: 请咨询客服
+      success_rate: 90.0
+      minimum_amount: '100'
+      maximum_amount: '10000'
+      status: 禁用
+      processing_time: 请咨询客服
+      amount_type: integer
+    description: 请联系客服获取最新通道信息
+    last_updated: '2026-03-11'
+exchange_rates:
+  usd_to_pkr: '280'
+  pkr_to_usd: '0.00357'
+  last_updated: '2026-03-11'
+version: '1.0'
+last_updated: '2026-03-11T22:30:00Z'
+description: 通道汇率与配置信息，支持动态更新

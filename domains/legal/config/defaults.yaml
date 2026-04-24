@@ -1,0 +1,27 @@
+domain:
+  name: legal
+  display_name: "法律咨询"
+  version: "1.0"
+
+ai:
+  reply_style: balanced
+  ai_name: "法律顾问"
+
+skills:
+  enabled:
+    - greeting
+    - complaint
+    - small_talk
+    - test
+
+kb:
+  categories:
+    - "合同纠纷"
+    - "劳动法律"
+    - "知识产权"
+    - "公司法务"
+    - "常见问题"
+
+emotion_enhancer_skip:
+  phrases: []
+  patterns: []

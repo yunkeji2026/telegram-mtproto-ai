@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}{% if ui_mode == 'simple' %}待处理案例{% else %}Case 管理{% endif %} · {{ site_name|default('智控王客户转化聊天系统') }}{% endblock %}
+{% block page_title %}{% if ui_mode == 'simple' %}待处理案例{% else %}Case 管理{% endif %}{% endblock %}
+{% block head %}
+<style>
+.case-grid{display:flex;flex-direction:column;gap:.8rem}
+.case-card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:1rem 1.2rem;transition:.2s}
+.case-card:hover{border-color:var(--p);box-shadow:0 2px 12px rgba(91,124,246,.08)}
+.case-card.at-risk{border-left:3px solid var(--red)}
+.case-card.closed{opacity:.55}
+.case-head{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.6rem}
+.case-id{font-family:'Consolas',monospace;font-size:.78rem;font-weight:700;color:var(--p)}
+.badge{display:inline-block;padding:.15rem .5rem;border-radius:6px;font-size:.68rem;font-weight:600}
+.badge-risk{background:rgba(239,68,68,.12);color:var(--red)}
+.badge-esc{background:rgba(245,158,11,.12);color:var(--amber)}
+.badge-closed{background:rgba(16,185,129,.12);color:var(--green)}
+.badge-pattern{background:rgba(139,92,246,.10);color:#8b5cf6}
+.case-chain{display:flex;gap:.3rem;flex-wrap:wrap;margin:.4rem 0}
+.chain-step{padding:.15rem .45rem;border-radius:5px;font-size:.7rem;background:var(--input);color:var(--t2)}
+.chain-arrow{color:var(--t3);font-size:.7rem;line-height:1.8}
+.case-msg{font-size:.82rem;color:var(--t2);line-height:1.5;margin:.4rem 0}
+.case-msg strong{color:var(--t1)}
+.case-actions{display:flex;gap:.5rem;margin-top:.6rem;flex-wrap:wrap}
+.case-note-input{flex:1;min-width:180px}
+.sat-bar{width:60px;height:6px;background:var(--bd);border-radius:3px;overflow:hidden;display:inline-block;vertical-align:middle;margin-left:.4rem}
+.sat-fill{height:100%;border-radius:3px;transition:width .4s}
+.filter-bar{display:flex;gap:.5rem;margin-bottom:1rem;flex-wrap:wrap;align-items:center}
+.stat-pill{padding:.4rem .8rem;border-radius:8px;font-size:.78rem;font-weight:600;background:var(--input);border:1px solid var(--bd)}
+.stat-pill strong{color:var(--p)}
+</style>
+{% endblock %}
+{% block content %}
+{% set active="cases" %}
+
+{% if ui_mode == 'simple' %}
+<div class="simple-guide" style="background:linear-gradient(135deg,rgba(91,124,246,.06),rgba(16,185,129,.06));border:1px solid rgba(91,124,246,.15);border-radius:10px;padding:.7rem 1rem;margin-bottom:.8rem;font-size:.82rem;color:var(--t2);display:flex;align-items:flex-start;gap:.6rem">
+  <span style="font-size:1.1rem;flex-shrink:0;margin-top:.1rem">📋</span>
+  <div>
+    <strong style="color:var(--t);font-size:.85rem">操作说明</strong>
+    <div style="margin-top:.25rem;line-height:1.6">每个案例卡片显示用户消息和 AI 回复。你可以添加<strong>备注</strong>标记重要信息，处理完毕后点击<strong style="color:var(--green)">结案</strong>。列表每 30 秒自动刷新。</div>
+    <button onclick="this.closest('.simple-guide').style.display='none';localStorage.setItem('_guide_cases','1')" style="background:none;border:none;color:var(--p);cursor:pointer;font-size:.78rem;font-weight:600;padding:0;margin-top:.3rem">知道了，不再显示</button>
+  </div>
+</div>
+<script>if(localStorage.getItem('_guide_cases')==='1')document.querySelector('.simple-guide').style.display='none';</script>
+{% endif %}
+<div class="filter-bar">
+  <div class="stat-pill" data-help="case_id">总 Case: <strong id="case-total">-</strong></div>
+  <div class="stat-pill">活跃: <strong id="case-open">-</strong></div>
+  <div class="stat-pill pro-only" style="border-color:var(--red)" data-help="at_risk">⚠ 高风险: <strong id="case-risk" style="color:var(--red)">-</strong></div>
+  <button class="btn btn-s" data-help="btn_refresh" onclick="loadCases()">刷新</button>
+</div>
+
+<div class="case-grid" id="case-list">
+  <div class="empty" style="padding:3rem">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="36" height="36"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+    <p>加载中…</p>
+  </div>
+</div>
+
+<script>
+async function loadCases() {
+  const el = document.getElementById('case-list');
+  try {
+    const res = await fetch('/api/cases/active');
+    const d = await res.json();
+    const cases = d.cases || [];
+    document.getElementById('case-total').textContent = d.count || 0;
+    const open = cases.filter(c => !c.closed).length;
+    const risk = cases.filter(c => c.at_risk && !c.closed).length;
+    document.getElementById('case-open').textContent = open;
+    document.getElementById('case-risk').textContent = risk;
+
+    if (!cases.length) {
+      var _sm=document.documentElement.getAttribute('data-ui-mode')==='simple';
+      el.innerHTML = _sm
+        ? '<div class="empty" style="padding:3rem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48" style="opacity:.3;margin-bottom:.5rem"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><p style="font-size:.95rem;font-weight:600;color:var(--green)">当前没有待处理的案例</p><p style="font-size:.82rem;color:var(--t3);margin-top:.3rem">系统每 30 秒自动检查新案例，也可以点击「刷新」手动检查</p></div>'
+        : '<div class="empty" style="padding:3rem"><p>暂无活跃 Case</p></div>';
+      return;
+    }
+
+    el.innerHTML = cases.map(c => {
+      const cls = [c.at_risk ? 'at-risk' : '', c.closed ? 'closed' : ''].filter(Boolean).join(' ');
+      const satColor = c.satisfaction > 60 ? 'var(--green)' : c.satisfaction > 30 ? 'var(--amber)' : 'var(--red)';
+      const satW = Math.max(5, Math.min(100, c.satisfaction));
+      const chain = (c.intent_chain || []).map(i => '<span class="chain-step">' + i + '</span>').join('<span class="chain-arrow">→</span>');
+      const badges = [
+        c.at_risk ? '<span class="badge badge-risk">⚠ 高风险</span>' : '',
+        c.escalation ? '<span class="badge badge-esc">已升级</span>' : '',
+        c.closed ? '<span class="badge badge-closed">已结案</span>' : '',
+        c.pattern ? '<span class="badge badge-pattern">' + c.pattern_desc + '</span>' : '',
+      ].filter(Boolean).join(' ');
+      const ts = c.last_active ? new Date(c.last_active * 1000).toLocaleString('zh-CN') : '-';
+      return '<div class="case-card ' + cls + '" data-cid="' + c.case_id + '">'
+        + '<div class="case-head">'
+        + '<span class="case-id">' + c.case_id + '</span> ' + badges
+        + '<span style="margin-left:auto;font-size:.72rem;color:var(--t3)">' + ts + '</span>'
+        + '</div>'
+        + '<div style="font-size:.78rem;color:var(--t2)">'
+        + '<span data-help="satisfaction">满意度</span>: <strong style="color:' + satColor + '">' + c.satisfaction + '</strong>/100'
+        + '<span class="sat-bar"><span class="sat-fill" style="width:' + satW + '%;background:' + satColor + '"></span></span>'
+        + ' · 连续追问: ' + c.consecutive_same
+        + ' · 用户: ' + (c.user_id || '-').slice(-8)
+        + (c.chat_title ? ' · 群: ' + c.chat_title : '')
+        + '</div>'
+        + (chain ? '<div class="case-chain">' + chain + '</div>' : '')
+        + '<div class="case-msg"><strong>用户:</strong> ' + (c.last_message || '-') + '</div>'
+        + '<div class="case-msg"><strong>AI:</strong> ' + (c.last_reply || '-') + '</div>'
+        + (c.note ? '<div class="case-msg" style="color:var(--p)"><strong>备注:</strong> ' + c.note + '</div>' : '')
+        + (c.closed ? '' :
+           '<div class="case-actions">'
+           + '<input class="input case-note-input" id="note-' + c.case_id + '" placeholder="添加备注…" value="' + (c.note || '') + '" />'
+           + '<button class="btn btn-xs" data-help="btn_save" onclick="saveNote(\'' + c.case_id + '\')">保存备注</button>'
+           + '<button class="btn btn-xs" data-help="close_case" style="background:var(--green);color:#fff" onclick="closeCase(\'' + c.case_id + '\')">结案</button>'
+           + '</div>')
+        + '</div>';
+    }).join('');
+  } catch (e) {
+    var _sm2=document.documentElement.getAttribute('data-ui-mode')==='simple';
+    el.innerHTML = _sm2
+      ? '<div class="empty" style="padding:2.5rem"><p style="font-size:.95rem;font-weight:600;color:var(--red)">加载失败</p><p style="font-size:.82rem;color:var(--t3);margin-top:.3rem">请稍后点击「刷新」重试。如果问题持续，请联系技术支持。</p></div>'
+      : '<div class="empty" style="padding:2rem"><p>加载失败: ' + e + '</p></div>';
+  }
+}
+
+async function saveNote(cid) {
+  const note = document.getElementById('note-' + cid).value.trim();
+  await fetch('/api/cases/' + cid + '/note', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ note })
+  });
+  loadCases();
+}
+
+async function closeCase(cid) {
+  const res = prompt('请输入结案说明（可为空）:');
+  if (res === null) return;
+  await fetch('/api/cases/' + cid + '/close', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ resolution: res })
+  });
+  loadCases();
+}
+
+loadCases();
+setInterval(loadCases, 30000);
+</script>
+{% endblock %}

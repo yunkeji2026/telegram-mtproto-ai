@@ -1,0 +1,59 @@
+{# Payment domain: channel health dashboard widget #}
+<div class="card fa fa3 pro-only">
+  <h2>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+    通道健康度
+    <div class="actions">
+      <a href="/channels" class="btn btn-s btn-xs">管理通道</a>
+    </div>
+  </h2>
+  {% if health %}
+  <div class="health-grid">
+    {% for h in health %}
+    {% if h.grade == 'disabled' %}
+    {% set color = 'var(--t3,#888)' %}
+    <div class="h-card" style="opacity:.5">
+      <div class="ring-wrap">
+        <svg viewBox="0 0 36 36" style="transform:rotate(-90deg)">
+          <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--bd2,rgba(0,0,0,.1))" stroke-width="3.2"/>
+        </svg>
+        <div class="ring-score" style="font-size:.7rem;color:var(--t3)">禁用</div>
+      </div>
+      <div class="h-info">
+        <div class="h-name" title="{{ h.display_name }}">{{ h.display_name }}</div>
+        <div class="h-meta">
+          <span class="badge" style="background:#fee2e2;color:#dc2626">已禁用</span>
+        </div>
+      </div>
+    </div>
+    {% else %}
+    {% set color = 'var(--green)' if h.grade=='healthy' else ('var(--amber)' if h.grade=='warning' else 'var(--red)') %}
+    {% set bclass = 'b-g' if h.grade=='healthy' else ('b-a' if h.grade=='warning' else 'b-r') %}
+    <div class="h-card">
+      <div class="ring-wrap">
+        <svg viewBox="0 0 36 36" style="transform:rotate(-90deg)">
+          <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--bd2,rgba(0,0,0,.1))" stroke-width="3.2"/>
+          <circle cx="18" cy="18" r="15.9" fill="none" stroke="{{ color }}" stroke-width="3.2"
+            stroke-dasharray="{{ h.score }} 100" stroke-linecap="round"
+            style="transition:stroke-dasharray 1.2s ease .3s;filter:drop-shadow(0 0 4px {{ color }})"/>
+        </svg>
+        <div class="ring-score">{{ h.score }}</div>
+      </div>
+      <div class="h-info">
+        <div class="h-name" title="{{ h.display_name }}">{{ h.display_name }}</div>
+        <div class="h-meta">
+          <span class="badge {{ bclass }}">{{ '健康' if h.grade=='healthy' else ('警告' if h.grade=='warning' else '异常') }}</span>
+          {% if h.fee_rate is defined %}<span style="font-size:.75rem">费率 {{ h.fee_rate }}</span>{% endif %}
+        </div>
+      </div>
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+    <p>暂无通道数据，<a href="/channels" style="color:var(--p)">去添加通道</a></p>
+  </div>
+  {% endif %}
+</div>

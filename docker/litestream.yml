@@ -1,0 +1,51 @@
+# P7-1：Litestream 主配置（primary 节点使用）
+#
+# 它会把列出的所有 SQLite DB 实时增量推到 minio bucket。
+# bucket 需要提前创建（见 scripts/ha/init_minio.sh）。
+#
+# 目标 RPO：≤ 5 min（Litestream 默认 1s 内推，极端网络丢包下最多 sync-interval）
+# 目标 RTO：≤ 10 min（standby 执行 restore + 启动 = 5~8 min 实测）
+
+access-key-id: ${LITESTREAM_ACCESS_KEY_ID}
+secret-access-key: ${LITESTREAM_SECRET_ACCESS_KEY}
+
+dbs:
+  # Messenger RPA 主状态库（最关键，含 chat_state / approvals / send_log / credit）
+  - path: /data/messenger_rpa.sqlite
+    replicas:
+      - type: s3
+        endpoint: http://minio:9000
+        bucket: rpa-backup
+        path: messenger_rpa
+        region: us-east-1
+        sync-interval: 1s
+        snapshot-interval: 1h
+        retention: 72h
+        validation-interval: 12h
+        force-path-style: true
+
+  # 审批队列库（P1-5 独立库，供 Web UI 审批流）
+  - path: /data/messenger_rpa_approvals.sqlite
+    replicas:
+      - type: s3
+        endpoint: http://minio:9000
+        bucket: rpa-backup
+        path: messenger_rpa_approvals
+        region: us-east-1
+        sync-interval: 1s
+        snapshot-interval: 1h
+        retention: 72h
+        force-path-style: true
+
+  # Bot 全局上下文（_conversation_history / ltm / credit memory）
+  - path: /data/bot.db
+    replicas:
+      - type: s3
+        endpoint: http://minio:9000
+        bucket: rpa-backup
+        path: bot
+        region: us-east-1
+        sync-interval: 2s
+        snapshot-interval: 1h
+        retention: 72h
+        force-path-style: true

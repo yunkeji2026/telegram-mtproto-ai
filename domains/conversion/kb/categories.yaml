@@ -1,0 +1,20 @@
+categories:
+  - name: "产品价值"
+    description: "卖点、差异化、适用人群"
+    triggers: ["优势", "亮点", "为什么选", "区别", "价值"]
+
+  - name: "常见问题"
+    description: "价格、周期、安全、合规等高频问答"
+    triggers: ["多少钱", "多久", "安全吗", "合规", "FAQ"]
+
+  - name: "转化话术"
+    description: "邀约下一步（演示、试用、预约、加微等）"
+    triggers: ["预约", "演示", "试用", "联系", "下一步"]
+
+  - name: "异议处理"
+    description: "顾虑、对比、犹豫时的回应框架"
+    triggers: ["担心", "犹豫", "再看看", "对比", "太贵"]
+
+  - name: "其他"
+    description: "未归类"
+    triggers: ["其他", "随便问问"]

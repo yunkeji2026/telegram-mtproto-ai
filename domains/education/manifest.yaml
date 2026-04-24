@@ -1,0 +1,24 @@
+name: education
+display_name: "教育答疑"
+version: "1.0"
+description: "学习与课程辅导域 — 作业思路、考试准备、概念讲解"
+
+skills: []
+
+config_files:
+  - defaults.yaml
+
+kb:
+  categories: kb/categories.yaml
+  seeds: kb/seeds.yaml
+
+prompts:
+  system_prompt: prompts/system_prompt.txt
+
+hooks: true
+
+i18n:
+  zh: i18n/zh.yaml
+  en: i18n/en.yaml
+
+web_routes: false

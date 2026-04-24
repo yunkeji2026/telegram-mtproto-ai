@@ -1,0 +1,329 @@
+{% extends "base.html" %}
+{% block title %}操作记录 · {{ site_name|default('智控王客户转化聊天系统') }}{% endblock %}
+{% block page_title %}操作记录{% endblock %}
+{% block head %}
+<style>
+/* filter form */
+.filter-row{display:flex;flex-wrap:wrap;gap:.6rem;align-items:flex-end}
+.filter-row .f-grp{margin-bottom:0;min-width:160px;flex:1}
+/* timeline */
+.tl{position:relative;padding-left:2.2rem}
+.tl::before{content:'';position:absolute;left:.85rem;top:0;bottom:0;width:2px;background:var(--bd);border-radius:1px}
+.tl-item{position:relative;margin-bottom:.8rem}
+.tl-item:last-child{margin-bottom:0}
+.tl-marker{position:absolute;left:-1.65rem;top:.3rem;width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;z-index:1;box-shadow:0 0 0 3px var(--bg)}
+.tl-marker svg{width:13px;height:13px;color:#fff}
+.tl-body{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:.8rem 1rem;transition:all .2s}
+[data-theme="dark"] .tl-body{backdrop-filter:blur(6px)}
+.tl-body:hover{box-shadow:var(--s1);transform:translateX(2px)}
+.tl-top{display:flex;align-items:center;flex-wrap:wrap;gap:.5rem;margin-bottom:.35rem}
+.tl-action{font-weight:700;font-size:.875rem;color:var(--t)}
+.tl-time{margin-left:auto;font-size:.76rem;color:var(--t3);font-family:'Consolas',monospace}
+.tl-meta{display:flex;flex-wrap:wrap;gap:.5rem;font-size:.8rem;color:var(--t2)}
+.tl-diff{margin-top:.5rem;background:var(--input);border-radius:7px;padding:.5rem .7rem;font-size:.78rem;font-family:'Consolas',monospace;display:none}
+.tl-diff.show{display:block}
+.tl-diff .rm{color:var(--red);background:var(--rs);padding:.05rem .25rem;border-radius:3px}
+.tl-diff .add{color:var(--green);background:var(--gs);padding:.05rem .25rem;border-radius:3px}
+.tl-expand{background:none;border:none;cursor:pointer;font-size:.75rem;color:var(--t3);padding:.2rem .5rem;border-radius:5px;transition:.15s;margin-top:.3rem;font-family:inherit}
+.tl-expand:hover{background:var(--bd);color:var(--t)}
+/* pagination */
+.pager{display:flex;align-items:center;justify-content:center;gap:.4rem;margin-top:1.2rem}
+.pager a,.pager span{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;font-size:.85rem;font-weight:600;text-decoration:none;transition:.2s;color:var(--t2)}
+.pager a:hover{background:var(--ps);color:var(--p)}
+.pager .cur{background:var(--g);color:#fff;box-shadow:var(--sp)}
+/* heatmap */
+.hm-wrap{overflow-x:auto;padding-bottom:.3rem}
+.hm-grid{display:inline-grid;grid-template-rows:repeat(7,12px);grid-auto-flow:column;gap:2px;min-width:max-content}
+.hm-cell{width:12px;height:12px;border-radius:2px;background:var(--bd);position:relative;cursor:default;transition:transform .1s}
+.hm-cell:hover{transform:scale(1.3);z-index:2}
+.hm-cell.l1{background:rgba(91,124,246,.25)}
+.hm-cell.l2{background:rgba(91,124,246,.45)}
+.hm-cell.l3{background:rgba(91,124,246,.7)}
+.hm-cell.l4{background:#5b7cf6}
+[data-theme="dark"] .hm-cell.l1{background:rgba(107,138,248,.3)}
+[data-theme="dark"] .hm-cell.l4{background:#6b8af8}
+.hm-month-labels{display:flex;gap:0;font-size:.66rem;color:var(--t3);margin-bottom:3px;margin-left:0;padding-left:0}
+.hm-day-labels{display:grid;grid-template-rows:repeat(7,12px);gap:2px;font-size:.62rem;color:var(--t3);margin-right:4px;align-items:center}
+.hm-layout{display:flex;align-items:flex-start;gap:0}
+.hm-tooltip{position:fixed;background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:.4rem .7rem;font-size:.75rem;pointer-events:none;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,.18);display:none}
+.hm-stats{display:flex;gap:1.2rem;flex-wrap:wrap;font-size:.8rem;color:var(--t2);margin-top:.7rem}
+.hm-stat strong{color:var(--t);font-weight:700}
+</style>
+{% endblock %}
+{% block content %}
+{% set active="audit" %}
+
+<!-- 活动热力图 -->
+<div class="card fa pro-only" style="margin-bottom:.9rem">
+  <h2>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+    操作活动热力图
+    <span style="font-size:.75rem;font-weight:400;color:var(--t2);margin-left:.4rem">最近 84 天</span>
+  </h2>
+  <div id="hm-loading" style="font-size:.82rem;color:var(--t2)">加载中…</div>
+  <div id="hm-content" style="display:none">
+    <div style="font-size:.75rem;color:var(--t2);margin-bottom:.6rem">每格代表一天，颜色越深表示操作次数越多</div>
+    <div class="hm-layout">
+      <div class="hm-day-labels" id="hm-day-labels">
+        <span>日</span><span>一</span><span>二</span><span>三</span>
+        <span>四</span><span>五</span><span>六</span>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div class="hm-month-labels" id="hm-month-labels"></div>
+        <div class="hm-wrap">
+          <div class="hm-grid" id="hm-grid"></div>
+        </div>
+      </div>
+    </div>
+    <div class="hm-stats" id="hm-stats"></div>
+  </div>
+</div>
+<div class="hm-tooltip" id="hm-tooltip"></div>
+
+<!-- filter -->
+<div class="card fa">
+  <h2>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+    筛选条件
+    <div class="actions">
+      {% set export_qs = [] %}
+      {% if filters %}
+        {% if filters.action %}{% set _ = export_qs.append('action=' ~ filters.action) %}{% endif %}
+        {% if filters.operator %}{% set _ = export_qs.append('operator=' ~ filters.operator) %}{% endif %}
+        {% if filters.channel %}{% set _ = export_qs.append('channel=' ~ filters.channel) %}{% endif %}
+        {% if filters.date_from %}{% set _ = export_qs.append('date_from=' ~ filters.date_from) %}{% endif %}
+        {% if filters.date_to %}{% set _ = export_qs.append('date_to=' ~ filters.date_to) %}{% endif %}
+      {% endif %}
+      <a href="/audit/export{% if export_qs %}?{{ export_qs|join('&') }}{% endif %}"
+         class="btn btn-s btn-xs pro-only"
+         title="{% if export_qs %}导出当前筛选结果为 CSV{% else %}导出全部记录为 CSV{% endif %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        {% if export_qs %}导出筛选结果{% else %}导出全部{% endif %}
+      </a>
+    </div>
+  </h2>
+  <form method="get" action="/audit">
+    <div class="filter-row">
+      <div class="f-grp">
+        <label class="f-lbl">操作类型 <span class="tip" data-tip="intent" style="cursor:help;opacity:.5;font-size:.6rem;background:var(--bd2);width:13px;height:13px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center">?</span></label>
+        <select name="action">
+          <option value="">全部</option>
+          {% for a in all_actions|default([]) %}
+          <option value="{{ a }}" {% if filters and filters.action == a %}selected{% endif %}>{{ a }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="f-grp">
+        <label class="f-lbl">操作人</label>
+        <select name="operator">
+          <option value="">全部</option>
+          {% for op in all_operators|default([]) %}
+          <option value="{{ op }}" {% if filters and filters.operator == op %}selected{% endif %}>{{ op }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="f-grp">
+        <label class="f-lbl">目标 / 关键词</label>
+        <input type="text" name="channel" value="{{ filters.channel if filters else '' }}" placeholder="通道名 / 模板名 / 关键词">
+      </div>
+      <div class="f-grp">
+        <label class="f-lbl">起始日期</label>
+        <input type="date" name="date_from" value="{{ filters.date_from if filters else '' }}">
+      </div>
+      <div class="f-grp">
+        <label class="f-lbl">结束日期</label>
+        <input type="date" name="date_to" value="{{ filters.date_to if filters else '' }}">
+      </div>
+      <div class="f-grp" style="min-width:100px;flex:0">
+        <label class="f-lbl">&nbsp;</label>
+        <button type="submit" class="btn btn-p btn-sm" style="width:100%">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          搜索
+        </button>
+      </div>
+      {% set has_filter = filters and (filters.action or filters.operator or filters.channel or filters.date_from or filters.date_to) %}
+      {% if has_filter %}
+      <div class="f-grp" style="min-width:80px;flex:0">
+        <label class="f-lbl">&nbsp;</label>
+        <a href="/audit" class="btn btn-s btn-sm" style="width:100%;justify-content:center">清除</a>
+      </div>
+      {% endif %}
+    </div>
+  </form>
+</div>
+
+<!-- timeline -->
+<div class="card fa fa2">
+  <h2>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+    操作时间轴
+    {% if total is defined %}<span style="font-weight:400;font-size:.8rem;color:var(--t3);margin-left:.3rem">共 {{ total }} 条</span>{% endif %}
+  </h2>
+  {% if records %}
+  <div class="tl">
+    {% for r in records %}
+    {% set act = r.action|default('') %}
+    {% set is_update = 'update' in act or 'set' in act or 'change' in act or 'batch' in act %}
+    {% set is_del = 'del' in act or 'remove' in act or 'disable' in act or 'rollback' in act %}
+    {% set is_add = 'add' in act or 'create' in act or 'enable' in act or 'import' in act %}
+    {% set mc = 'ico-p' if is_update else ('ico-r' if is_del else 'ico-g') %}
+    <div class="tl-item">
+      <div class="tl-marker {{ mc }}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          {% if is_update %}<path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+          {% elif is_del %}<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/>
+          {% else %}<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>{% endif %}
+        </svg>
+      </div>
+      <div class="tl-body">
+        <div class="tl-top">
+          <span class="tl-action">{{ act }}</span>
+          {% if r.target %}<span class="badge b-p">{{ r.target }}</span>{% endif %}
+          {% if r.user_id %}<span class="badge b-n">{{ r.user_id }}</span>{% endif %}
+          <span class="tl-time">{{ r.ts }}</span>
+        </div>
+        {% if r.old_val or r.new_val or r.snapshot_id %}
+        <div class="tl-meta">
+          {% if r.snapshot_id %}<span style="font-size:.72rem;color:var(--t3)">快照: {{ r.snapshot_id }}</span>{% endif %}
+        </div>
+        {% if r.old_val or r.new_val %}
+        <button class="tl-expand" onclick="toggleDiff(this)">▶ 查看变更</button>
+        <div class="tl-diff">
+          {% if r.old_val %}<div>旧值：<span class="rm">{{ r.old_val }}</span></div>{% endif %}
+          {% if r.new_val %}<div>新值：<span class="add">{{ r.new_val }}</span></div>{% endif %}
+        </div>
+        {% endif %}
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <!-- pagination -->
+  {% if total_pages is defined and total_pages > 1 %}
+  <div class="pager">
+    {% if page > 1 %}<a href="?page={{ page-1 }}&{{ query_str|default('') }}">‹</a>{% endif %}
+    {% for i in range(1, total_pages+1) %}
+      {% if i == page %}<span class="cur">{{ i }}</span>
+      {% elif i == 1 or i == total_pages or (i >= page-2 and i <= page+2) %}<a href="?page={{ i }}&{{ query_str|default('') }}">{{ i }}</a>
+      {% elif i == page-3 or i == page+3 %}<span>…</span>{% endif %}
+    {% endfor %}
+    {% if page < total_pages %}<a href="?page={{ page+1 }}&{{ query_str|default('') }}">›</a>{% endif %}
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="empty">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+    <p>暂无操作记录</p>
+  </div>
+  {% endif %}
+</div>
+
+<script>
+function toggleDiff(btn) {
+  const d = btn.nextElementSibling;
+  d.classList.toggle('show');
+  btn.textContent = d.classList.contains('show') ? '▼ 收起变更' : '▶ 查看变更';
+}
+
+/* ── 活动热力图 ─────────────────────────────────────────── */
+(async function initHeatmap(){
+  const DAYS = 84;
+  try{
+    const r = await fetch('/api/audit/activity?days=' + DAYS);
+    if(!r.ok) return;
+    const { days: dayMap, max } = await r.json();
+
+    const grid   = document.getElementById('hm-grid');
+    const months = document.getElementById('hm-month-labels');
+    const statsEl= document.getElementById('hm-stats');
+    const tooltip= document.getElementById('hm-tooltip');
+
+    document.getElementById('hm-loading').style.display = 'none';
+    document.getElementById('hm-content').style.display = '';
+
+    // 生成 84 天日期列表（从今天往前）
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const dates = [];
+    for(let i = DAYS - 1; i >= 0; i--){
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      dates.push(d);
+    }
+
+    // 月份标签（每列组对应的月份，只在月份变化时显示）
+    const colWidth = 14; // 12px + 2px gap
+    let lastMonth = -1;
+    const mlHtml = [];
+    let colIdx = 0;
+    const weeks = {};
+    dates.forEach((d, i) => {
+      const dow = d.getDay(); // 0=Sun
+      const weekIdx = Math.floor(i / 7);
+      if(!weeks[weekIdx]) weeks[weekIdx] = {};
+      weeks[weekIdx][dow] = d;
+    });
+
+    // Build grid cells
+    let totalOps = 0, activeDays = 0, maxDay = 0;
+    const cells = dates.map(d => {
+      const key = d.toISOString().slice(0,10);
+      const cnt = dayMap[key] || 0;
+      totalOps += cnt;
+      if(cnt > 0) activeDays++;
+      if(cnt > maxDay) maxDay = cnt;
+
+      let level = 0;
+      if(cnt > 0){
+        const pct = max > 0 ? cnt / max : 0;
+        level = pct <= 0.25 ? 1 : pct <= 0.5 ? 2 : pct <= 0.75 ? 3 : 4;
+      }
+      const cell = document.createElement('div');
+      cell.className = 'hm-cell' + (level ? ' l'+level : '');
+      cell.title = key + ': ' + cnt + ' 次操作';
+      cell.addEventListener('mouseenter', evt => {
+        tooltip.style.display = 'block';
+        tooltip.innerHTML = `<b>${key}</b><br>${cnt} 次操作`;
+      });
+      cell.addEventListener('mousemove', evt => {
+        tooltip.style.left = (evt.clientX + 12) + 'px';
+        tooltip.style.top  = (evt.clientY - 32) + 'px';
+      });
+      cell.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+      return cell;
+    });
+    cells.forEach(c => grid.appendChild(c));
+
+    // Month labels above the grid
+    const monthNames = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+    let prevMonth = -1, prevLeft = 0;
+    const mlSpans = [];
+    dates.forEach((d, i) => {
+      const m = d.getMonth();
+      if(m !== prevMonth){
+        // compute left offset (in columns of 14px)
+        const col = Math.floor(i / 7);
+        if(prevMonth !== -1) {
+          mlSpans.push({label: monthNames[prevMonth], width: (col - prevLeft) * colWidth});
+        }
+        prevMonth = m;
+        prevLeft = col;
+      }
+    });
+    // last month
+    const totalCols = Math.ceil(dates.length / 7);
+    mlSpans.push({label: monthNames[prevMonth], width: (totalCols - prevLeft) * colWidth});
+    months.innerHTML = mlSpans.map(s =>
+      `<span style="display:inline-block;width:${s.width}px;white-space:nowrap;overflow:hidden">${s.label}</span>`
+    ).join('');
+
+    // Stats row
+    statsEl.innerHTML =
+      `<span><strong>${totalOps}</strong> 次操作</span>` +
+      `<span><strong>${activeDays}</strong> 个活跃日</span>` +
+      `<span>最高单日 <strong>${maxDay}</strong> 次</span>`;
+
+  }catch(e){ document.getElementById('hm-loading').textContent = '热力图加载失败'; }
+})();
+</script>
+{% endblock %}

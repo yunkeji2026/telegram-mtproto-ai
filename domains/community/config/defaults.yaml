@@ -1,0 +1,27 @@
+domain:
+  name: community
+  display_name: "社区管理"
+  version: "1.0"
+
+ai:
+  reply_style: warm
+  ai_name: "社区管家"
+
+skills:
+  enabled:
+    - greeting
+    - complaint
+    - small_talk
+    - test
+
+kb:
+  categories:
+    - "群规FAQ"
+    - "活动公告"
+    - "新手引导"
+    - "常见问题"
+    - "违规处理"
+
+emotion_enhancer_skip:
+  phrases: []
+  patterns: []

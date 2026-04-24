@@ -1,0 +1,52 @@
+name: payment
+display_name: "支付通道客服"
+version: "1.0"
+description: "支付通道行业客服域 — 订单查询、GXP 命令代发、通道/额度管理"
+
+skills:
+  - gxp_command
+  - order_query
+  - price_check
+  - status_check
+  - channel_info
+  - quota_config
+  - enhanced_quota_config
+
+config_files:
+  - defaults.yaml
+  - exchange_rates.yaml
+  - quota_rules.yaml
+  - trigger_keywords.yaml
+
+kb:
+  categories: kb/categories.yaml
+  seeds: kb/seeds.yaml
+  direct_render_spec: kb/direct_render_spec.yaml
+
+prompts:
+  system_prompt: prompts/system_prompt.txt
+  context_supplements: prompts/context_supplements.yaml
+  terminology: prompts/terminology.yaml
+
+i18n:
+  zh: i18n/zh.yaml
+  en: i18n/en.yaml
+
+hooks: true
+
+web:
+  routes: true
+  pages:
+    - key: ch
+      path: /channels
+      label: "通道管理"
+      label_simple: "通道状态"
+      icon: globe
+      section: ops
+      show_in_simple: true
+      roles: [master, admin, viewer]
+      cmd_keys: "channels 通道 状态 管理"
+  dashboard_widgets:
+    - key: channel_health
+      template: _widget_channel_health.html
+      section: pro-only

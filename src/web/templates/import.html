@@ -1,0 +1,315 @@
+{% extends "base.html" %}
+{% block title %}导入 / 导出 · {{ site_name|default('智控王客户转化聊天系统') }}{% endblock %}
+{% block page_title %}导入 / 导出配置{% endblock %}
+{% block head %}
+<style>
+.dropzone{border:2px dashed var(--bd2);border-radius:var(--r-lg);padding:3rem 2rem;text-align:center;cursor:pointer;transition:all .25s;background:var(--input);position:relative;overflow:hidden}
+.dropzone:hover,.dropzone.dragover{border-color:var(--p);background:var(--ps);transform:scale(1.005)}
+.dropzone.dragover{box-shadow:0 0 0 4px var(--ps)}
+.dropzone input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.dz-icon{width:56px;height:56px;margin:0 auto .9rem;background:var(--ps);border-radius:14px;display:flex;align-items:center;justify-content:center;transition:.25s}
+.dz-icon svg{width:28px;height:28px;color:var(--p)}
+.dropzone:hover .dz-icon,.dropzone.dragover .dz-icon{background:var(--p);box-shadow:var(--sp)}
+.dropzone:hover .dz-icon svg,.dropzone.dragover .dz-icon svg{color:#fff}
+.dz-title{font-size:1rem;font-weight:700;margin-bottom:.35rem}
+.dz-sub{font-size:.83rem;color:var(--t3)}
+/* file preview */
+.file-preview{display:none;align-items:center;gap:.8rem;padding:.75rem 1rem;background:var(--input);border:1px solid var(--bd);border-radius:10px;margin-top:.8rem}
+.file-preview.show{display:flex}
+.file-ico{width:38px;height:38px;background:var(--gs);border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.file-ico svg{width:20px;height:20px;color:var(--green)}
+.file-info{flex:1;min-width:0}
+.file-name{font-weight:600;font-size:.875rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.file-size{font-size:.77rem;color:var(--t3);margin-top:.1rem}
+.file-rm{background:none;border:none;cursor:pointer;color:var(--t3);padding:.25rem;border-radius:5px;transition:.15s;display:flex;align-items:center}
+.file-rm:hover{background:var(--rs);color:var(--red)}
+.file-rm svg{width:16px;height:16px}
+/* progress */
+.progress-wrap{display:none;margin-top:.8rem}
+.progress-wrap.show{display:block}
+.progress-bar{height:5px;background:var(--bd);border-radius:3px;overflow:hidden;margin-bottom:.35rem}
+.progress-fill{height:100%;background:var(--g);width:0%;transition:width .3s ease;border-radius:3px}
+.progress-txt{font-size:.78rem;color:var(--t3);text-align:center}
+/* mode selector */
+.mode-sel{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin:.9rem 0 .6rem}
+.mode-opt{border:2px solid var(--bd);border-radius:10px;padding:.8rem 1rem;cursor:pointer;transition:all .2s;position:relative;background:var(--card)}
+.mode-opt:hover{border-color:var(--p)}
+.mode-opt input[type=radio]{position:absolute;opacity:0;pointer-events:none}
+.mode-opt.active{border-color:var(--p);background:var(--ps)}
+.mode-opt .m-icon{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;margin-bottom:.5rem}
+.mode-opt .m-icon svg{width:17px;height:17px;color:#fff}
+.mode-opt .m-title{font-weight:700;font-size:.875rem;margin-bottom:.2rem}
+.mode-opt .m-desc{font-size:.75rem;color:var(--t3);line-height:1.4}
+/* export section */
+.export-options{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.8rem}
+.export-opt{border:1.5px solid var(--bd);border-radius:var(--r);padding:1.1rem;text-align:center;cursor:pointer;transition:all .22s;text-decoration:none;display:block;background:var(--card)}
+[data-theme="dark"] .export-opt{background:var(--card);backdrop-filter:blur(6px)}
+.export-opt:hover{border-color:var(--p);box-shadow:var(--s1);transform:translateY(-2px)}
+.export-opt .opt-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;margin:0 auto .7rem}
+.export-opt .opt-icon svg{width:20px;height:20px;color:#fff}
+.export-opt .opt-name{font-weight:700;font-size:.88rem;margin-bottom:.25rem}
+.export-opt .opt-desc{font-size:.77rem;color:var(--t3)}
+</style>
+{% endblock %}
+{% block content %}
+{% set active="" %}
+
+{% if ui_mode == 'simple' %}
+<div style="background:linear-gradient(135deg,rgba(245,158,11,.08),rgba(239,68,68,.06));border:1px solid rgba(245,158,11,.2);border-radius:10px;padding:.7rem 1rem;margin-bottom:.8rem;font-size:.82rem;color:var(--t2);display:flex;align-items:center;gap:.6rem">
+  <span style="font-size:1.1rem;flex-shrink:0">🔒</span>
+  <div><strong style="color:var(--t)">管理员页面</strong> — 导入/导出为高级管理功能。<a href="/set_ui_mode?mode=full&next=/import" style="color:var(--p);font-weight:600">切换到完整模式</a>获得完整体验，或<a href="/cases" style="color:var(--p);font-weight:600">返回案例</a>。</div>
+</div>
+{% endif %}
+
+{% if msg %}
+<div class="msg {{ 'msg-ok' if '成功' in msg or 'ok' in msg.lower() else 'msg-err' }} fa">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">{% if '成功' in msg or 'ok' in msg.lower() %}<polyline points="20 6 9 17 4 12"/>{% else %}<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>{% endif %}</svg>
+  {{ msg }}
+</div>
+{% endif %}
+
+<!-- import -->
+<div class="card fa">
+  <h2>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+    导入配置
+  </h2>
+  <form method="post" action="/import" enctype="multipart/form-data" id="import-form">
+    <!-- 导入模式选择 -->
+    <div style="font-size:.82rem;font-weight:700;color:var(--t2);margin-bottom:.5rem">导入模式</div>
+    <div class="mode-sel">
+      <label class="mode-opt active" id="mode-overwrite-lbl" onclick="setMode('overwrite')">
+        <input type="radio" name="mode" value="overwrite" checked>
+        <div class="m-icon" style="background:linear-gradient(135deg,#ef4444,#dc2626)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M9 6V4h6v2"/></svg>
+        </div>
+        <div class="m-title">覆盖模式</div>
+        <div class="m-desc">完全替换当前配置，导入文件内容取代一切。适合全量恢复。</div>
+      </label>
+      <label class="mode-opt" id="mode-merge-lbl" onclick="setMode('merge')">
+        <input type="radio" name="mode" value="merge">
+        <div class="m-icon" style="background:linear-gradient(135deg,#10b981,#059669)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 009 9"/></svg>
+        </div>
+        <div class="m-title">增量合并</div>
+        <div class="m-desc">只更新导入文件中存在的键，保留当前独有配置。适合部分更新。</div>
+      </label>
+    </div>
+
+    <div class="dropzone" id="dropzone" onclick="document.getElementById('file-input').click()">
+      <input type="file" id="file-input" name="file" accept=".zip" onchange="onFileSelect(this.files[0])">
+      <div class="dz-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div>
+      <div class="dz-title">拖拽 ZIP 文件到此处，或点击选择</div>
+      <div class="dz-sub">支持通过「导出配置」生成的 .zip 打包文件</div>
+    </div>
+    <div class="file-preview" id="file-preview">
+      <div class="file-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+      <div class="file-info">
+        <div class="file-name" id="file-name">-</div>
+        <div class="file-size" id="file-size">-</div>
+      </div>
+      <button type="button" class="file-rm" onclick="clearFile()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    </div>
+    <div class="progress-wrap" id="progress-wrap">
+      <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+      <div class="progress-txt" id="progress-txt">上传中…</div>
+    </div>
+    <div style="margin-top:1rem;display:flex;gap:.6rem;align-items:center">
+      <button type="submit" class="btn btn-p" id="upload-btn" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        <span id="import-btn-lbl">覆盖导入</span>
+      </button>
+      <button type="button" class="btn btn-s" onclick="clearFile()">取消</button>
+      <span style="font-size:.75rem;color:var(--t3);margin-left:.3rem">导入前系统自动创建备份快照</span>
+    </div>
+  </form>
+</div>
+
+<!-- export -->
+<div class="card fa fa2">
+  <h2>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    导出配置
+  </h2>
+  <div class="export-options">
+    <form method="post" action="/export" style="contents">
+      <button type="submit" name="format" value="yaml" class="export-opt">
+        <div class="opt-icon" style="background:linear-gradient(135deg,#5b7cf6,#8b5cf6)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        </div>
+        <div class="opt-name" data-help="YAML">YAML 格式</div>
+        <div class="opt-desc">完整配置文件，可直接部署</div>
+      </button>
+    </form>
+    <form method="post" action="/export" style="contents">
+      <button type="submit" name="format" value="zip" class="export-opt">
+        <div class="opt-icon" style="background:linear-gradient(135deg,#10b981,#059669)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8m-4-4v4"/><path d="M12 7l-2 4h4l-2 4"/></svg>
+        </div>
+        <div class="opt-name" data-help="ZIP">ZIP 打包</div>
+        <div class="opt-desc">配置 + 话术模板全量打包</div>
+      </button>
+    </form>
+    <form method="post" action="/export" style="contents">
+      <button type="submit" name="format" value="json" class="export-opt">
+        <div class="opt-icon" style="background:linear-gradient(135deg,#f59e0b,#d97706)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+        </div>
+        <div class="opt-name" data-help="JSON">JSON 格式</div>
+        <div class="opt-desc">结构化数据，便于程序处理</div>
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- Webhook Settings Card -->
+<div class="card fa fa3">
+  <h2>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8h1a4 4 0 010 8h-1"/><path d="M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
+    <span data-help="webhook">Webhook 变更通知</span>
+  </h2>
+  <div id="wh-load" style="color:var(--t3);font-size:.83rem">加载中…</div>
+  <div id="wh-form" style="display:none">
+    <div class="f-grp" style="margin-bottom:.8rem">
+      <label class="f-lbl">推送地址（URL）</label>
+      <input type="url" id="wh-url" placeholder="https://your-server.com/webhook" style="width:100%">
+    </div>
+    <div class="f-grp" style="margin-bottom:.8rem">
+      <label class="f-lbl" data-help="HMAC">签名密钥（可选，用于 HMAC-SHA256 验签）</label>
+      <input type="password" id="wh-secret" placeholder="留空则不签名">
+    </div>
+    <div class="f-grp" style="margin-bottom:.8rem">
+      <label class="f-lbl">监听事件</label>
+      <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.4rem">
+        <label style="display:flex;align-items:center;gap:.35rem;font-size:.83rem;cursor:pointer">
+          <input type="checkbox" id="ev-config_change" value="config_change" checked style="accent-color:var(--p)"> 配置变更
+        </label>
+        <label style="display:flex;align-items:center;gap:.35rem;font-size:.83rem;cursor:pointer">
+          <input type="checkbox" id="ev-rollback" value="rollback" style="accent-color:var(--p)"> 回滚操作
+        </label>
+        <label style="display:flex;align-items:center;gap:.35rem;font-size:.83rem;cursor:pointer">
+          <input type="checkbox" id="ev-import" value="import" style="accent-color:var(--p)"> 导入配置
+        </label>
+        <label style="display:flex;align-items:center;gap:.35rem;font-size:.83rem;cursor:pointer">
+          <input type="checkbox" id="ev-test" value="test" checked style="accent-color:var(--p)"> 测试推送
+        </label>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:.8rem;margin-bottom:.5rem">
+      <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;font-size:.83rem">
+        <input type="checkbox" id="wh-enabled" style="width:16px;height:16px;accent-color:var(--p)"> 启用 Webhook
+      </label>
+    </div>
+    <div style="display:flex;gap:.6rem;flex-wrap:wrap">
+      <button class="btn btn-p btn-sm" data-help="btn_save" onclick="saveWebhook()">保存设置</button>
+      <button class="btn btn-s btn-sm" data-help="btn_test" onclick="testWebhook()">发送测试</button>
+    </div>
+    <div style="margin-top:.7rem;font-size:.76rem;color:var(--t3);background:var(--input);padding:.6rem .8rem;border-radius:8px;line-height:1.5">
+      💡 Webhook 推送 JSON payload，包含 <code>event</code>、<code>actor</code>、<code>target</code>、<code>summary</code>、<code>ts</code> 字段。
+      有 secret 时，请求头携带 <code>X-Hub-Signature-256</code> 签名。
+    </div>
+  </div>
+</div>
+
+<script>
+let _importMode = 'overwrite';
+
+function setMode(mode) {
+  _importMode = mode;
+  document.getElementById('mode-overwrite-lbl').classList.toggle('active', mode === 'overwrite');
+  document.getElementById('mode-merge-lbl').classList.toggle('active', mode === 'merge');
+  document.querySelector(`input[name=mode][value=${mode}]`).checked = true;
+  document.getElementById('import-btn-lbl').textContent = mode === 'merge' ? '增量合并导入' : '覆盖导入';
+}
+
+const dz = document.getElementById('dropzone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+dz.addEventListener('drop', e => {
+  e.preventDefault(); dz.classList.remove('dragover');
+  const f = e.dataTransfer.files[0];
+  if (f) { const dt=new DataTransfer();dt.items.add(f);document.getElementById('file-input').files=dt.files; onFileSelect(f); }
+});
+
+function onFileSelect(f) {
+  if (!f) return;
+  document.getElementById('file-name').textContent = f.name;
+  document.getElementById('file-size').textContent = formatSize(f.size);
+  document.getElementById('file-preview').classList.add('show');
+  document.getElementById('upload-btn').disabled = false;
+  dz.style.display = 'none';
+}
+
+function clearFile() {
+  document.getElementById('file-input').value = '';
+  document.getElementById('file-preview').classList.remove('show');
+  document.getElementById('upload-btn').disabled = true;
+  dz.style.display = '';
+  document.getElementById('progress-wrap').classList.remove('show');
+}
+
+function formatSize(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
+  return (b/1048576).toFixed(1) + ' MB';
+}
+
+document.getElementById('import-form').addEventListener('submit', e => {
+  const pw = document.getElementById('progress-wrap');
+  const pf = document.getElementById('progress-fill');
+  const pt = document.getElementById('progress-txt');
+  pw.classList.add('show');
+  pt.textContent = _importMode === 'merge' ? '合并中…' : '上传中…';
+  let w = 0;
+  const iv = setInterval(() => { w = Math.min(w + Math.random()*15, 85); pf.style.width = w + '%'; }, 200);
+  setTimeout(() => { clearInterval(iv); pf.style.width = '100%'; pt.textContent = '处理中…'; }, 2000);
+});
+
+/* ── Webhook Settings ──────────────────────────── */
+async function loadWebhook() {
+  try {
+    const r = await fetch('/api/webhook-settings');
+    if (!r.ok) return;
+    const d = await r.json();
+    document.getElementById('wh-url').value = d.url || '';
+    document.getElementById('wh-enabled').checked = !!d.enabled;
+    const evs = d.events || [];
+    ['config_change','rollback','import','test'].forEach(ev => {
+      const el = document.getElementById('ev-'+ev);
+      if (el) el.checked = evs.includes(ev);
+    });
+    document.getElementById('wh-load').style.display = 'none';
+    document.getElementById('wh-form').style.display = '';
+  } catch(e) {
+    document.getElementById('wh-load').textContent = '加载失败（需要管理员权限）';
+  }
+}
+
+async function saveWebhook() {
+  const events = ['config_change','rollback','import','test']
+    .filter(ev => document.getElementById('ev-'+ev)?.checked);
+  const body = {
+    url: document.getElementById('wh-url').value.trim(),
+    enabled: document.getElementById('wh-enabled').checked,
+    events,
+  };
+  const secret = document.getElementById('wh-secret').value.trim();
+  if (secret) body.secret = secret;
+  const r = await fetch('/api/webhook-settings', {
+    method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+  });
+  const d = await r.json();
+  if (d.ok) showToast('Webhook 设置已保存', 'ok');
+  else showToast('保存失败: ' + (d.detail || '未知错误'), 'err');
+}
+
+async function testWebhook() {
+  const r = await fetch('/api/webhook-test', { method: 'POST' });
+  const d = await r.json();
+  if (d.ok) showToast(d.msg || '测试通知已发送', 'ok');
+  else showToast('发送失败: ' + (d.detail || '未知错误'), 'err');
+}
+
+loadWebhook();
+</script>
+{% endblock %}

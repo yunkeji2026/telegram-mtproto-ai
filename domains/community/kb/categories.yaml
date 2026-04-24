@@ -1,0 +1,22 @@
+# Community domain KB categories
+
+categories:
+  - name: "群规FAQ"
+    description: "群规条款、禁言、广告、刷屏等规则说明"
+    triggers: ["群规", "规则", "禁止", "广告", "刷屏", "禁言"]
+
+  - name: "活动公告"
+    description: "活动流程、时间、报名方式"
+    triggers: ["活动", "公告", "报名", "抽奖", "福利"]
+
+  - name: "新手引导"
+    description: "入群必读、频道链接、常用指令"
+    triggers: ["新人", "入群", "引导", "怎么用", "置顶"]
+
+  - name: "常见问题"
+    description: "一般咨询与使用帮助"
+    triggers: ["帮助", "FAQ", "怎么", "为什么"]
+
+  - name: "违规处理"
+    description: "申诉、举报、违规类型与处理流程"
+    triggers: ["违规", "举报", "申诉", "封号", "踢人"]

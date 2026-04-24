@@ -1,0 +1,438 @@
+{% extends "base.html" %}
+{% block title %}策略效果 · {{ site_name|default('智控王客户转化聊天系统') }}{% endblock %}
+{% block page_title %}策略 A/B 效果追踪{% endblock %}
+{% block head %}
+<style>
+.sa-filter{display:flex;align-items:center;gap:.7rem;margin-bottom:1.4rem;flex-wrap:wrap}
+.sa-filter label{font-weight:600;font-size:.82rem;color:var(--t2)}
+.sa-filter select,.sa-filter button{padding:.35rem .65rem;border:1px solid var(--bd2);border-radius:var(--r-sm);font-size:.82rem;background:var(--input);color:var(--t);cursor:pointer}
+.sa-filter button:hover{background:var(--ps)}
+.sa-total{margin-left:auto;font-size:.82rem;color:var(--t3)}
+
+.sa-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:1rem;margin-bottom:1.8rem}
+.sa-card{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:1.15rem 1.3rem;position:relative;overflow:hidden;transition:all .25s}
+.sa-card:hover{box-shadow:var(--s1);transform:translateY(-1px)}
+.sa-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;border-radius:12px 12px 0 0}
+.sa-card:nth-child(1)::before{background:var(--g-g)}
+.sa-card:nth-child(2)::before{background:linear-gradient(90deg,#3b82f6,#06b6d4)}
+.sa-card:nth-child(3)::before{background:var(--g)}
+.sa-card:nth-child(4)::before{background:linear-gradient(90deg,#8b5cf6,#ec4899)}
+.sa-card:nth-child(5)::before{background:var(--g-a)}
+.sa-sid{font-weight:700;font-size:.9rem;margin-bottom:.6rem;display:flex;align-items:center;justify-content:space-between}
+.sa-badge{font-size:.68rem;padding:.12rem .45rem;border-radius:20px;font-weight:600}
+.sa-badge.best{background:var(--gs);color:var(--green)}
+.sa-badge.worst{background:var(--rs);color:var(--red)}
+.sa-score{font-size:1.6rem;font-weight:800;text-align:center;margin:.4rem 0}
+.sa-score-label{text-align:center;font-size:.7rem;color:var(--t3);margin-bottom:.6rem}
+.sa-metrics{display:grid;grid-template-columns:1fr 1fr;gap:.4rem .7rem}
+.sa-m{display:flex;flex-direction:column}
+.sa-m-label{font-size:.7rem;color:var(--t3);font-weight:500}
+.sa-m-val{font-size:.95rem;font-weight:700}
+.sa-m-val.good{color:var(--green)}.sa-m-val.warn{color:var(--amber)}.sa-m-val.bad{color:var(--red)}.sa-m-val.neutral{color:var(--p)}
+
+.sa-section{margin-bottom:1.8rem}
+.sa-section h3{font-size:.92rem;font-weight:700;margin-bottom:.8rem;display:flex;align-items:center;gap:.5rem}
+.sa-section h3 svg{width:16px;height:16px;color:var(--p)}
+
+.sa-alerts{display:flex;flex-direction:column;gap:.5rem;margin-bottom:1.5rem}
+.sa-alert{display:flex;align-items:flex-start;gap:.6rem;padding:.65rem .9rem;border-radius:var(--r-sm);font-size:.82rem;line-height:1.45}
+.sa-alert.critical{background:var(--rs);border-left:3px solid var(--red)}
+.sa-alert.warn{background:var(--as);border-left:3px solid var(--amber)}
+.sa-alert.info{background:var(--ps);border-left:3px solid var(--p)}
+.sa-alert-icon{flex-shrink:0;font-size:1rem;line-height:1}
+.sa-alert-body{flex:1}
+.sa-alert-msg{font-weight:600}
+.sa-alert-sug{color:var(--t2);margin-top:.15rem}
+
+.sa-table-wrap{overflow-x:auto;border:1px solid var(--bd);border-radius:var(--r);background:var(--card)}
+.sa-table{width:100%;border-collapse:collapse;font-size:.82rem}
+.sa-table th{text-align:left;padding:.55rem .75rem;background:var(--input);font-weight:600;color:var(--t2);font-size:.76rem;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--bd)}
+.sa-table td{padding:.5rem .75rem;border-bottom:1px solid var(--bd)}
+.sa-table tr:last-child td{border-bottom:none}
+.sa-table tr:hover td{background:var(--ps)}
+.sa-bar{display:inline-block;height:6px;border-radius:3px;background:var(--g);min-width:4px;vertical-align:middle;margin-right:.4rem}
+
+.ab-card{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:1rem;margin-bottom:.6rem}
+.ab-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem}
+.ab-intent{font-weight:700;font-size:.88rem}
+.ab-tag{font-size:.68rem;padding:.1rem .4rem;border-radius:12px;font-weight:600}
+.ab-tag.on{background:var(--gs);color:var(--green)}.ab-tag.off{background:var(--rs);color:var(--red)}
+.ab-variants{display:flex;gap:.8rem;flex-wrap:wrap}
+.ab-var{font-size:.8rem;color:var(--t2)}
+.ab-var strong{color:var(--t)}
+
+/* 会话 & 参数建议 & Auto-Pilot */
+.sess-row{display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:.3rem}
+.sess-kv{font-size:.82rem}.sess-kv strong{font-size:1.05rem;color:var(--p)}
+.sug-card{background:var(--card);border:1px solid var(--bd);border-radius:var(--r-sm);padding:.65rem .9rem;display:flex;align-items:center;gap:.8rem;margin-bottom:.5rem;font-size:.82rem}
+.sug-card .sug-arrow{color:var(--green);font-weight:700;font-size:1rem}
+.sug-btn{background:var(--g);color:#fff;border:none;padding:.3rem .7rem;border-radius:var(--r-sm);cursor:pointer;font-size:.76rem;font-weight:600;white-space:nowrap}
+.sug-btn:hover{opacity:.85}
+.ap-bar{display:flex;align-items:center;gap:.7rem;padding:.6rem .9rem;background:var(--card);border:1px solid var(--bd);border-radius:var(--r-sm);font-size:.82rem;margin-bottom:1rem}
+.ap-dot{width:8px;height:8px;border-radius:50%}
+.ap-dot.on{background:var(--green);box-shadow:0 0 6px var(--green)}
+.ap-dot.off{background:var(--t3)}
+.ap-toggle{margin-left:auto;background:var(--input);border:1px solid var(--bd2);padding:.25rem .6rem;border-radius:var(--r-sm);cursor:pointer;font-size:.78rem;font-weight:600}
+.ap-toggle:hover{background:var(--ps)}
+
+.purge-btn{background:var(--g-r);color:#fff;border:none;padding:.35rem .7rem;border-radius:var(--r-sm);font-size:.78rem;cursor:pointer;font-weight:600}
+.purge-btn:hover{opacity:.85}
+.export-btn{background:var(--g-g);color:#fff;border:none;padding:.35rem .7rem;border-radius:var(--r-sm);font-size:.78rem;cursor:pointer;font-weight:600;text-decoration:none}
+.export-btn:hover{opacity:.85}
+
+.sa-empty{text-align:center;padding:3rem;color:var(--t3);font-size:.9rem}
+
+/* 模型对比 */
+.model-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:.8rem;margin-bottom:1rem}
+.model-card{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:1rem 1.1rem;position:relative;overflow:hidden}
+.model-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#6366f1,#a855f7)}
+.model-name{font-weight:700;font-size:.88rem;margin-bottom:.5rem;display:flex;align-items:center;gap:.5rem}
+.model-name .badge{font-size:.65rem;padding:.1rem .35rem;border-radius:12px;background:var(--ps);color:var(--p)}
+.model-metrics{display:grid;grid-template-columns:1fr 1fr;gap:.3rem .6rem}
+.model-metrics .sa-m-label{font-size:.68rem;color:var(--t3)}.model-metrics .sa-m-val{font-size:.88rem;font-weight:700}
+
+/* 用户分群 */
+.seg-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.8rem;margin-bottom:.8rem}
+@media(max-width:768px){.seg-grid{grid-template-columns:1fr}}
+.seg-card{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:1rem 1.1rem;position:relative;overflow:hidden}
+.seg-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px}
+.seg-card.heavy::before{background:linear-gradient(90deg,#f97316,#ef4444)}
+.seg-card.moderate::before{background:linear-gradient(90deg,#3b82f6,#06b6d4)}
+.seg-card.light::before{background:linear-gradient(90deg,#a3a3a3,#d4d4d4)}
+.seg-title{font-weight:700;font-size:.86rem;margin-bottom:.5rem;display:flex;align-items:center;gap:.4rem}
+.seg-title .seg-icon{font-size:1rem}
+.seg-stats{display:grid;grid-template-columns:1fr 1fr;gap:.25rem .5rem;font-size:.8rem;margin-bottom:.4rem}
+.seg-stats strong{font-weight:700;font-size:.92rem}
+.seg-strats{font-size:.74rem;color:var(--t3);margin-top:.3rem}
+.seg-strats code{font-size:.72rem;background:var(--input);padding:.1rem .3rem;border-radius:3px;margin-right:.3rem}
+</style>
+{% endblock %}
+
+{% block content %}
+
+{% if ui_mode == 'simple' %}
+<div style="background:linear-gradient(135deg,rgba(245,158,11,.08),rgba(91,124,246,.06));border:1px solid rgba(245,158,11,.2);border-radius:10px;padding:.7rem 1rem;margin-bottom:.8rem;font-size:.82rem;color:var(--t2);display:flex;align-items:center;gap:.6rem">
+  <span style="font-size:1.1rem;flex-shrink:0">📊</span>
+  <div><strong style="color:var(--t)">高级分析</strong> — 策略效果追踪供管理员调优使用。<a href="/cases" style="color:var(--p);font-weight:600">返回案例</a></div>
+</div>
+{% endif %}
+
+<!-- 顶栏 -->
+<div class="sa-filter">
+  <label>时间范围</label>
+  <select id="sa-hours" onchange="location.href='/strategy-analytics?hours='+this.value">
+    <option value="6" {% if hours==6 %}selected{% endif %}>6h</option>
+    <option value="24" {% if hours==24 %}selected{% endif %}>24h</option>
+    <option value="72" {% if hours==72 %}selected{% endif %}>3d</option>
+    <option value="168" {% if hours==168 %}selected{% endif %}>7d</option>
+    <option value="720" {% if hours==720 %}selected{% endif %}>30d</option>
+  </select>
+  <a class="export-btn" data-help="CSV" href="/api/export-strategy-events?fmt=csv&hours={{ hours }}">导出 CSV</a>
+  <a class="export-btn" data-help="JSON" href="/api/export-strategy-events?fmt=json&hours={{ hours }}" style="background:var(--g)">导出 JSON</a>
+  <button onclick="doPurge()" class="purge-btn" data-tip="清理过期追踪数据">清理旧数据</button>
+  <span class="sa-total">共 <strong>{{ total }}</strong> 条事件</span>
+</div>
+
+<!-- Auto-Pilot 状态条 -->
+<div class="ap-bar">
+  <span class="ap-dot {% if autopilot.enabled|default(false) %}on{% else %}off{% endif %}"></span>
+  <span>Auto-Pilot</span>
+  <span style="color:var(--t3)">{% if autopilot.enabled|default(false) %}运行中 · 每 {{ autopilot.check_interval_messages|default(100) }} 条消息检查{% else %}未启用{% endif %}</span>
+  <button class="ap-toggle" onclick="toggleAP()" data-tip="启用后系统将自动把持续低效策略降级为更优策略">{% if autopilot.enabled|default(false) %}关闭{% else %}启用{% endif %}</button>
+</div>
+
+{% if not summary %}
+<div class="sa-empty">暂无策略追踪数据。当 AI 回复用户后将自动采集。</div>
+{% else %}
+
+<!-- 会话概览 -->
+{% if session_stats and session_stats.total_sessions > 0 %}
+<div class="sa-section">
+  <h3>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+    会话统计
+  </h3>
+  <div class="sess-row">
+    <div class="sess-kv" data-tip="同一用户在 30 分钟内的连续交互归为一个会话"><strong>{{ session_stats.total_sessions }}</strong> 个会话</div>
+    <div class="sess-kv" data-tip="平均每个会话中机器人回复的次数">平均 <strong>{{ session_stats.avg_turns }}</strong> 轮</div>
+    <div class="sess-kv" data-tip="会话中最后一条回复后用户未追问的比例">解决率 <strong style="color:{% if session_stats.resolve_rate >= 60 %}var(--green){% elif session_stats.resolve_rate >= 40 %}var(--amber){% else %}var(--red){% endif %}">{{ session_stats.resolve_rate }}%</strong></div>
+  </div>
+  {% if session_stats.by_strategy %}
+  <div class="sa-table-wrap" style="margin-top:.5rem">
+    <table class="sa-table">
+      <thead><tr><th>策略</th><th>会话数</th><th>平均轮次</th><th>解决率</th></tr></thead>
+      <tbody>
+        {% for sid, d in session_stats.by_strategy.items() %}
+        <tr>
+          <td><strong>{{ sid }}</strong></td>
+          <td>{{ d.sessions }}</td>
+          <td>{{ d.avg_turns }}</td>
+          <td style="color:{% if d.resolve_rate >= 60 %}var(--green){% elif d.resolve_rate >= 40 %}var(--amber){% else %}var(--red){% endif %}">{{ d.resolve_rate }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- 模型 A/B 对比 -->
+{% if model_summary %}
+<div class="sa-section">
+  <h3>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+    <span data-tip="model_ab">模型效果对比</span>
+  </h3>
+  <div class="model-grid">
+    {% for m in model_summary %}
+    <div class="model-card">
+      <div class="model-name" data-tip="model_id">
+        {{ (m.model_id or '') | display_model or '(默认)' }}
+        <span class="badge">{{ m.total }} 次</span>
+        <span class="badge">{{ m.strategies_count }} 个策略</span>
+      </div>
+      <div class="model-metrics">
+        <div class="sa-m"><span class="sa-m-label">平均响应</span><span class="sa-m-val {% if m.avg_ms < 1500 %}good{% elif m.avg_ms < 3000 %}warn{% else %}bad{% endif %}">{{ m.avg_ms }}ms</span></div>
+        <div class="sa-m"><span class="sa-m-label" data-help="follow_up_rate">追问率</span><span class="sa-m-val {% if m.follow_up_rate > 60 %}bad{% elif m.follow_up_rate > 40 %}warn{% else %}good{% endif %}">{{ m.follow_up_rate }}%</span></div>
+        <div class="sa-m"><span class="sa-m-label" data-help="same_intent_rate">同意图追问</span><span class="sa-m-val {% if m.same_intent_rate > 50 %}bad{% elif m.same_intent_rate > 30 %}warn{% else %}good{% endif %}">{{ m.same_intent_rate }}%</span></div>
+        <div class="sa-m"><span class="sa-m-label" data-help="silence_rate">静默率</span><span class="sa-m-val {% if m.silence_rate > 60 %}good{% elif m.silence_rate > 40 %}neutral{% else %}warn{% endif %}">{{ m.silence_rate }}%</span></div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% if model_matrix %}
+  <div class="sa-table-wrap">
+    <table class="sa-table">
+      <thead><tr><th data-tip="model_id">模型</th><th>策略</th><th>次数</th><th>平均响应</th><th>追问率</th><th>静默率</th></tr></thead>
+      <tbody>
+        {% for m in model_matrix %}
+        <tr>
+          <td><strong>{{ (m.model_id or '') | display_model or '(默认)' }}</strong></td>
+          <td>{{ m.strategy_id }}</td>
+          <td>{{ m.count }}</td>
+          <td>{{ m.avg_ms }}ms</td>
+          <td>{{ m.follow_up_rate }}%</td>
+          <td>{{ m.silence_rate }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- 用户分群分析 -->
+{% if user_segments %}
+<div class="sa-section">
+  <h3>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+    <span data-tip="user_segment">用户分群分析</span>
+  </h3>
+  <div class="seg-grid">
+    {% set seg_meta = {'heavy': {'icon': '🔥', 'label': '高频用户', 'tip': 'heavy'}, 'moderate': {'icon': '⚡', 'label': '中频用户', 'tip': 'moderate'}, 'light': {'icon': '🌱', 'label': '低频用户', 'tip': 'light'}} %}
+    {% for seg_key in ['heavy', 'moderate', 'light'] %}
+    {% set info = seg_meta[seg_key] %}
+    {% set seg = user_segments.get(seg_key, {}) %}
+    <div class="seg-card {{ seg_key }}">
+      <div class="seg-title" data-tip="{{ info.tip }}">
+        <span class="seg-icon">{{ info.icon }}</span> {{ info.label }}
+      </div>
+      <div class="seg-stats">
+        <div><span style="color:var(--t3)">用户数</span><br><strong>{{ seg.users|default(0) }}</strong></div>
+        <div><span style="color:var(--t3)">事件数</span><br><strong>{{ seg.events|default(0) }}</strong></div>
+        <div><span style="color:var(--t3)">平均响应</span><br><strong>{{ seg.avg_ms|default(0) }}ms</strong></div>
+        <div><span style="color:var(--t3)">追问率</span><br><strong style="color:{% if (seg.follow_up_rate|default(0)) > 60 %}var(--red){% elif (seg.follow_up_rate|default(0)) > 40 %}var(--amber){% else %}var(--green){% endif %}">{{ seg.follow_up_rate|default(0) }}%</strong></div>
+      </div>
+      {% if seg.top_strategies %}
+      <div class="seg-strats">
+        偏好策略:
+        {% for sid, cnt in seg.top_strategies.items() %}<code>{{ sid }}</code>({{ cnt }}){% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- Advisor 告警 -->
+{% if advisor and advisor.advisories %}
+<div class="sa-section">
+  <h3>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    智能诊断
+  </h3>
+  <div class="sa-alerts">
+    {% for a in advisor.advisories %}
+    <div class="sa-alert {{ a.level }}">
+      <span class="sa-alert-icon">{% if a.level=='critical' %}&#128308;{% elif a.level=='warn' %}&#128993;{% else %}&#128309;{% endif %}</span>
+      <div class="sa-alert-body">
+        <div class="sa-alert-msg">{{ a.message }}</div>
+        <div class="sa-alert-sug">&#128161; {{ a.suggestion }}</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- 参数微调建议 -->
+{% if param_suggestions %}
+<div class="sa-section">
+  <h3>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15V3m0 12l-4-4m4 4l4-4"/><path d="M2 17l.621 2.485A2 2 0 004.561 21h14.878a2 2 0 001.94-1.515L22 17"/></svg>
+    参数微调建议
+  </h3>
+  {% for sg in param_suggestions %}
+  <div class="sug-card">
+    <div style="flex:1">
+      <strong>{{ sg.strategy_id }}</strong> · <code>{{ sg.param }}</code>:
+      {{ sg.current }} <span class="sug-arrow">&rarr;</span> {{ sg.suggested }}
+      <div style="color:var(--t3);font-size:.76rem;margin-top:.15rem">{{ sg.reason }}</div>
+    </div>
+    <button class="sug-btn" onclick="applySuggestion('{{ sg.strategy_id }}','{{ sg.param }}',{{ sg.suggested }})">一键应用</button>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- 趋势图表 -->
+<div class="sa-section">
+  <h3>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+    趋势 & 质量评分
+  </h3>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:.5rem">
+    <div class="card" style="padding:1rem;margin:0"><canvas id="score-chart" height="200"></canvas></div>
+    <div class="card" style="padding:1rem;margin:0"><canvas id="trend-chart" height="200"></canvas></div>
+  </div>
+</div>
+
+<!-- 策略概览 -->
+<div class="sa-section">
+  <h3>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>
+    策略概览
+  </h3>
+  <div class="sa-grid">
+    {% for s in summary %}
+    <div class="sa-card">
+      <div class="sa-sid">
+        {{ s.strategy_id|replace('_',' ') }}
+        {% if s.model_id %}<span style="font-size:.68rem;color:var(--t3);font-weight:400">({{ s.model_id | display_model }})</span>{% endif %}
+        {% if advisor and advisor.best == s.strategy_id %}<span class="sa-badge best">最优</span>{% endif %}
+        {% if advisor and advisor.worst == s.strategy_id and advisor.worst != advisor.best %}<span class="sa-badge worst">待优化</span>{% endif %}
+      </div>
+      {% set qs = s.quality_score|default(0) %}
+      <div class="sa-score" style="color:{% if qs >= 70 %}var(--green){% elif qs >= 40 %}var(--amber){% else %}var(--red){% endif %}">{{ qs }}</div>
+      <div class="sa-score-label" data-tip="综合质量评分 0-100">质量评分</div>
+      <div class="sa-metrics">
+        <div class="sa-m"><span class="sa-m-label">回复数</span><span class="sa-m-val neutral">{{ s.total }}</span></div>
+        <div class="sa-m"><span class="sa-m-label">平均响应</span><span class="sa-m-val {% if s.avg_ms < 1500 %}good{% elif s.avg_ms < 3000 %}warn{% else %}bad{% endif %}">{{ s.avg_ms }}ms</span></div>
+        <div class="sa-m"><span class="sa-m-label" data-tip="用户在收到回复后 5 分钟内再次发消息的比例">追问率</span><span class="sa-m-val {% if s.follow_up_rate > 60 %}bad{% elif s.follow_up_rate > 40 %}warn{% else %}good{% endif %}">{{ s.follow_up_rate }}%</span></div>
+        <div class="sa-m"><span class="sa-m-label" data-tip="追问中与原始意图相同的比例">同意图追问</span><span class="sa-m-val {% if s.same_intent_rate > 50 %}bad{% elif s.same_intent_rate > 30 %}warn{% else %}good{% endif %}">{{ s.same_intent_rate }}%</span></div>
+        <div class="sa-m"><span class="sa-m-label" data-tip="回复后无追问的比例">静默率</span><span class="sa-m-val {% if s.silence_rate > 60 %}good{% elif s.silence_rate > 40 %}neutral{% else %}warn{% endif %}">{{ s.silence_rate }}%</span></div>
+        <div class="sa-m"><span class="sa-m-label" data-tip="模板直接回复">模板命中</span><span class="sa-m-val neutral">{{ s.template_hit_rate }}%</span></div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- A/B 灰度测试 -->
+<div class="sa-section">
+  <h3>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 3h5v5"/><path d="M8 3H3v5"/><path d="M12 22v-8.3a4 4 0 00-1.172-2.828L3 3"/><path d="m15 9 6-6"/></svg>
+    A/B 灰度测试
+  </h3>
+  {% if ab_tests %}
+    {% for intent, ab in ab_tests.items() %}{% if ab and ab.variants is defined %}
+    <div class="ab-card">
+      <div class="ab-hd"><span class="ab-intent">{{ intent }}</span><span class="ab-tag {% if ab.enabled %}on{% else %}off{% endif %}">{% if ab.enabled %}运行中{% else %}已停止{% endif %}</span></div>
+      <div class="ab-variants">{% for v in ab.variants %}<div class="ab-var"><strong>{{ v.strategy_id }}</strong> · {{ v.weight }}%</div>{% endfor %}</div>
+    </div>
+    {% endif %}{% endfor %}
+  {% else %}
+    <div style="font-size:.82rem;color:var(--t3);padding:.3rem 0">暂无 A/B 测试。在 <code>reply_strategies.yaml</code> 中配置 <code>ab_tests</code>。</div>
+  {% endif %}
+</div>
+
+<!-- 意图×策略矩阵 -->
+{% if matrix %}
+<div class="sa-section">
+  <h3>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+    意图 × 策略矩阵
+  </h3>
+  <div class="sa-table-wrap">
+    <table class="sa-table">
+      <thead><tr><th>意图</th><th>策略</th><th>次数</th><th>平均响应</th><th>追问数</th><th>占比</th></tr></thead>
+      <tbody>
+        {% set max_cnt = namespace(v=1) %}{% for m in matrix %}{% if m.count > max_cnt.v %}{% set max_cnt.v = m.count %}{% endif %}{% endfor %}
+        {% for m in matrix %}
+        <tr>
+          <td><strong>{{ m.intent }}</strong></td><td>{{ m.strategy_id }}</td>
+          <td><span class="sa-bar" style="width:{{ (m.count / max_cnt.v * 60)|round }}px"></span>{{ m.count }}</td>
+          <td>{{ m.avg_ms }}ms</td><td>{{ m.follow_ups }}</td><td>{{ (m.count / total * 100)|round(1) }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% endif %}
+
+<script src="/static/js/chart.umd.min.js"></script>
+<script>
+/* Quality score bar chart */
+(function(){
+  var labels=[{% for s in summary %}'{{ s.strategy_id }}'{% if not loop.last %},{% endif %}{% endfor %}];
+  var scores=[{% for s in summary %}{{ s.quality_score|default(0) }}{% if not loop.last %},{% endif %}{% endfor %}];
+  var colors=scores.map(function(v){return v>=70?'rgba(16,185,129,.7)':v>=40?'rgba(245,158,11,.7)':'rgba(239,68,68,.7)'});
+  var ctx=document.getElementById('score-chart');
+  if(ctx&&labels.length){new Chart(ctx,{type:'bar',data:{labels:labels,datasets:[{label:'质量评分',data:scores,backgroundColor:colors,borderRadius:6,maxBarThickness:40}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return '评分: '+c.raw+'/100'}}}},scales:{x:{min:0,max:100,grid:{color:'rgba(0,0,0,.05)'}},y:{grid:{display:false}}}}})}
+})();
+/* Hourly trend line chart */
+(function(){
+  var sids=[{% for s in summary %}'{{ s.strategy_id }}'{% if not loop.last %},{% endif %}{% endfor %}];
+  var palette=['#5b7cf6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4'];
+  var tctx=document.getElementById('trend-chart');
+  if(!tctx||!sids.length)return;
+  var hours={{ hours }};
+  Promise.all(sids.slice(0,4).map(function(sid){return fetch('/api/strategy-analytics/'+sid+'/hourly?hours='+hours).then(function(r){return r.json()})})).then(function(results){
+    var allLabels=[];
+    var datasets=results.map(function(res,i){
+      var data=res.data||[];
+      if(i===0)allLabels=data.map(function(d){return d.hour||d.label||''});
+      return{label:sids[i],data:data.map(function(d){return d.count||0}),borderColor:palette[i%palette.length],backgroundColor:palette[i%palette.length]+'22',fill:true,tension:.35,borderWidth:2,pointRadius:1};
+    });
+    new Chart(tctx,{type:'line',data:{labels:allLabels,datasets:datasets},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:11}}}},scales:{x:{grid:{display:false},ticks:{maxTicksLimit:8,font:{size:10}}},y:{beginAtZero:true,grid:{color:'rgba(0,0,0,.05)'}}}}});
+  });
+})();
+
+async function doPurge(){
+  if(!await confirmAction('确认清理过期追踪数据？',{okText:'清理'}))return;
+  const r=await fetch('/api/data-purge',{method:'POST',headers:{'Content-Type':'application/json'}});
+  const d=await r.json();
+  if(d.ok) showToast('清理完成: 策略 '+d.strategy_events_deleted+' 条, 通用 '+d.general_events_deleted+' 条','ok');
+  else showToast('清理失败','err');
+}
+async function toggleAP(){
+  const on={% if autopilot.enabled|default(false) %}true{% else %}false{% endif %};
+  const r=await fetch('/api/autopilot',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})});
+  if((await r.json()).ok){showToast(on?'Auto-Pilot 已关闭':'Auto-Pilot 已开启','ok');setTimeout(()=>location.reload(),800)}
+  else showToast('操作失败','err');
+}
+async function applySuggestion(sid,param,val){
+  if(!await confirmAction('应用参数调整: '+sid+'.'+param+' → '+val+'？',{okText:'应用',danger:false}))return;
+  const r=await fetch('/api/apply-param-suggestion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({strategy_id:sid,param:param,value:val})});
+  const d=await r.json();
+  if(d.ok){showToast('已应用: '+sid+'.'+param+' = '+val,'ok');setTimeout(()=>location.reload(),800)}
+  else showToast('应用失败: '+(d.detail||''),'err');
+}
+</script>
+{% endblock %}

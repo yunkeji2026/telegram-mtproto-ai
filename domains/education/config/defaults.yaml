@@ -1,0 +1,27 @@
+domain:
+  name: education
+  display_name: "教育答疑"
+  version: "1.0"
+
+ai:
+  reply_style: balanced
+  ai_name: "学习助手"
+
+skills:
+  enabled:
+    - greeting
+    - complaint
+    - small_talk
+    - test
+
+kb:
+  categories:
+    - "课程信息"
+    - "作业辅导"
+    - "考试准备"
+    - "学习方法"
+    - "技术概念"
+
+emotion_enhancer_skip:
+  phrases: []
+  patterns: []

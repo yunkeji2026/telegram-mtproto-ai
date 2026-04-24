@@ -1,0 +1,35 @@
+domain:
+  name: ecommerce
+  display_name: "电商客服"
+  version: "1.0"
+
+ai:
+  reply_style: warm
+  ai_name: "小乐"
+
+skills:
+  enabled:
+    - greeting
+    - complaint
+    - small_talk
+    - test
+    - product_query
+    - shipping_track
+    - return_refund
+
+kb:
+  categories:
+    - "商品咨询"
+    - "物流跟踪"
+    - "退款退货"
+    - "优惠活动"
+    - "账户问题"
+    - "常规咨询"
+    - "系统话术"
+    - "其他"
+
+emotion_enhancer_skip:
+  phrases:
+    - "退款金额"
+    - "运费险赔付"
+  patterns: []

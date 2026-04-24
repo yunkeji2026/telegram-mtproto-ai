@@ -1,0 +1,437 @@
+{% extends "base.html" %}
+{% block title %}Messenger RPA · {{ site_name|default('智控王客户转化聊天系统') }}{% endblock %}
+{% block page_title %}Messenger 自动聊天{% endblock %}
+{% block head %}
+<style>
+.mr-grid{display:grid;grid-template-columns:1.3fr 1fr;gap:1.1rem;margin-bottom:1.1rem}
+@media(max-width:960px){.mr-grid{grid-template-columns:1fr}}
+.mr-kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:.7rem;margin-bottom:1rem}
+@media(max-width:720px){.mr-kpi{grid-template-columns:repeat(2,1fr)}}
+.mr-kpi .kpi{background:var(--input);border-radius:var(--r-sm);padding:.8rem 1rem;display:flex;flex-direction:column;border:1px solid var(--bd)}
+.mr-kpi .kpi-v{font-size:1.5rem;font-weight:800;background:var(--g);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.mr-kpi .kpi-l{font-size:.72rem;color:var(--t3);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.mr-control{display:flex;flex-direction:column;gap:.6rem}
+.mr-control .btn{justify-content:center}
+.mr-appr{max-height:540px;overflow-y:auto;padding-right:.3rem}
+.mr-appr-row{padding:.75rem;border:1px solid var(--bd);border-radius:12px;margin-bottom:.6rem;background:var(--card)}
+.mr-appr-row.pending{border-left:3px solid var(--amber)}
+.mr-appr-row.approved{border-left:3px solid var(--green)}
+.mr-appr-row.rejected{border-left:3px solid var(--red)}
+.mr-appr-row.sent{border-left:3px solid var(--p)}
+.mr-appr-row .mr-meta{display:flex;gap:.5rem;font-size:.72rem;color:var(--t3);margin-bottom:.3rem;flex-wrap:wrap;align-items:center}
+.mr-appr-row .mr-status{font-weight:700;padding:.1rem .45rem;border-radius:10px;background:var(--input);color:var(--t2)}
+.mr-appr-row.pending .mr-status{color:var(--amber);background:var(--as)}
+.mr-appr-row.approved .mr-status{color:var(--green);background:var(--gs)}
+.mr-appr-row.rejected .mr-status{color:var(--red);background:var(--rs)}
+.mr-appr-row.sent .mr-status{color:var(--p);background:var(--ps)}
+.mr-appr-row .mr-time{margin-left:auto}
+.mr-appr-row .mr-peer{font-size:.86rem;white-space:pre-wrap;word-break:break-word}
+.mr-appr-row .mr-peer::before{content:'对方:';color:var(--p);font-weight:700;margin-right:.35rem;font-size:.78rem}
+.mr-appr-row .mr-reply{margin-top:.4rem;padding:.5rem .65rem;background:var(--ps);border-radius:8px;font-size:.83rem;white-space:pre-wrap}
+.mr-appr-row .mr-reply::before{content:'AI 回复:';color:var(--p);font-weight:700;margin-right:.35rem;font-size:.76rem}
+.mr-appr-row .mr-actions{margin-top:.5rem;display:flex;gap:.4rem}
+.mr-appr-row .mr-actions .btn{padding:.4rem .75rem;font-size:.78rem}
+.mr-runs{max-height:540px;overflow-y:auto}
+.mr-run{display:flex;justify-content:space-between;padding:.55rem .4rem;border-bottom:1px solid var(--bd);font-size:.8rem;gap:.5rem}
+.mr-run:last-child{border-bottom:none}
+.mr-run-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px}
+.mr-run-step{font-size:.72rem;padding:.1rem .4rem;border-radius:8px;background:var(--input);color:var(--t2)}
+.mr-run.ok .mr-run-step{color:var(--green);background:var(--gs)}
+.mr-run.err .mr-run-step{color:var(--red);background:var(--rs)}
+.mr-run-time{font-size:.7rem;color:var(--t3);text-align:right;flex-shrink:0}
+.mr-empty{text-align:center;color:var(--t3);padding:2rem;font-size:.88rem}
+.mr-hint{font-size:.72rem;color:var(--t3);margin-top:.2rem}
+</style>
+{% endblock %}
+{% block content %}
+<div class="lr-title" style="display:flex;align-items:center;gap:.7rem;margin-bottom:.9rem">
+  <span class="mr-dot" id="mr-status-dot" style="width:10px;height:10px;border-radius:50%;background:var(--t3);box-shadow:0 0 8px currentColor"></span>
+  <h1 style="font-size:1.2rem;margin:0">Messenger RPA</h1>
+  <span id="mr-status-text" class="lr-sub" style="font-size:.82rem;color:var(--t2)">加载中...</span>
+</div>
+
+<div class="mr-kpi">
+  <div class="kpi"><span class="kpi-v" id="kpi-pending">0</span><span class="kpi-l">待审批</span></div>
+  <div class="kpi"><span class="kpi-v" id="kpi-approved">0</span><span class="kpi-l">已批准待发</span></div>
+  <div class="kpi"><span class="kpi-v" id="kpi-sent">0</span><span class="kpi-l">最近24h 已发</span></div>
+  <div class="kpi"><span class="kpi-v" id="kpi-runs">0</span><span class="kpi-l">最近 runs</span></div>
+</div>
+
+<div class="mr-grid">
+  <div class="card">
+    <h2 style="margin:0 0 .6rem 0;font-size:1rem">审批队列</h2>
+    <div class="mr-hint">每一次 reply_mode=approve 的 run 都会把 AI 回复推到这里；点击「批准」后会真实发出去。</div>
+    <!-- ★ P2-6：批量操作 + SLA 状态条 -->
+    <div id="mr-bulk-bar" style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin:.4rem 0">
+      <label style="font-size:.8rem;color:var(--t2);display:flex;align-items:center;gap:.3rem">
+        <input type="checkbox" id="mr-bulk-all"> 全选 pending
+      </label>
+      <button class="btn btn-primary" id="btn-bulk-approve" disabled>批量批准</button>
+      <button class="btn" id="btn-bulk-reject" disabled>批量驳回</button>
+      <span id="mr-sla-badge" style="margin-left:auto;font-size:.76rem;color:var(--t3)"></span>
+    </div>
+    <div class="mr-appr" id="mr-approvals">
+      <div class="mr-empty">加载中...</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin:0 0 .6rem 0;font-size:1rem">控制面板</h2>
+    <div class="mr-control">
+      <button class="btn btn-primary" id="btn-trigger">立即跑一次 run_once</button>
+      <button class="btn" id="btn-calibrate">坐标校准（扫描屏幕）</button>
+      <button class="btn" id="btn-install-kbd">安装 ADBKeyboard（中文/emoji）</button>
+      <button class="btn" id="btn-pause">暂停 5 分钟</button>
+      <button class="btn" id="btn-resume">恢复</button>
+      <button class="btn" id="btn-refresh">刷新数据</button>
+    </div>
+
+    <h3 style="margin:1rem 0 .4rem 0;font-size:.88rem;color:var(--t2)">设备健康</h3>
+    <div id="mr-devices" class="mr-runs">
+      <div class="mr-empty">加载中...</div>
+    </div>
+
+    <h3 style="margin:1rem 0 .4rem 0;font-size:.88rem;color:var(--t2)">最近 20 次 runs</h3>
+    <div class="mr-runs" id="mr-runs">
+      <div class="mr-empty">加载中...</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const qs = (s) => document.querySelector(s);
+  const fmtTs = (ts) => {
+    if (!ts) return '--';
+    const d = new Date(ts * 1000);
+    return d.toLocaleString('zh-CN', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  };
+  const esc = (s) => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  async function apiGet(path){
+    const r = await fetch(path, {credentials:'same-origin'});
+    if(!r.ok) throw new Error(`${path} → ${r.status}`);
+    return r.json();
+  }
+  async function apiPost(path, body){
+    const r = await fetch(path, {
+      method:'POST',
+      credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},
+      body: body ? JSON.stringify(body) : '{}',
+    });
+    if(!r.ok) throw new Error(`${path} → ${r.status}`);
+    return r.json();
+  }
+
+  async function refreshStatus(){
+    try{
+      const st = await apiGet('/api/messenger-rpa/status');
+      const dot = qs('#mr-status-dot');
+      const txt = qs('#mr-status-text');
+      const running = !!st.running;
+      dot.style.background = running ? 'var(--green)' : 'var(--red)';
+      let flag = running ? '运行中' : '已停止';
+      if (st.paused_until && st.paused_until > Date.now()/1000) flag = '暂停中';
+      const notifFlag = st.notif_running ? '· 监听通知' : '· 仅轮询';
+      txt.textContent = `${flag} ${notifFlag} · ${st.consecutive_empty||0} 次连续空跑`;
+      qs('#kpi-runs').textContent = (st.last_run && st.last_run.run_id) ? '1+' : '0';
+      // ★ P2-6：SLA badge
+      const badge = qs('#mr-sla-badge');
+      if (badge) {
+        const sla = st.approval_sla || {};
+        const over = sla.overdue_count || 0;
+        const oldest = sla.oldest_age_sec || 0;
+        if ((sla.pending_count||0) === 0){
+          badge.textContent = '';
+        } else if (over > 0) {
+          badge.innerHTML = `<span style="color:var(--red)">⚠ ${over} 条超时（最老 ${oldest}s）</span> · 总 pending ${sla.pending_count}`;
+        } else {
+          badge.textContent = `✓ ${sla.pending_count} pending · 最老 ${oldest}s`;
+        }
+      }
+    }catch(e){
+      qs('#mr-status-text').textContent = '状态获取失败: '+e.message;
+    }
+  }
+
+  // ★ P2-6：快捷模板 — 进页后拉一次，缓存在闭包里
+  let _tplCache = null;
+  async function getTemplates(){
+    if (_tplCache) return _tplCache;
+    try{
+      const r = await apiGet('/api/messenger-rpa/templates');
+      _tplCache = r.templates || [];
+    }catch(e){ _tplCache = []; }
+    return _tplCache;
+  }
+
+  async function refreshApprovals(){
+    try{
+      const [pending, all, tpls] = await Promise.all([
+        apiGet('/api/messenger-rpa/approvals?status=pending&limit=50'),
+        apiGet('/api/messenger-rpa/approvals?status=all&limit=100'),
+        getTemplates(),
+      ]);
+      const pList = pending.approvals || [];
+      qs('#kpi-pending').textContent = pList.length;
+      const approvedList = (all.approvals||[]).filter(a => a.status==='approved');
+      qs('#kpi-approved').textContent = approvedList.length;
+      const now = Date.now()/1000;
+      const sentList = (all.approvals||[]).filter(a => a.status==='sent' && (now - a.sent_at) < 86400);
+      qs('#kpi-sent').textContent = sentList.length;
+
+      const root = qs('#mr-approvals');
+      const list = (all.approvals||[]).slice(0,30);
+      if (!list.length) { root.innerHTML = '<div class="mr-empty">暂无审批记录</div>'; return; }
+      // ★ P2-6：模板按钮 HTML（同一套挂给每条 pending 的 textarea）
+      const tplBtnsHtml = (aid) => (tpls && tpls.length)
+        ? `<div class="mr-tpls" style="margin-top:.25rem;display:flex;gap:.25rem;flex-wrap:wrap">
+             ${tpls.map((t,i)=>`<button class="btn btn-tpl" data-id="${aid}" data-idx="${i}"
+                style="font-size:.74rem;padding:.15rem .5rem">${esc(t.label)}</button>`).join('')}
+           </div>`
+        : '';
+
+      // ★ P2-6：age 超阈标红
+      const nowTs = Date.now()/1000;
+      root.innerHTML = list.map(a => {
+        const age = Math.max(0, nowTs - (a.created_at||nowTs));
+        const overdue = (a.status==='pending') && (age > 600);
+        const ageBadge = (a.status==='pending')
+          ? `<span style="font-size:.72rem;color:${overdue?'var(--red)':'var(--t3)'}">
+               ⏰ ${Math.floor(age)}s</span>`
+          : '';
+        const imgCap = (() => {
+          try{
+            const ex = a.extra_json ? JSON.parse(a.extra_json) : {};
+            return ex.image_caption ? `<div class="mr-hint" style="color:var(--t2)">📷 ${esc(ex.image_caption)}</div>` : '';
+          }catch(e){ return ''; }
+        })();
+        return `
+        <div class="mr-appr-row ${a.status}${overdue?' overdue':''}">
+          <div class="mr-meta">
+            ${a.status==='pending' ? `<input type="checkbox" class="mr-pick" data-id="${a.id}"
+                     style="margin-right:.3rem">` : ''}
+            <span class="mr-status">${a.status}</span>
+            <span>#${a.id}</span>
+            <span>${esc(a.chat_name || a.chat_key)}</span>
+            <span class="mr-time">${fmtTs(a.created_at)}</span>
+            ${ageBadge}
+          </div>
+          <div class="mr-peer">${esc((a.peer_text||'').slice(0,200))}</div>
+          ${imgCap}
+          ${a.status==='pending' ? `
+            <textarea class="mr-reply-edit" data-id="${a.id}" rows="3"
+                      style="width:100%;box-sizing:border-box;font-size:.85rem;
+                             padding:.4rem;border:1px solid var(--b3);
+                             border-radius:4px;background:var(--bg2);color:var(--t1);
+                             resize:vertical;margin-top:.3rem"
+                      placeholder="可编辑此回复后再批准">${esc(a.reply_text||'')}</textarea>
+            ${tplBtnsHtml(a.id)}
+            <div class="mr-actions" style="margin-top:.3rem">
+              <button class="btn btn-primary btn-approve" data-id="${a.id}">批准并发送</button>
+              <button class="btn btn-suggest" data-id="${a.id}">重新生成</button>
+              <button class="btn btn-reject" data-id="${a.id}">驳回</button>
+            </div>
+          ` : `<div class="mr-reply">${esc((a.reply_text||'').slice(0,280))}</div>` +
+          (a.status==='sent' ? `<div class="mr-hint">✓ 已于 ${fmtTs(a.sent_at)} 发出</div>` : (a.status==='rejected' ? `<div class="mr-hint">× 已驳回${a.decision_note?' · '+esc(a.decision_note):''}</div>` : ''))}
+        </div>`;
+      }).join('');
+
+      // ★ P2-6：模板点击 → 填入对应 textarea
+      root.querySelectorAll('.btn-tpl').forEach(b => {
+        b.addEventListener('click', () => {
+          const ta = root.querySelector(`.mr-reply-edit[data-id="${b.dataset.id}"]`);
+          if (ta) ta.value = tpls[parseInt(b.dataset.idx, 10)].text;
+        });
+      });
+      // ★ P2-6：勾选 → 控制批量按钮的可点状态
+      const updateBulkBtns = () => {
+        const picked = root.querySelectorAll('.mr-pick:checked').length;
+        qs('#btn-bulk-approve').disabled = picked === 0;
+        qs('#btn-bulk-reject').disabled = picked === 0;
+        qs('#btn-bulk-approve').textContent = `批量批准 (${picked})`;
+        qs('#btn-bulk-reject').textContent = `批量驳回 (${picked})`;
+      };
+      root.querySelectorAll('.mr-pick').forEach(cb => {
+        cb.addEventListener('change', updateBulkBtns);
+      });
+      updateBulkBtns();
+
+      root.querySelectorAll('.btn-approve').forEach(b => {
+        b.addEventListener('click', async () => {
+          if(!confirm(`确认批准 #${b.dataset.id}? 将通过 RPA 在手机上真实发出。`)) return;
+          b.disabled = true; b.textContent = '发送中...';
+          const ta = root.querySelector(`.mr-reply-edit[data-id="${b.dataset.id}"]`);
+          const overrideText = (ta && ta.value) ? ta.value.trim() : '';
+          try{
+            const payload = {decided_by:'web'};
+            if (overrideText) payload.reply_text = overrideText;
+            const r = await apiPost(`/api/messenger-rpa/approvals/${b.dataset.id}/approve`, payload);
+            alert(`send: ok=${r.send?.ok} step=${r.send?.step||''} err=${r.send?.error||''}`);
+            await refreshAll();
+          }catch(e){ alert('失败: '+e.message); b.disabled=false; b.textContent='批准并发送'; }
+        });
+      });
+      root.querySelectorAll('.btn-suggest').forEach(b => {
+        b.addEventListener('click', async () => {
+          b.disabled = true; b.textContent = '生成中...';
+          try{
+            const r = await apiPost(`/api/messenger-rpa/approvals/${b.dataset.id}/suggest`, {});
+            const ta = root.querySelector(`.mr-reply-edit[data-id="${b.dataset.id}"]`);
+            if (ta && r.suggestion) {
+              if (!ta.value.trim() || confirm('用新建议替换当前文案？\n新：' + r.suggestion.slice(0,160))){
+                ta.value = r.suggestion;
+              }
+            }
+          }catch(e){ alert('失败: '+e.message); }
+          finally{ b.disabled=false; b.textContent='重新生成'; }
+        });
+      });
+      root.querySelectorAll('.btn-reject').forEach(b => {
+        b.addEventListener('click', async () => {
+          const note = prompt('驳回原因（可空）:') || '';
+          try{
+            await apiPost(`/api/messenger-rpa/approvals/${b.dataset.id}/reject`, {decided_by:'web', note});
+            await refreshApprovals();
+          }catch(e){ alert('失败: '+e.message); }
+        });
+      });
+    }catch(e){
+      qs('#mr-approvals').innerHTML = '<div class="mr-empty">加载失败: '+esc(e.message)+'</div>';
+    }
+  }
+
+  // ★ P2-6：全选切换
+  qs('#mr-bulk-all').addEventListener('change', (ev) => {
+    const on = ev.target.checked;
+    document.querySelectorAll('.mr-pick').forEach(cb => {
+      cb.checked = on;
+      cb.dispatchEvent(new Event('change'));
+    });
+  });
+  // ★ P2-6：批量按钮
+  async function bulkDecide(action){
+    const ids = Array.from(document.querySelectorAll('.mr-pick:checked'))
+      .map(cb => parseInt(cb.dataset.id, 10));
+    if (!ids.length) return;
+    const verb = action==='approve'?'批准':'驳回';
+    if (!confirm(`批量${verb} ${ids.length} 条？${action==='approve'?'将真实发出。':''}`)) return;
+    try{
+      const r = await apiPost('/api/messenger-rpa/approvals/batch', {
+        ids, action, decided_by:'web-bulk',
+      });
+      const okCnt = (r.succeeded_ids||[]).length;
+      const failCnt = (r.failed||[]).length;
+      alert(`完成：成功 ${okCnt} 条，失败 ${failCnt} 条`);
+      await refreshAll();
+    }catch(e){ alert('失败: '+e.message); }
+  }
+  qs('#btn-bulk-approve').addEventListener('click', () => bulkDecide('approve'));
+  qs('#btn-bulk-reject').addEventListener('click', () => bulkDecide('reject'));
+
+  async function refreshRuns(){
+    try{
+      const r = await apiGet('/api/messenger-rpa/recent?limit=20');
+      const root = qs('#mr-runs');
+      const runs = r.runs || [];
+      qs('#kpi-runs').textContent = runs.length;
+      if (!runs.length) { root.innerHTML='<div class="mr-empty">尚无 run 记录</div>'; return; }
+      root.innerHTML = runs.map(run => `
+        <div class="mr-run ${run.ok?'ok':'err'}">
+          <div style="flex:1;min-width:0">
+            <div class="mr-run-name">${esc(run.chat_name || run.chat_key || '--')}</div>
+            <div style="font-size:.7rem;color:var(--t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((run.peer_text||run.error||'').slice(0,60))}</div>
+          </div>
+          <div style="text-align:right;flex-shrink:0">
+            <div class="mr-run-step">${esc(run.step||'?')}</div>
+            <div class="mr-run-time">${fmtTs(run.ts)}</div>
+          </div>
+        </div>
+      `).join('');
+    }catch(e){
+      qs('#mr-runs').innerHTML = '<div class="mr-empty">加载失败: '+esc(e.message)+'</div>';
+    }
+  }
+
+  async function refreshAll(){
+    await Promise.all([
+      refreshStatus(), refreshApprovals(), refreshRuns(), refreshDevices(),
+    ]);
+  }
+  // forward decl guard
+  async function refreshDevices(){ /* overridden below */ }
+
+  qs('#btn-trigger').addEventListener('click', async () => {
+    const btn = qs('#btn-trigger');
+    btn.disabled=true; btn.textContent='运行中...';
+    try{
+      const r = await apiPost('/api/messenger-rpa/trigger');
+      alert(`step=${r.step||''} ok=${r.ok} chat=${r.chat_name||''} \npeer=${(r.peer_text||'').slice(0,100)}\nreply=${(r.reply_text||'').slice(0,100)}`);
+      await refreshAll();
+    }catch(e){ alert('失败: '+e.message); }
+    finally{ btn.disabled=false; btn.textContent='立即跑一次 run_once'; }
+  });
+  qs('#btn-pause').addEventListener('click', async () => {
+    try{ await apiPost('/api/messenger-rpa/pause', {seconds:300}); await refreshStatus(); }
+    catch(e){ alert('失败: '+e.message); }
+  });
+  qs('#btn-resume').addEventListener('click', async () => {
+    try{ await apiPost('/api/messenger-rpa/resume'); await refreshStatus(); }
+    catch(e){ alert('失败: '+e.message); }
+  });
+  qs('#btn-refresh').addEventListener('click', refreshAll);
+
+  qs('#btn-calibrate').addEventListener('click', async () => {
+    const btn = qs('#btn-calibrate');
+    btn.disabled = true; btn.textContent = '扫描中...';
+    try {
+      const r = await apiPost('/api/messenger-rpa/calibrate');
+      const res = r.result || {};
+      alert(`calibrate ok=${r.ok} \nanchors=${JSON.stringify(res.anchors||res.reason||res, null, 2).slice(0,400)}`);
+    } catch (e) { alert('失败: ' + e.message); }
+    finally { btn.disabled = false; btn.textContent = '坐标校准（扫描屏幕）'; }
+  });
+
+  qs('#btn-install-kbd').addEventListener('click', async () => {
+    const btn = qs('#btn-install-kbd');
+    if (!confirm('将对 adb_serial 指定设备安装 ADBKeyboard（需要 tools/ADBKeyboard.apk 存在）')) return;
+    btn.disabled = true; btn.textContent = '安装中...';
+    try {
+      const r = await apiPost('/api/messenger-rpa/install-adbkeyboard');
+      alert(`install ok=${r.ok} \nsteps=${(r.info?.steps||[]).join(' → ')}\nerr=${r.info?.error||''}`);
+    } catch (e) { alert('失败: ' + e.message); }
+    finally { btn.disabled = false; btn.textContent = '安装 ADBKeyboard（中文/emoji）'; }
+  });
+
+  refreshDevices = async function(){
+    try{
+      const r = await apiGet('/api/messenger-rpa/devices');
+      const devs = r.devices || [];
+      const root = qs('#mr-devices');
+      if (!devs.length) { root.innerHTML = '<div class="mr-empty">'+esc(r.hint||'未配置设备')+'</div>'; return; }
+      root.innerHTML = devs.map(d => {
+        const online = !!d.present;
+        const cls = online ? 'ok' : 'err';
+        const lbl = online ? 'online' : 'offline';
+        const extra = online
+          ? `screen=${d.screen_on===null?'?':(d.screen_on?'on':'off')} · locked=${d.locked===null?'?':(d.locked?'yes':'no')}`
+          : '--';
+        return `<div class="mr-run ${cls}">
+          <div style="flex:1;min-width:0">
+            <div class="mr-run-name">${esc(d.serial)}</div>
+            <div style="font-size:.7rem;color:var(--t3)">${esc(extra)}</div>
+          </div>
+          <div style="text-align:right;flex-shrink:0"><div class="mr-run-step">${lbl}</div></div>
+        </div>`;
+      }).join('');
+    }catch(e){
+      qs('#mr-devices').innerHTML = '<div class="mr-empty">加载失败: '+esc(e.message)+'</div>';
+    }
+  };
+
+  refreshAll();
+  setInterval(refreshAll, 5000);
+})();
+</script>
+{% endblock %}

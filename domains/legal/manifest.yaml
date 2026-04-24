@@ -1,0 +1,24 @@
+name: legal
+display_name: "法律咨询"
+version: "1.0"
+description: "法律信息辅助域 — 一般性说明与法规检索提示（非正式法律意见）"
+
+skills: []
+
+config_files:
+  - defaults.yaml
+
+kb:
+  categories: kb/categories.yaml
+  seeds: kb/seeds.yaml
+
+prompts:
+  system_prompt: prompts/system_prompt.txt
+
+hooks: true
+
+i18n:
+  zh: i18n/zh.yaml
+  en: i18n/en.yaml
+
+web_routes: false

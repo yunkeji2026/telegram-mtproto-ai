@@ -1,0 +1,1457 @@
+<!DOCTYPE html>
+<html lang="{{ ui_lang|default('zh') }}-CN" data-theme="light" data-ui-mode="{{ ui_mode|default('simple') }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% block title %}{{ site_name|default('智控王客户转化聊天系统') }}{% endblock %}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"></noscript>
+<style>
+/* ── Variables ─────────────────────────────────── */
+:root{
+  --sw:240px; --th:58px; --r:12px; --r-sm:8px; --r-lg:16px;
+  --bg:#eef1f8; --card:#fff; --nav:#1b2038; --input:#f4f6fc;
+  --t:#111827; --t2:#4b5563; --t3:#9ca3af;
+  --bd:rgba(0,0,0,.07); --bd2:rgba(0,0,0,.13);
+  --p:#5b7cf6; --pd:#4a6aee; --ps:rgba(91,124,246,.12);
+  --g:linear-gradient(135deg,#5b7cf6,#8b5cf6);
+  --g-g:linear-gradient(135deg,#10b981,#059669);
+  --g-r:linear-gradient(135deg,#ef4444,#dc2626);
+  --g-a:linear-gradient(135deg,#f59e0b,#d97706);
+  --green:#10b981; --gs:rgba(16,185,129,.12);
+  --red:#ef4444;   --rs:rgba(239,68,68,.12);
+  --amber:#f59e0b; --as:rgba(245,158,11,.12);
+  --purple:#8b5cf6;--prs:rgba(139,92,246,.12);
+  --s0:0 1px 3px rgba(0,0,0,.05),0 1px 2px rgba(0,0,0,.03);
+  --s1:0 4px 12px rgba(0,0,0,.08);
+  --s2:0 12px 32px rgba(0,0,0,.12);
+  --sp:0 4px 14px rgba(91,124,246,.35);
+}
+[data-theme="dark"]{
+  --bg:#080c14; --card:rgba(14,20,34,.85); --nav:rgba(8,11,22,.95); --input:rgba(18,24,40,.8);
+  --t:#e2e8f0; --t2:#94a3b8; --t3:#475569;
+  --bd:rgba(255,255,255,.06); --bd2:rgba(255,255,255,.11);
+  --p:#6b8af8; --pd:#7c98ff; --ps:rgba(107,138,248,.15);
+  --s0:0 1px 3px rgba(0,0,0,.4); --s1:0 4px 12px rgba(0,0,0,.5); --s2:0 12px 32px rgba(0,0,0,.7);
+}
+/* ── Reset ─────────────────────────────────────── */
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t);min-height:100vh;display:flex;font-size:14px;line-height:1.5;transition:background .3s,color .3s}
+[data-theme="dark"] body{background:radial-gradient(ellipse at 15% 45%,rgba(91,124,246,.08) 0%,transparent 55%),radial-gradient(ellipse at 85% 15%,rgba(139,92,246,.06) 0%,transparent 50%),#080c14}
+/* ── Sidebar ─────────────────────────────────── */
+.sidebar{width:var(--sw);position:fixed;top:0;left:0;bottom:0;background:var(--nav);display:flex;flex-direction:column;z-index:100;border-right:1px solid var(--bd);transition:transform .3s cubic-bezier(.4,0,.2,1)}
+[data-theme="dark"] .sidebar{backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);background:rgba(8,11,22,.92);border-right:1px solid rgba(255,255,255,.05)}
+.sb-brand{padding:1.15rem 1.2rem;display:flex;align-items:center;gap:.6rem;border-bottom:1px solid rgba(255,255,255,.06)}
+.sb-icon{width:32px;height:32px;background:var(--g);border-radius:10px;display:flex;align-items:center;justify-content:center;box-shadow:var(--sp);flex-shrink:0}
+.sb-icon svg{width:17px;height:17px;color:#fff}
+.sb-name{font-weight:700;font-size:.95rem;color:#fff}
+.sb-nav{flex:1;padding:.6rem .55rem;overflow-y:auto}
+.sb-sec{font-size:.68rem;font-weight:700;color:rgba(255,255,255,.28);padding:.75rem .75rem .3rem;letter-spacing:.08em;text-transform:uppercase;cursor:default;user-select:none;pointer-events:none;border-top:1px solid rgba(255,255,255,.06);margin-top:.6rem;padding-top:.85rem}
+.sb-sec:first-child{border-top:none;margin-top:0;padding-top:.75rem}
+.sb-nav a{display:flex;align-items:center;gap:.55rem;padding:.58rem .75rem;border-radius:9px;color:rgba(255,255,255,.5);text-decoration:none;font-size:.86rem;font-weight:500;transition:all .18s;margin-bottom:2px}
+.sb-nav a:hover{background:rgba(255,255,255,.07);color:rgba(255,255,255,.85)}
+.sb-nav a.active{background:linear-gradient(135deg,rgba(91,124,246,.28),rgba(139,92,246,.18));color:#fff;box-shadow:inset 3px 0 0 var(--p)}
+.sb-nav a svg{width:16px;height:16px;flex-shrink:0;opacity:.65}
+.sb-nav a:hover svg,.sb-nav a.active svg{opacity:1}
+.sb-foot{padding:.65rem .8rem;border-top:1px solid rgba(255,255,255,.06);display:flex;flex-direction:column;gap:.2rem}
+.sb-status{font-size:.78rem;color:rgba(255,255,255,.38);display:flex;align-items:center;gap:.4rem}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);animation:pulse 2s infinite}
+.sb-links{display:flex;gap:.7rem;align-items:center}
+.sb-links a{color:rgba(255,255,255,.38);font-size:.78rem;text-decoration:none;transition:.18s;display:flex;align-items:center;gap:.25rem}
+.sb-links a:hover{color:rgba(255,255,255,.8)}
+/* legacy sb-links kept for collapsed compat */
+/* ── Simple mode: "more" fold + mode switch ──── */
+.sb-more{margin-top:.4rem;border-top:1px solid rgba(255,255,255,.06);padding-top:.4rem}
+.sb-more-toggle{display:flex;align-items:center;gap:.55rem;padding:.58rem .75rem;border-radius:9px;color:rgba(255,255,255,.38);font-size:.82rem;font-weight:500;cursor:pointer;transition:all .18s;list-style:none;user-select:none}
+.sb-more-toggle::-webkit-details-marker{display:none}
+.sb-more-toggle:hover{background:rgba(255,255,255,.07);color:rgba(255,255,255,.7)}
+.sb-more[open] .sb-more-toggle{color:rgba(255,255,255,.55)}
+.sb-more[open] .sb-more-toggle svg{transform:rotate(90deg)}
+.sb-more-toggle svg{transition:transform .2s;flex-shrink:0;opacity:.5}
+.sb-more a{display:flex;align-items:center;gap:.55rem;padding:.48rem .75rem .48rem 1.1rem;border-radius:9px;color:rgba(255,255,255,.4);text-decoration:none;font-size:.82rem;font-weight:500;transition:all .18s;margin-bottom:1px}
+.sb-more a:hover{background:rgba(255,255,255,.06);color:rgba(255,255,255,.75)}
+.sb-more a.active{background:linear-gradient(135deg,rgba(91,124,246,.2),rgba(139,92,246,.12));color:#fff}
+.sb-more a svg{width:15px;height:15px;flex-shrink:0;opacity:.55}
+/* Mode switch — prominent button in footer */
+.sb-mode-btn{display:flex;align-items:center;justify-content:center;gap:.45rem;width:100%;padding:.5rem .7rem;border-radius:8px;background:rgba(91,124,246,.12);color:rgba(160,180,255,.9);font-size:.78rem;font-weight:600;text-decoration:none;transition:all .2s;border:1px solid rgba(91,124,246,.15);margin-top:.4rem}
+.sb-mode-btn:hover{background:rgba(91,124,246,.25);color:#fff;border-color:rgba(91,124,246,.35)}
+.sb-mode-btn svg{flex-shrink:0;opacity:.8}
+.sidebar.collapsed .sb-mode-btn span{display:none}
+.sidebar.collapsed .sb-mode-btn{padding:.45rem;justify-content:center}
+.sb-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99;backdrop-filter:blur(2px)}
+/* Sidebar collapse toggle */
+.sb-collapse{background:none;border:none;color:rgba(255,255,255,.35);cursor:pointer;padding:.35rem;border-radius:6px;transition:.18s;display:flex;align-items:center;justify-content:center;margin-left:auto}
+.sb-collapse:hover{color:rgba(255,255,255,.8);background:rgba(255,255,255,.07)}
+.sb-collapse svg{width:16px;height:16px;transition:transform .3s}
+/* Collapsed state */
+.sidebar.collapsed{width:60px}
+.sidebar.collapsed .sb-name{display:none}
+.sidebar.collapsed .sb-nav a span,.sidebar.collapsed .sb-nav a .uname{display:none}
+.sidebar.collapsed .sb-sec{font-size:0;padding:.5rem 0 .2rem;text-align:center;border-top-color:rgba(255,255,255,.04)}
+.sidebar.collapsed .sb-sec::after{content:'·';font-size:.7rem;color:rgba(255,255,255,.2)}
+.sidebar.collapsed .sb-nav a{justify-content:center;padding:.58rem 0}
+.sidebar.collapsed .sb-nav a svg{margin:0}
+.sidebar.collapsed .sb-foot{gap:.2rem;padding:.5rem .4rem}
+.sidebar.collapsed .sb-status span:not(.dot){display:none}
+.sidebar.collapsed .sb-more-toggle span{display:none}
+.sidebar.collapsed .sb-more-toggle{justify-content:center;padding:.5rem 0}
+.sidebar.collapsed .sb-more a span{display:none}
+.sidebar.collapsed .sb-more a{justify-content:center;padding:.48rem 0}
+.sidebar.collapsed .sb-collapse svg{transform:rotate(180deg)}
+.sidebar.collapsed+.sb-overlay+.main,.sidebar.collapsed~.main{margin-left:60px}
+/* ── Main layout ────────────────────────────── */
+.main{margin-left:var(--sw);flex:1;display:flex;flex-direction:column;min-height:100vh;transition:margin-left .3s}
+.topbar{height:var(--th);display:flex;align-items:center;justify-content:space-between;padding:0 1.8rem;background:var(--card);border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:50;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);transition:background .3s}
+[data-theme="dark"] .topbar{background:rgba(9,13,24,.88)}
+.topbar-l{display:flex;align-items:center;gap:.65rem}
+.topbar-r{display:flex;align-items:center;gap:.5rem}
+.page-ttl{font-size:1rem;font-weight:600}
+.mode-badge{display:inline-flex;align-items:center;padding:.1rem .5rem;border-radius:5px;font-size:.68rem;font-weight:600;text-decoration:none;letter-spacing:.03em;transition:all .2s;cursor:pointer}
+.mode-badge-simple{background:linear-gradient(135deg,rgba(16,185,129,.15),rgba(16,185,129,.08));color:var(--green);border:1px solid rgba(16,185,129,.2)}
+.mode-badge-simple:hover{background:rgba(16,185,129,.25);color:#fff}
+/* ── Simple mode: hide pro-only elements, enhance simple UI ── */
+[data-ui-mode="simple"] .pro-only{display:none!important}
+[data-ui-mode="simple"] .simple-enhance{font-size:1.05em}
+[data-ui-mode="simple"] .simple-big-action{padding:.7rem 1.4rem!important;font-size:.95rem!important;border-radius:12px!important}
+[data-ui-mode="simple"] .entry-grid{grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
+[data-ui-mode="simple"] .case-card .case-chain{display:none}
+[data-ui-mode="simple"] .case-card .sat-bar{display:none}
+[data-ui-mode="simple"] .filter-bar .stat-pill:nth-child(n+4){display:none}
+/* Channels: hide editing controls in simple mode */
+[data-ui-mode="simple"] .ch-save-btn{display:none!important}
+[data-ui-mode="simple"] .ch-foot{display:none!important}
+[data-ui-mode="simple"] .ch-cb{display:none!important}
+[data-ui-mode="simple"] .batch-bar{display:none!important}
+[data-ui-mode="simple"] .rate-step button{display:none!important}
+[data-ui-mode="simple"] .sr-input{pointer-events:none;border-color:transparent;background:transparent}
+[data-ui-mode="simple"] .amt-pill input{pointer-events:none}
+[data-ui-mode="simple"] .st-sel input{pointer-events:none}
+[data-ui-mode="simple"] .lim-row input{pointer-events:none;border-color:transparent;background:transparent}
+[data-ui-mode="simple"] .lim-tags{display:none!important}
+[data-ui-mode="simple"] .pt-sel{pointer-events:none;appearance:none;background:transparent;border-color:transparent}
+/* Audit: hide heatmap & export in simple mode */
+[data-ui-mode="simple"] .hm-wrap{display:none!important}
+[data-ui-mode="simple"] .hm-layout{display:none!important}
+[data-ui-mode="simple"] .hm-stats{display:none!important}
+/* ── Mobile + Simple mode: larger touch targets ── */
+@media(max-width:640px){
+  [data-ui-mode="simple"] .btn{min-height:42px;font-size:.88rem;padding:.5rem 1rem}
+  [data-ui-mode="simple"] .btn-sm{min-height:38px}
+  [data-ui-mode="simple"] .btn-xs{min-height:34px;font-size:.8rem}
+  [data-ui-mode="simple"] .case-card{padding:1rem}
+  [data-ui-mode="simple"] .case-actions .input{min-height:38px;font-size:.88rem}
+  [data-ui-mode="simple"] .case-actions .btn{min-height:40px}
+  [data-ui-mode="simple"] .draft-actions .btn-sm{min-height:36px;padding:.4rem .8rem}
+  [data-ui-mode="simple"] .entry-card{padding:1rem}
+  [data-ui-mode="simple"] .sb-item{padding:.75rem 1rem;font-size:.9rem}
+  [data-ui-mode="simple"] .page-title{font-size:1.1rem}
+}
+.hamburger{display:none;background:none;border:none;cursor:pointer;color:var(--t);padding:.3rem;align-items:center;justify-content:center}
+.hamburger svg{width:22px;height:22px}
+/* theme toggle */
+.th-btn{width:44px;height:24px;border-radius:12px;border:1.5px solid var(--bd2);background:var(--bd2);cursor:pointer;position:relative;transition:background .3s,border .3s;flex-shrink:0}
+.th-btn::after{content:'';position:absolute;top:2px;left:2px;width:17px;height:17px;background:#fff;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .3s}
+[data-theme="dark"] .th-btn{background:var(--p);border-color:var(--p)}
+[data-theme="dark"] .th-btn::after{transform:translateX(19px)}
+.th-ico{color:var(--t3)}.th-ico svg{width:14px;height:14px;display:block}
+/* ── Content ─────────────────────────────── */
+.wrap{flex:1;padding:1.6rem 1.8rem 3rem;max-width:1160px;width:100%}
+.p-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:1.3rem}
+.p-head h1{font-size:1.2rem;font-weight:700}
+.page-in{animation:fadeUp .3s ease}
+/* ── Cards ──────────────────────────────── */
+.card{background:var(--card);border-radius:var(--r);box-shadow:var(--s0);padding:1.3rem 1.4rem;margin-bottom:1.2rem;border:1px solid var(--bd);transition:box-shadow .25s,transform .25s;position:relative;overflow:hidden}
+.card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--g);opacity:0;transition:opacity .25s}
+.card:hover{box-shadow:var(--s1);transform:translateY(-1px)}
+.card:hover::before{opacity:1}
+[data-theme="dark"] .card{backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.05)}
+.card h2{display:flex;align-items:center;gap:.5rem;font-size:.95rem;font-weight:600;margin-bottom:1rem;padding-bottom:.7rem;border-bottom:1px solid var(--bd);color:var(--t)}
+.card h2 svg{width:17px;height:17px;color:var(--p);flex-shrink:0}
+.card h2 .actions{margin-left:auto;display:flex;gap:.4rem}
+/* stat cards */
+.stat-card{text-align:center;padding:1.4rem 1rem}
+.s-icon{width:50px;height:50px;border-radius:14px;display:flex;align-items:center;justify-content:center;margin:0 auto .9rem}
+.s-icon svg{width:24px;height:24px;color:#fff}
+.s-num{font-size:2rem;font-weight:800;line-height:1;background:var(--g);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.s-lbl{font-size:.78rem;color:var(--t3);margin-top:.35rem}
+/* ── Grid ───────────────────────────────── */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:1.2rem}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:1.2rem}
+.g4{display:grid;grid-template-columns:repeat(4,1fr);gap:1.2rem}
+@media(max-width:1024px){.g4{grid-template-columns:1fr 1fr}.g3{grid-template-columns:1fr 1fr}}
+@media(max-width:640px){.g2,.g3,.g4{grid-template-columns:1fr}}
+/* ── Tables ─────────────────────────────── */
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:.85rem}
+thead tr{border-bottom:1px solid var(--bd)}
+th{text-align:left;padding:.5rem .75rem;font-size:.72rem;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.05em}
+td{padding:.6rem .75rem;border-bottom:1px solid var(--bd)}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:var(--ps)}
+/* ── Badges ─────────────────────────────── */
+.badge{display:inline-flex;align-items:center;gap:.25rem;padding:.18rem .55rem;border-radius:6px;font-size:.74rem;font-weight:600;white-space:nowrap}
+.b-g{background:var(--gs);color:var(--green)}
+.b-r{background:var(--rs);color:var(--red)}
+.b-a{background:var(--as);color:var(--amber)}
+.b-p{background:var(--ps);color:var(--p)}
+.b-u{background:var(--prs);color:var(--purple)}
+.b-n{background:rgba(107,114,128,.1);color:var(--t2)}
+/* ── Buttons ─────────────────────────────── */
+.btn{display:inline-flex;align-items:center;gap:.4rem;padding:.5rem 1.1rem;border:none;border-radius:9px;font-size:.85rem;font-weight:600;cursor:pointer;transition:all .2s;text-decoration:none;font-family:inherit;position:relative;overflow:hidden;white-space:nowrap}
+.btn svg{width:15px;height:15px;flex-shrink:0}
+.btn-p{background:var(--g);color:#fff;box-shadow:0 2px 8px rgba(91,124,246,.22)}
+.btn-p:hover{box-shadow:var(--sp);transform:translateY(-1px)}
+.btn-s{background:var(--input);color:var(--t2);border:1px solid var(--bd)}
+.btn-s:hover{background:var(--bd2);color:var(--t)}
+.btn-d{background:var(--g-r);color:#fff}
+.btn-d:hover{box-shadow:0 4px 14px rgba(239,68,68,.4);transform:translateY(-1px)}
+.btn-sm{padding:.35rem .8rem;font-size:.8rem}
+.btn-xs{padding:.2rem .55rem;font-size:.74rem;border-radius:6px}
+/* ripple */
+.ripple{position:absolute;border-radius:50%;background:rgba(255,255,255,.3);animation:ripple .55s linear;pointer-events:none;transform:scale(0)}
+@keyframes ripple{to{transform:scale(4);opacity:0}}
+/* ── Forms ──────────────────────────────── */
+.f-grp{margin-bottom:.9rem}
+.f-lbl{display:block;font-size:.8rem;font-weight:600;color:var(--t2);margin-bottom:.4rem}
+input[type=text],input[type=password],input[type=search],input[type=number],select,textarea,.inp{width:100%;padding:.55rem .8rem;border:1.5px solid var(--bd);border-radius:9px;font-size:.875rem;font-family:inherit;background:var(--input);color:var(--t);transition:all .2s;outline:none}
+input:focus,select:focus,textarea:focus,.inp:focus{border-color:var(--p);box-shadow:0 0 0 3px var(--ps)}
+textarea{min-height:90px;resize:vertical;line-height:1.6}
+/* toggle switch */
+.tog-wrap{display:flex;align-items:center;gap:.6rem}
+.tog{position:relative;width:44px;height:24px;flex-shrink:0}
+.tog input{opacity:0;width:0;height:0;position:absolute}
+.tog-s{position:absolute;inset:0;background:rgba(107,114,128,.3);border-radius:12px;cursor:pointer;transition:background .3s}
+.tog-s::after{content:'';position:absolute;top:3px;left:3px;width:18px;height:18px;background:#fff;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:transform .3s}
+.tog input:checked+.tog-s{background:var(--green)}
+.tog input:checked+.tog-s::after{transform:translateX(20px)}
+/* ── Messages / Alerts ──────────────────── */
+.msg{display:flex;align-items:center;gap:.6rem;padding:.7rem 1rem;border-radius:9px;margin-bottom:1rem;font-size:.875rem;font-weight:500;animation:fadeUp .3s ease}
+.msg svg{width:16px;height:16px;flex-shrink:0}
+.msg-ok{background:var(--gs);color:var(--green)}
+.msg-err{background:var(--rs);color:var(--red)}
+.msg-info{background:var(--ps);color:var(--p)}
+/* ── Toast ──────────────────────────────── */
+#toast-root{position:fixed;bottom:1.5rem;right:1.5rem;display:flex;flex-direction:column;gap:.45rem;z-index:9999}
+.toast{padding:.7rem 1rem;border-radius:10px;font-size:.875rem;font-weight:500;box-shadow:var(--s2);display:flex;align-items:center;gap:.5rem;min-width:210px;max-width:340px;transform:translateX(110%);transition:transform .3s cubic-bezier(.4,0,.2,1);backdrop-filter:blur(10px)}
+.toast.show{transform:translateX(0)}
+.t-ok{background:rgba(16,185,129,.15);color:var(--green);border:1px solid rgba(16,185,129,.2)}
+.t-err{background:rgba(239,68,68,.15);color:var(--red);border:1px solid rgba(239,68,68,.2)}
+.t-info{background:rgba(91,124,246,.15);color:var(--p);border:1px solid rgba(91,124,246,.2)}
+/* ── Empty state ────────────────────────── */
+.empty{text-align:center;padding:3rem 1rem;color:var(--t3)}
+.empty svg{width:52px;height:52px;margin-bottom:.8rem;opacity:.25}
+.empty p{font-size:.9rem}
+/* ── Code ───────────────────────────────── */
+code{background:var(--input);padding:.15rem .45rem;border-radius:5px;font-size:.82rem;font-family:'Consolas','JetBrains Mono','Courier New',monospace;border:1px solid var(--bd);color:var(--p)}
+/* ── Animations ─────────────────────────── */
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+@keyframes spin{to{transform:rotate(360deg)}}
+.fa{animation:fadeUp .32s ease both}
+.fa1{animation-delay:.06s}.fa2{animation-delay:.12s}.fa3{animation-delay:.18s}.fa4{animation-delay:.24s}
+/* ── Responsive ─────────────────────────── */
+@media(max-width:860px){
+  .sidebar{transform:translateX(-100%)}.sidebar.open{transform:translateX(0)}
+  .sb-overlay.open{display:block}.main{margin-left:0!important}
+  .hamburger{display:flex}.wrap{padding:1rem 1rem 2rem}
+  /* Topbar: hide search text on mobile */
+  #cmd-trigger #cmd-trigger-txt,#cmd-trigger kbd{display:none}
+  #cmd-trigger{padding:.35rem}
+  /* Notification: full-width dropdown on mobile */
+  .notif-dd{right:-50px;width:calc(100vw - 2rem);left:auto}
+  /* User dropdown: tighter on mobile */
+  .user-dd{right:-8px;min-width:200px}
+  /* Tables: horizontal scroll */
+  .sa-table-wrap,.table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  /* Cards: ensure readable padding */
+  .card{padding:1rem}
+  /* Shortcut overlay */
+  .sc-box{padding:1.2rem}
+  /* Command palette full width */
+  .cmd-box{width:95vw}
+  /* Chart grid stack */
+  .sa-section [style*="grid-template-columns:1fr 1fr"]{grid-template-columns:1fr!important}
+  /* Tour popup: smaller */
+  #tour-popup{width:min(260px,88vw)!important}
+}
+@media(max-width:480px){
+  .topbar{padding:0 .85rem}
+  .page-ttl{font-size:.9rem;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .wrap{padding:.75rem .75rem 2rem}
+  .f-grp label{font-size:.8rem}
+  input,select,textarea{font-size:16px!important}/* prevent iOS zoom */
+  .btn{min-height:38px}/* touch target */
+  .notif-dd{right:-80px;width:calc(100vw - 1.5rem)}
+}
+/* ── Scrollbar ──────────────────────────── */
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:3px}
+/* ── Global Tooltip ────────────────────── */
+.g-tip{position:fixed;z-index:10000;max-width:320px;padding:.7rem .9rem;background:var(--card);border:1px solid var(--bd);border-radius:11px;box-shadow:var(--s2);pointer-events:none;opacity:0;transition:opacity .18s;font-size:.8rem;line-height:1.55}
+.g-tip.show{opacity:1}
+.g-tip-name{font-weight:700;color:var(--p);margin-bottom:.15rem;font-size:.82rem;display:flex;align-items:center;gap:.35rem}
+.g-tip-usage{color:var(--t3);font-size:.72rem;margin-top:.35rem;border-top:1px solid var(--bd);padding-top:.35rem;font-style:italic}
+.g-tip-desc{color:var(--t2)}
+[data-tip]{cursor:help;border-bottom:1px dashed var(--bd2)}
+[data-help]{cursor:help}
+.sb-nav a[data-help]{cursor:pointer}
+.btn[data-help],.btn[data-tip]{cursor:pointer}
+/* Sidebar nav badge */
+.sb-badge{display:none;margin-left:auto;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--red);color:#fff;font-size:.65rem;font-weight:700;line-height:18px;text-align:center;flex-shrink:0;animation:fadeIn .3s ease}
+.sb-badge.has-count{display:inline-flex;align-items:center;justify-content:center}
+.sidebar.collapsed .sb-badge{display:none!important}
+.tip-toggle{position:fixed;bottom:1.5rem;left:calc(var(--sw) + 1.5rem);z-index:9998;width:36px;height:36px;border-radius:50%;border:1.5px solid var(--bd);background:var(--card);color:var(--t3);cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:var(--s1);transition:.2s;font-weight:800;font-size:.9rem}
+.tip-toggle:hover{color:var(--p);border-color:var(--p);transform:scale(1.08)}
+.tip-toggle.active{background:var(--p);color:#fff;border-color:var(--p)}
+@media(max-width:1024px){.tip-toggle{left:1.5rem}}
+/* Notification Center */
+.notif-wrap{position:relative}
+.notif-btn{background:none;border:none;cursor:pointer;padding:.35rem;border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--t2);position:relative;transition:.18s}
+.notif-btn:hover{background:var(--input);color:var(--t)}
+.notif-btn svg{width:18px;height:18px}
+.notif-badge{position:absolute;top:2px;right:2px;width:8px;height:8px;border-radius:50%;background:var(--red);border:2px solid var(--card);display:none}
+.notif-badge.show{display:block}
+.notif-dd{position:absolute;top:calc(100% + 8px);right:-10px;width:320px;max-height:400px;background:var(--card);border:1px solid var(--bd);border-radius:14px;box-shadow:var(--s2);z-index:200;overflow:hidden;display:flex;flex-direction:column;opacity:0;transform:translateY(-6px) scale(.97);pointer-events:none;transition:all .2s cubic-bezier(.4,0,.2,1)}
+.notif-dd.open{opacity:1;transform:translateY(0) scale(1);pointer-events:auto}
+.notif-hd{display:flex;align-items:center;justify-content:space-between;padding:.65rem .9rem;border-bottom:1px solid var(--bd);font-weight:700;font-size:.85rem;flex-shrink:0}
+.notif-mark{font-size:.72rem;color:var(--p);background:none;border:none;cursor:pointer;padding:.15rem .4rem;border-radius:5px;transition:.15s;font-family:inherit}
+.notif-mark:hover{background:var(--ps)}
+.notif-list{overflow-y:auto;flex:1}
+.notif-item{display:flex;align-items:flex-start;gap:.6rem;padding:.6rem .9rem;border-bottom:1px solid var(--bd);transition:background .12s;cursor:default}
+.notif-item:last-child{border-bottom:none}
+.notif-item:hover{background:var(--input)}
+.notif-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:.3rem}
+.notif-dot.critical{background:var(--red)}
+.notif-dot.warn{background:var(--amber)}
+.notif-dot.info{background:var(--p)}
+.notif-body{flex:1;min-width:0}
+.notif-title{font-weight:600;font-size:.82rem;margin-bottom:.1rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.notif-text{font-size:.75rem;color:var(--t2);line-height:1.4}
+.notif-time{font-size:.68rem;color:var(--t3);white-space:nowrap;margin-top:.15rem}
+.notif-empty{padding:2rem;text-align:center;color:var(--t3);font-size:.85rem}
+/* Shortcut Help Overlay */
+.sc-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:350;backdrop-filter:blur(3px);align-items:center;justify-content:center}
+.sc-overlay.open{display:flex}
+.sc-box{background:var(--card);border:1px solid var(--bd);border-radius:16px;box-shadow:var(--s2);padding:1.6rem;width:min(500px,92vw);max-height:80vh;overflow-y:auto}
+.sc-box h3{font-size:1rem;font-weight:700;margin-bottom:1.2rem;display:flex;align-items:center;gap:.5rem}
+.sc-box h3 svg{width:18px;height:18px;color:var(--p)}
+.sc-group{margin-bottom:1rem}
+.sc-group-title{font-size:.72rem;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.4rem}
+.sc-row{display:flex;align-items:center;justify-content:space-between;padding:.3rem 0;font-size:.83rem;border-bottom:1px solid var(--bd)}
+.sc-row:last-child{border-bottom:none}
+.sc-desc{color:var(--t2)}
+.sc-keys{display:flex;gap:.3rem}
+.sc-key{background:var(--input);border:1px solid var(--bd2);border-radius:5px;padding:.15rem .45rem;font-size:.72rem;font-weight:600;font-family:monospace;color:var(--t)}
+/* Command Palette */
+.cmd-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:300;backdrop-filter:blur(3px);justify-content:center;padding-top:min(18vh,150px)}
+.cmd-overlay.open{display:flex}
+.cmd-box{width:min(560px,92vw);background:var(--card);border:1px solid var(--bd);border-radius:14px;box-shadow:var(--s2);overflow:hidden;max-height:420px;display:flex;flex-direction:column}
+.cmd-input{border:none;outline:none;width:100%;padding:.85rem 1.1rem;font-size:.95rem;background:transparent;color:var(--t);font-family:inherit;border-bottom:1px solid var(--bd)}
+.cmd-input::placeholder{color:var(--t3)}
+.cmd-list{overflow-y:auto;padding:.35rem 0;flex:1}
+.cmd-item{display:flex;align-items:center;gap:.65rem;padding:.55rem 1.1rem;cursor:pointer;transition:background .12s;font-size:.86rem;color:var(--t)}
+.cmd-item:hover,.cmd-item.active{background:var(--ps)}
+.cmd-item svg{width:16px;height:16px;flex-shrink:0;color:var(--t2)}
+.cmd-item .cmd-key{margin-left:auto;font-size:.7rem;color:var(--t3);background:var(--input);padding:.1rem .4rem;border-radius:4px;border:1px solid var(--bd)}
+.cmd-empty{padding:1.5rem;text-align:center;color:var(--t3);font-size:.85rem}
+/* User menu */
+.user-menu{position:relative;margin-right:.5rem}
+.user-btn{display:flex;align-items:center;gap:.45rem;padding:.28rem .55rem .28rem .28rem;border:1px solid var(--bd);border-radius:10px;background:transparent;cursor:pointer;transition:all .2s;color:var(--t);font-family:inherit;font-size:0}
+.user-btn:hover{background:var(--input);border-color:var(--bd2)}
+.user-avatar{width:28px;height:28px;border-radius:8px;background:var(--g);display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;color:#fff;flex-shrink:0}
+.user-btn .uname{font-size:.82rem;font-weight:600;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--t)}
+.user-btn .chevron{color:var(--t3);transition:transform .2s}
+.user-dd{position:absolute;top:calc(100% + 8px);right:0;min-width:220px;background:var(--card);border:1px solid var(--bd);border-radius:12px;box-shadow:var(--s2);padding:.4rem 0;z-index:200;opacity:0;transform:translateY(-8px) scale(.96);pointer-events:none;transition:all .2s cubic-bezier(.4,0,.2,1)}
+.user-dd.open{opacity:1;transform:translateY(0) scale(1);pointer-events:auto}
+.ud-head{padding:.65rem .9rem;display:flex;align-items:center;gap:.55rem;border-bottom:1px solid var(--bd)}
+.ud-head .user-avatar{width:36px;height:36px;font-size:.9rem;border-radius:10px}
+.ud-info{flex:1;min-width:0}
+.ud-name{font-weight:700;font-size:.85rem;line-height:1.3}
+.ud-role-tag{font-size:.68rem;color:var(--t3)}
+.ud-item{display:flex;align-items:center;gap:.5rem;padding:.5rem .9rem;font-size:.84rem;color:var(--t);cursor:pointer;transition:background .15s;border:none;background:none;width:100%;font-family:inherit;text-decoration:none;text-align:left}
+.ud-item:hover{background:var(--input)}.ud-item svg{width:15px;height:15px;color:var(--t3);flex-shrink:0}
+.ud-sep{height:1px;background:var(--bd);margin:.25rem 0}
+.ud-item.danger{color:var(--red)}.ud-item.danger svg{color:var(--red)}
+@media(max-width:860px){.user-btn .uname{display:none}}
+/* Password modal */
+.pwd-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:300;display:none;align-items:center;justify-content:center;backdrop-filter:blur(3px)}
+.pwd-overlay.open{display:flex}
+.pwd-card{background:var(--card);border-radius:var(--r-lg);box-shadow:var(--s2);padding:1.5rem;width:380px;max-width:92vw;animation:fadeUp .25s ease}
+.pwd-card h3{font-size:1rem;font-weight:700;margin-bottom:1.1rem;display:flex;align-items:center;gap:.4rem}
+.pwd-card h3 svg{width:18px;height:18px;color:var(--p)}
+.pwd-err{font-size:.82rem;color:var(--red);margin-bottom:.6rem;display:none;padding:.4rem .6rem;background:var(--rs);border-radius:6px}
+/* Confirm modal */
+.confirm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:310;display:none;align-items:center;justify-content:center;backdrop-filter:blur(3px)}
+.confirm-overlay.open{display:flex}
+.confirm-card{background:var(--card);border-radius:var(--r-lg);box-shadow:var(--s2);padding:1.6rem;width:340px;max-width:90vw;text-align:center;animation:fadeUp .2s ease}
+.confirm-msg{font-size:.92rem;font-weight:500;margin-bottom:1.2rem;line-height:1.6;color:var(--t)}
+.confirm-actions{display:flex;gap:.5rem;justify-content:center}
+/* Spinner */
+@keyframes spin{to{transform:rotate(360deg)}}
+.btn .spinner{width:15px;height:15px;animation:spin .6s linear infinite;flex-shrink:0}
+</style>
+{% block head %}{% endblock %}
+<script>
+(function(){
+  var _f=window.fetch;
+  window.fetch=function(url,opts){
+    opts=opts||{};
+    var m=(opts.method||'GET').toUpperCase();
+    if(m!=='GET'&&m!=='HEAD'&&m!=='OPTIONS'){
+      var t=document.cookie.match(/(?:^|;\s*)csrf_token=([^;]*)/);
+      if(t){
+        opts.headers=opts.headers||{};
+        if(opts.headers instanceof Headers){opts.headers.set('X-CSRF-Token',t[1])}
+        else{opts.headers['X-CSRF-Token']=t[1]}
+      }
+    }
+    return _f.call(this,url,opts);
+  };
+})();
+</script>
+</head>
+<body>
+<div class="sb-overlay" id="sb-overlay" onclick="closeSidebar()"></div>
+<aside class="sidebar" id="sidebar">
+  <div class="sb-brand">
+    <div class="sb-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div>
+    <span class="sb-name">{{ i18n.brand if i18n else site_name|default('智控王客户转化聊天系统') }}</span>
+    <button class="sb-collapse" onclick="toggleCollapse()" title="{{ (i18n or {}).get('sidebar_toggle','折叠/展开侧栏') }}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>
+    </button>
+  </div>
+  <nav class="sb-nav">
+  {% if ui_mode == 'simple' %}
+    {# ── 简洁模式：日常工作 ──────────────────────────── #}
+    <div class="sb-sec">{{ (i18n or {}).get('section_daily', '日常工作') }}</div>
+    <a href="/cases" {% if active=="cases" %}class="active"{% endif %} data-help="nav_cases">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      <span>{{ (i18n or {}).get('cases', '待处理案例') }}</span>
+      <span class="sb-badge" id="badge-cases"></span>
+    </a>
+    <a href="/knowledge" {% if active=="knowledge" %}class="active"{% endif %} data-help="nav_knowledge">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+      <span>{{ (i18n or {}).get('knowledge', '知识库') }}</span>
+    </a>
+    {% for dp in domain_web_pages if dp.get('show_in_simple') %}
+    <a href="{{ dp.path }}" {% if active==dp.key %}class="active"{% endif %}>
+      {% set _ico = dp.get('icon','') %}
+      {% if _ico == 'globe' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+      {% elif _ico == 'package' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+      {% elif _ico == 'wallet' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+      {% elif _ico == 'truck' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+      {% else %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      {% endif %}
+      <span>{{ dp.get('label_simple') or dp.get('label', '') }}</span>
+    </a>
+    {% endfor %}
+    <a href="/learner" {% if active=="learner" %}class="active"{% endif %} data-help="nav_learner">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
+      <span>{{ (i18n or {}).get('learner', 'AI 学习审核') }}</span>
+      <span class="sb-badge" id="badge-learner"></span>
+    </a>
+    <a href="/line-rpa" {% if active=="line_rpa" %}class="active"{% endif %} data-help="nav_line_rpa">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/><circle cx="9" cy="10" r="1" fill="currentColor"/><circle cx="13" cy="10" r="1" fill="currentColor"/><circle cx="17" cy="10" r="1" fill="currentColor"/></svg>
+      <span>LINE 自动聊天</span>
+    </a>
+    <a href="/messenger-rpa" {% if active=="messenger_rpa" %}class="active"{% endif %} data-help="nav_messenger_rpa">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12.5L10.5 15 16 9"/></svg>
+      <span>Messenger RPA</span>
+    </a>
+    {% if user_role == 'master' %}
+    <a href="/settings" {% if active=="settings" %}class="active"{% endif %} data-help="nav_escalation">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 16.92z"/></svg>
+      <span>{{ (i18n or {}).get('escalation', '人工转接') }}</span>
+    </a>
+    {% endif %}
+    {# ── 简洁模式：数据 & 记录（折叠） ──────────────────── #}
+    <details class="sb-more" id="sb-more-fold">
+      <summary class="sb-more-toggle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+        <span>{{ (i18n or {}).get('section_data_records', '数据 & 记录') }}</span>
+      </summary>
+      <a href="/" {% if active=="dash" %}class="active"{% endif %} data-help="nav_dashboard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+        <span>{{ (i18n or {}).get('dashboard', '数据概览') }}</span>
+      </a>
+      <a href="/analytics" {% if active=="analytics" %}class="active"{% endif %} data-help="nav_analytics">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        <span>{{ (i18n or {}).get('analytics', '运营分析') }}</span>
+      </a>
+      <a href="/audit" {% if active=="audit" %}class="active"{% endif %} data-help="nav_audit">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        <span>{{ (i18n or {}).get('audit', '操作记录') }}</span>
+      </a>
+      <a href="/episodic-memory" {% if active=="episodic" %}class="active"{% endif %} data-help="nav_episodic">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/><line x1="8" y1="7" x2="16" y2="7"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+        <span>情景记忆</span>
+      </a>
+      <a href="/help" {% if active=="help" %}class="active"{% endif %} data-help="nav_help">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <span>{{ (i18n or {}).get('help_center', '帮助中心') }}</span>
+      </a>
+    </details>
+  {% else %}
+    {# ── 完整模式：运营中心 ──────────────────────────── #}
+    <div class="sb-sec">{{ (i18n or {}).get('section_ops', '运营中心') }}</div>
+    <a href="/cases" {% if active=="cases" %}class="active"{% endif %} data-help="nav_cases">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      <span>{{ (i18n or {}).get('cases', '待处理案例') }}</span>
+      <span class="sb-badge" id="badge-cases"></span>
+    </a>
+    <a href="/knowledge" {% if active=="knowledge" %}class="active"{% endif %} data-help="nav_knowledge">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+      <span>{{ (i18n or {}).get('knowledge', '知识库') }}</span>
+    </a>
+    <a href="/learner" {% if active=="learner" %}class="active"{% endif %} data-help="nav_learner">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
+      <span>{{ (i18n or {}).get('learner', 'AI 学习审核') }}</span>
+      <span class="sb-badge" id="badge-learner"></span>
+    </a>
+    <a href="/line-rpa" {% if active=="line_rpa" %}class="active"{% endif %} data-help="nav_line_rpa">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/><circle cx="9" cy="10" r="1" fill="currentColor"/><circle cx="13" cy="10" r="1" fill="currentColor"/><circle cx="17" cy="10" r="1" fill="currentColor"/></svg>
+      <span>LINE 自动聊天</span>
+    </a>
+    <a href="/messenger-rpa" {% if active=="messenger_rpa" %}class="active"{% endif %} data-help="nav_messenger_rpa">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12.5L10.5 15 16 9"/></svg>
+      <span>Messenger RPA</span>
+    </a>
+    {% for dp in domain_web_pages if dp.get('section') == 'ops' %}
+    <a href="{{ dp.path }}" {% if active==dp.key %}class="active"{% endif %}>
+      {% set _ico = dp.get('icon','') %}
+      {% if _ico == 'globe' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+      {% elif _ico == 'package' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+      {% elif _ico == 'wallet' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+      {% elif _ico == 'truck' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+      {% else %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      {% endif %}
+      <span>{{ dp.get('label', '') }}</span>
+    </a>
+    {% endfor %}
+    {# ── 完整模式：AI 与策略 ─────────────────────────── #}
+    <div class="sb-sec">{{ (i18n or {}).get('section_ai', 'AI 与策略') }}</div>
+    <a href="/strategies" {% if active=="strategies" %}class="active"{% endif %} data-help="nav_strategies">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+      <span>{{ (i18n or {}).get('strategies', '策略配置') }}</span>
+    </a>
+    <a href="/strategy-analytics" {% if active=="strategy-analytics" %}class="active"{% endif %} data-help="nav_strategy_analytics">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+      <span>{{ (i18n or {}).get('strategy_analytics', '策略效果') }}</span>
+    </a>
+    {# ── 完整模式：数据分析 ──────────────────────────── #}
+    <div class="sb-sec">{{ (i18n or {}).get('section_data', '数据分析') }}</div>
+    <a href="/" {% if active=="dash" %}class="active"{% endif %} data-help="nav_dashboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+      <span>{{ (i18n or {}).get('dashboard', '数据概览') }}</span>
+    </a>
+    <a href="/analytics" {% if active=="analytics" %}class="active"{% endif %} data-help="nav_analytics">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      <span>{{ (i18n or {}).get('analytics', '运营分析') }}</span>
+    </a>
+    <a href="/audit" {% if active=="audit" %}class="active"{% endif %} data-help="nav_audit">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      <span>{{ (i18n or {}).get('audit', '操作记录') }}</span>
+    </a>
+    <a href="/episodic-memory" {% if active=="episodic" %}class="active"{% endif %} data-help="nav_episodic">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/><line x1="8" y1="7" x2="16" y2="7"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+      <span>情景记忆</span>
+    </a>
+    <a href="/logs" {% if active=="logs" %}class="active"{% endif %} data-help="nav_logs">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+      <span>{{ (i18n or {}).get('logs', '实时日志') }}</span>
+    </a>
+    {# ── 完整模式：系统管理 (master only) ─────────────── #}
+    {% if user_role == 'master' %}
+    <div class="sb-sec">{{ (i18n or {}).get('section_system', '系统管理') }}</div>
+    <a href="/users" {% if active=="users" %}class="active"{% endif %} data-help="nav_users">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+      <span>{{ (i18n or {}).get('users', '用户管理') }}</span>
+    </a>
+    <a href="/settings" {% if active=="settings" %}class="active"{% endif %} data-help="nav_settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+      <span>{{ (i18n or {}).get('system_settings', '系统设置') }}</span>
+    </a>
+    <a href="/diff" {% if active=="diff" %}class="active"{% endif %} data-help="nav_diff">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 009 9"/></svg>
+      <span>{{ (i18n or {}).get('diff', '版本对比') }}</span>
+    </a>
+    <a href="/help" {% if active=="help" %}class="active"{% endif %} data-help="nav_help">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      <span>{{ (i18n or {}).get('help_center', '帮助中心') }}</span>
+    </a>
+    <a href="/developer" {% if active=="developer" %}class="active"{% endif %} data-help="nav_developer">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+      <span>{{ (i18n or {}).get('developer', '开发者工具') }}</span>
+    </a>
+    {% endif %}
+  {% endif %}
+  </nav>
+  <div class="sb-foot">
+    <div class="sb-status"><span class="dot"></span><span>{{ (i18n or {}).get('status_running', '运行中') }}</span></div>
+    <a href="/set_ui_mode?mode={{ 'full' if ui_mode == 'simple' else 'simple' }}" class="sb-mode-btn" title="{{ (i18n or {}).get('switch_mode','切换模式') }}">
+      {% if ui_mode == 'simple' %}
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      <span>{{ (i18n or {}).get('switch_to_full', '切换完整模式') }}</span>
+      {% else %}
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M4 6h16"/><path d="M4 12h10"/><path d="M4 18h7"/></svg>
+      <span>{{ (i18n or {}).get('switch_to_simple', '切换简洁模式') }}</span>
+      {% endif %}
+    </a>
+  </div>
+</aside>
+
+<div class="main">
+  <header class="topbar">
+    <div class="topbar-l">
+      <button class="hamburger" onclick="toggleSidebar()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+      <span class="page-ttl">{% block page_title %}{% endblock %}</span>
+      {% if ui_mode == 'simple' %}<a href="/set_ui_mode?mode=full" class="mode-badge mode-badge-simple" title="{{ (i18n or {}).get('click_switch_full','点击切换到完整模式') }}">{{ (i18n or {}).get('mode_simple_short', '简洁') }}</a>{% endif %}
+    </div>
+    <div class="topbar-r">
+      <button onclick="openCmdPalette()" id="cmd-trigger" style="background:var(--input);border:1px solid var(--bd);border-radius:8px;padding:.3rem .7rem;cursor:pointer;display:flex;align-items:center;gap:.4rem;color:var(--t2);font-size:.8rem;transition:.2s;font-family:inherit" title="{{ (i18n or {}).get('search','搜索') }} (Ctrl+K)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <span style="opacity:.6" id="cmd-trigger-txt">{{ (i18n or {}).get('search','搜索') }}...</span>
+        <kbd style="font-size:.65rem;background:var(--card);border:1px solid var(--bd);padding:0 .3rem;border-radius:3px;margin-left:.3rem;line-height:1.5">⌘K</kbd>
+      </button>
+      <div class="notif-wrap" id="notif-wrap">
+        <button class="notif-btn" onclick="toggleNotif(event)" title="{{ (i18n or {}).get('notifications','通知') }}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+          <span class="notif-badge" id="notif-badge"></span>
+        </button>
+        <div class="notif-dd" id="notif-dd">
+          <div class="notif-hd">
+            <span>{{ (i18n or {}).get('notifications','通知') }}</span>
+            <button class="notif-mark" onclick="markAllRead()">{{ (i18n or {}).get('notif_mark_all','全部已读') }}</button>
+          </div>
+          <div class="notif-list" id="notif-list">
+            <div class="notif-empty">{{ (i18n or {}).get('loading','加载中…') }}</div>
+          </div>
+        </div>
+      </div>
+      <div class="user-menu" id="user-menu">
+        <button class="user-btn" onclick="toggleUserMenu(event)">
+          <div class="user-avatar">{{ (username or 'A')[:1]|upper }}</div>
+          <span class="uname">{{ username or 'Admin' }}</span>
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="user-dd" id="user-dd">
+          <div class="ud-head">
+            <div class="user-avatar" style="width:36px;height:36px;font-size:.9rem;border-radius:10px">{{ (username or 'A')[:1]|upper }}</div>
+            <div class="ud-info">
+              <div class="ud-name">{{ display_name or username or 'Admin' }}</div>
+              <div class="ud-role-tag">{% if user_role == 'master' %}{{ (i18n or {}).get('role_master','主帐号（全部权限）') }}{% elif user_role == 'admin' %}{{ (i18n or {}).get('role_admin','管理员（编辑权限）') }}{% else %}{{ (i18n or {}).get('role_viewer','观察员') }}{% endif %}</div>
+            </div>
+          </div>
+          <div class="ud-sep"></div>
+          <button class="ud-item" onclick="openPwdModal()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+            {{ (i18n or {}).get('change_pwd','修改密码') }}
+          </button>
+          <a class="ud-item" href="/set_lang?lang={{ 'en' if ui_lang == 'zh' else 'zh' }}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+            {{ (i18n or {}).get('lang_switch_label','切换语言') }} ({{ i18n.lang_switch if i18n else 'EN' }})
+          </a>
+          <div class="ud-sep"></div>
+          <a class="ud-item danger" href="#" onclick="doLogout(event)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            {{ (i18n or {}).get('logout_full','退出登录') }}
+          </a>
+        </div>
+      </div>
+      <span class="th-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg></span>
+      <button class="th-btn" onclick="toggleTheme()"></button>
+      <span class="th-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg></span>
+    </div>
+  </header>
+  <div class="wrap"><div class="page-in">{% block content %}{% endblock %}</div></div>
+</div>
+
+<div id="toast-root"></div>
+
+<div class="pwd-overlay" id="pwd-overlay" onclick="if(event.target===this)closePwdModal()">
+  <div class="pwd-card">
+    <h3>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+      {{ (i18n or {}).get('pwd_title','修改密码') }}
+    </h3>
+    <div class="pwd-err" id="pwd-err"></div>
+    <div class="f-grp">
+      <label class="f-lbl">{{ (i18n or {}).get('pwd_old','当前密码') }}</label>
+      <input type="password" id="pwd-old" autocomplete="current-password">
+    </div>
+    <div class="f-grp">
+      <label class="f-lbl">{{ (i18n or {}).get('pwd_new','新密码（至少 6 位）') }}</label>
+      <input type="password" id="pwd-new" autocomplete="new-password">
+    </div>
+    <div class="f-grp">
+      <label class="f-lbl">{{ (i18n or {}).get('pwd_confirm','确认新密码') }}</label>
+      <input type="password" id="pwd-confirm" autocomplete="new-password">
+    </div>
+    <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:.8rem">
+      <button class="btn btn-s" onclick="closePwdModal()">{{ (i18n or {}).get('cancel','取消') }}</button>
+      <button class="btn btn-p" onclick="submitPwdChange()" id="pwd-submit-btn">{{ (i18n or {}).get('pwd_submit','确认修改') }}</button>
+    </div>
+  </div>
+</div>
+
+<div class="confirm-overlay" id="confirm-overlay" onclick="if(event.target===this)document.getElementById('confirm-cancel').click()">
+  <div class="confirm-card">
+    <div class="confirm-msg" id="confirm-msg"></div>
+    <div class="confirm-actions">
+      <button class="btn btn-s" id="confirm-cancel">{{ (i18n or {}).get('cancel','取消') }}</button>
+      <button class="btn btn-d" id="confirm-ok">{{ (i18n or {}).get('confirm','确认') }}</button>
+    </div>
+  </div>
+</div>
+
+<div class="sc-overlay" id="sc-overlay" onclick="if(event.target===this)closeShortcuts()">
+  <div class="sc-box">
+    <h3>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 2l-4 5-4-5"/></svg>
+      {{ (i18n or {}).get('shortcuts_title','键盘快捷键') }}
+    </h3>
+    <div class="sc-group">
+      <div class="sc-group-title">{{ (i18n or {}).get('shortcuts_nav','导航') }}</div>
+      <div class="sc-row"><span class="sc-desc">数据概览</span><span class="sc-keys"><kbd class="sc-key">G</kbd><kbd class="sc-key">D</kbd></span></div>
+      <div class="sc-row"><span class="sc-desc">话术模板</span><span class="sc-keys"><kbd class="sc-key">G</kbd><kbd class="sc-key">T</kbd></span></div>
+      <div class="sc-row"><span class="sc-desc">通道管理</span><span class="sc-keys"><kbd class="sc-key">G</kbd><kbd class="sc-key">C</kbd></span></div>
+      <div class="sc-row"><span class="sc-desc">策略效果</span><span class="sc-keys"><kbd class="sc-key">G</kbd><kbd class="sc-key">S</kbd></span></div>
+      <div class="sc-row"><span class="sc-desc">操作记录</span><span class="sc-keys"><kbd class="sc-key">G</kbd><kbd class="sc-key">A</kbd></span></div>
+      <div class="sc-row"><span class="sc-desc">实时日志</span><span class="sc-keys"><kbd class="sc-key">G</kbd><kbd class="sc-key">L</kbd></span></div>
+      <div class="sc-row"><span class="sc-desc">版本对比</span><span class="sc-keys"><kbd class="sc-key">G</kbd><kbd class="sc-key">V</kbd></span></div>
+    </div>
+    <div class="sc-group">
+      <div class="sc-group-title">{{ (i18n or {}).get('shortcuts_actions','操作') }}</div>
+      <div class="sc-row"><span class="sc-desc">命令面板</span><span class="sc-keys"><kbd class="sc-key">Ctrl</kbd><kbd class="sc-key">K</kbd></span></div>
+      <div class="sc-row"><span class="sc-desc">保存（模板页）</span><span class="sc-keys"><kbd class="sc-key">Ctrl</kbd><kbd class="sc-key">S</kbd></span></div>
+      <div class="sc-row"><span class="sc-desc">关闭弹窗</span><span class="sc-keys"><kbd class="sc-key">Esc</kbd></span></div>
+      <div class="sc-row"><span class="sc-desc">折叠/展开侧栏</span><span class="sc-keys"><kbd class="sc-key">[</kbd></span></div>
+      <div class="sc-row"><span class="sc-desc">切换主题</span><span class="sc-keys"><kbd class="sc-key">Ctrl</kbd><kbd class="sc-key">Shift</kbd><kbd class="sc-key">L</kbd></span></div>
+      <div class="sc-row"><span class="sc-desc">显示快捷键帮助</span><span class="sc-keys"><kbd class="sc-key">?</kbd></span></div>
+    </div>
+    <div style="text-align:right;margin-top:.8rem">
+      <button class="btn btn-s btn-sm" onclick="closeShortcuts()">{{ (i18n or {}).get('close','关闭') }}</button>
+    </div>
+  </div>
+</div>
+
+<div class="cmd-overlay" id="cmd-overlay" onclick="if(event.target===this)closeCmdPalette()">
+  <div class="cmd-box">
+    <input class="cmd-input" id="cmd-input" placeholder="{{ (i18n or {}).get('search_placeholder','搜索页面、功能…') }}" autocomplete="off" spellcheck="false">
+    <div class="cmd-list" id="cmd-list"></div>
+  </div>
+</div>
+
+<script>
+/* UI Mode */
+var _uiMode='{{ ui_mode|default("simple") }}';
+var _domainName='{{ domain_name|default("general") }}';
+/* Command Palette */
+var _cmdPagesAll=[
+  {name:'待处理案例',url:'/cases',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',keys:'cases 案例 待处理 case',simple:true},
+  {name:'知识库',url:'/knowledge',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>',keys:'knowledge 知识库 话术',simple:true},
+  {% for dp in domain_web_pages %}{name:'{{ dp.get("label_simple") or dp.get("label","") }}',url:'{{ dp.path }}',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/></svg>',keys:'{{ dp.get("cmd_keys","") }}',simple:{{ 'true' if dp.get('show_in_simple') else 'false' }}},
+  {% endfor %}
+  {name:'AI 学习审核',url:'/learner',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>',keys:'learner 学习 审核 AI',simple:true},
+  {name:'数据概览',url:'/',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>',keys:'dashboard home 首页 概览 仪表盘',simple:true},
+  {name:'运营分析',url:'/analytics',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',keys:'analytics 运营 分析 数据',simple:true},
+  {name:'操作记录',url:'/audit',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',keys:'audit 审计 记录 操作',simple:true},
+  {name:'人工转接',url:'/settings',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 16.92z"/></svg>',keys:'escalation 人工 转接 客服 handoff',simple:true},
+  {name:'帮助中心',url:'/help',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/></svg>',keys:'help 帮助',simple:true},
+  {name:'策略配置',url:'/strategies',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/></svg>',keys:'strategies 策略 配置',simple:false},
+  {name:'策略效果',url:'/strategy-analytics',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>',keys:'strategy analytics 策略 效果',simple:false},
+  {name:'话术模板',url:'/templates',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',keys:'templates 模板 话术',simple:false},
+  {name:'实时日志',url:'/logs',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>',keys:'logs 日志 终端',simple:false},
+  {name:'版本对比',url:'/diff',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 009 9"/></svg>',keys:'diff 对比 版本',simple:false},
+  {name:'导入配置',url:'/import',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',keys:'import 导入',simple:false},
+  {name:'用户管理',url:'/users',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>',keys:'users 用户',simple:false},
+  {name:'开发者工具',url:'/developer',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',keys:'developer 开发者 API key 密钥 接口 私聊 process_private',simple:false},
+  {name:'刷新当前页面',url:'#reload',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>',keys:'refresh reload 刷新 更新',simple:true},
+  {name:'切换模式',url:'#mode',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16"/><path d="M4 12h10"/><path d="M4 18h7"/></svg>',keys:'mode 模式 简洁 完整 切换',simple:true},
+  {name:'切换主题',url:'#theme',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/></svg>',keys:'theme 主题 暗色 亮色',simple:true},
+  {name:'修改密码',url:'#password',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>',keys:'password 密码',simple:true},
+  {name:'退出登录',url:'#logout',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',keys:'logout 退出',simple:true}
+];
+var _cmdPages=_cmdPagesAll.filter(function(p){
+  return _uiMode==='simple'?p.simple:true;
+});
+var _cmdIdx=-1;
+function openCmdPalette(){var o=document.getElementById('cmd-overlay');o.classList.add('open');var inp=document.getElementById('cmd-input');inp.value='';_cmdIdx=-1;renderCmdList('');setTimeout(function(){inp.focus()},50)}
+function closeCmdPalette(){document.getElementById('cmd-overlay').classList.remove('open')}
+function renderCmdList(q){
+  var list=document.getElementById('cmd-list');
+  var items=_cmdPages.filter(function(p){
+    if(!q)return true;
+    var ql=q.toLowerCase();
+    return p.name.toLowerCase().indexOf(ql)>=0||p.keys.toLowerCase().indexOf(ql)>=0;
+  });
+  if(!items.length){list.innerHTML='<div class="cmd-empty">没有匹配的结果</div>';return}
+  list.innerHTML=items.map(function(p,i){
+    return '<div class="cmd-item'+(i===_cmdIdx?' active':'')+'" data-url="'+p.url+'" onmouseenter="_cmdIdx='+i+';highlightCmd()" onclick="execCmd(\''+p.url+'\')">'+p.icon+'<span>'+p.name+'</span></div>';
+  }).join('');
+}
+function highlightCmd(){var items=document.querySelectorAll('.cmd-item');items.forEach(function(el,i){el.classList.toggle('active',i===_cmdIdx)})}
+function execCmd(url){
+  closeCmdPalette();
+  if(url==='#theme'){toggleTheme();return}
+  if(url==='#reload'){location.reload();return}
+  if(url==='#password'){openPwdModal();return}
+  if(url==='#logout'){doLogout();return}
+  if(url==='#mode'){location.href='/set_ui_mode?mode='+(_uiMode==='simple'?'full':'simple');return}
+  location.href=url;
+}
+document.getElementById('cmd-input').addEventListener('input',function(){_cmdIdx=0;renderCmdList(this.value)});
+document.getElementById('cmd-input').addEventListener('keydown',function(e){
+  var items=document.querySelectorAll('.cmd-item');
+  if(e.key==='ArrowDown'){e.preventDefault();_cmdIdx=Math.min(_cmdIdx+1,items.length-1);highlightCmd();items[_cmdIdx]&&items[_cmdIdx].scrollIntoView({block:'nearest'})}
+  else if(e.key==='ArrowUp'){e.preventDefault();_cmdIdx=Math.max(_cmdIdx-1,0);highlightCmd();items[_cmdIdx]&&items[_cmdIdx].scrollIntoView({block:'nearest'})}
+  else if(e.key==='Enter'&&items[_cmdIdx]){e.preventDefault();execCmd(items[_cmdIdx].dataset.url)}
+  else if(e.key==='Escape'){closeCmdPalette()}
+});
+/* ── Keyboard Shortcuts ─────────────────────────────── */
+function openShortcuts(){document.getElementById('sc-overlay').classList.add('open')}
+function closeShortcuts(){document.getElementById('sc-overlay').classList.remove('open')}
+var _gPending=false,_gTimer=null;
+document.addEventListener('keydown',function(e){
+  var tag=e.target.tagName.toLowerCase();
+  var inInput=(tag==='input'||tag==='textarea'||e.target.isContentEditable);
+  /* Ctrl+K / Cmd+K */
+  if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();openCmdPalette();return}
+  /* Ctrl+Shift+L — toggle theme */
+  if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key==='L'){e.preventDefault();toggleTheme();return}
+  /* [ — collapse sidebar */
+  if(!inInput&&e.key==='['){e.preventDefault();toggleCollapse();return}
+  /* Esc — close any open modal */
+  if(e.key==='Escape'){
+    closeCmdPalette();closeShortcuts();
+    var pov=document.getElementById('pwd-overlay');if(pov&&pov.classList.contains('open'))closePwdModal();
+    var cov=document.getElementById('confirm-overlay');if(cov&&cov.classList.contains('open'))document.getElementById('confirm-cancel').click();
+    endTour();
+    return;
+  }
+  /* ? — show shortcuts */
+  if(!inInput&&e.key==='?'){e.preventDefault();openShortcuts();return}
+  /* G+X navigation */
+  if(!inInput&&e.key==='g'){_gPending=true;clearTimeout(_gTimer);_gTimer=setTimeout(function(){_gPending=false},1500);return}
+  if(!inInput&&_gPending){
+    _gPending=false;clearTimeout(_gTimer);
+    var nav={d:'/',t:'/templates',c:'/channels',s:'/strategy-analytics',a:'/audit',l:'/logs',v:'/diff'};
+    var dest=nav[e.key.toLowerCase()];
+    if(dest){e.preventDefault();window.location.href=dest;return}
+  }
+});
+/* Theme */
+function toggleTheme(){const h=document.documentElement,n=h.getAttribute('data-theme')==='dark'?'light':'dark';h.setAttribute('data-theme',n);localStorage.setItem('theme',n)}
+(function(){const s=localStorage.getItem('theme');if(s)document.documentElement.setAttribute('data-theme',s);else if(window.matchMedia?.('(prefers-color-scheme:dark)').matches)document.documentElement.setAttribute('data-theme','dark')})();
+/* Sidebar */
+function toggleSidebar(){document.getElementById('sidebar').classList.toggle('open');document.getElementById('sb-overlay').classList.toggle('open')}
+function closeSidebar(){document.getElementById('sidebar').classList.remove('open');document.getElementById('sb-overlay').classList.remove('open')}
+/* Collapse */
+function toggleCollapse(){
+  if(window.innerWidth<=860){toggleSidebar();return}
+  var sb=document.getElementById('sidebar');sb.classList.toggle('collapsed');var c=sb.classList.contains('collapsed');
+  localStorage.setItem('sb_collapsed',c?'1':'0');
+  document.querySelector('.main').style.marginLeft=c?'60px':'';
+}
+(function(){
+  if(window.innerWidth>860&&localStorage.getItem('sb_collapsed')==='1'){
+    document.getElementById('sidebar').classList.add('collapsed');
+    document.querySelector('.main').style.marginLeft='60px';
+  }
+  var moreFold=document.getElementById('sb-more-fold');
+  if(moreFold){
+    if(moreFold.querySelector('.active')){moreFold.open=true}
+    else if(localStorage.getItem('sb_more_open')==='1'){moreFold.open=true}
+    moreFold.addEventListener('toggle',function(){localStorage.setItem('sb_more_open',moreFold.open?'1':'0')});
+  }
+})();
+window.addEventListener('resize',function(){
+  if(window.innerWidth<=860){document.querySelector('.main').style.marginLeft=''}
+  else if(localStorage.getItem('sb_collapsed')==='1'){document.querySelector('.main').style.marginLeft='60px'}
+  else{document.querySelector('.main').style.marginLeft=''}
+});
+/* Nav badges — fetch counts once on load */
+(function(){
+  function setBadge(id,n){
+    var el=document.getElementById(id);
+    if(!el)return;
+    if(n>0){el.textContent=n>99?'99+':n;el.classList.add('has-count')}
+    else{el.classList.remove('has-count')}
+  }
+  fetch('/api/cases/active',{credentials:'same-origin'}).then(r=>r.json()).then(d=>{
+    var open=0;
+    if(d.cases){d.cases.forEach(function(c){if(!c.closed)open++})}
+    setBadge('badge-cases',open);
+  }).catch(()=>{});
+  fetch('/api/learner/drafts?status=pending',{credentials:'same-origin'}).then(r=>r.json()).then(d=>{
+    setBadge('badge-learner',(d.drafts||[]).length);
+  }).catch(()=>{});
+})();
+/* User menu */
+/* Notification center */
+var _notifLoaded=false,_notifData=[];
+function toggleNotif(e){
+  e.stopPropagation();
+  var dd=document.getElementById('notif-dd');
+  var wasOpen=dd.classList.contains('open');
+  closeAllDropdowns();
+  if(!wasOpen){dd.classList.add('open');if(!_notifLoaded)loadNotifs()}
+}
+function closeAllDropdowns(){
+  ['notif-dd','user-dd'].forEach(function(id){var el=document.getElementById(id);if(el)el.classList.remove('open')});
+}
+async function loadNotifs(){
+  try{
+    var r=await fetch('/api/notifications');
+    if(!r.ok)throw new Error(r.status);
+    var d=await r.json();
+    _notifData=d.notifications||[];
+    _notifLoaded=true;
+    renderNotifs();
+    if(d.unread>0){var b=document.getElementById('notif-badge');if(b)b.classList.add('show')}
+  }catch(e){document.getElementById('notif-list').innerHTML='<div class="notif-empty">加载失败</div>'}
+}
+function renderNotifs(){
+  var list=document.getElementById('notif-list');
+  if(!_notifData.length){list.innerHTML='<div class="notif-empty">{{ (i18n or {}).get("notif_empty","暂无通知") }}</div>';return}
+  list.innerHTML=_notifData.map(function(n){
+    return '<div class="notif-item"><span class="notif-dot '+n.level+'"></span><div class="notif-body"><div class="notif-title">'+n.title+'</div><div class="notif-text">'+n.body+'</div>'+(n.ts?'<div class="notif-time">'+n.ts+'</div>':'')+'</div></div>';
+  }).join('');
+}
+function markAllRead(){document.getElementById('notif-badge').classList.remove('show');_notifData=[];renderNotifs()}
+document.addEventListener('click',function(e){if(!e.target.closest('#notif-wrap')&&!e.target.closest('#user-menu')){closeAllDropdowns()}});
+function toggleUserMenu(e){e.stopPropagation();var dd=document.getElementById('user-dd');var wasOpen=dd.classList.contains('open');closeAllDropdowns();if(!wasOpen)dd.classList.add('open')}
+/* Keep old toggleUserMenu call working */
+/* Password modal */
+function openPwdModal(){
+  document.getElementById('user-dd').classList.remove('open');
+  document.getElementById('pwd-overlay').classList.add('open');
+  document.getElementById('pwd-old').value='';document.getElementById('pwd-new').value='';document.getElementById('pwd-confirm').value='';
+  document.getElementById('pwd-err').style.display='none';
+  setTimeout(function(){document.getElementById('pwd-old').focus()},100);
+}
+function closePwdModal(){document.getElementById('pwd-overlay').classList.remove('open')}
+async function submitPwdChange(){
+  var old_pw=document.getElementById('pwd-old').value,new_pw=document.getElementById('pwd-new').value,cfm=document.getElementById('pwd-confirm').value;
+  var errEl=document.getElementById('pwd-err');errEl.style.display='none';
+  if(!old_pw){errEl.textContent='请输入当前密码';errEl.style.display='block';return}
+  if(new_pw.length<6){errEl.textContent='新密码至少 6 位';errEl.style.display='block';return}
+  if(new_pw!==cfm){errEl.textContent='两次输入的新密码不一致';errEl.style.display='block';return}
+  var btn=document.getElementById('pwd-submit-btn');btn.disabled=true;btn.textContent='提交中…';
+  try{var r=await fetch('/api/change-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({old_password:old_pw,new_password:new_pw})});
+    var d=await r.json();
+    if(r.ok&&d.ok){closePwdModal();showToast('密码修改成功','ok')}
+    else{errEl.textContent=d.detail||'修改失败';errEl.style.display='block'}
+  }catch(e){errEl.textContent='网络错误';errEl.style.display='block'}
+  finally{btn.disabled=false;btn.textContent='确认修改'}
+}
+/* Confirm dialog */
+function confirmAction(msg,opts){
+  opts=opts||{};
+  return new Promise(function(resolve){
+    document.getElementById('confirm-msg').textContent=msg;
+    var ok=document.getElementById('confirm-ok');
+    ok.textContent=opts.okText||'确认';
+    ok.className='btn '+(opts.danger!==false?'btn-d':'btn-p');
+    document.getElementById('confirm-overlay').classList.add('open');
+    ok.onclick=function(){document.getElementById('confirm-overlay').classList.remove('open');resolve(true)};
+    document.getElementById('confirm-cancel').onclick=function(){document.getElementById('confirm-overlay').classList.remove('open');resolve(false)};
+  });
+}
+/* Button loading */
+function btnLoading(btn,on){
+  if(on){btn._origHTML=btn.innerHTML;btn._origW=btn.style.minWidth;btn.style.minWidth=btn.offsetWidth+'px';btn.disabled=true;
+    btn.innerHTML='<svg class="spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2a10 10 0 019.95 9"/></svg> 处理中…'}
+  else{btn.disabled=false;if(btn._origHTML)btn.innerHTML=btn._origHTML;btn.style.minWidth=btn._origW||''}
+}
+/* Logout */
+async function doLogout(e){e.preventDefault();if(await confirmAction('确定退出登录？',{okText:'退出',danger:true}))window.location.href='/logout'}
+/* Ripple */
+document.addEventListener('click',function(e){
+  const b=e.target.closest('.btn');if(!b||b.classList.contains('btn-s'))return;
+  const r=document.createElement('span');r.className='ripple';
+  const rc=b.getBoundingClientRect(),s=Math.max(rc.width,rc.height);
+  r.style.cssText=`width:${s}px;height:${s}px;top:${e.clientY-rc.top-s/2}px;left:${e.clientX-rc.left-s/2}px`;
+  b.appendChild(r);setTimeout(()=>r.remove(),650);
+});
+/* Toast */
+function showToast(msg,type='ok',dur=3500){
+  const icons={ok:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="15" height="15"><polyline points="20 6 9 17 4 12"/></svg>',err:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="15" height="15"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',info:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="15" height="15"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'};
+  const t=document.createElement('div');t.className=`toast t-${type}`;t.innerHTML=(icons[type]||'')+msg;
+  document.getElementById('toast-root').appendChild(t);
+  requestAnimationFrame(()=>requestAnimationFrame(()=>t.classList.add('show')));
+  setTimeout(()=>{t.classList.remove('show');setTimeout(()=>t.remove(),350)},dur);
+}
+/* ── Onboarding Tour ───────────────────────────────── */
+var _tourSteps=[
+  {sel:'#sidebar .sb-brand',title:'欢迎使用 {{ site_name|default("智控王客户转化聊天系统") }}',body:'这里是您的管理中心。左侧导航菜单可访问所有功能模块。',pos:'right'},
+  {sel:'a[href="/cases"]',title:'待处理案例',body:'这是您最常用的页面 — 查看和处理客户案例，关注高风险用户，添加备注或结案。',pos:'right'},
+  {sel:'a[href="/knowledge"]',title:'知识库',body:'所有 AI 回复话术、知识条目均在此管理。在"系统话术"分类下编辑即可。',pos:'right'},
+  {sel:'#cmd-trigger',title:'命令面板（Ctrl+K）',body:'随时按 Ctrl+K 唤起命令面板，快速跳转任意页面或执行操作，无需鼠标。',pos:'bottom'},
+];
+var _tourIdx=0,_tourEl=null,_tourBg=null;
+function startTour(){
+  if(localStorage.getItem('tour_done')==='1')return;
+  _tourIdx=0;
+  _tourBg=document.createElement('div');
+  _tourBg.id='tour-bg';
+  _tourBg.style.cssText='position:fixed;inset:0;z-index:400;pointer-events:none';
+  document.body.appendChild(_tourBg);
+  showTourStep();
+}
+function showTourStep(){
+  var old=document.getElementById('tour-popup');if(old)old.remove();
+  var step=_tourSteps[_tourIdx];
+  var anchor=document.querySelector(step.sel);
+  if(!anchor){nextTourStep();return}
+  anchor.scrollIntoView({block:'nearest'});
+  var rect=anchor.getBoundingClientRect();
+  var pop=document.createElement('div');
+  pop.id='tour-popup';
+  pop.innerHTML='<div style="font-weight:700;font-size:.9rem;margin-bottom:.4rem">'+step.title+'</div><div style="font-size:.82rem;color:var(--t2);line-height:1.5;margin-bottom:.9rem">'+step.body+'</div><div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem"><span style="font-size:.72rem;color:var(--t3)">{{ (i18n or {}).get("tour_step","步骤") }} '+(_tourIdx+1)+' {{ (i18n or {}).get("tour_of","/") }} '+_tourSteps.length+'</span><div style="display:flex;gap:.4rem">'+(_tourIdx>0?'<button class="btn btn-s" style="font-size:.78rem;padding:.25rem .55rem" onclick="prevTourStep()">{{ (i18n or {}).get("tour_prev","上一步") }}</button>':'')+(_tourIdx<_tourSteps.length-1?'<button class="btn btn-p" style="font-size:.78rem;padding:.25rem .7rem" onclick="nextTourStep()">{{ (i18n or {}).get("tour_next","下一步") }}</button>':'<button class="btn btn-p" style="font-size:.78rem;padding:.25rem .7rem" onclick="endTour()">{{ (i18n or {}).get("tour_done","完成") }}</button>')+'<button class="btn btn-s" style="font-size:.72rem;padding:.2rem .45rem;color:var(--t3)" onclick="endTour()">{{ (i18n or {}).get("tour_skip","跳过") }}</button></div></div>';
+  pop.style.cssText='position:fixed;background:var(--card);border:1px solid var(--bd);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.18);padding:1.1rem 1.2rem;width:280px;z-index:401;animation:fadeUp .2s ease';
+  document.body.appendChild(pop);
+  var pw=280,ph=160;
+  var vw=window.innerWidth,vh=window.innerHeight;
+  var t,l;
+  if(step.pos==='right'){t=rect.top+rect.height/2-ph/2;l=rect.right+12}
+  else{t=rect.bottom+12;l=rect.left+rect.width/2-pw/2}
+  t=Math.max(8,Math.min(t,vh-ph-8));
+  l=Math.max(8,Math.min(l,vw-pw-8));
+  pop.style.top=t+'px';pop.style.left=l+'px';
+  /* Highlight anchor */
+  anchor.style.outline='2px solid var(--p)';anchor.style.outlineOffset='3px';anchor.style.borderRadius='8px';anchor._tour=true;
+}
+function clearTourHighlight(){
+  document.querySelectorAll('[data-tour-highlight]').forEach(function(el){el.style.outline='';el.style.outlineOffset='';el._tour=false});
+  var step=_tourSteps[_tourIdx];
+  if(step){var a=document.querySelector(step.sel);if(a){a.style.outline='';a.style.outlineOffset=''}}
+}
+function nextTourStep(){clearTourHighlight();_tourIdx++;if(_tourIdx>=_tourSteps.length)endTour();else showTourStep()}
+function prevTourStep(){clearTourHighlight();_tourIdx=Math.max(0,_tourIdx-1);showTourStep()}
+function endTour(){
+  var p=document.getElementById('tour-popup');if(p)p.remove();
+  if(_tourBg){_tourBg.remove();_tourBg=null}
+  clearTourHighlight();
+  localStorage.setItem('tour_done','1');
+}
+/* Auto start on first visit */
+(function(){
+  if(localStorage.getItem('tour_done')!=='1'){
+    setTimeout(function(){try{startTour()}catch(e){}},1200);
+  }
+})();
+/* CountUp */
+function countUp(el,target,dur=1200){
+  if(isNaN(target))return;const start=performance.now();
+  const ease=t=>1-Math.pow(1-t,3);
+  (function tick(now){const p=Math.min((now-start)/dur,1);el.textContent=Math.round(ease(p)*target);if(p<1)requestAnimationFrame(tick);else el.textContent=target})(start);
+}
+/* Stagger rows */
+document.addEventListener('DOMContentLoaded',()=>{
+  document.querySelectorAll('.stat-card').forEach((c,i)=>{c.style.animation=`fadeUp .35s ease ${i*55}ms both`});
+  document.querySelectorAll('tbody tr').forEach((r,i)=>{r.style.animation=`fadeUp .3s ease ${i*25}ms both`});
+  document.querySelectorAll('[data-count]').forEach(el=>{const v=parseInt(el.dataset.count);if(!isNaN(v)){el.textContent='0';countUp(el,v)}});
+  /* Ctrl+S save, Esc close */
+  document.addEventListener('keydown',e=>{
+    if(e.key==='Escape'){document.querySelectorAll('.panel.open').forEach(p=>closePanel(p.id))}
+    if((e.ctrlKey||e.metaKey)&&e.key==='s'){const f=document.querySelector('.panel.open form');if(f){e.preventDefault();f.requestSubmit()}}
+  });
+});
+function closePanel(id){const p=document.getElementById(id);if(p){p.classList.remove('open');document.getElementById('panel-backdrop')?.classList.remove('open')}}
+
+/* ── Global Tooltip Engine ─────────────── */
+const TERM_DICT={
+  /* ── 导航页面 ─── */
+  "nav_dashboard":{"zh":"仪表盘","desc":"系统总览页面，展示 Bot 运行状态、通道健康度、最近操作等关键指标","usage":"打开即可查看全局状态，点击各卡片的快捷链接可跳转到对应功能模块"},
+  "nav_templates":{"zh":"话术模板（已迁移）","desc":"话术模板已统一迁移到知识库的「系统话术」分类，可在知识库页面进行编辑","usage":"打开知识库 → 筛选「系统话术」分类 → 编辑对应的话术条目"},
+  "nav_channels":{"zh":"通道管理","desc":"配置支付通道的费率、金额限制、状态开关，实时监控成功率","usage":"点击通道卡片展开详情 → 调整参数 → 保存。可切换状态为 启用/维护中/波动"},
+  "nav_strategies":{"zh":"策略管理","desc":"为不同用户意图配置 AI 回复参数（温度、长度、上下文轮数），支持 A/B 灰度测试","usage":"选择策略 → 调整 Temperature/Max Tokens 等参数 → 保存 → 在意图映射中绑定"},
+  "nav_strategy_analytics":{"zh":"策略效果","desc":"追踪各策略的质量评分、追问率、响应时间等指标，自动识别最优策略","usage":"选择时间范围查看趋势图，点击策略卡片查看详细指标"},
+  "nav_knowledge":{"zh":"知识库","desc":"管理 AI 的知识条目、触发词、错误码字典，支持 BM25 + 语义搜索","usage":"搜索/浏览条目 → 编辑内容和触发词 → 用沙盒测试验证效果"},
+  "nav_users":{"zh":"用户管理","desc":"添加/管理后台管理员账户，设置角色权限（主帐号/管理员/观察员）","usage":"点击「创建子帐号」→ 填写信息 → 分配角色。可随时禁用/删除账户"},
+  "nav_settings":{"zh":"系统设置","desc":"配置 AI 提示词和人工转接设置","usage":"编辑提示词 → 保存。底层 API/安全配置请进入开发者工具"},
+  "nav_developer":{"zh":"开发者工具","desc":"API 密钥、底层参数、安全令牌、Bot 行为（含是否处理私聊）、回复逻辑、意图路由等高级配置（需密码）","usage":"输入开发者密码进入 → 「Bot 行为配置」中勾选「私聊消息」可允许私聊 → 保存"},
+  "nav_audit":{"zh":"操作记录","desc":"查看所有后台操作的审计日志，支持按操作人/类型/时间筛选","usage":"使用顶部筛选条件缩小范围 → 点击导出按钮下载 CSV"},
+  "nav_diff":{"zh":"版本对比","desc":"对比配置的不同版本快照，查看变更详情，支持一键回滚","usage":"选择两个版本 → 查看差异 → 确认后可回滚到旧版本"},
+  "nav_logs":{"zh":"实时日志","desc":"实时查看系统运行日志流，支持按级别过滤（DEBUG/INFO/WARN/ERROR）和关键词搜索","usage":"选择日志级别按钮过滤 → 输入关键词进一步筛选 → 点击暂停冻结画面"},
+  "nav_analytics":{"zh":"数据分析","desc":"查看运营数据图表、KB 命中率、响应时间趋势，内置 AI Copilot 自然语言查询","usage":"切换时间范围查看趋势 → 在 Copilot 输入框用中文提问查询数据"},
+  "nav_cases":{"zh":"Case 管理","desc":"追踪用户意图链产生的案例（如咨询→投诉→退款），监控满意度，支持添加备注和结案","usage":"查看活跃 Case 列表 → 关注高风险标记 → 添加备注或结案"},
+  "nav_escalation":{"zh":"人工转接","desc":"配置客服用户名、转接触发规则、排班与话术，让 AI 在需要时自动 @ 人工客服","usage":"启用 → 填写客服用户名 → 设置触发次数和冷却时间 → 保存"},
+  "nav_help":{"zh":"帮助","desc":"查看所有可用的 Bot 指令和操作说明，支持关键词搜索","usage":"输入关键词搜索 → 点击展开查看指令详情和用法"},
+  "nav_import":{"zh":"导入/导出","desc":"导入/导出配置文件（YAML/JSON/ZIP），管理 Webhook 变更通知","usage":"拖拽文件到上传区 → 选择覆盖或合并模式 → 确认导入"},
+  /* ── 通用术语 ─── */
+  "buy_rate":{"zh":"买入费率","desc":"用户向该通道充值时平台收取的费率百分比"},
+  "sell_rate":{"zh":"卖出费率","desc":"用户从该通道提现时的费率"},
+  "fee_rate":{"zh":"手续费率","desc":"该通道的交易手续费百分比。例如 0.5% 表示每笔扣除 0.5%"},
+  "circuit_breaker":{"zh":"熔断器","desc":"当 AI 接口连续失败超过阈值时自动停止调用一段时间，防止雪崩"},
+  "cooldown":{"zh":"冷却时间","desc":"两次回复之间的最小间隔（秒），防止刷屏"},
+  "temperature":{"zh":"回复温度（Temperature）","desc":"控制 AI 回复的随机性。0=最确定稳定，1=最多样创意。业务场景建议 0.3-0.5","usage":"拖动滑块调整，保存后对该策略下所有新回复生效"},
+  "max_tokens":{"zh":"最大字数（Max Tokens）","desc":"AI 单次回复的最大 token 数。1 token ≈ 1.5 个中文字。256=简短，512=正常，1024=详细","usage":"输入数值后保存。值越大回复越长，但速度变慢、费用增加"},
+  "context_rounds":{"zh":"上下文轮数","desc":"传入 AI 的历史对话轮数。轮数越多上下文越丰富，但速度更慢费用更高","usage":"通常 3-5 轮即可。复杂业务场景可增至 8-10 轮"},
+  "split_send":{"zh":"分条发送","desc":"长回复自动拆成多条消息发送，模拟真人打字节奏"},
+  "reply_probability":{"zh":"回复概率","desc":"收到此类消息时实际回复的概率。0.1=只有10%的消息会回复","usage":"设为 1.0 表示 100% 回复。水群场景可调低避免刷屏"},
+  "skip_ai":{"zh":"跳过 AI","desc":"启用后直接使用模板回复，不调用 AI 接口，响应极快（<1秒）","usage":"适用于固定话术场景（如问候语），开启后节省 API 费用"},
+  "success_rate":{"zh":"成功率","desc":"该通道交易成功的比例。低于 80% 建议排查或暂停"},
+  "alert_threshold":{"zh":"告警阈值","desc":"成功率低于此值时通道卡片显示红色告警"},
+  "P50":{"zh":"响应中位数（P50）","desc":"50% 的请求在此时间内完成。反映典型用户体验"},
+  "P90":{"zh":"响应 P90","desc":"90% 的请求在此时间内完成。反映大多数用户的最慢体验"},
+  "P99":{"zh":"响应 P99","desc":"99% 的请求在此时间内完成。用于发现极端慢请求"},
+  "SSE":{"zh":"服务端推送（SSE）","desc":"Server-Sent Events，服务器实时推送日志到浏览器，无需手动刷新"},
+  "minimum_amount":{"zh":"最小金额","desc":"该通道允许的单笔最小交易金额"},
+  "maximum_amount":{"zh":"最大金额","desc":"该通道允许的单笔最大交易金额"},
+  "processing_time":{"zh":"处理时间","desc":"从提交到完成的平均处理耗时"},
+  "per_user":{"zh":"用户冷却","desc":"同一用户两次触发回复的最小间隔"},
+  "per_content":{"zh":"内容冷却","desc":"相同内容重复发送时的冷却时间"},
+  "global":{"zh":"全局冷却","desc":"所有回复之间的最小间隔"},
+  "by_intent":{"zh":"意图冷却","desc":"按意图类型分别设置的冷却时间"},
+  "enabled":{"zh":"已启用","desc":"此功能/通道当前处于开启状态"},
+  "rate_limit":{"zh":"限流","desc":"防止短时间内过多请求的保护机制，基于令牌桶算法"},
+  "webhook":{"zh":"Webhook 推送通知","desc":"配置变更时自动推送通知到外部系统（Slack/微信/Telegram）","usage":"填写推送地址 → 选择监听事件 → 保存 → 发送测试验证"},
+  "intent":{"zh":"意图","desc":"用户消息被 AI 识别为的类型，如 greeting（问候）、order_query（查单）、complaint（投诉）等"},
+  "strategy":{"zh":"回复策略","desc":"根据消息意图选择的 AI 参数组合（温度、输出长度、上下文轮数等）"},
+  "follow_up_rate":{"zh":"追问率","desc":"用户在收到 AI 回复后 5 分钟内再次发送消息的比例；高追问率可能表示回复质量不足"},
+  "same_intent_rate":{"zh":"同意图追问率","desc":"追问消息与原始消息具有相同意图的比例；越高说明 AI 可能没解决用户问题"},
+  "silence_rate":{"zh":"静默率","desc":"回复后用户无追问的比例；高静默率通常表示一次解决"},
+  "template_hit_rate":{"zh":"模板命中率","desc":"使用预设模板直接回复（未调用 AI API）的比例；可节省 API 调用"},
+  "backfill":{"zh":"回填","desc":"当用户新消息到达时，系统回溯标记前一条 AI 回复的追问状态"},
+  "strategy_event":{"zh":"策略事件","desc":"每次 AI 通过某个策略回复用户时记录的一条追踪数据"},
+  "quality_score":{"zh":"质量评分","desc":"综合评分 0-100，融合响应速度(20%)、一次解决率(35%)、同意图追问惩罚(30%)、API 效率(15%)"},
+  "ab_test":{"zh":"A/B 灰度测试","desc":"对同一意图分流多个策略，用一致性哈希保证同一用户始终进入同一分桶，实现对照实验","usage":"创建两个策略 → 在意图映射中同时绑定 → 系统自动分流 → 查看策略效果对比"},
+  "data_retention":{"zh":"数据保留","desc":"策略追踪事件和通用事件的自动清理周期（天数），防止数据库无限膨胀"},
+  "advisor":{"zh":"智能诊断","desc":"系统自动分析策略指标，检测异常（高追问率、慢响应等）并给出参数调整建议"},
+  "purge":{"zh":"数据清理","desc":"删除超过保留期限的旧追踪数据并回收磁盘空间（VACUUM）"},
+  "autopilot":{"zh":"自动驾驶（Auto-Pilot）","desc":"系统持续监测策略质量评分，当某策略评分低于阈值时自动将其映射的意图切换到更优策略"},
+  "session":{"zh":"会话","desc":"同一用户在 30 分钟内的连续交互归为一个会话，用于追踪整体对话解决率"},
+  "resolve_rate":{"zh":"解决率","desc":"会话中最后一条回复后用户未再追问的比例；高解决率意味着问题一次性解决"},
+  "param_suggestion":{"zh":"参数微调建议","desc":"系统根据策略指标异常自动生成具体参数调整建议（如增加 context_rounds），可一键应用"},
+  "model_id":{"zh":"模型 ID","desc":"当前策略使用的 AI 模型名称，可在策略中配置以实现模型级 A/B 测试"},
+  "model_ab":{"zh":"模型 A/B 对比","desc":"将相同策略配置不同模型，通过 A/B 灰度分流对比模型效果差异"},
+  "user_segment":{"zh":"用户分群","desc":"按活跃度分群：高频(≥10条)、中频(3-9条)、低频(1-2条)，分析各群体对策略的响应差异"},
+  "heavy":{"zh":"高频用户","desc":"分析窗口内产生 ≥10 条交互的用户群体，通常是核心用户"},
+  "moderate":{"zh":"中频用户","desc":"分析窗口内产生 3-9 条交互的用户群体"},
+  "light":{"zh":"低频用户","desc":"分析窗口内仅 1-2 条交互的用户群体，可能是新用户或偶尔使用者"},
+  /* ── AI / 配置术语 ─── */
+  "api_key":{"zh":"API 密钥（API Key）","desc":"调用 AI 服务的身份验证密钥，类似密码，请妥善保管不要泄露","usage":"从 AI 服务商后台复制密钥 → 粘贴到此处 → 点击测试连接验证"},
+  "base_url":{"zh":"接口地址（Base URL）","desc":"AI 服务的 API 访问地址。不同服务商地址不同","usage":"填写完整 URL（含 https://），如 https://generativelanguage.googleapis.com"},
+  "embedding_model":{"zh":"向量模型（Embedding）","desc":"将文本转换为数学向量的模型，用于知识库语义搜索（理解意思而非精确匹配）","usage":"通常使用默认模型即可。如需更换，确保模型支持中文"},
+  "system_prompt":{"zh":"系统提示词（System Prompt）","desc":"AI 的核心指令，定义 AI 的角色、风格、回复规则。所有回复都受此约束","usage":"编辑提示词 → 保存即生效。可用右侧快捷按钮跳转到不同段落"},
+  "thinking_budget":{"zh":"思考预算（Thinking Budget）","desc":"AI 深度推理的 token 预算，越高推理越深入但速度越慢、费用更高","usage":"简单问答设 0（关闭推理），复杂业务场景设 1024-4096"},
+  "session_key":{"zh":"会话密钥（Session Key）","desc":"Web 管理面板的登录会话加密密钥，用于保护 Cookie 安全","usage":"初始化时自动生成，无需手动修改。如需重置登录状态可更换"},
+  /* ── 知识库术语 ─── */
+  "kb_entry":{"zh":"知识条目","desc":"知识库中的一条记录，包含标题、触发词、处理步骤、示例回复等字段","usage":"创建条目 → 设置触发词 → 用沙盒测试命中效果"},
+  "triggers":{"zh":"触发词","desc":"用户消息匹配这些关键词时会命中对应的知识条目。支持多个词，用逗号分隔","usage":"添加常见的用户提问关键词，如「查单」「订单号」「到账」"},
+  "sandbox":{"zh":"沙盒测试","desc":"在安全环境中测试 KB 搜索和 AI 回复效果，不影响真实用户","usage":"输入模拟用户消息 → 查看命中的条目和 AI 生成的回复"},
+  "vectorize":{"zh":"向量化","desc":"将所有知识条目转为数学向量，启用语义搜索（理解含义而非仅关键词匹配）","usage":"点击后等待处理完成。新增条目后建议重新向量化"},
+  "batch_translate":{"zh":"批量翻译","desc":"将所有未翻译的 KB 条目自动翻译为英语/乌尔都语/葡萄牙语/阿拉伯语","usage":"点击后自动翻译，翻译结果可在「翻译审核」标签页中审核"},
+  "hit_rate":{"zh":"命中率","desc":"用户消息能匹配到 KB 知识条目的比例。命中率越高，AI 回复质量越好","usage":"命中率低于 60% 时建议扩充知识库或优化触发词"},
+  "miss_log":{"zh":"未命中记录","desc":"用户消息没有匹配到任何 KB 条目时的记录，用于发现知识盲区","usage":"定期查看未命中记录 → 为高频未命中创建新的知识条目"},
+  "kb_feedback":{"zh":"效果反馈","desc":"对 AI 回复的评价记录（好评/差评），用于持续优化知识库内容"},
+  "bm25":{"zh":"BM25 搜索","desc":"基于关键词频率的传统搜索算法，速度快但无法理解语义"},
+  "semantic_search":{"zh":"语义搜索","desc":"基于向量的搜索，能理解同义词和相似表达（如「退钱」=「退款」）"},
+  /* ── 日志级别 ─── */
+  "DEBUG":{"zh":"调试日志（DEBUG）","desc":"最详细的日志级别，包含开发调试信息。通常仅开发人员使用","usage":"选中此按钮可查看所有级别的日志，信息量最大"},
+  "INFO":{"zh":"信息日志（INFO）","desc":"常规运行信息，如消息收发、回复生成、KB 查询等正常操作","usage":"日常监控推荐使用此级别"},
+  "WARNING":{"zh":"警告日志（WARNING）","desc":"潜在问题警告，如成功率下降、KB 未命中、接口超时等","usage":"重点关注此级别，可提前发现问题"},
+  "ERROR":{"zh":"错误日志（ERROR）","desc":"运行错误，需要关注但系统仍可运行。如 API 调用失败、数据异常等","usage":"出现 ERROR 时应检查原因并尽快修复"},
+  "CRITICAL":{"zh":"严重错误（CRITICAL）","desc":"系统级故障，如数据库连接断开、服务崩溃等，需要立即处理","usage":"CRITICAL 日志出现时应立即排查，可能影响所有用户"},
+  /* ── Case / 意图链 ─── */
+  "case_id":{"zh":"案例 ID","desc":"系统自动为识别到的意图链模式分配的唯一追踪编号"},
+  "intent_chain":{"zh":"意图链","desc":"用户在对话中的意图变化轨迹，如「查单 → 投诉 → 退款」","usage":"通过意图链可判断用户问题是否在升级，及时干预"},
+  "satisfaction":{"zh":"满意度","desc":"基于用户行为（追问、投诉、催促等）实时计算的满意度评分，范围 0-100","usage":"低于 40 分标记为高风险，建议人工介入"},
+  "at_risk":{"zh":"高风险","desc":"满意度评分低于阈值的用户，可能即将流失或投诉","usage":"在 Case 列表中带红色标记的即为高风险用户"},
+  "escalation":{"zh":"人工升级","desc":"AI 判断无法解决用户问题时，自动标记为需要人工客服介入"},
+  "close_case":{"zh":"结案","desc":"标记案例为已解决，并记录解决方案","usage":"点击结案按钮 → 输入解决说明 → 确认"},
+  /* ── 数据分析 ─── */
+  "copilot":{"zh":"运营 Copilot","desc":"AI 助手，用自然语言查询内部运营数据。支持问「今天知识库命中率多少？」等问题","usage":"在输入框输入中文问题 → 按回车 → 等待 AI 分析并返回结果"},
+  /* ── 按钮操作 ─── */
+  "btn_refresh":{"zh":"刷新","desc":"重新从服务器加载最新数据","usage":"点击后等待数据更新。页面数据通常每 30 秒自动刷新"},
+  "btn_save":{"zh":"保存","desc":"将当前修改保存到服务器，立即生效","usage":"修改完成后点击保存。也可使用快捷键 Ctrl+S"},
+  "btn_export":{"zh":"导出","desc":"将当前数据导出为文件（CSV/JSON/YAML）下载到本地","usage":"点击后浏览器自动下载文件"},
+  "btn_import":{"zh":"导入","desc":"从本地文件导入数据到系统","usage":"选择文件 → 确认导入模式（覆盖/合并） → 确认"},
+  "btn_test":{"zh":"测试","desc":"验证当前配置是否能正常工作","usage":"点击后等待测试结果，成功会显示绿色提示"},
+  "btn_delete":{"zh":"删除","desc":"永久删除此项，操作不可恢复","usage":"点击后需要二次确认才会执行"},
+  "btn_pause":{"zh":"暂停/继续","desc":"暂停实时数据流，方便查看当前内容","usage":"暂停后数据不再滚动，再次点击恢复"},
+  /* ── 导入/导出格式 ─── */
+  "JSON":{"zh":"JSON 格式","desc":"通用数据格式，结构化存储，适合程序处理和 API 传输"},
+  "CSV":{"zh":"CSV 格式","desc":"逗号分隔表格格式，可直接用 Excel/WPS 打开编辑"},
+  "YAML":{"zh":"YAML 格式","desc":"人类友好的配置文件格式，层级清晰易读"},
+  "ZIP":{"zh":"ZIP 压缩包","desc":"将多个文件打包压缩为一个文件，方便传输和备份"},
+  "HMAC":{"zh":"HMAC-SHA256 签名","desc":"消息认证码算法，用于验证 Webhook 推送消息的真实性，防止伪造"},
+  /* ── 通道状态 ─── */
+  "ch_enabled":{"zh":"启用","desc":"通道正常运行中，可以处理交易"},
+  "ch_maintenance":{"zh":"维护中","desc":"通道暂停服务，正在维护。AI 会告知用户通道维护状态"},
+  "ch_fluctuation":{"zh":"波动","desc":"通道成功率不稳定，可能影响交易。AI 会提醒用户注意风险"},
+  /* ── 用户角色 ─── */
+  "role_master":{"zh":"主帐号","desc":"拥有全部权限，可管理其他用户、修改系统设置、查看所有数据"},
+  "role_admin":{"zh":"管理员","desc":"拥有编辑权限，可管理模板、通道、知识库，但不能管理用户和系统设置"},
+  "role_viewer":{"zh":"观察员","desc":"只读权限，可查看所有数据但不能修改任何配置"},
+  /* ── {{ site_name|default('智控王客户转化聊天系统') }} ─── */
+  "bot_admin":{"zh":"{{ site_name|default('智控王客户转化聊天系统') }}","desc":"面向 Telegram 等渠道的 AI 客服与人工协同后台，用于知识库、案例、转接与监控"},
+  /* ── 其他 ─── */
+  "token":{"zh":"Token（令牌）","desc":"AI 处理文本的基本单位。1 个 token 约等于 1.5 个中文字或 0.75 个英文单词"},
+  "Bot":{"zh":"Bot（机器人）","desc":"Telegram 上的 AI 客服机器人，自动接收并回复用户消息"},
+  "Case":{"zh":"Case（案例/工单）","desc":"由系统自动识别的用户对话升级事件，需要运营关注和跟进"}
+};
+let tipEl=null,tipOn=localStorage.getItem('tipOn')!=='0';
+function initTooltip(){
+  tipEl=document.createElement('div');tipEl.className='g-tip';
+  tipEl.innerHTML='<div class="g-tip-name"></div><div class="g-tip-desc"></div><div class="g-tip-usage"></div>';
+  document.body.appendChild(tipEl);
+  const tog=document.createElement('button');tog.className='tip-toggle'+(tipOn?' active':'');tog.innerHTML='?';tog.title='术语提示开关（蓝色=已开启，鼠标悬停页面元素可看中文解释）';
+  tog.onclick=()=>{
+    tipOn=!tipOn;
+    localStorage.setItem('tipOn',tipOn?'1':'0');
+    tog.classList.toggle('active',tipOn);
+    if(!tipOn)tipEl.classList.remove('show');
+  };
+  document.body.appendChild(tog);
+  let _tipHideTimer=null;
+  function showTip(target,key){
+    const d=TERM_DICT[key];if(!d)return;
+    clearTimeout(_tipHideTimer);
+    tipEl.querySelector('.g-tip-name').textContent=d.zh;
+    tipEl.querySelector('.g-tip-desc').textContent=d.desc;
+    const usageEl=tipEl.querySelector('.g-tip-usage');
+    if(d.usage){usageEl.textContent='💡 '+d.usage;usageEl.style.display='block'}
+    else{usageEl.style.display='none'}
+    const r=target.getBoundingClientRect();
+    let left=Math.min(r.left,window.innerWidth-330);
+    let top=r.bottom+8;
+    if(top+150>window.innerHeight){top=r.top-tipEl.offsetHeight-8;if(top<8)top=8}
+    if(left<8)left=8;
+    tipEl.style.left=left+'px';
+    tipEl.style.top=top+'px';
+    tipEl.classList.add('show');
+  }
+  function hideTip(){_tipHideTimer=setTimeout(()=>tipEl.classList.remove('show'),80)}
+  document.addEventListener('mouseover',e=>{
+    if(!tipOn)return;
+    const t=e.target.closest('[data-help]')||e.target.closest('[data-tip]')||matchTerm(e.target);
+    if(!t)return;
+    const key=t.dataset?.help||t.dataset?.tip||t._tipKey;
+    showTip(t,key);
+  });
+  document.addEventListener('mouseout',e=>{
+    const t=e.target.closest('[data-help]')||e.target.closest('[data-tip]');
+    if(t||e.target._tipKey)hideTip();
+  });
+}
+function matchTerm(el){
+  if(!el||!el.textContent)return null;
+  const txt=el.textContent.trim().toLowerCase().replace(/[\s_-]+/g,'_');
+  for(const k of Object.keys(TERM_DICT)){
+    if(txt===k.toLowerCase()||txt===TERM_DICT[k].zh){el._tipKey=k;return el}
+  }
+  return null;
+}
+document.addEventListener('DOMContentLoaded',initTooltip);
+
+/* ── Confirm Modal ──────────────────────────────────── */
+(function(){
+  const overlay=document.createElement('div');
+  overlay.id='confirm-overlay';
+  overlay.style.cssText='display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;align-items:center;justify-content:center;backdrop-filter:blur(3px)';
+  overlay.innerHTML=`
+<div id="confirm-box" style="background:var(--card);border:1px solid var(--bd);border-radius:16px;box-shadow:var(--s2);padding:1.6rem 1.8rem;max-width:420px;width:90%;animation:fadeUp .2s ease">
+  <div style="display:flex;align-items:center;gap:.7rem;margin-bottom:.9rem">
+    <div id="confirm-icon" style="width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0"></div>
+    <h3 id="confirm-title" style="font-size:1rem;font-weight:700"></h3>
+  </div>
+  <div id="confirm-body" style="font-size:.875rem;color:var(--t2);line-height:1.6;margin-bottom:1.3rem"></div>
+  <div style="display:flex;gap:.6rem;justify-content:flex-end">
+    <button id="confirm-cancel" class="btn btn-s" onclick="window.__confirmResolve(false)">取消</button>
+    <button id="confirm-ok" class="btn btn-d" onclick="window.__confirmResolve(true)">确认</button>
+  </div>
+</div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click',e=>{if(e.target===overlay)window.__confirmResolve(false)});
+  window.__confirmResolve=function(){};
+})();
+
+function showConfirm(title, bodyHtml, onConfirm, {danger=true,okLabel='确认',cancelLabel='取消'}={}){
+  const ov=document.getElementById('confirm-overlay');
+  document.getElementById('confirm-title').textContent=title;
+  document.getElementById('confirm-body').innerHTML=bodyHtml;
+  document.getElementById('confirm-ok').textContent=okLabel;
+  document.getElementById('confirm-cancel').textContent=cancelLabel;
+  const iconEl=document.getElementById('confirm-icon');
+  if(danger){
+    iconEl.style.background='var(--rs)';
+    iconEl.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2.5" width="16" height="16"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+    document.getElementById('confirm-ok').style.cssText='';
+  } else {
+    iconEl.style.background='var(--ps)';
+    iconEl.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="var(--p)" stroke-width="2.5" width="16" height="16"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
+    document.getElementById('confirm-ok').style.cssText='background:var(--p);color:#fff;border:none';
+  }
+  ov.style.display='flex';
+  window.__confirmResolve=function(ok){
+    ov.style.display='none';
+    if(ok && typeof onConfirm==='function') onConfirm();
+    window.__confirmResolve=function(){};
+  };
+}
+
+/* ── Inline Diff Preview ─────────────────────────────── */
+/* 行级 LCS diff，纯前端，无外部依赖 */
+(function(){
+  const overlay=document.createElement('div');
+  overlay.id='diff-overlay';
+  overlay.style.cssText='display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9100;align-items:flex-start;justify-content:center;padding:3vh 0;overflow-y:auto;backdrop-filter:blur(4px)';
+  overlay.innerHTML=`
+<div id="diff-box" style="background:var(--card);border:1px solid var(--bd);border-radius:16px;box-shadow:var(--s2);width:min(780px,94vw);animation:fadeUp .2s ease;margin:auto">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:1rem 1.3rem;border-bottom:1px solid var(--bd)">
+    <div>
+      <h3 id="diff-title" style="font-size:1rem;font-weight:700;margin-bottom:.2rem"></h3>
+      <div style="font-size:.77rem;color:var(--t3)">保存前请确认变更内容</div>
+    </div>
+    <button class="btn btn-s btn-sm" onclick="closeDiffPreview()">✕</button>
+  </div>
+  <div style="padding:.8rem 1.3rem;display:grid;grid-template-columns:1fr 1fr;gap:.7rem;border-bottom:1px solid var(--bd)">
+    <div style="font-size:.73rem;font-weight:700;color:var(--red);letter-spacing:.03em">— 旧版本</div>
+    <div style="font-size:.73rem;font-weight:700;color:var(--green);letter-spacing:.03em">+ 新版本</div>
+  </div>
+  <div id="diff-content" style="padding:.7rem 1rem 1rem;font-family:'Consolas',monospace;font-size:.8rem;line-height:1.7;max-height:55vh;overflow-y:auto"></div>
+  <div style="padding:1rem 1.3rem;border-top:1px solid var(--bd);display:flex;gap:.6rem;justify-content:flex-end">
+    <button class="btn btn-s" onclick="closeDiffPreview()">取消</button>
+    <button id="diff-confirm-btn" class="btn btn-p">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><polyline points="20 6 9 17 4 12"/></svg>
+      确认保存
+    </button>
+  </div>
+</div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click',e=>{if(e.target===overlay)closeDiffPreview()});
+  document.getElementById('diff-confirm-btn').onclick=function(){
+    var cb=window.__diffOnConfirm;   // 先把回调存起来
+    closeDiffPreview();              // 再关弹窗（会把 __diffOnConfirm 清空）
+    if(typeof cb==='function') cb(); // 最后才调用，不受清空影响
+  };
+})();
+
+function closeDiffPreview(){document.getElementById('diff-overlay').style.display='none';window.__diffOnConfirm=null}
+
+/* 计算行级 LCS diff 并渲染双列视图 */
+function showDiffPreview(title, oldText, newText, onConfirm){
+  /* 如无变化，直接执行确认 */
+  if(oldText===newText){if(typeof onConfirm==='function')onConfirm();return}
+  document.getElementById('diff-title').textContent=title;
+  window.__diffOnConfirm=onConfirm;
+
+  const oldL=oldText.split('\n'), newL=newText.split('\n');
+  const ops=_diffLines(oldL,newL);
+  let leftHtml='', rightHtml='';
+  ops.forEach(op=>{
+    const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    if(op.type==='eq'){
+      const style='background:transparent;padding:0 .4rem;white-space:pre-wrap;word-break:break-all;border-left:2px solid transparent;min-height:1.7em;display:block';
+      leftHtml+=`<span style="${style}">${esc(op.old)}</span>`;
+      rightHtml+=`<span style="${style}">${esc(op.new)}</span>`;
+    } else if(op.type==='del'){
+      const style='background:var(--rs);color:var(--red);padding:0 .4rem;white-space:pre-wrap;word-break:break-all;border-left:2px solid var(--red);min-height:1.7em;display:block';
+      leftHtml+=`<span style="${style}">- ${esc(op.old)}</span>`;
+      rightHtml+=`<span style="opacity:0;min-height:1.7em;display:block"></span>`;
+    } else if(op.type==='ins'){
+      const style='background:var(--gs);color:var(--green);padding:0 .4rem;white-space:pre-wrap;word-break:break-all;border-left:2px solid var(--green);min-height:1.7em;display:block';
+      leftHtml+=`<span style="opacity:0;min-height:1.7em;display:block"></span>`;
+      rightHtml+=`<span style="${style}">+ ${esc(op.new)}</span>`;
+    } else { /* mod */
+      const ls='background:var(--rs);color:var(--red);padding:0 .4rem;white-space:pre-wrap;word-break:break-all;border-left:2px solid var(--red);min-height:1.7em;display:block';
+      const rs='background:var(--gs);color:var(--green);padding:0 .4rem;white-space:pre-wrap;word-break:break-all;border-left:2px solid var(--green);min-height:1.7em;display:block';
+      leftHtml+=`<span style="${ls}">- ${esc(op.old)}</span>`;
+      rightHtml+=`<span style="${rs}">+ ${esc(op.new)}</span>`;
+    }
+  });
+  document.getElementById('diff-content').innerHTML=
+    `<div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
+       <div style="border:1px solid var(--rs);border-radius:8px;overflow:hidden">${leftHtml}</div>
+       <div style="border:1px solid var(--gs);border-radius:8px;overflow:hidden">${rightHtml}</div>
+     </div>`;
+  document.getElementById('diff-overlay').style.display='flex';
+}
+
+function _diffLines(oldL, newL){
+  /* Myers diff の简化版 DP 实现 — O(n*m) LCS */
+  const m=oldL.length, n=newL.length;
+  const dp=Array.from({length:m+1},()=>new Array(n+1).fill(0));
+  for(let i=m-1;i>=0;i--)
+    for(let j=n-1;j>=0;j--)
+      dp[i][j]=oldL[i]===newL[j]?dp[i+1][j+1]+1:Math.max(dp[i+1][j],dp[i][j+1]);
+  const ops=[];
+  let i=0,j=0;
+  while(i<m&&j<n){
+    if(oldL[i]===newL[j]){ops.push({type:'eq',old:oldL[i],new:newL[j]});i++;j++}
+    else if(dp[i+1][j]>=dp[i][j+1]){ops.push({type:'del',old:oldL[i],new:''});i++}
+    else{ops.push({type:'ins',old:'',new:newL[j]});j++}
+  }
+  while(i<m){ops.push({type:'del',old:oldL[i++],new:''})}
+  while(j<n){ops.push({type:'ins',old:'',new:newL[j++]})}
+  /* 合并相邻 del+ins 为 mod */
+  const merged=[];
+  for(let k=0;k<ops.length;k++){
+    if(ops[k].type==='del'&&ops[k+1]?.type==='ins'){
+      merged.push({type:'mod',old:ops[k].old,new:ops[k+1].new});k++
+    } else merged.push(ops[k]);
+  }
+  return merged;
+}
+</script>
+<script>
+(function(){
+  if(typeof EventSource==='undefined')return;
+  var es,retry=1000;
+  function connect(){
+    es=new EventSource('/api/events');
+    es.addEventListener('config_reload',function(e){
+      showToast('配置已更新，页面即将刷新…','info',2000);
+      setTimeout(function(){location.reload()},2200);
+    });
+    es.onopen=function(){retry=1000};
+    es.onerror=function(){es.close();setTimeout(connect,Math.min(retry*=2,30000))};
+  }
+  connect();
+})();
+</script>
+{% if ui_mode == 'simple' %}
+<div id="onboard-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);backdrop-filter:blur(4px);align-items:center;justify-content:center">
+  <div style="background:var(--card);border-radius:16px;box-shadow:0 8px 40px rgba(0,0,0,.25);max-width:440px;width:92vw;padding:2rem;text-align:center;animation:fadeUp .3s ease">
+    <div style="font-size:2.5rem;margin-bottom:.8rem">👋</div>
+    <h2 style="font-size:1.2rem;font-weight:700;margin-bottom:.5rem">欢迎使用简洁模式</h2>
+    <p style="font-size:.88rem;color:var(--t2);line-height:1.6;margin-bottom:1.2rem">
+      系统已为你精简了操作界面，专注于最常用的功能：
+    </p>
+    <div style="display:flex;flex-direction:column;gap:.5rem;text-align:left;margin-bottom:1.5rem;padding:0 .5rem">
+      <div style="display:flex;align-items:center;gap:.6rem;font-size:.88rem"><span style="font-size:1.1rem">📋</span> <b>待处理案例</b> — 查看和处理客户案例</div>
+      <div style="display:flex;align-items:center;gap:.6rem;font-size:.88rem"><span style="font-size:1.1rem">📚</span> <b>知识库</b> — 浏览和搜索知识条目</div>
+      {% for dp in domain_web_pages if dp.get('show_in_simple') %}
+      <div style="display:flex;align-items:center;gap:.6rem;font-size:.88rem"><span style="font-size:1.1rem">🌐</span> <b>{{ dp.get('label_simple') or dp.get('label','') }}</b></div>
+      {% endfor %}
+      <div style="display:flex;align-items:center;gap:.6rem;font-size:.88rem"><span style="font-size:1.1rem">🧠</span> <b>AI 学习审核</b> — 审核 AI 生成的草稿</div>
+    </div>
+    <p style="font-size:.78rem;color:var(--t3);margin-bottom:1rem">你随时可以在侧边栏底部切换到完整模式</p>
+    <button onclick="dismissOnboard()" style="background:var(--p);color:#fff;border:none;border-radius:10px;padding:.65rem 2rem;font-size:.92rem;font-weight:600;cursor:pointer;transition:.15s">开始使用</button>
+  </div>
+</div>
+<script>
+(function(){
+  var k='_onboard_shown_simple';
+  if(!localStorage.getItem(k)){
+    var m=document.getElementById('onboard-modal');
+    if(m) m.style.display='flex';
+  }
+  window.dismissOnboard=function(){
+    localStorage.setItem(k,'1');
+    var m=document.getElementById('onboard-modal');
+    if(m) m.style.display='none';
+  };
+})();
+</script>
+{% endif %}
+</body>
+</html>

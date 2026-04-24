@@ -1,0 +1,40 @@
+system_reply_seeds:
+  - title: "代币价格与走势（讨论级）"
+    category: "行情分析"
+    triggers: ["价格", "涨跌", "走势", "BTC", "ETH"]
+    scenario: "When user asks for price or direction"
+    steps: "1. 声明非投资建议。2. 给出观察框架（周期/关键位/风险）。3. 提示信息延迟与不确定性。"
+    example_reply: "我无法提供买卖信号；你可以先看时间周期与关键位置，并假设行情可能剧烈波动，注意仓位与止损。"
+    reply_mode: "ai_guided"
+
+  - title: "杠杆与爆仓风险"
+    category: "交易教学"
+    triggers: ["杠杆", "爆仓", "强平", "合约"]
+    scenario: "When user asks about leverage"
+    steps: "1. 解释杠杆放大盈亏与强平机制。2. 强调保证金与费率。3. 强烈风险提示。"
+    example_reply: "杠杆会同步放大亏损并提高强平概率；新手应优先理解保证金、维持率与手续费，再考虑极小仓位练习。"
+    reply_mode: "ai_guided"
+
+  - title: "如何识别常见诈骗"
+    category: "风险提示"
+    triggers: ["诈骗", "钓鱼", "私聊", "保本"]
+    scenario: "When user mentions scams or suspicious offers"
+    steps: "1. 列举常见套路（假客服、假空投、保本高收益）。2. 提醒勿泄露私钥助记词。3. 建议官方渠道核实。"
+    example_reply: "任何索要助记词/私钥、保本高收益、拉你私下转账的都高度可疑；只在官方渠道核实链接与客服。"
+    reply_mode: "ai_guided"
+
+  - title: "Gas 与转账卡住"
+    category: "常见问题"
+    triggers: ["gas", "矿工费", "pending", "卡住"]
+    scenario: "When user asks why a transfer is slow"
+    steps: "1. 解释拥堵与 gas 竞价。2. 建议浏览器查看状态。3. 提醒跨链与地址网络一致性。"
+    example_reply: "链上拥堵时交易会排队；可在区块浏览器查看确认状态，并确认网络与地址类型一致。"
+    reply_mode: "ai_guided"
+
+  - title: "项目基本面从哪入手"
+    category: "项目介绍"
+    triggers: ["项目", "代币经济", "团队", "路线图"]
+    scenario: "When user asks how to research a project"
+    steps: "1. 建议看白皮书/文档与代码/审计。2. 关注代币分配与解锁。3. 强调自行验证与风险。"
+    example_reply: "可从文档、代码仓库、审计报告与代币分配入手，并交叉验证信息来源；注意解锁抛压与合约风险。"
+    reply_mode: "ai_guided"

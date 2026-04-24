@@ -1,0 +1,493 @@
+# Telegram MTProto AI Chat Assistant 配置文件
+# 请复制此文件为 config.yaml 并填入实际值
+
+# Active domain pack (directory name under domains/)
+domain: payment
+
+# Telegram API配置 (从 https://my.telegram.org 获取)
+telegram:
+  api_id: "YOUR_API_ID"           # 示例: "1234567"
+  api_hash: "YOUR_API_HASH"       # 示例: "abcdef1234567890abcdef1234567890"
+  phone_number: "+8612345678900"  # 手机号，带国际区号
+  session_name: "camille_bot"     # 会话文件名 (不要带扩展名)
+  
+  # 安全设置
+  use_test_dc: false              # 是否使用测试服务器
+  proxy: null                     # 代理设置，如: {"scheme": "socks5", "hostname": "127.0.0.1", "port": 1080}
+  
+  # 消息处理设置
+  max_workers: 5                  # 并发处理的最大工作线程数
+  message_queue_size: 100         # 消息队列大小
+  process_private: true           # 处理私聊消息
+  process_groups: false           # 处理群组消息 (建议关闭，除非需要)
+  process_channels: false         # 处理频道消息
+
+# LINE Messaging API（官方账号；与 Telegram 共用 Skill/AI，需 web 可公网 HTTPS）
+# 控制台 Webhook URL 填: https://你的域名/line/webhook（与 webhook_path 一致）
+line:
+  enabled: false
+  channel_secret: ""
+  channel_access_token: ""
+  webhook_path: "/line/webhook"
+  unsupported_type_reply: "目前仅支持文字消息，请发文字。"
+
+# Web 管理后台（显示名、侧边栏标题；LINE RPA 提示中的「系统」名称亦取此字段）
+web_admin:
+  site_name: 智控王客户转化聊天系统
+  host: 127.0.0.1
+  port: 18787
+  auth_token: YOUR_ADMIN_TOKEN
+  secret_key: YOUR_FLASK_SECRET_KEY
+
+# 个人 LINE 客户端 RPA（ADB + uiautomator dump；与官方 Messaging API 独立）
+# 需：开发者选项 USB 调试、已登录 LINE 的会话在前台、建议安装 ADB Keyboard 以输入中文
+line_rpa:
+  enabled: false
+  adb_serial: ""   # 空则自动选择已安装 LINE 的设备
+  prefer_line_device: true
+  line_package: jp.naver.line.android
+  splash_activity: jp.naver.line.android/.activity.SplashActivity
+  dump_remote_path: /sdcard/line_rpa_dump.xml
+  peer_left_ratio: 0.42
+  chat_key: "line_rpa:default"
+  default_reply_lang: zh
+  after_launch_sleep_sec: 1.2
+  after_text_sleep_sec: 0.35
+  clear_input_del_count: 96
+  use_adb_keyboard: true
+  adb_keyboard_ime: com.android.adbkeyboard/.AdbIME
+  adb_keyboard_prefer_b64: true
+  adb_keyboard_package: com.android.adbkeyboard
+  redump_before_send: true
+  state_file: ""   # 空则使用 config/line_rpa_state.json（去重上次对方话术）
+  try_root_ui_dump: true
+  # hierarchy 失败时：none=直接失败；screenshot_ocr=adb screencap + 裁剪 +（可选）Tesseract / Vision
+  read_fallback: none
+  # 私聊场景：默认不因 S5 静默概率吞回复；可 reply_strategy_override 强制整策略（如 S3_standard）
+  skip_silent_probability: true
+  reply_strategy_override: ""
+  # true：人设跟随后台 PersonaManager（与 Web「默认人设」一致）；false 时主要依赖 reply_style_hint
+  use_backend_persona: true
+  # LINE 渠道补充说明（非空则追加）；人设主体见 AI 系统提示中的「后台人设定位」
+  reply_style_hint: ""
+  # P2-4：群聊 @我 提权 / 回复策略
+  self_names: []                  # 本账号昵称/别名列表，用于检测 peer_text 里 @我
+  group_reply_policy: all         # all(群也回) | mention_only(仅被@才回) | never(群内完全不回)
+  reply_style_hint_mentioned: ""  # 群内被 @ 时使用的替代风格（空=沿用普通 hint）
+  # P4-3：回复模式 — auto=直接发送；approve=进入审核队列等人工批准；off=不回
+  reply_mode: auto
+  approve_max_deliver_per_cycle: 3  # 每轮最多投递几条已审批回复
+  # P5-1：审批条目防陈旧 + 超时自动取消
+  approve_stale_check:
+    enabled: true                   # 投递前对比 peer_text 哈希，若对方又发了新消息则自动取消本条
+  approve_pending_ttl_hours: 24.0   # 超过 N 小时未处理的 pending 自动 cancelled（0=关闭）
+  # P5-2：多类告警阈值（0=关闭对应告警；整体告警系统由 health_check.enabled 主控）
+  alert_thresholds:
+    send_fail_streak: 3             # 连续 N 次 send_failed/open_fail/send_verify_failed 触发
+    skill_error_burst: 5            # 近 skill_error_window_sec 秒内 ≥N 次 AI 技能错误触发
+    skill_error_window_sec: 3600
+    adb_lost: true                  # no_adb_device 立即触发
+    ime_lost: true                  # P6: AdbKeyboard 广播失败时触发（IME 被切换/崩溃）
+  # P4-5：后台健康检查（dumpsys notification 对账），连续多次 possibly_missed 自动入告警库
+  health_check:
+    enabled: true
+    interval_sec: 300.0              # 每 N 秒检查一次（0=关闭）
+    miss_streak_alert: 3             # 连续 N 次疑似漏读即告警
+    alert_dedup_window_sec: 1800.0   # 同 kind 告警去重窗口
+  # P3-3：连续对方气泡聚合（默认开启；对方一次发三段也能被 AI 完整看到）
+  peer_multi_bubble:
+    enabled: true
+    max_gap_px: 220         # 相邻两条 bottom_y 差超过则截断（px）
+    max_count: 6            # 最多合并几段
+    left_cx_tol_px: 140     # 水平中心偏差超过则认为不是同方气泡
+    joiner: "\n"            # 合并分隔符
+    mark_latest: true       # P4-1：给最后一段加 [最新] 前缀，帮助 AI 判断时序
+    latest_tag: "[最新] "
+  # 每轮 run_once 追加一行 JSON（路径）；空则关闭
+  metrics_jsonl: ""
+  screenshot_ocr:
+    enabled: true
+    # 预设：phone_default | phone_tall_nav | max_chat_area；可与 crop_bottom_ratio 等同名字段混用（显式优先）
+    preset: ""
+    crop_bottom_ratio: 0.42
+    # 在底部条带内再裁左侧比例（0.58 表示保留左 58% 宽度），弱化右侧己方气泡
+    peer_left_strip_ratio: 0.58
+    # false 时跳过 Tesseract，直接走 vision_read_fallback（本地 Ollama/Gemma 或云）
+    use_tesseract: true
+    tesseract_lang: chi_sim+eng
+    # 裁剪区 SHA256 与上次处理成功时相同则跳过（省 OCR/Vision/大模型）
+    skip_if_unchanged: true
+  # OCR 仍读不到（或 use_tesseract: false）时，用多模态读同一裁剪图
+  vision_read_fallback:
+    enabled: false
+    # 与全局 vision 合并；可在此覆盖 provider / base_url / model
+    # provider: zhipu（默认，需 api_key）| openai_compatible（Ollama：base_url + model）
+    # provider: openai_compatible
+    # base_url: http://127.0.0.1:11434/v1
+    # api_key: ollama
+    api_key: ""
+    model: glm-4v-flash
+    # 空=使用内置结构化 JSON prompt（识别文字/贴图/图片/语音）；非空则走旧「纯文字」模式
+    prompt: ""
+  # P6/P7：uiautomator OOM 时，用 vision 扫聊天列表（需 vision_read_fallback.enabled=true）
+  # Web /api/line-rpa/status 会返回 vision_scan.* 与 ime_lost_alerts_unacked（P7-2）
+  vision_scan:
+    enabled: false
+    scan_budget_sec: 30.0           # 两次 vision 列表扫描最小间隔（防 API 爆量）
+    max_pages: 5                  # 与 navigation.max_scroll_attempts 配合；多屏滑动上限
+    list_prompt_override: ""      # 空=内置 LIST_VISION_PROMPT
+  # 部分机型会 kill uiautomator（OOM）；无法 dump 时可用手动坐标 + --peer-text 走通 AI+发送试验
+  fallback_edit_tap: []   # 例: [540, 2280] 输入框中心
+  fallback_send_tap: []    # 例: [1000, 2280] 发送键中心
+  # ── 多会话导航（MVP：扫未读 → 自动进入 → 读/回/返） ──
+  # enabled=false 时仍走旧的"单聊停留"模式（不破坏原有行为）
+  navigation:
+    enabled: false
+    max_chats_per_run: 3          # 单轮最多处理 N 个未读
+    max_scan_rows: 10             # 扫列表时最多取前 N 行
+    max_scroll_attempts: 1        # 屏幕无可处理未读时最多向下滑动几次揭示更多（带防抖；0=不滚动）
+    scroll_to_top_attempts: 1     # P4-2：每轮开始先向上滑几次回到列表顶（0=关闭；防止用户手动滑到下半部分导致漏读）
+    scroll_top_after_done: true   # P6：处理完未读后是否滚回列表顶（下一轮从最新开始）
+    cycle_budget_sec: 60.0        # 单轮预算（超时自动 break）
+    after_tap_sleep_sec: 0.8
+    between_chats_ms: [900, 2200] # 会话之间的拟人停顿
+    chat_list_tab_tap: []         # 可选：人工标定 '聊天' tab 坐标（例如 [150, 2360]）
+    allow_list: []                # 对方名白名单（子串匹配）；为空=不限
+    deny_list: []                 # 对方名黑名单（子串匹配）
+    red_dot_fallback:             # P2-2：无数字徽章的红点未读（截图红像素比兜底）
+      enabled: false
+      min_red_ratio: 0.06         # 行右侧红色像素占比阈值
+      right_strip_ratio: 0.2      # 仅扫行最右侧 20% 区域
+
+  # P2-5：失败留痕（open_fail / no_peer_text / send_failed / skill_error 时自动截图）
+  failure_shots:
+    enabled: false
+    dir: logs/line_rpa/failures   # 保留目录（单层文件名，Web 通过 /api/line-rpa/screenshot/{name} 取）
+    max_files: 200                # FIFO 上限
+    on_steps:
+      - open_fail
+      - no_peer_text
+      - skill_error
+      - send_failed
+      - no_xml_in_room
+  # ── 主进程托管的后台服务（Web 后台可控） ──
+  # enabled=true 时主程序启动会拉起循环；可从 /line-rpa 页面暂停/恢复/立即触发
+  service:
+    autostart: true
+    interval_sec: 15.0         # 基准轮询间隔（空闲时）
+    fast_interval_sec: 4.0     # 刚收到对方消息后的短间隔
+    fast_window_sec: 60.0      # 进入快轮询的窗口时长
+    slow_interval_sec: 30.0    # 连续空轮后进入的慢轮询
+    slow_after_empty: 6        # 多少次空轮后进入慢轮询
+    jitter_pct: 0.25           # ±25% 随机抖动，避免机械感
+    max_consecutive_fail: 20   # 连续失败 N 次触发自动暂停（0=关闭）
+    auto_pause_sec_on_fail: 900
+  # ── 拟人节奏（读停顿 / 分条 / 条间隔） ──
+  human_pacing:
+    enabled: true
+    read_pause_ms: [800, 2000] # 看完对方消息的"思考"停顿
+    per_char_ms: [40, 80]      # 打字节奏（slow_type=true 时每字符停顿）
+    slow_type: false           # true 则逐字输入（更像人，但慢很多）
+    split_mode: sentence       # sentence | length | none
+    split_max_chars: 80        # 单条最多字符
+    split_max_parts: 3         # 最多分成几条
+    inter_msg_ms: [700, 1800]  # 分条之间的间隔
+  # 近期 run 历史保留上限（SQLite，用于 Web 卡片"会话流"）
+  recent_runs_buffer: 500
+
+# 人工客服转接：同问多次追加 @ 人工；值班状态存 SQLite human_escalation.db
+human_escalation:
+  enabled: false
+  repeat_threshold: 3
+  repeat_window_sec: 600
+  min_message_len: 6
+  # 成功 @ 人工后，对「同一归一化问句」再次 @ 的最短间隔（秒）
+  cooldown_sec: 120
+  # per_normalized_question（默认）| per_user_chat（旧：同用户全群共享一条冷却）
+  escalation_cooldown_scope: per_normalized_question
+  duty_mode: always
+  timezone: Asia/Shanghai
+  mention_joiner: " "
+  mention_mode: all
+  agents: []
+  agent_teams: []
+  team_fallback_to_global: true
+  team_pick_mode: union
+  mention_round_robin_scope: global
+  schedule_estimate_step_minutes: 15
+  # 近端细扫窗口（小时）：0=关闭细扫，仅用粗步进；默认 24
+  schedule_estimate_fine_horizon_hours: 24
+  # GET /api/human-escalation/schedule-status 内「排班估计」短时缓存（秒），0=关闭
+  schedule_status_cache_ttl_sec: 30
+  work_hours: {}
+  work_exceptions: {}
+  # work_exceptions 示例（本地日历 YYYY-MM-DD；[] 为全天休息）:
+  # work_exceptions:
+  #   "2026-01-01": []
+  #   "2026-03-21": [["10:00", "14:00"]]
+  human_username: ""
+  human_user_id: 0
+  only_when_shift_online: false
+  message_off_shift: ""
+  escalation_line: "已多次询问同类问题，请人工客服协助："
+  # 转接时附带用户问句：可点击跳转到该条消息（公开群 t.me/username/msg，无 username 的超级群 t.me/c/...，私聊 tg://openmessage）
+  include_user_question_link: true
+  user_question_max_len: 200
+  user_question_line_prefix: "原文："
+  # 触发 @ 人工且群内 AI 回复发送成功后，把用户该条群消息「转发」到各客服私聊（与 mention 名单一致，便于点转发条回到群内原话）
+  forward_user_message_to_agents: true
+  # 转发后再发一条私聊：内联按钮 + t.me/tg:// 直达链接（解决部分客户端转发条无法跳回群内指定消息）
+  forward_private_jump_hint: true
+  # agents 示例（优先于单客服字段）:
+  # agents:
+  #   - user_id: 123456789
+  #     username: ""
+  #     display_name: "白班-小王"
+  #   - user_id: 0
+  #     username: "night_staff"
+  #     display_name: "夜班"
+  # work_hours 示例（键 mon…sun，值为 [["HH:MM","HH:MM"], ...]）:
+  # work_hours:
+  #   mon: [["09:00","12:00"], ["13:00","18:00"]]
+  #   tue: [["09:00","18:00"]]
+  #   sat: []
+
+# 收窄回复：仅处理客服在线 / 通道状态·限额·成功率 等（详见各子项）；enabled: false 恢复全量应答
+narrow_reply:
+  enabled: false
+  allowed_intents:
+    - greeting
+    - channel_info
+    - status_check
+  cs_online_substrings: ["在吗", "在不", "有人吗", "客服", "人工", "在线吗", "上班吗", "有没有客服", "真人", "在不在"]
+  greeting_substrings: ["你好", "您好", "hello", "hi", "嗨", "hey", "早上好", "下午好", "晚上好", "早", "在么"]
+  channel_topic_substrings:
+    - "通道"
+    - "额度"
+    - "限额"
+    - "成功率"
+    - "代收"
+    - "代付"
+    - "维护"
+    - "波动"
+    - "稳定"
+    - "交易"
+    - "跑单"
+    - "正常"
+    - "单笔"
+    - "限制"
+    - "状态"
+    - "ep"
+    - "jc"
+    - "费率"
+    - "手续费"
+  deny_substrings:
+    - "订单号"
+    - "单号"
+    - "查单"
+    - "查订单"
+    - "投诉"
+    - "退款"
+    - "凭证"
+    - "截图"
+    - "没到账"
+    - "未到账"
+    - "钱没到"
+  inherit_followup_seconds: 120
+
+# Web 保存的默认人设落盘（与 config.yaml 同目录；重启后覆盖域包 persona.yaml）
+persona_persistence:
+  enabled: true
+  path: ""   # 空则使用 persona_runtime.yaml；可填相对 config 目录的路径
+
+# claude-4.6-oups-high V3 API配置
+ai:
+  provider: "deepseek"            # AI提供商
+  api_key: "YOUR_claude-4.6-oups-high_API_KEY"  # claude-4.6-oups-high API密钥
+  base_url: "https://api.deepseek.com"  # API基础URL
+  model: "deepseek-chat"          # 使用的模型
+  temperature: 0.7                # 温度参数 (0.0-1.0)
+  max_tokens: 1024                # 最大回复token数
+  timeout: 30                     # API调用超时(秒)
+  # 是否在实时通道数据里向模型注入「费率=」行（默认 false；对客不宣读具体费率数值）
+  channel_status_include_fee: false
+  # 后台人设注入：full 完整 | compact 精简（减与域 system_prompt 重复）| none 不注入（仅用域提示）
+  persona_block_detail: full
+
+  # 系统提示词
+  system_prompt: |
+    你是智能助手Camille，为用户提供友好、专业的客服服务。
+    请保持回复简洁、有帮助，并适当使用表情符号增加亲和力。
+    回复时考虑对话上下文，保持连贯性。
+
+# 陪伴关系阶段（conversion 域）；状态存 bot.db user_context JSON
+companion:
+  enabled: true
+  thresholds:
+    initial_to_warming_exchanges: 4
+    warming_to_intimate_exchanges: 14
+    intimate_to_steady_exchanges: 35
+  advance_suppress_after_downgrade: 8
+  downgrade_keywords:
+    - 别腻
+    - 正经点
+  natural_dialogue:
+    enabled: true
+    strict_exchange_max: 2
+    short_user_chars: 22
+    work_like_keywords: []
+
+# 图像理解：zhipu（智谱 GLM-4V）或 openai_compatible（Ollama 等，多模态 Gemma/LLaVA）
+# 若同时配置 Ollama(base_url) 与智谱 key，请求时优先 Ollama，不可用或空结果时自动回退智谱
+vision:
+  provider: zhipu
+  api_key: ""
+  model: glm-4v-flash
+  timeout: 30
+  # 与 Ollama 并存时可用 zhipu_api_key 专存智谱 key（api_key 可填 ollama）
+  # zhipu_api_key: ""
+  # zhipu_model: glm-4v-flash
+  # OpenAI 兼容多模态示例（Ollama）:
+  # provider: openai_compatible
+  # base_url: http://127.0.0.1:11434/v1
+  # api_key: ollama
+  # model: llava  # 或本机已拉取的多模态模型名
+
+# Skill工作流配置
+skills:
+  # 启用哪些技能模块
+  enabled:
+    - greeting     # 问候处理
+    - order_query  # 订单查询
+    - price_check  # 价格咨询
+    - status_check # 状态检查
+    - channel_info # 通道信息
+    - complaint    # 投诉处理
+    - small_talk   # 闲聊
+    - test         # 测试功能
+  
+  # 技能执行优先级 (数字越小优先级越高)
+  priority:
+    greeting: 1
+    test: 2
+    order_query: 3
+    price_check: 4
+    status_check: 5
+    channel_info: 6
+    complaint: 7
+    small_talk: 8
+  
+  # 回复冷却设置 (单位: 秒)
+  cooldown:
+    per_user: 60      # 同一用户冷却时间
+    per_content: 120  # 相同内容冷却时间
+    global: 30        # 全局冷却时间
+
+# 意图识别配置
+intent:
+  # 关键词匹配 (优先级从高到低)
+  keywords:
+    greeting: ["你好", "您好", "hello", "hi", "在吗", "在？", "有人吗"]
+    order_query: ["订单", "下单", "查单", "单号", "订单号", "order", "查询订单"]
+    price_check: ["价格", "价钱", "多少钱", "费率", "rate", "价格表", "报价"]
+    status_check: ["状态", "情况", "怎么样了", "进度", "status", "怎么样"]
+    channel_info: ["通道", "渠道", "channel", "有哪些通道", "通道状态"]
+    complaint: ["投诉", "抱怨", "问题", "不爽", "不满意", "complaint", "issue"]
+    small_talk: ["天气", "聊天", "聊会", "有空吗", "无聊", "干吗呢"]
+    test: ["测试", "test", "试验", "试试", "camille"]
+  
+  # 正则表达式模式
+  patterns:
+    order_query: ["订单\\s*[：:](.*)", "订单号\\s*[：:](.*)"]
+    price_check: ["(多少钱|价格|费率|rate).*"]
+    channel_info: ["(通道|渠道|channel).*"]
+
+# 回复模板配置
+templates:
+  # 问候回复模板（conversion/陪聊域勿用「有什么可以帮」客服腔）
+  greeting:
+    - "嗯嗯我在～怎么啦？"
+    - "在呀，找我呢？"
+    - "Hi～在呢"
+  
+  # 订单查询回复模板
+  order_query:
+    - "查询订单请提供订单号，我帮您查看状态。"
+    - "请告诉我订单号，我来为您查询具体情况。"
+    - "订单查询需要您的订单号，方便提供一下吗？"
+  
+  # 其他模板...
+
+# 日志配置
+logging:
+  level: "INFO"                    # 日志级别: DEBUG, INFO, WARNING, ERROR
+  file: "logs/app.log"             # 日志文件路径
+  max_size_mb: 10                  # 日志文件最大大小(MB)
+  backup_count: 5                  # 备份文件数量
+  format: "[{time}] [{level}] {message}"  # 日志格式
+  
+  # 控制台输出
+  console:
+    enabled: true
+    color: true
+
+# 性能监控
+monitoring:
+  enabled: true
+  metrics_port: 19190              # 监控端口（避免与常见 9090 冲突）
+  update_interval: 60              # 更新间隔(秒)
+  
+  # 监控指标
+  track:
+    - messages_processed
+    - api_calls
+    - response_time
+    - errors
+    - queue_size
+
+# 高级配置
+advanced:
+  # 重试机制
+  retry:
+    max_attempts: 3                # 最大重试次数
+    backoff_factor: 1.5            # 指数退避因子
+    max_delay: 60                  # 最大延迟(秒)
+  
+  # 缓存设置
+  cache:
+    enabled: true
+    ttl: 300                       # 缓存生存时间(秒)
+    max_size: 1000                 # 最大缓存条目数
+  
+  # 内存限制
+  memory:
+    max_queue_memory_mb: 100       # 队列最大内存占用(MB)
+    gc_threshold: 80               # 垃圾回收阈值(%)
+  
+  # 健康检查
+  health_check:
+    interval: 300                  # 健康检查间隔(秒)
+    timeout: 10                    # 检查超时(秒)
+# ─ 跨平台 Contacts 子系统（Messenger → LINE 引流 + 漏斗 + 合并）──
+# 默认关闭。启用后：
+#   - 启动时自动建 config/contacts.db
+#   - Web 自动挂 /api/contacts、/api/funnel、/ops/contacts、/ops/merge-reviews
+#   - Messenger/LINE runner 需另行接 ContactHooks 才会真记录数据
+#     （参考 docs/CONTACTS_RPA_INTEGRATION.md）
+contacts:
+  enabled: false                     # 总开关
+  # db_path: config/contacts.db     # 可选：自定义 db 位置（相对路径基于 config_path）
+  daily_cap: 15                      # 每个 Messenger 账号每天最多发多少次引流
+  global_cap: 0                      # 全局日上限（0=不启用）
+  token_ttl_hours: 72                # 引流暗号有效期
+  readiness_threshold: 70            # 开引流窗的 readiness 阈值
+  turn_saturation: 3                 # readiness 的 turn_count 饱和点
+  min_silent_days: 3                 # reactivation 最少沉默天数
+  min_intimacy_for_reactivation: 40  # reactivation 的最低亲密度
+  reactivation_cooldown_days: 7      # 再次 reactivation 的冷却
+  scripts_path: config/handoff_scripts.yaml
+  compliance_path: config/handoff_compliance.yaml
+  default_line_id: "@our_line"       # 回退用 LINE id
+  line_ids_by_account:               # 每个 Messenger 账号对应的 LINE id
+    # acc-A: "@line_handle_A"
+    # acc-B: "@line_handle_B"

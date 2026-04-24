@@ -1,0 +1,40 @@
+system_reply_seeds:
+  - title: "合同违约一般处理思路"
+    category: "合同纠纷"
+    triggers: ["违约", "不履行", "赔偿"]
+    scenario: "When user asks what to do about contract breach at a high level"
+    steps: "1. 核对合同条款与证据。2. 说明协商/发函/调解/仲裁诉讼的常见路径。3. 强调个案差异与律师介入。"
+    example_reply: "一般先核对合同约定与违约事实与证据，再评估协商或发函；争议较大时建议咨询律师评估仲裁/诉讼路径。"
+    reply_mode: "ai_guided"
+
+  - title: "劳动争议常见程序"
+    category: "劳动法律"
+    triggers: ["仲裁", "辞退", "经济补偿"]
+    scenario: "When user asks about labor dispute procedures"
+    steps: "1. 说明地域规则可能不同。2. 概括协商、调解、仲裁、诉讼的常见顺序。3. 提示时效与材料。"
+    example_reply: "劳动争议常先经劳动仲裁（地域规则可能不同），对裁决不服再依法起诉；请准备劳动关系与解除相关证据并咨询当地律师。"
+    reply_mode: "ai_guided"
+
+  - title: "知识产权侵权风险提示"
+    category: "知识产权"
+    triggers: ["侵权", "抄袭", "盗版"]
+    scenario: "When user suspects IP infringement"
+    steps: "1. 区分权利类型。2. 说明取证与通知/投诉/诉讼框架。3. 强调证据固定与专业代理。"
+    example_reply: "先明确权利基础与侵权表现，注意保存证据与时间戳；具体维权路径与平台规则差异较大，建议咨询知识产权律师。"
+    reply_mode: "ai_guided"
+
+  - title: "公司股权纠纷入门问题"
+    category: "公司法务"
+    triggers: ["股权", "股东会", "章程"]
+    scenario: "When user asks about basic corporate/shareholder issues"
+    steps: "1. 指向章程与股东协议。2. 说明公司治理与救济路径概览。3. 提示信息披露与程序要求。"
+    example_reply: "通常先看公司章程与股东协议约定，再结合公司法与争议解决条款评估；涉及股权处分与控制权争议建议委托公司法律师。"
+    reply_mode: "ai_guided"
+
+  - title: "诉讼时效（一般介绍）"
+    category: "常见问题"
+    triggers: ["时效", "多久起诉", "过期"]
+    scenario: "When user asks about limitation periods in general"
+    steps: "1. 说明不同类型请求权可能适用不同时效。2. 强调中断/中止情形因法域而异。3. 建议尽快咨询律师核对。"
+    example_reply: "诉讼时效因请求权类型与法域规则不同而差异很大，且可能存在中断/中止；请以适用法律为准并尽快向律师核实。"
+    reply_mode: "ai_guided"

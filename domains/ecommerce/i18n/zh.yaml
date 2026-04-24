@@ -1,0 +1,5 @@
+# E-commerce domain i18n — Chinese
+product_not_found: "抱歉，没有找到相关商品信息，请换个关键词试试～"
+shipping_tracking: "您的包裹（单号 {tracking_no}）当前状态：{status}"
+refund_submitted: "退款申请已提交，预计 {days} 个工作日到账"
+order_shipped: "您的订单已发货，快递单号：{tracking_no}"

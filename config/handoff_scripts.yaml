@@ -1,0 +1,157 @@
+# 引流话术池：Messenger 端用它把用户导向 LINE。
+#
+# 每条话术分三段（shell.greeting / reason / cta），便于将来 AI 改写
+# 只改风格不动关键信息。{LINE_ID} 和 {TOKEN} 两个 slot 由 renderer 填入，
+# 渲染后**必须**在最终文本里保留——合规检查会校验。
+#
+# triggers 语义：
+#   goodbye          用户告别语境触发（晚安/我去睡/bye 等）
+#   identity_asked   用户问你是谁/联系方式时触发
+#   any              任何时机都可用（兜底）
+#
+# persona_tone 语义（可选）：
+#   warm    温柔款
+#   playful 活泼款
+#   casual  朴实款
+# 未填 = 通用
+
+scripts:
+  # ─ 告别场景（推荐首选时机） ──
+  - id: zh_phone_dying
+    language: zh
+    triggers: [goodbye]
+    persona_tone: warm
+    shell:
+      greeting: "嗯嗯今天聊得好开心"
+      reason: "手机快没电啦"
+      cta: "加我 LINE 好不好 id 是 {LINE_ID}，加了跟我说 {TOKEN} 我认你一下"
+
+  - id: zh_messenger_unstable
+    language: zh
+    triggers: [goodbye, any]
+    persona_tone: warm
+    shell:
+      greeting: "好久没聊这么开心"
+      reason: "这里老是掉消息"
+      cta: "加我 LINE 嘛 {LINE_ID}，记得跟我说一声 {TOKEN} 我就知道是你"
+
+  - id: zh_sleep_more_comfy
+    language: zh
+    triggers: [goodbye]
+    persona_tone: playful
+    shell:
+      greeting: "我也要去躺平了"
+      reason: "LINE 那边聊起来更方便"
+      cta: "要不要加我 {LINE_ID}，备注 {TOKEN} 我看到就秒回"
+
+  - id: zh_see_you_tomorrow
+    language: zh
+    triggers: [goodbye]
+    persona_tone: casual
+    shell:
+      greeting: "那明天见啦"
+      reason: "我平时都在 LINE 上聊"
+      cta: "你加下我 {LINE_ID}，加上说 {TOKEN} 就行"
+
+  - id: zh_late_night_warm
+    language: zh
+    triggers: [goodbye]
+    persona_tone: warm
+    shell:
+      greeting: "这么晚了你还撑着聊我真的好感动"
+      reason: "这里总断线"
+      cta: "加我 LINE 嘛 {LINE_ID}，跟我说 {TOKEN} 我就认得你"
+
+  # ─ 询问身份 / 联系方式 ──
+  - id: zh_shy_sharing
+    language: zh
+    triggers: [identity_asked]
+    persona_tone: warm
+    shell:
+      greeting: "哎你真想知道呀"
+      reason: "那我发你 LINE 好啦"
+      cta: "id 是 {LINE_ID}，加我之后说 {TOKEN} 我就知道是你来了"
+
+  - id: zh_direct_share
+    language: zh
+    triggers: [identity_asked]
+    persona_tone: casual
+    shell:
+      greeting: "也行"
+      reason: "我这边 LINE 用得多"
+      cta: "{LINE_ID}，加我告诉我 {TOKEN} 就好"
+
+  # ─ 任何时机兜底 ──
+  - id: zh_switch_to_line
+    language: zh
+    triggers: [any]
+    persona_tone: casual
+    shell:
+      greeting: "话说"
+      reason: "这边消息经常没刷出来"
+      cta: "要不你加我 LINE 吧 {LINE_ID}，加上跟我说 {TOKEN}"
+
+  - id: zh_easier_on_line
+    language: zh
+    triggers: [any]
+    persona_tone: playful
+    shell:
+      greeting: "嘿嘿"
+      reason: "LINE 聊起来表情更多"
+      cta: "加我嘛 {LINE_ID}，跟我说 {TOKEN}"
+
+  # ─ 英文话术 ──
+  - id: en_phone_dying
+    language: en
+    triggers: [goodbye]
+    persona_tone: warm
+    shell:
+      greeting: "hey today was fun"
+      reason: "my phone is dying tho"
+      cta: "add me on LINE {LINE_ID}, tell me {TOKEN} so I know it's you"
+
+  - id: en_messenger_buggy
+    language: en
+    triggers: [goodbye, any]
+    persona_tone: casual
+    shell:
+      greeting: "ok gotta go"
+      reason: "this app keeps glitching"
+      cta: "LINE is easier, mine is {LINE_ID} — ping me with {TOKEN}"
+
+  - id: en_keep_in_touch
+    language: en
+    triggers: [identity_asked]
+    persona_tone: warm
+    shell:
+      greeting: "aww sure"
+      reason: "I'm mostly on LINE"
+      cta: "it's {LINE_ID}, send {TOKEN} when you add me"
+
+  - id: en_any_bridge
+    language: en
+    triggers: [any]
+    persona_tone: playful
+    shell:
+      greeting: "btw"
+      reason: "msgr is being weird lately"
+      cta: "if you wanna keep chatting, LINE {LINE_ID}, say {TOKEN}"
+
+  # ─ 日本語 ──
+  - id: ja_phone_dying
+    language: ja
+    triggers: [goodbye]
+    persona_tone: warm
+    shell:
+      greeting: "今日楽しかった"
+      reason: "スマホの電池やばい"
+      cta: "LINE 追加してほしいな {LINE_ID}、追加したら {TOKEN} 送って〜"
+
+  - id: ja_move_to_line
+    language: ja
+    triggers: [any]
+    persona_tone: casual
+    shell:
+      greeting: "そうだ"
+      reason: "ここよくエラー出るから"
+      cta: "LINE 教える {LINE_ID}、{TOKEN} って送ってくれたらわかる"

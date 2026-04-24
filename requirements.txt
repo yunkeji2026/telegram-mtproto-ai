@@ -1,0 +1,55 @@
+# Telegram MTProto AI Chat Assistant - 核心依赖
+
+# Telegram MTProto客户端
+pyrogram>=2.0.0
+tgcrypto>=1.2.5
+
+# AI集成 (Google Gemini 原生 API)
+google-genai>=1.0.0
+# OpenAI 兼容 HTTP API（Ollama / vLLM 等，见 ai.provider: openai_compatible）
+openai>=1.40.0
+aiohttp>=3.9.0
+
+# 工具和实用程序
+PyYAML>=6.0.1
+colorama>=0.4.6
+
+# 日志和监控
+loguru>=0.7.2
+
+# 后台监控 API + Web 管理面板
+fastapi>=0.100.0
+uvicorn>=0.22.0
+itsdangerous>=2.1.0
+python-multipart>=0.0.6
+
+# 可选：本地数据库支持
+# aiosqlite>=0.19.0
+
+# 开发工具 (可选，部署时不需要)
+# black>=23.0.0
+# isort>=5.12.0
+# pytest>=7.4.0
+# pytest-asyncio>=0.21.0
+# python-dotenv>=1.0.0
+
+# 语音识别依赖 (本地Whisper集成)
+openai-whisper>=20231117
+# 可选：更快的Whisper实现
+# faster-whisper>=0.10.0
+# torch>=2.0.0  # 如果需要GPU加速
+
+# 图像理解（智谱 GLM-4V-Flash，方案 A 为主）
+zhipuai>=2.0.0
+
+# 图片识别依赖 (OCR 兜底)
+# Tesseract OCR (需要系统安装Tesseract和语言包)
+pytesseract>=0.3.10
+Pillow>=10.0.0
+
+# 可选：EasyOCR (更准确但较重)
+# easyocr>=1.7.1
+# torch>=2.0.0  # EasyOCR需要PyTorch
+
+# 图片处理工具
+# opencv-python>=4.8.0  # 可选，图片预处理

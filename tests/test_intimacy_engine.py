@@ -1,0 +1,169 @@
+"""IntimacyEngine 单元测试。"""
+
+from __future__ import annotations
+
+import sys
+import time
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from src.contacts.store import ContactStore
+from src.contacts.handoff import HandoffTokenService
+from src.contacts.merge import MergeService
+from src.contacts.gateway import ContactGateway
+from src.contacts.models import CHANNEL_MESSENGER
+from src.skills.intimacy_engine import IntimacyEngine
+
+
+@pytest.fixture
+def env(tmp_path):
+    store = ContactStore(db_path=tmp_path / "contacts.db")
+    gw = ContactGateway(store, HandoffTokenService(store, ttl_seconds=3600), MergeService(store))
+    engine = IntimacyEngine(store)
+    yield store, gw, engine
+    store.close()
+
+
+def _fake_events(store, journey_id, pattern, *, start_ts=None):
+    """按 pattern 写 msg_in/msg_out 事件（直接改 events 表）。
+
+    pattern: list of (event_type, ts_offset_seconds_from_start)
+    """
+    start = start_ts if start_ts is not None else int(time.time())
+    for et, off in pattern:
+        with store._lock:
+            import uuid, json as _json
+            store._conn.execute(
+                "INSERT INTO journey_events (event_id, journey_id, trace_id, event_type, payload_json, ts) "
+                "VALUES (?, ?, '', ?, '{}', ?)",
+                (uuid.uuid4().hex, journey_id, et, start + off),
+            )
+            store._conn.commit()
+
+
+class TestEmptyJourney:
+    def test_empty_score_zero(self, env):
+        store, gw, eng = env
+        ctx = gw.on_peer_seen(channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_1")
+        bd = eng.compute_intimacy(ctx.journey.journey_id)
+        # contact_created 事件也会被读，但没有 msg_in/msg_out
+        assert bd.score == 0.0
+        assert bd.turn_count_in == 0
+
+
+class TestTurnCount:
+    def test_one_msg_in(self, env):
+        store, gw, eng = env
+        ctx = gw.on_message(
+            channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_1",
+            direction="in", text_preview="hi")
+        bd = eng.compute_intimacy(ctx.journey.journey_id)
+        # turns = 1/20 = 0.05 * 0.25 = 0.0125
+        # mutuality = 0（没 msg_out）
+        # days = 1/5 = 0.2 * 0.25 = 0.05
+        # recency ≈ 1 * 0.25 = 0.25
+        # total ≈ 0.3125 → 31.3
+        assert 30 < bd.score < 35
+        assert bd.turn_count_in == 1
+        assert bd.turn_count_out == 0
+
+
+class TestMutuality:
+    def test_balanced_high_mutuality(self, env):
+        store, gw, eng = env
+        ctx = gw.on_peer_seen(channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_1")
+        jid = ctx.journey.journey_id
+        # 5 in + 5 out
+        pattern = []
+        for i in range(5):
+            pattern.append(("msg_in", i * 60))
+            pattern.append(("msg_out", i * 60 + 30))
+        _fake_events(store, jid, pattern)
+        bd = eng.compute_intimacy(jid)
+        assert bd.contributions["mutuality"] == 0.25   # 满
+        # turns=5/20=0.0625 权重 0.25 → 0.0156
+        # days=1/5=0.2 → 0.05 * 0.25 贡献 0.05
+        # recency ≈ 1 * 0.25
+        assert bd.score > 55
+
+    def test_one_sided_low_mutuality(self, env):
+        store, gw, eng = env
+        ctx = gw.on_peer_seen(channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_1")
+        jid = ctx.journey.journey_id
+        # 10 in, 0 out
+        _fake_events(store, jid, [("msg_in", i * 60) for i in range(10)])
+        bd = eng.compute_intimacy(jid)
+        assert bd.contributions["mutuality"] == 0.0
+
+
+class TestActiveDays:
+    def test_5_days_sat(self, env):
+        store, gw, eng = env
+        ctx = gw.on_peer_seen(channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_1")
+        jid = ctx.journey.journey_id
+        now = int(time.time())
+        # 5 条 msg_in 分布在 5 个不同日
+        pattern = [("msg_in", -i * 86400) for i in range(5)]  # 0, -1d, -2d, ...
+        _fake_events(store, jid, pattern, start_ts=now)
+        bd = eng.compute_intimacy(jid, now=now)
+        assert bd.active_days_7d == 5
+        assert bd.contributions["active_days_7d"] == 0.25
+
+
+class TestRecency:
+    def test_fresh_msg_full_recency(self, env):
+        store, gw, eng = env
+        ctx = gw.on_message(channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_1",
+                             direction="in", text_preview="hi")
+        bd = eng.compute_intimacy(ctx.journey.journey_id)
+        # 刚刚发的 → recency 几乎 1
+        assert bd.contributions["recency"] >= 0.24
+
+    def test_14_days_old_half_recency(self, env):
+        store, gw, eng = env
+        ctx = gw.on_peer_seen(channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_1")
+        jid = ctx.journey.journey_id
+        now = int(time.time())
+        _fake_events(store, jid, [("msg_in", -14 * 86400)], start_ts=now)
+        bd = eng.compute_intimacy(jid, now=now)
+        # 14 天半衰期 → recency ≈ 0.5，加权 0.125
+        assert 0.11 < bd.contributions["recency"] < 0.14
+
+    def test_never_active_zero_recency(self, env):
+        store, gw, eng = env
+        ctx = gw.on_peer_seen(channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_1")
+        bd = eng.compute_intimacy(ctx.journey.journey_id)
+        assert bd.contributions["recency"] == 0.0
+
+
+class TestRefresh:
+    def test_refresh_writes_to_journey(self, env):
+        store, gw, eng = env
+        ctx = gw.on_message(channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_1",
+                             direction="in", text_preview="hi")
+        bd = eng.refresh_journey_intimacy(ctx.journey.journey_id)
+        j = store.get_journey(ctx.journey.journey_id)
+        assert j.intimacy_score == bd.score
+        assert j.intimacy_updated_at > 0
+
+
+class TestCappedScore:
+    def test_even_perfect_stays_bounded(self, env):
+        store, gw, eng = env
+        ctx = gw.on_peer_seen(channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_1")
+        jid = ctx.journey.journey_id
+        now = int(time.time())
+        # 大量双向消息 + 7 天活跃
+        pattern = []
+        for d in range(7):
+            for i in range(3):
+                pattern.append(("msg_in", -d * 86400 + i * 60))
+                pattern.append(("msg_out", -d * 86400 + i * 60 + 30))
+        _fake_events(store, jid, pattern, start_ts=now)
+        bd = eng.compute_intimacy(jid, now=now)
+        assert 0 <= bd.score <= 100
+        # 应该很高
+        assert bd.score > 80

@@ -1,0 +1,16 @@
+# Payment domain terminology corrections
+# Applied by AI client to fix common typos/OCR errors in prompts and replies
+
+corrections:
+  "Pay y in": "Pay in"
+  "Pay y out": "Pay out"
+  "代代付": "代付"
+  "代代收": "代收"
+
+glossary:
+  EP: "EasyPaisa 通道"
+  JC: "JazzCash 通道"
+  GXP: "GXP 机器人（订单查询/命令代发）"
+  UTR: "Unique Transaction Reference（唯一交易参考号）"
+  "Pay in": "代收（用户向商户付款）"
+  "Pay out": "代付（商户向用户打款）"

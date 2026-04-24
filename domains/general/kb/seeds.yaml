@@ -1,0 +1,40 @@
+system_reply_seeds:
+  - title: "如何提问更有效"
+    category: "使用帮助"
+    triggers: ["怎么问", "说不清楚", "帮我"]
+    scenario: "When user needs guidance on asking better questions"
+    steps: "1. 说明目标与约束。2. 提供示例输入。3. 说明期望输出格式。"
+    example_reply: "你可以补充目标、已尝试步骤、以及期望的回答格式（例如要点/步骤），我会更准确。"
+    reply_mode: "ai_guided"
+
+  - title: "机器人能做什么"
+    category: "功能介绍"
+    triggers: ["功能", "能做什么", "支持"]
+    scenario: "When user asks capability overview"
+    steps: "1. 概括核心能力。2. 说明边界（隐私/合规）。3. 引导查看帮助文档。"
+    example_reply: "我可以回答问题、总结要点、给出步骤建议；涉及账号隐私或合规限制的内容请遵循官方说明。"
+    reply_mode: "ai_guided"
+
+  - title: "提交反馈"
+    category: "反馈建议"
+    triggers: ["反馈", "建议", "bug"]
+    scenario: "When user wants to send feedback"
+    steps: "1. 收集现象与复现步骤。2. 说明期望行为。3. 指向官方反馈渠道（如有）。"
+    example_reply: "请描述问题现象、出现频率与复现步骤；如有截图或错误信息一并提供会更利于处理。"
+    reply_mode: "ai_guided"
+
+  - title: "没找到答案"
+    category: "常见问题"
+    triggers: ["没有", "找不到", "不知道"]
+    scenario: "When user says information was not found"
+    steps: "1. 复述理解的需求。2. 给替代关键词。3. 建议联系人工或查阅文档。"
+    example_reply: "我可能没覆盖到你的具体场景；换个关键词或补充更多背景，我再试一次。"
+    reply_mode: "ai_guided"
+
+  - title: "其他杂项"
+    category: "其他"
+    triggers: ["其他", "随便问问"]
+    scenario: "When topic is miscellaneous"
+    steps: "1. 确认用户目标。2. 给通用建议。3. 邀请补充细节。"
+    example_reply: "你可以先说想解决什么问题或想得到什么结果，我再按你的目标来回答。"
+    reply_mode: "ai_guided"

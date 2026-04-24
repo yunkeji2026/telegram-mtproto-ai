@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>登录 · {{ site_name|default('智控王客户转化聊天系统') }}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"></noscript>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#eef1f8;--card:#fff;--t:#111827;--t2:#6b7280;--bd:rgba(0,0,0,.09);
+  --p:#5b7cf6;--ps:rgba(91,124,246,.12);--g:linear-gradient(135deg,#5b7cf6,#8b5cf6);
+  --input:#f4f6fc;--red:#ef4444;--rs:rgba(239,68,68,.1);
+}
+[data-theme="dark"]{
+  --bg:#080c14;--card:rgba(15,21,36,.9);--t:#e2e8f0;--t2:#94a3b8;--bd:rgba(255,255,255,.07);
+  --p:#6b8af8;--ps:rgba(107,138,248,.15);--input:rgba(20,28,46,.8);
+}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t);min-height:100vh;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;transition:background .3s}
+[data-theme="dark"] body{background:#080c14}
+/* animated orbs */
+.orb{position:fixed;border-radius:50%;filter:blur(80px);opacity:.35;pointer-events:none;animation:float linear infinite}
+.orb1{width:520px;height:520px;background:radial-gradient(circle,#5b7cf6,transparent 70%);top:-180px;left:-180px;animation-duration:22s}
+.orb2{width:440px;height:440px;background:radial-gradient(circle,#8b5cf6,transparent 70%);bottom:-160px;right:-140px;animation-duration:18s;animation-direction:reverse}
+.orb3{width:300px;height:300px;background:radial-gradient(circle,#10b981,transparent 70%);top:50%;left:60%;animation-duration:26s;opacity:.2}
+@keyframes float{0%{transform:translate(0,0) rotate(0)}33%{transform:translate(30px,-20px) rotate(120deg)}66%{transform:translate(-20px,25px) rotate(240deg)}100%{transform:translate(0,0) rotate(360deg)}}
+/* card */
+.login-card{position:relative;z-index:10;background:var(--card);border:1px solid var(--bd);border-radius:20px;padding:2.6rem 2.4rem 2.4rem;width:380px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.15),0 0 0 1px var(--bd);animation:up .5s cubic-bezier(.4,0,.2,1)}
+[data-theme="dark"] .login-card{backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);background:rgba(14,20,35,.88);box-shadow:0 24px 64px rgba(0,0,0,.7)}
+@keyframes up{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
+/* logo */
+.logo{display:flex;align-items:center;gap:.75rem;margin-bottom:1.8rem}
+.logo-icon{width:44px;height:44px;background:var(--g);border-radius:13px;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 18px rgba(91,124,246,.4);animation:breathe 3s ease-in-out infinite}
+@keyframes breathe{0%,100%{box-shadow:0 6px 18px rgba(91,124,246,.4)}50%{box-shadow:0 8px 28px rgba(91,124,246,.65)}}
+.logo-icon svg{width:22px;height:22px;color:#fff}
+.logo-text h1{font-size:1.2rem;font-weight:800;line-height:1.15}
+.logo-text p{font-size:.78rem;color:var(--t2)}
+/* form */
+.f-lbl{display:block;font-size:.8rem;font-weight:600;color:var(--t2);margin-bottom:.45rem}
+.f-inp-wrap{position:relative;margin-bottom:1.3rem}
+.f-inp{width:100%;padding:.62rem .95rem;border:1.5px solid var(--bd);border-radius:10px;font-size:.9rem;font-family:inherit;background:var(--input);color:var(--t);outline:none;transition:all .2s}
+.f-inp:focus{border-color:var(--p);box-shadow:0 0 0 3px var(--ps)}
+.eye-btn{position:absolute;right:.8rem;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--t2);display:flex;align-items:center;padding:.2rem}
+.eye-btn svg{width:16px;height:16px}
+/* submit */
+.btn-login{width:100%;padding:.7rem;background:var(--g);color:#fff;border:none;border-radius:10px;font-size:.95rem;font-weight:700;font-family:inherit;cursor:pointer;transition:all .2s;box-shadow:0 4px 14px rgba(91,124,246,.3);position:relative;overflow:hidden}
+.btn-login:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(91,124,246,.45)}
+.btn-login:active{transform:translateY(0)}
+/* error */
+.err{background:rgba(239,68,68,.1);color:#ef4444;border:1px solid rgba(239,68,68,.2);border-radius:9px;padding:.6rem .9rem;font-size:.83rem;font-weight:500;margin-bottom:1rem;display:flex;align-items:center;gap:.5rem}
+.err svg{width:15px;height:15px;flex-shrink:0}
+/* footer */
+.login-foot{text-align:center;margin-top:1.2rem}
+.th-link{background:none;border:none;cursor:pointer;font-size:.8rem;color:var(--t2);font-family:inherit;transition:.2s;padding:.3rem .5rem;border-radius:6px}
+.th-link:hover{color:var(--p);background:var(--ps)}
+</style>
+</head>
+<body>
+<div class="orb orb1"></div>
+<div class="orb orb2"></div>
+<div class="orb orb3"></div>
+
+<div class="login-card">
+  <div class="logo">
+    <div class="logo-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div>
+    <div class="logo-text"><h1>{{ site_name|default('智控王客户转化聊天系统') }}</h1><p>管理控制台</p></div>
+  </div>
+  {% if error %}
+  <div class="err">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    {{ error }}
+  </div>
+  {% endif %}
+  {% if has_users %}
+  <!-- Multi-user login -->
+  <form method="post" action="/login" id="form-user">
+    <div class="f-inp-wrap" style="margin-bottom:.9rem">
+      <label class="f-lbl">用户名</label>
+      <input class="f-inp" type="text" name="username" placeholder="用户名" required autofocus autocomplete="username">
+    </div>
+    <div class="f-inp-wrap">
+      <label class="f-lbl">密码</label>
+      <input class="f-inp" type="password" id="pwd-inp" name="password" placeholder="密码" required autocomplete="current-password">
+      <button type="button" class="eye-btn" onclick="togglePwd()">
+        <svg id="eye-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
+    </div>
+    <button type="submit" class="btn-login">{{ i18n.login_btn if i18n else '登 录' }}</button>
+    <div style="text-align:center;margin-top:.8rem">
+      <button type="button" class="th-link" onclick="toggleLoginMode()" style="font-size:.75rem">使用 Token 登录</button>
+    </div>
+  </form>
+  <!-- Token login (hidden by default) -->
+  <form method="post" action="/login" id="form-token" style="display:none">
+    <label class="f-lbl">{{ i18n.login_title if i18n else '管理密码' }}</label>
+    <div class="f-inp-wrap">
+      <input class="f-inp" type="password" id="pwd-inp2" name="auth_token" placeholder="请输入访问令牌" autocomplete="current-password">
+    </div>
+    <button type="submit" class="btn-login">{{ i18n.login_btn if i18n else '登 录' }}</button>
+    <div style="text-align:center;margin-top:.8rem">
+      <button type="button" class="th-link" onclick="toggleLoginMode()" style="font-size:.75rem">使用帐号密码登录</button>
+    </div>
+  </form>
+  {% else %}
+  <form method="post" action="/login">
+    <label class="f-lbl">{{ i18n.login_title if i18n else '管理密码' }}</label>
+    <div class="f-inp-wrap">
+      <input class="f-inp" type="password" id="pwd-inp" name="auth_token" placeholder="请输入访问令牌" required autofocus autocomplete="current-password">
+      <button type="button" class="eye-btn" onclick="togglePwd()">
+        <svg id="eye-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
+    </div>
+    <button type="submit" class="btn-login">{{ i18n.login_btn if i18n else '登 录' }}</button>
+  </form>
+  {% endif %}
+  <div class="login-foot">
+    <button class="th-link" onclick="toggleTheme()">🌓 切换深色 / 浅色</button>
+  </div>
+</div>
+
+<script>
+(function(){const s=localStorage.getItem('theme');if(s)document.documentElement.setAttribute('data-theme',s);else if(window.matchMedia?.('(prefers-color-scheme:dark)').matches)document.documentElement.setAttribute('data-theme','dark')})();
+function toggleTheme(){const h=document.documentElement,n=h.getAttribute('data-theme')==='dark'?'light':'dark';h.setAttribute('data-theme',n);localStorage.setItem('theme',n)}
+function togglePwd(){
+  const i=document.getElementById('pwd-inp')||document.getElementById('pwd-inp2');
+  if(!i)return;
+  i.type=i.type==='password'?'text':'password';
+  const icon=document.getElementById('eye-icon');
+  if(icon)icon.innerHTML=i.type==='password'?'<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>':'<path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>';
+}
+function toggleLoginMode(){
+  const fu=document.getElementById('form-user'),ft=document.getElementById('form-token');
+  if(!fu||!ft)return;
+  if(fu.style.display==='none'){fu.style.display='';ft.style.display='none'}
+  else{fu.style.display='none';ft.style.display=''}
+}
+</script>
+</body>
+</html>

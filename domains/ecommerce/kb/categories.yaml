@@ -1,0 +1,32 @@
+categories:
+  - name: "商品咨询"
+    description: "商品规格、价格、库存、推荐"
+    triggers: ["商品", "产品", "价格", "规格", "库存", "product", "price"]
+
+  - name: "物流跟踪"
+    description: "快递状态、配送时间、延误处理"
+    triggers: ["快递", "物流", "发货", "到货", "tracking", "shipping"]
+
+  - name: "退款退货"
+    description: "退款申请、退货流程、换货"
+    triggers: ["退款", "退货", "换货", "退钱", "refund", "return"]
+
+  - name: "优惠活动"
+    description: "优惠券、促销活动、折扣"
+    triggers: ["优惠", "折扣", "促销", "券", "coupon", "discount"]
+
+  - name: "账户问题"
+    description: "账户安全、密码重置、登录问题"
+    triggers: ["账户", "密码", "登录", "account", "password", "login"]
+
+  - name: "常规咨询"
+    description: "一般问题和帮助"
+    triggers: ["帮助", "怎么", "如何", "help"]
+
+  - name: "系统话术"
+    description: "系统模板和兜底回复"
+    triggers: []
+
+  - name: "其他"
+    description: "未分类问题"
+    triggers: []

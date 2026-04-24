@@ -1,0 +1,27 @@
+domain:
+  name: conversion
+  display_name: "智控王 · 客户转化"
+  version: "1.0"
+
+ai:
+  reply_style: warm
+  ai_name: ""
+
+skills:
+  enabled:
+    - greeting
+    - complaint
+    - small_talk
+    - test
+
+kb:
+  categories:
+    - "产品价值"
+    - "常见问题"
+    - "转化话术"
+    - "异议处理"
+    - "其他"
+
+emotion_enhancer_skip:
+  phrases: []
+  patterns: []

@@ -1,0 +1,5 @@
+# E-commerce domain i18n — English
+product_not_found: "Sorry, no matching products found. Try different keywords."
+shipping_tracking: "Your package ({tracking_no}) status: {status}"
+refund_submitted: "Refund submitted. Expected arrival: {days} business days."
+order_shipped: "Your order has shipped. Tracking number: {tracking_no}"

@@ -1,0 +1,9 @@
+# Payment domain i18n — Chinese
+gxp_timeout: "查询超时（{sec}s 未收到回复），请稍后重试。\n命令: {cmd}"
+gxp_result_fail: "查询结果：{text}"
+gxp_result_ok: "查询结果：\n{text}"
+gxp_result_other: "GXP 回复：\n{text}"
+batch_preview_title: "📋 批量修改预览 — 所有通道费率\n"
+batch_confirm_hint: "请回复「确认批量修改」执行，或忽略取消。"
+batch_done: "已批量更新 {n} 个通道费率"
+order_ask_intent: "收到订单号 {order}，请问您需要：\n1. 查代收订单\n2. 查提现订单\n3. 回调交易订单\n4. 回调提现订单\n请回复数字 1-4"

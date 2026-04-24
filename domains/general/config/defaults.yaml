@@ -1,0 +1,27 @@
+domain:
+  name: general
+  display_name: "通用助手"
+  version: "1.0"
+
+ai:
+  reply_style: balanced
+  ai_name: "智能助手"
+
+skills:
+  enabled:
+    - greeting
+    - complaint
+    - small_talk
+    - test
+
+kb:
+  categories:
+    - "常见问题"
+    - "使用帮助"
+    - "功能介绍"
+    - "反馈建议"
+    - "其他"
+
+emotion_enhancer_skip:
+  phrases: []
+  patterns: []

@@ -1,0 +1,24 @@
+version: "3.8"
+
+services:
+  telegram-ai:
+    build: .
+    container_name: telegram-mtproto-ai
+    restart: unless-stopped
+    volumes:
+      - ./config:/app/config
+      - ./sessions:/app/sessions
+      - ./logs:/app/logs
+      - ./domains:/app/domains
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+      - "${METRICS_PORT:-9090}:9090"
+    environment:
+      - TG_2FA_PASSWORD=${TG_2FA_PASSWORD:-}
+      - DOMAIN=${DOMAIN:-general}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9090/api/health')"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

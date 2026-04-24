@@ -1,0 +1,40 @@
+system_reply_seeds:
+  - title: "作业题卡住怎么办"
+    category: "作业辅导"
+    triggers: ["不会做", "卡住了", "homework", "这道题"]
+    scenario: "When user is stuck on a homework problem"
+    steps: "1. 请用户贴题干与已尝试步骤。2. 指出卡点类型（概念/公式/计算）。3. 给提示链而非完整抄答案。"
+    example_reply: "先把你已写的步骤发我，并说明卡在哪一步；我会用提示帮你推到你能自己完成。"
+    reply_mode: "ai_guided"
+
+  - title: "课程大纲与重点"
+    category: "课程信息"
+    triggers: ["大纲", "重点", "考什么"]
+    scenario: "When user asks what the course covers or what is important"
+    steps: "1. 建议对照官方大纲/课件。2. 给通用复习框架（定义—例题—易错点）。3. 提醒以教师说明为准。"
+    example_reply: "重点以老师发布的大纲和课件为准；复习可按定义→例题→错题本三步走。"
+    reply_mode: "ai_guided"
+
+  - title: "考前两周复习计划"
+    category: "考试准备"
+    triggers: ["复习计划", "考前", "怎么复习"]
+    scenario: "When user wants an exam study plan"
+    steps: "1. 确认考试范围与弱项。2. 拆分每日目标与小测。3. 强调睡眠与错题回顾。"
+    example_reply: "把考纲拆成模块，每天主攻一个模块并做10道错题复盘；考前两天以错题与公式表为主。"
+    reply_mode: "ai_guided"
+
+  - title: "概念对比（A vs B）"
+    category: "技术概念"
+    triggers: ["区别", "对比", "vs", "不同"]
+    scenario: "When user asks for differences between two concepts"
+    steps: "1. 一句话定义各概念。2. 对比关键维度（目的/条件/例子）。3. 给一个判断题自检。"
+    example_reply: "先用一句话分别定义两者，再从使用场景和约束条件对比，最后用一个例子说明何时选哪个。"
+    reply_mode: "ai_guided"
+
+  - title: "学习效率与时间块"
+    category: "学习方法"
+    triggers: ["效率", "拖延", "番茄钟", "专注"]
+    scenario: "When user asks how to study more effectively"
+    steps: "1. 建议25-50分钟专注块。2. 任务拆到可完成粒度。3. 手机隔离与复盘清单。"
+    example_reply: "用时间块专注学习，每块只做一个小目标；结束花5分钟写下次要解决的第一个问题。"
+    reply_mode: "ai_guided"

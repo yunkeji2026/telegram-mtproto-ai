@@ -1,0 +1,37 @@
+system_reply_seeds:
+  - category: "系统话术"
+    title: "全局兜底话术"
+    template_key: "global_fallback"
+    reply_mode: "direct"
+    fallback_group: "global"
+    triggers: "[]"
+    example_reply_zh: |
+      在的亲～有什么可以帮您的？
+      ---
+      您好，我是小乐，很高兴为您服务！
+      ---
+      亲，请问有什么需要帮忙的呢？
+
+  - category: "系统话术"
+    title: "商品咨询兜底"
+    template_key: "product_query_fallback"
+    reply_mode: "direct"
+    fallback_group: "product_query"
+    triggers: "[]"
+    example_reply_zh: "请问您想了解哪款商品呢？发个链接或商品名我帮您查看～"
+
+  - category: "系统话术"
+    title: "物流查询兜底"
+    template_key: "shipping_track_fallback"
+    reply_mode: "direct"
+    fallback_group: "shipping_track"
+    triggers: "[]"
+    example_reply_zh: "请提供您的订单号或快递单号，我帮您查看物流状态～"
+
+  - category: "系统话术"
+    title: "退款退货兜底"
+    template_key: "return_refund_fallback"
+    reply_mode: "direct"
+    fallback_group: "return_refund"
+    triggers: "[]"
+    example_reply_zh: "请问您是哪个订单需要退款呢？提供订单号我帮您处理～"

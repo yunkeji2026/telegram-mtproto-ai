@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block title %}帮助 · {{ site_name|default('智控王客户转化聊天系统') }}{% endblock %}
+{% block page_title %}{% if ui_mode == 'simple' %}常用指令{% else %}帮助 & 指令参考{% endif %}{% endblock %}
+{% block head %}
+<style>
+/* accordion */
+.acc-item{border:1px solid var(--bd);border-radius:var(--r);overflow:hidden;margin-bottom:.75rem;transition:box-shadow .2s}
+.acc-item:hover{box-shadow:var(--s1)}
+.acc-hd{display:flex;align-items:center;gap:.65rem;padding:.9rem 1.1rem;cursor:pointer;background:var(--card);transition:background .18s;user-select:none;border:none;width:100%;text-align:left;font-family:inherit;font-size:.92rem;font-weight:700;color:var(--t)}
+[data-theme="dark"] .acc-hd{background:var(--card)}
+.acc-hd:hover{background:var(--ps)}
+.acc-hd svg.acc-ico{width:18px;height:18px;color:var(--p);flex-shrink:0}
+.acc-hd .acc-badge{background:var(--ps);color:var(--p);padding:.15rem .55rem;border-radius:6px;font-size:.73rem;font-weight:700;margin-left:.3rem}
+.acc-hd .chevron{margin-left:auto;width:18px;height:18px;color:var(--t3);transition:transform .3s;flex-shrink:0}
+.acc-hd.open .chevron{transform:rotate(180deg)}
+.acc-body{display:none;padding:0 0 .5rem;background:var(--card)}
+.acc-body.open{display:block;animation:fadeUp .2s ease}
+/* cmd table */
+.cmd-table{width:100%;border-collapse:collapse;font-size:.84rem}
+.cmd-table th{text-align:left;padding:.45rem .9rem;font-size:.7rem;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.05em;border-bottom:2px solid var(--bd)}
+.cmd-table td{padding:.52rem .9rem;border-bottom:1px solid var(--bd);vertical-align:top}
+.cmd-table tbody tr:last-child td{border-bottom:none}
+.cmd-table tbody tr:hover td{background:var(--ps)}
+/* cmd code cell */
+.cmd-wrap{display:flex;align-items:center;gap:.4rem}
+.cmd-code{font-family:'Consolas','JetBrains Mono','Courier New',monospace;font-size:.82rem;color:var(--p);background:var(--ps);padding:.2rem .55rem;border-radius:5px;border:1px solid rgba(91,124,246,.15)}
+.copy-btn{background:none;border:none;cursor:pointer;color:var(--t3);padding:.2rem;border-radius:5px;transition:.15s;display:flex;align-items:center}
+.copy-btn:hover{background:var(--ps);color:var(--p)}
+.copy-btn svg{width:13px;height:13px}
+/* search */
+.help-search{position:relative;margin-bottom:1rem}
+.help-search svg{position:absolute;left:.8rem;top:50%;transform:translateY(-50%);width:16px;height:16px;color:var(--t3)}
+#help-search{padding-left:2.5rem}
+/* no result */
+#help-no-result{display:none;text-align:center;padding:2rem;color:var(--t3)}
+/* section icon colors */
+.sec-basic .acc-ico{color:#5b7cf6}
+.sec-channel .acc-ico{color:#10b981}
+.sec-admin .acc-ico{color:#f59e0b}
+.sec-schedule .acc-ico{color:#8b5cf6}
+.sec-ai .acc-ico{color:#ef4444}
+</style>
+{% endblock %}
+{% block content %}
+{% set active="help" %}
+
+{% if ui_mode == 'simple' %}
+<div style="background:var(--ps);border:1px solid rgba(91,124,246,.2);border-radius:10px;padding:.8rem 1rem;margin-bottom:1rem;font-size:.85rem;color:var(--t2);display:flex;align-items:center;gap:.6rem">
+  <span style="font-size:1.2rem">💡</span>
+  <span>仅显示常用指令。<a href="/set_ui_mode?mode=full" style="color:var(--p);font-weight:600">切换完整模式</a> 查看全部指令。</span>
+</div>
+{% endif %}
+<div style="background:linear-gradient(135deg,rgba(16,185,129,.1),rgba(91,124,246,.1));border:1px solid rgba(91,124,246,.22);border-radius:12px;padding:.85rem 1.1rem;margin-bottom:1rem;font-size:.86rem;color:var(--t2);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.65rem">
+  <span style="display:flex;align-items:center;gap:.5rem"><span style="font-size:1.25rem">📽</span><span><strong style="color:var(--t)">客服培训演示</strong>（全屏幻灯片，含知识库与人工转接流程）</span></span>
+  <a href="/training" target="_blank" rel="noopener" class="btn btn-p btn-sm" style="text-decoration:none;white-space:nowrap">打开培训演示</a>
+</div>
+<!-- search -->
+<div class="help-search fa">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+  <input type="search" id="help-search" placeholder="搜索指令关键词…" oninput="filterHelp(this.value)">
+</div>
+<div id="help-no-result">找不到匹配的指令 🔍</div>
+
+<!-- accordion sections -->
+{% if commands %}
+  {% for section, cmds in commands.items() %}
+  {% set is_admin_section = '管理' in section or '权限' in section or '管控' in section or 'AI' in section or '智能' in section or '计划' in section or '定时' in section %}
+  <div class="acc-item fa fa{{ loop.index if loop.index <= 4 else '' }}{{ ' pro-only' if is_admin_section else '' }}" data-section="{{ section }}">
+    <button class="acc-hd {% if loop.index == 1 %}open{% endif %}" onclick="toggleAcc(this)">
+      <svg class="acc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        {% if '话术' in section or '模板' in section %}<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/>
+        {% elif '通道' in section or '费率' in section %}<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/>
+        {% elif '管理' in section or '权限' in section or '管控' in section %}<shield/><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        {% elif '计划' in section or '定时' in section %}<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+        {% elif 'AI' in section or '智能' in section %}<path d="M12 2a4 4 0 014 4v1h1a3 3 0 010 6h-1v1a4 4 0 01-4 4H8a4 4 0 01-4-4v-1H3a3 3 0 010-6h1V6a4 4 0 014-4h4z"/>
+        {% else %}<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>{% endif %}
+      </svg>
+      {{ section }}
+      <span class="acc-badge">{{ cmds|length }}</span>
+      <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>
+    <div class="acc-body {% if loop.index == 1 %}open{% endif %}">
+      <table class="cmd-table">
+        <thead><tr><th>指令</th><th>说明</th><th>示例</th><th>权限</th></tr></thead>
+        <tbody>
+          {% for cmd in cmds %}
+          <tr class="cmd-row{{ ' pro-only' if cmd.role in ['admin', 'super_admin'] else '' }}" data-cmd="{{ cmd.cmd|lower }}" data-desc="{{ cmd.desc|lower if cmd.desc else '' }}">
+            <td>
+              <div class="cmd-wrap">
+                <span class="cmd-code">{{ cmd.cmd }}</span>
+                <button class="copy-btn" onclick="copyCmd('{{ cmd.cmd }}')" title="复制指令">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                </button>
+              </div>
+            </td>
+            <td style="color:var(--t2)">{{ cmd.desc if cmd.desc else '-' }}</td>
+            <td><code>{{ cmd.example if cmd.example else '-' }}</code></td>
+            <td>
+              {% if cmd.role %}
+              <span class="badge {{ 'b-r' if cmd.role=='super_admin' else ('b-a' if cmd.role=='admin' else 'b-p') }}">{{ cmd.role }}</span>
+              {% else %}<span class="badge b-n">所有人</span>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endfor %}
+{% else %}
+<!-- fallback static help -->
+<div class="acc-item fa">
+  <button class="acc-hd open" onclick="toggleAcc(this)">
+    <svg class="acc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+    话术管理
+    <span class="acc-badge">4</span>
+    <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+  </button>
+  <div class="acc-body open">
+    <table class="cmd-table">
+      <thead><tr><th>指令</th><th>说明</th><th>示例</th><th>权限</th></tr></thead>
+      <tbody>
+        <tr class="cmd-row" data-cmd="/setgreeting" data-desc="设置问候语">
+          <td><div class="cmd-wrap"><span class="cmd-code">/setgreeting</span><button class="copy-btn" onclick="copyCmd('/setgreeting')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button></div></td>
+          <td style="color:var(--t2)">设置问候语</td><td><code>/setgreeting 你好！</code></td><td><span class="badge b-a">admin</span></td>
+        </tr>
+        <tr class="cmd-row" data-cmd="/setrate" data-desc="设置费率">
+          <td><div class="cmd-wrap"><span class="cmd-code">/setrate</span><button class="copy-btn" onclick="copyCmd('/setrate')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button></div></td>
+          <td style="color:var(--t2)">设置通道费率</td><td><code>/setrate ch1 6.85</code></td><td><span class="badge b-a">admin</span></td>
+        </tr>
+        <tr class="cmd-row" data-cmd="/status" data-desc="查看状态">
+          <td><div class="cmd-wrap"><span class="cmd-code">/status</span><button class="copy-btn" onclick="copyCmd('/status')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button></div></td>
+          <td style="color:var(--t2)">查看当前通道状态</td><td><code>/status</code></td><td><span class="badge b-n">所有人</span></td>
+        </tr>
+        <tr class="cmd-row" data-cmd="/help" data-desc="帮助">
+          <td><div class="cmd-wrap"><span class="cmd-code">/help</span><button class="copy-btn" onclick="copyCmd('/help')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button></div></td>
+          <td style="color:var(--t2)">显示帮助信息</td><td><code>/help</code></td><td><span class="badge b-n">所有人</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<script>
+function toggleAcc(btn) {
+  btn.classList.toggle('open');
+  const body = btn.nextElementSibling;
+  body.classList.toggle('open');
+}
+
+function filterHelp(kw) {
+  kw = kw.toLowerCase().trim();
+  let anyVisible = false;
+  document.querySelectorAll('.acc-item').forEach(item => {
+    let rowVisible = false;
+    item.querySelectorAll('.cmd-row').forEach(row => {
+      const match = !kw || row.dataset.cmd.includes(kw) || row.dataset.desc.includes(kw);
+      row.style.display = match ? '' : 'none';
+      if (match) rowVisible = true;
+    });
+    item.style.display = rowVisible || !kw ? '' : 'none';
+    if (rowVisible && kw) {
+      item.querySelector('.acc-hd').classList.add('open');
+      item.querySelector('.acc-body').classList.add('open');
+    }
+    if (rowVisible) anyVisible = true;
+  });
+  document.getElementById('help-no-result').style.display = anyVisible || !kw ? 'none' : 'block';
+}
+
+function copyCmd(cmd) {
+  navigator.clipboard.writeText(cmd).then(() => {
+    if (typeof showToast === 'function') showToast('已复制：' + cmd, 'ok', 2000);
+  });
+}
+</script>
+{% endblock %}

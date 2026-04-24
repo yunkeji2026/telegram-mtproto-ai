@@ -1,0 +1,24 @@
+name: community
+display_name: "社区管理"
+version: "1.0"
+description: "社区运营与群管理 — 欢迎新人、群规答疑、活动公告、违规处理"
+
+skills: []
+
+config_files:
+  - defaults.yaml
+
+kb:
+  categories: kb/categories.yaml
+  seeds: kb/seeds.yaml
+
+prompts:
+  system_prompt: prompts/system_prompt.txt
+
+hooks: true
+
+i18n:
+  zh: i18n/zh.yaml
+  en: i18n/en.yaml
+
+web_routes: false

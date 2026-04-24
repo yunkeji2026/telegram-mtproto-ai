@@ -1,0 +1,571 @@
+"""
+配置管理器
+负责加载、验证和管理配置文件
+"""
+
+import yaml
+import os
+from pathlib import Path
+from typing import Dict, Any, Optional
+import logging
+
+
+class ConfigManager:
+    """配置管理器类"""
+    
+    def __init__(self, config_path: str = None):
+        """
+        初始化配置管理器
+        
+        Args:
+            config_path: 配置文件路径，如果为None则使用默认路径
+        """
+        self.config_path = Path(config_path) if config_path else self._get_default_config_path()
+        self.config: Dict[str, Any] = {}
+        self.logger = logging.getLogger(__name__)
+        self._quota_rules_cache: Optional[Dict[str, Any]] = None
+        self._quota_rules_mtime: float = 0
+        self._templates_cache: Optional[Dict[str, Any]] = None
+        self._templates_mtime: float = 0
+        self._exchange_rates_cache: Optional[Dict[str, Any]] = None
+        self._exchange_rates_mtime: float = 0
+        self._strategies_cache: Optional[Dict[str, Any]] = None
+        self._strategies_mtime: float = 0
+        self._config_mtime: float = 0
+        self._hot_reload_interval: float = 30.0
+        self._last_hot_reload_check: float = 0
+        self._on_reload_callbacks: list = []
+    
+    def _get_default_config_path(self) -> Path:
+        """获取默认配置文件路径"""
+        # 优先使用当前目录下的config/config.yaml
+        current_dir = Path(__file__).parent.parent.parent
+        config_file = current_dir / "config" / "config.yaml"
+        
+        # 如果不存在，使用config.example.yaml
+        if not config_file.exists():
+            example_file = current_dir / "config" / "config.example.yaml"
+            if example_file.exists():
+                self.logger.warning(f"配置文件 {config_file} 不存在，请复制 {example_file} 并编辑")
+                return example_file
+        
+        return config_file
+    
+    async def load(self) -> bool:
+        """加载配置文件"""
+        try:
+            if not self.config_path.exists():
+                self.logger.error(f"配置文件不存在: {self.config_path}")
+                return False
+            
+            with open(self.config_path, 'r', encoding='utf-8') as f:
+                self.config = yaml.safe_load(f)
+            
+            # 验证配置
+            if not self._validate_config():
+                return False
+            
+            self._config_mtime = os.path.getmtime(self.config_path)
+            self.logger.info(f"配置文件加载成功: {self.config_path}")
+            return True
+            
+        except yaml.YAMLError as e:
+            self.logger.error(f"配置文件YAML格式错误: {e}")
+            return False
+        except Exception as e:
+            self.logger.error(f"加载配置文件失败: {e}")
+            return False
+    
+    def _validate_config(self) -> bool:
+        """验证配置文件"""
+        required_sections = ['telegram', 'ai', 'skills']
+        
+        # 检查必需的部分
+        for section in required_sections:
+            if section not in self.config:
+                self.logger.error(f"配置缺少必需部分: {section}")
+                return False
+        
+        # 验证Telegram配置
+        telegram_config = self.config.get('telegram', {})
+        required_telegram_keys = ['api_id', 'api_hash', 'phone_number']
+        
+        for key in required_telegram_keys:
+            if key not in telegram_config:
+                self.logger.error(f"Telegram配置缺少必需键: {key}")
+                return False
+            
+            value = telegram_config[key]
+            if value == f"YOUR_{key.upper()}" or not value:
+                self.logger.error(f"请配置有效的Telegram {key}")
+                return False
+        
+        # 验证AI配置
+        ai_config = self.config.get('ai', {})
+        if 'api_key' not in ai_config or ai_config['api_key'] == "YOUR_AI_API_KEY":
+            self.logger.error("请配置有效的 AI API 密钥")
+            return False
+        
+        return True
+    
+    def get(self, key: str, default: Any = None) -> Any:
+        """获取配置值，支持点分隔的嵌套键"""
+        keys = key.split('.')
+        value = self.config
+        
+        try:
+            for k in keys:
+                value = value[k]
+            return value
+        except (KeyError, TypeError):
+            return default
+    
+    def set(self, key: str, value: Any) -> None:
+        """设置配置值，支持点分隔的嵌套键"""
+        keys = key.split('.')
+        config = self.config
+        
+        # 遍历到倒数第二个键
+        for k in keys[:-1]:
+            if k not in config:
+                config[k] = {}
+            config = config[k]
+        
+        # 设置最后一个键的值
+        config[keys[-1]] = value
+    
+    def save(self) -> bool:
+        """保存配置到文件"""
+        try:
+            # 确保配置目录存在
+            self.config_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(self.config_path, 'w', encoding='utf-8') as f:
+                yaml.dump(self.config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+            
+            self.logger.info(f"配置已保存到: {self.config_path}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"保存配置失败: {e}")
+            return False
+    
+    def get_telegram_config(self) -> Dict[str, Any]:
+        """获取Telegram配置"""
+        return self.config.get('telegram', {})
+    
+    def get_ai_config(self) -> Dict[str, Any]:
+        """获取AI配置"""
+        return self.config.get('ai', {})
+
+    def get_line_rpa_config(self) -> Dict[str, Any]:
+        """个人 LINE 客户端 RPA（ADB）；可选，默认空。"""
+        return self.config.get("line_rpa") or {}
+
+    def get_messenger_rpa_config(self) -> Dict[str, Any]:
+        """Facebook Messenger RPA（ADB + Vision）；可选，默认空。"""
+        return self.config.get("messenger_rpa") or {}
+
+    def get_facebook_messenger_config(self) -> Dict[str, Any]:
+        """Facebook Page Messenger Webhook（官方 Graph API）；可选，默认空。"""
+        return self.config.get("facebook_messenger") or {}
+    
+    def get_skills_config(self) -> Dict[str, Any]:
+        """获取Skills配置"""
+        return self.config.get('skills', {})
+    
+    def get_intent_config(self) -> Dict[str, Any]:
+        """获取意图识别配置"""
+        return self.config.get('intent', {})
+    
+    def get_templates_config(self) -> Dict[str, Any]:
+        """获取模板配置"""
+        return self.config.get('templates', {})
+    
+    def get_logging_config(self) -> Dict[str, Any]:
+        """获取日志配置"""
+        return self.config.get('logging', {})
+    
+    def get_dynamic_templates_config(self) -> Dict[str, Any]:
+        """加载动态话术模板配置（config/templates.yaml），支持热更新（按文件 mtime 重载）"""
+        templates_file = self.config_path.parent / "templates.yaml"
+        if not templates_file.exists():
+            # 回退：按 config_manager 所在包路径找 config/templates.yaml
+            try:
+                base = Path(__file__).resolve().parent.parent.parent
+                templates_file = base / "config" / "templates.yaml"
+            except Exception:
+                pass
+        if not templates_file.exists():
+            self.logger.debug("动态话术模板文件不存在，将使用主配置中的模板: %s", getattr(templates_file, 'as_posix', str)(templates_file))
+            return {}
+        try:
+            mtime = os.path.getmtime(templates_file)
+            if self._templates_cache is not None and mtime <= self._templates_mtime:
+                return self._templates_cache
+            with open(templates_file, 'r', encoding='utf-8') as f:
+                self._templates_cache = yaml.safe_load(f) or {}
+            self._templates_mtime = mtime
+            template_keys = list(self._templates_cache.keys())
+            self.logger.info("动态话术模板已加载: 模板类别数=%s, 文件=%s", len(template_keys), templates_file.name)
+            return self._templates_cache
+        except Exception as e:
+            self.logger.warning("加载动态话术模板失败: %s", e)
+            return self._templates_cache if self._templates_cache is not None else {}
+    
+    def get_exchange_rates_config(self) -> Dict[str, Any]:
+        """加载动态汇率配置（config/exchange_rates.yaml），支持热更新（按文件 mtime 重载）"""
+        exchange_rates_file = self.config_path.parent / "exchange_rates.yaml"
+        if not exchange_rates_file.exists():
+            # 回退：按 config_manager 所在包路径找 config/exchange_rates.yaml
+            try:
+                base = Path(__file__).resolve().parent.parent.parent
+                exchange_rates_file = base / "config" / "exchange_rates.yaml"
+            except Exception:
+                pass
+        if not exchange_rates_file.exists():
+            self.logger.debug("动态汇率配置文件不存在: %s", getattr(exchange_rates_file, 'as_posix', str)(exchange_rates_file))
+            return {}
+        try:
+            mtime = os.path.getmtime(exchange_rates_file)
+            if self._exchange_rates_cache is not None and mtime <= self._exchange_rates_mtime:
+                return self._exchange_rates_cache
+            with open(exchange_rates_file, 'r', encoding='utf-8') as f:
+                self._exchange_rates_cache = yaml.safe_load(f) or {}
+            self._exchange_rates_mtime = mtime
+            channels = self._exchange_rates_cache.get("channels") or {}
+            self.logger.info("动态汇率配置已加载: 通道数=%s, 文件=%s", len(channels), exchange_rates_file.name)
+            return self._exchange_rates_cache
+        except Exception as e:
+            self.logger.warning("加载动态汇率配置失败: %s", e)
+            return self._exchange_rates_cache if self._exchange_rates_cache is not None else {}
+    
+    async def reload(self) -> bool:
+        """重新加载配置文件"""
+        self.config = {}
+        self._quota_rules_cache = None
+        self._quota_rules_mtime = 0
+        self._templates_cache = None
+        self._templates_mtime = 0
+        self._exchange_rates_cache = None
+        self._exchange_rates_mtime = 0
+        self._strategies_cache = None
+        self._strategies_mtime = 0
+        return await self.load()
+
+    _HOT_RELOAD_PROTECTED_KEYS = {"api_id", "api_hash", "phone_number", "session_name"}
+
+    @staticmethod
+    def _validate_hot_reload_config(data) -> str:
+        """热重载校验：检查配置结构完整性，返回拒绝原因（空字符串=通过）"""
+        if not isinstance(data, dict):
+            return "配置不是有效字典"
+        if "telegram" not in data:
+            return "缺少 telegram 节点"
+        tg = data["telegram"]
+        if not isinstance(tg, dict):
+            return "telegram 节点不是字典"
+        ai = data.get("ai", {})
+        if ai and not isinstance(ai, dict):
+            return "ai 节点不是字典"
+        for key in ("max_tokens",):
+            val = ai.get(key)
+            if val is not None:
+                try:
+                    v = int(val)
+                    if v <= 0:
+                        return f"ai.{key} 必须为正整数，当前值: {val}"
+                except (ValueError, TypeError):
+                    return f"ai.{key} 不是有效数字: {val}"
+        reply_cfg = data.get("reply", {})
+        if reply_cfg and not isinstance(reply_cfg, dict):
+            return "reply 节点不是字典"
+        strategies = reply_cfg.get("strategies", {})
+        if strategies and not isinstance(strategies, dict):
+            return "reply.strategies 不是字典"
+        return ""
+
+    def on_reload(self, callback) -> None:
+        """注册热重载回调。callback() 在配置成功重载后同步调用。"""
+        self._on_reload_callbacks.append(callback)
+
+    def check_and_hot_reload(self) -> bool:
+        """检查 config.yaml 是否修改，若有则热重载（保护不可变字段）。
+        返回 True 表示发生了重载。适合在消息处理主循环中定期调用。"""
+        import time as _t
+        now = _t.time()
+        if now - self._last_hot_reload_check < self._hot_reload_interval:
+            return False
+        self._last_hot_reload_check = now
+        try:
+            if not self.config_path.exists():
+                return False
+            mtime = os.path.getmtime(self.config_path)
+            if mtime <= self._config_mtime:
+                return False
+            with open(self.config_path, 'r', encoding='utf-8') as f:
+                new_data = yaml.safe_load(f)
+            reject_reason = self._validate_hot_reload_config(new_data)
+            if reject_reason:
+                self.logger.warning("热重载拒绝: %s", reject_reason)
+                return False
+            old_tg = self.config.get('telegram', {})
+            new_tg = new_data.get('telegram', {})
+            for key in self._HOT_RELOAD_PROTECTED_KEYS:
+                if key in old_tg:
+                    new_tg[key] = old_tg[key]
+            new_data['telegram'] = new_tg
+            self.config = new_data
+            self._config_mtime = mtime
+            self._quota_rules_cache = None
+            self._quota_rules_mtime = 0
+            self._templates_cache = None
+            self._templates_mtime = 0
+            self._exchange_rates_cache = None
+            self._exchange_rates_mtime = 0
+            self.logger.info("配置热重载完成 (config.yaml mtime=%s)", mtime)
+            for cb in self._on_reload_callbacks:
+                try:
+                    cb()
+                except Exception as cb_err:
+                    self.logger.debug("热重载回调异常: %s", cb_err)
+            return True
+        except Exception as e:
+            self.logger.warning("配置热重载失败: %s", e)
+            return False
+
+    def get_quota_rules(self) -> Dict[str, Any]:
+        """加载额度规则配置（config/quota_rules.yaml），支持热更新（按文件 mtime 重载）"""
+        quota_file = self.config_path.parent / "quota_rules.yaml"
+        if not quota_file.exists():
+            # 回退：按 config_manager 所在包路径找 config/quota_rules.yaml
+            try:
+                base = Path(__file__).resolve().parent.parent.parent
+                quota_file = base / "config" / "quota_rules.yaml"
+            except Exception:
+                pass
+        if not quota_file.exists():
+            self.logger.debug("额度规则文件不存在，将使用 AI 回复额度类问题: %s", getattr(quota_file, 'as_posix', str)(quota_file))
+            return {}
+        try:
+            mtime = os.path.getmtime(quota_file)
+            if self._quota_rules_cache is not None and mtime <= self._quota_rules_mtime:
+                return self._quota_rules_cache
+            with open(quota_file, 'r', encoding='utf-8') as f:
+                self._quota_rules_cache = yaml.safe_load(f) or {}
+            self._quota_rules_mtime = mtime
+            channels = self._quota_rules_cache.get("channels") or {}
+            self.logger.info("额度规则已加载: 通道数=%s, 文件=%s", len(channels), quota_file.name)
+            return self._quota_rules_cache
+        except Exception as e:
+            self.logger.warning("加载额度规则失败: %s", e)
+            return self._quota_rules_cache if self._quota_rules_cache is not None else {}
+
+    def get_quota_rules_file_path(self) -> Optional[Path]:
+        """返回 quota_rules.yaml 的路径，供对话命令写回配置使用；不存在则返回 None"""
+        quota_file = self.config_path.parent / "quota_rules.yaml"
+        if not quota_file.exists():
+            try:
+                base = Path(__file__).resolve().parent.parent.parent
+                quota_file = base / "config" / "quota_rules.yaml"
+            except Exception:
+                pass
+        return quota_file if quota_file.exists() else None
+
+    def invalidate_quota_rules_cache(self) -> None:
+        """使额度规则缓存失效，下次 get_quota_rules 将重新从文件加载"""
+        self._quota_rules_cache = None
+        self._quota_rules_mtime = 0
+
+    def update_quota_rules_special_groups(
+        self, add: Optional[list] = None, remove: Optional[list] = None
+    ) -> tuple:
+        """
+        增删特殊客户群名单并写回 quota_rules.yaml。
+        add/remove 为群名字符串列表；返回 (成功?, 说明文案)。
+        """
+        path = self.get_quota_rules_file_path()
+        if not path:
+            return False, "未找到 quota_rules.yaml"
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+            groups = list(data.get("special_groups") or [])
+            if add:
+                for name in add:
+                    name = (name or "").strip()
+                    if name and name not in groups:
+                        groups.append(name)
+            if remove:
+                for name in remove:
+                    groups = [g for g in groups if (g or "").strip() != (name or "").strip()]
+            data["special_groups"] = groups
+            with open(path, "w", encoding="utf-8") as f:
+                yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+            self.invalidate_quota_rules_cache()
+            return True, f"已更新特殊群名单，当前共 {len(groups)} 个"
+        except Exception as e:
+            self.logger.warning("写回额度规则失败: %s", e)
+            return False, f"写回配置失败: {e}"
+
+    def update_quota_rules_blacklist(
+        self,
+        add_group: Optional[str] = None,
+        ep_text: Optional[str] = None,
+        jc_text: Optional[str] = None,
+        remove_group: Optional[str] = None,
+    ) -> tuple:
+        """
+        添加或删除黑名单群并写回 quota_rules.yaml。
+        add_group 时 ep_text/jc_text 为可选话术；remove_group 为要删除的群名。返回 (成功?, 说明文案)。
+        """
+        path = self.get_quota_rules_file_path()
+        if not path:
+            return False, "未找到 quota_rules.yaml"
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+            blacklist = dict(data.get("blacklist_groups") or {})
+            if remove_group:
+                key = (remove_group or "").strip()
+                if key in blacklist:
+                    del blacklist[key]
+                data["blacklist_groups"] = blacklist
+                with open(path, "w", encoding="utf-8") as f:
+                    yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+                self.invalidate_quota_rules_cache()
+                return True, f"已删除黑名单群：{remove_group}"
+            if add_group:
+                key = (add_group or "").strip()
+                if not key:
+                    return False, "群名为空"
+                ep_text = (ep_text or "当前EP渠道受限，请使用其他渠道或联系客服处理。").strip()
+                jc_text = (jc_text or "当前JC额度请以实际提交为准。").strip()
+                blacklist[key] = {"ep": ep_text, "jc": jc_text}
+                data["blacklist_groups"] = blacklist
+                with open(path, "w", encoding="utf-8") as f:
+                    yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+                self.invalidate_quota_rules_cache()
+                return True, f"已添加黑名单群：{key}"
+            return False, "请指定 添加黑名单 或 删除黑名单 及群名"
+        except Exception as e:
+            self.logger.warning("写回额度规则失败: %s", e)
+            return False, f"写回配置失败: {e}"
+
+    def invalidate_templates_cache(self) -> None:
+        """使动态话术模板缓存失效，下次 get_dynamic_templates_config 将重新从文件加载"""
+        self._templates_cache = None
+        self._templates_mtime = 0
+
+    def invalidate_exchange_rates_cache(self) -> None:
+        """使动态汇率配置缓存失效，下次 get_exchange_rates_config 将重新从文件加载"""
+        self._exchange_rates_cache = None
+        self._exchange_rates_mtime = 0
+
+    def invalidate_strategies_cache(self) -> None:
+        """使策略缓存失效，下次 get_strategies_config 将重新从文件加载"""
+        self._strategies_cache = None
+        self._strategies_mtime = 0
+
+    def get_strategies_config(self) -> Dict[str, Any]:
+        """加载 reply_strategies.yaml，mtime 驱动热更新；文件不存在时从 config.yaml 中提取并自动创建"""
+        strategies_file = self.config_path.parent / "reply_strategies.yaml"
+        if not strategies_file.exists():
+            self._bootstrap_strategies_file(strategies_file)
+        if not strategies_file.exists():
+            return self.config.get("reply_strategies", {}) or {}
+        try:
+            mtime = os.path.getmtime(strategies_file)
+            if self._strategies_cache is not None and mtime <= self._strategies_mtime:
+                return self._strategies_cache
+            with open(strategies_file, "r", encoding="utf-8") as f:
+                self._strategies_cache = yaml.safe_load(f) or {}
+            self._strategies_mtime = mtime
+            n = len((self._strategies_cache.get("strategies") or {}))
+            self.logger.info("回复策略已加载: %d 个策略, 文件=%s", n, strategies_file.name)
+            return self._strategies_cache
+        except Exception as e:
+            self.logger.warning("加载回复策略失败: %s", e)
+            return self._strategies_cache if self._strategies_cache is not None else {}
+
+    def _bootstrap_strategies_file(self, path: Path) -> None:
+        """从 config.yaml 的 reply_strategies 节提取数据，写入独立 YAML 文件"""
+        rs = self.config.get("reply_strategies")
+        if not rs or not isinstance(rs, dict):
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                yaml.dump(rs, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+            self.logger.info("已从 config.yaml 迁移 reply_strategies 到 %s", path.name)
+        except Exception as e:
+            self.logger.warning("创建 reply_strategies.yaml 失败: %s", e)
+
+    def save_strategies(self, data: Dict[str, Any]) -> tuple:
+        """写入 reply_strategies.yaml 并刷新缓存。返回 (成功?, 说明)"""
+        path = self.config_path.parent / "reply_strategies.yaml"
+        try:
+            tmp = path.with_suffix(".yaml.tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+            with open(tmp, "r", encoding="utf-8") as f:
+                yaml.safe_load(f)
+            tmp.replace(path)
+            self.invalidate_strategies_cache()
+            return True, "策略配置已保存"
+        except Exception as e:
+            self.logger.warning("写回策略配置失败: %s", e)
+            if path.with_suffix(".yaml.tmp").exists():
+                path.with_suffix(".yaml.tmp").unlink(missing_ok=True)
+            return False, f"保存失败: {e}"
+
+    def _get_strategies_file_path(self) -> Optional[Path]:
+        path = self.config_path.parent / "reply_strategies.yaml"
+        return path if path.exists() else None
+
+    def _get_templates_file_path(self) -> Optional[Path]:
+        path = self.config_path.parent / "templates.yaml"
+        return path if path.exists() else None
+
+    def _get_exchange_rates_file_path(self) -> Optional[Path]:
+        path = self.config_path.parent / "exchange_rates.yaml"
+        return path if path.exists() else None
+
+    def save_templates(self, data: Dict[str, Any]) -> tuple:
+        """写入 templates.yaml 并刷新缓存。返回 (成功?, 说明)"""
+        path = self._get_templates_file_path()
+        if not path:
+            return False, "未找到 templates.yaml"
+        tmp = path.with_suffix(".yaml.tmp")
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+            with open(tmp, "r", encoding="utf-8") as f:
+                yaml.safe_load(f)
+            tmp.replace(path)
+            self.invalidate_templates_cache()
+            return True, "话术模板已保存"
+        except Exception as e:
+            self.logger.warning("写回话术模板失败: %s", e)
+            if tmp.exists():
+                tmp.unlink(missing_ok=True)
+            return False, f"保存失败: {e}"
+
+    def save_exchange_rates(self, data: Dict[str, Any]) -> tuple:
+        """写入 exchange_rates.yaml 并刷新缓存。返回 (成功?, 说明)"""
+        path = self._get_exchange_rates_file_path()
+        if not path:
+            return False, "未找到 exchange_rates.yaml"
+        tmp = path.with_suffix(".yaml.tmp")
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+            with open(tmp, "r", encoding="utf-8") as f:
+                yaml.safe_load(f)
+            tmp.replace(path)
+            self.invalidate_exchange_rates_cache()
+            return True, "通道配置已保存"
+        except Exception as e:
+            self.logger.warning("写回通道配置失败: %s", e)
+            if tmp.exists():
+                tmp.unlink(missing_ok=True)
+            return False, f"保存失败: {e}"

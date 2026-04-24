@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>Contacts · Ops</title>
+<style>
+body{font-family:-apple-system,Segoe UI,sans-serif;max-width:1100px;margin:20px auto;padding:0 20px;background:#fafafa;color:#222}
+h1{font-size:20px;margin-bottom:4px}
+.stats{display:flex;gap:12px;margin:10px 0 20px;flex-wrap:wrap}
+.pill{padding:6px 12px;background:#fff;border:1px solid #ddd;border-radius:6px;font-size:13px}
+.pill strong{color:#2563eb}
+table{width:100%;border-collapse:collapse;background:#fff;font-size:13px}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid #eee}
+th{background:#f3f4f6;font-weight:600;color:#444}
+tr:hover{background:#f9fafb}
+.stage{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}
+.s-INITIAL{background:#e5e7eb;color:#374151}
+.s-ENGAGED{background:#dbeafe;color:#1e40af}
+.s-WARMING,.s-HANDOFF_READY{background:#fef9c3;color:#854d0e}
+.s-HANDOFF_SENT{background:#fef3c7;color:#92400e}
+.s-LINE_ADDED,.s-LINE_ACCEPTED{background:#e0f2fe;color:#075985}
+.s-LINE_ENGAGED{background:#d1fae5;color:#065f46}
+.s-BONDED,.s-CONVERTED{background:#fce7f3;color:#9f1239}
+.s-LOST_HANDOFF,.s-LOST_LINE_SILENT{background:#fee2e2;color:#991b1b}
+.empty{padding:40px;text-align:center;color:#888}
+a{color:#2563eb;text-decoration:none}
+a:hover{text-decoration:underline}
+.nav{margin-bottom:20px}
+.nav a{margin-right:14px;font-size:13px}
+/* ── Funnel chart (W4-Ops) ── */
+.funnel-wrap{background:#fff;border:1px solid #ddd;border-radius:6px;padding:14px 16px;margin:12px 0 20px}
+.funnel-wrap h3{font-size:13px;margin:0 0 10px;color:#555;font-weight:600}
+.funnel-row{display:flex;align-items:center;height:24px;margin-bottom:4px;font-size:12px}
+.funnel-label{flex:0 0 140px;color:#555;text-align:right;padding-right:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.funnel-bar{flex:1;height:22px;background:#f1f5f9;border-radius:3px;position:relative;overflow:hidden}
+.funnel-fill{height:100%;border-radius:3px;display:flex;align-items:center;padding:0 8px;color:#fff;font-weight:600;font-size:11px;transition:width .3s}
+.funnel-count{flex:0 0 44px;text-align:right;color:#111;font-weight:600;padding-left:10px}
+.funnel-conv{flex:0 0 56px;text-align:right;color:#888;font-size:11px;padding-left:8px}
+.funnel-lost .funnel-fill{background:#dc2626!important}
+</style></head>
+<body>
+<div class="nav">
+  <a href="/ops/contacts">联系人</a>
+  <a href="/ops/merge-reviews">合并审核</a>
+</div>
+<h1>Contacts</h1>
+<div class="stats" id="stats"></div>
+<div class="funnel-wrap" id="funnel-wrap" style="display:none">
+  <h3>漏斗阶段分布（快照）</h3>
+  <div id="funnel-forward"></div>
+  <div id="funnel-lost-sep" style="margin:10px 0 6px;font-size:11px;color:#888;display:none">流失</div>
+  <div id="funnel-lost"></div>
+</div>
+<table id="tbl"><thead>
+  <tr><th>ID</th><th>名称</th><th>语言</th><th>阶段</th><th>Intimacy</th><th>最后活跃</th></tr>
+</thead><tbody></tbody></table>
+<div id="empty" class="empty" style="display:none">暂无联系人</div>
+<script>
+function escapeHtml(s){return (s+'').replace(/[&<>"']/g,c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+/* ── Funnel 漏斗图：inline SVG 风格，零外部依赖 ── */
+// 漏斗正向顺序（来自 src/contacts/models.py 的 STAGE_* 常量）
+const FUNNEL_FORWARD = [
+  'INITIAL','ENGAGED','HANDOFF_READY','HANDOFF_SENT',
+  'LINE_ADDED','LINE_ACCEPTED','LINE_ENGAGED','BONDED','CONVERTED',
+];
+const FUNNEL_LOST = ['LOST_HANDOFF','LOST_LINE_SILENT'];
+// 每个阶段的色带（与页面顶部 .s-* 徽章同色，保证视觉一致）
+const FUNNEL_COLOR = {
+  INITIAL:'#9ca3af', ENGAGED:'#3b82f6',
+  HANDOFF_READY:'#eab308', HANDOFF_SENT:'#f59e0b',
+  LINE_ADDED:'#0ea5e9', LINE_ACCEPTED:'#0284c7', LINE_ENGAGED:'#10b981',
+  BONDED:'#db2777', CONVERTED:'#be185d',
+  LOST_HANDOFF:'#dc2626', LOST_LINE_SILENT:'#b91c1c',
+};
+function renderFunnel(byStage){
+  byStage = byStage || {};
+  const fwd = FUNNEL_FORWARD.map(k => [k, byStage[k]||0]);
+  const lost = FUNNEL_LOST.map(k => [k, byStage[k]||0]);
+  const maxVal = Math.max(1, ...fwd.map(p=>p[1]), ...lost.map(p=>p[1]));
+  const total = fwd.reduce((a,p)=>a+p[1],0) + lost.reduce((a,p)=>a+p[1],0);
+  if(total===0){
+    document.getElementById('funnel-wrap').style.display='none';
+    return;
+  }
+  document.getElementById('funnel-wrap').style.display='block';
+  // 漏斗逐级转化率：当前阶段 / 上一阶段（仅 forward 段且都 >0 时显示）
+  const rowHtml = (k, v, prev, isLost) => {
+    const pct = Math.max(4, Math.round(v / maxVal * 100));
+    const color = FUNNEL_COLOR[k] || '#6b7280';
+    let conv = '';
+    if(!isLost && prev !== null && prev > 0 && v > 0){
+      conv = `${Math.round(v/prev*100)}%`;
+    }
+    return `<div class="funnel-row${isLost?' funnel-lost':''}">
+      <div class="funnel-label">${escapeHtml(k)}</div>
+      <div class="funnel-bar">
+        <div class="funnel-fill" style="width:${pct}%;background:${color}">${v>0?v:''}</div>
+      </div>
+      <div class="funnel-count">${v}</div>
+      <div class="funnel-conv">${conv}</div>
+    </div>`;
+  };
+  let html = '', prev = null;
+  for(const [k,v] of fwd){
+    html += rowHtml(k, v, prev, false);
+    prev = v;    // 下一行参考上一行
+  }
+  document.getElementById('funnel-forward').innerHTML = html;
+
+  const lostHasData = lost.some(p=>p[1]>0);
+  document.getElementById('funnel-lost-sep').style.display = lostHasData ? 'block' : 'none';
+  document.getElementById('funnel-lost').innerHTML =
+    lostHasData ? lost.map(([k,v]) => rowHtml(k, v, null, true)).join('') : '';
+}
+
+async function load(){
+  // 一次调用 /api/contacts?expand=journey 拿完所有需要的字段，避免 N+1
+  const [stats, list] = await Promise.all([
+    fetch('/api/funnel/stats').then(r=>r.json()),
+    fetch('/api/contacts?limit=100&expand=journey').then(r=>r.json()),
+  ]);
+  const s=document.getElementById('stats');
+  s.innerHTML = `<div class="pill">总联系人 <strong>${stats.total_contacts}</strong></div>`
+    + Object.entries(stats.by_stage||{}).map(([k,v])=>
+        `<div class="pill">${escapeHtml(k)} <strong>${v}</strong></div>`).join('')
+    + Object.entries(stats.by_channel||{}).map(([k,v])=>
+        `<div class="pill">${escapeHtml(k)} ch <strong>${v}</strong></div>`).join('');
+  renderFunnel(stats.by_stage);
+  const tbody=document.querySelector('#tbl tbody');
+  if(!list.items||list.items.length===0){
+    document.getElementById('tbl').style.display='none';
+    document.getElementById('empty').style.display='block';
+    return;
+  }
+  tbody.innerHTML = list.items.map(c=>{
+    const stage = c.funnel_stage||'INITIAL';
+    const intim = (c.intimacy_score||0).toFixed(1);
+    const last = c.last_active_at ? new Date(c.last_active_at*1000).toLocaleString('zh-CN') : '-';
+    return `<tr>
+      <td><code style="font-size:11px">${c.contact_id.slice(0,8)}</code></td>
+      <td>${escapeHtml(c.primary_name||'-')}</td>
+      <td>${escapeHtml(c.language_hint||'-')}</td>
+      <td><span class="stage s-${stage}">${stage}</span></td>
+      <td>${intim}</td>
+      <td>${last}</td>
+    </tr>`;
+  }).join('');
+}
+load().catch(e=>{document.body.innerHTML+='<p style="color:red">加载失败: '+e+'</p>';});
+</script>
+</body></html>

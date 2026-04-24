@@ -1,0 +1,332 @@
+{% extends "base.html" %}
+{% block title %}{% if ui_mode == 'simple' %}AI 策略概览{% else %}AI 策略{% endif %} · {{ site_name|default('智控王客户转化聊天系统') }}{% endblock %}
+{% block page_title %}{% if ui_mode == 'simple' %}AI 策略概览{% else %}AI 回复策略{% endif %}{% endblock %}
+{% block head %}
+<style>
+.st-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:1.2rem;margin-bottom:1.5rem}
+/* batch bar */
+.st-batch-bar{position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:.75rem 1.2rem;box-shadow:var(--s2);z-index:100;display:none;align-items:center;gap:.8rem;min-width:320px}
+.st-batch-bar.show{display:flex;animation:fadeUp .25s ease}
+/* checkbox on card */
+.st-cb-wrap{position:absolute;top:.9rem;right:.9rem;z-index:2}
+.st-card{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:1.3rem;transition:all .25s;position:relative;overflow:hidden}
+.st-card:hover{box-shadow:var(--s1);transform:translateY(-1px)}
+.st-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;border-radius:12px 12px 0 0}
+.st-card[data-sid="S1_instant_greet"]::before{background:var(--g-g)}
+.st-card[data-sid="S2_quick_answer"]::before{background:linear-gradient(90deg,#3b82f6,#06b6d4)}
+.st-card[data-sid="S3_standard"]::before{background:var(--g)}
+.st-card[data-sid="S4_deep_support"]::before{background:linear-gradient(90deg,#8b5cf6,#ec4899)}
+.st-card[data-sid="S5_silent_observe"]::before{background:var(--g-a)}
+.st-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:.8rem}
+.st-name{font-weight:700;font-size:1rem}
+.st-desc{font-size:.82rem;color:var(--t3);margin-bottom:1rem;min-height:2.4rem}
+.st-params{display:grid;grid-template-columns:1fr 1fr;gap:.7rem .8rem;margin-bottom:1rem}
+.st-p{background:var(--input);border-radius:8px;padding:.55rem .7rem}
+.st-p-lbl{font-size:.7rem;font-weight:600;color:var(--t3);margin-bottom:.25rem;display:flex;align-items:center;gap:.3rem}
+.st-p-lbl .tip{cursor:help;opacity:.5;font-size:.65rem;background:var(--bd2);width:14px;height:14px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center}
+.st-p-val{font-weight:700;font-size:.95rem;color:var(--t)}
+.st-p input[type=range]{width:100%;accent-color:var(--p);height:4px;margin-top:.3rem}
+.st-p input[type=number]{width:80px;padding:.3rem .5rem;font-size:.85rem;border:1.5px solid var(--bd);border-radius:6px;background:var(--card);color:var(--t);font-weight:600}
+.st-intents{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.5rem}
+.st-intent{font-size:.72rem;padding:.2rem .5rem;border-radius:5px;background:var(--ps);color:var(--p);font-weight:600}
+.st-foot{display:flex;align-items:center;justify-content:space-between;padding-top:.8rem;border-top:1px solid var(--bd);gap:.5rem}
+.st-save{opacity:0;transition:opacity .2s;pointer-events:none}
+.st-card.dirty .st-save{opacity:1;pointer-events:auto}
+.map-card{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:1.3rem 1.4rem}
+.map-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.7rem;margin-top:1rem}
+.map-item{background:var(--input);border-radius:8px;padding:.6rem .8rem;display:flex;align-items:center;justify-content:space-between;gap:.5rem}
+.map-intent{font-weight:600;font-size:.85rem}
+.map-item select{padding:.3rem .5rem;font-size:.8rem;border:1.5px solid var(--bd);border-radius:6px;background:var(--card);color:var(--t);font-weight:500;cursor:pointer}
+</style>
+{% endblock %}
+{% block content %}
+{% set active="strategies" %}
+
+{% if ui_mode == 'simple' %}
+<div class="simple-guide" style="background:linear-gradient(135deg,rgba(91,124,246,.06),rgba(245,158,11,.06));border:1px solid rgba(91,124,246,.15);border-radius:10px;padding:.7rem 1rem;margin-bottom:.8rem;font-size:.82rem;color:var(--t2);display:flex;align-items:flex-start;gap:.6rem">
+  <span style="font-size:1.1rem;flex-shrink:0;margin-top:.1rem">🔍</span>
+  <div>
+    <strong style="color:var(--t);font-size:.85rem">只读概览</strong>
+    <div style="margin-top:.25rem;line-height:1.6">简洁模式下仅显示策略状态，编辑参数请<a href="/set_ui_mode?mode=full&next=/strategies" style="color:var(--p);font-weight:600">切换到完整模式</a>。</div>
+    <button onclick="this.closest('.simple-guide').style.display='none';localStorage.setItem('_guide_strategies','1')" style="background:none;border:none;color:var(--p);cursor:pointer;font-size:.78rem;font-weight:600;padding:0;margin-top:.3rem">知道了</button>
+  </div>
+</div>
+<script>if(localStorage.getItem('_guide_strategies')==='1')document.querySelector('.simple-guide').style.display='none';</script>
+{% endif %}
+
+<div class="p-head fa">
+  <div>
+    <h1>{% if ui_mode == 'simple' %}AI 策略概览{% else %}AI 回复策略{% endif %}</h1>
+    <p style="font-size:.82rem;color:var(--t3);margin-top:.2rem">不同场景使用不同 AI 参数，实时生效无需重启</p>
+  </div>
+  <div style="display:flex;gap:.6rem;align-items:center" class="pro-only">
+    <label style="display:flex;align-items:center;gap:.5rem;font-size:.83rem;color:var(--t2);cursor:pointer">
+      <input type="checkbox" id="st-select-all" onchange="stToggleAll(this)" style="width:15px;height:15px;accent-color:var(--p)"> 全选
+    </label>
+  </div>
+</div>
+
+<!-- Strategy Cards -->
+<div class="st-grid">
+{% for sid, s in strategies.items() %}
+<div class="st-card fa" data-sid="{{ sid }}" id="card-{{ sid }}">
+  <div class="st-cb-wrap pro-only">
+    <input type="checkbox" class="st-cb" data-sid="{{ sid }}"
+           style="width:15px;height:15px;accent-color:var(--p)" onchange="stUpdateBatch()">
+  </div>
+  <div class="st-hd">
+    <span class="st-name">{{ s.name or sid }}</span>
+    <div class="tog-wrap">
+      <label class="tog">
+        <input type="checkbox" {% if s.enabled is not defined or s.enabled %}checked{% endif %}
+               onchange="markDirty('{{ sid }}')">
+        <span class="tog-s"></span>
+      </label>
+    </div>
+  </div>
+  <div class="st-desc">{{ s.description or '' }}</div>
+
+  <div class="st-params pro-only">
+    {% if not s.skip_ai %}
+    <div class="st-p">
+      <div class="st-p-lbl">Temperature <span class="tip" title="控制回复随机性。0=最确定，1=最多样。业务场景建议 0.3-0.5">?</span></div>
+      <input type="range" min="0" max="1" step="0.1" value="{{ s.temperature|default(0.7) }}"
+             oninput="this.nextElementSibling.textContent=this.value;markDirty('{{ sid }}')" data-key="temperature">
+      <span class="st-p-val">{{ s.temperature|default(0.7) }}</span>
+    </div>
+    <div class="st-p">
+      <div class="st-p-lbl">Max Tokens <span class="tip" title="AI 单次回复最大 token 数。1 token ≈ 1.5 个中文字。256=简短，512=正常，1024=详细">?</span></div>
+      <input type="number" min="64" max="2048" step="64" value="{{ s.max_tokens|default(512) }}"
+             oninput="markDirty('{{ sid }}')" data-key="max_tokens">
+    </div>
+    <div class="st-p">
+      <div class="st-p-lbl">上下文轮数 <span class="tip" title="传入 AI 的历史对话轮数。轮数越多上下文越丰富，但也越慢越贵">?</span></div>
+      <input type="number" min="0" max="20" step="1" value="{{ s.context_rounds|default(5) }}"
+             oninput="markDirty('{{ sid }}')" data-key="context_rounds">
+    </div>
+    {% else %}
+    <div class="st-p" style="grid-column:span 2">
+      <div class="st-p-lbl">跳过 AI <span class="tip" title="启用后直接使用模板回复，不调用 AI 接口，响应极快">?</span></div>
+      <span class="st-p-val" style="color:var(--green)">已启用 — 直接模板回复</span>
+    </div>
+    {% endif %}
+
+    {% if s.reply_probability is defined and s.reply_probability < 1.0 %}
+    <div class="st-p" style="grid-column:span 2">
+      <div class="st-p-lbl">回复概率 <span class="tip" title="收到此类消息时实际回复的概率。0.1 = 只有10%的消息会回复，其余静默">?</span></div>
+      <input type="range" min="0" max="1" step="0.05" value="{{ s.reply_probability }}"
+             oninput="this.nextElementSibling.textContent=(this.value*100).toFixed(0)+'%';markDirty('{{ sid }}')" data-key="reply_probability">
+      <span class="st-p-val">{{ (s.reply_probability * 100)|int }}%</span>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="st-p-lbl">关联意图</div>
+  <div class="st-intents">
+    {% for intent, mapped_sid in intent_map.items() %}
+      {% if mapped_sid == sid %}
+      <span class="st-intent">{{ (intent_display_names or {}).get(intent, intent) }}</span>
+      {% endif %}
+    {% endfor %}
+  </div>
+
+  <div class="st-foot">
+    <span style="font-size:.75rem;color:var(--t3)">{{ sid }}</span>
+    <div style="display:flex;gap:.4rem" class="pro-only">
+      <button class="btn btn-s btn-xs" onclick="openStrategyHistory('{{ sid }}')" title="查看该策略的参数变更历史">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        历史
+      </button>
+      <button class="btn btn-p btn-sm st-save" data-help="btn_save" onclick="saveStrategy('{{ sid }}')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg>
+        保存
+      </button>
+    </div>
+  </div>
+</div>
+{% endfor %}
+</div>
+
+<!-- Strategy batch bar -->
+<div class="st-batch-bar pro-only" id="st-batch-bar">
+  <span>已选 <strong id="st-batch-cnt">0</strong> 个策略</span>
+  <button class="btn btn-p btn-sm" onclick="stBatch(true)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><polyline points="20 6 9 17 4 12"/></svg>
+    批量启用
+  </button>
+  <button class="btn btn-d btn-sm" onclick="stBatch(false)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    批量禁用
+  </button>
+  <button class="btn btn-s btn-sm" onclick="stClearBatch()">取消</button>
+</div>
+
+<!-- Strategy History Modal -->
+<div id="sh-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9200;align-items:flex-start;justify-content:center;padding:4vh 0;overflow-y:auto;backdrop-filter:blur(4px)"
+     onclick="if(event.target===this)closeStrategyHistory()">
+  <div style="background:var(--card);border:1px solid var(--bd);border-radius:16px;box-shadow:var(--s2);width:min(540px,94vw);margin:auto;animation:fadeUp .2s ease">
+    <div style="padding:1rem 1.3rem;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:.7rem">
+      <svg viewBox="0 0 24 24" fill="none" stroke="var(--p)" stroke-width="2" width="16" height="16"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      <div>
+        <div style="font-weight:700;font-size:.95rem" id="sh-title">策略变更历史</div>
+        <div style="font-size:.75rem;color:var(--t3)">最近 20 次参数变更记录</div>
+      </div>
+      <button class="btn btn-s btn-sm" style="margin-left:auto" onclick="closeStrategyHistory()">✕</button>
+    </div>
+    <div id="sh-body" style="padding:.8rem 1rem 1.2rem;max-height:55vh;overflow-y:auto">
+      <div style="text-align:center;padding:2rem;color:var(--t3)">加载中…</div>
+    </div>
+  </div>
+</div>
+
+<div class="map-card card fa pro-only">
+  <h2>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 3h5v5"/><path d="M4 20L21 3"/><path d="M21 16v5h-5"/><path d="M15 15l6 6"/><path d="M4 4l5 5"/></svg>
+    意图 → 策略映射
+    <span style="margin-left:auto;font-size:.78rem;color:var(--t3);font-weight:400">修改后即时生效</span>
+  </h2>
+  <div class="map-grid">
+    {% for intent, mapped_sid in intent_map.items() %}
+    <div class="map-item">
+      <span class="map-intent" title="{{ intent }}">{{ (intent_display_names or {}).get(intent, intent) }}</span>
+      <select onchange="updateMapping('{{ intent }}', this.value)" data-intent="{{ intent }}">
+        {% for sid, s in strategies.items() %}
+        <option value="{{ sid }}" {% if sid == mapped_sid %}selected{% endif %}>{{ s.name or sid }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<script>
+function markDirty(sid){
+  document.getElementById('card-'+sid)?.classList.add('dirty');
+}
+function saveStrategy(sid){
+  const card=document.getElementById('card-'+sid);
+  if(!card)return;
+  const data={};
+  card.querySelectorAll('input[data-key]').forEach(inp=>{
+    const k=inp.dataset.key;
+    data[k]=inp.type==='range'?parseFloat(inp.value):
+             inp.type==='number'?parseInt(inp.value):inp.value;
+  });
+  const tog=card.querySelector('.tog input[type=checkbox]');
+  if(tog)data.enabled=tog.checked;
+
+  fetch('/api/strategies/'+sid,{
+    method:'PUT',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(data)
+  }).then(r=>r.json()).then(d=>{
+    if(d.ok){showToast('已保存 '+sid,'ok');card.classList.remove('dirty')}
+    else showToast('保存失败: '+(d.detail||''),'err');
+  }).catch(()=>showToast('请求失败','err'));
+}
+function updateMapping(intent,sid){
+  fetch('/api/strategies/mapping',{
+    method:'PUT',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({intent:intent,strategy_id:sid})
+  }).then(r=>r.json()).then(d=>{
+    if(d.ok)showToast(intent+' → '+sid,'ok');
+    else showToast('更新失败','err');
+  }).catch(()=>showToast('请求失败','err'));
+}
+
+/* ── 策略变更历史 ─────────────────────────── */
+async function openStrategyHistory(sid){
+  document.getElementById('sh-title').textContent='变更历史：'+sid;
+  document.getElementById('sh-overlay').style.display='flex';
+  document.getElementById('sh-body').innerHTML='<div style="text-align:center;padding:2rem;color:var(--t3)">加载中…</div>';
+  try{
+    const r=await fetch('/api/strategy-history/'+sid);
+    const d=await r.json();
+    const history=d.history||[];
+    if(!history.length){
+      document.getElementById('sh-body').innerHTML=
+        '<div style="text-align:center;padding:2rem;color:var(--t3)">暂无该策略的变更记录</div>';
+      return;
+    }
+    document.getElementById('sh-body').innerHTML=`
+<div style="position:relative;padding-left:1.5rem">
+<div style="position:absolute;left:.6rem;top:0;bottom:0;width:1.5px;background:var(--bd)"></div>
+${history.map(e=>{
+  const act=e.action||'';
+  const isUpdate=act.includes('update')||act.includes('batch');
+  const color=isUpdate?'var(--p)':'var(--green)';
+  return `<div style="position:relative;margin-bottom:.7rem">
+    <div style="position:absolute;left:-1.2rem;top:.4rem;width:10px;height:10px;border-radius:50%;background:${color};border:2px solid var(--card)"></div>
+    <div style="background:var(--input);border:1px solid var(--bd);border-radius:9px;padding:.6rem .8rem">
+      <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.25rem">
+        <span style="font-weight:700;font-size:.82rem;color:var(--t)">${act}</span>
+        <span style="font-size:.72rem;color:var(--t3);margin-left:auto;font-family:Consolas,monospace">${(e.ts||'').slice(0,16)}</span>
+      </div>
+      <div style="font-size:.76rem;color:var(--t2)">操作人：${e.user_id||'system'}</div>
+      ${e.new_val?`<div style="font-size:.73rem;color:var(--t3);margin-top:.2rem;font-family:Consolas,monospace">${e.new_val.slice(0,120)}</div>`:''}
+    </div>
+  </div>`;
+}).join('')}
+</div>`;
+  }catch(e){
+    document.getElementById('sh-body').innerHTML='<div style="text-align:center;padding:2rem;color:var(--red)">加载失败</div>';
+  }
+}
+function closeStrategyHistory(){document.getElementById('sh-overlay').style.display='none'}
+
+/* ── 批量操作 ───────────────────────────────── */
+function stToggleAll(cb){
+  document.querySelectorAll('.st-cb').forEach(c=>c.checked=cb.checked);
+  stUpdateBatch();
+}
+function stUpdateBatch(){
+  const n=document.querySelectorAll('.st-cb:checked').length;
+  document.getElementById('st-batch-cnt').textContent=n;
+  document.getElementById('st-batch-bar').classList.toggle('show',n>0);
+  const sa=document.getElementById('st-select-all');
+  const total=document.querySelectorAll('.st-cb').length;
+  sa.indeterminate=n>0&&n<total;
+  sa.checked=n===total;
+}
+function stClearBatch(){
+  document.querySelectorAll('.st-cb').forEach(c=>c.checked=false);
+  const sa=document.getElementById('st-select-all');
+  sa.checked=false;sa.indeterminate=false;
+  document.getElementById('st-batch-bar').classList.remove('show');
+}
+function stBatch(enabled){
+  const ids=[...document.querySelectorAll('.st-cb:checked')].map(c=>c.dataset.sid);
+  if(!ids.length)return;
+  const label=enabled?'启用':'禁用';
+  showConfirm(
+    `批量${label}策略`,
+    `确认将选中的 <strong>${ids.length}</strong> 个策略批量${label}？`,
+    async()=>{
+      try{
+        const r=await fetch('/api/batch-strategies',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({ids,enabled})
+        });
+        const d=await r.json();
+        if(r.ok&&d.ok){
+          showToast(`已批量${label} ${d.updated.length} 个策略`,'ok');
+          /* 同步更新 UI toggle */
+          d.updated.forEach(sid=>{
+            const card=document.getElementById('card-'+sid);
+            if(card){
+              const tog=card.querySelector('.tog input[type=checkbox]');
+              if(tog)tog.checked=enabled;
+              card.classList.remove('dirty');
+            }
+          });
+          stClearBatch();
+        }else showToast(d.detail||'操作失败','err');
+      }catch(e){showToast('网络错误','err');}
+    },
+    {danger:!enabled,okLabel:`确认${label}`}
+  );
+}
+</script>
+{% endblock %}

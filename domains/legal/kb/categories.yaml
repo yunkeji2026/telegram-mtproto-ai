@@ -1,0 +1,22 @@
+# Legal domain KB categories
+
+categories:
+  - name: "合同纠纷"
+    description: "买卖、服务、租赁等合同订立与违约"
+    triggers: ["合同", "违约", "解除", "赔偿", "条款"]
+
+  - name: "劳动法律"
+    description: "劳动关系、解除、加班、工伤（信息级）"
+    triggers: ["劳动", "辞退", "仲裁", "加班", "工伤"]
+
+  - name: "知识产权"
+    description: "商标、著作权、专利（概述）"
+    triggers: ["商标", "版权", "专利", "侵权"]
+
+  - name: "公司法务"
+    description: "公司治理、股权、合规（概述）"
+    triggers: ["公司", "股权", "股东", "合规"]
+
+  - name: "常见问题"
+    description: "流程、材料、时效（一般说明）"
+    triggers: ["起诉", "时效", "证据", "管辖"]

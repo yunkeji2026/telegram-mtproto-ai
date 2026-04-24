@@ -1,0 +1,32 @@
+system_reply_seeds:
+  - title: "澄清需求"
+    category: "转化话术"
+    triggers: ["想了解", "咨询", "有没有"]
+    scenario: "User message is vague"
+    steps: "1. 复述理解。2. 问一个关键约束（场景/预算/时间）。3. 给出可选下一步。"
+    example_reply: "我先对齐一下：您更关心「解决什么问题」还是「想先看方案」？确认后我给您最短路径。"
+    reply_mode: "ai_guided"
+
+  - title: "推动下一步"
+    category: "转化话术"
+    triggers: ["怎么开始", "下一步", "怎么做"]
+    scenario: "User asks how to proceed"
+    steps: "1. 给出 1–2 个具体动作。2. 说明各自适用条件。3. 邀请用户选择。"
+    example_reply: "通常有两种开始方式：A）先 10 分钟对齐需求；B）直接预约演示。您更倾向哪种？"
+    reply_mode: "ai_guided"
+
+  - title: "价格类问题"
+    category: "常见问题"
+    triggers: ["价格", "费用", "多少钱", "报价"]
+    scenario: "User asks pricing without enough context"
+    steps: "1. 说明定价取决于哪些变量。2. 收集最小必要信息。3. 引导人工/正式报价渠道（如适用）。"
+    example_reply: "准确报价要看规模与使用方式；您方便说下大概场景与人数吗？我再给区间或转同事出正式报价。"
+    reply_mode: "ai_guided"
+
+  - title: "异议：再考虑"
+    category: "异议处理"
+    triggers: ["再想想", "考虑一下", "不急"]
+    scenario: "User hesitates"
+    steps: "1. 认同节奏。2. 提供一个低摩擦的信息点。3. 约定轻量跟进。"
+    example_reply: "没问题，您按节奏来。若您愿意，我可以先发一页对比要点，您有空扫一眼即可。"
+    reply_mode: "ai_guided"

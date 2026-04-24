@@ -1,0 +1,406 @@
+{% extends "base.html" %}
+{% block title %}版本对比 · {{ site_name|default('智控王客户转化聊天系统') }}{% endblock %}
+{% block page_title %}版本对比{% endblock %}
+{% block head %}
+<style>
+/* ── Layout ── */
+.diff-layout{display:grid;grid-template-columns:280px 1fr;gap:1.2rem;align-items:start}
+@media(max-width:900px){.diff-layout{grid-template-columns:1fr}}
+/* ── Snapshot Timeline Panel ── */
+.snap-panel{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);position:sticky;top:1rem}
+.snap-panel-hd{padding:.9rem 1rem;border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between;gap:.5rem}
+.snap-panel-hd h3{font-size:.875rem;font-weight:700;margin:0}
+.snap-tabs{display:flex;gap:.3rem;padding:.6rem .8rem;border-bottom:1px solid var(--bd);flex-wrap:wrap}
+.snap-tab{padding:.25rem .65rem;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;border:1.5px solid var(--bd);background:transparent;color:var(--t3);transition:.15s;white-space:nowrap}
+.snap-tab.active{background:var(--ps);border-color:var(--p);color:var(--p)}
+.snap-list{max-height:520px;overflow-y:auto;padding:.5rem .6rem}
+.snap-empty{text-align:center;padding:1.8rem;color:var(--t3);font-size:.82rem}
+/* Timeline items */
+.tl-wrap{position:relative;padding-left:1.4rem}
+.tl-wrap::before{content:'';position:absolute;left:.55rem;top:.5rem;bottom:.5rem;width:1.5px;background:var(--bd)}
+.snap-item{position:relative;padding:.55rem .6rem;border-radius:8px;cursor:pointer;margin-bottom:.3rem;border:1.5px solid transparent;transition:all .15s}
+.snap-item:hover{background:var(--ps);border-color:var(--p)}
+.snap-item.sel-a{background:rgba(239,68,68,.08);border-color:var(--red)}
+.snap-item.sel-b{background:rgba(16,185,129,.08);border-color:var(--green)}
+.snap-item::before{content:'';position:absolute;left:-1.2rem;top:.7rem;width:10px;height:10px;border-radius:50%;background:var(--bd2);border:2px solid var(--card);transition:.15s}
+.snap-item:hover::before{background:var(--p)}
+.snap-item.sel-a::before{background:var(--red)}
+.snap-item.sel-b::before{background:var(--green)}
+.snap-item.auto-snap .snap-tag{display:inline-block}
+.snap-tag{background:var(--as);color:var(--amber);font-size:.65rem;font-weight:700;padding:.05rem .35rem;border-radius:4px;margin-left:.3rem;display:none}
+.snap-tag.manual{background:var(--ps);color:var(--p)}
+.snap-name{font-size:.78rem;font-weight:600;color:var(--t);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.snap-ts{font-size:.7rem;color:var(--t3);font-family:'Consolas',monospace;margin-top:.1rem}
+.snap-actor{font-size:.68rem;color:var(--t3)}
+.snap-ab-lbl{font-size:.68rem;font-weight:700;float:right;padding:.1rem .35rem;border-radius:4px;margin-top:-.15rem}
+/* ── Main diff area ── */
+.diff-main{}
+.snap-grid{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-bottom:.6rem}
+@media(max-width:600px){.snap-grid{grid-template-columns:1fr}}
+.diff-stats{display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;padding:.6rem .8rem;background:var(--input);border-radius:8px;margin-bottom:.9rem;font-size:.82rem}
+.stat-add{color:var(--green);font-weight:700}
+.stat-rm{color:var(--red);font-weight:700}
+.stat-ctx{color:var(--t3)}
+.diff-view{border:1px solid var(--bd);border-radius:10px;overflow:hidden;font-family:'Consolas','JetBrains Mono','Courier New',monospace;font-size:.82rem;line-height:1.6}
+.diff-hd{display:grid;grid-template-columns:48px 1fr;background:var(--input);border-bottom:1px solid var(--bd)}
+.diff-hd-col{padding:.5rem .75rem;font-size:.72rem;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.04em}
+.diff-row{display:grid;grid-template-columns:48px 1fr;transition:background .15s}
+.diff-row:hover{background:rgba(0,0,0,.02)}
+[data-theme="dark"] .diff-row:hover{background:rgba(255,255,255,.02)}
+.ln{padding:.15rem .6rem;color:var(--t3);text-align:right;user-select:none;border-right:1px solid var(--bd);font-size:.75rem;min-width:48px}
+.lc{padding:.15rem .75rem;white-space:pre-wrap;word-break:break-all}
+.row-add{background:rgba(16,185,129,.06)}
+.row-add .ln{background:rgba(16,185,129,.1);color:var(--green)}
+.row-add .lc{color:var(--green)}
+.row-rm{background:rgba(239,68,68,.06)}
+.row-rm .ln{background:rgba(239,68,68,.1);color:var(--red)}
+.row-rm .lc{color:var(--red)}
+.row-hunk{background:var(--ps)}
+.row-hunk .lc{color:var(--p);font-size:.78rem}
+.row-hunk .ln{background:var(--ps);color:var(--p)}
+.diff-pre-sym{opacity:.5;margin-right:.4rem;user-select:none}
+.diff-same{text-align:center;padding:2rem;color:var(--t3);font-size:.88rem}
+/* Quick compare */
+.quick-compare{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.6rem}
+.qc-btn{padding:.3rem .7rem;border-radius:7px;font-size:.75rem;font-weight:600;border:1.5px solid var(--bd);background:var(--input);color:var(--t2);cursor:pointer;transition:.15s;white-space:nowrap}
+.qc-btn:hover{border-color:var(--p);color:var(--p);background:var(--ps)}
+</style>
+{% endblock %}
+{% block content %}
+{% set active="diff" %}
+
+{% if ui_mode == 'simple' %}
+<div style="background:linear-gradient(135deg,rgba(245,158,11,.08),rgba(91,124,246,.06));border:1px solid rgba(245,158,11,.2);border-radius:10px;padding:.7rem 1rem;margin-bottom:.8rem;font-size:.82rem;color:var(--t2);display:flex;align-items:center;gap:.6rem">
+  <span style="font-size:1.1rem;flex-shrink:0">🔍</span>
+  <div><strong style="color:var(--t)">高级功能</strong> — 版本对比供管理员追溯配置变更。<a href="/cases" style="color:var(--p);font-weight:600">返回案例</a></div>
+</div>
+{% endif %}
+
+<div class="diff-layout">
+
+<!-- ── LEFT: Snapshot Timeline Panel ── -->
+<div class="snap-panel fa">
+  <div class="snap-panel-hd">
+    <h3>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" style="vertical-align:-2px;color:var(--p)"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      快照时间轴
+    </h3>
+    <button class="btn btn-s btn-xs" onclick="loadSnapshots()" title="刷新">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="12" height="12"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+    </button>
+  </div>
+  <div class="snap-tabs" id="snap-tabs">
+    <button class="snap-tab active" data-prefix="" onclick="filterSnaps(this,'')">全部</button>
+    <button class="snap-tab" data-prefix="templates" onclick="filterSnaps(this,'templates')">模板</button>
+    <button class="snap-tab" data-prefix="exchange_rates" onclick="filterSnaps(this,'exchange_rates')">通道</button>
+    <button class="snap-tab" data-prefix="reply_strategies" onclick="filterSnaps(this,'reply_strategies')">策略</button>
+  </div>
+  <div class="snap-list" id="snap-list">
+    <div class="snap-empty">加载中…</div>
+  </div>
+  <div style="padding:.7rem .8rem;border-top:1px solid var(--bd);display:flex;gap:.4rem;font-size:.72rem;color:var(--t3)">
+    <span style="display:inline-flex;align-items:center;gap:.3rem">
+      <span style="width:10px;height:10px;border-radius:50%;background:var(--red);display:inline-block"></span> 旧版本(A)
+    </span>
+    <span style="display:inline-flex;align-items:center;gap:.3rem">
+      <span style="width:10px;height:10px;border-radius:50%;background:var(--green);display:inline-block"></span> 新版本(B)
+    </span>
+    <span style="margin-left:auto;font-style:italic">点击选择</span>
+  </div>
+</div>
+
+<!-- ── RIGHT: Diff Main Area ── -->
+<div class="diff-main">
+  <div class="card fa">
+    <h2>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+      版本对比
+    </h2>
+
+    <!-- Quick compare shortcuts -->
+    <div class="quick-compare" id="quick-compare" style="display:none">
+      <span style="font-size:.72rem;color:var(--t3);align-self:center">快速对比：</span>
+    </div>
+
+    <form method="get" action="/diff" id="diff-form">
+      <div class="snap-grid">
+        <div class="f-grp" style="margin-bottom:0">
+          <label class="f-lbl" style="color:var(--red);font-weight:700">
+            <span style="width:10px;height:10px;border-radius:50%;background:var(--red);display:inline-block;vertical-align:-1px;margin-right:.3rem"></span>
+            旧版本（A — Before）
+          </label>
+          <select name="a" id="sel-a" onchange="onSelChange()">
+            <option value="">-- 选择快照 --</option>
+            {% for s in snapshots %}
+            <option value="{{ s.id }}" {{ 'selected' if selected_a == s.id|string else '' }}>{{ s.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="f-grp" style="margin-bottom:0">
+          <label class="f-lbl" style="color:var(--green);font-weight:700">
+            <span style="width:10px;height:10px;border-radius:50%;background:var(--green);display:inline-block;vertical-align:-1px;margin-right:.3rem"></span>
+            新版本（B — After）
+          </label>
+          <select name="b" id="sel-b" onchange="onSelChange()">
+            <option value="__current__">── 当前配置 ──</option>
+            <option value="">-- 选择快照 --</option>
+            {% for s in snapshots %}
+            <option value="{{ s.id }}" {{ 'selected' if selected_b == s.id|string else '' }}>{{ s.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div style="margin-top:.8rem;display:flex;gap:.5rem;flex-wrap:wrap">
+        <button type="submit" class="btn btn-p btn-sm">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+          对比
+        </button>
+        {% if selected_a %}
+        <button type="button" class="btn btn-d btn-sm" onclick="doRollback('{{ selected_a }}')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 109-9"/><polyline points="3 3 3 12 12 12"/></svg>
+          回滚到旧版本
+        </button>
+        {% endif %}
+        <button type="button" class="btn btn-s btn-sm" onclick="clearSelections()" style="margin-left:auto">
+          清除选择
+        </button>
+      </div>
+    </form>
+  </div>
+
+  {% if diff_lines is defined %}
+  <div class="card fa fa2">
+    <h2>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      对比结果
+      {% if add_count is defined or rm_count is defined %}
+      <div class="actions">
+        <span class="stat-add">+{{ add_count|default(0) }} 新增</span>
+        <span class="stat-rm">-{{ rm_count|default(0) }} 删除</span>
+      </div>
+      {% endif %}
+    </h2>
+    {% if diff_lines %}
+    {% if add_count|default(0) == 0 and rm_count|default(0) == 0 %}
+    <div class="diff-same">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="36" height="36" style="margin-bottom:.5rem;opacity:.3"><polyline points="20 6 9 17 4 12"/></svg>
+      <p>两个版本内容完全相同，无差异</p>
+    </div>
+    {% else %}
+    <div class="diff-stats">
+      <span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" style="vertical-align:-2px;color:var(--green)"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        <span class="stat-add">{{ add_count|default(0) }} 行新增</span>
+      </span>
+      <span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" style="vertical-align:-2px;color:var(--red)"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        <span class="stat-rm">{{ rm_count|default(0) }} 行删除</span>
+      </span>
+    </div>
+    <div class="diff-view">
+      <div class="diff-hd">
+        <div class="diff-hd-col">#</div>
+        <div class="diff-hd-col">内容</div>
+      </div>
+      {% set ln = namespace(n=0) %}
+      {% for line in diff_lines %}
+      {% if line.startswith('@@') %}
+      <div class="diff-row row-hunk"><div class="ln">…</div><div class="lc">{{ line }}</div></div>
+      {% elif line.startswith('+') and not line.startswith('+++') %}
+      {% set ln.n = ln.n + 1 %}
+      <div class="diff-row row-add"><div class="ln">{{ ln.n }}</div><div class="lc"><span class="diff-pre-sym">+</span>{{ line[1:] }}</div></div>
+      {% elif line.startswith('-') and not line.startswith('---') %}
+      <div class="diff-row row-rm"><div class="ln">{{ ln.n }}</div><div class="lc"><span class="diff-pre-sym">−</span>{{ line[1:] }}</div></div>
+      {% elif not line.startswith('---') and not line.startswith('+++') %}
+      {% set ln.n = ln.n + 1 %}
+      <div class="diff-row"><div class="ln">{{ ln.n }}</div><div class="lc"><span class="diff-pre-sym">&nbsp;</span>{{ line[1:] if line.startswith(' ') else line }}</div></div>
+      {% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% else %}
+    <div class="empty">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+      <p>请选择两个快照版本进行对比</p>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+</div><!-- .diff-main -->
+</div><!-- .diff-layout -->
+
+<script>
+/* ── Snapshot Timeline ──────────────────────────────── */
+let _allSnaps = [];
+let _curPrefix = '';
+let _selA = '{{ selected_a }}';
+let _selB = '{{ selected_b }}';
+
+const PREFIX_LABELS = {
+  'templates': '模板',
+  'exchange_rates': '通道',
+  'reply_strategies': '策略',
+  'quota': '配额'
+};
+
+async function loadSnapshots() {
+  try {
+    const r = await fetch('/api/snapshots?limit=60');
+    const d = await r.json();
+    _allSnaps = d.snapshots || [];
+    renderSnapList();
+    buildQuickCompare();
+  } catch(e) {
+    document.getElementById('snap-list').innerHTML =
+      '<div class="snap-empty">加载失败，请刷新</div>';
+  }
+}
+
+function filterSnaps(btn, prefix) {
+  _curPrefix = prefix;
+  document.querySelectorAll('.snap-tab').forEach(t => t.classList.toggle('active', t === btn));
+  renderSnapList();
+}
+
+function renderSnapList() {
+  const list = document.getElementById('snap-list');
+  const snaps = _curPrefix
+    ? _allSnaps.filter(s => s.prefix === _curPrefix)
+    : _allSnaps;
+
+  if (!snaps.length) {
+    list.innerHTML = '<div class="snap-empty">暂无快照</div>';
+    return;
+  }
+
+  /* Group by date */
+  const byDate = {};
+  snaps.forEach(s => {
+    const date = s.ts ? s.ts.slice(0, 8) : '未知';
+    (byDate[date] = byDate[date] || []).push(s);
+  });
+
+  let html = '<div class="tl-wrap">';
+  Object.entries(byDate).forEach(([date, items]) => {
+    const d = date.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3');
+    html += `<div style="font-size:.68rem;font-weight:700;color:var(--t3);padding:.4rem .2rem .2rem;letter-spacing:.05em">${d}</div>`;
+    items.forEach(s => {
+      const isAutoSnap = s.actor && s.actor !== 'sys' && s.actor !== 'api';
+      const prefixLabel = PREFIX_LABELS[s.prefix] || s.prefix;
+      const timeStr = s.ts ? s.ts.slice(9, 15).replace(/(\d{2})(\d{2})(\d{2})/, '$1:$2:$3') : '';
+      const selClass = s.id === _selA ? 'sel-a' : (s.id === _selB ? 'sel-b' : '');
+      const abLabel = s.id === _selA
+        ? '<span class="snap-ab-lbl" style="background:var(--rs);color:var(--red)">A</span>'
+        : (s.id === _selB ? '<span class="snap-ab-lbl" style="background:var(--gs);color:var(--green)">B</span>' : '');
+      html += `
+<div class="snap-item ${isAutoSnap ? 'auto-snap' : ''} ${selClass}" data-id="${s.id}" onclick="snapClick(event, '${s.id}')">
+  ${abLabel}
+  <div class="snap-name">
+    ${prefixLabel || s.id.split('_')[0]}
+    <span class="snap-tag ${isAutoSnap ? '' : 'manual'}">${isAutoSnap ? '自动' : '手动'}</span>
+  </div>
+  <div class="snap-ts">${timeStr}</div>
+  <div class="snap-actor">${s.actor ? '👤 ' + s.actor : ''}</div>
+</div>`;
+    });
+  });
+  html += '</div>';
+  list.innerHTML = html;
+}
+
+function snapClick(e, snapId) {
+  /* 双击或 Shift+点 → 选为 B；普通点 → 选为 A → 再点已选 A 的 → 选为 B */
+  const item = e.currentTarget;
+  const isShift = e.shiftKey;
+  if (isShift || snapId === _selA) {
+    _selB = snapId;
+    document.getElementById('sel-b').value = snapId;
+  } else {
+    _selA = snapId;
+    document.getElementById('sel-a').value = snapId;
+  }
+  renderSnapList();
+}
+
+function onSelChange() {
+  _selA = document.getElementById('sel-a').value;
+  _selB = document.getElementById('sel-b').value;
+  renderSnapList();
+}
+
+function clearSelections() {
+  _selA = ''; _selB = '';
+  document.getElementById('sel-a').value = '';
+  document.getElementById('sel-b').value = '';
+  renderSnapList();
+}
+
+/* Quick compare buttons for the same prefix */
+function buildQuickCompare() {
+  const container = document.getElementById('quick-compare');
+  const prefixes = [...new Set(_allSnaps.map(s => s.prefix).filter(Boolean))];
+  if (!prefixes.length) return;
+  let btns = '';
+  prefixes.forEach(p => {
+    const items = _allSnaps.filter(s => s.prefix === p);
+    if (items.length >= 2) {
+      const label = PREFIX_LABELS[p] || p;
+      btns += `<button class="qc-btn" onclick="quickCompare('${p}')">
+        ${label}：最新两版本
+      </button>`;
+    }
+    if (items.length >= 1) {
+      btns += `<button class="qc-btn" onclick="quickCompareLatestCurrent('${p}')">
+        ${label}：最新 vs 当前
+      </button>`;
+    }
+  });
+  if (btns) {
+    container.style.display = 'flex';
+    container.innerHTML = '<span style="font-size:.72rem;color:var(--t3);align-self:center">快速对比：</span>' + btns;
+  }
+}
+
+function quickCompare(prefix) {
+  const items = _allSnaps.filter(s => s.prefix === prefix);
+  if (items.length < 2) { showToast('该配置文件快照不足两个', 'info'); return; }
+  document.getElementById('sel-a').value = items[1].id;
+  document.getElementById('sel-b').value = items[0].id;
+  document.getElementById('diff-form').submit();
+}
+
+function quickCompareLatestCurrent(prefix) {
+  const items = _allSnaps.filter(s => s.prefix === prefix);
+  if (!items.length) { showToast('暂无该配置快照', 'info'); return; }
+  document.getElementById('sel-a').value = items[0].id;
+  document.getElementById('sel-b').value = '__current__';
+  document.getElementById('diff-form').submit();
+}
+
+/* Rollback */
+async function doRollback(snapId) {
+  showConfirm(
+    '回滚确认',
+    `确定回滚到快照「<strong>${snapId}</strong>」？<br>当前配置将被覆盖（系统已自动备份）。`,
+    async () => {
+      try {
+        const r = await fetch('/api/rollback', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({snapshot_id: snapId})
+        });
+        const d = await r.json();
+        if (r.ok && d.ok) {
+          showToast('已回滚: ' + d.restored + ' ← ' + d.snapshot, 'ok');
+          setTimeout(() => location.reload(), 1000);
+        } else showToast(d.detail || '回滚失败', 'err');
+      } catch(e) { showToast('网络错误', 'err'); }
+    },
+    {danger: true, okLabel: '确认回滚'}
+  );
+}
+
+/* Init */
+loadSnapshots();
+</script>
+{% endblock %}

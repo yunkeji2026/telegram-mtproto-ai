@@ -1,0 +1,939 @@
+{% extends "base.html" %}
+{% block title %}{% if ui_mode == 'simple' %}数据概览{% else %}仪表盘{% endif %} · {{ site_name|default('智控王客户转化聊天系统') }}{% endblock %}
+{% block page_title %}{% if ui_mode == 'simple' %}数据概览{% else %}仪表盘{% endif %}{% endblock %}
+{% block head %}
+<style>
+/* ── Alert Banner ────────────────────────────── */
+#alert-banner{display:none;margin-bottom:1rem;animation:fadeUp .3s ease}
+.alert-wrap{display:flex;flex-direction:column;gap:.5rem}
+.alert-bar{display:flex;align-items:flex-start;gap:.7rem;padding:.7rem 1rem;border-radius:var(--r);position:relative;font-size:.84rem;line-height:1.45}
+.alert-bar.critical{background:var(--rs);border:1px solid rgba(239,68,68,.3);border-left:4px solid var(--red)}
+.alert-bar.warn{background:var(--as);border:1px solid rgba(245,158,11,.25);border-left:4px solid var(--amber)}
+.alert-bar .alert-icon{font-size:1.1rem;flex-shrink:0;line-height:1}
+.alert-bar .alert-content{flex:1;min-width:0}
+.alert-bar .alert-title{font-weight:700;margin-bottom:.1rem}
+.alert-bar .alert-body{color:var(--t2);font-size:.8rem}
+.alert-bar .alert-action{flex-shrink:0;padding:.28rem .6rem;border-radius:6px;border:1px solid rgba(0,0,0,.15);background:rgba(0,0,0,.06);color:var(--t);font-size:.75rem;font-weight:600;text-decoration:none;cursor:pointer;white-space:nowrap;transition:.15s}
+.alert-bar .alert-action:hover{background:rgba(0,0,0,.12)}
+[data-theme="dark"] .alert-bar .alert-action{border-color:rgba(255,255,255,.15);background:rgba(255,255,255,.07)}
+.alert-banner-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:.45rem}
+.alert-banner-title{font-weight:700;font-size:.88rem;display:flex;align-items:center;gap:.4rem}
+.alert-banner-title svg{width:15px;height:15px}
+.alert-banner-title.critical{color:var(--red)}.alert-banner-title.warn{color:var(--amber)}
+.alert-collapse-btn{background:none;border:none;cursor:pointer;font-size:.75rem;color:var(--t3);padding:.15rem .35rem;border-radius:4px;transition:.15s}
+.alert-collapse-btn:hover{color:var(--t);background:var(--input)}
+/* ── 系统状态条 ──────────────────────────── */
+#sys-bar{display:none;align-items:center;gap:.6rem;padding:.5rem .85rem;background:var(--card);
+  border:1px solid var(--bd);border-radius:var(--r);margin-bottom:.9rem;flex-wrap:wrap;font-size:.78rem;
+  animation:fadeUp .3s ease}
+#sys-bar.show{display:flex}
+.sys-pills{display:flex;flex-wrap:wrap;gap:.4rem;flex:1}
+.sys-pill{display:inline-flex;align-items:center;gap:.3rem;padding:.2rem .6rem;
+  border-radius:20px;background:var(--input);color:var(--t2);font-size:.75rem;white-space:nowrap}
+.sys-pill.ok{background:var(--gs);color:var(--green)}
+.sys-pill.warn{background:var(--as,rgba(245,158,11,.1));color:var(--amber)}
+.sys-pill.err{background:var(--rs);color:var(--red)}
+.sys-pill .dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0}
+.sys-upd{font-size:.7rem;color:var(--t3,#9ca3af);margin-left:auto;white-space:nowrap}
+.sys-refresh{background:none;border:none;cursor:pointer;color:var(--t3);font-size:.85rem;padding:.1rem .3rem;border-radius:4px;transition:.15s}
+.sys-refresh:hover{color:var(--p);background:var(--ps)}
+/* stat icon colors */
+.ico-p{background:linear-gradient(135deg,#5b7cf6,#8b5cf6)}
+.ico-g{background:linear-gradient(135deg,#10b981,#059669)}
+.ico-a{background:linear-gradient(135deg,#f59e0b,#d97706)}
+.ico-r{background:linear-gradient(135deg,#ef4444,#dc2626)}
+.ico-b{background:linear-gradient(135deg,#06b6d4,#0891b2)}
+/* quick actions */
+.qa-row{display:flex;flex-wrap:wrap;gap:.6rem;margin-bottom:.5rem}
+/* health cards */
+.health-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:.8rem}
+@media(max-width:480px){.health-grid{grid-template-columns:1fr}}
+.h-card{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:1.1rem;display:flex;align-items:center;gap:1rem;transition:all .25s;cursor:default}
+[data-theme="dark"] .h-card{backdrop-filter:blur(8px)}
+.h-card:hover{box-shadow:var(--s1);transform:translateY(-1px)}
+a.stat-card{text-decoration:none;color:inherit;display:block}
+a.stat-card:hover{box-shadow:var(--sp);border-color:var(--p)}
+a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
+.ring-wrap{position:relative;width:58px;height:58px;flex-shrink:0}
+.ring-wrap svg{width:58px;height:58px}
+.ring-score{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:.9rem;font-weight:800;color:var(--t)}
+.h-info{flex:1;min-width:0}
+.h-name{font-weight:600;font-size:.87rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:.25rem}
+.h-meta{font-size:.76rem;color:var(--t2)}
+/* recent ops timeline */
+.tl{display:flex;flex-direction:column;gap:0}
+.tl-item{display:flex;gap:.9rem;padding:.6rem 0;border-bottom:1px solid var(--bd);align-items:flex-start}
+.tl-item:last-child{border-bottom:none}
+.tl-dot{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:.1rem}
+.tl-dot svg{width:14px;height:14px;color:#fff}
+.tl-body{flex:1;min-width:0}
+.tl-action{font-weight:600;font-size:.85rem;margin-bottom:.15rem}
+.tl-meta{font-size:.77rem;color:var(--t2);display:flex;gap:.6rem;flex-wrap:wrap}
+.tl-time{margin-left:auto;font-size:.76rem;color:var(--t3);white-space:nowrap;padding-top:.15rem}
+/* panel backdrop */
+#panel-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:199;backdrop-filter:blur(3px)}
+#panel-backdrop.open{display:block}
+/* activity chart */
+.act-chart-wrap{display:grid;grid-template-columns:1fr 200px;gap:1.2rem;align-items:center}
+@media(max-width:680px){.act-chart-wrap{grid-template-columns:1fr}}
+.act-bars{display:flex;align-items:flex-end;gap:2px;height:64px;padding:.3rem 0}
+.act-bar{flex:1;min-width:3px;border-radius:2px 2px 0 0;background:var(--p);opacity:.7;transition:height .4s ease,opacity .15s}
+.act-bar:hover{opacity:1}
+.act-bar.zero{background:var(--bd2);opacity:.4}
+.act-donut{position:relative;width:90px;height:90px;flex-shrink:0;margin:0 auto}
+.act-donut canvas{position:absolute;inset:0}
+.act-donut-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.act-total{font-weight:800;font-size:1.2rem;line-height:1;color:var(--p)}
+.act-total-lbl{font-size:.62rem;color:var(--t3)}
+.act-legend{display:flex;flex-direction:column;gap:.3rem;justify-content:center}
+.act-legend-item{display:flex;align-items:center;gap:.4rem;font-size:.73rem;color:var(--t2)}
+.act-legend-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.act-meta{display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.7rem;font-size:.77rem;color:var(--t2)}
+.act-op{background:var(--input);border-radius:6px;padding:.3rem .7rem;display:flex;align-items:center;gap:.4rem}
+.act-op-name{font-weight:600;color:var(--t)}
+/* health modal */
+.hc-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9200;align-items:flex-start;justify-content:center;padding:3vh 0;overflow-y:auto;backdrop-filter:blur(4px)}
+.hc-modal.show{display:flex;animation:fadeUp .2s ease}
+.hc-box{background:var(--card);border:1px solid var(--bd);border-radius:16px;box-shadow:var(--s2);width:min(600px,94vw);margin:auto}
+.hc-hd{padding:1.1rem 1.4rem;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:.8rem}
+.hc-score-ring{width:52px;height:52px;position:relative;flex-shrink:0}
+.hc-score-ring svg{width:52px;height:52px;transform:rotate(-90deg)}
+.hc-score-num{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:.88rem}
+.hc-body{padding:.7rem 1rem 1rem;max-height:60vh;overflow-y:auto}
+.hc-issue{display:flex;align-items:flex-start;gap:.7rem;padding:.65rem .8rem;border-radius:10px;margin-bottom:.45rem;border:1px solid transparent}
+.hc-issue.critical{background:var(--rs);border-color:rgba(239,68,68,.2)}
+.hc-issue.warn{background:var(--as);border-color:rgba(245,158,11,.2)}
+.hc-issue.info{background:var(--ps);border-color:rgba(91,124,246,.15)}
+.hc-issue.ok{background:var(--gs);border-color:rgba(16,185,129,.2)}
+.hc-icon{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:1rem}
+.hc-content{flex:1;min-width:0}
+.hc-title{font-weight:700;font-size:.84rem;margin-bottom:.15rem}
+.hc-detail{font-size:.76rem;color:var(--t2);line-height:1.4}
+.hc-cat{font-size:.68rem;padding:.1rem .4rem;border-radius:4px;background:var(--bd);color:var(--t3);font-weight:600;margin-right:.3rem}
+</style>
+{% endblock %}
+{% block content %}
+{% set active="dash" %}
+
+<!-- 系统状态条（JS 动态填充） -->
+<div id="sys-bar" class="pro-only">
+  <div class="sys-pills" id="sys-pills">
+    <span class="sys-pill"><span class="dot"></span>加载中…</span>
+  </div>
+  <span class="sys-upd" id="sys-upd-time"></span>
+  <button class="sys-refresh" onclick="loadSysBar()" title="刷新状态">↻</button>
+</div>
+
+<!-- 紧急告警横幅（JS 动态填充） -->
+<div id="alert-banner">
+  <div class="alert-banner-header">
+    <span class="alert-banner-title" id="alert-banner-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      <span id="alert-banner-label">系统告警</span>
+    </span>
+    <button class="alert-collapse-btn" id="alert-collapse-btn" onclick="toggleAlertBanner()">收起</button>
+  </div>
+  <div class="alert-wrap" id="alert-wrap"></div>
+</div>
+
+{% if ui_mode == 'simple' %}
+<div class="card" style="margin-bottom:1rem;padding:1.2rem">
+  <h2 style="font-size:1rem;font-weight:700;margin-bottom:.8rem;display:flex;align-items:center;gap:.5rem">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93A10 10 0 0015 3.05V1h-6v2.05A10 10 0 004.93 4.93L3.46 3.46 1 5.93l1.46 1.46A10 10 0 001.05 11H-1v2h2.05A10 10 0 003.46 17.07l-1.46 1.47L4.93 21l1.47-1.46A10 10 0 0011 20.95V23h2v-2.05a10 10 0 005.07-2.49L19.54 21 22 18.54l-1.47-1.47A10 10 0 0021.95 13H24v-2h-2.05A10 10 0 0019.07 4.93z"/></svg>
+    快捷入口
+  </h2>
+  <div style="display:flex;gap:.7rem;flex-wrap:wrap">
+    <a href="/cases" class="btn btn-p btn-sm" style="padding:.6rem 1.2rem;border-radius:10px;font-size:.9rem">📋 待处理案例</a>
+    <a href="/knowledge" class="btn btn-s btn-sm" style="padding:.6rem 1.2rem;border-radius:10px;font-size:.9rem">📚 知识库</a>
+    <a href="/learner" class="btn btn-s btn-sm" style="padding:.6rem 1.2rem;border-radius:10px;font-size:.9rem">🧠 学习审核</a>
+    <a href="/help" class="btn btn-s btn-sm" style="padding:.6rem 1.2rem;border-radius:10px;font-size:.9rem">❓ 帮助</a>
+  </div>
+</div>
+{% endif %}
+
+{% if msg %}
+<div class="msg {{ 'msg-ok' if 'ok' in msg.lower() or '成功' in msg else 'msg-err' }}">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+  {{ msg }}
+</div>
+{% endif %}
+
+<!-- Stat cards -->
+<div class="g4 fa">
+  <a href="/logs" class="card stat-card fa fa1">
+    <div class="s-icon ico-p"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+    <div class="s-num" data-count="{{ uptime_hours|default(0) }}">0</div>
+    <div class="s-lbl">运行时长（小时）</div>
+  </a>
+  <a href="/templates" class="card stat-card fa fa2">
+    <div class="s-icon ico-g"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+    <div class="s-num" data-count="{{ template_count|default(0) }}">0</div>
+    <div class="s-lbl">话术模板</div>
+  </a>
+  {% set _has_channels = domain_web_pages|selectattr('key','equalto','ch')|list|length > 0 %}
+  {% if _has_channels %}
+  <a href="/channels" class="card stat-card fa fa3">
+    <div class="s-icon ico-a"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg></div>
+    <div class="s-num" data-count="{{ channel_count|default(0) }}">0</div>
+    <div class="s-lbl">通道数量</div>
+  </a>
+  {% else %}
+  <a href="/knowledge" class="card stat-card fa fa3">
+    <div class="s-icon ico-a"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg></div>
+    <div class="s-num" id="kb-entry-count" data-count="0">0</div>
+    <div class="s-lbl">知识库条目</div>
+  </a>
+  {% endif %}
+  <a href="/strategy-analytics" class="card stat-card fa fa4">
+    <div class="s-icon ico-b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
+    <div class="s-num" style="font-size:1.3rem">{{ status|default('运行中') }}</div>
+    <div class="s-lbl">系统状态</div>
+  </a>
+</div>
+
+{% if user_role in ('master', 'admin') %}
+<div class="card fa fa2 pro-only" id="dash-first-deploy-card" style="margin-bottom:1rem;border-left:3px solid var(--p)">
+  <h2 style="font-size:.95rem;margin:0 0 .4rem;display:flex;align-items:center;justify-content:space-between;gap:.4rem;flex-wrap:wrap">
+    <span style="display:flex;align-items:center;gap:.4rem">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+      首次部署检查
+    </span>
+    <button type="button" class="btn btn-s btn-xs" id="dash-first-deploy-dismiss" title="不再显示此提示">已了解</button>
+  </h2>
+  <ol style="font-size:.8rem;color:var(--t2);line-height:1.55;margin:.35rem 0 0 1.1rem;padding:0">
+    <li>确认 AI 与 <a href="/settings">模型 / API</a> 可用</li>
+    <li>维护 <a href="/knowledge">知识库</a> 条目（空库时检索无命中）</li>
+    <li>检查 <a href="/strategies">回复策略</a> 已启用</li>
+    <li>私聊发一条测试消息，查看 <a href="/logs">日志</a></li>
+  </ol>
+  <p style="font-size:.72rem;color:var(--t3);margin:.55rem 0 0">备份：在项目根执行 <code style="font-size:.68rem">python scripts/backup_sqlite_dbs.py</code> · 详见 <code style="font-size:.68rem">docs/PRODUCTION_BASELINE.md</code></p>
+</div>
+<script>
+(function () {
+  var k = 'dash_first_deploy_dismissed_v1';
+  var el = document.getElementById('dash-first-deploy-card');
+  if (!el) return;
+  try {
+    if (localStorage.getItem(k) === '1') {
+      el.style.display = 'none';
+      return;
+    }
+  } catch (e) {}
+  var btn = document.getElementById('dash-first-deploy-dismiss');
+  if (btn) {
+    btn.addEventListener('click', function () {
+      try {
+        localStorage.setItem(k, '1');
+      } catch (e) {}
+      el.style.display = 'none';
+    });
+  }
+})();
+</script>
+{% endif %}
+
+<!-- Bot 实时性能指标 -->
+<div class="card fa fa2 pro-only" id="bot-metrics-card">
+  <h2>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+    Bot 实时性能
+    <div class="actions">
+      <span id="metrics-ts" style="font-size:.7rem;color:var(--t3)"></span>
+      <button class="btn btn-s btn-xs" onclick="loadBotMetrics()">刷新</button>
+    </div>
+  </h2>
+  <div id="bm-loading" style="text-align:center;padding:1rem;color:var(--t3);font-size:.82rem">加载中…</div>
+  <div id="bm-content" style="display:none">
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:.55rem;margin-bottom:.8rem">
+      <div style="background:var(--input);border-radius:var(--r-sm);padding:.5rem .6rem;text-align:center">
+        <div style="font-size:1.3rem;font-weight:700;color:var(--p)" id="bm-received">0</div>
+        <div style="font-size:.68rem;color:var(--t3)">消息接收</div>
+      </div>
+      <div style="background:var(--input);border-radius:var(--r-sm);padding:.5rem .6rem;text-align:center">
+        <div style="font-size:1.3rem;font-weight:700;color:var(--green)" id="bm-replied">0</div>
+        <div style="font-size:.68rem;color:var(--t3)">消息回复</div>
+      </div>
+      <div style="background:var(--input);border-radius:var(--r-sm);padding:.5rem .6rem;text-align:center">
+        <div style="font-size:1.3rem;font-weight:700" id="bm-avg-rt">0</div>
+        <div style="font-size:.68rem;color:var(--t3)">平均响应(ms)</div>
+      </div>
+      <div style="background:var(--input);border-radius:var(--r-sm);padding:.5rem .6rem;text-align:center">
+        <div style="font-size:1.3rem;font-weight:700" id="bm-p99-rt">0</div>
+        <div style="font-size:.68rem;color:var(--t3)">P99(ms)</div>
+      </div>
+      <div style="background:var(--input);border-radius:var(--r-sm);padding:.5rem .6rem;text-align:center">
+        <div style="font-size:1.3rem;font-weight:700" id="bm-concurrency">0</div>
+        <div style="font-size:.68rem;color:var(--t3)">并发/上限</div>
+      </div>
+      <div style="background:var(--input);border-radius:var(--r-sm);padding:.5rem .6rem;text-align:center">
+        <div style="font-size:1.3rem;font-weight:700" id="bm-queue">0</div>
+        <div style="font-size:.68rem;color:var(--t3)">队列/丢弃</div>
+      </div>
+      <div style="background:var(--input);border-radius:var(--r-sm);padding:.5rem .6rem;text-align:center">
+        <div style="font-size:1.3rem;font-weight:700" id="bm-errors">0</div>
+        <div style="font-size:.68rem;color:var(--t3)">错误总数</div>
+      </div>
+      <div style="background:var(--input);border-radius:var(--r-sm);padding:.5rem .6rem;text-align:center">
+        <div style="font-size:1.3rem;font-weight:700" id="bm-ai-status">—</div>
+        <div style="font-size:.68rem;color:var(--t3)">AI 状态</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;font-size:.75rem" id="bm-trigger-layers"></div>
+    <div style="display:flex;gap:.7rem;flex-wrap:wrap;font-size:.73rem;color:var(--t2);margin-top:.4rem" id="bm-quality"></div>
+    <div id="bm-memory" style="font-size:.73rem;color:var(--t2);margin-top:.35rem;line-height:1.45"></div>
+  </div>
+</div>
+
+<!-- 触发器决策日志 -->
+<div class="card fa fa2 pro-only" id="trigger-decisions-card">
+  <h2>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+    触发器决策（最近）
+    <div class="actions">
+      <button class="btn btn-s btn-xs" onclick="loadTriggerDecisions()">刷新</button>
+    </div>
+  </h2>
+  <div id="td-loading" style="text-align:center;padding:.8rem;color:var(--t3);font-size:.82rem">加载中…</div>
+  <div id="td-content" style="display:none;max-height:280px;overflow-y:auto">
+    <div id="td-list" class="tl"></div>
+  </div>
+  <div id="td-empty" style="display:none;text-align:center;padding:1rem;color:var(--t3);font-size:.82rem">暂无决策记录</div>
+</div>
+
+<!-- Quick actions -->
+<div class="card fa fa2 pro-only">
+  <h2>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93A10 10 0 0015 3.05V1h-6v2.05A10 10 0 004.93 4.93L3.46 3.46 1 5.93l1.46 1.46A10 10 0 001.05 11H-1v2h2.05A10 10 0 003.46 17.07l-1.46 1.47L4.93 21l1.47-1.46A10 10 0 0011 20.95V23h2v-2.05a10 10 0 005.07-2.49L19.54 21 22 18.54l-1.47-1.47A10 10 0 0021.95 13H24v-2h-2.05A10 10 0 0019.07 4.93z"/></svg>
+    快速操作
+  </h2>
+  <div class="qa-row">
+    <form method="post" action="/export" style="display:inline">
+      <button type="submit" class="btn btn-p btn-sm">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        导出配置
+      </button>
+    </form>
+    <a href="/import" class="btn btn-s btn-sm" data-help="nav_import">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      导入配置
+    </a>
+    <a href="/audit" class="btn btn-s btn-sm" data-help="nav_audit">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+      操作记录
+    </a>
+    <a href="/diff" class="btn btn-s btn-sm" data-help="nav_diff">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+      版本对比
+    </a>
+    <a href="/analytics" class="btn btn-s btn-sm" data-help="nav_analytics">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      数据分析
+    </a>
+    <button class="btn btn-sm" style="background:var(--gs);color:var(--green);border:1px solid var(--green)"
+            onclick="openHealthCheck()" id="hc-btn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+      系统诊断
+    </button>
+  </div>
+</div>
+
+<!-- 今日活动看板 -->
+<div class="card fa fa3 pro-only" id="activity-card">
+  <h2>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+    今日活动
+    <div class="actions" style="display:flex;gap:.4rem;align-items:center">
+      <span id="act-total-badge" style="font-size:.75rem;color:var(--t3)"></span>
+      <a href="/audit" class="btn btn-s btn-xs">查看记录</a>
+    </div>
+  </h2>
+  <div id="act-loading" style="text-align:center;padding:1rem;color:var(--t3);font-size:.82rem">加载中…</div>
+  <div id="act-content" style="display:none">
+    <div class="act-chart-wrap">
+      <div>
+        <div style="font-size:.72rem;color:var(--t3);margin-bottom:.4rem">过去 24 小时操作趋势</div>
+        <div class="act-bars" id="act-bars"></div>
+        <div style="display:flex;justify-content:space-between;font-size:.65rem;color:var(--t3);margin-top:.2rem">
+          <span id="act-h-start"></span>
+          <span id="act-h-end"></span>
+        </div>
+      </div>
+      <div style="display:flex;gap:.8rem;align-items:center">
+        <div class="act-donut" id="act-donut-wrap">
+          <canvas id="act-donut" width="90" height="90"></canvas>
+          <div class="act-donut-center">
+            <span class="act-total" id="act-total-num">0</span>
+            <span class="act-total-lbl">操作</span>
+          </div>
+        </div>
+        <div class="act-legend" id="act-legend"></div>
+      </div>
+    </div>
+    <div class="act-meta" id="act-top-ops"></div>
+  </div>
+</div>
+
+{# Domain dashboard widgets — loaded from manifest.web.dashboard_widgets[].template #}
+{% for _dw in domain_dashboard_widgets %}
+  {% if _dw.get('template') %}
+    {% include _dw.template ignore missing %}
+  {% endif %}
+{% endfor %}
+
+<!-- 知识库健康卡片 -->
+<div class="card fa fa3" id="kb-health-card">
+  <h2>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+    知识库状态
+    <div class="actions"><a href="/knowledge" class="btn btn-s btn-xs">管理</a></div>
+  </h2>
+  <div id="kb-loading" style="text-align:center;padding:1rem;color:var(--t3);font-size:.82rem">加载中…</div>
+  <div id="kb-content" style="display:none">
+    <!-- 核心指标：4宫格 -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-bottom:.8rem">
+      <div style="background:var(--input);border-radius:var(--r-sm);padding:.55rem .7rem;text-align:center">
+        <div style="font-size:1.4rem;font-weight:700;color:var(--p)" id="kb-d-entries">0</div>
+        <div style="font-size:.7rem;color:var(--t3)">知识条目</div>
+      </div>
+      <div style="background:var(--input);border-radius:var(--r-sm);padding:.55rem .7rem;text-align:center">
+        <div style="font-size:1.4rem;font-weight:700;color:var(--green)" id="kb-d-sat">—</div>
+        <div style="font-size:.7rem;color:var(--t3)">7日满意率</div>
+      </div>
+      <div style="background:var(--input);border-radius:var(--r-sm);padding:.55rem .7rem;text-align:center">
+        <div style="font-size:1.4rem;font-weight:700" id="kb-d-hitrate">—</div>
+        <div style="font-size:.7rem;color:var(--t3)">今日命中率</div>
+      </div>
+      <div style="background:var(--input);border-radius:var(--r-sm);padding:.55rem .7rem;text-align:center">
+        <div style="font-size:1.4rem;font-weight:700;color:var(--t2)" id="kb-d-queries">—</div>
+        <div style="font-size:.7rem;color:var(--t3)">今日查询次数</div>
+      </div>
+    </div>
+    <!-- 今日命中率迷你趋势图 -->
+    <div style="font-size:.75rem;color:var(--t3);margin-bottom:.3rem;font-weight:600">今日命中率趋势（每小时）</div>
+    <div id="kb-sparkline" style="height:44px;display:flex;align-items:flex-end;gap:2px;background:var(--input);border-radius:var(--r-sm);padding:.4rem .5rem;margin-bottom:.7rem"></div>
+    <!-- 检索模式 -->
+    <div id="kb-search-mode-badge" style="margin-bottom:.6rem"></div>
+    <!-- 向量化进度 -->
+    <div style="font-size:.75rem;color:var(--t3);margin-bottom:.3rem;font-weight:600">向量化覆盖率</div>
+    <div style="height:7px;background:var(--bd2);border-radius:10px;overflow:hidden;margin-bottom:.2rem">
+      <div id="kb-vec-bar" style="height:100%;width:0%;background:var(--p);border-radius:10px;transition:width .6s"></div>
+    </div>
+    <div style="font-size:.72rem;color:var(--t3);margin-bottom:.75rem" id="kb-vec-detail">—</div>
+    <!-- 翻译覆盖进度 -->
+    <div style="font-size:.75rem;color:var(--t3);margin-bottom:.3rem;font-weight:600">多语言翻译覆盖</div>
+    <div id="kb-trans-bars" style="display:flex;flex-direction:column;gap:.3rem;margin-bottom:.8rem"></div>
+    <!-- 高频未命中 -->
+    <div style="font-size:.75rem;color:var(--t3);margin-bottom:.3rem;font-weight:600">知识盲区（高频未命中）</div>
+    <div id="kb-miss-list" style="font-size:.78rem"></div>
+    <!-- 回复质量追踪 -->
+    <div style="margin-top:.8rem">
+      <div style="font-size:.75rem;color:var(--t3);margin-bottom:.3rem;font-weight:600">回复质量追踪（7日）</div>
+      <div id="kb-quality-stats" style="font-size:.78rem">加载中…</div>
+    </div>
+  </div>
+</div>
+
+<!-- Recent operations -->
+<div class="card fa fa4 pro-only">
+  <h2>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+    最近操作
+    <div class="actions"><a href="/audit" class="btn btn-s btn-xs">查看全部</a></div>
+  </h2>
+  {% if recent_ops %}
+  <div class="tl">
+    {% for op in recent_ops %}
+    {% set dc = 'ico-p' if 'update' in op.action else ('ico-g' if 'add' in op.action or 'create' in op.action else ('ico-r' if 'del' in op.action or 'remove' in op.action else 'ico-a')) %}
+    <div class="tl-item">
+      <div class="tl-dot {{ dc }}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          {% if 'update' in op.action %}<path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+          {% elif 'del' in op.action or 'remove' in op.action %}<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/>
+          {% else %}<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>{% endif %}
+        </svg>
+      </div>
+      <div class="tl-body">
+        <div class="tl-action">{{ op.action }}</div>
+        <div class="tl-meta">
+          {% if op.operator %}<span>{{ op.operator }}</span>{% endif %}
+          {% if op.channel %}<span>通道: {{ op.channel }}</span>{% endif %}
+        </div>
+      </div>
+      <div class="tl-time">{{ op.ts if op.ts else '' }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+    <p>暂无操作记录</p>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Health Check Modal -->
+<div class="hc-modal" id="hc-modal" onclick="if(event.target===this)closeHealthCheck()">
+  <div class="hc-box">
+    <div class="hc-hd">
+      <div class="hc-score-ring" id="hc-ring">
+        <svg viewBox="0 0 36 36">
+          <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--bd2)" stroke-width="3.2"/>
+          <circle id="hc-ring-fg" cx="18" cy="18" r="15.9" fill="none" stroke="var(--green)"
+                  stroke-width="3.2" stroke-dasharray="0 100" stroke-linecap="round"/>
+        </svg>
+        <div class="hc-score-num" id="hc-score-num">…</div>
+      </div>
+      <div style="flex:1">
+        <div style="font-weight:700;font-size:1rem" id="hc-title">系统诊断</div>
+        <div style="font-size:.78rem;color:var(--t3)" id="hc-subtitle">正在检查…</div>
+      </div>
+      <button class="btn btn-s btn-sm" onclick="runHealthCheck()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+        重新检测
+      </button>
+      <button class="btn btn-s btn-sm" onclick="closeHealthCheck()">✕</button>
+    </div>
+    <div class="hc-body" id="hc-body">
+      <div style="text-align:center;padding:2rem;color:var(--t3)">正在检查系统状态…</div>
+    </div>
+  </div>
+</div>
+
+<div id="panel-backdrop" onclick="closePanel('tpl-panel')"></div>
+
+<script>
+/* Dashboard alert banner */
+var _alertCollapsed=localStorage.getItem('dash_alert_collapsed')==='1';
+async function loadAlerts(){
+  try{
+    var r=await fetch('/api/alert-status');
+    if(!r.ok)return;
+    var d=await r.json();
+    if(!d.alert_count)return;
+    var banner=document.getElementById('alert-banner');
+    var wrap=document.getElementById('alert-wrap');
+    var titleEl=document.getElementById('alert-banner-title');
+    var label=document.getElementById('alert-banner-label');
+    label.textContent=d.alert_count+' 条系统告警';
+    titleEl.className='alert-banner-title '+d.highest_level;
+    wrap.innerHTML=d.alerts.map(function(a){
+      return '<div class="alert-bar '+a.level+'">'+
+        '<span class="alert-icon">'+(a.level==='critical'?'🚨':'⚠️')+'</span>'+
+        '<div class="alert-content"><div class="alert-title">'+a.title+'</div><div class="alert-body">'+a.body+'</div></div>'+
+        (a.action_url?'<a class="alert-action" href="'+a.action_url+'">'+a.action_label+'</a>':'')+
+        '</div>';
+    }).join('');
+    banner.style.display='block';
+    if(_alertCollapsed){wrap.style.display='none';document.getElementById('alert-collapse-btn').textContent='展开';}
+  }catch(e){}
+}
+function toggleAlertBanner(){
+  var wrap=document.getElementById('alert-wrap');
+  var btn=document.getElementById('alert-collapse-btn');
+  var collapsed=wrap.style.display==='none';
+  wrap.style.display=collapsed?'':'none';
+  btn.textContent=collapsed?'收起':'展开';
+  _alertCollapsed=!collapsed;
+  localStorage.setItem('dash_alert_collapsed',_alertCollapsed?'1':'0');
+}
+loadAlerts();
+setInterval(loadAlerts,60000);
+
+/* ── G2: Activity Stats ──────────────────────────── */
+const ACT_COLORS=['#5b7cf6','#10b981','#ef4444','#f59e0b','#8b5cf6','#06b6d4','#ec4899'];
+
+async function loadActivityStats(){
+  try{
+    const r=await fetch('/api/activity-stats?hours=24');
+    if(!r.ok)return;
+    const d=await r.json();
+    document.getElementById('act-loading').style.display='none';
+    document.getElementById('act-content').style.display='';
+
+    /* Bar chart */
+    const bars=document.getElementById('act-bars');
+    const hourly=d.hourly||[];
+    const maxV=Math.max(1,...hourly.map(h=>h.count));
+    bars.innerHTML=hourly.map(h=>{
+      const h100=Math.max(4,Math.round(h.count/maxV*100));
+      return `<div class="act-bar${h.count===0?' zero':''}" style="height:${h100}%" title="${h.label}: ${h.count}次"></div>`;
+    }).join('');
+    const labels=hourly.map(h=>h.label);
+    if(labels.length){
+      document.getElementById('act-h-start').textContent=labels[0];
+      document.getElementById('act-h-end').textContent=labels[labels.length-1];
+    }
+
+    /* Donut chart (pure canvas, no lib) */
+    document.getElementById('act-total-num').textContent=d.total||0;
+    document.getElementById('act-total-badge').textContent=`今日 ${d.total||0} 次操作`;
+    const byAction=d.by_action||{};
+    const entries=Object.entries(byAction).sort((a,b)=>b[1]-a[1]);
+    const canvas=document.getElementById('act-donut');
+    const ctx=canvas.getContext('2d');
+    ctx.clearRect(0,0,90,90);
+    if(entries.length){
+      const total=entries.reduce((s,[,v])=>s+v,0);
+      let angle=-Math.PI/2;
+      entries.forEach(([,v],i)=>{
+        const slice=v/total*Math.PI*2;
+        ctx.beginPath();
+        ctx.moveTo(45,45);
+        ctx.arc(45,45,38,angle,angle+slice);
+        ctx.closePath();
+        ctx.fillStyle=ACT_COLORS[i%ACT_COLORS.length];
+        ctx.fill();
+        angle+=slice;
+      });
+      /* Donut hole */
+      ctx.beginPath();ctx.arc(45,45,26,0,Math.PI*2);ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--card')||'#fff';ctx.fill();
+    }
+    /* Legend */
+    const legend=document.getElementById('act-legend');
+    legend.innerHTML=entries.slice(0,5).map(([k,v],i)=>
+      `<div class="act-legend-item"><div class="act-legend-dot" style="background:${ACT_COLORS[i%ACT_COLORS.length]}"></div><span>${k}</span><strong style="margin-left:auto;color:var(--t)">${v}</strong></div>`
+    ).join('');
+
+    /* Top operators */
+    const topOps=document.getElementById('act-top-ops');
+    topOps.innerHTML=(d.top_operators||[]).map(op=>
+      `<div class="act-op"><span class="act-op-name">${op.name}</span><span>${op.count} 次</span></div>`
+    ).join('');
+  }catch(e){}
+}
+
+/* ── G4: Health Check ───────────────────────────── */
+function openHealthCheck(){
+  document.getElementById('hc-modal').classList.add('show');
+  runHealthCheck();
+}
+function closeHealthCheck(){
+  document.getElementById('hc-modal').classList.remove('show');
+}
+
+async function runHealthCheck(){
+  document.getElementById('hc-body').innerHTML='<div style="text-align:center;padding:2rem;color:var(--t3)">正在检查系统状态…</div>';
+  document.getElementById('hc-score-num').textContent='…';
+  document.getElementById('hc-ring-fg').setAttribute('stroke-dasharray','0 100');
+  try{
+    const r=await fetch('/api/health-check');
+    const d=await r.json();
+    /* Score ring */
+    const score=d.score||0;
+    const scoreColor=score>=80?'var(--green)':score>=50?'var(--amber)':'var(--red)';
+    document.getElementById('hc-ring-fg').setAttribute('stroke-dasharray',`${score} 100`);
+    document.getElementById('hc-ring-fg').setAttribute('stroke',scoreColor);
+    document.getElementById('hc-score-num').textContent=score;
+    document.getElementById('hc-score-num').style.color=scoreColor;
+    const ls=d.level_summary||{};
+    const subtitle=d.status==='ok'?'系统健康，无问题发现':`发现 ${ls.critical||0} 严重 / ${ls.warn||0} 警告 / ${ls.info||0} 提示`;
+    document.getElementById('hc-subtitle').textContent=subtitle;
+
+    /* Issues list */
+    const issues=d.issues||[];
+    if(!issues.length){
+      document.getElementById('hc-body').innerHTML=`
+<div class="hc-issue ok">
+  <div class="hc-icon">✅</div>
+  <div class="hc-content"><div class="hc-title">所有检查项均正常</div><div class="hc-detail">系统配置完整，无需处理</div></div>
+</div>`;
+    }else{
+      const ICONS={critical:'🚨',warn:'⚠️',info:'ℹ️'};
+      document.getElementById('hc-body').innerHTML=issues.map(iss=>`
+<div class="hc-issue ${iss.level}">
+  <div class="hc-icon">${ICONS[iss.level]||'•'}</div>
+  <div class="hc-content">
+    <div class="hc-title"><span class="hc-cat">${iss.category}</span>${iss.title}</div>
+    ${iss.detail?`<div class="hc-detail">${iss.detail}</div>`:''}
+  </div>
+  ${iss.action_url?`<a href="${iss.action_url}" class="btn btn-s btn-xs" style="flex-shrink:0;align-self:center">${iss.action_label}</a>`:''}
+</div>`).join('');
+    }
+  }catch(e){
+    document.getElementById('hc-body').innerHTML='<div style="text-align:center;padding:2rem;color:var(--red)">检查失败，请稍后重试</div>';
+  }
+}
+
+/* ── Bot 实时性能指标 ─────────────────────── */
+async function loadBotMetrics(){
+  try{
+    const r=await fetch('/api/bot-metrics');
+    if(!r.ok)return;
+    const d=await r.json();
+    document.getElementById('bm-loading').style.display='none';
+    document.getElementById('bm-content').style.display='';
+    document.getElementById('bm-received').textContent=d.messages_received||0;
+    document.getElementById('bm-replied').textContent=d.messages_replied||0;
+    document.getElementById('bm-avg-rt').textContent=Math.round(d.response_time_avg||0);
+    document.getElementById('bm-p99-rt').textContent=Math.round(d.response_time_p99||0);
+    document.getElementById('bm-concurrency').textContent=(d.active_tasks||0)+'/'+(d.concurrency_limit||'—');
+    document.getElementById('bm-queue').textContent=(d.queue_size||0)+'/'+(d.queue_drops||0);
+    const errEl=document.getElementById('bm-errors');
+    errEl.textContent=d.errors_count||0;
+    errEl.style.color=(d.errors_count>0)?'var(--red)':'var(--t)';
+    const aiEl=document.getElementById('bm-ai-status');
+    if(d.ai_healthy){aiEl.textContent='正常';aiEl.style.color='var(--green)';}
+    else{aiEl.textContent='异常('+d.ai_errors+')';aiEl.style.color='var(--red)';}
+    const cb=d.circuit_breaker||{};
+    if(cb.state==='open'){aiEl.textContent='熔断中';aiEl.style.color='var(--red)';}
+    // trigger layers
+    const tl=d.trigger_layers||{};
+    const tlEl=document.getElementById('bm-trigger-layers');
+    const LAYER_NAMES={l1:'L1规则',l2:'L2语义',l3_filtered:'L3过滤',l4_silenced:'L4静默',skipped:'跳过'};
+    const LAYER_COLORS={l1:'var(--green)',l2:'var(--p)',l3_filtered:'var(--amber)',l4_silenced:'var(--t3)',skipped:'var(--red)'};
+    tlEl.innerHTML=Object.entries(tl).map(([k,v])=>
+      `<span style="background:var(--input);padding:.2rem .5rem;border-radius:12px;border-left:3px solid ${LAYER_COLORS[k]||'var(--t3)'}">${LAYER_NAMES[k]||k} <b>${v}</b></span>`
+    ).join('');
+    // quality
+    const rq=d.reply_quality||{};
+    const qEl=document.getElementById('bm-quality');
+    qEl.innerHTML=[
+      rq.avg_reply_length?`平均回复 <b>${rq.avg_reply_length}</b> 字`:'',
+      rq.fallback_count?`兜底 <b style="color:var(--amber)">${rq.fallback_count}</b> (${rq.fallback_rate_pct}%)`:'',
+      rq.truncated_count?`截断 <b style="color:var(--red)">${rq.truncated_count}</b> (${rq.truncated_rate_pct}%)`:'',
+    ].filter(Boolean).join(' · ');
+    const mem=d.memory;
+    const mEl=document.getElementById('bm-memory');
+    if(mEl&&mem!==undefined){
+      const st=mem&&mem.slow_think!=null?mem.slow_think:0;
+      const ej=mem&&mem.episodic_inject!=null?mem.episodic_inject:0;
+      const ef=mem&&mem.embed_fail!=null?mem.embed_fail:0;
+      const bf=mem&&mem.episodic_backfill_rows!=null?mem.episodic_backfill_rows:0;
+      const sa=d.startup_advisories||{};
+      const sat=sa.total!=null?sa.total:0;
+      const saw=sa.warnings!=null?sa.warnings:0;
+      const sal=sa.audit_logged_warnings;
+      const saStr=(sat>0||saw>0||sal!=null)?(' · 基线 <b>'+sat+'</b>/<b style="color:'+(saw>0?'var(--amber)':'inherit')+'">'+saw+'</b> · 审计 <b>'+(sal==null?'—':sal)+'</b>'):'';
+      mEl.innerHTML='记忆 · 慢思考 <b>'+st+'</b> · 注入 <b>'+ej+'</b> · 嵌入失败 <b style="color:'+(ef>0?'var(--amber)':'inherit')+'">'+ef+'</b> · 补全 <b>'+bf+'</b> · <a href="/episodic-memory" style="color:var(--p)">情景记忆</a>'+saStr;
+    }
+    document.getElementById('metrics-ts').textContent='更新: '+new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  }catch(e){}
+}
+const _isSimple=document.documentElement.getAttribute('data-ui-mode')==='simple';
+if(!_isSimple){loadBotMetrics();}
+let _bmTimer=_isSimple?null:setInterval(loadBotMetrics,15000);
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden){clearInterval(_bmTimer);}
+  else{loadBotMetrics();_bmTimer=setInterval(loadBotMetrics,15000);}
+});
+
+/* ── 触发器决策日志 ──────────────────────── */
+async function loadTriggerDecisions(){
+  try{
+    const r=await fetch('/api/trigger-decisions?limit=20');
+    if(!r.ok)return;
+    const d=await r.json();
+    document.getElementById('td-loading').style.display='none';
+    const list=d.decisions||[];
+    if(!list.length){
+      document.getElementById('td-empty').style.display='';
+      document.getElementById('td-content').style.display='none';
+      return;
+    }
+    document.getElementById('td-content').style.display='';
+    document.getElementById('td-empty').style.display='none';
+    const LAYER_MAP={l1:{icon:'🎯',color:'var(--green)',label:'L1规则'},l2:{icon:'🧠',color:'var(--p)',label:'L2语义'},l3_filtered:{icon:'🔇',color:'var(--amber)',label:'L3过滤'},l4_silenced:{icon:'💤',color:'var(--t3)',label:'L4静默'},skipped:{icon:'⏭️',color:'var(--red)',label:'跳过'}};
+    document.getElementById('td-list').innerHTML=list.map(function(d){
+      var lyr=d.layer||d.result||'?';
+      var info=LAYER_MAP[lyr]||{icon:'❓',color:'var(--t2)',label:lyr};
+      var ts=d.ts||'';
+      var tsFmt=ts?ts.substring(11,19):'';
+      var chat=d.chat||d.chat_title||'';
+      var user=d.user||d.username||'';
+      var reason=d.reason||d.detail||'';
+      var conf=d.confidence!=null?(' '+Math.round(d.confidence*100)+'%'):'';
+      return '<div class="tl-item" style="gap:.6rem;padding:.4rem 0">'+
+        '<div style="width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:.9rem;flex-shrink:0;background:var(--input)">'+info.icon+'</div>'+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="font-size:.82rem;font-weight:600;display:flex;align-items:center;gap:.4rem">'+
+            '<span style="color:'+info.color+'">'+info.label+conf+'</span>'+
+            (chat?'<span style="font-size:.72rem;color:var(--t3)">'+chat+'</span>':'')+
+          '</div>'+
+          (reason?'<div style="font-size:.73rem;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px" title="'+reason.replace(/"/g,'&quot;')+'">'+reason+'</div>':'')+
+        '</div>'+
+        '<div style="font-size:.7rem;color:var(--t3);white-space:nowrap">'+tsFmt+'</div>'+
+      '</div>';
+    }).join('');
+  }catch(e){}
+}
+if(!_isSimple){loadTriggerDecisions();setInterval(loadTriggerDecisions,30000);}
+
+/* Init — skip heavy loads in simple mode */
+if(!_isSimple) loadActivityStats();
+
+/* ── 系统状态条 ──────────────────────────────────── */
+let _sysBarTimer = null;
+async function loadSysBar(){
+  try{
+    const r = await fetch('/api/system-info');
+    if(!r.ok) return;
+    const d = await r.json();
+    const bar  = document.getElementById('sys-bar');
+    const pills= document.getElementById('sys-pills');
+    const upd  = document.getElementById('sys-upd-time');
+
+    const _fmt = s => {
+      if(s==null) return '—';
+      if(s<60) return s+'s';
+      if(s<3600) return Math.floor(s/60)+'m';
+      if(s<86400) return Math.floor(s/3600)+'h';
+      return Math.floor(s/86400)+'d';
+    };
+    const _mem = mb => mb!=null ? mb+'MB' : '—';
+    const _ago = ts => {
+      if(!ts) return '从未';
+      const diff = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+      if(diff<60) return diff+'秒前';
+      if(diff<3600) return Math.floor(diff/60)+'分钟前';
+      if(diff<86400) return Math.floor(diff/3600)+'小时前';
+      return Math.floor(diff/86400)+'天前';
+    };
+
+    const items = [
+      {cls: d.bot_online?'ok':'err', icon: d.bot_online?'●':'●', label: d.bot_online?'Bot 在线':'Bot 离线'},
+      {cls: 'ok', icon: '📚', label: (d.kb_entries||0)+' 条知识'},
+      d.memory_mb ? {cls:'', icon:'💾', label: _mem(d.memory_mb)} : null,
+      {cls: '', icon: '⏱', label: '运行 '+_fmt(d.uptime_s)},
+      {cls: '', icon: '👥', label: (d.admin_users||0)+' 管理员'},
+      d.embedding_ok ? {cls:'ok', icon:'🔮', label:'向量化已开启'} : {cls:'warn', icon:'🔮', label:'向量化未配置'},
+    ].filter(Boolean);
+
+    pills.innerHTML = items.map(it=>
+      `<span class="sys-pill ${it.cls}"><span class="dot" style="display:${it.icon==='●'?'block':'none'}"></span>${it.icon !== '●' ? it.icon+' ' : ''}${it.label}</span>`
+    ).join('');
+    upd.textContent = '更新于 '+new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    bar.classList.add('show');
+  } catch(e){}
+}
+if(!_isSimple) loadSysBar();
+// 每 60 秒自动刷新，页面隐藏时暂停
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden){ clearInterval(_sysBarTimer); }
+  else { loadSysBar(); _sysBarTimer = setInterval(loadSysBar, 60000); }
+});
+_sysBarTimer = setInterval(loadSysBar, 60000);
+
+/* ── 知识库健康卡片 ───────────────────────────────── */
+async function loadKbHealth(){
+  try{
+    // 并行拉取所有数据
+    const [r, r2, r3, r4] = await Promise.all([
+      fetch('/api/kb/health-stats'),
+      fetch('/api/kb/embed-coverage'),
+      fetch('/api/kb/today-hit-rate'),
+      fetch('/api/kb/query-analytics?hours=24'),
+    ]);
+    if(!r.ok)return;
+    const d=await r.json();
+    document.getElementById('kb-loading').style.display='none';
+    document.getElementById('kb-content').style.display='';
+
+    const s=d.stats||{};
+    document.getElementById('kb-d-entries').textContent=s.total_entries||0;
+    var kbCountEl=document.getElementById('kb-entry-count');
+    if(kbCountEl) kbCountEl.textContent=s.total_entries||0;
+    const sat=d.recent_feedback_7d>0 ? d.recent_satisfaction+'%' : '—';
+    const satEl=document.getElementById('kb-d-sat');
+    satEl.textContent=sat;
+    if(d.recent_satisfaction>=80) satEl.style.color='var(--green)';
+    else if(d.recent_satisfaction>=50) satEl.style.color='var(--amber)';
+    else satEl.style.color='var(--red)';
+
+    // 今日命中率
+    if(r3.ok){
+      const hr=await r3.json();
+      const hrEl=document.getElementById('kb-d-hitrate');
+      const qEl=document.getElementById('kb-d-queries');
+      hrEl.textContent=(hr.total>0 ? hr.hit_pct+'%' : '—');
+      hrEl.style.color=hr.hit_pct>=70?'var(--green)':hr.hit_pct>=40?'var(--amber)':'var(--red)';
+      qEl.textContent=hr.total||0;
+    }
+    // 命中率迷你趋势图
+    if(r4.ok){
+      const qa=await r4.json();
+      const hours=qa.hours||[];
+      const sl=document.getElementById('kb-sparkline');
+      if(sl&&hours.length){
+        const maxV=Math.max(...hours.map(h=>h.hits+h.misses),1);
+        sl.innerHTML=hours.map(h=>{
+          const total=h.hits+h.misses;
+          const hitPct=total>0?h.hits/total:0;
+          const barH=Math.max(Math.round(32*(total/maxV)),2);
+          const col=hitPct>=0.7?'var(--green)':hitPct>=0.4?'var(--amber)':'var(--red)';
+          return `<div style="flex:1;height:${barH}px;background:${total>0?col:'var(--bd2)'};border-radius:2px;transition:height .4s" title="${h.hour}时: ${h.hits}命中/${total}次"></div>`;
+        }).join('');
+      } else if(sl){
+        sl.innerHTML='<div style="color:var(--t3);font-size:.73rem;align-self:center;width:100%;text-align:center">暂无查询数据</div>';
+      }
+    }
+
+    // 向量化覆盖率 + 检索模式
+    if(r2.ok){
+      const cov=await r2.json();
+      const pct=cov.pct||0;
+      document.getElementById('kb-vec-bar').style.width=pct+'%';
+      document.getElementById('kb-vec-detail').textContent=
+        `${cov.done||0}/${cov.total||0} 条已向量化  ·  ${pct}%`;
+      const modeEl=document.getElementById('kb-search-mode-badge');
+      if(cov.mode&&cov.mode.includes('hybrid')){
+        modeEl.innerHTML='<span style="background:#d4edda;color:#155724;padding:.15rem .6rem;border-radius:99px;font-size:.72rem">✅ 混合检索（BM25 + 向量 RRF）</span>';
+      } else {
+        modeEl.innerHTML='<span style="background:#fff3cd;color:#856404;padding:.15rem .6rem;border-radius:99px;font-size:.72rem">⚠️ 纯 BM25 · 向量化后可提升同义词匹配</span>';
+      }
+    }
+
+    // 翻译覆盖进度条
+    const tc=d.translation_coverage||{};
+    const LANGS={en:'EN',ur:'UR',pt:'PT',ar:'AR'};
+    document.getElementById('kb-trans-bars').innerHTML=Object.entries(LANGS).map(([l,name])=>{
+      const pct=tc[l]||0;
+      const color=pct>=90?'var(--green)':pct>=50?'var(--amber)':'var(--red)';
+      return `<div style="display:flex;align-items:center;gap:.5rem">
+        <span style="width:24px;font-size:.72rem;color:var(--t3);text-align:right">${name}</span>
+        <div style="flex:1;height:7px;background:var(--bd2);border-radius:10px;overflow:hidden">
+          <div style="width:${pct}%;height:100%;background:${color};border-radius:10px;transition:width .8s"></div>
+        </div>
+        <span style="width:36px;font-size:.7rem;color:var(--t3);text-align:right">${pct}%</span>
+      </div>`;
+    }).join('');
+
+    // 未命中查询
+    const miss=d.miss_queries||[];
+    document.getElementById('kb-miss-list').innerHTML=miss.length?
+      miss.slice(0,5).map(m=>`<div style="display:flex;justify-content:space-between;padding:.2rem 0;border-bottom:1px solid var(--bd)">
+        <span style="color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px">${m.query}</span>
+        <span style="color:var(--red);font-size:.72rem;flex-shrink:0">×${m.cnt}</span>
+      </div>`).join('')
+      :'<span style="color:var(--t3)">暂无未命中记录</span>';
+
+    // 回复质量统计
+    try{
+      const qr=await fetch('/api/kb/reply-quality?days=7');
+      const qd=qr.ok?await qr.json():{};
+      const qEl=document.getElementById('kb-quality-stats');
+      if(qd.total>0){
+        const satColor=qd.satisfaction>=80?'var(--green)':qd.satisfaction>=50?'var(--amber)':'var(--red)';
+        qEl.innerHTML=`
+          <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.3rem">
+            <span>满意度 <b style="color:${satColor}">${qd.satisfaction}%</b></span>
+            <span>正面 <b style="color:var(--green)">${qd.positive}</b></span>
+            <span>负面 <b style="color:var(--red)">${qd.negative}</b></span>
+          </div>
+          <div style="font-size:.72rem;color:var(--t3)">
+            重复追问 ${qd.by_source?.auto_repeat||0} · 情绪检测 ${qd.by_source?.auto_detect||0} · 人工 ${qd.by_source?.manual||0}
+          </div>`;
+      }else{
+        qEl.innerHTML='<span style="color:var(--t3)">暂无反馈数据</span>';
+      }
+    }catch(e){}
+  }catch(e){}
+}
+loadKbHealth();
+// 自动刷新 KB 健康卡片（5 分钟，页面隐藏时暂停）
+let _kbRefreshTimer = setInterval(loadKbHealth, 5 * 60 * 1000);
+document.addEventListener('visibilitychange', ()=>{
+  if(document.hidden){ clearInterval(_kbRefreshTimer); }
+  else { _kbRefreshTimer = setInterval(loadKbHealth, 5 * 60 * 1000); loadKbHealth(); }
+});
+</script>
+{% endblock %}

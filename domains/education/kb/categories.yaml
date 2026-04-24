@@ -1,0 +1,22 @@
+# Education domain KB categories
+
+categories:
+  - name: "课程信息"
+    description: "课表、大纲、教材、考勤"
+    triggers: ["课程", "大纲", "教材", "考勤", "学分"]
+
+  - name: "作业辅导"
+    description: "作业要求、思路提示、格式"
+    triggers: ["作业", "deadline", "提交", "题目", "hint"]
+
+  - name: "考试准备"
+    description: "复习计划、考点、样题"
+    triggers: ["考试", "期中", "期末", "复习", "考点"]
+
+  - name: "学习方法"
+    description: "笔记、记忆、时间管理"
+    triggers: ["学习方法", "效率", "笔记", "拖延"]
+
+  - name: "技术概念"
+    description: "编程/理工/通识概念解释"
+    triggers: ["概念", "定义", "为什么", "区别"]
