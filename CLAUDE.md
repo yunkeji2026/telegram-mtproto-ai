@@ -15,7 +15,7 @@
 ```bash
 python -m pytest tests/ -n auto -q
 ```
-预期 **1090 passed, 8 skipped ~15 秒**。CI 用同一命令。
+预期：全绿，0 fail，CI ~50 秒（baseline 266 → 4x+ 当前规模；不存具体数字，每次合 PR 会增加，按 `git log` 看实际）。
 
 **仅 contacts/handoff 主线**（快速回归）：
 ```bash
@@ -23,9 +23,10 @@ python -m pytest tests/test_contacts_*.py tests/test_gateway_*.py \
   tests/test_account_limiter.py tests/test_handoff_readiness.py \
   tests/test_intimacy_engine.py tests/test_reactivation_scheduler.py \
   tests/test_handoff_*.py tests/test_cap_alert.py \
-  tests/test_rpa_contact_hooks_wireup.py -q --tb=line
+  tests/test_rpa_contact_hooks_wireup.py tests/test_contacts_runner_bridge.py \
+  -q --tb=line
 ```
-预期 **266 全绿**（是全量 1090 的子集）。
+预期：全绿（contacts/handoff 主线子集，含 runner→真 hooks→store bridge 测试）。
 
 ### Feature flag 约定
 
@@ -40,7 +41,8 @@ python -m pytest tests/test_contacts_*.py tests/test_gateway_*.py \
 
 ### 崩溃恢复提示
 
-- 本项目不在 git 之前的工作记录在 `DEPLOYMENT_STATUS.md` / `TODO_NEXT.md` / `docs/` 下多份 `*_PLAN.md`（历史文档，可能已过期，以代码为准）
+- 本项目不在 git 之前的工作记录在 `DEPLOYMENT_STATUS.md` / `TODO_NEXT.md` / `docs/` 下多份 `*_PLAN.md` 与早期分析（历史文档，可能已过期，**以代码为准**）
+- 已知含**虚构 model ID** `claude-4.6-oups-high` 的 deprecated docs（不要被这些占位误导）：`CURSOR_DEVELOPMENT_GUIDE.md`、`CURSOR_HANDOFF.md`、`docs/MONITORING_PLAN.md`、`docs/MONITORING_API_SPEC.md`、`docs/ORDER_REPLY_GENERATION_ANALYSIS.md`、`docs/LOG_ANALYSIS_OPTIMIZATIONS.md`——本 repo 实际 ai provider 见 `README.md` + `config/config.yaml::ai`
 - `~/.claude/projects/C--telegram-mtproto-ai/memory/` 里 `MEMORY.md` 按项目分组，本项目条目见 "Project: telegram-mtproto-ai" 段
 - 关键教训：`project_tasklist_drift.md` — 文档落后于代码，重入时以 `grep` 验证代码实况再信任任务列表
 
