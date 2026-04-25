@@ -171,6 +171,7 @@ config/snapshots/
 
 # Messenger RPA 截图 + replays（含他人对话）
 tmp_messenger_rpa/
+tmp_e2e_screens/
 
 # Temp 缓存
 temp/
