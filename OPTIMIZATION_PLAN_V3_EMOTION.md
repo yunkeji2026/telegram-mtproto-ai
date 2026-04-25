@@ -23,6 +23,15 @@
 > 项目当前 ai 配置已是 DeepSeek-V3（`deepseek-chat`）。本节主要是**参数调优**（temperature / max_tokens / timeout / system_prompt），不是切 provider。
 > 备选 provider（不替换当前 deepseek，按需配 alt）：`deepseek-reasoner`（DeepSeek-R1 推理）/ `gpt-4o-mini`（OpenAI 兼容）/ `glm-4-plus`（智谱）/ Ollama 本地。
 
+> **⚠️ system_prompt 警告 (2026-04-25 审查)**：下方 yaml 示例里的 Camille 客服 prompt 是 **`config.example.yaml` 的公开模板**——`config/config.yaml` 的 production system_prompt 通常按业务定制（如 `conversion` 域已替换为更长的角色化营销 prompt）。
+>
+> **修改 production system_prompt 前必须先读 `config/config.yaml::ai.system_prompt` 看实际内容**——否则会误覆盖业务侧已调优的人格策略。本文档不在 git 里展开 production 全文（含敏感行业策略）。
+>
+> 三层 prompt 装载顺序（见 `src/ai/ai_client.py::_primary_system_prompt_text` + `set_domain_pack`）：
+> 1. **`ai.system_prompt`** in `config/config.yaml`（最高优先级，业务自定义）
+> 2. **域包 system_prompt**（按 `domains/{ecommerce, conversion, payment, ...}` 路由 fallback；当 config.yaml 留空时启用）
+> 3. **persona runtime**（Web 后台「默认人设」+ `persona_runtime.yaml`）—— 与上面两层**叠加**，由 `persona_block_detail` 控制展开/精简/不注入
+
 ```yaml
 ai:
   provider: "openai_compatible"      # 项目实际 provider，无需改
