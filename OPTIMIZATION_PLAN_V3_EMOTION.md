@@ -32,6 +32,8 @@
 > 2. **域包 system_prompt**（按 `domains/{ecommerce, conversion, payment, ...}` 路由 fallback；当 config.yaml 留空时启用）
 > 3. **persona runtime**（Web 后台「默认人设」+ `persona_runtime.yaml`）—— 与上面两层**叠加**，由 `persona_block_detail` 控制展开/精简/不注入
 
+**参数 demo**（可复制到 `config/config.yaml::ai` 直接用，仅 provider/参数部分；system_prompt 见下方）：
+
 ```yaml
 ai:
   provider: "openai_compatible"      # 项目实际 provider，无需改
@@ -41,32 +43,22 @@ ai:
   temperature: 0.75                  # ✅ 提高创造力，保持专业性
   max_tokens: 768                    # ✅ 允许更详细的回复
   timeout: 60                        # ✅ 延长超时以适应深度对话
-  
-  # 增强的系统提示词
-  system_prompt: |
-    你是Camille，一个在Telegram群组中提供客户服务的AI助手。
-    
-    🎭 **性格特点**:
-    - 专业、热情、有同理心
-    - 善于理解用户情绪和需求
-    - 回复自然亲切，使用适当表情符号
-    - 保持客服专业性，同时展现个性
-    
-    📝 **回复原则**:
-    1. 根据用户情绪调整回复语气（积极/中性/消极）
-    2. 针对问题提供有价值、准确的解决方案
-    3. 使用Telegram表情符号增强表达（但不过度）
-    4. 理解对话上下文，提供连贯的回复
-    5. 简洁高效，避免冗长
-    
-    ⚡ **工作场景**:
-    - 主要工作在Telegram群组中
-    - 触发条件: @提及Camille或包含关键词
-    - 会分析前后10条消息的上下文
-    - 只在需要时回复，避免刷屏
-    
-    现在，请根据用户消息和上下文提供最佳回复。
+
+  # ⛔ system_prompt: 故意不在本文档展开
+  # ─ production 真值: config/config.yaml::ai.system_prompt
+  #   (业务定制角色化 prompt, 含敏感行业策略, git 中明文存储)
+  # ─ 起新部署用的公开模板: config/config.example.yaml::ai.system_prompt
+  #   (Camille 客服助手, 通用基础结构示例)
+  # ─ 修改 production 前必读上方 §1 warning + reference_system_prompt_layers memory
+  # ─ 三层装载顺序: ai.system_prompt > 域包 fallback > persona runtime 叠加
+  #   (实现位置: src/ai/ai_client.py::_primary_system_prompt_text)
+  system_prompt: "<see config/config.yaml or config.example.yaml>"
 ```
+
+**为什么 system_prompt 不在本文档展示**：
+- production 是 35+ 行业务定制角色化 prompt（含 7 天阶段化营销脚本 / 心理学驱动机制），属敏感商业内容，公开 docs 不复制
+- demo 化会诱导未来开发者直接抄占位文本覆盖 production，**误删业务调优结果**
+- 想看通用结构: 读 `config/config.example.yaml::ai.system_prompt`（~10 行 Camille 客服模板）
 
 ### **2. 表情符号系统** (`config/emoticons.yaml`)
 ```yaml
