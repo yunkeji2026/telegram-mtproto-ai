@@ -225,6 +225,15 @@ class MessengerRpaService:
                 runner.set_contact_hooks(_hooks)
             except Exception:
                 logger.debug("runner.set_contact_hooks 失败", exc_info=True)
+        # Phase 1：若已构建 PortraitExtractor，同步给新建 runner
+        _ext = getattr(self, "_portrait_extractor", None)
+        if _ext is not None:
+            try:
+                runner.set_portrait_extractor(_ext)
+            except Exception:
+                logger.debug(
+                    "runner.set_portrait_extractor 失败", exc_info=True
+                )
         self._runners[account_id] = runner
         logger.info(
             "[messenger_rpa] Runner 为 account=%s 初始化完成 "
@@ -304,8 +313,14 @@ class MessengerRpaService:
         """main.py 在 contacts 子系统 bootstrap 后调用，把 hooks 广播给所有 runner。
 
         W4-Runner：保持 hooks 的引用，新建 runner 时也会自动继承。
+        Phase 1：在 hooks 设置时尝试构建 PortraitExtractor（需要 store + ai_client）。
         """
         self._contact_hooks = hooks
+        # Phase 1：基于 GatewayContactHooks 的 store 自动建 extractor
+        try:
+            self._maybe_build_portrait_extractor(hooks)
+        except Exception:
+            logger.debug("[messenger_rpa] portrait extractor 构建失败", exc_info=True)
         for aid, r in list(self._runners.items()):
             try:
                 r.set_contact_hooks(hooks)
@@ -313,6 +328,64 @@ class MessengerRpaService:
                 logger.debug(
                     "set_contact_hooks 到 runner(%s) 失败", aid, exc_info=True,
                 )
+            # Phase 1：联动同步 extractor
+            ext = getattr(self, "_portrait_extractor", None)
+            if ext is not None:
+                try:
+                    r.set_portrait_extractor(ext)
+                except Exception:
+                    logger.debug(
+                        "set_portrait_extractor 到 runner(%s) 失败", aid,
+                        exc_info=True,
+                    )
+
+    def _maybe_build_portrait_extractor(self, hooks: Optional[Any]) -> None:
+        """Phase 1：从 GatewayContactHooks 取 store + 从 SkillManager 取 ai_client，
+        构建 PortraitExtractor。任一依赖缺失则置 None（runner 跳过画像抽取）。
+
+        config 项 messenger_rpa.portrait（可选）：
+            enabled: true
+            refresh_every_n_inbound: 5
+            refresh_after_hours: 24
+            max_inbound_messages_for_extract: 12
+        """
+        pcfg = (self._merged_cfg.get("portrait") or {})
+        if not bool(pcfg.get("enabled", True)):
+            self._portrait_extractor = None
+            return
+        gw = getattr(hooks, "_gw", None) if hooks is not None else None
+        store = getattr(gw, "_store", None) if gw is not None else None
+        ai = getattr(self._sm, "ai_client", None) if self._sm is not None else None
+        if store is None or ai is None:
+            self._portrait_extractor = None
+            return
+        try:
+            from src.contacts.portrait_extractor import PortraitExtractor
+            self._portrait_extractor = PortraitExtractor(
+                store=store,
+                ai_client=ai,
+                refresh_every_n_inbound=int(
+                    pcfg.get("refresh_every_n_inbound", 5) or 5
+                ),
+                refresh_after_hours=float(
+                    pcfg.get("refresh_after_hours", 24) or 24
+                ),
+                max_inbound_messages_for_extract=int(
+                    pcfg.get("max_inbound_messages_for_extract", 12) or 12
+                ),
+                ai_max_tokens=int(pcfg.get("ai_max_tokens", 400) or 400),
+            )
+            logger.info(
+                "[messenger_rpa] PortraitExtractor 已就绪 (refresh_every_n=%d, "
+                "refresh_after_hours=%.1f)",
+                self._portrait_extractor._n,
+                self._portrait_extractor._refresh_after_sec / 3600.0,
+            )
+        except Exception:
+            logger.warning(
+                "[messenger_rpa] PortraitExtractor 构建异常", exc_info=True
+            )
+            self._portrait_extractor = None
 
     # ── 默认与合并 ───────────────────────────────────────
     def _defaults(self) -> Dict[str, Any]:

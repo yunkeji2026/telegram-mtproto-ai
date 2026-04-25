@@ -644,6 +644,8 @@ class SkillManager(LoggerMixin):
                 "messenger_rpa_style_hint", "messenger_rpa_chat_key",
                 "messenger_rpa_peer_kind",
                 "is_group", "mentioned", "vision_room",
+                # Phase 1：用户画像上下文 — 由 runner 从 ContactGateway 渲染好后注入
+                "contact_id", "_contact_portrait_block",
             )
             for _mk in _line_merge_keys:
                 if _mk in context and context[_mk] is not None:
@@ -871,7 +873,8 @@ class SkillManager(LoggerMixin):
             _total_rounds = len(_conv_hist) // 2
             if _total_rounds > _COMPRESS_THRESHOLD:
                 _old_msgs = _conv_hist[:(-_KEEP_VERBATIM * 2)]
-                _summary = self._compress_history(_old_msgs)
+                # ★ Phase 2：默认用 LLM 摘要（更连贯），rule-based 作 fallback
+                _summary = await self._summarize_history_with_fallback(_old_msgs)
                 _conv_hist = _conv_hist[-_KEEP_VERBATIM * 2:]
                 user_context['_conversation_summary'] = _summary
             elif _total_rounds > _KEEP_VERBATIM:
@@ -1216,7 +1219,7 @@ class SkillManager(LoggerMixin):
                     )
                     user_context.pop("last_reply", None)
                     user_context["_conversation_history"] = []
-                    user_context.pop("_conversation_summary", None)
+                    # ★ Phase 2：保留 _conversation_summary 跨话题切换（摘要承载长期事实）
                     user_context["_intent_chain"] = [intent]
                     user_context.pop("_chain_pattern", None)
                     user_context.pop("_case_id", None)
@@ -2389,6 +2392,32 @@ class SkillManager(LoggerMixin):
 
         summary = " | ".join(parts) if parts else "（早期对话无关键业务实体，可依近期轮次理解）"
         return summary[:300]
+
+    async def _summarize_history_with_fallback(
+        self, old_messages: list,
+    ) -> str:
+        """Phase 2：优先用 LLM (`ai_client.summarize_conversation`) 生成连贯摘要；
+        失败 / 超时 / 配置关闭 → 回退到 rule-based `_compress_history`。
+
+        config 项 `ai.summarize_with_llm` (默认 true)。
+        """
+        cfg_root = (self.config.config or {}) if self.config and hasattr(self.config, "config") else {}
+        use_llm = bool((cfg_root.get("ai") or {}).get("summarize_with_llm", True))
+        if use_llm and getattr(self, "ai_client", None) is not None:
+            ai = self.ai_client
+            if hasattr(ai, "summarize_conversation"):
+                try:
+                    s = await ai.summarize_conversation(
+                        old_messages, max_chars=300, timeout_sec=10.0,
+                    )
+                    if s and isinstance(s, str) and s.strip():
+                        return s.strip()[:300]
+                except Exception as ex:
+                    self.logger.warning(
+                        "[summary] LLM summarize 失败 (%s:%s)，回退 rule-based",
+                        type(ex).__name__, ex,
+                    )
+        return self._compress_history(old_messages)
 
     # �€�€ L4: 用户画像���推断 �€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€
     _URGENCY_WORDS = re.compile(

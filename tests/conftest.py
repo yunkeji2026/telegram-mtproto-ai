@@ -178,6 +178,56 @@ def auth_client(client, config_dir):
     return client
 
 
+# ─────────────────────────────────────────────────────────
+# Contacts integration fixtures (Phase 1+ e2e 复用)
+# ─────────────────────────────────────────────────────────
+
+@pytest.fixture()
+def contacts_store(tmp_path):
+    """真 SQLite ContactStore（每测试独立 db）。"""
+    from src.contacts.store import ContactStore
+    db_path = tmp_path / "contacts_e2e.db"
+    store = ContactStore(str(db_path))
+    yield store
+    try:
+        store.close()
+    except Exception:
+        pass
+
+
+@pytest.fixture()
+def contacts_gateway(contacts_store):
+    """真 ContactGateway（含 HandoffTokenService + MergeService）。"""
+    from src.contacts.gateway import ContactGateway
+    from src.contacts.handoff import HandoffTokenService
+    from src.contacts.merge import MergeService
+    return ContactGateway(
+        contacts_store,
+        HandoffTokenService(contacts_store, ttl_seconds=3600),
+        MergeService(contacts_store),
+    )
+
+
+@pytest.fixture()
+def contacts_hooks(contacts_gateway):
+    """真 GatewayContactHooks。"""
+    from src.contacts.rpa_hooks import GatewayContactHooks
+    return GatewayContactHooks(contacts_gateway)
+
+
+@pytest.fixture()
+def mock_ai_client_ja():
+    """mock AIClient.chat 默认返日文 portrait JSON（可在测试中 override）。"""
+    from unittest.mock import AsyncMock, MagicMock
+    ai = MagicMock()
+    ai.chat = AsyncMock(return_value=(
+        '{"language":"ja","tone":"casual_friendly",'
+        '"interests":["旅行","料理"],"recent_topics":["週末の予定"],'
+        '"key_facts":["日本在住"],"intimacy_signal":"warming"}'
+    ))
+    return ai
+
+
 @pytest.fixture()
 def viewer_client(app, config_dir):
     """已认证为 viewer 角色的客户端"""

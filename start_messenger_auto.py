@@ -209,6 +209,36 @@ async def _build_skill_manager(cm: ConfigManager):
     return sk
 
 
+async def _maybe_bootstrap_contacts(cm: ConfigManager, svc: Any) -> None:
+    """Phase 1：尝试 bootstrap contacts 子系统并把 hooks 注入 messenger_rpa svc。
+    contacts.enabled=false 或 bootstrap 失败时静默跳过（runner 仍能跑）。
+    """
+    try:
+        from src.contacts import bootstrap_contacts_subsystem
+        cfg_dir = Path(cm.config_path).parent
+        contacts = bootstrap_contacts_subsystem(cm, cfg_dir)
+        if contacts is None:
+            _print("contacts subsystem", False, "未启用（contacts.enabled=false 或 config 缺失）")
+            return
+        try:
+            contacts.start_background_tasks()
+        except Exception:
+            logger.debug("contacts 后台任务启动失败", exc_info=True)
+        if contacts.is_rpa_hook_enabled("messenger"):
+            svc.set_contact_hooks(contacts.hooks)
+            _print(
+                "contacts hooks", True,
+                "Messenger 已接入（含 PortraitExtractor）",
+            )
+        else:
+            _print(
+                "contacts hooks", False,
+                "已 bootstrap 但 messenger hook 配置禁用",
+            )
+    except Exception as ex:
+        _print("contacts subsystem", False, f"bootstrap 失败: {ex}")
+
+
 async def run_auto_service(cm: ConfigManager) -> None:
     """拉起 service，阻塞运行直到 Ctrl+C。"""
     from src.integrations.messenger_rpa.service import MessengerRpaService
@@ -220,6 +250,7 @@ async def run_auto_service(cm: ConfigManager) -> None:
         skill_manager=skill,
         messenger_rpa_cfg=cm.get_messenger_rpa_config() or {},
     )
+    await _maybe_bootstrap_contacts(cm, svc)
     started = await svc.start()
     if not started:
         _print("service.start", False, "启动失败（enabled/autostart 都 True 才会起）")
@@ -253,6 +284,7 @@ async def run_once_only(cm: ConfigManager) -> Dict[str, Any]:
         skill_manager=skill,
         messenger_rpa_cfg=cm.get_messenger_rpa_config() or {},
     )
+    await _maybe_bootstrap_contacts(cm, svc)
     r = await svc.trigger_once()
     print("\n=== run_once 结果 ===")
     for k in ("ok", "step", "chat_name", "peer_text", "reply_text", "error", "total_ms"):

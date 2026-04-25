@@ -81,18 +81,25 @@ MESSENGER_LAUNCH_ACTIVITY = "com.facebook.orca/com.facebook.orca.auth.StartScree
 MESSENGER_MAIN_ALIAS = "com.facebook.orca/.auth.StartScreenActivity"
 
 
-def _detect_peer_lang(text: str) -> str:
-    """极简语种判定：是否含 CJK 字符。返回 'zh' / 'en' / 'unknown'。
+def _detect_peer_lang(text: str, ai_client: Any = None) -> str:
+    """语种判定。优先用 ai_client._detect_message_language（16+ 语言），
+    没传 ai_client 时退回到 zh/en/unknown 的极简实现。
 
-    不追求语言学准确，只为 language_alignment=auto 路径提供方向判断。
+    返回任意 _LANG_NAMES 里的语言码（'zh' / 'en' / 'ja' / 'ko' / 'ar_ur' / ...）
+    或 'unknown'。
     """
     if not text:
         return "unknown"
+    if ai_client is not None and hasattr(ai_client, "_detect_message_language"):
+        try:
+            return ai_client._detect_message_language(text) or "unknown"
+        except Exception:
+            pass
+    # fallback 极简（仅当 ai_client 未注入时使用）
     cjk = 0
     ascii_letters = 0
     for ch in text:
         o = ord(ch)
-        # CJK Unified Ideographs + 扩展 A
         if 0x4E00 <= o <= 0x9FFF or 0x3400 <= o <= 0x4DBF:
             cjk += 1
         elif ch.isascii() and ch.isalpha():
@@ -238,6 +245,8 @@ class MessengerRpaRunner:
         # W4-Runner：ContactHooks 由 main.py 在 contacts 子系统 bootstrap 后注入；
         # None 时所有 contact hook 调用静默跳过，runner 正常跑
         self._contact_hooks: Optional[Any] = None
+        # Phase 1：用户画像 extractor，由 service 注入；None 时不抽画像
+        self._portrait_extractor: Optional[Any] = None
 
     def bind_telegram_client(self, tg_client: Any) -> None:
         self._telegram_client = tg_client
@@ -245,6 +254,90 @@ class MessengerRpaRunner:
     def set_contact_hooks(self, hooks: Optional[Any]) -> None:
         """注入/摘除 ContactHooks；线程安全的原子替换，无锁即可。"""
         self._contact_hooks = hooks
+
+    def set_portrait_extractor(self, extractor: Optional[Any]) -> None:
+        """Phase 1：注入 PortraitExtractor；None 时跳过画像抽取。"""
+        self._portrait_extractor = extractor
+
+    def _is_spam_whitelisted_contact(
+        self, account_id: str, external_id: str,
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """优化 B：已建立画像 + 累计 ≥ N 入站 → 白名单保护。
+
+        命中时 spam HIGH 也只单次跳过不入永久 skip 表（避免老客户突发某条
+        含赌博词的复述被永久封）。返回 (whitelisted, info_dict for log)。
+
+        config 总开关：messenger_rpa.spam_whitelist.enabled (默认 true)
+        """
+        wh_cfg = (self._cfg.get("spam_whitelist") or {})
+        if not bool(wh_cfg.get("enabled", True)):
+            return (False, {"reason": "disabled_by_config"})
+        info: Dict[str, Any] = {}
+        hooks = self._contact_hooks
+        if hooks is None:
+            return (False, {"reason": "no_hooks"})
+        gw = getattr(hooks, "_gw", None)
+        store = getattr(gw, "_store", None) if gw is not None else None
+        if store is None:
+            return (False, {"reason": "no_store"})
+        try:
+            ci = store.get_ci_by_external(
+                "messenger", str(account_id or "default"),
+                str(external_id or ""),
+            )
+            if ci is None:
+                return (False, {"reason": "no_contact"})
+            journey = store.get_journey_by_contact(ci.contact_id)
+            if journey is None:
+                return (False, {"reason": "no_journey"})
+            has_portrait = bool(
+                (getattr(journey, "context_snapshot_json", "") or "").strip()
+            )
+            events = store.list_events(journey.journey_id, limit=50)
+            msg_in_count = sum(
+                1 for e in events if e.get("event_type") == "msg_in"
+            )
+            min_inbound = int(
+                (self._cfg.get("spam_whitelist") or {}).get(
+                    "min_inbound_msgs", 5
+                ) or 5
+            )
+            require_portrait = bool(
+                (self._cfg.get("spam_whitelist") or {}).get(
+                    "require_portrait", True
+                )
+            )
+            wh = (msg_in_count >= min_inbound) and (
+                has_portrait or not require_portrait
+            )
+            info = {
+                "contact_id": ci.contact_id,
+                "msg_in_count": msg_in_count,
+                "has_portrait": has_portrait,
+                "min_inbound": min_inbound,
+                "require_portrait": require_portrait,
+            }
+            return (wh, info)
+        except Exception as ex:
+            return (False, {"reason": f"exception:{type(ex).__name__}"})
+
+    async def _maybe_refresh_portrait_bg(
+        self, journey: Any, display_name: str = "",
+    ) -> None:
+        """fire-and-forget：判断 + 抽画像 + 写库；任何异常都吞，不影响 runner。"""
+        ext = self._portrait_extractor
+        if ext is None or journey is None:
+            return
+        try:
+            need = await asyncio.to_thread(ext.should_refresh, journey)
+            if not need:
+                return
+            await ext.extract_and_persist(
+                journey=journey,
+                display_name=display_name or "",
+            )
+        except Exception:
+            logger.debug("[messenger_rpa] portrait refresh bg 失败", exc_info=True)
 
     # P6-3/P7：统一的 approval 入队 wrapper —— 自动注入当前轮的 ai_tier，便于
     # 批量审批按 tier 过滤。所有 6 处旧 `self._state.enqueue_approval(` 已被
@@ -511,23 +604,57 @@ class MessengerRpaRunner:
             result["peer_kind"] = peer_msg.kind
 
             # 二级 spam 过滤：消息正文级（inbox 是 preview 级，可能漏）
-            if peer_msg.is_likely_spam and bool(
-                self._cfg.get("skip_spam", True)
-            ):
-                # ★ 把这个 chat 加入永久 skip 列表，下次扫到直接跳过下一条
-                try:
-                    self._state.add_skipped_chat(
-                        chat_key,
-                        chat_name=target.name,
-                        reason="msg_level_spam:keywords",
+            # 优化 A：分级处理 — HIGH 一次永久 skip；LOW 只单次跳过不入永久表
+            # 优化 B：已建立画像的客户即使 HIGH 命中也降级到单次跳过 + alert
+            if bool(self._cfg.get("skip_spam", True)):
+                _spam_hit, _spam_level, _spam_kw = peer_msg.spam_match()
+                if _spam_hit:
+                    _aid_for_wh = str(
+                        getattr(self, "_account_id", "") or "default"
                     )
-                except Exception:
-                    logger.debug("add_skipped_chat 失败", exc_info=True)
-                result["step"] = "msg_level_spam_skip"
-                result["spam_reason"] = "message_content_keywords"
-                result["ok"] = True
-                self._exit_thread(serial)
-                return self._finish(result, t0)
+                    _wh, _wh_info = self._is_spam_whitelisted_contact(
+                        _aid_for_wh, target.name or "",
+                    )
+                    if _spam_level == "high" and not _wh:
+                        # 强信号 + 非白名单：赌博域名/IM 引流 → 永久 skip
+                        try:
+                            self._state.add_skipped_chat(
+                                chat_key,
+                                chat_name=target.name,
+                                reason=f"msg_level_spam:high:{_spam_kw}"[:60],
+                            )
+                        except Exception:
+                            logger.debug("add_skipped_chat 失败", exc_info=True)
+                        result["step"] = "msg_level_spam_skip"
+                        result["spam_reason"] = f"high:{_spam_kw}"
+                    elif _spam_level == "high" and _wh:
+                        # 老客户突发 HIGH spam → 单次跳过 + 留 alert，不污染永久表
+                        result["step"] = "msg_level_spam_skip_once_whitelisted"
+                        result["spam_reason"] = f"high_whitelisted:{_spam_kw}"
+                        result["whitelist_info"] = _wh_info
+                        logger.warning(
+                            "[messenger_rpa] HIGH spam detected on whitelisted "
+                            "contact (msg_in=%d, has_portrait=%s) — skipping "
+                            "ONCE not permanent: chat=%s kw=%r preview=%s",
+                            _wh_info.get("msg_in_count", 0),
+                            _wh_info.get("has_portrait", False),
+                            chat_key, _spam_kw,
+                            (peer_msg.content or peer_msg.desc or "")[:80],
+                        )
+                    else:
+                        # LOW (无论是否白名单)：单次跳过不污染永久表
+                        result["step"] = "msg_level_spam_skip_once"
+                        result["spam_reason"] = f"low:{_spam_kw}"
+                        logger.info(
+                            "[messenger_rpa] LOW-confidence spam, "
+                            "skip once but NOT marking permanent: "
+                            "chat=%s kw=%r preview=%s",
+                            chat_key, _spam_kw,
+                            (peer_msg.content or peer_msg.desc or "")[:80],
+                        )
+                    result["ok"] = True
+                    self._exit_thread(serial)
+                    return self._finish(result, t0)
 
             fp = fingerprint(peer_msg)
             if self._state.is_duplicate(chat_key, fp):
@@ -1852,12 +1979,16 @@ class MessengerRpaRunner:
         missing_top_row = bool(cr.rows) and not any(
             r.row_index == 0 for r in cr.rows
         )
+        # 优化 D：row_index 分布 log → 便于 prompt 调优 / 诊断系统性漏行模式
+        # （combined prompt 已对 row_index=0 反复强调；若仍漏，说明 vision 模型在
+        # 当前设备/账号情境下系统性误判 Stories→row0 的边界）
+        _row_indices = sorted(r.row_index for r in cr.rows)
         logger.warning(
             "[messenger_rpa] _inbox_combined 决策: cr.rows=%d, "
-            "min_row=%s, missing_top=%s, guard=%s, retry=%s, "
+            "row_indices=%s, missing_top=%s, guard=%s, retry=%s, "
             "fallback_cfg=%s",
             len(cr.rows),
-            min((r.row_index for r in cr.rows), default=-1),
+            _row_indices,
             missing_top_row, cr.guard.type, retry,
             bool(self._cfg.get("unread_fallback_prompt", True)),
         )
@@ -2916,10 +3047,12 @@ class MessengerRpaRunner:
             logger.debug("P7-4 ltm inject 异常", exc_info=True)
 
         # W4-Runner：ContactHooks 入库 inbound 消息（失败不影响 runner）
+        # Phase 1：接住 JourneyContext → contact_id + 已有 snapshot 渲染成 portrait block 塞 ctx
         hooks = self._contact_hooks
+        journey_ctx_for_portrait = None
         if hooks is not None:
             try:
-                hooks.on_message(
+                journey_ctx_for_portrait = hooks.on_message(
                     channel="messenger",
                     account_id=str(getattr(self, "_account_id", "") or "default"),
                     external_id=target.name or "",
@@ -2930,6 +3063,40 @@ class MessengerRpaRunner:
                 )
             except Exception:
                 logger.debug("contact_hooks on_message(in) 异常", exc_info=True)
+
+        if journey_ctx_for_portrait is not None:
+            try:
+                _contact = getattr(journey_ctx_for_portrait, "contact", None)
+                _journey = getattr(journey_ctx_for_portrait, "journey", None)
+                if _contact is not None:
+                    ctx["contact_id"] = str(getattr(_contact, "contact_id", "") or "")
+                if _journey is not None:
+                    snap_json = str(getattr(_journey, "context_snapshot_json", "") or "")
+                    if snap_json:
+                        from src.contacts.portrait_extractor import render_block
+                        block = render_block(snap_json)
+                        if block:
+                            ctx["_contact_portrait_block"] = block
+            except Exception:
+                logger.debug("[messenger_rpa] portrait inject 异常", exc_info=True)
+
+            # ★ Phase 1：异步触发画像 refresh（不阻塞主回复路径）
+            if self._portrait_extractor is not None:
+                try:
+                    _j = getattr(journey_ctx_for_portrait, "journey", None)
+                    _c = getattr(journey_ctx_for_portrait, "contact", None)
+                    _disp = (
+                        getattr(_c, "primary_name", "") or target.name or ""
+                    ) if _c is not None else (target.name or "")
+                    if _j is not None:
+                        asyncio.create_task(
+                            self._maybe_refresh_portrait_bg(_j, _disp)
+                        )
+                except Exception:
+                    logger.debug(
+                        "[messenger_rpa] portrait refresh schedule 异常",
+                        exc_info=True,
+                    )
 
         # ★ P3-4：LLM 耗时计时
         _t_llm = time.monotonic()
@@ -2986,11 +3153,14 @@ class MessengerRpaRunner:
         ).strip().lower()
 
         if reply and mode != "off" and not reply.isascii():
-            peer_lang = _detect_peer_lang(peer_msg.raw or "")
+            ai = getattr(self._sm, "ai_client", None)
+            peer_lang = _detect_peer_lang(peer_msg.raw or "", ai_client=ai)
             need_translate = False
             if mode == "english_fallback_only":
                 need_translate = True
             elif mode == "auto":
+                # 只有 peer 说英文时才把 AI 的非 ASCII 回复翻成英文；
+                # 其他语言（ja/ko/ar/...）保留原回复，由 LLM 系统提示已要求按对方语言回
                 need_translate = (peer_lang == "en")
             if need_translate:
                 try:
@@ -3289,6 +3459,23 @@ class MessengerRpaRunner:
                     return {
                         "reason": f"content:forbidden_keyword:{k[:30]}",
                     }
+
+        # 5) ★ Phase 0.2：QualityTracker 异常拦截
+        # 默认拦 repeated / identity_leak / garbled —— 用户面前一识破，比限流还重要
+        qcfg = (self._cfg.get("quality_gate") or {})
+        if qcfg.get("enabled", True):
+            ai = getattr(self._sm, "ai_client", None)
+            qt = getattr(ai, "_quality_tracker", None) if ai is not None else None
+            last = list(getattr(qt, "last_call_anomalies", []) or []) if qt is not None else []
+            blocked_default = ["repeated", "identity_leak", "garbled"]
+            blocked_types = set(qcfg.get("block_types") or blocked_default)
+            hits = [a for a in last if a in blocked_types]
+            if hits:
+                return {
+                    "reason": f"quality:{','.join(hits)}",
+                    "quality_blocked": True,
+                    "anomalies": list(last),
+                }
         return None
 
     def _hint_non_ascii_adbkeyboard(
@@ -3890,7 +4077,9 @@ class MessengerRpaRunner:
         prefer_zh = False
         if lang_mode == "auto":
             raw = (peer_msg.raw or "") + " " + (peer_msg.desc or "")
-            prefer_zh = (_detect_peer_lang(raw) == "zh")
+            ai = getattr(self._sm, "ai_client", None)
+            # _MEDIA_ACK_TEMPLATES 当前只有 zh/en 两套；其他语言（ja/ko/...）走 en fallback
+            prefer_zh = (_detect_peer_lang(raw, ai_client=ai) == "zh")
         # 设备发不了 unicode 时，中文模板会走 ASCII guard 降级为审批；
         # 默认还是给英文以避免 approve 堆积
         lang = "zh" if prefer_zh else "en"

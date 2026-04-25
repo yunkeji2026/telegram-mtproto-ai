@@ -26,11 +26,20 @@ class QualityTracker:
         self._total_completion_tokens = 0
         self._total_calls = 0
         self._total_anomalies = 0
+        # 最近一次 record_call 检出的 anomaly 类型列表（caller 可读取做拦截决策）
+        self.last_call_anomalies: List[str] = []
+        self.last_call_request_id: str = ""
 
     def record_call(self, prompt_tokens: int = 0, completion_tokens: int = 0,
-                    elapsed_ms: int = 0, reply: str = "", request_id: str = ""):
+                    elapsed_ms: int = 0, reply: str = "", request_id: str = "") -> List[str]:
+        """记录一次 AI 调用，返回检出的 anomaly 类型列表（如 ['repeated']）。
+        副作用：更新 last_call_anomalies / last_call_request_id 以便 caller 用
+        request_id 校验自己看到的就是本次调用的结果。
+        """
         if not self._enabled:
-            return
+            self.last_call_anomalies = []
+            self.last_call_request_id = request_id
+            return []
         now = time.time()
         self._total_calls += 1
         self._total_prompt_tokens += prompt_tokens
@@ -58,6 +67,9 @@ class QualityTracker:
             logger.warning("[质量] 异常回复 (%s): %s...", ", ".join(anomalies), reply[:60])
 
         self._recent_replies.append(reply.strip()[:200])
+        self.last_call_anomalies = list(anomalies)
+        self.last_call_request_id = request_id
+        return list(anomalies)
 
     def _detect_anomalies(self, reply: str, elapsed_ms: int) -> List[str]:
         issues = []

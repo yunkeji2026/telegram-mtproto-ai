@@ -24,7 +24,7 @@ strategies:
     reply_probability: 1.0
     temperature: 0.7
     max_tokens: 512
-    context_rounds: 5
+    context_rounds: 10
     enabled: true
   S4_deep_support:
     name: 深度支持
@@ -34,7 +34,7 @@ strategies:
     temperature: 0.5
     max_tokens: 2048
     thinking_budget: 1024
-    context_rounds: 10
+    context_rounds: 15
     enabled: true
   S5_silent_observe:
     name: 静默观察

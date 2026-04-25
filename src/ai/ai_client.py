@@ -926,6 +926,10 @@ class AIClient(LoggerMixin):
         if not context:
             return ""
         prompt_parts = []
+        # Phase 1：用户画像注入 — runner 已渲染好 markdown 块塞 _contact_portrait_block
+        _portrait_block = (context.get("_contact_portrait_block") or "").strip()
+        if _portrait_block:
+            prompt_parts.append(_portrait_block)
         _cfg_ctx = (self.config.config or {}) if self.config else {}
         _is_companion = isinstance(_cfg_ctx, dict) and effective_domain_name(_cfg_ctx) == "conversion"
         _wa = (_cfg_ctx.get("web_admin") or {}) if isinstance(_cfg_ctx, dict) else {}
@@ -1311,15 +1315,18 @@ class AIClient(LoggerMixin):
         cjk = len(re.findall(r"[\u4e00-\u9fff]", t))
         letters = len(re.findall(r"[A-Za-z]", t))
 
+        # \u2605 \u975e CJK \u7684 script \u4f18\u5148\uff08hiragana/katakana/hangul/arabic/...\uff09
+        # \u542b\u6c49\u5b57 + \u5047\u540d\u65f6\uff08\u5982\u300c\u4eca\u65e5\u306f\u826f\u3044\u5929\u6c17\u300d\uff09\u4e5f\u5e94\u5224 ja\uff0c\u56e0\u4e3a\u5047\u540d\u662f\u65e5\u6587\u4e13\u5c5e
+        for pattern, lang in self._LANG_PATTERNS:
+            if re.search(pattern, t):
+                return lang
+
+        # \u542b\u6c49\u5b57\u4f46\u65e0\u4efb\u4f55 script \u2192 \u5224 zh\uff08\u4e2d\u6587\uff09
         if cjk > 0:
             if letters > 0 and letters > cjk * 3:
                 pass
             else:
                 return "zh"
-
-        for pattern, lang in self._LANG_PATTERNS:
-            if re.search(pattern, t):
-                return lang
 
         if letters >= 3:
             t_lower = t.lower()

@@ -89,29 +89,52 @@ class PeerMessage:
             return f"[文件] {self.desc}".strip()
         return f"[{self.kind}] {self.desc or self.content}".strip()
 
-    @property
-    def is_likely_spam(self) -> bool:
-        """对消息正文做一次廉价的关键词扫描，判定是否营销/赌博/诈骗。
+    # ── HIGH-confidence keywords：一次命中即建议**永久 skip** ──
+    # 赌博品牌/域名 + 中文赌博词 + IM 引流链接 + 明显引流参数
+    _SPAM_KW_HIGH = (
+        # 赌博品牌/域名
+        "fc8win", "betway", "1xbet", "sportingbet", "888.com",
+        # 中文赌博/支付通道（非客服业务话术，是营销/诈骗）
+        "投注", "彩票", "博彩", "赌博",
+        # IM 引流（用户主动让你换平台 = 通常诈骗或竞品引流）
+        "https://t.me/", "wa.me/",
+        # 引流参数片段
+        ".cc/?id=", ".cc/?promo=",
+        "?promo=", "?id=4", "?id=5",
+    )
 
-        本地兜底，命中即建议**直接跳过回复**，不耗 AI tokens。
+    # ── LOW-confidence keywords：单次跳过当前消息，**不入永久 skip 表** ──
+    # 这些词在合法消息也会偶发（如客户说"check my order"），不该永久封杀
+    _SPAM_KW_LOW = (
+        "win ", "win!", "bonus", "payout", "click my", "check my",
+        "free credit", "free play", "free spin", "promo code",
+        "register now", "claim your", "limited offer",
+        "代付", "代收",        # 业务上也可能是客户提问，不一刀切
+        "?ref=",                # 可能是合法 referral
+    )
+
+    def spam_match(self) -> tuple[bool, str, str]:
+        """三元组返回 (hit, level, keyword)。
+        level: "high" → 永久 skip，"low" → 单次跳过，"" → 未命中。
         """
         s = (self.content + " " + self.desc).lower()
         if not s.strip():
-            return False
-        spam_keywords = [
-            "win ", "win!", "bonus", "payout", "click my", "check my",
-            "free credit", "free play", "free spin", "promo code",
-            "register now", "claim your", "limited offer",
-            "投注", "彩票", "博彩", "赌博", "代付", "代收",
-            "fc8win", "betway", "1xbet", "sportingbet",
-            "888.com", ".cc/?id=", ".cc/?promo=", "?ref=",
-            "?promo=", "?id=4", "?id=5",
-            "https://t.me/", "wa.me/",
-        ]
-        for kw in spam_keywords:
+            return (False, "", "")
+        for kw in self._SPAM_KW_HIGH:
             if kw in s:
-                return True
-        return False
+                return (True, "high", kw)
+        for kw in self._SPAM_KW_LOW:
+            if kw in s:
+                return (True, "low", kw)
+        return (False, "", "")
+
+    @property
+    def is_likely_spam(self) -> bool:
+        """向后兼容：返 bool，命中（含 LOW）即 True。
+        新代码用 `spam_match()` 拿分级信号。
+        """
+        hit, _level, _kw = self.spam_match()
+        return hit
 
 
 def fingerprint(msg: PeerMessage) -> str:
