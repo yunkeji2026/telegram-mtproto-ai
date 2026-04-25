@@ -1,8 +1,15 @@
-﻿# Telegram客服AI优化方案 - V3模型 + 情绪感知 + 高效回复
+﻿# Telegram 客服 AI 优化方案 - 情绪感知 + 高效回复
+
+> **状态更新 (2026-04-25 净化扫描)**：
+> - `src/context/context_manager.py` ✅ **已实施**
+> - `src/skills/emotion_enhancer.py` ✅ **已实施且接入** `src/client/telegram_client.py:1259/1294`
+> - 原文档 model ID `claude-4.6-oups-high V3` 是**虚构占位**——本 repo 实际无 Anthropic Claude 客户端 (`src/ai/ai_client.py` 仅支持 Gemini + OpenAI 兼容 + Ollama)，已替换为项目实际 provider (DeepSeek-V3 via OpenAI 兼容)。
+> - **当前阶段不是新建模块**，是参数调优 + 配置完善（emotion 触发阈值、emoji 映射演化、context 窗口大小、reply_decision 优先级）。
+> - 想把整个项目升级到 Anthropic Claude 是另一项工作（需要新建 Anthropic SDK provider 分支 + 接入 ai_client.py），**本文档不覆盖**。
 
 ## 📋 优化目标
 基于用户要求，将当前AI客服系统优化为：
-1. **更智能的模型**: 升级到claude-4.6-oups-high V3模型
+1. **更智能的模型**: 升级到 `deepseek-chat`（DeepSeek-V3，主对话）/ `deepseek-reasoner`（强推理任务时） — 都通过项目现有 OpenAI 兼容 provider 调用
 2. **情绪感知能力**: 理解用户情绪并相应回复
 3. **表情符号系统**: 使用Telegram表情符号和表情包
 4. **上下文理解**: 分析前后10条消息上下文
@@ -11,16 +18,20 @@
 
 ## 🏗️ 系统架构优化
 
-### **1. AI模型升级** (`config/config.yaml`)
+### **1. AI 模型升级** (`config/config.yaml`)
+
+> 项目当前 ai 配置已是 DeepSeek-V3（`deepseek-chat`）。本节主要是**参数调优**（temperature / max_tokens / timeout / system_prompt），不是切 provider。
+> 备选 provider（不替换当前 deepseek，按需配 alt）：`deepseek-reasoner`（DeepSeek-R1 推理）/ `gpt-4o-mini`（OpenAI 兼容）/ `glm-4-plus`（智谱）/ Ollama 本地。
+
 ```yaml
 ai:
-  provider: "claude-4.6-oups-high"
-  api_key: "${AI_API_KEY}"                       # 从环境变量注入，不要写死
-  base_url: "https://api.claude-4.6-oups-high.com"
-  model: "claude-4.6-oups-high-v3"          # ✅ 升级到V3模型
+  provider: "openai_compatible"      # 项目实际 provider，无需改
+  api_key: "${AI_API_KEY}"           # 从环境变量注入，不要写死
+  base_url: "https://api.deepseek.com/v1"
+  model: "deepseek-chat"             # ✅ DeepSeek-V3 主对话；推理任务可换 deepseek-reasoner
   temperature: 0.75                  # ✅ 提高创造力，保持专业性
   max_tokens: 768                    # ✅ 允许更详细的回复
-  timeout: 60                        # ✅ 延长超时以适应V3模型
+  timeout: 60                        # ✅ 延长超时以适应深度对话
   
   # 增强的系统提示词
   system_prompt: |
@@ -471,9 +482,9 @@ class ReplyDecisionEngine:
 
 ### **阶段1: 基础配置更新** (5分钟)
 1. **更新AI配置** (`config/config.yaml`)
-   - 修改模型为 `claude-4.6-oups-high-v3`
+   - 确认 `model: deepseek-chat`（DeepSeek-V3，已是项目当前默认）；如需更强推理能力可临时改 `deepseek-reasoner`
    - 设置超时为60秒
-   - 更新系统提示词
+   - 更新系统提示词（**注意**：原文档示例的 Camille 人格 prompt 与本项目 customer_service 域可能不完全一致，调用前先 grep `system_prompt` 确认现状再合并）
 
 2. **创建表情符号配置** (`config/emoticons.yaml`)
    - 定义情绪和业务表情映射
