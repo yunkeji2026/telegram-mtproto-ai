@@ -51,6 +51,8 @@
 |---|---|
 | `backup_sqlite_dbs.py` | 备份 `config/` 下所有 SQLite db |
 | `package_handoff_zip.py` | 打包 handoff 交付 zip |
+| `ha/init_minio.sh` | 初始化 MinIO 对象存储（HA 主备资源） |
+| `ha/restore_standby.ps1` | 主备恢复脚本（Windows PowerShell） |
 
 ### 演示 / 一次性配置
 
