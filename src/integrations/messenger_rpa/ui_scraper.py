@@ -66,7 +66,13 @@ _INPUT_HINT_DESCS = (
 )
 
 _THREAD_LIST_SNIPPET_MARKER = "SimpleTextThreadSnippet"
-_SELF_PREFIX_MARKERS = ("你:", "你：", "You:", "You：")
+_SELF_PREFIX_MARKERS = (
+    "你:", "你：",
+    "You:", "You：",
+    "Me:", "Me：",
+    "我:", "我：",
+    "自分:", "自分：",
+)
 
 
 @dataclass
@@ -471,6 +477,28 @@ def iter_inbox_rows(
     return rows
 
 
+def latest_snippet_row(
+    xml: bytes | str | ET.Element,
+    *,
+    min_top: int = 240,
+    max_bottom: int = 1500,
+) -> Optional[ThreadRow]:
+    """Return the visually lowest Messenger snippet row in the current view.
+
+    Messenger exposes both inbox rows and many thread bubbles as
+    ``SimpleTextThreadSnippet(text=...)`` nodes.  The lowest visible snippet is
+    a cheap guardrail against replying to our own newest message when Vision
+    misclassifies a right-side blue bubble as ``peer``.
+    """
+    rows = [
+        r for r in iter_inbox_rows(xml)
+        if r.bounds.top >= min_top and r.bounds.bottom <= max_bottom
+    ]
+    if not rows:
+        return None
+    return max(rows, key=lambda r: (r.bounds.bottom, r.bounds.top))
+
+
 # ── Inbox 列表：Back/关闭弹窗等通用控件 ─────────────────────
 
 def find_button_by_desc(
@@ -563,6 +591,7 @@ __all__ = [
     "find_send_button",
     "find_peer_read_marker",
     "iter_inbox_rows",
+    "latest_snippet_row",
     "find_button_by_desc",
     "is_in_thread",
     "last_bubble_preview",

@@ -281,6 +281,24 @@ class AIClient(LoggerMixin):
 
         max_hist = use_context_rounds if use_context_rounds is not None else max(1, int(self.max_conversation_history or 10))
         system_instruction = self._build_system_instruction(context)
+        # ★ companion debug：可热开 ai.debug.dump_system_prompt 把完整 system prompt 打到 INFO 日志
+        # 用法：在 config 里设 ai.debug.dump_system_prompt: true，看 logs/app.log 验证 4 层记忆是否注入
+        try:
+            _ai_cfg = (self.config.config.get("ai") or {}) if (self.config and getattr(self.config, "config", None)) else {}
+            _dbg = (_ai_cfg.get("debug") or {})
+            if _dbg.get("dump_system_prompt", False) and system_instruction:
+                _rid = (context or {}).get("request_id", "n/a")
+                _layers = []
+                if "【对话伙伴画像" in system_instruction: _layers.append("portrait")
+                if "【陪伴关系" in system_instruction or "relationship" in system_instruction.lower(): _layers.append("intimacy")
+                if "【用户长期记忆要点" in system_instruction: _layers.append("episodic")
+                if "【Messenger 人设补充" in system_instruction or "【LINE 补充说明" in system_instruction: _layers.append("style_hint")
+                self.logger.info(
+                    "[prompt-dump rid=%s] layers=%s len=%d\n--- BEGIN system_prompt ---\n%s\n--- END ---",
+                    _rid, ",".join(_layers) or "none", len(system_instruction), system_instruction,
+                )
+        except Exception:
+            pass
         messages: List[Dict[str, str]] = []
         if system_instruction:
             messages.append({"role": "system", "content": system_instruction})
@@ -655,7 +673,10 @@ class AIClient(LoggerMixin):
         if not reply or not context:
             return reply
         _rl = context.get("reply_lang")
-        if not _rl or _rl == "zh" or context.get("_skip_lang_guard"):
+        if not _rl or _rl in ("zh", "ja", "ko") or context.get("_skip_lang_guard"):
+            return reply
+        _cfg_ctx = (self.config.config or {}) if self.config else {}
+        if isinstance(_cfg_ctx, dict) and effective_domain_name(_cfg_ctx) == "conversion":
             return reply
         if not self._reply_lang_mismatch(reply, _rl):
             return reply
@@ -739,7 +760,9 @@ class AIClient(LoggerMixin):
     def _build_system_instruction(self, context: Optional[Dict[str, Any]] = None) -> str:
         """将主系统提示词 + 快速设置 + 上下文提示合并为单一 system_instruction"""
         parts = []
-        _primary = self._primary_system_prompt_text()
+        context = context or {}
+        _suppress_global_identity = bool(context.get("suppress_global_ai_identity"))
+        _primary = "" if _suppress_global_identity else self._primary_system_prompt_text()
         if _primary:
             parts.append(_primary)
 
@@ -748,7 +771,7 @@ class AIClient(LoggerMixin):
         _pbd = (ai_cfg_pre.get("persona_block_detail") or "full").strip().lower()
         if _pbd not in ("none", "full", "compact"):
             _pbd = "full"
-        _name_ov = (ai_cfg_pre.get("ai_name") or "").strip()
+        _name_ov = "" if _suppress_global_identity else (ai_cfg_pre.get("ai_name") or "").strip()
         try:
             from src.utils.persona_manager import PersonaManager
 
@@ -763,7 +786,7 @@ class AIClient(LoggerMixin):
             pass
 
         ai_cfg = (self.config.config or {}).get("ai", {}) if self.config else {}
-        ai_name = (ai_cfg.get("ai_name") or "").strip()
+        ai_name = "" if _suppress_global_identity else (ai_cfg.get("ai_name") or "").strip()
         reply_style = (ai_cfg.get("reply_style") or "").strip()
         overrides = []
         if ai_name:
@@ -1011,19 +1034,20 @@ class AIClient(LoggerMixin):
         emotion_hint = (context.get("user_emotion_hint") or "").strip().lower()
         _um = context.get("_current_user_message_for_lang") or context.get("last_message") or ""
         lang_hint = self._detect_message_language(_um)
-        if lang_hint and lang_hint != "zh":
-            lang_name = self._LANG_NAMES.get(lang_hint, lang_hint)
+        if lang_hint:
+            lang_name = self._LANG_NAMES.get(lang_hint, lang_hint) or "中文"
             if _is_companion:
                 prompt_parts.append(
                     f"【输出语言】用户当前消息语言为「{lang_name}」，你必须用该语言回复全部内容。"
                     f"即使系统提供的模板或知识库内容是中文，你也必须翻译为「{lang_name}」后再输出。"
                 )
             else:
-                prompt_parts.append(
-                    f"【输出语言】用户当前消息语言为「{lang_name}」，你必须用该语言回复全部内容。"
-                    f"即使系统提供的模板或知识库内容是中文，你也必须翻译为「{lang_name}」后再输出。"
-                    f"术语如 EP/JC/EasyPaisa/JazzCash 等通道名保持原样不翻译。"
-                )
+                if lang_hint != "zh":
+                    prompt_parts.append(
+                        f"【输出语言】用户当前消息语言为「{lang_name}」，你必须用该语言回复全部内容。"
+                        f"即使系统提供的模板或知识库内容是中文，你也必须翻译为「{lang_name}」后再输出。"
+                        f"术语如 EP/JC/EasyPaisa/JazzCash 等通道名保持原样不翻译。"
+                    )
 
         if emotion_hint and emotion_hint != "neutral":
             emotion_guide = {
@@ -1802,7 +1826,8 @@ class AIClient(LoggerMixin):
         if intent_supplement:
             enhanced_context["_intent_supplement"] = intent_supplement
 
-        enhanced_context["_current_user_message_for_lang"] = user_message
+        if not (enhanced_context.get("_current_user_message_for_lang") or "").strip():
+            enhanced_context["_current_user_message_for_lang"] = user_message
         reply = await self.generate_reply(
             user_message, enhanced_context,
             conversation_history=conversation_history,

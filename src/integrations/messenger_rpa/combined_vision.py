@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -69,6 +70,8 @@ INBOX_COMBINED_PROMPT = (
     "  U4) 行末有**蓝色实心圆点**（部分版本才有）\n"
     "  U5) preview 显示为 'X new messages' / 'X new message'\n"
     "★ 营销链接 / 'sent a photo.' / 表情符开头**本身不是未读特征**——还要 U1/U2/U3 之一\n"
+    "★ preview 左侧/开头显示 'You:'、'Me:'、'Draft:' 的行是**我方已发送消息或草稿**，"
+    "绝不是未读。不要去掉这个前缀后再把该行列入 unread。\n"
     "★ 下游已经有 chat_state 去重，宁多列也不要漏\n"
     "★ 如果你想报 0 条未读，但屏内有 ≥4 行字体明显粗于其他，**请重新核对**\n"
     "对每条未读：\n"
@@ -159,8 +162,10 @@ THREAD_COMBINED_PROMPT = (
     "\n"
     "===== 任务 B：找最底部那条消息（对方 or 己方）=====\n"
     "  - role=peer：左侧深灰气泡 / 左侧贴纸 / 左侧图片 / 左侧 link preview 卡片\n"
-    "  - role=self：右侧蓝色气泡 / 右侧贴纸 / 右侧图片\n"
+    "  - role=self：右侧蓝色气泡 / 右侧贴纸 / 右侧图片 / 右下角带本账号头像的消息\n"
     "  - role=none：屏幕完全没消息（如刚进会话还没加载）\n"
+    "  - 如果最底部消息在右侧，或者 UI/可访问性文本含 'You:' / '你:' / 'Me:' 前缀，"
+    "必须返回 role=self，不能把它当成 peer。\n"
     "  - ⚠️ **不要**因为消息很长、很怪、是 link preview / 假支付截图 / 赌博推广\n"
     "      就返回 role=none。这正是我们要识别的"
     "      恶意营销内容 —— 完整捕获 content + URL，下游会做 spam 兜底过滤。\n"
@@ -177,6 +182,7 @@ THREAD_COMBINED_PROMPT = (
     "      · 只要**该条及往上连续全是左侧 peer 气泡、中间没被 self 气泡打断**，\n"
     "        就把它们作为 extra_peers 抽出来（从近到远，≤3 条，不含 peer 本条）\n"
     "      · 遇到第一条 self 气泡或日期分隔 / 屏顶即停止\n"
+    "  - 如果最底部是 self，extra_peers 必须为空，不能继续向上找旧 peer 消息来回复。\n"
     "  - 每条 extra 也按 kind/content/desc 填写（规则同上）\n"
     "  - 没有连发就 extra_peers=[]（不要硬凑）\n"
     "\n"
@@ -314,6 +320,8 @@ UNREAD_ONLY_PROMPT = (
     "  - 联系人名**明显粗体**（同屏其他细字对比很明显）\n"
     "  - 行末有**蓝色实心小圆点**（部分版本才有）\n"
     "  - 时间戳是**蓝色高饱和**（已读时间戳是灰色）\n"
+    "  - 但 preview 左侧/开头显示 'You:'、'Me:'、'Draft:' 的行必须排除；"
+    "这是我方消息或草稿，不是客户未读消息。\n"
     "\n"
     "**严格一行 JSON 输出（无 markdown）**：\n"
     '{"unread":[{"name":"...","row_index":N,"preview":"...≤60字","signal":'
@@ -335,6 +343,22 @@ def _is_noise_inbox_name(name: str) -> bool:
     if "meta ai" in n and len(n) < 24:
         return True
     return False
+
+
+_OUTBOUND_OR_DRAFT_PREVIEW_PREFIXES = (
+    "you:",
+    "me:",
+    "draft:",
+    "you：",
+    "me：",
+    "draft：",
+)
+
+
+def is_outbound_or_draft_preview(preview: str) -> bool:
+    """Return True when an inbox preview is our own last message or a draft."""
+    p = re.sub(r"\s+", " ", str(preview or "")).strip().lower()
+    return any(p.startswith(prefix) for prefix in _OUTBOUND_OR_DRAFT_PREVIEW_PREFIXES)
 
 
 async def analyze_unread_only(
@@ -366,6 +390,12 @@ async def analyze_unread_only(
         if _is_noise_inbox_name(name):
             continue
         preview = str(raw_row.get("preview") or "").strip()
+        if is_outbound_or_draft_preview(preview):
+            logger.info(
+                "[combined_vision] skip outbound/draft preview name=%r preview=%r",
+                name, preview[:80],
+            )
+            continue
         try:
             row_index = int(raw_row.get("row_index") or i)
         except (TypeError, ValueError):
@@ -474,6 +504,12 @@ async def analyze_inbox_combined(
         if not name:
             continue
         preview = str(raw_row.get("preview") or "").strip()
+        if is_outbound_or_draft_preview(preview):
+            logger.info(
+                "[combined_vision] skip outbound/draft preview name=%r preview=%r",
+                name, preview[:80],
+            )
+            continue
         time_s = str(raw_row.get("time") or "").strip()
         hint = str(raw_row.get("quality_hint") or "").strip().lower()
         valid_hints = {"friend", "unknown", "spam", "channel", "group", "unsure"}

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 
-from src.integrations.messenger_rpa.combined_vision import _parse_combined
+from src.integrations.messenger_rpa.combined_vision import (
+    _parse_combined,
+    is_outbound_or_draft_preview,
+)
 
 
 def test_parse_combined_valid_minimal() -> None:
@@ -69,3 +72,10 @@ def test_inbox_json_unread_list_minimal() -> None:
     d = _parse_inbox_json(raw)
     assert d is not None
     assert d["unread"][0].get("name") == "A"
+
+
+def test_outbound_or_draft_preview_detection() -> None:
+    assert is_outbound_or_draft_preview("You: hello")
+    assert is_outbound_or_draft_preview("Draft: hello")
+    assert is_outbound_or_draft_preview(" Me: hello")
+    assert not is_outbound_or_draft_preview("hello from customer")

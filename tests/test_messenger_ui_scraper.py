@@ -16,6 +16,7 @@ from src.integrations.messenger_rpa.ui_scraper import (
     is_in_thread,
     iter_inbox_rows,
     last_bubble_preview,
+    latest_snippet_row,
     parse_xml,
 )
 
@@ -214,6 +215,45 @@ def test_is_in_thread_true() -> None:
 
 def test_is_in_thread_false_on_inbox() -> None:
     assert is_in_thread(INBOX_XML) is False
+
+
+def test_latest_snippet_row_detects_self_prefix() -> None:
+    row = latest_snippet_row(INBOX_XML)
+    assert row is not None
+    assert row.preview == "你: こんにちは"
+    assert row.is_self_last is True
+
+
+def test_latest_snippet_row_can_guard_when_thread_title_missing() -> None:
+    xml = (
+        "<hierarchy>"
+        "<node class='android.widget.Button' content-desc='返回' bounds='[8,76][104,172]'/>"
+        "<node class='android.widget.Button' "
+        "content-desc='X, SimpleTextThreadSnippet(text=どうしてるの？)' "
+        "bounds='[24,640][520,760]'/>"
+        "<node class='android.widget.Button' "
+        "content-desc='X, SimpleTextThreadSnippet(text=You: うん、今は少し落ち着いたよ)' "
+        "bounds='[160,980][700,1140]'/>"
+        "</hierarchy>"
+    )
+    assert is_in_thread(xml) is False
+    row = latest_snippet_row(xml)
+    assert row is not None
+    assert row.preview.startswith("You:")
+    assert row.is_self_last is True
+
+
+def test_iter_inbox_rows_detects_english_self_prefixes() -> None:
+    xml = (
+        "<hierarchy>"
+        "<node class='android.widget.Button' "
+        "content-desc='X, SimpleTextThreadSnippet(text=Me: hello)' "
+        "bounds='[0,520][720,660]'/>"
+        "</hierarchy>"
+    )
+    rows = iter_inbox_rows(xml)
+    assert rows
+    assert rows[0].is_self_last is True
 
 
 # ── last_bubble_preview (best-effort) ──────────────────────
