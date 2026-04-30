@@ -644,9 +644,12 @@ class SkillManager(LoggerMixin):
                 "line_rpa_style_hint", "line_rpa_chat_key",
                 "messenger_rpa_style_hint", "messenger_rpa_chat_key",
                 "messenger_rpa_peer_kind",
+                "disable_episodic_memory",
                 "is_group", "mentioned", "vision_room",
                 # Phase 1：用户画像上下文 — 由 runner 从 ContactGateway 渲染好后注入
                 "contact_id", "_contact_portrait_block",
+                # 单条主消息（用于语言注入，避免多条合并文本污染检测）
+                "_current_user_message_for_lang",
             )
             for _mk in _line_merge_keys:
                 if _mk in context and context[_mk] is not None:
@@ -666,22 +669,25 @@ class SkillManager(LoggerMixin):
                 return None
 
             # 3. 注入情景记忆（关键词 / 向量融合 + 分桶）
-            _q_emb = None
-            _mvec = (self._memory_cfg or {}).get("vector") or {}
-            if (
-                self._episodic_store
-                and (self._memory_cfg or {}).get("enabled", True)
-                and _mvec.get("enabled", False)
-                and self.ai_client
-            ):
-                _q_emb = await self._embed_user_message_for_episodic(text)
-            self._inject_episodic_into_context(
-                user_context,
-                user_id_str,
-                _chat_id,
-                current_user_text=text,
-                query_embedding=_q_emb,
-            )
+            if user_context.get("disable_episodic_memory"):
+                user_context.pop("_episodic_memory_text", None)
+            else:
+                _q_emb = None
+                _mvec = (self._memory_cfg or {}).get("vector") or {}
+                if (
+                    self._episodic_store
+                    and (self._memory_cfg or {}).get("enabled", True)
+                    and _mvec.get("enabled", False)
+                    and self.ai_client
+                ):
+                    _q_emb = await self._embed_user_message_for_episodic(text)
+                self._inject_episodic_into_context(
+                    user_context,
+                    user_id_str,
+                    _chat_id,
+                    current_user_text=text,
+                    query_embedding=_q_emb,
+                )
 
             # 4. 合并传入的上下文信息（上下文分析、图�?OCR、群内机器人消息、request_id、chat�?
             if 'context_analysis' in context:
@@ -734,13 +740,21 @@ class SkillManager(LoggerMixin):
             except Exception:
                 self.logger.debug("companion relationship inject skipped", exc_info=True)
 
+            from src.hooks.registry import HookRegistry as _HR
+            _hooks = _HR.get_instance()
+
             # 3b. 检测用户消息语言，传入 reply_lang 供 KB 搜索和程序化回复
+            # 若调用方提供了 _current_user_message_for_lang（单条主消息），优先以此判断
+            # 避免 [对方连发] 合并文本中的英文干扰中/日文消息的语言判断
             if (
                 self.ai_client
                 and hasattr(self.ai_client, '_detect_message_language')
                 and not user_context.get("reply_lang_locked")
             ):
-                _detected_lang = self.ai_client._detect_message_language(text)
+                _lang_detect_src = (
+                    (context.get("_current_user_message_for_lang") or "").strip() or text
+                )
+                _detected_lang = self.ai_client._detect_message_language(_lang_detect_src)
                 _prev_lang = user_context.get('reply_lang', 'zh')
                 _stripped = (text or "").strip()
                 if _detected_lang == "zh" and _prev_lang != "zh":
@@ -748,8 +762,6 @@ class SkillManager(LoggerMixin):
                     if not _has_cjk and len(_stripped) <= 20:
                         _detected_lang = _prev_lang
                 # Domain-specific ambiguous tokens (e.g. EP/JC): may confuse lang detection
-                from src.hooks.registry import HookRegistry as _HR
-                _hooks = _HR.get_instance()
                 if _hooks.is_ambiguous_token_message(_stripped):
                     _lm = (user_context.get("last_message") or "").strip()
                     if _lm and not _hooks.is_ambiguous_token_message(_lm):
@@ -1413,9 +1425,10 @@ class SkillManager(LoggerMixin):
                 # 6. 更新状�€?
                 self._update_after_reply(reply, user_id_str, user_context,
                                          chat_id=context.get('chat_id', ''))
-                self._schedule_episodic_memory_extract(
-                    user_id_str, text, reply, intent, _chat_id
-                )
+                if not user_context.get("disable_episodic_memory"):
+                    self._schedule_episodic_memory_extract(
+                        user_id_str, text, reply, intent, _chat_id
+                    )
                 # J1: escalation suggestion via domain hook
                 if user_context.pop("_escalation_triggered", False):
                     reply += _hooks.get_escalation_line()

@@ -355,6 +355,48 @@ class MessengerRpaRunner:
     def bind_telegram_client(self, tg_client: Any) -> None:
         self._telegram_client = tg_client
 
+    def _run_once_target_names(self) -> List[str]:
+        """Optional allowlist for controlled manual tests."""
+        raw = (
+            self._cfg.get("run_once_target_names")
+            or self._cfg.get("target_chat_names")
+            or self._cfg.get("test_target_names")
+        )
+        if isinstance(raw, str):
+            raw = [raw]
+        if not isinstance(raw, list):
+            return []
+        return [str(x).strip() for x in raw if str(x or "").strip()]
+
+    @staticmethod
+    def _chat_name_matches_any(chat_name: str, names: List[str]) -> bool:
+        cn = (chat_name or "").strip().lower()
+        if not cn:
+            return False
+        for raw in names:
+            want = (raw or "").strip().lower()
+            if want and (cn == want or want in cn or cn in want):
+                return True
+        return False
+
+    def _thread_title_from_xml(self, serial: str, result: Dict[str, Any]) -> str:
+        try:
+            from src.integrations.messenger_rpa import thread_actions as _ta
+            from src.integrations.messenger_rpa import ui_scraper as _uis
+
+            xml = _ta.dump_view_tree(
+                serial,
+                dump_timeout=float(self._cfg.get("ui_dump_timeout_s") or 6.0),
+                cat_timeout=4.0,
+            )
+            title = (_uis.find_thread_title(xml) or "").strip() if xml else ""
+            if title:
+                result["thread_title_xml"] = title
+            return title
+        except Exception:
+            logger.debug("[messenger_rpa] thread title xml read failed", exc_info=True)
+            return ""
+
     def set_contact_hooks(self, hooks: Optional[Any]) -> None:
         """注入/摘除 ContactHooks；线程安全的原子替换，无锁即可。"""
         self._contact_hooks = hooks
@@ -583,7 +625,13 @@ class MessengerRpaRunner:
             target: Optional[UnreadChat] = None
             skipped_names: List[str] = []
             skipped_self_previews: List[str] = []
+            target_names = self._run_once_target_names()
+            if target_names:
+                result["target_chat_names"] = target_names
             for c in unread:
+                if target_names and not self._chat_name_matches_any(c.name, target_names):
+                    skipped_names.append(c.name)
+                    continue
                 if is_outbound_or_draft_preview(c.preview):
                     logger.info(
                         "[messenger_rpa] skip inbox row with outbound/draft preview: "
@@ -602,6 +650,16 @@ class MessengerRpaRunner:
                     continue
                 target = c
                 break
+            if target is None and target_names:
+                for wanted_name in target_names:
+                    target = self._pick_unread_row_for_peer(
+                        unread, wanted_name, result,
+                    )
+                    if target is not None:
+                        result.setdefault("hints", []).append(
+                            "run_once_target:matched_from_ranking"
+                        )
+                        break
             result["unread_names"] = [c.name for c in unread]
             result["skipped_names"] = skipped_names
             if skipped_self_previews:
@@ -684,6 +742,50 @@ class MessengerRpaRunner:
                 if selfheal_info.get("retried"):
                     thread_png = selfheal_info.get("new_png") or thread_png
                     result["screenshot_path"] = thread_png
+
+            actual_title = self._thread_title_from_xml(serial, result)
+            if actual_title and actual_title != (target.name or ""):
+                result.setdefault("hints", []).append(
+                    f"thread_title_corrected:{target.name}->{actual_title}"
+                )
+                target_names = self._run_once_target_names()
+                if target_names and not self._chat_name_matches_any(actual_title, target_names):
+                    result["step"] = "target_title_mismatch_skip"
+                    result["ok"] = True
+                    result["error"] = (
+                        f"opened {actual_title!r}, not in target_chat_names"
+                    )
+                    self._exit_thread(serial)
+                    return self._finish(result, t0)
+                old_lock = result.pop("_coord_lock_held", None)
+                my_aid = str(getattr(self, "_account_id", "") or "default")
+                if self._coordinator is not None and old_lock:
+                    try:
+                        self._coordinator.unlock(str(old_lock), my_aid)
+                    except Exception:
+                        logger.debug("coordinator unlock old title failed", exc_info=True)
+                if self._coordinator is not None and actual_title:
+                    if not self._coordinator.try_lock(actual_title, my_aid):
+                        holder = self._coordinator.active_chat_holder(actual_title)
+                        result["step"] = "chat_locked_by_other_account"
+                        result["ok"] = True
+                        result["locked_by"] = holder
+                        self._exit_thread(serial)
+                        return self._finish(result, t0)
+                    result["_coord_lock_held"] = actual_title
+                target = UnreadChat(
+                    name=actual_title,
+                    preview=target.preview,
+                    time=target.time,
+                    row_index=target.row_index,
+                    y_percent=target.y_percent,
+                    quality_hint=target.quality_hint,
+                    score=target.score,
+                    skip_inbox_tap=target.skip_inbox_tap,
+                )
+                chat_key = f"{self._chat_key_prefix}:{target.name}"
+                result["chat_key"] = chat_key
+                result["chat_name"] = target.name
 
             if self._use_combined_vision:
                 # ★ P3-3：乐观并发 — 同时启动 thread_combined 和 caption
@@ -3896,6 +3998,8 @@ class MessengerRpaRunner:
         }
         if bool(self._cfg.get("suppress_global_ai_identity", True)):
             ctx["suppress_global_ai_identity"] = True
+        if bool(self._cfg.get("disable_episodic_memory", True)):
+            ctx["disable_episodic_memory"] = True
         lead_prompt_block = ""
         try:
             if self._lead_qualifier.enabled:

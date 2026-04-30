@@ -243,6 +243,23 @@ def test_latest_snippet_row_can_guard_when_thread_title_missing() -> None:
     assert row.is_self_last is True
 
 
+def test_latest_snippet_row_ignores_self_prefix_without_text_payload() -> None:
+    xml = (
+        "<hierarchy>"
+        "<node class='android.widget.Button' "
+        "content-desc='X, SimpleTextThreadSnippet(text=何してるの。)' "
+        "bounds='[96,1040][620,1190]'/>"
+        "<node class='android.widget.Button' "
+        "content-desc='X, SimpleTextThreadSnippet(text=You: \U000f0000)' "
+        "bounds='[0,1257][720,1394]'/>"
+        "</hierarchy>"
+    )
+    row = latest_snippet_row(xml)
+    assert row is not None
+    assert row.preview.startswith("You:")
+    assert row.is_self_last is False
+
+
 def test_iter_inbox_rows_detects_english_self_prefixes() -> None:
     xml = (
         "<hierarchy>"

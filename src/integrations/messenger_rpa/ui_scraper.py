@@ -75,6 +75,19 @@ _SELF_PREFIX_MARKERS = (
 )
 
 
+def _self_prefixed_preview_has_text(preview: str) -> bool:
+    text = (preview or "").strip()
+    for prefix in _SELF_PREFIX_MARKERS:
+        if not text.startswith(prefix):
+            continue
+        payload = text[len(prefix):].strip()
+        # Messenger sometimes exposes a "You: <private-use icon>" snippet near
+        # the bottom of an open thread.  That is not a sent text bubble and must
+        # not suppress a newer peer message below the unread separator.
+        return any(ch.isalnum() for ch in payload)
+    return False
+
+
 @dataclass
 class Bounds:
     left: int
@@ -470,7 +483,7 @@ def iter_inbox_rows(
             continue
         m = _SNIPPET_PAT.search(cd)
         preview = m.group(1).strip() if m else ""
-        is_self = any(preview.startswith(p) for p in _SELF_PREFIX_MARKERS)
+        is_self = _self_prefixed_preview_has_text(preview)
         rows.append(ThreadRow(
             bounds=b, preview=preview, is_self_last=is_self, raw_desc=cd,
         ))
