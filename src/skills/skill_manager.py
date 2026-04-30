@@ -644,6 +644,7 @@ class SkillManager(LoggerMixin):
                 "line_rpa_style_hint", "line_rpa_chat_key",
                 "messenger_rpa_style_hint", "messenger_rpa_chat_key",
                 "messenger_rpa_peer_kind",
+                "suppress_global_ai_identity",
                 "disable_episodic_memory",
                 "is_group", "mentioned", "vision_room",
                 # Phase 1：用户画像上下文 — 由 runner 从 ContactGateway 渲染好后注入
