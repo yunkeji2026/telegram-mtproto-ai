@@ -195,6 +195,62 @@ line_rpa:
   # 近期 run 历史保留上限（SQLite，用于 Web 卡片"会话流"）
   recent_runs_buffer: 500
 
+
+# Facebook Messenger 客户端 RPA（ADB + Vision；与 Telegram/LINE 共用 Skill/AI）
+messenger_rpa:
+  enabled: false
+  autostart: true
+  adb_serial: ""
+  adb_user_id: 0
+  messenger_package: com.facebook.orca
+  # 更聪明的轮询：通知监听会立即触发；普通空闲轮询也不要拖到 30s+。
+  interval_sec: 8.0
+  min_interval_sec: 2.0
+  max_interval_sec: 60.0
+  backoff_multiplier: 1.25
+  max_inbox_per_run: 2
+  reply_mode: auto
+  default_reply_lang: zh
+  language_alignment: auto
+  notif_watch_enabled: true
+  notif_poll_ms: 700
+  use_adb_keyboard: true
+  adb_keyboard_ime: com.android.adbkeyboard/.AdbIME
+  adb_keyboard_package: com.android.adbkeyboard
+  # Messenger 多人设 / 语言锁。按联系人名或 chat_key 命中；未命中走 default。
+  reply_profiles:
+    default: warm_companion
+    profiles:
+      - id: warm_companion
+        language: auto
+        style_hint: |
+          你是自然的 Messenger 私聊对象，不是客服机器人。优先短句、口语、像真人聊天。
+          用户很短时只回一小句；用户认真倾诉时先接住情绪，再轻问一个问题。
+        persona:
+          name: Camille
+          role: 朋友式陪聊与转化助手
+          personality:
+            traits: [温柔, 机灵, 有边界感]
+            style: 轻松自然的私聊口吻
+          speaking:
+            language_follow: true
+            reply_length: concise
+            max_reply_sentences: 3
+            forbidden_phrases: [作为一个AI, 有什么可以帮您, 请问有什么需要]
+      - id: professional_support
+        match_names: []
+        language: auto
+        style_hint: |
+          面向明确咨询、订单、付款、商务问题时使用。先给结论，再给下一步动作。
+          避免恋爱腔，避免大段解释。
+        persona:
+          name: Camille
+          role: 专业但不生硬的客户沟通助手
+          speaking:
+            language_follow: true
+            reply_length: concise
+            max_reply_sentences: 4
+
 # 人工客服转接：同问多次追加 @ 人工；值班状态存 SQLite human_escalation.db
 human_escalation:
   enabled: false

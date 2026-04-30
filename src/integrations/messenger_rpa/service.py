@@ -395,10 +395,10 @@ class MessengerRpaService:
             "adb_serial": "",
             "messenger_package": "com.facebook.orca",
             # 自适应轮询
-            "interval_sec": 30.0,         # 基础间隔
-            "min_interval_sec": 8.0,      # 有未读时下一轮最小间隔
-            "max_interval_sec": 300.0,    # 连续空跑后最大间隔
-            "backoff_multiplier": 1.5,    # 每次空跑递增倍率
+            "interval_sec": 8.0,          # 基础间隔
+            "min_interval_sec": 2.0,      # 有未读时下一轮最小间隔
+            "max_interval_sec": 60.0,     # 连续空跑后最大间隔
+            "backoff_multiplier": 1.25,   # 每次空跑递增倍率
             # 单次 run
             "max_inbox_per_run": 1,       # 一次只处理 N 条未读
             "send_to_chat_inbox_row_cap": 16,
@@ -450,6 +450,24 @@ class MessengerRpaService:
             else:
                 d[k] = v
         return d
+
+    def _reload_runtime_cfg(self) -> Dict[str, Any]:
+        """Read the latest messenger_rpa config so runtime tuning takes effect."""
+        try:
+            cfg = (self._cm.config or {}).get("messenger_rpa") or {}
+            if isinstance(cfg, dict) and cfg:
+                d = self._defaults()
+                for k, v in cfg.items():
+                    if k == "screencap" and isinstance(v, dict) and isinstance(
+                        d.get("screencap"), dict,
+                    ):
+                        d[k] = {**d["screencap"], **v}
+                    else:
+                        d[k] = v
+                return d
+        except Exception:
+            pass
+        return self._merged_cfg
 
     # ── 生命周期 ────────────────────────────────────
     async def start(self) -> bool:
@@ -946,6 +964,18 @@ class MessengerRpaService:
         try:
             while not self._stop_evt.is_set():
                 self._last_tick_ts = time.time()
+                cfg_now = self._reload_runtime_cfg()
+                self._merged_cfg = cfg_now
+                base_iv = float(cfg_now.get("interval_sec", base_iv))
+                min_iv = float(cfg_now.get("min_interval_sec", min_iv))
+                max_iv = float(cfg_now.get("max_interval_sec", max_iv))
+                mult = float(cfg_now.get("backoff_multiplier", mult))
+                try:
+                    self._runner.refresh_cfg(cfg_now)
+                    for _r in self._runners.values():
+                        _r.refresh_cfg(cfg_now)
+                except Exception:
+                    logger.debug("[messenger_rpa] hot refresh runner cfg failed", exc_info=True)
 
                 # 暂停态：仅在被显式 trigger 时跑一次
                 paused = self._pause_until > time.time()

@@ -640,6 +640,7 @@ class SkillManager(LoggerMixin):
             # 供 AIClient._build_context_prompt 读取 channel / line_rpa_style_hint 等
             _line_merge_keys = (
                 "channel", "request_id", "reply_lang",
+                "reply_lang_locked",
                 "line_rpa_style_hint", "line_rpa_chat_key",
                 "messenger_rpa_style_hint", "messenger_rpa_chat_key",
                 "messenger_rpa_peer_kind",
@@ -734,7 +735,11 @@ class SkillManager(LoggerMixin):
                 self.logger.debug("companion relationship inject skipped", exc_info=True)
 
             # 3b. 检测用户消息语言，传入 reply_lang 供 KB 搜索和程序化回复
-            if self.ai_client and hasattr(self.ai_client, '_detect_message_language'):
+            if (
+                self.ai_client
+                and hasattr(self.ai_client, '_detect_message_language')
+                and not user_context.get("reply_lang_locked")
+            ):
                 _detected_lang = self.ai_client._detect_message_language(text)
                 _prev_lang = user_context.get('reply_lang', 'zh')
                 _stripped = (text or "").strip()

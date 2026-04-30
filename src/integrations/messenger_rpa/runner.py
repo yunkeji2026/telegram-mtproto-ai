@@ -2600,6 +2600,107 @@ class MessengerRpaRunner:
             logger.debug("assign_variant 异常", exc_info=True)
         return "", ""
 
+
+    def _pick_reply_profile(
+        self,
+        chat_key: str,
+        chat_name: str = "",
+    ) -> Dict[str, Any]:
+        """Pick a Messenger-specific persona/profile for the current chat."""
+        cfg = self._cfg.get("reply_profiles") or {}
+        if not isinstance(cfg, dict):
+            return {}
+        profiles = cfg.get("profiles") or []
+        if not isinstance(profiles, list) or not profiles:
+            return {}
+        chat_key_l = (chat_key or "").lower()
+        chat_name_l = (chat_name or "").lower()
+        default_id = str(cfg.get("default") or "").strip()
+        default_profile: Dict[str, Any] = {}
+        for raw in profiles:
+            if not isinstance(raw, dict):
+                continue
+            pid = str(raw.get("id") or raw.get("name") or "").strip()
+            if default_id and pid == default_id:
+                default_profile = raw
+            keys = raw.get("match_chat_keys") or []
+            names = raw.get("match_names") or []
+            if isinstance(keys, str):
+                keys = [keys]
+            if isinstance(names, str):
+                names = [names]
+            if any(str(k).strip().lower() and str(k).strip().lower() in chat_key_l for k in keys):
+                return raw
+            if any(str(n).strip().lower() and str(n).strip().lower() in chat_name_l for n in names):
+                return raw
+        return default_profile
+
+    @staticmethod
+    def _strip_lang_detection_markup(text: str) -> str:
+        """Remove local RPA labels that would bias language detection to zh."""
+        t = str(text or "")
+        t = t.replace("[对方连发]", " ")
+        t = re.sub(r"^\(\d+\)\s*", "", t, flags=re.M)
+        t = re.sub(
+            r"\[(最新|图片|链接|语音|贴纸|文件|image|link|voice|sticker|file)[^\]]*\]",
+            " ",
+            t,
+            flags=re.I,
+        )
+        t = re.sub(r"^【[^】]{1,20}】", " ", t)
+        return t.strip()
+
+    def _previous_reply_lang(self, chat_key: str) -> str:
+        try:
+            cs = getattr(self._sm, "_context_store", None)
+            if cs is None:
+                return ""
+            uctx = cs.get(chat_key) or {}
+            lang = str(uctx.get("reply_lang") or "").strip().lower()
+            return lang
+        except Exception:
+            return ""
+
+    def _resolve_reply_lang(
+        self,
+        *,
+        peer_msg: PeerMessage,
+        text_for_ai: str,
+        chat_key: str,
+        profile: Dict[str, Any],
+    ) -> str:
+        """Resolve output language with current text first, then profile/history."""
+        forced = str(profile.get("language") or "").strip().lower()
+        if forced and forced not in ("auto", "detect"):
+            return forced
+
+        cfg_default = str(self._cfg.get("default_reply_lang", "zh") or "zh").lower()
+        ai_for_lang = getattr(self._sm, "ai_client", None)
+        votes: Dict[str, int] = {}
+        if peer_msg.kind == "text":
+            lines: List[str] = []
+            if "[对方连发]" in text_for_ai:
+                for line in text_for_ai.splitlines():
+                    clean = self._strip_lang_detection_markup(line)
+                    if clean:
+                        lines.append(clean)
+            else:
+                clean = self._strip_lang_detection_markup(peer_msg.raw or text_for_ai)
+                if clean:
+                    lines.append(clean)
+            for line in lines:
+                lang = _detect_peer_lang(line, ai_client=ai_for_lang)
+                if lang not in ("unknown", ""):
+                    votes[lang] = votes.get(lang, 0) + 1
+        if votes:
+            non_en = {k: v for k, v in votes.items() if k != "en"}
+            return max(non_en or votes, key=(non_en or votes).get)
+
+        prev = self._previous_reply_lang(chat_key)
+        if prev:
+            return prev
+        return cfg_default
+
     def _compute_winner_variant(
         self, *, min_samples: int = 20
     ) -> Tuple[str, int]:
@@ -2974,20 +3075,81 @@ class MessengerRpaRunner:
             )
 
         # SkillManager.process_message(text, user_id, context) — 与 line_rpa / FB webhook 对齐
-        # chat_id 必须是 int（SkillManager 内 int(context["chat_id"])），字符串会崩
+        # chat_id 必须是 int（SkillManager 内 int(context["chat_id"]），字符串会崩
         cid_num = int(hashlib.md5(chat_key.encode("utf-8")).hexdigest()[:12], 16) % (10**9)
+        reply_profile = self._pick_reply_profile(chat_key, target.name or "")
+        _lang_single = (
+            peer_msg.raw or peer_msg.to_text_for_ai()
+            if peer_msg.kind == "text"
+            else ""
+        )
+        _reply_lang_ctx = self._resolve_reply_lang(
+            peer_msg=peer_msg,
+            text_for_ai=text_for_ai,
+            chat_key=chat_key,
+            profile=reply_profile,
+        )
+        result["detected_reply_lang"] = _reply_lang_ctx
+        if reply_profile:
+            result["reply_profile"] = str(
+                reply_profile.get("id") or reply_profile.get("name") or ""
+            )
         ctx: Dict[str, Any] = {
             "chat_id": cid_num,
             "request_id": f"mrpa-{uuid.uuid4().hex[:12]}",
             "channel": "messenger_rpa",
-            "reply_lang": str(self._cfg.get("default_reply_lang", "zh")),
+            "reply_lang": _reply_lang_ctx,
+            "reply_lang_locked": True,
             "chat_title": target.name or "Messenger Friend",
             "messenger_rpa_chat_key": chat_key,
             "messenger_rpa_peer_kind": peer_msg.kind,
             "messenger_rpa_peer_raw": (peer_msg.raw or "")[:300],
+            "_current_user_message_for_lang": _lang_single[:200],
         }
+        try:
+            cs_lang = getattr(self._sm, "_context_store", None)
+            if cs_lang is not None and _reply_lang_ctx:
+                uctx_lang = cs_lang.get(chat_key)
+                uctx_lang["reply_lang"] = _reply_lang_ctx
+                cs_lang.mark_dirty(chat_key)
+        except Exception:
+            logger.debug("[messenger_rpa] reply_lang persist failed", exc_info=True)
+
+        try:
+            persona_data = reply_profile.get("persona") if reply_profile else None
+            from src.utils.persona_manager import PersonaManager
+
+            pm = PersonaManager.get_instance()
+            if isinstance(persona_data, dict) and persona_data:
+                pm.bind_chat_persona(str(cid_num), persona_data)
+            else:
+                pm.unbind_chat_persona(str(cid_num))
+        except Exception:
+            logger.debug("[messenger_rpa] reply_profile persona bind failed", exc_info=True)
+
         # ★ P1-3：Messenger 专属 style_hint（可在 config 覆盖 LINE 默认人设）
         _style_hint = str(self._cfg.get("style_hint") or "").strip()
+        _profile_hint = ""
+        if reply_profile:
+            _profile_hint = str(reply_profile.get("style_hint") or "").strip()
+        try:
+            ai_for_name = getattr(self._sm, "ai_client", None)
+            _lang_name = getattr(ai_for_name, "_LANG_NAMES", {}).get(
+                _reply_lang_ctx, _reply_lang_ctx
+            )
+        except Exception:
+            _lang_name = _reply_lang_ctx
+        _lang_lock = (
+            f"【Messenger 语言锁定】本轮检测/继承的用户语言是 {_lang_name}。"
+            f"必须全程使用 {_lang_name} 回复；不要因为中文知识库、中文人设或本地标签而切回中文。"
+        )
+        style_parts = [_lang_lock]
+        if _style_hint:
+            style_parts.append(_style_hint)
+        if _profile_hint:
+            style_parts.append(_profile_hint)
+        _style_hint = "
+".join(p for p in style_parts if p)
         if _style_hint:
             ctx["messenger_rpa_style_hint"] = _style_hint
 
