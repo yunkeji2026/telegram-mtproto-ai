@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS messenger_rpa_chat_state (
     last_peer_kind      TEXT DEFAULT '',
     last_reply          TEXT DEFAULT '',
     last_screen_sha256  TEXT DEFAULT '',
+    last_sent_at        REAL DEFAULT 0,
     updated_at          REAL NOT NULL
 );
 
@@ -171,6 +172,20 @@ class MessengerRpaStateStore:
                 # P6-3/P7 补迁移：approvals 打 ai_tier 便于批量过滤
                 "ALTER TABLE messenger_rpa_approvals "
                 "ADD COLUMN ai_tier TEXT DEFAULT ''",
+                # ★ W2-D1：陪护模式延迟发送队列。status='deferred' + deferred_until=ts
+                # 表示这条 reply 被 safe_skip 后等到时间到自动发送（而非人工审批）。
+                # defer_reason 记降级原因（quiet_hours / daily_cap / min_gap / credit_low / pacing）。
+                "ALTER TABLE messenger_rpa_approvals "
+                "ADD COLUMN deferred_until REAL DEFAULT 0",
+                "ALTER TABLE messenger_rpa_approvals "
+                "ADD COLUMN defer_reason TEXT DEFAULT ''",
+                # ★ W2-D2：row 级 staleness — 不同类型 defer 阈值不同
+                # pacing: 60s（窗口窄，超时就丢）；quiet_hours: 21600s（6h）；
+                # 0 = 用 drain 默认值。
+                "ALTER TABLE messenger_rpa_approvals "
+                "ADD COLUMN defer_staleness_sec REAL DEFAULT 0",
+                "ALTER TABLE messenger_rpa_chat_state "
+                "ADD COLUMN last_sent_at REAL DEFAULT 0",
             ):
                 try:
                     c.execute(alter)
@@ -187,6 +202,17 @@ class MessengerRpaStateStore:
             ).fetchone()
         return dict(row) if row else {}
 
+    def list_chat_states(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Return recent chat state rows for operator dashboards."""
+        lim = max(1, min(int(limit or 100), 1000))
+        with self._lock, self._conn() as c:
+            rows = c.execute(
+                "SELECT * FROM messenger_rpa_chat_state "
+                "ORDER BY updated_at DESC LIMIT ?",
+                (lim,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def update_chat_state(
         self,
         chat_key: str,
@@ -197,6 +223,7 @@ class MessengerRpaStateStore:
         last_peer_kind: Optional[str] = None,
         last_reply: Optional[str] = None,
         last_screen_sha256: Optional[str] = None,
+        last_sent_at: Optional[float] = None,
     ) -> None:
         now = time.time()
         prev = self.get_chat_state(chat_key)
@@ -212,6 +239,8 @@ class MessengerRpaStateStore:
         _set("last_peer_kind", last_peer_kind)
         _set("last_reply", last_reply)
         _set("last_screen_sha256", last_screen_sha256)
+        if last_sent_at is not None:
+            merged["last_sent_at"] = float(last_sent_at)
         merged["chat_key"] = chat_key
         merged["updated_at"] = now
 
@@ -220,8 +249,8 @@ class MessengerRpaStateStore:
                 """
                 INSERT INTO messenger_rpa_chat_state
                     (chat_key, chat_name, last_peer_text, last_peer_fp,
-                     last_peer_kind, last_reply, last_screen_sha256, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     last_peer_kind, last_reply, last_screen_sha256, last_sent_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(chat_key) DO UPDATE SET
                     chat_name=excluded.chat_name,
                     last_peer_text=excluded.last_peer_text,
@@ -229,6 +258,7 @@ class MessengerRpaStateStore:
                     last_peer_kind=excluded.last_peer_kind,
                     last_reply=excluded.last_reply,
                     last_screen_sha256=excluded.last_screen_sha256,
+                    last_sent_at=excluded.last_sent_at,
                     updated_at=excluded.updated_at
                 """,
                 (
@@ -239,6 +269,7 @@ class MessengerRpaStateStore:
                     merged.get("last_peer_kind", ""),
                     merged.get("last_reply", ""),
                     merged.get("last_screen_sha256", ""),
+                    float(merged.get("last_sent_at", 0) or 0),
                     now,
                 ),
             )
@@ -654,6 +685,169 @@ class MessengerRpaStateStore:
             )
             c.commit()
             return int(cur.lastrowid or 0)
+
+    def enqueue_deferred(
+        self,
+        *,
+        chat_key: str,
+        chat_name: str,
+        peer_text: str,
+        peer_kind: str,
+        reply_text: str,
+        defer_until: float,
+        defer_reason: str = "",
+        reply_lang: str = "",
+        run_id: str = "",
+        extra: Optional[Dict[str, Any]] = None,
+        staleness_sec: float = 0,
+    ) -> int:
+        """W2-D1+D2：把 safe_skip / pacing 的 reply 入延迟发送队列。
+
+        - status='deferred' + deferred_until=ts；drain loop 到点取出真发
+        - 同 chat 已有 deferred 行先标 expired（"最新承诺覆盖"）
+        - ``staleness_sec``：row 级过期阈值。0 用 drain 默认。
+          典型：pacing=60s，quiet_hours=21600s（6h），daily_cap=86400s
+        """
+        if not (reply_text or "").strip():
+            raise ValueError("deferred reply_text 不能为空")
+        if not chat_key.strip():
+            raise ValueError("chat_key 不能为空")
+        extra_json = ""
+        if extra:
+            try:
+                extra_json = json.dumps(extra, ensure_ascii=False)[:4000]
+            except Exception:
+                extra_json = ""
+        now = time.time()
+        with self._lock, self._conn() as c:
+            # 同 chat 老的 deferred 先 expired，避免双发
+            c.execute(
+                """UPDATE messenger_rpa_approvals
+                   SET status='expired', decided_at=?, decided_by='superseded',
+                       decision_note='replaced_by_new_deferred'
+                   WHERE chat_key=? AND status='deferred'""",
+                (now, chat_key.strip()),
+            )
+            cur = c.execute(
+                """INSERT INTO messenger_rpa_approvals
+                     (created_at, chat_key, chat_name, peer_text, peer_kind,
+                      reply_text, reply_lang, status, run_id, extra_json,
+                      deferred_until, defer_reason, defer_staleness_sec)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 'deferred', ?, ?, ?, ?, ?)""",
+                (
+                    now, chat_key.strip(), chat_name or "",
+                    peer_text or "", peer_kind or "",
+                    reply_text.strip(), reply_lang or "",
+                    run_id or "", extra_json,
+                    float(defer_until), (defer_reason or "")[:120],
+                    float(max(0.0, staleness_sec)),
+                ),
+            )
+            c.commit()
+            return int(cur.lastrowid or 0)
+
+    def update_deferred_until(
+        self, approval_id: int, new_until: float, note: str = "",
+    ) -> bool:
+        """W2-D2.2：drain 前 gate 未通过 → 把 deferred_until 推后。
+
+        Returns: True if updated (row exists & status=deferred)，False otherwise.
+        """
+        with self._lock, self._conn() as c:
+            cur = c.execute(
+                """UPDATE messenger_rpa_approvals
+                   SET deferred_until=?,
+                       decision_note=COALESCE(NULLIF(?, ''), decision_note)
+                   WHERE id=? AND status='deferred'""",
+                (float(new_until), (note or "")[:120], int(approval_id)),
+            )
+            c.commit()
+            return bool(cur.rowcount)
+
+    def drain_due_deferred(self, now_ts: Optional[float] = None,
+                           limit: int = 20,
+                           staleness_sec: float = 6 * 3600,
+                           ) -> List[Dict[str, Any]]:
+        """取出已到期的 deferred 行，按 deferred_until 升序。
+
+        ★ W2-D2 v6：row 级 staleness — 每行用自己的 defer_staleness_sec
+        （由 enqueue_deferred 写入）；为 0 时回落到 ``staleness_sec`` 参数。
+        典型：pacing 类 60s，quiet_hours 类 21600s（6h），daily_cap 类 86400s。
+
+        注意：调用方负责发送；发送结果由 mark_deferred_sent 或
+        mark_deferred_failed 写回。这里只读不改 status（除 stale expire），
+        避免读后崩溃丢消息。
+        """
+        ts = float(now_ts if now_ts is not None else time.time())
+        default_stale = max(0.0, float(staleness_sec))
+        with self._lock, self._conn() as c:
+            # 先把过时的就地 expired（row 级阈值优先；为 0 用默认）
+            # SQL：阈值 = COALESCE(defer_staleness_sec>0 ? defer_staleness_sec : default, default)
+            # 简化：用 CASE 表达
+            c.execute(
+                """UPDATE messenger_rpa_approvals
+                   SET status='expired', decided_at=?, decided_by='auto_expire',
+                       decision_note='stale_after_drain_window'
+                   WHERE status='deferred' AND deferred_until > 0
+                     AND deferred_until <= ?
+                     AND (
+                       (defer_staleness_sec > 0 AND
+                        created_at < ? - defer_staleness_sec)
+                       OR
+                       (defer_staleness_sec <= 0 AND ? > 0 AND
+                        created_at < ? - ?)
+                     )""",
+                (ts, ts, ts, default_stale, ts, default_stale),
+            )
+            c.commit()
+            rows = c.execute(
+                """SELECT * FROM messenger_rpa_approvals
+                   WHERE status='deferred' AND deferred_until > 0
+                     AND deferred_until <= ?
+                   ORDER BY deferred_until ASC
+                   LIMIT ?""",
+                (ts, int(max(1, limit))),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def mark_deferred_sent(self, approval_id: int) -> None:
+        with self._lock, self._conn() as c:
+            c.execute(
+                """UPDATE messenger_rpa_approvals
+                   SET status='sent', sent_at=?, decided_at=?,
+                       decided_by='deferred_drain'
+                   WHERE id=? AND status='deferred'""",
+                (time.time(), time.time(), int(approval_id)),
+            )
+            c.commit()
+
+    def mark_deferred_failed(self, approval_id: int, err: str = "") -> None:
+        with self._lock, self._conn() as c:
+            c.execute(
+                """UPDATE messenger_rpa_approvals
+                   SET status='failed', send_error=?, decided_at=?,
+                       decided_by='deferred_drain'
+                   WHERE id=? AND status='deferred'""",
+                ((err or "")[:500], time.time(), int(approval_id)),
+            )
+            c.commit()
+
+    def expire_deferred_for_chat(self, chat_key: str, reason: str = "new_inbound") -> int:
+        """W2-D1.4：用户后续消息进来时，把同 chat 的 deferred 全部 expire。
+
+        理由：deferred 的 reply_text 是基于旧 peer_msg 生成的，对方又说话了
+        语境已变，这条 reply 不再准确。返回 expired 数量。
+        """
+        with self._lock, self._conn() as c:
+            cur = c.execute(
+                """UPDATE messenger_rpa_approvals
+                   SET status='expired', decided_at=?, decided_by='auto_expire',
+                       decision_note=?
+                   WHERE chat_key=? AND status='deferred'""",
+                (time.time(), (reason or "")[:120], chat_key.strip()),
+            )
+            c.commit()
+            return int(cur.rowcount or 0)
 
     def list_approvals(
         self,

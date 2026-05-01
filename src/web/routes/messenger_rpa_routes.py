@@ -19,13 +19,123 @@
 """
 from __future__ import annotations
 
+import copy
+import json
 import logging
-from typing import Any, Dict, Optional
+import sqlite3
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 logger = logging.getLogger(__name__)
+
+
+_SENSITIVE_KEYS = {
+    "api_key", "token", "secret", "password", "authorization",
+    "zhipu_api_key", "openai_api_key", "telegram_bot_token",
+}
+
+
+def _redact_cfg(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        out: Dict[str, Any] = {}
+        for k, v in obj.items():
+            if str(k).lower() in _SENSITIVE_KEYS:
+                out[k] = "***"
+            else:
+                out[k] = _redact_cfg(v)
+        return out
+    if isinstance(obj, list):
+        return [_redact_cfg(v) for v in obj]
+    return obj
+
+
+def _messenger_cfg(config_manager: Any) -> Dict[str, Any]:
+    cfg = getattr(config_manager, "config", None) or {}
+    mr = cfg.get("messenger_rpa") or {}
+    return mr if isinstance(mr, dict) else {}
+
+
+def _save_messenger_cfg(config_manager: Any, mr_cfg: Dict[str, Any]) -> None:
+    root = getattr(config_manager, "config", None)
+    if not isinstance(root, dict):
+        root = {}
+        config_manager.config = root
+    root["messenger_rpa"] = mr_cfg
+    ok = config_manager.save()
+    if ok is False:
+        raise HTTPException(500, "保存 messenger_rpa 配置失败")
+
+
+def _refresh_service_runtime(request: Request, mr_cfg: Dict[str, Any]) -> None:
+    svc = _get_service(request)
+    if svc is None:
+        return
+    try:
+        setattr(svc, "_cfg", dict(mr_cfg))
+        if hasattr(svc, "_merged"):
+            setattr(svc, "_merged_cfg", svc._merged())
+        live_cfg = svc._reload_runtime_cfg() if hasattr(svc, "_reload_runtime_cfg") else mr_cfg
+        runner = getattr(svc, "_runner", None)
+        if runner is not None and hasattr(runner, "refresh_cfg"):
+            runner.refresh_cfg(live_cfg)
+        for r in getattr(svc, "_runners", {}).values():
+            if hasattr(r, "refresh_cfg"):
+                r.refresh_cfg(live_cfg)
+    except Exception:
+        logger.debug("messenger_rpa runtime config refresh failed", exc_info=True)
+
+
+def _normalize_profiles(payload: Dict[str, Any]) -> Dict[str, Any]:
+    default_id = str(payload.get("default") or "").strip()
+    profiles = payload.get("profiles") or []
+    if not isinstance(profiles, list):
+        raise HTTPException(400, "profiles 必须是数组")
+    seen = set()
+    clean: List[Dict[str, Any]] = []
+    for raw in profiles:
+        if not isinstance(raw, dict):
+            raise HTTPException(400, "profile 必须是对象")
+        item = copy.deepcopy(raw)
+        pid = str(item.get("id") or item.get("name") or "").strip()
+        if not pid:
+            raise HTTPException(400, "profile.id 不能为空")
+        if pid in seen:
+            raise HTTPException(400, f"profile.id 重复: {pid}")
+        seen.add(pid)
+        item["id"] = pid
+        lang = str(item.get("language") or "auto").strip() or "auto"
+        item["language"] = lang
+        clean.append(item)
+    if default_id and default_id not in seen:
+        raise HTTPException(400, f"default profile 不存在: {default_id}")
+    if not default_id and clean:
+        default_id = str(clean[0]["id"])
+    return {"default": default_id, "profiles": clean}
+
+
+def _profile_id_for_chat(reply_profiles: Dict[str, Any], chat_key: str, chat_name: str) -> str:
+    profiles = reply_profiles.get("profiles") or []
+    default_id = str(reply_profiles.get("default") or "")
+    ck = (chat_key or "").lower()
+    cn = (chat_name or "").lower()
+    for p in profiles:
+        if not isinstance(p, dict):
+            continue
+        keys = p.get("match_chat_keys") or []
+        names = p.get("match_names") or []
+        if isinstance(keys, str):
+            keys = [keys]
+        if isinstance(names, str):
+            names = [names]
+        if any(str(k).strip().lower() and str(k).strip().lower() in ck for k in keys):
+            return str(p.get("id") or "")
+        if any(str(n).strip().lower() and str(n).strip().lower() in cn for n in names):
+            return str(p.get("id") or "")
+    return default_id
 
 
 def _get_service(request: Request):
@@ -87,6 +197,214 @@ def register_messenger_rpa_routes(
                 logger.exception("pending_empty_count 查询失败")
                 st["pending_empty_count"] = -1
         return st
+
+    @app.get("/api/messenger-rpa/config")
+    async def api_msgr_config(request: Request):
+        """Return Messenger operator-facing configuration."""
+        api_auth(request)
+        raw_cfg = copy.deepcopy(_messenger_cfg(config_manager))
+        svc = _get_service(request)
+        effective = raw_cfg
+        if svc is not None and hasattr(svc, "_reload_runtime_cfg"):
+            try:
+                effective = svc._reload_runtime_cfg()
+            except Exception:
+                effective = raw_cfg
+        ops_keys = [
+            "enabled", "autostart", "reply_mode", "max_inbox_per_run",
+            "run_once_target_names", "target_chat_names",
+            "companion_reply_cooldown_sec", "suppress_global_ai_identity",
+            "disable_episodic_memory", "language_alignment",
+            "default_reply_lang", "companion_mode",
+        ]
+        return {
+            "raw": _redact_cfg(raw_cfg),
+            "effective": _redact_cfg(effective),
+            "operations": {k: raw_cfg.get(k) for k in ops_keys if k in raw_cfg},
+            "accounts": raw_cfg.get("accounts") or [],
+            "reply_profiles": raw_cfg.get("reply_profiles") or {},
+            "lead_qualification": raw_cfg.get("lead_qualification") or {},
+            "safety": raw_cfg.get("safety") or {},
+        }
+
+    @app.put("/api/messenger-rpa/config")
+    async def api_msgr_config_update(request: Request):
+        """Patch safe Messenger RPA settings from the operations console."""
+        api_auth(request)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "invalid json body")
+        if not isinstance(body, dict):
+            raise HTTPException(400, "body 必须是对象")
+        allowed = {
+            "enabled", "autostart", "reply_mode", "max_inbox_per_run",
+            "run_once_target_names", "target_chat_names", "test_target_names",
+            "companion_reply_cooldown_sec", "suppress_global_ai_identity",
+            "disable_episodic_memory", "language_alignment",
+            "default_reply_lang", "companion_mode", "lead_qualification",
+        }
+        bad = [k for k in body.keys() if k not in allowed]
+        if bad:
+            raise HTTPException(400, f"不允许的字段: {bad}")
+        mr_cfg = copy.deepcopy(_messenger_cfg(config_manager))
+        for k, v in body.items():
+            if k == "lead_qualification":
+                if not isinstance(v, dict):
+                    raise HTTPException(400, "lead_qualification 必须是对象")
+                cur = mr_cfg.get(k) if isinstance(mr_cfg.get(k), dict) else {}
+                merged = copy.deepcopy(cur)
+                for lk, lv in v.items():
+                    if isinstance(lv, dict) and isinstance(merged.get(lk), dict):
+                        sub = dict(merged[lk])
+                        sub.update(lv)
+                        merged[lk] = sub
+                    else:
+                        merged[lk] = lv
+                mr_cfg[k] = merged
+            elif k in ("run_once_target_names", "target_chat_names", "test_target_names"):
+                if isinstance(v, str):
+                    mr_cfg[k] = [x.strip() for x in v.split(",") if x.strip()]
+                elif isinstance(v, list):
+                    mr_cfg[k] = [str(x).strip() for x in v if str(x or "").strip()]
+                else:
+                    raise HTTPException(400, f"{k} 必须是字符串或数组")
+            else:
+                mr_cfg[k] = v
+        _save_messenger_cfg(config_manager, mr_cfg)
+        _refresh_service_runtime(request, mr_cfg)
+        return {"ok": True, "updated_keys": list(body.keys())}
+
+    @app.get("/api/messenger-rpa/personas")
+    async def api_msgr_personas(request: Request):
+        api_auth(request)
+        cfg = _messenger_cfg(config_manager)
+        return {
+            "reply_profiles": cfg.get("reply_profiles") or {},
+            "experiment": cfg.get("persona_experiment") or {},
+        }
+
+    @app.put("/api/messenger-rpa/personas")
+    async def api_msgr_personas_update(request: Request):
+        api_auth(request)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "invalid json body")
+        if not isinstance(body, dict):
+            raise HTTPException(400, "body 必须是对象")
+        rp_body = body.get("reply_profiles", body)
+        if not isinstance(rp_body, dict):
+            raise HTTPException(400, "reply_profiles 必须是对象")
+        normalized = _normalize_profiles(rp_body)
+        mr_cfg = copy.deepcopy(_messenger_cfg(config_manager))
+        mr_cfg["reply_profiles"] = normalized
+        _save_messenger_cfg(config_manager, mr_cfg)
+        _refresh_service_runtime(request, mr_cfg)
+        return {"ok": True, "reply_profiles": normalized}
+
+    @app.get("/api/messenger-rpa/leads")
+    async def api_msgr_leads(request: Request, limit: int = 100):
+        """List recent Messenger contacts with ICP/qualification evidence."""
+        api_auth(request)
+        store = _get_store(request)
+        if store is None:
+            raise HTTPException(503, "state_store 未注入")
+        cfg = _messenger_cfg(config_manager)
+        reply_profiles = cfg.get("reply_profiles") or {}
+        chat_states = []
+        if hasattr(store, "list_chat_states"):
+            chat_states = store.list_chat_states(limit=int(limit or 100))
+
+        contexts: Dict[str, Dict[str, Any]] = {}
+        try:
+            cfg_dir = Path(config_manager.config_path).parent
+            db = cfg_dir / "bot.db"
+            if db.exists():
+                c = sqlite3.connect(str(db))
+                c.row_factory = sqlite3.Row
+                rows = c.execute(
+                    "SELECT user_id, data, updated_at FROM user_context "
+                    "WHERE user_id LIKE ? ORDER BY updated_at DESC LIMIT ?",
+                    ("acc_%:%", max(int(limit or 100) * 2, 200)),
+                ).fetchall()
+                c.close()
+                for row in rows:
+                    try:
+                        data = json.loads(row["data"] or "{}") or {}
+                    except Exception:
+                        data = {}
+                    data["_ctx_updated_at"] = row["updated_at"]
+                    contexts[str(row["user_id"])] = data
+        except Exception:
+            logger.debug("messenger leads context load failed", exc_info=True)
+
+        items: List[Dict[str, Any]] = []
+        seen = set()
+        for st in chat_states:
+            chat_key = str(st.get("chat_key") or "")
+            seen.add(chat_key)
+            chat_name = str(st.get("chat_name") or chat_key)
+            ctx = contexts.get(chat_key) or {}
+            lead = ctx.get("lead_qualification") if isinstance(ctx, dict) else {}
+            if not isinstance(lead, dict):
+                lead = {}
+            credit = {}
+            try:
+                credit = store.get_credit(chat_key)
+            except Exception:
+                credit = {}
+            items.append({
+                "chat_key": chat_key,
+                "chat_name": chat_name,
+                "updated_at": st.get("updated_at") or ctx.get("_ctx_updated_at") or 0,
+                "last_sent_at": st.get("last_sent_at") or 0,
+                "last_peer_text": st.get("last_peer_text") or ctx.get("last_message") or "",
+                "last_reply": st.get("last_reply") or ctx.get("last_reply") or "",
+                "credit": credit.get("credit", 100),
+                "credit_reason": credit.get("last_reason", ""),
+                "reply_lang": ctx.get("reply_lang", ""),
+                "persona_id": _profile_id_for_chat(reply_profiles, chat_key, chat_name),
+                "lead": lead,
+                "score": int(lead.get("icp_score") or 0),
+                "stage": str(lead.get("stage") or "unknown"),
+                "missing_fields": lead.get("missing_fields") or [],
+                "evidence": lead.get("evidence") or [],
+            })
+        for chat_key, ctx in contexts.items():
+            if chat_key in seen:
+                continue
+            chat_name = str(ctx.get("chat_title") or chat_key.split(":", 1)[-1])
+            lead = ctx.get("lead_qualification") if isinstance(ctx, dict) else {}
+            if not isinstance(lead, dict):
+                lead = {}
+            items.append({
+                "chat_key": chat_key,
+                "chat_name": chat_name,
+                "updated_at": ctx.get("_ctx_updated_at") or 0,
+                "last_sent_at": 0,
+                "last_peer_text": ctx.get("last_message") or "",
+                "last_reply": ctx.get("last_reply") or "",
+                "credit": 100,
+                "credit_reason": "",
+                "reply_lang": ctx.get("reply_lang", ""),
+                "persona_id": _profile_id_for_chat(reply_profiles, chat_key, chat_name),
+                "lead": lead,
+                "score": int(lead.get("icp_score") or 0),
+                "stage": str(lead.get("stage") or "unknown"),
+                "missing_fields": lead.get("missing_fields") or [],
+                "evidence": lead.get("evidence") or [],
+            })
+        items.sort(key=lambda x: (int(x.get("score") or 0), float(x.get("updated_at") or 0)), reverse=True)
+        total = len(items)
+        high = sum(1 for x in items if int(x.get("score") or 0) >= 80)
+        mid = sum(1 for x in items if 40 <= int(x.get("score") or 0) < 80)
+        low = sum(1 for x in items if int(x.get("score") or 0) < 40)
+        return {
+            "items": items[:max(1, min(int(limit or 100), 1000))],
+            "summary": {"total": total, "high": high, "mid": mid, "low": low},
+            "ts": time.time(),
+        }
 
     @app.get("/api/messenger-rpa/recent")
     async def api_msgr_recent(request: Request, limit: int = 50):
@@ -1164,5 +1482,205 @@ def register_messenger_rpa_routes(
             raise HTTPException(
                 500, f"install failed: {type(ex).__name__}:{ex}"
             )
+
+    # ── 账号健康看板：所有账号深度状态 ──────────────────
+    @app.get("/api/messenger-rpa/accounts/health")
+    async def api_msgr_accounts_health(request: Request, deep: bool = False):
+        """对所有已注册账号执行健康检查。
+
+        ``?deep=true`` 时额外检查 ADB Keyboard 安装情况（耗时约 3-5s）。
+        返回每台手机的 ADB 状态、屏幕、锁屏、暂停、UI unsafe 等字段。
+        """
+        api_auth(request)
+        svc = _get_service(request)
+        if svc is None:
+            raise HTTPException(503, "service 未注入")
+        if not hasattr(svc, "accounts_health"):
+            raise HTTPException(501, "accounts_health 不可用")
+        try:
+            result = await svc.accounts_health(deep=bool(deep))
+            return result
+        except Exception as ex:
+            logger.exception("accounts_health 异常")
+            raise HTTPException(500, f"health check 失败: {type(ex).__name__}:{ex}")
+
+    # ── 账号级暂停 ──────────────────────────────────
+    @app.post("/api/messenger-rpa/accounts/{account_id}/pause")
+    async def api_msgr_account_pause(request: Request, account_id: str):
+        """暂停指定账号 N 秒（默认 300s）。不影响其他账号。
+
+        Body JSON（可选）: ``{"seconds": 300}``
+        """
+        api_auth(request)
+        svc = _get_service(request)
+        if svc is None:
+            raise HTTPException(503, "service 未注入")
+        reg = getattr(svc, "_account_registry", None)
+        if reg is None or reg.get(account_id) is None:
+            raise HTTPException(404, f"未知 account: {account_id}")
+        body: Dict[str, Any] = {}
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        seconds = float(body.get("seconds", 300) or 300)
+        svc.pause_account(account_id, seconds)
+        return {"ok": True, "account_id": account_id, "paused_for_sec": seconds}
+
+    # ── 账号级恢复 ──────────────────────────────────
+    @app.post("/api/messenger-rpa/accounts/{account_id}/resume")
+    async def api_msgr_account_resume(request: Request, account_id: str):
+        """恢复指定账号，同时清除 ui_unsafe 标记。"""
+        api_auth(request)
+        svc = _get_service(request)
+        if svc is None:
+            raise HTTPException(503, "service 未注入")
+        reg = getattr(svc, "_account_registry", None)
+        if reg is None or reg.get(account_id) is None:
+            raise HTTPException(404, f"未知 account: {account_id}")
+        svc.resume_account(account_id)
+        return {"ok": True, "account_id": account_id}
+
+    # ── 清除 UI unsafe 标记（不自动恢复，需再调 resume） ──
+    @app.post("/api/messenger-rpa/accounts/{account_id}/clear-unsafe")
+    async def api_msgr_account_clear_unsafe(request: Request, account_id: str):
+        """仅清除 ui_unsafe 标记，暂停计时仍然有效。
+        若需立即恢复，请改用 /accounts/{id}/resume。
+        """
+        api_auth(request)
+        svc = _get_service(request)
+        if svc is None:
+            raise HTTPException(503, "service 未注入")
+        reg = getattr(svc, "_account_registry", None)
+        if reg is None or reg.get(account_id) is None:
+            raise HTTPException(404, f"未知 account: {account_id}")
+        svc.clear_account_ui_unsafe(account_id)
+        return {"ok": True, "account_id": account_id}
+
+    # ── 转化漏斗 + A/B 指标看板 ──────────────────────────
+    @app.get("/api/messenger-rpa/funnel")
+    async def api_msgr_funnel(request: Request):
+        """转化漏斗 + Persona A/B 实验指标。
+
+        返回字段：
+          funnel        - 各 Journey 阶段当前存量
+          conversions   - 关键转化率（engaged/handoff/line_add/line_engage/overall）
+          variants      - Persona A/B 各变体审批通过率
+          handoff       - 引流话术注入/发送/跳过统计（进程级计数器）
+          ab_conclusions- 策略 A/B 测试结论（conclusive/inconclusive/insufficient）
+        """
+        api_auth(request)
+        svc = _get_service(request)
+
+        # 1. 转化漏斗（来自 contacts store）
+        funnel: Dict[str, int] = {}
+        conversions: Dict[str, Any] = {}
+        try:
+            cs = getattr(request.app.state, "contacts", None)
+            if cs is not None:
+                funnel = cs.store.count_journeys_by_stage()
+        except Exception:
+            pass
+
+        if funnel:
+            def _pct(num_key: str, den_key: str) -> Optional[float]:
+                n = funnel.get(num_key, 0)
+                d = funnel.get(den_key, 0)
+                return round(n / d * 100, 1) if d else None
+
+            # 关键阶段（缺失补 0）
+            _stages = ["INITIAL", "ENGAGED", "HANDOFF_READY", "HANDOFF_SENT",
+                       "LINE_ADDED", "LINE_ACCEPTED", "LINE_ENGAGED", "BONDED",
+                       "LOST_HANDOFF", "LOST_LINE_SILENT"]
+            funnel = {s: funnel.get(s, 0) for s in _stages}
+
+            total = sum(
+                funnel.get(s, 0) for s in
+                ["INITIAL", "ENGAGED", "HANDOFF_READY", "HANDOFF_SENT",
+                 "LINE_ADDED", "LINE_ACCEPTED", "LINE_ENGAGED", "BONDED"]
+            )
+            line_engaged = funnel.get("LINE_ENGAGED", 0) + funnel.get("BONDED", 0)
+            conversions = {
+                "engaged_rate":     _pct("ENGAGED", "INITIAL"),
+                "handoff_rate":     _pct("HANDOFF_SENT", "ENGAGED"),
+                "line_add_rate":    _pct("LINE_ADDED", "HANDOFF_SENT"),
+                "line_engage_rate": (
+                    round(line_engaged / funnel.get("LINE_ADDED", 0) * 100, 1)
+                    if funnel.get("LINE_ADDED") else None
+                ),
+                "overall_rate": (
+                    round(line_engaged / total * 100, 1) if total else None
+                ),
+                "total_journeys": total,
+            }
+
+        # 2. Persona A/B variant stats
+        variants: Dict[str, Any] = {}
+        if svc is not None:
+            try:
+                store = getattr(svc, "_state", None)
+                if store is not None:
+                    vs = store.variant_stats()
+                    variants = vs.get("variants", {})
+            except Exception:
+                pass
+
+        # 3. Handoff 进程级计数器
+        handoff: Dict[str, Any] = {}
+        try:
+            from src.integrations.messenger_rpa.metrics import get_metrics
+            m = get_metrics().dump()
+            handoff = {
+                "injected_total":  m.get("handoff_injected_total", 0),
+                "sent_total":      m.get("handoff_sent_total", 0),
+                "by_script":       m.get("handoff_by_script", {}),
+                "skipped_reasons": m.get("handoff_skipped", {}),
+                "sends_total":     m.get("sends_total", 0),
+                "inject_rate": (
+                    round(m["handoff_injected_total"] / m["sends_total"] * 100, 1)
+                    if m.get("sends_total") else None
+                ),
+            }
+        except Exception:
+            pass
+
+        # 4. 策略 A/B 测试结论
+        ab_conclusions: list = []
+        try:
+            from src.utils.strategy_advisor import evaluate_ab_tests
+            sm = getattr(svc, "_sm", None) if svc else None
+            if sm is not None:
+                ab_tests = getattr(sm, "_ab_tests", {}) or {}
+                strategies = getattr(sm, "_strategies", {}) or {}
+                tracker = getattr(sm, "_strategy_tracker", None)
+                if ab_tests and tracker is not None:
+                    summary = tracker.get_summary() if hasattr(
+                        tracker, "get_summary") else []
+                    ab_conclusions = evaluate_ab_tests(
+                        ab_tests, summary, strategies)
+        except Exception:
+            pass
+
+        return {
+            "funnel": funnel,
+            "conversions": conversions,
+            "variants": variants,
+            "handoff": handoff,
+            "ab_conclusions": ab_conclusions,
+            "ts": __import__("time").time(),
+        }
+
+    # ── 跨账号协调器快照（活跃聊天锁 + 画像缓存） ──
+    @app.get("/api/messenger-rpa/coordinator")
+    async def api_msgr_coordinator(request: Request):
+        """返回 CrossAccountCoordinator 快照：
+        - active_chats: 当前各用户由哪个账号处理（聊天锁）
+        - portrait_cache: 各用户最新画像缓存元信息（account、时间、年龄）
+        """
+        api_auth(request)
+        svc = _get_service(request)
+        if svc is None:
+            raise HTTPException(503, "service 未注入")
+        return svc.coordinator_snapshot()
 
     logger.info("Messenger RPA routes registered (status/approvals/trigger/...)")

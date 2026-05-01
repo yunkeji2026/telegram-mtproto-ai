@@ -3,435 +3,1236 @@
 {% block page_title %}Messenger 自动聊天{% endblock %}
 {% block head %}
 <style>
-.mr-grid{display:grid;grid-template-columns:1.3fr 1fr;gap:1.1rem;margin-bottom:1.1rem}
-@media(max-width:960px){.mr-grid{grid-template-columns:1fr}}
-.mr-kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:.7rem;margin-bottom:1rem}
-@media(max-width:720px){.mr-kpi{grid-template-columns:repeat(2,1fr)}}
-.mr-kpi .kpi{background:var(--input);border-radius:var(--r-sm);padding:.8rem 1rem;display:flex;flex-direction:column;border:1px solid var(--bd)}
-.mr-kpi .kpi-v{font-size:1.5rem;font-weight:800;background:var(--g);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-.mr-kpi .kpi-l{font-size:.72rem;color:var(--t3);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
-.mr-control{display:flex;flex-direction:column;gap:.6rem}
-.mr-control .btn{justify-content:center}
-.mr-appr{max-height:540px;overflow-y:auto;padding-right:.3rem}
-.mr-appr-row{padding:.75rem;border:1px solid var(--bd);border-radius:12px;margin-bottom:.6rem;background:var(--card)}
-.mr-appr-row.pending{border-left:3px solid var(--amber)}
-.mr-appr-row.approved{border-left:3px solid var(--green)}
-.mr-appr-row.rejected{border-left:3px solid var(--red)}
-.mr-appr-row.sent{border-left:3px solid var(--p)}
-.mr-appr-row .mr-meta{display:flex;gap:.5rem;font-size:.72rem;color:var(--t3);margin-bottom:.3rem;flex-wrap:wrap;align-items:center}
-.mr-appr-row .mr-status{font-weight:700;padding:.1rem .45rem;border-radius:10px;background:var(--input);color:var(--t2)}
-.mr-appr-row.pending .mr-status{color:var(--amber);background:var(--as)}
-.mr-appr-row.approved .mr-status{color:var(--green);background:var(--gs)}
-.mr-appr-row.rejected .mr-status{color:var(--red);background:var(--rs)}
-.mr-appr-row.sent .mr-status{color:var(--p);background:var(--ps)}
-.mr-appr-row .mr-time{margin-left:auto}
-.mr-appr-row .mr-peer{font-size:.86rem;white-space:pre-wrap;word-break:break-word}
-.mr-appr-row .mr-peer::before{content:'对方:';color:var(--p);font-weight:700;margin-right:.35rem;font-size:.78rem}
-.mr-appr-row .mr-reply{margin-top:.4rem;padding:.5rem .65rem;background:var(--ps);border-radius:8px;font-size:.83rem;white-space:pre-wrap}
-.mr-appr-row .mr-reply::before{content:'AI 回复:';color:var(--p);font-weight:700;margin-right:.35rem;font-size:.76rem}
-.mr-appr-row .mr-actions{margin-top:.5rem;display:flex;gap:.4rem}
-.mr-appr-row .mr-actions .btn{padding:.4rem .75rem;font-size:.78rem}
-.mr-runs{max-height:540px;overflow-y:auto}
-.mr-run{display:flex;justify-content:space-between;padding:.55rem .4rem;border-bottom:1px solid var(--bd);font-size:.8rem;gap:.5rem}
-.mr-run:last-child{border-bottom:none}
-.mr-run-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px}
-.mr-run-step{font-size:.72rem;padding:.1rem .4rem;border-radius:8px;background:var(--input);color:var(--t2)}
-.mr-run.ok .mr-run-step{color:var(--green);background:var(--gs)}
-.mr-run.err .mr-run-step{color:var(--red);background:var(--rs)}
-.mr-run-time{font-size:.7rem;color:var(--t3);text-align:right;flex-shrink:0}
-.mr-empty{text-align:center;color:var(--t3);padding:2rem;font-size:.88rem}
-.mr-hint{font-size:.72rem;color:var(--t3);margin-top:.2rem}
+.mr-page{display:flex;flex-direction:column;gap:1rem}
+.mr-head{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:.1rem}
+.mr-title{display:flex;align-items:center;gap:.65rem;min-width:0}
+.mr-status-dot{width:11px;height:11px;border-radius:999px;background:var(--t3);box-shadow:0 0 10px currentColor;flex-shrink:0}
+.mr-title h1{font-size:1.25rem;line-height:1.2;margin:0;color:var(--t)}
+.mr-sub{font-size:.8rem;color:var(--t3);margin-top:.18rem}
+.mr-head-actions{display:flex;gap:.45rem;align-items:center;flex-wrap:wrap}
+.mr-pill{display:inline-flex;align-items:center;gap:.35rem;min-height:24px;padding:.18rem .55rem;border:1px solid var(--bd);border-radius:999px;background:var(--input);color:var(--t2);font-size:.74rem;font-weight:700;white-space:nowrap}
+.mr-pill.ok{background:var(--gs);color:var(--green);border-color:rgba(16,185,129,.25)}
+.mr-pill.warn{background:var(--as);color:var(--amber);border-color:rgba(245,158,11,.25)}
+.mr-pill.danger{background:var(--rs);color:var(--red);border-color:rgba(239,68,68,.25)}
+.mr-tabs{display:flex;gap:.35rem;padding:.25rem;border:1px solid var(--bd);border-radius:10px;background:var(--input);overflow-x:auto;scrollbar-width:thin}
+.mr-tab{border:0;background:transparent;color:var(--t2);font-family:inherit;font-size:.82rem;font-weight:700;padding:.55rem .8rem;border-radius:8px;cursor:pointer;white-space:nowrap;transition:.16s}
+.mr-tab:hover{background:rgba(99,102,241,.08);color:var(--t)}
+.mr-tab.active{background:var(--card);color:var(--p);box-shadow:var(--s0)}
+.mr-kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:.75rem}
+.mr-kpi{border:1px solid var(--bd);border-radius:8px;background:var(--input);padding:.8rem .85rem;min-width:0}
+.mr-kpi-value{display:block;font-size:1.45rem;line-height:1.1;font-weight:850;color:var(--t);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mr-kpi-label{display:block;margin-top:.25rem;font-size:.72rem;color:var(--t3);font-weight:700}
+.mr-view{display:none}
+.mr-view.active{display:block}
+.mr-grid{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(320px,.9fr);gap:1rem}
+.mr-grid.equal{grid-template-columns:repeat(2,minmax(0,1fr))}
+.mr-grid.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+.mr-panel{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:1rem;min-width:0;box-shadow:var(--s0)}
+.mr-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:.8rem;margin-bottom:.75rem;padding-bottom:.65rem;border-bottom:1px solid var(--bd)}
+.mr-panel-title{margin:0;font-size:.96rem;line-height:1.25;color:var(--t);font-weight:800}
+.mr-panel-sub{font-size:.73rem;color:var(--t3);margin-top:.2rem}
+.mr-toolbar{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap}
+.mr-stack{display:flex;flex-direction:column;gap:.75rem}
+.mr-row{display:flex;align-items:center;justify-content:space-between;gap:.75rem;padding:.62rem 0;border-bottom:1px solid var(--bd)}
+.mr-row:last-child{border-bottom:none}
+.mr-name{font-weight:800;color:var(--t);font-size:.84rem;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mr-muted{color:var(--t3);font-size:.74rem}
+.mr-note{color:var(--t2);font-size:.78rem;line-height:1.55}
+.mr-empty{text-align:center;color:var(--t3);padding:2rem 1rem;font-size:.86rem}
+.mr-scroll{max-height:560px;overflow:auto;padding-right:.2rem}
+.mr-scroll.tall{max-height:680px}
+.mr-scroll.short{max-height:360px}
+.mr-table{width:100%;border-collapse:collapse;font-size:.78rem}
+.mr-table th{text-align:left;color:var(--t3);font-weight:800;border-bottom:1px solid var(--bd);padding:.55rem .45rem;white-space:nowrap}
+.mr-table td{border-bottom:1px solid var(--bd);padding:.58rem .45rem;vertical-align:top;color:var(--t2)}
+.mr-table tr:last-child td{border-bottom:none}
+.mr-field-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem}
+.mr-field-grid.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+.mr-field{display:flex;flex-direction:column;gap:.28rem;min-width:0}
+.mr-field label{font-size:.72rem;color:var(--t3);font-weight:800}
+.mr-check{display:flex;align-items:center;gap:.45rem;color:var(--t2);font-size:.8rem;font-weight:700}
+.mr-check input{width:16px;height:16px;accent-color:var(--p)}
+.mr-textarea{min-height:320px;font-family:Consolas,'JetBrains Mono',monospace;font-size:.78rem;line-height:1.45;resize:vertical}
+.mr-json-small{min-height:150px}
+.mr-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,.8fr);gap:1rem}
+.mr-appr-row{border:1px solid var(--bd);border-left:3px solid var(--amber);border-radius:8px;background:var(--input);padding:.78rem;margin-bottom:.65rem}
+.mr-appr-row.sent{border-left-color:var(--p)}
+.mr-appr-row.approved{border-left-color:var(--green)}
+.mr-appr-row.rejected{border-left-color:var(--red)}
+.mr-appr-meta{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;color:var(--t3);font-size:.72rem;margin-bottom:.45rem}
+.mr-appr-meta .push{margin-left:auto}
+.mr-peer,.mr-reply{white-space:pre-wrap;word-break:break-word;line-height:1.55}
+.mr-peer{color:var(--t);font-size:.86rem}
+.mr-reply{margin-top:.55rem;background:var(--card);border:1px solid var(--bd);border-radius:7px;padding:.58rem .65rem;color:var(--t2);font-size:.84rem}
+.mr-edit{margin-top:.55rem;min-height:82px;font-size:.84rem;resize:vertical}
+.mr-actions{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.55rem}
+.mr-actions .btn,.mr-toolbar .btn{padding:.38rem .72rem;font-size:.76rem}
+.mr-badge{display:inline-flex;align-items:center;justify-content:center;min-height:20px;padding:.12rem .45rem;border-radius:999px;background:var(--input);border:1px solid var(--bd);font-size:.7rem;color:var(--t2);font-weight:800;white-space:nowrap}
+.mr-badge.pending{background:var(--as);color:var(--amber);border-color:rgba(245,158,11,.25)}
+.mr-badge.sent,.mr-badge.high,.mr-badge.online{background:var(--gs);color:var(--green);border-color:rgba(16,185,129,.25)}
+.mr-badge.approved,.mr-badge.mid{background:var(--ps);color:var(--p);border-color:rgba(99,102,241,.25)}
+.mr-badge.rejected,.mr-badge.low,.mr-badge.offline{background:var(--rs);color:var(--red);border-color:rgba(239,68,68,.25)}
+.mr-badge.paused,.mr-badge.warn{background:var(--as);color:var(--amber);border-color:rgba(245,158,11,.25)}
+.mr-account{display:grid;grid-template-columns:minmax(160px,1fr) auto minmax(220px,1fr) auto;gap:.75rem;align-items:center;padding:.7rem 0;border-bottom:1px solid var(--bd)}
+.mr-account:last-child{border-bottom:none}
+.mr-account-actions{display:flex;gap:.35rem;justify-content:flex-end;flex-wrap:wrap}
+.mr-funnel-row{display:grid;grid-template-columns:112px minmax(0,1fr) 44px;align-items:center;gap:.5rem;margin:.45rem 0}
+.mr-funnel-label{color:var(--t2);font-size:.74rem;text-align:right}
+.mr-bar{height:13px;background:var(--input);border:1px solid var(--bd);border-radius:999px;overflow:hidden}
+.mr-bar-fill{height:100%;background:linear-gradient(90deg,var(--p),var(--green));border-radius:999px;min-width:2px}
+.mr-bar-fill.loss{background:linear-gradient(90deg,var(--amber),var(--red))}
+.mr-persona-card{border:1px solid var(--bd);border-radius:8px;background:var(--input);padding:.75rem;display:flex;flex-direction:column;gap:.45rem}
+.mr-persona-top{display:flex;align-items:center;justify-content:space-between;gap:.5rem}
+.mr-code{font-family:Consolas,'JetBrains Mono',monospace;font-size:.75rem;color:var(--p);background:var(--input);border:1px solid var(--bd);border-radius:6px;padding:.08rem .35rem}
+.mr-lead-card{border:1px solid var(--bd);border-radius:8px;background:var(--input);padding:.75rem;display:grid;grid-template-columns:78px minmax(0,1fr) 160px;gap:.75rem;align-items:start;margin-bottom:.65rem}
+.mr-score{width:60px;height:60px;border-radius:8px;border:1px solid var(--bd);display:flex;align-items:center;justify-content:center;font-weight:900;font-size:1.1rem;background:var(--card)}
+.mr-score.high{color:var(--green);border-color:rgba(16,185,129,.35);background:var(--gs)}
+.mr-score.mid{color:var(--amber);border-color:rgba(245,158,11,.35);background:var(--as)}
+.mr-score.low{color:var(--t3)}
+.mr-evidence{display:flex;gap:.28rem;flex-wrap:wrap;margin-top:.45rem}
+.mr-evidence span{font-size:.68rem;border:1px solid var(--bd);border-radius:999px;padding:.08rem .35rem;color:var(--t3);background:var(--card)}
+.mr-toast{position:fixed;right:1.2rem;bottom:1.2rem;z-index:5000;max-width:420px;padding:.75rem .9rem;border:1px solid var(--bd);border-radius:10px;background:var(--card);box-shadow:var(--s2);color:var(--t);font-size:.82rem;display:none}
+.mr-toast.show{display:block;animation:fadeUp .18s ease}
+.mr-toast.ok{border-color:rgba(16,185,129,.35)}
+.mr-toast.err{border-color:rgba(239,68,68,.35)}
+@media(max-width:1180px){
+  .mr-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .mr-grid,.mr-grid.equal,.mr-grid.three,.mr-split{grid-template-columns:1fr}
+  .mr-account{grid-template-columns:minmax(0,1fr) auto}
+  .mr-account .mr-note{grid-column:1/-1}
+  .mr-account-actions{grid-column:1/-1;justify-content:flex-start}
+}
+@media(max-width:720px){
+  .mr-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .mr-field-grid,.mr-field-grid.three{grid-template-columns:1fr}
+  .mr-lead-card{grid-template-columns:1fr}
+  .mr-score{width:100%;height:44px}
+  .mr-head-actions{width:100%}
+}
 </style>
 {% endblock %}
 {% block content %}
-<div class="lr-title" style="display:flex;align-items:center;gap:.7rem;margin-bottom:.9rem">
-  <span class="mr-dot" id="mr-status-dot" style="width:10px;height:10px;border-radius:50%;background:var(--t3);box-shadow:0 0 8px currentColor"></span>
-  <h1 style="font-size:1.2rem;margin:0">Messenger RPA</h1>
-  <span id="mr-status-text" class="lr-sub" style="font-size:.82rem;color:var(--t2)">加载中...</span>
-</div>
-
-<div class="mr-kpi">
-  <div class="kpi"><span class="kpi-v" id="kpi-pending">0</span><span class="kpi-l">待审批</span></div>
-  <div class="kpi"><span class="kpi-v" id="kpi-approved">0</span><span class="kpi-l">已批准待发</span></div>
-  <div class="kpi"><span class="kpi-v" id="kpi-sent">0</span><span class="kpi-l">最近24h 已发</span></div>
-  <div class="kpi"><span class="kpi-v" id="kpi-runs">0</span><span class="kpi-l">最近 runs</span></div>
-</div>
-
-<div class="mr-grid">
-  <div class="card">
-    <h2 style="margin:0 0 .6rem 0;font-size:1rem">审批队列</h2>
-    <div class="mr-hint">每一次 reply_mode=approve 的 run 都会把 AI 回复推到这里；点击「批准」后会真实发出去。</div>
-    <!-- ★ P2-6：批量操作 + SLA 状态条 -->
-    <div id="mr-bulk-bar" style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin:.4rem 0">
-      <label style="font-size:.8rem;color:var(--t2);display:flex;align-items:center;gap:.3rem">
-        <input type="checkbox" id="mr-bulk-all"> 全选 pending
-      </label>
-      <button class="btn btn-primary" id="btn-bulk-approve" disabled>批量批准</button>
-      <button class="btn" id="btn-bulk-reject" disabled>批量驳回</button>
-      <span id="mr-sla-badge" style="margin-left:auto;font-size:.76rem;color:var(--t3)"></span>
+<div class="mr-page">
+  <div class="mr-head">
+    <div class="mr-title">
+      <span class="mr-status-dot" id="mr-status-dot"></span>
+      <div>
+        <h1>Messenger RPA 运营台</h1>
+        <div class="mr-sub" id="mr-status-text">正在读取运行状态...</div>
+      </div>
     </div>
-    <div class="mr-appr" id="mr-approvals">
-      <div class="mr-empty">加载中...</div>
+    <div class="mr-head-actions">
+      <span class="mr-pill" id="mr-mode-pill">mode --</span>
+      <span class="mr-pill" id="mr-target-pill">target --</span>
+      <button class="btn btn-primary" id="btn-trigger">跑一次</button>
+      <button class="btn" id="btn-refresh">刷新</button>
     </div>
   </div>
 
-  <div class="card">
-    <h2 style="margin:0 0 .6rem 0;font-size:1rem">控制面板</h2>
-    <div class="mr-control">
-      <button class="btn btn-primary" id="btn-trigger">立即跑一次 run_once</button>
-      <button class="btn" id="btn-calibrate">坐标校准（扫描屏幕）</button>
-      <button class="btn" id="btn-install-kbd">安装 ADBKeyboard（中文/emoji）</button>
-      <button class="btn" id="btn-pause">暂停 5 分钟</button>
-      <button class="btn" id="btn-resume">恢复</button>
-      <button class="btn" id="btn-refresh">刷新数据</button>
-    </div>
-
-    <h3 style="margin:1rem 0 .4rem 0;font-size:.88rem;color:var(--t2)">设备健康</h3>
-    <div id="mr-devices" class="mr-runs">
-      <div class="mr-empty">加载中...</div>
-    </div>
-
-    <h3 style="margin:1rem 0 .4rem 0;font-size:.88rem;color:var(--t2)">最近 20 次 runs</h3>
-    <div class="mr-runs" id="mr-runs">
-      <div class="mr-empty">加载中...</div>
-    </div>
+  <div class="mr-kpis">
+    <div class="mr-kpi"><span class="mr-kpi-value" id="kpi-pending">0</span><span class="mr-kpi-label">待审批</span></div>
+    <div class="mr-kpi"><span class="mr-kpi-value" id="kpi-sent">0</span><span class="mr-kpi-label">24h 已发</span></div>
+    <div class="mr-kpi"><span class="mr-kpi-value" id="kpi-high">0</span><span class="mr-kpi-label">高价值线索</span></div>
+    <div class="mr-kpi"><span class="mr-kpi-value" id="kpi-online">0/0</span><span class="mr-kpi-label">可运行账号</span></div>
+    <div class="mr-kpi"><span class="mr-kpi-value" id="kpi-runs">0</span><span class="mr-kpi-label">最近 runs</span></div>
+    <div class="mr-kpi"><span class="mr-kpi-value" id="kpi-line">--</span><span class="mr-kpi-label">LINE 注入率</span></div>
   </div>
+
+  <div class="mr-tabs" role="tablist">
+    <button class="mr-tab active" data-tab="overview" role="tab">总览</button>
+    <button class="mr-tab" data-tab="accounts" role="tab">账号设备</button>
+    <button class="mr-tab" data-tab="personas" role="tab">人设策略</button>
+    <button class="mr-tab" data-tab="leads" role="tab">客户线索</button>
+    <button class="mr-tab" data-tab="approvals" role="tab">审批质检</button>
+    <button class="mr-tab" data-tab="runs" role="tab">运行记录</button>
+    <button class="mr-tab" data-tab="settings" role="tab">策略配置</button>
+  </div>
+
+  <section class="mr-view active" id="view-overview">
+    <div class="mr-grid">
+      <div class="mr-panel">
+        <div class="mr-panel-head">
+          <div>
+            <h2 class="mr-panel-title">运营漏斗</h2>
+            <div class="mr-panel-sub" id="funnel-total">等待数据</div>
+          </div>
+          <div class="mr-toolbar" id="funnel-rates"></div>
+        </div>
+        <div id="funnel-bars"><div class="mr-empty">加载中...</div></div>
+      </div>
+      <div class="mr-panel">
+        <div class="mr-panel-head">
+          <div>
+            <h2 class="mr-panel-title">今日动作</h2>
+            <div class="mr-panel-sub">用于判断系统是否在正确推进</div>
+          </div>
+        </div>
+        <div class="mr-stack">
+          <div class="mr-row"><span class="mr-name">待审批 SLA</span><span id="overview-sla" class="mr-pill">--</span></div>
+          <div class="mr-row"><span class="mr-name">人设默认值</span><span id="overview-persona" class="mr-pill">--</span></div>
+          <div class="mr-row"><span class="mr-name">线索规则</span><span id="overview-lead-rule" class="mr-pill">--</span></div>
+          <div class="mr-row"><span class="mr-name">客服 LINE</span><span id="overview-line-id" class="mr-pill">未配置</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="mr-grid equal">
+      <div class="mr-panel">
+        <div class="mr-panel-head">
+          <div>
+            <h2 class="mr-panel-title">高价值线索</h2>
+            <div class="mr-panel-sub">优先由人工客服接管</div>
+          </div>
+          <button class="btn" data-goto="leads">查看全部</button>
+        </div>
+        <div id="overview-leads" class="mr-scroll short"><div class="mr-empty">加载中...</div></div>
+      </div>
+      <div class="mr-panel">
+        <div class="mr-panel-head">
+          <div>
+            <h2 class="mr-panel-title">最近运行</h2>
+            <div class="mr-panel-sub">展示最近 RPA 决策和失败点</div>
+          </div>
+          <button class="btn" data-goto="runs">运行记录</button>
+        </div>
+        <div id="overview-runs" class="mr-scroll short"><div class="mr-empty">加载中...</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="mr-view" id="view-accounts">
+    <div class="mr-grid">
+      <div class="mr-panel">
+        <div class="mr-panel-head">
+          <div>
+            <h2 class="mr-panel-title">账号设备池</h2>
+            <div class="mr-panel-sub" id="accounts-summary">读取中</div>
+          </div>
+          <div class="mr-toolbar">
+            <button class="btn" id="btn-health-deep">深度检查</button>
+            <button class="btn" id="btn-install-kbd">安装 ADBKeyboard</button>
+          </div>
+        </div>
+        <div id="accounts-list" class="mr-scroll tall"><div class="mr-empty">加载中...</div></div>
+      </div>
+      <div class="mr-panel">
+        <div class="mr-panel-head">
+          <div>
+            <h2 class="mr-panel-title">控制动作</h2>
+            <div class="mr-panel-sub">用于测试、暂停、恢复和坐标校准</div>
+          </div>
+        </div>
+        <div class="mr-stack">
+          <button class="btn btn-primary" id="btn-trigger-2">立即跑一次 run_once</button>
+          <button class="btn" id="btn-calibrate">坐标校准</button>
+          <button class="btn" id="btn-pause">暂停 5 分钟</button>
+          <button class="btn" id="btn-resume">恢复运行</button>
+        </div>
+        <div style="height:1rem"></div>
+        <div class="mr-panel-head">
+          <div>
+            <h2 class="mr-panel-title">跨账号协调</h2>
+            <div class="mr-panel-sub" id="coord-summary">读取中</div>
+          </div>
+        </div>
+        <div id="coord-list" class="mr-scroll short"><div class="mr-empty">加载中...</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="mr-view" id="view-personas">
+    <div class="mr-split">
+      <div class="mr-panel">
+        <div class="mr-panel-head">
+          <div>
+            <h2 class="mr-panel-title">人设配置</h2>
+            <div class="mr-panel-sub">保存后会刷新运行中的 Messenger runner</div>
+          </div>
+          <button class="btn btn-primary" id="btn-save-personas">保存人设</button>
+        </div>
+        <textarea id="personas-json" class="mr-textarea" spellcheck="false"></textarea>
+      </div>
+      <div class="mr-panel">
+        <div class="mr-panel-head">
+          <div>
+            <h2 class="mr-panel-title">人设预览</h2>
+            <div class="mr-panel-sub">检查绑定联系人、语言和禁用话术</div>
+          </div>
+        </div>
+        <div id="persona-preview" class="mr-stack"><div class="mr-empty">加载中...</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="mr-view" id="view-leads">
+    <div class="mr-panel">
+      <div class="mr-panel-head">
+        <div>
+          <h2 class="mr-panel-title">客户线索池</h2>
+          <div class="mr-panel-sub" id="leads-summary">读取中</div>
+        </div>
+        <div class="mr-toolbar">
+          <select id="lead-filter">
+            <option value="all">全部线索</option>
+            <option value="high">高价值</option>
+            <option value="mid">中等</option>
+            <option value="low">低优先级</option>
+          </select>
+          <button class="btn" id="btn-refresh-leads">刷新线索</button>
+        </div>
+      </div>
+      <div id="leads-list" class="mr-scroll tall"><div class="mr-empty">加载中...</div></div>
+    </div>
+  </section>
+
+  <section class="mr-view" id="view-approvals">
+    <div class="mr-grid">
+      <div class="mr-panel">
+        <div class="mr-panel-head">
+          <div>
+            <h2 class="mr-panel-title">审批队列</h2>
+            <div class="mr-panel-sub">批准后会通过手机真实发送</div>
+          </div>
+          <div class="mr-toolbar">
+            <label class="mr-check"><input type="checkbox" id="bulk-all">全选 pending</label>
+            <button class="btn btn-primary" id="btn-bulk-approve" disabled>批量批准</button>
+            <button class="btn" id="btn-bulk-reject" disabled>批量驳回</button>
+          </div>
+        </div>
+        <div id="approvals-list" class="mr-scroll tall"><div class="mr-empty">加载中...</div></div>
+      </div>
+      <div class="mr-panel">
+        <div class="mr-panel-head">
+          <div>
+            <h2 class="mr-panel-title">质检提示</h2>
+            <div class="mr-panel-sub">重点看语言、人设、是否过早索要隐私</div>
+          </div>
+        </div>
+        <div class="mr-stack">
+          <div class="mr-row"><span class="mr-name">待审批</span><span id="qc-pending" class="mr-pill">0</span></div>
+          <div class="mr-row"><span class="mr-name">已批准待发</span><span id="qc-approved" class="mr-pill">0</span></div>
+          <div class="mr-row"><span class="mr-name">24h 已发</span><span id="qc-sent" class="mr-pill">0</span></div>
+          <div class="mr-row"><span class="mr-name">空回复占位</span><span id="qc-empty" class="mr-pill">0</span></div>
+        </div>
+        <div style="height:.8rem"></div>
+        <div class="mr-note">
+          审批区保留人工把关能力。测试稳定后可以在策略配置中切换 reply_mode 为自动发送，但高分线索和首次 LINE 引导仍建议先走质检。
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="mr-view" id="view-runs">
+    <div class="mr-panel">
+      <div class="mr-panel-head">
+        <div>
+          <h2 class="mr-panel-title">运行记录</h2>
+          <div class="mr-panel-sub">用于定位打开聊天、生成、发送、跳过等步骤</div>
+        </div>
+        <button class="btn" id="btn-refresh-runs">刷新记录</button>
+      </div>
+      <div id="runs-table"><div class="mr-empty">加载中...</div></div>
+    </div>
+  </section>
+
+  <section class="mr-view" id="view-settings">
+    <div class="mr-grid">
+      <div class="mr-panel">
+        <div class="mr-panel-head">
+          <div>
+            <h2 class="mr-panel-title">运行策略</h2>
+            <div class="mr-panel-sub">控制是否自动启动、回复模式和目标聊天</div>
+          </div>
+          <button class="btn btn-primary" id="btn-save-config">保存配置</button>
+        </div>
+        <div class="mr-field-grid">
+          <label class="mr-check"><input type="checkbox" id="cfg-enabled">启用 Messenger RPA</label>
+          <label class="mr-check"><input type="checkbox" id="cfg-autostart">进程启动后自动运行</label>
+          <label class="mr-check"><input type="checkbox" id="cfg-suppress-identity">抑制 AI 身份泄漏</label>
+          <label class="mr-check"><input type="checkbox" id="cfg-disable-memory">禁用跨轮情景记忆</label>
+          <div class="mr-field">
+            <label for="cfg-reply-mode">回复模式</label>
+            <select id="cfg-reply-mode">
+              <option value="approve">approve - 审批后发送</option>
+              <option value="auto_send">auto_send - 自动发送</option>
+              <option value="draft">draft - 只生成草稿</option>
+            </select>
+          </div>
+          <div class="mr-field">
+            <label for="cfg-language">语言对齐</label>
+            <select id="cfg-language">
+              <option value="auto">auto - 跟随用户语言</option>
+              <option value="off">off - 交给人设</option>
+              <option value="english_fallback_only">仅英文兜底</option>
+            </select>
+          </div>
+          <div class="mr-field">
+            <label for="cfg-default-lang">默认回复语言</label>
+            <input id="cfg-default-lang" type="text" placeholder="ja / zh / en / auto">
+          </div>
+          <div class="mr-field">
+            <label for="cfg-max-inbox">每轮最多处理</label>
+            <input id="cfg-max-inbox" type="number" min="1" max="50">
+          </div>
+          <div class="mr-field">
+            <label for="cfg-cooldown">同一聊天回复冷却秒数</label>
+            <input id="cfg-cooldown" type="number" min="0" max="86400">
+          </div>
+          <div class="mr-field">
+            <label for="cfg-companion">陪聊模式</label>
+            <select id="cfg-companion">
+              <option value="true">开启</option>
+              <option value="false">关闭</option>
+            </select>
+          </div>
+          <div class="mr-field" style="grid-column:1/-1">
+            <label for="cfg-run-targets">run_once 目标联系人，逗号分隔</label>
+            <input id="cfg-run-targets" type="text" placeholder="Victor Zan">
+          </div>
+          <div class="mr-field" style="grid-column:1/-1">
+            <label for="cfg-targets">长期目标联系人白名单，逗号分隔，留空表示不限</label>
+            <input id="cfg-targets" type="text">
+          </div>
+        </div>
+      </div>
+      <div class="mr-panel">
+        <div class="mr-panel-head">
+          <div>
+            <h2 class="mr-panel-title">客户筛选与 LINE 引导</h2>
+            <div class="mr-panel-sub">面向日本 37-60 岁女性高价值客户</div>
+          </div>
+        </div>
+        <div class="mr-field-grid">
+          <label class="mr-check"><input type="checkbox" id="lead-enabled">启用线索评分</label>
+          <div class="mr-field">
+            <label for="lead-country">目标国家</label>
+            <input id="lead-country" type="text" value="JP">
+          </div>
+          <div class="mr-field">
+            <label for="lead-gender">目标性别</label>
+            <input id="lead-gender" type="text" value="female">
+          </div>
+          <div class="mr-field">
+            <label for="lead-language">目标语言</label>
+            <input id="lead-language" type="text" value="ja">
+          </div>
+          <div class="mr-field">
+            <label for="lead-age-min">年龄下限</label>
+            <input id="lead-age-min" type="number" min="18" max="90">
+          </div>
+          <div class="mr-field">
+            <label for="lead-age-max">年龄上限</label>
+            <input id="lead-age-max" type="number" min="18" max="90">
+          </div>
+          <div class="mr-field">
+            <label for="lead-min-score">发 LINE 最低分</label>
+            <input id="lead-min-score" type="number" min="0" max="100">
+          </div>
+          <div class="mr-field">
+            <label for="lead-min-turns">发 LINE 前最少轮次</label>
+            <input id="lead-min-turns" type="number" min="1" max="50">
+          </div>
+          <div class="mr-field">
+            <label for="lead-age-turns">询问年龄最少轮次</label>
+            <input id="lead-age-turns" type="number" min="1" max="30">
+          </div>
+          <div class="mr-field">
+            <label for="lead-budget-turns">预算话题最少轮次</label>
+            <input id="lead-budget-turns" type="number" min="1" max="50">
+          </div>
+          <div class="mr-field">
+            <label for="lead-low-score">低优先级分数线</label>
+            <input id="lead-low-score" type="number" min="0" max="100">
+          </div>
+          <div class="mr-field">
+            <label for="lead-stop-turns">低价值静默轮次</label>
+            <input id="lead-stop-turns" type="number" min="1" max="20">
+          </div>
+          <div class="mr-field" style="grid-column:1/-1">
+            <label for="lead-line-id">人工客服 LINE ID</label>
+            <input id="lead-line-id" type="text" placeholder="@your_line_id">
+          </div>
+          <div class="mr-field" style="grid-column:1/-1">
+            <label for="lead-template">LINE 引导话术模板，可使用 {LINE_ID}</label>
+            <textarea id="lead-template" class="mr-json-small"></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="mr-panel">
+      <div class="mr-panel-head">
+        <div>
+          <h2 class="mr-panel-title">只读原始配置</h2>
+          <div class="mr-panel-sub">敏感字段已隐藏，用于排查实际生效配置</div>
+        </div>
+      </div>
+      <textarea id="config-raw" class="mr-textarea" spellcheck="false" readonly></textarea>
+    </div>
+  </section>
 </div>
+
+<div id="mr-toast" class="mr-toast"></div>
 
 <script>
 (function(){
-  const qs = (s) => document.querySelector(s);
+  const state = {
+    status: null,
+    config: null,
+    approvals: [],
+    templates: null,
+    runs: [],
+    accounts: {},
+    funnel: null,
+    leads: [],
+    personas: null,
+  };
+
+  const qs = (s, root=document) => root.querySelector(s);
+  const qsa = (s, root=document) => Array.from(root.querySelectorAll(s));
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+  const num = (v, d=0) => Number.isFinite(Number(v)) ? Number(v) : d;
   const fmtTs = (ts) => {
     if (!ts) return '--';
-    const d = new Date(ts * 1000);
+    const d = new Date(Number(ts) * 1000);
+    if (Number.isNaN(d.getTime())) return '--';
     return d.toLocaleString('zh-CN', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
   };
-  const esc = (s) => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const short = (s, n=90) => {
+    s = String(s || '');
+    return s.length > n ? s.slice(0, n - 1) + '...' : s;
+  };
+  const splitCsv = (s) => String(s || '').split(',').map(x => x.trim()).filter(Boolean);
+  const joinCsv = (v) => Array.isArray(v) ? v.join(', ') : String(v || '');
 
-  async function apiGet(path){
-    const r = await fetch(path, {credentials:'same-origin'});
-    if(!r.ok) throw new Error(`${path} → ${r.status}`);
+  function toast(msg, type='ok'){
+    const el = qs('#mr-toast');
+    el.className = 'mr-toast show ' + (type === 'err' ? 'err' : 'ok');
+    el.textContent = msg;
+    clearTimeout(toast._timer);
+    toast._timer = setTimeout(() => el.className = 'mr-toast', 3200);
+  }
+
+  async function api(path, opts={}){
+    const init = Object.assign({credentials:'same-origin'}, opts);
+    if (init.body && typeof init.body !== 'string') {
+      init.headers = Object.assign({'Content-Type':'application/json'}, init.headers || {});
+      init.body = JSON.stringify(init.body);
+    }
+    const r = await fetch(path, init);
+    if (!r.ok) {
+      let msg = `${path} ${r.status}`;
+      try {
+        const b = await r.json();
+        msg = b.detail || b.error || msg;
+      } catch(e) {}
+      throw new Error(msg);
+    }
     return r.json();
   }
-  async function apiPost(path, body){
-    const r = await fetch(path, {
-      method:'POST',
-      credentials:'same-origin',
-      headers:{'Content-Type':'application/json'},
-      body: body ? JSON.stringify(body) : '{}',
-    });
-    if(!r.ok) throw new Error(`${path} → ${r.status}`);
-    return r.json();
+  const apiGet = (p) => api(p);
+  const apiPost = (p, body={}) => api(p, {method:'POST', body});
+  const apiPut = (p, body={}) => api(p, {method:'PUT', body});
+
+  function setTab(tab){
+    qsa('.mr-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+    qsa('.mr-view').forEach(v => v.classList.toggle('active', v.id === 'view-' + tab));
   }
+
+  qsa('.mr-tab').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
+  qsa('[data-goto]').forEach(b => b.addEventListener('click', () => setTab(b.dataset.goto)));
 
   async function refreshStatus(){
-    try{
-      const st = await apiGet('/api/messenger-rpa/status');
-      const dot = qs('#mr-status-dot');
-      const txt = qs('#mr-status-text');
-      const running = !!st.running;
-      dot.style.background = running ? 'var(--green)' : 'var(--red)';
-      let flag = running ? '运行中' : '已停止';
-      if (st.paused_until && st.paused_until > Date.now()/1000) flag = '暂停中';
-      const notifFlag = st.notif_running ? '· 监听通知' : '· 仅轮询';
-      txt.textContent = `${flag} ${notifFlag} · ${st.consecutive_empty||0} 次连续空跑`;
-      qs('#kpi-runs').textContent = (st.last_run && st.last_run.run_id) ? '1+' : '0';
-      // ★ P2-6：SLA badge
-      const badge = qs('#mr-sla-badge');
-      if (badge) {
-        const sla = st.approval_sla || {};
-        const over = sla.overdue_count || 0;
-        const oldest = sla.oldest_age_sec || 0;
-        if ((sla.pending_count||0) === 0){
-          badge.textContent = '';
-        } else if (over > 0) {
-          badge.innerHTML = `<span style="color:var(--red)">⚠ ${over} 条超时（最老 ${oldest}s）</span> · 总 pending ${sla.pending_count}`;
-        } else {
-          badge.textContent = `✓ ${sla.pending_count} pending · 最老 ${oldest}s`;
-        }
-      }
-    }catch(e){
-      qs('#mr-status-text').textContent = '状态获取失败: '+e.message;
+    let st;
+    try {
+      st = await apiGet('/api/messenger-rpa/status');
+    } catch(e) {
+      qs('#mr-status-text').textContent = '状态读取失败: ' + e.message;
+      qs('#mr-status-dot').style.background = 'var(--red)';
+      return;
     }
+    state.status = st;
+    const dot = qs('#mr-status-dot');
+    const text = qs('#mr-status-text');
+    const running = !!st.running;
+    const paused = st.paused_until && st.paused_until > Date.now() / 1000;
+    dot.style.background = paused ? 'var(--amber)' : running ? 'var(--green)' : 'var(--red)';
+    dot.style.color = dot.style.background;
+    if (!st.available) {
+      text.textContent = st.hint || 'Messenger 服务未注入';
+    } else {
+      const mode = paused ? '暂停中' : running ? '运行中' : '已停止';
+      const listen = st.notif_running ? '监听通知' : '轮询模式';
+      text.textContent = `${mode} · ${listen} · 连续空跑 ${st.consecutive_empty || 0}`;
+    }
+    qs('#qc-empty').textContent = st.pending_empty_count == null ? 0 : st.pending_empty_count;
+    const sla = st.approval_sla || {};
+    const slaText = (sla.pending_count || 0) === 0
+      ? '无积压'
+      : `${sla.pending_count || 0} 条 · 最老 ${sla.oldest_age_sec || 0}s`;
+    const slaEl = qs('#overview-sla');
+    slaEl.textContent = slaText;
+    slaEl.className = 'mr-pill ' + ((sla.overdue_count || 0) > 0 ? 'danger' : 'ok');
   }
 
-  // ★ P2-6：快捷模板 — 进页后拉一次，缓存在闭包里
-  let _tplCache = null;
+  async function refreshConfig(){
+    let cfg;
+    try {
+      cfg = await apiGet('/api/messenger-rpa/config');
+    } catch(e) {
+      qs('#mr-mode-pill').textContent = 'mode unavailable';
+      qs('#mr-mode-pill').className = 'mr-pill danger';
+      qs('#config-raw').value = '配置读取失败: ' + e.message;
+      return;
+    }
+    state.config = cfg;
+    const ops = cfg.operations || {};
+    const raw = cfg.raw || {};
+    const lq = cfg.lead_qualification || {};
+    const handoff = lq.handoff || {};
+    const targets = ops.run_once_target_names || raw.run_once_target_names || [];
+    qs('#mr-mode-pill').textContent = `mode ${ops.reply_mode || raw.reply_mode || '--'}`;
+    qs('#mr-target-pill').textContent = targets.length ? `target ${targets.join(', ')}` : 'target all';
+    qs('#overview-persona').textContent = (cfg.reply_profiles || {}).default || '--';
+    qs('#overview-lead-rule').textContent = lq.enabled ? `ON · ${lq.min_score_for_line || 80}+` : 'OFF';
+    qs('#overview-lead-rule').className = 'mr-pill ' + (lq.enabled ? 'ok' : 'warn');
+    qs('#overview-line-id').textContent = handoff.line_id ? handoff.line_id : '未配置';
+    qs('#overview-line-id').className = 'mr-pill ' + (handoff.line_id ? 'ok' : 'warn');
+    fillConfigForm(cfg);
+  }
+
+  function fillConfigForm(cfg){
+    const raw = cfg.raw || {};
+    const ops = cfg.operations || {};
+    const lq = cfg.lead_qualification || {};
+    const target = lq.target || {};
+    const q = lq.question_policy || {};
+    const handoff = lq.handoff || {};
+    const low = lq.low_priority || {};
+    qs('#cfg-enabled').checked = !!raw.enabled;
+    qs('#cfg-autostart').checked = !!raw.autostart;
+    qs('#cfg-suppress-identity').checked = !!raw.suppress_global_ai_identity;
+    qs('#cfg-disable-memory').checked = !!raw.disable_episodic_memory;
+    qs('#cfg-reply-mode').value = raw.reply_mode || ops.reply_mode || 'approve';
+    qs('#cfg-language').value = raw.language_alignment || ops.language_alignment || 'auto';
+    qs('#cfg-default-lang').value = raw.default_reply_lang || '';
+    qs('#cfg-max-inbox').value = raw.max_inbox_per_run || '';
+    qs('#cfg-cooldown').value = raw.companion_reply_cooldown_sec || '';
+    qs('#cfg-companion').value = raw.companion_mode === false ? 'false' : 'true';
+    qs('#cfg-run-targets').value = joinCsv(raw.run_once_target_names || []);
+    qs('#cfg-targets').value = joinCsv(raw.target_chat_names || []);
+    qs('#lead-enabled').checked = !!lq.enabled;
+    qs('#lead-country').value = target.country || 'JP';
+    qs('#lead-gender').value = target.gender || 'female';
+    qs('#lead-language').value = target.language || 'ja';
+    qs('#lead-age-min').value = target.age_min || 37;
+    qs('#lead-age-max').value = target.age_max || 60;
+    qs('#lead-min-score').value = lq.min_score_for_line || 80;
+    qs('#lead-min-turns').value = handoff.min_turns_before_send || 6;
+    qs('#lead-age-turns').value = q.min_turns_before_age || 4;
+    qs('#lead-budget-turns').value = q.min_turns_before_budget || 6;
+    qs('#lead-low-score').value = low.score_below || 40;
+    qs('#lead-stop-turns').value = low.stop_after_low_value_turns || 3;
+    qs('#lead-line-id').value = handoff.line_id || '';
+    qs('#lead-template').value = handoff.template || '';
+    qs('#config-raw').value = JSON.stringify(raw, null, 2);
+  }
+
+  async function saveConfig(){
+    const patch = {
+      enabled: qs('#cfg-enabled').checked,
+      autostart: qs('#cfg-autostart').checked,
+      suppress_global_ai_identity: qs('#cfg-suppress-identity').checked,
+      disable_episodic_memory: qs('#cfg-disable-memory').checked,
+      reply_mode: qs('#cfg-reply-mode').value,
+      language_alignment: qs('#cfg-language').value,
+      default_reply_lang: qs('#cfg-default-lang').value.trim(),
+      max_inbox_per_run: num(qs('#cfg-max-inbox').value, 1),
+      companion_reply_cooldown_sec: num(qs('#cfg-cooldown').value, 0),
+      companion_mode: qs('#cfg-companion').value === 'true',
+      run_once_target_names: splitCsv(qs('#cfg-run-targets').value),
+      target_chat_names: splitCsv(qs('#cfg-targets').value),
+      lead_qualification: {
+        enabled: qs('#lead-enabled').checked,
+        target: {
+          country: qs('#lead-country').value.trim() || 'JP',
+          language: qs('#lead-language').value.trim() || 'ja',
+          gender: qs('#lead-gender').value.trim() || 'female',
+          age_min: num(qs('#lead-age-min').value, 37),
+          age_max: num(qs('#lead-age-max').value, 60),
+        },
+        min_score_for_line: num(qs('#lead-min-score').value, 80),
+        question_policy: {
+          min_turns_before_age: num(qs('#lead-age-turns').value, 4),
+          min_turns_before_budget: num(qs('#lead-budget-turns').value, 6),
+        },
+        handoff: {
+          line_id: qs('#lead-line-id').value.trim(),
+          template: qs('#lead-template').value.trim(),
+          min_turns_before_send: num(qs('#lead-min-turns').value, 6),
+        },
+        low_priority: {
+          score_below: num(qs('#lead-low-score').value, 40),
+          stop_after_low_value_turns: num(qs('#lead-stop-turns').value, 3),
+        },
+      },
+    };
+    await apiPut('/api/messenger-rpa/config', patch);
+    toast('配置已保存，并已刷新运行时');
+    await Promise.all([refreshConfig(), refreshLeads()]);
+  }
+
+  async function refreshPersonas(){
+    let p;
+    try {
+      p = await apiGet('/api/messenger-rpa/personas');
+    } catch(e) {
+      qs('#persona-preview').innerHTML = `<div class="mr-empty">人设读取失败: ${esc(e.message)}</div>`;
+      return;
+    }
+    state.personas = p;
+    const rp = p.reply_profiles || {};
+    qs('#personas-json').value = JSON.stringify(rp, null, 2);
+    renderPersonas(rp);
+  }
+
+  function renderPersonas(rp){
+    const root = qs('#persona-preview');
+    const profiles = rp.profiles || [];
+    if (!profiles.length) {
+      root.innerHTML = '<div class="mr-empty">暂无人设配置</div>';
+      return;
+    }
+    root.innerHTML = profiles.map(p => {
+      const speaking = (p.persona || {}).speaking || {};
+      const forbid = speaking.forbidden_phrases || [];
+      const names = p.match_names || [];
+      return `<div class="mr-persona-card">
+        <div class="mr-persona-top">
+          <div class="mr-name">${esc(p.id)} ${p.id === rp.default ? '<span class="mr-badge sent">default</span>' : ''}</div>
+          <span class="mr-badge">${esc(p.language || 'auto')}</span>
+        </div>
+        <div class="mr-muted">绑定：${esc(Array.isArray(names) && names.length ? names.join(', ') : '未限定')}</div>
+        <div class="mr-note">${esc(short(p.style_hint || '', 180))}</div>
+        ${forbid.length ? `<div class="mr-evidence">${forbid.slice(0,8).map(x => `<span>${esc(x)}</span>`).join('')}</div>` : ''}
+      </div>`;
+    }).join('');
+  }
+
+  async function savePersonas(){
+    let body;
+    try {
+      body = JSON.parse(qs('#personas-json').value || '{}');
+    } catch(e) {
+      toast('人设 JSON 格式错误: ' + e.message, 'err');
+      return;
+    }
+    const r = await apiPut('/api/messenger-rpa/personas', body);
+    toast('人设已保存');
+    renderPersonas(r.reply_profiles || body);
+    await refreshConfig();
+  }
+
   async function getTemplates(){
-    if (_tplCache) return _tplCache;
-    try{
+    if (state.templates) return state.templates;
+    try {
       const r = await apiGet('/api/messenger-rpa/templates');
-      _tplCache = r.templates || [];
-    }catch(e){ _tplCache = []; }
-    return _tplCache;
+      state.templates = r.templates || [];
+    } catch(e) {
+      state.templates = [];
+    }
+    return state.templates;
   }
 
   async function refreshApprovals(){
-    try{
-      const [pending, all, tpls] = await Promise.all([
-        apiGet('/api/messenger-rpa/approvals?status=pending&limit=50'),
-        apiGet('/api/messenger-rpa/approvals?status=all&limit=100'),
+    let pending, all, tpls;
+    try {
+      [pending, all, tpls] = await Promise.all([
+        apiGet('/api/messenger-rpa/approvals?status=pending&limit=80'),
+        apiGet('/api/messenger-rpa/approvals?status=all&limit=160'),
         getTemplates(),
       ]);
-      const pList = pending.approvals || [];
-      qs('#kpi-pending').textContent = pList.length;
-      const approvedList = (all.approvals||[]).filter(a => a.status==='approved');
-      qs('#kpi-approved').textContent = approvedList.length;
-      const now = Date.now()/1000;
-      const sentList = (all.approvals||[]).filter(a => a.status==='sent' && (now - a.sent_at) < 86400);
-      qs('#kpi-sent').textContent = sentList.length;
-
-      const root = qs('#mr-approvals');
-      const list = (all.approvals||[]).slice(0,30);
-      if (!list.length) { root.innerHTML = '<div class="mr-empty">暂无审批记录</div>'; return; }
-      // ★ P2-6：模板按钮 HTML（同一套挂给每条 pending 的 textarea）
-      const tplBtnsHtml = (aid) => (tpls && tpls.length)
-        ? `<div class="mr-tpls" style="margin-top:.25rem;display:flex;gap:.25rem;flex-wrap:wrap">
-             ${tpls.map((t,i)=>`<button class="btn btn-tpl" data-id="${aid}" data-idx="${i}"
-                style="font-size:.74rem;padding:.15rem .5rem">${esc(t.label)}</button>`).join('')}
-           </div>`
-        : '';
-
-      // ★ P2-6：age 超阈标红
-      const nowTs = Date.now()/1000;
-      root.innerHTML = list.map(a => {
-        const age = Math.max(0, nowTs - (a.created_at||nowTs));
-        const overdue = (a.status==='pending') && (age > 600);
-        const ageBadge = (a.status==='pending')
-          ? `<span style="font-size:.72rem;color:${overdue?'var(--red)':'var(--t3)'}">
-               ⏰ ${Math.floor(age)}s</span>`
-          : '';
-        const imgCap = (() => {
-          try{
-            const ex = a.extra_json ? JSON.parse(a.extra_json) : {};
-            return ex.image_caption ? `<div class="mr-hint" style="color:var(--t2)">📷 ${esc(ex.image_caption)}</div>` : '';
-          }catch(e){ return ''; }
-        })();
-        return `
-        <div class="mr-appr-row ${a.status}${overdue?' overdue':''}">
-          <div class="mr-meta">
-            ${a.status==='pending' ? `<input type="checkbox" class="mr-pick" data-id="${a.id}"
-                     style="margin-right:.3rem">` : ''}
-            <span class="mr-status">${a.status}</span>
-            <span>#${a.id}</span>
-            <span>${esc(a.chat_name || a.chat_key)}</span>
-            <span class="mr-time">${fmtTs(a.created_at)}</span>
-            ${ageBadge}
-          </div>
-          <div class="mr-peer">${esc((a.peer_text||'').slice(0,200))}</div>
-          ${imgCap}
-          ${a.status==='pending' ? `
-            <textarea class="mr-reply-edit" data-id="${a.id}" rows="3"
-                      style="width:100%;box-sizing:border-box;font-size:.85rem;
-                             padding:.4rem;border:1px solid var(--b3);
-                             border-radius:4px;background:var(--bg2);color:var(--t1);
-                             resize:vertical;margin-top:.3rem"
-                      placeholder="可编辑此回复后再批准">${esc(a.reply_text||'')}</textarea>
-            ${tplBtnsHtml(a.id)}
-            <div class="mr-actions" style="margin-top:.3rem">
-              <button class="btn btn-primary btn-approve" data-id="${a.id}">批准并发送</button>
-              <button class="btn btn-suggest" data-id="${a.id}">重新生成</button>
-              <button class="btn btn-reject" data-id="${a.id}">驳回</button>
-            </div>
-          ` : `<div class="mr-reply">${esc((a.reply_text||'').slice(0,280))}</div>` +
-          (a.status==='sent' ? `<div class="mr-hint">✓ 已于 ${fmtTs(a.sent_at)} 发出</div>` : (a.status==='rejected' ? `<div class="mr-hint">× 已驳回${a.decision_note?' · '+esc(a.decision_note):''}</div>` : ''))}
-        </div>`;
-      }).join('');
-
-      // ★ P2-6：模板点击 → 填入对应 textarea
-      root.querySelectorAll('.btn-tpl').forEach(b => {
-        b.addEventListener('click', () => {
-          const ta = root.querySelector(`.mr-reply-edit[data-id="${b.dataset.id}"]`);
-          if (ta) ta.value = tpls[parseInt(b.dataset.idx, 10)].text;
-        });
-      });
-      // ★ P2-6：勾选 → 控制批量按钮的可点状态
-      const updateBulkBtns = () => {
-        const picked = root.querySelectorAll('.mr-pick:checked').length;
-        qs('#btn-bulk-approve').disabled = picked === 0;
-        qs('#btn-bulk-reject').disabled = picked === 0;
-        qs('#btn-bulk-approve').textContent = `批量批准 (${picked})`;
-        qs('#btn-bulk-reject').textContent = `批量驳回 (${picked})`;
-      };
-      root.querySelectorAll('.mr-pick').forEach(cb => {
-        cb.addEventListener('change', updateBulkBtns);
-      });
-      updateBulkBtns();
-
-      root.querySelectorAll('.btn-approve').forEach(b => {
-        b.addEventListener('click', async () => {
-          if(!confirm(`确认批准 #${b.dataset.id}? 将通过 RPA 在手机上真实发出。`)) return;
-          b.disabled = true; b.textContent = '发送中...';
-          const ta = root.querySelector(`.mr-reply-edit[data-id="${b.dataset.id}"]`);
-          const overrideText = (ta && ta.value) ? ta.value.trim() : '';
-          try{
-            const payload = {decided_by:'web'};
-            if (overrideText) payload.reply_text = overrideText;
-            const r = await apiPost(`/api/messenger-rpa/approvals/${b.dataset.id}/approve`, payload);
-            alert(`send: ok=${r.send?.ok} step=${r.send?.step||''} err=${r.send?.error||''}`);
-            await refreshAll();
-          }catch(e){ alert('失败: '+e.message); b.disabled=false; b.textContent='批准并发送'; }
-        });
-      });
-      root.querySelectorAll('.btn-suggest').forEach(b => {
-        b.addEventListener('click', async () => {
-          b.disabled = true; b.textContent = '生成中...';
-          try{
-            const r = await apiPost(`/api/messenger-rpa/approvals/${b.dataset.id}/suggest`, {});
-            const ta = root.querySelector(`.mr-reply-edit[data-id="${b.dataset.id}"]`);
-            if (ta && r.suggestion) {
-              if (!ta.value.trim() || confirm('用新建议替换当前文案？\n新：' + r.suggestion.slice(0,160))){
-                ta.value = r.suggestion;
-              }
-            }
-          }catch(e){ alert('失败: '+e.message); }
-          finally{ b.disabled=false; b.textContent='重新生成'; }
-        });
-      });
-      root.querySelectorAll('.btn-reject').forEach(b => {
-        b.addEventListener('click', async () => {
-          const note = prompt('驳回原因（可空）:') || '';
-          try{
-            await apiPost(`/api/messenger-rpa/approvals/${b.dataset.id}/reject`, {decided_by:'web', note});
-            await refreshApprovals();
-          }catch(e){ alert('失败: '+e.message); }
-        });
-      });
-    }catch(e){
-      qs('#mr-approvals').innerHTML = '<div class="mr-empty">加载失败: '+esc(e.message)+'</div>';
+    } catch(e) {
+      qs('#approvals-list').innerHTML = `<div class="mr-empty">审批读取失败: ${esc(e.message)}</div>`;
+      return;
     }
+    const pList = pending.approvals || [];
+    const allList = all.approvals || [];
+    state.approvals = allList;
+    const approved = allList.filter(a => a.status === 'approved');
+    const now = Date.now() / 1000;
+    const sent = allList.filter(a => a.status === 'sent' && now - Number(a.sent_at || 0) < 86400);
+    qs('#kpi-pending').textContent = pList.length;
+    qs('#kpi-sent').textContent = sent.length;
+    qs('#qc-pending').textContent = pList.length;
+    qs('#qc-approved').textContent = approved.length;
+    qs('#qc-sent').textContent = sent.length;
+    renderApprovals(allList.slice(0, 50), tpls);
   }
 
-  // ★ P2-6：全选切换
-  qs('#mr-bulk-all').addEventListener('change', (ev) => {
-    const on = ev.target.checked;
-    document.querySelectorAll('.mr-pick').forEach(cb => {
-      cb.checked = on;
-      cb.dispatchEvent(new Event('change'));
-    });
-  });
-  // ★ P2-6：批量按钮
-  async function bulkDecide(action){
-    const ids = Array.from(document.querySelectorAll('.mr-pick:checked'))
-      .map(cb => parseInt(cb.dataset.id, 10));
-    if (!ids.length) return;
-    const verb = action==='approve'?'批准':'驳回';
-    if (!confirm(`批量${verb} ${ids.length} 条？${action==='approve'?'将真实发出。':''}`)) return;
-    try{
-      const r = await apiPost('/api/messenger-rpa/approvals/batch', {
-        ids, action, decided_by:'web-bulk',
-      });
-      const okCnt = (r.succeeded_ids||[]).length;
-      const failCnt = (r.failed||[]).length;
-      alert(`完成：成功 ${okCnt} 条，失败 ${failCnt} 条`);
-      await refreshAll();
-    }catch(e){ alert('失败: '+e.message); }
+  function renderApprovals(list, tpls){
+    const root = qs('#approvals-list');
+    if (!list.length) {
+      root.innerHTML = '<div class="mr-empty">暂无审批记录</div>';
+      updateBulkButtons();
+      return;
+    }
+    const tplButtons = (aid) => tpls.length ? `<div class="mr-actions">
+      ${tpls.slice(0,6).map((t,i) => `<button class="btn btn-tpl" data-id="${aid}" data-idx="${i}">${esc(t.label || ('模板' + (i+1)))}</button>`).join('')}
+    </div>` : '';
+    root.innerHTML = list.map(a => {
+      const isPending = a.status === 'pending';
+      const age = Math.max(0, Math.floor(Date.now()/1000 - Number(a.created_at || Date.now()/1000)));
+      const cls = esc(a.status || '');
+      return `<div class="mr-appr-row ${cls}">
+        <div class="mr-appr-meta">
+          ${isPending ? `<input type="checkbox" class="pick-approval" data-id="${a.id}">` : ''}
+          <span class="mr-badge ${cls}">${esc(a.status || '--')}</span>
+          <span>#${esc(a.id)}</span>
+          <span>${esc(a.chat_name || a.chat_key || '--')}</span>
+          <span>${fmtTs(a.created_at)}</span>
+          ${isPending ? `<span class="${age > 600 ? 'mr-badge rejected' : 'mr-muted'}">${age}s</span>` : ''}
+          <span class="push">${esc(a.reply_lang || '')}</span>
+        </div>
+        <div class="mr-peer"><span class="mr-muted">对方：</span>${esc(a.peer_text || '')}</div>
+        ${isPending ? `
+          <textarea class="mr-edit" data-id="${a.id}" placeholder="可编辑回复">${esc(a.reply_text || '')}</textarea>
+          ${tplButtons(a.id)}
+          <div class="mr-actions">
+            <button class="btn btn-primary btn-approve" data-id="${a.id}">批准并发送</button>
+            <button class="btn btn-suggest" data-id="${a.id}">重新生成</button>
+            <button class="btn btn-reject" data-id="${a.id}">驳回</button>
+          </div>
+        ` : `<div class="mr-reply"><span class="mr-muted">回复：</span>${esc(a.reply_text || '')}</div>`}
+      </div>`;
+    }).join('');
+    qsa('.pick-approval', root).forEach(cb => cb.addEventListener('change', updateBulkButtons));
+    qsa('.btn-tpl', root).forEach(b => b.addEventListener('click', () => {
+      const ta = qs(`.mr-edit[data-id="${b.dataset.id}"]`, root);
+      const t = tpls[Number(b.dataset.idx)] || {};
+      if (ta) ta.value = t.text || '';
+    }));
+    qsa('.btn-approve', root).forEach(b => b.addEventListener('click', () => approveOne(b.dataset.id)));
+    qsa('.btn-suggest', root).forEach(b => b.addEventListener('click', () => suggestOne(b.dataset.id)));
+    qsa('.btn-reject', root).forEach(b => b.addEventListener('click', () => rejectOne(b.dataset.id)));
+    updateBulkButtons();
   }
-  qs('#btn-bulk-approve').addEventListener('click', () => bulkDecide('approve'));
-  qs('#btn-bulk-reject').addEventListener('click', () => bulkDecide('reject'));
+
+  function updateBulkButtons(){
+    const picked = qsa('.pick-approval:checked').length;
+    qs('#btn-bulk-approve').disabled = picked === 0;
+    qs('#btn-bulk-reject').disabled = picked === 0;
+    qs('#btn-bulk-approve').textContent = `批量批准 (${picked})`;
+    qs('#btn-bulk-reject').textContent = `批量驳回 (${picked})`;
+  }
+
+  async function approveOne(id){
+    if (!confirm(`确认批准 #${id}？将通过手机真实发送。`)) return;
+    const ta = qs(`.mr-edit[data-id="${id}"]`);
+    const body = {decided_by:'web'};
+    if (ta && ta.value.trim()) body.reply_text = ta.value.trim();
+    const r = await apiPost(`/api/messenger-rpa/approvals/${encodeURIComponent(id)}/approve`, body);
+    const send = r.send || {};
+    toast(`发送结果: ok=${!!send.ok} step=${send.step || ''}`);
+    await refreshAllLight();
+  }
+
+  async function suggestOne(id){
+    const r = await apiPost(`/api/messenger-rpa/approvals/${encodeURIComponent(id)}/suggest`, {});
+    const ta = qs(`.mr-edit[data-id="${id}"]`);
+    if (ta && r.suggestion) ta.value = r.suggestion;
+    toast('已重新生成建议');
+  }
+
+  async function rejectOne(id){
+    const note = prompt('驳回原因，可留空') || '';
+    await apiPost(`/api/messenger-rpa/approvals/${encodeURIComponent(id)}/reject`, {decided_by:'web', note});
+    toast('已驳回');
+    await refreshApprovals();
+  }
+
+  async function bulkDecision(action){
+    const ids = qsa('.pick-approval:checked').map(cb => Number(cb.dataset.id)).filter(Boolean);
+    if (!ids.length) return;
+    const label = action === 'approve' ? '批准并发送' : '驳回';
+    if (!confirm(`确认批量${label} ${ids.length} 条？`)) return;
+    const r = await apiPost('/api/messenger-rpa/approvals/batch', {ids, action, decided_by:'web-bulk'});
+    toast(`完成: 成功 ${(r.succeeded_ids || []).length} 条，失败 ${(r.failed || []).length} 条`);
+    await refreshAllLight();
+  }
 
   async function refreshRuns(){
-    try{
-      const r = await apiGet('/api/messenger-rpa/recent?limit=20');
-      const root = qs('#mr-runs');
-      const runs = r.runs || [];
-      qs('#kpi-runs').textContent = runs.length;
-      if (!runs.length) { root.innerHTML='<div class="mr-empty">尚无 run 记录</div>'; return; }
-      root.innerHTML = runs.map(run => `
-        <div class="mr-run ${run.ok?'ok':'err'}">
-          <div style="flex:1;min-width:0">
-            <div class="mr-run-name">${esc(run.chat_name || run.chat_key || '--')}</div>
-            <div style="font-size:.7rem;color:var(--t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((run.peer_text||run.error||'').slice(0,60))}</div>
-          </div>
-          <div style="text-align:right;flex-shrink:0">
-            <div class="mr-run-step">${esc(run.step||'?')}</div>
-            <div class="mr-run-time">${fmtTs(run.ts)}</div>
-          </div>
+    let r;
+    try {
+      r = await apiGet('/api/messenger-rpa/recent?limit=80');
+    } catch(e) {
+      qs('#overview-runs').innerHTML = `<div class="mr-empty">运行记录读取失败</div>`;
+      qs('#runs-table').innerHTML = `<div class="mr-empty">运行记录读取失败: ${esc(e.message)}</div>`;
+      return;
+    }
+    state.runs = r.runs || [];
+    qs('#kpi-runs').textContent = state.runs.length;
+    renderRuns();
+  }
+
+  function renderRuns(){
+    const list = state.runs || [];
+    const overview = qs('#overview-runs');
+    overview.innerHTML = list.length ? list.slice(0,8).map(runRowCompact).join('') : '<div class="mr-empty">暂无运行记录</div>';
+    const root = qs('#runs-table');
+    if (!list.length) {
+      root.innerHTML = '<div class="mr-empty">暂无运行记录</div>';
+      return;
+    }
+    root.innerHTML = `<div class="mr-scroll tall"><table class="mr-table">
+      <thead><tr><th>时间</th><th>联系人</th><th>步骤</th><th>结果</th><th>对方消息</th><th>回复/错误</th></tr></thead>
+      <tbody>${list.map(run => `<tr>
+        <td>${fmtTs(run.ts)}</td>
+        <td><b>${esc(run.chat_name || run.chat_key || '--')}</b></td>
+        <td><span class="mr-badge ${run.ok ? 'sent' : 'rejected'}">${esc(run.step || '--')}</span></td>
+        <td>${run.ok ? '<span class="mr-badge sent">ok</span>' : '<span class="mr-badge rejected">fail</span>'}</td>
+        <td>${esc(short(run.peer_text || '', 120))}</td>
+        <td>${esc(short(run.reply_text || run.error || '', 160))}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  }
+
+  function runRowCompact(run){
+    return `<div class="mr-row">
+      <div style="min-width:0">
+        <div class="mr-name">${esc(run.chat_name || run.chat_key || '--')}</div>
+        <div class="mr-muted">${esc(short(run.peer_text || run.error || '', 70))}</div>
+      </div>
+      <div style="text-align:right">
+        <span class="mr-badge ${run.ok ? 'sent' : 'rejected'}">${esc(run.step || '--')}</span>
+        <div class="mr-muted">${fmtTs(run.ts)}</div>
+      </div>
+    </div>`;
+  }
+
+  async function refreshAccounts(deep=false){
+    let r;
+    try {
+      r = await apiGet('/api/messenger-rpa/accounts/health' + (deep ? '?deep=true' : ''));
+    } catch(e) {
+      qs('#accounts-summary').textContent = '账号健康接口不可用';
+      qs('#accounts-list').innerHTML = `<div class="mr-empty">账号健康读取失败: ${esc(e.message)}</div>`;
+      qs('#kpi-online').textContent = '0/0';
+      return;
+    }
+    state.accounts = r.accounts || {};
+    const keys = Object.keys(state.accounts);
+    const safe = r.safe_count || 0;
+    const total = r.total || keys.length;
+    qs('#kpi-online').textContent = `${safe}/${total}`;
+    qs('#accounts-summary').textContent = `${safe}/${total} 可运行`;
+    renderAccounts(keys);
+  }
+
+  function renderAccounts(keys){
+    const root = qs('#accounts-list');
+    if (!keys.length) {
+      root.innerHTML = '<div class="mr-empty">暂无已注册账号</div>';
+      return;
+    }
+    root.innerHTML = keys.map(aid => {
+      const a = state.accounts[aid] || {};
+      let cls = a.present ? 'online' : 'offline';
+      let text = a.present ? 'online' : (a.adb_state || 'offline');
+      if (a.ui_unsafe) { cls = 'warn'; text = 'UI 不安全'; }
+      else if (a.paused) { cls = 'paused'; text = a.paused_left_sec ? `暂停 ${Math.ceil(a.paused_left_sec)}s` : '暂停'; }
+      const info = [
+        a.screen_on == null ? '' : `屏幕:${a.screen_on ? '亮' : '灭'}`,
+        a.locked == null ? '' : `锁屏:${a.locked ? '是' : '否'}`,
+        a.adbkeyboard_installed == null ? '' : `ADBKeyboard:${a.adbkeyboard_installed ? '已装' : '未装'}`,
+        a.last_run_step ? `上次:${a.last_run_step}` : '',
+      ].filter(Boolean).join(' · ');
+      const serial = a.adb_serial && a.adb_serial !== '(none)' ? a.adb_serial : '(未配置串号)';
+      return `<div class="mr-account" data-aid="${esc(aid)}">
+        <div>
+          <div class="mr-name">${esc(serial)}</div>
+          <div class="mr-muted">${esc(a.label && a.label !== aid ? a.label : aid)}</div>
         </div>
-      `).join('');
-    }catch(e){
-      qs('#mr-runs').innerHTML = '<div class="mr-empty">加载失败: '+esc(e.message)+'</div>';
+        <span class="mr-badge ${cls}">${esc(text)}</span>
+        <div class="mr-note">${esc(info || '无运行信息')}</div>
+        <div class="mr-account-actions">
+          <button class="btn btn-account-trigger" data-aid="${esc(aid)}">跑一次</button>
+          ${a.paused || a.ui_unsafe
+            ? `<button class="btn btn-primary btn-account-resume" data-aid="${esc(aid)}">恢复</button>`
+            : `<button class="btn btn-account-pause" data-aid="${esc(aid)}">暂停</button>`}
+        </div>
+      </div>`;
+    }).join('');
+    qsa('.btn-account-trigger', root).forEach(b => b.addEventListener('click', () => accountAction(b.dataset.aid, 'trigger')));
+    qsa('.btn-account-resume', root).forEach(b => b.addEventListener('click', () => accountAction(b.dataset.aid, 'resume')));
+    qsa('.btn-account-pause', root).forEach(b => b.addEventListener('click', () => accountAction(b.dataset.aid, 'pause')));
+  }
+
+  async function accountAction(aid, action){
+    if (action === 'trigger') {
+      const r = await apiPost(`/api/messenger-rpa/accounts/${encodeURIComponent(aid)}/trigger`, {});
+      const res = r.result || {};
+      toast(`账号 ${aid}: step=${res.step || '--'} ok=${!!res.ok}`);
+    } else if (action === 'resume') {
+      await apiPost(`/api/messenger-rpa/accounts/${encodeURIComponent(aid)}/resume`, {});
+      toast(`账号 ${aid} 已恢复`);
+    } else if (action === 'pause') {
+      await apiPost(`/api/messenger-rpa/accounts/${encodeURIComponent(aid)}/pause`, {seconds:300});
+      toast(`账号 ${aid} 已暂停 5 分钟`);
+    }
+    await refreshAccounts();
+  }
+
+  async function refreshCoordinator(){
+    const root = qs('#coord-list');
+    try {
+      const c = await apiGet('/api/messenger-rpa/coordinator');
+      if (!c.enabled) {
+        qs('#coord-summary').textContent = '未启用';
+        root.innerHTML = '<div class="mr-empty">协调器未启用</div>';
+        return;
+      }
+      const active = c.active_chats || {};
+      const portraits = c.portrait_cache || {};
+      const aKeys = Object.keys(active);
+      const pKeys = Object.keys(portraits);
+      qs('#coord-summary').textContent = `活跃锁 ${aKeys.length} · 画像缓存 ${pKeys.length}`;
+      const html = [
+        ...aKeys.map(k => `<div class="mr-row"><span class="mr-name">${esc(k)}</span><span class="mr-badge paused">${esc(active[k])}</span></div>`),
+        ...pKeys.slice(0,20).map(k => {
+          const p = portraits[k] || {};
+          return `<div class="mr-row"><span class="mr-name">${esc(k)}</span><span class="mr-muted">${esc(p.account_id || '')} · ${esc(p.age_sec || 0)}s</span></div>`;
+        }),
+      ].join('');
+      root.innerHTML = html || '<div class="mr-empty">暂无协调数据</div>';
+    } catch(e) {
+      qs('#coord-summary').textContent = '不可用';
+      root.innerHTML = `<div class="mr-empty">加载失败: ${esc(e.message)}</div>`;
     }
   }
 
-  async function refreshAll(){
-    await Promise.all([
-      refreshStatus(), refreshApprovals(), refreshRuns(), refreshDevices(),
-    ]);
+  async function refreshFunnel(){
+    try {
+      const d = await apiGet('/api/messenger-rpa/funnel');
+      state.funnel = d;
+      renderFunnel(d);
+    } catch(e) {
+      qs('#funnel-bars').innerHTML = '<div class="mr-empty">漏斗数据暂不可用</div>';
+    }
   }
-  // forward decl guard
-  async function refreshDevices(){ /* overridden below */ }
 
-  qs('#btn-trigger').addEventListener('click', async () => {
-    const btn = qs('#btn-trigger');
-    btn.disabled=true; btn.textContent='运行中...';
-    try{
-      const r = await apiPost('/api/messenger-rpa/trigger');
-      alert(`step=${r.step||''} ok=${r.ok} chat=${r.chat_name||''} \npeer=${(r.peer_text||'').slice(0,100)}\nreply=${(r.reply_text||'').slice(0,100)}`);
-      await refreshAll();
-    }catch(e){ alert('失败: '+e.message); }
-    finally{ btn.disabled=false; btn.textContent='立即跑一次 run_once'; }
-  });
-  qs('#btn-pause').addEventListener('click', async () => {
-    try{ await apiPost('/api/messenger-rpa/pause', {seconds:300}); await refreshStatus(); }
-    catch(e){ alert('失败: '+e.message); }
-  });
-  qs('#btn-resume').addEventListener('click', async () => {
-    try{ await apiPost('/api/messenger-rpa/resume'); await refreshStatus(); }
-    catch(e){ alert('失败: '+e.message); }
-  });
-  qs('#btn-refresh').addEventListener('click', refreshAll);
-
-  qs('#btn-calibrate').addEventListener('click', async () => {
-    const btn = qs('#btn-calibrate');
-    btn.disabled = true; btn.textContent = '扫描中...';
-    try {
-      const r = await apiPost('/api/messenger-rpa/calibrate');
-      const res = r.result || {};
-      alert(`calibrate ok=${r.ok} \nanchors=${JSON.stringify(res.anchors||res.reason||res, null, 2).slice(0,400)}`);
-    } catch (e) { alert('失败: ' + e.message); }
-    finally { btn.disabled = false; btn.textContent = '坐标校准（扫描屏幕）'; }
-  });
-
-  qs('#btn-install-kbd').addEventListener('click', async () => {
-    const btn = qs('#btn-install-kbd');
-    if (!confirm('将对 adb_serial 指定设备安装 ADBKeyboard（需要 tools/ADBKeyboard.apk 存在）')) return;
-    btn.disabled = true; btn.textContent = '安装中...';
-    try {
-      const r = await apiPost('/api/messenger-rpa/install-adbkeyboard');
-      alert(`install ok=${r.ok} \nsteps=${(r.info?.steps||[]).join(' → ')}\nerr=${r.info?.error||''}`);
-    } catch (e) { alert('失败: ' + e.message); }
-    finally { btn.disabled = false; btn.textContent = '安装 ADBKeyboard（中文/emoji）'; }
-  });
-
-  refreshDevices = async function(){
-    try{
-      const r = await apiGet('/api/messenger-rpa/devices');
-      const devs = r.devices || [];
-      const root = qs('#mr-devices');
-      if (!devs.length) { root.innerHTML = '<div class="mr-empty">'+esc(r.hint||'未配置设备')+'</div>'; return; }
-      root.innerHTML = devs.map(d => {
-        const online = !!d.present;
-        const cls = online ? 'ok' : 'err';
-        const lbl = online ? 'online' : 'offline';
-        const extra = online
-          ? `screen=${d.screen_on===null?'?':(d.screen_on?'on':'off')} · locked=${d.locked===null?'?':(d.locked?'yes':'no')}`
-          : '--';
-        return `<div class="mr-run ${cls}">
-          <div style="flex:1;min-width:0">
-            <div class="mr-run-name">${esc(d.serial)}</div>
-            <div style="font-size:.7rem;color:var(--t3)">${esc(extra)}</div>
-          </div>
-          <div style="text-align:right;flex-shrink:0"><div class="mr-run-step">${lbl}</div></div>
+  function renderFunnel(d){
+    const stages = [
+      ['INITIAL','初始接触',''],
+      ['ENGAGED','深入互动',''],
+      ['HANDOFF_READY','引流就绪',''],
+      ['HANDOFF_SENT','话术已发',''],
+      ['LINE_ADDED','加好友',''],
+      ['LINE_ACCEPTED','通过验证',''],
+      ['LINE_ENGAGED','LINE 互动',''],
+      ['BONDED','成交',''],
+      ['LOST_HANDOFF','流失-引流','loss'],
+      ['LOST_LINE_SILENT','流失-LINE','loss'],
+    ];
+    const f = d.funnel || {};
+    const maxVal = Math.max(1, ...stages.map(s => f[s[0]] || 0));
+    qs('#funnel-total').textContent = `共 ${(d.conversions || {}).total_journeys || 0} 条旅程`;
+    qs('#funnel-bars').innerHTML = stages
+      .filter(s => (f[s[0]] || 0) > 0 || ['INITIAL','ENGAGED','HANDOFF_SENT','LINE_ENGAGED'].includes(s[0]))
+      .map(s => {
+        const v = f[s[0]] || 0;
+        const pct = Math.max(2, Math.round(v / maxVal * 100));
+        return `<div class="mr-funnel-row">
+          <div class="mr-funnel-label">${esc(s[1])}</div>
+          <div class="mr-bar"><div class="mr-bar-fill ${s[2]}" style="width:${pct}%"></div></div>
+          <div class="mr-muted">${v}</div>
         </div>`;
       }).join('');
-    }catch(e){
-      qs('#mr-devices').innerHTML = '<div class="mr-empty">加载失败: '+esc(e.message)+'</div>';
-    }
-  };
+    const cv = d.conversions || {};
+    const rates = [
+      ['互动率', cv.engaged_rate],
+      ['引流率', cv.handoff_rate],
+      ['加友率', cv.line_add_rate],
+      ['综合转化', cv.overall_rate],
+    ].filter(x => x[1] != null);
+    qs('#funnel-rates').innerHTML = rates.map(x => `<span class="mr-badge approved">${esc(x[0])} ${esc(x[1])}%</span>`).join('');
+    const hd = d.handoff || {};
+    qs('#kpi-line').textContent = hd.inject_rate == null ? '--' : `${hd.inject_rate}%`;
+  }
 
-  refreshAll();
-  setInterval(refreshAll, 5000);
+  async function refreshLeads(){
+    let r;
+    try {
+      r = await apiGet('/api/messenger-rpa/leads?limit=120');
+    } catch(e) {
+      qs('#leads-summary').textContent = '线索接口不可用';
+      qs('#leads-list').innerHTML = `<div class="mr-empty">线索读取失败: ${esc(e.message)}</div>`;
+      qs('#overview-leads').innerHTML = `<div class="mr-empty">线索读取失败</div>`;
+      qs('#kpi-high').textContent = '0';
+      return;
+    }
+    state.leads = r.items || [];
+    const s = r.summary || {};
+    qs('#kpi-high').textContent = s.high || 0;
+    qs('#leads-summary').textContent = `共 ${s.total || 0} · 高价值 ${s.high || 0} · 中等 ${s.mid || 0} · 低优先级 ${s.low || 0}`;
+    renderLeads();
+  }
+
+  function leadLevel(score){
+    score = Number(score || 0);
+    if (score >= 80) return 'high';
+    if (score >= 40) return 'mid';
+    return 'low';
+  }
+
+  function renderLeads(){
+    const filter = qs('#lead-filter').value;
+    let list = state.leads || [];
+    if (filter !== 'all') list = list.filter(x => leadLevel(x.score) === filter);
+    const top = [...(state.leads || [])].sort((a,b) => Number(b.score||0) - Number(a.score||0)).slice(0,4);
+    qs('#overview-leads').innerHTML = top.length ? top.map(leadCompact).join('') : '<div class="mr-empty">暂无线索数据</div>';
+    const root = qs('#leads-list');
+    if (!list.length) {
+      root.innerHTML = '<div class="mr-empty">没有匹配的线索</div>';
+      return;
+    }
+    root.innerHTML = list.map(leadCard).join('');
+  }
+
+  function leadCompact(x){
+    const lvl = leadLevel(x.score);
+    return `<div class="mr-row">
+      <div style="min-width:0">
+        <div class="mr-name">${esc(x.chat_name || x.chat_key)}</div>
+        <div class="mr-muted">${esc(x.stage || '--')} · ${esc(x.persona_id || '--')}</div>
+      </div>
+      <span class="mr-badge ${lvl}">${Number(x.score || 0)}</span>
+    </div>`;
+  }
+
+  function leadCard(x){
+    const lvl = leadLevel(x.score);
+    const missing = x.missing_fields || [];
+    const evidence = x.evidence || [];
+    return `<div class="mr-lead-card">
+      <div>
+        <div class="mr-score ${lvl}">${Number(x.score || 0)}</div>
+        <div class="mr-muted" style="margin-top:.35rem">${fmtTs(x.updated_at)}</div>
+      </div>
+      <div style="min-width:0">
+        <div class="mr-name">${esc(x.chat_name || x.chat_key || '--')}</div>
+        <div class="mr-muted">${esc(x.stage || '--')} · persona ${esc(x.persona_id || '--')} · ${esc(x.reply_lang || '--')}</div>
+        <div class="mr-note" style="margin-top:.4rem"><b>对方：</b>${esc(short(x.last_peer_text || '', 180))}</div>
+        <div class="mr-note"><b>回复：</b>${esc(short(x.last_reply || '', 180))}</div>
+        <div class="mr-evidence">${evidence.slice(-8).map(v => `<span>${esc(v)}</span>`).join('')}</div>
+      </div>
+      <div>
+        <span class="mr-badge ${lvl}">${lvl === 'high' ? '高价值' : lvl === 'mid' ? '继续培养' : '低优先级'}</span>
+        <div class="mr-muted" style="margin-top:.45rem">缺失字段</div>
+        <div class="mr-evidence">${missing.length ? missing.map(v => `<span>${esc(v)}</span>`).join('') : '<span>完整</span>'}</div>
+      </div>
+    </div>`;
+  }
+
+  async function triggerRun(btn){
+    btn.disabled = true;
+    const old = btn.textContent;
+    btn.textContent = '运行中...';
+    try {
+      const r = await apiPost('/api/messenger-rpa/trigger', {});
+      toast(`run_once: step=${r.step || '--'} ok=${!!r.ok}`);
+      await refreshAllLight();
+    } finally {
+      btn.disabled = false;
+      btn.textContent = old;
+    }
+  }
+
+  async function pauseAll(){
+    await apiPost('/api/messenger-rpa/pause', {seconds:300});
+    toast('已暂停 5 分钟');
+    await refreshStatus();
+  }
+
+  async function resumeAll(){
+    await apiPost('/api/messenger-rpa/resume', {});
+    toast('已恢复运行');
+    await refreshStatus();
+  }
+
+  async function calibrate(){
+    const r = await apiPost('/api/messenger-rpa/calibrate', {});
+    toast(`坐标校准完成: ok=${!!r.ok}`);
+  }
+
+  async function installKeyboard(){
+    if (!confirm('确认安装 ADBKeyboard 到当前 adb_serial 设备？')) return;
+    const r = await apiPost('/api/messenger-rpa/install-adbkeyboard', {});
+    toast(`ADBKeyboard: ok=${!!r.ok}`);
+    await refreshAccounts(true);
+  }
+
+  async function refreshAllLight(){
+    await Promise.allSettled([
+      refreshStatus(),
+      refreshConfig(),
+      refreshApprovals(),
+      refreshRuns(),
+      refreshAccounts(),
+      refreshCoordinator(),
+      refreshFunnel(),
+      refreshLeads(),
+    ]);
+  }
+
+  async function initialLoad(){
+    await Promise.allSettled([
+      refreshStatus(),
+      refreshConfig(),
+      refreshPersonas(),
+      refreshApprovals(),
+      refreshRuns(),
+      refreshAccounts(),
+      refreshCoordinator(),
+      refreshFunnel(),
+      refreshLeads(),
+    ]);
+  }
+
+  qs('#btn-refresh').addEventListener('click', () => refreshAllLight().then(() => toast('已刷新')));
+  qs('#btn-refresh-leads').addEventListener('click', () => refreshLeads().then(() => toast('线索已刷新')));
+  qs('#btn-refresh-runs').addEventListener('click', () => refreshRuns().then(() => toast('运行记录已刷新')));
+  qs('#btn-trigger').addEventListener('click', ev => triggerRun(ev.currentTarget));
+  qs('#btn-trigger-2').addEventListener('click', ev => triggerRun(ev.currentTarget));
+  qs('#btn-pause').addEventListener('click', pauseAll);
+  qs('#btn-resume').addEventListener('click', resumeAll);
+  qs('#btn-calibrate').addEventListener('click', calibrate);
+  qs('#btn-install-kbd').addEventListener('click', installKeyboard);
+  qs('#btn-health-deep').addEventListener('click', ev => {
+    ev.currentTarget.disabled = true;
+    refreshAccounts(true).then(() => toast('深度检查完成')).finally(() => ev.currentTarget.disabled = false);
+  });
+  qs('#btn-save-config').addEventListener('click', () => saveConfig().catch(e => toast(e.message, 'err')));
+  qs('#btn-save-personas').addEventListener('click', () => savePersonas().catch(e => toast(e.message, 'err')));
+  qs('#lead-filter').addEventListener('change', renderLeads);
+  qs('#bulk-all').addEventListener('change', ev => {
+    qsa('.pick-approval').forEach(cb => { cb.checked = ev.currentTarget.checked; });
+    updateBulkButtons();
+  });
+  qs('#btn-bulk-approve').addEventListener('click', () => bulkDecision('approve').catch(e => toast(e.message, 'err')));
+  qs('#btn-bulk-reject').addEventListener('click', () => bulkDecision('reject').catch(e => toast(e.message, 'err')));
+
+  document.addEventListener('click', ev => {
+    const btn = ev.target.closest('button');
+    if (!btn) return;
+    if (btn.matches('.btn-approve,.btn-suggest,.btn-reject,.btn-account-trigger,.btn-account-resume,.btn-account-pause')) {
+      btn.disabled = true;
+      setTimeout(() => { if (btn.isConnected) btn.disabled = false; }, 4000);
+    }
+  });
+
+  initialLoad();
+  setInterval(refreshAllLight, 8000);
 })();
 </script>
 {% endblock %}

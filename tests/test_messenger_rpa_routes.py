@@ -32,8 +32,22 @@ from src.web.routes.messenger_rpa_routes import register_messenger_rpa_routes
 
 
 class _StubConfigMgr:
-    def __init__(self, enabled: bool = True) -> None:
-        self.config = {"messenger_rpa": {"enabled": enabled}}
+    def __init__(self, enabled: bool = True, config_path: Path | None = None) -> None:
+        self.config = {
+            "messenger_rpa": {
+                "enabled": enabled,
+                "reply_profiles": {
+                    "default": "warm",
+                    "profiles": [{"id": "warm", "language": "auto"}],
+                },
+            }
+        }
+        self.config_path = config_path or Path("config/config.yaml")
+        self.saved = 0
+
+    def save(self) -> bool:
+        self.saved += 1
+        return True
 
 
 def _noop_api_auth(request):
@@ -67,6 +81,22 @@ def client(store: MessengerRpaStateStore) -> TestClient:
     app.state.messenger_rpa_state_store = store
     app.state.messenger_rpa_service = None  # 显式无 svc
     return TestClient(app)
+
+
+@pytest.fixture
+def client_with_cfg(store: MessengerRpaStateStore, tmp_path: Path) -> tuple[TestClient, _StubConfigMgr]:
+    app = FastAPI()
+    cm = _StubConfigMgr(enabled=True, config_path=tmp_path / "config.yaml")
+    register_messenger_rpa_routes(
+        app,
+        page_auth=_noop_page_auth,
+        api_auth=_noop_api_auth,
+        templates=None,
+        config_manager=cm,
+    )
+    app.state.messenger_rpa_state_store = store
+    app.state.messenger_rpa_service = None
+    return TestClient(app), cm
 
 
 # ───────────────── /status ─────────────────
@@ -105,6 +135,77 @@ def test_status_includes_pending_empty_count(
 
     r1 = client.get("/api/messenger-rpa/status")
     assert r1.json()["pending_empty_count"] == 1  # 只数空的
+
+
+def test_config_get_and_patch(client_with_cfg: tuple[TestClient, _StubConfigMgr]) -> None:
+    client, cm = client_with_cfg
+    r0 = client.get("/api/messenger-rpa/config")
+    assert r0.status_code == 200
+    assert r0.json()["operations"]["enabled"] is True
+
+    r1 = client.put(
+        "/api/messenger-rpa/config",
+        json={
+            "autostart": False,
+            "reply_mode": "approve",
+            "run_once_target_names": "Victor Zan, Test User",
+        },
+    )
+    assert r1.status_code == 200
+    assert cm.saved == 1
+    cfg = cm.config["messenger_rpa"]
+    assert cfg["reply_mode"] == "approve"
+    assert cfg["run_once_target_names"] == ["Victor Zan", "Test User"]
+
+
+def test_personas_update_validates_default(
+    client_with_cfg: tuple[TestClient, _StubConfigMgr],
+) -> None:
+    client, cm = client_with_cfg
+    bad = client.put(
+        "/api/messenger-rpa/personas",
+        json={"default": "missing", "profiles": [{"id": "warm"}]},
+    )
+    assert bad.status_code == 400
+
+    ok = client.put(
+        "/api/messenger-rpa/personas",
+        json={
+            "default": "sato",
+            "profiles": [
+                {"id": "sato", "language": "ja", "match_names": ["Victor Zan"]},
+            ],
+        },
+    )
+    assert ok.status_code == 200
+    assert cm.config["messenger_rpa"]["reply_profiles"]["default"] == "sato"
+
+
+def test_leads_returns_chat_state_and_profile(
+    client_with_cfg: tuple[TestClient, _StubConfigMgr],
+    store: MessengerRpaStateStore,
+) -> None:
+    client, cm = client_with_cfg
+    cm.config["messenger_rpa"]["reply_profiles"] = {
+        "default": "warm",
+        "profiles": [
+            {"id": "warm", "language": "auto"},
+            {"id": "sato", "language": "ja", "match_names": ["Victor Zan"]},
+        ],
+    }
+    store.update_chat_state(
+        "acc_bg_phone_2:Victor Zan",
+        chat_name="Victor Zan",
+        last_peer_text="こんにちは",
+        last_reply="こんばんは",
+    )
+    r = client.get("/api/messenger-rpa/leads")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["summary"]["total"] >= 1
+    item = body["items"][0]
+    assert item["chat_name"] == "Victor Zan"
+    assert item["persona_id"] == "sato"
 
 
 # ───────────────── /approvals （列表 + 新 filter） ─────────────────
