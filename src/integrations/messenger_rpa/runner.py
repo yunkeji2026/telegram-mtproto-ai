@@ -3482,24 +3482,39 @@ class MessengerRpaRunner:
         chat_key_l = (chat_key or "").lower()
         chat_name_l = (chat_name or "").lower()
         default_id = str(cfg.get("default") or "").strip()
+        account_id = str(getattr(self, "_account_id", "") or "").strip()
+        account_profile_id = str(
+            self._cfg.get("account_reply_profile_id")
+            or self._cfg.get("reply_profile_id")
+            or self._cfg.get("persona_id")
+            or ""
+        ).strip()
         default_profile: Dict[str, Any] = {}
+        account_profile: Dict[str, Any] = {}
         for raw in profiles:
             if not isinstance(raw, dict):
                 continue
             pid = str(raw.get("id") or raw.get("name") or "").strip()
             if default_id and pid == default_id:
                 default_profile = raw
+            if account_profile_id and pid == account_profile_id:
+                account_profile = raw
             keys = raw.get("match_chat_keys") or []
             names = raw.get("match_names") or []
+            accounts = raw.get("match_account_ids") or raw.get("account_ids") or []
             if isinstance(keys, str):
                 keys = [keys]
             if isinstance(names, str):
                 names = [names]
+            if isinstance(accounts, str):
+                accounts = [accounts]
             if any(str(k).strip().lower() and str(k).strip().lower() in chat_key_l for k in keys):
                 return raw
             if any(str(n).strip().lower() and str(n).strip().lower() in chat_name_l for n in names):
                 return raw
-        return default_profile
+            if account_id and any(str(a).strip() == account_id for a in accounts):
+                account_profile = raw
+        return account_profile or default_profile
 
     @staticmethod
     def _strip_lang_detection_markup(text: str) -> str:
@@ -3851,6 +3866,56 @@ class MessengerRpaRunner:
             )
         return ""
 
+    async def _try_transcribe_peer_voice(self, serial: str) -> str:
+        """Try to turn the latest Messenger voice note into text.
+
+        Android Messenger does not expose voice files to non-root ADB.  The
+        current implementation uses the existing VoiceGrabber run-as path and
+        soft-fails into normal media handling when production APKs block it.
+        """
+        cfg = self._cfg.get("voice_input") or {}
+        if not isinstance(cfg, dict) or not cfg.get("enabled", False):
+            return ""
+        if not serial:
+            return ""
+        try:
+            from src.integrations.messenger_rpa.voice_grabber import VoiceGrabber
+            package = str(
+                cfg.get("package")
+                or self._cfg.get("messenger_package")
+                or "com.facebook.orca"
+            )
+            out_dir = str(cfg.get("out_dir") or "tmp_voice_notes")
+            grabber = VoiceGrabber(serial, package=package, out_dir=out_dir)
+            grabbed = await asyncio.to_thread(grabber.try_grab_latest_voice)
+            if not getattr(grabbed, "ok", False):
+                logger.info(
+                    "[messenger_rpa] voice grab skipped method=%s err=%s",
+                    getattr(grabbed, "method", ""),
+                    str(getattr(grabbed, "error", ""))[:120],
+                )
+                return ""
+
+            from src.ai.audio_pipeline import get_audio_pipeline
+            ap_cfg = self._cfg.get("audio_pipeline") or {}
+            if isinstance(cfg.get("audio_pipeline"), dict):
+                ap_cfg = cfg.get("audio_pipeline") or ap_cfg
+            ap = get_audio_pipeline(ap_cfg)
+            rv = await ap.transcribe_file(
+                getattr(grabbed, "local_path", ""),
+                language_hint=str(cfg.get("language_hint") or "").strip() or None,
+                timeout_sec=float(cfg.get("timeout_sec", 30) or 30),
+            )
+            if rv.ok and rv.text:
+                return str(rv.text).strip()
+            logger.info(
+                "[messenger_rpa] voice transcribe skipped err=%s",
+                str(rv.error or "")[:120],
+            )
+        except Exception:
+            logger.debug("[messenger_rpa] voice transcribe failed", exc_info=True)
+        return ""
+
     # ── 内部：AI 回复 ─────────────────────────────
     async def _generate_reply(
         self,
@@ -3911,6 +3976,14 @@ class MessengerRpaRunner:
                     _cap_task.cancel()
                 except Exception:
                     pass
+
+        if peer_msg.kind == "voice":
+            transcript = await self._try_transcribe_peer_voice(
+                str(self._cfg.get("adb_serial") or "")
+            )
+            if transcript:
+                text_for_ai = f"[语音转写：{transcript}]"
+                result["voice_transcript"] = transcript[:500]
 
         # ★ P2-2：对方连发合并（extra_peers 由 _thread_combined 写入 result）
         # 当 vision 抓到 peer 底部之上还有连续 peer 气泡时，把它们按
@@ -5623,26 +5696,32 @@ class MessengerRpaRunner:
         "image": {
             "en": "Got your photo — let me take a look and get back to you 📷",
             "zh": "收到你的照片啦，我看看然后回你～📷",
+            "ja": "写真ありがとう。ちゃんと見てから返すね📷",
         },
         "sticker": {
             "en": "Haha, love that one 😄",
             "zh": "哈哈这个贴纸我爱了 😄",
+            "ja": "そのスタンプ、ちょっと可愛いね😄",
         },
         "voice": {
             "en": "Heard your voice note, give me a sec to listen properly 🎙️",
             "zh": "收到你的语音，我等下认真听一遍再回你哈 🎙️",
+            "ja": "ボイスありがとう。ちゃんと聞いてから返すね🎙️",
         },
         "file": {
             "en": "Thanks for the file, I'll check it on my end 📎",
             "zh": "收到文件啦，我这边看一下～📎",
+            "ja": "ファイルありがとう。こちらで確認してみるね📎",
         },
         "link": {
             "en": "Got the link, opening it now 🔗",
             "zh": "链接收到了，我打开看看 🔗",
+            "ja": "リンクありがとう。開いて見てみるね🔗",
         },
         "other": {
             "en": "Got it, let me respond properly in a bit 👀",
             "zh": "收到啦，我等下好好回你 👀",
+            "ja": "受け取ったよ。少し見てからちゃんと返すね👀",
         },
     }
 
@@ -5667,20 +5746,33 @@ class MessengerRpaRunner:
             media_kinds.add("link")
         if kind not in media_kinds:
             return None, ""
+        voice_cfg = self._cfg.get("voice_input") or {}
+        if (
+            kind == "voice"
+            and isinstance(voice_cfg, dict)
+            and voice_cfg.get("enabled", False)
+            and voice_cfg.get("prefer_transcribe", True) is not False
+        ):
+            return None, ""
 
         # 语种：沿用 language_alignment 语义 + 历史 peer 文本
         lang_mode = str(
             self._cfg.get("language_alignment", "english_fallback_only")
         ).strip().lower()
-        prefer_zh = False
+        preferred_lang = "en"
         if lang_mode == "auto":
             raw = (peer_msg.raw or "") + " " + (peer_msg.desc or "")
             ai = getattr(self._sm, "ai_client", None)
-            # _MEDIA_ACK_TEMPLATES 当前只有 zh/en 两套；其他语言（ja/ko/...）走 en fallback
-            prefer_zh = (_detect_peer_lang(raw, ai_client=ai) == "zh")
+            detected = _detect_peer_lang(raw, ai_client=ai)
+            if detected in ("zh", "ja"):
+                preferred_lang = detected
+        else:
+            default_lang = str(self._cfg.get("default_reply_lang") or "").lower()
+            if default_lang in ("zh", "ja"):
+                preferred_lang = default_lang
         # 设备发不了 unicode 时，中文模板会走 ASCII guard 降级为审批；
         # 默认还是给英文以避免 approve 堆积
-        lang = "zh" if prefer_zh else "en"
+        lang = preferred_lang
 
         tbl = self._MEDIA_ACK_TEMPLATES.get(kind) or self._MEDIA_ACK_TEMPLATES["other"]
         reply = tbl.get(lang) or tbl.get("en") or "Got it!"

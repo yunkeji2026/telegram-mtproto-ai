@@ -59,6 +59,10 @@ def _messenger_cfg(config_manager: Any) -> Dict[str, Any]:
     return mr if isinstance(mr, dict) else {}
 
 
+def _dict_cfg(value: Any) -> Dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
 def _save_messenger_cfg(config_manager: Any, mr_cfg: Dict[str, Any]) -> None:
     root = getattr(config_manager, "config", None)
     if not isinstance(root, dict):
@@ -136,6 +140,43 @@ def _profile_id_for_chat(reply_profiles: Dict[str, Any], chat_key: str, chat_nam
         if any(str(n).strip().lower() and str(n).strip().lower() in cn for n in names):
             return str(p.get("id") or "")
     return default_id
+
+
+def _mobile_auto_snapshot(config_manager: Any) -> Dict[str, Any]:
+    cfg = getattr(config_manager, "config", None) or {}
+    mr_cfg = _messenger_cfg(config_manager)
+    from src.integrations.messenger_rpa.device_directory import (
+        MobileAutoDeviceDirectory,
+    )
+    directory = MobileAutoDeviceDirectory.from_messenger_cfg(mr_cfg)
+    devices = directory.list_devices()
+    bindings = directory.account_bindings(
+        messenger_accounts=mr_cfg.get("accounts") if isinstance(mr_cfg.get("accounts"), list) else [],
+        reply_profiles=_dict_cfg(mr_cfg.get("reply_profiles")),
+        contacts_cfg=cfg.get("contacts") or {},
+    )
+    return {
+        "mobile_auto": {
+            "root_path": devices.get("root_path", ""),
+            "openclaw_db_path": devices.get("openclaw_db_path", ""),
+        },
+        "devices": devices.get("devices") or [],
+        "device_summary": devices.get("summary") or {},
+        "conflicts": devices.get("conflicts") or [],
+        "bindings": bindings.get("accounts") or [],
+        "binding_summary": bindings.get("summary") or {},
+    }
+
+
+def _media_cfg(mr_cfg: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "media_handling_policy": mr_cfg.get("media_handling_policy", "ai"),
+        "media_include_links": bool(mr_cfg.get("media_include_links", False)),
+        "media_deep_understand": _dict_cfg(mr_cfg.get("media_deep_understand")),
+        "voice_input": _dict_cfg(mr_cfg.get("voice_input")),
+        "voice_output": _dict_cfg(mr_cfg.get("voice_output")),
+        "emoji_policy": _dict_cfg(mr_cfg.get("emoji_policy")),
+    }
 
 
 def _get_service(request: Request):
@@ -224,6 +265,8 @@ def register_messenger_rpa_routes(
             "accounts": raw_cfg.get("accounts") or [],
             "reply_profiles": raw_cfg.get("reply_profiles") or {},
             "lead_qualification": raw_cfg.get("lead_qualification") or {},
+            "media": _media_cfg(raw_cfg),
+            "mobile_auto": raw_cfg.get("mobile_auto") or {},
             "safety": raw_cfg.get("safety") or {},
         }
 
@@ -302,6 +345,144 @@ def register_messenger_rpa_routes(
         _save_messenger_cfg(config_manager, mr_cfg)
         _refresh_service_runtime(request, mr_cfg)
         return {"ok": True, "reply_profiles": normalized}
+
+    @app.get("/api/messenger-rpa/bindings")
+    async def api_msgr_bindings(request: Request):
+        """Return Messenger account ↔ phone ↔ persona bindings."""
+        api_auth(request)
+        return _mobile_auto_snapshot(config_manager)
+
+    @app.put("/api/messenger-rpa/bindings")
+    async def api_msgr_bindings_update(request: Request):
+        """Patch safe account binding fields without replacing full config."""
+        api_auth(request)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "invalid json body")
+        if not isinstance(body, dict):
+            raise HTTPException(400, "body 必须是对象")
+        updates = body.get("accounts") or []
+        if not isinstance(updates, list):
+            raise HTTPException(400, "accounts 必须是数组")
+        mr_cfg = copy.deepcopy(_messenger_cfg(config_manager))
+        accounts = mr_cfg.get("accounts") or []
+        if not isinstance(accounts, list):
+            accounts = []
+        by_id = {
+            str(a.get("id") or a.get("account_id") or ""): a
+            for a in accounts if isinstance(a, dict)
+        }
+        safe_fields = {
+            "label", "adb_serial", "reply_profile_id", "persona_id",
+            "mobile_device_id", "device_number", "device_alias",
+            "login_account", "messenger_login", "line_id",
+        }
+        reply_profiles = _dict_cfg(mr_cfg.get("reply_profiles"))
+        profile_ids = {
+            str(p.get("id") or p.get("name") or "").strip()
+            for p in reply_profiles.get("profiles", [])
+            if isinstance(p, dict)
+        }
+        changed = []
+        for raw in updates:
+            if not isinstance(raw, dict):
+                continue
+            aid = str(raw.get("id") or raw.get("account_id") or "").strip()
+            if not aid or aid not in by_id:
+                raise HTTPException(400, f"未知 account: {aid}")
+            item = by_id[aid]
+            bad = [k for k in raw.keys() if k not in safe_fields and k not in ("id", "account_id")]
+            if bad:
+                raise HTTPException(400, f"不允许的字段: {bad}")
+            has_persona_field = "reply_profile_id" in raw or "persona_id" in raw
+            persona = str(raw.get("reply_profile_id") or raw.get("persona_id") or "").strip()
+            if persona and profile_ids and persona not in profile_ids:
+                raise HTTPException(400, f"reply_profile_id 不存在: {persona}")
+            for k in safe_fields:
+                if k in raw:
+                    item[k] = raw[k]
+            if has_persona_field:
+                item["reply_profile_id"] = persona
+                item.pop("persona_id", None)
+            changed.append(aid)
+        mr_cfg["accounts"] = accounts
+        _save_messenger_cfg(config_manager, mr_cfg)
+        _refresh_service_runtime(request, mr_cfg)
+        snap = _mobile_auto_snapshot(config_manager)
+        snap["ok"] = True
+        snap["updated_accounts"] = changed
+        return snap
+
+    @app.get("/api/messenger-rpa/media")
+    async def api_msgr_media(request: Request):
+        """Return media/voice capabilities and config."""
+        api_auth(request)
+        mr_cfg = _messenger_cfg(config_manager)
+        audio_stats: Dict[str, Any] = {}
+        voice_input = _dict_cfg(mr_cfg.get("voice_input"))
+        audio_cfg = _dict_cfg(voice_input.get("audio_pipeline")) or _dict_cfg(
+            mr_cfg.get("audio_pipeline")
+        )
+        try:
+            from src.ai.audio_pipeline import get_audio_pipeline
+            audio_stats = get_audio_pipeline(audio_cfg).stats()
+        except Exception as exc:
+            audio_stats = {"error": f"{type(exc).__name__}: {exc}"}
+        media_deep = _dict_cfg(mr_cfg.get("media_deep_understand"))
+        voice_output = _dict_cfg(mr_cfg.get("voice_output"))
+        return {
+            "config": _media_cfg(mr_cfg),
+            "capabilities": {
+                "receive_image": True,
+                "receive_sticker": True,
+                "receive_emoji": True,
+                "receive_voice": True,
+                "image_understanding": bool(
+                    media_deep.get("enabled", True)
+                ),
+                "voice_transcription": bool(
+                    voice_input.get("enabled", False)
+                ),
+                "send_voice": bool(
+                    voice_output.get("enabled", False)
+                ),
+                "send_voice_note": "planned",
+            },
+            "audio_pipeline": audio_stats,
+        }
+
+    @app.put("/api/messenger-rpa/media")
+    async def api_msgr_media_update(request: Request):
+        api_auth(request)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "invalid json body")
+        if not isinstance(body, dict):
+            raise HTTPException(400, "body 必须是对象")
+        allowed = {
+            "media_handling_policy", "media_include_links",
+            "media_deep_understand", "voice_input", "voice_output",
+            "emoji_policy",
+        }
+        bad = [k for k in body.keys() if k not in allowed]
+        if bad:
+            raise HTTPException(400, f"不允许的字段: {bad}")
+        mr_cfg = copy.deepcopy(_messenger_cfg(config_manager))
+        for k, v in body.items():
+            if k in ("media_deep_understand", "voice_input", "voice_output", "emoji_policy"):
+                if not isinstance(v, dict):
+                    raise HTTPException(400, f"{k} 必须是对象")
+                cur = mr_cfg.get(k) if isinstance(mr_cfg.get(k), dict) else {}
+                merged = copy.deepcopy(cur)
+                merged.update(v)
+                mr_cfg[k] = merged
+            else:
+                mr_cfg[k] = v
+        _save_messenger_cfg(config_manager, mr_cfg)
+        _refresh_service_runtime(request, mr_cfg)
+        return {"ok": True, "config": _media_cfg(mr_cfg)}
 
     @app.get("/api/messenger-rpa/leads")
     async def api_msgr_leads(request: Request, limit: int = 100):

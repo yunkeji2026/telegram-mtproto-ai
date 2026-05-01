@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 import threading
 from dataclasses import dataclass, field
@@ -56,6 +57,12 @@ class AccountContext:
     config_overlay: Dict[str, Any] = field(default_factory=dict)
     state_db_path: Optional[Path] = None
     label: str = ""  # 人读标签，运维展示用
+    reply_profile_id: str = ""
+    mobile_device_id: str = ""
+    device_number: str = ""
+    device_alias: str = ""
+    login_account: str = ""
+    line_id: str = ""
 
     _state_store: Optional[MessengerRpaStateStore] = None
     _lock: threading.RLock = field(default_factory=threading.RLock)
@@ -99,10 +106,36 @@ class AccountContext:
         用户忘了在 overlay 里配，也不会让两个账号的 chat_key 在 ContextStore
         和 state DB 层互相污染。
         """
-        merged = dict(base_cfg or {})
+        merged = copy.deepcopy(base_cfg or {})
         merged.update(self.config_overlay or {})
         if self.adb_serial:
             merged["adb_serial"] = self.adb_serial
+        merged["account_id"] = self.account_id
+        merged["account_label"] = self.label
+        if self.reply_profile_id:
+            merged["account_reply_profile_id"] = self.reply_profile_id
+        if self.mobile_device_id:
+            merged["mobile_device_id"] = self.mobile_device_id
+        if self.device_number:
+            merged["device_number"] = self.device_number
+        if self.device_alias:
+            merged["device_alias"] = self.device_alias
+        if self.login_account:
+            merged["login_account"] = self.login_account
+        if self.line_id:
+            lq = merged.get("lead_qualification")
+            if not isinstance(lq, dict):
+                lq = {}
+            else:
+                lq = copy.deepcopy(lq)
+            handoff = lq.get("handoff")
+            if not isinstance(handoff, dict):
+                handoff = {}
+            else:
+                handoff = copy.deepcopy(handoff)
+            handoff["line_id"] = self.line_id
+            lq["handoff"] = handoff
+            merged["lead_qualification"] = lq
         # P6-1：非 default 账号默认启用命名空间前缀
         has_overlay_prefix = (
             "chat_key_prefix" in (self.config_overlay or {})
@@ -130,6 +163,14 @@ class AccountPool:
 
     def _ensure_semaphore(self) -> asyncio.Semaphore:
         """延迟创建 semaphore，必须在事件循环内调用。"""
+        if self._sem is not None:
+            try:
+                running = asyncio.get_running_loop()
+                bound = getattr(self._sem, "_loop", None)
+                if bound is not None and bound is not running:
+                    self._sem = None  # event loop 不匹配，重建
+            except RuntimeError:
+                pass
         if self._sem is None:
             self._sem = asyncio.Semaphore(self._max_parallel)
         return self._sem
@@ -137,6 +178,15 @@ class AccountPool:
     def _lock_for(self, account_id: str) -> asyncio.Lock:
         with self._create_lock:
             lk = self._locks.get(account_id)
+            if lk is not None:
+                # Python 3.10+ 锁绑定 event loop；若 loop 不匹配则重建
+                try:
+                    running = asyncio.get_running_loop()
+                    bound = getattr(lk, "_loop", None)
+                    if bound is not None and bound is not running:
+                        lk = None  # 强制重建
+                except RuntimeError:
+                    pass  # 不在 async 上下文——不重建
             if lk is None:
                 lk = asyncio.Lock()
                 self._locks[account_id] = lk
@@ -239,6 +289,12 @@ class AccountRegistry:
             for entry in raw_accounts:
                 if not isinstance(entry, dict):
                     continue
+                if entry.get("enabled") is False:
+                    logger.info(
+                        "[account_registry] 跳过 disabled account: %s",
+                        entry.get("id") or entry.get("account_id"),
+                    )
+                    continue
                 aid = str(entry.get("id") or entry.get("account_id") or "").strip()
                 if not aid:
                     logger.warning(
@@ -248,7 +304,15 @@ class AccountRegistry:
                 serial = str(entry.get("adb_serial") or "").strip()
                 prefix = str(entry.get("chat_key_prefix") or "").strip()
                 overlay = entry.get("overrides") or entry.get("config_overlay") or {}
+                if not isinstance(overlay, dict):
+                    overlay = {}
                 label = str(entry.get("label") or aid)
+                reply_profile_id = str(
+                    entry.get("reply_profile_id")
+                    or entry.get("persona_id")
+                    or (overlay.get("account_reply_profile_id") if isinstance(overlay, dict) else "")
+                    or ""
+                ).strip()
                 db_override = entry.get("state_db_path")
                 db_path: Optional[Path] = (
                     Path(db_override).expanduser().resolve()
@@ -262,6 +326,16 @@ class AccountRegistry:
                     config_overlay=dict(overlay),
                     state_db_path=db_path,
                     label=label,
+                    reply_profile_id=reply_profile_id,
+                    mobile_device_id=str(entry.get("mobile_device_id") or "").strip(),
+                    device_number=str(entry.get("device_number") or "").strip(),
+                    device_alias=str(entry.get("device_alias") or "").strip(),
+                    login_account=str(
+                        entry.get("login_account")
+                        or entry.get("messenger_login")
+                        or ""
+                    ).strip(),
+                    line_id=str(entry.get("line_id") or "").strip(),
                 ))
         else:
             # 单账号兼容：account_id="default"，serial 来自 cfg.adb_serial
@@ -299,6 +373,12 @@ class AccountRegistry:
                 "account_id": ctx.account_id,
                 "label": ctx.label,
                 "adb_serial": ctx.adb_serial,
+                "reply_profile_id": ctx.reply_profile_id,
+                "mobile_device_id": ctx.mobile_device_id,
+                "device_number": ctx.device_number,
+                "device_alias": ctx.device_alias,
+                "login_account": ctx.login_account,
+                "line_id": ctx.line_id,
                 "chat_key_prefix": ctx.chat_key_prefix or (
                     f"acc_{ctx.account_id}" if ctx.account_id != "default" else ""
                 ),

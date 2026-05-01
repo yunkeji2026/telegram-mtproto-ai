@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import sys
+import json
 from pathlib import Path
 
 import pytest
@@ -206,6 +207,89 @@ def test_leads_returns_chat_state_and_profile(
     item = body["items"][0]
     assert item["chat_name"] == "Victor Zan"
     assert item["persona_id"] == "sato"
+
+
+def test_bindings_read_mobile_auto_and_patch_account(
+    client_with_cfg: tuple[TestClient, _StubConfigMgr],
+    tmp_path: Path,
+) -> None:
+    client, cm = client_with_cfg
+    root = tmp_path / "mobile-auto"
+    cfg_dir = root / "config"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "device_aliases.json").write_text(
+        json.dumps({
+            "SERIAL05": {"number": 5, "alias": "05号", "display_name": "Pixel"}
+        }),
+        encoding="utf-8",
+    )
+    (cfg_dir / "device_registry.json").write_text(
+        json.dumps({
+            "hw-05": {
+                "current_serial": "SERIAL05",
+                "previous_serials": ["OLD05"],
+                "model": "Pixel",
+                "number": 5,
+                "alias": "05号",
+            }
+        }),
+        encoding="utf-8",
+    )
+    (cfg_dir / "chat.yaml").write_text(
+        "device_aliases:\n  \"05\": \"SERIAL05\"\n",
+        encoding="utf-8",
+    )
+    cm.config["messenger_rpa"].update({
+        "mobile_auto": {"root_path": str(root)},
+        "accounts": [{"id": "acc05", "label": "05号测试机", "adb_serial": "SERIAL05"}],
+    })
+
+    r0 = client.get("/api/messenger-rpa/bindings")
+    assert r0.status_code == 200
+    body = r0.json()
+    assert body["binding_summary"]["mapped_devices"] == 1
+    assert body["bindings"][0]["device_number"] == "05"
+
+    r1 = client.put(
+        "/api/messenger-rpa/bindings",
+        json={
+            "accounts": [{
+                "account_id": "acc05",
+                "reply_profile_id": "warm",
+                "login_account": "fb_login_05",
+                "line_id": "@line05",
+            }]
+        },
+    )
+    assert r1.status_code == 200
+    acc = cm.config["messenger_rpa"]["accounts"][0]
+    assert acc["reply_profile_id"] == "warm"
+    assert acc["login_account"] == "fb_login_05"
+    assert acc["line_id"] == "@line05"
+
+
+def test_media_config_get_and_patch(
+    client_with_cfg: tuple[TestClient, _StubConfigMgr],
+) -> None:
+    client, cm = client_with_cfg
+    r0 = client.get("/api/messenger-rpa/media")
+    assert r0.status_code == 200
+    assert r0.json()["capabilities"]["receive_image"] is True
+
+    r1 = client.put(
+        "/api/messenger-rpa/media",
+        json={
+            "media_handling_policy": "ai",
+            "media_deep_understand": {"enabled": True, "timeout_sec": 5},
+            "voice_input": {"enabled": True, "prefer_transcribe": True},
+            "voice_output": {"enabled": False, "provider": "disabled"},
+        },
+    )
+    assert r1.status_code == 200
+    mr = cm.config["messenger_rpa"]
+    assert mr["media_handling_policy"] == "ai"
+    assert mr["media_deep_understand"]["timeout_sec"] == 5
+    assert mr["voice_input"]["enabled"] is True
 
 
 # ───────────────── /approvals （列表 + 新 filter） ─────────────────

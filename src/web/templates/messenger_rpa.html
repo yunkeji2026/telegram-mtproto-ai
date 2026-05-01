@@ -84,6 +84,9 @@
 .mr-persona-card{border:1px solid var(--bd);border-radius:8px;background:var(--input);padding:.75rem;display:flex;flex-direction:column;gap:.45rem}
 .mr-persona-top{display:flex;align-items:center;justify-content:space-between;gap:.5rem}
 .mr-code{font-family:Consolas,'JetBrains Mono',monospace;font-size:.75rem;color:var(--p);background:var(--input);border:1px solid var(--bd);border-radius:6px;padding:.08rem .35rem}
+.mr-binding-card{border:1px solid var(--bd);border-radius:8px;background:var(--input);padding:.75rem;display:flex;flex-direction:column;gap:.6rem}
+.mr-binding-top{display:flex;align-items:flex-start;justify-content:space-between;gap:.75rem}
+.mr-binding-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.55rem}
 .mr-lead-card{border:1px solid var(--bd);border-radius:8px;background:var(--input);padding:.75rem;display:grid;grid-template-columns:78px minmax(0,1fr) 160px;gap:.75rem;align-items:start;margin-bottom:.65rem}
 .mr-score{width:60px;height:60px;border-radius:8px;border:1px solid var(--bd);display:flex;align-items:center;justify-content:center;font-weight:900;font-size:1.1rem;background:var(--card)}
 .mr-score.high{color:var(--green);border-color:rgba(16,185,129,.35);background:var(--gs)}
@@ -105,6 +108,7 @@
 @media(max-width:720px){
   .mr-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
   .mr-field-grid,.mr-field-grid.three{grid-template-columns:1fr}
+  .mr-binding-grid{grid-template-columns:1fr}
   .mr-lead-card{grid-template-columns:1fr}
   .mr-score{width:100%;height:44px}
   .mr-head-actions{width:100%}
@@ -235,6 +239,15 @@
           </div>
         </div>
         <div id="coord-list" class="mr-scroll short"><div class="mr-empty">加载中...</div></div>
+        <div style="height:1rem"></div>
+        <div class="mr-panel-head">
+          <div>
+            <h2 class="mr-panel-title">手机/账号/人设绑定</h2>
+            <div class="mr-panel-sub" id="bindings-summary">读取中</div>
+          </div>
+          <button class="btn btn-primary" id="btn-save-bindings">保存绑定</button>
+        </div>
+        <div id="bindings-list" class="mr-scroll tall"><div class="mr-empty">加载中...</div></div>
       </div>
     </div>
   </section>
@@ -457,6 +470,51 @@
           </div>
         </div>
       </div>
+      <div class="mr-panel">
+        <div class="mr-panel-head">
+          <div>
+            <h2 class="mr-panel-title">图片/表情/语音能力</h2>
+            <div class="mr-panel-sub" id="media-summary">读取中</div>
+          </div>
+          <button class="btn btn-primary" id="btn-save-media">保存媒体配置</button>
+        </div>
+        <div class="mr-field-grid">
+          <div class="mr-field">
+            <label for="media-policy">媒体处理策略</label>
+            <select id="media-policy">
+              <option value="ai">AI 识别后回复</option>
+              <option value="ack_and_approve">先确认再审批</option>
+              <option value="ack_only">只确认收到</option>
+            </select>
+          </div>
+          <div class="mr-field">
+            <label for="media-emoji-style">表情/贴纸策略</label>
+            <select id="media-emoji-style">
+              <option value="natural">自然回应</option>
+              <option value="conservative">保守回应</option>
+            </select>
+          </div>
+          <label class="mr-check"><input type="checkbox" id="media-include-links">链接也走媒体策略</label>
+          <label class="mr-check"><input type="checkbox" id="media-image-enabled">启用图片理解</label>
+          <div class="mr-field">
+            <label for="media-image-timeout">图片理解超时秒数</label>
+            <input id="media-image-timeout" type="number" min="1" max="60">
+          </div>
+          <label class="mr-check"><input type="checkbox" id="voice-input-enabled">启用语音转写</label>
+          <label class="mr-check"><input type="checkbox" id="voice-prefer-transcribe">语音优先转写再回复</label>
+          <div class="mr-field">
+            <label for="voice-timeout">语音转写超时秒数</label>
+            <input id="voice-timeout" type="number" min="5" max="120">
+          </div>
+          <div class="mr-field">
+            <label for="voice-output-enabled">语音输出</label>
+            <select id="voice-output-enabled">
+              <option value="false">暂不开启</option>
+              <option value="true">实验开启</option>
+            </select>
+          </div>
+        </div>
+      </div>
     </div>
     <div class="mr-panel">
       <div class="mr-panel-head">
@@ -481,6 +539,8 @@
     templates: null,
     runs: [],
     accounts: {},
+    bindings: null,
+    media: null,
     funnel: null,
     leads: [],
     personas: null,
@@ -537,6 +597,8 @@
   function setTab(tab){
     qsa('.mr-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
     qsa('.mr-view').forEach(v => v.classList.toggle('active', v.id === 'view-' + tab));
+    if (tab === 'accounts') refreshBindings().catch(e => toast(e.message, 'err'));
+    if (tab === 'settings') refreshMedia().catch(e => toast(e.message, 'err'));
   }
 
   qsa('.mr-tab').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
@@ -682,6 +744,65 @@
     await Promise.all([refreshConfig(), refreshLeads()]);
   }
 
+  async function refreshMedia(){
+    let r;
+    try {
+      r = await apiGet('/api/messenger-rpa/media');
+    } catch(e) {
+      qs('#media-summary').textContent = '媒体接口不可用';
+      return;
+    }
+    state.media = r;
+    const cfg = r.config || {};
+    const deep = cfg.media_deep_understand || {};
+    const vi = cfg.voice_input || {};
+    const vo = cfg.voice_output || {};
+    const emoji = cfg.emoji_policy || {};
+    const policy = cfg.media_handling_policy || 'ai';
+    qs('#media-policy').value = ['ai','ack_and_approve','ack_only'].includes(policy) ? policy : 'ai';
+    qs('#media-emoji-style').value = emoji.style === 'conservative' ? 'conservative' : 'natural';
+    qs('#media-include-links').checked = !!cfg.media_include_links;
+    qs('#media-image-enabled').checked = deep.enabled !== false;
+    qs('#media-image-timeout').value = deep.timeout_sec || 15;
+    qs('#voice-input-enabled').checked = !!vi.enabled;
+    qs('#voice-prefer-transcribe').checked = vi.prefer_transcribe !== false;
+    qs('#voice-timeout').value = vi.timeout_sec || 30;
+    qs('#voice-output-enabled').value = vo.enabled ? 'true' : 'false';
+    const caps = r.capabilities || {};
+    const ap = r.audio_pipeline || {};
+    qs('#media-summary').textContent = [
+      `图片${caps.image_understanding ? '识别' : '确认'}`,
+      `语音转写${caps.voice_transcription ? '开' : '关'}`,
+      `语音发送${caps.send_voice ? '实验' : '关'}`,
+      ap.backend ? `ASR ${ap.backend}` : '',
+    ].filter(Boolean).join(' · ');
+  }
+
+  async function saveMedia(){
+    const body = {
+      media_handling_policy: qs('#media-policy').value,
+      media_include_links: qs('#media-include-links').checked,
+      media_deep_understand: {
+        enabled: qs('#media-image-enabled').checked,
+        timeout_sec: num(qs('#media-image-timeout').value, 15),
+      },
+      voice_input: {
+        enabled: qs('#voice-input-enabled').checked,
+        prefer_transcribe: qs('#voice-prefer-transcribe').checked,
+        timeout_sec: num(qs('#voice-timeout').value, 30),
+      },
+      voice_output: {
+        enabled: qs('#voice-output-enabled').value === 'true',
+      },
+      emoji_policy: {
+        style: qs('#media-emoji-style').value,
+      },
+    };
+    await apiPut('/api/messenger-rpa/media', body);
+    toast('媒体配置已保存，并已刷新运行时');
+    await Promise.all([refreshMedia(), refreshConfig()]);
+  }
+
   async function refreshPersonas(){
     let p;
     try {
@@ -694,6 +815,7 @@
     const rp = p.reply_profiles || {};
     qs('#personas-json').value = JSON.stringify(rp, null, 2);
     renderPersonas(rp);
+    if (state.bindings) renderBindings(state.bindings);
   }
 
   function renderPersonas(rp){
@@ -983,6 +1105,147 @@
     await refreshAccounts();
   }
 
+  function profileOptions(selected){
+    const rp = ((state.personas || {}).reply_profiles || {});
+    const profiles = Array.isArray(rp.profiles) ? rp.profiles : [];
+    const ids = profiles.map(p => String(p.id || p.name || '').trim()).filter(Boolean);
+    const opts = [`<option value="">默认人设</option>`];
+    profiles.forEach(p => {
+      const id = String(p.id || p.name || '').trim();
+      if (!id) return;
+      const label = [id, p.language ? `(${p.language})` : ''].filter(Boolean).join(' ');
+      opts.push(`<option value="${esc(id)}" ${id === selected ? 'selected' : ''}>${esc(label)}</option>`);
+    });
+    if (selected && !ids.includes(selected)) {
+      opts.push(`<option value="${esc(selected)}" selected>${esc(selected)} (缺失)</option>`);
+    }
+    return opts.join('');
+  }
+
+  async function refreshBindings(){
+    let r;
+    try {
+      r = await apiGet('/api/messenger-rpa/bindings');
+    } catch(e) {
+      qs('#bindings-summary').textContent = '绑定接口不可用';
+      qs('#bindings-list').innerHTML = `<div class="mr-empty">绑定读取失败: ${esc(e.message)}</div>`;
+      return;
+    }
+    state.bindings = r;
+    renderBindings(r);
+  }
+
+  function renderBindings(data){
+    const root = qs('#bindings-list');
+    const rows = (data || {}).bindings || [];
+    const devices = (data || {}).devices || [];
+    const summary = (data || {}).binding_summary || {};
+    const conflicts = (data || {}).conflicts || [];
+    const total = summary.total_accounts || rows.length;
+    const mapped = summary.mapped_devices || 0;
+    qs('#bindings-summary').textContent = `${mapped}/${total} 已映射 · ${conflicts.length} 个编号冲突`;
+    if (!rows.length) {
+      root.innerHTML = '<div class="mr-empty">暂无账号绑定，请先在 messenger_rpa.accounts 添加账号</div>';
+      return;
+    }
+    const serialOptions = devices.map(d => {
+      const serial = d.current_serial || d.serial || d.adb_serial || '';
+      if (!serial) return '';
+      const label = [d.number ? `${d.number}号` : '', d.alias || d.display_name || d.model || ''].filter(Boolean).join(' ');
+      return `<option value="${esc(serial)}" label="${esc(label)}"></option>`;
+    }).join('');
+    const conflictText = conflicts.slice(0,4).map(c => (
+      (c.serials || []).length
+        ? `${c.number || '--'}号: ${(c.serials || []).join(', ')}`
+        : `${c.serial || '--'} ${c.field || ''}: ${(c.existing || []).join(', ')} -> ${c.incoming || ''}`
+    )).join('；');
+    const conflictHtml = conflicts.length ? `<div class="mr-binding-card">
+      <div class="mr-name">mobile-auto 编号冲突</div>
+      <div class="mr-note">${esc(conflictText)}</div>
+    </div>` : '';
+    root.innerHTML = `<datalist id="binding-serials">${serialOptions}</datalist>${conflictHtml}` + rows.map(b => {
+      const aid = b.account_id || b.id || '';
+      const pid = b.reply_profile_id || b.persona_id || '';
+      const mappedOk = !!(b.device_number || b.mobile_device_id);
+      let badgeCls = mappedOk ? 'sent' : 'warn';
+      let badgeText = mappedOk ? '已映射' : '待映射';
+      if (pid && b.persona_exists === false) {
+        badgeCls = 'warn';
+        badgeText = '人设缺失';
+      }
+      if (!b.adb_serial) {
+        badgeCls = 'rejected';
+        badgeText = '缺少串号';
+      }
+      const meta = [
+        b.adb_serial ? `ADB ${b.adb_serial}` : '未配置 ADB',
+        b.mobile_device_id ? `设备 ${b.mobile_device_id}` : '',
+        b.line_id ? `LINE ${b.line_id}` : '',
+      ].filter(Boolean).join(' · ');
+      return `<div class="mr-binding-card" data-account-id="${esc(aid)}">
+        <div class="mr-binding-top">
+          <div style="min-width:0">
+            <div class="mr-name">${esc(b.label || aid || '--')}</div>
+            <div class="mr-muted">${esc(aid || '--')} · ${esc(meta || '等待补齐绑定信息')}</div>
+          </div>
+          <span class="mr-badge ${badgeCls}">${esc(badgeText)}</span>
+        </div>
+        <div class="mr-binding-grid">
+          <div class="mr-field">
+            <label>ADB 串号</label>
+            <input data-bind-field="adb_serial" list="binding-serials" value="${esc(b.adb_serial || '')}">
+          </div>
+          <div class="mr-field">
+            <label>手机编号</label>
+            <input data-bind-field="device_number" value="${esc(b.device_number || '')}" placeholder="05">
+          </div>
+          <div class="mr-field">
+            <label>手机名称</label>
+            <input data-bind-field="device_alias" value="${esc(b.device_alias || b.mobile_device_alias || '')}" placeholder="05号">
+          </div>
+          <div class="mr-field">
+            <label>登录帐号</label>
+            <input data-bind-field="login_account" value="${esc(b.login_account || b.messenger_login || '')}" placeholder="Messenger 登录邮箱/手机号">
+          </div>
+          <div class="mr-field">
+            <label>绑定人设</label>
+            <select data-bind-field="reply_profile_id">${profileOptions(String(pid || '').trim())}</select>
+          </div>
+          <div class="mr-field">
+            <label>人工客服 LINE</label>
+            <input data-bind-field="line_id" value="${esc(b.line_id || '')}" placeholder="@line_id">
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  async function saveBindings(){
+    const root = qs('#bindings-list');
+    const accounts = qsa('.mr-binding-card[data-account-id]', root).map(card => {
+      const val = field => {
+        const el = qs(`[data-bind-field="${field}"]`, card);
+        return el ? String(el.value || '').trim() : '';
+      };
+      return {
+        account_id: card.dataset.accountId,
+        adb_serial: val('adb_serial'),
+        device_number: val('device_number'),
+        device_alias: val('device_alias'),
+        login_account: val('login_account'),
+        reply_profile_id: val('reply_profile_id'),
+        line_id: val('line_id'),
+      };
+    });
+    if (!accounts.length) {
+      toast('没有可保存的账号绑定', 'err');
+      return;
+    }
+    await apiPut('/api/messenger-rpa/bindings', {accounts});
+    toast(`已保存 ${accounts.length} 个账号绑定`);
+    await Promise.all([refreshBindings(), refreshAccounts(), refreshConfig()]);
+  }
+
   async function refreshCoordinator(){
     const root = qs('#coord-list');
     try {
@@ -1196,10 +1459,12 @@
       refreshCoordinator(),
       refreshFunnel(),
       refreshLeads(),
+      refreshBindings(),
+      refreshMedia(),
     ]);
   }
 
-  qs('#btn-refresh').addEventListener('click', () => refreshAllLight().then(() => toast('已刷新')));
+  qs('#btn-refresh').addEventListener('click', () => Promise.allSettled([refreshAllLight(), refreshBindings(), refreshMedia()]).then(() => toast('已刷新')));
   qs('#btn-refresh-leads').addEventListener('click', () => refreshLeads().then(() => toast('线索已刷新')));
   qs('#btn-refresh-runs').addEventListener('click', () => refreshRuns().then(() => toast('运行记录已刷新')));
   qs('#btn-trigger').addEventListener('click', ev => triggerRun(ev.currentTarget));
@@ -1214,6 +1479,8 @@
   });
   qs('#btn-save-config').addEventListener('click', () => saveConfig().catch(e => toast(e.message, 'err')));
   qs('#btn-save-personas').addEventListener('click', () => savePersonas().catch(e => toast(e.message, 'err')));
+  qs('#btn-save-bindings').addEventListener('click', () => saveBindings().catch(e => toast(e.message, 'err')));
+  qs('#btn-save-media').addEventListener('click', () => saveMedia().catch(e => toast(e.message, 'err')));
   qs('#lead-filter').addEventListener('change', renderLeads);
   qs('#bulk-all').addEventListener('change', ev => {
     qsa('.pick-approval').forEach(cb => { cb.checked = ev.currentTarget.checked; });
