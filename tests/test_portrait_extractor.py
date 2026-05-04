@@ -21,12 +21,28 @@ class FakeJourney:
 # ── should_refresh ────────────────────────────────────────────
 
 
-def test_should_refresh_no_snapshot_returns_true():
+def test_should_refresh_no_snapshot_with_enough_inbound_returns_true():
+    """W3-D1.2 改：无 snapshot 时也要 inbound >= min_for_initial（默认 2）"""
     store = MagicMock()
+    store.list_events.return_value = [
+        {"event_type": "msg_in", "ts": int(time.time())} for _ in range(3)
+    ]
     ai = MagicMock()
-    ext = PortraitExtractor(store, ai)
+    ext = PortraitExtractor(store, ai, min_for_initial=2)
     j = FakeJourney(snapshot="")
     assert ext.should_refresh(j) is True
+
+
+def test_should_refresh_no_snapshot_with_too_few_inbound_returns_false():
+    """W3-D1.2 新：无 snapshot + inbound < min_for_initial → 不抽（避免白调 LLM）"""
+    store = MagicMock()
+    store.list_events.return_value = [
+        {"event_type": "msg_in", "ts": int(time.time())},  # 仅 1 条
+    ]
+    ai = MagicMock()
+    ext = PortraitExtractor(store, ai, min_for_initial=2)
+    j = FakeJourney(snapshot="")
+    assert ext.should_refresh(j) is False
 
 
 def test_should_refresh_old_snapshot_returns_true():

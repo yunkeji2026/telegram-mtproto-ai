@@ -140,6 +140,17 @@ class ContactGateway:
         self._compliance = compliance
         self._readiness = readiness_scorer
         self._line_id_provider = line_id_provider
+        # ★ W3-D1.1：可选注入 intimacy_engine（msg_in 时自动 refresh）
+        # None → 兼容旧测试 / 未启用 intimacy 的部署
+        self._intimacy_engine: Optional[Any] = None
+
+    def set_intimacy_engine(self, engine: Optional[Any]) -> None:
+        """W3-D1.1：bootstrap 时把 IntimacyEngine 注入。
+
+        ContactsSubsystem 初始化时调用：每条 msg_in 自动 refresh intimacy_score。
+        engine=None 时静默跳过（旧行为）。
+        """
+        self._intimacy_engine = engine
 
     # ── 高层便利查询（给 rpa_hooks / web 用，避免下钻 _store） ────
     def find_channel_identity(
@@ -212,6 +223,18 @@ class ContactGateway:
         if direction == "in" and ctx.journey.funnel_stage == STAGE_INITIAL:
             self._transit(ctx.journey.journey_id, STAGE_ENGAGED, trace_id=trace_id,
                           payload={"reason": "first_message_in"})
+        # ★ W3-D1.1：每条 msg_in 触发 intimacy 重算（如果 engine 已注入）
+        # 写入 journeys.intimacy_score → 让 reactivation_scheduler 等下游能用
+        if direction == "in" and self._intimacy_engine is not None:
+            try:
+                self._intimacy_engine.refresh_journey_intimacy(
+                    ctx.journey.journey_id,
+                )
+            except Exception:
+                logger.debug(
+                    "refresh_journey_intimacy failed for journey=%s",
+                    ctx.journey.journey_id, exc_info=True,
+                )
         return ctx
 
     # ── 引流：签发 token ───────────────────────────────────

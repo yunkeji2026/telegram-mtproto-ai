@@ -720,6 +720,47 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         return await _aio.to_thread(_gather)
 
     # ── Bot 实时性能指标（供 dashboard 展示）─────────────────
+    @app.get("/api/vision-stats")
+    async def api_vision_stats(request: Request):
+        """Vision 调用统计——按 (task_name, model) 分桶，含 p50/p95/p99/avg
+        + 失败原因 breakdown。
+
+        Query params:
+          since_hours: int = 24
+          task: str = "" 仅按该 task 过滤
+        """
+        _api_auth(request)
+        try:
+            from src.integrations.messenger_rpa import vision_metrics as _vm
+            since_hours = float(request.query_params.get("since_hours") or 24)
+            task = (request.query_params.get("task") or "").strip() or None
+            since_sec = max(60.0, min(since_hours * 3600.0, 30 * 24 * 3600.0))
+            rows = _vm.summary(since_sec=since_sec, task_name=task)
+            errors = _vm.error_breakdown(since_sec=since_sec, task_name=task)
+            return {
+                "since_hours": since_hours,
+                "task": task,
+                "tasks": [
+                    {
+                        "task_name": r.task_name,
+                        "model": r.model,
+                        "count": r.count,
+                        "ok_count": r.ok_count,
+                        "fail_count": r.fail_count,
+                        "ok_rate": round(r.ok_rate, 4),
+                        "p50_ms": r.p50_ms,
+                        "p95_ms": r.p95_ms,
+                        "p99_ms": r.p99_ms,
+                        "avg_ms": r.avg_ms,
+                        "max_ms": r.max_ms,
+                    }
+                    for r in rows
+                ],
+                "errors": errors,
+            }
+        except Exception as e:
+            return {"error": f"vision_stats_unavailable:{type(e).__name__}"}
+
     @app.get("/api/bot-metrics")
     async def api_bot_metrics(request: Request):
         _api_auth(request)
@@ -742,6 +783,11 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
                 "circuit_breaker":   snap.get("circuit_breaker", {}),
                 "reply_quality":     snap.get("reply_quality", {}),
                 "memory":            snap.get("memory", {}),
+                "companion_safe_skip": snap.get("companion_safe_skip", {}),
+                "deferred_queue":    snap.get("deferred_queue", {}),
+                "reactivation":      snap.get("reactivation", {}),
+                "pacing":            snap.get("pacing", {}),
+                "peer_typing_prefetch": snap.get("peer_typing_prefetch", {}),
                 "startup_advisories": snap.get("startup_advisories", {}),
                 "ai_healthy":        ms.ai_healthy(),
                 "ai_errors":         ms._ai_consecutive_errors,
@@ -750,6 +796,80 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
             }
         except Exception:
             return {"error": "metrics unavailable"}
+
+    # ★ W2-D5.1：reactivation dry_run 样本审核端点
+    @app.get("/api/reactivation/dry-run-samples")
+    async def api_reactivation_dry_samples(
+        request: Request, limit: int = 50, before_ts: float = 0,
+    ):
+        """返回 reactivation_loop dry_run 模式下最近生成的话术样本。
+
+        ★ W3-D3.5：``before_ts`` 用于增量加载（>0 时只返早于此 ts 的）。
+
+        运营审核流程：
+          1. config 设 reactivation.enabled=true + dry_run=true
+          2. 等几小时让 loop 跑出几条样本
+          3. 调这个 API 看 LLM 生成的话术是否得体
+          4. 验收通过后改 dry_run=false 真发
+        """
+        _api_auth(request)
+        try:
+            from src.monitoring.metrics_store import get_metrics_store
+            samples = get_metrics_store().reactivation_dry_samples(
+                limit=limit,
+                before_ts=before_ts if before_ts > 0 else None,
+            )
+            return {"count": len(samples), "samples": samples}
+        except Exception as ex:
+            return {"error": f"{type(ex).__name__}:{ex}"}
+
+    # ★ W2-D6.2：dry_run sample feedback（运营点 like/dislike）
+    @app.post("/api/reactivation/dry-run-feedback")
+    async def api_reactivation_dry_feedback(request: Request):
+        """提交对 dry_run 样本的人工反馈。
+
+        body: {"sample_ts": float, "verdict": "like"|"dislike", "reason": "..."(opt)}
+        - 写入 audit_store（永久审计）
+        - 写入 metrics_store（dashboard 可见）
+        后续 W3+ 用这些数据做 LLM prompt 调优 / 黑词学习
+        """
+        _api_auth(request)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        verdict = str(body.get("verdict", "")).strip().lower()
+        if verdict not in ("like", "dislike"):
+            return {"error": "verdict must be 'like' or 'dislike'"}
+        sample_ts = float(body.get("sample_ts") or 0)
+        reason = str(body.get("reason", "") or "")[:300]
+        try:
+            from src.monitoring.metrics_store import get_metrics_store
+            ms = get_metrics_store()
+            ms.record_reactivation_feedback(verdict, sample_ts)
+            # ★ W2-D7.5：dislike → 把 reply_text 加入 in-memory 黑名单
+            # 后续 reactivation_loop 生成时查相似度，命中重生成
+            if verdict == "dislike" and sample_ts > 0:
+                samples = ms.reactivation_dry_samples(limit=200)
+                for s in samples:
+                    if abs(float(s.get("ts") or 0) - sample_ts) < 1.0:
+                        ms.add_disliked_reply(s.get("reply_text", ""))
+                        break
+        except Exception:
+            pass
+        if audit_store:
+            try:
+                audit_store.add_entry(
+                    user="admin",
+                    action="reactivation_dry_feedback",
+                    detail=(
+                        f"verdict={verdict} sample_ts={sample_ts} "
+                        f"reason={reason[:120]}"
+                    ),
+                )
+            except Exception:
+                pass
+        return {"ok": True, "verdict": verdict, "sample_ts": sample_ts}
 
     # ── 操作记录活动热力图 ────────────────────────────────────
 
@@ -956,6 +1076,11 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
             cfg = config_manager.config or {}
             ctx.update({
                 "ai": cfg.get("ai", {}),
+                "voice_ai": (
+                    ((cfg.get("messenger_rpa") or {}).get("voice_output") or {})
+                    if isinstance(cfg.get("messenger_rpa"), dict)
+                    else {}
+                ),
                 "wb": cfg.get("web_admin", {}),
                 "tg": cfg.get("telegram", {}),
                 "notif": cfg.get("notifications", cfg.get("webhook", {})),
@@ -990,7 +1115,7 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         if not section or not fields:
             raise HTTPException(400, "section 和 fields 不能为空")
 
-        allowed_sections = {"ai", "web_admin", "telegram", "notifications", "human_escalation"}
+        allowed_sections = {"ai", "voice_ai", "web_admin", "telegram", "notifications", "human_escalation"}
         if section not in allowed_sections:
             raise HTTPException(400, f"不允许修改 section: {section}")
 
@@ -998,6 +1123,85 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         if cfg is None:
             cfg = {}
             config_manager.config = cfg
+        updated = []
+        if section == "voice_ai":
+            mr = cfg.get("messenger_rpa")
+            if not isinstance(mr, dict):
+                mr = {}
+                cfg["messenger_rpa"] = mr
+            vo = mr.get("voice_output")
+            if not isinstance(vo, dict):
+                vo = {}
+                mr["voice_output"] = vo
+            vp = vo.get("voice_profile")
+            if not isinstance(vp, dict):
+                vp = {}
+                vo["voice_profile"] = vp
+            if "dashscope_api_key" in fields:
+                key = str(fields.get("dashscope_api_key") or "").strip()
+                if key:
+                    vo["dashscope_api_key"] = key
+                    updated.append("dashscope_api_key")
+            simple_map = {
+                "enabled": ("enabled", bool),
+                "mode": ("mode", str),
+                "trigger": ("trigger", str),
+                "backend": ("backend", str),
+                "voice": ("voice", str),
+                "model": ("model", str),
+                "format": ("format", str),
+                "region": ("dashscope_region", str),
+                "voice_profile_path": ("voice_profile_path", str),
+                "send_audit_dir": ("send_audit_dir", str),
+            }
+            for src, (dst, caster) in simple_map.items():
+                if src not in fields:
+                    continue
+                val = fields.get(src)
+                if caster is bool:
+                    val = bool(val)
+                else:
+                    val = str(val or "").strip()
+                    if val == "" and dst not in ("voice_profile_path",):
+                        continue
+                vo[dst] = val
+                updated.append(dst)
+            for src, dst in (
+                ("speaker_id", "speaker_id"),
+                ("reference_audio_path", "reference_audio_path"),
+            ):
+                if src in fields and str(fields.get(src) or "").strip():
+                    vp[dst] = str(fields.get(src) or "").strip()
+                    updated.append(f"voice_profile.{dst}")
+            vp["enabled"] = bool(fields.get("profile_enabled", vp.get("enabled", True)))
+            vp["owner_consent"] = bool(fields.get("owner_consent", vp.get("owner_consent", True)))
+            vp["backend"] = "voice_clone_command"
+            region = str(vo.get("dashscope_region") or fields.get("region") or "cn").strip() or "cn"
+            profile_path = str(
+                vo.get("voice_profile_path")
+                or fields.get("voice_profile_path")
+                or "D:/workspace/telegram-mtproto-ai/voice_samples/qwen_my_voice.json"
+            ).strip()
+            vo["backend"] = "voice_clone_command"
+            vo["voice"] = str(fields.get("voice") or vo.get("voice") or "my_voice").strip()
+            vo["model"] = str(fields.get("model") or vo.get("model") or "qwen3-tts-vc-2026-01-22").strip()
+            vo["format"] = str(fields.get("format") or vo.get("format") or "wav").strip()
+            vp["command_args"] = [
+                "python",
+                "D:/workspace/telegram-mtproto-ai/tools/qwen_tts_wrapper.py",
+                "--region", region,
+                "--text", "{text}",
+                "--out", "{out}",
+                "--voice-profile", profile_path,
+                "--language-type", "Japanese",
+            ]
+            config_manager.save()
+            try:
+                from src.ai.tts_pipeline import reset_tts_pipeline
+                reset_tts_pipeline()
+            except Exception:
+                logger.debug("reset_tts_pipeline failed", exc_info=True)
+            return {"ok": True, "updated": sorted(set(updated))}
         if section not in cfg:
             cfg[section] = {}
 

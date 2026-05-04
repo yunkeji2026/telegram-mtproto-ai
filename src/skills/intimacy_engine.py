@@ -134,10 +134,16 @@ class IntimacyEngine:
     def refresh_journey_intimacy(
         self, journey_id: str, *, now: Optional[int] = None,
     ) -> IntimacyBreakdown:
+        """重算并写回 intimacy_score。
+
+        ★ W3-D2.5：用 _touch=False 写库 — intimacy 重算不该把 journey 视为"又活跃"，
+        否则 silent_days 永远清零，reactivation_scheduler 永远找不到候选。
+        """
         now = now if now is not None else int(time.time())
         bd = self.compute_intimacy(journey_id, now=now)
         self._store.update_journey(
             journey_id,
+            _touch=False,
             intimacy_score=bd.score,
             intimacy_updated_at=now,
         )

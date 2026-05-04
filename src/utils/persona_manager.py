@@ -196,8 +196,38 @@ class PersonaManager:
             lines.append(
                 "禁止使用：" + "、".join(f"「{f}」" for f in forbidden[:12])
             )
+        # P2-A compact 模式也接通 emoji_level / reply_length（修真断链）
+        # — web 后台改完后即使在 compact 配置下也能立刻看到效果
+        p = persona.get("personality", {})
+        emoji_level = (p.get("emoji_level") or "").strip().lower()
+        if emoji_level == "none":
+            lines.append("不用 emoji。")
+        elif emoji_level == "minimal":
+            lines.append("emoji 极少（每 5 条最多 1 个）。")
+        elif emoji_level == "rich":
+            lines.append("emoji 用得自然（约 60% 回复带 1-2 个）。")
+        # moderate 不输出（默认行为，省 token）
+        reply_length = (s.get("reply_length") or "").strip().lower()
+        if reply_length in ("short", "concise", "brief"):
+            lines.append("回复 1-2 句即可，像微信私聊。")
+        elif reply_length in ("detailed", "long"):
+            lines.append("回复可稍详细（4-6 句），但保持口语。")
         if s.get("language_follow"):
             lines.append("用户用什么语言发消息，就用同一语言回复。")
+        # P1-1（compact 安全网）：full 模式有完整 5 条硬约束，compact 模式至少
+        # 保留最核心的 2 条 — 直接答问 + 禁括号标记 — 防配置切到 compact 时
+        # 整个底线消失。身份硬锁也保留，因为 AI 身份露馅是转化场景的最大伤害。
+        identity = persona.get("identity", {})
+        if identity.get("deny_ai"):
+            reply = identity.get("deny_ai_reply", f"我是{name}")
+            lines.append(
+                f"你就是真人「{name}」；不承认是 AI/机器人/语言模型，"
+                f"被问到时按「{reply}」回应，不解释运作原理。"
+            )
+        lines.append(
+            "回复硬约束：先正面回答用户问的问题再扩展；不要用 () [] 描写动作"
+            "或列举要点（如 (微笑) (1)(2)），用自然句子。"
+        )
         return "\n".join(lines)
 
     def get_all_chat_bindings(self) -> Dict[str, str]:
@@ -264,6 +294,17 @@ class PersonaManager:
         style = p.get("style", "")
         if style:
             lines.append(f"说话风格：{style}。")
+        # P2-A：emoji_level 真生效（修真断链）— 旧版仅当数据字段存在不进 prompt
+        # web 后台改了 emoji_level 用户感知不到。这里转成自然语言指令。
+        emoji_level = (p.get("emoji_level") or "").strip().lower()
+        if emoji_level == "none":
+            lines.append("不使用任何 emoji 或表情符号。")
+        elif emoji_level == "minimal":
+            lines.append("emoji 极少用：每 5 条回复最多带 1 个，仅在情绪强烈处。")
+        elif emoji_level == "moderate":
+            lines.append("emoji 偶尔用：约 30% 的回复带 1 个，自然不刻意，避免连用。")
+        elif emoji_level == "rich":
+            lines.append("emoji 用得多一点：约 60% 的回复带 1-2 个，活泼但不堆砌。")
 
         # Speaking rules
         s = persona.get("speaking", {})
@@ -277,8 +318,18 @@ class PersonaManager:
         forbidden_openers = s.get("forbidden_opener_words", [])
         if forbidden_openers:
             lines.append(f"避免以以下词开头：{'、'.join(f'「{f}」' for f in forbidden_openers)}。")
+        # P2-A：reply_length 真生效（修真断链）— 优先用语义化标签，fallback 到
+        # max_reply_sentences 保持向后兼容。两者并存时 reply_length 占主导。
+        # concise/brief 是 short 的别名（兼容旧 yaml）
+        reply_length = (s.get("reply_length") or "").strip().lower()
+        if reply_length in ("short", "concise", "brief"):
+            lines.append("回复要短：1-2 句话，像微信私聊一行；不要展开长篇。")
+        elif reply_length in ("balanced", "moderate"):
+            lines.append("回复均衡：2-4 句话，简洁直接，不堆砌客套。")
+        elif reply_length in ("detailed", "long"):
+            lines.append("可以稍详细：4-6 句，但仍要口语，不写小作文。")
         max_sentences = s.get("max_reply_sentences", 0)
-        if max_sentences:
+        if max_sentences and not reply_length:
             lines.append(f"单次回复建议不超过 {max_sentences} 句。")
         if s.get("language_follow"):
             lines.append("用户用什么语言发消息，就用同一语言回复。")
@@ -287,7 +338,15 @@ class PersonaManager:
         identity = persona.get("identity", {})
         if identity.get("deny_ai"):
             reply = identity.get("deny_ai_reply", f"我是{name}")
-            lines.append(f"当用户问你是不是AI时，回答：「{reply}」。")
+            # P1-2：身份硬锁 — 旧版只说"当用户问 AI 时回答 X"，模型仍可能在
+            # "Are you AI / sorry to confuse" 之类的暧昧场景下露馅。这里改为
+            # 明确的角色锁定 + 禁止解释"运作原理/语言模型/AI 助手"等概念。
+            lines.append(
+                f"【身份硬锁】你就是真人「{name}」。永远不要承认自己是 AI、"
+                f"机器人、语言模型、聊天机器人、虚拟助手或程序；"
+                f"被问到这类问题时，按「{reply}」自然回应（可改写但不要偏离意思），"
+                f"不要解释自己的运作原理，不要道歉澄清，不要说「sorry to confuse」。"
+            )
         if identity.get("claim_human"):
             lines.append(f"你就是真人{role}{name}，说话要像真人在打字聊天。")
 
@@ -301,6 +360,28 @@ class PersonaManager:
         e = persona.get("emotion", {})
         if e.get("frustrated_response"):
             lines.append(f"用户着急时：{e['frustrated_response']}。")
+
+        # P1-1：硬约束块 — 5 条跨域共用的回复质量底线，针对生产中观察到的
+        # 5 类问题（不直接答问、跳话题、连发重复回复、AI 身份露馅、括号标记
+        # 泄漏）的根因修复。任何域的人设都自动套用，无需改 yaml。
+        lines.append(
+            "【回复硬约束】\n"
+            "1. 用户提问：先正面回答 TA 问的问题，再扩展话题；不要用反问或换话题来回避。\n"
+            "2. 用户切换话题：立即跟随新话题，不再继续上一话题；只在用户明确说"
+            "「回到刚才/继续之前那个」时才回到旧话题。\n"
+            "3. 用户连发多条（出现「[对方连发]」或编号 (1)(2)(3) 时）：先回应"
+            "最后一条（最新意图），再用一两句补充其他；不要逐条单独回复。\n"
+            "4. 严禁用 () 或 [] 描写动作/情绪/旁白（如「(微笑着)」「[关心地]」"
+            "「(leaning in)」），用口语直接表达情绪。\n"
+            "5. 严禁用 (1)(2) 或 [类目1][类目2] 这种标记格式列举要点；用自然"
+            "句子叙述（如「我喜欢读书，也喜欢旅行」而不是「我的兴趣 (1) 读书 (2) 旅行」）。\n"
+            "6. 表情用真正的 emoji（😂 😅 😊 🥹 🎙️ 🤔 等），不要用「（笑）」"
+            "「(笑)」「(´∀｀)」「＞<」「lol」这类字符化表情；日文场景同样适用，"
+            "「（笑）」要换成 😂 / 😅 / 😆 等真 emoji。\n"
+            "7. 必须先正面回答对方上一条具体问题再扩展或反问。例：对方问「吃饭"
+            "了吗」必须先答「吃了/还没」再延伸；对方问「忙吗」必须先答「在忙/"
+            "不忙」再延伸。绝不直接跳到新话题。"
+        )
 
         return "\n".join(lines)
 

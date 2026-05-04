@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS contacts (
     notes             TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_contacts_last_active ON contacts(last_active_at DESC);
+CREATE INDEX IF NOT EXISTS idx_contacts_name ON contacts(primary_name);
 
 CREATE TABLE IF NOT EXISTS channel_identities (
     channel_identity_id     TEXT PRIMARY KEY,
@@ -63,6 +64,7 @@ CREATE TABLE IF NOT EXISTS channel_identities (
 );
 CREATE INDEX IF NOT EXISTS idx_ci_contact ON channel_identities(contact_id);
 CREATE INDEX IF NOT EXISTS idx_ci_channel ON channel_identities(channel);
+CREATE INDEX IF NOT EXISTS idx_ci_external_id ON channel_identities(external_id);
 
 CREATE TABLE IF NOT EXISTS handoff_tokens (
     token                TEXT PRIMARY KEY,
@@ -235,6 +237,36 @@ class ContactStore:
                 (limit, offset),
             ).fetchall()
         return [_row_to_contact(r) for r in rows]
+
+    def search_contacts(
+        self, q: str, limit: int = 50, offset: int = 0
+    ):
+        """按 contact_id / primary_name / channel_identity.external_id 模糊搜索。
+
+        返回 (contacts_list, total_matched_count)。
+        q 为空时退化为 list_contacts。
+        """
+        if not q:
+            rows = self.list_contacts(limit=limit, offset=offset)
+            total = self.count_contacts()
+            return rows, total
+        like = f"%{q}%"
+        sql_rows = (
+            "SELECT DISTINCT c.* FROM contacts c"
+            " LEFT JOIN channel_identities ci ON c.contact_id = ci.contact_id"
+            " WHERE c.contact_id = :exact OR c.primary_name LIKE :like OR ci.external_id LIKE :like"
+            " ORDER BY c.last_active_at DESC LIMIT :lim OFFSET :off"
+        )
+        sql_count = (
+            "SELECT COUNT(DISTINCT c.contact_id) FROM contacts c"
+            " LEFT JOIN channel_identities ci ON c.contact_id = ci.contact_id"
+            " WHERE c.contact_id = :exact OR c.primary_name LIKE :like OR ci.external_id LIKE :like"
+        )
+        params = {"exact": q, "like": like, "lim": limit, "off": offset}
+        with self._lock:
+            rows = self._conn.execute(sql_rows, params).fetchall()
+            total = self._conn.execute(sql_count, {"exact": q, "like": like}).fetchone()[0]
+        return [_row_to_contact(r) for r in rows], int(total)
 
     def count_contacts(self) -> int:
         with self._lock:
@@ -547,7 +579,15 @@ class ContactStore:
             ).fetchone()
         return _row_to_journey(row) if row else None
 
-    def update_journey(self, journey_id: str, **fields: Any) -> bool:
+    def update_journey(self, journey_id: str, *, _touch: bool = True, **fields: Any) -> bool:
+        """更新 journey 字段。
+
+        ★ W3-D2.5 加 ``_touch`` 参数：
+        - True（默认）：同时更新 ``updated_at = now()``，表示 journey 又活跃了
+        - False：**只改给定字段，不动 updated_at**
+          关键场景：intimacy refresh / readiness 重算这种"系统计算而非用户交互"
+          不应该把 silent_days 重置为 0（否则 reactivation_scheduler 找不到候选）
+        """
         allowed = {
             "persona_id", "funnel_stage",
             "intimacy_score", "engagement_score", "readiness_score",
@@ -562,8 +602,9 @@ class ContactStore:
             params.append(v)
         if not updates:
             return False
-        updates.append("updated_at=?")
-        params.append(self._now())
+        if _touch:
+            updates.append("updated_at=?")
+            params.append(self._now())
         params.append(journey_id)
         with self._lock:
             cur = self._conn.execute(
@@ -628,6 +669,79 @@ class ContactStore:
                 "ts": r["ts"],
             })
         return out
+
+    def compute_reactivation_response_stats(
+        self, *, window_sec: int = 86400, response_window_sec: int = 86400,
+    ) -> Dict[str, Any]:
+        """W2-D6.1 + D7.2：算"最近 window_sec 内主动唤醒后是否被回复"。
+
+        - 取最近 window_sec 内每个 journey 最新的 reactivation_sent 时间
+        - 若该 journey 在 reactivation_sent 之后 response_window_sec 内有 msg_in → 计为已回复
+        - ★ D7.2：同时按 intimacy_score 分桶（high>=70 / mid 40-70 / low<40）
+        - 返回 {sent, responded, response_rate_pct, by_intimacy: {high/mid/low}, computed_at}
+        """
+        import time as _t
+        now = int(_t.time())
+        cutoff = now - int(max(60, window_sec))
+
+        def _bucket_of(score: float) -> str:
+            if score >= 70:
+                return "high"
+            if score >= 40:
+                return "mid"
+            return "low"
+
+        with self._lock:
+            # 一次 join 拿到 reactivation_sent 时间 + 当前 intimacy_score
+            sent_rows = self._conn.execute(
+                """SELECT je.journey_id AS journey_id,
+                          MAX(je.ts) AS react_ts,
+                          j.intimacy_score AS intimacy_score
+                   FROM journey_events je
+                   LEFT JOIN journeys j ON j.journey_id = je.journey_id
+                   WHERE je.event_type='reactivation_sent' AND je.ts >= ?
+                   GROUP BY je.journey_id""",
+                (cutoff,),
+            ).fetchall()
+            sent = len(sent_rows)
+            responded = 0
+            by_intimacy = {
+                "high": {"sent": 0, "responded": 0},
+                "mid": {"sent": 0, "responded": 0},
+                "low": {"sent": 0, "responded": 0},
+            }
+            for row in sent_rows:
+                jid = row["journey_id"]
+                react_ts = int(row["react_ts"] or 0)
+                if react_ts <= 0:
+                    continue
+                bucket = _bucket_of(float(row["intimacy_score"] or 0))
+                by_intimacy[bucket]["sent"] += 1
+                got = self._conn.execute(
+                    """SELECT 1 FROM journey_events
+                       WHERE journey_id=? AND event_type='msg_in'
+                         AND ts > ? AND ts <= ?
+                       LIMIT 1""",
+                    (jid, react_ts, react_ts + int(response_window_sec)),
+                ).fetchone()
+                if got is not None:
+                    responded += 1
+                    by_intimacy[bucket]["responded"] += 1
+        # 算每桶的 rate
+        for k, v in by_intimacy.items():
+            v["rate_pct"] = round(
+                (v["responded"] / v["sent"] * 100.0) if v["sent"] else 0.0, 1,
+            )
+        rate = (responded / sent * 100.0) if sent > 0 else 0.0
+        return {
+            "sent": sent,
+            "responded": responded,
+            "response_rate_pct": round(rate, 1),
+            "by_intimacy": by_intimacy,
+            "window_hours": round(window_sec / 3600.0, 1),
+            "response_window_hours": round(response_window_sec / 3600.0, 1),
+            "computed_at": now,
+        }
 
     def has_event_of_type(self, journey_id: str, event_type: str) -> bool:
         """O(1) 检查：某 journey 是否已经落过特定类型的事件。

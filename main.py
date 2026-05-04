@@ -13,6 +13,15 @@ import threading
 import os
 from pathlib import Path
 
+# Windows console 默认 cp936；强制 UTF-8 防止日文/emoji 被 stdout 重定向时损坏。
+os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 # 添加项目根目录到Python路径
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -23,6 +32,46 @@ from src.utils.config_manager import ConfigManager
 from src.utils.logger import setup_logger
 from src.utils.net_helpers import is_bind_address_in_use_error
 from src.utils.domain_policy import effective_domain_name
+
+
+def _resolve_mobile_auto_openclaw_db(config, config_path) -> str:
+    """Resolve mobile-auto0423 openclaw.db with workspace-adjacent defaults."""
+    root = config if isinstance(config, dict) else {}
+    bridge_cfg = root.get("mobile_bridge") if isinstance(root.get("mobile_bridge"), dict) else {}
+    explicit = str(bridge_cfg.get("openclaw_db_path") or "").strip()
+    if explicit:
+        p = Path(explicit).expanduser()
+        if not p.is_absolute():
+            p = Path(config_path).parent / p
+        return str(p)
+
+    mr_cfg = root.get("messenger_rpa") if isinstance(root.get("messenger_rpa"), dict) else {}
+    ma_cfg = mr_cfg.get("mobile_auto") if isinstance(mr_cfg.get("mobile_auto"), dict) else {}
+    candidates = []
+    ma_db = str(ma_cfg.get("openclaw_db_path") or "").strip()
+    if ma_db:
+        candidates.append(Path(ma_db).expanduser())
+    ma_root = str(ma_cfg.get("root_path") or mr_cfg.get("mobile_auto_root") or "").strip()
+    if ma_root:
+        candidates.append(Path(ma_root).expanduser() / "data" / "openclaw.db")
+
+    cfg_path = Path(config_path).resolve()
+    repo_root = cfg_path.parent.parent
+    workspace_root = repo_root.parent
+    candidates.extend([
+        workspace_root / "mobile-auto0423" / "data" / "openclaw.db",
+        repo_root / "mobile-auto0423" / "data" / "openclaw.db",
+    ])
+
+    for p in candidates:
+        try:
+            if p.exists():
+                return str(p)
+        except Exception:
+            continue
+    return str(candidates[0]) if candidates else str(
+        workspace_root / "mobile-auto0423" / "data" / "openclaw.db"
+    )
 
 
 class AIChatAssistant:
@@ -40,7 +89,15 @@ class AIChatAssistant:
         self.messenger_rpa_service = None
         # W2-W4：跨平台 Contacts 子系统（feature flag 控制；默认关）
         self.contacts = None  # type: Optional["ContactsSubsystem"]  # noqa: F821
+        # Mobile Bridge：mobile-auto0423 ↔ telegram-mtproto-ai 双向同步
+        self.mobile_bridge = None  # type: Optional[Any]  # noqa: F821
         self._telegram_task = None
+        # D: web admin 隔离到独立线程
+        self._web_thread = None
+        self._web_loop = None
+        self._web_server = None
+        # W2-D4: 主动唤醒循环引用（关程序时 stop）
+        self._reactivation_loop = None
         
     async def initialize(self):
         """初始化所有组件"""
@@ -256,6 +313,36 @@ class AIChatAssistant:
             except Exception as ex:
                 self.logger.warning("Contacts 子系统启动跳过: %s", ex)
 
+            # ── Mobile Bridge（依赖 Contacts 子系统，仅 contacts 启用时构建）──
+            if self.contacts is not None:
+                try:
+                    from src.contacts.mobile_bridge import MobileBridgeService
+                    _bridge_cfg = (self.config.config or {}).get("mobile_bridge", {})
+                    _mr_cfg = (self.config.config or {}).get("messenger_rpa", {})
+                    _ma_cfg = _mr_cfg.get("mobile_auto", {}) if isinstance(_mr_cfg, dict) else {}
+                    _openclaw_path = _resolve_mobile_auto_openclaw_db(
+                        self.config.config or {},
+                        self.config.config_path,
+                    )
+                    _mobile_api = (
+                        _bridge_cfg.get("mobile_api_base")
+                        or (_ma_cfg.get("api_base") if isinstance(_ma_cfg, dict) else "")
+                        or "http://127.0.0.1:18080"
+                    )
+                    _poll_interval = float(_bridge_cfg.get("poll_interval_sec", 15))
+                    self.mobile_bridge = MobileBridgeService(
+                        contacts_store=self.contacts.store,
+                        openclaw_db_path=_openclaw_path,
+                        mobile_api_base=_mobile_api,
+                        poll_interval_sec=_poll_interval,
+                    )
+                    self.logger.info(
+                        "Mobile Bridge 已构建 (openclaw=%s mobile_api=%s poll=%.0fs)",
+                        _openclaw_path, _mobile_api, _poll_interval,
+                    )
+                except Exception as ex:
+                    self.logger.warning("Mobile Bridge 构建跳过: %s", ex)
+
             # Web 管理后台
             web_cfg = self.config.config.get("web_admin", {})
             if web_cfg.get("enabled"):
@@ -334,6 +421,7 @@ class AIChatAssistant:
                                 reactivation_scheduler=self.contacts.reactivation,
                                 gateway=self.contacts.gateway,
                                 account_limiter=self.contacts.limiter,
+                                mobile_bridge=self.mobile_bridge,
                             )
                             # 让 web 能通过 state 直接访问
                             web_app.state.contacts = self.contacts
@@ -357,10 +445,23 @@ class AIChatAssistant:
                     web_host = web_cfg.get("host", "127.0.0.1")
                     uvi_config = uvicorn.Config(web_app, host=web_host, port=web_port, log_level="warning")
                     server = uvicorn.Server(uvi_config)
+                    self._web_server = server
 
-                    async def _serve_web_panel():
+                    # ★ 隔离 web 到独立线程 + 独立 event loop，避免和主 loop 上的
+                    # Telegram/RPA/contacts 后台任务抢占。任何主 loop 上的同步阻塞
+                    # （SQLite 写、BM25 全表扫描）不会再卡 web 请求。
+                    def _run_web_in_thread():
                         try:
-                            await server.serve()
+                            web_loop = asyncio.new_event_loop()
+                            self._web_loop = web_loop
+                            asyncio.set_event_loop(web_loop)
+                            try:
+                                web_loop.run_until_complete(server.serve())
+                            finally:
+                                try:
+                                    web_loop.close()
+                                except Exception:
+                                    pass
                         except OSError as e:
                             if is_bind_address_in_use_error(e):
                                 self.logger.warning(
@@ -373,9 +474,15 @@ class AIChatAssistant:
                         except Exception as ex:
                             self.logger.warning("Web 管理后台启动跳过: %s", ex)
 
-                    asyncio.get_running_loop().create_task(_serve_web_panel())
+                    web_thread = threading.Thread(
+                        target=_run_web_in_thread,
+                        name="web_admin_thread",
+                        daemon=True,
+                    )
+                    web_thread.start()
+                    self._web_thread = web_thread
                     self.logger.info(
-                        "Web 管理后台正在绑定 http://%s:%s（若端口被占用将跳过并仅记录警告）",
+                        "Web 管理后台正在绑定 http://%s:%s（独立线程隔离，避免抢占主 event loop）",
                         web_host,
                         web_port,
                     )
@@ -483,6 +590,18 @@ class AIChatAssistant:
                 asyncio.create_task(self._periodic_self_heal(), name="kb_periodic_self_heal")
                 asyncio.create_task(self._periodic_daily_learn(), name="daily_learner")
 
+                # ★ W2-D4.2/4.3：启动 reactivation 主动唤醒循环
+                # 必须在 contacts + messenger_rpa_service + ai_client 都就绪后启动
+                await self._maybe_start_reactivation_loop()
+
+                # Mobile Bridge 轮询循环
+                if self.mobile_bridge is not None:
+                    try:
+                        await self.mobile_bridge.start()
+                        self.logger.info("✅ Mobile Bridge 已启动")
+                    except Exception as ex:
+                        self.logger.warning("Mobile Bridge 启动跳过: %s", ex)
+
                 # 保持运行直到收到停止信号
                 while self.running:
                     await asyncio.sleep(1)
@@ -494,6 +613,86 @@ class AIChatAssistant:
             finally:
                 await self.stop()
     
+    async def _maybe_start_reactivation_loop(self) -> None:
+        """W2-D4.2/4.3：启动 reactivation 主动唤醒循环（陪护核心）。
+
+        条件：contacts 子系统已启用 + messenger_rpa_service 已起 + 配置 reactivation.enabled
+        """
+        try:
+            cfg_react = (self.config.config.get("reactivation") or {})
+            if not cfg_react.get("enabled", False):
+                self.logger.info("reactivation_loop 未启用（reactivation.enabled=false）")
+                return
+            if self.contacts is None or self.messenger_rpa_service is None:
+                self.logger.info(
+                    "reactivation_loop 跳过（contacts=%s messenger_rpa=%s）",
+                    self.contacts is not None, self.messenger_rpa_service is not None,
+                )
+                return
+            from src.contacts.reactivation_loop import ReactivationLoop
+
+            # send_callback：把 reply 入 messenger 的 deferred 队列
+            async def _send_to_messenger(channel, account_id, chat_name, reply,
+                                         defer_until, reason, staleness_sec, extra):
+                if channel != "messenger":
+                    return 0
+                return await self.messenger_rpa_service.enqueue_reactivation_deferred(
+                    account_id=account_id,
+                    chat_name=chat_name,
+                    reply_text=reply,
+                    defer_until=defer_until,
+                    defer_reason=reason,
+                    staleness_sec=staleness_sec,
+                    extra=extra,
+                )
+
+            # episodic_provider：拿 journey 对象 → 渲染画像 block 给 reactivation prompt
+            def _episodic_provider(journey) -> str:
+                try:
+                    if journey is None:
+                        return ""
+                    snap = (getattr(journey, "context_snapshot_json", "") or "").strip()
+                    if snap:
+                        from src.contacts.portrait_extractor import render_block
+                        return render_block(snap) or ""
+                    return ""
+                except Exception:
+                    return ""
+
+            ai_name = ""
+            try:
+                ai_name = str((self.config.get_ai_config() or {}).get("ai_name") or "她")
+            except Exception:
+                ai_name = "她"
+
+            loop = ReactivationLoop(
+                scheduler=self.contacts.reactivation,
+                store=self.contacts.store,
+                ai_client=self.ai_client,
+                send_callback=_send_to_messenger,
+                episodic_provider=_episodic_provider,
+                ai_name=ai_name,
+                max_per_tick=int(cfg_react.get("max_per_tick", 3)),
+                interval_sec=float(cfg_react.get("interval_sec", 600)),
+                skip_if_no_episodic=bool(cfg_react.get("skip_if_no_episodic", True)),
+                dry_run=bool(cfg_react.get("dry_run", False)),
+                first_run_grace_minutes=float(
+                    cfg_react.get("first_run_grace_minutes", 60),
+                ),
+                first_run_max_per_tick=int(
+                    cfg_react.get("first_run_max_per_tick", 1),
+                ),
+            )
+            await loop.start()
+            self._reactivation_loop = loop
+            self.logger.info(
+                "✅ reactivation_loop 已启动（interval=%ss max_per_tick=%s）",
+                cfg_react.get("interval_sec", 600), cfg_react.get("max_per_tick", 3),
+            )
+        except Exception as ex:
+            self.logger.warning("reactivation_loop 启动跳过: %s", ex)
+            self.logger.debug("reactivation_loop 启动异常", exc_info=True)
+
     async def _wait_until_telegram_ready(self) -> None:
         """轮询 telegram_client.running/client.is_connected 直到 True，用于启动
         顺序解耦：我们不能 await telegram_client.start()（它内部 idle 永不返回），
@@ -737,6 +936,20 @@ class AIChatAssistant:
                 except Exception as ex:
                     self.logger.warning("Messenger RPA 停止异常: %s", ex)
 
+            # W2-D4.2：reactivation_loop 优雅停止
+            if self._reactivation_loop is not None:
+                try:
+                    await self._reactivation_loop.stop()
+                    self.logger.info("reactivation_loop 已停止")
+                except Exception as ex:
+                    self.logger.warning("reactivation_loop 停止异常: %s", ex)
+
+            if self.mobile_bridge is not None:
+                try:
+                    await self.mobile_bridge.stop()
+                except Exception as ex:
+                    self.logger.warning("Mobile Bridge 停止异常: %s", ex)
+
             if self.telegram_client:
                 await self.telegram_client.stop()
             
@@ -745,7 +958,20 @@ class AIChatAssistant:
             
             if self.ai_client:
                 await self.ai_client.cleanup()
-            
+
+            # D: 关掉 web 独立线程（uvicorn server 设 should_exit + 等线程退出）
+            try:
+                if self._web_server is not None:
+                    self._web_server.should_exit = True
+                if self._web_thread is not None and self._web_thread.is_alive():
+                    self._web_thread.join(timeout=5.0)
+                    if self._web_thread.is_alive():
+                        self.logger.warning("Web 管理后台线程 5s 内未退出，跳过等待")
+                    else:
+                        self.logger.info("Web 管理后台线程已停止")
+            except Exception as ex:
+                self.logger.warning("Web 管理后台停止异常: %s", ex)
+
             self.logger.info("✅ AI聊天助手已停止")
     
     def _setup_signal_handlers(self):

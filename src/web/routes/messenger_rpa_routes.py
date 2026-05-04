@@ -22,15 +22,41 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import re
 import sqlite3
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 
 logger = logging.getLogger(__name__)
+
+
+_HANDOFF_STATUSES = {
+    "new",
+    "assigned",
+    "in_progress",
+    "line_sent",
+    "line_added",
+    "converted",
+    "lost",
+    "paused",
+}
+_LINE_HANDOFF_STATUSES = {
+    "not_sent",
+    "sent",
+    "added",
+    "accepted",
+    "engaged",
+    "converted",
+    "lost",
+}
+_HANDOFF_PRIORITIES = {"", "low", "mid", "high", "urgent"}
 
 
 _SENSITIVE_KEYS = {
@@ -155,27 +181,980 @@ def _mobile_auto_snapshot(config_manager: Any) -> Dict[str, Any]:
         reply_profiles=_dict_cfg(mr_cfg.get("reply_profiles")),
         contacts_cfg=cfg.get("contacts") or {},
     )
+    api_base = _mobile_auto_api_base(mr_cfg)
+    base_screen_path = "/api/messenger-rpa/mobile-auto/devices"
+    out_bindings = bindings.get("accounts") or []
+    for row in out_bindings:
+        if not isinstance(row, dict):
+            continue
+        serial = str(row.get("adb_serial") or "").strip()
+        mobile = row.get("mobile") if isinstance(row.get("mobile"), dict) else {}
+        row["screen_url"] = (
+            f"{base_screen_path}/{urllib.parse.quote(serial, safe='')}/screenshot"
+            if serial else ""
+        )
+        row["mobile_auto_status"] = {
+            "api_base": api_base,
+            "root_path": str(directory.root),
+            "device_number": row.get("device_number") or mobile.get("number") or "",
+            "device_alias": row.get("device_alias") or mobile.get("alias") or "",
+            "sources": mobile.get("sources") or [],
+            "openclaw": mobile.get("openclaw") or {},
+        }
     return {
         "mobile_auto": {
             "root_path": devices.get("root_path", ""),
             "openclaw_db_path": devices.get("openclaw_db_path", ""),
+            "api_base": api_base,
         },
         "devices": devices.get("devices") or [],
         "device_summary": devices.get("summary") or {},
         "conflicts": devices.get("conflicts") or [],
-        "bindings": bindings.get("accounts") or [],
+        "bindings": out_bindings,
         "binding_summary": bindings.get("summary") or {},
     }
 
 
+def _mobile_auto_api_base(mr_cfg: Dict[str, Any]) -> str:
+    ma_cfg = mr_cfg.get("mobile_auto") or {}
+    if not isinstance(ma_cfg, dict):
+        ma_cfg = {}
+    base = (
+        ma_cfg.get("api_base")
+        or ma_cfg.get("base_url")
+        or ma_cfg.get("url")
+        or "http://127.0.0.1:18080"
+    )
+    return str(base).strip().rstrip("/")
+
+
+def _mobile_auto_base_reachable(base: str, *, timeout: float = 0.25) -> bool:
+    """Fast TCP probe before fanning out to multiple mobile-auto endpoints."""
+    try:
+        import socket
+        parsed = urllib.parse.urlparse(base)
+        host = parsed.hostname
+        if not host:
+            return False
+        if host not in {"127.0.0.1", "localhost", "::1"}:
+            return True
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
+def _mobile_auto_get_json(
+    base: str,
+    path: str,
+    *,
+    timeout: float = 4.0,
+) -> Dict[str, Any] | List[Any]:
+    url = f"{base.rstrip('/')}/{path.lstrip('/')}"
+    headers = {"Accept": "application/json"}
+    api_key = ""
+    try:
+        import os
+        api_key = (os.environ.get("OPENCLAW_API_KEY") or "").strip()
+    except Exception:
+        api_key = ""
+    if api_key:
+        headers["X-API-Key"] = api_key
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        raw = resp.read().decode("utf-8", errors="replace")
+    return json.loads(raw or "{}")
+
+
+def _mobile_auto_post_json(
+    base: str,
+    path: str,
+    body: Dict[str, Any] | None = None,
+    *,
+    timeout: float = 8.0,
+) -> Dict[str, Any] | List[Any]:
+    url = f"{base.rstrip('/')}/{path.lstrip('/')}"
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+    try:
+        import os
+        api_key = (os.environ.get("OPENCLAW_API_KEY") or "").strip()
+    except Exception:
+        api_key = ""
+    if api_key:
+        headers["X-API-Key"] = api_key
+    data = json.dumps(body or {}).encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        raw = resp.read().decode("utf-8", errors="replace")
+    return json.loads(raw or "{}")
+
+
+def _mobile_auto_status_snapshot(config_manager: Any) -> Dict[str, Any]:
+    """Aggregate mobile-auto status into Messenger account rows.
+
+    This keeps the browser simple and gives the RPA console one stable contract
+    even if mobile-auto splits data across devices, VPN, performance and tasks.
+    """
+    mr_cfg = _messenger_cfg(config_manager)
+    base = _mobile_auto_api_base(mr_cfg)
+    snap = _mobile_auto_snapshot(config_manager)
+    errors: Dict[str, str] = {}
+
+    if not _mobile_auto_base_reachable(base):
+        errors["mobile_auto"] = f"unreachable: {base}"
+        account_rows = []
+        for b in snap.get("bindings") or []:
+            if not isinstance(b, dict):
+                continue
+            account_rows.append({
+                "row_id": str(b.get("account_id") or b.get("adb_serial") or ""),
+                "account_id": str(b.get("account_id") or ""),
+                "adb_serial": str(b.get("adb_serial") or ""),
+                "device_id": "",
+                "device_number": b.get("device_number") or "",
+                "device_alias": b.get("device_alias") or "",
+                "online": False,
+                "device_status": "mobile_auto_unreachable",
+                "busy": False,
+                "usb_issue": "",
+                "is_cluster": False,
+                "host_name": "",
+                "host_id": "",
+                "screen_url": "",
+                "active_tasks": [],
+                "active_task_count": 0,
+                "task_status": "unknown",
+            })
+        return {
+            "ok": False,
+            "mobile_auto": snap.get("mobile_auto") or {},
+            "summary": {
+                "devices_total": len(snap.get("devices") or []),
+                "devices_online": 0,
+                "cluster_devices": 0,
+                "hosts_total": 0,
+                "accounts_total": len(account_rows),
+                "accounts_online": 0,
+                "tasks_active": 0,
+                "vpn_connected": 0,
+                "health_avg": 0,
+                "screen_stats": {},
+            },
+            "accounts": account_rows,
+            "devices": [],
+            "errors": errors,
+        }
+
+    def fetch(name: str, path: str, fallback: Any):
+        try:
+            return _mobile_auto_get_json(base, path)
+        except Exception as exc:
+            errors[name] = f"{type(exc).__name__}: {exc}"
+            return fallback
+
+    devices_raw = fetch("devices", "/devices", [])
+    cluster_raw = fetch("cluster_devices", "/cluster/devices", {"devices": []})
+    perf_raw = fetch("performance", "/devices/performance/all", {"devices": {}})
+    vpn_raw = fetch("vpn", "/vpn/status", {"devices": []})
+    tasks_raw = fetch("tasks", "/tasks?limit=300", [])
+    screen_raw = fetch("screen_stats", "/screen-stats", {})
+
+    devices = devices_raw if isinstance(devices_raw, list) else []
+    cluster_devices = (
+        cluster_raw.get("devices", []) if isinstance(cluster_raw, dict) else []
+    )
+    perf_map = (
+        perf_raw.get("devices", {}) if isinstance(perf_raw, dict) else {}
+    )
+    vpn_items = vpn_raw.get("devices", []) if isinstance(vpn_raw, dict) else []
+    tasks = tasks_raw if isinstance(tasks_raw, list) else []
+
+    def _device_key(d: Dict[str, Any]) -> str:
+        return str(
+            d.get("device_id")
+            or d.get("current_serial")
+            or d.get("serial")
+            or d.get("adb_serial")
+            or ""
+        ).strip()
+
+    merged_devices: Dict[str, Dict[str, Any]] = {}
+    for d in devices:
+        if not isinstance(d, dict):
+            continue
+        key = _device_key(d)
+        if not key:
+            continue
+        item = dict(d)
+        item.setdefault("_is_cluster", False)
+        item.setdefault("host_name", item.get("host_name") or "主控")
+        merged_devices[key] = item
+
+    for d in cluster_devices:
+        if not isinstance(d, dict):
+            continue
+        key = _device_key(d)
+        if not key:
+            continue
+        item = dict(d)
+        item["_is_cluster"] = True
+        item.setdefault("host_name", item.get("host_name") or item.get("host_id") or "Worker")
+        if key in merged_devices:
+            merged_devices[key].update(item)
+        else:
+            merged_devices[key] = item
+
+    all_devices = list(merged_devices.values())
+
+    device_meta_index: Dict[str, Dict[str, Any]] = {}
+    for meta in snap.get("devices") or []:
+        if not isinstance(meta, dict):
+            continue
+        meta_ids = [
+            meta.get("serial"),
+            meta.get("current_serial"),
+            meta.get("adb_serial"),
+            meta.get("device_id"),
+        ]
+        meta_ids.extend(meta.get("previous_serials") or [])
+        for mid in meta_ids:
+            mid_s = str(mid or "").strip()
+            if mid_s:
+                device_meta_index[mid_s] = meta
+
+    for d in all_devices:
+        if not isinstance(d, dict):
+            continue
+        meta = device_meta_index.get(_device_key(d)) or {}
+        if not meta:
+            continue
+        d.setdefault("number", meta.get("number") or "")
+        d.setdefault("device_number", meta.get("number") or "")
+        d.setdefault("alias", meta.get("alias") or "")
+        d.setdefault("name", meta.get("alias") or "")
+
+    device_index: Dict[str, Dict[str, Any]] = {}
+    for d in all_devices:
+        ids = [d.get("device_id"), d.get("current_serial"), d.get("serial")]
+        ids.extend(d.get("alternate_device_ids") or [])
+        for did in ids:
+            did_s = str(did or "").strip()
+            if did_s:
+                device_index[did_s] = d
+
+    vpn_map: Dict[str, Dict[str, Any]] = {}
+    for item in vpn_items:
+        if not isinstance(item, dict):
+            continue
+        did = str(item.get("device_id") or "").strip()
+        if did:
+            vpn_map[did] = item
+
+    active_by_device: Dict[str, List[Dict[str, Any]]] = {}
+    for t in tasks:
+        if not isinstance(t, dict):
+            continue
+        status = str(t.get("status") or "").lower()
+        if status not in {"running", "pending"}:
+            continue
+        did = str(t.get("device_id") or "").strip()
+        if did:
+            active_by_device.setdefault(did, []).append(t)
+
+    def screen_proxy_for(device_id: str, is_cluster: bool = False) -> str:
+        if not device_id:
+            return ""
+        quoted = urllib.parse.quote(device_id, safe="")
+        if is_cluster:
+            return f"/api/messenger-rpa/mobile-auto/cluster/devices/{quoted}/screenshot"
+        return f"/api/messenger-rpa/mobile-auto/devices/{quoted}/screenshot"
+
+    def runtime_row(
+        *,
+        account_id: str,
+        serial: str,
+        dev: Dict[str, Any],
+        binding: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        binding = binding or {}
+        did = str(dev.get("device_id") or serial).strip()
+        is_cluster = bool(dev.get("_is_cluster"))
+        host_name = str(dev.get("host_name") or dev.get("host_id") or ("Worker" if is_cluster else "主控")).strip()
+        perf = perf_map.get(did) or perf_map.get(serial) or {}
+        vpn = vpn_map.get(did) or vpn_map.get(serial) or {}
+        active = active_by_device.get(did) or active_by_device.get(serial) or []
+        meta = device_meta_index.get(did) or device_meta_index.get(serial) or {}
+        is_online = str(dev.get("status") or "").lower() in {
+            "connected", "online", "busy"
+        }
+        return {
+            "row_id": account_id or f"device:{did or serial}",
+            "account_id": account_id,
+            "adb_serial": serial,
+            "device_id": did,
+            "device_number": binding.get("device_number") or dev.get("number") or dev.get("device_number") or meta.get("number") or "",
+            "device_alias": binding.get("device_alias") or dev.get("alias") or dev.get("name") or meta.get("alias") or "",
+            "online": bool(is_online),
+            "device_status": dev.get("status") or ("unknown" if serial else "unbound"),
+            "busy": bool(dev.get("busy")),
+            "usb_issue": dev.get("usb_issue") or "",
+            "is_cluster": is_cluster,
+            "host_name": host_name,
+            "host_id": dev.get("host_id") or "",
+            "screen_url": screen_proxy_for(did or serial, is_cluster),
+            "battery_level": perf.get("battery_level"),
+            "battery_temp": perf.get("battery_temp"),
+            "charging": perf.get("charging"),
+            "mem_usage": perf.get("mem_usage"),
+            "storage_usage": perf.get("storage_usage"),
+            "vpn_connected": bool(vpn.get("connected")),
+            "vpn_config": vpn.get("config_name") or "",
+            "vpn_ip": vpn.get("ip") or "",
+            "vpn_country": vpn.get("country") or "",
+            "active_tasks": active[:5],
+            "active_task_count": len(active),
+            "task_status": (
+                "running" if any(str(t.get("status")) == "running" for t in active)
+                else "pending" if active else "idle"
+            ),
+        }
+
+    account_rows = []
+    for b in snap.get("bindings") or []:
+        if not isinstance(b, dict):
+            continue
+        aid = str(b.get("account_id") or "").strip()
+        serial = str(b.get("adb_serial") or "").strip()
+        dev = device_index.get(serial, {})
+        account_rows.append(runtime_row(account_id=aid, serial=serial, dev=dev, binding=b))
+
+    device_rows = [
+        runtime_row(account_id="", serial=str(d.get("device_id") or "").strip(), dev=d)
+        for d in all_devices
+        if isinstance(d, dict) and str(d.get("device_id") or "").strip()
+    ]
+    online_count = sum(1 for d in all_devices if str(d.get("status") or "").lower() in {"connected", "online", "busy"})
+    cluster_count = sum(1 for d in all_devices if bool(d.get("_is_cluster")))
+    hosts = {
+        str(d.get("host_name") or d.get("host_id") or "").strip()
+        for d in all_devices
+        if bool(d.get("_is_cluster")) and str(d.get("host_name") or d.get("host_id") or "").strip()
+    }
+    return {
+        "ok": not bool(errors),
+        "mobile_auto": snap.get("mobile_auto") or {},
+        "summary": {
+            "devices_total": len(all_devices),
+            "devices_online": online_count,
+            "cluster_devices": cluster_count,
+            "hosts_total": len(hosts),
+            "accounts_total": len(account_rows),
+            "accounts_online": sum(1 for a in account_rows if a.get("online")),
+            "tasks_active": sum(len(v) for v in active_by_device.values()),
+            "vpn_connected": sum(1 for v in vpn_map.values() if v.get("connected")),
+            "health_avg": screen_raw.get("health_avg", 0) if isinstance(screen_raw, dict) else 0,
+            "screen_stats": screen_raw if isinstance(screen_raw, dict) else {},
+        },
+        "accounts": account_rows,
+        "devices": device_rows,
+        "errors": errors,
+    }
+
+
 def _media_cfg(mr_cfg: Dict[str, Any]) -> Dict[str, Any]:
+    voice_input = _dict_cfg(mr_cfg.get("voice_input"))
+    if "audio_pipeline" not in voice_input:
+        voice_input["audio_pipeline"] = _dict_cfg(mr_cfg.get("audio_pipeline"))
+    voice_output = _dict_cfg(mr_cfg.get("voice_output"))
     return {
         "media_handling_policy": mr_cfg.get("media_handling_policy", "ai"),
         "media_include_links": bool(mr_cfg.get("media_include_links", False)),
         "media_deep_understand": _dict_cfg(mr_cfg.get("media_deep_understand")),
-        "voice_input": _dict_cfg(mr_cfg.get("voice_input")),
-        "voice_output": _dict_cfg(mr_cfg.get("voice_output")),
+        "voice_input": voice_input,
+        "voice_output": voice_output,
         "emoji_policy": _dict_cfg(mr_cfg.get("emoji_policy")),
+    }
+
+
+def _voice_runtime_summary(mr_cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Operator-facing voice capability model."""
+    vi = _dict_cfg(mr_cfg.get("voice_input"))
+    vo = _dict_cfg(mr_cfg.get("voice_output"))
+    ap = _dict_cfg(vi.get("audio_pipeline")) or _dict_cfg(mr_cfg.get("audio_pipeline"))
+    return {
+        "input": {
+            "enabled": bool(vi.get("enabled", False)),
+            "capture_mode": str(vi.get("capture_mode") or "run_as").strip(),
+            "prefer_transcribe": vi.get("prefer_transcribe", True) is not False,
+            "fallback": str(vi.get("fallback") or "ack_and_approve"),
+            "timeout_sec": float(vi.get("timeout_sec", 30) or 30),
+            "asr_backend": str(ap.get("backend") or "disabled"),
+            "asr_model": str(ap.get("model") or ap.get("model_size") or ""),
+            "language": str(ap.get("language") or vi.get("language_hint") or "auto"),
+        },
+        "output": {
+            "enabled": bool(vo.get("enabled", False)),
+            "mode": str(vo.get("mode") or "approval_only"),
+            "backend": str(vo.get("backend") or "edge_tts"),
+            "voice": str(vo.get("voice") or ""),
+            "format": str(vo.get("format") or "mp3"),
+            "send_text_summary": vo.get("send_text_summary", True) is not False,
+            "max_seconds": float(vo.get("max_seconds", 20) or 20),
+            "fallback": str(vo.get("fallback") or "text"),
+        },
+        "safety": {
+            "night_quiet": bool(vo.get("night_quiet", True)),
+            "approval_first": str(vo.get("mode") or "approval_only") != "auto",
+            "max_per_user_daily": int(vo.get("max_per_user_daily", 3) or 3),
+            "max_per_account_daily": int(vo.get("max_per_account_daily", 30) or 30),
+        },
+    }
+
+
+def _account_id_from_chat_key(chat_key: str, fallback: str = "") -> str:
+    """Infer configured account id from namespaced Messenger chat_key."""
+    ck = str(chat_key or "")
+    if ck.startswith("acc_") and ":" in ck:
+        return ck.split(":", 1)[0][4:]
+    if fallback:
+        return fallback
+    if ck.startswith("messenger_rpa:"):
+        return "default"
+    return ""
+
+
+def _chat_name_from_key(chat_key: str) -> str:
+    ck = str(chat_key or "")
+    return ck.split(":", 1)[-1] if ":" in ck else ck
+
+
+def _iter_account_stores(
+    request: Request,
+    config_manager: Optional[Any] = None,
+) -> List[Dict[str, Any]]:
+    """Return available per-account state stores.
+
+    Runtime service owns the authoritative AccountRegistry.  Tests and degraded
+    web-only boots may only expose app.state.messenger_rpa_state_store, so keep
+    that fallback.
+    """
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    svc = _get_service(request)
+    reg = getattr(svc, "_account_registry", None)
+    if reg is not None and hasattr(reg, "all_contexts"):
+        try:
+            for ctx in reg.all_contexts():
+                aid = str(getattr(ctx, "account_id", "") or "default")
+                if aid in seen:
+                    continue
+                store = ctx.state_store() if hasattr(ctx, "state_store") else None
+                if store is None:
+                    continue
+                out.append({
+                    "account_id": aid,
+                    "label": getattr(ctx, "label", "") or aid,
+                    "adb_serial": getattr(ctx, "adb_serial", "") or "",
+                    "store": store,
+                })
+                seen.add(aid)
+        except Exception:
+            logger.debug("account store iteration failed", exc_info=True)
+    if config_manager is not None:
+        try:
+            from src.integrations.messenger_rpa.state_store import (
+                MessengerRpaStateStore,
+                default_state_db_path,
+            )
+            mr_cfg = _messenger_cfg(config_manager)
+            accounts = mr_cfg.get("accounts") if isinstance(mr_cfg.get("accounts"), list) else []
+            max_runs_kept = int(mr_cfg.get("max_runs_kept") or 500)
+            for acc in accounts:
+                if not isinstance(acc, dict):
+                    continue
+                aid = str(acc.get("id") or acc.get("account_id") or "").strip()
+                if not aid or aid in seen:
+                    continue
+                store = MessengerRpaStateStore(
+                    default_state_db_path(config_manager.config_path, aid),
+                    max_runs_kept=max_runs_kept,
+                    account_id=aid,
+                )
+                out.append({
+                    "account_id": aid,
+                    "label": acc.get("label") or aid,
+                    "adb_serial": acc.get("adb_serial") or "",
+                    "store": store,
+                })
+                seen.add(aid)
+        except Exception:
+            logger.debug("configured account store iteration failed", exc_info=True)
+    if out:
+        return out
+    store = _get_store(request)
+    if store is not None:
+        aid = str(getattr(store, "account_id", "") or "default")
+        out.append({"account_id": aid, "label": aid, "adb_serial": "", "store": store})
+    return out
+
+
+def _store_info_for_chat_key(
+    request: Request,
+    chat_key: str,
+    config_manager: Optional[Any] = None,
+) -> tuple[Optional[Any], Dict[str, Any]]:
+    """Resolve the per-account store that owns a chat_key."""
+    stores = _iter_account_stores(request, config_manager)
+    if not stores:
+        return None, {}
+    account_id = _account_id_from_chat_key(chat_key, "")
+    selected: Dict[str, Any] | None = None
+    for si in stores:
+        if account_id and str(si.get("account_id") or "") != account_id:
+            continue
+        selected = si
+        break
+    if selected is None:
+        selected = stores[0]
+    return selected.get("store"), selected
+
+
+def _load_bot_contexts(
+    config_manager: Any,
+    *,
+    limit: int = 200,
+    chat_key: str = "",
+) -> Dict[str, Dict[str, Any]]:
+    """Load persisted SkillManager contexts for Messenger chat keys."""
+    contexts: Dict[str, Dict[str, Any]] = {}
+    try:
+        cfg_dir = Path(config_manager.config_path).parent
+        db = cfg_dir / "bot.db"
+        if not db.exists():
+            return contexts
+        c = sqlite3.connect(str(db))
+        c.row_factory = sqlite3.Row
+        if chat_key:
+            rows = c.execute(
+                "SELECT user_id, data, updated_at FROM user_context WHERE user_id=?",
+                (chat_key,),
+            ).fetchall()
+        else:
+            rows = c.execute(
+                "SELECT user_id, data, updated_at FROM user_context "
+                "WHERE user_id LIKE ? OR user_id LIKE ? "
+                "ORDER BY updated_at DESC LIMIT ?",
+                ("acc_%:%", "messenger_rpa:%", max(int(limit or 200), 1)),
+            ).fetchall()
+        c.close()
+        for row in rows:
+            try:
+                data = json.loads(row["data"] or "{}") or {}
+            except Exception:
+                data = {}
+            if not isinstance(data, dict):
+                data = {}
+            data["_ctx_updated_at"] = row["updated_at"]
+            contexts[str(row["user_id"])] = data
+    except Exception:
+        logger.debug("messenger bot context load failed", exc_info=True)
+    return contexts
+
+
+def _binding_index(config_manager: Any) -> Dict[str, Dict[str, Any]]:
+    try:
+        snap = _mobile_auto_snapshot(config_manager)
+        return {
+            str(b.get("account_id") or ""): b
+            for b in snap.get("bindings") or []
+            if isinstance(b, dict) and str(b.get("account_id") or "")
+        }
+    except Exception:
+        logger.debug("binding index load failed", exc_info=True)
+        return {}
+
+
+def _safe_float(v: Any, default: float = 0.0) -> float:
+    try:
+        return float(v or 0)
+    except Exception:
+        return default
+
+
+def _short_text(value: Any, n: int = 160) -> str:
+    s = str(value or "").strip()
+    return s if len(s) <= n else s[: max(0, n - 1)] + "..."
+
+
+def _lead_stage_label(score: int, lead: Dict[str, Any], line_id: str = "") -> str:
+    if score >= 80 and line_id:
+        return "ready_for_handoff"
+    if score >= 80:
+        return "qualified_missing_line"
+    if score >= 40:
+        return "nurture"
+    return "low_priority"
+
+
+def _build_handoff_advice(
+    *,
+    lead: Dict[str, Any],
+    score: int,
+    missing: List[Any],
+    line_id: str,
+    chat_name: str,
+) -> Dict[str, Any]:
+    stage = _lead_stage_label(score, lead, line_id)
+    missing_set = {str(x) for x in missing or []}
+    if stage == "ready_for_handoff":
+        priority = "high"
+        next_action = "建议人工客服接手，可在自然上下文中承接 LINE 沟通。"
+    elif stage == "qualified_missing_line":
+        priority = "high"
+        next_action = "线索分数高，但当前账号未配置人工客服 LINE，先补齐对接信息。"
+    elif stage == "nurture":
+        priority = "mid"
+        if "occupation" in missing_set or "income_signal" in missing_set:
+            next_action = "继续自然聊天，优先了解工作节奏、生活方式和消费能力信号。"
+        else:
+            next_action = "继续培养关系，等待对方表达更明确的服务需求后再转人工。"
+    else:
+        priority = "low"
+        next_action = "低优先级，保持礼貌短回，不主动推进 LINE。"
+
+    opening = "こんにちは。さっきの話、少し整理して見ました。無理に急がなくて大丈夫です。"
+    if "occupation" in missing_set:
+        opening = "そうなんですね。普段はどんなお仕事や生活リズムが多いんですか？"
+    elif "age_range" in missing_set:
+        opening = "話していて落ち着いた雰囲気を感じました。近い年代の方なのかなと思いました。"
+    elif score >= 80 and line_id:
+        opening = f"ここだと見落とすこともあるので、よければLINEで続きも話せます。LINE: {line_id}"
+
+    cautions = [
+        "不要直接追问年收入、资产、住址、证件或支付信息。",
+        "不要承诺感情关系；先共情，再轻问一个问题。",
+        "如果对方抗拒转平台，停止推进 LINE，回到普通聊天。",
+    ]
+    return {
+        "priority": priority,
+        "handoff_stage": stage,
+        "next_action": next_action,
+        "recommended_opening": opening,
+        "cautions": cautions,
+        "line_ready": bool(line_id and score >= 80),
+        "line_id": line_id,
+        "operator_note": f"{chat_name} 当前适合按 {priority} 优先级处理。",
+    }
+
+
+def _history_counts(ctx: Dict[str, Any]) -> Dict[str, int]:
+    hist = ctx.get("_conversation_history") or []
+    if not isinstance(hist, list):
+        hist = []
+    user_n = sum(1 for m in hist if isinstance(m, dict) and str(m.get("role") or "") == "user")
+    bot_n = sum(1 for m in hist if isinstance(m, dict) and str(m.get("role") or "") in ("assistant", "bot"))
+    return {"history_items": len(hist), "customer_messages": user_n, "bot_messages": bot_n}
+
+
+def _lead_source_messages(
+    *,
+    ctx: Dict[str, Any],
+    runs: List[Dict[str, Any]],
+    approvals: List[Dict[str, Any]],
+) -> List[str]:
+    """Collect customer-side texts for display-time lead scoring."""
+    out: List[str] = []
+
+    def _add(value: Any) -> None:
+        s = str(value or "").strip()
+        if not s:
+            return
+        if s not in out:
+            out.append(s[:500])
+
+    hist = ctx.get("_conversation_history") or []
+    if isinstance(hist, list):
+        for msg in hist[-30:]:
+            if not isinstance(msg, dict):
+                continue
+            if str(msg.get("role") or "") == "user":
+                _add(msg.get("content") or msg.get("text") or "")
+    _add(ctx.get("last_message") or "")
+    for r in sorted(runs, key=lambda x: _safe_float(x.get("ts")))[-30:]:
+        _add(r.get("peer_text") or "")
+    for a in sorted(approvals, key=lambda x: _safe_float(x.get("created_at")))[-30:]:
+        _add(a.get("peer_text") or "")
+    return out[-16:]
+
+
+def _derive_lead_profile(
+    *,
+    lead: Dict[str, Any],
+    ctx: Dict[str, Any],
+    runs: List[Dict[str, Any]],
+    approvals: List[Dict[str, Any]],
+    reply_lang: str,
+    chat_name: str,
+    lead_cfg: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Fallback ICP profile from existing history when stored lead data is empty."""
+    current = dict(lead or {})
+    if int(current.get("icp_score") or 0) > 0 or current.get("evidence"):
+        return current
+    messages = _lead_source_messages(ctx=ctx, runs=runs, approvals=approvals)
+    if not messages:
+        return current
+    try:
+        from src.integrations.messenger_rpa.lead_qualification import (
+            LeadQualificationEngine,
+        )
+        cfg = copy.deepcopy(lead_cfg or {})
+        handoff = cfg.get("handoff") if isinstance(cfg.get("handoff"), dict) else {}
+        handoff = dict(handoff)
+        # Display-time scoring must not mark LINE as sent or force a handoff reply.
+        handoff["line_id"] = ""
+        cfg["handoff"] = handoff
+        engine = LeadQualificationEngine(cfg)
+        profile: Dict[str, Any] = {}
+        for msg in messages:
+            decision = engine.evaluate(
+                profile,
+                peer_text=msg,
+                reply_lang=reply_lang or str(ctx.get("reply_lang") or "ja"),
+                chat_name=chat_name,
+            )
+            profile = decision.profile
+        if profile:
+            evidence = profile.get("evidence") if isinstance(profile.get("evidence"), list) else []
+            if not evidence and int(profile.get("icp_score") or 0) < 40:
+                return current
+            profile["derived_from_history"] = True
+            profile["derived_message_count"] = len(messages)
+            profile.setdefault("evidence", [])
+            return profile
+    except Exception:
+        logger.debug("lead history derivation failed", exc_info=True)
+    return current
+
+
+def _build_lead_item(
+    *,
+    chat_key: str,
+    chat_name: str,
+    store_info: Dict[str, Any],
+    st: Dict[str, Any],
+    ctx: Dict[str, Any],
+    reply_profiles: Dict[str, Any],
+    lead_qualification_cfg: Dict[str, Any],
+    binding: Dict[str, Any],
+    runs: List[Dict[str, Any]],
+    approvals: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    lead = ctx.get("lead_qualification") if isinstance(ctx, dict) else {}
+    if not isinstance(lead, dict):
+        lead = {}
+    lead = _derive_lead_profile(
+        lead=lead,
+        ctx=ctx,
+        runs=runs,
+        approvals=approvals,
+        reply_lang=str(ctx.get("reply_lang") or ""),
+        chat_name=chat_name,
+        lead_cfg=lead_qualification_cfg,
+    )
+    score = int(lead.get("icp_score") or 0)
+    missing = lead.get("missing_fields") or []
+    if not isinstance(missing, list):
+        missing = []
+    evidence = lead.get("evidence") or []
+    if not isinstance(evidence, list):
+        evidence = []
+
+    ts_candidates = [
+        _safe_float(st.get("updated_at")),
+        _safe_float(ctx.get("_ctx_updated_at")),
+        _safe_float(ctx.get("last_message_time")),
+        _safe_float(ctx.get("last_reply_time")),
+    ]
+    ts_candidates.extend(_safe_float(r.get("ts")) for r in runs)
+    ts_candidates.extend(_safe_float(a.get("created_at")) for a in approvals)
+    nonzero_ts = [x for x in ts_candidates if x > 0]
+    first_ts = min(nonzero_ts) if nonzero_ts else 0
+    last_ts = max(nonzero_ts) if nonzero_ts else 0
+    hist_counts = _history_counts(ctx)
+    customer_count = max(
+        hist_counts["customer_messages"],
+        sum(1 for r in runs if str(r.get("peer_text") or "").strip()),
+        sum(1 for a in approvals if str(a.get("peer_text") or "").strip()),
+    )
+    bot_count = max(
+        hist_counts["bot_messages"],
+        sum(1 for r in runs if str(r.get("reply_text") or "").strip()),
+        sum(1 for a in approvals if str(a.get("reply_text") or "").strip()),
+        int(ctx.get("reply_count") or 0),
+    )
+    last_peer = st.get("last_peer_text") or ctx.get("last_message") or ""
+    last_reply = st.get("last_reply") or ctx.get("last_reply") or ""
+    summary = str(ctx.get("_conversation_summary") or "").strip()
+    summary_short = summary or (
+        f"最近客户说：{_short_text(last_peer, 90)}；最近回复：{_short_text(last_reply, 90)}"
+        if (last_peer or last_reply) else "暂无可用聊天摘要"
+    )
+    account_id = _account_id_from_chat_key(chat_key, str(store_info.get("account_id") or ""))
+    line_id = str(binding.get("line_id") or "")
+    advice = _build_handoff_advice(
+        lead=lead, score=score, missing=missing, line_id=line_id, chat_name=chat_name,
+    )
+    return {
+        "chat_key": chat_key,
+        "chat_name": chat_name,
+        "account_id": account_id,
+        "account_label": binding.get("label") or store_info.get("label") or account_id,
+        "adb_serial": binding.get("adb_serial") or store_info.get("adb_serial") or "",
+        "device_number": binding.get("device_number") or "",
+        "device_alias": binding.get("device_alias") or "",
+        "login_account": binding.get("login_account") or "",
+        "line_id": line_id,
+        "updated_at": last_ts,
+        "first_contact_at": first_ts,
+        "last_activity_at": last_ts,
+        "talk_duration_sec": max(0, last_ts - first_ts) if first_ts and last_ts else 0,
+        "last_sent_at": st.get("last_sent_at") or 0,
+        "last_peer_text": last_peer,
+        "last_reply": last_reply,
+        "reply_lang": ctx.get("reply_lang", ""),
+        "persona_id": _profile_id_for_chat(reply_profiles, chat_key, chat_name),
+        "lead": lead,
+        "score": score,
+        "stage": str(lead.get("stage") or "unknown"),
+        "missing_fields": missing,
+        "evidence": evidence,
+        "summary_short": summary_short,
+        "handoff": advice,
+        "stats": {
+            "run_count": len(runs),
+            "approval_count": len(approvals),
+            "pending_approval_count": sum(1 for a in approvals if a.get("status") == "pending"),
+            "sent_approval_count": sum(1 for a in approvals if a.get("status") == "sent"),
+            "customer_message_count": customer_count,
+            "bot_reply_count": bot_count,
+            "history_items": hist_counts["history_items"],
+            "turn_count": max(customer_count, bot_count),
+        },
+    }
+
+
+def _timeline_for_chat(
+    *,
+    runs: List[Dict[str, Any]],
+    approvals: List[Dict[str, Any]],
+    limit: int = 80,
+) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for r in runs:
+        rows.append({
+            "source": "run",
+            "ts": r.get("ts") or 0,
+            "direction": "rpa_run",
+            "message_type": r.get("peer_kind") or "",
+            "status": "ok" if r.get("ok") else "failed",
+            "step": r.get("step") or "",
+            "peer_text": r.get("peer_text") or "",
+            "reply_text": r.get("reply_text") or "",
+            "error": r.get("error") or "",
+            "screenshot_path": r.get("screenshot_path") or "",
+            "total_ms": r.get("total_ms") or 0,
+        })
+    for a in approvals:
+        rows.append({
+            "source": "approval",
+            "id": a.get("id"),
+            "ts": a.get("created_at") or 0,
+            "direction": "approval",
+            "message_type": a.get("peer_kind") or "",
+            "status": a.get("status") or "",
+            "step": a.get("ai_tier") or "",
+            "peer_text": a.get("peer_text") or "",
+            "reply_text": a.get("reply_text") or "",
+            "reply_lang": a.get("reply_lang") or "",
+            "decided_by": a.get("decided_by") or "",
+            "decision_note": a.get("decision_note") or "",
+            "sent_at": a.get("sent_at") or 0,
+            "send_error": a.get("send_error") or "",
+            "screenshot_path": a.get("screenshot_path") or "",
+        })
+    rows.sort(key=lambda x: _safe_float(x.get("ts")), reverse=True)
+    return rows[: max(1, min(int(limit or 80), 300))]
+
+
+def _lead_ops_summary(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Operator-facing rollup for the lead workbench."""
+    now = time.time()
+    handoff_statuses = {
+        "new": 0,
+        "assigned": 0,
+        "in_progress": 0,
+        "line_sent": 0,
+        "line_added": 0,
+        "converted": 0,
+        "lost": 0,
+        "paused": 0,
+    }
+    line_statuses = {
+        "not_sent": 0,
+        "sent": 0,
+        "added": 0,
+        "accepted": 0,
+        "engaged": 0,
+        "converted": 0,
+        "lost": 0,
+    }
+    actions = {
+        "unassigned": 0,
+        "needs_line_config": 0,
+        "pending_approval": 0,
+        "ready_for_handoff": 0,
+        "needs_profile": 0,
+        "active_followup": 0,
+        "followup_due": 0,
+        "followup_today": 0,
+    }
+    for item in items:
+        op = item.get("operator_handoff") if isinstance(item.get("operator_handoff"), dict) else {}
+        status = str(op.get("status") or "new")
+        line_status = str(op.get("line_status") or "not_sent")
+        if status in handoff_statuses:
+            handoff_statuses[status] += 1
+        if line_status in line_statuses:
+            line_statuses[line_status] += 1
+        if not str(op.get("owner") or "").strip() and status in {"new", "assigned"}:
+            actions["unassigned"] += 1
+        if not str(item.get("line_id") or "").strip():
+            actions["needs_line_config"] += 1
+        stats = item.get("stats") if isinstance(item.get("stats"), dict) else {}
+        if int(stats.get("pending_approval_count") or 0) > 0:
+            actions["pending_approval"] += 1
+        handoff = item.get("handoff") if isinstance(item.get("handoff"), dict) else {}
+        if bool(handoff.get("line_ready")):
+            actions["ready_for_handoff"] += 1
+        if item.get("missing_fields"):
+            actions["needs_profile"] += 1
+        if status in {"assigned", "in_progress", "line_sent", "line_added"}:
+            actions["active_followup"] += 1
+        follow_ts = _safe_float(op.get("next_followup_at"))
+        if follow_ts > 0:
+            if follow_ts <= now:
+                actions["followup_due"] += 1
+            elif follow_ts <= now + 86400:
+                actions["followup_today"] += 1
+    return {
+        "handoff_statuses": handoff_statuses,
+        "line_statuses": line_statuses,
+        "actions": actions,
     }
 
 
@@ -208,7 +1187,7 @@ def register_messenger_rpa_routes(
 
     # ── REST: 状态 ─────────────────────────────────
     @app.get("/api/messenger-rpa/status")
-    async def api_msgr_status(request: Request):
+    def api_msgr_status(request: Request):
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
@@ -239,8 +1218,55 @@ def register_messenger_rpa_routes(
                 st["pending_empty_count"] = -1
         return st
 
+    @app.get("/api/messenger-rpa/hint-metrics")
+    def api_msgr_hint_metrics(request: Request, window: int = 0):
+        """P11 (2026-05-04)：messenger_rpa hint 事件计数器快照（JSON）。
+
+        路径名为 hint-metrics 避开同 path 的 Prometheus exposition 端点
+        （/api/messenger-rpa/metrics 已用于 Prometheus，见下方）。
+
+        Query params:
+          - ``window`` (秒): 0 / 缺省 = 累计；> 0 返回最近 N 秒窗口聚合（趋势）
+
+        来源：reply_decided 时自动从 result.hints 入计数。包含：
+          - self_overlap_promote / self_overlap_skip 拦截率
+          - thread_title_cache_hit / pre_foreground_cache_hit 命中率
+          - xml_inbox_fallback / xml_inbox_supplement 兜底次数
+          - cycle_entry_thread_recovered / sticky_force_full_screen_*
+          - inject_verify_emoji_normalized 等
+
+        前端 dashboard 同时拉 window=3600 + 累计，可显示"最近 1h vs 历史"
+        对比，发现退化（如 cache_hit 突降）立即告警。
+        """
+        api_auth(request)
+        try:
+            from src.monitoring.metrics_store import get_metrics_store
+            ms = get_metrics_store()
+            cumulative = ms.get_messenger_rpa_metrics(window_sec=None)
+            recent = (
+                ms.get_messenger_rpa_metrics(window_sec=float(window))
+                if window and window > 0 else None
+            )
+        except Exception as ex:
+            logger.exception("messenger_rpa metrics 查询失败")
+            return {"error": f"{type(ex).__name__}:{ex}", "metrics": {}}
+        sorted_cum = dict(sorted(cumulative.items(), key=lambda kv: -kv[1]))
+        out = {
+            "ok": True,
+            "total_events": sum(cumulative.values()),
+            "unique_event_names": len(cumulative),
+            "metrics": sorted_cum,
+        }
+        if recent is not None:
+            out["window_sec"] = int(window)
+            out["window_total"] = sum(recent.values())
+            out["window_metrics"] = dict(
+                sorted(recent.items(), key=lambda kv: -kv[1])
+            )
+        return out
+
     @app.get("/api/messenger-rpa/config")
-    async def api_msgr_config(request: Request):
+    def api_msgr_config(request: Request):
         """Return Messenger operator-facing configuration."""
         api_auth(request)
         raw_cfg = copy.deepcopy(_messenger_cfg(config_manager))
@@ -254,9 +1280,14 @@ def register_messenger_rpa_routes(
         ops_keys = [
             "enabled", "autostart", "reply_mode", "max_inbox_per_run",
             "run_once_target_names", "target_chat_names",
+            "run_once_start_mode", "force_return_to_chats",
+            "thread_title_vision_fallback", "pre_thread_self_xml_guard",
+            "stale_peer_after_self_guard",
             "companion_reply_cooldown_sec", "suppress_global_ai_identity",
             "disable_episodic_memory", "language_alignment",
-            "default_reply_lang", "companion_mode",
+            "default_reply_lang", "force_reply_lang", "companion_mode",
+            "interval_sec", "min_interval_sec", "max_interval_sec",
+            "backoff_multiplier",
         ]
         return {
             "raw": _redact_cfg(raw_cfg),
@@ -283,18 +1314,35 @@ def register_messenger_rpa_routes(
         allowed = {
             "enabled", "autostart", "reply_mode", "max_inbox_per_run",
             "run_once_target_names", "target_chat_names", "test_target_names",
+            "run_once_start_mode", "force_return_to_chats",
+            "thread_title_vision_fallback", "pre_thread_self_xml_guard",
+            "stale_peer_after_self_guard",
             "companion_reply_cooldown_sec", "suppress_global_ai_identity",
             "disable_episodic_memory", "language_alignment",
-            "default_reply_lang", "companion_mode", "lead_qualification",
+            "default_reply_lang", "force_reply_lang", "companion_mode",
+            "interval_sec", "min_interval_sec", "max_interval_sec",
+            "backoff_multiplier",
+            "lead_qualification",
+            # B6-P1 ops sub-tab 暴露的 dict 字段
+            "runaway_guard", "vision_misroute_guard", "sticky_thread",
+            "credit_policy", "pace_learning", "ai", "humanize",
+            "approval_sla", "portrait", "spam_cooldown_sec",
+            "self_skip_cooldown_sec", "per_chat_hourly_cap",
+        }
+        # 这些字段是 dict — 走深度 merge（保护未在 UI 暴露的子字段不被覆盖）
+        dict_merge_keys = {
+            "lead_qualification", "runaway_guard", "vision_misroute_guard",
+            "sticky_thread", "credit_policy", "pace_learning", "ai",
+            "humanize", "approval_sla", "portrait",
         }
         bad = [k for k in body.keys() if k not in allowed]
         if bad:
             raise HTTPException(400, f"不允许的字段: {bad}")
         mr_cfg = copy.deepcopy(_messenger_cfg(config_manager))
         for k, v in body.items():
-            if k == "lead_qualification":
+            if k in dict_merge_keys:
                 if not isinstance(v, dict):
-                    raise HTTPException(400, "lead_qualification 必须是对象")
+                    raise HTTPException(400, f"{k} 必须是对象")
                 cur = mr_cfg.get(k) if isinstance(mr_cfg.get(k), dict) else {}
                 merged = copy.deepcopy(cur)
                 for lk, lv in v.items():
@@ -312,6 +1360,14 @@ def register_messenger_rpa_routes(
                     mr_cfg[k] = [str(x).strip() for x in v if str(x or "").strip()]
                 else:
                     raise HTTPException(400, f"{k} 必须是字符串或数组")
+            elif k == "run_once_start_mode":
+                mode = str(v or "").strip().lower()
+                if mode not in ("smart_current_thread", "force_chats"):
+                    raise HTTPException(
+                        400,
+                        "run_once_start_mode 必须是 smart_current_thread 或 force_chats",
+                    )
+                mr_cfg[k] = mode
             else:
                 mr_cfg[k] = v
         _save_messenger_cfg(config_manager, mr_cfg)
@@ -346,11 +1402,782 @@ def register_messenger_rpa_routes(
         _refresh_service_runtime(request, mr_cfg)
         return {"ok": True, "reply_profiles": normalized}
 
+    @app.get("/api/messenger-rpa/strategy/runtime")
+    async def api_msgr_strategy_runtime(
+        request: Request,
+        limit: int = 120,
+    ):
+        """Return backend-backed persona strategy runtime state."""
+        api_auth(request)
+        store = _get_store(request)
+        cfg = _messenger_cfg(config_manager)
+        reply_profiles = _dict_cfg(cfg.get("reply_profiles"))
+        if store is None:
+            return {
+                "available": False,
+                "summary": {},
+                "accounts": [],
+                "personas": [],
+                "conversation_states": [],
+                "jobs": [],
+                "chat_runs": [],
+                "reply_profiles": reply_profiles,
+            }
+        try:
+            accounts = (
+                store.list_strategy_accounts()
+                if hasattr(store, "list_strategy_accounts") else []
+            )
+            personas = (
+                store.list_personas(status="")
+                if hasattr(store, "list_personas") else []
+            )
+            states = (
+                store.list_conversation_states(limit=limit)
+                if hasattr(store, "list_conversation_states") else []
+            )
+            jobs = (
+                store.list_auto_run_jobs(status="all", limit=limit)
+                if hasattr(store, "list_auto_run_jobs") else []
+            )
+            chat_runs = (
+                store.list_strategy_chat_runs(limit=limit)
+                if hasattr(store, "list_strategy_chat_runs") else []
+            )
+            audit = (
+                store.list_strategy_audit(limit=40)
+                if hasattr(store, "list_strategy_audit") else []
+            )
+        except Exception as ex:
+            logger.exception("strategy runtime query failed")
+            raise HTTPException(500, f"策略运行状态读取失败: {type(ex).__name__}")
+        for j in jobs:
+            try:
+                incoming = (
+                    store.get_incoming_message(j.get("incoming_message_id") or "")
+                    if hasattr(store, "get_incoming_message") else {}
+                )
+                if incoming:
+                    j["incoming_text"] = incoming.get("text", "")
+                    j["incoming_language"] = incoming.get("language", "")
+                conv = (
+                    store.get_conversation_state(j.get("customer_id") or "")
+                    if hasattr(store, "get_conversation_state") else {}
+                )
+                if conv:
+                    j["memory_summary"] = conv.get("memory_summary", "")
+                chat_key = j.get("customer_id") or ""
+                if conv.get("chat_key"):
+                    chat_key = conv.get("chat_key")
+                chat_state = (
+                    store.get_chat_state(chat_key)
+                    if hasattr(store, "get_chat_state") else {}
+                )
+                if chat_state:
+                    j["last_reply"] = chat_state.get("last_reply", "")
+                    j["last_peer_text"] = chat_state.get("last_peer_text", "")
+            except Exception:
+                logger.debug("strategy job context enrich failed", exc_info=True)
+        stage_counts: Dict[str, int] = {}
+        for row in states:
+            stg = str(row.get("stage") or "new_lead")
+            stage_counts[stg] = stage_counts.get(stg, 0) + 1
+        job_counts: Dict[str, int] = {}
+        for row in jobs:
+            js = str(row.get("status") or "unknown")
+            job_counts[js] = job_counts.get(js, 0) + 1
+        avg_health = 0.0
+        if accounts:
+            avg_health = sum(float(a.get("health_score") or 0) for a in accounts) / len(accounts)
+        return {
+            "available": True,
+            "summary": {
+                "accounts": len(accounts),
+                "personas": len(personas),
+                "conversation_states": len(states),
+                "jobs": len(jobs),
+                "pending_jobs": job_counts.get("pending", 0),
+                "running_jobs": job_counts.get("running", 0),
+                "failed_jobs": job_counts.get("failed", 0),
+                "avg_health": round(avg_health, 1),
+                "stage_counts": stage_counts,
+                "job_counts": job_counts,
+                "audit": len(audit),
+            },
+            "accounts": accounts,
+            "personas": personas,
+            "conversation_states": states,
+            "jobs": jobs,
+            "chat_runs": chat_runs,
+            "audit": audit,
+            "reply_profiles": reply_profiles,
+        }
+
+    @app.post("/api/messenger-rpa/strategy/simulate")
+    async def api_msgr_strategy_simulate(request: Request):
+        """Dry-run the automatic strategy planner without enqueueing a job."""
+        api_auth(request)
+        store = _get_store(request)
+        if store is None:
+            raise HTTPException(503, "messenger_rpa state_store 未注入")
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "invalid json body")
+        if not isinstance(body, dict):
+            raise HTTPException(400, "body 必须是对象")
+        text = str(body.get("text") or "").strip()
+        if not text:
+            raise HTTPException(400, "text 不能为空")
+        customer_id = str(
+            body.get("customer_id") or body.get("chat_key") or "simulated_customer"
+        ).strip()
+        chat_key = str(body.get("chat_key") or customer_id).strip()
+        try:
+            from src.integrations.messenger_rpa.persona_runtime import AutoRunPlanner
+
+            planner = AutoRunPlanner(store)
+            return planner.plan_and_enqueue(
+                customer_id=customer_id,
+                chat_key=chat_key,
+                text=text,
+                message_id=str(body.get("message_id") or ""),
+                raw_payload={"source": "web_simulator"},
+                priority=int(body.get("priority") or 50),
+                enqueue=False,
+            )
+        except Exception as ex:
+            logger.exception("strategy simulate failed")
+            raise HTTPException(500, f"策略模拟失败: {type(ex).__name__}: {ex}")
+
+    @app.patch("/api/messenger-rpa/strategy/accounts/{account_id}")
+    async def api_msgr_strategy_account_update(request: Request, account_id: str):
+        """Update runtime account-selector fields."""
+        api_auth(request)
+        store = _get_store(request)
+        if store is None:
+            raise HTTPException(503, "messenger_rpa state_store 未注入")
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "invalid json body")
+        if not isinstance(body, dict):
+            raise HTTPException(400, "body 必须是对象")
+        accounts = store.list_strategy_accounts()
+        cur = next((a for a in accounts if str(a.get("account_id")) == account_id), None)
+        if cur is None:
+            raise HTTPException(404, "account not found")
+
+        def _list(name: str) -> List[str]:
+            v = body.get(name, cur.get(name) or [])
+            if isinstance(v, str):
+                return [x.strip() for x in v.split(",") if x.strip()]
+            if isinstance(v, list):
+                return [str(x).strip() for x in v if str(x).strip()]
+            return []
+
+        status = str(body.get("status", cur.get("status") or "active")).strip()
+        if status not in {"active", "warming", "limited", "disabled", "blocked"}:
+            raise HTTPException(400, "status 不合法")
+        store.upsert_strategy_account(
+            account_id=account_id,
+            label=str(body.get("label", cur.get("label") or "")),
+            status=status,
+            supported_languages=_list("supported_languages"),
+            supported_customer_types=_list("supported_customer_types"),
+            persona_ids=_list("persona_ids"),
+            health_score=float(body.get("health_score", cur.get("health_score") or 100)),
+            current_load=int(body.get("current_load", cur.get("current_load") or 0)),
+            daily_send_count=int(body.get("daily_send_count", cur.get("daily_send_count") or 0)),
+            max_daily_send=int(body.get("max_daily_send", cur.get("max_daily_send") or 200)),
+            metadata=cur.get("metadata") or {},
+        )
+        if hasattr(store, "append_strategy_audit"):
+            store.append_strategy_audit(
+                action="account.update",
+                target_type="account",
+                target_id=account_id,
+                before=cur,
+                after=next((a for a in store.list_strategy_accounts() if str(a.get("account_id")) == account_id), {}),
+            )
+        return {"ok": True, "account_id": account_id}
+
+    @app.post("/api/messenger-rpa/strategy/personas")
+    async def api_msgr_strategy_persona_create(request: Request):
+        """Create or copy a reply profile without editing JSON manually."""
+        api_auth(request)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "invalid json body")
+        if not isinstance(body, dict):
+            raise HTTPException(400, "body 必须是对象")
+        action = str(body.get("action") or "create").strip()
+        new_id = str(body.get("id") or body.get("persona_id") or "").strip()
+        if not new_id:
+            raise HTTPException(400, "id 不能为空")
+        mr_cfg = copy.deepcopy(_messenger_cfg(config_manager))
+        rp = copy.deepcopy(_dict_cfg(mr_cfg.get("reply_profiles")))
+        profiles = rp.get("profiles") if isinstance(rp.get("profiles"), list) else []
+        if any(isinstance(p, dict) and str(p.get("id") or "") == new_id for p in profiles):
+            raise HTTPException(400, f"persona 已存在: {new_id}")
+        if action == "copy":
+            source_id = str(body.get("source_id") or "").strip()
+            src = next((p for p in profiles if isinstance(p, dict) and str(p.get("id") or "") == source_id), None)
+            if src is None:
+                raise HTTPException(404, "source persona not found")
+            item = copy.deepcopy(src)
+            item["id"] = new_id
+            item["match_names"] = []
+        else:
+            item = {
+                "id": new_id,
+                "language": str(body.get("language") or "auto"),
+                "customer_type": str(body.get("customer_type") or ""),
+                "style_hint": str(body.get("style_hint") or ""),
+                "match_names": [],
+                "persona": {
+                    "name": str(body.get("name") or new_id),
+                    "role": str(body.get("role") or ""),
+                    "facts": [],
+                    "speaking": {"forbidden_phrases": []},
+                },
+            }
+        profiles.append(item)
+        rp["profiles"] = profiles
+        if not rp.get("default"):
+            rp["default"] = new_id
+        normalized = _normalize_profiles(rp)
+        before = copy.deepcopy(mr_cfg.get("reply_profiles") or {})
+        mr_cfg["reply_profiles"] = normalized
+        _save_messenger_cfg(config_manager, mr_cfg)
+        _refresh_service_runtime(request, mr_cfg)
+        store = _get_store(request)
+        if store is not None and hasattr(store, "append_strategy_audit"):
+            store.append_strategy_audit(
+                action=f"persona.{action}",
+                target_type="persona",
+                target_id=new_id,
+                before=before,
+                after=item,
+            )
+        return {"ok": True, "reply_profiles": normalized, "persona": item}
+
+    @app.patch("/api/messenger-rpa/strategy/personas/{persona_id}")
+    async def api_msgr_strategy_persona_update(request: Request, persona_id: str):
+        """Structured persona editor backed by reply_profiles config."""
+        api_auth(request)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "invalid json body")
+        if not isinstance(body, dict):
+            raise HTTPException(400, "body 必须是对象")
+        mr_cfg = copy.deepcopy(_messenger_cfg(config_manager))
+        rp = copy.deepcopy(_dict_cfg(mr_cfg.get("reply_profiles")))
+        profiles = rp.get("profiles") if isinstance(rp.get("profiles"), list) else []
+        idx = None
+        for i, p in enumerate(profiles):
+            if isinstance(p, dict) and str(p.get("id") or "") == persona_id:
+                idx = i
+                break
+        if idx is None:
+            raise HTTPException(404, "persona not found")
+        item = copy.deepcopy(profiles[idx])
+        for key in ("language", "customer_type", "style_hint"):
+            if key in body:
+                item[key] = body[key]
+        if "match_names" in body:
+            v = body.get("match_names")
+            item["match_names"] = (
+                [x.strip() for x in v.split(",") if x.strip()]
+                if isinstance(v, str)
+                else [str(x).strip() for x in (v or []) if str(x).strip()]
+            )
+        persona = item.get("persona") if isinstance(item.get("persona"), dict) else {}
+        if "name" in body:
+            persona["name"] = str(body.get("name") or "").strip()
+        if "role" in body:
+            persona["role"] = str(body.get("role") or "").strip()
+        if "background_facts" in body:
+            facts = body.get("background_facts")
+            if isinstance(facts, str):
+                facts = [x.strip() for x in facts.splitlines() if x.strip()]
+            if isinstance(facts, list):
+                persona["facts"] = [str(x).strip() for x in facts if str(x).strip()]
+        speaking = persona.get("speaking") if isinstance(persona.get("speaking"), dict) else {}
+        if "forbidden_phrases" in body:
+            v = body.get("forbidden_phrases")
+            speaking["forbidden_phrases"] = (
+                [x.strip() for x in v.split(",") if x.strip()]
+                if isinstance(v, str)
+                else [str(x).strip() for x in (v or []) if str(x).strip()]
+            )
+        persona["speaking"] = speaking
+        item["persona"] = persona
+        profiles[idx] = item
+        rp["profiles"] = profiles
+        normalized = _normalize_profiles(rp)
+        before_profiles = copy.deepcopy(mr_cfg.get("reply_profiles") or {})
+        mr_cfg["reply_profiles"] = normalized
+        _save_messenger_cfg(config_manager, mr_cfg)
+        _refresh_service_runtime(request, mr_cfg)
+        store = _get_store(request)
+        if store is not None and hasattr(store, "upsert_persona"):
+            try:
+                from src.integrations.messenger_rpa.persona_runtime import (
+                    flatten_persona_facts,
+                )
+
+                store.upsert_persona(
+                    persona_id=persona_id,
+                    name=str(persona.get("name") or persona_id),
+                    language=str(item.get("language") or "auto"),
+                    customer_type=str(item.get("customer_type") or ""),
+                    facts=flatten_persona_facts(persona),
+                    persona=persona,
+                    status=str(item.get("status") or "active"),
+                )
+            except Exception:
+                logger.debug("structured persona upsert to store failed", exc_info=True)
+            try:
+                if hasattr(store, "append_strategy_audit"):
+                    store.append_strategy_audit(
+                        action="persona.update",
+                        target_type="persona",
+                        target_id=persona_id,
+                        before=before_profiles,
+                        after=item,
+                    )
+            except Exception:
+                logger.debug("persona audit failed", exc_info=True)
+        return {"ok": True, "reply_profiles": normalized, "persona": item}
+
+    @app.post("/api/messenger-rpa/strategy/personas/{persona_id}/{action}")
+    async def api_msgr_strategy_persona_action(
+        request: Request, persona_id: str, action: str
+    ):
+        api_auth(request)
+        if action not in {"disable", "enable", "delete", "set_default"}:
+            raise HTTPException(400, "action 只能是 disable / enable / delete / set_default")
+        mr_cfg = copy.deepcopy(_messenger_cfg(config_manager))
+        rp = copy.deepcopy(_dict_cfg(mr_cfg.get("reply_profiles")))
+        profiles = rp.get("profiles") if isinstance(rp.get("profiles"), list) else []
+        idx = next((i for i, p in enumerate(profiles) if isinstance(p, dict) and str(p.get("id") or "") == persona_id), None)
+        if idx is None:
+            raise HTTPException(404, "persona not found")
+        before = copy.deepcopy(profiles[idx])
+        if action == "set_default":
+            rp["default"] = persona_id
+        elif action == "delete":
+            profiles.pop(idx)
+            if rp.get("default") == persona_id:
+                rp["default"] = str((profiles[0] or {}).get("id") or "") if profiles else ""
+        else:
+            profiles[idx]["status"] = "disabled" if action == "disable" else "active"
+        rp["profiles"] = profiles
+        normalized = _normalize_profiles(rp) if profiles else {"default": "", "profiles": []}
+        mr_cfg["reply_profiles"] = normalized
+        _save_messenger_cfg(config_manager, mr_cfg)
+        _refresh_service_runtime(request, mr_cfg)
+        store = _get_store(request)
+        if store is not None and hasattr(store, "append_strategy_audit"):
+            store.append_strategy_audit(
+                action=f"persona.{action}",
+                target_type="persona",
+                target_id=persona_id,
+                before=before,
+                after=profiles[idx] if action != "delete" and idx < len(profiles) else {},
+            )
+        return {"ok": True, "reply_profiles": normalized}
+
+    @app.patch("/api/messenger-rpa/strategy/conversations/{customer_id:path}")
+    async def api_msgr_strategy_conversation_update(
+        request: Request, customer_id: str
+    ):
+        api_auth(request)
+        store = _get_store(request)
+        if store is None:
+            raise HTTPException(503, "messenger_rpa state_store 未注入")
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "invalid json body")
+        if not isinstance(body, dict):
+            raise HTTPException(400, "body 必须是对象")
+        cur = store.get_conversation_state(customer_id)
+        if not cur:
+            raise HTTPException(404, "conversation state not found")
+        action = str(body.get("action") or "update").strip()
+        used = cur.get("used_persona_facts") or []
+        summary = str(cur.get("memory_summary") or "")
+        stage = str(body.get("stage") or cur.get("stage") or "new_lead")
+        if action == "clear_used_facts":
+            used = []
+        elif action == "clear_memory":
+            summary = ""
+        elif action == "handoff":
+            stage = "handoff"
+        if "memory_summary" in body:
+            summary = str(body.get("memory_summary") or "")
+        store.update_conversation_state(
+            customer_id,
+            chat_key=str(body.get("chat_key") or cur.get("chat_key") or ""),
+            account_id=str(body.get("account_id") or cur.get("account_id") or ""),
+            persona_id=str(body.get("persona_id") or cur.get("persona_id") or ""),
+            customer_language=str(body.get("customer_language") or cur.get("customer_language") or ""),
+            customer_type=str(body.get("customer_type") or cur.get("customer_type") or ""),
+            stage=stage,
+            memory_summary=summary,
+            recent_topics=list(cur.get("recent_topics") or []),
+            used_persona_facts=list(used),
+            metadata=cur.get("metadata") or {},
+            last_message_at=float(cur.get("last_message_at") or 0),
+        )
+        if hasattr(store, "append_strategy_audit"):
+            store.append_strategy_audit(
+                action=f"conversation.{action}",
+                target_type="conversation",
+                target_id=customer_id,
+                before=cur,
+                after=store.get_conversation_state(customer_id),
+            )
+        return {"ok": True, "state": store.get_conversation_state(customer_id)}
+
+    @app.post("/api/messenger-rpa/strategy/jobs/{job_id}/{action}")
+    async def api_msgr_strategy_job_action(
+        request: Request, job_id: str, action: str
+    ):
+        api_auth(request)
+        store = _get_store(request)
+        if store is None:
+            raise HTTPException(503, "messenger_rpa state_store 未注入")
+        before_job = (
+            store.get_auto_run_job(job_id)
+            if hasattr(store, "get_auto_run_job") else {}
+        )
+        if action == "retry":
+            ok = store.retry_auto_run_job(job_id)
+        elif action == "cancel":
+            ok = store.cancel_auto_run_job(job_id)
+        else:
+            raise HTTPException(400, "action 只能是 retry 或 cancel")
+        if not ok:
+            raise HTTPException(404, "job not found")
+        if hasattr(store, "append_strategy_audit"):
+            store.append_strategy_audit(
+                action=f"job.{action}",
+                target_type="job",
+                target_id=job_id,
+                before=before_job,
+                after=(
+                    store.get_auto_run_job(job_id)
+                    if hasattr(store, "get_auto_run_job") else {}
+                ),
+            )
+        return {"ok": True, "job_id": job_id, "action": action}
+
+    @app.post("/api/messenger-rpa/strategy/audit/{audit_id}/rollback")
+    async def api_msgr_strategy_audit_rollback(request: Request, audit_id: int):
+        api_auth(request)
+        store = _get_store(request)
+        if store is None or not hasattr(store, "get_strategy_audit"):
+            raise HTTPException(503, "messenger_rpa state_store 未注入")
+        rec = store.get_strategy_audit(int(audit_id))
+        if not rec:
+            raise HTTPException(404, "audit not found")
+        action = str(rec.get("action") or "")
+        target_type = str(rec.get("target_type") or "")
+        target_id = str(rec.get("target_id") or "")
+        before = rec.get("before") if isinstance(rec.get("before"), dict) else {}
+        if target_type == "persona":
+            mr_cfg = copy.deepcopy(_messenger_cfg(config_manager))
+            if action in {"persona.update", "persona.create", "persona.copy"}:
+                if not isinstance(before.get("profiles"), list):
+                    raise HTTPException(400, "该审计记录缺少可回滚的人设配置")
+                mr_cfg["reply_profiles"] = _normalize_profiles(before)
+            else:
+                rp = copy.deepcopy(_dict_cfg(mr_cfg.get("reply_profiles")))
+                profiles = rp.get("profiles") if isinstance(rp.get("profiles"), list) else []
+                idx = next((i for i, p in enumerate(profiles) if isinstance(p, dict) and str(p.get("id") or "") == target_id), None)
+                if action == "persona.delete":
+                    if idx is None:
+                        profiles.append(before)
+                    else:
+                        profiles[idx] = before
+                elif before:
+                    if idx is None:
+                        profiles.append(before)
+                    else:
+                        profiles[idx] = before
+                rp["profiles"] = profiles
+                if not rp.get("default") and profiles:
+                    rp["default"] = str((profiles[0] or {}).get("id") or "")
+                mr_cfg["reply_profiles"] = _normalize_profiles(rp) if profiles else {"default": "", "profiles": []}
+            _save_messenger_cfg(config_manager, mr_cfg)
+            _refresh_service_runtime(request, mr_cfg)
+        elif target_type == "account":
+            if not before:
+                raise HTTPException(400, "该审计记录缺少账号回滚数据")
+            store.upsert_strategy_account(
+                account_id=target_id,
+                label=str(before.get("label") or ""),
+                status=str(before.get("status") or "active"),
+                supported_languages=list(before.get("supported_languages") or []),
+                supported_customer_types=list(before.get("supported_customer_types") or []),
+                persona_ids=list(before.get("persona_ids") or []),
+                health_score=float(before.get("health_score") or 100),
+                current_load=int(before.get("current_load") or 0),
+                daily_send_count=int(before.get("daily_send_count") or 0),
+                max_daily_send=int(before.get("max_daily_send") or 200),
+                metadata=before.get("metadata") or {},
+            )
+        elif target_type == "conversation":
+            if not before:
+                raise HTTPException(400, "该审计记录缺少会话回滚数据")
+            store.update_conversation_state(
+                target_id,
+                chat_key=str(before.get("chat_key") or ""),
+                account_id=str(before.get("account_id") or ""),
+                persona_id=str(before.get("persona_id") or ""),
+                customer_language=str(before.get("customer_language") or ""),
+                customer_type=str(before.get("customer_type") or ""),
+                stage=str(before.get("stage") or "new_lead"),
+                memory_summary=str(before.get("memory_summary") or ""),
+                recent_topics=list(before.get("recent_topics") or []),
+                used_persona_facts=list(before.get("used_persona_facts") or []),
+                metadata=before.get("metadata") or {},
+                last_message_at=float(before.get("last_message_at") or 0),
+            )
+        elif target_type == "job":
+            if not before:
+                raise HTTPException(400, "该审计记录缺少任务回滚数据")
+            status = str(before.get("status") or "pending")
+            if status == "pending":
+                store.retry_auto_run_job(target_id, run_after=float(before.get("run_after") or time.time()))
+            elif status == "canceled":
+                store.cancel_auto_run_job(target_id, before.get("last_error") or "rollback")
+            elif status == "failed":
+                store.mark_auto_run_job_failed(target_id, before.get("last_error") or "rollback")
+            else:
+                raise HTTPException(400, f"暂不支持回滚任务状态: {status}")
+        else:
+            raise HTTPException(400, "暂不支持该审计类型回滚")
+        if hasattr(store, "append_strategy_audit"):
+            store.append_strategy_audit(
+                action="audit.rollback",
+                target_type=target_type,
+                target_id=target_id,
+                before=rec,
+                after={"rolled_back_audit_id": audit_id},
+            )
+        return {"ok": True, "audit_id": audit_id, "rolled_back": target_id}
+
     @app.get("/api/messenger-rpa/bindings")
-    async def api_msgr_bindings(request: Request):
+    def api_msgr_bindings(request: Request):
         """Return Messenger account ↔ phone ↔ persona bindings."""
         api_auth(request)
         return _mobile_auto_snapshot(config_manager)
+
+    @app.get("/api/messenger-rpa/mobile-auto/devices/{device_id}/screenshot")
+    async def api_msgr_mobile_auto_screenshot(
+        request: Request,
+        device_id: str,
+        mode: str = "grid",
+        max_h: int = 360,
+        quality: int = 45,
+    ):
+        """Proxy mobile-auto0423 screenshots so the Messenger console can embed
+        the same device wall without depending on browser CORS or hard-coded ports.
+        """
+        api_auth(request)
+        mr_cfg = _messenger_cfg(config_manager)
+        base = _mobile_auto_api_base(mr_cfg)
+        if not base:
+            raise HTTPException(503, "mobile_auto.api_base 未配置")
+        q = urllib.parse.urlencode({
+            "mode": str(mode or "grid"),
+            "max_h": max(120, min(int(max_h or 360), 900)),
+            "quality": max(20, min(int(quality or 45), 95)),
+            "t": str(int(time.time() * 1000)),
+        })
+        url = (
+            f"{base}/devices/{urllib.parse.quote(device_id, safe='')}"
+            f"/screenshot?{q}"
+        )
+        try:
+            req = urllib.request.Request(url, headers={"Accept": "image/*"})
+            with urllib.request.urlopen(req, timeout=4.5) as resp:
+                body = resp.read()
+                ctype = resp.headers.get("content-type") or "image/jpeg"
+        except urllib.error.HTTPError as ex:
+            raise HTTPException(ex.code, f"mobile-auto screenshot failed: {ex.reason}")
+        except Exception as ex:
+            raise HTTPException(
+                502,
+                f"mobile-auto screenshot unavailable: {type(ex).__name__}:{ex}",
+            )
+        if not body:
+            raise HTTPException(502, "mobile-auto screenshot empty")
+        return Response(content=body, media_type=ctype)
+
+    @app.get("/api/messenger-rpa/mobile-auto/cluster/devices/{device_id}/screenshot")
+    async def api_msgr_mobile_auto_cluster_screenshot(
+        request: Request,
+        device_id: str,
+        mode: str = "grid",
+        max_h: int = 360,
+        quality: int = 45,
+    ):
+        """Proxy mobile-auto cluster screenshots, including W03/W175 workers."""
+        api_auth(request)
+        mr_cfg = _messenger_cfg(config_manager)
+        base = _mobile_auto_api_base(mr_cfg)
+        if not base:
+            raise HTTPException(503, "mobile_auto.api_base 未配置")
+        q = urllib.parse.urlencode({
+            "mode": str(mode or "grid"),
+            "max_h": max(120, min(int(max_h or 360), 900)),
+            "quality": max(20, min(int(quality or 45), 95)),
+            "t": str(int(time.time() * 1000)),
+        })
+        url = (
+            f"{base}/cluster/devices/{urllib.parse.quote(device_id, safe='')}"
+            f"/screenshot?{q}"
+        )
+        try:
+            req = urllib.request.Request(url, headers={"Accept": "image/*"})
+            with urllib.request.urlopen(req, timeout=4.5) as resp:
+                body = resp.read()
+                ctype = resp.headers.get("content-type") or "image/jpeg"
+        except urllib.error.HTTPError as ex:
+            raise HTTPException(ex.code, f"mobile-auto cluster screenshot failed: {ex.reason}")
+        except Exception as ex:
+            raise HTTPException(
+                502,
+                f"mobile-auto cluster screenshot unavailable: {type(ex).__name__}:{ex}",
+            )
+        if not body:
+            raise HTTPException(502, "mobile-auto cluster screenshot empty")
+        return Response(content=body, media_type=ctype)
+
+    @app.get("/api/messenger-rpa/mobile-auto/status")
+    def api_msgr_mobile_auto_status(request: Request):
+        """Aggregate mobile-auto device, VPN, performance and task status."""
+        api_auth(request)
+        return _mobile_auto_status_snapshot(config_manager)
+
+    @app.post("/api/messenger-rpa/mobile-auto/devices/{device_id}/action")
+    async def api_msgr_mobile_auto_device_action(request: Request, device_id: str):
+        """Forward a small allow-list of mobile-auto device maintenance actions."""
+        api_auth(request)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            raise HTTPException(400, "body 必须是对象")
+        action = str(body.get("action") or "").strip()
+        is_cluster = bool(body.get("is_cluster"))
+        mr_cfg = _messenger_cfg(config_manager)
+        base = _mobile_auto_api_base(mr_cfg)
+        if not base:
+            raise HTTPException(503, "mobile_auto.api_base 未配置")
+
+        quoted = urllib.parse.quote(device_id, safe="")
+        def input_path(kind: str) -> str:
+            if is_cluster:
+                return f"/cluster/devices/{quoted}/input/{kind}"
+            return f"/devices/{quoted}/input/{kind}"
+
+        if action == "refresh":
+            path = "/cluster/refresh-devices"
+            payload: Dict[str, Any] = {}
+        elif action == "reconnect":
+            path = "/cluster/batch-reconnect" if is_cluster else f"/devices/{quoted}/reconnect"
+            payload = {}
+        elif action == "vpn_check":
+            path = f"/vpn/health/{quoted}/check"
+            payload = {}
+        elif action in {"key_back", "key_home", "key_power"}:
+            keycodes = {"key_back": 4, "key_home": 3, "key_power": 26}
+            path = input_path("key")
+            payload = {"keycode": keycodes[action]}
+        elif action == "tap":
+            x = max(0, min(9999, int(body.get("x") or 0)))
+            y = max(0, min(9999, int(body.get("y") or 0)))
+            path = input_path("tap")
+            payload = {"x": x, "y": y}
+        elif action == "tap_ratio":
+            xr = max(0.0, min(1.0, float(body.get("x_ratio") or 0)))
+            yr = max(0.0, min(1.0, float(body.get("y_ratio") or 0)))
+            width = int(body.get("image_width") or 0)
+            height = int(body.get("image_height") or 0)
+            if is_cluster:
+                try:
+                    size_raw = _mobile_auto_post_json(
+                        base,
+                        f"/cluster/devices/{quoted}/shell",
+                        {"command": "wm size"},
+                        timeout=6.0,
+                    )
+                    output = str(
+                        (size_raw.get("output") if isinstance(size_raw, dict) else "")
+                        or ""
+                    )
+                    m = re.search(r"(\d{3,5})\s*x\s*(\d{3,5})", output)
+                    if m:
+                        width, height = int(m.group(1)), int(m.group(2))
+                except Exception:
+                    pass
+            else:
+                try:
+                    size_raw = _mobile_auto_get_json(base, f"/devices/{quoted}/screen-size", timeout=4.0)
+                    if isinstance(size_raw, dict):
+                        width = int(size_raw.get("width") or width)
+                        height = int(size_raw.get("height") or height)
+                except Exception:
+                    pass
+            x = max(0, min(9999, round(width * xr))) if width else 0
+            y = max(0, min(9999, round(height * yr))) if height else 0
+            path = input_path("tap")
+            payload = {"x": x, "y": y}
+        elif action == "open_messenger":
+            package = str(body.get("package") or "com.facebook.orca").strip()
+            allowed_packages = {"com.facebook.orca", "com.facebook.katana"}
+            if package not in allowed_packages:
+                raise HTTPException(400, f"不允许打开的 package: {package}")
+            if is_cluster:
+                path = f"/cluster/devices/{quoted}/shell"
+                payload = {
+                    "command": (
+                        f"monkey -p {package} "
+                        "-c android.intent.category.LAUNCHER 1"
+                    )
+                }
+            else:
+                path = f"/devices/{quoted}/open-app"
+                payload = {"package": package}
+        else:
+            raise HTTPException(400, f"不支持的 mobile-auto 操作: {action}")
+
+        try:
+            result = _mobile_auto_post_json(base, path, payload)
+        except urllib.error.HTTPError as ex:
+            raise HTTPException(ex.code, f"mobile-auto action failed: {ex.reason}")
+        except Exception as ex:
+            raise HTTPException(
+                502,
+                f"mobile-auto action unavailable: {type(ex).__name__}:{ex}",
+            )
+        return {
+            "ok": True,
+            "action": action,
+            "device_id": device_id,
+            "is_cluster": is_cluster,
+            "path": path,
+            "result": result,
+        }
 
     @app.put("/api/messenger-rpa/bindings")
     async def api_msgr_bindings_update(request: Request):
@@ -429,10 +2256,17 @@ def register_messenger_rpa_routes(
             audio_stats = get_audio_pipeline(audio_cfg).stats()
         except Exception as exc:
             audio_stats = {"error": f"{type(exc).__name__}: {exc}"}
+        tts_stats: Dict[str, Any] = {}
+        try:
+            from src.ai.tts_pipeline import get_tts_pipeline
+            tts_stats = get_tts_pipeline(_dict_cfg(mr_cfg.get("voice_output"))).stats()
+        except Exception as exc:
+            tts_stats = {"error": f"{type(exc).__name__}: {exc}"}
         media_deep = _dict_cfg(mr_cfg.get("media_deep_understand"))
         voice_output = _dict_cfg(mr_cfg.get("voice_output"))
         return {
             "config": _media_cfg(mr_cfg),
+            "voice_runtime": _voice_runtime_summary(mr_cfg),
             "capabilities": {
                 "receive_image": True,
                 "receive_sticker": True,
@@ -450,6 +2284,7 @@ def register_messenger_rpa_routes(
                 "send_voice_note": "planned",
             },
             "audio_pipeline": audio_stats,
+            "tts_pipeline": tts_stats,
         }
 
     @app.put("/api/messenger-rpa/media")
@@ -477,118 +2312,403 @@ def register_messenger_rpa_routes(
                 cur = mr_cfg.get(k) if isinstance(mr_cfg.get(k), dict) else {}
                 merged = copy.deepcopy(cur)
                 merged.update(v)
+                if (
+                    k == "voice_output"
+                    and isinstance(cur.get("voice_profile"), dict)
+                    and isinstance(v.get("voice_profile"), dict)
+                ):
+                    vp = copy.deepcopy(cur.get("voice_profile") or {})
+                    vp.update(v.get("voice_profile") or {})
+                    merged["voice_profile"] = vp
                 mr_cfg[k] = merged
             else:
                 mr_cfg[k] = v
         _save_messenger_cfg(config_manager, mr_cfg)
+        try:
+            from src.ai.audio_pipeline import reset_audio_pipeline
+            reset_audio_pipeline()
+        except Exception:
+            logger.debug("reset_audio_pipeline failed", exc_info=True)
+        try:
+            from src.ai.tts_pipeline import reset_tts_pipeline
+            reset_tts_pipeline()
+        except Exception:
+            logger.debug("reset_tts_pipeline failed", exc_info=True)
         _refresh_service_runtime(request, mr_cfg)
         return {"ok": True, "config": _media_cfg(mr_cfg)}
 
+    @app.post("/api/messenger-rpa/media/asr-test")
+    async def api_msgr_media_asr_test(request: Request):
+        """Transcribe a local audio file path using the currently selected ASR."""
+        api_auth(request)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "invalid json body")
+        path = str((body or {}).get("path") or "").strip()
+        if not path:
+            raise HTTPException(400, "path 必填")
+        p = Path(path)
+        if not p.exists() or not p.is_file():
+            raise HTTPException(404, "音频文件不存在")
+        mr_cfg = _messenger_cfg(config_manager)
+        vi = _dict_cfg(mr_cfg.get("voice_input"))
+        ap_cfg = _dict_cfg(vi.get("audio_pipeline")) or _dict_cfg(
+            mr_cfg.get("audio_pipeline")
+        )
+        ap_cfg["enabled"] = True
+        try:
+            from src.ai.audio_pipeline import reset_audio_pipeline, get_audio_pipeline
+            reset_audio_pipeline()
+            ap = get_audio_pipeline(ap_cfg)
+            rv = await ap.transcribe_file(
+                str(p),
+                language_hint=str((body or {}).get("language_hint") or "").strip() or None,
+                timeout_sec=float((body or {}).get("timeout_sec") or vi.get("timeout_sec") or 30),
+            )
+            return {"ok": rv.ok, "result": rv.__dict__}
+        except Exception as exc:
+            raise HTTPException(500, f"ASR 测试失败: {type(exc).__name__}: {exc}")
+
+    @app.post("/api/messenger-rpa/media/tts-test")
+    async def api_msgr_media_tts_test(request: Request):
+        """Generate a TTS preview file; does not send anything to Messenger."""
+        api_auth(request)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "invalid json body")
+        text = str((body or {}).get("text") or "").strip()
+        if not text:
+            raise HTTPException(400, "text 必填")
+        if len(text) > 500:
+            raise HTTPException(400, "试听文本最多 500 字")
+        mr_cfg = _messenger_cfg(config_manager)
+        vo_cfg = _dict_cfg(mr_cfg.get("voice_output"))
+        vo_cfg["enabled"] = True
+        try:
+            from src.ai.tts_pipeline import reset_tts_pipeline, get_tts_pipeline
+            reset_tts_pipeline()
+            tts = get_tts_pipeline(vo_cfg)
+            rv = await tts.synthesize(
+                text,
+                voice=str((body or {}).get("voice") or "").strip() or None,
+                timeout_sec=float((body or {}).get("timeout_sec") or vo_cfg.get("timeout_sec") or 30),
+            )
+            return {"ok": rv.ok, "result": rv.__dict__}
+        except Exception as exc:
+            raise HTTPException(500, f"TTS 试听失败: {type(exc).__name__}: {exc}")
+
     @app.get("/api/messenger-rpa/leads")
-    async def api_msgr_leads(request: Request, limit: int = 100):
+    def api_msgr_leads(request: Request, limit: int = 100):
         """List recent Messenger contacts with ICP/qualification evidence."""
         api_auth(request)
-        store = _get_store(request)
-        if store is None:
+        stores = _iter_account_stores(request, config_manager)
+        if not stores:
             raise HTTPException(503, "state_store 未注入")
         cfg = _messenger_cfg(config_manager)
-        reply_profiles = cfg.get("reply_profiles") or {}
-        chat_states = []
-        if hasattr(store, "list_chat_states"):
-            chat_states = store.list_chat_states(limit=int(limit or 100))
-
-        contexts: Dict[str, Dict[str, Any]] = {}
-        try:
-            cfg_dir = Path(config_manager.config_path).parent
-            db = cfg_dir / "bot.db"
-            if db.exists():
-                c = sqlite3.connect(str(db))
-                c.row_factory = sqlite3.Row
-                rows = c.execute(
-                    "SELECT user_id, data, updated_at FROM user_context "
-                    "WHERE user_id LIKE ? ORDER BY updated_at DESC LIMIT ?",
-                    ("acc_%:%", max(int(limit or 100) * 2, 200)),
-                ).fetchall()
-                c.close()
-                for row in rows:
-                    try:
-                        data = json.loads(row["data"] or "{}") or {}
-                    except Exception:
-                        data = {}
-                    data["_ctx_updated_at"] = row["updated_at"]
-                    contexts[str(row["user_id"])] = data
-        except Exception:
-            logger.debug("messenger leads context load failed", exc_info=True)
+        reply_profiles = _dict_cfg(cfg.get("reply_profiles"))
+        contexts = _load_bot_contexts(
+            config_manager,
+            limit=max(int(limit or 100) * 3, 300),
+        )
+        bindings = _binding_index(config_manager)
+        runs_by_chat: Dict[str, List[Dict[str, Any]]] = {}
+        approvals_by_chat: Dict[str, List[Dict[str, Any]]] = {}
+        chat_states: List[tuple[Dict[str, Any], Dict[str, Any]]] = []
+        store_by_chat: Dict[str, Dict[str, Any]] = {}
+        for si in stores:
+            store = si.get("store")
+            if store is None:
+                continue
+            if hasattr(store, "list_chat_states"):
+                for st in store.list_chat_states(limit=max(int(limit or 100) * 3, 300)):
+                    chat_key = str(st.get("chat_key") or "")
+                    chat_states.append((si, st))
+                    store_by_chat[chat_key] = si
+            try:
+                for r in store.recent_runs(limit=1000):
+                    ck = str(r.get("chat_key") or "")
+                    if ck:
+                        runs_by_chat.setdefault(ck, []).append(r)
+                        store_by_chat.setdefault(ck, si)
+            except Exception:
+                logger.debug("lead runs load failed", exc_info=True)
+            try:
+                for a in store.list_approvals(status=None, limit=1000):
+                    ck = str(a.get("chat_key") or "")
+                    if ck:
+                        approvals_by_chat.setdefault(ck, []).append(a)
+                        store_by_chat.setdefault(ck, si)
+            except Exception:
+                logger.debug("lead approvals load failed", exc_info=True)
 
         items: List[Dict[str, Any]] = []
         seen = set()
-        for st in chat_states:
+        for si, st in chat_states:
             chat_key = str(st.get("chat_key") or "")
             seen.add(chat_key)
             chat_name = str(st.get("chat_name") or chat_key)
             ctx = contexts.get(chat_key) or {}
-            lead = ctx.get("lead_qualification") if isinstance(ctx, dict) else {}
-            if not isinstance(lead, dict):
-                lead = {}
-            credit = {}
+            account_id = _account_id_from_chat_key(chat_key, str(si.get("account_id") or ""))
+            item = _build_lead_item(
+                chat_key=chat_key,
+                chat_name=chat_name or _chat_name_from_key(chat_key),
+                store_info=si,
+                st=st,
+                ctx=ctx,
+                reply_profiles=reply_profiles,
+                lead_qualification_cfg=_dict_cfg(cfg.get("lead_qualification")),
+                binding=bindings.get(account_id) or {},
+                runs=runs_by_chat.get(chat_key) or [],
+                approvals=approvals_by_chat.get(chat_key) or [],
+            )
             try:
-                credit = store.get_credit(chat_key)
+                credit = si["store"].get_credit(chat_key)
             except Exception:
                 credit = {}
-            items.append({
-                "chat_key": chat_key,
-                "chat_name": chat_name,
-                "updated_at": st.get("updated_at") or ctx.get("_ctx_updated_at") or 0,
-                "last_sent_at": st.get("last_sent_at") or 0,
-                "last_peer_text": st.get("last_peer_text") or ctx.get("last_message") or "",
-                "last_reply": st.get("last_reply") or ctx.get("last_reply") or "",
-                "credit": credit.get("credit", 100),
-                "credit_reason": credit.get("last_reason", ""),
-                "reply_lang": ctx.get("reply_lang", ""),
-                "persona_id": _profile_id_for_chat(reply_profiles, chat_key, chat_name),
-                "lead": lead,
-                "score": int(lead.get("icp_score") or 0),
-                "stage": str(lead.get("stage") or "unknown"),
-                "missing_fields": lead.get("missing_fields") or [],
-                "evidence": lead.get("evidence") or [],
-            })
+            item["credit"] = credit.get("credit", 100)
+            item["credit_reason"] = credit.get("last_reason", "")
+            try:
+                item["operator_handoff"] = si["store"].get_handoff(chat_key)
+            except Exception:
+                item["operator_handoff"] = {}
+            items.append(item)
         for chat_key, ctx in contexts.items():
             if chat_key in seen:
                 continue
             chat_name = str(ctx.get("chat_title") or chat_key.split(":", 1)[-1])
-            lead = ctx.get("lead_qualification") if isinstance(ctx, dict) else {}
-            if not isinstance(lead, dict):
-                lead = {}
-            items.append({
-                "chat_key": chat_key,
-                "chat_name": chat_name,
-                "updated_at": ctx.get("_ctx_updated_at") or 0,
-                "last_sent_at": 0,
-                "last_peer_text": ctx.get("last_message") or "",
-                "last_reply": ctx.get("last_reply") or "",
-                "credit": 100,
-                "credit_reason": "",
-                "reply_lang": ctx.get("reply_lang", ""),
-                "persona_id": _profile_id_for_chat(reply_profiles, chat_key, chat_name),
-                "lead": lead,
-                "score": int(lead.get("icp_score") or 0),
-                "stage": str(lead.get("stage") or "unknown"),
-                "missing_fields": lead.get("missing_fields") or [],
-                "evidence": lead.get("evidence") or [],
-            })
+            resolved_store, resolved_si = _store_info_for_chat_key(
+                request,
+                chat_key,
+                config_manager,
+            )
+            si = store_by_chat.get(chat_key) or resolved_si or {
+                "account_id": _account_id_from_chat_key(chat_key, "default"),
+                "label": _account_id_from_chat_key(chat_key, "default"),
+                "store": resolved_store or stores[0].get("store"),
+            }
+            account_id = _account_id_from_chat_key(chat_key, str(si.get("account_id") or ""))
+            item = _build_lead_item(
+                chat_key=chat_key,
+                chat_name=chat_name,
+                store_info=si,
+                st={},
+                ctx=ctx,
+                reply_profiles=reply_profiles,
+                lead_qualification_cfg=_dict_cfg(cfg.get("lead_qualification")),
+                binding=bindings.get(account_id) or {},
+                runs=runs_by_chat.get(chat_key) or [],
+                approvals=approvals_by_chat.get(chat_key) or [],
+            )
+            item["credit"] = 100
+            item["credit_reason"] = ""
+            try:
+                item["operator_handoff"] = si["store"].get_handoff(chat_key)
+            except Exception:
+                item["operator_handoff"] = {}
+            items.append(item)
         items.sort(key=lambda x: (int(x.get("score") or 0), float(x.get("updated_at") or 0)), reverse=True)
         total = len(items)
         high = sum(1 for x in items if int(x.get("score") or 0) >= 80)
         mid = sum(1 for x in items if 40 <= int(x.get("score") or 0) < 80)
         low = sum(1 for x in items if int(x.get("score") or 0) < 40)
+        ops = _lead_ops_summary(items)
         return {
             "items": items[:max(1, min(int(limit or 100), 1000))],
-            "summary": {"total": total, "high": high, "mid": mid, "low": low},
+            "summary": {
+                "total": total,
+                "high": high,
+                "mid": mid,
+                "low": low,
+                **ops,
+            },
             "ts": time.time(),
         }
 
+    @app.get("/api/messenger-rpa/leads/{chat_key:path}")
+    async def api_msgr_lead_detail(
+        request: Request,
+        chat_key: str,
+        history_limit: int = 80,
+    ):
+        """Customer handoff dossier for human operators."""
+        api_auth(request)
+        if not chat_key:
+            raise HTTPException(400, "chat_key 为空")
+        cfg = _messenger_cfg(config_manager)
+        reply_profiles = _dict_cfg(cfg.get("reply_profiles"))
+        bindings = _binding_index(config_manager)
+        account_id = _account_id_from_chat_key(chat_key, "")
+        store, selected = _store_info_for_chat_key(request, chat_key, config_manager)
+        if store is None:
+            raise HTTPException(503, "state_store 未注入")
+        st = {}
+        if store is not None and hasattr(store, "get_chat_state"):
+            st = store.get_chat_state(chat_key) or {}
+        ctx = (_load_bot_contexts(config_manager, chat_key=chat_key).get(chat_key) or {})
+        chat_name = str(
+            st.get("chat_name")
+            or ctx.get("chat_title")
+            or _chat_name_from_key(chat_key)
+        )
+        runs: List[Dict[str, Any]] = []
+        approvals: List[Dict[str, Any]] = []
+        if store is not None:
+            try:
+                runs = [
+                    r for r in store.recent_runs(limit=1000)
+                    if str(r.get("chat_key") or "") == chat_key
+                ]
+            except Exception:
+                logger.debug("lead detail runs failed", exc_info=True)
+            try:
+                approvals = store.list_approvals(status=None, chat_key=chat_key, limit=1000)
+            except Exception:
+                logger.debug("lead detail approvals failed", exc_info=True)
+        account_id = account_id or str(selected.get("account_id") or "")
+        binding = bindings.get(account_id) or {}
+        item = _build_lead_item(
+            chat_key=chat_key,
+            chat_name=chat_name,
+            store_info=selected,
+            st=st,
+            ctx=ctx,
+            reply_profiles=reply_profiles,
+            lead_qualification_cfg=_dict_cfg(cfg.get("lead_qualification")),
+            binding=binding,
+            runs=runs,
+            approvals=approvals,
+        )
+        try:
+            handoff_record = store.get_handoff(chat_key)
+        except Exception:
+            handoff_record = {}
+        item["operator_handoff"] = handoff_record
+        hist = ctx.get("_conversation_history") or []
+        if not isinstance(hist, list):
+            hist = []
+        max_hist = max(1, min(int(history_limit or 80), 300))
+        lead = item.get("lead") if isinstance(item.get("lead"), dict) else {}
+        profile = {
+            "country": lead.get("country", ""),
+            "gender": lead.get("gender", ""),
+            "age_range": lead.get("age_range", ""),
+            "occupation": lead.get("occupation", ""),
+            "occupation_tier": lead.get("occupation_tier", ""),
+            "income_band": lead.get("income_band", ""),
+            "income_confidence": lead.get("income_confidence", 0),
+            "need_tags": lead.get("need_tags") or [],
+            "relationship_stage": lead.get("stage", ""),
+            "reply_lang": item.get("reply_lang", ""),
+        }
+        summary = str(ctx.get("_conversation_summary") or "").strip()
+        if not summary:
+            summary = item.get("summary_short") or ""
+        handoff_brief = {
+            "one_line": item.get("summary_short") or "",
+            "detailed_summary": summary,
+            "handoff_advice": item.get("handoff") or {},
+            "known_facts": [
+                f"{k}: {v}" for k, v in profile.items()
+                if v not in ("", None, [], {})
+            ][:12],
+        }
+        return {
+            "ok": True,
+            "lead": item,
+            "account": {
+                "account_id": account_id,
+                "account_label": item.get("account_label", ""),
+                "adb_serial": item.get("adb_serial", ""),
+                "device_number": item.get("device_number", ""),
+                "device_alias": item.get("device_alias", ""),
+                "login_account": item.get("login_account", ""),
+                "line_id": item.get("line_id", ""),
+            },
+            "customer_profile": profile,
+            "handoff_brief": handoff_brief,
+            "operator_handoff": handoff_record,
+            "timeline": _timeline_for_chat(
+                runs=runs,
+                approvals=approvals,
+                limit=max_hist,
+            ),
+            "history_turns": hist[-max_hist:],
+            "approval_rows": approvals[:max_hist],
+            "run_rows": runs[:max_hist],
+        }
+
+    @app.put("/api/messenger-rpa/leads/{chat_key:path}/handoff")
+    async def api_msgr_lead_handoff_update(request: Request, chat_key: str):
+        """Persist human-operator follow-up state for a lead."""
+        api_auth(request)
+        if not chat_key:
+            raise HTTPException(400, "chat_key 为空")
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "invalid json body")
+        if not isinstance(body, dict):
+            raise HTTPException(400, "body 必须是对象")
+        allowed = {
+            "owner",
+            "status",
+            "line_status",
+            "priority",
+            "outcome",
+            "notes",
+            "next_followup_at",
+            "updated_by",
+        }
+        bad = [k for k in body.keys() if k not in allowed]
+        if bad:
+            raise HTTPException(400, f"不允许的字段: {bad}")
+        if "status" in body and str(body.get("status") or "") not in _HANDOFF_STATUSES:
+            raise HTTPException(400, "status 不合法")
+        if (
+            "line_status" in body
+            and str(body.get("line_status") or "") not in _LINE_HANDOFF_STATUSES
+        ):
+            raise HTTPException(400, "line_status 不合法")
+        if "priority" in body and str(body.get("priority") or "") not in _HANDOFF_PRIORITIES:
+            raise HTTPException(400, "priority 不合法")
+        next_followup_at = None
+        if "next_followup_at" in body:
+            raw = body.get("next_followup_at")
+            if raw in ("", None):
+                next_followup_at = 0.0
+            else:
+                try:
+                    next_followup_at = max(0.0, float(raw))
+                except Exception:
+                    raise HTTPException(400, "next_followup_at 必须是时间戳数字")
+        store, selected = _store_info_for_chat_key(request, chat_key, config_manager)
+        if store is None or not hasattr(store, "upsert_handoff"):
+            raise HTTPException(503, "state_store 不支持 handoff")
+        account_id = _account_id_from_chat_key(
+            chat_key,
+            str(selected.get("account_id") or ""),
+        )
+        try:
+            record = store.upsert_handoff(
+                chat_key,
+                account_id=account_id,
+                owner=body.get("owner") if "owner" in body else None,
+                status=body.get("status") if "status" in body else None,
+                line_status=body.get("line_status") if "line_status" in body else None,
+                priority=body.get("priority") if "priority" in body else None,
+                outcome=body.get("outcome") if "outcome" in body else None,
+                notes=body.get("notes") if "notes" in body else None,
+                next_followup_at=next_followup_at,
+                updated_by=str(body.get("updated_by") or "web"),
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        return {"ok": True, "handoff": record}
+
     @app.get("/api/messenger-rpa/recent")
-    async def api_msgr_recent(request: Request, limit: int = 50):
+    def api_msgr_recent(request: Request, limit: int = 50):
         api_auth(request)
         store = _get_store(request)
         if store is None:
@@ -597,7 +2717,7 @@ def register_messenger_rpa_routes(
 
     # ── REST: 审批 ─────────────────────────────────
     @app.get("/api/messenger-rpa/approvals")
-    async def api_msgr_approvals(
+    def api_msgr_approvals(
         request: Request,
         status: Optional[str] = "pending",
         limit: int = 50,
@@ -1200,6 +3320,28 @@ def register_messenger_rpa_routes(
                     lines.append(
                         f'messenger_rpa_caption_source_total{{source="{k}"}} {v}'
                     )
+            # P1-E1: 守卫触发计数（reason 维度）
+            guards = md.get("guard_skips") or {}
+            if guards:
+                lines.append(
+                    "# HELP messenger_rpa_guard_skips_total "
+                    "Safety-guard skip events by reason "
+                    "(P0-A inbox/P0-B thread/P0-C runaway/P1-C XML)"
+                )
+                lines.append(
+                    "# TYPE messenger_rpa_guard_skips_total counter"
+                )
+                for k, v in guards.items():
+                    safe = (
+                        str(k)
+                        .replace("\\", "\\\\")
+                        .replace('"', '\\"')
+                        .replace("\n", " ")
+                    )
+                    lines.append(
+                        f'messenger_rpa_guard_skips_total'
+                        f'{{reason="{safe}"}} {v}'
+                    )
 
         # 2) 按 variant 指标
         if store is not None:
@@ -1231,6 +3373,22 @@ def register_messenger_rpa_routes(
                     "sent / (sent + rejected) per variant", "gauge",
                     d.get("approve_ratio"), labels=labels,
                 )
+
+        # ★ P11.8 (2026-05-04)：messenger_rpa hint counters → Prometheus
+        # 输出 messenger_rpa_hint_total{name="<hint_base>"} <count>
+        try:
+            from src.monitoring.metrics_store import get_metrics_store
+            _hint_metrics = get_metrics_store().get_messenger_rpa_metrics()
+            for _name, _cnt in sorted(_hint_metrics.items()):
+                _emit(
+                    "messenger_rpa_hint_total",
+                    "Cumulative messenger_rpa hint event count",
+                    "counter",
+                    _cnt,
+                    labels={"name": _name},
+                )
+        except Exception:
+            pass
 
         body = "\n".join(lines) + "\n"
         # ★ P6-4：附上 LLM cost/tokens per (model, tier, account)
@@ -1345,6 +3503,194 @@ def register_messenger_rpa_routes(
             return {"ok": bool(r.get("ok")), "account_id": account_id, "result": r}
         except Exception as ex:
             raise HTTPException(500, f"send-to 失败: {ex}")
+
+    # ── P1-E2：紧急停发（运营舆情应急一键灭火）─────────────
+    @app.post("/api/messenger-rpa/accounts/{account_id}/chats/emergency_stop")
+    async def api_msgr_emergency_stop(request: Request, account_id: str):
+        """🚨 一键紧急停发：把指定 chat 加入永久 skip 黑名单 + 设短期内存
+        cooldown，立即停止所有自动回复。
+
+        Body JSON: ``{"chat_name": "...", "reason"?: "...",
+                       "self_skip_sec"?: 1800}``
+          - chat_name 必填
+          - reason 默认 "emergency_stop"，写入 skipped_chats.reason
+          - self_skip_sec 默认 1800（30 分钟），同时写 P0-4 持久化 self_skip
+            表（重启后仍然生效），并通过 _PersistentSelfSkipDict.__setitem__
+            同步刷新 runner 内存 dict。设 0 则跳过 self_skip 仅留永久黑名单。
+
+        三层保护：
+          1. messenger_rpa_skipped_chats 表 → is_skipped_chat() 永久跳过
+             （inbox 阶段 ck check + send_gate L3 都会拦）
+          2. messenger_rpa_self_skip 表（P0-4）→ norm_key 维度 cooldown，
+             重启自动回填到 _self_skip_until 内存 dict
+          3. runner._self_skip_until 内存 dict → 当下生效，不需要等任何
+             其他事件触发
+
+        响应：``{"ok": true, "account_id": "...", "chat_name": "...",
+                   "chat_key": "...", "reason": "...",
+                   "self_skip_until_ts": 1700000000.0}``
+        """
+        api_auth(request)
+        svc = _get_service(request)
+        if svc is None:
+            raise HTTPException(503, "service 未注入")
+        reg = getattr(svc, "_account_registry", None)
+        if reg is None:
+            raise HTTPException(503, "account_registry 未初始化")
+        if reg.get(account_id) is None:
+            raise HTTPException(404, f"未知 account: {account_id}")
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            raise HTTPException(400, "body 必须是 JSON 对象")
+        chat_name = str(body.get("chat_name") or "").strip()
+        if not chat_name:
+            raise HTTPException(400, "chat_name 必填")
+        reason = str(body.get("reason") or "emergency_stop").strip()
+        try:
+            self_skip_sec = float(body.get("self_skip_sec", 1800) or 0)
+        except (TypeError, ValueError):
+            self_skip_sec = 1800.0
+        try:
+            runner = svc._get_or_create_runner(account_id)
+        except Exception as ex:
+            raise HTTPException(500, f"runner 初始化失败: {ex}")
+        chat_key = f"{runner._chat_key_prefix}:{chat_name}"
+        try:
+            runner._state.add_skipped_chat(
+                chat_key, chat_name=chat_name, reason=reason,
+            )
+        except Exception as ex:
+            raise HTTPException(
+                500, f"add_skipped_chat 失败: {type(ex).__name__}:{ex}",
+            )
+        self_skip_until = 0.0
+        if self_skip_sec > 0:
+            try:
+                from src.integrations.messenger_rpa.runner import (
+                    _self_skip_norm_key,
+                )
+                norm_key = _self_skip_norm_key(chat_name)
+                # 写到 runner 内存 dict 触发 P0-4 同步落库
+                # （_PersistentSelfSkipDict.__setitem__ 会自动 epoch->mono 转换）
+                _mono_until = (
+                    __import__("time").monotonic() + self_skip_sec
+                )
+                runner._self_skip_until[norm_key] = _mono_until
+                self_skip_until = (
+                    __import__("time").time() + self_skip_sec
+                )
+            except Exception:
+                # self_skip 失败不致命，永久黑名单已写入
+                pass
+        return {
+            "ok": True,
+            "account_id": account_id,
+            "chat_name": chat_name,
+            "chat_key": chat_key,
+            "reason": reason,
+            "self_skip_until_ts": self_skip_until,
+            "self_skip_sec": self_skip_sec,
+        }
+
+    @app.delete(
+        "/api/messenger-rpa/accounts/{account_id}/chats/emergency_stop",
+    )
+    async def api_msgr_emergency_stop_release(
+        request: Request, account_id: str,
+    ):
+        """🔓 释放紧急停发：从黑名单移除 + 清 self_skip cooldown。
+
+        Body JSON 或 query: ``{"chat_name": "..."}``
+        响应：``{"ok": true, "removed_blacklist": true|false,
+                  "cleared_self_skip": true|false}``
+        """
+        api_auth(request)
+        svc = _get_service(request)
+        if svc is None:
+            raise HTTPException(503, "service 未注入")
+        reg = getattr(svc, "_account_registry", None)
+        if reg is None or reg.get(account_id) is None:
+            raise HTTPException(404, f"未知 account: {account_id}")
+        # body / query 都接受
+        chat_name = ""
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                chat_name = str(body.get("chat_name") or "").strip()
+        except Exception:
+            pass
+        if not chat_name:
+            chat_name = str(
+                request.query_params.get("chat_name") or "",
+            ).strip()
+        if not chat_name:
+            raise HTTPException(400, "chat_name 必填")
+        try:
+            runner = svc._get_or_create_runner(account_id)
+        except Exception as ex:
+            raise HTTPException(500, f"runner 初始化失败: {ex}")
+        chat_key = f"{runner._chat_key_prefix}:{chat_name}"
+        removed_bl = False
+        cleared_ss = False
+        try:
+            removed_bl = bool(runner._state.remove_skipped_chat(chat_key))
+        except Exception:
+            pass
+        try:
+            from src.integrations.messenger_rpa.runner import (
+                _self_skip_norm_key,
+            )
+            norm_key = _self_skip_norm_key(chat_name)
+            if norm_key in runner._self_skip_until:
+                # _PersistentSelfSkipDict.__delitem__ 会清 DB 表
+                del runner._self_skip_until[norm_key]
+                cleared_ss = True
+        except Exception:
+            pass
+        return {
+            "ok": True,
+            "account_id": account_id,
+            "chat_name": chat_name,
+            "chat_key": chat_key,
+            "removed_blacklist": removed_bl,
+            "cleared_self_skip": cleared_ss,
+        }
+
+    @app.get(
+        "/api/messenger-rpa/accounts/{account_id}/chats/skipped",
+    )
+    async def api_msgr_skipped_chats_list(
+        request: Request, account_id: str,
+    ):
+        """列出该账号当前所有被永久跳过的 chat（含 reason 和创建时间）。"""
+        api_auth(request)
+        svc = _get_service(request)
+        if svc is None:
+            raise HTTPException(503, "service 未注入")
+        reg = getattr(svc, "_account_registry", None)
+        if reg is None or reg.get(account_id) is None:
+            raise HTTPException(404, f"未知 account: {account_id}")
+        try:
+            runner = svc._get_or_create_runner(account_id)
+        except Exception as ex:
+            raise HTTPException(500, f"runner 初始化失败: {ex}")
+        try:
+            limit = int(request.query_params.get("limit") or 100)
+        except (TypeError, ValueError):
+            limit = 100
+        try:
+            rows = runner._state.list_skipped_chats(limit=limit)
+        except Exception as ex:
+            raise HTTPException(500, f"list_skipped_chats 失败: {ex}")
+        return {
+            "ok": True,
+            "account_id": account_id,
+            "count": len(rows),
+            "chats": rows,
+        }
 
     # ── P4-7：信用分 ────────────────────────────────
     @app.get("/api/messenger-rpa/credits")
@@ -1740,7 +4086,7 @@ def register_messenger_rpa_routes(
 
     # ── 转化漏斗 + A/B 指标看板 ──────────────────────────
     @app.get("/api/messenger-rpa/funnel")
-    async def api_msgr_funnel(request: Request):
+    def api_msgr_funnel(request: Request):
         """转化漏斗 + Persona A/B 实验指标。
 
         返回字段：
@@ -1863,5 +4209,135 @@ def register_messenger_rpa_routes(
         if svc is None:
             raise HTTPException(503, "service 未注入")
         return svc.coordinator_snapshot()
+
+    # ── B2: per-chat persona binding API ──
+    # 让运营在 Web 后台为每个 chat 单独指定人设；批量为账号下所有 chat 设人设
+    @app.get("/api/messenger-rpa/chat-persona-bindings")
+    async def api_msgr_chat_persona_bindings_list(request: Request):
+        """列出所有 chat 的运营手动绑定人设。
+        query 参数：account_id（可选，过滤特定账号）"""
+        api_auth(request)
+        store = _get_store(request)
+        if store is None:
+            raise HTTPException(503, "state_store 未注入")
+        account_id = str(request.query_params.get("account_id") or "").strip()
+        try:
+            bindings = store.list_chat_persona_overrides(account_id=account_id)
+            return {"ok": True, "bindings": bindings, "count": len(bindings)}
+        except Exception as ex:
+            raise HTTPException(500, f"list bindings failed: {ex}")
+
+    @app.put("/api/messenger-rpa/chat-persona-bindings/{chat_name}")
+    async def api_msgr_chat_persona_binding_set(
+        request: Request, chat_name: str,
+    ):
+        """运营单聊指定 reply_profile_id。
+        body: {"reply_profile_id": "...", "account_id": "...", "notes": "..."}"""
+        api_auth(request)
+        store = _get_store(request)
+        if store is None:
+            raise HTTPException(503, "state_store 未注入")
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "invalid json body")
+        if not isinstance(body, dict):
+            raise HTTPException(400, "body 必须是对象")
+        reply_profile_id = str(body.get("reply_profile_id") or "").strip()
+        if not reply_profile_id:
+            raise HTTPException(400, "reply_profile_id is required")
+        account_id = str(body.get("account_id") or "").strip()
+        notes = str(body.get("notes") or "")
+        try:
+            ok = store.upsert_chat_persona_override(
+                chat_name=chat_name,
+                reply_profile_id=reply_profile_id,
+                account_id=account_id,
+                bound_by="web_admin",
+                notes=notes,
+            )
+            return {
+                "ok": ok,
+                "chat_name": chat_name,
+                "reply_profile_id": reply_profile_id,
+                "account_id": account_id,
+            }
+        except Exception as ex:
+            raise HTTPException(500, f"set binding failed: {ex}")
+
+    @app.delete("/api/messenger-rpa/chat-persona-bindings/{chat_name}")
+    async def api_msgr_chat_persona_binding_unset(
+        request: Request, chat_name: str,
+    ):
+        """运营移除某 chat 的指定，回到自动匹配。
+        query: account_id（可选）"""
+        api_auth(request)
+        store = _get_store(request)
+        if store is None:
+            raise HTTPException(503, "state_store 未注入")
+        account_id = str(request.query_params.get("account_id") or "").strip()
+        try:
+            removed = store.remove_chat_persona_override(
+                chat_name=chat_name, account_id=account_id,
+            )
+            return {"ok": removed, "chat_name": chat_name, "account_id": account_id}
+        except Exception as ex:
+            raise HTTPException(500, f"unset failed: {ex}")
+
+    @app.post("/api/messenger-rpa/chat-persona-bindings/batch")
+    async def api_msgr_chat_persona_binding_batch(request: Request):
+        """批量绑定。
+        body: {
+          "bindings": [
+             {"chat_name": "...", "reply_profile_id": "...", "account_id": "..."},
+             ...
+          ]
+        }
+        或者快捷模式：
+        body: {
+          "account_id": "vwnj_test",
+          "reply_profile_id": "warm_companion",
+          "chat_names": ["A", "B", "C"]    -- 批量给这些 chat 设同一人设
+        }
+        """
+        api_auth(request)
+        store = _get_store(request)
+        if store is None:
+            raise HTTPException(503, "state_store 未注入")
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "invalid json body")
+        if not isinstance(body, dict):
+            raise HTTPException(400, "body 必须是对象")
+        bindings = body.get("bindings")
+        if not bindings and body.get("chat_names"):
+            # 快捷模式：所有 chat 用同一 profile_id
+            shared_profile = str(body.get("reply_profile_id") or "").strip()
+            shared_account = str(body.get("account_id") or "").strip()
+            shared_notes = str(body.get("notes") or "")
+            if not shared_profile:
+                raise HTTPException(400, "reply_profile_id is required in shortcut mode")
+            chat_names = body.get("chat_names") or []
+            if not isinstance(chat_names, list):
+                raise HTTPException(400, "chat_names 必须是数组")
+            bindings = [
+                {
+                    "chat_name": str(n).strip(),
+                    "reply_profile_id": shared_profile,
+                    "account_id": shared_account,
+                    "notes": shared_notes,
+                }
+                for n in chat_names if str(n).strip()
+            ]
+        if not isinstance(bindings, list):
+            raise HTTPException(400, "bindings 必须是数组")
+        try:
+            n = store.batch_upsert_chat_persona_overrides(
+                bindings, bound_by="web_admin",
+            )
+            return {"ok": True, "applied": n, "total_in_request": len(bindings)}
+        except Exception as ex:
+            raise HTTPException(500, f"batch upsert failed: {ex}")
 
     logger.info("Messenger RPA routes registered (status/approvals/trigger/...)")

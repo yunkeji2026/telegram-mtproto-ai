@@ -241,6 +241,8 @@ def test_latest_snippet_row_can_guard_when_thread_title_missing() -> None:
     assert row is not None
     assert row.preview.startswith("You:")
     assert row.is_self_last is True
+    assert row.has_self_prefix is True
+    assert row.is_self_media_placeholder is False
 
 
 def test_latest_snippet_row_ignores_self_prefix_without_text_payload() -> None:
@@ -258,6 +260,8 @@ def test_latest_snippet_row_ignores_self_prefix_without_text_payload() -> None:
     assert row is not None
     assert row.preview.startswith("You:")
     assert row.is_self_last is False
+    assert row.has_self_prefix is True
+    assert row.is_self_media_placeholder is True
 
 
 def test_iter_inbox_rows_detects_english_self_prefixes() -> None:

@@ -101,6 +101,8 @@ celerybeat.pid
 
 # Environments
 .env
+.env.local
+config/secrets.local.json
 .venv
 env/
 venv/
@@ -172,6 +174,26 @@ config/snapshots/
 # Messenger RPA 截图 + replays（含他人对话）
 tmp_messenger_rpa/
 tmp_e2e_screens/
+tmp_screenshots/
+tmp_voice_notes/
+tmp_voice_replies/
+
+# 用户语音样本（PII：用户本人 .wav + consent 文件，不入库）
+voice_samples/
+tools/voice_samples/
+
+# ML 模型完整目录（whisper 等大权重，216M 级别）
+models/
+
+# 一次性调试脚本（不应入库）
+check_deferred.py
+check_deferred2.py
+check_tables.py
+check_vz.py
+tmp_check_db.py
+
+# 不规则后缀备份（不命中 *.bak 通配）
+*.bak.*
 
 # Temp 缓存
 temp/

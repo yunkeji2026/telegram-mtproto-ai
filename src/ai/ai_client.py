@@ -249,6 +249,8 @@ class AIClient(LoggerMixin):
         context: Optional[Dict[str, Any]] = None,
         conversation_history: Optional[List[Dict[str, str]]] = None,
         strategy_overrides: Optional[Dict[str, Any]] = None,
+        *,
+        _skip_quality_check: bool = False,
     ) -> Optional[str]:
         """OpenAI 兼容（Ollama）对话生成，与 generate_reply 行为对齐（熔断、重试、兜底）。"""
         _fb_lang = (context or {}).get("reply_lang", "zh")
@@ -349,11 +351,6 @@ class AIClient(LoggerMixin):
                     except Exception:
                         pass
                     self.last_call_time = time.time()
-                    self._quality_tracker.record_call(
-                        prompt_tokens=pt, completion_tokens=ct,
-                        elapsed_ms=int(elapsed_time * 1000),
-                        reply=reply, request_id=request_id,
-                    )
                     # ★ P6-4：按 (model, tier, account) 累积 tokens + cost
                     try:
                         from src.ai.llm_cost import get_llm_cost
@@ -380,14 +377,24 @@ class AIClient(LoggerMixin):
                                 get_metrics_store().set_circuit_breaker_state("closed")
                             except Exception:
                                 pass
-                    try:
-                        from src.monitoring.metrics_store import get_metrics_store
-                        _ms = get_metrics_store()
-                        _ms.record_reply_length(len(reply))
-                        _ms.record_ai_success()
-                    except Exception:
-                        pass
                     reply = await self._guard_reply_language(reply, context)
+                    # ★ QualityTracker / reply_length 必须用 guard 之后的最终文本，
+                    #   否则 LLM 偶发的 "yes..." 等 raw 前缀会被反复误判 too_short。
+                    # ★ _skip_quality_check：yes/no 短答型 prompt（chat() 入口）
+                    #   3 字符回复是设计行为，跳过 too_short 误报。
+                    if not _skip_quality_check:
+                        self._quality_tracker.record_call(
+                            prompt_tokens=pt, completion_tokens=ct,
+                            elapsed_ms=int(elapsed_time * 1000),
+                            reply=reply, request_id=request_id,
+                        )
+                        try:
+                            from src.monitoring.metrics_store import get_metrics_store
+                            _ms = get_metrics_store()
+                            _ms.record_reply_length(len(reply))
+                            _ms.record_ai_success()
+                        except Exception:
+                            pass
                     return reply
                 self.logger.warning("AI 返回空响应")
                 if self._cb_enabled:
@@ -443,18 +450,24 @@ class AIClient(LoggerMixin):
         user_message: str,
         context: Optional[Dict[str, Any]] = None,
         conversation_history: Optional[List[Dict[str, str]]] = None,
-        strategy_overrides: Optional[Dict[str, Any]] = None
+        strategy_overrides: Optional[Dict[str, Any]] = None,
+        *,
+        _skip_quality_check: bool = False,
     ) -> Optional[str]:
         """
         生成回复（含重试与兜底：失败时返回友好提示而非 None）
 
         strategy_overrides 可包含 temperature / max_tokens / context_rounds
         以覆盖实例默认值，实现按策略差异化调用。
+
+        _skip_quality_check：yes/no 短答型 prompt（如 chat() 入口）开启此项后
+        跳过 QualityTracker，避免 3 字符回复被误判 too_short。
         """
         strategy_overrides = self._apply_tier_overrides(strategy_overrides, context)
         if self._use_openai_compat:
             return await self._generate_reply_openai_compat(
-                user_message, context, conversation_history, strategy_overrides
+                user_message, context, conversation_history, strategy_overrides,
+                _skip_quality_check=_skip_quality_check,
             )
         _fb_lang = (context or {}).get("reply_lang", "zh")
         if not self.client:
@@ -537,11 +550,6 @@ class AIClient(LoggerMixin):
                                 "max_output_tokens=%d, completion=%d, request_id=%s)",
                                 finish, use_max_tokens, ct, request_id or "n/a",
                             )
-                        self._quality_tracker.record_call(
-                            prompt_tokens=pt, completion_tokens=ct,
-                            elapsed_ms=int(elapsed_time * 1000),
-                            reply=reply, request_id=request_id,
-                        )
                         # ★ P6-4：Gemini 分支 cost tracking
                         try:
                             from src.ai.llm_cost import get_llm_cost
@@ -573,16 +581,24 @@ class AIClient(LoggerMixin):
                                 except Exception:
                                     pass
                         stripped = reply.strip()
-                        try:
-                            from src.monitoring.metrics_store import get_metrics_store
-                            _ms = get_metrics_store()
-                            _ms.record_reply_length(len(stripped))
-                            _ms.record_ai_success()
-                            if finish and "MAX_TOKENS" in finish.upper():
-                                _ms.record_truncated_reply()
-                        except Exception:
-                            pass
                         stripped = await self._guard_reply_language(stripped, context)
+                        # ★ QualityTracker / reply_length 移到 guard 之后，记录最终发出的文本；
+                        #   _skip_quality_check：yes/no 短答（chat()）跳过 too_short 误报。
+                        if not _skip_quality_check:
+                            self._quality_tracker.record_call(
+                                prompt_tokens=pt, completion_tokens=ct,
+                                elapsed_ms=int(elapsed_time * 1000),
+                                reply=stripped, request_id=request_id,
+                            )
+                            try:
+                                from src.monitoring.metrics_store import get_metrics_store
+                                _ms = get_metrics_store()
+                                _ms.record_reply_length(len(stripped))
+                                _ms.record_ai_success()
+                                if finish and "MAX_TOKENS" in finish.upper():
+                                    _ms.record_truncated_reply()
+                            except Exception:
+                                pass
                         return stripped
                 self.logger.warning("AI 返回空响应")
                 if self._cb_enabled:
@@ -645,25 +661,83 @@ class AIClient(LoggerMixin):
     _FALLBACK_REPLIES_EN = [
         "Got it, please hold on a moment~",
         "Received, let me check for you right away.",
-        "Sure, one moment please~",
-        "Hello, please wait a moment~",
-        "Noted, checking on it now.",
     ]
 
     @staticmethod
+    def _has_chinese_japanese_mixing(reply: str) -> bool:
+        """Detect alternating Chinese/Japanese sentences in one reply.
+
+        Japanese text always contains kana even when using kanji.
+        A sentence with CJK but zero kana is Chinese, not Japanese.
+        Returns True when the reply has BOTH kana-bearing sentences (Japanese)
+        AND pure-CJK-no-kana sentences (Chinese) — i.e. mixed output.
+        """
+        has_japanese = False
+        has_pure_chinese = False
+        for sent in re.split(r"[\u3002\uff01\uff1f!?\n]", reply):
+            sent = sent.strip()
+            if len(sent) < 4:
+                continue
+            kana = len(re.findall(r"[\u3040-\u309F\u30A0-\u30FF]", sent))
+            cjk = len(re.findall(r"[\u4e00-\u9fff]", sent))
+            if kana >= 2:
+                has_japanese = True
+            elif cjk >= 4 and kana == 0:
+                has_pure_chinese = True
+        return has_japanese and has_pure_chinese
+
+    @staticmethod
     def _reply_lang_mismatch(reply: str, expected_lang: str) -> bool:
-        """Return True when reply language clearly mismatches expected_lang."""
+        """Return True when *reply* is clearly NOT in *expected_lang*.
+
+        Used by :meth:`_guard_reply_language` both to trigger correction and
+        to verify that the corrected text actually matches.
+
+        Heuristics (lightweight, no LLM call):
+          - ja/ko: Japanese requires kana; Korean requires Hangul.  A reply
+            with CJK but zero kana/hangul is Chinese, not the target language.
+          - Other non-zh scripts (ar_ur, hi, ru, th …): at least one char of
+            the target script should appear.
+          - en / Latin languages: CJK-dominant text is a mismatch.
+          - zh: never considered a mismatch (caller already short-circuits).
+        """
         if not reply or not expected_lang:
             return False
-        cjk = len(re.findall(r"[\u4e00-\u9fff]", reply))
-        latin = len(re.findall(r"[A-Za-z]", reply))
-        total = cjk + latin
-        if total < 8:
-            return False
         if expected_lang == "zh":
-            return cjk / total < 0.2
-        else:
-            return cjk / total > 0.35
+            return False
+
+        if expected_lang == "ja":
+            kana = len(re.findall(r"[\u3040-\u309F\u30A0-\u30FF]", reply))
+            cjk = len(re.findall(r"[\u4e00-\u9fff]", reply))
+            return kana == 0 and cjk > 8
+
+        if expected_lang == "ko":
+            hangul = len(re.findall(r"[\uAC00-\uD7AF\u1100-\u11FF]", reply))
+            cjk = len(re.findall(r"[\u4e00-\u9fff]", reply))
+            return hangul == 0 and cjk > 8
+
+        # Non-CJK scripts: check the target script appears at least once
+        _script_patterns = {
+            "ar_ur": r"[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]",
+            "hi": r"[\u0900-\u097F]",
+            "ru": r"[\u0400-\u04FF]",
+            "th": r"[\u0E00-\u0E7F]",
+            "pa": r"[\u0A00-\u0A7F]",
+            "bn": r"[\u0980-\u09FF]",
+        }
+        pat = _script_patterns.get(expected_lang)
+        if pat:
+            if not re.search(pat, reply):
+                cjk = len(re.findall(r"[\u4e00-\u9fff]", reply))
+                return cjk > 8
+            return False
+
+        # en / Latin: CJK-dominant → mismatch
+        cjk = len(re.findall(r"[\u4e00-\u9fff]", reply))
+        letters = len(re.findall(r"[A-Za-z]", reply))
+        if cjk > 8 and letters < cjk:
+            return True
+        return False
 
     async def _guard_reply_language(
         self, reply: str, context: Optional[Dict[str, Any]]
@@ -673,12 +747,20 @@ class AIClient(LoggerMixin):
         if not reply or not context:
             return reply
         _rl = context.get("reply_lang")
-        if not _rl or _rl in ("zh", "ja", "ko") or context.get("_skip_lang_guard"):
+        if not _rl or _rl == "zh" or context.get("_skip_lang_guard"):
             return reply
         _cfg_ctx = (self.config.config or {}) if self.config else {}
-        if isinstance(_cfg_ctx, dict) and effective_domain_name(_cfg_ctx) == "conversion":
+        _is_companion = isinstance(_cfg_ctx, dict) and effective_domain_name(_cfg_ctx) == "conversion"
+        # ja/ko: Japanese uses lots of kanji so the CJK-ratio check is unreliable.
+        # Instead, trigger only when the reply has NO kana at all (clearly Chinese).
+        if _rl in ("ja", "ko"):
+            kana = len(re.findall(r"[\u3040-\u309F\u30A0-\u30FF]", reply))
+            cjk = len(re.findall(r"[\u4e00-\u9fff]", reply))
+            if not (kana == 0 and cjk > 8):
+                return reply
+        elif _is_companion:
             return reply
-        if not self._reply_lang_mismatch(reply, _rl):
+        elif not self._reply_lang_mismatch(reply, _rl):
             return reply
         _lang_name = self._LANG_NAMES.get(_rl, _rl)
         self.logger.warning(
@@ -817,11 +899,27 @@ class AIClient(LoggerMixin):
         _cfg_ins = (self.config.config or {}) if self.config and hasattr(self.config, "config") else {}
         _instr_companion = isinstance(_cfg_ins, dict) and effective_domain_name(_cfg_ins) == "conversion"
         if _reply_lang != "zh" and _lang_name:
-            _no_zh_extra = (
-                ""
-                if _instr_companion
-                else " DO NOT output any Chinese characters (except channel names like EP/JC/EasyPaisa/JazzCash)."
-            )
+            if _instr_companion:
+                # companion 模式对 ja/ko 加明确禁混指令：
+                # 日/韩文本本身含大量 CJK，所以不能说"禁 CJK"，
+                # 但必须明确禁止把中文句子夹在日/韩回复里。
+                if _reply_lang == "ja":
+                    _no_zh_extra = (
+                        " 絶対に中国語の文章や括弧内の中国語注釈を混入しないでください。"
+                        "全ての文を日本語のみで書くこと。"
+                        " CRITICAL: Do NOT mix Chinese sentences or parenthetical Chinese"
+                        " notes into your Japanese reply. Every sentence must be Japanese ONLY."
+                    )
+                elif _reply_lang == "ko":
+                    _no_zh_extra = (
+                        " 절대로 중국어 문장을 섞지 마세요. 한국어만 사용하세요."
+                        " CRITICAL: Do NOT mix Chinese sentences into your Korean reply."
+                        " Use Korean ONLY."
+                    )
+                else:
+                    _no_zh_extra = ""
+            else:
+                _no_zh_extra = " DO NOT output any Chinese characters (except channel names like EP/JC/EasyPaisa/JazzCash)."
             parts.append(
                 f"【LANGUAGE RULE — TOP PRIORITY — MANDATORY】\n"
                 f"DETECTED USER LANGUAGE: {_lang_name}.\n"
@@ -1996,12 +2094,18 @@ class AIClient(LoggerMixin):
         prompt: str,
         strategy_overrides: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
-        """短提示词调用（如 L2 触发置信度），走与 generate_reply 相同的提供方。"""
+        """短提示词调用（如 L2 触发置信度），走与 generate_reply 相同的提供方。
+
+        ★ 这条入口设计就是给 yes/no 等短答 prompt 用的（见 runner.py 7267
+        context_check 等），3 字符 'yes' 是合法回复——必须跳过 QualityTracker，
+        否则会反复触发 too_short 误报，污染监控信号。
+        """
         return await self.generate_reply(
             prompt,
             context=None,
             conversation_history=None,
             strategy_overrides=strategy_overrides,
+            _skip_quality_check=True,
         )
 
     def get_stats(self) -> Dict[str, Any]:

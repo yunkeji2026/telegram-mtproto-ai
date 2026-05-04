@@ -68,6 +68,14 @@ class InboxRowBounds:
     def height(self) -> int:
         return self.y_bottom - self.y_top
 
+    @property
+    def is_self_last(self) -> bool:
+        """True when the inbox preview indicates the latest message is self-sent."""
+        from src.integrations.messenger_rpa.ui_scraper import (
+            _self_prefixed_preview_has_text,
+        )
+        return _self_prefixed_preview_has_text(self.preview)
+
 
 def dump_inbox_rows(
     serial: str,
@@ -96,7 +104,31 @@ def _dump_xml(
 
     MIUI 会在 dump 时打一堆 ThemeCompatibility stacktrace 到 stderr——
     那些不是错误，dump 实际成功了。因此我们只看文件内容不看返回码。
+
+    路径 A (2026-05-04)：优先走 thread_actions 的 uiautomator2 持久 service
+    路径，毫秒级 + 对 lowmemkill 免疫。失败时再回退 legacy adb shell。
     """
+    # ── 优先 uiautomator2（持久 service）────────────────────
+    try:
+        from src.integrations.messenger_rpa.thread_actions import _dump_via_u2
+        u2_xml = _dump_via_u2(serial)
+        if u2_xml:
+            return u2_xml
+    except Exception:
+        pass  # 防御性：u2 异常退到 legacy
+    # ── Legacy fallback：mem 压力守卫 + adb shell ──────────
+    try:
+        from src.integrations.messenger_rpa.thread_actions import (
+            _dump_likely_to_fail,
+        )
+        if _dump_likely_to_fail(serial):
+            logger.debug(
+                "[ui_inbox_scraper] skip legacy dump: MemAvailable 不足，"
+                "lowmemkill 会杀 uiautomator"
+            )
+            return None
+    except Exception:
+        pass  # 防御性：mem helper 任何异常都不阻断 dump
     tmp_local = Path(tempfile.mkdtemp(prefix="mrpa_ui_")) / "inbox.xml"
     remote = "/sdcard/mrpa_inbox.xml"
     try:
@@ -116,11 +148,28 @@ def _dump_xml(
             check=False,
         )
         if not tmp_local.exists() or tmp_local.stat().st_size < 200:
-            logger.debug(
-                "[ui_inbox_scraper] pull 未拿到可用 xml: rc=%s stderr=%s",
-                pull.returncode, (pull.stderr or b"")[:200],
-            )
-            return None
+            # Samsung/部分ROM：uiautomator 先写 /sdcard/window_dump.xml 再复制到
+            # 自定义路径，被 OOM Kill 后只有默认路径存在。尝试 pull 默认路径。
+            _fb_remote = "/sdcard/window_dump.xml"
+            if remote != _fb_remote:
+                fb_pull = subprocess.run(
+                    ["adb", "-s", serial, "pull", _fb_remote, str(tmp_local)],
+                    capture_output=True, timeout=timeout_s, check=False,
+                )
+                if tmp_local.exists() and tmp_local.stat().st_size >= 200:
+                    logger.debug("[ui_inbox_scraper] pull fallback ok from %s", _fb_remote)
+                else:
+                    logger.debug(
+                        "[ui_inbox_scraper] pull 未拿到可用 xml: rc=%s stderr=%s",
+                        pull.returncode, (pull.stderr or b"")[:200],
+                    )
+                    return None
+            else:
+                logger.debug(
+                    "[ui_inbox_scraper] pull 未拿到可用 xml: rc=%s stderr=%s",
+                    pull.returncode, (pull.stderr or b"")[:200],
+                )
+                return None
         try:
             return tmp_local.read_text(encoding="utf-8", errors="replace")
         except OSError as e:
@@ -168,11 +217,52 @@ def find_row_by_preview(
     """根据 preview 文本前缀匹配（Vision 有时把 preview 当成 name 返）。"""
     if not preview_hint:
         return None
-    needle = preview_hint.strip()[:prefix_len].lower()
+    # 剥离 "Draft: " / "You: " 前缀——companion drain 时 Vision 带前缀但 XML 不带
+    raw = preview_hint.strip()
+    for _pfx in ("Draft: ", "Draft:", "You: ", "You:"):
+        if raw.startswith(_pfx):
+            raw = raw[len(_pfx):]
+            break
+    # 剥离 Vision 追加的时间戳后缀 " · 10:32 am" / " · 10:32"
+    # XML 行 preview 只含消息正文，不含时间戳
+    raw = re.sub(r"\s*·\s*\d{1,2}:\d{2}(\s*[aApP][mM])?\s*$", "", raw).strip()
+    needle = raw[:prefix_len].lower()
     if not needle:
         return None
     for r in rows:
-        if needle in r.preview.strip()[:prefix_len + 5].lower():
+        haystack = r.preview.strip()
+        for _pfx in ("Draft: ", "Draft:", "You: ", "You:"):
+            if haystack.startswith(_pfx):
+                haystack = haystack[len(_pfx):]
+                break
+        if needle in haystack[:prefix_len + 5].lower():
+            return r
+    return None
+
+
+def find_row_by_name(
+    rows: List[InboxRowBounds], name_hint: str,
+) -> Optional[InboxRowBounds]:
+    """★ 修 row_index 偏移 bug：按 chat name 在 raw_desc 里匹配。
+
+    messenger 的 content-desc 通常含发送方名字，例如：
+      'Victor Zan sent: hi'
+      'Shuichi missed your audio call'
+      'You: What's up?'
+
+    Vision 报的 chat.name（如 'Victor Zan'）应该能在某个 row 的 raw_desc 里
+    找到子串。这比按 row_index_fallback（受 Stories 行偏移影响）安全得多。
+
+    返回首个匹配的 row；找不到返 None。
+    """
+    if not name_hint:
+        return None
+    needle = name_hint.strip().lower()
+    if not needle:
+        return None
+    for r in rows:
+        haystack = (r.raw_desc or "").lower()
+        if needle in haystack:
             return r
     return None
 
@@ -200,7 +290,7 @@ class SendButtonBounds:
 # 里会被转义成 &#128077;），某些版本 / 语言环境下可能是 'Send' / 'Send 👍'。
 # 全部都兜住；用宽松容量匹配尾部 0-30 字符（覆盖 emoji 及其 HTML entity 形态）。
 _SEND_BTN_PAT = re.compile(
-    r'<node[^>]*content-desc="(发送[^"]{0,30}|Send[^"]{0,30})"'
+    r'<node[^>]*content-desc="(发送[^"]{0,30}|傳送[^"]{0,30}|送信[^"]{0,30}|Send[^"]{0,30}|보내기[^"]{0,30}|Отправить[^"]{0,30}|Gửi[^"]{0,30}|ส่ง[^"]{0,30}|Enviar[^"]{0,30}|Envoyer[^"]{0,30})"'
     r'[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',
     re.S,
 )

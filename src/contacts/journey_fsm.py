@@ -130,6 +130,14 @@ def apply_silence_decay(store, *, now: Optional[int] = None, dry_run: bool = Fal
       - 更新 funnel_stage 为 target
       - 落 `silence_decay` 事件
       - 不触 updated_at（这是降级本身，不是新活动）
+
+    ★ W3-D2.4 已知 GAP：本函数**不衰减 intimacy_score**，只动 funnel_stage。
+    用户 30 天沉默后 intimacy 仍保留 30 天前的高值。
+    陪护产品语义下这其实是对的（"高 intimacy + 长沉默"= 优先 reactivate 候选），
+    但如果 reactivation 反复失败要小心循环。后续如需 intimacy 衰减：
+      - 选项 A：在 silence_decay loop 末尾，对所有 ENGAGED+ 的 journey 按"沉默天数"乘衰减系数（保守 0.95/周，激进 0.7/月）
+      - 选项 B：让 IntimacyEngine.compute_intimacy 自己用 days_since_last_msg 加权（已部分有，但未公开调）
+    决策点：W3-D3 之后，看 reactivation 真启动后的回复率数据决定是否需要。
     """
     now = now if now is not None else int(time.time())
     eligible = list_journeys_eligible_for_decay(store, now=now)

@@ -79,7 +79,7 @@ async def test_e2e_ja_inbound_messages_to_portrait_snapshot(
     # 5. mock AI 真的被调用且 prompt 含日文消息
     mock_ai_client_ja.chat.assert_awaited_once()
     call_args = mock_ai_client_ja.chat.call_args
-    prompt = call_args[0][0][0]["content"]
+    prompt = call_args[0][0]
     assert "こんにちは" in prompt
     assert "東京" in prompt
     # display_name 也注入了

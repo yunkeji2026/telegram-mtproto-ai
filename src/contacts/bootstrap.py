@@ -245,6 +245,17 @@ def bootstrap_contacts_subsystem(
         readiness_scorer=readiness_scorer,
         line_id_provider=_line_id_provider,
     )
+    # ★ W3-D1.1：把 intimacy_engine 接入 gateway，让 msg_in 自动 refresh intimacy_score
+    # 修复 bug：之前 intimacy_engine 是孤儿组件，所有 chat 的 intimacy 永远 0
+    if intimacy_engine is not None:
+        try:
+            gateway.set_intimacy_engine(intimacy_engine)
+            # 用 warning 级别确保被根 logger（最低 WARNING）抓到 → 写入 app.log
+            logger.warning(
+                "ContactGateway 已接入 intimacy_engine（msg_in 自动 refresh）"
+            )
+        except Exception:
+            logger.warning("set_intimacy_engine 失败", exc_info=True)
     # W4-Handoff-Auto-Inject：hooks 按 config 决定是否允许主动触发
     auto_inject_cfg = contacts_cfg.get("handoff_auto_inject") or {}
     hooks = GatewayContactHooks(
@@ -366,6 +377,10 @@ def _safe_init_scorer(store, intim, contacts_cfg: Dict[str, Any]):
             store, intim,
             turn_saturation=int(contacts_cfg.get("turn_saturation") or 3),
             open_threshold=float(contacts_cfg.get("readiness_threshold") or 70),
+            llm_rapport_threshold=int(
+                contacts_cfg.get("llm_rapport_threshold") or 65),
+            llm_min_turns=int(
+                contacts_cfg.get("llm_min_turns") or 5),
         )
     except Exception as e:
         logger.warning("HandoffReadinessScorer init skipped: %s", e)
@@ -375,11 +390,18 @@ def _safe_init_scorer(store, intim, contacts_cfg: Dict[str, Any]):
 def _safe_init_reactivation(store, contacts_cfg: Dict[str, Any]):
     try:
         from src.skills.reactivation_scheduler import ReactivationScheduler
+        # ★ W2-D7.6：active_stages 可配置（默认含 ENGAGED + LINE_*；可在 config 收紧）
+        cand_stages = contacts_cfg.get("reactivation_active_stages")
+        if isinstance(cand_stages, list) and cand_stages:
+            active_stages = [str(s).strip().upper() for s in cand_stages if s]
+        else:
+            active_stages = None  # 走 scheduler 默认（含 ENGAGED）
         return ReactivationScheduler(
             store,
             min_silent_days=float(contacts_cfg.get("min_silent_days") or 3),
             min_intimacy=float(contacts_cfg.get("min_intimacy_for_reactivation") or 40),
             cooldown_days=float(contacts_cfg.get("reactivation_cooldown_days") or 7),
+            active_stages=active_stages,
         )
     except Exception as e:
         logger.warning("ReactivationScheduler init skipped: %s", e)

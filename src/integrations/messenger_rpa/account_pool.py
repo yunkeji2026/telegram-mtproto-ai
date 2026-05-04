@@ -63,6 +63,13 @@ class AccountContext:
     device_alias: str = ""
     login_account: str = ""
     line_id: str = ""
+    supported_languages: List[str] = field(default_factory=list)
+    supported_customer_types: List[str] = field(default_factory=list)
+    persona_ids: List[str] = field(default_factory=list)
+    status: str = "active"
+    health_score: float = 100.0
+    current_load: int = 0
+    max_daily_send: int = 200
 
     _state_store: Optional[MessengerRpaStateStore] = None
     _lock: threading.RLock = field(default_factory=threading.RLock)
@@ -285,6 +292,13 @@ class AccountRegistry:
         )
 
         contexts: List[AccountContext] = []
+        def _as_list(value: Any) -> List[str]:
+            if isinstance(value, str):
+                return [x.strip() for x in value.split(",") if x.strip()]
+            if isinstance(value, list):
+                return [str(x).strip() for x in value if str(x).strip()]
+            return []
+
         if isinstance(raw_accounts, list) and raw_accounts:
             for entry in raw_accounts:
                 if not isinstance(entry, dict):
@@ -336,6 +350,24 @@ class AccountRegistry:
                         or ""
                     ).strip(),
                     line_id=str(entry.get("line_id") or "").strip(),
+                    supported_languages=_as_list(
+                        entry.get("supported_languages")
+                        or entry.get("languages")
+                        or []
+                    ),
+                    supported_customer_types=_as_list(
+                        entry.get("supported_customer_types")
+                        or entry.get("customer_types")
+                        or []
+                    ),
+                    persona_ids=_as_list(
+                        entry.get("persona_ids")
+                        or ([reply_profile_id] if reply_profile_id else [])
+                    ),
+                    status=str(entry.get("status") or "active"),
+                    health_score=float(entry.get("health_score") or 100),
+                    current_load=int(entry.get("current_load") or 0),
+                    max_daily_send=int(entry.get("max_daily_send") or 200),
                 ))
         else:
             # 单账号兼容：account_id="default"，serial 来自 cfg.adb_serial
@@ -348,6 +380,11 @@ class AccountRegistry:
                     config_path, account_id="default",
                 ),
                 label="default",
+                supported_languages=_as_list(cfg.get("supported_languages") or []),
+                supported_customer_types=_as_list(
+                    cfg.get("supported_customer_types") or []
+                ),
+                persona_ids=[],
             ))
 
         pool = AccountPool(max_parallel=max_parallel)
@@ -379,6 +416,15 @@ class AccountRegistry:
                 "device_alias": ctx.device_alias,
                 "login_account": ctx.login_account,
                 "line_id": ctx.line_id,
+                "supported_languages": list(ctx.supported_languages or []),
+                "supported_customer_types": list(
+                    ctx.supported_customer_types or []
+                ),
+                "persona_ids": list(ctx.persona_ids or []),
+                "status": ctx.status,
+                "health_score": ctx.health_score,
+                "current_load": ctx.current_load,
+                "max_daily_send": ctx.max_daily_send,
                 "chat_key_prefix": ctx.chat_key_prefix or (
                     f"acc_{ctx.account_id}" if ctx.account_id != "default" else ""
                 ),

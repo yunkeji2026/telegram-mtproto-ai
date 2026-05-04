@@ -22,10 +22,21 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+# Windows console 默认 cp936，会让 logger StreamHandler 把日文/emoji 转成 mojibake
+# 写到 stdout 重定向后的文件里。强制 UTF-8：reconfigure 当前进程，env var 给子进程。
+os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))

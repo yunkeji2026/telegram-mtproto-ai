@@ -79,10 +79,23 @@ _FRIEND_KEYWORDS = [
 
 
 def _local_quality_hint(name: str, preview: str) -> str:
-    """本地启发式：preview 看起来像 spam/friend 时给个兜底标签。"""
+    """本地启发式：preview 看起来像 spam/friend 时给个兜底标签。
+
+    P2-A：优先检测系统事件（"You can now message..." 等），因为它们既不是
+    spam 也不是真实 friend 消息，应单独分类。
+    """
     p = (preview or "").lower()
     if not p:
         return "unsure"
+    # P2-A: 系统事件前置判断（避免被 friend 关键字"hi"误中）
+    try:
+        from src.integrations.messenger_rpa.chat_reader import (
+            is_system_event_text,
+        )
+        if is_system_event_text(preview):
+            return "system_event"
+    except Exception:
+        pass
     for kw in _SPAM_KEYWORDS:
         if kw.lower() in p:
             return "spam"
@@ -136,6 +149,11 @@ _QUALITY_BASE_SCORE = {
     "group": 30.0,
     "unsure": 40.0,
     "spam": -50.0,
+    # P2-A：系统事件行（"You can now message..."、E2EE 通知等）降到 spam 以下。
+    # 会排到最后，若有别的未读会先处理；若整屏只有系统事件则会被 pick 出来，
+    # 但下游 chat_reader 里会把 peer 降为 role=none，run_once 自然走
+    # no_peer_message 分支退出，不会生成 AI 回复。
+    "system_event": -60.0,
 }
 
 
@@ -226,7 +244,10 @@ async def scan_inbox_vision(
     if not parsed:
         return [], f"parse_failed:{tag}"
 
-    valid_hints = {"friend", "unknown", "spam", "channel", "group", "unsure"}
+    valid_hints = {
+        "friend", "unknown", "spam", "channel", "group", "unsure",
+        "system_event",  # P2-A
+    }
 
     raw_rows: List[UnreadChat] = []
     for i, raw in enumerate(parsed.get("unread") or []):
@@ -243,6 +264,12 @@ async def scan_inbox_vision(
         local_hint = _local_quality_hint(name, preview)
         if local_hint == "spam" and hint in ("friend", "unknown", "unsure"):
             hint = "spam"
+        # P2-A：vision 容易把 "You can now message and call each other" 这类
+        # 系统事件误当正常 friend 消息，用本地关键字扫描强制覆盖
+        if local_hint == "system_event" and hint in (
+            "friend", "unknown", "unsure",
+        ):
+            hint = "system_event"
         try:
             y_pct = float(raw.get("y_percent") or 0)
         except (TypeError, ValueError):

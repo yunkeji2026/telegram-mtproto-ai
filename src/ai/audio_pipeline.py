@@ -52,11 +52,21 @@ class AudioPipeline:
         compute_type: int8 | int8_float16 | float16
         language: auto | en | zh ...
         download_root: models/whisper
+        api_key: online backend API key
+        base_url: optional OpenAI-compatible base URL
+        model: online ASR model name, defaults to whisper-1
+        fallback_enabled: true/false
+        fallback_backend: openai
+        fallback_model: online ASR model for fallback
+        min_text_chars: fallback when primary returns too little text
+        fallback_on_low_confidence: true/false
+        min_avg_logprob: fallback when faster-whisper avg logprob is lower
         cb_cooldown_sec: 300   # 加载失败后多久不再重试
     """
 
     def __init__(self, cfg: Optional[Dict[str, Any]] = None):
         cfg = cfg or {}
+        self._cfg = dict(cfg)
         self.enabled = bool(cfg.get("enabled", False))
         self.backend = str(cfg.get("backend", "faster_whisper")).strip().lower()
         self.model_size = str(cfg.get("model_size", "base")).strip()
@@ -64,6 +74,47 @@ class AudioPipeline:
         self.compute_type = str(cfg.get("compute_type", "int8")).strip()
         self.language = str(cfg.get("language", "auto")).strip().lower()
         self.download_root = str(cfg.get("download_root", "models/whisper"))
+        self.api_key = str(cfg.get("api_key") or "").strip()
+        self.base_url = str(cfg.get("base_url") or "").strip().rstrip("/")
+        self.online_model = str(
+            cfg.get("model") or cfg.get("online_model") or "whisper-1"
+        ).strip()
+        self.min_text_chars = int(cfg.get("min_text_chars", 1) or 1)
+        self.fallback_on_low_confidence = bool(
+            cfg.get("fallback_on_low_confidence", False)
+        )
+        self.min_avg_logprob = float(cfg.get("min_avg_logprob", -1.0) or -1.0)
+        self.min_language_probability = float(
+            cfg.get("min_language_probability", 0.0) or 0.0
+        )
+        self.fallback_enabled = bool(
+            cfg.get("fallback_enabled", False)
+            or isinstance(cfg.get("fallback"), dict)
+        )
+        fallback_cfg = cfg.get("fallback") if isinstance(cfg.get("fallback"), dict) else {}
+        self.fallback_backend = str(
+            cfg.get("fallback_backend")
+            or fallback_cfg.get("backend")
+            or "openai"
+        ).strip().lower()
+        self.fallback_model = str(
+            cfg.get("fallback_model")
+            or fallback_cfg.get("model")
+            or cfg.get("online_model")
+            or cfg.get("model")
+            or "whisper-1"
+        ).strip()
+        self.fallback_api_key = str(
+            cfg.get("fallback_api_key")
+            or fallback_cfg.get("api_key")
+            or self.api_key
+        ).strip()
+        self.fallback_base_url = str(
+            cfg.get("fallback_base_url")
+            or fallback_cfg.get("base_url")
+            or self.base_url
+            or ""
+        ).strip().rstrip("/")
         self.cb_cooldown_sec = float(cfg.get("cb_cooldown_sec", 300) or 300)
 
         self._model: Any = None
@@ -78,6 +129,11 @@ class AudioPipeline:
         if self._cb_open_until > 0 and time.time() < self._cb_open_until:
             return False
         return True
+
+    def _model_label(self) -> str:
+        if self.backend == "faster_whisper":
+            return f"{self.backend}:{self.model_size}"
+        return f"{self.backend}:{self.online_model}"
 
     def _load_model(self) -> bool:
         if self._model is not None:
@@ -104,9 +160,15 @@ class AudioPipeline:
                         download_root=self.download_root,
                     )
                 elif self.backend == "openai":
-                    # OpenAI Whisper REST API：由调用方注入 api_key，骨架先留口
-                    import openai  # type: ignore  # noqa: F401
-                    self._model = "openai-stub"
+                    from openai import OpenAI  # type: ignore
+                    if not self.api_key:
+                        self._last_error = "missing api_key for openai ASR"
+                        self._cb_open_until = time.time() + self.cb_cooldown_sec
+                        return False
+                    kwargs: Dict[str, Any] = {"api_key": self.api_key}
+                    if self.base_url:
+                        kwargs["base_url"] = self.base_url
+                    self._model = OpenAI(**kwargs)
                 else:
                     self._last_error = f"unknown backend {self.backend}"
                     self._cb_open_until = time.time() + self.cb_cooldown_sec
@@ -148,7 +210,79 @@ class AudioPipeline:
         timeout_sec: float = 30.0,
     ) -> TranscribeResult:
         """异步转写。失败返回 ok=False + error；调用方自行降级。"""
-        rv = TranscribeResult(model=f"{self.backend}:{self.model_size}")
+        rv = await self._transcribe_file_once(
+            path,
+            language_hint=language_hint,
+            timeout_sec=timeout_sec,
+        )
+        if not self._should_try_fallback(rv):
+            return rv
+        fallback = self._build_fallback_pipeline()
+        if fallback is None:
+            return rv
+        fb = await fallback._transcribe_file_once(
+            path,
+            language_hint=language_hint,
+            timeout_sec=timeout_sec,
+        )
+        fb.extra["primary_ok"] = rv.ok
+        fb.extra["primary_text"] = rv.text[:200]
+        fb.extra["primary_error"] = rv.error[:300]
+        fb.extra["primary_model"] = rv.model
+        fb.extra["fallback_used"] = True
+        if fb.ok and fb.text:
+            return fb
+        rv.extra["fallback_attempted"] = True
+        rv.extra["fallback_error"] = fb.error[:300]
+        rv.extra["fallback_model"] = fb.model
+        return rv
+
+    def _should_try_fallback(self, rv: TranscribeResult) -> bool:
+        if not self.fallback_enabled:
+            return False
+        if self.backend == self.fallback_backend:
+            return False
+        if not rv.ok:
+            return True
+        text_len = len((rv.text or "").strip())
+        if text_len < max(1, self.min_text_chars):
+            return True
+        if not self.fallback_on_low_confidence:
+            return False
+        avg = rv.extra.get("avg_logprob")
+        if isinstance(avg, (int, float)) and float(avg) < self.min_avg_logprob:
+            return True
+        lang_prob = rv.extra.get("language_probability")
+        if (
+            isinstance(lang_prob, (int, float))
+            and self.min_language_probability > 0
+            and float(lang_prob) < self.min_language_probability
+        ):
+            return True
+        return False
+
+    def _build_fallback_pipeline(self) -> Optional["AudioPipeline"]:
+        if not self.fallback_backend or self.fallback_backend == "disabled":
+            return None
+        cfg = dict(self._cfg)
+        cfg["enabled"] = True
+        cfg["backend"] = self.fallback_backend
+        cfg["model"] = self.fallback_model
+        cfg["api_key"] = self.fallback_api_key
+        cfg["base_url"] = self.fallback_base_url
+        cfg["fallback_enabled"] = False
+        if self.fallback_backend != "faster_whisper":
+            cfg.setdefault("model_size", self.model_size)
+        return AudioPipeline(cfg)
+
+    async def _transcribe_file_once(
+        self,
+        path: str,
+        *,
+        language_hint: Optional[str] = None,
+        timeout_sec: float = 30.0,
+    ) -> TranscribeResult:
+        rv = TranscribeResult(model=self._model_label())
         if not self.enabled:
             rv.error = "pipeline_disabled"
             return rv
@@ -166,7 +300,7 @@ class AudioPipeline:
             return rv
 
         def _do_transcribe() -> TranscribeResult:
-            out = TranscribeResult(model=f"{self.backend}:{self.model_size}")
+            out = TranscribeResult(model=self._model_label())
             try:
                 if self.backend == "faster_whisper":
                     lang = (
@@ -182,19 +316,54 @@ class AudioPipeline:
                         vad_filter=True,  # 过滤静音
                     )
                     texts = []
+                    avg_logprobs = []
+                    no_speech_probs = []
+                    compression_ratios = []
                     for seg in segments:
                         txt = str(getattr(seg, "text", "") or "").strip()
                         if txt:
                             texts.append(txt)
+                        if getattr(seg, "avg_logprob", None) is not None:
+                            avg_logprobs.append(float(getattr(seg, "avg_logprob")))
+                        if getattr(seg, "no_speech_prob", None) is not None:
+                            no_speech_probs.append(float(getattr(seg, "no_speech_prob")))
+                        if getattr(seg, "compression_ratio", None) is not None:
+                            compression_ratios.append(float(getattr(seg, "compression_ratio")))
                     out.text = " ".join(texts).strip()
                     out.language = str(getattr(info, "language", "") or "")
                     out.duration_sec = float(
                         getattr(info, "duration", 0.0) or 0.0
                     )
+                    lang_prob = getattr(info, "language_probability", None)
+                    if lang_prob is not None:
+                        out.extra["language_probability"] = float(lang_prob)
+                    if avg_logprobs:
+                        out.extra["avg_logprob"] = sum(avg_logprobs) / len(avg_logprobs)
+                    if no_speech_probs:
+                        out.extra["max_no_speech_prob"] = max(no_speech_probs)
+                    if compression_ratios:
+                        out.extra["max_compression_ratio"] = max(compression_ratios)
+                    out.extra["segments"] = len(texts)
                     out.ok = bool(out.text)
                 elif self.backend == "openai":
-                    # 骨架：实际接入需传 api_key + requests / openai client
-                    out.error = "openai_backend_not_implemented"
+                    lang = (
+                        None
+                        if (self.language in ("auto", "")) and not language_hint
+                        else (language_hint or self.language)
+                    )
+                    with open(path, "rb") as f:
+                        kwargs: Dict[str, Any] = {
+                            "model": self.online_model,
+                            "file": f,
+                            "response_format": "json",
+                        }
+                        if lang:
+                            kwargs["language"] = lang
+                        resp = self._model.audio.transcriptions.create(**kwargs)
+                    text = str(getattr(resp, "text", "") or "").strip()
+                    out.text = text
+                    out.language = lang or ""
+                    out.ok = bool(text)
                 else:
                     out.error = f"unknown_backend: {self.backend}"
             except Exception as ex:
@@ -210,7 +379,7 @@ class AudioPipeline:
             rv.ok = False
             rv.error = f"transcribe_timeout({timeout_sec:.0f}s)"
         rv.latency_ms = int((time.monotonic() - t0) * 1000)
-        rv.model = f"{self.backend}:{self.model_size}"
+        rv.model = self._model_label()
         logger.info(
             "[audio_pipeline] transcribe path=%s ok=%s lang=%s dur=%.1fs "
             "len=%d latency=%dms err=%r",

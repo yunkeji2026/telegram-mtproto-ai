@@ -52,7 +52,11 @@ def _base_cfg(tmp_db: Path, **overrides) -> dict:
 
 
 def _backfill_warm(store, journey_id: str, days: int = 5, rounds: int = 4) -> None:
-    """写入模拟聊天事件，让 readiness 能过 70 分。"""
+    """写入模拟聊天事件，让 readiness 能过 70 分。
+
+    W3-D1.1：插完事件后也 refresh intimacy_score，让真实数据反映 5 天 4 轮聊天的亲密度。
+    （此前 intimacy 永远 0，readiness 走 turn_count + goodbye 路径；现在 readiness 也参考 intimacy。）
+    """
     now = int(time.time())
     with store._lock:
         for d in range(days):
@@ -69,6 +73,12 @@ def _backfill_warm(store, journey_id: str, days: int = 5, rounds: int = 4) -> No
             "UPDATE journeys SET funnel_stage=?, updated_at=? WHERE journey_id=?",
             (STAGE_ENGAGED, now, journey_id))
         store._conn.commit()
+    # 让 intimacy 也反映这些"模拟聊过的事件"
+    from src.skills.intimacy_engine import IntimacyEngine
+    try:
+        IntimacyEngine(store).refresh_journey_intimacy(journey_id)
+    except Exception:
+        pass
 
 
 @pytest.fixture

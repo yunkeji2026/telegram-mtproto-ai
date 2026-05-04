@@ -36,8 +36,10 @@ speaking:
   language_follow: true
 
 identity:
-  deny_ai: false
-  deny_ai_reply: ""
+  # P1-2：陪聊/情感向场景，AI 身份暴露会立刻打破沉浸感、转化率断崖。
+  # 默认开启身份硬锁；deny_ai_reply 给出兜底应答，模型可改写但不偏离意思。
+  deny_ai: true
+  deny_ai_reply: "哈哈你怎么这么问～我是个普通人啦，干嘛突然想到这个"
   claim_human: false
 
 boundaries:

@@ -62,6 +62,12 @@ from src.integrations.messenger_rpa.inbox_scanner import (
 from src.integrations.messenger_rpa.lead_qualification import (
     LeadQualificationEngine,
 )
+from src.integrations.messenger_rpa.persona_runtime import (
+    ConversationStateMachine,
+    detect_customer_language,
+    flatten_persona_facts,
+    infer_customer_type,
+)
 from src.integrations.messenger_rpa.state_store import MessengerRpaStateStore
 from src.integrations.messenger_rpa import escalation as _escalation
 
@@ -127,6 +133,13 @@ def _self_reply_overlap_ratio(last_reply: str, peer_text: str) -> float:
     Word splitting works for English, but Chinese/Japanese/Korean messages often
     have no spaces.  Use compact string containment plus n-gram overlap so CJK
     self messages are caught without making unrelated short replies collide.
+
+    P14 (2026-05-04): 加 substring echo 检测——peer 含 last_reply 任意 5+
+    字符连续片段就视为 echo 强信号。实测 vision 在 fast_path 把 bot 历史
+    多条 reply 合并/串联读成一条 "peer message" 时，整体字符级 LCS 不高，
+    但 peer 文本里**必然含 bot 最近常用短语**（如 "また明日ね"、"今日は"
+    引导句、emoji signature）。任何 ≥5 字 substring 命中即 1.0，让 0.7 阈值
+    能稳定触发。
     """
     lr = _compact_for_self_overlap(last_reply)
     pc = _compact_for_self_overlap(peer_text)
@@ -135,17 +148,150 @@ def _self_reply_overlap_ratio(last_reply: str, peer_text: str) -> float:
     if pc in lr or lr in pc:
         return 1.0
 
+    # ★ Substring echo：peer 含 last_reply 的任意 5+ 字符连续片段 → 强信号
+    #   bot signature phrase 命中，足以挡住 vision 把 self 串联成 peer 的 case
+    if len(lr) >= 5 and len(pc) >= 5:
+        for i in range(len(lr) - 5 + 1):
+            phrase = lr[i:i + 5]
+            if phrase in pc:
+                return 1.0
+
+    word_ratio = 0.0
     words_lr = set(re.findall(r"[a-z0-9]{2,}", (last_reply or "").lower()))
     words_pc = set(re.findall(r"[a-z0-9]{2,}", (peer_text or "").lower()))
     if len(words_pc) >= 3 and words_lr:
-        return len(words_lr & words_pc) / len(words_pc)
+        word_ratio = len(words_lr & words_pc) / len(words_pc)
 
     n = 3 if len(pc) >= 18 else 2
     lr_grams = {lr[i:i + n] for i in range(0, max(0, len(lr) - n + 1))}
     pc_grams = {pc[i:i + n] for i in range(0, max(0, len(pc) - n + 1))}
-    if not lr_grams or not pc_grams:
-        return 0.0
-    return len(lr_grams & pc_grams) / len(pc_grams)
+    ngram_ratio = 0.0
+    if lr_grams and pc_grams:
+        ngram_ratio = len(lr_grams & pc_grams) / len(pc_grams)
+
+    # 字符级 LCS 相似度（CJK-friendly 兜底）
+    try:
+        import difflib
+        sm_ratio = difflib.SequenceMatcher(None, lr, pc).ratio()
+    except Exception:
+        sm_ratio = 0.0
+
+    return max(word_ratio, ngram_ratio, sm_ratio)
+
+
+_SELF_MEDIA_OCR_MARKERS = (
+    "main profile",
+    "display name",
+    "status message",
+    "my qr code",
+    "friends who see this profile",
+    "phone number",
+    "line id",
+    "allow others to add me by id",
+    "background music",
+    "not set",
+    "copy",
+)
+
+
+def _self_skip_norm_key(name: str) -> str:
+    """Normalize chat name for self-skip cooldown & wrong-chat matching.
+
+    Vision OCR often returns different readings for the same Japanese name
+    (e.g. 神沢颯人, 神沢風人 — 颯 vs 風 are visually similar kanji).
+    CJK: keep first 2 chars (surname) for maximum OCR tolerance.
+    ASCII: keep first 8 chars for disambiguation.
+    """
+    s = re.sub(r"\s+", "", (name or "").strip())
+    ascii_ratio = sum(1 for c in s if ord(c) < 128) / max(len(s), 1)
+    keep = 8 if ascii_ratio > 0.5 else 2
+    return s[:keep].casefold()
+
+
+class _PersistentSelfSkipDict(dict):
+    """P0-4: dict 子类，写入即同步落库。
+
+    存储语义不变：key=norm_key, value=monotonic_until（ time.monotonic() 域）。
+    内存读路径完全透明（dict.get/__getitem__ 等沿用基类）。仅在 __setitem__ /
+    __delitem__ / pop 时把"剩余秒数"换算成 epoch 时间写入 state_store，从而
+    让 runaway_guard 等触发的 cooldown 在进程重启后仍然生效。
+
+    epoch ↔ monotonic 转换：
+      Δ = mono_until - time.monotonic()  # 剩余秒数
+      epoch_until = time.time() + Δ
+    转换误差 < 调度延迟（毫秒级），对 30 分钟级冷却无影响。
+
+    持久化失败（例如 DB 锁）静默忽略 — 内存仍然是真理（fail-open，不阻塞主流程）。
+    """
+
+    def __init__(self, store: Any, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._store = store
+
+    def __setitem__(self, key: str, value: float) -> None:
+        super().__setitem__(key, value)
+        try:
+            mono_until = float(value)
+        except (TypeError, ValueError):
+            return
+        try:
+            delta = mono_until - time.monotonic()
+            if delta <= 0:
+                return  # 已过期，懒删（下次 get 时 caller 会忽略）
+            epoch_until = time.time() + delta
+            if self._store is not None:
+                self._store.set_self_skip(str(key), epoch_until)
+        except Exception:
+            logger.debug("persist self_skip failed", exc_info=True)
+
+    def __delitem__(self, key: str) -> None:
+        super().__delitem__(key)
+        try:
+            if self._store is not None:
+                self._store.clear_self_skip(str(key))
+        except Exception:
+            pass
+
+    def pop(self, key: str, *args: Any) -> Any:
+        had = key in self
+        out = super().pop(key, *args)
+        if had:
+            try:
+                if self._store is not None:
+                    self._store.clear_self_skip(str(key))
+            except Exception:
+                pass
+        return out
+
+
+def _looks_like_self_media_ocr(peer_msg: Optional[PeerMessage]) -> bool:
+    """Detect OCR text read from our own sent screenshot/media bubble.
+
+    The XML guard can expose ``You: <private icon>`` for a self-sent image even
+    after a real peer text is visible.  Only suppress replies when Vision text
+    itself looks like screenshot UI chrome, not natural customer language.
+    """
+    if peer_msg is None:
+        return False
+    kind = str(getattr(peer_msg, "kind", "") or "").lower()
+    if kind in ("image", "sticker", "voice", "file"):
+        return True
+    text = " ".join(
+        str(x or "") for x in (
+            getattr(peer_msg, "content", ""),
+            getattr(peer_msg, "desc", ""),
+            getattr(peer_msg, "raw", ""),
+        )
+    )
+    low = re.sub(r"\s+", " ", text).strip().lower()
+    if not low:
+        return False
+    hits = sum(1 for marker in _SELF_MEDIA_OCR_MARKERS if marker in low)
+    if hits >= 1 and ("line" in low or "profile" in low or "not set" in low):
+        return True
+    if re.search(r"\+\s?81[\d\s-]{8,}", low) and ("phone" in low or "line" in low):
+        return True
+    return False
 
 
 def pick_unread_row_for_peer_name(
@@ -259,6 +405,96 @@ class MessengerRpaRunner:
         self._chat_entry_cache: Dict[
             Tuple[str, str], Tuple[int, int, float, str]
         ] = {}
+        # ★ P2-D: per-chat 搜索失败熔断
+        # {chat_name: {"fails": N, "cooldown_until": ts, "last_fail_ts": ts}}
+        # 连续 N 次搜索失败 → 冷却 M 分钟。冷却内的搜索请求直接短路返回 None，
+        # 由上游 fallback（inbox scan / cache）处理。避免对同一个系统事件/
+        # 已删好友反复 4 轮 12-16s 搜索，单 chat 卡死拖累整账号。
+        # 进程重启后状态清空（认为重启 = 假定健康）。
+        self._search_failure_state: Dict[str, Dict[str, float]] = {}
+        # ★ 短期冷却：进入 thread 后发现是 self-sent 的 chat，避免反复尝试
+        # key = _self_skip_norm_key(name), value = monotonic time until which to skip
+        # P0-4: 用 _PersistentSelfSkipDict 替代普通 dict —— 写入即落库，重启回填，
+        # 让 runaway_guard 30 分钟熔断 cooldown 跨重启生效（修 R4 根因）。
+        self._self_skip_until: Dict[str, float] = _PersistentSelfSkipDict(
+            self._state
+        )
+        try:
+            now_mono = time.monotonic()
+            now_epoch = time.time()
+            persisted = self._state.load_active_self_skips() or {}
+            restored = 0
+            for nk, (epoch_until, _reason) in persisted.items():
+                delta = float(epoch_until) - now_epoch
+                if delta > 0:
+                    # 直接写基类 __setitem__ 避免回写 DB（已经是从 DB 来的）
+                    dict.__setitem__(
+                        self._self_skip_until, str(nk), now_mono + delta,
+                    )
+                    restored += 1
+            if restored:
+                logger.info(
+                    "[messenger_rpa] P0-4 restored %d active self_skip "
+                    "cooldowns from DB", restored,
+                )
+        except Exception:
+            logger.debug("self_skip 回填失败", exc_info=True)
+
+        # ── thread title vision cache（per-target_name, TTL 默认 1800s）─────
+        # MIUI 上 uiautomator dump 被 lowmemkill 时，每 cycle 都得调 vision
+        # 拿 title strip（5–15s）。同一 chat 的 peer 名不会变，进同一 thread
+        # 没必要再走一次 OCR。命中后直接返 cached title，省整段 vision。
+        #
+        # TTL 选 1800s (30 min)：实测真实 cycle 间隔 3.5–5 min（120s post-send
+        # cooldown + peer 思考回复），30s TTL 命中率 0%；1800s 覆盖 99% 活跃
+        # 对话节奏。peer 改 nickname 罕见（月级），且 vision 返新名字会触发
+        # wrong_chat_rollback 自动清掉这个 entry，所以长 TTL 安全。
+        self._title_vision_cache: Dict[Tuple[str, str], Tuple[str, float]] = {}
+        self._title_vision_cache_ttl_sec = float(
+            self._cfg.get("thread_title_vision_cache_ttl_sec", 1800.0) or 0.0
+        )
+
+        # ── pre_foreground title cache（per-serial slot）──────────
+        # smart_current_thread 路径每 cycle 都问"当前 foreground 是哪个 chat？"
+        # XML 通常被 lowmemkill 杀，vision 又每次 5–15s。但只要我们没离开
+        # thread（_exit_thread），上次 vision 读到的 title 就还有效。
+        # 用 serial 单 slot 缓存：进 thread 后写、_exit_thread 时主动清。
+        self._foreground_title_cache: Dict[str, Tuple[str, float]] = {}
+
+        # ── P15: per-chat 最近 N 条 self reply（in-memory，重启丢失）──
+        # P14 self_overlap 只对比 chat_state.last_reply 一条，但 vision 偶发
+        # 串联的是更早的 self message（不在 last_reply 里）。扩展到 last 3
+        # replies，对每条计算 ratio 取 max——更广覆盖 vision 串联误读场景。
+        self._recent_replies_per_chat: Dict[str, List[str]] = {}
+        self._recent_replies_max = 3
+
+        # ── P16 (2026-05-04) self_message_skip 反空转三件套 ──
+        # 现象：vision 反复把同一条已发自发消息识为新 peer 消息，单 chat 14:29~14:50
+        # 触发 6+ 次 self_message_skip，每次浪费 100~200s。三层防御：
+        #   D 层：peer_msg.content 指纹去重，命中"上次已 skip 文本"立即短路
+        #   B 层：bubble_detector 信号与 overlap 联合判定（bubble=self+overlap≥0.7
+        #         即 100% vision 误读，无需再等 strict_window）
+        #   C 层：同 chat 连续 self_message_skip ≥ N 次 → chat 级长冷却覆盖
+        self._skipped_peer_text_per_chat: Dict[str, "deque[str]"] = {}
+        self._self_overlap_skip_streak: Dict[str, int] = {}
+        self._chat_overlap_skip_until: Dict[str, float] = {}
+
+        # ── P17 (2026-05-04) thread_combined 截屏 hash 缓存 ──
+        # 现象：vision 偶发对同一截屏在不同 run 内被反复调用（sticky_thread
+        # fast_path / 重试），同截屏输出客观一致。命中缓存可省 ~3-5s 延迟 +
+        # 整次 vision API token。LRU 16 条进程级。
+        # 安全约束：仅缓存 risk.hit=False 的结果，避免 risk 链路被旁路。
+        from collections import OrderedDict as _OD
+        self._thread_combined_cache: "OrderedDict[str, Any]" = _OD()
+        self._thread_combined_cache_max = 16
+
+        # P2 (2026-05-04) sticker reply：记录每 chat 的 sticker 发送时间戳列表，
+        # 用于 cooldown / 24h cap 计算。即使 dry_run 也记录决策模拟次数。
+        self._sticker_send_history: Dict[str, List[float]] = {}
+        # P2++F3 (2026-05-04)：记录每 chat 最近选过的 sticker 文件路径（按时间）
+        # _pick_sticker_file 时排除这些，避免连发同一张感觉机械。
+        self._sticker_recent_per_chat: Dict[str, List[str]] = {}
+        self._sticker_recent_max = 3
 
         # 调试截图目录
         self._debug_dir = Path(
@@ -295,6 +531,7 @@ class MessengerRpaRunner:
         self._lead_qualifier = LeadQualificationEngine(
             self._cfg.get("lead_qualification") or {}
         )
+        self._conversation_fsm = ConversationStateMachine()
         # ★ 跨账号协调器：共享画像 + 同用户聊天互斥；由 service 注入
         self._coordinator: Optional[Any] = None
 
@@ -339,12 +576,23 @@ class MessengerRpaRunner:
             logger.debug("peer_typing 初始化失败", exc_info=True)
             self._peer_typing = None
 
+        # ★ P0-E2 (2026-05-03 监控发现 OCR chat_key 分裂)：
+        # chat_name → canonical chat_key 的 in-memory cache + fuzzy resolve。
+        # 同一真实用户被 OCR 抖动到多个 chat_name（"Victor Zan" / "Victor"）
+        # → 之前各自独立 chat_state 行 + 独立 history → AI hist=0 冷启动。
+        # 这里给每个 chat_name 解析到 canonical chat_key（与现有表里相似名
+        # 共用），降低分裂面。
+        self._chat_key_resolve_cache: Dict[str, str] = {}
+
     def refresh_cfg(self, new_cfg: Dict[str, Any]) -> None:
         """热重载 runner 配置（service drain/run_once 每轮调用）。
         使 config.yaml 修改无需重启即对 pacing / gate / language 生效。
         """
         if new_cfg:
             self._cfg = dict(new_cfg)
+            self._reply_mode = (
+                self._cfg.get("reply_mode") or "auto"
+            ).lower().strip()
             try:
                 self._lead_qualifier.update_cfg(
                     self._cfg.get("lead_qualification") or {}
@@ -368,16 +616,804 @@ class MessengerRpaRunner:
             return []
         return [str(x).strip() for x in raw if str(x or "").strip()]
 
+    def _sticky_thread_names(self) -> List[str]:
+        """P2-S 粘性会话白名单：这些 chat 发送成功后不退 thread，让下轮
+        smart_current_thread 直接接管，省去 inbox 扫描 + tap 进入的开销
+        （30-60s → 5-10s）。空列表 = 不启用粘性。"""
+        cfg = self._cfg.get("sticky_thread") or {}
+        if not isinstance(cfg, dict) or not cfg.get("enabled", False):
+            return []
+        raw = cfg.get("target_chat_names") or cfg.get("chat_names") or []
+        if isinstance(raw, str):
+            raw = [raw]
+        if not isinstance(raw, list):
+            return []
+        return [str(x).strip() for x in raw if str(x or "").strip()]
+
+    def _is_sticky_chat(self, chat_name: str) -> bool:
+        """判断某 chat 是否在粘性会话白名单内。"""
+        if not chat_name:
+            return False
+        names = self._sticky_thread_names()
+        if not names:
+            return False
+        return self._chat_name_matches_any(chat_name, names)
+
+    def _should_skip_send(
+        self, chat_name: str, *, source: str = "",
+    ) -> Optional[str]:
+        """🛡 统一的"是否应该跳过本次回复"决策门（single source of truth）。
+
+        架构重构（4 次疯狂事件后引入）：所有可能触发 send 的路径**强制**调用
+        此方法做前置检查，避免 sticky/inbox/fast_path 等多条路径**各有各的
+        cooldown** 但**任一路径绕过其他路径的保护**。
+
+        检查项（按优先级，任一不通过即拒绝）：
+          1. self_skip_until cooldown（norm_key 维度，OCR 漂移也兜得住）
+          2. last_sent_at + post_send_cooldown_sec（state_store 权威源）
+          3. is_skipped_chat（永久跳过名单）
+          4. P0-2: per_chat_hourly_cap（配置开关；防长窗口刷屏的硬天花板）
+
+        返回：
+          None = 通过，可以发
+          str  = 拒绝原因（已写日志）
+        """
+        if not chat_name:
+            return None
+        try:
+            chat_key = self._chat_key_for(chat_name)  # P0-E2 OCR 容忍
+            # ── 1. self_skip_until（内存 cooldown，norm_key 抗 OCR 漂移）──
+            ss_key = _self_skip_norm_key(chat_name)
+            ss_until = self._self_skip_until.get(ss_key, 0.0)
+            now_mono = time.monotonic()
+            if ss_until > now_mono:
+                remaining = ss_until - now_mono
+                logger.warning(
+                    "[messenger_rpa] 🛡 send_gate REJECT chat=%r src=%s "
+                    "reason=self_skip_cooldown remaining=%.0fs",
+                    chat_name, source or "?", remaining,
+                )
+                return f"self_skip_cooldown:{remaining:.0f}s"
+            # ── 2. last_sent_at + post_send_cooldown_sec（持久权威源）──
+            try:
+                cs = self._state.get_chat_state(chat_key)
+                last_sent = float(cs.get("last_sent_at") or 0)
+            except Exception:
+                last_sent = 0.0
+            sticky_cfg = self._cfg.get("sticky_thread") or {}
+            base_cd = float(sticky_cfg.get("post_send_cooldown_sec", 90) or 90)
+            if last_sent > 0:
+                elapsed = time.time() - last_sent
+                if elapsed < base_cd:
+                    remaining = base_cd - elapsed
+                    logger.warning(
+                        "[messenger_rpa] 🛡 send_gate REJECT chat=%r src=%s "
+                        "reason=last_sent_cooldown remaining=%.0fs",
+                        chat_name, source or "?", remaining,
+                    )
+                    return f"last_sent_cooldown:{remaining:.0f}s"
+            # ── 3. 永久跳过名单 ──
+            try:
+                if self._state.is_skipped_chat(chat_key):
+                    return "skipped_chat_blacklist"
+            except Exception:
+                pass
+            # ── 4. P0-2: per_chat_hourly_cap（长窗口硬天花板）──
+            # runaway_guard 是 5 分钟 3 次的短窗口熔断，但**长时间**（一小时几十次）
+            # 仍可能堆出骚扰量。此处给运营一个独立维度的硬上限闸门。
+            # 复用 _chat_send_timestamps 内存 deque（runaway_guard 已在维护），
+            # 故无额外存储成本；进程重启清零是预期行为（重启 = 假定健康重新计数）。
+            try:
+                cap_raw = self._cfg.get("per_chat_hourly_cap", 0)
+                cap = int(cap_raw or 0)
+            except (TypeError, ValueError):
+                cap = 0
+            if cap > 0 and hasattr(self, "_chat_send_timestamps"):
+                dq = self._chat_send_timestamps.get(chat_name)
+                if dq:
+                    now_w = time.time()
+                    window = 3600.0  # 1 小时
+                    # 不修改 deque（runaway 在用），只 count
+                    recent = sum(1 for ts in dq if (now_w - ts) <= window)
+                    if recent >= cap:
+                        logger.warning(
+                            "[messenger_rpa] 🛡 send_gate REJECT chat=%r src=%s "
+                            "reason=per_chat_hourly_cap recent=%d cap=%d",
+                            chat_name, source or "?", recent, cap,
+                        )
+                        return f"per_chat_hourly_cap:{recent}/{cap}"
+        except Exception:
+            logger.debug(
+                "[messenger_rpa] _should_skip_send exception", exc_info=True,
+            )
+        return None
+
+    def _record_chat_send(self, chat_name: str, peer_text: str = "") -> None:
+        """P3-A 疯狂回复熔断器：记录每次 send 成功的时间戳 + 当时 peer_text 到滚动窗口。
+        peer_text 用于 sequence_check 检测"main.py 自顾自重复回复同一上下文"。
+
+        P0-C (2026-05-03)：加诊断日志便于反查"runaway 为什么没 trip"。
+        """
+        if not chat_name:
+            logger.info(
+                "[messenger_rpa] _record_chat_send: empty chat_name → noop",
+            )
+            return
+        if not hasattr(self, "_chat_send_timestamps"):
+            from collections import deque as _dq
+            self._chat_send_timestamps: Dict[str, Any] = {}
+            self._chat_send_peer_texts: Dict[str, Any] = {}
+        if chat_name not in self._chat_send_timestamps:
+            from collections import deque as _dq
+            self._chat_send_timestamps[chat_name] = _dq(maxlen=20)
+            self._chat_send_peer_texts[chat_name] = _dq(maxlen=20)
+        self._chat_send_timestamps[chat_name].append(time.time())
+        self._chat_send_peer_texts[chat_name].append((peer_text or "")[:300])
+        logger.info(
+            "[messenger_rpa] _record_chat_send: chat=%r dq_len=%d (after append)",
+            chat_name, len(self._chat_send_timestamps[chat_name]),
+        )
+
+    @staticmethod
+    def _decide_inbox_self_sent_skip(
+        *,
+        vision_preview: str,
+        last_sent_at: float,
+        last_reply: str,
+        hard_window_sec: float = 60.0,
+        overlap_threshold: float = 0.5,
+        now_ts: Optional[float] = None,
+    ) -> Tuple[bool, str]:
+        """P0-A 三层守卫的纯逻辑函数（无副作用，便于独立单元测试）。
+
+        前提：调用方已经判定 UI XML 显示当前 inbox 顶行是 self-sent
+        （target_ui.is_self_last == True）。本函数决定是否要"信任 XML，
+        跳过 tap"，还是"信任 Vision 截图、覆盖 XML、继续 tap"。
+
+        判定优先级（任一命中即返回 should_skip=True）：
+
+          L1) hard_skip_window:
+              我方刚发不久（now - last_sent_at < hard_window_sec）→ 强信任
+              XML，无视 Vision。理由：60s 内对方"刚收到回复就发新消息且
+              Messenger 把新对方消息缓存为 self-sent 预览"概率几乎为零，
+              该组合几乎只在 vision OCR 漏读 "You:" 前缀时出现。
+
+          L2) vision_self_prefix:
+              Vision preview 自身就以 "You:" / "你:" 等前缀打头 → 已是
+              self-sent，无需覆盖。
+
+          L3) overlap_with_last_reply:
+              Vision preview 与 last_reply 文本重叠 ≥ overlap_threshold
+              → 视为 OCR 漏前缀，仍是上次自方回复。
+
+          L4) ambiguous_status:
+              Vision preview 太短或纯状态词（"Sent" / "Delivered" 等）
+              → 不足以否定 XML 的 self-sent 判断。
+
+          L5) vision_overrides_xml（默认）:
+              Vision 看到了不同的、可信的 peer 内容 → XML content-desc
+              确实陈旧，允许覆盖。
+
+        Args:
+            vision_preview: Vision 截图读到的该 inbox 行预览
+            last_sent_at: chat_state.last_sent_at（我方上次发送 epoch 时间）
+            last_reply: chat_state.last_reply（我方上次回复内容）
+            hard_window_sec: L1 时间窗（秒），<=0 关闭
+            overlap_threshold: L3 重叠率阈值，[0,1]
+            now_ts: 注入用，None 则用 time.time()
+
+        Returns:
+            (should_skip, reason)
+            should_skip=True → 调用方应当 return 跳过该 chat
+            should_skip=False → 调用方应当继续 tap（Vision 覆盖 XML）
+            reason ∈ {"hard_skip_window", "vision_self_prefix",
+                      "overlap_with_last_reply", "ambiguous_status",
+                      "vision_overrides_xml"}
+        """
+        from src.integrations.messenger_rpa.ui_scraper import (
+            _self_prefixed_preview_has_text,
+        )
+
+        vp = (vision_preview or "").strip()
+        if now_ts is None:
+            now_ts = time.time()
+
+        # ── L1: last_sent_at 硬窗口 ──
+        if (
+            hard_window_sec > 0
+            and last_sent_at > 0
+            and (now_ts - last_sent_at) < hard_window_sec
+        ):
+            return True, "hard_skip_window"
+
+        # ── L2: vision 自我前缀检查 ──
+        # vp 为空时也视为 self（保守 — XML 已经说 self，没有信号反驳）
+        if not vp or _self_prefixed_preview_has_text(vp):
+            return True, "vision_self_prefix"
+
+        # ── L3: vision_preview vs last_reply 重叠 ──
+        last_reply_clean = (last_reply or "").strip()
+        if last_reply_clean and len(last_reply_clean) >= 4:
+            ovl = MessengerRpaRunner._text_overlap_ratio(
+                last_reply_clean, vp,
+            )
+            if ovl >= overlap_threshold:
+                return True, "overlap_with_last_reply"
+
+        # ── L4: 模糊状态词 ──
+        vp_clean = re.sub(r"[\d:.\s]+", "", vp)
+        AMBIGUOUS_STATUS = {
+            "sent", "delivered", "seen", "read",
+            "已发送", "已送达", "已读", "已送達",
+            "送信済み", "配信済み", "既読",
+        }
+        if (
+            len(vp_clean) < 3
+            or vp.casefold().strip().rstrip(".") in AMBIGUOUS_STATUS
+        ):
+            return True, "ambiguous_status"
+
+        # ── L5: 允许 Vision 覆盖 XML（XML content-desc 真陈旧的合法路径）──
+        return False, "vision_overrides_xml"
+
+    @staticmethod
+    def _text_overlap_ratio(a: str, b: str) -> float:
+        """两个字符串字符级重叠率（用于自方序列重复检测）。
+        简单 set intersection over union of char trigrams。"""
+        if not a or not b:
+            return 0.0
+        if a == b:
+            return 1.0
+        def _trigrams(s: str) -> set:
+            s = s.strip()
+            if len(s) < 3:
+                return {s}
+            return {s[i:i+3] for i in range(len(s) - 2)}
+        ta, tb = _trigrams(a), _trigrams(b)
+        if not ta or not tb:
+            return 0.0
+        inter = len(ta & tb)
+        union = len(ta | tb)
+        return inter / union if union else 0.0
+
+    def _check_runaway_circuit(
+        self, chat_name: str, result: Dict[str, Any],
+    ) -> bool:
+        """P3-A 疯狂回复熔断器（防客户被刷屏的最后底线）：
+        如果同一 chat 在 window_sec 内 sent ≥ max_sends_per_window 次 →
+        立即熔断：返回 True，调用方应跳过本次回复 + 退 thread + 设长 cooldown。
+        触发场景：未来某 bug（如 hash baseline 误判）导致 main.py 自顾自连发。
+
+        P0-C (2026-05-03)：
+          - 加诊断日志：每次入口打 deque len + window，便于反查"为什么没 trip"
+          - 加硬天花板：即使 enabled=false 也保留 5 分钟 N 次（默认 10）
+            的硬熔断作为最终底线，配置项 runaway_guard.hard_ceiling_sends
+            （0 = 关闭硬天花板，默认 10）。
+        """
+        if not chat_name:
+            return False
+        cfg = self._cfg.get("runaway_guard") or {}
+        enabled = bool(cfg.get("enabled", True))
+        if not hasattr(self, "_chat_send_timestamps"):
+            return False
+        dq = self._chat_send_timestamps.get(chat_name)
+        if not dq:
+            # 诊断：runaway 检查命中此分支说明 deque 为空——
+            # 反查"为什么 8 条爆炸 runaway 没 trip"用
+            logger.info(
+                "[messenger_rpa] runaway_circuit check: chat=%r dq=empty "
+                "(没 sent 历史，pass)", chat_name,
+            )
+            return False
+        now = time.time()
+        window_sec = float(cfg.get("window_sec", 300) or 300)
+        # 清理窗口外的旧记录
+        while dq and (now - dq[0]) > window_sec:
+            dq.popleft()
+        # 诊断日志：每次都输出 deque 状态
+        logger.info(
+            "[messenger_rpa] runaway_circuit check: chat=%r dq_len=%d "
+            "window=%ds enabled=%s",
+            chat_name, len(dq), int(window_sec), enabled,
+        )
+        # ── P0-C 硬天花板（永不可关）──
+        # 即使 cfg.enabled=false，也保留一个更宽松的硬熔断
+        try:
+            hard_ceiling = int(cfg.get("hard_ceiling_sends", 10) or 0)
+        except (TypeError, ValueError):
+            hard_ceiling = 10
+        if hard_ceiling > 0 and len(dq) >= hard_ceiling:
+            cooldown_sec = float(cfg.get("cooldown_sec", 1800) or 1800)
+            self._self_skip_until[_self_skip_norm_key(chat_name)] = (
+                time.monotonic() + cooldown_sec
+            )
+            result.setdefault("hints", []).append(
+                f"runaway_hard_ceiling:count_n={len(dq)}/{window_sec}s"
+            )
+            logger.error(
+                "[messenger_rpa] 🚨 RUNAWAY HARD-CEILING TRIPPED chat=%r: "
+                "sent %d times in %ds (ceiling=%d, enabled=%s) → "
+                "cooldown %ds（终极底线）",
+                chat_name, len(dq), int(window_sec), hard_ceiling,
+                enabled, int(cooldown_sec),
+            )
+            return True
+        # 软门（可被 enabled=false 关闭）
+        if not enabled:
+            return False
+        max_sends = int(cfg.get("max_sends_per_window", 3) or 3)
+        if len(dq) >= max_sends:
+            cooldown_sec = float(cfg.get("cooldown_sec", 1800) or 1800)
+            self._self_skip_until[_self_skip_norm_key(chat_name)] = (
+                time.monotonic() + cooldown_sec
+            )
+            result.setdefault("hints", []).append(
+                f"runaway_circuit_tripped:count_n={len(dq)}/{window_sec}s"
+            )
+            logger.error(
+                "[messenger_rpa] 🚨 RUNAWAY CIRCUIT TRIPPED chat=%r: "
+                "sent %d times in %ds → cooldown %ds（防止刷屏客户）",
+                chat_name, len(dq), int(window_sec), int(cooldown_sec),
+            )
+            return True
+        # 优化 C：自方序列重复检测（比次数熔断更精准）
+        # 如果最近 N 次 sent 之间 peer_text 相互高度相似 → main.py 在自顾自重复
+        if cfg.get("sequence_check_enabled", True):
+            seq_max = int(cfg.get("sequence_max_consecutive_self", 2) or 2)
+            seq_thr = float(cfg.get("sequence_overlap_threshold", 0.6) or 0.6)
+            peer_dq = getattr(self, "_chat_send_peer_texts", {}).get(chat_name)
+            if peer_dq and len(peer_dq) >= seq_max + 1:
+                # 取最近 seq_max + 1 个 peer_text，对比相邻两两相似度
+                recent = list(peer_dq)[-(seq_max + 1):]
+                similar_pairs = 0
+                for i in range(len(recent) - 1):
+                    if self._text_overlap_ratio(recent[i], recent[i + 1]) >= seq_thr:
+                        similar_pairs += 1
+                if similar_pairs >= seq_max:
+                    cooldown_sec = float(cfg.get("cooldown_sec", 1800) or 1800)
+                    self._self_skip_until[_self_skip_norm_key(chat_name)] = (
+                        time.monotonic() + cooldown_sec
+                    )
+                    result.setdefault("hints", []).append(
+                        f"runaway_circuit_tripped:sequence_n={similar_pairs}"
+                    )
+                    logger.error(
+                        "[messenger_rpa] 🚨 RUNAWAY CIRCUIT TRIPPED (sequence) "
+                        "chat=%r: %d 次连续 sent 之间 peer_text 高度相似 → "
+                        "main.py 自顾自重复回复，cooldown %ds",
+                        chat_name, similar_pairs, int(cooldown_sec),
+                    )
+                    return True
+        return False
+
+    def _check_sticky_thread_changed(
+        self,
+        thread_png_path: str,
+        chat_name: str,
+        result: Dict[str, Any],
+    ) -> bool:
+        """P2-A 粘性 thread 入口快速 hash diff：
+        crop thread 截图底部气泡区域 → md5 hash → 对比上次 hash
+        返回 True = 有变化（需要 vision 处理），False = 无变化（早退）
+        每 full_check_after_n_idle 次 idle 强制走 vision（兜底防 hash 假阳性）
+        """
+        cfg = self._cfg.get("sticky_thread") or {}
+        if not cfg.get("hash_diff_enabled", True):
+            return True  # 没启用 → 默认有变化（走 vision）
+        if not thread_png_path or not chat_name:
+            return True
+        # 初始化 runner 状态字段（懒加载）
+        if not hasattr(self, "_sticky_last_hash"):
+            self._sticky_last_hash: Dict[str, str] = {}
+        if not hasattr(self, "_sticky_idle_count"):
+            self._sticky_idle_count: Dict[str, int] = {}
+
+        try:
+            from PIL import Image
+            with Image.open(thread_png_path) as im:
+                w, h = im.size
+                # crop 底部气泡区域：y=35%-82%（避开顶栏 + 输入框 + 键盘）
+                top = int(h * 0.35)
+                bottom = int(h * 0.82)
+                crop = im.crop((0, top, w, bottom))
+                # 缩到 128x128 求 md5（normalize 抖动 + 计算快）
+                crop_small = crop.resize((128, 128))
+                raw = crop_small.tobytes()
+            h_now = hashlib.md5(raw).hexdigest()[:16]
+        except Exception:
+            logger.debug("[messenger_rpa] sticky hash diff failed", exc_info=True)
+            return True  # 失败 fail-open（走 vision）
+
+        last = self._sticky_last_hash.get(chat_name, "")
+        result["sticky_hash"] = h_now
+        if last and last == h_now:
+            # 没变化
+            idle_count = self._sticky_idle_count.get(chat_name, 0) + 1
+            self._sticky_idle_count[chat_name] = idle_count
+            # P-fix (2026-05-04)：30 → 10。bot 状态/屏幕脱钩 case（屏幕已在
+            # inbox 但 runner 内存仍 sticky）需要 ≤15s 自愈，30 次（45s）太慢。
+            full_check_n = int(cfg.get("full_check_after_n_idle", 10) or 10)
+            if idle_count >= full_check_n:
+                # 强制走完整 vision 兜底
+                self._sticky_idle_count[chat_name] = 0
+                result.setdefault("hints", []).append(
+                    f"sticky_force_full:{idle_count}"
+                )
+                # ★ 同时 dump XML 验证屏幕真在 thread 内——不在就告诉调用方
+                #   早退到外层 cycle，下个 cycle 入口的 B 守卫会重 sync。
+                try:
+                    from src.integrations.messenger_rpa import (
+                        thread_actions as _ta_sf,
+                        ui_scraper as _uis_sf,
+                    )
+                    _serial_sf = (
+                        result.get("serial")
+                        or result.get("device_serial")
+                        or self._resolve_serial(result)
+                    )
+                    _xml_sf = _ta_sf.dump_view_tree(_serial_sf) if _serial_sf else None
+                    if _xml_sf and not _uis_sf.is_in_thread(_xml_sf):
+                        # 屏幕在 inbox/其他页面，不在 thread——清 sticky 状态
+                        self._sticky_last_hash.pop(chat_name, None)
+                        self._sticky_idle_count.pop(chat_name, None)
+                        result.setdefault("hints", []).append(
+                            "sticky_force_full_screen_not_thread:reset"
+                        )
+                        logger.warning(
+                            "[messenger_rpa] sticky force_full: 屏幕不在 thread "
+                            "(chat=%r)，清 sticky 让下个 cycle 重 sync", chat_name,
+                        )
+                        return False  # 让调用方早退，外层重走 cycle 入口
+                except Exception:
+                    logger.debug("sticky force_full screen check 异常", exc_info=True)
+                return True
+            result["sticky_idle_count"] = idle_count
+            return False  # 没变化 → 调用方早退
+        # 有变化（或首次）→ 更新 hash + 重置 idle count
+        self._sticky_last_hash[chat_name] = h_now
+        self._sticky_idle_count[chat_name] = 0
+        if last:
+            result.setdefault("hints", []).append("sticky_thread_changed")
+        return True
+
+    def _check_inbox_changed(
+        self,
+        inbox_png_path: str,
+        serial: str,
+        result: Dict[str, Any],
+    ) -> bool:
+        """方案 3 (2026-05-03): inbox 阶段 hash 早退。
+        crop inbox 列表区域 → md5 hash → 对比上次 hash
+        返回 True = 有变化（需要走 vision），False = 无变化（早退）
+
+        每 full_check_after_n_idle 次 idle 强制走 vision（兜底防 hash 假阳性
+        / messenger 推送未刷新 inbox UI 但有新消息的极端 case）。
+
+        预期收益：节约 inbox vision call ~30s/轮（与 P2-A sticky_idle 同款效果）。
+        风险：messenger 推送通知未刷新 inbox UI 时漏检；由 full_check_n=30 兜底
+        （interval_sec=8s × 30 = 240s = 4 分钟内一定走一次完整 vision）。
+        """
+        cfg = self._cfg.get("inbox_hash_diff") or {}
+        if not cfg.get("enabled", True):
+            return True  # 没启用 → 默认有变化（走 vision）
+        if not inbox_png_path:
+            return True
+        # 用 serial 作 key，避免不同设备共享 hash
+        key = serial or "_default"
+        if not hasattr(self, "_inbox_last_hash"):
+            self._inbox_last_hash: Dict[str, str] = {}
+        if not hasattr(self, "_inbox_idle_count"):
+            self._inbox_idle_count: Dict[str, int] = {}
+
+        try:
+            from PIL import Image
+            with Image.open(inbox_png_path) as im:
+                w, h = im.size
+                # crop inbox 列表区域：y=15%-75%（避开顶栏搜索栏 + 底部 nav）
+                top = int(h * 0.15)
+                bottom = int(h * 0.75)
+                crop = im.crop((0, top, w, bottom))
+                # 缩到 128x128 求 md5（normalize 抖动 + 计算快）
+                crop_small = crop.resize((128, 128))
+                raw = crop_small.tobytes()
+            h_now = hashlib.md5(raw).hexdigest()[:16]
+        except Exception:
+            logger.debug(
+                "[messenger_rpa] inbox hash diff failed", exc_info=True,
+            )
+            return True  # 失败 fail-open（走 vision）
+
+        last = self._inbox_last_hash.get(key, "")
+        result["inbox_hash"] = h_now
+        if last and last == h_now:
+            # 没变化
+            idle_count = self._inbox_idle_count.get(key, 0) + 1
+            self._inbox_idle_count[key] = idle_count
+            # P-fix (2026-05-04): 30 → 10. inbox unread badge 偶发不让 hash 变
+            # （u2 看到 unread 但 hash 一致），30 次 (4 min) 太慢自愈。
+            full_check_n = int(cfg.get("full_check_after_n_idle", 10) or 10)
+            if idle_count >= full_check_n:
+                # 强制走完整 vision 兜底
+                self._inbox_idle_count[key] = 0
+                result.setdefault("hints", []).append(
+                    f"inbox_force_full:{idle_count}"
+                )
+                return True
+            result["inbox_idle_count"] = idle_count
+            return False  # 没变化 → 调用方早退
+        # 有变化（或首次）→ 更新 hash + 重置 idle count
+        self._inbox_last_hash[key] = h_now
+        self._inbox_idle_count[key] = 0
+        if last:
+            result.setdefault("hints", []).append("inbox_changed")
+        return True
+
+    def _run_once_start_mode(self) -> str:
+        """How run_once should position Messenger before reading messages."""
+        raw = str(
+            self._cfg.get("run_once_start_mode")
+            or self._cfg.get("start_position_mode")
+            or ""
+        ).strip().lower()
+        aliases = {
+            "smart": "smart_current_thread",
+            "preserve": "smart_current_thread",
+            "preserve_current_thread": "smart_current_thread",
+            "current_thread": "smart_current_thread",
+            "force_chats": "force_chats",
+            "force_inbox": "force_chats",
+            "chats": "force_chats",
+            "inbox": "force_chats",
+        }
+        mode = aliases.get(raw, raw or "smart_current_thread")
+        if bool(self._cfg.get("force_return_to_chats", False)):
+            return "force_chats"
+        if mode not in ("smart_current_thread", "force_chats"):
+            return "smart_current_thread"
+        return mode
+
+    def _chat_key_for(self, chat_name: str) -> str:
+        """P0-E2: chat_name → canonical chat_key（带 OCR 容忍 fuzzy resolve）。
+
+        替换原 ``f"{self._chat_key_prefix}:{chat_name}"`` 字符串拼接。
+        策略：
+          1. cache 命中（同 session 已 resolved）→ 直接返回
+          2. 严格匹配：chat_state 表已有 exact key → 返回
+          3. fuzzy match：扫表用 SequenceMatcher.ratio()，超阈值
+             （chat_key_fuzzy_threshold，默认 0.85）→ 用现有 key
+          4. 都不命中 → 返回新的严格 key
+
+        阈值 0.85 较保守，仅归并极相似变体（避免误归不同真实用户）。
+        阶段 2 数据驱动调阈值 / 加 prefix bucket。
+        """
+        if not chat_name:
+            return f"{self._chat_key_prefix}:_empty"
+        # Lazy-init cache（防 object.__new__ 跳过 __init__ 的测试 fixture 路径）
+        if not hasattr(self, "_chat_key_resolve_cache"):
+            self._chat_key_resolve_cache = {}
+        cn_key = chat_name
+        cached = self._chat_key_resolve_cache.get(cn_key)
+        if cached:
+            return cached
+
+        strict = f"{self._chat_key_prefix}:{chat_name}"
+
+        # 1. 严格匹配优先
+        try:
+            if self._state.get_chat_state(strict):
+                self._chat_key_resolve_cache[cn_key] = strict
+                return strict
+        except Exception:
+            logger.debug("chat_key strict lookup failed", exc_info=True)
+
+        # 2. fuzzy resolve
+        try:
+            threshold = float(
+                self._cfg.get("chat_key_fuzzy_threshold", 0.85) or 0
+            )
+        except (TypeError, ValueError):
+            threshold = 0.85
+        if threshold > 0 and threshold < 1:
+            try:
+                from difflib import SequenceMatcher
+                target_lower = chat_name.casefold().strip()
+                if target_lower:
+                    candidates = self._state.list_chat_states(limit=200)
+                    prefix = self._chat_key_prefix + ":"
+                    best_key, best_score = None, 0.0
+                    for row in candidates:
+                        ck = str(row.get("chat_key") or "")
+                        if not ck.startswith(prefix):
+                            continue
+                        existing_name = ck[len(prefix):]
+                        existing_lower = existing_name.casefold().strip()
+                        if not existing_lower:
+                            continue
+                        ratio = SequenceMatcher(
+                            None, target_lower, existing_lower,
+                        ).ratio()
+                        if ratio > best_score:
+                            best_key, best_score = ck, ratio
+                    if best_key and best_score >= threshold:
+                        logger.warning(
+                            "[messenger_rpa] P0-E2 chat_key fuzzy resolve: "
+                            "%r → %r (ratio=%.2f >= %.2f)",
+                            chat_name, best_key, best_score, threshold,
+                        )
+                        self._chat_key_resolve_cache[cn_key] = best_key
+                        return best_key
+            except Exception:
+                logger.debug(
+                    "chat_key fuzzy resolve failed", exc_info=True,
+                )
+
+        # 3. fallback: 新建 strict key
+        self._chat_key_resolve_cache[cn_key] = strict
+        return strict
+
     @staticmethod
     def _chat_name_matches_any(chat_name: str, names: List[str]) -> bool:
+        """检查 chat_name 是否命中任一 names 项。
+
+        P0-E1 (2026-05-03 监控发现 P0-H 入口)：
+          - 原 `cn == want or want in cn or cn in want` 三支匹配
+          - `cn in want` 是 OCR 漏后缀的 P0-H 入口（sticky 配 "Victor Zan"，
+            OCR 给 "Victor" → "Victor" in "Victor Zan" → True → fast_path
+            接管错的 chat_key → 跨人设串戏）
+          - 移除该支，保留 `want in cn`（运营常见的"配短名匹配多个变体"
+            场景仍工作，如 sticky 配 "Victor"，OCR 给 "Victor Zan/Smith"
+            仍 match）
+
+        效果：
+          - sticky=["Victor Zan"]，chat="Victor Zan"     → True ✓
+          - sticky=["Victor Zan"]，chat="Victor Zan San" → True ✓ (want in cn)
+          - sticky=["Victor Zan"]，chat="Victor"         → False ✓ 切断 P0-H 入口
+          - sticky=["Victor"], chat="Victor Zan"         → True ✓ 运营前缀仍工作
+        """
         cn = (chat_name or "").strip().lower()
         if not cn:
             return False
         for raw in names:
             want = (raw or "").strip().lower()
-            if want and (cn == want or want in cn or cn in want):
+            if want and (cn == want or want in cn):
                 return True
         return False
+
+    def _current_thread_target_from_title(
+        self,
+        title: str,
+        target_names: List[str],
+        result: Dict[str, Any],
+    ) -> Optional[UnreadChat]:
+        """Return a synthetic target when run_once starts inside target thread.
+
+        The fast path is deliberately allowlist-gated. Without an explicit
+        target name, a background run could resume whatever thread Messenger
+        last displayed and send in the wrong conversation.
+        """
+        name = (title or "").strip()
+        if not name:
+            return None
+        result["current_thread_title"] = name
+        if not target_names:
+            result.setdefault("hints", []).append(
+                "current_thread_seen:no_target_allowlist"
+            )
+            return None
+        if not self._chat_name_matches_any(name, target_names):
+            result.setdefault("hints", []).append(
+                f"current_thread_seen:not_target:{name}"
+            )
+            return None
+        return UnreadChat(
+            name=name,
+            preview="",
+            time="",
+            row_index=0,
+            y_percent=0.0,
+            quality_hint="current_thread",
+            score=100.0,
+            skip_inbox_tap=True,
+        )
+
+    def _xml_inbox_unread_fallback(self, serial: str) -> List["UnreadChat"]:
+        """vision 全失败时，用 XML dump_inbox_rows + chat_state 历史名做 last
+        resort 兜底。u2 让 inbox row XML 稳定可读，对 vision 漏读最终保底。
+
+        策略：
+          - dump 拿 row bounds + preview
+          - 跳过 self_last 的 row（"You: ..." / "You sent..."）
+          - 从 preview 提 sender 前缀（如 "Victor sent a voice..." → "Victor"）
+          - 用 sender 模糊匹配 _state 历史 chat name 列表得到完整 name
+          - 没 sender 就用 row 索引顺序，name 留 sender 本身或空
+        """
+        try:
+            from src.integrations.messenger_rpa.ui_inbox_scraper import (
+                dump_inbox_rows,
+            )
+        except Exception:
+            return []
+        try:
+            rows = dump_inbox_rows(
+                serial, adb_user_id=self._adb_user_id, timeout_s=6.0,
+            )
+        except Exception:
+            logger.debug(
+                "[messenger_rpa] xml_inbox_unread_fallback dump 失败",
+                exc_info=True,
+            )
+            return []
+        if not rows:
+            return []
+        # 历史 chat name pool（来自 chat_state DB）
+        historical: List[str] = []
+        try:
+            for row in self._state.list_chat_states(limit=200) or []:
+                nm = (row.get("chat_name") or "").strip()
+                if nm and nm not in historical:
+                    historical.append(nm)
+        except Exception:
+            pass
+
+        out: List[UnreadChat] = []
+        # rows 已按 y_top 排序；用 enumerate 作 row_index
+        for ix, row in enumerate(rows):
+            if row.is_self_last:
+                continue  # bot 自己最末气泡，不当作 unread
+            preview = (row.preview or "").strip()
+            if not preview:
+                continue
+            # 提取 sender 前缀："Victor sent..." / "Victor: ..." / "Yunshan ..."
+            sender = ""
+            m = re.match(r"^([\wÀ-￿]{1,40})(?:\s+sent|:)", preview)
+            if m:
+                sender = m.group(1)
+            # 用 sender 模糊匹配历史完整 chat name
+            chat_name = ""
+            if sender and historical:
+                _s_low = sender.lower()
+                for hc in historical:
+                    if _s_low in hc.lower() or hc.lower() in _s_low:
+                        chat_name = hc
+                        break
+            if not chat_name:
+                chat_name = sender or f"row_{ix}"
+            out.append(UnreadChat(
+                name=chat_name,
+                preview=preview,
+                time="",
+                row_index=ix,
+                y_percent=0.0,
+                quality_hint="friend",
+                score=70.0 - ix,  # 顶部 row 优先
+            ))
+            if len(out) >= 3:
+                break
+        return out
+
+    def _push_recent_reply(self, chat_key: str, reply_text: str) -> None:
+        """P15: 维护 per-chat 最近 N 条 self reply（in-memory，重启丢失）。
+        每次成功 send 后调用，给后续 self_overlap 检测提供更广的对比集。"""
+        if not chat_key or not reply_text:
+            return
+        text = reply_text.strip()
+        if not text:
+            return
+        bucket = self._recent_replies_per_chat.setdefault(chat_key, [])
+        bucket.append(text)
+        if len(bucket) > self._recent_replies_max:
+            del bucket[: len(bucket) - self._recent_replies_max]
+
+    @staticmethod
+    def _sanitize_actual_title(s: str) -> str:
+        """挡住 LLM/parse 偶发回出的 JSON 字面 token（"{}" / "[]" / "null" 等）
+        被当作合法会话标题——一旦落到 actual_title 会触发 wrong_chat_rollback。"""
+        if not s:
+            return ""
+        t = s.strip()
+        if t in {"{}", "[]", "null", "None", "undefined", "{ }", "[ ]"}:
+            return ""
+        return t
 
     def _thread_title_from_xml(self, serial: str, result: Dict[str, Any]) -> str:
         try:
@@ -389,12 +1425,168 @@ class MessengerRpaRunner:
                 dump_timeout=float(self._cfg.get("ui_dump_timeout_s") or 6.0),
                 cat_timeout=4.0,
             )
-            title = (_uis.find_thread_title(xml) or "").strip() if xml else ""
+            raw = (_uis.find_thread_title(xml) or "").strip() if xml else ""
+            title = self._sanitize_actual_title(raw)
             if title:
                 result["thread_title_xml"] = title
             return title
         except Exception:
             logger.debug("[messenger_rpa] thread title xml read failed", exc_info=True)
+            return ""
+
+    async def _thread_title_from_vision(
+        self,
+        serial: str,
+        result: Dict[str, Any],
+        *,
+        reason: str,
+        target_name: Optional[str] = None,
+    ) -> str:
+        if not bool(self._cfg.get("thread_title_vision_fallback", True)):
+            return ""
+        # ── cache 命中：跳过整段 vision OCR（5–15s/cycle）────────
+        # cache key 用 (serial, normalized target_name)。同 chat 的 peer
+        # 显示名在一次会话生命周期内不会变，TTL 30s 足够保证安全。
+        cache_key: Optional[Tuple[str, str]] = None
+        if target_name and self._title_vision_cache_ttl_sec > 0:
+            norm = (target_name or "").strip()
+            if norm:
+                cache_key = (serial, norm)
+                hit = self._title_vision_cache.get(cache_key)
+                if hit and hit[1] > time.monotonic():
+                    cached_title, _exp = hit
+                    result[f"thread_title_vision_{reason}"] = {
+                        "title": cached_title,
+                        "debug": "cache_hit",
+                    }
+                    result.setdefault("hints", []).append(
+                        f"thread_title_vision_cache_hit:{reason}"
+                    )
+                    if cached_title:
+                        result["thread_title_vision"] = cached_title
+                    return cached_title
+        try:
+            from src.integrations.messenger_rpa.thread_title_vision import (
+                read_thread_title_via_vision,
+            )
+
+            vr = await asyncio.to_thread(
+                read_thread_title_via_vision,
+                serial,
+                self._vision_cfg(),
+                self._global_vision_cfg(),
+            )
+            title = self._sanitize_actual_title((vr.title or "").strip())
+            result[f"thread_title_vision_{reason}"] = {
+                "title": title,
+                "debug": vr.debug,
+            }
+            if title:
+                result["thread_title_vision"] = title
+                # 只缓存非空 + 通过 sanitize 的合法 title
+                if cache_key is not None:
+                    self._title_vision_cache[cache_key] = (
+                        title,
+                        time.monotonic() + self._title_vision_cache_ttl_sec,
+                    )
+            return title
+        except Exception:
+            logger.debug(
+                "[messenger_rpa] thread title vision fallback failed",
+                exc_info=True,
+            )
+            result.setdefault("hints", []).append(
+                f"thread_title_vision_failed:{reason}"
+            )
+            return ""
+
+    def _is_send_to_screen_xml(self, xml: str) -> bool:
+        """Messenger share/forward target picker is not an inbox."""
+        if not xml:
+            return False
+        low = xml.lower()
+        if "send to" in low and ("create group" in low or "write a message" in low):
+            return True
+        # Japanese/Chinese locale fallbacks plus repeated Send buttons.
+        if ("送信先" in xml or "发送给" in xml or "傳送給" in xml) and (
+            "create group" in low or "send" in low or "送信" in xml
+        ):
+            return True
+        return False
+
+    def _search_result_fallback_taps(
+        self, wh: Tuple[int, int]
+    ) -> List[Tuple[int, int, str]]:
+        """Coordinate fallbacks for Messenger search results.
+
+        Search results do not share the inbox row grid.  On 720x1600 the first
+        exact "People" result sits around y=350; using inbox row y=600 taps the
+        "More people" section and fails to open the target.
+        """
+        w, h = int(wh[0]), int(wh[1])
+        rx = w / 720.0
+        ry = h / 1600.0
+        base = [
+            (280, 350, "search_result_primary"),
+            (280, 560, "search_more_0"),
+            (280, 675, "search_more_1"),
+        ]
+        return [
+            (int(round(x * rx)), int(round(y * ry)), tag)
+            for x, y, tag in base
+        ]
+
+    async def _recover_send_to_screen(
+        self,
+        serial: str,
+        wh: Tuple[int, int],
+        run_id: str,
+        result: Dict[str, Any],
+    ) -> str:
+        """Exit Messenger's ``Send to`` share picker before inbox vision.
+
+        The share picker visually resembles a people list and Vision may report
+        its rows as unread chats.  Treating it as an inbox can make the runner
+        tap Send/people rows, so recovery must happen before any unread scan.
+        """
+        try:
+            from src.integrations.messenger_rpa import thread_actions as _ta
+
+            xml = _ta.dump_view_tree(
+                serial,
+                dump_timeout=float(self._cfg.get("ui_dump_timeout_s") or 6.0),
+                cat_timeout=4.0,
+            )
+            if not self._is_send_to_screen_xml(xml or ""):
+                return ""
+            result.setdefault("hints", []).append("send_to_screen_recovered")
+            logger.warning(
+                "[messenger_rpa] detected Messenger Send-to share picker; "
+                "press BACK and return to Chats before scanning inbox"
+            )
+            for _ in range(2):
+                adb.input_keyevent(serial, "KEYCODE_BACK")
+                await asyncio.sleep(0.55)
+                xml2 = _ta.dump_view_tree(
+                    serial,
+                    dump_timeout=float(self._cfg.get("ui_dump_timeout_s") or 6.0),
+                    cat_timeout=4.0,
+                )
+                if not self._is_send_to_screen_xml(xml2 or ""):
+                    break
+            self._foreground_messenger(serial, result)
+            await asyncio.sleep(0.5)
+            try:
+                tx, ty = cc.TAB_CHATS.at(*wh)
+                adb.input_tap(serial, tx, ty)
+                await asyncio.sleep(0.5)
+            except Exception:
+                pass
+            png = await self._screenshot(serial, "inbox_after_send_to_recover", run_id)
+            return png or ""
+        except Exception:
+            logger.debug("[messenger_rpa] send-to recovery failed", exc_info=True)
+            result.setdefault("hints", []).append("send_to_screen_recover_error")
             return ""
 
     def set_contact_hooks(self, hooks: Optional[Any]) -> None:
@@ -557,118 +1749,447 @@ class MessengerRpaRunner:
             wh = self._screen_size(serial)
             result["device_wh"] = wh
 
-            if not self._foreground_messenger(serial, result):
-                return self._finish(result, t0)
+            target_names = self._run_once_target_names()
+            if target_names:
+                result["target_chat_names"] = target_names
+            # P2-S 粘性白名单也参与 smart_current_thread 判定，让粘性 chat
+            # 即使没配 target_chat_names 也能被"已在 thread 内"快速通道识别
+            sticky_names = self._sticky_thread_names()
+            preserve_current_thread = False
+            preserved_thread_title = ""
+            start_mode = self._run_once_start_mode()
+            result["run_once_start_mode"] = start_mode
+            _smart_target_names = target_names or sticky_names
 
-            inbox_png = await self._screenshot(serial, "inbox", run_id)
+            # ── B-fix (2026-05-04)：cycle 入口屏幕状态守卫 ──────
+            # 实测场景：runner 内存认为已退出 thread (sticky cleared)，
+            # 但实际屏幕仍停在 Victor Zan thread 内（用户手动开/BACK 没退）。
+            # runner 在 inbox 路径扫描却看到 thread 屏幕 → cr.rows=0 inbox_idle
+            # 死循环，永远漏掉 thread 内新消息。
+            # 修复：u2 dump XML 看真实顶栏。在 thread 内但 title 不在
+            # sticky/target → 强制 BACK 让下个 cycle 重扫 inbox。
+            if bool(self._cfg.get("cycle_entry_screen_state_guard", True)):
+                try:
+                    from src.integrations.messenger_rpa import (
+                        thread_actions as _ta_se,
+                        ui_scraper as _uis_se,
+                    )
+                    _xml_se = _ta_se.dump_view_tree(serial)
+                    if _xml_se and _uis_se.is_in_thread(_xml_se):
+                        _title_se = (
+                            _uis_se.find_thread_title(_xml_se) or ""
+                        ).strip()
+                        _smart_se = list(_smart_target_names or [])
+                        # 把当前 thread title 加入 sticky → 让 fast_path 自然处理
+                        if _title_se and _title_se not in _smart_se:
+                            logger.warning(
+                                "[messenger_rpa] cycle entry: in thread %r but "
+                                "not in sticky/target → 临时加入 sticky 让 fast_path 接管",
+                                _title_se,
+                            )
+                            _smart_target_names = _smart_se + [_title_se]
+                            result.setdefault("hints", []).append(
+                                f"cycle_entry_thread_recovered:{_title_se[:40]}"
+                            )
+                except Exception:
+                    logger.debug(
+                        "cycle entry screen state guard 异常",
+                        exc_info=True,
+                    )
+            if (
+                start_mode == "smart_current_thread"
+                and _smart_target_names
+                and not self._is_messenger_lost(serial)
+            ):
+                # ── pre_foreground cache：上次进 thread 后没 _exit_thread 的话，
+                #   foreground 还是同一个 chat，title 也没变。直接复用即省整段
+                #   xml+vision（5–15s）。失效时机：_exit_thread / TTL 兜底。
+                pre_title = ""
+                _fg_cache_key = serial
+                _fg_cache_ttl = self._title_vision_cache_ttl_sec
+                _now_m = time.monotonic()
+                _fg_hit = self._foreground_title_cache.get(_fg_cache_key)
+                if _fg_hit and _fg_hit[1] > _now_m and _fg_cache_ttl > 0:
+                    pre_title = _fg_hit[0]
+                    result.setdefault("hints", []).append(
+                        "pre_foreground_title_cache_hit"
+                    )
+                if not pre_title:
+                    pre_title = self._thread_title_from_xml(serial, result)
+                if not pre_title:
+                    pre_title = await self._thread_title_from_vision(
+                        serial, result, reason="pre_foreground",
+                    )
+                # 任意路径成功拿到 title 都写 cache（XML / vision 都行）
+                if pre_title and _fg_cache_ttl > 0:
+                    self._foreground_title_cache[_fg_cache_key] = (
+                        pre_title, _now_m + _fg_cache_ttl,
+                    )
+                preserve_current_thread = (
+                    self._current_thread_target_from_title(
+                        pre_title, _smart_target_names, result,
+                    )
+                    is not None
+                )
+                if preserve_current_thread:
+                    preserved_thread_title = pre_title
+            if preserve_current_thread:
+                result["foreground_skipped_current_thread"] = True
+                result.setdefault("hints", []).append(
+                    "foreground_preserved_current_thread"
+                )
+            else:
+                result.pop("thread_title_xml", None)
+                if not self._foreground_messenger(serial, result):
+                    return self._finish(result, t0)
+
+            first_shot_tag = "thread_current" if preserve_current_thread else "inbox"
+            inbox_png = await self._screenshot(serial, first_shot_tag, run_id)
             if not inbox_png:
-                result["step"] = "screenshot_inbox_failed"
+                result["step"] = (
+                    "screenshot_thread_current_failed"
+                    if preserve_current_thread else "screenshot_inbox_failed"
+                )
                 return self._finish(result, t0)
             result["screenshot_path"] = inbox_png
-
-            # ── 自动校准（首次、像素级、~200ms）──
-            self._maybe_auto_calibrate(serial, wh, inbox_png, result)
-
-            # ── inbox guard + 未读扫描 ──
-            if self._use_combined_vision:
-                guard, unread = await self._inbox_combined(inbox_png, result)
-            else:
-                guard = await self._handle_guard(
-                    serial, inbox_png, result, "inbox"
+            if not preserve_current_thread:
+                recovered_png = await self._recover_send_to_screen(
+                    serial, wh, run_id, result,
                 )
+                if recovered_png:
+                    inbox_png = recovered_png
+                    result["screenshot_path"] = inbox_png
+
+            target: Optional[UnreadChat] = None
+            chat_key = ""
+            thread_png = ""
+            actual_title = ""
+
+            current_title = (
+                preserved_thread_title
+                if preserve_current_thread else self._thread_title_from_xml(
+                    serial, result
+                )
+            )
+            # P2-S：粘性 chat 也参与"当前 thread 快速识别"，避免被 exit_to_inbox
+            current_thread_target = self._current_thread_target_from_title(
+                current_title, _smart_target_names, result,
+            )
+            if current_thread_target is not None:
+                target = current_thread_target
+                thread_png = inbox_png
+                actual_title = current_title
+                result["current_thread_fast_path"] = True
+                result["screenshot_path"] = thread_png
+                result.setdefault("hints", []).append("current_thread_fast_path")
+                # P2-A bugfix：fast_path 跳过了 L1211 的 _original_vision_name
+                # 赋值，导致后续 sticky cooldown 设置抛 UnboundLocalError → cooldown
+                # 失效 → main.py 持续处理同一 chat 疯狂回复。这里补上。
+                _original_vision_name = target.name
+            elif current_title:
+                result.setdefault("hints", []).append("current_thread_exit_to_inbox")
+                self._exit_thread(serial)
+                await asyncio.sleep(0.6)
+                still_title = self._thread_title_from_xml(serial, result)
+                if still_title and still_title == current_title:
+                    result.setdefault("hints", []).append("current_thread_exit_retry")
+                    self._exit_thread(serial)
+                    await asyncio.sleep(0.6)
+                inbox_png = await self._screenshot(
+                    serial, "inbox_after_thread_exit", run_id
+                )
+                if not inbox_png:
+                    result["step"] = "screenshot_inbox_after_thread_exit_failed"
+                    return self._finish(result, t0)
+                result["screenshot_path"] = inbox_png
+                result.pop("thread_title_xml", None)
+
+            if target is None:
+                # ── 自动校准（首次、像素级、~200ms）──
+                self._maybe_auto_calibrate(serial, wh, inbox_png, result)
+
+                # ★ 方案 3 (2026-05-03): inbox hash 早退（节约 vision ~30s/轮）
+                # 仿 P2-A sticky_thread.hash_diff_enabled，对 inbox 做相同优化。
+                # 配置 inbox_hash_diff.enabled (默认 True) + full_check_after_n_idle (30)
+                if not self._check_inbox_changed(inbox_png, serial, result):
+                    result["step"] = "inbox_idle"
+                    result["ok"] = True
+                    logger.info(
+                        "[messenger_rpa] 💤 inbox_idle hash unchanged "
+                        "idle_count=%s (skip vision, save ~30s)",
+                        result.get("inbox_idle_count"),
+                    )
+                    return self._finish(result, t0)
+
+                # ── inbox guard + 未读扫描 ──
+                if self._use_combined_vision:
+                    guard, unread = await self._inbox_combined(inbox_png, result)
+                    # P-XML fallback (2026-05-04)：vision 全失败时用 XML
+                    # dump_inbox_rows 兜底——u2 让 inbox row content-desc
+                    # 稳定可读，是 last-resort ground truth
+                    if not unread:
+                        xml_unread = self._xml_inbox_unread_fallback(serial)
+                        if xml_unread:
+                            result.setdefault("hints", []).append(
+                                f"xml_inbox_fallback:{len(xml_unread)}rows"
+                            )
+                            logger.warning(
+                                "[messenger_rpa] vision 全失败，XML inbox 兜底 "
+                                "返 %d 条: %s",
+                                len(xml_unread),
+                                [(r.name, r.preview[:30]) for r in xml_unread],
+                            )
+                            unread = xml_unread
+                else:
+                    guard = await self._handle_guard(
+                        serial, inbox_png, result, "inbox"
+                    )
+                    if guard.needs_human:
+                        result["step"] = "guard_needs_human"
+                        result["error"] = f"profile_picker:{guard.title}"
+                        return self._finish(result, t0)
+                    if guard.type != "none":
+                        wh_now = self._screen_size(serial)
+                        tx, ty = cc.TAB_CHATS.at(*wh_now)
+                        adb.input_tap(serial, tx, ty)
+                        await asyncio.sleep(0.6)
+                        inbox_png = await self._screenshot(
+                            serial, "inbox_retry", run_id
+                        )
+                        if not inbox_png:
+                            result["step"] = "screenshot_inbox_retry_failed"
+                            return self._finish(result, t0)
+                        result["screenshot_path"] = inbox_png
+                    unread = await self._scan_inbox(inbox_png, result)
                 if guard.needs_human:
                     result["step"] = "guard_needs_human"
                     result["error"] = f"profile_picker:{guard.title}"
                     return self._finish(result, t0)
-                if guard.type != "none":
-                    wh_now = self._screen_size(serial)
-                    tx, ty = cc.TAB_CHATS.at(*wh_now)
-                    adb.input_tap(serial, tx, ty)
-                    await asyncio.sleep(0.6)
-                    inbox_png = await self._screenshot(serial, "inbox_retry", run_id)
-                    if not inbox_png:
-                        result["step"] = "screenshot_inbox_retry_failed"
-                        return self._finish(result, t0)
-                    result["screenshot_path"] = inbox_png
-                unread = await self._scan_inbox(inbox_png, result)
-            if guard.needs_human:
-                result["step"] = "guard_needs_human"
-                result["error"] = f"profile_picker:{guard.title}"
-                return self._finish(result, t0)
-            if guard.type != "none" and self._use_combined_vision:
-                # combined 模式下若识别到 modal，先尝试闪避再重扫
-                handled = self._apply_guard_action(serial, guard)
-                if handled:
-                    await asyncio.sleep(0.6)
-                    inbox_png = await self._screenshot(serial, "inbox_retry", run_id)
-                    if inbox_png:
-                        result["screenshot_path"] = inbox_png
-                        guard, unread = await self._inbox_combined(
-                            inbox_png, result, retry=True
+                if guard.type != "none" and self._use_combined_vision:
+                    # combined 模式下若识别到 modal，先尝试闪避再重扫
+                    handled = self._apply_guard_action(serial, guard)
+                    if handled:
+                        await asyncio.sleep(0.6)
+                        inbox_png = await self._screenshot(
+                            serial, "inbox_retry", run_id
                         )
-            # Vision 偶发漏掉首屏外未读：上滑列表再扫（与 send_to_chat_name 同手势）
-            guard, unread = await self._run_once_scroll_rescan_if_no_unread(
-                serial, wh, run_id, result, guard, unread,
-            )
-            if getattr(guard, "needs_human", False):
-                result["step"] = "guard_needs_human"
-                result["error"] = (
-                    f"profile_picker:{getattr(guard, 'title', '')}"
+                        if inbox_png:
+                            result["screenshot_path"] = inbox_png
+                            guard, unread = await self._inbox_combined(
+                                inbox_png, result, retry=True
+                            )
+                # Vision 偶发漏掉首屏外未读：上滑列表再扫（与 send_to_chat_name 同手势）
+                guard, unread = await self._run_once_scroll_rescan_if_no_unread(
+                    serial, wh, run_id, result, guard, unread,
                 )
-                return self._finish(result, t0)
-            if not unread:
-                result["step"] = "no_unread"
-                result["ok"] = True
-                return self._finish(result, t0)
+                if getattr(guard, "needs_human", False):
+                    result["step"] = "guard_needs_human"
+                    result["error"] = (
+                        f"profile_picker:{getattr(guard, 'title', '')}"
+                    )
+                    return self._finish(result, t0)
+                if not unread:
+                    result["step"] = "no_unread"
+                    result["ok"] = True
+                    return self._finish(result, t0)
 
-            # 过滤永久跳过的 chat（spam 兜底命中过的、人工标记的）
-            target: Optional[UnreadChat] = None
-            skipped_names: List[str] = []
-            skipped_self_previews: List[str] = []
-            target_names = self._run_once_target_names()
-            if target_names:
-                result["target_chat_names"] = target_names
-            for c in unread:
-                if target_names and not self._chat_name_matches_any(c.name, target_names):
-                    skipped_names.append(c.name)
-                    continue
-                if is_outbound_or_draft_preview(c.preview):
-                    logger.info(
-                        "[messenger_rpa] skip inbox row with outbound/draft preview: "
-                        "name=%r preview=%r",
-                        c.name, (c.preview or "")[:80],
-                    )
-                    skipped_names.append(c.name)
-                    skipped_self_previews.append(c.name)
-                    continue
-                ck = f"{self._chat_key_prefix}:{c.name}"
-                if self._state.is_skipped_chat(ck):
-                    logger.info(
-                        "[messenger_rpa] skip chat (in skipped_chats): %r", c.name
-                    )
-                    skipped_names.append(c.name)
-                    continue
-                target = c
-                break
-            if target is None and target_names:
-                for wanted_name in target_names:
-                    target = self._pick_unread_row_for_peer(
-                        unread, wanted_name, result,
-                    )
-                    if target is not None:
-                        result.setdefault("hints", []).append(
-                            "run_once_target:matched_from_ranking"
+                # 过滤永久跳过的 chat（spam 兜底命中过的、人工标记的）
+                skipped_names: List[str] = []
+                skipped_self_previews: List[str] = []
+                # B1 修复：inbox 扫描跳过 messenger UI 上的 "Message request"
+                # 按钮（陌生人请求）和 "Facebook user" 等无效 row。vision 经常
+                # 把它们当成 chat row，但 main.py tap 进去会失败浪费 70s vision call
+                _INVALID_INBOX_NAMES = {
+                    "message request", "message requests",
+                    "facebook user",  # 匿名/已注销账号
+                }
+                for c in unread:
+                    _name_l = (c.name or "").strip().lower()
+                    if _name_l in _INVALID_INBOX_NAMES:
+                        logger.info(
+                            "[messenger_rpa] skip invalid inbox row: name=%r",
+                            c.name,
                         )
-                        break
-            result["unread_names"] = [c.name for c in unread]
-            result["skipped_names"] = skipped_names
-            if skipped_self_previews:
-                result["skipped_self_previews"] = skipped_self_previews
-            if target is None:
-                result["step"] = "all_unread_skipped"
-                result["ok"] = True
-                return self._finish(result, t0)
-            chat_key = f"{self._chat_key_prefix}:{target.name}"
+                        skipped_names.append(c.name)
+                        continue
+                    if target_names and not self._chat_name_matches_any(
+                        c.name, target_names
+                    ):
+                        skipped_names.append(c.name)
+                        continue
+                    if is_outbound_or_draft_preview(c.preview):
+                        logger.info(
+                            "[messenger_rpa] skip inbox row with outbound/draft preview: "
+                            "name=%r preview=%r",
+                            c.name, (c.preview or "")[:80],
+                        )
+                        skipped_names.append(c.name)
+                        skipped_self_previews.append(c.name)
+                        continue
+                    ck = f"{self._chat_key_prefix}:{c.name}"
+                    if self._state.is_skipped_chat(ck):
+                        logger.info(
+                            "[messenger_rpa] skip chat (in skipped_chats): %r", c.name
+                        )
+                        skipped_names.append(c.name)
+                        continue
+                    # ★ 短期冷却：进入 thread 后发现 self-sent → 暂时跳过
+                    _ss_key = _self_skip_norm_key(c.name)
+                    _ss_until = self._self_skip_until.get(_ss_key, 0.0)
+                    if _ss_until > time.monotonic():
+                        logger.warning(
+                            "[messenger_rpa] skip chat (self_skip cooldown %.0fs): %r key=%r",
+                            _ss_until - time.monotonic(), c.name, _ss_key,
+                        )
+                        skipped_names.append(c.name)
+                        continue
+                    # ★ P16-IL (2026-05-04)：chat 级 self_overlap 长冷却前移到 inbox。
+                    # 与 thread 内兜底（_chat_overlap_skip_until 检查）形成双层。
+                    # 命中即跳过整个 tap → 截屏 → vision → exit_thread 流程，
+                    # 单次省 100~200s，连续幻觉 chat 不再阻塞其他对话。
+                    _co_until = float(
+                        self._chat_overlap_skip_until.get(ck, 0.0) or 0.0
+                    )
+                    if _co_until > time.monotonic():
+                        # P16-IL2 (2026-05-04) 逃逸机制：长冷却期内若 inbox
+                        # preview 与已 skip 的 thread peer 文本明显不同（相似度
+                        # < threshold，默认 0.6），视为真新消息到达 → 立即解除
+                        # 冷却 + 重置 streak。指纹保留作为 D 层兜底。
+                        # 没有已 skip 文本指纹时，保守维持冷却。
+                        _esc_thr = float(
+                            self._cfg.get(
+                                "chat_overlap_inbox_escape_threshold", 0.6,
+                            ) or 0.0
+                        )
+                        _esc_preview = (c.preview or "").strip()
+                        _skipped_for_chat = list(
+                            self._skipped_peer_text_per_chat.get(ck) or []
+                        )
+                        _max_sim = 0.0
+                        if _esc_preview and _skipped_for_chat and _esc_thr > 0:
+                            for _sk_text in _skipped_for_chat:
+                                _r = _self_reply_overlap_ratio(
+                                    _sk_text, _esc_preview,
+                                )
+                                if _r > _max_sim:
+                                    _max_sim = _r
+                                    if _max_sim >= 1.0:
+                                        break
+                        _can_escape = (
+                            _esc_thr > 0
+                            and _esc_preview
+                            and _skipped_for_chat
+                            and _max_sim < _esc_thr
+                        )
+                        if _can_escape:
+                            self._chat_overlap_skip_until.pop(ck, None)
+                            self._self_overlap_skip_streak.pop(ck, None)
+                            result.setdefault("hints", []).append(
+                                f"chat_overlap_inbox_escape:sim={_max_sim:.2f}"
+                            )
+                            logger.warning(
+                                "[messenger_rpa] chat_overlap 长冷却逃逸 "
+                                "chat=%r preview=%r max_sim=%.2f<%.2f → "
+                                "解除冷却放行",
+                                c.name, _esc_preview[:60], _max_sim, _esc_thr,
+                            )
+                            # 不 continue，继续走后续 cooldown 检查
+                        else:
+                            logger.warning(
+                                "[messenger_rpa] skip chat (chat_overlap_cooldown "
+                                "%.0fs left, max_sim=%.2f): %r",
+                                _co_until - time.monotonic(), _max_sim, c.name,
+                            )
+                            result.setdefault("hints", []).append(
+                                "chat_overlap_inbox_skip"
+                            )
+                            skipped_names.append(c.name)
+                            continue
+                    # ★ P0-1: 前移 companion_reply_cooldown_sec 检查到 inbox 阶段。
+                    # 之前该检查仅在 L2014（thread 内）兜底，导致同一会话每轮被
+                    # tap 进 thread → vision 读屏 → 退出，浪费 5-10s/轮，并使其他
+                    # 会话排队等待。此处提前判定，命中冷却直接 skip 不进 thread。
+                    # 保留 L2014 thread 内兜底用于 sticky / fast_path 绕过 inbox 的路径。
+                    _reply_cd_raw_v = self._cfg.get(
+                        "companion_reply_cooldown_sec", 300
+                    )
+                    try:
+                        _reply_cd_v = float(
+                            300 if _reply_cd_raw_v is None or _reply_cd_raw_v == ""
+                            else _reply_cd_raw_v
+                        )
+                    except (TypeError, ValueError):
+                        _reply_cd_v = 300.0
+                    if _reply_cd_v > 0:
+                        try:
+                            _cs_v = self._state.get_chat_state(ck)
+                            _last_sent_v = float(_cs_v.get("last_sent_at") or 0)
+                        except Exception:
+                            _last_sent_v = 0.0
+                        if _last_sent_v > 0:
+                            _elapsed_v = time.time() - _last_sent_v
+                            if _elapsed_v < _reply_cd_v:
+                                logger.info(
+                                    "[messenger_rpa] skip chat (inbox-stage "
+                                    "reply_cooldown %.0fs left/%.0fs total): %r",
+                                    _reply_cd_v - _elapsed_v, _reply_cd_v, c.name,
+                                )
+                                skipped_names.append(c.name)
+                                continue
+                    target = c
+                    break
+                if target is None and target_names:
+                    for wanted_name in target_names:
+                        target = self._pick_unread_row_for_peer(
+                            unread, wanted_name, result,
+                        )
+                        if target is not None:
+                            result.setdefault("hints", []).append(
+                                "run_once_target:matched_from_ranking"
+                            )
+                            break
+                result["unread_names"] = [c.name for c in unread]
+                result["skipped_names"] = skipped_names
+                if skipped_self_previews:
+                    result["skipped_self_previews"] = skipped_self_previews
+                # P-XML fallback (2026-05-04)：vision 给的 ranking 全部被
+                # cooldown/self skip，但 XML 可能看到 vision 漏读的 row（如
+                # vision 把 cooldown chat 排错位置，真正 unread 在别处）。
+                # 用 XML inbox 兜底找 vision 没拿到的 chat name 试一次。
+                if target is None and unread:
+                    try:
+                        xml_unread = self._xml_inbox_unread_fallback(serial)
+                    except Exception:
+                        xml_unread = []
+                    _existing_names_low = {
+                        (c.name or "").strip().lower() for c in unread
+                    }
+                    _xml_extras = [
+                        c for c in xml_unread
+                        if (c.name or "").strip().lower()
+                        not in _existing_names_low
+                    ]
+                    if _xml_extras:
+                        result.setdefault("hints", []).append(
+                            f"xml_inbox_supplement:{len(_xml_extras)}rows"
+                        )
+                        logger.warning(
+                            "[messenger_rpa] vision ranking 全 skip，XML 补 %d 条: %s",
+                            len(_xml_extras),
+                            [c.name for c in _xml_extras],
+                        )
+                        # 直接 pick 第一个非 cooldown 的 chat
+                        for cand in _xml_extras:
+                            ss_key = _self_skip_norm_key(cand.name)
+                            if self._self_skip_until.get(ss_key, 0.0) <= time.monotonic():
+                                target = cand
+                                break
+                if target is None:
+                    result["step"] = "all_unread_skipped"
+                    result["ok"] = True
+                    return self._finish(result, t0)
+
+            chat_key = self._chat_key_for(target.name)  # P0-E2 OCR 容忍
             result["chat_key"] = chat_key
             result["chat_name"] = target.name
 
@@ -688,62 +2209,233 @@ class MessengerRpaRunner:
                     return self._finish(result, t0)
                 result["_coord_lock_held"] = _coord_ext_id
 
-            # ★ 二次确认 row_index：用名字独立问 vision，避免 combined/fallback 猜错行
-            # （vision 输出 row_index 时任务繁重；单任务可精确些）
-            if bool(self._cfg.get("resolve_row_by_name", True)):
-                try:
-                    confirmed_idx = await resolve_row_by_name(
-                        inbox_png,
-                        target.name,
-                        vision_cfg=self._vision_cfg(),
-                        global_vision=self._global_vision_cfg(),
-                    )
-                    if confirmed_idx is not None and confirmed_idx != target.row_index:
-                        if target.row_index == 0 and confirmed_idx > 0:
-                            result.setdefault("hints", []).append(
-                                f"row_resolve_ignored:first_row {target.row_index}->{confirmed_idx}"
-                            )
-                            confirmed_idx = None
-                    if confirmed_idx is not None and confirmed_idx != target.row_index:
-                        logger.info(
-                            "[messenger_rpa] row_index 修正 %r: %d → %d (vision 单问)",
-                            target.name, target.row_index, confirmed_idx,
-                        )
-                        target = UnreadChat(
-                            name=target.name,
-                            preview=target.preview,
-                            time=target.time,
-                            row_index=confirmed_idx,
-                            y_percent=target.y_percent,
-                            quality_hint=target.quality_hint,
-                            score=target.score,
-                            skip_inbox_tap=target.skip_inbox_tap,
-                        )
-                        result["row_index_resolved"] = confirmed_idx
-                except Exception:
-                    logger.debug("resolve_row_by_name 失败（非致命）", exc_info=True)
-
-            self._tap_chat_row(serial, wh, target)
-            # 等会话页加载（含淡入动画 + 历史消息渲染）
-            await asyncio.sleep(jitter_ms(800, 1500))
-
-            thread_png = await self._screenshot(serial, "thread", run_id)
             if not thread_png:
-                result["step"] = "screenshot_thread_failed"
-                return self._finish(result, t0)
-            result["screenshot_path"] = thread_png
+                # ★ 二次确认 row_index：用名字独立问 vision，避免 combined/fallback 猜错行
+                # （vision 输出 row_index 时任务繁重；单任务可精确些）
+                if bool(self._cfg.get("resolve_row_by_name", True)):
+                    try:
+                        confirmed_idx = await resolve_row_by_name(
+                            inbox_png,
+                            target.name,
+                            vision_cfg=self._vision_cfg(),
+                            global_vision=self._global_vision_cfg(),
+                        )
+                        if confirmed_idx is not None and confirmed_idx != target.row_index:
+                            if target.row_index == 0 and confirmed_idx > 0:
+                                result.setdefault("hints", []).append(
+                                    f"row_resolve_ignored:first_row {target.row_index}->{confirmed_idx}"
+                                )
+                                confirmed_idx = None
+                        if confirmed_idx is not None and confirmed_idx != target.row_index:
+                            logger.info(
+                                "[messenger_rpa] row_index 修正 %r: %d → %d (vision 单问)",
+                                target.name, target.row_index, confirmed_idx,
+                            )
+                            target = UnreadChat(
+                                name=target.name,
+                                preview=target.preview,
+                                time=target.time,
+                                row_index=confirmed_idx,
+                                y_percent=target.y_percent,
+                                quality_hint=target.quality_hint,
+                                score=target.score,
+                                skip_inbox_tap=target.skip_inbox_tap,
+                            )
+                            result["row_index_resolved"] = confirmed_idx
+                    except Exception:
+                        logger.debug("resolve_row_by_name 失败（非致命）", exc_info=True)
 
-            # ★ calibration 自愈：tap 完之后若仍看到多行头像（=还在 Inbox
-            # 列表页，说明坐标点偏了），清校准缓存 + 重扫 + 再 tap 一次
-            if bool(self._cfg.get("calib_selfheal", True)):
-                selfheal_info = await self._thread_open_selfheal(
-                    serial, wh, target, thread_png, run_id, result,
+                _tap_rv = self._tap_chat_row(serial, wh, target)
+                _tap_src = (_tap_rv[2] if _tap_rv else "unknown")
+                result["tap_src"] = _tap_src
+                # ★ inbox self-sent guard: 自己发的最后一条 → 跳过这个会话
+                if _tap_rv and _tap_rv[2] == "inbox_self_sent_skip":
+                    result["step"] = "inbox_self_sent_skip"
+                    result["ok"] = True
+                    logger.info(
+                        "[messenger_rpa] skip chat=%r: latest is self-sent",
+                        target.name,
+                    )
+                    self._exit_thread(serial)
+                    return self._finish(result, t0)
+                # 等会话页加载（含淡入动画 + 历史消息渲染）
+                await asyncio.sleep(jitter_ms(800, 1500))
+
+                thread_png = await self._screenshot(serial, "thread", run_id)
+                if not thread_png:
+                    result["step"] = "screenshot_thread_failed"
+                    return self._finish(result, t0)
+                result["screenshot_path"] = thread_png
+
+                # ★ calibration 自愈：tap 完之后若仍看到多行头像（=还在 Inbox
+                # 列表页，说明坐标点偏了），清校准缓存 + 重扫 + 再 tap 一次
+                if bool(self._cfg.get("calib_selfheal", True)):
+                    selfheal_info = await self._thread_open_selfheal(
+                        serial, wh, target, thread_png, run_id, result,
+                    )
+                    if selfheal_info.get("retried"):
+                        thread_png = selfheal_info.get("new_png") or thread_png
+                        result["screenshot_path"] = thread_png
+
+                _original_vision_name = target.name  # 保存 vision 原名，用于 self-skip cooldown
+                actual_title = self._thread_title_from_xml(serial, result)
+                if not actual_title:
+                    # 传 target_name 启用 vision title cache —— 同 chat 30s 内
+                    # 命中可直接跳过 5–15s 的 OCR（lowmemkill 场景下每 cycle 都要走）。
+                    actual_title = await self._thread_title_from_vision(
+                        serial, result, reason="after_tap",
+                        target_name=target.name,
+                    )
+            if (
+                not actual_title
+                and bool(self._cfg.get("search_on_thread_title_missing", True))
+                and (target.name or "").strip()
+            ):
+                result.setdefault("hints", []).append(
+                    "thread_title_missing_after_tap:search_fallback"
                 )
-                if selfheal_info.get("retried"):
-                    thread_png = selfheal_info.get("new_png") or thread_png
-                    result["screenshot_path"] = thread_png
-
-            actual_title = self._thread_title_from_xml(serial, result)
+                searched = await self._search_chat_by_name(
+                    serial, wh, target.name or "", result,
+                )
+                if searched is not None:
+                    target = searched
+                    thread_png2 = await self._screenshot(
+                        serial, "thread_search_recovered", run_id,
+                    )
+                    if thread_png2:
+                        thread_png = thread_png2
+                        result["screenshot_path"] = thread_png
+                    actual_title = self._thread_title_from_xml(serial, result)
+                    if actual_title:
+                        result["thread_title_search_recovered"] = actual_title
+            # ★ P0 fallback：UI XML tap 像素级精确（ui_inbox_scraper 已验证过
+            #   row 内容），但 MIUI lowmemkill 把 uiautomator dump 杀掉时 XML
+            #   持续返空，Vision fallback 也常超时，搜索 fallback 同样依赖
+            #   dump 而失效。这种结构性失败下信任 ui_xml/ 来源的 target.name
+            #   作为 actual_title，避免系统完全无法发送任何消息。
+            #
+            # ★ 扩展信任：tap_src=calibrated_*（基于精确校准的公式坐标）也是
+            #   像素精确（与 ui_xml 同级），同样可信任。另外当 target.name 命中
+            #   ocr_drift_accept_names 白名单时（运营明确指定的客户），无论
+            #   tap_src 来源如何都信任 — 这是避开 thread title 验证 + OCR 漂移
+            #   双失败下的最后兜底。
+            _tap_src_for_trust = result.get("tap_src", "")
+            _trust_by_src = (
+                _tap_src_for_trust.startswith("ui_xml/")
+                or _tap_src_for_trust.startswith("calibrated")
+            )
+            _accept_names_trust = (
+                self._cfg.get("ocr_drift_accept_names")
+                or self._cfg.get("ocr_drift_accepted_chat_names")
+                or []
+            )
+            if isinstance(_accept_names_trust, str):
+                _accept_names_trust = [_accept_names_trust]
+            _trust_by_whitelist = bool(
+                _accept_names_trust
+                and (target.name or "").strip()
+                and self._chat_name_matches_any(target.name, _accept_names_trust)
+            )
+            if (
+                not actual_title
+                and (_trust_by_src or _trust_by_whitelist)
+                and bool(self._cfg.get("trust_xml_tap_target_name", True))
+                and (target.name or "").strip()
+            ):
+                actual_title = target.name
+                result["thread_title_xml"] = actual_title
+                _reason = (
+                    "src" if _trust_by_src else "whitelist"
+                )
+                result.setdefault("hints", []).append(
+                    f"trust_xml_tap_target_name:{_reason}"
+                )
+                logger.warning(
+                    "[messenger_rpa] thread title 双 fallback 失败 + tap_src=%r "
+                    "(reason=%s) → 信任 target.name=%r 作为 actual_title",
+                    _tap_src_for_trust, _reason, target.name,
+                )
+            if (
+                not actual_title
+                and bool(self._cfg.get("require_thread_title_before_reply", True))
+            ):
+                result["step"] = "not_in_thread_after_tap"
+                result["ok"] = True
+                result["error"] = (
+                    f"could not verify thread title for {target.name!r}; "
+                    "skip reply to avoid sending from inbox/search page"
+                )
+                logger.warning(
+                    "[messenger_rpa] 未确认进入目标会话，跳过回复 chat=%r",
+                    target.name,
+                )
+                self._exit_thread(serial)
+                return self._finish(result, t0)
+            # ★ 错误聊天检测 + 回滚：仅当 tap 用了公式坐标时才检查
+            # UI XML 坐标是像素级精确的，不会点错行；OCR 名字太不稳定会产生误报
+            _tap_src = result.get("tap_src", "")
+            _is_formula_tap = not _tap_src.startswith("ui_xml/")
+            # ★ Vision OCR 漂移容忍：如果 actual_title（thread XML/Vision 真名）
+            #   命中了运营配置的 target_chat_names（白名单），即使与 Vision 在
+            #   inbox 阶段给出的 target.name 不一致，也认为这是 OCR 漂移导致的
+            #   误判（如英文名"Victor Zan"被错读成"さとう たかひろ"），接受当前
+            #   会话不进 rollback。后续 title 修正阶段会把 target.name 改对。
+            _accept_due_to_target_match = False
+            if actual_title and actual_title != (target.name or "") and _is_formula_tap:
+                # 优先看独立的 ocr_drift_accept_names（专用容忍白名单），
+                # 没配则 fallback 到 target_chat_names（运行时白名单）
+                _accept_names = (
+                    self._cfg.get("ocr_drift_accept_names")
+                    or self._cfg.get("ocr_drift_accepted_chat_names")
+                    or self._run_once_target_names()
+                    or []
+                )
+                if isinstance(_accept_names, str):
+                    _accept_names = [_accept_names]
+                if _accept_names and self._chat_name_matches_any(
+                    actual_title, _accept_names
+                ):
+                    _accept_due_to_target_match = True
+                    logger.warning(
+                        "[messenger_rpa] OCR 漂移容忍：vision_target=%r 实际=%r "
+                        "命中 ocr_drift_accept_names → 接受会话，不 rollback",
+                        target.name, actual_title,
+                    )
+                    result.setdefault("hints", []).append(
+                        "ocr_drift_target_name_accept"
+                    )
+            if (
+                actual_title and actual_title != (target.name or "")
+                and _is_formula_tap and not _accept_due_to_target_match
+            ):
+                _norm_actual = _self_skip_norm_key(actual_title)
+                _norm_target = _self_skip_norm_key(_original_vision_name)
+                if _norm_actual != _norm_target:
+                    logger.warning(
+                        "[messenger_rpa] ⚠ 进入了错误聊天！目标=%r(key=%r) "
+                        "实际=%r(key=%r) → 回滚退出，不触碰输入框",
+                        _original_vision_name, _norm_target,
+                        actual_title, _norm_actual,
+                    )
+                    result["step"] = "wrong_chat_rollback"
+                    result["ok"] = True
+                    result["error"] = (
+                        f"entered {actual_title!r} instead of "
+                        f"{_original_vision_name!r}"
+                    )
+                    _cd = float(self._cfg.get("wrong_chat_cooldown_sec", 60) or 60)
+                    _now_m = time.monotonic() + _cd
+                    self._self_skip_until[_norm_target] = _now_m
+                    self._self_skip_until[_norm_actual] = _now_m
+                    # 失效 vision title cache —— 否则 30s TTL 内反复返回错的
+                    # cached title，wrong_chat 自我循环。
+                    self._title_vision_cache.pop(
+                        (serial, (_original_vision_name or "").strip()), None,
+                    )
+                    self._exit_thread(serial)
+                    return self._finish(result, t0)
+            # ★ title 修正：无论 tap 来源，只要 XML actual_title 与 Vision name
+            #   不同就用 XML 结果修正 target — 保证 chat_key 一致，去重才有效
             if actual_title and actual_title != (target.name or ""):
                 result.setdefault("hints", []).append(
                     f"thread_title_corrected:{target.name}->{actual_title}"
@@ -783,9 +2475,138 @@ class MessengerRpaRunner:
                     score=target.score,
                     skip_inbox_tap=target.skip_inbox_tap,
                 )
-                chat_key = f"{self._chat_key_prefix}:{target.name}"
+                chat_key = self._chat_key_for(target.name)  # P0-E2 OCR 容忍
                 result["chat_key"] = chat_key
                 result["chat_name"] = target.name
+                logger.warning(
+                    "[messenger_rpa] title 修正: vision=%r → xml=%r chat_key=%s",
+                    _original_vision_name, actual_title, chat_key,
+                )
+                # P3-FIX-1: vision misroute guard
+                # vision 反复把 victor 错放 row=1，main.py tap row=1 就进了
+                # 别的 chat（如 うめだゆうき）。即使本轮 step=no_peer_message
+                # 早退，几分钟后 vision 又会重复同样错误。给"非粘性 actual_title"
+                # 设较长 cooldown，inbox 阶段就拦下避免浪费 vision/LLM。
+                vmg_cfg = self._cfg.get("vision_misroute_guard") or {}
+                if vmg_cfg.get("enabled", True):
+                    only_when_sticky = bool(
+                        vmg_cfg.get("only_when_vision_target_was_sticky", True)
+                    )
+                    # 只在 vision 目标本是粘性 chat（如 Victor Zan）但实际进了
+                    # 非粘性 chat 时触发（确认是 vision 路由错误，不是正常处理）
+                    vision_was_sticky = self._is_sticky_chat(_original_vision_name)
+                    actual_is_sticky = self._is_sticky_chat(actual_title)
+                    # 2026-05-04 fix1：跳过 row_N 类 vision fallback 标签——
+                    # vision 偶发只返回 row_0/row_1 (没识别名字)，被 guard 当
+                    # 成"误路由"反复给真 chat 设 600s cooldown。
+                    import re as _re
+                    _vt = (_original_vision_name or "").strip()
+                    _is_row_idx = bool(
+                        _re.match(r"^(row_\d+|row\d+|none|null|unknown)$",
+                                  _vt, _re.IGNORECASE)
+                    )
+                    # 2026-05-04 fix2 (P2++I1)：fuzzy name match——vision OCR
+                    # 偶发名字错一字（'野木'→'野末'），但 row 是对的。用
+                    # SequenceMatcher.ratio 判 vision name 和 actual name 是
+                    # 否"基本相同"。≥0.5 视为 OCR 偏差，不触发 guard。
+                    # 'Victor Zan' vs '野末' ratio≈0  → 真误路由 → guard 触发
+                    # '野木' vs '野末'      ratio=0.5 → OCR 偏差 → 不触发
+                    fuzzy_threshold = float(
+                        vmg_cfg.get("fuzzy_name_ratio_threshold", 0.5)
+                    )
+                    name_similar = False
+                    try:
+                        from difflib import SequenceMatcher as _SM
+                        if _vt and actual_title:
+                            _ratio = _SM(
+                                None,
+                                _vt.strip().lower(),
+                                actual_title.strip().lower(),
+                            ).ratio()
+                            name_similar = _ratio >= fuzzy_threshold
+                    except Exception:
+                        pass
+                    should_guard = (
+                        not actual_is_sticky
+                        and (vision_was_sticky or not only_when_sticky)
+                        and bool(_vt)
+                        and not _is_row_idx
+                        and not name_similar
+                    )
+                    if should_guard:
+                        cd = float(vmg_cfg.get("cooldown_sec", 600) or 600)
+                        ss_key = _self_skip_norm_key(actual_title)
+                        self._self_skip_until[ss_key] = time.monotonic() + cd
+                        result.setdefault("hints", []).append(
+                            f"vision_misroute_guard:{actual_title}_cd={int(cd)}s"
+                        )
+                        logger.warning(
+                            "[messenger_rpa] 🛡 vision misroute guard: vision "
+                            "target=%r 实际进入非粘性 chat=%r → 给 %r 设 %ds "
+                            "cooldown（防 vision 反复选错浪费 vision call）",
+                            _original_vision_name, actual_title, actual_title, int(cd),
+                        )
+
+            if bool(self._cfg.get("pre_thread_self_xml_guard", True)):
+                if self._latest_thread_snippet_is_self(serial, result):
+                    result["step"] = "self_latest_xml_prevision_skip"
+                    result["ok"] = True
+                    logger.warning(
+                        "[messenger_rpa] 线程内 XML 检测自发，跳过 chat=%r step=self_latest_xml_prevision_skip",
+                        target.name,
+                    )
+                    _cd = float(self._cfg.get("self_skip_cooldown_sec", 30) or 30)
+                    _now_m = time.monotonic() + _cd
+                    self._self_skip_until[_self_skip_norm_key(target.name)] = _now_m
+                    self._self_skip_until[_self_skip_norm_key(_original_vision_name)] = _now_m
+                    self._exit_thread(serial)
+                    return self._finish(result, t0)
+
+            # P2-A：粘性 thread 入口 hash diff 早退（**真"几秒回"** 的核心）
+            # 仅对粘性 chat + 已在 thread 内 + 已有上次 hash 时早退。
+            # 没新消息 → step=sticky_idle ok=True 立即返回（不调 vision）。
+            # service.py 主循环看到 sticky_idle 会用 1.5s 短间隔继续 poll。
+            # 这把响应延迟从 30-50s 降到 5-10s（hash diff 1-2s + vision 5-10s）。
+            if self._is_sticky_chat(target.name) and thread_png:
+                if not self._check_sticky_thread_changed(
+                    thread_png, target.name, result,
+                ):
+                    result["step"] = "sticky_idle"
+                    result["ok"] = True
+                    result["chat_name"] = target.name
+                    result["chat_key"] = chat_key or f"{self._chat_key_prefix}:{target.name}"
+                    # 不调 _exit_thread，保持粘性
+                    logger.warning(
+                        "[messenger_rpa] 💤 sticky_idle chat=%r idle_count=%s "
+                        "（hash 不变，跳过 vision，下轮 1.5s 后再 check）",
+                        target.name, result.get("sticky_idle_count"),
+                    )
+                    return self._finish(result, t0)
+                # 🛡 P3-X：统一 send gate（取代 v3 的散落 cooldown 检查）
+                # sticky hash changed 后用统一 gate 决定能否进 vision/LLM。
+                # 这是 4 次疯狂事件的根本架构修复 — 所有 cooldown 决策走同一处。
+                _gate_reason = self._should_skip_send(
+                    target.name, source="sticky_hash_changed",
+                )
+                if _gate_reason:
+                    result["step"] = "sticky_gate_skip"
+                    result["ok"] = True
+                    result["gate_reason"] = _gate_reason
+                    result["chat_name"] = target.name
+                    result["chat_key"] = chat_key or f"{self._chat_key_prefix}:{target.name}"
+                    return self._finish(result, t0)
+                # P3-C：hash 变化（victor 可能发新消息）→ 立刻提前 typing warmup
+                # 让 victor 在整个 vision + LLM 思考期间持续看到"对方正在输入..."
+                # 而不只是最后发送前 1.5s 闪一下。
+                try:
+                    await self._typing_indicator_early_warmup(
+                        serial, target.name, result,
+                    )
+                except Exception:
+                    logger.debug(
+                        "[messenger_rpa] early typing warmup failed",
+                        exc_info=True,
+                    )
 
             if self._use_combined_vision:
                 # ★ P3-3：乐观并发 — 同时启动 thread_combined 和 caption
@@ -825,13 +2646,63 @@ class MessengerRpaRunner:
                 result["error"] = f"profile_picker:{guard2.title}"
                 return self._finish(result, t0)
 
+            # ★ 像素级气泡归属检测：独立于 Vision 和 XML 的第三验证源
+            _bubble_sender = "unknown"
+            if thread_png and bool(self._cfg.get("bubble_detector_enabled", True)):
+                try:
+                    from src.integrations.messenger_rpa.bubble_detector import (
+                        detect_latest_sender,
+                    )
+                    _bubble_sender, _bub_info = detect_latest_sender(thread_png)
+                    result["bubble_sender"] = _bubble_sender
+                    result["bubble_info"] = _bub_info
+                except Exception:
+                    logger.debug("bubble_detector 异常", exc_info=True)
             # Hard guard: UI XML is more reliable than Vision for "who spoke last".
             # If the latest visible thread snippet starts with "You:" / "你:" etc.,
             # the newest message is ours, so do not let a Vision role mistake create
             # self-question/self-answer loops.
-            if self._latest_thread_snippet_is_self(serial, result):
-                result["step"] = "self_latest_xml_skip"
+            # ★ 升级：加入 bubble_detector 交叉验证——
+            #   XML says self + bubble says self → 确定自发，跳过
+            #   XML says self + bubble says peer → XML 可能陈旧，信任 bubble，继续
+            _xml_says_self = self._latest_thread_snippet_is_self(
+                serial, result, peer_msg=peer_msg
+            )
+            if _xml_says_self:
+                if _bubble_sender == "peer":
+                    logger.warning(
+                        "[messenger_rpa] XML 说自发但 bubble 检测到对方气泡 → "
+                        "信任 bubble，继续处理 chat=%r",
+                        target.name,
+                    )
+                    result.setdefault("hints", []).append(
+                        "bubble_override_xml_self"
+                    )
+                else:
+                    result["step"] = "self_latest_xml_skip"
+                    result["ok"] = True
+                    logger.warning(
+                        "[messenger_rpa] XML+bubble 均确认自发，跳过 chat=%r "
+                        "bubble=%s",
+                        target.name, _bubble_sender,
+                    )
+                    _cd = float(self._cfg.get("self_skip_cooldown_sec", 30) or 30)
+                    _now_m = time.monotonic() + _cd
+                    self._self_skip_until[_self_skip_norm_key(target.name)] = _now_m
+                    self._self_skip_until[_self_skip_norm_key(_original_vision_name)] = _now_m
+                    self._exit_thread(serial)
+                    return self._finish(result, t0)
+
+            # ★ P2-A：系统事件（"You can now message..."、E2EE 通知等）fast-path
+            # 跳过。不进 peer-retry，也不走 no_peer_message 通用分支 —— 给一个
+            # 专属 step 方便看板与 metrics 区分，同时避免浪费 2 次截图重试。
+            if peer_msg is not None and getattr(peer_msg, "is_system_event", False):
+                result["step"] = "system_event_skip"
                 result["ok"] = True
+                result["peer_kind"] = "system_event"
+                result.setdefault("hints", []).append(
+                    f"system_event_skip:{(peer_msg.content or peer_msg.desc or '')[:60]}"
+                )
                 self._exit_thread(serial)
                 return self._finish(result, t0)
 
@@ -858,20 +2729,76 @@ class MessengerRpaRunner:
                         thread_png = retry_png
                         result["screenshot_path"] = thread_png
                         break
+                    # retry 里拿到的若也是系统事件，同样走 fast-path
+                    if peer_msg is not None and getattr(
+                        peer_msg, "is_system_event", False,
+                    ):
+                        result["step"] = "system_event_skip"
+                        result["ok"] = True
+                        result["peer_kind"] = "system_event"
+                        result.setdefault("hints", []).append(
+                            "system_event_skip:detected_in_peer_retry"
+                        )
+                        self._exit_thread(serial)
+                        return self._finish(result, t0)
             if not peer_msg or not peer_msg.is_peer_anything:
                 result["step"] = "no_peer_message"
                 result["ok"] = True
                 self._exit_thread(serial)
                 return self._finish(result, t0)
 
-            if self._latest_thread_snippet_is_self(serial, result):
-                result["step"] = "self_latest_xml_skip"
-                result["ok"] = True
-                self._exit_thread(serial)
-                return self._finish(result, t0)
+            _xml_says_self2 = self._latest_thread_snippet_is_self(
+                serial, result, peer_msg=peer_msg
+            )
+            if _xml_says_self2:
+                if _bubble_sender == "peer":
+                    logger.warning(
+                        "[messenger_rpa] post-retry XML 说自发但 bubble 检测到对方 → "
+                        "继续处理 chat=%r",
+                        target.name,
+                    )
+                    result.setdefault("hints", []).append(
+                        "bubble_override_xml_self_post_retry"
+                    )
+                else:
+                    result["step"] = "self_latest_xml_skip"
+                    result["ok"] = True
+                    logger.warning(
+                        "[messenger_rpa] post-retry XML+bubble 确认自发，跳过 chat=%r",
+                        target.name,
+                    )
+                    _cd = float(self._cfg.get("self_skip_cooldown_sec", 30) or 30)
+                    _now_m = time.monotonic() + _cd
+                    self._self_skip_until[_self_skip_norm_key(target.name)] = _now_m
+                    self._self_skip_until[_self_skip_norm_key(_original_vision_name)] = _now_m
+                    self._exit_thread(serial)
+                    return self._finish(result, t0)
 
             result["peer_text"] = peer_msg.to_text_for_ai()
             result["peer_kind"] = peer_msg.kind
+
+            # Voice input should be interpreted before generic media ACK.
+            # If ASR succeeds, the message becomes normal text and can use the
+            # full AI/persona pipeline.  If it fails, keep kind=voice so the
+            # existing media ACK + approval fallback handles it safely.
+            if peer_msg.kind == "voice":
+                transcript = await self._try_transcribe_peer_voice(
+                    serial,
+                    chat_name=target.name or "",
+                    wh=wh,
+                    result=result,
+                )
+                if transcript:
+                    result["voice_transcript"] = transcript[:500]
+                    peer_msg = PeerMessage(
+                        role="peer",
+                        kind="text",
+                        content=transcript,
+                        desc="",
+                        raw=f"voice_transcript:{transcript[:300]}",
+                    )
+                    result["peer_text"] = transcript
+                    result["peer_kind"] = "voice_transcript"
 
             # 二级 spam 过滤：消息正文级（inbox 是 preview 级，可能漏）
             # 优化 A：分级处理 — HIGH 一次永久 skip；LOW 只单次跳过不入永久表
@@ -923,8 +2850,268 @@ class MessengerRpaRunner:
                             (peer_msg.content or peer_msg.desc or "")[:80],
                         )
                     result["ok"] = True
+                    _cd = float(self._cfg.get("spam_cooldown_sec", 3600) or 3600)
+                    _now_m = time.monotonic() + _cd
+                    self._self_skip_until[_self_skip_norm_key(target.name)] = _now_m
+                    self._self_skip_until[_self_skip_norm_key(_original_vision_name)] = _now_m
                     self._exit_thread(serial)
                     return self._finish(result, t0)
+
+            _chat_st = self._state.get_chat_state(chat_key)
+
+            if self._stale_peer_after_recent_self_marker(
+                _chat_st, peer_msg, result,
+            ):
+                result["step"] = "stale_peer_after_self_skip"
+                result["ok"] = True
+                result["error"] = (
+                    "vision_repeated_previous_peer_after_recent_self_reply"
+                )
+                logger.warning(
+                    "[messenger_rpa] skip stale peer after self marker chat=%s "
+                    "overlap=%s peer=%r",
+                    chat_key,
+                    result.get("last_peer_repeat_overlap"),
+                    (peer_msg.content or "")[:80],
+                )
+                _cd = float(self._cfg.get("stale_peer_cooldown_sec", 90) or 90)
+                _now_m = time.monotonic() + _cd
+                self._self_skip_until[_self_skip_norm_key(target.name)] = _now_m
+                self._self_skip_until[_self_skip_norm_key(_original_vision_name)] = _now_m
+                self._exit_thread(serial)
+                return self._finish(result, t0)
+
+            # ★ 反幻觉：Vision 有时把己方最后一条消息误识为对方消息（气泡颜色/位置判断失误）。
+            # 若"对方消息"内容与我方 last_reply 高度重叠，先尝试从 extra_peers
+            # 提升真实客户连发消息；没有可用候选时才跳过。
+            #
+            # P15：扩展到 last 3 replies——vision 偶发串联的是更早的 self message
+            # （不在 chat_state.last_reply 里），单条比对漏过。对最近 N 条 reply
+            # 各算 ratio 取 max。
+            #
+            # P16 (2026-05-04) 三层反空转：
+            #   D 层：peer_msg 内容指纹去重——本 chat 上次已 skip 过的同样文本
+            #         立刻短路，不重复算 overlap、不重复 promote。
+            #   B 层：bubble_detector 联合判定——bubble=self + overlap≥0.7 即可
+            #         100% 判定 vision 误读，跳过 promote 直接 skip。
+            #   C 层：连续 self_message_skip ≥ N 次 → chat 级长冷却，避免
+            #         单 chat 反复 100~200ms 空转。
+            if peer_msg.kind == "text":
+                _pc_raw = (peer_msg.content or "").strip()
+                # ── D 层短路 + C 层 chat 级冷却兜底 ──
+                _chat_skip_until_m = float(
+                    self._chat_overlap_skip_until.get(chat_key, 0.0) or 0.0
+                )
+                if _chat_skip_until_m > time.monotonic():
+                    result["step"] = "self_message_skip"
+                    result["ok"] = True
+                    result["error"] = (
+                        "chat_overlap_skip_cooldown:remaining="
+                        f"{int(_chat_skip_until_m - time.monotonic())}s"
+                    )
+                    result.setdefault("hints", []).append(
+                        "chat_overlap_skip_cooldown"
+                    )
+                    self._exit_thread(serial)
+                    return self._finish(result, t0)
+                # D2：精确相等 + 高相似度（>=0.85）双重命中。
+                # vision 偶发把同样消息加 emoji 截断略改 → 精确匹配漏掉，
+                # 但 _self_reply_overlap_ratio 能捕到。
+                _skipped_texts = self._skipped_peer_text_per_chat.get(chat_key)
+                _short_circuit_match: Optional[Tuple[str, float]] = None
+                if _pc_raw and _skipped_texts:
+                    _dedup_thr = float(
+                        self._cfg.get("skipped_peer_text_dedup_threshold", 0.85)
+                        or 0.0
+                    )
+                    for _prev in _skipped_texts:
+                        if _prev == _pc_raw:
+                            _short_circuit_match = (_prev, 1.0)
+                            break
+                        if _dedup_thr > 0:
+                            _r = _self_reply_overlap_ratio(_prev, _pc_raw)
+                            if _r >= _dedup_thr:
+                                _short_circuit_match = (_prev, _r)
+                                break
+                if _short_circuit_match is not None:
+                    _prev_text, _ratio = _short_circuit_match
+                    result["step"] = "self_message_skip"
+                    result["ok"] = True
+                    result["error"] = (
+                        f"vision_repeat_skipped_text: ratio={_ratio:.2f} "
+                        f"peer={_pc_raw[:60]!r}"
+                    )
+                    result.setdefault("hints", []).append(
+                        "skipped_peer_text_short_circuit"
+                    )
+                    result["short_circuit_ratio"] = round(_ratio, 3)
+                    logger.warning(
+                        "[messenger_rpa] vision 重复识别上次已 skip 文本，短路"
+                        " chat=%s ratio=%.2f peer=%r",
+                        chat_key, _ratio, _pc_raw[:80],
+                    )
+                    self._exit_thread(serial)
+                    return self._finish(result, t0)
+
+                _lr_raw = (_chat_st.get("last_reply") or "").strip()
+                _candidate_replies = list(
+                    self._recent_replies_per_chat.get(chat_key) or []
+                )
+                if _lr_raw and _lr_raw not in _candidate_replies:
+                    _candidate_replies.append(_lr_raw)
+                _self_overlap = 0.0
+                for _cand in _candidate_replies:
+                    _r = _self_reply_overlap_ratio(_cand, _pc_raw)
+                    if _r > _self_overlap:
+                        _self_overlap = _r
+                        if _self_overlap >= 1.0:
+                            break  # 已经触顶，无需再算
+                result["self_reply_overlap"] = round(_self_overlap, 3)
+                result["self_overlap_against_n_replies"] = len(_candidate_replies)
+                # P15-strict (2026-05-04)：post-send 短窗口内禁用 promote 路径。
+                # 实测 vision 在 lowmemkill + 无 XML 场景下，extra_peers 列表
+                # 也常被 hallucination 污染——promote 用了它仍然是自言自语。
+                # 真 peer 反应平均 > 120s（post-send cooldown 设计值），所以
+                # 短窗口内严格 skip：self_overlap >= 0.7 直接终止本 cycle，
+                # 不试 promote。窗口外（peer 真的有时间回复）才放宽用 promote。
+                #
+                # P16：strict_window 默认 180→120s 与 post_send_cooldown_sec
+                # 对齐，避免发送后 60s 必空转。
+                _strict_window = float(
+                    self._cfg.get("self_overlap_strict_window_sec", 120.0) or 0.0
+                )
+                _last_sent_at = float(_chat_st.get("last_sent_at") or 0.0)
+                _within_strict_window = (
+                    _strict_window > 0
+                    and _last_sent_at > 0
+                    and (time.time() - _last_sent_at) < _strict_window
+                )
+                # B 层：bubble_detector 强信号
+                _bubble_says_self = (result.get("bubble_sender") == "self")
+                if _self_overlap >= 0.7:
+                    promoted = None
+                    if _bubble_says_self:
+                        # bubble + overlap 双确认 vision 误读，无需 promote
+                        result.setdefault("hints", []).append(
+                            "bubble_self_confirms_overlap"
+                        )
+                    elif _within_strict_window:
+                        # 严格窗口内：直接 skip，不尝试 promote
+                        result.setdefault("hints", []).append(
+                            f"self_overlap_strict_skip:gap="
+                            f"{int(time.time() - _last_sent_at)}s"
+                        )
+                    else:
+                        promoted = self._promote_extra_peer_after_self_overlap(
+                            result, last_reply=_lr_raw, chat_key=chat_key,
+                        )
+                    if promoted is not None:
+                        result.setdefault("hints", []).append(
+                            "promoted_extra_peer_after_self_overlap"
+                        )
+                        result["self_reply_overlap_promoted"] = True
+                        peer_msg = promoted
+                        result["peer_text"] = peer_msg.to_text_for_ai()
+                        result["peer_kind"] = peer_msg.kind
+                    else:
+                        # ── C 层：累计 streak、内容入指纹、必要时长冷却 ──
+                        from collections import deque as _dq
+                        _q = self._skipped_peer_text_per_chat.get(chat_key)
+                        if _q is None:
+                            _q = _dq(maxlen=5)
+                            self._skipped_peer_text_per_chat[chat_key] = _q
+                        if _pc_raw and _pc_raw not in _q:
+                            _q.append(_pc_raw)
+                        _streak = self._self_overlap_skip_streak.get(chat_key, 0) + 1
+                        self._self_overlap_skip_streak[chat_key] = _streak
+                        _streak_threshold = int(
+                            self._cfg.get("self_overlap_streak_threshold", 3) or 3
+                        )
+                        _long_cd = float(
+                            self._cfg.get("self_overlap_long_cooldown_sec", 600.0)
+                            or 600.0
+                        )
+                        if _streak >= _streak_threshold and _long_cd > 0:
+                            self._chat_overlap_skip_until[chat_key] = (
+                                time.monotonic() + _long_cd
+                            )
+                            result.setdefault("hints", []).append(
+                                f"chat_overlap_long_cooldown:{int(_long_cd)}s"
+                                f":streak={_streak}"
+                            )
+                            self._self_overlap_skip_streak[chat_key] = 0
+                        result["step"] = "self_message_skip"
+                        result["ok"] = True
+                        result["error"] = (
+                            f"vision_misread_self_as_peer: overlap={_self_overlap:.2f} "
+                            f"peer={_pc_raw[:60]!r}"
+                        )
+                        result["self_overlap_skip_streak"] = _streak
+                        logger.warning(
+                            "[messenger_rpa] vision 把己方消息误识为 peer，跳过 "
+                            "chat=%s overlap=%.2f peer=%r strict_window=%s "
+                            "bubble=%s streak=%d",
+                            chat_key, _self_overlap, _pc_raw[:80],
+                            _within_strict_window,
+                            result.get("bubble_sender") or "?",
+                            _streak,
+                        )
+                        self._exit_thread(serial)
+                        return self._finish(result, t0)
+                else:
+                    # 没有触发 overlap 守卫：streak 归零（peer 内容确实变化了）
+                    if self._self_overlap_skip_streak.get(chat_key):
+                        self._self_overlap_skip_streak[chat_key] = 0
+
+            # ★ P0-B (2026-05-03 自我对话死循环兜底)：
+            # sticky_thread fast_path 跳过 inbox tap → P0-A 的 inbox 守卫
+            # 不会触发。这里加独立时间窗硬守卫：我方刚发不久（默认 30s）就
+            # 出现"vision 检出 peer 新消息"的组合 → 视为 vision 幻觉，强制
+            # skip。配置项 inbox_thread_self_skip_min_gap_sec 单独控制，
+            # 不被 companion_reply_cooldown_sec=0 影响（地板独立生效）。
+            try:
+                _hard_gap = float(
+                    self._cfg.get(
+                        "inbox_thread_self_skip_min_gap_sec", 30
+                    ) or 0
+                )
+            except (TypeError, ValueError):
+                _hard_gap = 30.0
+            try:
+                _last_sent_pb = float(_chat_st.get("last_sent_at") or 0)
+            except (TypeError, ValueError):
+                _last_sent_pb = 0.0
+            if (
+                _hard_gap > 0
+                and _last_sent_pb > 0
+                and (time.time() - _last_sent_pb) < _hard_gap
+                and peer_msg.is_peer_anything
+            ):
+                result["step"] = "thread_self_skip_hard_gap"
+                result["ok"] = True
+                _gap_now = time.time() - _last_sent_pb
+                result["error"] = (
+                    f"thread_self_skip_hard_gap: last_sent_ago={_gap_now:.0f}s "
+                    f"< {_hard_gap:.0f}s, suspect vision hallucination "
+                    f"(peer={(peer_msg.content or '')[:60]!r})"
+                )
+                logger.warning(
+                    "[messenger_rpa] thread self-skip HARD-GAP (P0-B): "
+                    "chat=%s last_sent_ago=%.0fs < %.0fs → 视为 vision 幻觉，"
+                    "skip (peer_kind=%s peer=%r)",
+                    chat_key, _gap_now, _hard_gap,
+                    peer_msg.kind, (peer_msg.content or "")[:80],
+                )
+                # 同步设短期内存冷却，sticky fast_path 下轮也能拦
+                try:
+                    _hg_until = time.monotonic() + _hard_gap
+                    self._self_skip_until[
+                        _self_skip_norm_key(target.name)
+                    ] = _hg_until
+                except Exception:
+                    pass
+                self._exit_thread(serial)
+                return self._finish(result, t0)
 
             fp = fingerprint(peer_msg)
             if self._state.is_duplicate(chat_key, fp):
@@ -932,30 +3119,6 @@ class MessengerRpaRunner:
                 result["ok"] = True
                 self._exit_thread(serial)
                 return self._finish(result, t0)
-
-            _chat_st = self._state.get_chat_state(chat_key)
-
-            # ★ 反幻觉：Vision 有时把己方最后一条消息误识为对方消息（气泡颜色/位置判断失误）。
-            # 若"对方消息"内容与我方 last_reply 高度重叠，则判定为误读，跳过。
-            if peer_msg.kind == "text":
-                _lr_raw = (_chat_st.get("last_reply") or "").strip()
-                _pc_raw = (peer_msg.content or "").strip()
-                _self_overlap = _self_reply_overlap_ratio(_lr_raw, _pc_raw)
-                result["self_reply_overlap"] = round(_self_overlap, 3)
-                if _self_overlap >= 0.7:
-                    result["step"] = "self_message_skip"
-                    result["ok"] = True
-                    result["error"] = (
-                        f"vision_misread_self_as_peer: overlap={_self_overlap:.2f} "
-                        f"peer={_pc_raw[:60]!r}"
-                    )
-                    logger.warning(
-                        "[messenger_rpa] vision 把己方消息误识为 peer，跳过 "
-                        "chat=%s overlap=%.2f peer=%r",
-                        chat_key, _self_overlap, _pc_raw[:80],
-                    )
-                    self._exit_thread(serial)
-                    return self._finish(result, t0)
 
             # ★ 反刷屏：发送后等对方回复，否则在冷却窗口内跳过
             # companion_reply_cooldown_sec (默认 300s)：我方上次发送后必须等待这段时间
@@ -1074,6 +3237,21 @@ class MessengerRpaRunner:
                 peer_msg, target.name
             )
             if media_reply_text is not None:
+                # ★ anti-duplicate: skip if last_reply is the same template text
+                _prev_reply = (_chat_st.get("last_reply") or "").strip()
+                if _prev_reply and _prev_reply == media_reply_text.strip():
+                    result["step"] = "media_ack_duplicate_skip"
+                    result["ok"] = True
+                    result["error"] = (
+                        f"media_ack_identical_to_last_reply: {media_reply_text[:60]!r}"
+                    )
+                    logger.warning(
+                        "[messenger_rpa] media ACK identical to last_reply, "
+                        "skip to prevent duplicate: chat=%s ack=%r",
+                        chat_key, media_reply_text[:60],
+                    )
+                    self._exit_thread(serial)
+                    return self._finish(result, t0)
                 result["peer_kind"] = peer_msg.kind
                 result["reply_text"] = media_reply_text
                 result["media_policy"] = media_policy
@@ -1164,9 +3342,37 @@ class MessengerRpaRunner:
                         last_peer_fp=fp,
                         last_peer_kind=peer_msg.kind,
                         last_reply=media_reply_text,
+                        last_sent_at=time.time(),
                     )
+                    # P15：媒体 ACK reply 也算 self reply，纳入 recent 队列
+                    self._push_recent_reply(chat_key, media_reply_text)
                 except Exception:
                     logger.debug("update_chat_state 失败", exc_info=True)
+                # ── P2++G_FIX (2026-05-04) fast-ack 路径接入 modality 决策 ──
+                # 修盲区：peer 发 sticker/voice/image 时这里就 return 了，之前
+                # 永远不会触发 sticker 决策器。现在调统一 helper，让 modality
+                # 决策对所有 reply 路径都生效（dry_run 阶段只 log，real_send
+                # 阶段双开关 OK 时真发 sticker 跟在 ack 文本之后）。
+                # caption 来自 P1 路径写入的 image_caption / media_caption。
+                if peer_msg.kind in (
+                    "sticker", "animated_sticker", "image", "video",
+                    "gif", "voice",
+                ):
+                    await self._run_modality_hook(
+                        serial=serial,
+                        target=target,
+                        chat_key=chat_key,
+                        peer_msg=peer_msg,
+                        reply_text=media_reply_text or "",
+                        multi_peer_count=int(result.get("multi_peer_count") or 0),
+                        peer_sticker_cat=result.get("sticker_category"),
+                        result=result,
+                        caption=(
+                            result.get("media_caption")
+                            or result.get("image_caption")
+                            or peer_msg.desc
+                        ),
+                    )
                 self._exit_thread(serial)
                 return self._finish(result, t0)
 
@@ -1240,6 +3446,8 @@ class MessengerRpaRunner:
             # 把 prefetch task 挂到 result 上让下游消费
             result["_peer_typing_prefetch_task"] = peer_typing_prefetch_task
 
+            # P2++G_FIX：让 _generate_reply 内的 modality hook 拿到 serial（real_send 才用）
+            result["_serial"] = serial
             try:
                 reply_text = await self._generate_reply(peer_msg, target, chat_key, result)
             finally:
@@ -1255,6 +3463,45 @@ class MessengerRpaRunner:
                 self._exit_thread(serial)
                 return self._finish(result, t0)
             result["reply_text"] = reply_text
+
+            # ★ P0-F (2026-05-03 5.5h 监控发现): reply_text 字字相同去重。
+            # LLM 在 deterministic 模式 + 类似 prompt 下可输出**完全一致**的
+            # reply，被反复发到客户端（监控发现 17:21+17:26、17:30+17:35 各
+            # 一对字字相同消息发到 Victor Zan 真实用户 → "AI 复读机"现象）。
+            # 现有 fingerprint 只去重 peer 内容、不去重 reply_text；media_ack
+            # 路径已有此守卫但普通 text reply 路径漏了。这里补齐。
+            # 命中后写短期 self_skip cooldown 防 sticky fast_path 下轮立即重入。
+            _prev_reply = (_chat_st.get("last_reply") or "").strip()
+            if _prev_reply and _prev_reply == reply_text.strip():
+                result["step"] = "reply_text_duplicate_skip"
+                result["ok"] = True
+                result["error"] = (
+                    f"reply_text_duplicate: identical to last_reply "
+                    f"({len(reply_text)} chars)"
+                )
+                logger.warning(
+                    "[messenger_rpa] reply_text duplicate skip (P0-F): "
+                    "chat=%s reply=%r — identical to last_reply, abort send",
+                    chat_key, reply_text[:80],
+                )
+                try:
+                    _dup_cd = float(
+                        self._cfg.get(
+                            "reply_text_duplicate_cooldown_sec", 300
+                        ) or 300
+                    )
+                    if _dup_cd > 0:
+                        self._self_skip_until[
+                            _self_skip_norm_key(target.name)
+                        ] = time.monotonic() + _dup_cd
+                except Exception:
+                    logger.debug(
+                        "P0-F self_skip cooldown 写入失败", exc_info=True,
+                    )
+                self._exit_thread(serial)
+                return self._finish(result, t0)
+
+            await self._maybe_prepare_tts_reply(reply_text, peer_msg, result)
             # ★ P4-7：低信用 → 本轮强制 approve（覆盖 reply_mode=auto）
             if credit_forced_approve and self._reply_mode == "auto":
                 result["credit_forced_approve"] = True
@@ -1282,6 +3529,9 @@ class MessengerRpaRunner:
                             ),
                             "device_wh": result.get("device_wh"),
                             "guard_history": result.get("guard_history", []),
+                            "tts_audio_path": result.get("tts_audio_path", ""),
+                            "tts_provider": result.get("tts_provider", ""),
+                            "tts_latency_ms": result.get("tts_latency_ms", 0),
                         },
                     )
                     result["approval_id"] = approval_id
@@ -1404,6 +3654,44 @@ class MessengerRpaRunner:
                     )
                     self._exit_thread(serial)
                     return self._finish(result, t0)
+                # ── P3-D: companion_dry_run ─────────────────────────────
+                # dry_run=true 时：完整跑完 LLM + TTS（已在前面完成），
+                # 记录样本到 metrics dashboard 供运营审核，但 **不** 真发送。
+                # 与 reactivation dry_run 共用同一 dashboard 展示，避免引入新 UI。
+                # 场景：上线前灰度验证、TTS 时长/质量审计、AI 话术复核。
+                if (
+                    bool(self._cfg.get("companion_mode", False))
+                    and bool(self._cfg.get("companion_dry_run", False))
+                ):
+                    try:
+                        from src.monitoring.metrics_store import get_metrics_store
+                        get_metrics_store().record_reactivation_dry_run(sample={
+                            "chat_name": target.name,
+                            "chat_key": chat_key,
+                            "peer_text": result.get("peer_text", ""),
+                            "reply_text": reply_text,
+                            "tts_duration_sec": result.get("tts_duration_sec"),
+                            "trigger": "companion_dry_run",
+                            "account_id": getattr(self, "_account_id", ""),
+                        })
+                    except Exception:
+                        pass
+                    result["step"] = "companion_dry_run_skip"
+                    result["ok"] = True
+                    self._state.update_chat_state(
+                        chat_key, chat_name=target.name,
+                        last_peer_text=result.get("peer_text", ""),
+                        last_peer_fp=fp, last_peer_kind=peer_msg.kind,
+                    )
+                    logger.info(
+                        "[messenger_rpa] P3-D dry_run chat=%s reply_len=%d "
+                        "tts_dur=%s",
+                        chat_key, len(reply_text),
+                        result.get("tts_duration_sec"),
+                    )
+                    self._exit_thread(serial)
+                    return self._finish(result, t0)
+
                 # ★ W2-D3.4 + D4.8 + D3-D2.5：对方"在输入..."检测 → 让一让，避免抢话
                 # D2.5 优化：从 prefetch task 拿结果（与 LLM 并发，typically 此时已就绪）
                 if (
@@ -1595,12 +3883,22 @@ class MessengerRpaRunner:
                             logger.debug(
                                 "maybe_before_reply 异常", exc_info=True)
 
-                    sent_ok = await self._send_reply_with_retry(serial, wh, reply_text, result)
-                    if not sent_ok:
-                        result["step"] = "send_failed"
-                        return self._finish(result, t0)
-                    result["step"] = "sent"
-                    result["ok"] = True
+                    # ★ TTS auto_voice guard: 如果语音已经通过 share sheet 发送，
+                    # 不要再注入文字 + 点 send（此时 Messenger 已不在 chat 页面）
+                    if result.get("tts_send_ok"):
+                        logger.info(
+                            "[messenger_rpa] skip text send: TTS auto_voice "
+                            "already sent chat=%s", chat_key,
+                        )
+                        result["step"] = "sent_voice_only"
+                        result["ok"] = True
+                    else:
+                        sent_ok = await self._send_reply_with_retry(serial, wh, reply_text, result)
+                        if not sent_ok:
+                            result["step"] = "send_failed"
+                            return self._finish(result, t0)
+                        result["step"] = "sent"
+                        result["ok"] = True
                     # ★ W2-D1.4：发送成功 → 清掉同 chat 老的 deferred 防止重发
                     try:
                         n_exp = self._state.expire_deferred_for_chat(
@@ -1637,7 +3935,145 @@ class MessengerRpaRunner:
                 last_reply=reply_text,
                 last_sent_at=time.time(),
             )
-            self._exit_thread(serial)
+            # P15：同步刷新 in-memory recent reply 队列
+            self._push_recent_reply(chat_key, reply_text)
+            # ★ post-send 冷却：发送成功后短暂屏蔽同一 chat，等对方回复
+            # 双保险：companion_reply_cooldown_sec 按 chat_key 检查（state_store），
+            # _self_skip_until 按 norm_key 检查（内存）→ OCR 变体也能拦住
+            _ps_cd = float(self._cfg.get("post_send_cooldown_sec", 120) or 120)
+            _ps_until = time.monotonic() + _ps_cd
+            self._self_skip_until[_self_skip_norm_key(target.name)] = _ps_until
+            if _original_vision_name:
+                self._self_skip_until[
+                    _self_skip_norm_key(_original_vision_name)
+                ] = _ps_until
+            logger.warning(
+                "[messenger_rpa] ✓ 发送成功 chat=%r → post-send cooldown %ds",
+                target.name, int(_ps_cd),
+            )
+            # P2.3 (2026-05-04) sticker 发送 hook：
+            # text 已发出 → 若 modality 决策命中且 dry_run=False 且
+            # real_send_enabled=True 双开关同时打开 → 异步真发 sticker。
+            # 默认 dry_run=True / real_send_enabled=False 都关，**真发不会触发**，
+            # 安全收集决策数据；任一为 True 才进入真发分支。
+            try:
+                _md = result.get("modality_decision") or {}
+                _sr_cfg = self._cfg.get("sticker_reply") or {}
+                _real_enabled = bool(_sr_cfg.get("real_send_enabled", False))
+                if (
+                    _md.get("would_send")
+                    and not _md.get("dry_run", True)
+                    and _real_enabled
+                    and _md.get("sticker_path")
+                ):
+                    asyncio.create_task(self._send_sticker_after_text(
+                        serial=serial,
+                        chat_name=target.name or "",
+                        sticker_path=_md["sticker_path"],
+                        sticker_cat=_md.get("sticker_cat") or "",
+                        result=result,
+                    ))
+                elif _md.get("would_send") and _md.get("dry_run"):
+                    # dry_run 模式下也 log 一遍，方便 grep 验证决策频率
+                    logger.info(
+                        "[messenger_rpa] sticker DRY_RUN skipped real send "
+                        "chat=%r cat=%s path=%s (dry_run=True)",
+                        target.name,
+                        _md.get("sticker_cat"), _md.get("sticker_path"),
+                    )
+            except Exception:
+                logger.debug(
+                    "[messenger_rpa] sticker send hook failed", exc_info=True,
+                )
+            # P3-A：记录 send 时间戳 + peer_text 供熔断器下轮检测
+            # peer_text 用于序列检测（连续 sent 之间 peer 文本高度相似 → 熔断）
+            self._record_chat_send(
+                target.name or "",
+                peer_text=str(result.get("peer_text") or "")[:300],
+            )
+            # P2-S 粘性会话：白名单内的 chat 发送成功后不退 thread，让下轮
+            # smart_current_thread 直接接管，把响应延迟从 60-90s 降到 5-10s。
+            if self._is_sticky_chat(target.name):
+                result["sticky_thread_kept"] = True
+                result.setdefault("hints", []).append(
+                    f"sticky_thread_kept:{target.name}"
+                )
+                logger.warning(
+                    "[messenger_rpa] 🔒 sticky_thread: 保持在 %r 会话内，"
+                    "下轮直接接管（省去 inbox 扫描）",
+                    target.name,
+                )
+                # 同时缩短 post_send_cooldown 让粘性快速循环
+                _sticky_cd = float(
+                    (self._cfg.get("sticky_thread") or {}).get(
+                        "post_send_cooldown_sec", 5
+                    ) or 5
+                )
+                # ★ P0-D (2026-05-03 自我对话死循环兜底)：强制 cooldown 地板。
+                # 历史上 sticky_thread.post_send_cooldown_sec 配置过 5s，加上
+                # vision 偶发误识 → 5s 内下轮 fast_path 又生成回复 → 死循环。
+                # 设独立地板配置 post_send_cooldown_floor_sec（默认 30s），
+                # **即使 post_send_cooldown_sec=0/5 也保底**。运维仍可显式调
+                # floor_sec=0 关闭地板（不推荐）。
+                _floor_raw = (self._cfg.get("sticky_thread") or {}).get(
+                    "post_send_cooldown_floor_sec", 30
+                )
+                try:
+                    _sticky_cd_floor = float(
+                        30 if _floor_raw is None else _floor_raw
+                    )
+                except (TypeError, ValueError):
+                    _sticky_cd_floor = 30.0
+                if _sticky_cd_floor > 0 and _sticky_cd < _sticky_cd_floor:
+                    logger.warning(
+                        "[messenger_rpa] sticky cooldown raised by floor "
+                        "(P0-D): %.1fs → %.1fs",
+                        _sticky_cd, _sticky_cd_floor,
+                    )
+                    _sticky_cd = _sticky_cd_floor
+                _ps_until_sticky = time.monotonic() + _sticky_cd
+                self._self_skip_until[_self_skip_norm_key(target.name)] = _ps_until_sticky
+                if _original_vision_name:
+                    self._self_skip_until[
+                        _self_skip_norm_key(_original_vision_name)
+                    ] = _ps_until_sticky
+                # P2-A bugfix（CRITICAL）：发送成功后自方气泡会出现在 thread 底部，
+                # 让 hash diff 误识为"peer 新消息" → 下轮又触发完整流程 → **疯狂
+                # 回复死循环**。这里强制等渲染 + 重新 screencap + 更新 hash baseline，
+                # 让下一轮 hash diff 以"包含自方刚发气泡"的截图为新基线。
+                #
+                # P2-A v2：等 5s 而不是 2s。messenger 渲染包括：自方气泡、Delivered
+                # 标记、Seen 标记、时间戳。这些渲染分多次发生，2s 不够。5s 让渲染
+                # 完全稳定，避免后续"自然变化"被 hash diff 误判 changed。
+                # 还做 dual-hash 验证：截图 1 + 等 1.5s + 截图 2，两次 hash 一致才信任。
+                try:
+                    await asyncio.sleep(3.0)
+                    post_send_png_1 = await self._screenshot(
+                        serial, "thread_post_send_b1", run_id,
+                    )
+                    await asyncio.sleep(2.0)
+                    post_send_png_2 = await self._screenshot(
+                        serial, "thread_post_send_b2", run_id,
+                    )
+                    chosen_baseline = post_send_png_2 or post_send_png_1
+                    if chosen_baseline:
+                        baseline_result: Dict[str, Any] = {}
+                        self._check_sticky_thread_changed(
+                            chosen_baseline, target.name, baseline_result,
+                        )
+                        result["sticky_baseline_updated"] = True
+                        logger.warning(
+                            "[messenger_rpa] 🔄 sticky baseline updated to "
+                            "post-send screenshot (settled 5s), hash=%s",
+                            baseline_result.get("sticky_hash", "?"),
+                        )
+                except Exception:
+                    logger.debug(
+                        "[messenger_rpa] sticky baseline update failed",
+                        exc_info=True,
+                    )
+            else:
+                self._exit_thread(serial)
             return self._finish(result, t0)
 
         except Exception as ex:
@@ -1867,12 +4303,20 @@ class MessengerRpaRunner:
             if not target:
                 # chat_name 已不在未读列表（可能已被其他人/我们自己读过了）
                 # 兜底搜索框；search-first 已跑过的 case 不再重复
-                if not search_first_tried:
+                # ★ skip_search=True（drain 场景）时不再做无效兜底搜索：
+                # drain 本意是"这条 reply 早就生成过、chat 应该还在未读；
+                # 若已不在未读说明对方/我们已读，没必要再花 12-16s 搜索"。
+                # 直接返回让上层 mark_deferred_failed("chat_not_in_unread")。
+                if not search_first_tried and not skip_search:
                     target = await self._search_chat_by_name(
                         serial, wh, chat_name, result,
                     )
                     if target:
                         just_verified_ts = time.time()
+                elif skip_search:
+                    result.setdefault("hints", []).append(
+                        "skip_search_honored:chat_not_in_unread"
+                    )
                 if not target:
                     result["step"] = "send:chat_not_found"
                     result["error"] = f"chat_name={chat_name!r} 不在未读列表也搜不到"
@@ -1915,6 +4359,10 @@ class MessengerRpaRunner:
                 inbox_tap_xy: Optional[Tuple[int, int, str]] = None
                 if not target.skip_inbox_tap:
                     inbox_tap_xy = self._tap_chat_row(serial, wh, target)
+                    if inbox_tap_xy and inbox_tap_xy[2] == "inbox_self_sent_skip":
+                        result["step"] = "send:inbox_self_sent_skip"
+                        result["ok"] = True
+                        return self._finish(result, t0)
                     await asyncio.sleep(jitter_ms(800, 1500))
                 elif target.quality_hint == "already_in_thread":
                     await asyncio.sleep(jitter_ms(120, 320))
@@ -2054,6 +4502,67 @@ class MessengerRpaRunner:
             result["error"] = f"{type(ex).__name__}: {ex}"
             return self._finish(result, t0)
 
+    # ── P2-D: per-chat 搜索失败熔断 helper ────────────────────────
+    def _search_circuit_is_open(self, chat_name: str) -> Tuple[bool, float]:
+        """返回 (is_open, remaining_sec)。is_open=True 表示应该跳过本次搜索。"""
+        st = self._search_failure_state.get(chat_name)
+        if not st:
+            return False, 0.0
+        until = float(st.get("cooldown_until", 0.0))
+        if until <= 0:
+            return False, 0.0
+        now = time.time()
+        if until <= now:
+            # 冷却窗口已过 → 清空状态（给下一次新鲜机会）
+            self._search_failure_state.pop(chat_name, None)
+            return False, 0.0
+        return True, until - now
+
+    def _search_circuit_record_failure(self, chat_name: str) -> Dict[str, float]:
+        """累加失败计数，达到阈值则开启冷却。返回更新后的 state dict。"""
+        now = time.time()
+        max_fails = int(self._cfg.get("search_failure_max", 3) or 3)
+        cooldown_sec = float(
+            self._cfg.get("search_cooldown_sec", 1800) or 1800,
+        )
+        st = self._search_failure_state.setdefault(
+            chat_name, {"fails": 0.0, "cooldown_until": 0.0, "last_fail_ts": 0.0},
+        )
+        st["fails"] = float(st.get("fails", 0.0)) + 1.0
+        st["last_fail_ts"] = now
+        if st["fails"] >= max_fails:
+            st["cooldown_until"] = now + cooldown_sec
+            logger.warning(
+                "[messenger_rpa] P2-D search circuit OPEN: chat=%r fails=%d "
+                "cooldown_sec=%.0f",
+                chat_name, int(st["fails"]), cooldown_sec,
+            )
+        # P3-C: metrics
+        try:
+            from src.monitoring.metrics_store import get_metrics_store
+            get_metrics_store().record_search_chat(ok=False)
+        except Exception:
+            pass
+        return st
+
+    def _search_circuit_record_success(self, chat_name: str) -> None:
+        """成功即清空失败状态，关闭熔断。"""
+        if chat_name in self._search_failure_state:
+            prev_fails = int(self._search_failure_state[chat_name].get("fails", 0))
+            if prev_fails > 0:
+                logger.info(
+                    "[messenger_rpa] P2-D search circuit RESET: chat=%r "
+                    "prev_fails=%d",
+                    chat_name, prev_fails,
+                )
+        self._search_failure_state.pop(chat_name, None)
+        # P3-C: metrics
+        try:
+            from src.monitoring.metrics_store import get_metrics_store
+            get_metrics_store().record_search_chat(ok=True)
+        except Exception:
+            pass
+
     async def _search_chat_by_name(
         self,
         serial: str,
@@ -2066,6 +4575,9 @@ class MessengerRpaRunner:
         旧实现盲点 ``chat_row_for(0)``，Messenger 搜索排序下极易开错会话。
         现逻辑：每次 tap 后用 ``verify_thread_title`` 确认顶栏；失败则 ``BACK``
         并重开搜索再试下一候选（仍失败则返回 ``None``）。
+
+        P2-D: 入口加熔断检查 —— 若该 chat 在冷却窗口内，直接返回 None，
+        避免对同名陌生人/已删好友反复 4 轮浪费 12-16s。
         """
         from src.integrations.messenger_rpa import thread_actions as _ta
         from src.integrations.messenger_rpa import ui_scraper as _uis
@@ -2073,6 +4585,24 @@ class MessengerRpaRunner:
 
         name = (chat_name or "").strip()
         if not name:
+            return None
+        # P2-D: 熔断检查 - 冷却窗口内直接短路
+        is_open, remaining = self._search_circuit_is_open(name)
+        if is_open:
+            result.setdefault("hints", []).append(
+                f"search_circuit_open:{name}:remaining={int(remaining)}s"
+            )
+            logger.info(
+                "[messenger_rpa] P2-D search circuit OPEN: chat=%r skip, "
+                "remaining=%.0fs",
+                name, remaining,
+            )
+            # P3-C: 熔断短路 → 记 skip
+            try:
+                from src.monitoring.metrics_store import get_metrics_store
+                get_metrics_store().record_search_chat(skipped=True)
+            except Exception:
+                pass
             return None
         search_bar_taps = cc.inbox_search_tap_candidates(wh[0], wh[1])
 
@@ -2084,8 +4614,10 @@ class MessengerRpaRunner:
             sx, sy = search_bar_taps[bar_idx % len(search_bar_taps)]
             adb.input_tap(serial, sx, sy)
             await asyncio.sleep(0.55)
-            for _ in range(72):
-                adb.input_keyevent(serial, "KEYCODE_DEL")
+            adb.run_adb(
+                ["shell", "input", "keyevent"] + ["KEYCODE_DEL"] * 40,
+                serial=serial, timeout=8.0,
+            )
             await asyncio.sleep(0.12)
             ime = (self._cfg.get("adb_keyboard_ime") or "").strip()
             use_adb_keyboard = bool(self._cfg.get("use_adb_keyboard", True))
@@ -2130,9 +4662,7 @@ class MessengerRpaRunner:
             # 过滤 tab，导致切换 tab 而非打开会话。只在 XML 命中为空时才加入
             # 最多 3 条 formula 兜底（已在 XML 尝试完后使用）。
             if not taps:
-                for i in range(3):
-                    rx, ry = cc.chat_row_for(i, width=wh[0], height=wh[1])
-                    taps.append((rx, ry, f"coord_row{i}"))
+                taps.extend(self._search_result_fallback_taps(wh))
             seen: set[Tuple[int, int]] = set()
             out: List[Tuple[int, int, str]] = []
             for tx, ty, tag in taps:
@@ -2147,12 +4677,20 @@ class MessengerRpaRunner:
 
         try:
             if not await _open_search_and_type(0):
+                self._search_circuit_record_failure(name)  # P2-D
+                result.setdefault("hints", []).append(
+                    "search_fail:open_type_initial"
+                )
                 return None
             await asyncio.sleep(1.4)
 
             for _round in range(4):
                 plan = _build_tap_plan()
                 if not plan:
+                    self._search_circuit_record_failure(name)  # P2-D
+                    result.setdefault("hints", []).append(
+                        f"search_fail:empty_plan_round={_round}"
+                    )
                     return None
                 tx, ty, tag = plan[0]
                 tried_xy.add((tx, ty))
@@ -2179,6 +4717,8 @@ class MessengerRpaRunner:
                     self._record_chat_entry(
                         serial, name, tx, ty, source=f"search:{tag}",
                     )
+                    # P2-D: 成功即清零熔断计数
+                    self._search_circuit_record_success(name)
                     return UnreadChat(
                         name=name,
                         preview="",
@@ -2193,6 +4733,10 @@ class MessengerRpaRunner:
                 await asyncio.sleep(0.48)
                 bar_idx = (_round + 1) % len(search_bar_taps)
                 if not await _open_search_and_type(bar_idx):
+                    self._search_circuit_record_failure(name)  # P2-D
+                    result.setdefault("hints", []).append(
+                        f"search_fail:open_type_round={_round}"
+                    )
                     return None
                 await asyncio.sleep(1.4)
             # 搜索全部轮次失败 → 按 BACK 退出搜索 overlay，回到 inbox
@@ -2205,9 +4749,15 @@ class MessengerRpaRunner:
                 time.sleep(0.4)
             except Exception:
                 pass
+            # P2-D: 所有 4 轮都 U1 失败
+            st = self._search_circuit_record_failure(name)
+            result.setdefault("hints", []).append(
+                f"search_fail:all_rounds_u1_miss:fails={int(st['fails'])}"
+            )
             return None
         except Exception as ex:
             logger.warning("[messenger_rpa] _search_chat_by_name 异常: %s", ex)
+            self._search_circuit_record_failure(name)  # P2-D
             result.setdefault("hints", []).append(
                 f"search_chat_by_name_exc:{type(ex).__name__}",
             )
@@ -2609,8 +5159,19 @@ class MessengerRpaRunner:
         self,
         serial: str,
         result: Dict[str, Any],
+        peer_msg: Optional[PeerMessage] = None,
+        chat_name: str = "",
     ) -> bool:
-        """Cheap hard guard against replying to our own latest thread message."""
+        """Cheap hard guard against replying to our own latest thread message.
+
+        P1-C (2026-05-03)：原有 latest_snippet_row 依赖 SimpleTextThreadSnippet
+        marker，仅 inbox 列表行可靠（thread 内气泡通常没有该 marker，且自方
+        气泡 preview 没有 "You:" 前缀），导致 03:40-03:46 死循环时此守卫**没
+        拦下**。新增"气泡 cx 几何启发 + last_sent_at 时间窗双信号"路径：
+        thread 内气泡按 cx > screen_w * left_ratio 判 self/peer，配合"我方
+        刚发不久"的时间窗加成防误判（cx 启发偶发不准时 fallback 到 vision）。
+        旧 latest_snippet_row 路径保留作兜底（仍能识别 self media placeholder）。
+        """
         if not bool(self._cfg.get("thread_self_xml_guard", True)):
             return False
         try:
@@ -2631,12 +5192,101 @@ class MessengerRpaRunner:
                 # guard is only called after we have already opened a candidate thread,
                 # so still inspect the latest visible snippet before trusting Vision.
                 result.setdefault("hints", []).append("thread_self_xml_guard:not_thread_but_checking")
+
+            # ── P1-C: 气泡 cx 几何 + last_sent_at 时间窗双信号 ──
+            # 不依赖 in_thread（旧注释已说明顶栏 XML 在不同 locale/build
+            # 下不稳定）。仅靠两个独立信号判定：
+            #   ① 我方刚发不久（last_sent_at 在窗口内）
+            #   ② 最末气泡 cx > left_ratio * screen_w（在右侧）
+            # 两条都成立时几乎一定是真 self 气泡（误判风险极低）。
+            if bool(self._cfg.get("thread_xml_bubble_guard", True)):
+                try:
+                    _eff_chat_name = chat_name or str(
+                        result.get("chat_name") or ""
+                    )
+                    _last_sent = 0.0
+                    if _eff_chat_name:
+                        _ck_xbg = f"{self._chat_key_prefix}:{_eff_chat_name}"
+                        try:
+                            _cs_xbg = self._state.get_chat_state(_ck_xbg)
+                            _last_sent = float(
+                                _cs_xbg.get("last_sent_at") or 0
+                            )
+                        except Exception:
+                            _last_sent = 0.0
+                    try:
+                        # P19 (2026-05-04): 默认 90 → 300s。u2 让 XML 可读，
+                        # last_bubble_preview cx 检测稳定。延长窗口覆盖 peer
+                        # 反应慢的对话节奏（cycle 间距常 3–5 min）。
+                        _guard_window = float(
+                            self._cfg.get(
+                                "thread_xml_bubble_guard_window_sec", 300
+                            ) or 0
+                        )
+                    except (TypeError, ValueError):
+                        _guard_window = 300.0
+                    if (
+                        _guard_window > 0
+                        and _last_sent > 0
+                        and (time.time() - _last_sent) < _guard_window
+                    ):
+                        try:
+                            _wh_xbg = self._screen_size(serial)
+                            _screen_w = (
+                                int(_wh_xbg[0]) if _wh_xbg else 720
+                            )
+                        except Exception:
+                            _screen_w = 720
+                        try:
+                            _left_ratio = float(
+                                self._cfg.get(
+                                    "thread_xml_bubble_guard_left_ratio", 0.6
+                                ) or 0.6
+                            )
+                        except (TypeError, ValueError):
+                            _left_ratio = 0.6
+                        _bub_text, _bub_dbg = _uis.last_bubble_preview(
+                            xml,
+                            screen_w=_screen_w,
+                            left_ratio=_left_ratio,
+                        )
+                        result["thread_xml_bubble_dbg"] = _bub_dbg
+                        if _bub_text:
+                            result["thread_xml_bubble_text"] = (
+                                _bub_text[:200]
+                            )
+                        if _bub_text and _bub_dbg.startswith("self "):
+                            result.setdefault("hints", []).append(
+                                "thread_xml_bubble_guard:self"
+                            )
+                            _ago_xbg = time.time() - _last_sent
+                            logger.warning(
+                                "[messenger_rpa] thread XML bubble guard "
+                                "(P1-C): cx_says_self=True "
+                                "last_sent_ago=%.0fs (< %.0fs) bubble=%r "
+                                "dbg=%s → skip vision",
+                                _ago_xbg, _guard_window,
+                                _bub_text[:60], _bub_dbg,
+                            )
+                            return True
+                except Exception:
+                    logger.debug(
+                        "thread_xml_bubble_guard 异常（fallback 到旧路径）",
+                        exc_info=True,
+                    )
+
             row = _uis.latest_snippet_row(xml)
             if row is None:
                 result.setdefault("hints", []).append("thread_self_xml_guard:no_snippet")
                 return False
             result["thread_latest_preview"] = row.preview[:200]
             result["thread_latest_is_self"] = bool(row.is_self_last)
+            result["thread_latest_has_self_prefix"] = bool(
+                getattr(row, "has_self_prefix", False)
+            )
+            result["thread_latest_self_media"] = bool(
+                getattr(row, "is_self_media_placeholder", False)
+            )
             result["thread_latest_bounds"] = row.bounds.as_tuple()
             result["thread_latest_in_thread"] = bool(in_thread)
             if row.is_self_last:
@@ -2646,10 +5296,117 @@ class MessengerRpaRunner:
                     row.preview[:120], row.bounds.as_tuple(),
                 )
                 return True
+            if (
+                peer_msg is not None
+                and bool(self._cfg.get("thread_self_media_xml_guard", True))
+                and bool(getattr(row, "is_self_media_placeholder", False))
+            ):
+                if _looks_like_self_media_ocr(peer_msg):
+                    result.setdefault("hints", []).append("self_media_xml_guard")
+                    logger.warning(
+                        "[messenger_rpa] latest thread snippet is self media; skip "
+                        "Vision OCR reply preview=%r peer_kind=%s peer_text=%r",
+                        row.preview[:120], getattr(peer_msg, "kind", ""),
+                        peer_msg.to_text_for_ai()[:120],
+                    )
+                    return True
+                result.setdefault("hints", []).append(
+                    "self_media_xml_guard_ignored_natural_peer"
+                )
         except Exception:
             logger.debug("thread_self_xml_guard failed", exc_info=True)
             result.setdefault("hints", []).append("thread_self_xml_guard:error")
         return False
+
+    def _promote_extra_peer_after_self_overlap(
+        self,
+        result: Dict[str, Any],
+        *,
+        last_reply: str,
+        chat_key: str = "",
+    ) -> Optional[PeerMessage]:
+        """Use a nearby extra peer bubble when Vision picked our own reply.
+
+        ``extra_peers`` is ordered near -> far by ``combined_vision``.  When
+        the primary ``peer`` overlaps our previous reply, the nearest extra
+        non-overlapping item is usually the actual customer message below an
+        unread separator.
+
+        P15 hardening (2026-05-04): 之前只对比 last_reply 单条，extra_peers
+        里若混入了更老的 self message（在 _recent_replies_per_chat 队列里），
+        会被当真 peer 用——bot 继续自言自语。改为对所有 candidate replies
+        （DB last_reply + queue 队列）取 max ratio，任何一条命中即拒绝。
+        """
+        extra = result.get("extra_peers") or []
+        if not isinstance(extra, list):
+            return None
+        # 构建 P15 候选集（与上层 self_overlap 检查口径一致）
+        _candidates = list(self._recent_replies_per_chat.get(chat_key) or [])
+        if last_reply and last_reply not in _candidates:
+            _candidates.append(last_reply)
+        for item in extra[:3]:
+            if not isinstance(item, dict):
+                continue
+            kind = str(item.get("kind") or "text").strip().lower()
+            if kind not in ("text", "image", "sticker", "voice", "file", "link", "other"):
+                kind = "other"
+            content = str(item.get("content") or "").strip()
+            desc = str(item.get("desc") or "").strip()
+            if not content and not desc:
+                continue
+            if kind == "text":
+                _max_ovlp = 0.0
+                for _cand in _candidates:
+                    _r = _self_reply_overlap_ratio(_cand, content)
+                    if _r > _max_ovlp:
+                        _max_ovlp = _r
+                        if _max_ovlp >= 1.0:
+                            break
+                if _max_ovlp >= 0.7:
+                    continue
+            return PeerMessage(
+                role="peer",
+                kind=kind,
+                content=content,
+                desc=desc,
+                raw=f"promoted_extra_peer:{kind}:{(content or desc)[:300]}",
+            )
+        return None
+
+    def _stale_peer_after_recent_self_marker(
+        self,
+        chat_state: Dict[str, Any],
+        peer_msg: PeerMessage,
+        result: Dict[str, Any],
+    ) -> bool:
+        """Detect Vision re-reading an old peer bubble after our latest reply."""
+        if not bool(self._cfg.get("stale_peer_after_self_guard", True)):
+            return False
+        if peer_msg.kind != "text":
+            return False
+        if not (
+            bool(result.get("thread_latest_has_self_prefix"))
+            or bool(result.get("thread_latest_is_self"))
+            or bool(result.get("thread_latest_self_media"))
+        ):
+            return False
+        last_sent_at = float(chat_state.get("last_sent_at") or 0.0)
+        if last_sent_at <= 0:
+            return False
+        window = float(self._cfg.get("stale_peer_after_self_window_sec", 900) or 900)
+        if time.time() - last_sent_at > window:
+            return False
+        last_peer = str(chat_state.get("last_peer_text") or "").strip()
+        cur_peer = str(peer_msg.content or "").strip()
+        if not last_peer or not cur_peer:
+            return False
+        overlap = _self_reply_overlap_ratio(last_peer, cur_peer)
+        result["last_peer_repeat_overlap"] = round(overlap, 3)
+        threshold = float(
+            self._cfg.get("stale_peer_after_self_overlap_threshold", 0.45)
+            or 0.45
+        )
+        return overlap >= threshold
 
     async def _run_once_scroll_rescan_if_no_unread(
         self,
@@ -2859,14 +5616,22 @@ class MessengerRpaRunner:
         cap = max(1, min(30, cap))
         return cr.guard, cr.rows[:cap]
 
-    async def _thread_combined(
-        self, thread_png: str, result: Dict[str, Any]
-    ) -> Tuple[Any, Optional[PeerMessage]]:
-        cr, tag = await analyze_thread_combined(
-            thread_png,
-            vision_cfg=self._vision_cfg(),
-            global_vision=self._global_vision_cfg(),
-        )
+    @staticmethod
+    def _screenshot_hash(path: str) -> Optional[str]:
+        """读 PNG 文件 bytes 算 MD5（速度足够快，碰撞对此用例无影响）。
+        失败返回 None。"""
+        try:
+            with open(path, "rb") as fh:
+                return hashlib.md5(fh.read()).hexdigest()
+        except (OSError, TypeError):
+            return None
+
+    def _thread_combined_apply_side_effects(
+        self, cr: Any, tag: Any, result: Dict[str, Any], *, replay_risk: bool,
+    ) -> None:
+        """把 _thread_combined 对 result 的写入抽出，供 cache 命中时重放。
+        replay_risk=False 时跳过 risk hit 副作用（避免重复触发 webhook 等）。
+        """
         result["thread_vision_tag"] = tag
         if cr.guard.type != "none":
             result.setdefault("guard_history", []).append(
@@ -2893,9 +5658,42 @@ class MessengerRpaRunner:
         except Exception:
             pass
         # ★ P3-1：thread 也扫描 risk
+        if replay_risk:
+            risk = getattr(cr, "risk", None)
+            if risk is not None and risk.hit:
+                self._handle_risk_hit(risk, result=result, where="thread")
+
+    async def _thread_combined(
+        self, thread_png: str, result: Dict[str, Any]
+    ) -> Tuple[Any, Optional[PeerMessage]]:
+        # ── P17 截屏 hash 缓存 ──
+        img_hash = self._screenshot_hash(thread_png) if thread_png else None
+        if img_hash and img_hash in self._thread_combined_cache:
+            cr, tag = self._thread_combined_cache[img_hash]
+            # LRU touch
+            self._thread_combined_cache.move_to_end(img_hash)
+            result.setdefault("hints", []).append("thread_combined_cache_hit")
+            # 命中时不重放 risk hit 副作用（首次已处理过）
+            self._thread_combined_apply_side_effects(
+                cr, tag, result, replay_risk=False,
+            )
+            return cr.guard, cr.peer
+
+        cr, tag = await analyze_thread_combined(
+            thread_png,
+            vision_cfg=self._vision_cfg(),
+            global_vision=self._global_vision_cfg(),
+        )
+        # 仅在 risk 未命中时缓存（risk 链路保持每次实时判定）
         risk = getattr(cr, "risk", None)
-        if risk is not None and risk.hit:
-            self._handle_risk_hit(risk, result=result, where="thread")
+        risk_hit = bool(risk and getattr(risk, "hit", False))
+        if img_hash and not risk_hit:
+            self._thread_combined_cache[img_hash] = (cr, tag)
+            while len(self._thread_combined_cache) > self._thread_combined_cache_max:
+                self._thread_combined_cache.popitem(last=False)
+        self._thread_combined_apply_side_effects(
+            cr, tag, result, replay_risk=True,
+        )
         return cr.guard, cr.peer
 
     def _apply_guard_action(self, serial: str, guard: Any) -> bool:
@@ -2974,7 +5772,7 @@ class MessengerRpaRunner:
         if bool(self._cfg.get("use_ui_hierarchy_tap", True)):
             try:
                 from src.integrations.messenger_rpa.ui_inbox_scraper import (
-                    dump_inbox_rows, find_row_by_preview, find_row_by_name,
+                    dump_inbox_rows, find_row_by_preview,
                 )
                 ui_rows = dump_inbox_rows(
                     serial,
@@ -2990,54 +5788,122 @@ class MessengerRpaRunner:
                     if target_ui is not None:
                         match_src = f"preview_match({probe_name})"
                         break
-                # 2. （已弃用）按 chat name 在 raw_desc 里匹配 — 真机调研发现
-                #     messenger 的 inbox row content-desc 是
-                #     "X.2Wn@HASH, SimpleTextThreadSnippet(text=...)" 格式，
-                #     **完全不含 sender name**，所以这种匹配永远 None。保留接口
-                #     但实际不工作。下一步要么改用截图 OCR 头像名字，要么完全靠
-                #     row_index 对齐（见下面 stories-aware 修复）。
-                if target_ui is None and chat.name:
-                    target_ui = find_row_by_name(ui_rows, chat.name)
-                    if target_ui is not None:
-                        match_src = f"name_match_in_desc"
-                # 3. ★★★ 真机暴露 row_index 偏移 bug ★★★
-                #    vision 看 inbox 时把 Stories 头像行算 row 0，第一个 chat 算 row 1
-                #    UI XML 抓的 ui_rows 只含 chat 行，不含 Stories
-                #    → vision row_index=N 实际对应 ui_rows[N-1]
-                #    fix: 先试 row_index-1（stories-aware），再 fallback 原 row_index
-                #    ★ 真机进一步暴露：messenger 未读 chat 行可能用不同 view layout
-                #      → ui_rows 完全没那行 → ui_rows[N-1] 仍指向错位 chat
-                #      所以拿到 candidate 后，必须用 chat.preview 做 overlap 验证。
-                #      不沾边 → 放弃 UI XML，走公式坐标（用 vision row_index 直接算）
-                if target_ui is None and chat.row_index > 0 \
-                        and (chat.row_index - 1) < len(ui_rows):
-                    cand = ui_rows[chat.row_index - 1]
-                    cand_prev = (cand.preview or "").strip().lower()
-                    vis_prev = (chat.preview or "").strip().lower()
-                    # 至少 3 字符相互含 → 才认为是同一 chat
-                    overlap_ok = (
-                        len(vis_prev) >= 3
-                        and len(cand_prev) >= 3
-                        and (vis_prev[:5] in cand_prev or cand_prev[:5] in vis_prev)
-                    )
-                    if overlap_ok:
-                        target_ui = cand
-                        match_src = f"row_index_stories_aware({chat.row_index}-1)"
-                    else:
-                        # 显式留 None → 后面公式坐标 fallback 会接手
-                        logger.info(
-                            "[messenger_rpa] stories_aware 拒收：cand_prev=%r vs vis=%r 不重叠 → 走公式",
-                            cand_prev[:30], vis_prev[:30],
-                        )
-                # 4. 启发式：preview 匹配失败但 Vision 说 row_index=0 → 点 UI XML row 0
-                if target_ui is None and chat.row_index == 0 and ui_rows:
-                    target_ui = ui_rows[0]
-                    match_src = "row0_heuristic"
-                # 5. ★ 已删除 row_index_fallback —— 真机暴露它系统性错位（vision 算 stories
-                #    UI XML 不算）。如果上面 stories_aware preview 重叠验证失败，
-                #    应该让 ui_rows tap 失败 → runner 走下方公式坐标 fallback（
-                #    line 2543 区块），用 vision row_index + 标定 / 公式 算坐标。
+                # 2. row_index 直接映射：UI XML rows 按 y_top 升序排列
+                #    Vision row_index=N → ui_rows[N]（两者均 0-indexed，不含 Stories）
+                if target_ui is None and 0 <= chat.row_index < len(ui_rows):
+                    target_ui = ui_rows[chat.row_index]
+                    match_src = f"row_index_direct({chat.row_index})"
+                # 3. 邻近匹配：用校准 Y 找最近的 XML 行（XML 缺行时 index 不对齐）
+                if target_ui is None and ui_rows:
+                    _cal = self._get_calibration(serial, width, height)
+                    if _cal:
+                        _exp_y = _cal.chat_row_first_y + chat.row_index * _cal.chat_row_height
+                        _best = min(ui_rows, key=lambda r: abs(r.y_center - _exp_y))
+                        if abs(_best.y_center - _exp_y) < _cal.chat_row_height * 0.7:
+                            target_ui = _best
+                            match_src = f"proximity(exp={_exp_y},act={_best.y_center})"
+                # 4. ★ 动态校准更新：XML 有 ≥3 行时实时修正缓存
+                if len(ui_rows) >= 3:
+                    _ys = [r.y_center for r in ui_rows]
+                    _diffs = [_ys[i+1] - _ys[i] for i in range(len(_ys) - 1)]
+                    _diffs.sort()
+                    _dyn_h = _diffs[len(_diffs) // 2]
+                    _dyn_first = _ys[0]
+                    if 80 < _dyn_h < 220 and 350 < _dyn_first < 900:
+                        _ck = (serial, width, height)
+                        _old = self._calib_cache.get(_ck)
+                        if _old is None or abs(getattr(_old, 'chat_row_first_y', 0) - _dyn_first) > 15:
+                            try:
+                                from src.integrations.messenger_rpa.coord_calibrator import (
+                                    InboxAnchors, save_calibration, calibrated_for,
+                                )
+                                _anch = InboxAnchors(
+                                    width=width, height=height,
+                                    chat_row_first_y=_dyn_first,
+                                    chat_row_height=_dyn_h,
+                                    notes=f"dynamic_xml:rows={len(ui_rows)}",
+                                )
+                                _ws = Path(self._cm.config_path).parent
+                                save_calibration(_ws, serial, _anch)
+                                self._calib_cache[_ck] = calibrated_for(
+                                    serial, width, height, _anch,
+                                )
+                                logger.warning(
+                                    "[messenger_rpa] 动态校准更新 first_y=%d row_h=%d (xml_rows=%d)",
+                                    _dyn_first, _dyn_h, len(ui_rows),
+                                )
+                            except Exception:
+                                logger.debug("动态校准保存失败", exc_info=True)
                 if target_ui is not None:
+                    # ★ inbox self-sent guard: 如果 XML 行的预览是自己发的，
+                    # 不要进入这个会话（防止 TTS 语音发送后无限循环 / vision
+                    # OCR 漏 "You:" 前缀引发的自我对话死循环 — 见 P0-A）。
+                    # 决策逻辑抽到 _decide_inbox_self_sent_skip 静态方法
+                    # （便于独立单元测试），本处只读 chat_state + 配置 + 调用 +
+                    # 写日志 + 路由。
+                    if getattr(target_ui, "is_self_last", False):
+                        vision_preview = (chat.preview or "").strip()
+                        try:
+                            _ck_ssl = f"{self._chat_key_prefix}:{chat.name}"
+                            _cs_ssl = self._state.get_chat_state(_ck_ssl)
+                        except Exception:
+                            _cs_ssl = {}
+                        try:
+                            _last_sent_ssl = float(
+                                _cs_ssl.get("last_sent_at") or 0
+                            )
+                        except (TypeError, ValueError):
+                            _last_sent_ssl = 0.0
+                        _last_reply_ssl = str(
+                            _cs_ssl.get("last_reply") or ""
+                        ).strip()
+                        try:
+                            _hard_window = float(
+                                self._cfg.get(
+                                    "inbox_self_sent_hard_skip_sec", 60
+                                ) or 0
+                            )
+                        except (TypeError, ValueError):
+                            _hard_window = 60.0
+                        try:
+                            _ovl_thr = float(
+                                self._cfg.get(
+                                    "inbox_self_sent_overlap_threshold", 0.5
+                                ) or 0.5
+                            )
+                        except (TypeError, ValueError):
+                            _ovl_thr = 0.5
+
+                        _should_skip, _ssl_reason = (
+                            self._decide_inbox_self_sent_skip(
+                                vision_preview=vision_preview,
+                                last_sent_at=_last_sent_ssl,
+                                last_reply=_last_reply_ssl,
+                                hard_window_sec=_hard_window,
+                                overlap_threshold=_ovl_thr,
+                            )
+                        )
+                        if _should_skip:
+                            _ago = (
+                                f"{(time.time() - _last_sent_ssl):.0f}s"
+                                if _last_sent_ssl > 0 else "n/a"
+                            )
+                            logger.warning(
+                                "[messenger_rpa] inbox skip self-sent "
+                                "reason=%s name=%r ui_preview=%r "
+                                "vision_preview=%r last_sent_ago=%s",
+                                _ssl_reason, chat.name,
+                                target_ui.preview[:60],
+                                vision_preview[:60], _ago,
+                            )
+                            return None, None, "inbox_self_sent_skip"
+                        logger.warning(
+                            "[messenger_rpa] inbox self-sent guard 被 Vision "
+                            "覆盖 (reason=%s): name=%r ui_preview=%r "
+                            "vision_preview=%r → 继续 tap（XML content-desc 陈旧）",
+                            _ssl_reason, chat.name,
+                            target_ui.preview[:40], vision_preview[:40],
+                        )
                     x, y = target_ui.x_center, target_ui.y_center
                     logger.warning(
                         "[messenger_rpa] tap chat: name=%r row_index=%d "
@@ -3060,9 +5926,10 @@ class MessengerRpaRunner:
                     exc_info=True,
                 )
 
-        # ★ 真机暴露 row_index 偏移：vision 算 stories 行，所以 chat.row_index
-        # 应该减 1 才是真 chat 行序号（用于公式坐标 / 校准坐标）
-        adjusted_row = max(0, chat.row_index - 1)
+        # ★ Vision row_index 从第一个 chat 行开始（0-indexed），不含 Stories。
+        # 之前的 -1 假设 Vision 把 Stories 算作 row 0，但实际不是——
+        # 多次日志确认第一个 chat = row_index=0。去掉偏移。
+        adjusted_row = chat.row_index
         # ★ 优先用本机校准
         cal = self._get_calibration(serial, width, height)
         if cal is not None:
@@ -3082,9 +5949,10 @@ class MessengerRpaRunner:
             y_base = cc.CHAT_ROW_FIRST_Y + adjusted_row * cc.CHAT_ROW_HEIGHT
             y = int(round(y_base * scale))
             src = "scaled_stories_aware"
-        logger.info(
-            "[messenger_rpa] tap chat: name=%r row_index=%d src=%s -> (%d, %d)",
-            chat.name, chat.row_index, src, x, y,
+        logger.warning(
+            "[messenger_rpa] tap chat: name=%r row_index=%d adjusted=%d "
+            "src=%s -> (%d, %d)",
+            chat.name, chat.row_index, adjusted_row, src, x, y,
         )
         adb.input_tap(serial, x, y)
         return x, y, src
@@ -3254,7 +6122,8 @@ class MessengerRpaRunner:
         """会话结束后按 BACK 回到 Inbox，避免下次还停在同一会话。
 
         副作用：失效该 serial 的 recent_verify_cache 全部条目——thread 一退，
-        旧的 verified 记录就过期了，下次 verify 必须真测。
+        旧的 verified 记录就过期了，下次 verify 必须真测。同样失效
+        pre_foreground title cache：foreground 已变，原 title 不再有效。
         """
         try:
             adb.input_keyevent(serial, "KEYCODE_BACK")
@@ -3265,6 +6134,8 @@ class MessengerRpaRunner:
             _rvc.invalidate(serial)
         except Exception:
             logger.debug("recent_verify_cache invalidate 失败", exc_info=True)
+        # 退出 thread 后 foreground 不再是原 chat，cache 必须清掉
+        self._foreground_title_cache.pop(serial, None)
 
     # ── 内部：P3-1 风控处理 ────────────────────────
     def _handle_risk_hit(
@@ -3489,8 +6360,42 @@ class MessengerRpaRunner:
             or self._cfg.get("persona_id")
             or ""
         ).strip()
+        # B2 优先级 #1：运营手动指定的 chat_persona_override（最高优先级）
+        # web 后台手动给某 chat 指定 reply_profile → 覆盖所有自动匹配规则
+        _state_for_override = getattr(self, "_state", None)
+        if chat_name and _state_for_override is not None and hasattr(
+            _state_for_override, "get_chat_persona_override"
+        ):
+            try:
+                override = _state_for_override.get_chat_persona_override(
+                    chat_name=chat_name, account_id=account_id,
+                )
+                if override:
+                    override_pid = str(override.get("reply_profile_id") or "").strip()
+                    if override_pid:
+                        # 在 profiles 里找这个 id
+                        for raw in profiles:
+                            if (
+                                isinstance(raw, dict)
+                                and str(raw.get("id") or raw.get("name") or "").strip() == override_pid
+                            ):
+                                logger.warning(
+                                    "[messenger_rpa] persona pick chat_key=%s chat_name=%r → "
+                                    "id=%r source=manual_override (bound_by=%s)",
+                                    chat_key, chat_name, override_pid,
+                                    override.get("bound_by", "?"),
+                                )
+                                return raw
+                        logger.warning(
+                            "[messenger_rpa] manual override 的 profile_id=%r 不存在于 profiles，fallback 自动匹配",
+                            override_pid,
+                        )
+            except Exception:
+                logger.debug("get_chat_persona_override failed", exc_info=True)
         default_profile: Dict[str, Any] = {}
         account_profile: Dict[str, Any] = {}
+        chosen: Dict[str, Any] = {}
+        match_source = ""
         for raw in profiles:
             if not isinstance(raw, dict):
                 continue
@@ -3509,12 +6414,49 @@ class MessengerRpaRunner:
             if isinstance(accounts, str):
                 accounts = [accounts]
             if any(str(k).strip().lower() and str(k).strip().lower() in chat_key_l for k in keys):
-                return raw
+                chosen = raw
+                match_source = "chat_key"
+                break
             if any(str(n).strip().lower() and str(n).strip().lower() in chat_name_l for n in names):
-                return raw
+                chosen = raw
+                match_source = "chat_name"
+                break
             if account_id and any(str(a).strip() == account_id for a in accounts):
                 account_profile = raw
-        return account_profile or default_profile
+        if not chosen:
+            if account_profile:
+                chosen = account_profile
+                match_source = "account_id_or_pinned"
+            elif default_profile:
+                chosen = default_profile
+                match_source = "default"
+        # P0-B：决策可观测性 — 记录命中的人设 ID + 来源 + 关键字段，方便运营在
+        # web 改完配置后到日志里对账"我改的字段是不是真生效了"。
+        try:
+            picked_id = str(
+                (chosen.get("id") if isinstance(chosen, dict) else "")
+                or (chosen.get("name") if isinstance(chosen, dict) else "")
+                or ""
+            ).strip()
+            persona_dict = (
+                chosen.get("persona") if isinstance(chosen.get("persona"), dict) else {}
+            ) if isinstance(chosen, dict) else {}
+            persona_name = str(persona_dict.get("name") or "").strip()
+            persona_lang = str((chosen or {}).get("language") or "").strip()
+            style_hint = str((chosen or {}).get("style_hint") or "").strip()
+            forb = ((persona_dict.get("speaking") or {}).get("forbidden_phrases") or []) \
+                if isinstance(persona_dict, dict) else []
+            logger.warning(
+                "[messenger_rpa] persona pick chat_key=%s chat_name=%r → "
+                "id=%r source=%s persona_name=%r lang=%s style_hint=%r "
+                "forbidden_n=%d default_id=%r",
+                chat_key, chat_name, picked_id, match_source or "none",
+                persona_name, persona_lang or "auto", style_hint[:40],
+                len(forb) if isinstance(forb, list) else 0, default_id,
+            )
+        except Exception:
+            logger.debug("[messenger_rpa] persona pick log failed", exc_info=True)
+        return chosen
 
     @staticmethod
     def _strip_lang_detection_markup(text: str) -> str:
@@ -3554,7 +6496,16 @@ class MessengerRpaRunner:
 
         Non-text media often arrives as Chinese local labels ("[图片]"), so for
         those messages we prefer explicit profile language or prior chat language.
+
+        Config keys:
+          force_reply_lang   e.g. "ja" — hard override, ignores all detection.
+          default_reply_lang e.g. "ja" — fallback when detection yields nothing.
         """
+        # Global hard override: force_reply_lang skips all detection.
+        _force_global = str(self._cfg.get("force_reply_lang") or "").strip().lower()
+        if _force_global and _force_global not in ("auto", "detect", ""):
+            return _force_global
+
         forced = str(profile.get("language") or "").strip().lower()
         if forced and forced not in ("auto", "detect"):
             return forced
@@ -3816,9 +6767,17 @@ class MessengerRpaRunner:
             logger.debug("bg image caption 异常", exc_info=True)
 
     async def _try_describe_peer_image(
-        self, image_path: str, *, timeout_sec: float = 8.0
+        self, image_path: str, *, timeout_sec: float = 8.0,
+        kind: str = "_generic",
     ) -> str:
-        """同步调用：返回图片 caption 或空串。超时/失败都静默返回空串。"""
+        """同步调用：返回图片 caption 或空串。超时/失败都静默返回空串。
+
+        P1.5-A (2026-05-04)：kind 参数透传到 vision——image/video/gif/sticker/
+        animated_sticker 用各自专属 prompt。
+        P1.5+D3 (2026-05-04)：默认 kind 从 'image' 改 '_generic'——prefetch 不
+        知 kind 时用通用 prompt 覆盖任何媒体（命中率提升 ~25%）；_generate_reply
+        里若 prefetch caption 质量不足再用 peer_msg.kind 同步重调一次。
+        """
         cfg = (self._cfg.get("media_deep_understand") or {})
         if not cfg.get("enabled", True):
             return ""
@@ -3834,13 +6793,8 @@ class MessengerRpaRunner:
             from src.integrations.messenger_rpa.combined_vision import (
                 describe_peer_image_detail,
             )
-            vision_cfg = self._cfg.get("vision") or {}
-            global_vision = {}
-            try:
-                full = (self._cm.config or {}) if hasattr(self._cm, "config") else {}
-                global_vision = full.get("vision") or {}
-            except Exception:
-                pass
+            vision_cfg = self._vision_cfg()
+            global_vision = self._global_vision_cfg()
             lang = self._deep_lang()
             caption, tag = await asyncio.wait_for(
                 describe_peer_image_detail(
@@ -3848,6 +6802,7 @@ class MessengerRpaRunner:
                     vision_cfg=vision_cfg,
                     global_vision=global_vision,
                     language=lang,
+                    kind=kind,
                 ),
                 timeout=float(timeout_sec),
             )
@@ -3866,20 +6821,30 @@ class MessengerRpaRunner:
             )
         return ""
 
-    async def _try_transcribe_peer_voice(self, serial: str) -> str:
+    async def _try_transcribe_peer_voice(
+        self,
+        serial: str,
+        *,
+        chat_name: str = "",
+        wh: Optional[Tuple[int, int]] = None,
+        result: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """Try to turn the latest Messenger voice note into text.
 
-        Android Messenger does not expose voice files to non-root ADB.  The
-        current implementation uses the existing VoiceGrabber run-as path and
-        soft-fails into normal media handling when production APKs block it.
+        Android Messenger does not expose voice files to non-root ADB.  For
+        production APKs, prefer the helper app path: MediaProjection captures
+        Messenger playback while the runner plays the voice bubble.
         """
         cfg = self._cfg.get("voice_input") or {}
         if not isinstance(cfg, dict) or not cfg.get("enabled", False):
             return ""
         if not serial:
             return ""
+        if result is not None:
+            result["voice_input_enabled"] = True
         try:
             from src.integrations.messenger_rpa.voice_grabber import VoiceGrabber
+            from src.integrations.messenger_rpa.voice_grabber import VoiceGrabResult
             package = str(
                 cfg.get("package")
                 or self._cfg.get("messenger_package")
@@ -3887,8 +6852,89 @@ class MessengerRpaRunner:
             )
             out_dir = str(cfg.get("out_dir") or "tmp_voice_notes")
             grabber = VoiceGrabber(serial, package=package, out_dir=out_dir)
-            grabbed = await asyncio.to_thread(grabber.try_grab_latest_voice)
+            capture_mode = str(cfg.get("capture_mode") or "run_as").strip().lower()
+            if result is not None:
+                result["voice_capture_mode"] = capture_mode
+            if capture_mode in ("screenrecord", "playback_record"):
+                grabbed = await asyncio.to_thread(
+                    grabber.record_playback_window,
+                    float(cfg.get("record_sec", 8.0) or 8.0),
+                )
+            elif capture_mode in ("helper_session", "session_helper", "audio_bridge_session"):
+                xy = cfg.get("voice_tap_xy")
+                tap_xy = None
+                if isinstance(xy, (list, tuple)) and len(xy) >= 2:
+                    try:
+                        tap_xy = (int(xy[0]), int(xy[1]))
+                    except Exception:
+                        tap_xy = None
+                grabbed = await asyncio.to_thread(
+                    grabber.capture_messenger_voice_session,
+                    duration_sec=float(cfg.get("record_sec", 8.0) or 8.0),
+                    apk_path=str(
+                        cfg.get("helper_apk_path")
+                        or "tools/audio_capture_helper/build/MrpAudioBridge.apk"
+                    ),
+                    helper_package=str(
+                        cfg.get("helper_package")
+                        or "com.codex.mrpaudiobridge"
+                    ),
+                    auto_install=cfg.get("helper_auto_install", True) is not False,
+                    expected_peer=str(cfg.get("expected_peer") or chat_name or ""),
+                    screen_wh=wh,
+                    voice_tap_xy=tap_xy,
+                    silence_max_abs=int(cfg.get("silence_max_abs", 120) or 120),
+                    find_voice_scroll_attempts=int(
+                        cfg.get("find_voice_scroll_attempts", 2) or 0
+                    ),
+                )
+            elif capture_mode in ("helper_app", "media_projection", "audio_bridge"):
+                grabbed = await asyncio.to_thread(
+                    grabber.capture_with_helper_app,
+                    duration_sec=float(cfg.get("record_sec", 6.0) or 6.0),
+                    apk_path=str(
+                        cfg.get("helper_apk_path")
+                        or "tools/audio_capture_helper/build/MrpAudioBridge.apk"
+                    ),
+                    package=str(
+                        cfg.get("helper_package")
+                        or "com.codex.mrpaudiobridge"
+                    ),
+                    auto_install=cfg.get("helper_auto_install", True) is not False,
+                    wait_for_user_consent_sec=float(
+                        cfg.get("helper_wait_sec", 12.0) or 12.0
+                    ),
+                )
+            elif capture_mode in ("external_file", "local_file", "test_file"):
+                local_path = str(
+                    cfg.get("external_file_path")
+                    or cfg.get("test_audio_path")
+                    or cfg.get("local_path")
+                    or ""
+                ).strip()
+                p = Path(local_path) if local_path else None
+                if p is not None and p.exists():
+                    grabbed = VoiceGrabResult(
+                        ok=True,
+                        local_path=str(p),
+                        method="external_file",
+                    )
+                else:
+                    grabbed = VoiceGrabResult(
+                        ok=False,
+                        method="external_file",
+                        error=f"missing_external_file:{local_path}",
+                    )
+            else:
+                grabbed = await asyncio.to_thread(grabber.try_grab_latest_voice)
+            if result is not None:
+                result["voice_capture_method"] = getattr(grabbed, "method", "")
+                result["voice_capture_path"] = getattr(grabbed, "local_path", "")
             if not getattr(grabbed, "ok", False):
+                if result is not None:
+                    result["voice_capture_error"] = str(
+                        getattr(grabbed, "error", "")
+                    )[:200]
                 logger.info(
                     "[messenger_rpa] voice grab skipped method=%s err=%s",
                     getattr(grabbed, "method", ""),
@@ -3901,20 +6947,375 @@ class MessengerRpaRunner:
             if isinstance(cfg.get("audio_pipeline"), dict):
                 ap_cfg = cfg.get("audio_pipeline") or ap_cfg
             ap = get_audio_pipeline(ap_cfg)
+            if result is not None:
+                result["voice_asr_backend"] = str(ap_cfg.get("backend") or "")
             rv = await ap.transcribe_file(
                 getattr(grabbed, "local_path", ""),
                 language_hint=str(cfg.get("language_hint") or "").strip() or None,
                 timeout_sec=float(cfg.get("timeout_sec", 30) or 30),
             )
             if rv.ok and rv.text:
+                if result is not None:
+                    result["voice_asr_ok"] = True
                 return str(rv.text).strip()
+            if result is not None:
+                result["voice_asr_ok"] = False
+                result["voice_asr_error"] = str(rv.error or "")[:200]
             logger.info(
                 "[messenger_rpa] voice transcribe skipped err=%s",
                 str(rv.error or "")[:120],
             )
         except Exception:
+            if result is not None:
+                result["voice_asr_ok"] = False
+                result["voice_asr_error"] = "exception"
             logger.debug("[messenger_rpa] voice transcribe failed", exc_info=True)
         return ""
+
+    async def _maybe_prepare_tts_reply(
+        self,
+        reply_text: str,
+        peer_msg: PeerMessage,
+        result: Dict[str, Any],
+    ) -> None:
+        """Generate a TTS artifact for approval/audit.
+
+        Actual Messenger voice attachment sending remains gated behind a later
+        device-specific transport.  This step is still valuable in production:
+        it proves provider quality/latency and gives operators an audio file to
+        review before enabling automatic voice delivery.
+        """
+        cfg = self._cfg.get("voice_output") or {}
+        if not isinstance(cfg, dict) or not cfg.get("enabled", False):
+            return
+        mode = str(cfg.get("mode") or "approval_only").strip().lower()
+        trigger = str(cfg.get("trigger") or "when_peer_voice").strip().lower()
+        if trigger == "when_peer_voice":
+            if not result.get("voice_transcript"):
+                return
+        elif trigger == "random":
+            import random as _rnd
+            _prob = max(0.0, min(1.0, float(cfg.get("voice_probability", 0.3) or 0.3)))
+            if _rnd.random() >= _prob:
+                result.setdefault("hints", []).append(
+                    f"tts_skipped_by_prob:threshold={_prob:.0%}"
+                )
+                return
+        # trigger == "always" or any unrecognised value → fall through
+        if mode in ("off", "disabled"):
+            return
+        max_chars = int(cfg.get("max_text_chars", 220) or 220)
+        text = (reply_text or "").strip()
+        if len(text) > max_chars:
+            text = text[:max_chars].rstrip() + "..."
+            result["tts_truncated"] = True
+        try:
+            from src.ai.tts_pipeline import get_tts_pipeline
+
+            tts = get_tts_pipeline(cfg)
+            rv = await tts.synthesize(
+                text,
+                timeout_sec=float(cfg.get("timeout_sec", 30) or 30),
+            )
+            result["tts_provider"] = rv.provider
+            result["tts_latency_ms"] = rv.latency_ms
+            if rv.ok:
+                # ── P3-A：时长硬校验 ──
+                # 防御：WAV header bug 曾把 5s 音频报成 745:39（DataSize=INT_MAX）。
+                # 这里对照 voice_output.max_seconds × max_ratio 算硬上限；
+                # duration 不可测（-1.0）时跳过（不当失败，避免 MP3/Opus 误杀）。
+                max_sec = float(cfg.get("max_seconds", 20) or 20)
+                min_sec = float(cfg.get("duration_min_sec", 0.3) or 0.3)
+                max_ratio = float(cfg.get("duration_max_ratio", 1.5) or 1.5)
+                hard_max = max_sec * max_ratio
+                result["tts_duration_sec"] = round(rv.duration_sec, 2)
+                result["tts_duration_source"] = rv.duration_source
+                duration_ok = True
+                if rv.duration_sec > 0:
+                    if rv.duration_sec > hard_max:
+                        duration_ok = False
+                        rv.error = (
+                            f"duration_exceeds_hard_max:"
+                            f"{rv.duration_sec:.1f}s>{hard_max:.1f}s "
+                            f"(source={rv.duration_source})"
+                        )
+                    elif rv.duration_sec < min_sec:
+                        duration_ok = False
+                        rv.error = (
+                            f"duration_below_min:"
+                            f"{rv.duration_sec:.1f}s<{min_sec:.1f}s "
+                            f"(source={rv.duration_source})"
+                        )
+                if not duration_ok:
+                    result["tts_error"] = rv.error
+                    result.setdefault("hints", []).append(
+                        f"tts_duration_guard_blocked:{rv.duration_sec:.1f}s"
+                    )
+                    # 删掉坏的 artifact，避免误投
+                    try:
+                        import os as _os
+                        if rv.audio_path and _os.path.isfile(rv.audio_path):
+                            _os.remove(rv.audio_path)
+                    except Exception:
+                        pass
+                    return
+                result["tts_audio_path"] = rv.audio_path
+                result["tts_voice"] = rv.voice
+                result["tts_format"] = rv.format
+                result.setdefault("hints", []).append("tts_ready_for_review")
+                if mode == "auto_voice" and self._reply_mode == "auto":
+                    await self._maybe_send_tts_audio(rv.audio_path, cfg, result)
+                    # ★ 若 share-sheet 发送失败，需按 BACK 回到 Messenger 聊天页
+                    # 否则后续 text send 会在 "Send to" 页面操作，导致循环
+                    # 但如果是预检就中止的（share_skip_），share 根本没打开，不需要 BACK
+                    _tts_err = str(result.get("tts_send_error") or "")
+                    if (
+                        not result.get("tts_send_ok")
+                        and not _tts_err.startswith("share_skip_")
+                    ):
+                        _serial = str(
+                            result.get("adb_serial")
+                            or self._cfg.get("adb_serial") or ""
+                        ).strip()
+                        if _serial:
+                            for _ in range(3):
+                                adb.run_adb(
+                                    ["shell", "input", "keyevent", "KEYCODE_BACK"],
+                                    serial=_serial, timeout=5.0,
+                                )
+                                await asyncio.sleep(0.4)
+                            logger.warning(
+                                "[messenger_rpa] TTS share 失败，已 BACK 3次"
+                                " 尝试回到聊天页 error=%s", _tts_err,
+                            )
+            else:
+                result["tts_error"] = rv.error
+                result.setdefault("hints", []).append("tts_failed_text_fallback")
+        except Exception:
+            result.setdefault("hints", []).append("tts_exception_text_fallback")
+            logger.debug("[messenger_rpa] TTS generation failed", exc_info=True)
+
+    async def _maybe_send_tts_audio(
+        self,
+        audio_path: str,
+        cfg: Dict[str, Any],
+        result: Dict[str, Any],
+    ) -> None:
+        """Best-effort Messenger audio attachment send for explicit auto_voice mode."""
+        if not audio_path:
+            return
+        serial = str(result.get("adb_serial") or self._cfg.get("adb_serial") or "").strip()
+        if not serial:
+            result["tts_send_error"] = "missing_adb_serial"
+            return
+        xy = cfg.get("share_recipient_tap_xy")
+        recipient_tap = None
+        if isinstance(xy, (list, tuple)) and len(xy) >= 2:
+            try:
+                recipient_tap = (int(xy[0]), int(xy[1]))
+            except Exception:
+                recipient_tap = None
+        xy = cfg.get("share_send_tap_xy")
+        send_tap = None
+        if isinstance(xy, (list, tuple)) and len(xy) >= 2:
+            try:
+                send_tap = (int(xy[0]), int(xy[1]))
+            except Exception:
+                send_tap = None
+        recipient_name = str(
+            cfg.get("share_recipient_name")
+            or result.get("chat_name")
+            or result.get("target_name")
+            or ""
+        ).strip()
+        if send_tap is None and not recipient_name:
+            result["tts_send_error"] = "missing_share_recipient"
+            result.setdefault("hints", []).append("tts_send_needs_recipient_name")
+            return
+        try:
+            from src.integrations.messenger_rpa.voice_sender import (
+                MessengerVoiceSender,
+            )
+
+            sender = MessengerVoiceSender(
+                serial,
+                package=str(
+                    cfg.get("messenger_package")
+                    or self._cfg.get("messenger_package")
+                    or "com.facebook.orca"
+                ),
+            )
+            rv = await asyncio.to_thread(
+                sender.send_audio_file,
+                audio_path,
+                recipient_name=recipient_name,
+                recipient_tap_xy=recipient_tap,
+                send_tap_xy=send_tap,
+                auto_find_send_button=bool(cfg.get("auto_find_share_send_button", True)),
+                auto_search_recipient=bool(cfg.get("auto_search_share_recipient", True)),
+                audit_dir=str(
+                    cfg.get("send_audit_dir")
+                    or self._cfg.get("debug_screenshot_dir")
+                    or "tmp_messenger_rpa"
+                ),
+            )
+            result["tts_send_ok"] = rv.ok
+            result["tts_send_remote_path"] = rv.remote_path
+            result["tts_send_method"] = rv.method
+            result["tts_send_extra"] = rv.extra
+            if rv.ok:
+                result.setdefault("hints", []).append("tts_voice_sent")
+            else:
+                result["tts_send_error"] = rv.error
+                result.setdefault("hints", []).append("tts_send_failed_text_fallback")
+        except Exception as ex:
+            result["tts_send_error"] = f"{type(ex).__name__}: {ex}"
+            result.setdefault("hints", []).append("tts_send_exception_text_fallback")
+
+    # ── P2++G_FIX (2026-05-04) modality 决策 + sticker hook 统一入口 ──
+    # 之前两条 reply 路径有不一致问题：
+    #   - _generate_reply（LLM reply）路径：调 modality 决策 + dry_run log
+    #   - _maybe_media_ack（fast-ack）路径：完全跳过 → peer 发 sticker 永远没决策
+    # 这个 helper 把两条路径统一，让 sticker / image / voice 的 fast-ack 也能
+    # 触发 modality 决策（dry_run 阶段只 log，real_send 阶段真发 sticker）。
+    async def _run_modality_hook(
+        self,
+        *,
+        serial: str,
+        target: UnreadChat,
+        chat_key: str,
+        peer_msg: PeerMessage,
+        reply_text: str,
+        multi_peer_count: int,
+        peer_sticker_cat: Optional[str],
+        result: Dict[str, Any],
+        caption: Optional[str] = None,
+    ) -> None:
+        """跑 modality 决策 + 拼 hints + dry_run log / real send 调度。"""
+        try:
+            modality_dec = self._decide_reply_modality(
+                reply_text=reply_text or "",
+                peer_msg=peer_msg,
+                peer_sticker_cat=peer_sticker_cat,
+                multi_peer_count=int(multi_peer_count or 0),
+                chat_key=chat_key,
+                caption=caption,
+            )
+            result["modality_decision"] = modality_dec
+            _mod = str(modality_dec.get("modality") or "text")
+            _reason = str(modality_dec.get("reason") or "")
+            _mod_norm = _mod.replace("+", "_with_")
+            _reason_base = _reason.split(":", 1)[0].strip() or "unknown"
+            hints = result.setdefault("hints", [])
+            hints.append(f"modality:{_mod}:{_reason}")
+            hints.append(f"modality_{_mod_norm}")
+            hints.append(f"modality_reason_{_reason_base}")
+            _cat = modality_dec.get("sticker_cat")
+            if modality_dec.get("would_send") and _cat:
+                hints.append(f"modality_cat_{_cat}")
+
+            # 真发 hook（dry_run + real_send_enabled 双开关同时打开才真发）
+            sr_cfg = self._cfg.get("sticker_reply") or {}
+            _real = bool(sr_cfg.get("real_send_enabled", False))
+            if (
+                modality_dec.get("would_send")
+                and not modality_dec.get("dry_run", True)
+                and _real
+                and modality_dec.get("sticker_path")
+            ):
+                asyncio.create_task(self._send_sticker_after_text(
+                    serial=serial,
+                    chat_name=target.name or "",
+                    sticker_path=modality_dec["sticker_path"],
+                    sticker_cat=modality_dec.get("sticker_cat") or "",
+                    result=result,
+                ))
+            elif modality_dec.get("would_send") and modality_dec.get("dry_run"):
+                logger.info(
+                    "[messenger_rpa] sticker DRY_RUN would-send chat=%s "
+                    "cat=%s path=%s reason=%s",
+                    chat_key, modality_dec.get("sticker_cat"),
+                    modality_dec.get("sticker_path"),
+                    modality_dec.get("reason"),
+                )
+        except Exception:
+            logger.debug(
+                "[messenger_rpa] modality hook failed", exc_info=True,
+            )
+
+    # ── P2.3 (2026-05-04) sticker 真发：复用 voice_sender share intent ──
+    # voice_sender.send_audio_file 内部用 mimetypes.guess_type 自动识别——PNG
+    # 文件会变成 mime=image/png 走 SEND intent，下游 share UI 完全相同。
+    # 因此直接复用，不必新写一个 send_image_via_share。
+    async def _send_sticker_after_text(
+        self,
+        *,
+        serial: str,
+        chat_name: str,
+        sticker_path: str,
+        sticker_cat: str,
+        result: Dict[str, Any],
+    ) -> None:
+        """text 已发出后，异步发 sticker（image/png via share intent）。
+
+        默认只在 sticker_reply.dry_run=False AND real_send_enabled=True 双开关
+        都打开时触发。share intent 会跳出当前 chat → 系统选择器 → 选 messenger
+        → 找接收方 → 点发送。完成后 messenger 会回到刚才的 chat（粘性会保留）。
+        """
+        try:
+            from src.integrations.messenger_rpa.voice_sender import (
+                MessengerVoiceSender,
+            )
+            cfg = self._cfg.get("voice_output") or {}
+            sender = MessengerVoiceSender(
+                serial,
+                package=str(
+                    cfg.get("messenger_package")
+                    or self._cfg.get("messenger_package")
+                    or "com.facebook.orca"
+                ),
+            )
+            # text 渲染缓冲——给 messenger 1.5s 把刚发的文字渲染出来再切 share
+            await asyncio.sleep(1.5)
+            rv = await asyncio.to_thread(
+                sender.send_audio_file,  # 通用：mime 由扩展名决定
+                sticker_path,
+                recipient_name=chat_name,
+                auto_find_send_button=bool(cfg.get("auto_find_share_send_button", True)),
+                auto_search_recipient=bool(cfg.get("auto_search_share_recipient", True)),
+                audit_dir=str(
+                    cfg.get("send_audit_dir")
+                    or self._cfg.get("debug_screenshot_dir")
+                    or "tmp_messenger_rpa"
+                ),
+            )
+            result["sticker_send_ok"] = rv.ok
+            result["sticker_send_extra"] = rv.extra
+            if rv.ok:
+                result.setdefault("hints", []).append(
+                    f"sticker_sent:cat={sticker_cat}"
+                )
+                logger.warning(
+                    "[messenger_rpa] ✅ sticker sent chat=%r cat=%s path=%s",
+                    chat_name, sticker_cat,
+                    Path(sticker_path).name,
+                )
+            else:
+                result.setdefault("hints", []).append(
+                    f"sticker_send_failed:{rv.error or 'unknown'}"
+                )
+                logger.warning(
+                    "[messenger_rpa] ❌ sticker send failed chat=%r err=%s",
+                    chat_name, rv.error,
+                )
+        except Exception as ex:
+            logger.debug(
+                "[messenger_rpa] _send_sticker_after_text exception: %s",
+                ex, exc_info=True,
+            )
+            result.setdefault("hints", []).append(
+                f"sticker_send_exception:{type(ex).__name__}"
+            )
 
     # ── 内部：AI 回复 ─────────────────────────────
     async def _generate_reply(
@@ -3932,11 +7333,75 @@ class MessengerRpaRunner:
         if not text_for_ai.strip():
             return ""
 
-        # ★ P2-1 + P3-3：图片深度理解
-        # - 若 runner 已经乐观并发预跑了 caption_task（P3-3），直接 await 它拿结果
-        # - 否则走 P2-1 老路径，同步调一次 vision
-        # 必须在 P2-2 多消息合并之前做，确保合并后 "[图片：caption]" 能进入最终 prompt
-        if peer_msg.kind == "image":
+        # 🛡 P3-X：统一 send gate（最后保险层）
+        # 即使其他路径漏检，_generate_reply 入口最后过一次门
+        _gate_reason = self._should_skip_send(
+            target.name or "", source="generate_reply_entry",
+        )
+        if _gate_reason:
+            result["step"] = "send_gate_skip"
+            result["error"] = f"gate:{_gate_reason}"
+            return ""
+
+        # P3-A：疯狂回复熔断器（防客户被刷屏的最后底线）
+        # 同一 chat 在 5 分钟内 sent ≥ 3 次 → 立即熔断 + 30 分钟 cooldown
+        try:
+            if self._check_runaway_circuit(target.name or "", result):
+                result["step"] = "runaway_paused"
+                result["error"] = "runaway_circuit_tripped"
+                return ""
+        except Exception:
+            logger.debug("runaway circuit check failed", exc_info=True)
+
+        # ★ P0-A：peer message quiet window（防"对方连发→机器人重复回复"）
+        # 场景：peer t=0 发 (1) → run_once 启动处理 → peer t=2 发 (2) → 系统
+        # 已经基于 (1) 生成完回复发出 → 下一次 run_once 把 (2) 当新未读再回一次。
+        # 在生成 LLM 回复前留一个 quiet window：(a) 给对方把后续消息发完，下一
+        # 次 run_once 通过 extra_peers 自然合并；(b) peer_typing 探测到正在打字
+        # 时再延长一段，让对方完整表达。设置 0 即禁用。
+        try:
+            quiet_window = float(self._cfg.get("peer_message_quiet_window_sec", 1.8) or 0)
+        except (TypeError, ValueError):
+            quiet_window = 0.0
+        if quiet_window > 0:
+            try:
+                quiet_max = float(
+                    self._cfg.get("peer_message_quiet_window_max_sec", 10.0) or 10.0
+                )
+            except (TypeError, ValueError):
+                quiet_max = 10.0
+            wait_sec = quiet_window
+            # 如果 vision peer_typing 在 prefetch 里已检测到打字，叠加它的建议等候
+            pt_task = result.get("_peer_typing_prefetch_task")
+            if pt_task is not None:
+                try:
+                    pt_res = await asyncio.wait_for(pt_task, timeout=2.0)
+                    is_typing = bool(getattr(pt_res, "is_typing", False))
+                    suggested = float(getattr(pt_res, "suggested_wait_sec", 0.0) or 0.0)
+                    if is_typing and suggested > 0:
+                        wait_sec = min(quiet_max, max(quiet_window, suggested))
+                        result["peer_typing_detected"] = True
+                        result["peer_typing_wait_sec"] = wait_sec
+                except (asyncio.TimeoutError, Exception):
+                    pass
+            wait_sec = min(wait_sec, quiet_max)
+            logger.info(
+                "[messenger_rpa] P0-A peer quiet window chat=%s wait=%.1fs",
+                chat_key, wait_sec,
+            )
+            await asyncio.sleep(wait_sec)
+            result.setdefault("hints", []).append(f"peer_quiet_window:{wait_sec:.1f}s")
+
+        # ★ P2-1 + P3-3 + P1-A1/A2/1.4 (2026-05-04)：媒体深度理解 + 上下文 fusion
+        # - 媒体类（image/video/gif/sticker/animated_sticker）一律走 caption 同步等回
+        # - sticker 类附加 _classify_sticker_category 得到 happy/love/sad/angry/cute 标签
+        # - fusion_hint：上一句 peer 文本（本轮 extra_peers / 上一轮 chat_state.last_peer_text）
+        #                帮 LLM 判意图（"看看我的照片" + 自拍 → 倾向夸；+ 动物 → 调侃）
+        # 必须在 P2-2 多消息合并之前做，确保合并后增强后的 text_for_ai 能进 prompt
+        _MEDIA_KINDS_FOR_CAPTION = {
+            "image", "video", "gif", "sticker", "animated_sticker",
+        }
+        if peer_msg.kind in _MEDIA_KINDS_FOR_CAPTION:
             caption = ""
             _cap_task = result.pop("_cap_task", None)
             if _cap_task is not None:
@@ -3954,36 +7419,81 @@ class MessengerRpaRunner:
                     result["caption_source"] = "timeout"
                 except Exception:
                     result["caption_source"] = "error"
-            if not caption:
-                caption = await self._try_describe_peer_image(
+            # P1.5+D3：质量评估——prefetch 用 _generic prompt 覆盖率高但质量略低；
+            # 当 caption 缺失 / 太短 / 含 NO_IMAGE 占位 时，用 peer_msg.kind 同步重调
+            need_resync = (
+                not caption
+                or len(caption) < 25
+                or any(
+                    p in caption.lower()
+                    for p in ("no_image", "无图片", "看不清的图片")
+                )
+            )
+            if need_resync:
+                resync_caption = await self._try_describe_peer_image(
                     result.get("screenshot_path", ""),
                     timeout_sec=self._deep_timeout(),
+                    kind=peer_msg.kind,
                 )
-                if caption and result.get("caption_source") not in ("prefetch",):
-                    result["caption_source"] = "sync"
+                if resync_caption:
+                    caption = resync_caption
+                    result["caption_source"] = (
+                        "resync_after_prefetch" if not need_resync
+                        else "sync"
+                    )
+                    result.setdefault("hints", []).append(
+                        f"caption_resync_kind:{peer_msg.kind}"
+                    )
+
+            # P1-1.4：sticker 类标签（让 LLM 看到对方情绪：happy/love/sad/angry/cute）
+            sticker_cat = None
+            if peer_msg.kind in ("sticker", "animated_sticker"):
+                try:
+                    sticker_cat = self._classify_sticker_category(
+                        peer_msg.desc or "", peer_msg.content or "",
+                    )
+                except Exception:
+                    sticker_cat = None
+
+            # P1-A2：上下文 fusion hint —— 上一句 peer 文本（本轮 extra_peers / 上一轮 state）
+            fusion_hint = self._build_media_fusion_hint(
+                chat_key, peer_msg, extra=result.get("extra_peers") or [],
+            )
+
+            # 用 to_text_for_ai 的增强签名拿一致输出
+            text_for_ai = peer_msg.to_text_for_ai(
+                caption=caption or None,
+                sticker_category=sticker_cat,
+                fusion_hint=fusion_hint,
+            )
             if caption:
-                text_for_ai = f"[图片：{caption}]"
-                result["image_caption"] = caption
-                logger.info(
-                    "[messenger_rpa] P2-1 image caption chat=%s src=%s caption=%r",
-                    chat_key, result.get("caption_source", "?"), caption[:100],
-                )
+                result["image_caption"] = caption  # 兼容旧 approval extra
+                result["media_caption"] = caption
+            if sticker_cat:
+                result["sticker_category"] = sticker_cat
+            if fusion_hint:
+                result["media_fusion_hint"] = fusion_hint[:120]
+            logger.info(
+                "[messenger_rpa] P1-media chat=%s kind=%s src=%s "
+                "caption=%r sticker_cat=%s fusion=%r",
+                chat_key, peer_msg.kind, result.get("caption_source", "?"),
+                (caption or "")[:80], sticker_cat or "-",
+                (fusion_hint or "")[:60],
+            )
+            result.setdefault("hints", []).append(
+                f"media_enriched:{peer_msg.kind}"
+                f"{':cap' if caption else ''}"
+                f"{':sticker_cat=' + sticker_cat if sticker_cat else ''}"
+                f"{':fusion' if fusion_hint else ''}"
+            )
         else:
-            # 非 image：把预跑的 caption_task cancel 掉（token 已花，但本次不等）
+            # 非媒体：把预跑的 caption_task cancel 掉（token 已花，但本次不等）
             _cap_task = result.pop("_cap_task", None)
             if _cap_task is not None:
                 try:
                     _cap_task.cancel()
                 except Exception:
                     pass
-
-        if peer_msg.kind == "voice":
-            transcript = await self._try_transcribe_peer_voice(
-                str(self._cfg.get("adb_serial") or "")
-            )
-            if transcript:
-                text_for_ai = f"[语音转写：{transcript}]"
-                result["voice_transcript"] = transcript[:500]
 
         # ★ P2-2：对方连发合并（extra_peers 由 _thread_combined 写入 result）
         # 当 vision 抓到 peer 底部之上还有连续 peer 气泡时，把它们按
@@ -4069,10 +7579,21 @@ class MessengerRpaRunner:
             "messenger_rpa_peer_raw": (peer_msg.raw or "")[:300],
             "_current_user_message_for_lang": _lang_single[:200],
         }
-        if bool(self._cfg.get("suppress_global_ai_identity", True)):
-            ctx["suppress_global_ai_identity"] = True
-        if bool(self._cfg.get("disable_episodic_memory", True)):
-            ctx["disable_episodic_memory"] = True
+        # P3-deep bugfix + B 防御性 (2026-05-04)：所有 cfg-driven ctx flag
+        # 都用 **explicit override** —— _context_store.user_context 会持久化
+        # 旧值，"only set if True" pattern 让 cfg 改 false 后无法覆盖
+        # 历史持久化的 True，导致功能"被永久关闭"。
+        ctx["suppress_global_ai_identity"] = bool(
+            self._cfg.get("suppress_global_ai_identity", True)
+        )
+        ctx["disable_episodic_memory"] = bool(
+            self._cfg.get("disable_episodic_memory", True)
+        )
+        # P3-deep (2026-05-04)：episodic_memory_extract 用 chat_id 算 storage_key；
+        # messenger_rpa 之前没传 chat_id，导致 storage_key 退化路径异常 →
+        # silent return 不写入。把 chat_key 当 chat_id 传入。
+        if chat_key and "chat_id" not in ctx:
+            ctx["chat_id"] = chat_key
         lead_prompt_block = ""
         try:
             if self._lead_qualifier.enabled:
@@ -4204,6 +7725,71 @@ class MessengerRpaRunner:
                     result["ltm_facts"] = len(facts)
         except Exception:
             logger.debug("P7-4 ltm inject 异常", exc_info=True)
+
+        persona_facts_for_state: List[str] = []
+        conv_state_for_reply: Dict[str, Any] = {}
+        try:
+            persona_data_for_state = (
+                reply_profile.get("persona") if reply_profile else None
+            )
+            persona_facts_for_state = flatten_persona_facts(
+                persona_data_for_state
+                if isinstance(persona_data_for_state, dict) else {}
+            )
+            fsm = getattr(self, "_conversation_fsm", None)
+            if fsm is None:
+                fsm = ConversationStateMachine()
+                self._conversation_fsm = fsm
+            prev_state = self._state.get_conversation_state(chat_key)
+            customer_lang = (
+                _reply_lang_ctx or prev_state.get("customer_language") or
+                detect_customer_language(text_for_ai)
+            )
+            customer_type = (
+                prev_state.get("customer_type") or infer_customer_type(text_for_ai)
+            )
+            conv_state_for_reply = fsm.advance(
+                prev_state,
+                peer_text=text_for_ai,
+                customer_language=customer_lang,
+                customer_type=customer_type,
+                persona_facts=persona_facts_for_state,
+            )
+            persona_id_for_state = str(
+                (reply_profile or {}).get("id")
+                or (reply_profile or {}).get("name")
+                or ""
+            )
+            self._state.update_conversation_state(
+                chat_key,
+                chat_key=chat_key,
+                account_id=str(getattr(self, "_account_id", "") or "default"),
+                persona_id=persona_id_for_state,
+                customer_language=str(conv_state_for_reply.get("customer_language") or ""),
+                customer_type=str(conv_state_for_reply.get("customer_type") or ""),
+                stage=str(conv_state_for_reply.get("stage") or "new_lead"),
+                memory_summary=str(conv_state_for_reply.get("memory_summary") or ""),
+                recent_topics=list(conv_state_for_reply.get("recent_topics") or []),
+                used_persona_facts=list(
+                    conv_state_for_reply.get("used_persona_facts") or []
+                ),
+                metadata={
+                    "chat_name": target.name or "",
+                    "previous_stage": conv_state_for_reply.get("previous_stage", ""),
+                },
+                last_message_at=float(
+                    conv_state_for_reply.get("last_message_at") or time.time()
+                ),
+            )
+            block = fsm.prompt_block(conv_state_for_reply)
+            if block:
+                cur_hint = str(ctx.get("messenger_rpa_style_hint") or "")
+                ctx["messenger_rpa_style_hint"] = (
+                    cur_hint + "\n" + block if cur_hint else block
+                )
+                result["conversation_stage"] = conv_state_for_reply.get("stage", "")
+        except Exception:
+            logger.debug("[messenger_rpa] conversation state machine failed", exc_info=True)
 
         # W4-Runner：ContactHooks 入库 inbound 消息（失败不影响 runner）
         # Phase 1：接住 JourneyContext → contact_id + 已有 snapshot 渲染成 portrait block 塞 ctx
@@ -4393,6 +7979,32 @@ class MessengerRpaRunner:
         else:
             reply = str(payload or "").strip()
 
+        # ── 中日混语过滤（P-LANG-MIX）────────────────────────────────────
+        # 当 reply_lang=ja 且 AI 输出含"纯中文句（无假名）"时，
+        # 将这些中文句从回复中剥离；保留所有含假名的日文句。
+        # 触发条件：_has_chinese_japanese_mixing 检测阳性。
+        # 目的：彻底消除语音消息里"一句中文一句日语"的来回混杂。
+        if _reply_lang_ctx == "ja" and reply:
+            try:
+                from src.ai.ai_client import AIClient
+                if AIClient._has_chinese_japanese_mixing(reply):
+                    _clean_sents = []
+                    for _s in re.split(r"([\u3002\uff01\uff1f!?\n])", reply):
+                        _kana = len(re.findall(r"[\u3040-\u309F\u30A0-\u30FF]", _s))
+                        _cjk = len(re.findall(r"[\u4e00-\u9fff]", _s))
+                        if _cjk >= 4 and _kana == 0 and len(_s.strip()) >= 4:
+                            result.setdefault("hints", []).append(
+                                f"lang_mix_filter:removed_zh_sent:{_s.strip()[:40]!r}"
+                            )
+                            continue
+                        _clean_sents.append(_s)
+                    _cleaned = "".join(_clean_sents).strip()
+                    if _cleaned:
+                        reply = _cleaned
+                        result.setdefault("hints", []).append("lang_mix_filter:applied_ja")
+            except Exception:
+                pass
+
         # ★ 智能语言对齐（取代旧 force_english_reply 一刀切）
         # 3 种模式：
         #   off                   不翻译
@@ -4458,6 +8070,229 @@ class MessengerRpaRunner:
             )
             reply = trimmed
 
+        try:
+            if reply and conv_state_for_reply:
+                fsm = getattr(self, "_conversation_fsm", None) or ConversationStateMachine()
+                updated_conv = fsm.mark_used_facts(
+                    conv_state_for_reply, reply, persona_facts_for_state,
+                )
+                self._state.update_conversation_state(
+                    chat_key,
+                    chat_key=chat_key,
+                    account_id=str(getattr(self, "_account_id", "") or "default"),
+                    persona_id=str(
+                        (reply_profile or {}).get("id")
+                        or (reply_profile or {}).get("name")
+                        or ""
+                    ),
+                    customer_language=str(updated_conv.get("customer_language") or ""),
+                    customer_type=str(updated_conv.get("customer_type") or ""),
+                    stage=str(updated_conv.get("stage") or "new_lead"),
+                    memory_summary=str(updated_conv.get("memory_summary") or ""),
+                    recent_topics=list(updated_conv.get("recent_topics") or []),
+                    used_persona_facts=list(
+                        updated_conv.get("used_persona_facts") or []
+                    ),
+                    metadata={
+                        "chat_name": target.name or "",
+                        "last_reply_len": len(reply),
+                    },
+                    last_message_at=float(
+                        updated_conv.get("last_message_at") or time.time()
+                    ),
+                )
+        except Exception:
+            logger.debug("[messenger_rpa] conversation state post-reply update failed", exc_info=True)
+
+        # P1-B：post-validation regen 防跳话题
+        # LLM 偶尔生成与 peer 上一条问题无关的回复（"你看了什么剧"→AI 回"开车"
+        # 这种幻觉）。在发送前用一次轻量 LLM 调用判断是否承接，不承接则 regen。
+        try:
+            reply = await self._maybe_regen_for_context(
+                reply, peer_msg, chat_key, ctx, result,
+            )
+        except Exception:
+            logger.debug("[messenger_rpa] context regen failed", exc_info=True)
+
+        # ── P2 + P2++G_FIX (2026-05-04) sticker modality 决策（统一 helper）──
+        # 在 reply decided log 之前调，让 modality 决定结果进 hint，dashboard
+        # 即可统计概率命中分布、cooldown 频率、各 cat 选中比例。
+        # 注意：fast-ack 路径在 _maybe_media_ack 命中后**也**会调同一个 helper，
+        # 让 sticker / voice / image 的快速回应也能附 sticker（P2++G_FIX 修盲区）。
+        # serial 由上层 cycle 写入 result["_serial"]——dry_run 阶段不会真发，
+        # 空 serial 也无害；real_send 必须保证 caller 已设。
+        await self._run_modality_hook(
+            serial=str(result.get("_serial") or ""),
+            target=target,
+            chat_key=chat_key,
+            peer_msg=peer_msg,
+            reply_text=reply or "",
+            multi_peer_count=int(result.get("multi_peer_count") or 0),
+            peer_sticker_cat=result.get("sticker_category"),
+            result=result,
+            caption=result.get("media_caption") or result.get("image_caption"),
+        )
+
+        # P0-B：回复决策末段日志 — 让运营能在 web 改完人设/参数后立刻在日志
+        # 里看到"哪个 chat 用了什么 persona、生成的回复长什么样"，避免"改了
+        # 没反应"的盲区。
+        try:
+            _picked = result.get("reply_profile") or ""
+            _hist_n = result.get("conv_hist_turns")
+            _multi_n = result.get("multi_peer_count")
+            # P7 监控修复：原 [:120] 截断让 thread_title_vision_cache_hit
+            # 这种关键 hint 看不见。bump 到 300 字符覆盖典型 hint 列表全貌。
+            _hint_list = result.get("hints") or []
+            _hints = ",".join(_hint_list)[:300]
+            _self_ovlp = result.get("self_reply_overlap")
+            _ovlp_n = result.get("self_overlap_against_n_replies")
+            logger.warning(
+                "[messenger_rpa] reply decided chat=%s persona=%r hist_turns=%s "
+                "multi_peer=%s reply_len=%d self_overlap=%s/n=%s preview=%r hints=%s",
+                chat_key, _picked, _hist_n, _multi_n, len(reply or ""),
+                _self_ovlp, _ovlp_n,
+                (reply or "")[:80], _hints,
+            )
+            # P11 (2026-05-04)：hints 自动入 metrics 计数器，dashboard/Prometheus
+            # 即可看到趋势（如 self_overlap promote 率 / cache hit 率退化告警）。
+            try:
+                from src.monitoring.metrics_store import get_metrics_store
+                _ms = get_metrics_store()
+                for _h in _hint_list:
+                    # 取冒号前 base name（如 cycle_entry_thread_recovered:Yunshan Zan
+                    # → cycle_entry_thread_recovered），动态片段不爆字典
+                    _base = (_h or "").split(":", 1)[0].strip()
+                    if _base:
+                        _ms.record_messenger_rpa_metric(_base)
+            except Exception:
+                pass
+        except Exception:
+            logger.debug("[messenger_rpa] reply decided log failed", exc_info=True)
+
+        # ★ P0-I (2026-05-03 监控发现): 双零信号 + 长 reply 守卫
+        # 当 hist_turns=0 (无历史) + multi_peer=None (vision 仅看到单 peer) +
+        # reply 长 > 30 字 时，LLM 处于"上下文双零 + 长篇生成"状态 → 大概率
+        # hallucinate（监控见过 19:04 晚 7 点说"早上好"、20:11 跳话题、21:28
+        # 编"买东西"等）。短 reply（"好的"/"嗯"等）不拦避免误伤。
+        # 默认 enabled=True，可通过 reply_min_signal_guard.enabled=false 关闭。
+        try:
+            _msg = (self._cfg.get("reply_min_signal_guard") or {})
+            if reply and bool(_msg.get("enabled", True)):
+                _hist_now = result.get("conv_hist_turns")
+                _multi_now = result.get("multi_peer_count")
+                _long_thr = int(_msg.get("long_reply_threshold", 30) or 30)
+                if (
+                    (_hist_now is None or _hist_now == 0)
+                    and _multi_now is None
+                    and len(reply) > _long_thr
+                ):
+                    result.setdefault("hints", []).append(
+                        "p0i_min_signal_skip"
+                    )
+                    logger.warning(
+                        "[messenger_rpa] P0-I min_signal skip: chat=%s "
+                        "hist=0 multi_peer=None reply_len=%d (>%d) "
+                        "preview=%r — 双零信号 + 长 reply 视为 hallucinate，"
+                        "abort send",
+                        chat_key, len(reply), _long_thr, reply[:80],
+                    )
+                    return ""
+        except Exception:
+            logger.debug("[messenger_rpa] P0-I guard failed", exc_info=True)
+
+        return reply
+
+    async def _maybe_regen_for_context(
+        self,
+        reply: str,
+        peer_msg: "PeerMessage",
+        chat_key: str,
+        ctx: Dict[str, Any],
+        result: Dict[str, Any],
+    ) -> str:
+        """P1-B post-validation regen：检查 reply 是否承接 peer 上一条问题。
+        不承接 → 用一次 regen 强制承接。
+        触发条件（避免无谓花钱）：
+          - humanize.context_check.enabled: true
+          - reply 长度 ≥ min_reply_chars（短回复不太可能跳话题）
+          - peer_msg 是文字问句
+        """
+        cfg = self._cfg.get("humanize") or {}
+        cc_cfg = cfg.get("context_check") or {}
+        if not cc_cfg.get("enabled", False):
+            return reply
+        if not reply:
+            return reply
+        peer_text = (peer_msg.content or "").strip()
+        if not peer_text or len(reply) < int(cc_cfg.get("min_reply_chars", 20) or 20):
+            return reply
+        # 跳过非文字 peer 消息（语音/图片/系统事件）
+        if peer_msg.kind not in ("text", "link"):
+            return reply
+
+        ai = getattr(self._sm, "ai_client", None)
+        if ai is None or not hasattr(ai, "chat"):
+            return reply
+
+        # 1. 用 ai_client.chat 做轻量 yes/no validation
+        validation_prompt = (
+            "判断以下「对话回复」是否直接承接了「对方的最后一句」。\n"
+            "只回答 yes 或 no，不要解释。\n\n"
+            f"[对方的最后一句]: {peer_text[:300]}\n"
+            f"[我方回复]: {reply[:300]}\n\n"
+            "我方回复是否直接承接了对方的话题或问题？(yes / no):"
+        )
+        try:
+            timeout_s = float(cc_cfg.get("validation_timeout_sec", 5.0) or 5.0)
+            rv = await asyncio.wait_for(
+                ai.chat(validation_prompt), timeout=timeout_s,
+            )
+            rv_text = (rv or "").strip().lower()
+        except (asyncio.TimeoutError, Exception):
+            result.setdefault("hints", []).append("context_check_timeout")
+            return reply
+
+        # yes 路径：直接放行
+        if "yes" in rv_text and "no" not in rv_text:
+            result.setdefault("hints", []).append("context_check_pass")
+            return reply
+
+        # no 路径：regen 一次
+        result.setdefault("hints", []).append("context_check_regen")
+        logger.warning(
+            "[messenger_rpa] ⚠ context_check 未承接，regen 一次 chat=%s "
+            "peer=%r reply=%r",
+            chat_key, peer_text[:60], reply[:60],
+        )
+        try:
+            # 在原 peer text 前面注入强约束指令
+            forced_text = (
+                f"⚠️ 必须先正面回应「{peer_text[:120]}」这条话题，"
+                f"再扩展或反问。绝不要跳到完全不相关的话题。\n\n"
+                f"对方的话: {peer_text}"
+            )
+            regen_ctx = dict(ctx)
+            regen_ctx["context_regen"] = True
+            new_payload = await self._sm.process_message(
+                forced_text,
+                chat_key,
+                context=regen_ctx,
+            )
+            new_reply = ""
+            if isinstance(new_payload, dict):
+                new_reply = str(
+                    new_payload.get("reply") or new_payload.get("text") or ""
+                ).strip()
+            elif new_payload:
+                new_reply = str(new_payload).strip()
+            if new_reply:
+                logger.warning(
+                    "[messenger_rpa] context regen ok new_reply=%r",
+                    new_reply[:80],
+                )
+                return new_reply
+        except Exception:
+            logger.debug("[messenger_rpa] context regen exception", exc_info=True)
         return reply
 
     async def _translate_to_english(
@@ -5008,7 +8843,187 @@ class MessengerRpaRunner:
             cache[serial] = (now, unicode_ok)
         return not unicode_ok
 
+    # ── Message Request 自动接受 ─────────────────────
+    async def _accept_message_request_if_needed(
+        self,
+        serial: str,
+        wh: Tuple[int, int],
+        result: Dict[str, Any],
+    ) -> bool:
+        """检测当前聊天是否为 Message Request，若是则自动点击 Accept。
+
+        返回 True 表示已接受（或不需要接受）；False 表示检测/接受失败。
+        """
+        try:
+            from src.integrations.messenger_rpa import thread_actions as _ta
+            from src.integrations.messenger_rpa import ui_scraper as _uis
+            xml = _ta.dump_view_tree(serial)
+            if xml is None:
+                return True  # dump 失败，不阻塞主流程
+            accept_b = _uis.find_message_request_accept(
+                xml, screen_h=int(wh[1]),
+            )
+            if accept_b is None:
+                return True  # 非 Message Request 页面，正常继续
+            # 找到 Accept 按钮 → 点击
+            logger.warning(
+                "[messenger_rpa] 检测到 Message Request Accept 按钮 "
+                "bounds=(%d,%d,%d,%d)，自动接受",
+                accept_b.left, accept_b.top, accept_b.right, accept_b.bottom,
+            )
+            adb.input_tap(serial, accept_b.cx, accept_b.cy)
+            result.setdefault("hints", []).append("message_request_accepted")
+            # 等待 UI 过渡（Accept 后输入框出现）
+            await asyncio.sleep(1.0)
+            return True
+        except Exception:
+            logger.debug(
+                "[messenger_rpa] _accept_message_request 异常", exc_info=True,
+            )
+            return True  # 非致命，不阻塞
+
     # ── P7-3：递进降级的发送重试 wrapper ─────────────
+    @staticmethod
+    def _replace_kana_laugh_with_emoji(text: str) -> str:
+        """P2-B emoji 真人感后处理：把日语字符化笑「（笑）」「(笑)」「(爆笑)」
+        「(泣)」等替换为真 emoji。也处理颜文字「(´∀｀)」「＞<」之类。
+        日本中年男士 IM 习惯偶尔用 (笑)，但产品偏好真 emoji 更年轻有活力。
+        """
+        if not text:
+            return text
+        import re as _re
+        out = text
+        # 笑：（笑）/(笑)/（笑い）/(笑い)/(微笑)
+        out = _re.sub(r"[（(]\s*(笑い?|w+|wara)\s*[）)]", "😂", out)
+        # 爆笑：(爆笑)
+        out = _re.sub(r"[（(]\s*爆笑\s*[）)]", "🤣", out)
+        # 泣：(泣)
+        out = _re.sub(r"[（(]\s*泣\s*[）)]", "😢", out)
+        # 怒：(怒)
+        out = _re.sub(r"[（(]\s*怒\s*[）)]", "😠", out)
+        # 汗：(汗)
+        out = _re.sub(r"[（(]\s*汗\s*[）)]", "😅", out)
+        # 照：(照) (照れ)
+        out = _re.sub(r"[（(]\s*照れ?\s*[）)]", "🥹", out)
+        # 萌：(萌)
+        out = _re.sub(r"[（(]\s*萌\s*[）)]", "🥰", out)
+        # 中文场景：(笑) (哭) (汗)
+        out = _re.sub(r"[（(]\s*哭\s*[）)]", "😢", out)
+        # 末尾 lol / LOL / xD
+        out = _re.sub(r"\s*\b(lol|LOL|xD|XD)\b", " 😂", out)
+        # P2-B+ 中文笑声混在日文里出戏 → 替换为 emoji（开头/中间/末尾都覆盖）
+        out = _re.sub(r"哈哈+", "😂", out)
+        out = _re.sub(r"嗯嗯+", "😊", out)
+        out = _re.sub(r"呵呵+", "😄", out)
+        # 颜文字常见组合（最常见 4 个，不全覆盖避免误伤）
+        out = _re.sub(r"\(´∀｀\)|\(￣▽￣\)", "😄", out)
+        out = _re.sub(r"＞<|>_<", "😆", out)
+        # 收紧多余空格
+        out = _re.sub(r"\s{2,}", " ", out).strip()
+        return out
+
+    async def _typing_indicator_early_warmup(
+        self,
+        serial: str,
+        chat_name: str,
+        result: Dict[str, Any],
+    ) -> None:
+        """P3-C 提前 typing warmup（覆盖整个 vision+LLM 思考期）：
+        在 hash diff 检测到变化后、vision 调用前立刻广播 typing 字符。
+        让 victor 看到的"正在输入..."状态持续 vision(10-15s) + LLM(5-15s)
+        全程，不只是最后发送前 1.5s。
+
+        与 _typing_indicator_warmup 区别：
+          - 不 sleep 不 DEL（让字符留在输入框，messenger 持续显示 typing）
+          - 后续 _send_reply 内的 clear_focused_input 会清掉
+          - 30s 内同一 chat 已触发过则跳过（防重复 append 输入框累积空格）
+        """
+        cfg = self._cfg.get("humanize") or {}
+        ti = cfg.get("typing_indicator") or {}
+        if not ti.get("enabled", False) or not ti.get("early_trigger", True):
+            return
+        if not chat_name:
+            return
+        if not hasattr(self, "_early_typing_active"):
+            self._early_typing_active: Dict[str, float] = {}
+        last_active = self._early_typing_active.get(chat_name, 0.0)
+        # 30 秒内已 early-trigger 过，跳过（避免输入框积累多个空格）
+        if last_active and (time.monotonic() - last_active) < 30:
+            return
+        warmup_chars = str(ti.get("warmup_chars", "　") or "　")
+        try:
+            adb.run_adb(
+                ["shell", "am", "broadcast", "-a", "ADB_INPUT_TEXT",
+                 "--es", "msg", warmup_chars],
+                serial=serial, timeout=3.0,
+            )
+            self._early_typing_active[chat_name] = time.monotonic()
+            result.setdefault("hints", []).append("typing_indicator_early")
+            logger.warning(
+                "[messenger_rpa] 🎙 early typing warmup chat=%r → victor 端"
+                "立刻看到 '正在输入...'（覆盖 vision+LLM 思考期 10-25s）",
+                chat_name,
+            )
+        except Exception:
+            logger.debug(
+                "[messenger_rpa] early typing warmup failed", exc_info=True,
+            )
+
+    async def _typing_indicator_warmup(
+        self, serial: str, result: Dict[str, Any]
+    ) -> None:
+        """P2-T 打字指示反馈：在真发送前先在输入框广播一个隐形字符触发
+        Messenger 的 "对方正在输入..." 指示，让对方先看到 typing 状态再
+        看到真消息（拟人感）。随后删除该字符，不影响真回复内容。
+        """
+        cfg = self._cfg.get("humanize") or {}
+        ti = cfg.get("typing_indicator") or {}
+        if not ti.get("enabled", False):
+            return
+        warmup_chars = str(ti.get("warmup_chars", "　") or "　")
+        warmup_sec = float(ti.get("warmup_sec", 1.5) or 1.5)
+        if warmup_sec <= 0 or not warmup_chars:
+            return
+        try:
+            # 用 ADB Keyboard 广播触发 typing —— 对方 messenger 客户端会立刻
+            # 收到 "is_typing=true"，UI 上显示 "对方正在输入..."
+            adb.run_adb(
+                ["shell", "am", "broadcast", "-a", "ADB_INPUT_TEXT",
+                 "--es", "msg", warmup_chars],
+                serial=serial, timeout=3.0,
+            )
+            result.setdefault("hints", []).append("typing_indicator_warmup")
+            logger.warning(
+                "[messenger_rpa] 🎙 typing indicator warmup chars=%r sec=%.1fs",
+                warmup_chars, warmup_sec,
+            )
+            await asyncio.sleep(warmup_sec)
+            # 删除 warmup 字符（每字符 1 次 DEL）
+            for _ in range(len(warmup_chars)):
+                adb.input_keyevent(serial, "KEYCODE_DEL")
+                await asyncio.sleep(0.05)
+        except Exception:
+            logger.debug("typing_indicator_warmup 异常", exc_info=True)
+
+    def _apply_human_text_filters(self, reply_text: str, result: Dict[str, Any]) -> str:
+        """在发送前对 LLM 回复做"真人感"后处理。
+        - 字符化笑 → 真 emoji（受 humanize.replace_kana_laugh 开关控制，默认 true）
+        """
+        if not reply_text:
+            return reply_text
+        cfg = self._cfg.get("humanize") or {}
+        if cfg.get("replace_kana_laugh", True):
+            new_text = self._replace_kana_laugh_with_emoji(reply_text)
+            if new_text != reply_text:
+                result.setdefault("hints", []).append("kana_laugh_replaced")
+                logger.warning(
+                    "[messenger_rpa] humanize: replaced (笑) → emoji "
+                    "before=%r after=%r",
+                    reply_text[:80], new_text[:80],
+                )
+                reply_text = new_text
+        return reply_text
+
     async def _send_reply_with_retry(
         self,
         serial: str,
@@ -5026,6 +9041,11 @@ class MessengerRpaRunner:
 
         非致命错误（inject_text / tap 失败）会重试；致命错误（empty text）立即返回。
         """
+        # P2-B：发送前做"真人感"后处理（emoji 替换 等）
+        reply_text = self._apply_human_text_filters(reply_text, result)
+        # P2-T：发送前先触发 typing indicator（"对方正在输入"），让 victor 端
+        # 立刻看到 typing 状态，再看到真消息出现（提升真人感）
+        await self._typing_indicator_warmup(serial, result)
         rt_cfg = (self._cfg.get("send_retry") or {})
         if not rt_cfg.get("enabled", True):
             return await self._send_reply(serial, wh, reply_text, result)
@@ -5041,6 +9061,9 @@ class MessengerRpaRunner:
         orig_use_ime = bool(self._cfg.get("use_adb_keyboard", True))
         ime_toggled = False
 
+        # ★ 首次发送前：检测并自动接受 Message Request
+        await self._accept_message_request_if_needed(serial, wh, result)
+
         for attempt in range(1, max_attempts + 1):
             try:
                 ok = await self._send_reply(serial, wh, reply_text, result)
@@ -5055,6 +9078,10 @@ class MessengerRpaRunner:
                 "n": attempt, "ok": ok, "path": result.get("send_path"),
                 "error": err[:120],
             })
+            logger.warning(
+                "[messenger_rpa] send attempt #%d ok=%s err=%s path=%s",
+                attempt, ok, err[:80], result.get("send_path"),
+            )
 
             if ok:
                 result["send_attempts"] = attempt_log
@@ -5145,6 +9172,10 @@ class MessengerRpaRunner:
 
         result["send_attempts"] = attempt_log
         result["send_all_failed"] = True
+        logger.warning(
+            "[messenger_rpa] send_all_failed after %d attempts: %s",
+            max_attempts, attempt_log,
+        )
         chat_key = str(result.get("chat_key") or "")
         if chat_key and cooldown_sec > 0:
             try:
@@ -5256,45 +9287,20 @@ class MessengerRpaRunner:
         # ★ P0-UI 安全护盾：验证键盘弹起；未弹时检查是否误开了相机/图库
         try:
             from src.integrations.messenger_rpa import thread_actions as _ta_kbd
-            _kw = await _ta_kbd.wait_keyboard_open(
-                serial, screen_h=int(wh[1]), timeout_sec=4.5,
-            )
-            if not _kw.ok:
-                _in_msgr = _ta_kbd.check_in_messenger(serial)
-                if not _in_msgr:
-                    # 误进了相机/图库等 ── 立刻两次 BACK 回到 Messenger
-                    for _ in range(2):
-                        adb.run_adb(
-                            ["shell", "input", "keyevent", "KEYCODE_BACK"],
-                            serial=serial, timeout=5.0,
-                        )
-                        time.sleep(0.3)
-                    result["step"] = "ui_unsafe_tap"
-                    result["error"] = (
-                        f"input_tap_left_messenger tap_src={_input_tap_src} "
-                        f"tap=({text_x},{text_y})"
-                    )
-                    logger.error(
-                        "[messenger_rpa] ★ 安全护盾：点击输入框后离开了 Messenger"
-                        "（可能误触相机/图库）；已 BACK 恢复。"
-                        " serial=%s tap=(%d,%d) src=%s",
-                        serial, text_x, text_y, _input_tap_src,
-                    )
-                    return False
-                # 仍在 Messenger 但键盘未弹 → 补 tap 并再等一轮
-                logger.warning(
-                    "[messenger_rpa] 键盘未弹（仍在 Messenger），补 tap "
-                    "serial=%s tap=(%d,%d)", serial, text_x, text_y,
+            if use_adb_keyboard:
+                # ADBKeyboard 通过 broadcast 注入文本，不一定弹出普通软键盘。
+                # 这里不能把“键盘未弹”当作失败，否则会在真实 Messenger
+                # 会话页误判为 input_tap_left_messenger。后续 inject_and_verify
+                # 和 send button 定位仍会兜底校验。
+                result["keyboard_open"] = "skipped_adbkeyboard"
+            else:
+                _kw = await _ta_kbd.wait_keyboard_open(
+                    serial, screen_h=int(wh[1]), timeout_sec=4.5,
                 )
-                adb.input_tap(serial, text_x, text_y)
-                _kw2 = await _ta_kbd.wait_keyboard_open(
-                    serial, screen_h=int(wh[1]), timeout_sec=3.5,
-                )
-                if _kw2.ok:
-                    result["keyboard_open"] = True
-                else:
-                    _in_msgr2 = _ta_kbd.check_in_messenger(serial)
-                    if not _in_msgr2:
+                if not _kw.ok:
+                    _in_msgr = _ta_kbd.check_in_messenger(serial)
+                    if not _in_msgr:
+                        # 误进了相机/图库等 ── 立刻两次 BACK 回到 Messenger
                         for _ in range(2):
                             adb.run_adb(
                                 ["shell", "input", "keyevent", "KEYCODE_BACK"],
@@ -5304,20 +9310,52 @@ class MessengerRpaRunner:
                         result["step"] = "ui_unsafe_tap"
                         result["error"] = (
                             f"input_tap_left_messenger tap_src={_input_tap_src} "
-                            f"tap=({text_x},{text_y}) retry2"
+                            f"tap=({text_x},{text_y})"
                         )
                         logger.error(
-                            "[messenger_rpa] ★ 安全护盾(补tap后)：离开了 Messenger"
+                            "[messenger_rpa] ★ 安全护盾：点击输入框后离开了 Messenger"
+                            "（可能误触相机/图库）；已 BACK 恢复。"
                             " serial=%s tap=(%d,%d) src=%s",
                             serial, text_x, text_y, _input_tap_src,
                         )
                         return False
+                    # 仍在 Messenger 但键盘未弹 → 补 tap 并再等一轮
                     logger.warning(
-                        "[messenger_rpa] 补tap后键盘仍未弹，继续注入 serial=%s",
-                        serial,
+                        "[messenger_rpa] 键盘未弹（仍在 Messenger），补 tap "
+                        "serial=%s tap=(%d,%d)", serial, text_x, text_y,
                     )
-            else:
-                result["keyboard_open"] = True
+                    adb.input_tap(serial, text_x, text_y)
+                    _kw2 = await _ta_kbd.wait_keyboard_open(
+                        serial, screen_h=int(wh[1]), timeout_sec=3.5,
+                    )
+                    if _kw2.ok:
+                        result["keyboard_open"] = True
+                    else:
+                        _in_msgr2 = _ta_kbd.check_in_messenger(serial)
+                        if not _in_msgr2:
+                            for _ in range(2):
+                                adb.run_adb(
+                                    ["shell", "input", "keyevent", "KEYCODE_BACK"],
+                                    serial=serial, timeout=5.0,
+                                )
+                                time.sleep(0.3)
+                            result["step"] = "ui_unsafe_tap"
+                            result["error"] = (
+                                f"input_tap_left_messenger tap_src={_input_tap_src} "
+                                f"tap=({text_x},{text_y}) retry2"
+                            )
+                            logger.error(
+                                "[messenger_rpa] ★ 安全护盾(补tap后)：离开了 Messenger"
+                                " serial=%s tap=(%d,%d) src=%s",
+                                serial, text_x, text_y, _input_tap_src,
+                            )
+                            return False
+                        logger.warning(
+                            "[messenger_rpa] 补tap后键盘仍未弹，继续注入 serial=%s",
+                            serial,
+                        )
+                else:
+                    result["keyboard_open"] = True
         except Exception:
             # 键盘验证本身异常不阻断发送，补足等待时间即可
             await asyncio.sleep(0.3)
@@ -5347,9 +9385,13 @@ class MessengerRpaRunner:
             reply_text,
             inject_cfg=inj_cfg,
             screen_h=int(wh[1]),
-            settle_sec=float(self._cfg.get("inject_verify_settle_sec", 0.85) or 0.85),
+            # P1-A：0.85 → 1.5，给 emoji 渲染留充足时间；MIUI 日文 IME 渲染
+            # 比英文慢 ~50%，原默认值会让 vision 看到不完整文本误报 mismatch
+            settle_sec=float(self._cfg.get("inject_verify_settle_sec", 1.5) or 1.5),
+            # P1-A：2 → 8 字符容忍；emoji 占 1-4 字符，末尾问号/感叹号 OCR 不
+            # 准也常被吃掉。带 emoji 的回复至少 2-3 emoji 共 8 字符要容忍。
             tolerate_truncation_chars=int(
-                self._cfg.get("inject_verify_tol_chars", 2) or 2,
+                self._cfg.get("inject_verify_tol_chars", 8) or 8,
             ),
             max_retries=int(
                 self._cfg.get("inject_verify_max_retries", 2)
@@ -5692,36 +9734,558 @@ class MessengerRpaRunner:
 
     # ── 内部：媒体最小应答 ────────────────────────
     # 按 (kind, lang) 查模板；默认英文，language_alignment=auto 时按 peer 语种回
-    _MEDIA_ACK_TEMPLATES: Dict[str, Dict[str, str]] = {
+    #
+    # P4-3 (2026-05-04) sticker 风格化：根据 peer_msg.desc（vision OCR 简述）
+    # keyword 关键词分类，每类用专属模板池——用户感受 sticker 回应"对得上"。
+    # 零额外 vision 调用，复用现有 desc。
+    _STICKER_CATEGORY_KEYWORDS: Dict[str, Tuple[str, ...]] = {
+        "happy": (
+            "笑", "哈哈", "笑脸", "笑顔", "smile", "smiling", "laugh", "lol",
+            "haha", "happy", "joy", "fun", "funny",
+        ),
+        "love": (
+            "爱心", "心型", "心形", "比心", "heart", "love", "romance", "kiss",
+            "ハート", "好き", "ラブ", "💕", "浪漫", "亲亲", "亲吻",
+        ),
+        "sad": (
+            "哭", "泣", "悲", "cry", "crying", "sad", "tear", "悲しい",
+            "つらい", "しんみり",
+        ),
+        "angry": (
+            "怒", "怒り", "angry", "mad", "rage", "irritate",
+        ),
+        "cute": (
+            "可爱", "可愛", "cute", "kawaii", "soft", "ぬいぐるみ",
+            "かわいい", "🥰",
+        ),
+        # P1.5+D1 (2026-05-04)：扩 awkward / wink / thinking 三类，覆盖更多常见 sticker
+        "awkward": (
+            "尴尬", "脸红", "捂脸", "汗", "💦", "💧", "facepalm", "embarrass",
+            "embarrassed", "awkward", "ぎこちない", "恥ずかしい", "あちゃー",
+            "汗顔", "🤦",
+        ),
+        "wink": (
+            "眨眼", "暧昧", "调皮", "wink", "smirk", "playful", "tease",
+            "winky", "😉", "😏", "ウィンク", "うふふ",
+        ),
+        "thinking": (
+            "思考", "想", "疑问", "puzzled", "thinking", "ponder", "wonder",
+            "questioning", "🤔", "うーん", "考える", "考え",
+        ),
+    }
+    _STICKER_CATEGORY_TEMPLATES: Dict[str, Dict[str, List[str]]] = {
+        "happy": {
+            "en": ["Haha 😆", "That's so funny lol", "Hahaha I love it"],
+            "zh": ["哈哈哈太搞笑了 😆", "笑死我了 😂", "哈哈这个真的可以"],
+            "ja": ["笑った😆", "ええっそれw", "ウケる〜"],
+        },
+        "love": {
+            "en": ["Aww 🥰", "So sweet ❤️", "Love that"],
+            "zh": ["哎呀 🥰", "好甜～❤️", "嘻嘻"],
+            "ja": ["きゅん🥰", "それ可愛い❤️", "うふふ"],
+        },
+        "sad": {
+            "en": ["Oh no, you okay?", "Hugs 🥺", "Aw, what happened?"],
+            "zh": ["怎么啦？要紧吗", "抱抱 🥺", "怎么了，跟我说说"],
+            "ja": ["どうしたの？", "ぎゅっ 🥺", "なんかあった？"],
+        },
+        "angry": {
+            "en": ["Whoa, what happened?", "Take it easy 😅"],
+            "zh": ["哎，怎么了", "别气别气 😅"],
+            "ja": ["え、どした？", "まあまあ 😅"],
+        },
+        "cute": {
+            "en": ["Cute! 🥰", "Aww", "So adorable"],
+            "zh": ["好可爱～🥰", "嘻嘻", "也太萌了"],
+            "ja": ["可愛い〜🥰", "うふふ", "それ良い"],
+        },
+        # P1.5+D1 (2026-05-04)：扩 3 类
+        "awkward": {
+            "en": ["Lol awkward 😅", "Oof haha", "Hehe", "Hahaha I'm dying 😂"],
+            "zh": ["哎呀有点尴尬 😅", "嘿嘿", "哈哈哈这表情", "笑死我了 😂"],
+            "ja": ["あー恥ずかしい😅", "あちゃー", "うふふ", "笑った笑った😂"],
+        },
+        "wink": {
+            "en": ["Hehe 😉", "Oh you 😏", "I see what you did", "Hahaha okay"],
+            "zh": ["嘿嘿 😉", "你～😏", "我懂的哈哈", "嘻嘻"],
+            "ja": ["うふふ😉", "もう〜😏", "わかってるよ", "あはは"],
+        },
+        "thinking": {
+            "en": ["Hmm let me think 🤔", "Good question", "Hmm hmm", "Yeah I get you"],
+            "zh": ["嗯～让我想想 🤔", "这个问题嘛", "嗯嗯", "我明白你意思"],
+            "ja": ["うーん🤔", "そうだなー", "考えてみる", "なるほどね"],
+        },
+    }
+
+    @classmethod
+    def _classify_sticker_category(
+        cls, desc: str, content: str = "",
+    ) -> Optional[str]:
+        """根据 peer_msg.desc + content 关键词分类 sticker。
+        命中返回 category name；不命中返回 None 让上层走通用模板。
+
+        P1.5+D1 (2026-05-04)：从 5 类扩到 8 类（加 awkward/wink/thinking）。
+        优先级：love > happy > wink > cute > thinking > awkward > sad > angry。
+        排序按"语义精确度高的在前"——爱心/wink 这类强信号优先识别，sad/angry
+        是较弱兜底。
+        """
+        text = ((desc or "") + " " + (content or "")).lower()
+        if not text.strip():
+            return None
+        for cat in (
+            "love", "happy", "wink", "cute", "thinking", "awkward", "sad", "angry",
+        ):
+            kws = cls._STICKER_CATEGORY_KEYWORDS.get(cat, ())
+            if any(kw.lower() in text for kw in kws):
+                return cat
+        return None
+
+    # P1.5+D2 (2026-05-04)：peer 主动让你看图/视频的关键词词典，多语种
+    # 命中时升级 fusion_hint 为"对方主动让你看"提示，让 LLM 倾向具体回应内容
+    # （例：是本人自拍 → 夸；是宠物 → 评价宠物；是商品 → 评价；不是预期内容 → 调侃）
+    _MEDIA_SHOW_INTENT_KEYWORDS: Tuple[str, ...] = (
+        # 中文（简繁）
+        "看看", "看一下", "瞧瞧", "瞅瞅", "给你看", "我发", "拍了", "拍的",
+        "晒一下", "分享给你", "你看", "看下", "睇下", "睇睇",
+        # English
+        "show you", "show me", "look at this", "look at that", "check this",
+        "check it out", "let me show", "picture of", "send you a", "sent you a",
+        "i'll send", "ill send", "wanna see", "want to see", "wanna show",
+        # 日本語
+        "見せる", "見せて", "送るね", "撮った", "撮って", "写真撮", "シェア",
+        "見て見て", "見てて", "見てみて",
+        # 韓国語
+        "보여", "찍었", "사진 보내", "보낼게",
+    )
+
+    def _build_media_fusion_hint(
+        self,
+        chat_key: str,
+        peer_msg: PeerMessage,
+        extra: Optional[List[Dict[str, Any]]] = None,
+    ) -> Optional[str]:
+        """P1-A2 + P1.5+D2 (2026-05-04)：为媒体消息构造"上一句 peer 文本"上下文提示。
+
+        优先级：
+          1. 本轮 extra_peers 里有 text 类 → 返回 None（让 P2-2 多消息合并自然带上下文，避免冗余）
+          2. chat_state.last_peer_text 含 "show me / 看看 / 写真撮" 等关键词
+             → 返回升级提示："对方主动让你看（前文：'X'），高概率是本人/相关图片，
+                倾向具体回应内容"
+          3. chat_state.last_peer_text 含其他普通文本 → 返回精简提示
+          4. 都没有 → None
+        失败/异常静默返回 None，不阻塞主流程。
+        """
+        try:
+            extra = extra or []
+            for pm_d in extra:
+                if not isinstance(pm_d, dict):
+                    continue
+                if str(pm_d.get("kind") or "").strip().lower() == "text":
+                    txt = str(pm_d.get("content") or "").strip()
+                    if txt:
+                        return None  # 让 P2-2 合并自然带，避免重复
+            chat_state = self._state.get_chat_state(chat_key) or {}
+            last_peer = str(chat_state.get("last_peer_text") or "").strip()
+            if not last_peer:
+                return None
+            # 跳过纯媒体占位（如 "[图片] xxx" 上次也是图）
+            if last_peer.startswith("[") and "]" in last_peer[:10]:
+                return None
+            short = last_peer[:80]
+            if len(last_peer) > 80:
+                short += "…"
+            low = last_peer.lower()
+            if any(kw in low for kw in self._MEDIA_SHOW_INTENT_KEYWORDS):
+                return (
+                    f'对方主动让你看（前文："{short}"），'
+                    f'高概率是相关/本人内容，倾向直接回应你看到的具体内容'
+                )
+            return f'上一句对方说："{short}"'
+        except Exception:
+            return None
+
+    # ── P2 (2026-05-04) sticker reply modality 决策器 ───────────────
+    def _sticker_24h_count(self, chat_key: str) -> int:
+        """统计 chat 最近 24h 的 sticker 发送次数（含 dry_run 模拟）。"""
+        now = time.time()
+        bucket = self._sticker_send_history.get(chat_key) or []
+        # 清掉超 24h 的旧记录
+        bucket = [t for t in bucket if now - t < 86400]
+        self._sticker_send_history[chat_key] = bucket
+        return len(bucket)
+
+    def _record_sticker_decision(self, chat_key: str) -> None:
+        """记录一次 sticker 决策（成功命中概率，dry_run / 真发都计入）。"""
+        bucket = self._sticker_send_history.setdefault(chat_key, [])
+        bucket.append(time.time())
+
+    def _infer_sticker_cat_from_reply(self, reply_text: str) -> Optional[str]:
+        """从 reply 文本反推情绪类——LLM 写了什么样的 reply，就配什么 sticker。
+
+        优先级：emoji > _STICKER_CATEGORY_KEYWORDS（与 peer sticker 分类共用词典）
+        """
+        if not reply_text:
+            return None
+        text = reply_text.lower()
+        # emoji 直接命中（高置信）
+        emoji_map = (
+            ("love", ("❤", "💕", "💖", "🥰", "😍", "😘", "💗", "💞")),
+            ("happy", ("😂", "🤣", "😆", "😄", "😁", "😺", "🤪")),
+            ("cute", ("🥰", "🌸", "🐱", "🐶", "🥺")),
+            ("wink", ("😉", "😏", "😜", "😋", "🤭")),
+            ("thinking", ("🤔", "💭", "🧐")),
+            ("sad", ("😢", "😭", "💔", "😔", "😞")),
+            ("awkward", ("😅", "🥲", "😬", "🙃", "🤦", "💦")),
+            ("angry", ("😠", "😡", "💢", "🤬")),
+        )
+        for cat, emojis in emoji_map:
+            if any(e in reply_text for e in emojis):
+                return cat
+        # 关键词兜底（沿用 sticker 分类词典）
+        for cat, kws in self._STICKER_CATEGORY_KEYWORDS.items():
+            if any(kw.lower() in text for kw in kws):
+                return cat
+        return None
+
+    def _pick_sticker_file(
+        self,
+        category: str,
+        asset_root: Path,
+        *,
+        exclude_recent: Optional[List[str]] = None,
+    ) -> Optional[str]:
+        """从 category 目录随机选一张 sticker 文件。
+
+        P2++F3 (2026-05-04)：exclude_recent 排除最近用过的（per-chat 去重，
+        避免连续发同一张）。如果 cat 内全部被排除（< 3 张时可能发生），fallback
+        到全部候选。
+        """
+        cat_dir = asset_root / category
+        if not cat_dir.exists() or not cat_dir.is_dir():
+            return None
+        files = list(cat_dir.glob("*.png")) + list(cat_dir.glob("*.webp"))
+        if not files:
+            return None
+        if exclude_recent:
+            exclude_set = {str(p) for p in exclude_recent}
+            filtered = [f for f in files if str(f) not in exclude_set]
+            if filtered:
+                files = filtered
+            # 否则保留全部（cat 内文件少于 recent 长度时的兜底）
+        import random as _rd
+        return str(_rd.choice(files))
+
+    def _decide_reply_modality(
+        self,
+        *,
+        reply_text: str,
+        peer_msg: PeerMessage,
+        peer_sticker_cat: Optional[str],
+        multi_peer_count: int,
+        chat_key: str,
+        caption: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """决定本条 reply 的 modality（text / sticker / text+sticker）。
+
+        返回 dict:
+          {
+            "modality": "text" | "sticker" | "text+sticker",
+            "sticker_path": str | None,
+            "sticker_cat": str | None,
+            "reason": str,           # 决策原因，进 hint
+            "dry_run": bool,
+            "would_send": bool,      # dry_run 模式下是否本应发送
+          }
+        失败一律降级 text。
+        """
+        cfg = self._cfg.get("sticker_reply") or {}
+        if not isinstance(cfg, dict) or not cfg.get("enabled", False):
+            return {"modality": "text", "reason": "sticker_disabled",
+                    "sticker_path": None, "sticker_cat": None,
+                    "dry_run": True, "would_send": False}
+
+        try:
+            dry_run = bool(cfg.get("dry_run", True))
+            asset_root = Path(cfg.get("asset_root") or "config/stickers")
+            cooldown = float(cfg.get("cooldown_after_sec", 90) or 0)
+            max_per_24h = int(cfg.get("max_per_chat_per_24h", 12) or 0)
+            probs = cfg.get("probabilities") or {}
+            now = time.time()
+
+            # 1) cooldown 检查
+            bucket = self._sticker_send_history.get(chat_key) or []
+            if bucket and (now - bucket[-1]) < cooldown:
+                wait = cooldown - (now - bucket[-1])
+                return {"modality": "text",
+                        "reason": f"cooldown:{wait:.0f}s",
+                        "sticker_path": None, "sticker_cat": None,
+                        "dry_run": dry_run, "would_send": False}
+
+            # 2) 24h cap 检查
+            cnt_24h = self._sticker_24h_count(chat_key)
+            if max_per_24h > 0 and cnt_24h >= max_per_24h:
+                return {"modality": "text",
+                        "reason": f"24h_cap:{cnt_24h}/{max_per_24h}",
+                        "sticker_path": None, "sticker_cat": None,
+                        "dry_run": dry_run, "would_send": False}
+
+            # 3) 按 peer_kind 选概率 + 候选 cat + 拟定 modality
+            peer_kind = (peer_msg.kind or "").lower() if peer_msg else "text"
+            if peer_kind in ("sticker", "animated_sticker"):
+                prob = float(probs.get("peer_sticker_reply", 0.30) or 0)
+                target_cat = peer_sticker_cat or "happy"
+                modality = "sticker"
+            elif peer_kind in ("image", "video", "gif"):
+                prob = float(probs.get("peer_image_video", 0.0) or 0)
+                target_cat = "happy"
+                modality = "text"
+            else:  # text / link / other
+                if multi_peer_count and multi_peer_count >= 3:
+                    prob = float(probs.get("multi_peer_burst", 0.15) or 0)
+                else:
+                    prob = float(probs.get("peer_text_attached", 0.05) or 0)
+                # P2++H1 (2026-05-04) 修反转 bug：reply_text 优先（bot 自己写
+                # 的情绪 = bot 应表达的情绪），caption 仅作 fallback（peer 内容，
+                # 不直接反映 bot 情绪）。例：caption "thinking pose" + reply
+                # "哈哈太搞笑" → bot 应该用 happy 类 sticker（自己的情绪），
+                # 而不是 thinking 类（peer 的内容）。
+                target_cat = (
+                    self._infer_sticker_cat_from_reply(reply_text)
+                    or self._infer_sticker_cat_from_reply(caption or "")
+                    or "happy"
+                )
+                modality = "text+sticker"
+
+            # 4) 概率过滤
+            if prob <= 0:
+                return {"modality": "text",
+                        "reason": f"prob_zero:peer_kind={peer_kind}",
+                        "sticker_path": None, "sticker_cat": None,
+                        "dry_run": dry_run, "would_send": False}
+            import random as _rd
+            roll = _rd.random()
+            if roll >= prob:
+                return {"modality": "text",
+                        "reason": f"prob_skip:{prob:.0%}_roll={roll:.2f}",
+                        "sticker_path": None, "sticker_cat": None,
+                        "dry_run": dry_run, "would_send": False}
+
+            # 5) 选 sticker 文件（P2++F3：排除该 chat 最近 3 张，避免重复）
+            recent = self._sticker_recent_per_chat.get(chat_key) or []
+            sticker_path = self._pick_sticker_file(
+                target_cat, asset_root, exclude_recent=recent,
+            )
+            if not sticker_path:
+                return {"modality": "text",
+                        "reason": f"asset_missing:cat={target_cat}",
+                        "sticker_path": None, "sticker_cat": None,
+                        "dry_run": dry_run, "would_send": False}
+
+            # 6) 命中 → 记一笔（dry_run 也算，让 cooldown / 24h cap / recent 真实生效）
+            self._record_sticker_decision(chat_key)
+            recent_bucket = self._sticker_recent_per_chat.setdefault(chat_key, [])
+            recent_bucket.append(sticker_path)
+            if len(recent_bucket) > self._sticker_recent_max:
+                recent_bucket.pop(0)
+            return {
+                "modality": modality,
+                "sticker_path": sticker_path,
+                "sticker_cat": target_cat,
+                "reason": f"hit:p={prob:.0%}_cat={target_cat}_kind={peer_kind}",
+                "dry_run": dry_run,
+                "would_send": True,
+            }
+        except Exception as ex:
+            logger.debug("[messenger_rpa] modality decision error: %s", ex,
+                         exc_info=True)
+            return {"modality": "text", "reason": f"error:{type(ex).__name__}",
+                    "sticker_path": None, "sticker_cat": None,
+                    "dry_run": True, "would_send": False}
+
+    _MEDIA_ACK_TEMPLATES: Dict[str, Dict[str, List[str]]] = {
         "image": {
-            "en": "Got your photo — let me take a look and get back to you 📷",
-            "zh": "收到你的照片啦，我看看然后回你～📷",
-            "ja": "写真ありがとう。ちゃんと見てから返すね📷",
+            "en": [
+                "Got your photo - let me take a look 📷",
+                "Nice pic! Let me check it out 👀",
+                "Just got your photo, looking now~",
+                "Photo received! Give me a sec 📸",
+                "Oh nice, let me see 🙂",
+            ],
+            "zh": [
+                "收到你的照片啦，我看看然后回你～📷",
+                "哇，照片我看看～",
+                "收到啦，等下细看 👀",
+                "图片收到，让我瞧瞧 📸",
+                "嗯嗯，我来看一下哈～",
+            ],
+            "ja": [
+                "写真ありがとう。ちゃんと見てから返すね📷",
+                "お、見てみるね〜",
+                "写真届いた、ちょっと見させて👀",
+                "おっ、ちょっと見るね",
+                "ありがと、確認してみる📸",
+            ],
         },
         "sticker": {
-            "en": "Haha, love that one 😄",
-            "zh": "哈哈这个贴纸我爱了 😄",
-            "ja": "そのスタンプ、ちょっと可愛いね😄",
+            "en": [
+                "Haha, love that one 😄",
+                "Lol nice sticker 😆",
+                "Cute! 🥰",
+                "Hahaha thats good",
+                "Lol 😂",
+            ],
+            "zh": [
+                "哈哈这个贴纸我爱了 😄",
+                "笑死 😆",
+                "好可爱～🥰",
+                "哈哈哈这个好",
+                "嘻嘻 😊",
+            ],
+            "ja": [
+                "そのスタンプ、ちょっと可愛いね😄",
+                "笑った😆",
+                "可愛い〜🥰",
+                "ええ感じやんw",
+                "うふふ😊",
+            ],
+        },
+        # P1.5-B (2026-05-04)：video / gif / animated_sticker 专属 fast-ack 模板池
+        "video": {
+            "en": [
+                "Watching your video now 🎬",
+                "Oh nice, let me play it 📹",
+                "Got the video, hang on~",
+                "Press play 👀, give me a sec",
+                "Video received, watching!",
+            ],
+            "zh": [
+                "视频收到啦，我看看～🎬",
+                "哇视频，等我点开 📹",
+                "好的好的，我播一下",
+                "嗯嗯，让我看完再回 👀",
+                "视频收到，正在看～",
+            ],
+            "ja": [
+                "動画ありがとう、再生してみるね🎬",
+                "お、見てみる📹",
+                "動画届いた、ちょっと見させて",
+                "了解、再生中～👀",
+                "あとで返すね、まず見るね",
+            ],
+        },
+        "gif": {
+            "en": [
+                "Lol nice GIF 🤣",
+                "Hahaha that GIF tho 😆",
+                "Omg this is gold",
+                "Hahaha I needed that",
+                "Lmao perfect reaction",
+            ],
+            "zh": [
+                "哈哈这个 GIF 太搞笑了 🤣",
+                "笑死 😆",
+                "这个动图绝了哈哈",
+                "哈哈哈我喜欢",
+                "笑喷，这个 reaction 满分",
+            ],
+            "ja": [
+                "このGIFｗｗ🤣",
+                "ウケる😆",
+                "それ最高ｗ",
+                "笑った笑った",
+                "ナイスリアクション",
+            ],
+        },
+        "animated_sticker": {
+            "en": [
+                "Aw that animated one 🥰",
+                "Cute moving sticker!",
+                "Haha I see what you did there 😆",
+                "Love the animation",
+            ],
+            "zh": [
+                "动起来好可爱 🥰",
+                "这个动图贴纸不错",
+                "嘻嘻 😆",
+                "动着看更可爱～",
+            ],
+            "ja": [
+                "動くやつ可愛い🥰",
+                "それ動くんだ",
+                "うふふ😆",
+                "動いてるの良いね",
+            ],
         },
         "voice": {
-            "en": "Heard your voice note, give me a sec to listen properly 🎙️",
-            "zh": "收到你的语音，我等下认真听一遍再回你哈 🎙️",
-            "ja": "ボイスありがとう。ちゃんと聞いてから返すね🎙️",
+            "en": [
+                "Heard your voice note, give me a sec 🎙️",
+                "Voice note received, listening now~",
+                "Got it, let me hear it 🎧",
+                "On it, give me a moment to play it back",
+            ],
+            "zh": [
+                "收到你的语音，我等下认真听一遍再回你哈 🎙️",
+                "好的，听一下你的语音～",
+                "收到收到，我听一下 🎧",
+                "嗯嗯，等我听完",
+            ],
+            "ja": [
+                "ボイスありがとう。ちゃんと聞いてから返すね🎙️",
+                "了解、ちょっと聞かせて〜",
+                "おけ、聞いてみる 🎧",
+                "ボイス届いた、ちょっと再生させて",
+            ],
         },
         "file": {
-            "en": "Thanks for the file, I'll check it on my end 📎",
-            "zh": "收到文件啦，我这边看一下～📎",
-            "ja": "ファイルありがとう。こちらで確認してみるね📎",
+            "en": [
+                "Thanks for the file 📎",
+                "Got the file, taking a look 📂",
+                "Received, will review now",
+            ],
+            "zh": [
+                "收到文件啦，我这边看一下～📎",
+                "嗯嗯，文件我打开看看 📂",
+                "收到，等下我看",
+            ],
+            "ja": [
+                "ファイルありがとう。確認してみるね📎",
+                "ファイル届いた、開いてみる📂",
+                "了解、見てみるね",
+            ],
         },
         "link": {
-            "en": "Got the link, opening it now 🔗",
-            "zh": "链接收到了，我打开看看 🔗",
-            "ja": "リンクありがとう。開いて見てみるね🔗",
+            "en": [
+                "Got the link, opening it now 🔗",
+                "Cool link, checking it out",
+                "Received, opening~",
+            ],
+            "zh": [
+                "链接收到了，我打开看看 🔗",
+                "好的，我点进去看看",
+                "嗯嗯，打开了～",
+            ],
+            "ja": [
+                "リンクありがとう。開いて見てみるね🔗",
+                "了解、開いてみる〜",
+                "リンク届いた、見てみるね",
+            ],
         },
         "other": {
-            "en": "Got it, let me respond properly in a bit 👀",
-            "zh": "收到啦，我等下好好回你 👀",
-            "ja": "受け取ったよ。少し見てからちゃんと返すね👀",
+            "en": [
+                "Got it, let me respond properly in a bit 👀",
+                "Received, give me a sec",
+                "Noted, let me get back to you~",
+            ],
+            "zh": [
+                "收到啦，我等下好好回你 👀",
+                "嗯嗯，等我回你",
+                "好的，稍等",
+            ],
+            "ja": [
+                "受け取ったよ。少し見てからちゃんと返すね👀",
+                "了解、ちょっと待って",
+                "うん、後でゆっくり返すね",
+            ],
         },
     }
 
@@ -5740,7 +10304,11 @@ class MessengerRpaRunner:
 
         kind = str(peer_msg.kind or "").lower()
         # link 本身文本有信息价值，AI 通常能回好；只对无文本媒体启用
-        media_kinds = {"image", "sticker", "voice", "file", "video", "other"}
+        # P1.5-B (2026-05-04)：补 gif / animated_sticker
+        media_kinds = {
+            "image", "sticker", "voice", "file", "video", "other",
+            "gif", "animated_sticker",
+        }
         # 允许 config 开关是否覆盖 link
         if bool(self._cfg.get("media_include_links", False)):
             media_kinds.add("link")
@@ -5755,27 +10323,98 @@ class MessengerRpaRunner:
         ):
             return None, ""
 
-        # 语种：沿用 language_alignment 语义 + 历史 peer 文本
-        lang_mode = str(
-            self._cfg.get("language_alignment", "english_fallback_only")
-        ).strip().lower()
-        preferred_lang = "en"
-        if lang_mode == "auto":
-            raw = (peer_msg.raw or "") + " " + (peer_msg.desc or "")
-            ai = getattr(self._sm, "ai_client", None)
-            detected = _detect_peer_lang(raw, ai_client=ai)
-            if detected in ("zh", "ja"):
-                preferred_lang = detected
+        # 语种：优先使用 force / profile / 历史回复语言，再 fallback 到 detection
+        # Step-1: global forced language
+        _force = str(self._cfg.get("force_reply_lang") or "").strip().lower()
+        if _force and _force not in ("auto", "detect", ""):
+            preferred_lang = _force
         else:
-            default_lang = str(self._cfg.get("default_reply_lang") or "").lower()
-            if default_lang in ("zh", "ja"):
-                preferred_lang = default_lang
-        # 设备发不了 unicode 时，中文模板会走 ASCII guard 降级为审批；
-        # 默认还是给英文以避免 approve 堆积
+            # Step-2: per-profile forced language
+            _profile_lang = ""
+            try:
+                _profiles = self._cfg.get("reply_profiles") or {}
+                if isinstance(_profiles, dict):
+                    _default_p = _profiles.get("default") or ""
+                    _profs = _profiles.get("profiles") or []
+                    for _pp in (_profs if isinstance(_profs, list) else []):
+                        if isinstance(_pp, dict) and _pp.get("id") == _default_p:
+                            _profile_lang = str(_pp.get("language") or "").strip().lower()
+                            break
+            except Exception:
+                pass
+            if _profile_lang and _profile_lang not in ("auto", "detect", ""):
+                preferred_lang = _profile_lang
+            else:
+                # Step-3: previous reply lang for this chat
+                chat_key = self._chat_key_for(chat_name)  # P0-E2 OCR 容忍
+                _prev_lang = self._previous_reply_lang(chat_key)
+                if _prev_lang:
+                    preferred_lang = _prev_lang
+                else:
+                    # Step-4: language detection (auto mode) or default_reply_lang
+                    lang_mode = str(
+                        self._cfg.get("language_alignment", "english_fallback_only")
+                    ).strip().lower()
+                    default_lang = str(
+                        self._cfg.get("default_reply_lang") or ""
+                    ).lower()
+                    if lang_mode == "auto":
+                        raw = (peer_msg.raw or "") + " " + (peer_msg.desc or "")
+                        ai = getattr(self._sm, "ai_client", None)
+                        detected = _detect_peer_lang(raw, ai_client=ai)
+                        if detected in ("zh", "ja", "ko"):
+                            preferred_lang = detected
+                        elif default_lang:
+                            preferred_lang = default_lang
+                        else:
+                            preferred_lang = "en"
+                    elif default_lang:
+                        preferred_lang = default_lang
+                    else:
+                        preferred_lang = "en"
         lang = preferred_lang
 
-        tbl = self._MEDIA_ACK_TEMPLATES.get(kind) or self._MEDIA_ACK_TEMPLATES["other"]
-        reply = tbl.get(lang) or tbl.get("en") or "Got it!"
+        # P4-4 (2026-05-04)：模板配置化——优先读 config.yaml 的
+        # messenger_rpa.media_ack_templates，运营改文案不用改代码。
+        # config 结构与 _MEDIA_ACK_TEMPLATES 同：dict[kind][lang] = list[str]
+        # （也兼容 dict[kind][lang] = str 单条）。refresh_cfg 每轮调用让改动
+        # 自动生效，无需重启。
+        cfg_tbl = self._cfg.get("media_ack_templates") or {}
+        # P4-3 (2026-05-04) sticker 风格化：根据 peer_msg.desc/content keyword
+        # 分类，命中类别用专属模板池（笑/爱心/哀伤/愤怒/可爱）。失败退回通用。
+        sticker_cat = None
+        if kind == "sticker":
+            sticker_cat = self._classify_sticker_category(
+                getattr(peer_msg, "desc", "") or "",
+                getattr(peer_msg, "content", "") or "",
+            )
+            if sticker_cat:
+                logger.info(
+                    "[messenger_rpa] sticker_category=%s desc=%r → 风格化模板",
+                    sticker_cat, (getattr(peer_msg, "desc", "") or "")[:80],
+                )
+        if sticker_cat and sticker_cat in self._STICKER_CATEGORY_TEMPLATES:
+            tbl = self._STICKER_CATEGORY_TEMPLATES[sticker_cat]
+        elif isinstance(cfg_tbl, dict) and isinstance(cfg_tbl.get(kind), dict):
+            tbl = cfg_tbl[kind]
+        else:
+            tbl = self._MEDIA_ACK_TEMPLATES.get(kind) or self._MEDIA_ACK_TEMPLATES["other"]
+        # P4-1: 每个 lang 一组模板列表，随机挑一条避免每次相同（"重复套话"感）
+        candidates = tbl.get(lang) or tbl.get("en") or ["Got it!"]
+        if isinstance(candidates, str):
+            reply = candidates
+        else:
+            import random as _rd
+            # 避开上一条 last_reply 重复
+            try:
+                _ck_pa = self._chat_key_for(chat_name)
+                _prev_reply_pa = (
+                    self._state.get_chat_state(_ck_pa).get("last_reply") or ""
+                ).strip()
+            except Exception:
+                _prev_reply_pa = ""
+            pool = [c for c in candidates if c.strip() != _prev_reply_pa] or list(candidates)
+            reply = _rd.choice(pool)
         logger.info(
             "[messenger_rpa] media ack chat=%s kind=%s policy=%s lang=%s → %r",
             chat_name, kind, policy, lang, reply[:60],
@@ -5993,6 +10632,15 @@ class MessengerRpaRunner:
                 except Exception:
                     pass
         result["total_ms"] = int(round((time.monotonic() - t0) * 1000))
+        # ★ 统一收尾日志：所有 run_once 出口都经过这里
+        _step = result.get("step", "?")
+        _ok = result.get("ok")
+        _chat = result.get("chat_name", "")
+        _err = (result.get("error") or "")[:100]
+        logger.warning(
+            "[messenger_rpa] ── run_once 结束 step=%s ok=%s chat=%r ms=%d err=%s",
+            _step, _ok, _chat, result["total_ms"], _err or "-",
+        )
         try:
             self._state.append_run(result)
         except Exception:

@@ -195,7 +195,6 @@ line_rpa:
   # 近期 run 历史保留上限（SQLite，用于 Web 卡片"会话流"）
   recent_runs_buffer: 500
 
-
 # Facebook Messenger 客户端 RPA（ADB + Vision；与 Telegram/LINE 共用 Skill/AI）
 messenger_rpa:
   enabled: false
@@ -209,6 +208,24 @@ messenger_rpa:
   max_interval_sec: 60.0
   backoff_multiplier: 1.25
   max_inbox_per_run: 2
+  # run_once 开始位置：
+  # - smart_current_thread: 已经在目标聊天页时直接读取并回复
+  # - force_chats: 每次强制回 Chats 列表扫描
+  run_once_start_mode: smart_current_thread
+  thread_title_vision_fallback: true
+  # MIUI lowmemkill 时 uiautomator dump 返回 "Killed"，XML/Vision/搜索三个
+  # title 校验 fallback 全部失败；UI XML tap 已经像素精确点中目标行，此时
+  # 信任 target.name 而不阻塞发送（true=系统能继续工作；false=严格校验）
+  trust_xml_tap_target_name: true
+  # P0-A peer message quiet window：生成 LLM 回复前等一小段，给对方把后续消息
+  # 发完，避免"对方连发→机器人对每条单独回复"的重复。peer_typing 探测到打字
+  # 时会自动延长到 detector 建议时间（封顶 max_sec）。设 0 即禁用。
+  peer_message_quiet_window_sec: 1.8
+  peer_message_quiet_window_max_sec: 10.0
+  pre_thread_self_xml_guard: true
+  stale_peer_after_self_guard: true
+  stale_peer_after_self_window_sec: 900
+  stale_peer_after_self_overlap_threshold: 0.45
   reply_mode: auto
   default_reply_lang: zh
   language_alignment: auto
@@ -217,6 +234,93 @@ messenger_rpa:
   use_adb_keyboard: true
   adb_keyboard_ime: com.android.adbkeyboard/.AdbIME
   adb_keyboard_package: com.android.adbkeyboard
+  thread_self_media_xml_guard: true
+  audio_pipeline:
+    enabled: false
+    backend: faster_whisper
+    model_size: base
+    model: whisper-1
+    device: cpu
+    compute_type: int8
+    language: auto
+    download_root: models/whisper
+    fallback_enabled: false
+    fallback_backend: openai
+    fallback_model: whisper-1
+    min_text_chars: 3
+    fallback_on_low_confidence: false
+    min_avg_logprob: -0.8
+    min_language_probability: 0.35
+    cb_cooldown_sec: 300
+  voice_input:
+    enabled: false
+    prefer_transcribe: true
+    capture_mode: run_as        # run_as | helper_session | helper_app | screenrecord | external_file | ack_only
+    record_sec: 8
+    timeout_sec: 30
+    fallback: ack_and_approve
+    helper_apk_path: tools/audio_capture_helper/build/MrpAudioBridge.apk
+    helper_package: com.codex.mrpaudiobridge
+    helper_auto_install: true
+    helper_wait_sec: 12
+    silence_max_abs: 120
+    find_voice_scroll_attempts: 2
+    # voice_tap_xy: [158, 374]  # 可选：指定播放按钮坐标，留空则自动识别
+    audio_pipeline:
+      enabled: false
+      backend: faster_whisper   # faster_whisper | openai | disabled
+      model_size: base
+      model: whisper-1
+      device: cpu
+      compute_type: int8
+      language: auto
+      download_root: models/whisper
+      fallback_enabled: false
+      fallback_backend: openai
+      fallback_model: whisper-1
+      min_text_chars: 3
+      fallback_on_low_confidence: false
+      min_avg_logprob: -0.8
+      min_language_probability: 0.35
+      cb_cooldown_sec: 300
+  voice_output:
+    enabled: false
+    mode: approval_only         # approval_only | text_plus_voice | auto_voice
+    trigger: when_peer_voice
+    backend: edge_tts           # edge_tts | pyttsx3 | openai | disabled
+    voice: ja-JP-NanamiNeural
+    model: gpt-4o-mini-tts
+    format: mp3
+    out_dir: tmp_voice_replies
+    voice_profile:
+      enabled: false
+      owner_consent: true       # 仅允许使用本人/已授权声音
+      speaker_id: my_voice
+      reference_audio_path: D:/workspace/telegram-mtproto-ai/voice_samples/my_voice.wav
+      backend: voice_clone_command
+      # 优先使用 command_args，避免 Windows 路径/引号问题；必须输出到 {out}
+      command_args: [python, D:/workspace/telegram-mtproto-ai/tools/qwen_tts_wrapper.py, --region, cn, --text, "{text}", --out, "{out}", --voice-profile, D:/workspace/telegram-mtproto-ai/voice_samples/qwen_my_voice.json, --language-type, Japanese]
+      # command_template 作为兼容旧脚本的 shell 字符串方案
+      # command_template: python tools/glm_tts_infer.py --text {text} --ref {reference_audio} --out {out}
+      command_timeout_sec: 120
+    timeout_sec: 30
+    max_seconds: 20
+    max_text_chars: 220
+    send_text_summary: true
+    night_quiet: true
+    fallback: text
+    auto_find_share_send_button: true
+    auto_search_share_recipient: true
+    send_audit_dir: tmp_messenger_rpa
+    # auto_voice 模式下用于 Messenger 分享页；默认用 chat_name 从 UI XML 自动找 Send 按钮
+    # 若 UI XML 在部分手机上不可用，会搜索联系人并用截图识别蓝色 Send 按钮
+    # share_recipient_name: Victor Zan
+    # share_recipient_tap_xy: [600, 640]
+    # share_send_tap_xy: [616, 634]
+  mobile_auto:
+    root_path: D:/workspace/mobile-auto0423
+    api_base: http://127.0.0.1:18080
+    openclaw_db_path: D:/workspace/mobile-auto0423/data/openclaw.db
   # Messenger 多人设 / 语言锁。按联系人名或 chat_key 命中；未命中走 default。
   reply_profiles:
     default: warm_companion
@@ -365,6 +469,10 @@ ai:
   temperature: 0.7                # 温度参数 (0.0-1.0)
   max_tokens: 1024                # 最大回复token数
   timeout: 30                     # API调用超时(秒)
+  # P1-3：会话历史轮数。10 偏短，话题切换时模型容易忘记上下文导致跳话题；
+  # 16 是质量/成本平衡点（多 60% token 但显著改善连贯性）。配合 _build_contents
+  # 的字符上限 12000 双重截断，不会超长。
+  max_conversation_history: 16
   # 是否在实时通道数据里向模型注入「费率=」行（默认 false；对客不宣读具体费率数值）
   channel_status_include_fee: false
   # 后台人设注入：full 完整 | compact 精简（减与域 system_prompt 重复）| none 不注入（仅用域提示）
@@ -547,3 +655,16 @@ contacts:
   line_ids_by_account:               # 每个 Messenger 账号对应的 LINE id
     # acc-A: "@line_handle_A"
     # acc-B: "@line_handle_B"
+
+# Mobile Bridge：mobile-auto0423 ↔ telegram-mtproto-ai 双向同步
+# 前置条件：contacts.enabled=true（bridge 依赖 contacts 子系统）
+# Mobile → Telegram: 轮询 openclaw.db 的 lead_handoffs，同步到 contacts.db
+# Telegram → Mobile: Web Admin 操作（ack/complete/reject）通过 mobile HTTP API 回写
+mobile_bridge:
+  # openclaw_db_path: ../mobile-auto0423/data/openclaw.db
+  # 留空时自动推断：<telegram-config-dir>/../../mobile-auto0423/data/openclaw.db
+  openclaw_db_path: ""
+  # mobile-auto0423 的 API 地址（默认端口 18080，可通过 OPENCLAW_PORT 环境变量覆盖）
+  mobile_api_base: "http://127.0.0.1:18080"
+  # 轮询间隔（秒），建议 10~60
+  poll_interval_sec: 15

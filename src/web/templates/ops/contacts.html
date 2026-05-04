@@ -35,13 +35,41 @@ a:hover{text-decoration:underline}
 .funnel-count{flex:0 0 44px;text-align:right;color:#111;font-weight:600;padding-left:10px}
 .funnel-conv{flex:0 0 56px;text-align:right;color:#888;font-size:11px;padding-left:8px}
 .funnel-lost .funnel-fill{background:#dc2626!important}
+/* ── 时间线 Drawer ── */
+#drawer-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:100}
+#drawer{position:fixed;right:0;top:0;height:100%;width:420px;max-width:95vw;background:#fff;box-shadow:-4px 0 24px rgba(0,0,0,.15);z-index:101;display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s ease}
+#drawer.open{transform:translateX(0)}
+.drawer-head{padding:16px 18px 12px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:10px}
+.drawer-head h2{font-size:15px;margin:0;flex:1}
+.drawer-close{background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;padding:0 4px}
+.drawer-body{flex:1;overflow-y:auto;padding:14px 18px}
+.tl-item{display:flex;gap:10px;margin-bottom:14px}
+.tl-dot{width:10px;height:10px;border-radius:50%;background:#d1d5db;flex-shrink:0;margin-top:4px}
+.tl-dot.mobile{background:#7c3aed}
+.tl-dot.regular{background:#2563eb}
+.tl-content{flex:1;min-width:0}
+.tl-type{font-size:12px;font-weight:700;color:#374151}
+.tl-type.mobile-event{color:#7c3aed}
+.tl-ts{font-size:11px;color:#9ca3af;margin-left:6px}
+.tl-payload{font-size:11px;color:#555;margin-top:3px;background:#f8fafc;border-radius:4px;padding:5px 8px;word-break:break-all}
+.tl-snip{font-style:italic;color:#374151;margin-top:2px;font-size:11px}
+.tl-empty{color:#9ca3af;font-size:13px;text-align:center;margin-top:30px}
+tr.clickable:hover td{background:#eff6ff;cursor:pointer}
+/* ── 搜索框 ── */
+.search-bar{display:flex;gap:8px;margin-bottom:14px;align-items:center}
+.search-bar input{flex:1;padding:7px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;outline:none}
+.search-bar input:focus{border-color:#2563eb;box-shadow:0 0 0 2px rgba(37,99,235,.12)}
+.search-hint{font-size:12px;color:#94a3b8}
+.result-badge{display:inline-block;padding:2px 8px;background:#e0f2fe;color:#0369a1;border-radius:4px;font-size:12px;font-weight:600;margin-left:8px}
+.nav a.active{font-weight:700;color:#1e3a8a;border-bottom:2px solid #2563eb;padding-bottom:2px}
 </style></head>
 <body>
-<div class="nav">
-  <a href="/ops/contacts">联系人</a>
-  <a href="/ops/merge-reviews">合并审核</a>
+<!-- NAV_INJECT -->
+<h1>Contacts <span id="result-badge" class="result-badge" style="display:none"></span></h1>
+<div class="search-bar">
+  <input id="search-input" type="search" placeholder="搜索联系人名称 / Canonical ID / Contact ID…" oninput="onSearchInput(this.value)" onkeydown="if(event.key==='Enter')doSearch()">
+  <span class="search-hint" id="search-hint"></span>
 </div>
-<h1>Contacts</h1>
 <div class="stats" id="stats"></div>
 <div class="funnel-wrap" id="funnel-wrap" style="display:none">
   <h3>漏斗阶段分布（快照）</h3>
@@ -49,6 +77,16 @@ a:hover{text-decoration:underline}
   <div id="funnel-lost-sep" style="margin:10px 0 6px;font-size:11px;color:#888;display:none">流失</div>
   <div id="funnel-lost"></div>
 </div>
+<!-- 时间线 Drawer -->
+<div id="drawer-overlay" onclick="closeDrawer()"></div>
+<div id="drawer">
+  <div class="drawer-head">
+    <h2 id="drawer-title">联系人时间线</h2>
+    <button class="drawer-close" onclick="closeDrawer()">✕</button>
+  </div>
+  <div class="drawer-body" id="drawer-body"><p class="tl-empty">加载中…</p></div>
+</div>
+
 <table id="tbl"><thead>
   <tr><th>ID</th><th>名称</th><th>语言</th><th>阶段</th><th>Intimacy</th><th>最后活跃</th></tr>
 </thead><tbody></tbody></table>
@@ -112,30 +150,52 @@ function renderFunnel(byStage){
     lostHasData ? lost.map(([k,v]) => rowHtml(k, v, null, true)).join('') : '';
 }
 
-async function load(){
-  // 一次调用 /api/contacts?expand=journey 拿完所有需要的字段，避免 N+1
-  const [stats, list] = await Promise.all([
-    fetch('/api/funnel/stats').then(r=>r.json()),
-    fetch('/api/contacts?limit=100&expand=journey').then(r=>r.json()),
-  ]);
-  const s=document.getElementById('stats');
-  s.innerHTML = `<div class="pill">总联系人 <strong>${stats.total_contacts}</strong></div>`
-    + Object.entries(stats.by_stage||{}).map(([k,v])=>
-        `<div class="pill">${escapeHtml(k)} <strong>${v}</strong></div>`).join('')
-    + Object.entries(stats.by_channel||{}).map(([k,v])=>
-        `<div class="pill">${escapeHtml(k)} ch <strong>${v}</strong></div>`).join('');
-  renderFunnel(stats.by_stage);
+/* ── 搜索逻辑 ── */
+let _searchTimer = null;
+let _currentQ = '';
+
+function onSearchInput(val){
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(()=>{ doSearch(val); }, 300);
+}
+
+function doSearch(q){
+  if(q===undefined) q = document.getElementById('search-input').value;
+  _currentQ = q.trim();
+  const url = new URL(location.href);
+  if(_currentQ) url.searchParams.set('q',_currentQ);
+  else url.searchParams.delete('q');
+  history.replaceState(null,'',url.toString());
+  renderContacts(_currentQ);
+}
+
+async function renderContacts(q){
+  const qs = q ? `&q=${encodeURIComponent(q)}` : '';
+  const list = await fetch(`/api/contacts?limit=100&expand=journey${qs}`).then(r=>r.json());
+  const badge = document.getElementById('result-badge');
+  const hint = document.getElementById('search-hint');
+  if(q){
+    badge.textContent=`${list.total} 条结果`;
+    badge.style.display='';
+    hint.textContent=`"​${q}​" 的搜索结果`;
+  } else {
+    badge.style.display='none';
+    hint.textContent='';
+  }
   const tbody=document.querySelector('#tbl tbody');
   if(!list.items||list.items.length===0){
     document.getElementById('tbl').style.display='none';
     document.getElementById('empty').style.display='block';
+    document.getElementById('empty').textContent = q ? `没有匹配「${q}」的联系人` : '暂无联系人';
     return;
   }
+  document.getElementById('tbl').style.display='';
+  document.getElementById('empty').style.display='none';
   tbody.innerHTML = list.items.map(c=>{
     const stage = c.funnel_stage||'INITIAL';
     const intim = (c.intimacy_score||0).toFixed(1);
     const last = c.last_active_at ? new Date(c.last_active_at*1000).toLocaleString('zh-CN') : '-';
-    return `<tr>
+    return `<tr class="clickable" onclick="openDrawer('${c.contact_id}','${escapeHtml(c.primary_name||c.contact_id.slice(0,8))}')">
       <td><code style="font-size:11px">${c.contact_id.slice(0,8)}</code></td>
       <td>${escapeHtml(c.primary_name||'-')}</td>
       <td>${escapeHtml(c.language_hint||'-')}</td>
@@ -145,6 +205,100 @@ async function load(){
     </tr>`;
   }).join('');
 }
+
+async function load(){
+  // 一次调用 /api/contacts?expand=journey 拿完所有需要的字段，避免 N+1
+  const initQ = new URLSearchParams(location.search).get('q')||'';
+  if(initQ){ document.getElementById('search-input').value = initQ; _currentQ = initQ; }
+  const [stats] = await Promise.all([
+    fetch('/api/funnel/stats').then(r=>r.json()),
+  ]);
+  const s=document.getElementById('stats');
+  s.innerHTML = `<div class="pill">总联系人 <strong>${stats.total_contacts}</strong></div>`
+    + Object.entries(stats.by_stage||{}).map(([k,v])=>
+        `<div class="pill">${escapeHtml(k)} <strong>${v}</strong></div>`).join('')
+    + Object.entries(stats.by_channel||{}).map(([k,v])=>
+        `<div class="pill">${escapeHtml(k)} ch <strong>${v}</strong></div>`).join('');
+  renderFunnel(stats.by_stage);
+  await renderContacts(initQ);
+}
 load().catch(e=>{document.body.innerHTML+='<p style="color:red">加载失败: '+e+'</p>';});
+
+/* ── 时间线 Drawer ── */
+const MOBILE_HANDOFF_STATES = {
+  pending:'待确认',acknowledged:'已确认',completed:'已完成',
+  rejected:'已拒绝',expired:'已过期',duplicate_blocked:'去重屏蔽',
+};
+
+function fmtTs(ts){
+  if(!ts)return '';
+  try{return new Date(typeof ts==='number'?ts*1000:ts).toLocaleString('zh-CN',{hour12:false});}
+  catch{return String(ts);}
+}
+
+function renderEvent(ev){
+  const isMobile = (ev.event_type||'').startsWith('mobile_handoff_');
+  const dotCls = isMobile ? 'mobile' : 'regular';
+  const typeCls = isMobile ? 'mobile-event' : '';
+  const ts = fmtTs(ev.ts||ev.created_at);
+
+  let detail = '';
+  if(isMobile){
+    const p = ev.payload||{};
+    const stateLabel = MOBILE_HANDOFF_STATES[p.state||''] || p.state || '';
+    const parts = [];
+    if(p.source_agent) parts.push(`来源: ${escapeHtml(p.source_agent)}`);
+    if(p.channel)      parts.push(`渠道: ${escapeHtml(p.channel)}`);
+    if(stateLabel)     parts.push(`状态: <strong>${escapeHtml(stateLabel)}</strong>`);
+    if(p.snippet_sent) detail += `<div class="tl-snip">"${escapeHtml(p.snippet_sent.slice(0,80))}${p.snippet_sent.length>80?'…':''}"</div>`;
+    if(parts.length)   detail += `<div class="tl-payload">${parts.join(' · ')}</div>`;
+  } else {
+    const p = ev.payload||{};
+    const keys = Object.keys(p).filter(k=>p[k]!==null&&p[k]!==''&&p[k]!==undefined);
+    if(keys.length){
+      const txt = keys.slice(0,4).map(k=>`${k}: ${escapeHtml(String(p[k]).slice(0,60))}`).join(' · ');
+      detail = `<div class="tl-payload">${txt}</div>`;
+    }
+  }
+
+  const typeLabel = isMobile
+    ? `📱 ${escapeHtml((ev.event_type||'').replace('mobile_handoff_','交接·'))}`
+    : escapeHtml(ev.event_type||'event');
+
+  return `<div class="tl-item">
+    <div class="tl-dot ${dotCls}"></div>
+    <div class="tl-content">
+      <span class="tl-type ${typeCls}">${typeLabel}</span>
+      <span class="tl-ts">${ts}</span>
+      ${detail}
+    </div>
+  </div>`;
+}
+
+async function openDrawer(contactId, name){
+  document.getElementById('drawer-title').textContent = name + ' 时间线';
+  document.getElementById('drawer-body').innerHTML = '<p class="tl-empty">加载中…</p>';
+  document.getElementById('drawer-overlay').style.display='block';
+  document.getElementById('drawer').classList.add('open');
+  try{
+    const d = await fetch(`/api/contacts/${contactId}/timeline?limit=80`).then(r=>r.json());
+    const events = d.events||[];
+    if(!events.length){
+      document.getElementById('drawer-body').innerHTML='<p class="tl-empty">暂无事件记录</p>';
+      return;
+    }
+    document.getElementById('drawer-body').innerHTML =
+      `<p style="font-size:11px;color:#9ca3af;margin:0 0 12px">共 ${events.length} 条 · 阶段: <strong>${d.funnel_stage||'-'}</strong></p>`
+      + events.map(renderEvent).join('');
+  }catch(e){
+    document.getElementById('drawer-body').innerHTML=`<p class="tl-empty" style="color:#dc2626">加载失败: ${e}</p>`;
+  }
+}
+
+function closeDrawer(){
+  document.getElementById('drawer').classList.remove('open');
+  document.getElementById('drawer-overlay').style.display='none';
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeDrawer();});
 </script>
 </body></html>

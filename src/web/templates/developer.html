@@ -154,6 +154,69 @@
         <button class="btn btn-s btn-sm" onclick="testApiConn()">测试连接</button>
         <button class="btn btn-p btn-sm" onclick="saveSection('ai')">保存 AI 配置</button>
       </div>
+
+      <div style="height:1px;background:var(--bd);margin:1rem 0"></div>
+      {% set vp = voice_ai.get('voice_profile', {}) if voice_ai else {} %}
+      <div class="f-row">
+        <div class="f-lbl">
+          语音模型 Key（阿里 DashScope）
+          <span class="badge-opt">保密</span>
+        </div>
+        <div class="masked-row">
+          <input class="f-inp" type="password" id="vai-dashscope_api_key"
+            placeholder="输入新 Key 才会更新，留空保留原值" value="">
+          <button type="button" class="show-btn" onclick="toggleMask('vai-dashscope_api_key',this)">显示</button>
+        </div>
+        <div class="f-hint">用于 Qwen Voice Cloning / Qwen3-TTS，自有音色后台语音回复</div>
+      </div>
+      <div class="f-grid">
+        <div class="f-row">
+          <label class="f-lbl">Region</label>
+          <input class="f-inp" type="text" id="vai-region"
+            value="{{ voice_ai.get('dashscope_region','cn') if voice_ai else 'cn' }}"
+            placeholder="cn">
+        </div>
+        <div class="f-row">
+          <label class="f-lbl">语音模型</label>
+          <input class="f-inp" type="text" id="vai-model"
+            value="{{ voice_ai.get('model','qwen3-tts-vc-2026-01-22') if voice_ai else 'qwen3-tts-vc-2026-01-22' }}">
+        </div>
+      </div>
+      <div class="f-grid">
+        <div class="f-row">
+          <label class="f-lbl">voice_id / 声音</label>
+          <input class="f-inp" type="text" id="vai-voice"
+            value="{{ voice_ai.get('voice','my_voice') if voice_ai else 'my_voice' }}"
+            placeholder="my_voice 或 qwen-tts-vc-...">
+        </div>
+        <div class="f-row">
+          <label class="f-lbl">voice profile JSON</label>
+          <input class="f-inp" type="text" id="vai-voice_profile_path"
+            value="{{ voice_ai.get('voice_profile_path','D:/workspace/telegram-mtproto-ai/voice_samples/qwen_my_voice.json') if voice_ai else 'D:/workspace/telegram-mtproto-ai/voice_samples/qwen_my_voice.json' }}">
+        </div>
+      </div>
+      <div class="f-grid">
+        <div class="f-row">
+          <label class="f-lbl">参考音频路径</label>
+          <input class="f-inp" type="text" id="vai-reference_audio_path"
+            value="{{ vp.get('reference_audio_path','D:/workspace/telegram-mtproto-ai/voice_samples/my_voice.wav') }}">
+        </div>
+        <div class="f-row">
+          <label class="f-lbl">发送审计目录</label>
+          <input class="f-inp" type="text" id="vai-send_audit_dir"
+            value="{{ voice_ai.get('send_audit_dir','tmp_messenger_rpa') if voice_ai else 'tmp_messenger_rpa' }}">
+        </div>
+      </div>
+      <div class="f-grid">
+        <label class="f-check-row"><input type="checkbox" id="vai-enabled" {% if voice_ai and voice_ai.get('enabled') %}checked{% endif %}>启用语音模型</label>
+        <label class="f-check-row"><input type="checkbox" id="vai-profile_enabled" {% if vp.get('enabled', True) %}checked{% endif %}>启用自有音色</label>
+        <label class="f-check-row"><input type="checkbox" id="vai-owner_consent" {% if vp.get('owner_consent', True) %}checked{% endif %}>确认本人/已授权声音</label>
+        <label class="f-check-row"><input type="checkbox" id="vai-auto_voice" {% if voice_ai and voice_ai.get('mode') == 'auto_voice' %}checked{% endif %}>后台自动语音发送</label>
+      </div>
+      <div class="save-bar">
+        <span class="save-result" id="save-res-vai"></span>
+        <button class="btn btn-p btn-sm" onclick="saveVoiceAi()">保存语音模型配置</button>
+      </div>
     </div>
   </div>
 
@@ -489,6 +552,41 @@ async function saveSection(section){
     });
     const d = await r.json();
     if(!r.ok){ resEl.textContent = '保存失败：'+(d.detail||'未知错误'); resEl.className='save-result err'; return; }
+    resEl.textContent = `✓ 已保存（${d.updated.length} 项）`; resEl.className='save-result ok';
+    setTimeout(()=>{ resEl.textContent=''; }, 4000);
+  }catch(e){
+    resEl.textContent = '请求失败：'+e.message; resEl.className='save-result err';
+  }
+}
+
+async function saveVoiceAi(){
+  const resEl = document.getElementById('save-res-vai');
+  resEl.textContent = '保存中…'; resEl.className = 'save-result';
+  const fields = {
+    dashscope_api_key: document.getElementById('vai-dashscope_api_key').value.trim(),
+    enabled: document.getElementById('vai-enabled').checked,
+    mode: document.getElementById('vai-auto_voice').checked ? 'auto_voice' : 'approval_only',
+    trigger: document.getElementById('vai-auto_voice').checked ? 'always' : 'when_peer_voice',
+    backend: 'voice_clone_command',
+    voice: document.getElementById('vai-voice').value.trim() || 'my_voice',
+    model: document.getElementById('vai-model').value.trim() || 'qwen3-tts-vc-2026-01-22',
+    format: 'wav',
+    region: document.getElementById('vai-region').value.trim() || 'cn',
+    voice_profile_path: document.getElementById('vai-voice_profile_path').value.trim(),
+    reference_audio_path: document.getElementById('vai-reference_audio_path').value.trim(),
+    send_audit_dir: document.getElementById('vai-send_audit_dir').value.trim() || 'tmp_messenger_rpa',
+    profile_enabled: document.getElementById('vai-profile_enabled').checked,
+    owner_consent: document.getElementById('vai-owner_consent').checked,
+  };
+  try{
+    const r = await fetch('/api/settings/save',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({section:'voice_ai', fields}),
+    });
+    const d = await r.json();
+    if(!r.ok){ resEl.textContent = '保存失败：'+(d.detail||'未知错误'); resEl.className='save-result err'; return; }
+    document.getElementById('vai-dashscope_api_key').value = '';
     resEl.textContent = `✓ 已保存（${d.updated.length} 项）`; resEl.className='save-result ok';
     setTimeout(()=>{ resEl.textContent=''; }, 4000);
   }catch(e){

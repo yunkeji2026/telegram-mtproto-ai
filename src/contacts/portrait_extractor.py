@@ -27,8 +27,10 @@ logger = logging.getLogger(__name__)
 
 class _AIClientProto(Protocol):
     async def chat(
-        self, messages: List[Dict[str, Any]], context: Optional[Dict[str, Any]] = ...,
-    ) -> str: ...
+        self,
+        prompt: str,
+        strategy_overrides: Optional[Dict[str, Any]] = ...,
+    ) -> Optional[str]: ...
 
 
 class _StoreProto(Protocol):
@@ -37,7 +39,7 @@ class _StoreProto(Protocol):
 
 
 _PORTRAIT_PROMPT = """\
-你是「用户画像分析师」。基于最近这位 messenger 客户的入站消息，提炼一份**简洁的画像**用于让聊天机器人在后续对话中保持人设连贯。
+你是「用户画像分析师」。基于最近这位 messenger 客户的入站消息，提炼一份**简洁的画像**用于让聊天机器人在后续对话中保持人设连贯，同时评估当前是否适合引导对方切换到 LINE 继续聊天。
 
 请输出**严格的 JSON**（无任何前后说明、无 markdown 围栏），schema 如下：
 {{
@@ -46,13 +48,17 @@ _PORTRAIT_PROMPT = """\
   "interests": ["3 个以内已显露的兴趣或关注点，每个 ≤ 8 字"],
   "recent_topics": ["最近 2-3 个对话主题，每个 ≤ 12 字"],
   "key_facts": ["3 条以内的关键事实（地区/职业/重要近况），每条 ≤ 30 字。无则空数组"],
-  "intimacy_signal": "对方对我们的态度 (warming / neutral / distant / annoyed / unknown)"
+  "intimacy_signal": "对方对我们的态度 (warming / neutral / distant / annoyed / unknown)",
+  "rapport_score": "整数 0-100，双方情感连接深度：0=完全陌生 40=普通友善 70=较深入投入 90+=有明显情感基础和信任",
+  "handoff_ready": "布尔值（true/false）：综合判断现在是否是一个**自然且合适**的时机引导对方加 LINE 好友。判断依据：rapport_score≥65 AND 对话投入度高 AND 对方没有明显抵触 AND 话题没有正处于敏感/冲突阶段。不要仅因为字数多就判断 true。",
+  "handoff_reason": "handoff_ready 为 true 时给出 1 句判断理由（≤20字）；false 时填空字符串"
 }}
 
 注意：
 - 用户画像只用做内部参考，不要在 JSON 之外输出任何东西
-- 信息不足时字段填 "unknown" 或空数组，不要编造
+- 信息不足时字段填 \"unknown\" 或空数组，不要编造
 - key_facts 不要包含敏感信息（密码/卡号/具体住址）
+- rapport_score 和 handoff_ready 必须严格按消息内容判断，宁少勿多（避免过早引流）
 
 [Display name]
 {display_name}
@@ -142,7 +148,8 @@ class PortraitExtractor:
         refresh_every_n_inbound: int = 5,
         refresh_after_hours: float = 24.0,
         max_inbound_messages_for_extract: int = 12,
-        ai_max_tokens: int = 400,
+        ai_max_tokens: int = 520,
+        min_for_initial: int = 2,
     ) -> None:
         self._store = store
         self._ai = ai_client
@@ -150,6 +157,9 @@ class PortraitExtractor:
         self._refresh_after_sec = max(60.0, float(refresh_after_hours) * 3600.0)
         self._max_msgs = max(3, int(max_inbound_messages_for_extract))
         self._ai_max_tokens = max(200, int(ai_max_tokens))
+        # ★ W3-D1.2：冷启动门槛 — 没 snapshot 时至少 N 条 inbound 才抽
+        # 默认 2：避免对方刚说 1 句就调 LLM（白花 token + collect_recent_inbound 也会 skip）
+        self._min_for_initial = max(1, int(min_for_initial))
         # in-memory dedup：同一 journey 多并发触发时只跑一次
         self._inflight: set[str] = set()
 
@@ -160,23 +170,26 @@ class PortraitExtractor:
         refreshed_at = int(getattr(journey, "snapshot_refreshed_at", 0) or 0)
         ts = int(now_ts if now_ts is not None else time.time())
 
-        # 1) 完全没 snapshot → 立即抽（冷启动）
-        if not snap.strip():
-            return True
-
-        # 2) 距上次抽超过窗口 → 抽
-        if refreshed_at <= 0 or (ts - refreshed_at) > self._refresh_after_sec:
-            return True
-
-        # 3) 自上次起累计入站消息 ≥ N → 抽
+        # 取所有 inbound 数（共用一次 list_events，避免重复查）
         try:
             evts = self._store.list_events(journey.journey_id, limit=200)
         except Exception:
             return False
+        total_in = sum(1 for e in evts if e.get("event_type") == "msg_in")
         new_in = sum(
             1 for e in evts
             if e.get("event_type") == "msg_in" and int(e.get("ts", 0) or 0) > refreshed_at
         )
+
+        # 1) 没 snapshot：要求 inbound ≥ min_for_initial 才抽（避免 1 条就调 LLM）
+        if not snap.strip():
+            return total_in >= self._min_for_initial
+
+        # 2) 距上次抽超过窗口 → 抽（即使新增不足 N 条）
+        if refreshed_at <= 0 or (ts - refreshed_at) > self._refresh_after_sec:
+            return True
+
+        # 3) 自上次起累计入站消息 ≥ N → 抽
         return new_in >= self._n
 
     def collect_recent_inbound(self, journey: Any) -> List[str]:
@@ -248,8 +261,8 @@ class PortraitExtractor:
             )
             try:
                 raw = await self._ai.chat(
-                    [{"role": "user", "content": prompt}],
-                    context={"_internal_purpose": "portrait_extract"},
+                    prompt,
+                    strategy_overrides={"_internal_purpose": "portrait_extract"},
                 )
             except Exception as ex:
                 logger.warning(
@@ -267,9 +280,12 @@ class PortraitExtractor:
             snap["_msg_count"] = len(messages)
 
             try:
+                # ★ W3-D3.1：portrait 抽取是后台 LLM 任务，不算"用户互动"
+                # → 不应该 touch updated_at（否则 reactivation_scheduler 找不到候选）
                 await asyncio.to_thread(
                     self._store.update_journey,
                     jid,
+                    _touch=False,
                     context_snapshot_json=json.dumps(snap, ensure_ascii=False),
                     snapshot_refreshed_at=int(time.time()),
                 )

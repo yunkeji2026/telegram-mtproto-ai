@@ -19,16 +19,34 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 _OPS_TPL_DIR = Path(__file__).resolve().parent.parent / "templates" / "ops"
 
+_NAV_LINKS = [
+    ("/ops/contacts", "联系人"),
+    ("/ops/merge-reviews", "合并审核"),
+    ("/ops/mobile-handoffs", "Mobile 交接单"),
+]
 
-def _load_ops_html(name: str) -> str:
-    """从 templates/ops/ 加载静态 HTML 文件。失败返回最简占位页。"""
+
+def _make_nav_html(active: str = "") -> str:
+    links = "".join(
+        f'<a href="{h}" {"class=\"active\"" if h == active else ""}>'
+        f"{label}</a>"
+        for h, label in _NAV_LINKS
+    )
+    return f'<div class="nav">{links}</div>'
+
+
+def _load_ops_html(name: str, active: str = "") -> str:
+    """从 templates/ops/ 加载静态 HTML。
+    active 为当前页 href，注入统一导航栏（替换 <!-- NAV_INJECT --> 占位符）。
+    """
     p = _OPS_TPL_DIR / name
     try:
-        return p.read_text(encoding="utf-8")
+        html = p.read_text(encoding="utf-8")
+        return html.replace("<!-- NAV_INJECT -->", _make_nav_html(active), 1)
     except FileNotFoundError:
         return f"<h1>Ops UI missing: {name}</h1>"
 
@@ -76,6 +94,7 @@ def register_contacts_routes(
     reactivation_scheduler=None,
     gateway=None,
     account_limiter=None,
+    mobile_bridge=None,
 ) -> None:
     """在 FastAPI app 上挂载 contacts 相关的 REST endpoint。
 
@@ -92,15 +111,17 @@ def register_contacts_routes(
         limit: int = 50,
         offset: int = 0,
         expand: str = "",
+        q: str = "",
         _=Depends(api_auth),
     ):
         """
         expand=journey 时，item 含 funnel_stage / intimacy_score 字段——
         消除 UI 的 N+1 请求。
+        q 时按 contact_id / 姓名 / canonical_id 搜索。
         """
         limit = max(1, min(int(limit), 200))
         offset = max(0, int(offset))
-        rows = contacts_store.list_contacts(limit=limit, offset=offset)
+        rows, total = contacts_store.search_contacts(q=q.strip(), limit=limit, offset=offset)
         include_journey = "journey" in (expand or "").split(",")
         items: list = []
         for c in rows:
@@ -113,7 +134,8 @@ def register_contacts_routes(
                     d["journey_id"] = j.journey_id
             items.append(d)
         return {
-            "total": contacts_store.count_contacts(),
+            "total": total,
+            "q": q.strip(),
             "items": items,
             "limit": limit,
             "offset": offset,
@@ -296,11 +318,149 @@ def register_contacts_routes(
     # ── 最小 Ops UI（纯静态 HTML + fetch，不走 Jinja2） ───
     @app.get("/ops/contacts", response_class=HTMLResponse)
     async def ops_contacts_page(_=Depends(api_auth)):
-        return HTMLResponse(_load_ops_html("contacts.html"))
+        return HTMLResponse(_load_ops_html("contacts.html", active="/ops/contacts"))
 
     @app.get("/ops/merge-reviews", response_class=HTMLResponse)
     async def ops_merge_reviews_page(_=Depends(api_auth)):
-        return HTMLResponse(_load_ops_html("merge_reviews.html"))
+        return HTMLResponse(_load_ops_html("merge_reviews.html", active="/ops/merge-reviews"))
+
+    # ── Mobile Bridge 路由（仅 mobile_bridge 注入时挂载） ────────────
+    if mobile_bridge is not None:
+        import asyncio as _asyncio
+        import functools as _functools
+
+        @app.get("/api/mobile-bridge/health")
+        async def mobile_bridge_health(_=Depends(api_auth)):
+            """Bridge 状态：同步计数、watermark、最近错误、dead_letter。"""
+            return await _asyncio.to_thread(mobile_bridge.status)
+
+        @app.get("/api/mobile-handoffs/summary")
+        async def mobile_handoffs_summary(_=Depends(api_auth)):
+            """各 state 的 handoff 计数（供 UI tab 徽章使用）。"""
+            counts = await _asyncio.to_thread(mobile_bridge.count_by_state)
+            total = sum(counts.values())
+            return {"by_state": counts, "total": total}
+
+        @app.get("/api/mobile-handoffs")
+        async def list_mobile_handoffs(
+            state: str = "",
+            canonical_id: str = "",
+            limit: int = 50,
+            offset: int = 0,
+            _=Depends(api_auth),
+        ):
+            """从 openclaw.db 实时查询 handoff 列表（只读）。"""
+            limit = max(1, min(int(limit), 200))
+            offset = max(0, int(offset))
+            rows = await _asyncio.to_thread(
+                _functools.partial(
+                    mobile_bridge.list_mobile_handoffs,
+                    state=state, canonical_id=canonical_id,
+                    limit=limit, offset=offset,
+                )
+            )
+            return {"items": rows, "count": len(rows)}
+
+        @app.get("/api/mobile-handoffs/{handoff_id}")
+        async def get_mobile_handoff(handoff_id: str, _=Depends(api_auth)):
+            """查单条 handoff（来自 openclaw.db）。"""
+            row = await _asyncio.to_thread(mobile_bridge.get_mobile_handoff, handoff_id)
+            if not row:
+                raise HTTPException(status_code=404, detail="handoff_not_found")
+            return row
+
+        @app.post("/api/mobile-handoffs/{handoff_id}/acknowledge")
+        async def mobile_ack(handoff_id: str, request: Request, _=Depends(api_auth)):
+            """Telegram 后台确认接单 → 回写 mobile API。mobile 不可达时入队重试。"""
+            user = _extract_user(request)
+            by = f"telegram_admin:{user or 'system'}"
+            try:
+                result = await _asyncio.to_thread(
+                    _functools.partial(mobile_bridge.writeback_acknowledge, handoff_id, by=by)
+                )
+                if audit_store:
+                    _safe_audit(audit_store, user, "mobile_handoff_acknowledge", handoff_id)
+                return {"ok": True, "queued": False, "mobile_result": result}
+            except Exception as exc:
+                retry_id = await _asyncio.to_thread(
+                    _functools.partial(mobile_bridge.enqueue_writeback,
+                                       handoff_id, "acknowledge", by=by)
+                )
+                return JSONResponse(status_code=202, content={
+                    "ok": False, "queued": True, "retry_id": retry_id,
+                    "error": str(exc), "msg": "mobile 暂时不可达，已入队自动重试",
+                })
+
+        @app.post("/api/mobile-handoffs/{handoff_id}/complete")
+        async def mobile_complete(handoff_id: str, request: Request, _=Depends(api_auth)):
+            """Telegram 后台标记完成 → 回写 mobile API。mobile 不可达时入队重试。"""
+            user = _extract_user(request)
+            by = f"telegram_admin:{user or 'system'}"
+            try:
+                result = await _asyncio.to_thread(
+                    _functools.partial(mobile_bridge.writeback_complete, handoff_id, by=by)
+                )
+                if audit_store:
+                    _safe_audit(audit_store, user, "mobile_handoff_complete", handoff_id)
+                return {"ok": True, "queued": False, "mobile_result": result}
+            except Exception as exc:
+                retry_id = await _asyncio.to_thread(
+                    _functools.partial(mobile_bridge.enqueue_writeback,
+                                       handoff_id, "complete", by=by)
+                )
+                return JSONResponse(status_code=202, content={
+                    "ok": False, "queued": True, "retry_id": retry_id,
+                    "error": str(exc), "msg": "mobile 暂时不可达，已入队自动重试",
+                })
+
+        @app.post("/api/mobile-handoffs/{handoff_id}/reject")
+        async def mobile_reject(handoff_id: str, request: Request, _=Depends(api_auth)):
+            """Telegram 后台拒绝 → 回写 mobile API。mobile 不可达时入队重试。"""
+            user = _extract_user(request)
+            by = f"telegram_admin:{user or 'system'}"
+            try:
+                result = await _asyncio.to_thread(
+                    _functools.partial(mobile_bridge.writeback_reject, handoff_id, by=by)
+                )
+                if audit_store:
+                    _safe_audit(audit_store, user, "mobile_handoff_reject", handoff_id)
+                return {"ok": True, "queued": False, "mobile_result": result}
+            except Exception as exc:
+                retry_id = await _asyncio.to_thread(
+                    _functools.partial(mobile_bridge.enqueue_writeback,
+                                       handoff_id, "reject", by=by)
+                )
+                return JSONResponse(status_code=202, content={
+                    "ok": False, "queued": True, "retry_id": retry_id,
+                    "error": str(exc), "msg": "mobile 暂时不可达，已入队自动重试",
+                })
+
+        @app.get("/ops/mobile-handoffs", response_class=HTMLResponse)
+        async def ops_mobile_handoffs_page(_=Depends(api_auth)):
+            return HTMLResponse(_load_ops_html("mobile_handoffs.html", active="/ops/mobile-handoffs"))
+
+        @app.get("/api/mobile-bridge/writeback-queue")
+        async def list_writeback_queue(
+            status: str = "dead_letter",
+            limit: int = 50,
+            _=Depends(api_auth),
+        ):
+            """列出 writeback 队列特定状态的条目（默认 dead_letter）。"""
+            limit = max(1, min(int(limit), 200))
+            rows = await _asyncio.to_thread(
+                _functools.partial(mobile_bridge.list_writeback_queue, status=status, limit=limit)
+            )
+            return {"items": rows, "count": len(rows), "status": status}
+
+        @app.post("/api/mobile-bridge/writeback-queue/{item_id}/retry")
+        async def retry_dead_letter(item_id: int, _=Depends(api_auth)):
+            """\u5c06 dead_letter 条目重置为 pending，下次轮询时自动重试。"""
+            ok = await _asyncio.to_thread(
+                _functools.partial(mobile_bridge.retry_dead_letter, item_id)
+            )
+            if not ok:
+                raise HTTPException(status_code=404, detail="item_not_found_or_not_dead_letter")
+            return {"ok": True, "item_id": item_id, "new_status": "pending"}
 
 
 def _extract_user(request: Request) -> str:

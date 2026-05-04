@@ -10,7 +10,8 @@ from typing import Any, Dict, Optional
 CHANNEL_MESSENGER = "messenger"
 CHANNEL_LINE = "line"
 CHANNEL_TELEGRAM = "telegram"
-VALID_CHANNELS = {CHANNEL_MESSENGER, CHANNEL_LINE, CHANNEL_TELEGRAM}
+CHANNEL_MOBILE = "mobile"
+VALID_CHANNELS = {CHANNEL_MESSENGER, CHANNEL_LINE, CHANNEL_TELEGRAM, CHANNEL_MOBILE}
 
 # ── Journey 状态（状态机节点） ──────────────────────────────────────
 STAGE_INITIAL = "INITIAL"

@@ -19,10 +19,20 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from src.contacts.models import (
-    STAGE_BONDED, STAGE_LINE_ACCEPTED, STAGE_LINE_ENGAGED,
+    STAGE_BONDED, STAGE_ENGAGED, STAGE_LINE_ACCEPTED, STAGE_LINE_ENGAGED,
 )
 
 logger = logging.getLogger(__name__)
+
+# ★ W2-D7.6：陪护产品候选状态扩展
+# 旧客服式：只对引到 LINE 之后沉默的用户做 reactivation
+# 陪护式：messenger 上 ENGAGED 之后沉默的用户也是核心目标（很多用户根本不进 LINE）
+_DEFAULT_ACTIVE_STAGES = (
+    STAGE_ENGAGED,           # ★ 陪护新增：messenger 上聊过但没 handoff
+    STAGE_LINE_ENGAGED,
+    STAGE_BONDED,
+    STAGE_LINE_ACCEPTED,
+)
 
 
 @dataclass
@@ -44,19 +54,22 @@ class ReactivationScheduler:
         min_intimacy: float = 40.0,
         cooldown_days: float = 7.0,
         limit: int = 50,
+        active_stages: Optional[List[str]] = None,
     ) -> None:
         self._store = store
         self._min_silent_s = int(min_silent_days * 86400)
         self._min_intimacy = float(min_intimacy)
         self._cooldown_s = int(cooldown_days * 86400)
         self._limit = int(limit)
+        # ★ W2-D7.6：可配置的 active_stages（陪护场景默认含 ENGAGED）
+        self._active_stages = tuple(active_stages or _DEFAULT_ACTIVE_STAGES)
 
     def list_candidates(
         self, *, now: Optional[int] = None,
     ) -> List[ReactivationCandidate]:
         now = now if now is not None else int(time.time())
         cutoff_silent = now - self._min_silent_s
-        active_stages = (STAGE_LINE_ENGAGED, STAGE_BONDED, STAGE_LINE_ACCEPTED)
+        active_stages = self._active_stages
         # 一次查出所有 eligible journey
         placeholders = ",".join("?" * len(active_stages))
         sql = (

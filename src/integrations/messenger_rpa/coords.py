@@ -104,9 +104,10 @@ INPUT_PLUS_DOCKED = Coord(60, 1450, "+ 附件 (键盘未弹)")
 INPUT_CAMERA_DOCKED = Coord(140, 1450, "相机 (键盘未弹)")
 INPUT_GALLERY_DOCKED = Coord(220, 1450, "相册 (键盘未弹)")
 INPUT_MIC_DOCKED = Coord(300, 1450, "麦克风 (键盘未弹)")
-INPUT_TEXT_FIELD = Coord(480, 1450, "Message 输入框 (键盘未弹，点击后唤起键盘)")
+INPUT_TEXT_FIELD = Coord(360, 1415, "Message 输入框 (ADB Keyboard/键盘未弹)")
 INPUT_EMOJI_DOCKED = Coord(640, 1450, "表情 (键盘未弹)")
 INPUT_THUMB_UP_DOCKED = Coord(700, 1450, "👍 (键盘未弹)")
+SEND_BTN_DOCKED = Coord(680, 1415, "发送箭头 (ADB Keyboard/键盘未弹)")
 
 # 键盘弹出后输入框/发送按钮的位置 —— 通过 d113 物理屏实测校准
 # 输入框中心在 X≈470 (居中靠右)，Y≈940

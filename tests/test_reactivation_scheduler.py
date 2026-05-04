@@ -68,12 +68,37 @@ class TestCandidateSelection:
                       intimacy=20.0, updated_ago_days=5)
         assert sched.list_candidates() == []
 
-    def test_wrong_stage_excluded(self, env):
+    def test_engaged_now_selected_for_companion(self, env):
+        """W2-D7.6：陪护产品语义 — messenger 上 ENGAGED 沉默用户也是候选
+
+        旧客服式 reactivation 只对引到 LINE 之后的用户主动唤醒；
+        陪护产品里 ENGAGED 是核心目标（很多用户根本不进 LINE）。
+        """
         store, gw, sched = env
-        # Stage ENGAGED 不在 LINE 漏斗下游
         _seed_journey(store, gw, stage=STAGE_ENGAGED,
                       intimacy=60.0, updated_ago_days=5)
-        assert sched.list_candidates() == []
+        cands = sched.list_candidates()
+        assert len(cands) == 1
+        assert cands[0].funnel_stage == STAGE_ENGAGED
+
+    def test_active_stages_can_be_restricted_to_legacy(self, tmp_path):
+        """W2-D7.6：可通过 active_stages 参数回退到旧客服行为"""
+        store = ContactStore(db_path=tmp_path / "contacts.db")
+        try:
+            gw = ContactGateway(
+                store, HandoffTokenService(store, ttl_seconds=3600), MergeService(store),
+            )
+            # 只接受 LINE_ENGAGED/BONDED/LINE_ACCEPTED（旧默认）
+            sched = ReactivationScheduler(
+                store, min_silent_days=3, min_intimacy=40, cooldown_days=7,
+                active_stages=[STAGE_LINE_ENGAGED, STAGE_BONDED, STAGE_LINE_ACCEPTED],
+            )
+            _seed_journey(store, gw, stage=STAGE_ENGAGED,
+                          intimacy=60.0, updated_ago_days=5)
+            # ENGAGED 显式排除 → 候选 0
+            assert sched.list_candidates() == []
+        finally:
+            store.close()
 
     def test_bonded_selected(self, env):
         store, gw, sched = env

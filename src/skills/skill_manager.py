@@ -1152,7 +1152,7 @@ class SkillManager(LoggerMixin):
                             )
                         user_context["_kb_search_mode"] = _mode
                         self.logger.info(
-                            "%sKB 命中 [%s] %s (score=%.3f mode=%s) �?注入 %d 字�",
+                            "%sKB 命中 [%s] %s (score=%.3f mode=%s) → 注入 %d 字符",
                             log_prefix, _mode, _top_title,
                             _top_bm25_score, _top_reply_mode, len(_kb_ctx)
                         )
@@ -1225,9 +1225,17 @@ class SkillManager(LoggerMixin):
             _prev_reply = (user_context.get("last_reply") or "").strip()
             _intent_switched = last_intent and intent != last_intent
             if _intent_switched and _prev_reply:
+                # P0-G fix (2026-05-03): chat-class intents 同族，
+                # 避免 messenger greeting/small_talk/direct_chat 切换
+                # 触发 _conversation_history 清空 -> hist=0 冷启动 ->
+                # 角色错乱、cross-chat persona 串戏、hallucinate.
                 _INTENT_FAMILIES = {
                     "channel": {"channel_info", "status_check"},
                     "order": {"order_query", "complaint"},
+                    "chat": {
+                        "greeting", "small_talk", "direct_chat",
+                        "casual_chat", "chitchat", "free_chat",
+                    },
                 }
                 _old_family = next((f for f, s in _INTENT_FAMILIES.items() if last_intent in s), last_intent)
                 _new_family = next((f for f, s in _INTENT_FAMILIES.items() if intent in s), intent)
@@ -1271,7 +1279,7 @@ class SkillManager(LoggerMixin):
                 user_context["_consecutive_same_intent"] = _angle_idx
             else:
                 if _same_intent and not _msg_similar and _prev_msg:
-                    self.logger.info(f"{log_prefix}同意图但不同�: '{_prev_msg[:15]}' �?'{text[:15]}'，�数器重置")
+                    self.logger.info(f"{log_prefix}同意图但不同义: '{_prev_msg[:15]}' → '{text[:15]}'，计数器重置")
                 user_context["_consecutive_same_intent"] = 0
 
             # M2: 重�提问质量追踪 �?用户重��?= 上�回�没解决问�?
@@ -1351,7 +1359,7 @@ class SkillManager(LoggerMixin):
 
             await self._maybe_slow_think(intent, text, user_context, log_prefix)
 
-            self.logger.info(f"{log_prefix}执��€�?{intent} (消息: {text[:30]}...)")
+            self.logger.info(f"{log_prefix}执行 {intent} (消息: {text[:30]}...)")
             # 5. 执��€能（�€多等�?45 秒）
             _t0 = time.time()
             try:
@@ -1426,7 +1434,14 @@ class SkillManager(LoggerMixin):
                 # 6. 更新状�€?
                 self._update_after_reply(reply, user_id_str, user_context,
                                          chat_id=context.get('chat_id', ''))
-                if not user_context.get("disable_episodic_memory"):
+                # P3-deep diag (2026-05-04)
+                _flag_dis = user_context.get("disable_episodic_memory")
+                self.logger.info(
+                    "[episodic] handle_msg checkpoint user=%s intent=%s "
+                    "reply_len=%d disable_flag=%s",
+                    user_id_str, intent, len(reply or ""), _flag_dis,
+                )
+                if not _flag_dis:
                     self._schedule_episodic_memory_extract(
                         user_id_str, text, reply, intent, _chat_id
                     )
@@ -1929,11 +1944,27 @@ class SkillManager(LoggerMixin):
     def _schedule_episodic_memory_extract(
         self, user_id: str, user_msg: str, reply: str, intent: str, chat_id: Any
     ) -> None:
-        if not self._episodic_store or not (self._memory_cfg or {}).get("enabled", True):
+        if not self._episodic_store:
+            self.logger.info(
+                "[episodic] schedule skip: no _episodic_store user=%s", user_id,
+            )
+            return
+        if not (self._memory_cfg or {}).get("enabled", True):
+            self.logger.info(
+                "[episodic] schedule skip: memory.enabled=False user=%s", user_id,
+            )
             return
         ex = (self._memory_cfg.get("extract") or {})
         if not ex.get("enabled", True):
+            self.logger.info(
+                "[episodic] schedule skip: memory.extract.enabled=False user=%s",
+                user_id,
+            )
             return
+        self.logger.info(
+            "[episodic] schedule run user=%s intent=%s msg_len=%d",
+            user_id, intent, len(user_msg or ""),
+        )
 
         async def _run():
             await self._episodic_memory_extract_async(user_id, user_msg, reply, intent, chat_id)
@@ -1941,19 +1972,33 @@ class SkillManager(LoggerMixin):
         try:
             asyncio.get_running_loop().create_task(_run())
         except RuntimeError:
-            pass
+            self.logger.warning(
+                "[episodic] schedule failed: no running loop user=%s", user_id,
+            )
 
     async def _episodic_memory_extract_async(
         self, user_id: str, user_msg: str, reply: str, intent: str, chat_id: Any
     ) -> None:
         if not self._episodic_store:
+            self.logger.info(
+                "[episodic] skip: no _episodic_store user=%s intent=%s",
+                user_id, intent,
+            )
             return
         ex = (self._memory_cfg.get("extract") or {})
         intents = set(ex.get("intents") or [])
         if intent not in intents:
+            self.logger.info(
+                "[episodic] skip: intent=%r not in %s user=%s",
+                intent, sorted(intents), user_id,
+            )
             return
         mu = (user_msg or "").strip()
         if len(mu) < int(ex.get("min_user_chars", 3)):
+            self.logger.info(
+                "[episodic] skip: msg too short len=%d user=%s",
+                len(mu), user_id,
+            )
             return
 
         key = self._episodic_storage_key(user_id, chat_id)
@@ -1984,8 +2029,14 @@ class SkillManager(LoggerMixin):
             pr = self._episodic_store.prune_oldest(key, keep)
             if pr:
                 self.logger.debug("episodic pruned key=%s removed=%s", key, pr)
+            # P3-deep 诊断：写入数量统计
+            self.logger.info(
+                "[episodic] extract done key=%s heuristic_count=? llm_count=%d "
+                "intent=%s msg_len=%d",
+                key, len(facts_llm), intent, len(mu),
+            )
         except Exception as _e:
-            self.logger.debug("episodic extract failed: %s", _e)
+            self.logger.warning("[episodic] extract failed key=%s: %s", key, _e)
 
     def episodic_list_for_admin(self, prefix: str = "", limit: int = 100) -> List[Dict[str, Any]]:
         if not self._episodic_store:

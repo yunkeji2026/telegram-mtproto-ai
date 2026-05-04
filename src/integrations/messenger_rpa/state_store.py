@@ -20,6 +20,28 @@ from typing import Any, Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 
+HANDOFF_STATUSES = {
+    "new",
+    "assigned",
+    "in_progress",
+    "line_sent",
+    "line_added",
+    "converted",
+    "lost",
+    "paused",
+}
+LINE_HANDOFF_STATUSES = {
+    "not_sent",
+    "sent",
+    "added",
+    "accepted",
+    "engaged",
+    "converted",
+    "lost",
+}
+HANDOFF_PRIORITIES = {"", "low", "mid", "high", "urgent"}
+
+
 _DDL = """
 CREATE TABLE IF NOT EXISTS messenger_rpa_chat_state (
     chat_key            TEXT PRIMARY KEY,
@@ -99,6 +121,19 @@ CREATE INDEX IF NOT EXISTS idx_messenger_send_log_ts
 CREATE INDEX IF NOT EXISTS idx_messenger_send_log_hour
     ON messenger_rpa_send_log(hour_local, ts DESC);
 
+-- P0-4：self_skip cooldown 持久化。让 runaway_guard / wrong-chat-detect /
+-- self-sent-detect 触发的冷却跨进程重启生效（之前仅在内存 dict 里）。
+-- norm_key 来自 _self_skip_norm_key()（CJK 取前 2 字、ASCII 取前 8 字），
+-- until_ts 是 epoch（time.time()）— **不是** monotonic，加载时再转回 monotonic。
+CREATE TABLE IF NOT EXISTS messenger_rpa_self_skip (
+    norm_key   TEXT PRIMARY KEY,
+    until_ts   REAL NOT NULL,
+    reason     TEXT DEFAULT '',
+    updated_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_messenger_self_skip_until
+    ON messenger_rpa_self_skip(until_ts);
+
 -- P4-7：chat 级信用分（credit 0-100，起始 100；每次 reject/escalation 扣分）
 CREATE TABLE IF NOT EXISTS messenger_rpa_chat_credit (
     chat_key   TEXT PRIMARY KEY,
@@ -106,6 +141,159 @@ CREATE TABLE IF NOT EXISTS messenger_rpa_chat_credit (
     updated_at REAL NOT NULL DEFAULT 0,
     last_reason TEXT DEFAULT ''
 );
+
+-- 人工客服交接状态：给运营台保存负责人、LINE 进度、备注和结果
+CREATE TABLE IF NOT EXISTS messenger_rpa_handoffs (
+    chat_key         TEXT PRIMARY KEY,
+    account_id       TEXT DEFAULT '',
+    owner            TEXT DEFAULT '',
+    status           TEXT NOT NULL DEFAULT 'new',
+    line_status      TEXT NOT NULL DEFAULT 'not_sent',
+    priority         TEXT DEFAULT '',
+    outcome          TEXT DEFAULT '',
+    notes            TEXT DEFAULT '',
+    next_followup_at REAL DEFAULT 0,
+    updated_by       TEXT DEFAULT '',
+    updated_at       REAL NOT NULL DEFAULT 0,
+    created_at       REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_messenger_handoffs_status
+    ON messenger_rpa_handoffs(status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_messenger_handoffs_owner
+    ON messenger_rpa_handoffs(owner, updated_at DESC);
+
+-- 自动人设策略运行服务：账号、人设、会话状态、入站消息、运行队列。
+CREATE TABLE IF NOT EXISTS messenger_rpa_strategy_accounts (
+    account_id               TEXT PRIMARY KEY,
+    label                    TEXT DEFAULT '',
+    status                   TEXT NOT NULL DEFAULT 'active',
+    supported_languages_json TEXT NOT NULL DEFAULT '[]',
+    supported_customer_types_json TEXT NOT NULL DEFAULT '[]',
+    persona_ids_json         TEXT NOT NULL DEFAULT '[]',
+    health_score             REAL NOT NULL DEFAULT 100,
+    current_load             INTEGER NOT NULL DEFAULT 0,
+    daily_send_count         INTEGER NOT NULL DEFAULT 0,
+    max_daily_send           INTEGER NOT NULL DEFAULT 200,
+    metadata_json            TEXT NOT NULL DEFAULT '{}',
+    created_at               REAL NOT NULL DEFAULT 0,
+    updated_at               REAL NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS messenger_rpa_personas (
+    persona_id       TEXT PRIMARY KEY,
+    name             TEXT NOT NULL,
+    language         TEXT DEFAULT 'auto',
+    customer_type    TEXT DEFAULT '',
+    facts_json       TEXT NOT NULL DEFAULT '[]',
+    persona_json     TEXT NOT NULL DEFAULT '{}',
+    status           TEXT NOT NULL DEFAULT 'active',
+    created_at       REAL NOT NULL DEFAULT 0,
+    updated_at       REAL NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS messenger_rpa_conversation_states (
+    customer_id          TEXT PRIMARY KEY,
+    chat_key             TEXT DEFAULT '',
+    account_id           TEXT DEFAULT '',
+    persona_id           TEXT DEFAULT '',
+    customer_language    TEXT DEFAULT '',
+    customer_type        TEXT DEFAULT '',
+    stage                TEXT NOT NULL DEFAULT 'new_lead',
+    memory_summary       TEXT DEFAULT '',
+    recent_topics_json   TEXT NOT NULL DEFAULT '[]',
+    used_persona_facts_json TEXT NOT NULL DEFAULT '[]',
+    metadata_json        TEXT NOT NULL DEFAULT '{}',
+    last_message_at      REAL DEFAULT 0,
+    created_at           REAL NOT NULL DEFAULT 0,
+    updated_at           REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_messenger_conv_chat
+    ON messenger_rpa_conversation_states(chat_key);
+CREATE INDEX IF NOT EXISTS idx_messenger_conv_account_stage
+    ON messenger_rpa_conversation_states(account_id, stage, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS messenger_rpa_incoming_messages (
+    message_id       TEXT PRIMARY KEY,
+    customer_id      TEXT NOT NULL,
+    chat_key         TEXT DEFAULT '',
+    text             TEXT NOT NULL,
+    language         TEXT DEFAULT '',
+    raw_payload_json TEXT NOT NULL DEFAULT '{}',
+    received_at      REAL NOT NULL,
+    created_at       REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_messenger_incoming_customer_ts
+    ON messenger_rpa_incoming_messages(customer_id, received_at DESC);
+
+CREATE TABLE IF NOT EXISTS messenger_rpa_auto_run_jobs (
+    job_id              TEXT PRIMARY KEY,
+    customer_id         TEXT NOT NULL,
+    incoming_message_id TEXT NOT NULL,
+    account_id          TEXT DEFAULT '',
+    persona_id          TEXT DEFAULT '',
+    stage               TEXT DEFAULT '',
+    strategy_json       TEXT NOT NULL DEFAULT '{}',
+    priority            INTEGER NOT NULL DEFAULT 50,
+    status              TEXT NOT NULL DEFAULT 'pending',
+    run_after           REAL NOT NULL DEFAULT 0,
+    locked_by           TEXT DEFAULT '',
+    locked_at           REAL DEFAULT 0,
+    attempts            INTEGER NOT NULL DEFAULT 0,
+    last_error          TEXT DEFAULT '',
+    created_at          REAL NOT NULL DEFAULT 0,
+    updated_at          REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_messenger_jobs_status_run_after
+    ON messenger_rpa_auto_run_jobs(status, run_after, priority DESC);
+CREATE INDEX IF NOT EXISTS idx_messenger_jobs_customer
+    ON messenger_rpa_auto_run_jobs(customer_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS messenger_rpa_chat_runs (
+    run_id          TEXT PRIMARY KEY,
+    job_id          TEXT DEFAULT '',
+    customer_id     TEXT NOT NULL,
+    account_id      TEXT DEFAULT '',
+    persona_id      TEXT DEFAULT '',
+    previous_stage  TEXT DEFAULT '',
+    next_stage      TEXT DEFAULT '',
+    strategy_json   TEXT NOT NULL DEFAULT '{}',
+    reply_text      TEXT DEFAULT '',
+    status          TEXT NOT NULL,
+    error           TEXT DEFAULT '',
+    created_at      REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_messenger_chat_runs_customer_ts
+    ON messenger_rpa_chat_runs(customer_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS messenger_rpa_strategy_audit (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          REAL NOT NULL,
+    actor       TEXT DEFAULT '',
+    action      TEXT NOT NULL,
+    target_type TEXT DEFAULT '',
+    target_id   TEXT DEFAULT '',
+    before_json TEXT NOT NULL DEFAULT '{}',
+    after_json  TEXT NOT NULL DEFAULT '{}',
+    note        TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_messenger_strategy_audit_ts
+    ON messenger_rpa_strategy_audit(ts DESC);
+
+-- B2: 运营手动指定的"chat → reply_profile" 绑定
+-- 优先级高于 reply_profiles 配置的 match_names / customer_type 自动匹配
+-- 也高于 conversation_states.persona_id（LLM 自动推断的）
+-- 这是给运营在 Web 后台"为每个 chat 单独指定人设"+"批量为账号下所有 chat 设人设"用的
+CREATE TABLE IF NOT EXISTS messenger_rpa_chat_persona_overrides (
+    chat_name        TEXT NOT NULL,
+    account_id       TEXT NOT NULL DEFAULT '',  -- 区分多账号下同名 chat
+    reply_profile_id TEXT NOT NULL,
+    bound_by         TEXT DEFAULT '',           -- 'web_admin' / account_id / system
+    bound_at         REAL NOT NULL DEFAULT 0,
+    notes            TEXT DEFAULT '',
+    PRIMARY KEY (chat_name, account_id)
+);
+CREATE INDEX IF NOT EXISTS idx_chat_persona_overrides_account
+    ON messenger_rpa_chat_persona_overrides(account_id, reply_profile_id);
 """
 
 
@@ -398,6 +586,75 @@ class MessengerRpaStateStore:
             pass
         return d
 
+    # ── P0-4：self_skip 持久化（让 runaway_guard 跨重启）────────
+    def set_self_skip(
+        self, norm_key: str, until_ts: float, reason: str = "",
+    ) -> None:
+        """写入/更新某 norm_key 的冷却到期时间（epoch）。
+
+        until_ts 必须是 time.time() 域的绝对时间（不是 monotonic）。
+        调用方负责转换：time.time() + (mono_until - time.monotonic())。
+        """
+        if not norm_key:
+            return
+        try:
+            ts = float(until_ts or 0)
+        except (TypeError, ValueError):
+            return
+        if ts <= time.time():
+            # 已过期 — 直接删除而不是写入
+            self.clear_self_skip(norm_key)
+            return
+        now = time.time()
+        with self._lock, self._conn() as c:
+            c.execute(
+                "INSERT INTO messenger_rpa_self_skip"
+                "(norm_key, until_ts, reason, updated_at) VALUES(?, ?, ?, ?) "
+                "ON CONFLICT(norm_key) DO UPDATE SET "
+                "  until_ts=MAX(excluded.until_ts, until_ts),"  # 取更晚的
+                "  reason=excluded.reason,"
+                "  updated_at=excluded.updated_at",
+                (norm_key, ts, reason or "", now),
+            )
+            c.commit()
+
+    def clear_self_skip(self, norm_key: str) -> None:
+        if not norm_key:
+            return
+        with self._lock, self._conn() as c:
+            c.execute(
+                "DELETE FROM messenger_rpa_self_skip WHERE norm_key=?",
+                (norm_key,),
+            )
+            c.commit()
+
+    def load_active_self_skips(self) -> Dict[str, Tuple[float, str]]:
+        """启动时一次性回填。返回 {norm_key: (until_ts_epoch, reason)}。
+
+        顺手清理已过期的行（GC）。
+        """
+        out: Dict[str, Tuple[float, str]] = {}
+        now = time.time()
+        try:
+            with self._lock, self._conn() as c:
+                c.execute(
+                    "DELETE FROM messenger_rpa_self_skip WHERE until_ts < ?",
+                    (now,),
+                )
+                c.commit()
+                rows = c.execute(
+                    "SELECT norm_key, until_ts, reason "
+                    "FROM messenger_rpa_self_skip WHERE until_ts >= ?",
+                    (now,),
+                ).fetchall()
+            for r in rows:
+                out[str(r["norm_key"])] = (
+                    float(r["until_ts"]), str(r["reason"] or ""),
+                )
+        except Exception:
+            logger.debug("load_active_self_skips 失败", exc_info=True)
+        return out
+
     # ── P4-3：发送节奏学习 ───────────────────────
     def pace_check(
         self,
@@ -563,6 +820,137 @@ class MessengerRpaStateStore:
         return {"distribution": dist, "low_credit_chats": low[:20],
                  "total_tracked": len(items)}
 
+    # ── 人工客服交接状态 ───────────────────────────
+    def _default_handoff(self, chat_key: str) -> Dict[str, Any]:
+        return {
+            "chat_key": str(chat_key or ""),
+            "account_id": self._account_id,
+            "owner": "",
+            "status": "new",
+            "line_status": "not_sent",
+            "priority": "",
+            "outcome": "",
+            "notes": "",
+            "next_followup_at": 0.0,
+            "updated_by": "",
+            "updated_at": 0.0,
+            "created_at": 0.0,
+        }
+
+    def get_handoff(self, chat_key: str) -> Dict[str, Any]:
+        """读取人工客服交接状态；没有记录时返回默认状态。"""
+        key = str(chat_key or "")
+        if not key:
+            return self._default_handoff("")
+        with self._lock, self._conn() as c:
+            row = c.execute(
+                "SELECT * FROM messenger_rpa_handoffs WHERE chat_key=?",
+                (key,),
+            ).fetchone()
+        if not row:
+            return self._default_handoff(key)
+        out = dict(row)
+        out["next_followup_at"] = float(out.get("next_followup_at") or 0)
+        out["updated_at"] = float(out.get("updated_at") or 0)
+        out["created_at"] = float(out.get("created_at") or 0)
+        return out
+
+    def upsert_handoff(
+        self,
+        chat_key: str,
+        *,
+        account_id: Optional[str] = None,
+        owner: Optional[str] = None,
+        status: Optional[str] = None,
+        line_status: Optional[str] = None,
+        priority: Optional[str] = None,
+        outcome: Optional[str] = None,
+        notes: Optional[str] = None,
+        next_followup_at: Optional[float] = None,
+        updated_by: str = "web",
+    ) -> Dict[str, Any]:
+        """保存人工客服交接状态，未传字段保留原值。"""
+        key = str(chat_key or "").strip()
+        if not key:
+            raise ValueError("chat_key is required")
+        cur = self.get_handoff(key)
+
+        def _text(value: Any, n: int) -> str:
+            return str(value or "").strip()[:n]
+
+        next_status = _text(status, 40) if status is not None else str(cur.get("status") or "new")
+        if next_status not in HANDOFF_STATUSES:
+            raise ValueError(f"invalid handoff status: {next_status}")
+        next_line_status = (
+            _text(line_status, 40)
+            if line_status is not None
+            else str(cur.get("line_status") or "not_sent")
+        )
+        if next_line_status not in LINE_HANDOFF_STATUSES:
+            raise ValueError(f"invalid line status: {next_line_status}")
+        next_priority = (
+            _text(priority, 20)
+            if priority is not None
+            else str(cur.get("priority") or "")
+        )
+        if next_priority not in HANDOFF_PRIORITIES:
+            raise ValueError(f"invalid priority: {next_priority}")
+        next_follow = float(cur.get("next_followup_at") or 0)
+        if next_followup_at is not None:
+            next_follow = max(0.0, float(next_followup_at or 0))
+
+        now = time.time()
+        record = {
+            "chat_key": key,
+            "account_id": _text(account_id, 120) if account_id is not None else str(cur.get("account_id") or self._account_id),
+            "owner": _text(owner, 120) if owner is not None else str(cur.get("owner") or ""),
+            "status": next_status,
+            "line_status": next_line_status,
+            "priority": next_priority,
+            "outcome": _text(outcome, 240) if outcome is not None else str(cur.get("outcome") or ""),
+            "notes": _text(notes, 10000) if notes is not None else str(cur.get("notes") or ""),
+            "next_followup_at": next_follow,
+            "updated_by": _text(updated_by, 120),
+            "updated_at": now,
+            "created_at": float(cur.get("created_at") or 0) or now,
+        }
+        with self._lock, self._conn() as c:
+            c.execute(
+                """
+                INSERT INTO messenger_rpa_handoffs
+                    (chat_key, account_id, owner, status, line_status, priority,
+                     outcome, notes, next_followup_at, updated_by, updated_at, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(chat_key) DO UPDATE SET
+                    account_id=excluded.account_id,
+                    owner=excluded.owner,
+                    status=excluded.status,
+                    line_status=excluded.line_status,
+                    priority=excluded.priority,
+                    outcome=excluded.outcome,
+                    notes=excluded.notes,
+                    next_followup_at=excluded.next_followup_at,
+                    updated_by=excluded.updated_by,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    record["chat_key"],
+                    record["account_id"],
+                    record["owner"],
+                    record["status"],
+                    record["line_status"],
+                    record["priority"],
+                    record["outcome"],
+                    record["notes"],
+                    record["next_followup_at"],
+                    record["updated_by"],
+                    record["updated_at"],
+                    record["created_at"],
+                ),
+            )
+            c.commit()
+        return record
+
     # ── run 历史 ────────────────────────────────
     def append_run(self, run: Dict[str, Any]) -> None:
         with self._lock, self._conn() as c:
@@ -624,6 +1012,595 @@ class MessengerRpaStateStore:
                 (key, str(value)),
             )
             c.commit()
+
+    # ── 自动人设策略运行服务 ───────────────────────
+    @staticmethod
+    def _json_dumps(data: Any) -> str:
+        try:
+            return json.dumps(data if data is not None else {}, ensure_ascii=False)
+        except Exception:
+            return "{}"
+
+    @staticmethod
+    def _json_loads(raw: Any, default: Any) -> Any:
+        if raw in (None, ""):
+            return default
+        try:
+            return json.loads(str(raw))
+        except Exception:
+            return default
+
+    @staticmethod
+    def _make_id(prefix: str, *parts: Any) -> str:
+        seed = "|".join(str(p) for p in parts) + f"|{time.time_ns()}"
+        digest = hashlib.sha1(seed.encode("utf-8", "ignore")).hexdigest()[:20]
+        return f"{prefix}_{digest}"
+
+    def upsert_strategy_account(
+        self,
+        *,
+        account_id: str,
+        label: str = "",
+        status: str = "active",
+        supported_languages: Optional[List[str]] = None,
+        supported_customer_types: Optional[List[str]] = None,
+        persona_ids: Optional[List[str]] = None,
+        health_score: float = 100.0,
+        current_load: int = 0,
+        daily_send_count: int = 0,
+        max_daily_send: int = 200,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        aid = str(account_id or "").strip()
+        if not aid:
+            raise ValueError("account_id is required")
+        now = time.time()
+        with self._lock, self._conn() as c:
+            c.execute(
+                """
+                INSERT INTO messenger_rpa_strategy_accounts
+                    (account_id, label, status, supported_languages_json,
+                     supported_customer_types_json, persona_ids_json,
+                     health_score, current_load, daily_send_count,
+                     max_daily_send, metadata_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(account_id) DO UPDATE SET
+                    label=excluded.label,
+                    status=excluded.status,
+                    supported_languages_json=excluded.supported_languages_json,
+                    supported_customer_types_json=excluded.supported_customer_types_json,
+                    persona_ids_json=excluded.persona_ids_json,
+                    health_score=excluded.health_score,
+                    current_load=excluded.current_load,
+                    daily_send_count=excluded.daily_send_count,
+                    max_daily_send=excluded.max_daily_send,
+                    metadata_json=excluded.metadata_json,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    aid,
+                    str(label or ""),
+                    str(status or "active"),
+                    self._json_dumps(supported_languages or []),
+                    self._json_dumps(supported_customer_types or []),
+                    self._json_dumps(persona_ids or []),
+                    float(health_score),
+                    int(current_load or 0),
+                    int(daily_send_count or 0),
+                    int(max_daily_send or 200),
+                    self._json_dumps(metadata or {}),
+                    now,
+                    now,
+                ),
+            )
+            c.commit()
+
+    def list_strategy_accounts(self) -> List[Dict[str, Any]]:
+        with self._lock, self._conn() as c:
+            rows = c.execute(
+                "SELECT * FROM messenger_rpa_strategy_accounts "
+                "ORDER BY updated_at DESC"
+            ).fetchall()
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            d = dict(r)
+            d["supported_languages"] = self._json_loads(
+                d.pop("supported_languages_json", "[]"), []
+            )
+            d["supported_customer_types"] = self._json_loads(
+                d.pop("supported_customer_types_json", "[]"), []
+            )
+            d["persona_ids"] = self._json_loads(d.pop("persona_ids_json", "[]"), [])
+            d["metadata"] = self._json_loads(d.pop("metadata_json", "{}"), {})
+            out.append(d)
+        return out
+
+    def upsert_persona(
+        self,
+        *,
+        persona_id: str,
+        name: str,
+        language: str = "auto",
+        customer_type: str = "",
+        facts: Optional[List[str]] = None,
+        persona: Optional[Dict[str, Any]] = None,
+        status: str = "active",
+    ) -> None:
+        pid = str(persona_id or "").strip()
+        if not pid:
+            raise ValueError("persona_id is required")
+        now = time.time()
+        with self._lock, self._conn() as c:
+            c.execute(
+                """
+                INSERT INTO messenger_rpa_personas
+                    (persona_id, name, language, customer_type, facts_json,
+                     persona_json, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(persona_id) DO UPDATE SET
+                    name=excluded.name,
+                    language=excluded.language,
+                    customer_type=excluded.customer_type,
+                    facts_json=excluded.facts_json,
+                    persona_json=excluded.persona_json,
+                    status=excluded.status,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    pid,
+                    str(name or pid),
+                    str(language or "auto"),
+                    str(customer_type or ""),
+                    self._json_dumps(facts or []),
+                    self._json_dumps(persona or {}),
+                    str(status or "active"),
+                    now,
+                    now,
+                ),
+            )
+            c.commit()
+
+    def list_personas(self, *, status: str = "active") -> List[Dict[str, Any]]:
+        sql = "SELECT * FROM messenger_rpa_personas"
+        params: Tuple[Any, ...] = ()
+        if status:
+            sql += " WHERE status=?"
+            params = (status,)
+        sql += " ORDER BY updated_at DESC"
+        with self._lock, self._conn() as c:
+            rows = c.execute(sql, params).fetchall()
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            d = dict(r)
+            d["facts"] = self._json_loads(d.pop("facts_json", "[]"), [])
+            d["persona"] = self._json_loads(d.pop("persona_json", "{}"), {})
+            out.append(d)
+        return out
+
+    def get_conversation_state(self, customer_id: str) -> Dict[str, Any]:
+        cid = str(customer_id or "").strip()
+        if not cid:
+            return {}
+        with self._lock, self._conn() as c:
+            row = c.execute(
+                "SELECT * FROM messenger_rpa_conversation_states "
+                "WHERE customer_id=?",
+                (cid,),
+            ).fetchone()
+        if not row:
+            return {}
+        d = dict(row)
+        d["recent_topics"] = self._json_loads(d.pop("recent_topics_json", "[]"), [])
+        d["used_persona_facts"] = self._json_loads(
+            d.pop("used_persona_facts_json", "[]"), []
+        )
+        d["metadata"] = self._json_loads(d.pop("metadata_json", "{}"), {})
+        return d
+
+    def list_conversation_states(self, limit: int = 100) -> List[Dict[str, Any]]:
+        lim = max(1, min(int(limit or 100), 1000))
+        with self._lock, self._conn() as c:
+            rows = c.execute(
+                "SELECT * FROM messenger_rpa_conversation_states "
+                "ORDER BY updated_at DESC LIMIT ?",
+                (lim,),
+            ).fetchall()
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            d = dict(r)
+            d["recent_topics"] = self._json_loads(d.pop("recent_topics_json", "[]"), [])
+            d["used_persona_facts"] = self._json_loads(
+                d.pop("used_persona_facts_json", "[]"), []
+            )
+            d["metadata"] = self._json_loads(d.pop("metadata_json", "{}"), {})
+            out.append(d)
+        return out
+
+    def update_conversation_state(
+        self,
+        customer_id: str,
+        *,
+        chat_key: str = "",
+        account_id: str = "",
+        persona_id: str = "",
+        customer_language: str = "",
+        customer_type: str = "",
+        stage: str = "new_lead",
+        memory_summary: str = "",
+        recent_topics: Optional[List[str]] = None,
+        used_persona_facts: Optional[List[str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        last_message_at: Optional[float] = None,
+    ) -> None:
+        cid = str(customer_id or "").strip()
+        if not cid:
+            raise ValueError("customer_id is required")
+        prev = self.get_conversation_state(cid)
+        now = time.time()
+        with self._lock, self._conn() as c:
+            c.execute(
+                """
+                INSERT INTO messenger_rpa_conversation_states
+                    (customer_id, chat_key, account_id, persona_id,
+                     customer_language, customer_type, stage, memory_summary,
+                     recent_topics_json, used_persona_facts_json, metadata_json,
+                     last_message_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(customer_id) DO UPDATE SET
+                    chat_key=excluded.chat_key,
+                    account_id=excluded.account_id,
+                    persona_id=excluded.persona_id,
+                    customer_language=excluded.customer_language,
+                    customer_type=excluded.customer_type,
+                    stage=excluded.stage,
+                    memory_summary=excluded.memory_summary,
+                    recent_topics_json=excluded.recent_topics_json,
+                    used_persona_facts_json=excluded.used_persona_facts_json,
+                    metadata_json=excluded.metadata_json,
+                    last_message_at=excluded.last_message_at,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    cid,
+                    chat_key or prev.get("chat_key", ""),
+                    account_id or prev.get("account_id", ""),
+                    persona_id or prev.get("persona_id", ""),
+                    customer_language or prev.get("customer_language", ""),
+                    customer_type or prev.get("customer_type", ""),
+                    stage or prev.get("stage", "new_lead"),
+                    memory_summary if memory_summary != "" else prev.get("memory_summary", ""),
+                    self._json_dumps(
+                        recent_topics if recent_topics is not None
+                        else prev.get("recent_topics", [])
+                    ),
+                    self._json_dumps(
+                        used_persona_facts if used_persona_facts is not None
+                        else prev.get("used_persona_facts", [])
+                    ),
+                    self._json_dumps(
+                        metadata if metadata is not None else prev.get("metadata", {})
+                    ),
+                    float(last_message_at if last_message_at is not None else prev.get("last_message_at", 0) or now),
+                    now,
+                    now,
+                ),
+            )
+            c.commit()
+
+    def enqueue_auto_run_message(
+        self,
+        *,
+        customer_id: str,
+        text: str,
+        chat_key: str = "",
+        language: str = "",
+        raw_payload: Optional[Dict[str, Any]] = None,
+        account_id: str = "",
+        persona_id: str = "",
+        stage: str = "",
+        strategy: Optional[Dict[str, Any]] = None,
+        priority: int = 50,
+        run_after: Optional[float] = None,
+        message_id: str = "",
+    ) -> str:
+        cid = str(customer_id or "").strip()
+        if not cid:
+            raise ValueError("customer_id is required")
+        msg_id = str(message_id or "").strip() or self._make_id("msg", cid, text[:80])
+        job_id = self._make_id("job", cid, msg_id)
+        now = time.time()
+        with self._lock, self._conn() as c:
+            c.execute(
+                """
+                INSERT OR IGNORE INTO messenger_rpa_incoming_messages
+                    (message_id, customer_id, chat_key, text, language,
+                     raw_payload_json, received_at, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    msg_id,
+                    cid,
+                    str(chat_key or ""),
+                    str(text or ""),
+                    str(language or ""),
+                    self._json_dumps(raw_payload or {}),
+                    now,
+                    now,
+                ),
+            )
+            c.execute(
+                """
+                INSERT INTO messenger_rpa_auto_run_jobs
+                    (job_id, customer_id, incoming_message_id, account_id,
+                     persona_id, stage, strategy_json, priority, status,
+                     run_after, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+                """,
+                (
+                    job_id,
+                    cid,
+                    msg_id,
+                    str(account_id or ""),
+                    str(persona_id or ""),
+                    str(stage or ""),
+                    self._json_dumps(strategy or {}),
+                    int(priority or 50),
+                    float(run_after if run_after is not None else now),
+                    now,
+                    now,
+                ),
+            )
+            c.commit()
+        return job_id
+
+    def lease_auto_run_jobs(
+        self,
+        *,
+        worker_id: str,
+        now_ts: Optional[float] = None,
+        limit: int = 10,
+    ) -> List[Dict[str, Any]]:
+        now = float(now_ts or time.time())
+        worker = str(worker_id or "worker")
+        lim = max(1, min(int(limit or 10), 100))
+        with self._lock, self._conn() as c:
+            rows = c.execute(
+                """
+                SELECT * FROM messenger_rpa_auto_run_jobs
+                WHERE status='pending' AND run_after<=?
+                ORDER BY priority DESC, created_at ASC
+                LIMIT ?
+                """,
+                (now, lim),
+            ).fetchall()
+            job_ids = [str(r["job_id"]) for r in rows]
+            if job_ids:
+                q = ",".join("?" for _ in job_ids)
+                c.execute(
+                    f"UPDATE messenger_rpa_auto_run_jobs "
+                    f"SET status='running', locked_by=?, locked_at=?, "
+                    f"attempts=attempts+1, updated_at=? "
+                    f"WHERE job_id IN ({q}) AND status='pending'",
+                    (worker, now, now, *job_ids),
+                )
+            c.commit()
+        return [self._hydrate_auto_run_job(dict(r)) for r in rows]
+
+    def _hydrate_auto_run_job(self, d: Dict[str, Any]) -> Dict[str, Any]:
+        d["strategy"] = self._json_loads(d.pop("strategy_json", "{}"), {})
+        return d
+
+    def list_auto_run_jobs(
+        self, *, status: str = "all", limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        lim = max(1, min(int(limit or 100), 1000))
+        params: List[Any] = []
+        sql = "SELECT * FROM messenger_rpa_auto_run_jobs"
+        if status and status != "all":
+            sql += " WHERE status=?"
+            params.append(status)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(lim)
+        with self._lock, self._conn() as c:
+            rows = c.execute(sql, tuple(params)).fetchall()
+        return [self._hydrate_auto_run_job(dict(r)) for r in rows]
+
+    def get_auto_run_job(self, job_id: str) -> Dict[str, Any]:
+        with self._lock, self._conn() as c:
+            row = c.execute(
+                "SELECT * FROM messenger_rpa_auto_run_jobs WHERE job_id=?",
+                (str(job_id),),
+            ).fetchone()
+        return self._hydrate_auto_run_job(dict(row)) if row else {}
+
+    def get_incoming_message(self, message_id: str) -> Dict[str, Any]:
+        with self._lock, self._conn() as c:
+            row = c.execute(
+                "SELECT * FROM messenger_rpa_incoming_messages WHERE message_id=?",
+                (str(message_id),),
+            ).fetchone()
+        if not row:
+            return {}
+        d = dict(row)
+        d["raw_payload"] = self._json_loads(d.pop("raw_payload_json", "{}"), {})
+        return d
+
+    def list_strategy_chat_runs(self, limit: int = 100) -> List[Dict[str, Any]]:
+        lim = max(1, min(int(limit or 100), 1000))
+        with self._lock, self._conn() as c:
+            rows = c.execute(
+                "SELECT * FROM messenger_rpa_chat_runs "
+                "ORDER BY created_at DESC LIMIT ?",
+                (lim,),
+            ).fetchall()
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            d = dict(r)
+            d["strategy"] = self._json_loads(d.pop("strategy_json", "{}"), {})
+            out.append(d)
+        return out
+
+    def mark_auto_run_job_done(self, job_id: str) -> None:
+        now = time.time()
+        with self._lock, self._conn() as c:
+            c.execute(
+                "UPDATE messenger_rpa_auto_run_jobs "
+                "SET status='done', updated_at=? WHERE job_id=?",
+                (now, str(job_id)),
+            )
+            c.commit()
+
+    def mark_auto_run_job_failed(
+        self, job_id: str, error: str, *, retry_after: Optional[float] = None
+    ) -> None:
+        now = time.time()
+        if retry_after is not None:
+            status = "pending"
+            run_after = float(retry_after)
+        else:
+            status = "failed"
+            run_after = now
+        with self._lock, self._conn() as c:
+            c.execute(
+                "UPDATE messenger_rpa_auto_run_jobs "
+                "SET status=?, run_after=?, last_error=?, updated_at=? "
+                "WHERE job_id=?",
+                (status, run_after, str(error or "")[:500], now, str(job_id)),
+            )
+            c.commit()
+
+    def retry_auto_run_job(
+        self, job_id: str, *, run_after: Optional[float] = None
+    ) -> bool:
+        now = time.time()
+        with self._lock, self._conn() as c:
+            cur = c.execute(
+                "UPDATE messenger_rpa_auto_run_jobs "
+                "SET status='pending', run_after=?, locked_by='', locked_at=0, "
+                "last_error='', updated_at=? WHERE job_id=?",
+                (float(run_after if run_after is not None else now), now, str(job_id)),
+            )
+            c.commit()
+            return cur.rowcount > 0
+
+    def cancel_auto_run_job(self, job_id: str, reason: str = "") -> bool:
+        now = time.time()
+        with self._lock, self._conn() as c:
+            cur = c.execute(
+                "UPDATE messenger_rpa_auto_run_jobs "
+                "SET status='canceled', last_error=?, locked_by='', "
+                "locked_at=0, updated_at=? WHERE job_id=?",
+                (str(reason or "canceled_by_operator")[:500], now, str(job_id)),
+            )
+            c.commit()
+            return cur.rowcount > 0
+
+    def record_strategy_chat_run(
+        self,
+        *,
+        customer_id: str,
+        status: str,
+        run_id: str = "",
+        job_id: str = "",
+        account_id: str = "",
+        persona_id: str = "",
+        previous_stage: str = "",
+        next_stage: str = "",
+        strategy: Optional[Dict[str, Any]] = None,
+        reply_text: str = "",
+        error: str = "",
+    ) -> str:
+        rid = str(run_id or "").strip() or self._make_id("run", customer_id, job_id)
+        now = time.time()
+        with self._lock, self._conn() as c:
+            c.execute(
+                """
+                INSERT INTO messenger_rpa_chat_runs
+                    (run_id, job_id, customer_id, account_id, persona_id,
+                     previous_stage, next_stage, strategy_json, reply_text,
+                     status, error, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    rid,
+                    str(job_id or ""),
+                    str(customer_id or ""),
+                    str(account_id or ""),
+                    str(persona_id or ""),
+                    str(previous_stage or ""),
+                    str(next_stage or ""),
+                    self._json_dumps(strategy or {}),
+                    str(reply_text or ""),
+                    str(status or "unknown"),
+                    str(error or "")[:500],
+                    now,
+                ),
+            )
+            c.commit()
+        return rid
+
+    def append_strategy_audit(
+        self,
+        *,
+        action: str,
+        target_type: str = "",
+        target_id: str = "",
+        actor: str = "",
+        before: Optional[Dict[str, Any]] = None,
+        after: Optional[Dict[str, Any]] = None,
+        note: str = "",
+    ) -> int:
+        now = time.time()
+        with self._lock, self._conn() as c:
+            cur = c.execute(
+                """
+                INSERT INTO messenger_rpa_strategy_audit
+                    (ts, actor, action, target_type, target_id,
+                     before_json, after_json, note)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    now,
+                    str(actor or "web"),
+                    str(action or ""),
+                    str(target_type or ""),
+                    str(target_id or ""),
+                    self._json_dumps(before or {}),
+                    self._json_dumps(after or {}),
+                    str(note or "")[:500],
+                ),
+            )
+            c.commit()
+            return int(cur.lastrowid or 0)
+
+    def list_strategy_audit(self, limit: int = 80) -> List[Dict[str, Any]]:
+        lim = max(1, min(int(limit or 80), 500))
+        with self._lock, self._conn() as c:
+            rows = c.execute(
+                "SELECT * FROM messenger_rpa_strategy_audit "
+                "ORDER BY ts DESC LIMIT ?",
+                (lim,),
+            ).fetchall()
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            d = dict(r)
+            d["before"] = self._json_loads(d.pop("before_json", "{}"), {})
+            d["after"] = self._json_loads(d.pop("after_json", "{}"), {})
+            out.append(d)
+        return out
+
+    def get_strategy_audit(self, audit_id: int) -> Dict[str, Any]:
+        with self._lock, self._conn() as c:
+            row = c.execute(
+                "SELECT * FROM messenger_rpa_strategy_audit WHERE id=?",
+                (int(audit_id),),
+            ).fetchone()
+        if not row:
+            return {}
+        d = dict(row)
+        d["before"] = self._json_loads(d.pop("before_json", "{}"), {})
+        d["after"] = self._json_loads(d.pop("after_json", "{}"), {})
+        return d
 
     # ── 审批队列（reply_mode=approve）────────────────
     def enqueue_approval(
@@ -1330,6 +2307,144 @@ class MessengerRpaStateStore:
             )
             c.commit()
             return cur.rowcount > 0
+
+    # ── B2: per-chat persona overrides（运营手动指定人设）──
+    def upsert_chat_persona_override(
+        self,
+        *,
+        chat_name: str,
+        reply_profile_id: str,
+        account_id: str = "",
+        bound_by: str = "web_admin",
+        notes: str = "",
+    ) -> bool:
+        """运营手动绑定 chat → reply_profile_id。覆盖原 match_names / default。"""
+        chat_name = (chat_name or "").strip()
+        reply_profile_id = (reply_profile_id or "").strip()
+        if not chat_name or not reply_profile_id:
+            return False
+        with self._lock, self._conn() as c:
+            c.execute(
+                """
+                INSERT INTO messenger_rpa_chat_persona_overrides
+                    (chat_name, account_id, reply_profile_id, bound_by, bound_at, notes)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(chat_name, account_id) DO UPDATE SET
+                    reply_profile_id = excluded.reply_profile_id,
+                    bound_by = excluded.bound_by,
+                    bound_at = excluded.bound_at,
+                    notes = excluded.notes
+                """,
+                (chat_name, account_id or "", reply_profile_id,
+                 bound_by, time.time(), notes),
+            )
+            c.commit()
+            return True
+
+    def get_chat_persona_override(
+        self, chat_name: str, account_id: str = "",
+    ) -> Optional[Dict[str, Any]]:
+        """读 chat 的运营指定 persona。优先匹配同 account_id，没有则匹配空 account_id。
+        返回 dict {chat_name, account_id, reply_profile_id, bound_by, bound_at, notes}。
+        """
+        chat_name = (chat_name or "").strip()
+        if not chat_name:
+            return None
+        with self._lock, self._conn() as c:
+            # 1. 优先精确 account_id 匹配
+            row = c.execute(
+                """SELECT chat_name, account_id, reply_profile_id, bound_by, bound_at, notes
+                   FROM messenger_rpa_chat_persona_overrides
+                   WHERE chat_name=? AND account_id=?""",
+                (chat_name, account_id or ""),
+            ).fetchone()
+            if not row and account_id:
+                # 2. fallback：account_id='' 的全局绑定
+                row = c.execute(
+                    """SELECT chat_name, account_id, reply_profile_id, bound_by, bound_at, notes
+                       FROM messenger_rpa_chat_persona_overrides
+                       WHERE chat_name=? AND account_id=''""",
+                    (chat_name,),
+                ).fetchone()
+            if not row:
+                return None
+            return {
+                "chat_name": row[0],
+                "account_id": row[1],
+                "reply_profile_id": row[2],
+                "bound_by": row[3],
+                "bound_at": row[4],
+                "notes": row[5] or "",
+            }
+
+    def remove_chat_persona_override(
+        self, chat_name: str, account_id: str = "",
+    ) -> bool:
+        chat_name = (chat_name or "").strip()
+        if not chat_name:
+            return False
+        with self._lock, self._conn() as c:
+            cur = c.execute(
+                "DELETE FROM messenger_rpa_chat_persona_overrides "
+                "WHERE chat_name=? AND account_id=?",
+                (chat_name, account_id or ""),
+            )
+            c.commit()
+            return cur.rowcount > 0
+
+    def list_chat_persona_overrides(
+        self, account_id: str = "",
+    ) -> List[Dict[str, Any]]:
+        """列出当前所有绑定。account_id='' 时列所有；否则只列该账号。"""
+        with self._lock, self._conn() as c:
+            if account_id:
+                rows = c.execute(
+                    """SELECT chat_name, account_id, reply_profile_id, bound_by, bound_at, notes
+                       FROM messenger_rpa_chat_persona_overrides
+                       WHERE account_id=? OR account_id=''
+                       ORDER BY bound_at DESC""",
+                    (account_id,),
+                ).fetchall()
+            else:
+                rows = c.execute(
+                    """SELECT chat_name, account_id, reply_profile_id, bound_by, bound_at, notes
+                       FROM messenger_rpa_chat_persona_overrides
+                       ORDER BY bound_at DESC""",
+                ).fetchall()
+            return [
+                {
+                    "chat_name": r[0],
+                    "account_id": r[1],
+                    "reply_profile_id": r[2],
+                    "bound_by": r[3],
+                    "bound_at": r[4],
+                    "notes": r[5] or "",
+                }
+                for r in rows
+            ]
+
+    def batch_upsert_chat_persona_overrides(
+        self,
+        bindings: List[Dict[str, Any]],
+        *,
+        bound_by: str = "web_admin",
+    ) -> int:
+        """批量绑定。bindings = [{chat_name, reply_profile_id, account_id?, notes?}, ...]
+        返回成功 upsert 的条数。"""
+        n = 0
+        for b in bindings or []:
+            try:
+                if self.upsert_chat_persona_override(
+                    chat_name=str(b.get("chat_name") or ""),
+                    reply_profile_id=str(b.get("reply_profile_id") or ""),
+                    account_id=str(b.get("account_id") or ""),
+                    bound_by=bound_by,
+                    notes=str(b.get("notes") or ""),
+                ):
+                    n += 1
+            except Exception:
+                continue
+        return n
 
     def mark_approval_sent(
         self,

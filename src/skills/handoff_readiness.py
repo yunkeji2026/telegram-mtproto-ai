@@ -1,19 +1,17 @@
-"""HandoffReadinessScorer — 判断"现在该不该发 LINE 引流话术"。
+"""HandoffReadinessScorer — 判断“现在该不该发 LINE 引流话术”。
 
-MVP 3 信号：
-  - turn_count      对方消息数（封顶 3 起 sat）
-  - intimacy_score  从 IntimacyEngine 读的 0-100 分
-  - goodbye_context 最近一条对方消息是告别语吗？
+双路 window_open 触发：
+  A）告别触发（原逻辑）：score ≥ threshold AND goodbye_context=True
+  B）LLM 情感深度触发（新）：画像 LLM 判断 handoff_ready=True
+                         AND rapport_score ≥ llm_rapport_threshold
+                         AND turn_count ≥ llm_min_turns
 
-window_open 规则（最重要）：
-  - score ≥ 70 **AND** 当前上下文是告别（goodbye_context=True）→ 开窗触发引流
-  - 其他情况：即使 score=100 也不开窗，等出现告别场景再说
-
-这样保证：关系到位 + 告别场景 + 自然时机三者齐备才引流。
+B 路径不需要告别语，适用于双方聊得正投入且自然过渡的场景。
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
@@ -52,6 +50,10 @@ _W_GOODBYE = 0.15
 _DEFAULT_TURN_SAT = 3        # 3 条 msg_in 即满
 _DEFAULT_OPEN_THRESHOLD = 70.0
 _INTIMACY_CACHE_TTL_S = 300  # 5 分钟内不重算 intimacy（复用 Journey 缓存值）
+
+# LLM 情感深度触发参数
+_DEFAULT_LLM_RAPPORT_THRESHOLD = 65   # rapport_score 必须 ≥ 此值才可触发
+_DEFAULT_LLM_MIN_TURNS = 5            # 至少 N 条 inbound 才允许 LLM 路径触发
 
 
 @dataclass
@@ -93,11 +95,15 @@ class HandoffReadinessScorer:
         *,
         turn_saturation: int = _DEFAULT_TURN_SAT,
         open_threshold: float = _DEFAULT_OPEN_THRESHOLD,
+        llm_rapport_threshold: int = _DEFAULT_LLM_RAPPORT_THRESHOLD,
+        llm_min_turns: int = _DEFAULT_LLM_MIN_TURNS,
     ) -> None:
         self._store = store
         self._intimacy = intimacy_engine
         self._turn_sat = max(1, int(turn_saturation))
         self._threshold = float(open_threshold)
+        self._llm_rapport_threshold = max(0, int(llm_rapport_threshold))
+        self._llm_min_turns = max(1, int(llm_min_turns))
 
     def evaluate(
         self,
@@ -135,7 +141,33 @@ class HandoffReadinessScorer:
         score_0_1 = max(0.0, min(1.0, score_0_1))
         score = round(score_0_1 * 100, 1)
 
+        # ── 路径 A：告别触发（原逻辑）
         window_open = (score >= self._threshold) and goodbye_hit
+        window_trigger = "goodbye" if window_open else ""
+
+        # ── 路径 B：LLM 情感深度触发
+        # 从 journey.context_snapshot_json 读取 PortraitExtractor 写入的字段
+        llm_rapport = 0
+        llm_handoff_ready = False
+        llm_handoff_reason = ""
+        try:
+            snap_json = str(getattr(j, "context_snapshot_json", "") or "") if j else ""
+            if snap_json:
+                snap = json.loads(snap_json)
+                llm_rapport = int(snap.get("rapport_score") or 0)
+                llm_handoff_ready = bool(snap.get("handoff_ready", False))
+                llm_handoff_reason = str(snap.get("handoff_reason") or "")
+        except Exception:
+            pass
+
+        if (
+            not window_open
+            and llm_handoff_ready
+            and llm_rapport >= self._llm_rapport_threshold
+            and turn_in >= self._llm_min_turns
+        ):
+            window_open = True
+            window_trigger = "llm_rapport"
 
         return ReadinessDecision(
             score=score,
@@ -145,6 +177,10 @@ class HandoffReadinessScorer:
                 "turn_count": turn_in,
                 "intimacy_score": intimacy_score,
                 "goodbye_hit": goodbye_hit,
+                "llm_rapport_score": llm_rapport,
+                "llm_handoff_ready": llm_handoff_ready,
+                "llm_handoff_reason": llm_handoff_reason,
+                "window_trigger": window_trigger,
             },
             threshold=self._threshold,
         )

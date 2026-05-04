@@ -95,3 +95,24 @@ def test_prompt_selects_occupation_before_age_in_early_turns():
 
     assert decision.result["next_question"] == "occupation"
     assert "普段どんなお仕事" in decision.prompt_block
+
+
+def test_lifestyle_and_child_age_infer_high_value_without_direct_income():
+    engine = LeadQualificationEngine(_cfg())
+    profile = {}
+    for text in [
+        "日本の港区に住んでいる女性です。娘は25歳で独立しました。",
+        "今は離婚して一人暮らしで、少し寂しい日もあります。",
+        "美容サロンを経営していて、ゴルフと海外旅行が好きです。",
+        "詳しく相談したいです。",
+    ]:
+        decision = engine.evaluate(profile, peer_text=text, reply_lang="ja")
+        profile = decision.profile
+
+    assert decision.score >= 80
+    assert profile["gender"] == "female"
+    assert profile["age_range"]
+    assert profile["occupation_tier"] == "high_income_signal"
+    assert profile["lifestyle_tags"]
+    assert "emotional_support" in profile["need_tags"]
+    assert "income_signal" not in profile["missing_fields"]

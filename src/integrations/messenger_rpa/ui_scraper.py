@@ -21,7 +21,7 @@ from __future__ import annotations
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from typing import Iterable, List, Optional, Tuple, Set
+from typing import Dict, Iterable, List, Optional, Tuple, Set
 
 # ── 常量：多语言兼容 ────────────────────────────────────────
 # 顶栏 Button 的 content-desc 总是以 "<peer>[, <status>], <suffix>" 的形式
@@ -66,6 +66,21 @@ _INPUT_HINT_DESCS = (
 )
 
 _THREAD_LIST_SNIPPET_MARKER = "SimpleTextThreadSnippet"
+
+# P2-C: Messenger 搜索结果区 section header 标签
+# key = 内部区名, value = 各语言封号（全小写精确匹配）
+_SEARCH_SECTION_HEADER_LABELS: Dict[str, Tuple[str, ...]] = {
+    "people": (
+        "people", "联系人", "联络人", "人物",
+        "persons", "contacts", "联系人和聊天",
+    ),
+    "messages": (
+        "messages", "消息", "訊息", "訊息", "メッセージ",
+    ),
+    "groups": (
+        "groups", "群组", "群组", "グループ",
+    ),
+}
 _SELF_PREFIX_MARKERS = (
     "你:", "你：",
     "You:", "You：",
@@ -74,9 +89,38 @@ _SELF_PREFIX_MARKERS = (
     "自分:", "自分：",
 )
 
+# Messenger uses these *full-sentence* previews for self-sent media (no colon).
+# Matching is case-insensitive startswith; kept lowercase here.
+_SELF_SENT_MEDIA_MARKERS = (
+    "you sent a voice message",
+    "you sent a photo",
+    "you sent a video",
+    "you sent a sticker",
+    "you sent a gif",
+    "you sent a file",
+    "you sent an attachment",
+    "you sent a link",
+    "你发送了语音",
+    "你发送了照片",
+    "你发送了视频",
+    "你发送了贴图",
+    "你发送了文件",
+    "你发送了链接",
+    "你發送了語音",
+    "你發送了照片",
+    "ボイスメッセージを送信しました",
+    "写真を送信しました",
+    "動画を送信しました",
+    "スタンプを送信しました",
+    "ファイルを送信しました",
+)
+
 
 def _self_prefixed_preview_has_text(preview: str) -> bool:
     text = (preview or "").strip()
+    # "You sent a voice message." etc. — always self
+    if text.lower().startswith(tuple(_SELF_SENT_MEDIA_MARKERS)):
+        return True
     for prefix in _SELF_PREFIX_MARKERS:
         if not text.startswith(prefix):
             continue
@@ -86,6 +130,39 @@ def _self_prefixed_preview_has_text(preview: str) -> bool:
         # not suppress a newer peer message below the unread separator.
         return any(ch.isalnum() for ch in payload)
     return False
+
+
+def _self_prefixed_preview_payload(preview: str) -> Tuple[bool, str]:
+    """Return ``(has_self_prefix, payload)`` for Messenger snippet previews."""
+    text = (preview or "").strip()
+    low = text.lower()
+    for marker in _SELF_SENT_MEDIA_MARKERS:
+        if low.startswith(marker):
+            return True, text  # entire text is the payload for media markers
+    for prefix in _SELF_PREFIX_MARKERS:
+        if text.startswith(prefix):
+            return True, text[len(prefix):].strip()
+    return False, ""
+
+
+def _looks_like_media_placeholder(payload: str) -> bool:
+    """True for Messenger's private-use icon snippets used for self media.
+
+    A self text message has a readable payload (letters/numbers/kana/hanzi).
+    Photos, stickers and some voice snippets often expose only a private-use
+    glyph such as ``\U000f0000``. Treating that as "not self" lets Vision OCR
+    text inside a screenshot and creates self-reply loops.
+    """
+    s = (payload or "").strip()
+    if not s:
+        return True
+    if any(ch.isalnum() for ch in s):
+        return False
+    for ch in s:
+        o = ord(ch)
+        if 0xE000 <= o <= 0xF8FF or 0xF0000 <= o <= 0xFFFFD or 0x100000 <= o <= 0x10FFFD:
+            return True
+    return len(s) <= 4
 
 
 @dataclass
@@ -149,6 +226,46 @@ def _normalize_peer_label(s: str) -> str:
             continue
         out.append(ch)
     return "".join(out).strip().casefold()
+
+
+def _find_search_section_boundaries(
+    root: ET.Element,
+) -> List[Tuple[int, str]]:
+    """P2-C: Messenger 搜索页 section header 的 Y 坐标。
+
+    返回 [(y_top, section_name), ...]，按 y_top 升序。
+    """
+    boundaries: List[Tuple[int, str]] = []
+    seen: set = set()
+    for el in root.iter():
+        t = (el.get("text") or "").strip()
+        cd = (el.get("content-desc") or "").strip()
+        label = (t or cd).lower()
+        if not label:
+            continue
+        for section, keywords in _SEARCH_SECTION_HEADER_LABELS.items():
+            if label in keywords and section not in seen:
+                b = _parse_bounds(el.get("bounds") or "")
+                if b and 80 < b.top < 1200:
+                    h = b.bottom - b.top
+                    w = b.right - b.left
+                    # section header 是短文本行，高度小且不充全屏
+                    if h <= 80 and w <= 500:
+                        boundaries.append((b.top, section))
+                        seen.add(section)
+                break
+    return sorted(boundaries, key=lambda x: x[0])
+
+
+def _get_result_section(y: int, boundaries: List[Tuple[int, str]]) -> str:
+    """P2-C: 返回 y 坐标所属的 section 名（'people'|'messages'|'groups'|'unknown'）。"""
+    section = "unknown"
+    for y_top, name in boundaries:
+        if y >= y_top:
+            section = name
+        else:
+            break
+    return section
 
 
 def _search_noise_substrings(s: str) -> bool:
@@ -255,6 +372,9 @@ def find_search_suggestion_taps(
 
     raw: List[Tuple[int, int, int, str, int]] = []  # score, cx, cy, reason, top
 
+    # P2-C: 先扫描 section 边界并利用其修正分数
+    section_boundaries = _find_search_section_boundaries(root)
+
     for el in root.iter():
         t = (el.get("text") or "").strip()
         cd = (el.get("content-desc") or "").strip()
@@ -320,7 +440,19 @@ def find_search_suggestion_taps(
                 reason = "weak_substr"
 
         if score > 0:
-            raw.append((score, b.cx, b.cy, reason, b.top))
+            # P2-C: 修正 section 加成
+            sec = _get_result_section(b.top, section_boundaries)
+            if sec == "people":
+                score = min(100, score + 15)
+                reason = f"{reason}+people"
+            elif sec == "messages":
+                score = max(0, score - 20)
+                reason = f"{reason}+msg_section"
+            elif sec == "groups":
+                score = max(0, score - 10)
+                reason = f"{reason}+groups"
+            if score > 0:
+                raw.append((score, b.cx, b.cy, reason, b.top))
 
     raw.sort(key=lambda r: (-r[0], r[4]))
     out: List[Tuple[int, int, int, str]] = []
@@ -445,6 +577,8 @@ class ThreadRow:
     preview: str       # SimpleTextThreadSnippet 里的 text= 内容
     is_self_last: bool  # 最后一条是我方发的（"你: xxx" 前缀）
     raw_desc: str
+    has_self_prefix: bool = False
+    is_self_media_placeholder: bool = False
 
     @property
     def center(self) -> Tuple[int, int]:
@@ -483,9 +617,15 @@ def iter_inbox_rows(
             continue
         m = _SNIPPET_PAT.search(cd)
         preview = m.group(1).strip() if m else ""
+        has_self_prefix, self_payload = _self_prefixed_preview_payload(preview)
         is_self = _self_prefixed_preview_has_text(preview)
         rows.append(ThreadRow(
             bounds=b, preview=preview, is_self_last=is_self, raw_desc=cd,
+            has_self_prefix=has_self_prefix,
+            is_self_media_placeholder=(
+                has_self_prefix and not is_self
+                and _looks_like_media_placeholder(self_payload)
+            ),
         ))
     return rows
 
@@ -594,6 +734,75 @@ def last_bubble_preview(
     return t, f"{side} bottom={b.bottom} len={len(t)}"
 
 
+# ── Thread 内：Message Request "Accept" 按钮 ──────────────
+# Messenger 的陌生人消息请求在聊天底部显示 Accept / Block / Delete 等按钮，
+# 正常输入框被这些按钮替代。需要先点 Accept 才能显示输入框。
+# 按钮可能以 Button（text= 或 content-desc=）形式出现，也可能是
+# 带 clickable=true 的 ViewGroup/TextView。
+_MSG_REQUEST_ACCEPT_LABELS = {
+    # English
+    "accept", "reply",
+    # 简体中文
+    "接受", "回复",
+    # 繁体中文
+    "接受", "回覆",
+    # 日本語
+    "承認", "返信",
+    # 韓国語
+    "수락", "답장",
+    # Français
+    "accepter", "répondre",
+}
+_MSG_REQUEST_BLOCK_LABELS = {
+    "block", "delete", "屏蔽", "删除", "刪除", "ブロック", "削除",
+    "차단", "삭제", "bloquer", "supprimer",
+}
+
+
+def find_message_request_accept(
+    xml: bytes | str | ET.Element,
+    *,
+    screen_h: int = 1600,
+) -> Optional[Bounds]:
+    """检测 Message Request 页面并返回 Accept 按钮的 bbox。
+
+    判定逻辑：
+    1. 屏幕下半区（y > screen_h * 0.5）找到 text/content-desc 匹配
+       Accept 标签的可点击元素
+    2. 同一区域还存在 Block/Delete 按钮（确认是 message request 界面
+       而非误命中）
+
+    返回 Accept 按钮 bbox；未检测到返回 None。
+    """
+    root = xml if isinstance(xml, ET.Element) else parse_xml(xml)
+    if root is None:
+        return None
+
+    y_threshold = int(screen_h * 0.5)
+    accept_btn: Optional[Bounds] = None
+    has_block_or_delete = False
+
+    for el in root.iter():
+        text = (el.get("text") or "").strip()
+        cd = (el.get("content-desc") or "").strip()
+        label = (text or cd).casefold()
+        if not label:
+            continue
+        b = _parse_bounds(el.get("bounds") or "")
+        if not b or b.top < y_threshold:
+            continue
+        if label in _MSG_REQUEST_ACCEPT_LABELS:
+            if accept_btn is None or b.bottom > accept_btn.bottom:
+                accept_btn = b
+        if label in _MSG_REQUEST_BLOCK_LABELS:
+            has_block_or_delete = True
+
+    # 只有同时看到 Accept + Block/Delete 才确认是 Message Request 界面
+    if accept_btn is not None and has_block_or_delete:
+        return accept_btn
+    return None
+
+
 __all__ = [
     "Bounds",
     "InputBoxState",
@@ -606,6 +815,7 @@ __all__ = [
     "iter_inbox_rows",
     "latest_snippet_row",
     "find_button_by_desc",
+    "find_message_request_accept",
     "is_in_thread",
     "last_bubble_preview",
 ]

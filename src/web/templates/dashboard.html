@@ -281,6 +281,18 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
     <div style="display:flex;gap:.5rem;flex-wrap:wrap;font-size:.75rem" id="bm-trigger-layers"></div>
     <div style="display:flex;gap:.7rem;flex-wrap:wrap;font-size:.73rem;color:var(--t2);margin-top:.4rem" id="bm-quality"></div>
     <div id="bm-memory" style="font-size:.73rem;color:var(--t2);margin-top:.35rem;line-height:1.45"></div>
+    <!-- ★ W2-D5.6：陪护模式三层 metrics 卡片 -->
+    <div id="bm-companion" style="display:none;margin-top:.6rem;padding:.55rem .65rem;background:var(--input);border-radius:8px;border-left:3px solid var(--p);font-size:.73rem;line-height:1.55"></div>
+    <!-- ★ W3-D1.3：reactivation dry_run 样本审核面板 -->
+    <details id="bm-dry-samples" style="margin-top:.5rem;font-size:.73rem">
+      <summary style="cursor:pointer;color:var(--t2);user-select:none">
+        待审核话术 <span id="bm-dry-count" style="color:var(--t3)">(–)</span>
+        <button class="btn btn-s btn-xs" style="margin-left:.6rem;padding:.1rem .5rem;font-size:.65rem" onclick="event.preventDefault();loadDrySamples(true)">刷新</button>
+      </summary>
+      <div id="bm-dry-list" style="margin-top:.5rem;display:flex;flex-direction:column;gap:.4rem">
+        <div style="color:var(--t3)">点开后按"刷新"加载</div>
+      </div>
+    </details>
   </div>
 </div>
 
@@ -706,9 +718,186 @@ async function loadBotMetrics(){
       const saStr=(sat>0||saw>0||sal!=null)?(' · 基线 <b>'+sat+'</b>/<b style="color:'+(saw>0?'var(--amber)':'inherit')+'">'+saw+'</b> · 审计 <b>'+(sal==null?'—':sal)+'</b>'):'';
       mEl.innerHTML='记忆 · 慢思考 <b>'+st+'</b> · 注入 <b>'+ej+'</b> · 嵌入失败 <b style="color:'+(ef>0?'var(--amber)':'inherit')+'">'+ef+'</b> · 补全 <b>'+bf+'</b> · <a href="/episodic-memory" style="color:var(--p)">情景记忆</a>'+saStr;
     }
+    // ★ W2-D5.6 + D6.5：companion 三层 metrics + sparkline 趋势
+    try{
+      const css=d.companion_safe_skip||{};
+      const dq=d.deferred_queue||{};
+      const re=d.reactivation||{};
+      const pa=d.pacing||{};
+      const cEl=document.getElementById('bm-companion');
+      // SVG sparkline 渲染器：12 个 5min 桶 → 60×16 px 的微型柱图
+      // 每个 rect 含 <title> 子元素，鼠标悬停显示该桶的时间区间和计数
+      function spark(arr,color){
+        if(!arr||!arr.length)return '';
+        const max=Math.max(1,...arr);
+        const w=60, h=16, n=arr.length, bw=w/n, bucketMin=5;
+        const bars=arr.map((v,i)=>{
+          const bh=Math.max(1,Math.round(v/max*h));
+          // i=0 是最早的桶（60 min 前），i=n-1 是当前
+          const minAgo=(n-1-i)*bucketMin;
+          const minAgoEnd=minAgo+bucketMin;
+          const tip=`${minAgoEnd}~${minAgo} min 前: ${v} 条`;
+          return `<rect x="${(i*bw).toFixed(1)}" y="${h-bh}" width="${(bw-0.6).toFixed(1)}" height="${bh}" fill="${color}"><title>${tip}</title></rect>`;
+        }).join('');
+        return `<svg width="${w}" height="${h}" style="vertical-align:middle;margin-left:.4rem">${bars}</svg>`;
+      }
+      if(cEl){
+        const hasAny=(css.total||0)>0 || (dq.total||0)>0 || (re.scheduled_24h||0)>0 || (re.last_run_ts||0)>0 || (pa.count||0)>0;
+        if(!hasAny){ cEl.style.display='none'; }
+        else{
+          cEl.style.display='';
+          const cssRate=css.rate_1h||0;
+          const cssColor=cssRate>10?'var(--red)':(cssRate>3?'var(--amber)':'var(--green)');
+          const cssTopReason=Object.entries(css.by_reason||{}).sort((a,b)=>b[1]-a[1])[0];
+          const cssReasonStr=cssTopReason?(' · 主因 '+cssTopReason[0]+' ×'+cssTopReason[1]):'';
+          const dqAccPairs=Object.entries(dq.by_account||{});
+          const dqByAcc=dqAccPairs.length?(' ('+dqAccPairs.map(([k,v])=>k+':'+v).join(',')+')'):'';
+          const reLast=re.last_run_ts?new Date(re.last_run_ts*1000).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}):'—';
+          // reactivation 回复率（D6-1）+ intimacy 分桶（D7-2）
+          const rs=re.response_stats||{};
+          let rsStr='';
+          if(rs.sent>0){
+            rsStr=' · 24h 回复率 <b>'+rs.response_rate_pct+'%</b> ('+rs.responded+'/'+rs.sent+')';
+            const byI=rs.by_intimacy||{};
+            const tiers=[];
+            for(const [k,label] of [['high','高'],['mid','中'],['low','低']]){
+              const t=byI[k]||{};
+              if((t.sent||0)>0) tiers.push(label+' '+t.rate_pct+'% ('+t.responded+'/'+t.sent+')');
+            }
+            if(tiers.length) rsStr+=' · 分层 '+tiers.join(' / ');
+          }
+          // feedback (D6-2)
+          const fb=re.feedback_1h||{};
+          const fbStr=(fb.like||fb.dislike)?(' · 反馈 👍'+fb.like+' 👎'+fb.dislike):'';
+          cEl.innerHTML=
+            '<div><b>陪护 safe_skip</b> · 累计 '+(css.total||0)+' · 1h 速率 <b style="color:'+cssColor+'">'+cssRate+'</b>'+cssReasonStr+spark(css.sparkline_1h,'var(--amber)')+'</div>'+
+            '<div style="margin-top:.25rem"><b>延迟队列</b> · 当前 '+(dq.total||0)+' 条'+dqByAcc+' · 1h 已发 <b>'+(dq.drained_1h||0)+'</b> · 失败 <b style="color:'+((dq.failed_1h||0)>0?'var(--amber)':'inherit')+'">'+(dq.failed_1h||0)+'</b>'+spark(dq.drained_sparkline_1h,'var(--green)')+'</div>'+
+            '<div style="margin-top:.25rem"><b>主动唤醒</b> · 1h <b>'+(re.scheduled_1h||0)+'</b> · 24h <b>'+(re.scheduled_24h||0)+'</b> · dry_run <b style="color:var(--amber)">'+(re.dry_run_1h||0)+'</b>'+rsStr+fbStr+' · 上次 '+reLast+spark(re.sparkline_1h,'var(--p)')+'</div>'+
+            ((pa.count||0)>0?(()=>{
+              const b=pa.buckets||{};
+              const distStr=Object.entries(b).filter(([_k,v])=>v>0).map(([k,v])=>`${k}:${v}`).join(' / ');
+              const distHtml=distStr?(' · 分布 '+distStr):'';
+              return '<div style="margin-top:.25rem;color:var(--t3)"><b>pacing</b> · 样本 '+pa.count+' · 平均 '+pa.avg_sec+'s · P50 '+pa.p50_sec+'s · P95 '+pa.p95_sec+'s'+distHtml+'</div>';
+            })():'');
+        }
+      }
+    }catch(_e){}
     document.getElementById('metrics-ts').textContent='更新: '+new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
   }catch(e){}
 }
+// ★ W3-D1.3 + D2.3 + D3.5：dry_run 样本审核（增量加载，避免每次重拉）
+const _dryPageSize=20;
+let _dryShown=[];  // 已显示的样本数组（最新在前）
+
+function _esc(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+function _renderSample(s){
+  const ts=s.ts||0;
+  const tsLabel=s.ts_iso?new Date(ts*1000).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-';
+  return `<div data-ts="${ts}" style="padding:.5rem .55rem;background:var(--input);border-radius:6px;border-left:3px solid var(--t3)">
+    <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;font-size:.7rem;color:var(--t3)">
+      <span><b style="color:var(--t)">${_esc(s.chat_name||'?')}</b></span>
+      <span>· ${tsLabel}</span>
+      <span>· 沉默 ${(s.silent_days||0).toFixed(1)}d</span>
+      <span>· 亲密 ${Math.round(s.intimacy||0)}</span>
+      <span>· ${_esc(s.lang||'')}</span>
+      <span style="margin-left:auto" class="dry-fb-btns">
+        <button class="btn btn-s btn-xs" data-v="like" onclick="submitDryFb(this,${ts},'like')" style="padding:.15rem .5rem">👍</button>
+        <button class="btn btn-s btn-xs" data-v="dislike" onclick="submitDryFb(this,${ts},'dislike')" style="padding:.15rem .5rem">👎</button>
+      </span>
+    </div>
+    <div style="margin-top:.4rem;font-size:.78rem;line-height:1.45;color:var(--t)">${_esc(s.reply_text||'')}</div>
+  </div>`;
+}
+
+function _renderList(){
+  const list=document.getElementById('bm-dry-list');
+  const cnt=document.getElementById('bm-dry-count');
+  if(!list)return;
+  if(cnt)cnt.textContent='('+_dryShown.length+')';
+  if(!_dryShown.length){
+    list.innerHTML='<div style="color:var(--t3)">还没有 dry_run 样本（reactivation.enabled=true && dry_run=true 后等几分钟）</div>';
+    return;
+  }
+  const items=_dryShown.map(_renderSample).join('');
+  const more=`<button class="btn btn-s btn-xs" style="margin-top:.3rem;padding:.2rem .8rem" onclick="event.preventDefault();loadMoreDry()">加载更早 (+${_dryPageSize})</button>`;
+  list.innerHTML=items+more;
+}
+
+async function loadDrySamples(reset){
+  const list=document.getElementById('bm-dry-list');
+  if(!list)return;
+  if(reset){
+    _dryShown=[];
+    list.innerHTML='<div style="color:var(--t3)">加载中...</div>';
+  }
+  try{
+    const r=await fetch('/api/reactivation/dry-run-samples?limit='+_dryPageSize,{credentials:'same-origin'});
+    if(!r.ok){list.innerHTML='<div style="color:var(--red)">加载失败</div>';return;}
+    const d=await r.json();
+    _dryShown=d.samples||[];
+    _renderList();
+  }catch(e){
+    list.innerHTML='<div style="color:var(--red)">'+_esc(String(e))+'</div>';
+  }
+}
+
+async function loadMoreDry(){
+  // ★ W3-D3.5：增量加载 — 用最早一条的 ts 作为 before_ts
+  const earliest=_dryShown.length?_dryShown[_dryShown.length-1].ts:0;
+  if(!earliest)return;
+  try{
+    const r=await fetch('/api/reactivation/dry-run-samples?limit='+_dryPageSize+'&before_ts='+earliest,{credentials:'same-origin'});
+    if(!r.ok)return;
+    const d=await r.json();
+    const more=d.samples||[];
+    if(!more.length){
+      // 没有更多了，把"加载更早"按钮替换成提示
+      const list=document.getElementById('bm-dry-list');
+      if(list){
+        const btn=list.querySelector('button.btn');
+        if(btn) btn.outerHTML='<div style="color:var(--t3);font-size:.7rem;margin-top:.3rem">已加载全部</div>';
+      }
+      return;
+    }
+    _dryShown=_dryShown.concat(more);
+    _renderList();
+  }catch(_){}
+}
+
+async function submitDryFb(btn,ts,verdict){
+  const wrap=btn.closest('div[data-ts]');
+  const btns=btn.parentElement;
+  if(btns){btns.querySelectorAll('button').forEach(b=>{b.disabled=true;});}
+  const csrf=(document.cookie.match(/csrf_token=([^;]+)/)||[])[1]||'';
+  try{
+    const r=await fetch('/api/reactivation/dry-run-feedback',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},
+      credentials:'same-origin',
+      body:JSON.stringify({sample_ts:ts,verdict:verdict}),
+    });
+    if(r.ok){
+      if(btns){
+        // ★ W3-D2.3：dislike 时显示"已加入黑名单（重启后清空）"
+        const tip=verdict==='dislike'
+          ? '已反馈 👎 · 已加入内存黑名单（下次类似话术会重生成；重启后清空）'
+          : '已反馈 👍';
+        btns.innerHTML='<span style="color:'+(verdict==='like'?'var(--green)':'var(--amber)')+';font-size:.65rem">'+tip+'</span>';
+      }
+      if(wrap){
+        wrap.style.opacity='.55';
+        if(verdict==='dislike') wrap.style.borderLeftColor='var(--amber)';
+        else wrap.style.borderLeftColor='var(--green)';
+      }
+    }else{
+      if(btns){btns.querySelectorAll('button').forEach(b=>{b.disabled=false;});}
+    }
+  }catch(_){
+    if(btns){btns.querySelectorAll('button').forEach(b=>{b.disabled=false;});}
+  }
+}
+
 const _isSimple=document.documentElement.getAttribute('data-ui-mode')==='simple';
 if(!_isSimple){loadBotMetrics();}
 let _bmTimer=_isSimple?null:setInterval(loadBotMetrics,15000);

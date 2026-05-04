@@ -53,6 +53,7 @@ class MessengerRpaService:
         self._primary_account_id: str = primary.account_id
         # 主 account 的 state store 作为 self._state（完全兼容旧调用者）
         self._state: MessengerRpaStateStore = primary.state_store()
+        self._seed_strategy_runtime_config()
         # ★ _telegram_client 必须在 _get_or_create_runner 之前赋初值（它会读）
         self._telegram_client: Optional[Any] = None
         # ★ P6-1：Runner factory —— 按 account_id 懒加载 + 缓存
@@ -71,6 +72,8 @@ class MessengerRpaService:
         self._last_run_map: Dict[str, Dict[str, Any]] = {}
         self._task: Optional[asyncio.Task] = None
         self._notif_task: Optional[asyncio.Task] = None
+        # ★ W2-D2.1：deferred 队列独立 drain loop（陪护模式）
+        self._drain_task: Optional[asyncio.Task] = None
         # P7-1：leader lock + standby 等待 task
         self._leader_lock: Optional[Any] = None
         self._standby_task: Optional[asyncio.Task] = None
@@ -83,6 +86,16 @@ class MessengerRpaService:
         self._last_tick_ts: float = 0.0
         self._last_notif_event_ts: float = 0.0
         self._notif_event_count: int = 0
+        # ★ 账号级暂停 + UI 安全状态
+        self._account_pause_until: Dict[str, float] = {}
+        self._account_ui_unsafe: set = set()
+        # ★ 跨账号协调器：共享画像 + 同用户聊天互斥
+        try:
+            from src.integrations.messenger_rpa.cross_account import CrossAccountCoordinator
+            self._coordinator = CrossAccountCoordinator()
+        except Exception:
+            logger.warning("CrossAccountCoordinator 构建失败，跨账号功能禁用", exc_info=True)
+            self._coordinator = None
         # P0-4: 设备掉线告警追踪
         self._consecutive_unhealthy: int = 0
         self._last_unhealthy_alert_ts: float = 0.0
@@ -96,6 +109,74 @@ class MessengerRpaService:
         # 已推送过的超时 approval id（避免同一条重复告警）
         self._sla_alerted_ids: set = set()
         self._sla_alert_total: int = 0
+
+    def _seed_strategy_runtime_config(self) -> None:
+        """Mirror local account/persona config into the strategy DB tables.
+
+        This is intentionally idempotent. It lets the existing YAML remain the
+        source of truth during migration while new backend workers can read the
+        same account/persona data from SQLite.
+        """
+        try:
+            for ctx in self._account_registry.all_contexts():
+                store = ctx.state_store()
+                send_stats = {}
+                try:
+                    send_stats = store.get_send_stats()
+                except Exception:
+                    send_stats = {}
+                store.upsert_strategy_account(
+                    account_id=ctx.account_id,
+                    label=ctx.label,
+                    status=ctx.status,
+                    supported_languages=list(ctx.supported_languages or []),
+                    supported_customer_types=list(
+                        ctx.supported_customer_types or []
+                    ),
+                    persona_ids=list(ctx.persona_ids or []),
+                    health_score=float(ctx.health_score or 100),
+                    current_load=int(ctx.current_load or 0),
+                    daily_send_count=int(send_stats.get("count") or 0),
+                    max_daily_send=int(ctx.max_daily_send or 200),
+                    metadata={
+                        "adb_serial": ctx.adb_serial,
+                        "reply_profile_id": ctx.reply_profile_id,
+                        "device_alias": ctx.device_alias,
+                        "login_account": ctx.login_account,
+                    },
+                )
+            profiles = (
+                (self._merged_cfg.get("reply_profiles") or {}).get("profiles")
+                if isinstance(self._merged_cfg.get("reply_profiles"), dict)
+                else []
+            )
+            if isinstance(profiles, list):
+                for p in profiles:
+                    if not isinstance(p, dict):
+                        continue
+                    pid = str(p.get("id") or p.get("name") or "").strip()
+                    if not pid:
+                        continue
+                    persona = p.get("persona") if isinstance(p.get("persona"), dict) else {}
+                    facts = []
+                    try:
+                        from src.integrations.messenger_rpa.persona_runtime import (
+                            flatten_persona_facts,
+                        )
+                        facts = flatten_persona_facts(persona)
+                    except Exception:
+                        facts = []
+                    self._state.upsert_persona(
+                        persona_id=pid,
+                        name=str((persona or {}).get("name") or pid),
+                        language=str(p.get("language") or "auto"),
+                        customer_type=str(p.get("customer_type") or ""),
+                        facts=facts,
+                        persona=persona,
+                        status=str(p.get("status") or "active"),
+                    )
+        except Exception:
+            logger.debug("[messenger_rpa] strategy runtime config seed failed", exc_info=True)
 
     def configured_adb_serials(self) -> List[str]:
         """所有 account 中显式绑定的串号，有序去重（运维 /devices 用）。"""
@@ -188,6 +269,156 @@ class MessengerRpaService:
                 )
                 break
 
+    def coordinator_snapshot(self) -> Dict[str, Any]:
+        """跨账号协调器快照：当前活跃聊天 + 画像缓存概况。"""
+        coord = getattr(self, "_coordinator", None)
+        if coord is None:
+            return {"enabled": False}
+        snap = coord.snapshot()
+        snap["enabled"] = True
+        return snap
+
+    # ―― 账号级暂停 / 恢复 / UI 安全 ――――――――――――――――――――――――――――───────────────────────────
+
+    def pause_account(self, account_id: str, seconds: float = 300.0) -> None:
+        """暂停单个账号 N 秒（不影响其他账号的轮询节奏）。"""
+        self._account_pause_until[account_id] = time.time() + max(0.0, float(seconds))
+        logger.info("[messenger_rpa] account=%s 暂停 %.0fs", account_id, seconds)
+
+    def resume_account(self, account_id: str) -> None:
+        """恢复单个账号，同时清除 ui_unsafe 标记。"""
+        self._account_pause_until.pop(account_id, None)
+        self._account_ui_unsafe.discard(account_id)
+        logger.info("[messenger_rpa] account=%s 已恢复", account_id)
+
+    def mark_account_ui_unsafe(self, account_id: str, pause_sec: float = 300.0) -> None:
+        """标记账号 UI 不安全（误点相机后自动调用），并暂停 pause_sec 秒。
+
+        账号保持 paused 直到运营在看板点击「清除 unsafe / 恢复」。
+        """
+        self._account_ui_unsafe.add(account_id)
+        self.pause_account(account_id, pause_sec)
+        logger.error(
+            "[messenger_rpa] ★ account=%s 已标记 ui_unsafe，自动暂停 %.0fs。"
+            "请在看板确认设备正常后手动恢复。",
+            account_id, pause_sec,
+        )
+
+    def clear_account_ui_unsafe(self, account_id: str) -> None:
+        """清除 ui_unsafe 标记（运营确认设备正常后调用，不自动恢复暂停）。"""
+        self._account_ui_unsafe.discard(account_id)
+        logger.info("[messenger_rpa] account=%s ui_unsafe 标记已清除", account_id)
+
+    def account_states(self) -> Dict[str, Any]:
+        """返回每个账号的暂停 / unsafe 状态快照（供 status() 和健康 API 使用）。"""
+        now = time.time()
+        out: Dict[str, Any] = {}
+        for ctx in self._account_registry.all_contexts():
+            aid = ctx.account_id
+            paused_until = self._account_pause_until.get(aid, 0.0)
+            out[aid] = {
+                "account_id": aid,
+                "label": ctx.label,
+                "adb_serial": ctx.adb_serial,
+                "paused": paused_until > now,
+                "paused_until": paused_until,
+                "paused_left_sec": max(0.0, paused_until - now),
+                "ui_unsafe": aid in self._account_ui_unsafe,
+                "last_run": dict(self._last_run_map.get(aid, {})),
+                "cur_iv_sec": self._cur_iv_map.get(aid, 0.0),
+                "consecutive_empty": self._consecutive_empty_map.get(aid, 0),
+            }
+        return out
+
+    async def accounts_health(self, *, deep: bool = False) -> Dict[str, Any]:
+        """对所有已注册账号执行健康检查，返回每台手机的状态。
+
+        ``deep=False`` (默认)：仅做 ADB 快速探测（~1s）+ 内部状态快照。
+        ``deep=True``：额外检查屏幕点亮、锁屏、ADB Keyboard（~3-5s）。
+        """
+        from src.integrations.messenger_rpa.device_health import probe_devices
+
+        ctxs = self._account_registry.all_contexts()
+        serials = [ctx.adb_serial for ctx in ctxs if ctx.adb_serial]
+
+        probe_result: Dict[str, Any] = {}
+        try:
+            loop = asyncio.get_running_loop()
+            probe_result = await loop.run_in_executor(
+                None,
+                lambda: probe_devices(serials),
+            )
+        except Exception as ex:
+            logger.warning("[messenger_rpa] accounts_health probe_devices 失败: %s", ex)
+
+        now = time.time()
+        accounts_out: Dict[str, Any] = {}
+        for ctx in ctxs:
+            aid = ctx.account_id
+            serial = ctx.adb_serial or ""
+            probe = probe_result.get(serial, {}) if serial else {}
+
+            paused_until = self._account_pause_until.get(aid, 0.0)
+            ui_unsafe = aid in self._account_ui_unsafe
+            present = bool(probe.get("present", False))
+
+            item: Dict[str, Any] = {
+                "account_id": aid,
+                "label": ctx.label,
+                "adb_serial": serial or "(none)",
+                "adb_state": probe.get("adb_state", "no_serial" if not serial else "not_listed"),
+                "present": present,
+                "screen_on": probe.get("screen_on"),
+                "locked": probe.get("locked"),
+                "paused": paused_until > now,
+                "paused_until": paused_until,
+                "paused_left_sec": max(0.0, paused_until - now),
+                "ui_unsafe": ui_unsafe,
+                "last_run_step": (self._last_run_map.get(aid, {}) or {}).get("step", ""),
+                "last_run_ts": (self._last_run_map.get(aid, {}) or {}).get("ts", 0),
+            }
+
+            if deep and present:
+                try:
+                    loop = asyncio.get_running_loop()
+                    from src.integrations.messenger_rpa.text_input import precheck_text_input
+                    kbd = await loop.run_in_executor(
+                        None,
+                        lambda s=serial: precheck_text_input(
+                            s, auto_install_adbkeyboard=False,
+                        ),
+                    )
+                    item["adbkeyboard_installed"] = kbd.get("adbkeyboard_installed", False)
+                    item["unicode_ok"] = kbd.get("unicode_ok", False)
+                    item["input_paths"] = kbd.get("available_paths", [])
+                except Exception as ex:
+                    item["adbkeyboard_check_error"] = f"{type(ex).__name__}: {ex}"
+
+            reasons: List[str] = []
+            if not serial:
+                reasons.append("no_serial_configured")
+            elif not present:
+                reasons.append(item["adb_state"])
+            if item.get("screen_on") is False:
+                reasons.append("screen_off")
+            if item.get("locked") is True:
+                reasons.append("device_locked")
+            if ui_unsafe:
+                reasons.append("ui_unsafe")
+            if paused_until > now:
+                reasons.append(f"paused_{paused_until - now:.0f}s")
+
+            item["safe_to_run"] = not bool(reasons)
+            item["reasons"] = reasons
+
+            accounts_out[aid] = item
+
+        return {
+            "total": len(accounts_out),
+            "safe_count": sum(1 for v in accounts_out.values() if v["safe_to_run"]),
+            "accounts": accounts_out,
+        }
+
     def _get_or_create_runner(self, account_id: str) -> MessengerRpaRunner:
         """按 account_id 懒加载 Runner；不同账号各持独立 state_store + cfg。
 
@@ -234,6 +465,13 @@ class MessengerRpaService:
                 logger.debug(
                     "runner.set_portrait_extractor 失败", exc_info=True
                 )
+        # ★ 跨账号协调器注入
+        _coord = getattr(self, "_coordinator", None)
+        if _coord is not None:
+            try:
+                runner.set_coordinator(_coord)
+            except Exception:
+                logger.debug("runner.set_coordinator 失败", exc_info=True)
         self._runners[account_id] = runner
         logger.info(
             "[messenger_rpa] Runner 为 account=%s 初始化完成 "
@@ -243,6 +481,345 @@ class MessengerRpaService:
         )
         return runner
 
+    async def enqueue_reactivation_deferred(
+        self,
+        *,
+        account_id: str,
+        chat_name: str,
+        reply_text: str,
+        defer_until: float,
+        defer_reason: str = "reactivation",
+        staleness_sec: float = 86400.0,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """W2-D4.2：被 reactivation_loop 调用，把主动消息入 messenger 的 deferred 队列。
+
+        与 runner safe_skip 类 deferred 共用 schema：drain loop 自动尊重 gate / staleness。
+        Returns: deferred_id (>0 成功) 或 0 (account 不存在/失败)
+        """
+        try:
+            runner = self._get_or_create_runner(account_id)
+        except Exception:
+            logger.warning(
+                "enqueue_reactivation_deferred: account=%s runner 不存在",
+                account_id,
+            )
+            return 0
+        try:
+            # ★ W2-D4.5 修正：chat_key 必须用 runner 的 _chat_key_prefix 拼接，
+            # 否则和 inbox 路径不一致（runner 用 messenger_rpa:Alice / acc_X:Alice）
+            # → drain 后续 expire_deferred_for_chat 找不到 → 重发风险
+            prefix = getattr(runner, "_chat_key_prefix", None) or "messenger_rpa"
+            chat_key = f"{prefix}:{chat_name}"
+            return runner._state.enqueue_deferred(
+                chat_key=chat_key,
+                chat_name=chat_name,
+                peer_text="(reactivation 主动发起)",
+                peer_kind="reactivation",
+                reply_text=reply_text,
+                defer_until=defer_until,
+                defer_reason=defer_reason[:120],
+                run_id="",
+                extra=extra or {},
+                staleness_sec=staleness_sec,
+            )
+        except Exception:
+            logger.exception("enqueue_reactivation_deferred 失败")
+            return 0
+
+    async def _drain_deferred_for_account(
+        self, account_id: str, *, max_per_tick: int = 1,
+    ) -> int:
+        """W2-D1.3 + D2.1+D2.2：把账号下到期的 deferred reply 真发出去。
+
+        改动 D2.1：默认 max_per_tick=1，因为已经迁移到独立 drain loop，
+        每 tick 慢慢清比一次轰一波更安全。
+        改动 D2.2：drain 前再过一次 _pre_send_gate；不通过则把 deferred_until
+        推后（min_gap 类 +60s，daily_cap +1h，quiet_hours +30min），不丢消息。
+
+        返回：实际发送条数（含成功/失败/重 defer）。
+        """
+        try:
+            runner = self._get_or_create_runner(account_id)
+        except Exception:
+            return 0
+        try:
+            _live_cfg = self._reload_runtime_cfg()
+            runner.refresh_cfg(_live_cfg)
+        except Exception:
+            pass
+        try:
+            due = runner._state.drain_due_deferred(limit=max_per_tick)
+        except Exception:
+            logger.debug("drain_due_deferred 失败 account=%s", account_id, exc_info=True)
+            return 0
+        if not due:
+            return 0
+        sent = 0
+        pool = self._account_registry.pool
+        for row in due:
+            chat_name = (row.get("chat_name") or "").strip()
+            reply_text = (row.get("reply_text") or "").strip()
+            row_id = int(row.get("id") or 0)
+            if not chat_name or not reply_text or row_id <= 0:
+                runner._state.mark_deferred_failed(row_id, "invalid_row")
+                continue
+            # ── P2-B：drain 发送前新鲜度校验 ───────────────────────────
+            # 对比 deferred.peer_text 与 chat_state.last_peer_text：
+            # 若 chat_state 有更新过且两者不等 → 对方已发新消息，
+            # 当前 reply_text 是基于旧上下文生成的，发出去会突兀 → 标 failed。
+            # 这是 expire_deferred_for_chat 的 defense-in-depth（防
+            # chat_key 拼写、并发、漏调用等）。
+            # reactivation 类（主动发起）不做此检查 —— 没有对应 peer_msg。
+            if bool(_live_cfg.get("drain_freshness_check", True)):
+                try:
+                    peer_kind_deferred = str(row.get("peer_kind") or "")
+                    is_reactivation = (
+                        peer_kind_deferred == "reactivation"
+                        or (row.get("defer_reason") or "").startswith(
+                            "reactivation"
+                        )
+                    )
+                    if not is_reactivation:
+                        chat_key_row = str(row.get("chat_key") or "").strip()
+                        stored_peer_text = str(
+                            row.get("peer_text") or ""
+                        ).strip()
+                        if chat_key_row and stored_peer_text:
+                            cs = runner._state.get_chat_state(chat_key_row)
+                            cs_peer_text = str(
+                                cs.get("last_peer_text") or ""
+                            ).strip()
+                            cs_updated_at = float(
+                                cs.get("updated_at") or 0.0
+                            )
+                            row_created_at = float(
+                                row.get("created_at") or 0.0
+                            )
+                            if (
+                                cs_peer_text
+                                and cs_peer_text != stored_peer_text
+                                and cs_updated_at >= row_created_at - 2.0
+                            ):
+                                runner._state.mark_deferred_failed(
+                                    row_id,
+                                    (
+                                        "stale_peer_context:"
+                                        f"defer={stored_peer_text[:40]!r} "
+                                        f"current={cs_peer_text[:40]!r}"
+                                    )[:200],
+                                )
+                                try:
+                                    from src.monitoring.metrics_store import (
+                                        get_metrics_store,
+                                    )
+                                    get_metrics_store().record_deferred_drain_failed(
+                                        "p2b_stale_peer_context",
+                                    )
+                                except Exception:
+                                    pass
+                                logger.info(
+                                    "[messenger_rpa] P2-B stale peer account=%s "
+                                    "id=%d chat=%s defer_peer=%r current_peer=%r",
+                                    account_id, row_id, chat_name,
+                                    stored_peer_text[:60],
+                                    cs_peer_text[:60],
+                                )
+                                continue
+                except Exception:
+                    logger.debug(
+                        "P2-B freshness check failed account=%s id=%d",
+                        account_id, row_id, exc_info=True,
+                    )
+
+            # ★ W2-D2.2：drain 前 gate 再 check（防止 quiet_hours 解除瞬间秒发 N 条触发风控）
+            # ★ W2-D7.2 评估：原计划在此对 peer_typing defer 再做 vision re-detect，
+            # 但 drain 阶段没有"对方此刻"的新截图（要进 thread 截屏，开销过大）。
+            # 退化结论：peer_typing 命中已 defer 8s + staleness 120s 兜底，足够覆盖 90%+ 真人打字时长
+            try:
+                gate2 = runner._pre_send_gate(reply_text)
+            except Exception:
+                gate2 = None
+            if gate2 is not None:
+                # 还没解除 → push deferred_until，不丢消息
+                push_sec = self._calc_re_defer_sec(gate2)
+                new_until = time.time() + push_sec
+                try:
+                    runner._state.update_deferred_until(
+                        row_id, new_until, note=f"re_gate:{gate2.get('reason','?')}"[:120],
+                    )
+                    logger.info(
+                        "[messenger_rpa] drain re-gate push account=%s id=%d chat=%s "
+                        "reason=%s push=%dmin",
+                        account_id, row_id, chat_name,
+                        gate2.get("reason"), int(push_sec / 60),
+                    )
+                except Exception:
+                    runner._state.mark_deferred_failed(
+                        row_id, f"re_gate_update_fail:{gate2.get('reason','?')}"[:200],
+                    )
+                continue  # 不计入 sent，下个 row
+            #   - 其他（手动 defer / quiet_hours / 短）→ 2.5s burst
+            #   - typing_indicator_advised=false 显式关 → 0
+            typing_sec = 2.5
+            try:
+                if row.get("extra_json"):
+                    import json as _json
+                    ext = _json.loads(row["extra_json"]) or {}
+                    if ext.get("typing_indicator_advised") is False:
+                        typing_sec = 0.0
+                    elif "typing_pulse_sec" in ext:
+                        typing_sec = float(ext["typing_pulse_sec"])
+                    else:
+                        pds = float(ext.get("pacing_delay_sec") or 0)
+                        if pds >= 30:
+                            typing_sec = 5.0
+                        elif pds >= 15:
+                            typing_sec = 4.0
+                        elif pds >= 5:
+                            typing_sec = 3.0
+                        # else 保持默认 2.5
+            except Exception:
+                pass
+            try:
+                async with pool.acquire(account_id, timeout=120.0):
+                    r = await runner.send_to_chat_name(
+                        chat_name=chat_name, reply_text=reply_text,
+                        typing_pulse_sec=typing_sec,
+                        skip_search=True,
+                    )
+                if r.get("ok") and r.get("step") == "sent":
+                    runner._state.mark_deferred_sent(row_id)
+                    sent += 1
+                    try:
+                        from src.monitoring.metrics_store import get_metrics_store
+                        get_metrics_store().record_deferred_drain_sent()
+                    except Exception:
+                        pass
+                    logger.info(
+                        "[messenger_rpa] deferred drain ok account=%s id=%d chat=%s wait_min=%d",
+                        account_id, row_id, chat_name,
+                        max(0, int((time.time() - float(row.get("created_at") or 0)) / 60)),
+                    )
+                else:
+                    runner._state.mark_deferred_failed(
+                        row_id, str(r.get("error") or r.get("step") or "send_not_ok")[:200],
+                    )
+                    try:
+                        from src.monitoring.metrics_store import get_metrics_store
+                        get_metrics_store().record_deferred_drain_failed(
+                            str(r.get("step") or "send_not_ok"),
+                        )
+                    except Exception:
+                        pass
+                    logger.warning(
+                        "[messenger_rpa] deferred drain fail account=%s id=%d chat=%s step=%s",
+                        account_id, row_id, chat_name, r.get("step"),
+                    )
+            except asyncio.TimeoutError:
+                runner._state.mark_deferred_failed(row_id, "pool_acquire_timeout")
+            except Exception as ex:
+                runner._state.mark_deferred_failed(row_id, f"{type(ex).__name__}:{ex}"[:200])
+                logger.debug("deferred drain 异常 id=%d", row_id, exc_info=True)
+        return sent
+
+    @staticmethod
+    def _calc_re_defer_sec(gate: Dict[str, Any]) -> float:
+        """W2-D2.2：drain 前 gate 失败时把 deferred_until 推后多久。
+
+        不重做 _calc_defer_until_sec 那套精确日历计算，简单按类型推固定时长，
+        因为 drain loop 自己会再次循环检查。
+        """
+        reason = (gate or {}).get("reason", "")
+        if reason.startswith("rate_limit:min_gap"):
+            return float(gate.get("wait_remaining_sec") or 60.0) + 5.0
+        if reason.startswith("rate_limit:daily_cap"):
+            return 3600.0  # 1h 后再看（最迟次日 0 点会过 cap）
+        if reason.startswith("rate_limit:quiet_hours"):
+            return 1800.0  # 30 min 后再看
+        if reason.startswith("pace:throttle"):
+            return 600.0   # 10 min
+        if reason.startswith("pace:deny"):
+            return 1800.0  # 30 min
+        return 600.0  # 兜底 10 min
+
+    async def _deferred_drain_loop(self) -> None:
+        """W2-D2.1 + D3.2：独立 drain loop，与主 _loop 平行运行。
+
+        - 间隔默认 30 秒（companion_drain_interval_sec 可配；每轮 reload 配置）
+        - 每 tick 每账号最多 drain 1 条（独立 loop 慢慢清就够了）
+        - 尊重 pause / stop 信号
+        - companion_mode=false 时进入 noop 循环（不真 drain）便于热切换
+        """
+        try:
+            while not self._stop_evt.is_set():
+                # 实时读 config（不依赖 startup 时的 self._merged_cfg）
+                cfg_now = self._reload_runtime_cfg()
+                companion_on = bool(cfg_now.get("companion_mode", False))
+                interval = float(cfg_now.get("companion_drain_interval_sec", 30.0) or 30.0)
+                interval = max(5.0, min(300.0, interval))
+                max_per_tick = int(cfg_now.get("companion_drain_max_per_tick", 1) or 1)
+
+                if not companion_on:
+                    # noop：等下一轮再看；不真 drain 也不退出，方便热开关
+                    try:
+                        await asyncio.wait_for(self._stop_evt.wait(), timeout=interval)
+                    except asyncio.TimeoutError:
+                        pass
+                    continue
+
+                # 暂停态尊重（pause_until 来自 web /api/messenger-rpa/pause）
+                if self._pause_until > time.time():
+                    await asyncio.wait_for(
+                        self._stop_evt.wait(),
+                        timeout=min(10.0, interval),
+                    )
+                    continue
+                ctxs = self._account_registry.all_contexts()
+                aids = [c.account_id for c in ctxs]
+                # 每账号独立 drain，错开请求（避免一秒内多账号同时发）
+                for aid in aids:
+                    if self._stop_evt.is_set():
+                        break
+                    try:
+                        await self._drain_deferred_for_account(
+                            aid, max_per_tick=max_per_tick,
+                        )
+                    except Exception:
+                        logger.debug(
+                            "drain account=%s 异常", aid, exc_info=True,
+                        )
+                # ★ 写 metrics：deferred 队列健康度
+                try:
+                    from src.monitoring.metrics_store import get_metrics_store
+                    by_acc: Dict[str, int] = {}
+                    total = 0
+                    for aid in aids:
+                        try:
+                            runner = self._get_or_create_runner(aid)
+                            cnt = len(runner._state.list_approvals(
+                                status="deferred", limit=10000,
+                            ))
+                            by_acc[aid] = cnt
+                            total += cnt
+                        except Exception:
+                            pass
+                    get_metrics_store().set_deferred_queue_size(total, by_acc)
+                except Exception:
+                    logger.debug("metrics deferred_queue 写入失败", exc_info=True)
+                # 等下一轮（被 stop_evt 中断也 OK）
+                try:
+                    await asyncio.wait_for(
+                        self._stop_evt.wait(), timeout=interval,
+                    )
+                except asyncio.TimeoutError:
+                    pass
+        except asyncio.CancelledError:
+            logger.info("MessengerRpaService _deferred_drain_loop 被取消")
+            raise
+        except Exception:
+            logger.exception("MessengerRpaService _deferred_drain_loop 异常退出")
+
     async def _run_once_for_account(
         self, account_id: str, *, acquire_timeout: float = 180.0,
     ) -> Dict[str, Any]:
@@ -251,6 +828,23 @@ class MessengerRpaService:
         - `acquire_timeout`：防止死锁；超时视为本轮 skip（不是错误）
         - 异常统一兜底，返回带 step 的 result dict
         """
+        # ★ 账号级暂停检查（不影响其他账号）
+        _pause_until = self._account_pause_until.get(account_id, 0.0)
+        if _pause_until > time.time():
+            return {
+                "ok": False,
+                "step": "account_paused",
+                "error": f"account_paused_left={_pause_until - time.time():.0f}s",
+                "account_id": account_id,
+            }
+        # ★ UI 安全护盾：ui_unsafe 账号停止自动运行，等运营清除后恢复
+        if account_id in self._account_ui_unsafe:
+            return {
+                "ok": False,
+                "step": "account_ui_unsafe",
+                "error": "account_ui_unsafe: 请在看板清除 unsafe 标记后点击恢复",
+                "account_id": account_id,
+            }
         try:
             runner = self._get_or_create_runner(account_id)
         except Exception as ex:
@@ -259,6 +853,10 @@ class MessengerRpaService:
                 "error": f"{type(ex).__name__}: {ex}",
                 "account_id": account_id,
             }
+        try:
+            runner.refresh_cfg(self._reload_runtime_cfg())
+        except Exception:
+            pass
         pool = self._account_registry.pool
         try:
             async with pool.acquire(account_id, timeout=acquire_timeout):
@@ -374,12 +972,15 @@ class MessengerRpaService:
                     pcfg.get("max_inbound_messages_for_extract", 12) or 12
                 ),
                 ai_max_tokens=int(pcfg.get("ai_max_tokens", 400) or 400),
+                # ★ W3-D2.2：冷启动门槛配置化（默认 2，避免 1 条 inbound 就调 LLM）
+                min_for_initial=int(pcfg.get("min_for_initial", 2) or 2),
             )
             logger.info(
                 "[messenger_rpa] PortraitExtractor 已就绪 (refresh_every_n=%d, "
-                "refresh_after_hours=%.1f)",
+                "refresh_after_hours=%.1f, min_for_initial=%d)",
                 self._portrait_extractor._n,
                 self._portrait_extractor._refresh_after_sec / 3600.0,
+                self._portrait_extractor._min_for_initial,
             )
         except Exception:
             logger.warning(
@@ -401,6 +1002,14 @@ class MessengerRpaService:
             "backoff_multiplier": 1.25,   # 每次空跑递增倍率
             # 单次 run
             "max_inbox_per_run": 1,       # 一次只处理 N 条未读
+            # smart_current_thread: 若手机已停在目标聊天页，直接读当前页；
+            # force_chats: 每次强制回 Chats 列表扫描。
+            "run_once_start_mode": "smart_current_thread",
+            "thread_title_vision_fallback": True,
+            "pre_thread_self_xml_guard": True,
+            "stale_peer_after_self_guard": True,
+            "stale_peer_after_self_window_sec": 900,
+            "stale_peer_after_self_overlap_threshold": 0.45,
             "send_to_chat_inbox_row_cap": 16,
             "send_to_chat_inbox_scroll_attempts": 4,
             # send_to_chat_name：上滑收件箱列表（相对屏高比例 + 时长 ms）
@@ -452,10 +1061,15 @@ class MessengerRpaService:
         return d
 
     def _reload_runtime_cfg(self) -> Dict[str, Any]:
-        """Read the latest messenger_rpa config so runtime tuning takes effect."""
+        """W2-D3.2：从 ConfigManager 实时拉一份最新 messenger_rpa 配置。
+
+        用于 _deferred_drain_loop 这种需要热感知 companion_mode / 间隔等
+        切换的场景。失败时回退到 startup 时的 _merged_cfg。
+        """
         try:
             cfg = (self._cm.config or {}).get("messenger_rpa") or {}
             if isinstance(cfg, dict) and cfg:
+                # 仍然走 defaults 兜底
                 d = self._defaults()
                 for k, v in cfg.items():
                     if k == "screencap" and isinstance(v, dict) and isinstance(
@@ -529,13 +1143,18 @@ class MessengerRpaService:
             self._sla_task = asyncio.create_task(
                 self._sla_loop(), name="messenger_rpa_sla",
             )
+        # ★ W2-D2.1+D3.2：deferred 独立 drain loop 总是启动；内部按 companion_mode
+        # 配置实时决定是否真 drain，便于热切换不重启
+        self._drain_task = asyncio.create_task(
+            self._deferred_drain_loop(), name="messenger_rpa_defer_drain",
+        )
         logger.info("MessengerRpaService 已启动")
         return True
 
     async def stop(self) -> None:
         self._stop_evt.set()
         self._trigger_evt.set()
-        tasks = [self._task, self._notif_task, self._sla_task]
+        tasks = [self._task, self._notif_task, self._sla_task, self._drain_task]
         if getattr(self, "_standby_task", None):
             tasks.append(self._standby_task)
         for t in tasks:
@@ -551,6 +1170,7 @@ class MessengerRpaService:
         self._notif_task = None
         self._sla_task = None
         self._standby_task = None
+        self._drain_task = None
         # P7-1：释放 leader lock
         if getattr(self, "_leader_lock", None) is not None:
             try:
@@ -710,13 +1330,17 @@ class MessengerRpaService:
             "credit": credit,
             # ★ P5-1：account registry 概览（运维 UI 用）
             "accounts": self._account_registry.stats(),
+            "coordinator": self.coordinator_snapshot(),
             "last_run": dict(self._last_run) if self._last_run else {},
-            # ★ P6-1：多账号 per-account 最近一次 run + 节奏
+            # ★ P6-1：多账号 per-account 最近一次 run + 节奏 + 暂停/unsafe
             "per_account": {
                 aid: {
                     "last_run": dict(self._last_run_map.get(aid, {})),
                     "cur_iv_sec": self._cur_iv_map.get(aid, 0.0),
                     "consecutive_empty": self._consecutive_empty_map.get(aid, 0),
+                    "paused": self._account_pause_until.get(aid, 0.0) > time.time(),
+                    "paused_until": self._account_pause_until.get(aid, 0.0),
+                    "ui_unsafe": aid in self._account_ui_unsafe,
                 }
                 for aid in self._account_registry.account_ids()
             },
@@ -988,6 +1612,8 @@ class MessengerRpaService:
                     continue
                 self._trigger_evt.clear()
 
+                # ★ W2-D2.1：drain 已迁移到独立 _deferred_drain_loop，
+                # 这里不再 inline 调用，避免阻塞主 _loop 的 inbox 处理节奏
                 if not multi_mode:
                     # ── 单账号旧路径（100% 兼容）──
                     try:
@@ -995,6 +1621,16 @@ class MessengerRpaService:
                         self._last_run = r
                         if r.get("ok") and r.get("step") == "sent":
                             cur_iv = min_iv
+                            self._consecutive_empty = 0
+                        elif r.get("step") == "sticky_idle":
+                            # P2-A 粘性 idle：用 sticky_thread.idle_poll_interval_sec
+                            # 短间隔继续 poll（默认 1.5s），实现"几秒回"
+                            sticky_iv = float(
+                                (cfg_now.get("sticky_thread") or {}).get(
+                                    "idle_poll_interval_sec", 1.5
+                                ) or 1.5
+                            )
+                            cur_iv = sticky_iv
                             self._consecutive_empty = 0
                         elif r.get("step") in ("no_unread", "duplicate_skip"):
                             self._consecutive_empty += 1
@@ -1034,9 +1670,22 @@ class MessengerRpaService:
                         }
                     self._last_run_map[aid] = r
                     step = str(r.get("step") or "")
+                    # ★ 安全护盾：自动暂停误点相机的账号
+                    if step == "ui_unsafe_tap":
+                        self.mark_account_ui_unsafe(aid)
                     iv = self._cur_iv_map.get(aid, base_iv)
                     if r.get("ok") and step == "sent":
                         iv = min_iv
+                        self._consecutive_empty_map[aid] = 0
+                    elif step == "sticky_idle":
+                        # P3-D：多账号路径同步 sticky_idle 短间隔
+                        # 让粘性 chat 在多账号模式下也享受 1.5s 快速 poll
+                        sticky_iv = float(
+                            (cfg_now.get("sticky_thread") or {}).get(
+                                "idle_poll_interval_sec", 1.5
+                            ) or 1.5
+                        )
+                        iv = sticky_iv
                         self._consecutive_empty_map[aid] = 0
                     elif step in ("no_unread", "duplicate_skip"):
                         self._consecutive_empty_map[aid] = (

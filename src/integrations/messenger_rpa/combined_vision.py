@@ -161,9 +161,19 @@ THREAD_COMBINED_PROMPT = (
     "  ❌ 底部输入栏（+, 相机, Message 输入框, 表情, 👍）\n"
     "\n"
     "===== 任务 B：找最底部那条消息（对方 or 己方）=====\n"
-    "  - role=peer：左侧深灰气泡 / 左侧贴纸 / 左侧图片 / 左侧 link preview 卡片\n"
-    "  - role=self：右侧蓝色气泡 / 右侧贴纸 / 右侧图片 / 右下角带本账号头像的消息\n"
+    "  ★★★ 颜色判定是【绝对硬规则】，优先级高于位置／长度／内容 ★★★\n"
+    "  - 蓝色气泡（Messenger 主蓝 #0084FF 或同色系亮蓝/紫）→ 必定 role=self；\n"
+    "    无论它在屏幕左、中、右；无论一行还是多行；无论是英文/日文/中文/纯 emoji；\n"
+    "    无论内容看起来是问句、自言自语、还是商务话术，都不要当成 peer。\n"
+    "  - 灰色气泡（#E4E6EB 或同色系亮灰/米白）→ 必定 role=peer。\n"
+    "  - role=peer：灰色气泡 / 灰色贴纸 / 灰色图片 / link preview 卡片（通常居左）\n"
+    "  - role=self：蓝色气泡 / 蓝色贴纸 / 自己头像旁的消息（通常居右）\n"
     "  - role=none：屏幕完全没消息（如刚进会话还没加载）\n"
+    "  - 反例（容易出错的场景，看到这些请坚决用颜色判定）：\n"
+    "    · 蓝色长气泡占了屏幕大半宽、左边界距屏幕左侧只剩一点 → 仍是 self\n"
+    "    · 蓝色气泡里是问候 / 道歉 / 提问 'I am heading home for now' 等\n"
+    "      容易看着像对方想说的话 → 颜色蓝就是 self\n"
+    "    · 灰色短气泡夹在两条蓝色之间 → 灰色那条是 peer\n"
     "  - 如果最底部消息在右侧，或者 UI/可访问性文本含 'You:' / '你:' / 'Me:' 前缀，"
     "必须返回 role=self，不能把它当成 peer。\n"
     "  - ⚠️ **不要**因为消息很长、很怪、是 link preview / 假支付截图 / 赌博推广\n"
@@ -173,9 +183,20 @@ THREAD_COMBINED_PROMPT = (
     "**content/desc 须单行**，字符串内禁止未转义双引号与裸换行（避免 JSON 断裂）\n"
     "  - kind=link：content 填 URL（如 https://www.fc8win.com/?id=...），\n"
     "      desc ≤30 字描述卡片标题或截图内容（如 'fc8win 赌博推广 + 假 GCash 付款截图'）\n"
-    "  - kind=image：content 留空，desc ≤30 字描述图片（如 '虚假 ₱500 GCash 收据'）\n"
-    "  - kind=sticker/voice/file：content 留空，desc 简述\n"
+    "  - kind=image：静态照片/截图。content 留空，desc ≤30 字（如 '虚假 ₱500 GCash 收据'）\n"
+    "      ⚠️ 如果消息是照片/截图/LINE 资料页截图，即使图片里有 'Not set'、电话号码、"
+    "LINE ID、菜单文字等 OCR 文本，也仍然必须返回 kind=image；不要把图片里的文字填到 content。\n"
+    "  - kind=video：视频缩略图（覆盖播放三角 ▶ 或时长 0:08 标签）。content 留空，desc 写画面+时长\n"
+    "  - kind=gif：GIF 动图（角标 'GIF' 字样 / 自动播放循环）。content 留空，desc 简述动作\n"
+    "  - kind=voice：左侧带播放三角、波形/进度条、时长（如 0:06）的语音条。"
+    "如果它比文字气泡更靠近底部输入框，必须选它为 peer，content 留空，desc 写时长/语音条。\n"
+    "  - kind=sticker：静态贴纸（无气泡浮在背景，单帧）。content 留空，desc 简述\n"
+    "  - kind=animated_sticker：动态贴纸（角标小播放标志或动画感图层）。content 留空，desc 简述动作\n"
+    "  - kind=file：content 留空，desc 简述\n"
     "  - 选**垂直坐标最大、紧贴输入框上方**那一条；如果同一条消息有图 + 文，合并为 kind=link 或 image\n"
+    "  - ★ 媒体 desc 兜底：image/video/gif/sticker/animated_sticker/voice/file 的 desc 永远不能空。\n"
+    "      看不清就给最低粒度的主体类型（'自拍' / '截图' / '动物' / 'meme' / '卡通'）。"
+    "完全无视觉信息也至少写 '看不清的图片'。\n"
     "\n"
     "===== 任务 C（新增）：对方连发识别 =====\n"
     "  - 若 peer.role=peer，继续**从最底向上**看紧邻的 peer 气泡：\n"
@@ -193,7 +214,8 @@ THREAD_COMBINED_PROMPT = (
     "\n"
     "===== 输出格式（严格一行 JSON，无 markdown）=====\n"
     '{"guard":{"type":"...","action":"...","title":"...","confidence":"high|medium|low"},'
-    '"peer":{"role":"peer|self|none","kind":"text|image|sticker|voice|file|link|other",'
+    '"peer":{"role":"peer|self|none",'
+    '"kind":"text|image|video|gif|sticker|animated_sticker|voice|file|link|other",'
     '"content":"...","desc":"..."},'
     '"extra_peers":[{"kind":"...","content":"...","desc":"..."}],'
     '"risk":{"hit":false,"severity":"none|warn|block","reason":"..."}}\n'
@@ -245,11 +267,27 @@ def _parse_peer_dict(d: Any, raw_text: str) -> Optional[PeerMessage]:
     if role not in ("peer", "self", "none"):
         role = "none"
     kind = str(d.get("kind") or "other").strip().lower()
-    valid_kinds = {"text", "image", "sticker", "voice", "file", "link", "other"}
+    valid_kinds = {
+        "text", "image", "video", "gif", "sticker", "animated_sticker",
+        "voice", "file", "link", "other", "system_event",
+    }
     if kind not in valid_kinds:
         kind = "other"
     content = str(d.get("content") or "")
     desc = str(d.get("desc") or "")
+    # ── P2-A：系统事件覆盖（与 chat_reader.read_peer_message_vision 行为一致）──
+    if role == "peer" and kind in ("text", "link", "other"):
+        from src.integrations.messenger_rpa.chat_reader import (
+            is_system_event_text,
+        )
+        if is_system_event_text(content + " " + desc):
+            logger.info(
+                "[combined_vision] system event at thread bottom: "
+                "kind=%s content=%r → downgrade to role=none kind=system_event",
+                kind, content[:80],
+            )
+            role = "none"
+            kind = "system_event"
     return PeerMessage(role=role, kind=kind, content=content, desc=desc, raw=raw_text)
 
 
@@ -512,12 +550,21 @@ async def analyze_inbox_combined(
             continue
         time_s = str(raw_row.get("time") or "").strip()
         hint = str(raw_row.get("quality_hint") or "").strip().lower()
-        valid_hints = {"friend", "unknown", "spam", "channel", "group", "unsure"}
+        valid_hints = {
+            "friend", "unknown", "spam", "channel", "group", "unsure",
+            "system_event",  # P2-A
+        }
         if hint not in valid_hints:
             hint = _local_quality_hint(name, preview)
         local_hint = _local_quality_hint(name, preview)
         if local_hint == "spam" and hint in ("friend", "unknown", "unsure"):
             hint = "spam"
+        # P2-A：vision 若把 "You can now message and call each other" 当成 friend 或
+        # friend-like，用本地系统事件识别强制覆盖
+        if local_hint == "system_event" and hint in (
+            "friend", "unknown", "unsure",
+        ):
+            hint = "system_event"
 
         try:
             row_index = int(raw_row.get("row_index") or i)
@@ -673,6 +720,170 @@ _IMAGE_DEEP_DESCRIBE_PROMPT_EN = (
     "  - Output <= 80 chars, plain text, NO JSON / NO markdown / NO prefix\n"
 )
 
+# P1.5-A (2026-05-04)：按 kind 区分 caption prompt——video/gif/sticker 各有侧重
+_VIDEO_DEEP_PROMPT_ZH = (
+    "这是 Facebook Messenger 对方发来的消息截图，请聚焦**左侧（对方一方）的视频缩略图气泡**。\n"
+    "要求：\n"
+    "  - 描述视频画面（人/物/场景/动作），如果可见时长标（0:08 / 0:15）一并写出\n"
+    "  - 若是自拍/人像视频：性别 / 大致年龄 / 表情 / 动作 / 背景，不描述长相细节\n"
+    "  - 若是宠物/物品/风景视频：直接写主体 + 动作\n"
+    "  - 若看不清或无视频：返回 '无图片' 三个字\n"
+    "  - 输出 ≤ 80 字，纯文字，不要 JSON / markdown / 前缀\n"
+)
+_VIDEO_DEEP_PROMPT_EN = (
+    "Focus on the LEFT-SIDE peer video thumbnail bubble in this Messenger screenshot.\n"
+    "Rules:\n"
+    "  - Describe video content (people, objects, scene, action) + duration if visible (0:08, 0:15)\n"
+    "  - For selfie/portrait videos: gender / age range / expression / action / setting\n"
+    "  - For pet/object/scenery videos: subject + action\n"
+    "  - If no video visible: return 'NO_IMAGE'\n"
+    "  - Output <= 80 chars, plain text, NO JSON / markdown / prefix\n"
+)
+
+_GIF_DEEP_PROMPT_ZH = (
+    "这是 GIF 动图气泡。GIF 通常是 1-3 秒循环动作或 meme reaction（反应表情包）。\n"
+    "要求：\n"
+    "  - 描述动作主体（角色 / 动物 / 人物 / meme）+ 氛围（搞笑 / 无奈 / 庆祝 / 调侃 / 惊讶）\n"
+    "  - 若是 reaction GIF：标注情绪类型，例如 '哈哈大笑反应' / '翻白眼无奈' / '撒花庆祝'\n"
+    "  - 看不清或没有：返回 '无图片'\n"
+    "  - 输出 ≤ 60 字，纯文字\n"
+)
+_GIF_DEEP_PROMPT_EN = (
+    "This is a GIF bubble (1-3 second loop, often a reaction meme).\n"
+    "Rules:\n"
+    "  - Describe subject (character / animal / person / meme) + vibe (funny, sigh, celebrating, sarcastic, surprised)\n"
+    "  - For reaction GIFs: tag the emotion, e.g. 'laughing reaction' / 'eye-roll' / 'celebration confetti'\n"
+    "  - If unclear / none: return 'NO_IMAGE'\n"
+    "  - Output <= 60 chars, plain text\n"
+)
+
+_STICKER_DEEP_PROMPT_ZH = (
+    "这是 Messenger 贴纸气泡（无对话框，浮在背景上）。\n"
+    "要求：\n"
+    "  - 描述角色 + 表情 + 动作 + 情绪类型（happy 笑/love 爱/sad 哭/angry 怒/cute 萌/awkward 尬/wink 调皮 等）\n"
+    "  - 例如 'Meta 黄色小人开心鼓掌（happy）' / '猫咪眨眼比心（love）' / '熊熊翻白眼（无奈）'\n"
+    "  - 看不清或没有：返回 '无图片'\n"
+    "  - 输出 ≤ 60 字，纯文字\n"
+)
+_STICKER_DEEP_PROMPT_EN = (
+    "This is a Messenger sticker bubble (no chat frame, overlay on background).\n"
+    "Rules:\n"
+    "  - Describe character + expression + action + emotion (happy / love / sad / angry / cute / awkward / wink)\n"
+    "  - E.g. 'Meta yellow guy clapping (happy)' / 'cat winking heart (love)' / 'bear eye-rolling (sigh)'\n"
+    "  - If unclear / none: return 'NO_IMAGE'\n"
+    "  - Output <= 60 chars, plain text\n"
+)
+
+_ANIMATED_STICKER_DEEP_PROMPT_ZH = (
+    "这是 Messenger 动态贴纸气泡（会动的小图，1-2 秒循环）。\n"
+    "要求：\n"
+    "  - 描述角色 + 动作 + 情绪（在描述里标注 '动'，让读者知道是动图）\n"
+    "  - 例如 '小狗摇尾巴动图（happy）' / '爱心冒出动图（love）' / '泪滴落动图（sad）'\n"
+    "  - 看不清或没有：返回 '无图片'\n"
+    "  - 输出 ≤ 60 字，纯文字\n"
+)
+_ANIMATED_STICKER_DEEP_PROMPT_EN = (
+    "This is an animated sticker bubble (small looped animation, 1-2 sec).\n"
+    "Rules:\n"
+    "  - Describe character + action + emotion (note 'animated' in the desc)\n"
+    "  - E.g. 'puppy tail-wag animated (happy)' / 'hearts popping animated (love)'\n"
+    "  - If unclear / none: return 'NO_IMAGE'\n"
+    "  - Output <= 60 chars, plain text\n"
+)
+
+# P1.5+D3 (2026-05-04)：通用 prefetch prompt——thread_combined 还没跑完时不知道
+# 实际 kind，prefetch 一律走这个通用 prompt，覆盖任何媒体类型。命中率比 image-only
+# 默认高 ~20-30%，省去同步重调延迟。质量略低于专属 prompt，_generate_reply 里
+# 会基于 caption 长度判断是否再用对的 kind 重调一次。
+_GENERIC_DEEP_PROMPT_ZH = (
+    "这是 Facebook Messenger 对方发来的消息截图，请聚焦**左侧（对方一方）的媒体气泡**。\n"
+    "媒体可能是：照片 / 视频缩略图 / GIF 动图 / 静态贴纸 / 动态贴纸。\n"
+    "通用要求：\n"
+    "  - 描述视觉主体（人 / 物 / 场景 / 角色 / meme）+ 动作或表情 + 类型标签\n"
+    "  - 若是人/自拍：性别 / 大致年龄 / 表情 / 动作 / 背景，不描述长相细节\n"
+    "  - 若是 sticker / animated_sticker：角色 + 表情 + 情绪标签（happy / love / sad / angry / cute / awkward / wink / thinking / surprised）\n"
+    "  - 若是 video：内容 + 时长（如可见 0:08 / 0:15）\n"
+    "  - 若是 GIF：动作 + 氛围（reaction meme 标情绪）\n"
+    "  - 若是截图/meme：描述大意 + 标 'meme' 或 '截图'\n"
+    "  - 看不清就给最低粒度主体类型（'自拍' / '动物' / '截图' / 'meme'），不要返回空\n"
+    "  - 完全没有视觉媒体（peer 区域只有文字气泡）：返回 '无图片'\n"
+    "  - 输出 ≤ 80 字，纯文字，不要 JSON / markdown / 前缀\n"
+)
+_GENERIC_DEEP_PROMPT_EN = (
+    "Focus on the LEFT-SIDE peer media bubble in this Messenger screenshot.\n"
+    "Media could be: photo / video thumbnail / GIF / static sticker / animated sticker.\n"
+    "Universal rules:\n"
+    "  - Describe visual subject (person / object / scene / character / meme) + action or expression + type tag\n"
+    "  - For people/selfies: gender / age range / expression / action / setting (no detailed facial features)\n"
+    "  - For stickers: character + expression + emotion tag (happy / love / sad / angry / cute / awkward / wink / thinking / surprised)\n"
+    "  - For video: content + duration if visible (0:08, 0:15)\n"
+    "  - For GIF: action + vibe (reaction meme → tag emotion)\n"
+    "  - For screenshots/memes: describe gist + tag 'meme' or 'screenshot'\n"
+    "  - If unclear, still give the broadest subject category ('selfie' / 'animal' / 'screenshot' / 'meme'); never return empty\n"
+    "  - If no visual media (peer area is only text bubble): return 'NO_IMAGE'\n"
+    "  - Output <= 80 chars, plain text, NO JSON / markdown / prefix\n"
+)
+
+# kind → (zh_prompt, en_prompt) 查表；image 走原 _IMAGE_DEEP_DESCRIBE_PROMPT_*
+_MEDIA_DEEP_PROMPT_TABLE: Dict[str, Tuple[str, str]] = {
+    "_generic": (_GENERIC_DEEP_PROMPT_ZH, _GENERIC_DEEP_PROMPT_EN),
+    "image": (_IMAGE_DEEP_DESCRIBE_PROMPT_ZH, _IMAGE_DEEP_DESCRIBE_PROMPT_EN),
+    "video": (_VIDEO_DEEP_PROMPT_ZH, _VIDEO_DEEP_PROMPT_EN),
+    "gif": (_GIF_DEEP_PROMPT_ZH, _GIF_DEEP_PROMPT_EN),
+    "sticker": (_STICKER_DEEP_PROMPT_ZH, _STICKER_DEEP_PROMPT_EN),
+    "animated_sticker": (
+        _ANIMATED_STICKER_DEEP_PROMPT_ZH, _ANIMATED_STICKER_DEEP_PROMPT_EN,
+    ),
+}
+
+
+# UI / chrome 关键词——若 vision 返回的 caption 含这些，说明它把 UI 当图片描述了
+_IMAGE_DESC_UI_NOISE_KEYWORDS = (
+    "输入框", "聊天框", "键盘", "通知栏", "状态栏", "导航栏", "底部导航",
+    "Active now", "Online", "输入消息", "发送按钮", "Type a message",
+    "对话气泡", "气泡框", "聊天界面", "Messenger 界面", "应用界面",
+    "input box", "chat bubble", "send button", "navigation bar",
+    "status bar", "keyboard", "notification bar",
+)
+
+
+def _crop_to_peer_image_region(
+    image_path: str,
+    *,
+    left_ratio: float = 0.0,
+    right_ratio: float = 0.62,
+    top_ratio: float = 0.12,
+    bottom_ratio: float = 0.78,
+) -> Optional[str]:
+    """裁剪 thread 截图，只保留 peer 气泡区域（左 + 中段）。
+
+    P2 (2026-05-04)：vision 看整屏会把 UI / 输入框 / 状态栏当图片描述（用户
+    反馈"荒诞描述"）。裁掉顶栏（< 12%）+ 底栏输入框（> 78%）+ 右半屏（self
+    气泡和 share 按钮），让 vision 视野只剩 peer 一方的图片气泡。
+    失败回退原图（不阻塞主流程）。
+    """
+    try:
+        from PIL import Image
+    except Exception:
+        return None
+    try:
+        img = Image.open(image_path)
+        w, h = img.size
+        left = int(w * left_ratio)
+        right = int(w * right_ratio)
+        top = int(h * top_ratio)
+        bottom = int(h * bottom_ratio)
+        if right - left < 200 or bottom - top < 200:
+            return None
+        cropped = img.crop((left, top, right, bottom))
+        from pathlib import Path
+        p = Path(image_path)
+        out = p.with_name(p.stem + "_peercrop" + p.suffix)
+        cropped.save(out)
+        return str(out)
+    except Exception:
+        return None
+
 
 async def describe_peer_image_detail(
     image_path: str,
@@ -680,20 +891,38 @@ async def describe_peer_image_detail(
     vision_cfg: Dict[str, Any],
     global_vision: Dict[str, Any],
     language: str = "zh",
+    kind: str = "image",
 ) -> Tuple[str, str]:
     """对 thread 截图做一次聚焦的图片内容描述。
 
     返回 (caption, tag)。失败或无图片时 caption 为空串。
+
+    P1.5-A (2026-05-04)：按 kind 选 prompt——video/gif/sticker/animated_sticker
+    各有专门提示，让描述更贴合该类内容（动作 / 时长 / 情绪标签）。
+
+    P2 强化：先用 PIL 裁掉 UI/状态栏/输入框/self 侧，再喂 vision；vision 若
+    返回 UI 关键词污染的描述则视为荒诞，返空让上层 fallback 模板。
     """
-    prompt = (
-        _IMAGE_DEEP_DESCRIBE_PROMPT_EN
-        if str(language).lower().startswith("en")
-        else _IMAGE_DEEP_DESCRIBE_PROMPT_ZH
+    # ── 1) 裁切 peer 气泡区域 ────────────────────────
+    cropped_path = _crop_to_peer_image_region(image_path)
+    use_path = cropped_path or image_path
+    is_en = str(language).lower().startswith("en")
+    prompt_pair = _MEDIA_DEEP_PROMPT_TABLE.get(
+        str(kind or "image").lower().strip(),
+        (_IMAGE_DEEP_DESCRIBE_PROMPT_ZH, _IMAGE_DEEP_DESCRIBE_PROMPT_EN),
     )
+    prompt = prompt_pair[1] if is_en else prompt_pair[0]
     raw, tag = await _call_vision(
-        image_path, prompt,
+        use_path, prompt,
         vision_cfg=vision_cfg, global_vision=global_vision,
     )
+    # ── 2) 裁切的临时文件清理 ─────────────────────────
+    if cropped_path and cropped_path != image_path:
+        try:
+            from pathlib import Path
+            Path(cropped_path).unlink(missing_ok=True)
+        except Exception:
+            pass
     text = (raw or "").strip()
     # 清掉常见的模型前缀
     for pref in (
@@ -710,4 +939,9 @@ async def describe_peer_image_detail(
     # 判 "无图片"
     if text in ("无图片", "NO_IMAGE", "no_image", "无") or not text:
         return "", tag
+    # ── 3) UI 噪声过滤：vision 把 UI 当图片描述了 ────
+    text_low = text.lower()
+    if any(kw.lower() in text_low for kw in _IMAGE_DESC_UI_NOISE_KEYWORDS):
+        # 描述被 UI 干扰，丢弃返空——上层会用通用模板"看到你发了一张图"
+        return "", f"{tag}:rejected_ui_noise"
     return text[:200], tag
