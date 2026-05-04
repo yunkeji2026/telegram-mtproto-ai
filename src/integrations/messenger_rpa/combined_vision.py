@@ -607,6 +607,10 @@ async def analyze_inbox_combined(
                 y_percent=0.0,
                 quality_hint=hint,
                 score=_score_chat(row_index, hint, preview),
+                # P23：透传三信号让下游 runner 决策
+                name_bold=name_bold,
+                preview_bold=preview_bold,
+                blue_dot=blue_dot,
             )
         )
 

@@ -9,7 +9,9 @@
 """
 from __future__ import annotations
 
+import json
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict
 
@@ -194,6 +196,109 @@ class TestRealLoopReproduction:
         d = m.dump()
         assert d["guard_skips"]["runaway_paused"] == 1
         assert d["guard_skips"]["runaway_hard_ceiling"] == 1
+
+
+class TestP20Persistence:
+    """P20 持久化：counter 跨重启保留，histogram 不持久化（session-only）。"""
+
+    def test_persist_then_reload_restores_guard_skips(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(
+            "MESSENGER_RPA_METRICS_PATH",
+            str(tmp_path / "metrics.json"),
+        )
+        # 显式启用持久化（PYTEST_CURRENT_TEST 默认禁用）
+        m1 = MessengerRpaMetrics()
+        m1._enable_persist()
+        m1._persist_interval_sec = 0  # 强制每次都 persist
+        m1.observe_run(_make_result(
+            step="self_message_skip", ok=True,
+            hints=["bubble_pre_vision_self_skip"],
+        ))
+        m1.observe_run(_make_result(
+            step="self_message_skip", ok=True,
+            hints=["chat_overlap_long_cooldown:600s:streak=3"],
+        ))
+        # 模拟"重启"：丢 m1 实例，新建 m2 显式启用持久化（load 历史）
+        m2 = MessengerRpaMetrics()
+        m2._enable_persist()
+        d = m2.dump()
+        # counter 应被恢复
+        assert d["guard_skips"]["self_message_skip"] == 2
+        assert d["guard_skips"]["bubble_pre_vision_self_skip"] == 1
+        assert d["guard_skips"]["chat_overlap_long_cooldown"] == 1
+
+    def test_persist_does_not_restore_histogram(self, tmp_path, monkeypatch):
+        """histogram 是 session-only，重启后从 0 开始（确保 latency 分位数
+        不被陈旧数据污染）。"""
+        monkeypatch.setenv(
+            "MESSENGER_RPA_METRICS_PATH",
+            str(tmp_path / "metrics.json"),
+        )
+        m1 = MessengerRpaMetrics()
+        m1._enable_persist()
+        m1._persist_interval_sec = 0
+        m1.observe_run(_make_result(
+            step="sent", ok=True, total_ms=5000.0,
+            phase_ms={"thread_vision": 3000},
+        ))
+        m2 = MessengerRpaMetrics()
+        m2._enable_persist()
+        d = m2.dump()
+        # histogram 应未被回填
+        assert d["run_duration"]["count"] == 0
+        assert d["phase_duration"]["thread_vision"]["count"] == 0
+
+    def test_persist_idempotent_when_file_missing(self, tmp_path, monkeypatch):
+        """首次启动（无文件）应 silent 不报错。"""
+        monkeypatch.setenv(
+            "MESSENGER_RPA_METRICS_PATH",
+            str(tmp_path / "no_such_file.json"),
+        )
+        m = MessengerRpaMetrics()
+        m._enable_persist()  # 不应抛
+        d = m.dump()
+        assert d["sends_total"] == 0
+        assert d["guard_skips"] == {}
+
+    def test_test_env_skips_auto_load(self):
+        """PYTEST_CURRENT_TEST 环境下默认不自动 load，避免污染单测。"""
+        m = MessengerRpaMetrics()
+        # _persist_path 应为 None（未启用 persist）
+        assert m._persist_path is None
+
+    def test_force_persist_bypasses_throttle(self, tmp_path, monkeypatch):
+        """P22：force_persist 绕过 60s throttle，立即写盘。"""
+        monkeypatch.setenv(
+            "MESSENGER_RPA_METRICS_PATH",
+            str(tmp_path / "metrics.json"),
+        )
+        m = MessengerRpaMetrics()
+        m._enable_persist()
+        m._persist_interval_sec = 999999  # 永远 throttle
+        m.observe_run(_make_result(
+            step="self_message_skip", ok=True,
+            hints=["bubble_pre_vision_self_skip"],
+        ))
+        # 普通路径被 throttle 阻塞，文件未生成
+        # （第一次 observe 时 _last_persist_at=0，会触发 — 改成强制 throttle）
+        # 注意：observe_run 内部的 _maybe_persist 在 _last_persist_at=0 时
+        # 会触发首次写盘。先重置 _last_persist_at 模拟"已经 dump 过"。
+        m._last_persist_at = time.time()  # 假装刚 dump 过
+        m._guard_skips["new_event"] = 5  # 新增数据
+        # force_persist 应立刻写盘
+        m._force_persist()
+        # 读回文件验证
+        path = tmp_path / "metrics.json"
+        assert path.exists()
+        with path.open("r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        assert data["guard_skips"].get("new_event") == 5
+
+    def test_force_persist_no_path_silent(self):
+        """P22：未启用持久化时 force_persist 应静默不抛。"""
+        m = MessengerRpaMetrics()
+        assert m._persist_path is None
+        m._force_persist()  # 不应抛
 
 
 class TestP16GuardCounters:

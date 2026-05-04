@@ -16,10 +16,21 @@ runner 每次 run 结束调 observe_run(result)，/api/messenger-rpa/metrics 读
                  sticky_idle, sticky_gate_skip, ...
       hint 维度: thread_xml_bubble_guard:self, runaway_circuit_tripped:*,
                  self_media_xml_guard, ...
+
+P20 (2026-05-04) 持久化：
+  - counter 类（不含 histogram）throttled (60s) dump 到 JSON
+  - 启动时 load JSON 回填 counter（histogram 为 session-only，不 load）
+  - 路径：tmp_messenger_rpa/messenger_rpa_metrics.json（已 gitignore）
+  - 重启不丢累积，跨进程查询无需 web auth
 """
 from __future__ import annotations
 
+import atexit
+import json
+import os
 import threading
+import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 # 秒 bucket — 适配 RPA 场景（通常 2~10s）
@@ -62,6 +73,11 @@ _GUARD_TRACKED_STEPS: frozenset = frozenset({
     # vision 误进非粘性 chat
     "wrong_chat_misroute_skip",
     "vision_repeated_previous_peer_after_recent_self_reply",
+    # P18 device_unhealthy 反空转
+    "device_unhealthy",
+    "device_unhealthy_backoff",
+    # P19 bubble_detector 前置短路（vision 之前）
+    "bubble_pre_vision_self_skip",
 })
 
 # hint 维度：精确匹配
@@ -82,6 +98,12 @@ _GUARD_TRACKED_HINTS_EXACT: frozenset = frozenset({
     "bubble_self_confirms_overlap",          # B 层：bubble + overlap 双确认
     # P17 thread_combined 截屏 hash 缓存命中
     "thread_combined_cache_hit",
+    # P25 inbox_combined ROI 缓存命中（最大头瓶颈）
+    "inbox_combined_cache_hit",
+    # P19 bubble 前置短路 hint（与 step 同名，hint+step 双计）
+    "bubble_pre_vision_self_skip",
+    # P28：peer 显著更长降级路径中 promote 失败时保留原 peer
+    "self_overlap_peer_longer_keep_original",
 })
 
 # hint 维度：前缀匹配（截断到前缀本身作 metrics key，避免维度爆炸）
@@ -100,6 +122,17 @@ _GUARD_TRACKED_HINT_PREFIXES: Tuple[str, ...] = (
     "self_overlap_strict_skip:",
     # P16-IL2：长冷却内 inbox preview 不同 → 解除冷却放行（带相似度数值）
     "chat_overlap_inbox_escape:",
+    # P18：device unhealthy backoff 触发 / 启动
+    "device_unhealthy_backoff:",
+    "device_unhealthy_backoff_armed:",
+    # P21：长冷却硬上限熔断（chat 入永久黑名单）
+    "chat_long_cooldown_blacklisted:",
+    # P26：auto-sticky 触发（带 TTL 数字）
+    "auto_sticky_armed:",
+    # P28：peer 显著更长 → 降级 promote（防 echo 子串误拦真消息）
+    "self_overlap_peer_longer_promote:",
+    # P23：vision 三信号全 F + 最近发过 → inbox 阶段 skip
+    "no_unread_signal_skip:",
 )
 
 
@@ -168,6 +201,99 @@ class MessengerRpaMetrics:
         # P1-E1: 守卫触发计数（reason 维度）
         # key 由白名单（_GUARD_TRACKED_STEPS / hints）筛选，避免维度爆炸
         self._guard_skips: Dict[str, int] = {}
+
+        # ── P20 (2026-05-04) 持久化 ──
+        self._persist_path: Optional[Path] = None
+        self._last_persist_at: float = 0.0
+        self._persist_interval_sec: float = 60.0
+        # 测试环境（pytest 自动设 PYTEST_CURRENT_TEST）不自动 load 生产 JSON
+        # 避免污染单测；测试需要持久化时显式调 _enable_persist()。
+        if not os.environ.get("PYTEST_CURRENT_TEST"):
+            self._enable_persist()
+            # P22 (2026-05-04) shutdown hook：进程正常退出时强制 dump 一次，
+            # 防止 60s throttle 窗口内的最新数据丢失（SIGINT/SIGTERM 都触发；
+            # SIGKILL 无救）。pytest 不注册（fixture 控制）。
+            atexit.register(self._force_persist)
+
+    def _force_persist(self) -> None:
+        """绕过 throttle 强制 dump。供 atexit / SIGTERM hook 调用。
+        失败静默（shutdown path 不该抛）。"""
+        if self._persist_path is None:
+            return
+        self._last_persist_at = 0.0
+        try:
+            self._maybe_persist()
+        except Exception:
+            pass
+
+    def _enable_persist(self) -> None:
+        """启动时尝试 load 历史累积。失败静默（首次 / 测试场景无文件）。"""
+        try:
+            base = os.environ.get(
+                "MESSENGER_RPA_METRICS_PATH",
+                "tmp_messenger_rpa/messenger_rpa_metrics.json",
+            )
+            self._persist_path = Path(base).resolve()
+            self._persist_path.parent.mkdir(parents=True, exist_ok=True)
+            if self._persist_path.exists():
+                with self._persist_path.open("r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+                with self._lock:
+                    for k, v in (data.get("run_outcomes") or {}).items():
+                        if k in self._run_outcomes:
+                            self._run_outcomes[k] += int(v or 0)
+                    for k, v in (data.get("caption_sources") or {}).items():
+                        if k in self._caption_sources:
+                            self._caption_sources[k] += int(v or 0)
+                    self._sends_total += int(data.get("sends_total") or 0)
+                    self._handoff_injected_total += int(
+                        data.get("handoff_injected_total") or 0
+                    )
+                    self._handoff_sent_total += int(
+                        data.get("handoff_sent_total") or 0
+                    )
+                    for k, v in (data.get("handoff_by_script") or {}).items():
+                        self._handoff_by_script[k] = (
+                            self._handoff_by_script.get(k, 0) + int(v or 0)
+                        )
+                    for k, v in (data.get("handoff_skipped") or {}).items():
+                        self._handoff_skipped[k] = (
+                            self._handoff_skipped.get(k, 0) + int(v or 0)
+                        )
+                    for k, v in (data.get("guard_skips") or {}).items():
+                        self._guard_skips[k] = (
+                            self._guard_skips.get(k, 0) + int(v or 0)
+                        )
+        except Exception:
+            # 持久化失败不影响主流程
+            pass
+
+    def _maybe_persist(self) -> None:
+        """throttled dump（默认 60s）。lock 之外调用以避免长 I/O 阻塞 record。"""
+        if self._persist_path is None:
+            return
+        now = time.time()
+        if now - self._last_persist_at < self._persist_interval_sec:
+            return
+        self._last_persist_at = now
+        try:
+            payload = {
+                "run_outcomes": dict(self._run_outcomes),
+                "caption_sources": dict(self._caption_sources),
+                "sends_total": self._sends_total,
+                "handoff_injected_total": self._handoff_injected_total,
+                "handoff_sent_total": self._handoff_sent_total,
+                "handoff_by_script": dict(self._handoff_by_script),
+                "handoff_skipped": dict(self._handoff_skipped),
+                "guard_skips": dict(self._guard_skips),
+                "_persist_ts": int(now),
+            }
+            tmp = self._persist_path.with_suffix(".json.tmp")
+            with tmp.open("w", encoding="utf-8") as fh:
+                json.dump(payload, fh, ensure_ascii=False, indent=1)
+            os.replace(tmp, self._persist_path)
+        except Exception:
+            pass
 
     def observe_run(self, result: Dict[str, Any]) -> None:
         """每次 runner.run_once 结束调一次。"""
@@ -250,6 +376,8 @@ class MessengerRpaMetrics:
                                 break
             except Exception:
                 pass  # metrics 不能反噬主流程
+        # P20：lock 释放后做 throttled persist（避免 I/O 阻塞）
+        self._maybe_persist()
 
     def dump(self) -> Dict[str, Any]:
         with self._lock:

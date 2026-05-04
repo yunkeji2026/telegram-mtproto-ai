@@ -488,6 +488,45 @@ class MessengerRpaRunner:
         self._thread_combined_cache: "OrderedDict[str, Any]" = _OD()
         self._thread_combined_cache_max = 16
 
+        # ── P26 (2026-05-04) auto-sticky chat ──
+        # 现状：sticky_thread.target_chat_names 仅 1 个静态白名单（Victor Zan），
+        # 其他 chat 每轮都走完整 inbox vision (50s+) → 反应慢。
+        # 优化：发送成功后该 chat 自动 sticky N 秒（默认 300s = 5 分钟），让它
+        # 享受 fast_path（current_thread_fast_path / sticky_idle 短间隔 1.5s
+        # poll）。peer 在 5 分钟内继续聊 → bot 几秒内响应；过期自动退出。
+        self._auto_sticky_until: Dict[str, float] = {}
+
+        # ── P25 (2026-05-04) inbox_combined ROI hash 缓存 ──
+        # phase_duration 数据：inbox_vision 平均 57s/次，是最大瓶颈。
+        # 当 peer 没发新消息时 inbox 列表稳定（5 分钟级时间戳粗粒度），ROI
+        # hash 应能命中。命中省 ~50s vision API 调用 + 整轮等待。
+        # ROI = [23.75%, 92.5%]，跳过 stories（动画头像）+ 底部 nav。
+        # LRU 4 条（inbox 切换不频繁）。
+        self._inbox_combined_cache: "OrderedDict[str, Any]" = _OD()
+        self._inbox_combined_cache_max = 4
+
+        # ── P21 (2026-05-04) 长冷却硬上限熔断 ──
+        # 单 chat 在滚动窗口（默认 24h）内累计触发 ≥ N 次（默认 3）long_cooldown
+        # → 自动加入 state_store.skipped_chats 永久跳过列表 + ERROR 告警。
+        # 防御场景：vision 对某个 chat 系统性持续幻觉，反复触发 600s 长冷却也
+        # 救不回（cycle 永远空转）。入黑后由人工 review + 调用 remove_skipped_chat
+        # 解禁。
+        self._chat_long_cooldown_history: Dict[str, List[float]] = {}
+
+        # ── P24 (2026-05-04) window 上限保护 ──
+        # 防御 P19 误拦事故重演：bubble_pre_vision_recent_window_sec 配置过大
+        # 时（>300s）会让 peer 久不回的真消息被误判 self 拦截，必须 clamp。
+        # warning 只打一次防止日志刷屏。
+        self._pv_window_clamp_warned: bool = False
+
+        # ── P18 (2026-05-04) device_unhealthy 反空转 ──
+        # 现象：USB 设备物理掉线时，每次 _resolve_serial 都调 ensure_device_ready
+        # 跑 30s 重连—但 USB 模式下 _adb_connect 是 no-op，重连无效，30s 全浪费。
+        # 1.5h 采样到 12 次 device_unhealthy = 360s+ 空转。
+        # 防御：连续 N 次 unhealthy 后进入 backoff 短路，不再调 ensure_device_ready。
+        self._device_unhealthy_streak: Dict[str, int] = {}
+        self._device_unhealthy_skip_until: Dict[str, float] = {}
+
         # P2 (2026-05-04) sticker reply：记录每 chat 的 sticker 发送时间戳列表，
         # 用于 cooldown / 24h cap 计算。即使 dry_run 也记录决策模拟次数。
         self._sticker_send_history: Dict[str, List[float]] = {}
@@ -619,7 +658,12 @@ class MessengerRpaRunner:
     def _sticky_thread_names(self) -> List[str]:
         """P2-S 粘性会话白名单：这些 chat 发送成功后不退 thread，让下轮
         smart_current_thread 直接接管，省去 inbox 扫描 + tap 进入的开销
-        （30-60s → 5-10s）。空列表 = 不启用粘性。"""
+        （30-60s → 5-10s）。空列表 = 不启用粘性。
+
+        P26 (2026-05-04)：合并 config 静态白名单 + auto-sticky 动态名单
+        （发送成功后短期内自动 sticky）。auto-sticky 受
+        sticky_thread.auto_sticky_enabled（默认 true）控制。
+        """
         cfg = self._cfg.get("sticky_thread") or {}
         if not isinstance(cfg, dict) or not cfg.get("enabled", False):
             return []
@@ -627,8 +671,21 @@ class MessengerRpaRunner:
         if isinstance(raw, str):
             raw = [raw]
         if not isinstance(raw, list):
-            return []
-        return [str(x).strip() for x in raw if str(x or "").strip()]
+            raw = []
+        result = [str(x).strip() for x in raw if str(x or "").strip()]
+        # P26：拼上 auto-sticky 中尚未过期的 chat
+        if cfg.get("auto_sticky_enabled", True):
+            now_m = time.monotonic()
+            expired: List[str] = []
+            for name, expiry in self._auto_sticky_until.items():
+                if expiry > now_m:
+                    if name and name not in result:
+                        result.append(name)
+                else:
+                    expired.append(name)
+            for k in expired:
+                self._auto_sticky_until.pop(k, None)
+        return result
 
     def _is_sticky_chat(self, chat_name: str) -> bool:
         """判断某 chat 是否在粘性会话白名单内。"""
@@ -2105,6 +2162,43 @@ class MessengerRpaRunner:
                             )
                             skipped_names.append(c.name)
                             continue
+                    # ★ P23 (2026-05-04) vision 三信号 + 最近发过守卫 ──
+                    # vision INBOX_COMBINED 已输出 name_bold/preview_bold/blue_dot
+                    # 三个未读视觉特征。当三个全 F + 我们最近 N 秒内（默认 60s）
+                    # 发过消息时，大概率是 vision 把已读列入 unread 的"前进式
+                    # 误识"（lowmemkill 后 inbox 缓存陈旧）。
+                    # 保守设计：60s 窗口外不 skip（不破坏"双机互发联调"边界）。
+                    _p23_window = float(self._cfg.get(
+                        "no_unread_signal_recent_window_sec", 60.0,
+                    ) or 0.0)
+                    if (
+                        _p23_window > 0
+                        and c.unread_signals_count == 0
+                    ):
+                        try:
+                            _cs_p23 = self._state.get_chat_state(ck)
+                            _last_sent_p23 = float(
+                                _cs_p23.get("last_sent_at") or 0.0
+                            )
+                        except Exception:
+                            _last_sent_p23 = 0.0
+                        if (
+                            _last_sent_p23 > 0
+                            and (time.time() - _last_sent_p23) < _p23_window
+                        ):
+                            _gap_p23 = int(time.time() - _last_sent_p23)
+                            logger.warning(
+                                "[messenger_rpa] skip chat (vision "
+                                "unread_signals=0 + last_sent_ago=%ds < %ds)"
+                                ": %r",
+                                _gap_p23, int(_p23_window), c.name,
+                            )
+                            result.setdefault("hints", []).append(
+                                f"no_unread_signal_skip:gap={_gap_p23}s"
+                            )
+                            skipped_names.append(c.name)
+                            continue
+
                     # ★ P0-1: 前移 companion_reply_cooldown_sec 检查到 inbox 阶段。
                     # 之前该检查仅在 L2014（thread 内）兜底，导致同一会话每轮被
                     # tap 进 thread → vision 读屏 → 退出，浪费 5-10s/轮，并使其他
@@ -2608,6 +2702,112 @@ class MessengerRpaRunner:
                         exc_info=True,
                     )
 
+            # ── P19 (2026-05-04) bubble_detector 前置短路 ──
+            # 与 P1-C XML 守卫并列，覆盖 XML Litho 顶栏不暴露 "You:" 前缀。
+            # bubble_detector 像素扫描 ≈ 100-300ms，仅在最近发过时调用以避免
+            # happy path（peer 新消息）浪费——peer 新消息时 bubble=peer，
+            # 不会触发 self skip，提前查 last_sent_at 让 bubble_detector 只在
+            # 它可能发挥作用的场景跑。
+            # 1.5h 生产数据：4 次 vision_misread 全部 bubble=self → 预期 100%
+            # 拦截 vision 误读源头。bubble=peer/unknown 时仍走 vision。
+            if thread_png and bool(
+                self._cfg.get("bubble_pre_vision_guard_enabled", True)
+            ):
+                _ck_pv = (
+                    chat_key or f"{self._chat_key_prefix}:{target.name}"
+                )
+                try:
+                    _cs_pv = self._state.get_chat_state(_ck_pv)
+                    _last_sent_pv = float(_cs_pv.get("last_sent_at") or 0.0)
+                except Exception:
+                    _last_sent_pv = 0.0
+                # P19-FIX (2026-05-04 emergency)：window 紧缩到 120s（与
+                # post_send_cooldown_sec 对齐）。
+                # 历史 v2 升到 3600s 的假设是"bubble=self 已确认最底部仍是
+                # 我们的"——但生产观察到 last_sent_ago=2443s（40 分钟前）
+                # 仍触发 self-skip，导致 peer 真回复后 bot 不应答的 bug：
+                # bubble_detector 扫描区 [45%, 85%]，peer 新气泡可能在
+                # [85%, 100%] 被键盘/输入栏遮挡 → bubble_detector 看不到
+                # 新 peer 气泡 → 误判 self → 真消息被吞。
+                # 120s 内才信任 bubble=self（post-send 期内 vision 也容易
+                # 误读，bubble 是更可靠源），过 120s 必须走 vision 路径
+                # 让模型完整看屏（含被遮挡区域的 hint）。
+                #
+                # P24 (2026-05-04) 上限保护：window 配置 > 上限（默认 300s）
+                # 时强制 clamp + WARNING 一次。防御"配置错乱重演 P19 事故"。
+                _pv_window_raw = float(self._cfg.get(
+                    "bubble_pre_vision_recent_window_sec", 120.0,
+                ) or 0.0)
+                _pv_window_max = float(self._cfg.get(
+                    "bubble_pre_vision_window_max_sec", 300.0,
+                ) or 300.0)
+                if (
+                    _pv_window_max > 0
+                    and _pv_window_raw > _pv_window_max
+                ):
+                    if not self._pv_window_clamp_warned:
+                        logger.warning(
+                            "[messenger_rpa] P24 ⚠️ "
+                            "bubble_pre_vision_recent_window_sec=%.0fs "
+                            "> 上限 %.0fs，clamp 到 %.0fs。"
+                            "原因：bubble_detector 扫描区 [45%%-85%%] 看不"
+                            "到键盘/输入栏遮挡的 peer 新气泡，window 过长会"
+                            "把 peer 真消息误判 self 拦截（P19 历史事故）。",
+                            _pv_window_raw, _pv_window_max, _pv_window_max,
+                        )
+                        self._pv_window_clamp_warned = True
+                    _pv_window = _pv_window_max
+                else:
+                    _pv_window = _pv_window_raw
+                _pv_within_window = (
+                    _last_sent_pv > 0
+                    and _pv_window > 0
+                    and (time.time() - _last_sent_pv) < _pv_window
+                )
+                if _pv_within_window:
+                    try:
+                        from src.integrations.messenger_rpa.bubble_detector \
+                            import detect_latest_sender as _pv_detect
+                        _pv_sender, _pv_info = _pv_detect(thread_png)
+                        result["pre_vision_bubble_sender"] = _pv_sender
+                        result["pre_vision_bubble_info"] = _pv_info
+                        if _pv_sender == "self":
+                            _gap = int(time.time() - _last_sent_pv)
+                            result["step"] = "bubble_pre_vision_self_skip"
+                            result["ok"] = True
+                            result["error"] = (
+                                f"bubble_pre_vision: self confirmed, "
+                                f"last_sent_ago={_gap}s < "
+                                f"{int(_pv_window)}s window"
+                            )
+                            result.setdefault("hints", []).append(
+                                "bubble_pre_vision_self_skip"
+                            )
+                            _cd_pv = float(
+                                self._cfg.get("self_skip_cooldown_sec", 30)
+                                or 30
+                            )
+                            _now_pv = time.monotonic() + _cd_pv
+                            self._self_skip_until[
+                                _self_skip_norm_key(target.name)
+                            ] = _now_pv
+                            if (
+                                _original_vision_name
+                                and _original_vision_name != target.name
+                            ):
+                                self._self_skip_until[
+                                    _self_skip_norm_key(_original_vision_name)
+                                ] = _now_pv
+                            logger.warning(
+                                "[messenger_rpa] P19 bubble 前置: self 确认 + "
+                                "最近 %ds 内发过 → 跳过 vision chat=%r",
+                                _gap, target.name,
+                            )
+                            self._exit_thread(serial)
+                            return self._finish(result, t0)
+                    except Exception:
+                        logger.debug("P19 bubble_pre_vision 异常", exc_info=True)
+
             if self._use_combined_vision:
                 # ★ P3-3：乐观并发 — 同时启动 thread_combined 和 caption
                 # kind!=image 时 caption 浪费一次 vision 调用但不浪费墙上时间；
@@ -2647,17 +2847,23 @@ class MessengerRpaRunner:
                 return self._finish(result, t0)
 
             # ★ 像素级气泡归属检测：独立于 Vision 和 XML 的第三验证源
-            _bubble_sender = "unknown"
-            if thread_png and bool(self._cfg.get("bubble_detector_enabled", True)):
+            # P19：优先复用前置探测结果（vision 调用前已扫过一次，避免重复 50ms）
+            _bubble_sender = result.get("pre_vision_bubble_sender") or "unknown"
+            _bub_info = result.get("pre_vision_bubble_info") or {}
+            if (
+                _bubble_sender == "unknown"
+                and thread_png
+                and bool(self._cfg.get("bubble_detector_enabled", True))
+            ):
                 try:
                     from src.integrations.messenger_rpa.bubble_detector import (
                         detect_latest_sender,
                     )
                     _bubble_sender, _bub_info = detect_latest_sender(thread_png)
-                    result["bubble_sender"] = _bubble_sender
-                    result["bubble_info"] = _bub_info
                 except Exception:
                     logger.debug("bubble_detector 异常", exc_info=True)
+            result["bubble_sender"] = _bubble_sender
+            result["bubble_info"] = _bub_info
             # Hard guard: UI XML is more reliable than Vision for "who spoke last".
             # If the latest visible thread snippet starts with "You:" / "你:" etc.,
             # the newest message is ours, so do not let a Vision role mistake create
@@ -2917,14 +3123,32 @@ class MessengerRpaRunner:
                 # D2：精确相等 + 高相似度（>=0.85）双重命中。
                 # vision 偶发把同样消息加 emoji 截断略改 → 精确匹配漏掉，
                 # 但 _self_reply_overlap_ratio 能捕到。
+                #
+                # P28-FIX (2026-05-04)：D 层短路也加长度差异守卫——
+                # 实测 bug：bot 发"お疲れ様です。どうぞ軽く食べてください"(22 字)
+                # peer 真回复"お疲れ様です。これを軽く消化しました。そちらはお食事
+                # はどうですか？"(33 字)，因公共子串"お疲れ様"+"軽く" 算出 ratio=1.0
+                # 被 D 层误拦真消息。peer 显著长于 prev_skipped 时不短路。
                 _skipped_texts = self._skipped_peer_text_per_chat.get(chat_key)
                 _short_circuit_match: Optional[Tuple[str, float]] = None
+                _d_len_thr = float(self._cfg.get(
+                    "self_overlap_peer_length_ratio_threshold", 1.3,
+                ) or 0.0)
                 if _pc_raw and _skipped_texts:
                     _dedup_thr = float(
                         self._cfg.get("skipped_peer_text_dedup_threshold", 0.85)
                         or 0.0
                     )
                     for _prev in _skipped_texts:
+                        # P28-FIX：peer 显著长于 prev → peer 大概率是真消息
+                        # quote 部分 prev 子串，跳过此条短路（让下游 P28 主路
+                        # 径处理）
+                        if (
+                            _d_len_thr > 0
+                            and _prev
+                            and len(_pc_raw) > len(_prev) * _d_len_thr
+                        ):
+                            continue
                         if _prev == _pc_raw:
                             _short_circuit_match = (_prev, 1.0)
                             break
@@ -2988,6 +3212,21 @@ class MessengerRpaRunner:
                 )
                 # B 层：bubble_detector 强信号
                 _bubble_says_self = (result.get("bubble_sender") == "self")
+                # ── P28 (2026-05-04) 长度差异守卫 ──
+                # 实测 bug：bot 发"...自分のペースでいいよ..." (50 字)，peer 真消息
+                # "あのばとろ🍵 そう言ってもらえると安心..." (80+ 字) 在自己回复
+                # 里 echo 公共子串"自分のペースで"，被 _self_reply_overlap_ratio
+                # 算出 1.00 → 守卫误拦真消息，bot 进 thread 但不回复。
+                # 修复：peer 文本长度 > last_reply × ratio 时降级为"试 promote"
+                # 路径，避免直接 skip。bubble=self 时仍信任 self 信号，跳过此降级。
+                _len_ratio_thr = float(self._cfg.get(
+                    "self_overlap_peer_length_ratio_threshold", 1.3,
+                ) or 0.0)
+                _peer_significantly_longer = (
+                    _lr_raw
+                    and _len_ratio_thr > 0
+                    and len(_pc_raw) > len(_lr_raw) * _len_ratio_thr
+                )
                 if _self_overlap >= 0.7:
                     promoted = None
                     if _bubble_says_self:
@@ -2995,6 +3234,27 @@ class MessengerRpaRunner:
                         result.setdefault("hints", []).append(
                             "bubble_self_confirms_overlap"
                         )
+                    elif _peer_significantly_longer:
+                        # P28：peer 显著更长 + bubble 非 self → 视为 peer 真消息
+                        # quote bot，降级到 promote 路径让下游再裁定
+                        result.setdefault("hints", []).append(
+                            f"self_overlap_peer_longer_promote:"
+                            f"peer={len(_pc_raw)}"
+                            f"_self={len(_lr_raw)}"
+                        )
+                        promoted = (
+                            self._promote_extra_peer_after_self_overlap(
+                                result, last_reply=_lr_raw, chat_key=chat_key,
+                            )
+                        )
+                        # 若 promote 失败仍直接用 peer_msg 本体（不再 skip）
+                        if promoted is None:
+                            result.setdefault("hints", []).append(
+                                "self_overlap_peer_longer_keep_original"
+                            )
+                            # 保留 peer_msg 原样，不进入下面 self_message_skip 分支
+                            # 用 sentinel "promoted" 标记进入 happy-path
+                            promoted = peer_msg
                     elif _within_strict_window:
                         # 严格窗口内：直接 skip，不尝试 promote
                         result.setdefault("hints", []).append(
@@ -3040,6 +3300,70 @@ class MessengerRpaRunner:
                                 f":streak={_streak}"
                             )
                             self._self_overlap_skip_streak[chat_key] = 0
+                            # ── P21 长冷却硬上限熔断 ──
+                            _now_epoch = time.time()
+                            _bw_window = float(self._cfg.get(
+                                "chat_long_cooldown_blacklist_window_sec",
+                                86400.0,
+                            ) or 0.0)
+                            _bw_cutoff = _now_epoch - _bw_window
+                            _bw_hist = [
+                                t
+                                for t in self._chat_long_cooldown_history.get(
+                                    chat_key, []
+                                )
+                                if t >= _bw_cutoff
+                            ]
+                            _bw_hist.append(_now_epoch)
+                            self._chat_long_cooldown_history[chat_key] = _bw_hist
+                            _bw_threshold = int(self._cfg.get(
+                                "chat_long_cooldown_blacklist_threshold", 3,
+                            ) or 3)
+                            if (
+                                _bw_threshold > 0
+                                and len(_bw_hist) >= _bw_threshold
+                            ):
+                                _bl_reason = (
+                                    f"chat_long_cooldown_blacklist: "
+                                    f"{len(_bw_hist)} long_cd in "
+                                    f"{int(_bw_window)}s window"
+                                )
+                                try:
+                                    self._state.add_skipped_chat(
+                                        chat_key,
+                                        chat_name=getattr(target, "name", ""),
+                                        reason=_bl_reason,
+                                    )
+                                    result.setdefault("hints", []).append(
+                                        f"chat_long_cooldown_blacklisted:"
+                                        f"{len(_bw_hist)}"
+                                    )
+                                    logger.error(
+                                        "[messenger_rpa] 🚫 chat 永久跳过："
+                                        "%s 在 %ds 内累计 %d 次 long_cooldown"
+                                        "，已加入 skipped_chats 黑名单（人工"
+                                        " unban 用 remove_skipped_chat）",
+                                        chat_key, int(_bw_window),
+                                        len(_bw_hist),
+                                    )
+                                    # 清理本 chat 内存状态，避免 dangling
+                                    self._chat_overlap_skip_until.pop(
+                                        chat_key, None
+                                    )
+                                    self._self_overlap_skip_streak.pop(
+                                        chat_key, None
+                                    )
+                                    self._chat_long_cooldown_history.pop(
+                                        chat_key, None
+                                    )
+                                    self._skipped_peer_text_per_chat.pop(
+                                        chat_key, None
+                                    )
+                                except Exception:
+                                    logger.warning(
+                                        "add_skipped_chat 异常 chat=%s",
+                                        chat_key, exc_info=True,
+                                    )
                         result["step"] = "self_message_skip"
                         result["ok"] = True
                         result["error"] = (
@@ -3951,6 +4275,25 @@ class MessengerRpaRunner:
                 "[messenger_rpa] ✓ 发送成功 chat=%r → post-send cooldown %ds",
                 target.name, int(_ps_cd),
             )
+            # ── P26 auto-sticky：发送成功后该 chat 自动 sticky N 秒，让 peer
+            # 在 TTL 内继续聊时 bot 走 fast_path 几秒响应（跳过 50s inbox vision）
+            try:
+                _sticky_cfg_post = self._cfg.get("sticky_thread") or {}
+                if _sticky_cfg_post.get("enabled", False) and _sticky_cfg_post.get(
+                    "auto_sticky_enabled", True,
+                ):
+                    _auto_ttl = float(_sticky_cfg_post.get(
+                        "auto_sticky_ttl_sec", 300.0,
+                    ) or 300.0)
+                    if _auto_ttl > 0 and target.name:
+                        self._auto_sticky_until[target.name] = (
+                            time.monotonic() + _auto_ttl
+                        )
+                        result.setdefault("hints", []).append(
+                            f"auto_sticky_armed:{int(_auto_ttl)}s"
+                        )
+            except Exception:
+                logger.debug("auto_sticky 设置异常", exc_info=True)
             # P2.3 (2026-05-04) sticker 发送 hook：
             # text 已发出 → 若 modality 决策命中且 dry_run=False 且
             # real_send_enabled=True 双开关同时打开 → 异步真发 sticker。
@@ -4767,6 +5110,23 @@ class MessengerRpaRunner:
     def _resolve_serial(self, result: Dict[str, Any]) -> Optional[str]:
         cfg_serial = (self._cfg.get("adb_serial") or "").strip()
         if cfg_serial:
+            # ★ P18 反空转：连续 unhealthy 后进入 backoff，跳过 ensure_device_ready
+            # 30s 等待。避免 USB 物理掉线时 service 持续 6+ 分钟空转。
+            _bo_until_m = float(
+                self._device_unhealthy_skip_until.get(cfg_serial, 0.0) or 0.0
+            )
+            if _bo_until_m > time.monotonic():
+                _remaining = int(_bo_until_m - time.monotonic())
+                result["step"] = "device_unhealthy_backoff"
+                result["error"] = (
+                    f"device_unhealthy_backoff: {_remaining}s remaining "
+                    f"(streak={self._device_unhealthy_streak.get(cfg_serial, 0)})"
+                )
+                result.setdefault("hints", []).append(
+                    f"device_unhealthy_backoff:{_remaining}s"
+                )
+                return None
+
             # ★ P4-2：heal cache — 同 serial N 秒内不重复 heal
             # 成功后短缓存，失败后更短缓存（好让下次 run 重试）
             hc_cfg = (self._cfg.get("adb_healthcheck") or {})
@@ -4777,6 +5137,8 @@ class MessengerRpaRunner:
             last = self._heal_cache.get(cfg_serial)
             if last and (now - last[0]) < heal_cache_sec and last[1].get("ok"):
                 result["device_health"] = {**last[1], "cache_hit": True}
+                # 健康路径：清 streak
+                self._device_unhealthy_streak.pop(cfg_serial, None)
                 return cfg_serial
 
             # ★ 设备健康守护：自动重连/唤醒/解锁 + IME 预检
@@ -4802,6 +5164,9 @@ class MessengerRpaRunner:
                 result["device_health"] = info
                 if healthy:
                     self._heal_cache[cfg_serial] = (now, info)
+                    # P18：健康路径清 streak / backoff
+                    self._device_unhealthy_streak.pop(cfg_serial, None)
+                    self._device_unhealthy_skip_until.pop(cfg_serial, None)
                 if not healthy:
                     result["step"] = "device_unhealthy"
                     err_attempts = info.get("attempts") or []
@@ -4809,6 +5174,26 @@ class MessengerRpaRunner:
                         err_attempts[-1].get("error", "") if err_attempts else ""
                     )
                     result["error"] = f"device_health: {last_err}"
+                    # ── P18 反空转：累加 streak，达阈值进 backoff ──
+                    _streak = self._device_unhealthy_streak.get(
+                        cfg_serial, 0
+                    ) + 1
+                    self._device_unhealthy_streak[cfg_serial] = _streak
+                    _thr = int(self._cfg.get(
+                        "device_unhealthy_streak_threshold", 3
+                    ) or 3)
+                    _bo = float(self._cfg.get(
+                        "device_unhealthy_backoff_sec", 60.0
+                    ) or 0.0)
+                    if _streak >= _thr and _bo > 0:
+                        self._device_unhealthy_skip_until[cfg_serial] = (
+                            time.monotonic() + _bo
+                        )
+                        result.setdefault("hints", []).append(
+                            f"device_unhealthy_backoff_armed:{int(_bo)}s"
+                            f":streak={_streak}"
+                        )
+                    result["device_unhealthy_streak"] = _streak
                     return None
             except Exception as ex:
                 logger.exception("[runner] device_health 异常")
@@ -5483,25 +5868,16 @@ class MessengerRpaRunner:
                 return g2, ur2
         return last_guard, unread
 
-    async def _inbox_combined(
+    def _apply_inbox_combined_side_effects(
         self,
-        inbox_png: str,
+        cr: Any,
+        tag: str,
         result: Dict[str, Any],
-        retry: bool = False,
+        retry: bool,
         *,
-        max_rows: Optional[int] = None,
-    ) -> Tuple[Any, List[UnreadChat]]:
-        """单次 vision 同时拿 inbox guard + 未读列表。"""
-        _t_iv = time.monotonic()
-        cr, tag = await analyze_inbox_combined(
-            inbox_png,
-            vision_cfg=self._vision_cfg(),
-            global_vision=self._global_vision_cfg(),
-            skip_spam=bool(self._cfg.get("skip_spam", True)),
-        )
-        result.setdefault("phase_ms", {})["inbox_vision"] = int(
-            (time.monotonic() - _t_iv) * 1000
-        )
+        replay_risk: bool,
+    ) -> None:
+        """P25：抽出 _inbox_combined 对 result 的写入，便于 cache 命中时重放。"""
         result["inbox_vision_tag"] = tag + ("|retry" if retry else "")
         result["inbox_unread_count"] = len(cr.rows)
         result["inbox_ranking"] = [
@@ -5524,10 +5900,72 @@ class MessengerRpaRunner:
                     "title": cr.guard.title,
                 }
             )
-        # ★ P3-1：inbox 也可能暴露风控 banner，同 thread 一样处理
+        if replay_risk:
+            risk = getattr(cr, "risk", None)
+            if risk is not None and risk.hit:
+                self._handle_risk_hit(risk, result=result, where="inbox")
+
+    async def _inbox_combined(
+        self,
+        inbox_png: str,
+        result: Dict[str, Any],
+        retry: bool = False,
+        *,
+        max_rows: Optional[int] = None,
+    ) -> Tuple[Any, List[UnreadChat]]:
+        """单次 vision 同时拿 inbox guard + 未读列表。
+
+        P25 (2026-05-04)：加 ROI hash 缓存。peer 没发新消息时同分钟内 inbox
+        列表稳定（时间戳"5m"粗粒度），ROI hash 命中可省 ~50s vision API。
+        风险约束：仅 risk 未命中且 retry=False 时缓存（retry 路径用单任务
+        prompt 不该混入 cache）。
+        """
+        # ── P25 ROI hash cache ──
+        img_hash = (
+            self._screenshot_inbox_hash(inbox_png) if inbox_png else None
+        )
+        if (
+            img_hash
+            and not retry
+            and img_hash in self._inbox_combined_cache
+        ):
+            cr, tag = self._inbox_combined_cache[img_hash]
+            self._inbox_combined_cache.move_to_end(img_hash)
+            result.setdefault("hints", []).append("inbox_combined_cache_hit")
+            result.setdefault("phase_ms", {})["inbox_vision"] = 0
+            self._apply_inbox_combined_side_effects(
+                cr, tag, result, retry, replay_risk=False,
+            )
+            cap = (
+                self._max_inbox_per_run
+                if max_rows is None else int(max_rows)
+            )
+            cap = max(1, min(30, cap))
+            return cr.guard, cr.rows[:cap]
+
+        _t_iv = time.monotonic()
+        cr, tag = await analyze_inbox_combined(
+            inbox_png,
+            vision_cfg=self._vision_cfg(),
+            global_vision=self._global_vision_cfg(),
+            skip_spam=bool(self._cfg.get("skip_spam", True)),
+        )
+        result.setdefault("phase_ms", {})["inbox_vision"] = int(
+            (time.monotonic() - _t_iv) * 1000
+        )
+        # P25：仅 risk 未命中 + 非 retry 时缓存
         risk = getattr(cr, "risk", None)
-        if risk is not None and risk.hit:
-            self._handle_risk_hit(risk, result=result, where="inbox")
+        risk_hit = bool(risk and getattr(risk, "hit", False))
+        if img_hash and not retry and not risk_hit:
+            self._inbox_combined_cache[img_hash] = (cr, tag)
+            while len(
+                self._inbox_combined_cache
+            ) > self._inbox_combined_cache_max:
+                self._inbox_combined_cache.popitem(last=False)
+        # P25：side effects 复用 helper（含 risk 实时处理）
+        self._apply_inbox_combined_side_effects(
+            cr, tag, result, retry, replay_risk=True,
+        )
 
         # ★ combined 漏报时用单任务 prompt 再兜底一次
         # 两种触发情形：
@@ -5618,11 +6056,60 @@ class MessengerRpaRunner:
 
     @staticmethod
     def _screenshot_hash(path: str) -> Optional[str]:
-        """读 PNG 文件 bytes 算 MD5（速度足够快，碰撞对此用例无影响）。
-        失败返回 None。"""
+        """对消息气泡 ROI（去掉顶栏 Active 时间 + 输入栏 typing 闪烁）算 MD5。
+
+        P17-v2 (2026-05-04)：v1 用全图 PNG bytes，1.5h 生产 0% 命中——顶栏
+        "Active 5m ago" / 输入栏游标闪烁 / 状态栏每秒变化都让全图 hash 永远
+        不同。改 ROI = 屏高 [3.75%, 83%]，720x1600 屏对应 [60, 1328]，正好
+        卡掉这两个变化区域，保留消息气泡区。
+
+        PIL 不可用时 fallback 到全图 hash（保留 v1 行为）。
+        前缀区分两种 hash 用于调试：roi: / full:
+        """
+        return MessengerRpaRunner._screenshot_roi_hash(
+            path, top_pct=0.0375, bottom_pct=0.83, prefix="roi",
+        )
+
+    @staticmethod
+    def _screenshot_inbox_hash(path: str) -> Optional[str]:
+        """P25：inbox 截图 ROI hash。
+
+        ROI = 屏高 [23.75%, 92.5%]，跳过：
+        - [0, 23.75%]：状态栏 + Messenger header + 搜索框 + Stories 动画头像
+        - [92.5%, 100%]：底部 nav 栏
+
+        保留：chat 列表区。peer 没发新消息时同分钟内列表稳定（时间戳是
+        "5m ago" 粒度，5 分钟才滚一次）。
+        """
+        return MessengerRpaRunner._screenshot_roi_hash(
+            path, top_pct=0.2375, bottom_pct=0.925, prefix="inbox_roi",
+        )
+
+    @staticmethod
+    def _screenshot_roi_hash(
+        path: str,
+        *,
+        top_pct: float,
+        bottom_pct: float,
+        prefix: str,
+    ) -> Optional[str]:
+        """通用 ROI hash 实现。PIL 失败时 fallback 全图。"""
+        try:
+            from PIL import Image
+            with Image.open(path) as img:
+                w, h = img.size
+                top = int(h * top_pct)
+                bottom = int(h * bottom_pct)
+                if top < bottom:
+                    roi = img.crop((0, top, w, bottom))
+                    return f"{prefix}:" + hashlib.md5(
+                        roi.tobytes()
+                    ).hexdigest()
+        except Exception:
+            pass
         try:
             with open(path, "rb") as fh:
-                return hashlib.md5(fh.read()).hexdigest()
+                return "full:" + hashlib.md5(fh.read()).hexdigest()
         except (OSError, TypeError):
             return None
 
@@ -5666,12 +6153,16 @@ class MessengerRpaRunner:
     async def _thread_combined(
         self, thread_png: str, result: Dict[str, Any]
     ) -> Tuple[Any, Optional[PeerMessage]]:
-        # ── P17 截屏 hash 缓存 ──
+        # ── P17-v2 截屏 ROI hash 缓存（chat_key 隔离）──
+        # cache key = "{chat_key}|{roi_hash}"，避免不同 chat 但 ROI 像素巧合
+        # 相同时误命中。
         img_hash = self._screenshot_hash(thread_png) if thread_png else None
-        if img_hash and img_hash in self._thread_combined_cache:
-            cr, tag = self._thread_combined_cache[img_hash]
+        chat_key_hint = str(result.get("chat_key") or "")
+        cache_key = f"{chat_key_hint}|{img_hash}" if img_hash else None
+        if cache_key and cache_key in self._thread_combined_cache:
+            cr, tag = self._thread_combined_cache[cache_key]
             # LRU touch
-            self._thread_combined_cache.move_to_end(img_hash)
+            self._thread_combined_cache.move_to_end(cache_key)
             result.setdefault("hints", []).append("thread_combined_cache_hit")
             # 命中时不重放 risk hit 副作用（首次已处理过）
             self._thread_combined_apply_side_effects(
@@ -5687,8 +6178,8 @@ class MessengerRpaRunner:
         # 仅在 risk 未命中时缓存（risk 链路保持每次实时判定）
         risk = getattr(cr, "risk", None)
         risk_hit = bool(risk and getattr(risk, "hit", False))
-        if img_hash and not risk_hit:
-            self._thread_combined_cache[img_hash] = (cr, tag)
+        if cache_key and not risk_hit:
+            self._thread_combined_cache[cache_key] = (cr, tag)
             while len(self._thread_combined_cache) > self._thread_combined_cache_max:
                 self._thread_combined_cache.popitem(last=False)
         self._thread_combined_apply_side_effects(

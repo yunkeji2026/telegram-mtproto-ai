@@ -118,6 +118,19 @@ class UnreadChat:
     score: float = 0.0            # 下游打分用，越大越优先
     # True：已通过搜索等方式进入会话，勿再对 inbox 行做 tap
     skip_inbox_tap: bool = False
+    # ── P23 (2026-05-04) vision 三信号 ──
+    # vision INBOX_COMBINED 输出的未读视觉特征。三个全 False 时大概率是
+    # vision 误把已读列入 unread[]（特别是 lowmemkill 后 inbox 缓存陈旧）。
+    # 默认值（True / False / False）与"老 prompt 只返 name_bold"行为一致，
+    # 兼容老 vision 输出。下游 runner 用 unread_signals_count() 决策。
+    name_bold: bool = True
+    preview_bold: bool = False
+    blue_dot: bool = False
+
+    @property
+    def unread_signals_count(self) -> int:
+        """三信号合计（0~3）。0 = vision 模型偷懒 / 误把已读列入 unread。"""
+        return int(self.name_bold) + int(self.preview_bold) + int(self.blue_dot)
 
     @property
     def is_spam(self) -> bool:

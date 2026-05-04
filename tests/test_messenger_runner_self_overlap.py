@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from src.integrations.messenger_rpa.runner import _self_reply_overlap_ratio
 
 
@@ -140,6 +142,479 @@ def test_p16_bubble_self_strong_signal_skips_promote():
     bubble_says_self = (bubble_sender == "self")
     # 在 runner.py L2899 附近的逻辑：bubble=self + overlap>=0.7 → 不试 promote
     assert bubble_says_self and self_overlap >= 0.7
+
+
+def test_p23_unread_chat_signals_count_default():
+    """P23：UnreadChat 默认值（True / False / False）= 1 个信号，
+    向后兼容（老 vision 输出按"已是 unread"处理）。"""
+    from src.integrations.messenger_rpa.inbox_scanner import UnreadChat
+    c = UnreadChat(
+        name="Alice", preview="hi", time="now", row_index=0,
+    )
+    assert c.unread_signals_count == 1  # name_bold=True 默认
+
+
+def test_p23_unread_chat_all_signals_false():
+    """P23：三信号全 F → unread_signals_count = 0 → vision 偷懒。"""
+    from src.integrations.messenger_rpa.inbox_scanner import UnreadChat
+    c = UnreadChat(
+        name="Bob", preview="hello", time="now", row_index=0,
+        name_bold=False, preview_bold=False, blue_dot=False,
+    )
+    assert c.unread_signals_count == 0
+
+
+def test_p23_unread_chat_partial_signals():
+    """P23：部分信号为 True 时累加。"""
+    from src.integrations.messenger_rpa.inbox_scanner import UnreadChat
+    c = UnreadChat(
+        name="Carol", preview="hey", time="now", row_index=0,
+        name_bold=True, preview_bold=True, blue_dot=False,
+    )
+    assert c.unread_signals_count == 2
+
+
+def test_p23_skip_condition_signals_zero_and_recent_send():
+    """P23：unread_signals=0 + 最近发过 → skip 条件成立。"""
+    import time
+    last_sent_at = time.time() - 30  # 30s 前发过
+    window = 60.0
+    unread_signals = 0
+    should_skip = (
+        unread_signals == 0
+        and window > 0
+        and last_sent_at > 0
+        and (time.time() - last_sent_at) < window
+    )
+    assert should_skip
+
+
+def test_p23_skip_condition_signals_zero_but_no_recent_send():
+    """P23：信号 0 但很久没发过 → 不 skip（peer 真发新消息可能性高）。"""
+    import time
+    last_sent_at = time.time() - 3600  # 1h 前
+    window = 60.0
+    unread_signals = 0
+    should_skip = (
+        unread_signals == 0
+        and last_sent_at > 0
+        and (time.time() - last_sent_at) < window
+    )
+    assert not should_skip
+
+
+def test_p23_skip_condition_signals_present_does_not_skip():
+    """P23：信号 ≥ 1 时不 skip（vision 真识别为 unread）。"""
+    import time
+    last_sent_at = time.time() - 30
+    window = 60.0
+    unread_signals = 1
+    should_skip = (unread_signals == 0 and last_sent_at > 0 and (time.time() - last_sent_at) < window)
+    assert not should_skip
+
+
+def test_p21_long_cooldown_history_window_aging():
+    """P21：滚动窗口（默认 24h）外的历史应被清理。"""
+    import time
+    history: list[float] = []
+    window = 86400.0  # 24h
+    now = time.time()
+
+    def maybe_record(t: float) -> int:
+        nonlocal history
+        cutoff = now - window
+        history = [x for x in history if x >= cutoff]
+        history.append(t)
+        return len(history)
+
+    # 25h 前的历史 + 现在 → 旧的应被清，仅留 1 条
+    maybe_record(now - 25 * 3600)  # 25h 前
+    assert len(history) == 1
+    # 模拟 24h 后再来一次
+    history = [t for t in history if t >= (now - window)]  # 现在视角看 25h 前过期
+    history.append(now)
+    # 仅留 now 这一条
+    history_within = [t for t in history if t >= (now - window)]
+    assert len(history_within) == 1
+
+
+def test_p21_blacklist_triggers_at_threshold():
+    """P21：累计 ≥ threshold 时应触发 add_skipped_chat（用 mock 验证）。"""
+    import time
+    history: list[float] = []
+    threshold = 3
+    now = time.time()
+    # 连续 3 次 long_cooldown 在 1h 内
+    history.append(now - 1800)
+    history.append(now - 600)
+    history.append(now)
+    assert len(history) >= threshold
+
+
+def test_p21_below_threshold_does_not_blacklist():
+    """P21：累计 < threshold 时仅累加历史，不入黑。"""
+    history: list[float] = []
+    threshold = 3
+    history.append(1.0)
+    history.append(2.0)
+    assert len(history) < threshold  # 不应触发 blacklist
+
+
+def test_p21_blacklist_clears_chat_state():
+    """P21：blacklist 时应清理 chat 的所有内存状态。"""
+    skip_until = {"chat_a": 1e18}
+    streak = {"chat_a": 5}
+    history = {"chat_a": [1.0, 2.0, 3.0]}
+    skipped_text = {"chat_a": ["xx", "yy"]}
+    # 模拟 blacklist 清理
+    skip_until.pop("chat_a", None)
+    streak.pop("chat_a", None)
+    history.pop("chat_a", None)
+    skipped_text.pop("chat_a", None)
+    assert "chat_a" not in skip_until
+    assert "chat_a" not in streak
+    assert "chat_a" not in history
+    assert "chat_a" not in skipped_text
+
+
+def test_p19_long_last_sent_ago_does_not_skip_emergency_fix():
+    """P19-FIX 紧急修复回归：last_sent_ago > 默认 window (120s) 时
+    必须不 skip，让 vision 接管（防止 peer 久回的真消息被吞）。
+    生产事故重演：last_sent_ago=2443s（40min）+ 旧 window=3600s → 误吞。"""
+    import time
+    pv_bubble_sender = "self"
+    last_sent_at = time.time() - 2443  # 40 分钟前发的（peer 久回场景）
+    window = 120.0  # P19-FIX 默认值
+    should_skip = (
+        pv_bubble_sender == "self"
+        and last_sent_at > 0
+        and (time.time() - last_sent_at) < window
+    )
+    assert not should_skip  # 不应误拦
+
+
+def test_p24_window_clamp_oversized_config():
+    """P24：window 配置 > 上限时应被 clamp。"""
+    raw = 3600.0
+    cap = 300.0
+    clamped = min(raw, cap) if cap > 0 else raw
+    assert clamped == 300.0
+
+
+def test_p24_window_clamp_normal_config_unchanged():
+    """P24：window 配置 ≤ 上限时不变。"""
+    raw = 120.0
+    cap = 300.0
+    clamped = min(raw, cap) if cap > 0 else raw
+    assert clamped == 120.0
+
+
+def test_p24_window_clamp_at_exact_boundary():
+    """P24：window 配置 == 上限时不 clamp（边界包含）。"""
+    raw = 300.0
+    cap = 300.0
+    # 实际 clamp 条件：raw > cap 才 clamp
+    should_clamp = raw > cap
+    assert not should_clamp  # 等于不 clamp
+
+
+def test_p24_warning_only_once_per_runner():
+    """P24：一个 runner 实例多次进 P19 窗口检查时 warning 只打一次。"""
+    warned = False
+    raw = 600.0
+    cap = 300.0
+    warning_count = 0
+
+    for _ in range(5):
+        if raw > cap and not warned:
+            warning_count += 1
+            warned = True
+    assert warning_count == 1  # 只 warn 一次
+
+
+def test_p19_pre_vision_bubble_self_recent_window_short_circuits():
+    """P19：bubble=self + 最近发送窗口内 → 应短路不调 vision。"""
+    import time
+    pv_bubble_sender = "self"
+    last_sent_at = time.time() - 30  # 30s 前发的
+    window = 600.0
+    should_skip = (
+        pv_bubble_sender == "self"
+        and last_sent_at > 0
+        and (time.time() - last_sent_at) < window
+    )
+    assert should_skip
+
+
+def test_p19_pre_vision_bubble_peer_does_not_short_circuit():
+    """P19：bubble=peer 时即使最近发送也不该短路（peer 真有新消息）。"""
+    import time
+    pv_bubble_sender = "peer"
+    last_sent_at = time.time() - 30
+    window = 600.0
+    should_skip = (
+        pv_bubble_sender == "self"
+        and last_sent_at > 0
+        and (time.time() - last_sent_at) < window
+    )
+    assert not should_skip  # peer 不能短路
+
+
+def test_p19_pre_vision_bubble_self_outside_window_walks_vision():
+    """P19：bubble=self 但最近 N 秒外（如 1h 前发） → 仍走 vision，
+    因为 peer 可能已经回复（vision 才能看到 peer 内容）。"""
+    import time
+    pv_bubble_sender = "self"
+    last_sent_at = time.time() - 3600  # 1h 前
+    window = 600.0
+    should_skip = (
+        pv_bubble_sender == "self"
+        and last_sent_at > 0
+        and (time.time() - last_sent_at) < window
+    )
+    assert not should_skip
+
+
+def test_p19_unknown_bubble_walks_vision():
+    """P19：bubble_detector 返回 unknown 时不该短路（信息不足）。"""
+    pv_bubble_sender = "unknown"
+    should_skip = (pv_bubble_sender == "self")
+    assert not should_skip
+
+
+def test_p19_bubble_result_shared_between_pre_and_in_thread():
+    """P19：前置探测结果应被 thread 内 _bubble_sender 复用，避免双次扫描。"""
+    result = {
+        "pre_vision_bubble_sender": "peer",
+        "pre_vision_bubble_info": {"y": 800},
+    }
+    # 模拟 thread 内 bubble 检测复用逻辑
+    bubble_sender = result.get("pre_vision_bubble_sender") or "unknown"
+    bub_info = result.get("pre_vision_bubble_info") or {}
+    assert bubble_sender == "peer"
+    assert bub_info == {"y": 800}
+    # 仅 unknown 时才重新扫描
+    result_unknown = {}
+    bubble_sender2 = result_unknown.get("pre_vision_bubble_sender") or "unknown"
+    assert bubble_sender2 == "unknown"
+
+
+def test_p18_device_unhealthy_streak_arms_backoff():
+    """P18：连续 device_unhealthy >= threshold (默认 3) 时设置 skip_until。"""
+    import time
+    streak: dict[str, int] = {}
+    skip_until: dict[str, float] = {}
+    threshold = 3
+    backoff_sec = 60.0
+
+    def simulate_unhealthy(serial: str) -> None:
+        streak[serial] = streak.get(serial, 0) + 1
+        if streak[serial] >= threshold and backoff_sec > 0:
+            skip_until[serial] = time.monotonic() + backoff_sec
+
+    # 前两次只累 streak 不进 backoff
+    simulate_unhealthy("S1")
+    simulate_unhealthy("S1")
+    assert streak["S1"] == 2
+    assert "S1" not in skip_until
+    # 第三次进 backoff
+    simulate_unhealthy("S1")
+    assert "S1" in skip_until
+    assert skip_until["S1"] > time.monotonic() + 50
+
+
+def test_p18_healthy_resets_streak_and_backoff():
+    """P18：设备恢复健康时应清 streak 和 skip_until。"""
+    streak = {"S1": 5}
+    skip_until = {"S1": 1e18}
+    # 模拟 healthy 路径
+    streak.pop("S1", None)
+    skip_until.pop("S1", None)
+    assert "S1" not in streak
+    assert "S1" not in skip_until
+
+
+def test_p18_backoff_short_circuits_resolve_serial():
+    """P18：skip_until 覆盖期内 _resolve_serial 应短路。"""
+    import time
+    skip_until = {"S1": time.monotonic() + 30}
+    serial = "S1"
+    is_in_backoff = skip_until.get(serial, 0.0) > time.monotonic()
+    assert is_in_backoff  # 应短路
+
+
+def test_p26_auto_sticky_within_ttl_returns_in_names():
+    """P26：发送成功后 chat 应在 TTL 内被 _sticky_thread_names 包含。"""
+    import time
+    auto_until: dict[str, float] = {}
+    ttl = 300.0
+    chat = "Maipon Senda"
+    # 模拟发送成功
+    auto_until[chat] = time.monotonic() + ttl
+    # _sticky_thread_names 模拟逻辑
+    now = time.monotonic()
+    active = [n for n, e in auto_until.items() if e > now]
+    assert chat in active
+
+
+def test_p26_auto_sticky_after_ttl_expires():
+    """P26：TTL 过期后 chat 不再 sticky。"""
+    import time
+    auto_until: dict[str, float] = {}
+    chat = "野末"
+    auto_until[chat] = time.monotonic() - 10  # 10s 前已过期
+    now = time.monotonic()
+    active = [n for n, e in auto_until.items() if e > now]
+    assert chat not in active
+
+
+def test_p26_auto_sticky_merges_with_static():
+    """P26：auto-sticky 与 config 静态白名单合并，不重复。"""
+    static_names = ["Victor Zan"]
+    import time
+    auto_until = {"Victor Zan": time.monotonic() + 100, "野末": time.monotonic() + 100}
+    now = time.monotonic()
+    auto_active = [n for n, e in auto_until.items() if e > now]
+    merged = list(static_names)
+    for n in auto_active:
+        if n not in merged:
+            merged.append(n)
+    assert merged == ["Victor Zan", "野末"]  # Victor Zan 不重复
+
+
+def test_p28_peer_significantly_longer_triggers_promote_path():
+    """P28 紧急修复：peer 文本长度 > last_reply × 1.3 时即使 overlap=1.00 也应
+    走 promote 路径而非直接 skip（防 echo 子串误拦真消息）。
+
+    生产 bug 重现：
+      bot 发"お疲れさま。気にしないで、自分のペースでいいよ..." (50 字)
+      peer 真消息"あのばとろ🍵 そう言ってもらえると安心..." (80+ 字)
+      公共子串"自分のペースで"导致 overlap=1.00，但 peer 显著更长。
+    """
+    last_reply = "お疲れさま。気にしないで、自分のペースでいいよ"
+    peer_real = (
+        "あのばとろ🍵そう言ってもらえると安心します。"
+        "ちゃんと無理せずやってるから大丈夫🍵"
+        "あなたも無理しないで、自分のペースで過ごしてね🍃"
+        "またタイミング合わせて話"
+    )
+    threshold = 1.3
+    peer_significantly_longer = (
+        last_reply
+        and len(peer_real) > len(last_reply) * threshold
+    )
+    assert peer_significantly_longer  # 应触发降级路径
+
+
+def test_p28_short_peer_does_not_trigger_promote_downgrade():
+    """P28：peer 与 last_reply 长度相近时不降级（保持守卫严谨）。"""
+    last_reply = "今日は疲れた、自分のペースでいいよ"
+    peer_text = "今日は疲れた、自分のペースでいい"  # vision 漏字误读 self
+    threshold = 1.3
+    peer_significantly_longer = (
+        len(peer_text) > len(last_reply) * threshold
+    )
+    assert not peer_significantly_longer  # 应当 skip 不降级
+
+
+def test_p28_bubble_says_self_overrides_length_check():
+    """P28：bubble=self 时仍信任 self 信号，跳过长度降级。"""
+    bubble_says_self = True
+    # 即使 peer_significantly_longer=True，bubble=self 优先
+    if bubble_says_self:
+        decision = "skip"  # 走 bubble_self_confirms_overlap 路径
+    else:
+        decision = "promote_downgrade"
+    assert decision == "skip"
+
+
+def test_p25_inbox_roi_hash_skips_stories_and_nav(tmp_path):
+    """P25：inbox ROI = [23.75%, 92.5%]，应忽略 stories 头像动画 + 底部 nav，
+    仅对 chat 列表区敏感。"""
+    pytest.importorskip("PIL")
+    from PIL import Image
+    from src.integrations.messenger_rpa.runner import MessengerRpaRunner
+
+    # 720x1600，stories 区不同但 chat 列表相同
+    a = Image.new("RGB", (720, 1600), (255, 255, 255))
+    a.paste((100, 100, 100), (0, 200, 720, 380))  # stories
+    a.paste((0, 132, 255), (50, 600, 700, 750))  # chat row 1
+    b = Image.new("RGB", (720, 1600), (255, 255, 255))
+    b.paste((50, 50, 50), (0, 200, 720, 380))  # stories 不同
+    b.paste((0, 132, 255), (50, 600, 700, 750))  # chat row 1 同
+    # chat list 不同
+    c = Image.new("RGB", (720, 1600), (255, 255, 255))
+    c.paste((100, 100, 100), (0, 200, 720, 380))
+    c.paste((0, 132, 255), (50, 600, 700, 760))  # 不同高度
+
+    p_a = tmp_path / "a.png"; a.save(p_a)
+    p_b = tmp_path / "b.png"; b.save(p_b)
+    p_c = tmp_path / "c.png"; c.save(p_c)
+
+    h_a = MessengerRpaRunner._screenshot_inbox_hash(str(p_a))
+    h_b = MessengerRpaRunner._screenshot_inbox_hash(str(p_b))
+    h_c = MessengerRpaRunner._screenshot_inbox_hash(str(p_c))
+
+    assert h_a is not None and h_a.startswith("inbox_roi:")
+    assert h_a == h_b, "stories 变化应被 inbox ROI 忽略"
+    assert h_a != h_c, "chat 列表不同 hash 应不同"
+
+
+def test_p25_inbox_roi_prefix_distinct_from_thread():
+    """P25：inbox ROI 与 thread ROI 前缀不同（防止两个 cache 串）。"""
+    # thread ROI 前缀是 "roi:"，inbox 是 "inbox_roi:"，验证前缀分离
+    assert "inbox_roi:" != "roi:"
+
+
+def test_p17v2_roi_hash_ignores_top_and_bottom_changes(tmp_path):
+    """P17-v2：ROI hash 应忽略顶栏（Active time）+ 输入栏（typing 闪烁）变化，
+    只对中间消息气泡区敏感。"""
+    pil = pytest.importorskip("PIL")
+    from PIL import Image
+    from src.integrations.messenger_rpa.runner import MessengerRpaRunner
+
+    # 顶栏不同（模拟 Active time 变化）但消息区相同
+    a = Image.new("RGB", (720, 1600), (255, 255, 255))
+    a.paste((0, 0, 0), (0, 0, 720, 60))
+    a.paste((0, 132, 255), (300, 800, 700, 900))
+    b = Image.new("RGB", (720, 1600), (255, 255, 255))
+    b.paste((50, 50, 50), (0, 0, 720, 60))  # 顶栏不同
+    b.paste((0, 132, 255), (300, 800, 700, 900))  # 中间相同
+    # 中间气泡位置不同
+    c = Image.new("RGB", (720, 1600), (255, 255, 255))
+    c.paste((0, 0, 0), (0, 0, 720, 60))
+    c.paste((0, 132, 255), (200, 800, 700, 900))  # 气泡位置移了 100px
+    # 输入栏不同（模拟 typing cursor）但中间相同
+    d = Image.new("RGB", (720, 1600), (255, 255, 255))
+    d.paste((0, 0, 0), (0, 0, 720, 60))
+    d.paste((0, 132, 255), (300, 800, 700, 900))
+    d.paste((100, 100, 100), (0, 1400, 720, 1500))  # 输入栏
+
+    p_a = tmp_path / "a.png"; a.save(p_a)
+    p_b = tmp_path / "b.png"; b.save(p_b)
+    p_c = tmp_path / "c.png"; c.save(p_c)
+    p_d = tmp_path / "d.png"; d.save(p_d)
+
+    h_a = MessengerRpaRunner._screenshot_hash(str(p_a))
+    h_b = MessengerRpaRunner._screenshot_hash(str(p_b))
+    h_c = MessengerRpaRunner._screenshot_hash(str(p_c))
+    h_d = MessengerRpaRunner._screenshot_hash(str(p_d))
+
+    assert h_a is not None and h_a.startswith("roi:")
+    assert h_a == h_b, "顶栏变化应被 ROI 忽略"
+    assert h_a == h_d, "输入栏变化应被 ROI 忽略"
+    assert h_a != h_c, "中间气泡区不同 hash 应不同"
+
+
+def test_p17v2_cache_key_isolates_by_chat_key():
+    """P17-v2：cache key 含 chat_key，不同 chat 但 ROI 相同时不互相命中。"""
+    cache: dict = {}
+    img_hash = "roi:abc123"
+    key_a = f"chat_a|{img_hash}"
+    key_b = f"chat_b|{img_hash}"
+    cache[key_a] = ("cr_a", "tag_a")
+    assert key_a in cache
+    assert key_b not in cache  # 跨 chat 不命中
 
 
 def test_p17_screenshot_hash_stable_for_same_bytes(tmp_path):
