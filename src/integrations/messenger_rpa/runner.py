@@ -544,9 +544,7 @@ class MessengerRpaRunner:
         # ROI = [23.75%, 92.5%]，跳过 stories（动画头像）+ 底部 nav。
         # LRU 4 条（inbox 切换不频繁）。
         self._inbox_combined_cache: "OrderedDict[str, Any]" = _OD()
-        # P25-v2-fix：双键写入（text + ROI 各占 1 entry），LRU 容量 4 → 8
-        # 让能存 4 个完整 chat 列表 snapshot
-        self._inbox_combined_cache_max = 8
+        self._inbox_combined_cache_max = 4
 
         # ── P21 (2026-05-04) 长冷却硬上限熔断 ──
         # 单 chat 在滚动窗口（默认 24h）内累计触发 ≥ N 次（默认 3）long_cooldown
@@ -6069,28 +6067,23 @@ class MessengerRpaRunner:
         roi_hash = (
             self._screenshot_inbox_hash(inbox_png) if inbox_png else None
         )
-
-        # P25-v2-fix (2026-05-05) 双键查找：
-        # 原 v2 写入只用 text key（dump 成功时），下次 dump 失败用 ROI 查找
-        # 找不到 → 命中率低。修复：text 和 ROI 都试。
-        _hit_hash = None
-        _hit_kind = None
-        if not retry:
-            for _try_hash, _kind in (
-                (text_hash, "text"), (roi_hash, "roi"),
-            ):
-                if _try_hash and _try_hash in self._inbox_combined_cache:
-                    _hit_hash = _try_hash
-                    _hit_kind = _kind
-                    break
-
-        if _hit_hash:
-            cr, tag = self._inbox_combined_cache[_hit_hash]
-            self._inbox_combined_cache.move_to_end(_hit_hash)
+        # 用 text hash 优先 cache key（dump 成功才有），否则用 ROI hash
+        img_hash = text_hash or roi_hash
+        if (
+            img_hash
+            and not retry
+            and img_hash in self._inbox_combined_cache
+        ):
+            cr, tag = self._inbox_combined_cache[img_hash]
+            self._inbox_combined_cache.move_to_end(img_hash)
             result.setdefault("hints", []).append("inbox_combined_cache_hit")
-            result["inbox_cache_hash_kind"] = _hit_kind
+            # P25-v2：标记命中的 hash 类型，便于看 text vs ROI 命中率分布
+            _cache_hash_kind = (
+                "text" if img_hash.startswith("inbox_text:") else "roi"
+            )
+            result["inbox_cache_hash_kind"] = _cache_hash_kind
             result.setdefault("hints", []).append(
-                f"inbox_combined_cache_hit_kind:{_hit_kind}"
+                f"inbox_combined_cache_hit_kind:{_cache_hash_kind}"
             )
             result.setdefault("phase_ms", {})["inbox_vision"] = 0
             self._apply_inbox_combined_side_effects(
@@ -6116,12 +6109,8 @@ class MessengerRpaRunner:
         # P25：仅 risk 未命中 + 非 retry 时缓存
         risk = getattr(cr, "risk", None)
         risk_hit = bool(risk and getattr(risk, "hit", False))
-        if not retry and not risk_hit:
-            # P25-v2-fix：text 和 ROI 两个 key 都写（指向同一结果），让下次
-            # 任意一种 hash 查找都能命中
-            for _wkey in (text_hash, roi_hash):
-                if _wkey and _wkey not in self._inbox_combined_cache:
-                    self._inbox_combined_cache[_wkey] = (cr, tag)
+        if img_hash and not retry and not risk_hit:
+            self._inbox_combined_cache[img_hash] = (cr, tag)
             while len(
                 self._inbox_combined_cache
             ) > self._inbox_combined_cache_max:
