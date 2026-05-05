@@ -164,8 +164,13 @@ def _self_reply_overlap_ratio(last_reply: str, peer_text: str) -> float:
     #          → 不算 echo，让 peer 真消息（quote bot 头部 + 自己后续）通过
     #          但 vision 真把整段 self 串联（phrase ≈ peer length）→ ratio
     #          必然 ≥ 60% → 仍能识别 vision 误读
+    # P32-tune (2026-05-05)：60% → 75% 进一步严格化。
+    # 60% 阈值在 peer "今日は特に予定もなく、のんびり過ごしています。あなたは？"
+    # 这种 peer 真消息（quote bot 头部 + 自己后续）场景仍触发 false positive。
+    # 75% 让 phrase 必须占 peer 大部分才视为 echo——peer 真消息含
+    # 自己内容 ≥ 25% 就放行。
     _MIN_PHRASE = 8
-    _MIN_ECHO_PEER_COVERAGE = 0.60
+    _MIN_ECHO_PEER_COVERAGE = 0.75
     if len(lr) >= _MIN_PHRASE and len(pc) >= _MIN_PHRASE:
         # 找最长公共子串（O(N*M) but N,M 通常 < 100）
         _longest = 0
