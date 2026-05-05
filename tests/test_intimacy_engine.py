@@ -167,3 +167,63 @@ class TestCappedScore:
         assert 0 <= bd.score <= 100
         # 应该很高
         assert bd.score > 80
+
+
+class TestSilenceDecay:
+    """P-W3D2.4 (2026-05-05) 沉默衰减测试。
+    防"长期沉默用户仍被 reactivation 骚扰"。"""
+
+    def _build_active_then_silent(self, store, gw, days_silent: int):
+        """构造一个曾活跃 30 轮、然后沉默 N 天的 journey。"""
+        ctx = gw.on_peer_seen(
+            channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_x",
+        )
+        jid = ctx.journey.journey_id
+        now = int(time.time())
+        active_start = now - days_silent * 86400
+        # 在活跃期前后插 30 轮双向消息（10 个不同日 × 3 轮）
+        pattern = []
+        for d in range(10):
+            for i in range(3):
+                pattern.append(("msg_in", -d * 86400 + i * 60))
+                pattern.append(("msg_out", -d * 86400 + i * 60 + 30))
+        _fake_events(store, jid, pattern, start_ts=active_start)
+        return jid, now
+
+    def test_no_decay_within_grace_period(self, env):
+        """7 天 grace 内不衰减。"""
+        store, gw, eng = env
+        jid, now = self._build_active_then_silent(store, gw, days_silent=5)
+        bd = eng.compute_intimacy(jid, now=now)
+        # 5 天 < 7 天 grace → silence_decay = 1.0
+        assert bd.contributions["silence_decay"] == 1.0
+
+    def test_decay_after_30_days_silence(self, env):
+        """沉默 30 天后衰减明显。"""
+        store, gw, eng = env
+        jid, now = self._build_active_then_silent(store, gw, days_silent=30)
+        bd = eng.compute_intimacy(jid, now=now)
+        # 30 天 = 23 天衰减期 ≈ 3.3 周 × 0.95^x ≈ 0.85
+        assert 0.75 < bd.contributions["silence_decay"] < 0.90
+        # score 应明显下降
+        assert bd.score < 60
+
+    def test_decay_after_60_days_pushes_below_reactivation_threshold(self, env):
+        """沉默 60 天后 score < 40（reactivation 默认阈值）。"""
+        store, gw, eng = env
+        jid, now = self._build_active_then_silent(store, gw, days_silent=60)
+        bd = eng.compute_intimacy(jid, now=now)
+        # 60 天 = 53 天衰减 ≈ 7.6 周 × 0.95^7.6 ≈ 0.68
+        assert bd.contributions["silence_decay"] < 0.75
+        # 触发 reactivation 退出（< 40 阈值）
+        assert bd.score < 40
+
+    def test_breakdown_contains_silence_decay_field(self, env):
+        """contributions 字典必含 silence_decay 让看板可观察。"""
+        store, gw, eng = env
+        ctx = gw.on_message(
+            channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_y",
+            direction="in", text_preview="hi",
+        )
+        bd = eng.compute_intimacy(ctx.journey.journey_id)
+        assert "silence_decay" in bd.contributions

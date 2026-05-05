@@ -41,6 +41,13 @@ _TURN_SAT = 20          # 20 条 msg_in 即视作 "满"
 _DAYS_SAT = 5           # 7 天内活动 5 天视作"满"
 _RECENCY_HALFLIFE_S = 14 * 24 * 3600    # 2 周半衰期
 
+# 沉默衰减（W3-D2.4 GAP 修复 / 2026-05-05）：
+# turn_count_in / mutuality 不随时间下降，导致"100 轮互动 + 沉默 30 天"
+# 用户仍 50 分过 reactivation 阈值。在 score 顶层加每周 5% 全局衰减，
+# 7 天 grace period 后开始（短期沉默是正常的）。
+_SILENCE_DECAY_GRACE_DAYS = 7
+_SILENCE_DECAY_PER_WEEK = 0.95
+
 
 @dataclass
 class IntimacyBreakdown:
@@ -119,7 +126,23 @@ class IntimacyEngine:
         }
         score = sum(contribs.values())
         score = max(0.0, min(1.0, score))
-        score = round(score * 100, 1)     # 输出 0-100，保留 1 位小数
+        score = score * 100  # 0-100
+
+        # P-W3D2.4 (2026-05-05) 沉默衰减：超过 grace 天数后每周乘 0.95
+        # 防"长期沉默用户仍被 reactivation 骚扰"
+        silence_decay = 1.0
+        if (
+            last_ts > 0
+            and days_since != float("inf")
+            and days_since > _SILENCE_DECAY_GRACE_DAYS
+        ):
+            weeks_silent = (
+                days_since - _SILENCE_DECAY_GRACE_DAYS
+            ) / 7.0
+            silence_decay = _SILENCE_DECAY_PER_WEEK ** weeks_silent
+            score = score * silence_decay
+        contribs["silence_decay"] = round(silence_decay, 3)
+        score = round(score, 1)
 
         return IntimacyBreakdown(
             score=score,

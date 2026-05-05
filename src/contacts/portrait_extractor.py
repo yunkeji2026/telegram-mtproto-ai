@@ -45,9 +45,10 @@ _PORTRAIT_PROMPT = """\
 {{
   "language": "用户主要使用的语言代码 (ja/zh/en/ko/ar/...)。",
   "tone": "用户的语气风格 (casual_friendly / formal / playful / curt / emotional / unknown)。",
-  "interests": ["3 个以内已显露的兴趣或关注点，每个 ≤ 8 字"],
-  "recent_topics": ["最近 2-3 个对话主题，每个 ≤ 12 字"],
-  "key_facts": ["3 条以内的关键事实（地区/职业/重要近况），每条 ≤ 30 字。无则空数组"],
+  "interests": ["5 个以内已显露的兴趣或关注点，每个 ≤ 12 字"],
+  "recent_topics": ["最近 3-5 个对话主题，每个 ≤ 15 字"],
+  "key_facts": ["8 条以内的关键事实（具体的人/地点/食物/经历/喜好/近况），每条 ≤ 60 字。例：「最近常加班，午餐吃便利店便当」「养了一只名叫 Leo 的猫」「最近在看《ドライブ・マイ・カー》电影」「6月要去冲縄度假」。事实越具体越好，方便后续 bot 自然引用。无则空数组"],
+  "emotional_state": "用户当前的情绪基调 (happy / tired / lonely / anxious / excited / calm / frustrated / unknown)",
   "intimacy_signal": "对方对我们的态度 (warming / neutral / distant / annoyed / unknown)",
   "rapport_score": "整数 0-100，双方情感连接深度：0=完全陌生 40=普通友善 70=较深入投入 90+=有明显情感基础和信任",
   "handoff_ready": "布尔值（true/false）：综合判断现在是否是一个**自然且合适**的时机引导对方加 LINE 好友。判断依据：rapport_score≥65 AND 对话投入度高 AND 对方没有明显抵触 AND 话题没有正处于敏感/冲突阶段。不要仅因为字数多就判断 true。",
@@ -111,22 +112,29 @@ def render_block(snapshot_json: str) -> str:
 
     interests = snap.get("interests") or []
     if isinstance(interests, list) and interests:
-        items = "、".join(str(x).strip()[:20] for x in interests[:5] if x)
+        items = "、".join(str(x).strip()[:24] for x in interests[:6] if x)
         if items:
             lines.append(f"- 已知兴趣：{items}")
 
     topics = snap.get("recent_topics") or []
     if isinstance(topics, list) and topics:
-        items = "、".join(str(x).strip()[:20] for x in topics[:5] if x)
+        items = "、".join(str(x).strip()[:24] for x in topics[:5] if x)
         if items:
             lines.append(f"- 近期话题：{items}")
 
+    # P-W3D2.6 (2026-05-05) key_facts 扩容 5→8 条 + 60 字让 bot 能引用更具体
+    # 的事实（食物/电影/朋友/旅行计划等），不再像金鱼记忆。
     facts = snap.get("key_facts") or []
     if isinstance(facts, list) and facts:
-        for f in facts[:5]:
-            s = str(f).strip()[:60]
+        for f in facts[:8]:
+            s = str(f).strip()[:80]
             if s and s.lower() != "unknown":
                 lines.append(f"- 关键事实：{s}")
+
+    # P-W3D2.6：emotional_state 注入让 bot 知道 peer 当前情绪基调
+    emotional = str(snap.get("emotional_state") or "").strip()
+    if emotional and emotional.lower() != "unknown":
+        lines.append(f"- 当前情绪：{emotional}")
 
     intimacy = str(snap.get("intimacy_signal") or "").strip()
     if intimacy and intimacy.lower() != "unknown":
