@@ -148,13 +148,41 @@ def _self_reply_overlap_ratio(last_reply: str, peer_text: str) -> float:
     if pc in lr or lr in pc:
         return 1.0
 
-    # ★ Substring echo：peer 含 last_reply 的任意 5+ 字符连续片段 → 强信号
+    # ★ Substring echo：peer 含 last_reply 的任意 N+ 字符连续片段 → 强信号
     #   bot signature phrase 命中，足以挡住 vision 把 self 串联成 peer 的 case
-    if len(lr) >= 5 and len(pc) >= 5:
-        for i in range(len(lr) - 5 + 1):
-            phrase = lr[i:i + 5]
-            if phrase in pc:
-                return 1.0
+    #
+    # P32 (2026-05-05) 紧急修复：找最长公共子串，要求覆盖率 ≥ 60% 才视为 echo。
+    # 原 N=5 任意命中即 1.0 太宽——"今日は特に"5 字、"予定もなく"5 字等
+    # 日常话术 signature peer 真消息也常用，导致大量 false positive
+    # 死循环（夜间 15+ 次野末/Maipon Senda 死锁）。
+    #
+    # 修复逻辑：
+    #   1. N=8 起步（8 字才代表 bot 个性化短语）
+    #   2. 找最长公共连续子串
+    #   3. 公共子串占 peer 长度 ≥ 60% 才视为 echo
+    # 实测 case："今日は特に予定もなく、" 11 字 / peer 28 字 = 39% < 60%
+    #          → 不算 echo，让 peer 真消息（quote bot 头部 + 自己后续）通过
+    #          但 vision 真把整段 self 串联（phrase ≈ peer length）→ ratio
+    #          必然 ≥ 60% → 仍能识别 vision 误读
+    _MIN_PHRASE = 8
+    _MIN_ECHO_PEER_COVERAGE = 0.60
+    if len(lr) >= _MIN_PHRASE and len(pc) >= _MIN_PHRASE:
+        # 找最长公共子串（O(N*M) but N,M 通常 < 100）
+        _longest = 0
+        for i in range(len(lr) - _MIN_PHRASE + 1):
+            # 二分扩展 phrase 长度找最长命中
+            _max_len = min(len(lr) - i, len(pc))
+            for size in range(_MIN_PHRASE, _max_len + 1):
+                phrase = lr[i:i + size]
+                if phrase in pc:
+                    if size > _longest:
+                        _longest = size
+                else:
+                    break  # 更长的 phrase 必然也不在 pc
+        if _longest > 0 and (
+            _longest / max(len(pc), 1) >= _MIN_ECHO_PEER_COVERAGE
+        ):
+            return 1.0
 
     word_ratio = 0.0
     words_lr = set(re.findall(r"[a-z0-9]{2,}", (last_reply or "").lower()))

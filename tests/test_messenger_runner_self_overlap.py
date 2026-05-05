@@ -18,13 +18,19 @@ def test_self_reply_overlap_ignores_unrelated_japanese() -> None:
 
 
 def test_self_reply_overlap_p14_self_concatenated_replies() -> None:
-    """P14 regression: vision 把 fast_path 内 bot 多条历史 reply 串联读成
-    一条 'peer message'。两条文本字符级相似度低 (~0.16)，但 peer 必然含
-    bot 标志性短语（farewell/客套词）。substring echo 信号应触发挡板。
+    """P32 (2026-05-05) 反转：原 P14 case 是 false positive 体现。
+
+    last_reply: "うん、また明日ね。今日はこうして一緒にいられてよかったよ。おやすみ 😊"
+    peer_text:  "どうも、ありがとうございます。今日はたっぷりとお話ししましょう。お互いに気を付けて、また明日ね😊"
+
+    peer 实际是 peer 礼貌道别真消息，仅仅因含日常话术"今日は"/"また明日ね"
+    被原 5 字算法误判 self → 生产实测大量 false positive。
+    P32 严格化算法（最长公共子串占 peer ≥ 60% 才算 echo）：
+      公共"また明日ね😊" 6 字 / peer ~50 字 = 12% → 正确不拦。
     """
     last_reply = "うん、また明日ね。今日はこうして一緒にいられてよかったよ。おやすみ 😊"
     peer_text = "どうも、ありがとうございます。今日はたっぷりとお話ししましょう。お互いに気を付けて、また明日ね😊"
-    assert _self_reply_overlap_ratio(last_reply, peer_text) >= 0.7
+    assert _self_reply_overlap_ratio(last_reply, peer_text) < 0.7
 
 
 def test_self_reply_overlap_p14_unrelated_long_japanese_passes() -> None:
@@ -820,19 +826,23 @@ def test_p15_push_recent_reply_keeps_last_n():
 
 
 def test_p15_overlap_against_recent_finds_old_self():
-    """P15: vision 串联了 last_reply 之外的更早 self message，
-    单条比对漏过；扩展集 max-ratio 应触发挡板。"""
-    older_self = "うん、また明日ね、今日も楽しかったよ"  # 含 5+ 字 signature
-    last_reply = "うん、いい日だよ。仕事も終わったし気分も軽い"  # 与 peer 无关键词
-    # vision 把更老的 self message 串联当作 peer
+    """P32 (2026-05-05) 反转：原 P15 case 也是 false positive 体现。
+
+    peer "今日も楽しかったよ、ありがとう、また明日ね" 实际是 peer 真道谢消息，
+    仅 quote 了 bot 习惯短语就被原 5 字算法误判 self。
+    P32 严格化（≥ 60% peer 覆盖）：
+      最长公共子串 9 字 / peer 22 字 = 41% < 60% → 正确不拦。
+
+    P15 多 reply 队列设计仍保留（仍可能在更明确 echo case 命中），
+    但本 case 体现严格阈值后的正确边界。
+    """
+    older_self = "うん、また明日ね、今日も楽しかったよ"
+    last_reply = "うん、いい日だよ。仕事も終わったし気分も軽い"
     peer_text = "今日も楽しかったよ、ありがとう、また明日ね"
-    # 当前 P14 只对比 last_reply：
     r1 = _self_reply_overlap_ratio(last_reply, peer_text)
-    # 与 older_self 对比应 ≥ 0.7（含 "今日も楽し" 5 字 substring）
     r2 = _self_reply_overlap_ratio(older_self, peer_text)
-    assert r1 < 0.7  # last_reply 单条不够
-    assert r2 >= 0.7  # older self 命中
-    # max(r1, r2) ≥ 0.7 → P15 扩展能挡住
+    assert r1 < 0.7
+    assert r2 < 0.7  # P32：peer 真消息不该被 5 字 signature 当 echo
 
 
 def test_p15_promote_extra_peer_uses_recent_queue():
