@@ -104,6 +104,9 @@ _GUARD_TRACKED_HINTS_EXACT: frozenset = frozenset({
     "bubble_pre_vision_self_skip",
     # P28：peer 显著更长降级路径中 promote 失败时保留原 peer
     "self_overlap_peer_longer_keep_original",
+    # P30：bubble=peer 强信号 override overlap，走 promote 路径
+    "bubble_peer_overrides_overlap",
+    "bubble_peer_keep_original",
 })
 
 # hint 维度：前缀匹配（截断到前缀本身作 metrics key，避免维度爆炸）
@@ -120,6 +123,8 @@ _GUARD_TRACKED_HINT_PREFIXES: Tuple[str, ...] = (
     "chat_overlap_long_cooldown:",
     # P16-D2：短路时携带 ratio 数值
     "self_overlap_strict_skip:",
+    # P31：strict_window 内降级 promote（不再硬 skip）
+    "self_overlap_strict_promote:",
     # P16-IL2：长冷却内 inbox preview 不同 → 解除冷却放行（带相似度数值）
     "chat_overlap_inbox_escape:",
     # P18：device unhealthy backoff 触发 / 启动

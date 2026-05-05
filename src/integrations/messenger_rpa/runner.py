@@ -478,6 +478,14 @@ class MessengerRpaRunner:
         self._skipped_peer_text_per_chat: Dict[str, "deque[str]"] = {}
         self._self_overlap_skip_streak: Dict[str, int] = {}
         self._chat_overlap_skip_until: Dict[str, float] = {}
+        # P29 (2026-05-05) D 层指纹 TTL（修死循环 false positive）：
+        # 现象：bot 发"今日は特に予定もなく..."→peer 真回复"今日は特に予定もなく、
+        # のんびり過ごしてるよ"，"今日は特に"短公共子串让 _self_reply_overlap_ratio
+        # 算 1.00 → 第一次误判 self → 入指纹 → 后续 vision 每次读到（OCR 漂移
+        # 也算 1.00）→ D 层永久短路 → bot 永远不回。
+        # 修复：每个 skipped 文本带时间戳，过 N 秒（默认 300s）失效，让 vision
+        # 重新判定有机会通过。已观察过 10+ 次同条文本短路，必须有 TTL。
+        self._skipped_peer_text_ts_per_chat: Dict[str, Dict[str, float]] = {}
 
         # ── P17 (2026-05-04) thread_combined 截屏 hash 缓存 ──
         # 现象：vision 偶发对同一截屏在不同 run 内被反复调用（sticky_thread
@@ -3134,12 +3142,25 @@ class MessengerRpaRunner:
                 _d_len_thr = float(self._cfg.get(
                     "self_overlap_peer_length_ratio_threshold", 1.3,
                 ) or 0.0)
+                # P29 D 层 TTL：过期指纹不再算命中
+                _d_ttl = float(self._cfg.get(
+                    "skipped_peer_text_ttl_sec", 300.0,
+                ) or 0.0)
+                _d_now = time.time()
+                _d_ts_map = self._skipped_peer_text_ts_per_chat.get(
+                    chat_key, {},
+                )
                 if _pc_raw and _skipped_texts:
                     _dedup_thr = float(
                         self._cfg.get("skipped_peer_text_dedup_threshold", 0.85)
                         or 0.0
                     )
                     for _prev in _skipped_texts:
+                        # P29：TTL 过期跳过此项（让 vision 重新判定）
+                        if _d_ttl > 0:
+                            _prev_ts = float(_d_ts_map.get(_prev, 0.0) or 0.0)
+                            if _prev_ts <= 0 or _d_now - _prev_ts > _d_ttl:
+                                continue
                         # P28-FIX：peer 显著长于 prev → peer 大概率是真消息
                         # quote 部分 prev 子串，跳过此条短路（让下游 P28 主路
                         # 径处理）
@@ -3212,6 +3233,10 @@ class MessengerRpaRunner:
                 )
                 # B 层：bubble_detector 强信号
                 _bubble_says_self = (result.get("bubble_sender") == "self")
+                # P30 (2026-05-05)：bubble=peer 是更强信号（bubble_detector 明
+                # 确看到底部是对方灰色气泡 → peer 真发消息）。即使 overlap=1.00
+                # 也大概率是公共子串误判，不能直接 skip。
+                _bubble_says_peer = (result.get("bubble_sender") == "peer")
                 # ── P28 (2026-05-04) 长度差异守卫 ──
                 # 实测 bug：bot 发"...自分のペースでいいよ..." (50 字)，peer 真消息
                 # "あのばとろ🍵 そう言ってもらえると安心..." (80+ 字) 在自己回复
@@ -3234,6 +3259,24 @@ class MessengerRpaRunner:
                         result.setdefault("hints", []).append(
                             "bubble_self_confirms_overlap"
                         )
+                    elif _bubble_says_peer:
+                        # P30：bubble 明确说 peer → peer 真发消息，overlap=1.00
+                        # 大概率是公共子串误判（_self_reply_overlap_ratio 算法
+                        # 边界），降级到 promote 路径。promote 失败保留 peer_msg
+                        # 原样而非 skip。
+                        result.setdefault("hints", []).append(
+                            "bubble_peer_overrides_overlap"
+                        )
+                        promoted = (
+                            self._promote_extra_peer_after_self_overlap(
+                                result, last_reply=_lr_raw, chat_key=chat_key,
+                            )
+                        )
+                        if promoted is None:
+                            result.setdefault("hints", []).append(
+                                "bubble_peer_keep_original"
+                            )
+                            promoted = peer_msg
                     elif _peer_significantly_longer:
                         # P28：peer 显著更长 + bubble 非 self → 视为 peer 真消息
                         # quote bot，降级到 promote 路径让下游再裁定
@@ -3256,10 +3299,19 @@ class MessengerRpaRunner:
                             # 用 sentinel "promoted" 标记进入 happy-path
                             promoted = peer_msg
                     elif _within_strict_window:
-                        # 严格窗口内：直接 skip，不尝试 promote
+                        # P31 (2026-05-05) 紧急：strict_window 内不再硬 skip。
+                        # 实测 false positive：peer 真消息 1-2 分钟内回，但与
+                        # bot reply 公共子串导致 overlap=1.00 → bot 错过真消息。
+                        # 改为先试 promote（用 vision 的 extra_peers 兜底），
+                        # promote 失败仍 skip。
                         result.setdefault("hints", []).append(
-                            f"self_overlap_strict_skip:gap="
+                            f"self_overlap_strict_promote:gap="
                             f"{int(time.time() - _last_sent_at)}s"
+                        )
+                        promoted = (
+                            self._promote_extra_peer_after_self_overlap(
+                                result, last_reply=_lr_raw, chat_key=chat_key,
+                            )
                         )
                     else:
                         promoted = self._promote_extra_peer_after_self_overlap(
@@ -3282,6 +3334,16 @@ class MessengerRpaRunner:
                             self._skipped_peer_text_per_chat[chat_key] = _q
                         if _pc_raw and _pc_raw not in _q:
                             _q.append(_pc_raw)
+                        # P29：同步记录时间戳让 D 层 TTL 过期能识别
+                        if _pc_raw:
+                            _ts_map = self._skipped_peer_text_ts_per_chat \
+                                .setdefault(chat_key, {})
+                            _ts_map[_pc_raw] = time.time()
+                            # 清理 deque 之外的过期 key（防字典无界增长）
+                            _alive = set(_q)
+                            for _k in list(_ts_map.keys()):
+                                if _k not in _alive:
+                                    _ts_map.pop(_k, None)
                         _streak = self._self_overlap_skip_streak.get(chat_key, 0) + 1
                         self._self_overlap_skip_streak[chat_key] = _streak
                         _streak_threshold = int(

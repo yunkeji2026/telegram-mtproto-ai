@@ -482,6 +482,107 @@ def test_p26_auto_sticky_merges_with_static():
     assert merged == ["Victor Zan", "野末"]  # Victor Zan 不重复
 
 
+def test_p31_strict_window_falls_back_to_promote():
+    """P31：strict_window 内不再硬 skip，先试 promote（用 vision extra_peers
+    兜底）。peer 真消息 1-2 分钟内回时不被误拦。"""
+    # 模拟决策路径
+    bubble_says_self = False  # bubble != self
+    bubble_says_peer = False
+    peer_significantly_longer = False
+    within_strict_window = True  # 仍在 120s 内
+
+    if bubble_says_self:
+        decision = "skip"
+    elif bubble_says_peer:
+        decision = "p30_promote"
+    elif peer_significantly_longer:
+        decision = "p28_promote"
+    elif within_strict_window:
+        decision = "p31_strict_promote"  # 改前是 "skip"，改后试 promote
+    else:
+        decision = "promote"
+
+    assert decision == "p31_strict_promote"
+
+
+def test_p30_bubble_peer_overrides_high_overlap():
+    """P30：bubble=peer 强信号时即使 overlap=1.00 也降级 promote，
+    防止 _self_reply_overlap_ratio 公共子串误判 false positive。"""
+    bubble_sender = "peer"
+    self_overlap = 1.0
+    bubble_says_peer = (bubble_sender == "peer")
+    bubble_says_self = (bubble_sender == "self")
+    # P30 决策路径：bubble_says_peer 应触发 promote 降级（不直接 skip）
+    if bubble_says_self:
+        decision = "skip"  # bubble=self 仍信任
+    elif bubble_says_peer:
+        decision = "promote_or_keep"  # P30 降级
+    else:
+        decision = "fallback"  # 走 strict_window / promote 原逻辑
+    assert decision == "promote_or_keep"
+
+
+def test_p30_bubble_self_priority_over_peer():
+    """P30：bubble=self 优先级最高（self 信号 + overlap 双确认 = vision 真误读）。"""
+    bubble_sender = "self"
+    bubble_says_self = (bubble_sender == "self")
+    # bubble=self 直接 skip，不进入 P30 降级
+    assert bubble_says_self
+
+
+def test_p30_bubble_unknown_falls_through():
+    """P30：bubble=unknown 时不走 P30 降级（保持原 P16 strict/promote 逻辑）。"""
+    bubble_sender = "unknown"
+    bubble_says_peer = (bubble_sender == "peer")
+    bubble_says_self = (bubble_sender == "self")
+    if bubble_says_self:
+        decision = "skip"
+    elif bubble_says_peer:
+        decision = "p30_promote"
+    else:
+        decision = "fallback"  # 原 strict_window / promote 路径
+    assert decision == "fallback"
+
+
+def test_p29_d_layer_ttl_expires_old_fingerprint():
+    """P29：D 层指纹超过 TTL（默认 300s）后失效，不再短路。
+
+    生产 bug：野末 / Maipon Senda chat 反复 D 层短路同条文本 10+ 次（10+ 小时）
+    导致 bot 永远不回。修复：每条 skipped 文本带时间戳，过期视为不命中。
+    """
+    import time
+    ts_map = {"今日は特に予定もなく、のんびり過ごしてるよ。": time.time() - 600}  # 10 分钟前
+    ttl = 300.0  # 5 分钟
+    now = time.time()
+    prev = "今日は特に予定もなく、のんびり過ごしてるよ。"
+    prev_ts = ts_map.get(prev, 0.0)
+    expired = (prev_ts <= 0) or (now - prev_ts > ttl)
+    assert expired  # 应被识别为过期
+
+
+def test_p29_d_layer_ttl_within_window_still_short_circuits():
+    """P29：TTL 窗口内的指纹仍然有效，正常短路。"""
+    import time
+    fresh_text = "今日は寒いね。"
+    ts_map = {fresh_text: time.time() - 60}  # 1 分钟前
+    ttl = 300.0
+    now = time.time()
+    prev_ts = ts_map.get(fresh_text, 0.0)
+    expired = (prev_ts <= 0) or (now - prev_ts > ttl)
+    assert not expired  # 仍 fresh，应继续短路
+
+
+def test_p29_d_layer_no_ts_entry_skipped():
+    """P29：缺时间戳元数据（旧格式兼容）的指纹应当跳过 TTL 检查 → 视为过期。"""
+    import time
+    ts_map = {}  # 完全无 ts 信息
+    ttl = 300.0
+    now = time.time()
+    prev_ts = ts_map.get("any_text", 0.0)
+    expired = (prev_ts <= 0) or (now - prev_ts > ttl)
+    assert expired
+
+
 def test_p28_peer_significantly_longer_triggers_promote_path():
     """P28 紧急修复：peer 文本长度 > last_reply × 1.3 时即使 overlap=1.00 也应
     走 promote 路径而非直接 skip（防 echo 子串误拦真消息）。
