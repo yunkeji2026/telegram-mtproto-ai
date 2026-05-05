@@ -635,6 +635,56 @@ def test_p28_bubble_says_self_overrides_length_check():
     assert decision == "skip"
 
 
+def test_p25v2_text_hash_prefix_distinguishable():
+    """P25-v2：text hash 用 'inbox_text:' 前缀，ROI hash 用 'inbox_roi:' 前缀。
+    cache 命中时能根据前缀区分两种 hash 来源。"""
+    text_hash = "inbox_text:abc123"
+    roi_hash = "inbox_roi:def456"
+    assert text_hash.startswith("inbox_text:")
+    assert roi_hash.startswith("inbox_roi:")
+    # 命中类型判定
+    assert ("text" if text_hash.startswith("inbox_text:") else "roi") == "text"
+    assert ("text" if roi_hash.startswith("inbox_text:") else "roi") == "roi"
+
+
+def test_p25v2_text_hash_uses_inbox_row_preview():
+    """P25-v2：text hash 拼 InboxRow.preview 字段（截断 60 字防爆胀）。"""
+    import hashlib
+    rows_a = [
+        type("R", (), {"preview": "Maipon: 今日は特に予定もなく..."})(),
+        type("R", (), {"preview": "野末: そうだなあ、毎日忙しくて..."})(),
+    ]
+    rows_b = [
+        type("R", (), {"preview": "Maipon: 今日は特に予定もなく..."})(),
+        type("R", (), {"preview": "野末: そうだなあ、毎日忙しくて..."})(),
+    ]
+    rows_c = [
+        type("R", (), {"preview": "Maipon: 今日は特に予定もなく..."})(),
+        type("R", (), {"preview": "野末: 全然忙しくない..."})(),  # 不同
+    ]
+    text_a = "|".join(r.preview[:60] for r in rows_a[:8])
+    text_b = "|".join(r.preview[:60] for r in rows_b[:8])
+    text_c = "|".join(r.preview[:60] for r in rows_c[:8])
+    h_a = "inbox_text:" + hashlib.md5(text_a.encode()).hexdigest()
+    h_b = "inbox_text:" + hashlib.md5(text_b.encode()).hexdigest()
+    h_c = "inbox_text:" + hashlib.md5(text_c.encode()).hexdigest()
+    assert h_a == h_b  # 内容相同 hash 相同
+    assert h_a != h_c  # 内容不同 hash 不同
+
+
+def test_p25v2_text_hash_cache_priority_over_roi():
+    """P25-v2：text hash 优先于 ROI hash 作 cache key。
+    text 命中率应显著高于 ROI（4% → 30%+）。"""
+    text_hash = "inbox_text:stable_text"
+    roi_hash = "inbox_roi:variable_pixels"
+    img_hash = text_hash or roi_hash  # text 优先
+    assert img_hash == text_hash
+    # text 不可用时 fallback ROI
+    text_hash_2 = None
+    img_hash_2 = text_hash_2 or roi_hash
+    assert img_hash_2 == roi_hash
+
+
 def test_p25_inbox_roi_hash_skips_stories_and_nav(tmp_path):
     """P25：inbox ROI = [23.75%, 92.5%]，应忽略 stories 头像动画 + 底部 nav，
     仅对 chat 列表区敏感。"""

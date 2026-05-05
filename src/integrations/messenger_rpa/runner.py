@@ -5995,6 +5995,47 @@ class MessengerRpaRunner:
             if risk is not None and risk.hit:
                 self._handle_risk_hit(risk, result=result, where="inbox")
 
+    def _inbox_text_hash(self) -> Optional[str]:
+        """P25-v2 (2026-05-05) 文本级 hash：用 InboxRow.preview 拼字符串作 cache key。
+
+        理由：原 P25 ROI 像素 hash 命中率仅 4%（10:30 metrics 数据：12 hit /
+        ~300 calls），因为时间戳"5m ago"分钟级变化让像素永不一致。改用从
+        uiautomator dump 提取的 row preview 文本——peer 没发新消息时 row
+        preview 字面稳定（时间戳不在 preview 字段里）。
+
+        失败（dump timeout / lowmemkill）→ 返 None，caller 用 ROI hash fallback。
+        """
+        serial = (self._cfg.get("adb_serial") or "").strip()
+        if not serial:
+            return None
+        _timeout = float(self._cfg.get(
+            "inbox_text_hash_dump_timeout_s", 2.0,
+        ) or 0.0)
+        if _timeout <= 0:
+            return None
+        try:
+            from src.integrations.messenger_rpa.ui_inbox_scraper import (
+                dump_inbox_rows,
+            )
+            rows = dump_inbox_rows(
+                serial,
+                adb_user_id=self._adb_user_id,
+                timeout_s=_timeout,
+            )
+        except Exception:
+            return None
+        if not rows:
+            return None
+        # 拼前 8 行的 preview 字段（截断 60 字防异常长 preview 把 hash 打散）
+        text = "|".join(
+            (r.preview or "")[:60] for r in rows[:8]
+        )
+        if not text:
+            return None
+        return "inbox_text:" + hashlib.md5(
+            text.encode("utf-8")
+        ).hexdigest()
+
     async def _inbox_combined(
         self,
         inbox_png: str,
@@ -6009,11 +6050,20 @@ class MessengerRpaRunner:
         列表稳定（时间戳"5m"粗粒度），ROI hash 命中可省 ~50s vision API。
         风险约束：仅 risk 未命中且 retry=False 时缓存（retry 路径用单任务
         prompt 不该混入 cache）。
+
+        P25-v2 (2026-05-05)：双层 cache key。优先 text hash（uiautomator
+        dump 的 row preview 拼字符串），健康设备命中率应 > 30%。dump 失败
+        fallback 到 ROI hash（保持 v1 行为）。
         """
-        # ── P25 ROI hash cache ──
-        img_hash = (
+        # ── P25-v2 双层 cache key ──
+        # 优先 text hash（更稳定，避开像素时间戳变化）
+        text_hash = self._inbox_text_hash() if not retry else None
+        # ROI hash 作为 fallback（dump 失败时仍可用）
+        roi_hash = (
             self._screenshot_inbox_hash(inbox_png) if inbox_png else None
         )
+        # 用 text hash 优先 cache key（dump 成功才有），否则用 ROI hash
+        img_hash = text_hash or roi_hash
         if (
             img_hash
             and not retry
@@ -6022,6 +6072,14 @@ class MessengerRpaRunner:
             cr, tag = self._inbox_combined_cache[img_hash]
             self._inbox_combined_cache.move_to_end(img_hash)
             result.setdefault("hints", []).append("inbox_combined_cache_hit")
+            # P25-v2：标记命中的 hash 类型，便于看 text vs ROI 命中率分布
+            _cache_hash_kind = (
+                "text" if img_hash.startswith("inbox_text:") else "roi"
+            )
+            result["inbox_cache_hash_kind"] = _cache_hash_kind
+            result.setdefault("hints", []).append(
+                f"inbox_combined_cache_hit_kind:{_cache_hash_kind}"
+            )
             result.setdefault("phase_ms", {})["inbox_vision"] = 0
             self._apply_inbox_combined_side_effects(
                 cr, tag, result, retry, replay_risk=False,

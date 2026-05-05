@@ -125,6 +125,8 @@ _GUARD_TRACKED_HINT_PREFIXES: Tuple[str, ...] = (
     "self_overlap_strict_skip:",
     # P31：strict_window 内降级 promote（不再硬 skip）
     "self_overlap_strict_promote:",
+    # P25-v2：cache 命中时标记 hash 类型 (text / roi)
+    "inbox_combined_cache_hit_kind:",
     # P16-IL2：长冷却内 inbox preview 不同 → 解除冷却放行（带相似度数值）
     "chat_overlap_inbox_escape:",
     # P18：device unhealthy backoff 触发 / 启动
