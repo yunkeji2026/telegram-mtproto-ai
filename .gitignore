@@ -244,6 +244,7 @@ Thumbs.db
 *.bak
 *.backup
 *.old
+*_recovered.py
 
 # 密钥文件
 *.pem
