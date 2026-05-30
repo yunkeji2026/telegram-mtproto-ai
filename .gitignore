@@ -209,6 +209,7 @@ models/**/*.safetensors
 *.apk
 
 # Claude Code 运行时状态
+.claude/
 .claude/scheduled_tasks.lock
 .claude/**/*.log
 
@@ -219,6 +220,21 @@ data/
 *.tmp
 *.temp
 _package_out/
+
+# 根目录一次性 RPA/ADB 调试残留（截图、UI dump、临时探针脚本）
+/tmp_*
+/_*.py
+/dbg_*.py
+/investigate_*.py
+/probe_*.py
+/monitor_open_thread_test.ps1
+/test_*.png
+/ij8_live.png
+/wa_*.png
+/*.xml
+/*.wav
+/*.mp3
+tools/tmp_*.py
 
 # 系统文件
 .DS_Store
