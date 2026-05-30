@@ -17,7 +17,28 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from ..rpa_shared import (
+    compute_intent_tag as _compute_intent_tag,
+    sessions_from_rows as _sessions_from_rows,
+    compute_intent_stats as _compute_intent_stats,
+    count_runs_for_chat_name as _count_runs_for_chat_name,
+)
+
 logger = logging.getLogger(__name__)
+
+
+def mrpa_chat_cid(chat_name: str, chat_key_prefix: str = "messenger_rpa") -> int:
+    """Deterministic synthetic chat_id mirroring MessengerRpaRunner's cid_num formula.
+
+    Used by:
+    - MessengerRpaService._warmup_pm_chat_bindings() to seed PM on startup
+    - API routes double-write when operator sets per-chat persona override
+
+    Formula must stay in sync with runner.py line:
+        cid_num = int(hashlib.md5(chat_key.encode("utf-8")).hexdigest()[:12], 16) % (10**9)
+    """
+    chat_key = f"{chat_key_prefix}:{chat_name}"
+    return int(hashlib.md5(chat_key.encode("utf-8")).hexdigest()[:12], 16) % (10**9)
 
 
 HANDOFF_STATUSES = {
@@ -294,6 +315,21 @@ CREATE TABLE IF NOT EXISTS messenger_rpa_chat_persona_overrides (
 );
 CREATE INDEX IF NOT EXISTS idx_chat_persona_overrides_account
     ON messenger_rpa_chat_persona_overrides(account_id, reply_profile_id);
+
+-- P28：手动发送队列（运营可主动入队，runner pop 后通过 UI 自动化将消息发出）
+CREATE TABLE IF NOT EXISTS messenger_rpa_send_queue (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          REAL NOT NULL,           -- 入队时刻
+    chat_key    TEXT NOT NULL DEFAULT '', -- 目标会话
+    peer_name   TEXT NOT NULL DEFAULT '', -- 对方显示名
+    text        TEXT NOT NULL DEFAULT '', -- 要发送的消息
+    status      TEXT NOT NULL DEFAULT 'queued',  -- queued|processing|sent|failed|cancelled
+    created_by  TEXT DEFAULT '',
+    sent_at     REAL DEFAULT 0,
+    error       TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_msgr_send_queue_status_ts
+    ON messenger_rpa_send_queue(status, ts);
 """
 
 
@@ -324,7 +360,7 @@ class MessengerRpaStateStore:
         account_id: str = "default",
     ) -> None:
         self._db_path = str(db_path)
-        self._max_runs_kept = max(int(max_runs_kept or 500), 100)
+        self._max_runs_kept = max(int(max_runs_kept or 50000), 100)
         self._account_id = str(account_id or "default")
         self._lock = threading.RLock()
         self._init_db()
@@ -374,12 +410,32 @@ class MessengerRpaStateStore:
                 "ADD COLUMN defer_staleness_sec REAL DEFAULT 0",
                 "ALTER TABLE messenger_rpa_chat_state "
                 "ADD COLUMN last_sent_at REAL DEFAULT 0",
+                "ALTER TABLE messenger_rpa_runs "
+                "ADD COLUMN intent_tag TEXT DEFAULT ''",
+                # P8-3: 复合索引加速 chat_history / sessions / search
+                "CREATE INDEX IF NOT EXISTS idx_msgr_runs_ck_ts ON messenger_rpa_runs(chat_key, ts DESC)",
+                "CREATE INDEX IF NOT EXISTS idx_msgr_runs_ts ON messenger_rpa_runs(ts DESC)",
+                # P5-A: 运营手动锁定对话语言（覆盖自动检测）
+                "ALTER TABLE messenger_rpa_chat_state ADD COLUMN forced_lang TEXT DEFAULT NULL",
             ):
                 try:
                     c.execute(alter)
                 except sqlite3.OperationalError:
                     pass  # 已存在
             c.commit()
+        # P28：启动恢复——将上次进程异常中断的 processing 重置为 queued
+        self._recover_stuck_send_queue()
+
+    def _recover_stuck_send_queue(self) -> None:
+        try:
+            with self._lock, self._conn() as c:
+                c.execute(
+                    "UPDATE messenger_rpa_send_queue SET status='queued'"
+                    " WHERE status='processing'"
+                )
+                c.commit()
+        except Exception:
+            pass
 
     # ── chat 状态 ────────────────────────────────
     def get_chat_state(self, chat_key: str) -> Dict[str, Any]:
@@ -389,6 +445,21 @@ class MessengerRpaStateStore:
                 (chat_key,),
             ).fetchone()
         return dict(row) if row else {}
+
+    def set_forced_lang(self, chat_key: str, lang: Optional[str]) -> None:
+        """P5-A: 锁定或解锁对话语言。lang=None 表示解除锁定。"""
+        import time as _time
+        now = _time.time()
+        with self._lock, self._conn() as c:
+            # Ensure row exists first
+            c.execute(
+                "INSERT OR IGNORE INTO messenger_rpa_chat_state (chat_key, updated_at) VALUES (?, ?)",
+                (chat_key, now),
+            )
+            c.execute(
+                "UPDATE messenger_rpa_chat_state SET forced_lang=?, updated_at=? WHERE chat_key=?",
+                (lang or None, now, chat_key),
+            )
 
     def list_chat_states(self, limit: int = 100) -> List[Dict[str, Any]]:
         """Return recent chat state rows for operator dashboards."""
@@ -958,8 +1029,8 @@ class MessengerRpaStateStore:
                 """
                 INSERT INTO messenger_rpa_runs
                     (ts, chat_key, chat_name, ok, step, peer_text, peer_kind,
-                     reply_text, reader_path, total_ms, error, screenshot_path)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     reply_text, reader_path, total_ms, error, screenshot_path, intent_tag)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     float(run.get("ts") or time.time()),
@@ -974,6 +1045,7 @@ class MessengerRpaStateStore:
                     float(run.get("total_ms") or 0),
                     str(run.get("error") or ""),
                     str(run.get("screenshot_path") or ""),
+                    _compute_intent_tag(str(run.get("peer_text") or "")),
                 ),
             )
             c.execute(
@@ -995,6 +1067,107 @@ class MessengerRpaStateStore:
                 (max(int(limit or 50), 1),),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def chat_history(
+        self, chat_key: str, limit: int = 10, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """P7-C: 指定联系人的消息交换（分页，含 intent_tag）。"""
+        with self._lock, self._conn() as c:
+            rows = c.execute(
+                "SELECT ts, chat_key, peer_text, reply_text, ok, step, total_ms, error, intent_tag"
+                " FROM messenger_rpa_runs WHERE chat_key=? AND peer_text!=''"
+                " ORDER BY ts DESC LIMIT ? OFFSET ?",
+                (chat_key, max(1, int(limit)), max(0, int(offset))),
+            ).fetchall()
+        return list(reversed([dict(r) for r in rows]))
+
+    def sessions_for_chat(
+        self, chat_key: str, gap_sec: float = 14400
+    ) -> List[Dict[str, Any]]:
+        """P7-C: 按 4h 间隔分组会话摘要。"""
+        with self._lock, self._conn() as c:
+            rows = c.execute(
+                "SELECT ts, peer_text, reply_text, ok, COALESCE(intent_tag,'general') as intent_tag"
+                " FROM messenger_rpa_runs WHERE chat_key=? AND peer_text!=''"
+                " ORDER BY ts ASC",
+                (chat_key,),
+            ).fetchall()
+        return _sessions_from_rows([dict(r) for r in rows], gap_sec=gap_sec)
+
+    def total_turns_for_chat(self, chat_key: str) -> int:
+        with self._lock, self._conn() as c:
+            row = c.execute(
+                "SELECT COUNT(*) AS n FROM messenger_rpa_runs WHERE chat_key=? AND peer_text!=''",
+                (chat_key,),
+            ).fetchone()
+        return int((row["n"] if row else 0) or 0)
+
+    def customer_profile(self, chat_key: str) -> Dict[str, Any]:
+        """P7-C: 联系人全量画像。"""
+        with self._lock, self._conn() as c:
+            stats = c.execute(
+                "SELECT COUNT(*) as total, SUM(ok) as ok_cnt,"
+                " MIN(ts) as first_ts, MAX(ts) as last_ts"
+                " FROM messenger_rpa_runs WHERE chat_key=? AND peer_text!=''",
+                (chat_key,),
+            ).fetchone()
+            intent_rows = c.execute(
+                "SELECT COALESCE(intent_tag,'general') as tag, COUNT(*) as cnt"
+                " FROM messenger_rpa_runs WHERE chat_key=? AND peer_text!=''"
+                " GROUP BY tag ORDER BY cnt DESC",
+                (chat_key,),
+            ).fetchall()
+        total = int((stats["total"] if stats else 0) or 0)
+        ok = int((stats["ok_cnt"] if stats else 0) or 0)
+        dist = {r["tag"]: int(r["cnt"]) for r in intent_rows}
+        dominant = intent_rows[0]["tag"] if intent_rows else "general"
+        return {
+            "total_turns": total,
+            "reply_rate": round(ok / total * 100, 1) if total else 0.0,
+            "first_ts": float((stats["first_ts"] if stats else 0) or 0),
+            "last_ts": float((stats["last_ts"] if stats else 0) or 0),
+            "dominant_intent": dominant,
+            "intent_distribution": dist,
+            "intimacy_score": None,
+            "last_peer_text": "",
+        }
+
+    def search_history(
+        self, q: str, *, intent: str = "", days: int = 30, limit: int = 20
+    ) -> List[Dict[str, Any]]:
+        """P7-C: 跨联系人关键词检索。"""
+        q = (q or "").strip()
+        if not q:
+            return []
+        since = time.time() - max(1, int(days)) * 86400
+        pct = f"%{q}%"
+        params: list = [pct, pct, since]
+        ic = ""
+        if intent:
+            ic = "AND COALESCE(intent_tag,'general')=?"
+            params.append(intent)
+        with self._lock, self._conn() as c:
+            rows = c.execute(
+                f"SELECT id, ts, chat_key, peer_text, reply_text, ok, intent_tag"
+                f" FROM messenger_rpa_runs"
+                f" WHERE (peer_text LIKE ? OR reply_text LIKE ?)"
+                f" AND ts >= ? AND peer_text != '' {ic}"
+                f" ORDER BY ts DESC LIMIT ?",
+                params + [limit],
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def intent_stats(self, window_hours: float = 168.0) -> Dict[str, Any]:
+        """P10-C: 意图分布统计（委托给 rpa_shared.compute_intent_stats）。"""
+        with self._lock, self._conn() as c:
+            return _compute_intent_stats(
+                c, "messenger_rpa_runs", window_hours=window_hours
+            )
+
+    def match_chat_name(self, name: str) -> Dict[str, Any]:
+        """P12-A: 跨平台身份匹配 — 按 chat_key 后缀查 chat_name 的轮次/最后时间。"""
+        with self._lock, self._conn() as c:
+            return _count_runs_for_chat_name(c, "messenger_rpa_runs", name)
 
     # ── 元数据 ────────────────────────────────
     def get_meta(self, key: str, default: Optional[str] = None) -> Optional[str]:
@@ -2445,6 +2618,96 @@ class MessengerRpaStateStore:
             except Exception:
                 continue
         return n
+
+    # ── P28：手动发送队列 ───────────────────────────────────
+    def enqueue_send(
+        self,
+        *,
+        chat_key: str,
+        peer_name: str,
+        text: str,
+        created_by: str = "",
+    ) -> int:
+        """Insert a queued send task. Returns new row id."""
+        now = time.time()
+        with self._lock, self._conn() as c:
+            cur = c.execute(
+                "INSERT INTO messenger_rpa_send_queue"
+                " (ts, chat_key, peer_name, text, status, created_by)"
+                " VALUES (?, ?, ?, ?, 'queued', ?)",
+                (now, str(chat_key)[:200], str(peer_name)[:200],
+                 str(text)[:4000], str(created_by)[:60]),
+            )
+            c.commit()
+            return int(cur.lastrowid)
+
+    def pop_send_queue_item(self) -> Optional[Dict[str, Any]]:
+        """Pop earliest queued task, mark processing. Returns dict or None."""
+        with self._lock, self._conn() as c:
+            row = c.execute(
+                "SELECT * FROM messenger_rpa_send_queue"
+                " WHERE status='queued' ORDER BY ts LIMIT 1"
+            ).fetchone()
+            if row is None:
+                return None
+            c.execute(
+                "UPDATE messenger_rpa_send_queue SET status='processing' WHERE id=?",
+                (row["id"],),
+            )
+            c.commit()
+            return dict(row)
+
+    def mark_send_queue_item(
+        self, item_id: int, status: str, error: Optional[str] = None
+    ) -> None:
+        """Finalise a task (status ∈ sent | failed | cancelled)."""
+        with self._lock, self._conn() as c:
+            c.execute(
+                "UPDATE messenger_rpa_send_queue"
+                " SET status=?, sent_at=?, error=? WHERE id=?",
+                (str(status), time.time(), error, int(item_id)),
+            )
+            c.commit()
+
+    def list_send_queue(
+        self, limit: int = 30, include_done: bool = False
+    ) -> List[Dict[str, Any]]:
+        """List recent N tasks; optionally include terminal statuses."""
+        with self._lock, self._conn() as c:
+            if include_done:
+                rows = c.execute(
+                    "SELECT * FROM messenger_rpa_send_queue"
+                    " ORDER BY ts DESC LIMIT ?",
+                    (int(limit),),
+                ).fetchall()
+            else:
+                rows = c.execute(
+                    "SELECT * FROM messenger_rpa_send_queue"
+                    " WHERE status NOT IN ('sent','failed','cancelled')"
+                    " ORDER BY ts DESC LIMIT ?",
+                    (int(limit),),
+                ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_send_queue_item(self, item_id: int) -> Optional[Dict[str, Any]]:
+        """Get single send queue item by id."""
+        with self._lock, self._conn() as c:
+            row = c.execute(
+                "SELECT * FROM messenger_rpa_send_queue WHERE id=?",
+                (int(item_id),),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def cancel_send_queue_item(self, item_id: int) -> bool:
+        """Cancel a queued task atomically. Returns True if it was queued."""
+        with self._lock, self._conn() as c:
+            cur = c.execute(
+                "UPDATE messenger_rpa_send_queue SET status='cancelled'"
+                " WHERE id=? AND status='queued'",
+                (int(item_id),),
+            )
+            c.commit()
+            return cur.rowcount > 0
 
     def mark_approval_sent(
         self,

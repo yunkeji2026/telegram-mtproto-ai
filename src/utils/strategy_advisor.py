@@ -70,6 +70,17 @@ class Advisory:
 
 def compute_quality_score(s: Dict) -> float:
     """根据策略汇总指标计算复合质量评分 0-100"""
+    return compute_quality_score_breakdown(s)["total"]
+
+
+def compute_quality_score_breakdown(s: Dict) -> Dict:
+    """计算质量评分并返回各分项明细（用于 UI 透明化展示）。
+
+    Returns: {"total": float, "response": float, "silence": float,
+              "same_intent": float, "template": float,
+              "response_raw": float, "silence_raw": float,
+              "same_intent_raw": float, "template_raw": float}
+    """
     # 响应时间评分: 0-500ms=100, 500-3000ms线性衰减, >6000ms=0
     avg_ms = s.get("avg_ms", 0)
     if avg_ms <= 500:
@@ -91,11 +102,21 @@ def compute_quality_score(s: Dict) -> float:
     tpl = s.get("template_hit_rate", 0)
     te_score = min(100, tpl * 1.5)
 
-    score = (W_RESPONSE_TIME * rt_score +
+    total = (W_RESPONSE_TIME * rt_score +
              W_SILENCE_RATE * sr_score +
              W_SAME_INTENT * si_score +
              W_TEMPLATE_EFF * te_score)
-    return round(min(100, max(0, score)), 1)
+    return {
+        "total": round(min(100, max(0, total)), 1),
+        "response": round(rt_score, 1),
+        "silence": round(sr_score, 1),
+        "same_intent": round(si_score, 1),
+        "template": round(te_score, 1),
+        "response_raw": round(W_RESPONSE_TIME * rt_score, 1),
+        "silence_raw": round(W_SILENCE_RATE * sr_score, 1),
+        "same_intent_raw": round(W_SAME_INTENT * si_score, 1),
+        "template_raw": round(W_TEMPLATE_EFF * te_score, 1),
+    }
 
 
 def analyze(summary: List[Dict], strategies_config: Dict = None) -> Dict[str, Any]:

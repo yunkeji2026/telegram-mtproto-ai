@@ -117,7 +117,8 @@ def _normalize_message_text(raw: Any) -> str:
 class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
     """Telegram MTProto客户端"""
     
-    def __init__(self, config, skill_manager: SkillManager, ai_client=None):
+    def __init__(self, config, skill_manager: SkillManager, ai_client=None,
+                 account_cfg: Optional[Dict[str, Any]] = None):
         """
         初始化Telegram客户端
         
@@ -125,6 +126,8 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             config: 配置管理器实例
             skill_manager: Skill管理器实例
             ai_client: AI 客户端（可选），用于「前一条+当前消息」上下文判断是否回复
+            account_cfg: 多账号覆盖字典（可选）；包含 api_id/api_hash/phone_number/
+                         session_name/account_id/persona_ids 等，优先于 config 中的值
         """
         self.config = config
         self.skill_manager = skill_manager
@@ -157,12 +160,19 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
         from src.utils.rate_limiter import RateLimiter
         self._rate_limiter = RateLimiter(config.config if hasattr(config, 'config') else {})
 
-        # 从配置获取Telegram设置
+        # 从配置获取Telegram设置（account_cfg overlay 优先）
+        _ov: Dict[str, Any] = dict(account_cfg or {})
         telegram_config = config.get_telegram_config()
-        self.api_id = telegram_config.get('api_id')
-        self.api_hash = telegram_config.get('api_hash')
-        self.phone_number = telegram_config.get('phone_number')
-        self.session_name = telegram_config.get('session_name', 'camille_bot')
+        self.api_id = _ov.get('api_id') or telegram_config.get('api_id')
+        self.api_hash = _ov.get('api_hash') or telegram_config.get('api_hash')
+        self.phone_number = _ov.get('phone_number') or telegram_config.get('phone_number')
+        self.session_name = (
+            _ov.get('session_name') or telegram_config.get('session_name', 'camille_bot')
+        )
+        # 多账号元信息（供日志/persona 路由使用）
+        self.account_id: str = str(_ov.get('account_id') or 'default')
+        self.account_label: str = str(_ov.get('account_label') or self.account_id)
+        self.account_persona_ids: List[str] = list(_ov.get('persona_ids') or [])
         
         # 初始化语音转录服务
         self.voice_transcriber = None
@@ -1101,6 +1111,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                     'chat_id': message.chat.id,
                     'image_ocr_text': image_ocr_text,
                     '_trigger_path': getattr(message, '_trigger_path', None),
+                    '_is_voice_msg': bool(message.voice or message.audio),
                 }
                 try:
                     self.message_queue.put_nowait(msg_data)
@@ -1243,6 +1254,9 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             # 群名（用于额度规则：特殊客户/黑名单按群名识别）
             msg = message_data.get('message')
             chat_title = (getattr(msg.chat, 'title', None) or '').strip() if msg and getattr(msg, 'chat', None) else ''
+            # chat_type 用于 3-tier persona 路由和下游决策
+            _chat_type_str = str(getattr(getattr(msg, 'chat', None), 'type', '') or '').lower()
+            _is_group = _chat_type_str in ('group', 'supergroup', 'channel')
 
             # request_id 串联整条链路，便于日志与排错
             request_id = f"{chat_id}_{getattr(message, 'id', 0)}"
@@ -1262,9 +1276,13 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                     user_emotion_hint = (_ea or {}).get("emotion", "neutral") or "neutral"
                 except Exception:
                     pass
+            # 语音转录：AI 只需看纯文本，剥掉 [语音转录] 前缀标记
+            _VOICE_PREFIX = "[语音转录] "
+            ai_text = text[len(_VOICE_PREFIX):] if text.startswith(_VOICE_PREFIX) else text
+
             # 调用Skill管理器处理消息，传递上下文分析结果、图片 OCR、机器人消息、群名、request_id、情绪、发群消息回调（供 gxp 代发命令等）
             reply_text = await self.skill_manager.process_message(
-                text=text,
+                text=ai_text,
                 user_id=user_id,
                 context={
                     'chat_id': chat_id,
@@ -1283,6 +1301,20 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                     'chat_id': chat_id,
                     'user_id': user_id,
                     'user_msg_id': getattr(message, 'id', 0),
+                    'account_persona_id': (
+                        (
+                            self.account_persona_ids[2]
+                            if _chat_type_str == 'channel' and len(self.account_persona_ids) > 2
+                            else self.account_persona_ids[1]
+                            if _is_group and len(self.account_persona_ids) > 1
+                            else self.account_persona_ids[0]
+                        )
+                        if getattr(self, 'account_persona_ids', None)
+                        else ""
+                    ),
+                    'is_group': _is_group,
+                    'chat_type': _chat_type_str or 'private',
+                    'platform': 'telegram',  # S5: CrossPlatformIdentity
                 }
             )
             
@@ -1373,8 +1405,19 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
 
             _parse_mode = ParseMode.HTML if (PYROGRAM_AVAILABLE and suffix_html) else None
 
-            # 如果有回复，发送消息（言简意赅：长回复可分条发送）
+            # 语音回复：如果启用且触发条件满足，先尝试发语音；成功则跳过文字
+            _is_voice_msg = bool(message_data.get('_is_voice_msg'))
+            _voice_sent = False
             if reply_final:
+                try:
+                    _voice_sent = await self._maybe_send_voice_reply(
+                        message, reply_final, is_peer_voice=_is_voice_msg
+                    )
+                except Exception as _ve:
+                    self.logger.warning("[voice_reply] probe failed: %s", _ve)
+
+            # 如果有回复，发送消息（言简意赅：长回复可分条发送）
+            if reply_final and not _voice_sent:
                 sent_text_for_context = reply_final
                 split_cfg = self.config.get("reply", {}).get("split_send", {})
                 if split_cfg.get("enabled", False):
@@ -1433,6 +1476,35 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                     f"处理: {process_duration:.2f}s, "
                     f"发送: {send_duration:.2f}s"
                 )
+
+                if he_forward_spec:
+                    try:
+                        await self._forward_escalation_user_to_agents(he_forward_spec)
+                    except Exception as fwd_ex:
+                        self.logger.warning(
+                            "人工转接: 向客服私聊转发用户原话失败: %s", fwd_ex
+                        )
+
+            elif reply_final and _voice_sent:
+                # Voice was sent — still record metrics & context
+                send_time = time.time()
+                total_time_ms = (send_time - start_time) * 1000
+                m = _metrics()
+                if m:
+                    m.record_reply()
+                    m.record_response_time_ms(total_time_ms)
+                    m.set_queue_size(self.message_queue.qsize())
+                if self.context_manager:
+                    try:
+                        self.context_manager.add_message(
+                            chat_id=chat_id,
+                            user_id=0,
+                            username="Camille",
+                            text=reply_final,
+                            is_ai=True,
+                        )
+                    except Exception as _e:
+                        self.logger.warning("记录语音回复到上下文失败: %s", _e)
 
                 if he_forward_spec:
                     try:

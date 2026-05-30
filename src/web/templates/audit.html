@@ -80,6 +80,29 @@
 </div>
 <div class="hm-tooltip" id="hm-tooltip"></div>
 
+<!-- P27-C: 快捷筛选预设（安全 / intent_tags 编辑栈相关 action） -->
+{% set _presets = [
+  ('web_body_oversize_rejected', '🛡 大 body 攻击 (413)', 'danger'),
+  ('rpa_intent_tags_rate_limited', '⚡ 限流命中 (429)', 'warn'),
+  ('rpa_intent_tags_write',  '📝 字典写入', 'info'),
+  ('rpa_intent_tags_restore', '↺ 字典恢复', 'info'),
+  ('rpa_intent_tags_reload', '🔄 字典 reload', 'info'),
+] %}
+<div class="card fa" style="margin-bottom:.6rem">
+  <h2 style="margin-bottom:.6rem">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9c2.05 0 3.94.68 5.46 1.83"/></svg>
+    快捷筛选
+    <span style="font-size:.72rem;font-weight:400;color:var(--t3);margin-left:.3rem">点击一次过滤；再点 [清除] 复位</span>
+  </h2>
+  <div style="display:flex;flex-wrap:wrap;gap:.4rem">
+    {% for a, label, kind in _presets %}
+    <a href="/audit?action={{ a }}"
+       class="btn btn-xs {% if filters and filters.action == a %}btn-p{% else %}btn-s{% endif %}"
+       title="筛选 action={{ a }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+</div>
+
 <!-- filter -->
 <div class="card fa">
   <h2>

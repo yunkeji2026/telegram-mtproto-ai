@@ -4,6 +4,7 @@
 
 import asyncio
 import html
+import os
 import random
 import re
 import time
@@ -370,6 +371,132 @@ class TelegramSenderMixin:
                 self.logger.warning(
                     "人工转接: 私聊定位说明(无 URL)失败 peer=%s: %s", peer, e
                 )
+
+    async def _maybe_send_voice_reply(
+        self,
+        original_message,
+        reply_text: str,
+        *,
+        is_peer_voice: bool = False,
+    ) -> bool:
+        """Try to send a TTS voice note for *reply_text*.
+
+        Returns ``True`` if a voice note was sent (caller should skip text send).
+        Returns ``False`` if voice was skipped/failed (caller sends text normally).
+
+        Trigger modes (``telegram.voice_reply.trigger``):
+        - ``when_peer_voice`` — only when the incoming message was a voice note
+        - ``always``          — every reply
+        - ``random``          — with configurable probability
+        - ``never``           — effectively disables (same as ``enabled: false``)
+        """
+        try:
+            raw_cfg = self.config.config if hasattr(self.config, "config") else {}
+            vr_cfg: Dict[str, Any] = (raw_cfg.get("telegram") or {}).get("voice_reply") or {}
+            if not vr_cfg.get("enabled", False):
+                self.logger.warning("[voice_reply] skip: enabled=false (section=%s)", "found" if vr_cfg else "missing")
+                return False
+
+            trigger = str(vr_cfg.get("trigger", "when_peer_voice")).strip().lower()
+            if trigger == "never":
+                self.logger.debug("[voice_reply] skip: trigger=never")
+                return False
+            if trigger == "when_peer_voice" and not is_peer_voice:
+                self.logger.debug("[voice_reply] skip: trigger=when_peer_voice but msg is not voice")
+                return False
+            if trigger == "random":
+                prob = float(vr_cfg.get("probability", 0.3) or 0.3)
+                if random.random() >= prob:
+                    return False
+
+            max_chars = int(vr_cfg.get("max_text_chars", 220) or 220)
+            clean_text = (reply_text or "").strip()
+            if not clean_text or len(clean_text) > max_chars:
+                self.logger.debug(
+                    "[voice_reply] skipped: text len=%d max=%d", len(clean_text), max_chars
+                )
+                return False
+
+            # ── Resolve persona → voice config (3-tier fallback) ──
+            from src.ai.persona_voice import resolve_voice_cfg
+
+            persona_id: Optional[str] = None
+            try:
+                from src.utils.persona_manager import PersonaManager
+
+                pm = PersonaManager.get_instance()
+                _acc_pid = (
+                    self.account_persona_ids[0]
+                    if getattr(self, "account_persona_ids", None)
+                    else ""
+                )
+                pid_dict = pm.get_persona(
+                    str(original_message.chat.id), _acc_pid
+                )
+                persona_id = (
+                    pid_dict.get("id")
+                    if isinstance(pid_dict, dict)
+                    else None
+                ) or _acc_pid or None
+            except Exception:
+                pass
+
+            voice_cfg = resolve_voice_cfg(persona_id, raw_cfg)
+            voice_cfg["enabled"] = True
+
+            # ── Synthesize ──
+            from src.ai.tts_pipeline import TTSPipeline
+
+            tts = TTSPipeline(voice_cfg)
+            timeout_sec = float(vr_cfg.get("timeout_sec", 30) or 30)
+            result = await tts.synthesize(clean_text, timeout_sec=timeout_sec)
+            if not result.ok:
+                self.logger.warning("[voice_reply] TTS failed: %s", result.error)
+                return False
+
+            # ── Duration gate ──
+            max_sec = float(vr_cfg.get("max_seconds", 60) or 60)
+            if result.duration_sec > 0 and result.duration_sec > max_sec:
+                self.logger.warning(
+                    "[voice_reply] audio %.1fs exceeds max %.1fs, fallback text",
+                    result.duration_sec, max_sec,
+                )
+                try:
+                    os.unlink(result.audio_path)
+                except Exception:
+                    pass
+                return False
+
+            dur_int = int(result.duration_sec) if result.duration_sec > 0 else None
+            _rt = self._reply_to_message_id_for_send(original_message)
+
+            # ── Send voice ──
+            from src.client.voice_sender import send_telegram_voice
+
+            sent = await send_telegram_voice(
+                self.client,
+                original_message.chat.id,
+                result.audio_path,
+                duration=dur_int,
+                reply_to_message_id=_rt,
+            )
+            try:
+                os.unlink(result.audio_path)
+            except Exception:
+                pass
+
+            if sent:
+                self.logger.info(
+                    "[voice_reply] voice sent chat=%s persona=%s dur=%s",
+                    original_message.chat.id, persona_id, dur_int,
+                )
+                if vr_cfg.get("send_text_summary", False):
+                    await self._send_reply(original_message, reply_text)
+                return True
+            return False
+        except Exception as ex:
+            self.logger.error("[voice_reply] unexpected error: %s", ex)
+            return False
 
     async def _forward_escalation_user_to_agents(self, spec) -> None:
         """

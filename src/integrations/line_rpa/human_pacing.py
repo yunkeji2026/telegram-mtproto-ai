@@ -25,7 +25,7 @@ from typing import List, Tuple
 logger = logging.getLogger(__name__)
 
 _SENT_SPLIT_RE = re.compile(
-    r"(?<=[。！？!?\.\n])\s+|(?<=[。！？!?])(?=[^\s])",
+    r"\n+|(?<=[。！？!?\.])\s+|(?<=[。！？!?])(?=[^\s])",
     flags=re.UNICODE,
 )
 

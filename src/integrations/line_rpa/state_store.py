@@ -16,6 +16,13 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ..rpa_shared import (
+    compute_intent_tag as _compute_intent_tag,
+    sessions_from_rows as _sessions_from_rows,
+    compute_intent_stats as _compute_intent_stats,
+    count_runs_for_chat_name as _count_runs_for_chat_name,
+)
+
 logger = logging.getLogger(__name__)
 
 _DDL = """
@@ -94,13 +101,27 @@ CREATE TABLE IF NOT EXISTS line_rpa_alerts (
 );
 CREATE INDEX IF NOT EXISTS idx_alerts_ack_ts ON line_rpa_alerts(acknowledged_at, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_alerts_kind   ON line_rpa_alerts(kind);
+
+-- P28-1：手动发送队列（操作员从 Web 主动发起一次定向发送，runner 在下一轮 pop 执行）
+CREATE TABLE IF NOT EXISTS line_rpa_send_queue (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          REAL NOT NULL,
+    chat_key    TEXT NOT NULL,
+    peer_name   TEXT NOT NULL DEFAULT '',
+    text        TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'queued',   -- queued | processing | sent | failed | cancelled
+    sent_at     REAL DEFAULT NULL,
+    error       TEXT DEFAULT NULL,
+    created_by  TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_line_send_q_status ON line_rpa_send_queue(status, ts);
 """
 
 
 class LineRpaStateStore:
     """线程安全的 SQLite 封装，供同步 runner 与 Web 路由共用。"""
 
-    def __init__(self, db_path: Path, *, max_runs_kept: int = 500) -> None:
+    def __init__(self, db_path: Path, *, max_runs_kept: int = 50000) -> None:
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
@@ -111,6 +132,27 @@ class LineRpaStateStore:
             self._conn.executescript(_DDL)
             self._commit_migrations()
             self._conn.commit()
+        # P28-1: 启动时恢复 send_queue 中卡在 processing 的项（崩溃 / kill 兜底）+ 清理 >7d 终态
+        self._recover_stuck_send_queue()
+
+    def _recover_stuck_send_queue(self) -> None:
+        """P28-1：① processing → queued（防 SIGKILL 卡死）；② 删 >7d 终态。"""
+        cutoff = time.time() - 7 * 86400
+        with self._lock:
+            try:
+                self._conn.execute(
+                    "UPDATE line_rpa_send_queue SET status='queued',"
+                    " error='recovered_on_startup'"
+                    " WHERE status='processing'"
+                )
+                self._conn.execute(
+                    "DELETE FROM line_rpa_send_queue"
+                    " WHERE status IN ('sent','failed','cancelled') AND ts < ?",
+                    (cutoff,),
+                )
+                self._conn.commit()
+            except sqlite3.OperationalError:
+                pass  # 表尚未创建（首次启动），忽略
 
     def _commit_migrations(self) -> None:
         """对老库幂等追加列（SQLite ALTER TABLE ADD COLUMN 不支持 IF NOT EXISTS）。"""
@@ -130,6 +172,39 @@ class LineRpaStateStore:
                 )
             except Exception as e:
                 logger.debug("ALTER screenshot_path 跳过: %s", e)
+        if "intent_tag" not in cols:
+            try:
+                self._conn.execute(
+                    "ALTER TABLE line_rpa_runs ADD COLUMN intent_tag TEXT DEFAULT ''"
+                )
+            except Exception as e:
+                logger.debug("ALTER intent_tag 跳过: %s", e)
+        # P6-C: LINE TTS approval-only — pending 行附带音频预览路径
+        try:
+            pend_cols = {
+                row["name"]
+                for row in self._conn.execute(
+                    "PRAGMA table_info(line_rpa_pending)"
+                ).fetchall()
+            }
+        except Exception:
+            pend_cols = set()
+        if "tts_path" not in pend_cols:
+            try:
+                self._conn.execute(
+                    "ALTER TABLE line_rpa_pending ADD COLUMN tts_path TEXT DEFAULT ''"
+                )
+            except Exception as e:
+                logger.debug("ALTER tts_path 跳过: %s", e)
+        # P8-3: 复合索引（幂等，如已存在则跳过）
+        for idx_sql in (
+            "CREATE INDEX IF NOT EXISTS idx_line_runs_ck_ts ON line_rpa_runs(chat_key, ts DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_line_runs_ts ON line_rpa_runs(ts DESC)",
+        ):
+            try:
+                self._conn.execute(idx_sql)
+            except Exception as e:
+                logger.debug("CREATE INDEX line_rpa_runs 跳过: %s", e)
 
         # P5-1：pending 表追加 peer_hash（防陈旧校验）
         try:
@@ -148,6 +223,31 @@ class LineRpaStateStore:
                 )
             except Exception as e:
                 logger.debug("ALTER peer_hash 跳过: %s", e)
+        # P7-D: 对话级语言锁定（chat_state）
+        try:
+            cs_cols = {
+                row["name"]
+                for row in self._conn.execute(
+                    "PRAGMA table_info(line_rpa_chat_state)"
+                ).fetchall()
+            }
+        except Exception:
+            cs_cols = set()
+        if "forced_lang" not in cs_cols:
+            try:
+                self._conn.execute(
+                    "ALTER TABLE line_rpa_chat_state ADD COLUMN forced_lang TEXT DEFAULT ''"
+                )
+            except Exception as e:
+                logger.debug("ALTER forced_lang 跳过: %s", e)
+        # P7-C: 对话层语言落库（runs）
+        if "reply_lang" not in cols:
+            try:
+                self._conn.execute(
+                    "ALTER TABLE line_rpa_runs ADD COLUMN reply_lang TEXT DEFAULT ''"
+                )
+            except Exception as e:
+                logger.debug("ALTER reply_lang 跳过: %s", e)
 
     # ── 会话状态 ─────────────────────────────────────────
 
@@ -223,6 +323,29 @@ class LineRpaStateStore:
 
     # ── 运行历史 ─────────────────────────────────────────
 
+    def set_forced_lang(self, chat_key: str, lang: Optional[str]) -> None:
+        """P7-D: 锁定或解除锁定对话级语言。lang=None 表示解除。"""
+        val = str(lang or "").strip().lower()
+        now = time.time()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT chat_key FROM line_rpa_chat_state WHERE chat_key=?", (chat_key,)
+            ).fetchone()
+            if row:
+                self._conn.execute(
+                    "UPDATE line_rpa_chat_state SET forced_lang=?, updated_at=? WHERE chat_key=?",
+                    (val, now, chat_key),
+                )
+            else:
+                self._conn.execute(
+                    "INSERT INTO line_rpa_chat_state"
+                    "(chat_key,forced_lang,last_peer_text,last_peer_hash,last_reply,"
+                    " last_screen_sha256,updated_at)"
+                    " VALUES(?,?,?,?,?,?,?)",
+                    (chat_key, val, "", "", "", "", now),
+                )
+            self._conn.commit()
+
     def record_run(
         self,
         *,
@@ -235,6 +358,7 @@ class LineRpaStateStore:
         total_ms: float,
         error: Optional[str] = None,
         screenshot_path: Optional[str] = None,
+        reply_lang: str = "",
     ) -> None:
         # 节流：仅当 peer_text 非空或有明确 error/screenshot 时才持久化，避免空转淹没
         if not (
@@ -244,12 +368,13 @@ class LineRpaStateStore:
             )
         ):
             return
+        itag = _compute_intent_tag(peer_text or "")
         with self._lock:
             self._conn.execute(
                 "INSERT INTO line_rpa_runs"
                 "(ts,chat_key,ok,step,peer_text,reply_text,reader_path,"
-                " total_ms,error,screenshot_path)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?)",
+                " total_ms,error,screenshot_path,intent_tag,reply_lang)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     time.time(),
                     (chat_key or "")[:120],
@@ -261,6 +386,8 @@ class LineRpaStateStore:
                     float(max(0.0, total_ms)),
                     (error or "")[:500],
                     (screenshot_path or "")[:200],
+                    itag,
+                    (reply_lang or "")[:20],
                 ),
             )
             cnt_row = self._conn.execute(
@@ -291,6 +418,107 @@ class LineRpaStateStore:
                     (lim,),
                 ).fetchall()
         return [dict(r) for r in rows]
+
+    def chat_history(
+        self, chat_key: str, limit: int = 10, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """P7-C: 指定联系人的消息交换（分页，含 intent_tag）。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT ts, peer_text, reply_text, ok, step, total_ms, error, intent_tag"
+                " FROM line_rpa_runs WHERE chat_key=? AND peer_text!=''"
+                " ORDER BY ts DESC LIMIT ? OFFSET ?",
+                (chat_key, max(1, int(limit)), max(0, int(offset))),
+            ).fetchall()
+        return list(reversed([dict(r) for r in rows]))
+
+    def sessions_for_chat(
+        self, chat_key: str, gap_sec: float = 14400
+    ) -> List[Dict[str, Any]]:
+        """P7-C: 按 4h 间隔分组会话摘要。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT ts, peer_text, reply_text, ok, COALESCE(intent_tag,'general') as intent_tag"
+                " FROM line_rpa_runs WHERE chat_key=? AND peer_text!=''"
+                " ORDER BY ts ASC",
+                (chat_key,),
+            ).fetchall()
+        return _sessions_from_rows([dict(r) for r in rows], gap_sec=gap_sec)
+
+    def total_turns_for_chat(self, chat_key: str) -> int:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM line_rpa_runs WHERE chat_key=? AND peer_text!=''",
+                (chat_key,),
+            ).fetchone()
+        return int((row["n"] if row else 0) or 0)
+
+    def customer_profile(self, chat_key: str) -> Dict[str, Any]:
+        """P7-C: 联系人全量画像。"""
+        with self._lock:
+            stats = self._conn.execute(
+                "SELECT COUNT(*) as total, SUM(ok) as ok_cnt,"
+                " MIN(ts) as first_ts, MAX(ts) as last_ts"
+                " FROM line_rpa_runs WHERE chat_key=? AND peer_text!=''",
+                (chat_key,),
+            ).fetchone()
+            intent_rows = self._conn.execute(
+                "SELECT COALESCE(intent_tag,'general') as tag, COUNT(*) as cnt"
+                " FROM line_rpa_runs WHERE chat_key=? AND peer_text!=''"
+                " GROUP BY tag ORDER BY cnt DESC",
+                (chat_key,),
+            ).fetchall()
+        total = int((stats["total"] if stats else 0) or 0)
+        ok = int((stats["ok_cnt"] if stats else 0) or 0)
+        dist = {r["tag"]: int(r["cnt"]) for r in intent_rows}
+        dominant = intent_rows[0]["tag"] if intent_rows else "general"
+        return {
+            "total_turns": total,
+            "reply_rate": round(ok / total * 100, 1) if total else 0.0,
+            "first_ts": float((stats["first_ts"] if stats else 0) or 0),
+            "last_ts": float((stats["last_ts"] if stats else 0) or 0),
+            "dominant_intent": dominant,
+            "intent_distribution": dist,
+            "intimacy_score": None,
+            "last_peer_text": "",
+        }
+
+    def search_history(
+        self, q: str, *, intent: str = "", days: int = 30, limit: int = 20
+    ) -> List[Dict[str, Any]]:
+        """P7-C: 跨联系人关键词检索。"""
+        q = (q or "").strip()
+        if not q:
+            return []
+        since = time.time() - max(1, int(days)) * 86400
+        pct = f"%{q}%"
+        params: list = [pct, pct, since]
+        ic = ""
+        if intent:
+            ic = "AND COALESCE(intent_tag,'general')=?"
+            params.append(intent)
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT id, ts, chat_key, peer_text, reply_text, ok, intent_tag"
+                f" FROM line_rpa_runs"
+                f" WHERE (peer_text LIKE ? OR reply_text LIKE ?)"
+                f" AND ts >= ? AND peer_text != '' {ic}"
+                f" ORDER BY ts DESC LIMIT ?",
+                params + [limit],
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def intent_stats(self, window_hours: float = 168.0) -> Dict[str, Any]:
+        """P10-C: 意图分布统计（委托给 rpa_shared.compute_intent_stats）。"""
+        with self._lock:
+            return _compute_intent_stats(
+                self._conn, "line_rpa_runs", window_hours=window_hours
+            )
+
+    def match_chat_name(self, name: str) -> Dict[str, Any]:
+        """P12-A: 跨平台身份匹配 — 按 chat_key 后缀查 chat_name 的轮次/最后时间。"""
+        with self._lock:
+            return _count_runs_for_chat_name(self._conn, "line_rpa_runs", name)
 
     def timeline(self, *, minutes: int = 60, limit: int = 200) -> List[Dict[str, Any]]:
         """P5-3：合并 runs + pending 事件 + alerts 的时间轴。按 ts 倒序。"""
@@ -440,14 +668,15 @@ class LineRpaStateStore:
         peer_text: str,
         draft_reply: str,
         peer_hash: Optional[str] = None,
+        tts_path: str = "",
     ) -> int:
         if peer_hash is None:
             peer_hash = self.compute_peer_hash(peer_text)
         with self._lock:
             cur = self._conn.execute(
                 "INSERT INTO line_rpa_pending(ts, chat_key, chat_name, peer_text, "
-                "draft_reply, final_reply, status, peer_hash) "
-                "VALUES(?,?,?,?,?,?,?,?)",
+                "draft_reply, final_reply, status, peer_hash, tts_path) "
+                "VALUES(?,?,?,?,?,?,?,?,?)",
                 (
                     time.time(),
                     str(chat_key)[:200],
@@ -457,18 +686,43 @@ class LineRpaStateStore:
                     str(draft_reply or "")[:4000],
                     "pending",
                     str(peer_hash)[:40],
+                    str(tts_path or ""),
                 ),
             )
             self._conn.commit()
             return int(cur.lastrowid or 0)
 
-    def sweep_stale_pending(
+    def update_pending_tts_path(self, pending_id: int, tts_path: str) -> None:
+        """P6-C: 异步 TTS 生成完成后回写音频路径。"""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE line_rpa_pending SET tts_path=? WHERE id=?",
+                (str(tts_path or ""), pending_id),
+            )
+            self._conn.commit()
+
+    def reset_pending_tts(self, pending_id: int) -> bool:
+        """P12-D: 清除 ERROR 哨兵，重置为空字符串，让 runner 下一轮自动重新生成 TTS。
+        仅对 status IN ('pending','approved') 的行有效，返回是否找到并更新了该行。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, status FROM line_rpa_pending WHERE id=?", (pending_id,)
+            ).fetchone()
+            if row is None or row["status"] not in ("pending", "approved"):
+                return False
+            self._conn.execute(
+                "UPDATE line_rpa_pending SET tts_path='' WHERE id=?", (pending_id,)
+            )
+            self._conn.commit()
+        return True
+
+    def cancel_pending_by_ttl(
         self,
         *,
         ttl_sec: float,
         reason: str = "ttl_expired",
     ) -> List[int]:
-        """P5-1：把 ts 早于 ttl 的 pending/approved 行自动取消。返回被取消的 id 列表。"""
+        """P5-1/P11-D: 把 ts 早于 ttl 的 pending/approved 行自动取消。返回被取消的 id 列表。"""
         if ttl_sec <= 0:
             return []
         now = time.time()
@@ -502,6 +756,13 @@ class LineRpaStateStore:
                 except Exception:
                     pass
         return ids
+
+    # backward-compat alias (P5-1 callers + tests use this name)
+    sweep_stale_pending = cancel_pending_by_ttl
+
+    def cancel_all_open_pending(self) -> List[int]:
+        """P13-D: 立即取消所有 pending/approved 行（批量清空）。"""
+        return self.cancel_pending_by_ttl(ttl_sec=0.001, reason="bulk_cancelled")
 
     def cancel_pending_with_reason(
         self,
@@ -550,17 +811,21 @@ class LineRpaStateStore:
         status: Optional[str] = None,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
+        # P8-A: LEFT JOIN to surface per-chat forced_lang in one query
+        _base = (
+            "SELECT p.*, COALESCE(s.forced_lang,'') AS forced_lang "
+            "FROM line_rpa_pending p "
+            "LEFT JOIN line_rpa_chat_state s ON p.chat_key = s.chat_key "
+        )
         with self._lock:
             if status:
                 rows = self._conn.execute(
-                    "SELECT * FROM line_rpa_pending WHERE status=? "
-                    "ORDER BY id DESC LIMIT ?",
+                    _base + "WHERE p.status=? ORDER BY p.id DESC LIMIT ?",
                     (status, int(limit)),
                 ).fetchall()
             else:
                 rows = self._conn.execute(
-                    "SELECT * FROM line_rpa_pending "
-                    "ORDER BY id DESC LIMIT ?",
+                    _base + "ORDER BY p.id DESC LIMIT ?",
                     (int(limit),),
                 ).fetchall()
         return [dict(r) for r in rows]
@@ -830,6 +1095,103 @@ class LineRpaStateStore:
                     "SELECT COUNT(1) AS n FROM line_rpa_alerts WHERE acknowledged_at=0"
                 ).fetchone()
         return int(row["n"]) if row else 0
+
+    # ── P28-1：手动发送队列 ──────────────────────────────
+
+    def enqueue_send(
+        self,
+        *,
+        chat_key: str,
+        peer_name: str,
+        text: str,
+        created_by: str = "",
+    ) -> int:
+        """插入一条待主动发送任务，返回新行 id。
+
+        text 由调用方做长度校验；这里仅保证类型/非空 / 写入。
+        """
+        ck = str(chat_key or "").strip()
+        nm = str(peer_name or "").strip()
+        body = str(text or "")
+        if not ck or not body:
+            raise ValueError("chat_key 和 text 不能为空")
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO line_rpa_send_queue"
+                " (ts, chat_key, peer_name, text, status, created_by)"
+                " VALUES (?, ?, ?, ?, 'queued', ?)",
+                (time.time(), ck, nm, body, str(created_by)[:60]),
+            )
+            self._conn.commit()
+            return int(cur.lastrowid or 0)
+
+    def pop_send_queue_item(self) -> Optional[Dict[str, Any]]:
+        """取出最早一条 queued 任务并将其标记为 processing，返回 dict 或 None。
+
+        runner 在 run_once 开头调用一次：若有任务，优先处理。
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM line_rpa_send_queue"
+                " WHERE status='queued' ORDER BY ts LIMIT 1"
+            ).fetchone()
+            if row is None:
+                return None
+            self._conn.execute(
+                "UPDATE line_rpa_send_queue SET status='processing' WHERE id=?",
+                (row["id"],),
+            )
+            self._conn.commit()
+            return dict(row)
+
+    def mark_send_queue_item(
+        self, item_id: int, status: str, error: Optional[str] = None
+    ) -> None:
+        """终结一条任务（status ∈ sent | failed | cancelled），写 sent_at + error。"""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE line_rpa_send_queue"
+                " SET status=?, sent_at=?, error=? WHERE id=?",
+                (str(status), time.time(), error, int(item_id)),
+            )
+            self._conn.commit()
+
+    def list_send_queue(
+        self, limit: int = 30, include_done: bool = False
+    ) -> List[Dict[str, Any]]:
+        """列出最近 N 条；include_done=False 时只看活跃（非 sent/failed）。"""
+        lim = max(1, min(int(limit), 200))
+        clause = "" if include_done else " WHERE status NOT IN ('sent','failed')"
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT * FROM line_rpa_send_queue{clause}"
+                " ORDER BY ts DESC LIMIT ?",
+                (lim,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_send_queue_item(self, item_id: int) -> Optional[Dict[str, Any]]:
+        """单条查询（供前端轮询单条状态变化用）。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM line_rpa_send_queue WHERE id=?",
+                (int(item_id),),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def cancel_send_queue_item(self, item_id: int) -> bool:
+        """取消任务。仅当 status='queued' 时可取消；processing/sent/failed 时返回 False。
+
+        竞态保护：用 UPDATE ... WHERE status='queued' 一次性原子完成。
+        """
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE line_rpa_send_queue SET status='cancelled', sent_at=?,"
+                " error='cancelled_by_user' WHERE id=? AND status='queued'",
+                (time.time(), int(item_id)),
+            )
+            self._conn.commit()
+            return bool(cur.rowcount)
 
     def close(self) -> None:
         try:

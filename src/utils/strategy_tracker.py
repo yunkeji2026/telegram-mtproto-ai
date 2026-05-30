@@ -158,10 +158,21 @@ class StrategyTracker:
 
     # ── 聚合查询 ──────────────────────────────────────
 
-    def strategy_summary(self, hours: int = 24) -> List[Dict]:
-        """各策略的核心指标汇总"""
-        cutoff = time.time() - hours * 3600
-        rows = self._conn.execute("""
+    def strategy_summary(self, hours: int = 24, offset_hours: int = 0) -> List[Dict]:
+        """各策略的核心指标汇总。offset_hours>0 时查询 [now-offset-hours, now-offset+hours] 窗口。"""
+        now = time.time()
+        if offset_hours > 0:
+            cutoff = now - (offset_hours + hours) * 3600
+            upper = now - offset_hours * 3600
+        else:
+            cutoff = now - hours * 3600
+            upper = None
+        where = "ts_epoch >= ?"
+        params: list = [cutoff]
+        if upper is not None:
+            where += " AND ts_epoch < ?"
+            params.append(upper)
+        rows = self._conn.execute(f"""
             SELECT
                 strategy_id,
                 COUNT(*) AS total,
@@ -172,10 +183,10 @@ class StrategyTracker:
                 SUM(CASE WHEN follow_up = 1 AND follow_up_intent = intent THEN 1 ELSE 0 END) AS same_intent_follow_ups,
                 SUM(CASE WHEN used_ai = 0 THEN 1 ELSE 0 END) AS template_hits
             FROM strategy_events
-            WHERE ts_epoch >= ?
+            WHERE {where}
             GROUP BY strategy_id
             ORDER BY total DESC
-        """, (cutoff,)).fetchall()
+        """, params).fetchall()
         result = []
         for r in rows:
             total = r["total"] or 1

@@ -61,15 +61,33 @@ def has_any_vision_backend(merged: dict, global_vision: dict) -> bool:
     return _zhipu_credentials(gv, merged) is not None
 
 
-def _image_to_data_url(image_path: str) -> Optional[str]:
-    """将本地图片转为 data URL（base64），供多模态 API 使用。"""
+def _image_to_data_url(image_path: str, max_dim: Optional[int] = None) -> Optional[str]:
+    """将本地图片转为 data URL（base64），供多模态 API 使用。
+    max_dim: 若非 None，将图片缩放使最长边 ≤ max_dim，并以 JPEG 输出（减少本地 VLM 内存压力）。
+    """
     path = Path(image_path)
     if not path.exists() or not path.is_file():
         return None
     try:
         raw = path.read_bytes()
-        if len(raw) > 5 * 1024 * 1024:  # 5MB
+        if len(raw) > 10 * 1024 * 1024:  # 10MB hard limit
             return None
+        if max_dim is not None:
+            try:
+                import io
+                from PIL import Image as _PILImage
+                img = _PILImage.open(io.BytesIO(raw)).convert("RGB")
+                w, h = img.size
+                if max(w, h) > max_dim:
+                    scale = max_dim / max(w, h)
+                    img = img.resize((int(w * scale), int(h * scale)), _PILImage.LANCZOS)
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=85)
+                raw = buf.getvalue()
+                b64 = base64.b64encode(raw).decode("ascii")
+                return f"data:image/jpeg;base64,{b64}"
+            except Exception:
+                pass  # fall through to original encoding
         b64 = base64.b64encode(raw).decode("ascii")
         suffix = path.suffix.lower()
         mime = "image/jpeg"
@@ -160,7 +178,10 @@ class VisionClient:
     ) -> Optional[str]:
         if not self._oa_sync:
             return None
-        data_url = _image_to_data_url(image_path)
+        max_dim = self.config.get("max_image_dim")
+        if max_dim is None:
+            max_dim = 800  # default: resize to 800px max for local VLMs
+        data_url = _image_to_data_url(image_path, max_dim=int(max_dim))
         if not data_url:
             self.logger.warning("图片转 base64 失败或文件过大")
             return None
@@ -181,7 +202,7 @@ class VisionClient:
                         ],
                     }
                 ],
-                max_tokens=1024,
+                max_tokens=int(self.config.get("max_tokens") or 300),
             )
             if resp and getattr(resp, "choices", None) and len(resp.choices) > 0:
                 content = getattr(resp.choices[0].message, "content", None)

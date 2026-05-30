@@ -44,8 +44,9 @@ class TestStartStopIdempotent:
                 _cfg(tmp_path / "c.db", decay_interval_minutes=5), CFG_DIR)
             try:
                 sub.start_background_tasks()
+                n_first = len(sub._bg_tasks)
                 sub.start_background_tasks()    # 第二次是 no-op
-                assert len(sub._bg_tasks) == 1
+                assert len(sub._bg_tasks) == n_first  # 幂等：数量不变
                 # close 会自动 stop；允许任务被 cancel
                 tasks_snapshot = list(sub._bg_tasks)
             finally:
@@ -62,10 +63,12 @@ class TestStartStopIdempotent:
     def test_disabled_when_interval_zero(self, tmp_path):
         async def scenario():
             sub = bootstrap_contacts_subsystem(
-                _cfg(tmp_path / "c.db", decay_interval_minutes=0), CFG_DIR)
+                _cfg(tmp_path / "c.db",
+                     decay_interval_minutes=0,
+                     kpi_alert_interval_minutes=0), CFG_DIR)
             try:
                 sub.start_background_tasks()
-                assert sub._bg_tasks == [], "interval=0 时不应启动后台任务"
+                assert sub._bg_tasks == [], "两个 interval=0 时不应启动任何后台任务"
             finally:
                 sub.close()
         asyncio.run(scenario())

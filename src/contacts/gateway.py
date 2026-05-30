@@ -321,6 +321,18 @@ class ContactGateway:
                          "first_text_replay": True},
                 trace_id=trace_id,
             )
+            # W3-3A.1：LINE 后续 inbound 也走 on_line_first_text（runner 不区分首/后续），
+            # 必须刷新 intimacy_score；否则 LINE 渠道首条之后 score 永远定格。
+            if self._intimacy_engine is not None:
+                try:
+                    self._intimacy_engine.refresh_journey_intimacy(
+                        ctx.journey.journey_id,
+                    )
+                except Exception:
+                    logger.debug(
+                        "refresh_journey_intimacy failed for journey=%s (line replay)",
+                        ctx.journey.journey_id, exc_info=True,
+                    )
             logger.debug(
                 "on_line_first_text replay ignored for ci=%s (already merged/handled)",
                 ctx.channel_identity.channel_identity_id,
@@ -337,6 +349,19 @@ class ContactGateway:
             payload={"preview": (text or "")[:120]},
             trace_id=trace_id,
         )
+        # W3-3A.1：补 IntimacyEngine 刷新 — 与 on_message(direction='in') 对齐
+        # 之前 LINE 入库不刷新 score 是 silent gap，会让 companion_relationship 融合
+        # 在 LINE 渠道上完全无效（score 永远 0）。
+        if self._intimacy_engine is not None:
+            try:
+                self._intimacy_engine.refresh_journey_intimacy(
+                    ctx.journey.journey_id,
+                )
+            except Exception:
+                logger.debug(
+                    "refresh_journey_intimacy failed for journey=%s (line)",
+                    ctx.journey.journey_id, exc_info=True,
+                )
 
         # 路径 1：token 合并
         candidates = self._handoff.extract_candidates(text or "")

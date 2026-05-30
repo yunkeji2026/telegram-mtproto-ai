@@ -1,6 +1,20 @@
 """
 陪伴关系阶段（conversion 域）：持久化于 user_context.companion_relationship[chat_key]，
 供 AI 提示注入与回复后演进。
+
+W2-D1（2026-05-17）：与 contacts/IntimacyEngine 融合
+─────────────────────────────────────────────────────────────────
+两套关系模型并存且互补：
+  - **exchange_count**（本模块）：助手已完成轮数；驱动「升阶」
+  - **IntimacyEngine.intimacy_score**：含 mutuality / recency / silence_decay 的复合分
+
+融合策略（``fuse_with_intimacy``）：
+  1. 仅在 ``exchange_count >= initial_to_warming`` 阈值后启用（避免新用户被错降）
+  2. ``effective_stage = min(raw_stage, intimacy_stage)`` —— 永远只降不升
+  3. 长沉默 → IntimacyEngine 的 silence_decay 自动把 score 衰减 → 触发 reunion
+     → AI prompt 加「好久不见，自然问候」提示，避免直接接旧梗
+
+设计要点：可选增强，未传 ``intimacy_score`` 时行为完全等同旧版（向后兼容）。
 """
 
 from __future__ import annotations
@@ -16,6 +30,14 @@ STAGE_LABEL_ZH = {
     "warming": "试探/升温",
     "intimate": "暧昧陪伴",
     "steady": "稳定陪伴",
+}
+
+# ── intimacy_score → stage 的默认阈值（与 IntimacyEngine 0-100 对齐） ──
+# 与 ai_studio.html 关系看板 / IntimacyEngine 文档 / contacts.journey 保持一致。
+INTIMACY_BAND_DEFAULTS: Dict[str, float] = {
+    "to_warming": 25.0,   # 0-25 → initial
+    "to_intimate": 55.0,  # 25-55 → warming
+    "to_steady": 80.0,    # 55-80 → intimate, 80+ → steady
 }
 
 
@@ -218,27 +240,116 @@ def build_natural_dialogue_prompt_addon(
     return "\n".join(lines)
 
 
+def derive_stage_from_intimacy(
+    score: Optional[float],
+    bands: Optional[Dict[str, float]] = None,
+) -> Optional[str]:
+    """把 IntimacyEngine 的 0-100 score 映射到 STAGE_ORDER 中的阶段。
+
+    None → None（无信号，调用方应回退）。bands 可覆盖默认阈值。
+    """
+    if score is None:
+        return None
+    try:
+        s = float(score)
+    except (TypeError, ValueError):
+        return None
+    b = dict(INTIMACY_BAND_DEFAULTS)
+    if isinstance(bands, dict):
+        for k in ("to_warming", "to_intimate", "to_steady"):
+            if k in bands:
+                try:
+                    b[k] = float(bands[k])
+                except (TypeError, ValueError):
+                    pass
+    if s >= b["to_steady"]:
+        return "steady"
+    if s >= b["to_intimate"]:
+        return "intimate"
+    if s >= b["to_warming"]:
+        return "warming"
+    return "initial"
+
+
+def fuse_with_intimacy(
+    raw_stage: str,
+    exchange_count: int,
+    intimacy_score: Optional[float],
+    companion_cfg: Dict[str, Any],
+) -> Tuple[str, bool]:
+    """融合 raw（轮次推）阶段与 intimacy（衰减分）阶段。
+
+    返回 (effective_stage, reunion_flag)：
+      - effective_stage = min(raw, intimacy)，仅在 exchange_count 已过 warming 阈值后启用
+      - reunion_flag = True 当 effective 比 raw 至少低 1 阶（用户长沉默后回归）
+
+    intimacy_score=None 或 fusion 关闭 → effective=raw, reunion=False（向后兼容）。
+    """
+    fusion_cfg = (companion_cfg.get("intimacy_fusion") or {}) if companion_cfg else {}
+    if not fusion_cfg.get("enabled", True) or intimacy_score is None:
+        return raw_stage, False
+    raw = raw_stage if raw_stage in STAGE_ORDER else "initial"
+    # 新用户保护：未过 warming 阈值前不让 intimacy 把 stage 拉低于 raw
+    th = _thresholds(companion_cfg)
+    if int(exchange_count or 0) < th["to_warming"]:
+        return raw, False
+    intim_stage = derive_stage_from_intimacy(
+        intimacy_score, fusion_cfg.get("intimacy_bands"),
+    )
+    if intim_stage is None:
+        return raw, False
+    raw_idx = STAGE_ORDER.index(raw)
+    intim_idx = STAGE_ORDER.index(intim_stage)
+    eff_idx = min(raw_idx, intim_idx)
+    effective = STAGE_ORDER[eff_idx]
+    reunion = (raw_idx - eff_idx) >= 1
+    return effective, reunion
+
+
 def build_relationship_prompt_block(
     st: Dict[str, Any],
     companion_cfg: Dict[str, Any],
     *,
     ai_name: str = "",
     user_message: str = "",
+    intimacy_score: Optional[float] = None,
 ) -> str:
-    """注入到 AI 上下文的短提示（中文为主；非中文会话仍给中文指令由多语言规则覆盖）。"""
+    """注入到 AI 上下文的短提示（中文为主；非中文会话仍给中文指令由多语言规则覆盖）。
+
+    W2-D1：可选 ``intimacy_score`` 启用「轮次×衰减」双信号融合：
+      - 长沉默后回归会自动降阶并加 reunion 提示
+      - 未传 ``intimacy_score`` 时行为完全等同旧版
+    """
     if not companion_cfg.get("enabled", True):
         return ""
-    stage = (st.get("stage") or "initial").strip()
+    raw_stage = (st.get("stage") or "initial").strip()
+    if raw_stage not in STAGE_ORDER:
+        raw_stage = "initial"
+    ex = int(st.get("exchange_count", 0) or 0)
+
+    effective_stage, reunion = fuse_with_intimacy(
+        raw_stage, ex, intimacy_score, companion_cfg,
+    )
+
     stages = companion_cfg.get("stages") or {}
-    custom = (stages.get(stage) or {}) if isinstance(stages, dict) else {}
+    custom = (stages.get(effective_stage) or {}) if isinstance(stages, dict) else {}
     zh = (custom.get("zh") or "").strip() if isinstance(custom, dict) else ""
     if not zh:
-        zh = _default_stage_hint_zh(stage, ai_name)
-    ex = int(st.get("exchange_count", 0) or 0)
-    label = STAGE_LABEL_ZH.get(stage, stage)
-    core = (
-        f"【关系阶段 · {label}】累计有效互动约 {ex} 轮（助手侧计数）。{zh}"
-    )
+        zh = _default_stage_hint_zh(effective_stage, ai_name)
+    label = STAGE_LABEL_ZH.get(effective_stage, effective_stage)
+
+    if reunion:
+        raw_label = STAGE_LABEL_ZH.get(raw_stage, raw_stage)
+        score_str = f"{float(intimacy_score):.0f}" if intimacy_score is not None else "?"
+        core = (
+            f"【关系阶段 · {label}（曾达 {raw_label}，因长时间沉默自动降级）】"
+            f"累计互动 {ex} 轮，但近期亲密度仅 {score_str}/100。"
+            f"对方很久没主动找你了——本轮先自然问候、像久违的朋友重逢，"
+            f"不要直接接上次的话题或撒娇梗；先确认「最近怎么样」并给对方主导节奏。{zh}"
+        )
+    else:
+        core = f"【关系阶段 · {label}】累计有效互动约 {ex} 轮（助手侧计数）。{zh}"
+
     addon = build_natural_dialogue_prompt_addon(
         st, companion_cfg, user_message=user_message
     )

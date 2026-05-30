@@ -550,6 +550,70 @@ class ConfigManager:
                 tmp.unlink(missing_ok=True)
             return False, f"保存失败: {e}"
 
+    # ── Personas canonical config (personas.yaml) ────────────────────────────
+
+    _personas_cache: Optional[Dict[str, Any]] = None
+    _personas_mtime: float = 0
+
+    def get_personas_config(self) -> Dict[str, Any]:
+        """加载 personas.yaml（运营人设规范定义），mtime 驱动热更新。
+        不存在时返回空 dict（无报警，因为是可选文件）。
+        """
+        path = self.config_path.parent / "personas.yaml"
+        if not path.exists():
+            return {}
+        try:
+            mtime = os.path.getmtime(path)
+            if self._personas_cache is not None and mtime <= self._personas_mtime:
+                return self._personas_cache
+            with open(path, "r", encoding="utf-8") as f:
+                self._personas_cache = yaml.safe_load(f) or {}
+            self._personas_mtime = mtime
+            n = len((self._personas_cache.get("profiles") or {}))
+            self.logger.info("personas.yaml 已加载: %d 个 profiles", n)
+            return self._personas_cache
+        except Exception as e:
+            self.logger.warning("加载 personas.yaml 失败: %s", e)
+            return self._personas_cache if self._personas_cache is not None else {}
+
+    def save_personas(self, data: Dict[str, Any]) -> tuple:
+        """将运营人设写入 personas.yaml（P5-C: atomic write, git-trackable canonical config）。
+        data 格式: {"profiles": {pid: persona_dict, ...}, "updated_at": "..."}
+        返回 (成功?, 说明)
+        """
+        path = self.config_path.parent / "personas.yaml"
+        tmp = path.with_suffix(".yaml.tmp")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(tmp, "w", encoding="utf-8") as f:
+                yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+            with open(tmp, "r", encoding="utf-8") as f:
+                yaml.safe_load(f)  # validate before replacing
+            # P8-A: rotate previous version to .bak (one-step manual undo)
+            bak = path.with_suffix(".yaml.bak")
+            if path.exists():
+                try:
+                    path.replace(bak)
+                except Exception:
+                    pass
+            tmp.replace(path)
+            self._personas_cache = None
+            self._personas_mtime = 0
+            n = len((data.get("profiles") or {}))
+            self.logger.info("personas.yaml 已保存: %d 个 profiles", n)
+            return True, f"personas.yaml 已保存 ({n} 个 profiles)"
+        except Exception as e:
+            self.logger.warning("保存 personas.yaml 失败: %s", e)
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return False, f"保存失败: {e}"
+
+    def get_personas_file_path(self) -> Optional[Path]:
+        """返回 personas.yaml 的路径（不论是否存在）。"""
+        return self.config_path.parent / "personas.yaml"
+
     def save_exchange_rates(self, data: Dict[str, Any]) -> tuple:
         """写入 exchange_rates.yaml 并刷新缓存。返回 (成功?, 说明)"""
         path = self._get_exchange_rates_file_path()

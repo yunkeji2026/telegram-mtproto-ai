@@ -1,0 +1,1574 @@
+{% extends "base.html" %}
+{% block title %}Telegram 设置{% endblock %}
+{% block content %}
+{# ══════════════════════════════════════════════════════════════════ #}
+{# 统一 RPA 组件库（4 平台共用）—— Telegram 是视觉基线                  #}
+{# Telegram 自家 .tg-* 类名保留兼容；新加面板可直接用 .rpa-* 类         #}
+{# ══════════════════════════════════════════════════════════════════ #}
+{% include "_rpa_shared_styles.html" %}
+{% include "_rpa_shared_scripts.html" %}
+<!-- ═══════════════════════════════════════════ NEW DESIGN ════ -->
+<style>
+/* ─── Hero Card ───────────────────────────────────────────────── */
+.tg-hero{display:flex;align-items:center;gap:1.2rem;background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:1.1rem 1.4rem;margin-bottom:1.3rem;flex-wrap:wrap}
+.tg-hero-avatar{width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#229ed9,#1a7abf);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.tg-hero-avatar svg{width:26px;height:26px;stroke:#fff}
+.tg-hero-info{flex:1;min-width:160px}
+.tg-hero-name{font-weight:700;font-size:1rem;color:var(--t);display:flex;align-items:center;gap:.55rem}
+.tg-hero-sub{font-size:.78rem;color:var(--t3);margin-top:.15rem}
+.tg-online-dot{width:9px;height:9px;border-radius:50%;background:var(--green);flex-shrink:0;box-shadow:0 0 0 2px rgba(34,197,94,.25)}
+.tg-online-dot.offline{background:var(--t3);box-shadow:none}
+.tg-stats{display:flex;gap:.7rem;flex-wrap:wrap;margin-left:auto}
+.tg-stat{display:flex;flex-direction:column;align-items:center;background:var(--input);border:1px solid var(--bd);border-radius:10px;padding:.45rem .9rem;min-width:64px}
+.tg-stat-n{font-size:1.25rem;font-weight:800;color:var(--p);line-height:1.1}
+.tg-stat-l{font-size:.68rem;color:var(--t3);margin-top:.1rem;white-space:nowrap}
+.tg-hero-refresh{padding:.4rem .7rem;border:1px solid var(--bd2);border-radius:8px;background:var(--input);color:var(--t3);cursor:pointer;font-size:.75rem;transition:all .15s;align-self:flex-start;margin-left:.3rem}
+.tg-hero-refresh:hover{color:var(--p);border-color:var(--p)}
+
+/* ─── Tab bar ─────────────────────────────────────────────────── */
+.st-bar{display:flex;gap:.25rem;border-bottom:2px solid var(--bd);margin-bottom:1.3rem;flex-wrap:wrap}
+.st-tab{position:relative;padding:.55rem 1.15rem;border-radius:8px 8px 0 0;font-size:.875rem;font-weight:600;color:var(--t2);cursor:pointer;border:none;background:transparent;transition:all .15s;bottom:-2px;border-bottom:2px solid transparent}
+.st-tab:hover{color:var(--t);background:var(--input)}
+.st-tab.active{color:var(--p);border-bottom:2px solid var(--p);background:var(--card)}
+.st-tab .tab-dot{display:none;position:absolute;top:7px;right:8px;width:7px;height:7px;border-radius:50%;background:#f59e0b}
+.st-tab.dirty .tab-dot{display:block}
+.st-pane{display:none}.st-pane.active{display:block}
+
+/* ─── Cards ───────────────────────────────────────────────────── */
+.tg-card{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:1.3rem 1.5rem;margin-bottom:1rem}
+.tg-card-header{display:flex;align-items:center;gap:.7rem;margin-bottom:1rem}
+.tg-card-icon{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1rem;flex-shrink:0}
+.tg-card-icon.blue{background:rgba(34,158,217,.15)}
+.tg-card-icon.green{background:rgba(34,197,94,.12)}
+.tg-card-icon.purple{background:rgba(139,92,246,.12)}
+.tg-card-title{font-size:.95rem;font-weight:700;color:var(--t)}
+.tg-card-desc{font-size:.78rem;color:var(--t3);margin-left:auto}
+.tg-sect-div{border-top:1px solid var(--bd);margin:1rem 0}
+
+/* ─── Fields ──────────────────────────────────────────────────── */
+.f-row{display:flex;flex-direction:column;gap:.3rem;margin-bottom:.9rem}
+.f-lbl{font-size:.8rem;font-weight:600;color:var(--t2);display:flex;align-items:center;gap:.5rem}
+.f-inp{padding:.52rem .8rem;border:1px solid var(--bd2);border-radius:8px;background:var(--input);color:var(--t);font-size:.875rem;width:100%;box-sizing:border-box;transition:border .15s}
+.f-inp:focus{outline:none;border-color:var(--p);box-shadow:0 0 0 3px var(--ps)}
+.f-hint{font-size:.75rem;color:var(--t3);margin-top:.15rem}
+.f-hint a{color:var(--p);text-decoration:none}
+select.f-inp{cursor:pointer}
+.f-grid2{display:grid;grid-template-columns:1fr 1fr;gap:.75rem}
+@media(max-width:520px){.f-grid2{grid-template-columns:1fr}}
+.f-dur{font-size:.75rem;font-weight:600;color:var(--p);margin-left:.4rem}
+
+/* ─── Toggle ──────────────────────────────────────────────────── */
+.tg-toggle{display:flex;align-items:center;gap:.75rem;cursor:pointer;user-select:none}
+.tg-toggle input[type=checkbox]{display:none}
+.tg-sw{width:42px;height:24px;background:var(--bd2);border-radius:12px;position:relative;transition:background .2s;flex-shrink:0}
+.tg-toggle input:checked + .tg-sw{background:var(--p)}
+.tg-sw::after{content:'';position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+.tg-toggle input:checked + .tg-sw::after{transform:translateX(18px)}
+.tg-toggle-lbl{font-size:.875rem;font-weight:600;color:var(--t)}
+
+/* ─── Provider / Backend visual cards ────────────────────────── */
+.be-cards{display:flex;gap:.6rem;flex-wrap:wrap;margin:.4rem 0 .8rem}
+.be-card{flex:1;min-width:120px;max-width:180px;padding:.75rem 1rem;border:1.5px solid var(--bd2);border-radius:11px;cursor:pointer;transition:all .15s;background:var(--input);text-align:center}
+.be-card:hover{border-color:var(--p);background:var(--card)}
+.be-card.selected{border-color:var(--p);background:var(--ps)}
+.be-card-icon{font-size:1.4rem;margin-bottom:.3rem}
+.be-card-name{font-size:.82rem;font-weight:700;color:var(--t)}
+.be-card.selected .be-card-name{color:var(--p)}
+.be-card-desc{font-size:.7rem;color:var(--t3);margin-top:.15rem;line-height:1.35}
+
+/* ─── Trigger mode cards ─────────────────────────────────────── */
+.tr-cards{display:flex;gap:.55rem;flex-wrap:wrap;margin:.35rem 0}
+.tr-card{padding:.6rem .9rem;border:1.5px solid var(--bd2);border-radius:10px;cursor:pointer;background:var(--input);transition:all .15s;min-width:120px}
+.tr-card:hover{border-color:var(--p)}
+.tr-card.selected{border-color:var(--p);background:var(--ps)}
+.tr-card-top{display:flex;align-items:center;gap:.4rem;font-size:.82rem;font-weight:700;color:var(--t)}
+.tr-card.selected .tr-card-top{color:var(--p)}
+.tr-card-sub{font-size:.7rem;color:var(--t3);margin-top:.2rem}
+
+/* ─── Prob slider ─────────────────────────────────────────────── */
+.prob-row{display:flex;align-items:center;gap:.8rem}
+.prob-row input[type=range]{flex:1;accent-color:var(--p)}
+.prob-val{min-width:38px;font-size:.82rem;font-weight:700;color:var(--p);text-align:right}
+
+/* ─── Save bar ────────────────────────────────────────────────── */
+.save-bar{display:flex;align-items:center;gap:.75rem;margin-top:1rem;padding-top:.9rem;border-top:1px solid var(--bd);flex-wrap:wrap}
+.save-res{font-size:.8rem;color:var(--t3)}.save-res.ok{color:var(--green)}.save-res.err{color:var(--red)}
+.btn-p{background:var(--g);color:#fff;border:none;padding:.52rem 1.25rem;border-radius:9px;font-size:.875rem;font-weight:600;cursor:pointer;transition:opacity .15s;display:flex;align-items:center;gap:.4rem}
+.btn-p:hover{opacity:.87}
+.btn-p:disabled{opacity:.5;cursor:default}
+.btn-sec{background:var(--input);color:var(--t2);border:1px solid var(--bd2);padding:.5rem 1.1rem;border-radius:9px;font-size:.82rem;font-weight:600;cursor:pointer;transition:all .15s}
+.btn-sec:hover{border-color:var(--p);color:var(--p)}
+
+/* ─── Preview audio row ───────────────────────────────────────── */
+.preview-row{display:flex;gap:.6rem;align-items:center;margin-top:.7rem}
+.preview-row input{flex:1}
+.preview-audio{width:100%;margin-top:.5rem;display:none}
+.preview-audio.show{display:block}
+
+/* ─── Key badge ───────────────────────────────────────────────── */
+.key-badge{display:inline-flex;align-items:center;gap:.2rem;font-size:.7rem;background:rgba(34,197,94,.12);color:#16a34a;border-radius:6px;padding:.1rem .4rem;font-weight:600}
+
+/* ─── Account stat badges ─────────────────────────────────────── */
+.cfg-badge{display:inline-flex;align-items:center;gap:.3rem;font-size:.75rem;font-weight:600;padding:.2rem .55rem;border-radius:20px}
+.cfg-badge.on{background:rgba(34,197,94,.12);color:#16a34a}
+.cfg-badge.off{background:var(--input);color:var(--t3);border:1px solid var(--bd)}
+
+/* ─── Sub-section header ─────────────────────────────────────── */
+.sub-hd{font-size:.78rem;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.05em;margin:1rem 0 .7rem;display:flex;align-items:center;gap:.5rem}
+.sub-hd::after{content:'';flex:1;height:1px;background:var(--bd)}
+
+/* ─── Health banner ──────────────────────────────────────────── */
+.hb-wrap{display:none;flex-direction:column;gap:.4rem;margin-bottom:1rem}
+.hb-wrap.show{display:flex}
+.hb-item{display:flex;align-items:flex-start;gap:.6rem;padding:.55rem .85rem;border-radius:9px;font-size:.8rem;font-weight:500}
+.hb-item.error{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.25);color:#dc2626}
+.hb-item.warning{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.25);color:#b45309}
+.hb-item.ok{background:rgba(34,197,94,.09);border:1px solid rgba(34,197,94,.2);color:#15803d}
+.hb-icon{flex-shrink:0;margin-top:.05rem}
+
+/* ─── Preset popover ─────────────────────────────────────────── */
+.preset-wrap{position:relative;display:inline-block}
+.preset-pop{position:absolute;top:calc(100% + 6px);right:0;background:var(--card);border:1px solid var(--bd);border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.15);padding:.5rem;min-width:220px;z-index:200;display:none}
+.preset-pop.open{display:block}
+.preset-btn-item{width:100%;text-align:left;padding:.6rem .85rem;border:none;border-radius:8px;background:transparent;cursor:pointer;font-size:.82rem;color:var(--t);transition:background .12s;display:flex;align-items:center;gap:.6rem}
+.preset-btn-item:hover{background:var(--input)}
+.preset-btn-item .pi{font-size:1.1rem;width:1.4rem;text-align:center}
+.preset-divider{height:1px;background:var(--bd);margin:.25rem 0}
+.preset-lbl{font-size:.7rem;color:var(--t3);padding:.3rem .85rem .1rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+
+/* ─── Log tail ───────────────────────────────────────────────── */
+.log-wrap{background:var(--input);border:1px solid var(--bd);border-radius:8px;max-height:280px;overflow-y:auto;font-family:monospace;font-size:.75rem;padding:.5rem .75rem}
+.log-line{padding:.18rem 0;border-bottom:1px solid rgba(128,128,128,.08);display:flex;gap:.6rem;align-items:baseline}
+.log-ts{color:var(--t3);flex-shrink:0;white-space:nowrap}
+.log-msg{flex:1;word-break:break-word;line-height:1.4}
+.log-line.INFO .log-msg{color:var(--t2)}
+.log-line.WARNING .log-msg{color:#b45309}
+.log-line.ERROR .log-msg{color:#dc2626}
+.log-line.voice_sent .log-msg{color:#16a34a;font-weight:600}
+.log-empty{color:var(--t3);font-size:.78rem;padding:.5rem}
+.log-toolbar{display:flex;align-items:center;gap:.6rem;margin-bottom:.5rem}
+.log-live-dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+/* ─── WAV quality card ────────────────────────────────────────── */
+.qc-wrap{margin-top:.6rem;padding:.65rem .85rem;border-radius:9px;font-size:.78rem}
+.qc-wrap.ok{background:rgba(34,197,94,.09);border:1px solid rgba(34,197,94,.2)}
+.qc-wrap.warning{background:rgba(245,158,11,.09);border:1px solid rgba(245,158,11,.25)}
+.qc-wrap.error{background:rgba(239,68,68,.09);border:1px solid rgba(239,68,68,.25)}
+.qc-title{font-weight:700;margin-bottom:.35rem}
+.qc-item{display:flex;gap:.4rem;padding:.1rem 0}
+.qc-item.ok .qi{color:#16a34a}
+.qc-item.warning .qi{color:#b45309}
+.qc-item.error .qi{color:#dc2626}
+
+/* ─── Snapshot list ─────────────────────────────────────────── */
+.snap-row{display:flex;align-items:center;gap:.6rem;padding:.45rem .6rem;border-bottom:1px solid var(--bd);font-size:.8rem}
+.snap-row:last-child{border-bottom:none}
+.snap-ts{flex:1;color:var(--t2);font-family:monospace}
+.snap-lbl{font-size:.7rem;background:var(--input);padding:.1rem .4rem;border-radius:10px;color:var(--t3)}
+.snap-empty{color:var(--t3);font-size:.8rem;padding:.4rem}
+
+/* ─── Modal overlay ────────────────────────────────────────────── */
+.modal-ov{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:600;display:none;align-items:center;justify-content:center;padding:1rem}
+.modal-ov.open{display:flex}
+.modal-box{background:var(--card);border-radius:16px;border:1px solid var(--bd);width:100%;max-width:540px;max-height:82vh;display:flex;flex-direction:column;box-shadow:0 24px 60px rgba(0,0,0,.3)}
+.modal-hdr{display:flex;align-items:center;justify-content:space-between;padding:1.1rem 1.4rem .8rem;border-bottom:1px solid var(--bd);flex-shrink:0}
+.modal-title{font-size:.95rem;font-weight:700;color:var(--t)}
+.modal-cls{border:none;background:transparent;font-size:1.2rem;cursor:pointer;color:var(--t2);width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center}
+.modal-cls:hover{background:var(--input);color:var(--t)}
+.modal-body{padding:1rem 1.4rem;overflow-y:auto;flex:1}
+
+/* ─── Upload area ────────────────────────────────────────────── */
+.upload-area{border:2px dashed var(--bd2);border-radius:10px;padding:1.2rem 1rem;text-align:center;cursor:pointer;transition:all .15s;margin-bottom:.9rem;color:var(--t2);font-size:.82rem}
+.upload-area:hover,.upload-area.drag-over{border-color:var(--p);background:rgba(99,102,241,.06);color:var(--p)}
+.upload-area .ua-icon{font-size:1.8rem;display:block;margin-bottom:.3rem}
+.upload-area .ua-hint{font-size:.72rem;color:var(--t3);margin-top:.25rem}
+.upload-status{font-size:.8rem;margin-bottom:.7rem;min-height:1.2rem;color:var(--t2)}
+
+/* ─── Voice file list ─────────────────────────────────────────── */
+.vf-list{display:flex;flex-direction:column;gap:.4rem}
+.vf-item{display:flex;align-items:center;gap:.6rem;padding:.55rem .75rem;border:1px solid var(--bd);border-radius:9px;transition:border-color .12s}
+.vf-item:hover{border-color:var(--p)}
+.vf-icon{font-size:1.1rem;flex-shrink:0}
+.vf-name{flex:1;font-size:.82rem;font-weight:600;word-break:break-all}
+.vf-sz{font-size:.72rem;color:var(--t3);flex-shrink:0}
+.vf-acts{display:flex;gap:.3rem;flex-shrink:0}
+.vf-empty{color:var(--t3);font-size:.8rem;padding:.6rem;text-align:center}
+
+/* ─── Contact chips ───────────────────────────────────────────── */
+.contact-pane{display:none;margin-top:.5rem;padding:.75rem;background:var(--input);border:1px solid var(--bd);border-radius:8px}
+.contact-pane.open{display:block}
+.contact-chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.5rem}
+.chip{display:inline-flex;align-items:center;gap:.3rem;padding:.25rem .55rem;border-radius:20px;font-size:.75rem;font-weight:600;border:1px solid var(--bd);background:var(--card);cursor:default}
+.chip.blocked{background:rgba(239,68,68,.09);border-color:rgba(239,68,68,.25);color:#dc2626}
+.chip-add{background:transparent;border:none;cursor:pointer;color:var(--p);font-size:.9rem;padding:.05rem;line-height:1}
+.chip-add:hover{color:var(--p2)}
+.contact-loading{font-size:.78rem;color:var(--t3)}
+</style>
+
+<!-- ══ HERO ════════════════════════════════════════════════════════ -->
+<div class="tg-hero">
+  <div class="tg-hero-avatar">
+    <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22 11 13 2 9l20-7z"/></svg>
+  </div>
+  <div class="tg-hero-info">
+    <div class="tg-hero-name">
+      <span class="tg-online-dot offline" id="h-dot"></span>
+      <span id="h-name">加载中…</span>
+    </div>
+    <div class="tg-hero-sub" id="h-sub">正在连接…</div>
+  </div>
+  <div class="tg-stats">
+    <div class="tg-stat"><span class="tg-stat-n" id="st-msg">—</span><span class="tg-stat-l">今日消息</span></div>
+    <div class="tg-stat"><span class="tg-stat-n" id="st-vin">—</span><span class="tg-stat-l">语音接收</span></div>
+    <div class="tg-stat"><span class="tg-stat-n" id="st-tts">—</span><span class="tg-stat-l">TTS 发送</span></div>
+  </div>
+  <button class="tg-hero-refresh" onclick="loadAccountInfo()" title="刷新状态">↻</button>
+  <div class="preset-wrap">
+    <button class="btn-sec" id="preset-toggle" onclick="togglePresets(event)" style="font-size:.78rem;padding:.38rem .7rem">
+      📋 预设
+    </button>
+    <div class="preset-pop" id="preset-pop">
+      <div class="preset-lbl">应用场景预设（不保存，需手动点保存）</div>
+      <div class="preset-divider"></div>
+      <button class="preset-btn-item" onclick="applyPreset('companion')">
+        <span class="pi">🤗</span><div>
+          <div style="font-weight:700">陈伴型对话</div>
+          <div style="font-size:.7rem;color:var(--t3)">克隆声音·仅语音触发·冷却 60s</div>
+        </div>
+      </button>
+      <button class="preset-btn-item" onclick="applyPreset('service')">
+        <span class="pi">💬</span><div>
+          <div style="font-weight:700">高效客服型</div>
+          <div style="font-size:.7rem;color:var(--t3)">纯文字·本地 ASR·冷却 10s</div>
+        </div>
+      </button>
+      <button class="preset-btn-item" onclick="applyPreset('voice_all')">
+        <span class="pi">🎤</span><div>
+          <div style="font-weight:700">全语音互动</div>
+          <div style="font-size:.7rem;color:var(--t3)">Edge TTS·始终语音·冷却 5s</div>
+        </div>
+      </button>
+      <button class="preset-btn-item" onclick="applyPreset('text_only')">
+        <span class="pi">📝</span><div>
+          <div style="font-weight:700">纯文字模式</div>
+          <div style="font-size:.7rem;color:var(--t3)">关闭 TTS·保留 ASR 识别</div>
+        </div>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ TABS ═══════════════════════════════════════════════════════════════ -->
+<div class="st-bar">
+  <button class="st-tab active" id="tab-reply" onclick="switchTab('reply')">
+    💬 消息处理<span class="tab-dot"></span>
+  </button>
+  <button class="st-tab" id="tab-voice" onclick="switchTab('voice')">
+    🎙️ 语音功能<span class="tab-dot"></span>
+  </button>
+  <button class="st-tab" id="tab-account" onclick="switchTab('account')">
+    👤 账号<span class="tab-dot"></span>
+  </button>
+  <button class="st-tab" id="tab-funnel" onclick="switchTab('funnel')">
+    📈 运营漏斗
+  </button>
+</div>
+
+<!-- ══════════════════════════ TAB: 消息处理 ═══════════════════ -->
+<div class="st-pane active" id="pane-reply">
+
+  <div class="tg-card">
+    <div class="tg-card-header">
+      <div class="tg-card-icon blue">📨</div>
+      <div>
+        <div class="tg-card-title">接收范围</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:2rem;flex-wrap:wrap">
+      <label class="tg-toggle">
+        <input type="checkbox" id="rl-process_private" onchange="markDirty('reply')">
+        <span class="tg-sw"></span><span class="tg-toggle-lbl">处理私聊</span>
+      </label>
+      <label class="tg-toggle">
+        <input type="checkbox" id="rl-process_groups" onchange="markDirty('reply')">
+        <span class="tg-sw"></span><span class="tg-toggle-lbl">处理群组消息</span>
+      </label>
+    </div>
+  </div>
+
+  <div class="tg-card">
+    <div class="tg-card-header">
+      <div class="tg-card-icon green">⚙️</div>
+      <div><div class="tg-card-title">回复逻辑</div></div>
+    </div>
+    <div class="f-grid2">
+      <div class="f-row">
+        <label class="f-lbl">
+          冷却时间（秒）
+          <span class="f-dur" id="rl-cooldown-dur"></span>
+        </label>
+        <input class="f-inp" type="number" id="rl-cooldown_seconds" min="0" max="86400"
+          placeholder="60" oninput="updateDur('rl-cooldown_seconds','rl-cooldown-dur');markDirty('reply')">
+        <span class="f-hint">同一用户两次回复的最小间隔，0 = 不限制</span>
+      </div>
+      <div class="f-row">
+        <label class="f-lbl">最大连续回复次数</label>
+        <input class="f-inp" type="number" id="rl-max_consecutive_replies" min="1" max="999"
+          placeholder="10" onchange="markDirty('reply')">
+        <span class="f-hint">超过后暂停自动回复</span>
+      </div>
+    </div>
+    <div style="display:flex;gap:2rem;flex-wrap:wrap;margin-top:.3rem">
+      <label class="tg-toggle">
+        <input type="checkbox" id="rl-reply_to_user_message" onchange="markDirty('reply')">
+        <span class="tg-sw"></span><span class="tg-toggle-lbl">回复时引用原消息</span>
+      </label>
+      <label class="tg-toggle">
+        <input type="checkbox" id="rl-ignore_edited" onchange="markDirty('reply')">
+        <span class="tg-sw"></span><span class="tg-toggle-lbl">忽略编辑过的消息</span>
+      </label>
+    </div>
+  </div>
+
+  <div class="tg-card">
+    <div class="tg-card-header">
+      <div class="tg-card-icon purple">🚫</div>
+      <div><div class="tg-card-title">屏蔽名单</div></div>
+    </div>
+    <div class="f-row">
+      <label class="f-lbl">不自动回复的用户名（每行一个，不含 @）</label>
+      <textarea class="f-inp" id="rl-no_reply_usernames" rows="4"
+        placeholder="bot_name&#10;spam_user" style="resize:vertical;font-family:monospace;font-size:.82rem"
+        oninput="markDirty('reply')"></textarea>
+      <span class="f-hint">命中此列表的用户名不会触发 AI 自动回复</span>
+      <div style="margin-top:.5rem">
+        <button class="btn-sec" style="font-size:.75rem;padding:.3rem .6rem" onclick="toggleRecentContacts()">
+          📄 从最近联系人添加 <span id="contact-toggle-icon">▾</span>
+        </button>
+        <div class="contact-pane" id="contact-pane">
+          <div style="font-size:.75rem;color:var(--t3);margin-bottom:.2rem">灰色=已屏蔽，点 + 可将用户名加入上方返回列表</div>
+          <div class="contact-chips" id="contact-chips"><span class="contact-loading">加载中…</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="save-bar">
+    <span class="save-res" id="save-res-rl"></span>
+    <span style="font-size:.75rem;color:var(--t3)">保存即热更新，无需重启</span>
+    <button class="btn-sec" onclick="resetReplyLogic()">重置</button>
+    <button class="btn-p" onclick="saveReplyLogic()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+      保存消息配置
+    </button>
+  </div>
+</div>
+
+<!-- ══════════════════════════ TAB: 语音功能 ════════════════════ -->
+<div class="st-pane" id="pane-voice">
+
+  <!-- ── 健康检查横幅 ─────────────────────────────────────── -->
+  <div class="hb-wrap" id="health-banner"></div>
+
+  <!-- ── 语音识别（接收）─────────────────────────────────── -->
+  <div class="tg-card">
+    <div class="tg-card-header">
+      <div class="tg-card-icon blue">📥</div>
+      <div>
+        <div class="tg-card-title">语音识别（接收用户语音）</div>
+        <div style="font-size:.75rem;color:var(--t3);margin-top:.1rem">将用户发来的语音消息转为文字，再由 AI 理解回复</div>
+      </div>
+      <label class="tg-toggle" style="margin-left:auto">
+        <input type="checkbox" id="asr-enabled" onchange="markDirty('voice')">
+        <span class="tg-sw"></span>
+      </label>
+    </div>
+
+    <div class="sub-hd">识别引擎</div>
+    <div class="be-cards" id="asr-be-cards">
+      <div class="be-card" data-val="faster_whisper" onclick="selectAsrProvider(this)">
+        <div class="be-card-icon">⚡</div>
+        <div class="be-card-name">本地快速</div>
+        <div class="be-card-desc">faster-whisper<br>无需 API，速度快</div>
+      </div>
+      <div class="be-card" data-val="whisper_local" onclick="selectAsrProvider(this)">
+        <div class="be-card-icon">🔬</div>
+        <div class="be-card-name">本地精准</div>
+        <div class="be-card-desc">OpenAI Whisper<br>精度更高，较慢</div>
+      </div>
+      <div class="be-card" data-val="openai" onclick="selectAsrProvider(this)">
+        <div class="be-card-icon">☁️</div>
+        <div class="be-card-name">云端 API</div>
+        <div class="be-card-desc">Groq / SiliconFlow<br>极速，需 API Key</div>
+      </div>
+    </div>
+    <input type="hidden" id="asr-provider" value="faster_whisper">
+
+    <div class="f-row">
+      <label class="f-lbl">识别语言</label>
+      <select class="f-inp" id="asr-language" onchange="markDirty('voice')" style="max-width:220px">
+        <option value="auto">🌐 自动检测</option>
+        <option value="zh">🇨🇳 中文</option>
+        <option value="ja">🇯🇵 日语</option>
+        <option value="en">🇺🇸 英语</option>
+        <option value="ko">🇰🇷 韩语</option>
+      </select>
+    </div>
+
+    <!-- 云端 API 配置 -->
+    <div id="asr-cloud-fields" style="display:none">
+      <div class="sub-hd">云端 API 配置</div>
+      <div class="f-row">
+        <label class="f-lbl">
+          API Key
+          <span class="key-badge" id="asr-key-badge" style="display:none">🔑 已配置</span>
+        </label>
+        <input class="f-inp" type="password" id="asr-api_key" placeholder="sk-..." onchange="markDirty('voice')">
+        <span class="f-hint">保存时留空则保留原密钥；填入新值则覆盖</span>
+      </div>
+      <div class="f-grid2">
+        <div class="f-row">
+          <label class="f-lbl">Base URL</label>
+          <input class="f-inp" type="text" id="asr-base_url" placeholder="https://api.groq.com/openai/v1" onchange="markDirty('voice')">
+          <span class="f-hint"><a href="https://console.groq.com" target="_blank">Groq</a> · <a href="https://siliconflow.cn" target="_blank">SiliconFlow</a></span>
+        </div>
+        <div class="f-row">
+          <label class="f-lbl">模型名</label>
+          <input class="f-inp" type="text" id="asr-model" placeholder="whisper-large-v3-turbo" onchange="markDirty('voice')">
+          <span class="f-hint">SiliconFlow: FunAudioLLM/SenseVoiceSmall</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 本地模型配置 -->
+    <div id="asr-local-fields">
+      <div class="sub-hd">本地模型配置</div>
+      <div class="f-grid2">
+        <div class="f-row">
+          <label class="f-lbl">模型大小</label>
+          <select class="f-inp" id="asr-model_size" onchange="markDirty('voice')">
+            <option value="tiny">tiny — 最快，精度低</option>
+            <option value="base">base — 均衡（推荐）</option>
+            <option value="small">small</option>
+            <option value="medium">medium</option>
+            <option value="large-v3">large-v3 — 最精准</option>
+          </select>
+        </div>
+        <div class="f-row">
+          <label class="f-lbl">推理设备</label>
+          <select class="f-inp" id="asr-device" onchange="markDirty('voice')">
+            <option value="cpu">CPU（通用）</option>
+            <option value="cuda">CUDA（NVIDIA GPU）</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 语音回复（发送）─────────────────────────────────── -->
+  <div class="tg-card">
+    <div class="tg-card-header">
+      <div class="tg-card-icon green">📤</div>
+      <div>
+        <div class="tg-card-title">语音回复（向用户发语音）</div>
+        <div style="font-size:.75rem;color:var(--t3);margin-top:.1rem">AI 回复通过 TTS 合成语音后发送，替代纯文字</div>
+      </div>
+      <label class="tg-toggle" style="margin-left:auto">
+        <input type="checkbox" id="vr-enabled" onchange="markDirty('voice')">
+        <span class="tg-sw"></span>
+      </label>
+    </div>
+
+    <div class="sub-hd">触发方式</div>
+    <div class="tr-cards" id="vr-trigger-cards">
+      <div class="tr-card" data-val="when_peer_voice" onclick="selectTrigger(this)">
+        <div class="tr-card-top">🎤 仅收到语音时</div>
+        <div class="tr-card-sub">对方发语音 → 我也语音回</div>
+      </div>
+      <div class="tr-card" data-val="always" onclick="selectTrigger(this)">
+        <div class="tr-card-top">🔊 始终回语音</div>
+        <div class="tr-card-sub">所有消息都用语音</div>
+      </div>
+      <div class="tr-card" data-val="random" onclick="selectTrigger(this)">
+        <div class="tr-card-top">🎲 随机概率</div>
+        <div class="tr-card-sub">按概率随机触发</div>
+      </div>
+      <div class="tr-card" data-val="never" onclick="selectTrigger(this)">
+        <div class="tr-card-top">🔇 关闭</div>
+        <div class="tr-card-sub">只发文字</div>
+      </div>
+    </div>
+    <input type="hidden" id="vr-trigger" value="when_peer_voice">
+
+    <div id="vr-prob-row" class="f-row" style="display:none;margin-top:.5rem">
+      <label class="f-lbl">随机触发概率</label>
+      <div class="prob-row">
+        <input type="range" id="vr-probability" min="0" max="100" value="30"
+          oninput="document.getElementById('vr-prob-val').textContent=this.value+'%';markDirty('voice')">
+        <span class="prob-val" id="vr-prob-val">30%</span>
+      </div>
+    </div>
+
+    <div class="sub-hd" style="margin-top:1.1rem">TTS 引擎</div>
+    <div class="be-cards" id="vr-be-cards">
+      <div class="be-card" data-val="voice_clone_command" onclick="selectTtsBackend(this)">
+        <div class="be-card-icon">🤖</div>
+        <div class="be-card-name">克隆声音</div>
+        <div class="be-card-desc">Qwen TTS<br>最自然，需参考音频</div>
+      </div>
+      <div class="be-card" data-val="edge_tts" onclick="selectTtsBackend(this)">
+        <div class="be-card-icon">🔵</div>
+        <div class="be-card-name">微软 Edge</div>
+        <div class="be-card-desc">多语言，完全免费<br>延迟低</div>
+      </div>
+      <div class="be-card" data-val="openai" onclick="selectTtsBackend(this)">
+        <div class="be-card-icon">🟢</div>
+        <div class="be-card-name">OpenAI TTS</div>
+        <div class="be-card-desc">高质量音色<br>需 API Key</div>
+      </div>
+    </div>
+    <input type="hidden" id="vr-backend" value="voice_clone_command">
+
+    <!-- 克隆声音配置 -->
+    <div id="vr-clone-fields">
+      <div class="sub-hd">克隆声音配置</div>
+      <div class="f-row">
+        <label class="f-lbl">参考音频文件路径 <span style="color:var(--red)">*</span></label>
+        <div style="display:flex;gap:.4rem;align-items:center">
+          <input class="f-inp" type="text" id="vr-reference_audio_path" style="flex:1"
+            placeholder="D:/workspace/voice_samples/my_voice.wav"
+            onchange="markDirty('voice')" oninput="checkRefAudio()">
+          <button class="btn-sec" onclick="openVoicePicker()" title="浏览语音文件" style="flex-shrink:0;white-space:nowrap;padding:.38rem .6rem">
+            📂 选择
+          </button>
+        </div>
+        <span class="f-hint" id="vr-ref-hint">WAV 格式，10–30 秒干净人声，用于声音克隆</span>
+      </div>
+      <div class="f-row">
+        <label class="f-lbl">声音配置文件路径（可选）</label>
+        <input class="f-inp" type="text" id="vr-voice_profile_path"
+          placeholder="D:/workspace/telegram-mtproto-ai/voice_samples/qwen_my_voice.json"
+          onchange="markDirty('voice')">
+        <span class="f-hint">qwen_tts_wrapper.py 生成的 JSON 文件</span>
+      </div>
+      <div class="f-grid2">
+        <div class="f-row">
+          <label class="f-lbl">克隆命令超时（秒）</label>
+          <input class="f-inp" type="number" id="vr-cmd_timeout" min="30" max="600" placeholder="120" onchange="markDirty('voice')">
+        </div>
+      </div>
+    </div>
+
+    <!-- 微软 Edge TTS 配置 -->
+    <div id="vr-edge-fields" style="display:none">
+      <div class="sub-hd">微软 Edge TTS 配置</div>
+      <div class="f-row">
+        <label class="f-lbl">声线</label>
+        <input class="f-inp" type="text" id="vr-voice" list="edge-voice-list"
+          placeholder="ja-JP-NanamiNeural" onchange="markDirty('voice')">
+        <datalist id="edge-voice-list">
+          <option value="zh-CN-XiaoxiaoNeural">小晓 — 中文女声（推荐）</option>
+          <option value="zh-CN-YunxiNeural">云希 — 中文男声</option>
+          <option value="zh-CN-XiaoyiNeural">晓伊 — 中文女声（活泼）</option>
+          <option value="zh-TW-HsiaoChenNeural">曉臻 — 台湾中文女声</option>
+          <option value="ja-JP-NanamiNeural">七海 — 日语女声</option>
+          <option value="ja-JP-KeitaNeural">慶太 — 日语男声</option>
+          <option value="en-US-JennyNeural">Jenny — 英语女声</option>
+          <option value="ko-KR-SunHiNeural">선희 — 韩语女声</option>
+        </datalist>
+        <span class="f-hint">从下拉选择或手动填入 Edge TTS 声线名</span>
+      </div>
+    </div>
+
+    <!-- OpenAI TTS 配置 -->
+    <div id="vr-oai-fields" style="display:none">
+      <div class="sub-hd">OpenAI TTS 配置</div>
+      <div class="f-row">
+        <label class="f-lbl">
+          API Key
+          <span class="key-badge" id="vr-oai-key-badge" style="display:none">🔑 已配置</span>
+        </label>
+        <input class="f-inp" type="password" id="vr-oai_api_key" placeholder="sk-..." onchange="markDirty('voice')">
+      </div>
+      <div class="f-grid2">
+        <div class="f-row">
+          <label class="f-lbl">声线</label>
+          <select class="f-inp" id="vr-oai_voice" onchange="markDirty('voice')">
+            <option value="alloy">alloy — 中性</option>
+            <option value="echo">echo — 男声</option>
+            <option value="fable">fable — 英式男声</option>
+            <option value="onyx">onyx — 深沉男声</option>
+            <option value="nova">nova — 活泼女声</option>
+            <option value="shimmer">shimmer — 柔和女声</option>
+          </select>
+        </div>
+        <div class="f-row">
+          <label class="f-lbl">模型</label>
+          <select class="f-inp" id="vr-oai_model" onchange="markDirty('voice')">
+            <option value="tts-1">tts-1（速度快）</option>
+            <option value="tts-1-hd">tts-1-hd（质量高）</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- 通用参数 -->
+    <div class="tg-sect-div"></div>
+    <div class="f-grid2">
+      <div class="f-row">
+        <label class="f-lbl">
+          最大字符数
+          <span class="f-hint" style="margin:0;font-size:.7rem">（超出则发文字）</span>
+        </label>
+        <input class="f-inp" type="number" id="vr-max_text_chars" min="10" max="1000" placeholder="200" onchange="markDirty('voice')">
+      </div>
+      <div class="f-row">
+        <label class="f-lbl">
+          合成超时（秒）
+          <span class="f-dur" id="vr-timeout-dur"></span>
+        </label>
+        <input class="f-inp" type="number" id="vr-timeout_sec" min="10" max="300" placeholder="60"
+          oninput="updateDur('vr-timeout_sec','vr-timeout-dur');markDirty('voice')">
+      </div>
+    </div>
+    <label class="tg-toggle">
+      <input type="checkbox" id="vr-send_text_summary" onchange="markDirty('voice')">
+      <span class="tg-sw"></span>
+      <span class="tg-toggle-lbl">同时发送文字摘要</span>
+    </label>
+
+    <!-- TTS 试听 -->
+    <div class="tg-sect-div"></div>
+    <div class="sub-hd">试听</div>
+    <div class="preview-row">
+      <input class="f-inp" type="text" id="preview-text" placeholder="输入测试文字，点击试听…" maxlength="100">
+      <button class="btn-p" id="preview-btn" onclick="testTts()" style="flex-shrink:0">
+        ▶ 试听
+      </button>
+    </div>
+    <div id="preview-result" style="font-size:.78rem;color:var(--t3);margin-top:.4rem"></div>
+    <audio id="preview-audio" class="preview-audio" controls></audio>
+  </div>
+
+  <div class="save-bar">
+    <span class="save-res" id="save-res-voice"></span>
+    <span style="font-size:.75rem;color:var(--t3)">ASR 模型切换需重启生效</span>
+    <button class="btn-sec" onclick="resetVoice()">重置</button>
+    <button class="btn-p" onclick="saveVoice()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+      保存语音配置
+    </button>
+  </div>
+</div>
+
+<!-- ╔═══════════════════ VOICE PICKER MODAL ╔══════════════ -->
+<div class="modal-ov" id="voice-picker-modal" onclick="closeVoicePicker(event)">
+  <div class="modal-box">
+    <div class="modal-hdr">
+      <span class="modal-title">📂 选择参考音频文件</span>
+      <button class="modal-cls" onclick="closeVoicePicker()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="upload-area" id="upload-area"
+        onclick="document.getElementById('voice-file-input').click()"
+        ondragover="event.preventDefault();this.classList.add('drag-over')"
+        ondragleave="this.classList.remove('drag-over')"
+        ondrop="handleVoiceDrop(event)">
+        <span class="ua-icon">📤</span>
+        点击上传 .wav 文件，或拖放到此处
+        <div class="ua-hint">推荐 10–30 秒干净人声 · 最大 20MB · WAV 格式</div>
+      </div>
+      <input type="file" id="voice-file-input" accept=".wav" style="display:none" onchange="handleVoiceFileSelect(event)">
+      <div class="upload-status" id="upload-status"></div>
+      <div id="upload-quality"></div>
+      <div class="sub-hd">📁 voice_samples/ 中的文件</div>
+      <div id="vf-list-wrap"><div class="vf-empty">加载中…</div></div>
+      <audio id="picker-audio" style="display:none"></audio>
+    </div>
+  </div>
+</div>
+
+<!-- ╔═════════════════════════ TAB: 账号 ╔════════════════════ -->
+<div class="st-pane" id="pane-account">
+  <div class="tg-card">
+    <div class="tg-card-header">
+      <div class="tg-card-icon blue">👤</div>
+      <div><div class="tg-card-title">当前账号</div></div>
+      <button class="tg-hero-refresh" onclick="loadAccountInfo()" style="margin-left:auto">↻ 刷新</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:1rem;background:var(--input);border-radius:12px;border:1px solid var(--bd);padding:1rem 1.2rem;margin-bottom:.9rem;flex-wrap:wrap">
+      <div style="width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,#229ed9,#1a7abf);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:.95rem;color:var(--t)" id="acc-display-name">—</div>
+        <div style="font-size:.78rem;color:var(--t3)" id="acc-username"></div>
+        <div style="font-size:.78rem;color:var(--t3)" id="acc-phone"></div>
+      </div>
+      <div id="acc-status" style="display:flex;align-items:center;gap:.4rem;font-size:.8rem;font-weight:600">
+        <span class="tg-online-dot offline" id="acc-dot"></span><span id="acc-status-txt">检测中</span>
+      </div>
+    </div>
+    <p style="font-size:.75rem;color:var(--t3)">会话文件：<code id="acc-session">—</code></p>
+  </div>
+
+  <div class="tg-card">
+    <div class="tg-card-header">
+      <div class="tg-card-icon purple">📊</div>
+      <div><div class="tg-card-title">今日统计</div></div>
+    </div>
+    <div style="display:flex;gap:1rem;flex-wrap:wrap">
+      <div class="tg-stat" style="flex:1"><span class="tg-stat-n" id="acc-st-msg">—</span><span class="tg-stat-l">文字消息</span></div>
+      <div class="tg-stat" style="flex:1"><span class="tg-stat-n" id="acc-st-vin">—</span><span class="tg-stat-l">收到语音</span></div>
+      <div class="tg-stat" style="flex:1"><span class="tg-stat-n" id="acc-st-tts">—</span><span class="tg-stat-l">TTS 发送</span></div>
+    </div>
+  </div>
+
+  <!-- ── 日志实时流 ────────────────────────────────────── -->
+  <div class="tg-card">
+    <div class="tg-card-header">
+      <div class="tg-card-icon blue">📜</div>
+      <div><div class="tg-card-title">运行日志</div></div>
+      <div class="log-toolbar" style="margin-left:auto;margin-bottom:0">
+        <span class="log-live-dot" id="log-live-dot" style="display:none"></span>
+        <span style="font-size:.72rem;color:var(--t3)" id="log-last-updated"></span>
+        <button class="tg-hero-refresh" onclick="refreshLogTail()">↻ 刷新</button>
+      </div>
+    </div>
+    <div class="log-wrap" id="log-tail">
+      <div class="log-empty">点击刺新加载日志…</div>
+    </div>
+  </div>
+
+  <div class="tg-card">
+    <div class="tg-card-header">
+      <div class="tg-card-icon green">✅</div>
+      <div><div class="tg-card-title">配置摘要</div></div>
+      <button class="btn-sec" onclick="exportConfig()" style="margin-left:auto;font-size:.75rem;padding:.3rem .6rem" title="导出 Telegram 配置为 JSON">
+        ⬇️ 导出
+      </button>
+    </div>
+    <div id="acc-badges" style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.8rem"></div>
+    <table style="width:100%;border-collapse:collapse;font-size:.82rem" id="acc-config-table"></table>
+  </div>
+
+  <!-- ── 版本历史 ────────────────────────────────────── -->
+  <div class="tg-card">
+    <div class="tg-card-header">
+      <div class="tg-card-icon" style="background:rgba(168,85,247,.12);color:#9333ea">🗂️</div>
+      <div><div class="tg-card-title">版本历史（自动快照）</div><div style="font-size:.72rem;color:var(--t3)">每次保存配置时自动建立快照，支持一键恢复</div></div>
+      <button class="tg-hero-refresh" onclick="loadSnapshots()" style="margin-left:auto">↻</button>
+    </div>
+    <div id="snap-list"><div class="snap-empty">点击刷新加载…</div></div>
+  </div>
+</div>
+
+<!-- ╔════════════════════════ TAB: 运营漏斗（P5）╔═══════════════ -->
+<div class="st-pane" id="pane-funnel">
+  {% include "_rpa_shared_funnel.html" %}
+</div>
+
+<script>
+/* ─── State ─────────────────────────────────────────────────── */
+let _cfg = {};
+let _dirty = {reply:false, voice:false};
+let _origSettings = null;
+
+/* ─── Dirty tracking ────────────────────────────────────────── */
+function markDirty(tab){
+  _dirty[tab] = true;
+  document.getElementById('tab-'+tab)?.classList.add('dirty');
+}
+function clearDirty(tab){
+  _dirty[tab] = false;
+  document.getElementById('tab-'+tab)?.classList.remove('dirty');
+}
+
+/* ─── Tab switch + URL hash ─────────────────────────────────── */
+const TAB_NAMES = ['reply','voice','account','funnel'];
+let _logSse = null;
+function switchTab(name){
+  TAB_NAMES.forEach(n=>{
+    document.getElementById('tab-'+n)?.classList.toggle('active', n===name);
+    document.getElementById('pane-'+n)?.classList.toggle('active', n===name);
+  });
+  history.replaceState(null,'','#'+name);
+  if(name==='account'){
+    loadAccountInfo();
+    startLogStream();
+  } else {
+    stopLogStream();
+  }
+  if(name==='voice') loadHealth();
+}
+
+/* ─── Helpers ───────────────────────────────────────────────── */
+function $v(id){ return (document.getElementById(id)||{}).value||''; }
+function $chk(id){ const el=document.getElementById(id); return el?el.checked:false; }
+function setV(id,v){ const el=document.getElementById(id); if(el) el.value=(v??''); }
+function setChk(id,v){ const el=document.getElementById(id); if(el) el.checked=!!v; }
+function show(id,vis){ const el=document.getElementById(id); if(el) el.style.display=vis?'':'none'; }
+
+function humanDur(sec){
+  const s=parseInt(sec)||0;
+  if(!s) return '';
+  if(s<60) return `${s}秒`;
+  if(s<3600) return `${Math.round(s/60)}分钟`;
+  return `${(s/3600).toFixed(1)}小时`;
+}
+function updateDur(inputId, labelId){
+  const el=document.getElementById(labelId);
+  if(el) el.textContent=humanDur($v(inputId));
+}
+
+function setRes(id,msg,cls=''){
+  const el=document.getElementById(id);
+  if(!el) return;
+  el.textContent=msg; el.className='save-res'+(cls?' '+cls:'');
+  if(cls==='ok') setTimeout(()=>el.textContent='', 3500);
+}
+
+async function apiFetch(url,method='GET',body=null){
+  const opt={method,headers:{'Content-Type':'application/json'}};
+  if(body) opt.body=JSON.stringify(body);
+  const r=await fetch(url,opt);
+  const d=await r.json();
+  if(!r.ok) throw new Error(d.detail||'请求失败');
+  return d;
+}
+
+/* ─── Provider / backend card selection ─────────────────────── */
+function _selectCard(groupId, val){
+  document.querySelectorAll('#'+groupId+' .be-card').forEach(c=>{
+    c.classList.toggle('selected', c.dataset.val===val);
+  });
+}
+function _selectTrCard(val){
+  document.querySelectorAll('#vr-trigger-cards .tr-card').forEach(c=>{
+    c.classList.toggle('selected', c.dataset.val===val);
+  });
+}
+
+function selectAsrProvider(card){
+  const val=card.dataset.val;
+  _selectCard('asr-be-cards', val);
+  setV('asr-provider', val);
+  show('asr-cloud-fields', val==='openai');
+  show('asr-local-fields', val!=='openai');
+  markDirty('voice');
+}
+
+function selectTtsBackend(card){
+  const val=card.dataset.val;
+  _selectCard('vr-be-cards', val);
+  setV('vr-backend', val);
+  show('vr-clone-fields', val==='voice_clone_command');
+  show('vr-edge-fields', val==='edge_tts');
+  show('vr-oai-fields', val==='openai');
+  markDirty('voice');
+}
+
+function selectTrigger(card){
+  const val=card.dataset.val;
+  _selectTrCard(val);
+  setV('vr-trigger', val);
+  show('vr-prob-row', val==='random');
+  markDirty('voice');
+}
+
+/* ─── Reference audio path validation ──────────────────────── */
+function checkRefAudio(){
+  const v=$v('vr-reference_audio_path').trim();
+  const el=document.getElementById('vr-ref-hint');
+  if(!el) return;
+  if(!v){ el.textContent='WAV 格式，10–30 秒干净人声，用于声音克隆'; el.style.color=''; return; }
+  if(!v.toLowerCase().endsWith('.wav')){
+    el.textContent='⚠️ 建议使用 .wav 格式'; el.style.color='var(--red)';
+  } else {
+    el.textContent='✓ 路径格式正确'; el.style.color='var(--green)';
+  }
+}
+
+/* ─── Load settings ─────────────────────────────────────────── */
+async function loadSettings(){
+  try{
+    const d=await apiFetch('/api/telegram/settings');
+    _cfg=d; _origSettings=JSON.parse(JSON.stringify(d));
+
+    // ── reply logic ──
+    const rl=d.reply_logic||{};
+    setChk('rl-process_private', d.process_private!==false);
+    setChk('rl-process_groups', d.process_groups===true);
+    setV('rl-cooldown_seconds', rl.cooldown_seconds??'');
+    setV('rl-max_consecutive_replies', rl.max_consecutive_replies??'');
+    setChk('rl-reply_to_user_message', rl.reply_to_user_message!==false);
+    setChk('rl-ignore_edited', rl.ignore_edited===true);
+    document.getElementById('rl-no_reply_usernames').value=(d.no_reply_sender_usernames||[]).join('\n');
+    updateDur('rl-cooldown_seconds','rl-cooldown-dur');
+
+    // ── voice reply ──
+    const vr=d.voice_reply||{};
+    setChk('vr-enabled', vr.enabled===true);
+
+    const trigger=vr.trigger||'when_peer_voice';
+    setV('vr-trigger', trigger);
+    _selectTrCard(trigger);
+    show('vr-prob-row', trigger==='random');
+
+    const prob=Math.round((parseFloat(vr.probability||0.3))*100);
+    setV('vr-probability', prob);
+    document.getElementById('vr-prob-val').textContent=prob+'%';
+
+    const backend=vr.backend||'voice_clone_command';
+    setV('vr-backend', backend);
+    _selectCard('vr-be-cards', backend);
+    show('vr-clone-fields', backend==='voice_clone_command');
+    show('vr-edge-fields', backend==='edge_tts');
+    show('vr-oai-fields', backend==='openai');
+
+    // voice_profile
+    const vp=vr.voice_profile||{};
+    setV('vr-reference_audio_path', vp.reference_audio_path||'');
+    setV('vr-voice_profile_path', vp.voice_profile_path||'');
+    setV('vr-cmd_timeout', vp.command_timeout_sec||'');
+    checkRefAudio();
+
+    // edge tts
+    setV('vr-voice', vr.voice||'');
+
+    // openai tts
+    const oaiTts=vr.openai_tts||{};
+    const hasOaiKey=!!oaiTts.api_key;
+    document.getElementById('vr-oai-key-badge').style.display=hasOaiKey?'inline-flex':'none';
+    setV('vr-oai_voice', oaiTts.voice||'alloy');
+    setV('vr-oai_model', oaiTts.model||'tts-1');
+
+    setV('vr-max_text_chars', vr.max_text_chars||200);
+    setV('vr-timeout_sec', vr.timeout_sec||60);
+    updateDur('vr-timeout_sec','vr-timeout-dur');
+    setChk('vr-send_text_summary', vr.send_text_summary===true);
+
+    // ── ASR ──
+    const asr=d.voice_recognition||{};
+    setChk('asr-enabled', asr.enabled!==false);
+    const prov=asr.provider||'faster_whisper';
+    setV('asr-provider', prov);
+    _selectCard('asr-be-cards', prov);
+    show('asr-cloud-fields', prov==='openai');
+    show('asr-local-fields', prov!=='openai');
+    setV('asr-language', asr.language||'auto');
+
+    const oai=asr.openai||{};
+    const hasAsrKey=!!(oai.api_key && oai.api_key!=='***');
+    document.getElementById('asr-key-badge').style.display=hasAsrKey?'inline-flex':'none';
+    setV('asr-base_url', oai.base_url||'');
+    setV('asr-model', oai.model||'');
+
+    const wh=asr.faster_whisper||asr.whisper||{};
+    setV('asr-model_size', wh.model_size||'base');
+    setV('asr-device', wh.device||'cpu');
+
+    clearDirty('reply'); clearDirty('voice');
+  } catch(e){
+    console.error('loadSettings failed', e);
+  }
+}
+
+/* ─── Reset (restore to loaded values) ─────────────────────── */
+function resetReplyLogic(){
+  if(!_origSettings) return;
+  _cfg = JSON.parse(JSON.stringify(_origSettings));
+  const d=_origSettings;
+  const rl=d.reply_logic||{};
+  setChk('rl-process_private', d.process_private!==false);
+  setChk('rl-process_groups', d.process_groups===true);
+  setV('rl-cooldown_seconds', rl.cooldown_seconds??'');
+  setV('rl-max_consecutive_replies', rl.max_consecutive_replies??'');
+  setChk('rl-reply_to_user_message', rl.reply_to_user_message!==false);
+  setChk('rl-ignore_edited', rl.ignore_edited===true);
+  document.getElementById('rl-no_reply_usernames').value=(d.no_reply_sender_usernames||[]).join('\n');
+  updateDur('rl-cooldown_seconds','rl-cooldown-dur');
+  clearDirty('reply');
+}
+function resetVoice(){
+  loadSettings();
+}
+
+/* ─── Save reply logic ──────────────────────────────────────── */
+async function saveReplyLogic(){
+  setRes('save-res-rl','保存中…');
+  try{
+    const nu=document.getElementById('rl-no_reply_usernames').value
+      .split('\n').map(s=>s.trim()).filter(Boolean);
+    const body={
+      process_private: $chk('rl-process_private'),
+      process_groups: $chk('rl-process_groups'),
+      no_reply_sender_usernames: nu,
+      reply_logic:{
+        cooldown_seconds: parseInt($v('rl-cooldown_seconds'))||0,
+        max_consecutive_replies: parseInt($v('rl-max_consecutive_replies'))||10,
+        reply_to_user_message: $chk('rl-reply_to_user_message'),
+        ignore_edited: $chk('rl-ignore_edited'),
+      }
+    };
+    const d=await apiFetch('/api/telegram/settings/reply-logic','PUT',body);
+    _origSettings = null; // force re-fetch on next reset
+    setRes('save-res-rl',`✓ 已保存（${d.updated.length} 项，热更新中）`,'ok');
+    clearDirty('reply');
+  } catch(e){ setRes('save-res-rl','保存失败：'+e.message,'err'); }
+}
+
+/* ─── Save voice ────────────────────────────────────────────── */
+async function saveVoice(){
+  setRes('save-res-voice','保存中…');
+  try{
+    const prob=parseInt($v('vr-probability')||30)/100;
+    const backend=$v('vr-backend');
+    const vrBody={
+      enabled: $chk('vr-enabled'),
+      trigger: $v('vr-trigger'),
+      probability: prob,
+      backend,
+      voice: $v('vr-voice'),
+      max_text_chars: parseInt($v('vr-max_text_chars'))||200,
+      timeout_sec: parseInt($v('vr-timeout_sec'))||60,
+      send_text_summary: $chk('vr-send_text_summary'),
+      voice_profile:{
+        reference_audio_path: $v('vr-reference_audio_path'),
+        voice_profile_path: $v('vr-voice_profile_path'),
+        command_timeout_sec: parseInt($v('vr-cmd_timeout'))||120,
+        enabled: true,
+        owner_consent: true,
+      },
+      openai_tts:{
+        api_key: $v('vr-oai_api_key'),
+        voice: $v('vr-oai_voice'),
+        model: $v('vr-oai_model'),
+      }
+    };
+    const d1=await apiFetch('/api/telegram/settings/voice-reply','PUT',vrBody);
+
+    const asrBody={
+      enabled: $chk('asr-enabled'),
+      provider: $v('asr-provider'),
+      language: $v('asr-language'),
+      openai:{
+        api_key: $v('asr-api_key'),
+        base_url: $v('asr-base_url'),
+        model: $v('asr-model'),
+      },
+      faster_whisper:{ model_size: $v('asr-model_size'), device: $v('asr-device') },
+      whisper:{ model_size: $v('asr-model_size'), device: $v('asr-device') },
+    };
+    const d2=await apiFetch('/api/telegram/settings/voice-asr','PUT',asrBody);
+    const total=d1.updated.length+d2.updated.length;
+    setRes('save-res-voice',`✓ 已保存（${total} 项）`,'ok');
+    clearDirty('voice');
+    await loadSettings();
+    loadHealth();
+  } catch(e){ setRes('save-res-voice','保存失败：'+e.message,'err'); }
+}
+
+/* ─── Health Check ─────────────────────────────────────────────── */
+async function loadHealth(){
+  try{
+    const d=await apiFetch('/api/telegram/health');
+    const banner=document.getElementById('health-banner');
+    if(!banner) return;
+    const issues=d.issues||[];
+    if(issues.length===0){
+      banner.innerHTML=`<div class="hb-item ok"><span class="hb-icon">✅</span>语音配置正常，无异常</div>`;
+    } else {
+      banner.innerHTML=issues.map(i=>{
+        const icon = i.level==='error'?'❌': i.level==='warning'?'⚠️':'ℹ️';
+        return `<div class="hb-item ${i.level}"><span class="hb-icon">${icon}</span>${i.msg}</div>`;
+      }).join('');
+    }
+    banner.classList.add('show');
+  } catch(e){ console.warn('loadHealth failed',e); }
+}
+
+/* ─── Preset Schemes ───────────────────────────────────────────── */
+function togglePresets(e){
+  e.stopPropagation();
+  const pop=document.getElementById('preset-pop');
+  pop.classList.toggle('open');
+}
+document.addEventListener('click', ()=>{
+  document.getElementById('preset-pop')?.classList.remove('open');
+});
+
+const PRESETS = {
+  companion:{
+    // voice tab
+    vr_enabled:true, vr_trigger:'when_peer_voice', vr_backend:'voice_clone_command',
+    asr_enabled:true, asr_provider:'faster_whisper',
+    // reply tab
+    rl_cooldown:60, rl_process_private:true, rl_process_groups:false,
+  },
+  service:{
+    vr_enabled:false, vr_trigger:'never', vr_backend:'edge_tts',
+    asr_enabled:true, asr_provider:'faster_whisper',
+    rl_cooldown:10, rl_process_private:true, rl_process_groups:false,
+  },
+  voice_all:{
+    vr_enabled:true, vr_trigger:'always', vr_backend:'edge_tts',
+    asr_enabled:true, asr_provider:'faster_whisper',
+    rl_cooldown:5, rl_process_private:true, rl_process_groups:false,
+  },
+  text_only:{
+    vr_enabled:false, vr_trigger:'never', vr_backend:'edge_tts',
+    asr_enabled:true, asr_provider:'faster_whisper',
+    rl_cooldown:30, rl_process_private:true, rl_process_groups:false,
+  },
+};
+
+function applyPreset(name){
+  const p=PRESETS[name]; if(!p) return;
+  document.getElementById('preset-pop')?.classList.remove('open');
+
+  // — voice tab —
+  setChk('vr-enabled', p.vr_enabled);
+  setV('vr-trigger', p.vr_trigger);
+  _selectTrCard(p.vr_trigger);
+  show('vr-prob-row', p.vr_trigger==='random');
+  const bk=p.vr_backend;
+  setV('vr-backend', bk);
+  _selectCard('vr-be-cards', bk);
+  show('vr-clone-fields', bk==='voice_clone_command');
+  show('vr-edge-fields', bk==='edge_tts');
+  show('vr-oai-fields', bk==='openai');
+  setChk('asr-enabled', p.asr_enabled);
+  setV('asr-provider', p.asr_provider);
+  _selectCard('asr-be-cards', p.asr_provider);
+  show('asr-cloud-fields', p.asr_provider==='openai');
+  show('asr-local-fields', p.asr_provider!=='openai');
+  markDirty('voice');
+
+  // — reply tab —
+  setV('rl-cooldown_seconds', p.rl_cooldown);
+  updateDur('rl-cooldown_seconds','rl-cooldown-dur');
+  setChk('rl-process_private', p.rl_process_private);
+  setChk('rl-process_groups', p.rl_process_groups);
+  markDirty('reply');
+
+  // Switch to voice tab so user sees the changes
+  switchTab('voice');
+  const labels={companion:'🤗 陈伴型', service:'💬 客服型', voice_all:'🎤 全语音', text_only:'📝 纯文字'};
+  setRes('save-res-voice',`已应用「${labels[name]||name}」预设，请检查后点保存`,'');
+}
+
+/* ─── Log Stream (SSE) ──────────────────────────────────────────── */
+const _MAX_LOG_LINES = 120;
+
+function _appendLogLine(d){
+  const wrap=document.getElementById('log-tail');
+  if(!wrap) return;
+  // Clear placeholder
+  const ph=wrap.querySelector('.log-empty');
+  if(ph) ph.remove();
+  const isTts=d.msg.includes('[voice_reply] voice sent');
+  const cls=['log-line', d.level||'INFO', isTts?'voice_sent':''].join(' ');
+  const el=document.createElement('div');
+  el.className=cls.trim();
+  el.innerHTML=`<span class="log-ts">${d.ts||''}</span><span class="log-msg">${d.msg}</span>`;
+  wrap.appendChild(el);
+  // Prune old lines
+  while(wrap.children.length>_MAX_LOG_LINES) wrap.removeChild(wrap.firstChild);
+  wrap.scrollTop=wrap.scrollHeight;
+}
+
+function startLogStream(){
+  if(_logSse) return;
+  const dot=document.getElementById('log-live-dot');
+  const wrap=document.getElementById('log-tail');
+  if(wrap && !wrap.querySelector('.log-line')) wrap.innerHTML='<div class="log-empty">连接中…</div>';
+  _logSse=new EventSource('/api/telegram/log-stream');
+  _logSse.onopen=()=>{
+    if(dot) dot.style.display='';
+    const ph=document.querySelector('#log-tail .log-empty');
+    if(ph) ph.textContent='监听中，等待新日志…';
+  };
+  _logSse.onmessage=(e)=>{
+    try{ const d=JSON.parse(e.data); _appendLogLine(d); }catch(ex){}
+  };
+  _logSse.onerror=()=>{
+    stopLogStream();
+    // Fallback: one-shot historical tail after SSE error
+    refreshLogTail();
+  };
+}
+function stopLogStream(){
+  if(_logSse){ _logSse.close(); _logSse=null; }
+  const dot=document.getElementById('log-live-dot');
+  if(dot) dot.style.display='none';
+}
+
+async function refreshLogTail(){
+  const wrap=document.getElementById('log-tail');
+  if(!wrap) return;
+  try{
+    const d=await apiFetch('/api/telegram/log-tail?n=40');
+    const lines=d.lines||[];
+    if(!lines.length){
+      wrap.innerHTML='<div class="log-empty">暂无相关日志</div>';
+      return;
+    }
+    wrap.innerHTML=lines.map(l=>{
+      const isSent=l.msg.includes('voice sent');
+      const cls=isSent?'voice_sent':l.level;
+      const icon=l.level==='ERROR'?'❌ ':l.level==='WARNING'?'⚠ ':'';
+      return `<div class="log-line ${cls}"><span class="log-ts">${l.ts}</span><span class="log-msg">${icon}${l.msg.replace(/</g,'&lt;')}</span></div>`;
+    }).join('');
+    wrap.scrollTop=wrap.scrollHeight;
+    const upd=document.getElementById('log-last-updated');
+    if(upd) upd.textContent=new Date().toLocaleTimeString();
+    document.getElementById('log-live-dot').style.display='inline-block';
+  } catch(e){
+    if(wrap) wrap.innerHTML='<div class="log-empty">加载失败: '+e.message+'</div>';
+  }
+}
+
+/* ─── WAV Quality Display ──────────────────────────────────────── */
+function renderQuality(q, container){
+  if(!q||!container) return;
+  const icons={ok:'✓',warning:'⚠️',error:'✘'};
+  const grades={ok:'✓ 质量合格',warning:'⚠️ 有优化建议',error:'✘ 读取失败'};
+  const info=q.info||{};
+  const infoStr=info.duration_sec!=null
+    ?`时长 ${info.duration_sec}s · ${info.sample_rate} Hz · ${info.channels===1?'单声道':'双声道'}` : '';
+  container.innerHTML=`
+    <div class="qc-wrap ${q.grade}">
+      <div class="qc-title">${grades[q.grade]||q.grade}${infoStr?` <span style="font-weight:400;opacity:.7;font-size:.74rem">· ${infoStr}</span>`:''}</div>
+      ${(q.checks||[]).map(c=>`<div class="qc-item ${c.level}"><span class="qi">${icons[c.level]||'•'}</span><span>${c.msg}</span></div>`).join('')}
+    </div>`;
+}
+
+/* ─── TTS Preview (uses current UI settings via override) ───────── */
+async function testTts(){
+  const text=$v('preview-text').trim();
+  if(!text){ document.getElementById('preview-result').textContent='请输入测试文字'; return; }
+  const btn=document.getElementById('preview-btn');
+  btn.disabled=true; btn.textContent='合成中…';
+  document.getElementById('preview-result').textContent='';
+
+  // Build override from current UI — preview uses live settings even before save
+  const backend=$v('vr-backend');
+  const override={backend, voice:$v('vr-voice')};
+  if(backend==='voice_clone_command'){
+    override.voice_profile={reference_audio_path:$v('vr-reference_audio_path')};
+  } else if(backend==='openai'){
+    override.openai_tts={
+      voice:$v('vr-oai_voice'), model:$v('vr-oai_model'),
+      ...($v('vr-oai_api_key')?{api_key:$v('vr-oai_api_key')}:{}),
+    };
+  }
+
+  try{
+    const d=await apiFetch('/api/voice/tts-test','POST',{
+      text, format:'mp3', voice_cfg_override: override
+    });
+    if(d.ok){
+      const audio=document.getElementById('preview-audio');
+      audio.src=d.url+'?t='+Date.now();
+      audio.className='preview-audio show';
+      audio.play().catch(()=>{});
+      document.getElementById('preview-result').textContent=
+        `✓ ${d.provider||''} · ${d.voice||''} · ${(d.duration_sec||0).toFixed(1)}s · ${Math.round((d.bytes||0)/1024)}KB`;
+    } else {
+      document.getElementById('preview-result').textContent='⚠️ '+d.error;
+    }
+  } catch(e){
+    document.getElementById('preview-result').textContent='请求失败：'+e.message;
+  } finally{
+    btn.disabled=false; btn.textContent='▶ 试听';
+  }
+}
+
+/* ─── Account info ──────────────────────────────────────────── */
+async function loadAccountInfo(){
+  try{
+    const d=await apiFetch('/api/telegram/account-info');
+
+    // hero
+    document.getElementById('h-name').textContent=d.display_name||d.username||'未登录';
+    document.getElementById('h-sub').textContent=
+      [d.username, d.phone].filter(Boolean).join(' · ')||'Telegram 账号';
+    const online=d.online;
+    ['h-dot'].forEach(id=>{
+      const el=document.getElementById(id);
+      if(el){ el.classList.toggle('offline',!online); }
+    });
+    document.getElementById('st-msg').textContent=(d.stats?.messages??'—');
+    document.getElementById('st-vin').textContent=(d.stats?.voice_in??'—');
+    document.getElementById('st-tts').textContent=(d.stats?.tts_sent??'—');
+
+    // account tab
+    document.getElementById('acc-display-name').textContent=d.display_name||d.username||'—';
+    document.getElementById('acc-username').textContent=d.username||'';
+    document.getElementById('acc-phone').textContent=d.phone||'';
+    document.getElementById('acc-session').textContent=d.session_name||'default';
+    const dot=document.getElementById('acc-dot');
+    if(dot) dot.classList.toggle('offline',!online);
+    document.getElementById('acc-status-txt').textContent=online?'在线':'离线';
+
+    // stats
+    document.getElementById('acc-st-msg').textContent=d.stats?.messages??0;
+    document.getElementById('acc-st-vin').textContent=d.stats?.voice_in??0;
+    document.getElementById('acc-st-tts').textContent=d.stats?.tts_sent??0;
+
+    // config badges + table
+    _renderAccountSummary();
+  } catch(e){ console.error('loadAccountInfo failed',e); }
+}
+
+function _renderAccountSummary(){
+  const vr=_cfg.voice_reply||{};
+  const asr=_cfg.voice_recognition||{};
+
+  // badges
+  const bdg=document.getElementById('acc-badges');
+  if(bdg){
+    const items=[
+      [vr.enabled,'语音回复'],
+      [asr.enabled!==false,'语音识别'],
+      [_cfg.process_private!==false,'处理私聊'],
+      [_cfg.process_groups,'处理群组'],
+    ];
+    bdg.innerHTML=items.map(([on,lbl])=>
+      `<span class="cfg-badge ${on?'on':'off'}">${on?'✓':'✗'} ${lbl}</span>`
+    ).join('');
+  }
+
+  const tbl=document.getElementById('acc-config-table');
+  if(!tbl) return;
+  const rows=[
+    ['触发方式', vr.trigger||'—'],
+    ['TTS 引擎', ({voice_clone_command:'克隆声音',edge_tts:'微软Edge',openai:'OpenAI'}[vr.backend])||vr.backend||'—'],
+    ['ASR 引擎', ({faster_whisper:'本地快速',whisper_local:'本地精准',openai:'云端API'}[asr.provider])||asr.provider||'—'],
+    ['识别语言', asr.language||'auto'],
+    ['参考音频', (vr.voice_profile||{}).reference_audio_path||'未设置'],
+  ];
+  tbl.innerHTML=rows.map(([k,v])=>`<tr>
+    <td style="padding:.42rem .6rem;color:var(--t2);font-weight:600;white-space:nowrap;border-bottom:1px solid var(--bd);width:110px">${k}</td>
+    <td style="padding:.42rem .6rem;border-bottom:1px solid var(--bd);word-break:break-all;font-size:.8rem">${v}</td>
+  </tr>`).join('');
+}
+
+/* ─── Voice File Picker ────────────────────────────────────────── */
+function openVoicePicker(){
+  document.getElementById('voice-picker-modal').classList.add('open');
+  loadVoiceFiles();
+}
+function closeVoicePicker(e){
+  if(e && e.target!==document.getElementById('voice-picker-modal')) return;
+  document.getElementById('voice-picker-modal').classList.remove('open');
+}
+
+async function loadVoiceFiles(){
+  const wrap=document.getElementById('vf-list-wrap');
+  if(!wrap) return;
+  wrap.innerHTML='<div class="vf-empty">扫描中…</div>';
+  try{
+    const d=await apiFetch('/api/telegram/voice-files');
+    const files=d.files||[];
+    if(!files.length){
+      wrap.innerHTML='<div class="vf-empty">voice_samples/ 目录为空—上传一个 .wav 文件开始</div>';
+      return;
+    }
+    wrap.innerHTML='<div class="vf-list">'+files.map(f=>`
+      <div class="vf-item">
+        <span class="vf-icon">🔊</span>
+        <span class="vf-name">${f.name}</span>
+        <span class="vf-sz">${f.size_kb} KB</span>
+        <div class="vf-acts">
+          <button class="btn-sec" style="padding:.25rem .45rem;font-size:.72rem" onclick="playPickerAudio('${f.url}')" title="试听">▶</button>
+          <button class="btn-p" style="padding:.25rem .55rem;font-size:.72rem" onclick="selectVoiceFile('${f.path}','${f.name}')">✓ 使用</button>
+        </div>
+      </div>`).join('')+'</div>';
+  } catch(e){
+    wrap.innerHTML='<div class="vf-empty">加载失败: '+e.message+'</div>';
+  }
+}
+
+function playPickerAudio(url){
+  const a=document.getElementById('picker-audio');
+  if(!a) return;
+  a.src=url+'?t='+Date.now();
+  a.play().catch(()=>{});
+}
+
+function selectVoiceFile(path, name){
+  setV('vr-reference_audio_path', path);
+  markDirty('voice');
+  checkRefAudio();
+  document.getElementById('voice-picker-modal').classList.remove('open');
+  // Hint user to test
+  const hint=document.getElementById('vr-ref-hint');
+  if(hint) hint.textContent='✓ 已选择：'+name+'，点下方》试听《验证效果';
+}
+
+function handleVoiceFileSelect(e){
+  const file=e.target.files[0];
+  if(file) doUploadVoice(file);
+  e.target.value='';
+}
+function handleVoiceDrop(e){
+  e.preventDefault();
+  document.getElementById('upload-area').classList.remove('drag-over');
+  const file=e.dataTransfer.files[0];
+  if(file) doUploadVoice(file);
+}
+
+async function doUploadVoice(file){
+  if(!file.name.toLowerCase().endsWith('.wav')){
+    document.getElementById('upload-status').textContent='⚠️ 只支持 .wav 格式';
+    return;
+  }
+  const st=document.getElementById('upload-status');
+  st.textContent='上传中… '+file.name;
+  const form=new FormData();
+  form.append('file', file);
+  try{
+    const resp=await fetch('/api/telegram/upload-voice',{method:'POST',body:form});
+    const d=await resp.json();
+    if(d.ok){
+      st.textContent='✓ 上传成功：'+d.name+' ('+d.size_kb+' KB)';
+      // Render quality check results
+      renderQuality(d.quality, document.getElementById('upload-quality'));
+      // Auto-select the uploaded file
+      selectVoiceFile(d.path, d.name);
+      // Refresh list
+      loadVoiceFiles();
+    } else {
+      st.textContent='⚠️ 上传失败：'+(d.detail||d.error||'未知错误');
+    }
+  } catch(err){
+    st.textContent='上传异常：'+err.message;
+  }
+}
+
+/* ─── Recent Contacts + Blocklist ───────────────────────────────── */
+let _contactsLoaded=false;
+function toggleRecentContacts(){
+  const pane=document.getElementById('contact-pane');
+  const icon=document.getElementById('contact-toggle-icon');
+  const open=pane.classList.toggle('open');
+  if(icon) icon.textContent=open?'▴':'▾';
+  if(open && !_contactsLoaded) loadRecentContacts();
+}
+
+async function loadRecentContacts(){
+  const chips=document.getElementById('contact-chips');
+  if(!chips) return;
+  try{
+    const d=await apiFetch('/api/telegram/recent-contacts');
+    const contacts=d.contacts||[];
+    _contactsLoaded=true;
+    if(!contacts.length){
+      chips.innerHTML='<span class="contact-loading">暂无近期私聊记录</span>';
+      return;
+    }
+    chips.innerHTML=contacts.map(c=>{
+      const blocked=c.blocked;
+      const display=c.username+(c.last_ts?` <span style="font-weight:400;opacity:.6">${c.last_ts}</span>`:'');
+      return blocked
+        ? `<span class="chip blocked" title="已屏蔽">@${c.username} ⛔</span>`
+        : `<span class="chip">@${c.username}
+            <button class="chip-add" onclick="addToBlocklist('${c.username}')" title="加入屏蔽名单">️➕</button>
+           </span>`;
+    }).join('');
+  } catch(e){
+    if(chips) chips.innerHTML='<span class="contact-loading">加载失败</span>';
+  }
+}
+
+function addToBlocklist(username){
+  const ta=document.getElementById('rl-no_reply_usernames');
+  if(!ta) return;
+  const existing=ta.value.split('\n').map(s=>s.trim()).filter(Boolean);
+  const clean=username.replace('@','').trim();
+  if(clean && !existing.includes(clean)){
+    ta.value=(existing.join('\n')+(existing.length?'\n':'')+clean).trim();
+    markDirty('reply');
+  }
+  // Refresh contact chips to show blocked state
+  _contactsLoaded=false;
+  loadRecentContacts();
+}
+
+/* ─── Config Snapshots ─────────────────────────────────────────── */
+async function loadSnapshots(){
+  const wrap=document.getElementById('snap-list');
+  if(!wrap) return;
+  wrap.innerHTML='<div class="snap-empty">加载中…</div>';
+  try{
+    const d=await apiFetch('/api/telegram/config-snapshots');
+    const snaps=d.snapshots||[];
+    if(!snaps.length){
+      wrap.innerHTML='<div class="snap-empty">暂无快照（保存配置后自动生成）</div>';
+      return;
+    }
+    const lblMap={voice_reply:'语音回复',voice_asr:'语音识别',reply_logic:'消息配置',pre_restore:'恢复前备份'};
+    wrap.innerHTML=snaps.map(s=>`
+      <div class="snap-row">
+        <span class="snap-ts">${s.ts.replace('_',' ').replace(/(小時)(分)(秒)/,'$1:$2:$3').replace(/(\d{4})(\d{2})(\d{2}) (\d{2})(\d{2})(\d{2})/,'$1-$2-$3 $4:$5:$6')}</span>
+        ${s.label?`<span class="snap-lbl">${lblMap[s.label]||s.label}</span>`:''}
+        <span style="font-size:.7rem;color:var(--t3)">${s.size_kb}KB</span>
+        <button class="btn-sec" style="padding:.2rem .5rem;font-size:.72rem" onclick="restoreSnapshot('${s.filename}')”>恢复</button>
+      </div>`).join('');
+  } catch(e){
+    wrap.innerHTML='<div class="snap-empty">加载失败</div>';
+  }
+}
+
+async function restoreSnapshot(filename){
+  if(!confirm(`确认从快照 ${filename} 恢复配置？\n当前配置将先自动备份为新快照。`)) return;
+  try{
+    const d=await apiFetch('/api/telegram/config-restore',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({filename})
+    });
+    if(d.ok){
+      alert('恢复成功！即将重新加载配置…');
+      await loadSettings();
+      loadSnapshots();
+    }
+  } catch(e){
+    alert('恢复失败：'+e.message);
+  }
+}
+
+/* ─── Config Export ─────────────────────────────────────────────── */
+function exportConfig(){
+  // Trigger download via hidden anchor — auth cookie is sent automatically
+  const a=document.createElement('a');
+  a.href='/api/telegram/config-export';
+  a.download='';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+/* ─── Init ──────────────────────────────────────────────────── */
+window.addEventListener('DOMContentLoaded', async ()=>{
+  // restore tab from URL hash
+  const hash=(location.hash||'').replace('#','');
+  const initTab=TAB_NAMES.includes(hash)?hash:'reply';
+  // Activate initial tab without history side-effect on first load
+  TAB_NAMES.forEach(n=>{
+    document.getElementById('tab-'+n)?.classList.toggle('active', n===initTab);
+    document.getElementById('pane-'+n)?.classList.toggle('active', n===initTab);
+  });
+
+  await loadSettings();
+  loadAccountInfo();
+  loadHealth();
+  if(initTab==='account') startLogStream();
+  // P5 + Q4: 运营漏斗初始加载 + 60s 轮询，默认 scope=telegram
+  if(window.rpa && window.rpa.funnel){ window.rpa.funnel.init({intervalSec:60, defaultScope:'telegram'}); }
+});
+</script>
+{% endblock %}

@@ -410,11 +410,25 @@ def verify_thread_title(
 
     title: Optional[str] = None
     title_source = "xml"
+    _xml_non_messenger = False  # True when xml is non-None but not Messenger content
     if xml is not None:
         title = uis.find_thread_title(xml)
         if title is None:
-            return VerifyResult(
-                ok=False, reason="not_in_thread", expected=expected,
+            # ★ Guard: distinguish genuine "not in thread" (Messenger XML, no title)
+            # from notification-shade XML returned by MIUI uiautomator2 bug.
+            # Notification-shade XML never contains "com.facebook.orca".
+            _xml_str = xml if isinstance(xml, str) else (
+                xml.decode("utf-8", "replace") if isinstance(xml, bytes) else str(xml)
+            )
+            if "com.facebook.orca" in _xml_str:
+                return VerifyResult(
+                    ok=False, reason="not_in_thread", expected=expected,
+                )
+            # Non-Messenger XML (notification shade / system UI garbage) → Vision
+            _xml_non_messenger = True
+            logger.debug(
+                "[thread_actions] xml has no Messenger package (notification shade?) "
+                "serial=%s → Vision fallback", serial,
             )
     elif vision_cfg:
         try:
@@ -445,6 +459,38 @@ def verify_thread_title(
         return VerifyResult(
             ok=False, reason="dump_failed", expected=expected,
         )
+
+    # ★ Non-Messenger XML fallback: xml was present but is notification-shade
+    # garbage (MIUI uiautomator2 bug) → Vision is the only reliable source.
+    if _xml_non_messenger and title is None:
+        if vision_cfg:
+            try:
+                from src.integrations.messenger_rpa.thread_title_vision import (
+                    read_thread_title_via_vision,
+                )
+                vr = read_thread_title_via_vision(serial, vision_cfg, global_vision_cfg)
+                title = vr.title
+                title_source = f"vision_xml_garbage({vr.debug})"
+                if title is None:
+                    return VerifyResult(
+                        ok=False,
+                        reason=f"xml_garbage_vision_{vr.debug}",
+                        expected=expected,
+                    )
+            except Exception as e:
+                logger.debug(
+                    "[thread_actions] Vision (xml_garbage) fallback exc %s", e,
+                    exc_info=True,
+                )
+                return VerifyResult(
+                    ok=False,
+                    reason=f"xml_garbage_vision_exc:{type(e).__name__}",
+                    expected=expected,
+                )
+        else:
+            return VerifyResult(
+                ok=False, reason="not_in_thread_xml_garbage", expected=expected,
+            )
 
     matched = (
         peer_names_match_inbox_pick(title, expected)

@@ -127,7 +127,7 @@ class TestChatPersonaBinding:
         pm.bind_chat_persona("111", {"name": "A"})
         pm.bind_chat_persona("222", {"name": "B"})
         bindings = pm.get_all_chat_bindings()
-        assert bindings == {"111": "A", "222": "B"}
+        assert bindings == {"111": {"name": "A"}, "222": {"name": "B"}}
 
 
 class TestSystemPromptAssembly:

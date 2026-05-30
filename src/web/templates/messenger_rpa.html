@@ -241,6 +241,10 @@ body:has(.mr-page.monitor-mode) .wrap{padding:.65rem .85rem 1.5rem}
 .mr-lead-top{display:flex;align-items:center;gap:.45rem;min-width:0;flex-wrap:wrap}
 .mr-lead-title{font-weight:850;color:var(--t);font-size:.86rem;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mr-lead-meta{display:flex;gap:.38rem;flex-wrap:wrap;margin-top:.28rem;color:var(--t3);font-size:.7rem}
+.mr-lang-badge{display:inline-flex;align-items:center;gap:.2rem;padding:.06rem .35rem;border-radius:5px;border:1px solid var(--bd2);cursor:pointer;font-size:.68rem;transition:border-color .15s,background .15s;user-select:none}
+.mr-lang-badge:hover{border-color:var(--p);color:var(--p)}
+.mr-lang-badge.locked{border-color:#059669;background:rgba(5,150,105,.12);color:#059669;font-weight:600}
+.mr-lang-badge.locked:hover{background:rgba(239,68,68,.12);border-color:#dc2626;color:#dc2626}
 .mr-lead-line{color:var(--t2);font-size:.76rem;line-height:1.45;margin-top:.35rem;word-break:break-word}
 .mr-lead-side{display:flex;flex-direction:column;align-items:flex-start;gap:.32rem;min-width:0}
 .mr-risk-list{display:flex;gap:.25rem;flex-wrap:wrap;margin-top:.38rem}
@@ -401,45 +405,80 @@ body:has(.mr-page.monitor-mode) .wrap{padding:.65rem .85rem 1.5rem}
   .mr-score{width:100%;height:44px}
   .mr-head-actions{width:100%}
 }
+/* ── 统一 4 平台 Hero 视觉对齐 ───────────────────────────── */
+.mr-page .rpa-hero{margin-bottom:.7rem}
+.mr-page.monitor-mode .rpa-hero{padding:.7rem 1rem}
+.mr-page.monitor-mode .rpa-hero .rpa-hero-name{font-size:.92rem}
+.mr-page.monitor-mode .rpa-hero .rpa-kpi-n{font-size:1.05rem}
+/* mr-tabs 视觉跟 .st-bar 对齐 */
+.mr-tabs{display:flex;gap:.25rem;padding:0;border:none;border-bottom:2px solid var(--bd);background:transparent;backdrop-filter:none;border-radius:0;flex-wrap:wrap;position:sticky;top:0;z-index:50}
+.mr-tab{padding:.55rem 1.15rem;border:none;background:transparent;color:var(--t2);font-size:.875rem;font-weight:600;border-radius:8px 8px 0 0;border-bottom:2px solid transparent;margin-bottom:-2px;cursor:pointer;transition:all .15s;box-shadow:none}
+.mr-tab:hover{color:var(--t);background:var(--input)}
+.mr-tab.active{color:var(--p);border-bottom:2px solid var(--p);background:var(--card);box-shadow:none}
+.mr-tab.active::after{display:none}
 </style>
+{# 统一 RPA 组件库（4 平台共用）#}
+{% include "_rpa_shared_styles.html" %}
 {% endblock %}
 {% block content %}
+{# 统一 RPA JS 工具库 #}
+{% include "_rpa_shared_scripts.html" %}
 <div class="mr-page">
-  <div class="mr-head">
-    <div class="mr-title">
-      <span class="mr-status-dot" id="mr-status-dot"></span>
-      <div>
-        <h1>Messenger RPA 运营台</h1>
-        <div class="mr-sub" id="mr-status-text">正在读取运行状态...</div>
+  {# ══ Hero（统一 4 平台样式）══ #}
+  <div class="rpa-hero">
+    <div class="rpa-hero-avatar theme-messenger">
+      <svg viewBox="0 0 24 24" fill="#fff"><path d="M12 2C6.477 2 2 6.145 2 11.259c0 2.913 1.454 5.512 3.726 7.21V22l3.405-1.869c.91.252 1.872.388 2.869.388 5.523 0 10-4.145 10-9.259S17.523 2 12 2zm.997 12.467l-2.546-2.715-4.97 2.715 5.467-5.804 2.61 2.715 4.905-2.715-5.466 5.804z"/></svg>
+    </div>
+    <div class="rpa-hero-info">
+      <div class="rpa-hero-name">
+        <span class="rpa-status-dot neutral" id="mr-status-dot"></span>
+        <span>Messenger RPA 运营台</span>
       </div>
+      <div class="rpa-hero-sub" id="mr-status-text">正在读取运行状态…</div>
+    </div>
+    <div class="rpa-kpi-row">
+      <div class="rpa-kpi"><span class="rpa-kpi-n amber" id="kpi-pending">0</span><span class="rpa-kpi-l">⚠️ 待审批</span></div>
+      <div class="rpa-kpi"><span class="rpa-kpi-n" id="kpi-sent">0</span><span class="rpa-kpi-l">📤 24h 已发</span></div>
+      <div class="rpa-kpi"><span class="rpa-kpi-n green" id="kpi-high">0</span><span class="rpa-kpi-l">⭐ 高价值</span></div>
+      <div class="rpa-kpi"><span class="rpa-kpi-n" id="kpi-online" style="color:#8b5cf6">0/0</span><span class="rpa-kpi-l">📱 在线账号</span></div>
+      <div class="rpa-kpi"><span class="rpa-kpi-n" id="kpi-runs">0</span><span class="rpa-kpi-l">🔄 最近运行</span></div>
+      <div class="rpa-kpi"><span class="rpa-kpi-n" id="kpi-line">--</span><span class="rpa-kpi-l">💚 LINE 转化</span></div>
     </div>
   </div>
 
-  <!-- B6-P1: 美化 KPI 卡片 — 加色块 + 图标 + 大数字 + 含义提示 -->
-  <div class="mr-kpis">
-    <div class="mr-kpi" style="border-left:4px solid #f59e0b;background:linear-gradient(135deg,rgba(245,158,11,0.08),var(--input))" title="等待运营审核的待发消息数">
-      <span class="mr-kpi-value" id="kpi-pending" style="color:#f59e0b;font-size:1.6rem">0</span>
-      <span class="mr-kpi-label">⚠️ 待审批</span>
-    </div>
-    <div class="mr-kpi" style="border-left:4px solid #2d6cdf;background:linear-gradient(135deg,rgba(45,108,223,0.08),var(--input))" title="过去 24 小时 AI 已自动发出的回复数">
-      <span class="mr-kpi-value" id="kpi-sent" style="color:#2d6cdf;font-size:1.6rem">0</span>
-      <span class="mr-kpi-label">📤 24h 已发</span>
-    </div>
-    <div class="mr-kpi" style="border-left:4px solid #10b981;background:linear-gradient(135deg,rgba(16,185,129,0.08),var(--input))" title="评分较高的客户数 — 优先跟进">
-      <span class="mr-kpi-value" id="kpi-high" style="color:#10b981;font-size:1.6rem">0</span>
-      <span class="mr-kpi-label">⭐ 高价值客户</span>
-    </div>
-    <div class="mr-kpi" style="border-left:4px solid #8b5cf6;background:linear-gradient(135deg,rgba(139,92,246,0.08),var(--input))" title="当前在线/已配置的 messenger 账号">
-      <span class="mr-kpi-value" id="kpi-online" style="color:#8b5cf6;font-size:1.6rem">0/0</span>
-      <span class="mr-kpi-label">📱 可运行账号</span>
-    </div>
-    <div class="mr-kpi" style="border-left:4px solid #94a3b8;background:linear-gradient(135deg,rgba(148,163,184,0.05),var(--input))" title="最近的运行轮数（每轮一次 AI 决策）">
-      <span class="mr-kpi-value" id="kpi-runs" style="font-size:1.4rem">0</span>
-      <span class="mr-kpi-label">🔄 最近运行</span>
-    </div>
-    <div class="mr-kpi" style="border-left:4px solid #ef4444;background:linear-gradient(135deg,rgba(239,68,68,0.05),var(--input))" title="成功转化为 LINE 客户的比率">
-      <span class="mr-kpi-value" id="kpi-line" style="font-size:1.4rem">--</span>
-      <span class="mr-kpi-label">💚 LINE 转化率</span>
+  <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.7rem;flex-wrap:wrap">
+    <button class="btn-p" id="btn-trigger">▶ 立即触发一轮</button>
+    <button class="btn-sec" id="btn-pause">⏸ 暂停</button>
+    <button class="btn-sec" id="btn-resume" style="display:none">▶ 立即恢复</button>
+    <button class="btn-sec" id="btn-send-manual" title="主动给指定会话发送一条消息（入队，runner 自动处理）" onclick="mrOpenSendManual()">✉ 手动发送</button>
+  </div>
+
+  <!-- P28: 手动发送模态框 -->
+  <div id="mr-send-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;align-items:center;justify-content:center" onclick="if(event.target===this)mrCloseSendManual()">
+    <div style="background:var(--card);border:1px solid var(--bd2);border-radius:14px;padding:1.4rem 1.6rem;width:min(460px,92vw);box-shadow:0 12px 40px rgba(0,0,0,.3)">
+      <div style="display:flex;align-items:center;gap:.7rem;margin-bottom:1rem">
+        <strong style="font-size:1rem">手动发送消息</strong>
+        <button onclick="mrCloseSendManual()" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:1.2rem;color:var(--t3)">✕</button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:.6rem">
+        <label style="font-size:.8rem;color:var(--t2);display:flex;flex-direction:column;gap:.25rem">
+          Chat Key <span style="font-size:.72rem;color:var(--t3)">(必填，例：messenger_rpa:name:Alice)</span>
+          <input id="mr-sm-chat-key" class="f-inp" type="text" placeholder="messenger_rpa:name:Alice">
+        </label>
+        <label style="font-size:.8rem;color:var(--t2);display:flex;flex-direction:column;gap:.25rem">
+          对方显示名 <span style="font-size:.72rem;color:var(--t3)">(可选，便于查询)</span>
+          <input id="mr-sm-peer-name" class="f-inp" type="text" placeholder="Alice">
+        </label>
+        <label style="font-size:.8rem;color:var(--t2);display:flex;flex-direction:column;gap:.25rem">
+          消息内容 <span style="font-size:.72rem;color:var(--t3)">(必填)</span>
+          <textarea id="mr-sm-text" class="f-inp" rows="3" style="resize:vertical" placeholder="你好，这是一条手动发送的消息"></textarea>
+        </label>
+        <div id="mr-sm-msg" style="font-size:.78rem;min-height:1.2em"></div>
+        <div style="display:flex;gap:.5rem;justify-content:flex-end">
+          <button class="btn-sec btn-sm" onclick="mrCloseSendManual()">取消</button>
+          <button class="btn-p btn-sm" id="mr-sm-submit" onclick="mrSubmitSendManual()">入队发送</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -622,6 +661,10 @@ body:has(.mr-page.monitor-mode) .wrap{padding:.65rem .85rem 1.5rem}
   </section>
 
   <section class="mr-view" id="view-personas">
+    <div style="background:rgba(91,124,246,.08);border:1px solid rgba(91,124,246,.2);border-radius:10px;padding:.6rem 1rem;margin-bottom:.9rem;font-size:.82rem;display:flex;align-items:center;gap:.7rem">
+      <span>🎭</span>
+      <span>人设统一管理入口已迁移至 <a href="/personas" style="color:var(--p);font-weight:600">人设工作室（/personas）</a>，支持全渠道（Telegram / Messenger / WhatsApp）账号人设路由查看与编辑。此处仅保留 Messenger 策略状态视图。</span>
+    </div>
     <div class="mr-strategy-hero" id="strategy-hero">
       <div class="mr-strategy-card"><b>--</b><span>策略账号</span></div>
       <div class="mr-strategy-card"><b>--</b><span>自动队列</span></div>
@@ -665,20 +708,15 @@ body:has(.mr-page.monitor-mode) .wrap{padding:.65rem .85rem 1.5rem}
       <div class="mr-panel">
         <div class="mr-panel-head">
           <div>
-            <h2 class="mr-panel-title">🎭 人设管理</h2>
-            <div class="mr-panel-sub">为不同客户配置不同回复风格 · 点击卡片右侧"编辑"打开详细配置</div>
+            <h2 class="mr-panel-title">🎭 已加载人设</h2>
+            <div class="mr-panel-sub">PersonaManager 当前 profile 状态 · 编辑请前往人设工作室</div>
           </div>
           <div style="display:flex;gap:8px">
-            <button class="btn btn-primary" id="btn-open-chat-binding-mgr" style="background:#10b981;border-color:#10b981" title="给每个 chat 单独指定人设 / 批量绑定">🎭 单聊人设管理</button>
-            <button class="btn btn-primary" id="btn-save-personas" title="保存当前所有人设的修改">💾 保存全部</button>
+            <button class="btn btn-primary" id="btn-open-chat-binding-mgr" style="background:#10b981;border-color:#10b981" title="给每个 chat 单独指定人设 / 批量绑定">🎭 单聊绑定</button>
+            <a href="/personas" class="btn btn-primary" style="text-decoration:none">✏️ 编辑人设</a>
           </div>
         </div>
         <div id="persona-preview" class="mr-stack"><div class="mr-empty">加载中...</div></div>
-        <div class="mr-actions" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--bd)">
-          <button class="btn" id="btn-new-persona">➕ 新增人设</button>
-          <button class="btn" id="btn-copy-persona">📋 复制当前默认人设</button>
-        </div>
-        <textarea id="personas-json" class="mr-textarea" spellcheck="false" style="display:none;margin-top:.75rem"></textarea>
       </div>
       <div class="mr-panel">
         <div class="mr-panel-head">
@@ -814,6 +852,7 @@ body:has(.mr-page.monitor-mode) .wrap{padding:.65rem .85rem 1.5rem}
       <!-- sub-tab nav -->
       <div class="dc-bar" style="display:flex;gap:6px;border-bottom:1px solid var(--bd);padding:0 0 0 4px;margin-bottom:14px">
         <button class="dc-tab active" data-dc="runs">📋 运行记录</button>
+        <button class="dc-tab" data-dc="history">💬 聊天历史</button>
         <button class="dc-tab" data-dc="cost">💰 成本看板</button>
         <button class="dc-tab" data-dc="variants">🧪 A/B 人设效果</button>
         <button class="dc-tab" data-dc="accounts-active">📱 账号活跃</button>
@@ -824,6 +863,33 @@ body:has(.mr-page.monitor-mode) .wrap{padding:.65rem .85rem 1.5rem}
       <div class="dc-pane active" data-dc-pane="runs">
         <div class="mr-panel-sub" style="margin-bottom:8px">最近 80 条 step 事件（打开聊天 / 生成 / 发送 / 跳过等）</div>
         <div id="runs-table"><div class="mr-empty">加载中...</div></div>
+      </div>
+
+      <!-- pane: 聊天历史 (P9-D) -->
+      <div class="dc-pane" data-dc-pane="history" style="display:none">
+        <div class="mr-panel-sub" style="margin-bottom:10px">跨联系人全文检索 + 意图分布统计（覆盖 30 天 / 上限 5 万条历史）</div>
+        <div style="display:flex;gap:.6rem;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+          <input id="mr-hist-q" type="text" placeholder="🔍 检索聊天历史关键词…"
+                 style="flex:1;min-width:220px;padding:.5rem .75rem;background:var(--card);border:1px solid var(--bd);border-radius:8px;font-size:.85rem;color:var(--t1)">
+          <select id="mr-hist-q-intent" style="padding:.5rem .65rem;background:var(--card);border:1px solid var(--bd);border-radius:8px;font-size:.8rem;color:var(--t2)">
+            <option value="">全部意图</option>
+            <option value="purchase">购买</option>
+            <option value="support">售后</option>
+            <option value="inquiry">咨询</option>
+            <option value="greeting">问候</option>
+            <option value="general">通用</option>
+          </select>
+        </div>
+        <div id="mr-hist-results" style="display:none;max-height:380px;overflow-y:auto;border:1px solid var(--bd);border-radius:8px;margin-bottom:18px"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <h3 style="margin:0;font-size:.95rem;color:var(--t1)">📊 意图分布</h3>
+          <div style="display:flex;gap:.3rem">
+            <button class="btn btn-xs rpa-win-btn" data-h="24">24h</button>
+            <button class="btn btn-xs rpa-win-btn active" data-h="168">7d</button>
+            <button class="btn btn-xs rpa-win-btn" data-h="720">30d</button>
+          </div>
+        </div>
+        <div id="mr-intent-body" style="padding:.4rem 0">加载中…</div>
       </div>
 
       <!-- pane: 成本看板 -->
@@ -1302,6 +1368,29 @@ body:has(.mr-page.monitor-mode) .wrap{padding:.65rem .85rem 1.5rem}
         </div>
       </details>
 
+      <!-- P28: 手动发送队列 -->
+      <div class="mr-panel" id="mr-sendq-card" style="margin-top:12px">
+        <div class="mr-panel-head">
+          <div>
+            <h2 class="mr-panel-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;vertical-align:middle;margin-right:6px"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              手动发送队列
+            </h2>
+            <div class="mr-panel-sub"><span id="mr-sendq-count"></span></div>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <label style="font-size:.75rem;display:flex;align-items:center;gap:4px">
+              <input type="checkbox" id="mr-sendq-include-done" onchange="loadMrSendQueue()"> 含已完成
+            </label>
+            <button class="btn" style="font-size:.72rem;padding:.25rem .55rem" onclick="loadMrSendQueue()">刷新</button>
+            <button class="btn btn-primary" style="font-size:.72rem;padding:.25rem .55rem" onclick="mrOpenSendManual()">+ 新建</button>
+          </div>
+        </div>
+        <div id="mr-sendq-body" style="font-size:.82rem;padding:0 16px 12px">
+          <div class="mr-empty" style="padding:1rem">加载中…</div>
+        </div>
+      </div>
+
       <!-- 保存按钮（sticky 底部） -->
       <div style="margin-top:14px;padding:12px 16px;background:rgba(15,23,42,.6);border:1px solid var(--bd);border-radius:8px;display:flex;align-items:center;gap:12px;position:sticky;bottom:0;z-index:5">
         <span style="font-size:12px;color:var(--t3);flex:1">⚠ 这些是事故级参数，保存前请确认理解每项含义</span>
@@ -1416,6 +1505,15 @@ body:has(.mr-page.monitor-mode) .wrap{padding:.65rem .85rem 1.5rem}
   };
   const splitCsv = (s) => String(s || '').split(',').map(x => x.trim()).filter(Boolean);
   const joinCsv = (v) => Array.isArray(v) ? v.join(', ') : String(v || '');
+  // P11-A: 语言旗帜映射
+  const _LANG_FLAGS = {
+    'zh-cn':'🇨🇳','zh':'🇨🇳','en':'🇺🇸','de':'🇩🇪','ja':'🇯🇵','ko':'🇰🇷',
+    'fr':'🇫🇷','es':'🇪🇸','ar':'🇸🇦','ru':'🇷🇺','hi':'🇮🇳',
+    'it':'🇮🇹','pt':'🇧🇷','nl':'🇳🇱','pl':'🇵🇱','tr':'🇹🇷','cs':'🇨🇿','hu':'🇭🇺',
+  };
+  const _langBadge = (rl) => rl
+    ? `<span class="mr-lang-badge" style="font-size:.66rem;padding:.06rem .28rem" title="回复语言">${_LANG_FLAGS[rl]||'🌐'} ${esc(rl)}</span>`
+    : '';
 
   // B6-P6: toast 升级 — 4 类型 + icon + 关闭按钮 + 错误同步入历史
   const ICONS = {ok:'✓', err:'✕', warn:'⚠', info:'ⓘ'};
@@ -1667,7 +1765,7 @@ body:has(.mr-page.monitor-mode) .wrap{padding:.65rem .85rem 1.5rem}
       st = await apiGet('/api/messenger-rpa/status');
     } catch(e) {
       qs('#mr-status-text').textContent = '状态读取失败: ' + e.message;
-      qs('#mr-status-dot').style.background = 'var(--red)';
+      qs('#mr-status-dot').className = 'rpa-status-dot err';
       return;
     }
     state.status = st;
@@ -1675,7 +1773,7 @@ body:has(.mr-page.monitor-mode) .wrap{padding:.65rem .85rem 1.5rem}
     const text = qs('#mr-status-text');
     const running = !!st.running;
     const paused = st.paused_until && st.paused_until > Date.now() / 1000;
-    dot.style.background = paused ? 'var(--amber)' : running ? 'var(--green)' : 'var(--red)';
+    dot.className = 'rpa-status-dot' + (paused ? ' paused' : running ? '' : ' err');
     dot.style.color = dot.style.background;
     if (!st.available) {
       text.textContent = st.hint || 'Messenger 服务未注入';
@@ -2480,113 +2578,73 @@ body:has(.mr-page.monitor-mode) .wrap{padding:.65rem .85rem 1.5rem}
   }
 
   async function refreshPersonas(){
-    let p;
+    const root = qs('#persona-preview');
+    let pmData, mrpaData;
     try {
-      p = await apiGet('/api/messenger-rpa/personas');
+      [pmData, mrpaData] = await Promise.allSettled([
+        apiGet('/api/personas/profiles'),
+        apiGet('/api/messenger-rpa/personas'),
+      ]).then(([a, b]) => [a.value, b.value]);
     } catch(e) {
-      qs('#persona-preview').innerHTML = `<div class="mr-empty">人设读取失败: ${esc(e.message)}</div>`;
+      if (root) root.innerHTML = `<div class="mr-empty">人设读取失败: ${esc(e.message)}</div>`;
       return;
     }
-    state.personas = p;
-    const rp = p.reply_profiles || {};
-    qs('#personas-json').value = JSON.stringify(rp, null, 2);
-    renderPersonas(rp);
+    // Store PM profiles for chat-binding manager dropdowns
+    state.pmProfiles = Object.values((pmData || {}).profiles || {});
+    state.personas = mrpaData;
+    renderPersonas(pmData || {}, (mrpaData || {}).reply_profiles || {});
     if (state.bindings) renderBindings(state.bindings);
   }
 
-  function renderPersonas(rp){
+  function renderPersonas(pmData, mrpaRp){
     const root = qs('#persona-preview');
-    const profiles = rp.profiles || [];
+    const profiles = state.pmProfiles || [];
     if (!profiles.length) {
-      root.innerHTML = '<div class="mr-empty">暂无人设配置</div>';
+      root.innerHTML = `<div class="mr-empty">暂无 PM 人设 · <a href="/personas" style="color:var(--p)">去添加</a></div>`;
       return;
     }
-    // P0-C：顶部活跃徽章 — 让运营随时能看到"现在跑的是哪个人设"，告别盲改
-    const _defId = rp.default || '';
-    const _defP = profiles.find(x => x && x.id === _defId);
-    const _defName = (_defP && (_defP.persona || {}).name) || _defId || '未设置';
-    const _defLang = (_defP && _defP.language) || 'auto';
+    const mrpaProfiles = (mrpaRp.profiles || []);
+    const defaultId = mrpaRp.default || '';
+    // _activeBanner: show currently active Messenger default persona
+    const _defId = defaultId;
+    const _defPM = profiles.find(x => (x.id || x.name) === _defId);
+    const _defName = (_defPM && _defPM.name) || _defId || '未设置';
     const _activeBanner = `<div class="mr-persona-active" style="padding:10px 14px;border:1px solid #2d6cdf;border-radius:8px;background:rgba(45,108,223,0.08);margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <span style="font-weight:600">🎭 当前活跃人设</span>
+        <span style="font-weight:600">🎭 Messenger 默认人设</span>
         <span class="mr-badge sent">${esc(_defId || '—')}</span>
-        <span class="mr-muted">${esc(_defName)} · ${esc(_defLang)}</span>
-        <span class="mr-muted" style="margin-left:auto;font-size:12px">运行时已加载 · 修改后即时生效</span>
+        <span class="mr-muted">${esc(_defName)}</span>
+        <a href="/personas" style="margin-left:auto;font-size:11px;color:var(--p)">在人设工作室编辑 →</a>
       </div>`;
-    // 中文化语言显示
+    // P2-D: Read-only PM profile cards; editing is exclusively via /personas Studio
     const LANG_LABELS = {auto:'自动跟随', ja:'日语', en:'英语', zh:'中文', ko:'韩语'};
-    // 中文化背景字段
-    const BG_LABELS = {
-      age_range:'年龄', occupation:'职业', work_years:'工作年限',
-      residence_area:'居住地', hometown_area:'故乡', marital_status:'婚姻',
-      child:'子女', hobbies:'爱好', housing:'住房', overseas:'海外经历',
-      gender:'性别', personality:'性格', interests:'兴趣',
-    };
     root.innerHTML = _activeBanner + profiles.map(p => {
-      const persona = p.persona || {};
-      const speaking = persona.speaking || {};
-      const forbid = speaking.forbidden_phrases || [];
-      const names = p.match_names || [];
-      const bg = persona.background || {};
-      const factBits = Object.entries(bg).slice(0, 5).map(([k,v]) => {
-        const label = BG_LABELS[k] || k;
-        const val = Array.isArray(v) ? v.join('、') : v;
-        return `${label}：${val}`;
-      });
-      const isDefault = p.id === rp.default;
-      const isDisabled = p.status === 'disabled';
-      const langLabel = LANG_LABELS[p.language] || p.language || '自动跟随';
-      const personaName = persona.name || '未命名';
+      const pid = p.id || p.name || '?';
+      const persona = p;  // PM profile IS the persona dict
+      const personaName = persona.name || p.id || '未命名';
       const role = persona.role || '';
-      const styleHint = p.style_hint || '';
-      return `<div class="mr-persona-card" style="${isDisabled ? 'opacity:0.5;' : ''}border:1px solid ${isDefault ? '#10b981' : 'var(--bd)'};border-radius:8px;padding:14px;margin-bottom:10px;background:${isDefault ? 'rgba(16,185,129,0.05)' : 'var(--input)'}">
-        <!-- 顶部：身份 + 操作按钮 -->
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;flex-wrap:wrap">
-          <div style="min-width:0;flex:1">
-            <div style="font-size:15px;font-weight:700;color:var(--t);display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-              <span style="font-size:18px">🎭</span>
-              <span>${esc(personaName)}</span>
-              ${isDefault ? '<span class="mr-badge sent" style="font-size:10px">⭐ 默认</span>' : ''}
-              ${isDisabled ? '<span class="mr-badge rejected" style="font-size:10px">已停用</span>' : ''}
+      const isImported = !!persona._mrpa_source;
+      const mrpaMatch = mrpaProfiles.find(m => (m.id || m.name) === pid);
+      const isDefault = pid === defaultId;
+      const matchNames = (mrpaMatch && mrpaMatch.match_names) || [];
+      const lang = (mrpaMatch && mrpaMatch.language) || 'auto';
+      const langLabel = LANG_LABELS[lang] || lang;
+      return `<div style="border:1px solid ${isDefault ? '#10b981' : 'var(--bd)'};border-radius:8px;padding:12px 14px;margin-bottom:8px;background:${isDefault ? 'rgba(16,185,129,0.05)' : 'var(--input)'}">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+          <div>
+            <div style="font-size:14px;font-weight:700;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+              <span>🎭 ${esc(personaName)}</span>
+              ${isDefault ? '<span class="mr-badge sent" style="font-size:10px">⭐ Messenger默认</span>' : ''}
+              ${isImported ? '<span class="mr-badge" style="font-size:10px;opacity:.7">config导入</span>' : '<span class="mr-badge" style="font-size:10px;background:rgba(91,124,246,.15);color:var(--p)">PM编辑</span>'}
               <span class="mr-badge" style="font-size:10px">${esc(langLabel)}</span>
             </div>
-            <div style="font-size:12px;color:var(--t3);margin-top:4px">ID: <code style="font-size:11px">${esc(p.id)}</code> ${role ? '· ' + esc(role) : ''}</div>
+            <div style="font-size:11px;color:var(--t3);margin-top:3px">ID: <code>${esc(pid)}</code>${role ? ' · ' + esc(role) : ''}
+              ${matchNames.length ? ' · 匹配: ' + matchNames.slice(0,3).map(n => `<span class="mr-badge" style="font-size:10px">${esc(n)}</span>`).join('') : ''}
+            </div>
           </div>
-          <div class="mr-toolbar">
-            <button class="btn btn-primary" data-persona-edit="${esc(p.id)}" style="font-size:12px">📝 编辑</button>
-            ${isDefault
-              ? `<button class="btn" disabled style="font-size:12px;opacity:.5;cursor:not-allowed" title="此人设已是默认，无需重复设置">⭐ 已是默认</button>`
-              : `<button class="btn" data-persona-default="${esc(p.id)}" style="font-size:12px" title="设为新建 chat 的默认人设">⭐ 设为默认</button>`
-            }
-            <button class="btn" data-persona-toggle="${esc(p.id)}" style="font-size:12px">${isDisabled ? '✅ 启用' : '⏸ 停用'}</button>
-            ${isDefault
-              ? `<button class="btn" disabled style="font-size:12px;opacity:.5;cursor:not-allowed;color:#ef4444;border-color:rgba(239,68,68,0.2)" title="默认人设不能删除（系统失去 fallback 会出错）— 请先把别的人设设为默认，再来删除这个">🗑 删除（受保护）</button>`
-              : `<button class="btn" data-persona-delete="${esc(p.id)}" style="font-size:12px;color:#ef4444;border-color:rgba(239,68,68,0.4)" title="永久删除此人设（不可恢复）">🗑 删除</button>`
-            }
-          </div>
+          <a href="/personas" class="btn" style="font-size:11px;text-decoration:none">✏️ 在人设工作室编辑</a>
         </div>
-        <!-- 中部：核心信息 -->
-        <div style="background:rgba(0,0,0,0.15);border-radius:6px;padding:10px;margin-bottom:8px">
-          <div style="font-size:12px;color:var(--t3);margin-bottom:4px">👥 专属客户</div>
-          <div style="font-size:13px;color:var(--t)">${Array.isArray(names) && names.length ? names.map(n => `<span class="mr-badge" style="margin-right:4px;font-size:11px">${esc(n)}</span>`).join('') : '<span class="mr-muted" style="font-style:italic">无（用作默认 fallback）</span>'}</div>
-        </div>
-        ${styleHint ? `<div style="background:rgba(0,0,0,0.15);border-radius:6px;padding:10px;margin-bottom:8px">
-          <div style="font-size:12px;color:var(--t3);margin-bottom:4px">💬 风格提示</div>
-          <div style="font-size:12px;color:var(--t2);line-height:1.6">${esc(short(styleHint, 200))}</div>
-        </div>` : ''}
-        ${factBits.length ? `<div style="background:rgba(0,0,0,0.15);border-radius:6px;padding:10px;margin-bottom:8px">
-          <div style="font-size:12px;color:var(--t3);margin-bottom:6px">📋 背景设定</div>
-          <div style="display:flex;flex-wrap:wrap;gap:6px">${factBits.map(x => `<span style="font-size:11px;padding:3px 8px;background:rgba(45,108,223,0.1);border:1px solid rgba(45,108,223,0.2);border-radius:4px;color:var(--t2)">${esc(x)}</span>`).join('')}</div>
-        </div>` : ''}
-        ${forbid.length ? `<div style="background:rgba(239,68,68,0.05);border:1px solid rgba(239,68,68,0.15);border-radius:6px;padding:8px 10px">
-          <div style="font-size:11px;color:#ef4444;margin-bottom:4px">🚫 永远不会说</div>
-          <div style="display:flex;flex-wrap:wrap;gap:4px">${forbid.slice(0,8).map(x => `<span style="font-size:10px;padding:2px 6px;background:rgba(239,68,68,0.1);border-radius:3px;color:#fca5a5">${esc(x)}</span>`).join('')}</div>
-        </div>` : ''}
       </div>`;
     }).join('');
-    qsa('[data-persona-edit]', root).forEach(btn => btn.addEventListener('click', () => openPersonaForm(btn.dataset.personaEdit)));
-    qsa('[data-persona-toggle]', root).forEach(btn => btn.addEventListener('click', () => togglePersona(btn.dataset.personaToggle)));
-    qsa('[data-persona-default]', root).forEach(btn => btn.addEventListener('click', () => setDefaultPersona(btn.dataset.personaDefault)));
-    qsa('[data-persona-delete]', root).forEach(btn => btn.addEventListener('click', () => deletePersona(btn.dataset.personaDelete).catch(e => toast(e.message, 'err'))));
   }
 
   async function deletePersona(pid){
@@ -2852,6 +2910,8 @@ body:has(.mr-page.monitor-mode) .wrap{padding:.65rem .85rem 1.5rem}
     qs('#qc-pending').textContent = pList.length;
     qs('#qc-approved').textContent = approved.length;
     qs('#qc-sent').textContent = sent.length;
+    // Q3: 浏览器 title 角标
+    if(window.rpa && window.rpa.notify) window.rpa.notify.setBadge(pList.length, 'FB 待审');
     renderApprovals(allList.slice(0, 50), tpls);
   }
 
@@ -2970,12 +3030,12 @@ body:has(.mr-page.monitor-mode) .wrap{padding:.65rem .85rem 1.5rem}
       return;
     }
     root.innerHTML = `<div class="mr-scroll tall"><table class="mr-table">
-      <thead><tr><th>时间</th><th>联系人</th><th>步骤</th><th>结果</th><th>对方消息</th><th>回复/错误</th></tr></thead>
+      <thead><tr><th>时间</th><th>联系人</th><th>步骤</th><th>语言</th><th>对方消息</th><th>回复/错误</th></tr></thead>
       <tbody>${list.map(run => `<tr>
         <td>${fmtTs(run.ts)}</td>
         <td><b>${esc(run.chat_name || run.chat_key || '--')}</b></td>
         <td><span class="mr-badge ${run.ok ? 'sent' : 'rejected'}">${esc(run.step || '--')}</span></td>
-        <td>${run.ok ? '<span class="mr-badge sent">ok</span>' : '<span class="mr-badge rejected">fail</span>'}</td>
+        <td>${_langBadge(run.reply_lang || '')}</td>
         <td>${esc(short(run.peer_text || '', 120))}</td>
         <td>${esc(short(run.reply_text || run.error || '', 160))}</td>
       </tr>`).join('')}</tbody>
@@ -2985,7 +3045,7 @@ body:has(.mr-page.monitor-mode) .wrap{padding:.65rem .85rem 1.5rem}
   function runRowCompact(run){
     return `<div class="mr-row">
       <div style="min-width:0">
-        <div class="mr-name">${esc(run.chat_name || run.chat_key || '--')}</div>
+        <div class="mr-name">${esc(run.chat_name || run.chat_key || '--')} ${run.ok && run.reply_lang ? _langBadge(run.reply_lang) : ''}</div>
         <div class="mr-muted">${esc(short(run.peer_text || run.error || '', 70))}</div>
       </div>
       <div style="text-align:right">
@@ -3005,8 +3065,25 @@ body:has(.mr-page.monitor-mode) .wrap{padding:.65rem .85rem 1.5rem}
     });
     loadDcPane(name).catch(e => toast(e.message, 'err'));
   }
+  // P9-D: 聊天历史面板（lazy init，仅首次激活时挂载工厂）
+  let _mrHistoryInited = false;
+  function _initMrHistoryOnce(){
+    if (_mrHistoryInited) return;
+    if (!(window.rpa && window.rpa.analytics)) return;
+    _mrHistoryInited = true;
+    rpa.analytics.initSearch({
+      inputId:'mr-hist-q', resultId:'mr-hist-results',
+      apiBase:'/api/messenger-rpa', days:30, limit:30,
+      onPick:function(ck){
+        // P10-A: 打开通用会话抽屉
+        if(window.rpa && rpa.analytics) rpa.analytics.openDetail({apiBase:'/api/messenger-rpa', chatKey:ck});
+      }
+    });
+    rpa.analytics.intentChart({bodyId:'mr-intent-body', apiBase:'/api/messenger-rpa', defaultHours:168});
+  }
   async function loadDcPane(name){
     if (name === 'runs') return refreshRuns();
+    if (name === 'history'){ _initMrHistoryOnce(); return; }
     if (name === 'cost') return refreshDcCost();
     if (name === 'variants') return refreshDcVariants();
     if (name === 'accounts-active') return refreshDcAccounts();
@@ -4480,7 +4557,10 @@ body:has(.mr-page.monitor-mode) .wrap{padding:.65rem .85rem 1.5rem}
         <div class="mr-lead-meta">
           <span>${esc(acct || '账号未识别')}</span>
           <span>persona ${esc(x.persona_id || '--')}</span>
-          <span>${esc(x.reply_lang || '--')}</span>
+          ${x.forced_lang
+            ? `<span class="mr-lang-badge locked" title="语言已锁定，点击解锁" onclick="msgrLangUnlock(event,'${esc(x.chat_key)}')">🔒 ${esc(x.forced_lang)}</span>`
+            : `<span class="mr-lang-badge" title="自动检测语言，点击锁定" onclick="msgrLangLockPrompt(event,'${esc(x.chat_key)}','${esc(x.reply_lang||'')}')">🌐 ${esc(x.reply_lang||'--')}</span>`
+          }
         </div>
         <div class="mr-lead-line"><b>摘要：</b>${esc(short(x.summary_short || '', 170))}</div>
         <div class="mr-lead-line"><b>最近：</b>${esc(short(x.last_peer_text || '', 135))}</div>
@@ -4934,16 +5014,16 @@ body:has(.mr-page.monitor-mode) .wrap{padding:.65rem .85rem 1.5rem}
     if (!leads.length) return toast('没有 leads，请先刷新', 'err');
     const accounts = [...new Set(leads.map(l => l.account_id || '').filter(Boolean))];
     if (!accounts.length) return toast('leads 都没 account_id，无法批量', 'err');
-    const profiles = (((state.personas || {}).reply_profiles || {}).profiles) || [];
-    if (!profiles.length) return toast('reply_profiles 为空', 'err');
+    const profiles = (state.pmProfiles || (((state.personas || {}).reply_profiles || {}).profiles) || []);
+    if (!profiles.length) return toast('暂无人设，请先在 /personas 创建', 'err');
     const accountId = prompt(
       `选择一个账号批量绑定。\n\n可选 account_id:\n${accounts.map(a => '  - ' + a).join('\n')}\n\n输入 account_id:`,
       accounts[0],
     );
     if (!accountId) return;
     const profileId = prompt(
-      `给账号 "${accountId}" 下所有 chat 统一绑定人设。\n\n可选 reply_profile_id:\n${profiles.map(p => '  - ' + p.id).join('\n')}\n\n输入 reply_profile_id:`,
-      profiles[0].id,
+      `给账号 "${accountId}" 下所有 chat 统一绑定人设。\n\n可选 reply_profile_id:\n${profiles.map(p => '  - ' + (p.id||p.name)).join('\n')}\n\n输入 reply_profile_id:`,
+      (profiles[0] && (profiles[0].id||profiles[0].name)) || '',
     );
     if (!profileId) return;
     const targetChats = leads.filter(l => (l.account_id || '') === accountId);
@@ -5525,8 +5605,8 @@ body:has(.mr-page.monitor-mode) .wrap{padding:.65rem .85rem 1.5rem}
   async function bulkBindSelected() {
     const checks = [...listEl.querySelectorAll('.binding-mgr-check:checked')];
     if (!checks.length) return alert('请先勾选 chat');
-    const profiles = (((window.state || {}).personas || {}).reply_profiles || {}).profiles || [];
-    const profileId = prompt(`批量为 ${checks.length} 个 chat 绑定人设。\n可选:\n${profiles.map(p => '  - ' + p.id).join('\n')}\n\n输入 reply_profile_id（留空 = 解绑）:`, profiles[0]?.id || '');
+    const profiles = (window.state || {}).pmProfiles || (((window.state || {}).personas || {}).reply_profiles || {}).profiles || [];
+    const profileId = prompt(`批量为 ${checks.length} 个 chat 绑定人设。\n可选:\n${profiles.map(p => '  - ' + (p.id||p.name)).join('\n')}\n\n输入 reply_profile_id（留空 = 解绑）:`, (profiles[0] && (profiles[0].id||profiles[0].name)) || '');
     if (profileId === null) return;
     const bindings = checks.map(c => ({chat_name: c.dataset.chatName, account_id: c.dataset.accountId || '', reply_profile_id: profileId.trim()}));
     try {
@@ -5549,10 +5629,10 @@ body:has(.mr-page.monitor-mode) .wrap{padding:.65rem .85rem 1.5rem}
   async function bindAllAccount() {
     const accounts = [...new Set(_bindingMgrLeads.map(l => l.account_id || '').filter(Boolean))];
     if (!accounts.length) return alert('没账号信息');
-    const profiles = (((window.state || {}).personas || {}).reply_profiles || {}).profiles || [];
+    const profiles = (window.state || {}).pmProfiles || (((window.state || {}).personas || {}).reply_profiles || {}).profiles || [];
     const accountId = prompt(`选账号:\n${accounts.map(a => '  - ' + a).join('\n')}`, accounts[0]);
     if (!accountId) return;
-    const profileId = prompt(`给账号 "${accountId}" 下所有 chat 统一绑定人设:\n${profiles.map(p => '  - ' + p.id).join('\n')}`, profiles[0]?.id || '');
+    const profileId = prompt(`给账号 "${accountId}" 下所有 chat 统一绑定人设:\n${profiles.map(p => '  - ' + (p.id||p.name)).join('\n')}`, (profiles[0] && (profiles[0].id||profiles[0].name)) || '');
     if (!profileId) return;
     const target = _bindingMgrLeads.filter(l => (l.account_id || '') === accountId);
     if (!(await confirm2(`将给账号 "${accountId}" 下 ${target.length} 个 chat 全部绑定 "${profileId}"。继续？`))) return;
@@ -5582,5 +5662,157 @@ body:has(.mr-page.monitor-mode) .wrap{padding:.65rem .85rem 1.5rem}
   // 点 modal 背景关闭
   modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
 })();
+
+// ── P28: 手动发送队列 ────────────────────────────────────
+const _SQ_STATUS_LABEL={queued:'待发',processing:'发送中',sent:'已发',failed:'失败',cancelled:'已取消'};
+const _SQ_STATUS_COLOR={queued:'#92400e',processing:'#1e3a8a',sent:'#166534',failed:'#7f1d1d',cancelled:'#374151'};
+const _SQ_STATUS_BG={queued:'#fde68a',processing:'#bfdbfe',sent:'#bbf7d0',failed:'#fecaca',cancelled:'#e5e7eb'};
+
+async function loadMrSendQueue(){
+  const body=document.getElementById('mr-sendq-body');
+  const countEl=document.getElementById('mr-sendq-count');
+  if(!body) return;
+  const done=document.getElementById('mr-sendq-include-done')?.checked?1:0;
+  try{
+    const r=await fetch('/api/messenger-rpa/send-queue?limit=50&include_done='+done);
+    const d=await r.json();
+    if(!d.items||!d.items.length){
+      body.innerHTML='<div class="mr-empty" style="padding:1rem">队列为空</div>';
+      countEl.textContent='';
+      return;
+    }
+    countEl.textContent='（'+d.count+' 条）';
+    body.innerHTML=d.items.map(it=>{
+      const st=it.status||'queued';
+      const lab=_SQ_STATUS_LABEL[st]||st;
+      const bg=_SQ_STATUS_BG[st]||'#e5e7eb';
+      const col=_SQ_STATUS_COLOR[st]||'#374151';
+      const canCancel=(st==='queued');
+      return `<div style="border:1px solid var(--bd);border-radius:8px;padding:10px 12px;margin-bottom:8px;background:var(--input)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <span style="font-weight:600;font-size:.82rem">${esc(it.peer_name||it.chat_key)}</span>
+          <span style="font-size:.7rem;padding:.1rem .4rem;border-radius:6px;background:${bg};color:${col}">${lab}</span>
+        </div>
+        <div style="font-size:.76rem;color:var(--t2);margin-bottom:4px;white-space:pre-wrap">${esc(it.text)}</div>
+        <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
+          <span style="font-size:.68rem;color:var(--t3)">#${it.id} · ${new Date(it.ts*1000).toLocaleString('zh-CN',{hour12:false})}${it.error?' · <span style="color:#ef4444">'+esc(it.error)+'</span>':''}</span>
+          ${canCancel?`<button class="btn" style="font-size:.68rem;padding:.15rem .45rem;margin-left:auto" onclick="mrCancelSendItem(${it.id})">取消</button>`:''}
+        </div>
+      </div>`;
+    }).join('');
+  }catch(e){ body.innerHTML='<div style="color:var(--red);font-size:.78rem">加载失败: '+esc(String(e))+'</div>'; }
+}
+
+async function mrCancelSendItem(id){
+  if(!confirm('确认取消发送任务 #'+id+'？')) return;
+  try{
+    const r=await fetch('/api/messenger-rpa/send-queue/'+id+'/cancel',{method:'POST'});
+    if(!r.ok){ const t=await r.json(); alert('取消失败: '+(t.detail||r.status)); return; }
+    loadMrSendQueue();
+  }catch(e){ alert('请求失败: '+e); }
+}
+
+function mrOpenSendManual(){
+  const m=document.getElementById('mr-send-modal');
+  m.style.display='flex';
+  document.getElementById('mr-sm-chat-key').value='';
+  document.getElementById('mr-sm-peer-name').value='';
+  document.getElementById('mr-sm-text').value='';
+  document.getElementById('mr-sm-msg').textContent='';
+  document.getElementById('mr-sm-msg').style.color='';
+  setTimeout(()=>document.getElementById('mr-sm-chat-key').focus(),80);
+}
+function mrCloseSendManual(){
+  document.getElementById('mr-send-modal').style.display='none';
+}
+async function mrSubmitSendManual(){
+  const chatKey=document.getElementById('mr-sm-chat-key').value.trim();
+  const peerName=document.getElementById('mr-sm-peer-name').value.trim();
+  const text=document.getElementById('mr-sm-text').value.trim();
+  const msgEl=document.getElementById('mr-sm-msg');
+  const btn=document.getElementById('mr-sm-submit');
+  if(!chatKey){ msgEl.textContent='chat_key 必填'; msgEl.style.color='var(--red)'; return; }
+  if(!text){ msgEl.textContent='消息内容不能为空'; msgEl.style.color='var(--red)'; return; }
+  btn.disabled=true; msgEl.textContent='入队中…'; msgEl.style.color='var(--t2)';
+  try{
+    const r=await fetch('/api/messenger-rpa/send-manual',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({chat_key:chatKey,peer_name:peerName,text})});
+    const d=await r.json();
+    if(!r.ok){ msgEl.textContent='失败: '+(d.detail||r.status); msgEl.style.color='var(--red)'; btn.disabled=false; return; }
+    msgEl.textContent='已入队 #'+d.item_id; msgEl.style.color='var(--green)';
+    setTimeout(()=>{ mrCloseSendManual(); loadMrSendQueue(); }, 900);
+  }catch(e){ msgEl.textContent='请求异常: '+e; msgEl.style.color='var(--red)'; }
+  btn.disabled=false;
+}
+
+// 切换到 ops tab 时自动加载发送队列
+const _origSetSettingsTab = setSettingsTab;
+setSettingsTab = function(stId) {
+  _origSetSettingsTab(stId);
+  if (stId === 'ops') loadMrSendQueue();
+};
+
+// ── P6-A: Messenger 对话语言锁定 ──────────────────────────────
+const _MSGR_LANG_OPTIONS = [
+  {v:'zh',l:'🇨🇳 zh (中文)'},{v:'en',l:'🇺🇸 en (英语)'},{v:'de',l:'🇩🇪 de (德语)'},
+  {v:'ja',l:'🇯🇵 ja (日语)'},{v:'ko',l:'🇰🇷 ko (韩语)'},{v:'fr',l:'🇫🇷 fr (法语)'},
+  {v:'es',l:'🇪🇸 es (西班牙语)'},{v:'ru',l:'🇷🇺 ru (俄语)'},{v:'ar',l:'🇸🇦 ar (阿拉伯语)'},
+  {v:'hi',l:'🇮🇳 hi (印地语)'},{v:'it',l:'🇮🇹 it (意大利语)'},{v:'pt',l:'🇧🇷 pt (葡萄牙语)'},
+];
+
+function _msgrRemoveLangPopover() {
+  document.querySelectorAll('.mr-lang-popover').forEach(el => el.remove());
+}
+
+async function msgrLangLockPrompt(evt, chatKey, currentLang) {
+  evt.stopPropagation();
+  _msgrRemoveLangPopover();
+  const anchor = evt.currentTarget;
+  const pop = document.createElement('div');
+  pop.className = 'mr-lang-popover';
+  pop.style.cssText = 'position:fixed;z-index:9999;background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:.65rem .75rem;box-shadow:0 8px 24px rgba(0,0,0,.35);min-width:180px';
+  const rect = anchor.getBoundingClientRect();
+  pop.style.left = Math.min(rect.left, window.innerWidth - 200) + 'px';
+  pop.style.top = (rect.bottom + 4) + 'px';
+  pop.innerHTML = `<div style="font-size:.75rem;font-weight:600;color:var(--t);margin-bottom:.4rem">🔒 锁定语言 · ${esc(chatKey.split(':').pop()||chatKey)}</div>
+    <select id="mr-lp-sel" style="width:100%;padding:.3rem .4rem;background:var(--input);border:1px solid var(--bd2);border-radius:5px;font-size:.78rem;color:var(--t);margin-bottom:.45rem">
+      ${_MSGR_LANG_OPTIONS.map(o=>`<option value="${o.v}"${o.v===currentLang?' selected':''}>${o.l}</option>`).join('')}
+    </select>
+    <div style="display:flex;gap:.35rem">
+      <button id="mr-lp-ok" class="btn btn-p btn-xs" style="flex:1">确认锁定</button>
+      <button id="mr-lp-cancel" class="btn btn-xs">取消</button>
+    </div>`;
+  document.body.appendChild(pop);
+  const close = () => pop.remove();
+  pop.querySelector('#mr-lp-cancel').onclick = close;
+  pop.querySelector('#mr-lp-ok').onclick = async () => {
+    const lang = pop.querySelector('#mr-lp-sel').value;
+    close();
+    await _msgrSetLang(chatKey, lang);
+  };
+  setTimeout(() => document.addEventListener('click', close, {once: true}), 50);
+}
+
+async function msgrLangUnlock(evt, chatKey) {
+  evt.stopPropagation();
+  if (!confirm(`解除对 ${chatKey.split(':').pop()||chatKey} 的语言锁定？将恢复自动检测。`)) return;
+  await _msgrSetLang(chatKey, null);
+}
+
+async function _msgrSetLang(chatKey, lang) {
+  try {
+    const r = await fetch('/api/messenger-rpa/chat-lang-lock', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({chat_key: chatKey, lang: lang || null}),
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) { alert('操作失败: ' + (d.detail || d.error || r.status)); return; }
+    const msg = lang ? `已锁定 ${chatKey.split(':').pop()||chatKey} → ${lang}` : `已解锁 ${chatKey.split(':').pop()||chatKey}（恢复自动检测）`;
+    if (typeof showToast === 'function') showToast(msg, 'ok'); else alert(msg);
+    if (typeof refreshLeads === 'function') refreshLeads();
+  } catch(e) { alert('网络错误: ' + e); }
+}
 </script>
 {% endblock %}

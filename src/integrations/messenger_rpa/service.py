@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from src.integrations.line_rpa.adb_helpers import get_device_lock
 from src.integrations.messenger_rpa.account_pool import AccountRegistry
 from src.integrations.messenger_rpa.runner import MessengerRpaRunner
 from src.integrations.messenger_rpa.state_store import (
@@ -109,6 +110,116 @@ class MessengerRpaService:
         # 已推送过的超时 approval id（避免同一条重复告警）
         self._sla_alerted_ids: set = set()
         self._sla_alert_total: int = 0
+        # Step-2 migration: auto-seed PersonaManager with reply_profiles on startup
+        self._mrpa_pm_import_count: int = self._import_reply_profiles_to_pm()
+        # P1: warm-up PM chat bindings from durable SQLite chat_persona_overrides
+        self._mrpa_pm_binding_count: int = self._warmup_pm_chat_bindings()
+
+    def _import_reply_profiles_to_pm(self) -> int:
+        """One-way idempotent import: messenger_rpa.reply_profiles.profiles → PM profile store.
+
+        Each profile's ``persona`` sub-dict is upserted as a PM profile with the same ``id``.
+        Profiles imported this way carry ``_mrpa_source: true`` so the status API can count them.
+        Existing profiles with the same id are refreshed from config (config remains source-of-truth
+        until the operator explicitly edits via /personas).
+
+        Returns the number of profiles upserted.
+        """
+        try:
+            from src.utils.persona_manager import PersonaManager
+            pm = PersonaManager.get_instance()
+            rp_cfg = self._merged_cfg.get("reply_profiles") or {}
+            if not isinstance(rp_cfg, dict):
+                return 0
+            profiles = rp_cfg.get("profiles") or []
+            if not isinstance(profiles, list):
+                return 0
+            n = 0
+            for p in profiles:
+                if not isinstance(p, dict):
+                    continue
+                pid = str(p.get("id") or p.get("name") or "").strip()
+                if not pid:
+                    continue
+                persona_data = p.get("persona")
+                if not isinstance(persona_data, dict) or not persona_data:
+                    continue
+                # P2-A: If PM already has this profile WITHOUT _mrpa_source, the operator
+                # has edited it via /personas — don't overwrite their changes on restart.
+                existing = pm.get_persona_by_id(pid)
+                if existing is not None and not existing.get("_mrpa_source"):
+                    logger.debug(
+                        "[messenger_rpa] skip import profile=%r: operator-owned in PM",
+                        pid,
+                    )
+                    continue
+                entry = {**persona_data, "id": pid, "_mrpa_source": True}
+                pm.upsert_profile(pid, entry, _track_history=False)
+                n += 1
+            if n:
+                logger.info(
+                    "[messenger_rpa] reply_profiles \u5c06 %d \u4e2a profiles \u5bfc\u5165 PersonaManager\uff08\u53ef\u5728 /personas \u7f16\u8f91\uff09",
+                    n,
+                )
+            return n
+        except Exception:
+            logger.debug("[messenger_rpa] _import_reply_profiles_to_pm \u5f02\u5e38", exc_info=True)
+            return 0
+
+    def _warmup_pm_chat_bindings(self) -> int:
+        """Restore PM chat bindings from SQLite messenger_rpa_chat_persona_overrides on startup.
+
+        Without this, PM chat bindings are lost on restart and the runner falls back to
+        auto-matching (which may pick a different profile than the operator intended).
+
+        Runs after _import_reply_profiles_to_pm so that PM profiles already exist when
+        bind_chat_persona_by_profile_id is called.
+
+        Returns total number of bindings seeded into PM.
+        """
+        try:
+            from src.utils.persona_manager import PersonaManager
+            from src.integrations.messenger_rpa.state_store import mrpa_chat_cid
+            pm = PersonaManager.get_instance()
+            total = 0
+            skipped = 0
+            for ctx in self._account_registry.all_contexts():
+                try:
+                    store = ctx.state_store()
+                    mc = ctx.merged_config(self._merged_cfg)
+                    prefix = mc.get("chat_key_prefix") or "messenger_rpa"
+                    overrides = store.list_chat_persona_overrides()
+                    for ov in overrides:
+                        chat_name = str(ov.get("chat_name") or "").strip()
+                        profile_id = str(ov.get("reply_profile_id") or "").strip()
+                        if not chat_name or not profile_id:
+                            continue
+                        cid = mrpa_chat_cid(chat_name, prefix)
+                        ok = pm.bind_chat_persona_by_profile_id(str(cid), profile_id)
+                        if ok:
+                            total += 1
+                        else:
+                            skipped += 1
+                            logger.debug(
+                                "[messenger_rpa] warmup skip: profile_id=%r not in PM "
+                                "(chat=%r account=%s)",
+                                profile_id, chat_name, ctx.account_id,
+                            )
+                except Exception:
+                    logger.debug(
+                        "[messenger_rpa] warmup failed for account=%s", ctx.account_id,
+                        exc_info=True,
+                    )
+            if total or skipped:
+                logger.info(
+                    "[messenger_rpa] PM \u70ed\u542f\u52a8\u5b8c\u6210: \u7ed1\u5b9a %d \u4e2a chat persona"
+                    "\uff08\u8df3\u8fc7 %d \u4e2a profile \u672a\u5bfc\u5165\uff09",
+                    total, skipped,
+                )
+            return total
+        except Exception:
+            logger.debug("[messenger_rpa] _warmup_pm_chat_bindings \u5f02\u5e38", exc_info=True)
+            return 0
 
     def _seed_strategy_runtime_config(self) -> None:
         """Mirror local account/persona config into the strategy DB tables.
@@ -442,6 +553,7 @@ class MessengerRpaService:
         try:
             runner._account_registry = self._account_registry
             runner._account_id = ctx.account_id
+            runner._persona_ids = list(ctx.persona_ids or [])
         except Exception:
             pass
         if self._telegram_client is not None:
@@ -860,7 +972,9 @@ class MessengerRpaService:
         pool = self._account_registry.pool
         try:
             async with pool.acquire(account_id, timeout=acquire_timeout):
-                r = await runner.run_once()
+                _dev_serial = (runner._cfg.get("adb_serial") or "").strip()
+                async with get_device_lock(_dev_serial):
+                    r = await runner.run_once()
         except asyncio.TimeoutError:
             return {
                 "ok": False, "step": "pool_acquire_timeout",
@@ -1094,7 +1208,18 @@ class MessengerRpaService:
         if not self._merged_cfg.get("autostart"):
             logger.info("MessengerRpaService autostart=False，等待外部 trigger")
             return False
+        return await self._do_start()
 
+    async def force_start(self) -> bool:
+        """Web 控制面板调用：绕过 autostart 检查，只要 enabled 就拉起 loop。"""
+        if self._task and not self._task.done():
+            return True  # 已在运行
+        if not self._merged_cfg.get("enabled"):
+            logger.info("MessengerRpaService enabled=False，跳过 force_start")
+            return False
+        return await self._do_start()
+
+    async def _do_start(self) -> bool:
         # ── P7-1：leader lock 接入 ────────────────────
         # 若 ha.enabled=true，必须先抢到锁才能进入真正的 RPA 循环。
         # 未抢到则进入 standby 等待循环（低频 peek，发现原 leader 断开立即抢占）。
@@ -1150,6 +1275,10 @@ class MessengerRpaService:
         )
         logger.info("MessengerRpaService 已启动")
         return True
+
+    @property
+    def is_running(self) -> bool:
+        return bool(self._task and not self._task.done())
 
     async def stop(self) -> None:
         self._stop_evt.set()
@@ -1617,7 +1746,9 @@ class MessengerRpaService:
                 if not multi_mode:
                     # ── 单账号旧路径（100% 兼容）──
                     try:
-                        r = await self._runner.run_once()
+                        _dev_s = (self._runner._cfg.get("adb_serial") or "").strip()
+                        async with get_device_lock(_dev_s):
+                            r = await self._runner.run_once()
                         self._last_run = r
                         if r.get("ok") and r.get("step") == "sent":
                             cur_iv = min_iv
@@ -1644,6 +1775,17 @@ class MessengerRpaService:
                             "run_once 抛异常（不应该发生，已被 runner 兜底）"
                         )
                         cur_iv = min(cur_iv * mult, max_iv)
+                    # P28：手动发送队列投递
+                    try:
+                        sq_res = await self._runner.run_send_queue_deliveries(max_deliver=3)
+                        if sq_res.get("delivered") or sq_res.get("failed"):
+                            self._last_run["send_queue_deliver"] = sq_res
+                            logger.info(
+                                "[messenger_rpa] send_queue_deliver delivered=%s failed=%s",
+                                sq_res.get("delivered"), sq_res.get("failed"),
+                            )
+                    except Exception:
+                        logger.debug("run_send_queue_deliveries 失败", exc_info=True)
                     await self._sleep_or_trigger(cur_iv)
                     continue
 
@@ -1809,6 +1951,29 @@ class MessengerRpaService:
         except asyncio.TimeoutError:
             pass
 
+    # ── P28：手动发送队列 ──────────────────────────────────────
+    def enqueue_send(
+        self, *, chat_key: str, peer_name: str, text: str, created_by: str = "",
+    ) -> int:
+        """入队一条主动发送任务并立即唤醒 runner 进入下一轮。"""
+        item_id = self._state.enqueue_send(
+            chat_key=chat_key, peer_name=peer_name, text=text, created_by=created_by,
+        )
+        try:
+            self._trigger_evt.set()
+        except Exception:
+            pass
+        return item_id
+
+    def list_send_queue(self, *, limit: int = 30, include_done: bool = False) -> list:
+        return self._state.list_send_queue(limit=limit, include_done=include_done)
+
+    def get_send_queue_item(self, item_id: int):
+        return self._state.get_send_queue_item(int(item_id))
+
+    def cancel_send_queue_item(self, item_id: int) -> bool:
+        return self._state.cancel_send_queue_item(int(item_id))
+
     # ── 通知监听：新消息到达时立刻 trigger，避免 30s 轮询延迟 ──
     async def _notif_loop(self) -> None:
         """长连接监听 com.facebook.orca 通知 dump diff，新通知 → 立刻唤醒主循环。"""
@@ -1831,7 +1996,7 @@ class MessengerRpaService:
 
         # 失败重连（设备掉线时不能让 notif_loop 自己挂掉）
         backoff = 2.0
-        while not self._stop_evt.is_set():
+        while not self._stop_evt.is_set():  # noqa: SIM117
             try:
                 w = MessengerNotificationWatcher(
                     serial,

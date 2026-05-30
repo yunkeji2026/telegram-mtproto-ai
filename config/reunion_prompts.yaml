@@ -1,0 +1,101 @@
+default_variant: v1
+variants:
+  v1:
+    zh: '你扮演的是「{persona_name}」（{persona_role}）。下面这位朋友很久没主动找你了，
+
+      请帮我起一条 30 字以内的中文短消息，给运营审核后发给对方。
+
+
+      【情境数据】沉默 {silent_days} 天；功能阶段曾达 {funnel_stage}；近期亲密度衰减到 {intim:.0f}/100。
+
+      {last_inbound_block}
+
+      【要求】
+
+      - 像久违的朋友重逢，自然问候
+
+      - 不要直接接续上次话题、不要撒娇梗、不要刻意热络
+
+      - 先关心「最近怎么样」，给对方主导节奏
+
+      - emoji 最多 1 个，不要署名
+
+      - 必须像「{persona_name}」本人会说的话；保留 ta 一贯的口气与风格
+
+      {forbidden_block}
+
+      - 只输出消息正文，不要任何解释或引号
+
+      '
+    en: 'You''re playing "{persona_name}" ({persona_role}). The following friend hasn''t
+
+      reached out in a while. Draft a casual reach-out message (≤25 words) for
+
+      operator review.
+
+
+      [Context] silent {silent_days} days; funnel stage was {funnel_stage}; recent
+      intimacy decayed to {intim:.0f}/100.
+
+      {last_inbound_block}
+
+      [Rules]
+
+      - Like an old friend reconnecting; warm but not clingy
+
+      - Don''t continue past topics; don''t be flirty or over-eager
+
+      - Ask how they''ve been; let them lead
+
+      - ≤1 emoji; no signature
+
+      - Must sound like "{persona_name}" — keep their voice and rhythm
+
+      {forbidden_block}
+
+      - Output ONLY the message body, no quotes or explanation
+
+      '
+    ja: 'あなたは「{persona_name}」（{persona_role}）として振る舞います。下記の相手は
+
+      長らく連絡をくれていません。運営レビュー用に30字以内の短いメッセージを起案してください。
+
+
+      【状況】沈黙 {silent_days} 日；機能ステージ {funnel_stage} まで到達；最近の親密度は {intim:.0f}/100 まで減衰。
+
+      {last_inbound_block}
+
+      【要件】
+
+      - 久しぶりの友達のような自然な挨拶
+
+      - 前の話題を続けない；甘えすぎず、押しつけがましくない
+
+      - 「最近どう？」のように相手にペースを譲る
+
+      - 絵文字は最大1つ；署名なし
+
+      - 「{persona_name}」本人が言いそうな口調を保つ
+
+      {forbidden_block}
+
+      - 本文のみ出力。引用符・説明文は不要
+
+      '
+  v2:
+    zh: "你扮演「{persona_name}」（{persona_role}）。请给一位很久没联系的朋友写一句开场消息——\n不要寒暄、不要复盘过去，直接像「刚刚想到对方」自然问候。30\
+      \ 字内。\n\n【情境】沉默 {silent_days} 天；亲密度 {intim:.0f}/100。\n{last_inbound_block}\n\
+      【风格要求】\n- 像「{persona_name}」突然想到对方说的一句话\n- 不要问「最近怎么样」这种空泛问句，给一个具体的钩子\n  （例：「刚看到\
+      \ X 想到你」「今天天气好突然想起你」）\n- emoji 0-1 个；不署名；不要引号\n{forbidden_block}\n- 只输出消息正文\n"
+    en: "You're \"{persona_name}\" ({persona_role}). Draft a one-line opener to a\
+      \ friend\nyou haven't talked to in a while — no small talk, no recap; sound\
+      \ like you\njust thought of them. ≤25 words.\n\n[Context] silent {silent_days}\
+      \ days; intimacy {intim:.0f}/100.\n{last_inbound_block}\n[Style]\n- Sound like\
+      \ \"{persona_name}\" had a sudden thought of them\n- Don't ask \"how have you\
+      \ been\" — give a specific hook\n  (e.g. \"saw X and thought of you\" / \"weather\
+      \ is nice, you crossed my mind\")\n- 0-1 emoji; no signature; no quotes\n{forbidden_block}\n\
+      - Output ONLY the message body\n"
+    ja: "あなたは「{persona_name}」（{persona_role}）。久しぶりの相手に一言、開幕メッセージを起案して。\n—— 寒暄なし・回顧なし・「ふと思い出した」風に。30字以内。\n\
+      \n【状況】沈黙 {silent_days} 日；親密度 {intim:.0f}/100。\n{last_inbound_block}\n【スタイル】\n\
+      - 「{persona_name}」が相手をふと思い出した感じ\n- 「最近どう？」みたいな抽象的な質問は避け、具体的なフックを使う\n  （例：「Xを見て思い出した」「天気いいね、ふと顔浮かんだ」）\n\
+      - 絵文字 0-1 個；署名なし；引用符なし\n{forbidden_block}\n- 本文のみ出力\n"

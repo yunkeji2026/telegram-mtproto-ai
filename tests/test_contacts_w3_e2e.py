@@ -229,6 +229,182 @@ class TestW3S6_DecayReactivationCoordination:
         assert reactivator.list_candidates() == []
 
 
+class TestW3_3B5_MergePreservesIntimacy:
+    """W3-3B.5：合并必须保留 messenger 侧已经积累的 intimacy 历史。
+
+    回归保护：之前 messenger 聊了 5 天积累的 intimacy_score 不能因为 LINE
+    合并而清零；下次回话时 reunion 信号才有依据。
+    """
+
+    def test_token_merge_preserves_messenger_intimacy(self, env):
+        """Token 合并：messenger 已积累的 intimacy 在合并后仍在新 journey 上。"""
+        store, gw, intim, _, _ = env
+        # Step 1: messenger 侧多日聊天 → intimacy 起来
+        m_ctx = _seed_multi_day_chat(
+            store, gw, fb_id="fb_dora", days=5, msgs_per_day=4,
+        )
+        bd_before = intim.refresh_journey_intimacy(m_ctx.journey.journey_id)
+        intimacy_before = bd_before.score
+        assert intimacy_before > 20, "5 天 4 条对话应该积累出 intimacy>20"
+        messenger_contact_id = m_ctx.contact.contact_id
+
+        # Step 2: 签发 token + 推 HANDOFF_SENT
+        tok = gw.issue_handoff(messenger_ci_id=m_ctx.channel_identity.channel_identity_id)
+        assert tok and tok.token
+        gw.on_handoff_sent(
+            messenger_ci_id=m_ctx.channel_identity.channel_identity_id, token=tok.token,
+        )
+
+        # Step 3: LINE 侧用 token 合并
+        outcome = gw.on_line_first_text(
+            account_id="a", external_id="line_dora",
+            text=f"嗨 {tok.token}", display_name="Dora",
+        )
+        assert outcome.merged is True
+        assert outcome.via == "token"
+        # 合并后的 contact_id 应该等于 messenger 侧（不是新建的 LINE 那个）
+        assert outcome.contact_id == messenger_contact_id
+
+        # Step 4：合并后的 journey 仍带着 intimacy
+        new_journey = store.get_journey_by_contact(messenger_contact_id)
+        assert new_journey is not None
+        assert new_journey.intimacy_score == intimacy_before, (
+            f"合并不能清零 intimacy: before={intimacy_before} after={new_journey.intimacy_score}"
+        )
+
+    def test_signal_merge_via_approve_preserves_intimacy(self, env):
+        """Heuristic 合并 + 运营 approve：同样不能丢 intimacy。"""
+        from src.contacts.merge import MergeService
+        store, gw, intim, _, _ = env
+        merge_svc = MergeService(store)
+        # messenger 侧积累 intimacy
+        m_ctx = _seed_multi_day_chat(
+            store, gw, fb_id="fb_evan", days=5, msgs_per_day=4,
+        )
+        # 在 Contact 上写完整画像，以便后面 signal 匹配
+        store.update_contact(
+            m_ctx.contact.contact_id,
+            primary_name="Evan", language_hint="en", timezone_hint="Asia/Tokyo",
+        )
+        bd_before = intim.refresh_journey_intimacy(m_ctx.journey.journey_id)
+        intimacy_before = bd_before.score
+        messenger_contact_id = m_ctx.contact.contact_id
+
+        # 签发 token（让候选池非空）
+        gw.issue_handoff(messenger_ci_id=m_ctx.channel_identity.channel_identity_id)
+
+        # LINE 侧来一条没带 token 但信号匹配的消息 → 入 review
+        outcome = gw.on_line_first_text(
+            account_id="a", external_id="line_evan",
+            text="hello",
+            display_name="Evan",
+            language_hint="en", timezone_hint="Asia/Tokyo",
+        )
+        # 信号都满，可能 auto_merge 或 manual_review
+        # 不管走哪条路径，最终 contact 必须是 messenger 那个 + intimacy 保留
+        if outcome.merged:
+            final_contact = outcome.contact_id
+        else:
+            assert outcome.review_id, "应该入 review 队列"
+            ok = merge_svc.approve_review(outcome.review_id, resolved_by="ops_test")
+            assert ok
+            final_contact = messenger_contact_id
+
+        assert final_contact == messenger_contact_id
+        final_journey = store.get_journey_by_contact(messenger_contact_id)
+        assert final_journey.intimacy_score == intimacy_before, (
+            f"合并清零 intimacy 是严重 regression: before={intimacy_before} "
+            f"after={final_journey.intimacy_score}"
+        )
+
+    def test_merge_preserves_history_replay_consistency(self, env):
+        """W3-3D.5：合并后 30 天历史重放 = 合并前两 journey 历史的并集。
+
+        关键回归保护：``relink_channel_identity`` 把老 journey 的事件搬到新
+        journey，保证 ``compute_intimacy_from_events(now=past_ts)`` 对任意历史时间
+        点都能产出与合并前一致的快照。
+        """
+        from src.skills.intimacy_engine import IntimacyEngine
+        store, gw, intim, _, _ = env
+
+        # 造 messenger 侧 journey + 5 天内多次互动
+        m_ctx = _seed_multi_day_chat(
+            store, gw, fb_id="fb_zoe", days=5, msgs_per_day=3,
+        )
+        m_jid = m_ctx.journey.journey_id
+
+        # 取合并前的历史快照（每天一个点，最近 7 天）
+        import time as _t
+        now = int(_t.time())
+        day_secs = 86400
+        today_end = (now // day_secs) * day_secs + day_secs - 1
+        m_events_before = store.list_events(m_jid, limit=500)
+        before_snapshots = []
+        for i in range(6, -1, -1):
+            day_ts = today_end - i * day_secs
+            bd = IntimacyEngine.compute_intimacy_from_events(
+                m_events_before, now=day_ts,
+            )
+            before_snapshots.append((day_ts, bd.score))
+
+        # 触发 token merge
+        tok = gw.issue_handoff(messenger_ci_id=m_ctx.channel_identity.channel_identity_id)
+        gw.on_handoff_sent(
+            messenger_ci_id=m_ctx.channel_identity.channel_identity_id, token=tok.token,
+        )
+        outcome = gw.on_line_first_text(
+            account_id="a", external_id="line_zoe",
+            text=f"嗨 {tok.token}", display_name="Zoe",
+        )
+        assert outcome.merged
+
+        # 合并后从新 journey 取事件，做相同时间点的快照
+        new_journey = store.get_journey_by_contact(outcome.contact_id)
+        new_events = store.list_events(new_journey.journey_id, limit=500)
+        for day_ts, before_score in before_snapshots:
+            # 跳过合并发生那一天（合并事件本身会引入 channel_identity_merged 等
+            # 非 msg_in/msg_out 事件，不影响 score 计算；但若那天是「今天」则因为
+            # token_issued / handoff_sent 后还有微弱时间偏移可能 score 微变）
+            if day_ts >= today_end - day_secs:
+                continue
+            bd_after = IntimacyEngine.compute_intimacy_from_events(
+                new_events, now=day_ts,
+            )
+            assert abs(bd_after.score - before_score) < 0.5, (
+                f"合并后历史重放不一致: day_ts={day_ts} "
+                f"before={before_score} after={bd_after.score}"
+            )
+
+    def test_merge_preserves_journey_events_for_future_reunion(self, env):
+        """合并后老 journey 的 events 应迁到新 journey（reunion 判定依赖事件历史）。"""
+        store, gw, intim, _, _ = env
+        m_ctx = _seed_multi_day_chat(
+            store, gw, fb_id="fb_fred", days=3, msgs_per_day=3,
+        )
+        msg_events_before = len(store.list_events(m_ctx.journey.journey_id, limit=500))
+        assert msg_events_before > 0
+
+        tok = gw.issue_handoff(messenger_ci_id=m_ctx.channel_identity.channel_identity_id)
+        gw.on_handoff_sent(
+            messenger_ci_id=m_ctx.channel_identity.channel_identity_id, token=tok.token,
+        )
+        events_after_handoff = len(store.list_events(m_ctx.journey.journey_id, limit=500))
+
+        outcome = gw.on_line_first_text(
+            account_id="a", external_id="line_fred",
+            text=f"嗨 {tok.token}", display_name="Fred",
+        )
+        assert outcome.merged
+
+        # 合并后 messenger 侧 journey 必须包含合并事件 + 原有事件
+        new_journey = store.get_journey_by_contact(outcome.contact_id)
+        all_events = store.list_events(new_journey.journey_id, limit=500)
+        # 至少应有：原有事件 + 合并相关事件
+        assert len(all_events) >= events_after_handoff
+        types = {e["event_type"] for e in all_events}
+        assert "channel_identity_merged" in types, "合并必须留事件痕迹"
+
+
 class TestW3S5_IntimacyRecencyDecay:
     def test_inactive_contact_intimacy_decays_over_time(self, env):
         """验证 recency 半衰期：14 天前的对话 intimacy 贡献减半。"""

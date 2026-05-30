@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import xml.etree.ElementTree as _ET
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, List, Optional, Tuple
 
@@ -25,6 +26,34 @@ from src.integrations.line_rpa import screen_state as ss
 from src.integrations.line_rpa.chat_list_scanner import UnreadRow, parse_unread_rows
 
 logger = logging.getLogger(__name__)
+
+
+def _find_name_tap_in_xml(
+    xml_bytes: bytes,
+    name: str,
+    pkg: str,
+) -> Optional[Tuple[int, int]]:
+    """在 XML 里找 text==name 且其祖先节点 clickable=true 的可点击行。
+    用于 open_unread_chat 的二级 tap：LINE "非好友请求列表"中再次找到同名行。
+    """
+    try:
+        root = _ET.fromstring(xml_bytes)
+    except _ET.ParseError:
+        return None
+    name_lo = name.strip().lower()
+    for el in root.iter():
+        if (el.get("package") or "") != pkg:
+            continue
+        if (el.get("text") or "").strip().lower() != name_lo:
+            continue
+        bb_str = el.get("bounds") or ""
+        m = __import__("re").match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bb_str)
+        if not m:
+            continue
+        cx = (int(m.group(1)) + int(m.group(3))) // 2
+        cy = (int(m.group(2)) + int(m.group(4))) // 2
+        return cx, cy
+    return None
 
 DumpFunc = Callable[[], Awaitable[Tuple[Optional[bytes], str]]]
 # P6-B2: vision 列表扫描函数签名 (png_bytes, max_rows) → (List[UnreadRow], str)
@@ -221,13 +250,19 @@ class Navigator:
 
             if state == ss.OTHER_LINE:
                 # 处于 LINE 但不在列表/会话：
-                # 1) 若配置了聊天 Tab 坐标，点它
-                if self._chat_list_tab_tap:
+                # 通过 XML 判断底部导航栏是否可见：
+                # - 含 "chats tab" → 导航栏可见（Home/VOOM 等同层 Tab） → tap chat_list_tab_tap
+                # - 不含 → 子页遮住了导航栏（如"非好友请求列表"） → BACK 弹出子页
+                nav_bar_visible = bool(
+                    self._chat_list_tab_tap
+                    and xml
+                    and b"chats tab" in xml.lower()
+                )
+                if nav_bar_visible:
                     x, y = self._chat_list_tab_tap
                     await self.tap(x, y)
-                    continue
-                # 2) 否则按一下 BACK（如 VOOM/设置等子页多会回列表）
-                await self.press_back()
+                else:
+                    await self.press_back()
                 continue
 
         # 最后再探一次
@@ -248,6 +283,22 @@ class Navigator:
     ) -> NavResult:
         await self.tap(row.tap_x, row.tap_y)
         r = await self.wait_for_state([ss.CHAT_ROOM], timeout_sec=timeout_sec)
+
+        # 二级导航重试：LINE 的"非好友消息请求"需要两次 tap
+        # 第一 tap 进入 "Requests from non-friends" 列表（other_line；无 EditText）
+        # 第二 tap 才进入真正的 chat request 页（有 EditText → CHAT_ROOM）
+        if not r.ok and r.state == ss.OTHER_LINE:
+            xml2, _ = await self._dump()
+            if xml2:
+                retry_xy = _find_name_tap_in_xml(xml2, row.name, self._pkg)
+                if retry_xy:
+                    rx, ry = retry_xy
+                    logger.debug(
+                        "open_unread_chat: 二级 tap (%d,%d) name=%r", rx, ry, row.name
+                    )
+                    await self.tap(rx, ry)
+                    r = await self.wait_for_state([ss.CHAT_ROOM], timeout_sec=timeout_sec)
+
         if not r.ok:
             return NavResult(
                 False, r.state,

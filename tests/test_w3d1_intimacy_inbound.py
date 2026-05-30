@@ -99,3 +99,47 @@ def test_multiple_inbound_keeps_engine_called(env):
             direction="in", text_preview=f"msg{i}",
         )
     assert engine.refresh_journey_intimacy.call_count == 5
+
+
+# ── W3-3A.1（2026-05-17）：LINE on_line_first_text 也应触发 refresh ──
+# 修复 silent gap：之前 LINE 渠道入库走 on_line_first_text 而非 on_message，
+# 导致 intimacy_score 在 LINE 上永远 0；companion_relationship 融合在 LINE 完全无效。
+
+def test_line_first_text_with_engine_refreshes_intimacy(env):
+    """注入 engine 后，on_line_first_text 也触发 refresh（与 msg_in 对齐）。"""
+    from src.contacts.models import CHANNEL_LINE
+    store, gw = env
+    engine = MagicMock()
+    engine.refresh_journey_intimacy = MagicMock()
+    gw.set_intimacy_engine(engine)
+    gw.on_line_first_text(
+        account_id="a", external_id="line_x", text="hello",
+    )
+    engine.refresh_journey_intimacy.assert_called_once()
+
+
+def test_line_first_text_replay_also_refreshes(env):
+    """重放路径同样要刷新 — runner 把所有 LINE inbound 都送 on_line_first_text，
+    不刷新会导致首条之后 score 永远定格（修复 W3-3A.1 silent gap）。
+    """
+    store, gw = env
+    engine = MagicMock()
+    engine.refresh_journey_intimacy = MagicMock()
+    gw.set_intimacy_engine(engine)
+    # 第一次 → 走完整路径
+    gw.on_line_first_text(account_id="a", external_id="line_x", text="hello")
+    # 第二次（重放路径，已记录 line_first_reply）→ 早返回但仍要刷新
+    gw.on_line_first_text(account_id="a", external_id="line_x", text="hello again")
+    assert engine.refresh_journey_intimacy.call_count == 2
+
+
+def test_line_first_text_engine_failure_does_not_break(env):
+    """engine 抛异常时 LINE 首条仍能完成合并流程（fail-open）。"""
+    store, gw = env
+    bad = MagicMock()
+    bad.refresh_journey_intimacy = MagicMock(side_effect=RuntimeError("boom"))
+    gw.set_intimacy_engine(bad)
+    out = gw.on_line_first_text(
+        account_id="a", external_id="line_x", text="hi",
+    )
+    assert out is not None  # 没崩

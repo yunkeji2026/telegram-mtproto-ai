@@ -14,6 +14,19 @@ import re
 import hashlib
 import copy
 import uuid
+
+
+def _safe_int_chat_id(v: Any) -> int:
+    """Convert any chat_id to int safely.
+    Telegram 使用数字 ID；WA/LINE/Messenger 使用字符串 chat_key。
+    非数字值通过 MD5 派生稳定 32 bit int，保持每个账号唯一性。
+    """
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return int(hashlib.md5(str(v).encode()).hexdigest()[:8], 16)
+
+
 from src.utils.audit_store import AuditStore
 from src.utils.domain_policy import effective_domain_name, payment_plugin_enabled
 from src.utils.channel_status_format import (
@@ -236,6 +249,13 @@ class SkillManager(LoggerMixin):
             except Exception as _mem_err:
                 self.logger.warning("情景记忆初始化失败（将禁用）: %s", _mem_err)
                 self._episodic_store = None
+
+        self._cpi = None  # S5: CrossPlatformIdentity
+        try:
+            from src.utils.cross_platform_identity import CrossPlatformIdentity
+            self._cpi = CrossPlatformIdentity(_epath)
+        except Exception as _cpi_err:
+            self.logger.warning("CrossPlatformIdentity 初始化失败: %s", _cpi_err)
 
         self._ai_fallback_replies = (
             self.config.config.get('reply', {}).get('ai_fallback_replies', [])
@@ -644,13 +664,26 @@ class SkillManager(LoggerMixin):
                 "line_rpa_style_hint", "line_rpa_chat_key",
                 "messenger_rpa_style_hint", "messenger_rpa_chat_key",
                 "messenger_rpa_peer_kind",
+                "whatsapp_rpa_chat_key", "whatsapp_rpa_peer_name",
+                "whatsapp_rpa_style_hint",
+                "account_persona_id",
                 "suppress_global_ai_identity",
                 "disable_episodic_memory",
                 "is_group", "mentioned", "vision_room",
                 # Phase 1：用户画像上下文 — 由 runner 从 ContactGateway 渲染好后注入
                 "contact_id", "_contact_portrait_block",
+                # W2-D1：IntimacyEngine 的 score → companion_relationship 双信号融合
+                "intimacy_score",
+                # P10-C：漏斗阶段 → PersonaManager 平台感知 prompt 注入
+                "funnel_stage",
                 # 单条主消息（用于语言注入，避免多条合并文本污染检测）
                 "_current_user_message_for_lang",
+                # S5: 平台标识，用于 CrossPlatformIdentity canonical_id 解析
+                "platform",
+                # 重复消息标记（runner 检测到用户发了跟上次完全一样的消息）
+                "_is_repeated_message", "_prev_reply_for_repeat",
+                # 语音消息标记（对方发的是语音，AI 回复应更口语化）
+                "_peer_message_is_voice", "_voice_duration",
             )
             for _mk in _line_merge_keys:
                 if _mk in context and context[_mk] is not None:
@@ -666,7 +699,7 @@ class SkillManager(LoggerMixin):
 
             # 2. 冷却
             if not self._check_cooldown(text, user_id_str, chat_id=_chat_id):
-                self.logger.info(f"{log_prefix}用户 {user_id_str} 处于冷却期，跳过回�")
+                self.logger.warning(f"{log_prefix}用户 {user_id_str} 处于冷却期，跳过回�")
                 return None
 
             # 3. 注入情景记忆（关键词 / 向量融合 + 分桶）
@@ -688,7 +721,25 @@ class SkillManager(LoggerMixin):
                     _chat_id,
                     current_user_text=text,
                     query_embedding=_q_emb,
+                    platform=user_context.get("platform", ""),  # S5
                 )
+
+            # 3b. 情感智能上下文引擎（情绪分析 + 时间感知 + 记忆反思 + 关系温度）
+            try:
+                from src.utils.emotional_context import build_emotional_context_block
+                _epi_text = (user_context.get("_episodic_memory_text") or "").strip()
+                _emo_block = build_emotional_context_block(text, user_context, _epi_text)
+                if _emo_block:
+                    user_context["_emotional_context_block"] = _emo_block
+                    self.logger.info(
+                        "%s情感上下文引擎: emotion=%s valence=%s warmth_label=%s",
+                        log_prefix,
+                        user_context.get("_prev_emotion", "?"),
+                        user_context.get("_prev_valence", "?"),
+                        "active",
+                    )
+            except Exception:
+                self.logger.warning("emotional_context inject skipped", exc_info=True)
 
             # 4. 合并传入的上下文信息（上下文分析、图�?OCR、群内机器人消息、request_id、chat�?
             if 'context_analysis' in context:
@@ -732,14 +783,42 @@ class SkillManager(LoggerMixin):
                         ).strip()
                     except Exception:
                         pass
+                    # W2-D1：拉 IntimacyEngine 的 score（runner 已注入到 context）
+                    # 没传则 fusion 自动跳过 → 完全向后兼容
+                    _intim_score = context.get("intimacy_score")
+                    try:
+                        _intim_score = (
+                            float(_intim_score) if _intim_score is not None else None
+                        )
+                    except (TypeError, ValueError):
+                        _intim_score = None
                     user_context["_relationship_prompt_block"] = (
                         build_relationship_prompt_block(
-                            _rst, _comp_cfg, ai_name=_ain, user_message=text
+                            _rst, _comp_cfg, ai_name=_ain, user_message=text,
+                            intimacy_score=_intim_score,
                         )
                     )
                     user_context["relationship_stage"] = str(_rst.get("stage") or "")
             except Exception:
                 self.logger.debug("companion relationship inject skipped", exc_info=True)
+
+            # W3-3M：RelationshipStager — 跨域轻量语气指令
+            # 与 companion_relationship 互不干扰：conversion 域有完整关系块，
+            # 其他域（或 companion 未启用时）通过此注入获得漏斗语气校准。
+            try:
+                _fstage = (context or {}).get("funnel_stage") or ""
+                _fscore = (context or {}).get("intimacy_score")
+                if _fstage:
+                    from src.contacts.relationship_stager import stage_directive
+                    _directive = stage_directive(_fstage, _fscore)
+                    if _directive:
+                        user_context["_funnel_directive"] = _directive
+                        self.logger.debug(
+                            "[3M] funnel_directive stage=%s score=%s",
+                            _fstage, _fscore,
+                        )
+            except Exception:
+                self.logger.debug("relationship_stager inject skipped", exc_info=True)
 
             from src.hooks.registry import HookRegistry as _HR
             _hooks = _HR.get_instance()
@@ -819,7 +898,7 @@ class SkillManager(LoggerMixin):
             self.logger.debug(f"{log_prefix}识别到意图: {intent} (消息: {text[:50]}...)")
 
             if not self._narrow_reply_allows(text, intent, last_intent, user_context):
-                self.logger.info("%snarrow_reply: 非允许范围，跳过回复 (intent=%s)", log_prefix, intent)
+                self.logger.warning("%snarrow_reply: 非允许范围，跳过回复 (intent=%s)", log_prefix, intent)
                 return None
 
             # 4b 按意图冷却：配置 by_intent 时，距上次回复不足N秒数则跳过
@@ -844,7 +923,7 @@ class SkillManager(LoggerMixin):
                     last_rt = user_context.get('last_reply_time') or 0
                     now = time.time()
                     if now - last_rt < float(need_gap):
-                        self.logger.info(
+                        self.logger.warning(
                             f"{log_prefix}意图 {intent} 处于 by_intent 冷却期 ({need_gap}s)，距上次回复 {now-last_rt:.1f}s，跳过"
                         )
                         return None
@@ -883,9 +962,19 @@ class SkillManager(LoggerMixin):
             _conv_hist = user_context.get('_conversation_history', [])
             if not isinstance(_conv_hist, list):
                 _conv_hist = []
+            # Fix D: retroactive sanitize on loaded history（修复自我强化幻觉污染；失败不阻断流程）
+            try:
+                _conv_hist = self._sanitize_history_name_claims(_conv_hist, user_context)
+            except Exception as _se1:
+                self.logger.debug("sanitize_history skipped: %s", _se1)
             if _saved_prev_message and _saved_prev_reply:
+                try:
+                    _clean_prev_reply = self._sanitize_assistant_reply(_saved_prev_reply, user_context)
+                except Exception as _se2:
+                    self.logger.debug("sanitize_prev_reply skipped: %s", _se2)
+                    _clean_prev_reply = _saved_prev_reply
                 _conv_hist.append({"role": "user", "content": _saved_prev_message[:200]})
-                _conv_hist.append({"role": "assistant", "content": _saved_prev_reply[:300]})
+                _conv_hist.append({"role": "assistant", "content": _clean_prev_reply[:300]})
             _KEEP_VERBATIM = 5  # 与 reply 策略 context_rounds≈5 对齐，避免本地先裁成 3 轮导致模型「失忆」
             _COMPRESS_THRESHOLD = 8  # 更长对话才摘要，减少过早丢轮次
             _total_rounds = len(_conv_hist) // 2
@@ -900,7 +989,7 @@ class SkillManager(LoggerMixin):
             user_context['_conversation_history'] = _conv_hist
 
             # 追问回填 �?用户新消���达，回溯标�前一条策略事�?
-            _chat_id = int(context.get("chat_id", 0))
+            _chat_id = _safe_int_chat_id(context.get("chat_id", 0))
             try:
                 self._strategy_tracker.backfill_follow_up(user_id_str, _chat_id, intent)
             except Exception:
@@ -958,6 +1047,12 @@ class SkillManager(LoggerMixin):
                     strategy = dict(strategy)
                     strategy["reply_probability"] = 1.0
 
+            # WhatsApp RPA（1v1 私聊）：同 Messenger RPA 一致，强制 reply_probability=1.0 + 禁止 skip_ai
+            if context.get("channel") == "whatsapp_rpa":
+                strategy = dict(strategy)
+                strategy["skip_ai"] = False
+                strategy["reply_probability"] = 1.0
+
             # S5 静默观察：按概率决定不回复
             # 触发系统已判定应回复（_trigger_path 存在）或 @ 时，跳过概率检查
             rp = strategy.get('reply_probability')
@@ -966,7 +1061,7 @@ class SkillManager(LoggerMixin):
                 if context.get('triggered_by_mention') or _tp:
                     self.logger.info(f"{log_prefix}触发���={_tp or 'mention'}，跳�?S5 概率�€�?")
                 elif random.random() > rp:
-                    self.logger.info(f"{log_prefix}策略 {strategy_id} 静默跳过 (概率 {rp})")
+                    self.logger.warning(f"{log_prefix}策略 {strategy_id} 静默跳过 (概率 {rp})")
                     return None
 
             user_context['_reply_strategy'] = strategy
@@ -1125,7 +1220,28 @@ class SkillManager(LoggerMixin):
                                 _direct = legacy_direct_text(_top_entry)
                                 _dm = {"path": ["error", str(_dr_err)]}
                             if _direct:
-                                _kb.inc_use_count(_matched_eid)
+                                # companion guard: skip KB 直出 for companion domain + non-biz messages
+                                _cfg_gd = self.config.config if hasattr(self.config, "config") else {}
+                                _is_comp_gd = (
+                                    isinstance(_cfg_gd, dict)
+                                    and effective_domain_name(_cfg_gd) == "conversion"
+                                )
+                                if _is_comp_gd:
+                                    _biz_kws_gd = (
+                                        "通道", "订单", "查单", "费率", "代收", "代付",
+                                        "成功率", "限额", "回调", "转账", "支付",
+                                        "channel", "order", "payment", "payin", "payout",
+                                    )
+                                    _has_biz_gd = any(k in (text or "") for k in _biz_kws_gd)
+                                    _comp_intents = ("greeting", "small_talk", "direct_chat", "complaint")
+                                    if intent in _comp_intents and not _has_biz_gd:
+                                        self.logger.info(
+                                            "%s companion: skip KB direct 直出 (intent=%s no biz kw)",
+                                            log_prefix, intent,
+                                        )
+                                        _direct = None  # fall through → normal AI with persona
+                                if _direct:
+                                    _kb.inc_use_count(_matched_eid)
                                 self.logger.info(
                                     "%sKB direct 命中 [%s] '%s' �?直出 path=%s branch=%s router=%s",
                                     log_prefix, _mode, _top_title,
@@ -1140,7 +1256,9 @@ class SkillManager(LoggerMixin):
                                     )
                                 except Exception:
                                     pass
-                                return _direct
+                                if _direct is not None:
+                                    return _direct
+                                # companion cleared _direct -> fall through to normal AI
 
                         _skip_kb_inject = _is_ch_intent and not _e_is_ch
                         if not _skip_kb_inject:
@@ -1218,7 +1336,7 @@ class SkillManager(LoggerMixin):
             # 4b. 选择并执行技能
             skill = self._select_skill(intent, user_context)
             if not skill:
-                self.logger.warning(f"{log_prefix}未找到适合意图 {intent} 的技能")
+                self.logger.warning(f"{log_prefix}未找到适合意图 {intent} 的技能（channel=%s）", (context or {}).get('channel',''))
                 return None
 
             # 4c-fix. 意图切换时：清理上文回�记忆，防AI����€话�"带偏"
@@ -1318,11 +1436,11 @@ class SkillManager(LoggerMixin):
                     )
                 else:
                     user_context["_anti_repeat_hint"] = (
-                        "用户已经追问了很多次，而且可能有不满情绪。作为真人客服，你要：\n"
-                        "1. 先表达理解，比如'确实让您等久了，抱歉'\n"
-                        "2. 坦诚告知：'关于这个问题我这边能给到的信息就是这些了'\n"
-                        "3. 主动建议升级：'要不我帮您把问题提交给上级同事/技术团队处理？这样能更快给到您准确的结果'\n"
-                        "4. 简洁有力，不要再重复之前的信息。两三句话。"
+                        "对方情绪有些低落，多追问了好几次。以你的人设自然回应：\n"
+                        "1. 先表达感受到了，比如'感觉你现在挺烦的'\n"
+                        "2. 坦诚但温柔地说：'我能说的就这些了，不想糊弄你'\n"
+                        "3. 轻轻提个别的话头或换个方向聊聊\n"
+                        "4. 简短自然，两三句就好，不要正式腔。"
                     )
                 so = user_context.get("_reply_strategy") or {}
                 so["temperature"] = 0.6
@@ -1332,11 +1450,10 @@ class SkillManager(LoggerMixin):
             elif _consecutive_same:
                 if _angle_idx >= 3:
                     user_context["_anti_repeat_hint"] = (
-                        "用户在反复问同一个问题，你已经回答过了。像真人客服一样，简短承认'跟刚才说的一样'，然后：\n"
-                        "- 补充一个之前没说过的小信息点（如果有的话）\n"
-                        "- 或者主动问用户'是不是有什么具体的地方没说清楚？'\n"
-                        "- 或者建议'如果需要更详细的数据，我帮您问问同事/转人工'\n"
-                        "绝对不要把之前说过的完整信息再说一遍。一两句话搞定。"
+                        "对方一直在问同一件事，你已经说过了。按照你的性格自然应对：\n"
+                        "- 补一个之前没提过的小细节（如果有）\n"
+                        "- 或者轻松问一句'是哪个地方没说明白吗？'\n"
+                        "- 绝对不要一字不差重复之前的话。一两句搞定。"
                     )
                     so = user_context.get("_reply_strategy") or {}
                     so["temperature"] = min(float(so.get("temperature", 0.7)) + 0.2, 1.0)
@@ -1373,16 +1490,16 @@ class SkillManager(LoggerMixin):
             _elapsed_ms = int((time.time() - _t0) * 1000)
 
             # 5b. 相似度�测：如果回�与上条重复度 >65%，强指令重试
-            if reply and _prev_reply and _consecutive_same:
+            # 无论用户消息是否相似，只要 bot 即将重复自己的上条回复就应重试
+            if reply and _prev_reply:
                 _sim = self._reply_similarity(_prev_reply, reply)
                 if _sim > 0.65:
                     self.logger.info(
                         f"{log_prefix}回�相似�?{_sim:.0%}，强制重试换角度")
                     user_context["_anti_repeat_hint"] = (
-                        # f"你上一条回复是：「{_prev_reply[:120]}」\n" f"你刚才又生成了几乎一样的内容。现在你必须——\n"
                         f"1. 换一个完全不同的开头（禁止用上次的前5个字）\n"
                         f"2. 换一个不同的重点（上次说了什么，这次说别的）\n"
-                        f"3. 像是另一个客服同事在回答，风格要有明显区别"
+                        f"3. 风格要有明显区别，就像换了个心情在聊"
                     )
                     so = user_context.get("_reply_strategy") or {}
                     so["temperature"] = min(float(so.get("temperature", 0.85)) + 0.15, 1.0)
@@ -1443,7 +1560,8 @@ class SkillManager(LoggerMixin):
                 )
                 if not _flag_dis:
                     self._schedule_episodic_memory_extract(
-                        user_id_str, text, reply, intent, _chat_id
+                        user_id_str, text, reply, intent, _chat_id,
+                        platform=user_context.get("platform", ""),  # S5
                     )
                 # J1: escalation suggestion via domain hook
                 if user_context.pop("_escalation_triggered", False):
@@ -1452,7 +1570,7 @@ class SkillManager(LoggerMixin):
                 if tracker:
                     tracker.track(
                         event_type=intent,
-                        chat_id=int(context.get("chat_id", 0)),
+                        chat_id=_safe_int_chat_id(context.get("chat_id", 0)),
                         user_id=user_id_str,
                         detail=text[:100],
                         response_ms=_elapsed_ms,
@@ -1779,11 +1897,95 @@ class SkillManager(LoggerMixin):
         """获取或创建用户上下文（持久化�?SQLite�?"""
         return self._context_store.get(user_id)
 
-    def _episodic_storage_key(self, user_id_str: str, chat_id: Any) -> str:
+    def _get_persona_name_for_context(self, user_context: Dict[str, Any]) -> str:
+        """Return the correct persona name for this user_context, or '' if unavailable."""
+        persona_id = (user_context or {}).get("account_persona_id") or ""
+        if not persona_id:
+            return ""
+        try:
+            from src.utils.persona_manager import PersonaManager
+            pm = PersonaManager.get_instance()
+            persona = pm.get_persona_by_id(str(persona_id))
+            if not persona:
+                return ""
+            return (persona.get("name") or "").strip()
+        except Exception:
+            return ""
+
+    def _sanitize_assistant_reply(self, reply: str, user_context: Dict[str, Any]) -> str:
+        """Strip wrong self-name claims from a bot reply before storing to history.
+
+        Prevents self-reinforcing hallucination (bot says wrong name once → sees it in
+        history → keeps repeating). Patterns covered:
+          "我叫X"    "我的名字是X"    "我是X" (only when X is a short name-like token)
+          "My name is X"   "I'm X" (when X is a single capitalized name)
+
+        If X != persona_name, replace X with persona_name. If persona_name unavailable,
+        leave reply untouched (graceful degrade).
+        """
+        if not reply or not isinstance(reply, str):
+            return reply
+        correct = self._get_persona_name_for_context(user_context)
+        if not correct:
+            return reply
+
+        import re as _re
+
+        def _zh_repl(m):
+            prefix = m.group(1)
+            claimed = m.group(2).strip()
+            if claimed == correct:
+                return m.group(0)
+            return f"{prefix}{correct}"
+
+        out = _re.sub(r"(我叫)([^\s，。！？,.\!\?\n]{1,8})", _zh_repl, reply)
+        out = _re.sub(r"(我的名字(?:是|叫))([^\s，。！？,.\!\?\n]{1,8})", _zh_repl, out)
+
+        def _en_repl(m):
+            prefix = m.group(1)
+            claimed = m.group(2).strip()
+            if claimed.lower() == correct.lower():
+                return m.group(0)
+            return f"{prefix}{correct}"
+
+        out = _re.sub(
+            r"(?i)(my name is\s+|i['' ]?m\s+|i am\s+)([A-Z][a-zA-Z]{1,15})",
+            _en_repl, out,
+        )
+        return out
+
+    def _sanitize_history_name_claims(
+        self, history: List[Dict[str, Any]], user_context: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        """Sanitize all assistant turns in conversation history (retroactive cleanup)."""
+        if not history or not isinstance(history, list):
+            return history
+        correct = self._get_persona_name_for_context(user_context)
+        if not correct:
+            return history
+        cleaned: List[Dict[str, Any]] = []
+        for turn in history:
+            if not isinstance(turn, dict):
+                cleaned.append(turn)
+                continue
+            if turn.get("role") == "assistant" and turn.get("content"):
+                new_content = self._sanitize_assistant_reply(
+                    str(turn["content"]), user_context,
+                )
+                cleaned.append({**turn, "content": new_content})
+            else:
+                cleaned.append(turn)
+        return cleaned
+
+    def _episodic_storage_key(self, user_id_str: str, chat_id: Any, platform: str = "") -> str:
         from src.utils.episodic_memory_store import compute_memory_storage_key
 
         scope = (self._memory_cfg or {}).get("scope", "user")
-        return compute_memory_storage_key(str(scope), user_id_str, chat_id)
+        base_key = compute_memory_storage_key(str(scope), user_id_str, chat_id)
+        # S5: resolve to cross-platform canonical_id when platform is known
+        if self._cpi and platform:
+            return self._cpi.resolve(platform, base_key)
+        return base_key
 
     async def _embed_user_message_for_episodic(self, text: str) -> Optional[List[float]]:
         t = (text or "").strip()
@@ -1862,6 +2064,7 @@ class SkillManager(LoggerMixin):
         chat_id: Any,
         current_user_text: str = "",
         query_embedding: Optional[List[float]] = None,
+        platform: str = "",  # S5
     ) -> None:
         user_context.pop("_episodic_memory_text", None)
         if not self._episodic_store:
@@ -1871,7 +2074,7 @@ class SkillManager(LoggerMixin):
             return
         mx = int(mcfg.get("inject_max_items", 8))
         mc = int(mcfg.get("inject_max_chars", 1200))
-        key = self._episodic_storage_key(user_id_str, chat_id)
+        key = self._episodic_storage_key(user_id_str, chat_id, platform)
         rr = bool(mcfg.get("inject_rerank_keywords", True))
         vcfg = mcfg.get("vector") or {}
         use_fusion = bool(vcfg.get("inject_fusion", True)) and bool(query_embedding)
@@ -1931,7 +2134,8 @@ class SkillManager(LoggerMixin):
         from src.utils.memory_heuristic import matches_forget_intent
         if not matches_forget_intent((text or "").strip(), phrases):
             return None
-        key = self._episodic_storage_key(user_id_str, chat_id)
+        _plat = (user_context or {}).get("platform", "")  # S5
+        key = self._episodic_storage_key(user_id_str, chat_id, _plat)
         n = self._episodic_store.clear_user(key)
         user_context["last_message"] = (text or "").strip()
         user_context["last_message_time"] = time.time()
@@ -1942,7 +2146,8 @@ class SkillManager(LoggerMixin):
         return "好的，已清空我这边为你记下的聊天要点，我们从头聊～"
 
     def _schedule_episodic_memory_extract(
-        self, user_id: str, user_msg: str, reply: str, intent: str, chat_id: Any
+        self, user_id: str, user_msg: str, reply: str, intent: str, chat_id: Any,
+        platform: str = "",  # S5
     ) -> None:
         if not self._episodic_store:
             self.logger.info(
@@ -1967,7 +2172,7 @@ class SkillManager(LoggerMixin):
         )
 
         async def _run():
-            await self._episodic_memory_extract_async(user_id, user_msg, reply, intent, chat_id)
+            await self._episodic_memory_extract_async(user_id, user_msg, reply, intent, chat_id, platform)
 
         try:
             asyncio.get_running_loop().create_task(_run())
@@ -1977,7 +2182,8 @@ class SkillManager(LoggerMixin):
             )
 
     async def _episodic_memory_extract_async(
-        self, user_id: str, user_msg: str, reply: str, intent: str, chat_id: Any
+        self, user_id: str, user_msg: str, reply: str, intent: str, chat_id: Any,
+        platform: str = "",  # S5
     ) -> None:
         if not self._episodic_store:
             self.logger.info(
@@ -2001,7 +2207,7 @@ class SkillManager(LoggerMixin):
             )
             return
 
-        key = self._episodic_storage_key(user_id, chat_id)
+        key = self._episodic_storage_key(user_id, chat_id, platform)  # S5
 
         from src.utils.memory_heuristic import extract_heuristic_facts
 
@@ -2316,8 +2522,14 @@ class SkillManager(LoggerMixin):
         """回�后更新状�?"""
         current_time = time.time()
         
+        # Fix D: sanitize reply before persisting (any failure must NOT break the pipeline)
+        try:
+            _clean_reply = self._sanitize_assistant_reply(reply, user_context)
+        except Exception as _se:
+            self.logger.debug("sanitize_reply skipped: %s", _se)
+            _clean_reply = reply
         user_context.update({
-            'last_reply': reply[:500],
+            'last_reply': _clean_reply[:500],
             'last_reply_time': current_time,
             'reply_count': user_context.get('reply_count', 0) + 1
         })

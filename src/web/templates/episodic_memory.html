@@ -129,6 +129,13 @@ async function emBackfill() {
   } catch (e) { st.textContent = '请求失败: ' + e; }
   finally { if (btn) btn.disabled = false; }
 }
-document.addEventListener('DOMContentLoaded', function() { emLoad(); });
+document.addEventListener('DOMContentLoaded', function() {
+  var _urlQ = new URLSearchParams(window.location.search).get('q');
+  if (_urlQ) {
+    var _inp = document.getElementById('em-prefix');
+    if (_inp) _inp.value = _urlQ;
+  }
+  emLoad();
+});
 </script>
 {% endblock %}

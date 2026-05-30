@@ -1,0 +1,2121 @@
+{% extends "base.html" %}
+{% block title %}RPA 跨平台总览 · {{ site_name|default('智控王客户转化聊天系统') }}{% endblock %}
+{% block page_title %}RPA 跨平台总览{% endblock %}
+{% block head %}
+<style>
+/* ── /rpa-overview 专属布局 ────────────────────────────── */
+.ov-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:.85rem;margin-bottom:1.3rem}
+@media(max-width:880px){.ov-summary{grid-template-columns:repeat(2,1fr)}}
+.ov-summary .rpa-kpi{padding:.85rem 1rem;align-items:flex-start;min-width:0}
+.ov-summary .rpa-kpi-n{font-size:1.6rem}
+.ov-summary .rpa-kpi-l{font-size:.75rem;text-transform:none;letter-spacing:.02em}
+
+.ov-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem;margin-bottom:1.4rem}
+@media(max-width:780px){.ov-grid{grid-template-columns:1fr}}
+
+.ov-card{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:1.1rem 1.25rem;display:flex;flex-direction:column;gap:.85rem;transition:border .15s,box-shadow .15s}
+.ov-card:hover{border-color:var(--p);box-shadow:0 4px 18px rgba(91,124,246,.08)}
+.ov-card-head{display:flex;align-items:center;gap:.75rem}
+.ov-card-icon{width:42px;height:42px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.ov-card-icon svg{width:22px;height:22px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.ov-card-icon.theme-telegram{background:linear-gradient(135deg,#229ed9,#1a7abf)}
+.ov-card-icon.theme-line{background:linear-gradient(135deg,#06c755,#04a247)}
+.ov-card-icon.theme-messenger{background:linear-gradient(135deg,#0084ff,#0066cc)}
+.ov-card-icon.theme-whatsapp{background:linear-gradient(135deg,#25d366,#128c7e)}
+.ov-card-title{flex:1;min-width:0}
+.ov-card-name{font-size:1.02rem;font-weight:700;color:var(--t);display:flex;align-items:center;gap:.55rem}
+.ov-card-sub{font-size:.74rem;color:var(--t3);margin-top:.2rem}
+.ov-card-link{font-size:.75rem;color:var(--p);text-decoration:none;padding:.3rem .65rem;border:1px solid var(--bd2);border-radius:6px;transition:all .15s;white-space:nowrap}
+.ov-card-link:hover{background:var(--ps);border-color:var(--p)}
+
+.ov-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:.5rem}
+.ov-kpi{background:var(--input);border-radius:8px;padding:.5rem .6rem;text-align:center}
+.ov-kpi-n{font-size:1.1rem;font-weight:800;color:var(--p);line-height:1.1}
+.ov-kpi-n.green{color:#3fb950}
+.ov-kpi-n.amber{color:#e3b341}
+.ov-kpi-n.red{color:#f85149}
+.ov-kpi-n.muted{color:var(--t2)}
+.ov-kpi-l{font-size:.68rem;color:var(--t2);margin-top:.15rem;text-transform:uppercase;letter-spacing:.03em}
+
+.ov-foot{display:flex;justify-content:space-between;font-size:.72rem;color:var(--t3);align-items:center;flex-wrap:wrap;gap:.4rem}
+.ov-foot .ov-mode{padding:.15rem .5rem;border-radius:5px;background:var(--input);border:1px solid var(--bd2);font-weight:600;color:var(--t2)}
+.ov-foot .ov-mode.approve{color:#e3b341;border-color:rgba(227,179,65,.4)}
+.ov-foot .ov-mode.auto{color:#3fb950;border-color:rgba(63,185,80,.4)}
+.ov-foot .ov-mode.off{color:var(--t3)}
+
+/* 离线/暂停 visual */
+.ov-card.is-offline{opacity:.55}
+.ov-card.is-offline .ov-card-icon{filter:grayscale(.6)}
+
+/* 运行控制按钮组 */
+.ov-ctrl{display:flex;gap:.3rem;align-items:center;flex-shrink:0}
+.ov-ctrl-btn{padding:.25rem .55rem;font-size:.68rem;font-weight:600;border:1px solid var(--bd2);border-radius:5px;background:var(--input);color:var(--t2);cursor:pointer;transition:all .15s;line-height:1;white-space:nowrap}
+.ov-ctrl-btn:hover{border-color:var(--p);background:var(--ps);color:var(--p)}
+.ov-ctrl-btn.warn{color:#e3b341;border-color:rgba(227,179,65,.4)}
+.ov-ctrl-btn.warn:hover{background:rgba(227,179,65,.1)}
+.ov-ctrl-btn.ok{color:#3fb950;border-color:rgba(63,185,80,.4)}
+.ov-ctrl-btn.ok:hover{background:rgba(63,185,80,.1)}
+.ov-ctrl-btn.danger{color:#f85149;border-color:rgba(248,81,73,.4)}
+.ov-ctrl-btn.danger:hover{background:rgba(248,81,73,.1)}
+.ov-ctrl-btn:disabled{opacity:.4;cursor:not-allowed}
+.ov-ctrl-btn.spinning{pointer-events:none;opacity:.6}
+
+/* 设备管理面板 */
+.dev-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:.85rem}
+.dev-card{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:1rem 1.1rem;transition:border .15s,box-shadow .15s,background .15s;position:relative}
+.dev-card:hover{border-color:var(--p);box-shadow:0 4px 16px rgba(88,166,255,.18)}
+.dev-card.is-online{border-left:3px solid #3fb950}
+.dev-card.is-offline{border-left:3px solid var(--bd2);filter:saturate(0.6)}
+.dev-card.is-offline:hover{filter:saturate(0.85)}
+.dev-card.is-unregistered{border-left:3px solid #f59e0b}
+.dev-card-head{display:flex;align-items:center;gap:.6rem;margin-bottom:.55rem}
+/* 自定义 checkbox — 替代原生不可见 checkbox */
+.dev-sel{appearance:none;-webkit-appearance:none;width:20px;height:20px;border:2px solid var(--bd2);border-radius:5px;background:var(--input);cursor:pointer;flex-shrink:0;transition:all .15s;position:relative;margin:0}
+.dev-sel:hover{border-color:var(--p);background:var(--ps)}
+.dev-sel:checked{background:var(--p);border-color:var(--p)}
+.dev-sel:checked::after{content:'\2713';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:.7rem;font-weight:700;line-height:1}
+.dev-card-num{width:40px;height:40px;border-radius:10px;background:var(--ps);color:var(--p);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:1.1rem;flex-shrink:0;border:1px solid rgba(88,166,255,.2)}
+.dev-card-num.unregistered{background:rgba(245,158,11,.12);color:#e3b341;border-color:rgba(227,179,65,.25)}
+.dev-card-info{flex:1;min-width:0}
+.dev-card-label{font-weight:800;font-size:1rem;color:var(--t);letter-spacing:-.01em}
+.dev-card-serial{font-size:.7rem;color:var(--t2);font-family:'SF Mono',Consolas,monospace;margin-top:.12rem;line-height:1.3}
+.dev-card-platforms{display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.5rem}
+.dev-plat-tag{font-size:.68rem;font-weight:600;padding:.2rem .5rem;border-radius:5px;letter-spacing:.02em}
+.dev-plat-tag.line{background:rgba(63,185,80,.18);color:#3fb950}
+.dev-plat-tag.messenger{background:rgba(88,166,255,.18);color:#58a6ff}
+.dev-plat-tag.whatsapp{background:rgba(63,185,80,.15);color:#7ee787}
+.dev-card-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:.3rem;margin-top:.5rem}
+.dev-stat{text-align:center;padding:.35rem;background:var(--input);border-radius:6px}
+.dev-stat-n{font-size:.88rem;font-weight:700;color:var(--t)}
+.dev-stat-l{font-size:.62rem;color:var(--t2);text-transform:uppercase}
+.dev-card-status{font-size:.72rem;margin-top:.5rem;display:flex;align-items:center;gap:.4rem}
+.dev-status-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.dev-status-dot.online{background:#3fb950;box-shadow:0 0 6px rgba(63,185,80,.5)}
+.dev-status-dot.offline{background:#636e7b}
+.dev-status-dot.circuit-open{background:#f87171;box-shadow:0 0 6px rgba(248,113,113,.4)}
+.dev-register-form{margin-top:.6rem;display:flex;gap:.35rem;flex-wrap:wrap}
+.dev-register-form input,.dev-register-form select{padding:.35rem .55rem;font-size:.75rem;border:1px solid var(--bd2);border-radius:6px;background:var(--input);color:var(--t)}
+.dev-register-form button{padding:.35rem .65rem;font-size:.72rem;font-weight:600;border:1px solid var(--p);border-radius:6px;background:var(--ps);color:var(--p);cursor:pointer;transition:all .15s}
+.dev-register-form button:hover{background:var(--p);color:#fff}
+.dev-orch-grid{display:flex;flex-direction:column;gap:.35rem}
+.dev-plat-row{display:grid;grid-template-columns:18px 38px 1fr 1fr;gap:.35rem;align-items:center;font-size:.72rem}
+.dev-plat-cb{width:15px;height:15px;accent-color:var(--p);cursor:pointer}
+.dev-plat-label{font-weight:700;color:var(--t2);font-size:.68rem}
+.dev-plat-input{padding:.25rem .4rem;border:1px solid var(--bd2);border-radius:4px;background:var(--input);color:var(--t);font-size:.7rem;min-width:0}
+.dev-plat-input:disabled{opacity:.4;cursor:not-allowed}
+.dev-plat-select{padding:.22rem .3rem;border:1px solid var(--bd2);border-radius:4px;background:var(--input);color:var(--t);font-size:.68rem;min-width:0}
+.dev-card.is-remote{border-left:3px solid #818cf8;background:linear-gradient(135deg,rgba(129,140,248,.06) 0%,var(--card) 70%)}
+.dev-card.is-remote:hover{border-color:#a5b4fc;box-shadow:0 4px 16px rgba(129,140,248,.15)}
+.dev-group-header{grid-column:1/-1;font-weight:700;font-size:.84rem;color:var(--t);padding:.5rem 0;border-bottom:1px solid var(--bd);margin-top:.4rem}
+/* 远程管理 / 未注册 徽章 */
+.dev-remote-tag{display:inline-flex;align-items:center;gap:3px;font-size:.68rem;font-weight:600;padding:.18rem .5rem;border-radius:5px;background:rgba(129,140,248,.15);color:#a5b4fc;border:1px solid rgba(129,140,248,.3)}
+.dev-unregistered-tag{display:inline-flex;align-items:center;gap:3px;font-size:.68rem;font-weight:600;padding:.18rem .5rem;border-radius:5px;background:rgba(245,158,11,.12);color:#e3b341;border:1px solid rgba(227,179,65,.3)}
+
+/* S4-A: sticky floating batch bar */
+.dev-float-bar{position:fixed;bottom:0;left:var(--sw);right:0;z-index:60;padding:.6rem 1.5rem;background:var(--card);border-top:1px solid var(--bd2);box-shadow:0 -4px 20px rgba(0,0,0,.25);display:none;align-items:center;gap:.6rem;flex-wrap:wrap;transition:transform .2s ease}
+.dev-float-bar.visible{display:flex;animation:slideUp .2s ease}
+@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+.dev-float-bar .fb-count{font-size:.82rem;font-weight:700;color:var(--p);min-width:80px}
+.dev-float-bar .fb-input{padding:.3rem .5rem;font-size:.74rem;border:1px solid var(--bd2);border-radius:6px;background:var(--input);color:var(--t);width:120px}
+.dev-float-bar .fb-input:focus{border-color:var(--p);outline:none;box-shadow:0 0 0 2px var(--ps)}
+.dev-float-bar .fb-btn{padding:.35rem .7rem;font-size:.74rem;font-weight:600;border-radius:6px;cursor:pointer;transition:all .15s;border:1px solid}
+.dev-float-bar .fb-btn.primary{background:var(--p);color:#fff;border-color:var(--p)}
+.dev-float-bar .fb-btn.primary:hover{background:var(--pd)}
+.fb-cb-label{display:inline-flex;align-items:center;gap:3px;font-size:.74rem;font-weight:600;color:var(--t);cursor:pointer;user-select:none}
+.fb-cb-label input{accent-color:var(--p);cursor:pointer}
+.dev-float-bar .fb-btn.ghost{background:transparent;color:var(--t2);border-color:var(--bd2)}
+.dev-float-bar .fb-btn.ghost:hover{background:var(--input);color:var(--t)}
+.dev-float-bar .fb-sep{width:1px;height:24px;background:var(--bd2);flex-shrink:0}
+
+/* S4-B: mini stats row inside device cards */
+.dev-mini-stats{display:flex;gap:.5rem;margin-top:.5rem;padding-top:.45rem;border-top:1px solid var(--bd)}
+.dev-mini-stat{display:flex;flex-direction:column;align-items:center;flex:1;min-width:0}
+.dev-mini-stat-n{font-size:.82rem;font-weight:700;line-height:1.1}
+.dev-mini-stat-n.ok{color:#3fb950}
+.dev-mini-stat-n.warn{color:#e3b341}
+.dev-mini-stat-n.err{color:#f85149}
+.dev-mini-stat-l{font-size:.58rem;color:var(--t2);text-transform:uppercase;letter-spacing:.03em;margin-top:1px;white-space:nowrap}
+.dev-mini-spark{display:flex;gap:1px;align-items:flex-end;height:16px;margin-top:.35rem}
+.dev-mini-spark-bar{width:3px;border-radius:1px;min-height:2px;transition:height .2s}
+
+/* S4-C: quick action context menu */
+.dev-ctx-wrap{position:relative;margin-left:auto}
+.dev-ctx-btn{width:28px;height:28px;border-radius:6px;border:1px solid var(--bd);background:transparent;color:var(--t2);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1rem;line-height:1;transition:all .15s}
+.dev-ctx-btn:hover{background:var(--input);border-color:var(--p);color:var(--p)}
+.dev-ctx-menu{position:absolute;top:100%;right:0;margin-top:4px;min-width:140px;background:var(--card);border:1px solid var(--bd2);border-radius:8px;box-shadow:var(--s2);z-index:70;display:none;overflow:hidden}
+.dev-ctx-menu.open{display:block;animation:fadeIn .12s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+.dev-ctx-item{display:flex;align-items:center;gap:.45rem;padding:.45rem .7rem;font-size:.74rem;color:var(--t);cursor:pointer;transition:background .1s;white-space:nowrap}
+.dev-ctx-item:hover{background:var(--input)}
+.dev-ctx-item.danger{color:#f87171}
+.dev-ctx-item.danger:hover{background:rgba(248,113,113,.08)}
+.dev-ctx-sep{height:1px;background:var(--bd);margin:.2rem 0}
+
+/* 跨平台事件流 */
+.ov-list{display:flex;flex-direction:column;gap:.5rem}
+.ov-row{display:flex;gap:.6rem;padding:.55rem .75rem;border:1px solid var(--bd);border-radius:8px;background:var(--input);align-items:flex-start}
+.ov-row:hover{background:var(--card)}
+.ov-row .platform-tag{font-size:.68rem;font-weight:700;padding:.15rem .5rem;border-radius:5px;flex-shrink:0;letter-spacing:.03em}
+.ov-row .platform-tag.telegram{background:rgba(56,189,248,.15);color:#38bdf8}
+.ov-row .platform-tag.line{background:rgba(63,185,80,.18);color:#3fb950}
+.ov-row .platform-tag.messenger{background:rgba(88,166,255,.18);color:#58a6ff}
+.ov-row .platform-tag.whatsapp{background:rgba(126,231,135,.15);color:#7ee787}
+.ov-row-body{flex:1;min-width:0}
+.ov-row-head{display:flex;justify-content:space-between;gap:.5rem;font-size:.78rem;color:var(--t2);margin-bottom:.15rem}
+.ov-row-time{color:var(--t3);font-size:.72rem;flex-shrink:0}
+.ov-row-peer{font-size:.84rem;color:var(--t);white-space:pre-wrap;word-break:break-word;line-height:1.4}
+.ov-row-reply{font-size:.78rem;color:var(--t2);margin-top:.3rem;padding:.35rem .55rem;background:var(--card);border-radius:6px;border-left:2px solid var(--p);white-space:pre-wrap;word-break:break-word}
+
+.ov-row.severity-error{border-left:3px solid #ef4444}
+.ov-row.severity-warning{border-left:3px solid #f59e0b}
+.ov-row.severity-critical{border-left:3px solid #dc2626;background:rgba(239,68,68,.05)}
+.ov-row.severity-info{border-left:3px solid var(--p)}
+
+/* refresh badge */
+.ov-refresh-bar{display:flex;align-items:center;gap:.7rem;font-size:.75rem;color:var(--t3);margin-bottom:.8rem;flex-wrap:wrap}
+.ov-refresh-dot{width:7px;height:7px;border-radius:50%;background:#16a34a;animation:rpaPulse 1.6s infinite}
+@keyframes rpaPulse{0%,100%{opacity:1}50%{opacity:.4}}
+.ov-refresh-bar .ov-spacer{flex:1}
+.ov-refresh-bar select{background:var(--input);border:1px solid var(--bd2);color:var(--t);font-size:.75rem;padding:.25rem .55rem;border-radius:6px}
+</style>
+{% include "_rpa_shared_styles.html" %}
+{% endblock %}
+{% block content %}
+{% set active="rpa_overview" %}
+{% include "_rpa_shared_scripts.html" %}
+
+<!-- P10-B: 全平台聊天历史检索 -->
+<div style="background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:.9rem 1.1rem;margin-bottom:1rem">
+  <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.5rem">
+    <strong style="font-size:.92rem;color:var(--t)">🌐 跨平台聊天检索</strong>
+    <span style="font-size:.7rem;color:var(--t3)">同时检索 LINE / Messenger / WhatsApp 历史</span>
+  </div>
+  <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+    <input id="ov-global-q" type="text" placeholder="🔍 在所有平台历史聊天中检索关键词…"
+           style="flex:1;min-width:240px;padding:.5rem .75rem;background:var(--input);border:1px solid var(--bd2);border-radius:7px;font-size:.85rem;color:var(--t)">
+    <select id="ov-global-q-intent" style="padding:.5rem .65rem;background:var(--input);border:1px solid var(--bd2);border-radius:7px;font-size:.8rem;color:var(--t2)">
+      <option value="">全部意图</option>
+      <option value="purchase">购买</option>
+      <option value="support">售后</option>
+      <option value="inquiry">咨询</option>
+      <option value="greeting">问候</option>
+      <option value="general">通用</option>
+    </select>
+    <select id="ov-global-platforms" style="padding:.5rem .65rem;background:var(--input);border:1px solid var(--bd2);border-radius:7px;font-size:.8rem;color:var(--t2)">
+      <option value="">全平台</option>
+      <option value="line">仅 LINE</option>
+      <option value="messenger">仅 Messenger</option>
+      <option value="whatsapp">仅 WhatsApp</option>
+    </select>
+  </div>
+  <div id="ov-global-results" style="display:none;max-height:420px;overflow-y:auto;border-top:1px solid var(--bd);margin-top:.6rem;padding-top:.4rem"></div>
+</div>
+
+<!-- 顶部聚合 KPI -->
+<div class="ov-refresh-bar">
+  <span class="ov-refresh-dot"></span>
+  <span>实时聚合 · 上次更新 <strong id="ov-last">—</strong></span>
+  <span class="ov-spacer"></span>
+  <label>刷新间隔
+    <select id="ov-interval">
+      <option value="10">10 秒</option>
+      <option value="30" selected>30 秒</option>
+      <option value="60">60 秒</option>
+      <option value="0">手动</option>
+    </select>
+  </label>
+  <button class="btn-sec" type="button" onclick="ovRefresh()">立即刷新</button>
+</div>
+
+<!-- P16-A: 意图关键词字典 — 内联编辑器（可折叠） -->
+<details id="ov-intent-admin" style="background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:.5rem 1rem;margin-bottom:1rem">
+  <summary style="cursor:pointer;font-size:.88rem;color:var(--t);display:flex;align-items:center;gap:.5rem;padding:.3rem 0">
+    <strong>🏷️ 意图关键词字典</strong>
+    <span style="font-size:.7rem;color:var(--t3)" id="ov-it-summary">点击展开 · 编辑 config/intent_tags.yaml</span>
+  </summary>
+  <div style="padding:.6rem 0">
+    <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.5rem;flex-wrap:wrap">
+      <span style="font-size:.7rem;color:var(--t3)" id="ov-it-meta">载入中…</span>
+      <span style="flex:1"></span>
+      <button class="btn-sec" type="button" id="ov-it-load" style="font-size:.75rem;padding:.3rem .65rem">↻ 重新加载文件</button>
+      <button class="btn-sec" type="button" id="ov-it-reload" style="font-size:.75rem;padding:.3rem .65rem" title="不写文件，仅重读硬盘上现有 yaml">⚡ 仅 reload</button>
+      <button class="btn-sec" type="button" id="ov-it-restore" style="font-size:.75rem;padding:.3rem .65rem" title="查看备份并选择恢复">⏪ 恢复备份</button>
+      <button class="btn-sec" type="button" id="ov-it-diff" style="font-size:.75rem;padding:.3rem .65rem" title="保存前预览将增加/删除的关键词">👁 预览改动</button>
+      <button class="btn" type="button" id="ov-it-save" style="font-size:.75rem;padding:.3rem .85rem;background:var(--p);color:#fff;border:0;border-radius:6px;cursor:pointer">💾 保存并 reload</button>
+    </div>
+    <textarea id="ov-it-yaml" rows="14" spellcheck="false"
+      style="width:100%;font-family:'SF Mono',Consolas,monospace;font-size:.78rem;padding:.6rem .8rem;background:var(--input);border:1px solid var(--bd2);border-radius:6px;color:var(--t);resize:vertical;line-height:1.45"></textarea>
+    <div id="ov-it-diff-pane" style="display:none;margin-top:.5rem;padding:.55rem .7rem;background:var(--input);border:1px solid var(--bd2);border-radius:6px;font-size:.75rem;line-height:1.5"></div>
+    <div id="ov-it-bak-pane" style="display:none;margin-top:.5rem;padding:.55rem .7rem;background:var(--input);border:1px solid var(--bd2);border-radius:6px;font-size:.75rem"></div>
+    <div id="ov-it-msg" style="font-size:.72rem;color:var(--t3);margin-top:.4rem;min-height:1em"></div>
+  </div>
+</details>
+
+<div class="ov-summary">
+  <div class="rpa-kpi"><div class="rpa-kpi-n green" id="ov-agg-running">—</div><div class="rpa-kpi-l">运行中平台</div></div>
+  <div class="rpa-kpi"><div class="rpa-kpi-n" id="ov-agg-sent">—</div><div class="rpa-kpi-l">24h 总发送</div></div>
+  <div class="rpa-kpi"><div class="rpa-kpi-n amber" id="ov-agg-pending">—</div><div class="rpa-kpi-l">待审总数</div></div>
+  <div class="rpa-kpi"><div class="rpa-kpi-n red" id="ov-agg-alerts">—</div><div class="rpa-kpi-l">未确认告警</div></div>
+</div>
+
+<!-- 4 平台卡片 -->
+<div class="ov-grid" id="ov-grid">
+  <!-- Telegram -->
+  <div class="ov-card" id="ov-card-telegram">
+    <div class="ov-card-head">
+      <div class="ov-card-icon theme-telegram">
+        <svg viewBox="0 0 24 24"><path d="M22 2L11 13"/><path d="M22 2L15 22 11 13 2 9l20-7z"/></svg>
+      </div>
+      <div class="ov-card-title">
+        <div class="ov-card-name">Telegram <span class="rpa-status-dot neutral" id="ov-dot-telegram"></span></div>
+        <div class="ov-card-sub" id="ov-sub-telegram">载入中…</div>
+      </div>
+      <a class="ov-card-link" href="/telegram">设置 ›</a>
+    </div>
+    <div class="ov-kpis">
+      <div class="ov-kpi"><div class="ov-kpi-n" id="ov-telegram-sent">—</div><div class="ov-kpi-l">24h 发送</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n muted" id="ov-telegram-pending">—</div><div class="ov-kpi-l">待审</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n red" id="ov-telegram-alerts">—</div><div class="ov-kpi-l">告警</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n muted" id="ov-telegram-rate">—</div><div class="ov-kpi-l">成功率</div></div>
+    </div>
+    <div class="ov-foot">
+      <span><span class="ov-mode" id="ov-telegram-mode">—</span></span>
+      <span id="ov-telegram-last">—</span>
+    </div>
+  </div>
+
+  <!-- LINE -->
+  <div class="ov-card" id="ov-card-line">
+    <div class="ov-card-head">
+      <div class="ov-card-icon theme-line">
+        <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/><circle cx="9" cy="10" r="1" fill="currentColor"/><circle cx="13" cy="10" r="1" fill="currentColor"/><circle cx="17" cy="10" r="1" fill="currentColor"/></svg>
+      </div>
+      <div class="ov-card-title">
+        <div class="ov-card-name">LINE <span class="rpa-status-dot neutral" id="ov-dot-line"></span></div>
+        <div class="ov-card-sub" id="ov-sub-line">载入中…</div>
+      </div>
+      <div class="ov-ctrl" id="ov-ctrl-line">
+        <button class="ov-ctrl-btn ok ov-start-btn" title="启动服务" onclick="ovControl('line','start')">▶ 启动</button>
+        <button class="ov-ctrl-btn danger ov-stop-btn" title="停止服务" onclick="ovControl('line','stop')" style="display:none">■ 停止</button>
+        <button class="ov-ctrl-btn warn ov-pause-btn" title="暂停 5 分钟" onclick="ovControl('line','pause',300)" style="display:none">⏸ 暂停</button>
+        <button class="ov-ctrl-btn ok ov-resume-btn" title="立即恢复" onclick="ovControl('line','resume')" style="display:none">⏵ 恢复</button>
+        <button class="ov-ctrl-btn ov-trigger-btn" title="立即触发一次扫描" onclick="ovControl('line','trigger')">⚡</button>
+      </div>
+      <a class="ov-card-link" href="/line-rpa">设置 ›</a>
+    </div>
+    <div class="ov-kpis">
+      <div class="ov-kpi"><div class="ov-kpi-n" id="ov-line-sent">—</div><div class="ov-kpi-l">24h 发送</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n amber" id="ov-line-pending">—</div><div class="ov-kpi-l">待审</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n red" id="ov-line-alerts">—</div><div class="ov-kpi-l">告警</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n muted" id="ov-line-rate">—</div><div class="ov-kpi-l">成功率</div></div>
+    </div>
+    <div class="ov-foot">
+      <span><span class="ov-mode" id="ov-line-mode">—</span></span>
+      <span id="ov-line-lang" style="display:none"></span>
+      <span id="ov-line-last">—</span>
+    </div>
+  </div>
+
+  <!-- Messenger -->
+  <div class="ov-card" id="ov-card-messenger">
+    <div class="ov-card-head">
+      <div class="ov-card-icon theme-messenger">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8 12.5L10.5 15 16 9"/></svg>
+      </div>
+      <div class="ov-card-title">
+        <div class="ov-card-name">Messenger <span class="rpa-status-dot neutral" id="ov-dot-messenger"></span></div>
+        <div class="ov-card-sub" id="ov-sub-messenger">载入中…</div>
+      </div>
+      <div class="ov-ctrl" id="ov-ctrl-messenger">
+        <button class="ov-ctrl-btn ok ov-start-btn" title="启动服务" onclick="ovControl('messenger','start')">▶ 启动</button>
+        <button class="ov-ctrl-btn danger ov-stop-btn" title="停止服务" onclick="ovControl('messenger','stop')" style="display:none">■ 停止</button>
+        <button class="ov-ctrl-btn warn ov-pause-btn" title="暂停 5 分钟" onclick="ovControl('messenger','pause',300)" style="display:none">⏸ 暂停</button>
+        <button class="ov-ctrl-btn ok ov-resume-btn" title="立即恢复" onclick="ovControl('messenger','resume')" style="display:none">⏵ 恢复</button>
+        <button class="ov-ctrl-btn ov-trigger-btn" title="立即触发一次扫描" onclick="ovControl('messenger','trigger')">⚡</button>
+      </div>
+      <a class="ov-card-link" href="/messenger-rpa">设置 ›</a>
+    </div>
+    <div class="ov-kpis">
+      <div class="ov-kpi"><div class="ov-kpi-n" id="ov-messenger-sent">—</div><div class="ov-kpi-l">24h 发送</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n amber" id="ov-messenger-pending">—</div><div class="ov-kpi-l">待审</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n red" id="ov-messenger-alerts">—</div><div class="ov-kpi-l">告警</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n muted" id="ov-messenger-rate">—</div><div class="ov-kpi-l">成功率</div></div>
+    </div>
+    <div class="ov-foot">
+      <span><span class="ov-mode" id="ov-messenger-mode">—</span></span>
+      <span id="ov-messenger-lang" style="display:none"></span>
+      <span id="ov-messenger-last">—</span>
+    </div>
+  </div>
+
+  <!-- WhatsApp -->
+  <div class="ov-card" id="ov-card-whatsapp">
+    <div class="ov-card-head">
+      <div class="ov-card-icon theme-whatsapp">
+        <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884"/></svg>
+      </div>
+      <div class="ov-card-title">
+        <div class="ov-card-name">WhatsApp <span class="rpa-status-dot neutral" id="ov-dot-whatsapp"></span></div>
+        <div class="ov-card-sub" id="ov-sub-whatsapp">载入中…</div>
+      </div>
+      <div class="ov-ctrl" id="ov-ctrl-whatsapp">
+        <button class="ov-ctrl-btn ok ov-start-btn" title="启动服务" onclick="ovControl('whatsapp','start')">▶ 启动</button>
+        <button class="ov-ctrl-btn danger ov-stop-btn" title="停止服务" onclick="ovControl('whatsapp','stop')" style="display:none">■ 停止</button>
+        <button class="ov-ctrl-btn warn ov-pause-btn" title="暂停 5 分钟" onclick="ovControl('whatsapp','pause',300)" style="display:none">⏸ 暂停</button>
+        <button class="ov-ctrl-btn ok ov-resume-btn" title="立即恢复" onclick="ovControl('whatsapp','resume')" style="display:none">⏵ 恢复</button>
+        <button class="ov-ctrl-btn ov-trigger-btn" title="立即触发一次扫描" onclick="ovControl('whatsapp','trigger')">⚡</button>
+      </div>
+      <a class="ov-card-link" href="/whatsapp-rpa">设置 ›</a>
+    </div>
+    <div class="ov-kpis">
+      <div class="ov-kpi"><div class="ov-kpi-n" id="ov-whatsapp-sent">—</div><div class="ov-kpi-l">24h 发送</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n amber" id="ov-whatsapp-pending">—</div><div class="ov-kpi-l">待审</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n red" id="ov-whatsapp-alerts">—</div><div class="ov-kpi-l">告警</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n muted" id="ov-whatsapp-rate">—</div><div class="ov-kpi-l">成功率</div></div>
+    </div>
+    <div class="ov-foot">
+      <span><span class="ov-mode" id="ov-whatsapp-mode">—</span></span>
+      <span id="ov-whatsapp-lang" style="display:none"></span>
+      <span id="ov-whatsapp-last">—</span>
+    </div>
+  </div>
+</div>
+
+<div style="font-size:.68rem;color:var(--t3);padding:.3rem .6rem;margin-top:-.3rem;margin-bottom:.5rem">
+  ℹ️ 以上按钮控制全局服务。设备级平台/人设编排请在下方「📱 设备管理」中操作。
+</div>
+
+<!-- 跨平台事件 tab -->
+<div class="st-bar">
+  <button class="st-tab active" type="button" data-pane="ov-tab-pending" onclick="rpa.switchTab(this)">跨平台待审 <span id="ov-pending-count" class="cfg-badge warn" style="display:none;margin-left:.4rem"></span></button>
+  <button class="st-tab" type="button" data-pane="ov-tab-alerts" onclick="rpa.switchTab(this)">未确认告警 <span id="ov-alerts-count" class="cfg-badge err" style="display:none;margin-left:.4rem"></span></button>
+  <button class="st-tab" type="button" data-pane="ov-tab-devices" onclick="rpa.switchTab(this);devRefresh()">📱 设备管理 <span id="ov-devices-count" class="cfg-badge" style="display:none;margin-left:.4rem"></span></button>
+  <button class="st-tab" type="button" data-pane="ov-tab-device-stats" onclick="rpa.switchTab(this);devStatsRefresh()">📊 设备统计</button>
+  <button class="st-tab" type="button" data-pane="ov-tab-funnel" onclick="rpa.switchTab(this)">📈 运营漏斗</button>
+  <button class="st-tab" type="button" data-pane="ov-tab-lang" onclick="rpa.switchTab(this);ovLangLoad()">🌍 语言分布</button>
+</div>
+
+<div id="ov-tab-pending" class="st-pane active">
+  <div class="rpa-card">
+    <div class="rpa-card-head">
+      <div class="rpa-card-icon amber">⏳</div>
+      <div class="rpa-card-title">最近 5 条 / 平台 · 待审回复</div>
+      <span class="rpa-card-desc">点击下方平台名跳转到详细审批页</span>
+    </div>
+    <div class="ov-list" id="ov-pending-list"><div class="rpa-empty">载入中…</div></div>
+  </div>
+</div>
+
+<div id="ov-tab-alerts" class="st-pane">
+  <div class="rpa-card">
+    <div class="rpa-card-head">
+      <div class="rpa-card-icon red">⚠️</div>
+      <div class="rpa-card-title">未确认告警 · 跨平台</div>
+      <span class="rpa-card-desc">仅 LINE / WhatsApp 维护本地告警表；Messenger 走 Telegram escalation</span>
+    </div>
+    <div class="ov-list" id="ov-alerts-list"><div class="rpa-empty">载入中…</div></div>
+  </div>
+</div>
+
+<!-- 设备管理面板 -->
+<div id="ov-tab-devices" class="st-pane">
+  <div class="rpa-card">
+    <div class="rpa-card-head">
+      <div class="rpa-card-icon" style="background:linear-gradient(135deg,#6366f1,#4f46e5)">📱</div>
+      <div class="rpa-card-title">设备管理</div>
+      <span class="rpa-card-desc" id="dev-host-label">主机: —</span>
+      <button class="btn-sec" type="button" onclick="devRefresh()" style="font-size:.75rem;padding:.3rem .65rem;margin-left:auto">↻ 刷新</button>
+    </div>
+    <!-- old inline batch bar removed — replaced by sticky floating bar below -->
+    <div id="dev-grid" class="dev-grid" style="margin-top:.7rem">
+      <div class="rpa-empty">加载中…</div>
+    </div>
+  </div>
+</div>
+
+<!-- 设备统计仪表盘 -->
+<div id="ov-tab-device-stats" class="st-pane">
+  <div class="rpa-card">
+    <div class="rpa-card-head">
+      <div class="rpa-card-icon" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9)">📊</div>
+      <div class="rpa-card-title">设备统计 (24h)</div>
+      <span class="rpa-card-desc" id="ds-summary-label">加载中…</span>
+      <select id="ds-hours" onchange="devStatsRefresh()" style="margin-left:auto;padding:.25rem .4rem;font-size:.72rem;border:1px solid var(--bd2);border-radius:4px;background:var(--input);color:var(--t)">
+        <option value="24">24 小时</option>
+        <option value="12">12 小时</option>
+        <option value="6" selected>6 小时</option>
+        <option value="1">1 小时</option>
+      </select>
+      <button class="btn-sec" type="button" onclick="devStatsRefresh()" style="font-size:.75rem;padding:.3rem .65rem">↻</button>
+    </div>
+    <!-- 汇总卡片行 -->
+    <div id="ds-summary-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.5rem;margin-top:.7rem">
+      <div class="rpa-empty">点击刷新加载统计…</div>
+    </div>
+    <!-- 时间序列图表区 -->
+    <div id="ds-chart-area" style="margin-top:1rem"></div>
+    <!-- 负载均衡分析 -->
+    <div id="ds-load-balance" style="margin-top:1rem;padding:.6rem .7rem;background:var(--card);border:1px solid var(--bd);border-radius:6px">
+      <div style="font-size:.75rem;font-weight:600;color:var(--t2);margin-bottom:.4rem">⚖️ 主机负载分析</div>
+      <div id="ds-lb-hosts" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:.4rem"></div>
+      <div id="ds-lb-suggestions" style="margin-top:.4rem"></div>
+    </div>
+    <!-- 实时事件流 -->
+    <div id="ds-events" style="margin-top:1rem;padding:.6rem .7rem;background:var(--card);border:1px solid var(--bd);border-radius:6px">
+      <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.4rem">
+        <span style="font-size:.75rem;font-weight:600;color:var(--t2)">🔴 实时事件</span>
+        <span id="ds-sse-status" style="font-size:.6rem;color:var(--t3)">连接中…</span>
+      </div>
+      <div id="ds-event-log" style="max-height:120px;overflow-y:auto;font-size:.65rem;font-family:monospace;color:var(--t3)"></div>
+    </div>
+    <!-- 模板快速应用 -->
+    <div style="margin-top:1rem;padding:.6rem .7rem;background:var(--ps);border-radius:6px">
+      <div style="font-size:.75rem;font-weight:600;color:var(--p);margin-bottom:.4rem">设备模板快速应用</div>
+      <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
+        <select id="ds-template-sel" style="padding:.25rem .4rem;font-size:.72rem;border:1px solid var(--bd2);border-radius:4px;background:var(--input);color:var(--t);min-width:140px">
+          <option value="">选择模板…</option>
+        </select>
+        <span id="ds-template-desc" style="font-size:.68rem;color:var(--t3)"></span>
+        <button class="btn-sec" onclick="devApplyTemplate()" style="font-size:.72rem;padding:.25rem .6rem;font-weight:600;border-color:var(--p);color:var(--p);margin-left:auto">应用到选中设备</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 跨平台运营漏斗（P5 partial） -->
+<div id="ov-tab-funnel" class="st-pane">
+  {% include "_rpa_shared_funnel.html" %}
+</div>
+
+<!-- P5-B: 语言分布面板 -->
+<div id="ov-tab-lang" class="st-pane">
+  <div class="rpa-card">
+    <div class="rpa-card-head">
+      <div class="rpa-card-icon" style="background:linear-gradient(135deg,#0ea5e9,#0284c7)">🌍</div>
+      <div class="rpa-card-title">多平台语言分布</div>
+      <span class="rpa-card-desc" id="ov-lang-summary">WhatsApp（检测/锁定） + Messenger + LINE（7 天回复语言）</span>
+      <button class="btn-sec" type="button" onclick="ovLangLoad()" style="font-size:.75rem;padding:.3rem .65rem;margin-left:auto">↻ 刷新</button>
+    </div>
+    <div id="ov-lang-body" style="margin-top:.8rem">
+      <div class="rpa-empty">点击「🌍 语言分布」标签加载…</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── 状态文案 ────────────────────────────────────────────────
+function ovHealthText(p){
+  if(!p.available) return '不可用';
+  if(!p.enabled)   return '未启用（config disabled）';
+  if(p.paused){
+    const sec = Math.max(0, Math.round(p.pause_remaining_sec||0));
+    return sec>0 ? `已暂停 (${rpa.fmtDur(sec)}剩余)` : '已暂停';
+  }
+  if(!p.running)        return '已停止';
+  if(p.unacked_alerts)  return '运行中 · 有未确认告警';
+  return '运行中';
+}
+
+// ── 跨平台运行控制 ─────────────────────────────────────────
+async function ovControl(platform, action, seconds){
+  const LABELS = {start:'启动', stop:'停止', pause:'暂停', resume:'恢复', trigger:'触发'};
+  try{
+    const body = {platform, action};
+    if(action === 'pause') body.seconds = seconds || 300;
+    const r = await fetch('/api/rpa-overview/control', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if(!r.ok){
+      rpa.toast((d && d.detail) || `${LABELS[action]}失败（HTTP ${r.status}）`, 'err');
+      return;
+    }
+    let msg = `${platform} 已${LABELS[action]}`;
+    if(d.auto_started) msg += '（已自动启动服务）';
+    rpa.toast(msg, 'ok');
+    // 立即刷新总览数据
+    setTimeout(ovRefresh, 600);
+  } catch(e){
+    rpa.toast(`${LABELS[action]}失败：`+e, 'err');
+  }
+}
+
+function ovUpdateCtrlButtons(k, p){
+  const grp = document.getElementById('ov-ctrl-'+k);
+  if(!grp) return;
+  const startBtn  = grp.querySelector('.ov-start-btn');
+  const stopBtn   = grp.querySelector('.ov-stop-btn');
+  const pauseBtn  = grp.querySelector('.ov-pause-btn');
+  const resumeBtn = grp.querySelector('.ov-resume-btn');
+  const trigBtn   = grp.querySelector('.ov-trigger-btn');
+  // 不可用或未启用（config disabled）→ 隐藏所有控制
+  if(!p.available || !p.enabled){
+    grp.style.display = 'none';
+    return;
+  }
+  grp.style.display = 'flex';
+  const running = p.running;
+  const paused  = p.paused;
+  // 启动/停止
+  if(startBtn)  startBtn.style.display  = running ? 'none' : '';
+  if(stopBtn)   stopBtn.style.display   = running ? '' : 'none';
+  // 暂停/恢复（仅运行中时显示）
+  if(pauseBtn)  pauseBtn.style.display  = (running && !paused) ? '' : 'none';
+  if(resumeBtn) resumeBtn.style.display = (running && paused)  ? '' : 'none';
+  // 触发始终可见
+  if(trigBtn)   trigBtn.style.display   = '';
+}
+
+function ovApplyCard(p){
+  const k = p.platform;
+  const dot = document.getElementById('ov-dot-'+k);
+  const sub = document.getElementById('ov-sub-'+k);
+  const card= document.getElementById('ov-card-'+k);
+  if(dot){
+    dot.className = 'rpa-status-dot ' + (p.health_status||'neutral');
+  }
+  if(sub){ sub.textContent = ovHealthText(p); }
+  if(card){ card.classList.toggle('is-offline', !p.available || !p.enabled); }
+  ovUpdateCtrlButtons(k, p);
+  // 4 KPI
+  const sent = document.getElementById('ov-'+k+'-sent');
+  if(sent) sent.textContent = String(p.sent_24h||0);
+  const pend = document.getElementById('ov-'+k+'-pending');
+  if(pend){
+    pend.textContent = String(p.pending_count||0);
+    pend.className = 'ov-kpi-n ' + (p.pending_count>0 ? 'amber' : 'muted');
+    // P14-D: click 跳转到对应平台审批页
+    const _platUrl = {'line':'/line-rpa','whatsapp':'/whatsapp-rpa','messenger':'/messenger-rpa','telegram':'/telegram-rpa'};
+    if(p.pending_count>0 && _platUrl[k]){
+      pend.style.cursor='pointer'; pend.title=`${p.pending_count} 条待审，点击前往处理`;
+      pend.onclick = ()=>{ window.location.href = _platUrl[k]; };
+    } else { pend.style.cursor=''; pend.title=''; pend.onclick=null; }
+  }
+  const al = document.getElementById('ov-'+k+'-alerts');
+  if(al){
+    al.textContent = String(p.unacked_alerts||0);
+    al.className = 'ov-kpi-n ' + (p.unacked_alerts>0 ? 'red' : 'muted');
+  }
+  const rate = document.getElementById('ov-'+k+'-rate');
+  if(rate){
+    const r = Number(p.success_rate||0);
+    rate.textContent = (p.total_24h>0) ? (r.toFixed(0)+'%') : '—';
+    rate.className = 'ov-kpi-n ' + (p.total_24h===0 ? 'muted' : r>=90 ? 'green' : r>=60 ? 'amber' : 'red');
+  }
+  // mode + lang lock + last run
+  const mode = document.getElementById('ov-'+k+'-mode');
+  if(mode){
+    const m = String(p.reply_mode||'—');
+    mode.textContent = m;
+    mode.className = 'ov-mode ' + (m==='approve'?'approve':m==='auto'?'auto':m==='off'?'off':'');
+  }
+  // P10-B: 全局语言锁徽章
+  const langSlot = document.getElementById('ov-'+k+'-lang');
+  if(langSlot){
+    const fl = p.force_reply_lang||'';
+    if(fl){
+      const flag = _OV_LANG_FLAGS[fl]||'🌐';
+      const lockTs = p.last_lang_lock_ts ? ` <span style="font-size:.65rem;color:var(--t3);margin-left:.25rem" title="最近锁定时间">${rpa.ago(p.last_lang_lock_ts)}</span>` : '';
+      langSlot.style.display = '';
+      langSlot.innerHTML = `<span style="font-size:.7rem;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.4);border-radius:5px;padding:.1rem .38rem;color:#818cf8" title="全局语言锁定">🔒 ${flag} ${rpa.esc(fl)}</span>${lockTs}`;
+    } else {
+      langSlot.style.display = 'none';
+      langSlot.innerHTML = '';
+    }
+  }
+  const last = document.getElementById('ov-'+k+'-last');
+  if(last){
+    last.textContent = p.last_run_ts ? ('最近一次 '+rpa.ago(p.last_run_ts)) : '尚无活动';
+  }
+}
+
+function ovApplyAggregate(agg){
+  document.getElementById('ov-agg-running').textContent = String(agg.platforms_running||0) + ' / ' + String(agg.platforms_total||0);
+  document.getElementById('ov-agg-sent').textContent = String(agg.sent_24h||0);
+  document.getElementById('ov-agg-pending').textContent = String(agg.pending_total||0);
+  document.getElementById('ov-agg-alerts').textContent = String(agg.alerts_unacked_total||0);
+}
+
+function ovRenderPending(items){
+  const box = document.getElementById('ov-pending-list');
+  const badge = document.getElementById('ov-pending-count');
+  const n = (items && items.length) || 0;
+  // Q3: 浏览器 title 跨平台总待审
+  if(window.rpa && window.rpa.notify) window.rpa.notify.setBadge(n, '跨平台待审');
+  if(n === 0){
+    box.innerHTML = '<div class="rpa-empty">当前所有平台均无待审条目 ✅</div>';
+    badge.style.display = 'none';
+    return;
+  }
+  badge.style.display = 'inline-flex';
+  badge.textContent = n;
+  const html = items.map(it => `
+    <div class="ov-row">
+      <span class="platform-tag ${it.platform}">${rpa.esc(it.platform_name)}</span>
+      <div class="ov-row-body">
+        <div class="ov-row-head">
+          <span>${rpa.esc(it.peer_name||it.chat_key||'—')}</span>
+          <span class="ov-row-time">${rpa.fmtTime(it.ts)} · ${rpa.ago(it.ts)}</span>
+        </div>
+        <div class="ov-row-peer">${rpa.esc(it.peer_text||'')}</div>
+        ${it.proposed_reply ? `<div class="ov-row-reply">${rpa.esc(it.proposed_reply)}</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+  box.innerHTML = html;
+}
+
+function ovRenderAlerts(items){
+  const box = document.getElementById('ov-alerts-list');
+  const badge = document.getElementById('ov-alerts-count');
+  if(!items || items.length===0){
+    box.innerHTML = '<div class="rpa-empty">当前没有未确认告警 ✅</div>';
+    badge.style.display = 'none';
+    return;
+  }
+  badge.style.display = 'inline-flex';
+  badge.textContent = items.length;
+  const html = items.map(it => `
+    <div class="ov-row severity-${rpa.esc(it.severity||'warning')}">
+      <span class="platform-tag ${it.platform}">${rpa.esc(it.platform_name)}</span>
+      <div class="ov-row-body">
+        <div class="ov-row-head">
+          <span>${rpa.esc(it.code||'')} · ${rpa.esc(it.title||'')}</span>
+          <span class="ov-row-time">${rpa.fmtTime(it.ts)} · ${rpa.ago(it.ts)}</span>
+        </div>
+      </div>
+    </div>
+  `).join('');
+  box.innerHTML = html;
+}
+
+// ── P5-B: 语言分布 ──────────────────────────────────────────
+const _OV_LANG_FLAGS = {
+  'zh-cn':'🇨🇳','zh':'🇨🇳','en':'🇺🇸','de':'🇩🇪','ja':'🇯🇵','ko':'🇰🇷',
+  'fr':'🇫🇷','es':'🇪🇸','ar':'🇸🇦','ru':'🇷🇺','hi':'🇮🇳',
+  'it':'🇮🇹','pt':'🇧🇷','nl':'🇳🇱','pl':'🇵🇱','tr':'🇹🇷','cs':'🇨🇿','hu':'🇭🇺',
+};
+let _ovLangLoaded = false;
+async function ovLangLoad(force){
+  if(_ovLangLoaded && !force) return;
+  const body = document.getElementById('ov-lang-body');
+  const summary = document.getElementById('ov-lang-summary');
+  if(!body) return;
+  body.innerHTML = '<div class="rpa-empty">加载中…</div>';
+  try{
+    // P9-C: fetch dist + trend in parallel
+    const [d, tr] = await Promise.all([
+      rpa.get('/api/rpa-overview/lang-dist'),
+      rpa.get('/api/rpa-overview/lang-trend').catch(() => null),
+    ]);
+    if(!d.ok){ body.innerHTML=`<div class="rpa-empty">加载失败</div>`; return; }
+    _ovLangLoaded = true;
+    // P12-C: 同步已知版本，避免 5s 轮询刚载入就误判为"版本变化"
+    try { const vr2 = await rpa.get('/api/rpa-overview/lang-dist-version'); if(vr2.ok) _ovLangVersion = vr2.v; } catch(e){}
+    const merged = d.merged || {};
+    const total = d.total_chats || 0;
+    const platforms = d.platforms || {};
+    if(summary) summary.textContent =
+      `共 ${total} 个对话有语言记录 · 平台: ${Object.keys(platforms).join(' + ')||'—'}`;
+    if(!total){ body.innerHTML='<div class="rpa-empty">暂无语言数据</div>'; return; }
+    const max = Math.max(...Object.values(merged), 1);
+    // Per-platform mini tables
+    let plHtml = '';
+    const plNames = {'whatsapp':'📱 WhatsApp','messenger':'💬 Messenger','line':'📱 LINE'};
+    for(const [pl, dist] of Object.entries(platforms)){
+      if(!Object.keys(dist).length) continue;
+      plHtml += `<div style="margin-bottom:.6rem"><div style="font-size:.78rem;font-weight:600;color:var(--t2);margin-bottom:.3rem">${plNames[pl]||pl}</div>`;
+      for(const [lang, cnt] of Object.entries(dist).sort((a,b)=>b[1]-a[1])){
+        const flag = _OV_LANG_FLAGS[lang]||'🌐';
+        const pct = Math.round(cnt/total*100);
+        plHtml += `<div style="display:flex;align-items:center;gap:.5rem;margin:.15rem 0;font-size:.8rem">
+          <span style="width:80px;flex-shrink:0">${flag} ${rpa.esc(lang)}</span>
+          <div style="flex:1;background:var(--bd2);border-radius:4px;height:12px;overflow:hidden">
+            <div style="width:${Math.round(cnt/max*100)}%;background:#0ea5e9;height:100%;border-radius:4px;transition:width .4s ease"></div>
+          </div>
+          <span style="width:36px;text-align:right;color:var(--t2)">${cnt}</span>
+          <span style="width:36px;color:var(--t3);font-size:.72rem">${pct}%</span>
+        </div>`;
+      }
+      plHtml += '</div>';
+    }
+    // Merged bar chart
+    let mergedHtml = '<div style="font-size:.78rem;font-weight:600;color:var(--t2);margin:.7rem 0 .3rem">🌍 合并（全平台）</div>';
+    for(const [lang, cnt] of Object.entries(merged)){
+      const flag = _OV_LANG_FLAGS[lang]||'🌐';
+      const pct = Math.round(cnt/total*100);
+      mergedHtml += `<div style="display:flex;align-items:center;gap:.5rem;margin:.15rem 0;font-size:.82rem">
+        <span style="width:80px;flex-shrink:0">${flag} ${rpa.esc(lang)}</span>
+        <div style="flex:1;background:var(--bd2);border-radius:4px;height:14px;overflow:hidden">
+          <div style="width:${Math.round(cnt/max*100)}%;background:linear-gradient(90deg,#0ea5e9,#6366f1);height:100%;border-radius:4px;transition:width .4s ease"></div>
+        </div>
+        <span style="width:36px;text-align:right;color:var(--t);font-weight:600">${cnt}</span>
+        <span style="width:40px;color:var(--t3);font-size:.74rem">${pct}%</span>
+      </div>`;
+    }
+    // P9-C: 7-day sparkline section
+    let sparkHtml = '';
+    if(tr && tr.ok && tr.by_platform && Object.keys(tr.by_platform).length){
+      const days = tr.days || [];
+      const byPl = tr.by_platform || {};
+      const _plColors = {whatsapp:'#25d366',messenger:'#0084ff',line:'#06c755'};
+      const _plLabel = {'whatsapp':'📱 WA','messenger':'💬 MSG','line':'📱 LINE'};
+      // helper: render one platform sparkline as an SVG bar chart
+      function _spark(vals, color){
+        const W=168, H=40, N=vals.length, gap=2;
+        const bw=Math.floor((W-gap*(N-1))/N);
+        const maxV=Math.max(...vals,1);
+        const bars=vals.map((v,i)=>{
+          const bh=Math.max(2,Math.round(v/maxV*(H-2)));
+          const x=i*(bw+gap), y=H-bh;
+          const alpha=0.25+0.75*(v/maxV);
+          return `<rect x="${x}" y="${y}" width="${bw}" height="${bh}" rx="1" fill="${color}" opacity="${alpha.toFixed(2)}"></rect>`;
+        }).join('');
+        const labels=days.map((d,i)=>{
+          const md=d.slice(5); // MM-DD
+          const x=i*(bw+gap)+Math.floor(bw/2);
+          return `<text x="${x}" y="${H+9}" font-size="7" text-anchor="middle" fill="var(--t3)">${md}</text>`;
+        }).join('');
+        return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H+12}" style="display:block">${bars}${labels}</svg>`;
+      }
+      sparkHtml = `<div style="margin-top:1rem;border-top:1px solid var(--bd);padding-top:.8rem">
+        <div style="font-size:.78rem;font-weight:600;color:var(--t2);margin-bottom:.55rem">📈 7 天对话趋势</div>
+        <div style="display:flex;gap:1.5rem;flex-wrap:wrap">`;
+      for(const [pl, vals] of Object.entries(byPl)){
+        const total7=vals.reduce((a,b)=>a+b,0);
+        sparkHtml+=`<div style="min-width:180px">
+          <div style="font-size:.72rem;color:var(--t2);margin-bottom:.25rem">${_plLabel[pl]||pl} <span style="color:var(--t3);font-weight:400">7天 ${total7} 对话</span></div>
+          ${_spark(vals, _plColors[pl]||'#6366f1')}
+        </div>`;
+      }
+      sparkHtml += '</div></div>';
+    }
+    // P11-E: 对话级锁定数汇总
+    const locked = d.locked_chats || {};
+    const totalLocked = Object.values(locked).reduce((a,b)=>a+b,0);
+    let lockedHtml = '';
+    if(totalLocked > 0){
+      const _plIcons = {line:'📱 LINE',whatsapp:'📱 WA',messenger:'💬 MSG'};
+      const parts = Object.entries(locked).filter(([,v])=>v>0)
+        .map(([pl,v])=>`<span style="font-size:.75rem;background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.3);border-radius:5px;padding:.1rem .38rem;color:#a5b4fc">🔒 ${_plIcons[pl]||pl} ${v}</span>`).join(' ');
+      lockedHtml = `<div style="margin-top:.7rem;padding-top:.6rem;border-top:1px solid var(--bd);display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+        <span style="font-size:.74rem;color:var(--t3)">对话锁定</span>${parts}
+        <span style="font-size:.72rem;color:var(--t3);margin-left:auto">共 ${totalLocked} 条</span>
+      </div>`;
+    }
+    body.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.2rem;align-items:start">
+      <div>${plHtml}</div>
+      <div>${mergedHtml}</div>
+    </div>${sparkHtml}${lockedHtml}`;
+  }catch(e){ body.innerHTML=`<div class="rpa-empty">错误: ${e}</div>`; }
+}
+
+// P12-C: 5s 版本轮询取代 30s 盲刷新 — 版本号不变则不触发重绘
+let _ovLangVersion = -1;
+let _ovLangRefreshTimer = null;
+function _ovLangScheduleRefresh() {
+  if (_ovLangRefreshTimer) return;
+  _ovLangRefreshTimer = setInterval(async () => {
+    if (!_ovLangLoaded) return;  // 面板未打开则跳过
+    try {
+      const vr = await rpa.get('/api/rpa-overview/lang-dist-version');
+      if (vr.ok && vr.v !== _ovLangVersion) {
+        _ovLangVersion = vr.v;
+        _ovLangLoaded = false;
+        ovLangLoad();
+      }
+    } catch(e) { /* 静默 */ }
+  }, 5000);
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', _ovLangScheduleRefresh);
+} else {
+  _ovLangScheduleRefresh();
+}
+
+// ── 拉取数据 ────────────────────────────────────────────────
+async function ovRefresh(){
+  try{
+    const [st, pd, al] = await Promise.all([
+      rpa.get('/api/rpa-overview/status'),
+      rpa.get('/api/rpa-overview/pending?limit=5'),
+      rpa.get('/api/rpa-overview/alerts?limit=5'),
+    ]);
+    if(st && st.platforms){
+      ovApplyAggregate(st.aggregate || {});
+      // 多账号（如多个 WhatsApp 账号）会返回同 platform 的多条记录，需先合并
+      // running/enabled = 任意一条满足即为 true；KPI 求和；last_run_ts 取最大值
+      const platMap = {};
+      for(const p of st.platforms){
+        const k = p.platform;
+        if(!platMap[k]){
+          platMap[k] = Object.assign({}, p);
+        } else {
+          const m = platMap[k];
+          if(p.running)  m.running  = true;
+          if(p.enabled)  m.enabled  = true;
+          if(p.available) m.available = true;
+          if(p.paused && !m.running) m.paused = true;
+          m.sent_24h      = (m.sent_24h||0)      + (p.sent_24h||0);
+          m.total_24h     = (m.total_24h||0)      + (p.total_24h||0);
+          m.pending_count = (m.pending_count||0)  + (p.pending_count||0);
+          m.unacked_alerts= (m.unacked_alerts||0) + (p.unacked_alerts||0);
+          if((p.last_run_ts||0) > (m.last_run_ts||0)) m.last_run_ts = p.last_run_ts;
+          // health_status: 有任意 ok 则升级
+          if(p.health_status==='ok' || m.health_status!=='ok') m.health_status = p.health_status || m.health_status;
+          // P10-B: 取第一个非空 force_reply_lang
+          if(!m.force_reply_lang && p.force_reply_lang) m.force_reply_lang = p.force_reply_lang;
+        }
+      }
+      for(const p of Object.values(platMap)){ ovApplyCard(p); }
+    }
+    if(pd && pd.items){ ovRenderPending(pd.items); }
+    if(al && al.items){ ovRenderAlerts(al.items); }
+    document.getElementById('ov-last').textContent = new Date().toLocaleTimeString('zh-CN',{hour12:false});
+  }catch(e){
+    console.warn('overview refresh failed', e);
+    rpa.toast('刷新失败：'+e, 'err');
+  }
+}
+
+let _ovTimer = null;
+function ovScheduleRefresh(){
+  if(_ovTimer){ clearInterval(_ovTimer); _ovTimer = null; }
+  const sec = Number(document.getElementById('ov-interval').value||0);
+  if(sec>0){ _ovTimer = setInterval(ovRefresh, sec*1000); }
+}
+
+document.addEventListener('DOMContentLoaded', function(){
+  rpa.restoreTabFromHash();
+  document.getElementById('ov-interval').addEventListener('change', ovScheduleRefresh);
+  // 页面切到后台时停定时器，避免空跑
+  document.addEventListener('visibilitychange', function(){
+    if(document.hidden){
+      if(_ovTimer){ clearInterval(_ovTimer); _ovTimer = null; }
+    }else{
+      ovRefresh();
+      ovScheduleRefresh();
+    }
+  });
+  ovRefresh();
+  ovScheduleRefresh();
+  // P5 + Q4: 运营漏斗初始加载 + 60s 轮询，默认 scope=all（跨平台总览）
+  if(window.rpa && window.rpa.funnel){ window.rpa.funnel.init({intervalSec:60, defaultScope:'all'}); }
+
+  // P10-B: 跨平台全局检索
+  const gqInp = document.getElementById('ov-global-q');
+  const gqResults = document.getElementById('ov-global-results');
+  const gqIntent = document.getElementById('ov-global-q-intent');
+  const gqPlat = document.getElementById('ov-global-platforms');
+  const PLATFORM_LABELS = {line:'LINE', messenger:'Messenger', whatsapp:'WhatsApp'};
+  let gqTimer = null;
+  const escHtml = (window.rpa && rpa.esc) ? rpa.esc : function(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));};
+  function gqDoSearch(){
+    const q = (gqInp.value||'').trim();
+    if(!q){ gqResults.style.display='none'; gqResults.innerHTML=''; return; }
+    gqResults.style.display='';
+    gqResults.innerHTML = '<div style="padding:.6rem 1rem;color:var(--t3);font-size:.8rem">检索中…</div>';
+    const url = '/api/rpa/global-search?q='+encodeURIComponent(q)
+              + '&intent='+encodeURIComponent(gqIntent.value||'')
+              + '&platforms='+encodeURIComponent(gqPlat.value||'')
+              + '&days=30&limit=20';
+    fetch(url).then(r=>r.json()).then(d=>{
+      const rs = (d && d.results) || [];
+      const bp = (d && d.by_platform) || {};
+      const bpLine = Object.entries(bp).map(([k,v])=>`<span class="platform-tag ${k}" style="margin-right:.4rem">${PLATFORM_LABELS[k]||k} ${v}</span>`).join('');
+      if(!rs.length){
+        gqResults.innerHTML = '<div style="padding:.6rem 1rem;color:var(--t3);font-size:.8rem">无匹配结果' + (bpLine?'<div style="margin-top:.3rem">'+bpLine+'</div>':'') + '</div>';
+        return;
+      }
+      gqResults.innerHTML = '<div style="padding:.4rem 1rem;font-size:.72rem;color:var(--t3);border-bottom:1px solid var(--bd);margin-bottom:.3rem">命中分布：'+bpLine+'</div>'
+        + rs.map((r,i)=>{
+          const p = r.platform || '';
+          const ck = r.chat_key || '';
+          const ckEsc = ck.replace(/'/g,"\\'");
+          const ab = (r.api_base||'').replace(/'/g,"\\'");
+          const onclick = `(window.__ovOpen)('${ab}','${ckEsc}')`;
+          const ago = (window.rpa && rpa.ago) ? rpa.ago(r.ts) : (r.ts||'');
+          return `<div onclick="${onclick}" style="cursor:pointer;padding:.55rem .75rem;border-radius:6px;margin-bottom:.3rem;transition:background .12s" onmouseover="this.style.background='var(--input)'" onmouseout="this.style.background='transparent'">
+            <div style="display:flex;align-items:center;gap:.4rem;font-size:.72rem;color:var(--t3);margin-bottom:.2rem">
+              <span class="platform-tag ${p}">${PLATFORM_LABELS[p]||p}</span>
+              <span style="font-family:monospace">${escHtml(ck)}</span>
+              <span style="margin-left:auto">${ago}</span>
+            </div>
+            ${r.peer_text?`<div style="font-size:.82rem;color:var(--t2)">👤 ${escHtml(String(r.peer_text).slice(0,200))}</div>`:''}
+            ${r.reply_text?`<div style="font-size:.78rem;color:var(--t3);margin-top:.15rem">🤖 ${escHtml(String(r.reply_text).slice(0,150))}</div>`:''}
+          </div>`;
+        }).join('');
+    }).catch(()=>{
+      gqResults.innerHTML = '<div style="padding:.6rem 1rem;color:#dc2626;font-size:.8rem">检索失败</div>';
+    });
+  }
+  window.__ovOpen = function(apiBase, chatKey){
+    if(window.rpa && rpa.analytics && rpa.analytics.openDetail){
+      rpa.analytics.openDetail({apiBase:apiBase, chatKey:chatKey});
+    }
+  };
+  if(gqInp){
+    gqInp.addEventListener('input', ()=>{ clearTimeout(gqTimer); gqTimer = setTimeout(gqDoSearch, 380); });
+    [gqIntent, gqPlat].forEach(el => el && el.addEventListener('change', gqDoSearch));
+  }
+
+  // ── P16-A: 意图关键词字典管理面板 ──────────────────────────────
+  const itPanel = document.getElementById('ov-intent-admin');
+  const itTextarea = document.getElementById('ov-it-yaml');
+  const itMeta = document.getElementById('ov-it-meta');
+  const itMsg = document.getElementById('ov-it-msg');
+  const itSummary = document.getElementById('ov-it-summary');
+  let itLoaded = false;
+  function itStatus(s, color){
+    if(itMsg){ itMsg.textContent = s || ''; itMsg.style.color = color || 'var(--t3)'; }
+  }
+  // P27-B: 把 413 / 429 等 HTTP 错误码翻译成对用户友好的中文提示。
+  // resp 为 Response 对象（可拿 headers），body 为 JSON detail。
+  function itFormatErr(resp, body){
+    const status = resp && resp.status;
+    const detail = (body && (body.detail || body.error)) || '';
+    if(status === 413){
+      const cap = resp.headers.get('X-Body-Limit') || (body && body.max_body_bytes);
+      const capMB = cap ? (Number(cap) / (1024*1024)).toFixed(2) + ' MB' : '上限';
+      return `⚠ 提交内容超出 ${capMB}，请删减后再保存（${detail}）`;
+    }
+    if(status === 429){
+      const ra = resp.headers.get('Retry-After');
+      return `⚠ 操作过于频繁，请 ${ra ? ra + ' 秒' : '稍'}后重试（${detail}）`;
+    }
+    if(status === 400 || status === 422){
+      return `保存失败：${detail || '请求格式不合法'}`;
+    }
+    if(status === 401 || status === 403){
+      return `权限不足（${status}）：${detail}`;
+    }
+    return `保存失败（HTTP ${status}）：${detail || '未知'}`;
+  }
+  function itRefreshMeta(){
+    fetch('/api/rpa/intent-tags').then(r=>r.json()).then(d=>{
+      if(!d || !d.ok) return;
+      const txt = `${d.category_count} 类 · ${d.keyword_count} 关键词 · ${d.yaml_exists?'✓ 文件存在':'⚠ 用内置默认'}`;
+      if(itMeta) itMeta.textContent = txt;
+      if(itSummary) itSummary.textContent = txt;
+    }).catch(()=>{});
+  }
+  function itLoadFile(){
+    itStatus('载入中…');
+    fetch('/api/rpa/intent-tags/raw').then(r=>r.text()).then(t=>{
+      if(itTextarea) itTextarea.value = t || '';
+      itLoaded = true;
+      itStatus('✓ 已载入文件原文', '#16a34a');
+      itRefreshMeta();
+    }).catch(()=>{ itStatus('载入失败', '#dc2626'); });
+  }
+  // 首次展开时延迟加载
+  if(itPanel){
+    itPanel.addEventListener('toggle', ()=>{
+      if(itPanel.open && !itLoaded) itLoadFile();
+    });
+    document.getElementById('ov-it-load')?.addEventListener('click', itLoadFile);
+    document.getElementById('ov-it-reload')?.addEventListener('click', ()=>{
+      itStatus('正在 reload…');
+      fetch('/api/rpa/intent-tags/reload', {method:'POST'})
+        .then(r=>r.json()).then(d=>{
+          if(d && d.ok){
+            itStatus(`✓ 已 reload · ${d.category_count} 类 · ${d.keyword_count} 关键词 (Δ ${d.delta>=0?'+':''}${d.delta})`, '#16a34a');
+            itRefreshMeta();
+          } else { itStatus('reload 失败', '#dc2626'); }
+        }).catch(e=>{ itStatus('reload 失败：'+e, '#dc2626'); });
+    });
+    // P17-B: 渲染 diff 结果到面板
+    const diffPane = document.getElementById('ov-it-diff-pane');
+    function renderDiff(d){
+      if(!diffPane) return;
+      const esc = (s)=>String(s).replace(/[<>&]/g,(c)=>({'<':'&lt;','>':'&gt;','&':'&amp;'})[c]);
+      const greenSpan = (kw)=>`<span style="background:rgba(34,197,94,.15);color:#16a34a;padding:.05rem .35rem;border-radius:4px;margin-right:.2rem;font-family:monospace">+${esc(kw)}</span>`;
+      const redSpan = (kw)=>`<span style="background:rgba(239,68,68,.15);color:#dc2626;padding:.05rem .35rem;border-radius:4px;margin-right:.2rem;font-family:monospace">-${esc(kw)}</span>`;
+      const lines = [`<div style="margin-bottom:.4rem"><strong>📋 ${esc(d.summary)}</strong></div>`];
+      if(d.added_tags && d.added_tags.length){
+        lines.push(`<div style="margin:.25rem 0"><strong style="color:#16a34a">+ 新增类别：</strong> ${d.added_tags.map(esc).join(', ')}</div>`);
+      }
+      if(d.removed_tags && d.removed_tags.length){
+        lines.push(`<div style="margin:.25rem 0"><strong style="color:#dc2626">- 删除类别：</strong> ${d.removed_tags.map(esc).join(', ')}</div>`);
+      }
+      const changed = d.changed_tags || {};
+      const changedKeys = Object.keys(changed);
+      if(changedKeys.length){
+        lines.push('<div style="margin-top:.4rem;font-weight:600">变更明细：</div>');
+        changedKeys.forEach(k=>{
+          const v = changed[k];
+          const segs = [];
+          if(v.added && v.added.length) segs.push(v.added.map(greenSpan).join(''));
+          if(v.removed && v.removed.length) segs.push(v.removed.map(redSpan).join(''));
+          lines.push(`<div style="margin:.2rem 0 .2rem 1rem"><span style="color:var(--t2);font-weight:600">${esc(k)}:</span> ${segs.join(' ')}</div>`);
+        });
+      }
+      // P18-D: reorder-only tags (content same, order changed)
+      if(d.reordered_tags && d.reordered_tags.length){
+        lines.push(`<div style="margin:.25rem 0;color:#b45309"><strong>⇅ 仅顺序变化：</strong> ${d.reordered_tags.map(esc).join(', ')} <span style="font-size:.7rem;color:var(--t3)">(影响匹配优先级)</span></div>`);
+      }
+      if(!d.added_tags?.length && !d.removed_tags?.length && !changedKeys.length && !(d.reordered_tags||[]).length){
+        lines.push('<div style="color:var(--t3)">（与当前运行时字典完全一致）</div>');
+      }
+      diffPane.innerHTML = lines.join('');
+      diffPane.style.display = '';
+    }
+    function fetchDiff(content){
+      return fetch('/api/rpa/intent-tags/diff', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({content: content})
+      }).then(r=>r.json().then(d=>({status:r.status, body:d})));
+    }
+    document.getElementById('ov-it-diff')?.addEventListener('click', ()=>{
+      const content = (itTextarea && itTextarea.value) || '';
+      if(!content.trim()){ itStatus('内容为空', '#dc2626'); return; }
+      itStatus('计算 diff…');
+      fetchDiff(content).then(({status, body})=>{
+        if(status === 200 && body.ok){
+          renderDiff(body);
+          itStatus('✓ ' + body.summary, '#16a34a');
+        } else {
+          if(diffPane) diffPane.style.display = 'none';
+          itStatus('diff 失败：' + (body && (body.detail||body.error) || '未知'), '#dc2626');
+        }
+      }).catch(e=>{ itStatus('diff 失败：'+e, '#dc2626'); });
+    });
+
+    // P18-C: 实时 lint（输入防抖 600ms）— 只显示状态条 summary，不展开 diffPane
+    // P19-B: AbortController 取消上一次未返回的请求，避免乱序覆盖状态条
+    let lintTimer = null;
+    let lintAbort = null;
+    itTextarea?.addEventListener('input', ()=>{
+      clearTimeout(lintTimer);
+      lintTimer = setTimeout(()=>{
+        const content = itTextarea.value || '';
+        if(!content.trim()){ itStatus(''); return; }
+        // 取消上一次还没回来的 lint
+        if(lintAbort){ try{ lintAbort.abort(); }catch(_){} }
+        lintAbort = new AbortController();
+        const signal = lintAbort.signal;
+        fetch('/api/rpa/intent-tags/diff', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({content: content}), signal: signal
+        }).then(r=>r.json().then(d=>({status:r.status, body:d})))
+          .then(({status, body})=>{
+            if(signal.aborted) return;  // 已被新请求覆盖
+            if(status === 200 && body.ok){
+              itStatus('📋 ' + body.summary, body.summary.includes('+0 kw / -0 kw') ? 'var(--t3)' : '#0ea5e9');
+            } else {
+              itStatus('⚠ ' + (body && (body.detail||body.error) || '语法错'), '#dc2626');
+            }
+          }).catch(err=>{
+            if(err && err.name === 'AbortError') return;  // 静默忽略取消
+            // 其他错误不更新状态（避免覆盖更新鲜的 status）
+          });
+      }, 600);
+    });
+
+    // P17-D: 备份列表 + 恢复
+    const bakPane = document.getElementById('ov-it-bak-pane');
+    function renderBackups(list){
+      if(!bakPane) return;
+      if(!list || !list.length){
+        bakPane.innerHTML = '<div style="color:var(--t3)">（暂无备份）</div>';
+        bakPane.style.display = '';
+        return;
+      }
+      const esc = (s)=>String(s).replace(/[<>&"]/g,(c)=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'})[c]);
+      const fmt = (ts)=> ts ? new Date(ts*1000).toLocaleString() : '—';
+      bakPane.innerHTML = '<div style="margin-bottom:.35rem;font-weight:600">最近 ' + list.length + ' 份备份（先预览再恢复）：</div>'
+        + list.map(b=>(
+          `<div style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;border-top:1px solid var(--bd)">
+            <span style="font-family:monospace;font-size:.7rem;color:var(--t2)">${esc(b.filename)}</span>
+            <span style="font-size:.7rem;color:var(--t3)">${fmt(b.mtime)}</span>
+            <span style="font-size:.7rem;color:var(--t3)">${b.size} B</span>
+            <span style="flex:1"></span>
+            <button class="btn-sec ov-it-bak-preview" data-fn="${esc(b.filename)}" style="font-size:.7rem;padding:.2rem .55rem" title="dry-run：只看会变什么，不实际恢复">👁 预览</button>
+            <button class="btn-sec ov-it-bak-restore" data-fn="${esc(b.filename)}" style="font-size:.7rem;padding:.2rem .55rem">恢复此版</button>
+          </div>`
+        )).join('');
+      bakPane.style.display = '';
+      // P18-A: dry-run preview
+      bakPane.querySelectorAll('.ov-it-bak-preview').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const fn = btn.getAttribute('data-fn');
+          itStatus('预览中…');
+          fetch('/api/rpa/intent-tags/restore', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({filename: fn, dry_run: true})
+          }).then(r=>r.json().then(d=>({status:r.status, body:d})))
+            .then(({status, body})=>{
+              if(status === 200 && body.ok){
+                renderDiff(body);
+                itStatus(`✓ 预览 ${fn} · ${body.summary}`, '#0ea5e9');
+              } else {
+                itStatus('预览失败：' + (body && (body.detail||body.error) || '未知'), '#dc2626');
+              }
+            }).catch(e=>{ itStatus('预览失败：'+e, '#dc2626'); });
+        });
+      });
+      bakPane.querySelectorAll('.ov-it-bak-restore').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const fn = btn.getAttribute('data-fn');
+          if(!confirm(`将用 ${fn} 覆盖当前 yaml（同时会再生成一份新备份）。继续？`)) return;
+          itStatus('恢复中…');
+          fetch('/api/rpa/intent-tags/restore', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({filename: fn})
+          }).then(r=>r.json().then(d=>({status:r.status, body:d})))
+            .then(({status, body})=>{
+              if(status === 200 && body.ok){
+                itStatus(`✓ 已恢复 · ${body.category_count} 类 · ${body.keyword_count} 关键词`, '#16a34a');
+                itRefreshMeta();
+                itLoadFile();
+                bakPane.style.display = 'none';
+              } else {
+                itStatus('恢复失败：' + (body && (body.detail||body.error) || '未知'), '#dc2626');
+              }
+            }).catch(e=>{ itStatus('恢复失败：'+e, '#dc2626'); });
+        });
+      });
+    }
+    document.getElementById('ov-it-restore')?.addEventListener('click', ()=>{
+      itStatus('载入备份列表…');
+      fetch('/api/rpa/intent-tags/backups').then(r=>r.json()).then(d=>{
+        if(d && d.ok){
+          renderBackups(d.backups || []);
+          itStatus('');
+        } else { itStatus('载入失败', '#dc2626'); }
+      }).catch(e=>{ itStatus('载入失败：'+e, '#dc2626'); });
+    });
+
+    document.getElementById('ov-it-save')?.addEventListener('click', ()=>{
+      const content = (itTextarea && itTextarea.value) || '';
+      if(!content.trim()){ itStatus('内容为空', '#dc2626'); return; }
+      // P17-B: 保存前先做 diff，附在 confirm 里
+      itStatus('计算 diff…');
+      fetchDiff(content).then(({status, body})=>{
+        if(status !== 200 || !body.ok){
+          itStatus('校验失败：' + (body && (body.detail||body.error) || '未知'), '#dc2626');
+          return;
+        }
+        renderDiff(body);
+        if(!confirm(`即将保存：${body.summary}\n\n旧版会备份。继续？`)) {
+          itStatus('已取消', 'var(--t3)');
+          return;
+        }
+        itStatus('保存中…');
+        fetch('/api/rpa/intent-tags', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({content: content})
+        }).then(r=>r.json().then(d=>({resp:r, body:d})))
+          .then(({resp, body})=>{
+            if(resp.status === 200 && body.ok){
+              itStatus(`✓ 已保存 · ${body.category_count} 类 · ${body.keyword_count} 关键词 · 备份: ${body.backup_path||'(无旧文件)'}`, '#16a34a');
+              itRefreshMeta();
+            } else {
+              // P27-B: 413/429/4xx 友好提示（含 X-Body-Limit / Retry-After）
+              itStatus(itFormatErr(resp, body), '#dc2626');
+            }
+          }).catch(e=>{ itStatus('保存失败：'+e, '#dc2626'); });
+      }).catch(e=>{ itStatus('diff 失败：'+e, '#dc2626'); });
+    });
+    // 页面初次打开：异步取一下 meta（不展开 textarea）
+    itRefreshMeta();
+  }
+});
+
+// ── 设备管理面板 ─────────────────────────────────────────────
+const _devGrid = document.getElementById('dev-grid');
+const _devHostLabel = document.getElementById('dev-host-label');
+const _devCountBadge = document.getElementById('ov-devices-count');
+// 自动加载：设备 tab 可见时自动刷新（首次 + tab 切换）
+let _devLoaded=false;
+(function _autoDevRefresh(){
+  const pane=document.getElementById('ov-tab-devices');
+  if(!pane) return;
+  const obs=new MutationObserver(()=>{
+    if(pane.classList.contains('active')&&!_devLoaded){_devLoaded=true;devRefresh();}
+  });
+  obs.observe(pane,{attributes:true,attributeFilter:['class']});
+  // 如果页面加载时已经是 active
+  if(pane.classList.contains('active')){_devLoaded=true;setTimeout(devRefresh,100);}
+})();
+const _esc = (window.rpa && rpa.esc) ? rpa.esc : function(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));};
+
+function _personaName(pid){
+  if(!pid||!_personasCache) return '';
+  const p=_personasCache.find(x=>x.id===pid);
+  return p?(p.name||pid):'';
+}
+function devPlatTags(dev){
+  const tags=[];
+  if(dev.platform_messenger){
+    let t='MSG: '+_esc(dev.platform_messenger);
+    const pn=_personaName(dev.persona_messenger);
+    if(pn) t+=' <span style="opacity:.7;font-size:.6rem">· '+_esc(pn)+'</span>';
+    tags.push('<span class="dev-plat-tag messenger">'+t+'</span>');
+  }
+  if(dev.platform_line){
+    let t='LINE: '+_esc(dev.platform_line);
+    const pn=_personaName(dev.persona_line);
+    if(pn) t+=' <span style="opacity:.7;font-size:.6rem">· '+_esc(pn)+'</span>';
+    tags.push('<span class="dev-plat-tag line">'+t+'</span>');
+  }
+  if(dev.platform_whatsapp){
+    let t='WA: '+_esc(dev.platform_whatsapp);
+    const pn=_personaName(dev.persona_whatsapp);
+    if(pn) t+=' <span style="opacity:.7;font-size:.6rem">· '+_esc(pn)+'</span>';
+    tags.push('<span class="dev-plat-tag whatsapp">'+t+'</span>');
+  }
+  return tags.join('')||'<span style="font-size:.7rem;color:var(--t3)">未分配平台</span>';
+}
+
+function devRenderCoordStatus(coord){
+  if(!coord) return '<div style="margin-top:.35rem"><span class="dev-unregistered-tag" style="background:rgba(99,110,123,.15);color:var(--t3);border-color:rgba(99,110,123,.3)">○ 未运行</span></div>';
+  const pHtml = (coord.platforms||[]).map(p=>{
+    const dotCls = p.circuit_open?'circuit-open':'online';
+    const stepTxt = p.last_step||'idle';
+    const failTxt = p.consecutive_fail>0?` · fail:${p.consecutive_fail}`:'';
+    // 运行历史（最近 N 条）
+    const history = (p.run_history||[]).slice(0,10);
+    let histHtml='';
+    if(history.length){
+      const dots = history.map(h=>{
+        const color = h.ok?'#3fb950':'#f85149';
+        const title = `${h.step||'?'} ${h.ok?'✓':'✗'} badge:${h.badge??'-'}`;
+        return `<span title="${_esc(title)}" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${color};cursor:help"></span>`;
+      }).join('');
+      histHtml = `<div style="display:flex;gap:2px;margin-top:2px;align-items:center" title="最近 ${history.length} 次运行（左=最新）">${dots}</div>`;
+    }
+    return `<div style="display:flex;align-items:center;gap:.3rem;font-size:.68rem;color:var(--t2);flex-wrap:wrap">
+      <span class="dev-status-dot ${dotCls}"></span>
+      <span class="dev-plat-tag ${p.type}">${p.type}</span>
+      <span>${_esc(stepTxt)}${failTxt}</span>
+      <span style="color:var(--t2);margin-left:auto">${p.total_replies||0} 回复</span>
+      ${histHtml}
+    </div>`;
+  }).join('');
+  const ago = coord.last_run_ago_sec!=null?rpa.fmtDur(coord.last_run_ago_sec)+' 前':'—';
+  return `<div class="dev-card-status"><span class="dev-status-dot online"></span><span style="color:#2dd4bf;font-weight:600">运行中</span><span style="color:var(--t2);margin-left:.5rem">周期: ${coord.cycle_count||0} · 最近: ${ago}</span></div>`
+    +pHtml;
+}
+
+// S4-B: mini stats helper — compute from coord platforms
+function _devMiniStats(coord){
+  if(!coord || !coord.platforms || !coord.platforms.length) return '';
+  let totalRuns=0, totalOk=0, totalReplies=0;
+  const allHist=[];
+  (coord.platforms||[]).forEach(p=>{
+    totalReplies += (p.total_replies||0);
+    (p.run_history||[]).forEach(h=>{
+      totalRuns++;
+      if(h.ok) totalOk++;
+      allHist.push(h);
+    });
+  });
+  if(!totalRuns) return '';
+  const rate = Math.round(totalOk/totalRuns*100);
+  const rateCls = rate>=90?'ok':rate>=70?'warn':'err';
+
+  // mini sparkline from recent history (last 20)
+  const recent = allHist.slice(0,20);
+  const sparkBars = recent.map(h=>{
+    const color = h.ok?'#3fb950':'#f85149';
+    const ht = h.ok ? 12 : 6;
+    return `<div class="dev-mini-spark-bar" style="height:${ht}px;background:${color}"></div>`;
+  }).join('');
+  const sparkHtml = sparkBars ? `<div class="dev-mini-spark" title="最近 ${recent.length} 次运行">${sparkBars}</div>` : '';
+
+  return `<div class="dev-mini-stats">
+    <div class="dev-mini-stat"><div class="dev-mini-stat-n ${rateCls}">${rate}%</div><div class="dev-mini-stat-l">成功率</div></div>
+    <div class="dev-mini-stat"><div class="dev-mini-stat-n" style="color:var(--t)">${totalReplies}</div><div class="dev-mini-stat-l">回复</div></div>
+    <div class="dev-mini-stat"><div class="dev-mini-stat-n" style="color:var(--t)">${coord.cycle_count||0}</div><div class="dev-mini-stat-l">周期</div></div>
+  </div>${sparkHtml}`;
+}
+
+// S4-C: context menu helpers
+function devCtxToggle(btn){
+  const menu = btn.nextElementSibling;
+  if(!menu) return;
+  // close all other menus
+  document.querySelectorAll('.dev-ctx-menu.open').forEach(m=>{ if(m!==menu) m.classList.remove('open'); });
+  menu.classList.toggle('open');
+}
+
+function devCtxAction(el, action){
+  const card = el.closest('.dev-card');
+  const serial = card?.getAttribute('data-serial');
+  if(!serial) return;
+  // close menu
+  el.closest('.dev-ctx-menu')?.classList.remove('open');
+
+  if(action==='auto-detect'){
+    devAutoDetect(serial);
+  } else if(action==='edit'){
+    const editBtn = card.querySelector('.dev-edit-form');
+    if(editBtn){ editBtn.style.display = editBtn.style.display==='none'?'':'none'; }
+  } else if(action==='copy-serial'){
+    navigator.clipboard?.writeText(serial).then(()=>rpa.toast('已复制 Serial','ok')).catch(()=>{});
+  } else if(action==='stats'){
+    // 切到统计 tab
+    const statsTab = document.querySelector('[data-pane="ov-tab-device-stats"]');
+    if(statsTab){ statsTab.click(); devStatsRefresh(); }
+  } else if(action==='trigger'){
+    // 触发设备上所有平台
+    rpa.toast(`触发 ${serial.slice(0,8)} 扫描…`);
+    ['messenger','line','whatsapp'].forEach(p=>{ try{ovControl(p,'trigger');}catch(e){} });
+  }
+}
+
+async function devAutoDetect(serial){
+  rpa.toast(`🔍 正在扫描 ${serial.slice(0,8)} 的 app…`);
+  try{
+    const r = await fetch(`/api/rpa-overview/registry/${encodeURIComponent(serial)}/auto-detect`,
+      {method:'POST', headers:{'Content-Type':'application/json'}});
+    const d = await r.json();
+    if(!r.ok){ rpa.toast((d&&d.detail)||'检测失败','err'); return; }
+    if(!Object.keys(d.detected||{}).length){
+      rpa.toast(d.message||'未检测到已安装的聊天 app','warn'); return;
+    }
+    const found = Object.entries(d.detected).map(([p,v])=>`${p}=${v.account_id}${v.account_name?'('+v.account_name+')':''}`).join(' · ');
+    let msg = `✅ 检测到: ${found}`;
+    if(d.reload?.action) msg += ` · Coordinator ${d.reload.action==='rebuilt'?'已热重建':'已创建'}`;
+    rpa.toast(msg,'ok');
+    setTimeout(devRefresh, 800);
+  }catch(e){
+    rpa.toast('检测失败: '+e,'err');
+  }
+}
+
+function _devPlatRow(ptype, label, dev){
+  const platField = 'platform_'+ptype;
+  const persField = 'persona_'+ptype;
+  const aid = dev[platField]||'';
+  const pid = dev[persField]||'';
+  const checked = aid?'checked':'';
+  return `<div class="dev-plat-row">
+    <input type="checkbox" class="dev-plat-cb" data-ptype="${ptype}" ${checked} onchange="this.closest('.dev-plat-row').querySelector('input[type=text]').disabled=!this.checked">
+    <span class="dev-plat-label">${label}</span>
+    <input type="text" data-field="${platField}" value="${_esc(aid)}" placeholder="account_id" ${checked?'':'disabled'} class="dev-plat-input">
+    <select data-field="${persField}" class="dev-plat-select">${_personaOptions(pid)}</select>
+  </div>`;
+}
+
+function devRenderCard(dev, coordMap, source){
+  const serial = dev.serial||'';
+  const isOnline = source==='online';
+  const coord = coordMap[serial];
+  const numTxt = dev.number?String(dev.number).padStart(2,'0'):'?';
+  const cardCls = source==='unregistered'?'is-unregistered':source==='remote'?'is-remote':isOnline?'is-online':'is-offline';
+  const numCls = source==='unregistered'?'unregistered':'';
+  const sEsc = _esc(serial);
+
+  let html = `<div class="dev-card ${cardCls}" data-serial="${sEsc}">`;
+  html += `<div class="dev-card-head">`;
+  if(source!=='unregistered' && source!=='remote'){
+    html += `<input type="checkbox" class="dev-sel" data-serial="${sEsc}" onchange="devSelChanged()">`;
+  }
+  html += `<div class="dev-card-num ${numCls}">${_esc(numTxt)}</div>`;
+  html += `<div class="dev-card-info">`;
+  html += `<div class="dev-card-label">${_esc(dev.label||dev.location||serial.slice(0,8))}</div>`;
+  html += `<div class="dev-card-serial">${_esc(serial)} · ${_esc(dev.group_name||'')}</div>`;
+  html += `</div>`;
+  // S4-C: context menu — show for all registered devices (incl. remote)
+  if(source!=='unregistered'){
+    html += `<div class="dev-ctx-wrap">
+      <button class="dev-ctx-btn" onclick="devCtxToggle(this)" title="操作菜单">⋮</button>
+      <div class="dev-ctx-menu">
+        <div class="dev-ctx-item" onclick="devCtxAction(this,'auto-detect')">🔍 自动检测 App</div>
+        <div class="dev-ctx-item" onclick="devCtxAction(this,'edit')">✏️ 编排平台/人设</div>
+        <div class="dev-ctx-item" onclick="devCtxAction(this,'trigger')">⚡ 触发扫描</div>
+        <div class="dev-ctx-item" onclick="devCtxAction(this,'stats')">📊 查看统计</div>
+        <div class="dev-ctx-sep"></div>
+        <div class="dev-ctx-item" onclick="devCtxAction(this,'copy-serial')">📋 复制 Serial</div>
+      </div>
+    </div>`;
+  }
+  html += `</div>`;
+
+  if(source==='remote'){
+    html += `<div class="dev-card-platforms">${devPlatTags(dev)}</div>`;
+    html += `<div style="margin-top:.5rem"><span class="dev-remote-tag">⚡ 远程管理</span></div>`;
+    html += `<div class="dev-edit-form" style="display:none;margin-top:.5rem;padding-top:.5rem;border-top:1px solid var(--bd)">
+      <div class="dev-orch-grid">
+        ${_devPlatRow('messenger','MSG',dev)}
+        ${_devPlatRow('line','LINE',dev)}
+        ${_devPlatRow('whatsapp','WA',dev)}
+      </div>
+      <div style="font-size:.62rem;color:var(--t3);margin-top:.3rem">ℹ️ Telegram 运行在本机，无需设备分配</div>
+      <div style="display:flex;gap:.4rem;margin-top:.4rem">
+        <button class="btn-sec" onclick="devSavePlatforms(this,'${sEsc}')" style="font-size:.7rem;padding:.25rem .6rem;font-weight:600;border-color:var(--p);color:var(--p)">💾 保存并重建</button>
+        <button class="btn-sec" onclick="devToggleEdit(this)" style="font-size:.7rem;padding:.25rem .6rem">取消</button>
+        <span class="dev-edit-msg" style="font-size:.68rem;color:var(--t2);align-self:center;margin-left:.3rem"></span>
+      </div>
+    </div>`;
+  } else if(source==='unregistered'){
+    html += `<div class="dev-register-form">
+      <input type="text" placeholder="简码(如Q4N)" data-field="label" style="width:70px">
+      <input type="text" placeholder="分组(如主控)" data-field="group_name" style="width:70px" value="${_esc(_lastHostName||'')}">
+      <input type="number" placeholder="编号" data-field="number" style="width:55px">
+      <button onclick="devRegister(this,'${sEsc}')">注册</button>
+    </div>`;
+  } else {
+    html += `<div class="dev-card-platforms">${devPlatTags(dev)}</div>`;
+    // 内联编排面板（默认隐藏）
+    html += `<div class="dev-edit-form" style="display:none;margin-top:.5rem;padding-top:.5rem;border-top:1px solid var(--bd)">
+      <div class="dev-orch-grid">
+        ${_devPlatRow('messenger','MSG',dev)}
+        ${_devPlatRow('line','LINE',dev)}
+        ${_devPlatRow('whatsapp','WA',dev)}
+      </div>
+      <div style="display:flex;gap:.4rem;margin-top:.5rem">
+        <button class="btn-sec" onclick="devSavePlatforms(this,'${sEsc}')" style="font-size:.7rem;padding:.25rem .6rem;font-weight:600;border-color:var(--p);color:var(--p)">💾 保存并重建</button>
+        <button class="btn-sec" onclick="devToggleEdit(this)" style="font-size:.7rem;padding:.25rem .6rem">取消</button>
+        <span class="dev-edit-msg" style="font-size:.68rem;color:var(--t2);align-self:center;margin-left:.3rem"></span>
+      </div>
+    </div>`;
+    html += devRenderCoordStatus(coord);
+    // S4-B: mini stats + sparkline
+    html += _devMiniStats(coord);
+  }
+  html += `</div>`;
+  return html;
+}
+
+let _lastHostName='';
+let _personasCache=null;
+async function _loadPersonas(){
+  if(_personasCache) return _personasCache;
+  try{
+    const r=await rpa.get('/api/personas/list');
+    _personasCache=(r&&r.profiles)||[];
+  }catch(e){ _personasCache=[]; }
+  // Populate batch persona select
+  const sel=document.getElementById('dev-fb-persona');
+  if(sel&&_personasCache.length){
+    let h='<option value="">人设不变</option>';
+    for(const p of _personasCache) h+=`<option value="${_esc(p.id)}">${_esc(p.name||p.id)}</option>`;
+    sel.innerHTML=h;
+  }
+  return _personasCache;
+}
+function _personaOptions(selectedId){
+  const list=_personasCache||[];
+  let h=`<option value="">— 默认人设 —</option>`;
+  for(const p of list){
+    const sel=(p.id===selectedId)?'selected':'';
+    h+=`<option value="${_esc(p.id)}" ${sel}>${_esc(p.name||p.id)}</option>`;
+  }
+  return h;
+}
+async function devRefresh(){
+  if(!_devGrid) return;
+  _devGrid.innerHTML='<div class="rpa-empty">加载中…</div>';
+  try{
+    const [devData, regData] = await Promise.all([
+      rpa.get('/api/rpa-overview/devices'),
+      rpa.get('/api/rpa-overview/registry'),
+      _loadPersonas(),
+    ]);
+
+    // 合并 coordinator 状态到 serial→coord map
+    const coordMap={};
+    if(devData){
+      // static devices from DeviceCoordinatorService
+      for(const c of (devData.static||[])){
+        coordMap[c.serial]=c;
+      }
+      // hotplug devices
+      const hp = devData.hotplug||{};
+      _lastHostName = hp.host_name||'';
+      if(_devHostLabel) _devHostLabel.textContent = '主机: '+(hp.host_name||'全部');
+      for(const c of (hp.managed_devices||[])){
+        coordMap[c.serial]=c;
+      }
+      // unregistered online
+      var unreg = hp.unregistered_online||[];
+    }
+
+    // registry devices
+    const regDevices = (regData && regData.devices)||[];
+    const regMap={};
+    for(const d of regDevices) regMap[d.serial]=d;
+
+    // determine online serials from coordinator map
+    const onlineSerials = new Set(Object.keys(coordMap));
+    // also mark static serials as registered even if not in regMap
+    for(const s of (devData?.hotplug?.static_serials||[])){
+      onlineSerials.add(s);
+    }
+
+    let html='';
+    let totalDevices=0;
+    const myHost = (_lastHostName && _lastHostName!=='(all)') ? _lastHostName : ''; // 空 = 管所有
+
+    // 按 group_name 分组
+    const groups = {};
+    for(const d of regDevices){
+      const g = d.group_name||'(未分组)';
+      if(!groups[g]) groups[g]=[];
+      groups[g].push(d);
+    }
+
+    // 优先显示本机 group，然后其他
+    const groupOrder = Object.keys(groups).sort((a,b)=>{
+      if(myHost){
+        if(a===myHost) return -1;
+        if(b===myHost) return 1;
+      }
+      return a.localeCompare(b);
+    });
+
+    for(const g of groupOrder){
+      const isMyGroup = !myHost || g===myHost;
+      if(groupOrder.length>1){
+        html += `<div class="dev-group-header">${_esc(g)}${isMyGroup?' (本机)':' (远程)'}</div>`;
+      }
+      for(const d of groups[g]){
+        if(isMyGroup){
+          const isOnline = coordMap[d.serial]!=null;
+          html += devRenderCard(d, coordMap, isOnline?'online':'offline');
+        } else {
+          // 远程主机设备：简化显示
+          html += devRenderCard(d, coordMap, 'remote');
+        }
+        totalDevices++;
+      }
+    }
+
+    // Unregistered online devices
+    if((unreg||[]).length){
+      const unregFiltered = unreg.filter(s=>!regMap[s]);
+      if(unregFiltered.length){
+        if(groupOrder.length>1||totalDevices>0) html += `<div class="dev-group-header">⚠ 未注册在线设备</div>`;
+        for(const s of unregFiltered){
+          html += devRenderCard({serial:s}, coordMap, 'unregistered');
+          totalDevices++;
+        }
+      }
+    }
+
+    if(!html) html='<div class="rpa-empty">无设备数据</div>';
+    _devGrid.innerHTML=html;
+
+    if(_devCountBadge){
+      const onlineCount = Object.keys(coordMap).length;
+      _devCountBadge.textContent=onlineCount+'/'+totalDevices;
+      _devCountBadge.style.display=totalDevices>0?'inline-flex':'none';
+    }
+  }catch(e){
+    _devGrid.innerHTML='<div class="rpa-empty" style="color:#dc2626">加载失败: '+_esc(String(e))+'</div>';
+  }
+}
+
+function devToggleEdit(btn){
+  const card = btn.closest('.dev-card');
+  if(!card) return;
+  const form = card.querySelector('.dev-edit-form');
+  if(!form) return;
+  const isVisible = form.style.display !== 'none';
+  form.style.display = isVisible ? 'none' : '';
+  // 清空消息
+  const msg = form.querySelector('.dev-edit-msg');
+  if(msg) msg.textContent = '';
+}
+
+async function devSavePlatforms(btn, serial){
+  if(btn.disabled) return;
+  const card = btn.closest('.dev-card');
+  if(!card) return;
+  const form = card.querySelector('.dev-edit-form');
+  if(!form) return;
+  const msg = form.querySelector('.dev-edit-msg');
+  const body = {serial};
+  // Collect platform fields: if checkbox unchecked, clear the field
+  form.querySelectorAll('.dev-plat-row').forEach(row=>{
+    const cb = row.querySelector('.dev-plat-cb');
+    const inp = row.querySelector('input[data-field]');
+    const sel = row.querySelector('select[data-field]');
+    if(inp){
+      const field = inp.getAttribute('data-field');
+      body[field] = (cb && !cb.checked) ? '' : inp.value.trim();
+    }
+    if(sel){
+      body[sel.getAttribute('data-field')] = sel.value;
+    }
+  });
+  // Also collect any other data-field inputs (register form etc.)
+  form.querySelectorAll('input[data-field]:not(.dev-plat-input)').forEach(inp=>{
+    const f=inp.getAttribute('data-field');
+    if(!(f in body)) body[f]=inp.value.trim();
+  });
+  try{
+    btn.disabled=true;
+    btn.textContent='保存中…';
+    if(msg) msg.textContent='';
+    const r=await fetch('/api/rpa-overview/registry',{
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)
+    });
+    const d=await r.json();
+    if(!r.ok){
+      if(msg) msg.textContent=(d&&d.detail)||'保存失败';
+      if(msg) msg.style.color='#f85149';
+      return;
+    }
+    let toast = `✅ 编排已保存`;
+    if(d.reload && d.reload.ok){
+      const act = d.reload.action;
+      if(act==='rebuilt') toast += ' · Coordinator 已热重建';
+      else if(act==='created') toast += ' · Coordinator 已创建';
+      else if(act==='no_platforms') toast += ' · 无平台（已停止）';
+    } else if(d.reload && d.reload.error){
+      toast += ` · 重建失败: ${d.reload.error}`;
+    }
+    rpa.toast(toast,'ok');
+    form.style.display='none';
+    setTimeout(devRefresh, 600);
+  }catch(e){
+    if(msg){ msg.textContent='保存失败：'+e; msg.style.color='#f85149'; }
+  }finally{
+    btn.disabled=false;
+    btn.textContent='💾 保存并重建';
+  }
+}
+
+// ── 批量操作（S4-A: 使用 sticky 浮动栏） ──
+// lazy: float bar HTML 在 script 之后，getElementById 需延迟
+function _getFloatBar(){ return document.getElementById('dev-float-bar'); }
+function _getFbCount(){ return document.getElementById('dev-fb-count'); }
+
+function devSelChanged(){
+  const checked = document.querySelectorAll('.dev-sel:checked');
+  const n = checked.length;
+  const fb=_getFloatBar();
+  if(fb){
+    if(n>0){ fb.classList.add('visible'); } else { fb.classList.remove('visible'); }
+  }
+  const fbc=_getFbCount();
+  if(fbc) fbc.textContent = n+' 台选中';
+}
+
+function devBatchClear(){
+  document.querySelectorAll('.dev-sel:checked').forEach(cb=>{cb.checked=false;});
+  devSelChanged();
+}
+
+function devSelectAll(){
+  document.querySelectorAll('.dev-sel').forEach(cb=>{cb.checked=true;});
+  devSelChanged();
+}
+
+function _batchSerials(){
+  return Array.from(document.querySelectorAll('.dev-sel:checked')).map(cb=>cb.getAttribute('data-serial')).filter(Boolean);
+}
+function _batchPlats(){
+  return Array.from(document.querySelectorAll('.fb-plat-cb:checked')).map(cb=>cb.value);
+}
+let _batchBusy=false;
+async function _batchPost(fields, label){
+  if(_batchBusy) return;
+  const serials=_batchSerials();
+  if(!serials.length){rpa.toast('请先选择设备','err');return;}
+  _batchBusy=true;
+  // disable all batch buttons
+  const btns=document.querySelectorAll('#dev-float-bar .fb-btn');
+  btns.forEach(b=>{b.disabled=true;b.style.opacity='.5'});
+  rpa.toast('处理中…');
+  try{
+    const r=await fetch('/api/registry/batch',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({serials,fields})
+    });
+    const d=await r.json();
+    if(!r.ok){rpa.toast((d&&d.detail)||'操作失败','err');return;}
+    const reloadOk=(d.reloads||[]).filter(x=>x.ok).length;
+    rpa.toast(`${label} ${d.count} 台 · ${reloadOk} 台已重建`,'ok');
+    devBatchClear();
+    setTimeout(devRefresh,600);
+  }catch(e){ rpa.toast('操作失败：'+e,'err'); }
+  finally{ _batchBusy=false; btns.forEach(b=>{b.disabled=false;b.style.opacity=''}); }
+}
+async function devBatchApplyPersona(){
+  const pid=document.getElementById('dev-fb-persona')?.value||'';
+  if(!pid){rpa.toast('请先选择人设','err');return;}
+  const plats=_batchPlats();
+  if(!plats.length){rpa.toast('请勾选要应用的平台','err');return;}
+  const fields={};
+  for(const p of plats) fields['persona_'+p]=pid;
+  await _batchPost(fields,'✅ 人设已切换');
+}
+async function devBatchClearPersona(){
+  const plats=_batchPlats();
+  if(!plats.length){rpa.toast('请勾选要清除的平台','err');return;}
+  const fields={};
+  for(const p of plats) fields['persona_'+p]='';
+  await _batchPost(fields,'🗑 人设已清除');
+}
+
+async function devRegister(btn, serial){
+  const form = btn.closest('.dev-register-form');
+  if(!form) return;
+  const body = {serial};
+  form.querySelectorAll('input[data-field]').forEach(inp=>{
+    const f=inp.getAttribute('data-field');
+    const v=inp.value.trim();
+    if(v) body[f]= f==='number'?parseInt(v,10):v;
+  });
+  try{
+    btn.disabled=true;
+    btn.textContent='注册中…';
+    const r=await fetch('/api/rpa-overview/registry',{
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)
+    });
+    const d=await r.json();
+    if(!r.ok){rpa.toast((d&&d.detail)||'注册失败','err');return;}
+    rpa.toast(`设备 ${serial.slice(0,8)} 注册成功，下次扫描将自动纳管`,'ok');
+    setTimeout(devRefresh,500);
+  }catch(e){
+    rpa.toast('注册失败：'+e,'err');
+  }finally{
+    btn.disabled=false;
+    btn.textContent='注册';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 设备统计仪表盘 JS
+// ═══════════════════════════════════════════════════════════════════════
+
+let _dsTemplates = [];
+
+async function devStatsRefresh(){
+  const hours = document.getElementById('ds-hours')?.value || '6';
+  try{
+    const [statsR, tplR] = await Promise.all([
+      fetch('/api/rpa-overview/device-stats?hours='+hours),
+      fetch('/api/registry/templates'),
+    ]);
+    const statsD = await statsR.json();
+    const tplD = await tplR.json();
+
+    _dsTemplates = tplD.templates || [];
+    _renderTemplateSelect();
+
+    const summaries = statsD.summaries || [];
+    const lbl = document.getElementById('ds-summary-label');
+    if(lbl) lbl.textContent = `${summaries.length} 台设备`;
+
+    const container = document.getElementById('ds-summary-cards');
+    if(!container) return;
+
+    if(!summaries.length){
+      container.innerHTML = '<div class="rpa-empty">暂无统计数据（设备需运行后才有数据）</div>';
+      return;
+    }
+
+    container.innerHTML = summaries.map(s => {
+      const sr = s.success_rate_pct || 0;
+      const srColor = sr >= 90 ? '#3fb950' : sr >= 70 ? '#e3b341' : '#f85149';
+      const pHtml = (s.platforms||[]).map(p => {
+        const psr = p.success_rate_pct || 0;
+        const pColor = psr >= 90 ? '#3fb950' : psr >= 70 ? '#e3b341' : '#f85149';
+        return `<div style="display:flex;justify-content:space-between;font-size:.65rem;color:var(--t2);padding:2px 0">
+          <span class="dev-plat-tag ${p.platform}">${p.platform}</span>
+          <span>成功 <b style="color:${pColor}">${psr}%</b></span>
+          <span>回复 ${p.total_replies}</span>
+          <span>${p.avg_elapsed_ms}ms</span>
+        </div>`;
+      }).join('');
+
+      // mini sparkline (CSS-only bar chart)
+      const barHtml = _renderMiniBar(s.platforms || []);
+
+      return `<div style="border:1px solid var(--bd);border-radius:8px;padding:.6rem;background:var(--input)">
+        <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.4rem">
+          <b style="font-size:.78rem;color:var(--t)">${_esc(s.serial?.slice(0,8)||'?')}</b>
+          <span style="font-size:.65rem;color:var(--t3);margin-left:auto">${s.total_runs||0} 次</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.3rem;margin-bottom:.4rem">
+          <div class="dev-stat"><div class="dev-stat-n" style="color:${srColor}">${sr}%</div><div class="dev-stat-l">成功率</div></div>
+          <div class="dev-stat"><div class="dev-stat-n">${s.total_replies||0}</div><div class="dev-stat-l">回复</div></div>
+          <div class="dev-stat"><div class="dev-stat-n">${s.total_runs||0}</div><div class="dev-stat-l">运行</div></div>
+        </div>
+        ${barHtml}
+        ${pHtml}
+      </div>`;
+    }).join('');
+
+    // 图表区：为每个设备拉取时间序列
+    _renderChartArea(summaries, hours);
+
+    // 负载均衡分析
+    _renderLoadBalance();
+
+  }catch(e){
+    console.error('devStatsRefresh error:', e);
+    rpa.toast('统计加载失败: '+e, 'err');
+  }
+}
+
+async function _renderLoadBalance(){
+  try{
+    const r = await fetch('/api/rpa-overview/load-balance');
+    const d = await r.json();
+    const hostsEl = document.getElementById('ds-lb-hosts');
+    const sugEl = document.getElementById('ds-lb-suggestions');
+    if(!hostsEl) return;
+
+    const hosts = d.hosts || [];
+    if(!hosts.length){
+      hostsEl.innerHTML = '<span style="font-size:.68rem;color:var(--t3)">无主机数据</span>';
+      if(sugEl) sugEl.innerHTML = '';
+      return;
+    }
+
+    const maxScore = Math.max(...hosts.map(h=>h.load_score||0), 1);
+    hostsEl.innerHTML = hosts.map(h=>{
+      const pct = Math.round((h.load_score/maxScore)*100);
+      const color = h.load_score > (d.avg_load_score||1)*1.5 ? '#f85149' :
+                    h.load_score > (d.avg_load_score||1)*1.1 ? '#e3b341' : '#3fb950';
+      return `<div style="border:1px solid var(--bd);border-radius:6px;padding:.4rem;background:var(--input)">
+        <div style="font-size:.7rem;font-weight:600;color:var(--t)">${_esc(h.host)}</div>
+        <div style="font-size:.6rem;color:var(--t3)">${h.device_count} 设备 · ${h.total_runs_24h} 次运行</div>
+        <div style="display:flex;align-items:center;gap:4px;margin-top:3px">
+          <div style="flex:1;height:5px;background:var(--bd);border-radius:3px;overflow:hidden">
+            <div style="width:${pct}%;height:100%;background:${color};border-radius:3px"></div>
+          </div>
+          <span style="font-size:.6rem;color:${color};font-weight:600">${h.load_score}</span>
+        </div>
+        <div style="font-size:.58rem;color:var(--t3)">失败率 ${h.fail_rate_pct}%</div>
+      </div>`;
+    }).join('');
+
+    const suggestions = d.suggestions || [];
+    if(sugEl){
+      if(suggestions.length){
+        sugEl.innerHTML = suggestions.map(s=>
+          `<div style="font-size:.68rem;color:#e3b341;padding:3px 0">⚠️ ${_esc(s.action)} — ${_esc(s.reason)}</div>`
+        ).join('');
+      } else {
+        sugEl.innerHTML = '<div style="font-size:.65rem;color:#3fb950">✅ 各主机负载均衡</div>';
+      }
+    }
+  }catch(e){
+    console.error('loadBalance error:', e);
+  }
+}
+
+function _renderMiniBar(platforms){
+  if(!platforms.length) return '';
+  const max = Math.max(...platforms.map(p=>p.total_runs||1), 1);
+  const bars = platforms.map(p=>{
+    const pct = Math.round((p.total_ok||0)/(p.total_runs||1)*100);
+    const w = Math.round((p.total_runs||0)/max*100);
+    const color = pct>=90?'#3fb950':pct>=70?'#e3b341':'#f85149';
+    return `<div style="display:flex;align-items:center;gap:4px;font-size:.6rem">
+      <span style="width:28px;text-align:right;color:var(--t3)">${p.platform?.slice(0,3)}</span>
+      <div style="flex:1;height:6px;background:var(--bd);border-radius:3px;overflow:hidden">
+        <div style="width:${w}%;height:100%;background:${color};border-radius:3px"></div>
+      </div>
+      <span style="width:24px;color:var(--t3)">${pct}%</span>
+    </div>`;
+  }).join('');
+  return `<div style="margin:.3rem 0">${bars}</div>`;
+}
+
+async function _renderChartArea(summaries, hours){
+  const area = document.getElementById('ds-chart-area');
+  if(!area) return;
+  if(!summaries.length){ area.innerHTML=''; return; }
+
+  // 拉取前 4 台设备的时间序列
+  const top4 = summaries.slice(0, 4);
+  const fetches = top4.map(s =>
+    fetch(`/api/rpa-overview/device-stats/${encodeURIComponent(s.serial)}?hours=${hours}`)
+      .then(r=>r.json()).catch(()=>null)
+  );
+  const results = await Promise.all(fetches);
+
+  let chartsHtml = '<div style="font-size:.75rem;font-weight:600;color:var(--t2);margin-bottom:.4rem">时间序列（5min 粒度）</div>';
+  chartsHtml += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:.6rem">';
+
+  results.forEach((r, i)=>{
+    if(!r || !r.timeseries) return;
+    const serial = top4[i].serial || '?';
+    const platforms = r.timeseries.platforms || {};
+    let svgHtml = '';
+    for(const [pt, buckets] of Object.entries(platforms)){
+      if(!buckets.length) continue;
+      svgHtml += _renderSparkSvg(pt, buckets);
+    }
+    if(!svgHtml) return;
+    chartsHtml += `<div style="border:1px solid var(--bd);border-radius:6px;padding:.5rem;background:var(--input)">
+      <div style="font-size:.7rem;font-weight:600;color:var(--t);margin-bottom:.3rem">${_esc(serial.slice(0,8))}</div>
+      ${svgHtml}
+    </div>`;
+  });
+  chartsHtml += '</div>';
+  area.innerHTML = chartsHtml;
+}
+
+function _renderSparkSvg(platform, buckets){
+  // SVG mini sparkline: runs as bars, ok ratio as line
+  const W=260, H=40, pad=2;
+  if(!buckets.length) return '';
+  const maxRuns = Math.max(...buckets.map(b=>b.runs||0), 1);
+  const barW = Math.max(2, Math.min(8, (W-pad*2)/buckets.length - 1));
+  let bars='', linePts=[];
+  buckets.forEach((b,i)=>{
+    const x = pad + i * ((W-pad*2)/buckets.length);
+    const h = (b.runs/maxRuns) * (H-8);
+    const okRatio = b.runs ? b.ok/b.runs : 1;
+    const color = okRatio>=0.9?'#3fb950':okRatio>=0.7?'#e3b341':'#f85149';
+    bars += `<rect x="${x}" y="${H-h-2}" width="${barW}" height="${h}" rx="1" fill="${color}" opacity="0.6"/>`;
+    linePts.push(`${x+barW/2},${H - okRatio*(H-8) - 2}`);
+  });
+  const line = linePts.length>1 ? `<polyline points="${linePts.join(' ')}" fill="none" stroke="var(--p)" stroke-width="1.5" opacity="0.8"/>` : '';
+  const platColor = platform==='messenger'?'#0084ff':platform==='line'?'#06c755':'#25d366';
+  return `<div style="margin-bottom:.2rem">
+    <span style="font-size:.6rem;color:${platColor};font-weight:600">${platform}</span>
+    <svg width="${W}" height="${H}" style="display:block">${bars}${line}</svg>
+  </div>`;
+}
+
+// ── 模板功能 ──
+
+function _renderTemplateSelect(){
+  const sel = document.getElementById('ds-template-sel');
+  if(!sel) return;
+  sel.innerHTML = '<option value="">选择模板…</option>';
+  _dsTemplates.forEach(t=>{
+    sel.innerHTML += `<option value="${_esc(t.name)}">${_esc(t.name)} — ${_esc(t.description||'')}</option>`;
+  });
+  sel.onchange = function(){
+    const desc = document.getElementById('ds-template-desc');
+    const tpl = _dsTemplates.find(t=>t.name===sel.value);
+    if(desc) desc.textContent = tpl ? JSON.stringify(tpl.fields||{}) : '';
+  };
+}
+
+async function devApplyTemplate(){
+  const sel = document.getElementById('ds-template-sel');
+  const tplName = sel?.value;
+  // 从设备管理 tab 获取选中的设备
+  const checked = document.querySelectorAll('.dev-sel:checked');
+  const serials = Array.from(checked).map(cb=>cb.getAttribute('data-serial')).filter(Boolean);
+
+  if(!serials.length){ rpa.toast('请先在 📱 设备管理 tab 勾选设备','err'); return; }
+  if(!tplName){ rpa.toast('请选择一个模板','err'); return; }
+
+  try{
+    const r = await fetch('/api/registry/apply-template',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({serials, template_name: tplName}),
+    });
+    const d = await r.json();
+    if(!r.ok){ rpa.toast((d&&d.detail)||'应用模板失败','err'); return; }
+    const reloadOk = (d.reloads||[]).filter(x=>x.ok).length;
+    rpa.toast(`模板 "${tplName}" 应用到 ${d.count} 台设备，${reloadOk} 台已热重建`,'ok');
+    setTimeout(devStatsRefresh, 600);
+  }catch(e){
+    rpa.toast('应用模板失败: '+e, 'err');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// SSE 实时事件监听
+// ═══════════════════════════════════════════════════════════════════════
+
+let _evtSource = null;
+const _eventLog = [];
+const _maxEventLog = 50;
+
+function initSSE(){
+  if(_evtSource) return;
+  try{
+    _evtSource = new EventSource('/api/rpa-overview/events');
+    _evtSource.onopen = function(){
+      const s = document.getElementById('ds-sse-status');
+      if(s) s.textContent = '已连接';
+      if(s) s.style.color = '#3fb950';
+    };
+    _evtSource.onmessage = function(e){
+      try{
+        const evt = JSON.parse(e.data);
+        _handleSSEvent(evt);
+      }catch(ex){}
+    };
+    _evtSource.onerror = function(){
+      const s = document.getElementById('ds-sse-status');
+      if(s){ s.textContent = '重连中…'; s.style.color = '#e3b341'; }
+    };
+  }catch(ex){
+    console.warn('SSE init failed:', ex);
+  }
+}
+
+function _handleSSEvent(evt){
+  const type = evt.type;
+  const d = evt.data || {};
+  const ts = evt.ts ? new Date(evt.ts*1000).toLocaleTimeString() : '';
+
+  // 写入事件日志
+  const icons = {circuit_open:'⚠️',recovery:'✅',device_online:'📱',device_offline:'📴'};
+  const logLine = `${ts} ${icons[type]||'·'} ${type} ${(d.serial||'').slice(0,8)} ${d.platform||''} ${d.label||''}`;
+  _eventLog.unshift(logLine);
+  if(_eventLog.length > _maxEventLog) _eventLog.length = _maxEventLog;
+  const logEl = document.getElementById('ds-event-log');
+  if(logEl) logEl.innerHTML = _eventLog.map(l=>`<div>${_esc(l)}</div>`).join('');
+
+  // toast 通知
+  if(type === 'circuit_open'){
+    rpa.toast(`⚠️ 熔断: ${(d.serial||'?').slice(0,8)} ${d.platform} 连续失败 ${d.consecutive_fail}`, 'err');
+  } else if(type === 'recovery'){
+    rpa.toast(`✅ 恢复: ${(d.serial||'?').slice(0,8)} ${d.platform}`, 'ok');
+  } else if(type === 'device_online'){
+    rpa.toast(`📱 上线: ${(d.serial||'?').slice(0,8)} ${d.label||''} [${(d.platforms||[]).join(',')}]`, 'ok');
+  } else if(type === 'device_offline'){
+    rpa.toast(`📴 离线: ${(d.serial||'?').slice(0,8)}`, 'err');
+  }
+
+  // 自动刷新
+  if(type === 'device_online' || type === 'device_offline'){
+    if(document.getElementById('ov-tab-devices')?.classList.contains('active')){
+      setTimeout(devRefresh, 500);
+    }
+  }
+}
+
+// 页面加载时启动 SSE
+if(document.readyState==='loading'){
+  document.addEventListener('DOMContentLoaded', initSSE);
+} else {
+  initSSE();
+}
+
+// ── S4-C: 全局点击关闭 context menu ──
+document.addEventListener('click', function(e){
+  if(!e.target.closest('.dev-ctx-wrap')){
+    document.querySelectorAll('.dev-ctx-menu.open').forEach(m=>m.classList.remove('open'));
+  }
+});
+</script>
+
+<!-- S4-A: Sticky floating batch bar -->
+<div id="dev-float-bar" class="dev-float-bar">
+  <span class="fb-count" id="dev-fb-count">0 台选中</span>
+  <div class="fb-sep"></div>
+  <span style="font-size:.72rem;color:var(--t2)">平台:</span>
+  <label class="fb-cb-label"><input type="checkbox" class="fb-plat-cb" value="messenger" checked> MSG</label>
+  <label class="fb-cb-label"><input type="checkbox" class="fb-plat-cb" value="line" checked> LINE</label>
+  <label class="fb-cb-label"><input type="checkbox" class="fb-plat-cb" value="whatsapp" checked> WA</label>
+  <div class="fb-sep"></div>
+  <span style="font-size:.72rem;color:var(--t2)">切换人设:</span>
+  <select class="fb-input" id="dev-fb-persona" style="min-width:120px"><option value="">— 选择人设 —</option></select>
+  <button class="fb-btn primary" onclick="devBatchApplyPersona()">应用</button>
+  <button class="fb-btn ghost" onclick="devBatchClearPersona()" style="color:#f87171;border-color:#f87171">清除人设</button>
+  <div class="fb-sep"></div>
+  <button class="fb-btn ghost" onclick="devSelectAll()">全选</button>
+  <button class="fb-btn ghost" onclick="devBatchClear()">取消选择</button>
+</div>
+{% endblock %}

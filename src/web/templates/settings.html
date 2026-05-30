@@ -129,15 +129,29 @@ textarea.f-inp.he-json-area{font-family:ui-monospace,SFMono-Regular,Consolas,mon
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
       </div>
       <div>
-        <div class="acc-title">AI 提示词 & 行为配置</div>
-        <div class="acc-sub">控制 AI 的人格、回复风格、SOP 规则 — 客服团队可直接编辑</div>
+        <div class="acc-title">AI 提示词 & 行为配置 <span style="font-size:.68rem;padding:.12rem .45rem;border-radius:5px;background:rgba(59,130,246,.12);color:#2563eb;font-weight:600;vertical-align:middle;margin-left:.4rem">Telegram 专用</span></div>
+        <div class="acc-sub">控制 Telegram 端 AI 的人格、回复风格、SOP 规则 — 三端 RPA 使用独立人设</div>
       </div>
       <svg class="acc-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
     </div>
     <div class="acc-body open" id="body-prompt">
+      <!-- P0: 作用域提示 banner -->
+      <div style="margin-bottom:1rem;padding:.7rem 1rem;background:linear-gradient(135deg,rgba(251,191,36,.08),rgba(245,158,11,.12));border:1px solid rgba(245,158,11,.35);border-radius:10px;line-height:1.7;font-size:.82rem;display:flex;align-items:flex-start;gap:.7rem">
+        <span style="font-size:1.2rem;flex-shrink:0;margin-top:.1rem">⚠️</span>
+        <div>
+          <strong style="color:#b45309;font-size:.84rem">作用域：仅 Telegram</strong><br>
+          以下 AI 名称、回复风格、系统提示词<strong>仅影响 Telegram 端</strong>。<br>
+          三端 RPA（Messenger / LINE / WhatsApp）使用独立人设系统，请前往各自设置页配置：
+          <div style="margin-top:.4rem;display:flex;flex-wrap:wrap;gap:.35rem">
+            <a href="/messenger-rpa" style="display:inline-flex;align-items:center;gap:.25rem;padding:.15rem .55rem;border-radius:6px;background:rgba(59,130,246,.1);color:#2563eb;font-weight:600;font-size:.74rem;text-decoration:none;border:1px solid rgba(59,130,246,.2)">🔵 Messenger</a>
+            <a href="/line-rpa" style="display:inline-flex;align-items:center;gap:.25rem;padding:.15rem .55rem;border-radius:6px;background:rgba(34,197,94,.1);color:#16a34a;font-weight:600;font-size:.74rem;text-decoration:none;border:1px solid rgba(34,197,94,.2)">🟢 LINE</a>
+            <a href="/whatsapp-rpa" style="display:inline-flex;align-items:center;gap:.25rem;padding:.15rem .55rem;border-radius:6px;background:rgba(37,211,102,.1);color:#15803d;font-weight:600;font-size:.74rem;text-decoration:none;border:1px solid rgba(37,211,102,.2)">🟠 WhatsApp</a>
+          </div>
+        </div>
+      </div>
       <div class="f-hint" style="margin-bottom:1rem;padding:.6rem .8rem;background:var(--ps);border-radius:8px;border:1px solid var(--p);line-height:1.6">
-        <strong>这里控制 AI 的「大脑」</strong> — 修改后保存即刻生效，无需重启。<br>
-        通道话术模板请在 <a href="/knowledge" style="color:var(--p);font-weight:600">知识库</a> 中编辑，这里控制 AI 的总体人格和回复规则。
+        <strong>这里控制 Telegram AI 的「大脑」</strong> — 修改后保存即刻生效，无需重启。<br>
+        通道话术模板请在 <a href="/knowledge" style="color:var(--p);font-weight:600">知识库</a> 中编辑，这里控制 Telegram AI 的总体人格和回复规则。
       </div>
 
       <!-- 快速设置 -->

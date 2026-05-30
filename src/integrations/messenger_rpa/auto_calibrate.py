@@ -119,9 +119,16 @@ def calibrate_inbox_rows(png_path: str) -> InboxCalibration:
         )
 
     # 判断首行 = Stories 还是会话 1：
-    # Stories 行通常 height >= 100px（大圆头像列）；若 height < 100 就认为已是会话第 1 行
+    # Stories 行通常比会话行显著更高（≥1.5× 第二行高度）。
+    # 注意：x=50-140 扫描带包含头像 + 部分文字，会话行 peak 可达 116-160px，
+    # 因此不能用绝对阈值（100px）判定——会把第一个会话行误判为 Stories bar。
+    # 改为相对阈值：仅当第一峰高度 > 第二峰高度 × 1.5 时才视作 Stories bar。
     start_idx = 0
-    if chat_peaks[0][1] >= int(100 * h / 1600):
+    if (
+        len(chat_peaks) > 1
+        and chat_peaks[0][1] > chat_peaks[1][1] * 1.5
+        and chat_peaks[0][1] >= int(100 * h / 1600)
+    ):
         # Stories 行，跳过
         start_idx = 1
 
@@ -141,11 +148,11 @@ def calibrate_inbox_rows(png_path: str) -> InboxCalibration:
     diffs.sort()
     row_height = diffs[len(diffs) // 2]
 
-    # 健全性检查
-    if not (500 <= first_y <= 750):
+    # 健全性检查（含 Stories bar 时 first_y ≈350-500；无 Stories bar ≈200-360）
+    if not (200 <= first_y <= 800):
         return InboxCalibration(
             False, 600, 165, 0, [p[0] for p in peaks], (w, h),
-            f"first_y_out_of_range={first_y}"
+            f"first_y_out_of_range={first_y} (expected 350-800)"
         )
     if not (100 <= row_height <= 220):
         return InboxCalibration(

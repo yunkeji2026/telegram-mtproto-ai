@@ -1,0 +1,554 @@
+{# ════════════════════════════════════════════════════════════════════════ #}
+{# RPA 运营漏斗共用组件（P5）                                                #}
+{#                                                                            #}
+{# 数据源：/api/funnel/stats（contacts_routes，跨平台共享）                    #}
+{# 数据是按 Journey 维度聚合的"客户生命周期"，不按 RPA 平台拆分；所有平台    #}
+{# 页面 include 本组件看到同一份漏斗，这是符合业务模型的。                    #}
+{#                                                                            #}
+{# 用法：                                                                     #}
+{# 1. 在 {% block content %} 中 include 本文件（必须在 _rpa_shared_scripts    #}
+{#    .html 之后，因为依赖 window.rpa.get / rpa.esc）                          #}
+{# 2. 在页面初始化代码里调 rpa.funnel.init({intervalSec: 60}) 启动             #}
+{# 3. 单页面只能 include 一次（元素 ID 是全局命名）                            #}
+{#                                                                            #}
+{# 不与 Messenger 自家 /api/messenger-rpa/funnel 冲突：那个 endpoint 在通用    #}
+{# 漏斗之上叠加了 Persona A/B variants + handoff metrics + ab_conclusions，    #}
+{# 是 Messenger 独有的"增强版"，仍由 messenger_rpa.html 自己渲染。            #}
+{# ════════════════════════════════════════════════════════════════════════ #}
+<style>
+.rpa-funnel-wrap{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:1.1rem 1.3rem;margin-bottom:1rem}
+.rpa-funnel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:.7rem;margin-bottom:.95rem;flex-wrap:wrap}
+.rpa-funnel-title{font-weight:700;font-size:.95rem;color:var(--t);display:flex;align-items:center;gap:.5rem}
+.rpa-funnel-sub{font-size:.74rem;color:var(--t3);font-weight:500;margin-left:.4rem}
+.rpa-funnel-rates{display:flex;gap:.4rem;flex-wrap:wrap;justify-content:flex-end;max-width:60%}
+.rpa-funnel-rate{display:inline-flex;align-items:center;gap:.3rem;font-size:.72rem;font-weight:600;padding:.2rem .55rem;border-radius:6px;background:rgba(34,197,94,.13);color:#16a34a;border:1px solid rgba(34,197,94,.25);white-space:nowrap}
+.rpa-funnel-rate.warn{background:rgba(245,158,11,.13);color:#b45309;border-color:rgba(245,158,11,.25)}
+.rpa-funnel-rate.muted{background:var(--input);color:var(--t3);border-color:var(--bd)}
+.rpa-funnel-bars{display:flex;flex-direction:column;gap:.4rem}
+.rpa-funnel-row{display:grid;grid-template-columns:118px minmax(0,1fr) 48px;align-items:center;gap:.55rem}
+@media(max-width:520px){.rpa-funnel-row{grid-template-columns:90px minmax(0,1fr) 40px}}
+.rpa-funnel-label{font-size:.75rem;color:var(--t2);text-align:right}
+.rpa-funnel-bar{height:14px;background:var(--input);border:1px solid var(--bd);border-radius:999px;overflow:hidden}
+.rpa-funnel-fill{height:100%;background:linear-gradient(90deg,var(--p),#16a34a);border-radius:999px;min-width:3px;transition:width .4s}
+.rpa-funnel-fill.loss{background:linear-gradient(90deg,#f59e0b,#dc2626)}
+.rpa-funnel-val{font-size:.78rem;font-weight:700;color:var(--t);text-align:right}
+.rpa-funnel-empty{text-align:center;color:var(--t3);padding:1.2rem 1rem;font-size:.85rem}
+.rpa-funnel-disabled{padding:.9rem 1rem;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);border-radius:8px;font-size:.82rem;color:#b45309;line-height:1.5}
+.rpa-funnel-disabled b{color:#b45309}
+/* Q4: channel chip 过滤器 */
+.rpa-funnel-chips{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.85rem}
+.rpa-funnel-chip{cursor:pointer;user-select:none;font-size:.74rem;font-weight:600;padding:.3rem .7rem;border-radius:999px;background:var(--input);color:var(--t2);border:1px solid var(--bd);transition:all .15s;display:inline-flex;align-items:center;gap:.3rem}
+.rpa-funnel-chip:hover{background:var(--card);color:var(--t)}
+.rpa-funnel-chip.active{background:var(--p);color:#fff;border-color:var(--p)}
+.rpa-funnel-chip-n{font-size:.68rem;font-weight:500;opacity:.85;padding:0 .35rem;background:rgba(255,255,255,.15);border-radius:8px}
+.rpa-funnel-chip:not(.active) .rpa-funnel-chip-n{background:rgba(0,0,0,.06);color:var(--t3)}
+/* B1: 时序折线图 */
+.rpa-funnel-ts{margin-top:1rem;padding-top:.85rem;border-top:1px dashed var(--bd)}
+.rpa-funnel-ts-head{display:flex;align-items:center;gap:.5rem;margin-bottom:.55rem;flex-wrap:wrap}
+.rpa-funnel-ts-title{font-weight:700;font-size:.85rem;color:var(--t);display:flex;align-items:center;gap:.4rem}
+.rpa-funnel-ts-days{display:inline-flex;gap:.2rem;margin-left:auto;padding:.15rem;border:1px solid var(--bd);border-radius:7px;background:var(--input)}
+.rpa-funnel-ts-day-btn{cursor:pointer;border:0;background:transparent;color:var(--t2);font-size:.7rem;font-weight:600;padding:.2rem .55rem;border-radius:5px;transition:all .15s}
+.rpa-funnel-ts-day-btn:hover{color:var(--t)}
+.rpa-funnel-ts-day-btn.active{background:var(--p);color:#fff}
+.rpa-funnel-ts-svg{width:100%;height:160px;display:block}
+.rpa-funnel-ts-legend{display:flex;gap:.85rem;flex-wrap:wrap;font-size:.7rem;color:var(--t3);margin-top:.4rem}
+.rpa-funnel-ts-legend-item{display:inline-flex;align-items:center;gap:.3rem;cursor:pointer;user-select:none;padding:.1rem .35rem;border-radius:4px;transition:opacity .15s}
+.rpa-funnel-ts-legend-item.dimmed{opacity:.35}
+.rpa-funnel-ts-legend-item .swatch{width:10px;height:3px;border-radius:1px}
+.rpa-funnel-ts-empty{text-align:center;color:var(--t3);padding:1rem;font-size:.78rem}
+/* B2: KPI alert banner */
+.rpa-kpi-alerts{margin-top:1rem;padding-top:.85rem;border-top:1px dashed var(--bd)}
+.rpa-kpi-alerts-head{display:flex;align-items:center;gap:.5rem;margin-bottom:.55rem}
+.rpa-kpi-alerts-title{font-weight:700;font-size:.85rem;color:var(--t)}
+.rpa-kpi-alerts-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;font-size:.68rem;font-weight:700;background:#dc2626;color:#fff;line-height:1}
+.rpa-kpi-alerts-ack-all{margin-left:auto;cursor:pointer;border:1px solid var(--bd);background:var(--input);color:var(--t2);font-size:.7rem;font-weight:600;padding:.2rem .6rem;border-radius:5px;transition:all .15s}
+.rpa-kpi-alerts-ack-all:hover{background:var(--card);color:var(--t)}
+.rpa-kpi-alert-item{display:flex;align-items:flex-start;gap:.6rem;padding:.5rem .7rem;border-radius:7px;margin-bottom:.4rem;border:1px solid rgba(220,38,38,.25);background:rgba(220,38,38,.06)}
+.rpa-kpi-alert-item.warn{border-color:rgba(245,158,11,.3);background:rgba(245,158,11,.07)}
+.rpa-kpi-alert-item.critical{border-color:rgba(220,38,38,.4);background:rgba(220,38,38,.1)}
+.rpa-kpi-alert-item.acked{opacity:.45;filter:grayscale(.6)}
+.rpa-kpi-alert-icon{font-size:.95rem;line-height:1.4;flex-shrink:0}
+.rpa-kpi-alert-body{flex:1;min-width:0}
+.rpa-kpi-alert-msg{font-size:.78rem;color:var(--t);line-height:1.45;word-break:break-all}
+.rpa-kpi-alert-meta{font-size:.68rem;color:var(--t3);margin-top:.2rem}
+.rpa-kpi-alert-ack-btn{flex-shrink:0;cursor:pointer;border:1px solid var(--bd);background:transparent;color:var(--t3);font-size:.68rem;padding:.15rem .45rem;border-radius:4px;transition:all .15s}
+.rpa-kpi-alert-ack-btn:hover{background:var(--card);color:var(--t)}
+.rpa-kpi-alerts-empty{text-align:center;color:var(--t3);padding:.7rem;font-size:.78rem}
+</style>
+
+<div class="rpa-funnel-wrap" id="rpa-funnel-wrap">
+  <div class="rpa-funnel-head">
+    <div class="rpa-funnel-title">
+      📊 运营漏斗
+      <span class="rpa-funnel-sub" id="rpa-funnel-total">载入中…</span>
+    </div>
+    <div class="rpa-funnel-rates" id="rpa-funnel-rates"></div>
+  </div>
+  <div class="rpa-funnel-chips" id="rpa-funnel-chips" role="tablist" aria-label="按平台筛选漏斗">
+    {# chip 由 JS 渲染（要根据 by_channel 显示数字） #}
+  </div>
+  <div class="rpa-funnel-bars" id="rpa-funnel-bars">
+    <div class="rpa-funnel-empty">载入中…</div>
+  </div>
+  {# B1: 时序折线图（独立 section，复用 scope/channel + chip 状态） #}
+  <div class="rpa-funnel-ts" id="rpa-funnel-ts">
+    <div class="rpa-funnel-ts-head">
+      <div class="rpa-funnel-ts-title">📈 转化时序</div>
+      <div class="rpa-funnel-ts-days" id="rpa-funnel-ts-days" role="tablist" aria-label="时序窗口">
+        <button type="button" class="rpa-funnel-ts-day-btn" data-days="7" role="tab">7 天</button>
+        <button type="button" class="rpa-funnel-ts-day-btn active" data-days="30" role="tab">30 天</button>
+      </div>
+    </div>
+    <div id="rpa-funnel-ts-body">
+      <div class="rpa-funnel-ts-empty">载入中…</div>
+    </div>
+  </div>
+  {# B2: KPI 告警横幅（滚动渲染，首次加载及漏斗刷新时联动） #}
+  <div class="rpa-kpi-alerts" id="rpa-kpi-alerts">
+    <div class="rpa-kpi-alerts-head">
+      <span class="rpa-kpi-alerts-title">🔔 KPI 告警</span>
+      <span class="rpa-kpi-alerts-badge" id="rpa-kpi-alerts-badge" style="display:none"></span>
+      <button type="button" class="rpa-kpi-alerts-ack-all" id="rpa-kpi-alerts-ack-all"
+              style="display:none" title="确认所有未读告警">全部已读</button>
+    </div>
+    <div id="rpa-kpi-alerts-body">
+      <div class="rpa-kpi-alerts-empty">载入中…</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+'use strict';
+if(!window.rpa){
+  // 必须先 include _rpa_shared_scripts.html
+  console.warn('[rpa-funnel] window.rpa 未初始化，请先 include _rpa_shared_scripts.html');
+  return;
+}
+if(window.rpa.funnel) return; // 防止重复加载（单页面多次 include 仍只取第一次）
+
+const F = window.rpa.funnel = {};
+
+// Q4: 当前 scope（'all' 或 channel 名）；init 时可 override
+F._scope = 'all';
+
+// Q4: chip 定义（顺序固定，与 VALID_CHANNELS 对齐；mobile 来自 mobile-auto0423）
+const CHIPS = [
+  ['all',       '全部',      ''],
+  ['messenger', 'Messenger', ''],
+  ['line',      'LINE',      ''],
+  ['telegram',  'Telegram',  ''],
+  ['mobile',    'Mobile',    'mobile-auto0423 流入'],
+];
+
+// Q4: scope label —— 在 render 里被引用，所以必须在 render 之前声明
+const SCOPE_LABEL = {
+  'all':       '全平台',
+  'messenger': 'Messenger',
+  'line':      'LINE',
+  'telegram':  'Telegram',
+  'mobile':    'Mobile',
+};
+
+// 10 阶段（与 contacts.JourneyStage 对齐；loss 标记走红色渐变）
+const STAGES = [
+  ['INITIAL',        '初始接触',   ''],
+  ['ENGAGED',        '深入互动',   ''],
+  ['HANDOFF_READY',  '引流就绪',   ''],
+  ['HANDOFF_SENT',   '话术已发',   ''],
+  ['LINE_ADDED',     '加好友',     ''],
+  ['LINE_ACCEPTED',  '通过验证',   ''],
+  ['LINE_ENGAGED',   '二次互动',   ''],
+  ['BONDED',         '成交',       ''],
+  ['LOST_HANDOFF',   '流失-引流',  'loss'],
+  ['LOST_LINE_SILENT','流失-LINE', 'loss'],
+];
+
+// 保底显示的阶段（即使为 0 也画一行，避免空白看不出漏斗形状）
+const ALWAYS_VISIBLE = ['INITIAL','ENGAGED','HANDOFF_SENT','LINE_ENGAGED'];
+
+F._pct = function(num, den){
+  num = Number(num)||0; den = Number(den)||0;
+  return den > 0 ? (Math.round(num/den*1000)/10) + '%' : null;
+};
+
+// Q4: 渲染 chip 行（active 高亮 + 数字角标 + 点击切换）
+F._renderChips = function(byChannel){
+  const wrap = document.getElementById('rpa-funnel-chips');
+  if(!wrap) return;
+  byChannel = byChannel || {};
+  wrap.innerHTML = CHIPS.map(c => {
+    const [val, label, hint] = c;
+    const active = (F._scope === val) ? 'active' : '';
+    // 数字：'all' 显示总和，其他显示对应 channel 的 ci 数
+    const n = (val === 'all')
+      ? Object.values(byChannel).reduce((s,v)=>s+(Number(v)||0), 0)
+      : (Number(byChannel[val])||0);
+    const nBadge = n > 0 ? `<span class="rpa-funnel-chip-n">${n}</span>` : '';
+    const title = hint ? ` title="${rpa.esc(hint)}"` : '';
+    return `<button type="button" role="tab" aria-selected="${!!active}" class="rpa-funnel-chip ${active}" data-scope="${rpa.esc(val)}"${title}>${rpa.esc(label)}${nBadge}</button>`;
+  }).join('');
+  // 绑定点击
+  wrap.querySelectorAll('.rpa-funnel-chip').forEach(btn => {
+    btn.addEventListener('click', function(){
+      const s = this.getAttribute('data-scope') || 'all';
+      if(s === F._scope) return;        // 已选中 → 无操作
+      F._scope = s;
+      F.refresh();                       // 切 scope 时重新拉数据 + 重画
+    });
+  });
+};
+
+F.render = function(data){
+  const bars = document.getElementById('rpa-funnel-bars');
+  const total = document.getElementById('rpa-funnel-total');
+  const rates = document.getElementById('rpa-funnel-rates');
+  if(!bars || !total || !rates) return;
+
+  if(data && data.error){
+    bars.innerHTML = '<div class="rpa-funnel-empty" style="color:#dc2626">加载失败 <button class="btn-sec" type="button" style="margin-left:.4rem;font-size:.75rem" onclick="window.rpa&&rpa.funnel&&rpa.funnel.refresh()">重试</button></div>';
+    total.textContent = '';
+    rates.innerHTML = '';
+    return;
+  }
+  if(!data || data.disabled){
+    bars.innerHTML = '<div class="rpa-funnel-disabled">contacts 子系统<b>未启用</b>，请在 <code>config.yaml</code> 中开启 <code>contacts.enabled</code> 后重启进程。</div>';
+    total.textContent = '';
+    rates.innerHTML = '';
+    // chip 行清空（避免 disabled 时点 chip 误以为可用）
+    const chipsWrap = document.getElementById('rpa-funnel-chips');
+    if(chipsWrap) chipsWrap.innerHTML = '';
+    return;
+  }
+
+  // Q4: chip 行用 by_channel 的总览数据刷新（数据是全局的，不受 scope 影响）
+  F._renderChips(data.by_channel || {});
+
+  const stages = data.by_stage || {};
+  // 主流程的总人数（不含 LOST_*）
+  const flowKeys = ['INITIAL','ENGAGED','HANDOFF_READY','HANDOFF_SENT',
+                    'LINE_ADDED','LINE_ACCEPTED','LINE_ENGAGED','BONDED'];
+  const flowTotal = flowKeys.reduce((s,k)=>s+(Number(stages[k])||0), 0);
+  const maxVal = Math.max(1, ...STAGES.map(s=>Number(stages[s[0]])||0));
+
+  // Q4: scope ≠ 'all' 时显式标注范围，避免运营误判"这是全平台数据"
+  const scopeTag = (F._scope === 'all') ? '' : ` · 范围：${SCOPE_LABEL[F._scope] || F._scope}`;
+  total.textContent = `共 ${flowTotal} 条旅程 · 联系人 ${data.total_contacts||0} 位${scopeTag}`;
+
+  const html = STAGES
+    .filter(s => (Number(stages[s[0]])||0) > 0 || ALWAYS_VISIBLE.includes(s[0]))
+    .map(s => {
+      const v = Number(stages[s[0]])||0;
+      const pct = Math.max(2, Math.round(v / maxVal * 100));
+      return `<div class="rpa-funnel-row">
+        <div class="rpa-funnel-label">${rpa.esc(s[1])}</div>
+        <div class="rpa-funnel-bar"><div class="rpa-funnel-fill ${s[2]}" style="width:${pct}%"></div></div>
+        <div class="rpa-funnel-val">${v}</div>
+      </div>`;
+    }).join('');
+  bars.innerHTML = html || '<div class="rpa-funnel-empty">暂无 Journey 数据</div>';
+
+  // 转化率
+  const eng = F._pct(stages.ENGAGED, stages.INITIAL);
+  const hnd = F._pct(stages.HANDOFF_SENT, stages.ENGAGED);
+  const add = F._pct(stages.LINE_ADDED, stages.HANDOFF_SENT);
+  const bnd = F._pct(stages.BONDED, flowTotal);
+  const rateList = [
+    {label:'互动率',  val: eng},
+    {label:'引流率',  val: hnd},
+    {label:'加友率',  val: add},
+    {label:'综合成交', val: bnd},
+  ].filter(r => r.val != null);
+
+  rates.innerHTML = rateList.length === 0
+    ? '<span class="rpa-funnel-rate muted">暂无转化数据</span>'
+    : rateList.map(r =>
+        `<span class="rpa-funnel-rate">${rpa.esc(r.label)} ${rpa.esc(r.val)}</span>`
+      ).join('');
+};
+
+F.refresh = function(){
+  // Q4: scope='all' 不带参数（保持向后兼容契约）；其他拼 ?channel=
+  const url = (F._scope === 'all')
+    ? '/api/funnel/stats'
+    : '/api/funnel/stats?channel=' + encodeURIComponent(F._scope);
+  // B1: 截面 + 时序两份请求并发拉（独立失败不互相阻塞）
+  const p1 = rpa.get(url).then(d => {
+    // rpa.get 在 4xx/5xx 时会把状态码塞到 d._status
+    if(d && d._status){
+      // 404 / 503 = contacts 未启用 → 渲染 disabled banner
+      F.render({disabled: true});
+      return;
+    }
+    F.render(d);
+  }).catch(()=>{
+    F.render({error: true});
+  });
+  F._refreshTimeseries(); // 不 await：时序图慢失败不阻塞 chip
+  F._refreshAlerts();     // B2: 告警横幅，独立失败不阻塞主漏斗
+  return p1;
+};
+
+// B1: 时序窗口 + 折线可见性状态 ───────────────────────────
+F._tsDays = 30;
+F._tsLineVisible = { engaged_rate: true, handoff_rate: true, line_add_rate: true, bonded_rate: true };
+
+// 4 条折线的视觉定义 —— SVG 颜色 + 中文 label
+const TS_LINES = [
+  { key: 'engaged_rate',  label: '互动率',  color: '#16a34a' },
+  { key: 'handoff_rate',  label: '引流率',  color: '#2563eb' },
+  { key: 'line_add_rate', label: '加友率',  color: '#9333ea' },
+  { key: 'bonded_rate',   label: '成交率',  color: '#ea580c' },
+];
+
+F._refreshTimeseries = function(){
+  const url = '/api/funnel/timeseries?days=' + F._tsDays
+    + (F._scope === 'all' ? '' : '&channel=' + encodeURIComponent(F._scope));
+  return rpa.get(url).then(d => {
+    if(d && d._status){
+      F._renderTimeseries(null);
+      return;
+    }
+    F._renderTimeseries(d);
+  }).catch(()=>{
+    F._renderTimeseries({error:true});
+  });
+};
+
+// B1: 渲染折线图 —— inline SVG 手写，无第三方依赖
+// 关键设计：
+//   - viewBox 600×200，宽度 100% 缩放
+//   - 4 条折线根据 F._tsLineVisible 隐藏/显示
+//   - 数据点 rates[key] 为 null（den=0 无法计算）的位置自动断点
+//   - X 轴标签：首尾 + 中间 2~3 个 tick
+//   - Y 轴：0~100% 固定（百分比天然有上限）
+F._renderTimeseries = function(data){
+  const body = document.getElementById('rpa-funnel-ts-body');
+  if(!body) return;
+  if(data && data.error){
+    body.innerHTML = '<div class="rpa-funnel-ts-empty" style="color:#dc2626">加载失败 <button class="btn-sec" type="button" style="margin-left:.35rem;font-size:.72rem" onclick="window.rpa&&rpa.funnel&&rpa.funnel._refreshTimeseries()">重试</button></div>';
+    return;
+  }
+  if(!data || !Array.isArray(data.series) || data.series.length === 0){
+    body.innerHTML = '<div class="rpa-funnel-ts-empty">暂无时序数据（journey_events 表为空或 contacts 未启用）</div>';
+    return;
+  }
+  // SVG 坐标系：viewBox 600×200，留 36px 左 / 12px 右 / 8px 上 / 22px 下 padding
+  const W = 600, H = 200, PAD_L = 36, PAD_R = 12, PAD_T = 8, PAD_B = 22;
+  const innerW = W - PAD_L - PAD_R;
+  const innerH = H - PAD_T - PAD_B;
+  const n = data.series.length;
+  const xStep = n > 1 ? innerW / (n - 1) : 0;
+
+  // 4 条折线的 SVG path（null 数据点 break path）
+  const pathParts = TS_LINES.map(line => {
+    if(!F._tsLineVisible[line.key]) return null;
+    const segs = [];
+    let segStart = true;
+    data.series.forEach((item, i) => {
+      const v = item.rates && item.rates[line.key];
+      if(v == null){ segStart = true; return; }
+      const x = PAD_L + i * xStep;
+      const y = PAD_T + innerH * (1 - Math.min(1, v / 100));
+      segs.push((segStart ? 'M' : 'L') + x.toFixed(1) + ' ' + y.toFixed(1));
+      segStart = false;
+    });
+    return segs.length ? { line, d: segs.join(' ') } : null;
+  }).filter(Boolean);
+
+  // 数据点圆圈（每条线最后一个有效点显示当前值，让运营一眼看到"今天"）
+  const dotsParts = TS_LINES.map(line => {
+    if(!F._tsLineVisible[line.key]) return '';
+    let lastIdx = -1, lastV = null;
+    data.series.forEach((item, i) => {
+      const v = item.rates && item.rates[line.key];
+      if(v != null){ lastIdx = i; lastV = v; }
+    });
+    if(lastIdx < 0) return '';
+    const x = PAD_L + lastIdx * xStep;
+    const y = PAD_T + innerH * (1 - Math.min(1, lastV / 100));
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="${line.color}" />`
+         + `<text x="${(x + 4).toFixed(1)}" y="${(y - 5).toFixed(1)}" fill="${line.color}" font-size="9" font-weight="700">${lastV}%</text>`;
+  }).join('');
+
+  // Y 轴 grid 线 + 标签（0/25/50/75/100%）
+  const gridParts = [0, 25, 50, 75, 100].map(p => {
+    const y = PAD_T + innerH * (1 - p / 100);
+    return `<line x1="${PAD_L}" y1="${y.toFixed(1)}" x2="${W - PAD_R}" y2="${y.toFixed(1)}" stroke="var(--bd)" stroke-width="0.5" stroke-dasharray="2,3" />`
+         + `<text x="${PAD_L - 4}" y="${(y + 3).toFixed(1)}" fill="var(--t3)" font-size="9" text-anchor="end">${p}%</text>`;
+  }).join('');
+
+  // X 轴标签：首 / 中 / 尾（密度根据 n 调）
+  const xTicks = [];
+  const tickN = Math.min(5, n);
+  for(let i = 0; i < tickN; i++){
+    const idx = Math.round(i * (n - 1) / Math.max(1, tickN - 1));
+    const x = PAD_L + idx * xStep;
+    const dayStr = String(data.series[idx].day).slice(5);  // MM-DD
+    xTicks.push(
+      `<text x="${x.toFixed(1)}" y="${(H - 6).toFixed(1)}" fill="var(--t3)" font-size="9" text-anchor="middle">${dayStr}</text>`
+    );
+  }
+
+  // 折线 path（带 stroke + opacity，hover 时可加效果）
+  const linesSvg = pathParts.map(p =>
+    `<path d="${p.d}" fill="none" stroke="${p.line.color}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" />`
+  ).join('');
+
+  // Legend（点击切换可见性）
+  const legendHtml = TS_LINES.map(line => {
+    const dimmed = F._tsLineVisible[line.key] ? '' : ' dimmed';
+    return `<span class="rpa-funnel-ts-legend-item${dimmed}" data-line-key="${line.key}">
+      <span class="swatch" style="background:${line.color}"></span>${rpa.esc(line.label)}
+    </span>`;
+  }).join('');
+
+  body.innerHTML = `<svg class="rpa-funnel-ts-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+    ${gridParts}
+    ${linesSvg}
+    ${dotsParts}
+    ${xTicks.join('')}
+  </svg>
+  <div class="rpa-funnel-ts-legend">${legendHtml}</div>`;
+
+  // 绑定 legend 点击切换
+  body.querySelectorAll('.rpa-funnel-ts-legend-item').forEach(el => {
+    el.addEventListener('click', function(){
+      const k = this.getAttribute('data-line-key');
+      if(!k) return;
+      F._tsLineVisible[k] = !F._tsLineVisible[k];
+      F._renderTimeseries(data);  // 用同一份数据重画，不重新请求
+    });
+  });
+};
+
+// B1: 7 天 / 30 天切换按钮的点击委托（在 init 里绑一次）
+F._bindTsControls = function(){
+  if(F._tsControlsBound) return;
+  F._tsControlsBound = true;
+  const days = document.getElementById('rpa-funnel-ts-days');
+  if(!days) return;
+  days.addEventListener('click', function(e){
+    const btn = e.target.closest('.rpa-funnel-ts-day-btn');
+    if(!btn) return;
+    const d = parseInt(btn.getAttribute('data-days') || '30', 10);
+    if(d === F._tsDays) return;
+    F._tsDays = d;
+    days.querySelectorAll('.rpa-funnel-ts-day-btn').forEach(b =>
+      b.classList.toggle('active', b === btn)
+    );
+    F._refreshTimeseries();
+  });
+};
+
+// B2: KPI alert state
+F._alertsData = null;
+
+F._refreshAlerts = function(){
+  return rpa.get('/api/funnel/alerts?limit=20').then(function(d){
+    if(d && d._status){ F._renderAlerts(null); return; }
+    F._alertsData = d;
+    F._renderAlerts(d);
+  }).catch(function(){ F._renderAlerts({error:true}); });
+};
+
+F._renderAlerts = function(data){
+  const body = document.getElementById('rpa-kpi-alerts-body');
+  const badge = document.getElementById('rpa-kpi-alerts-badge');
+  const ackAllBtn = document.getElementById('rpa-kpi-alerts-ack-all');
+  if(!body) return;
+  if(data && data.error){
+    body.innerHTML = '<div class="rpa-kpi-alerts-empty" style="color:#dc2626">加载失败 <button class="btn-sec" type="button" style="margin-left:.35rem;font-size:.72rem" onclick="window.rpa&&rpa.funnel&&rpa.funnel._refreshAlerts()">重试</button></div>';
+    if(badge) badge.style.display = 'none';
+    if(ackAllBtn) ackAllBtn.style.display = 'none';
+    return;
+  }
+  if(!data || !Array.isArray(data.items)){
+    body.innerHTML = '<div class="rpa-kpi-alerts-empty">暂无告警数据</div>';
+    if(badge) badge.style.display = 'none';
+    if(ackAllBtn) ackAllBtn.style.display = 'none';
+    return;
+  }
+  const unacked = data.unacked_count || 0;
+  if(badge){
+    badge.textContent = unacked > 99 ? '99+' : String(unacked);
+    badge.style.display = unacked > 0 ? '' : 'none';
+  }
+  if(ackAllBtn) ackAllBtn.style.display = unacked > 0 ? '' : 'none';
+  if(data.items.length === 0){
+    body.innerHTML = '<div class="rpa-kpi-alerts-empty">✅ 暂无 KPI 告警</div>';
+    return;
+  }
+  const now = Date.now() / 1000;
+  body.innerHTML = data.items.map(function(a){
+    const icon = a.severity === 'critical' ? '🔴' : '🟡';
+    const sevCls = a.severity === 'critical' ? 'critical' : 'warn';
+    const ackedCls = a.acked ? ' acked' : '';
+    const ago = _fmtAgo(now - (a.ts || 0));
+    const ackHtml = a.acked
+      ? '<span style="font-size:.68rem;color:var(--t3)">已确认</span>'
+      : '<button type="button" class="rpa-kpi-alert-ack-btn" data-aid="' + a.id + '">确认</button>';
+    return '<div class="rpa-kpi-alert-item ' + sevCls + ackedCls + '">'
+      + '<span class="rpa-kpi-alert-icon">' + icon + '</span>'
+      + '<div class="rpa-kpi-alert-body">'
+      + '<div class="rpa-kpi-alert-msg">' + rpa.esc(a.message) + '</div>'
+      + '<div class="rpa-kpi-alert-meta">' + rpa.esc(a.kind) + ' · ' + rpa.esc(ago) + '</div>'
+      + '</div>' + ackHtml + '</div>';
+  }).join('');
+  // bind ack buttons
+  body.querySelectorAll('.rpa-kpi-alert-ack-btn').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      const aid = parseInt(this.getAttribute('data-aid') || '0', 10);
+      if(!aid) return;
+      this.disabled = true;
+      rpa.post('/api/funnel/alerts/' + aid + '/ack', {}).then(function(){
+        F._refreshAlerts();
+      }).catch(function(){
+        F._refreshAlerts();
+      });
+    });
+  });
+};
+
+function _fmtAgo(sec){
+  sec = Math.max(0, Math.round(sec));
+  if(sec < 60) return sec + ' 秒前';
+  if(sec < 3600) return Math.round(sec/60) + ' 分钟前';
+  if(sec < 86400) return Math.round(sec/3600) + ' 小时前';
+  return Math.round(sec/86400) + ' 天前';
+}
+
+F._bindAckAll = function(){
+  if(F._ackAllBound) return;
+  F._ackAllBound = true;
+  const btn = document.getElementById('rpa-kpi-alerts-ack-all');
+  if(!btn) return;
+  btn.addEventListener('click', function(){
+    this.disabled = true;
+    rpa.post('/api/funnel/alerts/ack-all', {}).then(function(){
+      F._refreshAlerts();
+    }).catch(function(){
+      F._refreshAlerts();
+    });
+  });
+};
+
+// Q4: init 接受 defaultScope，让"在 LINE 页打开漏斗默认看 LINE 范围"
+// 不传 defaultScope 时保持原行为（all）
+F.init = function(opts){
+  opts = opts || {};
+  // 仅在合法值时才使用 defaultScope，避免页面 bug 把 _scope 改成 undefined
+  if(opts.defaultScope && SCOPE_LABEL[opts.defaultScope]){
+    F._scope = opts.defaultScope;
+  }
+  F._bindTsControls();  // B1: 绑定 7d/30d 切换（仅首次有效）
+  F._bindAckAll();      // B2: 绑定"全部已读"按钮（仅首次有效）
+  F.refresh();
+  if(opts.intervalSec && opts.intervalSec > 0){
+    // 保留 handle 让调用方可清理（多平台共用同一个，最后一个 init 胜出）
+    if(F._timer) clearInterval(F._timer);
+    F._timer = setInterval(F.refresh, opts.intervalSec * 1000);
+  }
+};
+})();
+</script>

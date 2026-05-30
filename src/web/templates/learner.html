@@ -50,6 +50,12 @@
       <div class="text-muted" style="font-size:.82rem">已拒绝</div>
     </div>
   </div>
+  <div class="col-4 pro-only">
+    <div class="card p-3 text-center">
+      <div class="stat-value" id="stat-dup" style="font-size:2rem;font-weight:800;color:var(--amber)">-</div>
+      <div class="text-muted" style="font-size:.82rem">疑似重复</div>
+    </div>
+  </div>
 </div>
 
 <!-- Filter Tabs -->
@@ -59,12 +65,26 @@
     <button class="btn btn-sm pro-only" onclick="filterDrafts('approved',this)" data-filter="approved">已通过</button>
     <button class="btn btn-sm pro-only" onclick="filterDrafts('rejected',this)" data-filter="rejected">已拒绝</button>
     <button class="btn btn-sm pro-only" onclick="filterDrafts('all',this)" data-filter="all">全部</button>
+    <select id="sort-select" onchange="loadDrafts()" style="font-size:.76rem;padding:.2rem .4rem;border:1px solid var(--bd);border-radius:5px;background:var(--input);color:var(--t2);margin-left:.5rem">
+      <option value="priority">排序: 综合优先级</option>
+      <option value="confidence">排序: AI自信度</option>
+      <option value="hit_count">排序: 命中次数</option>
+      <option value="time">排序: 最新时间</option>
+    </select>
     <div style="flex:1"></div>
     <button class="btn btn-sm btn-green" onclick="approveAll()" id="btn-approve-all" style="display:none">
       全部通过
     </button>
   </div>
 
+  <!-- A2: Batch action bar -->
+  <div id="batch-bar" style="display:none;padding:.5rem 1rem;background:rgba(91,124,246,.06);border-bottom:1px solid rgba(91,124,246,.18);font-size:.82rem;align-items:center;gap:.6rem">
+    <input type="checkbox" id="batch-all" onchange="toggleAllChecks(this.checked)" style="margin-right:.3rem">
+    <span id="batch-count">0</span> 条已选
+    <button class="btn btn-sm btn-green" onclick="batchAction('approve')" style="margin-left:.5rem">✔ 批量通过</button>
+    <button class="btn btn-sm btn-red" onclick="batchAction('reject')">✖ 批量拒绝</button>
+    <button class="btn btn-sm" onclick="clearBatch()">取消</button>
+  </div>
   <div id="drafts-container" style="min-height:200px">
     <div style="padding:3rem;text-align:center;color:var(--t3)">加载中...</div>
   </div>
@@ -139,6 +159,19 @@
 .status-pending{background:var(--as);color:var(--amber)}
 .empty-state{padding:3rem;text-align:center;color:var(--t3)}
 .empty-state svg{width:48px;height:48px;margin-bottom:.75rem;opacity:.3}
+.conf-badge{display:inline-flex;align-items:center;gap:.2rem;font-size:.68rem;padding:.1rem .4rem;border-radius:4px;font-weight:700;flex-shrink:0}
+.conf-high{background:rgba(16,185,129,.12);color:var(--green)}
+.conf-mid{background:rgba(245,158,11,.1);color:var(--amber)}
+.conf-low{background:rgba(239,68,68,.1);color:var(--red)}
+.draft-check{margin-right:.5rem;cursor:pointer;width:16px;height:16px;flex-shrink:0}
+#batch-bar{display:flex}
+.dup-badge{display:inline-flex;align-items:center;gap:.2rem;font-size:.68rem;padding:.12rem .45rem;border-radius:4px;font-weight:700;background:rgba(245,158,11,.12);color:var(--amber);flex-shrink:0;cursor:help}
+.dup-warn{background:linear-gradient(135deg,rgba(245,158,11,.07),rgba(239,68,68,.05));border:1px solid rgba(245,158,11,.25);border-radius:8px;padding:.45rem .7rem;margin:.35rem 0;font-size:.78rem;display:flex;align-items:center;gap:.5rem;color:var(--t2)}
+.dup-warn .dup-title{font-weight:600;color:var(--amber)}
+.dup-warn .dup-link{color:var(--p);text-decoration:underline;cursor:pointer;font-weight:600}
+.dup-warn .dup-score{font-size:.72rem;color:var(--t3);margin-left:.3rem}
+.dup-recheck{background:none;border:1px solid var(--bd);border-radius:4px;font-size:.7rem;padding:.15rem .4rem;cursor:pointer;color:var(--t3);margin-left:auto}
+.dup-recheck:hover{border-color:var(--p);color:var(--p)}
 </style>
 
 <script>
@@ -151,22 +184,27 @@ async function loadStats(){
     document.getElementById('stat-pending').textContent=d.pending||0;
     document.getElementById('stat-approved').textContent=d.approved||0;
     document.getElementById('stat-rejected').textContent=d.rejected||0;
+    var dupEl=document.getElementById('stat-dup');
+    if(dupEl)dupEl.textContent=d.dup_flagged||0;
     document.getElementById('btn-approve-all').style.display=(d.pending>0&&currentFilter==='pending')?'':'none';
   }catch(e){}
 }
 
+let currentSort='priority';
 async function loadDrafts(){
   loadStats();
+  currentSort=document.getElementById('sort-select').value;
   const c=document.getElementById('drafts-container');
   c.innerHTML='<div style="padding:2rem;text-align:center;color:var(--t3)">加载中...</div>';
   try{
-    const r=await fetch('/api/learner/drafts?status='+currentFilter);
+    const r=await fetch('/api/learner/drafts?status='+currentFilter+'&sort='+currentSort);
     const d=await r.json();
     renderDrafts(d.drafts||[]);
   }catch(e){
     var _sm2=document.documentElement.getAttribute('data-ui-mode')==='simple';
     c.innerHTML=_sm2?'<div class="empty-state"><p style="font-weight:600;color:var(--red)">加载失败</p><p style="font-size:.82rem;color:var(--t3);margin-top:.3rem">请点击「刷新」重试</p></div>':'<div class="empty-state">加载失败</div>';
   }
+  clearBatch();
 }
 
 function renderDrafts(drafts){
@@ -183,13 +221,21 @@ function renderDrafts(drafts){
   drafts.forEach(d=>{
     const src=srcLabels[d.source]||d.source;
     const triggers=(d.triggers||'').split(',').filter(Boolean).map(t=>'<span>'+t.trim()+'</span>').join('');
+    const conf=d.confidence||0;
+    const confCls=conf>=75?'conf-high':conf>=40?'conf-mid':'conf-low';
+    const confLabel=conf>=75?'✔️':conf>=40?'⚠️':'❓';
+    const showCheck=d.status==='pending';
     html+=`<div class="draft-card" data-id="${d.id}">
       <div class="draft-header">
+        ${showCheck?'<input type="checkbox" class="draft-check" value="'+d.id+'" onchange="updateBatch()">':''}
         <span class="draft-source source-${d.source}">${src}</span>
         <span class="draft-query">${esc(d.query)}</span>
         <span class="draft-count">${d.hit_count}次</span>
+        <span class="conf-badge ${confCls}" title="AI自信度">${confLabel} ${conf}</span>
+        ${d.dup_score>0?'<span class="dup-badge" title="与现有知识库条目相似">⚠ 疑似重复 '+Math.round(d.dup_score*100)+'%</span>':''}
         ${d.status!=='pending'?'<span class="status-badge status-'+d.status+'">'+(d.status==='approved'?'已通过':'已拒绝')+'</span>':''}
       </div>
+      ${d.dup_score>0?'<div class="dup-warn"><span class="dup-title">⚠ 与现有条目相似:</span> <span class="dup-link" onclick="window.open(\'/knowledge#entry-'+d.dup_entry_id+'\',\'_blank\')">['+esc(d.dup_entry_id)+'] '+esc(d.dup_entry_title)+'</span><span class="dup-score">('+Math.round(d.dup_score*100)+'% · '+(d.dup_method||'auto')+')</span>'+(d.status==='pending'?'<button class="dup-recheck" onclick="recheckDup(\''+d.id+'\',this)">🔄 重新检测</button>':'')+'</div>':''}
       <div class="draft-title"><b>${esc(d.title)}</b> · ${esc(d.category)}</div>
       <div class="draft-triggers">${triggers}</div>
       ${d.example_reply?'<div class="draft-reply">'+esc(d.example_reply)+'</div>':''}
@@ -230,8 +276,25 @@ async function runLearning(){
   }
 }
 
+async function recheckDup(id,btn){
+  if(btn){btn.disabled=true;btn.textContent='检测中...'}
+  try{
+    const r=await fetch('/api/learner/drafts/'+id+'/recheck-dup',{method:'POST'});
+    const d=await r.json();
+    if(d.dup){
+      if(typeof showToast==='function')showToast('仍存在相似条目: '+d.dup.entry_title+' ('+Math.round(d.dup.score*100)+'%)','warning');
+    }else{
+      if(typeof showToast==='function')showToast('未发现重复，已清除标记','success');
+    }
+    loadDrafts();
+  }catch(e){if(typeof showToast==='function')showToast('检测失败','error')}
+}
+
 async function approveDraft(id){
-  if(!confirm('确认将此草稿入库为正式知识条目？'))return;
+  var card=document.querySelector('.draft-card[data-id="'+id+'"]');
+  var hasDup=card&&card.querySelector('.dup-warn');
+  var msg=hasDup?'⚠ 此草稿与现有知识库条目相似，确认仍要入库？':'确认将此草稿入库为正式知识条目？';
+  if(!confirm(msg))return;
   try{
     await fetch('/api/learner/drafts/'+id+'/approve',{method:'POST'});
     if(typeof showToast==='function')showToast('已通过入库','success');
@@ -285,6 +348,43 @@ async function saveDraft(){
     closeModal();
     loadDrafts();
   }catch(e){if(typeof showToast==='function')showToast('保存失败','error')}
+}
+
+// ── A2: Batch selection ─────────────────────────────────
+function getSelectedIds(){
+  return Array.from(document.querySelectorAll('.draft-check:checked')).map(cb=>cb.value);
+}
+function updateBatch(){
+  const ids=getSelectedIds();
+  const bar=document.getElementById('batch-bar');
+  bar.style.display=ids.length?'flex':'none';
+  document.getElementById('batch-count').textContent=ids.length;
+}
+function toggleAllChecks(on){
+  document.querySelectorAll('.draft-check').forEach(cb=>{cb.checked=on});
+  updateBatch();
+}
+function clearBatch(){
+  document.querySelectorAll('.draft-check').forEach(cb=>{cb.checked=false});
+  const bar=document.getElementById('batch-bar');
+  if(bar)bar.style.display='none';
+  const ba=document.getElementById('batch-all');
+  if(ba)ba.checked=false;
+}
+async function batchAction(action){
+  const ids=getSelectedIds();
+  if(!ids.length)return;
+  const label=action==='approve'?'通过入库':'拒绝';
+  if(!confirm(`确认将 ${ids.length} 条草稿${label}？`))return;
+  try{
+    const r=await fetch('/api/learner/drafts/batch-action',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ids,action})
+    });
+    const d=await r.json();
+    if(typeof showToast==='function')showToast(`批量${label}: ${d.approved||0}条通过, ${d.rejected||0}条拒绝`,'success');
+    loadDrafts();
+  }catch(e){if(typeof showToast==='function')showToast('批量操作失败','error')}
 }
 
 loadDrafts();

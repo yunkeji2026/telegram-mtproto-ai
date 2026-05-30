@@ -190,13 +190,15 @@ class OpenAITranscriber(VoiceTranscriber):
         
         # OpenAI配置
         openai_config = config.get('openai', {})
-        self.api_key = openai_config.get('api_key')
-        self.model = openai_config.get('model', 'whisper-1')
-        
+        self.api_key = openai_config.get('api_key') or config.get('api_key')
+        self.model = openai_config.get('model') or config.get('model') or 'whisper-1'
+        self.base_url = openai_config.get('base_url') or config.get('base_url') or None
+
         if not self.api_key:
             self.logger.warning("OpenAI API密钥未配置")
-        
-        self.logger.info("OpenAI Whisper API转录服务初始化")
+
+        _ep = self.base_url or "https://api.openai.com/v1"
+        self.logger.info(f"OpenAI Whisper API转录服务初始化 endpoint={_ep} model={self.model}")
     
     async def _transcribe_impl(self, voice_file_path: str, language: str) -> Optional[str]:
         """使用OpenAI Whisper API转录"""
@@ -209,8 +211,11 @@ class OpenAITranscriber(VoiceTranscriber):
                 self.logger.error("OpenAI API密钥未配置")
                 return None
             
-            # 设置客户端
-            client = openai.OpenAI(api_key=self.api_key)
+            # 设置客户端（支持 OpenAI 兼容端点：Groq / SiliconFlow / 本地等）
+            client_kwargs: Dict[str, Any] = {"api_key": self.api_key}
+            if self.base_url:
+                client_kwargs["base_url"] = self.base_url
+            client = openai.OpenAI(**client_kwargs)
             
             # 打开语音文件
             with open(voice_file_path, 'rb') as audio_file:

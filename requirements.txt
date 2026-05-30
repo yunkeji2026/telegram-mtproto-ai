@@ -23,6 +23,10 @@ uvicorn>=0.22.0
 itsdangerous>=2.1.0
 python-multipart>=0.0.6
 
+# P26-A: intent_tags.yaml 文件变更自动 reload（src/integrations/intent_tags_watcher.py）
+# 失败时模块会自动降级（捕获 ImportError），但生产部署仍应显式安装。
+watchdog>=3.0.0
+
 # 可选：本地数据库支持
 # aiosqlite>=0.19.0
 

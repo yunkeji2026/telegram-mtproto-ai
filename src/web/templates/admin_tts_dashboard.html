@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TTS 仪表盘 — Admin</title>
+  <link rel="stylesheet" href="/static/rpa_shared.css">
+  <style>
+    :root{ --bg:#0f172a; --card:#1e293b; --t1:#e2e8f0; --t2:#94a3b8; --t3:#64748b; --bd:#334155; --accent:#38bdf8; --green:#22c55e; --red:#ef4444; --amber:#f59e0b; }
+    *{ box-sizing:border-box; }
+    body{ margin:0; padding:2rem; background:var(--bg); color:var(--t1); font-family:system-ui,-apple-system,sans-serif; font-size:14px; line-height:1.5; }
+    h1{ margin:0 0 1.5rem; font-size:1.5rem; display:flex; align-items:center; gap:.75rem; }
+    .grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:1rem; margin-bottom:1.5rem; }
+    .card{ background:var(--card); border:1px solid var(--bd); border-radius:12px; padding:1.25rem; }
+    .card h2{ margin:0 0 1rem; font-size:1rem; color:var(--t2); display:flex; align-items:center; gap:.5rem; }
+    .stat{ display:flex; align-items:baseline; gap:.5rem; margin:.5rem 0; }
+    .stat-value{ font-size:2rem; font-weight:600; color:var(--accent); }
+    .stat-label{ color:var(--t3); font-size:.875rem; }
+    .bar-wrap{ height:8px; background:var(--bd); border-radius:4px; overflow:hidden; margin:.75rem 0; }
+    .bar{ height:100%; border-radius:4px; transition:width .3s ease; }
+    .bar-green{ background:var(--green); }
+    .bar-amber{ background:var(--amber); }
+    .bar-red{ background:var(--red); }
+    .prefix-list{ display:flex; flex-wrap:wrap; gap:.5rem; margin-top:.75rem; }
+    .prefix-tag{ padding:.25rem .6rem; background:var(--bd); border-radius:6px; font-size:.75rem; color:var(--t2); }
+    .prefix-tag b{ color:var(--t1); margin-left:.25rem; }
+    .actions{ display:flex; gap:.5rem; margin-top:1rem; }
+    .btn{ padding:.5rem 1rem; background:var(--bd); border:none; border-radius:6px; color:var(--t1); cursor:pointer; font-size:.875rem; }
+    .btn:hover{ background:#334155; }
+    .btn-primary{ background:var(--accent); color:#0f172a; font-weight:500; }
+    .btn-primary:hover{ background:#7dd3fc; }
+    .refresh-hint{ color:var(--t3); font-size:.75rem; margin-left:auto; }
+    #log{ margin-top:1rem; padding:.75rem; background:rgba(0,0,0,.2); border-radius:6px; font-size:.75rem; color:var(--t3); max-height:120px; overflow-y:auto; }
+    .empty-state{ text-align:center; padding:2rem; color:var(--t3); }
+  </style>
+</head>
+<body>
+  <h1>
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+    TTS 预览文件仪表盘
+    <span class="refresh-hint">自动刷新: 30s | <a href="/" style="color:var(--accent)">返回首页</a></span>
+  </h1>
+
+  <div class="grid">
+    <div class="card">
+      <h2>📊 总体统计</h2>
+      <div class="stat">
+        <span class="stat-value" id="total-files">—</span>
+        <span class="stat-label">文件数</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value" id="total-size">—</span>
+        <span class="stat-label">总大小</span>
+      </div>
+      <div class="bar-wrap" title="磁盘占用估算 (假设 1GB 阈值)">
+        <div class="bar bar-amber" id="disk-bar" style="width:0%"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:.75rem;color:var(--t3)">
+        <span>0</span>
+        <span id="disk-percent">0%</span>
+        <span>1GB</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>⏱ 文件时效</h2>
+      <div class="stat">
+        <span class="stat-value" id="oldest-age">—</span>
+        <span class="stat-label">最早文件</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value" id="newest-age">—</span>
+        <span class="stat-label">最新文件</span>
+      </div>
+      <div style="margin-top:.75rem;font-size:.75rem;color:var(--t3)">
+        超过 24h 的文件建议清理
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>🏷 前缀分布</h2>
+      <div id="prefix-list" class="prefix-list">
+        <span class="empty-state">加载中…</span>
+      </div>
+      <div style="margin-top:.75rem;font-size:.75rem;color:var(--t3)">
+        tts-*: 通用 | line-tts-*: LINE | wa-tts-*: WhatsApp
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>🛠 运维操作</h2>
+      <div class="actions">
+        <button class="btn btn-primary" onclick="cleanup(3600)">清理 >1h</button>
+        <button class="btn" onclick="cleanup(86400)">清理 >24h</button>
+        <button class="btn" onclick="cleanup(604800)">清理 >7d</button>
+      </div>
+      <div id="log"></div>
+    </div>
+  </div>
+
+  <script src="/static/rpa_shared.js"></script>
+  <script>
+    const fmtBytes = (b) => {
+      if (b > 1e9) return (b/1e9).toFixed(2) + ' GB';
+      if (b > 1e6) return (b/1e6).toFixed(2) + ' MB';
+      if (b > 1e3) return (b/1e3).toFixed(2) + ' KB';
+      return b + ' B';
+    };
+    const fmtAge = (s) => {
+      if (s === null) return '—';
+      if (s < 60) return Math.floor(s) + 's';
+      if (s < 3600) return Math.floor(s/60) + 'm';
+      if (s < 86400) return Math.floor(s/3600) + 'h';
+      return Math.floor(s/86400) + 'd';
+    };
+
+    async function loadStats() {
+      try {
+        const r = await rpa.get('/api/admin/tts-stats');
+        if (!r.ok) throw new Error('API failed');
+        document.getElementById('total-files').textContent = r.files ?? '—';
+        document.getElementById('total-size').textContent = fmtBytes(r.total_bytes ?? 0);
+        document.getElementById('oldest-age').textContent = fmtAge(r.oldest_sec);
+        document.getElementById('newest-age').textContent = fmtAge(r.newest_sec);
+
+        // 磁盘占用条 (假设 1GB 阈值)
+        const pct = Math.min(100, (r.total_bytes || 0) / 1e9 * 100);
+        document.getElementById('disk-bar').style.width = pct + '%';
+        document.getElementById('disk-bar').className = 'bar ' + (pct > 80 ? 'bar-red' : pct > 50 ? 'bar-amber' : 'bar-green');
+        document.getElementById('disk-percent').textContent = pct.toFixed(1) + '%';
+
+        // 前缀分布
+        const list = document.getElementById('prefix-list');
+        const byPrefix = r.by_prefix || {};
+        const entries = Object.entries(byPrefix).sort((a,b) => b[1]-a[1]);
+        if (entries.length === 0) {
+          list.innerHTML = '<span class="empty-state">暂无文件</span>';
+        } else {
+          list.innerHTML = entries.map(([k,v]) => `<span class="prefix-tag">${k}: <b>${v}</b></span>`).join('');
+        }
+      } catch(e) {
+        console.warn('stats load failed', e);
+      }
+    }
+
+    async function cleanup(maxAgeSec) {
+      const log = document.getElementById('log');
+      log.innerHTML = '<span style="color:var(--t2)">清理中…</span>';
+      try {
+        const r = await rpa.post('/api/admin/tts-cleanup?max_age_sec=' + maxAgeSec);
+        if (r.ok) {
+          log.innerHTML = `<span style="color:var(--green)">✓ 已清理 ${r.removed} 个文件</span>`;
+          loadStats();
+        } else {
+          log.innerHTML = `<span style="color:var(--red)">✗ ${r.error || '清理失败'}</span>`;
+        }
+      } catch(e) {
+        log.innerHTML = `<span style="color:var(--red)">✗ ${e.message}</span>`;
+      }
+    }
+
+    // 初始加载 + 30s 自动刷新
+    loadStats();
+    setInterval(loadStats, 30000);
+  </script>
+</body>
+</html>

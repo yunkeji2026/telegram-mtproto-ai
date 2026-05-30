@@ -267,6 +267,152 @@ def find_row_by_name(
     return None
 
 
+# ── Message Requests 入口检测（inbox 页面） ─────────────
+# Messenger 在主收件箱里通常以 native View 渲染 "Message Requests" 入口行，
+# 其 text/content-desc 属性比 Litho chat row 更稳定。
+_MR_ENTRY_KEYWORDS = (
+    "message request",           # EN (covers plural too)
+    "\u6d88\u606f\u8bf7\u6c42",  # ZH-CN
+    "\u8a0a\u606f\u8981\u6c42",  # ZH-TW
+    "\u30e1\u30c3\u30bb\u30fc\u30b8\u30ea\u30af\u30a8\u30b9\u30c8",  # JA
+    "\uba54\uc2dc\uc9c0 \uc694\uccad",  # KO
+    "demandes de messages",      # FR
+    "solicitudes de mensajes",   # ES
+    "tin nh\u1eafn y\u00eau c\u1ea7u",  # VI
+)
+_MR_ENTRY_PAT = re.compile(
+    r"<node[^>]*(?:text|content-desc)=\"([^\"]*(?:"
+    + "|".join(re.escape(k) for k in _MR_ENTRY_KEYWORDS)
+    + r")[^\"]*)\""
+    r"[^>]*bounds=\"\[(\d+),(\d+)\]\[(\d+),(\d+)\]\"",
+    re.IGNORECASE | re.S,
+)
+
+# 更宽泛 fallback: 含 "request" 字样的任意可见节点
+_MR_ENTRY_LOOSE_PAT = re.compile(
+    r"<node[^>]*(?:text|content-desc)=\"([^\"]*\brequests?\b[^\"]*)\""
+    r"[^>]*bounds=\"\[(\d+),(\d+)\]\[(\d+),(\d+)\]\"",
+    re.IGNORECASE | re.S,
+)
+
+# MR folder 内的 request row：比主收件箱宽松，不要求 SimpleTextThreadSnippet
+# 只要 clickable=true 且尺寸合理即视为一条 request 行
+_MR_ROW_CLICKABLE_PAT = re.compile(
+    r"<node[^>]*clickable=\"true\"[^>]*bounds=\"\[(\d+),(\d+)\]\[(\d+),(\d+)\]\"",
+    re.S,
+)
+
+# Messenger Menu 导航项目的 content-desc 模式（需排除在 MR row 之外）
+_MENU_NAV_PAT = re.compile(
+    r'content-desc="(?:'
+    r'Settings(?:,\s*\d+\s+of\s+\d+)?'
+    r'|Communities(?:,\s*\d+\s+of\s+\d+)?'
+    r'|Archive(?:,\s*\d+\s+of\s+\d+)?'
+    r'|Message requests(?:,\s*\d+\s+of\s+\d+)?'
+    r'|设置(?:,\s*\d+/\d+)?'
+    r'|社群(?:,\s*\d+/\d+)?'
+    r'|归档(?:,\s*\d+/\d+)?'
+    r'|陌生消息(?:,\s*\d+/\d+[^"]*)?'
+    r'|Switch profile|Tap to switch profile|切换个人主页'
+    r'|QR code tool bar button|二维码工具栏按钮'
+    r'|Logged in as|以[^"]*的身份登录'
+    r'|Subscriptions|Also from Meta|Facebook Reels|Facebook Events'
+    r'|Choose who can message you|选择谁能发消息给你'
+    r')"',
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class MessageRequestEntry:
+    """Messenger 主收件箱中"Message Requests"入口的点击坐标。"""
+    x_center: int
+    y_center: int
+    label: str  # 日志用
+
+
+def find_message_request_entry(xml: str) -> Optional["MessageRequestEntry"]:
+    """在 inbox UI XML 中查找"Message Requests"入口行/按钮。
+
+    优先精确多语言匹配，退而尝试宽松 'request' 关键字匹配。
+    Litho 不稳定时可能找不到，返回 None，调用方回退到 deep-link。
+    """
+    if not xml:
+        return None
+    for pat in (_MR_ENTRY_PAT, _MR_ENTRY_LOOSE_PAT):
+        for m in pat.finditer(xml):
+            label = m.group(1)
+            x1, y1, x2, y2 = (int(m.group(i)) for i in (2, 3, 4, 5))
+            if x2 <= x1 or y2 <= y1 or (y2 - y1) < 30:
+                continue
+            return MessageRequestEntry(
+                x_center=(x1 + x2) // 2,
+                y_center=(y1 + y2) // 2,
+                label=label,
+            )
+    return None
+
+
+def find_first_mr_row(
+    xml: str,
+    screen_w: int = 720,
+    screen_h: int = 1560,
+) -> Optional[tuple]:
+    """在 Message Requests 文件夹 XML 中找第一条可点击的 request 行。
+
+    先尝试 dump_inbox_rows 的标准 SimpleTextThreadSnippet 解析；
+    若 MR 文件夹的行格式不含该 pattern，则退而用 clickable=true + 尺寸过滤。
+
+    返回 (x_center, y_center) 或 None。
+    """
+    # 优先用标准 inbox 行解析（MR 文件夹有时用相同 Litho 组件）
+    rows = _parse_rows(xml)
+    if rows:
+        return rows[0].x_center, rows[0].y_center
+
+    # Fallback: 找全屏宽、中部高度、clickable=true 的行
+    # 优先找有联系人名称特征的行（非 Menu 导航项）
+    best: Optional[tuple] = None
+    best_priority: int = 99  # 低值=高优先级
+    for m in _MR_ROW_CLICKABLE_PAT.finditer(xml):
+        x1, y1, x2, y2 = (int(m.group(i)) for i in (1, 2, 3, 4))
+        h = y2 - y1
+        w = x2 - x1
+        # 过滤：行高 60-250px；宽度至少半屏；避开顶部 header 和底部导航
+        if h < 60 or h > 250:
+            continue
+        if w < screen_w // 2:
+            continue
+        if y1 < 150 or y2 > screen_h - 150:
+            continue
+        # 跳过 ActionBar$Tab / 空 content-desc 元素
+        node_frag = xml[max(0, m.start()-100):m.end()+50]
+        cls_m = re.search(r'class="([^"]{0,60})"', node_frag)
+        cls_v = cls_m.group(1) if cls_m else ""
+        if "Tab" in cls_v or "Indicator" in cls_v:
+            continue
+        cd_m = re.search(r'content-desc="([^"]{0,200})"', node_frag)
+        if not cd_m or not cd_m.group(1).strip():
+            continue
+        # 跳过 Menu 导航项
+        if _MENU_NAV_PAT.search(node_frag):
+            continue
+        # 判断是否像联系人行（content-desc 含 , 新消息 / , New message 等）
+        is_contact_row = bool(
+            re.search(
+                r'content-desc="[^"]+,\s*(?:新消息|New message|[Nn]ew)',
+                node_frag,
+            )
+        )
+        priority = 0 if is_contact_row else 1
+        if best is None or priority < best_priority or (
+            priority == best_priority and y1 < best[1]
+        ):
+            best = ((x1 + x2) // 2, (y1 + y2) // 2)
+            best_priority = priority
+    return best
+
+
 # ── Send button 定位（chat 页面） ────────────────────────
 @dataclass(frozen=True)
 class SendButtonBounds:

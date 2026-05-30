@@ -1,0 +1,133 @@
+# 意图分类关键词字典（跨平台 RPA 共享）
+#
+# 加载顺序：rpa_shared.py 启动时尝试读取本文件；缺失时回退到内置默认值。
+# 修改后无需重启 — 通过 reload_intent_tags() 或下次进程启动生效。
+#
+# 匹配规则（详见 src/integrations/rpa_shared.py::_kw_matches）：
+#   - 短 ASCII 关键词（≤ 5 字符）使用 word-boundary 正则，避免 'hi' 误匹配 'this'
+#   - 中/泰/越/日/韩/印尼语等非 ASCII 直接子串匹配
+#
+# 字典遍历顺序即优先级（先 match 的标签胜出）。请按业务重要性排序。
+
+# P16-D: schema 版本（保留键，loader 静默跳过）
+schema_version: 1
+
+purchase:
+  # 中文
+  - 买
+  - 购买
+  - 下单
+  - 价格
+  - 多少钱
+  - 怎么买
+  - 付款
+  - 订单
+  - 发货
+  - 运费
+  - 优惠
+  - 打折
+  - 包邮
+  - 费用
+  - 多少
+  # English
+  - buy
+  - order
+  - price
+  - cost
+  - purchase
+  - pay
+  - checkout
+  - discount
+  - promo
+  # 泰 / 越
+  - ราคา
+  - ซื้อ
+  - giá
+  - mua
+
+support:
+  # 中文
+  - 问题
+  - 不行
+  - 故障
+  - 退款
+  - 投诉
+  - 不好用
+  - 坏了
+  - 维修
+  - 售后
+  - 退货
+  - 补偿
+  - 赔偿
+  - 客服
+  - 帮我
+  - 解决
+  # English
+  - problem
+  - issue
+  - broken
+  - not working
+  - refund
+  - complaint
+  - fix
+  - help
+  - support
+  - wrong
+  - damage
+  # 泰 / 越
+  - เสีย
+  - hư
+  - lỗi
+
+inquiry:
+  # 中文
+  - 请问
+  - 咨询
+  - 了解
+  - 想知道
+  - 能不能
+  - 可以吗
+  - 有没有
+  - 介绍
+  - 说明
+  - 怎样
+  - 如何
+  - 什么是
+  - 是否
+  # English
+  - how
+  - what
+  - when
+  - where
+  - why
+  - can i
+  - do you
+  - tell me
+  - info
+  - information
+  # 泰 / 越
+  - ขอ
+  - เกี่ยว
+  - hỏi
+
+greeting:
+  # 中文
+  - 你好
+  - 在吗
+  - 嗨
+  - 哈喽
+  - 打扰
+  - 您好
+  # English
+  - hi
+  - hello
+  - hey
+  - good morning
+  - good afternoon
+  - good evening
+  # 多语种
+  - สวัสดี
+  - xin chào
+  - halo
+  - salam
+  - 안녕

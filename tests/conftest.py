@@ -145,6 +145,11 @@ def client(app):
     """未认证的测试客户端"""
     with TestClient(app, raise_server_exceptions=True) as c:
         yield c
+    # P22-B: clean rate-limit state after the test
+    reset_fn = getattr(app.state, "intent_tags_rate_limit_reset", None)
+    if callable(reset_fn):
+        try: reset_fn()
+        except Exception: pass
 
 
 @pytest.fixture()
@@ -226,6 +231,33 @@ def mock_ai_client_ja():
         '"key_facts":["日本在住"],"intimacy_signal":"warming"}'
     ))
     return ai
+
+
+# ─────────────────────────────────────────────────────────
+# P20-D: 自动重置 intent_tags 编辑滑窗（防测试间污染）
+# ─────────────────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _reset_intent_tags_edit_window():
+    """每个 test 前后清 rpa_shared._INTENT_TAGS_EDIT_WINDOW + counter，
+    避免持久化 sidecar 跨测试漏数。仅在 rpa_shared 已加载时生效。
+
+    P21-D: 关闭持久化防抖（测试中每次写都要触发 sidecar 更新）。
+    """
+    try:
+        from src.integrations import rpa_shared as _shr
+        _shr.reset_intent_tags_edit_window()
+        # P21-D: tests run faster than 1s throttle would tolerate
+        _shr._STATS_SAVE_MIN_INTERVAL_SEC = 0.0
+        _shr._stats_last_save_ts = 0.0
+    except Exception:
+        pass
+    yield
+    try:
+        from src.integrations import rpa_shared as _shr
+        _shr.reset_intent_tags_edit_window()
+    except Exception:
+        pass
 
 
 @pytest.fixture()

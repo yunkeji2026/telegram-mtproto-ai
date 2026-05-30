@@ -79,14 +79,39 @@ class IntimacyEngine:
     def compute_intimacy(
         self, journey_id: str, *, now: Optional[int] = None,
     ) -> IntimacyBreakdown:
+        """单 journey 即时计算（每次 1 SQL）。
+
+        批量场景请改用 ``compute_intimacy_from_events`` 配合 store 批量加载，
+        避免 N+1（W3-3D.1 / 2026-05-17）。
+        """
         now = now if now is not None else int(time.time())
         # 读近 500 条事件——正常 Journey 不会超。
         # TODO(perf)：如果 Journey 真跑到 >500 events，这里是热点：
         #   1) 改 store 加 count_events_by_type + 只读活跃窗口内的 msg_*
         #   2) 或按 stage 的"入场快照"只重算增量
         events = self._store.list_events(journey_id, limit=500)
-        msg_in_ts = [e["ts"] for e in events if e["event_type"] == "msg_in"]
-        msg_out_ts = [e["ts"] for e in events if e["event_type"] == "msg_out"]
+        return self.compute_intimacy_from_events(events, now=now)
+
+    @classmethod
+    def compute_intimacy_from_events(
+        cls, events, *, now: Optional[int] = None,
+    ) -> IntimacyBreakdown:
+        """W3-3D.1：纯函数版本——接受预加载事件列表，零 SQL。
+
+        批量重放场景（趋势 API）：路由层 1 次批量 SQL 加载全部 journey 的
+        events，然后对每天 × 每 journey 调用本方法在内存里重放。
+
+        events: list of dict，至少含 ``event_type`` (str) 和 ``ts`` (int)。
+        now: 计算"快照时间点"。``None`` → 当前时间。
+        """
+        now = now if now is not None else int(time.time())
+        # P-W3-3C.2 (2026-05-17)：当 now 在过去（历史重放场景），过滤掉未来事件
+        # 否则"7 天前的快照"会算进 7 天后才有的消息，造成 score 提前爆表。
+        # 当 now 是当前时间时此过滤等价于全通过（无行为变化）。
+        msg_in_ts = [e["ts"] for e in events
+                     if e["event_type"] == "msg_in" and e["ts"] <= now]
+        msg_out_ts = [e["ts"] for e in events
+                      if e["event_type"] == "msg_out" and e["ts"] <= now]
 
         turn_in = len(msg_in_ts)
         turn_out = len(msg_out_ts)

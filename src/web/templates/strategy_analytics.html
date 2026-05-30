@@ -23,7 +23,18 @@
 .sa-badge.best{background:var(--gs);color:var(--green)}
 .sa-badge.worst{background:var(--rs);color:var(--red)}
 .sa-score{font-size:1.6rem;font-weight:800;text-align:center;margin:.4rem 0}
+.sa-score-clickable{cursor:pointer;transition:transform .15s}
+.sa-score-clickable:hover{transform:scale(1.08)}
 .sa-score-label{text-align:center;font-size:.7rem;color:var(--t3);margin-bottom:.6rem}
+.sa-breakdown{display:none;padding:.5rem .6rem;margin-bottom:.5rem;background:var(--input);border-radius:var(--r-sm);font-size:.74rem}
+.sa-breakdown.show{display:block;animation:bdFade .2s ease-out}
+@keyframes bdFade{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.sa-bd-row{display:flex;align-items:center;gap:.4rem;margin-bottom:.35rem}
+.sa-bd-row>span:first-child{width:52px;color:var(--t2);flex-shrink:0}
+.sa-bd-bar{flex:1;height:6px;background:var(--bd);border-radius:3px;overflow:hidden}
+.sa-bd-bar>div{height:100%;border-radius:3px;transition:width .4s ease}
+.sa-bd-val{width:50px;text-align:right;font-weight:600;color:var(--t)}
+.sa-bd-val small{color:var(--t3);font-weight:400}
 .sa-metrics{display:grid;grid-template-columns:1fr 1fr;gap:.4rem .7rem}
 .sa-m{display:flex;flex-direction:column}
 .sa-m-label{font-size:.7rem;color:var(--t3);font-weight:500}
@@ -79,6 +90,21 @@
 .purge-btn:hover{opacity:.85}
 .export-btn{background:var(--g-g);color:#fff;border:none;padding:.35rem .7rem;border-radius:var(--r-sm);font-size:.78rem;cursor:pointer;font-weight:600;text-decoration:none}
 .export-btn:hover{opacity:.85}
+.compare-btn{background:linear-gradient(90deg,#6366f1,#8b5cf6);color:#fff;border:none;padding:.35rem .7rem;border-radius:var(--r-sm);font-size:.78rem;cursor:pointer;font-weight:600}
+.compare-btn:hover{opacity:.85}
+.compare-btn.active{box-shadow:0 0 0 2px rgba(99,102,241,.4)}
+.sa-compare-panel{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:1rem 1.2rem;margin-bottom:1.2rem;animation:bdFade .25s ease-out}
+.sa-cmp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:.7rem}
+.sa-cmp-card{background:var(--input);border-radius:var(--r-sm);padding:.7rem .9rem}
+.sa-cmp-sid{font-weight:700;font-size:.82rem;margin-bottom:.5rem}
+.sa-cmp-row{display:flex;justify-content:space-between;font-size:.78rem;padding:.18rem 0;border-bottom:1px solid rgba(0,0,0,.04)}
+.sa-cmp-row:last-child{border-bottom:none}
+.sa-cmp-cur{font-weight:600;color:var(--t)}
+.sa-cmp-prev{color:var(--t3)}
+.sa-cmp-delta{font-weight:700;font-size:.72rem;padding:.08rem .3rem;border-radius:3px}
+.sa-cmp-delta.up{background:rgba(16,185,129,.1);color:var(--green)}
+.sa-cmp-delta.down{background:rgba(239,68,68,.1);color:var(--red)}
+.sa-cmp-delta.flat{background:rgba(0,0,0,.04);color:var(--t3)}
 
 .sa-empty{text-align:center;padding:3rem;color:var(--t3);font-size:.9rem}
 
@@ -130,7 +156,17 @@
   <a class="export-btn" data-help="CSV" href="/api/export-strategy-events?fmt=csv&hours={{ hours }}">导出 CSV</a>
   <a class="export-btn" data-help="JSON" href="/api/export-strategy-events?fmt=json&hours={{ hours }}" style="background:var(--g)">导出 JSON</a>
   <button onclick="doPurge()" class="purge-btn" data-tip="清理过期追踪数据">清理旧数据</button>
+  <button onclick="toggleCompare()" class="compare-btn" id="btn-compare">对比上一时段</button>
   <span class="sa-total">共 <strong>{{ total }}</strong> 条事件</span>
+</div>
+
+<!-- B2: Period comparison panel -->
+<div id="compare-panel" style="display:none" class="sa-compare-panel">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.6rem">
+    <h4 style="margin:0;font-size:.88rem;font-weight:700">时段对比 · 当前 {{ hours }}h vs 上一 {{ hours }}h</h4>
+    <button onclick="document.getElementById('compare-panel').style.display='none'" style="background:none;border:none;font-size:1.1rem;cursor:pointer;color:var(--t3)">&times;</button>
+  </div>
+  <div id="compare-grid" class="sa-cmp-grid"></div>
 </div>
 
 <!-- Auto-Pilot 状态条 -->
@@ -326,8 +362,15 @@
         {% if advisor and advisor.worst == s.strategy_id and advisor.worst != advisor.best %}<span class="sa-badge worst">待优化</span>{% endif %}
       </div>
       {% set qs = s.quality_score|default(0) %}
-      <div class="sa-score" style="color:{% if qs >= 70 %}var(--green){% elif qs >= 40 %}var(--amber){% else %}var(--red){% endif %}">{{ qs }}</div>
-      <div class="sa-score-label" data-tip="综合质量评分 0-100">质量评分</div>
+      {% set bd = s.score_breakdown|default({}) %}
+      <div class="sa-score sa-score-clickable" style="color:{% if qs >= 70 %}var(--green){% elif qs >= 40 %}var(--amber){% else %}var(--red){% endif %}" onclick="this.nextElementSibling.nextElementSibling.classList.toggle('show')">{{ qs }}</div>
+      <div class="sa-score-label" data-tip="综合质量评分 0-100 · 点击展开分项">质量评分 ▾</div>
+      <div class="sa-breakdown">
+        <div class="sa-bd-row"><span>响应速度</span><div class="sa-bd-bar"><div style="width:{{ bd.response|default(0) }}%;background:var(--green)"></div></div><span class="sa-bd-val">{{ bd.response_raw|default(0) }}<small>/20</small></span></div>
+        <div class="sa-bd-row"><span>一次解决</span><div class="sa-bd-bar"><div style="width:{{ bd.silence|default(0) }}%;background:var(--p)"></div></div><span class="sa-bd-val">{{ bd.silence_raw|default(0) }}<small>/35</small></span></div>
+        <div class="sa-bd-row"><span>追问控制</span><div class="sa-bd-bar"><div style="width:{{ bd.same_intent|default(0) }}%;background:var(--amber)"></div></div><span class="sa-bd-val">{{ bd.same_intent_raw|default(0) }}<small>/30</small></span></div>
+        <div class="sa-bd-row"><span>模板效率</span><div class="sa-bd-bar"><div style="width:{{ bd.template|default(0) }}%;background:var(--cyan,#06b6d4)"></div></div><span class="sa-bd-val">{{ bd.template_raw|default(0) }}<small>/15</small></span></div>
+      </div>
       <div class="sa-metrics">
         <div class="sa-m"><span class="sa-m-label">回复数</span><span class="sa-m-val neutral">{{ s.total }}</span></div>
         <div class="sa-m"><span class="sa-m-label">平均响应</span><span class="sa-m-val {% if s.avg_ms < 1500 %}good{% elif s.avg_ms < 3000 %}warn{% else %}bad{% endif %}">{{ s.avg_ms }}ms</span></div>
@@ -433,6 +476,43 @@ async function applySuggestion(sid,param,val){
   const d=await r.json();
   if(d.ok){showToast('已应用: '+sid+'.'+param+' = '+val,'ok');setTimeout(()=>location.reload(),800)}
   else showToast('应用失败: '+(d.detail||''),'err');
+}
+
+// ── B2: Period comparison ──────────────────────────────────
+var _cmpLoaded=false;
+async function toggleCompare(){
+  var panel=document.getElementById('compare-panel');
+  var btn=document.getElementById('btn-compare');
+  if(panel.style.display!=='none'){panel.style.display='none';btn.classList.remove('active');return}
+  panel.style.display='block';btn.classList.add('active');
+  if(_cmpLoaded)return;
+  var grid=document.getElementById('compare-grid');
+  grid.innerHTML='<div style="text-align:center;color:var(--t3);padding:1rem">加载对比数据...</div>';
+  try{
+    var hours=document.getElementById('sa-hours').value;
+    var r=await fetch('/api/strategy-analytics/compare?hours='+hours);
+    var d=await r.json();
+    var cur=d.current||[],prev=d.previous||[],ch=d.changes||{};
+    if(!cur.length){grid.innerHTML='<div style="color:var(--t3);padding:1rem">当前时段无数据</div>';return}
+    var prevMap={};prev.forEach(function(p){prevMap[p.strategy_id]=p});
+    var html='';
+    cur.forEach(function(s){
+      var sid=s.strategy_id;var p=prevMap[sid]||{};var c=ch[sid]||{};
+      function delta(v,unit,inv){
+        if(v===undefined||v===0)return '<span class="sa-cmp-delta flat">—</span>';
+        var cls=v>0?(inv?'down':'up'):(inv?'up':'down');
+        return '<span class="sa-cmp-delta '+cls+'">'+(v>0?'+':'')+v+(unit||'')+'</span>';
+      }
+      html+='<div class="sa-cmp-card"><div class="sa-cmp-sid">'+sid.replace(/_/g,' ')+'</div>';
+      html+='<div class="sa-cmp-row"><span>质量评分</span><span class="sa-cmp-cur">'+(s.quality_score||0)+'</span><span class="sa-cmp-prev">'+(p.quality_score||'—')+'</span>'+delta(c.score_delta)+'</div>';
+      html+='<div class="sa-cmp-row"><span>回复数</span><span class="sa-cmp-cur">'+s.total+'</span><span class="sa-cmp-prev">'+(p.total||'—')+'</span>'+delta(c.total_delta)+'</div>';
+      html+='<div class="sa-cmp-row"><span>平均响应</span><span class="sa-cmp-cur">'+s.avg_ms+'ms</span><span class="sa-cmp-prev">'+(p.avg_ms!==undefined?p.avg_ms+'ms':'—')+'</span>'+delta(c.avg_ms_delta,'ms',true)+'</div>';
+      html+='<div class="sa-cmp-row"><span>追问率</span><span class="sa-cmp-cur">'+s.follow_up_rate+'%</span><span class="sa-cmp-prev">'+(p.follow_up_rate!==undefined?p.follow_up_rate+'%':'—')+'</span>'+delta(c.follow_up_delta,'%',true)+'</div>';
+      html+='<div class="sa-cmp-row"><span>静默率</span><span class="sa-cmp-cur">'+s.silence_rate+'%</span><span class="sa-cmp-prev">'+(p.silence_rate!==undefined?p.silence_rate+'%':'—')+'</span>'+delta(c.silence_delta,'%')+'</div>';
+      html+='</div>';
+    });
+    grid.innerHTML=html;_cmpLoaded=true;
+  }catch(e){grid.innerHTML='<div style="color:var(--red);padding:1rem">加载失败</div>'}
 }
 </script>
 {% endblock %}

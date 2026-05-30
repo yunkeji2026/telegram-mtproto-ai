@@ -118,10 +118,11 @@ class ContactsSubsystem:
 
     # ── W4 定时任务 ────────────────────────────────────────
     def start_background_tasks(self) -> None:
-        """启动 decay 等周期任务；按 config_snapshot 里的参数决定是否跑。
+        """启动 decay + kpi_alert 等周期任务；按 config_snapshot 里的参数决定是否跑。
 
         - `decay_interval_minutes` (默认 30, 0=关)：周期性把沉默超期的 journey
           降到 LOST_* 状态；跑在 asyncio.to_thread，不会阻塞事件循环。
+        - `kpi_alert_interval_minutes` (默认 60, 0=关)：每 N 分钟跑一次 KPI 告警检测。
 
         幂等：重复调用只会忽略已在跑的任务。
         """
@@ -129,31 +130,127 @@ class ContactsSubsystem:
             return
         cfg = self.config_snapshot or {}
         try:
-            interval_min = int(cfg.get("decay_interval_minutes", 30) or 0)
-        except (TypeError, ValueError):
-            interval_min = 30
-        if interval_min <= 0:
-            logger.info("contacts 后台任务：decay_interval_minutes=0，已禁用")
-            return
-        try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             logger.warning(
                 "contacts 后台任务：当前无运行中的 event loop，跳过启动")
             return
-        t = loop.create_task(
-            self._decay_loop(interval_sec=interval_min * 60),
-            name="contacts-silence-decay",
-        )
-        self._bg_tasks.append(t)
-        logger.info(
-            "contacts 后台任务：silence_decay 每 %d 分钟跑一次", interval_min)
+
+        try:
+            interval_min = int(cfg.get("decay_interval_minutes", 30) or 0)
+        except (TypeError, ValueError):
+            interval_min = 30
+        if interval_min > 0:
+            t = loop.create_task(
+                self._decay_loop(interval_sec=interval_min * 60),
+                name="contacts-silence-decay",
+            )
+            self._bg_tasks.append(t)
+            logger.info(
+                "contacts 后台任务：silence_decay 每 %d 分钟跑一次", interval_min)
+        else:
+            logger.info("contacts 后台任务：decay_interval_minutes=0，已禁用")
+
+        try:
+            kpi_min = int(cfg.get("kpi_alert_interval_minutes", 60) or 0)
+        except (TypeError, ValueError):
+            kpi_min = 60
+        if kpi_min > 0:
+            t2 = loop.create_task(
+                self._kpi_alert_loop(interval_sec=kpi_min * 60),
+                name="contacts-kpi-alert",
+            )
+            self._bg_tasks.append(t2)
+            logger.info(
+                "contacts 后台任务：kpi_alert 每 %d 分钟跑一次", kpi_min)
+        else:
+            logger.info("contacts 后台任务：kpi_alert_interval_minutes=0，已禁用")
 
     def stop_background_tasks(self) -> None:
         for t in list(self._bg_tasks):
             if not t.done():
                 t.cancel()
         self._bg_tasks.clear()
+
+    async def _kpi_alert_loop(self, *, interval_sec: int) -> None:
+        """B2：定期检测漏斗 KPI 下跌并写入告警。
+
+        - 首次运行延迟 120 秒（让 decay 先跑，数据更新）
+        - 使用 count_stage_transitions_by_day(days=8) 重放近 8 天数据
+        - 检测逻辑由 kpi_alerting.detect_kpi_drops 承担（纯函数）
+        - 写入 kpi_alerts 表（含 4h 去重窗口，hourly 跑不会重复告警）
+        """
+        try:
+            await asyncio.sleep(min(120, interval_sec))
+        except asyncio.CancelledError:
+            return
+        while True:
+            try:
+                await asyncio.to_thread(self._run_kpi_alert_once)
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                logger.warning("contacts kpi_alert 异常（继续跑）", exc_info=True)
+            try:
+                await asyncio.sleep(interval_sec)
+            except asyncio.CancelledError:
+                return
+
+    def _run_kpi_alert_once(self) -> int:
+        """同步执行一次 KPI 告警检测，返回写入告警数量。"""
+        from src.contacts.kpi_alerting import detect_kpi_drops
+
+        cfg = self.config_snapshot or {}
+        kpi_cfg = cfg.get("kpi_alert") or {}
+        thresholds = kpi_cfg.get("thresholds") or {}
+        dedup_sec = float(kpi_cfg.get("dedup_window_sec", 14400.0) or 14400.0)
+
+        raw = self.store.count_stage_transitions_by_day(days=8)
+
+        def _pct(num: int, den: int):
+            if den <= 0:
+                return None
+            return round(num / den * 100, 1)
+
+        series = []
+        for item in raw:
+            by = item.get("by_stage") or {}
+            engaged = int(by.get("ENGAGED", 0))
+            handoff = int(by.get("HANDOFF_SENT", 0))
+            line_added = int(by.get("LINE_ADDED", 0))
+            bonded = int(by.get("BONDED", 0))
+            series.append({
+                "day": item["day"],
+                "by_stage": by,
+                "rates": {
+                    "engaged_rate": _pct(engaged, int(by.get("INITIAL", 0))),
+                    "handoff_rate": _pct(handoff, engaged),
+                    "line_add_rate": _pct(line_added, handoff),
+                    "bonded_rate": _pct(bonded, line_added),
+                },
+            })
+
+        alerts = detect_kpi_drops(series, thresholds=thresholds or None)
+        inserted = 0
+        for a in alerts:
+            aid = self.store.insert_kpi_alert(
+                kind=a["kind"],
+                severity=a["severity"],
+                message=a["message"],
+                detail=a["detail"],
+                dedup_window_sec=dedup_sec,
+            )
+            if aid is not None:
+                inserted += 1
+                logger.warning(
+                    "KPI 告警写入：kind=%s severity=%s %s",
+                    a["kind"], a["severity"], a["message"],
+                )
+        if inserted:
+            logger.info("kpi_alert 本轮写入 %d 条", inserted)
+        else:
+            logger.debug("kpi_alert 本轮无告警")
+        return inserted
 
     async def _decay_loop(self, *, interval_sec: int) -> None:
         # 启动后延迟 60s 再跑第一次，避免和 bootstrap/首屏竞争

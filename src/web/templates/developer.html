@@ -51,6 +51,19 @@
 .dev-warn-banner strong{color:var(--t)}
 .dev-logout-btn{background:none;border:1px solid var(--bd);color:var(--t3);cursor:pointer;font-size:.75rem;padding:.3rem .7rem;border-radius:6px;margin-left:auto;flex-shrink:0}
 .dev-logout-btn:hover{background:var(--input);color:var(--t)}
+.ai-status-card{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.65rem;padding:.75rem;border:1px solid var(--bd);border-radius:10px;background:rgba(91,124,246,.06);margin-bottom:.9rem}
+.ai-status-item{min-width:0}
+.ai-status-lbl{font-size:.68rem;color:var(--t3);margin-bottom:.18rem}
+.ai-status-val{font-size:.82rem;color:var(--t);font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ai-mode-grid{display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin:.45rem 0 .85rem}
+.ai-mode-card{border:1.5px solid var(--bd);border-radius:11px;padding:.8rem;background:var(--input);cursor:pointer;transition:all .16s}
+.ai-mode-card:hover{border-color:var(--p);transform:translateY(-1px)}
+.ai-mode-card.active{border-color:var(--p);box-shadow:0 0 0 3px var(--ps)}
+.ai-mode-title{display:flex;align-items:center;gap:.45rem;font-size:.86rem;font-weight:750;color:var(--t)}
+.ai-mode-desc{font-size:.72rem;color:var(--t2);margin-top:.35rem;line-height:1.5}
+.ai-mode-meta{display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.55rem}
+.ai-pill{font-size:.65rem;color:var(--t2);border:1px solid var(--bd);border-radius:999px;padding:.1rem .45rem}
+@media(max-width:720px){.ai-status-card,.ai-mode-grid{grid-template-columns:1fr}}
 </style>
 {% endblock %}
 {% block content %}
@@ -96,6 +109,24 @@
       <svg class="acc-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
     </div>
     <div class="acc-body open" id="body-ai">
+      <div class="ai-status-card">
+        <div class="ai-status-item">
+          <div class="ai-status-lbl">当前模式</div>
+          <div class="ai-status-val" id="ai-status-mode">自动识别中</div>
+        </div>
+        <div class="ai-status-item">
+          <div class="ai-status-lbl">当前模型</div>
+          <div class="ai-status-val" id="ai-status-model">{{ ai.get('model','—') }}</div>
+        </div>
+        <div class="ai-status-item">
+          <div class="ai-status-lbl">Base URL</div>
+          <div class="ai-status-val" id="ai-status-base">{{ ai.get('base_url','—') }}</div>
+        </div>
+        <div class="ai-status-item">
+          <div class="ai-status-lbl">最近测试</div>
+          <div class="ai-status-val" id="ai-status-test">未测试</div>
+        </div>
+      </div>
       <div class="f-row">
         <div class="f-lbl">
           API Key
@@ -109,6 +140,27 @@
         </div>
         <div class="f-hint">留空则保留服务器中已存储的值，只有输入新内容才会更新</div>
       </div>
+      <div class="f-row">
+        <label class="f-lbl">AI 模式切换</label>
+        <div class="ai-mode-grid">
+          <div class="ai-mode-card" id="ai-card-local" onclick="switchAiPreset('local')">
+            <div class="ai-mode-title">🏠 本地低成本模式</div>
+            <div class="ai-mode-desc">数据不出网，适合日常自动回复；依赖本地 Ollama/局域网模型可用性。</div>
+            <div class="ai-mode-meta">
+              <span class="ai-pill">低成本</span><span class="ai-pill">高隐私</span><span class="ai-pill">局域网</span>
+            </div>
+          </div>
+          <div class="ai-mode-card" id="ai-card-deepseek" onclick="switchAiPreset('deepseek')">
+            <div class="ai-mode-title">☁️ 云端 DeepSeek 高质量模式</div>
+            <div class="ai-mode-desc">回复质量更强，适合复杂咨询和高价值客户；需要有效 API Key。</div>
+            <div class="ai-mode-meta">
+              <span class="ai-pill">高质量</span><span class="ai-pill">按量计费</span><span class="ai-pill">云端</span>
+            </div>
+          </div>
+        </div>
+        <div class="f-hint">点击模式卡会自动保存并测试连接；API Key 留空时保留服务器原值。</div>
+      </div>
+      <input type="hidden" id="ai-mode" value="{{ ai.get('mode','') }}">
       <div class="f-grid">
         <div class="f-row">
           <label class="f-lbl">Base URL</label>
@@ -537,6 +589,29 @@ function _getFields(prefix){
   return fields;
 }
 
+function detectAiMode(){
+  const explicit = (document.getElementById('ai-mode')?.value || '').trim();
+  if(explicit === 'local' || explicit === 'deepseek') return explicit;
+  const base = (document.getElementById('ai-base_url')?.value || '').toLowerCase();
+  const model = (document.getElementById('ai-model')?.value || '').toLowerCase();
+  if(base.includes('11434') || base.includes('ollama') || model.includes('qwen')) return 'local';
+  if(base.includes('deepseek') || model.includes('deepseek')) return 'deepseek';
+  return 'custom';
+}
+
+function refreshAiStatus(testText){
+  const mode = detectAiMode();
+  const modeText = mode === 'local' ? '本地低成本模式'
+                : mode === 'deepseek' ? '云端 DeepSeek 模式'
+                : '自定义模型';
+  document.getElementById('ai-status-mode').textContent = modeText;
+  document.getElementById('ai-status-model').textContent = document.getElementById('ai-model').value || '—';
+  document.getElementById('ai-status-base').textContent = document.getElementById('ai-base_url').value || '—';
+  if(testText) document.getElementById('ai-status-test').textContent = testText;
+  document.getElementById('ai-card-local')?.classList.toggle('active', mode === 'local');
+  document.getElementById('ai-card-deepseek')?.classList.toggle('active', mode === 'deepseek');
+}
+
 async function saveSection(section){
   const prefix = section === 'web_admin' ? 'wb'
                : section === 'notifications' ? 'notif'
@@ -551,12 +626,53 @@ async function saveSection(section){
       body: JSON.stringify({section, fields}),
     });
     const d = await r.json();
-    if(!r.ok){ resEl.textContent = '保存失败：'+(d.detail||'未知错误'); resEl.className='save-result err'; return; }
+    if(!r.ok){ resEl.textContent = '保存失败：'+(d.detail||'未知错误'); resEl.className='save-result err'; return null; }
     resEl.textContent = `✓ 已保存（${d.updated.length} 项）`; resEl.className='save-result ok';
+    if(section === 'ai') refreshAiStatus('已保存，待测试');
     setTimeout(()=>{ resEl.textContent=''; }, 4000);
+    return d;
   }catch(e){
     resEl.textContent = '请求失败：'+e.message; resEl.className='save-result err';
+    return null;
   }
+}
+
+async function switchAiPreset(kind){
+  const presets = {
+    local: {
+      mode: 'local',
+      base_url: 'http://192.168.0.184:11434/v1',
+      model: 'huihui_ai/qwen3.5-abliterated:9b',
+      embedding_model: '',
+      temperature: '0.8',
+      max_tokens: '2048',
+      timeout: '60',
+    },
+    deepseek: {
+      mode: 'deepseek',
+      base_url: 'https://api.deepseek.com/v1',
+      model: 'deepseek-chat',
+      embedding_model: '',
+      temperature: '0.7',
+      max_tokens: '2048',
+      timeout: '60',
+    },
+  };
+  const p = presets[kind];
+  if(!p) return;
+  document.getElementById('ai-mode').value = p.mode;
+  document.getElementById('ai-base_url').value = p.base_url;
+  document.getElementById('ai-model').value = p.model;
+  document.getElementById('ai-embedding_model').value = p.embedding_model;
+  document.getElementById('ai-temperature').value = p.temperature;
+  document.getElementById('ai-max_tokens').value = p.max_tokens;
+  document.getElementById('ai-timeout').value = p.timeout;
+  refreshAiStatus('切换中…');
+  const resEl = document.getElementById('save-res-ai');
+  resEl.textContent = kind === 'local' ? '正在切换到本地模型…' : '正在切换到云端 DeepSeek…';
+  resEl.className = 'save-result';
+  const saved = await saveSection('ai');
+  if(saved) await testApiConn({silent:false});
 }
 
 async function saveVoiceAi(){
@@ -594,9 +710,11 @@ async function saveVoiceAi(){
   }
 }
 
-async function testApiConn(){
+async function testApiConn(opts){
+  opts = opts || {};
   const resEl = document.getElementById('save-res-ai');
   resEl.textContent = '测试中…'; resEl.className='save-result';
+  refreshAiStatus('测试中…');
   try{
     const r = await fetch('/api/setup/test-ai',{
       method:'POST',
@@ -610,7 +728,13 @@ async function testApiConn(){
     const d = await r.json();
     resEl.textContent = (d.ok?'✓ ':'✗ ') + d.msg;
     resEl.className = 'save-result '+(d.ok?'ok':'err');
-  }catch(e){ resEl.textContent='请求失败：'+e.message; resEl.className='save-result err'; }
+    refreshAiStatus(d.ok ? ('测试成功：' + (d.msg || '连接成功')) : ('测试失败：' + (d.msg || '连接失败')));
+    return d;
+  }catch(e){
+    resEl.textContent='请求失败：'+e.message; resEl.className='save-result err';
+    refreshAiStatus('测试异常：' + e.message);
+    return {ok:false, msg:e.message};
+  }
 }
 
 async function testWebhook(){
@@ -713,6 +837,11 @@ async function testIntent(){
   }
 }
 loadIntentKeywords();
+
+refreshAiStatus();
+['ai-base_url','ai-model','ai-mode'].forEach(id=>{
+  document.getElementById(id)?.addEventListener('input', ()=>refreshAiStatus());
+});
 
 /* ── Reply Logic ─────────────────────────────────── */
 async function loadReplyLogic(){

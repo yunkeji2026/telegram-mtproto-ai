@@ -502,6 +502,9 @@ def find_input_box(
         b = _parse_bounds(el.get("bounds") or "")
         if not b:
             continue
+        # 輸入框必須在屏幕下半部分（top > screen_h * 0.5），避免選中頂部的錯誤 EditText
+        if b.top < screen_h * 0.5:
+            continue
         t = (el.get("text") or "")
         if best is None or b.top > best[0].top:
             # 页面上最靠下的 EditText 才是聊天输入框（搜索框等会更靠上）

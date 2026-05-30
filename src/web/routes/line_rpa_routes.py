@@ -10,19 +10,28 @@ REST：
     POST /api/line-rpa/pause           — {"seconds": 300} 暂停 N 秒
     POST /api/line-rpa/resume          — 立刻恢复
     POST /api/line-rpa/trigger         — 立即触发下一轮
+    POST /api/line-rpa/accept-friends  — 手动触发一次好友申请接受
+    GET  /api/line-rpa/device-screenshot — ADB 设备按需截屏（PNG）
     GET  /api/line-rpa/config          — 当前有效配置（敏感信息脱敏）
     PUT  /api/line-rpa/config          — 热更新配置段（写 config.yaml）
+
+手动发送队列（P28）：
+    POST /api/line-rpa/send-manual              — 入队一条主动发送任务
+    GET  /api/line-rpa/send-queue               — 列出队列（?limit=30&include_done=0）
+    GET  /api/line-rpa/send-queue/{item_id}     — 查询单条任务
+    POST /api/line-rpa/send-queue/{item_id}/cancel — 取消待发任务
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict
 
 from pathlib import Path
 
 from fastapi import Depends, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Response
 
 logger = logging.getLogger(__name__)
 
@@ -329,6 +338,23 @@ def register_line_rpa_routes(app, *, page_auth, api_auth, templates, config_mana
             raise HTTPException(404, "not found")
         return FileResponse(str(fpath), media_type="image/png")
 
+    @app.get("/api/line-rpa/log-tail", response_class=PlainTextResponse)
+    async def api_line_rpa_log_tail(request: Request, n: int = 80):
+        """最近 N 行 LINE RPA 相关日志（从 logs/app.log 过滤）。"""
+        api_auth(request)
+        from pathlib import Path as _P
+        for candidate in ("logs/app.log", "logs/bot.log", "app.log"):
+            p = _P(candidate)
+            if p.exists():
+                try:
+                    text = p.read_text(encoding="utf-8", errors="replace")
+                    lines = [l for l in text.splitlines()
+                             if "line_rpa" in l.lower() or "LineRpa" in l]
+                    return PlainTextResponse("\n".join(lines[-max(1, min(200, n)):]))
+                except Exception as e:
+                    return PlainTextResponse(f"Error reading {candidate}: {e}")
+        return PlainTextResponse("")
+
     @app.get("/api/line-rpa/chats")
     async def api_line_rpa_chats(request: Request, limit: int = 30):
         api_auth(request)
@@ -336,6 +362,59 @@ def register_line_rpa_routes(app, *, page_auth, api_auth, templates, config_mana
         if svc is None:
             return {"available": False, "chats": []}
         return {"available": True, "chats": svc.list_chats(limit=limit)}
+
+    # ── P8-2: 聊天历史分析 ────────────────────────────────
+
+    @app.get("/api/line-rpa/sessions/{chat_key:path}")
+    async def api_line_sessions(request: Request, chat_key: str):
+        """按 4h 间隔分组的会话摘要。"""
+        api_auth(request)
+        svc = _get_service(request)
+        if svc is None:
+            return {"available": False, "sessions": []}
+        return {"available": True, "sessions": svc.sessions_for_chat(chat_key), "chat_key": chat_key}
+
+    @app.get("/api/line-rpa/chat-history/{chat_key:path}")
+    async def api_line_chat_history(request: Request, chat_key: str,
+                                     limit: int = 10, offset: int = 0):
+        """分页拉取指定联系人的对话记录（含 intent_tag）。"""
+        api_auth(request)
+        svc = _get_service(request)
+        if svc is None:
+            return {"available": False, "messages": [], "total": 0}
+        msgs = svc.chat_history(chat_key, limit=limit, offset=offset)
+        total = svc.total_turns_for_chat(chat_key)
+        return {"available": True, "messages": msgs, "total": total, "offset": offset}
+
+    @app.get("/api/line-rpa/customer-profile/{chat_key:path}")
+    async def api_line_customer_profile(request: Request, chat_key: str):
+        """联系人全量画像（历史统计 + 意图分布）。"""
+        api_auth(request)
+        svc = _get_service(request)
+        if svc is None:
+            return {"available": False, "profile": {}}
+        return {"available": True, "profile": svc.customer_profile(chat_key), "chat_key": chat_key}
+
+    @app.get("/api/line-rpa/search")
+    async def api_line_search(request: Request, q: str = "", intent: str = "",
+                               days: int = 30, limit: int = 20):
+        """跨联系人全文检索。"""
+        api_auth(request)
+        svc = _get_service(request)
+        if svc is None:
+            return {"available": False, "results": [], "q": q}
+        results = svc.search_history(q, intent=intent, days=days, limit=min(limit, 50))
+        return {"available": True, "results": results, "q": q, "intent": intent}
+
+    @app.get("/api/line-rpa/intent-stats")
+    async def api_line_intent_stats(request: Request, hours: float = 168.0):
+        """近 N 小时意图分布统计。"""
+        api_auth(request)
+        svc = _get_service(request)
+        if svc is None:
+            return {"available": False, "distribution": {}, "total_turns": 0}
+        stats = svc.intent_stats(window_hours=hours)
+        return {"available": True, **stats}
 
     @app.post("/api/line-rpa/pause")
     async def api_line_rpa_pause(request: Request):
@@ -376,8 +455,45 @@ def register_line_rpa_routes(app, *, page_auth, api_auth, templates, config_mana
         svc = _get_service(request)
         if svc is None:
             raise HTTPException(503, "LINE RPA 服务未启动")
+        auto_started = False
+        if hasattr(svc, "is_running") and not svc.is_running:
+            if hasattr(svc, "force_start"):
+                auto_started = await svc.force_start()
         svc.trigger_once()
-        return {"ok": True}
+        return {"ok": True, "auto_started": auto_started, "is_running": getattr(svc, "is_running", None)}
+
+    @app.post("/api/line-rpa/accept-friends")
+    async def api_line_rpa_accept_friends(request: Request):
+        """手动触发一次好友申请接受（在当前屏幕 XML 查找同意按钮并点击）。"""
+        api_auth(request)
+        svc = _get_service(request)
+        if svc is None:
+            raise HTTPException(503, "LINE RPA 服务未启动")
+        try:
+            res = await svc._runner.maybe_auto_accept_friends(max_accept=10)
+        except Exception as e:
+            raise HTTPException(500, str(e))
+        return {"ok": True, "result": res}
+
+    @app.get("/api/line-rpa/device-screenshot")
+    async def api_line_rpa_device_screenshot(request: Request):
+        """按需从 ADB 设备截屏，返回 PNG（不依赖失败留痕目录）。"""
+        api_auth(request)
+        svc = _get_service(request)
+        if svc is None:
+            raise HTTPException(503, "LINE RPA 服务未启动")
+        runner = svc._runner
+        serial = runner._serial
+        if not serial:
+            raise HTTPException(503, "未找到 ADB 设备（serial 未设置）")
+        try:
+            from src.integrations.line_rpa import screen_ocr, adb_helpers as _adb
+            png = await asyncio.to_thread(screen_ocr.capture_screen_png, serial, _adb)
+        except Exception as e:
+            raise HTTPException(500, f"截屏失败: {e}")
+        if not png:
+            raise HTTPException(503, "截屏返回空（ADB 设备可能未就绪）")
+        return Response(content=png, media_type="image/png")
 
     @app.get("/api/line-rpa/config")
     async def api_line_rpa_config(request: Request):
@@ -405,7 +521,7 @@ def register_line_rpa_routes(app, *, page_auth, api_auth, templates, config_mana
         # 只允许更新白名单字段，避免误写入破坏式配置
         ALLOWED = {
             "enabled", "adb_serial", "prefer_line_device",
-            "chat_key", "default_reply_lang",
+            "chat_key", "default_reply_lang", "daily_cap",
             "peer_left_ratio", "after_launch_sleep_sec",
             "redump_before_send", "use_backend_persona", "reply_style_hint",
             "human_pacing", "service", "screenshot_ocr",
@@ -415,7 +531,7 @@ def register_line_rpa_routes(app, *, page_auth, api_auth, templates, config_mana
             "reply_mode", "approve_max_deliver_per_cycle",
             "health_check",
             "approve_stale_check", "approve_pending_ttl_hours",
-            "alert_thresholds",
+            "alert_thresholds", "auto_accept",
             "vision_scan",
         }
         bad = [k for k in body.keys() if k not in ALLOWED]
@@ -449,3 +565,206 @@ def register_line_rpa_routes(app, *, page_auth, api_auth, templates, config_mana
             audit_store.log(actor, "line_rpa_config_update",
                             f"keys={list(body.keys())}")
         return {"ok": True, "updated_keys": list(body.keys())}
+
+    # ── P28：手动发送队列 ──────────────────────────────────────────────────
+
+    @app.post("/api/line-rpa/send-manual")
+    async def api_line_rpa_send_manual(request: Request):
+        """入队一条主动发送任务。
+
+        Body JSON: {"chat_key": "...", "peer_name": "...", "text": "..."}
+        """
+        api_auth(request)
+        svc = _get_service(request)
+        if svc is None:
+            raise HTTPException(503, "LINE RPA 服务未启动")
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "invalid json body")
+        chat_key = (body.get("chat_key") or "").strip()
+        peer_name = (body.get("peer_name") or "").strip()
+        text = (body.get("text") or "").strip()
+        if not chat_key:
+            raise HTTPException(400, "chat_key 必填")
+        if not text:
+            raise HTTPException(400, "text 不能为空")
+        try:
+            actor = request.session.get("username", "web_admin")
+        except Exception:
+            actor = "api"
+        try:
+            item_id = svc.enqueue_send(
+                chat_key=chat_key, peer_name=peer_name, text=text, created_by=actor,
+            )
+        except Exception as e:
+            raise HTTPException(500, str(e))
+        if audit_store:
+            audit_store.log(actor, "line_rpa_send_manual_enqueue",
+                            f"id={item_id} chat_key={chat_key}")
+        return {"ok": True, "item_id": item_id}
+
+    @app.get("/api/line-rpa/send-queue")
+    async def api_line_rpa_send_queue_list(request: Request):
+        """列出发送队列。可选参数: limit（默认30）、include_done（0/1）。"""
+        api_auth(request)
+        svc = _get_service(request)
+        if svc is None:
+            raise HTTPException(503, "LINE RPA 服务未启动")
+        try:
+            limit = int(request.query_params.get("limit", 30))
+            include_done = request.query_params.get("include_done", "0") not in ("0", "false", "")
+        except ValueError:
+            raise HTTPException(400, "limit 必须为整数")
+        items = svc.list_send_queue(limit=limit, include_done=include_done)
+        return {"items": items, "count": len(items)}
+
+    @app.get("/api/line-rpa/send-queue/{item_id}")
+    async def api_line_rpa_send_queue_get(item_id: int, request: Request):
+        """查询单条发送任务。"""
+        api_auth(request)
+        svc = _get_service(request)
+        if svc is None:
+            raise HTTPException(503, "LINE RPA 服务未启动")
+        item = svc.get_send_queue_item(item_id)
+        if item is None:
+            raise HTTPException(404, f"send_queue item {item_id} 不存在")
+        return item
+
+    @app.post("/api/line-rpa/send-queue/{item_id}/cancel")
+    async def api_line_rpa_send_queue_cancel(item_id: int, request: Request):
+        """取消一条待发任务（仅限 queued 状态）。"""
+        api_auth(request)
+        svc = _get_service(request)
+        if svc is None:
+            raise HTTPException(503, "LINE RPA 服务未启动")
+        ok = svc.cancel_send_queue_item(item_id)
+        if not ok:
+            raise HTTPException(409, f"item {item_id} 不可取消（不存在或已非 queued 状态）")
+        try:
+            actor = request.session.get("username", "web_admin")
+        except Exception:
+            actor = "api"
+        if audit_store:
+            audit_store.log(actor, "line_rpa_send_queue_cancel", f"id={item_id}")
+        return {"ok": True, "item_id": item_id}
+
+    # ── P7-D: 对话语言锁定 ──────────────────────────────────────────────
+
+    @app.post("/api/line-rpa/chat-lang-lock")
+    async def api_line_chat_lang_lock(request: Request):
+        """锁定或解锁 LINE 指定对话的回复语言。
+
+        Body: {chat_key: str, lang: str|null}
+        """
+        api_auth(request)
+        svc = _get_service(request)
+        if svc is None:
+            raise HTTPException(503, "LINE RPA 服务未启动")
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "invalid JSON body")
+        chat_key = str(body.get("chat_key") or "").strip()
+        if not chat_key:
+            raise HTTPException(400, "chat_key is required")
+        lang_raw = body.get("lang")
+        lang = str(lang_raw).strip().lower() if lang_raw else ""
+        _VALID_LANGS = {
+            "zh", "en", "de", "ja", "ko", "fr", "es", "ar", "ru",
+            "hi", "it", "pt", "nl", "pl", "tr", "cs", "hu",
+        }
+        if lang and lang not in _VALID_LANGS:
+            raise HTTPException(400, f"不支持的语言代码: {lang}。支持: {sorted(_VALID_LANGS)}")
+        ss = getattr(svc, "_state_store", None) or getattr(
+            getattr(svc, "_runner", None), "_state_store", None
+        )
+        if ss is None:
+            raise HTTPException(503, "state_store 不可用")
+        try:
+            ss.set_forced_lang(chat_key, lang or None)
+        except Exception as e:
+            raise HTTPException(500, f"写入失败: {e}")
+        # P10-D: 语言已变更—立即让 lang-dist 缓存失效
+        try:
+            from src.web.routes.rpa_overview_routes import invalidate_lang_dist_cache
+            invalidate_lang_dist_cache()
+        except Exception:
+            pass
+        # P13-E: 记录最近一次语言锁变更时间
+        try:
+            import time as _t
+            svc._last_lang_lock_ts = _t.time()
+        except Exception:
+            pass
+        action = f"锁定为 {lang}" if lang else "解除锁定（恢复自动/默认）"
+        return {"ok": True, "chat_key": chat_key, "forced_lang": lang or None, "action": action}
+
+    # ── P13-D: 批量取消端点 ──────────────────────────────────────────────
+
+    @app.post("/api/line-rpa/pending/cancel-all")
+    async def api_line_pending_cancel_all(request: Request):
+        """P13-D: 立即取消所有 pending/approved 行（批量清空）。"""
+        api_auth(request)
+        svc = _get_service(request)
+        if svc is None:
+            return {"ok": False, "error": "service unavailable"}
+        ss = getattr(svc, "_state_store", None) or getattr(
+            getattr(svc, "_runner", None), "_state_store", None
+        )
+        if ss is None:
+            return {"ok": False, "error": "state store unavailable"}
+        cancelled = ss.cancel_all_open_pending()
+        if audit_store and cancelled:
+            try:
+                actor = getattr(request.state, "user", {}).get("username", "web")
+                audit_store.log(actor, "line_pending_cancel_all", f"cancelled={len(cancelled)}")
+            except Exception:
+                pass
+        return {"ok": True, "cancelled": len(cancelled), "ids": cancelled}
+
+    # ── P7-A: TTS ready 轮询端点 ─────────────────────────────────────────
+
+    @app.post("/api/line-rpa/pending/{pending_id}/retry-tts")
+    async def api_line_pending_retry_tts(pending_id: int, request: Request):
+        """P12-D: 重置 TTS ERROR 哨兵，让 runner 下一轮自动重新生成 TTS 预览。"""
+        api_auth(request)
+        svc = _get_service(request)
+        if svc is None:
+            return {"ok": False, "error": "service unavailable"}
+        ss = getattr(svc, "_state_store", None) or getattr(
+            getattr(svc, "_runner", None), "_state_store", None
+        )
+        if ss is None:
+            return {"ok": False, "error": "state store unavailable"}
+        ok = ss.reset_pending_tts(pending_id)
+        if not ok:
+            return {"ok": False, "error": "not found or not in pending/approved status"}
+        return {"ok": True, "pending_id": pending_id}
+
+    @app.get("/api/line-rpa/pending-tts")
+    async def api_line_pending_tts(request: Request, ids: str = ""):
+        """P7-A: 返回指定 pending_id 列表的 tts_path 映射，供前端轮询。
+
+        Query: ?ids=1,2,3  Returns: {"ok":true, "paths":{"1":"...", "2":""}}
+        """
+        api_auth(request)
+        svc = _get_service(request)
+        if svc is None:
+            return {"ok": False, "paths": {}}
+        ss = getattr(svc, "_state_store", None) or getattr(
+            getattr(svc, "_runner", None), "_state_store", None
+        )
+        if ss is None:
+            return {"ok": False, "paths": {}}
+        try:
+            id_list = [int(x.strip()) for x in ids.split(",") if x.strip().isdigit()]
+        except Exception:
+            return {"ok": False, "paths": {}}
+        if not id_list:
+            return {"ok": True, "paths": {}}
+        result = {}
+        for pid in id_list[:20]:
+            row = ss.get_pending(pid)
+            result[str(pid)] = str(row.get("tts_path") or "") if row else ""
+        return {"ok": True, "paths": result}

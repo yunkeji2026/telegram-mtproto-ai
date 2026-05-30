@@ -22,6 +22,87 @@ telegram:
   process_groups: false           # 处理群组消息 (建议关闭，除非需要)
   process_channels: false         # 处理频道消息
 
+  # ── Telegram 语音回复（TTS）────────────────────────────────
+  # 启用后，AI 文字回复可自动合成语音发送；fallback 始终为纯文字
+  voice_reply:
+    enabled: false
+    # when_peer_voice — 仅对方发语音时才回语音
+    # always          — 所有回复都发语音（+ 可选文字摘要）
+    # random          — 以 probability 概率随机发语音
+    # never           — 关闭（与 enabled:false 等效）
+    trigger: when_peer_voice
+    probability: 0.3              # trigger=random 时生效
+    backend: edge_tts             # edge_tts | openai | voice_clone_command
+    voice: ja-JP-NanamiNeural     # edge_tts 声音 ID
+    model: gpt-4o-mini-tts        # openai backend 模型
+    format: mp3                   # mp3 | ogg；ogg 需 ffmpeg 转码
+    out_dir: tmp_voice_replies
+    max_text_chars: 220           # 超过此长度自动回退文字
+    max_seconds: 60               # TTS 时长超限自动回退文字
+    timeout_sec: 30               # TTS 合成超时（秒）
+    send_text_summary: false      # true=语音发送后额外追加一条文字
+    # 人设级音色覆盖（优先于此处；见 personas.profiles[].voice_profile）
+    voice_profile:
+      enabled: false
+      owner_consent: true
+      speaker_id: my_voice
+      reference_audio_path: ""
+      backend: voice_clone_command
+      command_args: []
+      command_timeout_sec: 120
+
+# ── Telegram 语音消息接收转录（ASR）────────────────────────────────────────
+# 对方发语音条 → 下载 OGG → Whisper 转文字 → 传给 AI 回复
+# provider: whisper_local | faster_whisper | openai
+voice_recognition:
+  enabled: false               # true=开启语音接收转录
+  provider: faster_whisper     # 推荐 faster_whisper；openai 需 api_key
+  language: auto               # auto | zh | ja | en …
+  temp_dir: ./temp/voice
+  max_file_size: 16777216      # 16 MB
+  whisper:
+    model_size: base           # tiny(最快)|base|small|medium|large-v3
+    device: cpu                # cpu | cuda
+    download_root: ./models/faster-whisper
+  openai:
+    api_key: ""
+    model: whisper-1
+
+# ── Telegram 图片消息识别（OCR / Vision 兜底）────────────────────────────
+# 对方发图片 → Vision AI 优先；无 Vision 配置则走 OCR 兜底
+# Vision 配置位于顶层 vision.enabled；以下仅为 OCR 兜底配置
+image_recognition:
+  enabled: false               # true=开启 OCR 兜底（Vision 已配置则 OCR 极少触发）
+  provider: tesseract          # tesseract | easyocr
+  language: zh
+  temp_dir: ./temp/images
+  max_file_size: 10485760      # 10 MB
+  supported_formats: [jpg, jpeg, png, gif, bmp]
+  ocr:
+    languages: [ch_sim, en]    # easyocr 语言列表；tesseract 用 chi_sim+eng
+    psm: 3
+    oem: 3
+
+  # ── 多账号并行（单账号时留空/删除 accounts 块即可）──────────────
+  # 每个账号共享 skill_manager/ai_client，独立 pyrogram session 文件
+  # accounts:
+  #   - id: acc_a
+  #     label: "号 A"
+  #     api_id: 12345678
+  #     api_hash: "abcdef1234567890"
+  #     phone_number: "+8613800000000"
+  #     session_name: camille_a
+  #     persona_ids: [warm_companion]
+  #     enabled: true
+  #   - id: acc_b
+  #     label: "号 B"
+  #     api_id: 87654321
+  #     api_hash: "fedcba0987654321"
+  #     phone_number: "+8613811111111"
+  #     session_name: camille_b
+  #     persona_ids: [professional_support]
+  #     enabled: true
+
 # LINE Messaging API（官方账号；与 Telegram 共用 Skill/AI，需 web 可公网 HTTPS）
 # 控制台 Webhook URL 填: https://你的域名/line/webhook（与 webhook_path 一致）
 line:
@@ -38,6 +119,22 @@ web_admin:
   port: 18787
   auth_token: YOUR_ADMIN_TOKEN
   secret_key: YOUR_FLASK_SECRET_KEY
+  # P25-A / P26-C: 全局 body size 限制（防大 JSON / chunked 流式攻击）
+  # 默认 2MB，按 path 可在 body_limits 覆盖。超限 → 413 + Connection:close + audit_log。
+  max_body_bytes: 2097152                # 2 MiB
+  # 个别 path 提升上限（如完整 intent_tags 字典写入）
+  body_limits:
+    "/api/rpa/intent-tags": 4194304      # 4 MiB
+  # 完全跳过 body 检查的 path 前缀（如未来的文件上传端点 — 当前为空）
+  max_body_exempt_prefixes: []
+
+# RPA intent_tags 字典管理
+rpa_intent_tags:
+  # P26-A: 文件变更后自动 reload（基于 watchdog；保存外部编辑、热部署友好）
+  # 关闭后只能靠 POST /api/rpa/intent-tags/reload 触发
+  watch_enabled: true
+  # 文件变更与 reload 之间的去抖延时（秒）— 防止编辑器多次 write 触发多次 reload
+  watch_debounce_sec: 0.8
 
 # 个人 LINE 客户端 RPA（ADB + uiautomator dump；与官方 Messaging API 独立）
 # 需：开发者选项 USB 调试、已登录 LINE 的会话在前台、建议安装 ADB Keyboard 以输入中文
@@ -195,13 +292,116 @@ line_rpa:
   # 近期 run 历史保留上限（SQLite，用于 Web 卡片"会话流"）
   recent_runs_buffer: 500
 
+# ── 多平台设备协调器（Device Coordinator）─────────────────────────────────
+# 设备注册表 DB（共享 openclaw.db，两个项目共用）
+# 主控机可留空用默认路径；远程主机需配置为共享路径或本地副本
+device_registry:
+  db_path: ""                      # 空=用默认 ../mobile-auto0423/data/openclaw.db
+  # 远程主机示例：
+  # db_path: "\\\\192.168.8.100\\shared\\openclaw.db"   # Windows SMB
+  # db_path: "/mnt/shared/openclaw.db"                   # Linux NFS
+
+# 让一台手机轮流检查 LINE / WhatsApp / Messenger，有角标才进入 App 处理。
+# 启用后，相关设备的独立 line_rpa / whatsapp_rpa / messenger_rpa service
+# 应将 autostart 设为 false（由协调器统一驱动）。
+device_coordinator:
+  enabled: false
+  devices:
+    - serial: IJ8HZLORS485PJWW
+      label: "IJ8-主机"
+      enabled: true
+      poll_interval_sec: 15         # 有通知时的检测间隔（秒）
+      idle_poll_interval_sec: 30    # 无通知时的检测间隔
+      force_check_interval_sec: 45  # 不管有无通知，每 N 秒强制检查一遍（防通知被关闭或漏消息）
+      home_settle_sec: 1.5          # HOME 键后等待 Launcher 稳定的时间
+      priority_by_badge: true       # true=通知数多的 App 优先处理
+      platforms:
+        - type: line
+          account_id: line_ij8
+        - type: whatsapp
+          account_id: wa_ij8
+        - type: messenger
+          account_id: msg_ij8
+    - serial: XW8TQKEQIVJRQO69
+      label: "XW8"
+      enabled: true
+      poll_interval_sec: 15
+      idle_poll_interval_sec: 30
+      force_check_interval_sec: 45
+      platforms:
+        - type: line
+          account_id: line_xw8
+        - type: whatsapp
+          account_id: wa_xw8
+
+# ADB 热插拔自动纳管 — 检测新插入的手机并查 registry DB 动态创建 Coordinator
+# 与 device_coordinator.devices[] 共存：静态配置的设备由上方管理，
+# 不在静态配置但在 registry 中注册的设备由 HotPlug Watcher 管理。
+hotplug_watcher:
+  enabled: true                    # 默认跟随 device_coordinator.enabled
+  host_name: ""                    # 本机名称，对应 registry DB 的 group_name
+                                   # 空=""管所有在线已注册设备；"主控"/"W03"/"W175"则只管对应分组
+  scan_interval_sec: 15            # ADB 扫描周期（秒）
+  offline_timeout_sec: 30          # 设备离线多久才停止 Coordinator（防 USB 瞬断）
+
+# ── Webhook 告警通知 ──────────────────────────────────────────────────────
+# 设备熔断 / 配置变更 / 审计事件推到 Telegram / Slack / 企业微信
+# 事件类型: device_coordinator.circuit_open / messenger_rpa.device_unhealthy
+#           config.changed / audit.* 等
+webhook:
+  enabled: false
+  timeout: 10
+  retry: 1
+  webhooks: []
+    # Telegram Bot 示例：
+    # - url: "https://api.telegram.org/bot<TOKEN>/sendMessage"
+    #   format: telegram
+    #   chat_id: "123456789"
+    # Slack 示例：
+    # - url: "https://hooks.slack.com/services/T.../B.../xxx"
+    #   format: slack
+
+# ── 设备模板（快速批量分配平台配置）─────────────────────────────────────
+# 在 Web 面板 📊 设备统计 tab 可选择模板一键应用到勾选设备
+device_templates:
+  - name: "3-platform-full"
+    description: "三平台全开（Messenger + LINE + WhatsApp）"
+    fields:
+      platform_messenger: "msg_auto"
+      platform_line: "line_auto"
+      platform_whatsapp: "wa_auto"
+  - name: "messenger-only"
+    description: "仅 Messenger"
+    fields:
+      platform_messenger: "msg_auto"
+      platform_line: ""
+      platform_whatsapp: ""
+  - name: "line-wa"
+    description: "LINE + WhatsApp（不含 Messenger）"
+    fields:
+      platform_messenger: ""
+      platform_line: "line_auto"
+      platform_whatsapp: "wa_auto"
+
 # Facebook Messenger 客户端 RPA（ADB + Vision；与 Telegram/LINE 共用 Skill/AI）
+# 多账号模式：在 accounts[] 下为每台手机写一条；device_coordinator.platforms 里
+# 用 account_id 对应到具体账号，每账号自动使用独立 state DB。
 messenger_rpa:
   enabled: false
   autostart: true
-  adb_serial: ""
+  adb_serial: ""        # 单账号模式保留此字段；多账号时由 accounts[].adb_serial 覆盖
   adb_user_id: 0
   messenger_package: com.facebook.orca
+  # 多账号示例（4台手机各1个Messenger账号）：
+  # accounts:
+  #   - account_id: msg_ij8
+  #     adb_serial: IJ8HZLORS485PJWW
+  #   - account_id: msg_q4n
+  #     adb_serial: Q4N7AM7HMZGU4LZD
+  #   - account_id: msg_vwn
+  #     adb_serial: VWNJFUNRV4LF4XTS
+  #   - account_id: msg_xw8
+  #     adb_serial: XW8TQKEQIVJRQO69
   # 更聪明的轮询：通知监听会立即触发；普通空闲轮询也不要拖到 30s+。
   interval_sec: 8.0
   min_interval_sec: 2.0
@@ -355,6 +555,86 @@ messenger_rpa:
             reply_length: concise
             max_reply_sentences: 4
 
+# WhatsApp RPA（ADB + uiautomator；与 Telegram/LINE/Messenger 共用 Skill/AI）
+# 与 messenger_rpa 结构类似，accounts[] 下为每台手机一条
+whatsapp_rpa:
+  enabled: false
+  accounts:
+    - account_id: wa_q4n
+      adb_serial: Q4N7AM7HMZGU4LZD
+      use_business_app: false   # true → com.whatsapp.w4b
+      reply_mode: auto          # auto | approve | off
+      default_reply_lang: zh
+      daily_cap: 200
+      dedup_window_sec: 10
+      catchup_limit: 3          # 发完后最多追补几轮漏消息
+      # 语音识别（STT）— 直接从 WhatsApp 文件系统读取 .opus 文件
+      voice_input:
+        enabled: false
+        max_age_sec: 600        # 语音文件最大年龄（秒）
+        batch_max: 5            # 连续多条语音最多批量转写几条
+      # 语音回复（TTS）— 通过 share intent 发送
+      voice_output:
+        enabled: false
+        mode: approval_only     # approval_only | auto_voice
+        trigger: when_peer_voice  # when_peer_voice | always | random
+        voice_probability: 0.3  # trigger=random 时的概率
+        max_text_chars: 220     # TTS 最大文本长度
+        max_seconds: 20         # 音频最长秒数
+        timeout_sec: 30         # TTS 合成超时
+      # 多条消息引用回复（Quote Reply）
+      # 当用户连续发送多条消息时，AI 先判断意图关系，再逐条引用回复
+      multi_msg_reply_enabled: false  # 默认关闭，稳定后可开启
+      multi_msg_max_count: 5          # 最多处理几条新消息（超出取最新 N 条）
+      auto_quote_reply: false         # 单条主流程也用引用回复（long-press→回复），combined 模式始终生效
+      # 多模态媒体理解 — 图片/视频/贴纸/GIF/文件
+      media_input:
+        enabled: false
+        use_vision: true        # true=截图裁剪+VLM描述; false=仅 placeholder
+        crop_padding: 24        # 裁剪媒体气泡时的边距 (px)
+        max_image_dim: 960      # 送 VLM 前缩放最长边上限
+        timeout_sec: 30         # VisionClient 超时
+        # vision_cfg:           # 可覆盖全局 vision 配置（如单独超时/模型）
+        #   timeout: 25
+      human_pacing:
+        enabled: true
+        typing_cpm_lo: 240
+        typing_cpm_hi: 480
+      service:
+        interval_sec: 30
+        autostart: false
+
+# ── 顶层人设池（跨平台复用：TG / Messenger / LINE）───────────────────────
+# messenger_rpa.reply_profiles 继续有效（向后兼容 alias，读取时优先级最低）
+# Telegram 通过 telegram.voice_reply 和本节 voice_profile 选择音色
+personas:
+  default: warm_companion
+  profiles:
+    - id: warm_companion
+      name: Camille
+      enabled: true
+      style_hint: |
+        你是自然的私聊对象，不是客服机器人。优先短句、口语、像真人聊天。
+      # voice_profile 留空则继承 telegram.voice_reply 全局设置
+      voice_profile:
+        enabled: false
+        backend: edge_tts
+        voice: ja-JP-NanamiNeural
+        owner_consent: true
+        speaker_id: warm_companion_voice
+        reference_audio_path: ""
+        command_args: []
+        command_timeout_sec: 120
+    - id: professional_support
+      name: Camille
+      enabled: true
+      style_hint: |
+        面向明确咨询、订单、付款、商务问题时使用。先给结论，再给下一步动作。
+      voice_profile:
+        enabled: false
+        backend: edge_tts
+        voice: zh-CN-XiaoxiaoNeural
+
 # 人工客服转接：同问多次追加 @ 人工；值班状态存 SQLite human_escalation.db
 human_escalation:
   enabled: false
@@ -500,6 +780,15 @@ companion:
     strict_exchange_max: 2
     short_user_chars: 22
     work_like_keywords: []
+  # W2-D1：双信号融合 — 让 IntimacyEngine 的 score（含沉默衰减）参与 stage 决策
+  # 沉默 30 天的 steady 关系 → score 衰减 → 自动降阶 + 注入 reunion 提示
+  # 仅当 messenger_rpa runner 拿到 journey.intimacy_score 时生效（其它渠道静默回退）
+  intimacy_fusion:
+    enabled: true
+    intimacy_bands:        # score(0-100) → stage 阈值，与 IntimacyEngine 对齐
+      to_warming: 25
+      to_intimate: 55
+      to_steady: 80
 
 # 图像理解：zhipu（智谱 GLM-4V）或 openai_compatible（Ollama 等，多模态 Gemma/LLaVA）
 # 若同时配置 Ollama(base_url) 与智谱 key，请求时优先 Ollama，不可用或空结果时自动回退智谱
@@ -632,6 +921,41 @@ advanced:
   health_check:
     interval: 300                  # 健康检查间隔(秒)
     timeout: 10                    # 检查超时(秒)
+# ─ RPA 跨平台运行时调优（P16-B 引入）─────────────────────────────
+# 跨平台聊天画像缓存（/api/rpa/cross-platform-profile）：
+#   - 抽屉打开会同时查 LINE/Messenger/WA 三个 SQLite 后取并集
+#   - in-process TTL cache + FIFO 淘汰；超大量同名访客时建议提高 max
+#   - 不配置时使用代码默认值 (TTL 60s / MAX 256)
+# 关键词字典 (config/intent_tags.yaml)：
+#   - 通过 /rpa-overview 页面可视化编辑 + reload，无需改 config.yaml
+#   - 写入会自动备份；最近 5 份带时间戳保留在同目录 (.bakN)
+rpa:
+  cache:
+    cross_profile_ttl: 60               # 秒；后端 cross-platform-profile 缓存 TTL（最小 1）
+    cross_profile_max: 256              # FIFO 上限；超出按插入序淘汰（最小 8）
+
+  # P21-A: 反代后真实 IP 解析 — 只信任来自这些 IP 的 X-Forwarded-For
+  # 推荐生产环境填 nginx/cloudflare 真实出口，否则黑客可伪造 XFF 绕开限流
+  # trusted_proxies:
+  #   - 127.0.0.1
+  #   - 10.0.0.0/8           # 注：当前只支持精确 IP 匹配，CIDR 留待后续
+  trusted_proxies: []
+
+  # P21-B: intent-tags admin 端点限流（token bucket）
+  # diff: 实时 lint 端点（编辑器输入触发），默认较宽松
+  # restore: 备份恢复（写操作 + reload），默认严格
+  rate_limits:
+    diff:
+      capacity: 20                      # 桶容量（短突发上限）
+      refill_per_sec: 2                 # 每秒回血 token 数（持续吞吐 = 2 req/s）
+    restore:
+      capacity: 5
+      refill_per_sec: 0.2               # 每 5 秒补一个 → 强制冷却
+    # P23-D: /api/rpa/metrics 也限流 — Prometheus scrape 15s/次很安全，宽松设
+    metrics:
+      capacity: 100
+      refill_per_sec: 1                 # 持续吞吐 1 req/s，足够多套监控系统拉
+
 # ─ 跨平台 Contacts 子系统（Messenger → LINE 引流 + 漏斗 + 合并）──
 # 默认关闭。启用后：
 #   - 启动时自动建 config/contacts.db

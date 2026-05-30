@@ -29,6 +29,8 @@ _NON_PERSIST = frozenset({
     "_slow_think_outline",
     "_relationship_prompt_block",
     "relationship_stage",
+    "_funnel_directive",   # W3-3M: per-request, re-computed each turn
+    "funnel_stage",        # W3-3M: injected by runner, not persistent
 })
 
 

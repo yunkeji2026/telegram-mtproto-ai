@@ -196,6 +196,16 @@ def read_thread_title_via_vision(
     ``task_name`` 默认 ``"title_verify"`` → 通过 ``vision_task_models``
     解析对应推荐模型/超时（实测：flash 4-7s 准确，无需 plus）。
     """
+    # ★ Collapse the notification shade before screencap.
+    # uiautomator dump_hierarchy (u2) can leave the shade expanded on MIUI
+    # devices, causing the screenshot to capture notification content instead
+    # of the Messenger thread title bar.
+    try:
+        import time as _collapse_time
+        adb.run_adb(["shell", "cmd statusbar collapse"], serial=serial, timeout=3.0)
+        _collapse_time.sleep(0.35)
+    except Exception:
+        pass
     img_path = screencap_top_strip(serial, top_ratio=top_ratio)
     if img_path is None:
         return VisionTitleResult(title=None, debug="screencap_failed")

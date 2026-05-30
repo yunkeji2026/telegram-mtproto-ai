@@ -8,7 +8,7 @@ import re
 import subprocess
 import time
 from dataclasses import dataclass
-from typing import List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -149,10 +149,66 @@ def pick_serial(preferred: str, *, prefer_line_installed: bool, line_pkg: str) -
     return serials[0] if serials else None
 
 
+def force_portrait(serial: str) -> None:
+    """强制设备竖屏（user_rotation=0，关闭自动旋转）。
+    横屏状态下 uiautomator dump 坐标系错误，会导致导航失败。
+    """
+    script = (
+        "settings put system accelerometer_rotation 0; "
+        "settings put system user_rotation 0"
+    )
+    run_adb(["shell", script], serial=serial, timeout=10.0)
+
+
+def prepare_device_for_rpa(serial: str, packages: Optional[List[str]] = None) -> None:
+    """每轮 RPA 前的设备准备：竖屏 + 通知/角标强制开启 + 关闭勿扰。
+
+    执行以下操作（合并为一条 adb shell 减少往返）：
+      1. 关闭自动旋转，锁定竖屏（accelerometer_rotation=0, user_rotation=0）
+      2. 关闭系统级勿扰（zen_mode=0）
+      3. 开启全局通知角标（notification_badging=1）
+      4. 对每个 App 包名：appops set POST_NOTIFICATIONS allow（Android 13+ 通知权限）
+         + notification_enabled 兜底（部分 MIUI 版本）
+
+    Args:
+        serial:   ADB 设备序列号
+        packages: 需要开启通知的包名列表，例如
+                  ["jp.naver.line.android", "com.whatsapp", "com.facebook.orca"]
+    """
+    cmds: List[str] = [
+        # 1. 竖屏
+        "settings put system accelerometer_rotation 0",
+        "settings put system user_rotation 0",
+        # 2. 关闭勿扰
+        "settings put global zen_mode 0",
+        # 3. 全局通知角标（secure 命名空间，标准 Android）
+        "settings put secure notification_badging 1",
+    ]
+    for pkg in (packages or []):
+        if not pkg:
+            continue
+        # Android 13+ POST_NOTIFICATIONS appops（静默忽略旧版不支持的情况）
+        cmds.append(f"cmd appops set {pkg} POST_NOTIFICATIONS allow 2>/dev/null || true")
+        # MIUI 额外：重置 notification_enabled（部分 MIUI 会把它设为 0）
+        cmds.append(
+            f"cmd notification allow_listener {pkg} 2>/dev/null || true"
+        )
+
+    script = "; ".join(cmds)
+    run_adb(["shell", script], serial=serial, timeout=15.0)
+    logger.debug("[prepare_device] %s 竖屏+通知设置完成", serial)
+
+
 def ensure_line_foreground(serial: str, line_pkg: str, splash_activity: str) -> AdbResult:
-    """合并为单条 shell，减少部分设备上 adb shell 会话过早断开。"""
+    """合并为单条 shell，减少部分设备上 adb shell 会话过早断开。
+    1) force_portrait 先锁竖屏（横屏下 dump 坐标系错误）
+    2) am start 尝试拉起；MIUI 后台弹窗限制下可能不生效
+    3) monkey LAUNCHER 事件作为兜底（模拟用户点图标，绕过 MIUI 限制）
+    """
+    force_portrait(serial)
     script = (
         f"am start -n {line_pkg}/{splash_activity} >/dev/null 2>&1; "
+        f"monkey -p {line_pkg} -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; "
         f"echo OK"
     )
     return run_adb(["shell", script], serial=serial, timeout=30.0)
@@ -434,3 +490,84 @@ def parse_bounds(bounds: str) -> Optional[Tuple[int, int, int, int]]:
     if not m:
         return None
     return int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
+
+
+# ── 设备级并发锁（per-serial asyncio.Lock）────────────────────────────────────
+# 多个 runner（LINE / WhatsApp / Messenger）可能共享同一台物理设备。
+# 同一时刻只能有一个 runner 操作该设备（am start + uiautomator dump + 点击/输入），
+# 否则互相踢前台、dump 到错误 App 的 UI。
+# 使用方：在各 Service._loop() 的 run_once() 调用外套 async with get_device_lock(serial):
+import asyncio as _asyncio
+_DEVICE_LOCKS: "dict[str, _asyncio.Lock]" = {}
+
+
+def get_device_lock(serial: str) -> "_asyncio.Lock":
+    """Return (creating if needed) the asyncio.Lock for the given ADB serial.
+
+    Thread-safe: asyncio is single-threaded; dict access is GIL-protected.
+    Pass serial='' for 'no serial / don't care' — returns a shared fallback lock.
+    """
+    key = (serial or "").strip() or "__default__"
+    if key not in _DEVICE_LOCKS:
+        _DEVICE_LOCKS[key] = _asyncio.Lock()
+    return _DEVICE_LOCKS[key]
+
+
+# ── Platform Auto-Discovery ────────────────────────────────────────────────
+
+_CHAT_PKG_TO_PLATFORM: Dict[str, str] = {
+    "jp.naver.line.android": "line",
+    "com.whatsapp": "whatsapp",
+    "com.facebook.orca": "messenger",
+}
+
+_PLATFORM_ACCOUNT_TYPES: Dict[str, List[str]] = {
+    "whatsapp": ["com.whatsapp"],
+    "messenger": ["com.facebook.messenger.sync", "com.facebook.auth.login"],
+    "line": ["jp.naver.line.android"],
+}
+
+
+def detect_installed_chat_apps(serial: str) -> Dict[str, bool]:
+    """检测设备上已安装并启用的聊天 app。
+
+    Returns: {"line": bool, "whatsapp": bool, "messenger": bool}
+    """
+    result: Dict[str, bool] = {"line": False, "whatsapp": False, "messenger": False}
+    r = run_adb(["shell", "pm", "list", "packages", "-e"], serial=serial, timeout=15.0)
+    if r.returncode != 0:
+        return result
+    for raw in (r.stdout or "").splitlines():
+        pkg = raw.strip()
+        if pkg.startswith("package:"):
+            pkg = pkg[len("package:"):]
+        if pkg in _CHAT_PKG_TO_PLATFORM:
+            result[_CHAT_PKG_TO_PLATFORM[pkg]] = True
+    return result
+
+
+def get_chat_account_name(serial: str, platform: str) -> Optional[str]:
+    """尝试从 Android AccountManager 读取聊天 app 的登录账号名称。
+
+    WhatsApp → 手机号(+852...)   Messenger → Facebook 账号
+    LINE     → 通常返回 'LINE' 或为空
+
+    Returns: 账号名称字符串 或 None
+    """
+    target_types = _PLATFORM_ACCOUNT_TYPES.get(platform, [])
+    if not target_types:
+        return None
+    r = run_adb(["shell", "dumpsys", "account"], serial=serial, timeout=10.0)
+    if r.returncode != 0:
+        return None
+    text = r.stdout or ""
+    for line_text in text.splitlines():
+        stripped = line_text.strip()
+        for t in target_types:
+            if t in stripped:
+                m = re.search(r"name[=:]\s*([^,}\s\n]+)", stripped)
+                if m:
+                    name = m.group(1).strip()
+                    if name and name.lower() not in ("null", "none", ""):
+                        return name
+    return None

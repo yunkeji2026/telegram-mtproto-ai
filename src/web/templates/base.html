@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="{{ ui_lang|default('zh') }}-CN" data-theme="light" data-ui-mode="{{ ui_mode|default('simple') }}">
+<html lang="{{ ui_lang|default('zh') }}-CN" data-theme="light" data-ui-mode="{{ ui_mode|default('simple') }}"{% if embedded %} data-embedded="1"{% endif %}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -9,6 +9,16 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"></noscript>
 <style>
+/* ── Embedded mode (iframe inside AI Studio etc.) — hide chrome ── */
+[data-embedded="1"] .sidebar,
+[data-embedded="1"] .sb-overlay,
+[data-embedded="1"] .topbar,
+[data-embedded="1"] .tip-toggle,
+[data-embedded="1"] .hamburger{display:none!important}
+[data-embedded="1"] .main{margin-left:0!important}
+[data-embedded="1"] .wrap{padding:1rem 1.2rem 1.5rem!important;max-width:none!important}
+[data-embedded="1"] body{background:transparent!important}
+[data-embedded="1"] .p-head{display:none!important}
 /* ── Variables ─────────────────────────────────── */
 :root{
   --sw:240px; --th:58px; --r:12px; --r-sm:8px; --r-lg:16px;
@@ -30,20 +40,21 @@
   --sp:0 4px 14px rgba(91,124,246,.35);
 }
 [data-theme="dark"]{
-  --bg:#080c14; --card:rgba(14,20,34,.85); --nav:rgba(8,11,22,.95); --input:rgba(18,24,40,.8);
-  --t:#e2e8f0; --t2:#94a3b8; --t3:#475569;
-  --bd:rgba(255,255,255,.06); --bd2:rgba(255,255,255,.11);
-  --p:#6b8af8; --pd:#7c98ff; --ps:rgba(107,138,248,.15);
-  --s0:0 1px 3px rgba(0,0,0,.4); --s1:0 4px 12px rgba(0,0,0,.5); --s2:0 12px 32px rgba(0,0,0,.7);
+  --bg:#0d1117; --card:#161b22; --nav:rgba(13,17,23,.98); --input:#21262d;
+  --t:#e6edf3; --t2:#8b949e; --t3:#768390;
+  --bd:rgba(240,246,252,.1); --bd2:rgba(240,246,252,.16);
+  --p:#58a6ff; --pd:#79b8ff; --ps:rgba(88,166,255,.15);
+  --green:#3fb950; --red:#f85149; --amber:#e3b341;
+  --s0:0 1px 3px rgba(0,0,0,.5); --s1:0 4px 12px rgba(0,0,0,.6); --s2:0 12px 32px rgba(0,0,0,.8);
 }
 /* ── Reset ─────────────────────────────────────── */
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
 html{scroll-behavior:smooth}
 body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t);min-height:100vh;display:flex;font-size:14px;line-height:1.5;transition:background .3s,color .3s}
-[data-theme="dark"] body{background:radial-gradient(ellipse at 15% 45%,rgba(91,124,246,.08) 0%,transparent 55%),radial-gradient(ellipse at 85% 15%,rgba(139,92,246,.06) 0%,transparent 50%),#080c14}
+[data-theme="dark"] body{background:radial-gradient(ellipse at 20% 50%,rgba(88,166,255,.06) 0%,transparent 50%),radial-gradient(ellipse at 80% 10%,rgba(63,185,80,.04) 0%,transparent 45%),#0d1117}
 /* ── Sidebar ─────────────────────────────────── */
 .sidebar{width:var(--sw);position:fixed;top:0;left:0;bottom:0;background:var(--nav);display:flex;flex-direction:column;z-index:100;border-right:1px solid var(--bd);transition:transform .3s cubic-bezier(.4,0,.2,1)}
-[data-theme="dark"] .sidebar{backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);background:rgba(8,11,22,.92);border-right:1px solid rgba(255,255,255,.05)}
+[data-theme="dark"] .sidebar{backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);background:rgba(13,17,23,.98);border-right:1px solid rgba(240,246,252,.08)}
 .sb-brand{padding:1.15rem 1.2rem;display:flex;align-items:center;gap:.6rem;border-bottom:1px solid rgba(255,255,255,.06)}
 .sb-icon{width:32px;height:32px;background:var(--g);border-radius:10px;display:flex;align-items:center;justify-content:center;box-shadow:var(--sp);flex-shrink:0}
 .sb-icon svg{width:17px;height:17px;color:#fff}
@@ -105,7 +116,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 /* ── Main layout ────────────────────────────── */
 .main{margin-left:var(--sw);flex:1;display:flex;flex-direction:column;min-height:100vh;transition:margin-left .3s}
 .topbar{height:var(--th);display:flex;align-items:center;justify-content:space-between;padding:0 1.8rem;background:var(--card);border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:50;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);transition:background .3s}
-[data-theme="dark"] .topbar{background:rgba(9,13,24,.88)}
+[data-theme="dark"] .topbar{background:rgba(13,17,23,.94);border-bottom:1px solid rgba(240,246,252,.08)}
 .topbar-l{display:flex;align-items:center;gap:.65rem}
 .topbar-r{display:flex;align-items:center;gap:.5rem}
 .page-ttl{font-size:1rem;font-weight:600}
@@ -167,7 +178,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--g);opacity:0;transition:opacity .25s}
 .card:hover{box-shadow:var(--s1);transform:translateY(-1px)}
 .card:hover::before{opacity:1}
-[data-theme="dark"] .card{backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.05)}
+[data-theme="dark"] .card{backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid rgba(240,246,252,.1)}
 .card h2{display:flex;align-items:center;gap:.5rem;font-size:.95rem;font-weight:600;margin-bottom:1rem;padding-bottom:.7rem;border-bottom:1px solid var(--bd);color:var(--t)}
 .card h2 svg{width:17px;height:17px;color:var(--p);flex-shrink:0}
 .card h2 .actions{margin-left:auto;display:flex;gap:.4rem}
@@ -455,6 +466,23 @@ code{background:var(--input);padding:.15rem .45rem;border-radius:5px;font-size:.
       <span>{{ (i18n or {}).get('learner', 'AI 学习审核') }}</span>
       <span class="sb-badge" id="badge-learner"></span>
     </a>
+    <a href="/personas" {% if active=="personas" %}class="active"{% endif %} data-help="nav_personas">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/><circle cx="18.5" cy="7" r="2.5" fill="currentColor" opacity=".45"/></svg>
+      <span>人设工作室</span>
+    </a>
+    <a href="/unified-inbox" {% if active=="unified_inbox" %}class="active"{% endif %} data-help="nav_unified_inbox">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M4 9l8 5 8-5"/></svg>
+      <span>统一收件箱</span>
+    </a>
+    <a href="/rpa-overview" {% if active=="rpa_overview" %}class="active"{% endif %} data-help="nav_rpa_overview">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      <span>RPA 跨平台总览</span>
+      <span class="sb-badge" id="badge-rpa-ov-compact"></span>
+    </a>
+    <a href="/telegram" {% if active=="telegram" %}class="active"{% endif %}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22 11 13 2 9l20-7z"/></svg>
+      <span>Telegram 设置</span>
+    </a>
     <a href="/line-rpa" {% if active=="line_rpa" %}class="active"{% endif %} data-help="nav_line_rpa">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/><circle cx="9" cy="10" r="1" fill="currentColor"/><circle cx="13" cy="10" r="1" fill="currentColor"/><circle cx="17" cy="10" r="1" fill="currentColor"/></svg>
       <span>LINE 自动聊天</span>
@@ -513,6 +541,19 @@ code{background:var(--input);padding:.15rem .45rem;border-radius:5px;font-size:.
       <span>{{ (i18n or {}).get('learner', 'AI 学习审核') }}</span>
       <span class="sb-badge" id="badge-learner"></span>
     </a>
+    <a href="/unified-inbox" {% if active=="unified_inbox" %}class="active"{% endif %} data-help="nav_unified_inbox">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M4 9l8 5 8-5"/></svg>
+      <span>统一收件箱</span>
+    </a>
+    <a href="/rpa-overview" {% if active=="rpa_overview" %}class="active"{% endif %} data-help="nav_rpa_overview">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      <span>RPA 跨平台总览</span>
+      <span class="sb-badge" id="badge-rpa-ov"></span>
+    </a>
+    <a href="/telegram" {% if active=="telegram" %}class="active"{% endif %}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22 11 13 2 9l20-7z"/></svg>
+      <span>Telegram 设置</span>
+    </a>
     <a href="/line-rpa" {% if active=="line_rpa" %}class="active"{% endif %} data-help="nav_line_rpa">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/><circle cx="9" cy="10" r="1" fill="currentColor"/><circle cx="13" cy="10" r="1" fill="currentColor"/><circle cx="17" cy="10" r="1" fill="currentColor"/></svg>
       <span>LINE 自动聊天</span>
@@ -520,6 +561,10 @@ code{background:var(--input);padding:.15rem .45rem;border-radius:5px;font-size:.
     <a href="/messenger-rpa" {% if active=="messenger_rpa" %}class="active"{% endif %} data-help="nav_messenger_rpa">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12.5L10.5 15 16 9"/></svg>
       <span>Messenger RPA</span>
+    </a>
+    <a href="/whatsapp-rpa" {% if active=="whatsapp_rpa" %}class="active"{% endif %} data-help="nav_whatsapp_rpa">
+      <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884"/></svg>
+      <span>WhatsApp 自动聊天</span>
     </a>
     {% for dp in domain_web_pages if dp.get('section') == 'ops' %}
     <a href="{{ dp.path }}" {% if active==dp.key %}class="active"{% endif %}>
@@ -535,6 +580,10 @@ code{background:var(--input);padding:.15rem .45rem;border-radius:5px;font-size:.
     {% endfor %}
     {# ── 完整模式：AI 与策略 ─────────────────────────── #}
     <div class="sb-sec">{{ (i18n or {}).get('section_ai', 'AI 与策略') }}</div>
+    <a href="/ai-studio" {% if active=="ai_studio" or active=="personas" %}class="active"{% endif %} data-help="nav_ai_studio" style="background:linear-gradient(135deg,rgba(91,124,246,.12),rgba(139,92,246,.08))">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 0110 10 10 10 0 01-10 10A10 10 0 012 12 10 10 0 0112 2z"/><path d="M12 8v8M8 12h8"/></svg>
+      <span><strong>AI 工作室</strong></span>
+    </a>
     <a href="/strategies" {% if active=="strategies" %}class="active"{% endif %} data-help="nav_strategies">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
       <span>{{ (i18n or {}).get('strategies', '策略配置') }}</span>
@@ -618,6 +667,7 @@ code{background:var(--input);padding:.15rem .45rem;border-radius:5px;font-size:.
         <span style="opacity:.6" id="cmd-trigger-txt">{{ (i18n or {}).get('search','搜索') }}...</span>
         <kbd style="font-size:.65rem;background:var(--card);border:1px solid var(--bd);padding:0 .3rem;border-radius:3px;margin-left:.3rem;line-height:1.5">⌘K</kbd>
       </button>
+      {% if user_role == 'viewer' %}<span style="display:inline-flex;align-items:center;gap:.3rem;padding:.18rem .6rem;border-radius:6px;font-size:.72rem;font-weight:700;background:rgba(245,158,11,.12);color:var(--amber);border:1px solid rgba(245,158,11,.25)" title="当前账号为只读观察员，无法修改配置"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="12" height="12"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>只读</span>{% endif %}
       <div class="notif-wrap" id="notif-wrap">
         <button class="notif-btn" onclick="toggleNotif(event)" title="{{ (i18n or {}).get('notifications','通知') }}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
@@ -758,6 +808,8 @@ var _cmdPagesAll=[
   {% for dp in domain_web_pages %}{name:'{{ dp.get("label_simple") or dp.get("label","") }}',url:'{{ dp.path }}',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/></svg>',keys:'{{ dp.get("cmd_keys","") }}',simple:{{ 'true' if dp.get('show_in_simple') else 'false' }}},
   {% endfor %}
   {name:'AI 学习审核',url:'/learner',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>',keys:'learner 学习 审核 AI',simple:true},
+  {name:'统一收件箱',url:'/unified-inbox',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M4 9l8 5 8-5"/></svg>',keys:'unified inbox 统一 收件箱 消息 聊天 多平台',simple:true},
+  {name:'RPA 跨平台总览',url:'/rpa-overview',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>',keys:'rpa overview 总览 跨平台 telegram line messenger whatsapp',simple:true},
   {name:'数据概览',url:'/',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>',keys:'dashboard home 首页 概览 仪表盘',simple:true},
   {name:'运营分析',url:'/analytics',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',keys:'analytics 运营 分析 数据',simple:true},
   {name:'操作记录',url:'/audit',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',keys:'audit 审计 记录 操作',simple:true},
@@ -1203,13 +1255,30 @@ function initTooltip(){
   tipEl=document.createElement('div');tipEl.className='g-tip';
   tipEl.innerHTML='<div class="g-tip-name"></div><div class="g-tip-desc"></div><div class="g-tip-usage"></div>';
   document.body.appendChild(tipEl);
-  const tog=document.createElement('button');tog.className='tip-toggle'+(tipOn?' active':'');tog.innerHTML='?';tog.title='术语提示开关（蓝色=已开启，鼠标悬停页面元素可看中文解释）';
-  tog.onclick=()=>{
+  const tog=document.createElement('button');tog.className='tip-toggle'+(tipOn?' active':'');tog.innerHTML='?';tog.title='左键=开关术语提示 · 右键=隐藏按钮 · 可拖动';
+  tog.onclick=(e)=>{
+    if(tog._dragged)return;
     tipOn=!tipOn;
     localStorage.setItem('tipOn',tipOn?'1':'0');
     tog.classList.toggle('active',tipOn);
     if(!tipOn)tipEl.classList.remove('show');
   };
+  // drag support
+  let _dx=0,_dy=0,_dragging=false;
+  function _onDragStart(ex,ey){_dx=ex-tog.offsetLeft;_dy=ey-tog.offsetTop;_dragging=true;tog._dragged=false;tog.style.transition='none'}
+  function _onDragMove(ex,ey){if(!_dragging)return;tog._dragged=true;tog.style.left=Math.max(0,ex-_dx)+'px';tog.style.top=Math.max(0,ey-_dy)+'px';tog.style.bottom='auto';tog.style.right='auto'}
+  function _onDragEnd(){if(!_dragging)return;_dragging=false;tog.style.transition='';const pos={l:tog.style.left,t:tog.style.top};localStorage.setItem('tipTogPos',JSON.stringify(pos))}
+  tog.addEventListener('mousedown',e=>{if(e.button===0){_onDragStart(e.clientX,e.clientY);e.preventDefault()}});
+  document.addEventListener('mousemove',e=>{_onDragMove(e.clientX,e.clientY)});
+  document.addEventListener('mouseup',()=>_onDragEnd());
+  tog.addEventListener('touchstart',e=>{const t=e.touches[0];_onDragStart(t.clientX,t.clientY)},{passive:true});
+  document.addEventListener('touchmove',e=>{if(_dragging){const t=e.touches[0];_onDragMove(t.clientX,t.clientY)}});
+  document.addEventListener('touchend',()=>_onDragEnd());
+  // right-click = hide
+  tog.addEventListener('contextmenu',e=>{e.preventDefault();tog.style.display='none';localStorage.setItem('tipTogHidden','1');rpa&&rpa.toast?rpa.toast('术语按钮已隐藏（刷新页面恢复）','ok'):0});
+  // restore position
+  try{const sp=JSON.parse(localStorage.getItem('tipTogPos')||'{}');if(sp.l){tog.style.left=sp.l;tog.style.top=sp.t;tog.style.bottom='auto';tog.style.right='auto'}}catch(e){}
+  if(localStorage.getItem('tipTogHidden')==='1') tog.style.display='none';
   document.body.appendChild(tog);
   let _tipHideTimer=null;
   function showTip(target,key){
@@ -1250,7 +1319,7 @@ function matchTerm(el){
   }
   return null;
 }
-document.addEventListener('DOMContentLoaded',initTooltip);
+document.addEventListener('DOMContentLoaded',()=>{localStorage.removeItem('tipTogHidden');initTooltip()});
 
 /* ── Confirm Modal ──────────────────────────────────── */
 (function(){

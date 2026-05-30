@@ -96,9 +96,11 @@ INBOX_COMBINED_PROMPT = (
     "      channel = 公众号/官方号自动推送\n"
     "      group = 群聊\n"
     "  - row_index: 该会话在**会话列表**里从上往下的物理行序号（含已读，从 0 起算）。\n"
-    "      参考标定：720×1600 屏上，第 0 行 Y≈600，第 1 行 Y≈765，第 2 行 Y≈930，\n"
-    "      第 3 行 Y≈1095，第 4 行 Y≈1260，第 5 行 Y≈1425，第 6 行可能贴近底栏。\n"
-    "      每行约 165 像素。\n"
+    "      参考标定：720×1600 屏上，第 0 行 Y≈430，第 1 行 Y≈574，第 2 行 Y≈718，\n"
+    "      第 3 行 Y≈862，第 4 行 Y≈1006，第 5 行 Y≈1150，第 6 行 Y≈1294。\n"
+    "      每行约 144 像素。\n"
+    "  - y_percent: 该会话头像中心距屏幕顶部的百分比（0-100 整数），\n"
+    "      下游用 y_percent×屏幕高 直接算点击坐标，**请尽量精确**。\n"
     "      ★ 屏内最多 **7** 条可见会话行（row_index ∈ [0, 6]）；若 row_index≥7\n"
     "        说明已滚出屏外，**不要包含进 unread 列表**。\n"
     "      ★ 会话列表区**起点是 'Stories' 行的下方** —— 别把 'Create story' / 'Wen' / 'Arnel' \n"
@@ -131,7 +133,7 @@ INBOX_COMBINED_PROMPT = (
     'permission_dialog|other_modal|none","action":"tap_ok|tap_close_x|press_back|'
     'need_human|none","title":"...","confidence":"high|medium|low"},'
     '"unread":[{"name":"...","preview":"...","time":"...",'
-    '"quality_hint":"friend|spam|...","row_index":N,'
+    '"quality_hint":"friend|spam|...","row_index":N,"y_percent":N,'
     '"name_bold":true,"preview_bold":true,"blue_dot":false}],"total_unread":N,'
     '"risk":{"hit":false,"severity":"none|warn|block","reason":"..."}}\n'
     "\n"
@@ -390,6 +392,14 @@ _OUTBOUND_OR_DRAFT_PREVIEW_PREFIXES = (
     "you：",
     "me：",
     "draft：",
+    # P25 (2026-05-23): Chinese Messenger omits "You:" prefix for self-sent messages.
+    # Add Chinese outbound / voice-sent prefixes to catch self-replies at inbox stage.
+    "你：",        # Chinese "You:"
+    "你发了",      # "You sent (a voice/photo/...)"
+    "你发送了",    # "You sent"
+    "你分享了",    # "You shared"
+    "you sent a voice",   # English voice-sent (already covered by "you:" but explicit)
+    "you sent an audio",
 )
 
 
@@ -590,6 +600,20 @@ async def analyze_inbox_combined(
         blue_dot = bool(raw_row.get("blue_dot", False))
         unread_signals = int(name_bold) + int(preview_bold) + int(blue_dot)
         if unread_signals == 0:
+            # P23-D: 如果 preview 明确是外发消息（bot 最后一条是自己发的），
+            # 三信号全 F 时直接丢弃——外发 preview 说明对方没新消息。
+            _pv_low = (preview or "").lower().strip()
+            _OUTBOUND_PREFIXES = (
+                "you sent", "you:", "you shared", "you called",
+                "you reacted", "you missed", "you left",
+                "你:", "您:", "你发了", "你发送",
+            )
+            if any(_pv_low.startswith(_op) for _op in _OUTBOUND_PREFIXES):
+                logger.warning(
+                    "[combined_vision] 三信号全 F + outbound preview → 丢弃 name=%r row=%d",
+                    name, row_index,
+                )
+                continue
             # Vision 已把本行放进 unread[]，但三信号全 F（模型偷懒/误判）时
             # 仍保留 —— 否则会出现「有未读却 0 条」的假阴性（双机互发联调常见）。
             logger.warning(
@@ -598,13 +622,19 @@ async def analyze_inbox_combined(
                 name, row_index,
             )
 
+        try:
+            y_pct = float(raw_row.get("y_percent") or 0)
+        except (TypeError, ValueError):
+            y_pct = 0.0
+        if not (0 < y_pct <= 100):
+            y_pct = 0.0
         rows.append(
             UnreadChat(
                 name=name,
                 preview=preview,
                 time=time_s,
                 row_index=row_index,
-                y_percent=0.0,
+                y_percent=y_pct,
                 quality_hint=hint,
                 score=_score_chat(row_index, hint, preview),
                 # P23：透传三信号让下游 runner 决策

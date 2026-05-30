@@ -143,6 +143,7 @@ class LineRpaRunner:
         self._pacing = PacingConfig.from_dict(self._cfg.get("human_pacing") or {})
         # W4-Runner：ContactHooks 由 main.py 后置注入，None 时所有调用静默跳过
         self._contact_hooks: Optional[Any] = None
+        self._tts_semaphore: Optional[asyncio.Semaphore] = None  # P13-A: 防止 TTS 并发合成
 
     def set_contact_hooks(self, hooks: Optional[Any]) -> None:
         self._contact_hooks = hooks
@@ -185,6 +186,40 @@ class LineRpaRunner:
             logger.debug(
                 "contact_hooks line %s 异常", direction, exc_info=True)
 
+    def _lookup_intimacy_score(self, chat_key: str) -> Optional[float]:
+        """W3-3A.1：LINE 入库后查 IntimacyEngine 的最新 score。
+        失败/无 hooks/无 journey 时返回 None，调用方静默跳过 fusion。
+        """
+        hooks = self._contact_hooks
+        if hooks is None or not chat_key:
+            return None
+        getter = getattr(hooks, "get_journey_intimacy", None)
+        if getter is None:
+            return None
+        account_id = str(self._cfg_get("account_id", "default") or "default")
+        try:
+            score = getter(channel="line", account_id=account_id, external_id=chat_key)
+            return float(score) if score is not None else None
+        except Exception:
+            logger.debug("[line_rpa] _lookup_intimacy_score failed", exc_info=True)
+            return None
+
+    def _lookup_funnel_stage(self, chat_key: str) -> Optional[str]:
+        """W3-3M：查联系人 journey 的 funnel_stage，供 RelationshipStager 注入。"""
+        hooks = self._contact_hooks
+        if hooks is None or not chat_key:
+            return None
+        getter = getattr(hooks, "get_journey_funnel_stage", None)
+        if getter is None:
+            return None
+        account_id = str(self._cfg_get("account_id", "default") or "default")
+        try:
+            stage = getter(channel="line", account_id=account_id, external_id=chat_key)
+            return str(stage) if stage else None
+        except Exception:
+            logger.debug("[line_rpa] _lookup_funnel_stage failed", exc_info=True)
+            return None
+
     def reconfigure(self, new_cfg: Dict[str, Any]) -> None:
         """热更新配置（LineRpaService 使用）。"""
         self._cfg = dict(new_cfg or {})
@@ -192,6 +227,65 @@ class LineRpaRunner:
 
     def _cfg_get(self, key: str, default: Any = None) -> Any:
         return self._cfg.get(key, default)
+
+    def _resolve_line_reply_lang(self, chat_key: str) -> str:
+        """P7-D: 语言优先级链 — 全局 force > 对话锁定 > default_reply_lang。"""
+        # 1. Global force (operator override via config)
+        _force = str(self._cfg.get("force_reply_lang") or "").strip().lower()
+        if _force and _force not in ("auto", "detect", ""):
+            return _force
+        # 2. Per-chat forced_lang from state_store
+        if self._state_store is not None:
+            try:
+                _cs = self._state_store.get_chat_state(chat_key) or {}
+                _fl = str(_cs.get("forced_lang") or "").strip().lower()
+                if _fl and _fl not in ("auto", "detect"):
+                    return _fl
+            except Exception:
+                pass
+        # 3. Config default
+        return str(self._cfg_get("default_reply_lang", "zh") or "zh").lower()
+
+    # ── P6-C: LINE TTS approval-only ─────────────────────────────────────
+    # AIClient lang code → XTTS-v2 lang code
+    _AILANGS_TO_XTTS: Dict[str, str] = {
+        "zh": "zh-cn", "en": "en", "de": "de", "ja": "ja", "ko": "ko",
+        "fr": "fr", "es": "es", "ar": "ar", "ru": "ru", "hi": "hi",
+        "it": "it", "pt": "pt", "nl": "nl", "pl": "pl", "tr": "tr",
+        "cs": "cs", "hu": "hu",
+    }
+
+    async def _maybe_generate_tts_for_pending(
+        self,
+        pending_id: int,
+        reply_text: str,
+        reply_lang: str,
+    ) -> None:
+        """P6-C/P14-B: 异步为 approval-mode pending 行生成 TTS 预览音频。"""
+        vo = self._cfg.get("voice_output") or {}
+        if not vo.get("enabled") or self._state_store is None:
+            return
+        if self._tts_semaphore is None:
+            self._tts_semaphore = asyncio.Semaphore(1)
+        from src.integrations.shared.tts_preview import generate_approval_tts
+        await generate_approval_tts(
+            pending_id, reply_text, reply_lang,
+            voice_cfg=dict(vo), state_store=self._state_store,
+            semaphore=self._tts_semaphore, fname_prefix="line-tts",
+        )
+
+    def _account_persona_id(self, is_group: bool = False) -> str:
+        """Select account-level persona_id for 3-tier routing.
+
+        - Private chats: persona_ids[0]
+        - Group chats: persona_ids[1] if configured, else persona_ids[0]
+        """
+        ids = self._cfg_get("persona_ids") or []
+        if not isinstance(ids, list) or not ids:
+            return ""
+        if is_group and len(ids) > 1:
+            return str(ids[1])
+        return str(ids[0])
 
     def _resolve_serial(self) -> Optional[str]:
         pref = (self._cfg_get("adb_serial") or "").strip()
@@ -317,14 +411,16 @@ class LineRpaRunner:
             r = adb.dump_ui_hierarchy_xml(serial, remote)
             out = r.stdout or ""
             if "<?xml" in out and "hierarchy" in out:
-                return out.encode("utf-8"), f"ok:{remote}"
+                xml_start = out.find("<?xml")
+                return out[xml_start:].encode("utf-8"), f"ok:{remote}"
             logger.debug("dump try %s rc=%s head=%s", remote, r.returncode, out[:80])
 
             if try_root:
                 rr = adb.dump_ui_hierarchy_xml_as_root(serial, remote)
                 outr = rr.stdout or ""
                 if "<?xml" in outr and "hierarchy" in outr:
-                    return outr.encode("utf-8"), f"ok_su:{remote}"
+                    xml_start = outr.find("<?xml")
+                    return outr[xml_start:].encode("utf-8"), f"ok_su:{remote}"
                 logger.debug(
                     "dump su try %s rc=%s head=%s",
                     remote,
@@ -402,6 +498,7 @@ class LineRpaRunner:
                         reader_path=str(result.get("dump") or ""),
                         total_ms=float(result["timings_ms"]["run_total"]),
                         error=str(result.get("error") or ""),
+                        reply_lang=str(result.get("reply_lang") or ""),
                     )
                 except Exception:
                     logger.debug("state_store.record_run 失败", exc_info=True)
@@ -568,16 +665,28 @@ class LineRpaRunner:
             "chat_id": cid,
             "request_id": req_id,
             "channel": "line_rpa",
-            "reply_lang": str(self._cfg_get("default_reply_lang", "zh")),
+            "platform": "line_rpa",  # S5: CrossPlatformIdentity
+            "reply_lang": self._resolve_line_reply_lang(chat_key),
             "line_rpa_chat_key": chat_key,
             "line_rpa_style_hint": line_style,
+            "account_persona_id": self._account_persona_id(),  # private path
         }
+        out["reply_lang"] = ctx["reply_lang"]
 
         # W4-Runner: inbound 入库（失败静默）
         self._emit_contact_message(
             chat_key=chat_key, direction="in",
             text=peer_text.strip(), trace_id=req_id,
         )
+        # W3-3A.1：把 IntimacyEngine 写回 journey 的最新 score 透传给 skill_manager
+        # → companion_relationship 双信号融合（沉默衰减触发自动降级 + reunion 提示）
+        _intim = self._lookup_intimacy_score(chat_key)
+        if _intim is not None:
+            ctx["intimacy_score"] = _intim
+        # W3-3M：漏斗阶段 → RelationshipStager 语气指令注入
+        _fstage = self._lookup_funnel_stage(chat_key)
+        if _fstage:
+            ctx["funnel_stage"] = _fstage
 
         reply_text: Optional[str] = None
         try:
@@ -665,6 +774,13 @@ class LineRpaRunner:
 
             t0 = time.time()
             send_res = await asyncio.to_thread(self._send_text, last_xml, piece)
+            if not send_res.get("ok"):
+                await asyncio.sleep(1.5)
+                redump_xml, _ = await asyncio.to_thread(self._dump_ui_xml)
+                send_res = await asyncio.to_thread(
+                    self._send_text, redump_xml or last_xml, piece
+                )
+                send_res["retried"] = True
             send_res["took_ms"] = int((time.time() - t0) * 1000)
             send_res["text"] = piece
             results.append(send_res)
@@ -973,18 +1089,29 @@ class LineRpaRunner:
                 "chat_id": cid,
                 "request_id": req_id,
                 "channel": "line_rpa",
-                "reply_lang": str(self._cfg_get("default_reply_lang", "zh")),
+                "platform": "line_rpa",  # S5: CrossPlatformIdentity
+                "reply_lang": self._resolve_line_reply_lang(chat_key),
                 "line_rpa_chat_key": chat_key,
                 "line_rpa_style_hint": str(self._cfg_get("reply_style_hint") or ""),
                 "is_group": False,
                 "mentioned": False,
                 "vision_room": True,
+                "account_persona_id": self._account_persona_id(),  # vision branch private
             }
+            out["reply_lang"] = ctx["reply_lang"]
             # W4-Runner: inbound 入库（vision-peer 分支）
             self._emit_contact_message(
                 chat_key=chat_key, direction="in",
                 text=vpeer.strip(), trace_id=req_id,
             )
+            # W3-3A.1：vision-peer 分支同样透传 intimacy_score
+            _intim = self._lookup_intimacy_score(chat_key)
+            if _intim is not None:
+                ctx["intimacy_score"] = _intim
+            # W3-3M：vision-peer 分支同样透传 funnel_stage
+            _fstage = self._lookup_funnel_stage(chat_key)
+            if _fstage:
+                ctx["funnel_stage"] = _fstage
 
             reply_text: Optional[str] = None
             try:
@@ -1022,6 +1149,12 @@ class LineRpaRunner:
                     out["pending_id"] = pid
                     out["ok"] = True
                     out["step"] = "awaiting_approval"
+                    # P6-C: fire-and-forget TTS preview (non-blocking)
+                    asyncio.create_task(self._maybe_generate_tts_for_pending(
+                        pid, str(reply_text),
+                        # P10-A: 回退链 forced_lang > default，而非直接跳到 default
+                        str(ctx.get("reply_lang") or self._resolve_line_reply_lang(chat_key)),
+                    ))
                     return out
                 except Exception as e:  # noqa: BLE001
                     logger.warning("vision_room insert_pending 失败: %s", e)
@@ -1148,17 +1281,28 @@ class LineRpaRunner:
             "chat_id": cid,
             "request_id": req_id,
             "channel": "line_rpa",
-            "reply_lang": str(self._cfg_get("default_reply_lang", "zh")),
+            "platform": "line_rpa",  # S5: CrossPlatformIdentity
+            "reply_lang": self._resolve_line_reply_lang(chat_key),
             "line_rpa_chat_key": chat_key,
             "line_rpa_style_hint": verdict.style_hint,
             "is_group": verdict.is_group,
             "mentioned": verdict.mentioned,
+            "account_persona_id": self._account_persona_id(is_group=verdict.is_group),
         }
+        out["reply_lang"] = ctx["reply_lang"]
         # W4-Runner: inbound 入库（nav-scan 分支）
         self._emit_contact_message(
             chat_key=chat_key, direction="in",
             text=peer_text.strip(), trace_id=req_id,
         )
+        # W3-3A.1：nav-scan 分支同样透传 intimacy_score
+        _intim = self._lookup_intimacy_score(chat_key)
+        if _intim is not None:
+            ctx["intimacy_score"] = _intim
+        # W3-3M：nav-scan 分支同样透传 funnel_stage
+        _fstage = self._lookup_funnel_stage(chat_key)
+        if _fstage:
+            ctx["funnel_stage"] = _fstage
 
         try:
             reply_text = await self._sm.process_message(
@@ -1201,6 +1345,12 @@ class LineRpaRunner:
                 out["pending_id"] = pid
                 out["ok"] = True
                 out["step"] = "awaiting_approval"
+                # P6-C: fire-and-forget TTS preview (non-blocking)
+                asyncio.create_task(self._maybe_generate_tts_for_pending(
+                    pid, str(reply_text),
+                    # P10-A: 回退链 forced_lang > default，而非直接跳到 default
+                    str(ctx.get("reply_lang") or self._resolve_line_reply_lang(chat_key)),
+                ))
                 return out
             except Exception as e:  # noqa: BLE001
                 logger.warning("insert_pending 失败，回退为普通发送: %s", e)
@@ -1267,6 +1417,9 @@ class LineRpaRunner:
             result["error"] = "no_adb_device"
             result["step"] = "no_adb_device"
             return result
+
+        # 强制竖屏：横屏下 uiautomator dump 坐标系错误会导致导航失败
+        await asyncio.to_thread(adb.force_portrait, self._serial)
 
         nav = self._build_navigator()
 
@@ -1430,6 +1583,7 @@ class LineRpaRunner:
                         total_ms=0.0,
                         error=str(pr.get("error") or ""),
                         screenshot_path=pr.get("screenshot_path"),
+                        reply_lang=str(pr.get("reply_lang") or ""),
                     )
                 except Exception:
                     logger.debug("record_run 失败", exc_info=True)
@@ -1485,6 +1639,9 @@ class LineRpaRunner:
         elif any_unread_handled:
             result["ok"] = True
             result["step"] = "multi_handled_no_send"
+        elif total_unread_seen == 0 and processed == 0:
+            result["ok"] = True
+            result["step"] = "no_unread"
         else:
             result["step"] = "multi_all_failed"
         # 面向 state_store.record_run：给"主轮"也暴露 peer_text/reply_text（第一条有效）
@@ -1641,4 +1798,102 @@ class LineRpaRunner:
             # 回列表继续处理下一条
             await nav.back_to_chat_list()
 
+        return out
+
+    # ── P28：手动发送队列投递 ────────────────────────────────────
+    async def run_send_queue_deliveries(self, max_deliver: int = 3) -> Dict[str, Any]:
+        """弹出并投递手动发送队列任务（P28 hook；P29 实现 UI 自动化）。"""
+        out: Dict[str, Any] = {
+            "delivered": 0, "failed": 0, "skipped": 0, "details": [],
+        }
+        if self._state_store is None:
+            out["error"] = "no_state_store"
+            return out
+
+        for _ in range(max_deliver):
+            item = self._state_store.pop_send_queue_item()
+            if item is None:
+                break
+            item_id = int(item.get("id") or 0)
+            detail: Dict[str, Any] = {
+                "id": item_id, "chat_key": item.get("chat_key"),
+            }
+            try:
+                res = await self._handle_queued_send(item)
+                if res.get("ok"):
+                    self._state_store.mark_send_queue_item(item_id, "sent")
+                    detail["step"] = "sent"
+                    out["delivered"] += 1
+                else:
+                    err = str(res.get("error") or "send_failed")[:200]
+                    self._state_store.mark_send_queue_item(item_id, "failed", error=err)
+                    detail["step"] = "failed"
+                    detail["error"] = err
+                    out["failed"] += 1
+            except Exception as exc:
+                err = str(exc)[:200]
+                self._state_store.mark_send_queue_item(item_id, "failed", error=err)
+                detail["step"] = "exception"
+                detail["error"] = err
+                out["failed"] += 1
+            out["details"].append(detail)
+
+        return out
+
+    async def _handle_queued_send(self, item: Dict[str, Any]) -> Dict[str, Any]:
+        """P28 stub — P29 将实现完整的 UI 导航 + 发送逻辑。
+
+        Returns {"ok": bool, "error": str | None}.
+        """
+        # P29-TODO: implement LINE UI navigation and send for chat_key
+        return {"ok": False, "error": "not_implemented_p29"}
+
+    # ── 自动接受好友申请 ──────────────────────────────────────
+    async def maybe_auto_accept_friends(self, max_accept: int = 5) -> Dict[str, Any]:
+        """在当前屏幕 XML 中寻找"接受好友申请"按钮并点击。
+
+        设计原则：
+        - 只作用于当前可见界面，**不主动导航**到好友申请页
+        - 若当前不在好友申请页则无副作用
+        - 由 service._loop() 在 health_check 同级节流下调用
+        """
+        aa_cfg = self._cfg_get("auto_accept") or {}
+        if not isinstance(aa_cfg, dict) or not aa_cfg.get("enabled"):
+            return {"skipped": True, "reason": "disabled"}
+
+        serial = self._serial
+        if not serial:
+            return {"skipped": True, "reason": "no_serial"}
+
+        out: Dict[str, Any] = {"tapped": 0, "coords": []}
+        try:
+            xml_bytes, _ = await asyncio.to_thread(self._dump_ui_xml)
+            if not xml_bytes:
+                return {"skipped": True, "reason": "no_xml"}
+
+            coords = ui.find_accept_button_coords(xml_bytes)
+            if not coords:
+                return {"skipped": True, "reason": "no_accept_buttons"}
+
+            for cx, cy in coords[:max_accept]:
+                adb.input_tap(serial, cx, cy)
+                await asyncio.sleep(0.6)
+                out["tapped"] += 1
+                out["coords"].append([cx, cy])
+                logger.info("auto_accept_friends: tapped (%d,%d)", cx, cy)
+
+            if out["tapped"] and self._state_store is not None:
+                try:
+                    self._state_store.insert_alert(
+                        kind="friend_accepted",
+                        severity="info",
+                        message=f"自动接受好友申请 {out['tapped']} 个",
+                        detail={"coords": out["coords"]},
+                        dedup_window_sec=300,
+                    )
+                except Exception:
+                    pass
+        except Exception as e:
+            out["error"] = str(e)
+            logger.debug("maybe_auto_accept_friends 失败: %s", e, exc_info=True)
         return out

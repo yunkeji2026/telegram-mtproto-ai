@@ -45,6 +45,8 @@ class AIClient(LoggerMixin):
         self._oa_client = None  # AsyncOpenAI（Ollama / OpenAI 兼容）
         self._oa_embed_client = None  # 可选：仅用于 embedding（如 DeepSeek 对话 + Ollama 向量）
         self._use_openai_compat = False
+        self._oa_extra_body: Dict[str, Any] = {}  # 透传给 create() 的额外字段（如 think:false）
+        self._ollama_native_base: Optional[str] = None  # 非 None 时走原生 /api/chat（绕过 /v1/ think 问题）
         self._provider = "gemini"
         self.system_prompt = ""
         self.model = "gemini-2.5-flash"
@@ -165,6 +167,17 @@ class AIClient(LoggerMixin):
         self._oa_client = AsyncOpenAI(api_key=key, base_url=raw_base, timeout=float(self.timeout))
         self._use_openai_compat = True
         self.client = None
+        self._oa_extra_body = {}
+        self._ollama_native_base = None
+        think_flag = ai_config.get("think")
+        if think_flag is False:
+            self._oa_extra_body["options"] = {"think": False}
+            # Auto-detect Ollama native endpoint: use /api/chat to properly honor think:false
+            # (Ollama /v1/ compat endpoint ignores think flag in some versions)
+            _root = raw_base[:-3] if raw_base.endswith("/v1") else raw_base
+            if ai_config.get("ollama_native", True) and (":11434" in _root or "/ollama" in _root.lower()):
+                self._ollama_native_base = _root.rstrip("/")
+                self.logger.info("Ollama native /api/chat mode enabled: %s", self._ollama_native_base)
 
         emb_raw = (ai_config.get("embedding_base_url") or "").strip().rstrip("/")
         if emb_raw:
@@ -190,22 +203,62 @@ class AIClient(LoggerMixin):
         try:
             if not self._oa_client:
                 return False
-            response = await self._oa_client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": "Say hi in one word."}],
-                max_tokens=32,
-                temperature=0.3,
-            )
-            if response and response.choices:
-                c0 = response.choices[0].message
-                if c0 and (c0.content or "").strip():
-                    self.logger.info("AI API 连接测试成功")
-                    return True
+            if self._ollama_native_base:
+                text, _, _ = await self._ollama_native_chat(
+                    messages=[{"role": "user", "content": "Say hi in one word."}],
+                    max_tokens=64,
+                    temperature=0.3,
+                )
+            else:
+                create_kwargs: Dict[str, Any] = dict(
+                    model=self.model,
+                    messages=[{"role": "user", "content": "Say hi in one word."}],
+                    max_tokens=512,
+                    temperature=0.3,
+                )
+                if self._oa_extra_body:
+                    create_kwargs["extra_body"] = self._oa_extra_body
+                response = await self._oa_client.chat.completions.create(**create_kwargs)
+                text = ""
+                if response and response.choices:
+                    c0 = response.choices[0].message
+                    text = (c0.content or "").strip()
+                    if not text:
+                        extra = getattr(c0, "model_extra", None) or {}
+                        text = (extra.get("reasoning") or "").strip()
+            if text:
+                self.logger.info("AI API 连接测试成功")
+                return True
             self.logger.error("OpenAI 兼容 API 返回空 choices")
             return False
         except Exception as e:
             self.logger.error(f"AI API 连接测试失败: {e}")
             return False
+
+    async def _ollama_native_chat(
+        self,
+        messages: List[Dict[str, Any]],
+        max_tokens: int,
+        temperature: float,
+    ) -> tuple:
+        """Call Ollama /api/chat directly (bypasses /v1/ think-flag bug). Returns (content, prompt_tokens, completion_tokens)."""
+        import httpx
+        payload: Dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "stream": False,
+            "think": False,
+            "options": {"num_predict": max_tokens, "temperature": temperature},
+        }
+        async with httpx.AsyncClient(timeout=float(self.timeout)) as _hc:
+            resp = await _hc.post(f"{self._ollama_native_base}/api/chat", json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+        msg = data.get("message") or {}
+        content = (msg.get("content") or "").strip()
+        pt = int(data.get("prompt_eval_count") or 0)
+        ct = int(data.get("eval_count") or 0)
+        return content, pt, ct
 
     async def _test_connection(self) -> bool:
         """测试API连接"""
@@ -303,7 +356,13 @@ class AIClient(LoggerMixin):
             pass
         messages: List[Dict[str, str]] = []
         if system_instruction:
-            messages.append({"role": "system", "content": system_instruction})
+            _sys_content = system_instruction
+            if self._oa_extra_body.get("options", {}).get("think") is False:
+                if "/nothink" not in _sys_content:
+                    _sys_content = _sys_content.rstrip() + "\n/nothink"
+            messages.append({"role": "system", "content": _sys_content})
+        elif self._oa_extra_body.get("options", {}).get("think") is False:
+            messages.append({"role": "system", "content": "/nothink"})
         if conversation_history:
             _lim = max(0, int(max_hist))
             hist = [] if _lim == 0 else conversation_history[-_lim:]
@@ -323,33 +382,49 @@ class AIClient(LoggerMixin):
         start_time = time.time()
         for attempt in range(2):
             try:
-                response = await self._oa_client.chat.completions.create(
-                    model=use_model,
-                    messages=messages,
-                    temperature=use_temperature,
-                    max_tokens=use_max_tokens,
-                )
-                elapsed_time = time.time() - start_time
-                try:
-                    from src.monitoring.metrics_store import get_metrics_store
-                    get_metrics_store().record_api_call(elapsed_time * 1000)
-                except Exception:
-                    pass
-
-                reply = None
-                if response and response.choices:
-                    reply = (response.choices[0].message.content or "").strip()
-                if reply:
-                    self.total_calls += 1
-                    pt = ct = 0
+                pt: int = 0
+                ct: int = 0
+                if self._ollama_native_base:
+                    reply, pt, ct = await self._ollama_native_chat(
+                        messages=messages,
+                        max_tokens=use_max_tokens,
+                        temperature=use_temperature,
+                    )
+                    elapsed_time = time.time() - start_time
+                else:
+                    _create_kw: Dict[str, Any] = dict(
+                        model=use_model,
+                        messages=messages,
+                        temperature=use_temperature,
+                        max_tokens=use_max_tokens,
+                    )
+                    if self._oa_extra_body:
+                        _create_kw["extra_body"] = self._oa_extra_body
+                    response = await self._oa_client.chat.completions.create(**_create_kw)
+                    elapsed_time = time.time() - start_time
+                    reply = None
+                    if response and response.choices:
+                        _msg = response.choices[0].message
+                        reply = (_msg.content or "").strip()
+                        if not reply:
+                            _extra = getattr(_msg, "model_extra", None) or {}
+                            reply = (_extra.get("reasoning") or "").strip()
                     try:
                         u = response.usage
                         if u:
                             pt = getattr(u, "prompt_tokens", 0) or 0
                             ct = getattr(u, "completion_tokens", 0) or 0
-                            self.total_tokens += pt + ct
                     except Exception:
                         pass
+                try:
+                    from src.monitoring.metrics_store import get_metrics_store
+                    get_metrics_store().record_api_call(elapsed_time * 1000)
+                except Exception:
+                    pass
+                reply = reply or None
+                if reply:
+                    self.total_calls += 1
+                    self.total_tokens += pt + ct
                     self.last_call_time = time.time()
                     # ★ P6-4：按 (model, tier, account) 累积 tokens + cost
                     try:
@@ -859,11 +934,35 @@ class AIClient(LoggerMixin):
 
             _pm = PersonaManager.get_instance()
             _p_cid = str((context or {}).get("chat_id", "") or "") if context else ""
+            _p_acc_pid = str((context or {}).get("account_persona_id", "") or "") if context else ""
+            # P10-C: derive platform from channel; pass funnel_stage for tone injection
+            _channel = str((context or {}).get("channel", "") or "")
+            _p_platform = "whatsapp" if "whatsapp" in _channel else _channel
+            _p_funnel = str((context or {}).get("funnel_stage", "") or "") if context else ""
             _p_block = _pm.format_persona_block(
-                _p_cid, detail=_pbd, name_override=_name_ov
+                _p_cid, detail=_pbd, name_override=_name_ov,
+                account_persona_id=_p_acc_pid,
+                platform=_p_platform,
+                funnel_stage=_p_funnel,
             )
             if _p_block:
                 parts.append("【后台人设定位 · 须遵守】\n" + _p_block)
+            _p_resolved, _p_tier = _pm.get_persona_with_tier(_p_cid, _p_acc_pid)
+            _p_name = _p_resolved.get("name", "?")
+            # ★ 传给 context，让 _build_context_prompt 能做名字锁定
+            if context is not None and _p_name and _p_name != "?":
+                context["_resolved_persona_name"] = _p_name
+            _req_id = str((context or {}).get("request_id", "") or "")
+            if _p_tier in ("chat_binding", "account_profile"):
+                logger.info(
+                    "[persona] tier=%s name=%r acc_pid=%r cid=%s req=%s",
+                    _p_tier, _p_name, _p_acc_pid or "—", _p_cid or "—", _req_id or "—",
+                )
+            else:
+                logger.debug(
+                    "[persona] tier=%s name=%r cid=%s",
+                    _p_tier, _p_name, _p_cid or "—",
+                )
         except Exception:
             pass
 
@@ -1092,6 +1191,19 @@ class AIClient(LoggerMixin):
                 prompt_parts.append(
                     "【LINE 读屏模式】本条上下文来自截图+多模态识别，可能存在遗漏；回复保持容错、简短。"
                 )
+        # WhatsApp RPA：渠道说明 + 可选 style_hint
+        if context.get("channel") == "whatsapp_rpa":
+            _wh = (context.get("whatsapp_rpa_style_hint") or "").strip()
+            _peer = (context.get("whatsapp_rpa_peer_name") or "").strip()
+            if _wh:
+                prompt_parts.append("【WhatsApp 人设补充】\n" + _wh)
+            else:
+                _peer_clause = f"对方名字是「{_peer}」；" if _peer else ""
+                prompt_parts.append(
+                    f"【WhatsApp 渠道】当前为 WhatsApp 一对一私聊；{_peer_clause}"
+                    "回复风格偏朋友式聊天，简短自然（建议 1-3 句，可含少量 emoji），"
+                    "避免长段客服套话；称呼用对方在 WhatsApp 上的名字，不主动提及其他平台。"
+                )
         # Messenger RPA：渠道说明 + 可选 style_hint（从 config 读）
         if context.get("channel") == "messenger_rpa":
             _mh = (context.get("messenger_rpa_style_hint") or "").strip()
@@ -1116,6 +1228,38 @@ class AIClient(LoggerMixin):
             elif _peer_kind == "sticker":
                 prompt_parts.append(
                     "【Messenger 多模态·贴纸】对方发来贴纸；回复口语化，一两句即可，贴纸氛围偏轻松。"
+                )
+        # WhatsApp / 通用语音消息提示（对方发语音，AI 回复应更口语/简短）
+        if context.get("_peer_message_is_voice"):
+            _vdur = context.get("_voice_duration") or ""
+            _vdur_txt = f"（时长 {_vdur}）" if _vdur else ""
+            prompt_parts.append(
+                f"【语音消息】对方发来语音{_vdur_txt}（已转文字）。"
+                "你的回复应更口语化、简短自然，像在对讲一样回应，避免书面长段。"
+            )
+        # WhatsApp 媒体消息提示（图片/视频/贴纸/GIF/文件）
+        if context.get("_peer_message_is_media"):
+            _mkind = context.get("_media_kind") or "media"
+            _mdesc = (context.get("_media_desc") or "").strip()
+            _kind_hint = {
+                "image":            "图片/截图",
+                "sticker":          "贴纸",
+                "animated_sticker": "动态贴纸",
+                "video":            "视频（缩略图识别）",
+                "gif":              "GIF 动图",
+                "file":             "文件",
+            }.get(_mkind, "媒体消息")
+            if _mdesc:
+                prompt_parts.append(
+                    f"【WhatsApp 媒体消息·{_kind_hint}】系统已识别对方发来的媒体内容如下：\n"
+                    f"{_mdesc}\n"
+                    "回复要求：像真人一样自然回应这条媒体消息，不要说「我无法查看图片」；"
+                    "若识别内容不清楚可温和追问；视频仅基于缩略图内容回应，不要假装看完整个视频。"
+                )
+            else:
+                prompt_parts.append(
+                    f"【WhatsApp 媒体消息·{_kind_hint}】对方发来了一条{_kind_hint}消息，"
+                    "内容暂无法识别。请自然承认收到了，并温和追问对方想表达或想了解什么。"
                 )
         # 关键信息锚定：置顶，避免长对话截断后丢失（陪聊域不注入通道/订单锚点）
         key_anchor = []
@@ -1175,26 +1319,28 @@ class AIClient(LoggerMixin):
         _rp = (context.get("_relationship_prompt_block") or "").strip()
         if _rp and _is_companion:
             prompt_parts.append(_rp)
-        _epi = (context.get("_episodic_memory_text") or "").strip()
-        if _epi:
-            prompt_parts.append(
-                "【用户长期记忆要点（简要事实，自然承接即可；不要机械复述「我记得你说过」）】\n"
-                + _epi
-            )
+        # W3-3M：漏斗阶段语气指令（跨域；与 _relationship_prompt_block 互补非替代）
+        _fd = (context.get("_funnel_directive") or "").strip()
+        if _fd and not (_rp and _is_companion):
+            # companion 已注入完整关系块时不再重复；其他域正常追加
+            prompt_parts.append(_fd)
+        # ★ 情感智能上下文引擎（时间感知 + 情绪弧线 + 关系温度 + 记忆反思）
+        _emo_block = (context.get("_emotional_context_block") or "").strip()
+        if _emo_block:
+            prompt_parts.append(_emo_block)
+        else:
+            # 降级：无情感引擎时仍注入原始记忆
+            _epi = (context.get("_episodic_memory_text") or "").strip()
+            if _epi:
+                prompt_parts.append(
+                    "【用户长期记忆要点（简要事实，自然承接即可；不要机械复述「我记得你说过」）】\n"
+                    + _epi
+                )
         _slo = (context.get("_slow_think_outline") or "").strip()
         if _slo:
             prompt_parts.append(
                 "【慢思考规划（内部策略，请自然融入回复，勿逐条复读）】\n" + _slo[:2800]
             )
-        # 添加用户信息
-        user_id = context.get('user_id')
-        if user_id:
-            prompt_parts.append(f"用户ID: {user_id}")
-        
-        # 添加上次对话时间
-        last_message_time = context.get('last_message_time')
-        if last_message_time:
-            prompt_parts.append(f"上次消息时间: {last_message_time}")
         
         # 添加意图信息
         intent = context.get('intent')
@@ -1218,6 +1364,26 @@ class AIClient(LoggerMixin):
                 "可答「和刚才一致」、或只回应追问点（例如问波动则只谈波动与建议）。"
             )
 
+        # ★ 重复消息检测（runner 层标记）：用户发了跟上次一模一样的消息
+        _is_repeated_msg = bool(context.get("_is_repeated_message"))
+        _prev_reply_for_rpt = (context.get("_prev_reply_for_repeat") or "").strip()
+        if _is_repeated_msg and _prev_reply_for_rpt:
+            prompt_parts.append(
+                "【重要：对方刚才发了一条跟上次一模一样的消息】\n"
+                f"你上次的回复是：「{_prev_reply_for_rpt[:200]}」\n\n"
+                "真人收到相同消息时的自然反应（任选其一，按情境决定）：\n"
+                "1. 轻松调侃：「哈哈你又问～」「怎么又问这个啦」\n"
+                "2. 确认意图：「嗯？上次不是说了吗，是没看到还是想再确认一下？」\n"
+                "3. 换个角度补充上次没说的细节\n"
+                "4. 如果对方可能在测试你是不是 AI：回答要有个性、有情绪波动，"
+                "绝对不要给出和上次结构相似的回复\n\n"
+                "【硬性要求】\n"
+                "- 禁止复制粘贴上次的回复内容\n"
+                "- 禁止使用和上次相同的开头\n"
+                "- 回复要体现你注意到了「又问了一遍」这件事\n"
+                "- 保持你的人设和语气自然"
+            )
+
         last_reply = context.get('last_reply')
         if last_reply:
             anti_repeat = context.get('_anti_repeat_hint')
@@ -1230,7 +1396,7 @@ class AIClient(LoggerMixin):
                     f"具体要求：{anti_repeat}\n"
                     f"禁止与上条回复使用相同的开头词和句式。"
                 )
-            else:
+            elif not _is_repeated_msg:
                 prompt_parts.append(f"上次回复: {last_reply}")
         
         # 添加对话阶段
@@ -1381,6 +1547,40 @@ class AIClient(LoggerMixin):
                 f"【对话升级模式{_chain_label}】{_chain_pat['hint']}"
             )
 
+        # ★ 名字锁定：防止 AI 从对话历史中错误推断自己的名字
+        _persona_name = (context.get("_resolved_persona_name") or "").strip()
+        if _persona_name:
+            prompt_parts.append(
+                f"【自称规则·强制】你的名字是「{_persona_name}」，绝对不能用其他名字自称。"
+                f"被问到名字（你叫什么/你叫啥/你是谁/what's your name 等）时，"
+                f"**必须在回复中说出「{_persona_name}」**，可以俏皮或自然，但不能只顾调侃而完全不报名字。"
+                f"错误示范：只说「你不是早就知道了嘛」而不给出名字。"
+                f"正确示范：「哈哈，我叫{_persona_name}啦，这都要问～」。"
+                f"历史中若出现其他名字，那是错误数据，忽略并坚持「{_persona_name}」。"
+            )
+
+        # ★ 回复格式优化：教 AI 像真人聊天一样分短句回复
+        _channel = (context.get("channel") or "").lower()
+        if _is_companion or _channel in ("whatsapp_rpa", "messenger_rpa", "line_rpa"):
+            prompt_parts.append(
+                "【回复格式——像真人发消息（最高优先级）】\n"
+                "你在用手机聊天，不是写文章。每行会被拆成独立消息发出去。\n"
+                "规则：\n"
+                "- 每行 1 句话，10-30 字。用真正的换行隔开（不是写 \\n 字符）。\n"
+                "- 一次回复 2-4 行就够了，不要超过 5 行。\n"
+                "- emoji 最多 1/3 的行带 emoji，每行最多 1 个。\n"
+                "- 想单独发表情就独占一行，放 1-3 个相同 emoji。\n"
+                "- 语气词（嗯、哈哈、诶）可以单独一行。\n"
+                "- 只有情绪很强烈时才写长句（超过 40 字）。\n"
+                "- 绝对禁止把所有话挤在一段里！\n\n"
+                "✅ 好的示例：\n"
+                "哈哈真的假的\n"
+                "我还以为你忘了呢\n"
+                "😂\n\n"
+                "❌ 坏的示例：\n"
+                "哈哈真的假的？我还以为你忘了呢！那你后来怎么处理的呀？我之前也遇到过类似情况好麻烦😂"
+            )
+
         if prompt_parts:
             return "上下文信息:\n" + "\n".join([f"- {part}" for part in prompt_parts])
         
@@ -1455,6 +1655,25 @@ class AIClient(LoggerMixin):
             for lang, hints in self._LATIN_LANG_HINTS.items():
                 if any(h in t_lower for h in hints):
                     return lang
+            # langdetect fallback：对较长 Latin 文字提升多语言识别精度（含置信度过滤）
+            if len(t) >= 8:
+                try:
+                    from langdetect import detect_langs as _ld_detect_langs  # type: ignore
+                    _ld_langs = _ld_detect_langs(t)
+                    if _ld_langs:
+                        _ld_top = _ld_langs[0]
+                        if _ld_top.prob >= 0.55:
+                            _ld_raw = str(_ld_top.lang)
+                            _ld_map = {"zh-cn": "zh", "zh-tw": "zh", "zh": "zh", "ar": "ar_ur"}
+                            _ld_code = _ld_map.get(_ld_raw, _ld_raw)
+                            if _ld_code in self._LANG_NAMES:
+                                logger.debug(
+                                    "_detect_message_language: %r → %s (prob=%.3f)",
+                                    t[:50], _ld_code, _ld_top.prob,
+                                )
+                                return _ld_code
+                except Exception:
+                    pass
             return "en"
 
         t_lower = t.lower().strip("?？!！.。, ")
@@ -1483,11 +1702,18 @@ class AIClient(LoggerMixin):
         facts = obj.get("facts") if isinstance(obj, dict) else None
         if not isinstance(facts, list):
             return []
+        # Filter: discard facts about the assistant's own name/identity.
+        # These override the configured persona and cause "名字污染".
+        _IDENTITY_FILTERS = (
+            "助手", "称呼助手", "告知全名", "助手全名", "助手名", "助手叫",
+            "我叫", "我的名字", "bot叫", "AI叫",
+        )
         out: List[str] = []
         for x in facts:
             s = str(x).strip()
             if 2 <= len(s) <= 500:
-                out.append(s)
+                if not any(kw in s for kw in _IDENTITY_FILTERS):
+                    out.append(s)
             if len(out) >= 6:
                 break
         return out
@@ -1507,8 +1733,11 @@ class AIClient(LoggerMixin):
 
         sys_inst = (
             "你是对话记忆抽取器。根据本轮用户消息与助手回复，抽取值得后续聊天记住的客观信息"
-            "（称呼、偏好、用户刚透露的重要事实、简单约定）。不要抽取通道费率、订单号等业务敏感数字"
-            "除非用户明确说这是 TA 自己的。输出严格为一行 JSON，不要 markdown："
+            "（用户称呼自己的名字、用户的偏好、用户刚透露的重要事实、简单约定）。"
+            "不要抽取通道费率、订单号等业务敏感数字（除非用户明确说这是 TA 自己的）。"
+            "【重要】绝对不要抽取关于助手/AI/机器人自己的名字、身份、角色的事实，"
+            "例如「用户称呼助手为X」「助手全名为Y」等，这类信息由系统人设控制，不需记忆。"
+            "输出严格为一行 JSON，不要 markdown："
             '{"facts":["..."]} facts 为 0～4 条中文短句，无则 []。'
         )
         usr = f"USER:\n{u[:2000]}\n\nASSISTANT:\n{a[:2000]}"

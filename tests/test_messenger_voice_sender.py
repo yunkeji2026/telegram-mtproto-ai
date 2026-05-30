@@ -116,7 +116,7 @@ def test_voice_sender_falls_back_to_search_and_screenshot_send(tmp_path, monkeyp
     monkeypatch.setattr(
         sender,
         "_search_share_recipient",
-        lambda name, screen_wh: searches.append((name, screen_wh)),
+        lambda name, screen_wh: (searches.append((name, screen_wh)) or True),
     )
 
     rv = sender.send_audio_file(str(audio), recipient_name="Victor Zan")

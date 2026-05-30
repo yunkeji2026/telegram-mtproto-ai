@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from src.integrations.line_rpa.adb_helpers import get_device_lock
 from src.integrations.line_rpa.runner import LineRpaRunner
 from src.integrations.line_rpa.state_store import (
     LineRpaStateStore,
@@ -38,14 +39,19 @@ class LineRpaService:
         config_manager: Any,
         skill_manager: Any,
         line_rpa_cfg: Optional[Dict[str, Any]] = None,
+        account_id: Optional[str] = None,
     ) -> None:
         self._cm = config_manager
         self._sm = skill_manager
         self._cfg: Dict[str, Any] = dict(line_rpa_cfg or {})
+        self.account_id: str = account_id or self._cfg.get("account_id") or "default"
         self._merged_cfg: Dict[str, Any] = self._merged()
 
         cfg_dir = Path(self._cm.config_path).parent
-        db_path = default_state_db_path(self._cm.config_path)
+        if self.account_id and self.account_id != "default":
+            db_path = Path(self._cm.config_path).parent / f"line_rpa_state_{self.account_id}.db"
+        else:
+            db_path = default_state_db_path(self._cm.config_path)
         self._state = LineRpaStateStore(
             db_path,
             max_runs_kept=int(self._merged_cfg.get("recent_runs_buffer", 500) or 500),
@@ -71,9 +77,11 @@ class LineRpaService:
         # 自适应轮询状态
         self._last_had_peer_ts: float = 0.0
         self._last_tick_ts: float = 0.0
+        self._last_pending_ttl_check: float = 0.0  # P11-D: throttle guard
         # P4-5：告警闭环 - 连续 possibly_missed 计数 + 下次检查时刻
         self._consecutive_missed: int = 0
         self._next_health_check_ts: float = 0.0
+        self._next_auto_accept_ts: float = 0.0
         # P5-2：多类 streak 计数器
         self._send_fail_streak: int = 0
         self._skill_error_times: list = []   # 近 1h 内 skill_error 时间戳
@@ -88,6 +96,14 @@ class LineRpaService:
             "peer_left_ratio": 0.42,
             "chat_key": "line_rpa:default",
             "default_reply_lang": "zh",
+            # 日发上限（0=不限）；UTC 0 点重置计数
+            "daily_cap": 0,
+            # 自动接受好友申请（在当前可见屏幕找同意按钮；不主动导航）
+            "auto_accept": {
+                "enabled": False,
+                "max_per_run": 5,
+                "check_interval_sec": 120.0,
+            },
             # P4-3：回复模式 — auto=直接发送；approve=进入待审核队列；off=永不发
             "reply_mode": "auto",
             "approve_max_deliver_per_cycle": 3,
@@ -223,12 +239,29 @@ class LineRpaService:
         if not self._merged_cfg.get("enabled") or not svc_cfg.get("autostart", True):
             logger.info("LineRpaService 未启用或 autostart=false，跳过自动启动")
             return False
+        return await self._do_start()
+
+    async def force_start(self) -> bool:
+        """Web 控制面板调用：绕过 autostart 检查，只要 enabled 就拉起 loop。"""
+        if self._task and not self._task.done():
+            return True  # 已在运行
+        if not self._merged_cfg.get("enabled"):
+            logger.info("LineRpaService 未启用（enabled=false），跳过 force_start")
+            return False
+        return await self._do_start()
+
+    async def _do_start(self) -> bool:
+        svc_cfg = self._merged_cfg.get("service", {}) or {}
         self._stop_evt.clear()
         self._trigger_evt.clear()
         self._started_at = time.time()
         self._task = asyncio.create_task(self._loop(), name="line_rpa_service_loop")
         logger.info("LineRpaService 已启动（每轮基准 %.1fs）", float(svc_cfg.get("interval_sec", 15.0)))
         return True
+
+    @property
+    def is_running(self) -> bool:
+        return bool(self._task and not self._task.done())
 
     async def stop(self) -> None:
         self._stop_evt.set()
@@ -262,9 +295,30 @@ class LineRpaService:
                     pass
                 continue
 
+            # daily_cap 守门
+            _cap = int(self._merged_cfg.get("daily_cap") or 0)
+            if _cap > 0:
+                _today_sent = int((self._state.run_stats(24.0) or {}).get("sent") or 0)
+                if _today_sent >= _cap:
+                    _secs_to_midnight = 86400 - (int(time.time()) % 86400)
+                    logger.info(
+                        "LINE RPA daily_cap=%d reached (sent=%d), sleeping %ds to midnight",
+                        _cap, _today_sent, _secs_to_midnight,
+                    )
+                    try:
+                        await asyncio.wait_for(
+                            self._stop_evt.wait(), timeout=float(_secs_to_midnight),
+                        )
+                    except asyncio.TimeoutError:
+                        pass
+                    continue
+
             self._last_tick_ts = time.time()
+            # 设备锁：同一物理设备上的 LINE/WhatsApp/Messenger 三者串行，防止互踢前台
+            _serial = self._merged_cfg.get("adb_serial") or ""
             try:
-                result = await self._runner.run_once()
+                async with get_device_lock(_serial):
+                    result = await self._runner.run_once()
                 self._last_run = result
                 step = result.get("step", "")
                 ok = bool(result.get("ok"))
@@ -272,7 +326,7 @@ class LineRpaService:
                 if peer:
                     self._last_had_peer_ts = time.time()
                     empty_streak = 0
-                elif step in ("no_peer_text", "duplicate_peer_skipped", "screen_unchanged_skipped"):
+                elif step in ("no_peer_text", "duplicate_peer_skipped", "screen_unchanged_skipped", "no_unread"):
                     empty_streak += 1
                 # 失败计数仅统计非"空跑"类 step
                 success_like = ok or step in (
@@ -280,6 +334,7 @@ class LineRpaService:
                     "empty_reply", "screen_unchanged_skipped",
                     "dry_run_done", "sent",
                     "reply_disabled", "awaiting_approval",
+                    "no_unread", "multi_sent", "multi_handled_no_send",
                 )
                 if success_like:
                     self._consecutive_fail = 0
@@ -323,11 +378,46 @@ class LineRpaService:
                 except Exception:
                     logger.debug("run_pending_deliveries 失败", exc_info=True)
 
+            # P28：手动发送队列投递
+            try:
+                sq_res = await self._runner.run_send_queue_deliveries(max_deliver=3)
+                if sq_res.get("delivered") or sq_res.get("failed"):
+                    self._last_run["send_queue_deliver"] = sq_res
+                    logger.info(
+                        "send_queue_deliver delivered=%s failed=%s",
+                        sq_res.get("delivered"), sq_res.get("failed"),
+                    )
+            except Exception:
+                logger.debug("run_send_queue_deliveries 失败", exc_info=True)
+
+            # P11-D：pending 自动过期（节流：每小时最多执行一次）
+            try:
+                _ttl = float(self._merged_cfg.get("pending_ttl_sec") or 86400)
+                _now = time.time()
+                if _ttl > 0 and _now - self._last_pending_ttl_check >= 3600:
+                    self._last_pending_ttl_check = _now
+                    _cancelled = self._state.cancel_pending_by_ttl(
+                        ttl_sec=_ttl, reason="pending_ttl_expired"
+                    )
+                    if _cancelled:
+                        logger.info(
+                            "P11-D pending_ttl: %d 条超时 pending 已自动取消 (ttl=%.0fs)",
+                            len(_cancelled), _ttl,
+                        )
+            except Exception:
+                logger.debug("cancel_pending_by_ttl 失败", exc_info=True)
+
             # P4-5：后台健康检查（节流：按 interval_sec 控制）
             try:
                 await self._maybe_run_health_check()
             except Exception:
                 logger.debug("health_check 失败", exc_info=True)
+
+            # 自动接受好友申请（节流：按 auto_accept.check_interval_sec 控制）
+            try:
+                await self._maybe_run_auto_accept()
+            except Exception:
+                logger.debug("auto_accept 失败", exc_info=True)
 
             # 自适应 + 手动触发感知
             interval = self._compute_next_interval(empty_streak)
@@ -421,6 +511,8 @@ class LineRpaService:
             },
             "stats_24h": stats_24,
             "stats_1h": stats_1,
+            "daily_cap": int(self._merged_cfg.get("daily_cap") or 0),
+            "daily_sent": int((stats_24 or {}).get("sent") or 0),
         }
 
     def pause_for(self, seconds: float) -> None:
@@ -611,6 +703,51 @@ class LineRpaService:
                 dedup_window_sec=dedup,
             )
 
+    async def _maybe_run_auto_accept(self) -> None:
+        """节流调用 runner.maybe_auto_accept_friends()。"""
+        aa = self._merged_cfg.get("auto_accept") or {}
+        if not isinstance(aa, dict) or not aa.get("enabled"):
+            return
+        interval = float(aa.get("check_interval_sec", 120.0) or 120.0)
+        now = time.time()
+        if now < self._next_auto_accept_ts:
+            return
+        self._next_auto_accept_ts = now + interval
+        try:
+            res = await self._runner.maybe_auto_accept_friends(
+                max_accept=int(aa.get("max_per_run", 5) or 5),
+            )
+            if res.get("tapped"):
+                logger.info(
+                    "auto_accept_friends: tapped=%d coords=%s",
+                    res["tapped"], res.get("coords"),
+                )
+        except Exception:
+            logger.debug("_maybe_run_auto_accept 异常", exc_info=True)
+
+    # ── P8-2: 聊天历史分析 API ─────────────────────────────
+    def chat_history(self, chat_key: str, limit: int = 10, offset: int = 0) -> list:
+        return self._state.chat_history(chat_key=chat_key, limit=limit, offset=offset)
+
+    def sessions_for_chat(self, chat_key: str) -> list:
+        return self._state.sessions_for_chat(chat_key=chat_key)
+
+    def total_turns_for_chat(self, chat_key: str) -> int:
+        return self._state.total_turns_for_chat(chat_key=chat_key)
+
+    def customer_profile(self, chat_key: str) -> dict:
+        return self._state.customer_profile(chat_key=chat_key)
+
+    def search_history(self, q: str, intent: str = "", days: int = 30, limit: int = 20) -> list:
+        return self._state.search_history(q, intent=intent, days=days, limit=limit)
+
+    def intent_stats(self, window_hours: float = 168.0) -> dict:
+        return self._state.intent_stats(window_hours=window_hours)
+
+    def match_chat_name(self, name: str) -> dict:
+        """P12-A: 跨平台身份匹配。"""
+        return self._state.match_chat_name(name=name)
+
     def list_alerts(self, *, only_unacked: bool = True, limit: int = 50) -> list:
         return self._state.list_alerts(only_unacked=only_unacked, limit=limit)
 
@@ -632,6 +769,30 @@ class LineRpaService:
         return self._state.alerts_count_unacked()
 
     # ── P4-3：Human-in-the-Loop API for routes ────────────
+    # ── P28-1：手动发送队列 ──────────────────────────────
+    def enqueue_send(
+        self, *, chat_key: str, peer_name: str, text: str, created_by: str = "",
+    ) -> int:
+        """入队一条主动发送任务并立即唤醒 runner 进入下一轮。"""
+        item_id = self._state.enqueue_send(
+            chat_key=chat_key, peer_name=peer_name, text=text, created_by=created_by,
+        )
+        # 唤醒 runner 立刻 pop（避免等到下一个 interval）
+        try:
+            self._trigger_evt.set()
+        except Exception:
+            pass
+        return item_id
+
+    def list_send_queue(self, *, limit: int = 30, include_done: bool = False) -> list:
+        return self._state.list_send_queue(limit=limit, include_done=include_done)
+
+    def get_send_queue_item(self, item_id: int):
+        return self._state.get_send_queue_item(int(item_id))
+
+    def cancel_send_queue_item(self, item_id: int) -> bool:
+        return self._state.cancel_send_queue_item(int(item_id))
+
     def list_pending(self, *, status: Optional[str] = None, limit: int = 50) -> list:
         return self._state.list_pending(status=status, limit=limit)
 

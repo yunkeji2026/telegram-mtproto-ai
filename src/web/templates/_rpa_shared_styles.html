@@ -1,0 +1,242 @@
+{# ════════════════════════════════════════════════════════════════════════ #}
+{# RPA 统一组件库 — 视觉基线（Telegram 风格抽出，4 平台共用）                  #}
+{#                                                                            #}
+{# 用法：在 4 个 RPA 页面（telegram / line_rpa / messenger_rpa / whatsapp_rpa） #}
+{#       的 {% block content %} 顶部 {% include "_rpa_shared_styles.html" %}    #}
+{#                                                                            #}
+{# 维护规则：                                                                  #}
+{# - 此文件只放"4 平台都用得到"的样式；平台特有的样式留在各自 HTML 里         #}
+{# - 颜色 / 间距 / 圆角全部用 base.html 的 CSS 变量（var(--p) / var(--bd) 等）   #}
+{# - 不引入额外字体或第三方资源                                                #}
+{# ════════════════════════════════════════════════════════════════════════ #}
+<style>
+/* ─── Hero 卡片 ─────────────────────────────────────────────────────────────
+   平台 banner：头像 + 在线点 + 标题/副标题 + 今日 KPI + 刷新 + 预设按钮
+   ──────────────────────────────────────────────────────────────────────── */
+.rpa-hero{display:flex;align-items:center;gap:1.2rem;background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:1.1rem 1.4rem;margin-bottom:1.3rem;flex-wrap:wrap}
+.rpa-hero-avatar{width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.rpa-hero-avatar svg{width:26px;height:26px;stroke:#fff}
+/* 平台主题色（默认 Telegram 蓝；其他平台在自家 HTML 里覆盖 background） */
+.rpa-hero-avatar.theme-telegram{background:linear-gradient(135deg,#229ed9,#1a7abf)}
+.rpa-hero-avatar.theme-line{background:linear-gradient(135deg,#06c755,#04a247)}
+.rpa-hero-avatar.theme-messenger{background:linear-gradient(135deg,#0084ff,#0066cc)}
+.rpa-hero-avatar.theme-whatsapp{background:linear-gradient(135deg,#25d366,#128c7e)}
+.rpa-hero-info{flex:1;min-width:160px}
+.rpa-hero-name{font-weight:700;font-size:1rem;color:var(--t);display:flex;align-items:center;gap:.55rem}
+.rpa-hero-sub{font-size:.78rem;color:var(--t3);margin-top:.15rem}
+.rpa-hero-actions{display:flex;align-items:center;gap:.5rem;margin-left:auto;flex-wrap:wrap}
+.rpa-hero-btn{padding:.4rem .7rem;border:1px solid var(--bd2);border-radius:8px;background:var(--input);color:var(--t3);cursor:pointer;font-size:.75rem;transition:all .15s}
+.rpa-hero-btn:hover{color:var(--p);border-color:var(--p)}
+
+/* 状态点（在线 / 离线 / 暂停 / 错误） */
+.rpa-status-dot{width:9px;height:9px;border-radius:50%;background:var(--green);flex-shrink:0;box-shadow:0 0 0 2px rgba(63,185,80,.25)}
+.rpa-status-dot.offline,.rpa-status-dot.err{background:#f85149;box-shadow:0 0 0 2px rgba(248,81,73,.25)}
+.rpa-status-dot.warn,.rpa-status-dot.paused{background:#e3b341;box-shadow:0 0 0 2px rgba(227,179,65,.25)}
+.rpa-status-dot.neutral{background:var(--t3);box-shadow:none}
+
+/* KPI 横条（小数字卡片，跟在 Hero 右侧） */
+.rpa-kpi-row{display:flex;gap:.7rem;flex-wrap:wrap}
+.rpa-kpi{display:flex;flex-direction:column;align-items:center;background:var(--input);border:1px solid var(--bd);border-radius:10px;padding:.45rem .9rem;min-width:64px}
+.rpa-kpi-n{font-size:1.25rem;font-weight:800;color:var(--p);line-height:1.1}
+.rpa-kpi-n.green{color:#3fb950}
+.rpa-kpi-n.amber{color:#e3b341}
+.rpa-kpi-n.red{color:#f85149}
+.rpa-kpi-l{font-size:.7rem;color:var(--t2);margin-top:.1rem;white-space:nowrap}
+
+/* ─── Tab bar（已被 telegram/line/whatsapp 沿用；messenger 后续会迁过来）───── */
+.st-bar{display:flex;gap:.25rem;border-bottom:2px solid var(--bd);margin-bottom:1.3rem;flex-wrap:wrap}
+.st-tab{position:relative;padding:.55rem 1.15rem;border-radius:8px 8px 0 0;font-size:.875rem;font-weight:600;color:var(--t2);cursor:pointer;border:none;background:transparent;transition:all .15s;bottom:-2px;border-bottom:2px solid transparent}
+.st-tab:hover{color:var(--t);background:var(--input)}
+.st-tab.active{color:var(--p);border-bottom:2px solid var(--p);background:var(--card)}
+.st-tab .tab-dot{display:none;position:absolute;top:7px;right:8px;width:7px;height:7px;border-radius:50%;background:#f59e0b}
+.st-tab.dirty .tab-dot{display:block}
+.st-pane{display:none}.st-pane.active{display:block}
+
+/* ─── Card（4 平台所有面板的容器） ───────────────────────────────────────── */
+.rpa-card{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:1.3rem 1.5rem;margin-bottom:1rem}
+.rpa-card-head{display:flex;align-items:center;gap:.7rem;margin-bottom:1rem}
+.rpa-card-icon{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1rem;flex-shrink:0}
+.rpa-card-icon.blue{background:rgba(34,158,217,.15)}
+.rpa-card-icon.green{background:rgba(34,197,94,.12)}
+.rpa-card-icon.purple{background:rgba(139,92,246,.12)}
+.rpa-card-icon.amber{background:rgba(245,158,11,.13)}
+.rpa-card-icon.red{background:rgba(239,68,68,.12)}
+.rpa-card-title{font-size:.95rem;font-weight:700;color:var(--t)}
+.rpa-card-desc{font-size:.78rem;color:var(--t3);margin-left:auto}
+.rpa-sect-div{border-top:1px solid var(--bd);margin:1rem 0}
+
+/* ─── Form fields ─────────────────────────────────────────────────────── */
+.f-row{display:flex;flex-direction:column;gap:.3rem;margin-bottom:.9rem}
+.f-lbl{font-size:.8rem;font-weight:600;color:var(--t2);display:flex;align-items:center;gap:.5rem}
+.f-inp{padding:.52rem .8rem;border:1px solid var(--bd2);border-radius:8px;background:var(--input);color:var(--t);font-size:.875rem;width:100%;box-sizing:border-box;transition:border .15s}
+.f-inp:focus{outline:none;border-color:var(--p);box-shadow:0 0 0 3px var(--ps)}
+.f-hint{font-size:.75rem;color:var(--t3);margin-top:.15rem}
+.f-hint a{color:var(--p);text-decoration:none}
+select.f-inp{cursor:pointer}
+.f-grid2{display:grid;grid-template-columns:1fr 1fr;gap:.75rem}
+@media(max-width:520px){.f-grid2{grid-template-columns:1fr}}
+.f-dur{font-size:.75rem;font-weight:600;color:var(--p);margin-left:.4rem}
+
+/* ─── Toggle 开关 ─────────────────────────────────────────────────────── */
+.rpa-toggle{display:flex;align-items:center;gap:.75rem;cursor:pointer;user-select:none}
+.rpa-toggle input[type=checkbox]{display:none}
+.rpa-toggle-sw{width:42px;height:24px;background:var(--bd2);border-radius:12px;position:relative;transition:background .2s;flex-shrink:0}
+.rpa-toggle input:checked + .rpa-toggle-sw{background:var(--p)}
+.rpa-toggle-sw::after{content:'';position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+.rpa-toggle input:checked + .rpa-toggle-sw::after{transform:translateX(18px)}
+.rpa-toggle-lbl{font-size:.875rem;font-weight:600;color:var(--t)}
+
+/* ─── Provider / Mode 视觉卡片（语音引擎 / 回复模式 / 触发模式）─────────── */
+.be-cards{display:flex;gap:.6rem;flex-wrap:wrap;margin:.4rem 0 .8rem}
+.be-card{flex:1;min-width:120px;max-width:180px;padding:.75rem 1rem;border:1.5px solid var(--bd2);border-radius:11px;cursor:pointer;transition:all .15s;background:var(--input);text-align:center}
+.be-card:hover{border-color:var(--p);background:var(--card)}
+.be-card.selected{border-color:var(--p);background:var(--ps)}
+.be-card-icon{font-size:1.4rem;margin-bottom:.3rem}
+.be-card-name{font-size:.82rem;font-weight:700;color:var(--t)}
+.be-card.selected .be-card-name{color:var(--p)}
+.be-card-desc{font-size:.7rem;color:var(--t3);margin-top:.15rem;line-height:1.35}
+
+.tr-cards{display:flex;gap:.55rem;flex-wrap:wrap;margin:.35rem 0}
+.tr-card{padding:.6rem .9rem;border:1.5px solid var(--bd2);border-radius:10px;cursor:pointer;background:var(--input);transition:all .15s;min-width:120px}
+.tr-card:hover{border-color:var(--p)}
+.tr-card.selected{border-color:var(--p);background:var(--ps)}
+.tr-card-top{display:flex;align-items:center;gap:.4rem;font-size:.82rem;font-weight:700;color:var(--t)}
+.tr-card.selected .tr-card-top{color:var(--p)}
+.tr-card-sub{font-size:.7rem;color:var(--t3);margin-top:.2rem}
+
+/* ─── 概率滑块 ────────────────────────────────────────────────────────── */
+.prob-row{display:flex;align-items:center;gap:.8rem}
+.prob-row input[type=range]{flex:1;accent-color:var(--p)}
+.prob-val{min-width:38px;font-size:.82rem;font-weight:700;color:var(--p);text-align:right}
+
+/* ─── Save bar / 按钮 ────────────────────────────────────────────────── */
+.save-bar{display:flex;align-items:center;gap:.75rem;margin-top:1rem;padding-top:.9rem;border-top:1px solid var(--bd);flex-wrap:wrap}
+.save-res{font-size:.8rem;color:var(--t3)}.save-res.ok{color:var(--green,#16a34a)}.save-res.err{color:var(--red,#dc2626)}
+.btn-p{background:var(--g);color:#fff;border:none;padding:.52rem 1.25rem;border-radius:9px;font-size:.875rem;font-weight:600;cursor:pointer;transition:opacity .15s;display:inline-flex;align-items:center;gap:.4rem}
+.btn-p:hover{opacity:.87}
+.btn-p:disabled{opacity:.5;cursor:default}
+.btn-sec{background:var(--input);color:var(--t2);border:1px solid var(--bd2);padding:.5rem 1.1rem;border-radius:9px;font-size:.82rem;font-weight:600;cursor:pointer;transition:all .15s}
+.btn-sec:hover{border-color:var(--p);color:var(--p)}
+.btn-danger{background:#ef4444;color:#fff;border:none;padding:.5rem 1.1rem;border-radius:9px;font-size:.82rem;font-weight:600;cursor:pointer;transition:opacity .15s}
+.btn-danger:hover{opacity:.85}
+
+/* ─── Sub-section header ─────────────────────────────────────────────── */
+.sub-hd{font-size:.78rem;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.05em;margin:1rem 0 .7rem;display:flex;align-items:center;gap:.5rem}
+.sub-hd::after{content:'';flex:1;height:1px;background:var(--bd)}
+
+/* ─── Health banner（运行健康提示横幅） ───────────────────────────────── */
+.hb-wrap{display:none;flex-direction:column;gap:.4rem;margin-bottom:1rem}
+.hb-wrap.show{display:flex}
+.hb-item{display:flex;align-items:flex-start;gap:.6rem;padding:.55rem .85rem;border-radius:9px;font-size:.8rem;font-weight:500}
+.hb-item.error{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.25);color:#dc2626}
+.hb-item.warning{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.25);color:#b45309}
+.hb-item.ok{background:rgba(34,197,94,.09);border:1px solid rgba(34,197,94,.2);color:#15803d}
+.hb-icon{flex-shrink:0;margin-top:.05rem}
+
+/* ─── Preset popover（预设方案弹层）───────────────────────────────────── */
+.preset-wrap{position:relative;display:inline-block}
+.preset-pop{position:absolute;top:calc(100% + 6px);right:0;background:var(--card);border:1px solid var(--bd);border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.15);padding:.5rem;min-width:240px;z-index:200;display:none}
+.preset-pop.open{display:block}
+.preset-btn-item{width:100%;text-align:left;padding:.6rem .85rem;border:none;border-radius:8px;background:transparent;cursor:pointer;font-size:.82rem;color:var(--t);transition:background .12s;display:flex;align-items:center;gap:.6rem}
+.preset-btn-item:hover{background:var(--input)}
+.preset-btn-item .pi{font-size:1.1rem;width:1.4rem;text-align:center;flex-shrink:0}
+.preset-btn-item .pt{flex:1}
+.preset-btn-item .pt-title{font-weight:700}
+.preset-btn-item .pt-desc{font-size:.7rem;color:var(--t3);margin-top:.1rem}
+.preset-divider{height:1px;background:var(--bd);margin:.25rem 0}
+.preset-lbl{font-size:.7rem;color:var(--t3);padding:.3rem .85rem .1rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+
+/* ─── Log tail（实时日志） ───────────────────────────────────────────── */
+.log-wrap{background:var(--input);border:1px solid var(--bd);border-radius:8px;max-height:320px;overflow-y:auto;font-family:Consolas,'JetBrains Mono',monospace;font-size:.75rem;padding:.5rem .75rem}
+.log-line{padding:.18rem 0;border-bottom:1px solid rgba(128,128,128,.08);display:flex;gap:.6rem;align-items:baseline}
+.log-ts{color:var(--t3);flex-shrink:0;white-space:nowrap}
+.log-msg{flex:1;word-break:break-word;line-height:1.4}
+.log-line.INFO .log-msg{color:var(--t2)}
+.log-line.WARNING .log-msg{color:#b45309}
+.log-line.ERROR .log-msg{color:#dc2626}
+.log-line.OK .log-msg,.log-line.voice_sent .log-msg{color:#16a34a;font-weight:600}
+.log-empty{color:var(--t3);font-size:.78rem;padding:.5rem}
+.log-toolbar{display:flex;align-items:center;gap:.6rem;margin-bottom:.5rem}
+.log-live-dot{width:7px;height:7px;border-radius:50%;background:var(--green,#16a34a);animation:rpaPulse 1.5s infinite}
+@keyframes rpaPulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+/* ─── Modal overlay ─────────────────────────────────────────────────── */
+.modal-ov{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:600;display:none;align-items:center;justify-content:center;padding:1rem}
+.modal-ov.open{display:flex}
+.modal-box{background:var(--card);border-radius:16px;border:1px solid var(--bd);width:100%;max-width:540px;max-height:82vh;display:flex;flex-direction:column;box-shadow:0 24px 60px rgba(0,0,0,.3)}
+.modal-hdr{display:flex;align-items:center;justify-content:space-between;padding:1.1rem 1.4rem .8rem;border-bottom:1px solid var(--bd);flex-shrink:0}
+.modal-title{font-size:.95rem;font-weight:700;color:var(--t)}
+.modal-cls{border:none;background:transparent;font-size:1.2rem;cursor:pointer;color:var(--t2);width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center}
+.modal-cls:hover{background:var(--input);color:var(--t)}
+.modal-body{padding:1rem 1.4rem;overflow-y:auto;flex:1}
+
+/* ─── Badges / chips ──────────────────────────────────────────────── */
+.cfg-badge{display:inline-flex;align-items:center;gap:.3rem;font-size:.75rem;font-weight:600;padding:.2rem .55rem;border-radius:20px}
+.cfg-badge.on{background:rgba(34,197,94,.12);color:#16a34a}
+.cfg-badge.off{background:var(--input);color:var(--t3);border:1px solid var(--bd)}
+.cfg-badge.warn{background:rgba(245,158,11,.12);color:#b45309}
+.cfg-badge.err{background:rgba(239,68,68,.12);color:#dc2626}
+.key-badge{display:inline-flex;align-items:center;gap:.2rem;font-size:.7rem;background:rgba(34,197,94,.12);color:#16a34a;border-radius:6px;padding:.1rem .4rem;font-weight:600}
+
+/* ─── Daily cap 进度条 ────────────────────────────────────────────── */
+.rpa-cap-bar{height:5px;border-radius:3px;background:var(--bd2);margin-top:.4rem;overflow:hidden}
+.rpa-cap-fill{height:100%;border-radius:3px;background:var(--p);transition:width .4s}
+.rpa-cap-fill.warn{background:#f59e0b}.rpa-cap-fill.full{background:#ef4444}
+
+/* ─── Pending/Review queue card item ─────────────────────────────── */
+.rpa-pend{border:1px solid var(--bd);border-radius:8px;padding:.7rem .8rem;margin-bottom:.55rem;background:var(--input)}
+.rpa-pend-head{display:flex;justify-content:space-between;gap:.5rem;align-items:center;margin-bottom:.35rem}
+.rpa-pend-name{font-weight:600;color:var(--t)}
+.rpa-pend-status{font-size:.72rem;padding:.1rem .45rem;border-radius:6px;background:var(--bd2);color:var(--t2)}
+.rpa-pend-status.pending{background:#fde68a;color:#92400e}
+.rpa-pend-status.approved,.rpa-pend-status.sent{background:#bbf7d0;color:#166534}
+.rpa-pend-status.rejected,.rpa-pend-status.error{background:#fecaca;color:#7f1d1d}
+.rpa-pend-status.cancelled{background:#e5e7eb;color:#374151}
+.rpa-pend-peer{font-size:.78rem;color:var(--t2);margin-bottom:.35rem;white-space:pre-wrap;border-left:3px solid var(--bd);padding-left:.55rem}
+.rpa-pend-draft{font-size:.82rem;color:var(--t);margin-bottom:.4rem;white-space:pre-wrap}
+.rpa-pend-editor{width:100%;min-height:3.2rem;font-size:.82rem;font-family:inherit;border:1px solid var(--bd);border-radius:6px;padding:.45rem;background:var(--card);color:var(--t)}
+.rpa-pend-actions{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.35rem}
+.rpa-pend-meta{font-size:.7rem;color:var(--t3);margin-top:.25rem}
+
+/* ─── Run stream（实时事件流） ───────────────────────────────────── */
+.rpa-stream{display:flex;flex-direction:column;gap:.45rem;max-height:520px;overflow-y:auto}
+.rpa-stream-row{border:1px solid var(--bd);border-radius:8px;padding:.55rem .7rem;background:var(--input)}
+.rpa-stream-row.ok{border-left:3px solid #16a34a}
+.rpa-stream-row.err{border-left:3px solid #ef4444}
+.rpa-stream-row.skip{border-left:3px solid var(--t3)}
+.rpa-stream-meta{display:flex;gap:.5rem;font-size:.72rem;color:var(--t3);align-items:center;margin-bottom:.3rem;flex-wrap:wrap}
+.rpa-stream-step{font-weight:700;color:var(--t2);padding:.1rem .45rem;border-radius:10px;background:var(--card);letter-spacing:.02em}
+.rpa-stream-row.ok .rpa-stream-step{color:#16a34a;background:rgba(34,197,94,.1)}
+.rpa-stream-row.err .rpa-stream-step{color:#dc2626;background:rgba(239,68,68,.1)}
+.rpa-stream-time{margin-left:auto}
+.rpa-stream-peer{font-size:.88rem;color:var(--t);white-space:pre-wrap;word-break:break-word}
+.rpa-stream-peer::before{content:'对方:';color:var(--p);font-weight:700;margin-right:.35rem;font-size:.8rem}
+.rpa-stream-reply{margin-top:.4rem;padding:.55rem .7rem;background:var(--ps);border-radius:8px;font-size:.84rem;color:var(--t);white-space:pre-wrap;word-break:break-word}
+.rpa-stream-reply::before{content:'AI 回复:';color:var(--p);font-weight:700;margin-right:.35rem;font-size:.78rem}
+.rpa-stream-err{margin-top:.3rem;color:#dc2626;font-size:.78rem}
+
+/* ─── Empty / loading ────────────────────────────────────────────── */
+.rpa-empty{text-align:center;color:var(--t3);padding:1.5rem 1rem;font-size:.85rem}
+.rpa-empty svg{width:36px;height:36px;opacity:.4;margin-bottom:.5rem;display:block;margin-left:auto;margin-right:auto}
+
+/* ─── 批量审批 + 键盘导航（Q1+Q2） ────────────────────────────────
+   - .rpa-bulk-toolbar：列表顶部"全选 / 清空 / 批量批准 / 批量拒绝"工具栏
+   - .rpa-bulk-pick：每行的 checkbox（class 让 rpa.bulk 委托 change 事件）
+   - .rpa-bulk-focus：键盘焦点行高亮（j/k 移焦点）
+   - .rpa-bulk-hint：右上角"键盘快捷键"提示气泡，hover 展开 */
+.rpa-bulk-toolbar{display:flex;align-items:center;gap:.5rem;padding:.55rem .8rem;background:var(--input);border:1px solid var(--bd);border-radius:8px;margin-bottom:.7rem;flex-wrap:wrap}
+.rpa-bulk-toolbar .btn{font-size:.75rem;padding:.32rem .75rem;border-radius:6px;border:1px solid var(--bd2);background:var(--card);color:var(--t);cursor:pointer;transition:all .15s}
+.rpa-bulk-toolbar .btn:hover:not(:disabled){border-color:var(--p);color:var(--p)}
+.rpa-bulk-toolbar .btn:disabled{opacity:.45;cursor:not-allowed}
+.rpa-bulk-toolbar .btn-primary{background:var(--p);color:#fff;border-color:var(--p)}
+.rpa-bulk-toolbar .btn-primary:hover:not(:disabled){background:var(--p);filter:brightness(1.1)}
+.rpa-bulk-toolbar .btn-danger{background:#dc2626;color:#fff;border-color:#dc2626}
+.rpa-bulk-toolbar .btn-danger:hover:not(:disabled){filter:brightness(1.1)}
+.rpa-bulk-count{font-size:.74rem;color:var(--t3);font-weight:600}
+.rpa-bulk-hint{position:relative;margin-left:auto;font-size:.7rem;color:var(--t3);padding:.25rem .5rem;border:1px dashed var(--bd2);border-radius:6px;cursor:help;user-select:none}
+.rpa-bulk-hint:hover .rpa-bulk-hint-pop{display:block}
+.rpa-bulk-hint-pop{display:none;position:absolute;right:0;top:calc(100% + 4px);z-index:50;background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:.5rem .7rem;box-shadow:0 4px 16px rgba(0,0,0,.18);min-width:220px;font-size:.72rem;color:var(--t2);line-height:1.7;white-space:nowrap}
+.rpa-bulk-hint-pop kbd{display:inline-block;padding:0 .35rem;border:1px solid var(--bd2);border-radius:4px;background:var(--input);color:var(--t);font-family:monospace;font-size:.7rem;margin-right:.3rem}
+.rpa-bulk-pick{width:14px;height:14px;cursor:pointer;flex-shrink:0;accent-color:var(--p)}
+.rpa-bulk-focus{outline:2px solid var(--p);outline-offset:-2px;background:rgba(34,197,94,.04)}
+</style>

@@ -626,6 +626,39 @@ class VoiceGrabber:
             rv.error = f"helper_exception:{type(ex).__name__}: {ex}"
             return rv
 
+    @staticmethod
+    def _find_start_now_xy(xml: str) -> Optional[Tuple[int, int]]:
+        """Locate the MediaProjection 'Start now' consent button from UI XML.
+
+        Android shows a system-level dialog with a 'Start now' button whose
+        text varies by locale.  We match a broad set of labels so this works
+        across EN / ZH / TW / JA / KO / FR devices.
+
+        Returns the tap (cx, cy) on success, None if not found.
+        """
+        _START_LABELS = (
+            "start now", "start recording",
+            "立即开始", "立即錄製", "立刻开始", "开始",
+            "すぐに開始", "録画を開始",
+            "지금 시작", "시작",
+            "commencer", "démarrer",
+            "start",
+        )
+        if not xml:
+            return None
+        try:
+            for m in re.finditer(
+                r'<node[^>]*(?:text|content-desc)="([^"]*)"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',
+                xml,
+            ):
+                label = m.group(1).strip().lower()
+                if any(kw in label for kw in _START_LABELS):
+                    x1, y1, x2, y2 = int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5))
+                    return (x1 + x2) // 2, (y1 + y2) // 2
+        except Exception:
+            pass
+        return None
+
     def capture_messenger_voice_session(
         self,
         *,
@@ -677,7 +710,23 @@ class VoiceGrabber:
                 return rv
 
             time.sleep(0.7)
-            sx, sy = start_now_xy or (int(w * 0.735), int(h * 0.672))
+            if start_now_xy is not None:
+                sx, sy = int(start_now_xy[0]), int(start_now_xy[1])
+                rv.extra["start_now_method"] = "configured_xy"
+            else:
+                # P5-4: 优先 XML 定位 MediaProjection 'Start now' 对话框按钮
+                xml_dump = self._adb(
+                    ["shell", "uiautomator", "dump", "/dev/stdout"],
+                    timeout=8.0,
+                )
+                xml_text = xml_dump.stdout or ""
+                xml_hit = self._find_start_now_xy(xml_text)
+                if xml_hit is not None:
+                    sx, sy = xml_hit
+                    rv.extra["start_now_method"] = "xml_detected"
+                else:
+                    sx, sy = int(w * 0.735), int(h * 0.672)
+                    rv.extra["start_now_method"] = "hardcoded_fallback"
             self._adb(["shell", "input", "tap", str(sx), str(sy)], timeout=5.0)
             rv.extra["start_now_tap"] = [sx, sy]
             time.sleep(max(0.2, post_consent_sec))

@@ -46,10 +46,36 @@ class DailyLearner:
         )
         self._ensure_table()
 
+    _MIGRATION_CONFIDENCE = (
+        "ALTER TABLE kb_drafts ADD COLUMN confidence INTEGER DEFAULT 0",
+    )
+    _MIGRATION_DUP = (
+        "ALTER TABLE kb_drafts ADD COLUMN dup_entry_id TEXT DEFAULT ''",
+        "ALTER TABLE kb_drafts ADD COLUMN dup_entry_title TEXT DEFAULT ''",
+        "ALTER TABLE kb_drafts ADD COLUMN dup_score REAL DEFAULT 0",
+    )
+
     def _ensure_table(self):
         conn = sqlite3.connect(str(self._db_path))
         conn.execute(self.DRAFTS_SCHEMA)
         conn.commit()
+        # migration: add confidence column
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(kb_drafts)").fetchall()}
+        if "confidence" not in cols:
+            for sql in self._MIGRATION_CONFIDENCE:
+                try:
+                    conn.execute(sql)
+                except sqlite3.OperationalError:
+                    pass
+            conn.commit()
+        # migration: add dup columns
+        if "dup_entry_id" not in cols:
+            for sql in self._MIGRATION_DUP:
+                try:
+                    conn.execute(sql)
+                except sqlite3.OperationalError:
+                    pass
+            conn.commit()
         conn.close()
 
     def _conn(self):
@@ -189,6 +215,7 @@ class DailyLearner:
 - "triggers": 触发关键词数组（3-5个）
 - "example_reply": 建议的标准回复（口语化、简洁、专业）
 - "reasoning": 你的判断理由（一句话）
+- "confidence": 你对这条回复质量的自信度（0-100整数，100=完全确定正确且完整，50=不太确定，0=纯猜测）
 
 只输出 JSON 数组，不要其他内容。"""
 
@@ -214,6 +241,7 @@ class DailyLearner:
                 idx = item.get("index", 0) - 1
                 if 0 <= idx < len(batch):
                     m = batch[idx]
+                    confidence = max(0, min(100, int(item.get("confidence", 50))))
                     drafts.append({
                         "source": m["source"],
                         "query": m["query"],
@@ -223,6 +251,7 @@ class DailyLearner:
                         "triggers": item.get("triggers", []),
                         "example_reply": item.get("example_reply", ""),
                         "ai_reasoning": item.get("reasoning", ""),
+                        "confidence": confidence,
                     })
             return drafts
 
@@ -234,7 +263,7 @@ class DailyLearner:
             return []
 
     def save_drafts(self, drafts: List[Dict]) -> int:
-        """保存草稿到数据库"""
+        """保存草稿到数据库，自动标记与现有 KB 的重复。"""
         now = time.strftime("%Y-%m-%dT%H:%M:%S")
         saved = 0
         with self._conn() as c:
@@ -243,17 +272,27 @@ class DailyLearner:
                 triggers = d.get("triggers", [])
                 if isinstance(triggers, list):
                     triggers = ",".join(triggers)
+                dup = self.check_duplicate(d)
+                dup_eid = dup["entry_id"] if dup else ""
+                dup_etitle = dup["entry_title"] if dup else ""
+                dup_score = dup["score"] if dup else 0
                 try:
                     c.execute(
                         "INSERT INTO kb_drafts "
                         "(id,source,query,hit_count,category,title,triggers,"
-                        "example_reply,ai_reasoning,status,created_at) "
-                        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                        "example_reply,ai_reasoning,status,created_at,confidence,"
+                        "dup_entry_id,dup_entry_title,dup_score) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (draft_id, d["source"], d["query"], d.get("hit_count", 1),
                          d.get("category", ""), d.get("title", ""),
                          triggers, d.get("example_reply", ""),
-                         d.get("ai_reasoning", ""), "pending", now)
+                         d.get("ai_reasoning", ""), "pending", now,
+                         d.get("confidence", 0),
+                         dup_eid, dup_etitle, dup_score)
                     )
+                    if dup:
+                        _logger.info("草稿 %s 疑似重复: KB=%s score=%.2f",
+                                     draft_id, dup_eid, dup_score)
                     saved += 1
                 except sqlite3.IntegrityError:
                     pass
@@ -287,16 +326,25 @@ class DailyLearner:
 
     # ── 草稿管理 API ──
 
-    def list_drafts(self, status: str = "pending", limit: int = 50) -> List[Dict]:
+    def list_drafts(self, status: str = "pending", limit: int = 50,
+                     sort: str = "priority") -> List[Dict]:
+        """List drafts. sort='priority' sorts by composite score (confidence + hit_count)."""
+        order = "created_at DESC"
+        if sort == "priority":
+            order = "(confidence * 0.5 + MIN(hit_count * 10, 100) * 0.5) DESC, created_at DESC"
+        elif sort == "confidence":
+            order = "confidence DESC, created_at DESC"
+        elif sort == "hit_count":
+            order = "hit_count DESC, created_at DESC"
         with self._conn() as c:
             if status == "all":
                 rows = c.execute(
-                    "SELECT * FROM kb_drafts ORDER BY created_at DESC LIMIT ?",
+                    f"SELECT * FROM kb_drafts ORDER BY {order} LIMIT ?",
                     (limit,)
                 ).fetchall()
             else:
                 rows = c.execute(
-                    "SELECT * FROM kb_drafts WHERE status=? ORDER BY created_at DESC LIMIT ?",
+                    f"SELECT * FROM kb_drafts WHERE status=? ORDER BY {order} LIMIT ?",
                     (status, limit)
                 ).fetchall()
         return [dict(r) for r in rows]
@@ -323,6 +371,22 @@ class DailyLearner:
                 values
             )
         return True
+
+    def recheck_duplicate(self, draft_id: str) -> Optional[Dict]:
+        """A3: 重新检测草稿与 KB 的重复（审核前可调用以刷新结果）。"""
+        draft = self.get_draft(draft_id)
+        if not draft:
+            return None
+        dup = self.check_duplicate(draft)
+        dup_eid = dup["entry_id"] if dup else ""
+        dup_etitle = dup["entry_title"] if dup else ""
+        dup_score = dup["score"] if dup else 0
+        with self._conn() as c:
+            c.execute(
+                "UPDATE kb_drafts SET dup_entry_id=?, dup_entry_title=?, dup_score=? WHERE id=?",
+                (dup_eid, dup_etitle, dup_score, draft_id)
+            )
+        return dup
 
     def approve_draft(self, draft_id: str, operator: str = "") -> Optional[str]:
         """审核通过：将草稿入库为正式知识条目"""
@@ -372,9 +436,122 @@ class DailyLearner:
                 count += 1
         return count
 
+    def batch_action(self, draft_ids: List[str], action: str, operator: str = "") -> Dict:
+        """A2: 批量通过或拒绝指定草稿"""
+        approved = 0
+        rejected = 0
+        failed = []
+        for did in draft_ids:
+            try:
+                if action == "approve":
+                    if self.approve_draft(did, operator):
+                        approved += 1
+                    else:
+                        failed.append(did)
+                elif action == "reject":
+                    self.reject_draft(did, operator)
+                    rejected += 1
+            except Exception:
+                failed.append(did)
+        return {"approved": approved, "rejected": rejected, "failed": failed}
+
     def stats(self) -> Dict:
         with self._conn() as c:
             pending = c.execute("SELECT COUNT(*) FROM kb_drafts WHERE status='pending'").fetchone()[0]
             approved = c.execute("SELECT COUNT(*) FROM kb_drafts WHERE status='approved'").fetchone()[0]
             rejected = c.execute("SELECT COUNT(*) FROM kb_drafts WHERE status='rejected'").fetchone()[0]
-        return {"pending": pending, "approved": approved, "rejected": rejected}
+            dup_flagged = c.execute(
+                "SELECT COUNT(*) FROM kb_drafts WHERE status='pending' AND dup_score > 0"
+            ).fetchone()[0]
+        return {"pending": pending, "approved": approved, "rejected": rejected,
+                "dup_flagged": dup_flagged}
+
+    # ── A3: Semantic duplicate detection ─────────────────────────────
+
+    _DUP_BM25_THRESHOLD = 8.0
+    _DUP_TRIGGER_THRESHOLD = 0.4
+
+    def check_duplicate(self, draft: Dict) -> Optional[Dict]:
+        """
+        Multi-layer duplicate check against existing KB (no API calls).
+        Layer 1: Trigger set overlap (Jaccard ≥ 0.4)
+        Layer 2: BM25 text search score (≥ 8.0)
+        Returns {entry_id, entry_title, score, method} or None.
+        """
+        # Build search text from draft fields
+        draft_triggers_raw = draft.get("triggers", "")
+        if isinstance(draft_triggers_raw, list):
+            draft_triggers = [t.strip().lower() for t in draft_triggers_raw if t.strip()]
+        else:
+            draft_triggers = [t.strip().lower()
+                              for t in str(draft_triggers_raw).split(",") if t.strip()]
+        draft_title = (draft.get("title") or "").strip()
+        draft_query = (draft.get("query") or "").strip()
+        search_text = f"{draft_title} {' '.join(draft_triggers)} {draft_query}"
+        if len(search_text.strip()) < 2:
+            return None
+
+        # Layer 1: trigger overlap against KB entries
+        best_trigger_match = self._check_trigger_overlap(draft_triggers)
+        if best_trigger_match and best_trigger_match["score"] >= self._DUP_TRIGGER_THRESHOLD:
+            return best_trigger_match
+
+        # Layer 2: BM25 search
+        try:
+            result = self._kb.search(search_text, top_k=3)
+            entries = result.get("entries", [])
+            if entries:
+                top = entries[0]
+                bm25_score = top.get("_score", 0)
+                if bm25_score >= self._DUP_BM25_THRESHOLD:
+                    return {
+                        "entry_id": top["id"],
+                        "entry_title": top.get("title", ""),
+                        "score": round(min(bm25_score / 15.0, 0.99), 2),
+                        "method": "bm25",
+                    }
+        except Exception as e:
+            _logger.debug("check_duplicate BM25 search error: %s", e)
+
+        return None
+
+    def _check_trigger_overlap(self, draft_triggers: List[str]) -> Optional[Dict]:
+        """Check if draft triggers overlap with existing KB entry triggers."""
+        if not draft_triggers:
+            return None
+        draft_set = set(draft_triggers)
+        best = None
+        best_score = 0.0
+        try:
+            with self._kb._conn() as c:
+                rows = c.execute(
+                    "SELECT id, title, triggers FROM kb_entries WHERE enabled=1"
+                ).fetchall()
+            for row in rows:
+                raw = row["triggers"] or ""
+                if isinstance(raw, str):
+                    try:
+                        kb_triggers = [t.strip().lower() for t in json.loads(raw) if t.strip()]
+                    except (json.JSONDecodeError, TypeError):
+                        kb_triggers = [t.strip().lower() for t in raw.split(",") if t.strip()]
+                else:
+                    kb_triggers = [str(t).strip().lower() for t in raw if t]
+                if not kb_triggers:
+                    continue
+                kb_set = set(kb_triggers)
+                inter = len(draft_set & kb_set)
+                if inter == 0:
+                    continue
+                union = len(draft_set | kb_set)
+                jaccard = inter / union if union else 0.0
+                if jaccard > best_score:
+                    best_score = jaccard
+                    best = {
+                        "entry_id": row["id"],
+                        "entry_title": row["title"] or "",
+                        "score": round(jaccard, 2),
+                        "method": "trigger_overlap",
+                    }
+        except Exception as e:
+            _logger.debug("_check_trigger_overlap error: %s", e)
+        return best

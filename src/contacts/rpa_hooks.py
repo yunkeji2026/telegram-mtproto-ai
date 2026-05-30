@@ -86,6 +86,22 @@ class ContactHooks(Protocol):
         trace_id: str = "",
     ) -> Optional[MergeOutcome]: ...
 
+    def get_journey_intimacy(
+        self, *, channel: str, account_id: str, external_id: str,
+    ) -> Optional[float]:
+        """W3-3A.1：查 IntimacyEngine 写到 journeys.intimacy_score 的最新值。
+
+        runner 在 inbound 入库后调用，把 score 透传到 skill_manager → companion_relationship 融合。
+        失败/未注册时返回 None（runner 静默跳过 fusion）。
+        """
+        ...
+
+    def get_journey_funnel_stage(
+        self, *, channel: str, account_id: str, external_id: str,
+    ) -> Optional[str]:
+        """W3-3M：查 journeys.funnel_stage，供 RelationshipStager 语气指令注入。"""
+        ...
+
     def maybe_before_reply(
         self, *, account_id: str, external_id: str,
         ai_reply: str, latest_in_text: str = "", trace_id: str = "",
@@ -190,6 +206,50 @@ class GatewayContactHooks:
             logger.warning("hook on_line_first_text failed: %s", e)
             return None
 
+    def get_journey_intimacy(
+        self, *, channel: str, account_id: str, external_id: str,
+    ) -> Optional[float]:
+        """W3-3A.1：纯读查询。runner 在 inbound 入库后取 fresh intimacy_score。"""
+        try:
+            ci = self._gw.find_channel_identity(
+                channel=channel, account_id=account_id, external_id=external_id,
+            )
+            if ci is None:
+                return None
+            store = getattr(self._gw, "_store", None)
+            if store is None:
+                return None
+            journey = store.get_journey_by_contact(ci.contact_id)
+            if journey is None:
+                return None
+            score = getattr(journey, "intimacy_score", None)
+            return float(score) if score is not None else None
+        except Exception as e:
+            logger.debug("hook get_journey_intimacy failed: %s", e)
+            return None
+
+    def get_journey_funnel_stage(
+        self, *, channel: str, account_id: str, external_id: str,
+    ) -> Optional[str]:
+        """W3-3M：纯读查询。返回 journeys.funnel_stage，runner 透传给 context。"""
+        try:
+            ci = self._gw.find_channel_identity(
+                channel=channel, account_id=account_id, external_id=external_id,
+            )
+            if ci is None:
+                return None
+            store = getattr(self._gw, "_store", None)
+            if store is None:
+                return None
+            journey = store.get_journey_by_contact(ci.contact_id)
+            if journey is None:
+                return None
+            fs = getattr(journey, "funnel_stage", None)
+            return str(fs) if fs else None
+        except Exception as e:
+            logger.debug("hook get_journey_funnel_stage failed: %s", e)
+            return None
+
     # ── W4-Handoff-Auto-Inject ─────────────────────────────
     def maybe_before_reply(
         self, *, account_id: str, external_id: str,
@@ -254,6 +314,8 @@ class NoopContactHooks:
     def issue_handoff_for_messenger(self, **_: object) -> None: return None
     def on_handoff_sent(self, **_: object) -> None: return None
     def on_line_first_text(self, **_: object) -> None: return None
+    def get_journey_intimacy(self, **_: object) -> None: return None
+    def get_journey_funnel_stage(self, **_: object) -> None: return None
 
     def maybe_before_reply(self, *, ai_reply: str = "", **_: object) -> BeforeReplyDecision:
         return BeforeReplyDecision(

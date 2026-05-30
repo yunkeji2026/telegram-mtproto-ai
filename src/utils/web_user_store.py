@@ -68,6 +68,7 @@ PAGE_PERMISSIONS = {
     "cases":      {ROLE_MASTER, ROLE_ADMIN, ROLE_VIEWER},
     "episodic":   {ROLE_MASTER, ROLE_ADMIN, ROLE_VIEWER},
     "line_rpa":   {ROLE_MASTER, ROLE_ADMIN, ROLE_VIEWER},
+    "personas":   {ROLE_MASTER, ROLE_ADMIN, ROLE_VIEWER},
 }
 
 WRITE_PERMISSIONS = {
@@ -78,6 +79,7 @@ WRITE_PERMISSIONS = {
     "manage_users":   {ROLE_MASTER},
     "manage_settings":{ROLE_MASTER},
     "import_export":  {ROLE_MASTER},
+    "edit_persona":   {ROLE_MASTER, ROLE_ADMIN},
 }
 
 

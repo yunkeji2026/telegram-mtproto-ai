@@ -142,6 +142,11 @@ def detect_screen_state(
         if any(h in rid for h in _CHATLIST_HINT_RIDS):
             evi.chatlist_hint += 1
 
+        # LINE bnb_chat Tab 选中信号：content-desc 如 "Chats tab Selected"
+        # 此信号仅当 Chats Tab 为当前激活 Tab 时才出现（其他 Tab 上不含 "selected"）
+        if "chats tab" in cdesc and "selected" in cdesc:
+            evi.chatlist_hint += 3
+
         # 返回按钮（content-desc 常见：Back / 返回 / Navigate up）
         if (
             "back" in cdesc

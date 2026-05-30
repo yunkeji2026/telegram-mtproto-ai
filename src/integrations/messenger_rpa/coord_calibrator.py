@@ -259,18 +259,28 @@ def calibrated_for(
     # ★ chat_row：anchors 合法 → 直接用；非法 → 退回等比缩放
     if (
         anchors.chat_row_first_y is not None
-        and 400 * ry <= anchors.chat_row_first_y <= 900 * ry
+        and 200 * ry <= anchors.chat_row_first_y <= 650 * ry
     ):
         chat_first_y = int(anchors.chat_row_first_y)
     else:
         chat_first_y = fb(cc.CHAT_ROW_FIRST_Y)
 
+    # S1-P0A: 收紧 chat_row_height 校验上限 220→180，下限 80→100。
+    # Messenger 720x1600 实测行高 ~140-165px。selfheal 偶尔产出 200+ 异常值
+    # （如 IJ8 height=211 导致 wrong_chat_rollback 频发）必须降级到 BASE。
     if (
         anchors.chat_row_height is not None
-        and 80 * ry <= anchors.chat_row_height <= 220 * ry
+        and 100 * ry <= anchors.chat_row_height <= 180 * ry
     ):
         chat_h = int(anchors.chat_row_height)
     else:
+        if anchors.chat_row_height is not None:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "[coord_calibrator] 校准异常降级: serial=%s height=%s 超出 [%d,%d] → BASE=%d",
+                serial, anchors.chat_row_height,
+                int(100 * ry), int(180 * ry), cc.CHAT_ROW_HEIGHT,
+            )
         chat_h = fb(cc.CHAT_ROW_HEIGHT)
 
     # tab_bar_y 让 vision 校准（误差小，且位置关键）

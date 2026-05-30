@@ -80,18 +80,25 @@ class AIChatAssistant:
     def __init__(self):
         """初始化AI聊天助手"""
         self.config = None
-        self.telegram_client = None
+        self.telegram_client = None          # primary (backward-compat)
+        self.telegram_clients: list = []     # all accounts (including primary)
         self.ai_client = None
         self.skill_manager = None
         self.logger = None
         self.running = False
-        self.line_rpa_service = None
+        self.line_rpa_service = None         # primary (backward-compat)
+        self.line_rpa_services: list = []      # all LINE accounts
         self.messenger_rpa_service = None
+        self.whatsapp_rpa_service = None        # primary (backward-compat)
+        self.whatsapp_rpa_services: list = []   # all WhatsApp accounts
+        self.device_coordinator_service = None   # 多平台设备协调器（可选）
+        self.hotplug_watcher = None              # ADB 热插拔自动纳管（可选）
         # W2-W4：跨平台 Contacts 子系统（feature flag 控制；默认关）
         self.contacts = None  # type: Optional["ContactsSubsystem"]  # noqa: F821
         # Mobile Bridge：mobile-auto0423 ↔ telegram-mtproto-ai 双向同步
         self.mobile_bridge = None  # type: Optional[Any]  # noqa: F821
         self._telegram_task = None
+        self._secondary_tg_tasks: list = []  # extra account tasks
         # D: web admin 隔离到独立线程
         self._web_thread = None
         self._web_loop = None
@@ -190,14 +197,50 @@ class AIChatAssistant:
             await self.skill_manager.initialize()
             self.logger.info("Skill管理器初始化成功")
             
-            # 5. 初始化Telegram客户端（传入 ai_client 用于「前一条+当前消息」上下文判断是否回复）
+            # 5. 初始化Telegram客户端（支持多账号并行）
+            try:
+                from src.client.telegram_account_registry import TelegramAccountRegistry
+                tg_raw_cfg = (self.config.config or {}).get("telegram", {})
+                _tg_registry = TelegramAccountRegistry.from_config(tg_raw_cfg)
+            except Exception as _reg_ex:
+                self.logger.warning("TelegramAccountRegistry 构建失败，回退单账号: %s", _reg_ex)
+                _tg_registry = None
+
+            _primary_ctx = None if _tg_registry is None else _tg_registry.primary()
+            _primary_cfg = _primary_ctx.account_cfg() if _primary_ctx else None
+
             self.telegram_client = TelegramClient(
                 config=self.config,
                 skill_manager=self.skill_manager,
-                ai_client=self.ai_client
+                ai_client=self.ai_client,
+                account_cfg=_primary_cfg,
             )
             await self.telegram_client.initialize()
-            self.logger.info("Telegram客户端初始化成功")
+            self.telegram_clients = [self.telegram_client]
+
+            if _tg_registry is not None and _tg_registry.is_multi_account():
+                for _ctx in _tg_registry.all_contexts()[1:]:
+                    try:
+                        _tc = TelegramClient(
+                            config=self.config,
+                            skill_manager=self.skill_manager,
+                            ai_client=self.ai_client,
+                            account_cfg=_ctx.account_cfg(),
+                        )
+                        await _tc.initialize()
+                        self.telegram_clients.append(_tc)
+                        self.logger.info(
+                            "Telegram 账号 [%s] 初始化成功", _ctx.account_id
+                        )
+                    except Exception as _tc_ex:
+                        self.logger.warning(
+                            "Telegram 账号 [%s] 初始化失败，跳过: %s",
+                            _ctx.account_id, _tc_ex,
+                        )
+
+            self.logger.info(
+                "Telegram 客户端初始化完成（%d 个账号）", len(self.telegram_clients)
+            )
             
             self.logger.info("✅ AI聊天助手初始化完成")
 
@@ -228,17 +271,36 @@ class AIChatAssistant:
             except Exception:
                 self.logger.debug("startup_advisory metrics 跳过", exc_info=True)
 
-            # 个人 LINE RPA 服务（可选；主进程托管循环）
+            # LINE RPA 服务（单账号 or 多账号）
             try:
                 _line_rpa_cfg = self.config.get_line_rpa_config() or {}
                 if isinstance(_line_rpa_cfg, dict) and _line_rpa_cfg.get("enabled"):
                     from src.integrations.line_rpa.service import LineRpaService
-                    self.line_rpa_service = LineRpaService(
-                        config_manager=self.config,
-                        skill_manager=self.skill_manager,
-                        line_rpa_cfg=_line_rpa_cfg,
-                    )
-                    self.logger.info("LINE RPA 服务已构建（autostart 将在 start() 中决定）")
+                    _line_accounts = _line_rpa_cfg.get("accounts") or []
+                    if _line_accounts:
+                        for _acc in _line_accounts:
+                            if not isinstance(_acc, dict) or not _acc.get("enabled", True):
+                                continue
+                            _acc_cfg = {**_line_rpa_cfg, **_acc}
+                            _acc_cfg.pop("accounts", None)
+                            _aid = _acc.get("account_id") or _acc.get("adb_serial", "default")
+                            svc = LineRpaService(
+                                config_manager=self.config,
+                                skill_manager=self.skill_manager,
+                                line_rpa_cfg=_acc_cfg,
+                                account_id=_aid,
+                            )
+                            self.line_rpa_services.append(svc)
+                            self.logger.info("LINE RPA 账号 [%s] 已构建 serial=%s", _aid, _acc.get("adb_serial"))
+                    else:
+                        svc = LineRpaService(
+                            config_manager=self.config,
+                            skill_manager=self.skill_manager,
+                            line_rpa_cfg=_line_rpa_cfg,
+                        )
+                        self.line_rpa_services.append(svc)
+                        self.logger.info("LINE RPA 服务已构建（单账号，autostart 将在 start() 中决定）")
+                    self.line_rpa_service = self.line_rpa_services[0] if self.line_rpa_services else None
             except Exception as ex:
                 self.logger.warning("LINE RPA 服务构建跳过: %s", ex)
 
@@ -258,6 +320,92 @@ class AIChatAssistant:
                     )
             except Exception as ex:
                 self.logger.warning("Messenger RPA 服务构建跳过: %s", ex)
+
+            # WhatsApp RPA 服务（单账号 or 多账号）
+            try:
+                _wa_cfg = (self.config.config or {}).get("whatsapp_rpa") or {}
+                if isinstance(_wa_cfg, dict) and _wa_cfg.get("enabled"):
+                    from src.integrations.whatsapp_rpa.service import WhatsAppRpaService
+                    _wa_accounts = _wa_cfg.get("accounts") or []
+                    if _wa_accounts:
+                        for _acc in _wa_accounts:
+                            if not isinstance(_acc, dict) or not _acc.get("enabled", True):
+                                continue
+                            _acc_cfg = {**_wa_cfg, **_acc}
+                            _acc_cfg.pop("accounts", None)
+                            _aid = _acc.get("account_id") or _acc.get("adb_serial", "default")
+                            svc = WhatsAppRpaService(
+                                config_manager=self.config,
+                                skill_manager=self.skill_manager,
+                                wa_cfg=_acc_cfg,
+                                account_id=_aid,
+                            )
+                            self.whatsapp_rpa_services.append(svc)
+                            self.logger.info("WhatsApp RPA 账号 [%s] 已构建 serial=%s", _aid, _acc.get("adb_serial"))
+                    else:
+                        svc = WhatsAppRpaService(
+                            config_manager=self.config,
+                            skill_manager=self.skill_manager,
+                            wa_cfg=_wa_cfg,
+                        )
+                        self.whatsapp_rpa_services.append(svc)
+                        self.logger.info("WhatsApp RPA 服务已构建（单账号）")
+                    self.whatsapp_rpa_service = self.whatsapp_rpa_services[0] if self.whatsapp_rpa_services else None
+            except Exception as ex:
+                self.logger.warning("WhatsApp RPA 服务构建跳过: %s", ex)
+
+            # 多平台设备协调器（Device Coordinator）
+            try:
+                _dc_cfg = (self.config.config or {}).get("device_coordinator") or {}
+                if isinstance(_dc_cfg, dict) and _dc_cfg.get("enabled"):
+                    from src.integrations.shared.device_service import DeviceCoordinatorService
+                    self.device_coordinator_service = DeviceCoordinatorService(
+                        config_manager=self.config,
+                        skill_manager=self.skill_manager,
+                        dc_cfg=_dc_cfg,
+                    )
+                    self.logger.info("DeviceCoordinatorService 已构建")
+            except Exception as ex:
+                self.logger.warning("DeviceCoordinatorService 构建跳过: %s", ex)
+
+            # 初始化设备注册表 DB（可配置路径，支持远程主机不同路径）
+            try:
+                _reg_cfg = (self.config.config or {}).get("device_registry") or {}
+                _reg_db_path = _reg_cfg.get("db_path", "")
+                if _reg_db_path:
+                    from src.shared.device_registry import get_device_registry
+                    get_device_registry(_reg_db_path)
+                    self.logger.info("DeviceRegistry 初始化（db=%s）", _reg_db_path)
+            except Exception as ex:
+                self.logger.warning("DeviceRegistry 初始化跳过: %s", ex)
+
+            # ADB 热插拔自动纳管（HotPlug Watcher）
+            try:
+                _hp_cfg = (self.config.config or {}).get("hotplug_watcher") or {}
+                # 默认启用（只要 device_coordinator 启用）
+                _hp_enabled = _hp_cfg.get("enabled", bool(self.device_coordinator_service))
+                if _hp_enabled:
+                    from src.integrations.shared.hotplug_watcher import HotPlugWatcher
+                    # 收集静态配置中已管理的 serial，防止重复纳管
+                    _static_serials = set()
+                    if self.device_coordinator_service:
+                        for c in self.device_coordinator_service.coordinators:
+                            _static_serials.add(c._serial)
+                    _host_name = str(_hp_cfg.get("host_name", "")).strip()
+                    self.hotplug_watcher = HotPlugWatcher(
+                        config_manager=self.config,
+                        skill_manager=self.skill_manager,
+                        scan_interval_sec=float(_hp_cfg.get("scan_interval_sec", 15)),
+                        static_serials=_static_serials,
+                        host_name=_host_name,
+                        offline_timeout_sec=float(_hp_cfg.get("offline_timeout_sec", 30)),
+                    )
+                    self.logger.info(
+                        "HotPlugWatcher 已构建（host=%s, 静态设备: %d 台）",
+                        _host_name or "(all)", len(_static_serials),
+                    )
+            except Exception as ex:
+                self.logger.warning("HotPlugWatcher 构建跳过: %s", ex)
 
             # ── Contacts 跨平台子系统（feature flag 控制）──
             try:
@@ -310,6 +458,21 @@ class AIChatAssistant:
                             self.logger.info(
                                 "LINE RPA ContactHooks 已按配置禁用 "
                                 "(contacts.rpa_hooks.line=false)")
+                    for _wsvc in self.whatsapp_rpa_services:
+                        if self.contacts.is_rpa_hook_enabled("whatsapp"):
+                            try:
+                                _wsvc.set_contact_hooks(_hooks)
+                                self.logger.info(
+                                    "WhatsApp RPA [%s] 已接入 ContactHooks",
+                                    getattr(_wsvc, "account_id", "?"))
+                            except Exception:
+                                self.logger.warning(
+                                    "WhatsApp RPA set_contact_hooks 失败",
+                                    exc_info=True)
+                        else:
+                            self.logger.info(
+                                "WhatsApp RPA ContactHooks 已按配置禁用 "
+                                "(contacts.rpa_hooks.whatsapp=false)")
             except Exception as ex:
                 self.logger.warning("Contacts 子系统启动跳过: %s", ex)
 
@@ -396,8 +559,16 @@ class AIChatAssistant:
                                         log_buffer=_log_buf)
                     if self.line_rpa_service is not None:
                         web_app.state.line_rpa_service = self.line_rpa_service
+                    web_app.state.line_rpa_services = self.line_rpa_services
                     if self.messenger_rpa_service is not None:
                         web_app.state.messenger_rpa_service = self.messenger_rpa_service
+                    if self.whatsapp_rpa_service is not None:
+                        web_app.state.whatsapp_rpa_service = self.whatsapp_rpa_service
+                    web_app.state.whatsapp_rpa_services = self.whatsapp_rpa_services
+                    if self.device_coordinator_service is not None:
+                        web_app.state.device_coordinator_service = self.device_coordinator_service
+                    if self.hotplug_watcher is not None:
+                        web_app.state.hotplug_watcher = self.hotplug_watcher
 
                     # ── 挂载 Contacts 路由（仅 contacts 子系统启用时） ──
                     if self.contacts is not None:
@@ -406,7 +577,9 @@ class AIChatAssistant:
                                 register_contacts_routes,
                             )
 
-                            def _contacts_api_auth(request):
+                            from starlette.requests import Request as _Req
+
+                            def _contacts_api_auth(request: _Req):
                                 # 复用 admin 的权限体系；若不存在则无鉴权（内网）
                                 if hasattr(web_app.state, "require_role"):
                                     web_app.state.require_role(request, "line_rpa")
@@ -419,9 +592,16 @@ class AIChatAssistant:
                                 audit_store=audit,
                                 intimacy_engine=self.contacts.intimacy_engine,
                                 reactivation_scheduler=self.contacts.reactivation,
+                                eval_scheduler=getattr(
+                                    self.contacts, "draft_eval_scheduler", None,
+                                ),
                                 gateway=self.contacts.gateway,
                                 account_limiter=self.contacts.limiter,
                                 mobile_bridge=self.mobile_bridge,
+                                fire_webhook=getattr(
+                                    web_app.state, "fire_webhook", None,
+                                ),
+                                ai_client=self.ai_client,
                             )
                             # 让 web 能通过 state 直接访问
                             web_app.state.contacts = self.contacts
@@ -531,8 +711,17 @@ class AIChatAssistant:
                 self._telegram_task = asyncio.create_task(
                     self.telegram_client.start(), name="telegram_client_start",
                 )
-                # 给 telegram 几秒完成登录、打印 "✅ Telegram客户端已启动，等待消息..."
-                # 超时不阻塞后续启动，只记 warning
+                # 次要账号各自建独立 task
+                for _i, _tc in enumerate(self.telegram_clients[1:], 2):
+                    _t = asyncio.create_task(
+                        _tc.start(),
+                        name=f"telegram_client_start_{_tc.account_id}",
+                    )
+                    self._secondary_tg_tasks.append(_t)
+                    self.logger.info(
+                        "Telegram 账号 [%s] 已在后台启动", _tc.account_id
+                    )
+                # 给主 telegram 几秒完成登录
                 try:
                     await asyncio.wait_for(
                         self._wait_until_telegram_ready(), timeout=15.0
@@ -547,15 +736,27 @@ class AIChatAssistant:
 
                 self.logger.info("✅ AI聊天助手已启动，等待消息...")
 
-                if self.line_rpa_service is not None:
+                for _lsvc in self.line_rpa_services:
                     try:
-                        started = await self.line_rpa_service.start()
+                        started = await _lsvc.start()
+                        _aid = getattr(_lsvc, "account_id", "default")
                         if started:
-                            self.logger.info("✅ LINE RPA 后台循环已启动")
+                            self.logger.info("✅ LINE RPA [%s] 后台循环已启动", _aid)
                         else:
-                            self.logger.info("LINE RPA 后台循环未自动启动（见配置）")
+                            self.logger.info("LINE RPA [%s] 未自动启动（见配置）", _aid)
                     except Exception as ex:
                         self.logger.warning("LINE RPA 启动跳过: %s", ex)
+
+                for _wsvc in self.whatsapp_rpa_services:
+                    try:
+                        started = await _wsvc.start()
+                        _aid = getattr(_wsvc, "account_id", "default")
+                        if started:
+                            self.logger.info("✅ WhatsApp RPA [%s] 后台循环已启动", _aid)
+                        else:
+                            self.logger.info("WhatsApp RPA [%s] 未自动启动（见配置）", _aid)
+                    except Exception as ex:
+                        self.logger.warning("WhatsApp RPA 启动跳过: %s", ex)
 
                 if self.messenger_rpa_service is not None:
                     try:
@@ -580,6 +781,20 @@ class AIChatAssistant:
                     except Exception as ex:
                         self.logger.warning("Messenger RPA 启动跳过: %s", ex)
 
+                if self.device_coordinator_service is not None:
+                    try:
+                        await self.device_coordinator_service.start()
+                        self.logger.info("✅ DeviceCoordinatorService 已启动")
+                    except Exception as ex:
+                        self.logger.warning("DeviceCoordinatorService 启动跳过: %s", ex)
+
+                if self.hotplug_watcher is not None:
+                    try:
+                        await self.hotplug_watcher.start()
+                        self.logger.info("✅ HotPlugWatcher 已启动")
+                    except Exception as ex:
+                        self.logger.warning("HotPlugWatcher 启动跳过: %s", ex)
+
                 asyncio.create_task(self._warmup_embeddings(), name="kb_warmup_embeddings")
                 asyncio.create_task(
                     self._episodic_backfill_on_startup(), name="episodic_backfill_startup"
@@ -589,6 +804,16 @@ class AIChatAssistant:
                 )
                 asyncio.create_task(self._periodic_self_heal(), name="kb_periodic_self_heal")
                 asyncio.create_task(self._periodic_daily_learn(), name="daily_learner")
+
+                # ★ W3-3G / W3-3K：启动 reunion 草稿成功率评估循环（DraftEvalScheduler）
+                if self.contacts is not None and self.contacts.store is not None:
+                    from src.contacts.draft_eval import DraftEvalScheduler
+                    self.contacts.draft_eval_scheduler = DraftEvalScheduler(
+                        self.contacts.store, eval_window_secs=86400,
+                    )
+                    asyncio.create_task(
+                        self._periodic_draft_eval(), name="draft_success_evaluator",
+                    )
 
                 # ★ W2-D4.2/4.3：启动 reactivation 主动唤醒循环
                 # 必须在 contacts + messenger_rpa_service + ai_client 都就绪后启动
@@ -868,6 +1093,24 @@ class AIChatAssistant:
                 self.logger.warning("知识库自愈异常: %s", e)
             await asyncio.sleep(86400)
 
+    async def _periodic_draft_eval(self):
+        """W3-3G：每小时跑一次 reunion 草稿成功率评估。
+
+        对所有「已发 24h+ 但还没评估」的草稿，看 sent_ts 后 24h 内有没有
+        对方 msg_in，写回 ``draft_log.success``。让 digest 的成功率
+        指标持续刷新，无需运营手动触发 ``/api/drafts/eval-run``。
+
+        启动延迟 5min（避免与启动期其他 init 抢 SQLite 锁）；
+        每轮 sleep 3600 秒（1h，比窗口 24h 更密以减小 stats 滞后）。
+        """
+        await asyncio.sleep(300)
+        sched = getattr(getattr(self, "contacts", None), "draft_eval_scheduler", None)
+        while self.running:
+            if sched is not None:
+                sched.run_once()
+            interval = sched.next_interval_secs if sched else 3600
+            await asyncio.sleep(interval)
+
     async def _periodic_daily_learn(self):
         """每24小时执行一次自动学习：汇总未命中 → AI生成草稿 → 等待人工审核"""
         await asyncio.sleep(600)
@@ -922,10 +1165,10 @@ class AIChatAssistant:
                     except Exception as e:
                         self.logger.warning("上下文快照保存失败: %s", e)
             
-            if self.line_rpa_service is not None:
+            for _lsvc in self.line_rpa_services:
                 try:
-                    await self.line_rpa_service.stop()
-                    self.logger.info("LINE RPA 后台循环已停止")
+                    await _lsvc.stop()
+                    self.logger.info("LINE RPA [%s] 后台循环已停止", getattr(_lsvc, "account_id", "?"))
                 except Exception as ex:
                     self.logger.warning("LINE RPA 停止异常: %s", ex)
 
@@ -935,6 +1178,13 @@ class AIChatAssistant:
                     self.logger.info("Messenger RPA 后台循环已停止")
                 except Exception as ex:
                     self.logger.warning("Messenger RPA 停止异常: %s", ex)
+
+            for _wsvc in self.whatsapp_rpa_services:
+                try:
+                    await _wsvc.stop()
+                    self.logger.info("WhatsApp RPA [%s] 后台循环已停止", getattr(_wsvc, "account_id", "?"))
+                except Exception as ex:
+                    self.logger.warning("WhatsApp RPA 停止异常: %s", ex)
 
             # W2-D4.2：reactivation_loop 优雅停止
             if self._reactivation_loop is not None:
@@ -949,6 +1199,13 @@ class AIChatAssistant:
                     await self.mobile_bridge.stop()
                 except Exception as ex:
                     self.logger.warning("Mobile Bridge 停止异常: %s", ex)
+
+            if self.hotplug_watcher is not None:
+                try:
+                    await self.hotplug_watcher.stop()
+                    self.logger.info("HotPlugWatcher 已停止")
+                except Exception as ex:
+                    self.logger.warning("HotPlugWatcher 停止异常: %s", ex)
 
             if self.telegram_client:
                 await self.telegram_client.stop()

@@ -76,13 +76,16 @@ class TestMutuality:
         store, gw, eng = env
         ctx = gw.on_peer_seen(channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_1")
         jid = ctx.journey.journey_id
-        # 5 in + 5 out
+        # 5 in + 5 out — events at start..start+270, compute at start+300
+        # （明确传 now 以避免 "事件相对 now 在未来" 被过滤 / 2026-05-17）
+        import time as _t
+        start = int(_t.time())
         pattern = []
         for i in range(5):
             pattern.append(("msg_in", i * 60))
             pattern.append(("msg_out", i * 60 + 30))
-        _fake_events(store, jid, pattern)
-        bd = eng.compute_intimacy(jid)
+        _fake_events(store, jid, pattern, start_ts=start)
+        bd = eng.compute_intimacy(jid, now=start + 300)
         assert bd.contributions["mutuality"] == 0.25   # 满
         # turns=5/20=0.0625 权重 0.25 → 0.0156
         # days=1/5=0.2 → 0.05 * 0.25 贡献 0.05
@@ -94,8 +97,12 @@ class TestMutuality:
         ctx = gw.on_peer_seen(channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_1")
         jid = ctx.journey.journey_id
         # 10 in, 0 out
-        _fake_events(store, jid, [("msg_in", i * 60) for i in range(10)])
-        bd = eng.compute_intimacy(jid)
+        import time as _t
+        start = int(_t.time())
+        _fake_events(
+            store, jid, [("msg_in", i * 60) for i in range(10)], start_ts=start,
+        )
+        bd = eng.compute_intimacy(jid, now=start + 600)
         assert bd.contributions["mutuality"] == 0.0
 
 

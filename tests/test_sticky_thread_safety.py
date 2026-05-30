@@ -103,6 +103,47 @@ class TestStickyHashDiff:
         )
         assert any_force_hint
 
+    def test_force_full_does_not_call_adb_when_serial_unknown(self, tmp_path, monkeypatch):
+        """🔒 防回归 (2026-05-18)：force_full 路径在没显式配置 adb_serial 时
+        必须**跳过** XML 屏幕验证，不能 fallback 到 adb.list_device_serials()。
+
+        历史 bug：调用 self._resolve_serial(result) 兜底拿 serial，导致单元
+        测试在开发机插了真实手机时拿到无关设备的 XML，is_in_thread→False
+        让 force_full 路径错误返回 False（应返回 True 让上层走 vision）。
+
+        修复：只读 result.serial / cfg.adb_serial；都没有就跳过 XML 验证。
+        """
+        # 故意 monkeypatch adb 列设备让其返回非空（模拟开发机连了 adb 设备的情况）
+        from src.integrations.messenger_rpa import runner as _runner_mod
+
+        called = {"list_device_serials": 0}
+        original = getattr(_runner_mod.adb, "list_device_serials", None)
+
+        def _spy_list_serials():
+            called["list_device_serials"] += 1
+            return ["FAKE_SERIAL_X"]
+
+        if original is not None:
+            monkeypatch.setattr(_runner_mod.adb, "list_device_serials", _spy_list_serials)
+
+        # cfg 不带 adb_serial → force_full 应该跳过 XML 验证
+        r = _runner({
+            "sticky_thread": {
+                "hash_diff_enabled": True,
+                "full_check_after_n_idle": 3,
+            },
+        })
+        png = tmp_path / "f.png"
+        _make_test_png(png)
+        # 建立 baseline + 2 次 idle + 1 次 force_full
+        for _ in range(4):
+            r._check_sticky_thread_changed(str(png), "Alice", {})
+        # 最后一次 force_full 必须不调 adb.list_device_serials()
+        assert called["list_device_serials"] == 0, (
+            "force_full 路径不应 fallback 到 adb.list_device_serials()"
+            "（会引入对外部 adb 状态的脆弱依赖）"
+        )
+
     def test_disabled_returns_changed_default(self, tmp_path):
         """hash_diff_enabled=False 时永远返回 True（不影响原流程）。"""
         r = _runner({"sticky_thread": {"hash_diff_enabled": False}})

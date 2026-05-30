@@ -1,0 +1,908 @@
+{# ════════════════════════════════════════════════════════════════════════ #}
+{# RPA 统一 JS 工具库 — 4 平台共用                                            #}
+{#                                                                            #}
+{# 用法：在 4 个 RPA 页面 {% block content %} 顶部                              #}
+{#       {% include "_rpa_shared_scripts.html" %}                              #}
+{#                                                                            #}
+{# 提供全局 window.rpa 命名空间，所有函数以 rpa* 前缀避免冲突。                  #}
+{# ════════════════════════════════════════════════════════════════════════ #}
+<script>
+(function(){
+'use strict';
+if(window.rpa) return; // 防止重复加载
+
+const rpa = window.rpa = {};
+
+// ─── CSRF ───────────────────────────────────────────────────────────────
+rpa.csrf = function(){
+  const c=document.cookie.split('; ').find(x=>x.startsWith('csrf_token='));
+  return c?c.split('=')[1]:'';
+};
+
+// ─── HTML escape ────────────────────────────────────────────────────────
+rpa.esc = function(s){
+  return String(s==null?'':s)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;');
+};
+
+// ─── 时间格式化 ─────────────────────────────────────────────────────────
+rpa.fmtTs = function(t){
+  if(!t) return '—';
+  const d = new Date(Number(t)*1000);
+  return d.toLocaleString('zh-CN',{hour12:false});
+};
+rpa.fmtTime = function(t){
+  if(!t) return '';
+  const d = new Date(Number(t)*1000);
+  return d.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+};
+rpa.fmtDate = function(t){
+  if(!t) return '—';
+  const d = new Date(Number(t)*1000);
+  return d.toLocaleDateString('zh-CN',{month:'2-digit',day:'2-digit'});
+};
+rpa.ago = function(t){
+  if(!t) return '';
+  const s = Math.round(Date.now()/1000 - Number(t));
+  if(s<1) return '刚刚';
+  if(s<60) return s+' 秒前';
+  if(s<3600) return Math.round(s/60)+' 分前';
+  if(s<86400) return Math.round(s/3600)+' 小时前';
+  return Math.round(s/86400)+' 天前';
+};
+
+// ─── 时长（秒）→ 人类可读 ───────────────────────────────────────────────
+rpa.fmtDur = function(sec){
+  sec = Math.max(0, Math.round(Number(sec)||0));
+  if(sec === 0) return '不限';
+  if(sec < 60) return sec + ' 秒';
+  if(sec < 3600){
+    const m = Math.floor(sec/60), s = sec%60;
+    return s ? `${m} 分 ${s} 秒` : `${m} 分钟`;
+  }
+  if(sec < 86400){
+    const h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60);
+    return m ? `${h} 时 ${m} 分` : `${h} 小时`;
+  }
+  const d = Math.floor(sec/86400), h = Math.floor((sec%86400)/3600);
+  return h ? `${d} 天 ${h} 时` : `${d} 天`;
+};
+
+// ─── Fetch 包装：GET / POST / PUT，自动带 CSRF + JSON ────────────────────
+rpa.get = function(path, opts){
+  return fetch(path, Object.assign({method:'GET', credentials:'include'}, opts||{}))
+    .then(r => r.ok ? r.json() : r.json().catch(()=>({error:'http_'+r.status})).then(e=>{e._status=r.status;return e;}));
+};
+rpa.post = function(path, body, opts){
+  return fetch(path, Object.assign({
+    method:'POST',
+    credentials:'include',
+    headers:{'Content-Type':'application/json','X-CSRF-Token':rpa.csrf()},
+    body: body==null ? null : JSON.stringify(body),
+  }, opts||{}));
+};
+rpa.put = function(path, body, opts){
+  return fetch(path, Object.assign({
+    method:'PUT',
+    credentials:'include',
+    headers:{'Content-Type':'application/json','X-CSRF-Token':rpa.csrf()},
+    body: body==null ? null : JSON.stringify(body),
+  }, opts||{}));
+};
+
+// ─── Tab 切换（依赖 .st-bar / .st-tab / .st-pane） ──────────────────────
+// 用法：onclick="rpa.switchTab(this)"，data-pane 指向目标 pane id
+rpa.switchTab = function(el){
+  const bar = el.closest('.st-bar');
+  if(!bar) return;
+  // 找到同组的 panes 容器（通常是 bar 的兄弟节点）
+  const parent = bar.parentElement;
+  // 取消所有兄弟 tab 的 active
+  bar.querySelectorAll('.st-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  // 取消所有兄弟 pane 的 active
+  parent.querySelectorAll(':scope > .st-pane').forEach(p => p.classList.remove('active'));
+  const targetId = el.getAttribute('data-pane');
+  if(targetId){
+    const tgt = document.getElementById(targetId);
+    if(tgt) tgt.classList.add('active');
+  }
+  // 记忆到 URL hash
+  if(targetId) {
+    try{ history.replaceState(null, '', '#'+targetId); }catch(_){}
+  }
+};
+
+// 页面加载时从 URL hash 恢复 tab
+rpa.restoreTabFromHash = function(){
+  const hash = (location.hash||'').replace(/^#/, '');
+  if(!hash) return;
+  const target = document.querySelector(`.st-tab[data-pane="${hash}"]`);
+  if(target) rpa.switchTab(target);
+};
+
+// ─── Dirty marker（设置未保存时给 tab 加橙色点） ─────────────────────────
+rpa.markDirty = function(tabId, dirty){
+  if(dirty == null) dirty = true;
+  const el = document.getElementById(tabId);
+  if(!el) return;
+  el.classList.toggle('dirty', !!dirty);
+};
+
+// ─── 预设方案 popover 显隐 ──────────────────────────────────────────────
+rpa.togglePreset = function(ev, popId){
+  if(ev) ev.stopPropagation();
+  const pop = document.getElementById(popId);
+  if(!pop) return;
+  const wasOpen = pop.classList.contains('open');
+  // 关掉所有其他 preset-pop
+  document.querySelectorAll('.preset-pop.open').forEach(p => p.classList.remove('open'));
+  if(!wasOpen) pop.classList.add('open');
+};
+// 全局点击关闭所有 preset
+document.addEventListener('click', function(e){
+  if(!e.target.closest('.preset-wrap')){
+    document.querySelectorAll('.preset-pop.open').forEach(p => p.classList.remove('open'));
+  }
+});
+
+// ─── Toast（简易吐司提示） ──────────────────────────────────────────────
+let _toastBox;
+rpa.toast = function(msg, kind){
+  if(!_toastBox){
+    _toastBox = document.createElement('div');
+    _toastBox.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:9999;display:flex;flex-direction:column;gap:.4rem;pointer-events:none;align-items:center';
+    document.body.appendChild(_toastBox);
+  }
+  const t = document.createElement('div');
+  const bg = kind==='err' ? '#dc2626' : kind==='warn' ? '#b45309' : kind==='ok' ? '#16a34a' : '#1f2937';
+  t.style.cssText = `background:${bg};color:#fff;padding:.55rem 1rem;border-radius:8px;font-size:.85rem;font-weight:500;box-shadow:0 4px 14px rgba(0,0,0,.25);opacity:0;transition:opacity .2s`;
+  t.textContent = msg;
+  _toastBox.appendChild(t);
+  requestAnimationFrame(()=>{ t.style.opacity='1'; });
+  setTimeout(()=>{
+    t.style.opacity='0';
+    setTimeout(()=> t.remove(), 250);
+  }, kind==='err' ? 4500 : 2800);
+};
+
+// ─── 浏览器 title 通知（Q3） ─────────────────────────────────────────────
+// rpa.notify.setBadge(count, label?)：count>0 时 title 加前缀 (N)/(N label)
+//   - 幂等：每次调用都用正则剥掉旧前缀，不依赖 baseline 缓存
+//   - count=0 → 恢复无前缀状态
+// rpa.notify.flash()：当用户在别的 tab 时，title 闪烁 3 次提醒（visibilityState=hidden）
+// rpa.notify.reset()：强制清前缀（页面关闭 / 用户登出时调用）
+rpa.notify = (function(){
+  // 匹配 (N) 或 (N word) 前缀（含一个或多个空格）。N 至少 1 位数字。
+  const PREFIX_RE = /^\(\d+(?:\s+[^\)]+)?\)\s+/;
+  let _flashTimer = null;
+  let _flashSeq = 0;
+
+  function stripPrefix(title){
+    return String(title || '').replace(PREFIX_RE, '');
+  }
+  function setBadge(count, label){
+    const n = Math.max(0, Number(count) || 0);
+    const base = stripPrefix(document.title);
+    if(n === 0){
+      document.title = base;
+    } else {
+      const lbl = label ? ` ${label}` : '';
+      document.title = `(${n}${lbl}) ${base}`;
+    }
+  }
+  function reset(){ document.title = stripPrefix(document.title); }
+  function flash(times){
+    // 只在用户不可见当前 tab 时才有意义
+    if(document.visibilityState === 'visible') return;
+    if(_flashTimer){ clearInterval(_flashTimer); _flashTimer = null; }
+    const total = Math.max(1, Number(times) || 3) * 2; // 一次 toggle 算 0.5 次
+    _flashSeq = 0;
+    const original = document.title;
+    const alt = stripPrefix(original);
+    // 如果剥不掉前缀（无 badge）→ 加一个 🔔 emoji 来对比
+    const flashTitle = (original === alt) ? `🔔 ${alt}` : alt;
+    _flashTimer = setInterval(() => {
+      document.title = (_flashSeq % 2 === 0) ? flashTitle : original;
+      _flashSeq += 1;
+      if(_flashSeq >= total){
+        clearInterval(_flashTimer); _flashTimer = null;
+        document.title = original;
+      }
+    }, 800);
+  }
+  // 用户切回当前 tab → 立即停止闪烁
+  document.addEventListener('visibilitychange', function(){
+    if(document.visibilityState === 'visible' && _flashTimer){
+      clearInterval(_flashTimer); _flashTimer = null;
+    }
+  });
+  return { setBadge: setBadge, reset: reset, flash: flash };
+})();
+
+// ─── 批量审批 + 键盘快捷键（Q1+Q2） ─────────────────────────────────────
+// 设计：
+//   - 平台无关：rpa.bulk.register({containerId, rowClass, pidAttr, approve, reject, ...})
+//     声明"我的 pending 在哪、单条操作怎么调"，bulk 负责选中态 / 焦点 / 键盘 / 并发派发
+//   - Checkbox 由平台模板渲染（class="rpa-bulk-pick" data-pid="X"）；bulk 不动态注入 DOM
+//   - 焦点跟随 PID 跨 refresh 持久；refresh 后找回，找不到则跳第一行
+//   - Promise.allSettled 并发执行单条操作；toast 显示"成功 X / 失败 Y"
+//
+// 键盘快捷键（焦点不在 input/textarea/select/contenteditable 时才生效）：
+//   j / ↓     —— 焦点下移
+//   k / ↑     —— 焦点上移
+//   空格 / x  —— 切换当前焦点 checkbox
+//   a         —— 批准当前焦点行
+//   r         —— 拒绝当前焦点行
+//   Shift+A   —— 批量批准所有勾选
+//   Shift+R   —— 批量拒绝所有勾选
+//   Esc       —— 清空选中 + 取消焦点
+rpa.bulk = (function(){
+  let _spec = null;          // 当前注册的平台 spec（一页一个）
+  let _focusedPid = null;    // 当前焦点行 PID（跨 refresh 持久）
+  let _keymapBound = false;  // 全局 keymap 只绑一次
+
+  function _container(){
+    return _spec ? document.getElementById(_spec.containerId) : null;
+  }
+  function _rows(){
+    const c = _container();
+    return c ? Array.from(c.querySelectorAll('.' + _spec.rowClass)) : [];
+  }
+  function _rowPid(row){
+    return row.getAttribute(_spec.pidAttr);
+  }
+  function _findRow(pid){
+    const c = _container();
+    if(!c || pid == null) return null;
+    return c.querySelector('.' + _spec.rowClass + '[' + _spec.pidAttr + '="' + String(pid).replace(/"/g,'\\"') + '"]');
+  }
+  function getSelectedIds(){
+    const c = _container();
+    if(!c) return [];
+    return Array.from(c.querySelectorAll('.rpa-bulk-pick:checked'))
+      .map(cb => cb.getAttribute('data-pid'))
+      .filter(x => x != null);
+  }
+  function _refreshToolbar(){
+    if(!_spec) return;
+    const n = getSelectedIds().length;
+    const btnA = document.getElementById(_spec.approveBtnId);
+    const btnR = document.getElementById(_spec.rejectBtnId);
+    const cnt  = document.getElementById(_spec.countId);
+    if(btnA){ btnA.disabled = (n === 0); btnA.textContent = `批量批准 (${n})`; }
+    if(btnR){ btnR.disabled = (n === 0); btnR.textContent = `批量拒绝 (${n})`; }
+    if(cnt){  cnt.textContent = `已选 ${n} 项`; }
+  }
+  function _applyFocus(){
+    const c = _container();
+    if(!c) return;
+    c.querySelectorAll('.rpa-bulk-focus').forEach(el => el.classList.remove('rpa-bulk-focus'));
+    if(_focusedPid != null){
+      const row = _findRow(_focusedPid);
+      if(row){
+        row.classList.add('rpa-bulk-focus');
+        // 滚到可视区域（不必平滑，免得按 j 连续按时晕）
+        row.scrollIntoView({block: 'nearest'});
+      } else {
+        _focusedPid = null;   // 该 ID 已不在列表（被处理 / refresh 后过滤）
+      }
+    }
+  }
+  function _focusFirst(){
+    const rs = _rows();
+    _focusedPid = rs.length ? _rowPid(rs[0]) : null;
+    _applyFocus();
+  }
+  function _focusMove(delta){
+    const rs = _rows();
+    if(!rs.length){ _focusedPid = null; return; }
+    let idx = rs.findIndex(r => _rowPid(r) === _focusedPid);
+    if(idx < 0) idx = (delta > 0) ? -1 : rs.length;
+    let next = idx + delta;
+    if(next < 0) next = 0;
+    if(next >= rs.length) next = rs.length - 1;
+    _focusedPid = _rowPid(rs[next]);
+    _applyFocus();
+  }
+  function selectAll(){
+    const c = _container();
+    if(!c) return;
+    c.querySelectorAll('.rpa-bulk-pick').forEach(cb => { cb.checked = true; });
+    _refreshToolbar();
+  }
+  function clearSelection(){
+    const c = _container();
+    if(!c) return;
+    c.querySelectorAll('.rpa-bulk-pick:checked').forEach(cb => { cb.checked = false; });
+    _refreshToolbar();
+  }
+  function toggleAt(pid){
+    const c = _container();
+    if(!c || pid == null) return;
+    const cb = c.querySelector('.rpa-bulk-pick[data-pid="' + String(pid).replace(/"/g,'\\"') + '"]');
+    if(cb){ cb.checked = !cb.checked; _refreshToolbar(); }
+  }
+  // 并发执行 + toast 汇总 + P19-B: 淡出动画 + 滚动保持
+  async function _runBatch(ids, fn, actionLabel){
+    if(!ids.length){ rpa.toast('未选中任何项', 'warn'); return; }
+    // P19-B: 保存滚动位置
+    const c = _container();
+    const scrollTop = c ? c.scrollTop : 0;
+    // P19-B: 对已选行添加淡出动画
+    ids.forEach(pid => {
+      const row = _rowByPid(pid);
+      if(row){ row.style.transition = 'opacity .4s'; row.style.opacity = '0.3'; }
+    });
+    rpa.toast(`正在${actionLabel} ${ids.length} 条…`);
+    const results = await Promise.allSettled(ids.map(id => fn(id)));
+    const ok = results.filter(r => r.status === 'fulfilled' && !(r.value && r.value._failed)).length;
+    const failed = results.length - ok;
+    if(failed === 0){
+      rpa.toast(`${actionLabel}成功：${ok} 条`, 'ok');
+    } else {
+      rpa.toast(`${actionLabel}完成：${ok} 成功 / ${failed} 失败`, failed === results.length ? 'err' : 'warn');
+      results.forEach((r, i) => {
+        if(r.status === 'rejected'){
+          console.warn('[rpa.bulk] 失败', ids[i], r.reason);
+        } else if(r.value && r.value._failed){
+          console.warn('[rpa.bulk] 业务失败', ids[i], r.value);
+        }
+      });
+    }
+    if(_spec && typeof _spec.onAfterChange === 'function'){
+      try { await _spec.onAfterChange(); } catch(_){}
+    }
+    // P19-B: 恢复滚动位置（在重渲染后）
+    if(c){ c.scrollTop = scrollTop; }
+  }
+  async function approveSelected(){
+    if(!_spec || !_spec.approve) return;
+    await _runBatch(getSelectedIds(), _spec.approve, '批准');
+  }
+  async function rejectSelected(reason){
+    if(!_spec || !_spec.reject) return;
+    await _runBatch(getSelectedIds(), (id) => _spec.reject(id, reason), '拒绝');
+  }
+  async function approveFocused(){
+    if(!_spec || !_spec.approve || _focusedPid == null) return;
+    await _runBatch([_focusedPid], _spec.approve, '批准');
+  }
+  async function rejectFocused(reason){
+    if(!_spec || !_spec.reject || _focusedPid == null) return;
+    await _runBatch([_focusedPid], (id) => _spec.reject(id, reason), '拒绝');
+  }
+  function _bindKeymap(){
+    if(_keymapBound) return;
+    _keymapBound = true;
+    document.addEventListener('keydown', function(e){
+      if(!_spec) return;
+      // 焦点在输入框时跳过（避免在 textarea/input 里按 a/r 触发审批）
+      const t = e.target;
+      const tag = (t && t.tagName || '').toLowerCase();
+      if(tag === 'input' || tag === 'textarea' || tag === 'select' || (t && t.isContentEditable)) return;
+      // 在 pending tab 不可见时跳过（rough heuristic：container 必须可见）
+      const c = _container();
+      if(!c || c.offsetParent === null) return;
+      // 修饰键过滤：bulk 操作需 shift；其它 single 操作不能带 ctrl/meta/alt
+      if(e.ctrlKey || e.metaKey || e.altKey) return;
+      switch(e.key){
+        case 'j': case 'ArrowDown':
+          e.preventDefault(); _focusMove(+1); break;
+        case 'k': case 'ArrowUp':
+          e.preventDefault(); _focusMove(-1); break;
+        case ' ': case 'x':
+          if(_focusedPid != null){ e.preventDefault(); toggleAt(_focusedPid); }
+          break;
+        case 'A':  // Shift+A
+          if(e.shiftKey){ e.preventDefault(); approveSelected(); }
+          break;
+        case 'R':  // Shift+R
+          if(e.shiftKey){ e.preventDefault(); rejectSelected(); }
+          break;
+        case 'a':
+          if(!e.shiftKey){ e.preventDefault(); approveFocused(); }
+          break;
+        case 'r':
+          if(!e.shiftKey){ e.preventDefault(); rejectFocused(); }
+          break;
+        case 'Escape':
+          if(_focusedPid != null || getSelectedIds().length){
+            e.preventDefault(); _focusedPid = null; clearSelection(); _applyFocus();
+          }
+          break;
+      }
+    });
+  }
+  // 重要：register 是幂等的——同一 containerId 重复 register 会覆盖 spec，
+  // keymap 只绑一次，按钮/checkbox 的 change 监听用事件委托（在 document 上）
+  function register(spec){
+    _spec = Object.assign({
+      // 默认值（平台可不传）
+      countId: '',
+      approveBtnId: '',
+      rejectBtnId: '',
+    }, spec);
+    _bindKeymap();
+    // 事件委托：当用户勾选 checkbox 时 refresh toolbar；refresh focus
+    // （register 可能被 refresh pending list 多次调用，但我们用 _delegationBound 标记保护）
+    if(!register._delegationBound){
+      register._delegationBound = true;
+      document.addEventListener('change', function(e){
+        if(e.target && e.target.classList && e.target.classList.contains('rpa-bulk-pick')){
+          _refreshToolbar();
+        }
+      });
+      document.addEventListener('click', function(e){
+        // 行点击 → 移焦点过去（除非点的是 checkbox 或 button）
+        const row = e.target.closest && e.target.closest('.' + (_spec ? _spec.rowClass : '__none__'));
+        if(!row) return;
+        if(e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        const pid = _rowPid(row);
+        if(pid != null){ _focusedPid = pid; _applyFocus(); }
+      });
+    }
+    // refresh 一次（pending list 渲染后 register 才有 row 可数）
+    _refreshToolbar();
+    _applyFocus();
+  }
+  // 平台 refresh pending list 后调用 onPendingRendered() 让 bulk 同步焦点/工具栏
+  function onPendingRendered(){ _refreshToolbar(); _applyFocus(); }
+  return {
+    register: register,
+    onPendingRendered: onPendingRendered,
+    getSelectedIds: getSelectedIds,
+    getSelected: getSelectedIds, // P19-A: alias for keyboard shortcut handler
+    selectAll: selectAll,
+    clearSelection: clearSelection,
+    toggleAt: toggleAt,
+    approveSelected: approveSelected,
+    rejectSelected: rejectSelected,
+    approveFocused: approveFocused,
+    rejectFocused: rejectFocused,
+  };
+})();
+
+// ─── P9: 聊天分析组件工厂（LINE / Messenger / WhatsApp 共用） ──────────────
+// 提供两个跨平台工厂：
+//   rpa.analytics.initSearch({inputId, resultId, listId?, apiBase, days?, limit?, onPick?})
+//     - 注入到任意搜索输入框，绑定 debounce + 调 {apiBase}/search
+//     - 结果默认点击触发 onPick(chatKey)；若未提供，仅高亮无跳转
+//   rpa.analytics.intentChart({bodyId, apiBase, defaultHours?, btnSel?})
+//     - 渲染意图分布水平条形图，绑定窗口切换按钮（class=btnSel, data-h=小时数）
+const _INTENT_COLORS = {purchase:'#6ee7b7',support:'#f87171',inquiry:'#93c5fd',greeting:'#94a3b8',general:'rgba(148,163,184,.5)'};
+const _INTENT_LABELS = {purchase:'购买',support:'售后',inquiry:'咨询',greeting:'问候',general:'通用'};
+
+rpa.analytics = {
+  initSearch: function(opts){
+    const inp = document.getElementById(opts.inputId);
+    const results = document.getElementById(opts.resultId);
+    const list = opts.listId ? document.getElementById(opts.listId) : null;
+    if(!inp || !results) return;
+    const apiBase = opts.apiBase;
+    const days = opts.days || 30;
+    const limit = opts.limit || 20;
+    const onPick = typeof opts.onPick === 'function' ? opts.onPick : null;
+    let timer = null;
+    const doSearch = function(){
+      const q = (inp.value||'').trim();
+      if(!q){
+        results.style.display='none'; results.innerHTML='';
+        if(list) list.style.display='';
+        return;
+      }
+      if(list) list.style.display='none';
+      results.style.display='';
+      results.innerHTML='<div style="padding:.55rem 1rem;font-size:.78rem;color:var(--t3,#94a3b8)">检索中…</div>';
+      const intent = (document.getElementById(opts.inputId+'-intent')?.value || '');
+      rpa.get(apiBase + '/search?q=' + encodeURIComponent(q)
+                + '&intent=' + encodeURIComponent(intent)
+                + '&days=' + days + '&limit=' + limit)
+        .then(function(d){
+          const rs = (d && d.results) || [];
+          if(!rs.length){
+            results.innerHTML='<div style="padding:.55rem 1rem;font-size:.78rem;color:var(--t3,#94a3b8)">无匹配记录</div>';
+            return;
+          }
+          const hi = function(txt){
+            if(!txt) return '';
+            const safe = rpa.esc(txt.slice(0,200));
+            try{
+              const re = new RegExp(rpa.esc(q).replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi');
+              return safe.replace(re, function(m){ return '<em style="color:#fbbf24;font-style:normal;font-weight:600">'+m+'</em>'; });
+            }catch(_){ return safe; }
+          };
+          results.innerHTML = '<div class="rpa-search-results">' + rs.map(function(r){
+            const ck = r.chat_key || '';
+            const ckEsc = ck.replace(/'/g,"\\'");
+            const intentTag = (r.intent_tag && r.intent_tag !== 'general')
+              ? ' <span style="font-size:.65rem;padding:1px 6px;border-radius:6px;background:rgba(99,102,241,.15);color:#a5b4fc">'+rpa.esc(r.intent_tag)+'</span>'
+              : '';
+            const click = onPick ? ('onclick="(window.__rpaPick_'+opts.inputId+')(\''+ckEsc+'\')" style="cursor:pointer"') : '';
+            return '<div class="rpa-search-row" '+click+'>'
+              + '<div style="font-size:.7rem;color:var(--t3,#94a3b8);margin-bottom:.15rem">'
+              +   rpa.esc(ck) + ' · ' + rpa.ago(r.ts) + intentTag
+              + '</div>'
+              + (r.peer_text ? '<div style="font-size:.78rem;color:var(--t2,#cbd5e1)">👤 '+hi(r.peer_text)+'</div>' : '')
+              + (r.reply_text ? '<div style="font-size:.78rem;color:var(--t3,#94a3b8)">🤖 '+rpa.esc(r.reply_text.slice(0,120))+'</div>' : '')
+              + '</div>';
+          }).join('') + '</div>';
+        })
+        .catch(function(){
+          results.innerHTML='<div style="padding:.55rem 1rem;color:#f87171;font-size:.78rem">检索失败 <button class="btn-sec" type="button" style="margin-left:.35rem;font-size:.75rem">重试</button></div>';
+          const btn = results.querySelector('.btn-sec');
+          if(btn){ btn.addEventListener('click', doSearch); }
+        });
+    };
+    if(onPick){ window['__rpaPick_'+opts.inputId] = onPick; }
+    inp.addEventListener('input', function(){
+      clearTimeout(timer); timer = setTimeout(doSearch, 380);
+    });
+  },
+
+  // P10-A: 通用聊天详情抽屉（4 平台共用）
+  // 用法：rpa.analytics.openDetail({apiBase, chatKey, peerName?})
+  //   - 拉 sessions + chat-history + customer-profile 三接口
+  //   - 浮层 drawer 显示画像条 + 会话摘要 + 全量分页（Load More）
+  openDetail: function(opts){
+    const apiBase = opts.apiBase, chatKey = opts.chatKey;
+    if(!apiBase || !chatKey) return;
+    const peerName = opts.peerName || chatKey;
+    // 已有 → 关闭
+    let mask = document.getElementById('rpa-detail-mask');
+    if(mask){ mask.remove(); return; }
+    mask = document.createElement('div');
+    mask.id = 'rpa-detail-mask';
+    mask.style.cssText = 'position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.55);display:flex;justify-content:flex-end;animation:rpaFadeIn .18s ease-out';
+    const drawer = document.createElement('div');
+    drawer.style.cssText = 'width:min(560px,100%);max-width:100%;height:100%;background:var(--bg,#0f172a);border-left:1px solid var(--bd,#1e293b);overflow-y:auto;box-shadow:-12px 0 28px rgba(0,0,0,.4)';
+    drawer.innerHTML = '<div style="padding:1rem 1.2rem;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:.6rem;position:sticky;top:0;background:var(--bg,#0f172a);z-index:2">'
+      + '<strong style="font-size:.95rem;color:var(--t1)">💬 '+rpa.esc(peerName)+'</strong>'
+      + '<span style="font-size:.7rem;color:var(--t3);font-family:monospace">'+rpa.esc(chatKey)+'</span>'
+      + '<button id="rpa-detail-close" style="margin-left:auto;background:transparent;border:0;color:var(--t2);font-size:1.3rem;cursor:pointer;padding:0 .3rem" title="关闭 (Esc)">×</button>'
+      + '</div>'
+      + '<div id="rpa-detail-profile" style="padding:.6rem 1.2rem;border-bottom:1px dashed var(--bd);font-size:.78rem"></div>'
+      + '<div id="rpa-detail-xprofile" style="display:none;padding:.5rem 1.2rem;border-bottom:1px dashed var(--bd);font-size:.75rem;background:rgba(99,102,241,.05)"></div>'
+      + '<div style="display:flex;gap:.5rem;padding:.55rem 1.2rem;border-bottom:1px solid var(--bd);background:rgba(148,163,184,.04)">'
+      +   '<button class="rpa-dt-tab" data-mode="summary" style="background:transparent;border:0;color:var(--t1);font-weight:600;font-size:.82rem;cursor:pointer;border-bottom:2px solid #6366f1;padding:.3rem 0">📋 摘要</button>'
+      +   '<button class="rpa-dt-tab" data-mode="full" style="background:transparent;border:0;color:var(--t3);font-size:.82rem;cursor:pointer;border-bottom:2px solid transparent;padding:.3rem 0">💬 全量</button>'
+      +   '<span id="rpa-detail-total" style="margin-left:auto;font-size:.7rem;color:var(--t3);align-self:center"></span>'
+      + '</div>'
+      + '<div id="rpa-detail-pane" style="padding:1rem 1.2rem">加载中…</div>';
+    mask.appendChild(drawer);
+    document.body.appendChild(mask);
+    mask.addEventListener('click', function(e){ if(e.target === mask) mask.remove(); });
+    drawer.querySelector('#rpa-detail-close').addEventListener('click', function(){ mask.remove(); });
+    const escHandler = function(e){ if(e.key === 'Escape'){ mask.remove(); document.removeEventListener('keydown', escHandler); } };
+    document.addEventListener('keydown', escHandler);
+
+    // 注入画像条
+    rpa.get(apiBase + '/customer-profile/' + encodeURIComponent(chatKey))
+      .then(function(d){
+        const p = (d && d.profile) || {};
+        const stripEl = drawer.querySelector('#rpa-detail-profile');
+        if(!p.total_turns){ stripEl.innerHTML = '<span style="color:var(--t3)">暂无历史数据</span>'; return; }
+        const firstDate = p.first_ts ? rpa.fmtDate(p.first_ts) : '—';
+        const lastDate  = p.last_ts  ? rpa.fmtDate(p.last_ts)  : '—';
+        const dom = p.dominant_intent || 'general';
+        const intentBadge = (dom !== 'general')
+          ? '<span style="margin-left:auto;font-size:.7rem;padding:2px 8px;border-radius:8px;background:'+(_INTENT_COLORS[dom]||'#94a3b8')+';color:#0f172a;font-weight:600">'+(_INTENT_LABELS[dom]||dom)+'</span>'
+          : '';
+        stripEl.innerHTML = '<div style="display:flex;gap:.8rem;flex-wrap:wrap;align-items:center">'
+          + '<span style="color:var(--t2)">📊 <strong style="color:var(--t1)">'+p.total_turns+'</strong> 轮</span>'
+          + '<span style="color:var(--t2)">✅ <strong style="color:var(--t1)">'+(p.reply_rate||0)+'%</strong></span>'
+          + '<span style="color:var(--t2)">📅 '+firstDate+' → '+lastDate+'</span>'
+          + (p.intimacy_score != null ? '<span style="color:var(--t2)">💜 亲密 <strong style="color:var(--t1)">'+Math.round(p.intimacy_score)+'</strong></span>' : '')
+          + intentBadge
+          + '</div>';
+      })
+      .catch(function(){});
+
+    // P12-A: 跨平台身份合并（在画像条下方再加一条横幅）
+    const PLATFORM_META = {
+      line:      {label:'LINE',      color:'#06c755', icon:'🟢'},
+      messenger: {label:'Messenger', color:'#0084ff', icon:'🔵'},
+      whatsapp:  {label:'WhatsApp',  color:'#25d366', icon:'🟢'},
+    };
+    // P14-A: 前端 60s 缓存 — 同抽屉重开/快速翻多个会话时不重复请求
+    if(!rpa._xprofCache) rpa._xprofCache = new Map();
+    const _xpKey = chatKey;
+    const _xpEntry = rpa._xprofCache.get(_xpKey);
+    const _xpFresh = _xpEntry && (Date.now() - _xpEntry.t < 60000);
+    const _xpFetch = _xpFresh
+      ? Promise.resolve(_xpEntry.d)
+      : rpa.get('/api/rpa/cross-platform-profile?chat_key=' + encodeURIComponent(chatKey))
+          .then(function(d){
+            // 缓存上限 100 条 FIFO
+            if(rpa._xprofCache.size >= 100){
+              const firstK = rpa._xprofCache.keys().next().value;
+              if(firstK !== undefined) rpa._xprofCache.delete(firstK);
+            }
+            rpa._xprofCache.set(_xpKey, {t: Date.now(), d: d});
+            return d;
+          });
+    _xpFetch
+      .then(function(d){
+        if(!d || !d.ok || !d.name) return;
+        const xpEl = drawer.querySelector('#rpa-detail-xprofile');
+        const platforms = d.platforms || {};
+        const others = Object.entries(platforms)
+          .filter(function(kv){ return kv[1].total_turns > 0 && kv[1].sample_chat_key !== chatKey; })
+          // P13-2: 按最近活跃倒序（last_ts 大的在前）
+          .sort(function(a, b){ return (b[1].last_ts || 0) - (a[1].last_ts || 0); });
+        if(others.length === 0) return;
+        const totalOther = d.total_other_turns || 0;
+        const badges = others.map(function(kv){
+          const k = kv[0], info = kv[1];
+          const m = PLATFORM_META[k] || {label:k, color:'#94a3b8', icon:'⚫'};
+          const ck = (info.sample_chat_key || '').replace(/'/g, "\\'");
+          const ab = (info.api_base || '').replace(/'/g, "\\'");
+          const click = ck && ab ? `onclick="(window.__rpaXOpen)('${ab}','${ck}')"` : '';
+          // 最近活跃时间作为 title
+          const recent = info.last_ts ? rpa.fmtDate(info.last_ts) : '—';
+          const tip = '最近活跃: ' + recent + (click ? '\n点击打开该平台的会话详情' : '');
+          return '<span ' + click + ' title="'+rpa.esc(tip)+'" style="cursor:' + (click?'pointer':'default') + ';display:inline-flex;align-items:center;gap:.3rem;padding:.18rem .55rem;border-radius:6px;background:' + m.color + '22;color:' + m.color + ';font-weight:600">'
+            + m.icon + ' ' + m.label + ' <strong>' + info.total_turns + '轮</strong></span>';
+        }).join(' ');
+        // P13-2: 头部加 ⓘ tooltip 警示同名不等于同一人
+        const warnTip = '⚠️ 仅按显示名 "' + d.name + '" 后缀匹配，不保证是同一人';
+        xpEl.innerHTML = '<div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">'
+          + '<span style="color:var(--t3)">🔗 同名 "<strong style="color:var(--t1)">' + rpa.esc(d.name) + '</strong>" 在其他平台共 <strong style="color:var(--t1)">' + totalOther + '</strong> 轮'
+          + ' <span title="'+rpa.esc(warnTip)+'" style="cursor:help;color:var(--t3);font-size:.7rem;border:1px solid var(--bd);border-radius:50%;width:14px;height:14px;display:inline-flex;align-items:center;justify-content:center;margin-left:.15rem">ⓘ</span>：</span>'
+          + badges
+          + '</div>';
+        xpEl.style.display = '';
+      })
+      .catch(function(){});
+    // 桥接：点击徽章打开对方平台抽屉（先关当前）
+    window.__rpaXOpen = function(ab, ck){
+      mask.remove();
+      setTimeout(function(){
+        if(window.rpa && rpa.analytics) rpa.analytics.openDetail({apiBase:ab, chatKey:ck});
+      }, 80);
+    };
+
+    // P12-B: WA 抽屉快速回复（仅 WhatsApp 支持 send-manual）
+    if(apiBase && apiBase.indexOf('whatsapp') >= 0){
+      const reply = document.createElement('div');
+      reply.style.cssText = 'border-top:1px solid var(--bd);padding:.7rem 1.2rem;background:rgba(148,163,184,.04);position:sticky;bottom:0;background:var(--bg,#0f172a)';
+      reply.innerHTML = '<div style="font-size:.75rem;color:var(--t2);margin-bottom:.35rem;display:flex;align-items:center;gap:.4rem"><span>✉️ 快速回复</span><span style="font-size:.65rem;color:var(--t3)">(WhatsApp send-manual 队列)</span></div>'
+        + '<textarea id="rpa-qr-text" rows="2" placeholder="输入要发送的消息…" style="width:100%;padding:.45rem .6rem;background:var(--card,#1e293b);border:1px solid var(--bd);border-radius:6px;color:var(--t1);font-size:.82rem;resize:vertical;font-family:inherit"></textarea>'
+        + '<div style="display:flex;gap:.4rem;margin-top:.4rem;align-items:center">'
+        + '  <span id="rpa-qr-msg" style="flex:1;font-size:.72rem;color:var(--t3)"></span>'
+        + '  <button id="rpa-qr-send" class="btn btn-xs" style="padding:.35rem 1rem;background:#25d366;color:#fff;border:0;border-radius:6px;cursor:pointer;font-weight:600">发送</button>'
+        + '</div>';
+      drawer.appendChild(reply);
+      const txt = reply.querySelector('#rpa-qr-text');
+      const btn = reply.querySelector('#rpa-qr-send');
+      const msg = reply.querySelector('#rpa-qr-msg');
+      btn.addEventListener('click', function(){
+        const t = (txt.value || '').trim();
+        if(!t){ msg.textContent = '请先输入内容'; msg.style.color = '#f87171'; return; }
+        // 从 chat_key 解析 peer_name（WA: wa:{acc}:{name}）
+        const parts = chatKey.split(':');
+        const peerName = parts.length >= 2 ? parts[parts.length-1] : chatKey;
+        btn.disabled = true; msg.textContent = '入队中…'; msg.style.color = 'var(--t3)';
+        fetch(apiBase + '/send-manual', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({chat_key: chatKey, peer_name: peerName, text: t})
+        }).then(function(r){ return r.json(); }).then(function(d){
+          if(d && d.ok){
+            const itemId = d.item_id || 0;
+            msg.textContent = '✓ 已入队 #' + (itemId || '?'); msg.style.color = '#22c55e';
+            // P13-4 + P14-C: 乐观更新 ghost row + 轮询真实状态
+            const pane2 = drawer.querySelector('#rpa-detail-pane');
+            if(pane2 && pane2.firstChild){
+              const ghost = document.createElement('div');
+              ghost.style.cssText = 'margin-bottom:.6rem;padding:.4rem .6rem;background:rgba(34,197,94,.08);border:1px dashed rgba(34,197,94,.3);border-radius:6px;animation:rpaFadeIn .3s ease-out;transition:background .3s,border-color .3s';
+              const STATUS_LABEL = {
+                'queued':'待发送','pending':'待发送','sending':'发送中…',
+                'sent':'已发送','done':'已发送','ok':'已发送',
+                'failed':'失败','error':'失败','cancelled':'已取消'
+              };
+              const renderGhost = function(statusKey){
+                const lbl = STATUS_LABEL[statusKey] || statusKey || '待发送';
+                const isDone = (statusKey === 'sent' || statusKey === 'done' || statusKey === 'ok');
+                const isFail = (statusKey === 'failed' || statusKey === 'error' || statusKey === 'cancelled');
+                if(isDone){ ghost.style.background = 'rgba(34,197,94,.18)'; ghost.style.borderStyle='solid'; }
+                else if(isFail){ ghost.style.background = 'rgba(239,68,68,.12)'; ghost.style.borderColor = 'rgba(239,68,68,.4)'; }
+                ghost.innerHTML = '<div style="font-size:.68rem;color:' + (isFail?'#f87171':'#22c55e') + ';margin-bottom:.2rem">'
+                  + '刚刚 · ' + lbl + (itemId ? '（队列 #' + itemId + '）' : '') + '</div>'
+                  + '<div style="font-size:.78rem;color:var(--t2)">🤖 ' + rpa.esc(t) + '</div>';
+                return isDone || isFail;
+              };
+              renderGhost('queued');
+              pane2.insertBefore(ghost, pane2.firstChild);
+              // 轮询真实状态 — 3s 一次，最多 30s（10 次）
+              if(itemId && apiBase){
+                let pollCount = 0;
+                const pollTimer = setInterval(function(){
+                  pollCount++;
+                  if(pollCount > 10 || !document.body.contains(ghost)){
+                    clearInterval(pollTimer); return;
+                  }
+                  // P15-C: 单条端点 O(1) 索引查询
+                  // P16-C: ETag/304 — 状态未变时零字节响应
+                  let lastEtag = ghost._etag || '';
+                  fetch(apiBase + '/send-queue/' + itemId, {
+                    headers: lastEtag ? {'If-None-Match': lastEtag} : {}
+                  }).then(function(r){
+                    if(r.status === 304) return null;     // 状态未变，跳过
+                    const newEtag = r.headers.get('ETag');
+                    if(newEtag) ghost._etag = newEtag;
+                    if(!r.ok) return null;
+                    return r.json();
+                  }).then(function(qd){
+                    const found = qd && qd.item;
+                    if(found){
+                      const terminal = renderGhost(String(found.status || 'queued').toLowerCase());
+                      if(terminal) clearInterval(pollTimer);
+                    }
+                  }).catch(function(){ /* 404 / 失败 — 下次再试 */ });
+                }, 3000);
+              }
+            }
+            txt.value = '';
+          } else {
+            msg.textContent = '失败：' + (d && d.detail || '未知'); msg.style.color = '#f87171';
+          }
+        }).catch(function(e){
+          msg.textContent = '失败：' + e; msg.style.color = '#f87171';
+        }).finally(function(){
+          btn.disabled = false;
+          setTimeout(function(){ if(msg.textContent.startsWith('✓')) msg.textContent = ''; }, 4000);
+        });
+      });
+    }
+
+    // 加载 sessions / full 两种模式
+    const pane = drawer.querySelector('#rpa-detail-pane');
+    const totalEl = drawer.querySelector('#rpa-detail-total');
+    let mode = 'summary';
+    let offset = 0;
+    const loadSummary = function(){
+      pane.innerHTML = '<div style="color:var(--t3);font-size:.78rem">加载中…</div>';
+      rpa.get(apiBase + '/sessions/' + encodeURIComponent(chatKey))
+        .then(function(d){
+          const ss = (d && d.sessions) || [];
+          totalEl.textContent = ss.length + ' 个会话';
+          if(!ss.length){ pane.innerHTML = '<div style="color:var(--t3);font-size:.78rem">暂无历史会话记录</div>'; return; }
+          pane.innerHTML = ss.map(function(s){
+            const d1 = rpa.fmtDate(s.start_ts), d2 = rpa.fmtDate(s.end_ts);
+            const dateStr = (d1 === d2) ? d1 : (d1 + ' — ' + d2);
+            const okPct = s.turn_count ? Math.round(s.ok_count / s.turn_count * 100) : 0;
+            const dom = s.dominant_intent || 'general';
+            const intentBadge = (dom !== 'general')
+              ? '<span style="font-size:.65rem;padding:1px 7px;border-radius:6px;background:'+(_INTENT_COLORS[dom]||'#94a3b8')+';color:#0f172a;font-weight:600">'+(_INTENT_LABELS[dom]||dom)+'</span>'
+              : '';
+            return '<div style="margin-bottom:.7rem;padding:.6rem .8rem;background:rgba(148,163,184,.05);border-radius:8px;border-left:3px solid #6366f1">'
+              + '<div style="display:flex;gap:.5rem;align-items:center;font-size:.75rem;color:var(--t2);margin-bottom:.3rem">'
+              +   '<strong style="color:var(--t1)">#'+s.session_num+'</strong>'
+              +   '<span>'+dateStr+'</span>'
+              +   '<span style="color:var(--t3)">'+s.turn_count+'轮 / '+okPct+'%</span>'
+              +   intentBadge
+              + '</div>'
+              + (s.first_msg ? '<div style="font-size:.78rem;color:var(--t2)">👤 '+rpa.esc(s.first_msg)+'</div>' : '')
+              + (s.first_reply ? '<div style="font-size:.78rem;color:var(--t3);margin-top:.2rem">🤖 '+rpa.esc(s.first_reply)+'</div>' : '')
+              + '</div>';
+          }).join('');
+        })
+        .catch(function(){ pane.innerHTML = '<div style="color:#f87171;font-size:.78rem">加载失败</div>'; });
+    };
+    const loadFull = function(append){
+      if(!append){ offset = 0; pane.innerHTML = '<div style="color:var(--t3);font-size:.78rem">加载中…</div>'; }
+      else { const lb = pane.querySelector('.rpa-load-more'); if(lb) lb.remove(); }
+      rpa.get(apiBase + '/chat-history/' + encodeURIComponent(chatKey) + '?limit=10&offset=' + offset)
+        .then(function(d){
+          const msgs = (d && (d.messages || d.history)) || [];
+          const total = (d && d.total) || 0;
+          totalEl.textContent = '共 ' + total + ' 条';
+          if(!append) pane.innerHTML = '';
+          msgs.forEach(function(m){
+            const dom = m.intent_tag || 'general';
+            const intentBadge = (dom !== 'general')
+              ? ' <span style="font-size:.6rem;padding:0 5px;border-radius:5px;background:rgba(99,102,241,.18);color:#a5b4fc">'+(_INTENT_LABELS[dom]||dom)+'</span>'
+              : '';
+            const row = document.createElement('div');
+            row.style.cssText = 'margin-bottom:.6rem;padding-bottom:.5rem;border-bottom:1px dashed rgba(148,163,184,.1)';
+            row.innerHTML = '<div style="font-size:.68rem;color:var(--t3);margin-bottom:.2rem">'+rpa.fmtTs(m.ts)+intentBadge+'</div>'
+              + (m.peer_text ? '<div style="font-size:.78rem;color:var(--t2)">👤 '+rpa.esc(m.peer_text)+'</div>' : '')
+              + (m.reply_text ? '<div style="font-size:.78rem;color:var(--t3);margin-top:.15rem">🤖 '+rpa.esc(m.reply_text)+'</div>' : '');
+            pane.appendChild(row);
+          });
+          offset += msgs.length;
+          if(offset < total){
+            const more = document.createElement('button');
+            more.className = 'rpa-load-more';
+            more.textContent = '加载更多（剩 '+(total-offset)+' 条）';
+            more.style.cssText = 'display:block;margin:.6rem auto;padding:.4rem 1rem;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.3);border-radius:6px;color:#a5b4fc;cursor:pointer;font-size:.78rem';
+            more.addEventListener('click', function(){ loadFull(true); });
+            pane.appendChild(more);
+          } else if(msgs.length === 0 && !append){
+            pane.innerHTML = '<div style="color:var(--t3);font-size:.78rem">暂无消息记录</div>';
+          }
+        })
+        .catch(function(){ if(!append) pane.innerHTML = '<div style="color:#f87171;font-size:.78rem">加载失败</div>'; });
+    };
+    drawer.querySelectorAll('.rpa-dt-tab').forEach(function(b){
+      b.addEventListener('click', function(){
+        mode = this.getAttribute('data-mode');
+        drawer.querySelectorAll('.rpa-dt-tab').forEach(function(x){
+          x.style.color = 'var(--t3)';
+          x.style.borderBottomColor = 'transparent';
+          x.style.fontWeight = 'normal';
+        });
+        this.style.color = 'var(--t1)';
+        this.style.borderBottomColor = '#6366f1';
+        this.style.fontWeight = '600';
+        if(mode === 'summary') loadSummary(); else loadFull(false);
+      });
+    });
+    loadSummary();
+  },
+
+  intentChart: function(opts){
+    const body = document.getElementById(opts.bodyId);
+    if(!body) return;
+    const apiBase = opts.apiBase;
+    const btnSel = opts.btnSel || '.rpa-win-btn';
+    const card = body.closest('.rpa-card') || body.closest('.card') || body.closest('.mr-panel') || body.parentElement;
+    const load = function(hours){
+      body.innerHTML = '<div style="padding:.5rem 0;font-size:.78rem;color:var(--t3,#94a3b8)">加载中…</div>';
+      rpa.get(apiBase + '/intent-stats?hours=' + hours)
+        .then(function(d){
+          const dist = (d && d.distribution) || {};
+          const total = (d && d.total_turns) || 0;
+          if(!total){ body.innerHTML='<div style="padding:.5rem 0;font-size:.78rem;color:var(--t3,#94a3b8)">暂无数据</div>'; return; }
+          const entries = Object.entries(dist).sort(function(a,b){ return b[1]-a[1]; });
+          body.innerHTML = '<div style="font-size:.7rem;color:var(--t3,#94a3b8);margin-bottom:.4rem">共 '+total+' 条消息</div>'
+            + entries.map(function(kv){
+                const tag = kv[0], cnt = kv[1];
+                const pct = Math.round(cnt/total*100);
+                return '<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.75rem">'
+                  + '<span style="width:2.8rem;text-align:right;color:var(--t3,#94a3b8);flex-shrink:0">'+(_INTENT_LABELS[tag]||tag)+'</span>'
+                  + '<div style="flex:1;height:8px;background:rgba(148,163,184,.12);border-radius:4px;overflow:hidden">'
+                  +   '<div style="height:100%;border-radius:4px;width:'+pct+'%;background:'+(_INTENT_COLORS[tag]||'#94a3b8')+';transition:width .4s ease"></div>'
+                  + '</div>'
+                  + '<span style="width:3rem;text-align:right;color:var(--t3,#94a3b8);font-size:.7rem;flex-shrink:0">'+cnt+' ('+pct+'%)</span>'
+                  + '</div>';
+              }).join('');
+        })
+        .catch(function(){ body.innerHTML='<div style="padding:.5rem 0;font-size:.78rem;color:#f87171">加载失败</div>'; });
+    };
+    if(card){
+      card.querySelectorAll(btnSel).forEach(function(btn){
+        btn.addEventListener('click', function(){
+          card.querySelectorAll(btnSel).forEach(function(b){ b.classList.remove('active'); });
+          this.classList.add('active');
+          load(parseInt(this.getAttribute('data-h'))||opts.defaultHours||168);
+        });
+      });
+    }
+    load(opts.defaultHours || 168);
+  }
+};
+
+// ─── Hero 渲染辅助（接收 status 数据，填充 DOM） ──────────────────────────
+// 用法：rpa.renderHero({dotEl, subEl, status, statusText, kpis:[{el,val,extra}]})
+rpa.renderHero = function(spec){
+  if(spec.dotEl){
+    spec.dotEl.className = 'rpa-status-dot ' + (spec.status||'neutral');
+  }
+  if(spec.subEl){
+    spec.subEl.textContent = spec.statusText || '';
+  }
+  if(Array.isArray(spec.kpis)){
+    for(const k of spec.kpis){
+      if(!k.el) continue;
+      k.el.textContent = (k.val==null || k.val==='') ? '—' : String(k.val);
+    }
+  }
+};
+
+})();
+</script>

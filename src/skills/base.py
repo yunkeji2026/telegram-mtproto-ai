@@ -88,7 +88,7 @@ class Skill(LoggerMixin):
                 )
         except Exception:
             pass
-        return "在的，有什么可以帮您的？"
+        return "在呀，你说～"  # S3: 改为伴侣风格，去客服腔
 
     def _get_template_reply(self, template_name: str, context: Optional[Dict[str, Any]] = None) -> Optional[str]:
         reply = self._kb_reply(template_name, **(context or {}))

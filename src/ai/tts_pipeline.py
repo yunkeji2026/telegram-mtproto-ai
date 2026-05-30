@@ -40,7 +40,7 @@ class TTSPipeline:
 
     Config:
         enabled: true/false
-        backend: edge_tts | pyttsx3 | openai | voice_clone_command | disabled
+        backend: edge_tts | pyttsx3 | openai | voice_clone_command | coqui_http | disabled
         voice: provider-specific voice id
         model: online model name, defaults to gpt-4o-mini-tts
         format: mp3 | wav | opus
@@ -202,6 +202,9 @@ class TTSPipeline:
         if backend == "voice_clone_command":
             self._synthesize_voice_clone_command(text, out)
             return
+        if backend == "coqui_http":
+            self._synthesize_coqui_http(text, out)
+            return
         if backend == "disabled":
             raise RuntimeError("backend disabled")
         raise RuntimeError(f"unknown backend {backend}")
@@ -256,6 +259,78 @@ class TTSPipeline:
         if r.returncode != 0:
             msg = (r.stderr or r.stdout or "")[:500]
             raise RuntimeError(f"voice_clone_command_failed:{msg}")
+
+    def _synthesize_coqui_http(self, text: str, out: Path) -> None:
+        """Call Coqui XTTS-v2 server (custom OpenAI-compatible API).
+
+        voice_profile.enabled + reference_audio_path
+            → POST /v1/audio/clone  (JSON: text + reference_audio_base64)
+        otherwise
+            → POST /v1/audio/speech (JSON: model + input + voice + language)
+        """
+        import base64 as _b64
+        import json as _json
+        import urllib.request as _ur
+
+        base = (self.base_url or "http://127.0.0.1:7851").rstrip("/")
+        vp = self.voice_profile
+        fmt = (self.format or "wav").lower()
+        language = str(vp.get("language") or "zh-cn")
+        auth_header = f"Bearer {self.api_key or 'coqui'}"
+
+        use_clone = (
+            bool(vp.get("enabled"))
+            and bool(vp.get("owner_consent"))
+            and bool(vp.get("reference_audio_path"))
+            and Path(str(vp.get("reference_audio_path", ""))).is_file()
+        )
+
+        if use_clone:
+            ref_path = str(vp["reference_audio_path"])
+            ref_b64 = _b64.b64encode(Path(ref_path).read_bytes()).decode("ascii")
+            payload = _json.dumps({
+                "text": text,
+                "language": language,
+                "reference_audio_base64": ref_b64,
+            }).encode()
+            url = f"{base}/v1/audio/clone"
+        else:
+            voice_id = str(vp.get("speaker_id") or self.voice or "female_01")
+            payload = _json.dumps({
+                "model": self.model or "xtts_v2",
+                "input": text,
+                "voice": voice_id,
+                "language": language,
+                "response_format": fmt,
+            }).encode()
+            url = f"{base}/v1/audio/speech"
+
+        req = _ur.Request(
+            url,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": auth_header,
+            },
+        )
+        with _ur.urlopen(req, timeout=300) as resp:
+            response_bytes = resp.read()
+        if not response_bytes:
+            raise RuntimeError("coqui_http: empty response from TTS server")
+        # /v1/audio/clone returns JSON: {"audio_base64": "..."}
+        # /v1/audio/speech returns raw audio bytes
+        if use_clone:
+            try:
+                resp_json = _json.loads(response_bytes.decode("utf-8"))
+                audio_b64 = resp_json.get("audio_base64") or resp_json.get("audio")
+                if not audio_b64:
+                    raise RuntimeError(f"coqui_http: no audio_base64 in response: {list(resp_json.keys())}")
+                audio_bytes = _b64.b64decode(audio_b64)
+            except (_json.JSONDecodeError, KeyError, ValueError) as e:
+                raise RuntimeError(f"coqui_http: failed to parse clone response: {e}")
+        else:
+            audio_bytes = response_bytes
+        out.write_bytes(audio_bytes)
 
     async def _edge_tts(self, text: str, out: Path, voice: str) -> None:
         import edge_tts  # type: ignore

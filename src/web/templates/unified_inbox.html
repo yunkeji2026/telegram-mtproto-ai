@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+{% block title %}统一收件箱{% endblock %}
+{% block content %}
+<style>
+.inbox-layout { display:flex; gap:0; height:calc(100vh - 120px); overflow:hidden; }
+.inbox-sidebar { width:340px; min-width:260px; border-right:1px solid #e5e7eb; display:flex; flex-direction:column; background:#fff; }
+.inbox-main   { flex:1; display:flex; flex-direction:column; background:#f9fafb; }
+
+/* Platform filter bar */
+.platform-bar { display:flex; gap:6px; padding:10px 12px; border-bottom:1px solid #e5e7eb; flex-wrap:wrap; }
+.plat-btn { padding:4px 10px; border-radius:20px; font-size:12px; border:1px solid #d1d5db; background:#fff; cursor:pointer; white-space:nowrap; }
+.plat-btn.active { background:#2563eb; color:#fff; border-color:#2563eb; }
+.plat-dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:4px; }
+.dot-telegram{background:#2BA5E0;} .dot-line{background:#00C300;} .dot-messenger{background:#0084FF;} .dot-whatsapp{background:#25D366;}
+
+/* Chat list */
+.chat-list { flex:1; overflow-y:auto; }
+.chat-item { padding:10px 14px; border-bottom:1px solid #f0f0f0; cursor:pointer; display:flex; gap:10px; align-items:flex-start; }
+.chat-item:hover, .chat-item.selected { background:#eff6ff; }
+.chat-avatar { width:38px; height:38px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:700; flex-shrink:0; color:#fff; }
+.chat-body { flex:1; overflow:hidden; }
+.chat-name  { font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.chat-preview { font-size:12px; color:#6b7280; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
+.chat-meta  { font-size:11px; color:#9ca3af; text-align:right; white-space:nowrap; flex-shrink:0; }
+.chat-badge { display:inline-block; background:#ef4444; color:#fff; border-radius:10px; font-size:10px; padding:1px 6px; margin-top:3px; }
+.chat-tag   { font-size:10px; color:#fff; border-radius:3px; padding:1px 5px; display:inline-block; margin-top:2px; }
+.tag-line{background:#00C300;} .tag-wa{background:#25D366;} .tag-messenger{background:#0084FF;} .tag-telegram{background:#2BA5E0;}
+
+/* Main panel */
+.inbox-header { padding:14px 20px; border-bottom:1px solid #e5e7eb; background:#fff; display:flex; align-items:center; gap:12px; }
+.inbox-header .plat-icon { font-size:20px; }
+.inbox-header .chat-title { font-size:16px; font-weight:700; }
+.inbox-header .chat-sub   { font-size:12px; color:#6b7280; }
+.empty-state { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#9ca3af; gap:8px; }
+.empty-state .icon { font-size:48px; }
+
+/* Message area */
+.msg-area { flex:1; overflow-y:auto; padding:16px 20px; display:flex; flex-direction:column; gap:10px; }
+.msg-bubble { max-width:72%; padding:9px 14px; border-radius:16px; font-size:13px; line-height:1.5; }
+.msg-peer  { background:#fff; border:1px solid #e5e7eb; align-self:flex-start; border-bottom-left-radius:4px; }
+.msg-self  { background:#2563eb; color:#fff; align-self:flex-end; border-bottom-right-radius:4px; }
+.msg-ts    { font-size:10px; color:#9ca3af; margin-top:2px; }
+.msg-peer .msg-ts  { text-align:left; }
+.msg-self .msg-ts  { text-align:right; color:rgba(255,255,255,.6); }
+
+/* Reply bar */
+.reply-bar { padding:12px 16px; background:#fff; border-top:1px solid #e5e7eb; display:flex; gap:10px; }
+.reply-bar textarea { flex:1; border:1px solid #d1d5db; border-radius:8px; padding:8px 12px; font-size:13px; resize:none; line-height:1.4; font-family:inherit; }
+.reply-bar textarea:focus { outline:none; border-color:#2563eb; }
+.send-btn { padding:0 20px; background:#2563eb; color:#fff; border:none; border-radius:8px; cursor:pointer; font-size:13px; font-weight:600; }
+.send-btn:disabled { background:#93c5fd; cursor:not-allowed; }
+
+/* Status bar */
+.status-strip { display:flex; gap:8px; padding:8px 14px; background:#f8fafc; border-bottom:1px solid #e5e7eb; flex-wrap:wrap; }
+.svc-chip { display:flex; align-items:center; gap:5px; font-size:11px; background:#fff; border:1px solid #e5e7eb; padding:3px 8px; border-radius:12px; }
+.svc-dot  { width:7px; height:7px; border-radius:50%; }
+.svc-dot.on{background:#22c55e;} .svc-dot.off{background:#ef4444;}
+
+/* Spinner */
+.spin { display:inline-block; width:16px; height:16px; border:2px solid #e5e7eb; border-top-color:#2563eb; border-radius:50%; animation:spin .7s linear infinite; }
+@keyframes spin{to{transform:rotate(360deg);}}
+</style>
+
+<div class="inbox-layout">
+  <!-- Sidebar -->
+  <div class="inbox-sidebar">
+    <div class="platform-bar" id="platform-bar">
+      <button class="plat-btn active" data-plat="all">全部</button>
+      <button class="plat-btn" data-plat="telegram"><span class="plat-dot dot-telegram"></span>Telegram</button>
+      <button class="plat-btn" data-plat="line"><span class="plat-dot dot-line"></span>LINE</button>
+      <button class="plat-btn" data-plat="messenger"><span class="plat-dot dot-messenger"></span>Messenger</button>
+      <button class="plat-btn" data-plat="whatsapp"><span class="plat-dot dot-whatsapp"></span>WhatsApp</button>
+    </div>
+    <div class="status-strip" id="status-strip"><span class="spin"></span></div>
+    <div class="chat-list" id="chat-list"><div style="padding:20px;text-align:center;color:#9ca3af;font-size:13px;"><span class="spin"></span> 加载中...</div></div>
+  </div>
+
+  <!-- Main -->
+  <div class="inbox-main" id="inbox-main">
+    <div class="empty-state">
+      <div class="icon">💬</div>
+      <div style="font-size:15px;font-weight:600;">选择一个对话</div>
+      <div style="font-size:13px;">从左侧选择对话查看消息并回复</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const PLATFORM_COLORS = {telegram:'#2BA5E0',line:'#00C300',messenger:'#0084FF',whatsapp:'#25D366'};
+  const PLATFORM_ICONS  = {telegram:'✈️',line:'💚',messenger:'💙',whatsapp:'💬'};
+  const TAG_CLASS       = {telegram:'tag-telegram',line:'tag-line',messenger:'tag-messenger',whatsapp:'tag-wa'};
+  let allChats = [], filtered = [], selectedChat = null, activePlat = 'all';
+  let pollTimer = null;
+
+  function fmtTs(ts){
+    if(!ts) return '';
+    const d = new Date(ts*1000), now = new Date();
+    if(d.toDateString()===now.toDateString()) return d.toTimeString().slice(0,5);
+    return (d.getMonth()+1)+'/'+(d.getDate());
+  }
+
+  function renderStatusStrip(ps){
+    const el = document.getElementById('status-strip');
+    if(!ps || !Object.keys(ps).length){ el.innerHTML=''; return; }
+    el.innerHTML = Object.values(ps).map(p=>`
+      <div class="svc-chip">
+        <span class="svc-dot ${p.running?'on':'off'}"></span>
+        <span>${p.label||p.account_id}</span>
+      </div>`).join('');
+  }
+
+  function renderList(){
+    const list = document.getElementById('chat-list');
+    if(!filtered.length){
+      list.innerHTML='<div style="padding:30px;text-align:center;color:#9ca3af;font-size:13px;">暂无对话</div>';
+      return;
+    }
+    list.innerHTML = filtered.map((c,i)=>{
+      const initials = (c.name||'?').slice(0,2).toUpperCase();
+      const color = PLATFORM_COLORS[c.platform]||'#6b7280';
+      const tagCls = TAG_CLASS[c.platform]||'';
+      const isSelected = selectedChat && selectedChat._idx === i;
+      return `<div class="chat-item${isSelected?' selected':''}" onclick="UI.selectChat(${i})">
+        <div class="chat-avatar" style="background:${color}">${PLATFORM_ICONS[c.platform]||'?'}</div>
+        <div class="chat-body">
+          <div class="chat-name">${esc(c.name||c.chat_key||'未知')}</div>
+          <div class="chat-preview">${esc(c.last_msg||'')}</div>
+          <span class="chat-tag ${tagCls}">${c.account_label||c.platform}</span>
+        </div>
+        <div class="chat-meta">
+          ${fmtTs(c.last_ts)}
+          ${c.unread>0?`<br><span class="chat-badge">${c.unread}</span>`:''}
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  function renderMain(c){
+    if(!c){ document.getElementById('inbox-main').innerHTML=`<div class="empty-state"><div class="icon">💬</div><div style="font-size:15px;font-weight:600;">选择一个对话</div></div>`; return; }
+    const color = PLATFORM_COLORS[c.platform]||'#6b7280';
+    const msg = c.last_msg;
+    const canSend = (c.platform==='messenger');
+    const sendHint = canSend?'':'发送功能仅限 approve 模式（LINE/WhatsApp 请在各自页面操作）';
+    document.getElementById('inbox-main').innerHTML=`
+      <div class="inbox-header">
+        <div class="plat-icon">${PLATFORM_ICONS[c.platform]||'?'}</div>
+        <div>
+          <div class="chat-title">${esc(c.name||c.chat_key)}</div>
+          <div class="chat-sub">${c.platform_name} · ${c.account_label||c.account_id}</div>
+        </div>
+      </div>
+      <div class="msg-area" id="msg-area">
+        ${msg?`<div><div class="msg-bubble msg-peer">${esc(msg)}</div><div class="msg-ts">${fmtTs(c.last_ts)}</div></div>`:'<div style="text-align:center;color:#9ca3af;font-size:13px;padding:30px">暂无消息记录</div>'}
+      </div>
+      <div class="reply-bar">
+        <textarea id="reply-text" rows="2" placeholder="${canSend?'输入回复内容...':sendHint}" ${canSend?'':'disabled'}></textarea>
+        <button class="send-btn" id="send-btn" ${canSend?'':'disabled'} onclick="UI.sendReply()">发送</button>
+      </div>`;
+    const ta = document.getElementById('reply-text');
+    if(ta) ta.addEventListener('keydown', e=>{ if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){ UI.sendReply(); } });
+  }
+
+  function applyFilter(){
+    filtered = activePlat==='all' ? allChats : allChats.filter(c=>c.platform===activePlat);
+    if(selectedChat && !filtered.includes(selectedChat)) selectedChat=null;
+    renderList();
+  }
+
+  function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  async function load(){
+    try{
+      const r = await fetch('/api/unified-inbox/chats?limit=50');
+      if(!r.ok) return;
+      const d = await r.json();
+      allChats = (d.chats||[]).map((c,i)=>({...c,_idx:i}));
+      renderStatusStrip(d.platform_status||{});
+      applyFilter();
+    }catch(e){ console.error(e); }
+  }
+
+  window.UI = {
+    selectChat(idx){
+      selectedChat = filtered[idx];
+      renderList();
+      renderMain(selectedChat);
+    },
+    async sendReply(){
+      if(!selectedChat) return;
+      const ta = document.getElementById('reply-text');
+      const btn = document.getElementById('send-btn');
+      const text = (ta?.value||'').trim();
+      if(!text) return;
+      btn.disabled=true; btn.textContent='发送中...';
+      try{
+        const r = await fetch('/api/unified-inbox/send',{
+          method:'POST',
+          headers:{'Content-Type':'application/json','X-CSRF-Token':rpa?.csrf?.()??''},
+          body:JSON.stringify({platform:selectedChat.platform,account_id:selectedChat.account_id,chat_key:selectedChat.chat_key,text})
+        });
+        const d = await r.json();
+        if(d.ok){ ta.value=''; await load(); }
+        else{ alert('发送失败: '+(d.detail||JSON.stringify(d))); }
+      }catch(e){ alert('网络错误'); }
+      finally{ btn.disabled=false; btn.textContent='发送'; }
+    }
+  };
+
+  document.getElementById('platform-bar').addEventListener('click', e=>{
+    const btn = e.target.closest('.plat-btn');
+    if(!btn) return;
+    activePlat = btn.dataset.plat;
+    document.querySelectorAll('.plat-btn').forEach(b=>b.classList.toggle('active',b===btn));
+    applyFilter();
+  });
+
+  load();
+  pollTimer = setInterval(load, 15000);
+})();
+</script>
+{% endblock %}

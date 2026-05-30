@@ -1,0 +1,2528 @@
+{% extends "base.html" %}
+{% block title %}WhatsApp 自动聊天{% endblock %}
+{% block content %}
+{# 统一组件库（4 平台共用） ───────────────────────────────────────── #}
+{% include "_rpa_shared_styles.html" %}
+{% include "_rpa_shared_scripts.html" %}
+
+<style>
+/* ── WhatsApp 页面特有样式 ────────────────────────────────────── */
+.wa-stream-empty{color:var(--t3);font-size:.85rem;padding:1.2rem;text-align:center}
+
+/* ── 视图切换分段控件 ──────────────────────────────────────────── */
+.wa-view-seg{display:flex;gap:.3rem;background:rgba(255,255,255,.04);border:1px solid var(--bd);border-radius:8px;padding:.25rem;margin-bottom:.85rem}
+.wa-vseg-btn{flex:1;padding:.38rem .7rem;border-radius:6px;border:none;background:transparent;color:var(--t2);font-size:.79rem;cursor:pointer;transition:all .15s;font-family:inherit;white-space:nowrap}
+.wa-vseg-btn.active{background:var(--p);color:#fff;font-weight:600;box-shadow:0 1px 4px rgba(91,124,246,.35)}
+.wa-vseg-btn:not(.active):hover{background:rgba(255,255,255,.06);color:var(--t1)}
+
+/* ── 对话卡片 ─────────────────────────────────────────────────── */
+.wa-conv-card{display:flex;gap:.75rem;align-items:flex-start;padding:.8rem 1rem;border-bottom:1px solid var(--bd);transition:background .12s;cursor:default}
+.wa-conv-card:last-child{border-bottom:none}
+.wa-conv-card:hover{background:rgba(255,255,255,.028)}
+.wa-conv-avatar{width:36px;height:36px;min-width:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.8rem;font-weight:700;color:#fff;letter-spacing:0;flex-shrink:0}
+.wa-conv-body{flex:1;min-width:0}
+.wa-conv-top{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;margin-bottom:.22rem}
+.wa-conv-name{font-weight:600;font-size:.88rem;color:var(--t1);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wa-conv-persona-chip{font-size:.7rem;padding:.12rem .4rem;background:rgba(99,102,241,.15);color:#a5b4fc;border-radius:20px;border:1px solid rgba(99,102,241,.22);white-space:nowrap}
+.wa-conv-time{margin-left:auto;font-size:.73rem;color:var(--t3);white-space:nowrap;flex-shrink:0}
+.wa-conv-msg{font-size:.81rem;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:.18rem}
+.wa-conv-msg.muted{color:var(--t3)}
+.wa-conv-reply{font-size:.78rem;color:#4ade80;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:.28rem;padding-left:.65rem;border-left:2px solid rgba(74,222,128,.35)}
+.wa-conv-footer{display:flex;align-items:center;gap:.45rem}
+.wa-conv-turns{font-size:.7rem;color:var(--t3)}
+.wa-conv-err-chip{font-size:.7rem;padding:.12rem .4rem;background:rgba(239,68,68,.1);color:#f87171;border-radius:20px;border:1px solid rgba(239,68,68,.2)}
+.wa-conv-empty{padding:2.8rem 1rem;text-align:center}
+.wa-conv-empty-icon{font-size:2.2rem;margin-bottom:.6rem}
+.wa-conv-empty-title{font-size:.9rem;font-weight:600;color:var(--t2);margin-bottom:.3rem}
+.wa-conv-empty-sub{font-size:.8rem;color:var(--t3);line-height:1.5}
+
+/* ── 动态人设横幅 ─────────────────────────────────────────────── */
+.wa-persona-bar{background:rgba(99,102,241,.07);border:1px solid rgba(99,102,241,.2);border-radius:10px;padding:.6rem 1rem;margin-bottom:.9rem;display:flex;flex-wrap:wrap;align-items:center;gap:.45rem;min-height:2.4rem}
+.wa-persona-bar-lbl{font-size:.77rem;color:var(--t3);flex-shrink:0}
+.wa-persona-acct{display:inline-flex;align-items:center;gap:.3rem;font-size:.79rem;background:rgba(255,255,255,.06);border:1px solid var(--bd);border-radius:6px;padding:.18rem .5rem;color:var(--t2)}
+.wa-persona-acct strong{color:var(--t1);font-weight:600}
+.wa-persona-bar-links{margin-left:auto;display:flex;gap:.6rem;flex-shrink:0}
+.wa-persona-bar-links a{font-size:.74rem;color:var(--p);text-decoration:none;white-space:nowrap}
+.wa-persona-bar-links a:hover{text-decoration:underline}
+
+/* ── 搜索 / 过滤栏 ──────────────────────────────────────────── */
+.wa-conv-searchbar{padding:.45rem 1rem .4rem;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:.45rem;flex-wrap:wrap}
+.wa-search-inp{flex:1;min-width:90px;background:rgba(255,255,255,.05);border:1px solid var(--bd);border-radius:6px;padding:.28rem .6rem;font-size:.79rem;color:var(--t1);outline:none;font-family:inherit;transition:border-color .15s}
+.wa-search-inp:focus{border-color:var(--p);background:rgba(91,124,246,.06)}
+.wa-search-inp::placeholder{color:var(--t3)}
+.wa-filter-chips{display:flex;gap:.2rem;flex-shrink:0}
+.wa-chip{padding:.2rem .48rem;font-size:.7rem;border:1px solid var(--bd);border-radius:20px;background:transparent;color:var(--t3);cursor:pointer;transition:all .15s;white-space:nowrap;font-family:inherit}
+.wa-chip.active{background:rgba(91,124,246,.15);border-color:rgba(91,124,246,.35);color:#a5b4fc}
+.wa-chip:not(.active):hover{background:rgba(255,255,255,.05);color:var(--t2)}
+.wa-conv-count{font-size:.7rem;color:var(--t3);white-space:nowrap;flex-shrink:0}
+
+/* ── 互动热度 dot ─────────────────────────────────────────── */
+.wa-eng-dot{width:6px;height:6px;min-width:6px;border-radius:50%;margin-top:1px;flex-shrink:0}
+.wa-eng-hot{background:#f97316;box-shadow:0 0 5px rgba(249,115,22,.5)}
+.wa-eng-active{background:#6366f1}
+.wa-eng-dormant{background:#374151}
+.wa-eng-none{background:#1f2937}
+
+/* ── 对话手风琴展开 ─────────────────────────────────────── */
+.wa-conv-card{cursor:pointer}
+.wa-conv-card.expanded{background:rgba(255,255,255,.03)}
+.wa-conv-detail{border-bottom:2px solid rgba(99,102,241,.2);overflow:hidden;animation:wa-slide-in .18s ease}
+@keyframes wa-slide-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+.wa-detail-list{max-height:300px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--bd) transparent}
+.wa-detail-row{padding:.55rem 1rem .5rem 3.5rem;border-bottom:1px solid rgba(255,255,255,.035)}
+.wa-detail-row:last-child{border-bottom:none}
+.wa-detail-bubble{display:inline-block;max-width:82%;font-size:.79rem;border-radius:8px;padding:.28rem .55rem;word-break:break-word}
+.wa-detail-bubble.peer{background:rgba(255,255,255,.08);color:var(--t1)}
+.wa-detail-bubble.ai{background:rgba(99,102,241,.15);color:#c7d2fe}
+.wa-detail-meta{font-size:.68rem;color:var(--t3);padding-top:.12rem;display:flex;align-items:center;gap:.4rem}
+.wa-copy-btn{font-size:.68rem;background:transparent;border:1px solid var(--bd);border-radius:4px;color:var(--t3);padding:.05rem .3rem;cursor:pointer;flex-shrink:0;transition:all .12s}
+.wa-copy-btn:hover{background:rgba(99,102,241,.15);color:#a5b4fc;border-color:rgba(99,102,241,.3)}
+.wa-copy-btn.copied{color:#6ee7b7;border-color:rgba(16,185,129,.3)}
+.wa-detail-empty{padding:.7rem 1rem .9rem 3.5rem;font-size:.79rem;color:var(--t3)}
+/* P7-B: customer profile strip */
+.wa-profile-strip{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem .7rem;padding:.45rem 1rem .4rem 3.5rem;background:rgba(255,255,255,.025);border-bottom:1px solid rgba(255,255,255,.05);font-size:.72rem;color:var(--t2)}
+.wa-profile-stat{display:inline-flex;align-items:center;gap:.18rem;white-space:nowrap}
+.wa-profile-stat strong{color:var(--t1);font-weight:600}
+.wa-profile-score{display:inline-block;width:40px;height:4px;border-radius:2px;background:rgba(99,102,241,.2);vertical-align:middle;margin-left:.2rem;position:relative;overflow:hidden}
+.wa-profile-score::after{content:'';display:block;height:100%;background:#818cf8;border-radius:2px}
+/* P7-A: search bar */
+.wa-search-bar{display:flex;align-items:center;gap:.4rem;padding:.45rem 1rem .4rem;border-bottom:1px solid rgba(255,255,255,.04)}
+.wa-search-inp{flex:1;background:rgba(255,255,255,.05);border:1px solid var(--bd);border-radius:8px;color:var(--t1);font-size:.79rem;padding:.25rem .7rem;outline:none;transition:border-color .15s}
+.wa-search-inp:focus{border-color:rgba(99,102,241,.4)}
+.wa-search-sel{background:rgba(255,255,255,.05);border:1px solid var(--bd);border-radius:6px;color:var(--t2);font-size:.75rem;padding:.22rem .4rem;outline:none;flex-shrink:0}
+.wa-search-results{background:rgba(0,0,0,.15);border-bottom:1px solid rgba(255,255,255,.04)}
+.wa-search-result-row{padding:.4rem 1rem .4rem 3.5rem;border-bottom:1px solid rgba(255,255,255,.025);cursor:pointer;transition:background .12s}
+.wa-search-result-row:hover{background:rgba(99,102,241,.05)}
+.wa-search-result-key{font-size:.7rem;color:var(--t3);margin-bottom:.1rem}
+.wa-search-result-msg{font-size:.78rem;color:var(--t2)}
+.wa-search-result-msg em{color:#fbbf24;font-style:normal}
+/* P7-D: intent stats chart */
+.wa-intent-chart{padding:.5rem 1rem .6rem}
+.wa-intent-bar-row{display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.75rem}
+.wa-intent-bar-label{width:2.8rem;text-align:right;color:var(--t3);flex-shrink:0}
+.wa-intent-bar-track{flex:1;height:7px;background:rgba(255,255,255,.06);border-radius:4px;overflow:hidden}
+.wa-intent-bar-fill{height:100%;border-radius:4px;transition:width .4s ease}
+.wa-intent-bar-cnt{width:2.2rem;text-align:right;color:var(--t3);font-size:.7rem;flex-shrink:0}
+.wa-intent-chart-win{display:flex;gap:.3rem;justify-content:flex-end;font-size:.7rem;margin-bottom:.4rem}
+.wa-chart-win-btn{background:transparent;border:1px solid var(--bd);border-radius:10px;color:var(--t3);padding:.1rem .4rem;cursor:pointer}
+.wa-chart-win-btn.active{background:rgba(99,102,241,.15);color:#a5b4fc;border-color:rgba(99,102,241,.3)}
+/* P6-C: detail mode tabs */
+.wa-detail-tabs{display:flex;align-items:center;gap:.3rem;padding:.4rem 1rem .35rem 3.5rem;border-bottom:1px solid rgba(255,255,255,.05)}
+.wa-detail-tab{background:transparent;border:1px solid var(--bd);border-radius:16px;color:var(--t3);font-size:.72rem;padding:.15rem .55rem;cursor:pointer;transition:all .15s}
+.wa-detail-tab.active{background:rgba(99,102,241,.18);border-color:rgba(99,102,241,.4);color:#a5b4fc}
+.wa-detail-total{margin-left:auto;font-size:.7rem;color:var(--t3)}
+/* P6-C: intent badges */
+.wa-intent{display:inline-block;border-radius:10px;font-size:.65rem;padding:.07rem .35rem;margin-left:.3rem;white-space:nowrap}
+.wa-intent.purchase{background:rgba(16,185,129,.12);color:#6ee7b7;border:1px solid rgba(16,185,129,.2)}
+.wa-intent.support{background:rgba(239,68,68,.1);color:#f87171;border:1px solid rgba(239,68,68,.2)}
+.wa-intent.inquiry{background:rgba(59,130,246,.1);color:#93c5fd;border:1px solid rgba(59,130,246,.2)}
+.wa-intent.greeting{background:rgba(148,163,184,.1);color:#94a3b8;border:1px solid rgba(148,163,184,.2)}
+.wa-intent.general{background:rgba(100,116,139,.07);color:var(--t3);border:1px solid var(--bd)}
+/* P6-C: session cards */
+.wa-session-card{padding:.5rem 1rem .5rem 3.5rem;border-bottom:1px solid rgba(255,255,255,.03);cursor:default}
+.wa-session-card:last-child{border-bottom:none}
+.wa-session-head{display:flex;align-items:center;gap:.45rem;font-size:.75rem;margin-bottom:.22rem}
+.wa-session-date{color:var(--t2);font-weight:500}
+.wa-session-stat{color:var(--t3);font-size:.7rem}
+.wa-session-msg{font-size:.78rem;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-left:.05rem}
+.wa-session-reply{font-size:.75rem;color:var(--t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:.1rem}
+/* P6-C: load more */
+.wa-load-more{display:block;width:100%;padding:.42rem;font-size:.75rem;background:transparent;border:1px solid var(--bd);border-radius:6px;color:var(--t3);cursor:pointer;text-align:center;transition:all .15s;margin:.4rem 0 .1rem}
+.wa-load-more:hover{background:rgba(99,102,241,.1);color:#a5b4fc}
+.wa-send-bar{display:flex;gap:.5rem;padding:.55rem 1rem .65rem 3.5rem;border-top:1px solid rgba(255,255,255,.04)}
+.wa-send-inp{flex:1;background:rgba(255,255,255,.05);border:1px solid var(--bd);border-radius:8px;color:var(--t1);font-size:.79rem;padding:.3rem .7rem;resize:none;min-height:34px;max-height:80px;outline:none;transition:border-color .15s}
+.wa-send-inp:focus{border-color:rgba(99,102,241,.5)}
+.wa-send-btn{background:rgba(99,102,241,.2);border:1px solid rgba(99,102,241,.3);color:#a5b4fc;border-radius:8px;padding:.3rem .8rem;cursor:pointer;font-size:.79rem;white-space:nowrap;transition:all .15s;flex-shrink:0}
+.wa-send-btn:hover{background:rgba(99,102,241,.35)}
+.wa-send-btn:disabled{opacity:.4;cursor:not-allowed}
+.wa-conv-expand-hint{font-size:.68rem;color:var(--t3);flex-shrink:0;opacity:.35;transition:opacity .15s;padding-left:.1rem}
+.wa-conv-card:hover .wa-conv-expand-hint{opacity:.7}
+
+/* ── 健康检查横幅 ──────────────────────────────────── */
+.wa-health-bar{border-radius:8px;padding:.4rem .9rem;margin-bottom:.8rem;font-size:.79rem;display:flex;align-items:center;gap:.55rem;flex-wrap:wrap;transition:all .3s}
+.wa-health-bar.ok{background:rgba(16,185,129,.07);border:1px solid rgba(16,185,129,.2);color:#6ee7b7}
+.wa-health-bar.warn{background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);color:#fbbf24}
+.wa-health-bar.err{background:rgba(239,68,68,.09);border:1px solid rgba(239,68,68,.25);color:#f87171}
+.wa-health-issue{font-size:.73rem;background:rgba(0,0,0,.18);border-radius:20px;padding:.1rem .42rem;white-space:nowrap}
+
+/* ── 亲密度进度条 ──────────────────────────────────── */
+.wa-intimacy-bar{height:3px;border-radius:2px;margin-top:.3rem;background:rgba(255,255,255,.07);overflow:hidden}
+.wa-intimacy-fill{height:100%;border-radius:2px;transition:width .4s ease}
+.wa-intimacy-fill.lo{background:rgba(148,163,184,.4)}
+.wa-intimacy-fill.mid{background:linear-gradient(90deg,rgba(99,102,241,.5),rgba(139,92,246,.5))}
+.wa-intimacy-fill.hi{background:linear-gradient(90deg,#6366f1,#ec4899)}
+
+/* ── 待回复 chip ───────────────────────────────────── */
+.wa-conv-unanswered{font-size:.7rem;padding:.12rem .4rem;background:rgba(245,158,11,.12);color:#fbbf24;border-radius:20px;border:1px solid rgba(245,158,11,.25);white-space:nowrap;animation:wa-pulse 2s infinite}
+@keyframes wa-pulse{0%,100%{opacity:1}50%{opacity:.65}}
+
+/* ── 运维统计卡 ─────────────────────────────────────── */
+.wa-ops-stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.6rem;padding:.8rem 1rem .5rem}
+.wa-ops-stat{text-align:center;padding:.55rem .4rem;background:rgba(255,255,255,.025);border-radius:8px;border:1px solid var(--bd)}
+.wa-ops-stat-n{font-size:1.35rem;font-weight:700;color:var(--t1);line-height:1.1}
+.wa-ops-stat-l{font-size:.7rem;color:var(--t3);margin-top:.15rem}
+
+/* ── 手动发送队列卷 ─────────────────────────────────────── */
+.wa-sq-list{padding:.1rem 0}
+.wa-sq-row{display:grid;grid-template-columns:5.5rem 6rem 1fr auto;align-items:center;gap:.5rem;padding:.38rem 1rem;border-bottom:1px solid rgba(255,255,255,.03);font-size:.78rem}
+.wa-sq-row:last-child{border-bottom:none}
+.wa-sq-status{border-radius:20px;padding:.1rem .4rem;font-size:.7rem;white-space:nowrap;text-align:center}
+.wa-sq-status.wa-sq-queued{background:rgba(245,158,11,.12);color:#fbbf24;border:1px solid rgba(245,158,11,.2)}
+.wa-sq-status.wa-sq-processing{background:rgba(99,102,241,.12);color:#a5b4fc;border:1px solid rgba(99,102,241,.2)}
+.wa-sq-status.wa-sq-sent{background:rgba(16,185,129,.1);color:#6ee7b7;border:1px solid rgba(16,185,129,.2)}
+.wa-sq-status.wa-sq-failed{background:rgba(239,68,68,.1);color:#f87171;border:1px solid rgba(239,68,68,.2)}
+.wa-sq-status.wa-sq-cancelled{background:rgba(100,116,139,.1);color:#94a3b8;border:1px solid rgba(100,116,139,.2)}
+.wa-sq-peer{color:var(--t1);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wa-sq-txt{color:var(--t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wa-sq-time{color:var(--t3);font-size:.7rem;white-space:nowrap;text-align:right}
+.wa-sq-cancel{background:transparent;border:1px solid rgba(239,68,68,.3);color:#f87171;border-radius:4px;font-size:.68rem;padding:.07rem .35rem;cursor:pointer}
+.wa-sq-cancel:hover{background:rgba(239,68,68,.1)}
+.wa-sq-err{font-size:.68rem;color:#f87171;grid-column:1/-1;padding-left:.2rem}
+
+/* ── 未保存横幅 ──────────────────────────────────── */
+.wa-unsaved-banner{display:none;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.22);border-radius:8px;padding:.42rem .9rem;margin-bottom:.75rem;font-size:.79rem;color:#fbbf24;align-items:center;gap:.5rem}
+.wa-unsaved-banner.show{display:flex}
+.wa-unsaved-actions{margin-left:auto;display:flex;gap:.35rem;flex-shrink:0}
+</style>
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# Hero：状态点 + 标题 + 副标题 + KPI + 预设/刷新按钮                  #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div class="rpa-hero">
+  <div class="rpa-hero-avatar theme-whatsapp">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347" fill="#fff"/></svg>
+  </div>
+  <div class="rpa-hero-info">
+    <div class="rpa-hero-name">
+      <span class="rpa-status-dot neutral" id="wa-dot"></span>
+      <span>WhatsApp 自动聊天</span>
+    </div>
+    <div class="rpa-hero-sub" id="wa-hero-sub">加载中…</div>
+  </div>
+  <div class="rpa-kpi-row">
+    <div class="rpa-kpi"><span class="rpa-kpi-n" id="wa-kpi-conv">—</span><span class="rpa-kpi-l">今日对话</span></div>
+    <div class="rpa-kpi"><span class="rpa-kpi-n" id="wa-kpi-sent">—</span><span class="rpa-kpi-l">今日回复</span></div>
+    <div class="rpa-kpi"><span class="rpa-kpi-n green" id="wa-kpi-rate">—</span><span class="rpa-kpi-l">回复率</span></div>
+    <div class="rpa-kpi"><span class="rpa-kpi-n" id="wa-kpi-avg">—</span><span class="rpa-kpi-l">平均耗时</span></div>
+    <div class="rpa-kpi" id="wa-kpi-cap-box" style="display:none">
+      <span class="rpa-kpi-n" id="wa-kpi-cap">0/0</span>
+      <span class="rpa-kpi-l">今日上限</span>
+      <div class="rpa-cap-bar" style="width:100%"><div class="rpa-cap-fill" id="wa-cap-fill" style="width:0%"></div></div>
+    </div>
+  </div>
+  <div class="rpa-hero-actions">
+    <div class="preset-wrap">
+      <button class="btn-sec" id="wa-preset-toggle" onclick="rpa.togglePreset(event,'wa-preset-pop')" style="font-size:.78rem;padding:.38rem .7rem">📋 预设</button>
+      <div class="preset-pop" id="wa-preset-pop">
+        <div class="preset-lbl">应用场景预设（不会立即保存）</div>
+        <div class="preset-divider"></div>
+        <button class="preset-btn-item" onclick="waApplyPreset('companion')">
+          <span class="pi">🤝</span>
+          <div class="pt"><div class="pt-title">陪伴模式</div><div class="pt-desc">慢节奏 · 拟人停顿 · 适合 1-1 聊天</div></div>
+        </button>
+        <button class="preset-btn-item" onclick="waApplyPreset('service')">
+          <span class="pi">💼</span>
+          <div class="pt"><div class="pt-title">客服模式</div><div class="pt-desc">10s 轮询 · 短停顿 · 高响应</div></div>
+        </button>
+        <button class="preset-btn-item" onclick="waApplyPreset('fast')">
+          <span class="pi">⚡</span>
+          <div class="pt"><div class="pt-title">快速轮询</div><div class="pt-desc">5s 轮询 · 关闭节奏 · 实时</div></div>
+        </button>
+        <button class="preset-btn-item" onclick="waApplyPreset('gentle')">
+          <span class="pi">🌙</span>
+          <div class="pt"><div class="pt-title">温柔轮询</div><div class="pt-desc">30s 轮询 · 拟人节奏 · 省电</div></div>
+        </button>
+      </div>
+    </div>
+    <button class="rpa-hero-btn" onclick="waRefreshAll()" title="刷新状态">↻</button>
+  </div>
+</div>
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# 控制条：触发 / 暂停 / 恢复                                          #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div style="display:flex;gap:.5rem;align-items:center;margin-bottom:1.1rem;flex-wrap:wrap">
+  <button class="btn-p" id="wa-btn-trigger">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+    立即触发
+  </button>
+  <button class="btn-sec" id="wa-btn-pause">暂停 5 分钟</button>
+  <button class="btn-sec" id="wa-btn-resume">恢复</button>
+  <span id="wa-ctrl-msg" style="font-size:.8rem;color:var(--t3)"></span>
+</div>
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# Tab Bar                                                              #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div class="st-bar">
+  <button class="st-tab active" data-pane="pane-wa-monitor" onclick="rpa.switchTab(this)"> 对话</button>
+  <button class="st-tab" data-pane="pane-wa-pending" onclick="rpa.switchTab(this)" id="wa-tab-pending">✅ 待审<span class="tab-dot"></span></button>
+  <button class="st-tab" data-pane="pane-wa-templates" onclick="rpa.switchTab(this)">📊 模板分析</button>
+  <button class="st-tab" data-pane="pane-wa-settings" onclick="rpa.switchTab(this)" id="wa-tab-settings">⚙️ 配置<span class="tab-dot"></span></button>
+  <button class="st-tab" data-pane="pane-wa-ops" onclick="rpa.switchTab(this)">🔧 运维</button>
+</div>
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# Tab: 对话                                                            #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div id="pane-wa-monitor" class="st-pane active">
+
+  {# 告警横幅 #}
+  <div class="hb-wrap" id="wa-alert-banner">
+    <div class="hb-item error">
+      <svg class="hb-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      <div style="flex:1">
+        <strong>未处理告警：</strong><span id="wa-alert-count"></span>
+      </div>
+      <button class="btn-sec" style="font-size:.72rem;padding:.3rem .6rem" onclick="waAckAll()">全部确认</button>
+    </div>
+  </div>
+
+  {# 视图切换分段控件 #}
+  <div class="wa-view-seg">
+    <button class="wa-vseg-btn active" id="wa-vseg-conv" onclick="waSetViewMode('conv')">💬 对话视图</button>
+    <button class="wa-vseg-btn" id="wa-vseg-log" onclick="waSetViewMode('log')">📋 运行日志</button>
+  </div>
+
+  {# 对话视图（默认） #}
+  <div id="wa-conv-view">
+    <div class="rpa-card">
+      <div class="rpa-card-head">
+        <div class="rpa-card-icon blue">�</div>
+        <div class="rpa-card-title">活跃对话 <span style="font-size:.75rem;color:var(--t3);font-weight:400">· 48h 内</span></div>
+        <button class="rpa-hero-btn" style="margin-left:auto" onclick="waLoadConversations()" title="刷新">↻</button>
+      </div>
+      <div class="wa-conv-searchbar">
+        <input type="text" id="wa-conv-search" class="wa-search-inp" placeholder="搜索联系人、人设…" oninput="waRenderConversations()">
+        <div class="wa-filter-chips">
+          <button class="wa-chip active" id="wa-filter-all" onclick="waFilterConv('all')">全部</button>
+          <button class="wa-chip" id="wa-filter-ok" onclick="waFilterConv('ok')">✓ 成功</button>
+          <button class="wa-chip" id="wa-filter-err" onclick="waFilterConv('err')">⚠ 失败</button>
+        </div>
+        <span class="wa-conv-count" id="wa-conv-count"></span>
+        <div class="wa-filter-chips">
+          <button class="wa-sort-chip wa-chip active" data-s="time" onclick="waSetConvSort('time')">⏱ 时间</button>
+          <button class="wa-sort-chip wa-chip" data-s="engage" onclick="waSetConvSort('engage')">🔥 热度</button>
+          <button class="wa-sort-chip wa-chip" data-s="unanswered" onclick="waSetConvSort('unanswered')">⏳ 待回复首</button>
+        </div>
+      </div>
+      {# P7-A: 历史检索行 #}
+      <div class="wa-search-bar" id="wa-hist-searchbar">
+        <input type="text" id="wa-hist-q" class="wa-search-inp" placeholder="🔍 全文检索历史消息…" oninput="waHistSearch(this.value)">
+        <select id="wa-hist-intent" class="wa-search-sel" onchange="waHistSearch($('wa-hist-q').value)">
+          <option value="">全部意图</option>
+          <option value="purchase">购买</option>
+          <option value="support">售后</option>
+          <option value="inquiry">咨询</option>
+          <option value="greeting">问候</option>
+          <option value="general">通用</option>
+        </select>
+      </div>
+      <div id="wa-hist-results" style="display:none"></div>
+      <div id="wa-conv-list">
+        <div class="wa-conv-empty">
+          <div class="wa-conv-empty-icon">💬</div>
+          <div class="wa-conv-empty-title">加载中…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# 日志视图（隐藏） #}
+  <div id="wa-log-view" style="display:none">
+    <div class="rpa-card">
+      <div class="rpa-card-head">
+        <div class="rpa-card-icon blue">�</div>
+        <div class="rpa-card-title">运行日志</div>
+        <label style="margin-left:auto;font-size:.78rem;display:flex;align-items:center;gap:.3rem;font-weight:500;color:var(--t2)">
+          <input type="checkbox" id="wa-only-peer"> 仅含对方消息
+        </label>
+      </div>
+      <div class="rpa-stream" id="wa-stream">
+        <div class="wa-stream-empty">加载中…</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# Tab: 审核队列                                                       #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div id="pane-wa-pending" class="st-pane">
+
+  <div class="rpa-card">
+    <div class="rpa-card-head">
+      <div class="rpa-card-icon amber">⏳</div>
+      <div class="rpa-card-title">待审批回复 <span class="cfg-badge" id="wa-pending-badge" style="display:none"></span></div>
+      <button class="rpa-hero-btn" style="margin-left:auto" onclick="waLoadPending()" title="刷新">↻</button>
+      <button class="rpa-hero-btn" style="color:#dc2626" onclick="waCancelAllPending()" title="清空全部待审">✕ 清空</button>
+    </div>
+    {# Q1+Q2: 批量审批 + 键盘快捷键工具栏 #}
+    <div class="rpa-bulk-toolbar">
+      <button type="button" class="btn" onclick="rpa.bulk.selectAll()">全选</button>
+      <button type="button" class="btn" onclick="rpa.bulk.clearSelection()">清空</button>
+      <button type="button" class="btn btn-primary" id="wa-bulk-approve" disabled
+              onclick="rpa.bulk.approveSelected()">批量批准 (0)</button>
+      <button type="button" class="btn btn-danger" id="wa-bulk-reject" disabled
+              onclick="rpa.bulk.rejectSelected()">批量拒绝 (0)</button>
+      <span class="rpa-bulk-count" id="wa-bulk-count">已选 0 项</span>
+      <span class="rpa-bulk-hint">⌨ 快捷键
+        <span class="rpa-bulk-hint-pop" id="wa-shortcuts-pop">
+          <div><kbd>j</kbd>/<kbd>↓</kbd> 下一条　<kbd>k</kbd>/<kbd>↑</kbd> 上一条</div>
+          <div><kbd>x</kbd>/<kbd>空格</kbd> 勾选当前</div>
+          <div><kbd>a</kbd> 批准焦点　<kbd>r</kbd> 拒绝焦点</div>
+          <div><kbd>Ctrl</kbd>+<kbd>Enter</kbd> 批量批准</div>
+          <div><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> 批量拒绝</div>
+          <div><kbd>Esc</kbd> 取消选中</div>
+        </span>
+      </span>
+      <button type="button" class="btn" style="margin-left:auto;font-size:.75rem;padding:.2rem .5rem" onclick="document.getElementById('wa-shortcuts-pop').classList.toggle('show')" title="快捷键帮助">?</button>
+    </div>
+    <div id="wa-pending-list">
+      <div class="rpa-empty">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        <div>暂无待审批回复</div>
+        <div style="font-size:.75rem;margin-top:.25rem">当回复模式为 approve 时，所有 AI 草稿会先来这里等审核</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# Tab: 模板分析 (P15-i)                                                #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div id="pane-wa-templates" class="st-pane">
+  <div class="rpa-card">
+    <div class="rpa-card-head" style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
+      <span>📊 主动续聊模板效果分析</span>
+      <span class="wa-persona-bar-links" style="margin-left:auto">
+        <a href="#" onclick="waLoadTemplateAnalytics();return false">🔄 刷新</a>
+      </span>
+    </div>
+
+    {# 配置信息 #}
+    <div class="wa-persona-bar" id="wa-tpl-config-bar" style="margin:.6rem 0">
+      <span class="wa-persona-bar-lbl">⚙️ 当前策略</span>
+      <span id="wa-tpl-config-text" style="font-size:.78rem;color:var(--t3)">加载中…</span>
+    </div>
+
+    {# KPI 卡片 #}
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.6rem;margin:.6rem 0 1rem">
+      <div class="rpa-kpi" style="background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.2);border-radius:8px;padding:.6rem">
+        <span class="rpa-kpi-n" id="wa-tpl-sent">—</span>
+        <span class="rpa-kpi-l">模板发送</span>
+      </div>
+      <div class="rpa-kpi" style="background:rgba(74,222,128,.08);border:1px solid rgba(74,222,128,.2);border-radius:8px;padding:.6rem">
+        <span class="rpa-kpi-n green" id="wa-tpl-replied">—</span>
+        <span class="rpa-kpi-l">用户回复</span>
+      </div>
+      <div class="rpa-kpi" style="background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.2);border-radius:8px;padding:.6rem">
+        <span class="rpa-kpi-n" id="wa-tpl-rate" style="color:#f59e0b">—</span>
+        <span class="rpa-kpi-l">回复率</span>
+      </div>
+      <div class="rpa-kpi" style="background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.2);border-radius:8px;padding:.6rem">
+        <span class="rpa-kpi-n" id="wa-tpl-categories" style="color:#8b5cf6">—</span>
+        <span class="rpa-kpi-l">模板类别</span>
+      </div>
+    </div>
+
+    {# 类别表现表格 #}
+    <div style="margin:1rem 0">
+      <div style="font-size:.85rem;font-weight:600;color:var(--t1);margin-bottom:.5rem">类别表现详情</div>
+      <table class="wa-table" id="wa-tpl-category-table">
+        <thead>
+          <tr>
+            <th>类别</th>
+            <th>发送数</th>
+            <th>回复数</th>
+            <th>回复率</th>
+            <th>效果</th>
+          </tr>
+        </thead>
+        <tbody id="wa-tpl-category-body">
+          <tr><td colspan="5" style="text-align:center;color:var(--t3)">加载中…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    {# 模板详情 #}
+    <div style="margin:1rem 0">
+      <div style="font-size:.85rem;font-weight:600;color:var(--t1);margin-bottom:.5rem">模板使用分布</div>
+      <div id="wa-tpl-detail-list" style="max-height:300px;overflow-y:auto">
+        <div style="padding:1rem;text-align:center;color:var(--t3)">加载中…</div>
+      </div>
+    </div>
+
+    {# 策略切换 #}
+    <div style="margin:1rem 0;padding:.8rem;background:rgba(255,255,255,.03);border:1px solid var(--bd);border-radius:8px">
+      <div style="font-size:.85rem;font-weight:600;color:var(--t1);margin-bottom:.5rem">轮换策略设置</div>
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
+        <select id="wa-tpl-strategy-select" class="wa-search-sel" style="padding:.35rem .6rem">
+          <option value="weighted">加权选择 (推荐)</option>
+          <option value="round_robin">轮询</option>
+          <option value="random">随机</option>
+        </select>
+        <button class="btn-sec" onclick="waSaveTemplateStrategy()" style="font-size:.78rem;padding:.35rem .7rem">保存策略</button>
+        <span id="wa-tpl-strategy-msg" style="font-size:.75rem;color:var(--t3)"></span>
+      </div>
+      <div style="font-size:.7rem;color:var(--t3);margin-top:.4rem">
+        💡 加权选择：使用次数越多的模板权重越高，形成正反馈优化
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# Tab: 设置                                                           #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div id="pane-wa-settings" class="st-pane">
+
+  <div class="wa-health-bar" id="wa-health-bar" style="display:none"></div>
+
+  <div class="wa-persona-bar" id="wa-persona-bar">
+    <span class="wa-persona-bar-lbl">🎭 账号人设</span>
+    <span style="font-size:.78rem;color:var(--t3)">加载中…</span>
+  </div>
+
+  <div class="wa-unsaved-banner" id="wa-unsaved-banner">
+    ⚠ 有未保存的更改
+    <div class="wa-unsaved-actions">
+      <button class="btn-sec" style="font-size:.72rem;padding:.2rem .55rem" onclick="waLoadCfg()">还原</button>
+      <button class="btn-p" style="font-size:.72rem;padding:.2rem .55rem" onclick="$('wa-cfg-save').click()">立即保存</button>
+    </div>
+  </div>
+
+  <div class="rpa-card">
+    <div class="rpa-card-head">
+      <div class="rpa-card-icon green">⚙️</div>
+      <div class="rpa-card-title">服务轮询</div>
+      <div class="rpa-card-desc">控制 RPA 后台扫描频率</div>
+    </div>
+    <div class="f-grid2">
+      <div class="f-row">
+        <label class="f-lbl">基准轮询间隔（秒）<span class="f-dur" id="cfg-wa-interval-dur"></span></label>
+        <input class="f-inp" type="number" id="cfg-wa-interval" min="1" step="1" value="15" oninput="rpa.markDirty('wa-tab-settings');updateDur('cfg-wa-interval','cfg-wa-interval-dur')">
+        <span class="f-hint">空闲时默认轮询间隔</span>
+      </div>
+      <div class="f-row">
+        <label class="f-lbl">快轮询间隔（秒）<span class="f-dur" id="cfg-wa-fast-dur"></span></label>
+        <input class="f-inp" type="number" id="cfg-wa-fast" min="1" step="1" value="4" oninput="rpa.markDirty('wa-tab-settings');updateDur('cfg-wa-fast','cfg-wa-fast-dur')">
+        <span class="f-hint">有未读时切到此速度</span>
+      </div>
+      <div class="f-row">
+        <label class="f-lbl">慢轮询间隔（秒）<span class="f-dur" id="cfg-wa-slow-dur"></span></label>
+        <input class="f-inp" type="number" id="cfg-wa-slow" min="1" step="1" value="30" oninput="rpa.markDirty('wa-tab-settings');updateDur('cfg-wa-slow','cfg-wa-slow-dur')">
+        <span class="f-hint">连续空轮后降速到此</span>
+      </div>
+      <div class="f-row">
+        <label class="f-lbl">空轮 N 次后进入慢轮询</label>
+        <input class="f-inp" type="number" id="cfg-wa-slow-after" min="1" step="1" value="6" oninput="rpa.markDirty('wa-tab-settings')">
+      </div>
+    </div>
+  </div>
+
+  <div class="rpa-card">
+    <div class="rpa-card-head">
+      <div class="rpa-card-icon purple">💬</div>
+      <div class="rpa-card-title">回复策略</div>
+    </div>
+    <div class="f-row">
+      <label class="f-lbl">回复模式</label>
+      <div class="tr-cards" id="wa-reply-mode-cards">
+        <div class="tr-card" data-val="auto" onclick="selectReplyMode(this)">
+          <div class="tr-card-top">⚡ 自动发送</div>
+          <div class="tr-card-sub">AI 草稿生成即发，无人工介入</div>
+        </div>
+        <div class="tr-card" data-val="approve" onclick="selectReplyMode(this)">
+          <div class="tr-card-top">✅ 人工审核</div>
+          <div class="tr-card-sub">草稿入待审队列，确认后发</div>
+        </div>
+        <div class="tr-card" data-val="off" onclick="selectReplyMode(this)">
+          <div class="tr-card-top">🚫 关闭</div>
+          <div class="tr-card-sub">仅记录消息，不生成回复</div>
+        </div>
+      </div>
+      <input type="hidden" id="cfg-wa-reply-mode" value="auto">
+    </div>
+    <div class="f-grid2">
+      <div class="f-row">
+        <label class="f-lbl">默认回复语言</label>
+        <input class="f-inp" type="text" id="cfg-wa-lang" placeholder="zh / en / ja" value="zh" oninput="rpa.markDirty('wa-tab-settings')">
+        <span class="f-hint">用户语言识别失败时使用此默认值</span>
+      </div>
+      <div class="f-row">
+        <label class="f-lbl">每日发送上限</label>
+        <input class="f-inp" type="number" id="cfg-wa-daily-cap" min="0" step="1" value="0" oninput="rpa.markDirty('wa-tab-settings')">
+        <span class="f-hint">0 = 不限；达到后自动暂停到次日</span>
+        <div style="margin-top:.25rem;display:flex;gap:.35rem;flex-wrap:wrap;font-size:.78rem">
+          <span style="color:var(--t3)">快捷：</span>
+          <button type="button" class="btn-chip" onclick="waSetDailyCap(5000)">5k</button>
+          <button type="button" class="btn-chip" onclick="waSetDailyCap(10000)">1万</button>
+          <button type="button" class="btn-chip" onclick="waSetDailyCap(0)">不限</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="rpa-card">
+    <div class="rpa-card-head">
+      <div class="rpa-card-icon blue">🧑</div>
+      <div class="rpa-card-title">拟人节奏（防风控）</div>
+      <label class="rpa-toggle" style="margin-left:auto">
+        <input type="checkbox" id="cfg-wa-pacing-on" onchange="rpa.markDirty('wa-tab-settings')">
+        <span class="rpa-toggle-sw"></span>
+      </label>
+    </div>
+    <div class="f-grid2">
+      <div class="f-row">
+        <label class="f-lbl">分条策略</label>
+        <select class="f-inp" id="cfg-wa-split" onchange="rpa.markDirty('wa-tab-settings')">
+          <option value="sentence">按句子</option>
+          <option value="length">按长度</option>
+          <option value="none">不分条</option>
+        </select>
+      </div>
+      <div class="f-row">
+        <label class="f-lbl">单条最大字符</label>
+        <input class="f-inp" type="number" id="cfg-wa-split-chars" min="20" step="10" value="80" oninput="rpa.markDirty('wa-tab-settings')">
+      </div>
+      <div class="f-row">
+        <label class="f-lbl">最多分成几条</label>
+        <input class="f-inp" type="number" id="cfg-wa-split-parts" min="1" step="1" value="3" oninput="rpa.markDirty('wa-tab-settings')">
+      </div>
+      <div class="f-row">
+        <label class="f-lbl">读停顿 ms（低-高）</label>
+        <div style="display:flex;gap:.4rem">
+          <input class="f-inp" type="number" id="cfg-wa-read-lo" min="0" step="100" value="800" oninput="rpa.markDirty('wa-tab-settings')">
+          <input class="f-inp" type="number" id="cfg-wa-read-hi" min="0" step="100" value="2000" oninput="rpa.markDirty('wa-tab-settings')">
+        </div>
+      </div>
+      <div class="f-row">
+        <label class="f-lbl">条间隔 ms（低-高）</label>
+        <div style="display:flex;gap:.4rem">
+          <input class="f-inp" type="number" id="cfg-wa-inter-lo" min="0" step="100" value="700" oninput="rpa.markDirty('wa-tab-settings')">
+          <input class="f-inp" type="number" id="cfg-wa-inter-hi" min="0" step="100" value="1800" oninput="rpa.markDirty('wa-tab-settings')">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="rpa-card">
+    <div class="rpa-card-head">
+      <div class="rpa-card-icon" style="background:rgba(16,185,129,.12)">🎤</div>
+      <div class="rpa-card-title">语音功能</div>
+      <div class="rpa-card-desc">语音识别（STT）+ 语音回复（TTS）</div>
+    </div>
+    <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:.7rem">
+      <label class="rpa-toggle">
+        <input type="checkbox" id="cfg-wa-voice-in" onchange="rpa.markDirty('wa-tab-settings')">
+        <span class="rpa-toggle-sw"></span><span class="rpa-toggle-lbl">语音识别（接收语音→转文字）</span>
+      </label>
+      <label class="rpa-toggle">
+        <input type="checkbox" id="cfg-wa-voice-out" onchange="rpa.markDirty('wa-tab-settings')">
+        <span class="rpa-toggle-sw"></span><span class="rpa-toggle-lbl">语音回复（TTS 生成语音）</span>
+      </label>
+    </div>
+    <div class="f-grid2" id="wa-voice-out-opts" style="display:none">
+      <div class="f-row">
+        <label class="f-lbl">发送模式</label>
+        <select class="f-inp" id="cfg-wa-voice-mode" onchange="rpa.markDirty('wa-tab-settings')">
+          <option value="approval_only">仅生成（审核后手动发）</option>
+          <option value="auto_voice">自动发送语音</option>
+        </select>
+      </div>
+      <div class="f-row">
+        <label class="f-lbl">触发条件</label>
+        <select class="f-inp" id="cfg-wa-voice-trigger" onchange="rpa.markDirty('wa-tab-settings')">
+          <option value="when_peer_voice">对方发语音时</option>
+          <option value="always">每条回复</option>
+          <option value="random">随机概率</option>
+        </select>
+      </div>
+      <div class="f-row">
+        <label class="f-lbl">TTS 最大文字长度</label>
+        <input class="f-inp" type="number" id="cfg-wa-voice-maxchars" min="50" step="10" value="220" oninput="rpa.markDirty('wa-tab-settings')">
+      </div>
+      <div class="f-row">
+        <label class="f-lbl">音频最长秒数</label>
+        <input class="f-inp" type="number" id="cfg-wa-voice-maxsec" min="5" step="5" value="20" oninput="rpa.markDirty('wa-tab-settings')">
+      </div>
+      <div class="f-row" style="grid-column:1/-1">
+        <label class="f-lbl">TTS 快速试听</label>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;flex:1">
+          <select id="cfg-wa-tts-test-lang" style="font-size:12px;padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;background:#fff">
+            <option value="">— 配置默认语言 —</option>
+            <option value="zh-cn">🇨🇳 zh-cn 中文</option>
+            <option value="en">🇺🇸 en English</option>
+            <option value="de">🇩🇪 de Deutsch</option>
+            <option value="ja">🇯🇵 ja 日本語</option>
+            <option value="ko">🇰🇷 ko 한국어</option>
+            <option value="fr">🇫🇷 fr Français</option>
+            <option value="es">🇪🇸 es Español</option>
+            <option value="ar">🇸🇦 ar Arabic</option>
+            <option value="ru">🇷🇺 ru Русский</option>
+            <option value="hi">🇮🇳 hi Hindi</option>
+            <option value="it">🇮🇹 it Italiano</option>
+            <option value="pt">🇧🇷 pt Português</option>
+            <option value="tr">🇹🇷 tr Türkçe</option>
+          </select>
+          <input type="text" id="cfg-wa-tts-test-text" placeholder="输入测试文字…" maxlength="200"
+            style="flex:1;min-width:120px;font-size:12px;padding:4px 8px;border:1px solid #d1d5db;border-radius:6px">
+          <button onclick="waSettingsTtsTest()" id="cfg-wa-tts-test-btn"
+            style="font-size:12px;padding:4px 12px;border-radius:6px;background:#0ea5e9;color:#fff;border:none;cursor:pointer">
+            ▶ 试听
+          </button>
+        </div>
+      </div>
+      <div id="cfg-wa-tts-test-result" style="grid-column:1/-1;margin-top:2px;font-size:12px;display:flex;align-items:center;gap:8px;min-height:18px"></div>
+    </div>
+    <div id="wa-voice-metrics" style="margin-top:.6rem;padding:.5rem .7rem;background:rgba(16,185,129,.06);border-radius:6px;font-size:.82rem;color:#6b7280;display:none">
+      <b>语音统计</b>（本次启动）：<span id="wa-vm-txt">加载中...</span>
+    </div>
+  </div>
+
+  <div class="rpa-card">
+    <div class="rpa-card-head">
+      <div class="rpa-card-icon" style="background:rgba(139,92,246,.12)">🖼️</div>
+      <div class="rpa-card-title">多模态媒体理解</div>
+    </div>
+    <div class="rpa-desc">识别对方发来的图片/视频/贴纸/GIF/文件，让 AI 自然回应（需配置 Vision 后端）。</div>
+    <div class="f-row" style="margin-top:.4rem">
+      <label class="rpa-toggle">
+        <input type="checkbox" id="cfg-wa-media-enabled" onchange="rpa.markDirty('wa-tab-settings')">
+        <span class="rpa-toggle-sw"></span><span class="rpa-toggle-lbl">启用媒体理解</span>
+      </label>
+    </div>
+    <div class="f-row">
+      <label class="rpa-toggle">
+        <input type="checkbox" id="cfg-wa-media-vision" checked onchange="rpa.markDirty('wa-tab-settings')">
+        <span class="rpa-toggle-sw"></span><span class="rpa-toggle-lbl">使用 Vision 描述内容（否则仅 placeholder）</span>
+      </label>
+    </div>
+    <div class="f-row">
+      <label class="f-lbl">裁剪边距 (px)</label>
+      <input class="f-inp" type="number" id="cfg-wa-media-padding" min="0" max="80" step="4" value="24" oninput="rpa.markDirty('wa-tab-settings')">
+    </div>
+    <div class="f-row">
+      <label class="f-lbl">Vision 超时 (秒)</label>
+      <input class="f-inp" type="number" id="cfg-wa-media-timeout" min="5" max="120" step="5" value="30" oninput="rpa.markDirty('wa-tab-settings')">
+    </div>
+    <div id="wa-media-metrics" style="margin-top:.6rem;padding:.5rem .7rem;background:rgba(139,92,246,.06);border-radius:6px;font-size:.82rem;color:#6b7280;display:none">
+      <b>媒体统计</b>（本次启动）：<span id="wa-mm-txt">加载中...</span>
+    </div>
+  </div>
+
+  <div class="rpa-card">
+    <div class="rpa-card-head">
+      <div class="rpa-card-icon" style="background:rgba(99,102,241,.12)">🔌</div>
+      <div class="rpa-card-title">全局开关</div>
+    </div>
+    <div style="display:flex;gap:1.5rem;flex-wrap:wrap">
+      <label class="rpa-toggle">
+        <input type="checkbox" id="cfg-wa-enabled" onchange="rpa.markDirty('wa-tab-settings')">
+        <span class="rpa-toggle-sw"></span><span class="rpa-toggle-lbl">启用 WhatsApp RPA（总开关）</span>
+      </label>
+      <label class="rpa-toggle">
+        <input type="checkbox" id="cfg-wa-biz" onchange="rpa.markDirty('wa-tab-settings')">
+        <span class="rpa-toggle-sw"></span><span class="rpa-toggle-lbl">使用 WhatsApp Business 版</span>
+      </label>
+      <label class="rpa-toggle">
+        <input type="checkbox" id="cfg-wa-auto-accept" onchange="rpa.markDirty('wa-tab-settings')">
+        <span class="rpa-toggle-sw"></span><span class="rpa-toggle-lbl">自动接受联系人申请</span>
+      </label>
+    </div>
+  </div>
+
+  {# P15-j: 表情控制配置 #}
+  <div class="rpa-card">
+    <div class="rpa-card-head">
+      <div class="rpa-card-icon" style="background:rgba(251,191,36,.12);color:#f59e0b">😊</div>
+      <div class="rpa-card-title">表情回复控制</div>
+      <label class="rpa-toggle" style="margin-left:auto">
+        <input type="checkbox" id="cfg-wa-emoticons-enabled" onchange="rpa.markDirty('wa-tab-settings')">
+        <span class="rpa-toggle-sw"></span>
+      </label>
+    </div>
+    <div class="f-grid2">
+      <div class="f-row">
+        <label class="f-lbl">跳过表情概率（%）</label>
+        <input class="f-inp" type="number" id="cfg-wa-emoticons-skip" min="0" max="100" step="5" value="32" oninput="rpa.markDirty('wa-tab-settings')">
+        <span class="f-hint">0 = 总是加表情，100 = 从不加表情</span>
+      </div>
+      <div class="f-row">
+        <label class="f-lbl">最大连续带表情条数</label>
+        <input class="f-inp" type="number" id="cfg-wa-emoticons-max-consec" min="0" max="10" step="1" value="2" oninput="rpa.markDirty('wa-tab-settings')">
+        <span class="f-hint">超过此数后强制跳过表情（防刷屏）</span>
+      </div>
+    </div>
+    <div style="margin-top:.6rem;padding:.5rem .7rem;background:rgba(251,191,36,.06);border-radius:6px;font-size:.78rem;color:#6b7280">
+      💡 <b>减少表情建议</b>：将"跳过概率"提高到 70-85%，"最大连续"设为 1
+    </div>
+  </div>
+
+  <div class="save-bar">
+    <span class="save-res" id="wa-cfg-msg"></span>
+    <span style="font-size:.75rem;color:var(--t3);margin-right:auto">大部分字段实时生效；总开关需重启主进程</span>
+    <button class="btn-sec" onclick="waLoadCfg()">重置</button>
+    <button class="btn-p" id="wa-cfg-save">保存配置</button>
+  </div>
+
+</div>
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# Tab: 运维                                                            #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div id="pane-wa-ops" class="st-pane">
+
+  <!-- P11-B: 历史聊天检索 -->
+  <div class="rpa-card">
+    <div class="rpa-card-head">
+      <div class="rpa-card-icon" style="background:rgba(99,102,241,.12);color:#6366f1">🔍</div>
+      <div class="rpa-card-title">历史聊天检索</div>
+      <span class="rpa-card-sub" style="margin-left:auto;font-size:.72rem;color:var(--t3)">30 天内全文 + 意图过滤</span>
+    </div>
+    <div style="display:flex;gap:.55rem;align-items:center;flex-wrap:wrap;padding:.2rem 0 .5rem">
+      <input id="wa-hist-q" type="text" placeholder="🔍 检索聊天关键词…"
+             style="flex:1;min-width:220px;padding:.5rem .75rem;background:var(--input);border:1px solid var(--bd2);border-radius:7px;font-size:.85rem;color:var(--t)">
+      <select id="wa-hist-q-intent" style="padding:.5rem .65rem;background:var(--input);border:1px solid var(--bd2);border-radius:7px;font-size:.8rem;color:var(--t2)">
+        <option value="">全部意图</option>
+        <option value="purchase">购买</option>
+        <option value="support">售后</option>
+        <option value="inquiry">咨询</option>
+        <option value="greeting">问候</option>
+        <option value="general">通用</option>
+      </select>
+    </div>
+    <div id="wa-hist-results" style="display:none;max-height:360px;overflow-y:auto;border-top:1px solid var(--bd)"></div>
+  </div>
+
+  <!-- P11-B: 意图分布 -->
+  <div class="rpa-card">
+    <div class="rpa-card-head">
+      <div class="rpa-card-icon" style="background:rgba(59,130,246,.12);color:#3b82f6">📊</div>
+      <div class="rpa-card-title">意图分布</div>
+      <div class="actions" style="display:flex;gap:.3rem;margin-left:auto">
+        <button class="rpa-hero-btn rpa-win-btn" data-h="24">24h</button>
+        <button class="rpa-hero-btn rpa-win-btn active" data-h="168">7d</button>
+        <button class="rpa-hero-btn rpa-win-btn" data-h="720">30d</button>
+      </div>
+    </div>
+    <div id="wa-intent-body" style="padding:.4rem 0">加载中…</div>
+  </div>
+
+  <div class="rpa-card">
+    <div class="rpa-card-head">
+      <div class="rpa-card-icon" style="background:rgba(168,85,247,.12);color:#9333ea">📜</div>
+      <div class="rpa-card-title">运行日志</div>
+      <div class="log-toolbar" style="margin-left:auto;margin-bottom:0">
+        <span class="log-live-dot" id="wa-log-live-dot" style="display:none"></span>
+        <button class="rpa-hero-btn" onclick="waLoadLogTail()">↻ 刷新</button>
+      </div>
+    </div>
+    <div class="log-wrap" id="wa-log-tail">
+      <div class="log-empty">点击刷新加载…</div>
+    </div>
+  </div>
+
+  <div class="rpa-card">
+    <div class="rpa-card-head">
+      <div class="rpa-card-icon blue">📱</div>
+      <div class="rpa-card-title">设备快捷操作</div>
+    </div>
+    <div style="display:flex;gap:.65rem;flex-wrap:wrap;margin-bottom:.85rem">
+      <button class="btn-sec" id="wa-btn-accept">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+        立即接受联系人申请
+      </button>
+      <button class="btn-sec" id="wa-btn-screenshot">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+        获取当前截屏
+      </button>
+    </div>
+    <div id="wa-device-msg" style="font-size:.78rem;color:var(--t2);margin-bottom:.5rem"></div>
+    <div id="wa-screenshot-wrap" style="display:none;margin-top:.5rem">
+      <img id="wa-screenshot-img" src="" alt="设备截屏"
+           style="max-width:100%;border-radius:8px;border:1px solid var(--bd);cursor:zoom-in"
+           onclick="this.style.maxWidth=this.style.maxWidth==='100%'?'none':'100%'">
+      <div style="font-size:.72rem;color:var(--t3);margin-top:.25rem">点击放大/缩小</div>
+    </div>
+  </div>
+
+  {# 24h 操作统计卡 #}
+  <div class="rpa-card" id="wa-ops-stats-card" style="margin-bottom:.7rem">
+    <div class="rpa-card-head">
+      <div class="rpa-card-icon blue">📊</div>
+      <div class="rpa-card-title">24h 统计</div>
+      <div class="rpa-card-desc" id="wa-ops-mode-lbl"></div>
+    </div>
+    <div class="wa-ops-stat-grid">
+      <div class="wa-ops-stat"><div class="wa-ops-stat-n" id="wa-ops-conv">—</div><div class="wa-ops-stat-l">独立对话</div></div>
+      <div class="wa-ops-stat"><div class="wa-ops-stat-n" id="wa-ops-sent">—</div><div class="wa-ops-stat-l">回复成功</div></div>
+      <div class="wa-ops-stat"><div class="wa-ops-stat-n" id="wa-ops-rate">—</div><div class="wa-ops-stat-l">回复率</div></div>
+      <div class="wa-ops-stat"><div class="wa-ops-stat-n" id="wa-ops-avg">—</div><div class="wa-ops-stat-l">平均耗时</div></div>
+      <div class="wa-ops-stat"><div class="wa-ops-stat-n" id="wa-ops-total">—</div><div class="wa-ops-stat-l">总巡检次</div></div>
+      <div class="wa-ops-stat"><div class="wa-ops-stat-n" id="wa-ops-pending">—</div><div class="wa-ops-stat-l">待审批</div></div>
+    </div>
+  </div>
+
+  {# P5-2: 手动发送队列卡 #}
+  <div class="rpa-card" id="wa-send-queue-card" style="margin-bottom:.7rem">
+    <div class="rpa-card-head">
+      <div class="rpa-card-icon purple">📤</div>
+      <div class="rpa-card-title">手动发送队列</div>
+      <button class="rpa-hero-btn" style="margin-left:auto;font-size:.7rem" onclick="waLoadSendQueue()" title="刷新">↻</button>
+    </div>
+    <div id="wa-send-queue-list"><div style="padding:.55rem 1rem;font-size:.78rem;color:var(--t3)">加载中…</div></div>
+  </div>
+
+  {# P7-D: 意图分布统计卡 #}
+  <div class="rpa-card" id="wa-intent-stats-card" style="margin-bottom:.7rem">
+    <div class="rpa-card-head">
+      <div class="rpa-card-icon" style="background:rgba(245,158,11,.1);color:#f59e0b">🏷️</div>
+      <div class="rpa-card-title">意图分布</div>
+      <div class="wa-intent-chart-win" style="margin-left:auto;margin-bottom:0">
+        <button class="wa-chart-win-btn active" onclick="waLoadIntentStats(this,168)" data-h="168">7天</button>
+        <button class="wa-chart-win-btn" onclick="waLoadIntentStats(this,720)" data-h="720">30天</button>
+        <button class="wa-chart-win-btn" onclick="waLoadIntentStats(this,24)" data-h="24">24h</button>
+      </div>
+    </div>
+    <div id="wa-intent-chart-body" class="wa-intent-chart"><div style="font-size:.75rem;color:var(--t3)">加载中…</div></div>
+  </div>
+
+  {# 运营漏斗（合并到运维 tab）#}
+  <div id="pane-wa-funnel" style="margin-top:.5rem">
+    {% include "_rpa_shared_funnel.html" %}
+  </div>
+
+</div>
+
+<script>
+(function(){
+'use strict';
+const $ = (id) => document.getElementById(id);
+
+/* ── 时长显示辅助 ───────────────────────────────────────── */
+window.updateDur = function(inpId, durId){
+  const v = Number($(inpId)?.value)||0;
+  const d = $(durId);
+  if(d) d.textContent = v ? rpa.fmtDur(v) : '';
+};
+
+/* ── reply_mode 选择卡片 ────────────────────────────────── */
+window.selectReplyMode = function(card){
+  document.querySelectorAll('#wa-reply-mode-cards .tr-card').forEach(c=>c.classList.remove('selected'));
+  card.classList.add('selected');
+  $('cfg-wa-reply-mode').value = card.dataset.val;
+  rpa.markDirty('wa-tab-settings');
+};
+
+// 配置快捷填充
+window.waSetDailyCap = function(v){
+  const inp = $('cfg-wa-daily-cap');
+  if(!inp) return;
+  inp.value = Number(v||0);
+  rpa.markDirty('wa-tab-settings');
+};
+window.waSetEmoPreset = function(mode){
+  const skip = $('cfg-wa-emoticons-skip');
+  const consec = $('cfg-wa-emoticons-max-consec');
+  const enabled = $('cfg-wa-emoticons-enabled');
+  if(!skip||!consec||!enabled) return;
+  enabled.checked = true;
+  if(mode==='low'){ skip.value = 85; consec.value = 1; }
+  else if(mode==='high'){ skip.value = 30; consec.value = 3; }
+  else { skip.value = 60; consec.value = 2; }
+  rpa.markDirty('wa-tab-settings');
+};
+
+/* ── P2-A: 健康检查 ─────────────────────────────────────── */
+let _waLastStatus = null;
+let _waLastCfgEff = null;
+
+function waRenderHealthBar(){
+  const bar = $('wa-health-bar');
+  if(!bar || !_waLastStatus) return;
+  const s = _waLastStatus;
+  const issues=[], warns=[];
+  if(!s.available){ issues.push('服务未初始化'); }
+  else if(!s.enabled){ warns.push('服务已禁用'); }
+  else if(!s.running){ issues.push('后台轮询未运行'); }
+  if(s.paused) warns.push('已暂停 '+rpa.fmtDur(s.pause_remaining_sec||0));
+  const cap=Number(s.daily_cap||0), sent=Number(s.daily_sent||0);
+  if(cap>0 && sent>=cap) issues.push('今日上限已满 '+sent+'/'+cap);
+  else if(cap>0 && sent>=cap*.8) warns.push('接近每日上限 '+sent+'/'+cap);
+  if((s.unacked_alerts||0)>0) warns.push(s.unacked_alerts+' 条未确认告警');
+  const lr=s.last_run||{};
+  if(lr.ok===false||lr.ok===0) warns.push('上次运行失败: '+(lr.step||'?'));
+  let state,icon,label;
+  if(issues.length){ state='err'; icon='🔴'; label='异常'; }
+  else if(warns.length){ state='warn'; icon='🟡'; label='注意'; }
+  else{ state='ok'; icon='🟢'; label='运行正常'; }
+  const chips=[...issues,...warns].map(x=>`<span class="wa-health-issue">${rpa.esc(x)}</span>`).join('');
+  bar.className='wa-health-bar '+state;
+  bar.style.display='';
+  bar.innerHTML=`${icon} <strong>${label}</strong>${chips}`;
+}
+
+/* ── P2-E: 运维统计 ──────────────────────────────────────── */
+function waUpdateOpsStats(s){
+  if(!s) return;
+  const cs=s.conv_stats_24h||{}, rs=s.stats_24h||{};
+  $('wa-ops-conv').textContent = cs.unique_chats ?? '—';
+  $('wa-ops-sent').textContent = cs.conv_sent ?? '—';
+  const r = cs.conv_total>0?Math.round(cs.conv_sent/cs.conv_total*100)+'%':'—';
+  $('wa-ops-rate').textContent = r;
+  $('wa-ops-avg').textContent = cs.conv_avg_ms?Math.round(cs.conv_avg_ms)+'ms':'—';
+  $('wa-ops-total').textContent = rs.total ?? '—';
+  $('wa-ops-pending').textContent = s.pending_count ?? '—';
+  const modeEl=$('wa-ops-mode-lbl');
+  if(modeEl) modeEl.textContent='回复模式：'+(s.reply_mode||'auto');
+}
+
+/* ── Status ─────────────────────────────────────────────── */
+async function waLoadStatus(){
+  try{
+    const d = await rpa.get('/api/whatsapp-rpa/status');
+    _waLastStatus = d;
+    // dot
+    const dot = $('wa-dot');
+    if(!d.available || !d.enabled){ dot.className='rpa-status-dot offline'; }
+    else if(d.paused){ dot.className='rpa-status-dot paused'; }
+    else if(d.running){ dot.className='rpa-status-dot'; }
+    else { dot.className='rpa-status-dot warn'; }
+    // subtitle
+    let sub='';
+    if(!d.available) sub='服务未初始化';
+    else if(!d.enabled) sub='已禁用';
+    else if(d.paused) sub='已暂停（剩 '+rpa.fmtDur(d.pause_remaining_sec||0)+'）';
+    else if(d.running) sub='运行中 · 回复模式：'+(d.reply_mode||'auto');
+    else sub='未运行';
+    $('wa-hero-sub').textContent = sub;
+    // KPI（基于真实对话统计，过滤心跳空转）
+    const cs24 = d.conv_stats_24h||{};
+    $('wa-kpi-conv').textContent = cs24.unique_chats ?? '—';
+    $('wa-kpi-sent').textContent = cs24.conv_sent ?? '—';
+    const rate = cs24.conv_total > 0 ? Math.round(cs24.conv_sent/cs24.conv_total*100)+'%' : '—';
+    $('wa-kpi-rate').textContent = rate;
+    $('wa-kpi-avg').textContent = cs24.conv_avg_ms ? Math.round(cs24.conv_avg_ms)+' ms' : '—';
+    // cap
+    const cap = Number(d.daily_cap||0), capSent = Number(d.daily_sent||0);
+    const capBox = $('wa-kpi-cap-box');
+    if(cap>0){
+      capBox.style.display='';
+      $('wa-kpi-cap').textContent = capSent+'/'+cap;
+      const pct = Math.min(100, Math.round(capSent/cap*100));
+      const fill = $('wa-cap-fill');
+      fill.style.width = pct+'%';
+      fill.className = 'rpa-cap-fill' + (pct>=100?' full' : pct>=80?' warn' : '');
+    } else { capBox.style.display='none'; }
+    // alerts
+    const unacked = d.unacked_alerts||0;
+    const banner = $('wa-alert-banner');
+    if(unacked>0){
+      banner.classList.add('show');
+      $('wa-alert-count').textContent = unacked+' 条';
+    } else { banner.classList.remove('show'); }
+    // pending tab badge
+    const pendCnt = d.pending_count||0;
+    const pendBadge = $('wa-pending-badge');
+    if(pendCnt>0){
+      pendBadge.style.display=''; pendBadge.textContent = pendCnt;
+      pendBadge.className = 'cfg-badge warn';
+      rpa.markDirty('wa-tab-pending', true);
+    } else {
+      pendBadge.style.display='none'; pendBadge.textContent='';
+      rpa.markDirty('wa-tab-pending', false);
+    }
+    // Q3: 浏览器 title 角标
+    if(window.rpa && window.rpa.notify) window.rpa.notify.setBadge(pendCnt, 'WA 待审');
+    // P2-A: 健康检查 + P2-E: 运维统计
+    waRenderHealthBar();
+    waUpdateOpsStats(d);
+  }catch(e){ console.warn('wa status fail', e); }
+}
+
+/* ── 视图切换 ───────────────────────────────────────────── */
+let _waViewMode = sessionStorage.getItem('wa_view_mode') || 'conv';
+
+window.waSetViewMode = function(mode){
+  _waViewMode = mode;
+  sessionStorage.setItem('wa_view_mode', mode);
+  const convView = $('wa-conv-view'), logView = $('wa-log-view');
+  const btnConv = $('wa-vseg-conv'), btnLog = $('wa-vseg-log');
+  if(mode === 'conv'){
+    convView.style.display = ''; logView.style.display = 'none';
+    btnConv.classList.add('active'); btnLog.classList.remove('active');
+    waLoadConversations();
+  } else {
+    convView.style.display = 'none'; logView.style.display = '';
+    btnConv.classList.remove('active'); btnLog.classList.add('active');
+    waLoadRecent();
+  }
+};
+
+/* ── 对话视图 ───────────────────────────────────────────── */
+const _AVATAR_COLORS = [
+  'linear-gradient(135deg,#6366f1,#8b5cf6)',
+  'linear-gradient(135deg,#0ea5e9,#6366f1)',
+  'linear-gradient(135deg,#10b981,#0ea5e9)',
+  'linear-gradient(135deg,#f59e0b,#ef4444)',
+  'linear-gradient(135deg,#ec4899,#8b5cf6)',
+];
+let _waConvData = [];
+let _waConvFilter = 'all';
+let _waConvSort = 'time';      // P3-B: 当前排序方式（time / engage / unanswered）
+let _waExpandedKey = null;     // P2-D: 当前展开的 chat_key
+let _waPrevConvKeys = new Set(); // P2-D: 新对话检测
+
+window.waSetConvSort = function(s){
+  _waConvSort = s;
+  document.querySelectorAll('.wa-sort-chip').forEach(b =>
+    b.classList.toggle('active', b.dataset.s === s)
+  );
+  waRenderConversations();
+};
+
+function _avatarBg(name){
+  let h = 0;
+  for(let i=0;i<name.length;i++) h = (h*31 + name.charCodeAt(i)) & 0xffff;
+  return _AVATAR_COLORS[h % _AVATAR_COLORS.length];
+}
+function _initials(name){
+  if(!name) return '?';
+  const s = name.trim();
+  if(/[\u4e00-\u9fa5]/.test(s)) return s.slice(-2);
+  const parts = s.split(/\s+/);
+  if(parts.length >= 2) return (parts[0][0] + parts[parts.length-1][0]).toUpperCase();
+  return s.slice(0, 2).toUpperCase();
+}
+
+/* P1-C + P3-A: 互动热度（优先用 state_last_peer_ts，更准确） */
+function waEngagementLevel(conv){
+  const turns = Number(conv.total_turns)||0;
+  const now = Date.now()/1000;
+  // 优先用 chat_state 实际收到时间，降级为 run 表时间
+  const lastTs = Number(conv.state_last_peer_ts||conv.last_peer_ts||conv.ts)||0;
+  const hoursAgo = lastTs ? (now - lastTs)/3600 : 99;
+  const score = Math.min(100, turns*5 + (hoursAgo<1?40:hoursAgo<6?30:hoursAgo<24?20:hoursAgo<48?10:0));
+  return score>=70?'hot':score>=35?'active':score>=10?'dormant':'none';
+}
+
+async function waLoadConversations(){
+  try{
+    const d = await rpa.get('/api/whatsapp-rpa/conversations?limit=30&hours=48');
+    const incoming = d.conversations || [];
+    // P2-D: 新对话 Toast
+    if(_waPrevConvKeys.size > 0){
+      const novel = incoming.filter(c=>c.chat_key && !_waPrevConvKeys.has(c.chat_key));
+      if(novel.length) rpa.toast('✨ '+novel.length+' 个新对话', 'ok');
+    }
+    _waPrevConvKeys = new Set(incoming.map(c=>c.chat_key).filter(Boolean));
+    _waConvData = incoming;
+    waRenderConversations({restoreExpand:true});
+  }catch(e){
+    const list=$('wa-conv-list');
+    if(list) list.innerHTML='<div class="wa-conv-empty"><div class="wa-conv-empty-title" style="color:#f87171">加载失败</div><div class="wa-conv-empty-sub">'+rpa.esc(String(e))+'</div></div>';
+    console.warn('wa conversations fail',e);
+  }
+}
+
+/* P1-A + P2-C + P2-D: 渲染（搜索/过滤/热度/待回复/保持展开） */
+window.waRenderConversations = function(opts){
+  opts = opts||{};
+  const list = $('wa-conv-list');
+  if(!list) return;
+  const query = ($('wa-conv-search')?.value||'').toLowerCase().trim();
+  // P3-B: 排序
+  let data = [..._waConvData];
+  const now2 = Date.now()/1000;
+  if(_waConvSort==='engage'){
+    data.sort((a,b)=>{
+      const sa=Number(a.total_turns||0)*5+(now2-Number(a.state_last_peer_ts||a.last_peer_ts||a.ts||0))/3600*-1;
+      const sb=Number(b.total_turns||0)*5+(now2-Number(b.state_last_peer_ts||b.last_peer_ts||b.ts||0))/3600*-1;
+      return sb-sa;
+    });
+  } else if(_waConvSort==='unanswered'){
+    data.sort((a,b)=>{
+      const ua=a.state_last_peer && !a.state_last_reply?1:0;
+      const ub=b.state_last_peer && !b.state_last_reply?1:0;
+      if(ua!==ub) return ub-ua;
+      return Number(b.state_last_peer_ts||b.last_peer_ts||0)-Number(a.state_last_peer_ts||a.last_peer_ts||0);
+    });
+  }
+  // 过滤
+  const filtered = data.filter(c=>{
+    if(_waConvFilter==='ok' && !c.ok) return false;
+    if(_waConvFilter==='err' && c.ok) return false;
+    if(query){
+      const hay = ((c.peer_name||c.chat_key||'')+(c.persona_name||'')).toLowerCase();
+      if(!hay.includes(query)) return false;
+    }
+    return true;
+  });
+  const countEl=$('wa-conv-count');
+  if(countEl) countEl.textContent=(query||_waConvFilter!=='all')?filtered.length+'/'+_waConvData.length:'';
+  if(!filtered.length){
+    list.innerHTML = _waConvData.length
+      ? `<div class="wa-conv-empty"><div class="wa-conv-empty-icon">🔍</div><div class="wa-conv-empty-title">无匹配对话</div><div class="wa-conv-empty-sub">尝试清空搜索词或切换过滤</div></div>`
+      : `<div class="wa-conv-empty"><div class="wa-conv-empty-icon">💬</div><div class="wa-conv-empty-title">48 小时内无对话</div><div class="wa-conv-empty-sub">WhatsApp RPA 运行中，等待第一条消息</div></div>`;
+    return;
+  }
+  list.innerHTML = filtered.map(conv=>{
+    const name = conv.peer_name||conv.chat_key||'未知';
+    const engLvl = waEngagementLevel(conv);
+    const engDot = `<span class="wa-eng-dot wa-eng-${engLvl}" title="互动热度：${engLvl}"></span>`;
+    const personaChip = conv.persona_name?`<span class="wa-conv-persona-chip">🎭 ${rpa.esc(conv.persona_name)}</span>`:'';
+    // P3-A: 待回复检测（优先用时间比较：last_peer_ts > last_reply_ts，降级为文本比较）
+    const lpt = Number(conv.state_last_peer_ts)||0;
+    const lrt = Number(conv.state_last_reply_ts)||0;
+    const unanswered = lpt>0 ? lpt>lrt : (conv.state_last_peer && !conv.state_last_reply);
+    const unansweredChip = unanswered?'<span class="wa-conv-unanswered">⏳ 待回复</span>':'';
+    const timeStr = rpa.ago(conv.last_peer_ts||conv.ts);
+    const peer = (conv.peer_text||'').slice(0,90)||'（无预览）';
+    const replyRow = conv.reply_text?`<div class="wa-conv-reply">${rpa.esc((conv.reply_text||'').slice(0,90))}</div>`:'';
+    const errChip = !conv.ok?`<span class="wa-conv-err-chip">⚠ 上次失败</span>`:'';
+    const turns = Number(conv.total_turns)||0;
+    // P4-A: 亲密度进度条
+    const intimacy = conv.state_intimacy != null ? Number(conv.state_intimacy) : null;
+    const intBar = intimacy != null
+      ? `<div class="wa-intimacy-bar" title="亲密度 ${Math.round(intimacy)}">
+           <div class="wa-intimacy-fill ${intimacy>=70?'hi':intimacy>=35?'mid':'lo'}" style="width:${Math.min(100,intimacy)}%"></div>
+         </div>` : '';
+    // P3-A/P4-A: 语言徽章（锁定优先）
+    const _langMap={'zh-cn':'🇨🇳','en':'🇺🇸','de':'🇩🇪','ja':'🇯🇵','ko':'🇰🇷',
+      'fr':'🇫🇷','es':'🇪🇸','ar':'🇸🇦','ru':'🇷🇺','hi':'🇮🇳',
+      'it':'🇮🇹','pt':'🇧🇷','nl':'🇳🇱','pl':'🇵🇱','tr':'🇹🇷','cs':'🇨🇿','hu':'🇭🇺'};
+    const _fl = conv.state_forced_lang;
+    const _dl = conv.state_detected_lang;
+    const langBadge = _fl
+      ? `<span class="wa-lang-badge wa-lang-locked" title="语言已锁定: ${_fl}（运营手动设置）">🔒 ${_langMap[_fl]||'🌐'} ${_fl}</span>`
+      : (_dl ? `<span class="wa-lang-badge" title="检测到的语言: ${_dl}">${_langMap[_dl]||'🌐'} ${_dl}</span>` : '');
+    const ck = rpa.esc(conv.chat_key||'');
+    return `<div class="wa-conv-card" data-chat-key="${ck}">
+      <div class="wa-conv-avatar" style="background:${_avatarBg(name)}">${rpa.esc(_initials(name))}</div>
+      <div class="wa-conv-body">
+        <div class="wa-conv-top">
+          <span class="wa-conv-name">${rpa.esc(name)}</span>
+          ${personaChip}
+          ${engDot}
+          ${unansweredChip}
+          <span class="wa-conv-time">${rpa.esc(timeStr)}</span>
+        </div>
+        ${intBar}
+        <div class="wa-conv-msg">${rpa.esc(peer)}</div>
+        ${replyRow}
+        <div class="wa-conv-footer">
+          <span class="wa-conv-turns">💬 ${turns} 轮</span>
+          ${langBadge}
+          ${errChip}
+          <span class="wa-conv-expand-hint">▸ 展开</span>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('.wa-conv-card').forEach(card=>{
+    card.addEventListener('click', ()=>waToggleChatDetail(card));
+  });
+  // P2-D: 自动恢复展开状态（仅在数据刷新时，不在用户主动搜索时）
+  if(opts.restoreExpand && _waExpandedKey){
+    Array.from(list.querySelectorAll('.wa-conv-card')).forEach(card=>{
+      if(card.dataset.chatKey === _waExpandedKey){
+        card.classList.add('expanded');
+        const hint=card.querySelector('.wa-conv-expand-hint');
+        if(hint) hint.textContent='▾ 收起';
+        waToggleChatDetail(card, true);
+      }
+    });
+  }
+};
+
+/* P3-C: 复制消息按鈕 */
+window.waCopyMsg = function(btn, encoded){
+  const text = decodeURIComponent(encoded);
+  navigator.clipboard?.writeText(text).then(()=>{
+    btn.textContent='✓';
+    btn.classList.add('copied');
+    setTimeout(()=>{ btn.textContent='copy'; btn.classList.remove('copied'); }, 1500);
+  }).catch(()=>rpa.toast('复制失败','err'));
+};
+
+/* P1-B + P2-D + P6-C: 手风琴展开详情（noToggle=true 用于自动恢复） */
+async function waToggleChatDetail(card, noToggle){
+  if(!noToggle) card.classList.toggle('expanded');
+  const next = card.nextElementSibling;
+  if(!noToggle && next?.classList.contains('wa-conv-detail')){
+    next.remove();
+    const hint = card.querySelector('.wa-conv-expand-hint');
+    if(hint) hint.textContent='▸ 展开';
+    _waExpandedKey = null;
+    return;
+  }
+  const hint = card.querySelector('.wa-conv-expand-hint');
+  if(hint) hint.textContent='▾ 收起';
+  const chatKey = card.dataset.chatKey;
+  if(!chatKey) return;
+  _waExpandedKey = chatKey;
+  const pName = card.querySelector('.wa-conv-name')?.textContent?.trim()||'';
+
+  const detail = document.createElement('div');
+  detail.className='wa-conv-detail';
+  detail.dataset.chatKey = chatKey;
+  detail.dataset.peerName = pName;
+  detail.dataset.mode = 'summary';
+  detail.dataset.offset = '0';
+  detail.dataset.total = '0';
+  card.after(detail);
+
+  // Tabs
+  const tabs = document.createElement('div');
+  tabs.className='wa-detail-tabs';
+  tabs.innerHTML=`<button class="wa-detail-tab active" onclick="waDetailMode(this,'summary')">📋 摘要</button>
+    <button class="wa-detail-tab" onclick="waDetailMode(this,'full')">💬 全量</button>
+    <span class="wa-detail-total" id="wa-dt-total-${chatKey.replace(/[^a-z0-9]/gi,'_')}"></span>`;
+  detail.appendChild(tabs);
+
+  // Content pane
+  const pane = document.createElement('div');
+  pane.className='wa-detail-pane';
+  pane.innerHTML='<div class="wa-detail-empty">加载中…</div>';
+  detail.appendChild(pane);
+
+  // Send bar
+  const sendBar = document.createElement('div');
+  sendBar.className='wa-send-bar';
+  sendBar.innerHTML=`<textarea class="wa-send-inp" placeholder="手动发送消息到 ${rpa.esc(pName)}…" rows="1"></textarea>
+    <button class="wa-send-btn" onclick="waSendManual(this,'${rpa.esc(chatKey)}','${rpa.esc(pName)}')">&#9654; 入队</button>`;
+  detail.appendChild(sendBar);
+
+  // P3-D + P4-A: TTS 语言测试面板（含锁定/解锁）
+  const convData = _waConvData.find(c=>c.chat_key===chatKey);
+  const detectedLang = convData?.state_detected_lang || '';
+  const forcedLang  = convData?.state_forced_lang  || '';
+  const activeLang  = forcedLang || detectedLang;
+  const lastPeerText = (convData?.state_last_peer || convData?.peer_text || '').slice(0,200);
+  const ttsBar = document.createElement('div');
+  ttsBar.className = 'wa-tts-test-bar';
+  ttsBar.dataset.chatKey = chatKey;
+  const _mkOpt = (v,lbl) => `<option value="${v}"${activeLang===v?' selected':''}>${lbl}</option>`;
+  ttsBar.innerHTML = `
+    <div class="wa-tts-test-header">🔊 TTS 语言测试
+      ${forcedLang ? `<span class="wa-lang-locked-pill">🔒 已锁定 ${forcedLang}</span>` : ''}
+    </div>
+    <div class="wa-tts-test-row">
+      <select class="wa-tts-lang-sel" title="选择 TTS 语言">
+        <option value="">— 使用配置默认 —</option>
+        ${_mkOpt('zh-cn','🇨🇳 zh-cn 中文')}
+        ${_mkOpt('en','🇺🇸 en English')}
+        ${_mkOpt('de','🇩🇪 de Deutsch')}
+        ${_mkOpt('ja','🇯🇵 ja 日本語')}
+        ${_mkOpt('ko','🇰🇷 ko 한국어')}
+        ${_mkOpt('fr','🇫🇷 fr Français')}
+        ${_mkOpt('es','🇪🇸 es Español')}
+        ${_mkOpt('ar','🇸🇦 ar Arabic')}
+        ${_mkOpt('ru','🇷🇺 ru Русский')}
+        ${_mkOpt('hi','🇮🇳 hi Hindi')}
+        ${_mkOpt('it','🇮🇹 it Italiano')}
+        ${_mkOpt('pt','🇧🇷 pt Português')}
+        ${_mkOpt('tr','🇹🇷 tr Türkçe')}
+      </select>
+      <input type="text" class="wa-tts-text-inp" value="${rpa.esc(lastPeerText)}" placeholder="输入测试文字…" maxlength="400">
+      <button class="wa-tts-test-btn" onclick="waTtsTest(this)">▶ 试听</button>
+      <button class="wa-tts-lock-btn" onclick="waLangLock(this)" title="将选中语言锁定为此对话的固定语言">🔒 锁定</button>
+      ${forcedLang ? `<button class="wa-tts-unlock-btn" onclick="waLangUnlock(this)" title="恢复自动检测语言">🔓 解锁</button>` : ''}
+    </div>
+    <div class="wa-tts-test-result"></div>`;
+  detail.appendChild(ttsBar);
+
+  waInjectProfile(detail);  // P7-B: async, non-blocking
+  await waDetailLoadSummary(detail, pane);
+}
+
+async function waDetailLoadSummary(detail, pane){
+  const chatKey = detail.dataset.chatKey;
+  try{
+    const d = await rpa.get('/api/whatsapp-rpa/sessions/'+encodeURIComponent(chatKey));
+    const sessions = d.sessions||[];
+    const totalEl = document.getElementById('wa-dt-total-'+chatKey.replace(/[^a-z0-9]/gi,'_'));
+    if(sessions.length===0){
+      pane.innerHTML='<div class="wa-detail-empty">暂无历史会话记录</div>'; return;
+    }
+    if(totalEl) totalEl.textContent=sessions.length+'个会话';
+    pane.innerHTML=sessions.map(s=>{
+      const d1=rpa.fmtDate(s.start_ts), d2=rpa.fmtDate(s.end_ts);
+      const dateStr = d1===d2?d1:`${d1} — ${d2}`;
+      return `<div class="wa-session-card">
+        <div class="wa-session-head">
+          <span class="wa-session-date">${dateStr}</span>
+          ${_intentBadge(s.dominant_intent)}
+          <span class="wa-session-stat">${s.turn_count}轮 · ${s.ok_count}成功</span>
+        </div>
+        <div class="wa-session-msg">👤 ${rpa.esc(s.first_msg||'')}</div>
+        ${s.first_reply?`<div class="wa-session-reply">🤖 ${rpa.esc(s.first_reply)}</div>`:''}
+      </div>`;
+    }).join('');
+  }catch(e){
+    pane.innerHTML='<div class="wa-detail-empty" style="color:#f87171">摘要加载失败</div>';
+  }
+}
+
+async function waDetailLoadFull(detail, pane, append){
+  const chatKey = detail.dataset.chatKey;
+  const offset = append ? parseInt(detail.dataset.offset||'0') : 0;
+  const limit = 10;
+  try{
+    const d = await rpa.get('/api/whatsapp-rpa/chat-history?chat_key='+encodeURIComponent(chatKey)+'&limit='+limit+'&offset='+offset);
+    const hist = d.history||[];
+    const total = d.total||0;
+    detail.dataset.total = String(total);
+    detail.dataset.offset = String(offset + hist.length);
+    const totalEl = document.getElementById('wa-dt-total-'+chatKey.replace(/[^a-z0-9]/gi,'_'));
+    if(totalEl) totalEl.textContent='共'+total+'条';
+    if(!append) pane.innerHTML='';
+    else { const lb=pane.querySelector('.wa-load-more'); if(lb) lb.remove(); }
+    if(!hist.length && !append){
+      pane.innerHTML='<div class="wa-detail-empty">暂无历史消息记录</div>'; return;
+    }
+    const frag = hist.map(r=>{
+      const copyAi=r.reply_text?`<button class="wa-copy-btn" title="复制" onclick="waCopyMsg(this,'${encodeURIComponent(r.reply_text||'')}')">copy</button>`:'';
+      const badge=r.intent_tag&&r.intent_tag!=='general'?_intentBadge(r.intent_tag):'';
+      return `<div class="wa-detail-row">
+        ${r.peer_text?`<div><span class="wa-detail-bubble peer">${rpa.esc(r.peer_text.slice(0,300))}</span>${badge}</div>`:''}
+        ${r.reply_text?`<div style="text-align:right"><span class="wa-detail-bubble ai">${rpa.esc(r.reply_text.slice(0,300))}</span></div>`:''}
+        <div class="wa-detail-meta"><span>${rpa.ago(r.ts)}${r.total_ms?' · '+r.total_ms+'ms':''}</span>${copyAi}</div>
+      </div>`;
+    }).join('');
+    pane.insertAdjacentHTML('beforeend', frag);
+    const newOffset = parseInt(detail.dataset.offset||'0');
+    if(newOffset < total){
+      const lb=document.createElement('button');
+      lb.className='wa-load-more';
+      lb.textContent='加载更多（'+(total-newOffset)+'条未显示）';
+      lb.onclick=()=>waDetailLoadFull(detail, pane, true);
+      pane.appendChild(lb);
+    }
+  }catch(e){
+    if(!append) pane.innerHTML='<div class="wa-detail-empty" style="color:#f87171">历史记录加载失败</div>';
+  }
+}
+
+window.waDetailMode = async function(btn, mode){
+  const detail = btn.closest('.wa-conv-detail');
+  if(!detail) return;
+  detail.querySelectorAll('.wa-detail-tab').forEach(b=>b.classList.toggle('active',b===btn));
+  detail.dataset.mode = mode;
+  const pane = detail.querySelector('.wa-detail-pane');
+  if(!pane) return;
+  pane.innerHTML='<div class="wa-detail-empty">加载中…</div>';
+  if(mode==='summary') await waDetailLoadSummary(detail, pane);
+  else { detail.dataset.offset='0'; await waDetailLoadFull(detail, pane, false); }
+};
+
+/* P3-C: 复制消息按鈕 */
+window.waCopyMsg = function(btn, encoded){
+  const text = decodeURIComponent(encoded);
+  navigator.clipboard?.writeText(text).then(()=>{
+    btn.textContent='✓';
+    btn.classList.add('copied');
+    setTimeout(()=>{ btn.textContent='copy'; btn.classList.remove('copied'); }, 1500);
+  }).catch(()=>rpa.toast('复制失败','err'));
+};
+
+window.waFilterConv = function(f){
+  _waConvFilter = f;
+  ['all','ok','err'].forEach(x=>$('wa-filter-'+x)?.classList.toggle('active',x===f));
+  waRenderConversations();
+};
+
+/* P4-B: 手动入队发送 */
+window.waSendManual = async function(btn, chatKey, peerName){
+  const bar = btn.closest('.wa-send-bar');
+  const inp = bar?.querySelector('.wa-send-inp');
+  const text = (inp?.value||'').trim();
+  if(!text){ rpa.toast('请输入消息内容','warn'); return; }
+  btn.disabled = true;
+  try{
+    const r = await rpa.post('/api/whatsapp-rpa/send-manual',{chat_key:chatKey,peer_name:peerName,text});
+    if(r.ok){
+      rpa.toast('✅ 已入队，RPA 下轮将优先发送');
+      inp.value='';
+    } else {
+      rpa.toast('入队失败: '+(r.error||JSON.stringify(r)),'err');
+    }
+  }catch(ex){
+    rpa.toast('请求失败: '+String(ex),'err');
+  } finally { btn.disabled=false; }
+};
+
+/* ── 动态人设横幅 ──────────────────────────────────────── */
+async function waLoadPersonaBar(){
+  const bar = $('wa-persona-bar');
+  if(!bar) return;
+  try{
+    const d = await rpa.get('/api/personas/status');
+    const accts = d.wa_accounts || [];
+    if(!accts.length){
+      bar.innerHTML = '<span class="wa-persona-bar-lbl">🎭 账号人设</span>'
+        + '<span style="font-size:.78rem;color:var(--t3)">未配置（前往'
+        + ' <a href="/personas" style="color:var(--p)">人设工作室</a> 绑定）</span>';
+      return;
+    }
+    const chips = accts.map(a=>{
+      const pname = a.persona_name || (a.persona_ids||[])[0] || '未绑定';
+      return `<span class="wa-persona-acct"><strong>${rpa.esc(a.label||a.account_id)}</strong>`
+           + ` → ${rpa.esc(pname)}</span>`;
+    }).join('');
+    bar.innerHTML = `<span class="wa-persona-bar-lbl">🎭 账号人设</span>${chips}`
+      + `<div class="wa-persona-bar-links">`
+      + `<a href="/personas#${(accts[0]?.persona_ids||[])[0]||''}">切换人设</a>`
+      + `<a href="/ai-studio">AI Studio</a></div>`;
+  }catch(e){ /* silent */ }
+}
+
+/* ── 会话流水（日志视图） ───────────────────────────────── */
+async function waLoadRecent(){
+  try{
+    const only = $('wa-only-peer').checked ? 1 : 0;
+    const d = await rpa.get('/api/whatsapp-rpa/recent?limit=50&only_with_peer='+only);
+    const stream = $('wa-stream');
+    const rows = d.runs||[];
+    if(!rows.length){
+      stream.innerHTML = '<div class="wa-stream-empty">暂无运行记录</div>';
+      return;
+    }
+    stream.innerHTML = rows.map(run=>{
+      const cls = run.ok ? 'ok' : (String(run.step||'').startsWith('skip') ? 'skip' : 'err');
+      const step = run.step||'';
+      const chat = (run.chat_key||'').replace(/^wa:/, '');
+      const peer = run.peer_text ? `<div class="rpa-stream-peer">${rpa.esc(run.peer_text.slice(0,200))}</div>` : '';
+      const reply = run.reply_text ? `<div class="rpa-stream-reply">${rpa.esc(run.reply_text.slice(0,200))}</div>` : '';
+      const err = run.error ? `<div class="rpa-stream-err">⚠ ${rpa.esc(run.error.slice(0,200))}</div>` : '';
+      return `<div class="rpa-stream-row ${cls}">
+        <div class="rpa-stream-meta">
+          <span class="rpa-stream-step">${rpa.esc(step)}</span>
+          <span>${rpa.esc(chat.slice(0,40))}</span>
+          <span class="rpa-stream-time">${rpa.ago(run.ts)} · ${run.total_ms||0}ms</span>
+        </div>${peer}${reply}${err}
+      </div>`;
+    }).join('');
+  }catch(e){ console.warn('wa recent fail', e); }
+}
+
+/* ── 待审批 ─────────────────────────────────────────────── */
+// P16-B: localStorage draft helpers
+function _waDraftKey(id){ return 'wa-pend-draft-'+id; }
+function waSaveDraft(id){
+  const ta=$('wa-pend-edit-'+id);
+  if(!ta) return;
+  const v=ta.value;
+  if(v) localStorage.setItem(_waDraftKey(id), v);
+  else localStorage.removeItem(_waDraftKey(id));
+  // P18-A: show save indicator briefly
+  const ind=$('wa-draft-ind-'+id);
+  if(ind){ ind.style.opacity='1'; setTimeout(()=>{ ind.style.opacity='0'; }, 1200); }
+}
+function waLoadDraft(id){ return localStorage.getItem(_waDraftKey(id))||''; }
+function waCleanupDrafts(ids){ if(ids) ids.forEach(id=>localStorage.removeItem(_waDraftKey(id))); }
+
+async function waLoadPending(){
+  try{
+    const d = await rpa.get('/api/whatsapp-rpa/pending?status=pending&limit=20');
+    const list = $('wa-pending-list');
+    const items = d.items||[];
+    if(!items.length){
+      list.innerHTML = `<div class="rpa-empty">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        <div>暂无待审批回复</div>
+      </div>`;
+      return;
+    }
+    list.innerHTML = items.map(p=>{
+      const ttsSlotId = `wa-tts-slot-${p.id}`;
+      // P20-A: TTS error type display
+      const _ttsErr = p.tts_path && p.tts_path.startsWith('ERROR') ? p.tts_path : '';
+      const _errMap = {
+        'ERROR:timeout': {icon:'⏱', text:'TTS 超时'},
+        'ERROR:disk': {icon:'💾', text:'磁盘错误'},
+        'ERROR:model': {icon:'🤖', text:'模型错误'},
+        'ERROR:unknown': {icon:'⚠️', text:'TTS 生成失败'},
+        'ERROR': {icon:'⚠️', text:'TTS 生成失败'}
+      };
+      const _errInfo = _errMap[_ttsErr] || _errMap['ERROR'];
+      const ttsHtml = _ttsErr
+        ? `<div id="${ttsSlotId}" style="margin:.3rem 0;font-size:.7rem;color:#dc2626;font-weight:600">${_errInfo.icon} ${_errInfo.text} <button onclick="waRetryTts(${p.id})" style="margin-left:.4rem;font-size:.68rem;padding:.1rem .35rem;cursor:pointer">↻ 重试</button></div>`
+        : p.tts_path
+          ? `<div id="${ttsSlotId}" style="margin:.3rem 0"><span style="font-size:.7rem;color:var(--t3)">🎤 TTS 预览</span> <audio controls preload="none" style="height:26px;vertical-align:middle;max-width:200px" src="${rpa.esc(p.tts_path)}"></audio></div>`
+          : `<div id="${ttsSlotId}" style="margin:.3rem 0;font-size:.7rem;color:var(--t2)">⏳ TTS 生成中…</div>`;
+      return `<div class="rpa-pend" data-pid="${p.id}">
+        <div class="rpa-pend-head">
+          <input type="checkbox" class="rpa-bulk-pick" data-pid="${p.id}" title="勾选用于批量审批">
+          <div class="rpa-pend-name">${rpa.esc(p.peer_name || p.chat_key)}</div>
+          <span class="rpa-pend-status pending">待审 · ${rpa.ago(p.ts)}</span>
+        </div>
+        <div class="rpa-pend-peer">${rpa.esc(p.peer_text||'')}</div>
+        ${ttsHtml}
+        <div style="position:relative"><textarea class="rpa-pend-editor" id="wa-pend-edit-${p.id}" placeholder="可编辑后再发送" oninput="waSaveDraft(${p.id})" onblur="waSaveDraft(${p.id})">${rpa.esc(waLoadDraft(p.id)||p.proposed_reply||'')}</textarea><span id="wa-draft-ind-${p.id}" style="position:absolute;right:4px;bottom:4px;width:6px;height:6px;border-radius:50%;background:#22c55e;opacity:0;transition:opacity .2s" title="已自动保存"></span></div>
+        <div class="rpa-pend-actions">
+          <button class="btn-p" style="font-size:.75rem;padding:.35rem .8rem" onclick="waResolvePending(${p.id},'approve')">✓ 发送</button>
+          <button class="btn-sec" style="font-size:.75rem;padding:.35rem .8rem" onclick="waResolvePending(${p.id},'reject')">✗ 拒绝</button>
+        </div>
+      </div>`;
+    }).join('');
+    // P14-A: TTS 轮询（与 LINE 对称）
+    _waStartTtsPoll(items);
+    // Q1+Q2: 通知 bulk 重新渲染了 pending 列表
+    if(window.rpa && window.rpa.bulk) window.rpa.bulk.onPendingRendered();
+  }catch(e){ console.warn('wa pending fail', e); }
+}
+
+// P14-A/P17-A: WA TTS 预览轮询（带进度指示）
+let _waTtsPollTimer = null;
+let _waPollStartTs = 0;
+function _waStartTtsPoll(items) {
+  if (_waTtsPollTimer) { clearTimeout(_waTtsPollTimer); _waTtsPollTimer = null; }
+  const missing = (items||[]).filter(p => p.status==='pending' && !p.tts_path && p.tts_path!=='ERROR').map(p=>p.id);
+  if (!missing.length) return;
+  _waPollStartTs = Date.now();
+  let delay = 3000, rounds = 0;
+  const MAX_ROUNDS = 8;
+  function _updateProgress() {
+    const elapsed = Math.floor((Date.now() - _waPollStartTs)/1000);
+    missing.forEach(pid => {
+      const el = document.getElementById(`wa-tts-slot-${pid}`);
+      if (el && el.innerHTML.includes('TTS 生成中')) {
+        el.innerHTML = `<span style="font-size:.7rem;color:var(--t2)">⏳ TTS 生成中… (${elapsed}s)</span>`;
+      }
+    });
+  }
+  async function poll() {
+    _waTtsPollTimer = null;
+    const stillMissing = missing.filter(pid => {
+      const el = document.getElementById(`wa-tts-slot-${pid}`);
+      return el && !el.innerHTML.includes('TTS 预览') && !el.innerHTML.includes('生成失败');
+    });
+    if (!stillMissing.length || rounds >= MAX_ROUNDS) return;
+    rounds++;
+    _updateProgress();
+    try {
+      const r = await fetch('/api/whatsapp-rpa/pending-tts?ids=' + stillMissing.join(','));
+      if (!r.ok) return;
+      const d = await r.json();
+      Object.entries(d.paths||{}).forEach(([pid, ttsPath]) => {
+        if (!ttsPath) return;
+        const el = document.getElementById(`wa-tts-slot-${pid}`);
+        if (el && !el.innerHTML.includes('TTS 预览')) {
+          // P20-A: handle ERROR:type format
+          if (ttsPath === 'ERROR' || (typeof ttsPath === 'string' && ttsPath.startsWith('ERROR'))) {
+            const errMap = {'ERROR:timeout':'⏱ TTS 超时','ERROR:disk':'💾 磁盘错误','ERROR:model':'🤖 模型错误','ERROR:unknown':'⚠️ TTS 失败','ERROR':'⚠️ TTS 失败'};
+            const errText = errMap[ttsPath] || '⚠️ TTS 失败';
+            el.innerHTML = `<span style="font-size:.7rem;color:#dc2626;font-weight:600">${errText}</span> <button onclick="waRetryTts(${pid})" style="font-size:.68rem;padding:.1rem .35rem;cursor:pointer">↻ 重试</button>`;
+          } else {
+            el.innerHTML = `<span style="font-size:.7rem;color:var(--t3)">🎤 TTS 预览</span> <audio controls preload="none" style="height:26px;vertical-align:middle;max-width:200px" src="${ttsPath}"></audio>`;
+          }
+        }
+      });
+    } catch(_){}
+    delay = Math.min(delay * 2, 30000);
+    const remaining = missing.filter(pid => { const el = document.getElementById(`wa-tts-slot-${pid}`); return el && !el.innerHTML.includes('TTS 预览') && !el.innerHTML.includes('生成失败'); });
+    if (remaining.length && rounds < MAX_ROUNDS) _waTtsPollTimer = setTimeout(poll, delay);
+  }
+  _waTtsPollTimer = setTimeout(poll, delay);
+}
+
+// P14-C: WA TTS 重试
+window.waRetryTts = async function(pid) {
+  const r = await rpa.post(`/api/whatsapp-rpa/pending/${pid}/retry-tts`, {});
+  if (r.ok) {
+    const el = document.getElementById(`wa-tts-slot-${pid}`);
+    if (el) el.innerHTML = '<span style="font-size:.7rem;color:var(--t2)">已重置，等待下一轮生成…</span>';
+    setTimeout(waLoadPending, 8000);
+  } else { rpa.toast('TTS 重试失败: '+(r.error||''), 'err'); }
+};
+
+window.waResolvePending = async function(id, action){
+  const editor = $('wa-pend-edit-'+id);
+  const body = action==='approve' && editor ? {action, text: editor.value} : {action};
+  const r = await rpa.post('/api/whatsapp-rpa/pending/'+id+'/resolve', body);
+  if(r.ok){ rpa.toast(action==='approve'?'已发送':'已拒绝', 'ok'); waCleanupDrafts([id]); }
+  else { rpa.toast('操作失败', 'err'); }
+  waLoadPending(); waLoadStatus();
+};
+
+window.waCancelAllPending = async function(){
+  if (!confirm('确认清空所有待审批条目？此操作不可撤销。')) return;
+  const r = await rpa.post('/api/whatsapp-rpa/pending/cancel-all', {});
+  if (r.ok) rpa.toast(`已取消 ${r.cancelled||0} 条待审`, 'ok');
+  else rpa.toast('操作失败', 'err');
+  waLoadPending(); waLoadStatus();
+};
+
+window.waAckAll = async function(){
+  const r = await rpa.post('/api/whatsapp-rpa/alerts/ack_all', {});
+  rpa.toast(r.ok?'告警已确认':'确认失败', r.ok?'ok':'err');
+  waLoadStatus();
+};
+
+// P17-B/P18-B: Ctrl+Enter 批量批准, Ctrl+Shift+Enter 批量拒绝
+document.addEventListener('keydown', e => {
+  if (!e.ctrlKey || !window.rpa || !window.rpa.bulk) return;
+  const sel = window.rpa.bulk.getSelected ? window.rpa.bulk.getSelected() : [];
+  if (sel.length === 0) return;
+  if (e.key === 'Enter') {
+    if (e.shiftKey) {
+      e.preventDefault();
+      if(confirm(`确认批量拒绝 ${sel.length} 条?`)) window.rpa.bulk.rejectSelected();
+    } else {
+      e.preventDefault();
+      window.rpa.bulk.approveSelected();
+    }
+  }
+});
+
+/* ── 控制按钮 ──────────────────────────────────────────── */
+$('wa-btn-trigger').onclick = async ()=>{
+  const r = await rpa.post('/api/whatsapp-rpa/trigger', {});
+  rpa.toast(r.ok ? '已触发' : '触发失败', r.ok?'ok':'err');
+  setTimeout(waLoadStatus, 500);
+};
+$('wa-btn-pause').onclick = async ()=>{
+  const r = await rpa.post('/api/whatsapp-rpa/pause', {seconds: 300});
+  rpa.toast(r.ok ? '已暂停 5 分钟' : '暂停失败', r.ok?'ok':'err');
+  waLoadStatus();
+};
+$('wa-btn-resume').onclick = async ()=>{
+  const r = await rpa.post('/api/whatsapp-rpa/resume', {});
+  rpa.toast(r.ok ? '已恢复' : '恢复失败', r.ok?'ok':'err');
+  waLoadStatus();
+};
+
+/* ── 设备快捷操作 ──────────────────────────────────────── */
+$('wa-btn-accept').addEventListener('click', async ()=>{
+  const btn = $('wa-btn-accept'), msg = $('wa-device-msg');
+  btn.disabled = true; msg.textContent = '正在查找联系人申请按钮…'; msg.style.color = 'var(--t2)';
+  try{
+    const r = await rpa.post('/api/whatsapp-rpa/accept-contacts', {});
+    const d = await r.json(); const res = d.result||{};
+    if(res.skipped){ msg.textContent = '未找到接受按钮（'+res.reason+'）'; msg.style.color = 'var(--t3)'; }
+    else if(res.error){ msg.textContent = '出错：'+res.error; msg.style.color = '#dc2626'; }
+    else { msg.textContent = '✓ 已点击 '+res.tapped+' 个接受按钮'; msg.style.color = '#16a34a'; }
+  }catch(e){ msg.textContent = '请求失败：'+e; msg.style.color = '#dc2626'; }
+  btn.disabled = false;
+});
+
+$('wa-btn-screenshot').addEventListener('click', async ()=>{
+  const btn = $('wa-btn-screenshot'), msg = $('wa-device-msg'), wrap = $('wa-screenshot-wrap'), img = $('wa-screenshot-img');
+  btn.disabled = true; wrap.style.display = 'none'; msg.textContent = '截屏中…'; msg.style.color = 'var(--t2)';
+  try{
+    const r = await fetch('/api/whatsapp-rpa/device-screenshot?_='+Date.now());
+    if(!r.ok) throw new Error(await r.text());
+    img.src = URL.createObjectURL(await r.blob());
+    img.style.maxWidth = '100%'; wrap.style.display = '';
+    msg.textContent = '✓ 截屏成功（'+new Date().toLocaleTimeString()+'）'; msg.style.color = '#16a34a';
+  }catch(e){
+    msg.innerHTML = '截屏失败：'+rpa.esc(e)+' <button class="btn-sec" type="button" style="margin-left:.35rem;font-size:.75rem" onclick="document.getElementById(\'wa-btn-screenshot\').click()">重试</button>';
+    msg.style.color = '#dc2626';
+  }
+  btn.disabled = false;
+});
+
+/* ── 预设方案 ───────────────────────────────────────────── */
+const WA_PRESETS = {
+  companion: { 'service':{'interval_sec':12,'fast_interval_sec':4,'slow_interval_sec':20}, 'human_pacing':{'enabled':true,'read_pause_ms':[1200,2500],'inter_msg_ms':[900,2000]} },
+  service:   { 'service':{'interval_sec':10,'fast_interval_sec':3,'slow_interval_sec':25}, 'human_pacing':{'enabled':true,'read_pause_ms':[500,1200],'inter_msg_ms':[500,1000]} },
+  fast:      { 'service':{'interval_sec':5, 'fast_interval_sec':2,'slow_interval_sec':15}, 'human_pacing':{'enabled':false} },
+  gentle:    { 'service':{'interval_sec':30,'fast_interval_sec':10,'slow_interval_sec':60},'human_pacing':{'enabled':true,'read_pause_ms':[2000,4000],'inter_msg_ms':[1500,3000]} },
+};
+window.waApplyPreset = async function(name){
+  document.getElementById('wa-preset-pop').classList.remove('open');
+  const p = WA_PRESETS[name]; if(!p) return;
+  const r = await rpa.put('/api/whatsapp-rpa/config', p);
+  if(r.ok){
+    rpa.toast('预设「'+name+'」已应用', 'ok');
+    waLoadCfg();
+  } else {
+    rpa.toast('应用预设失败', 'err');
+  }
+};
+
+/* ── P1-D: 配置脏检测 ──────────────────────────────────── */
+function waMarkSettingsDirty(dirty){
+  const banner=$('wa-unsaved-banner');
+  if(banner) banner.classList.toggle('show',!!dirty);
+  if(window.rpa) rpa.markDirty('wa-tab-settings',!!dirty);
+}
+
+/* ── 配置读取 ───────────────────────────────────────────── */
+async function waLoadCfg(){
+  try{
+    const d = await rpa.get('/api/whatsapp-rpa/config');
+    const e = d.effective||{};
+    $('cfg-wa-enabled').checked = !!e.enabled;
+    $('cfg-wa-biz').checked = !!e.use_business_app;
+    $('cfg-wa-lang').value = e.default_reply_lang||'zh';
+    $('cfg-wa-daily-cap').value = Number(e.daily_cap||0);
+    const mode = e.reply_mode||'auto';
+    $('cfg-wa-reply-mode').value = mode;
+    document.querySelectorAll('#wa-reply-mode-cards .tr-card').forEach(c=>{
+      c.classList.toggle('selected', c.dataset.val === mode);
+    });
+    const aa = e.auto_accept||{};
+    $('cfg-wa-auto-accept').checked = !!aa.enabled;
+    const svc = e.service||{};
+    $('cfg-wa-interval').value = Number(svc.interval_sec||15);
+    $('cfg-wa-fast').value = Number(svc.fast_interval_sec||4);
+    $('cfg-wa-slow').value = Number(svc.slow_interval_sec||30);
+    $('cfg-wa-slow-after').value = Number(svc.slow_after_empty||6);
+    const hp = e.human_pacing||{};
+    $('cfg-wa-pacing-on').checked = hp.enabled !== false;
+    $('cfg-wa-split').value = hp.split_strategy||'sentence';
+    $('cfg-wa-split-chars').value = Number(hp.split_max_chars||80);
+    $('cfg-wa-split-parts').value = Number(hp.split_max_parts||3);
+    const rp = hp.read_pause_ms||[800,2000];
+    $('cfg-wa-read-lo').value = rp[0]||800;
+    $('cfg-wa-read-hi').value = rp[1]||2000;
+    const im = hp.inter_msg_ms||[700,1800];
+    $('cfg-wa-inter-lo').value = im[0]||700;
+    $('cfg-wa-inter-hi').value = im[1]||1800;
+    // 语音功能
+    const vi = e.voice_input||{};
+    $('cfg-wa-voice-in').checked = !!vi.enabled;
+    const vo = e.voice_output||{};
+    $('cfg-wa-voice-out').checked = !!vo.enabled;
+    $('cfg-wa-voice-mode').value = vo.mode||'approval_only';
+    $('cfg-wa-voice-trigger').value = vo.trigger||'when_peer_voice';
+    $('cfg-wa-voice-maxchars').value = Number(vo.max_text_chars||220);
+    $('cfg-wa-voice-maxsec').value = Number(vo.max_seconds||20);
+    $('wa-voice-out-opts').style.display = vo.enabled ? '' : 'none';
+    const mi = e.media_input||{};
+    $('cfg-wa-media-enabled').checked = !!mi.enabled;
+    $('cfg-wa-media-vision').checked = mi.use_vision !== false;
+    $('cfg-wa-media-padding').value = Number(mi.crop_padding||24);
+    $('cfg-wa-media-timeout').value = Number(mi.timeout_sec||30);
+    // 表情控制配置
+    const emo = e.emoticons||{};
+    const nat = emo.naturalization||{};
+    $('cfg-wa-emoticons-enabled').checked = nat.enabled !== false;
+    // 概率 0-1 转百分比 0-100
+    const skipProb = nat.skip_emoticon_pass_probability || 0.32;
+    $('cfg-wa-emoticons-skip').value = Math.round(skipProb * 100);
+    $('cfg-wa-emoticons-max-consec').value = nat.max_consecutive_decorated || 2;
+    // 时长显示
+    updateDur('cfg-wa-interval','cfg-wa-interval-dur');
+    updateDur('cfg-wa-fast','cfg-wa-fast-dur');
+    updateDur('cfg-wa-slow','cfg-wa-slow-dur');
+    waMarkSettingsDirty(false);
+  }catch(e){ console.warn('wa cfg fail', e); }
+}
+
+/* ── 配置保存 ───────────────────────────────────────────── */
+$('wa-cfg-save').addEventListener('click', async ()=>{
+  const msg = $('wa-cfg-msg');
+  msg.textContent = '保存中…'; msg.className = 'save-res';
+  // 前置校验
+  const capVal = Number($('cfg-wa-daily-cap').value)||0;
+  const skipVal = Number($('cfg-wa-emoticons-skip').value)||0;
+  const consecVal = Number($('cfg-wa-emoticons-max-consec').value)||0;
+  if(capVal < 0){ msg.textContent='日上限需>=0'; msg.className='save-res err'; rpa.toast('日上限需>=0','err'); return; }
+  if(skipVal < 0 || skipVal > 100){ msg.textContent='表情跳过概率需 0-100'; msg.className='save-res err'; rpa.toast('表情跳过概率需 0-100','err'); return; }
+  if(consecVal < 1){ msg.textContent='最大连续表情需>=1'; msg.className='save-res err'; rpa.toast('最大连续表情需>=1','err'); return; }
+  const payload = {
+    enabled: $('cfg-wa-enabled').checked,
+    use_business_app: $('cfg-wa-biz').checked,
+    default_reply_lang: $('cfg-wa-lang').value.trim()||'zh',
+    daily_cap: capVal,
+    reply_mode: $('cfg-wa-reply-mode').value||'auto',
+    auto_accept: { enabled: $('cfg-wa-auto-accept').checked },
+    service: {
+      interval_sec: Number($('cfg-wa-interval').value)||15,
+      fast_interval_sec: Number($('cfg-wa-fast').value)||4,
+      slow_interval_sec: Number($('cfg-wa-slow').value)||30,
+      slow_after_empty: Number($('cfg-wa-slow-after').value)||6,
+    },
+    human_pacing: {
+      enabled: $('cfg-wa-pacing-on').checked,
+      split_strategy: $('cfg-wa-split').value,
+      split_max_chars: Number($('cfg-wa-split-chars').value)||80,
+      split_max_parts: Number($('cfg-wa-split-parts').value)||3,
+      read_pause_ms: [Number($('cfg-wa-read-lo').value)||800, Number($('cfg-wa-read-hi').value)||2000],
+      inter_msg_ms: [Number($('cfg-wa-inter-lo').value)||700, Number($('cfg-wa-inter-hi').value)||1800],
+    },
+    voice_input: { enabled: $('cfg-wa-voice-in').checked },
+    voice_output: {
+      enabled: $('cfg-wa-voice-out').checked,
+      mode: $('cfg-wa-voice-mode').value||'approval_only',
+      trigger: $('cfg-wa-voice-trigger').value||'when_peer_voice',
+      max_text_chars: Number($('cfg-wa-voice-maxchars').value)||220,
+      max_seconds: Number($('cfg-wa-voice-maxsec').value)||20,
+    },
+    media_input: {
+      enabled: $('cfg-wa-media-enabled').checked,
+      use_vision: $('cfg-wa-media-vision').checked,
+      crop_padding: Number($('cfg-wa-media-padding').value)||24,
+      timeout_sec: Number($('cfg-wa-media-timeout').value)||30,
+    },
+    emoticons: {
+      naturalization: {
+        enabled: $('cfg-wa-emoticons-enabled').checked,
+        skip_emoticon_pass_probability: skipVal / 100,
+        max_consecutive_decorated: consecVal || 2,
+      }
+    },
+  };
+  try{
+    const r = await rpa.put('/api/whatsapp-rpa/config', payload);
+    if(!r.ok){
+      let err='未知错误';
+      try{
+        const data = await r.json();
+        err = data.error || data.msg || data.detail || ('HTTP '+r.status);
+      }catch(_){
+        try{ err = await r.text(); }catch(__){ err = 'HTTP '+r.status; }
+      }
+      msg.textContent = '保存失败：'+err;
+      msg.className = 'save-res err';
+      rpa.toast(err,'err');
+      return;
+    }
+    msg.textContent = '✓ 已保存';
+    msg.className = 'save-res ok';
+    rpa.toast('配置已保存', 'ok');
+    waMarkSettingsDirty(false);
+    waLoadStatus(); waLoadCfg();
+    setTimeout(()=>{ msg.textContent=''; msg.className='save-res'; }, 3000);
+  }catch(e){
+    msg.textContent = '保存失败：'+e.message;
+    msg.className = 'save-res err';
+  }
+});
+
+/* ── 语音选项联动 ──────────────────────────────────────── */
+$('cfg-wa-voice-out').addEventListener('change', function(){
+  $('wa-voice-out-opts').style.display = this.checked ? '' : 'none';
+  rpa.markDirty('wa-tab-settings');
+});
+
+/* ── 语音管道统计 ──────────────────────────────────────── */
+window.waLoadVoiceMetrics = async function(){
+  try{
+    const r = await fetch('/api/whatsapp-rpa/voice-metrics');
+    const d = await r.json();
+    if(!d.ok||!d.metrics) return;
+    const m = d.metrics;
+    const total = m.stt_attempts + m.tts_attempts;
+    if(total === 0) return;  // 无数据不显示
+    const wrap = $('wa-voice-metrics');
+    wrap.style.display = '';
+    const parts = [];
+    if(m.stt_attempts) parts.push(`STT: ${m.stt_ok}/${m.stt_attempts} 成功`);
+    if(m.stt_fallback_used) parts.push(`备用ASR: ${m.stt_fallback_used}`);
+    if(m.stt_placeholder) parts.push(`占位: ${m.stt_placeholder}`);
+    if(m.stt_batch_multi) parts.push(`多条批量: ${m.stt_batch_multi}`);
+    if(m.tts_attempts) parts.push(`TTS: ${m.tts_ok}/${m.tts_attempts} 成功`);
+    if(m.tts_sent) parts.push(`已发送: ${m.tts_sent}`);
+    if(m.tts_send_fail) parts.push(`发送失败: ${m.tts_send_fail}`);
+    $('wa-vm-txt').textContent = parts.join(' · ') || '暂无';
+  }catch(e){ /* silent */ }
+};
+
+// 媒体管道统计（防止未定义导致控制台报错）
+window.waLoadMediaMetrics = async function(){
+  try{
+    const r = await fetch('/api/whatsapp-rpa/media-metrics');
+    const d = await r.json();
+    if(!d.ok || !d.metrics) return;
+    const m = d.metrics;
+    const total = (m.visions||0) + (m.visions_fail||0) + (m.placeholders||0);
+    if(total === 0) return;
+    const wrap = $('wa-media-metrics');
+    wrap.style.display = '';
+    const parts = [];
+    if(m.visions) parts.push(`Vision 成功: ${m.visions}`);
+    if(m.visions_fail) parts.push(`Vision 失败: ${m.visions_fail}`);
+    if(m.placeholders) parts.push(`占位描述: ${m.placeholders}`);
+    $('wa-mm-txt').textContent = parts.join(' · ') || '暂无';
+  }catch(e){ /* silent */ }
+};
+
+/* ── 日志流 ─────────────────────────────────────────────── */
+window.waLoadLogTail = async function(){
+  const wrap = $('wa-log-tail');
+  if(!wrap) return;
+  $('wa-log-live-dot').style.display = '';
+  try{
+    const r = await fetch('/api/whatsapp-rpa/log-tail?n=80');
+    const txt = await r.text();
+    if(!txt.trim()){
+      wrap.innerHTML = '<div class="log-empty">暂无 WhatsApp RPA 日志</div>';
+      return;
+    }
+    wrap.innerHTML = txt.split('\n').filter(Boolean).map(l=>{
+      let kind = 'INFO';
+      if(/error|fail|exception/i.test(l)) kind = 'ERROR';
+      else if(/warn/i.test(l)) kind = 'WARNING';
+      else if(/\bok\b|sent|success/i.test(l)) kind = 'OK';
+      // 提取时间戳前缀（如 "[2026-05-18 04:58:25]"）
+      const m = l.match(/^(\[?\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}\]?)\s*(.*)$/);
+      if(m){
+        return `<div class="log-line ${kind}"><span class="log-ts">${rpa.esc(m[1])}</span><span class="log-msg">${rpa.esc(m[2])}</span></div>`;
+      }
+      return `<div class="log-line ${kind}"><span class="log-msg">${rpa.esc(l)}</span></div>`;
+    }).join('');
+    wrap.scrollTop = wrap.scrollHeight;
+  }catch(e){
+    wrap.innerHTML = '<div class="log-empty" style="color:#dc2626">日志加载失败 <button class="btn-sec" onclick="waLoadLogTail()" style="margin-left:.4rem;font-size:.75rem">重试</button></div>';
+  } finally {
+    $('wa-log-live-dot').style.display = 'none';
+  }
+};
+
+/* ── P5-2: 手动发送队列面板 ─────────────────────────────────── */
+const _SQ_STATUS_LABELS = {
+  queued:'⏳ 排队', processing:'⚙️ 处理中',
+  sent:'✅ 已发', failed:'❌ 失败', cancelled:'🚫 已取消',
+};
+async function waLoadSendQueue(){
+  const list = $('wa-send-queue-list');
+  if(!list) return;
+  try{
+    const d = await rpa.get('/api/whatsapp-rpa/send-queue?include_done=1&limit=20');
+    const items = d.queue||[];
+    if(!items.length){
+      list.innerHTML='<div style="padding:.55rem 1rem;font-size:.78rem;color:var(--t3)">暂无队列记录</div>';
+      return;
+    }
+    list.innerHTML='<div class="wa-sq-list">'+items.map(it=>{
+      const lbl = _SQ_STATUS_LABELS[it.status]||it.status;
+      const cancelBtn = it.status==='queued'?`<button class="wa-sq-cancel" onclick="waCancelSendQueue(${it.id})">取消</button>`:'<span></span>';
+      return `<div class="wa-sq-row">
+        <span class="wa-sq-status wa-sq-${it.status}">${lbl}</span>
+        <span class="wa-sq-peer">${rpa.esc(it.peer_name||it.chat_key||'')}</span>
+        <span class="wa-sq-txt">${rpa.esc((it.text||'').slice(0,60))}</span>
+        <span class="wa-sq-time">${rpa.ago(it.sent_at||it.ts)}</span>
+        ${cancelBtn}
+        ${it.error&&it.error!=='recovered_on_startup'?`<div class="wa-sq-err">⚠ ${rpa.esc(it.error)}</div>`:''}
+      </div>`;
+    }).join('')+'</div>';
+  }catch(e){
+    list.innerHTML='<div style="padding:.55rem 1rem;font-size:.78rem;color:#f87171">加载失败 <button class="btn-sec" type="button" style="margin-left:.35rem;font-size:.75rem" onclick="waLoadSendQueue()">重试</button></div>';
+  }
+}
+
+window.waCancelSendQueue = async function(id){
+  try{
+    await rpa.post('/api/whatsapp-rpa/send-queue/'+id+'/cancel',{});
+    rpa.toast('已取消发送任务');
+    waLoadSendQueue();
+  }catch(e){ rpa.toast('取消失败','err'); }
+};
+
+/* ── P7-B: 客户画像条注入（在 waToggleChatDetail 里调用） ── */
+async function waInjectProfile(detail){
+  const chatKey = detail.dataset.chatKey;
+  try{
+    const d = await rpa.get('/api/whatsapp-rpa/customer-profile/'+encodeURIComponent(chatKey));
+    const p = d.profile||{};
+    if(!p.total_turns) return;
+    const strip = document.createElement('div');
+    strip.className='wa-profile-strip';
+    const firstDate = p.first_ts ? rpa.fmtDate(p.first_ts) : '—';
+    const lastDate  = p.last_ts  ? rpa.fmtDate(p.last_ts)  : '—';
+    const score = p.intimacy_score != null ? Math.round(p.intimacy_score) : null;
+    const scoreBar = score!=null
+      ? `<span class="wa-profile-score" style="--w:${score}%"><span style="display:block;width:${score}%;height:100%;background:#818cf8;border-radius:2px"></span></span>`
+      : '';
+    strip.innerHTML=`<span class="wa-profile-stat">📊 <strong>${p.total_turns}</strong>轮对话</span>
+      <span class="wa-profile-stat">✅ <strong>${p.reply_rate}%</strong>成功率</span>
+      <span class="wa-profile-stat">📅 首次 <strong>${firstDate}</strong></span>
+      <span class="wa-profile-stat">🔁 最近 <strong>${lastDate}</strong></span>
+      ${score!=null?`<span class="wa-profile-stat">💜 亲密 <strong>${score}</strong>${scoreBar}</span>`:''}
+      ${_intentBadge(p.dominant_intent)}`;
+    detail.insertBefore(strip, detail.firstChild);
+  }catch(_){}
+}
+
+/* ── P8-1: 搜索结果点击 → 展开对话 ─────────────────────── */
+window.waOpenChatByKey = function(chatKey, peerName){
+  const qi = $('wa-hist-q');
+  if(qi) qi.value='';
+  const results = $('wa-hist-results');
+  const convList = $('wa-conv-list');
+  if(results){ results.style.display='none'; results.innerHTML=''; }
+  if(convList) convList.style.display='';
+
+  // 找已渲染的 card
+  const esc = CSS.escape(chatKey);
+  const existing = convList?.querySelector(`.wa-conv-card[data-chat-key="${esc}"]`);
+  if(existing){
+    existing.scrollIntoView({behavior:'smooth', block:'center'});
+    if(!existing.nextElementSibling?.classList.contains('wa-conv-detail'))
+      waToggleChatDetail(existing);
+    return;
+  }
+
+  // 未在 48h 列表中 → 注入幽灵卡再展开
+  if(!convList) return;
+  const initials = (peerName||chatKey||'?').replace(/\s+/g,' ').trim().split(' ')
+    .map(w=>w[0]||'').join('').slice(0,2).toUpperCase()||'?';
+  const phantom = document.createElement('div');
+  phantom.className='wa-conv-card';
+  phantom.dataset.chatKey = chatKey;
+  phantom.innerHTML=`<div class="wa-conv-avatar" style="background:#6366f1;color:#fff">${rpa.esc(initials)}</div>
+    <div class="wa-conv-body">
+      <div class="wa-conv-top"><span class="wa-conv-name">${rpa.esc(peerName||chatKey)}</span>
+        <span class="wa-conv-time" style="margin-left:auto;color:var(--t3);font-size:.7rem">历史记录</span></div>
+      <div class="wa-conv-footer"><span class="wa-conv-expand-hint">▸ 展开</span></div>
+    </div>`;
+  convList.prepend(phantom);
+  phantom.addEventListener('click', ()=>waToggleChatDetail(phantom));
+  phantom.scrollIntoView({behavior:'smooth', block:'start'});
+  waToggleChatDetail(phantom);
+};
+
+/* ── P7-A: 历史全文检索 ─────────────────────────────────── */
+let _waHistTimer = null;
+window.waHistSearch = function(q){
+  clearTimeout(_waHistTimer);
+  const results = $('wa-hist-results');
+  const convList = $('wa-conv-list');
+  if(!(q||'').trim()){
+    if(results){ results.style.display='none'; results.innerHTML=''; }
+    if(convList) convList.style.display='';
+    return;
+  }
+  if(convList) convList.style.display='none';
+  if(results){ results.style.display=''; results.innerHTML='<div style="padding:.5rem 1rem;font-size:.75rem;color:var(--t3)">检索中…</div>'; }
+  _waHistTimer = setTimeout(async ()=>{
+    const intent = $('wa-hist-intent')?.value||'';
+    try{
+      const d = await rpa.get('/api/whatsapp-rpa/search?q='+encodeURIComponent(q)+'&intent='+encodeURIComponent(intent)+'&days=90&limit=20');
+      const rs = d.results||[];
+      if(!rs.length){
+        results.innerHTML='<div class="wa-search-results"><div style="padding:.55rem 1rem 3.5rem;font-size:.78rem;color:var(--t3)">无匹配记录</div></div>';
+        return;
+      }
+      const esc = rpa.esc.bind(rpa);
+      const hilite = (txt)=>{
+        if(!txt) return '';
+        return esc(txt.slice(0,200)).replace(new RegExp(esc(q),'gi'), m=>`<em>${m}</em>`);
+      };
+      results.innerHTML='<div class="wa-search-results">'+rs.map(r=>{
+        const ck = r.chat_key||'';
+        const safeKey = ck.replace(/'/g,"\\'");
+        return `<div class="wa-search-result-row" onclick="waOpenChatByKey('${safeKey}','${safeKey}')" title="点击展开对话">
+          <div class="wa-search-result-key">${esc(ck)} · ${rpa.ago(r.ts)}${r.intent_tag&&r.intent_tag!=='general'?' '+_intentBadge(r.intent_tag):''}</div>
+          ${r.peer_text?`<div class="wa-search-result-msg">👤 ${hilite(r.peer_text)}</div>`:''}
+          ${r.reply_text?`<div class="wa-search-result-msg" style="color:var(--t3)">🤖 ${esc(r.reply_text.slice(0,120))}</div>`:''}
+        </div>`;}).join('')+'</div>';
+    }catch(e){
+      results.innerHTML='<div class="wa-search-results"><div style="padding:.5rem 1rem;color:#f87171;font-size:.75rem">检索失败</div></div>';
+    }
+  }, 380);
+};
+
+/* ── P7-D: 意图分布图 ───────────────────────────────────── */
+const _INTENT_COLORS={purchase:'#6ee7b7',support:'#f87171',inquiry:'#93c5fd',greeting:'#94a3b8',general:'rgba(148,163,184,.5)'};
+let _waIntentHours = 168;
+window.waLoadIntentStats = async function(btn, hours){
+  // 仅在点击时切换 active，定时刷新不改按钮状态
+  if(btn){
+    document.querySelectorAll('.wa-chart-win-btn').forEach(b=>b.classList.toggle('active',b===btn));
+  }
+  const body=$('wa-intent-chart-body');
+  if(!body) return;
+  _waIntentHours = hours || _waIntentHours || 168;
+  const retryBtn = `<button class="btn-sec" style="margin-left:.4rem;font-size:.75rem" onclick="waLoadIntentStats(document.querySelector('.wa-chart-win-btn.active'), ${_waIntentHours})">重试</button>`;
+  body.innerHTML='<div style="font-size:.75rem;color:var(--t3)">加载中…</div>';
+  try{
+    const d=await rpa.get('/api/whatsapp-rpa/intent-stats?hours='+_waIntentHours);
+    const dist=d.distribution||{}; const total=d.total_turns||0;
+    if(!total){ body.innerHTML='<div style="font-size:.75rem;color:var(--t3)">暂无数据</div>'; return; }
+    const _LABELS={purchase:'购买',support:'售后',inquiry:'咨询',greeting:'问候',general:'通用'};
+    const entries=Object.entries(dist).sort((a,b)=>b[1]-a[1]);
+    body.innerHTML=`<div style="font-size:.7rem;color:var(--t3);margin-bottom:.35rem">共 ${total} 条消息</div>`+
+      entries.map(([tag,cnt])=>{
+        const pct=Math.round(cnt/total*100);
+        const color=_INTENT_COLORS[tag]||'#94a3b8';
+        return `<div class="wa-intent-bar-row">
+          <span class="wa-intent-bar-label">${_LABELS[tag]||tag}</span>
+          <div class="wa-intent-bar-track"><div class="wa-intent-bar-fill" style="width:${pct}%;background:${color}"></div></div>
+          <span class="wa-intent-bar-cnt">${cnt}</span>
+        </div>`;
+      }).join('');
+  }catch(e){
+    body.innerHTML=`<div style="font-size:.75rem;color:#f87171">加载失败</div>${retryBtn}`;
+  }
+};
+
+/* ── 全量刷新 ───────────────────────────────────────────── */
+window.waRefreshAll = function(){
+  waLoadStatus();
+  if(_waViewMode === 'conv') waLoadConversations();
+  else waLoadRecent();
+  waLoadPending();
+  waLoadSendQueue();
+};
+
+$('wa-only-peer').addEventListener('change', ()=>{ if(_waViewMode==='log') waLoadRecent(); });
+
+/* ── Q1+Q2: 注册 bulk —— WhatsApp pending 用 POST /api/whatsapp-rpa/pending/<id>/resolve
+   action: 'approve' / 'reject'。批量场景不带 text（用 AI 原稿），见 LINE 同样设计 */
+if(window.rpa && window.rpa.bulk){
+  window.rpa.bulk.register({
+    containerId: 'wa-pending-list',
+    rowClass:    'rpa-pend',
+    pidAttr:     'data-pid',
+    countId:     'wa-bulk-count',
+    approveBtnId:'wa-bulk-approve',
+    rejectBtnId: 'wa-bulk-reject',
+    approve: (id) => fetch('/api/whatsapp-rpa/pending/'+id+'/resolve', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','X-CSRF-Token':rpa.csrf()},
+      body: JSON.stringify({action:'approve'}),
+    }).then(r => r.ok ? r.json() : Promise.reject('HTTP '+r.status)),
+    reject: (id) => fetch('/api/whatsapp-rpa/pending/'+id+'/resolve', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','X-CSRF-Token':rpa.csrf()},
+      body: JSON.stringify({action:'reject'}),
+    }).then(r => r.ok ? r.json() : Promise.reject('HTTP '+r.status)),
+    onAfterChange: () => { waLoadPending(); waLoadStatus(); },
+  });
+}
+
+/* ── 初始化 + 自动刷新 ──────────────────────────────────── */
+rpa.restoreTabFromHash();
+// 恢复上次视图模式
+(function(){
+  const m = sessionStorage.getItem('wa_view_mode') || 'conv';
+  if(m !== 'conv') waSetViewMode(m);
+})();
+waRefreshAll();
+waLoadCfg();
+waLoadPersonaBar();
+waLoadVoiceMetrics();
+waLoadMediaMetrics();
+waLoadIntentStats(document.querySelector('.wa-chart-win-btn.active'), _waIntentHours||168);
+
+// 运维 tab 懒加载（漏斗等非首屏卡片）
+let _waOpsLazyInit=false;
+function waEnsureOpsInit(){
+  if(_waOpsLazyInit) return;
+  _waOpsLazyInit=true;
+  if(window.rpa && window.rpa.funnel){
+    const el = document.getElementById('pane-wa-funnel');
+    const initFunnel = ()=>{ rpa.funnel.init({intervalSec:60, defaultScope:'all'}); };
+    if('IntersectionObserver' in window && el){
+      const io = new IntersectionObserver((entries)=>{
+        entries.forEach(en=>{
+          if(en.isIntersecting){ initFunnel(); io.disconnect(); }
+        });
+      },{root:null,rootMargin:'120px',threshold:0.1});
+      io.observe(el);
+    } else { initFunnel(); }
+  }
+}
+const _waOpsTab = document.querySelector('.st-tab[data-pane="pane-wa-ops"]');
+if(_waOpsTab){ _waOpsTab.addEventListener('click', waEnsureOpsInit); }
+
+/* P1-D: 设置表单脏号事件委托 */
+(function(){
+  const pane = $('pane-wa-settings');
+  if(!pane) return;
+  const skip = e => e.target.closest('#wa-persona-bar')||e.target.closest('#wa-unsaved-banner');
+  pane.addEventListener('change', e=>{ if(!skip(e)) waMarkSettingsDirty(true); });
+  pane.addEventListener('input', e=>{
+    if(!skip(e) && (e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')){
+      waMarkSettingsDirty(true);
+    }
+  });
+})();
+
+let _waTimer = setInterval(waRefreshAll, 8000);
+let _waIntentTimer = setInterval(()=>waLoadIntentStats(document.querySelector('.wa-chart-win-btn.active'), _waIntentHours||168), 60000);
+// P5 + Q4: 运营漏斗 60s 轮询
+// 注意：WhatsApp 不接入 contacts 体系，没有 CHANNEL_WHATSAPP；默认看 all，
+// 让运营以“从 WhatsApp 跳去看整个生态”的视角使用，chip 仍可手动切
+if(document.getElementById('pane-wa-ops')?.classList.contains('active')){ waEnsureOpsInit(); }
+// P11-B: 历史检索 + 意图分布（共享组件工厂）
+if(window.rpa && window.rpa.analytics){
+  rpa.analytics.initSearch({
+    inputId:'wa-hist-q', resultId:'wa-hist-results',
+    apiBase:'/api/whatsapp-rpa', days:30, limit:30,
+    onPick:function(ck){
+      // P10-A: 打开通用会话抽屉
+      if(window.rpa && rpa.analytics) rpa.analytics.openDetail({apiBase:'/api/whatsapp-rpa', chatKey:ck});
+    }
+  });
+  rpa.analytics.intentChart({bodyId:'wa-intent-body', apiBase:'/api/whatsapp-rpa', defaultHours:168});
+}
+document.addEventListener('visibilitychange', ()=>{
+  if(document.hidden){ clearInterval(_waTimer); clearInterval(_waIntentTimer); }
+  else {
+    waRefreshAll();
+    waLoadIntentStats(document.querySelector('.wa-chart-win-btn.active'), _waIntentHours||168);
+    _waTimer = setInterval(waRefreshAll, 8000);
+    _waIntentTimer = setInterval(()=>waLoadIntentStats(document.querySelector('.wa-chart-win-btn.active'), _waIntentHours||168), 60000);
+  }
+});
+
+/* P4-D: 设置页独立 TTS 试听 */
+async function waSettingsTtsTest(){
+  const lang = ($('cfg-wa-tts-test-lang')?.value||'').trim();
+  const text = ($('cfg-wa-tts-test-text')?.value||'').trim();
+  if(!text){ rpa.toast('请输入测试文字', 'warn'); return; }
+  const btn = $('cfg-wa-tts-test-btn');
+  const res = $('cfg-wa-tts-test-result');
+  if(btn){ btn.disabled=true; btn.textContent='⏳ 合成中…'; }
+  if(res) res.innerHTML='';
+  try{
+    const r = await fetch('/api/whatsapp-rpa/tts-test',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','X-CSRF-Token':rpa.csrf()},
+      body: JSON.stringify({text, language:lang||undefined}),
+    });
+    const d = await r.json();
+    if(res){
+      if(!d.ok){ res.innerHTML=`<span style="color:#dc2626">❌ ${rpa.esc(d.error||'失败')}</span>`; return; }
+      const dur = d.duration_sec>0?` · ${d.duration_sec}s`:'';
+      res.innerHTML=`<audio controls src="${rpa.esc(d.url)}" style="height:30px;vertical-align:middle"></audio>
+        <span style="color:#64748b;font-size:11px">${rpa.esc(d.language||'')}${dur} · ${rpa.esc(d.provider||'')}</span>`;
+    }
+  }catch(e){ if(res) res.innerHTML=`<span style="color:#dc2626">❌ ${e}</span>`; }
+  finally{ if(btn){ btn.disabled=false; btn.textContent='▶ 试听'; } }
+}
+
+/* P4-A: 语言锁定 / 解锁 */
+async function waLangLock(btn){
+  const bar = btn.closest('.wa-tts-test-bar');
+  if(!bar) return;
+  const chatKey = bar.dataset.chatKey;
+  const lang = bar.querySelector('.wa-tts-lang-sel')?.value || '';
+  if(!lang){ rpa.toast('请先选择一个语言再锁定', 'warn'); return; }
+  btn.disabled = true;
+  try{
+    const r = await fetch('/api/whatsapp-rpa/chat-lang-lock',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','X-CSRF-Token':rpa.csrf()},
+      body: JSON.stringify({chat_key:chatKey, lang}),
+    });
+    const d = await r.json();
+    if(!d.ok) throw new Error(d.detail||d.error||'失败');
+    rpa.toast(`🔒 已锁定为 ${lang}`, 'ok');
+    // 更新本地数据 + 刷新卡片
+    const cv = _waConvData.find(c=>c.chat_key===chatKey);
+    if(cv) cv.state_forced_lang = lang;
+    waRenderConversations({restoreExpand:true});
+  }catch(e){ rpa.toast('锁定失败: '+e, 'err'); }
+  finally{ btn.disabled=false; }
+}
+async function waLangUnlock(btn){
+  const bar = btn.closest('.wa-tts-test-bar');
+  if(!bar) return;
+  const chatKey = bar.dataset.chatKey;
+  btn.disabled = true;
+  try{
+    const r = await fetch('/api/whatsapp-rpa/chat-lang-lock',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','X-CSRF-Token':rpa.csrf()},
+      body: JSON.stringify({chat_key:chatKey, lang:null}),
+    });
+    const d = await r.json();
+    if(!d.ok) throw new Error(d.detail||d.error||'失败');
+    rpa.toast('🔓 已解除语言锁定，恢复自动检测', 'ok');
+    const cv = _waConvData.find(c=>c.chat_key===chatKey);
+    if(cv) cv.state_forced_lang = null;
+    waRenderConversations({restoreExpand:true});
+  }catch(e){ rpa.toast('解锁失败: '+e, 'err'); }
+  finally{ btn.disabled=false; }
+}
+
+/* P3-D: TTS 语言测试 */
+async function waTtsTest(btn){
+  const bar = btn.closest('.wa-tts-test-bar');
+  if(!bar) return;
+  const lang = bar.querySelector('.wa-tts-lang-sel')?.value || '';
+  const text = (bar.querySelector('.wa-tts-text-inp')?.value || '').trim();
+  if(!text){ alert('请输入测试文字'); return; }
+  const res = bar.querySelector('.wa-tts-test-result');
+  btn.disabled = true; btn.textContent = '⏳ 合成中…';
+  res.innerHTML = '';
+  try {
+    const r = await fetch('/api/whatsapp-rpa/tts-test', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','X-CSRF-Token':rpa.csrf()},
+      body: JSON.stringify({text, language: lang||undefined}),
+    });
+    const d = await r.json();
+    if(!d.ok){ res.innerHTML=`<span class="wa-tts-err">❌ ${rpa.esc(d.error||'失败')}</span>`; return; }
+    const dur = d.duration_sec > 0 ? ` · ${d.duration_sec}s` : '';
+    res.innerHTML=`<audio controls src="${rpa.esc(d.url)}" style="height:32px;vertical-align:middle"></audio>
+      <span class="wa-tts-meta">${rpa.esc(d.language||'')}${dur} · ${rpa.esc(d.provider||'')}</span>`;
+  } catch(e){ res.innerHTML=`<span class="wa-tts-err">❌ ${e}</span>`; }
+  finally{ btn.disabled=false; btn.textContent='▶ 试听'; }
+}
+
+/* P15-i: 模板分析功能 */
+const _waCatNames = {care: '关怀型', interest: '兴趣型', question: '提问型'};
+
+async function waLoadTemplateAnalytics(){
+  const msgEl = document.getElementById('wa-tpl-strategy-msg');
+  if(msgEl) msgEl.textContent = '加载中…';
+
+  try{
+    const r = await fetch('/api/whatsapp-rpa/template-analytics?hours=168');
+    const d = await r.json();
+
+    if(!d.ok){
+      if(msgEl) msgEl.textContent = '加载失败: ' + (d.error || '未知错误');
+      return;
+    }
+
+    // 更新配置信息
+    const configText = document.getElementById('wa-tpl-config-text');
+    if(configText){
+      const strategy = d.config?.rotation_strategy || 'unknown';
+      const strategyMap = {weighted: '加权选择', round_robin: '轮询', random: '随机'};
+      configText.innerHTML = `<span style="color:var(--t1)">${strategyMap[strategy] || strategy}</span> <span style="color:var(--t3)">· A/B测试 ${d.config?.ab_test_enabled ? '开启' : '关闭'}</span>`;
+    }
+
+    // 计算总发送数和回复数
+    let totalSent = 0, totalReplied = 0;
+    const tplStats = d.template_stats || {};
+    Object.values(tplStats).forEach(stat => {
+      totalSent += stat.sent || 0;
+    });
+    totalReplied = d.replied_48h || 0;
+
+    // 更新KPI
+    const sentEl = document.getElementById('wa-tpl-sent');
+    const repliedEl = document.getElementById('wa-tpl-replied');
+    const rateEl = document.getElementById('wa-tpl-rate');
+    const catEl = document.getElementById('wa-tpl-categories');
+
+    if(sentEl) sentEl.textContent = totalSent;
+    if(repliedEl) repliedEl.textContent = totalReplied;
+    if(rateEl){
+      const rate = totalSent > 0 ? Math.round((totalReplied / totalSent) * 100) : 0;
+      rateEl.textContent = rate + '%';
+    }
+    if(catEl) catEl.textContent = Object.keys(tplStats).length;
+
+    // 更新类别表格
+    const tbody = document.getElementById('wa-tpl-category-body');
+    if(tbody){
+      const catPerf = d.category_performance || {};
+      if(Object.keys(catPerf).length === 0){
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--t3)">暂无数据</td></tr>';
+      } else {
+        tbody.innerHTML = Object.entries(catPerf).map(([cat, perf]) => {
+          const rate = Math.round((perf.reply_rate || 0) * 100);
+          let effectBadge = rate >= 30 ? '<span style="color:#22c55e">优秀</span>' : rate >= 15 ? '<span style="color:#f59e0b">良好</span>' : '<span style="color:#ef4444">需优化</span>';
+          return `<tr>
+            <td>${_waCatNames[cat] || cat}</td>
+            <td>${perf.sent || 0}</td>
+            <td>${perf.replied || 0}</td>
+            <td>${rate}%</td>
+            <td>${effectBadge}</td>
+          </tr>`;
+        }).join('');
+      }
+    }
+
+    // 更新模板详情列表
+    const detailList = document.getElementById('wa-tpl-detail-list');
+    if(detailList){
+      if(Object.keys(tplStats).length === 0){
+        detailList.innerHTML = '<div style="padding:1rem;text-align:center;color:var(--t3)">暂无模板使用数据</div>';
+      } else {
+        detailList.innerHTML = Object.entries(tplStats).map(([cat, stat]) => {
+          const templates = stat.templates || {};
+          const sorted = Object.entries(templates).sort((a, b) => b[1] - a[1]);
+          return `<div style="margin-bottom:.8rem;padding:.6rem;background:rgba(255,255,255,.03);border:1px solid var(--bd);border-radius:6px">
+            <div style="font-size:.8rem;font-weight:600;color:var(--t1);margin-bottom:.3rem">${_waCatNames[cat] || cat}</div>
+            <div style="font-size:.7rem;color:var(--t3)">模板分布 (使用次数):</div>
+            <div style="display:flex;flex-wrap:wrap;gap:.2rem;margin-top:.3rem">
+              ${sorted.map(([idx, count]) => `<span style="font-size:.7rem;padding:.15rem .35rem;background:rgba(99,102,241,.15);color:#a5b4fc;border-radius:4px">#${idx}: ${count}</span>`).join('')}
+            </div>
+          </div>`;
+        }).join('');
+      }
+    }
+
+    // 更新策略选择器
+    const strategySel = document.getElementById('wa-tpl-strategy-select');
+    if(strategySel && d.config?.rotation_strategy){
+      strategySel.value = d.config.rotation_strategy;
+    }
+
+    if(msgEl) msgEl.textContent = '✅ 已更新';
+    setTimeout(() => { if(msgEl) msgEl.textContent = ''; }, 2000);
+
+  } catch(e){
+    if(msgEl) msgEl.textContent = '加载失败: ' + e;
+  }
+}
+
+async function waSaveTemplateStrategy(){
+  const sel = document.getElementById('wa-tpl-strategy-select');
+  const msgEl = document.getElementById('wa-tpl-strategy-msg');
+  if(!sel) return;
+
+  const strategy = sel.value;
+  if(msgEl) msgEl.textContent = '保存中…';
+
+  try{
+    const r = await fetch('/api/whatsapp-rpa/config', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRF-Token': rpa.csrf()},
+      body: JSON.stringify({proactive_templates: {rotation_strategy: strategy}})
+    });
+    const d = await r.json();
+    if(d.ok){
+      if(msgEl) msgEl.textContent = '✅ 已保存';
+      setTimeout(() => { if(msgEl) msgEl.textContent = ''; }, 2000);
+      waLoadTemplateAnalytics(); // 刷新显示
+    } else {
+      if(msgEl) msgEl.textContent = '保存失败: ' + (d.error || d.detail || '未知错误');
+    }
+  } catch(e){
+    if(msgEl) msgEl.textContent = '保存失败: ' + e;
+  }
+}
+
+// 页面加载时自动加载模板分析数据
+setTimeout(() => {
+  if(document.getElementById('pane-wa-templates')){
+    waLoadTemplateAnalytics();
+  }
+}, 1000);
+
+})();
+</script>
+
+<style>
+/* P3-A / P4-A: 语言徽章 */
+.wa-lang-badge{display:inline-block;font-size:11px;padding:1px 6px;border-radius:10px;
+  background:#e8f4fd;color:#2563eb;border:1px solid #bfdbfe;margin-right:4px;letter-spacing:.3px;user-select:none;}
+.wa-lang-badge.wa-lang-locked{background:#fef3c7;color:#92400e;border-color:#fcd34d;}
+.wa-lang-locked-pill{display:inline-block;font-size:11px;padding:1px 8px;border-radius:10px;
+  background:#fef3c7;color:#92400e;border:1px solid #fcd34d;margin-left:8px;vertical-align:middle;}
+.wa-tts-lock-btn{font-size:12px;padding:4px 10px;border-radius:6px;background:#f59e0b;color:#fff;border:none;cursor:pointer;}
+.wa-tts-lock-btn:hover{background:#d97706;}
+.wa-tts-unlock-btn{font-size:12px;padding:4px 10px;border-radius:6px;background:#6b7280;color:#fff;border:none;cursor:pointer;}
+.wa-tts-unlock-btn:hover{background:#4b5563;}
+/* P3-D: TTS 测试面板 */
+.wa-tts-test-bar{padding:8px 12px;border-top:1px solid #f0f0f0;background:#fafeff;}
+.wa-tts-test-header{font-size:12px;font-weight:600;color:#0ea5e9;margin-bottom:6px;}
+.wa-tts-test-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+.wa-tts-lang-sel{font-size:12px;padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;background:#fff;color:#374151;cursor:pointer;}
+.wa-tts-text-inp{flex:1;min-width:120px;font-size:12px;padding:4px 8px;border:1px solid #d1d5db;border-radius:6px;}
+.wa-tts-test-btn{font-size:12px;padding:4px 12px;border-radius:6px;background:#0ea5e9;color:#fff;border:none;cursor:pointer;white-space:nowrap;}
+.wa-tts-test-btn:hover{background:#0284c7;}
+.wa-tts-test-btn:disabled{background:#94a3b8;cursor:not-allowed;}
+.wa-tts-test-result{margin-top:6px;font-size:12px;display:flex;align-items:center;gap:8px;}
+.wa-tts-err{color:#dc2626;}
+.wa-tts-meta{color:#64748b;font-size:11px;}
+</style>
+
+{% endblock %}

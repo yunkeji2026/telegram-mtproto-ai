@@ -27,7 +27,7 @@ from starlette.middleware.sessions import SessionMiddleware
 logger = logging.getLogger("WebAdmin")
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
-templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
+templates = Jinja2Templates(directory=str(_TEMPLATE_DIR), auto_reload=True)
 
 # ── 模型显示名映射（UI 层展示，不影响实际 API 调用）─────────────
 _MODEL_DISPLAY_MAP: dict = {
@@ -136,6 +136,9 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
     app.state.kb_conflict_checkers = []
     app.state.intent_display_names_extra = {}
     app.state.config_manager = config_manager
+    app.state.telegram_client = telegram_client
+    # P23-B: 让外部 router 注册器（如 rpa_overview_routes 的 audit 钩子）能拿到 audit_store
+    app.state.audit_store = audit_store
 
     web_cfg = config_manager.config.get("web_admin", {})
     secret = web_cfg.get("secret_key", "change-me-in-production")
@@ -194,6 +197,17 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
             return JSONResponse(status_code=403, content={"detail": "CSRF token missing or invalid"})
         return await call_next(request)
 
+    # ── HTML 页面禁缓存（防止浏览器缓存旧版模板） ──────────────
+    @app.middleware("http")
+    async def nocache_html_middleware(request: Request, call_next):
+        response = await call_next(request)
+        ct = response.headers.get("content-type", "")
+        if "text/html" in ct and not request.url.path.startswith("/static"):
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
+
     # ── 管理端限流（固定窗口计数器，内存高效） ──────────────────
     _rate_buckets: Dict[str, list] = {}  # ip -> [window_start, count]
     _RATE_WINDOW = int(web_cfg.get("rate_limit_window", 60))
@@ -227,6 +241,109 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
             stale = [k for k, v in _rate_buckets.items() if now - v[0] >= _RATE_WINDOW * 2]
             for k in stale:
                 _rate_buckets.pop(k, None)
+        return await call_next(request)
+
+    # ── P25-A: 全局 body size 限制（防大 JSON / chunked 流式攻击） ──────
+    # 比 P24-C 的 per-route _read_json_body 更强：
+    #   1. 覆盖所有 POST/PUT/PATCH 路由（不只是 intent-tags）
+    #   2. 流式逐块累计 + 即时熔断（attacker 流 100MB 我方只缓存到 limit 字节就中止）
+    #   3. P25-B: 413 写 audit_log（潜在攻击信号）
+    # 例外：path 在 _BODY_LIMIT_EXEMPT 中的不受限（如文件上传端点 — 当前无）
+    _BODY_LIMIT_DEFAULT = int(web_cfg.get("max_body_bytes", 2 * 1024 * 1024))
+    # P26-C: 从 config.yaml::web_admin.body_limits 加载 per-path 上限（dict path->bytes）
+    _raw_overrides = web_cfg.get("body_limits") or {}
+    _BODY_LIMIT_OVERRIDES: Dict[str, int] = {}
+    if isinstance(_raw_overrides, dict):
+        for _k, _v in _raw_overrides.items():
+            try:
+                _BODY_LIMIT_OVERRIDES[str(_k)] = int(_v)
+            except (TypeError, ValueError):
+                continue
+    # 兼容旧字段 max_body_bytes_intent_tags_write
+    if "/api/rpa/intent-tags" not in _BODY_LIMIT_OVERRIDES:
+        _BODY_LIMIT_OVERRIDES["/api/rpa/intent-tags"] = int(
+            web_cfg.get("max_body_bytes_intent_tags_write", 4 * 1024 * 1024))
+    _BODY_LIMIT_EXEMPT_PREFIXES: tuple = tuple(web_cfg.get("max_body_exempt_prefixes", []))
+    # P25-B / P26-D: 413 攻击信号防抖 — 用通用 AuditThrottle
+    from src.utils.audit_throttle import AuditThrottle as _AuditThrottle
+    _body_oversize_throttle = _AuditThrottle(window_sec=5.0, max_keys=4096)
+    # P26-B: 暴露 413 计数器给 /api/rpa/metrics（label = path），格式 {path: count}
+    app.state.web_body_oversize_counter = {}
+
+    def _audit_oversize(request: Request, path: str, observed: int, limit: int) -> None:
+        """P25-B / P26-D: 413 攻击信号写 audit log（per-IP 5s 防抖）。"""
+        try:
+            ip = request.client.host if request.client else "unknown"
+            # P26-B: 计数（不防抖，每次都加 — Prometheus 看真实攻击量）
+            counter = app.state.web_body_oversize_counter
+            counter[path] = counter.get(path, 0) + 1
+            # 审计写入（5s 防抖防 DB flood）
+            if not _body_oversize_throttle.should_emit(ip):
+                return
+            actor = getattr(getattr(request.state, "user", None), "username", "unknown")
+            audit_store.log(actor, "web_body_oversize_rejected",
+                            f"path={path} observed={observed} limit={limit} ip={ip}")
+        except Exception:
+            pass
+
+    def _413_response(limit: int, detail: str) -> JSONResponse:
+        """P27-B: 413 响应统一带 X-Body-Limit 头（告知客户端上限）+ Connection:close。"""
+        return JSONResponse(
+            status_code=413,
+            content={"detail": detail, "max_body_bytes": limit},
+            headers={
+                "Connection": "close",
+                "X-Body-Limit": str(limit),
+            },
+        )
+
+    @app.middleware("http")
+    async def body_size_limit_middleware(request: Request, call_next):
+        if request.method in ("GET", "HEAD", "OPTIONS", "DELETE"):
+            return await call_next(request)
+        path = request.url.path
+        if any(path.startswith(p) for p in _BODY_LIMIT_EXEMPT_PREFIXES):
+            return await call_next(request)
+        limit = _BODY_LIMIT_OVERRIDES.get(path, _BODY_LIMIT_DEFAULT)
+        # 1) Content-Length 预检（快速失败，不读 body）
+        cl = request.headers.get("content-length")
+        if cl and cl.isdigit():
+            if int(cl) > limit:
+                _audit_oversize(request, path, int(cl), limit)
+                return _413_response(limit,
+                    f"request body too large (declared {cl}, max {limit})")
+        # 2) 流式累积（防伪 Content-Length + chunked 上传）
+        body_chunks: list = []
+        received = 0
+        while True:
+            msg = await request._receive()
+            mtype = msg.get("type")
+            if mtype == "http.disconnect":
+                return JSONResponse(status_code=499,
+                                     content={"detail": "client disconnected"})
+            if mtype != "http.request":
+                continue
+            chunk = msg.get("body", b"") or b""
+            if chunk:
+                received += len(chunk)
+                if received > limit:
+                    _audit_oversize(request, path, received, limit)
+                    return _413_response(limit,
+                        f"request body too large (streamed {received}, max {limit})")
+                body_chunks.append(chunk)
+            if not msg.get("more_body", False):
+                break
+        # 3) 重放给下游
+        full_body = b"".join(body_chunks)
+        replayed = {"done": False}
+
+        async def replay_receive():
+            if replayed["done"]:
+                return {"type": "http.disconnect"}
+            replayed["done"] = True
+            return {"type": "http.request", "body": full_body, "more_body": False}
+
+        request._receive = replay_receive
         return await call_next(request)
 
     # RBAC user store
@@ -271,6 +388,11 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         "/knowledge": "knowledge", "/learner": "learner", "/settings": "settings",
         "/cases": "cases", "/episodic-memory": "episodic",
         "/line-rpa": "line_rpa",
+        "/messenger-rpa": "messenger_rpa",
+        "/whatsapp-rpa": "whatsapp_rpa",
+        "/rpa-overview": "rpa_overview",
+        "/personas": "personas",
+        "/ai-studio": "ai_studio",
     }
     for _dp in domain_web_pages:
         _PATH_TO_ACTIVE[_dp["path"]] = _dp["key"]
@@ -327,6 +449,13 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         context.setdefault("domain_name", domain_name)
         context.setdefault("domain_web_pages", domain_web_pages)
         context.setdefault("domain_dashboard_widgets", domain_dashboard_widgets)
+
+        # ── Embedded mode（用于 AI 工作室 iframe 嵌入，去掉外层 chrome）──
+        try:
+            qs_emb = request.query_params.get("embedded", "") == "1"
+        except Exception:
+            qs_emb = False
+        context.setdefault("embedded", qs_emb)
 
         return context
 
@@ -1069,7 +1198,7 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
 
     @app.get("/developer", response_class=HTMLResponse)
     async def developer_page(request: Request):
-        _api_auth(request)
+        _require_auth(request)
         dev_unlocked = request.session.get("dev_unlocked", False)
         ctx: dict = {"dev_unlocked": dev_unlocked, "dev_error": ""}
         if dev_unlocked:
@@ -1089,7 +1218,7 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
 
     @app.post("/developer/auth", response_class=HTMLResponse)
     async def developer_auth(request: Request):
-        _api_auth(request)
+        _require_auth(request)
         form = await request.form()
         password = (form.get("password") or "").strip()
         if password == _DEV_PASSWORD:
@@ -1103,7 +1232,7 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
 
     @app.post("/developer/logout")
     async def developer_logout(request: Request):
-        _api_auth(request)
+        _require_auth(request)
         request.session.pop("dev_unlocked", None)
         return RedirectResponse("/developer", status_code=303)
 
@@ -1917,6 +2046,193 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         merged.update(getattr(app.state, "intent_display_names_extra", {}))
         return merged
 
+    # ── Persona Studio (/personas) ───────────────────────────
+    try:
+        from src.web.routes.persona_routes import register_persona_routes
+        register_persona_routes(
+            app, auth_dep=_api_auth, audit_store=audit_store, config_manager=config_manager
+        )
+    except Exception:
+        import logging as _log_pr
+        _log_pr.getLogger("admin").debug("Persona API 路由注册跳过", exc_info=True)
+
+    @app.get("/personas", response_class=HTMLResponse)
+    async def personas_page(request: Request, _=Depends(_page_auth)):
+        from src.utils.persona_manager import PersonaManager
+        try:
+            pm = PersonaManager.get_instance()
+            default_persona = pm.get_persona("")
+            bindings = pm.get_all_chat_bindings()
+        except Exception:
+            default_persona = {}
+            bindings = {}
+        tg_accounts_stats: dict = {}
+        try:
+            from src.client.telegram_account_registry import TelegramAccountRegistry
+            _tg_cfg = (config_manager.config or {}).get("telegram", {})
+            _reg = TelegramAccountRegistry.from_config(_tg_cfg)
+            tg_accounts_stats = _reg.stats()
+        except Exception:
+            pass
+        personas_from_cfg = (config_manager.config or {}).get("personas", {})
+        return templates.TemplateResponse(request, "personas.html", {
+            "default_persona": default_persona,
+            "bindings": bindings,
+            "personas_cfg": personas_from_cfg,
+            "tg_accounts": tg_accounts_stats,
+        })
+
+    # ── AI 工作室 (/ai-studio) — 4-Tab 集中入口 ─────────────────────
+    @app.get("/ai-studio", response_class=HTMLResponse)
+    async def ai_studio_page(request: Request, _=Depends(_page_auth)):
+        return templates.TemplateResponse(request, "ai_studio.html", {})
+
+    @app.get("/api/ai-studio/summary")
+    async def api_ai_studio_summary(request: Request, _=Depends(_api_auth)):
+        """统一统计：人设池 / 情景记忆 / KB草稿 / 关系档案 / 重复人设池告警。"""
+        out: Dict[str, Any] = {
+            "personas": {"profile_count": 0, "binding_count": 0},
+            "memory": {"total_facts": 0, "unique_users": 0, "with_embedding": 0},
+            "drafts": {"pending": 0, "approved": 0, "rejected": 0},
+            "relations": {"total": 0, "intimate_count": 0, "stages": {}},
+            "messenger_rpa_reply_profiles": {"count": 0, "default": ""},
+        }
+
+        # 人设池
+        try:
+            from src.utils.persona_manager import PersonaManager
+            pm = PersonaManager.get_instance()
+            out["personas"]["profile_count"] = len(pm.list_profile_ids())
+            out["personas"]["binding_count"] = len(pm.get_all_chat_bindings())
+        except Exception:
+            pass
+
+        # 情景记忆
+        try:
+            sm = getattr(telegram_client, "skill_manager", None) if telegram_client else None
+            store = getattr(sm, "_episodic_store", None) if sm else None
+            if store and store._conn:
+                row = store._conn.execute(
+                    "SELECT COUNT(*), COUNT(DISTINCT user_id), "
+                    "SUM(CASE WHEN embedding IS NOT NULL AND length(embedding)>=8 THEN 1 ELSE 0 END) "
+                    "FROM episodic_memory"
+                ).fetchone()
+                if row:
+                    out["memory"]["total_facts"] = int(row[0] or 0)
+                    out["memory"]["unique_users"] = int(row[1] or 0)
+                    out["memory"]["with_embedding"] = int(row[2] or 0)
+        except Exception:
+            pass
+
+        # KB 草稿统计
+        try:
+            from src.utils.daily_learner import DailyLearner as _DL
+            learner = getattr(app.state, "_daily_learner", None)
+            if learner is None:
+                ai = getattr(telegram_client, "ai_client", None) if telegram_client else None
+                kb = getattr(app.state, "kb_store", None)
+                if ai and kb:
+                    learner = _DL(kb, ai, db_path=getattr(app.state, "kb_db_path", None) or kb._db_path)
+                    app.state._daily_learner = learner
+            if learner:
+                out["drafts"] = learner.stats()
+        except Exception:
+            pass
+
+        # 关系档案统计（直接 SQL）
+        try:
+            _contacts = getattr(app.state, "contacts", None)
+            cs = getattr(_contacts, "store", None) if _contacts else None
+            conn = getattr(cs, "_conn", None) if cs else None
+            if conn is not None:
+                row = conn.execute(
+                    "SELECT "
+                    "  SUM(CASE WHEN intimacy_score>=80 THEN 1 ELSE 0 END), "
+                    "  SUM(CASE WHEN intimacy_score>=55 AND intimacy_score<80 THEN 1 ELSE 0 END), "
+                    "  SUM(CASE WHEN intimacy_score>=25 AND intimacy_score<55 THEN 1 ELSE 0 END), "
+                    "  SUM(CASE WHEN intimacy_score<25 OR intimacy_score IS NULL THEN 1 ELSE 0 END), "
+                    "  COUNT(*) "
+                    "FROM journeys"
+                ).fetchone()
+                if row:
+                    soulmate = int(row[0] or 0)
+                    close = int(row[1] or 0)
+                    friend = int(row[2] or 0)
+                    stranger = int(row[3] or 0)
+                    out["relations"]["total"] = int(row[4] or 0)
+                    out["relations"]["stages"] = {
+                        "stranger": stranger, "friend": friend,
+                        "close": close, "soulmate": soulmate,
+                    }
+                    out["relations"]["intimate_count"] = soulmate + close
+
+                # W3-3A.3：reunion 候选 — 曾深度互动（funnel_stage 已过 INITIAL 且非 LOST/MERGE）
+                # 但 intimacy_score 因沉默衰减回落到 stranger 区间（<25）的 journey
+                # 这些是「需重激活」的优先目标，应在 ai_studio 关系看板单列展示
+                try:
+                    rc_row = conn.execute(
+                        "SELECT COUNT(*) FROM journeys WHERE "
+                        "intimacy_score < 25 AND "
+                        "funnel_stage NOT IN ('INITIAL','LOST_HANDOFF',"
+                        "'LOST_LINE_SILENT','NEEDS_MANUAL_MERGE')"
+                    ).fetchone()
+                    out["relations"]["reunion_candidates"] = int(
+                        (rc_row[0] if rc_row else 0) or 0
+                    )
+                except Exception:
+                    out["relations"]["reunion_candidates"] = 0
+
+                # W3-3A.3：funnel_stage 分布 — 给运营看「漏斗实况」补充 score 分布
+                try:
+                    fs_rows = conn.execute(
+                        "SELECT funnel_stage, COUNT(*) FROM journeys "
+                        "GROUP BY funnel_stage"
+                    ).fetchall()
+                    out["relations"]["funnel_stages"] = {
+                        str(r[0] or "INITIAL"): int(r[1] or 0)
+                        for r in (fs_rows or [])
+                    }
+                except Exception:
+                    out["relations"]["funnel_stages"] = {}
+
+                # W3-3B.2：merge_review_queue pending 计数 + auto_merge 高分边界候选
+                # 让 ai_studio 关系看板与 reunion 一样有 banner 直达
+                try:
+                    mr_row = conn.execute(
+                        "SELECT COUNT(*) FROM merge_review_queue WHERE status='pending'"
+                    ).fetchone()
+                    out["relations"]["merge_reviews_pending"] = int(
+                        (mr_row[0] if mr_row else 0) or 0
+                    )
+                    # 边界候选：confidence>=0.85 但因歧义降级到 review 的高质量对
+                    # 运营优先处理这些（基本确定是同一个人）
+                    hc_row = conn.execute(
+                        "SELECT COUNT(*) FROM merge_review_queue "
+                        "WHERE status='pending' AND confidence >= 0.85"
+                    ).fetchone()
+                    out["relations"]["merge_reviews_high_conf"] = int(
+                        (hc_row[0] if hc_row else 0) or 0
+                    )
+                except Exception:
+                    out["relations"]["merge_reviews_pending"] = 0
+                    out["relations"]["merge_reviews_high_conf"] = 0
+        except Exception:
+            pass
+
+        # Messenger RPA reply_profiles 重复检测
+        try:
+            mr_cfg = (config_manager.config or {}).get("messenger_rpa", {}) or {}
+            rp = mr_cfg.get("reply_profiles") or {}
+            profs = rp.get("profiles") if isinstance(rp.get("profiles"), list) else []
+            out["messenger_rpa_reply_profiles"] = {
+                "count": len([p for p in profs if isinstance(p, dict) and p.get("id")]),
+                "default": str(rp.get("default") or ""),
+            }
+        except Exception:
+            pass
+
+        return out
+
     @app.get("/strategies", response_class=HTMLResponse)
     async def strategies_page(request: Request, _=Depends(_page_auth)):
         rs = config_manager.get_strategies_config()
@@ -2006,11 +2322,12 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         rs = config_manager.get_strategies_config()
         strategies_cfg = rs.get("strategies", {})
 
-        from src.utils.strategy_advisor import analyze, suggest_param_adjustments
+        from src.utils.strategy_advisor import analyze, suggest_param_adjustments, compute_quality_score_breakdown
         advisor = analyze(summary, strategies_cfg) if summary else {
             "scores": {}, "advisories": [], "best": None, "worst": None}
         for s in summary:
             s["quality_score"] = advisor["scores"].get(s["strategy_id"], 0)
+            s["score_breakdown"] = compute_quality_score_breakdown(s)
             s["model_id"] = strategies_cfg.get(s["strategy_id"], {}).get("model", "")
 
         param_suggestions = suggest_param_adjustments(summary, strategies_cfg) if summary else []
@@ -2055,6 +2372,40 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
             "model_matrix": tracker.model_strategy_matrix(hours),
             "user_segments": tracker.user_segment_analysis(hours),
         }
+
+    @app.get("/api/strategy-analytics/compare")
+    async def api_strategy_compare(request: Request, _=Depends(_api_auth),
+                                   hours: int = Query(24, ge=1, le=720)):
+        """B2: Compare current period vs previous period of same length."""
+        tracker = _get_strategy_tracker()
+        if not tracker:
+            return {"current": [], "previous": [], "changes": {}}
+        tracker.mark_no_follow_up()
+        from src.utils.strategy_advisor import compute_quality_score_breakdown
+        current = tracker.strategy_summary(hours, offset_hours=0)
+        previous = tracker.strategy_summary(hours, offset_hours=hours)
+        # compute changes per strategy
+        prev_map = {s["strategy_id"]: s for s in previous}
+        changes = {}
+        for s in current:
+            sid = s["strategy_id"]
+            s["score_breakdown"] = compute_quality_score_breakdown(s)
+            s["quality_score"] = s["score_breakdown"]["total"]
+            p = prev_map.get(sid)
+            if p:
+                p["score_breakdown"] = compute_quality_score_breakdown(p)
+                p["quality_score"] = p["score_breakdown"]["total"]
+                changes[sid] = {
+                    "total_delta": s["total"] - p["total"],
+                    "avg_ms_delta": s["avg_ms"] - p["avg_ms"],
+                    "follow_up_delta": round(s["follow_up_rate"] - p["follow_up_rate"], 1),
+                    "silence_delta": round(s["silence_rate"] - p["silence_rate"], 1),
+                    "score_delta": round(s["quality_score"] - p["quality_score"], 1),
+                }
+            else:
+                changes[sid] = {"total_delta": s["total"], "avg_ms_delta": 0,
+                                "follow_up_delta": 0, "silence_delta": 0, "score_delta": 0}
+        return {"current": current, "previous": previous, "changes": changes, "hours": hours}
 
     @app.get("/api/strategy-analytics/{strategy_id}/hourly")
     async def api_strategy_hourly(strategy_id: str, request: Request,
@@ -2741,8 +3092,12 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         except Exception:
             pass
 
-    async def _fire_webhook(event_type: str, actor: str, target: str, summary: str = ""):
-        """异步发送 Webhook 通知（失败静默，不影响主流程）"""
+    async def _fire_webhook(event_type: str, actor: str, target: str, summary: str = ""):  # noqa: D401
+        """异步发送 Webhook 通知（失败静默，不影响主流程）。
+
+        注：本闭包同步暴露在 ``app.state.fire_webhook`` 上，供其他路由
+        模块（如 contacts_routes）按需调用，避免重复实现一遍 webhook 派发。
+        """
         cfg = _get_webhook_cfg()
         if not cfg.get("enabled") or not cfg.get("url"):
             return
@@ -2767,6 +3122,9 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
                 resp.raise_for_status()
         except Exception:
             pass  # 静默失败，Webhook 不影响主操作
+
+    # 暴露给其他路由模块复用（如 contacts_routes 的 /api/relations/digest/push）
+    app.state.fire_webhook = _fire_webhook
 
     @app.get("/api/webhook-settings")
     async def api_get_webhook(request: Request, _=Depends(_api_write("import_export"))):
@@ -4241,6 +4599,23 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         asyncio.create_task(_kb_evolve_loop())
         asyncio.create_task(_kb_self_heal_loop())
         asyncio.create_task(_weekly_report_loop())
+        # P26-A: intent_tags.yaml 文件变更自动 reload（基于 watchdog）
+        try:
+            _it_cfg = (config_manager.config or {}).get("rpa_intent_tags", {}) or {}
+            if _it_cfg.get("watch_enabled", True):
+                from src.integrations.intent_tags_watcher import start_watcher
+                start_watcher(debounce_sec=float(_it_cfg.get("watch_debounce_sec", 0.8)))
+        except Exception:
+            pass
+
+    @app.on_event("shutdown")
+    async def _stop_intent_tags_watcher():
+        # P26-A: 干净停 watchdog observer thread
+        try:
+            from src.integrations.intent_tags_watcher import stop_watcher
+            stop_watcher()
+        except Exception:
+            pass
 
     @app.post("/api/kb/translate-all")
     async def api_kb_translate_all(request: Request):
@@ -5897,11 +6272,12 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
 
     @app.get("/api/learner/drafts")
     async def api_learner_drafts(request: Request, _=Depends(_api_auth),
-                                 status: str = Query("pending")):
+                                 status: str = Query("pending"),
+                                 sort: str = Query("priority")):
         learner = _get_learner()
         if not learner:
             return {"drafts": []}
-        return {"drafts": learner.list_drafts(status=status)}
+        return {"drafts": learner.list_drafts(status=status, sort=sort)}
 
     @app.get("/api/learner/drafts/{draft_id}")
     async def api_learner_draft_detail(request: Request, draft_id: str,
@@ -5960,6 +6336,34 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         if audit_store:
             audit_store.log(actor, "learner_approve_all", str(count))
         return {"ok": True, "approved": count}
+
+    @app.post("/api/learner/drafts/batch-action")
+    async def api_learner_batch_action(request: Request, _=Depends(_api_auth)):
+        """A2: Batch approve/reject selected drafts."""
+        learner = _get_learner()
+        if not learner:
+            raise HTTPException(503, "learner not available")
+        body = await request.json()
+        ids = body.get("ids", [])
+        action = body.get("action", "")
+        if not ids or action not in ("approve", "reject"):
+            raise HTTPException(400, "ids[] and action (approve|reject) required")
+        actor = request.session.get("username", "web_admin")
+        result = learner.batch_action(ids, action, operator=actor)
+        if audit_store:
+            audit_store.log(actor, f"learner_batch_{action}",
+                            f"{len(ids)} ids -> {result}")
+        return {"ok": True, **result}
+
+    # ── A3: Duplicate recheck ─────────────────────────────────
+    @app.post("/api/learner/drafts/{draft_id}/recheck-dup")
+    async def api_learner_recheck_dup(request: Request, draft_id: str,
+                                       _=Depends(_api_auth)):
+        learner = _get_learner()
+        if not learner:
+            raise HTTPException(503, "learner not available")
+        dup = learner.recheck_duplicate(draft_id)
+        return {"ok": True, "dup": dup}
 
     # ── Persona Management API ──────────────────────────────
 
@@ -6171,6 +6575,57 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
             raise HTTPException(status_code=400, detail=err or "backfill_failed")
         return out
 
+    # ── S5: CrossPlatformIdentity API ─────────────────────────────────────────
+
+    def _get_cpi():
+        """Return CPI instance from SkillManager or None."""
+        sm = getattr(telegram_client, "skill_manager", None) if telegram_client else None
+        return getattr(sm, "_cpi", None) if sm else None
+
+    @app.get("/api/identity")
+    async def api_identity_list(request: Request, limit: int = 200):
+        """List all (platform, platform_uid, canonical_id) rows."""
+        _api_auth(request)
+        cpi = _get_cpi()
+        if not cpi:
+            raise HTTPException(status_code=503, detail="CrossPlatformIdentity 未就绪")
+        rows = cpi.list_all(limit=min(int(limit), 500))
+        return {"ok": True, "items": [
+            {"platform": r[0], "platform_uid": r[1], "canonical_id": r[2], "created_at": r[3]}
+            for r in rows
+        ]}
+
+    @app.post("/api/identity/link")
+    async def api_identity_link(request: Request):
+        """Link two platform UIDs to share the same episodic memory.
+        Body: {platform_a, uid_a, platform_b, uid_b}"""
+        _api_write("identity")(request)
+        cpi = _get_cpi()
+        if not cpi:
+            raise HTTPException(status_code=503, detail="CrossPlatformIdentity 未就绪")
+        body = await request.json()
+        pa, ua = str(body.get("platform_a", "")), str(body.get("uid_a", ""))
+        pb, ub = str(body.get("platform_b", "")), str(body.get("uid_b", ""))
+        if not all([pa, ua, pb, ub]):
+            raise HTTPException(status_code=400, detail="需要 platform_a/uid_a/platform_b/uid_b")
+        canon = cpi.link(pa, ua, pb, ub)
+        return {"ok": True, "canonical_id": canon}
+
+    @app.post("/api/identity/unlink")
+    async def api_identity_unlink(request: Request):
+        """Detach a platform UID back to its own canonical_id.
+        Body: {platform, uid}"""
+        _api_write("identity")(request)
+        cpi = _get_cpi()
+        if not cpi:
+            raise HTTPException(status_code=503, detail="CrossPlatformIdentity 未就绪")
+        body = await request.json()
+        plat, uid = str(body.get("platform", "")), str(body.get("uid", ""))
+        if not plat or not uid:
+            raise HTTPException(status_code=400, detail="需要 platform 和 uid")
+        new_canon = cpi.unlink(plat, uid)
+        return {"ok": True, "canonical_id": new_canon}
+
     try:
         from src.integrations.line_webhook import register_line_routes
 
@@ -6230,6 +6685,7 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
             api_auth=_api_auth,
             templates=templates,
             config_manager=config_manager,
+            audit_store=audit_store,
         )
     except Exception:
         import logging as _log_mr
@@ -6237,6 +6693,103 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         _log_mr.getLogger("admin").debug(
             "Messenger RPA 路由注册跳过", exc_info=True
         )
+
+    # ── WhatsApp RPA（个人号 / Business 号自动聊天）Web + REST ──
+    try:
+        from src.web.routes.whatsapp_rpa_routes import (
+            register_whatsapp_rpa_routes,
+        )
+
+        def _wa_rpa_page_auth(request: Request):
+            _require_role(request, "line_rpa")
+
+        register_whatsapp_rpa_routes(
+            app,
+            page_auth=_wa_rpa_page_auth,
+            api_auth=_api_auth,
+            templates=templates,
+            config_manager=config_manager,
+            audit_store=audit_store,
+        )
+    except Exception:
+        import logging as _log_wa
+
+        _log_wa.getLogger("admin").debug(
+            "WhatsApp RPA 路由注册跳过", exc_info=True
+        )
+
+    # ── RPA 跨平台总览（聚合 4 个平台 status / pending / alerts） ──
+    try:
+        from src.web.routes.rpa_overview_routes import (
+            register_rpa_overview_routes,
+        )
+
+        def _rpa_overview_page_auth(request: Request):
+            # 聚合页只读，复用 line_rpa 角色（与 4 个详情页同等敏感度）
+            _require_role(request, "line_rpa")
+
+        register_rpa_overview_routes(
+            app,
+            page_auth=_rpa_overview_page_auth,
+            api_auth=_api_auth,
+            templates=templates,
+            config_manager=config_manager,
+        )
+    except Exception:
+        import logging as _log_ov
+
+        _log_ov.getLogger("admin").debug(
+            "RPA 跨平台总览路由注册跳过", exc_info=True
+        )
+
+    # ── 统一收件箱（跨平台消息聚合 + 发送） ─────────────────────
+    try:
+        from src.web.routes.unified_inbox_routes import register_unified_inbox_routes
+
+        def _unified_inbox_page_auth(request: Request):
+            _require_role(request, "line_rpa")
+
+        register_unified_inbox_routes(
+            app,
+            page_auth=_unified_inbox_page_auth,
+            api_auth=_api_auth,
+            templates=templates,
+            config_manager=config_manager,
+        )
+    except Exception:
+        import logging as _log_ui
+        _log_ui.getLogger("admin").debug("统一收件箱路由注册跳过", exc_info=True)
+
+    # ── Voice / TTS 统一试听 API ──────────────────────────────
+    try:
+        from src.web.routes.voice_routes import register_voice_routes
+
+        register_voice_routes(app, api_auth=_api_auth, config_manager=config_manager)
+    except Exception:
+        import logging as _log_vr
+
+        _log_vr.getLogger("admin").debug("Voice TTS 路由注册跳过", exc_info=True)
+
+    # ── Telegram 帐号设置页 ────────────────────────────────────
+    try:
+        from src.web.routes.telegram_routes import register_telegram_routes
+
+        def _tg_page_auth(request: Request):
+            _require_role(request, "settings")
+
+        register_telegram_routes(
+            app,
+            page_auth=_tg_page_auth,
+            api_auth=_api_auth,
+            templates=templates,
+            config_manager=config_manager,
+            telegram_client=telegram_client,
+            audit_store=audit_store,
+        )
+    except Exception:
+        import logging as _log_tgr
+
+        _log_tgr.getLogger("admin").debug("Telegram 路由注册跳过", exc_info=True)
 
     return app
 

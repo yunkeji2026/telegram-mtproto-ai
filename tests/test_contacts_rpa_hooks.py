@@ -104,6 +104,53 @@ class TestNoopContactHooks:
         assert n.issue_handoff_for_messenger(account_id="a", external_id="b") is None
         assert n.on_handoff_sent(account_id="a", external_id="b", token="t") is None
         assert n.on_line_first_text(account_id="a", external_id="b", text="") is None
+        # W3-3A.1
+        assert n.get_journey_intimacy(channel="x", account_id="a", external_id="b") is None
+
+
+class TestGetJourneyIntimacy:
+    """W3-3A.1：runner 通过 hooks 查询 IntimacyEngine 写到 journey 的 score。"""
+
+    def test_unknown_peer_returns_none(self, hooks):
+        h, _, _ = hooks
+        assert h.get_journey_intimacy(
+            channel=CHANNEL_MESSENGER, account_id="a", external_id="ghost",
+        ) is None
+
+    def test_returns_score_after_message(self, hooks):
+        h, gw, store = hooks
+        # 建 ci + journey
+        ctx = h.on_message(
+            channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_1",
+            direction="in", text_preview="hi",
+        )
+        assert ctx is not None
+        # 直接改 journey.intimacy_score 模拟 IntimacyEngine 写入
+        store.update_journey(ctx.journey.journey_id, intimacy_score=42.5)
+        score = h.get_journey_intimacy(
+            channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_1",
+        )
+        assert score == 42.5
+        assert isinstance(score, float)
+
+    def test_zero_score_returned_as_zero_not_none(self, hooks):
+        """新 journey intimacy_score=0.0 必须返回 0.0，runner 才能区分「无数据」与「0 分」。"""
+        h, gw, store = hooks
+        h.on_message(
+            channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_1",
+            direction="in", text_preview="hi",
+        )
+        score = h.get_journey_intimacy(
+            channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_1",
+        )
+        assert score == 0.0
+
+    def test_swallows_errors(self, hooks):
+        """错误 channel → gateway raise ValueError → hook 吞掉返回 None。"""
+        h, _, _ = hooks
+        assert h.get_journey_intimacy(
+            channel="twitter", account_id="a", external_id="x",
+        ) is None
 
 
 class TestProtocolConformance:

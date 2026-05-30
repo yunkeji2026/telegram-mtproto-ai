@@ -111,13 +111,26 @@ def test_verify_thread_title_dump_failed(monkeypatch):
 
 
 def test_verify_thread_title_not_in_thread(monkeypatch):
+    # Genuine Messenger XML (has com.facebook.orca) but no thread title → not_in_thread
+    monkeypatch.setattr(
+        ta, "dump_view_tree", lambda s, **kw:
+        "<hierarchy><node package='com.facebook.orca' "
+        "class='android.widget.FrameLayout'/></hierarchy>",
+    )
+    r = ta.verify_thread_title("abc", "Jane Doe")
+    assert r.ok is False
+    assert r.reason == "not_in_thread"
+
+
+def test_verify_thread_title_xml_garbage_no_vision(monkeypatch):
+    # Non-Messenger XML (notification shade, no com.facebook.orca) + no vision_cfg
     monkeypatch.setattr(
         ta, "dump_view_tree", lambda s, **kw:
         "<hierarchy><node class='android.widget.FrameLayout'/></hierarchy>",
     )
     r = ta.verify_thread_title("abc", "Jane Doe")
     assert r.ok is False
-    assert r.reason == "not_in_thread"
+    assert r.reason == "not_in_thread_xml_garbage"
 
 
 def test_verify_thread_title_ignores_unicode_direction(monkeypatch):

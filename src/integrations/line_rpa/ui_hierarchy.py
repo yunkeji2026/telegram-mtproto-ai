@@ -483,3 +483,42 @@ def find_send_button_center(
     hits.sort(key=lambda x: x[3])
     l, t, r, b = hits[-1]
     return (l + r) // 2, (t + b) // 2
+
+
+def find_accept_button_coords(
+    xml_bytes: bytes,
+) -> List[Tuple[int, int]]:
+    """找页面上所有"接受好友申请"按钮的点击坐标。
+
+    匹配策略（无序优先级）：
+      1. text / content-desc 包含 Accept / 同意 / 承認 / 추가 / 허락
+      2. resource-id 包含 "accept" / "agree" / "confirm"
+      3. 排除 text 空白 & 排除宽度过小的误识
+    """
+    try:
+        root = ET.fromstring(xml_bytes)
+    except ET.ParseError:
+        return []
+
+    _ACCEPT_TEXTS = {"accept", "同意", "承認", "추가", "허락", "add", "agree", "confirm"}
+    _ACCEPT_RID = {"accept", "agree", "confirm"}
+
+    hits: List[Tuple[int, int]] = []
+    for el in root.iter():
+        text = (el.get("text") or "").strip().lower()
+        cdesc = (el.get("content-desc") or "").strip().lower()
+        rid = (el.get("resource-id") or "").strip().lower()
+        bb = _parse_bounds(el.get("bounds") or "")
+        if not bb:
+            continue
+        l, t, r, b = bb
+        if r - l < 20 or b - t < 12:
+            continue
+        matched = (
+            any(k in text for k in _ACCEPT_TEXTS)
+            or any(k in cdesc for k in _ACCEPT_TEXTS)
+            or any(k in rid for k in _ACCEPT_RID)
+        )
+        if matched:
+            hits.append(((l + r) // 2, (t + b) // 2))
+    return hits

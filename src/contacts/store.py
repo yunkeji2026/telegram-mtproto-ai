@@ -119,6 +119,33 @@ CREATE TABLE IF NOT EXISTS merge_review_queue (
 );
 CREATE INDEX IF NOT EXISTS idx_review_status ON merge_review_queue(status, created_at DESC);
 
+-- W3-3G：reunion 草稿日志（关联生成 → 发送 → 回复评估的完整闭环）
+CREATE TABLE IF NOT EXISTS draft_log (
+    draft_id          TEXT PRIMARY KEY,
+    journey_id        TEXT NOT NULL,
+    contact_id        TEXT NOT NULL DEFAULT '',
+    draft_text        TEXT NOT NULL,
+    draft_lang        TEXT NOT NULL DEFAULT 'zh',
+    intimacy_score    REAL NOT NULL DEFAULT 0,
+    silent_days       INTEGER NOT NULL DEFAULT 0,
+    funnel_stage      TEXT NOT NULL DEFAULT '',
+    prompt_variant    TEXT NOT NULL DEFAULT 'v1',
+    -- W3-3I.5：prompt 文本的 stable hash（前 8 字节 SHA-256 hex）
+    -- 用于"这条 draft 当时用的什么 prompt 文本"回溯（持久化的 yaml 改了之后仍能对账）
+    prompt_snapshot_hash TEXT NOT NULL DEFAULT '',
+    generated_at      INTEGER NOT NULL,
+    -- 发送态：sent_ts NULL = 还没标记已发
+    sent_ts           INTEGER,
+    sent_by           TEXT,
+    -- 评估态：success_eval_ts NULL = 还没评估
+    success_eval_ts   INTEGER,
+    success           INTEGER,        -- 1=有回复 / 0=无回复 / NULL=未评估
+    reply_event_id    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_draft_jid ON draft_log(journey_id, generated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_draft_sent ON draft_log(sent_ts) WHERE sent_ts IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_draft_pending_eval ON draft_log(sent_ts) WHERE sent_ts IS NOT NULL AND success_eval_ts IS NULL;
+
 CREATE TABLE IF NOT EXISTS account_handoff_counters (
     account_id  TEXT NOT NULL,
     day         TEXT NOT NULL,      -- YYYY-MM-DD (UTC)
@@ -126,6 +153,21 @@ CREATE TABLE IF NOT EXISTS account_handoff_counters (
     PRIMARY KEY (account_id, day)
 );
 CREATE INDEX IF NOT EXISTS idx_counters_day ON account_handoff_counters(day);
+
+-- B2: KPI 漏斗告警（种类：kpi_drop_engaged_rate / kpi_drop_handoff_rate / ...）
+CREATE TABLE IF NOT EXISTS kpi_alerts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          REAL NOT NULL,
+    kind        TEXT NOT NULL,
+    severity    TEXT DEFAULT 'warn',
+    message     TEXT DEFAULT '',
+    detail_json TEXT DEFAULT '{}',
+    acked       INTEGER DEFAULT 0,
+    acked_at    REAL,
+    acked_by    TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_kpi_alerts_ts   ON kpi_alerts(ts DESC);
+CREATE INDEX IF NOT EXISTS idx_kpi_alerts_kind ON kpi_alerts(kind, ts DESC);
 """
 
 
@@ -144,6 +186,17 @@ class ContactStore:
             self._conn.execute("PRAGMA synchronous=NORMAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.executescript(_DDL)
+            # W3-3I.5：幂等 migration —— 老 DB 没 prompt_snapshot_hash 列时补上
+            cols = {
+                row[1] for row in self._conn.execute(
+                    "PRAGMA table_info(draft_log)"
+                ).fetchall()
+            }
+            if "prompt_snapshot_hash" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE draft_log ADD COLUMN "
+                    "prompt_snapshot_hash TEXT NOT NULL DEFAULT ''"
+                )
             self._conn.commit()
 
     def close(self) -> None:
@@ -272,13 +325,230 @@ class ContactStore:
         with self._lock:
             return self._conn.execute("SELECT COUNT(*) FROM contacts").fetchone()[0]
 
-    def count_journeys_by_stage(self) -> Dict[str, int]:
-        """按 funnel_stage 聚合 Journey 数量。Funnel Dashboard 基础数据。"""
+    def count_journeys_by_stage(self, channel: Optional[str] = None) -> Dict[str, int]:
+        """按 funnel_stage 聚合 Journey 数量。Funnel Dashboard 基础数据。
+
+        Args:
+            channel: 可选，按 channel 过滤（messenger/line/telegram/mobile）。
+                None → 所有 Journey；非 None → 仅统计在该 channel 上有
+                identity 的 Journey（**COUNT(DISTINCT)**，避免同一 journey
+                在 N 个 account 各算一次）。
+
+        Returns: ``{stage: count}``，例如 ``{"INITIAL": 12, "ENGAGED": 8}``。
+        """
+        if channel is None:
+            with self._lock:
+                rows = self._conn.execute(
+                    "SELECT funnel_stage, COUNT(*) AS n FROM journeys GROUP BY funnel_stage"
+                ).fetchall()
+            return {r["funnel_stage"]: r["n"] for r in rows}
+        # ── 带 channel 过滤：JOIN + DISTINCT 防重复计数 ────────────────
         with self._lock:
             rows = self._conn.execute(
-                "SELECT funnel_stage, COUNT(*) AS n FROM journeys GROUP BY funnel_stage"
+                "SELECT j.funnel_stage, COUNT(DISTINCT j.journey_id) AS n "
+                "FROM journeys j "
+                "JOIN channel_identities ci ON j.contact_id = ci.contact_id "
+                "WHERE ci.channel = ? "
+                "GROUP BY j.funnel_stage",
+                (channel,),
             ).fetchall()
         return {r["funnel_stage"]: r["n"] for r in rows}
+
+    def count_stage_transitions_by_day(
+        self,
+        *,
+        days: int = 30,
+        channel: Optional[str] = None,
+        now_ts: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """B1：从 journey_events 重放每天每个 stage 的进入数（流量时序）。
+
+        数据源是 ``journey_events.event_type='stage_change'``（含
+        ``journey_fsm.transit`` + 各处主动写入）。``silence_decay`` 是后
+        台衰减不算业务事件，**刻意排除**。
+
+        Args:
+            days: 取过去多少天的窗口（不含未来）。默认 30。
+            channel: 可选，仅统计在该 channel 上有 identity 的 journey
+                （与 ``count_journeys_by_stage(channel=...)`` 语义一致；
+                JOIN + DISTINCT 防同 journey 多 CI 重复计数）。
+            now_ts: 测试用，注入"现在"时间戳；缺省取 self._now()。
+
+        Returns:
+            按天升序的列表，每项 ``{"day": "YYYY-MM-DD", "by_stage":
+            {stage: n}}``。即使某天 0 进入也保留 day 行（前端折线图不
+            断点）。
+
+        实现细节：
+          - 只用 SQL 做"事件筛选 + 可选 channel JOIN + DISTINCT"，
+            payload_json 的 'to' stage 字段在 Python 层 json.loads 提取
+            （避免依赖 SQLite JSON1 模块）。
+          - 同一 journey 一天内多次进入同一 stage 也只算 1 次
+            （DISTINCT，否则 flip-flop 会膨胀流量）。
+        """
+        import json as _json
+        from datetime import datetime, timedelta, timezone
+
+        days = max(1, int(days))
+        now = int(now_ts) if now_ts is not None else self._now()
+        # 截掉 now 当天的"未到达"那部分：用 UTC 当天 23:59:59
+        today_utc = datetime.fromtimestamp(now, tz=timezone.utc).date()
+        cutoff_date = today_utc - timedelta(days=days - 1)
+        cutoff_ts = int(
+            datetime(
+                cutoff_date.year, cutoff_date.month, cutoff_date.day,
+                tzinfo=timezone.utc,
+            ).timestamp()
+        )
+
+        # SQL 拉所有候选事件 —— 数据量是 N 天 × 每天 stage 变化次数，
+        # 即使一天 10000 次也才 30 万行，足够在内存里处理
+        if channel is None:
+            sql = (
+                "SELECT je.journey_id, je.payload_json, je.ts "
+                "FROM journey_events je "
+                "WHERE je.event_type='stage_change' AND je.ts >= ?"
+            )
+            params: tuple = (cutoff_ts,)
+        else:
+            # JOIN channel_identities 过滤 + DISTINCT 防重复
+            sql = (
+                "SELECT DISTINCT je.journey_id, je.payload_json, je.ts "
+                "FROM journey_events je "
+                "JOIN journeys j ON j.journey_id = je.journey_id "
+                "JOIN channel_identities ci ON ci.contact_id = j.contact_id "
+                "WHERE je.event_type='stage_change' AND je.ts >= ? "
+                "AND ci.channel = ?"
+            )
+            params = (cutoff_ts, channel)
+
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+
+        # Python 层：按 (day, to_stage) 聚合，同 (day, journey, stage) 只算 1
+        # 用 set 去重
+        seen_day_journey_stage: set = set()
+        bucket: Dict[str, Dict[str, int]] = {}
+        for r in rows:
+            try:
+                payload = _json.loads(r["payload_json"] or "{}")
+                to_stage = str(payload.get("to") or "").strip()
+            except Exception:
+                continue
+            if not to_stage:
+                continue
+            day = datetime.fromtimestamp(
+                int(r["ts"]), tz=timezone.utc,
+            ).strftime("%Y-%m-%d")
+            key = (day, r["journey_id"], to_stage)
+            if key in seen_day_journey_stage:
+                continue
+            seen_day_journey_stage.add(key)
+            bucket.setdefault(day, {})
+            bucket[day][to_stage] = bucket[day].get(to_stage, 0) + 1
+
+        # 输出按 day 升序填充（缺失天补空 dict，让前端折线不断）
+        out: List[Dict[str, Any]] = []
+        for i in range(days):
+            d = (cutoff_date + timedelta(days=i)).strftime("%Y-%m-%d")
+            out.append({"day": d, "by_stage": bucket.get(d, {})})
+        return out
+
+    # ── B2: KPI 漏斗告警 ─────────────────────────────────
+    def insert_kpi_alert(
+        self, *, kind: str, severity: str = "warn",
+        message: str = "", detail: Optional[Dict] = None,
+        dedup_window_sec: float = 14400.0,
+    ) -> Optional[int]:
+        """插入 KPI 告警，含去重（同 kind 在窗口内已存在则跳过）。
+
+        Args:
+            kind: 告警类型，如 ``kpi_drop_engaged_rate``。
+            severity: ``warn`` / ``critical``。
+            message: 人可读摘要。
+            detail: 附加 JSON 数据（rate_key / today_val / avg_7d 等）。
+            dedup_window_sec: 去重窗口，默认 4 小时（3600×4）。
+
+        Returns:
+            新插入记录的 id；重复时返回 None。
+        """
+        since = time.time() - dedup_window_sec
+        with self._lock:
+            dup = self._conn.execute(
+                "SELECT id FROM kpi_alerts WHERE kind=? AND ts>=? LIMIT 1",
+                (kind, since),
+            ).fetchone()
+            if dup:
+                return None
+            cur = self._conn.execute(
+                "INSERT INTO kpi_alerts (ts, kind, severity, message, detail_json) "
+                "VALUES (?,?,?,?,?)",
+                (time.time(), kind, severity, message,
+                 json.dumps(detail or {}, ensure_ascii=False)),
+            )
+            self._conn.commit()
+            return cur.lastrowid
+
+    def list_kpi_alerts(
+        self,
+        limit: int = 50,
+        *,
+        unacked_only: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """列出 KPI 告警（降序，最新在前）。"""
+        sql = "SELECT * FROM kpi_alerts"
+        params: tuple
+        if unacked_only:
+            sql += " WHERE acked=0"
+            params = (limit,)
+        else:
+            params = (limit,)
+        sql += " ORDER BY ts DESC LIMIT ?"
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            out.append({
+                "id": r["id"],
+                "ts": r["ts"],
+                "kind": r["kind"],
+                "severity": r["severity"],
+                "message": r["message"],
+                "detail": json.loads(r["detail_json"] or "{}"),
+                "acked": bool(r["acked"]),
+                "acked_at": r["acked_at"],
+                "acked_by": r["acked_by"] or "",
+            })
+        return out
+
+    def ack_kpi_alert(self, alert_id: int, *, acked_by: str = "") -> bool:
+        """确认单条 KPI 告警。返回 True 表示成功更新（未确认 → 已确认）。"""
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE kpi_alerts SET acked=1, acked_at=?, acked_by=? "
+                "WHERE id=? AND acked=0",
+                (time.time(), acked_by, alert_id),
+            )
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    def ack_all_kpi_alerts(self, *, acked_by: str = "") -> int:
+        """批量确认所有未读 KPI 告警。返回实际更新条数。"""
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE kpi_alerts SET acked=1, acked_at=?, acked_by=? WHERE acked=0",
+                (time.time(), acked_by),
+            )
+            self._conn.commit()
+        return cur.rowcount
+
+    def count_unacked_kpi_alerts(self) -> int:
+        """未确认 KPI 告警数（用于 UI 红点徽章）。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM kpi_alerts WHERE acked=0"
+            ).fetchone()
+        return int(row[0]) if row else 0
 
     def count_channel_identities_by_channel(self) -> Dict[str, int]:
         with self._lock:
@@ -286,6 +556,45 @@ class ContactStore:
                 "SELECT channel, COUNT(*) AS n FROM channel_identities GROUP BY channel"
             ).fetchall()
         return {r["channel"]: r["n"] for r in rows}
+
+    def count_multi_platform_contacts(self) -> Dict[str, Any]:
+        """W3-3L.2：统计跨平台联系人（拥有 2+ 不同 channel 的 contact）。
+
+        返回::
+
+            {
+                "multi_platform_contacts": N,
+                "by_channel_combo": {"line+messenger": 12, "messenger+telegram": 3, ...},
+            }
+
+        设计：
+          - 在 Python 层聚合（而非复杂 SQL）：数量级 ≤ 万行时足够快，
+            且 SQLite 不支持 ``GROUP_CONCAT`` 内排序，Python 更清晰。
+          - 只统计 distinct channel（不同账号的同 channel 算一个）。
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT contact_id, channel FROM channel_identities"
+                " ORDER BY contact_id, channel"
+            ).fetchall()
+
+        from collections import defaultdict
+        channels_by_contact: Dict[str, set] = defaultdict(set)
+        for r in rows:
+            channels_by_contact[r["contact_id"]].add(r["channel"])
+
+        combo_count: Dict[str, int] = {}
+        multi_n = 0
+        for channels in channels_by_contact.values():
+            if len(channels) >= 2:
+                multi_n += 1
+                combo = "+".join(sorted(channels))
+                combo_count[combo] = combo_count.get(combo, 0) + 1
+
+        return {
+            "multi_platform_contacts": multi_n,
+            "by_channel_combo": combo_count,
+        }
 
     # ── 每账号每日 handoff 计数 ───────────────────────────
     def incr_account_handoff_counter(self, account_id: str, day: str) -> int:
@@ -454,6 +763,29 @@ class ContactStore:
                 (channel, account_id, external_id),
             ).fetchone()
         return _row_to_ci(row) if row else None
+
+    def list_channel_identities_for_contacts(
+        self, contact_ids: List[str],
+    ) -> Dict[str, List[ChannelIdentity]]:
+        """W3-3L.4：批量拉取多个 contact 的所有 ChannelIdentity（单次 SQL）。
+
+        避免 N+1 问题；返回 ``{contact_id: [ChannelIdentity, ...]}``.
+        对不存在的 contact_id 返回空列表（不报错）。
+        """
+        if not contact_ids:
+            return {}
+        placeholders = ",".join("?" * len(contact_ids))
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT * FROM channel_identities WHERE contact_id IN ({placeholders})"
+                " ORDER BY contact_id, linked_at",
+                contact_ids,
+            ).fetchall()
+        result: Dict[str, List[ChannelIdentity]] = {cid: [] for cid in contact_ids}
+        for r in rows:
+            ci = _row_to_ci(r)
+            result.setdefault(ci.contact_id, []).append(ci)
+        return result
 
     def list_channel_identities_of(self, contact_id: str) -> List[ChannelIdentity]:
         with self._lock:
@@ -658,17 +990,392 @@ class ContactStore:
                 "SELECT * FROM journey_events WHERE journey_id=? ORDER BY ts DESC LIMIT ?",
                 (journey_id, limit),
             ).fetchall()
-        out: List[Dict[str, Any]] = []
-        for r in rows:
-            out.append({
-                "event_id": r["event_id"],
-                "journey_id": r["journey_id"],
-                "trace_id": r["trace_id"],
-                "event_type": r["event_type"],
-                "payload": json.loads(r["payload_json"] or "{}"),
-                "ts": r["ts"],
-            })
+        return self._rows_to_events(rows)
+
+    def list_events_for_journeys(
+        self, journey_ids: List[str], limit_per_journey: int = 500,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """W3-3D.2：批量加载多个 journey 的事件，避免 N+1。
+
+        实现：
+          - 1 次 SQL 用 ``WHERE journey_id IN (...)`` 拿全量
+          - 在内存里按 ``journey_id`` 分组，每组取最新 ``limit_per_journey`` 条
+          - 返回 ``{journey_id: events}``，**保证每个传入 jid 都有 key**（即使为 []）
+            以便调用方可直接 ``result[jid]`` 不需 ``.get(jid, [])``
+
+        SQLite IN-list 上限通常是 999/32766（依版本）。当 ``len(journey_ids)`` 超
+        阈值时分批查询。
+        """
+        if not journey_ids:
+            return {}
+        # SQLite SQLITE_MAX_VARIABLE_NUMBER 安全值
+        CHUNK = 800
+        out: Dict[str, List[Dict[str, Any]]] = {jid: [] for jid in journey_ids}
+        with self._lock:
+            for i in range(0, len(journey_ids), CHUNK):
+                chunk = journey_ids[i:i + CHUNK]
+                placeholders = ",".join("?" * len(chunk))
+                rows = self._conn.execute(
+                    f"SELECT * FROM journey_events WHERE journey_id IN ({placeholders}) "
+                    f"ORDER BY journey_id, ts DESC",
+                    chunk,
+                ).fetchall()
+                for r in rows:
+                    jid = r["journey_id"]
+                    bucket = out.get(jid)
+                    if bucket is None:
+                        # journey_id 不在请求列表中（不应发生，防御）
+                        continue
+                    if len(bucket) < limit_per_journey:
+                        bucket.append(self._row_to_event(r))
         return out
+
+    @staticmethod
+    def _row_to_event(row) -> Dict[str, Any]:
+        try:
+            payload = json.loads(row["payload_json"] or "{}")
+        except (TypeError, ValueError):
+            payload = {}
+        return {
+            "event_id": row["event_id"],
+            "journey_id": row["journey_id"],
+            "trace_id": row["trace_id"],
+            "event_type": row["event_type"],
+            "payload": payload,
+            "ts": row["ts"],
+        }
+
+    def _rows_to_events(self, rows) -> List[Dict[str, Any]]:
+        return [self._row_to_event(r) for r in rows]
+
+    # ── Draft Log（W3-3G：reunion 草稿生成→发送→评估闭环） ──
+    def record_draft(
+        self,
+        *,
+        journey_id: str,
+        contact_id: str = "",
+        draft_text: str,
+        draft_lang: str = "zh",
+        intimacy_score: float = 0.0,
+        silent_days: int = 0,
+        funnel_stage: str = "",
+        prompt_variant: str = "v1",
+        prompt_snapshot_hash: str = "",
+    ) -> str:
+        """记录一次 draft 生成。返回 draft_id。
+
+        ``prompt_snapshot_hash``（W3-3I.5）：prompt 文本的 stable hash，
+        留空则自动从 ``draft_text`` 派生（兼容旧调用方）。建议传入
+        ``hash_prompt(prompt)``，因为 draft_text 是 AI 输出而非 prompt 本身。
+        """
+        did = new_id()
+        now = self._now()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO draft_log (draft_id, journey_id, contact_id, draft_text, "
+                "draft_lang, intimacy_score, silent_days, funnel_stage, prompt_variant, "
+                "prompt_snapshot_hash, generated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (did, journey_id, contact_id, draft_text, draft_lang,
+                 float(intimacy_score), int(silent_days), funnel_stage,
+                 prompt_variant, prompt_snapshot_hash, now),
+            )
+            self._conn.commit()
+        return did
+
+    def latest_unsent_draft_for(self, journey_id: str) -> Optional[Dict[str, Any]]:
+        """取该 journey 最新一条还未 mark-sent 的 draft（用于 /mark-sent 联动）。
+
+        同秒插入的多条用 ROWID 作 tiebreaker，保证「后写的赢」。
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM draft_log WHERE journey_id=? AND sent_ts IS NULL "
+                "ORDER BY generated_at DESC, ROWID DESC LIMIT 1",
+                (journey_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def mark_draft_sent(
+        self, draft_id: str, *, sent_by: str = "",
+    ) -> bool:
+        """把 draft 置为已发。已发 / 不存在的返回 False。"""
+        now = self._now()
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE draft_log SET sent_ts=?, sent_by=? "
+                "WHERE draft_id=? AND sent_ts IS NULL",
+                (now, sent_by, draft_id),
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
+
+    def mark_draft_unsent(self, draft_id: str) -> bool:
+        """W3-3H.5：撤回 draft 的「已发」状态（运营点错时用）。
+
+        - 仅清 sent_ts / sent_by；保留 draft_text 等
+        - **拒绝撤回**已评估过的 draft（success_eval_ts 非空）：因为 success
+          已写入 stats，撤回会导致历史分母不一致
+        - 已评估过 / 没发过 / 不存在 → False
+        """
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE draft_log SET sent_ts=NULL, sent_by=NULL "
+                "WHERE draft_id=? AND sent_ts IS NOT NULL "
+                "AND success_eval_ts IS NULL",
+                (draft_id,),
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
+
+    def find_first_msg_in_window(
+        self,
+        journey_id: str,
+        *,
+        after_ts: int,
+        before_ts: int,
+    ) -> Optional[Dict[str, Any]]:
+        """W3-3H.6：在 ``(after_ts, before_ts]`` 区间找该 journey 第一条 msg_in。
+
+        给 DraftSuccessEvaluator 用，避免它直接访问 ``_lock`` / ``_conn``。
+
+        返回 ``{event_id, ts}`` 或 ``None``。
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT event_id, ts FROM journey_events "
+                "WHERE journey_id=? AND event_type='msg_in' "
+                "AND ts > ? AND ts <= ? "
+                "ORDER BY ts ASC LIMIT 1",
+                (journey_id, int(after_ts), int(before_ts)),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def list_drafts_pending_eval(
+        self, *, window_secs: int = 86400, now_ts: Optional[int] = None,
+        limit: int = 500,
+    ) -> List[Dict[str, Any]]:
+        """已发但还没评估，且评估窗口已到期的草稿。"""
+        now = int(now_ts) if now_ts is not None else self._now()
+        deadline = now - int(window_secs)
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM draft_log "
+                "WHERE sent_ts IS NOT NULL AND success_eval_ts IS NULL "
+                "AND sent_ts <= ? "
+                "ORDER BY sent_ts ASC LIMIT ?",
+                (deadline, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def eval_draft_success(
+        self, draft_id: str, *, success: bool,
+        reply_event_id: str = "", now_ts: Optional[int] = None,
+    ) -> bool:
+        """写评估结果。已评估过的返回 False（幂等）。"""
+        now = int(now_ts) if now_ts is not None else self._now()
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE draft_log SET success_eval_ts=?, success=?, reply_event_id=? "
+                "WHERE draft_id=? AND success_eval_ts IS NULL",
+                (now, 1 if success else 0, reply_event_id, draft_id),
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
+
+    @staticmethod
+    def _wilson_lower(success: int, total: int, *, z: float = 1.96) -> Optional[float]:
+        """Wilson score 区间下界（95% CI by default）。
+
+        比朴素 success/total 更稳健 —— 3/3=100% 给出虚高，5/10=50% 才有意义。
+        Reference: https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval
+        """
+        if total <= 0:
+            return None
+        p = success / total
+        denom = 1.0 + z * z / total
+        center = (p + z * z / (2 * total)) / denom
+        margin = (
+            z * ((p * (1 - p) + z * z / (4 * total)) / total) ** 0.5
+        ) / denom
+        return max(0.0, round(center - margin, 3))
+
+    @staticmethod
+    def _wilson_upper(success: int, total: int, *, z: float = 1.96) -> Optional[float]:
+        """Wilson score 区间上界（W3-3I.1：判断 A/B 显著性时和 _wilson_lower 配对用）。"""
+        if total <= 0:
+            return None
+        p = success / total
+        denom = 1.0 + z * z / total
+        center = (p + z * z / (2 * total)) / denom
+        margin = (
+            z * ((p * (1 - p) + z * z / (4 * total)) / total) ** 0.5
+        ) / denom
+        return min(1.0, round(center + margin, 3))
+
+    @classmethod
+    def pick_winning_variant(
+        cls, by_variant: Dict[str, Dict[str, Any]],
+        *, min_evaluated: int = 10,
+    ) -> Optional[Dict[str, Any]]:
+        """W3-3I.1：从 ``by_variant`` 桶里挑显著优胜者。
+
+        判定：
+          - 至少有 2 个 variant 各自评估数 ≥ ``min_evaluated``
+          - 「最强」variant 的 95% CI 下界 > 「最弱」variant 的 95% CI 上界
+            （即两区间不重叠 → 差异显著）
+          - 返回 ``{winner, winner_rate, runner_up, runner_up_rate, gap}``，
+            否则返回 ``None``（数据不足或差异未显著）
+
+        阈值 ``min_evaluated=10`` 是工程权衡：太低（< 5）噪声大，太高
+        （> 30）等太久；10 在 50/50 路由下大约对应每 variant 累计 30+
+        样本就能决断。
+        """
+        eligible = {
+            k: v for k, v in by_variant.items()
+            if isinstance(v, dict) and int(v.get("evaluated", 0)) >= min_evaluated
+            and v.get("success_rate") is not None
+            and v.get("success_rate_lower") is not None
+        }
+        if len(eligible) < 2:
+            return None
+        # 按点估计排：最强 vs 最弱
+        ranked = sorted(
+            eligible.items(),
+            key=lambda kv: kv[1]["success_rate"],
+            reverse=True,
+        )
+        winner_id, winner = ranked[0]
+        loser_id, loser = ranked[-1]
+        loser_upper = cls._wilson_upper(
+            int(loser["success"]), int(loser["evaluated"]),
+        )
+        if loser_upper is None:
+            return None
+        if winner["success_rate_lower"] > loser_upper:
+            return {
+                "winner": winner_id,
+                "winner_rate": winner["success_rate"],
+                "winner_evaluated": winner["evaluated"],
+                "runner_up": loser_id,
+                "runner_up_rate": loser["success_rate"],
+                "runner_up_evaluated": loser["evaluated"],
+                "gap_pct": round(
+                    (winner["success_rate"] - loser["success_rate"]) * 100, 1,
+                ),
+            }
+        return None
+
+    @staticmethod
+    def _silent_band(days: int) -> str:
+        """W3-3H.4：把 silent_days 分到 4 桶（运营粒度）。"""
+        d = int(days or 0)
+        if d < 7:
+            return "0-6d"
+        if d < 14:
+            return "7-13d"
+        if d < 30:
+            return "14-29d"
+        if d < 60:
+            return "30-59d"
+        return "60d+"
+
+    def draft_quality_stats(
+        self, *, days: int = 7, now_ts: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """汇总最近 N 天的 draft 质量。
+
+        返回 {window_days, generated, sent, evaluated, success, success_rate,
+              success_rate_lower (Wilson 95% CI 下界，更稳健),
+              by_lang: {zh: {sent, evaluated, success, success_rate, success_rate_lower}, ...},
+              by_variant: {...}, by_silent_band: {...}}
+        """
+        now = int(now_ts) if now_ts is not None else self._now()
+        cutoff = now - int(days) * 86400
+        with self._lock:
+            # 一次性把窗口内所有 draft 拿出来，内存里分组（数据量小）
+            rows = [dict(r) for r in self._conn.execute(
+                "SELECT * FROM draft_log WHERE generated_at >= ?", (cutoff,),
+            ).fetchall()]
+        generated = len(rows)
+        sent_rows = [r for r in rows if r.get("sent_ts")]
+        eval_rows = [r for r in rows if r.get("success_eval_ts")]
+        success_rows = [r for r in eval_rows if r.get("success")]
+
+        def _group(key_fn):
+            """key_fn: row → bucket key（str 或 None）。"""
+            buckets: Dict[str, Dict[str, Any]] = {}
+            for r in sent_rows:
+                k = key_fn(r) or "_unknown"
+                b = buckets.setdefault(
+                    k, {"sent": 0, "evaluated": 0, "success": 0},
+                )
+                b["sent"] += 1
+                if r.get("success_eval_ts"):
+                    b["evaluated"] += 1
+                    if r.get("success"):
+                        b["success"] += 1
+            for k, b in buckets.items():
+                b["success_rate"] = (
+                    round(b["success"] / b["evaluated"], 3)
+                    if b["evaluated"] else None
+                )
+                b["success_rate_lower"] = self._wilson_lower(
+                    b["success"], b["evaluated"],
+                )
+            return buckets
+
+        return {
+            "window_days": days,
+            "generated": generated,
+            "sent": len(sent_rows),
+            "evaluated": len(eval_rows),
+            "success": len(success_rows),
+            "success_rate": (
+                round(len(success_rows) / len(eval_rows), 3)
+                if eval_rows else None
+            ),
+            "success_rate_lower": self._wilson_lower(
+                len(success_rows), len(eval_rows),
+            ),
+            "by_lang": _group(lambda r: r.get("draft_lang")),
+            "by_variant": _group(lambda r: r.get("prompt_variant")),
+            "by_silent_band": _group(
+                lambda r: self._silent_band(r.get("silent_days", 0)),
+            ),
+        }
+
+    def draft_quality_by_hash(
+        self, *, days: int = 7, now_ts: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """W3-3J.4：按 prompt_snapshot_hash 聚合 draft 质量。
+
+        返回 ``{hash16: {sent, evaluated, success, success_rate, success_rate_lower}}``。
+        hash == "" 的行（旧数据，无 hash）归入 "_legacy" 桶。
+        """
+        now = int(now_ts) if now_ts is not None else self._now()
+        cutoff = now - int(days) * 86400
+        with self._lock:
+            rows = [dict(r) for r in self._conn.execute(
+                "SELECT * FROM draft_log WHERE generated_at >= ? AND sent_ts IS NOT NULL",
+                (cutoff,),
+            ).fetchall()]
+        buckets: Dict[str, Dict[str, Any]] = {}
+        for r in rows:
+            k = (r.get("prompt_snapshot_hash") or "").strip() or "_legacy"
+            b = buckets.setdefault(k, {"sent": 0, "evaluated": 0, "success": 0})
+            b["sent"] += 1
+            if r.get("success_eval_ts"):
+                b["evaluated"] += 1
+                if r.get("success"):
+                    b["success"] += 1
+        for b in buckets.values():
+            b["success_rate"] = (
+                round(b["success"] / b["evaluated"], 3)
+                if b["evaluated"] else None
+            )
+            b["success_rate_lower"] = self._wilson_lower(b["success"], b["evaluated"])
+        return buckets
 
     def compute_reactivation_response_stats(
         self, *, window_sec: int = 86400, response_window_sec: int = 86400,
