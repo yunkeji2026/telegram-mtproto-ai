@@ -24,4 +24,6 @@ i18n:
   zh: i18n/zh.yaml
   en: i18n/en.yaml
 
+hooks: true
+
 web_routes: false

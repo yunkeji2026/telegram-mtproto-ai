@@ -49,25 +49,38 @@ class ChatAnalysis:
         }
 
 
-class ChatAssistantService:
-    """Rule-first analyzer with an optional AI upgrade path.
+_RISK_ORDER = {"low": 0, "medium": 1, "high": 2}
 
-    The MVP keeps output stable and auditable. Later phases can add LLM scoring
-    behind the same return shape.
+
+class ChatAssistantService:
+    """Rule-first analyzer with an optional LLM upgrade path (Phase C1).
+
+    规则做兜底、LLM 做提升，返回 shape 始终是 ChatAnalysis。关键不变量：
+    - LLM 故障/超时/非 JSON → 静默回落规则版，不抛错。
+    - 风险只升不降：final_risk = max(rule, llm)；规则命中的硬底线（money/privacy
+      /self_harm 等）LLM 不能调低。
+    - use_llm=False / ai_client=None 时行为与改造前完全一致（向后兼容）。
     """
 
-    def __init__(self, *, ai_client: Optional[Any] = None) -> None:
-        self.ai_client = ai_client
-
-    async def analyze(
+    def __init__(
         self,
         *,
-        text: str,
-        messages: Optional[List[Dict[str, Any]]] = None,
-        chat: Optional[Dict[str, Any]] = None,
+        ai_client: Optional[Any] = None,
+        use_llm: bool = False,
+        analysis_store: Optional[Any] = None,
+        timeout_sec: float = 8.0,
+    ) -> None:
+        self.ai_client = ai_client
+        self._use_llm = bool(use_llm)
+        self._analysis_store = analysis_store
+        self._timeout = float(timeout_sec or 8.0)
+
+    def _rule_analyze(
+        self,
+        raw: str,
+        msgs: List[Dict[str, Any]],
+        chat: Optional[Dict[str, Any]],
     ) -> ChatAnalysis:
-        raw = str(text or "").strip()
-        msgs = list(messages or [])
         lang = (chat or {}).get("language") or detect_language(raw)
         emotion = _detect_emotion(raw)
         intent = _detect_intent(raw, emotion=emotion)
@@ -85,6 +98,84 @@ class ChatAssistantService:
             next_step=next_step,
             suggestions=suggestions,
         )
+
+    async def analyze(
+        self,
+        *,
+        text: str,
+        messages: Optional[List[Dict[str, Any]]] = None,
+        chat: Optional[Dict[str, Any]] = None,
+        use_llm: Optional[bool] = None,
+    ) -> ChatAnalysis:
+        raw = str(text or "").strip()
+        msgs = list(messages or [])
+        base = self._rule_analyze(raw, msgs, chat)
+        analyzer = "rule"
+
+        want_llm = self._use_llm if use_llm is None else bool(use_llm)
+        if want_llm and self.ai_client is not None and raw:
+            from src.ai.intent_llm import llm_score
+
+            llm = await llm_score(self.ai_client, raw, msgs, chat, timeout=self._timeout)
+            if llm:
+                base = _merge_analysis(base, llm)
+                analyzer = "llm"
+
+        self._save_analysis(base, chat, analyzer)
+        return base
+
+    def _save_analysis(
+        self, analysis: ChatAnalysis, chat: Optional[Dict[str, Any]], analyzer: str
+    ) -> None:
+        store = self._analysis_store
+        if store is None or not hasattr(store, "save_analysis"):
+            return
+        conv_id = str((chat or {}).get("conversation_id") or "")
+        if not conv_id:
+            return
+        try:
+            from src.inbox.models import MessageAnalysis
+
+            store.save_analysis(MessageAnalysis(
+                message_id="",
+                conversation_id=conv_id,
+                intent=analysis.intent,
+                emotion=analysis.emotion,
+                risk_level=analysis.risk_level,
+                risk_reasons=list(analysis.risk_reasons),
+                relationship_stage=analysis.relationship_stage,
+                summary=getattr(analysis, "summary", "") or "",
+                order_no=getattr(analysis, "order_no", "") or "",
+                confidence=getattr(analysis, "confidence", 0.0) or 0.0,
+                analyzer=analyzer,
+            ))
+        except Exception:
+            pass
+
+
+def _merge_analysis(base: ChatAnalysis, llm: Dict[str, Any]) -> ChatAnalysis:
+    """合并规则 baseline 与 LLM 结果。风险只升不降，其余 LLM 非空优先。"""
+    rule_risk = base.risk_level
+    llm_risk = llm.get("risk_level") or rule_risk
+    final_risk = rule_risk if _RISK_ORDER.get(rule_risk, 0) >= _RISK_ORDER.get(llm_risk, 0) else llm_risk
+    reasons = list(base.risk_reasons)
+    for r in llm.get("risk_reasons", []) or []:
+        if r not in reasons:
+            reasons.append(r)
+    base.intent = llm.get("intent") or base.intent
+    base.emotion = llm.get("emotion") or base.emotion
+    base.risk_level = final_risk
+    base.risk_reasons = reasons
+    if llm.get("relationship_stage"):
+        base.relationship_stage = llm["relationship_stage"]
+    # ChatAnalysis 没有 summary/order_no/confidence 字段，附加为动态属性供落库读取
+    if llm.get("summary"):
+        setattr(base, "summary", llm["summary"])
+    if llm.get("order_no"):
+        setattr(base, "order_no", llm["order_no"])
+    if llm.get("confidence") is not None:
+        setattr(base, "confidence", llm["confidence"])
+    return base
 
 
 def _detect_emotion(text: str) -> str:

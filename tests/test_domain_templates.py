@@ -65,8 +65,6 @@ class TestPersonaFiles:
         return request.param
 
     def test_persona_exists_for_new_domains(self, domain_name):
-        if domain_name == "ecommerce":
-            pytest.skip("ecommerce is legacy skeleton, persona optional")
         persona_path = DOMAINS_DIR / domain_name / "persona.yaml"
         assert persona_path.exists(), f"{domain_name}/persona.yaml missing"
 
@@ -103,8 +101,6 @@ class TestKBFiles:
         return request.param
 
     def test_categories_yaml_exists(self, domain_name):
-        if domain_name == "ecommerce":
-            pytest.skip("ecommerce legacy")
         path = DOMAINS_DIR / domain_name / "kb" / "categories.yaml"
         assert path.exists(), f"{domain_name}/kb/categories.yaml missing"
 
@@ -119,8 +115,6 @@ class TestKBFiles:
         assert len(data["categories"]) >= 3, f"{domain_name}: fewer than 3 categories"
 
     def test_seeds_yaml_exists(self, domain_name):
-        if domain_name == "ecommerce":
-            pytest.skip("ecommerce legacy")
         path = DOMAINS_DIR / domain_name / "kb" / "seeds.yaml"
         assert path.exists(), f"{domain_name}/kb/seeds.yaml missing"
 
@@ -140,8 +134,6 @@ class TestHookFiles:
         return request.param
 
     def test_hooks_loadable(self, domain_name):
-        if domain_name == "ecommerce":
-            pytest.skip("ecommerce has no hooks")
         hooks_path = DOMAINS_DIR / domain_name / "hooks.py"
         if not hooks_path.exists():
             pytest.skip(f"{domain_name} has no hooks.py")
@@ -158,8 +150,6 @@ class TestHookFiles:
         assert issubclass(pack.hook_class, DomainHook), f"{domain_name}: hook not a DomainHook subclass"
 
     def test_hook_instantiable(self, domain_name):
-        if domain_name == "ecommerce":
-            pytest.skip("ecommerce has no hooks")
         hooks_path = DOMAINS_DIR / domain_name / "hooks.py"
         if not hooks_path.exists():
             pytest.skip(f"{domain_name} has no hooks.py")
@@ -181,14 +171,10 @@ class TestI18nFiles:
         return request.param
 
     def test_zh_i18n_exists(self, domain_name):
-        if domain_name == "ecommerce":
-            pytest.skip("ecommerce may have different structure")
         path = DOMAINS_DIR / domain_name / "i18n" / "zh.yaml"
         assert path.exists(), f"{domain_name}/i18n/zh.yaml missing"
 
     def test_en_i18n_exists(self, domain_name):
-        if domain_name == "ecommerce":
-            pytest.skip("ecommerce may have different structure")
         path = DOMAINS_DIR / domain_name / "i18n" / "en.yaml"
         assert path.exists(), f"{domain_name}/i18n/en.yaml missing"
 
@@ -196,7 +182,7 @@ class TestI18nFiles:
 class TestFullDomainLoad:
     """Integration test: load each domain pack through the full DomainLoader."""
 
-    @pytest.fixture(params=[d for d in ALL_DOMAINS if d != "ecommerce"])
+    @pytest.fixture(params=ALL_DOMAINS)
     def domain_name(self, request):
         return request.param
 
@@ -216,5 +202,4 @@ class TestFullDomainLoad:
 
         assert pack.system_prompt, f"{domain_name}: system_prompt empty after load"
         assert pack.persona, f"{domain_name}: persona empty after load"
-        if domain_name != "ecommerce":
-            assert pack.hook_class is not None, f"{domain_name}: no hook class after load"
+        assert pack.hook_class is not None, f"{domain_name}: no hook class after load"
