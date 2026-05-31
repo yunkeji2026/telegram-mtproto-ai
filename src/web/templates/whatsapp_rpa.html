@@ -2211,7 +2211,7 @@ function waEnsureOpsInit(){
   _waOpsLazyInit=true;
   if(window.rpa && window.rpa.funnel){
     const el = document.getElementById('pane-wa-funnel');
-    const initFunnel = ()=>{ rpa.funnel.init({intervalSec:60, defaultScope:'all'}); };
+    const initFunnel = ()=>{ window.rpa.funnel.init({intervalSec:60, defaultScope:'all'}); };
     if('IntersectionObserver' in window && el){
       const io = new IntersectionObserver((entries)=>{
         entries.forEach(en=>{

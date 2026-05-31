@@ -4,7 +4,19 @@
 <style>
 .inbox-layout { display:flex; gap:0; height:calc(100vh - 120px); overflow:hidden; }
 .inbox-sidebar { width:340px; min-width:260px; border-right:1px solid #e5e7eb; display:flex; flex-direction:column; background:#fff; }
-.inbox-main   { flex:1; display:flex; flex-direction:column; background:#f9fafb; }
+.inbox-main   { flex:1; display:grid; grid-template-columns:minmax(0,1fr) 300px; background:#f9fafb; min-width:0; }
+.chat-panel   { display:flex; flex-direction:column; min-width:0; }
+.ai-panel     { border-left:1px solid #e5e7eb; background:#fff; padding:14px; overflow-y:auto; }
+.ai-panel h3  { margin:0 0 10px; font-size:14px; color:#111827; }
+.ai-section   { border:1px solid #e5e7eb; border-radius:8px; padding:10px; margin-bottom:10px; background:#fbfdff; }
+.ai-label     { font-size:11px; color:#64748b; margin-bottom:4px; }
+.ai-value     { font-size:13px; color:#111827; font-weight:600; word-break:break-word; }
+.mode-row     { display:flex; gap:6px; flex-wrap:wrap; }
+.mode-pill    { font-size:11px; border:1px solid #d1d5db; border-radius:12px; padding:2px 7px; background:#fff; color:#374151; }
+.mode-select  { width:100%; border:1px solid #d1d5db; border-radius:7px; padding:6px 8px; font-size:12px; background:#fff; }
+.suggestion { border:1px solid #e5e7eb; border-radius:8px; padding:8px; margin-top:7px; background:#fff; }
+.suggestion-title { font-size:12px; color:#0f766e; font-weight:700; margin-bottom:4px; }
+.suggestion-text { font-size:12px; color:#374151; line-height:1.45; }
 
 /* Platform filter bar */
 .platform-bar { display:flex; gap:6px; padding:10px 12px; border-bottom:1px solid #e5e7eb; flex-wrap:wrap; }
@@ -37,6 +49,10 @@
 /* Message area */
 .msg-area { flex:1; overflow-y:auto; padding:16px 20px; display:flex; flex-direction:column; gap:10px; }
 .msg-bubble { max-width:72%; padding:9px 14px; border-radius:16px; font-size:13px; line-height:1.5; }
+.msg-translation { margin-top:6px; padding-top:6px; border-top:1px dashed rgba(100,116,139,.35); color:#64748b; font-size:12px; }
+.msg-tools { margin-top:4px; }
+.tiny-btn { border:1px solid #d1d5db; background:#fff; border-radius:6px; padding:2px 7px; font-size:11px; color:#374151; cursor:pointer; }
+.tiny-btn:hover { background:#f8fafc; border-color:#94a3b8; }
 .msg-peer  { background:#fff; border:1px solid #e5e7eb; align-self:flex-start; border-bottom-left-radius:4px; }
 .msg-self  { background:#2563eb; color:#fff; align-self:flex-end; border-bottom-right-radius:4px; }
 .msg-ts    { font-size:10px; color:#9ca3af; margin-top:2px; }
@@ -44,7 +60,12 @@
 .msg-self .msg-ts  { text-align:right; color:rgba(255,255,255,.6); }
 
 /* Reply bar */
-.reply-bar { padding:12px 16px; background:#fff; border-top:1px solid #e5e7eb; display:flex; gap:10px; }
+.reply-wrap { background:#fff; border-top:1px solid #e5e7eb; padding:10px 16px; }
+.reply-bar { display:flex; gap:10px; }
+.reply-tools { display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap; }
+.reply-preview { display:none; margin-top:8px; border:1px solid #dbeafe; background:#eff6ff; border-radius:8px; padding:8px 10px; font-size:12px; color:#1e3a8a; white-space:pre-wrap; }
+.voice-preview { display:none; margin-top:8px; border:1px solid #ccfbf1; background:#f0fdfa; border-radius:8px; padding:8px 10px; font-size:12px; color:#115e59; }
+.voice-preview audio { width:100%; margin-top:6px; }
 .reply-bar textarea { flex:1; border:1px solid #d1d5db; border-radius:8px; padding:8px 12px; font-size:13px; resize:none; line-height:1.4; font-family:inherit; }
 .reply-bar textarea:focus { outline:none; border-color:#2563eb; }
 .send-btn { padding:0 20px; background:#2563eb; color:#fff; border:none; border-radius:8px; cursor:pointer; font-size:13px; font-weight:600; }
@@ -91,6 +112,7 @@
   const PLATFORM_ICONS  = {telegram:'✈️',line:'💚',messenger:'💙',whatsapp:'💬'};
   const TAG_CLASS       = {telegram:'tag-telegram',line:'tag-line',messenger:'tag-messenger',whatsapp:'tag-wa'};
   let allChats = [], filtered = [], selectedChat = null, activePlat = 'all';
+  let threadMessages = [];
   let pollTimer = null;
 
   function fmtTs(ts){
@@ -136,29 +158,155 @@
     }).join('');
   }
 
-  function renderMain(c){
+  async function loadThread(c){
+    const qs = new URLSearchParams({platform:c.platform,account_id:c.account_id||'default',chat_key:c.chat_key||'',limit:'50'});
+    const r = await fetch('/api/unified-inbox/thread?'+qs.toString());
+    if(!r.ok) return c.messages||[];
+    const d = await r.json();
+    return d.messages||c.messages||[];
+  }
+
+  async function renderMain(c){
     if(!c){ document.getElementById('inbox-main').innerHTML=`<div class="empty-state"><div class="icon">💬</div><div style="font-size:15px;font-weight:600;">选择一个对话</div></div>`; return; }
     const color = PLATFORM_COLORS[c.platform]||'#6b7280';
-    const msg = c.last_msg;
-    const canSend = (c.platform==='messenger');
-    const sendHint = canSend?'':'发送功能仅限 approve 模式（LINE/WhatsApp 请在各自页面操作）';
+    const messages = await loadThread(c);
+    threadMessages = messages;
+    const canSend = !!c.can_send;
+    const sendHint = canSend?'输入回复内容...':'当前平台暂不支持从统一工作台发送';
+    const stage = c.relationship?.stage || '待分析';
+    const risk = c.risk?.level || '待分析';
+    const lang = c.language || c.last_message?.language || 'unknown';
+    const modes = c.send_modes || ['manual','review','multi_choice'];
     document.getElementById('inbox-main').innerHTML=`
-      <div class="inbox-header">
-        <div class="plat-icon">${PLATFORM_ICONS[c.platform]||'?'}</div>
-        <div>
-          <div class="chat-title">${esc(c.name||c.chat_key)}</div>
-          <div class="chat-sub">${c.platform_name} · ${c.account_label||c.account_id}</div>
+      <div class="chat-panel">
+        <div class="inbox-header">
+          <div class="plat-icon">${PLATFORM_ICONS[c.platform]||'?'}</div>
+          <div>
+            <div class="chat-title">${esc(c.name||c.chat_key)}</div>
+            <div class="chat-sub">${c.platform_name} · ${c.account_label||c.account_id}</div>
+          </div>
+        </div>
+        <div class="msg-area" id="msg-area">
+          ${messages.length?messages.map(renderMessage).join(''):'<div style="text-align:center;color:#9ca3af;font-size:13px;padding:30px">暂无消息记录</div>'}
+        </div>
+        <div class="reply-wrap">
+          <div class="reply-bar">
+            <textarea id="reply-text" rows="2" placeholder="${sendHint}" ${canSend?'':'disabled'}></textarea>
+            <button class="send-btn" id="send-btn" ${canSend?'':'disabled'} onclick="UI.sendReply()">发送</button>
+          </div>
+          <div class="reply-tools">
+            <button class="tiny-btn" onclick="UI.previewReplyTranslation()" ${canSend?'':'disabled'}>发送前翻译预览</button>
+            <button class="tiny-btn" onclick="UI.previewVoice()" ${canSend?'':'disabled'}>生成语音预览</button>
+            <span style="font-size:11px;color:#64748b;">目标语言：${esc(lang||'auto')}</span>
+          </div>
+          <div class="reply-preview" id="reply-preview"></div>
+          <div class="voice-preview" id="voice-preview"></div>
         </div>
       </div>
-      <div class="msg-area" id="msg-area">
-        ${msg?`<div><div class="msg-bubble msg-peer">${esc(msg)}</div><div class="msg-ts">${fmtTs(c.last_ts)}</div></div>`:'<div style="text-align:center;color:#9ca3af;font-size:13px;padding:30px">暂无消息记录</div>'}
-      </div>
-      <div class="reply-bar">
-        <textarea id="reply-text" rows="2" placeholder="${canSend?'输入回复内容...':sendHint}" ${canSend?'':'disabled'}></textarea>
-        <button class="send-btn" id="send-btn" ${canSend?'':'disabled'} onclick="UI.sendReply()">发送</button>
-      </div>`;
+      <aside class="ai-panel">
+        <h3>AI 助手</h3>
+        <div class="ai-section"><div class="ai-label">语言</div><div class="ai-value">${esc(lang)}</div></div>
+        <div class="ai-section"><div class="ai-label">情绪</div><div class="ai-value" id="ai-emotion">分析中...</div></div>
+        <div class="ai-section"><div class="ai-label">意图</div><div class="ai-value" id="ai-intent">分析中...</div></div>
+        <div class="ai-section"><div class="ai-label">关系阶段</div><div class="ai-value" id="ai-stage">${esc(stage)}</div></div>
+        <div class="ai-section"><div class="ai-label">风险等级</div><div class="ai-value" id="ai-risk">${esc(risk)}</div></div>
+        <div class="ai-section">
+          <div class="ai-label">回复模式</div>
+          <select class="mode-select" id="automation-mode" onchange="UI.saveAutomationMode()">
+            ${modes.map(m=>`<option value="${esc(m)}" ${m===(c.automation_mode||'review')?'selected':''}>${modeName(m)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="ai-section"><div class="ai-label">对象档案</div><div id="profile-box"><span class="spin"></span></div></div>
+        <div class="ai-section"><div class="ai-label">下一步</div><div class="ai-value" id="ai-next">正在生成建议...</div></div>
+        <div class="ai-section"><div class="ai-label">多答案建议</div><div id="ai-suggestions"><span class="spin"></span></div></div>
+      </aside>`;
     const ta = document.getElementById('reply-text');
     if(ta) ta.addEventListener('keydown', e=>{ if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){ UI.sendReply(); } });
+    loadAnalysis(c, messages);
+    loadProfile(c);
+  }
+
+  async function loadAnalysis(c, messages){
+    const latest = [...messages].reverse().find(m=>m.direction!=='out' && (m.text||m.original_text));
+    const text = latest?.text || latest?.original_text || c.last_msg || '';
+    try{
+      const r = await fetch('/api/unified-inbox/analyze',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','X-CSRF-Token':rpa?.csrf?.()??''},
+        body:JSON.stringify({text, messages, chat:c})
+      });
+      const d = await r.json();
+      renderAnalysis(d.analysis||{});
+    }catch(e){
+      renderAnalysis({emotion:'分析失败',intent:'分析失败',risk_level:'unknown',next_step:'请稍后重试',suggestions:[]});
+    }
+  }
+
+  function renderAnalysis(a){
+    const set = (id, value)=>{ const el=document.getElementById(id); if(el) el.textContent=value||'待分析'; };
+    set('ai-emotion', a.emotion);
+    set('ai-intent', a.intent);
+    set('ai-stage', a.relationship_stage);
+    set('ai-risk', a.risk_level);
+    set('ai-next', a.next_step);
+    const box = document.getElementById('ai-suggestions');
+    if(!box) return;
+    const suggestions = a.suggestions || [];
+    if(!suggestions.length){ box.innerHTML='<span style="color:#94a3b8;font-size:12px;">暂无建议</span>'; return; }
+    box.innerHTML = suggestions.map((s,i)=>`
+      <div class="suggestion">
+        <div class="suggestion-title">${esc(s.title||s.style||('建议 '+(i+1)))}</div>
+        <div class="suggestion-text">${esc(s.text||'')}</div>
+        <div style="margin-top:6px;"><button class="tiny-btn" onclick="UI.useSuggestion(${i})">填入输入框</button></div>
+      </div>`).join('');
+    window.__lastSuggestions = suggestions;
+  }
+
+  async function loadProfile(c){
+    const box = document.getElementById('profile-box');
+    if(!box) return;
+    try{
+      const qs = new URLSearchParams({platform:c.platform,account_id:c.account_id||'default',chat_key:c.chat_key||'',limit:'50'});
+      const r = await fetch('/api/unified-inbox/profile?'+qs.toString());
+      const d = await r.json();
+      renderProfile(d.profile||{});
+    }catch(e){
+      box.innerHTML='<span style="color:#ef4444;font-size:12px;">档案加载失败</span>';
+    }
+  }
+
+  function renderProfile(p){
+    const box = document.getElementById('profile-box');
+    if(!box) return;
+    const rel = p.relationship || {};
+    const act = p.activity || {};
+    const tags = p.tags || [];
+    const memories = p.memories || [];
+    box.innerHTML = `
+      <div class="ai-value">${esc(p.display_name||'未知对象')}</div>
+      <div style="font-size:12px;color:#64748b;margin-top:4px;">${esc(p.platform_name||p.platform||'')} · ${esc(p.account_label||p.account_id||'')}</div>
+      <div style="font-size:12px;color:#374151;margin-top:8px;">阶段：${esc(rel.stage||'初识')} · 消息数：${esc(act.message_count||0)}</div>
+      ${tags.length?`<div class="mode-row" style="margin-top:7px;">${tags.map(t=>`<span class="mode-pill">${esc(t)}</span>`).join('')}</div>`:''}
+      ${memories.length?`<div style="margin-top:8px;font-size:12px;color:#374151;">${memories.map(m=>`<div>· ${esc(m)}</div>`).join('')}</div>`:'<div style="margin-top:8px;font-size:12px;color:#94a3b8;">暂无长期记忆</div>'}
+    `;
+  }
+
+  function renderMessage(m, idx){
+    const self = m.direction === 'out';
+    const text = m.text || m.original_text || '';
+    const trans = m.translated_text && m.translated_text !== text ? `<div class="msg-translation">${esc(m.translated_text)}</div>` : '';
+    const needsTranslate = !self && text && (m.language||'') !== 'zh';
+    return `<div>
+      <div class="msg-bubble ${self?'msg-self':'msg-peer'}" data-msg-idx="${idx}">
+        ${esc(text)}${trans}
+        ${needsTranslate?`<div class="msg-tools"><button class="tiny-btn" onclick="UI.translateMessage(${idx})">翻译为中文</button></div>`:''}
+      </div>
+      <div class="msg-ts">${fmtTs(m.ts)}</div>
+    </div>`;
+  }
+
+  function modeName(m){
+    return ({manual:'人工发送',review:'人工审核',multi_choice:'多答案',auto_ai:'AI自动'})[m] || m;
   }
 
   function applyFilter(){
@@ -204,6 +352,94 @@
         else{ alert('发送失败: '+(d.detail||JSON.stringify(d))); }
       }catch(e){ alert('网络错误'); }
       finally{ btn.disabled=false; btn.textContent='发送'; }
+    },
+    async translateMessage(idx){
+      const m = threadMessages[idx];
+      if(!m || !m.text) return;
+      const bubble = document.querySelector(`.msg-bubble[data-msg-idx="${idx}"]`);
+      try{
+        const r = await fetch('/api/unified-inbox/translate',{
+          method:'POST',
+          headers:{'Content-Type':'application/json','X-CSRF-Token':rpa?.csrf?.()??''},
+          body:JSON.stringify({text:m.text,target_lang:'zh',source_lang:m.language||''})
+        });
+        const d = await r.json();
+        const tr = d.translation || {};
+        const translated = tr.translated_text || m.text;
+        m.translated_text = translated;
+        if(bubble){
+          let el = bubble.querySelector('.msg-translation');
+          if(!el){ el = document.createElement('div'); el.className='msg-translation'; bubble.insertBefore(el, bubble.querySelector('.msg-tools')); }
+          el.textContent = translated;
+        }
+      }catch(e){
+        if(bubble) bubble.insertAdjacentHTML('beforeend','<div class="msg-translation">翻译失败，请稍后重试</div>');
+      }
+    },
+    async previewReplyTranslation(){
+      if(!selectedChat) return;
+      const ta = document.getElementById('reply-text');
+      const box = document.getElementById('reply-preview');
+      const text = (ta?.value||'').trim();
+      if(!text || !box) return;
+      box.style.display='block';
+      box.textContent='正在生成发送前译文...';
+      try{
+        const target = selectedChat.language && selectedChat.language !== 'unknown' ? selectedChat.language : 'en';
+        const r = await fetch('/api/unified-inbox/translate',{
+          method:'POST',
+          headers:{'Content-Type':'application/json','X-CSRF-Token':rpa?.csrf?.()??''},
+          body:JSON.stringify({text,target_lang:target,style:'chat'})
+        });
+        const d = await r.json();
+        const tr = d.translation || {};
+        box.textContent = `目标语言：${tr.target_lang||target}\\n${tr.translated_text||text}`;
+      }catch(e){
+        box.textContent='翻译预览失败，请稍后重试';
+      }
+    },
+    async previewVoice(){
+      const ta = document.getElementById('reply-text');
+      const box = document.getElementById('voice-preview');
+      const text = (ta?.value||'').trim();
+      if(!text || !box) return;
+      box.style.display='block';
+      box.textContent='正在生成语音预览...';
+      try{
+        const r = await fetch('/api/voice/tts-test',{
+          method:'POST',
+          headers:{'Content-Type':'application/json','X-CSRF-Token':rpa?.csrf?.()??''},
+          body:JSON.stringify({text, format:'mp3'})
+        });
+        const d = await r.json();
+        if(d.ok && d.url){
+          box.innerHTML = `语音已生成 · ${esc(d.provider||'tts')} · ${esc(String(d.duration_sec||''))}s<audio controls src="${esc(d.url)}"></audio>`;
+        }else{
+          box.textContent = '语音生成失败：' + (d.error || '未知错误');
+        }
+      }catch(e){
+        box.textContent='语音预览失败，请稍后重试';
+      }
+    },
+    useSuggestion(idx){
+      const s = (window.__lastSuggestions||[])[idx];
+      const ta = document.getElementById('reply-text');
+      if(s && ta){ ta.value = s.text || ''; ta.focus(); }
+    },
+    async saveAutomationMode(){
+      if(!selectedChat) return;
+      const sel = document.getElementById('automation-mode');
+      const mode = sel?.value || 'review';
+      try{
+        const r = await fetch('/api/unified-inbox/automation',{
+          method:'POST',
+          headers:{'Content-Type':'application/json','X-CSRF-Token':rpa?.csrf?.()??''},
+          body:JSON.stringify({platform:selectedChat.platform,account_id:selectedChat.account_id,chat_key:selectedChat.chat_key,mode})
+        });
+        const d = await r.json();
+        if(d.ok){ selectedChat.automation_mode = d.mode; }
+        else{ alert('保存回复模式失败'); }
+      }catch(e){ alert('保存回复模式失败'); }
     }
   };
 

@@ -52,12 +52,6 @@ def _heuristic_classify(msgs: List["IncomingMessage"]) -> Optional[str]:
     if all(_is_casual_token(t) for t in texts):
         return "casual"
 
-    # 所有消息无问号且平均长度 <= 6 字 → combined
-    has_question = any(_QUESTION_RE.search(t) for t in texts)
-    avg_len = sum(len(t) for t in texts) / len(texts)
-    if not has_question and avg_len <= 6:
-        return "combined"
-
     return None  # 需要 AI
 
 

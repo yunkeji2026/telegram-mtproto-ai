@@ -249,6 +249,8 @@ def _collect_incoming_candidates(
         cy = (t + b) // 2
         if w <= 50 and h <= 50 and len(text) <= 2:
             continue
+        if re.fullmatch(r"(?:上午|下午)?\s*\d{1,2}[:：]\d{2}", text, re.IGNORECASE):
+            continue
         if re.fullmatch(r"[\d:：上下apm\s]+", text, re.IGNORECASE):
             continue
         if len(text) <= 5 and re.fullmatch(r"[今昨前A-Za-z\s]+", text):
@@ -327,6 +329,9 @@ def pick_new_incoming_messages(
     # last_peer_text 存在于可见区域时：取其后的消息
     if last_idx >= 0:
         new_msgs = msgs[last_idx + 1:]
+    elif not last_peer_text:
+        # 无锚点时保守只回最新一条，避免把整屏历史都当作新消息。
+        new_msgs = msgs[-1:]
     else:
         # 锚点已滚出屏幕：所有可见消息都视为新消息（用 max_count 截断）
         new_msgs = msgs
