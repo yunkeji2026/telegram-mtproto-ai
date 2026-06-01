@@ -15,6 +15,12 @@ class IntentSample:
     note: str = ""
 
 
+@dataclass
+class FaqSample:
+    question: str        # 应可被 KB 自动解决的 FAQ 问题
+    note: str = ""
+
+
 def load_intent_samples(path: Optional[str] = None) -> List[IntentSample]:
     """从 YAML 或 JSONL 加载意图样本；path 为空则返回内置种子集。
 
@@ -74,4 +80,45 @@ _SEED_INTENT_SAMPLES: List[IntentSample] = [
     IntentSample("我刚看完那部电影觉得还挺好看的推荐你也看看", "继续聊天"),
     IntentSample("", "空消息"),
     IntentSample("   ", "空消息"),
+]
+
+
+def load_faq_samples(path: Optional[str] = None) -> List["FaqSample"]:
+    """加载 FAQ 样本（YAML/JSONL）；path 为空则返回内置种子集。
+
+    YAML/JSONL 每条：``{question: "...", note: "..."}``
+    """
+    if not path:
+        return list(_SEED_FAQ_SAMPLES)
+    if not os.path.exists(path):
+        raise FileNotFoundError(path)
+    if path.endswith(".jsonl"):
+        out: List[FaqSample] = []
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                d = json.loads(line)
+                out.append(FaqSample(question=str(d.get("question", "")),
+                                     note=str(d.get("note", ""))))
+        return out
+    import yaml
+    with open(path, "r", encoding="utf-8") as f:
+        rows = yaml.safe_load(f) or []
+    return [FaqSample(question=str(r.get("question", "")),
+                      note=str(r.get("note", "")))
+            for r in rows if isinstance(r, dict)]
+
+
+# 内置 FAQ 种子（跨境电商常见问题），作为解决率评测的默认输入
+_SEED_FAQ_SAMPLES: List["FaqSample"] = [
+    FaqSample("怎么退货"),
+    FaqSample("发货要多久"),
+    FaqSample("支持货到付款吗"),
+    FaqSample("尺码怎么选"),
+    FaqSample("支持哪些支付方式"),
+    FaqSample("可以退款吗"),
+    FaqSample("물류 어떻게 확인하나요", "韩文物流查询"),
+    FaqSample("How do I track my order"),
 ]

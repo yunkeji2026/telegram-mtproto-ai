@@ -11,8 +11,11 @@
 """
 
 from .metrics import multiclass_metrics, resolve_rate
-from .dataset import IntentSample, load_intent_samples
+from .dataset import (
+    IntentSample, load_intent_samples, FaqSample, load_faq_samples,
+)
 from .intent_eval import evaluate_intent, compare_predictors
+from .faq_eval import evaluate_faq, kb_search_resolver
 from .predictors import (
     rule_intent_predictor,
     llm_intent_predictor,
@@ -26,8 +29,12 @@ __all__ = [
     "resolve_rate",
     "IntentSample",
     "load_intent_samples",
+    "FaqSample",
+    "load_faq_samples",
     "evaluate_intent",
     "compare_predictors",
+    "evaluate_faq",
+    "kb_search_resolver",
     "rule_intent_predictor",
     "llm_intent_predictor",
     "INTENT_LABELS",
