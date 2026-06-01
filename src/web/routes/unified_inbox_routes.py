@@ -443,6 +443,59 @@ def register_unified_inbox_routes(
                 logger.debug("inbox analyze 订单查询失败（已忽略）", exc_info=True)
         return result
 
+    # ── A1 读路径增量①：store-backed 持久化读端点 ──────────────────────
+    # 直接从 InboxStore（统一事实源）读会话/消息，独立于 live 聚合（/chats、/thread）。
+    # 价值：跨平台、跨重启的持久历史可查（蓝图 A1 验收）；不改 live 路径，零风险。
+
+    @app.get("/api/unified-inbox/stored-chats")
+    async def api_unified_inbox_stored_chats(
+        request: Request, limit: int = 50, platform: str = "",
+    ):
+        """从持久层读会话列表（事实源），区别于实时聚合的 /chats。"""
+        api_auth(request)
+        store = _inbox_store(request)
+        if store is None:
+            raise HTTPException(503, "统一收件箱持久层未启用")
+        limit = max(1, min(200, int(limit or 50)))
+        convs = store.list_conversations(limit=limit, platform=str(platform or ""))
+        for c in convs:
+            cid = str(c.get("conversation_id") or "")
+            mode = _read_automation_mode(request, cid)
+            c["automation_mode"] = mode if mode in AUTOMATION_MODES else "review"
+            c["message_count"] = store.count_messages(cid)
+        return {"ok": True, "source": "store", "count": len(convs), "chats": convs}
+
+    @app.get("/api/unified-inbox/history")
+    async def api_unified_inbox_history(
+        request: Request, conversation_id: str = "", limit: int = 50,
+    ):
+        """从持久层读某会话的历史消息（跨重启可查），并附最近一次分析。"""
+        api_auth(request)
+        store = _inbox_store(request)
+        if store is None:
+            raise HTTPException(503, "统一收件箱持久层未启用")
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            raise HTTPException(400, "conversation_id 不能为空")
+        limit = max(1, min(200, int(limit or 50)))
+        conv = store.get_conversation(cid)
+        if conv is None:
+            return {"ok": True, "found": False, "source": "store",
+                    "conversation_id": cid, "messages": [], "count": 0}
+        messages = store.list_messages(cid, limit=limit)
+        analysis = None
+        if hasattr(store, "latest_analysis"):
+            try:
+                analysis = store.latest_analysis(cid)
+            except Exception:
+                analysis = None
+        return {
+            "ok": True, "found": True, "source": "store",
+            "conversation_id": cid, "conversation": conv,
+            "messages": messages, "count": store.count_messages(cid),
+            "analysis": analysis,
+        }
+
     @app.get("/api/unified-inbox/automation")
     async def api_unified_inbox_automation_get(
         request: Request,

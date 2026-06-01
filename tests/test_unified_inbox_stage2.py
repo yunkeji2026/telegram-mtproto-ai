@@ -98,6 +98,76 @@ def test_thread_open_persists_history(tmp_path):
     store.close()
 
 
+def test_stored_chats_reads_from_store(tmp_path):
+    """A1：/stored-chats 从持久层读会话列表（先用 /chats 旁路写入）。"""
+    store = InboxStore(tmp_path / "inbox.db")
+    c = _client(inbox_store=store)
+    c.get("/api/unified-inbox/chats?limit=10")  # 旁路写入
+    resp = c.get("/api/unified-inbox/stored-chats?limit=50")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["source"] == "store"
+    assert data["count"] >= 1
+    platforms = {row["platform"] for row in data["chats"]}
+    assert "line" in platforms
+    # 每条会话带 automation_mode + message_count
+    assert all("automation_mode" in r and "message_count" in r for r in data["chats"])
+    store.close()
+
+
+def test_stored_chats_platform_filter(tmp_path):
+    store = InboxStore(tmp_path / "inbox.db")
+    c = _client(inbox_store=store)
+    c.get("/api/unified-inbox/chats?limit=10")
+    resp = c.get("/api/unified-inbox/stored-chats?platform=line")
+    assert resp.status_code == 200
+    chats = resp.json()["chats"]
+    assert chats and all(r["platform"] == "line" for r in chats)
+    store.close()
+
+
+def test_history_reads_persisted_messages(tmp_path):
+    """A1：/history 从持久层读某会话历史（跨重启可查）。"""
+    db = tmp_path / "inbox.db"
+    store = InboxStore(db)
+    c = _client(inbox_store=store)
+    c.get("/api/unified-inbox/thread?platform=telegram&account_id=default&chat_key=tg-room")
+    store.close()
+    # 模拟重启：新 store 同一 db
+    store2 = InboxStore(db)
+    c2 = _client(inbox_store=store2)
+    resp = c2.get("/api/unified-inbox/history?conversation_id=telegram:default:tg-room")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["found"] is True and data["source"] == "store"
+    assert [m["text"] for m in data["messages"]] == ["你好", "hello again"]
+    assert data["count"] == 2
+    store2.close()
+
+
+def test_history_not_found_returns_empty(tmp_path):
+    store = InboxStore(tmp_path / "inbox.db")
+    c = _client(inbox_store=store)
+    resp = c.get("/api/unified-inbox/history?conversation_id=nope:default:x")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["found"] is False and data["messages"] == []
+    store.close()
+
+
+def test_history_missing_conversation_id_400(tmp_path):
+    store = InboxStore(tmp_path / "inbox.db")
+    c = _client(inbox_store=store)
+    assert c.get("/api/unified-inbox/history").status_code == 400
+    store.close()
+
+
+def test_stored_endpoints_503_without_store():
+    c = _client(inbox_store=None)
+    assert c.get("/api/unified-inbox/stored-chats").status_code == 503
+    assert c.get("/api/unified-inbox/history?conversation_id=x").status_code == 503
+
+
 class _StubEcomTools:
     """最小电商工具桩：1001 命中，其它 not_found。"""
 
