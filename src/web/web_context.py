@@ -64,3 +64,11 @@ class AdminRouteContext:
     # 其它常用闭包
     auto_snapshot: Optional[Callable] = None       # auto_snapshot(name, content, actor)
     get_intent_display_names: Optional[Callable] = None
+    fire_webhook: Optional[Callable] = None        # async fire_webhook(event, actor, target, summary)
+
+    # 延迟挂载的单例（在 create_app 内对应对象创建后再 set，如 kb_store 在 ~2500 行才建）
+    kb_store: Any = None
+
+    # 监控/报表组用（G2）
+    event_tracker: Any = None
+    boot_ts: float = 0.0
