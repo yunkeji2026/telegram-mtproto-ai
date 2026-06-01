@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -80,6 +81,21 @@ def _automation_store(request: Request) -> Dict[str, str]:
 def _inbox_store(request: Request):
     """持久层（Phase A）。未挂载时返回 None，调用方自动回落进程内 dict / 实时聚合。"""
     return getattr(request.app.state, "inbox_store", None)
+
+
+def _ecommerce_tools(request: Request):
+    """电商工具服务（Phase D）。未启用时返回 None（feature-flag ecommerce_tools.enabled）。"""
+    return getattr(request.app.state, "ecommerce_tools", None)
+
+
+# 通用订单号兜底正则（与 domains/ecommerce/hooks 同形，核心不依赖域包）：
+# #1001（Shopify 默认 4 位）/ SP-20240601-001 等
+_ORDER_NO_RE = re.compile(r"#?\b([A-Z]{0,4}[-_]?\d[\dA-Z\-_]{3,23})\b", re.IGNORECASE)
+
+
+def _extract_order_no(text: str) -> str:
+    m = _ORDER_NO_RE.search(str(text or ""))
+    return m.group(1) if m else ""
 
 
 def _read_automation_mode(request: Request, conversation_id: str) -> str:
@@ -584,7 +600,23 @@ def register_unified_inbox_routes(
             text = str(last.get("text") or "")
         svc = _get_chat_assistant_service(request)
         analysis = await svc.analyze(text=text, messages=messages, chat=chat)
-        return {"ok": True, "analysis": analysis.to_dict()}
+        out = analysis.to_dict()
+        # C1 LLM 可能抽出 order_no（动态属性）；否则用通用兜底正则
+        order_no = str(getattr(analysis, "order_no", "") or "").strip() or _extract_order_no(text)
+        out["order_no"] = order_no
+        result: Dict[str, Any] = {"ok": True, "analysis": out}
+
+        # Phase D：检测到订单号 + 电商工具启用 → 查订单并回事实串（事实校验，勿编造）
+        ecom = _ecommerce_tools(request)
+        if order_no and ecom is not None:
+            try:
+                tr = await ecom.lookup_order(order_no, by="inbox_analyze")
+                d = tr.to_dict()
+                d["facts"] = tr.to_context_facts()
+                result["order_lookup"] = d
+            except Exception:
+                logger.debug("inbox analyze 订单查询失败（已忽略）", exc_info=True)
+        return result
 
     @app.get("/api/unified-inbox/automation")
     async def api_unified_inbox_automation_get(

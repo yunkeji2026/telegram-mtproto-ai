@@ -236,6 +236,7 @@
         </div>
         <div class="ai-section"><div class="ai-label">对象档案</div><div id="profile-box"><span class="spin"></span></div></div>
         <div class="ai-section"><div class="ai-label">下一步</div><div class="ai-value" id="ai-next">正在生成建议...</div></div>
+        <div class="ai-section" id="ai-order-sec" style="display:none;"><div class="ai-label">订单/物流（事实校验）</div><div id="ai-order"></div></div>
         <div class="ai-section"><div class="ai-label">多答案建议</div><div id="ai-suggestions"><span class="spin"></span></div></div>
       </aside>`;
     const ta = document.getElementById('reply-text');
@@ -255,9 +256,33 @@
       });
       const d = await r.json();
       renderAnalysis(d.analysis||{});
+      renderOrderLookup(d.order_lookup||null);
     }catch(e){
       renderAnalysis({emotion:'分析失败',intent:'分析失败',risk_level:'unknown',next_step:'请稍后重试',suggestions:[]});
     }
+  }
+
+  function renderOrderLookup(o){
+    const sec = document.getElementById('ai-order-sec');
+    const box = document.getElementById('ai-order');
+    if(!sec || !box) return;
+    if(!o){ sec.style.display='none'; return; }
+    sec.style.display='block';
+    if(!o.ok){
+      box.innerHTML = `<div style="font-size:12px;color:#b91c1c;">查询失败（系统暂不可用，请勿编造订单状态）</div>`;
+      return;
+    }
+    if(!o.found){
+      box.innerHTML = `<div style="font-size:12px;color:#92400e;">未查到订单「${esc(o.query||'')}」——请如实告知客户查不到，勿编造</div>`;
+      return;
+    }
+    const dat = o.data || {};
+    const ship = dat.shipment || {};
+    box.innerHTML = `
+      <div class="ai-value">订单 ${esc(dat.order_no||o.query)} · ${esc(dat.status||'')}</div>
+      <div style="font-size:12px;color:#374151;margin-top:4px;">金额：${esc(dat.total||'')} ${esc(dat.currency||'')}</div>
+      ${ship.tracking_no?`<div style="font-size:12px;color:#374151;margin-top:4px;">物流：${esc(ship.carrier||'')} · ${esc(ship.status||'')}<br>${esc(ship.last_event||'')}${ship.eta?' · 预计 '+esc(ship.eta):''}</div>`:''}
+      <div style="font-size:11px;color:#16a34a;margin-top:6px;">✓ 数据来自 ${esc(o.source||'connector')}，可据此回复</div>`;
   }
 
   function renderAnalysis(a){

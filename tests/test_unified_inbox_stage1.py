@@ -224,3 +224,7 @@ def test_unified_inbox_template_contains_drafts_panel():
     assert "UI.showDrafts" in html
     assert "UI.resolveDraft" in html
     assert "risk-badge" in html  # 风险徽章
+    # P0-b：订单/物流事实卡片（事实校验可视化）
+    assert "renderOrderLookup" in html
+    assert "ai-order" in html
+    assert "事实校验" in html

@@ -98,6 +98,67 @@ def test_thread_open_persists_history(tmp_path):
     store.close()
 
 
+class _StubEcomTools:
+    """最小电商工具桩：1001 命中，其它 not_found。"""
+
+    async def lookup_order(self, order_no, by=""):
+        from src.ecommerce_tools.models import ToolResult
+        if str(order_no).lstrip("#") == "1001":
+            return ToolResult(ok=True, found=True, kind="order", query=order_no,
+                              data={"order_no": "1001", "status": "shipped",
+                                    "total": "59.90", "currency": "USD",
+                                    "shipment": {"carrier": "YunExpress", "status": "in_transit",
+                                                 "last_event": "Departed", "eta": "2026-05-30",
+                                                 "tracking_no": "LP001"}},
+                              source="stub")
+        return ToolResult(ok=True, found=False, kind="order", query=order_no, source="stub")
+
+
+def test_analyze_order_lookup_when_ecom_enabled():
+    """P0-b：analyze 检测到订单号 + 电商工具启用 → 返回 order_lookup 事实。"""
+    app = FastAPI()
+
+    def page_auth(request: Request):
+        return True
+
+    def api_auth(request: Request):
+        return True
+
+    register_unified_inbox_routes(app, page_auth=page_auth, api_auth=api_auth, templates=_Templates())
+    app.state.ecommerce_tools = _StubEcomTools()
+    c = TestClient(app)
+    resp = c.post("/api/unified-inbox/analyze",
+                  json={"text": "我的订单 #1001 到哪了", "messages": [], "chat": {"language": "zh"}})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["analysis"]["order_no"] == "1001"
+    assert data["order_lookup"]["found"] is True
+    assert data["order_lookup"]["data"]["status"] == "shipped"
+    # found → 事实串含真实状态（供回复引用）
+    assert "shipped" in data["order_lookup"]["facts"]
+    assert "1001" in data["order_lookup"]["facts"]
+
+
+def test_analyze_no_order_lookup_when_ecom_disabled():
+    """电商工具未启用 → 不返回 order_lookup（不报错）。"""
+    app = FastAPI()
+
+    def page_auth(request: Request):
+        return True
+
+    def api_auth(request: Request):
+        return True
+
+    register_unified_inbox_routes(app, page_auth=page_auth, api_auth=api_auth, templates=_Templates())
+    c = TestClient(app)
+    resp = c.post("/api/unified-inbox/analyze",
+                  json={"text": "订单 #1001", "messages": [], "chat": {}})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "order_lookup" not in data
+    assert data["analysis"]["order_no"] == "1001"
+
+
 def test_without_store_falls_back_to_process_dict():
     # 不挂 inbox_store：automation 仍可用（回落进程内 dict），不报错
     c = _client(inbox_store=None)
