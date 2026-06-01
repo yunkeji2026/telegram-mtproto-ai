@@ -656,16 +656,19 @@ class AIChatAssistant:
                             if _ec_cfg.get("enabled", False):
                                 from src.ecommerce_tools import (
                                     EcommerceToolService, build_connector,
+                                    build_logistics_connector,
                                 )
                                 from src.web.routes.ecommerce_tools_routes import (
                                     register_ecommerce_tools_routes,
                                 )
                                 _ec_conn = build_connector(_ec_cfg)
+                                _logi_conn = build_logistics_connector(_ec_cfg.get("logistics") or {})
                                 self.ecommerce_tools = EcommerceToolService(
                                     _ec_conn, audit_store=audit,
                                     timeout_sec=float(_ec_cfg.get("timeout_sec", 8) or 8),
                                     cache_ttl_sec=float(_ec_cfg.get("cache_ttl_sec", 0) or 0),
                                     cache_max_entries=int(_ec_cfg.get("cache_max_entries", 512) or 512),
+                                    logistics_connector=_logi_conn,
                                 )
                                 web_app.state.ecommerce_tools = self.ecommerce_tools
                                 register_ecommerce_tools_routes(
