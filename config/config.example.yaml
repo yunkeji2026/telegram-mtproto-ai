@@ -740,11 +740,15 @@ persona_persistence:
   enabled: true
   path: ""   # 空则使用 persona_runtime.yaml；可填相对 config 目录的路径
 
-# claude-4.6-oups-high V3 API配置
+# AI 提供商配置
+# ⚠️ 重要：ai_client.py 只实现两条分支——gemini（默认，native google-genai）
+#   与 openai_compatible（OpenAI SDK + base_url，用于 DeepSeek/Ollama/vLLM）。
+#   provider 写 "deepseek" 不是独立分支，会 fall-through 到 gemini！
+#   要真正用 DeepSeek，必须 provider: openai_compatible + 下方 base_url/model。
 ai:
-  provider: "deepseek"            # AI提供商
-  api_key: "YOUR_claude-4.6-oups-high_API_KEY"  # claude-4.6-oups-high API密钥
-  base_url: "https://api.deepseek.com"  # API基础URL
+  provider: "openai_compatible"   # gemini | openai_compatible（DeepSeek/Ollama/vLLM 走这条）
+  api_key: "YOUR_API_KEY"         # 对应 provider 的 API 密钥
+  base_url: "https://api.deepseek.com"  # openai_compatible 时必填（如 DeepSeek）
   model: "deepseek-chat"          # 使用的模型
   temperature: 0.7                # 温度参数 (0.0-1.0)
   max_tokens: 1024                # 最大回复token数
