@@ -17,10 +17,23 @@ from fastapi.responses import HTMLResponse
 
 from src.ai.chat_assistant_service import ChatAssistantService
 from src.ai.translation_service import TranslationService, detect_language
+from src.inbox.channel_adapters import (
+    collect_chats_via_adapters,
+    default_inbox_adapters,
+)
 from src.inbox.ingest import ingest_collected_chats, ingest_thread
+from src.inbox.normalizer import (
+    candidate_messages_from_source,
+    conv_id,
+    message_obj,
+    normalize_chat,
+)
 
 logger = logging.getLogger(__name__)
 AUTOMATION_MODES = {"manual", "review", "multi_choice", "auto_ai"}
+
+# A2：渠道适配器注册表（模块级，无状态可复用）。新增渠道在 channel_adapters 注册即可。
+_INBOX_ADAPTERS = default_inbox_adapters()
 
 
 # ── 服务获取帮助 ─────────────────────────────────────────────────────────
@@ -135,94 +148,12 @@ def _ingest_thread_best_effort(request: Request, chat: Optional[Dict[str, Any]],
         logger.debug("统一收件箱会话历史写入失败（已忽略）", exc_info=True)
 
 
-def _conv_id(platform: str, account_id: str, chat_key: str) -> str:
-    return f"{platform}:{account_id}:{chat_key}"
-
-
-def _message_obj(
-    *,
-    text: str,
-    ts: Any = 0,
-    direction: str = "in",
-    message_id: str = "",
-    source: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    raw = str(text or "")
-    lang = detect_language(raw)
-    return {
-        "message_id": str(message_id or ""),
-        "direction": direction if direction in {"in", "out"} else "in",
-        "text": raw,
-        "original_text": raw,
-        "translated_text": raw,
-        "language": lang,
-        "translation": {
-            "source_lang": lang,
-            "target_lang": "zh",
-            "ok": lang in {"zh", "unknown"} or not raw.strip(),
-            "provider": "identity" if lang == "zh" else "none",
-            "error": "" if lang in {"zh", "unknown"} else "not_requested",
-        },
-        "ts": ts or 0,
-        "source": source or {},
-    }
-
-
-def _normalize_chat(
-    *,
-    platform: str,
-    platform_name: str,
-    account_id: str,
-    account_label: str,
-    chat_key: str,
-    name: str,
-    last_msg: str,
-    last_ts: Any = 0,
-    unread: Any = 0,
-    source: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    msg = _message_obj(text=last_msg, ts=last_ts, direction="in", source=source)
-    return {
-        "platform": platform,
-        "platform_name": platform_name,
-        "account_id": account_id,
-        "account_label": account_label,
-        "chat_key": chat_key,
-        "conversation_id": _conv_id(platform, account_id, chat_key),
-        "name": name,
-        "last_msg": last_msg,
-        "last_ts": last_ts or 0,
-        "unread": unread or 0,
-        "language": msg["language"],
-        "last_message": msg,
-        "messages": [msg] if last_msg else [],
-        "can_send": True,
-        "send_modes": ["manual", "review", "multi_choice", "auto_ai"],
-        "automation_mode": "review",
-        "risk": {"level": "unknown", "reasons": []},
-        "relationship": {"stage": "", "intimacy_score": None},
-        "source": source or {},
-    }
-
-
-def _candidate_messages_from_source(source: Dict[str, Any]) -> List[Dict[str, Any]]:
-    for key in ("messages", "history", "recent_messages", "conversation"):
-        rows = source.get(key)
-        if isinstance(rows, list):
-            out: List[Dict[str, Any]] = []
-            for idx, row in enumerate(rows[-50:]):
-                if isinstance(row, dict):
-                    text = row.get("text") or row.get("raw") or row.get("peer_text") or row.get("message") or ""
-                    direction = row.get("direction") or ("out" if row.get("is_self") else "in")
-                    out.append(_message_obj(
-                        text=str(text or ""),
-                        ts=row.get("ts") or row.get("timestamp") or 0,
-                        direction=str(direction),
-                        message_id=str(row.get("id") or row.get("message_id") or idx),
-                        source=row,
-                    ))
-            return [m for m in out if m.get("text")]
-    return []
+# A3：归一逻辑已提到 src/inbox/normalizer.py（单一真源、可单测）。
+# 此处保留同名薄委托别名，路由内现有调用点零改动。
+_conv_id = conv_id
+_message_obj = message_obj
+_normalize_chat = normalize_chat
+_candidate_messages_from_source = candidate_messages_from_source
 
 
 def _memory_bullets(request: Request, key: str, query: str = "") -> List[str]:
@@ -311,114 +242,15 @@ def _profile_tags(chat: Dict[str, Any], messages: List[Dict[str, Any]], memories
 # ── 数据聚合 ─────────────────────────────────────────────────────────────
 
 def _collect_all_chats(request: Request, limit: int = 20) -> List[Dict[str, Any]]:
-    """从所有平台/账号收集最近对话，返回统一格式列表。"""
-    out: List[Dict[str, Any]] = []
+    """从所有平台/账号收集最近对话，返回统一格式列表。
 
-    # LINE 账号
-    for svc in _get_line_services(request):
-        if svc is None:
-            continue
-        aid = getattr(svc, "account_id", "default")
-        try:
-            label = (svc._merged_cfg if hasattr(svc, "_merged_cfg") else {}).get("label") or aid
-        except Exception:
-            label = aid
-        try:
-            chats = svc.list_chats(limit) or []
-        except Exception as ex:
-            logger.debug("LINE list_chats [%s] 失败: %s", aid, ex)
-            chats = []
-        for c in chats:
-            out.append(_normalize_chat(
-                platform="line",
-                platform_name="LINE",
-                account_id=aid,
-                account_label=label,
-                chat_key=c.get("chat_key") or c.get("name") or "",
-                name=c.get("name") or c.get("chat_key") or "",
-                last_msg=c.get("last_peer_text") or c.get("last_text") or "",
-                last_ts=c.get("last_ts") or c.get("ts") or 0,
-                unread=c.get("unread_count") or 0,
-                source=c,
-            ))
-
-    # WhatsApp 账号
-    for svc in _get_whatsapp_services(request):
-        if svc is None:
-            continue
-        aid = getattr(svc, "account_id", "default")
-        try:
-            label = (svc._merged_cfg if hasattr(svc, "_merged_cfg") else {}).get("label") or aid
-        except Exception:
-            label = aid
-        try:
-            # WA service 使用 list_pending 获取等待回复的对话
-            rows = svc.list_pending(status="pending", limit=limit) or []
-            chats = [{"chat_key": r.get("chat_key") or r.get("peer_name", ""),
-                      "name": r.get("peer_name") or r.get("chat_key") or "",
-                      "last_msg": r.get("peer_text") or "",
-                      "last_ts": r.get("ts") or 0,
-                      "unread": 1} for r in rows]
-        except Exception as ex:
-            logger.debug("WA list_pending [%s] 失败: %s", aid, ex)
-            chats = []
-        for c in chats:
-            out.append(_normalize_chat(
-                platform="whatsapp",
-                platform_name="WhatsApp",
-                account_id=aid,
-                account_label=label,
-                chat_key=c.get("chat_key", ""),
-                name=c.get("name", ""),
-                last_msg=c.get("last_msg", ""),
-                last_ts=c.get("last_ts", 0),
-                unread=c.get("unread", 0),
-                source=c,
-            ))
-
-    # Messenger
-    msvc = _get_messenger_service(request)
-    if msvc is not None:
-        try:
-            rows = msvc.list_approvals(status="pending", limit=limit) if hasattr(msvc, "list_approvals") else []
-        except Exception as ex:
-            logger.debug("Messenger list_approvals 失败: %s", ex)
-            rows = []
-        for r in rows or []:
-            aid = r.get("account_id") or "default"
-            out.append(_normalize_chat(
-                platform="messenger",
-                platform_name="Messenger",
-                account_id=aid,
-                account_label=aid or "Messenger",
-                chat_key=r.get("chat_key") or r.get("name", ""),
-                name=r.get("name") or r.get("chat_key", ""),
-                last_msg=r.get("peer_text") or "",
-                last_ts=r.get("ts") or 0,
-                unread=1,
-                source=r,
-            ))
-
-    # Telegram 最近消息（如有 event_tracker）
-    client = _get_telegram_client(request)
-    if client is not None:
-        try:
-            recent = getattr(client, "_recent_messages", None) or []
-            for m in list(recent)[-limit:]:
-                out.append(_normalize_chat(
-                    platform="telegram",
-                    platform_name="Telegram",
-                    account_id="default",
-                    account_label="Telegram",
-                    chat_key=str(m.get("chat_id") or ""),
-                    name=m.get("user_name") or m.get("chat_name") or str(m.get("chat_id", "")),
-                    last_msg=m.get("text") or "",
-                    last_ts=m.get("ts") or 0,
-                    unread=1,
-                    source=m,
-                ))
-        except Exception:
-            pass
+    A2：改为遍历 ChannelAdapter 注册表（src/inbox/channel_adapters.py）。
+    新增渠道 = 新增一个适配器并注册，无需改本函数。各平台的取数/字段映射
+    封装在各自适配器内，行为与抽取前一致。
+    """
+    out: List[Dict[str, Any]] = collect_chats_via_adapters(
+        request, limit, _INBOX_ADAPTERS,
+    )
 
     out.sort(key=lambda x: x.get("last_ts") or 0, reverse=True)
     out = out[:limit * 4]
