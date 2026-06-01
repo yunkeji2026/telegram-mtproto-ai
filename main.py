@@ -665,6 +665,7 @@ class AIChatAssistant:
                                     _ec_conn, audit_store=audit,
                                     timeout_sec=float(_ec_cfg.get("timeout_sec", 8) or 8),
                                     cache_ttl_sec=float(_ec_cfg.get("cache_ttl_sec", 0) or 0),
+                                    cache_max_entries=int(_ec_cfg.get("cache_max_entries", 512) or 512),
                                 )
                                 web_app.state.ecommerce_tools = self.ecommerce_tools
                                 register_ecommerce_tools_routes(

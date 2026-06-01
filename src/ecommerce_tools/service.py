@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import time
+from collections import OrderedDict
 from typing import Any, Dict, Optional, Tuple
 
 from .models import ToolResult
@@ -29,14 +30,16 @@ class EcommerceToolService:
         audit_store: Optional[Any] = None,
         timeout_sec: float = 8.0,
         cache_ttl_sec: float = 0.0,
+        cache_max_entries: int = 512,
     ) -> None:
         self._connector = connector
         self._audit = audit_store
         self._timeout = float(timeout_sec or 8.0)
-        # 短 TTL 内存缓存：避免同会话连续追问同一单号重复打 API。
+        # 短 TTL + 有界 LRU 内存缓存：避免同会话连续追问同一单号重复打 API。
         # ttl<=0 关闭；仅缓存 ok=True 结果（错误/超时不缓存，下次重试）。
         self._cache_ttl = float(cache_ttl_sec or 0.0)
-        self._cache: Dict[Tuple[str, str], Tuple[float, ToolResult]] = {}
+        self._cache_max = max(1, int(cache_max_entries or 512))
+        self._cache: "OrderedDict[Tuple[str, str], Tuple[float, ToolResult]]" = OrderedDict()
 
     @property
     def connector_name(self) -> str:
@@ -58,14 +61,25 @@ class EcommerceToolService:
         if exp < time.monotonic():
             self._cache.pop(key, None)
             return None
+        self._cache.move_to_end(key)  # LRU：命中即最近使用
         return res
 
     def _cache_put(self, kind: str, q: str, res: ToolResult) -> None:
         if self._cache_ttl <= 0 or not res.ok:
             return
-        self._cache[self._cache_key(kind, q)] = (
-            time.monotonic() + self._cache_ttl, res,
-        )
+        now = time.monotonic()
+        key = self._cache_key(kind, q)
+        self._cache[key] = (now + self._cache_ttl, res)
+        self._cache.move_to_end(key)
+        # 先顺手清掉已过期项（最早插入的在前），再按容量上界 LRU 淘汰
+        while self._cache:
+            k0 = next(iter(self._cache))
+            if self._cache[k0][0] < now:
+                self._cache.pop(k0, None)
+            else:
+                break
+        while len(self._cache) > self._cache_max:
+            self._cache.popitem(last=False)
 
     async def lookup_order(self, order_no: str, *, by: str = "") -> ToolResult:
         q = str(order_no or "").strip()

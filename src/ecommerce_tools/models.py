@@ -90,7 +90,12 @@ class ToolResult:
             ship = d.get("shipment") or {}
             ship_str = ""
             if ship:
-                ship_str = f"，物流{ship.get('carrier','')} {ship.get('status','')}（{ship.get('last_event','')}）"
+                _tn = ship.get("tracking_no") or ""
+                _tn_str = f"，运单号={_tn}" if _tn else ""
+                ship_str = (
+                    f"，物流{ship.get('carrier','')} {ship.get('status','')}"
+                    f"（{ship.get('last_event','')}）{_tn_str}"
+                )
             return (
                 f"[事实] 订单 {d.get('order_no','')} 状态={d.get('status','')}，"
                 f"金额={d.get('total','')}{d.get('currency','')}{ship_str}。"

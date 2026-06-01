@@ -993,6 +993,7 @@ ecommerce_tools:
   provider: "mock"                   # mock / shopify（woocommerce 等为扩展点）
   timeout_sec: 8
   cache_ttl_sec: 0                   # 订单/物流查询短 TTL 内存缓存秒数；0=关闭（建议 30~60）
+  cache_max_entries: 512             # 缓存条目上界（LRU 淘汰），防高基数单号撑爆内存
   # mock_orders: {}                  # provider=mock 时可注入演示订单数据
   # shopify:                         # provider=shopify 时填（缺 shop/token 自动回落 mock）
   #   shop: "your-store.myshopify.com"

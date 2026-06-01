@@ -127,3 +127,45 @@ async def test_cache_key_separates_order_and_shipment():
     await svc.track_shipment("LP001234567CN")  # shipment 应独立查
     assert conn.order_calls == 1
     assert conn.ship_calls == 1
+
+
+async def test_lru_eviction_by_maxsize():
+    """超容量按最久未用淘汰：被淘汰键再查需重新打 connector。"""
+    conn = _CountingConnector()
+    svc = EcommerceToolService(conn, cache_ttl_sec=100, cache_max_entries=2)
+    await svc.lookup_order("a")  # calls=1
+    await svc.lookup_order("b")  # calls=2
+    await svc.lookup_order("c")  # calls=3 → 淘汰最旧 "a"
+    await svc.lookup_order("c")  # 命中, calls=3
+    await svc.lookup_order("a")  # 已被淘汰 → miss, calls=4
+    assert conn.order_calls == 4
+    assert len(svc._cache) <= 2
+
+
+async def test_expired_entries_swept_on_insert():
+    """插入新项时顺手清理已过期项，防内存泄漏。"""
+    conn = _CountingConnector()
+    svc = EcommerceToolService(conn, cache_ttl_sec=100, cache_max_entries=512)
+    await svc.lookup_order("1001")
+    # 把 1001 拨过期
+    for k in list(svc._cache.keys()):
+        exp, res = svc._cache[k]
+        svc._cache[k] = (time.monotonic() - 1, res)
+    await svc.lookup_order("9999")  # 触发 put → 清理过期的 1001
+    keys = [k for (_, k) in svc._cache.keys()]
+    assert "1001" not in keys
+    assert "9999" in keys
+
+
+def test_order_facts_include_tracking_no():
+    from src.ecommerce_tools.models import ToolResult
+    res = ToolResult(
+        ok=True, found=True, kind="order", query="1001",
+        data={"order_no": "1001", "status": "shipped", "total": "10",
+              "currency": "USD",
+              "shipment": {"carrier": "DHL", "status": "in_transit",
+                           "last_event": "出库", "tracking_no": "LP001234567CN"}},
+    )
+    facts = res.to_context_facts()
+    assert "运单号=" in facts
+    assert "LP001234567CN" in facts
