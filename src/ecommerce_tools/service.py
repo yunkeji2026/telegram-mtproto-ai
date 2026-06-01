@@ -40,6 +40,8 @@ class EcommerceToolService:
         self._cache_ttl = float(cache_ttl_sec or 0.0)
         self._cache_max = max(1, int(cache_max_entries or 512))
         self._cache: "OrderedDict[Tuple[str, str], Tuple[float, ToolResult]]" = OrderedDict()
+        self._cache_hits = 0
+        self._cache_misses = 0
 
     @property
     def connector_name(self) -> str:
@@ -56,13 +58,29 @@ class EcommerceToolService:
         key = self._cache_key(kind, q)
         item = self._cache.get(key)
         if not item:
+            self._cache_misses += 1
             return None
         exp, res = item
         if exp < time.monotonic():
             self._cache.pop(key, None)
+            self._cache_misses += 1
             return None
         self._cache.move_to_end(key)  # LRU：命中即最近使用
+        self._cache_hits += 1
         return res
+
+    def cache_stats(self) -> Dict[str, Any]:
+        """缓存命中率快照，供观测（hit_rate 仅在缓存启用且有查询时有意义）。"""
+        total = self._cache_hits + self._cache_misses
+        return {
+            "enabled": self._cache_ttl > 0,
+            "ttl_sec": self._cache_ttl,
+            "max_entries": self._cache_max,
+            "size": len(self._cache),
+            "hits": self._cache_hits,
+            "misses": self._cache_misses,
+            "hit_rate": (self._cache_hits / total) if total else 0.0,
+        }
 
     def _cache_put(self, kind: str, q: str, res: ToolResult) -> None:
         if self._cache_ttl <= 0 or not res.ok:

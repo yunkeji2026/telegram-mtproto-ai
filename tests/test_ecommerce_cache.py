@@ -157,6 +157,28 @@ async def test_expired_entries_swept_on_insert():
     assert "9999" in keys
 
 
+async def test_cache_stats_counts_hits_and_misses():
+    conn = _CountingConnector()
+    svc = EcommerceToolService(conn, cache_ttl_sec=100)
+    await svc.lookup_order("1001")  # miss
+    await svc.lookup_order("1001")  # hit
+    await svc.lookup_order("1001")  # hit
+    s = svc.cache_stats()
+    assert s["enabled"] is True
+    assert s["hits"] == 2
+    assert s["misses"] == 1
+    assert abs(s["hit_rate"] - (2 / 3)) < 1e-9
+    assert s["size"] == 1
+
+
+def test_cache_stats_disabled_by_default():
+    svc = EcommerceToolService(_CountingConnector())
+    s = svc.cache_stats()
+    assert s["enabled"] is False
+    assert s["hits"] == 0 and s["misses"] == 0
+    assert s["hit_rate"] == 0.0
+
+
 def test_order_facts_include_tracking_no():
     from src.ecommerce_tools.models import ToolResult
     res = ToolResult(
