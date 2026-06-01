@@ -19,13 +19,32 @@ import logging
 import os
 import sys
 
-from src.eval.dataset import load_intent_samples
+from src.eval.dataset import load_faq_samples, load_intent_samples
+from src.eval.faq_eval import evaluate_faq, format_faq_report, kb_search_resolver
 from src.eval.intent_eval import (
     compare_predictors, evaluate_intent, format_compare, format_report,
 )
 from src.eval.predictors import llm_intent_predictor, rule_intent_predictor
 
 logger = logging.getLogger("run_eval")
+
+
+def _try_build_kb_resolver(kb_db: str, score_threshold: float):
+    """构造 KB 解决判定器；KB 不存在/构造失败返回 None。"""
+    from pathlib import Path
+    candidates = [kb_db] if kb_db else [
+        "config/knowledge_base.db", "data/knowledge_base.db",
+    ]
+    for c in candidates:
+        if c and os.path.exists(c):
+            try:
+                from src.utils.kb_store import KnowledgeBaseStore
+                store = KnowledgeBaseStore(Path(c))
+                return kb_search_resolver(store, score_threshold=score_threshold)
+            except Exception as ex:
+                logger.warning("KB resolver 构造失败 %s: %s", c, ex)
+                return None
+    return None
 
 
 def _try_build_llm_generate_fn():
@@ -77,7 +96,26 @@ def main(argv=None) -> int:
     ap.add_argument("--threshold", type=float, default=0.85, help="PASS 阈值（默认 0.85）")
     ap.add_argument("--json", action="store_true", help="输出 JSON")
     ap.add_argument("--compare", action="store_true", help="rule vs LLM 对比")
+    ap.add_argument("--faq", action="store_true", help="FAQ 自动解决率评测")
+    ap.add_argument("--kb-db", default="", help="KB sqlite 路径(--faq 用)")
+    ap.add_argument("--faq-pass", type=float, default=0.50, help="FAQ 解决率 PASS 阈值")
+    ap.add_argument("--score-threshold", type=float, default=1.0,
+                    help="KB 命中分数阈值(--faq 判定解决)")
     args = ap.parse_args(argv)
+
+    if args.faq:
+        samples = load_faq_samples(args.dataset or None)
+        resolver = _try_build_kb_resolver(args.kb_db, args.score_threshold)
+        if resolver is None:
+            print("[note] FAQ 评测需 KB：用 --kb-db 指定 sqlite，或确保 "
+                  "config/knowledge_base.db 存在。当前 KB 不可用，跳过。")
+            return 0
+        report = evaluate_faq(resolver, samples, threshold=args.faq_pass)
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(format_faq_report(report))
+        return 0 if report["passed"] else 1
 
     samples = load_intent_samples(args.dataset or None)
 
