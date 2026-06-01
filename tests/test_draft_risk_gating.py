@@ -59,3 +59,47 @@ def test_apply_analysis_low_risk_auto_ai_allows_autosend(tmp_path):
     assert res["autopilot_level"] == "L2"
     assert res["autosend_allowed"] is True
     store.close()
+
+
+def test_quick_risk_rule_pipeline():
+    """P0-c：同步规则风险函数——硬底线命中即 high。"""
+    from src.ai.chat_assistant_service import quick_risk
+    level, reasons = quick_risk("请帮我转账到银行卡")
+    assert level == "high"
+    assert "money" in reasons
+    level2, _ = quick_risk("好的谢谢")
+    assert level2 in ("low", "medium")
+
+
+class _RiskLineSvc:
+    account_id = "line-a"
+    _merged_cfg = {"label": "LINE-A"}
+
+    def list_pending(self, *, status=None, limit=50):
+        return [{
+            "id": 99, "chat_key": "lk", "chat_name": "U",
+            "peer_text": "我要退款，钱什么时候到银行卡", "draft_reply": "好的",
+            "status": "pending", "ts": 1,
+        }]
+
+
+def test_list_drafts_quick_risk_colors_badge(tmp_path):
+    """无 overlay 的草稿，list_drafts 用 risk_fn 现算 risk+autopilot（零成本）。"""
+    from src.ai.chat_assistant_service import quick_risk
+    store = InboxStore(tmp_path / "inbox.db")
+    svc = DraftService(inbox_store=store, line_services=[_RiskLineSvc()], risk_fn=quick_risk)
+    drafts = svc.list_drafts(platform="line")
+    d = next(x for x in drafts if x["draft_id"] == "line_pending:line-a:99")
+    assert d["risk_level"] == "high"          # 命中 money 硬底线
+    assert d["autopilot_level"] == "L4"       # high → L4
+    store.close()
+
+
+def test_list_drafts_no_risk_fn_keeps_unknown(tmp_path):
+    """未注入 risk_fn → 保持 unknown（向后兼容）。"""
+    store = InboxStore(tmp_path / "inbox.db")
+    svc = DraftService(inbox_store=store, line_services=[_RiskLineSvc()])
+    drafts = svc.list_drafts(platform="line")
+    d = next(x for x in drafts if x["draft_id"] == "line_pending:line-a:99")
+    assert d["risk_level"] == "unknown"
+    store.close()

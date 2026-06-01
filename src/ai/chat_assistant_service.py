@@ -178,6 +178,19 @@ def _merge_analysis(base: ChatAnalysis, llm: Dict[str, Any]) -> ChatAnalysis:
     return base
 
 
+def quick_risk(text: str) -> "tuple[str, list]":
+    """同步零成本规则风险评估（不调 LLM）。返回 (risk_level, risk_reasons)。
+
+    供 DraftService 在列草稿时实时给风险徽章上色（high/medium/low），
+    走与 ChatAssistantService 规则版同一管线（emotion→intent→risk），
+    硬底线（money/privacy/self_harm/adult/stop_contact）命中即 high。
+    """
+    t = str(text or "")
+    emotion = _detect_emotion(t)
+    intent = _detect_intent(t, emotion=emotion)
+    return _detect_risk(t, emotion=emotion, intent=intent)
+
+
 def _detect_emotion(text: str) -> str:
     t = text.lower()
     if any(k in t for k in ("sad", "tired", "lonely", "难过", "累", "孤独", "失落", "想哭")):

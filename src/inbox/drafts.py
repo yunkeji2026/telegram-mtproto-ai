@@ -30,8 +30,12 @@ class DraftService:
         line_services: Optional[List[Any]] = None,
         wa_services: Optional[List[Any]] = None,
         messenger_service: Optional[Any] = None,
+        risk_fn: Optional[Any] = None,
     ) -> None:
         self._store = inbox_store
+        # 同步零成本规则风险函数 risk_fn(text)->(level, reasons)（P0-c）；
+        # 用于给无 overlay 的草稿实时算风险徽章，不调 LLM。
+        self._risk_fn = risk_fn
         self._adapters = [
             LinePendingAdapter(line_services or []),
             WhatsAppPendingAdapter(wa_services or []),
@@ -61,8 +65,30 @@ class DraftService:
                 logger.debug("inbox 自发草稿列举失败", exc_info=True)
         # 风险 overlay 合并：平台草稿挂上 reply_drafts 里的 risk 元数据
         self._merge_overlays(drafts)
+        # 无 overlay 风险的草稿：用同步规则函数现算（零成本，不调 LLM）
+        self._apply_quick_risk(drafts)
         drafts.sort(key=lambda d: d.created_ts or 0, reverse=True)
         return [d.to_dict() for d in drafts[:limit]]
+
+    def _apply_quick_risk(self, drafts: List[UnifiedDraft]) -> None:
+        """对仍无明确风险（overlay 未覆盖）的草稿，用规则函数现算 risk + autopilot。"""
+        if self._risk_fn is None:
+            return
+        for d in drafts:
+            if d.risk_level and d.risk_level != "unknown":
+                continue  # 已有 overlay/LLM 风险，不覆盖
+            text = d.peer_text or d.draft_text
+            if not text:
+                continue
+            try:
+                level, reasons = self._risk_fn(text)
+            except Exception:
+                continue
+            d.risk_level = level or "low"
+            if reasons and not d.risk_reasons:
+                d.risk_reasons = list(reasons)
+            if not d.autopilot_level:
+                d.autopilot_level = risk_to_autopilot(d.risk_level, "review")
 
     def _merge_overlays(self, drafts: List[UnifiedDraft]) -> None:
         if self._store is None:

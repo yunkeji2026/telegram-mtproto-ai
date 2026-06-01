@@ -593,12 +593,14 @@ class AIChatAssistant:
                             # ── Phase B：统一草稿/审批层（read-through 聚合 4 平台源表） ──
                             from src.inbox.drafts import DraftService
                             from src.web.routes.drafts_routes import register_drafts_routes
+                            from src.ai.chat_assistant_service import quick_risk as _quick_risk
 
                             draft_svc = DraftService(
                                 inbox_store=self.inbox_store,
                                 line_services=self.line_rpa_services or [],
                                 wa_services=self.whatsapp_rpa_services or [],
                                 messenger_service=self.messenger_rpa_service,
+                                risk_fn=_quick_risk,
                             )
                             web_app.state.draft_service = draft_svc
 
