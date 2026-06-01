@@ -669,8 +669,11 @@ class AIChatAssistant:
                                 register_ecommerce_tools_routes(
                                     web_app, api_auth=_drafts_api_auth,
                                 )
+                                # P1-b：注入回复生成链路 → 命中订单号自动带真实事实/反幻觉守卫
+                                if self.ai_client is not None:
+                                    self.ai_client.set_ecommerce_tools(self.ecommerce_tools)
                                 self.logger.info(
-                                    "电商工具层已挂载（provider=%s, /api/tools/ecommerce/*）",
+                                    "电商工具层已挂载（provider=%s, /api/tools/ecommerce/* + 回复事实注入）",
                                     self.ecommerce_tools.connector_name,
                                 )
                     except Exception:

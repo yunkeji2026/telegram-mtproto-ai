@@ -6,22 +6,16 @@
 
 from __future__ import annotations
 
-import re
 from typing import Dict, List, Set
 
 from src.hooks.base import DomainHook
 
-
-# 订单号：4~24 位字母数字（含 # 前缀、连字符），如 #1001（Shopify 默认）/ SP-20240601-001
-_ORDER_NO_RE = re.compile(r"#?\b([A-Z]{0,4}[-_]?\d[\dA-Z\-_]{3,23})\b", re.IGNORECASE)
-# 物流单号：10~24 位字母数字（更长，常全大写），如 LP00123456789CN
-_TRACKING_RE = re.compile(r"\b([A-Z]{2}\d{6,}[A-Z]{0,2}|\d{10,24})\b")
-
-_ORDER_KW = re.compile(
-    r"订单|下单|order|订单号|order\s*(no|number|id)", re.IGNORECASE
-)
-_SHIPPING_KW = re.compile(
-    r"物流|快递|运单|包裹|tracking|shipment|parcel|courier", re.IGNORECASE
+# 订单号/物流号正则与抽取已收敛到单一真源（避免跨文件正则漂移）
+from src.ecommerce_tools.extract import (
+    _ORDER_KW,
+    _SHIPPING_KW,
+    extract_order_no,
+    extract_tracking_no,
 )
 
 
@@ -51,15 +45,6 @@ class EcommerceDomainHook(DomainHook):
         return False
 
 
-# ── 供 Phase D 工具层复用的纯函数（无副作用，便于单测） ──────────────
-
-def extract_order_no(text: str) -> str:
-    """从文本里抽取首个疑似订单号。无则返回空串。"""
-    m = _ORDER_NO_RE.search(str(text or ""))
-    return m.group(1) if m else ""
-
-
-def extract_tracking_no(text: str) -> str:
-    """从文本里抽取首个疑似物流单号。无则返回空串。"""
-    m = _TRACKING_RE.search(str(text or ""))
-    return m.group(1) if m else ""
+# extract_order_no / extract_tracking_no 见 src.ecommerce_tools.extract（单一真源），
+# 此处通过模块顶部 import 暴露，外部 `from domains.ecommerce.hooks import extract_order_no` 仍可用。
+__all__ = ["EcommerceDomainHook", "extract_order_no", "extract_tracking_no"]

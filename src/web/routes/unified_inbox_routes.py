@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -88,14 +87,8 @@ def _ecommerce_tools(request: Request):
     return getattr(request.app.state, "ecommerce_tools", None)
 
 
-# 通用订单号兜底正则（与 domains/ecommerce/hooks 同形，核心不依赖域包）：
-# #1001（Shopify 默认 4 位）/ SP-20240601-001 等
-_ORDER_NO_RE = re.compile(r"#?\b([A-Z]{0,4}[-_]?\d[\dA-Z\-_]{3,23})\b", re.IGNORECASE)
-
-
-def _extract_order_no(text: str) -> str:
-    m = _ORDER_NO_RE.search(str(text or ""))
-    return m.group(1) if m else ""
+# 订单号抽取：复用单一真源（src.ecommerce_tools.extract），避免正则跨文件漂移
+from src.ecommerce_tools.extract import extract_order_no as _extract_order_no
 
 
 def _read_automation_mode(request: Request, conversation_id: str) -> str:

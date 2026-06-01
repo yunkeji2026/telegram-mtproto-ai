@@ -520,6 +520,39 @@ class AIClient(LoggerMixin):
         merged.setdefault("_ai_tier", tier)
         return merged
 
+    def set_ecommerce_tools(self, svc: Any) -> None:
+        """注入电商工具服务（EcommerceToolService）。None 则关闭事实注入。"""
+        self.ecommerce_tools = svc
+
+    async def _maybe_inject_ecommerce_facts(
+        self, user_message: str, context: Optional[Dict[str, Any]]
+    ) -> None:
+        """命中订单号 → 查真实订单 → 把事实写入 context['_ecommerce_facts']。
+
+        - 仅在注入了 ecommerce_tools 且消息含订单号时触发；查得到必注（高价值低风险）。
+        - 查不到/出错时，仅当消息明显含订单/物流意图才注入「如实告知查不到」守卫，
+          避免把随机数字（金额/电话）误判为订单号而产生噪声。
+        - 全程 best-effort：任何异常静默降级，绝不阻断回复主链路。
+        - service 层自带超时/审计，这里不再重复。
+        """
+        svc = getattr(self, "ecommerce_tools", None)
+        if svc is None or context is None:
+            return
+        if context.get("_ecommerce_facts"):
+            return  # 上游已注入，尊重之
+        try:
+            from src.ecommerce_tools import extract_order_no, has_order_intent
+            order_no = extract_order_no(user_message)
+            if not order_no:
+                return
+            res = await svc.lookup_order(order_no, by="reply_gen")
+            if res.found or has_order_intent(user_message):
+                facts = res.to_context_facts()
+                if facts:
+                    context["_ecommerce_facts"] = facts
+        except Exception:
+            self.logger.debug("ecommerce 事实注入跳过", exc_info=True)
+
     async def generate_reply(
         self,
         user_message: str,
@@ -539,6 +572,8 @@ class AIClient(LoggerMixin):
         跳过 QualityTracker，避免 3 字符回复被误判 too_short。
         """
         strategy_overrides = self._apply_tier_overrides(strategy_overrides, context)
+        # P1-b：命中订单号则注入电商真实事实（含「查不到就如实说」反幻觉守卫）
+        await self._maybe_inject_ecommerce_facts(user_message, context)
         if self._use_openai_compat:
             return await self._generate_reply_openai_compat(
                 user_message, context, conversation_history, strategy_overrides,
@@ -1051,6 +1086,16 @@ class AIClient(LoggerMixin):
 
         if context and context.get("_intent_supplement"):
             parts.append(context["_intent_supplement"])
+
+        # P1-b：电商真实事实（订单/物流）— 高优先级，强约束「只可基于事实、勿编造」
+        _ecom_facts = (context or {}).get("_ecommerce_facts") if context else ""
+        if _ecom_facts:
+            parts.append(
+                "【电商实时事实 · 最高优先级 · 必须遵守】\n"
+                f"{_ecom_facts}\n"
+                "你只能依据以上事实回答订单/物流相关问题；事实未覆盖的细节，"
+                "必须如实告知客户暂无该信息，严禁编造订单状态、金额、物流进度或时间。"
+            )
 
         return "\n\n".join(parts)
 
