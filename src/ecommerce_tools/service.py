@@ -12,7 +12,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any, Dict, Optional
+import time
+from typing import Any, Dict, Optional, Tuple
 
 from .models import ToolResult
 from .mock_connector import MockEcommerceConnector
@@ -27,20 +28,54 @@ class EcommerceToolService:
         *,
         audit_store: Optional[Any] = None,
         timeout_sec: float = 8.0,
+        cache_ttl_sec: float = 0.0,
     ) -> None:
         self._connector = connector
         self._audit = audit_store
         self._timeout = float(timeout_sec or 8.0)
+        # 短 TTL 内存缓存：避免同会话连续追问同一单号重复打 API。
+        # ttl<=0 关闭；仅缓存 ok=True 结果（错误/超时不缓存，下次重试）。
+        self._cache_ttl = float(cache_ttl_sec or 0.0)
+        self._cache: Dict[Tuple[str, str], Tuple[float, ToolResult]] = {}
 
     @property
     def connector_name(self) -> str:
         return str(getattr(self._connector, "name", "unknown"))
+
+    def _cache_key(self, kind: str, q: str) -> Tuple[str, str]:
+        # 键带 connector 名，避免切换 provider 后命中旧数据；单号大小写/＃归一
+        norm = q.lstrip("#").strip().lower()
+        return (f"{self.connector_name}:{kind}", norm)
+
+    def _cache_get(self, kind: str, q: str) -> Optional[ToolResult]:
+        if self._cache_ttl <= 0:
+            return None
+        key = self._cache_key(kind, q)
+        item = self._cache.get(key)
+        if not item:
+            return None
+        exp, res = item
+        if exp < time.monotonic():
+            self._cache.pop(key, None)
+            return None
+        return res
+
+    def _cache_put(self, kind: str, q: str, res: ToolResult) -> None:
+        if self._cache_ttl <= 0 or not res.ok:
+            return
+        self._cache[self._cache_key(kind, q)] = (
+            time.monotonic() + self._cache_ttl, res,
+        )
 
     async def lookup_order(self, order_no: str, *, by: str = "") -> ToolResult:
         q = str(order_no or "").strip()
         if not q:
             return ToolResult(ok=False, found=False, kind="order", query=q,
                               source=self.connector_name, error="empty_order_no")
+        cached = self._cache_get("order", q)
+        if cached is not None:
+            self._audit_call("ecommerce_order_lookup", q, cached, by, cache_hit=True)
+            return cached
         try:
             order = await asyncio.wait_for(self._connector.get_order(q), timeout=self._timeout)
         except asyncio.TimeoutError:
@@ -53,6 +88,7 @@ class EcommerceToolService:
         else:
             res = ToolResult(ok=True, found=True, kind="order", query=q,
                              data=order.to_dict(), source=self.connector_name)
+        self._cache_put("order", q, res)
         self._audit_call("ecommerce_order_lookup", q, res, by)
         return res
 
@@ -61,6 +97,10 @@ class EcommerceToolService:
         if not q:
             return ToolResult(ok=False, found=False, kind="shipment", query=q,
                               source=self.connector_name, error="empty_tracking_no")
+        cached = self._cache_get("shipment", q)
+        if cached is not None:
+            self._audit_call("ecommerce_shipment_track", q, cached, by, cache_hit=True)
+            return cached
         try:
             ship = await asyncio.wait_for(
                 self._connector.track_shipment(q), timeout=self._timeout
@@ -75,6 +115,7 @@ class EcommerceToolService:
         else:
             res = ToolResult(ok=True, found=True, kind="shipment", query=q,
                              data=ship.to_dict(), source=self.connector_name)
+        self._cache_put("shipment", q, res)
         self._audit_call("ecommerce_shipment_track", q, res, by)
         return res
 
@@ -84,12 +125,14 @@ class EcommerceToolService:
         self._audit_call(f"ecommerce_{kind}_error", q, res, by)
         return res
 
-    def _audit_call(self, action: str, query: str, res: ToolResult, by: str) -> None:
+    def _audit_call(self, action: str, query: str, res: ToolResult, by: str,
+                    *, cache_hit: bool = False) -> None:
         if self._audit is None or not hasattr(self._audit, "log"):
             return
         try:
             summary = {"found": res.found, "ok": res.ok,
-                       "source": res.source, "error": res.error}
+                       "source": res.source, "error": res.error,
+                       "cache_hit": cache_hit}
             self._audit.log(
                 user_id=by or "system",
                 action=action,

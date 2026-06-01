@@ -992,6 +992,7 @@ ecommerce_tools:
   enabled: false                     # 默认关；电商域上线时开
   provider: "mock"                   # mock / shopify（woocommerce 等为扩展点）
   timeout_sec: 8
+  cache_ttl_sec: 0                   # 订单/物流查询短 TTL 内存缓存秒数；0=关闭（建议 30~60）
   # mock_orders: {}                  # provider=mock 时可注入演示订单数据
   # shopify:                         # provider=shopify 时填（缺 shop/token 自动回落 mock）
   #   shop: "your-store.myshopify.com"

@@ -110,6 +110,37 @@ def test_system_instruction_no_facts_block_when_absent():
     assert "电商实时事实" not in prompt
 
 
+def _svc_default() -> EcommerceToolService:
+    # 用内置默认单：1001 运单 LP001234567CN（YunExpress in_transit）
+    return EcommerceToolService(MockEcommerceConnector(), audit_store=None)
+
+
+async def test_inject_shipment_facts_when_distinct_tracking_found():
+    """消息同时含订单号 + 独立运单号 → 订单与物流事实都注入。"""
+    client = AIClient(_Cfg())
+    client.set_ecommerce_tools(_svc_default())  # 默认单 1001 运单 LP001234567CN
+    ctx: dict = {}
+    await client._maybe_inject_ecommerce_facts(
+        "订单 #1001 的运单 LP001234567CN 到哪了", ctx
+    )
+    facts = ctx.get("_ecommerce_facts") or ""
+    assert "1001" in facts
+    assert "LP001234567CN" in facts
+
+
+async def test_no_shipment_guard_when_tracking_not_found():
+    """运单查不到不注入「查不到」守卫（避免每条长数字误报），仅保留订单事实。"""
+    client = AIClient(_Cfg())
+    client.set_ecommerce_tools(_svc_default())
+    ctx: dict = {}
+    await client._maybe_inject_ecommerce_facts(
+        "订单 #1001 运单 LP999999999XX 呢", ctx
+    )
+    facts = ctx.get("_ecommerce_facts") or ""
+    assert "1001" in facts
+    assert "LP999999999XX" not in facts
+
+
 def test_extractor_single_source_of_truth():
     """domains.ecommerce.hooks 的抽取函数即 src.ecommerce_tools.extract 同一实现。"""
     from domains.ecommerce.hooks import extract_order_no as h_order
