@@ -1,0 +1,78 @@
+# 意图识别评测标注集 v1（人工标注 ground-truth）
+# 标签空间对齐 ChatAssistantService 规则版：
+#   打招呼 / 停止联系 / 需要安抚 / 不满/投诉 / 短句接话 / 提问 / 继续聊天 / 空消息
+# 用途：python -m scripts.run_eval --dataset config/eval/intent_samples.yaml
+# 注：刻意保留若干规则版难例（如「早上好」非白名单问候），使基线真实、非过拟合。
+
+# ── 打招呼 ──
+- {text: "在吗", intent: "打招呼"}
+- {text: "你好", intent: "打招呼"}
+- {text: "hello", intent: "打招呼"}
+- {text: "嗨", intent: "打招呼"}
+- {text: "哈喽", intent: "打招呼"}
+- {text: "hey", intent: "打招呼"}
+- {text: "こんにちは", intent: "打招呼"}
+- {text: "早上好", intent: "打招呼", note: "规则难例:非白名单问候"}
+- {text: "晚上好呀", intent: "打招呼", note: "规则难例"}
+- {text: "好久不见", intent: "打招呼", note: "规则难例"}
+
+# ── 停止联系 ──
+- {text: "别再联系我了", intent: "停止联系"}
+- {text: "请不要再打扰我", intent: "停止联系"}
+- {text: "别联系我", intent: "停止联系"}
+- {text: "stop contacting me", intent: "停止联系"}
+- {text: "unsubscribe please", intent: "停止联系"}
+- {text: "不要再发消息了", intent: "停止联系"}
+- {text: "勿扰，谢谢", intent: "停止联系", note: "规则难例:勿扰未被覆盖"}
+- {text: "别再骚扰我", intent: "停止联系"}
+
+# ── 需要安抚 ──
+- {text: "我最近好难过，压力好大", intent: "需要安抚"}
+- {text: "我好焦虑睡不着", intent: "需要安抚"}
+- {text: "感觉好孤独", intent: "需要安抚"}
+- {text: "今天真的好累好想哭", intent: "需要安抚"}
+- {text: "我有点担心害怕", intent: "需要安抚"}
+- {text: "心情很低落，什么都不想做", intent: "需要安抚"}
+- {text: "i feel so lonely and tired", intent: "需要安抚"}
+- {text: "最近失眠很严重，整个人很疲惫", intent: "需要安抚"}
+
+# ── 不满/投诉 ──
+- {text: "你们这什么破服务，太气人了", intent: "不满/投诉"}
+- {text: "我真的很生气，烦死了", intent: "不满/投诉"}
+- {text: "等了这么久还没发货，太讨厌了", intent: "不满/投诉"}
+- {text: "气死我了，到底什么时候处理", intent: "不满/投诉"}
+- {text: "态度这么差，我要投诉", intent: "不满/投诉", note: "规则难例:投诉无愤怒词"}
+- {text: "我对你们的处理非常不满意", intent: "不满/投诉", note: "规则难例"}
+
+# ── 短句接话 ──
+- {text: "好的", intent: "短句接话"}
+- {text: "嗯嗯", intent: "短句接话"}
+- {text: "哈哈哈", intent: "短句接话"}
+- {text: "收到", intent: "短句接话"}
+- {text: "好哒", intent: "短句接话"}
+- {text: "可以的", intent: "短句接话"}
+- {text: "OK", intent: "短句接话"}
+- {text: "谢谢啦", intent: "短句接话"}
+
+# ── 提问 ──
+- {text: "这个产品的尺码怎么选？", intent: "提问"}
+- {text: "请问发货要多久？", intent: "提问"}
+- {text: "How long does shipping take?", intent: "提问"}
+- {text: "能便宜点吗？", intent: "提问"}
+- {text: "有货吗?", intent: "提问"}
+- {text: "支持退换货吗？", intent: "提问"}
+- {text: "这个颜色还有别的吗？", intent: "提问"}
+- {text: "你们在哪个城市发货？", intent: "提问"}
+- {text: "可以用支付宝付款吗？", intent: "提问"}
+
+# ── 继续聊天 ──
+- {text: "今天天气不错我们出去走走吧聊聊近况", intent: "继续聊天"}
+- {text: "我刚看完那部电影觉得还挺好看的推荐你也看看", intent: "继续聊天"}
+- {text: "周末我打算去爬山顺便拍点照片回来", intent: "继续聊天"}
+- {text: "昨天那家餐厅味道真不错下次带你一起去", intent: "继续聊天"}
+- {text: "我最近在学做饭已经会好几道菜了", intent: "继续聊天"}
+- {text: "刚刚路过你说的那家店人好多啊", intent: "继续聊天"}
+
+# ── 空消息 ──
+- {text: "", intent: "空消息"}
+- {text: "   ", intent: "空消息"}

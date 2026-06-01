@@ -105,3 +105,71 @@ def test_evaluate_intent_perfect_predictor():
     assert report["passed"] is True
     assert report["metrics"]["accuracy"] == 1.0
     assert report["errors"] == []
+
+
+# ── 扩充标注集 + LLM 预测器 + 对比 ─────────────────────────────────────────
+
+def test_curated_dataset_loads_and_covers_labels():
+    import os
+    from src.eval.predictors import INTENT_LABELS
+    path = "config/eval/intent_samples.yaml"
+    if not os.path.exists(path):
+        return  # 数据集随仓库提供；缺失则跳过
+    rows = load_intent_samples(path)
+    assert len(rows) >= 40
+    labels = {s.intent for s in rows}
+    # 覆盖全部 8 个标签
+    assert set(INTENT_LABELS).issubset(labels)
+    # 规则基线在更大集上应仍合理（>=0.80，真实可能 <0.85）
+    from src.eval.predictors import rule_intent_predictor
+    rep = evaluate_intent(rule_intent_predictor(), rows)
+    assert rep["metrics"]["accuracy"] >= 0.80
+
+
+def test_parse_intent_label():
+    from src.eval.predictors import parse_intent_label, INTENT_LABELS
+    assert parse_intent_label("提问", INTENT_LABELS) == "提问"
+    assert parse_intent_label("意图：提问。", INTENT_LABELS) == "提问"  # 子串
+    assert parse_intent_label("乱七八糟无关", INTENT_LABELS) == "继续聊天"  # 兜底
+
+
+def test_llm_predictor_with_fake_generate():
+    from src.eval.predictors import llm_intent_predictor
+    # fake：把消息映射到标签（模拟一个"完美"LLM）
+    mapping = {"在吗": "打招呼", "能便宜点吗？": "提问"}
+
+    def fake_gen(prompt: str) -> str:
+        for k, v in mapping.items():
+            if k in prompt:
+                return f"标签：{v}"
+        return "继续聊天"
+
+    predict = llm_intent_predictor(fake_gen)
+    assert predict("在吗") == "打招呼"
+    assert predict("能便宜点吗？") == "提问"
+    assert predict("") == "空消息"            # 空消息不调用 LLM
+
+
+def test_llm_predictor_fallback_on_exception():
+    from src.eval.predictors import llm_intent_predictor
+
+    def boom(prompt: str) -> str:
+        raise RuntimeError("api down")
+
+    predict = llm_intent_predictor(boom)
+    assert predict("随便说点什么") == "继续聊天"   # 异常兜底
+
+
+def test_compare_predictors():
+    from src.eval.intent_eval import compare_predictors, format_compare
+    from src.eval.predictors import rule_intent_predictor
+    samples = load_intent_samples()
+    gold = {s.text: s.intent for s in samples}
+    results = compare_predictors({
+        "rule": rule_intent_predictor(),
+        "oracle": lambda t: gold[t],
+    }, samples)
+    assert results["oracle"]["metrics"]["accuracy"] == 1.0
+    assert "rule" in results and "oracle" in results
+    text = format_compare(results)
+    assert "predictor" in text and "oracle" in text

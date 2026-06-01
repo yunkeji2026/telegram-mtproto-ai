@@ -12,8 +12,14 @@
 
 from .metrics import multiclass_metrics, resolve_rate
 from .dataset import IntentSample, load_intent_samples
-from .intent_eval import evaluate_intent
-from .predictors import rule_intent_predictor
+from .intent_eval import evaluate_intent, compare_predictors
+from .predictors import (
+    rule_intent_predictor,
+    llm_intent_predictor,
+    INTENT_LABELS,
+    build_intent_classify_prompt,
+    parse_intent_label,
+)
 
 __all__ = [
     "multiclass_metrics",
@@ -21,5 +27,10 @@ __all__ = [
     "IntentSample",
     "load_intent_samples",
     "evaluate_intent",
+    "compare_predictors",
     "rule_intent_predictor",
+    "llm_intent_predictor",
+    "INTENT_LABELS",
+    "build_intent_classify_prompt",
+    "parse_intent_label",
 ]
