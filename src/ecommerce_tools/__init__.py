@@ -15,7 +15,9 @@ from .connector import EcommerceConnector
 from .mock_connector import MockEcommerceConnector
 from .shopify_connector import ShopifyConnector
 from .service import EcommerceToolService, build_connector
-from .extract import extract_order_no, extract_tracking_no, has_order_intent
+from .extract import (
+    extract_order_no, extract_tracking_no, has_order_intent, is_ecom_intent,
+)
 
 __all__ = [
     "OrderInfo",
@@ -29,4 +31,5 @@ __all__ = [
     "extract_order_no",
     "extract_tracking_no",
     "has_order_intent",
+    "is_ecom_intent",
 ]

@@ -542,13 +542,17 @@ class AIClient(LoggerMixin):
             return  # 上游已注入，尊重之
         try:
             from src.ecommerce_tools import (
-                extract_order_no, extract_tracking_no, has_order_intent,
+                extract_order_no, extract_tracking_no,
+                has_order_intent, is_ecom_intent,
             )
             order_no = extract_order_no(user_message)
             tracking_no = extract_tracking_no(user_message)
             if not order_no and not tracking_no:
                 return
-            intent = has_order_intent(user_message)
+            # 门槛：有上游分类意图(skill 路径会塞 context['intent'])则以它为权威，
+            # 更准、可避免「含 order 字样但意图是闲聊」误报；否则回落关键词正则。
+            _ci = str((context or {}).get("intent") or "").strip()
+            intent = is_ecom_intent(_ci) if _ci else has_order_intent(user_message)
             facts_parts: List[str] = []
             # 订单事实：查得到必注；查不到仅在含订单/物流意图时注入「如实告知」守卫
             if order_no:
