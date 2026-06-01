@@ -195,7 +195,8 @@ def _detect_emotion(text: str) -> str:
     t = text.lower()
     if any(k in t for k in ("sad", "tired", "lonely", "难过", "累", "孤独", "失落", "想哭")):
         return "低落"
-    if any(k in t for k in ("angry", "mad", "生气", "烦", "滚", "讨厌")):
+    if any(k in t for k in ("angry", "mad", "生气", "烦", "滚", "讨厌",
+                            "气人", "气死", "太气", "气炸", "破服务", "什么破")):
         return "生气"
     if any(k in t for k in ("worried", "anxious", "焦虑", "担心", "害怕")):
         return "焦虑"
@@ -212,16 +213,21 @@ def _detect_intent(text: str, *, emotion: str) -> str:
         return "空消息"
     if re.fullmatch(r"(hi|hey|hello|在吗|在|你好|哈喽|嗨|hola|olá|bonjour|こんにちは)", t):
         return "打招呼"
-    if any(k in t for k in ("stop", "don't contact", "unsubscribe", "别联系", "别发", "不要再")):
+    # 停止联系：固定短语 + 「别/不要/勿/停止 …(≤3字)… 联系/打扰/骚扰」正则，
+    # 兼容「别再联系」「不要打扰我」等非连续表达（评测发现的漏判）。
+    if any(k in t for k in ("stop", "don't contact", "unsubscribe",
+                            "别联系", "别发", "不要发")) \
+            or re.search(r"(别|不要|不想|勿|停止)\S{0,3}(联系|打扰|骚扰)", t):
         return "停止联系"
     if emotion in {"低落", "焦虑"}:
         return "需要安抚"
     if emotion == "生气":
         return "不满/投诉"
-    if len(t) <= 8:
-        return "短句接话"
+    # 提问判定须在「短句」短路之前：否则「能便宜点吗？」等短问句会被误判为短句接话。
     if "?" in t or "？" in t:
         return "提问"
+    if len(t) <= 8:
+        return "短句接话"
     return "继续聊天"
 
 
