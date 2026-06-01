@@ -80,6 +80,23 @@
 /* Spinner */
 .spin { display:inline-block; width:16px; height:16px; border:2px solid #e5e7eb; border-top-color:#2563eb; border-radius:50%; animation:spin .7s linear infinite; }
 @keyframes spin{to{transform:rotate(360deg);}}
+
+/* 待审草稿（Phase B：统一草稿队列） */
+.drafts-toggle { margin-left:auto; padding:4px 10px; border-radius:20px; font-size:12px; border:1px solid #f59e0b; background:#fffbeb; color:#92400e; cursor:pointer; white-space:nowrap; }
+.drafts-view { grid-column:1 / -1; padding:16px 20px; overflow-y:auto; background:#f9fafb; }
+.drafts-view h3 { margin:0 0 12px; font-size:15px; color:#111827; }
+.draft-card { border:1px solid #e5e7eb; border-radius:10px; padding:12px 14px; margin-bottom:10px; background:#fff; }
+.draft-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; flex-wrap:wrap; }
+.draft-plat { font-size:11px; color:#fff; border-radius:3px; padding:1px 6px; }
+.risk-badge { font-size:11px; font-weight:700; border-radius:10px; padding:1px 8px; }
+.risk-low{background:#dcfce7;color:#166534;} .risk-medium{background:#fef9c3;color:#854d0e;}
+.risk-high{background:#fee2e2;color:#991b1b;} .risk-unknown{background:#f1f5f9;color:#475569;}
+.draft-peer { font-size:12px; color:#6b7280; background:#f8fafc; border-left:3px solid #cbd5e1; padding:6px 8px; border-radius:4px; margin:6px 0; white-space:pre-wrap; }
+.draft-text { font-size:13px; color:#111827; line-height:1.5; white-space:pre-wrap; }
+.draft-acts { margin-top:8px; display:flex; gap:8px; }
+.btn-approve{ background:#16a34a; color:#fff; border:none; border-radius:7px; padding:5px 14px; font-size:12px; cursor:pointer; }
+.btn-reject{ background:#fff; color:#b91c1c; border:1px solid #fecaca; border-radius:7px; padding:5px 14px; font-size:12px; cursor:pointer; }
+.btn-approve:disabled,.btn-reject:disabled{ opacity:.5; cursor:not-allowed; }
 </style>
 
 <div class="inbox-layout">
@@ -91,6 +108,7 @@
       <button class="plat-btn" data-plat="line"><span class="plat-dot dot-line"></span>LINE</button>
       <button class="plat-btn" data-plat="messenger"><span class="plat-dot dot-messenger"></span>Messenger</button>
       <button class="plat-btn" data-plat="whatsapp"><span class="plat-dot dot-whatsapp"></span>WhatsApp</button>
+      <button class="drafts-toggle" onclick="UI.showDrafts()" title="跨平台待审草稿">📝 待审草稿 <span id="drafts-count" class="chat-badge" style="display:none"></span></button>
     </div>
     <div class="status-strip" id="status-strip"><span class="spin"></span></div>
     <div class="chat-list" id="chat-list"><div style="padding:20px;text-align:center;color:#9ca3af;font-size:13px;"><span class="spin"></span> 加载中...</div></div>
@@ -218,6 +236,7 @@
         </div>
         <div class="ai-section"><div class="ai-label">对象档案</div><div id="profile-box"><span class="spin"></span></div></div>
         <div class="ai-section"><div class="ai-label">下一步</div><div class="ai-value" id="ai-next">正在生成建议...</div></div>
+        <div class="ai-section" id="ai-order-sec" style="display:none;"><div class="ai-label">订单/物流（事实校验）</div><div id="ai-order"></div></div>
         <div class="ai-section"><div class="ai-label">多答案建议</div><div id="ai-suggestions"><span class="spin"></span></div></div>
       </aside>`;
     const ta = document.getElementById('reply-text');
@@ -237,9 +256,33 @@
       });
       const d = await r.json();
       renderAnalysis(d.analysis||{});
+      renderOrderLookup(d.order_lookup||null);
     }catch(e){
       renderAnalysis({emotion:'分析失败',intent:'分析失败',risk_level:'unknown',next_step:'请稍后重试',suggestions:[]});
     }
+  }
+
+  function renderOrderLookup(o){
+    const sec = document.getElementById('ai-order-sec');
+    const box = document.getElementById('ai-order');
+    if(!sec || !box) return;
+    if(!o){ sec.style.display='none'; return; }
+    sec.style.display='block';
+    if(!o.ok){
+      box.innerHTML = `<div style="font-size:12px;color:#b91c1c;">查询失败（系统暂不可用，请勿编造订单状态）</div>`;
+      return;
+    }
+    if(!o.found){
+      box.innerHTML = `<div style="font-size:12px;color:#92400e;">未查到订单「${esc(o.query||'')}」——请如实告知客户查不到，勿编造</div>`;
+      return;
+    }
+    const dat = o.data || {};
+    const ship = dat.shipment || {};
+    box.innerHTML = `
+      <div class="ai-value">订单 ${esc(dat.order_no||o.query)} · ${esc(dat.status||'')}</div>
+      <div style="font-size:12px;color:#374151;margin-top:4px;">金额：${esc(dat.total||'')} ${esc(dat.currency||'')}</div>
+      ${ship.tracking_no?`<div style="font-size:12px;color:#374151;margin-top:4px;">物流：${esc(ship.carrier||'')} · ${esc(ship.status||'')}<br>${esc(ship.last_event||'')}${ship.eta?' · 预计 '+esc(ship.eta):''}</div>`:''}
+      <div style="font-size:11px;color:#16a34a;margin-top:6px;">✓ 数据来自 ${esc(o.source||'connector')}，可据此回复</div>`;
   }
 
   function renderAnalysis(a){
@@ -326,6 +369,55 @@
       renderStatusStrip(d.platform_status||{});
       applyFilter();
     }catch(e){ console.error(e); }
+  }
+
+  const PLAT_DRAFT_NAME = {telegram:'Telegram',line:'LINE',messenger:'Messenger',whatsapp:'WhatsApp',inbox:'收件箱'};
+  function riskBadge(level){
+    const cls = {low:'risk-low',medium:'risk-medium',high:'risk-high'}[level]||'risk-unknown';
+    const txt = {low:'低风险',medium:'中风险',high:'高风险'}[level]||'未评估';
+    return `<span class="risk-badge ${cls}">${txt}</span>`;
+  }
+  function renderDrafts(drafts){
+    const main = document.getElementById('inbox-main');
+    const head = `<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <h3 style="margin:0;">📝 待审草稿（${drafts.length}）</h3>
+        <button class="tiny-btn" onclick="UI.refreshDrafts()">刷新</button>
+        <button class="tiny-btn" onclick="UI.closeDrafts()">← 返回会话</button></div>`;
+    if(!drafts.length){
+      main.innerHTML = `<div class="drafts-view">${head}<div style="color:#94a3b8;font-size:13px;padding:20px;text-align:center;">暂无待审草稿</div></div>`;
+      return;
+    }
+    const cards = drafts.map(d=>{
+      const platName = PLAT_DRAFT_NAME[d.platform]||d.platform||'';
+      const color = PLATFORM_COLORS[d.platform]||'#6b7280';
+      return `<div class="draft-card" data-did="${esc(d.draft_id)}">
+        <div class="draft-head">
+          <span class="draft-plat" style="background:${color}">${esc(platName)}</span>
+          <span style="font-size:12px;font-weight:600;">${esc(d.chat_name||d.chat_key||'')}</span>
+          ${riskBadge(d.risk_level)}
+          ${d.autopilot_level?`<span class="mode-pill">${esc(d.autopilot_level)}</span>`:''}
+          <span style="font-size:11px;color:#9ca3af;margin-left:auto;">${esc(d.account_label||d.account_id||'')}</span>
+        </div>
+        ${d.peer_text?`<div class="draft-peer">客户：${esc(d.peer_text)}</div>`:''}
+        <div class="draft-text">${esc(d.draft_text||'(空草稿)')}</div>
+        ${d.translated_preview?`<div class="msg-translation">${esc(d.translated_preview)}</div>`:''}
+        <div class="draft-acts">
+          <button class="btn-approve" onclick="UI.resolveDraft('${esc(d.draft_id)}','approve',this)">批准发送</button>
+          <button class="btn-reject" onclick="UI.resolveDraft('${esc(d.draft_id)}','reject',this)">驳回</button>
+        </div>
+      </div>`;
+    }).join('');
+    main.innerHTML = `<div class="drafts-view">${head}${cards}</div>`;
+  }
+  async function loadDraftsCount(){
+    try{
+      const r = await fetch('/api/drafts/stats');
+      if(!r.ok) return;
+      const d = await r.json();
+      const n = (d.stats && d.stats.total_pending) || 0;
+      const el = document.getElementById('drafts-count');
+      if(el){ el.textContent = n; el.style.display = n>0?'inline-block':'none'; }
+    }catch(e){}
   }
 
   window.UI = {
@@ -440,6 +532,43 @@
         if(d.ok){ selectedChat.automation_mode = d.mode; }
         else{ alert('保存回复模式失败'); }
       }catch(e){ alert('保存回复模式失败'); }
+    },
+    async showDrafts(){
+      const main = document.getElementById('inbox-main');
+      main.innerHTML = '<div class="drafts-view"><span class="spin"></span> 加载待审草稿...</div>';
+      try{
+        const r = await fetch('/api/drafts?status=pending&limit=100');
+        const d = await r.json();
+        renderDrafts(d.drafts||[]);
+      }catch(e){ main.innerHTML='<div class="drafts-view" style="color:#ef4444">草稿加载失败</div>'; }
+    },
+    refreshDrafts(){ this.showDrafts(); loadDraftsCount(); },
+    closeDrafts(){ renderMain(selectedChat||null); },
+    async resolveDraft(id, action, btn){
+      const card = btn && btn.closest('.draft-card');
+      if(card) card.querySelectorAll('button').forEach(b=>b.disabled=true);
+      try{
+        const r = await fetch('/api/drafts/'+encodeURIComponent(id)+'/resolve',{
+          method:'POST',
+          headers:{'Content-Type':'application/json','X-CSRF-Token':rpa?.csrf?.()??''},
+          body:JSON.stringify({action, by:'web_admin'})
+        });
+        if(r.ok){
+          if(card){
+            card.style.opacity='.45';
+            const acts = card.querySelector('.draft-acts');
+            if(acts) acts.innerHTML = `<span style="font-size:12px;color:#16a34a;">已${action==='approve'?'批准':'驳回'}</span>`;
+          }
+          loadDraftsCount();
+        } else {
+          const d = await r.json().catch(()=>({}));
+          alert('处置失败：'+(d.detail||r.status));
+          if(card) card.querySelectorAll('button').forEach(b=>b.disabled=false);
+        }
+      }catch(e){
+        alert('网络错误');
+        if(card) card.querySelectorAll('button').forEach(b=>b.disabled=false);
+      }
     }
   };
 
@@ -452,7 +581,8 @@
   });
 
   load();
-  pollTimer = setInterval(load, 15000);
+  loadDraftsCount();
+  pollTimer = setInterval(()=>{ load(); loadDraftsCount(); }, 15000);
 })();
 </script>
 {% endblock %}

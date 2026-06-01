@@ -71,12 +71,21 @@ class TranslationService:
         default_target_lang: str = "zh",
         cache_ttl_sec: int = 86400,
         max_cache_items: int = 1000,
+        memory_store: Optional[Any] = None,
+        glossary_terms: Optional[Dict[str, str]] = None,
+        glossary_version: str = "",
+        cost_tracking: bool = False,
     ) -> None:
         self.ai_client = ai_client
         self.default_target_lang = normalize_lang(default_target_lang) or "zh"
         self.cache_ttl_sec = max(60, int(cache_ttl_sec or 86400))
         self.max_cache_items = max(10, int(max_cache_items or 1000))
         self._cache: Dict[str, Tuple[float, TranslationResult]] = {}
+        # Phase C2：持久翻译记忆（L2）+ 术语库 + 成本统计（全部可选，默认行为不变）
+        self._memory_store = memory_store
+        self._glossary_terms = {str(k): str(v) for k, v in (glossary_terms or {}).items()}
+        self._glossary_version = str(glossary_version or "")
+        self._cost_tracking = bool(cost_tracking)
 
     def detect_language(self, text: str) -> str:
         return detect_language(text)
@@ -98,10 +107,17 @@ class TranslationService:
             return TranslationResult(src_text, src_text, source, target, True, provider="identity")
 
         key = self._cache_key(src_text, source, target, style)
+        # L1：进程内 TTL 缓存
         cached = self._cache_get(key)
         if cached is not None:
             cached.cached = True
             return cached
+        # L2：持久翻译记忆（跨重启命中）
+        mem = self._memory_get(key)
+        if mem is not None:
+            mem.cached = True
+            self._cache_put(key, mem)  # 回填 L1
+            return mem
 
         if self.ai_client is None or not hasattr(self.ai_client, "chat"):
             result = TranslationResult(
@@ -144,7 +160,62 @@ class TranslationService:
             provider="ai",
         )
         self._cache_put(key, result)
+        if result.ok:
+            self._memory_put(key, result, style)
+            self._record_cost(src_text, out, source, target)
         return result
+
+    def _memory_get(self, key: str) -> Optional[TranslationResult]:
+        if self._memory_store is None:
+            return None
+        try:
+            row = self._memory_store.get(key)
+        except Exception:
+            return None
+        if not row:
+            return None
+        return TranslationResult(
+            source_text=str(row.get("source_text") or ""),
+            translated_text=str(row.get("translated_text") or ""),
+            source_lang=str(row.get("source_lang") or ""),
+            target_lang=str(row.get("target_lang") or ""),
+            ok=True,
+            provider=str(row.get("engine") or "ai"),
+        )
+
+    def _memory_put(self, key: str, result: "TranslationResult", style: str) -> None:
+        if self._memory_store is None:
+            return
+        try:
+            self._memory_store.put(
+                key,
+                source_text=result.source_text,
+                translated_text=result.translated_text,
+                source_lang=result.source_lang,
+                target_lang=result.target_lang,
+                style=style,
+                engine="ai",
+                glossary_ver=self._glossary_version,
+            )
+        except Exception:
+            pass
+
+    def _record_cost(self, src: str, out: str, source: str, target: str) -> None:
+        if not self._cost_tracking:
+            return
+        try:
+            from src.ai.llm_cost import get_llm_cost
+
+            # chat() 不返回 token 数，按字符估算（~4 字符/token），best-effort
+            pt = max(1, len(src) // 4)
+            ct = max(1, len(out) // 4)
+            model = getattr(self.ai_client, "model", "") or "translate"
+            get_llm_cost().record(
+                model=str(model), prompt_tokens=pt, completion_tokens=ct,
+                tier="translation",
+            )
+        except Exception:
+            pass
 
     def _build_prompt(self, text: str, source_lang: str, target_lang: str, style: str) -> str:
         source_name = LANG_NAMES.get(source_lang, source_lang)
@@ -155,14 +226,23 @@ class TranslationService:
             if style == "chat"
             else "Translate faithfully. Do not add explanations."
         )
+        glossary = self._glossary_hint(text)
         return (
             f"Translate the following chat message from {source_name} to {target_name}. "
-            f"{tone}\n\n{text}"
+            f"{tone}{glossary}\n\n{text}"
         )
 
-    @staticmethod
-    def _cache_key(text: str, source_lang: str, target_lang: str, style: str) -> str:
-        raw = f"{source_lang}|{target_lang}|{style}|{text[:2000]}"
+    def _glossary_hint(self, text: str) -> str:
+        """命中术语注入提示（Phase C2）。仅注入文本中出现的术语，避免噪声。"""
+        if not self._glossary_terms:
+            return ""
+        hits = [f"{k}->{v}" for k, v in self._glossary_terms.items() if k and k in text]
+        if not hits:
+            return ""
+        return " Use these term translations: " + "; ".join(hits[:20]) + "."
+
+    def _cache_key(self, text: str, source_lang: str, target_lang: str, style: str) -> str:
+        raw = f"{source_lang}|{target_lang}|{style}|{self._glossary_version}|{text[:2000]}"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def _cache_get(self, key: str) -> Optional[TranslationResult]:

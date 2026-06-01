@@ -93,6 +93,12 @@ class AIChatAssistant:
         self.whatsapp_rpa_services: list = []   # all WhatsApp accounts
         self.device_coordinator_service = None   # 多平台设备协调器（可选）
         self.hotplug_watcher = None              # ADB 热插拔自动纳管（可选）
+        # Phase A：统一收件箱持久层（纯旁路；store 故障/为空自动回落实时聚合）
+        self.inbox_store = None  # type: Optional[Any]  # noqa: F821
+        # Phase C：翻译记忆持久层（可选）
+        self.translation_memory = None  # type: Optional[Any]  # noqa: F821
+        # Phase D：电商工具服务（可选）
+        self.ecommerce_tools = None  # type: Optional[Any]  # noqa: F821
         # W2-W4：跨平台 Contacts 子系统（feature flag 控制；默认关）
         self.contacts = None  # type: Optional["ContactsSubsystem"]  # noqa: F821
         # Mobile Bridge：mobile-auto0423 ↔ telegram-mtproto-ai 双向同步
@@ -569,6 +575,109 @@ class AIChatAssistant:
                         web_app.state.device_coordinator_service = self.device_coordinator_service
                     if self.hotplug_watcher is not None:
                         web_app.state.hotplug_watcher = self.hotplug_watcher
+
+                    # ── 统一收件箱持久层（Phase A：纯旁路，store 故障/为空自动回落） ──
+                    try:
+                        _inbox_cfg = (self.config.config or {}).get("inbox", {}) or {}
+                        if _inbox_cfg.get("enabled", True):
+                            from src.inbox.store import InboxStore
+
+                            _cfg_dir = Path(self.config.config_path).parent
+                            _inbox_db = Path(_inbox_cfg.get("db_path") or (_cfg_dir / "inbox.db"))
+                            if not _inbox_db.is_absolute():
+                                _inbox_db = _cfg_dir / _inbox_db
+                            self.inbox_store = InboxStore(_inbox_db)
+                            web_app.state.inbox_store = self.inbox_store
+                            self.logger.info("统一收件箱持久层已挂载（%s）", _inbox_db)
+
+                            # ── Phase B：统一草稿/审批层（read-through 聚合 4 平台源表） ──
+                            from src.inbox.drafts import DraftService
+                            from src.web.routes.drafts_routes import register_drafts_routes
+                            from src.ai.chat_assistant_service import quick_risk as _quick_risk
+
+                            draft_svc = DraftService(
+                                inbox_store=self.inbox_store,
+                                line_services=self.line_rpa_services or [],
+                                wa_services=self.whatsapp_rpa_services or [],
+                                messenger_service=self.messenger_rpa_service,
+                                risk_fn=_quick_risk,
+                            )
+                            web_app.state.draft_service = draft_svc
+
+                            def _drafts_api_auth(request):
+                                if hasattr(web_app.state, "require_role"):
+                                    web_app.state.require_role(request, "line_rpa")
+
+                            register_drafts_routes(web_app, api_auth=_drafts_api_auth)
+                            self.logger.info("统一草稿层已挂载（/api/drafts）")
+
+                            # ── Phase C：意图 LLM 升级 + 翻译记忆持久化（预置带依赖的 service） ──
+                            _cfg_root = self.config.config or {}
+                            _ia_cfg = _cfg_root.get("intent_analysis", {}) or {}
+                            _tr_cfg = _cfg_root.get("translation", {}) or {}
+                            from src.ai.chat_assistant_service import ChatAssistantService
+                            web_app.state.chat_assistant_service = ChatAssistantService(
+                                ai_client=self.ai_client,
+                                use_llm=bool(_ia_cfg.get("use_llm", False)),
+                                analysis_store=self.inbox_store,
+                                timeout_sec=float(_ia_cfg.get("timeout_sec", 8) or 8),
+                            )
+                            _tm_store = None
+                            if (_tr_cfg.get("memory", {}) or {}).get("enabled", True):
+                                from src.ai.translation_memory import TranslationMemoryStore
+                                _tm_db = Path(
+                                    (_tr_cfg.get("memory", {}) or {}).get("db_path")
+                                    or (_cfg_dir / "translation_memory.db")
+                                )
+                                if not _tm_db.is_absolute():
+                                    _tm_db = _cfg_dir / _tm_db
+                                _tm_store = TranslationMemoryStore(_tm_db)
+                                self.translation_memory = _tm_store
+                            _gl_cfg = _tr_cfg.get("glossary", {}) or {}
+                            _gl_terms = (_gl_cfg.get("extra_terms") or {}) if _gl_cfg.get("enabled", True) else {}
+                            import hashlib as _hl
+                            _gl_ver = _hl.sha256(
+                                repr(sorted(_gl_terms.items())).encode("utf-8")
+                            ).hexdigest()[:12] if _gl_terms else ""
+                            from src.ai.translation_service import TranslationService
+                            web_app.state.translation_service = TranslationService(
+                                ai_client=self.ai_client,
+                                memory_store=_tm_store,
+                                glossary_terms=_gl_terms,
+                                glossary_version=_gl_ver,
+                                cost_tracking=bool(_tr_cfg.get("cost_tracking", False)),
+                            )
+                            self.logger.info("Phase C 服务已预置（意图LLM=%s, 翻译记忆=%s）",
+                                             bool(_ia_cfg.get("use_llm", False)),
+                                             _tm_store is not None)
+
+                            # ── Phase D：电商工具层（订单/物流查询 + 事实校验 + 审计） ──
+                            _ec_cfg = _cfg_root.get("ecommerce_tools", {}) or {}
+                            if _ec_cfg.get("enabled", False):
+                                from src.ecommerce_tools import (
+                                    EcommerceToolService, build_connector,
+                                )
+                                from src.web.routes.ecommerce_tools_routes import (
+                                    register_ecommerce_tools_routes,
+                                )
+                                _ec_conn = build_connector(_ec_cfg)
+                                self.ecommerce_tools = EcommerceToolService(
+                                    _ec_conn, audit_store=audit,
+                                    timeout_sec=float(_ec_cfg.get("timeout_sec", 8) or 8),
+                                )
+                                web_app.state.ecommerce_tools = self.ecommerce_tools
+                                register_ecommerce_tools_routes(
+                                    web_app, api_auth=_drafts_api_auth,
+                                )
+                                # P1-b：注入回复生成链路 → 命中订单号自动带真实事实/反幻觉守卫
+                                if self.ai_client is not None:
+                                    self.ai_client.set_ecommerce_tools(self.ecommerce_tools)
+                                self.logger.info(
+                                    "电商工具层已挂载（provider=%s, /api/tools/ecommerce/* + 回复事实注入）",
+                                    self.ecommerce_tools.connector_name,
+                                )
+                    except Exception:
+                        self.logger.warning("统一收件箱持久层挂载跳过", exc_info=True)
 
                     # ── 挂载 Contacts 路由（仅 contacts 子系统启用时） ──
                     if self.contacts is not None:

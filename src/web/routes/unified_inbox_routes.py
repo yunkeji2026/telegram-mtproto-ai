@@ -17,6 +17,7 @@ from fastapi.responses import HTMLResponse
 
 from src.ai.chat_assistant_service import ChatAssistantService
 from src.ai.translation_service import TranslationService, detect_language
+from src.inbox.ingest import ingest_collected_chats, ingest_thread
 
 logger = logging.getLogger(__name__)
 AUTOMATION_MODES = {"manual", "review", "multi_choice", "auto_ai"}
@@ -74,6 +75,64 @@ def _automation_store(request: Request) -> Dict[str, str]:
         store = {}
         request.app.state.unified_inbox_automation = store
     return store
+
+
+def _inbox_store(request: Request):
+    """持久层（Phase A）。未挂载时返回 None，调用方自动回落进程内 dict / 实时聚合。"""
+    return getattr(request.app.state, "inbox_store", None)
+
+
+def _ecommerce_tools(request: Request):
+    """电商工具服务（Phase D）。未启用时返回 None（feature-flag ecommerce_tools.enabled）。"""
+    return getattr(request.app.state, "ecommerce_tools", None)
+
+
+# 订单号抽取：复用单一真源（src.ecommerce_tools.extract），避免正则跨文件漂移
+from src.ecommerce_tools.extract import extract_order_no as _extract_order_no
+
+
+def _read_automation_mode(request: Request, conversation_id: str) -> str:
+    """优先读持久层，回落进程内 dict（修掉「重启即丢」生产阻断点）。"""
+    store = _inbox_store(request)
+    if store is not None:
+        try:
+            return store.get_automation_mode(conversation_id)
+        except Exception:
+            logger.debug("inbox_store.get_automation_mode 失败，回落进程内 dict", exc_info=True)
+    return _automation_store(request).get(conversation_id, "review")
+
+
+def _write_automation_mode(request: Request, conversation_id: str, mode: str) -> None:
+    store = _inbox_store(request)
+    if store is not None:
+        try:
+            store.set_automation_mode(conversation_id, mode)
+            return
+        except Exception:
+            logger.debug("inbox_store.set_automation_mode 失败，回落进程内 dict", exc_info=True)
+    _automation_store(request)[conversation_id] = mode
+
+
+def _ingest_best_effort(request: Request, chats: List[Dict[str, Any]]) -> None:
+    """旁路写入持久层。失败只 log，绝不影响收件箱响应。"""
+    store = _inbox_store(request)
+    if store is None or not chats:
+        return
+    try:
+        ingest_collected_chats(store, chats)
+    except Exception:
+        logger.debug("统一收件箱旁路写入失败（已忽略）", exc_info=True)
+
+
+def _ingest_thread_best_effort(request: Request, chat: Optional[Dict[str, Any]],
+                               messages: List[Dict[str, Any]]) -> None:
+    store = _inbox_store(request)
+    if store is None or not chat or not messages:
+        return
+    try:
+        ingest_thread(store, chat, messages)
+    except Exception:
+        logger.debug("统一收件箱会话历史写入失败（已忽略）", exc_info=True)
 
 
 def _conv_id(platform: str, account_id: str, chat_key: str) -> str:
@@ -362,12 +421,14 @@ def _collect_all_chats(request: Request, limit: int = 20) -> List[Dict[str, Any]
             pass
 
     out.sort(key=lambda x: x.get("last_ts") or 0, reverse=True)
-    store = _automation_store(request)
+    out = out[:limit * 4]
+    # 旁路写入持久层（best-effort，不改读路径行为）
+    _ingest_best_effort(request, out)
     for row in out:
         cid = str(row.get("conversation_id") or "")
-        mode = store.get(cid) or row.get("automation_mode") or "review"
+        mode = _read_automation_mode(request, cid)
         row["automation_mode"] = mode if mode in AUTOMATION_MODES else "review"
-    return out[:limit * 4]
+    return out
 
 
 # ── 路由注册 ─────────────────────────────────────────────────────────────
@@ -495,6 +556,9 @@ def register_unified_inbox_routes(
         if not messages and target:
             messages = list(target.get("messages") or [])
 
+        # 操作员打开会话时把较完整历史落库（best-effort）
+        _ingest_thread_best_effort(request, target, messages)
+
         return {
             "ok": True,
             "chat": target,
@@ -529,7 +593,23 @@ def register_unified_inbox_routes(
             text = str(last.get("text") or "")
         svc = _get_chat_assistant_service(request)
         analysis = await svc.analyze(text=text, messages=messages, chat=chat)
-        return {"ok": True, "analysis": analysis.to_dict()}
+        out = analysis.to_dict()
+        # C1 LLM 可能抽出 order_no（动态属性）；否则用通用兜底正则
+        order_no = str(getattr(analysis, "order_no", "") or "").strip() or _extract_order_no(text)
+        out["order_no"] = order_no
+        result: Dict[str, Any] = {"ok": True, "analysis": out}
+
+        # Phase D：检测到订单号 + 电商工具启用 → 查订单并回事实串（事实校验，勿编造）
+        ecom = _ecommerce_tools(request)
+        if order_no and ecom is not None:
+            try:
+                tr = await ecom.lookup_order(order_no, by="inbox_analyze")
+                d = tr.to_dict()
+                d["facts"] = tr.to_context_facts()
+                result["order_lookup"] = d
+            except Exception:
+                logger.debug("inbox analyze 订单查询失败（已忽略）", exc_info=True)
+        return result
 
     @app.get("/api/unified-inbox/automation")
     async def api_unified_inbox_automation_get(
@@ -540,7 +620,7 @@ def register_unified_inbox_routes(
     ):
         api_auth(request)
         cid = _conv_id(str(platform or "").lower(), str(account_id or "default"), str(chat_key or ""))
-        mode = _automation_store(request).get(cid, "review")
+        mode = _read_automation_mode(request, cid)
         return {"ok": True, "conversation_id": cid, "mode": mode}
 
     @app.post("/api/unified-inbox/automation")
@@ -555,7 +635,7 @@ def register_unified_inbox_routes(
         if mode not in AUTOMATION_MODES:
             raise HTTPException(400, f"不支持的自动化模式: {mode}")
         cid = _conv_id(platform, account_id, chat_key)
-        _automation_store(request)[cid] = mode
+        _write_automation_mode(request, cid, mode)
         return {"ok": True, "conversation_id": cid, "mode": mode}
 
     @app.get("/api/unified-inbox/profile")

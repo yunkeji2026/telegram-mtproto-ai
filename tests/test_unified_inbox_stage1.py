@@ -211,3 +211,20 @@ def test_unified_inbox_template_contains_translation_controls():
     assert "对象档案" in html
     assert "生成语音预览" in html
     assert "AI 助手" in html
+
+
+def test_unified_inbox_template_contains_drafts_panel():
+    """P0-a：统一收件箱接入 /api/drafts 待审草稿队列（Phase B 可视化）。"""
+    path = Path(__file__).resolve().parent.parent / "src" / "web" / "templates" / "unified_inbox.html"
+    html = path.read_text(encoding="utf-8")
+    assert "待审草稿" in html
+    assert "/api/drafts?status=pending" in html
+    assert "/api/drafts/stats" in html
+    assert "/resolve" in html
+    assert "UI.showDrafts" in html
+    assert "UI.resolveDraft" in html
+    assert "risk-badge" in html  # 风险徽章
+    # P0-b：订单/物流事实卡片（事实校验可视化）
+    assert "renderOrderLookup" in html
+    assert "ai-order" in html
+    assert "事实校验" in html

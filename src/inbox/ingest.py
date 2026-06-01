@@ -1,0 +1,82 @@
+"""把 unified_inbox 现有聚合结果旁路写入 InboxStore。
+
+这是 Phase A 增量 1 的「写入桥」：复用 unified_inbox_routes 已经归一好的
+chat dict（_normalize_chat 产物）与 message dict（_message_obj 产物），
+映射成 InboxConversation / InboxMessage 落库。
+
+刻意不引入 ChannelAdapter：增量 1 只做旁路持久化（零行为变化），适配器留到
+读路径切换（增量 2）时再引入并真正被使用，避免现在写无人调用的死代码。
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any, Dict, List
+
+from .models import InboxConversation, InboxMessage
+
+logger = logging.getLogger(__name__)
+
+
+def _msg_from_obj(conversation_id: str, m: Dict[str, Any], *, direction: str = "") -> InboxMessage:
+    text = str(m.get("text") or "")
+    # 注意：当前 unified_inbox 聚合出的 message dict 不带可信的稳定平台 id
+    # （Telegram 是循环下标、RPA 源多为空），不同代码路径（collect vs thread）
+    # 对同一条消息会编出不同 id。因此 bypass ingest 一律按内容去重
+    # （platform_msg_id 留空 → store 用 hash(text|ts) 作主键），跨路径一致。
+    # 真正稳定的平台 id（MTProto message.id / WhatsApp wamid）随增量 2 的
+    # ChannelAdapter（官方 API）接入后再填，届时 store 会自动改用 id 去重。
+    return InboxMessage(
+        conversation_id=conversation_id,
+        platform_msg_id="",
+        direction=direction or str(m.get("direction") or "in"),
+        text=text,
+        original_text=str(m.get("original_text") or text),
+        translated_text=str(m.get("translated_text") or ""),
+        source_lang=str(m.get("language") or "unknown"),
+        ts=float(m.get("ts") or 0),
+    )
+
+
+def _conv_from_chat(chat: Dict[str, Any]) -> InboxConversation:
+    return InboxConversation(
+        conversation_id=str(chat.get("conversation_id") or ""),
+        platform=str(chat.get("platform") or ""),
+        account_id=str(chat.get("account_id") or "default"),
+        chat_key=str(chat.get("chat_key") or ""),
+        display_name=str(chat.get("name") or ""),
+        language=str(chat.get("language") or "unknown"),
+        last_text=str(chat.get("last_msg") or ""),
+        last_ts=float(chat.get("last_ts") or 0),
+        unread=int(chat.get("unread") or 0),
+    )
+
+
+def ingest_collected_chats(store, chats: List[Dict[str, Any]]) -> int:
+    """旁路写入聚合到的对话列表。返回新插入的消息条数。best-effort，调用方包 try。"""
+    inserted = 0
+    for chat in chats or []:
+        conv = _conv_from_chat(chat)
+        if not conv.conversation_id or not conv.platform:
+            continue
+        msgs: List[InboxMessage] = []
+        lm = chat.get("last_message") or {}
+        if isinstance(lm, dict) and lm.get("text"):
+            msgs.append(_msg_from_obj(conv.conversation_id, lm))
+        inserted += store.ingest_batch(conv, msgs)
+    return inserted
+
+
+def ingest_thread(store, chat: Dict[str, Any], messages: List[Dict[str, Any]]) -> int:
+    """操作员打开会话时，把该会话较完整的历史落库。返回新插入条数。"""
+    if not chat:
+        return 0
+    conv = _conv_from_chat(chat)
+    if not conv.conversation_id or not conv.platform:
+        return 0
+    msgs = [
+        _msg_from_obj(conv.conversation_id, m)
+        for m in (messages or [])
+        if isinstance(m, dict) and m.get("text")
+    ]
+    return store.ingest_batch(conv, msgs)
