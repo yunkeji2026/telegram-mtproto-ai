@@ -37,6 +37,33 @@ def evaluate_intent(
     }
 
 
+def compare_predictors(
+    named_predictors: Dict[str, Callable[[str], str]],
+    samples: Optional[List[IntentSample]] = None,
+    *,
+    threshold: float = 0.85,
+) -> Dict[str, Any]:
+    """对多个预测器在同一数据集上评测并汇总，便于 rule vs LLM 对比。"""
+    rows = samples if samples is not None else load_intent_samples()
+    out: Dict[str, Any] = {}
+    for name, fn in named_predictors.items():
+        out[name] = evaluate_intent(fn, rows, threshold=threshold)
+    return out
+
+
+def format_compare(results: Dict[str, Any]) -> str:
+    """渲染多预测器对比表（CLI 用）。"""
+    lines = ["=== 预测器对比 ===",
+             f"{'predictor':<12} {'accuracy':>9} {'macro_f1':>9} {'pass':>6}"]
+    for name, rep in results.items():
+        m = rep["metrics"]
+        lines.append(
+            f"{name:<12} {m['accuracy']:>8.2%} {m['macro_f1']:>9.4f} "
+            f"{'Y' if rep['passed'] else 'N':>6}"
+        )
+    return "\n".join(lines)
+
+
 def format_report(report: Dict[str, Any]) -> str:
     """把报告渲染为人读文本（CLI 用）。"""
     m = report["metrics"]
