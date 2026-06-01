@@ -14,6 +14,12 @@ from .models import OrderInfo, ShipmentInfo, ToolResult
 from .connector import EcommerceConnector
 from .mock_connector import MockEcommerceConnector
 from .shopify_connector import ShopifyConnector
+from .logistics import (
+    LogisticsConnector,
+    MockLogisticsConnector,
+    AfterShipConnector,
+    build_logistics_connector,
+)
 from .service import EcommerceToolService, build_connector
 from .extract import (
     extract_order_no, extract_tracking_no, has_order_intent, is_ecom_intent,
@@ -26,6 +32,10 @@ __all__ = [
     "EcommerceConnector",
     "MockEcommerceConnector",
     "ShopifyConnector",
+    "LogisticsConnector",
+    "MockLogisticsConnector",
+    "AfterShipConnector",
+    "build_logistics_connector",
     "EcommerceToolService",
     "build_connector",
     "extract_order_no",

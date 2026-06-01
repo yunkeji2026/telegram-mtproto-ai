@@ -994,6 +994,12 @@ ecommerce_tools:
   timeout_sec: 8
   cache_ttl_sec: 0                   # 订单/物流查询短 TTL 内存缓存秒数；0=关闭（建议 30~60）
   cache_max_entries: 512             # 缓存条目上界（LRU 淘汰），防高基数单号撑爆内存
+  logistics:                         # 物流聚合器（按运单号查轨迹，优先于电商 connector）
+    enabled: false                   # 默认关；不启用时 track 回退电商 connector
+    provider: "mock"                 # mock / aftership（17track 等为扩展点）
+    # aftership:
+    #   api_key: "your-aftership-key"
+    #   base_url: "https://api.aftership.com/v4"
   # mock_orders: {}                  # provider=mock 时可注入演示订单数据
   # shopify:                         # provider=shopify 时填（缺 shop/token 自动回落 mock）
   #   shop: "your-store.myshopify.com"

@@ -31,8 +31,12 @@ class EcommerceToolService:
         timeout_sec: float = 8.0,
         cache_ttl_sec: float = 0.0,
         cache_max_entries: int = 512,
+        logistics_connector: Optional[Any] = None,
     ) -> None:
         self._connector = connector
+        # 物流聚合器（AfterShip/17Track）：按运单号查轨迹，优先于电商连接器；
+        # None 则 track_shipment 回退用电商连接器（多数返 None → 如实告知查不到）。
+        self._logistics = logistics_connector
         self._audit = audit_store
         self._timeout = float(timeout_sec or 8.0)
         # 短 TTL + 有界 LRU 内存缓存：避免同会话连续追问同一单号重复打 API。
@@ -134,22 +138,33 @@ class EcommerceToolService:
             self._audit_call("ecommerce_shipment_track", q, cached, by, cache_hit=True)
             return cached
         try:
-            ship = await asyncio.wait_for(
-                self._connector.track_shipment(q), timeout=self._timeout
-            )
+            ship, source = await self._do_track(q)
         except asyncio.TimeoutError:
             return self._fail("shipment", q, "timeout", by)
         except Exception as ex:
             return self._fail("shipment", q, f"{type(ex).__name__}: {ex}", by)
         if ship is None:
             res = ToolResult(ok=True, found=False, kind="shipment", query=q,
-                             source=self.connector_name)
+                             source=source)
         else:
             res = ToolResult(ok=True, found=True, kind="shipment", query=q,
-                             data=ship.to_dict(), source=self.connector_name)
+                             data=ship.to_dict(), source=source)
         self._cache_put("shipment", q, res)
         self._audit_call("ecommerce_shipment_track", q, res, by)
         return res
+
+    async def _do_track(self, q: str):
+        """物流查询：优先物流连接器；返回 None 则回退电商连接器。返回 (ship, source)。"""
+        if self._logistics is not None:
+            lname = str(getattr(self._logistics, "name", "logistics"))
+            ship = await asyncio.wait_for(self._logistics.track(q), timeout=self._timeout)
+            if ship is not None:
+                return ship, lname
+            # 物流聚合器查不到 → 回退电商连接器（多数仍 None，但保留语义）
+        ship = await asyncio.wait_for(
+            self._connector.track_shipment(q), timeout=self._timeout
+        )
+        return ship, self.connector_name
 
     def _fail(self, kind: str, q: str, err: str, by: str) -> ToolResult:
         res = ToolResult(ok=False, found=False, kind=kind, query=q,
