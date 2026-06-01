@@ -13,6 +13,7 @@
 from .models import OrderInfo, ShipmentInfo, ToolResult
 from .connector import EcommerceConnector
 from .mock_connector import MockEcommerceConnector
+from .shopify_connector import ShopifyConnector
 from .service import EcommerceToolService, build_connector
 
 __all__ = [
@@ -21,6 +22,7 @@ __all__ = [
     "ToolResult",
     "EcommerceConnector",
     "MockEcommerceConnector",
+    "ShopifyConnector",
     "EcommerceToolService",
     "build_connector",
 ]

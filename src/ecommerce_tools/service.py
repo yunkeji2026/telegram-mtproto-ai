@@ -106,7 +106,20 @@ def build_connector(config: Optional[Dict[str, Any]]) -> Any:
     provider = str(cfg.get("provider") or "mock").lower()
     if provider == "mock":
         return MockEcommerceConnector(orders=cfg.get("mock_orders") or None)
-    # 扩展点：provider == "shopify" / "woocommerce" → 实例化对应 connector
+    if provider == "shopify":
+        sh = cfg.get("shopify") or {}
+        shop = sh.get("shop") or sh.get("domain") or ""
+        token = sh.get("access_token") or sh.get("token") or ""
+        if shop and token:
+            from .shopify_connector import ShopifyConnector
+            return ShopifyConnector(
+                shop=shop, access_token=token,
+                api_version=str(sh.get("api_version") or "2024-01"),
+                timeout=float(cfg.get("timeout_sec") or 15),
+            )
+        logger.warning("ecommerce: provider=shopify 但缺 shop/access_token，回落 mock")
+        return MockEcommerceConnector()
+    # 扩展点：woocommerce / 自有 ERP → 实例化对应 connector
     # 未实现的 provider 一律回落 mock，保证服务可用且不崩
     logger.warning("ecommerce connector provider=%s 暂未实现，回落 mock", provider)
     return MockEcommerceConnector()

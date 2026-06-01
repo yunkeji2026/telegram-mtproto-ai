@@ -990,9 +990,13 @@ translation:
 # 数据只能查不可编：查不到就如实告知，绝不编造订单/物流状态。
 ecommerce_tools:
   enabled: false                     # 默认关；电商域上线时开
-  provider: "mock"                   # mock / shopify / woocommerce（后两者为扩展点）
+  provider: "mock"                   # mock / shopify（woocommerce 等为扩展点）
   timeout_sec: 8
-  # mock_orders: {}                  # 可注入演示订单数据
+  # mock_orders: {}                  # provider=mock 时可注入演示订单数据
+  # shopify:                         # provider=shopify 时填（缺 shop/token 自动回落 mock）
+  #   shop: "your-store.myshopify.com"
+  #   access_token: "shpat_xxx"
+  #   api_version: "2024-01"
 
 contacts:
   enabled: false                     # 总开关
