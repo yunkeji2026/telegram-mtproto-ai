@@ -18,6 +18,12 @@ from fastapi.responses import HTMLResponse
 from src.ai.chat_assistant_service import ChatAssistantService
 from src.ai.translation_service import TranslationService, detect_language
 from src.inbox.ingest import ingest_collected_chats, ingest_thread
+from src.inbox.normalizer import (
+    candidate_messages_from_source,
+    conv_id,
+    message_obj,
+    normalize_chat,
+)
 
 logger = logging.getLogger(__name__)
 AUTOMATION_MODES = {"manual", "review", "multi_choice", "auto_ai"}
@@ -135,94 +141,12 @@ def _ingest_thread_best_effort(request: Request, chat: Optional[Dict[str, Any]],
         logger.debug("统一收件箱会话历史写入失败（已忽略）", exc_info=True)
 
 
-def _conv_id(platform: str, account_id: str, chat_key: str) -> str:
-    return f"{platform}:{account_id}:{chat_key}"
-
-
-def _message_obj(
-    *,
-    text: str,
-    ts: Any = 0,
-    direction: str = "in",
-    message_id: str = "",
-    source: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    raw = str(text or "")
-    lang = detect_language(raw)
-    return {
-        "message_id": str(message_id or ""),
-        "direction": direction if direction in {"in", "out"} else "in",
-        "text": raw,
-        "original_text": raw,
-        "translated_text": raw,
-        "language": lang,
-        "translation": {
-            "source_lang": lang,
-            "target_lang": "zh",
-            "ok": lang in {"zh", "unknown"} or not raw.strip(),
-            "provider": "identity" if lang == "zh" else "none",
-            "error": "" if lang in {"zh", "unknown"} else "not_requested",
-        },
-        "ts": ts or 0,
-        "source": source or {},
-    }
-
-
-def _normalize_chat(
-    *,
-    platform: str,
-    platform_name: str,
-    account_id: str,
-    account_label: str,
-    chat_key: str,
-    name: str,
-    last_msg: str,
-    last_ts: Any = 0,
-    unread: Any = 0,
-    source: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    msg = _message_obj(text=last_msg, ts=last_ts, direction="in", source=source)
-    return {
-        "platform": platform,
-        "platform_name": platform_name,
-        "account_id": account_id,
-        "account_label": account_label,
-        "chat_key": chat_key,
-        "conversation_id": _conv_id(platform, account_id, chat_key),
-        "name": name,
-        "last_msg": last_msg,
-        "last_ts": last_ts or 0,
-        "unread": unread or 0,
-        "language": msg["language"],
-        "last_message": msg,
-        "messages": [msg] if last_msg else [],
-        "can_send": True,
-        "send_modes": ["manual", "review", "multi_choice", "auto_ai"],
-        "automation_mode": "review",
-        "risk": {"level": "unknown", "reasons": []},
-        "relationship": {"stage": "", "intimacy_score": None},
-        "source": source or {},
-    }
-
-
-def _candidate_messages_from_source(source: Dict[str, Any]) -> List[Dict[str, Any]]:
-    for key in ("messages", "history", "recent_messages", "conversation"):
-        rows = source.get(key)
-        if isinstance(rows, list):
-            out: List[Dict[str, Any]] = []
-            for idx, row in enumerate(rows[-50:]):
-                if isinstance(row, dict):
-                    text = row.get("text") or row.get("raw") or row.get("peer_text") or row.get("message") or ""
-                    direction = row.get("direction") or ("out" if row.get("is_self") else "in")
-                    out.append(_message_obj(
-                        text=str(text or ""),
-                        ts=row.get("ts") or row.get("timestamp") or 0,
-                        direction=str(direction),
-                        message_id=str(row.get("id") or row.get("message_id") or idx),
-                        source=row,
-                    ))
-            return [m for m in out if m.get("text")]
-    return []
+# A3：归一逻辑已提到 src/inbox/normalizer.py（单一真源、可单测）。
+# 此处保留同名薄委托别名，路由内现有调用点零改动。
+_conv_id = conv_id
+_message_obj = message_obj
+_normalize_chat = normalize_chat
+_candidate_messages_from_source = candidate_messages_from_source
 
 
 def _memory_bullets(request: Request, key: str, query: str = "") -> List[str]:
