@@ -110,6 +110,75 @@ def test_system_instruction_no_facts_block_when_absent():
     assert "电商实时事实" not in prompt
 
 
+def _svc_default() -> EcommerceToolService:
+    # 用内置默认单：1001 运单 LP001234567CN（YunExpress in_transit）
+    return EcommerceToolService(MockEcommerceConnector(), audit_store=None)
+
+
+async def test_inject_shipment_facts_when_distinct_tracking_found():
+    """消息同时含订单号 + 独立运单号 → 订单与物流事实都注入。"""
+    client = AIClient(_Cfg())
+    client.set_ecommerce_tools(_svc_default())  # 默认单 1001 运单 LP001234567CN
+    ctx: dict = {}
+    await client._maybe_inject_ecommerce_facts(
+        "订单 #1001 的运单 LP001234567CN 到哪了", ctx
+    )
+    facts = ctx.get("_ecommerce_facts") or ""
+    assert "1001" in facts
+    assert "LP001234567CN" in facts
+
+
+async def test_no_shipment_guard_when_tracking_not_found():
+    """运单查不到不注入「查不到」守卫（避免每条长数字误报），仅保留订单事实。"""
+    client = AIClient(_Cfg())
+    client.set_ecommerce_tools(_svc_default())
+    ctx: dict = {}
+    await client._maybe_inject_ecommerce_facts(
+        "订单 #1001 运单 LP999999999XX 呢", ctx
+    )
+    facts = ctx.get("_ecommerce_facts") or ""
+    assert "1001" in facts
+    assert "LP999999999XX" not in facts
+
+
+async def test_classified_intent_authoritative_suppresses_false_positive():
+    """消息含 order 字样但已分类意图是闲聊 → 不注入「查不到」守卫(降误报)。"""
+    client = AIClient(_Cfg())
+    client.set_ecommerce_tools(_svc_empty())
+    ctx: dict = {"intent": "small_talk"}
+    await client._maybe_inject_ecommerce_facts("my order 9999 lol", ctx)
+    assert "_ecommerce_facts" not in ctx
+
+
+async def test_classified_ecom_intent_opens_guard():
+    """已分类电商意图 → 查不到也注入守卫(即便关键词正则可能漏)。"""
+    client = AIClient(_Cfg())
+    client.set_ecommerce_tools(_svc_empty())
+    ctx: dict = {"intent": "order_query"}
+    await client._maybe_inject_ecommerce_facts("#9999", ctx)
+    facts = ctx.get("_ecommerce_facts") or ""
+    assert "勿编造" in facts
+
+
+async def test_found_order_injects_regardless_of_intent():
+    """查得到订单始终注入，与意图门槛无关。"""
+    client = AIClient(_Cfg())
+    client.set_ecommerce_tools(_svc_with_order())
+    ctx: dict = {"intent": "small_talk"}
+    await client._maybe_inject_ecommerce_facts("#1001", ctx)
+    assert "1001" in (ctx.get("_ecommerce_facts") or "")
+
+
+def test_is_ecom_intent_labels():
+    from src.ecommerce_tools.extract import is_ecom_intent
+    assert is_ecom_intent("order_query") is True
+    assert is_ecom_intent("status_check") is True
+    assert is_ecom_intent("物流") is True
+    assert is_ecom_intent("order_status") is True   # 子串兜底
+    assert is_ecom_intent("small_talk") is False
+    assert is_ecom_intent("") is False
+
+
 def test_extractor_single_source_of_truth():
     """domains.ecommerce.hooks 的抽取函数即 src.ecommerce_tools.extract 同一实现。"""
     from domains.ecommerce.hooks import extract_order_no as h_order

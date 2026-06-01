@@ -68,3 +68,9 @@ def register_ecommerce_tools_routes(app, *, api_auth):
         if not results:
             raise HTTPException(400, "未能从文本识别订单号或物流单号")
         return {"ok": True, "count": len(results), "results": results}
+
+    @app.get("/api/tools/ecommerce/cache_stats")
+    async def api_cache_stats(request: Request, _=Depends(api_auth)):
+        """缓存命中率快照（观测缓存收益）。"""
+        svc = _get_tools(request)
+        return {"ok": True, "stats": svc.cache_stats()}

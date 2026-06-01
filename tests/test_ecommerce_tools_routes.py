@@ -68,3 +68,25 @@ def test_not_found_order_returns_facts_no_fabrication():
 def test_503_without_service():
     c = _client(with_service=False)
     assert c.get("/api/tools/ecommerce/order?order_no=1001").status_code == 503
+
+
+def test_cache_stats_endpoint():
+    app = FastAPI()
+
+    def api_auth(request: Request):
+        return True
+
+    register_ecommerce_tools_routes(app, api_auth=api_auth)
+    app.state.ecommerce_tools = EcommerceToolService(
+        MockEcommerceConnector(), cache_ttl_sec=100,
+    )
+    c = TestClient(app)
+    c.get("/api/tools/ecommerce/order?order_no=1001")  # miss -> 落缓存
+    c.get("/api/tools/ecommerce/order?order_no=1001")  # hit
+    resp = c.get("/api/tools/ecommerce/cache_stats")
+    assert resp.status_code == 200
+    s = resp.json()["stats"]
+    assert s["enabled"] is True
+    assert s["hits"] == 1
+    assert s["misses"] == 1
+    assert 0 < s["hit_rate"] <= 1

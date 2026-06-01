@@ -541,15 +541,36 @@ class AIClient(LoggerMixin):
         if context.get("_ecommerce_facts"):
             return  # 上游已注入，尊重之
         try:
-            from src.ecommerce_tools import extract_order_no, has_order_intent
+            from src.ecommerce_tools import (
+                extract_order_no, extract_tracking_no,
+                has_order_intent, is_ecom_intent,
+            )
             order_no = extract_order_no(user_message)
-            if not order_no:
+            tracking_no = extract_tracking_no(user_message)
+            if not order_no and not tracking_no:
                 return
-            res = await svc.lookup_order(order_no, by="reply_gen")
-            if res.found or has_order_intent(user_message):
-                facts = res.to_context_facts()
-                if facts:
-                    context["_ecommerce_facts"] = facts
+            # 门槛：有上游分类意图(skill 路径会塞 context['intent'])则以它为权威，
+            # 更准、可避免「含 order 字样但意图是闲聊」误报；否则回落关键词正则。
+            _ci = str((context or {}).get("intent") or "").strip()
+            intent = is_ecom_intent(_ci) if _ci else has_order_intent(user_message)
+            facts_parts: List[str] = []
+            # 订单事实：查得到必注；查不到仅在含订单/物流意图时注入「如实告知」守卫
+            if order_no:
+                res = await svc.lookup_order(order_no, by="reply_gen")
+                if res.found or intent:
+                    f = res.to_context_facts()
+                    if f:
+                        facts_parts.append(f)
+            # 物流事实：仅在查得到时注入（多数 connector 对未知单号返 None，
+            # 注入「查不到」守卫会在每条含长数字的消息上误报，故只注正向事实）。
+            if tracking_no and tracking_no != order_no:
+                res2 = await svc.track_shipment(tracking_no, by="reply_gen")
+                if res2.found:
+                    f2 = res2.to_context_facts()
+                    if f2:
+                        facts_parts.append(f2)
+            if facts_parts:
+                context["_ecommerce_facts"] = "\n".join(facts_parts)
         except Exception:
             self.logger.debug("ecommerce 事实注入跳过", exc_info=True)
 
