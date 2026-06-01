@@ -1,0 +1,16 @@
+# FAQ 自动解决率评测样本（应可被 KB 自助解决的常见问题）
+# 用途：python -m scripts.run_eval --faq --dataset config/eval/faq_samples.yaml
+# 注：解决率依赖 KB 内容与阈值校准；本集为跨境电商通用 FAQ。
+
+- {question: "怎么退货"}
+- {question: "退款多久到账"}
+- {question: "发货要多久"}
+- {question: "支持货到付款吗"}
+- {question: "支持哪些支付方式"}
+- {question: "尺码怎么选"}
+- {question: "可以换货吗"}
+- {question: "怎么查物流"}
+- {question: "运费多少"}
+- {question: "可以开发票吗"}
+- {question: "How do I track my order", note: "英文"}
+- {question: "What is your return policy", note: "英文"}
