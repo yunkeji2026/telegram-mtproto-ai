@@ -369,8 +369,10 @@ _BASELINE = """
 /api/unified-inbox/automation	GET
 /api/unified-inbox/automation	POST
 /api/unified-inbox/chats	GET
+/api/unified-inbox/history	GET
 /api/unified-inbox/profile	GET
 /api/unified-inbox/send	POST
+/api/unified-inbox/stored-chats	GET
 /api/unified-inbox/thread	GET
 /api/unified-inbox/translate	POST
 /api/user-segments	GET
