@@ -1616,48 +1616,16 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
 
     # /api/strategy-history/{strategy_id} 已抽到 routes/strategy_routes.py
 
-    @app.get("/api/notifications")
-    async def api_notifications(request: Request, _=Depends(_page_auth)):
-        """聚合策略告警 + 最近系统操作，返回通知列表"""
-        notifs = []
+    # 运营仪表盘只读 API（notifications/snapshots/trigger-decisions）
+    # 已抽到 src/web/routes/ops_dashboard_routes.py（Phase E1 续拆）。
+    try:
+        from src.web.routes.ops_dashboard_routes import register_ops_dashboard_routes
 
-        # 1. 策略效果告警：quality_score < 40
-        if event_tracker:
-            try:
-                from src.strategy.strategy_analytics import StrategyAnalytics
-                sa = StrategyAnalytics(event_tracker)
-                summary = sa.summarize(hours=24)
-                for s in summary:
-                    qs = s.get("quality_score", 100)
-                    if qs < 40:
-                        notifs.append({
-                            "id": f"strategy_{s['strategy_id']}",
-                            "type": "strategy",
-                            "level": "critical" if qs < 20 else "warn",
-                            "title": f"策略告警：{s['strategy_id']}",
-                            "body": f"质量评分仅 {qs}/100，建议优化",
-                            "ts": "",
-                        })
-            except Exception:
-                pass
+        register_ops_dashboard_routes(app, _admin_ctx)
+    except Exception:
+        import logging as _log_ops
 
-        # 2. 最近审计记录（最新 5 条）
-        if audit_store:
-            try:
-                recent = audit_store.query(limit=5)
-                for e in recent:
-                    notifs.append({
-                        "id": f"audit_{e.get('id', '')}",
-                        "type": "system",
-                        "level": "info",
-                        "title": e.get("action", "操作"),
-                        "body": e.get("target", ""),
-                        "ts": e.get("ts", ""),
-                    })
-            except Exception:
-                pass
-
-        return {"notifications": notifs[:12], "unread": len(notifs)}
+        _log_ops.getLogger("admin").warning("ops dashboard 路由注册失败", exc_info=True)
 
     # ── 告警状态 API ───────────────────────────────────────────
     # ── Webhook 通知 ──────────────────────────────────────────
@@ -1746,29 +1714,6 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         await _fire_webhook("test", request.session.get("username", "admin"), "test", "This is a test notification")
         return {"ok": True, "msg": "测试通知已发送（如未收到请检查 URL 和网络）"}
 
-    @app.get("/api/snapshots")
-    async def api_list_snapshots(request: Request, _=Depends(_api_auth),
-                                 prefix: str = "", limit: int = 30):
-        """列出可用快照（支持按 prefix 过滤，如 templates / exchange_rates）"""
-        cfg_dir = config_manager.config_path.parent
-        snap_dir = cfg_dir / "snapshots"
-        if not snap_dir.exists():
-            return {"snapshots": [], "total": 0}
-        glob_pat = f"{prefix}_*.yaml" if prefix else "*.yaml"
-        files = sorted(snap_dir.glob(glob_pat), key=lambda f: f.stat().st_mtime, reverse=True)
-        result = []
-        for f in files[:limit]:
-            parts = f.stem.split("_", 3)
-            result.append({
-                "id": f.stem,
-                "prefix": parts[0] if parts else "",
-                "ts": "_".join(parts[1:3]) if len(parts) >= 3 else "",
-                "actor": parts[3] if len(parts) > 3 else "",
-                "size": f.stat().st_size,
-                "mtime": int(f.stat().st_mtime),
-            })
-        return {"snapshots": result, "total": len(files)}
-
     @app.get("/api/alert-status")
     async def api_alert_status(request: Request, _=Depends(_page_auth)):
         """聚合所有系统告警状态，供仪表盘告警横幅使用"""
@@ -1851,45 +1796,6 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         return await _aio.to_thread(_compute_alerts)
 
     # ── 实时日志 ──────────────────────────────────────────────
-
-    @app.get("/api/trigger-decisions")
-    async def api_trigger_decisions(request: Request, limit: int = 50):
-        """读取最近的触发器决策日志（JSON lines）"""
-        _api_auth(request)
-        limit = max(1, min(200, limit))
-        log_path = Path("logs/trigger_decisions.log")
-        if not log_path.exists():
-            return {"decisions": [], "total": 0}
-
-        import asyncio as _aio
-
-        def _read_tail():
-            try:
-                file_size = log_path.stat().st_size
-                read_size = min(file_size, 256 * 1024)
-                with open(log_path, "rb") as f:
-                    if file_size > read_size:
-                        f.seek(file_size - read_size)
-                    raw = f.read()
-                tail_text = raw.decode("utf-8", errors="ignore")
-                lines = tail_text.splitlines()
-                decisions = []
-                for line in reversed(lines):
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        obj = json.loads(line)
-                        decisions.append(obj)
-                        if len(decisions) >= limit:
-                            break
-                    except (json.JSONDecodeError, ValueError):
-                        pass
-                return {"decisions": decisions, "total": file_size // 120}
-            except Exception:
-                return {"decisions": [], "total": 0}
-
-        return await _aio.to_thread(_read_tail)
 
     @app.get("/logs", response_class=HTMLResponse)
     async def logs_page(request: Request, _=Depends(_page_auth), limit: int = 200):
