@@ -2596,80 +2596,15 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         return resp
 
     # G3: 意图链 Case 面板 — 活跃 case 列表 + 人工介入 + 结案
-    @app.get("/api/cases/active")
-    async def api_cases_active(request: Request):
-        """返回所有有 _case_id 的活跃用户 case"""
-        _api_auth(request)
-        ctx_store, sm = _copilot_get_ctx_store()
-        if not ctx_store:
-            return {"cases": [], "count": 0}
+    # 运营 case 管理 API（Phase E1 续拆 → cases_routes）
+    try:
+        from src.web.routes.cases_routes import register_cases_routes
 
-        cases = []
-        for uid, ctx in ctx_store._cache.items():
-            case_id = ctx.get("_case_id")
-            if not case_id:
-                continue
-            chain = ctx.get("_intent_chain", [])
-            pattern = ctx.get("_chain_pattern", {})
-            profile = ctx.get("_user_profile", {})
-            cases.append({
-                "case_id": case_id,
-                "user_id": uid,
-                "chat_id": ctx.get("chat_id", ""),
-                "chat_title": ctx.get("chat_title", ""),
-                "intent_chain": chain[-8:],
-                "pattern": pattern.get("pattern", "") if isinstance(pattern, dict) else "",
-                "pattern_desc": pattern.get("desc", "") if isinstance(pattern, dict) else "",
-                "satisfaction": profile.get("satisfaction", 80) if isinstance(profile, dict) else 80,
-                "at_risk": profile.get("at_risk", False) if isinstance(profile, dict) else False,
-                "consecutive_same": ctx.get("_consecutive_same_intent", 0),
-                "last_message": (ctx.get("last_message") or "")[:100],
-                "last_reply": (ctx.get("last_reply") or "")[:100],
-                "last_active": ctx.get("last_reply_time", 0),
-                "escalation": bool(ctx.get("_escalation_ts")),
-                "closed": ctx.get("_case_closed", False),
-                "note": ctx.get("_case_note", ""),
-            })
-        cases.sort(key=lambda x: (x["closed"], not x["at_risk"], -x["consecutive_same"]))
-        return {"cases": cases[:100], "count": len(cases)}
+        register_cases_routes(app, _admin_ctx)
+    except Exception:
+        import logging as _log_cases
 
-    @app.post("/api/cases/{case_id}/note")
-    async def api_case_note(request: Request, case_id: str):
-        """运营人员为 case 添加备注"""
-        _api_auth(request)
-        data = await request.json()
-        note = (data.get("note") or "").strip()
-        ctx_store, _ = _copilot_get_ctx_store()
-        if not ctx_store:
-            raise HTTPException(404, "上下文存储不可用")
-        for uid, ctx in ctx_store._cache.items():
-            if ctx.get("_case_id") == case_id:
-                ctx["_case_note"] = note[:500]
-                actor = request.session.get("username", "web_admin")
-                if audit_store:
-                    audit_store.log(actor, "case_note", case_id, uid, note[:80])
-                return {"ok": True, "case_id": case_id}
-        raise HTTPException(404, f"Case {case_id} 不存在")
-
-    @app.post("/api/cases/{case_id}/close")
-    async def api_case_close(request: Request, case_id: str):
-        """运营人员结案"""
-        _api_auth(request)
-        data = await request.json()
-        resolution = (data.get("resolution") or "").strip()
-        ctx_store, _ = _copilot_get_ctx_store()
-        if not ctx_store:
-            raise HTTPException(404, "上下文存储不可用")
-        for uid, ctx in ctx_store._cache.items():
-            if ctx.get("_case_id") == case_id:
-                ctx["_case_closed"] = True
-                ctx["_case_resolution"] = resolution[:500]
-                ctx["_case_closed_at"] = time.time()
-                actor = request.session.get("username", "web_admin")
-                if audit_store:
-                    audit_store.log(actor, "case_close", case_id, uid, resolution[:80])
-                return {"ok": True, "case_id": case_id}
-        raise HTTPException(404, f"Case {case_id} 不存在")
+        _log_cases.getLogger("admin").warning("cases 路由注册失败", exc_info=True)
 
     # G2: 测试纠错 → 一键创建 KB 反馈 + 优质示例
     @app.post("/api/chat/test/correct")
