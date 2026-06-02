@@ -72,3 +72,7 @@ class AdminRouteContext:
     # 监控/报表组用（G2）
     event_tracker: Any = None
     boot_ts: float = 0.0
+
+    # 域包声明的 web 页面/仪表盘 widget（health-check / alert-status 等据此分支）
+    domain_web_pages: list = field(default_factory=list)
+    domain_dashboard_widgets: list = field(default_factory=list)
