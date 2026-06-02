@@ -76,3 +76,7 @@ class AdminRouteContext:
     # 域包声明的 web 页面/仪表盘 widget（health-check / alert-status 等据此分支）
     domain_web_pages: list = field(default_factory=list)
     domain_dashboard_widgets: list = field(default_factory=list)
+
+    # 页面路由用：模板引擎单例 + 实时日志缓冲（页面路由抽出后经此注入）
+    templates: Any = None
+    log_buffer: Any = None
