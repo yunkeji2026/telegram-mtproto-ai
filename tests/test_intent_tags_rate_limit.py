@@ -150,18 +150,30 @@ def test_cidr_invalid_entry_skipped(auth_client, _yaml_with_intent_tags,
 
 def test_rate_limit_reset_helper_clears_state(auth_client, _yaml_with_intent_tags,
                                                 config_manager, app) -> None:
-    """app.state.intent_tags_rate_limit_reset should empty buckets so 429 → 200 again."""
+    """app.state.intent_tags_rate_limit_reset should empty buckets so 429 → 200 again.
+
+    确定性化（防 -n auto 并行偶发）：默认 diff 桶 cap=20/refill=2，30 次突发在并行
+    CPU 争用下若每请求耗时偏大，refill 会持续补充令牌导致不触发 429（曾偶发
+    `200 == 429`）。这里把 diff 限流配成 cap=3/refill=0.1（floor），令牌补充远跟不上
+    消耗，无论时序快慢都必触发 429。修改的是 function-scoped config_manager，不影响他测。
+    """
     config_manager.config.setdefault("rpa", {})["trusted_proxies"] = []
+    config_manager.config["rpa"].setdefault("rate_limits", {})["diff"] = {
+        "capacity": 3, "refill_per_sec": 0.1,
+    }
+    # 起始先清桶，避免同 worker 前序测试的残留状态
+    reset = getattr(app.state, "intent_tags_rate_limit_reset", None)
+    assert callable(reset)
+    reset()
+
     body = {"content": "purchase:\n  - kw\n"}
-    # Hit the limiter
+    # Hit the limiter（cap=3 → 第 4 次起必 429；30 次远超）
     for _ in range(30):
         auth_client.post("/api/rpa/intent-tags/diff", json=body)
     r1 = auth_client.post("/api/rpa/intent-tags/diff", json=body)
     assert r1.status_code == 429
 
     # Reset and confirm next request passes
-    reset = getattr(app.state, "intent_tags_rate_limit_reset", None)
-    assert callable(reset)
     reset()
     r2 = auth_client.post("/api/rpa/intent-tags/diff", json=body)
     assert r2.status_code == 200
