@@ -245,7 +245,7 @@
 | D 电商工具层 | D0 ecommerce persona/hooks | ✅ | 100% |
 | | D1 连接器 | 🟡 mock+Shopify订单✅、物流AfterShip(#22)✅；**Woo/库存SKU/退款政策❌** | 65% |
 | | D2 回复事实校验（P1-b 注入 + 反幻觉） | ✅ | 90% |
-| E 后台收敛 + 商业化 | E1 admin.py 拆分 | 🟡 6819→3307 行，目标 <1500 | ~55% |
+| E 后台收敛 + 商业化 | E1 admin.py 拆分 | ✅ 6819→2273 行，**达结构性终态**（盘点 §4 已弃机械 <1500，改骨架+薄页面壳 ~2000-2500） | ~90% |
 | | E2 商业化（多租户/计量/向导/健康面板） | ❌ 未起 | 0% |
 
 ### 9.2 里程碑达成度（§7）
@@ -255,9 +255,11 @@
 | 地基就绪 (A) | ~80% | 抽象+持久层就位；差「读路径迁移到 store」与「稳定 id」 |
 | 客服工作台可用 (A+B+C) | ~78% | 核心闭环已通；C2 多引擎、B2 风险全档是缺口 |
 | 电商突破 MVP (+D) | ~70% | 订单+物流+事实校验成体系；缺 Woo/库存/退款；**解决率未度量** |
-| 可商用交付 (+E) | ~30% | E1 半成，E2 商业化空白 |
+| 可商用交付 (+E) | ~35% | E1 达终态；E2 商业化仍空白 |
 
-**总体 ≈ 60%**（按 §7 工期权重加权）。内核（A+B+C+D MVP）≈75% 可演示可用；拖累总分的是 **E2 商业化（0%）**。结论：**离「能用」很近，离「能卖」还远**。
+**总体 ≈ 62%**（按 §7 工期权重加权）。内核（A+B+C+D MVP）≈75% 可演示可用；拖累总分的是 **E2 商业化（0%）**。结论：**离「能用」很近，离「能卖」还远**。
+
+> **2026-06-04 增量**（本次 P0 收口）：① E1 admin.py 拆分达结构性终态（2273 行），正式收口；② 评测进门禁——策展集 57 例规则基线 **84.21%→100%**（评测驱动修 9 例难例：时段问候/勿扰/无怒投诉/低落同义词）。门禁**经 pytest 用例 `test_rule_baseline_meets_target_on_curated_dataset` 生效**（现有 CI 回归步骤直接执行，≥85% 不达即 fail）；`tests.yml` 显式 `run_eval` gate 步骤因 PAT 缺 `workflow` scope 暂未推送，patch 存 `docs/eval_gate_workflow.patch`（`git apply docs/eval_gate_workflow.patch`），待有 workflow 权限时应用；③ 修正下方 §9.3 deepseek 漂移（代码早已修，文档滞后）。
 
 ### 9.3 架构债状态（§5 复核）
 
@@ -265,9 +267,9 @@
 |---|---|
 | 无统一会话事实源 | 🟡 store 建好，读路径未迁移 |
 | 草稿分散 4 处 | ✅ DraftService 统一聚合 |
-| admin.py 巨石 | 🟡 −51%，未达 <1500 |
+| admin.py 巨石 | ✅ −66.7%（6819→2273），达结构性终态 |
 | 渠道无统一适配 | 🟡 收集路径已统一(#21)，send 未 |
-| **AI provider 配置陷阱（deepseek 不生效）** | ❌ 仍未修，`config.example.yaml` 仍 `provider: deepseek` |
+| **AI provider 配置陷阱（deepseek 不生效）** | ✅ 已修：`config.example.yaml:749` 现为 `provider: "openai_compatible"` + base_url + 显式警示注释 |
 | ecommerce 域包残缺 | ✅ 已补 persona/hooks |
 | 翻译无持久记忆 | ✅ translation_memory |
 
@@ -284,10 +286,10 @@
 6. 多租户 + 套餐计量 + 部署向导 + 账号健康面板
 
 **质量标尺（横切）**
-7. 评测 harness：量化意图 ≥85% / FAQ 解决率 ≥50%（当前完全未度量，验收盲区）
+7. ✅ 评测 harness 已进门禁（意图策展集 ≥85%，当前 100%，经 pytest 用例生效；`tests.yml` 显式 gate 步骤待 workflow 权限应用 `docs/eval_gate_workflow.patch`）；FAQ 解决率 ≥50% 待接（需 KB sqlite，CI 缺库时优雅跳过）
 
 **低成本清债**
-8. 修 `config.example` 的 deepseek 陷阱（已在本次同步修正注释）
+8. ✅ 修 `config.example` 的 deepseek 陷阱（已完成）
 
 ---
 

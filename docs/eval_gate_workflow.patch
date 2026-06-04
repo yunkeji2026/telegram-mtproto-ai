@@ -1,0 +1,18 @@
+diff --git a/.github/workflows/tests.yml b/.github/workflows/tests.yml
+index c66a0d7..46a1f78 100644
+--- a/.github/workflows/tests.yml
++++ b/.github/workflows/tests.yml
+@@ -32,3 +32,13 @@ jobs:
+       - name: Run regression (parallel, file-level isolation)
+         # -n auto 让 xdist 按文件分 worker 并行，本地实测 ~9s 跑完 912 tests
+         run: python -m pytest tests/ -n auto -q --tb=line
++
++      - name: Eval gate — intent accuracy (curated set >=85%)
++        # 规则版意图基线门禁：策展集（57 例，含规则难例）准确率低于 85% 即 fail。
++        # 离线确定性，不联网（LLM 对比需 EVAL_LLM=1，门禁不依赖）。
++        env:
++          PYTHONIOENCODING: utf-8
++        run: >-
++          python -m scripts.run_eval
++          --dataset config/eval/intent_samples.yaml
++          --threshold 0.85
