@@ -27,6 +27,7 @@ from src.inbox.normalizer import (
     conv_id,
     message_obj,
     normalize_chat,
+    store_row_to_chat,
 )
 
 logger = logging.getLogger(__name__)
@@ -263,6 +264,52 @@ def _collect_all_chats(request: Request, limit: int = 20) -> List[Dict[str, Any]
     return out
 
 
+def _read_from_store_enabled(request: Request) -> bool:
+    """A1 读路径灰度开关：config.inbox.read_from_store（默认 false=实时聚合）。"""
+    cm = getattr(request.app.state, "config_manager", None)
+    cfg = getattr(cm, "config", None) if cm is not None else None
+    if not isinstance(cfg, dict):
+        return False
+    return bool((cfg.get("inbox") or {}).get("read_from_store", False))
+
+
+def _collect_chats_from_store(request: Request, limit: int = 30) -> List[Dict[str, Any]]:
+    """A1 读路径：直接从 InboxStore（持久事实源）读会话列表，映射回 chat dict 形状。
+
+    返回 None 表示 store 不可用（调用方回落实时聚合）。
+    """
+    store = _inbox_store(request)
+    if store is None:
+        return None  # type: ignore[return-value]
+    convs = store.list_conversations(limit=min(200, max(1, limit * 4)))
+    out: List[Dict[str, Any]] = []
+    for c in convs:
+        cid = str(c.get("conversation_id") or "")
+        mode = _read_automation_mode(request, cid)
+        try:
+            mc = store.count_messages(cid)
+        except Exception:
+            mc = 0
+        out.append(store_row_to_chat(c, automation_mode=mode, message_count=mc))
+    return out
+
+
+def _chats_for_listing(request: Request, limit: int = 30) -> List[Dict[str, Any]]:
+    """收件箱列表数据源（A1 灰度）：
+
+    - 始终先跑实时聚合 `_collect_all_chats`（同时旁路 ingest 进 store，保持 store 新鲜）；
+    - flag 开 + store 可用：列表改用 store-backed 视图（跨平台/跨重启持久），
+      实时聚合的副作用（ingest）已经发生；
+    - 否则：返回实时聚合结果（原行为，零变化）。
+    """
+    live = _collect_all_chats(request, limit=limit)
+    if _read_from_store_enabled(request):
+        stored = _collect_chats_from_store(request, limit=limit)
+        if stored is not None:
+            return stored
+    return live
+
+
 # ── 路由注册 ─────────────────────────────────────────────────────────────
 
 def register_unified_inbox_routes(
@@ -283,7 +330,7 @@ def register_unified_inbox_routes(
     async def api_unified_inbox_chats(request: Request, limit: int = 30):
         api_auth(request)
         limit = max(5, min(100, int(limit or 30)))
-        chats = _collect_all_chats(request, limit=limit)
+        chats = _chats_for_listing(request, limit=limit)
         # 平台摘要（running 状态）
         platform_status: Dict[str, Any] = {}
         for svc in _get_line_services(request):

@@ -18,6 +18,14 @@ from src.ai.translation_service import detect_language
 # 统一收件箱草稿/审批的 4 档自动化模式（与 unified_inbox 前端一致）
 SEND_MODES = ["manual", "review", "multi_choice", "auto_ai"]
 
+# 平台标识 → 展示名（store 行只存 platform，回填 platform_name 用）
+PLATFORM_DISPLAY = {
+    "line": "LINE",
+    "whatsapp": "WhatsApp",
+    "messenger": "Messenger",
+    "telegram": "Telegram",
+}
+
 
 def conv_id(platform: str, account_id: str, chat_key: str) -> str:
     """会话唯一 id：platform:account_id:chat_key。"""
@@ -89,6 +97,50 @@ def normalize_chat(
         "risk": {"level": "unknown", "reasons": []},
         "relationship": {"stage": "", "intimacy_score": None},
         "source": source or {},
+    }
+
+
+def store_row_to_chat(
+    row: Dict[str, Any],
+    *,
+    automation_mode: str = "review",
+    message_count: int = 0,
+) -> Dict[str, Any]:
+    """把 InboxStore.list_conversations 的一行映射回 unified_inbox 的 chat dict 形状。
+
+    A1 读路径切换用：store 持久行 → 与实时聚合 `normalize_chat` 同形状的行，
+    使前端/下游零改动即可消费 store-backed 列表。store 不持久 source/messages，
+    故 source={} / messages=[]（线程与画像端点按需另取，列表视图不需要）。
+    """
+    platform = str(row.get("platform") or "")
+    account_id = str(row.get("account_id") or "default")
+    chat_key = str(row.get("chat_key") or "")
+    last_text = str(row.get("last_text") or "")
+    cid = str(row.get("conversation_id") or "") or conv_id(platform, account_id, chat_key)
+    risk_level = str(row.get("risk_level") or "unknown")
+    mode = automation_mode if automation_mode in SEND_MODES else "review"
+    return {
+        "platform": platform,
+        "platform_name": PLATFORM_DISPLAY.get(platform, platform.title() or platform),
+        "account_id": account_id,
+        "account_label": account_id,
+        "chat_key": chat_key,
+        "conversation_id": cid,
+        "name": str(row.get("display_name") or chat_key),
+        "last_msg": last_text,
+        "last_ts": row.get("last_ts") or 0,
+        "unread": int(row.get("unread") or 0),
+        "language": str(row.get("language") or "unknown"),
+        "last_message": None,
+        "messages": [],
+        "message_count": int(message_count or 0),
+        "can_send": True,
+        "send_modes": list(SEND_MODES),
+        "automation_mode": mode,
+        "risk": {"level": risk_level, "reasons": []},
+        "relationship": {"stage": "", "intimacy_score": None},
+        "source": {},
+        "from_store": True,
     }
 
 
