@@ -193,7 +193,8 @@ def quick_risk(text: str) -> "tuple[str, list]":
 
 def _detect_emotion(text: str) -> str:
     t = text.lower()
-    if any(k in t for k in ("sad", "tired", "lonely", "难过", "累", "孤独", "失落", "想哭")):
+    if any(k in t for k in ("sad", "tired", "lonely", "难过", "累", "孤独", "失落", "想哭",
+                            "低落", "失眠", "疲惫", "提不起", "没精神")):
         return "低落"
     if any(k in t for k in ("angry", "mad", "生气", "烦", "滚", "讨厌",
                             "气人", "气死", "太气", "气炸", "破服务", "什么破")):
@@ -213,15 +214,24 @@ def _detect_intent(text: str, *, emotion: str) -> str:
         return "空消息"
     if re.fullmatch(r"(hi|hey|hello|在吗|在|你好|哈喽|嗨|hola|olá|bonjour|こんにちは)", t):
         return "打招呼"
-    # 停止联系：固定短语 + 「别/不要/勿/停止 …(≤3字)… 联系/打扰/骚扰」正则，
-    # 兼容「别再联系」「不要打扰我」等非连续表达（评测发现的漏判）。
+    # 时段问候 / 久别问候（评测难例：非白名单短语，如「早上好」「晚上好呀」「好久不见」）。
+    # 放在「短句接话」短路之前；这些表达虽短，语义上是问候而非泛接话。
+    if any(k in t for k in ("早上好", "早安", "上午好", "中午好", "午安", "下午好",
+                            "晚上好", "晚安", "好久不见", "好久没见")):
+        return "打招呼"
+    # 停止联系：固定短语 + 「别/不要/勿/停止 …(≤4字)… 联系/打扰/骚扰/发消息」正则，
+    # 兼容「别再联系」「不要打扰我」「不要再发消息了」等非连续表达（评测发现的漏判）。
     if any(k in t for k in ("stop", "don't contact", "unsubscribe",
-                            "别联系", "别发", "不要发")) \
-            or re.search(r"(别|不要|不想|勿|停止)\S{0,3}(联系|打扰|骚扰)", t):
+                            "别联系", "别发", "不要发", "勿扰")) \
+            or re.search(r"(别|不要|不想|勿|停止)\S{0,4}(联系|打扰|骚扰|发消息|发信息)", t):
         return "停止联系"
     if emotion in {"低落", "焦虑"}:
         return "需要安抚"
     if emotion == "生气":
+        return "不满/投诉"
+    # 投诉关键词（无显性愤怒情绪也成立，评测难例：「我要投诉」「非常不满意」「态度差」）。
+    if any(k in t for k in ("投诉", "不满意", "不满", "差评", "退一赔", "维权")) \
+            or re.search(r"态度.{0,4}差", t):
         return "不满/投诉"
     # 提问判定须在「短句」短路之前：否则「能便宜点吗？」等短问句会被误判为短句接话。
     if "?" in t or "？" in t:
