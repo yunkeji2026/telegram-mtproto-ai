@@ -2,7 +2,6 @@
 
 import asyncio
 import csv
-import difflib
 import hashlib
 import io
 import json
@@ -670,48 +669,7 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
 
     # /settings 页已抽到 routes/settings_routes.py（见下方 register_settings_routes）
 
-    # ── 开发者工具（密码保护） ──────────────────────────────────
-    _DEV_PASSWORD = "Along2026"
-
-    @app.get("/developer", response_class=HTMLResponse)
-    async def developer_page(request: Request):
-        _require_auth(request)
-        dev_unlocked = request.session.get("dev_unlocked", False)
-        ctx: dict = {"dev_unlocked": dev_unlocked, "dev_error": ""}
-        if dev_unlocked:
-            cfg = config_manager.config or {}
-            ctx.update({
-                "ai": cfg.get("ai", {}),
-                "voice_ai": (
-                    ((cfg.get("messenger_rpa") or {}).get("voice_output") or {})
-                    if isinstance(cfg.get("messenger_rpa"), dict)
-                    else {}
-                ),
-                "wb": cfg.get("web_admin", {}),
-                "tg": cfg.get("telegram", {}),
-                "notif": cfg.get("notifications", cfg.get("webhook", {})),
-            })
-        return templates.TemplateResponse(request, "developer.html", ctx)
-
-    @app.post("/developer/auth", response_class=HTMLResponse)
-    async def developer_auth(request: Request):
-        _require_auth(request)
-        form = await request.form()
-        password = (form.get("password") or "").strip()
-        if password == _DEV_PASSWORD:
-            request.session["dev_unlocked"] = True
-            return RedirectResponse("/developer", status_code=303)
-        cfg = config_manager.config or {}
-        return templates.TemplateResponse(request, "developer.html", {
-            "dev_unlocked": False,
-            "dev_error": "密码错误，请重试",
-        })
-
-    @app.post("/developer/logout")
-    async def developer_logout(request: Request):
-        _require_auth(request)
-        request.session.pop("dev_unlocked", None)
-        return RedirectResponse("/developer", status_code=303)
+    # /developer 页面已抽到 routes/developer_page_routes.py（_admin_ctx 就绪后注册）
 
     # /api/settings/save 与 /api/reply-logic 已抽到 routes/settings_routes.py
 
@@ -1205,113 +1163,7 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
                             "update_autopilot", "", "", str(body)[:200])
         return {"ok": True}
 
-    # ── 审计日志 ──────────────────────────────────────
-
-    @app.get("/audit", response_class=HTMLResponse)
-    async def audit_page(request: Request, _=Depends(_page_auth),
-                         action: str = "", keyword: str = "", limit: int = 50,
-                         operator: str = "", channel: str = "",
-                         date_from: str = "", date_to: str = "",
-                         page: int = 1):
-        all_entries = []
-        if audit_store:
-            all_entries = audit_store.query(limit=500, action=action, keyword=keyword)
-        # additional filters
-        if operator:
-            all_entries = [e for e in all_entries if operator.lower() in str(e.get("user_id", "")).lower()]
-        if channel:
-            all_entries = [e for e in all_entries if channel.lower() in str(e.get("target", "")).lower()]
-        if date_from:
-            all_entries = [e for e in all_entries if str(e.get("ts", "")) >= date_from]
-        if date_to:
-            all_entries = [e for e in all_entries if str(e.get("ts", ""))[:10] <= date_to]
-        total = len(all_entries)
-        per_page = limit
-        total_pages = max(1, (total + per_page - 1) // per_page)
-        page = max(1, min(page, total_pages))
-        records = all_entries[(page-1)*per_page : page*per_page]
-        # collect unique actions/operators for dropdown
-        all_actions = sorted(set(e.get("action", "") for e in all_entries if e.get("action")))
-        all_operators = sorted(set(str(e.get("user_id", "")) for e in all_entries if e.get("user_id")))
-        qs_parts = []
-        if action: qs_parts.append(f"action={action}")
-        if keyword: qs_parts.append(f"keyword={keyword}")
-        if operator: qs_parts.append(f"operator={operator}")
-        if channel: qs_parts.append(f"channel={channel}")
-        if date_from: qs_parts.append(f"date_from={date_from}")
-        if date_to: qs_parts.append(f"date_to={date_to}")
-        qs_parts.append(f"limit={limit}")
-        query_str = "&".join(qs_parts)
-        return templates.TemplateResponse(request, "audit.html", {
-            "records": records,
-            "total": total, "page": page, "total_pages": total_pages,
-            "query_str": query_str,
-            "filters": {"action": action, "keyword": keyword, "operator": operator,
-                        "channel": channel, "date_from": date_from, "date_to": date_to},
-            "all_actions": all_actions, "all_operators": all_operators,
-        })
-
-    @app.get("/audit/export")
-    async def audit_export(request: Request, _=Depends(_page_auth),
-                           action: str = "", operator: str = "",
-                           channel: str = "", date_from: str = "", date_to: str = ""):
-        """
-        导出审计记录为 CSV（支持与 /audit 页面相同的筛选参数）。
-        UTF-8 BOM 编码，Excel 直接打开不乱码。
-        """
-        import csv, io as _io
-        all_entries = audit_store.query(limit=10000) if audit_store else []
-        # 应用与审计页面相同的过滤逻辑
-        if action:
-            all_entries = [e for e in all_entries if e.get("action", "").startswith(action)]
-        if operator:
-            all_entries = [e for e in all_entries if e.get("user_id", "") == operator]
-        if channel:
-            kw = channel.lower()
-            all_entries = [e for e in all_entries if
-                           kw in e.get("target", "").lower() or
-                           kw in e.get("action", "").lower() or
-                           kw in (e.get("new_val") or "").lower()]
-        if date_from:
-            all_entries = [e for e in all_entries if str(e.get("ts", "")) >= date_from]
-        if date_to:
-            end = date_to + "T23:59:59"
-            all_entries = [e for e in all_entries if str(e.get("ts", "")) <= end]
-
-        buf = _io.StringIO()
-        writer = csv.writer(buf)
-        # 元数据行（方便接收方了解导出条件）
-        writer.writerow(["# 导出时间", time.strftime("%Y-%m-%d %H:%M:%S")])
-        writer.writerow(["# 筛选条件",
-                         f"操作={action or '全部'}",
-                         f"操作人={operator or '全部'}",
-                         f"关键词={channel or '无'}",
-                         f"日期={date_from or '不限'}~{date_to or '不限'}"])
-        writer.writerow(["# 记录总数", len(all_entries)])
-        writer.writerow([])  # 空行分隔
-        writer.writerow(["序号", "时间", "操作类型", "目标", "操作人", "旧值", "新值", "快照ID"])
-        for i, e in enumerate(all_entries, 1):
-            writer.writerow([
-                i,
-                e.get("ts", ""),
-                e.get("action", ""),
-                e.get("target", ""),
-                e.get("user_id", ""),
-                e.get("old_val", "") or "",
-                e.get("new_val", "") or "",
-                e.get("snapshot_id", "") or "",
-            ])
-        content = buf.getvalue().encode("utf-8-sig")  # BOM for Excel
-        ts = time.strftime("%Y%m%d_%H%M%S")
-        filename = f"audit_{ts}.csv"
-        if action or operator or channel:
-            tag = (action or operator or channel or "filtered").replace(" ", "_")[:20]
-            filename = f"audit_{tag}_{ts}.csv"
-        return StreamingResponse(
-            iter([content]),
-            media_type="text/csv; charset=utf-8-sig",
-            headers={"Content-Disposition": f"attachment; filename={filename}"},
-        )
+    # /audit、/audit/export 已抽到 routes/audit_page_routes.py（见下方 register）
 
     # 信息/日志/分析 页面路由（Phase E1 续拆 → page_routes，经 ctx 注入 templates/log_buffer）
     try:
@@ -1323,66 +1175,32 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
 
         _log_pg.getLogger("admin").warning("page 路由注册失败", exc_info=True)
 
-    # ── 快照对比 ──────────────────────────────────────────────
+    try:
+        from src.web.routes.developer_page_routes import register_developer_page_routes
 
-    def _resolve_current_file(prefix: str):
-        """根据快照前缀找到对应的当前配置文件路径"""
-        cfg_dir = config_manager.config_path.parent
-        _PREFIX_FILE_MAP = {
-            "templates": cfg_dir / "templates.yaml",
-            "exchange_rates": cfg_dir / "exchange_rates.yaml",
-            "reply_strategies": cfg_dir / "reply_strategies.yaml",
-            "quota": cfg_dir / "quota_rules.yaml",
-        }
-        for key, path in _PREFIX_FILE_MAP.items():
-            if prefix.startswith(key):
-                return path
-        return None
+        register_developer_page_routes(app, _admin_ctx)
+    except Exception:
+        import logging as _log_devpg
 
-    @app.get("/diff", response_class=HTMLResponse)
-    async def diff_page(request: Request, _=Depends(_page_auth),
-                        a: str = "", b: str = ""):
-        cfg_dir = config_manager.config_path.parent
-        snap_dir = cfg_dir / "snapshots"
-        snap_dir.mkdir(parents=True, exist_ok=True)
-        available = sorted([f.stem for f in snap_dir.glob("*.yaml")], reverse=True)
+        _log_devpg.getLogger("admin").warning("developer 页面路由注册失败", exc_info=True)
+    try:
+        from src.web.routes.audit_page_routes import register_audit_page_routes
 
-        diff_lines: list = []
-        snap_a, snap_b = a, b
+        register_audit_page_routes(app, _admin_ctx)
+    except Exception:
+        import logging as _log_auditpg
 
-        if snap_a:
-            file_a = snap_dir / f"{snap_a}.yaml"
-            text_a = file_a.read_text(encoding="utf-8").splitlines() if file_a.exists() else []
+        _log_auditpg.getLogger("admin").warning("audit 页面路由注册失败", exc_info=True)
+    try:
+        from src.web.routes.diff_page_routes import register_diff_page_routes
 
-            if snap_b and snap_b != "__current__":
-                # Both are explicit snapshots
-                file_b = snap_dir / f"{snap_b}.yaml"
-                text_b = file_b.read_text(encoding="utf-8").splitlines() if file_b.exists() else []
-                tofile = snap_b
-            else:
-                # B is current config (default when b is empty or __current__)
-                prefix = snap_a.split("_")[0] if "_" in snap_a else snap_a
-                current_file = _resolve_current_file(prefix)
-                text_b = current_file.read_text(encoding="utf-8").splitlines() if current_file and current_file.exists() else []
-                tofile = "当前配置"
+        register_diff_page_routes(app, _admin_ctx)
+    except Exception:
+        import logging as _log_diffpg
 
-            diff_lines = list(difflib.unified_diff(
-                text_a, text_b, fromfile=snap_a, tofile=tofile, lineterm=""
-            ))
+        _log_diffpg.getLogger("admin").warning("diff 页面路由注册失败", exc_info=True)
 
-        add_count = sum(1 for l in diff_lines if l.startswith('+') and not l.startswith('+++'))
-        rm_count = sum(1 for l in diff_lines if l.startswith('-') and not l.startswith('---'))
-
-        snapshots = []
-        for stem in available:
-            snapshots.append({"id": stem, "label": stem.replace("_", " ", 1)})
-
-        return templates.TemplateResponse(request, "diff.html", {
-            "snapshots": snapshots,
-            "selected_a": snap_a, "selected_b": snap_b,
-            "diff_lines": diff_lines,
-            "add_count": add_count, "rm_count": rm_count,
-        })
+    # /diff 页面已抽到 routes/diff_page_routes.py；/api/rollback 仍留本文件
 
     @app.post("/api/rollback")
     async def api_rollback(request: Request, _=Depends(_api_write("import_export"))):
