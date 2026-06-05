@@ -314,7 +314,7 @@ class WhatsAppRpaRunner:
         self._persona_ids: List[str] = list(self._cfg.get("persona_ids") or [])
         # ContactHooks 由 service 在 contacts 子系统 bootstrap 后注入；None 时静默跳过
         self._contact_hooks: Optional[Any] = None
-        self._last_wa_full_check_ts: float = 0.0  # MIUI badge scan throttle
+        self._last_wa_full_check_ts: float = time.time()  # MIUI badge scan throttle
         self._tts_semaphore: Optional[asyncio.Semaphore] = None  # P13-B: 防并发 TTS
         # 语音管道统计（内存级，API 可读）
         self._voice_metrics: Dict[str, int] = {
@@ -346,6 +346,15 @@ class WhatsAppRpaRunner:
         self._open_thread_max_rounds: int = int(
             self._cfg_get("open_thread_max_rounds", 3)  # 单轮最大处理消息数
         )
+        # 主动巡检：消息被自动已读（无 badge）且机器人不在该对话内时，
+        # 周期性打开列表最顶部会话核对「已读未回」消息（复用 open_thread 检测逻辑）。
+        self._active_sweep_enabled: bool = bool(
+            self._cfg_get("active_chat_sweep_enabled", True)
+        )
+        self._active_sweep_interval_sec: float = float(
+            self._cfg_get("active_chat_sweep_interval_sec", 60)
+        )
+        self._last_active_sweep_ts: float = time.time()
         # P15-d: 用户明确要求停止联系 → 黑名单/静默
         self._stop_contact_quiet_minutes: float = float(
             self._cfg_get("stop_contact_quiet_minutes", 1440)
@@ -668,6 +677,65 @@ class WhatsAppRpaRunner:
             logger.warning("[wa_rpa][open_thread] 检测异常: %s", e, exc_info=True)
             return None
 
+    async def _sweep_recent_chat_for_unanswered(
+        self,
+        list_xml: Optional[bytes],
+        result: Dict[str, Any],
+        t0: float,
+    ) -> Optional[Dict[str, Any]]:
+        """主动巡检：打开聊天列表最顶部（最近）会话，核对「已读未回」消息。
+
+        解决：消息被 WhatsApp 自动标记已读（无 badge），且机器人停在聊天列表
+        （不在该对话内）时，badge 扫描与 open_thread 检测都发现不了的盲区。
+
+        机制：节流（active_sweep_interval_sec）下，打开最顶部会话 → 复用
+        _check_open_thread_for_new_messages 的「读最后一条对方消息 + 去重」逻辑。
+        若该会话最后一条是己方消息或已回复过，则不会重复回复（由去重保证）。
+
+        Returns: 处理了新消息则返回 result，否则返回 None（并退回聊天列表）。
+        """
+        if not self._serial or not list_xml:
+            return None
+        _now = time.time()
+        if (_now - self._last_active_sweep_ts) < self._active_sweep_interval_sec:
+            return None
+        # 仅在确实停在聊天列表时巡检（不在任何对话内）
+        if b"conversations_row" not in list_xml or b"com.whatsapp:id/entry" in list_xml:
+            logger.warning(
+                "[wa_rpa][sweep] 跳过：未停在聊天列表 has_rows=%s has_entry=%s serial=%s",
+                b"conversations_row" in list_xml,
+                b"com.whatsapp:id/entry" in list_xml,
+                self._serial,
+            )
+            return None
+        top = ui.find_top_chat_row(list_xml, wa_pkg=self._wa_pkg)
+        if not top:
+            logger.warning("[wa_rpa][sweep] 跳过：未解析到顶部会话行 serial=%s", self._serial)
+            return None
+        self._last_active_sweep_ts = _now
+        _name, _cx, _cy = top
+        logger.warning("[wa_rpa][sweep] 打开最近会话核对已读未回 name=%r serial=%s", _name, self._serial)
+        try:
+            self._tap(_cx, _cy)
+            await asyncio.sleep(1.2)
+            _open_result = await self._check_open_thread_for_new_messages(result, t0)
+            if _open_result and _open_result.get("step") not in (None, "no_unread", "duplicate"):
+                logger.warning(
+                    "[wa_rpa][sweep] 已读未回消息已处理 name=%r step=%s",
+                    _name, _open_result.get("step"),
+                )
+                return _open_result
+        except Exception as e:
+            logger.warning("[wa_rpa][sweep] 巡检异常: %s", e, exc_info=True)
+        finally:
+            # 退回聊天列表，保持下一轮在列表态
+            try:
+                self._back()
+                await asyncio.sleep(0.4)
+            except Exception:
+                pass
+        return None
+
     async def _process_open_thread_message(
         self,
         serial: str,
@@ -747,8 +815,11 @@ class WhatsAppRpaRunner:
 
         result["reply_text"] = reply_text
 
-        # 发送回复（使用 _pace_and_send 需要 chat_xml，这里简化用 coordinate fallback）
-        send_res = await self._send_text_coord_fallback(serial, reply_text)
+        # 发送回复（坐标 fallback，需要屏幕尺寸定位输入框/发送键）
+        _screen = await asyncio.to_thread(adb.screen_size, serial)
+        _sw = _screen[0] if _screen else 1080
+        _sh = _screen[1] if _screen else 1920
+        send_res = await self._send_text_coord_fallback(serial, reply_text, (_sw, _sh))
 
         if send_res.get("ok"):
             result["ok"] = True
@@ -793,6 +864,12 @@ class WhatsAppRpaRunner:
         serial = self._serial
         if not serial:
             return {"ok": False, "error": "no_serial"}
+
+        # 对齐 LINE：发送前刷新 hierarchy，避免 AI 耗时后界面已变导致坐标失效
+        if bool(self._cfg_get("redump_before_send", True)):
+            fresh_xml, _ = self._dump_ui_xml()
+            if fresh_xml:
+                xml_bytes = fresh_xml
 
         # 1) 找输入框并点击
         input_xy = ui.find_input_field(xml_bytes) if xml_bytes else None
@@ -1341,12 +1418,13 @@ class WhatsAppRpaRunner:
         results: List[Dict] = []
         overall_ok = True
         last_xml = xml_bytes
+        redump_before_send = bool(self._cfg_get("redump_before_send", True))
 
         for idx, piece in enumerate(parts):
             if pacing.enabled and not pacing.slow_type:
                 await asyncio.sleep(min(3.5, typing_duration_sec(piece, pacing)))
 
-            if idx > 0:
+            if redump_before_send:
                 redump_xml, _ = await asyncio.to_thread(self._dump_ui_xml)
                 if redump_xml:
                     last_xml = redump_xml
@@ -1366,11 +1444,22 @@ class WhatsAppRpaRunner:
             results.append(send_res)
             if not send_res.get("ok"):
                 overall_ok = False
+                logger.warning(
+                    "[wa_rpa] send part %d/%d failed err=%s retried=%s piece=%r",
+                    idx + 1, len(parts),
+                    send_res.get("error", "?"),
+                    send_res.get("retried"),
+                    piece[:40],
+                )
                 break
             if pacing.enabled and idx < len(parts) - 1:
                 await asyncio.sleep(jitter_ms(pacing.inter_msg_ms_lo, pacing.inter_msg_ms_hi))
 
-        return {"ok": overall_ok, "parts": results, "parts_count": len(parts)}
+        out: Dict[str, Any] = {"ok": overall_ok, "parts": results, "parts_count": len(parts)}
+        if not overall_ok and results:
+            last_fail = results[-1]
+            out["error"] = str(last_fail.get("error") or "send_part_failed")
+        return out
 
     # ── P4-B: 手动发送队列处理 ────────────────────────────────────────────────────────────────────
 
@@ -2653,6 +2742,15 @@ class WhatsAppRpaRunner:
                     # 已检测到并处理了新消息，直接返回结果
                     return _open_result
 
+            # 主动巡检：机器人不在任何对话内（停在聊天列表）时，open_thread 检测会立即
+            # 返回 None。此处周期性打开最顶部（最近）会话，核对是否有「已读未回」消息。
+            if self._active_sweep_enabled and not dry_run:
+                _sweep_result = await self._sweep_recent_chat_for_unanswered(
+                    xml_bytes, result, t0,
+                )
+                if _sweep_result:
+                    return _sweep_result
+
             return self._finish(result, t0)
 
         # 5) 取第一个未读会话
@@ -3053,6 +3151,29 @@ class WhatsAppRpaRunner:
             await asyncio.sleep(2.5)
             return self._finish(result, t0)
 
+        # AI 思考 15–40s 后界面可能滚动；发送前刷新 hierarchy（与 LINE redump_before_send 对齐）
+        _pre_send_xml, _pre_send_sl = await asyncio.to_thread(self._dump_ui_xml)
+        if _pre_send_xml:
+            chat_xml = _pre_send_xml
+            if _peer_msg_for_quote is not None:
+                _quote_lookup = result.get("_multi_real_last_peer") or peer_text or ""
+                if _quote_lookup:
+                    _ref = ui.find_incoming_by_text(
+                        chat_xml, _quote_lookup, screen_width=sw
+                    )
+                    if _ref:
+                        _peer_msg_for_quote = _ref
+                    else:
+                        logger.warning(
+                            "[wa_rpa] 发送前未刷新 quote 坐标 anchor=%r chat=%s",
+                            _quote_lookup[:30], chat_key,
+                        )
+        else:
+            logger.warning(
+                "[wa_rpa] 发送前 UI dump 失败，沿用旧 hierarchy sl=%s chat=%s",
+                _pre_send_sl, chat_key,
+            )
+
         # auto_quote_reply：可选引用回复（long-press → 「回复」→ 发送）
         # combined 模式总是尝试，用户显式请求总是尝试，单条消息受 config 控制
         _do_quote = (
@@ -3132,7 +3253,9 @@ class WhatsAppRpaRunner:
                     logger.debug("[wa_rpa] contact_hooks on_message(out) 异常", exc_info=True)
         else:
             result["step"] = "send_fail"
-            result["error"] = str(send_result.get("error", ""))
+            result["error"] = str(send_result.get("error", "") or "send_unknown")
+            if send_result.get("parts"):
+                result["send_parts"] = send_result.get("parts")
             if self._state_store:
                 self._state_store.insert_alert(
                     kind="send_fail",
