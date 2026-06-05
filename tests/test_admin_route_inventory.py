@@ -393,6 +393,7 @@ _BASELINE = """
 /api/workspace/contacts/search	GET
 /api/workspace/contacts/split	POST
 /api/workspace/agent-frt-detail	GET
+/api/workspace/daily-report.csv	GET
 /api/workspace/dashboard	GET
 /api/workspace/follow-up/{task_id}/assign	POST
 /api/workspace/follow-up/{task_id}/done	POST

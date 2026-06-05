@@ -1250,6 +1250,69 @@ class TestResolutionStats:
         assert len(r["res_trend"]) == 7
 
 
+class TestDailyReport:
+    """Phase 6-16：坐席经营日报 CSV 导出。"""
+
+    def _ev(self, cstore, jid, etype, ts, n=0):
+        with cstore._lock:
+            cstore._conn.execute(
+                "INSERT INTO journey_events (event_id, journey_id, trace_id, "
+                "event_type, payload_json, ts) VALUES (?,?,?,?,?,?)",
+                (f"{jid}-{etype}-{n}", jid, "", etype, "{}", int(ts)))
+            cstore._conn.commit()
+
+    def _ingest(self, store, cid, direction, ts):
+        from src.inbox.models import InboxConversation, InboxMessage
+        store.ingest_batch(
+            InboxConversation(conversation_id=cid, platform="web", account_id="web",
+                              chat_key=cid.split(":")[-1], display_name="V",
+                              language="zh", last_text="x", last_ts=float(ts), unread=0),
+            [InboxMessage(conversation_id=cid, platform_msg_id="", direction=direction,
+                          text="x", original_text="x", translated_text="x",
+                          source_lang="zh", ts=float(ts))])
+
+    def test_daily_report_csv(self, cstore, gateway):
+        from src.inbox.store import InboxStore
+        import time as _t
+        d = tempfile.mkdtemp()
+        inbox = InboxStore(Path(d) / "i.db")
+        now = int(_t.time())
+        # 今日一笔：进线 → 60s 回复（首响 60，达标）
+        self._ingest(inbox, "web:web:R1", "in", now - 120)
+        self._ingest(inbox, "web:web:R1", "out", now - 60)
+        # 今日解决：journey msg_in → handoff_sent
+        a = gateway.on_peer_seen(channel=CHANNEL_WEB, account_id="web",
+                                 external_id="rep1", display_name="A")
+        jid = a.journey.journey_id
+        self._ev(cstore, jid, "msg_in", now - 120)
+        self._ev(cstore, jid, "handoff_sent", now - 60)
+        cli = _client_with_inbox(cstore, gateway, inbox)
+        r = cli.get("/api/workspace/daily-report.csv?days=7")
+        assert r.status_code == 200
+        assert "text/csv" in r.headers["content-type"]
+        assert "attachment" in r.headers["content-disposition"]
+        body = r.text.lstrip("\ufeff")
+        lines = [ln for ln in body.splitlines() if ln.strip()]
+        # 表头 + 7 天 + 合计
+        assert lines[0].startswith("date,new_contacts,leads,conversions")
+        assert len(lines) == 1 + 7 + 1
+        assert lines[-1].startswith("合计")
+        tot = lines[-1].split(",")
+        # 合计 conversions(解决) >=1，frt_responded >=1
+        assert int(tot[3]) >= 1   # conversions
+        assert int(tot[5]) >= 1   # frt_responded
+        assert int(tot[8]) >= 1   # resolved
+        inbox.close()
+
+    def test_daily_report_days_30(self, cstore, gateway):
+        from src.inbox.store import InboxStore
+        d = tempfile.mkdtemp()
+        cli = _client_with_inbox(cstore, gateway, InboxStore(Path(d) / "i.db"))
+        r = cli.get("/api/workspace/daily-report.csv?days=30")
+        lines = [ln for ln in r.text.lstrip("\ufeff").splitlines() if ln.strip()]
+        assert len(lines) == 1 + 30 + 1
+
+
 class TestCrmWidgetsAsset:
     """Phase 6-13：共享前端组件抽取的静态资产与挂载守卫。"""
 

@@ -27,7 +27,10 @@
 {% block content %}
 <div class="db-wrap">
   <a class="db-back" href="/workspace">← 返回工作台</a>
-  <h2 style="margin:8px 0 14px;font-size:18px;">今日概览</h2>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0 14px;">
+    <h2 style="margin:0;font-size:18px;">今日概览</h2>
+    <a id="db-export" href="#" style="font-size:12px;padding:5px 10px;border:1px solid #d1d5db;border-radius:6px;text-decoration:none;color:#0f172a;background:#fff;">⬇ 导出日报 CSV</a>
+  </div>
   <div class="db-grid" id="db-cards"></div>
   <div class="db-sec">
     <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -192,6 +195,9 @@
     }).catch(function(){ document.getElementById('db-cards').innerHTML='<span style="color:#ef4444;">加载失败</span>'; });
   }
   var _sel=document.getElementById('db-days'); if(_sel){ _sel.addEventListener('change', load); }
+  var _exp=document.getElementById('db-export');
+  if(_exp){ _exp.addEventListener('click', function(e){ e.preventDefault();
+    window.location='/api/workspace/daily-report.csv?days='+curDays(); }); }
   var _modal=document.getElementById('db-modal'); if(_modal){ _modal.addEventListener('click', function(e){ if(e.target===_modal) closeDetail(); }); }
   load(); setInterval(load, 60000);
 })();
