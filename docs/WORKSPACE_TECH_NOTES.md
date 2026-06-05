@@ -372,6 +372,20 @@ API：`GET /api/workspace/contact/{contact_id}` 一次返回 `{contact, timeline
   `today_avg_sec` 两张卡 + `res_trend`（窗口内每日 `avg_min`/`count`）折线（`spark` 自适应）。
   趋势随右上 7/30 窗口联动；无解决数据时提示"需漏斗推进到引流已发"。
 
+## 5s. 坐席经营日报 / CSV 导出（Phase 6-16）
+
+把 6-7~6-15 积累的指标从"只能看仪表盘"收口成"可交付物 + 历史回看"。
+
+- **端点** `GET /api/workspace/daily-report.csv?days=7|30`：逐日一行，列含
+  新客/留资/引流(转化) + 首响(条数/已响应/均值秒/达标率%) + 解决(条数/均值秒)，
+  末尾一行「合计」（首响/解决均值按已响应/已解决数加权）。Excel UTF-8 BOM。
+- **共用聚合** `_daily_report_rows(request, span)`：完全复用既有 store 方法
+  （`count_contacts_by_day` / `count_events_by_day` / `resolution_stats` /
+  `first_response_rows`），按本地日期分桶，contacts/inbox 任一缺失则该段补 0，
+  不抛错。无新表、无新 store 方法。
+- **入口**：仪表盘右上「⬇ 导出日报 CSV」按钮，随 7/30 窗口下拉联动导出。
+- **历史回看**：CSV 天然含 N 天逐日明细；文件名带窗口与生成日期便于归档。
+
 ## 6. 明确不做（后续阶段）
 
 | 项 | 原因 |
