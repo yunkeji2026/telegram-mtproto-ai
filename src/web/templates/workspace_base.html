@@ -62,6 +62,7 @@
   <a class="ws-logout" href="/workspace/tasks" style="border:0;">待办</a>
   <a class="ws-logout" href="/workspace/dash" style="border:0;">概览</a>
   <span class="ws-spacer"></span>
+  <a class="ws-review" id="ws-esc" style="background:#7c3aed;color:#fff;text-decoration:none;cursor:pointer;" title="升级：无人处理的严重超时会话"></a>
   <a class="ws-review" id="ws-sla" style="background:#dc2626;color:#fff;text-decoration:none;cursor:pointer;" title="SLA 严重超时未回复会话"></a>
   <a class="ws-review" id="ws-followup" style="background:#dc2626;color:#fff;text-decoration:none;" href="/workspace/tasks" title="到期待跟进任务"></a>
   <span id="ws-prefs-btn" style="cursor:pointer;font-size:16px;padding:0 6px;" title="告警设置（SLA 阈值 / 免打扰）">⚙</span>
@@ -217,6 +218,33 @@
     });
   }
   refreshSla(); setInterval(refreshSla, 30000);
+
+  // 升级徽标：无人有效处理的严重超时（全局口径，不受个人静默影响）
+  var escBadge=document.getElementById('ws-esc');
+  var _escItems=[];
+  function refreshEsc(){
+    fetch('/api/workspace/escalations').then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok){ if(escBadge) escBadge.style.display='none'; return; }
+      _escItems=d.items||[];
+      var n=d.count||0;
+      if(escBadge){
+        escBadge.style.display=n?'inline-block':'none';
+        escBadge.textContent='升级 '+n;
+        escBadge.title=n? _escItems.slice(0,8).map(function(it){
+          var rz={unclaimed:'无人认领',holder_offline:'坐席离线',holder_quiet:'坐席静音'}[it.reason]||it.reason;
+          return it.name+'（'+fmtWaitMin(it.wait_sec)+'·'+rz+'）';
+        }).join('\n') : '';
+      }
+    }).catch(function(){});
+  }
+  if(escBadge){
+    escBadge.addEventListener('click',function(){
+      if(!_escItems.length){ location.href='/workspace/dash'; return; }
+      try{ sessionStorage.setItem('ws_focus_conv', _escItems[0].conversation_id); }catch(_){ }
+      location.href='/workspace';
+    });
+  }
+  refreshEsc(); setInterval(refreshEsc, 30000);
 
   // 告警设置面板（每坐席 SLA 阈值 + 免打扰时段 + 静音）
   function _hm(min){ if(min==null||min<0) return ''; var h=Math.floor(min/60),m=min%60; return (h<10?'0':'')+h+':'+(m<10?'0':'')+m; }

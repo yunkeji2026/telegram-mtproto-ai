@@ -671,6 +671,92 @@ def _sla_alert_snapshot(request: Request) -> Dict[str, Any]:
             "quiet": quiet, "warn_sec": sla["warn"], "crit_sec": sla["crit"]}
 
 
+def _presence_stale_sec(request: Request) -> float:
+    """在线判定窗口（秒）：config.workspace.presence_stale_sec，默认 120。"""
+    cm = getattr(request.app.state, "config_manager", None)
+    cfg = getattr(cm, "config", None) if cm is not None else None
+    if isinstance(cfg, dict):
+        ws = cfg.get("workspace") or {}
+        try:
+            return max(30.0, float(ws.get("presence_stale_sec") or 120))
+        except (TypeError, ValueError):
+            pass
+    return 120.0
+
+
+def _escalation_snapshot(request: Request) -> Dict[str, Any]:
+    """升级快照（团队安全网，**全局口径、不受查看者个人静默影响**）。
+
+    列出"严重超时(≥全局 crit)且无人有效处理"的会话 + 原因：
+      unclaimed=无人认领 / holder_offline=认领坐席离线 / holder_quiet=认领坐席静音或免打扰。
+    用于 6-18 个人可静默后的兜底：被放下的会话不能就此无人管。
+    """
+    inbox = _inbox_store(request)
+    if inbox is None:
+        return {"ok": True, "count": 0, "items": []}
+    sla = _sla_cfg(request)  # 全局团队阈值，不叠加个人覆盖
+    now = time.time()
+    convs = inbox.list_conversations(limit=500)
+    cmap = {str(c.get("conversation_id") or ""): c for c in convs}
+    dirs = inbox.last_message_dirs(list(cmap))
+    claim_map: Dict[str, Dict[str, str]] = {}
+    try:
+        for cl in inbox.list_conversation_claims():
+            claim_map[str(cl.get("conversation_id") or "")] = {
+                "agent_id": str(cl.get("agent_id") or ""),
+                "agent_name": str(cl.get("agent_name") or ""),
+            }
+    except Exception:
+        logger.debug("escalation claim 读取失败（已忽略）", exc_info=True)
+    online: Dict[str, str] = {}
+    try:
+        for p in inbox.list_agent_presence(
+                active_within_sec=_presence_stale_sec(request)):
+            online[str(p.get("agent_id") or "")] = str(p.get("status") or "")
+    except Exception:
+        logger.debug("escalation presence 读取失败（已忽略）", exc_info=True)
+    items: List[Dict[str, Any]] = []
+    for cid, info in dirs.items():
+        if info.get("direction") != "in":
+            continue
+        wait = now - (info.get("ts") or now)
+        if wait < sla["crit"]:
+            continue
+        cl = claim_map.get(cid)
+        reason = ""
+        if not cl or not cl["agent_id"]:
+            reason = "unclaimed"
+        else:
+            aid = cl["agent_id"]
+            status = online.get(aid)
+            if status not in ("online", "busy"):
+                reason = "holder_offline"
+            else:
+                try:
+                    prefs = inbox.get_agent_prefs(aid)
+                    if prefs.get("muted") or _dnd_active(prefs):
+                        reason = "holder_quiet"
+                except Exception:
+                    reason = ""
+        if not reason:
+            continue
+        c = cmap.get(cid) or {}
+        items.append({
+            "conversation_id": cid,
+            "platform": str(c.get("platform") or ""),
+            "account_id": str(c.get("account_id") or "default"),
+            "chat_key": str(c.get("chat_key") or ""),
+            "name": str(c.get("display_name") or c.get("chat_key") or cid),
+            "wait_sec": int(max(0, wait)),
+            "reason": reason,
+            "agent_id": cl["agent_id"] if cl else "",
+            "agent_name": (cl["agent_name"] if cl else "") or "",
+        })
+    items.sort(key=lambda x: -x["wait_sec"])
+    return {"ok": True, "count": len(items), "items": items[:50],
+            "crit_sec": sla["crit"]}
+
+
 def _sla_detail(
     request: Request, scope: str = "critical", agent: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -1650,6 +1736,12 @@ def register_unified_inbox_routes(
         """SLA 告警源（顶栏徽标轮询 + 严重超时清单下钻）。"""
         api_auth(request)
         return _sla_alert_snapshot(request)
+
+    @app.get("/api/workspace/escalations")
+    async def api_workspace_escalations(request: Request):
+        """升级告警源（无人有效处理的严重超时；全局口径，不受个人静默影响）。"""
+        api_auth(request)
+        return _escalation_snapshot(request)
 
     @app.get("/api/workspace/prefs")
     async def api_workspace_prefs_get(request: Request):
