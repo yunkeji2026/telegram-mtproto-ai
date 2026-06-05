@@ -408,6 +408,7 @@ _BASELINE = """
 /api/workspace/presence	POST
 /api/workspace/sla-alerts	GET
 /api/workspace/sla-detail	GET
+/api/workspace/sla/create-task	POST
 /api/workspace/stream	GET
 /api/workspace/tag-library	GET
 /api/workspace/tag-library	POST

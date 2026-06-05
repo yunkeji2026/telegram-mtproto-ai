@@ -386,6 +386,23 @@ API：`GET /api/workspace/contact/{contact_id}` 一次返回 `{contact, timeline
 - **入口**：仪表盘右上「⬇ 导出日报 CSV」按钮，随 7/30 窗口下拉联动导出。
 - **历史回看**：CSV 天然含 N 天逐日明细；文件名带窗口与生成日期便于归档。
 
+## 5t. SLA 告警 → 跟进任务闭环（Phase 6-17）
+
+把 6-9 的「SLA 告警」与 6-4 的「跟进任务」打通：发现超时 → 一键建待办 → 指派闭环。
+
+- **端点** `POST /api/workspace/sla/create-task`：body 接 `platform`+`chat_key`
+  或 `conversation_id`（缺则从 `platform:account:chat_key` 解析）+ 可选
+  `wait_sec`/`due_in_hours`(默认 2)/`assignee`(默认本人)/`note`。
+  经 `resolve_contacts_by_external` 把会话解析为 contact，note 预填
+  「SLA 超时未回复 N 分钟，请尽快跟进」+ 自定义补充，复用
+  `gateway.add_follow_up_task`；成功发 `follow_up` SSE 事件刷新待办徽标。
+  contact 未建档返回 `contact_not_found`（不抛错，前端 toast 提示）。
+- **入口**：仪表盘 SLA/首响明细弹层每行加「生成跟进」按钮（`stopPropagation`
+  不触发跳转）；按 index 取 `window.__slaItems` 避免内联 JSON 转义，
+  建后按钮变「✓ 已建」+ toast。
+- **复用既有**：会话→contact 解析、`add_follow_up_task`、`follow_up` 事件总线、
+  `CRMW.toast`，无新表、无新 store 方法。
+
 ## 6. 明确不做（后续阶段）
 
 | 项 | 原因 |
