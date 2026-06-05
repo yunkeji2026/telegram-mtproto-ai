@@ -435,6 +435,23 @@ API：`GET /api/workspace/contact/{contact_id}` 一次返回 `{contact, timeline
 - **入口**：仪表盘「坐席首响绩效」每行加 ⬇ 链接，`stopPropagation` 不触发下钻，
   随 7/30 窗口导出该坐席个人日报。无新路由（同 path 加 query）。
 
+## 5w. 告警升级策略（团队安全网）（Phase 6-20）
+
+补上 6-18「个人可静默」后的风险敞口：被放下的严重会话不能就此无人管。
+
+- **快照** `_escalation_snapshot(request)`：**全局口径**（用全局 `_sla_cfg`，
+  不叠加查看者个人覆盖、不受个人静默影响），列出"≥全局 crit 且无人有效处理"
+  的会话 + 原因：
+  - `unclaimed` 无人认领；
+  - `holder_offline` 认领坐席不在线（presence 不在 `presence_stale_sec` 窗口内
+    或状态非 online/busy）；
+  - `holder_quiet` 认领坐席 muted 或处于免打扰。
+- **端点** `GET /api/workspace/escalations`。
+- **入口**：顶栏紫色「升级 N」徽标（独立 30s 轮询，**绕过个人静默**，点跳首条）+
+  仪表盘「⚠ 升级」区段（原因标注 + 跳转 + 复用 6-17「生成跟进」一键建待办）。
+- **为何不自动建任务/不开后台循环**：遵循 main.py 单体无新后台任务约定；
+  升级以"高可见徽标 + 一键转任务"呈现，由在线坐席即时接管，避免误判自动派单。
+
 ## 6. 明确不做（后续阶段）
 
 | 项 | 原因 |
