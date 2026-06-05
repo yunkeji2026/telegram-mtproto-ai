@@ -1362,6 +1362,93 @@ class TestSlaCreateTask:
         assert r.status_code == 400
 
 
+class TestAgentPrefs:
+    """Phase 6-18：告警个性化 — 每坐席 SLA 阈值 + 免打扰 + 静音。"""
+
+    def test_store_get_set_prefs(self, tmp_path):
+        from src.inbox.store import InboxStore
+        store = InboxStore(tmp_path / "i.db")
+        d = store.get_agent_prefs("a1")
+        assert d["warn_sec"] == 0 and d["dnd_start"] == -1
+        store.set_agent_prefs("a1", warn_sec=600, crit_sec=1200,
+                              muted=1, dnd_start=1320, dnd_end=480)
+        d = store.get_agent_prefs("a1")
+        assert d["warn_sec"] == 600 and d["crit_sec"] == 1200
+        assert d["muted"] == 1 and d["dnd_start"] == 1320 and d["dnd_end"] == 480
+        # 覆盖写
+        store.set_agent_prefs("a1", warn_sec=0, crit_sec=0)
+        assert store.get_agent_prefs("a1")["warn_sec"] == 0
+        store.close()
+
+    def test_dnd_active(self):
+        import time as _t
+        from src.web.routes.unified_inbox_routes import _dnd_active
+        # 构造一个跨午夜 22:00-08:00，取 23:00 应 active
+        base = _t.struct_time((2026, 6, 6, 23, 0, 0, 5, 157, -1))
+        now = _t.mktime(base)
+        assert _dnd_active({"dnd_start": 1320, "dnd_end": 480}, now) is True
+        # 12:00 不在 22:00-08:00
+        noon = _t.mktime(_t.struct_time((2026, 6, 6, 12, 0, 0, 5, 157, -1)))
+        assert _dnd_active({"dnd_start": 1320, "dnd_end": 480}, noon) is False
+        # 关闭
+        assert _dnd_active({"dnd_start": -1, "dnd_end": -1}, now) is False
+
+    def _crit_conv(self, inbox, cid="web:web:Z"):
+        import time
+        from src.inbox.models import InboxConversation, InboxMessage
+        old = time.time() - 99999
+        inbox.ingest_batch(
+            InboxConversation(conversation_id=cid, platform="web", account_id="web",
+                              chat_key=cid.split(":")[-1], display_name="Z",
+                              language="zh", last_text="x", last_ts=old, unread=1),
+            [InboxMessage(conversation_id=cid, platform_msg_id="", direction="in",
+                          text="x", original_text="x", translated_text="x",
+                          source_lang="zh", ts=old)])
+
+    def test_prefs_endpoint_and_mute(self, cstore, gateway):
+        import time
+        from src.inbox.store import InboxStore
+        d = tempfile.mkdtemp()
+        inbox = InboxStore(Path(d) / "i.db")
+        self._crit_conv(inbox)
+        cli = _client_with_inbox(cstore, gateway, inbox)
+        # 默认：有严重超时
+        snap = cli.get("/api/workspace/sla-alerts").json()
+        assert snap["critical"] >= 1 and snap["quiet"] is False
+        assert len(snap["items"]) >= 1
+        # 设置静音 → quiet=True，items 清空，但 critical 计数仍在
+        r = cli.post("/api/workspace/prefs", json={"muted": 1})
+        assert r.json()["ok"] is True
+        snap2 = cli.get("/api/workspace/sla-alerts").json()
+        assert snap2["quiet"] is True
+        assert snap2["items"] == []
+        assert snap2["critical"] >= 1
+        inbox.close()
+
+    def test_prefs_threshold_override(self, cstore, gateway):
+        import time
+        from src.inbox.store import InboxStore
+        d = tempfile.mkdtemp()
+        inbox = InboxStore(Path(d) / "i.db")
+        # 一条等待 ~50 分钟的会话：全局 crit=120 分不触发严重，个人 crit=30 分则触发
+        from src.inbox.models import InboxConversation, InboxMessage
+        ts = time.time() - 3000  # 50 分钟
+        inbox.ingest_batch(
+            InboxConversation(conversation_id="web:web:T", platform="web",
+                              account_id="web", chat_key="T", display_name="T",
+                              language="zh", last_text="x", last_ts=ts, unread=1),
+            [InboxMessage(conversation_id="web:web:T", platform_msg_id="",
+                          direction="in", text="x", original_text="x",
+                          translated_text="x", source_lang="zh", ts=ts)])
+        cli = _client_with_inbox(cstore, gateway, inbox)
+        snap = cli.get("/api/workspace/sla-alerts").json()
+        assert snap["critical"] == 0  # 全局默认 crit=2h 未到
+        cli.post("/api/workspace/prefs", json={"crit_sec": 1800})  # 个人 30 分
+        snap2 = cli.get("/api/workspace/sla-alerts").json()
+        assert snap2["critical"] >= 1
+        inbox.close()
+
+
 class TestCrmWidgetsAsset:
     """Phase 6-13：共享前端组件抽取的静态资产与挂载守卫。"""
 

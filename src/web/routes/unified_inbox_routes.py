@@ -590,12 +590,58 @@ def _sla_cfg(request: Request) -> Dict[str, int]:
     return {"warn": warn, "crit": crit}
 
 
+def _dnd_active(prefs: Dict[str, Any], now: Optional[float] = None) -> bool:
+    """坐席当前是否处于免打扰时段（本地分钟，支持跨午夜）。"""
+    try:
+        start = int(prefs.get("dnd_start", -1))
+        end = int(prefs.get("dnd_end", -1))
+    except (TypeError, ValueError):
+        return False
+    if start < 0 or end < 0 or start == end:
+        return False
+    lt = time.localtime(now if now is not None else time.time())
+    cur = lt.tm_hour * 60 + lt.tm_min
+    if start < end:
+        return start <= cur < end
+    return cur >= start or cur < end  # 跨午夜
+
+
+def _agent_sla_cfg(request: Request) -> Dict[str, Any]:
+    """全局 SLA 阈值叠加当前坐席个性化覆盖 + 免打扰/静音状态。"""
+    base = _sla_cfg(request)
+    warn, crit = base["warn"], base["crit"]
+    muted = False
+    dnd = False
+    inbox = _inbox_store(request)
+    if inbox is not None:
+        try:
+            agent = _session_agent(request)
+            prefs = inbox.get_agent_prefs(agent["agent_id"])
+            if int(prefs.get("warn_sec") or 0) > 0:
+                warn = int(prefs["warn_sec"])
+            if int(prefs.get("crit_sec") or 0) > 0:
+                crit = int(prefs["crit_sec"])
+            muted = bool(prefs.get("muted"))
+            dnd = _dnd_active(prefs)
+        except Exception:
+            logger.debug("读取坐席告警偏好失败（已忽略）", exc_info=True)
+    if crit < warn:
+        crit = warn
+    return {"warn": warn, "crit": crit, "muted": muted, "dnd": dnd}
+
+
 def _sla_alert_snapshot(request: Request) -> Dict[str, Any]:
-    """当前 SLA 快照：等待/警告/严重计数 + 严重超时会话清单（告警徽标/SSE 用）。"""
+    """当前 SLA 快照：等待/警告/严重计数 + 严重超时会话清单（告警徽标/SSE 用）。
+
+    阈值按当前坐席个性化覆盖；静音或免打扰时段则 items 置空 + quiet=true，
+    使徽标与 SSE toast 在该坐席侧静默（计数仍照常返回供仪表盘参考）。
+    """
     inbox = _inbox_store(request)
     if inbox is None:
-        return {"ok": True, "waiting": 0, "breaching": 0, "critical": 0, "items": []}
-    sla = _sla_cfg(request)
+        return {"ok": True, "waiting": 0, "breaching": 0, "critical": 0,
+                "items": [], "quiet": False}
+    sla = _agent_sla_cfg(request)
+    quiet = bool(sla["muted"] or sla["dnd"])
     convs = inbox.list_conversations(limit=500)
     cmap = {str(c.get("conversation_id") or ""): c for c in convs}
     dirs = inbox.last_message_dirs(list(cmap))
@@ -621,8 +667,8 @@ def _sla_alert_snapshot(request: Request) -> Dict[str, Any]:
             })
     items.sort(key=lambda x: -x["wait_sec"])
     return {"ok": True, "waiting": waiting, "breaching": breaching,
-            "critical": len(items), "items": items[:50],
-            "warn_sec": sla["warn"], "crit_sec": sla["crit"]}
+            "critical": len(items), "items": [] if quiet else items[:50],
+            "quiet": quiet, "warn_sec": sla["warn"], "crit_sec": sla["crit"]}
 
 
 def _sla_detail(
@@ -1604,6 +1650,54 @@ def register_unified_inbox_routes(
         """SLA 告警源（顶栏徽标轮询 + 严重超时清单下钻）。"""
         api_auth(request)
         return _sla_alert_snapshot(request)
+
+    @app.get("/api/workspace/prefs")
+    async def api_workspace_prefs_get(request: Request):
+        """当前坐席告警偏好 + 全局默认阈值（供设置面板回显）。"""
+        api_auth(request)
+        glob = _sla_cfg(request)
+        inbox = _inbox_store(request)
+        agent = _session_agent(request)
+        prefs = (inbox.get_agent_prefs(agent["agent_id"])
+                 if inbox is not None else
+                 {"warn_sec": 0, "crit_sec": 0, "muted": 0,
+                  "dnd_start": -1, "dnd_end": -1})
+        return {"ok": True, "prefs": prefs,
+                "global_warn_sec": glob["warn"], "global_crit_sec": glob["crit"],
+                "effective": _agent_sla_cfg(request)}
+
+    @app.post("/api/workspace/prefs")
+    async def api_workspace_prefs_set(request: Request):
+        """保存当前坐席告警偏好：{warn_sec,crit_sec,muted,dnd_start,dnd_end}。
+
+        warn_sec/crit_sec=0 表示沿用全局；dnd_start/dnd_end 为本地分钟(0-1439)，
+        -1=关闭免打扰。
+        """
+        api_auth(request)
+        inbox = _inbox_store(request)
+        if inbox is None:
+            return {"ok": False, "error": "inbox_disabled"}
+        body = await request.json()
+
+        def _int(key: str, default: int = 0) -> int:
+            try:
+                return int(body.get(key, default))
+            except (TypeError, ValueError):
+                return default
+
+        def _clamp_min(v: int) -> int:
+            return v if v == -1 else max(0, min(1439, v))
+
+        agent = _session_agent(request)
+        prefs = inbox.set_agent_prefs(
+            agent["agent_id"],
+            warn_sec=max(0, _int("warn_sec")),
+            crit_sec=max(0, _int("crit_sec")),
+            muted=1 if body.get("muted") else 0,
+            dnd_start=_clamp_min(_int("dnd_start", -1)),
+            dnd_end=_clamp_min(_int("dnd_end", -1)),
+        )
+        return {"ok": True, "prefs": prefs}
 
     @app.get("/api/workspace/sla-detail")
     async def api_workspace_sla_detail(

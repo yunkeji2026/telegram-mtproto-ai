@@ -161,6 +161,16 @@ CREATE TABLE IF NOT EXISTS agent_sends (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_sends_conv ON agent_sends(conversation_id, ts);
 CREATE INDEX IF NOT EXISTS idx_agent_sends_ts   ON agent_sends(ts);
+
+CREATE TABLE IF NOT EXISTS agent_prefs (
+    agent_id          TEXT PRIMARY KEY,
+    warn_sec          INTEGER NOT NULL DEFAULT 0,   -- 0=沿用全局
+    crit_sec          INTEGER NOT NULL DEFAULT 0,   -- 0=沿用全局
+    muted             INTEGER NOT NULL DEFAULT 0,   -- 1=完全静音告警
+    dnd_start         INTEGER NOT NULL DEFAULT -1,  -- 免打扰起(本地分钟 0-1439)，-1=关
+    dnd_end           INTEGER NOT NULL DEFAULT -1,  -- 免打扰止(本地分钟 0-1439)，-1=关
+    updated_at        REAL NOT NULL DEFAULT 0
+);
 """
 
 
@@ -793,6 +803,42 @@ class InboxStore:
         if float(out.get("expires_at") or 0) < self._now():
             return None
         return out
+
+    def get_agent_prefs(self, agent_id: str) -> Dict[str, Any]:
+        """坐席告警偏好（不存在则返回全 0/默认=沿用全局、无免打扰）。"""
+        aid = str(agent_id or "").strip()
+        row = None
+        if aid:
+            with self._lock:
+                row = self._conn.execute(
+                    "SELECT * FROM agent_prefs WHERE agent_id=?", (aid,)
+                ).fetchone()
+        if row is None:
+            return {"agent_id": aid, "warn_sec": 0, "crit_sec": 0,
+                    "muted": 0, "dnd_start": -1, "dnd_end": -1, "updated_at": 0}
+        return dict(row)
+
+    def set_agent_prefs(
+        self, agent_id: str, *, warn_sec: int = 0, crit_sec: int = 0,
+        muted: int = 0, dnd_start: int = -1, dnd_end: int = -1,
+    ) -> Dict[str, Any]:
+        """写坐席告警偏好（整条覆盖）。"""
+        aid = str(agent_id or "").strip()
+        if not aid:
+            raise ValueError("agent_id required")
+        now = self._now()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO agent_prefs (agent_id, warn_sec, crit_sec, muted, "
+                "dnd_start, dnd_end, updated_at) VALUES (?,?,?,?,?,?,?) "
+                "ON CONFLICT(agent_id) DO UPDATE SET warn_sec=excluded.warn_sec, "
+                "crit_sec=excluded.crit_sec, muted=excluded.muted, "
+                "dnd_start=excluded.dnd_start, dnd_end=excluded.dnd_end, "
+                "updated_at=excluded.updated_at",
+                (aid, int(warn_sec or 0), int(crit_sec or 0), 1 if muted else 0,
+                 int(dnd_start), int(dnd_end), now))
+            self._conn.commit()
+        return self.get_agent_prefs(aid)
 
     def list_conversation_claims(self) -> List[Dict[str, Any]]:
         self.purge_expired_claims()
