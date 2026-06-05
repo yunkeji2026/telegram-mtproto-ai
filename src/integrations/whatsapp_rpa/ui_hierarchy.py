@@ -498,6 +498,53 @@ def find_chat_row_by_name(
     return None
 
 
+# ── 聊天列表：取最顶部（最近）会话行（用于已读未回主动巡检）──────────────────
+
+def find_top_chat_row(
+    xml_bytes: bytes,
+    *,
+    wa_pkg: str = "com.whatsapp",
+) -> Optional[Tuple[str, int, int]]:
+    """返回聊天列表中最顶部（最近）会话行的 (name, cx, cy)。
+
+    WhatsApp 聊天列表按最近活动排序，最顶部即最新会话。
+    用于「已读未回」主动巡检：即便无未读角标也能打开最近会话核对。
+    无可用会话行时返回 None。
+    """
+    try:
+        root = ET.fromstring(xml_bytes)
+    except ET.ParseError:
+        return None
+    best: Optional[Tuple[int, str, int, int]] = None  # (top_y, name, cx, cy)
+    for el in root.iter():
+        rid = el.get("resource-id") or ""
+        if "conversations_row_contact_name" not in rid:
+            continue
+        name = (el.get("text") or "").strip()
+        if not name:
+            continue
+        row_bb = _parse_bounds(el.get("bounds") or "")
+        cur = el
+        for _ in range(6):
+            p = _find_parent(root, cur)
+            if p is None:
+                break
+            cur = p
+            bb = _parse_bounds(cur.get("bounds") or "")
+            if bb and (bb[2] - bb[0]) > 500:
+                row_bb = bb
+                break
+        if not row_bb:
+            continue
+        top_y = row_bb[1]
+        cx, cy = _cx_cy(row_bb)
+        if best is None or top_y < best[0]:
+            best = (top_y, name, cx, cy)
+    if best is None:
+        return None
+    return best[1], best[2], best[3]
+
+
 # ── 搜索按鈕（内置搜索入口，用于主动发送兄底）────────────────────────────────
 
 def find_search_button(

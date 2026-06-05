@@ -1126,7 +1126,7 @@ class SkillManager(LoggerMixin):
                                 self._get_embedding_cached(text), timeout=8.0
                             )
                         except asyncio.TimeoutError:
-                            self.logger.warning("KB Embedding 调用超时�?8s），降级为纯 BM25")
+                            self.logger.warning("KB Embedding 调用超时（>8s），降级为纯 BM25")
                             _query_vec = None
                         if _query_vec:
                             _search_result = _kb.search(
@@ -1134,7 +1134,7 @@ class SkillManager(LoggerMixin):
                             )
                             _mode = _search_result.get("search_mode", "bm25")
                             self.logger.info(
-                                "%sKB 混合�€索模�?%s，BM25原�=%.3f",
+                                "%sKB 混合搜索模式 %s，BM25原始=%.3f",
                                 log_prefix, _mode, _top_bm25_score
                             )
                         else:
@@ -1290,7 +1290,7 @@ class SkillManager(LoggerMixin):
                     else:
                         _kb.log_miss(text)
                         self.logger.info(
-                            "%sKB ����?(BM25=%.3f) msg='%s'",
+                            "%sKB 未命中 (BM25=%.3f) msg='%s'",
                             log_prefix, _top_bm25_score, text[:30]
                         )
 
@@ -1308,7 +1308,7 @@ class SkillManager(LoggerMixin):
                     except Exception:
                         pass
             except Exception as _kb_err:
-                self.logger.warning("KB �€索失败（非阻���: %s", _kb_err)
+                self.logger.warning("KB 检索失败（非阻塞）: %s", _kb_err)
 
             # Domain hook: inject live状态（仅支付等业务域；陪聊域不注入，避免模型主动推销查通道）
             _cfg_dom = self.config.config if hasattr(self.config, "config") else {}

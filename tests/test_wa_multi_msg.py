@@ -17,6 +17,7 @@ import pytest
 from src.integrations.whatsapp_rpa.ui_hierarchy import (
     IncomingMessage,
     pick_new_incoming_messages,
+    find_top_chat_row,
 )
 from src.integrations.whatsapp_rpa.multi_msg_handler import (
     MsgGroup,
@@ -121,6 +122,54 @@ class TestPickNewIncomingMessages:
         xml = _make_xml(("只有这条", 600))
         result = pick_new_incoming_messages(xml, last_peer_text="只有这条", screen_width=1080)
         assert len(result) == 1
+
+
+# ── find_top_chat_row（已读未回主动巡检）────────────────────────────────────────
+
+def _make_chat_list(*rows: tuple) -> bytes:
+    """Build a minimal WhatsApp chat-list XML. Each row is (name, top_y).
+
+    Wraps the contact_name in a wide (>500px) row container so the helper
+    can resolve the full-row bounds.
+    """
+    nodes = []
+    for name, top in rows:
+        bottom = top + 120
+        nodes.append(
+            f"<node class='android.widget.RelativeLayout' bounds='[0,{top}][1080,{bottom}]'>"
+            f"<node resource-id='com.whatsapp:id/conversations_row_contact_name'"
+            f" class='TextView' text='{name}' bounds='[150,{top + 20}][700,{top + 70}]'/>"
+            f"</node>"
+        )
+    return (
+        "<hierarchy><node resource-id='com.whatsapp:id/conversations_row'"
+        " class='android.view.ViewGroup'>"
+        + "".join(nodes)
+        + "</node></hierarchy>"
+    ).encode()
+
+
+class TestFindTopChatRow:
+    def test_returns_topmost_row(self):
+        xml = _make_chat_list(("阿龙🐉", 300), ("Bob", 500), ("Carol", 700))
+        top = find_top_chat_row(xml)
+        assert top is not None
+        name, cx, cy = top
+        assert name == "阿龙🐉"
+        assert cx == (0 + 1080) // 2
+        assert cy == (300 + 420) // 2
+
+    def test_unordered_input_picks_smallest_y(self):
+        xml = _make_chat_list(("Bob", 700), ("阿龙🐉", 200), ("Carol", 500))
+        top = find_top_chat_row(xml)
+        assert top is not None
+        assert top[0] == "阿龙🐉"
+
+    def test_empty_list_returns_none(self):
+        assert find_top_chat_row(b"<hierarchy/>") is None
+
+    def test_malformed_xml_returns_none(self):
+        assert find_top_chat_row(b"<not valid") is None
 
 
 # ── analyze_multi_msg ──────────────────────────────────────────────────────────
