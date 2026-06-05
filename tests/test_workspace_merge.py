@@ -1504,6 +1504,73 @@ class TestAgentDailyReport:
         inbox.close()
 
 
+class TestEscalation:
+    """Phase 6-20：告警升级 — 无人有效处理的严重超时（全局口径）。"""
+
+    def _crit(self, inbox, cid):
+        import time
+        from src.inbox.models import InboxConversation, InboxMessage
+        old = time.time() - 99999
+        inbox.ingest_batch(
+            InboxConversation(conversation_id=cid, platform="web", account_id="web",
+                              chat_key=cid.split(":")[-1], display_name=cid.split(":")[-1],
+                              language="zh", last_text="x", last_ts=old, unread=1),
+            [InboxMessage(conversation_id=cid, platform_msg_id="", direction="in",
+                          text="x", original_text="x", translated_text="x",
+                          source_lang="zh", ts=old)])
+
+    def test_unclaimed_escalates(self, cstore, gateway):
+        from src.inbox.store import InboxStore
+        d = tempfile.mkdtemp()
+        inbox = InboxStore(Path(d) / "i.db")
+        self._crit(inbox, "web:web:U")
+        cli = _client_with_inbox(cstore, gateway, inbox)
+        snap = cli.get("/api/workspace/escalations").json()
+        assert snap["count"] == 1
+        assert snap["items"][0]["reason"] == "unclaimed"
+        inbox.close()
+
+    def test_online_claim_no_escalate(self, cstore, gateway):
+        import time
+        from src.inbox.store import InboxStore
+        d = tempfile.mkdtemp()
+        inbox = InboxStore(Path(d) / "i.db")
+        self._crit(inbox, "web:web:C")
+        inbox.set_conversation_claim("web:web:C", "ag1", agent_name="A")
+        inbox.upsert_agent_presence("ag1", display_name="A", status="online")
+        cli = _client_with_inbox(cstore, gateway, inbox)
+        snap = cli.get("/api/workspace/escalations").json()
+        assert snap["count"] == 0
+        inbox.close()
+
+    def test_offline_holder_escalates(self, cstore, gateway):
+        from src.inbox.store import InboxStore
+        d = tempfile.mkdtemp()
+        inbox = InboxStore(Path(d) / "i.db")
+        self._crit(inbox, "web:web:O")
+        inbox.set_conversation_claim("web:web:O", "ag2", agent_name="B")
+        # 无 presence 记录 → 视为离线
+        cli = _client_with_inbox(cstore, gateway, inbox)
+        snap = cli.get("/api/workspace/escalations").json()
+        assert snap["count"] == 1
+        assert snap["items"][0]["reason"] == "holder_offline"
+        inbox.close()
+
+    def test_quiet_holder_escalates(self, cstore, gateway):
+        from src.inbox.store import InboxStore
+        d = tempfile.mkdtemp()
+        inbox = InboxStore(Path(d) / "i.db")
+        self._crit(inbox, "web:web:Q")
+        inbox.set_conversation_claim("web:web:Q", "ag3", agent_name="C")
+        inbox.upsert_agent_presence("ag3", display_name="C", status="online")
+        inbox.set_agent_prefs("ag3", muted=1)
+        cli = _client_with_inbox(cstore, gateway, inbox)
+        snap = cli.get("/api/workspace/escalations").json()
+        assert snap["count"] == 1
+        assert snap["items"][0]["reason"] == "holder_quiet"
+        inbox.close()
+
+
 class TestCrmWidgetsAsset:
     """Phase 6-13：共享前端组件抽取的静态资产与挂载守卫。"""
 
