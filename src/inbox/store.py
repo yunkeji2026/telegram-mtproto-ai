@@ -171,6 +171,18 @@ CREATE TABLE IF NOT EXISTS agent_prefs (
     dnd_end           INTEGER NOT NULL DEFAULT -1,  -- 免打扰止(本地分钟 0-1439)，-1=关
     updated_at        REAL NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS escalations (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id   TEXT NOT NULL,
+    reason            TEXT NOT NULL DEFAULT '',
+    agent_id          TEXT NOT NULL DEFAULT '',   -- 升级时的认领人(问责)
+    agent_name        TEXT NOT NULL DEFAULT '',
+    wait_sec          INTEGER NOT NULL DEFAULT 0,
+    ts                REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_escalations_conv ON escalations(conversation_id, ts);
+CREATE INDEX IF NOT EXISTS idx_escalations_ts   ON escalations(ts);
 """
 
 
@@ -854,6 +866,50 @@ class InboxStore:
                  int(dnd_start), int(dnd_end), now))
             self._conn.commit()
         return self.get_agent_prefs(aid)
+
+    def record_escalation(
+        self, conversation_id: str, *, reason: str = "", agent_id: str = "",
+        agent_name: str = "", wait_sec: int = 0, dedup_sec: float = 3600,
+        ts: Optional[float] = None,
+    ) -> bool:
+        """记录一次会话升级（问责审计）。dedup_sec 内同会话已记过则跳过。
+
+        返回 True=本次新记录（边沿），False=去重跳过。
+        """
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            return False
+        now = float(ts if ts is not None else self._now())
+        with self._lock:
+            if dedup_sec > 0:
+                row = self._conn.execute(
+                    "SELECT 1 FROM escalations WHERE conversation_id=? AND ts>=? "
+                    "LIMIT 1", (cid, now - float(dedup_sec))).fetchone()
+                if row is not None:
+                    return False
+            self._conn.execute(
+                "INSERT INTO escalations (conversation_id, reason, agent_id, "
+                "agent_name, wait_sec, ts) VALUES (?,?,?,?,?,?)",
+                (cid, str(reason or ""), str(agent_id or ""),
+                 str(agent_name or ""), int(wait_sec or 0), now))
+            self._conn.commit()
+        return True
+
+    def count_escalations_since(self, since_ts: float = 0.0) -> int:
+        with self._lock:
+            return self._conn.execute(
+                "SELECT COUNT(*) FROM escalations WHERE ts>=?", (float(since_ts),)
+            ).fetchone()[0]
+
+    def list_escalations(
+        self, since_ts: float = 0.0, limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM escalations WHERE ts>=? ORDER BY ts DESC LIMIT ?",
+                (float(since_ts), int(max(1, min(1000, limit)))),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def list_conversation_claims(self) -> List[Dict[str, Any]]:
         self.purge_expired_claims()

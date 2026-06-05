@@ -1571,6 +1571,43 @@ class TestEscalation:
         inbox.close()
 
 
+class TestEscalationAudit:
+    """Phase 6-21：升级问责审计 — record/dedup/count + snapshot today_count。"""
+
+    def test_record_dedup_and_count(self, tmp_path):
+        import time
+        from src.inbox.store import InboxStore
+        store = InboxStore(tmp_path / "i.db")
+        now = time.time()
+        assert store.record_escalation("web:web:A", reason="unclaimed",
+                                       wait_sec=9000, ts=now) is True
+        # 同会话 1h 内去重
+        assert store.record_escalation("web:web:A", reason="unclaimed",
+                                       wait_sec=9100, ts=now + 10) is False
+        # 不同会话照记
+        assert store.record_escalation("web:web:B", reason="holder_offline",
+                                       wait_sec=8000, ts=now) is True
+        assert store.count_escalations_since(0) == 2
+        # 超出 dedup 窗口可再记
+        assert store.record_escalation("web:web:A", reason="unclaimed",
+                                       wait_sec=9999, ts=now + 4000) is True
+        assert store.count_escalations_since(0) == 3
+        rows = store.list_escalations(0)
+        assert len(rows) == 3 and rows[0]["ts"] >= rows[-1]["ts"]
+        store.close()
+
+    def test_snapshot_today_count(self, cstore, gateway):
+        import time
+        from src.inbox.store import InboxStore
+        d = tempfile.mkdtemp()
+        inbox = InboxStore(Path(d) / "i.db")
+        inbox.record_escalation("web:web:Z", reason="unclaimed", ts=time.time())
+        cli = _client_with_inbox(cstore, gateway, inbox)
+        snap = cli.get("/api/workspace/escalations").json()
+        assert snap["today_count"] >= 1
+        inbox.close()
+
+
 class TestCrmWidgetsAsset:
     """Phase 6-13：共享前端组件抽取的静态资产与挂载守卫。"""
 

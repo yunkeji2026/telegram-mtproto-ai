@@ -452,6 +452,21 @@ API：`GET /api/workspace/contact/{contact_id}` 一次返回 `{contact, timeline
 - **为何不自动建任务/不开后台循环**：遵循 main.py 单体无新后台任务约定；
   升级以"高可见徽标 + 一键转任务"呈现，由在线坐席即时接管，避免误判自动派单。
 
+## 5x. 升级实时化 + 问责审计（Phase 6-21）
+
+让 6-20 的安全网从"被动可查"变"主动触达 + 可追溯"。
+
+- **审计表** `inbox.escalations`（conversation_id/reason/agent_id 问责/wait_sec/ts）
+  + `record_escalation(dedup_sec=3600)`（同会话窗口内去重，返回是否新记录）
+  + `count_escalations_since` / `list_escalations`。
+- **SSE 实时**：流内新增 `_esc_pushes()`（镜像 `_sla_pushes`），连接建立 +
+  每 30s 心跳用**全局升级快照**边沿触发 `escalation` 帧；新升级同时
+  `record_escalation` 落审计（**表级去重**防多连接重复落库）。
+- **绕过个人静默**：升级 toast 是团队安全网，前端 `escalation` 事件直接
+  `CRMW.toast`（紫色）+ `refreshEsc()`，不受查看者 quiet 影响。
+- **问责呈现**：升级快照加 `today_count`（今日累计升级次数），仪表盘升级区段
+  显示"当前 N 条 · 今日累计升级 M 次"；审计行保留升级时的认领人，便于复盘。
+
 ## 6. 明确不做（后续阶段）
 
 | 项 | 原因 |
