@@ -159,6 +159,8 @@
     return (d.getMonth()+1)+'/'+(d.getDate());
   }
 
+  function fmtWait(sec){ return CRMW.fmtWait(sec); }
+
   function renderStatusStrip(ps){
     const el = document.getElementById('status-strip');
     if(!ps || !Object.keys(ps).length){ el.innerHTML=''; return; }
@@ -212,16 +214,21 @@
       const isSelected = selectedChat && c.conversation_id===selectedChat.conversation_id;
       const cl = claimMap[c.conversation_id];
       const claimTag = cl ? `<span class="claim-badge" title="处理中">🔒 ${esc((cl.agent_name||cl.agent_id||'').slice(0,8))}</span>` : '';
+      const fuDot = c.follow_up_overdue ? `<span title="有逾期跟进" style="color:#dc2626;margin-left:4px;">●</span>` : '';
+      const wait = c.unanswered_sec|0;
+      const slaColor = c.sla_level==='crit'?'#dc2626':(c.sla_level==='warn'?'#d97706':'#9ca3af');
+      const waitTag = wait>0 ? `<br><span title="客户等待回复时长" style="font-size:11px;color:${slaColor};${c.sla_breach?'font-weight:700;':''}">⏱${fmtWait(wait)}</span>` : '';
       return `<div class="chat-item${isSelected?' selected':''}" onclick="UI.selectChat(${i})">
         <div class="chat-avatar" style="background:${color}">${PLATFORM_ICONS[c.platform]||'?'}</div>
         <div class="chat-body">
-          <div class="chat-name">${esc(c.name||c.chat_key||'未知')}${claimTag}</div>
+          <div class="chat-name">${esc(c.name||c.chat_key||'未知')}${claimTag}${fuDot}</div>
           <div class="chat-preview">${esc(c.last_msg||'')}</div>
           <span class="chat-tag ${tagCls}">${c.account_label||c.platform}</span>
         </div>
         <div class="chat-meta">
           ${fmtTs(c.last_ts)}
           ${c.unread>0?`<br><span class="chat-badge">${c.unread}</span>`:''}
+          ${waitTag}
         </div>
       </div>`;
     }).join('');
@@ -439,7 +446,10 @@
       ${events?`<div style="margin-top:8px;">${events}</div>`:''}
       ${memories.length?`<div style="margin-top:8px;font-size:12px;color:#374151;">${memories.map(m=>`<div>· ${esc(m)}</div>`).join('')}</div>`:'<div style="margin-top:8px;font-size:12px;color:#94a3b8;">暂无长期记忆</div>'}
       ${ct.contact_id?`<div style="margin-top:6px;font-size:10px;color:#94a3b8;">ID ${esc(ct.contact_id.slice(0,12))}… · <a href="/workspace/contact/${esc(ct.contact_id)}" target="_blank" style="color:#2563eb;">查看全景</a></div>`:''}
+      ${ct.contact_id?`<div id="conv-tasks" style="margin-top:8px;padding-top:7px;border-top:1px dashed #e5e7eb;"></div>`:''}
     `;
+    window.__convContactId = ct.contact_id || '';
+    if(ct.contact_id) UI.loadConvTasks(ct.contact_id);
   }
 
   function renderMessage(m, idx){
@@ -506,6 +516,15 @@
       renderStatusStrip(d.platform_status||{});
       renderPlatformBar();
       applyFilter();
+      // SLA 告警下钻：从顶栏徽标跳转过来时聚焦指定会话（一次性）
+      try{
+        const focus=sessionStorage.getItem('ws_focus_conv');
+        if(focus){
+          sessionStorage.removeItem('ws_focus_conv');
+          const fi=filtered.findIndex(c=>c.conversation_id===focus);
+          if(fi>=0) UI.selectChat(fi);
+        }
+      }catch(_){ }
     }catch(e){ console.error(e); }
   }
 
@@ -783,6 +802,57 @@
       const h = (window.__kbHits||[])[idx];
       const ta = document.getElementById('reply-text');
       if(h && ta){ ta.value = h.answer || h.title || ''; ta.focus(); }
+    },
+    async loadConvTasks(contactId){
+      const box = document.getElementById('conv-tasks');
+      if(!box) return;
+      try{
+        const r = await fetch('/api/workspace/contact/'+encodeURIComponent(contactId)+'/tasks');
+        const d = await r.json();
+        const now = Date.now()/1000;
+        const tasks = (d.tasks||[]).filter(t=>!t.done_at);
+        const rows = tasks.map(t=>{
+          const due = t.due_at && t.due_at<=now;
+          return `<div style="font-size:12px;margin-top:4px;display:flex;justify-content:space-between;gap:6px;align-items:center;">
+            <span style="color:${due?'#dc2626':'#92400e'};">${due?'⏰ ':''}${fmtTs(t.due_at)}${t.note?' · '+esc(t.note):''}</span>
+            <span style="flex:0 0 auto;display:flex;gap:3px;">
+              <button class="tiny-btn" style="padding:1px 6px;" onclick="UI.snoozeConvTask('${esc(t.task_id)}',1)">+1天</button>
+              <button class="tiny-btn" style="padding:1px 6px;" onclick="UI.doneConvTask('${esc(t.task_id)}')">完成</button>
+            </span></div>`;
+        }).join('');
+        box.innerHTML = `<div style="font-size:12px;color:#374151;display:flex;justify-content:space-between;align-items:center;">
+            <span>跟进任务</span>
+            <button class="tiny-btn" style="padding:1px 7px;" onclick="UI.addConvTask()">+ 新增</button></div>
+          ${rows||'<div style="font-size:12px;color:#94a3b8;margin-top:3px;">无跟进任务</div>'}`;
+      }catch(e){ box.innerHTML=''; }
+    },
+    async addConvTask(){
+      const cid = window.__convContactId;
+      if(!cid) return;
+      const v = prompt('设置跟进时间（格式：YYYY-MM-DD HH:MM，留空取消）');
+      if(!v) return;
+      const ts = Math.floor(new Date(v.replace(' ','T')).getTime()/1000);
+      if(!ts || isNaN(ts)){ alert('时间格式不正确'); return; }
+      const note = prompt('跟进事项（可选）')||'';
+      try{
+        const r = await fetch('/api/workspace/contact/'+encodeURIComponent(cid)+'/follow-up',{method:'POST',
+          headers:{'Content-Type':'application/json'}, body:JSON.stringify({due_at:ts, note:note})});
+        const d = await r.json();
+        if(d.ok){ this.loadConvTasks(cid); } else { alert('添加失败: '+(d.error||'')); }
+      }catch(e){ alert('网络错误'); }
+    },
+    async doneConvTask(tid){
+      try{
+        await fetch('/api/workspace/follow-up/'+encodeURIComponent(tid)+'/done',{method:'POST'});
+        if(window.__convContactId) this.loadConvTasks(window.__convContactId);
+      }catch(e){ alert('网络错误'); }
+    },
+    async snoozeConvTask(tid, days){
+      try{
+        await fetch('/api/workspace/follow-up/'+encodeURIComponent(tid)+'/snooze',{method:'POST',
+          headers:{'Content-Type':'application/json'}, body:JSON.stringify({days:days})});
+        if(window.__convContactId) this.loadConvTasks(window.__convContactId);
+      }catch(e){ alert('网络错误'); }
     },
     async loadIdentity(){
       const box = document.getElementById('identity-box');

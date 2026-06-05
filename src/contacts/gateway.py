@@ -384,6 +384,10 @@ class ContactGateway:
             tags = self._store.get_contact_tags(contact_id)
         except Exception:
             tags = []
+        try:
+            follow_up_tasks = self._store.list_follow_up_tasks(contact_id)
+        except Exception:
+            follow_up_tasks = []
         return {
             "contact_id": contact_id,
             "primary_name": contact.primary_name,
@@ -391,6 +395,7 @@ class ContactGateway:
             "note": attributes.get("note", ""),
             "tags": tags,
             "follow_up_at": getattr(contact, "follow_up_at", 0) or 0,
+            "follow_up_tasks": follow_up_tasks,
             "identities": identities,
             "channels": sorted({i["channel"] for i in identities}),
             "funnel_stage": journey.funnel_stage if journey else "",
@@ -431,6 +436,74 @@ class ContactGateway:
             "ok": True,
             "tags": saved_tags if saved_tags is not None else self._store.get_contact_tags(contact_id),
         }
+
+    def add_follow_up_task(
+        self, contact_id: str, *, due_at: int, note: str = "",
+        assignee: str = "", operator: str = "",
+    ) -> Dict[str, Any]:
+        """坐席为客户新增跟进任务（任务化跟进）。"""
+        if self._store.get_contact(contact_id) is None:
+            return {"ok": False, "error": "contact_not_found"}
+        tid = self._store.add_follow_up_task(
+            contact_id, due_at=int(due_at or 0), note=note,
+            assignee=assignee or operator, created_by=operator,
+        )
+        journey = self._store.get_journey_by_contact(contact_id)
+        if journey is not None:
+            self._store.append_event(
+                journey_id=journey.journey_id, event_type="follow_up_added",
+                payload={"by": operator, "due_at": int(due_at or 0)},
+            )
+        return {"ok": bool(tid), "task_id": tid,
+                "follow_up_tasks": self._store.list_follow_up_tasks(contact_id)}
+
+    def complete_follow_up_task(
+        self, task_id: str, *, operator: str = "",
+    ) -> Dict[str, Any]:
+        """标记跟进任务完成。"""
+        ok = self._store.complete_follow_up_task(task_id, done_by=operator)
+        return {"ok": ok}
+
+    def list_open_tasks(
+        self, *, assignee: Optional[str] = None, due_before: Optional[int] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """未完成跟进任务列表（「我的待办」面板）。"""
+        return self._store.list_open_tasks(
+            assignee=assignee, due_before=due_before, limit=limit)
+
+    def reassign_follow_up_task(
+        self, task_id: str, *, assignee: str, operator: str = "",
+    ) -> Dict[str, Any]:
+        """改派跟进任务给某坐席。"""
+        cid = self._store.reassign_task(task_id, assignee)
+        if cid is None:
+            return {"ok": False, "error": "task_not_open"}
+        journey = self._store.get_journey_by_contact(cid)
+        if journey is not None:
+            self._store.append_event(
+                journey_id=journey.journey_id, event_type="follow_up_reassigned",
+                payload={"by": operator, "to": assignee, "task_id": task_id},
+            )
+        return {"ok": True, "contact_id": cid, "assignee": assignee}
+
+    def snooze_follow_up_task(
+        self, task_id: str, *, days: int = 0, due_at: int = 0, operator: str = "",
+    ) -> Dict[str, Any]:
+        """延期跟进任务（days 顺延或 due_at 直设）。"""
+        cid = self._store.snooze_task(task_id, days=days, due_at=due_at)
+        if cid is None:
+            return {"ok": False, "error": "task_not_open"}
+        return {"ok": True, "contact_id": cid}
+
+    def list_tag_library(self) -> List[Dict[str, Any]]:
+        return self._store.list_tag_library()
+
+    def upsert_tag_library(self, tag: str, *, color: str = "", sort_order: int = 0) -> bool:
+        return self._store.upsert_tag_library(tag, color=color, sort_order=sort_order)
+
+    def delete_tag_library(self, tag: str) -> bool:
+        return self._store.delete_tag_library(tag)
 
     def merge_candidates_for(self, contact_id: str, *, limit: int = 5) -> List[Dict[str, Any]]:
         """按共享强标识（phone/email）找可合并的其它 Contact，返回其档案摘要。"""

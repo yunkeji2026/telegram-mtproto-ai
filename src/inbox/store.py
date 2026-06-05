@@ -151,6 +151,16 @@ CREATE TABLE IF NOT EXISTS conversation_claims (
 );
 CREATE INDEX IF NOT EXISTS idx_claims_agent   ON conversation_claims(agent_id);
 CREATE INDEX IF NOT EXISTS idx_claims_expires ON conversation_claims(expires_at);
+
+CREATE TABLE IF NOT EXISTS agent_sends (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id   TEXT NOT NULL,
+    agent_id          TEXT NOT NULL DEFAULT '',
+    agent_name        TEXT NOT NULL DEFAULT '',
+    ts                REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_agent_sends_conv ON agent_sends(conversation_id, ts);
+CREATE INDEX IF NOT EXISTS idx_agent_sends_ts   ON agent_sends(ts);
 """
 
 
@@ -366,6 +376,122 @@ class InboxStore:
                     (conversation_id, limit),
                 ).fetchall()
         return [dict(r) for r in reversed(rows)]
+
+    def last_message_dirs(
+        self, conversation_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """每个会话最后一条消息的方向与时间（SLA：当前未回复时长用）。
+
+        conversation_ids=None → 全部会话；否则仅限给定集合（会话列表批量）。
+        返回 {conversation_id: {"direction": "in"/"out", "ts": float}}。
+        """
+        where = ""
+        params: List[Any] = []
+        if conversation_ids is not None:
+            ids = list({c for c in conversation_ids if c})
+            if not ids:
+                return {}
+            ph = ",".join("?" * len(ids))
+            where = f"WHERE conversation_id IN ({ph})"
+            params = ids
+        sql = (
+            "SELECT m.conversation_id AS cid, m.direction AS direction, m.ts AS ts "
+            "FROM messages m JOIN (SELECT conversation_id, MAX(ts) AS mts FROM messages "
+            f"{where} GROUP BY conversation_id) x "
+            "ON m.conversation_id=x.conversation_id AND m.ts=x.mts"
+        )
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return {str(r["cid"]): {"direction": str(r["direction"] or "in"),
+                                "ts": float(r["ts"] or 0)} for r in rows}
+
+    def first_response_rows(
+        self, since_ts: float = 0.0,
+    ) -> List[Dict[str, Any]]:
+        """每会话首响原始数据（首条入站 ts → 首条其后出站 ts）。
+
+        仅返回 t_in >= since_ts 的会话（窗口内首次进线）。t_out 为 None ⇒ 尚未回复。
+        首响时长/达标率/趋势的聚合交由调用方（路由）在内存完成，保持本方法纯查询。
+        """
+        sql = (
+            "WITH firstin AS ("
+            "  SELECT conversation_id, MIN(ts) AS t_in FROM messages "
+            "  WHERE direction='in' GROUP BY conversation_id"
+            ") "
+            "SELECT f.conversation_id AS cid, f.t_in AS t_in, "
+            "  (SELECT MIN(m.ts) FROM messages m "
+            "   WHERE m.conversation_id=f.conversation_id AND m.direction='out' "
+            "   AND m.ts>=f.t_in) AS t_out "
+            "FROM firstin f WHERE f.t_in >= ?"
+        )
+        with self._lock:
+            rows = self._conn.execute(sql, (float(since_ts),)).fetchall()
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            t_out = r["t_out"]
+            out.append({
+                "cid": str(r["cid"]),
+                "t_in": float(r["t_in"] or 0),
+                "t_out": float(t_out) if t_out is not None else None,
+            })
+        return out
+
+    def record_agent_send(
+        self, conversation_id: str, agent_id: str, *,
+        agent_name: str = "", ts: Optional[float] = None,
+    ) -> None:
+        """记录一次坐席人工发送（用于历史首响坐席归属）。
+
+        与消息 ingest 解耦：发送瞬间打点，不依赖 RPA 出站消息何时被旁路 ingest。
+        """
+        cid = str(conversation_id or "").strip()
+        aid = str(agent_id or "").strip()
+        if not cid:
+            return
+        t = float(ts) if ts is not None else self._now()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO agent_sends (conversation_id, agent_id, agent_name, ts) "
+                "VALUES (?,?,?,?)",
+                (cid, aid, str(agent_name or ""), t),
+            )
+            self._conn.commit()
+
+    def agent_first_responses(
+        self, since_ts: float = 0.0,
+    ) -> List[Dict[str, Any]]:
+        """每会话首响坐席归属：首条入站 → 其后**首次坐席发送**（agent_sends）。
+
+        仅统计 t_in>=since_ts 的会话。resp_ts/agent_id 为 None ⇒ 该会话尚无坐席首响
+        （可能 AI 自动回复或未回复）。聚合（按坐席的均值/达标率）交由调用方完成。
+        """
+        sql = (
+            "WITH firstin AS ("
+            "  SELECT conversation_id, MIN(ts) AS t_in FROM messages "
+            "  WHERE direction='in' GROUP BY conversation_id"
+            ") "
+            "SELECT f.conversation_id AS cid, f.t_in AS t_in, "
+            "  (SELECT s.ts FROM agent_sends s WHERE s.conversation_id=f.conversation_id "
+            "   AND s.ts>=f.t_in ORDER BY s.ts ASC LIMIT 1) AS resp_ts, "
+            "  (SELECT s.agent_id FROM agent_sends s WHERE s.conversation_id=f.conversation_id "
+            "   AND s.ts>=f.t_in ORDER BY s.ts ASC LIMIT 1) AS agent_id, "
+            "  (SELECT s.agent_name FROM agent_sends s WHERE s.conversation_id=f.conversation_id "
+            "   AND s.ts>=f.t_in ORDER BY s.ts ASC LIMIT 1) AS agent_name "
+            "FROM firstin f WHERE f.t_in >= ?"
+        )
+        with self._lock:
+            rows = self._conn.execute(sql, (float(since_ts),)).fetchall()
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            resp = r["resp_ts"]
+            out.append({
+                "cid": str(r["cid"]),
+                "t_in": float(r["t_in"] or 0),
+                "resp_ts": float(resp) if resp is not None else None,
+                "agent_id": str(r["agent_id"]) if r["agent_id"] is not None else None,
+                "agent_name": str(r["agent_name"] or "") if r["agent_name"] is not None else "",
+            })
+        return out
 
     def update_message_translation(
         self,

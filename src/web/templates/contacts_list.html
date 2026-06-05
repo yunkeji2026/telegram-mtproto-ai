@@ -45,6 +45,7 @@
       <option value="any">有跟进计划</option>
     </select>
     <select class="cl-sel" id="cl-tag" onchange="CL.reset()"><option value="">全部标签</option></select>
+    <button class="cl-sel" style="cursor:pointer;" onclick="CL.exportCsv()">导出 CSV</button>
   </div>
   <div class="cl-stats" id="cl-stats"></div>
   <div class="cl-list" id="cl-list"><span style="color:#94a3b8;">加载中…</span></div>
@@ -61,22 +62,46 @@
   function chCls(c){return ({line:'ch-line',whatsapp:'ch-whatsapp',messenger:'ch-messenger',telegram:'ch-telegram',web:'ch-web'})[c]||'ch-default';}
   function fmtTs(ts){ if(!ts) return '—'; var d=new Date((ts<1e12?ts*1000:ts)); return d.toLocaleDateString()+' '+d.toLocaleTimeString().slice(0,5); }
   function params(){
-    return new URLSearchParams({
-      q:(document.getElementById('cl-q').value||'').trim(),
-      stage:document.getElementById('cl-stage').value||'',
-      has_lead:document.getElementById('cl-lead').value||'',
-      follow_up:document.getElementById('cl-fu').value||'',
-      tag:document.getElementById('cl-tag').value||'',
-      limit:String(LIMIT), offset:String(offset)
-    });
+    var p=filterParams(); p.set('limit',String(LIMIT)); p.set('offset',String(offset)); return p;
+  }
+  var tagColors={};
+  function filterParams(){
+    var p=new URLSearchParams();
+    var q=(document.getElementById('cl-q').value||'').trim();
+    if(q) p.set('q',q);
+    var v;
+    if((v=document.getElementById('cl-stage').value)) p.set('stage',v);
+    if((v=document.getElementById('cl-lead').value)) p.set('has_lead',v);
+    if((v=document.getElementById('cl-fu').value)) p.set('follow_up',v);
+    if((v=document.getElementById('cl-tag').value)) p.set('tag',v);
+    return p;
+  }
+  function syncUrl(){
+    var p=filterParams();
+    if(offset>0) p.set('offset',String(offset));
+    var qs=p.toString();
+    history.replaceState(null,'', location.pathname+(qs?('?'+qs):''));
+  }
+  function readUrl(){
+    var p=new URLSearchParams(location.search);
+    if(p.get('q')!=null) document.getElementById('cl-q').value=p.get('q');
+    if(p.get('has_lead')!=null) document.getElementById('cl-lead').value=p.get('has_lead');
+    if(p.get('follow_up')!=null) document.getElementById('cl-fu').value=p.get('follow_up');
+    offset=Math.max(0,parseInt(p.get('offset')||'0',10)||0);
+    // stage/tag 选项异步填充后再设；先暂存
+    window.__pendStage=p.get('stage')||''; window.__pendTag=p.get('tag')||'';
+    // 兼容旧 #due 锚点
+    if(location.hash==='#due') document.getElementById('cl-fu').value='due';
   }
   function fillTagOptions(){
     var sel=document.getElementById('cl-tag');
-    if(sel.options.length>1) return;
+    if(sel.options.length>1){ return; }
     fetch('/api/workspace/tags').then(function(r){return r.json();}).then(function(d){
       (d.tags||[]).forEach(function(t){
+        if(t.color) tagColors[t.tag]=t.color;
         var o=document.createElement('option'); o.value=t.tag; o.textContent=t.tag+' ('+t.count+')'; sel.appendChild(o);
       });
+      if(window.__pendTag){ sel.value=window.__pendTag; window.__pendTag=''; }
     }).catch(function(){});
   }
   function fillStageOptions(labels, counts){
@@ -88,6 +113,7 @@
       o.textContent=stageLabels[k]+(counts&&counts[k]?(' ('+counts[k]+')'):'');
       sel.appendChild(o);
     });
+    if(window.__pendStage){ sel.value=window.__pendStage; window.__pendStage=''; }
   }
   function renderStats(counts){
     var box=document.getElementById('cl-stats'); var cur=document.getElementById('cl-stage').value;
@@ -104,7 +130,7 @@
     box.innerHTML=rows.map(function(c){
       var chans=(c.channels||[]).map(function(ch,i){return '<span class="cl-chan '+chCls(ch)+'">'+esc((c.channel_labels||[])[i]||ch)+'</span>';}).join('');
       var intim=(c.intimacy_score!=null)?('<div class="cl-intim">亲密 '+Number(c.intimacy_score).toFixed(0)+'</div>'):'';
-      var tags=(c.tags||[]).map(function(t){return '<span class="cl-stage" style="background:#f1f5f9;color:#475569;">'+esc(t)+'</span>';}).join(' ');
+      var tags=(c.tags||[]).map(function(t){var col=tagColors[t];var st=col?('background:'+esc(col)+';color:#fff;'):'background:#f1f5f9;color:#475569;';return '<span class="cl-stage" style="'+st+'">'+esc(t)+'</span>';}).join(' ');
       var fu='';
       if(c.follow_up_at){ var due=c.follow_up_at<=now; fu='<div style="font-size:11px;margin-top:3px;color:'+(due?'#dc2626':'#92400e')+';">'+(due?'⏰ 待跟进 ':'跟进 ')+fmtTs(c.follow_up_at)+'</div>'; }
       return '<div class="cl-card" onclick="location.href=\'/workspace/contact/'+encodeURIComponent(c.contact_id)+'\'">'
@@ -120,19 +146,20 @@
       if(!d.ok){ document.getElementById('cl-list').innerHTML='<span style="color:#94a3b8;">联系人子系统未启用</span>'; return; }
       total=d.total||0; fillStageOptions(d.stage_labels, d.stage_counts); fillTagOptions(); renderStats(d.stage_counts||{});
       render(d.contacts||[]);
+      syncUrl();
       var pg=Math.floor(offset/LIMIT)+1, pages=Math.max(1,Math.ceil(total/LIMIT));
       document.getElementById('cl-pageinfo').textContent=pg+' / '+pages+' 页 · 共 '+total;
       document.getElementById('cl-prev').disabled=offset<=0;
       document.getElementById('cl-next').disabled=offset+LIMIT>=total;
     }).catch(function(){ document.getElementById('cl-list').innerHTML='<span style="color:#ef4444;">加载失败</span>'; });
   }
-  // 顶栏「待跟进」徽标跳转 /workspace/contacts#due → 预置到期筛选
-  if(location.hash==='#due'){ var fuSel=document.getElementById('cl-fu'); if(fuSel) fuSel.value='due'; }
+  readUrl();
   window.CL={
     reset:function(){ offset=0; load(); },
     setStage:function(s){ document.getElementById('cl-stage').value=s; offset=0; load(); },
     prev:function(){ if(offset>0){ offset=Math.max(0,offset-LIMIT); load(); } },
-    next:function(){ if(offset+LIMIT<total){ offset+=LIMIT; load(); } }
+    next:function(){ if(offset+LIMIT<total){ offset+=LIMIT; load(); } },
+    exportCsv:function(){ window.open('/api/workspace/contacts/export.csv?'+filterParams().toString(), '_blank'); }
   };
   load();
 })();
