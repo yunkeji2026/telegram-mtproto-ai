@@ -753,8 +753,16 @@ def _escalation_snapshot(request: Request) -> Dict[str, Any]:
             "agent_name": (cl["agent_name"] if cl else "") or "",
         })
     items.sort(key=lambda x: -x["wait_sec"])
+    today_count = 0
+    try:
+        lt = time.localtime(now)
+        midnight = time.mktime(
+            (lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1))
+        today_count = inbox.count_escalations_since(midnight)
+    except Exception:
+        logger.debug("escalation today_count 失败（已忽略）", exc_info=True)
     return {"ok": True, "count": len(items), "items": items[:50],
-            "crit_sec": sla["crit"]}
+            "today_count": today_count, "crit_sec": sla["crit"]}
 
 
 def _sla_detail(
@@ -970,6 +978,39 @@ def register_unified_inbox_routes(
                 logger.debug("SLA SSE 推送计算失败（已忽略）", exc_info=True)
             return frames
 
+        _esc_seen: set = set()
+
+        def _esc_pushes():
+            """边沿触发：新升级会话 → 推送 escalation 帧 + 落审计（表级去重防多连接重复）。"""
+            frames: List[str] = []
+            try:
+                snap = _escalation_snapshot(request)
+                items = snap.get("items", [])
+                cur = {it["conversation_id"] for it in items}
+                inbox = _inbox_store(request)
+                for it in items:
+                    cid = it["conversation_id"]
+                    if cid in _esc_seen:
+                        continue
+                    _esc_seen.add(cid)
+                    if inbox is not None:
+                        try:
+                            inbox.record_escalation(
+                                cid, reason=it.get("reason", ""),
+                                agent_id=it.get("agent_id", ""),
+                                agent_name=it.get("agent_name", ""),
+                                wait_sec=it.get("wait_sec", 0))
+                        except Exception:
+                            logger.debug("升级审计落库失败（已忽略）", exc_info=True)
+                    frames.append(
+                        "data: " + _json.dumps(
+                            {"type": "escalation", "data": it},
+                            ensure_ascii=False) + "\n\n")
+                _esc_seen.intersection_update(cur)
+            except Exception:
+                logger.debug("升级 SSE 推送计算失败（已忽略）", exc_info=True)
+            return frames
+
         async def _gen():
             try:
                 # 仅 replay 最近的 inbox_message 事件，避免设备类噪声
@@ -978,8 +1019,10 @@ def register_unified_inbox_routes(
                 for evt in bus.recent_events(30):
                     if evt.get("type") in _sse_types:
                         yield f"data: {_json.dumps(evt, ensure_ascii=False)}\n\n"
-                # 连接建立即推一轮当前严重超时（无需等首个心跳）
+                # 连接建立即推一轮当前严重超时 + 升级（无需等首个心跳）
                 for fr in _sla_pushes():
+                    yield fr
+                for fr in _esc_pushes():
                     yield fr
                 while True:
                     try:
@@ -989,6 +1032,8 @@ def register_unified_inbox_routes(
                     except asyncio.TimeoutError:
                         yield ": heartbeat\n\n"
                         for fr in _sla_pushes():
+                            yield fr
+                        for fr in _esc_pushes():
                             yield fr
                     if await request.is_disconnected():
                         break

@@ -312,6 +312,10 @@
       } else if(msg && msg.type==='sla_alert' && msg.data){
         wsToast('⚠ 客户「'+(msg.data.name||'?')+'」已等待 '+fmtWaitMin(msg.data.wait_sec)+'未回复');
         refreshSla();
+      } else if(msg && msg.type==='escalation' && msg.data){
+        var _rz={unclaimed:'无人认领',holder_offline:'坐席离线',holder_quiet:'坐席静音'}[msg.data.reason]||msg.data.reason;
+        CRMW.toast('🆙 升级：客户「'+(msg.data.name||'?')+'」'+fmtWaitMin(msg.data.wait_sec)+'未回复（'+_rz+'）','#7c3aed');
+        refreshEsc();
       }
     };
     window.addEventListener('beforeunload',function(){ try{ es.close(); }catch(_){ } });
