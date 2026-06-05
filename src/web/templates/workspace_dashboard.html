@@ -102,14 +102,28 @@
     if(_detailAgent!==null) qs+='&agent='+encodeURIComponent(_detailAgent);
     fetch(qs).then(function(r){return r.json();}).then(function(d){
       var its=d.items||[];
-      body.innerHTML= its.length? ('<div style="font-size:12px;color:#94a3b8;margin-bottom:6px;">共 '+d.count+' 条，点击跳转会话</div>'+its.map(function(it){
+      window.__slaItems=its;
+      body.innerHTML= its.length? ('<div style="font-size:12px;color:#94a3b8;margin-bottom:6px;">共 '+d.count+' 条，点击姓名跳转会话；「生成跟进」一键建待办</div>'+its.map(function(it,ix){
         var col=it.level==='crit'?'#dc2626':(it.level==='warn'?'#d97706':'#64748b');
-        return '<div class="db-row db-click" onclick="window.__dbGoConv(\''+esc(it.conversation_id)+'\')">'
-          +'<span>'+esc(it.name)+' <span style="color:#94a3b8;font-size:11px;">'+esc(it.platform)+'</span></span>'
-          +'<span style="color:'+col+';">'+fmtDur(it.wait_sec)+(it.agent_name?(' · '+esc(it.agent_name)):'')+'</span></div>';
+        return '<div class="db-row" style="gap:8px;">'
+          +'<span class="db-click" style="flex:1;cursor:pointer;" onclick="window.__dbGoConv(\''+esc(it.conversation_id)+'\')">'+esc(it.name)+' <span style="color:#94a3b8;font-size:11px;">'+esc(it.platform)+'</span></span>'
+          +'<span style="color:'+col+';white-space:nowrap;">'+fmtDur(it.wait_sec)+(it.agent_name?(' · '+esc(it.agent_name)):'')+'</span>'
+          +'<button onclick="window.__dbMkTask(event,'+ix+')" style="font-size:11px;padding:2px 8px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;white-space:nowrap;">生成跟进</button></div>';
       }).join('')) : '<span style="color:#94a3b8;font-size:13px;">无</span>';
     }).catch(function(){ body.innerHTML='<span style="color:#ef4444;">加载失败</span>'; });
   }
+  function mkTask(ev, ix){
+    if(ev){ ev.stopPropagation(); ev.preventDefault(); }
+    var it=(window.__slaItems||[])[ix]; if(!it) return;
+    var btn=ev&&ev.target; if(btn){ btn.disabled=true; btn.textContent='…'; }
+    fetch('/api/workspace/sla/create-task',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({platform:it.platform,chat_key:it.chat_key,conversation_id:it.conversation_id,
+        name:it.name,wait_sec:it.wait_sec})}).then(function(r){return r.json();}).then(function(d){
+      if(d&&d.ok){ if(btn){ btn.textContent='✓ 已建'; btn.style.color='#16a34a'; } CRMW.toast('已生成跟进任务：'+esc(it.name)); }
+      else { if(btn){ btn.disabled=false; btn.textContent='生成跟进'; } CRMW.toast('生成失败：'+((d&&d.error)||'未知'),'#dc2626'); }
+    }).catch(function(){ if(btn){ btn.disabled=false; btn.textContent='生成跟进'; } CRMW.toast('生成失败','#dc2626'); });
+  }
+  window.__dbMkTask=mkTask;
   function openAgentDetail(agent){
     document.getElementById('db-modal').style.display='block';
     document.getElementById('db-modal-tabs').innerHTML='';

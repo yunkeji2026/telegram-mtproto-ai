@@ -1623,6 +1623,61 @@ def register_unified_inbox_routes(
         api_auth(request)
         return _agent_frt_detail(request, agent=str(agent or ""), days=days)
 
+    @app.post("/api/workspace/sla/create-task")
+    async def api_workspace_sla_create_task(request: Request):
+        """SLA 超时会话一键生成跟进任务（告警→行动闭环）。
+
+        body: {platform, chat_key, conversation_id?, name?, wait_sec?,
+               due_in_hours?(默认2), assignee?(默认本人), note?}
+        会话经 (platform, chat_key) 解析 contact，note 预填 SLA 上下文。
+        """
+        api_auth(request)
+        body = await request.json()
+        store = _contacts_store(request)
+        gw = _contacts_gateway(request)
+        if store is None or gw is None:
+            return {"ok": False, "error": "contacts_disabled"}
+        platform = str(body.get("platform") or "").strip()
+        chat_key = str(body.get("chat_key") or "").strip()
+        conv = str(body.get("conversation_id") or "").strip()
+        if (not platform or not chat_key) and conv:
+            parts = conv.split(":")
+            if len(parts) >= 3:
+                platform = platform or parts[0]
+                chat_key = chat_key or ":".join(parts[2:])
+        if not platform or not chat_key:
+            raise HTTPException(400, "缺少 platform/chat_key 或 conversation_id")
+        cmap = store.resolve_contacts_by_external([(platform, chat_key)])
+        contact_id = cmap.get((platform, chat_key))
+        if not contact_id:
+            return {"ok": False, "error": "contact_not_found"}
+        try:
+            due_in_hours = float(body.get("due_in_hours") or 2)
+        except (TypeError, ValueError):
+            due_in_hours = 2.0
+        due_in_hours = max(0.0, min(24.0 * 30, due_in_hours))
+        due_at = int(time.time() + due_in_hours * 3600)
+        agent = _session_agent(request)
+        assignee = str(body.get("assignee") or "").strip() or agent["agent_id"]
+        wait_sec = 0
+        try:
+            wait_sec = int(body.get("wait_sec") or 0)
+        except (TypeError, ValueError):
+            wait_sec = 0
+        prefix = ("SLA 超时未回复 %d 分钟，请尽快跟进" % (wait_sec // 60)
+                  if wait_sec > 0 else "SLA 超时未回复，请尽快跟进")
+        extra = str(body.get("note") or "").strip()
+        note = prefix + ("；" + extra if extra else "")
+        out = gw.add_follow_up_task(
+            contact_id, due_at=due_at, note=note,
+            assignee=assignee, operator=agent["agent_id"])
+        if out.get("ok"):
+            _publish_follow_up("added", contact_id=contact_id,
+                               task_id=out.get("task_id") or "", assignee=assignee)
+            out["contact_id"] = contact_id
+            out["due_at"] = due_at
+        return out
+
     def _daily_report_rows(request: Request, span: int) -> List[Dict[str, Any]]:
         """逐日经营指标表（坐席日报/导出共用）。
 

@@ -1313,6 +1313,55 @@ class TestDailyReport:
         assert len(lines) == 1 + 30 + 1
 
 
+class TestSlaCreateTask:
+    """Phase 6-17：SLA 超时会话一键生成跟进任务（告警→行动闭环）。"""
+
+    def test_create_task_from_conversation(self, cstore, gateway):
+        from src.inbox.store import InboxStore
+        d = tempfile.mkdtemp()
+        a = gateway.on_peer_seen(channel=CHANNEL_WEB, account_id="web",
+                                 external_id="sla_t1", display_name="Tom")
+        contact_id = a.contact.contact_id
+        cli = _client_with_inbox(cstore, gateway, InboxStore(Path(d) / "i.db"))
+        r = cli.post("/api/workspace/sla/create-task", json={
+            "platform": "web", "chat_key": "sla_t1", "wait_sec": 3660})
+        body = r.json()
+        assert body["ok"] is True
+        assert body["task_id"]
+        assert body["contact_id"] == contact_id
+        tasks = cstore.list_follow_up_tasks(contact_id)
+        assert len(tasks) == 1
+        assert "61 分钟" in tasks[0]["note"]
+
+    def test_create_task_via_conversation_id(self, cstore, gateway):
+        from src.inbox.store import InboxStore
+        d = tempfile.mkdtemp()
+        a = gateway.on_peer_seen(channel=CHANNEL_WEB, account_id="web",
+                                 external_id="sla_t2", display_name="Ann")
+        cli = _client_with_inbox(cstore, gateway, InboxStore(Path(d) / "i.db"))
+        r = cli.post("/api/workspace/sla/create-task", json={
+            "conversation_id": "web:web:sla_t2", "note": "VIP"})
+        body = r.json()
+        assert body["ok"] is True
+        tasks = cstore.list_follow_up_tasks(a.contact.contact_id)
+        assert "VIP" in tasks[0]["note"]
+
+    def test_create_task_contact_not_found(self, cstore, gateway):
+        from src.inbox.store import InboxStore
+        d = tempfile.mkdtemp()
+        cli = _client_with_inbox(cstore, gateway, InboxStore(Path(d) / "i.db"))
+        r = cli.post("/api/workspace/sla/create-task", json={
+            "platform": "web", "chat_key": "no_such"})
+        assert r.json()["error"] == "contact_not_found"
+
+    def test_create_task_missing_keys(self, cstore, gateway):
+        from src.inbox.store import InboxStore
+        d = tempfile.mkdtemp()
+        cli = _client_with_inbox(cstore, gateway, InboxStore(Path(d) / "i.db"))
+        r = cli.post("/api/workspace/sla/create-task", json={})
+        assert r.status_code == 400
+
+
 class TestCrmWidgetsAsset:
     """Phase 6-13：共享前端组件抽取的静态资产与挂载守卫。"""
 
