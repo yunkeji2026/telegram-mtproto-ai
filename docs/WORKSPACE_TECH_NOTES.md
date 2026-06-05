@@ -171,6 +171,207 @@ API：`GET /api/workspace/contact/{contact_id}` 一次返回 `{contact, timeline
   - 工作台顶栏新增**到期待跟进徽标**（复用 merge-review 徽标轮询模式，60s 刷新），
     点击跳 `/workspace/contacts#due` 自动预置到期筛选。
 
+## 5g. 跟进任务化 / 预设标签库 / CRM 导出 / 筛选入 URL（Phase 6-4）
+
+把 6-3 的「单个可覆盖跟进时间」升级为可完成、可指派、有历史的任务，并补齐标签规范化与数据导出。
+
+- **跟进任务化**：
+  - 新表 `follow_up_tasks(task_id, contact_id, due_at, note, assignee, created_by, done_at, done_by)`；
+  - `contacts.follow_up_at` 降级为**派生缓存**（= 最近未完成任务到期），由 `_recompute_follow_up` 维护，
+    使 6-2 的 CRM 列表筛选/排序查询零改动仍可用；
+  - `set_follow_up` 重写为**去重**语义（更新最近未完成任务，无则新建；清除=完成全部），
+    兼容 6-3 的 `update_contact_crm(follow_up_at=)` 调用不产生重复任务；
+  - `count_due_tasks(assignee)` 支持「我的待办 vs 全部」徽标（顶栏显示 `待跟进 我的/全部`）。
+- **预设标签库**：新表 `tag_library(tag, color, sort_order)`；`list_all_tags` LEFT JOIN 库色，
+  并把「库里未使用」的标签以 count=0 一并返回供补全；360/列表统一用库色渲染 chips，自由标签仍可临时加。
+- **CRM 导出**：`GET /api/workspace/contacts/export.csv`，复用 `list_contacts_overview` 的全部筛选条件，
+  带 UTF-8 BOM 兼容 Excel，时间戳格式化为可读字符串。
+- **筛选状态入 URL**：客户列表读/写 `location.search`（`history.replaceState`），刷新/分享保留筛选与页码，
+  并兼容旧 `#due` 锚点；导出按钮直接拼当前筛选。
+- **API**：`POST /contact/{id}/follow-up`、`POST /follow-up/{task_id}/done`、
+  `GET/POST /tag-library`、`DELETE /tag-library/{tag}`、`GET /contacts/export.csv`；
+  `GET /follow-ups` 增 `due_tasks` / `due_tasks_mine`。
+
+## 5h. 「我的待办」面板 + 任务指派协作 + 延期快捷 + SSE 实时（Phase 6-5）
+
+把 6-4 的任务从「单客户挂着」升级为坐席的每日工作流与团队协作。
+
+- **「我的待办」页** `GET /workspace/tasks`（顶栏新增「待办」导航）：
+  - API `GET /api/workspace/my-tasks?scope=mine|all&due=today|overdue|all`；
+  - 底层 `ContactStore.list_open_tasks(assignee, due_before)` 单次 JOIN 带出客户名 + 渠道（GROUP_CONCAT），
+    `due=today` 取「今天 23:59:59 及之前」覆盖逾期+今日。
+- **任务指派协作**：
+  - `reassign_task` / `gateway.reassign_follow_up_task` + `POST /follow-up/{id}/assign`；
+  - 指派下拉**复用 5-1 的 `presence` 在线坐席列表**；360 与待办页均可改派。
+- **延期快捷**：`snooze_task(days|due_at)` + `POST /follow-up/{id}/snooze`，
+  `days` 从 `max(now, 当前到期)` 顺延（逾期任务从今天起算），按钮 +1天/+3天/+1周；改派/延期均**仅作用未完成任务**。
+- **SSE 实时**：任务 add/done/assign/snooze 经 `event_bus.publish("follow_up", …)` 推送；
+  stream 白名单加 `follow_up`；`workspace_base.html` 订阅后实时刷新到期徽标（及打开中的待办页），
+  替代纯 60s 轮询（轮询保留为兜底）。徽标点击改为直达 `/workspace/tasks`。
+- 缓存列 `contacts.follow_up_at` 在 snooze/complete 后由 `_recompute_follow_up` 维护，列表/排序零改动。
+
+## 5i. 会话↔CRM 双向打通 + 工作台仪表盘（Phase 6-6）
+
+把割裂的「会话工作台」与「CRM/任务」缝合，并给团队一个概览。
+
+- **会话内联跟进任务**：会话右侧档案区（`unified_inbox.html`）在已关联 contact 时内嵌跟进任务
+  （看/建/完成/+1天），复用 6-4/6-5 端点；轻量只读端点 `GET /api/workspace/contact/{id}/tasks`。
+- **会话列表逾期红点**：`/api/unified-inbox/chats` 批量给会话挂 `contact_id` + `follow_up_overdue`：
+  `ContactStore.resolve_contacts_by_external(pairs)` 一条 `IN(...)` 查询解析 (channel, external_id)→contact，
+  `overdue_contact_ids()` 单查缓存列，**零额外表、零 N+1**；前端列表项渲染红点。
+- **工作台仪表盘** `GET /workspace/dash`（顶栏「概览」）+ `GET /api/workspace/dashboard`：
+  今日新客户/留资/引流（`count_contacts_created_since` / `count_events_since`）、
+  到期跟进（全部/我的）、坐席负载（`agent_task_load`：每人未完成 + 逾期）、漏斗分布、
+  web 漏斗快照（复用 5-2 `web_funnel_snapshot`）。
+- **踩坑**：新页面模板原名 `dashboard.html` 与既有**后台运营仪表盘**同名被覆盖（`test_web_alert` 抓到），
+  改名 `workspace_dashboard.html`；提醒：新模板务必避开既有命名。
+
+## 5j. SLA 未回复时长 + 7 日趋势 + 仪表盘聚合优化（Phase 6-7）
+
+让"该先回谁"和"团队走势"一眼可见，全部复用既有事实源、不新增表。
+
+- **SLA 当前未回复时长**：`InboxStore.last_message_dirs(cids=None)` 用
+  `messages JOIN (SELECT conversation_id,MAX(ts) GROUP BY ...)` 一条查询取每会话**末条**消息的
+  方向+时间；末条为 `in` ⇒ `unanswered_sec = now - ts`，超 `_SLA_WARN_SEC`（默认 1800s）标 `sla_breach`。
+  - 会话列表 `/api/unified-inbox/chats` 给可见会话批量挂 `unanswered_sec` / `sla_breach`，
+    前端 meta 区渲染 `⏱` 等待时长（超时红色加粗，`fmtWait` 秒/分/时/天）。
+  - 仪表盘对最近 ≤500 会话聚合 `sla.waiting`（等待中）/ `sla.breaching`（超时），新增两张卡片。
+  - **为何不存列**：方向已在 messages，按需 JOIN 即可；存"末条方向"列会引入写路径耦合与回填迁移，得不偿失。
+  - **首响时长**：当前只做"当前未回复"（最可执行）；历史首响均值/分位属重计算，留待趋势看板二期。
+- **7 日趋势**：`ContactStore.count_contacts_by_day` / `count_events_by_day` 用
+  `strftime('%Y-%m-%d', ts, 'unixepoch', 'localtime')` 按本地日 `GROUP BY`；仪表盘补满 7 格
+  渲染内联 SVG 折线（新客户 / 留资，带 `<title>` 悬浮值），零前端图表依赖。
+- **仪表盘聚合优化**：今日 `lead_captured` + `handoff_sent` 两次计数合并为
+  `count_events_since_multi(types, since)`（一条 `IN(...) GROUP BY event_type`），减一次 DB 往返。
+  其余计数分散于不同表（contacts / follow_up_tasks / journeys），强行单查询收益小、可读性差，未合并。
+- **前端组件抽取（crm-widgets.js）**：static 挂载（`/static`←`src/web/static`）确认可行，但跟进任务卡 +
+  标签编辑横跨 360/待办/会话三模板、各有上下文差异；纯重构、无功能收益且无浏览器回归，
+  本期**主动不做**（避免过早抽象引入回归面），列为下一期可选项。
+
+## 5k. 首响时长二期 + SLA 可配置分级 + 趋势扩展（Phase 6-8）
+
+把"反应快不快"量化到可考核，并让趋势可调时间窗。
+
+- **首响时长（first response）**：`InboxStore.first_response_rows(since)` 用 `WITH firstin AS (MIN(ts)
+  WHERE direction='in' GROUP BY conversation_id)` 取每会话首条入站，再相关子查询取**其后**首条出站
+  `MIN(ts) WHERE direction='out' AND ts>=t_in`。返回 `{cid, t_in, t_out|None}` 纯数据，
+  聚合（今日均值/达标率 + N 日达标率趋势）在路由内存完成，保持查询单一职责。
+  - 仪表盘新增「今日平均首响」「今日首响达标率」卡 + 「首响达标率趋势」折线（0–100% 固定刻度 `sparkPct`）。
+  - **达标口径**：首响 ≤ `sla_warn_sec` 记达标；未回复会话不计入分母（只统计已响应）。
+  - **为何 t_out 要 ts>=t_in**：排除客户进线前坐席的主动消息（如群发/打招呼），避免负首响/虚高达标。
+- **SLA 可配置 + 分级**：`config.inbox.sla_warn_sec`（默认 1800）/`sla_crit_sec`（默认 7200），
+  `_sla_cfg(request)` 读取并兜底（crit<warn 时拉平）。会话列表 `sla_level` ∈ `''/warn/crit`，
+  前端 ⏱ 灰→橙→红加粗；仪表盘 SLA 卡拆「待回复 / SLA 超时(≥warn) / 严重超时(≥crit)」。
+- **趋势扩展**：折线加第三条「引流(转化, handoff_sent)」；仪表盘右上 7/30 天下拉，
+  `GET /api/workspace/dashboard?days=30` 后端按 `span` 生成对齐日轴（缺日补 0），前端切换即重取。
+- **复用既有**：转化/留资按天复用 6-7 的 `count_events_by_day`；首响/SLA 全部走 inbox 消息，零新增表。
+
+## 5l. SLA 主动告警（顶栏徽标 + SSE 实时推送 + 下钻跳转）（Phase 6-9）
+
+把 SLA 从"打开仪表盘才看到"升级为"坐席无论在哪个页面都被动收到提醒"。
+
+- **告警源** `GET /api/workspace/sla-alerts` + `_sla_alert_snapshot()`：扫最近 ≤500 会话末条方向，
+  返回 `waiting / breaching(≥warn) / critical(≥crit)` 计数 + 严重超时会话清单
+  （`conversation_id/platform/chat_key/name/wait_sec`，按等待时长倒序，截 50）。
+- **顶栏徽标**（`workspace_base.html`，所有工作台页继承）：轮询 30s，有严重→红「SLA 严重 N」、
+  仅警告→橙「SLA 超时 N」，hover 列出 top8；点击把首个会话写 `sessionStorage.ws_focus_conv` 跳 `/workspace`。
+- **SSE 边沿触发**：复用既有 `/api/workspace/stream` 生成器，**不新增 main.py 后台 loop**——
+  在连接建立 + 每次 30s 心跳时跑 `_sla_pushes()`：对"新转入严重"的会话发 `sla_alert` 帧（每连接 `_sla_seen` 去重，
+  会话恢复后移出 seen 可再次告警）。前端收到 → 右下角红色 toast（8s 自动消失）。
+  - **为何不开全局后台任务**：SSE 生成器本就有 30s 心跳节拍，挂在上面天然按"在线坐席"作用域、
+    零 lifespan 改动、零新依赖；代价是每连接各算一次（坐席数少，可接受）。
+- **下钻跳转**：`unified_inbox.html` 的 `load()` 读 `sessionStorage.ws_focus_conv`（一次性）→
+  在 `filtered` 里定位 index → `UI.selectChat()` 直接打开该会话。
+- **复用既有**：SLA 阈值/分级沿用 6-8 `_sla_cfg`；快照与会话列表 `sla_level` 同源（`last_message_dirs`），口径一致。
+
+## 5m. 坐席维度 SLA 归属（按活跃 claim）（Phase 6-10）
+
+回答"谁手上压着待回复/超时会话"——团队管理与坐席自查都用得上。
+
+- **数据源选择（关键决策）**：会话↔坐席归属用 **活跃 claim**（`list_conversation_claims`，lease 有效、
+  过期自动 purge，**可靠**），而非 messages（无 agent 列）或历史 claim（已删）。
+- **实现**：仪表盘 SLA 块在遍历 `last_message_dirs` 时，用 claim_map 把每个待回复会话归到
+  `agent_id`（无 claim → `""`/「(未认领)」桶），统计每人 `waiting/breaching/critical`，
+  按 `(-critical,-breaching,-waiting)` 排序输出 `sla_by_agent`。仪表盘新增「坐席 SLA 归属」分区
+  （严重红 / 超时橙 / 待回复灰）。
+- **为何不做"历史首响 by 坐席"**：首响出站消息在多平台经 RPA 旁路 ingest（`is_self`→out），
+  **发送时不带 agent 身份**；仅 web 分支直接落库。要可靠归属需给所有平台出站打 agent_id（改发送路径 + 迁移），
+  且 RPA ingest 与 send 路径 message_id 不一致——本期**主动不做**，避免在不可靠归属上建绩效指标。
+  升级路径：发送路径统一打 `sent_by_agent` 列后，再做历史首响/解决时长的坐席绩效榜。
+
+## 5n. SLA/首响明细下钻（仪表盘聚合数字 → 可操作清单）（Phase 6-11）
+
+把仪表盘上的"数字"变成"点开就能处理的会话清单"，闭环到具体会话。
+
+- **明细端点** `GET /api/workspace/sla-detail?scope=&agent=` + `_sla_detail()`：
+  - `scope`: `waiting`（全部待回复）/ `breaching`（≥warn）/ `critical`（≥crit）/ `unresponded`（今日进线未回复）；非法值回落 `critical`。
+  - `agent`: 传入按 claim 坐席过滤（`""`=未认领，`None`=不过滤）。
+  - 返回 `{scope, count, items[]}`，item 含 `conversation_id/platform/chat_key/name/wait_sec/level/agent_id/agent_name`，按等待倒序截 200。
+  - `unresponded` 复用 6-8 `first_response_rows(midnight)` 取 `t_out is None`；其余复用 `last_message_dirs` + 阈值；坐席归属复用 6-10 claim_map。
+- **仪表盘下钻 UI**：SLA 三卡（待回复/超时/严重）与「今日首响达标率」卡、坐席 SLA 归属行**均可点**→
+  弹层列清单，顶部 4 个 scope tab 可切换（保留当前 agent 过滤）；每条点 → `sessionStorage.ws_focus_conv` 跳 `/workspace`
+  自动聚焦会话（复用 6-9 下钻通道）。点击坐席行 = `scope=waiting&agent=<id>`。
+- **复用既有**：阈值/分级 `_sla_cfg`、跳转 `ws_focus_conv`、归属 claim_map 全部沿用，无新表、无新前端依赖。
+
+## 5o. 出站坐席归属基建 + 历史首响坐席绩效（Phase 6-12）
+
+补上 6-10 标注的数据缺口：让"历史首响 by 坐席"成为可靠指标。
+
+- **核心设计：发送打点而非改消息行**。新表 `agent_sends(id, conversation_id, agent_id, agent_name, ts)`。
+  `/api/unified-inbox/send` 五个平台分支成功后调 `record_agent_send(conv_id(...), agent)`（`_session_agent` 取身份）。
+  - **为何不在 messages 加 sent_by_agent 列**：LINE/WhatsApp/Messenger 出站经 RPA **稍后**旁路 ingest，
+    发送瞬间消息行还不存在；且 RPA ingest 与 send 路径 message_id 不一致，回填不可靠。
+    发送即打点（与 ingest 解耦）天然覆盖全平台、不依赖出站何时落库。
+  - **只记人工发送**：AI 自动回复不经此端点 → 无 marker，绩效只统计真人首响（正是所求）。
+- **归属查询** `agent_first_responses(since)`：`firstin(MIN(ts) in)` + 关联子查询取**其后首条** agent_sends
+  （`ts>=t_in ORDER BY ts ASC LIMIT 1`）的 ts/agent。resp_ts=None ⇒ 无人工首响（AI 或未回复）。
+- **仪表盘「坐席首响绩效」**：按 agent 聚合首响数 / 平均首响 / 达标率（≤warn），达标率绿/橙/红。
+  与 6-10「坐席 SLA 归属（当前 claim）」并列：一个看历史响应速度、一个看当前积压。
+- **复用既有**：`conv_id`、`_session_agent`、`first_response_rows` 同构（把"首条出站"换成"首条 agent_sends"）；阈值沿用 `_sla_cfg`。
+
+## 5p. 前端共享组件抽取 crm-widgets.js（Phase 6-13）
+
+把散落多模板的纯工具函数收敛到一处，降维护成本（技术债收敛，纯重构）。
+
+- **静态资产** `src/web/static/workspace/crm-widgets.js` → 挂 `window.CRMW`：
+  `esc / fmtDur / fmtWait / fmtWaitMin / spark / sparkPct / toast`（零依赖、纯函数）。
+- **挂载点**：`/static`←`src/web/static`（`admin.py` 已 `app.mount`，目录存在即挂）；
+  `workspace_base.html` 在 head（CSRF 脚本后）`<script src="/static/workspace/crm-widgets.js">`，
+  **所有工作台页继承 base** → 自动获得，子页 `{% block content %}` 内联脚本运行时 CRMW 已就绪。
+- **零调用点改动**：各模板原同名函数改为**一行委托**（`function fmtWait(s){return CRMW.fmtWait(s);}`），
+  调用处不动，回归面最小；删除 base 的 `wsToast`/`fmtWaitMin` 全身、dashboard 的 `spark/sparkPct/fmtDur/esc` 全身、
+  inbox 的 `fmtWait` 全身，合计减约 60 行重复。
+- **守卫测试**：`TestCrmWidgetsAsset` 断言 JS 暴露全部 API + base 模板确实引用，防误删/改名导致运行期 CRMW undefined。
+- **取舍**：仅抽**纯函数**；下钻弹层/SSE 处理等含页面状态的逻辑留在各页（抽出反而要传一堆上下文，得不偿失）。
+
+## 5q. 坐席首响绩效下钻 + 窗口切换（Phase 6-14）
+
+把 6-12 的坐席绩效"数字"变成"可核查的会话清单"。
+
+- **明细端点** `GET /api/workspace/agent-frt-detail?agent=&days=` + `_agent_frt_detail()`：
+  复用 6-12 `agent_first_responses(since)`，按 `agent_id` 过滤、`resp_ts` 非空，
+  join conv 取名/平台，算每会话 `frt_sec` + `attained`（≤warn），按首响时长倒序截 200。
+  `days` 7/30 与仪表盘窗口一致（`since=midnight-(span-1)*86400`）。
+- **仪表盘下钻**：「坐席首响绩效」每行可点 → 复用 6-11 弹层（无 scope tab）列该坐席窗口内首响会话，
+  达标绿/超时红 ⚠，点条目 → `ws_focus_conv` 跳会话；弹层标题带当前 `days` 窗口。
+- **窗口联动**：下钻读 `curDays()`（仪表盘右上 7/30 下拉），与绩效榜/趋势同窗口，口径一致。
+- **复用既有**：`agent_first_responses`、`_sla_cfg`、弹层 DOM、`ws_focus_conv` 跳转全部沿用，无新表、无新前端依赖。
+
+## 5r. 解决(引流)时长指标（Phase 6-15）
+
+在"首响速度"之外补上"结案/引流时长"维度，构成「快 + 结」双维。
+
+- **定义**：每 journey「首条 `msg_in` → 其后首个 `handoff_sent`（引流已发）」的时长。
+  本仓库漏斗目标=引流，故以 `handoff_sent` 为解决里程碑（`resolve_event` 可配，默认即此）。
+- **单库实现** `ContactStore.resolution_stats(since, resolve_event="handoff_sent")`：
+  CTE `firstin` 取每 journey 首条 `msg_in`，子查询取 `ts>=t_in` 的首个解决事件 →
+  返回 `[{journey_id, t_in, resolved_ts|None}]`。**早于进线的 handoff 不计**；
+  `resolved_ts=None` ⇒ 尚未解决。聚合（均值/趋势）交路由层，保持 store 单一职责。
+- **全部落在 journey_events 单表**，与首响（inbox.messages）解耦，无新表、无跨库 join。
+- **仪表盘**：`api_workspace_dashboard` 按"解决日"分桶 → `resolution.today_resolved` /
+  `today_avg_sec` 两张卡 + `res_trend`（窗口内每日 `avg_min`/`count`）折线（`spark` 自适应）。
+  趋势随右上 7/30 窗口联动；无解决数据时提示"需漏斗推进到引流已发"。
+
 ## 6. 明确不做（后续阶段）
 
 | 项 | 原因 |
