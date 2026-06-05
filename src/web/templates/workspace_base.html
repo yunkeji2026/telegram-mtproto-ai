@@ -49,6 +49,7 @@
   };
 })();
 </script>
+<script src="/static/workspace/crm-widgets.js"></script>
 </head>
 <body>
 <header class="ws-top">
@@ -58,8 +59,11 @@
   </span>
   <a class="ws-logout" href="/workspace" style="border:0;">会话</a>
   <a class="ws-logout" href="/workspace/contacts" style="border:0;">客户</a>
+  <a class="ws-logout" href="/workspace/tasks" style="border:0;">待办</a>
+  <a class="ws-logout" href="/workspace/dash" style="border:0;">概览</a>
   <span class="ws-spacer"></span>
-  <a class="ws-review" id="ws-followup" style="background:#dc2626;color:#fff;text-decoration:none;" href="/workspace/contacts#due" title="到期待跟进客户"></a>
+  <a class="ws-review" id="ws-sla" style="background:#dc2626;color:#fff;text-decoration:none;cursor:pointer;" title="SLA 严重超时未回复会话"></a>
+  <a class="ws-review" id="ws-followup" style="background:#dc2626;color:#fff;text-decoration:none;" href="/workspace/tasks" title="到期待跟进任务"></a>
   <span class="ws-review" id="ws-review" title="待裁决的合并候选" onclick="window.__wsReviews&&window.__wsReviews.open()"></span>
   <span class="ws-funnel" id="ws-funnel" title="今日 web 漏斗"></span>
   <span class="ws-agents" id="ws-agents-online" title="在线坐席"></span>
@@ -170,16 +174,67 @@
   modal.addEventListener('click',function(e){ if(e.target===modal) window.__wsReviews.close(); });
   refresh(); setInterval(refresh, 60000);
 
-  // 到期待跟进徽标
+  // 到期待跟进徽标（优先显示「我的」到期任务，括号内为全部）
   var fuBadge=document.getElementById('ws-followup');
   function refreshFu(){
     fetch('/api/workspace/follow-ups?scope=due&limit=1').then(function(r){return r.json();}).then(function(d){
       if(!d||!d.ok){ if(fuBadge) fuBadge.style.display='none'; return; }
-      var n=d.due_follow_ups||0;
-      if(fuBadge){ fuBadge.style.display=n?'inline-block':'none'; fuBadge.textContent='待跟进 '+n; }
+      var mine=d.due_tasks_mine||0, all=(d.due_tasks!=null?d.due_tasks:(d.due_follow_ups||0));
+      var show=mine||all;
+      if(fuBadge){
+        fuBadge.style.display=show?'inline-block':'none';
+        fuBadge.textContent= mine ? ('待跟进 '+mine+(all>mine?(' / '+all):'')) : ('待跟进 '+all);
+      }
     }).catch(function(){});
   }
   refreshFu(); setInterval(refreshFu, 60000);
+
+  // SLA 严重超时徽标 + 下钻清单
+  var slaBadge=document.getElementById('ws-sla');
+  var _slaItems=[];
+  function fmtWaitMin(sec){ return CRMW.fmtWaitMin(sec); }
+  function refreshSla(){
+    fetch('/api/workspace/sla-alerts').then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok){ if(slaBadge) slaBadge.style.display='none'; return; }
+      _slaItems=d.items||[];
+      var crit=d.critical||0, brk=d.breaching||0;
+      if(slaBadge){
+        slaBadge.style.display=(crit||brk)?'inline-block':'none';
+        slaBadge.style.background = crit?'#dc2626':'#d97706';
+        slaBadge.textContent = crit?('SLA 严重 '+crit):('SLA 超时 '+brk);
+        slaBadge.title = crit? _slaItems.slice(0,8).map(function(it){return it.name+'（'+fmtWaitMin(it.wait_sec)+'）';}).join('\n') : ('有 '+brk+' 个会话超过警告阈值');
+      }
+    }).catch(function(){});
+  }
+  if(slaBadge){
+    slaBadge.addEventListener('click',function(){
+      if(!_slaItems.length){ location.href='/workspace'; return; }
+      var top=_slaItems[0];
+      try{ sessionStorage.setItem('ws_focus_conv', top.conversation_id); }catch(_){ }
+      location.href='/workspace';
+    });
+  }
+  refreshSla(); setInterval(refreshSla, 30000);
+
+  // 轻量 toast（SLA 实时告警）— 委托共享组件
+  function wsToast(text){ CRMW.toast(text); }
+
+  // SSE 实时刷新：跟进任务变更即时更新徽标（及待办页若打开）+ SLA 告警 toast
+  try{
+    var es=new EventSource('/api/workspace/stream');
+    es.onmessage=function(e){
+      if(!e.data) return;
+      var msg; try{ msg=JSON.parse(e.data); }catch(_){ return; }
+      if(msg && msg.type==='follow_up'){
+        refreshFu();
+        if(window.TK && typeof window.TK.load==='function') window.TK.load();
+      } else if(msg && msg.type==='sla_alert' && msg.data){
+        wsToast('⚠ 客户「'+(msg.data.name||'?')+'」已等待 '+fmtWaitMin(msg.data.wait_sec)+'未回复');
+        refreshSla();
+      }
+    };
+    window.addEventListener('beforeunload',function(){ try{ es.close(); }catch(_){ } });
+  }catch(_){ }
 })();
 </script>
 <main class="ws-body">

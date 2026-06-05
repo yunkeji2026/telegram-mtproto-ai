@@ -1,0 +1,110 @@
+{% extends "workspace_base.html" %}
+{% block title %}我的待办{% endblock %}
+{% block head %}
+<style>
+  .tk-wrap{height:100%;display:flex;flex-direction:column;background:#f7f8fa;}
+  .tk-bar{padding:12px 18px;background:#fff;border-bottom:1px solid #e5e7eb;display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+  .tk-bar a.back{font-size:12px;color:#2563eb;text-decoration:none;}
+  .tk-sel{border:1px solid #d1d5db;border-radius:7px;padding:7px 9px;font-size:13px;background:#fff;}
+  .tk-list{flex:1;overflow-y:auto;padding:12px 18px;}
+  .tk-card{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:9px;display:flex;align-items:center;gap:12px;}
+  .tk-card.overdue{border-left:4px solid #dc2626;}
+  .tk-name{font-weight:600;font-size:14px;cursor:pointer;color:#111827;}
+  .tk-name:hover{color:#2563eb;}
+  .tk-meta{font-size:12px;color:#64748b;margin-top:3px;}
+  .tk-due{font-size:12px;margin-top:2px;}
+  .tk-due.over{color:#dc2626;font-weight:600;} .tk-due.fut{color:#92400e;}
+  .tk-chan{display:inline-block;font-size:10px;font-weight:600;border-radius:5px;padding:0 5px;margin-right:4px;}
+  .ch-line{background:#06c755;color:#fff;} .ch-whatsapp{background:#25d366;color:#fff;}
+  .ch-messenger{background:#0084ff;color:#fff;} .ch-telegram{background:#229ed9;color:#fff;}
+  .ch-web{background:#2563eb;color:#fff;} .ch-default{background:#64748b;color:#fff;}
+  .tk-right{margin-left:auto;display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end;}
+  .tk-btn{border:1px solid #d1d5db;background:#fff;border-radius:6px;padding:3px 9px;font-size:12px;cursor:pointer;}
+  .tk-btn:hover{background:#f3f4f6;}
+  .tk-btn.done{border-color:#16a34a;color:#16a34a;}
+  .tk-asg{font-size:11px;color:#94a3b8;}
+</style>
+{% endblock %}
+{% block content %}
+<div class="tk-wrap">
+  <div class="tk-bar">
+    <a class="back" href="/workspace">← 工作台</a>
+    <span style="font-weight:600;">跟进待办</span>
+    <select class="tk-sel" id="tk-scope" onchange="TK.load()">
+      <option value="mine">我的</option>
+      <option value="all">全部坐席</option>
+    </select>
+    <select class="tk-sel" id="tk-due" onchange="TK.load()">
+      <option value="today">今天及逾期</option>
+      <option value="overdue">仅逾期</option>
+      <option value="all">全部未完成</option>
+    </select>
+    <span id="tk-count" style="font-size:12px;color:#64748b;"></span>
+  </div>
+  <div class="tk-list" id="tk-list"><span style="color:#94a3b8;">加载中…</span></div>
+</div>
+<script>
+(function(){
+  var agents=[];
+  function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+  function chCls(c){return ({line:'ch-line',whatsapp:'ch-whatsapp',messenger:'ch-messenger',telegram:'ch-telegram',web:'ch-web'})[c]||'ch-default';}
+  function fmtTs(ts){ if(!ts) return '无期限'; var d=new Date((ts<1e12?ts*1000:ts)); return d.toLocaleDateString()+' '+d.toLocaleTimeString().slice(0,5); }
+  function loadAgents(){
+    fetch('/api/workspace/presence').then(function(r){return r.json();}).then(function(d){
+      agents=(d.agents||[]).map(function(a){return {id:a.agent_id||a.id, name:a.display_name||a.agent_id||a.id};});
+    }).catch(function(){});
+  }
+  function assignSelect(tid, cur){
+    var opts=agents.map(function(a){return '<option value="'+esc(a.id)+'"'+(a.id===cur?' selected':'')+'>'+esc(a.name)+'</option>';}).join('');
+    if(!agents.length) return '';
+    return '<select class="tk-btn" onchange="TK.assign(\''+esc(tid)+'\',this.value)"><option value="">改派…</option>'+opts+'</select>';
+  }
+  function render(tasks){
+    var box=document.getElementById('tk-list');
+    if(!tasks.length){ box.innerHTML='<span style="color:#94a3b8;">没有待办任务 🎉</span>'; return; }
+    box.innerHTML=tasks.map(function(t){
+      var chans=(t.channels||[]).map(function(ch,i){return '<span class="tk-chan '+chCls(ch)+'">'+esc((t.channel_labels||[])[i]||ch)+'</span>';}).join('');
+      var due='<div class="tk-due '+(t.overdue?'over':'fut')+'">'+(t.overdue?'⏰ 逾期 ':'到期 ')+fmtTs(t.due_at)+'</div>';
+      var asg=t.assignee?('<span class="tk-asg">@'+esc(t.assignee.slice(0,10))+'</span>'):'';
+      return '<div class="tk-card'+(t.overdue?' overdue':'')+'">'
+        +'<div><div class="tk-name" onclick="location.href=\'/workspace/contact/'+encodeURIComponent(t.contact_id)+'\'">'+esc(t.name||'未命名客户')+'</div>'
+        +'<div class="tk-meta">'+chans+(t.note?(' · '+esc(t.note)):'')+'</div>'+due+'</div>'
+        +'<div class="tk-right">'+asg
+        +'<button class="tk-btn" onclick="TK.snooze(\''+esc(t.task_id)+'\',1)">+1天</button>'
+        +'<button class="tk-btn" onclick="TK.snooze(\''+esc(t.task_id)+'\',3)">+3天</button>'
+        +'<button class="tk-btn" onclick="TK.snooze(\''+esc(t.task_id)+'\',7)">+1周</button>'
+        +assignSelect(t.task_id, t.assignee)
+        +'<button class="tk-btn done" onclick="TK.done(\''+esc(t.task_id)+'\')">完成</button>'
+        +'</div></div>';
+    }).join('');
+  }
+  window.TK={
+    load:function(){
+      document.getElementById('tk-list').innerHTML='<span style="color:#94a3b8;">加载中…</span>';
+      var scope=document.getElementById('tk-scope').value, due=document.getElementById('tk-due').value;
+      fetch('/api/workspace/my-tasks?scope='+scope+'&due='+due).then(function(r){return r.json();}).then(function(d){
+        if(!d.ok){ document.getElementById('tk-list').innerHTML='<span style="color:#94a3b8;">联系人子系统未启用</span>'; return; }
+        document.getElementById('tk-count').textContent='共 '+(d.tasks||[]).length+' 条 · 到期(我的/全部) '+(d.due_tasks_mine||0)+'/'+(d.due_tasks||0);
+        render(d.tasks||[]);
+      }).catch(function(){ document.getElementById('tk-list').innerHTML='<span style="color:#ef4444;">加载失败</span>'; });
+    },
+    done:function(tid){
+      fetch('/api/workspace/follow-up/'+encodeURIComponent(tid)+'/done',{method:'POST'})
+        .then(function(r){return r.json();}).then(function(){ TK.load(); }).catch(function(){ alert('网络错误'); });
+    },
+    snooze:function(tid, days){
+      fetch('/api/workspace/follow-up/'+encodeURIComponent(tid)+'/snooze',{method:'POST',
+        headers:{'Content-Type':'application/json'}, body:JSON.stringify({days:days})})
+        .then(function(r){return r.json();}).then(function(){ TK.load(); }).catch(function(){ alert('网络错误'); });
+    },
+    assign:function(tid, who){
+      if(!who) return;
+      fetch('/api/workspace/follow-up/'+encodeURIComponent(tid)+'/assign',{method:'POST',
+        headers:{'Content-Type':'application/json'}, body:JSON.stringify({assignee:who})})
+        .then(function(r){return r.json();}).then(function(d){ if(d.ok) TK.load(); else alert('改派失败'); }).catch(function(){ alert('网络错误'); });
+    }
+  };
+  loadAgents(); TK.load(); setInterval(TK.load, 60000);
+})();
+</script>
+{% endblock %}

@@ -55,12 +55,20 @@
       <div id="c360-tagbox" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:5px;"></div>
       <input class="c360-search" id="c360-taginp" list="c360-taglist" placeholder="输入标签后回车…" onkeydown="if(event.key==='Enter'){event.preventDefault();C360.addTag();}">
       <datalist id="c360-taglist"></datalist>
-      <div style="font-size:12px;color:#6b7280;margin:7px 0 3px;">下次跟进时间</div>
-      <input class="c360-search" id="c360-fu" type="datetime-local">
       <div style="font-size:12px;color:#6b7280;margin:7px 0 3px;">备注</div>
       <textarea class="c360-search" id="c360-note" rows="3" style="resize:vertical;" placeholder="坐席备注…"></textarea>
-      <button class="tiny-btn" style="margin-top:7px;width:100%;" onclick="C360.saveCrm()">保存跟进/备注</button>
+      <button class="tiny-btn" style="margin-top:7px;width:100%;" onclick="C360.saveCrm()">保存备注/标签</button>
       <div id="c360-crm-msg" style="font-size:12px;color:#16a34a;margin-top:5px;"></div>
+    </div>
+    <div class="c360-sec">
+      <h4>跟进任务</h4>
+      <div id="c360-tasks" style="font-size:12px;color:#94a3b8;">无跟进任务</div>
+      <div style="margin-top:8px;border-top:1px dashed #e5e7eb;padding-top:8px;">
+        <div style="font-size:12px;color:#6b7280;margin-bottom:3px;">新增任务 · 到期时间</div>
+        <input class="c360-search" id="c360-task-due" type="datetime-local">
+        <input class="c360-search" id="c360-task-note" placeholder="跟进事项（可选）…" style="margin-top:5px;">
+        <button class="tiny-btn" style="margin-top:7px;width:100%;" onclick="C360.addTask()">添加跟进任务</button>
+      </div>
     </div>
     <div class="c360-sec">
       <h4>渠道身份</h4>
@@ -145,8 +153,7 @@
     window.__tags = (ct.tags||[]).slice();
     renderTags();
     document.getElementById('c360-note').value = ct.note || (attrs.note||'');
-    var fu=document.getElementById('c360-fu');
-    fu.value = ct.follow_up_at ? toLocalInput(ct.follow_up_at) : '';
+    renderTasks(ct.follow_up_tasks||[]);
     loadTagSuggest();
 
     // 合并候选
@@ -157,16 +164,55 @@
     var d=new Date((ts<1e12?ts*1000:ts)); var p=function(n){return String(n).padStart(2,'0');};
     return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'T'+p(d.getHours())+':'+p(d.getMinutes());
   }
+  window.__tagColors={};
+  function tagStyle(t){
+    var c=window.__tagColors[t];
+    return c?('background:'+esc(c)+';color:#fff;'):'';
+  }
   function renderTags(){
     var box=document.getElementById('c360-tagbox');
     box.innerHTML=(window.__tags||[]).map(function(t,i){
-      return '<span class="c360-pill" style="cursor:default;">'+esc(t)+' <a style="cursor:pointer;color:#92400e;" onclick="C360.delTag('+i+')">×</a></span>';
+      return '<span class="c360-pill" style="cursor:default;'+tagStyle(t)+'">'+esc(t)+' <a style="cursor:pointer;opacity:.7;" onclick="C360.delTag('+i+')">×</a></span>';
     }).join('') || '<span style="color:#94a3b8;font-size:12px;">无标签</span>';
+  }
+  window.__agents=[];
+  function loadAgents(){
+    fetch('/api/workspace/presence').then(function(r){return r.json();}).then(function(d){
+      window.__agents=(d.agents||[]).map(function(a){return {id:a.agent_id||a.id, name:a.display_name||a.agent_id||a.id};});
+    }).catch(function(){});
+  }
+  function assignSelect(tid, cur){
+    if(!window.__agents.length) return '';
+    var opts=window.__agents.map(function(a){return '<option value="'+esc(a.id)+'"'+(a.id===cur?' selected':'')+'>'+esc(a.name)+'</option>';}).join('');
+    return '<select class="tiny-btn" style="padding:1px 4px;" onchange="C360.assignTask(\''+esc(tid)+'\',this.value)"><option value="">改派…</option>'+opts+'</select>';
+  }
+  function renderTasks(tasks){
+    var box=document.getElementById('c360-tasks');
+    if(!tasks||!tasks.length){ box.innerHTML='<span style="color:#94a3b8;font-size:12px;">无跟进任务</span>'; return; }
+    var now=Date.now()/1000;
+    box.innerHTML=tasks.map(function(t){
+      if(t.done_at){
+        return '<div style="font-size:12px;color:#9ca3af;margin-top:5px;text-decoration:line-through;">✓ '+fmtTs(t.due_at)+(t.note?(' · '+esc(t.note)):'')+'</div>';
+      }
+      var due=t.due_at && t.due_at<=now;
+      return '<div style="font-size:12px;margin-top:6px;border-bottom:1px dashed #f1f5f9;padding-bottom:6px;">'
+        +'<div style="color:'+(due?'#dc2626':'#92400e')+';">'+(due?'⏰ ':'')+fmtTs(t.due_at)+(t.note?(' · '+esc(t.note)):'')+(t.assignee?(' <span style="color:#94a3b8;">@'+esc(t.assignee.slice(0,8))+'</span>'):'')+'</div>'
+        +'<div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap;">'
+        +'<button class="tiny-btn" style="padding:1px 6px;" onclick="C360.snoozeTask(\''+esc(t.task_id)+'\',1)">+1天</button>'
+        +'<button class="tiny-btn" style="padding:1px 6px;" onclick="C360.snoozeTask(\''+esc(t.task_id)+'\',3)">+3天</button>'
+        +'<button class="tiny-btn" style="padding:1px 6px;" onclick="C360.snoozeTask(\''+esc(t.task_id)+'\',7)">+1周</button>'
+        +assignSelect(t.task_id, t.assignee)
+        +'<button class="tiny-btn" style="padding:1px 7px;" onclick="C360.doneTask(\''+esc(t.task_id)+'\')">完成</button>'
+        +'</div></div>';
+    }).join('');
   }
   function loadTagSuggest(){
     fetch('/api/workspace/tags').then(function(r){return r.json();}).then(function(d){
+      window.__tagColors={};
+      (d.tags||[]).forEach(function(t){ if(t.color) window.__tagColors[t.tag]=t.color; });
       document.getElementById('c360-taglist').innerHTML=(d.tags||[]).map(function(t){
         return '<option value="'+esc(t.tag)+'">';}).join('');
+      renderTags();
     }).catch(function(){});
   }
 
@@ -197,17 +243,50 @@
     delTag:function(i){ window.__tags.splice(i,1); renderTags(); },
     saveCrm:function(){
       var note=document.getElementById('c360-note').value;
-      var fuVal=document.getElementById('c360-fu').value;
-      var follow_up_at = fuVal ? Math.floor(new Date(fuVal).getTime()/1000) : 0;
       var msg=document.getElementById('c360-crm-msg'); msg.textContent='保存中…'; msg.style.color='#6b7280';
       fetch('/api/workspace/contact/'+encodeURIComponent(CONTACT_ID)+'/crm',{method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({note:note, tags:window.__tags||[], follow_up_at:follow_up_at})})
+        body:JSON.stringify({note:note, tags:window.__tags||[]})})
         .then(function(r){return r.json();}).then(function(d){
           if(d.ok){ msg.style.color='#16a34a'; msg.textContent='已保存'; window.__tags=d.tags||window.__tags; renderTags(); }
           else{ msg.style.color='#ef4444'; msg.textContent='保存失败：'+(d.error||''); }
         }).catch(function(){ msg.style.color='#ef4444'; msg.textContent='网络错误'; });
     },
+    addTask:function(){
+      var dueVal=document.getElementById('c360-task-due').value;
+      if(!dueVal){ alert('请选择到期时间'); return; }
+      var due_at=Math.floor(new Date(dueVal).getTime()/1000);
+      var note=document.getElementById('c360-task-note').value;
+      fetch('/api/workspace/contact/'+encodeURIComponent(CONTACT_ID)+'/follow-up',{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({due_at:due_at, note:note})})
+        .then(function(r){return r.json();}).then(function(d){
+          if(d.ok){ document.getElementById('c360-task-due').value=''; document.getElementById('c360-task-note').value=''; renderTasks(d.follow_up_tasks||[]); }
+          else{ alert('添加失败：'+(d.error||'')); }
+        }).catch(function(){ alert('网络错误'); });
+    },
+    doneTask:function(tid){
+      fetch('/api/workspace/follow-up/'+encodeURIComponent(tid)+'/done',{method:'POST'})
+        .then(function(r){return r.json();}).then(function(d){
+          if(d.ok){ C360.reload(); } else{ alert('操作失败'); }
+        }).catch(function(){ alert('网络错误'); });
+    },
+    snoozeTask:function(tid, days){
+      fetch('/api/workspace/follow-up/'+encodeURIComponent(tid)+'/snooze',{method:'POST',
+        headers:{'Content-Type':'application/json'}, body:JSON.stringify({days:days})})
+        .then(function(r){return r.json();}).then(function(d){
+          if(d.ok){ C360.reload(); } else{ alert('延期失败'); }
+        }).catch(function(){ alert('网络错误'); });
+    },
+    assignTask:function(tid, who){
+      if(!who) return;
+      fetch('/api/workspace/follow-up/'+encodeURIComponent(tid)+'/assign',{method:'POST',
+        headers:{'Content-Type':'application/json'}, body:JSON.stringify({assignee:who})})
+        .then(function(r){return r.json();}).then(function(d){
+          if(d.ok){ C360.reload(); } else{ alert('改派失败'); }
+        }).catch(function(){ alert('网络错误'); });
+    },
+    reload:function(){ load(); },
     loadMore:function(){
       var cur=window.__nextCursor||0; if(!cur) return;
       var btn=document.getElementById('c360-more'); if(btn){ btn.disabled=true; btn.textContent='加载中…'; }
@@ -244,6 +323,7 @@
         }).catch(function(){ alert('网络错误'); });
     }
   };
+  loadAgents();
   load();
 })();
 </script>

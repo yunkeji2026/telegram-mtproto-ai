@@ -188,6 +188,30 @@ CREATE TABLE IF NOT EXISTS contact_tags (
     PRIMARY KEY (contact_id, tag)
 );
 CREATE INDEX IF NOT EXISTS idx_tags_tag ON contact_tags(tag);
+
+-- Phase 6-4：跟进任务化（可完成/带备注/指派），contacts.follow_up_at 作为「最近未完成到期」缓存。
+CREATE TABLE IF NOT EXISTS follow_up_tasks (
+    task_id     TEXT PRIMARY KEY,
+    contact_id  TEXT NOT NULL,
+    due_at      INTEGER NOT NULL DEFAULT 0,
+    note        TEXT NOT NULL DEFAULT '',
+    assignee    TEXT NOT NULL DEFAULT '',
+    created_at  INTEGER NOT NULL DEFAULT 0,
+    created_by  TEXT NOT NULL DEFAULT '',
+    done_at     INTEGER NOT NULL DEFAULT 0,
+    done_by     TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_fut_contact ON follow_up_tasks(contact_id);
+CREATE INDEX IF NOT EXISTS idx_fut_open ON follow_up_tasks(done_at, due_at);
+CREATE INDEX IF NOT EXISTS idx_fut_assignee ON follow_up_tasks(assignee, done_at, due_at);
+
+-- Phase 6-4：预设标签库（名称/颜色/排序），自由标签仍可临时添加。
+CREATE TABLE IF NOT EXISTS tag_library (
+    tag         TEXT PRIMARY KEY,
+    color       TEXT NOT NULL DEFAULT '',
+    sort_order  INTEGER NOT NULL DEFAULT 0,
+    created_at  INTEGER NOT NULL DEFAULT 0
+);
 """
 
 
@@ -375,19 +399,371 @@ class ContactStore:
                 out.append(cid)
         return out
 
-    # ── Phase 6-3：跟进提醒 + 标签 ───────────────────────────
+    # ── Phase 6-3/6-4：跟进任务 + 标签 ───────────────────────────
+    def _recompute_follow_up(self, contact_id: str) -> int:
+        """把 contacts.follow_up_at 重算为「最近未完成任务到期时间」（无则 0）。需持锁调用。"""
+        row = self._conn.execute(
+            "SELECT MIN(due_at) FROM follow_up_tasks "
+            "WHERE contact_id=? AND done_at=0 AND due_at>0", (contact_id,),
+        ).fetchone()
+        nxt = int(row[0]) if row and row[0] else 0
+        self._conn.execute(
+            "UPDATE contacts SET follow_up_at=? WHERE contact_id=?", (nxt, contact_id)
+        )
+        return nxt
+
     def set_follow_up(self, contact_id: str, follow_up_at: int) -> bool:
-        """设置/清除跟进时间（0 或负=清除）。"""
+        """快捷设置/清除「下次跟进」。
+
+        基于任务表去重：>0 时更新最近未完成任务的到期（无则新建一条）；
+        <=0 时完成所有未完成任务。contacts.follow_up_at 随之重算。
+        """
         cid = str(contact_id or "").strip()
         if not cid:
             return False
         val = max(0, int(follow_up_at or 0))
+        now = self._now()
         with self._lock:
-            cur = self._conn.execute(
-                "UPDATE contacts SET follow_up_at=? WHERE contact_id=?", (val, cid)
+            if val <= 0:
+                self._conn.execute(
+                    "UPDATE follow_up_tasks SET done_at=? WHERE contact_id=? AND done_at=0",
+                    (now, cid),
+                )
+            else:
+                row = self._conn.execute(
+                    "SELECT task_id FROM follow_up_tasks WHERE contact_id=? AND done_at=0 "
+                    "ORDER BY due_at LIMIT 1", (cid,),
+                ).fetchone()
+                if row:
+                    self._conn.execute(
+                        "UPDATE follow_up_tasks SET due_at=? WHERE task_id=?",
+                        (val, row["task_id"]),
+                    )
+                else:
+                    self._conn.execute(
+                        "INSERT INTO follow_up_tasks "
+                        "(task_id, contact_id, due_at, created_at) VALUES (?, ?, ?, ?)",
+                        (new_id(), cid, val, now),
+                    )
+            self._recompute_follow_up(cid)
+            self._conn.commit()
+            return True
+
+    def add_follow_up_task(
+        self, contact_id: str, *, due_at: int, note: str = "",
+        assignee: str = "", created_by: str = "",
+    ) -> Optional[str]:
+        """新增一条跟进任务，返回 task_id。"""
+        cid = str(contact_id or "").strip()
+        if not cid:
+            return None
+        tid = new_id()
+        now = self._now()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO follow_up_tasks "
+                "(task_id, contact_id, due_at, note, assignee, created_at, created_by) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (tid, cid, max(0, int(due_at or 0)), str(note or "")[:1000],
+                 str(assignee or ""), now, str(created_by or "")),
+            )
+            self._recompute_follow_up(cid)
+            self._conn.commit()
+        return tid
+
+    def complete_follow_up_task(self, task_id: str, *, done_by: str = "") -> bool:
+        """标记某跟进任务完成，并重算所属 contact 的 follow_up_at。"""
+        tid = str(task_id or "").strip()
+        if not tid:
+            return False
+        now = self._now()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT contact_id, done_at FROM follow_up_tasks WHERE task_id=?", (tid,)
+            ).fetchone()
+            if row is None or row["done_at"]:
+                return False
+            self._conn.execute(
+                "UPDATE follow_up_tasks SET done_at=?, done_by=? WHERE task_id=?",
+                (now, str(done_by or ""), tid),
+            )
+            self._recompute_follow_up(str(row["contact_id"]))
+            self._conn.commit()
+            return True
+
+    def list_follow_up_tasks(
+        self, contact_id: str, *, include_done: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """某客户的跟进任务：未完成在前(按到期升序)，已完成在后(按完成倒序)。"""
+        cid = str(contact_id or "").strip()
+        if not cid:
+            return []
+        sql = "SELECT * FROM follow_up_tasks WHERE contact_id=?"
+        if not include_done:
+            sql += " AND done_at=0"
+        sql += " ORDER BY (CASE WHEN done_at=0 THEN 0 ELSE 1 END), " \
+               "(CASE WHEN done_at=0 THEN due_at ELSE -done_at END)"
+        with self._lock:
+            rows = self._conn.execute(sql, (cid,)).fetchall()
+        return [{
+            "task_id": r["task_id"], "contact_id": r["contact_id"],
+            "due_at": r["due_at"] or 0, "note": r["note"] or "",
+            "assignee": r["assignee"] or "", "created_at": r["created_at"] or 0,
+            "created_by": r["created_by"] or "", "done_at": r["done_at"] or 0,
+            "done_by": r["done_by"] or "",
+        } for r in rows]
+
+    def count_due_tasks(
+        self, *, assignee: Optional[str] = None, now_ts: Optional[int] = None,
+    ) -> int:
+        """未完成且已到期的任务数（assignee 给定则只数该坐席）。"""
+        now = int(now_ts if now_ts is not None else self._now())
+        sql = "SELECT COUNT(*) FROM follow_up_tasks WHERE done_at=0 AND due_at>0 AND due_at<=?"
+        params: List[Any] = [now]
+        if assignee is not None:
+            sql += " AND assignee=?"
+            params.append(assignee)
+        with self._lock:
+            return self._conn.execute(sql, params).fetchone()[0]
+
+    def list_open_tasks(
+        self, *, assignee: Optional[str] = None, due_before: Optional[int] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """未完成跟进任务（含客户名/渠道），按到期升序。「我的待办」面板用。
+
+        assignee 给定→只看该坐席；due_before 给定→只看到期 <= 该时间。
+        """
+        sql = (
+            "SELECT ft.task_id, ft.contact_id, ft.due_at, ft.note, ft.assignee, "
+            "ft.created_by, ft.created_at, c.primary_name AS name, "
+            "(SELECT GROUP_CONCAT(DISTINCT ci.channel) FROM channel_identities ci "
+            "WHERE ci.contact_id=ft.contact_id) AS channels "
+            "FROM follow_up_tasks ft LEFT JOIN contacts c ON c.contact_id=ft.contact_id "
+            "WHERE ft.done_at=0"
+        )
+        params: List[Any] = []
+        if assignee is not None:
+            sql += " AND ft.assignee=?"
+            params.append(assignee)
+        if due_before is not None:
+            sql += " AND ft.due_at>0 AND ft.due_at<=?"
+            params.append(int(due_before))
+        sql += (" ORDER BY (CASE WHEN ft.due_at>0 THEN 0 ELSE 1 END), ft.due_at "
+                "LIMIT ?")
+        params.append(int(limit))
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [{
+            "task_id": r["task_id"], "contact_id": r["contact_id"],
+            "due_at": r["due_at"] or 0, "note": r["note"] or "",
+            "assignee": r["assignee"] or "", "created_by": r["created_by"] or "",
+            "created_at": r["created_at"] or 0, "name": r["name"] or "",
+            "channels": [c for c in str(r["channels"] or "").split(",") if c],
+        } for r in rows]
+
+    def reassign_task(self, task_id: str, assignee: str) -> Optional[str]:
+        """改派未完成任务给某坐席，成功返回 contact_id（已完成/不存在→None）。"""
+        tid = str(task_id or "").strip()
+        if not tid:
+            return None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT contact_id, done_at FROM follow_up_tasks WHERE task_id=?", (tid,)
+            ).fetchone()
+            if row is None or row["done_at"]:
+                return None
+            self._conn.execute(
+                "UPDATE follow_up_tasks SET assignee=? WHERE task_id=?",
+                (str(assignee or ""), tid),
             )
             self._conn.commit()
+            return str(row["contact_id"])
+
+    def snooze_task(
+        self, task_id: str, *, days: int = 0, due_at: int = 0,
+    ) -> Optional[str]:
+        """延期未完成任务：给 due_at 直接设；否则按 days 从 max(now, 当前到期) 顺延。
+
+        成功返回 contact_id 并重算缓存（已完成/不存在→None）。
+        """
+        tid = str(task_id or "").strip()
+        if not tid:
+            return None
+        now = self._now()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT contact_id, due_at, done_at FROM follow_up_tasks WHERE task_id=?",
+                (tid,),
+            ).fetchone()
+            if row is None or row["done_at"]:
+                return None
+            if due_at and int(due_at) > 0:
+                new_due = int(due_at)
+            else:
+                base = max(now, int(row["due_at"] or 0))
+                new_due = base + max(0, int(days or 0)) * 86400
+            self._conn.execute(
+                "UPDATE follow_up_tasks SET due_at=? WHERE task_id=?", (new_due, tid)
+            )
+            self._recompute_follow_up(str(row["contact_id"]))
+            self._conn.commit()
+            return str(row["contact_id"])
+
+    # ── Phase 6-6：会话↔CRM 打通 + 仪表盘 ────────────────────
+    def overdue_contact_ids(self, now_ts: Optional[int] = None) -> set:
+        """有逾期未完成跟进的 contact_id 集合（会话列表红点用，单查缓存列）。"""
+        now = int(now_ts if now_ts is not None else self._now())
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT contact_id FROM contacts WHERE follow_up_at>0 AND follow_up_at<=?",
+                (now,),
+            ).fetchall()
+        return {str(r["contact_id"]) for r in rows}
+
+    def resolve_contacts_by_external(
+        self, pairs: List[Tuple[str, str]],
+    ) -> Dict[Tuple[str, str], str]:
+        """批量把 (channel, external_id) 解析为 contact_id（会话列表关联，避免 N+1）。"""
+        exts = list({e for (_c, e) in pairs if e})
+        if not exts:
+            return {}
+        ph = ",".join("?" * len(exts))
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT channel, external_id, contact_id FROM channel_identities "
+                f"WHERE external_id IN ({ph})", tuple(exts),
+            ).fetchall()
+        m: Dict[Tuple[str, str], str] = {}
+        for r in rows:
+            m[(str(r["channel"]), str(r["external_id"]))] = str(r["contact_id"])
+        return {p: m[p] for p in pairs if p in m}
+
+    def count_contacts_created_since(self, since_ts: int) -> int:
+        with self._lock:
+            return self._conn.execute(
+                "SELECT COUNT(*) FROM contacts WHERE created_at>=?", (int(since_ts),)
+            ).fetchone()[0]
+
+    def count_events_since(self, event_type: str, since_ts: int) -> int:
+        with self._lock:
+            return self._conn.execute(
+                "SELECT COUNT(*) FROM journey_events WHERE event_type=? AND ts>=?",
+                (str(event_type), int(since_ts)),
+            ).fetchone()[0]
+
+    def count_events_since_multi(
+        self, event_types: List[str], since_ts: int,
+    ) -> Dict[str, int]:
+        """一次查多种事件自某时间起的计数（仪表盘减少往返）。"""
+        types = [str(t) for t in (event_types or []) if t]
+        if not types:
+            return {}
+        ph = ",".join("?" * len(types))
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT event_type, COUNT(*) AS n FROM journey_events "
+                f"WHERE event_type IN ({ph}) AND ts>=? GROUP BY event_type",
+                (*types, int(since_ts)),
+            ).fetchall()
+        return {str(r["event_type"]): int(r["n"]) for r in rows}
+
+    def count_contacts_by_day(self, since_ts: int) -> Dict[str, int]:
+        """按本地日期聚合新建客户数（趋势折线）。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT strftime('%Y-%m-%d', created_at, 'unixepoch', 'localtime') AS d, "
+                "COUNT(*) AS n FROM contacts WHERE created_at>=? GROUP BY d",
+                (int(since_ts),),
+            ).fetchall()
+        return {str(r["d"]): int(r["n"]) for r in rows}
+
+    def resolution_stats(
+        self, since_ts: int, resolve_event: str = "handoff_sent",
+    ) -> List[Dict[str, Any]]:
+        """每 journey 解决时长原始数据：首条 msg_in → 其后首个 resolve 事件。
+
+        默认 resolve_event=handoff_sent（本仓库漏斗目标=引流已发）。
+        仅含首条 msg_in 在 since_ts 之后的 journey。resolved_ts=None ⇒ 尚未解决。
+        聚合（均值/趋势）交由调用方完成，保持单一职责。
+        """
+        sql = (
+            "WITH firstin AS ("
+            "  SELECT journey_id, MIN(ts) AS t_in FROM journey_events "
+            "  WHERE event_type='msg_in' GROUP BY journey_id"
+            ") "
+            "SELECT f.journey_id AS jid, f.t_in AS t_in, "
+            "  (SELECT MIN(e.ts) FROM journey_events e WHERE e.journey_id=f.journey_id "
+            "   AND e.event_type=? AND e.ts>=f.t_in) AS resolved_ts "
+            "FROM firstin f WHERE f.t_in >= ?"
+        )
+        with self._lock:
+            rows = self._conn.execute(
+                sql, (str(resolve_event), int(since_ts))).fetchall()
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            res = r["resolved_ts"]
+            out.append({
+                "journey_id": str(r["jid"]),
+                "t_in": int(r["t_in"] or 0),
+                "resolved_ts": int(res) if res is not None else None,
+            })
+        return out
+
+    def count_events_by_day(self, event_type: str, since_ts: int) -> Dict[str, int]:
+        """按本地日期聚合某事件数（趋势折线）。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT strftime('%Y-%m-%d', ts, 'unixepoch', 'localtime') AS d, "
+                "COUNT(*) AS n FROM journey_events WHERE event_type=? AND ts>=? GROUP BY d",
+                (str(event_type), int(since_ts)),
+            ).fetchall()
+        return {str(r["d"]): int(r["n"]) for r in rows}
+
+    def agent_task_load(self) -> List[Dict[str, Any]]:
+        """每个坐席未完成任务数（仪表盘坐席负载）。"""
+        now = self._now()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT assignee, COUNT(*) AS n, "
+                "SUM(CASE WHEN due_at>0 AND due_at<=? THEN 1 ELSE 0 END) AS overdue "
+                "FROM follow_up_tasks WHERE done_at=0 GROUP BY assignee ORDER BY n DESC",
+                (now,),
+            ).fetchall()
+        return [{"assignee": str(r["assignee"] or ""), "open": int(r["n"]),
+                 "overdue": int(r["overdue"] or 0)} for r in rows]
+
+    # ── Phase 6-4：预设标签库 ────────────────────────────────
+    def upsert_tag_library(self, tag: str, *, color: str = "", sort_order: int = 0) -> bool:
+        t = str(tag or "").strip()[:40]
+        if not t:
+            return False
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO tag_library (tag, color, sort_order, created_at) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(tag) DO UPDATE SET "
+                "color=excluded.color, sort_order=excluded.sort_order",
+                (t, str(color or "")[:16], int(sort_order or 0), self._now()),
+            )
+            self._conn.commit()
+            return True
+
+    def delete_tag_library(self, tag: str) -> bool:
+        t = str(tag or "").strip()
+        if not t:
+            return False
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM tag_library WHERE tag=?", (t,))
+            self._conn.commit()
             return cur.rowcount > 0
+
+    def list_tag_library(self) -> List[Dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT tag, color, sort_order FROM tag_library ORDER BY sort_order, tag"
+            ).fetchall()
+        return [{"tag": str(r["tag"]), "color": str(r["color"] or ""),
+                 "sort_order": int(r["sort_order"] or 0)} for r in rows]
 
     def set_contact_tags(self, contact_id: str, tags: List[str]) -> List[str]:
         """全量替换某客户的标签集合。返回规整去重后的标签列表。"""
@@ -436,13 +812,27 @@ class ContactStore:
         return out
 
     def list_all_tags(self, limit: int = 100) -> List[Dict[str, Any]]:
-        """聚合全部标签 + 使用计数（标签自动补全/快筛）。"""
+        """聚合全部使用中的标签 + 计数 + 预设库颜色（标签自动补全/快筛/上色）。
+
+        合并「已使用标签」与「预设库中尚未使用的标签」(count=0)，便于补全选用。
+        """
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT tag, COUNT(*) AS n FROM contact_tags GROUP BY tag "
-                "ORDER BY n DESC, tag LIMIT ?", (int(limit),),
+            used = self._conn.execute(
+                "SELECT ct.tag AS tag, COUNT(*) AS n, "
+                "COALESCE(tl.color, '') AS color "
+                "FROM contact_tags ct LEFT JOIN tag_library tl ON tl.tag=ct.tag "
+                "GROUP BY ct.tag ORDER BY n DESC, ct.tag LIMIT ?", (int(limit),),
             ).fetchall()
-        return [{"tag": str(r["tag"]), "count": int(r["n"])} for r in rows]
+            lib = self._conn.execute(
+                "SELECT tag, color FROM tag_library "
+                "WHERE tag NOT IN (SELECT DISTINCT tag FROM contact_tags) "
+                "ORDER BY sort_order, tag"
+            ).fetchall()
+        out = [{"tag": str(r["tag"]), "count": int(r["n"]),
+                "color": str(r["color"] or "")} for r in used]
+        out += [{"tag": str(r["tag"]), "count": 0, "color": str(r["color"] or "")}
+                for r in lib]
+        return out
 
     def count_due_follow_ups(self, now_ts: Optional[int] = None) -> int:
         now = int(now_ts if now_ts is not None else self._now())

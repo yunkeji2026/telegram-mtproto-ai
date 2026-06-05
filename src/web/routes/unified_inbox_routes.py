@@ -14,7 +14,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 
 from src.ai.chat_assistant_service import ChatAssistantService
 from src.ai.translation_service import TranslationService, detect_language
@@ -33,6 +33,22 @@ from src.inbox.normalizer import (
 
 logger = logging.getLogger(__name__)
 AUTOMATION_MODES = {"manual", "review", "multi_choice", "auto_ai"}
+_SLA_WARN_SEC = 1800  # 客户消息未回复超过该秒数标记 SLA 警告（默认 30 分钟）
+_SLA_CRIT_SEC = 7200  # 超过该秒数标记严重超时（默认 2 小时）
+
+
+def _fmt_ts(ts: Any) -> str:
+    """秒级时间戳 → 'YYYY-MM-DD HH:MM'（0/空 → 空串），CSV 导出用。"""
+    try:
+        n = int(ts or 0)
+    except (TypeError, ValueError):
+        return ""
+    if n <= 0:
+        return ""
+    if n > 1e12:  # 容错毫秒
+        n = int(n / 1000)
+    import datetime
+    return datetime.datetime.fromtimestamp(n).strftime("%Y-%m-%d %H:%M")
 
 # 漏斗阶段中文标签（与 contacts.JourneyStage / _rpa_shared_funnel.html 对齐）
 FUNNEL_STAGE_LABELS: Dict[str, str] = {
@@ -209,6 +225,19 @@ def _session_agent(request: Request) -> Dict[str, str]:
     return {"agent_id": uid, "display_name": str(name or uid)}
 
 
+def _publish_follow_up(action: str, *, contact_id: str = "", task_id: str = "",
+                       assignee: str = "") -> None:
+    """发布跟进任务变更事件（SSE 实时刷新待办徽标）。失败静默。"""
+    try:
+        from src.integrations.shared.event_bus import get_event_bus
+        get_event_bus().publish("follow_up", {
+            "action": action, "contact_id": contact_id,
+            "task_id": task_id, "assignee": assignee,
+        })
+    except Exception:
+        logger.debug("follow_up 事件发布失败（已忽略）", exc_info=True)
+
+
 def _contacts_store(request: Request):
     """Contacts 子系统 store（未启用时 None）。"""
     contacts = getattr(request.app.state, "contacts", None)
@@ -304,6 +333,8 @@ _EVENT_LABELS: Dict[str, str] = {
     "channel_identity_split_out": "身份已拆出（原侧）",
     "journey_states_discarded": "合并丢弃旧状态",
     "crm_updated": "坐席更新备注/标签",
+    "follow_up_added": "新增跟进任务",
+    "follow_up_reassigned": "跟进任务改派",
 }
 
 
@@ -542,6 +573,166 @@ def _read_from_store_enabled(request: Request) -> bool:
     return bool((cfg.get("inbox") or {}).get("read_from_store", False))
 
 
+def _sla_cfg(request: Request) -> Dict[str, int]:
+    """SLA 阈值（秒）：config.inbox.sla_warn_sec / sla_crit_sec，带默认值。"""
+    warn, crit = _SLA_WARN_SEC, _SLA_CRIT_SEC
+    cm = getattr(request.app.state, "config_manager", None)
+    cfg = getattr(cm, "config", None) if cm is not None else None
+    if isinstance(cfg, dict):
+        ib = cfg.get("inbox") or {}
+        try:
+            warn = int(ib.get("sla_warn_sec", warn) or warn)
+            crit = int(ib.get("sla_crit_sec", crit) or crit)
+        except (TypeError, ValueError):
+            pass
+    if crit < warn:
+        crit = warn
+    return {"warn": warn, "crit": crit}
+
+
+def _sla_alert_snapshot(request: Request) -> Dict[str, Any]:
+    """当前 SLA 快照：等待/警告/严重计数 + 严重超时会话清单（告警徽标/SSE 用）。"""
+    inbox = _inbox_store(request)
+    if inbox is None:
+        return {"ok": True, "waiting": 0, "breaching": 0, "critical": 0, "items": []}
+    sla = _sla_cfg(request)
+    convs = inbox.list_conversations(limit=500)
+    cmap = {str(c.get("conversation_id") or ""): c for c in convs}
+    dirs = inbox.last_message_dirs(list(cmap))
+    now = time.time()
+    waiting = breaching = 0
+    items: List[Dict[str, Any]] = []
+    for cid, info in dirs.items():
+        if info.get("direction") != "in":
+            continue
+        waiting += 1
+        wait = now - (info.get("ts") or now)
+        if wait >= sla["warn"]:
+            breaching += 1
+        if wait >= sla["crit"]:
+            c = cmap.get(cid) or {}
+            items.append({
+                "conversation_id": cid,
+                "platform": str(c.get("platform") or ""),
+                "account_id": str(c.get("account_id") or "default"),
+                "chat_key": str(c.get("chat_key") or ""),
+                "name": str(c.get("display_name") or c.get("chat_key") or cid),
+                "wait_sec": int(wait),
+            })
+    items.sort(key=lambda x: -x["wait_sec"])
+    return {"ok": True, "waiting": waiting, "breaching": breaching,
+            "critical": len(items), "items": items[:50],
+            "warn_sec": sla["warn"], "crit_sec": sla["crit"]}
+
+
+def _sla_detail(
+    request: Request, scope: str = "critical", agent: Optional[str] = None,
+) -> Dict[str, Any]:
+    """SLA/首响明细下钻：按 scope 列出会话清单（带坐席归属，供仪表盘点开跳转）。
+
+    scope: waiting(全部待回复) / breaching(≥warn) / critical(≥crit) / unresponded(今日进线未回复)。
+    agent: 传入则按 claim 坐席过滤（""=未认领）。
+    """
+    inbox = _inbox_store(request)
+    if inbox is None:
+        return {"ok": True, "scope": scope, "items": [], "count": 0}
+    sla = _sla_cfg(request)
+    now = time.time()
+    convs = inbox.list_conversations(limit=500)
+    cmap = {str(c.get("conversation_id") or ""): c for c in convs}
+    claim_map: Dict[str, Dict[str, str]] = {}
+    try:
+        for cl in inbox.list_conversation_claims():
+            claim_map[str(cl.get("conversation_id") or "")] = {
+                "agent_id": str(cl.get("agent_id") or ""),
+                "agent_name": str(cl.get("agent_name") or ""),
+            }
+    except Exception:
+        logger.debug("sla-detail claim 读取失败（已忽略）", exc_info=True)
+
+    def _mk(cid: str, wait: float, level: str) -> Dict[str, Any]:
+        c = cmap.get(cid) or {}
+        cl = claim_map.get(cid)
+        return {
+            "conversation_id": cid,
+            "platform": str(c.get("platform") or ""),
+            "account_id": str(c.get("account_id") or "default"),
+            "chat_key": str(c.get("chat_key") or ""),
+            "name": str(c.get("display_name") or c.get("chat_key") or cid),
+            "wait_sec": int(max(0, wait)),
+            "level": level,
+            "agent_id": cl["agent_id"] if cl else "",
+            "agent_name": (cl["agent_name"] if cl else "") or "",
+        }
+
+    items: List[Dict[str, Any]] = []
+    if scope == "unresponded":
+        lt = time.localtime(now)
+        midnight = time.mktime(
+            (lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1))
+        for r in inbox.first_response_rows(midnight):
+            if r["t_out"] is None:
+                wait = now - r["t_in"]
+                level = ("crit" if wait >= sla["crit"]
+                         else "warn" if wait >= sla["warn"] else "")
+                items.append(_mk(r["cid"], wait, level))
+    else:
+        thr = (sla["crit"] if scope == "critical"
+               else sla["warn"] if scope == "breaching" else 0)
+        dirs = inbox.last_message_dirs(list(cmap))
+        for cid, info in dirs.items():
+            if info.get("direction") != "in":
+                continue
+            wait = now - (info.get("ts") or now)
+            if wait < thr:
+                continue
+            level = ("crit" if wait >= sla["crit"]
+                     else "warn" if wait >= sla["warn"] else "")
+            items.append(_mk(cid, wait, level))
+
+    if agent is not None:
+        items = [it for it in items if it["agent_id"] == agent]
+    items.sort(key=lambda x: -x["wait_sec"])
+    return {"ok": True, "scope": scope, "count": len(items),
+            "items": items[:200]}
+
+
+def _agent_frt_detail(
+    request: Request, agent: str, days: int = 7,
+) -> Dict[str, Any]:
+    """某坐席在窗口内的首响会话明细（绩效榜下钻）。"""
+    inbox = _inbox_store(request)
+    if inbox is None:
+        return {"ok": True, "agent": agent, "days": 7, "count": 0, "items": []}
+    sla = _sla_cfg(request)
+    span = 30 if int(days or 7) >= 30 else 7
+    now = time.time()
+    lt = time.localtime(now)
+    midnight = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1))
+    since = midnight - (span - 1) * 86400
+    convs = inbox.list_conversations(limit=500)
+    cmap = {str(c.get("conversation_id") or ""): c for c in convs}
+    items: List[Dict[str, Any]] = []
+    for r in inbox.agent_first_responses(since):
+        if r["resp_ts"] is None or r["agent_id"] != agent:
+            continue
+        frt = max(0, int(r["resp_ts"] - r["t_in"]))
+        c = cmap.get(r["cid"]) or {}
+        items.append({
+            "conversation_id": r["cid"],
+            "platform": str(c.get("platform") or ""),
+            "account_id": str(c.get("account_id") or "default"),
+            "chat_key": str(c.get("chat_key") or ""),
+            "name": str(c.get("display_name") or c.get("chat_key") or r["cid"]),
+            "frt_sec": frt,
+            "attained": frt <= sla["warn"],
+            "responded_at": r["resp_ts"],
+        })
+    items.sort(key=lambda x: -x["frt_sec"])
+    return {"ok": True, "agent": agent, "days": span,
+            "count": len(items), "items": items[:200]}
+
+
 def _collect_chats_from_store(request: Request, limit: int = 30) -> List[Dict[str, Any]]:
     """A1 读路径：直接从 InboxStore（持久事实源）读会话列表，映射回 chat dict 形状。
 
@@ -624,13 +815,40 @@ def register_unified_inbox_routes(
         bus = get_event_bus()
         queue = bus.subscribe()
 
+        _sla_seen: set = set()
+
+        def _sla_pushes():
+            """边沿触发：返回本轮"新转入严重超时"的会话 SSE 帧（去重 + 恢复后可再报）。"""
+            frames: List[str] = []
+            try:
+                snap = _sla_alert_snapshot(request)
+                items = snap.get("items", [])
+                cur = {it["conversation_id"] for it in items}
+                for it in items:
+                    cid = it["conversation_id"]
+                    if cid not in _sla_seen:
+                        _sla_seen.add(cid)
+                        frames.append(
+                            "data: " + _json.dumps(
+                                {"type": "sla_alert", "data": it},
+                                ensure_ascii=False) + "\n\n")
+                # 已恢复（不再严重）的从 seen 移除，便于下次再次告警
+                _sla_seen.intersection_update(cur)
+            except Exception:
+                logger.debug("SLA SSE 推送计算失败（已忽略）", exc_info=True)
+            return frames
+
         async def _gen():
             try:
                 # 仅 replay 最近的 inbox_message 事件，避免设备类噪声
-                _sse_types = {"inbox_message", "agent_presence", "conversation_claim"}
+                _sse_types = {"inbox_message", "agent_presence",
+                              "conversation_claim", "follow_up"}
                 for evt in bus.recent_events(30):
                     if evt.get("type") in _sse_types:
                         yield f"data: {_json.dumps(evt, ensure_ascii=False)}\n\n"
+                # 连接建立即推一轮当前严重超时（无需等首个心跳）
+                for fr in _sla_pushes():
+                    yield fr
                 while True:
                     try:
                         evt = await asyncio.wait_for(queue.get(), timeout=30.0)
@@ -638,6 +856,8 @@ def register_unified_inbox_routes(
                             yield f"data: {_json.dumps(evt, ensure_ascii=False)}\n\n"
                     except asyncio.TimeoutError:
                         yield ": heartbeat\n\n"
+                        for fr in _sla_pushes():
+                            yield fr
                     if await request.is_disconnected():
                         break
             finally:
@@ -722,6 +942,44 @@ def register_unified_inbox_routes(
                 }
         except Exception:
             pass
+        # Phase 6-6：批量给会话挂 contact_id + 逾期跟进红点（contacts 启用时）
+        try:
+            _cstore = _contacts_store(request)
+            if _cstore is not None and chats:
+                pairs = [(str(c.get("platform") or ""), str(c.get("chat_key") or ""))
+                         for c in chats]
+                cmap = _cstore.resolve_contacts_by_external(pairs)
+                overdue = _cstore.overdue_contact_ids()
+                for c in chats:
+                    cid = cmap.get((str(c.get("platform") or ""),
+                                    str(c.get("chat_key") or "")))
+                    if cid:
+                        c["contact_id"] = cid
+                        c["follow_up_overdue"] = cid in overdue
+        except Exception:
+            logger.debug("会话列表 contact 关联失败（已忽略）", exc_info=True)
+        # Phase 6-7/6-8：SLA — 末条为入站则计算当前未回复时长，分级（warn/crit）标色
+        try:
+            _ibx = _inbox_store(request)
+            if _ibx is not None and chats:
+                _sla = _sla_cfg(request)
+                _cids = [str(c.get("conversation_id") or "") for c in chats]
+                _dirs = _ibx.last_message_dirs([x for x in _cids if x])
+                _now = time.time()
+                for c in chats:
+                    info = _dirs.get(str(c.get("conversation_id") or ""))
+                    if info and info.get("direction") == "in":
+                        wait = max(0, int(_now - (info.get("ts") or _now)))
+                        c["unanswered_sec"] = wait
+                        c["sla_breach"] = wait >= _sla["warn"]
+                        c["sla_level"] = ("crit" if wait >= _sla["crit"]
+                                          else "warn" if wait >= _sla["warn"] else "")
+                    else:
+                        c["unanswered_sec"] = 0
+                        c["sla_breach"] = False
+                        c["sla_level"] = ""
+        except Exception:
+            logger.debug("会话列表 SLA 统计失败（已忽略）", exc_info=True)
         return {
             "ok": True,
             "ts": time.time(),
@@ -1193,7 +1451,7 @@ def register_unified_inbox_routes(
 
     @app.get("/api/workspace/follow-ups")
     async def api_workspace_follow_ups(request: Request, scope: str = "due", limit: int = 50):
-        """待跟进客户列表（scope=due 已到期 / any 全部有跟进）+ 到期计数。"""
+        """待跟进客户列表（scope=due 已到期 / any 全部有跟进）+ 到期计数（全部/本人）。"""
         api_auth(request)
         store = _contacts_store(request)
         if store is None:
@@ -1208,17 +1466,452 @@ def register_unified_inbox_routes(
             r["channel_labels"] = [
                 _PLATFORM_LABELS.get(c, c) for c in (r.get("channels") or [])
             ]
+        agent = _session_agent(request)
         return {"ok": True, "contacts": rows, "total": total,
-                "due_follow_ups": store.count_due_follow_ups()}
+                "due_follow_ups": store.count_due_follow_ups(),
+                "due_tasks": store.count_due_tasks(),
+                "due_tasks_mine": store.count_due_tasks(assignee=agent["agent_id"])}
+
+    @app.post("/api/workspace/contact/{contact_id}/follow-up")
+    async def api_workspace_follow_up_add(
+        contact_id: str, request: Request, _=Depends(api_auth),
+    ):
+        """为客户新增跟进任务：{due_at, note, assignee?}。"""
+        body = await request.json()
+        gw = _contacts_gateway(request)
+        if gw is None:
+            return {"ok": False, "error": "contacts_disabled"}
+        try:
+            due_at = int(body.get("due_at") or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "due_at 必须是时间戳整数")
+        if due_at <= 0:
+            raise HTTPException(400, "due_at 不能为空")
+        agent = _session_agent(request)
+        assignee = str(body.get("assignee") or "").strip() or agent["agent_id"]
+        out = gw.add_follow_up_task(
+            contact_id, due_at=due_at, note=str(body.get("note") or ""),
+            assignee=assignee, operator=agent["agent_id"],
+        )
+        if out.get("ok"):
+            _publish_follow_up("added", contact_id=contact_id,
+                               task_id=out.get("task_id") or "", assignee=assignee)
+        return out
+
+    @app.post("/api/workspace/follow-up/{task_id}/done")
+    async def api_workspace_follow_up_done(
+        task_id: str, request: Request, _=Depends(api_auth),
+    ):
+        """标记跟进任务完成。"""
+        gw = _contacts_gateway(request)
+        if gw is None:
+            return {"ok": False, "error": "contacts_disabled"}
+        agent = _session_agent(request)
+        out = gw.complete_follow_up_task(task_id, operator=agent["agent_id"])
+        if out.get("ok"):
+            _publish_follow_up("done", task_id=task_id)
+        return out
+
+    @app.post("/api/workspace/follow-up/{task_id}/assign")
+    async def api_workspace_follow_up_assign(
+        task_id: str, request: Request, _=Depends(api_auth),
+    ):
+        """改派跟进任务给某坐席：{assignee}。"""
+        body = await request.json()
+        gw = _contacts_gateway(request)
+        if gw is None:
+            return {"ok": False, "error": "contacts_disabled"}
+        assignee = str(body.get("assignee") or "").strip()
+        if not assignee:
+            raise HTTPException(400, "assignee 不能为空")
+        agent = _session_agent(request)
+        out = gw.reassign_follow_up_task(
+            task_id, assignee=assignee, operator=agent["agent_id"])
+        if out.get("ok"):
+            _publish_follow_up("assigned", contact_id=out.get("contact_id") or "",
+                               task_id=task_id, assignee=assignee)
+        return out
+
+    @app.post("/api/workspace/follow-up/{task_id}/snooze")
+    async def api_workspace_follow_up_snooze(
+        task_id: str, request: Request, _=Depends(api_auth),
+    ):
+        """延期跟进任务：{days} 顺延 或 {due_at} 直设。"""
+        body = await request.json()
+        gw = _contacts_gateway(request)
+        if gw is None:
+            return {"ok": False, "error": "contacts_disabled"}
+        try:
+            days = int(body.get("days") or 0)
+            due_at = int(body.get("due_at") or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "days/due_at 必须是整数")
+        if days <= 0 and due_at <= 0:
+            raise HTTPException(400, "需提供 days 或 due_at")
+        agent = _session_agent(request)
+        out = gw.snooze_follow_up_task(
+            task_id, days=days, due_at=due_at, operator=agent["agent_id"])
+        if out.get("ok"):
+            _publish_follow_up("snoozed", contact_id=out.get("contact_id") or "",
+                               task_id=task_id)
+        return out
+
+    @app.get("/api/workspace/my-tasks")
+    async def api_workspace_my_tasks(
+        request: Request, scope: str = "mine", due: str = "today", limit: int = 100,
+    ):
+        """跟进待办列表：scope=mine(本人)/all(全部)，due=today/overdue/all。"""
+        api_auth(request)
+        store = _contacts_store(request)
+        if store is None:
+            return {"ok": False, "error": "contacts_disabled", "tasks": []}
+        agent = _session_agent(request)
+        assignee = agent["agent_id"] if scope != "all" else None
+        now = int(time.time())
+        if due == "overdue":
+            due_before: Optional[int] = now
+        elif due == "all":
+            due_before = None
+        else:  # today（含逾期 + 今天到期）
+            lt = time.localtime(now)
+            due_before = int(time.mktime(
+                (lt.tm_year, lt.tm_mon, lt.tm_mday, 23, 59, 59, 0, 0, -1)))
+        tasks = store.list_open_tasks(
+            assignee=assignee, due_before=due_before,
+            limit=max(1, min(500, int(limit or 100))))
+        for t in tasks:
+            t["channel_labels"] = [_PLATFORM_LABELS.get(c, c) for c in (t.get("channels") or [])]
+            t["overdue"] = bool(t.get("due_at") and t["due_at"] <= now)
+        return {"ok": True, "tasks": tasks,
+                "due_tasks": store.count_due_tasks(),
+                "due_tasks_mine": store.count_due_tasks(assignee=agent["agent_id"])}
+
+    @app.get("/api/workspace/contact/{contact_id}/tasks")
+    async def api_workspace_contact_tasks(
+        contact_id: str, request: Request, include_done: int = 0,
+    ):
+        """某客户的跟进任务（会话内联面板用，轻量）。"""
+        api_auth(request)
+        store = _contacts_store(request)
+        if store is None:
+            return {"ok": False, "tasks": []}
+        return {"ok": True,
+                "tasks": store.list_follow_up_tasks(
+                    contact_id, include_done=bool(include_done))}
+
+    @app.get("/api/workspace/sla-alerts")
+    async def api_workspace_sla_alerts(request: Request):
+        """SLA 告警源（顶栏徽标轮询 + 严重超时清单下钻）。"""
+        api_auth(request)
+        return _sla_alert_snapshot(request)
+
+    @app.get("/api/workspace/sla-detail")
+    async def api_workspace_sla_detail(
+        request: Request, scope: str = "critical", agent: Optional[str] = None,
+    ):
+        """SLA/首响明细下钻清单（仪表盘卡片/坐席行点开）。"""
+        api_auth(request)
+        scope = scope if scope in {"waiting", "breaching", "critical",
+                                   "unresponded"} else "critical"
+        return _sla_detail(request, scope=scope, agent=agent)
+
+    @app.get("/api/workspace/agent-frt-detail")
+    async def api_workspace_agent_frt_detail(
+        request: Request, agent: str = "", days: int = 7,
+    ):
+        """某坐席窗口内首响会话明细（绩效榜下钻）。"""
+        api_auth(request)
+        return _agent_frt_detail(request, agent=str(agent or ""), days=days)
+
+    @app.get("/api/workspace/dashboard")
+    async def api_workspace_dashboard(request: Request, days: int = 7):
+        """工作台仪表盘：今日会话/留资/引流 + 到期跟进 + 坐席负载 + 趋势 + SLA + 首响。"""
+        api_auth(request)
+        store = _contacts_store(request)
+        agent = _session_agent(request)
+        sla = _sla_cfg(request)
+        span = 30 if int(days or 7) >= 30 else 7
+        now = int(time.time())
+        lt = time.localtime(now)
+        midnight = int(time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1)))
+        since = midnight - (span - 1) * 86400
+        out: Dict[str, Any] = {"ok": True, "today": {}, "agent_load": [],
+                               "funnel": {}, "trend": [], "sla": {}, "days": span,
+                               "first_response": {}, "sla_by_agent": [],
+                               "agent_frt": [], "resolution": {}, "res_trend": []}
+        if store is not None:
+            try:
+                ev = store.count_events_since_multi(
+                    ["lead_captured", "handoff_sent"], midnight)
+                out["today"] = {
+                    "new_contacts": store.count_contacts_created_since(midnight),
+                    "leads": ev.get("lead_captured", 0),
+                    "handoffs": ev.get("handoff_sent", 0),
+                }
+                out["due_tasks"] = store.count_due_tasks()
+                out["due_tasks_mine"] = store.count_due_tasks(assignee=agent["agent_id"])
+                out["agent_load"] = store.agent_task_load()
+                out["stage_counts"] = store.count_journeys_by_stage()
+                # N 日趋势（按本地日期）：新客户 / 留资 / 引流(转化)
+                by_new = store.count_contacts_by_day(since)
+                by_lead = store.count_events_by_day("lead_captured", since)
+                by_conv = store.count_events_by_day("handoff_sent", since)
+                trend = []
+                for i in range(span):
+                    day_ts = since + i * 86400
+                    key = time.strftime("%Y-%m-%d", time.localtime(day_ts))
+                    trend.append({"day": key[5:], "new_contacts": by_new.get(key, 0),
+                                  "leads": by_lead.get(key, 0),
+                                  "conversions": by_conv.get(key, 0)})
+                out["trend"] = trend
+                # 解决(引流)时长：首条 msg_in → handoff_sent（按解决日聚合）
+                res_per_day: Dict[str, Dict[str, float]] = {}
+                r_sum = r_cnt = 0
+                for rr in store.resolution_stats(since):
+                    if rr["resolved_ts"] is None:
+                        continue
+                    dur = max(0, rr["resolved_ts"] - rr["t_in"])
+                    rday = time.strftime("%Y-%m-%d", time.localtime(rr["resolved_ts"]))
+                    pd = res_per_day.setdefault(rday, {"sum": 0.0, "n": 0})
+                    pd["sum"] += dur
+                    pd["n"] += 1
+                    if rr["resolved_ts"] >= midnight:
+                        r_sum += dur
+                        r_cnt += 1
+                out["resolution"] = {
+                    "today_resolved": r_cnt,
+                    "today_avg_sec": int(r_sum / r_cnt) if r_cnt else 0}
+                res_trend = []
+                for i in range(span):
+                    day_ts = since + i * 86400
+                    key = time.strftime("%Y-%m-%d", time.localtime(day_ts))
+                    pd = res_per_day.get(key)
+                    res_trend.append({
+                        "day": key[5:],
+                        "avg_min": round(pd["sum"] / pd["n"] / 60, 1) if pd and pd["n"] else 0,
+                        "count": pd["n"] if pd else 0})
+                out["res_trend"] = res_trend
+            except Exception:
+                logger.debug("dashboard 统计失败（已忽略）", exc_info=True)
+        # SLA + 首响：均基于 inbox 消息
+        try:
+            inbox = _inbox_store(request)
+            if inbox is not None:
+                # 当前等待回复（末条入站）+ 分级
+                cids = [c["conversation_id"] for c in inbox.list_conversations(limit=500)]
+                dirs = inbox.last_message_dirs(cids)
+                # 活跃 claim → 会话归属坐席（lease 有效，可靠；过期已 purge）
+                claim_map: Dict[str, Dict[str, str]] = {}
+                try:
+                    for cl in inbox.list_conversation_claims():
+                        claim_map[str(cl.get("conversation_id") or "")] = {
+                            "agent_id": str(cl.get("agent_id") or ""),
+                            "agent_name": str(cl.get("agent_name") or ""),
+                        }
+                except Exception:
+                    logger.debug("dashboard claim 读取失败（已忽略）", exc_info=True)
+                waiting = breaching = critical = 0
+                by_agent: Dict[str, Dict[str, Any]] = {}
+                for cid, v in dirs.items():
+                    if v.get("direction") != "in":
+                        continue
+                    waiting += 1
+                    wait = now - (v.get("ts") or now)
+                    is_warn = wait >= sla["warn"]
+                    is_crit = wait >= sla["crit"]
+                    if is_crit:
+                        critical += 1
+                    if is_warn:
+                        breaching += 1
+                    cl = claim_map.get(cid)
+                    akey = cl["agent_id"] if cl and cl["agent_id"] else ""
+                    bucket = by_agent.get(akey)
+                    if bucket is None:
+                        bucket = {"agent_id": akey,
+                                  "agent_name": (cl["agent_name"] if cl else "")
+                                  or akey or "(未认领)",
+                                  "waiting": 0, "breaching": 0, "critical": 0}
+                        by_agent[akey] = bucket
+                    bucket["waiting"] += 1
+                    if is_warn:
+                        bucket["breaching"] += 1
+                    if is_crit:
+                        bucket["critical"] += 1
+                out["sla"] = {"waiting": waiting, "breaching": breaching,
+                              "critical": critical, "warn_sec": sla["warn"],
+                              "crit_sec": sla["crit"]}
+                out["sla_by_agent"] = sorted(
+                    by_agent.values(),
+                    key=lambda x: (-x["critical"], -x["breaching"], -x["waiting"]))
+                # 首响：窗口内首次进线的会话，首条入站→首条其后出站
+                rows = inbox.first_response_rows(since)
+                per_day: Dict[str, Dict[str, float]] = {}
+                t_sum = t_cnt = t_attain = t_resp = 0
+                for r in rows:
+                    day = time.strftime("%Y-%m-%d", time.localtime(r["t_in"]))
+                    d = per_day.setdefault(day, {"n": 0, "resp": 0, "sum": 0.0,
+                                                 "attain": 0})
+                    d["n"] += 1
+                    if r["t_out"] is not None:
+                        frt = max(0.0, r["t_out"] - r["t_in"])
+                        d["resp"] += 1
+                        d["sum"] += frt
+                        if frt <= sla["warn"]:
+                            d["attain"] += 1
+                    if r["t_in"] >= midnight:
+                        t_cnt += 1
+                        if r["t_out"] is not None:
+                            frt = max(0.0, r["t_out"] - r["t_in"])
+                            t_resp += 1
+                            t_sum += frt
+                            if frt <= sla["warn"]:
+                                t_attain += 1
+                out["first_response"] = {
+                    "today_count": t_cnt,
+                    "today_responded": t_resp,
+                    "today_avg_sec": int(t_sum / t_resp) if t_resp else 0,
+                    "today_attain_rate": round(t_attain / t_resp * 100, 1) if t_resp else 0.0,
+                }
+                # 首响达标率趋势（与 trend 对齐 day 维度）
+                frt_trend = []
+                for i in range(span):
+                    day_ts = since + i * 86400
+                    key = time.strftime("%Y-%m-%d", time.localtime(day_ts))
+                    d = per_day.get(key)
+                    rate = round(d["attain"] / d["resp"] * 100, 1) if d and d["resp"] else 0.0
+                    frt_trend.append({"day": key[5:], "rate": rate,
+                                      "count": d["n"] if d else 0})
+                out["frt_trend"] = frt_trend
+                # 坐席首响绩效（基于 agent_sends 归属，窗口内）
+                ag: Dict[str, Dict[str, Any]] = {}
+                for r in inbox.agent_first_responses(since):
+                    if r["resp_ts"] is None or not r["agent_id"]:
+                        continue
+                    frt = max(0.0, r["resp_ts"] - r["t_in"])
+                    a = ag.get(r["agent_id"])
+                    if a is None:
+                        a = {"agent_id": r["agent_id"],
+                             "agent_name": r["agent_name"] or r["agent_id"],
+                             "responded": 0, "_sum": 0.0, "attain": 0}
+                        ag[r["agent_id"]] = a
+                    a["responded"] += 1
+                    a["_sum"] += frt
+                    if frt <= sla["warn"]:
+                        a["attain"] += 1
+                agent_frt = []
+                for a in ag.values():
+                    n = a["responded"]
+                    agent_frt.append({
+                        "agent_id": a["agent_id"], "agent_name": a["agent_name"],
+                        "responded": n,
+                        "avg_sec": int(a["_sum"] / n) if n else 0,
+                        "attain_rate": round(a["attain"] / n * 100, 1) if n else 0.0})
+                agent_frt.sort(key=lambda x: -x["responded"])
+                out["agent_frt"] = agent_frt
+        except Exception:
+            logger.debug("dashboard SLA/首响 统计失败（已忽略）", exc_info=True)
+        try:
+            out["funnel"] = web_funnel_snapshot(request, config_manager)
+        except Exception:
+            out["funnel"] = {}
+        return out
 
     @app.get("/api/workspace/tags")
     async def api_workspace_tags(request: Request, limit: int = 100):
-        """全部标签 + 使用计数（标签自动补全/快筛）。"""
+        """全部标签 + 使用计数 + 预设库颜色（标签自动补全/快筛/上色）。"""
         api_auth(request)
         store = _contacts_store(request)
         if store is None:
             return {"ok": False, "tags": []}
         return {"ok": True, "tags": store.list_all_tags(limit=max(1, min(300, int(limit or 100))))}
+
+    @app.get("/api/workspace/tag-library")
+    async def api_workspace_tag_library_list(request: Request):
+        """预设标签库（名称/颜色/排序）。"""
+        api_auth(request)
+        gw = _contacts_gateway(request)
+        if gw is None:
+            return {"ok": False, "library": []}
+        return {"ok": True, "library": gw.list_tag_library()}
+
+    @app.post("/api/workspace/tag-library")
+    async def api_workspace_tag_library_upsert(request: Request, _=Depends(api_auth)):
+        """新增/更新预设标签：{tag, color?, sort_order?}。"""
+        body = await request.json()
+        gw = _contacts_gateway(request)
+        if gw is None:
+            return {"ok": False, "error": "contacts_disabled"}
+        tag = str(body.get("tag") or "").strip()
+        if not tag:
+            raise HTTPException(400, "tag 不能为空")
+        ok = gw.upsert_tag_library(
+            tag, color=str(body.get("color") or ""),
+            sort_order=int(body.get("sort_order") or 0),
+        )
+        return {"ok": ok, "library": gw.list_tag_library()}
+
+    @app.delete("/api/workspace/tag-library/{tag}")
+    async def api_workspace_tag_library_delete(
+        tag: str, request: Request, _=Depends(api_auth),
+    ):
+        """从预设库删除一个标签（不影响已打在客户上的标签）。"""
+        gw = _contacts_gateway(request)
+        if gw is None:
+            return {"ok": False, "error": "contacts_disabled"}
+        return {"ok": gw.delete_tag_library(tag), "library": gw.list_tag_library()}
+
+    @app.get("/api/workspace/contacts/export.csv")
+    async def api_workspace_contacts_export(
+        request: Request,
+        q: str = "",
+        stage: str = "",
+        has_lead: str = "",
+        tag: str = "",
+        follow_up: str = "",
+        limit: int = 5000,
+    ):
+        """按当前筛选导出客户列表 CSV（最多 limit 行）。"""
+        api_auth(request)
+        store = _contacts_store(request)
+        if store is None:
+            raise HTTPException(503, "contacts 未启用")
+        lead_filter: Optional[bool] = None
+        if has_lead in ("1", "true", "yes"):
+            lead_filter = True
+        elif has_lead in ("0", "false", "no"):
+            lead_filter = False
+        fu = follow_up if follow_up in ("due", "any") else ""
+        rows, _total = store.list_contacts_overview(
+            q=str(q or "").strip(), stage=str(stage or "").strip(),
+            has_lead=lead_filter, tag=str(tag or "").strip(), follow_up=fu,
+            limit=max(1, min(20000, int(limit or 5000))), offset=0,
+        )
+        import csv
+        import io
+        buf = io.StringIO()
+        buf.write("\ufeff")  # Excel UTF-8 BOM
+        w = csv.writer(buf)
+        w.writerow(["contact_id", "name", "channels", "funnel_stage",
+                    "intimacy", "has_lead", "tags", "follow_up_at", "last_active_at"])
+        for r in rows:
+            stage_lbl = FUNNEL_STAGE_LABELS.get(r.get("funnel_stage") or "",
+                                                r.get("funnel_stage") or "")
+            w.writerow([
+                r.get("contact_id") or "",
+                r.get("primary_name") or "",
+                " ".join(_PLATFORM_LABELS.get(c, c) for c in (r.get("channels") or [])),
+                stage_lbl,
+                "" if r.get("intimacy_score") is None else r.get("intimacy_score"),
+                "1" if r.get("has_lead") else "0",
+                " ".join(r.get("tags") or []),
+                _fmt_ts(r.get("follow_up_at") or 0),
+                _fmt_ts(r.get("last_active_at") or 0),
+            ])
+        return Response(
+            content=buf.getvalue(),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": "attachment; filename=contacts.csv"},
+        )
 
     @app.get("/workspace/contacts", response_class=HTMLResponse)
     async def workspace_contacts_page(request: Request, _=Depends(page_auth)):
@@ -1235,6 +1928,38 @@ def register_unified_inbox_routes(
         except Exception:
             pass
         return templates.TemplateResponse(request, "contacts_list.html", ctx)
+
+    @app.get("/workspace/tasks", response_class=HTMLResponse)
+    async def workspace_tasks_page(request: Request, _=Depends(page_auth)):
+        ctx: Dict[str, Any] = {
+            "user_name": request.session.get("username") or "",
+            "user_display_name": request.session.get("display_name")
+            or request.session.get("username") or "",
+        }
+        try:
+            if config_manager is not None:
+                _wa = (config_manager.config or {}).get("web_admin", {}) or {}
+                if _wa.get("site_name"):
+                    ctx["site_name"] = _wa.get("site_name")
+        except Exception:
+            pass
+        return templates.TemplateResponse(request, "tasks.html", ctx)
+
+    @app.get("/workspace/dash", response_class=HTMLResponse)
+    async def workspace_dash_page(request: Request, _=Depends(page_auth)):
+        ctx: Dict[str, Any] = {
+            "user_name": request.session.get("username") or "",
+            "user_display_name": request.session.get("display_name")
+            or request.session.get("username") or "",
+        }
+        try:
+            if config_manager is not None:
+                _wa = (config_manager.config or {}).get("web_admin", {}) or {}
+                if _wa.get("site_name"):
+                    ctx["site_name"] = _wa.get("site_name")
+        except Exception:
+            pass
+        return templates.TemplateResponse(request, "workspace_dashboard.html", ctx)
 
     @app.get("/api/unified-inbox/templates")
     async def api_unified_inbox_templates(request: Request):
@@ -1466,6 +2191,20 @@ def register_unified_inbox_routes(
         if not chat_key or not text:
             raise HTTPException(400, "chat_key 和 text 不能为空")
 
+        _send_agent = _session_agent(request)
+
+        def _mark_send(cid: str) -> None:
+            """发送成功后打坐席首响归属点（best-effort，失败不影响发送）。"""
+            ibx = _inbox_store(request)
+            if ibx is None or not cid:
+                return
+            try:
+                ibx.record_agent_send(
+                    cid, _send_agent["agent_id"],
+                    agent_name=_send_agent.get("display_name", ""))
+            except Exception:
+                logger.debug("record_agent_send 失败（已忽略）", exc_info=True)
+
         if platform == "line":
             svcs = _get_line_services(request)
             target = next((s for s in svcs if getattr(s, "account_id", "default") == account_id), None)
@@ -1475,6 +2214,7 @@ def register_unified_inbox_routes(
                 raise HTTPException(503, "LINE 服务未启用")
             try:
                 result = await target.send_to_chat(chat_key=chat_key, text=text)
+                _mark_send(_conv_id("line", account_id, chat_key))
                 return {"ok": True, "result": result}
             except AttributeError:
                 raise HTTPException(501, "LINE 暂不支持主动发送（需启用 approve 模式）")
@@ -1488,6 +2228,7 @@ def register_unified_inbox_routes(
                 raise HTTPException(503, "WhatsApp 服务未启用")
             try:
                 result = await target.send_to_chat(chat_key=chat_key, text=text)
+                _mark_send(_conv_id("whatsapp", account_id, chat_key))
                 return {"ok": True, "result": result}
             except AttributeError:
                 raise HTTPException(501, "WhatsApp 暂不支持主动发送（需启用 approve 模式）")
@@ -1498,6 +2239,7 @@ def register_unified_inbox_routes(
                 raise HTTPException(503, "Messenger 服务未启用")
             try:
                 result = await msvc.send_to_chat_name(chat_name=chat_key, text=text)
+                _mark_send(_conv_id("messenger", account_id, chat_key))
                 return {"ok": True, "result": result}
             except Exception as ex:
                 raise HTTPException(500, str(ex))
@@ -1513,6 +2255,7 @@ def register_unified_inbox_routes(
                 result = sender(chat_key, text)
                 if hasattr(result, "__await__"):
                     result = await result
+                _mark_send(_conv_id("telegram", account_id, chat_key))
                 return {"ok": True, "result": result}
             except Exception as ex:
                 raise HTTPException(500, str(ex))
@@ -1532,6 +2275,7 @@ def register_unified_inbox_routes(
                                    direction="out", display_name="")
             except Exception:
                 logger.debug("[web_chat] 坐席出站落库失败", exc_info=True)
+            _mark_send(cid)
             try:
                 get_web_outbound_hub().publish(cid, {
                     "type": "web_outbound", "conversation_id": cid,
