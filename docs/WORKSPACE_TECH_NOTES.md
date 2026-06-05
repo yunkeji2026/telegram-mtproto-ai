@@ -403,6 +403,22 @@ API：`GET /api/workspace/contact/{contact_id}` 一次返回 `{contact, timeline
 - **复用既有**：会话→contact 解析、`add_follow_up_task`、`follow_up` 事件总线、
   `CRMW.toast`，无新表、无新 store 方法。
 
+## 5u. 告警个性化：每坐席 SLA 阈值 + 免打扰 + 静音（Phase 6-18）
+
+让 6-9 的一刀切告警可按坐席自调，避免无关告警淹没。
+
+- **存储** `inbox.agent_prefs` 表（`warn_sec`/`crit_sec` 0=沿用全局、`muted`、
+  `dnd_start`/`dnd_end` 本地分钟 0-1439 / -1=关）+ `get/set_agent_prefs`。
+- **合并** `_agent_sla_cfg(request)`：全局 `_sla_cfg` 叠加当前坐席覆盖，
+  返回 `{warn, crit, muted, dnd}`；`_dnd_active()` 支持跨午夜（start>end）。
+- **静默口径**：`_sla_alert_snapshot` 按个人阈值算严重；静音或免打扰时段
+  → `items=[]` + `quiet=true`（计数仍返回供仪表盘参考），徽标隐藏、
+  SSE 自然无 toast（无 items 即无帧）。**仅影响告警，不改团队级列表/仪表盘配色**
+  （团队统一 SLA 标准仍走全局 config）。
+- **端点** `GET/POST /api/workspace/prefs`：回显（含全局默认 + effective）/保存。
+- **入口**：顶栏 ⚙ 打开轻量设置面板（阈值分钟 + `<input type=time>` 免打扰 +
+  静音勾选），保存即 `refreshSla()`。
+
 ## 6. 明确不做（后续阶段）
 
 | 项 | 原因 |

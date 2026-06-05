@@ -406,6 +406,8 @@ _BASELINE = """
 /api/workspace/metrics/web-funnel	GET
 /api/workspace/presence	GET
 /api/workspace/presence	POST
+/api/workspace/prefs	GET
+/api/workspace/prefs	POST
 /api/workspace/sla-alerts	GET
 /api/workspace/sla-detail	GET
 /api/workspace/sla/create-task	POST

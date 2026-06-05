@@ -64,6 +64,7 @@
   <span class="ws-spacer"></span>
   <a class="ws-review" id="ws-sla" style="background:#dc2626;color:#fff;text-decoration:none;cursor:pointer;" title="SLA 严重超时未回复会话"></a>
   <a class="ws-review" id="ws-followup" style="background:#dc2626;color:#fff;text-decoration:none;" href="/workspace/tasks" title="到期待跟进任务"></a>
+  <span id="ws-prefs-btn" style="cursor:pointer;font-size:16px;padding:0 6px;" title="告警设置（SLA 阈值 / 免打扰）">⚙</span>
   <span class="ws-review" id="ws-review" title="待裁决的合并候选" onclick="window.__wsReviews&&window.__wsReviews.open()"></span>
   <span class="ws-funnel" id="ws-funnel" title="今日 web 漏斗"></span>
   <span class="ws-agents" id="ws-agents-online" title="在线坐席"></span>
@@ -197,6 +198,7 @@
     fetch('/api/workspace/sla-alerts').then(function(r){return r.json();}).then(function(d){
       if(!d||!d.ok){ if(slaBadge) slaBadge.style.display='none'; return; }
       _slaItems=d.items||[];
+      if(d.quiet){ if(slaBadge) slaBadge.style.display='none'; return; }
       var crit=d.critical||0, brk=d.breaching||0;
       if(slaBadge){
         slaBadge.style.display=(crit||brk)?'inline-block':'none';
@@ -215,6 +217,57 @@
     });
   }
   refreshSla(); setInterval(refreshSla, 30000);
+
+  // 告警设置面板（每坐席 SLA 阈值 + 免打扰时段 + 静音）
+  function _hm(min){ if(min==null||min<0) return ''; var h=Math.floor(min/60),m=min%60; return (h<10?'0':'')+h+':'+(m<10?'0':'')+m; }
+  function _toMin(s){ if(!s) return -1; var p=String(s).split(':'); if(p.length<2) return -1; var h=parseInt(p[0],10),m=parseInt(p[1],10); if(isNaN(h)||isNaN(m)) return -1; return h*60+m; }
+  function openPrefs(){
+    var ov=document.getElementById('ws-prefs-modal');
+    if(!ov){
+      ov=document.createElement('div'); ov.id='ws-prefs-modal';
+      ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:9999;display:flex;align-items:center;justify-content:center;';
+      ov.innerHTML='<div style="background:#fff;border-radius:12px;padding:20px;width:340px;max-width:92vw;box-shadow:0 10px 40px rgba(0,0,0,.2);font-size:14px;">'
+        +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;"><strong>告警设置</strong><span id="ws-prefs-x" style="cursor:pointer;color:#64748b;font-size:18px;">✕</span></div>'
+        +'<label style="display:flex;justify-content:space-between;align-items:center;margin:8px 0;">警告阈值（分钟，空=全局）<input id="wp-warn" type="number" min="0" style="width:90px;padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;"></label>'
+        +'<label style="display:flex;justify-content:space-between;align-items:center;margin:8px 0;">严重阈值（分钟，空=全局）<input id="wp-crit" type="number" min="0" style="width:90px;padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;"></label>'
+        +'<label style="display:flex;justify-content:space-between;align-items:center;margin:8px 0;">免打扰 起<input id="wp-dnds" type="time" style="padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;"></label>'
+        +'<label style="display:flex;justify-content:space-between;align-items:center;margin:8px 0;">免打扰 止<input id="wp-dnde" type="time" style="padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;"></label>'
+        +'<label style="display:flex;justify-content:space-between;align-items:center;margin:8px 0;">完全静音告警<input id="wp-mute" type="checkbox"></label>'
+        +'<div id="wp-hint" style="font-size:12px;color:#94a3b8;margin:6px 0 12px;"></div>'
+        +'<div style="display:flex;gap:8px;justify-content:flex-end;"><button id="wp-cancel" style="padding:6px 14px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;">取消</button><button id="wp-save" style="padding:6px 14px;border:0;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer;">保存</button></div>'
+        +'</div>';
+      document.body.appendChild(ov);
+      ov.addEventListener('click',function(e){ if(e.target===ov) ov.style.display='none'; });
+      ov.querySelector('#ws-prefs-x').addEventListener('click',function(){ ov.style.display='none'; });
+      ov.querySelector('#wp-cancel').addEventListener('click',function(){ ov.style.display='none'; });
+      ov.querySelector('#wp-save').addEventListener('click',savePrefs);
+    }
+    ov.style.display='flex';
+    fetch('/api/workspace/prefs').then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok) return; var p=d.prefs||{};
+      document.getElementById('wp-warn').value = p.warn_sec? Math.round(p.warn_sec/60):'';
+      document.getElementById('wp-crit').value = p.crit_sec? Math.round(p.crit_sec/60):'';
+      document.getElementById('wp-dnds').value = _hm(p.dnd_start);
+      document.getElementById('wp-dnde').value = _hm(p.dnd_end);
+      document.getElementById('wp-mute').checked = !!p.muted;
+      document.getElementById('wp-hint').textContent = '全局默认：警告 '+Math.round(d.global_warn_sec/60)+' 分 / 严重 '+Math.round(d.global_crit_sec/60)+' 分';
+    }).catch(function(){});
+  }
+  function savePrefs(){
+    var warn=parseInt(document.getElementById('wp-warn').value,10);
+    var crit=parseInt(document.getElementById('wp-crit').value,10);
+    var body={ warn_sec: isNaN(warn)?0:warn*60, crit_sec: isNaN(crit)?0:crit*60,
+      muted: document.getElementById('wp-mute').checked?1:0,
+      dnd_start: _toMin(document.getElementById('wp-dnds').value),
+      dnd_end: _toMin(document.getElementById('wp-dnde').value) };
+    fetch('/api/workspace/prefs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+      .then(function(r){return r.json();}).then(function(d){
+        if(d&&d.ok){ document.getElementById('ws-prefs-modal').style.display='none'; CRMW.toast('告警设置已保存'); refreshSla(); }
+        else { CRMW.toast('保存失败','#dc2626'); }
+      }).catch(function(){ CRMW.toast('保存失败','#dc2626'); });
+  }
+  var prefsBtn=document.getElementById('ws-prefs-btn');
+  if(prefsBtn){ prefsBtn.addEventListener('click',openPrefs); }
 
   // 轻量 toast（SLA 实时告警）— 委托共享组件
   function wsToast(text){ CRMW.toast(text); }
