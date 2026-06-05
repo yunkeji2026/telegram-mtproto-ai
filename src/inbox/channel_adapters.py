@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Protocol, runtime_checkable
 
-from src.inbox.normalizer import normalize_chat
+from src.inbox.normalizer import normalize_chat, store_row_to_chat
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +171,34 @@ class TelegramInboxAdapter:
         return out
 
 
+class WebInboxAdapter:
+    """web 渠道：会话即在统一收件箱（服务端原生），直接从 store 读出供工作台展示。"""
+
+    platform = "web"
+
+    def collect_chats(self, request: Any, limit: int) -> List[Dict[str, Any]]:
+        store = getattr(request.app.state, "inbox_store", None)
+        if store is None:
+            return []
+        out: List[Dict[str, Any]] = []
+        try:
+            rows = store.list_conversations(limit=limit, platform="web") or []
+        except Exception:
+            logger.debug("WebInboxAdapter list_conversations 失败", exc_info=True)
+            return []
+        for r in rows:
+            cid = str(r.get("conversation_id") or "")
+            mode = "auto_ai"
+            mcount = 0
+            try:
+                mode = store.get_automation_mode(cid)
+                mcount = store.count_messages(cid)
+            except Exception:
+                pass
+            out.append(store_row_to_chat(r, automation_mode=mode, message_count=mcount))
+        return out
+
+
 def default_inbox_adapters() -> List[ChannelAdapter]:
     """默认渠道适配器注册表。新增渠道在此追加即可，核心聚合无需改动。"""
     return [
@@ -178,6 +206,7 @@ def default_inbox_adapters() -> List[ChannelAdapter]:
         WhatsAppInboxAdapter(),
         MessengerInboxAdapter(),
         TelegramInboxAdapter(),
+        WebInboxAdapter(),
     ]
 
 
