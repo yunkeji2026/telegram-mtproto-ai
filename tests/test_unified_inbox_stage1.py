@@ -201,14 +201,21 @@ def test_unified_inbox_template_contains_translation_controls():
     path = Path(__file__).resolve().parent.parent / "src" / "web" / "templates" / "unified_inbox.html"
     html = path.read_text(encoding="utf-8")
     assert "翻译为中文" in html
-    assert "发送前翻译预览" in html
+    assert "翻译预览" in html
+    assert "翻译成" in html  # Phase 4：翻译后发送控件
     assert "/api/unified-inbox/translate" in html
     assert "/api/unified-inbox/analyze" in html
     assert "/api/unified-inbox/profile" in html
     assert "/api/voice/tts-test" in html
     assert "/api/unified-inbox/automation" in html
     assert "多答案建议" in html
-    assert "对象档案" in html
+    assert "客户档案" in html
+    # Phase 4：账号分栏 + AI 接管开关 + 翻译后发送
+    assert "renderPlatformBar" in html
+    assert "data-filter" in html
+    assert "ai-takeover-btn" in html
+    assert "toggleAiTakeover" in html
+    assert "xlate-on" in html
     assert "生成语音预览" in html
     assert "AI 助手" in html
 
