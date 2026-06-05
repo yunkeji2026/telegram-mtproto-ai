@@ -55,7 +55,9 @@ def register_auth_user_routes(
                 request.session["role"] = user["role"]
                 request.session["display_name"] = user.get("display_name", username)
                 request.session["jti"] = jti
-                return RedirectResponse("/", status_code=303)
+                # 坐席角色登录后直达独立工作台，不进后台
+                _dest = "/workspace" if user["role"] == "agent" else "/"
+                return RedirectResponse(_dest, status_code=303)
             return templates.TemplateResponse(request, "login.html", {
                 "error": "用户名或密码错误", "has_users": True
             })

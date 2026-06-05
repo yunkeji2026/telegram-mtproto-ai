@@ -111,6 +111,9 @@ class AIChatAssistant:
         self._web_server = None
         # W2-D4: 主动唤醒循环引用（关程序时 stop）
         self._reactivation_loop = None
+        # 坐席工作台实时化（D5a）：收件箱后台 ingest 轮询任务 + web_app 引用
+        self._web_app = None  # type: Optional[Any]  # noqa: F821
+        self._inbox_ingest_task = None
         
     async def initialize(self):
         """初始化所有组件"""
@@ -563,6 +566,7 @@ class AIChatAssistant:
                                         telegram_client=self.telegram_client,
                                         event_tracker=self.telegram_client.event_tracker,
                                         log_buffer=_log_buf)
+                    self._web_app = web_app  # 供收件箱后台 ingest 轮询访问 state 上的各平台 service
                     if self.line_rpa_service is not None:
                         web_app.state.line_rpa_service = self.line_rpa_service
                     web_app.state.line_rpa_services = self.line_rpa_services
@@ -933,6 +937,9 @@ class AIChatAssistant:
                 # 必须在 contacts + messenger_rpa_service + ai_client 都就绪后启动
                 await self._maybe_start_reactivation_loop()
 
+                # 坐席工作台实时化（D5a）：后台轻量 ingest 轮询 → 新入站消息发 SSE 事件
+                self._maybe_start_inbox_ingest_loop()
+
                 # Mobile Bridge 轮询循环
                 if self.mobile_bridge is not None:
                     try:
@@ -952,6 +959,52 @@ class AIChatAssistant:
             finally:
                 await self.stop()
     
+    def _maybe_start_inbox_ingest_loop(self) -> None:
+        """D5a：启动收件箱后台 ingest 轮询循环。
+
+        周期性把各平台 runner 的最近会话聚合 ingest 进 inbox.db；对**新入站消息**
+        发 inbox_message 事件（坐席工作台 SSE 实时刷新）。冷启动首轮 warmup 不发事件。
+        条件：inbox 已挂载 + web_app 就绪。
+        """
+        if self.inbox_store is None or self._web_app is None:
+            return
+        try:
+            _inbox_cfg = (self.config.config or {}).get("inbox", {}) or {}
+            interval = float(_inbox_cfg.get("realtime_poll_sec", 10))
+        except Exception:
+            interval = 10.0
+        if interval <= 0:
+            self.logger.info("收件箱实时 ingest 轮询已禁用（realtime_poll_sec<=0）")
+            return
+        self._inbox_ingest_task = asyncio.create_task(
+            self._inbox_ingest_loop(interval), name="inbox_ingest_loop",
+        )
+        self.logger.info("✅ 收件箱实时 ingest 轮询已启动（interval=%ss）", interval)
+
+    async def _inbox_ingest_loop(self, interval: float) -> None:
+        from types import SimpleNamespace
+        from src.inbox.channel_adapters import (
+            default_inbox_adapters, collect_chats_via_adapters,
+        )
+        from src.inbox.ingest import ingest_collected_chats
+
+        adapters = default_inbox_adapters()
+        shim = SimpleNamespace(app=self._web_app)
+        warmup = True  # 首轮只 ingest 不发事件，避免冷启动事件洪泛
+        while self.running:
+            try:
+                chats = await asyncio.to_thread(
+                    collect_chats_via_adapters, shim, 50, adapters,
+                )
+                # ingest（含发事件）放主循环线程执行：SSE 用的 asyncio.Queue 非线程安全
+                ingest_collected_chats(
+                    self.inbox_store, chats, publish_events=not warmup,
+                )
+                warmup = False
+            except Exception:
+                self.logger.debug("收件箱 ingest 轮询异常", exc_info=True)
+            await asyncio.sleep(interval)
+
     async def _maybe_start_reactivation_loop(self) -> None:
         """W2-D4.2/4.3：启动 reactivation 主动唤醒循环（陪护核心）。
 
@@ -1299,6 +1352,14 @@ class AIChatAssistant:
                     self.logger.info("WhatsApp RPA [%s] 后台循环已停止", getattr(_wsvc, "account_id", "?"))
                 except Exception as ex:
                     self.logger.warning("WhatsApp RPA 停止异常: %s", ex)
+
+            # D5a：收件箱 ingest 轮询优雅停止
+            if self._inbox_ingest_task is not None:
+                try:
+                    self._inbox_ingest_task.cancel()
+                    self.logger.info("收件箱 ingest 轮询已停止")
+                except Exception as ex:
+                    self.logger.warning("收件箱 ingest 轮询停止异常: %s", ex)
 
             # W2-D4.2：reactivation_loop 优雅停止
             if self._reactivation_loop is not None:

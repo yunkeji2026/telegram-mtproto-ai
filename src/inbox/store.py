@@ -133,6 +133,24 @@ CREATE TABLE IF NOT EXISTS reply_drafts (
 CREATE INDEX IF NOT EXISTS idx_drafts_status ON reply_drafts(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_drafts_conv   ON reply_drafts(conversation_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_drafts_source ON reply_drafts(source_kind, source_id);
+
+-- Phase 5：坐席在线状态 + 会话租约锁（多坐席防重复回复）
+CREATE TABLE IF NOT EXISTS agent_presence (
+    agent_id          TEXT PRIMARY KEY,
+    display_name      TEXT NOT NULL DEFAULT '',
+    status            TEXT NOT NULL DEFAULT 'offline',
+    last_seen_at      REAL NOT NULL DEFAULT 0,
+    updated_at        REAL NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS conversation_claims (
+    conversation_id   TEXT PRIMARY KEY,
+    agent_id          TEXT NOT NULL,
+    agent_name        TEXT NOT NULL DEFAULT '',
+    claimed_at        REAL NOT NULL DEFAULT 0,
+    expires_at        REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_claims_agent   ON conversation_claims(agent_id);
+CREATE INDEX IF NOT EXISTS idx_claims_expires ON conversation_claims(expires_at);
 """
 
 
@@ -322,6 +340,64 @@ class InboxStore:
                 (conversation_id, limit),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def list_recent_messages(
+        self,
+        conversation_id: str,
+        *,
+        limit: int = 50,
+        before_ts: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
+        """取会话**最近** limit 条（可用 before_ts 游标向更早翻页），返回 ts 升序。
+
+        与 list_messages（取最旧 limit 条）相反，用于时间线展示与分页加载。
+        """
+        limit = max(1, min(500, int(limit or 50)))
+        with self._lock:
+            if before_ts is not None:
+                rows = self._conn.execute(
+                    "SELECT * FROM messages WHERE conversation_id = ? AND ts < ? "
+                    "ORDER BY ts DESC LIMIT ?",
+                    (conversation_id, float(before_ts), limit),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT * FROM messages WHERE conversation_id = ? ORDER BY ts DESC LIMIT ?",
+                    (conversation_id, limit),
+                ).fetchall()
+        return [dict(r) for r in reversed(rows)]
+
+    def update_message_translation(
+        self,
+        message_id: str,
+        *,
+        translated_text: str,
+        target_lang: str = "zh",
+        source_lang: str = "",
+    ) -> bool:
+        """回写入站消息译文（Phase 5-3 自动翻译缓存）。"""
+        mid = str(message_id or "").strip()
+        if not mid or not str(translated_text or "").strip():
+            return False
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                UPDATE messages SET
+                    translated_text = ?,
+                    target_lang = ?,
+                    source_lang = CASE WHEN ? != '' THEN ? ELSE source_lang END
+                WHERE message_id = ?
+                """,
+                (
+                    str(translated_text),
+                    str(target_lang or "zh"),
+                    str(source_lang or ""),
+                    str(source_lang or ""),
+                    mid,
+                ),
+            )
+            self._conn.commit()
+            return int(cur.rowcount or 0) > 0
 
     def count_messages(self, conversation_id: str = "") -> int:
         with self._lock:
@@ -518,3 +594,170 @@ class InboxStore:
         except Exception:
             out["risk_reasons"] = []
         return out
+
+    # ── Phase 5：坐席 presence + 会话租约 ─────────────────────
+
+    def upsert_agent_presence(
+        self,
+        agent_id: str,
+        *,
+        display_name: str = "",
+        status: str = "online",
+    ) -> Dict[str, Any]:
+        aid = str(agent_id or "").strip()
+        if not aid:
+            raise ValueError("agent_id required")
+        st = str(status or "online").strip().lower()
+        if st not in {"online", "busy", "offline"}:
+            raise ValueError(f"invalid status: {st}")
+        now = self._now()
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO agent_presence(agent_id, display_name, status, last_seen_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(agent_id) DO UPDATE SET
+                    display_name = CASE WHEN excluded.display_name != ''
+                        THEN excluded.display_name ELSE agent_presence.display_name END,
+                    status = excluded.status,
+                    last_seen_at = excluded.last_seen_at,
+                    updated_at = excluded.updated_at
+                """,
+                (aid, str(display_name or ""), st, now, now),
+            )
+            self._conn.commit()
+        return self.get_agent_presence(aid) or {}
+
+    def get_agent_presence(self, agent_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM agent_presence WHERE agent_id = ?", (agent_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def list_agent_presence(self, *, active_within_sec: float = 120) -> List[Dict[str, Any]]:
+        cutoff = self._now() - max(0.0, float(active_within_sec or 0))
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM agent_presence WHERE last_seen_at >= ? ORDER BY last_seen_at DESC",
+                (cutoff,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def purge_expired_claims(self) -> int:
+        now = self._now()
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM conversation_claims WHERE expires_at > 0 AND expires_at < ?",
+                (now,),
+            )
+            self._conn.commit()
+            return int(cur.rowcount or 0)
+
+    def get_conversation_claim(self, conversation_id: str) -> Optional[Dict[str, Any]]:
+        self.purge_expired_claims()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM conversation_claims WHERE conversation_id = ?",
+                (conversation_id,),
+            ).fetchone()
+        if not row:
+            return None
+        out = dict(row)
+        if float(out.get("expires_at") or 0) < self._now():
+            return None
+        return out
+
+    def list_conversation_claims(self) -> List[Dict[str, Any]]:
+        self.purge_expired_claims()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM conversation_claims ORDER BY claimed_at DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def set_conversation_claim(
+        self,
+        conversation_id: str,
+        agent_id: str,
+        *,
+        agent_name: str = "",
+        ttl_sec: float = 900,
+        force: bool = False,
+    ) -> Dict[str, Any]:
+        cid = str(conversation_id or "").strip()
+        aid = str(agent_id or "").strip()
+        if not cid or not aid:
+            raise ValueError("conversation_id and agent_id required")
+        self.purge_expired_claims()
+        existing = self.get_conversation_claim(cid)
+        if existing and existing.get("agent_id") != aid and not force:
+            return {
+                "ok": False,
+                "reason": "already_claimed",
+                "claim": existing,
+            }
+        now = self._now()
+        exp = now + max(60.0, float(ttl_sec or 900))
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO conversation_claims
+                    (conversation_id, agent_id, agent_name, claimed_at, expires_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(conversation_id) DO UPDATE SET
+                    agent_id = excluded.agent_id,
+                    agent_name = excluded.agent_name,
+                    claimed_at = excluded.claimed_at,
+                    expires_at = excluded.expires_at
+                """,
+                (cid, aid, str(agent_name or ""), now, exp),
+            )
+            self._conn.commit()
+        claim = self.get_conversation_claim(cid) or {}
+        return {"ok": True, "claim": claim}
+
+    def renew_conversation_claim(
+        self,
+        conversation_id: str,
+        agent_id: str,
+        *,
+        ttl_sec: float = 900,
+    ) -> Dict[str, Any]:
+        cid = str(conversation_id or "").strip()
+        aid = str(agent_id or "").strip()
+        existing = self.get_conversation_claim(cid)
+        if not existing:
+            return {"ok": False, "reason": "not_claimed"}
+        if existing.get("agent_id") != aid:
+            return {"ok": False, "reason": "not_owner", "claim": existing}
+        now = self._now()
+        exp = now + max(60.0, float(ttl_sec or 900))
+        with self._lock:
+            self._conn.execute(
+                "UPDATE conversation_claims SET expires_at = ? WHERE conversation_id = ?",
+                (exp, cid),
+            )
+            self._conn.commit()
+        return {"ok": True, "claim": self.get_conversation_claim(cid)}
+
+    def release_conversation_claim(
+        self,
+        conversation_id: str,
+        agent_id: str,
+        *,
+        force: bool = False,
+    ) -> Dict[str, Any]:
+        cid = str(conversation_id or "").strip()
+        aid = str(agent_id or "").strip()
+        existing = self.get_conversation_claim(cid)
+        if not existing:
+            return {"ok": True, "released": False}
+        if existing.get("agent_id") != aid and not force:
+            return {"ok": False, "reason": "not_owner", "claim": existing}
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM conversation_claims WHERE conversation_id = ?", (cid,)
+            )
+            self._conn.commit()
+        return {"ok": True, "released": True, "conversation_id": cid}

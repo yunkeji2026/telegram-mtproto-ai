@@ -168,6 +168,26 @@ CREATE TABLE IF NOT EXISTS kpi_alerts (
 );
 CREATE INDEX IF NOT EXISTS idx_kpi_alerts_ts   ON kpi_alerts(ts DESC);
 CREATE INDEX IF NOT EXISTS idx_kpi_alerts_kind ON kpi_alerts(kind, ts DESC);
+
+-- Phase 5-4：pre-chat 留资属性（phone/email/name 等），支持按属性去重合并身份。
+CREATE TABLE IF NOT EXISTS contact_attributes (
+    contact_id   TEXT NOT NULL,
+    attr_key     TEXT NOT NULL,
+    attr_value   TEXT NOT NULL DEFAULT '',
+    updated_at   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (contact_id, attr_key)
+);
+CREATE INDEX IF NOT EXISTS idx_attr_lookup ON contact_attributes(attr_key, attr_value);
+CREATE INDEX IF NOT EXISTS idx_attr_contact ON contact_attributes(contact_id);
+
+-- Phase 6-3：客户标签（多对一），支持标签筛选与聚合自动补全。
+CREATE TABLE IF NOT EXISTS contact_tags (
+    contact_id   TEXT NOT NULL,
+    tag          TEXT NOT NULL,
+    created_at   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (contact_id, tag)
+);
+CREATE INDEX IF NOT EXISTS idx_tags_tag ON contact_tags(tag);
 """
 
 
@@ -196,6 +216,20 @@ class ContactStore:
                 self._conn.execute(
                     "ALTER TABLE draft_log ADD COLUMN "
                     "prompt_snapshot_hash TEXT NOT NULL DEFAULT ''"
+                )
+            # Phase 6-3：contacts.follow_up_at（跟进提醒时间戳，0=无）
+            ccols = {
+                row[1] for row in self._conn.execute(
+                    "PRAGMA table_info(contacts)"
+                ).fetchall()
+            }
+            if "follow_up_at" not in ccols:
+                self._conn.execute(
+                    "ALTER TABLE contacts ADD COLUMN follow_up_at INTEGER NOT NULL DEFAULT 0"
+                )
+                self._conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_contacts_followup "
+                    "ON contacts(follow_up_at) WHERE follow_up_at > 0"
                 )
             self._conn.commit()
 
@@ -283,6 +317,141 @@ class ContactStore:
             self._conn.commit()
             return cur.rowcount > 0
 
+    # ── Contact 属性（Phase 5-4：pre-chat 留资 + 去重）────────────
+    def set_contact_attribute(self, contact_id: str, key: str, value: str) -> None:
+        """写入/更新一条联系人属性（如 phone/email）。空值删除该属性。"""
+        cid = str(contact_id or "").strip()
+        k = str(key or "").strip().lower()
+        v = str(value or "").strip()
+        if not cid or not k:
+            return
+        with self._lock:
+            if not v:
+                self._conn.execute(
+                    "DELETE FROM contact_attributes WHERE contact_id=? AND attr_key=?",
+                    (cid, k),
+                )
+            else:
+                self._conn.execute(
+                    "INSERT INTO contact_attributes (contact_id, attr_key, attr_value, updated_at) "
+                    "VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT(contact_id, attr_key) DO UPDATE SET "
+                    "attr_value=excluded.attr_value, updated_at=excluded.updated_at",
+                    (cid, k, v, self._now()),
+                )
+            self._conn.commit()
+
+    def get_contact_attributes(self, contact_id: str) -> Dict[str, str]:
+        cid = str(contact_id or "").strip()
+        if not cid:
+            return {}
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT attr_key, attr_value FROM contact_attributes WHERE contact_id=?",
+                (cid,),
+            ).fetchall()
+        return {str(r["attr_key"]): str(r["attr_value"]) for r in rows}
+
+    def find_contacts_by_attribute(
+        self, key: str, value: str, *, exclude_contact_id: str = "",
+    ) -> List[str]:
+        """按属性值反查 contact_id（去重合并用）。返回最近更新优先的列表。"""
+        k = str(key or "").strip().lower()
+        v = str(value or "").strip()
+        if not k or not v:
+            return []
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT contact_id FROM contact_attributes "
+                "WHERE attr_key=? AND attr_value=? ORDER BY updated_at DESC",
+                (k, v),
+            ).fetchall()
+        out: List[str] = []
+        for r in rows:
+            cid = str(r["contact_id"])
+            if exclude_contact_id and cid == exclude_contact_id:
+                continue
+            if cid not in out:
+                out.append(cid)
+        return out
+
+    # ── Phase 6-3：跟进提醒 + 标签 ───────────────────────────
+    def set_follow_up(self, contact_id: str, follow_up_at: int) -> bool:
+        """设置/清除跟进时间（0 或负=清除）。"""
+        cid = str(contact_id or "").strip()
+        if not cid:
+            return False
+        val = max(0, int(follow_up_at or 0))
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE contacts SET follow_up_at=? WHERE contact_id=?", (val, cid)
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
+
+    def set_contact_tags(self, contact_id: str, tags: List[str]) -> List[str]:
+        """全量替换某客户的标签集合。返回规整去重后的标签列表。"""
+        cid = str(contact_id or "").strip()
+        if not cid:
+            return []
+        norm: List[str] = []
+        for t in tags or []:
+            tt = str(t or "").strip()[:40]
+            if tt and tt not in norm:
+                norm.append(tt)
+        now = self._now()
+        with self._lock:
+            self._conn.execute("DELETE FROM contact_tags WHERE contact_id=?", (cid,))
+            for t in norm:
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO contact_tags (contact_id, tag, created_at) "
+                    "VALUES (?, ?, ?)", (cid, t, now),
+                )
+            self._conn.commit()
+        return norm
+
+    def get_contact_tags(self, contact_id: str) -> List[str]:
+        cid = str(contact_id or "").strip()
+        if not cid:
+            return []
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT tag FROM contact_tags WHERE contact_id=? ORDER BY created_at", (cid,)
+            ).fetchall()
+        return [str(r["tag"]) for r in rows]
+
+    def get_tags_for_contacts(self, contact_ids: List[str]) -> Dict[str, List[str]]:
+        """批量取标签（CRM 列表用，避免 N+1）。"""
+        if not contact_ids:
+            return {}
+        ph = ",".join("?" * len(contact_ids))
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT contact_id, tag FROM contact_tags WHERE contact_id IN ({ph}) "
+                "ORDER BY created_at", tuple(contact_ids),
+            ).fetchall()
+        out: Dict[str, List[str]] = {}
+        for r in rows:
+            out.setdefault(str(r["contact_id"]), []).append(str(r["tag"]))
+        return out
+
+    def list_all_tags(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """聚合全部标签 + 使用计数（标签自动补全/快筛）。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT tag, COUNT(*) AS n FROM contact_tags GROUP BY tag "
+                "ORDER BY n DESC, tag LIMIT ?", (int(limit),),
+            ).fetchall()
+        return [{"tag": str(r["tag"]), "count": int(r["n"])} for r in rows]
+
+    def count_due_follow_ups(self, now_ts: Optional[int] = None) -> int:
+        now = int(now_ts if now_ts is not None else self._now())
+        with self._lock:
+            return self._conn.execute(
+                "SELECT COUNT(*) FROM contacts WHERE follow_up_at > 0 AND follow_up_at <= ?",
+                (now,),
+            ).fetchone()[0]
+
     def list_contacts(self, limit: int = 50, offset: int = 0) -> List[Contact]:
         with self._lock:
             rows = self._conn.execute(
@@ -324,6 +493,89 @@ class ContactStore:
     def count_contacts(self) -> int:
         with self._lock:
             return self._conn.execute("SELECT COUNT(*) FROM contacts").fetchone()[0]
+
+    def list_contacts_overview(
+        self,
+        *,
+        q: str = "",
+        stage: str = "",
+        has_lead: Optional[bool] = None,
+        tag: str = "",
+        follow_up: str = "",
+        now_ts: Optional[int] = None,
+        limit: int = 30,
+        offset: int = 0,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """CRM 客户列表：单次 JOIN 返回 contact + journey + 渠道 + 留资 + 跟进（避免 N+1）。
+
+        返回 (rows, total)。rows 每项含 contact_id/primary_name/last_active_at/
+        funnel_stage/intimacy_score/channels(list)/has_lead(bool)/follow_up_at/tags(list)。
+        过滤：q（名称/ID/渠道 external_id）、stage、has_lead、tag（精确）、
+        follow_up（"due"=已到期 / "any"=有跟进）。
+        """
+        now = int(now_ts if now_ts is not None else self._now())
+        where: List[str] = []
+        params: Dict[str, Any] = {}
+        if q:
+            where.append(
+                "(c.primary_name LIKE :like OR c.contact_id = :exact OR EXISTS("
+                "SELECT 1 FROM channel_identities ci2 WHERE ci2.contact_id=c.contact_id "
+                "AND ci2.external_id LIKE :like))"
+            )
+            params["like"] = f"%{q}%"
+            params["exact"] = q
+        if stage:
+            where.append("j.funnel_stage = :stage")
+            params["stage"] = stage
+        if has_lead is True:
+            where.append("EXISTS(SELECT 1 FROM contact_attributes a WHERE a.contact_id=c.contact_id)")
+        elif has_lead is False:
+            where.append("NOT EXISTS(SELECT 1 FROM contact_attributes a WHERE a.contact_id=c.contact_id)")
+        if tag:
+            where.append("EXISTS(SELECT 1 FROM contact_tags t WHERE t.contact_id=c.contact_id AND t.tag=:tag)")
+            params["tag"] = tag
+        if follow_up == "due":
+            where.append("c.follow_up_at > 0 AND c.follow_up_at <= :now")
+            params["now"] = now
+        elif follow_up == "any":
+            where.append("c.follow_up_at > 0")
+        where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+        base = (
+            "FROM contacts c LEFT JOIN journeys j ON j.contact_id = c.contact_id" + where_sql
+        )
+        # 到期跟进优先排前，其次最近活跃
+        rows_sql = (
+            "SELECT c.contact_id, c.primary_name, c.last_active_at, c.follow_up_at, "
+            "j.funnel_stage AS funnel_stage, j.intimacy_score AS intimacy_score, "
+            "(SELECT GROUP_CONCAT(DISTINCT ci.channel) FROM channel_identities ci "
+            "WHERE ci.contact_id=c.contact_id) AS channels, "
+            "EXISTS(SELECT 1 FROM contact_attributes a WHERE a.contact_id=c.contact_id) AS has_lead "
+            + base
+            + " ORDER BY (CASE WHEN c.follow_up_at>0 AND c.follow_up_at<=:now THEN 0 ELSE 1 END), "
+            "c.last_active_at DESC LIMIT :lim OFFSET :off"
+        )
+        count_sql = "SELECT COUNT(*) " + base
+        row_params = dict(params, lim=int(limit), off=int(offset), now=now)
+        with self._lock:
+            rows = self._conn.execute(rows_sql, row_params).fetchall()
+            total = self._conn.execute(count_sql, params).fetchone()[0]
+        ids = [r["contact_id"] for r in rows]
+        tags_map = self.get_tags_for_contacts(ids)
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            chans = [c for c in str(r["channels"] or "").split(",") if c]
+            out.append({
+                "contact_id": r["contact_id"],
+                "primary_name": r["primary_name"] or "",
+                "last_active_at": r["last_active_at"] or 0,
+                "funnel_stage": r["funnel_stage"] or "",
+                "intimacy_score": r["intimacy_score"],
+                "channels": chans,
+                "has_lead": bool(r["has_lead"]),
+                "follow_up_at": r["follow_up_at"] or 0,
+                "tags": tags_map.get(r["contact_id"], []),
+            })
+        return out, int(total)
 
     def count_journeys_by_stage(self, channel: Optional[str] = None) -> Dict[str, int]:
         """按 funnel_stage 聚合 Journey 数量。Funnel Dashboard 基础数据。
@@ -895,6 +1147,75 @@ class ContactStore:
             )
             self._conn.commit()
             return True
+
+    def split_channel_identity(
+        self, *, ci_id: str, display_name: str = "", trace_id: str = "",
+    ) -> Optional[str]:
+        """把一个 ChannelIdentity 从共享 Contact 拆出，独立成新 Contact + Journey（误并回滚）。
+
+        返回新建的 contact_id；若该 ci 不存在或本就是该 Contact 上的唯一身份
+        （拆了没意义），返回 None。
+
+        说明：historical journey_events 按 journey 记录、未按 ci 区分，拆分**不回搬**历史
+        事件（无法可靠归属），仅修正身份归属与未来归因；两侧各落一条 split 审计事件。
+        """
+        now = self._now()
+        with self._lock:
+            ci_row = self._conn.execute(
+                "SELECT * FROM channel_identities WHERE channel_identity_id=?", (ci_id,)
+            ).fetchone()
+            if not ci_row:
+                return None
+            old_contact_id = ci_row["contact_id"]
+            sibling = self._conn.execute(
+                "SELECT COUNT(*) FROM channel_identities "
+                "WHERE contact_id=? AND channel_identity_id<>?",
+                (old_contact_id, ci_id),
+            ).fetchone()[0]
+            if sibling == 0:
+                return None  # 已是孤岛，无需拆
+
+            new_contact_id = new_id()
+            new_journey_id = new_id()
+            name = display_name or ci_row["display_name"] or ""
+            self._conn.execute(
+                "INSERT INTO contacts (contact_id, primary_name, language_hint, timezone_hint, "
+                "country_hint, created_at, last_active_at, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (new_contact_id, name, "", "", "", now, now, ""),
+            )
+            self._conn.execute(
+                "INSERT INTO journeys (journey_id, contact_id, persona_id, funnel_stage, "
+                "intimacy_score, engagement_score, readiness_score, intimacy_updated_at, "
+                "context_snapshot_json, snapshot_refreshed_at, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (new_journey_id, new_contact_id, "", STAGE_INITIAL, 0.0, 0.0, 0.0, 0, "", 0, now, now),
+            )
+            self._conn.execute(
+                "UPDATE channel_identities SET contact_id=?, direction='first_seen', "
+                "linked_via='manual_split', attribution_confidence=1.0, linked_at=? "
+                "WHERE channel_identity_id=?",
+                (new_contact_id, now, ci_id),
+            )
+            self._insert_event_nolock(
+                journey_id=new_journey_id,
+                event_type="channel_identity_split",
+                payload={"channel_identity_id": ci_id, "from_contact_id": old_contact_id},
+                trace_id=trace_id,
+                ts=now,
+            )
+            old_journey_row = self._conn.execute(
+                "SELECT journey_id FROM journeys WHERE contact_id=?", (old_contact_id,)
+            ).fetchone()
+            if old_journey_row:
+                self._insert_event_nolock(
+                    journey_id=old_journey_row["journey_id"],
+                    event_type="channel_identity_split_out",
+                    payload={"channel_identity_id": ci_id, "to_contact_id": new_contact_id},
+                    trace_id=trace_id,
+                    ts=now,
+                )
+            self._conn.commit()
+            return new_contact_id
 
     # ── Journey ────────────────────────────────────────────
     def get_journey_by_contact(self, contact_id: str) -> Optional[Journey]:
@@ -1634,6 +1955,7 @@ def _row_to_contact(row: sqlite3.Row) -> Contact:
         created_at=row["created_at"],
         last_active_at=row["last_active_at"],
         notes=row["notes"],
+        follow_up_at=(row["follow_up_at"] if "follow_up_at" in row.keys() else 0) or 0,
     )
 
 

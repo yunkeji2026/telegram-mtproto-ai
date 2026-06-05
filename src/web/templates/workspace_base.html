@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="{{ ui_lang|default('zh') }}-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% block title %}坐席工作台{% endblock %} · {{ site_name|default('智控王客户转化聊天系统') }}</title>
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;font-family:'Inter','PingFang SC','Microsoft YaHei',system-ui,sans-serif;color:#111827;background:#f3f4f6;}
+  .ws-top{height:52px;display:flex;align-items:center;gap:12px;padding:0 18px;background:#1b2038;color:#fff;}
+  .ws-brand{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px;}
+  .ws-brand svg{width:20px;height:20px;}
+  .ws-spacer{flex:1;}
+  .ws-user{font-size:13px;color:#cbd5e1;}
+  .ws-presence{border:1px solid rgba(255,255,255,.25);border-radius:7px;padding:3px 8px;font-size:12px;background:rgba(255,255,255,.08);color:#fff;}
+  .ws-funnel{font-size:11px;color:#cbd5e1;white-space:nowrap;}
+  .ws-agents{font-size:11px;color:#94a3b8;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .ws-logout{color:#fff;text-decoration:none;font-size:13px;border:1px solid rgba(255,255,255,.3);border-radius:7px;padding:4px 12px;}
+  .ws-logout:hover{background:rgba(255,255,255,.12);}
+  .ws-body{height:calc(100vh - 52px);overflow:hidden;}
+  .ws-review{display:none;cursor:pointer;font-size:12px;background:#f59e0b;color:#1b2038;font-weight:600;border-radius:7px;padding:3px 9px;}
+  .ws-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;align-items:center;justify-content:center;}
+  .ws-modal-box{background:#fff;border-radius:12px;max-width:560px;width:92vw;max-height:80vh;overflow:auto;padding:18px;}
+  .ws-modal-box h3{margin:0 0 12px;font-size:16px;}
+  .ws-rv-item{border:1px solid #e5e7eb;border-radius:9px;padding:10px;margin-bottom:10px;font-size:13px;}
+  .ws-rv-cmp{display:flex;gap:10px;margin:6px 0;}
+  .ws-rv-col{flex:1;background:#f9fafb;border-radius:7px;padding:7px;font-size:12px;}
+  .ws-rv-acts{display:flex;gap:8px;margin-top:6px;}
+  .ws-rv-acts button{flex:1;border:0;border-radius:7px;padding:7px;font-size:13px;cursor:pointer;}
+  .ws-rv-yes{background:#16a34a;color:#fff;} .ws-rv-no{background:#e5e7eb;color:#374151;}
+  .ws-modal-close{float:right;cursor:pointer;color:#6b7280;font-size:18px;}
+</style>
+{% block head %}{% endblock %}
+<script>
+(function(){
+  var _f=window.fetch;
+  window.fetch=function(url,opts){
+    opts=opts||{};
+    var m=(opts.method||'GET').toUpperCase();
+    if(m!=='GET'&&m!=='HEAD'&&m!=='OPTIONS'){
+      var t=document.cookie.match(/(?:^|;\s*)csrf_token=([^;]*)/);
+      if(t){
+        opts.headers=opts.headers||{};
+        if(opts.headers instanceof Headers){opts.headers.set('X-CSRF-Token',t[1])}
+        else{opts.headers['X-CSRF-Token']=t[1]}
+      }
+    }
+    return _f.call(this,url,opts);
+  };
+})();
+</script>
+</head>
+<body>
+<header class="ws-top">
+  <span class="ws-brand">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M4 4h16v16H4z"/><path d="M4 9l8 5 8-5"/></svg>
+    {{ site_name|default('智控王客户转化聊天系统') }} · 坐席工作台
+  </span>
+  <a class="ws-logout" href="/workspace" style="border:0;">会话</a>
+  <a class="ws-logout" href="/workspace/contacts" style="border:0;">客户</a>
+  <span class="ws-spacer"></span>
+  <a class="ws-review" id="ws-followup" style="background:#dc2626;color:#fff;text-decoration:none;" href="/workspace/contacts#due" title="到期待跟进客户"></a>
+  <span class="ws-review" id="ws-review" title="待裁决的合并候选" onclick="window.__wsReviews&&window.__wsReviews.open()"></span>
+  <span class="ws-funnel" id="ws-funnel" title="今日 web 漏斗"></span>
+  <span class="ws-agents" id="ws-agents-online" title="在线坐席"></span>
+  <select class="ws-presence" id="ws-presence" title="我的状态">
+    <option value="online">🟢 在线</option>
+    <option value="busy">🟡 忙碌</option>
+    <option value="offline">⚫ 离线</option>
+  </select>
+  <span class="ws-user">{{ (user_display_name or user_name or '') }}</span>
+  <a class="ws-logout" href="/logout">退出登录</a>
+</header>
+<script>
+(function(){
+  var AGENT_ID = {{ (user_name or '')|tojson }};
+  var AGENT_NAME = {{ (user_display_name or user_name or '')|tojson }};
+  window.__wsAgent = { id: String(AGENT_ID||'agent'), name: String(AGENT_NAME||AGENT_ID||'agent') };
+
+  function setPresence(st){
+    fetch('/api/workspace/presence',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({status:st,display_name:window.__wsAgent.name})}).catch(function(){});
+  }
+  function heartbeat(){
+    var sel=document.getElementById('ws-presence');
+    fetch('/api/workspace/heartbeat',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({status:sel?sel.value:'online',display_name:window.__wsAgent.name})}).catch(function(){});
+  }
+  function loadFunnel(){
+    fetch('/api/workspace/metrics/web-funnel').then(function(r){return r.json();}).then(function(d){
+      var m=(d&&d.metrics)||{};
+      var el=document.getElementById('ws-funnel');
+      if(!el) return;
+      var sess=m.web_sessions||0, inbound=m.web_inbound||0, ho=m.handoff_sent||0, cv=m.line_converted||0;
+      el.textContent = 'Web 今日 '+sess+'会话 · '+inbound+'入站 · 引流'+ho+' · 转化'+cv;
+    }).catch(function(){});
+  }
+  function loadAgents(){
+    fetch('/api/workspace/presence').then(function(r){return r.json();}).then(function(d){
+      var el=document.getElementById('ws-agents-online');
+      if(!el) return;
+      var agents=(d&&d.agents)||[];
+      if(!agents.length){ el.textContent=''; return; }
+      el.textContent = '在线 '+agents.map(function(a){
+        var dot=a.status==='busy'?'🟡':(a.status==='online'?'🟢':'⚫');
+        return dot+(a.display_name||a.agent_id);
+      }).join(' · ');
+    }).catch(function(){});
+  }
+  var sel=document.getElementById('ws-presence');
+  if(sel){
+    sel.addEventListener('change',function(){ setPresence(sel.value); });
+    setPresence('online');
+  }
+  heartbeat(); loadFunnel(); loadAgents();
+  setInterval(heartbeat, 30000);
+  setInterval(loadFunnel, 120000);
+  setInterval(loadAgents, 60000);
+  window.addEventListener('beforeunload',function(){ setPresence('offline'); });
+  window.__wsPresence = { refreshAgents: loadAgents, refreshFunnel: loadFunnel };
+})();
+</script>
+<div class="ws-modal" id="ws-review-modal">
+  <div class="ws-modal-box">
+    <span class="ws-modal-close" onclick="window.__wsReviews&&window.__wsReviews.close()">×</span>
+    <h3>待裁决的合并候选</h3>
+    <div id="ws-review-list"></div>
+  </div>
+</div>
+<script>
+(function(){
+  function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+  var badge=document.getElementById('ws-review');
+  var modal=document.getElementById('ws-review-modal');
+  var list=document.getElementById('ws-review-list');
+  function ov(o){ if(!o) return '—'; return esc(o.primary_name||'未命名')+' · '+((o.channels||[]).map(esc).join('/')||'无渠道'); }
+  function refresh(){
+    fetch('/api/workspace/merge-reviews').then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok){ if(badge) badge.style.display='none'; return; }
+      var n=(d.reviews||[]).length;
+      if(badge){ badge.style.display=n?'inline-block':'none'; badge.textContent='待审合并 '+n; }
+      window.__wsReviewData=d.reviews||[];
+      if(modal.style.display==='flex') render();
+    }).catch(function(){});
+  }
+  function render(){
+    var rv=window.__wsReviewData||[];
+    if(!rv.length){ list.innerHTML='<div style="color:#6b7280;font-size:13px;">暂无待审项</div>'; return; }
+    list.innerHTML=rv.map(function(r){
+      return '<div class="ws-rv-item">'
+        +'<div>置信度 '+(Number(r.confidence||0).toFixed(2))+' · 渠道 '+esc(r.candidate_channel||'')+'</div>'
+        +'<div class="ws-rv-cmp"><div class="ws-rv-col"><b>候选</b><br>'+ov(r.candidate)+'</div>'
+        +'<div class="ws-rv-col"><b>并入</b><br>'+ov(r.target)+'</div></div>'
+        +'<div class="ws-rv-acts">'
+        +'<button class="ws-rv-yes" onclick="window.__wsReviews.resolve(\''+esc(r.review_id)+'\',\'approve\')">通过合并</button>'
+        +'<button class="ws-rv-no" onclick="window.__wsReviews.resolve(\''+esc(r.review_id)+'\',\'reject\')">拒绝</button>'
+        +'</div></div>';
+    }).join('');
+  }
+  window.__wsReviews={
+    open:function(){ modal.style.display='flex'; render(); },
+    close:function(){ modal.style.display='none'; },
+    resolve:function(id,action){
+      fetch('/api/workspace/merge-reviews/'+encodeURIComponent(id),{method:'POST',
+        headers:{'Content-Type':'application/json'},body:JSON.stringify({action:action})})
+        .then(function(r){return r.json();}).then(function(){ refresh(); }).catch(function(){});
+    },
+    refresh:refresh
+  };
+  modal.addEventListener('click',function(e){ if(e.target===modal) window.__wsReviews.close(); });
+  refresh(); setInterval(refresh, 60000);
+
+  // 到期待跟进徽标
+  var fuBadge=document.getElementById('ws-followup');
+  function refreshFu(){
+    fetch('/api/workspace/follow-ups?scope=due&limit=1').then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok){ if(fuBadge) fuBadge.style.display='none'; return; }
+      var n=d.due_follow_ups||0;
+      if(fuBadge){ fuBadge.style.display=n?'inline-block':'none'; fuBadge.textContent='待跟进 '+n; }
+    }).catch(function(){});
+  }
+  refreshFu(); setInterval(refreshFu, 60000);
+})();
+</script>
+<main class="ws-body">
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

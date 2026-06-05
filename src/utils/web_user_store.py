@@ -12,11 +12,13 @@ from typing import Dict, List, Optional
 ROLE_MASTER = "master"
 ROLE_ADMIN = "admin"
 ROLE_VIEWER = "viewer"
+ROLE_AGENT = "agent"
 
 ROLE_LABELS = {
     ROLE_MASTER: "主帐号（全部权限）",
     ROLE_ADMIN: "管理员（编辑权限）",
     ROLE_VIEWER: "只读观察员",
+    ROLE_AGENT: "坐席（仅聊天工作台）",
 }
 
 # ── UI 模式 ─────────────────────────────────────────────────
@@ -36,6 +38,7 @@ ROLE_DEFAULT_UI_MODE = {
     ROLE_MASTER: UI_MODE_SIMPLE,
     ROLE_ADMIN:  UI_MODE_SIMPLE,
     ROLE_VIEWER: UI_MODE_SIMPLE,
+    ROLE_AGENT:  UI_MODE_SIMPLE,
 }
 
 
@@ -69,6 +72,8 @@ PAGE_PERMISSIONS = {
     "episodic":   {ROLE_MASTER, ROLE_ADMIN, ROLE_VIEWER},
     "line_rpa":   {ROLE_MASTER, ROLE_ADMIN, ROLE_VIEWER},
     "personas":   {ROLE_MASTER, ROLE_ADMIN, ROLE_VIEWER},
+    # 坐席工作台（统一收件箱）：master/admin/agent 可用（viewer 只读不接管）
+    "workspace":  {ROLE_MASTER, ROLE_ADMIN, ROLE_AGENT},
 }
 
 WRITE_PERMISSIONS = {
