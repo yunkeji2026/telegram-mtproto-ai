@@ -424,6 +424,853 @@ class TestCrmApi:
         assert r.status_code == 400
 
 
+class TestFollowUpTasks:
+    def test_task_lifecycle_recompute(self, cstore, gateway):
+        c = gateway.on_peer_seen(channel=CHANNEL_WEB, account_id="web",
+                                 external_id=" task1".strip(), display_name="A")
+        cid = c.contact.contact_id
+        t1 = cstore.add_follow_up_task(cid, due_at=5000, note="电话回访")
+        t2 = cstore.add_follow_up_task(cid, due_at=3000, note="发资料")
+        assert t1 and t2
+        # follow_up_at 缓存 = 最近未完成到期 = 3000
+        assert cstore.get_contact(cid).follow_up_at == 3000
+        tasks = cstore.list_follow_up_tasks(cid)
+        assert len(tasks) == 2 and tasks[0]["due_at"] == 3000  # 未完成按到期升序
+        # 完成最早的，缓存重算为 5000
+        assert cstore.complete_follow_up_task(t2, done_by="op") is True
+        assert cstore.get_contact(cid).follow_up_at == 5000
+        # 已完成不能再次完成
+        assert cstore.complete_follow_up_task(t2) is False
+        # 完成全部 → 缓存 0
+        cstore.complete_follow_up_task(t1)
+        assert cstore.get_contact(cid).follow_up_at == 0
+
+    def test_set_follow_up_dedupes_via_task(self, cstore, gateway):
+        c = gateway.on_peer_seen(channel=CHANNEL_WEB, account_id="web",
+                                 external_id="task2", display_name="A")
+        cid = c.contact.contact_id
+        cstore.set_follow_up(cid, 1000)
+        cstore.set_follow_up(cid, 2000)  # 更新同一未完成任务，而非新增
+        assert len([t for t in cstore.list_follow_up_tasks(cid) if not t["done_at"]]) == 1
+        assert cstore.get_contact(cid).follow_up_at == 2000
+        cstore.set_follow_up(cid, 0)  # 清除 → 完成全部
+        assert cstore.get_contact(cid).follow_up_at == 0
+
+    def test_count_due_tasks_by_assignee(self, cstore, gateway):
+        a = gateway.on_peer_seen(channel=CHANNEL_WEB, account_id="web",
+                                 external_id="dt1", display_name="A")
+        b = gateway.on_peer_seen(channel=CHANNEL_LINE, account_id="line1",
+                                 external_id="dt2", display_name="B")
+        cstore.add_follow_up_task(a.contact.contact_id, due_at=1000, assignee="alice")
+        cstore.add_follow_up_task(b.contact.contact_id, due_at=1000, assignee="bob")
+        cstore.add_follow_up_task(b.contact.contact_id, due_at=9e9, assignee="alice")  # 未到期
+        assert cstore.count_due_tasks(now_ts=2000) == 2
+        assert cstore.count_due_tasks(assignee="alice", now_ts=2000) == 1
+
+    def test_gateway_add_and_done_task(self, gateway):
+        c = gateway.on_peer_seen(channel=CHANNEL_WEB, account_id="web",
+                                 external_id="gt1", display_name="A")
+        out = gateway.add_follow_up_task(c.contact.contact_id, due_at=4000,
+                                         note="回访", operator="op")
+        assert out["ok"] and out["task_id"]
+        ov = gateway.contact_overview(c.contact.contact_id)
+        assert len(ov["follow_up_tasks"]) == 1 and ov["follow_up_at"] == 4000
+        assert gateway.complete_follow_up_task(out["task_id"], operator="op")["ok"]
+        assert gateway.contact_overview(c.contact.contact_id)["follow_up_at"] == 0
+
+
+class TestTagLibrary:
+    def test_upsert_list_delete(self, cstore):
+        assert cstore.upsert_tag_library("VIP", color="#dc2626", sort_order=1)
+        assert cstore.upsert_tag_library("意向", color="#f59e0b", sort_order=2)
+        lib = cstore.list_tag_library()
+        assert [x["tag"] for x in lib] == ["VIP", "意向"]
+        assert lib[0]["color"] == "#dc2626"
+        # 更新颜色
+        cstore.upsert_tag_library("VIP", color="#000000", sort_order=1)
+        assert cstore.list_tag_library()[0]["color"] == "#000000"
+        assert cstore.delete_tag_library("VIP")
+        assert [x["tag"] for x in cstore.list_tag_library()] == ["意向"]
+
+    def test_list_all_tags_merges_library_color_and_unused(self, cstore, gateway):
+        c = gateway.on_peer_seen(channel=CHANNEL_WEB, account_id="web",
+                                 external_id="lt1", display_name="A")
+        cstore.set_contact_tags(c.contact.contact_id, ["VIP"])
+        cstore.upsert_tag_library("VIP", color="#dc2626")
+        cstore.upsert_tag_library("未使用", color="#10b981")  # 库里有但没人用
+        tags = {t["tag"]: t for t in cstore.list_all_tags()}
+        assert tags["VIP"]["count"] == 1 and tags["VIP"]["color"] == "#dc2626"
+        assert tags["未使用"]["count"] == 0 and tags["未使用"]["color"] == "#10b981"
+
+
+class TestCrm64Api:
+    def _client(self, cstore, gateway):
+        from src.inbox.store import InboxStore
+        d = tempfile.mkdtemp()
+        return _client_with_inbox(cstore, gateway, InboxStore(Path(d) / "i.db"))
+
+    def test_follow_up_task_endpoints(self, cstore, gateway):
+        c = gateway.on_peer_seen(channel=CHANNEL_WEB, account_id="web",
+                                 external_id="ep1", display_name="A")
+        cli = self._client(cstore, gateway)
+        r = cli.post(f"/api/workspace/contact/{c.contact.contact_id}/follow-up",
+                     json={"due_at": 1000, "note": "回访"})
+        assert r.json()["ok"] is True
+        tid = r.json()["task_id"]
+        # 缺 due_at → 400
+        assert cli.post(f"/api/workspace/contact/{c.contact.contact_id}/follow-up",
+                        json={"note": "x"}).status_code == 400
+        # follow-ups 含到期任务计数
+        fu = cli.get("/api/workspace/follow-ups").json()
+        assert fu["due_tasks"] >= 1
+        # 完成任务
+        assert cli.post(f"/api/workspace/follow-up/{tid}/done").json()["ok"] is True
+
+    def test_tag_library_endpoints(self, cstore, gateway):
+        cli = self._client(cstore, gateway)
+        r = cli.post("/api/workspace/tag-library", json={"tag": "VIP", "color": "#dc2626"})
+        assert r.json()["ok"] and any(x["tag"] == "VIP" for x in r.json()["library"])
+        assert cli.get("/api/workspace/tag-library").json()["library"][0]["tag"] == "VIP"
+        assert cli.post("/api/workspace/tag-library", json={"tag": ""}).status_code == 400
+        d = cli.delete("/api/workspace/tag-library/VIP").json()
+        assert d["ok"] and d["library"] == []
+
+    def test_export_csv(self, cstore, gateway):
+        gateway.on_peer_seen(channel=CHANNEL_WEB, account_id="web",
+                             external_id="ex1", display_name="导出客户")
+        cli = self._client(cstore, gateway)
+        r = cli.get("/api/workspace/contacts/export.csv")
+        assert r.status_code == 200
+        assert "text/csv" in r.headers["content-type"]
+        assert "attachment" in r.headers.get("content-disposition", "")
+        body = r.content.decode("utf-8-sig")
+        assert "contact_id" in body and "导出客户" in body
+
+
+class TestTaskCollaboration:
+    def test_list_open_tasks_filters(self, cstore, gateway):
+        a = gateway.on_peer_seen(channel=CHANNEL_WEB, account_id="web",
+                                 external_id="ot1", display_name="客户甲")
+        b = gateway.on_peer_seen(channel=CHANNEL_LINE, account_id="line1",
+                                 external_id="ot2", display_name="客户乙")
+        cstore.add_follow_up_task(a.contact.contact_id, due_at=1000, assignee="alice", note="回访")
+        cstore.add_follow_up_task(b.contact.contact_id, due_at=5000, assignee="bob")
+        # 全部未完成
+        allt = cstore.list_open_tasks()
+        assert len(allt) == 2
+        assert allt[0]["due_at"] == 1000 and allt[0]["name"] == "客户甲"
+        assert "web" in allt[0]["channels"]
+        # 按 assignee
+        assert len(cstore.list_open_tasks(assignee="alice")) == 1
+        # 按到期
+        assert len(cstore.list_open_tasks(due_before=2000)) == 1
+
+    def test_reassign_and_snooze(self, cstore, gateway):
+        c = gateway.on_peer_seen(channel=CHANNEL_WEB, account_id="web",
+                                 external_id="rs1", display_name="A")
+        tid = cstore.add_follow_up_task(c.contact.contact_id, due_at=1000, assignee="alice")
+        # 改派
+        assert cstore.reassign_task(tid, "bob") == c.contact.contact_id
+        assert cstore.list_open_tasks(assignee="bob")[0]["task_id"] == tid
+        # 延期 +2 天（从 max(now, due)）
+        cid = cstore.snooze_task(tid, days=2)
+        assert cid == c.contact.contact_id
+        t = cstore.list_open_tasks()[0]
+        assert t["due_at"] > 1000
+        # 缓存随之更新
+        assert cstore.get_contact(c.contact.contact_id).follow_up_at == t["due_at"]
+        # 直设 due_at
+        cstore.snooze_task(tid, due_at=9000)
+        assert cstore.list_open_tasks()[0]["due_at"] == 9000
+        # 已完成任务不能改派/延期
+        cstore.complete_follow_up_task(tid)
+        assert cstore.reassign_task(tid, "carol") is None
+        assert cstore.snooze_task(tid, days=1) is None
+
+    def test_gateway_reassign_snooze(self, gateway):
+        c = gateway.on_peer_seen(channel=CHANNEL_WEB, account_id="web",
+                                 external_id="grs1", display_name="A")
+        out = gateway.add_follow_up_task(c.contact.contact_id, due_at=1000, operator="op")
+        tid = out["task_id"]
+        assert gateway.reassign_follow_up_task(tid, assignee="bob", operator="op")["ok"]
+        assert gateway.snooze_follow_up_task(tid, days=3, operator="op")["ok"]
+        assert gateway.reassign_follow_up_task("nope", assignee="x")["ok"] is False
+
+
+class TestTaskApi:
+    def _client(self, cstore, gateway):
+        from src.inbox.store import InboxStore
+        d = tempfile.mkdtemp()
+        return _client_with_inbox(cstore, gateway, InboxStore(Path(d) / "i.db"))
+
+    def test_my_tasks_and_assign_snooze(self, cstore, gateway):
+        c = gateway.on_peer_seen(channel=CHANNEL_WEB, account_id="web",
+                                 external_id="mt1", display_name="客户")
+        cli = self._client(cstore, gateway)
+        add = cli.post(f"/api/workspace/contact/{c.contact.contact_id}/follow-up",
+                       json={"due_at": 1000, "note": "回访"}).json()
+        tid = add["task_id"]
+        # my-tasks scope=all due=all 含该任务
+        mt = cli.get("/api/workspace/my-tasks", params={"scope": "all", "due": "all"}).json()
+        assert mt["ok"] and any(t["task_id"] == tid for t in mt["tasks"])
+        assert mt["tasks"][0]["overdue"] is True  # due 1000 已逾期
+        # 改派
+        assert cli.post(f"/api/workspace/follow-up/{tid}/assign",
+                        json={"assignee": "bob"}).json()["ok"]
+        # 改派缺 assignee → 400
+        assert cli.post(f"/api/workspace/follow-up/{tid}/assign", json={}).status_code == 400
+        # 延期
+        assert cli.post(f"/api/workspace/follow-up/{tid}/snooze",
+                        json={"days": 3}).json()["ok"]
+        # 延期缺参数 → 400
+        assert cli.post(f"/api/workspace/follow-up/{tid}/snooze", json={}).status_code == 400
+
+
+class TestConvCrmBridge:
+    def test_resolve_and_overdue(self, cstore, gateway):
+        a = gateway.on_peer_seen(channel=CHANNEL_WEB, account_id="web",
+                                 external_id="rv_a", display_name="A")
+        b = gateway.on_peer_seen(channel=CHANNEL_LINE, account_id="line1",
+                                 external_id="rv_b", display_name="B")
+        # 批量解析 (channel, external_id) → contact_id
+        m = cstore.resolve_contacts_by_external([("web", "rv_a"), ("line", "rv_b"),
+                                                 ("web", "missing")])
+        assert m[("web", "rv_a")] == a.contact.contact_id
+        assert m[("line", "rv_b")] == b.contact.contact_id
+        assert ("web", "missing") not in m
+        # 逾期集合
+        cstore.set_follow_up(a.contact.contact_id, 1000)
+        cstore.set_follow_up(b.contact.contact_id, 9e9)
+        od = cstore.overdue_contact_ids(now_ts=2000)
+        assert a.contact.contact_id in od and b.contact.contact_id not in od
+
+    def test_dashboard_counts(self, cstore, gateway):
+        import time as _t
+        now = int(_t.time())
+        a = gateway.on_peer_seen(channel=CHANNEL_WEB, account_id="web",
+                                 external_id="db_a", display_name="A")
+        # created_at 应 >= 今日 0 点
+        midnight = now - (now % 86400)
+        assert cstore.count_contacts_created_since(midnight) >= 1
+        cstore.add_follow_up_task(a.contact.contact_id, due_at=1000, assignee="alice")
+        cstore.add_follow_up_task(a.contact.contact_id, due_at=9e9, assignee="bob")
+        load = {x["assignee"]: x for x in cstore.agent_task_load()}
+        assert load["alice"]["open"] == 1 and load["alice"]["overdue"] == 1
+        assert load["bob"]["open"] == 1 and load["bob"]["overdue"] == 0
+
+
+class TestConvCrmApi:
+    def _client(self, cstore, gateway):
+        from src.inbox.store import InboxStore
+        d = tempfile.mkdtemp()
+        return _client_with_inbox(cstore, gateway, InboxStore(Path(d) / "i.db"))
+
+    def test_contact_tasks_endpoint(self, cstore, gateway):
+        c = gateway.on_peer_seen(channel=CHANNEL_WEB, account_id="web",
+                                 external_id="ct_ep", display_name="A")
+        cstore.add_follow_up_task(c.contact.contact_id, due_at=1000)
+        cli = self._client(cstore, gateway)
+        r = cli.get(f"/api/workspace/contact/{c.contact.contact_id}/tasks").json()
+        assert r["ok"] and len(r["tasks"]) == 1
+
+    def test_dashboard_endpoint(self, cstore, gateway):
+        gateway.on_peer_seen(channel=CHANNEL_WEB, account_id="web",
+                             external_id="db_ep", display_name="A")
+        cli = self._client(cstore, gateway)
+        r = cli.get("/api/workspace/dashboard").json()
+        assert r["ok"] and "today" in r and "agent_load" in r
+        assert r["today"]["new_contacts"] >= 1
+
+
+class TestSlaTrendStore:
+    """Phase 6-7：SLA last_message_dirs + 趋势/多事件聚合。"""
+
+    def test_last_message_dirs(self, tmp_path):
+        from src.inbox.store import InboxStore
+        from src.inbox.models import InboxConversation, InboxMessage
+        store = InboxStore(tmp_path / "i.db")
+        cid = "web:web:sla1"
+        store.ingest_batch(
+            InboxConversation(conversation_id=cid, platform="web", account_id="web",
+                              chat_key="sla1", display_name="V", language="zh",
+                              last_text="m1", last_ts=5.0, unread=1),
+            [InboxMessage(conversation_id=cid, platform_msg_id="", direction="in",
+                          text="hi", original_text="hi", translated_text="hi",
+                          source_lang="zh", ts=5.0)])
+        # 末条为入站
+        d = store.last_message_dirs([cid])
+        assert d[cid]["direction"] == "in" and d[cid]["ts"] == 5.0
+        # 再来一条出站 → 末条变 out
+        store.ingest_batch(
+            InboxConversation(conversation_id=cid, platform="web", account_id="web",
+                              chat_key="sla1", display_name="V", language="zh",
+                              last_text="reply", last_ts=9.0, unread=0),
+            [InboxMessage(conversation_id=cid, platform_msg_id="", direction="out",
+                          text="reply", original_text="reply", translated_text="reply",
+                          source_lang="zh", ts=9.0)])
+        d2 = store.last_message_dirs([cid])
+        assert d2[cid]["direction"] == "out" and d2[cid]["ts"] == 9.0
+        # 空集合 / None
+        assert store.last_message_dirs([]) == {}
+        assert cid in store.last_message_dirs(None)
+        store.close()
+
+    def test_events_multi_and_by_day(self, cstore, gateway):
+        a = gateway.on_peer_seen(channel=CHANNEL_WEB, account_id="web",
+                                 external_id="trend_a", display_name="A")
+        jid = a.journey.journey_id
+        cstore.append_event(journey_id=jid, event_type="lead_captured")
+        cstore.append_event(journey_id=jid, event_type="lead_captured")
+        cstore.append_event(journey_id=jid, event_type="handoff_sent")
+        multi = cstore.count_events_since_multi(
+            ["lead_captured", "handoff_sent"], 0)
+        assert multi["lead_captured"] == 2 and multi["handoff_sent"] == 1
+        assert cstore.count_events_since_multi([], 0) == {}
+        # 按天聚合（至少今日一格有值）
+        by_day = cstore.count_events_by_day("lead_captured", 0)
+        assert sum(by_day.values()) == 2
+        by_new = cstore.count_contacts_by_day(0)
+        assert sum(by_new.values()) >= 1
+
+
+class TestSlaTrendApi:
+    def _client(self, cstore, gateway, inbox=None):
+        from src.inbox.store import InboxStore
+        d = tempfile.mkdtemp()
+        return _client_with_inbox(
+            cstore, gateway, inbox or InboxStore(Path(d) / "i.db"))
+
+    def test_dashboard_has_trend_and_sla(self, cstore, gateway):
+        from src.inbox.store import InboxStore
+        from src.inbox.models import InboxConversation, InboxMessage
+        d = tempfile.mkdtemp()
+        inbox = InboxStore(Path(d) / "i.db")
+        cid = "web:web:dbsla"
+        inbox.ingest_batch(
+            InboxConversation(conversation_id=cid, platform="web", account_id="web",
+                              chat_key="dbsla", display_name="V", language="zh",
+                              last_text="hi", last_ts=1.0, unread=1),
+            [InboxMessage(conversation_id=cid, platform_msg_id="", direction="in",
+                          text="hi", original_text="hi", translated_text="hi",
+                          source_lang="zh", ts=1.0)])
+        cli = self._client(cstore, gateway, inbox)
+        r = cli.get("/api/workspace/dashboard").json()
+        assert r["ok"]
+        assert isinstance(r["trend"], list) and len(r["trend"]) == 7
+        assert "new_contacts" in r["trend"][0] and "leads" in r["trend"][0]
+        # 末条入站 → SLA 计为等待中且超时（ts=1.0 远早于现在）
+        assert r["sla"]["waiting"] >= 1 and r["sla"]["breaching"] >= 1
+
+
+class TestFirstResponseStore:
+    """Phase 6-8：首响原始数据 first_response_rows。"""
+
+    def _ingest(self, store, cid, direction, ts):
+        from src.inbox.models import InboxConversation, InboxMessage
+        store.ingest_batch(
+            InboxConversation(conversation_id=cid, platform="web", account_id="web",
+                              chat_key=cid.split(":")[-1], display_name="V",
+                              language="zh", last_text="x", last_ts=float(ts), unread=0),
+            [InboxMessage(conversation_id=cid, platform_msg_id="", direction=direction,
+                          text="x", original_text="x", translated_text="x",
+                          source_lang="zh", ts=float(ts))])
+
+    def test_first_response_rows(self, tmp_path):
+        from src.inbox.store import InboxStore
+        store = InboxStore(tmp_path / "i.db")
+        # 会话 A：100 进线，130 回复 → 首响 30
+        self._ingest(store, "web:web:A", "in", 100)
+        self._ingest(store, "web:web:A", "out", 130)
+        # 会话 B：200 进线，未回复 → t_out None
+        self._ingest(store, "web:web:B", "in", 200)
+        # 会话 C：先 50 出站（主动），80 进线，95 回复 → 首响以首条入站 80 起 = 15
+        self._ingest(store, "web:web:C", "out", 50)
+        self._ingest(store, "web:web:C", "in", 80)
+        self._ingest(store, "web:web:C", "out", 95)
+        rows = {r["cid"]: r for r in store.first_response_rows(0)}
+        assert rows["web:web:A"]["t_out"] - rows["web:web:A"]["t_in"] == 30
+        assert rows["web:web:B"]["t_out"] is None
+        assert rows["web:web:C"]["t_in"] == 80
+        assert rows["web:web:C"]["t_out"] - rows["web:web:C"]["t_in"] == 15
+        # since 窗口过滤：仅 t_in>=150 → 只剩 B
+        rows2 = {r["cid"]: r for r in store.first_response_rows(150)}
+        assert set(rows2) == {"web:web:B"}
+        store.close()
+
+
+class TestSlaConfig:
+    """Phase 6-8：SLA 阈值可配置 + 分级。"""
+
+    def _client(self, cstore, gateway, inbox, cfg):
+        from types import SimpleNamespace as NS
+        app = FastAPI()
+        register_unified_inbox_routes(
+            app, page_auth=lambda r: True, api_auth=lambda r: True,
+            templates=_Templates(), config_manager=NS(config=cfg))
+        app.state.contacts = NS(store=cstore, gateway=gateway)
+        app.state.inbox_store = inbox
+        return TestClient(app)
+
+    def test_chats_sla_levels(self, cstore, gateway):
+        from src.inbox.store import InboxStore
+        from src.inbox.models import InboxConversation, InboxMessage
+        import time as _t
+        d = tempfile.mkdtemp()
+        inbox = InboxStore(Path(d) / "i.db")
+        now = _t.time()
+        # 三个会话：刚来(0s)、warn(1h)、crit(3h)，均末条入站
+        for key, age in [("fresh", 1), ("warnc", 3700), ("critc", 10900)]:
+            cid = f"web:web:{key}"
+            inbox.ingest_batch(
+                InboxConversation(conversation_id=cid, platform="web", account_id="web",
+                                  chat_key=key, display_name="V", language="zh",
+                                  last_text="hi", last_ts=now - age, unread=1),
+                [InboxMessage(conversation_id=cid, platform_msg_id="", direction="in",
+                              text="hi", original_text="hi", translated_text="hi",
+                              source_lang="zh", ts=now - age)])
+        cfg = {"inbox": {"sla_warn_sec": 1800, "sla_crit_sec": 7200}}
+        cli = self._client(cstore, gateway, inbox, cfg)
+        chats = {c["chat_key"]: c for c in cli.get("/api/unified-inbox/chats").json()["chats"]}
+        assert chats["fresh"]["sla_level"] == ""
+        assert chats["warnc"]["sla_level"] == "warn" and chats["warnc"]["sla_breach"]
+        assert chats["critc"]["sla_level"] == "crit"
+
+    def test_dashboard_days_and_frt(self, cstore, gateway):
+        from src.inbox.store import InboxStore
+        from src.inbox.models import InboxConversation, InboxMessage
+        import time as _t
+        d = tempfile.mkdtemp()
+        inbox = InboxStore(Path(d) / "i.db")
+        now = _t.time()
+        cid = "web:web:frt"
+        inbox.ingest_batch(
+            InboxConversation(conversation_id=cid, platform="web", account_id="web",
+                              chat_key="frt", display_name="V", language="zh",
+                              last_text="hi", last_ts=now, unread=0),
+            [InboxMessage(conversation_id=cid, platform_msg_id="", direction="in",
+                          text="hi", original_text="hi", translated_text="hi",
+                          source_lang="zh", ts=now - 60)])
+        inbox.ingest_batch(
+            InboxConversation(conversation_id=cid, platform="web", account_id="web",
+                              chat_key="frt", display_name="V", language="zh",
+                              last_text="re", last_ts=now, unread=0),
+            [InboxMessage(conversation_id=cid, platform_msg_id="", direction="out",
+                          text="re", original_text="re", translated_text="re",
+                          source_lang="zh", ts=now - 30)])
+        cfg = {"inbox": {}}
+        cli = self._client(cstore, gateway, inbox, cfg)
+        r7 = cli.get("/api/workspace/dashboard").json()
+        assert r7["days"] == 7 and len(r7["trend"]) == 7
+        assert "conversions" in r7["trend"][0]
+        assert r7["first_response"]["today_responded"] == 1
+        assert r7["first_response"]["today_attain_rate"] == 100.0
+        assert len(r7["frt_trend"]) == 7
+        r30 = cli.get("/api/workspace/dashboard?days=30").json()
+        assert r30["days"] == 30 and len(r30["trend"]) == 30
+
+
+class TestSlaAlerts:
+    """Phase 6-9：SLA 告警端点 — 严重超时清单 + 分级计数。"""
+
+    def _client(self, cstore, gateway, inbox, cfg):
+        from types import SimpleNamespace as NS
+        app = FastAPI()
+        register_unified_inbox_routes(
+            app, page_auth=lambda r: True, api_auth=lambda r: True,
+            templates=_Templates(), config_manager=NS(config=cfg))
+        app.state.contacts = NS(store=cstore, gateway=gateway)
+        app.state.inbox_store = inbox
+        return TestClient(app)
+
+    def test_sla_alerts_snapshot(self, cstore, gateway):
+        from src.inbox.store import InboxStore
+        from src.inbox.models import InboxConversation, InboxMessage
+        import time as _t
+        d = tempfile.mkdtemp()
+        inbox = InboxStore(Path(d) / "i.db")
+        now = _t.time()
+        plan = [("fresh", 1, "in"), ("warnc", 3700, "in"),
+                ("critc", 10900, "in"), ("answered", 99999, "out")]
+        for key, age, direction in plan:
+            cid = f"web:web:{key}"
+            inbox.ingest_batch(
+                InboxConversation(conversation_id=cid, platform="web", account_id="web",
+                                  chat_key=key, display_name="N_" + key, language="zh",
+                                  last_text="x", last_ts=now - age, unread=1),
+                [InboxMessage(conversation_id=cid, platform_msg_id="", direction=direction,
+                              text="x", original_text="x", translated_text="x",
+                              source_lang="zh", ts=now - age)])
+        cfg = {"inbox": {"sla_warn_sec": 1800, "sla_crit_sec": 7200}}
+        cli = self._client(cstore, gateway, inbox, cfg)
+        r = cli.get("/api/workspace/sla-alerts").json()
+        assert r["ok"]
+        # fresh+warnc+critc 末条入站 → waiting=3；warnc+critc 超 warn → breaching=2；critc 超 crit → critical=1
+        assert r["waiting"] == 3
+        assert r["breaching"] == 2
+        assert r["critical"] == 1
+        assert len(r["items"]) == 1
+        assert r["items"][0]["chat_key"] == "critc"
+        assert r["items"][0]["name"] == "N_critc"
+        assert r["items"][0]["conversation_id"] == "web:web:critc"
+
+
+class TestSlaByAgent:
+    """Phase 6-10：坐席维度 SLA 归属（按活跃 claim）。"""
+
+    def _client(self, cstore, gateway, inbox, cfg):
+        from types import SimpleNamespace as NS
+        app = FastAPI()
+        register_unified_inbox_routes(
+            app, page_auth=lambda r: True, api_auth=lambda r: True,
+            templates=_Templates(), config_manager=NS(config=cfg))
+        app.state.contacts = NS(store=cstore, gateway=gateway)
+        app.state.inbox_store = inbox
+        return TestClient(app)
+
+    def test_sla_by_agent_attribution(self, cstore, gateway):
+        from src.inbox.store import InboxStore
+        from src.inbox.models import InboxConversation, InboxMessage
+        import time as _t
+        d = tempfile.mkdtemp()
+        inbox = InboxStore(Path(d) / "i.db")
+        now = _t.time()
+        # alice 认领两个：一个 crit(3h) 一个 warn(40m)；bob 认领一个 warn(40m)；
+        # 一个无人认领 crit(3h)
+        plan = [("a_crit", 10900, "alice", "Alice"),
+                ("a_warn", 2400, "alice", "Alice"),
+                ("b_warn", 2400, "bob", "Bob"),
+                ("u_crit", 10900, None, None)]
+        for key, age, aid, aname in plan:
+            cid = f"web:web:{key}"
+            inbox.ingest_batch(
+                InboxConversation(conversation_id=cid, platform="web", account_id="web",
+                                  chat_key=key, display_name=key, language="zh",
+                                  last_text="x", last_ts=now - age, unread=1),
+                [InboxMessage(conversation_id=cid, platform_msg_id="", direction="in",
+                              text="x", original_text="x", translated_text="x",
+                              source_lang="zh", ts=now - age)])
+            if aid:
+                inbox.set_conversation_claim(cid, aid, agent_name=aname, ttl_sec=3600)
+        cfg = {"inbox": {"sla_warn_sec": 1800, "sla_crit_sec": 7200}}
+        cli = self._client(cstore, gateway, inbox, cfg)
+        d2 = cli.get("/api/workspace/dashboard").json()
+        sba = {x["agent_id"]: x for x in d2["sla_by_agent"]}
+        assert sba["alice"]["waiting"] == 2
+        assert sba["alice"]["critical"] == 1 and sba["alice"]["breaching"] == 2
+        assert sba["bob"]["waiting"] == 1 and sba["bob"]["critical"] == 0
+        assert sba[""]["agent_name"] == "(未认领)" and sba[""]["critical"] == 1
+        # 排序：critical 多者靠前 → alice 先于 未认领(同 crit=1 但 breaching 更高) 与 bob
+        assert d2["sla_by_agent"][0]["agent_id"] == "alice"
+
+
+class TestSlaDetail:
+    """Phase 6-11：SLA/首响明细下钻端点。"""
+
+    def _client(self, cstore, gateway, inbox, cfg):
+        from types import SimpleNamespace as NS
+        app = FastAPI()
+        register_unified_inbox_routes(
+            app, page_auth=lambda r: True, api_auth=lambda r: True,
+            templates=_Templates(), config_manager=NS(config=cfg))
+        app.state.contacts = NS(store=cstore, gateway=gateway)
+        app.state.inbox_store = inbox
+        return TestClient(app)
+
+    def _ingest_in(self, inbox, key, age, now):
+        from src.inbox.models import InboxConversation, InboxMessage
+        cid = f"web:web:{key}"
+        inbox.ingest_batch(
+            InboxConversation(conversation_id=cid, platform="web", account_id="web",
+                              chat_key=key, display_name="N_" + key, language="zh",
+                              last_text="x", last_ts=now - age, unread=1),
+            [InboxMessage(conversation_id=cid, platform_msg_id="", direction="in",
+                          text="x", original_text="x", translated_text="x",
+                          source_lang="zh", ts=now - age)])
+        return cid
+
+    def test_scopes_and_agent_filter(self, cstore, gateway):
+        from src.inbox.store import InboxStore
+        import time as _t
+        d = tempfile.mkdtemp()
+        inbox = InboxStore(Path(d) / "i.db")
+        now = _t.time()
+        self._ingest_in(inbox, "fresh", 60, now)
+        self._ingest_in(inbox, "warnc", 2400, now)
+        ccid = self._ingest_in(inbox, "critc", 10900, now)
+        inbox.set_conversation_claim(ccid, "alice", agent_name="Alice", ttl_sec=3600)
+        cfg = {"inbox": {"sla_warn_sec": 1800, "sla_crit_sec": 7200}}
+        cli = self._client(cstore, gateway, inbox, cfg)
+        # waiting=3, breaching(>=warn)=2, critical=1
+        assert cli.get("/api/workspace/sla-detail?scope=waiting").json()["count"] == 3
+        assert cli.get("/api/workspace/sla-detail?scope=breaching").json()["count"] == 2
+        crit = cli.get("/api/workspace/sla-detail?scope=critical").json()
+        assert crit["count"] == 1 and crit["items"][0]["agent_name"] == "Alice"
+        assert crit["items"][0]["level"] == "crit"
+        # agent 过滤："alice" 只命中 critc；"" 未认领命中其余 waiting
+        assert cli.get("/api/workspace/sla-detail?scope=waiting&agent=alice").json()["count"] == 1
+        assert cli.get("/api/workspace/sla-detail?scope=waiting&agent=").json()["count"] == 2
+        # 非法 scope 回落 critical
+        assert cli.get("/api/workspace/sla-detail?scope=bogus").json()["scope"] == "critical"
+
+    def test_unresponded_scope(self, cstore, gateway):
+        from src.inbox.store import InboxStore
+        from src.inbox.models import InboxConversation, InboxMessage
+        import time as _t
+        d = tempfile.mkdtemp()
+        inbox = InboxStore(Path(d) / "i.db")
+        now = _t.time()
+        # A：今日进线未回复 → unresponded 命中
+        self._ingest_in(inbox, "A", 300, now)
+        # B：今日进线已回复 → 不命中
+        cidB = "web:web:B"
+        inbox.ingest_batch(
+            InboxConversation(conversation_id=cidB, platform="web", account_id="web",
+                              chat_key="B", display_name="N_B", language="zh",
+                              last_text="r", last_ts=now, unread=0),
+            [InboxMessage(conversation_id=cidB, platform_msg_id="", direction="in",
+                          text="x", original_text="x", translated_text="x",
+                          source_lang="zh", ts=now - 200),
+             InboxMessage(conversation_id=cidB, platform_msg_id="", direction="out",
+                          text="r", original_text="r", translated_text="r",
+                          source_lang="zh", ts=now - 100)])
+        cfg = {"inbox": {}}
+        cli = self._client(cstore, gateway, inbox, cfg)
+        r = cli.get("/api/workspace/sla-detail?scope=unresponded").json()
+        keys = {it["chat_key"] for it in r["items"]}
+        assert "A" in keys and "B" not in keys
+
+
+class TestAgentFirstResponseStore:
+    """Phase 6-12：agent_sends 归属 + agent_first_responses 查询。"""
+
+    def _in(self, inbox, cid, ts):
+        from src.inbox.models import InboxConversation, InboxMessage
+        inbox.ingest_batch(
+            InboxConversation(conversation_id=cid, platform="web", account_id="web",
+                              chat_key=cid.split(":")[-1], display_name="V",
+                              language="zh", last_text="x", last_ts=float(ts), unread=0),
+            [InboxMessage(conversation_id=cid, platform_msg_id="", direction="in",
+                          text="x", original_text="x", translated_text="x",
+                          source_lang="zh", ts=float(ts))])
+
+    def test_agent_first_responses(self, tmp_path):
+        from src.inbox.store import InboxStore
+        store = InboxStore(tmp_path / "i.db")
+        # A：100 进线，alice 130 发送 → 归属 alice，首响 30
+        self._in(store, "web:web:A", 100)
+        store.record_agent_send("web:web:A", "alice", agent_name="Alice", ts=130)
+        # 早于进线的发送不算（50<100）
+        store.record_agent_send("web:web:A", "bob", agent_name="Bob", ts=50)
+        # B：200 进线，无坐席发送 → resp None
+        self._in(store, "web:web:B", 200)
+        rows = {r["cid"]: r for r in store.agent_first_responses(0)}
+        assert rows["web:web:A"]["agent_id"] == "alice"
+        assert rows["web:web:A"]["resp_ts"] == 130
+        assert rows["web:web:A"]["resp_ts"] - rows["web:web:A"]["t_in"] == 30
+        assert rows["web:web:B"]["resp_ts"] is None
+        assert rows["web:web:B"]["agent_id"] is None
+        # 最早其后发送优先：A 再加一条 alice 200（应仍取 130）
+        store.record_agent_send("web:web:A", "alice", ts=200)
+        rows2 = {r["cid"]: r for r in store.agent_first_responses(0)}
+        assert rows2["web:web:A"]["resp_ts"] == 130
+        store.close()
+
+
+class TestAgentFrtApi:
+    def _client(self, cstore, gateway, inbox, cfg):
+        from types import SimpleNamespace as NS
+
+        def page_auth(request: Request):
+            return True
+
+        def api_auth(request: Request):
+            return True
+
+        app = FastAPI()
+        register_unified_inbox_routes(
+            app, page_auth=page_auth, api_auth=api_auth,
+            templates=_Templates(), config_manager=NS(config=cfg))
+        app.state.contacts = NS(store=cstore, gateway=gateway)
+        app.state.inbox_store = inbox
+        return TestClient(app)
+
+    def test_dashboard_agent_frt(self, cstore, gateway):
+        from src.inbox.store import InboxStore
+        from src.inbox.models import InboxConversation, InboxMessage
+        import time as _t
+        d = tempfile.mkdtemp()
+        inbox = InboxStore(Path(d) / "i.db")
+        now = _t.time()
+        cid = "web:web:af"
+        inbox.ingest_batch(
+            InboxConversation(conversation_id=cid, platform="web", account_id="web",
+                              chat_key="af", display_name="V", language="zh",
+                              last_text="x", last_ts=now, unread=0),
+            [InboxMessage(conversation_id=cid, platform_msg_id="", direction="in",
+                          text="x", original_text="x", translated_text="x",
+                          source_lang="zh", ts=now - 60)])
+        inbox.record_agent_send(cid, "alice", agent_name="Alice", ts=now - 30)
+        cfg = {"inbox": {"sla_warn_sec": 1800}}
+        cli = self._client(cstore, gateway, inbox, cfg)
+        r = cli.get("/api/workspace/dashboard").json()
+        af = {x["agent_id"]: x for x in r["agent_frt"]}
+        assert af["alice"]["responded"] == 1
+        assert af["alice"]["attain_rate"] == 100.0
+        assert af["alice"]["avg_sec"] == 30
+
+    def test_send_records_agent_marker(self, cstore, gateway):
+        # web 发送应打 agent_sends 点（坐席首响归属基建）
+        from src.inbox.store import InboxStore
+        from src.inbox.models import InboxConversation, InboxMessage
+        import time as _t
+        d = tempfile.mkdtemp()
+        inbox = InboxStore(Path(d) / "i.db")
+        now = _t.time()
+        cid = "web:web:visitorX"
+        inbox.ingest_batch(
+            InboxConversation(conversation_id=cid, platform="web", account_id="web",
+                              chat_key="visitorX", display_name="V", language="zh",
+                              last_text="hi", last_ts=now - 60, unread=1),
+            [InboxMessage(conversation_id=cid, platform_msg_id="", direction="in",
+                          text="hi", original_text="hi", translated_text="hi",
+                          source_lang="zh", ts=now - 60)])
+        cfg = {"web_chat": {"account_id": "web"}, "inbox": {}}
+        cli = self._client(cstore, gateway, inbox, cfg)
+        resp = cli.post("/api/unified-inbox/send", json={
+            "platform": "web", "account_id": "web",
+            "chat_key": "visitorX", "text": "你好"})
+        assert resp.status_code == 200
+        rows = inbox.agent_first_responses(0)
+        byc = {r["cid"]: r for r in rows}
+        assert byc[cid]["agent_id"] is not None
+
+
+class TestAgentFrtDetail:
+    """Phase 6-14：坐席首响明细下钻端点（agent + days 窗口）。"""
+
+    def _client(self, cstore, gateway, inbox, cfg):
+        from types import SimpleNamespace as NS
+        app = FastAPI()
+        register_unified_inbox_routes(
+            app, page_auth=lambda r: True, api_auth=lambda r: True,
+            templates=_Templates(), config_manager=NS(config=cfg))
+        app.state.contacts = NS(store=cstore, gateway=gateway)
+        app.state.inbox_store = inbox
+        return TestClient(app)
+
+    def test_agent_frt_detail(self, cstore, gateway):
+        from src.inbox.store import InboxStore
+        from src.inbox.models import InboxConversation, InboxMessage
+        import time as _t
+        d = tempfile.mkdtemp()
+        inbox = InboxStore(Path(d) / "i.db")
+        now = _t.time()
+        # alice：会话 A 首响 30s（达标），会话 B 首响 3000s（不达标）
+        for key, in_age, send_age in [("A", 1000, 970), ("B", 5000, 2000)]:
+            cid = f"web:web:{key}"
+            inbox.ingest_batch(
+                InboxConversation(conversation_id=cid, platform="web", account_id="web",
+                                  chat_key=key, display_name="N_" + key, language="zh",
+                                  last_text="x", last_ts=now - in_age, unread=0),
+                [InboxMessage(conversation_id=cid, platform_msg_id="", direction="in",
+                              text="x", original_text="x", translated_text="x",
+                              source_lang="zh", ts=now - in_age)])
+            inbox.record_agent_send(cid, "alice", agent_name="Alice", ts=now - send_age)
+        # bob 的会话不应出现在 alice 明细
+        cidc = "web:web:C"
+        inbox.ingest_batch(
+            InboxConversation(conversation_id=cidc, platform="web", account_id="web",
+                              chat_key="C", display_name="N_C", language="zh",
+                              last_text="x", last_ts=now - 800, unread=0),
+            [InboxMessage(conversation_id=cidc, platform_msg_id="", direction="in",
+                          text="x", original_text="x", translated_text="x",
+                          source_lang="zh", ts=now - 800)])
+        inbox.record_agent_send(cidc, "bob", agent_name="Bob", ts=now - 790)
+        cfg = {"inbox": {"sla_warn_sec": 1800}}
+        cli = self._client(cstore, gateway, inbox, cfg)
+        r = cli.get("/api/workspace/agent-frt-detail?agent=alice&days=7").json()
+        assert r["ok"] and r["agent"] == "alice" and r["days"] == 7
+        keys = {it["chat_key"] for it in r["items"]}
+        assert keys == {"A", "B"}
+        byk = {it["chat_key"]: it for it in r["items"]}
+        assert byk["A"]["attained"] is True
+        assert byk["B"]["attained"] is False
+        # 倒序：B(3000s) 在 A(30s) 之前
+        assert r["items"][0]["chat_key"] == "B"
+        # days=30 仍可用
+        r30 = cli.get("/api/workspace/agent-frt-detail?agent=alice&days=30").json()
+        assert r30["days"] == 30
+
+
+class TestResolutionStats:
+    """Phase 6-15：解决(引流)时长 — 首条 msg_in → handoff_sent。"""
+
+    def _ev(self, cstore, jid, etype, ts, n=0):
+        with cstore._lock:
+            cstore._conn.execute(
+                "INSERT INTO journey_events (event_id, journey_id, trace_id, "
+                "event_type, payload_json, ts) VALUES (?,?,?,?,?,?)",
+                (f"{jid}-{etype}-{n}", jid, "", etype, "{}", int(ts)))
+            cstore._conn.commit()
+
+    def test_resolution_stats(self, cstore, gateway):
+        a = gateway.on_peer_seen(channel=CHANNEL_WEB, account_id="web",
+                                 external_id="res_a", display_name="A")
+        b = gateway.on_peer_seen(channel=CHANNEL_WEB, account_id="web",
+                                 external_id="res_b", display_name="B")
+        ja, jb = a.journey.journey_id, b.journey.journey_id
+        # A：msg_in 1000，handoff_sent 1300 → 300；早于进线的 handoff 不算
+        self._ev(cstore, ja, "msg_in", 1000)
+        self._ev(cstore, ja, "handoff_sent", 1300)
+        self._ev(cstore, ja, "handoff_sent", 500, n=1)
+        # B：仅 msg_in 2000 → 未解决
+        self._ev(cstore, jb, "msg_in", 2000)
+        rows = {r["journey_id"]: r for r in cstore.resolution_stats(0)}
+        assert rows[ja]["resolved_ts"] == 1300
+        assert rows[ja]["resolved_ts"] - rows[ja]["t_in"] == 300
+        assert rows[jb]["resolved_ts"] is None
+        # since 过滤：since=1500 → 只剩 B
+        rows2 = {r["journey_id"]: r for r in cstore.resolution_stats(1500)}
+        assert set(rows2) == {jb}
+
+    def test_dashboard_resolution(self, cstore, gateway):
+        from src.inbox.store import InboxStore
+        d = tempfile.mkdtemp()
+        a = gateway.on_peer_seen(channel=CHANNEL_WEB, account_id="web",
+                                 external_id="res_dash", display_name="A")
+        jid = a.journey.journey_id
+        import time as _t
+        now = int(_t.time())
+        self._ev(cstore, jid, "msg_in", now - 120)
+        self._ev(cstore, jid, "handoff_sent", now - 60)
+        cli = _client_with_inbox(cstore, gateway, InboxStore(Path(d) / "i.db"))
+        r = cli.get("/api/workspace/dashboard").json()
+        assert r["resolution"]["today_resolved"] >= 1
+        assert r["resolution"]["today_avg_sec"] >= 0
+        assert len(r["res_trend"]) == 7
+
+
+class TestCrmWidgetsAsset:
+    """Phase 6-13：共享前端组件抽取的静态资产与挂载守卫。"""
+
+    def _root(self):
+        import src.web.routes.unified_inbox_routes as m
+        return Path(m.__file__).resolve().parents[3]
+
+    def test_widget_file_exposes_api(self):
+        js = (self._root() / "src" / "web" / "static" / "workspace"
+              / "crm-widgets.js").read_text(encoding="utf-8")
+        assert "window.CRMW" in js
+        for fn in ["esc", "fmtDur", "fmtWait", "fmtWaitMin", "spark",
+                   "sparkPct", "toast"]:
+            assert (fn + ":") in js or ("function " + fn) in js
+
+    def test_base_template_includes_widget(self):
+        tpl = (self._root() / "src" / "web" / "templates"
+               / "workspace_base.html").read_text(encoding="utf-8")
+        assert "/static/workspace/crm-widgets.js" in tpl
+
+
 class TestTimelineCursor:
     def test_list_recent_and_before_ts(self, tmp_path):
         from src.inbox.store import InboxStore
