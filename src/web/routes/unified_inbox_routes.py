@@ -1841,11 +1841,99 @@ def register_unified_inbox_routes(
                 logger.debug("daily-report inbox 统计失败（已忽略）", exc_info=True)
         return [rows[k] for k in days_keys]
 
+    def _agent_daily_report_rows(
+        request: Request, span: int, agent: str,
+    ) -> List[Dict[str, Any]]:
+        """某坐席逐日个人绩效：首响数/均值/达标率 + 发送量 + 完成任务数。
+
+        首响按"响应日(resp_ts)"归属（即坐席当日实际动作）；frt=resp_ts-t_in。
+        """
+        sla = _sla_cfg(request)
+        now = int(time.time())
+        lt = time.localtime(now)
+        midnight = int(time.mktime(
+            (lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1)))
+        since = midnight - (span - 1) * 86400
+        days_keys = [time.strftime("%Y-%m-%d", time.localtime(since + i * 86400))
+                     for i in range(span)]
+        rows: Dict[str, Dict[str, Any]] = {
+            k: {"date": k, "first_responded": 0, "frt_avg_sec": 0,
+                "frt_attain_rate": 0.0, "sends": 0, "tasks_done": 0}
+            for k in days_keys}
+        inbox = _inbox_store(request)
+        if inbox is not None:
+            try:
+                fr_acc: Dict[str, List[float]] = {}
+                for r in inbox.agent_first_responses(since):
+                    if r["resp_ts"] is None or r["agent_id"] != agent:
+                        continue
+                    day = time.strftime("%Y-%m-%d", time.localtime(r["resp_ts"]))
+                    acc = fr_acc.setdefault(day, [0.0, 0.0, 0.0])  # n, sum, attain
+                    frt = max(0.0, r["resp_ts"] - r["t_in"])
+                    acc[0] += 1
+                    acc[1] += frt
+                    if frt <= sla["warn"]:
+                        acc[2] += 1
+                for k, (n, s, att) in fr_acc.items():
+                    if k not in rows:
+                        continue
+                    rows[k]["first_responded"] = int(n)
+                    rows[k]["frt_avg_sec"] = int(s / n) if n else 0
+                    rows[k]["frt_attain_rate"] = round(att / n * 100, 1) if n else 0.0
+                for k, n in inbox.count_agent_sends_by_day(agent, since).items():
+                    if k in rows:
+                        rows[k]["sends"] = int(n)
+            except Exception:
+                logger.debug("agent daily-report inbox 统计失败（已忽略）", exc_info=True)
+        store = _contacts_store(request)
+        if store is not None:
+            try:
+                for k, n in store.count_tasks_done_by_day(agent, since).items():
+                    if k in rows:
+                        rows[k]["tasks_done"] = int(n)
+            except Exception:
+                logger.debug("agent daily-report tasks 统计失败（已忽略）", exc_info=True)
+        return [rows[k] for k in days_keys]
+
     @app.get("/api/workspace/daily-report.csv")
-    async def api_workspace_daily_report(request: Request, days: int = 7):
-        """逐日经营日报 CSV（历史回看）：days=7/30，每行一天，含汇总行。"""
+    async def api_workspace_daily_report(
+        request: Request, days: int = 7, agent: str = "",
+    ):
+        """逐日经营日报 CSV（历史回看）：days=7/30，每行一天，含汇总行。
+
+        传 agent → 该坐席个人绩效日报（首响/发送量/完成任务）。
+        """
         api_auth(request)
         span = 30 if int(days or 7) >= 30 else 7
+        agent = str(agent or "").strip()
+        if agent:
+            import csv
+            import io
+            data = _agent_daily_report_rows(request, span, agent)
+            buf = io.StringIO()
+            buf.write("\ufeff")
+            w = csv.writer(buf)
+            w.writerow(["date", "first_responded", "frt_avg_sec",
+                        "frt_attain_rate_pct", "sends", "tasks_done"])
+            tot = {"fr": 0, "sends": 0, "tasks": 0, "frt_sum": 0, "attain": 0}
+            for r in data:
+                w.writerow([r["date"], r["first_responded"], r["frt_avg_sec"],
+                            r["frt_attain_rate"], r["sends"], r["tasks_done"]])
+                tot["fr"] += r["first_responded"]
+                tot["sends"] += r["sends"]
+                tot["tasks"] += r["tasks_done"]
+                tot["frt_sum"] += r["frt_avg_sec"] * r["first_responded"]
+                tot["attain"] += round(r["frt_attain_rate"] / 100 * r["first_responded"])
+            frt_avg = int(tot["frt_sum"] / tot["fr"]) if tot["fr"] else 0
+            attain = round(tot["attain"] / tot["fr"] * 100, 1) if tot["fr"] else 0.0
+            w.writerow(["合计", tot["fr"], frt_avg, attain, tot["sends"], tot["tasks"]])
+            fname = "agent-report-%s-%dd-%s.csv" % (
+                agent, span, time.strftime("%Y%m%d", time.localtime()))
+            return Response(
+                content=buf.getvalue(),
+                media_type="text/csv; charset=utf-8",
+                headers={"Content-Disposition": "attachment; filename=" + fname},
+            )
         data = _daily_report_rows(request, span)
         import csv
         import io

@@ -710,6 +710,22 @@ class ContactStore:
             })
         return out
 
+    def count_tasks_done_by_day(
+        self, done_by: str, since_ts: int,
+    ) -> Dict[str, int]:
+        """某坐席按本地日期完成的跟进任务数（个人日报：任务产出）。"""
+        who = str(done_by or "").strip()
+        if not who:
+            return {}
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT strftime('%Y-%m-%d', done_at, 'unixepoch', 'localtime') AS d, "
+                "COUNT(*) AS n FROM follow_up_tasks "
+                "WHERE done_by=? AND done_at>=? GROUP BY d",
+                (who, int(since_ts)),
+            ).fetchall()
+        return {str(r["d"]): int(r["n"]) for r in rows if r["d"]}
+
     def count_events_by_day(self, event_type: str, since_ts: int) -> Dict[str, int]:
         """按本地日期聚合某事件数（趋势折线）。"""
         with self._lock:

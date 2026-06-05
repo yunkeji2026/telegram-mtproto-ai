@@ -142,7 +142,9 @@
   }
   function goConv(cid){ try{ sessionStorage.setItem('ws_focus_conv', cid); }catch(_){ } location.href='/workspace'; }
   function closeDetail(){ document.getElementById('db-modal').style.display='none'; }
-  window.__dbDetail=openDetail; window.__dbGoConv=goConv; window.__dbCloseDetail=closeDetail; window.__dbAgentDetail=openAgentDetail;
+  function agentReport(ev, agent){ if(ev){ ev.stopPropagation(); ev.preventDefault(); }
+    window.location='/api/workspace/daily-report.csv?days='+curDays()+'&agent='+encodeURIComponent(agent||''); }
+  window.__dbDetail=openDetail; window.__dbGoConv=goConv; window.__dbCloseDetail=closeDetail; window.__dbAgentDetail=openAgentDetail; window.__dbAgentReport=agentReport;
   function spark(rows,key,color){ return CRMW.spark(rows,key,color); }
   function sparkPct(rows,key,color){ return CRMW.sparkPct(rows,key,color); }
   function fmtDur(sec){ return CRMW.fmtDur(sec); }
@@ -184,7 +186,8 @@
         var rc = a.attain_rate>=80?'#16a34a':(a.attain_rate>=50?'#d97706':'#dc2626');
         return '<div class="db-row db-click" onclick="window.__dbAgentDetail('+JSON.stringify(a.agent_id||'')+')"><span>'+esc(a.agent_name||a.agent_id)+'</span>'
           +'<span>'+a.responded+'</span><span>'+fmtDur(a.avg_sec)+'</span>'
-          +'<span style="color:'+rc+';font-weight:600;">'+a.attain_rate+'%</span></div>';
+          +'<span style="color:'+rc+';font-weight:600;">'+a.attain_rate+'%</span>'
+          +'<a href="#" onclick="window.__dbAgentReport(event,'+JSON.stringify(a.agent_id||'')+')" title="导出该坐席个人日报 CSV" style="text-decoration:none;color:#2563eb;">⬇</a></div>';
       }).join('')) : '<span style="color:#94a3b8;font-size:13px;">暂无人工首响数据（需坐席从工作台发送）</span>';
       var sba=d.sla_by_agent||[];
       document.getElementById('db-sla-agents').innerHTML= sba.length? sba.map(function(a){
