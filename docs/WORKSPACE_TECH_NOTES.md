@@ -419,6 +419,22 @@ API：`GET /api/workspace/contact/{contact_id}` 一次返回 `{contact, timeline
 - **入口**：顶栏 ⚙ 打开轻量设置面板（阈值分钟 + `<input type=time>` 免打扰 +
   静音勾选），保存即 `refreshSla()`。
 
+## 5v. 坐席个人日报 CSV（Phase 6-19）
+
+在 6-16 团队日报上加 `?agent=` 维度，把 6-12 的出站归属 + 6-5 的任务产出
+收口成个人绩效可交付物。
+
+- **复用同一端点** `GET /api/workspace/daily-report.csv?days=&agent=`：
+  传 `agent` → 走 `_agent_daily_report_rows`，列改为
+  首响数/均值/达标率 + 发送量 + 完成任务数，末行合计（首响均值/达标率加权）。
+- **新增按日聚合**：`inbox.count_agent_sends_by_day(agent, since)`（发送量）+
+  `contacts.count_tasks_done_by_day(done_by, since)`（任务产出），均 `strftime`
+  本地日分桶，无相关子查询。
+- **首响按"响应日(resp_ts)"归属**：即坐席当日实际动作日（区别于团队日报
+  6-16 按进线日 t_in），`frt=resp_ts-t_in`。
+- **入口**：仪表盘「坐席首响绩效」每行加 ⬇ 链接，`stopPropagation` 不触发下钻，
+  随 7/30 窗口导出该坐席个人日报。无新路由（同 path 加 query）。
+
 ## 6. 明确不做（后续阶段）
 
 | 项 | 原因 |

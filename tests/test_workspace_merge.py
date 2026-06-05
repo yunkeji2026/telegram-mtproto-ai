@@ -1449,6 +1449,61 @@ class TestAgentPrefs:
         inbox.close()
 
 
+class TestAgentDailyReport:
+    """Phase 6-19：坐席个人日报 CSV（首响/发送量/完成任务）。"""
+
+    def test_store_by_day_aggregations(self, cstore, gateway, tmp_path):
+        import time
+        from src.inbox.store import InboxStore
+        store = InboxStore(tmp_path / "i.db")
+        now = time.time()
+        store.record_agent_send("web:web:c1", "ag1", agent_name="A", ts=now)
+        store.record_agent_send("web:web:c2", "ag1", agent_name="A", ts=now)
+        store.record_agent_send("web:web:c3", "ag2", agent_name="B", ts=now)
+        by = store.count_agent_sends_by_day("ag1", 0)
+        assert sum(by.values()) == 2
+        assert store.count_agent_sends_by_day("zzz", 0) == {}
+        # tasks done by agent
+        a = gateway.on_peer_seen(channel=CHANNEL_WEB, account_id="web",
+                                 external_id="adr", display_name="X")
+        cid = a.contact.contact_id
+        tid = cstore.add_follow_up_task(cid, due_at=int(now), created_by="ag1")
+        cstore.complete_follow_up_task(tid, done_by="ag1")
+        byt = cstore.count_tasks_done_by_day("ag1", 0)
+        assert sum(byt.values()) == 1
+        assert cstore.count_tasks_done_by_day("none", 0) == {}
+        store.close()
+
+    def test_agent_report_csv(self, cstore, gateway):
+        import time
+        from src.inbox.store import InboxStore
+        from src.inbox.models import InboxConversation, InboxMessage
+        d = tempfile.mkdtemp()
+        inbox = InboxStore(Path(d) / "i.db")
+        now = time.time()
+        # 进线 → 60s 后该坐席发送（首响 60，达标）
+        inbox.ingest_batch(
+            InboxConversation(conversation_id="web:web:P", platform="web",
+                              account_id="web", chat_key="P", display_name="P",
+                              language="zh", last_text="x", last_ts=now - 120, unread=1),
+            [InboxMessage(conversation_id="web:web:P", platform_msg_id="",
+                          direction="in", text="x", original_text="x",
+                          translated_text="x", source_lang="zh", ts=now - 120)])
+        inbox.record_agent_send("web:web:P", "ag1", agent_name="A", ts=now - 60)
+        cli = _client_with_inbox(cstore, gateway, inbox)
+        r = cli.get("/api/workspace/daily-report.csv?days=7&agent=ag1")
+        assert r.status_code == 200
+        assert "agent-report-ag1" in r.headers["content-disposition"]
+        lines = [ln for ln in r.text.lstrip("\ufeff").splitlines() if ln.strip()]
+        assert lines[0].startswith("date,first_responded,frt_avg_sec")
+        assert len(lines) == 1 + 7 + 1
+        tot = lines[-1].split(",")
+        assert tot[0] == "合计"
+        assert int(tot[1]) >= 1   # first_responded
+        assert int(tot[4]) >= 1   # sends
+        inbox.close()
+
+
 class TestCrmWidgetsAsset:
     """Phase 6-13：共享前端组件抽取的静态资产与挂载守卫。"""
 

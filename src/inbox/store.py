@@ -503,6 +503,21 @@ class InboxStore:
             })
         return out
 
+    def count_agent_sends_by_day(
+        self, agent_id: str, since_ts: float = 0.0,
+    ) -> Dict[str, int]:
+        """某坐席按本地日期的人工发送条数（个人日报：发送量）。"""
+        aid = str(agent_id or "").strip()
+        if not aid:
+            return {}
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT strftime('%Y-%m-%d', ts, 'unixepoch', 'localtime') AS d, "
+                "COUNT(*) AS n FROM agent_sends WHERE agent_id=? AND ts>=? "
+                "GROUP BY d", (aid, float(since_ts)),
+            ).fetchall()
+        return {str(r["d"]): int(r["n"]) for r in rows if r["d"]}
+
     def update_message_translation(
         self,
         message_id: str,
