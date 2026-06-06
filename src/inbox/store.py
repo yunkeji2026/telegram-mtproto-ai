@@ -848,6 +848,80 @@ class InboxStore:
             rows = self._conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
+    # ── Phase A / C1：坐席绩效聚合 ───────────────────────────
+
+    def get_agent_perf(
+        self,
+        *,
+        since_ts: float = 0.0,
+        agent_id: str = "",
+    ) -> List[Dict[str, Any]]:
+        """按 agent_id 聚合 draft_audit_log，返回每坐席的草稿处置绩效。
+
+        返回字段：agent_id, total, approved, rejected, blocked,
+                   force_override, autosend, avg_action（秒），
+                   last_action_ts
+        """
+        clauses = ["dal.ts>=?"]
+        params: List[Any] = [float(since_ts)]
+        if agent_id:
+            clauses.append("dal.agent_id=?")
+            params.append(str(agent_id))
+        sql = f"""
+            SELECT
+                dal.agent_id,
+                COUNT(*)                                       AS total,
+                SUM(CASE WHEN dal.action='approved'       THEN 1 ELSE 0 END) AS approved,
+                SUM(CASE WHEN dal.action='rejected'       THEN 1 ELSE 0 END) AS rejected,
+                SUM(CASE WHEN dal.action='blocked'        THEN 1 ELSE 0 END) AS blocked,
+                SUM(CASE WHEN dal.action='force_override' THEN 1 ELSE 0 END) AS force_override,
+                SUM(CASE WHEN dal.action='autosend'       THEN 1 ELSE 0 END) AS autosend,
+                SUM(CASE WHEN dal.action='edit_send'      THEN 1 ELSE 0 END) AS edit_send,
+                MAX(dal.ts)                                    AS last_action_ts
+            FROM draft_audit_log dal
+            WHERE {' AND '.join(clauses)}
+              AND dal.agent_id != ''
+            GROUP BY dal.agent_id
+            ORDER BY total DESC
+        """
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_agent_perf_timeline(
+        self,
+        *,
+        since_ts: float = 0.0,
+        agent_id: str = "",
+        bucket_sec: int = 86400,
+    ) -> List[Dict[str, Any]]:
+        """按时间桶聚合 draft_audit_log，返回趋势数据（默认按天）。
+
+        返回字段：bucket_ts（UTC 秒，每桶起始）, agent_id, total, approved, rejected
+        """
+        clauses = ["ts>=?"]
+        params: List[Any] = [float(since_ts)]
+        if agent_id:
+            clauses.append("agent_id=?")
+            params.append(str(agent_id))
+        bkt = max(3600, int(bucket_sec))
+        sql = f"""
+            SELECT
+                (CAST(ts / {bkt} AS INTEGER) * {bkt}) AS bucket_ts,
+                agent_id,
+                COUNT(*) AS total,
+                SUM(CASE WHEN action='approved' THEN 1 ELSE 0 END) AS approved,
+                SUM(CASE WHEN action='rejected' THEN 1 ELSE 0 END) AS rejected
+            FROM draft_audit_log
+            WHERE {' AND '.join(clauses)}
+              AND agent_id != ''
+            GROUP BY bucket_ts, agent_id
+            ORDER BY bucket_ts
+        """
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
     # ── Phase 5：坐席 presence + 会话租约 ─────────────────────
 
     def upsert_agent_presence(

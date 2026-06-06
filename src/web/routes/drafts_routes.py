@@ -5,6 +5,7 @@ API 端点（register_drafts_routes — main.py 调用）：
   GET  /api/drafts/stats                    — 按平台×状态计数
   GET  /api/drafts/risk-summary             — 待处理草稿按 autopilot_level 分布（B2）
   GET  /api/drafts/audit                    — 草稿处置审计日志（B2；主管专属）
+  GET  /api/drafts/autosend-status          — AutosendWorker 运行指标（Phase A）
   GET  /api/drafts/{draft_id}               — 单条草稿
   POST /api/drafts/{draft_id}/resolve       — 带 L4 拦截 + 审计的统一处置（B2）
   POST /api/drafts/{draft_id}/force-override — 主管强制放行 L4 草稿（B2）
@@ -86,6 +87,16 @@ def register_drafts_routes(app, *, api_auth):
         """L0–L4 分布统计（供仪表盘风险看板轮询）。"""
         svc = _get_draft_service(request)
         return {"ok": True, **svc.risk_summary()}
+
+    @app.get("/api/drafts/autosend-status")
+    async def api_drafts_autosend_status(request: Request, _=Depends(api_auth)):
+        """AutosendWorker 运行时指标（主管专属）。"""
+        if not _is_supervisor(request):
+            raise HTTPException(403, "需要主管权限")
+        worker = getattr(request.app.state, "autosend_worker", None)
+        if worker is None:
+            return {"ok": True, "worker": None, "note": "AutosendWorker 未启用"}
+        return {"ok": True, "worker": worker.status_snapshot()}
 
     @app.get("/api/drafts/audit")
     async def api_drafts_audit(
@@ -182,6 +193,84 @@ def register_drafts_routes(app, *, api_auth):
             else:
                 errors += 1
         return {"ok": True, "sent": sent, "errors": errors}
+
+
+# ── C1：坐席绩效 API（不依赖 draft_service，直读 inbox_store） ──────────────
+
+def register_agent_perf_routes(app, *, api_auth, page_auth, templates, config_manager=None):
+    """坐席绩效看板：API + 页面路由（admin.py 调用）。
+
+    GET /api/workspace/agent-perf        — 每坐席聚合指标（主管专属）
+    GET /api/workspace/agent-perf/timeline — 趋势数据（主管专属）
+    GET /workspace/agent-perf            — 绩效看板页面（主管专属）
+    """
+    import time as _time
+    from fastapi import Depends
+    from fastapi.responses import HTMLResponse, RedirectResponse
+
+    def _get_store(request):
+        store = getattr(request.app.state, "inbox_store", None)
+        if store is None:
+            from fastapi import HTTPException
+            raise HTTPException(503, "InboxStore 未挂载")
+        return store
+
+    def _ctx(request) -> dict:
+        try:
+            sess = request.session
+        except (AttributeError, AssertionError):
+            sess = {}
+        ctx: dict = {
+            "user_name": sess.get("username") or "",
+            "user_display_name": sess.get("display_name") or sess.get("username") or "",
+        }
+        try:
+            if config_manager is not None:
+                _wa = (config_manager.config or {}).get("web_admin", {}) or {}
+                if _wa.get("site_name"):
+                    ctx["site_name"] = _wa["site_name"]
+        except Exception:
+            pass
+        return ctx
+
+    @app.get("/api/workspace/agent-perf")
+    async def api_agent_perf(
+        request: Request,
+        days: int = 30,
+        agent_id: str = "",
+        _=Depends(api_auth),
+    ):
+        """每坐席草稿处置聚合绩效（主管专属）。"""
+        if not _is_supervisor(request):
+            from fastapi import HTTPException
+            raise HTTPException(403, "需要主管权限")
+        store = _get_store(request)
+        since = _time.time() - max(1, min(90, int(days or 30))) * 86400
+        rows = store.get_agent_perf(since_ts=since, agent_id=agent_id or "")
+        return {"ok": True, "agents": rows, "days": int(days), "total_agents": len(rows)}
+
+    @app.get("/api/workspace/agent-perf/timeline")
+    async def api_agent_perf_timeline(
+        request: Request,
+        days: int = 14,
+        agent_id: str = "",
+        _=Depends(api_auth),
+    ):
+        """坐席绩效趋势（按天分桶；主管专属）。"""
+        if not _is_supervisor(request):
+            from fastapi import HTTPException
+            raise HTTPException(403, "需要主管权限")
+        store = _get_store(request)
+        since = _time.time() - max(1, min(90, int(days or 14))) * 86400
+        timeline = store.get_agent_perf_timeline(since_ts=since, agent_id=agent_id or "")
+        return {"ok": True, "timeline": timeline, "days": int(days)}
+
+    @app.get("/workspace/agent-perf", response_class=HTMLResponse)
+    async def workspace_agent_perf_page(request: Request, _=Depends(page_auth)):
+        """坐席绩效看板（主管专属；非主管重定向到工作台）。"""
+        if not _is_supervisor(request):
+            return RedirectResponse(url="/workspace", status_code=302)
+        return templates.TemplateResponse(request, "agent_perf.html", _ctx(request))
 
 
 # ── 页面路由（需 templates + page_auth，由 admin.py create_app 调用） ──────

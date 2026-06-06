@@ -395,6 +395,8 @@ _BASELINE = """
 /api/workspace/agent-frt-detail	GET
 /api/workspace/daily-report.csv	GET
 /api/workspace/dashboard	GET
+/api/workspace/agent-perf	GET
+/api/workspace/agent-perf/timeline	GET
 /api/workspace/escalation-log	GET
 /api/workspace/escalation/{esc_id}/assign	POST
 /api/workspace/escalations	GET
@@ -512,6 +514,7 @@ _BASELINE = """
 /training	GET
 /unified-inbox	GET
 /workspace	GET
+/workspace/agent-perf	GET
 /workspace/contact/{contact_id}	GET
 /workspace/contacts	GET
 /workspace/dash	GET
