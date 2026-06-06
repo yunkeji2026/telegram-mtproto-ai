@@ -70,6 +70,12 @@ class AutosendWorker:
         self._circuit_open = False
         self._circuit_open_ts: float = 0.0
 
+        # H3：草稿清理配置
+        self._cleanup_age_days: int = int(cfg.get("cleanup_age_days", 7))
+        self._cleanup_enabled: bool = bool(cfg.get("cleanup_enabled", True))
+        self._last_cleanup_ts: float = 0.0
+        self._cleanup_interval: float = 86400.0  # 每日执行一次
+
         # 指标
         self.total_sent: int = 0
         self.total_errors: int = 0
@@ -78,6 +84,7 @@ class AutosendWorker:
         self.last_error: str = ""
         self.cycles: int = 0
         self.event_triggers: int = 0  # C3：记录事件驱动触发次数
+        self.total_cleaned: int = 0   # H3：历史清理草稿总数
 
     # ── 生命周期 ──────────────────────────────────────────────
 
@@ -178,6 +185,20 @@ class AutosendWorker:
         else:
             logger.debug("[AutosendWorker] 本轮无 L2 待发草稿")
 
+        # H3：每日清理超龄已处理草稿（best-effort，不影响发送主流程）
+        if self._cleanup_enabled and (time.time() - self._last_cleanup_ts) > self._cleanup_interval:
+            try:
+                store = getattr(self._svc, "_store", None)
+                if store is not None and hasattr(store, "cleanup_old_drafts"):
+                    n = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        lambda: store.cleanup_old_drafts(max_age_days=self._cleanup_age_days),
+                    )
+                    self.total_cleaned += n
+                    self._last_cleanup_ts = time.time()
+            except Exception:
+                logger.debug("[AutosendWorker] cleanup_old_drafts 失败", exc_info=True)
+
     def _process_batch(self) -> tuple[int, int]:
         """同步：列出 L2 pending 草稿并逐条自动发送。每条隔离 try/except。"""
         drafts = self._svc.list_drafts(status="pending", limit=200)
@@ -227,4 +248,6 @@ class AutosendWorker:
             "consecutive_errors": self._consecutive_errors,
             "current_interval_sec": round(self._current_interval, 1),
             "event_triggers": self.event_triggers,  # C3：事件驱动唤醒次数
+            "total_cleaned": self.total_cleaned,     # H3：历史清理草稿总数
+            "total_sent_session": self.total_sent,   # E3 健康面板兼容字段
         }

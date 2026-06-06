@@ -51,6 +51,19 @@
   .dr-copilot-kb{background:#f1f5f9;border-radius:6px;padding:6px 10px;margin:3px 0;font-size:11px;}
   .dr-copilot-kb strong{color:#2563eb;}
   .dr-copilot-loading{color:#94a3b8;font-style:italic;}
+  /* H1 翻译面板 */
+  .dr-trans{background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px 12px;margin:8px 0;font-size:12px;}
+  .dr-trans-header{display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;}
+  .dr-trans-body{margin-top:8px;display:none;}
+  .dr-trans-body.open{display:block;}
+  .dr-trans-text{background:#e0f2fe;border-radius:6px;padding:8px 10px;font-size:13px;color:#0c4a6e;margin-bottom:8px;word-break:break-word;line-height:1.5;}
+  .dr-trans-tag{font-size:10px;color:#0369a1;background:#e0f2fe;padding:2px 7px;border-radius:8px;margin-right:4px;}
+  /* H2 批量操作栏 */
+  .dr-select-bar{display:none;position:sticky;top:0;background:#1e3a5f;color:#fff;padding:10px 16px;border-radius:8px;margin-bottom:12px;z-index:100;justify-content:space-between;align-items:center;font-size:13px;}
+  .dr-select-bar.visible{display:flex;}
+  .dr-select-btn{padding:5px 14px;border-radius:6px;font-size:12px;cursor:pointer;border:none;font-weight:600;}
+  /* H2 键盘快捷键提示 */
+  .dr-kb-hint{position:fixed;bottom:16px;right:16px;background:#1e293b;color:#94a3b8;font-size:11px;padding:6px 12px;border-radius:8px;opacity:.8;pointer-events:none;}
   /* F1 快捷回复按钮组 */
   .dr-suggest{margin-top:8px;border-top:1px solid #bbf7d0;padding-top:8px;}
   .dr-suggest-lbl{font-size:10px;color:#6b7280;margin-bottom:4px;font-weight:600;letter-spacing:.03em;}
@@ -87,8 +100,18 @@
     <button class="dr-tab" onclick="setFilter('approved','','')">已批准</button>
     <button class="dr-tab" onclick="setFilter('rejected','','')">已拒绝</button>
   </div>
+  <!-- H2 批量操作栏 -->
+  <div id="dr-select-bar" class="dr-select-bar">
+    <span id="dr-select-count">已选 0 条</span>
+    <div style="display:flex;gap:8px;">
+      <button class="dr-select-btn" style="background:#16a34a;" onclick="bulkAct('approve')">✓ 批量批准</button>
+      <button class="dr-select-btn" style="background:#dc2626;" onclick="bulkAct('reject')">✗ 批量拒绝</button>
+      <button class="dr-select-btn" style="background:#475569;" onclick="clearSel()">取消选择</button>
+    </div>
+  </div>
   <div id="dr-list"><div class="dr-loading">加载中…</div></div>
 </div>
+<div class="dr-kb-hint">? = 快捷键说明</div>
 <script>
 (function(){
 var _status='pending', _platform='', _level='';
@@ -180,9 +203,24 @@ function load(){
           +'<div class="dr-ctx-body" id="'+ctxId+'"></div>'
           +'</div>';
       }
-      return '<div class="dr-card '+cls+'" id="card-'+ix+'">'
+      // H1 翻译面板
+      var transId='trans-'+ix;
+      var transHtml='';
+      if(dr.draft_text&&isPending){
+        transHtml='<div class="dr-trans">'
+          +'<div class="dr-trans-header" onclick="toggleTrans(\''+transId+'\',\''+esc(dr.draft_id)+'\',this)">'
+          +'<span>🌐 翻译为客户语言</span><span style="font-size:11px;color:#0369a1;">点击展开 ▼</span></div>'
+          +'<div class="dr-trans-body" id="'+transId+'"></div>'
+          +'</div>';
+      }
+      // H2 checkboxes（用 data 属性标记 draft_id + level 以便批量操作）
+      var chkHtml=isPending?('<input type="checkbox" class="dr-chk" data-id="'+esc(dr.draft_id)+'" data-lv="'+esc(lv)+'" '
+        +'onchange="updateSelectBar()" style="margin-right:6px;cursor:pointer;" title="选择此草稿">'):' ';
+      return '<div class="dr-card '+cls+'" id="card-'+ix+'" tabindex="0" '
+        +'data-draft-id="'+esc(dr.draft_id)+'" data-lv="'+esc(lv)+'" data-pending="'+isPending+'" '
+        +'onkeydown="cardKeydown(event,this)">'
         +'<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:6px;">'
-        +'<div style="font-size:13px;font-weight:600;">'+platIcon+' '+esc(dr.chat_name||dr.chat_key||'未知')+'<span class="dr-platform"> · '+esc(plat)+(dr.account_label?' · '+esc(dr.account_label):'')+'</span></div>'
+        +'<div style="font-size:13px;font-weight:600;">'+chkHtml+platIcon+' '+esc(dr.chat_name||dr.chat_key||'未知')+'<span class="dr-platform"> · '+esc(plat)+(dr.account_label?' · '+esc(dr.account_label):'')+'</span></div>'
         +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'
         +slaHtml
         +'<span class="dr-badge '+badgeCls+'">'+esc(lbl)+'</span>'
@@ -194,6 +232,7 @@ function load(){
         +(dr.draft_text?'<div class="dr-draft">🤖 <strong>AI 草稿：</strong>'+esc(dr.draft_text)+'</div>':'')
         +(reasons?'<div class="dr-reasons">⚠ 风险原因：'+esc(reasons)+'</div>':'')
         +copilotHtml
+        +transHtml
         +ctxHtml
         +(isPending?'<textarea id="'+editBoxId+'" class="dr-edit-box" placeholder="编辑后发送…">'+esc(dr.draft_text)+'</textarea>':'')
         +'<div class="dr-actions">'+actHtml+'</div>'
@@ -405,6 +444,113 @@ function triggerBulkAutosend(){
     if(btn){ btn.disabled=false; btn.textContent='⚡ 一键发所有 L2'; }
     alert('网络错误');
   });
+}
+
+// H1 翻译面板
+function toggleTrans(bodyId, draftId, headerEl){
+  var body=document.getElementById(bodyId);
+  if(!body) return;
+  if(body.classList.contains('open')){
+    body.classList.remove('open');
+    headerEl.lastChild.textContent='点击展开 ▼';
+    return;
+  }
+  body.classList.add('open');
+  headerEl.lastChild.textContent='收起 ▲';
+  if(body.getAttribute('data-loaded')) return;
+  body.setAttribute('data-loaded','1');
+  body.innerHTML='<span style="color:#94a3b8;font-size:11px;">翻译中…</span>';
+  fetch('/api/drafts/'+encodeURIComponent(draftId)+'/translate',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok||!d.translated){
+        body.innerHTML='<span style="color:#ef4444;font-size:11px;">'+(d&&d.error||'翻译失败')+'</span>';
+        body.removeAttribute('data-loaded');
+        return;
+      }
+      body.innerHTML='<div><span class="dr-trans-tag">'+esc(d.source_lang||'zh')+'</span>'
+        +'<span style="font-size:11px;color:#64748b;">→</span>'
+        +'<span class="dr-trans-tag">'+esc(d.target_lang||'en')+'</span>'
+        +(d.fallback?'<span style="font-size:10px;color:#d97706;margin-left:4px;">原文（翻译不可用）</span>':'')
+        +'</div>'
+        +'<div class="dr-trans-text">'+esc(d.translated)+'</div>'
+        +'<button class="dr-btn btn-approve" style="font-size:12px;padding:4px 12px;" '
+        +'onclick="resolveWithTranslation(\''+esc(draftId)+'\','+JSON.stringify(d.translated)+',this)">✈ 发送翻译版</button>';
+    }).catch(function(){
+      body.innerHTML='<span style="color:#ef4444;font-size:11px;">翻译请求失败</span>';
+      body.removeAttribute('data-loaded');
+    });
+}
+
+function resolveWithTranslation(draftId, text, btn){
+  if(btn){ btn.disabled=true; btn.textContent='发送中…'; }
+  resolve(draftId,'edit_send',text,btn);
+}
+
+// H2 批量操作
+function getSelectedIds(){
+  var ids=[];
+  document.querySelectorAll('.dr-chk:checked').forEach(function(c){ ids.push(c.getAttribute('data-id')); });
+  return ids;
+}
+function updateSelectBar(){
+  var ids=getSelectedIds();
+  var bar=document.getElementById('dr-select-bar');
+  var cnt=document.getElementById('dr-select-count');
+  if(ids.length>0){
+    bar.classList.add('visible');
+    if(cnt) cnt.textContent='已选 '+ids.length+' 条';
+  } else {
+    bar.classList.remove('visible');
+  }
+}
+function clearSel(){
+  document.querySelectorAll('.dr-chk:checked').forEach(function(c){ c.checked=false; });
+  updateSelectBar();
+}
+function bulkAct(action){
+  var ids=getSelectedIds();
+  if(!ids.length) return;
+  var label=action==='approve'?'批量批准':'批量拒绝';
+  if(!confirm(label+' 选中的 '+ids.length+' 条草稿？')) return;
+  fetch('/api/drafts/bulk-resolve',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({action:action,draft_ids:ids})
+  }).then(function(r){return r.json();}).then(function(d){
+    if(d&&d.ok){
+      alert(label+' 完成：成功 '+d.succeeded+' 条，失败 '+d.failed+' 条');
+      clearSel(); load();
+    } else { alert((d&&d.detail)||(d&&d.error)||label+'失败'); }
+  }).catch(function(){ alert('网络错误'); });
+}
+
+// H2 键盘快捷键（card 级导航）
+var _curCardIdx=-1;
+function cardKeydown(ev, cardEl){
+  if(ev.key==='a'||ev.key==='A'){
+    ev.preventDefault();
+    var did=cardEl.getAttribute('data-draft-id');
+    if(did&&cardEl.getAttribute('data-pending')==='true'){
+      var approveBtn=cardEl.querySelector('.btn-approve');
+      if(approveBtn&&!approveBtn.disabled) approveBtn.click();
+    }
+  } else if(ev.key==='r'||ev.key==='R'){
+    ev.preventDefault();
+    var did=cardEl.getAttribute('data-draft-id');
+    if(did&&cardEl.getAttribute('data-pending')==='true'){
+      var rejectBtn=cardEl.querySelector('.btn-reject');
+      if(rejectBtn&&!rejectBtn.disabled) rejectBtn.click();
+    }
+  } else if(ev.key==='ArrowDown'||ev.key==='j'){
+    ev.preventDefault();
+    var next=cardEl.nextElementSibling;
+    if(next&&next.classList&&next.classList.contains('dr-card')) next.focus();
+  } else if(ev.key==='ArrowUp'||ev.key==='k'){
+    ev.preventDefault();
+    var prev=cardEl.previousElementSibling;
+    if(prev&&prev.classList&&prev.classList.contains('dr-card')) prev.focus();
+  } else if(ev.key==='?'){
+    alert('键盘快捷键：\nA = 批准当前草稿\nR = 拒绝当前草稿\n↑/K = 上一张\n↓/J = 下一张\nSpace = 选择（批量）');
+  }
 }
 
 setInterval(load, 30000);

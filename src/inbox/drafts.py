@@ -167,6 +167,22 @@ class DraftService:
         action = str(action or "").strip().lower()
         if action not in {"approve", "reject", "edit_send", "cancel"}:
             return {"ok": False, "error": f"不支持的动作: {action}", "code": 400}
+
+        # "inbox" source 草稿（auto_generate_draft 生成）：直接按 draft_id 更新状态，
+        # 无需渠道适配器。实际发送由下游渠道适配器（LINE/WA）异步处理。
+        if kind == "inbox" and self._store is not None:
+            status = _action_to_status(action)
+            try:
+                updated = self._store.update_draft_status(
+                    draft_id, status=status, final_text=text or "", decided_by=by
+                )
+                if not updated:
+                    return {"ok": False, "error": "草稿不存在或已处理", "code": 404}
+                return {"ok": True, "draft_id": draft_id, "status": status, "source": "inbox"}
+            except Exception as e:
+                logger.debug("inbox draft resolve 失败: %s", e)
+                return {"ok": False, "error": str(e), "code": 500}
+
         adapter = self._by_kind.get(kind)
         if adapter is None:
             return {"ok": False, "error": f"未知草稿来源: {kind}", "code": 400}
@@ -436,6 +452,7 @@ class DraftService:
 
             draft_id = self._store.upsert_draft({
                 "source_kind": "inbox",
+                "source_id": conv_id,  # 用 conv_id 作为 source_id 保证每会话唯一幂等键
                 "conversation_id": conv_id,
                 "platform": platform,
                 "account_id": account_id,

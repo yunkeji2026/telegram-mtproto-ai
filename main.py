@@ -622,9 +622,18 @@ class AIChatAssistant:
                                     "inbox", {}
                                 ).get("l2_autosend", {}) or {}
                                 if _as_cfg.get("enabled", True):
+                                    # H3：合并 auto_draft 清理配置到 worker cfg
+                                    _ad_cleanup = (self.config.config or {}).get(
+                                        "inbox", {}
+                                    ).get("auto_draft", {}) or {}
+                                    _merged_as_cfg = {
+                                        "cleanup_age_days": int(_ad_cleanup.get("cleanup_age_days", 7)),
+                                        "cleanup_enabled": bool(_ad_cleanup.get("cleanup_enabled", True)),
+                                        **_as_cfg,
+                                    }
                                     _as_worker = AutosendWorker(
                                         draft_service=draft_svc,
-                                        config=_as_cfg,
+                                        config=_merged_as_cfg,
                                     )
                                     web_app.state.autosend_worker = _as_worker
                                     # C3：注册 L2 事件驱动钩子，新草稿落库时立即唤醒
