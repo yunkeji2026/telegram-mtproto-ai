@@ -328,6 +328,28 @@ class DraftService:
 
         result = self.resolve(draft_id, real_action, text=text, by=by)
 
+        # P1: 草稿成功批准后，发布 draft_resolved 事件（供 CRM 同步/外部集成订阅）
+        if result.get("ok") and action in ("approve", "edit_send", "autosend"):
+            try:
+                from src.integrations.shared.event_bus import get_event_bus
+                _meta = self._store.get_conv_meta(conv_id) if self._store and conv_id else {}
+                _csat = float(_meta.get("csat_score") or -1) if _meta else -1
+                get_event_bus().publish("draft_resolved", {
+                    "draft_id": draft_id,
+                    "conversation_id": conv_id,
+                    "agent_id": by,
+                    "action": action,
+                    "autopilot_level": autopilot,
+                    "risk_level": effective_risk,
+                    "intent": str((_meta or {}).get("last_intent") or ""),
+                    "emotion": str((_meta or {}).get("last_emotion") or ""),
+                    "csat": _csat if _csat >= 0 else None,
+                    "text_preview": str(text or "")[:80],
+                    "platform": str((_meta or {}).get("platform") or ""),
+                })
+            except Exception:
+                logger.debug("P1 draft_resolved 发布失败（已忽略）", exc_info=True)
+
         # M1: 草稿成功处置后计算并写入 CSAT 评分
         if result.get("ok") and conv_id and self._store is not None:
             try:

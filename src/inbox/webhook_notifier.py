@@ -65,6 +65,7 @@ _EVENT_ALIASES: Dict[str, Dict[str, Any]] = {
     "reply_risk": {"types": {"human_reply_risk"}, "levels": None},  # M3
     "report": {"types": {"report"}, "levels": None},                # M2 简报推送
     "csat_alert": {"types": {"csat_alert"}, "levels": None},        # O2 智能预警
+    "crm_sync": {"types": {"draft_resolved"}, "levels": None},      # P1 外部 CRM 同步
 }
 
 # ─── 速率限制 ────────────────────────────────────────────────────────────────
@@ -194,6 +195,21 @@ def _build_message(event_type: str, data: Dict[str, Any]) -> tuple[str, str]:
         period = data.get("period", "daily")
         title = f"📊 {'今日' if period == 'daily' else '本周'}工作简报"
         text = str(data.get("text") or "")
+
+    elif event_type == "draft_resolved":
+        # P1: CRM 同步用简洁摘要格式
+        intent_s = data.get("intent") or "—"
+        emotion_s = data.get("emotion") or "—"
+        csat_s = f"{data['csat']:.1f}⭐" if data.get("csat") is not None else "待评"
+        title = f"✅ 对话已处置 [{data.get('platform', '?')}] intent={intent_s}"
+        text = (
+            f"**草稿**: {data.get('draft_id', '?')}\n"
+            f"**会话**: {data.get('conversation_id', '?')}\n"
+            f"**坐席**: {data.get('agent_id', '?')} · {data.get('action', '?')}\n"
+            f"**意图**: {intent_s} · **情绪**: {emotion_s}\n"
+            f"**CSAT**: {csat_s} · **风险**: {data.get('risk_level', '?')}\n"
+            f"**回复预览**: {data.get('text_preview', '')}"
+        )
 
     elif event_type == "csat_alert":
         title = f"⚠️ 服务质量预警 [{data.get('condition', '?')}]"

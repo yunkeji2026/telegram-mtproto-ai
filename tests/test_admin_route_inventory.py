@@ -526,6 +526,10 @@ _BASELINE = """
 /api/workspace/leaderboard	GET
 /api/workspace/trend	GET
 /api/workspace/my-perf	GET
+/api/workspace/kb-archive	POST
+/api/workspace/workspaces	GET
+/api/workspace/workspaces	POST
+/api/workspace/workspaces/{workspace_id}/stats	GET
 /api/reply-templates	POST
 /api/reply-templates/{template_id}	DELETE
 /api/reply-templates/{template_id}	PUT
