@@ -453,6 +453,20 @@ class DraftService:
                 "auto_generate_draft OK conv=%s level=%s draft_id=%s",
                 conv_id, autopilot, draft_id,
             )
+            # G1：向事件总线发布 draft_created，供 SSE 实时通知坐席工作台
+            try:
+                from src.integrations.shared.event_bus import get_event_bus
+                get_event_bus().publish("draft_created", {
+                    "draft_id": draft_id,
+                    "conversation_id": conv_id,
+                    "platform": platform,
+                    "autopilot_level": autopilot,
+                    "risk_level": risk_level,
+                    "peer_text": t[:100],
+                    "chat_name": chat_name,
+                })
+            except Exception:
+                logger.debug("draft_created 事件发布失败", exc_info=True)
             return draft_id
         except Exception:
             logger.debug("auto_generate_draft 失败", exc_info=True)

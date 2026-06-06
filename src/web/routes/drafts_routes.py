@@ -151,14 +151,34 @@ def register_drafts_routes(app, *, api_auth):
         返回：intent, emotion, risk_level, risk_reasons, next_step, kb_matches, language
         用于 draft_review.html 内嵌 AI 洞察面板。
         """
-        from src.ai.chat_assistant_service import quick_analyze
-        analysis = quick_analyze(str(text or ""))
+        from src.ai.chat_assistant_service import (
+            quick_analyze, _suggestions, detect_language,
+            _detect_emotion, _detect_intent, _detect_risk,
+        )
+        t = str(text or "")
+        analysis = quick_analyze(t)
+        # F1：附带规则建议文本（最多3条），供前端快捷回复按钮展示
+        suggestions: list = []
+        if t.strip():
+            try:
+                lang = analysis.get("language", "zh")
+                intent = analysis.get("intent", "")
+                emotion = analysis.get("emotion", "平稳")
+                risk = analysis.get("risk_level", "low")
+                for s in _suggestions(t, lang=lang, intent=intent, emotion=emotion, risk=risk)[:3]:
+                    suggestions.append({
+                        "style": str(s.style or ""),
+                        "title": str(s.title or ""),
+                        "text": str(s.text or ""),
+                    })
+            except Exception:
+                pass
         # KB 匹配（可选，kb_store 未挂载时返回空列表）
         kb_matches: list = []
         try:
             kb_store = getattr(request.app.state, "kb_store", None)
-            if kb_store is not None and str(text or "").strip():
-                result = kb_store.search(str(text), top_k=3)
+            if kb_store is not None and t.strip():
+                result = kb_store.search(t, top_k=3)
                 raw_entries = (result or {}).get("entries", [])
                 for e in raw_entries[:3]:
                     kb_matches.append({
@@ -174,6 +194,7 @@ def register_drafts_routes(app, *, api_auth):
             "draft_id": draft_id,
             "conversation_id": conversation_id,
             **analysis,
+            "suggestions": suggestions,
             "kb_matches": kb_matches,
         }
 

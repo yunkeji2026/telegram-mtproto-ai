@@ -1148,7 +1148,8 @@ def register_unified_inbox_routes(
             try:
                 # 仅 replay 最近的 inbox_message 事件，避免设备类噪声
                 _sse_types = {"inbox_message", "agent_presence",
-                              "conversation_claim", "follow_up"}
+                              "conversation_claim", "follow_up",
+                              "draft_created"}  # G1：自动草稿生成实时推送
                 for evt in bus.recent_events(30):
                     if evt.get("type") in _sse_types:
                         yield f"data: {_json.dumps(evt, ensure_ascii=False)}\n\n"
