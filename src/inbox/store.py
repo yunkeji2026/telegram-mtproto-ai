@@ -1076,6 +1076,81 @@ class InboxStore:
             rows = self._conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
+    def get_csat_trend(
+        self,
+        *,
+        since_ts: float = 0.0,
+        bucket_sec: int = 86400,
+    ) -> List[Dict[str, Any]]:
+        """O1：按时间桶聚合 conversation_meta CSAT 均值趋势。
+
+        返回字段：bucket_ts（UTC 秒，每桶起始）, avg_csat, count
+        仅统计 csat_score >= 0（已评分）的会话。
+        """
+        bkt = max(3600, int(bucket_sec))
+        with self._lock:
+            rows = self._conn.execute(
+                f"""
+                SELECT
+                    (CAST(updated_at / {bkt} AS INTEGER) * {bkt}) AS bucket_ts,
+                    AVG(csat_score) AS avg_csat,
+                    COUNT(*) AS count
+                FROM conversation_meta
+                WHERE csat_score >= 0 AND updated_at >= ?
+                GROUP BY bucket_ts
+                ORDER BY bucket_ts
+                """,
+                (float(since_ts),),
+            ).fetchall()
+        return [
+            {
+                "bucket_ts": r[0],
+                "avg_csat": round(float(r[1]), 2) if r[1] is not None else None,
+                "count": int(r[2]),
+            }
+            for r in rows
+        ]
+
+    def get_draft_level_trend(
+        self,
+        *,
+        since_ts: float = 0.0,
+        bucket_sec: int = 86400,
+    ) -> List[Dict[str, Any]]:
+        """O1：按时间桶聚合 draft_audit_log，统计 L3/L4 占比趋势。
+
+        返回字段：bucket_ts, total, l3, l4, high_risk_rate（L3+L4 / total）
+        """
+        bkt = max(3600, int(bucket_sec))
+        with self._lock:
+            rows = self._conn.execute(
+                f"""
+                SELECT
+                    (CAST(ts / {bkt} AS INTEGER) * {bkt}) AS bucket_ts,
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN autopilot_level='L3' THEN 1 ELSE 0 END) AS l3,
+                    SUM(CASE WHEN autopilot_level='L4' THEN 1 ELSE 0 END) AS l4
+                FROM draft_audit_log
+                WHERE ts >= ? AND action IN ('approved','rejected','autosend','force_override','blocked')
+                GROUP BY bucket_ts
+                ORDER BY bucket_ts
+                """,
+                (float(since_ts),),
+            ).fetchall()
+        result = []
+        for r in rows:
+            total = int(r[1] or 0)
+            l3 = int(r[2] or 0)
+            l4 = int(r[3] or 0)
+            result.append({
+                "bucket_ts": r[0],
+                "total": total,
+                "l3": l3,
+                "l4": l4,
+                "high_risk_rate": round((l3 + l4) / total, 3) if total > 0 else 0.0,
+            })
+        return result
+
     # ── Phase 5：坐席 presence + 会话租约 ─────────────────────
 
     def upsert_agent_presence(

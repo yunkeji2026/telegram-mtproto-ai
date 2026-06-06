@@ -64,6 +64,7 @@ _EVENT_ALIASES: Dict[str, Dict[str, Any]] = {
     "escalation": {"types": {"escalation"}, "levels": None},
     "reply_risk": {"types": {"human_reply_risk"}, "levels": None},  # M3
     "report": {"types": {"report"}, "levels": None},                # M2 简报推送
+    "csat_alert": {"types": {"csat_alert"}, "levels": None},        # O2 智能预警
 }
 
 # ─── 速率限制 ────────────────────────────────────────────────────────────────
@@ -193,6 +194,15 @@ def _build_message(event_type: str, data: Dict[str, Any]) -> tuple[str, str]:
         period = data.get("period", "daily")
         title = f"📊 {'今日' if period == 'daily' else '本周'}工作简报"
         text = str(data.get("text") or "")
+
+    elif event_type == "csat_alert":
+        title = f"⚠️ 服务质量预警 [{data.get('condition', '?')}]"
+        text = (
+            f"**预警条件**: {data.get('condition', '?')}\n"
+            f"**消息**: {data.get('message', '')}\n"
+            f"**阈值**: {data.get('threshold', '?')}\n"
+            "[📊 查看简报](/workspace/dashboard)"
+        )
 
     elif event_type == "escalation":
         title = "🔔 升级告警"

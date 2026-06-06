@@ -101,6 +101,36 @@
     </div>
     <div id="db-metrics" style="margin-top:10px;"><span style="color:#94a3b8;font-size:13px;">加载中…</span></div>
   </div>
+  <!-- O3 我的绩效（所有登录坐席可见，个人化数据） -->
+  <div class="db-sec" id="db-myp-sec" style="display:none;">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h3 style="margin:0;">📈 我的绩效</h3>
+      <div style="display:flex;gap:6px;">
+        <select id="db-myp-days" style="font-size:11px;padding:2px 6px;border:1px solid #e2e8f0;border-radius:4px;cursor:pointer;" onchange="window._mypRefresh()">
+          <option value="1">今日</option>
+          <option value="7" selected>本周</option>
+          <option value="30">本月</option>
+        </select>
+        <button onclick="window._mypRefresh()" style="font-size:11px;padding:2px 8px;border:1px solid #7c3aed;border-radius:4px;background:#f5f3ff;color:#6d28d9;cursor:pointer;">刷新</button>
+      </div>
+    </div>
+    <div id="db-myp-body" style="margin-top:10px;"><span style="color:#94a3b8;font-size:13px;">加载中…</span></div>
+  </div>
+  <!-- O1 CSAT/风险趋势图（主管专属） -->
+  <div class="db-sec" id="db-trend-sec" style="display:none;">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h3 style="margin:0;">📉 质量趋势</h3>
+      <div style="display:flex;gap:6px;">
+        <select id="db-trend-days" style="font-size:11px;padding:2px 6px;border:1px solid #e2e8f0;border-radius:4px;cursor:pointer;" onchange="window._trendRefresh()">
+          <option value="7" selected>近7天</option>
+          <option value="30">近30天</option>
+          <option value="90">近90天</option>
+        </select>
+        <button onclick="window._trendRefresh()" style="font-size:11px;padding:2px 8px;border:1px solid #2563eb;border-radius:4px;background:#eff6ff;color:#2563eb;cursor:pointer;">刷新</button>
+      </div>
+    </div>
+    <div id="db-trend-body" style="margin-top:10px;"><span style="color:#94a3b8;font-size:13px;">加载中…</span></div>
+  </div>
   <!-- N3 CSAT 坐席排行榜（主管专属） -->
   <div class="db-sec" id="db-leaderboard-sec" style="display:none;">
     <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -338,6 +368,114 @@
       el.innerHTML=html;
     }).catch(function(){ if(el) el.innerHTML='<span style="color:#94a3b8;font-size:12px;">指标加载失败</span>'; });
   }
+
+  // ─── O1/O3 共用 SVG Sparkline ───────────────────────────────────────────
+  function _sparkline(values, opts){
+    opts = opts||{};
+    var w=opts.w||160, h=opts.h||36, color=opts.color||'#2563eb', fillColor=opts.fill||'';
+    if(!values||!values.length) return '<span style="color:#94a3b8;font-size:11px;">无数据</span>';
+    var min=Math.min.apply(null,values), max=Math.max.apply(null,values);
+    var range=max-min||1;
+    var pad=3;
+    function px(i){ return Math.round(pad + i*(w-2*pad)/(values.length-1||1)); }
+    function py(v){ return Math.round(pad + (1-(v-min)/range)*(h-2*pad)); }
+    var pts=values.map(function(v,i){ return px(i)+','+py(v); }).join(' ');
+    var fill='';
+    if(fillColor){
+      var last=values.length-1;
+      fill='<polygon points="'+px(0)+','+h+' '+pts+' '+px(last)+','+h+'" fill="'+fillColor+'" opacity="0.15"/>';
+    }
+    var last_v=values[values.length-1];
+    var prev_v=values[values.length-2];
+    var delta=values.length>1?last_v-prev_v:0;
+    var arrow=delta>0?'↑':delta<0?'↓':'→';
+    var arrowColor=delta>0?'#16a34a':delta<0?'#dc2626':'#64748b';
+    return '<svg width="'+w+'" height="'+h+'" style="vertical-align:middle;">'
+      +fill
+      +'<polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="1.5" stroke-linejoin="round"/>'
+      +'<circle cx="'+px(values.length-1)+'" cy="'+py(last_v)+'" r="2.5" fill="'+color+'"/>'
+      +'</svg>'
+      +'<span style="font-size:11px;color:'+arrowColor+';margin-left:3px;">'+arrow+' '+last_v.toFixed(1)+'</span>';
+  }
+
+  // O1: CSAT + Level 趋势（主管专属）
+  function loadTrend(){
+    var sec=document.getElementById('db-trend-sec');
+    var el=document.getElementById('db-trend-body');
+    if(!sec||!IS_SUP) return;
+    sec.style.display='';
+    var days=(document.getElementById('db-trend-days')||{}).value||'7';
+    fetch('/api/workspace/trend?days='+days)
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        var csat=d.csat_trend||[];
+        var lvl=d.level_trend||[];
+        var delta=d.delta||{};
+
+        var csatVals=csat.map(function(r){ return r.avg_csat||0; });
+        var riskVals=lvl.map(function(r){ return Math.round(r.high_risk_rate*100); });
+        var deltaV=delta.csat_delta;
+        var deltaStr=deltaV==null?'—':(deltaV>0?'+':'')+deltaV.toFixed(2);
+        var deltaColor=deltaV==null?'#64748b':deltaV>=0?'#16a34a':'#dc2626';
+
+        var html='<div style="display:flex;gap:24px;flex-wrap:wrap;align-items:center;">'
+          +'<div>'
+          +'<div style="font-size:11px;color:#64748b;margin-bottom:2px;">CSAT 趋势 <span style="color:'+deltaColor+';font-weight:600;">('+deltaStr+')</span></div>'
+          +_sparkline(csatVals, {w:160,h:40,color:'#2563eb',fill:'#2563eb'})
+          +'</div>'
+          +'<div>'
+          +'<div style="font-size:11px;color:#64748b;margin-bottom:2px;">L3/L4 占比趋势 (%)</div>'
+          +_sparkline(riskVals, {w:160,h:40,color:'#dc2626',fill:'#dc2626'})
+          +'</div>'
+          +'<div style="font-size:12px;color:#64748b;">'
+          +'当期均分: <b style="color:#2563eb;">'+(delta.csat_current!=null?delta.csat_current.toFixed(2):'—')+'</b><br/>'
+          +'上期均分: <b>'+(delta.csat_previous!=null?delta.csat_previous.toFixed(2):'—')+'</b>'
+          +'</div>'
+          +'</div>';
+        el.innerHTML=html;
+      })
+      .catch(function(){ if(el) el.innerHTML='<span style="color:#94a3b8;font-size:12px;">趋势加载失败</span>'; });
+  }
+  window._trendRefresh=function(){ loadTrend(); };
+
+  // O3: 我的绩效（所有登录坐席可见，个性化）
+  function loadMyPerf(){
+    var sec=document.getElementById('db-myp-sec');
+    var el=document.getElementById('db-myp-body');
+    if(!sec) return;
+    sec.style.display='';
+    var days=(document.getElementById('db-myp-days')||{}).value||'7';
+    fetch('/api/workspace/my-perf?days='+days)
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(!d.ok){ el.innerHTML='<span style="color:#94a3b8;font-size:12px;">无数据</span>'; return; }
+        var p=d.perf||{};
+        var tl=d.timeline||[];
+        var totalVals=tl.map(function(r){ return r.total||0; });
+        var approveVals=tl.map(function(r){ return r.approved||0; });
+        var rank=d.rank;
+        var total_agents=d.total_agents||0;
+        var rankStr=rank?rank+' / '+total_agents+'人':'—';
+        var csat=p.avg_csat!=null?p.avg_csat.toFixed(1)+'⭐':'—';
+        var csatColor=p.avg_csat==null?'#94a3b8':p.avg_csat>=4.5?'#16a34a':p.avg_csat>=3.5?'#d97706':'#dc2626';
+
+        var html='<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start;">'
+          +'<div style="min-width:160px;">'
+          +'<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px;">'
+          +'<div style="text-align:center;"><div style="font-size:22px;font-weight:700;color:#1e293b;">'+(p.total||0)+'</div><div style="font-size:11px;color:#64748b;">总处理</div></div>'
+          +'<div style="text-align:center;"><div style="font-size:22px;font-weight:700;color:#16a34a;">'+(p.approved||0)+'</div><div style="font-size:11px;color:#64748b;">批准</div></div>'
+          +'<div style="text-align:center;"><div style="font-size:22px;font-weight:700;color:#d97706;">'+(p.rejected||0)+'</div><div style="font-size:11px;color:#64748b;">拒绝</div></div>'
+          +'<div style="text-align:center;"><div style="font-size:22px;font-weight:700;color:'+csatColor+';">'+csat+'</div><div style="font-size:11px;color:#64748b;">CSAT</div></div>'
+          +'</div>'
+          +'<div style="font-size:12px;color:#64748b;">CSAT 排名: <b>'+rankStr+'</b></div>'
+          +'</div>'
+          +(totalVals.length>1?'<div><div style="font-size:11px;color:#64748b;margin-bottom:2px;">处理量趋势</div>'+_sparkline(totalVals, {w:140,h:36,color:'#7c3aed',fill:'#7c3aed'})+'</div>':'')
+          +'</div>';
+        el.innerHTML=html;
+      })
+      .catch(function(){ if(el) el.innerHTML='<span style="color:#94a3b8;font-size:12px;">绩效加载失败</span>'; });
+  }
+  window._mypRefresh=function(){ loadMyPerf(); };
 
   // N3: CSAT 排行榜（主管专属）
   function loadLeaderboard(){
@@ -584,7 +722,8 @@
     }
     load(); setInterval(load, 60000);
     loadEsc(); setInterval(loadEsc, 60000);
-    if(IS_SUP){ loadRisk(); setInterval(loadRisk, 60000); loadPresence(); setInterval(loadPresence, 30000); loadMetrics(); setInterval(loadMetrics, 60000); loadReport(); loadLeaderboard(); setInterval(loadLeaderboard, 120000); }
+    loadMyPerf(); setInterval(loadMyPerf, 120000);
+    if(IS_SUP){ loadRisk(); setInterval(loadRisk, 60000); loadPresence(); setInterval(loadPresence, 30000); loadMetrics(); setInterval(loadMetrics, 60000); loadReport(); loadLeaderboard(); setInterval(loadLeaderboard, 120000); loadTrend(); setInterval(loadTrend, 300000); }
     loadHealth(); setInterval(loadHealth, 60000);
 
     // L3：一键 L2 自动发（主管快速操作）

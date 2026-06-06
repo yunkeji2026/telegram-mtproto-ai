@@ -58,10 +58,12 @@ class ScheduledReporter:
         self._daily_time: str = str(cfg.get("daily_time") or "09:00").strip()
         self._weekly_day: str = str(cfg.get("weekly_day") or "").lower().strip()
         self._tz_offset: int = int(cfg.get("tz_offset_hours") or 8)
+        self._alert_rules: list = list(cfg.get("alert_rules") or [])  # O2
         self._stop_evt = asyncio.Event()
         self._running = False
         self.total_sent: int = 0
         self.total_errors: int = 0
+        self.total_alerts: int = 0  # O2 预警触发次数
         self._last_daily: Optional[str] = None   # "YYYY-MM-DD"
         self._last_weekly: Optional[str] = None  # "YYYY-WNN"
         self._tick_secs: int = int(cfg.get("tick_secs") or 60)
@@ -128,7 +130,7 @@ class ScheduledReporter:
                 await self._send("weekly")
 
     async def _send(self, period: str) -> None:
-        """生成简报并广播到 EventBus。"""
+        """生成简报、广播到 EventBus，并触发 O2 预警规则评估。"""
         try:
             from src.inbox.report_generator import ReportGenerator
             from src.integrations.shared.event_bus import get_event_bus
@@ -147,6 +149,9 @@ class ScheduledReporter:
             })
             self.total_sent += 1
             logger.info("ScheduledReporter %s 简报已发布到 EventBus（total_sent=%d）", period, self.total_sent)
+
+            # O2: 简报数据复用，直接评估预警规则（零额外 DB 查询）
+            await self._evaluate_alert_rules(report_data)
         except Exception:
             self.total_errors += 1
             logger.warning("ScheduledReporter %s 简报推送失败", period, exc_info=True)
@@ -163,7 +168,76 @@ class ScheduledReporter:
             "last_weekly": self._last_weekly,
             "total_sent": self.total_sent,
             "total_errors": self.total_errors,
+            "total_alerts": self.total_alerts,  # O2
+            "alert_rules": len(self._alert_rules),
         }
+
+    # ── O2：智能预警规则评估 ─────────────────────────────────────────────
+
+    async def _evaluate_alert_rules(self, report_data: Dict[str, Any]) -> None:
+        """O2：评估配置的预警规则，符合条件时发布 csat_alert 事件。
+
+        rules 配置示例（config.yaml）：
+          report:
+            alert_rules:
+              - condition: avg_csat_below
+                threshold: 3.5
+                message: "团队 CSAT 均分低于 {threshold}"
+              - condition: l3l4_rate_above
+                threshold: 0.3
+                message: "L3/L4 高风险草稿占比超过 {pct}%"
+        """
+        rules = self._alert_rules
+        if not rules:
+            return
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            csat_data = report_data.get("csat") or {}
+            sla_data = report_data.get("sla_stats") or {}
+
+            for rule in rules:
+                condition = str(rule.get("condition") or "")
+                threshold = float(rule.get("threshold") or 0)
+                msg_tpl = str(rule.get("message") or condition)
+                triggered = False
+                payload: Dict[str, Any] = {}
+
+                if condition == "avg_csat_below":
+                    avg = csat_data.get("avg")
+                    if avg is not None and avg < threshold:
+                        triggered = True
+                        payload = {"avg_csat": avg, "threshold": threshold}
+                        msg_tpl = msg_tpl.format(threshold=threshold, avg=avg)
+
+                elif condition == "l3l4_rate_above":
+                    compliance = float(sla_data.get("compliance_rate") or 100)
+                    high_risk_rate = round((100 - compliance) / 100, 3)
+                    if high_risk_rate > threshold:
+                        triggered = True
+                        payload = {"rate": high_risk_rate, "threshold": threshold}
+                        pct = round(high_risk_rate * 100, 1)
+                        msg_tpl = msg_tpl.format(threshold=threshold, pct=pct)
+
+                elif condition == "force_override_above":
+                    forced = int(sla_data.get("force_overrides") or 0)
+                    if forced > int(threshold):
+                        triggered = True
+                        payload = {"force_overrides": forced, "threshold": int(threshold)}
+                        msg_tpl = msg_tpl.format(threshold=int(threshold), count=forced)
+
+                if triggered:
+                    get_event_bus().publish("csat_alert", {
+                        "condition": condition,
+                        "message": msg_tpl,
+                        "threshold": threshold,
+                        **payload,
+                    })
+                    self.total_alerts += 1
+                    logger.warning(
+                        "O2 预警触发: %s — %s", condition, msg_tpl,
+                    )
+        except Exception:
+            logger.debug("O2 预警规则评估失败（已忽略）", exc_info=True)
 
     # ── 手动触发（用于测试 / API 按钮） ─────────────────────────────────
 

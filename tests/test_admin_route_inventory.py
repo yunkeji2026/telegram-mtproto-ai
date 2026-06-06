@@ -524,6 +524,8 @@ _BASELINE = """
 /api/workspace/report	GET
 /api/workspace/broadcast	POST
 /api/workspace/leaderboard	GET
+/api/workspace/trend	GET
+/api/workspace/my-perf	GET
 /api/reply-templates	POST
 /api/reply-templates/{template_id}	DELETE
 /api/reply-templates/{template_id}	PUT

@@ -612,6 +612,155 @@ def register_metrics_route(app, *, api_auth):
         return {"ok": True, **metrics}
 
 
+def register_trend_route(app, *, api_auth):
+    """O1：注册 GET /api/workspace/trend（CSAT/审批率趋势图数据，主管专属）。"""
+    from fastapi import Depends
+    import time as _time
+
+    @app.get("/api/workspace/trend")
+    async def api_workspace_trend(
+        request: Request,
+        days: int = 7,
+        bucket: str = "day",
+        _=Depends(api_auth),
+    ):
+        """O1：返回 CSAT + L3/L4 占比的时间序列趋势数据（主管专属）。
+
+        days:   7（默认，近一周）| 30（近一月）| 90（近季度）
+        bucket: day（默认，每天一个数据点）| week（每周）
+        返回：{csat_trend: [...], level_trend: [...], delta: {...}}
+        delta 包含本周期 vs 上期 CSAT 均值变化量。
+        """
+        if not _is_supervisor(request):
+            raise HTTPException(403, "趋势数据需要主管权限")
+
+        inbox = getattr(request.app.state, "inbox_store", None)
+        if inbox is None:
+            raise HTTPException(503, "inbox_store 未就绪")
+
+        days = max(1, min(90, int(days)))
+        bucket_sec = 604800 if bucket == "week" else 86400
+        now = _time.time()
+        since_ts = now - days * 86400
+        prev_since_ts = now - days * 2 * 86400  # 对比上一周期
+
+        csat_trend = inbox.get_csat_trend(since_ts=since_ts, bucket_sec=bucket_sec)
+        level_trend = inbox.get_draft_level_trend(since_ts=since_ts, bucket_sec=bucket_sec)
+
+        # delta：当期 vs 上期 CSAT 均值差
+        curr_csat_rows = inbox.get_csat_trend(since_ts=since_ts)
+        prev_csat_rows = inbox.get_csat_trend(since_ts=prev_since_ts, bucket_sec=bucket_sec)
+        prev_csat_rows_filtered = [r for r in prev_csat_rows if r["bucket_ts"] < since_ts]
+
+        def _avg(rows):
+            vals = [r["avg_csat"] for r in rows if r["avg_csat"] is not None]
+            return round(sum(vals) / len(vals), 2) if vals else None
+
+        curr_avg = _avg(curr_csat_rows)
+        prev_avg = _avg(prev_csat_rows_filtered)
+        delta_csat = round(curr_avg - prev_avg, 2) if curr_avg is not None and prev_avg is not None else None
+
+        return {
+            "ok": True,
+            "days": days,
+            "csat_trend": csat_trend,
+            "level_trend": level_trend,
+            "delta": {
+                "csat_current": curr_avg,
+                "csat_previous": prev_avg,
+                "csat_delta": delta_csat,
+                "direction": (
+                    "up" if delta_csat and delta_csat > 0.05
+                    else "down" if delta_csat and delta_csat < -0.05
+                    else "stable"
+                ),
+            },
+        }
+
+
+def register_my_perf_route(app, *, api_auth):
+    """O3：注册 GET /api/workspace/my-perf（坐席自助绩效查询，无需主管权限）。"""
+    from fastapi import Depends
+    import time as _time
+
+    @app.get("/api/workspace/my-perf")
+    async def api_workspace_my_perf(
+        request: Request,
+        days: int = 7,
+        agent_id: str = "",
+        _=Depends(api_auth),
+    ):
+        """O3：坐席自助绩效查询。
+
+        无需主管权限；
+        agent_id: 可选，主管可指定其他坐席；坐席只能查自己。
+        days: 1 / 7（默认）/ 30 / 90
+        返回：{agent_id, total, approved, rejected, autosend, avg_csat, timeline, rank}
+        """
+        inbox = getattr(request.app.state, "inbox_store", None)
+        if inbox is None:
+            raise HTTPException(503, "inbox_store 未就绪")
+
+        days = max(1, min(90, int(days)))
+        now = _time.time()
+        since_ts = now - days * 86400
+
+        # 当前登录坐席 ID
+        current_uid = _session_agent_id(request)
+        is_sup = _is_supervisor(request)
+
+        # 权限：非主管只能查自己
+        target_id = str(agent_id or "").strip()
+        if not target_id:
+            target_id = current_uid
+        elif not is_sup and target_id != current_uid:
+            raise HTTPException(403, "坐席只能查看自己的绩效数据")
+
+        # 个人绩效
+        perf_list = inbox.get_agent_perf(since_ts=since_ts, agent_id=target_id)
+        perf = perf_list[0] if perf_list else {
+            "agent_id": target_id, "total": 0, "approved": 0,
+            "rejected": 0, "autosend": 0, "avg_csat": None,
+        }
+
+        # 趋势（每天一个点）
+        timeline = inbox.get_agent_perf_timeline(
+            since_ts=since_ts,
+            agent_id=target_id,
+            bucket_sec=86400,
+        )
+
+        # 排名：在全部坐席中的 CSAT 排名
+        all_perf = inbox.get_agent_perf(since_ts=since_ts)
+        all_sorted = sorted(
+            [p for p in all_perf if p.get("total", 0) > 0],
+            key=lambda x: float(x.get("avg_csat") or -1),
+            reverse=True,
+        )
+        rank = next(
+            (i + 1 for i, p in enumerate(all_sorted) if p.get("agent_id") == target_id),
+            None,
+        )
+        total_agents = len(all_sorted)
+
+        # 近期处置记录（最近 10 条）
+        recent_decisions = [
+            r for r in inbox.list_draft_audit(limit=200)
+            if str(r.get("agent_id") or "") == target_id
+        ][:10]
+
+        return {
+            "ok": True,
+            "agent_id": target_id,
+            "days": days,
+            "perf": perf,
+            "timeline": timeline,
+            "rank": rank,
+            "total_agents": total_agents,
+            "recent_decisions": recent_decisions,
+        }
+
+
 def register_leaderboard_route(app, *, api_auth):
     """N3：注册 GET /api/workspace/leaderboard（CSAT 坐席排行榜，主管专属）。"""
     from fastapi import Depends
