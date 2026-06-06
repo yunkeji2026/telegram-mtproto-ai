@@ -2429,9 +2429,17 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
     @app.get("/workspace/templates")
     async def _ws_templates(request: Request):
         _unified_inbox_page_auth(request)
+        sess = request.session
         return templates.TemplateResponse(
+            request,
             "template_mgmt.html",
-            {"request": request, "config_manager": config_manager},
+            {
+                "request": request,
+                "config_manager": config_manager,
+                "user_name": sess.get("username") or sess.get("agent_id") or "",
+                "user_display_name": sess.get("display_name") or sess.get("username") or "",
+                "site_name": (config_manager.config or {}).get("web_admin", {}).get("site_name", ""),
+            },
         )
 
     # ── 面向客户的网页聊天 Widget（web 渠道，公网；feature flag 默认关）──
