@@ -235,6 +235,25 @@ _MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS idx_conv_meta_workspace ON conversation_meta(workspace_id)",
     "CREATE INDEX IF NOT EXISTS idx_draft_audit_workspace ON draft_audit_log(workspace_id)",
     "CREATE INDEX IF NOT EXISTS idx_conv_meta_updated ON conversation_meta(updated_at DESC)",
+    # Q1: conversation_meta 新增 summary 列（对话摘要自动归档）
+    "ALTER TABLE conversation_meta ADD COLUMN summary TEXT NOT NULL DEFAULT ''",
+    # Q2: reply_drafts 新增质量评分列
+    "ALTER TABLE reply_drafts ADD COLUMN quality_score REAL NOT NULL DEFAULT -1",
+    "ALTER TABLE reply_drafts ADD COLUMN quality_breakdown TEXT NOT NULL DEFAULT '{}'",
+    # Q3: KB 推荐命中率记录表
+    """CREATE TABLE IF NOT EXISTS kb_recommendation_log (
+        id              TEXT PRIMARY KEY,
+        entry_id        TEXT NOT NULL DEFAULT '',
+        entry_title     TEXT NOT NULL DEFAULT '',
+        conversation_id TEXT NOT NULL DEFAULT '',
+        agent_id        TEXT NOT NULL DEFAULT '',
+        recommended_ts  REAL NOT NULL DEFAULT 0,
+        clicked         INTEGER NOT NULL DEFAULT 0,
+        used_in_draft   INTEGER NOT NULL DEFAULT 0,
+        draft_id        TEXT NOT NULL DEFAULT ''
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_kb_rec_entry ON kb_recommendation_log(entry_id)",
+    "CREATE INDEX IF NOT EXISTS idx_kb_rec_ts    ON kb_recommendation_log(recommended_ts DESC)",
     # I3: 回复模板库
     """CREATE TABLE IF NOT EXISTS reply_templates (
         id           TEXT PRIMARY KEY,
@@ -1596,6 +1615,163 @@ class InboxStore:
                  mc, now, str(contact_id or ""), _wsid),
             )
             self._conn.commit()
+
+    # ── Q1: 对话摘要 ─────────────────────────────────────────────────────
+    def update_conv_summary(self, conversation_id: str, summary: str) -> None:
+        """Q1：写入/更新对话摘要到 conversation_meta.summary。"""
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            return
+        now = self._now()
+        with self._lock:
+            self._conn.execute(
+                "UPDATE conversation_meta SET summary=?, updated_at=? WHERE conversation_id=?",
+                (str(summary or ""), now, cid),
+            )
+            self._conn.commit()
+
+    # ── Q2: 草稿质量评分 ─────────────────────────────────────────────────
+    def update_draft_quality(
+        self,
+        draft_id: str,
+        quality_score: float,
+        quality_breakdown: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Q2：写入草稿质量分及维度明细到 reply_drafts。"""
+        did = str(draft_id or "").strip()
+        if not did:
+            return
+        breakdown_json = json.dumps(quality_breakdown or {}, ensure_ascii=False)
+        now = self._now()
+        with self._lock:
+            self._conn.execute(
+                "UPDATE reply_drafts SET quality_score=?, quality_breakdown=?, updated_at=? WHERE draft_id=?",
+                (float(quality_score), breakdown_json, now, did),
+            )
+            self._conn.commit()
+
+    def get_draft_quality(self, draft_id: str) -> Optional[Dict[str, Any]]:
+        """Q2：读取草稿质量评分（含明细）。"""
+        did = str(draft_id or "").strip()
+        if not did:
+            return None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT quality_score, quality_breakdown FROM reply_drafts WHERE draft_id=?", (did,)
+            ).fetchone()
+        if row is None:
+            return None
+        score = float(row[0]) if row[0] is not None else -1.0
+        try:
+            breakdown = json.loads(row[1] or "{}")
+        except Exception:
+            breakdown = {}
+        return {"quality_score": score, "breakdown": breakdown}
+
+    def list_draft_quality_stats(
+        self,
+        *,
+        since_ts: float = 0.0,
+        limit: int = 500,
+    ) -> Dict[str, Any]:
+        """Q2：汇总质量分分布（用于 dashboard 统计）。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT quality_score FROM reply_drafts WHERE quality_score >= 0 AND created_at >= ? LIMIT ?",
+                (float(since_ts), limit),
+            ).fetchall()
+        scores = [float(r[0]) for r in rows]
+        if not scores:
+            return {"count": 0, "avg": None, "excellent": 0, "good": 0, "fair": 0, "poor": 0}
+        avg = sum(scores) / len(scores)
+        return {
+            "count": len(scores),
+            "avg": round(avg, 1),
+            "excellent": sum(1 for s in scores if s >= 80),
+            "good": sum(1 for s in scores if 60 <= s < 80),
+            "fair": sum(1 for s in scores if 40 <= s < 60),
+            "poor": sum(1 for s in scores if s < 40),
+        }
+
+    # ── Q3: KB 命中率监控 ─────────────────────────────────────────────────
+    def record_kb_recommendation(
+        self,
+        *,
+        rec_id: str,
+        entry_id: str,
+        entry_title: str = "",
+        conversation_id: str = "",
+        agent_id: str = "",
+    ) -> None:
+        """Q3：记录 KB 条目被推荐给坐席一次。"""
+        import uuid as _uuid
+        rid = str(rec_id or _uuid.uuid4().hex[:12])
+        now = self._now()
+        with self._lock:
+            self._conn.execute(
+                """INSERT OR IGNORE INTO kb_recommendation_log
+                   (id, entry_id, entry_title, conversation_id, agent_id, recommended_ts)
+                   VALUES (?,?,?,?,?,?)""",
+                (rid, str(entry_id), str(entry_title), str(conversation_id), str(agent_id), now),
+            )
+            self._conn.commit()
+
+    def click_kb_recommendation(
+        self,
+        *,
+        rec_id: str,
+        used_in_draft: bool = False,
+        draft_id: str = "",
+    ) -> None:
+        """Q3：标记坐席点击了某次 KB 推荐（可选：是否用于草稿）。"""
+        now = self._now()
+        with self._lock:
+            self._conn.execute(
+                """UPDATE kb_recommendation_log
+                   SET clicked=1, used_in_draft=?, draft_id=?, recommended_ts=recommended_ts
+                   WHERE id=?""",
+                (1 if used_in_draft else 0, str(draft_id), str(rec_id)),
+            )
+            self._conn.commit()
+
+    def get_kb_hit_stats(
+        self,
+        *,
+        since_ts: float = 0.0,
+        top_n: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """Q3：返回 KB 条目推荐/点击/使用统计（按命中率排序）。"""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT entry_id, entry_title,
+                          COUNT(*) as recommended,
+                          SUM(clicked) as clicked,
+                          SUM(used_in_draft) as used
+                   FROM kb_recommendation_log
+                   WHERE recommended_ts >= ?
+                   GROUP BY entry_id, entry_title
+                   ORDER BY clicked DESC
+                   LIMIT ?""",
+                (float(since_ts), top_n),
+            ).fetchall()
+        result = []
+        for row in rows:
+            entry_id, entry_title, recommended, clicked, used = row
+            recommended = int(recommended or 0)
+            clicked = int(clicked or 0)
+            used = int(used or 0)
+            hit_rate = round(clicked / recommended * 100, 1) if recommended > 0 else 0.0
+            use_rate = round(used / recommended * 100, 1) if recommended > 0 else 0.0
+            result.append({
+                "entry_id": entry_id,
+                "entry_title": entry_title,
+                "recommended": recommended,
+                "clicked": clicked,
+                "used": used,
+                "hit_rate": hit_rate,
+                "use_rate": use_rate,
+            })
+        return result
 
     def upsert_workspace(
         self,

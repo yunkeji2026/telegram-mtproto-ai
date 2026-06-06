@@ -178,6 +178,34 @@
       <div id="ws-create-result" style="font-size:12px;margin-top:4px;"></div>
     </div>
   </div>
+  <!-- Q2+Q3: 草稿质量 & KB 命中率（主管专属） -->
+  <div class="db-sec" id="db-quality-sec" style="display:none;">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h3 style="margin:0;">📊 质量与知识库</h3>
+      <div style="display:flex;gap:6px;">
+        <select id="db-quality-days" style="font-size:11px;padding:2px 6px;border:1px solid #e2e8f0;border-radius:4px;">
+          <option value="7">近7天</option>
+          <option value="30">近30天</option>
+          <option value="90">近90天</option>
+        </select>
+        <button onclick="loadQuality()" style="font-size:11px;padding:2px 8px;border:1px solid #2563eb;border-radius:4px;background:#eff6ff;color:#2563eb;cursor:pointer;">刷新</button>
+      </div>
+    </div>
+    <!-- Q2 质量分分布 -->
+    <div style="margin-top:10px;">
+      <strong style="font-size:12px;color:#374151;">🟢 草稿质量分分布</strong>
+      <div id="db-quality-dist" style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;">
+        <span style="color:#94a3b8;font-size:12px;">加载中…</span>
+      </div>
+    </div>
+    <!-- Q3 KB 命中率 -->
+    <div style="margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px;">
+      <strong style="font-size:12px;color:#374151;">📚 KB 推荐命中率</strong>
+      <div id="db-kb-stats" style="margin-top:6px;"><span style="color:#94a3b8;font-size:12px;">加载中…</span></div>
+    </div>
+    <!-- Q3 低命中率预警 -->
+    <div id="db-kb-lowthit" style="margin-top:8px;"></div>
+  </div>
   <!-- E3 系统健康 Widget（所有坐席可见，主管更丰富） -->
   <div class="db-sec" id="db-health-sec">
     <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -538,6 +566,96 @@
   }
   window._lbRefresh=function(){ loadLeaderboard(); };
 
+  // Q2+Q3: 草稿质量分布 + KB 命中率（主管专属）
+  function loadQuality(){
+    var sec=document.getElementById('db-quality-sec');
+    var distEl=document.getElementById('db-quality-dist');
+    var kbEl=document.getElementById('db-kb-stats');
+    var lowEl=document.getElementById('db-kb-lowthit');
+    if(!sec||!IS_SUP) return;
+    sec.style.display='';
+    var days=parseInt((document.getElementById('db-quality-days')||{}).value||'7');
+
+    // Q2: 质量分分布
+    fetch('/api/workspace/quality-stats?days='+days)
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(!d.ok||!d.count){
+          if(distEl) distEl.innerHTML='<span style="color:#94a3b8;font-size:12px;">暂无质量评分数据</span>';
+          return;
+        }
+        var total=d.count||1;
+        var bars=[
+          {label:'🟢 优秀',count:d.excellent,color:'#16a34a'},
+          {label:'🟡 良好',count:d.good,color:'#d97706'},
+          {label:'🟠 一般',count:d.fair,color:'#ea580c'},
+          {label:'🔴 待改进',count:d.poor,color:'#dc2626'},
+        ];
+        var html='<div style="font-size:12px;color:#374151;margin-bottom:4px;">均分: <strong>'+d.avg+'</strong> / 100 &nbsp; 共 '+d.count+' 条</div>'
+          +'<div style="display:flex;gap:10px;align-items:flex-end;">';
+        bars.forEach(function(b){
+          var pct=Math.round(b.count/total*100);
+          html+='<div style="text-align:center;">'
+            +'<div style="width:36px;height:'+(Math.max(4,pct))+'px;background:'+b.color+'44;border:1px solid '+b.color+'66;border-radius:3px;margin:0 auto;"></div>'
+            +'<div style="font-size:10px;color:'+b.color+';font-weight:700;">'+b.count+'</div>'
+            +'<div style="font-size:10px;color:#94a3b8;">'+b.label+'</div>'
+            +'</div>';
+        });
+        html+='</div>';
+        if(distEl) distEl.innerHTML=html;
+      })
+      .catch(function(){ if(distEl) distEl.innerHTML='<span style="color:#94a3b8;font-size:12px;">加载失败</span>'; });
+
+    // Q3: KB 命中率
+    fetch('/api/workspace/kb-stats?days='+days)
+      .then(function(r){return r.json();})
+      .then(function(d){
+        var entries=(d&&d.entries)||[];
+        if(!entries.length){
+          if(kbEl) kbEl.innerHTML='<span style="color:#94a3b8;font-size:12px;">暂无 KB 推荐记录</span>';
+          if(lowEl) lowEl.innerHTML='';
+          return;
+        }
+        // 展示 Top 8 条目
+        var top=entries.slice(0,8);
+        var html='<table style="width:100%;border-collapse:collapse;font-size:11px;">'
+          +'<thead><tr style="color:#64748b;border-bottom:1px solid #e2e8f0;">'
+          +'<th style="text-align:left;padding:3px 5px;">KB 条目</th>'
+          +'<th style="text-align:right;padding:3px 5px;">推荐</th>'
+          +'<th style="text-align:right;padding:3px 5px;">点击</th>'
+          +'<th style="text-align:right;padding:3px 5px;">命中率</th>'
+          +'<th style="text-align:right;padding:3px 5px;">使用率</th>'
+          +'</tr></thead><tbody>';
+        top.forEach(function(e){
+          var hitColor=e.hit_rate>=60?'#16a34a':e.hit_rate>=30?'#d97706':'#dc2626';
+          html+='<tr style="border-bottom:1px solid #f8fafc;">'
+            +'<td style="padding:3px 5px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(e.entry_id)+'">'+esc(e.entry_title||e.entry_id)+'</td>'
+            +'<td style="text-align:right;padding:3px 5px;">'+e.recommended+'</td>'
+            +'<td style="text-align:right;padding:3px 5px;">'+e.clicked+'</td>'
+            +'<td style="text-align:right;padding:3px 5px;color:'+hitColor+';font-weight:700;">'+e.hit_rate+'%</td>'
+            +'<td style="text-align:right;padding:3px 5px;color:#64748b;">'+e.use_rate+'%</td>'
+            +'</tr>';
+        });
+        html+='</tbody></table>';
+        if(kbEl) kbEl.innerHTML=html;
+
+        // 低命中率预警
+        var low=(d.low_hit_entries||[]);
+        if(low.length){
+          var lowHtml='<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:6px 10px;font-size:11px;">'
+            +'<strong style="color:#c2410c;">⚠ 低命中率条目（建议优化）</strong><ul style="margin:4px 0 0;padding-left:14px;">';
+          low.forEach(function(e){
+            lowHtml+='<li>'+esc(e.entry_title||e.entry_id)+' — 命中率 '+e.hit_rate+'%（推荐 '+e.recommended+' 次）</li>';
+          });
+          lowHtml+='</ul></div>';
+          if(lowEl) lowEl.innerHTML=lowHtml;
+        } else {
+          if(lowEl) lowEl.innerHTML='';
+        }
+      })
+      .catch(function(){ if(kbEl) kbEl.innerHTML='<span style="color:#94a3b8;font-size:12px;">KB 统计加载失败</span>'; });
+  }
+
   // P3: 工作区管理（主管专属）
   function loadWorkspaces(){
     var sec=document.getElementById('db-workspace-sec');
@@ -800,7 +918,7 @@
     load(); setInterval(load, 60000);
     loadEsc(); setInterval(loadEsc, 60000);
     loadMyPerf(); setInterval(loadMyPerf, 120000);
-    if(IS_SUP){ loadRisk(); setInterval(loadRisk, 60000); loadPresence(); setInterval(loadPresence, 30000); loadMetrics(); setInterval(loadMetrics, 60000); loadReport(); loadLeaderboard(); setInterval(loadLeaderboard, 120000); loadTrend(); setInterval(loadTrend, 300000); loadWorkspaces(); }
+    if(IS_SUP){ loadRisk(); setInterval(loadRisk, 60000); loadPresence(); setInterval(loadPresence, 30000); loadMetrics(); setInterval(loadMetrics, 60000); loadReport(); loadLeaderboard(); setInterval(loadLeaderboard, 120000); loadTrend(); setInterval(loadTrend, 300000); loadWorkspaces(); loadQuality(); setInterval(loadQuality, 300000); }
     loadHealth(); setInterval(loadHealth, 60000);
 
     // L3：一键 L2 自动发（主管快速操作）

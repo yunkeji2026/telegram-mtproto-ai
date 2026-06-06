@@ -3048,6 +3048,15 @@ def register_unified_inbox_routes(
             except Exception:
                 result["cross_platform"] = None
 
+        # ⑤ Q1: 对话摘要（最新生成的 summary，主管画像核心字段）
+        if store is not None:
+            try:
+                _meta = result.get("conv_meta") or {}
+                _summary = str(_meta.get("summary") or "").strip()
+                result["conv_summary"] = _summary if _summary else None
+            except Exception:
+                result["conv_summary"] = None
+
         return result
 
     # ── I3 模板库 API ─────────────────────────────────────────────

@@ -423,6 +423,22 @@ function toggleCopilot(bodyId, peerEncoded, headerEl){
     } else {
       kbHtml='<div style="font-size:11px;color:#94a3b8;margin-top:4px;">暂无 KB 匹配</div>';
     }
+    // Q3: KB 条目加入点击追踪
+    if(d.kb_matches&&d.kb_matches.length){
+      kbHtml='<div style="margin-top:6px;font-size:11px;color:#374151;font-weight:600;">📚 KB 匹配</div>'
+        +d.kb_matches.map(function(kb){
+          var recId=kb._rec_id||'';
+          return '<div class="dr-copilot-kb" style="cursor:pointer;" onclick="_trackKbClick(\''+esc(recId)+'\',false,\'\')">'
+            +'<strong>'+esc(kb.title||'无标题')+'</strong>'
+            +(kb.summary?'<br><span style="color:#64748b;">'+esc(kb.summary)+'</span>':'')
+            +'</div>';
+        }).join('');
+    }
+    // Q2: 展示质量评分徽章
+    if(d.quality_badge){
+      var cardParent=body.closest('.dr-card');
+      if(cardParent) _showQualityBadge(d, cardParent);
+    }
     // F1：快捷回复建议按钮（点击填入草稿框 / 展开编辑框）
     var suggestHtml='';
     if(d.suggestions&&d.suggestions.length){
@@ -910,6 +926,43 @@ document.addEventListener('draft_reassigned', function(e){
     }
   });
 })();
+
+// Q2: 显示 Copilot 质量评分徽章（注入到草稿卡）
+function _showQualityBadge(copilotData, cardEl){
+  if(!copilotData || copilotData.quality_score == null || copilotData.quality_score < 0) return;
+  var score = copilotData.quality_score;
+  var badge = copilotData.quality_badge || '';
+  var breakdown = copilotData.quality_breakdown || {};
+  var existing = cardEl && cardEl.querySelector('.q2-quality-badge');
+  if(existing) existing.remove();
+  if(!badge) return;
+  var bdHtml = '';
+  if(Object.keys(breakdown).length){
+    var tips = [];
+    if(breakdown.length!=null) tips.push('长度:'+breakdown.length);
+    if(breakdown.politeness!=null) tips.push('礼貌:'+breakdown.politeness);
+    if(breakdown.completeness!=null) tips.push('完整:'+breakdown.completeness);
+    if(breakdown.lang_match!=null) tips.push('语言:'+breakdown.lang_match);
+    if(breakdown.risk_match!=null) tips.push('风险:'+breakdown.risk_match);
+    bdHtml = ' <span style="font-size:10px;color:#94a3b8;">('+tips.join(' ')+')</span>';
+  }
+  var el = document.createElement('span');
+  el.className = 'q2-quality-badge';
+  el.style.cssText = 'margin-left:6px;vertical-align:middle;';
+  el.innerHTML = badge + bdHtml;
+  var copilotHeader = cardEl && cardEl.querySelector('.dr-copilot-header');
+  if(copilotHeader) copilotHeader.appendChild(el);
+}
+
+// Q3: 记录 KB 条目点击（供命中率统计）
+function _trackKbClick(recId, usedInDraft, draftId){
+  if(!recId) return;
+  fetch('/api/workspace/kb-click', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({rec_id:recId, used_in_draft:!!usedInDraft, draft_id:draftId||''})
+  }).catch(function(){});
+}
 
 // P2: 知识库归档
 window.kbArchive = function(draftId, btn){

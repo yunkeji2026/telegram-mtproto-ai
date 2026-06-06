@@ -350,6 +350,37 @@ class DraftService:
             except Exception:
                 logger.debug("P1 draft_resolved 发布失败（已忽略）", exc_info=True)
 
+        # Q1: 草稿成功批准后，在后台生成并存储对话摘要
+        if result.get("ok") and action in ("approve", "edit_send", "autosend") and conv_id and self._store is not None:
+            try:
+                import threading as _th
+                from src.inbox.summary import generate_conv_summary, enrich_summary_with_history
+                _meta_for_sum = self._store.get_conv_meta(conv_id) or {}
+                _draft_created = float(draft.get("created_at") or 0.0)
+
+                def _do_summary():
+                    try:
+                        s = generate_conv_summary(
+                            conv_meta=_meta_for_sum,
+                            action=action,
+                            agent_id=by,
+                            sent_text=text or "",
+                            created_ts=_draft_created,
+                        )
+                        s = enrich_summary_with_history(
+                            s,
+                            _meta_for_sum.get("intent_history") or [],
+                            _meta_for_sum.get("emotion_history") or [],
+                        )
+                        if s:
+                            self._store.update_conv_summary(conv_id, s)
+                    except Exception:
+                        logger.debug("Q1 摘要生成失败（已忽略）", exc_info=True)
+
+                _th.Thread(target=_do_summary, daemon=True).start()
+            except Exception:
+                logger.debug("Q1 摘要线程启动失败（已忽略）", exc_info=True)
+
         # M1: 草稿成功处置后计算并写入 CSAT 评分
         if result.get("ok") and conv_id and self._store is not None:
             try:
@@ -535,6 +566,17 @@ class DraftService:
                 "autopilot_level": autopilot,
                 "status": "pending",
             })
+            # Q2: 草稿创建后即时计算质量评分（亚毫秒，不阻塞流程）
+            try:
+                from src.inbox.quality import calculate_draft_quality
+                _q_score, _q_bd = calculate_draft_quality(
+                    draft_text, peer_text=t,
+                    risk_level=risk_level, lang=lang,
+                )
+                self._store.update_draft_quality(draft_id, _q_score, _q_bd)
+            except Exception:
+                logger.debug("Q2 质量评分写入失败（已忽略）", exc_info=True)
+
             logger.info(
                 "auto_generate_draft OK conv=%s level=%s draft_id=%s",
                 conv_id, autopilot, draft_id,
