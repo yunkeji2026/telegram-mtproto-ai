@@ -222,6 +222,18 @@ _MIGRATIONS = [
     # N1: conversation_meta 新增 contact_id 列（用于跨平台会话归档）
     "ALTER TABLE conversation_meta ADD COLUMN contact_id TEXT NOT NULL DEFAULT ''",
     "CREATE INDEX IF NOT EXISTS idx_conv_meta_contact ON conversation_meta(contact_id)",
+    # P3: 多租户 workspace_id 列（默认 'default'，向下兼容）
+    "ALTER TABLE conversation_meta ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'",
+    "ALTER TABLE draft_audit_log ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'",
+    """CREATE TABLE IF NOT EXISTS workspaces (
+        workspace_id   TEXT PRIMARY KEY,
+        display_name   TEXT NOT NULL DEFAULT '',
+        config_json    TEXT NOT NULL DEFAULT '{}',
+        created_at     REAL NOT NULL DEFAULT 0,
+        updated_at     REAL NOT NULL DEFAULT 0
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_conv_meta_workspace ON conversation_meta(workspace_id)",
+    "CREATE INDEX IF NOT EXISTS idx_draft_audit_workspace ON draft_audit_log(workspace_id)",
     "CREATE INDEX IF NOT EXISTS idx_conv_meta_updated ON conversation_meta(updated_at DESC)",
     # I3: 回复模板库
     """CREATE TABLE IF NOT EXISTS reply_templates (
@@ -1525,6 +1537,7 @@ class InboxStore:
         emotion: str = "",
         risk: str = "low",
         contact_id: str = "",
+        workspace_id: str = "default",
         max_history: int = 10,
     ) -> None:
         """I1：每次新入站消息后，更新对话智能元数据。
@@ -1553,12 +1566,13 @@ class InboxStore:
         # 保持滚动窗口
         ih = ih[-max_history:]
         eh = eh[-max_history:]
+        _wsid = str(workspace_id or "default")
         with self._lock:
             self._conn.execute(
                 """INSERT INTO conversation_meta
                    (conversation_id, platform, last_intent, last_emotion, last_risk,
-                    intent_history, emotion_history, msg_count, updated_at, contact_id)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)
+                    intent_history, emotion_history, msg_count, updated_at, contact_id, workspace_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(conversation_id) DO UPDATE SET
                      platform       = excluded.platform,
                      last_intent    = CASE WHEN excluded.last_intent != ''
@@ -1571,15 +1585,81 @@ class InboxStore:
                      msg_count      = excluded.msg_count,
                      updated_at     = excluded.updated_at,
                      contact_id     = CASE WHEN excluded.contact_id != ''
-                                      THEN excluded.contact_id ELSE conversation_meta.contact_id END
+                                      THEN excluded.contact_id ELSE conversation_meta.contact_id END,
+                     workspace_id   = CASE WHEN excluded.workspace_id != 'default'
+                                      THEN excluded.workspace_id ELSE conversation_meta.workspace_id END
                 """,
                 (cid, str(platform or ""), str(intent or ""), str(emotion or ""),
                  str(risk or "low"),
                  json.dumps(ih, ensure_ascii=False),
                  json.dumps(eh, ensure_ascii=False),
-                 mc, now, str(contact_id or "")),
+                 mc, now, str(contact_id or ""), _wsid),
             )
             self._conn.commit()
+
+    def upsert_workspace(
+        self,
+        workspace_id: str,
+        display_name: str = "",
+        config: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """P3：创建或更新工作区配置。"""
+        wid = str(workspace_id or "").strip()
+        if not wid:
+            return
+        now = self._now()
+        config_json = json.dumps(config or {}, ensure_ascii=False)
+        with self._lock:
+            self._conn.execute(
+                """INSERT INTO workspaces (workspace_id, display_name, config_json, created_at, updated_at)
+                   VALUES (?,?,?,?,?)
+                   ON CONFLICT(workspace_id) DO UPDATE SET
+                     display_name = excluded.display_name,
+                     config_json  = excluded.config_json,
+                     updated_at   = excluded.updated_at
+                """,
+                (wid, str(display_name or ""), config_json, now, now),
+            )
+            self._conn.commit()
+
+    def list_workspaces(self) -> List[Dict[str, Any]]:
+        """P3：列出所有工作区。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT workspace_id, display_name, config_json, created_at, updated_at "
+                "FROM workspaces ORDER BY created_at"
+            ).fetchall()
+        result = []
+        for row in rows:
+            d = dict(zip(["workspace_id", "display_name", "config_json", "created_at", "updated_at"], row))
+            try:
+                d["config"] = json.loads(d.pop("config_json") or "{}")
+            except Exception:
+                d["config"] = {}
+            result.append(d)
+        return result
+
+    def get_workspace_stats(self, workspace_id: str) -> Dict[str, Any]:
+        """P3：返回指定工作区的基本统计（会话数/审计数/CSAT 均值）。"""
+        wid = str(workspace_id or "default")
+        with self._lock:
+            conv_count = self._conn.execute(
+                "SELECT COUNT(*) FROM conversation_meta WHERE workspace_id=?", (wid,)
+            ).fetchone()[0]
+            audit_count = self._conn.execute(
+                "SELECT COUNT(*) FROM draft_audit_log WHERE workspace_id=?", (wid,)
+            ).fetchone()[0]
+            csat_row = self._conn.execute(
+                "SELECT AVG(csat_score) FROM conversation_meta WHERE workspace_id=? AND csat_score>=0",
+                (wid,),
+            ).fetchone()
+            avg_csat = round(float(csat_row[0]), 1) if csat_row and csat_row[0] is not None else None
+        return {
+            "workspace_id": wid,
+            "conversation_count": int(conv_count or 0),
+            "audit_count": int(audit_count or 0),
+            "avg_csat": avg_csat,
+        }
 
     def get_contact_sessions(
         self,

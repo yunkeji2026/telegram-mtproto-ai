@@ -226,6 +226,11 @@ function load(){
         if(isL4 && _isSup){
           actHtml+='<button class="dr-btn btn-override" onclick="forceOverride(\''+esc(dr.draft_id)+'\',this)">🔓 主管放行</button>';
         }
+        // P2: KB 归档按钮（主管，回复文本存在时显示）
+        if(_isSup && (dr.draft_text||dr.final_text)){
+          actHtml+='<button class="dr-btn" style="border:1px solid #7c3aed;color:#7c3aed;background:#faf5ff;" '
+            +'onclick="kbArchive(\''+esc(dr.draft_id)+'\',this)">📚 存 KB</button>';
+        }
       }
       var slaHtml=isSlaOverdue?'<span class="badge-sla">⏰ SLA 超时</span> ':'';
       // C2 Copilot 面板（懒加载，点击展开）
@@ -905,6 +910,37 @@ document.addEventListener('draft_reassigned', function(e){
     }
   });
 })();
+
+// P2: 知识库归档
+window.kbArchive = function(draftId, btn){
+  var title = prompt('请输入知识库条目标题（用于日后检索）：');
+  if(!title || !title.trim()) return;
+  var origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '归档中…';
+  fetch('/api/workspace/kb-archive', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({draft_id: draftId, title: title.trim()})
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    if(d.ok){
+      btn.textContent = '✅ 已入库';
+      btn.style.background = '#f0fdf4';
+      btn.style.color = '#16a34a';
+      btn.style.borderColor = '#16a34a';
+    } else {
+      btn.textContent = '❌ 失败';
+      btn.disabled = false;
+      setTimeout(function(){ btn.textContent = origText; btn.disabled = false; }, 2000);
+    }
+  })
+  .catch(function(){
+    btn.textContent = origText;
+    btn.disabled = false;
+  });
+};
 })();
 </script>
 {% endblock %}

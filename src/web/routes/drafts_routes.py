@@ -678,6 +678,183 @@ def register_trend_route(app, *, api_auth):
         }
 
 
+def register_workspace_route(app, *, api_auth):
+    """P3：注册 /api/workspace/workspaces（多租户工作区 CRUD，主管专属）。"""
+    from fastapi import Depends
+
+    @app.get("/api/workspace/workspaces")
+    async def api_list_workspaces(request: Request, _=Depends(api_auth)):
+        """P3：列出所有工作区（主管专属）。"""
+        if not _is_supervisor(request):
+            raise HTTPException(403, "工作区管理需要主管权限")
+        inbox = getattr(request.app.state, "inbox_store", None)
+        if inbox is None:
+            raise HTTPException(503, "inbox_store 未就绪")
+        workspaces = inbox.list_workspaces()
+        # 为每个工作区追加统计
+        for ws in workspaces:
+            try:
+                ws["stats"] = inbox.get_workspace_stats(ws["workspace_id"])
+            except Exception:
+                ws["stats"] = {}
+        # 当前工作区（从 session 读，默认 default）
+        try:
+            current_ws = request.scope.get("session", {}).get("workspace_id", "default")
+        except Exception:
+            current_ws = "default"
+        return {"ok": True, "workspaces": workspaces, "current": current_ws}
+
+    @app.post("/api/workspace/workspaces")
+    async def api_upsert_workspace(request: Request, _=Depends(api_auth)):
+        """P3：创建或更新工作区配置（主管专属）。
+
+        Body: {workspace_id, display_name, config}
+        """
+        if not _is_supervisor(request):
+            raise HTTPException(403, "工作区管理需要主管权限")
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "请求体 JSON 解析失败")
+        ws_id = str(body.get("workspace_id") or "").strip()
+        if not ws_id:
+            raise HTTPException(400, "workspace_id 不能为空")
+        inbox = getattr(request.app.state, "inbox_store", None)
+        if inbox is None:
+            raise HTTPException(503, "inbox_store 未就绪")
+        inbox.upsert_workspace(
+            ws_id,
+            display_name=str(body.get("display_name") or ""),
+            config=body.get("config") or {},
+        )
+        stats = inbox.get_workspace_stats(ws_id)
+        return {"ok": True, "workspace_id": ws_id, "stats": stats}
+
+    @app.get("/api/workspace/workspaces/{workspace_id}/stats")
+    async def api_workspace_stats(request: Request, workspace_id: str, _=Depends(api_auth)):
+        """P3：返回指定工作区统计（主管专属）。"""
+        if not _is_supervisor(request):
+            raise HTTPException(403, "工作区管理需要主管权限")
+        inbox = getattr(request.app.state, "inbox_store", None)
+        if inbox is None:
+            raise HTTPException(503, "inbox_store 未就绪")
+        return {"ok": True, **inbox.get_workspace_stats(workspace_id)}
+
+
+def register_kb_archive_route(app, *, api_auth):
+    """P2：注册 POST /api/workspace/kb-archive（优质回复存入知识库，主管专属）。"""
+    from fastapi import Depends
+
+    @app.post("/api/workspace/kb-archive")
+    async def api_workspace_kb_archive(
+        request: Request,
+        _=Depends(api_auth),
+    ):
+        """P2：将一条已审批草稿的回复文本一键归档进知识库。
+
+        Request body: {
+            "draft_id":   str,       # 草稿 ID
+            "title":      str,       # KB 条目标题（必填）
+            "category":   str,       # 分类（可选，默认"客服回复"）
+            "triggers":   list[str], # 关键词触发器（可选）
+            "scenario":   str,       # 适用场景描述（可选）
+            "language":   str,       # 语言（可选，默认 zh）
+        }
+
+        主管专属；坐席可"推荐归档"，触发主管审核（future）。
+        """
+        if not _is_supervisor(request):
+            raise HTTPException(403, "知识库归档需要主管权限")
+
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "请求体 JSON 解析失败")
+
+        draft_id = str(body.get("draft_id") or "").strip()
+        title = str(body.get("title") or "").strip()
+        if not title:
+            raise HTTPException(400, "title 不能为空")
+
+        kb = getattr(request.app.state, "kb_store", None)
+        if kb is None:
+            raise HTTPException(503, "kb_store 未就绪")
+
+        # 获取草稿内容（final_text 优先，回退到 draft_text）
+        draft_text = ""
+        peer_text = ""
+        conversation_id = ""
+        intent = ""
+
+        inbox = getattr(request.app.state, "inbox_store", None)
+        if inbox is not None and draft_id:
+            try:
+                draft = inbox.get_draft(draft_id)
+                if draft is not None:
+                    draft_text = str(draft.get("final_text") or draft.get("draft_text") or "")
+                    peer_text = str(draft.get("peer_text") or "")
+                    conversation_id = str(draft.get("conversation_id") or "")
+            except Exception:
+                pass
+
+            # 从 conversation_meta 获取意图标签
+            if conversation_id:
+                try:
+                    meta = inbox.get_conv_meta(conversation_id)
+                    if meta:
+                        intent = str(meta.get("last_intent") or "")
+                except Exception:
+                    pass
+
+        # 触发器：优先用请求中的，回退到意图标签
+        triggers = list(body.get("triggers") or [])
+        if not triggers and intent:
+            triggers = [intent]
+
+        # 构建 KB 条目
+        agent_id = _session_agent_id(request)
+        entry_data = {
+            "category": str(body.get("category") or "客服回复"),
+            "title": title,
+            "triggers": triggers,
+            "scenario": str(body.get("scenario") or (f"适用场景: {peer_text[:100]}" if peer_text else "")),
+            "steps": "",
+            "principles": "",
+            "example_reply_zh": draft_text,
+            "forbidden": "",
+            "enabled": 1,
+            "reply_mode": "direct",
+            "use_count": 0,
+            "rating": 0.0,
+        }
+
+        try:
+            entry_id = kb.add_entry(entry_data)
+        except Exception as e:
+            raise HTTPException(500, f"KB 写入失败: {e}")
+
+        # 写审计（便于溯源）
+        if inbox is not None and draft_id:
+            try:
+                inbox.record_draft_audit(
+                    draft_id,
+                    autopilot_level="",
+                    action="kb_archived",
+                    agent_id=agent_id,
+                    reason=f"KB entry_id={entry_id}, title={title[:40]}",
+                    conversation_id=conversation_id,
+                )
+            except Exception:
+                pass
+
+        return {
+            "ok": True,
+            "entry_id": entry_id,
+            "title": title,
+            "draft_id": draft_id,
+        }
+
+
 def register_my_perf_route(app, *, api_auth):
     """O3：注册 GET /api/workspace/my-perf（坐席自助绩效查询，无需主管权限）。"""
     from fastapi import Depends
