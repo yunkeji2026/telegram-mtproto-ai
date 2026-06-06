@@ -1,6 +1,6 @@
 """统一草稿/审批路由（Phase B / B2）。
 
-端点：
+API 端点（register_drafts_routes — main.py 调用）：
   GET  /api/drafts                          ?status=pending&platform=&limit=50
   GET  /api/drafts/stats                    — 按平台×状态计数
   GET  /api/drafts/risk-summary             — 待处理草稿按 autopilot_level 分布（B2）
@@ -8,6 +8,11 @@
   GET  /api/drafts/{draft_id}               — 单条草稿
   POST /api/drafts/{draft_id}/resolve       — 带 L4 拦截 + 审计的统一处置（B2）
   POST /api/drafts/{draft_id}/force-override — 主管强制放行 L4 草稿（B2）
+  POST /api/drafts/bulk-autosend            — 批量触发所有 L2 草稿自动发送（B2）
+
+页面路由（register_drafts_page_routes — admin.py 调用）：
+  GET  /workspace/drafts         — 草稿审批工作台（坐席/主管均可，L4 需主管放行）
+  GET  /workspace/draft-audit    — 审计日志页（主管专属）
 
 依赖 app.state.draft_service（main.py 注入）。未注入时端点返回 503。
 """
@@ -145,7 +150,6 @@ def register_drafts_routes(app, *, api_auth):
         action = str(body.get("action") or "approve").strip().lower()
         text = str(body.get("text") or "")
         by = _session_agent_id(request) or str(body.get("by") or "")
-        # 写 reason 到 audit（通过 resolve_with_audit 的 force_override 路径）
         result = svc.resolve_with_audit(
             draft_id, action, text=text, by=by, force_override=True,
         )
@@ -153,3 +157,85 @@ def register_drafts_routes(app, *, api_auth):
             code = int(result.get("code") or 400)
             raise HTTPException(code, result.get("error") or "强制放行失败")
         return result
+
+    @app.post("/api/drafts/bulk-autosend")
+    async def api_drafts_bulk_autosend(
+        request: Request, _=Depends(api_auth),
+    ):
+        """批量触发所有 L2（低风险 + auto_ai）草稿自动发送。
+
+        适用场景：定时任务 / 坐席手动触发"一键自动发所有 L2"。
+        返回 {ok, sent, errors}。
+        """
+        svc = _get_draft_service(request)
+        by = _session_agent_id(request) or "system"
+        drafts = svc.list_drafts(status="pending", limit=200)
+        sent, errors = 0, 0
+        for d in drafts:
+            if d.get("autopilot_level") != "L2":
+                continue
+            result = svc.resolve_with_audit(
+                d["draft_id"], "autosend", by=by,
+            )
+            if result.get("ok"):
+                sent += 1
+            else:
+                errors += 1
+        return {"ok": True, "sent": sent, "errors": errors}
+
+
+# ── 页面路由（需 templates + page_auth，由 admin.py create_app 调用） ──────
+
+def register_drafts_page_routes(
+    app,
+    *,
+    page_auth,
+    templates,
+    config_manager=None,
+):
+    """挂载草稿审批工作台页面路由（需 Jinja2 templates + page_auth）。
+
+    与 register_drafts_routes（API 路由）分离注册：
+    - API 路由在 main.py 里 app 创建后追加（不依赖 templates）
+    - 页面路由在 admin.py create_app 内调用（需 templates 和 page_auth）
+    """
+    from fastapi import Depends
+    from fastapi.responses import HTMLResponse, RedirectResponse
+
+    def _ctx(request: Request) -> dict:
+        try:
+            sess = request.session
+        except (AttributeError, AssertionError):
+            sess = {}
+        ctx: dict = {
+            "user_name": sess.get("username") or "",
+            "user_display_name": (
+                sess.get("display_name") or sess.get("username") or ""
+            ),
+        }
+        try:
+            if config_manager is not None:
+                _wa = (config_manager.config or {}).get("web_admin", {}) or {}
+                if _wa.get("site_name"):
+                    ctx["site_name"] = _wa["site_name"]
+        except Exception:
+            pass
+        return ctx
+
+    @app.get("/workspace/drafts", response_class=HTMLResponse)
+    async def workspace_drafts_page(
+        request: Request, _=Depends(page_auth),
+    ):
+        """草稿审批工作台（坐席/主管均可进；L4 需主管才能 force-override）。"""
+        return templates.TemplateResponse(request, "draft_review.html", _ctx(request))
+
+    @app.get("/workspace/draft-audit", response_class=HTMLResponse)
+    async def workspace_draft_audit_page(
+        request: Request, _=Depends(page_auth),
+    ):
+        """草稿处置审计日志页（主管专属；非主管重定向到草稿工作台）。"""
+        if not _is_supervisor(request):
+            return RedirectResponse(url="/workspace/drafts", status_code=302)
+        return templates.TemplateResponse(
+            request, "draft_audit_page.html", _ctx(request)
+        )

@@ -1,0 +1,139 @@
+{% extends "workspace_base.html" %}
+{% block title %}草稿审计日志{% endblock %}
+{% block head %}
+<style>
+  .da-wrap{height:100%;overflow-y:auto;background:#f7f8fa;padding:18px;}
+  .da-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
+  .da-filters{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px;}
+  .da-filters input,.da-filters select{padding:5px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;}
+  .da-table{width:100%;border-collapse:collapse;font-size:13px;}
+  .da-table th{background:#f1f5f9;padding:8px 12px;text-align:left;font-weight:600;color:#374151;border-bottom:2px solid #e5e7eb;}
+  .da-table td{padding:8px 12px;border-bottom:1px solid #f1f5f9;color:#374151;vertical-align:top;}
+  .da-table tr:hover td{background:#f8fafc;}
+  .da-badge{display:inline-block;padding:2px 7px;border-radius:8px;font-size:11px;font-weight:600;}
+  .act-blocked{background:#fee2e2;color:#991b1b;}
+  .act-force_override{background:#fce7f3;color:#9d174d;}
+  .act-autosend{background:#d1fae5;color:#065f46;}
+  .act-approved{background:#dbeafe;color:#1d4ed8;}
+  .act-rejected{background:#f3f4f6;color:#6b7280;}
+  .act-default{background:#f1f5f9;color:#374151;}
+  .lv-L4{color:#dc2626;font-weight:700;}
+  .lv-L3{color:#d97706;font-weight:600;}
+  .lv-L2{color:#16a34a;}
+  .lv-L1{color:#2563eb;}
+  .da-empty{text-align:center;padding:40px;color:#94a3b8;}
+  .da-loading{text-align:center;padding:30px;color:#94a3b8;}
+</style>
+{% endblock %}
+{% block content %}
+<div class="da-wrap">
+  <div class="da-header">
+    <h2 style="margin:0;font-size:18px;">🔍 草稿审计日志</h2>
+    <a href="/workspace/drafts" style="font-size:13px;color:#2563eb;text-decoration:none;">← 返回草稿工作台</a>
+  </div>
+  <div class="da-filters">
+    <select id="f-days" onchange="load()">
+      <option value="7">近 7 天</option>
+      <option value="30">近 30 天</option>
+      <option value="90">近 90 天</option>
+    </select>
+    <input id="f-draft" placeholder="草稿 ID（可选）" style="width:220px;" oninput="debounce()">
+    <input id="f-agent" placeholder="坐席 ID（可选）" style="width:180px;" oninput="debounce()">
+    <select id="f-action" onchange="load()">
+      <option value="">全部动作</option>
+      <option value="blocked">blocked（拦截）</option>
+      <option value="force_override">force_override（强制放行）</option>
+      <option value="autosend">autosend（自动发送）</option>
+      <option value="approved">approved（批准）</option>
+      <option value="rejected">rejected（拒绝）</option>
+    </select>
+    <span id="da-count" style="font-size:12px;color:#94a3b8;"></span>
+  </div>
+  <table class="da-table">
+    <thead>
+      <tr>
+        <th style="width:110px;">时间</th>
+        <th style="width:80px;">动作</th>
+        <th style="width:60px;">等级</th>
+        <th style="width:100px;">坐席</th>
+        <th>草稿 ID</th>
+        <th>会话</th>
+        <th>风险等级</th>
+        <th>原因</th>
+      </tr>
+    </thead>
+    <tbody id="da-body">
+      <tr><td colspan="8" class="da-loading">加载中…</td></tr>
+    </tbody>
+  </table>
+</div>
+<script>
+(function(){
+var _timer=null;
+function debounce(){ clearTimeout(_timer); _timer=setTimeout(load, 400); }
+window.debounce=debounce;
+function fmtTs(ts){
+  if(!ts) return '';
+  var d=new Date(ts*1000);
+  return d.toLocaleDateString('zh-CN',{month:'2-digit',day:'2-digit'})
+    +' '+d.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'});
+}
+function esc(t){ var d=document.createElement('div'); d.textContent=String(t||''); return d.innerHTML; }
+var ACT_CLS={
+  blocked:'act-blocked', force_override:'act-force_override',
+  autosend:'act-autosend', approved:'act-approved', rejected:'act-rejected',
+};
+var ACT_LABEL={
+  blocked:'⛔ 拦截', force_override:'🔓 强制放行', autosend:'⚡ 自动发送',
+  approved:'✓ 批准', rejected:'✗ 拒绝', edit_send:'✏ 编辑发送',
+  cancel:'↩ 取消',
+};
+function load(){
+  var days=document.getElementById('f-days').value||'7';
+  var draft=document.getElementById('f-draft').value.trim();
+  var agent=document.getElementById('f-agent').value.trim();
+  var action=document.getElementById('f-action').value;
+  var url='/api/drafts/audit?days='+encodeURIComponent(days)+'&limit=300';
+  if(draft) url+='&draft_id='+encodeURIComponent(draft);
+  if(agent) url+='&agent_id='+encodeURIComponent(agent);
+  document.getElementById('da-body').innerHTML='<tr><td colspan="8" class="da-loading">加载中…</td></tr>';
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    if(!d||!d.ok){
+      document.getElementById('da-body').innerHTML='<tr><td colspan="8" class="da-empty">加载失败（需要主管权限）</td></tr>';
+      return;
+    }
+    var items=(d.items||[]).filter(function(it){
+      if(!action) return true;
+      return (it.action||'')==action;
+    });
+    document.getElementById('da-count').textContent='共 '+items.length+' 条记录';
+    if(!items.length){
+      document.getElementById('da-body').innerHTML='<tr><td colspan="8" class="da-empty">暂无记录</td></tr>';
+      return;
+    }
+    document.getElementById('da-body').innerHTML=items.map(function(it){
+      var actCls=ACT_CLS[it.action]||'act-default';
+      var actLbl=ACT_LABEL[it.action]||esc(it.action||'');
+      var lvl=it.autopilot_level||'';
+      var lvlCls='lv-'+(lvl||'L1');
+      return '<tr>'
+        +'<td style="white-space:nowrap;">'+fmtTs(it.ts)+'</td>'
+        +'<td><span class="da-badge '+actCls+'">'+actLbl+'</span></td>'
+        +'<td><span class="'+lvlCls+'">'+esc(lvl)+'</span></td>'
+        +'<td>'+esc(it.agent_id||'—')+'</td>'
+        +'<td style="font-size:11px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(it.draft_id)+'">'+esc(it.draft_id||'—')+'</td>'
+        +'<td style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(it.conversation_id)+'">'+esc(it.conversation_id||'—')+'</td>'
+        +'<td style="font-size:11px;color:'+(it.risk_level==='high'?'#dc2626':it.risk_level==='medium'?'#d97706':'#6b7280')+';">'+esc(it.risk_level||'—')+'</td>'
+        +'<td style="font-size:12px;color:#64748b;max-width:180px;">'+esc(it.reason||'—')+'</td>'
+        +'</tr>';
+    }).join('');
+  }).catch(function(){
+    document.getElementById('da-body').innerHTML='<tr><td colspan="8" class="da-empty">网络错误</td></tr>';
+  });
+}
+window.load=load;
+load();
+setInterval(load, 60000);
+})();
+</script>
+{% endblock %}

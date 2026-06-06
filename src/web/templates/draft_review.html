@@ -1,0 +1,229 @@
+{% extends "workspace_base.html" %}
+{% block title %}草稿审批工作台{% endblock %}
+{% block head %}
+<style>
+  .dr-wrap{height:100%;overflow-y:auto;background:#f7f8fa;padding:18px;}
+  .dr-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
+  .dr-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
+  .dr-tab{padding:5px 14px;border:1px solid #d1d5db;border-radius:16px;font-size:13px;cursor:pointer;background:#fff;color:#374151;}
+  .dr-tab.active{background:#2563eb;color:#fff;border-color:#2563eb;}
+  .dr-card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-bottom:12px;transition:box-shadow .15s;}
+  .dr-card:hover{box-shadow:0 2px 12px rgba(37,99,235,.12);}
+  .dr-card.l4{border-left:4px solid #dc2626;}
+  .dr-card.l3{border-left:4px solid #d97706;}
+  .dr-card.l2{border-left:4px solid #16a34a;}
+  .dr-card.l1{border-left:4px solid #2563eb;}
+  .dr-card.l0{border-left:4px solid #9ca3af;}
+  .dr-badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;}
+  .badge-l4{background:#fee2e2;color:#991b1b;}
+  .badge-l3{background:#fef3c7;color:#92400e;}
+  .badge-l2{background:#d1fae5;color:#065f46;}
+  .badge-l1{background:#dbeafe;color:#1d4ed8;}
+  .badge-l0{background:#f3f4f6;color:#6b7280;}
+  .dr-platform{font-size:11px;color:#94a3b8;}
+  .dr-peer{background:#f1f5f9;border-radius:8px;padding:10px;font-size:13px;color:#334155;margin:8px 0;}
+  .dr-draft{background:#eff6ff;border-radius:8px;padding:10px;font-size:13px;color:#1e3a5f;margin:8px 0;}
+  .dr-reasons{font-size:11px;color:#dc2626;margin:4px 0;}
+  .dr-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
+  .dr-btn{padding:6px 14px;border-radius:6px;font-size:13px;cursor:pointer;border:1px solid;transition:opacity .15s;}
+  .dr-btn:disabled{opacity:.45;cursor:default;}
+  .btn-approve{background:#16a34a;color:#fff;border-color:#16a34a;}
+  .btn-reject{background:#fff;color:#dc2626;border-color:#dc2626;}
+  .btn-edit{background:#fff;color:#2563eb;border-color:#2563eb;}
+  .btn-override{background:#991b1b;color:#fff;border-color:#991b1b;}
+  .btn-autosend{background:#059669;color:#fff;border-color:#059669;}
+  .dr-empty{text-align:center;padding:40px 0;color:#94a3b8;font-size:14px;}
+  .dr-edit-box{width:100%;min-height:70px;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:13px;resize:vertical;display:none;margin:6px 0;}
+  .dr-warn{background:#fff7ed;border:1px solid #fb923c;border-radius:8px;padding:10px 14px;font-size:12px;color:#9a3412;margin:8px 0;}
+  .dr-loading{text-align:center;padding:30px;color:#94a3b8;}
+</style>
+{% endblock %}
+{% block content %}
+<div class="dr-wrap">
+  <div class="dr-header">
+    <h2 style="margin:0;font-size:18px;">📋 草稿审批工作台</h2>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <button onclick="triggerBulkAutosend()" id="btn-bulk" style="padding:5px 12px;border:1px solid #16a34a;border-radius:6px;background:#fff;color:#16a34a;font-size:13px;cursor:pointer;">⚡ 一键发所有 L2</button>
+      <a href="/workspace/draft-audit" id="audit-link" style="font-size:13px;color:#2563eb;text-decoration:none;display:none;">查看审计日志 →</a>
+    </div>
+  </div>
+  <div class="dr-tabs">
+    <button class="dr-tab active" onclick="setFilter('pending','','')">全部待审</button>
+    <button class="dr-tab" onclick="setFilter('pending','','L3')">L3 待审批</button>
+    <button class="dr-tab" onclick="setFilter('pending','','L4')">⛔ L4 拦截</button>
+    <button class="dr-tab" onclick="setFilter('pending','','L2')">L2 自动</button>
+    <button class="dr-tab" onclick="setFilter('approved','','')">已批准</button>
+    <button class="dr-tab" onclick="setFilter('rejected','','')">已拒绝</button>
+  </div>
+  <div id="dr-list"><div class="dr-loading">加载中…</div></div>
+</div>
+<script>
+(function(){
+var _status='pending', _platform='', _level='';
+var _isSup=false;
+var COLORS={L0:'l0',L1:'l1',L2:'l2',L3:'l3',L4:'l4'};
+var BADGES={L0:'badge-l0',L1:'badge-l1',L2:'badge-l2',L3:'badge-l3',L4:'badge-l4'};
+var LABELS={L0:'L0 手动',L1:'L1 待审',L2:'L2 自动放行',L3:'L3 需审批',L4:'L4 拦截'};
+var PLATICONS={line:'🟢',whatsapp:'📱',messenger:'💬',telegram:'✈️',web:'🌐',inbox:'📥'};
+
+fetch('/api/workspace/me').then(function(r){return r.json();}).then(function(m){
+  if(m&&m.ok){ _isSup=!!(m.is_supervisor); }
+  var auditLink=document.getElementById('audit-link');
+  if(_isSup && auditLink) auditLink.style.display='inline';
+  load();
+}).catch(function(){ load(); });
+
+function setFilter(s,p,l){
+  _status=s; _platform=p; _level=l;
+  document.querySelectorAll('.dr-tab').forEach(function(b){ b.classList.remove('active'); });
+  event.target.classList.add('active');
+  load();
+}
+function esc(t){ var d=document.createElement('div'); d.textContent=t||''; return d.innerHTML; }
+function fmtTs(ts){ if(!ts) return ''; var d=new Date(ts*1000); return d.toLocaleDateString('zh-CN',{month:'2-digit',day:'2-digit'})+' '+d.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}); }
+
+function load(){
+  var url='/api/drafts?status='+encodeURIComponent(_status)+'&limit=100';
+  if(_platform) url+='&platform='+encodeURIComponent(_platform);
+  document.getElementById('dr-list').innerHTML='<div class="dr-loading">加载中…</div>';
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    if(!d||!d.ok){ document.getElementById('dr-list').innerHTML='<div class="dr-empty">加载失败或草稿服务未启用</div>'; return; }
+    var drafts=(d.drafts||[]).filter(function(dr){
+      if(!_level) return true;
+      return (dr.autopilot_level||'L1')===_level;
+    });
+    if(!drafts.length){ document.getElementById('dr-list').innerHTML='<div class="dr-empty">暂无草稿</div>'; return; }
+    document.getElementById('dr-list').innerHTML=drafts.map(function(dr,ix){
+      var lv=dr.autopilot_level||'L1';
+      var cls=COLORS[lv]||'l1';
+      var badgeCls=BADGES[lv]||'badge-l1';
+      var lbl=LABELS[lv]||lv;
+      var plat=dr.platform||'inbox';
+      var platIcon=PLATICONS[plat]||'📨';
+      var isL4=lv==='L4';
+      var isL2=lv==='L2';
+      var reasons=(dr.risk_reasons||[]).join('、');
+      var isPending=(dr.status||'pending')==='pending';
+      var warnHtml=isL4?'<div class="dr-warn">⛔ L4 高风险草稿：此回复被系统拦截，须主管通过「主管放行」按钮才能发出。</div>':'';
+      var editBoxId='edit-'+ix;
+      var actHtml='';
+      if(isPending){
+        if(isL2){
+          actHtml+='<button class="dr-btn btn-autosend" onclick="resolve(\''+esc(dr.draft_id)+'\',\'autosend\',\'\',this)">⚡ 自动发送</button>';
+        }
+        if(!isL4){
+          actHtml+='<button class="dr-btn btn-approve" onclick="resolve(\''+esc(dr.draft_id)+'\',\'approve\',\'\',this)">✓ 批准发送</button>';
+          actHtml+='<button class="dr-btn btn-edit" onclick="toggleEdit(\''+editBoxId+'\',this)">✏ 编辑后发</button>';
+        }
+        actHtml+='<button class="dr-btn btn-reject" onclick="resolve(\''+esc(dr.draft_id)+'\',\'reject\',\'\',this)">✗ 拒绝</button>';
+        if(isL4 && _isSup){
+          actHtml+='<button class="dr-btn btn-override" onclick="forceOverride(\''+esc(dr.draft_id)+'\',this)">🔓 主管放行</button>';
+        }
+      }
+      return '<div class="dr-card '+cls+'" id="card-'+ix+'">'
+        +'<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:6px;">'
+        +'<div style="font-size:13px;font-weight:600;">'+platIcon+' '+esc(dr.chat_name||dr.chat_key||'未知')+'<span class="dr-platform"> · '+esc(plat)+(dr.account_label?' · '+esc(dr.account_label):'')+'</span></div>'
+        +'<div style="display:flex;gap:6px;align-items:center;">'
+        +'<span class="dr-badge '+badgeCls+'">'+esc(lbl)+'</span>'
+        +(dr.status&&dr.status!=='pending'?'<span class="dr-badge" style="background:#f1f5f9;color:#64748b;">'+esc(dr.status)+'</span>':'')
+        +'<span style="font-size:11px;color:#94a3b8;">'+fmtTs(dr.created_ts)+'</span>'
+        +'</div></div>'
+        +warnHtml
+        +(dr.peer_text?'<div class="dr-peer">💬 <strong>客户：</strong>'+esc(dr.peer_text)+'</div>':'')
+        +(dr.draft_text?'<div class="dr-draft">🤖 <strong>AI 草稿：</strong>'+esc(dr.draft_text)+'</div>':'')
+        +(reasons?'<div class="dr-reasons">⚠ 风险原因：'+esc(reasons)+'</div>':'')
+        +(isPending?'<textarea id="'+editBoxId+'" class="dr-edit-box" placeholder="编辑后发送…">'+esc(dr.draft_text)+'</textarea>':'')
+        +'<div class="dr-actions">'+actHtml+'</div>'
+        +'</div>';
+    }).join('');
+  }).catch(function(){ document.getElementById('dr-list').innerHTML='<div class="dr-empty">加载失败</div>'; });
+}
+
+function toggleEdit(boxId, btn){
+  var box=document.getElementById(boxId);
+  if(!box) return;
+  if(box.style.display==='none'||!box.style.display){
+    box.style.display='block'; btn.textContent='取消编辑';
+    // 在编辑框旁加一个发送按钮
+    if(!box.nextSibling||!box.nextSibling.classList||!box.nextSibling.classList.contains('send-edited')){
+      var sendBtn=document.createElement('button');
+      sendBtn.className='dr-btn btn-approve send-edited';
+      sendBtn.textContent='✓ 确认发送';
+      sendBtn.onclick=function(){
+        var did=box.getAttribute('data-did');
+        if(!did){ did=boxId; }
+        resolve(did,'edit_send',box.value,sendBtn);
+      };
+      // 保存 draft_id 到 box
+      var draftId=boxId.replace('edit-','');
+      box.setAttribute('data-did', (window._drafts&&window._drafts[draftId])||'');
+      box.parentNode.insertBefore(sendBtn, box.nextSibling);
+    }
+  } else {
+    box.style.display='none'; btn.textContent='✏ 编辑后发';
+    var next=box.nextSibling;
+    if(next&&next.classList&&next.classList.contains('send-edited')) next.remove();
+  }
+}
+
+function resolve(draftId, action, text, btn){
+  if(btn){ btn.disabled=true; btn.textContent='…'; }
+  fetch('/api/drafts/'+encodeURIComponent(draftId)+'/resolve',{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({action:action, text:text||''})
+  }).then(function(r){return r.json();}).then(function(d){
+    if(d&&d.ok){
+      if(btn){ btn.textContent='✓ 完成'; btn.style.opacity='0.6'; }
+      setTimeout(load, 600);
+    } else {
+      if(btn){ btn.disabled=false; btn.textContent='重试'; }
+      var msg=(d&&d.detail)||(d&&d.error)||'操作失败';
+      alert('操作失败：'+msg);
+    }
+  }).catch(function(){
+    if(btn){ btn.disabled=false; btn.textContent='重试'; }
+    alert('网络错误，请重试');
+  });
+}
+
+function forceOverride(draftId, btn){
+  if(!confirm('确认以主管权限强制放行此 L4 草稿？操作将记入审计日志。')) return;
+  if(btn){ btn.disabled=true; btn.textContent='…'; }
+  fetch('/api/drafts/'+encodeURIComponent(draftId)+'/force-override',{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({action:'approve'})
+  }).then(function(r){return r.json();}).then(function(d){
+    if(d&&d.ok){
+      if(btn){ btn.textContent='✓ 已放行'; btn.style.opacity='0.6'; }
+      setTimeout(load, 600);
+    } else {
+      if(btn){ btn.disabled=false; btn.textContent='🔓 主管放行'; }
+      alert('放行失败：'+((d&&d.detail)||(d&&d.error)||'未知'));
+    }
+  }).catch(function(){
+    if(btn){ btn.disabled=false; btn.textContent='🔓 主管放行'; }
+    alert('网络错误');
+  });
+}
+
+function triggerBulkAutosend(){
+  var btn=document.getElementById('btn-bulk');
+  if(btn){ btn.disabled=true; btn.textContent='…'; }
+  fetch('/api/drafts/bulk-autosend',{
+    method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'
+  }).then(function(r){return r.json();}).then(function(d){
+    if(btn){ btn.disabled=false; btn.textContent='⚡ 一键发所有 L2'; }
+    if(d&&d.ok){
+      alert('完成：发送 '+d.sent+' 条，失败 '+d.errors+' 条');
+      load();
+    } else { alert('批量发送失败'); }
+  }).catch(function(){
+    if(btn){ btn.disabled=false; btn.textContent='⚡ 一键发所有 L2'; }
+    alert('网络错误');
+  });
+}
+
+setInterval(load, 30000);
+})();
+</script>
+{% endblock %}
