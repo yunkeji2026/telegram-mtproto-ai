@@ -64,6 +64,13 @@
   /* I3 模板选择器 */
   .dr-tpl{background:#fafafa;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin:8px 0;font-size:12px;}
   .dr-tpl-header{display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;}
+  .dr-profile{background:#fdf4ff;border:1px solid #e9d5ff;border-radius:8px;padding:10px 12px;margin:8px 0;font-size:12px;}
+  .dr-profile-header{display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;font-weight:600;color:#7c3aed;}
+  .dr-profile-body{display:none;margin-top:8px;}
+  .dr-profile-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px;}
+  .dr-profile-tag{padding:2px 8px;border-radius:10px;background:#ede9fe;color:#5b21b6;font-size:11px;}
+  .dr-profile-dec{font-size:11px;color:#374151;padding:3px 0;border-bottom:1px solid #f1f5f9;}
+  .dr-profile-dec:last-child{border-bottom:0;}
   .dr-tpl-body{display:none;margin-top:8px;}
   .dr-tpl-body.open{display:block;}
   .dr-tpl-filters{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;}
@@ -159,6 +166,22 @@ function setFilter(s,p,l){
   load();
 }
 function esc(t){ var d=document.createElement('div'); d.textContent=t||''; return d.innerHTML; }
+
+// K1/K2 toast（复用 workspace_base CRMW；降级为原生 alert 兜底）
+function _drToast(msg, style, dur){
+  style = style||'info';
+  try{
+    var color={'warn':'#b91c1c','info':'#0f766e','success':'#16a34a'}[style]||'#2563eb';
+    if(window.CRMW&&CRMW.toast){ CRMW.toast(msg, color); return; }
+  }catch(_){}
+  var el=document.createElement('div');
+  el.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;padding:10px 18px;'
+    +'border-radius:8px;background:#1e293b;color:#fff;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.25);max-width:320px;cursor:pointer;';
+  el.textContent=msg;
+  document.body.appendChild(el);
+  setTimeout(function(){el.remove();}, dur||4000);
+  el.onclick=function(){el.remove();};
+}
 function fmtTs(ts){ if(!ts) return ''; var d=new Date(ts*1000); return d.toLocaleDateString('zh-CN',{month:'2-digit',day:'2-digit'})+' '+d.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}); }
 
 function load(){
@@ -227,6 +250,16 @@ function load(){
           +'<div class="dr-ctx-body" id="'+ctxId+'"></div>'
           +'</div>';
       }
+      // K3 客户画像面板
+      var profileId='profile-'+ix;
+      var profileHtml='';
+      if(dr.conversation_id){
+        profileHtml='<div class="dr-profile">'
+          +'<div class="dr-profile-header" onclick="toggleProfile(\''+profileId+'\',\''+encodeURIComponent(dr.conversation_id)+'\',this)">'
+          +'<span>👤 客户画像</span><span style="font-size:11px;color:#7c3aed;">点击展开 ▼</span></div>'
+          +'<div class="dr-profile-body" id="'+profileId+'"></div>'
+          +'</div>';
+      }
       // I3 模板选择器面板
       var tplId='tpl-'+ix;
       var tplHtml='';
@@ -274,6 +307,7 @@ function load(){
         +(dr.draft_text?'<div class="dr-draft">🤖 <strong>AI 草稿：</strong>'+esc(dr.draft_text)+'</div>':'')
         +(reasons?'<div class="dr-reasons">⚠ 风险原因：'+esc(reasons)+'</div>':'')
         +intelHtml
+        +profileHtml
         +copilotHtml
         +tplHtml
         +transHtml
@@ -650,6 +684,75 @@ function _renderIntel(el, meta){
 // I3 模板库
 var _tplCache=null;
 var _tplLang='';
+// K3：客户画像面板切换 + 懒加载
+function toggleProfile(bodyId, convEnc, headerEl){
+  var body=document.getElementById(bodyId);
+  if(!body) return;
+  if(body.style.display==='block'){
+    body.style.display='none';
+    headerEl.lastChild.textContent='点击展开 ▼';
+    return;
+  }
+  body.style.display='block';
+  headerEl.lastChild.textContent='收起 ▲';
+  if(body.getAttribute('data-loaded')) return;
+  body.setAttribute('data-loaded','1');
+  body.innerHTML='<span style="color:#94a3b8;font-size:12px;">加载中…</span>';
+  var cid=decodeURIComponent(convEnc);
+  fetch('/api/unified-inbox/contact-profile?conversation_id='+encodeURIComponent(cid))
+    .then(function(r){return r.json();})
+    .then(function(d){ _renderProfile(body, d); })
+    .catch(function(){ body.innerHTML='<span style="color:#94a3b8;font-size:12px;">加载失败</span>'; });
+}
+function _renderProfile(body, d){
+  var html='';
+  var m=d.conv_meta||{};
+  // 对话智能
+  if(m&&(m.last_intent||m.last_emotion||m.msg_count)){
+    html+='<div style="font-weight:600;font-size:11px;color:#5b21b6;margin-bottom:4px;">对话智能</div>';
+    html+='<div class="dr-profile-row">';
+    if(m.last_intent) html+='<span class="dr-profile-tag">意图：'+esc(m.last_intent)+'</span>';
+    if(m.last_emotion) html+='<span class="dr-profile-tag">情绪：'+esc(m.last_emotion)+'</span>';
+    if(m.emotion_trend){
+      var trendIcon={'rising':'📈','falling':'📉','stable':'📊'}[m.emotion_trend]||'';
+      html+='<span class="dr-profile-tag">趋势：'+trendIcon+esc(m.emotion_trend)+'</span>';
+    }
+    if(m.last_risk) html+='<span class="dr-profile-tag">风险：'+esc(m.last_risk)+'</span>';
+    if(m.msg_count) html+='<span class="dr-profile-tag">消息：'+esc(String(m.msg_count))+'条</span>';
+    html+='</div>';
+    // 意图历史气泡
+    if(m.intent_history&&m.intent_history.length){
+      html+='<div style="font-size:11px;color:#6b7280;margin-bottom:4px;">近期意图：'+m.intent_history.slice(-5).map(function(i){ return '<span style="padding:1px 5px;background:#ede9fe;border-radius:6px;margin-right:3px;">'+esc(i)+'</span>'; }).join('')+'</div>';
+    }
+  }
+  // CRM 档案
+  var c=d.contact||{};
+  if(c&&(c.name||c.funnel_stage||c.tags)){
+    html+='<div style="font-weight:600;font-size:11px;color:#5b21b6;margin:6px 0 4px;">CRM 档案</div>';
+    html+='<div class="dr-profile-row">';
+    if(c.name) html+='<span class="dr-profile-tag">客户：'+esc(c.name)+'</span>';
+    if(c.funnel_stage) html+='<span class="dr-profile-tag">漏斗：'+esc(c.funnel_stage)+'</span>';
+    if(c.follow_up_overdue) html+='<span class="dr-profile-tag" style="background:#fee2e2;color:#991b1b;">跟进逾期</span>';
+    (c.tags||[]).slice(0,5).forEach(function(t){ html+='<span class="dr-profile-tag">'+esc(t)+'</span>'; });
+    html+='</div>';
+    if(c.note) html+='<div style="font-size:11px;color:#374151;margin-top:2px;">备注：'+esc(c.note)+'</div>';
+  }
+  // 近期草稿决策
+  var decs=d.recent_decisions||[];
+  if(decs.length){
+    html+='<div style="font-weight:600;font-size:11px;color:#5b21b6;margin:6px 0 4px;">近期决策</div>';
+    var _acn={'approved':'✅批准','rejected':'❌拒绝','autosend':'🤖自动发','force_override':'🔓强制放行','auto_reassigned':'🔄再分配'};
+    decs.forEach(function(r){
+      var ts=r.ts>0?new Date(r.ts*1000).toLocaleDateString():'';
+      html+='<div class="dr-profile-dec">'+(_acn[r.action]||esc(r.action))+' '
+        +(r.risk_level?'<span style="color:#94a3b8;">['+esc(r.risk_level)+']</span> ':'')+esc(r.agent_id||'')
+        +(ts?' <span style="color:#94a3b8;float:right;">'+ts+'</span>':'')+'</div>';
+    });
+  }
+  if(!html) html='<span style="color:#94a3b8;font-size:12px;">暂无客户画像数据</span>';
+  body.innerHTML=html;
+}
+
 function toggleTpl(bodyId, draftId, headerEl){
   var body=document.getElementById(bodyId);
   if(!body) return;
@@ -733,9 +836,29 @@ setInterval(load, 30000);
 // G1：监听 workspace_base.html 转发的 draft_created CustomEvent，新草稿到达即刷新
 document.addEventListener('draft_created', function(e){
   var lv=(e.detail&&e.detail.autopilot_level)||'';
-  // 当前 filter 与新草稿 level 匹配时刷新（避免用户在看其他 tab 时抖动）
-  if(!_level || _level===lv) {
-    setTimeout(load, 300); // 小延迟确保 DB 写入完成
+  if(!_level || _level===lv) { setTimeout(load, 300); }
+});
+
+// K1：监听 draft_sla_breach — 主管视图弹 toast + 角标闪烁
+document.addEventListener('draft_sla_breach', function(e){
+  var d=e.detail||{};
+  var msg='⏰ SLA 超时：'+esc(d.peer_text_preview||d.draft_id||'草稿')
+    +' 已等待 '+(d.wait_min||'?')+'分钟（'+esc(d.autopilot_level||'')+'）';
+  _drToast(msg, 'warn', 6000);
+  // 高亮对应草稿卡片（如可见）
+  var card=document.querySelector('[data-draft-id="'+esc(d.draft_id||'')+'"]');
+  if(card){ card.style.outline='2px solid #dc2626'; }
+});
+
+// K2：监听 draft_reassigned — 通知被分配给自己的草稿
+document.addEventListener('draft_reassigned', function(e){
+  var d=e.detail||{};
+  var myId=(typeof MY_AGENT_ID!=='undefined')?MY_AGENT_ID:'';
+  if(d.to_agent && d.to_agent===myId){
+    _drToast('📋 草稿已转派给您（来自 '+esc(d.from_agent||'离线坐席')+'）', 'info', 5000);
+    setTimeout(load, 500);
+  } else if(d.to_agent){
+    _drToast('🔄 草稿已自动转派给 '+esc(d.to_agent_name||d.to_agent), 'info', 4000);
   }
 });
 })();

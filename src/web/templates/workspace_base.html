@@ -378,6 +378,26 @@
         refreshL4();
         // 通过 CustomEvent 告知草稿审批页面刷新列表（若当前页已打开）
         try{ document.dispatchEvent(new CustomEvent('draft_created',{detail:_dc})); }catch(_){}
+      } else if(msg && msg.type==='draft_sla_breach' && msg.data){
+        // K1：草稿 SLA 超时 → 主管 toast + 转发 CustomEvent
+        if(MY_IS_SUP){
+          var _br=msg.data;
+          var _brEl=CRMW.toast(
+            '⏰ 草稿 SLA 超时：'+(_br.peer_text_preview||_br.draft_id||'').slice(0,40)
+              +' 已等待 '+(_br.wait_min||'?')+'分钟（'+(_br.autopilot_level||'')+'）',
+            '#b91c1c');
+          if(_brEl){ _brEl.style.cursor='pointer'; _brEl.onclick=function(){ location.href='/workspace/drafts'; }; }
+          try{ document.dispatchEvent(new CustomEvent('draft_sla_breach',{detail:_br})); }catch(_){}
+          refreshL4();
+        }
+      } else if(msg && msg.type==='draft_reassigned' && msg.data){
+        // K2：草稿自动再分配 → 被分配人 toast + 转发 CustomEvent
+        var _ra=msg.data;
+        if(MY_IS_SUP || (_ra.to_agent&&_ra.to_agent===MY_AGENT_ID)){
+          var _raLabel=(_ra.to_agent===MY_AGENT_ID)?'草稿已转派给您':'草稿已自动转派给 '+(_ra.to_agent_name||_ra.to_agent||'?');
+          CRMW.toast('🔄 '+_raLabel+'（来自离线坐席 '+(_ra.from_agent||'?')+'）','#0f766e');
+          try{ document.dispatchEvent(new CustomEvent('draft_reassigned',{detail:_ra})); }catch(_){}
+        }
       } else if(msg && msg.type==='escalation' && msg.data){
         var _d=msg.data;
         var _rz={unclaimed:'无人认领',holder_offline:'坐席离线',holder_quiet:'坐席静音'}[_d.reason]||_d.reason;
