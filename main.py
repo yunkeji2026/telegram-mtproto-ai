@@ -639,10 +639,31 @@ class AIChatAssistant:
                                     )
                             except Exception:
                                 self.logger.debug("AutosendWorker 启动跳过", exc_info=True)
-                            # E2：注册入站新消息 → 自动草稿生成回调
-                            self.inbox_store.register_new_inbound_cb(
-                                draft_svc.auto_generate_draft
-                            )
+                            # E2/F2：按 auto_draft 配置注册入站新消息 → 自动草稿生成回调
+                            _ad_cfg = (self.config.config or {}).get(
+                                "inbox", {}
+                            ).get("auto_draft", {}) or {}
+                            if _ad_cfg.get("enabled", True):
+                                _ad_mode = str(_ad_cfg.get("automation_mode", "auto_ai"))
+                                _ad_min_len = int(_ad_cfg.get("min_text_len", 3))
+                                _ad_skip = set(_ad_cfg.get("skip_platforms", []) or [])
+
+                                def _auto_draft_cb(conv: dict, text: str) -> None:
+                                    if conv.get("platform", "") in _ad_skip:
+                                        return
+                                    if len(str(text or "").strip()) < _ad_min_len:
+                                        return
+                                    draft_svc.auto_generate_draft(
+                                        conv, text, automation_mode=_ad_mode
+                                    )
+
+                                self.inbox_store.register_new_inbound_cb(_auto_draft_cb)
+                                self.logger.info(
+                                    "AutoDraft 已启用（mode=%s min_len=%s skip=%s）",
+                                    _ad_mode, _ad_min_len, _ad_skip,
+                                )
+                            else:
+                                self.logger.info("AutoDraft 已禁用（auto_draft.enabled=false）")
 
                             # ── Phase C：意图 LLM 升级 + 翻译记忆持久化（预置带依赖的 service） ──
                             _cfg_root = self.config.config or {}

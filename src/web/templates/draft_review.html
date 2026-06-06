@@ -51,6 +51,12 @@
   .dr-copilot-kb{background:#f1f5f9;border-radius:6px;padding:6px 10px;margin:3px 0;font-size:11px;}
   .dr-copilot-kb strong{color:#2563eb;}
   .dr-copilot-loading{color:#94a3b8;font-style:italic;}
+  /* F1 快捷回复按钮组 */
+  .dr-suggest{margin-top:8px;border-top:1px solid #bbf7d0;padding-top:8px;}
+  .dr-suggest-lbl{font-size:10px;color:#6b7280;margin-bottom:4px;font-weight:600;letter-spacing:.03em;}
+  .dr-suggest-btns{display:flex;gap:6px;flex-wrap:wrap;}
+  .dr-suggest-btn{padding:4px 10px;border:1px solid #16a34a;border-radius:12px;font-size:11px;background:#fff;color:#15803d;cursor:pointer;transition:background .12s;}
+  .dr-suggest-btn:hover{background:#dcfce7;}
   /* E1 对话历史时间轴 */
   .dr-ctx{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin:8px 0;font-size:12px;}
   .dr-ctx-header{display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;color:#475569;}
@@ -277,6 +283,8 @@ function toggleCopilot(bodyId, peerEncoded, headerEl){
   if(body.getAttribute('data-loaded')) return;
   body.setAttribute('data-loaded','1');
   var text=decodeURIComponent(peerEncoded);
+  // editBoxId 从 copilotId 推断：copilot-N → edit-N（F1 快捷填入）
+  var editBoxIdx=bodyId.replace('copilot-','');
   fetch('/api/workspace/copilot?text='+encodeURIComponent(text)).then(function(r){return r.json();}).then(function(d){
     if(!d||!d.ok){ body.innerHTML='<span class="dr-copilot-loading">分析失败</span>'; return; }
     var riskCls='dr-copilot-risk-'+(d.risk_level||'low').toLowerCase();
@@ -291,6 +299,17 @@ function toggleCopilot(bodyId, peerEncoded, headerEl){
     } else {
       kbHtml='<div style="font-size:11px;color:#94a3b8;margin-top:4px;">暂无 KB 匹配</div>';
     }
+    // F1：快捷回复建议按钮（点击填入草稿框 / 展开编辑框）
+    var suggestHtml='';
+    if(d.suggestions&&d.suggestions.length){
+      suggestHtml='<div class="dr-suggest"><div class="dr-suggest-lbl">⚡ 快捷回复（点击填入）</div>'
+        +'<div class="dr-suggest-btns">'
+        +d.suggestions.map(function(s){
+          return '<button class="dr-suggest-btn" title="'+esc(s.title||'')+'" '
+            +'onclick="fillDraft(\'edit-'+editBoxIdx+'\','+JSON.stringify(s.text||'')+')">'+esc(s.title||s.style)+'</button>';
+        }).join('')
+        +'</div></div>';
+    }
     body.innerHTML='<div class="dr-copilot-row">'
       +'<span class="dr-copilot-tag">意图：'+esc(d.intent||'—')+'</span>'
       +'<span class="dr-copilot-tag">情绪：'+esc(d.emotion||'—')+'</span>'
@@ -299,6 +318,7 @@ function toggleCopilot(bodyId, peerEncoded, headerEl){
       +'</div>'
       +(d.risk_reasons&&d.risk_reasons.length?'<div style="font-size:11px;color:#dc2626;margin:2px 0;">⚠ '+esc(d.risk_reasons.join('、'))+'</div>':'')
       +(d.next_step?'<div style="font-size:11px;color:#374151;margin:2px 0;">💡 建议：'+esc(d.next_step)+'</div>':'')
+      +suggestHtml
       +kbHtml;
   }).catch(function(){
     body.innerHTML='<span class="dr-copilot-loading">网络错误</span>';
@@ -341,6 +361,35 @@ function toggleCtx(bodyId, convEnc, headerEl){
     });
 }
 
+function fillDraft(editBoxId, text){
+  // F1：把快捷回复文本填入编辑框（展开编辑框 + 填入 + 提示）
+  var box=document.getElementById(editBoxId);
+  if(!box) return;
+  box.value=text;
+  // 自动展开编辑框（如果是隐藏状态）
+  if(box.style.display==='none'||!box.style.display){
+    box.style.display='block';
+    // 找到同卡片的「编辑后发」按钮并更新
+    var editBtn=box.previousSibling;
+    if(editBtn&&editBtn.textContent&&editBtn.textContent.indexOf('编辑')>=0){
+      editBtn.textContent='取消编辑';
+      // 如果还没有「确认发送」按钮则插入
+      if(!box.nextSibling||!box.nextSibling.classList||!box.nextSibling.classList.contains('send-edited')){
+        var sendBtn=document.createElement('button');
+        sendBtn.className='dr-btn btn-approve send-edited';
+        sendBtn.textContent='✓ 确认发送';
+        sendBtn.onclick=function(){
+          var did=box.getAttribute('data-did');
+          resolve(did,'edit_send',box.value,sendBtn);
+        };
+        box.parentNode.insertBefore(sendBtn,box.nextSibling);
+      }
+    }
+  }
+  box.focus();
+  box.setSelectionRange(box.value.length, box.value.length);
+}
+
 function triggerBulkAutosend(){
   var btn=document.getElementById('btn-bulk');
   if(btn){ btn.disabled=true; btn.textContent='…'; }
@@ -359,6 +408,14 @@ function triggerBulkAutosend(){
 }
 
 setInterval(load, 30000);
+// G1：监听 workspace_base.html 转发的 draft_created CustomEvent，新草稿到达即刷新
+document.addEventListener('draft_created', function(e){
+  var lv=(e.detail&&e.detail.autopilot_level)||'';
+  // 当前 filter 与新草稿 level 匹配时刷新（避免用户在看其他 tab 时抖动）
+  if(!_level || _level===lv) {
+    setTimeout(load, 300); // 小延迟确保 DB 写入完成
+  }
+});
 })();
 </script>
 {% endblock %}

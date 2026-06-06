@@ -361,6 +361,22 @@
       } else if(msg && msg.type==='sla_alert' && msg.data){
         wsToast('⚠ 客户「'+(msg.data.name||'?')+'」已等待 '+fmtWaitMin(msg.data.wait_sec)+'未回复');
         refreshSla();
+      } else if(msg && msg.type==='draft_created' && msg.data){
+        // G1：新自动草稿生成 → toast 通知 + 转发 CustomEvent 给草稿审批页
+        var _dc=msg.data;
+        var _lvlColor={'L2':'#16a34a','L3':'#d97706','L4':'#dc2626'}[_dc.autopilot_level]||'#2563eb';
+        var _toastEl=CRMW.toast(
+          '📋 新草稿 ['+(_dc.autopilot_level||'?')+'] '+(_dc.chat_name||_dc.platform||'?')+'：'+(_dc.peer_text||'').slice(0,30),
+          _lvlColor);
+        if(_toastEl && _dc.autopilot_level!=='L2'){
+          // 非 L2 需要人工审批 → 点击 toast 跳转草稿审批页
+          _toastEl.style.cursor='pointer';
+          _toastEl.onclick=function(){ location.href='/workspace/drafts'; };
+        }
+        // 刷新顶栏草稿角标
+        refreshL4();
+        // 通过 CustomEvent 告知草稿审批页面刷新列表（若当前页已打开）
+        try{ document.dispatchEvent(new CustomEvent('draft_created',{detail:_dc})); }catch(_){}
       } else if(msg && msg.type==='escalation' && msg.data){
         var _d=msg.data;
         var _rz={unclaimed:'无人认领',holder_offline:'坐席离线',holder_quiet:'坐席静音'}[_d.reason]||_d.reason;
