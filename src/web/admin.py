@@ -2359,6 +2359,20 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         import logging as _log_ui
         _log_ui.getLogger("admin").debug("统一收件箱路由注册跳过", exc_info=True)
 
+    # ── 草稿审批工作台页面（B2：坐席/主管使用；API 路由由 main.py 挂） ──
+    try:
+        from src.web.routes.drafts_routes import register_drafts_page_routes
+
+        register_drafts_page_routes(
+            app,
+            page_auth=_unified_inbox_page_auth,
+            templates=templates,
+            config_manager=config_manager,
+        )
+    except Exception:
+        import logging as _log_dr
+        _log_dr.getLogger("admin").debug("草稿审批页面路由注册跳过", exc_info=True)
+
     # ── 面向客户的网页聊天 Widget（web 渠道，公网；feature flag 默认关）──
     try:
         _wc_cfg = (config_manager.config or {}).get("web_chat", {}) or {}

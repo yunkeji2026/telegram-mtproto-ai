@@ -515,6 +515,8 @@ _BASELINE = """
 /workspace/contact/{contact_id}	GET
 /workspace/contacts	GET
 /workspace/dash	GET
+/workspace/draft-audit	GET
+/workspace/drafts	GET
 /workspace/escalations	GET
 /workspace/tasks	GET
 /users	GET
