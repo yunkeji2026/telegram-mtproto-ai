@@ -51,6 +51,17 @@
   .dr-copilot-kb{background:#f1f5f9;border-radius:6px;padding:6px 10px;margin:3px 0;font-size:11px;}
   .dr-copilot-kb strong{color:#2563eb;}
   .dr-copilot-loading{color:#94a3b8;font-style:italic;}
+  /* E1 对话历史时间轴 */
+  .dr-ctx{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin:8px 0;font-size:12px;}
+  .dr-ctx-header{display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;color:#475569;}
+  .dr-ctx-body{margin-top:8px;display:none;max-height:220px;overflow-y:auto;}
+  .dr-ctx-body.open{display:block;}
+  .dr-bubble-wrap{display:flex;margin:4px 0;}
+  .dr-bubble-wrap.out{justify-content:flex-end;}
+  .dr-bubble{max-width:75%;padding:6px 10px;border-radius:10px;font-size:12px;line-height:1.45;word-break:break-word;}
+  .dr-bubble-wrap.in .dr-bubble{background:#e0f2fe;color:#0c4a6e;border-radius:10px 10px 10px 2px;}
+  .dr-bubble-wrap.out .dr-bubble{background:#d1fae5;color:#064e3b;border-radius:10px 10px 2px 10px;}
+  .dr-bubble-ts{font-size:10px;color:#94a3b8;margin-top:2px;text-align:right;}
 </style>
 {% endblock %}
 {% block content %}
@@ -152,6 +163,17 @@ function load(){
           +'<div class="dr-copilot-body" id="'+copilotId+'"><span class="dr-copilot-loading">加载中…</span></div>'
           +'</div>';
       }
+      // E1 对话历史上下文（有 conversation_id 才渲染）
+      var ctxId='ctx-'+ix;
+      var ctxHtml='';
+      if(dr.conversation_id){
+        var convEnc=encodeURIComponent(dr.conversation_id);
+        ctxHtml='<div class="dr-ctx">'
+          +'<div class="dr-ctx-header" onclick="toggleCtx(\''+ctxId+'\',\''+convEnc+'\',this)">'
+          +'<span>📜 对话上下文</span><span style="font-size:11px;">点击展开 ▼</span></div>'
+          +'<div class="dr-ctx-body" id="'+ctxId+'"></div>'
+          +'</div>';
+      }
       return '<div class="dr-card '+cls+'" id="card-'+ix+'">'
         +'<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:6px;">'
         +'<div style="font-size:13px;font-weight:600;">'+platIcon+' '+esc(dr.chat_name||dr.chat_key||'未知')+'<span class="dr-platform"> · '+esc(plat)+(dr.account_label?' · '+esc(dr.account_label):'')+'</span></div>'
@@ -166,6 +188,7 @@ function load(){
         +(dr.draft_text?'<div class="dr-draft">🤖 <strong>AI 草稿：</strong>'+esc(dr.draft_text)+'</div>':'')
         +(reasons?'<div class="dr-reasons">⚠ 风险原因：'+esc(reasons)+'</div>':'')
         +copilotHtml
+        +ctxHtml
         +(isPending?'<textarea id="'+editBoxId+'" class="dr-edit-box" placeholder="编辑后发送…">'+esc(dr.draft_text)+'</textarea>':'')
         +'<div class="dr-actions">'+actHtml+'</div>'
         +'</div>';
@@ -281,6 +304,41 @@ function toggleCopilot(bodyId, peerEncoded, headerEl){
     body.innerHTML='<span class="dr-copilot-loading">网络错误</span>';
     body.removeAttribute('data-loaded');
   });
+}
+
+function toggleCtx(bodyId, convEnc, headerEl){
+  var body=document.getElementById(bodyId);
+  if(!body) return;
+  if(body.classList.contains('open')){
+    body.classList.remove('open');
+    headerEl.lastChild.textContent='点击展开 ▼';
+    return;
+  }
+  body.classList.add('open');
+  headerEl.lastChild.textContent='收起 ▲';
+  if(body.getAttribute('data-loaded')) return;
+  body.setAttribute('data-loaded','1');
+  body.innerHTML='<span style="color:#94a3b8;font-size:11px;">加载中…</span>';
+  var cid=decodeURIComponent(convEnc);
+  fetch('/api/unified-inbox/history?conversation_id='+encodeURIComponent(cid)+'&limit=10')
+    .then(function(r){return r.json();}).then(function(d){
+      var msgs=(d&&d.messages)||[];
+      if(!msgs.length){ body.innerHTML='<span style="color:#94a3b8;font-size:11px;">暂无历史记录</span>'; return; }
+      body.innerHTML=msgs.map(function(m){
+        var dir=(m.direction||'in')==='out'?'out':'in';
+        var txt=m.text||m.original_text||'';
+        var ts=m.ts?new Date(m.ts*1000).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}):'';
+        return '<div class="dr-bubble-wrap '+dir+'">'
+          +'<div><div class="dr-bubble">'+esc(txt)+'</div>'
+          +(ts?'<div class="dr-bubble-ts">'+ts+'</div>':'')
+          +'</div></div>';
+      }).join('');
+      // 滚到底部（最新消息）
+      body.scrollTop=body.scrollHeight;
+    }).catch(function(){
+      body.innerHTML='<span style="color:#ef4444;font-size:11px;">加载失败</span>';
+      body.removeAttribute('data-loaded');
+    });
 }
 
 function triggerBulkAutosend(){

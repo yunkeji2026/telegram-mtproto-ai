@@ -92,9 +92,25 @@ def ingest_collected_chats(
             msgs.append(_msg_from_obj(conv.conversation_id, lm, platform=conv.platform))
         n = store.ingest_batch(conv, msgs)
         inserted += n
-        if publish_events and n > 0 and isinstance(lm, dict) \
+        if n > 0 and isinstance(lm, dict) \
                 and str(lm.get("direction") or "in") == "in":
-            _publish_inbox_message(conv)
+            if publish_events:
+                _publish_inbox_message(conv)
+            # E2：通知已注册的入站新消息回调（auto-draft 生成等），best-effort
+            msg_text = str(lm.get("text") or "").strip()
+            if msg_text:
+                conv_dict = {
+                    "conversation_id": conv.conversation_id,
+                    "platform": conv.platform,
+                    "account_id": conv.account_id,
+                    "chat_key": conv.chat_key,
+                    "display_name": conv.display_name,
+                }
+                for _cb in getattr(store, "_new_inbound_cbs", []):
+                    try:
+                        _cb(conv_dict, msg_text)
+                    except Exception:
+                        logger.debug("new_inbound_cb 调用失败", exc_info=True)
     return inserted
 
 

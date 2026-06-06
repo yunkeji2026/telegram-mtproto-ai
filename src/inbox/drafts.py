@@ -373,6 +373,91 @@ class DraftService:
             "by_level": counts,
         }
 
+    # ── E2：入站消息 → 自动草稿生成 ──────────────────────────────
+
+    def auto_generate_draft(
+        self,
+        conv: Dict[str, Any],
+        text: str,
+        *,
+        automation_mode: str = "review",
+    ) -> Optional[str]:
+        """入站新消息触发，自动生成 inbox 草稿（best-effort，不抛异常）。
+
+        安全不变量：
+          1. 若该会话已有 pending 草稿，跳过（幂等保护，避免洪泛）。
+          2. 消息极短（< 3 字符）或已是 out 方向，跳过。
+          3. high → L4 拦截草稿；medium → L3 必审；low → L2 自动放行。
+          4. 草稿文本取规则建议首条（<1ms，不调 LLM）。
+
+        返回生成的 draft_id，跳过/失败时返回 None。
+        """
+        if self._store is None:
+            return None
+        t = str(text or "").strip()
+        if len(t) < 3:
+            return None
+
+        conv_id = str(conv.get("conversation_id") or "")
+        platform = str(conv.get("platform") or "")
+        account_id = str(conv.get("account_id") or "default")
+        chat_key = str(conv.get("chat_key") or "")
+        chat_name = str(conv.get("display_name") or "")
+
+        if not conv_id:
+            return None
+
+        try:
+            # 幂等保护：同一会话已有 pending draft 则跳过
+            existing = self._store.list_drafts(
+                source_kind="inbox", status="pending", conversation_id=conv_id, limit=1
+            )
+            if existing:
+                logger.debug("auto_generate_draft 跳过（已有 pending）: %s", conv_id)
+                return None
+        except Exception:
+            pass
+
+        try:
+            from src.ai.chat_assistant_service import quick_analyze, _suggestions, detect_language
+            analysis = quick_analyze(t)
+            risk_level = _max_risk(
+                analysis.get("risk_level", "low"),
+                keyword_risk_level(t),
+            )
+            # L0: 手动只发，不自动生成（保留给完全人工场景）
+            autopilot = risk_to_autopilot(risk_level, automation_mode)
+
+            lang = analysis.get("language", "zh")
+            intent = analysis.get("intent", "")
+            emotion = analysis.get("emotion", "平稳")
+            suggestions = _suggestions(t, lang=lang, intent=intent, emotion=emotion, risk=risk_level)
+            draft_text = suggestions[0].text if suggestions else "感谢您的消息，我们稍后为您回复。"
+
+            draft_id = self._store.upsert_draft({
+                "source_kind": "inbox",
+                "conversation_id": conv_id,
+                "platform": platform,
+                "account_id": account_id,
+                "chat_key": chat_key,
+                "chat_name": chat_name,
+                "peer_text": t,
+                "draft_text": draft_text,
+                "draft_lang": lang,
+                "risk_level": risk_level,
+                "risk_reasons": analysis.get("risk_reasons") or [],
+                "autopilot_level": autopilot,
+                "status": "pending",
+            })
+            logger.info(
+                "auto_generate_draft OK conv=%s level=%s draft_id=%s",
+                conv_id, autopilot, draft_id,
+            )
+            return draft_id
+        except Exception:
+            logger.debug("auto_generate_draft 失败", exc_info=True)
+            return None
+
     # ── 统计 ─────────────────────────────────────────────────
 
     def stats(self) -> Dict[str, Any]:
