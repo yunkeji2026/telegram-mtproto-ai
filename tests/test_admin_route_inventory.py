@@ -550,6 +550,12 @@ _BASELINE = """
 /users/delete/{user_id}	POST
 /users/update/{user_id}	POST
 /whatsapp-rpa	GET
+/api/workspace/ab-tests	GET,POST
+/api/workspace/ab-tests/{test_id}/results	GET
+/api/workspace/ab-tests/{test_id}/stop	POST
+/api/workspace/anomaly	GET
+/api/workspace/trace	GET
+/api/workspace/trace/{trace_id}	GET
 """
 
 

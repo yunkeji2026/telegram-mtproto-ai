@@ -269,6 +269,39 @@ _MIGRATIONS = [
     )""",
     "CREATE INDEX IF NOT EXISTS idx_survey_conv ON csat_surveys(conversation_id)",
     "CREATE INDEX IF NOT EXISTS idx_survey_due  ON csat_surveys(send_at, sent)",
+    # S1: A/B 测试表
+    """CREATE TABLE IF NOT EXISTS ab_tests (
+        id              TEXT PRIMARY KEY,
+        name            TEXT NOT NULL DEFAULT '',
+        intent_filter   TEXT NOT NULL DEFAULT '',
+        template_a_id   TEXT NOT NULL DEFAULT '',
+        template_b_id   TEXT NOT NULL DEFAULT '',
+        description     TEXT NOT NULL DEFAULT '',
+        min_sample      INTEGER NOT NULL DEFAULT 30,
+        status          TEXT NOT NULL DEFAULT 'active',
+        created_by      TEXT NOT NULL DEFAULT '',
+        created_at      REAL NOT NULL DEFAULT 0,
+        updated_at      REAL NOT NULL DEFAULT 0,
+        n_a             INTEGER NOT NULL DEFAULT 0,
+        n_b             INTEGER NOT NULL DEFAULT 0,
+        sat_a           INTEGER NOT NULL DEFAULT 0,
+        sat_b           INTEGER NOT NULL DEFAULT 0
+    )""",
+    """CREATE TABLE IF NOT EXISTS ab_assignments (
+        test_id         TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        variant         TEXT NOT NULL DEFAULT 'A',
+        assigned_ts     REAL NOT NULL DEFAULT 0,
+        csat_score      REAL NOT NULL DEFAULT -1,
+        outcome_ts      REAL NOT NULL DEFAULT 0,
+        PRIMARY KEY (test_id, conversation_id)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_ab_assign_conv ON ab_assignments(conversation_id)",
+    # S3: 全链路追踪 trace_id
+    "ALTER TABLE conversation_meta ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE reply_drafts ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''",
+    "CREATE INDEX IF NOT EXISTS idx_conv_trace ON conversation_meta(trace_id)",
+    "CREATE INDEX IF NOT EXISTS idx_draft_trace ON reply_drafts(trace_id)",
     # I3: 回复模板库
     """CREATE TABLE IF NOT EXISTS reply_templates (
         id           TEXT PRIMARY KEY,
@@ -804,8 +837,8 @@ class InboxStore:
                      source_kind, source_id, peer_text, draft_text, final_text,
                      draft_lang, translated_preview, risk_level, risk_reasons_json,
                      autopilot_level, status, decided_by, decided_at, sent_at, error,
-                     created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     created_at, updated_at, trace_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(source_kind, source_id) DO UPDATE SET
                     risk_level = excluded.risk_level,
                     risk_reasons_json = excluded.risk_reasons_json,
@@ -819,7 +852,9 @@ class InboxStore:
                     decided_at = excluded.decided_at,
                     sent_at = excluded.sent_at,
                     error = excluded.error,
-                    updated_at = excluded.updated_at
+                    updated_at = excluded.updated_at,
+                    trace_id = CASE WHEN reply_drafts.trace_id = '' OR reply_drafts.trace_id IS NULL
+                               THEN excluded.trace_id ELSE reply_drafts.trace_id END
                 """,
                 (
                     draft_id, str(draft.get("conversation_id") or ""),
@@ -834,7 +869,7 @@ class InboxStore:
                     str(draft.get("status") or "pending"),
                     str(draft.get("decided_by") or ""), float(draft.get("decided_at") or 0),
                     float(draft.get("sent_at") or 0), str(draft.get("error") or ""),
-                    now, now,
+                    now, now, str(draft.get("trace_id") or ""),
                 ),
             )
             self._conn.commit()
@@ -1584,6 +1619,7 @@ class InboxStore:
             return
         now = self._now()
         existing = self.get_conv_meta(cid)
+        trace_id_to_use = ""
         if existing:
             ih = list(existing.get("intent_history") or [])
             eh = list(existing.get("emotion_history") or [])
@@ -1591,8 +1627,13 @@ class InboxStore:
             # 保留已有 contact_id（如未传新值）
             if not contact_id:
                 contact_id = str(existing.get("contact_id") or "")
+            # S3: 继承已有 trace_id；没有则新生成
+            trace_id_to_use = str(existing.get("trace_id") or "")
         else:
             ih, eh, mc = [], [], 1
+        if not trace_id_to_use:
+            from src.inbox.tracer import new_trace_id
+            trace_id_to_use = new_trace_id()
         if intent:
             ih.append(str(intent))
         if emotion:
@@ -1605,8 +1646,8 @@ class InboxStore:
             self._conn.execute(
                 """INSERT INTO conversation_meta
                    (conversation_id, platform, last_intent, last_emotion, last_risk,
-                    intent_history, emotion_history, msg_count, updated_at, contact_id, workspace_id)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                    intent_history, emotion_history, msg_count, updated_at, contact_id, workspace_id, trace_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(conversation_id) DO UPDATE SET
                      platform       = excluded.platform,
                      last_intent    = CASE WHEN excluded.last_intent != ''
@@ -1621,13 +1662,15 @@ class InboxStore:
                      contact_id     = CASE WHEN excluded.contact_id != ''
                                       THEN excluded.contact_id ELSE conversation_meta.contact_id END,
                      workspace_id   = CASE WHEN excluded.workspace_id != 'default'
-                                      THEN excluded.workspace_id ELSE conversation_meta.workspace_id END
+                                      THEN excluded.workspace_id ELSE conversation_meta.workspace_id END,
+                     trace_id       = CASE WHEN conversation_meta.trace_id = '' OR conversation_meta.trace_id IS NULL
+                                      THEN excluded.trace_id ELSE conversation_meta.trace_id END
                 """,
                 (cid, str(platform or ""), str(intent or ""), str(emotion or ""),
                  str(risk or "low"),
                  json.dumps(ih, ensure_ascii=False),
                  json.dumps(eh, ensure_ascii=False),
-                 mc, now, str(contact_id or ""), _wsid),
+                 mc, now, str(contact_id or ""), _wsid, trace_id_to_use),
             )
             self._conn.commit()
 
@@ -2102,7 +2145,7 @@ class InboxStore:
         return None
 
     def update_conv_csat(self, conversation_id: str, csat_score: float) -> None:
-        """M1：写入对话 CSAT 评分（会话结束时调用）。"""
+        """M1：写入对话 CSAT 评分（会话结束时调用），同时触发 S1 A/B 结果回填。"""
         cid = str(conversation_id or "").strip()
         if not cid:
             return
@@ -2113,6 +2156,14 @@ class InboxStore:
                 (csat_score, cid),
             )
             self._conn.commit()
+        # S1: 自动回填 A/B 测试结果（best-effort，不影响主流程）
+        try:
+            from src.inbox.ab_testing import ABTestingStore
+            ab = ABTestingStore(self)
+            ab.record_outcome(conversation_id=cid, csat_score=csat_score)
+        except Exception:
+            import logging as _log
+            _log.getLogger(__name__).debug("S1 A/B outcome 回填失败（已忽略）", exc_info=True)
 
     def get_conv_meta(self, conversation_id: str) -> Optional[Dict[str, Any]]:
         """I1：获取对话智能元数据，含情绪趋势计算结果。"""

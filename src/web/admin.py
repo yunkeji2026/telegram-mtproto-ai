@@ -2375,6 +2375,9 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
             register_workspace_route,
             register_kb_stats_route,
             register_workload_route,
+            register_ab_testing_route,
+            register_anomaly_route,
+            register_trace_route,
         )
         # J3: export API（主管数据导出）
         register_export_route(app, api_auth=_api_auth)
@@ -2398,6 +2401,12 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         register_kb_stats_route(app, api_auth=_api_auth)
         # R2: 坐席工作负荷 API
         register_workload_route(app, api_auth=_api_auth)
+        # S1: A/B 测试 API
+        register_ab_testing_route(app, api_auth=_api_auth)
+        # S2: 异常检测 API
+        register_anomaly_route(app, api_auth=_api_auth)
+        # S3: 全链路追踪 API
+        register_trace_route(app, api_auth=_api_auth)
 
         register_drafts_page_routes(
             app,
