@@ -190,6 +190,21 @@ CREATE INDEX IF NOT EXISTS idx_escalations_assigned ON escalations(assigned_to, 
 # 对存量 escalations 表补列（新安装已由 DDL 建好，旧库通过 migration 追加）
 _MIGRATIONS = [
     "ALTER TABLE escalations ADD COLUMN assigned_to TEXT NOT NULL DEFAULT ''",
+    # B2: 草稿强制审计日志（安全不变量：L4 拦截 / force-override / autosend 全部留档）
+    """CREATE TABLE IF NOT EXISTS draft_audit_log (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        draft_id        TEXT NOT NULL DEFAULT '',
+        autopilot_level TEXT NOT NULL DEFAULT '',
+        action          TEXT NOT NULL DEFAULT '',
+        agent_id        TEXT NOT NULL DEFAULT '',
+        reason          TEXT NOT NULL DEFAULT '',
+        risk_level      TEXT NOT NULL DEFAULT '',
+        conversation_id TEXT NOT NULL DEFAULT '',
+        ts              REAL NOT NULL DEFAULT 0
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_draft_audit_draft ON draft_audit_log(draft_id, ts)",
+    "CREATE INDEX IF NOT EXISTS idx_draft_audit_ts    ON draft_audit_log(ts)",
+    "CREATE INDEX IF NOT EXISTS idx_draft_audit_agent ON draft_audit_log(agent_id, ts)",
 ]
 
 
@@ -769,6 +784,69 @@ class InboxStore:
         except Exception:
             out["risk_reasons"] = []
         return out
+
+    # ── B2 草稿审计日志 ──────────────────────────────────────────
+
+    def record_draft_audit(
+        self,
+        draft_id: str,
+        *,
+        autopilot_level: str = "",
+        action: str = "",
+        agent_id: str = "",
+        reason: str = "",
+        risk_level: str = "",
+        conversation_id: str = "",
+        ts: Optional[float] = None,
+    ) -> int:
+        """记录一条草稿处置审计事件，返回插入的 id。
+
+        action 枚举：autosend（L2 自动）/ blocked（L4 拦截）/
+                     force_override（主管强制放行）/ approved / rejected /
+                     edit_send / cancelled。
+        """
+        now = float(ts if ts is not None else self._now())
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO draft_audit_log "
+                "(draft_id, autopilot_level, action, agent_id, reason, "
+                " risk_level, conversation_id, ts) VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    str(draft_id or ""), str(autopilot_level or ""),
+                    str(action or ""), str(agent_id or ""),
+                    str(reason or ""), str(risk_level or ""),
+                    str(conversation_id or ""), now,
+                ),
+            )
+            self._conn.commit()
+            return cur.lastrowid
+
+    def list_draft_audit(
+        self,
+        *,
+        draft_id: str = "",
+        agent_id: str = "",
+        since_ts: float = 0.0,
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        """查审计日志（可按 draft_id / agent_id / 时间过滤）。"""
+        clauses: List[str] = ["ts>=?"]
+        params: List[Any] = [float(since_ts)]
+        if draft_id:
+            clauses.append("draft_id=?")
+            params.append(str(draft_id))
+        if agent_id:
+            clauses.append("agent_id=?")
+            params.append(str(agent_id))
+        sql = (
+            "SELECT * FROM draft_audit_log WHERE "
+            + " AND ".join(clauses)
+            + " ORDER BY ts DESC LIMIT ?"
+        )
+        params.append(int(max(1, min(1000, limit))))
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
 
     # ── Phase 5：坐席 presence + 会话租约 ─────────────────────
 
