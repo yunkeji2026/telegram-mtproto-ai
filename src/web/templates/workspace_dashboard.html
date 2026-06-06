@@ -80,6 +80,14 @@
     </div>
     <div id="db-risk" style="margin-top:10px;"><span style="color:#94a3b8;font-size:13px;">加载中…</span></div>
   </div>
+  <!-- E3 系统健康 Widget（所有坐席可见，主管更丰富） -->
+  <div class="db-sec" id="db-health-sec">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h3 style="margin:0;">⚙ 系统健康</h3>
+      <span id="db-health-ts" style="font-size:11px;color:#94a3b8;"></span>
+    </div>
+    <div id="db-health" style="margin-top:10px;"><span style="color:#94a3b8;font-size:13px;">加载中…</span></div>
+  </div>
 </div>
 <div id="db-modal">
   <div class="db-modal-card">
@@ -234,6 +242,54 @@
       document.getElementById('db-risk').innerHTML=html;
     }).catch(function(){ document.getElementById('db-risk').innerHTML='<span style="color:#ef4444;">加载失败</span>'; });
   }
+  function loadHealth(){
+    var el=document.getElementById('db-health');
+    var tsEl=document.getElementById('db-health-ts');
+    // 并发拉取两个端点，然后合并展示
+    Promise.all([
+      fetch('/api/drafts/autosend-status').then(function(r){return r.json();}).catch(function(){return null;}),
+      fetch('/api/drafts/risk-summary').then(function(r){return r.json();}).catch(function(){return null;})
+    ]).then(function(results){
+      var ws=results[0], rs=results[1];
+      var now=new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+      if(tsEl) tsEl.textContent='刷新于 '+now;
+      var rows=[];
+      // AutosendWorker 状态
+      if(ws&&ws.ok){
+        var st=ws.worker_status||{};
+        var isRunning=(st.running===true)||(st.running==='true');
+        var circOpen=(st.circuit_open===true)||(st.circuit_open==='true');
+        var runColor=isRunning?'#16a34a':'#dc2626';
+        var circColor=circOpen?'#dc2626':'#16a34a';
+        rows.push('<div class="db-row"><span>⚡ AutosendWorker</span>'
+          +'<span style="color:'+runColor+';font-weight:600;">'+(isRunning?'运行中':'已停止')+'</span></div>');
+        rows.push('<div class="db-row"><span>熔断器</span>'
+          +'<span style="color:'+circColor+';">'+(circOpen?'⚠ 已打开（暂停发送）':'✓ 关闭（正常）')+'</span></div>');
+        if(st.total_sent_session!=null)
+          rows.push('<div class="db-row"><span>本次会话已发</span><span>'+st.total_sent_session+' 条</span></div>');
+        if(st.consecutive_errors!=null&&parseInt(st.consecutive_errors)>0)
+          rows.push('<div class="db-row"><span style="color:#d97706;">连续错误</span><span style="color:#d97706;font-weight:600;">'+st.consecutive_errors+' 次</span></div>');
+      } else {
+        rows.push('<div class="db-row"><span>⚡ AutosendWorker</span><span style="color:#94a3b8;">未启动 / 不可用</span></div>');
+      }
+      // SLA + 待审草稿（risk-summary）
+      if(rs&&rs.ok){
+        var slaOvd=(rs.sla_overdue||0);
+        var slaColor=slaOvd>0?'#dc2626':'#16a34a';
+        rows.push('<div class="db-row"><span>⏰ SLA 超时草稿</span>'
+          +'<span style="color:'+slaColor+';font-weight:600;">'+slaOvd+' 条</span></div>');
+        var lvls=rs.by_level||{};
+        var urgentN=(lvls['L3']||0)+(lvls['L4']||0);
+        var urgentColor=urgentN>0?'#d97706':'#16a34a';
+        rows.push('<div class="db-row"><span>🔴 L3/L4 待审</span>'
+          +'<span style="color:'+urgentColor+';font-weight:600;">'+urgentN+' 条</span></div>');
+        rows.push('<div class="db-row"><span>📋 待处理草稿总量</span><span>'+(rs.total_pending||0)+' 条</span></div>');
+      }
+      if(el) el.innerHTML=rows.length?rows.join(''):'<span style="color:#94a3b8;font-size:13px;">健康数据不可用</span>';
+    }).catch(function(){
+      if(el) el.innerHTML='<span style="color:#ef4444;font-size:13px;">健康数据加载失败</span>';
+    });
+  }
   window.__dbDetail=openDetail; window.__dbGoConv=goConv; window.__dbCloseDetail=closeDetail; window.__dbAgentDetail=openAgentDetail; window.__dbAgentReport=agentReport; window.__dbEscTask=escTask; window.__dbEscReassign=escReassign;
   function spark(rows,key,color){ return CRMW.spark(rows,key,color); }
   function sparkPct(rows,key,color){ return CRMW.sparkPct(rows,key,color); }
@@ -317,6 +373,7 @@
     load(); setInterval(load, 60000);
     loadEsc(); setInterval(loadEsc, 60000);
     if(IS_SUP){ loadRisk(); setInterval(loadRisk, 60000); }
+    loadHealth(); setInterval(loadHealth, 60000);
   });
 })();
 </script>

@@ -232,6 +232,8 @@ class InboxStore:
         self._lock = threading.Lock()
         # C3：L2 草稿写入通知钩子（AutosendWorker 注册，线程安全回调）
         self._l2_callbacks: List[Any] = []
+        # E2：入站新消息通知钩子（AutoDraft 注册，参数 conv_dict + text）
+        self._new_inbound_cbs: List[Any] = []
         with self._lock:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA busy_timeout=5000")
@@ -251,6 +253,14 @@ class InboxStore:
         实现方可用 loop.call_soon_threadsafe 安全地唤醒异步任务。
         """
         self._l2_callbacks.append(cb)
+
+    def register_new_inbound_cb(self, cb: Any) -> None:
+        """注册入站新消息通知回调（E2 自动草稿生成）。
+
+        cb 签名：cb(conv: dict, text: str)，在 ingest 检测到新入站消息后调用。
+        在 ingest 锁外调用，best-effort，异常自动静默。
+        """
+        self._new_inbound_cbs.append(cb)
 
     def close(self) -> None:
         with self._lock:
@@ -773,7 +783,12 @@ class InboxStore:
         return self._row_to_draft(row) if row else None
 
     def list_drafts(
-        self, *, source_kind: str = "", status: str = "", limit: int = 50
+        self,
+        *,
+        source_kind: str = "",
+        status: str = "",
+        conversation_id: str = "",
+        limit: int = 50,
     ) -> List[Dict[str, Any]]:
         limit = max(1, min(500, int(limit or 50)))
         sql = "SELECT * FROM reply_drafts"
@@ -785,6 +800,9 @@ class InboxStore:
         if status:
             clauses.append("status = ?")
             params.append(status)
+        if conversation_id:
+            clauses.append("conversation_id = ?")
+            params.append(conversation_id)
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
         sql += " ORDER BY created_at DESC LIMIT ?"

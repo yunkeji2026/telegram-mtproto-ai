@@ -639,6 +639,10 @@ class AIChatAssistant:
                                     )
                             except Exception:
                                 self.logger.debug("AutosendWorker 启动跳过", exc_info=True)
+                            # E2：注册入站新消息 → 自动草稿生成回调
+                            self.inbox_store.register_new_inbound_cb(
+                                draft_svc.auto_generate_draft
+                            )
 
                             # ── Phase C：意图 LLM 升级 + 翻译记忆持久化（预置带依赖的 service） ──
                             _cfg_root = self.config.config or {}
