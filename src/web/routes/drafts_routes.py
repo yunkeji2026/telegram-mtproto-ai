@@ -20,9 +20,12 @@ API 端点（register_drafts_routes — main.py 调用）：
 
 from __future__ import annotations
 
+import logging
 import time
 
 from fastapi import Depends, HTTPException, Request
+
+logger = logging.getLogger(__name__)
 
 # 主管角色集（与 unified_inbox_routes 保持一致）
 _SUPERVISOR_ROLES = {"master", "admin"}
@@ -224,6 +227,115 @@ def register_drafts_routes(app, *, api_auth):
             "count": len(overdue),
             "sla_hours": int(hours),
             "overdue": overdue,
+        }
+
+    # ── H1 草稿翻译 + H2 批量处置（必须在 /{draft_id} 之前注册） ──────────────
+
+    @app.post("/api/drafts/{draft_id}/translate")
+    async def api_drafts_translate(request: Request, draft_id: str, _=Depends(api_auth)):
+        """H1：将草稿 AI 回复文本翻译为客户语言。
+
+        优先使用 web_app.state.translation_service（若已配置），
+        降级时返回原文（带 fallback 标记）。
+        返回：{ok, translated, source_lang, target_lang, fallback, draft_id}
+        """
+        svc = _get_draft_service(request)
+        draft = svc.get_draft(draft_id)
+        if draft is None:
+            raise HTTPException(404, "草稿不存在")
+
+        draft_text = str(draft.get("draft_text") or "")
+        peer_text = str(draft.get("peer_text") or "")
+        if not draft_text.strip():
+            return {"ok": False, "error": "草稿文本为空，无需翻译", "draft_id": draft_id}
+
+        # 推断语言：source=中文（草稿），target=客户语言（从 peer_text 检测）
+        from src.ai.chat_assistant_service import detect_language
+        source_lang = str(draft.get("draft_lang") or "zh") or "zh"
+        target_lang = detect_language(peer_text) if peer_text.strip() else "en"
+        if target_lang in ("zh", "zh-TW", ""):
+            target_lang = "en"  # 中文草稿对中文客户无需翻译，回退英文
+
+        ts_svc = getattr(request.app.state, "translation_service", None)
+        if ts_svc is None:
+            return {
+                "ok": True,
+                "draft_id": draft_id,
+                "translated": draft_text,
+                "source_lang": source_lang,
+                "target_lang": target_lang,
+                "fallback": True,
+                "note": "翻译服务未启用，返回原文",
+            }
+        try:
+            result = await ts_svc.translate(
+                draft_text, target_lang=target_lang, source_lang=source_lang, style="chat"
+            )
+            translated = str(result.translated_text if hasattr(result, "translated_text")
+                             else result.get("translated_text", draft_text))
+            return {
+                "ok": True,
+                "draft_id": draft_id,
+                "translated": translated,
+                "source_lang": source_lang,
+                "target_lang": target_lang,
+                "fallback": False,
+            }
+        except Exception as e:
+            logger.debug("草稿翻译失败: %s", e)
+            return {
+                "ok": True,
+                "draft_id": draft_id,
+                "translated": draft_text,
+                "source_lang": source_lang,
+                "target_lang": target_lang,
+                "fallback": True,
+                "note": "翻译暂时不可用，返回原文",
+            }
+
+    @app.post("/api/drafts/bulk-resolve")
+    async def api_drafts_bulk_resolve(request: Request, _=Depends(api_auth)):
+        """H2：批量处置草稿（主管专属）。
+
+        Body: {action: "approve"|"reject", draft_ids: [...], by?}
+        返回：{ok, total, succeeded, failed, errors: [...]}
+        """
+        if not _is_supervisor(request):
+            raise HTTPException(403, "批量处置需要主管权限")
+        svc = _get_draft_service(request)
+        body = {}
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "请求体解析失败")
+        action = str(body.get("action") or "").strip().lower()
+        if action not in {"approve", "reject"}:
+            raise HTTPException(400, "action 须为 approve 或 reject")
+        draft_ids = list(body.get("draft_ids") or [])
+        if not draft_ids:
+            return {"ok": True, "total": 0, "succeeded": 0, "failed": 0, "errors": []}
+        by = str(body.get("by") or _session_agent_id(request))
+        agent_id = _session_agent_id(request)
+        succeeded, failed, errors = 0, 0, []
+        for did in draft_ids[:50]:  # 单次最多 50 条
+            try:
+                result = svc.resolve_with_audit(
+                    str(did), action, by=by or agent_id or "bulk"
+                )
+                if result.get("ok"):
+                    succeeded += 1
+                else:
+                    failed += 1
+                    errors.append({"draft_id": did, "error": result.get("error", "failed")})
+            except Exception as e:
+                failed += 1
+                errors.append({"draft_id": did, "error": str(e)})
+        return {
+            "ok": True,
+            "total": len(draft_ids),
+            "succeeded": succeeded,
+            "failed": failed,
+            "errors": errors[:10],
         }
 
     @app.get("/api/drafts/{draft_id}")

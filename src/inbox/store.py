@@ -767,6 +767,28 @@ class InboxStore:
                     pass
         return draft_id
 
+    def update_draft_status(
+        self,
+        draft_id: str,
+        *,
+        status: str,
+        final_text: str = "",
+        decided_by: str = "",
+    ) -> bool:
+        """H1/H2：通过 draft_id 直接更新草稿状态（适用于 inbox 源草稿）。
+
+        返回 True 表示找到并更新了记录。
+        """
+        now = self._now()
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE reply_drafts SET status=?, final_text=CASE WHEN ?!='' THEN ? ELSE final_text END, "
+                "decided_by=?, decided_at=?, updated_at=? WHERE draft_id=?",
+                (status, final_text, final_text, decided_by, now, now, draft_id),
+            )
+            self._conn.commit()
+        return int(cur.rowcount or 0) > 0
+
     def get_draft(self, draft_id: str) -> Optional[Dict[str, Any]]:
         with self._lock:
             row = self._conn.execute(
@@ -819,6 +841,39 @@ class InboxStore:
         except Exception:
             out["risk_reasons"] = []
         return out
+
+    def cleanup_old_drafts(
+        self,
+        *,
+        max_age_days: int = 7,
+        statuses: Optional[List[str]] = None,
+    ) -> int:
+        """H3：删除超龄的已处理草稿，防止 reply_drafts 表无限膨胀。
+
+        仅删除 statuses 中指定状态的草稿（默认 approved/rejected/cancelled），
+        绝不删除 pending 草稿（安全不变量）。
+        返回实际删除的行数。
+        """
+        if statuses is None:
+            statuses = ["approved", "rejected", "cancelled"]
+        # 安全过滤：强制移除 pending，不允许误删待处理草稿
+        safe_statuses = [s for s in statuses if s != "pending"]
+        if not safe_statuses:
+            return 0
+        cutoff_ts = self._now() - max(1, int(max_age_days)) * 86400
+        placeholders = ",".join("?" for _ in safe_statuses)
+        with self._lock:
+            cur = self._conn.execute(
+                f"DELETE FROM reply_drafts WHERE status IN ({placeholders})"
+                f" AND updated_at < ?",
+                (*safe_statuses, cutoff_ts),
+            )
+            self._conn.commit()
+        count = int(cur.rowcount or 0)
+        if count > 0:
+            logger.info("cleanup_old_drafts: 删除 %d 条超龄草稿（age>%dd statuses=%s）",
+                        count, max_age_days, safe_statuses)
+        return count
 
     # ── B2 草稿审计日志 ──────────────────────────────────────────
 
