@@ -605,6 +605,75 @@ def register_metrics_route(app, *, api_auth):
         return {"ok": True, **metrics}
 
 
+def register_broadcast_route(app, *, api_auth):
+    """M2：注册 POST /api/workspace/broadcast（主管广播事件到 EventBus，触发 Webhook）。"""
+    from fastapi import Depends
+
+    @app.post("/api/workspace/broadcast")
+    async def api_workspace_broadcast(
+        request: Request,
+        _=Depends(api_auth),
+    ):
+        """M2：广播任意事件到 EventBus（主管专属，用于简报推送等）。"""
+        if not _is_supervisor(request):
+            raise HTTPException(403, "广播需要主管权限")
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "请求体 JSON 解析失败")
+        event_type = str(body.get("type") or "").strip()
+        if not event_type:
+            raise HTTPException(400, "type 字段不能为空")
+        data = body.get("data") or {}
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            get_event_bus().publish(event_type, data)
+        except Exception as e:
+            raise HTTPException(500, f"EventBus 发布失败: {e}")
+        return {"ok": True, "type": event_type}
+
+
+def register_report_route(app, *, api_auth):
+    """M2：注册 GET /api/workspace/report（工作日报/周报，主管专属）。"""
+    from fastapi import Depends
+    from fastapi.responses import PlainTextResponse
+
+    @app.get("/api/workspace/report")
+    async def api_workspace_report(
+        request: Request,
+        period: str = "daily",
+        format: str = "json",
+        _=Depends(api_auth),
+    ):
+        """M2：工作日报/周报 API（主管专属）。
+
+        period: daily（过去 24h，默认）| weekly（过去 7 天）
+        format: json（默认）| text（Webhook 推送格式）| html（仪表盘嵌入）
+        """
+        if not _is_supervisor(request):
+            raise HTTPException(403, "简报查看需要主管权限")
+
+        inbox = getattr(request.app.state, "inbox_store", None)
+        if inbox is None:
+            raise HTTPException(503, "inbox_store 未就绪")
+
+        from src.inbox.report_generator import ReportGenerator
+        gen = ReportGenerator(
+            inbox_store=inbox,
+            draft_service=getattr(request.app.state, "draft_service", None),
+            app_state=request.app.state,
+        )
+        report_data = gen.generate(period=period)
+
+        fmt = str(format or "json").lower()
+        if fmt == "text":
+            return PlainTextResponse(gen.format_text(report_data))
+        if fmt == "html":
+            from fastapi.responses import HTMLResponse
+            return HTMLResponse(gen.format_html(report_data))
+        return {"ok": True, **report_data}
+
+
 def register_export_route(app, *, api_auth):
     """J3：注册 GET /api/workspace/export（CSV 导出，主管专属）。
 
