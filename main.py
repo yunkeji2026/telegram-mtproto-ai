@@ -615,6 +615,27 @@ class AIChatAssistant:
                             register_drafts_routes(web_app, api_auth=_drafts_api_auth)
                             self.logger.info("统一草稿层已挂载（/api/drafts）")
 
+                            # ── Phase A：L2 草稿自动发送后台 worker ──
+                            try:
+                                from src.inbox.autosend_worker import AutosendWorker
+                                _as_cfg = (self.config.config or {}).get(
+                                    "inbox", {}
+                                ).get("l2_autosend", {}) or {}
+                                if _as_cfg.get("enabled", True):
+                                    _as_worker = AutosendWorker(
+                                        draft_service=draft_svc,
+                                        config=_as_cfg,
+                                    )
+                                    web_app.state.autosend_worker = _as_worker
+                                    asyncio.ensure_future(_as_worker.run())
+                                    self.logger.info(
+                                        "AutosendWorker 已启动（min=%ss max=%ss）",
+                                        _as_cfg.get("min_interval_sec", 60),
+                                        _as_cfg.get("max_interval_sec", 600),
+                                    )
+                            except Exception:
+                                self.logger.debug("AutosendWorker 启动跳过", exc_info=True)
+
                             # ── Phase C：意图 LLM 升级 + 翻译记忆持久化（预置带依赖的 service） ──
                             _cfg_root = self.config.config or {}
                             _ia_cfg = _cfg_root.get("intent_analysis", {}) or {}

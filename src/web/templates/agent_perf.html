@@ -1,0 +1,211 @@
+{% extends "workspace_base.html" %}
+{% block title %}坐席绩效看板{% endblock %}
+{% block head %}
+<style>
+  .ap-wrap{height:100%;overflow-y:auto;background:#f7f8fa;padding:18px;}
+  .ap-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;}
+  .ap-filters{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;}
+  .ap-filters select,.ap-filters input{padding:5px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;}
+  /* 汇总卡片 */
+  .ap-summary{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px;margin-bottom:18px;}
+  .ap-kpi{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px;text-align:center;}
+  .ap-kpi .val{font-size:26px;font-weight:700;color:#1e3a5f;}
+  .ap-kpi .lbl{font-size:11px;color:#94a3b8;margin-top:2px;}
+  /* 表格 */
+  .ap-table-wrap{background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;margin-bottom:18px;}
+  .ap-table{width:100%;border-collapse:collapse;font-size:13px;}
+  .ap-table th{background:#f1f5f9;padding:9px 12px;text-align:left;font-weight:600;color:#374151;border-bottom:2px solid #e5e7eb;}
+  .ap-table td{padding:8px 12px;border-bottom:1px solid #f3f4f6;color:#374151;vertical-align:middle;}
+  .ap-table tr:hover td{background:#f8fafc;}
+  .ap-table tr:last-child td{border-bottom:0;}
+  .ap-bar-wrap{width:120px;background:#f1f5f9;border-radius:4px;height:8px;display:inline-block;vertical-align:middle;}
+  .ap-bar{height:8px;border-radius:4px;background:#2563eb;}
+  /* 趋势 */
+  .ap-trend{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-bottom:18px;}
+  .ap-trend h3{margin:0 0 10px;font-size:14px;color:#374151;}
+  .ap-chart{display:flex;align-items:flex-end;gap:4px;height:80px;overflow-x:auto;}
+  .ap-bar-col{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:28px;}
+  .ap-bar-stk{width:20px;border-radius:3px 3px 0 0;}
+  .ap-bar-day{font-size:9px;color:#94a3b8;white-space:nowrap;}
+  .ap-empty{text-align:center;padding:32px;color:#94a3b8;font-size:14px;}
+  .ap-loading{text-align:center;padding:30px;color:#94a3b8;}
+  .badge-eff{display:inline-block;padding:2px 7px;border-radius:8px;font-size:11px;font-weight:600;}
+  .eff-high{background:#d1fae5;color:#065f46;}
+  .eff-mid{background:#fef3c7;color:#92400e;}
+  .eff-low{background:#fee2e2;color:#991b1b;}
+</style>
+{% endblock %}
+{% block content %}
+<div class="ap-wrap">
+  <div class="ap-header">
+    <h2 style="margin:0;font-size:18px;">📊 坐席绩效看板</h2>
+    <span id="ap-update" style="font-size:12px;color:#94a3b8;"></span>
+  </div>
+  <div class="ap-filters">
+    <select id="f-days" onchange="load()">
+      <option value="7">近 7 天</option>
+      <option value="14" selected>近 14 天</option>
+      <option value="30">近 30 天</option>
+    </select>
+    <input id="f-agent" placeholder="坐席 ID 过滤（可选）" style="width:200px;" oninput="debounce()">
+    <button onclick="load()" style="padding:5px 12px;border:1px solid #2563eb;border-radius:6px;background:#fff;color:#2563eb;font-size:13px;cursor:pointer;">刷新</button>
+  </div>
+
+  <!-- 汇总 KPI -->
+  <div class="ap-summary" id="ap-kpis">
+    <div class="ap-kpi"><div class="val" id="kpi-agents">—</div><div class="lbl">活跃坐席</div></div>
+    <div class="ap-kpi"><div class="val" id="kpi-total">—</div><div class="lbl">总处置</div></div>
+    <div class="ap-kpi"><div class="val" id="kpi-approved">—</div><div class="lbl">批准</div></div>
+    <div class="ap-kpi"><div class="val" id="kpi-rejected">—</div><div class="lbl">拒绝</div></div>
+    <div class="ap-kpi"><div class="val" id="kpi-auto">—</div><div class="lbl">L2 自动发</div></div>
+    <div class="ap-kpi"><div class="val" id="kpi-override">—</div><div class="lbl">主管放行</div></div>
+  </div>
+
+  <!-- 趋势图（按天）-->
+  <div class="ap-trend">
+    <h3>每日处置趋势</h3>
+    <div class="ap-chart" id="ap-chart"><div class="ap-loading" style="height:auto;">加载中…</div></div>
+  </div>
+
+  <!-- 坐席明细表 -->
+  <div class="ap-table-wrap">
+    <table class="ap-table">
+      <thead>
+        <tr>
+          <th>坐席</th>
+          <th>总处置</th>
+          <th>批准</th>
+          <th>拒绝</th>
+          <th>编辑发送</th>
+          <th>L2 自动</th>
+          <th>主管放行</th>
+          <th>批准率</th>
+          <th>占比</th>
+          <th>最后操作</th>
+        </tr>
+      </thead>
+      <tbody id="ap-body">
+        <tr><td colspan="10" class="ap-loading">加载中…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+(function(){
+var _timer=null;
+function debounce(){ clearTimeout(_timer); _timer=setTimeout(load, 400); }
+window.debounce=debounce;
+
+function fmtTs(ts){
+  if(!ts) return '—';
+  var d=new Date(ts*1000);
+  return d.toLocaleDateString('zh-CN',{month:'2-digit',day:'2-digit'})+' '+d.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'});
+}
+function fmtDay(ts){
+  var d=new Date(ts*1000);
+  return (d.getMonth()+1)+'/'+(d.getDate());
+}
+function pct(a,b){ return b>0?Math.round(a*100/b):0; }
+function esc(t){ var d=document.createElement('div'); d.textContent=String(t||''); return d.innerHTML; }
+
+function load(){
+  var days=document.getElementById('f-days').value||'14';
+  var agent=document.getElementById('f-agent').value.trim();
+  var url1='/api/workspace/agent-perf?days='+days+(agent?'&agent_id='+encodeURIComponent(agent):'');
+  var url2='/api/workspace/agent-perf/timeline?days='+days+(agent?'&agent_id='+encodeURIComponent(agent):'');
+
+  Promise.all([fetch(url1).then(function(r){return r.json();}), fetch(url2).then(function(r){return r.json();})]).then(function(results){
+    var d=results[0], tl=results[1];
+    if(!d||!d.ok){
+      document.getElementById('ap-body').innerHTML='<tr><td colspan="10" class="ap-empty">加载失败（需要主管权限）</td></tr>';
+      return;
+    }
+    renderKPIs(d.agents||[]);
+    renderTable(d.agents||[]);
+    if(tl&&tl.ok) renderTimeline(tl.timeline||[]);
+    document.getElementById('ap-update').textContent='更新于 '+new Date().toLocaleTimeString('zh-CN');
+  }).catch(function(){
+    document.getElementById('ap-body').innerHTML='<tr><td colspan="10" class="ap-empty">网络错误</td></tr>';
+  });
+}
+
+function renderKPIs(agents){
+  var total=0, approved=0, rejected=0, autosend=0, override=0;
+  agents.forEach(function(a){
+    total+=a.total||0; approved+=a.approved||0; rejected+=a.rejected||0;
+    autosend+=(a.autosend||0); override+=(a.force_override||0);
+  });
+  document.getElementById('kpi-agents').textContent=agents.length;
+  document.getElementById('kpi-total').textContent=total;
+  document.getElementById('kpi-approved').textContent=approved;
+  document.getElementById('kpi-rejected').textContent=rejected;
+  document.getElementById('kpi-auto').textContent=autosend;
+  document.getElementById('kpi-override').textContent=override;
+}
+
+function renderTable(agents){
+  if(!agents.length){
+    document.getElementById('ap-body').innerHTML='<tr><td colspan="10" class="ap-empty">该时段暂无处置记录</td></tr>';
+    return;
+  }
+  var maxTotal=Math.max.apply(null, agents.map(function(a){return a.total||1;}));
+  document.getElementById('ap-body').innerHTML=agents.map(function(a){
+    var total=a.total||0;
+    var approved=a.approved||0;
+    var appRate=pct(approved, total);
+    var effCls=appRate>=70?'eff-high':appRate>=40?'eff-mid':'eff-low';
+    var barW=Math.round((total/maxTotal)*100);
+    return '<tr>'
+      +'<td><strong>'+esc(a.agent_id)+'</strong></td>'
+      +'<td>'+total+'</td>'
+      +'<td style="color:#16a34a;">'+approved+'</td>'
+      +'<td style="color:#dc2626;">'+(a.rejected||0)+'</td>'
+      +'<td>'+(a.edit_send||0)+'</td>'
+      +'<td style="color:#059669;">'+(a.autosend||0)+'</td>'
+      +'<td style="color:#9d174d;">'+(a.force_override||0)+'</td>'
+      +'<td><span class="badge-eff '+effCls+'">'+appRate+'%</span></td>'
+      +'<td><div class="ap-bar-wrap"><div class="ap-bar" style="width:'+barW+'%;"></div></div></td>'
+      +'<td style="font-size:11px;color:#94a3b8;">'+fmtTs(a.last_action_ts)+'</td>'
+      +'</tr>';
+  }).join('');
+}
+
+function renderTimeline(timeline){
+  if(!timeline.length){
+    document.getElementById('ap-chart').innerHTML='<div class="ap-empty" style="height:auto;">无趋势数据</div>';
+    return;
+  }
+  // 收集所有日期桶
+  var buckets={};
+  timeline.forEach(function(row){
+    var bkt=row.bucket_ts;
+    if(!buckets[bkt]) buckets[bkt]={approved:0,rejected:0,total:0};
+    buckets[bkt].approved+=(row.approved||0);
+    buckets[bkt].rejected+=(row.rejected||0);
+    buckets[bkt].total+=(row.total||0);
+  });
+  var keys=Object.keys(buckets).map(Number).sort();
+  var maxTotal=Math.max.apply(null, keys.map(function(k){return buckets[k].total||1;}));
+  var maxH=70; // px
+  document.getElementById('ap-chart').innerHTML=keys.map(function(k){
+    var b=buckets[k];
+    var h=maxTotal>0?Math.round((b.total/maxTotal)*maxH):0;
+    var ha=maxTotal>0?Math.round((b.approved/maxTotal)*maxH):0;
+    var hr=maxTotal>0?Math.round((b.rejected/maxTotal)*maxH):0;
+    var ho=Math.max(0,h-ha-hr);
+    return '<div class="ap-bar-col" title="'+fmtDay(k)+' 总:'+b.total+' 批:'+b.approved+' 拒:'+b.rejected+'">'
+      +'<div class="ap-bar-stk" style="height:'+ha+'px;background:#16a34a;"></div>'
+      +'<div class="ap-bar-stk" style="height:'+hr+'px;background:#dc2626;"></div>'
+      +(ho>0?'<div class="ap-bar-stk" style="height:'+ho+'px;background:#e5e7eb;"></div>':'')
+      +'<div class="ap-bar-day">'+fmtDay(k)+'</div>'
+      +'</div>';
+  }).join('');
+}
+
+window.load=load;
+load();
+setInterval(load, 120000);
+})();
+</script>
+{% endblock %}
