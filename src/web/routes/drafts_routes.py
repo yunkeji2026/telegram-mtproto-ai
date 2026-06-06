@@ -464,6 +464,147 @@ def register_drafts_routes(app, *, api_auth):
 
 # ── J3：数据导出 API（独立注册函数，由 admin.py + main.py 共同调用）──────────
 
+def register_metrics_route(app, *, api_auth):
+    """L1：注册 GET /api/workspace/metrics（系统指标，主管专属）。
+
+    format=json（默认）→ JSON 对象
+    format=prometheus   → Prometheus text format（# HELP / # TYPE / metric lines）
+    """
+    import io
+    from fastapi import Depends
+    from fastapi.responses import PlainTextResponse
+
+    @app.get("/api/workspace/metrics")
+    async def api_workspace_metrics(
+        request: Request,
+        format: str = "json",
+        _=Depends(api_auth),
+    ):
+        if not _is_supervisor(request):
+            raise HTTPException(403, "指标查看需要主管权限")
+
+        # ── 聚合各子系统指标 ──────────────────────────────────────
+        metrics: dict = {"ts": time.time()}
+
+        # AutosendWorker
+        try:
+            w = getattr(request.app.state, "autosend_worker", None)
+            if w is not None:
+                snap = w.status_snapshot()
+                metrics["autosend"] = snap
+            else:
+                metrics["autosend"] = {"running": False}
+        except Exception:
+            metrics["autosend"] = {"running": False}
+
+        # SLAWatcher (K1/K2)
+        try:
+            sw = getattr(request.app.state, "sla_watcher", None)
+            if sw is not None:
+                metrics["sla_watcher"] = sw.status_snapshot()
+            else:
+                metrics["sla_watcher"] = {"running": False}
+        except Exception:
+            metrics["sla_watcher"] = {"running": False}
+
+        # WebhookNotifier (L2)
+        try:
+            whn = getattr(request.app.state, "webhook_notifier", None)
+            if whn is not None:
+                metrics["webhook"] = whn.status_snapshot()
+            else:
+                metrics["webhook"] = {"running": False}
+        except Exception:
+            metrics["webhook"] = {"running": False}
+
+        # InboxStore 草稿统计
+        try:
+            inbox = getattr(request.app.state, "inbox_store", None)
+            if inbox is not None:
+                svc = getattr(request.app.state, "draft_service", None)
+                if svc is not None:
+                    all_drafts = svc.list_drafts(status="pending", limit=1000)
+                    by_level: dict = {}
+                    for d in all_drafts:
+                        lv = str(d.get("autopilot_level") or "?")
+                        by_level[lv] = by_level.get(lv, 0) + 1
+                    metrics["drafts"] = {
+                        "pending_total": len(all_drafts),
+                        "by_level": by_level,
+                    }
+                # EventBus 订阅者数
+                try:
+                    from src.integrations.shared.event_bus import get_event_bus
+                    metrics["event_bus"] = {
+                        "subscriber_count": get_event_bus().subscriber_count,
+                        "history_size": len(get_event_bus().recent_events(50)),
+                    }
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        fmt = str(format or "json").lower()
+
+        if fmt == "prometheus":
+            buf = io.StringIO()
+
+            def _gauge(name: str, value, help_text: str = "", labels: str = "") -> None:
+                if help_text:
+                    buf.write(f"# HELP {name} {help_text}\n")
+                buf.write(f"# TYPE {name} gauge\n")
+                lbl = f"{{{labels}}}" if labels else ""
+                buf.write(f"{name}{lbl} {value}\n")
+
+            _gauge("ws_autosend_running",
+                   1 if metrics["autosend"].get("running") else 0,
+                   "AutosendWorker is running")
+            _gauge("ws_autosend_total_sent",
+                   metrics["autosend"].get("total_sent", 0),
+                   "Total L2 drafts auto-sent")
+            _gauge("ws_autosend_total_errors",
+                   metrics["autosend"].get("total_errors", 0),
+                   "Total autosend errors")
+            _gauge("ws_autosend_circuit_open",
+                   1 if metrics["autosend"].get("circuit_open") else 0,
+                   "AutosendWorker circuit breaker open")
+
+            _gauge("ws_sla_watcher_running",
+                   1 if metrics["sla_watcher"].get("running") else 0,
+                   "SLAWatcher is running")
+            _gauge("ws_sla_breach_events_total",
+                   metrics["sla_watcher"].get("total_breach_events", 0),
+                   "Total SLA breach events published")
+            _gauge("ws_sla_reassigned_total",
+                   metrics["sla_watcher"].get("total_reassigned", 0),
+                   "Total drafts auto-reassigned")
+
+            _gauge("ws_webhook_total_sent",
+                   metrics["webhook"].get("total_sent", 0),
+                   "Total webhook notifications sent")
+            _gauge("ws_webhook_total_errors",
+                   metrics["webhook"].get("total_errors", 0),
+                   "Total webhook send errors")
+
+            drafts = metrics.get("drafts", {})
+            _gauge("ws_drafts_pending_total",
+                   drafts.get("pending_total", 0),
+                   "Total pending drafts")
+            for lv, cnt in (drafts.get("by_level") or {}).items():
+                _gauge("ws_drafts_pending_by_level",
+                       cnt,
+                       labels=f'level="{lv}"')
+
+            eb = metrics.get("event_bus", {})
+            _gauge("ws_sse_subscribers",
+                   eb.get("subscriber_count", 0),
+                   "Active SSE subscriber count")
+
+            return PlainTextResponse(buf.getvalue(), media_type="text/plain; version=0.0.4")
+
+        return {"ok": True, **metrics}
+
+
 def register_export_route(app, *, api_auth):
     """J3：注册 GET /api/workspace/export（CSV 导出，主管专属）。
 
