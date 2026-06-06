@@ -598,6 +598,69 @@ API：`GET /api/workspace/contact/{contact_id}` 一次返回 `{contact, timeline
 18 个用例，覆盖：Store 单元（set/count/list）、mine 端点权限（主管/非主管/无 store）、
 assign 端点（正常/403/404/400/503）、`/me` 角色字段、路由基线（两新路由在 openapi）。
 
+## 5ad. B2 风险 L0–L4 全档 + 强制审计闭环
+
+**目标**：把已有 70% 的 B 线地基（`risk_to_autopilot` / `is_autosend_allowed` / overlay / quick_risk）
+补完剩余 30%——L4 强制拦截、敏感词兜底升级、L2 autosend 路径、全档审计落库、前后端 API 闭环。
+
+### 敏感词强制升级（`src/inbox/drafts.py`）
+
+- `_SENSITIVE_PATTERNS`：正则表表，两级：
+  - **high（L4）**：退款/refund/付款/支付/账号密码/验证码/OTP/转账/银行卡
+  - **medium（L3）**：优惠/折扣/discount/投诉/complaint/骗/scam/律师/报警
+- `keyword_risk_level(text) -> Optional[str]`：首中即止，返回 `high`/`medium`/`None`。
+- `_max_risk(a, b)`：取两风险中较高者（high>medium>low>unknown）。
+- `resolve_with_audit` 在获取草稿后，先对 `peer_text + draft_text` 跑关键词，
+  取 max(LLM overlay, 关键词) 作为生效风险，不降级（best-effort 回写 overlay）。
+
+### Store 层（`src/inbox/store.py`）
+
+- `draft_audit_log` 表（via migration）：`draft_id / autopilot_level / action / agent_id / reason / risk_level / conversation_id / ts`。
+  - 三条 index：`(draft_id,ts)` / `ts` / `(agent_id,ts)`。
+- `record_draft_audit(...)` → 返回新记录 id。
+- `list_draft_audit(draft_id, agent_id, since_ts, limit)` → 多字段可选过滤。
+- Migration 幂等（`CREATE TABLE IF NOT EXISTS` + `except` 吞建索引冲突）。
+
+### 强制执行层（`DraftService.resolve_with_audit`）
+
+```
+L4 + approve/edit_send/autosend（无 force_override）
+  → 写 blocked 审计 → 返回 422 {ok:false, blocked:true}
+
+L4 + force_override=True（主管专属路径）
+  → 写 force_override 审计 → 继续走 resolve
+
+L2 + autosend
+  → 写 autosend 审计 → 转为 approve 下发
+
+L3/L4 + 任何正常审批
+  → 写 action 审计（不漏记）
+
+L4 + reject/cancel
+  → 不拦截（只拦截发送类动作）
+```
+
+### Routes 层（`src/web/routes/drafts_routes.py`）
+
+| 端点 | 说明 |
+|------|------|
+| `GET  /api/drafts/risk-summary` | 待处理草稿 L0–L4 分布（仪表盘看板轮询）|
+| `GET  /api/drafts/audit` | 审计日志，可按 `draft_id/agent_id/days` 过滤；主管专属（403）|
+| `POST /api/drafts/{id}/resolve` | B2 增强版：带关键词升级 + L4 拦截 + 审计（422 on block）|
+| `POST /api/drafts/{id}/force-override` | 主管强制放行 L4（403 on non-supervisor）|
+
+### 测试（`tests/test_b2_risk_audit.py`）
+
+42 个用例，覆盖：
+- Store：record / list / filter / migration 幂等
+- `keyword_risk_level`：8 个 parametrize（high/medium/None）
+- `_max_risk` / `risk_to_autopilot` / `is_autosend_allowed`
+- `resolve_with_audit`：L4 拦截、force_override、L4 reject 不拦截、L2 autosend、关键词升级触发 L4、L3 审计、404
+- `risk_summary`：空/有数据
+- Routes：risk-summary 503 / 200、audit 403/200、resolve L4→422、force-override 403/200、openapi 基线
+
+全量回归：**3418 passed, 31 skipped**
+
 ## 6. 明确不做（后续阶段）
 
 | 项 | 原因 |

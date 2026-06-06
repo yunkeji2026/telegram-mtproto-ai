@@ -239,7 +239,7 @@
 | | A3 Message Normalizer（`src/inbox/normalizer.py`） | ✅ | 100% |
 | | 稳定平台 message id | ✅ `extract_platform_msg_id` 平台白名单（TG id/WA wamid/…），store 自动改用 id 去重，取不到才回落 hash | 90% |
 | B 草稿/审批 + 风险驾驶 | B1 reply_drafts 统一（read-through 聚合 `DraftService`） | ✅ | 85% |
-| | B2 风险 L0–L4 落地 | 🟡 4 档 + `quick_risk`/`risk_to_autopilot`，强制审计部分 | 70% |
+| | B2 风险 L0–L4 落地 | ✅ L4 拦截/force-override/L2 autosend/敏感词升级/`draft_audit_log` 审计闭环 | 100% |
 | C 意图LLM + 翻译产品化 | C1 ChatAssistant 接 LLM + 落 message_analysis | ✅ | 90% |
 | | C2 翻译产品化 | 🟡 记忆/glossary/成本✅；**多引擎(DeepL/Google/腾讯/百度)❌** | 60% |
 | D 电商工具层 | D0 ecommerce persona/hooks | ✅ | 100% |
