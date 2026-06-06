@@ -83,10 +83,26 @@ def register_drafts_routes(app, *, api_auth):
         return {"ok": True, "stats": svc.stats()}
 
     @app.get("/api/drafts/risk-summary")
-    async def api_drafts_risk_summary(request: Request, _=Depends(api_auth)):
-        """L0–L4 分布统计（供仪表盘风险看板轮询）。"""
+    async def api_drafts_risk_summary(
+        request: Request, sla_hours: int = 4, _=Depends(api_auth),
+    ):
+        """L0–L4 分布统计（供仪表盘风险看板轮询）。含 sla_overdue 字段（D1）。"""
         svc = _get_draft_service(request)
-        return {"ok": True, **svc.risk_summary()}
+        summary = svc.risk_summary()
+        # D1：追加 SLA 过期数量（主管可见；非主管返回 -1 表示无权限）
+        if _is_supervisor(request):
+            threshold_ts = time.time() - max(1, min(72, int(sla_hours or 4))) * 3600
+            drafts = svc.list_drafts(status="pending", limit=200)
+            sla_overdue = sum(
+                1 for d in drafts
+                if d.get("autopilot_level") in {"L3", "L4"}
+                and float(d.get("created_ts") or 0) > 0
+                and float(d.get("created_ts") or 0) < threshold_ts
+            )
+            summary["sla_overdue"] = sla_overdue
+        else:
+            summary["sla_overdue"] = -1
+        return {"ok": True, **summary}
 
     @app.get("/api/drafts/autosend-status")
     async def api_drafts_autosend_status(request: Request, _=Depends(api_auth)):
@@ -119,6 +135,75 @@ def register_drafts_routes(app, *, api_auth):
             limit=max(1, min(500, int(limit or 200))),
         )
         return {"ok": True, "items": items, "total": len(items)}
+
+    # ── C2 / D1 端点必须注册在 /{draft_id} 之前，防止被通配路由截获 ──
+
+    @app.get("/api/workspace/copilot")
+    async def api_workspace_copilot(
+        request: Request,
+        text: str = "",
+        draft_id: str = "",
+        conversation_id: str = "",
+        _=Depends(api_auth),
+    ):
+        """AI Copilot：对客户来文做规则层全量分析 + KB 匹配（<10ms，无 LLM）。
+
+        返回：intent, emotion, risk_level, risk_reasons, next_step, kb_matches, language
+        用于 draft_review.html 内嵌 AI 洞察面板。
+        """
+        from src.ai.chat_assistant_service import quick_analyze
+        analysis = quick_analyze(str(text or ""))
+        # KB 匹配（可选，kb_store 未挂载时返回空列表）
+        kb_matches: list = []
+        try:
+            kb_store = getattr(request.app.state, "kb_store", None)
+            if kb_store is not None and str(text or "").strip():
+                result = kb_store.search(str(text), top_k=3)
+                raw_entries = (result or {}).get("entries", [])
+                for e in raw_entries[:3]:
+                    kb_matches.append({
+                        "entry_id": str(e.get("entry_id") or e.get("id") or ""),
+                        "title": str(e.get("title") or ""),
+                        "summary": str(e.get("summary") or e.get("answer") or "")[:120],
+                        "score": float(e.get("score") or 0),
+                    })
+        except Exception:
+            pass
+        return {
+            "ok": True,
+            "draft_id": draft_id,
+            "conversation_id": conversation_id,
+            **analysis,
+            "kb_matches": kb_matches,
+        }
+
+    @app.get("/api/drafts/sla-overdue")
+    async def api_drafts_sla_overdue(
+        request: Request,
+        hours: int = 4,
+        _=Depends(api_auth),
+    ):
+        """列出 L3/L4 草稿中超过 SLA 时限（默认 4h）的待审草稿（主管专属）。
+
+        用于顶栏 SLA 角标 + 草稿审批页 SLA 徽章。
+        """
+        if not _is_supervisor(request):
+            raise HTTPException(403, "需要主管权限")
+        svc = _get_draft_service(request)
+        threshold_ts = time.time() - max(1, min(72, int(hours or 4))) * 3600
+        drafts = svc.list_drafts(status="pending", limit=200)
+        overdue = [
+            d for d in drafts
+            if d.get("autopilot_level") in {"L3", "L4"}
+            and float(d.get("created_ts") or 0) > 0
+            and float(d.get("created_ts") or 0) < threshold_ts
+        ]
+        return {
+            "ok": True,
+            "count": len(overdue),
+            "sla_hours": int(hours),
+            "overdue": overdue,
+        }
 
     @app.get("/api/drafts/{draft_id}")
     async def api_drafts_get(request: Request, draft_id: str, _=Depends(api_auth)):

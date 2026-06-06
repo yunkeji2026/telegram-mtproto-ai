@@ -316,7 +316,7 @@
 
   // B2：L4 高风险草稿 badge + 顶栏告警（主管专属）
   var _l4Badge=document.getElementById('ws-l4-badge');
-  var _l4Prev=0;
+  var _l4Prev=0, _slaPrev=0;
   function refreshL4(){
     if(!MY_IS_SUP) return;
     fetch('/api/drafts/risk-summary').then(function(r){return r.json();}).then(function(d){
@@ -324,18 +324,28 @@
       var l4=(d.by_level&&d.by_level['L4'])||0;
       var l3=(d.by_level&&d.by_level['L3'])||0;
       var high=l4+l3;
+      var sla=(d.sla_overdue&&d.sla_overdue>0)?d.sla_overdue:0;
       if(_l4Badge){
         _l4Badge.style.display=l4?'inline-block':'none';
         if(l4) _l4Badge.textContent='L4 '+l4;
       }
-      // 草稿审批链接显示待审总数
+      // 草稿审批链接显示待审总数 + SLA 告警
       var _dl=document.getElementById('ws-drafts-link');
-      if(_dl) _dl.textContent='草稿审批'+(high?'('+high+')':'');
+      if(_dl){
+        var label='草稿审批';
+        if(high) label+='('+high+')';
+        if(sla) label+=' ⏰'+sla;
+        _dl.textContent=label;
+      }
       // 新出现 L4 → loud toast（仅主管，仅增量触发）
       if(l4>_l4Prev){
         CRMW.toast('🚨 新增 L4 高风险草稿待审：共 '+l4+' 条（需主管放行）','#991b1b');
       }
-      _l4Prev=l4;
+      // D1：新出现 SLA 超时 → loud toast
+      if(sla>_slaPrev&&_slaPrev>=0){
+        CRMW.toast('⏰ SLA 告警：'+sla+' 条 L3/L4 草稿超过 4 小时未审批','#9d174d');
+      }
+      _l4Prev=l4; _slaPrev=sla;
     }).catch(function(){});
   }
 

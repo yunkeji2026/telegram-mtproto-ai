@@ -1,6 +1,12 @@
-"""AutosendWorker — L2 草稿定时自动发送后台任务（Phase A）。
+"""AutosendWorker — L2 草稿自动发送后台任务（Phase A + C3 事件驱动升级）。
 
 设计要点：
+  C3 升级（事件驱动）：
+  - 新 L2 草稿落库时，InboxStore 通过回调立即唤醒 worker（notify_new_l2）
+  - 替代纯定时轮询：延迟从最多 60s 降至毫秒级，同时保留定时兜底
+  - asyncio.Event + loop.call_soon_threadsafe 确保线程安全
+
+  Phase A 保留：
   - 自适应间隔：有发送时使用 min_interval，静默时指数扩张到 max_interval
   - 熔断器：连续 circuit_threshold 次失败后进入 open 状态，等待 cooldown_sec 后重试
   - 每草稿隔离：单条发送失败不影响同批次其他草稿
@@ -8,8 +14,8 @@
 
 配置（config.yaml::inbox.l2_autosend）：
   enabled: true
-  min_interval_sec: 60      # 有活动时的最短间隔
-  max_interval_sec: 600     # 静默时的最长间隔（自适应上限）
+  min_interval_sec: 60      # 有活动时的最短轮询间隔（也是定时兜底上限的起点）
+  max_interval_sec: 600     # 静默时的最长兜底间隔
   circuit_threshold: 5      # 触发熔断的连续错误次数
   cooldown_sec: 300         # 熔断冷却时间
 """
@@ -55,6 +61,10 @@ class AutosendWorker:
         self._running = False
         self._current_interval = self._min_interval
 
+        # C3：事件驱动——asyncio.Event（run() 内初始化，保证在正确的 loop 上）
+        self._l2_event: Optional[asyncio.Event] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
         # 熔断器
         self._consecutive_errors = 0
         self._circuit_open = False
@@ -67,29 +77,53 @@ class AutosendWorker:
         self.last_sent: int = 0
         self.last_error: str = ""
         self.cycles: int = 0
+        self.event_triggers: int = 0  # C3：记录事件驱动触发次数
 
     # ── 生命周期 ──────────────────────────────────────────────
 
     def stop(self) -> None:
         self._running = False
 
+    def notify_new_l2(self) -> None:
+        """从任意线程安全地通知 worker：有新 L2 草稿已落库，立即唤醒（C3 事件驱动）。
+
+        由 InboxStore.register_l2_callback 注册调用。
+        使用 loop.call_soon_threadsafe 避免跨线程 asyncio 竞态。
+        """
+        if self._loop is not None and self._l2_event is not None:
+            try:
+                self._loop.call_soon_threadsafe(self._l2_event.set)
+            except RuntimeError:
+                pass  # event loop 已停止
+
     async def run(self) -> None:
         if not self._enabled:
             logger.info("[AutosendWorker] L2 自动发送已禁用（config.enabled=false）")
             return
+        # C3：在 run() 内初始化，确保绑定到正确的 event loop
+        self._loop = asyncio.get_running_loop()
+        self._l2_event = asyncio.Event()
         self._running = True
         logger.info(
-            "[AutosendWorker] 启动 — min_interval=%.0fs max_interval=%.0fs "
+            "[AutosendWorker] 启动（事件驱动+定时兜底）— min_interval=%.0fs max_interval=%.0fs "
             "circuit_threshold=%d cooldown=%.0fs",
             self._min_interval, self._max_interval,
             self._circuit_threshold, self._cooldown_sec,
         )
-        # 首次启动延迟一个 min_interval，避免与服务启动争资源
+        # 首次启动延迟，避免与服务启动争资源
         await asyncio.sleep(self._min_interval)
         while self._running:
             await self._tick()
             jitter = random.uniform(-0.1, 0.1) * self._current_interval
-            await asyncio.sleep(max(5.0, self._current_interval + jitter))
+            wait_sec = max(5.0, self._current_interval + jitter)
+            # C3：等待事件或定时器兜底
+            try:
+                await asyncio.wait_for(self._l2_event.wait(), timeout=wait_sec)
+                self._l2_event.clear()
+                self.event_triggers += 1
+                logger.debug("[AutosendWorker] L2 事件触发，提前唤醒")
+            except asyncio.TimeoutError:
+                pass  # 定时兜底触发，正常
 
     # ── 单轮逻辑 ─────────────────────────────────────────────
 
@@ -192,4 +226,5 @@ class AutosendWorker:
             "circuit_open": self._circuit_open,
             "consecutive_errors": self._consecutive_errors,
             "current_interval_sec": round(self._current_interval, 1),
+            "event_triggers": self.event_triggers,  # C3：事件驱动唤醒次数
         }

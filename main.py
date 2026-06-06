@@ -627,6 +627,10 @@ class AIChatAssistant:
                                         config=_as_cfg,
                                     )
                                     web_app.state.autosend_worker = _as_worker
+                                    # C3：注册 L2 事件驱动钩子，新草稿落库时立即唤醒
+                                    self.inbox_store.register_l2_callback(
+                                        _as_worker.notify_new_l2
+                                    )
                                     asyncio.ensure_future(_as_worker.run())
                                     self.logger.info(
                                         "AutosendWorker 已启动（min=%ss max=%ss）",
