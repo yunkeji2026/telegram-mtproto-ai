@@ -30,6 +30,27 @@ logger = logging.getLogger(__name__)
 # 主管角色集（与 unified_inbox_routes 保持一致）
 _SUPERVISOR_ROLES = {"master", "admin"}
 
+# J2：意图 → 模板场景映射（与 template_seeds.py 的 scene 枚举对应）
+_INTENT_TO_SCENE: dict = {
+    "退款": "refund", "退款申请": "refund", "要求退款": "refund",
+    "物流查询": "shipping", "催单": "shipping", "物流": "shipping", "到货查询": "shipping",
+    "订单查询": "order_inquiry", "查询订单": "order_inquiry", "下单": "order_inquiry",
+    "产品咨询": "product_info", "产品问题": "product_info", "询问产品": "product_info",
+    "投诉": "complaint", "投诉处理": "complaint", "不满": "complaint",
+    "感谢": "closing", "再见": "closing",
+    "询问": "order_inquiry",  # 通用问询默认归订单
+}
+
+
+def _intent_to_scene(intent: str) -> str:
+    """J2：将 quick_analyze 返回的 intent 映射到模板 scene。"""
+    if not intent:
+        return ""
+    for key, scene in _INTENT_TO_SCENE.items():
+        if key in intent:
+            return scene
+    return ""
+
 
 def _get_draft_service(request: Request):
     svc = getattr(request.app.state, "draft_service", None)
@@ -192,6 +213,32 @@ def register_drafts_routes(app, *, api_auth):
                     })
         except Exception:
             pass
+
+        # J2：模板智能推荐——按 intent→scene + 客户语言从模板库精准检索
+        template_suggestions: list = []
+        try:
+            inbox_store = getattr(request.app.state, "inbox_store", None)
+            if inbox_store is not None and t.strip():
+                _intent = str(analysis.get("intent") or "")
+                _lang = str(analysis.get("language") or "zh")
+                _scene = _intent_to_scene(_intent)
+                tpls = inbox_store.list_templates(
+                    language=_lang, scene=_scene, limit=3
+                )
+                if not tpls and _scene:
+                    # 同场景、无语言限制 fallback（用于语言不完整的模板库）
+                    tpls = inbox_store.list_templates(scene=_scene, limit=3)
+                for tpl in tpls[:3]:
+                    template_suggestions.append({
+                        "id": str(tpl.get("id") or ""),
+                        "title": str(tpl.get("title") or ""),
+                        "content": str(tpl.get("content") or ""),
+                        "scene": str(tpl.get("scene") or ""),
+                        "language": str(tpl.get("language") or ""),
+                    })
+        except Exception:
+            pass
+
         return {
             "ok": True,
             "draft_id": draft_id,
@@ -199,6 +246,7 @@ def register_drafts_routes(app, *, api_auth):
             **analysis,
             "suggestions": suggestions,
             "kb_matches": kb_matches,
+            "template_suggestions": template_suggestions,  # J2
         }
 
     @app.get("/api/drafts/sla-overdue")
@@ -411,6 +459,106 @@ def register_drafts_routes(app, *, api_auth):
             else:
                 errors += 1
         return {"ok": True, "sent": sent, "errors": errors}
+
+
+
+# ── J3：数据导出 API（独立注册函数，由 admin.py + main.py 共同调用）──────────
+
+def register_export_route(app, *, api_auth):
+    """J3：注册 GET /api/workspace/export（CSV 导出，主管专属）。
+
+    admin.py 和 main.py 各调用一次。FastAPI 允许同一路由被重复注册，
+    重复注册时不报错，但为避免重复，应在两者之一中只调用一次。
+    实际只在 admin.py 中调用，以保持 inventory 测试覆盖。
+    """
+    import csv
+    import datetime
+    import io
+    from fastapi import Depends
+    from fastapi.responses import StreamingResponse
+
+    @app.get("/api/workspace/export")
+    async def api_workspace_export(
+        request: Request,
+        export_type: str = "drafts",
+        days: int = 7,
+        _=Depends(api_auth),
+    ):
+        """J3：导出工作台数据为 CSV（主管专属）。
+
+        export_type: drafts | audit | perf
+        days: 最近 N 天（1–90），默认 7
+        返回 CSV 文件流（BOM-UTF8，兼容 Excel）。
+        """
+        if not _is_supervisor(request):
+            raise HTTPException(403, "数据导出需要主管权限")
+
+        days_int = max(1, min(90, int(days or 7)))
+        cutoff_ts = time.time() - days_int * 86400
+        etype = str(export_type or "drafts").lower()
+
+        inbox_store = getattr(request.app.state, "inbox_store", None)
+        svc = getattr(request.app.state, "draft_service", None)
+        buf = io.StringIO()
+        w = csv.writer(buf)
+
+        if etype == "audit" and inbox_store is not None:
+            w.writerow(["时间", "草稿ID", "坐席ID", "动作", "风险等级", "自动化等级", "原因", "会话ID"])
+            logs = inbox_store.list_draft_audit(limit=2000)
+            for row in logs:
+                if float(row.get("ts") or 0) < cutoff_ts:
+                    continue
+                ts_str = datetime.datetime.fromtimestamp(
+                    float(row.get("ts") or 0)
+                ).strftime("%Y-%m-%d %H:%M:%S")
+                w.writerow([
+                    ts_str, row.get("draft_id", ""), row.get("agent_id", ""),
+                    row.get("action", ""), row.get("risk_level", ""),
+                    row.get("autopilot_level", ""), row.get("reason", ""),
+                    row.get("conversation_id", ""),
+                ])
+
+        elif etype == "perf" and inbox_store is not None:
+            w.writerow(["坐席ID", "总处理", "批准", "拒绝", "自动发送", "强制放行"])
+            perf = inbox_store.get_agent_perf(since_ts=cutoff_ts)
+            for row in perf:
+                w.writerow([
+                    row.get("agent_id", ""),
+                    row.get("total", 0), row.get("approved", 0),
+                    row.get("rejected", 0), row.get("autosend", 0),
+                    row.get("force_override", 0),
+                ])
+
+        else:  # drafts（默认）
+            w.writerow([
+                "草稿ID", "会话ID", "平台", "账号", "状态", "风险等级",
+                "自动化等级", "草稿文本（截断）", "客户文本（截断）", "处置人", "创建时间",
+            ])
+            if svc is not None:
+                for d in svc.list_drafts(limit=2000):
+                    ca = float(d.get("created_at") or d.get("created_ts") or 0)
+                    if ca > 0 and ca < cutoff_ts:
+                        continue
+                    ts_str = datetime.datetime.fromtimestamp(ca).strftime(
+                        "%Y-%m-%d %H:%M:%S"
+                    ) if ca > 0 else ""
+                    w.writerow([
+                        d.get("draft_id", ""), d.get("conversation_id", ""),
+                        d.get("platform", ""), d.get("account_id", ""),
+                        d.get("status", ""), d.get("risk_level", ""),
+                        d.get("autopilot_level", ""),
+                        str(d.get("draft_text", ""))[:200],
+                        str(d.get("peer_text", ""))[:100],
+                        d.get("decided_by", ""), ts_str,
+                    ])
+
+        buf.seek(0)
+        filename = f"ws_{etype}_{datetime.date.today().isoformat()}.csv"
+        return StreamingResponse(
+            iter(["\ufeff" + buf.read()]),  # BOM：兼容 Excel 直接打开 UTF-8
+            media_type="text/csv; charset=utf-8-sig",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
 
 # ── C1：坐席绩效 API（不依赖 draft_service，直读 inbox_store） ──────────────
