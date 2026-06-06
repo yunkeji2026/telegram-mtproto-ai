@@ -518,8 +518,15 @@ _BASELINE = """
 /workspace/contact/{contact_id}	GET
 /workspace/contacts	GET
 /workspace/dash	GET
+/api/reply-templates	GET
+/api/reply-templates	POST
+/api/reply-templates/{template_id}	DELETE
+/api/reply-templates/{template_id}	PUT
+/api/reply-templates/{template_id}/use	POST
+/api/unified-inbox/conv-meta	GET
 /workspace/draft-audit	GET
 /workspace/drafts	GET
+/workspace/templates	GET
 /workspace/escalations	GET
 /workspace/tasks	GET
 /users	GET

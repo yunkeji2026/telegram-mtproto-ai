@@ -2383,6 +2383,15 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         import logging as _log_dr
         _log_dr.getLogger("admin").debug("草稿/绩效路由注册跳过", exc_info=True)
 
+    # ── I3 模板库管理页面 ──────────────────────────────────────────
+    @app.get("/workspace/templates")
+    async def _ws_templates(request: Request):
+        _unified_inbox_page_auth(request)
+        return templates.TemplateResponse(
+            "template_mgmt.html",
+            {"request": request, "config_manager": config_manager},
+        )
+
     # ── 面向客户的网页聊天 Widget（web 渠道，公网；feature flag 默认关）──
     try:
         _wc_cfg = (config_manager.config or {}).get("web_chat", {}) or {}

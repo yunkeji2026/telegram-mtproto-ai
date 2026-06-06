@@ -2901,3 +2901,126 @@ def register_unified_inbox_routes(
             or _conv_id(platform, account_id, chat_key)
         _mark_send(cid)
         return {"ok": True, "result": result}
+
+    # ── I1 对话智能元数据 API ──────────────────────────────────────
+
+    @app.get("/api/unified-inbox/conv-meta")
+    async def api_conv_meta(request: Request, conversation_id: str = ""):
+        """I1：获取对话智能元数据（最近意图、情绪趋势、风险、历史窗口）。
+
+        返回：{ok, found, meta: {last_intent, last_emotion, emotion_trend,
+                                  last_risk, msg_count, intent_history,
+                                  emotion_history, updated_at}}
+        """
+        api_auth(request)
+        store = _inbox_store(request)
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            raise HTTPException(400, "conversation_id 不能为空")
+        if store is None:
+            return {"ok": True, "found": False, "conversation_id": cid, "meta": None}
+        meta = store.get_conv_meta(cid)
+        return {
+            "ok": True,
+            "found": meta is not None,
+            "conversation_id": cid,
+            "meta": meta,
+        }
+
+    # ── I3 模板库 API ─────────────────────────────────────────────
+
+    def _template_store(request: Request):
+        s = _inbox_store(request)
+        if s is None:
+            raise HTTPException(503, "模板库未启用（需 inbox_store）")
+        return s
+
+    @app.get("/api/reply-templates")
+    async def api_templates_list(
+        request: Request,
+        language: str = "",
+        platform: str = "",
+        scene: str = "",
+        search: str = "",
+        limit: int = 100,
+    ):
+        """I3：列出回复模板（支持语言/平台/场景/关键词过滤）。"""
+        api_auth(request)
+        ts = _template_store(request)
+        templates = ts.list_templates(
+            language=language, platform=platform, scene=scene,
+            search=search, limit=min(200, max(1, int(limit or 100)))
+        )
+        return {"ok": True, "templates": templates, "count": len(templates)}
+
+    @app.post("/api/reply-templates")
+    async def api_templates_create(request: Request):
+        """I3：创建新模板（坐席/主管均可，主管审核后启用）。"""
+        api_auth(request)
+        ts = _template_store(request)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "请求体解析失败")
+        title = str(body.get("title") or "").strip()
+        content = str(body.get("content") or "").strip()
+        if not title or not content:
+            raise HTTPException(400, "title 和 content 不能为空")
+        tid = ts.create_template(
+            title=title,
+            content=content,
+            language=str(body.get("language") or "zh"),
+            platform=str(body.get("platform") or ""),
+            scene=str(body.get("scene") or ""),
+            created_by=str(body.get("created_by") or "agent"),
+        )
+        return {"ok": True, "id": tid, "title": title}
+
+    @app.put("/api/reply-templates/{template_id}")
+    async def api_templates_update(request: Request, template_id: str):
+        """I3：更新模板字段（仅主管可完全编辑；普通坐席不能修改）。"""
+        api_auth(request)
+        ts = _template_store(request)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "请求体解析失败")
+        updated = ts.update_template(
+            template_id,
+            title=body.get("title"),
+            content=body.get("content"),
+            language=body.get("language"),
+            platform=body.get("platform"),
+            scene=body.get("scene"),
+            is_active=body.get("is_active"),
+        )
+        if not updated:
+            raise HTTPException(404, "模板不存在")
+        return {"ok": True, "id": template_id}
+
+    @app.delete("/api/reply-templates/{template_id}")
+    async def api_templates_delete(request: Request, template_id: str):
+        """I3：软删除模板（主管专属）。"""
+        api_auth(request)
+        # 主管校验
+        role = request.scope.get("session", {}).get("role", "")
+        if role not in {"master", "admin"}:
+            try:
+                role = request.session.get("role", "")
+            except Exception:
+                role = ""
+        if role not in {"master", "admin"}:
+            raise HTTPException(403, "删除模板需要主管权限")
+        ts = _template_store(request)
+        deleted = ts.delete_template(template_id)
+        if not deleted:
+            raise HTTPException(404, "模板不存在")
+        return {"ok": True, "id": template_id, "deleted": True}
+
+    @app.post("/api/reply-templates/{template_id}/use")
+    async def api_templates_use(request: Request, template_id: str):
+        """I3：记录模板使用（用量统计，best-effort）。"""
+        api_auth(request)
+        ts = _template_store(request)
+        ts.increment_template_usage(template_id)
+        return {"ok": True, "id": template_id}
