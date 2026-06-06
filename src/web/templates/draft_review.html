@@ -861,6 +861,50 @@ document.addEventListener('draft_reassigned', function(e){
     _drToast('🔄 草稿已自动转派给 '+esc(d.to_agent_name||d.to_agent), 'info', 4000);
   }
 });
+
+// L3：快捷键面板（? 键弹出）
+(function(){
+  var _shortcuts=[
+    {key:'A', desc:'批准选中草稿（Approve）'},
+    {key:'R', desc:'拒绝选中草稿（Reject）'},
+    {key:'E', desc:'展开/收起草稿编辑框'},
+    {key:'T', desc:'打开模板库'},
+    {key:'C', desc:'打开 AI Copilot 面板'},
+    {key:'P', desc:'打开客户画像'},
+    {key:'?', desc:'显示/隐藏快捷键帮助'},
+    {key:'Esc', desc:'清除全部选中'},
+  ];
+  var _helpEl=null;
+  function _makeHelp(){
+    var d=document.createElement('div');
+    d.id='dr-help-overlay';
+    d.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99999;display:flex;align-items:center;justify-content:center;';
+    d.innerHTML='<div style="background:#fff;border-radius:12px;padding:24px 32px;min-width:320px;max-width:480px;">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">'
+      +'<strong style="font-size:15px;">⌨ 快捷键一览</strong>'
+      +'<span style="cursor:pointer;font-size:20px;color:#94a3b8;" onclick="document.getElementById(\'dr-help-overlay\').remove()">✕</span>'
+      +'</div>'
+      +_shortcuts.map(function(s){
+        return '<div style="display:flex;gap:12px;align-items:center;padding:5px 0;border-bottom:1px solid #f1f5f9;">'
+          +'<kbd style="background:#f3f4f6;border:1px solid #d1d5db;border-radius:4px;padding:2px 7px;font-family:monospace;font-size:12px;min-width:30px;text-align:center;">'+s.key+'</kbd>'
+          +'<span style="font-size:13px;color:#374151;">'+s.desc+'</span>'
+          +'</div>';
+      }).join('')
+      +'<div style="margin-top:12px;font-size:11px;color:#94a3b8;text-align:right;">再按 ? 或点击背景关闭</div>'
+      +'</div>';
+    d.addEventListener('click',function(e){ if(e.target===d) d.remove(); });
+    return d;
+  }
+  document.addEventListener('keydown',function(e){
+    if(e.target&&(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')) return;
+    if(e.key==='?'){
+      var existing=document.getElementById('dr-help-overlay');
+      if(existing){ existing.remove(); return; }
+      _helpEl=_makeHelp();
+      document.body.appendChild(_helpEl);
+    }
+  });
+})();
 })();
 </script>
 {% endblock %}

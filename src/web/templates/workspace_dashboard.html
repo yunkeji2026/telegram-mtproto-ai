@@ -31,7 +31,10 @@
   <a class="db-back" href="/workspace">← 返回工作台</a>
   <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0 14px;">
     <h2 style="margin:0;font-size:18px;">今日概览</h2>
-    <a id="db-export" href="#" style="display:none;font-size:12px;padding:5px 10px;border:1px solid #d1d5db;border-radius:6px;text-decoration:none;color:#0f172a;background:#fff;">⬇ 导出日报 CSV</a>
+    <div style="display:flex;gap:8px;align-items:center;">
+    <a id="db-quick-approve" href="#" style="display:none;font-size:12px;padding:5px 10px;border:1px solid #16a34a;border-radius:6px;text-decoration:none;color:#15803d;background:#f0fdf4;" title="一键自动发所有 L2 草稿">⚡ 一键 L2</a>
+    <a id="db-export" href="#" style="display:none;font-size:12px;padding:5px 10px;border:1px solid #d1d5db;border-radius:6px;text-decoration:none;color:#0f172a;background:#fff;">⬇ 导出 CSV</a>
+  </div>
   </div>
   <div class="db-grid" id="db-cards"></div>
   <div class="db-sec">
@@ -89,6 +92,14 @@
       <span id="db-presence-ts" style="font-size:11px;color:#94a3b8;"></span>
     </div>
     <div id="db-presence" style="margin-top:10px;"><span style="color:#94a3b8;font-size:13px;">加载中…</span></div>
+  </div>
+  <!-- L1 系统指标（主管专属，包含 AutosendWorker/SLAWatcher/Webhook 状态） -->
+  <div class="db-sec" id="db-metrics-sec" style="display:none;">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h3 style="margin:0;">📊 系统指标</h3>
+      <a id="db-metrics-prom" href="/api/workspace/metrics?format=prometheus" target="_blank" style="font-size:11px;color:#2563eb;text-decoration:none;">Prometheus ↗</a>
+    </div>
+    <div id="db-metrics" style="margin-top:10px;"><span style="color:#94a3b8;font-size:13px;">加载中…</span></div>
   </div>
   <!-- E3 系统健康 Widget（所有坐席可见，主管更丰富） -->
   <div class="db-sec" id="db-health-sec">
@@ -252,6 +263,52 @@
       document.getElementById('db-risk').innerHTML=html;
     }).catch(function(){ document.getElementById('db-risk').innerHTML='<span style="color:#ef4444;">加载失败</span>'; });
   }
+  // L1: 系统指标（主管专属）
+  function loadMetrics(){
+    var sec=document.getElementById('db-metrics-sec');
+    var el=document.getElementById('db-metrics');
+    if(!sec||!IS_SUP) return;
+    sec.style.display='';
+    fetch('/api/workspace/metrics').then(function(r){return r.json();}).then(function(d){
+      var as=d.autosend||{};
+      var sw=d.sla_watcher||{};
+      var wh=d.webhook||{};
+      var dr=d.drafts||{};
+      var eb=d.event_bus||{};
+
+      function _pill(v, ok, label){
+        var color=ok?'#16a34a':'#dc2626';
+        return '<span style="padding:2px 8px;border-radius:10px;background:'
+          +(ok?'#dcfce7':'#fee2e2')+';color:'+color+';font-size:11px;margin-right:4px;">'+label+': '+v+'</span>';
+      }
+
+      var html='<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">'
+        +_pill(as.running?'运行中':'停止',as.running,'自动发')
+        +_pill(sw.running?'运行中':'停止',sw.running,'SLA监控')
+        +_pill(wh.running?'运行中（'+wh.webhooks+'）':wh.webhooks>0?'未启动':'未配置',wh.running,'Webhook')
+        +_pill(eb.subscriber_count||0,true,'SSE客户端')
+        +'</div>'
+        +'<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;">'
+        +'<span>✅ 自动发: <b>'+((as.total_sent)||0)+'</b></span>'
+        +(as.total_errors?'<span style="color:#dc2626">❌ 错误: <b>'+as.total_errors+'</b></span>':'')
+        +'<span>⏰ SLA告警: <b>'+(sw.total_breach_events||0)+'</b></span>'
+        +'<span>🔄 再分配: <b>'+(sw.total_reassigned||0)+'</b></span>'
+        +'<span>📨 Webhook: <b>'+(wh.total_sent||0)+'</b></span>'
+        +'<span>📋 待审草稿: <b>'+(dr.pending_total||0)+'</b></span>'
+        +'</div>';
+      if(dr.by_level&&Object.keys(dr.by_level).length){
+        html+='<div style="margin-top:4px;font-size:11px;color:#64748b;">';
+        Object.entries(dr.by_level).forEach(function(e){
+          var lv=e[0],cnt=e[1];
+          var c={'L2':'#16a34a','L3':'#d97706','L4':'#dc2626'}[lv]||'#6b7280';
+          html+='<span style="margin-right:8px;color:'+c+';">'+lv+': <b>'+cnt+'</b></span>';
+        });
+        html+='</div>';
+      }
+      el.innerHTML=html;
+    }).catch(function(){ if(el) el.innerHTML='<span style="color:#94a3b8;font-size:12px;">指标加载失败</span>'; });
+  }
+
   // J1: 团队在线状态（主管专属）
   function loadPresence(){
     var sec=document.getElementById('db-presence-sec');
@@ -413,8 +470,24 @@
     }
     load(); setInterval(load, 60000);
     loadEsc(); setInterval(loadEsc, 60000);
-    if(IS_SUP){ loadRisk(); setInterval(loadRisk, 60000); loadPresence(); setInterval(loadPresence, 30000); }
+    if(IS_SUP){ loadRisk(); setInterval(loadRisk, 60000); loadPresence(); setInterval(loadPresence, 30000); loadMetrics(); setInterval(loadMetrics, 60000); }
     loadHealth(); setInterval(loadHealth, 60000);
+
+    // L3：一键 L2 自动发（主管快速操作）
+    if(IS_SUP){
+      var qaBtn=document.getElementById('db-quick-approve');
+      if(qaBtn){
+        qaBtn.style.display='inline-block';
+        qaBtn.onclick=function(e){
+          e.preventDefault();
+          if(!confirm('确认一键自动发所有 L2 草稿？')) return;
+          fetch('/api/drafts/bulk-autosend',{method:'POST',headers:{'Content-Type':'application/json'}})
+            .then(function(r){return r.json();}).then(function(d){
+              alert('已发送 '+d.sent+' 条 L2 草稿'+(d.errors?' （'+d.errors+' 条失败）':''));
+            }).catch(function(){ alert('操作失败，请重试'); });
+        };
+      }
+    }
 
     // J3：激活导出按钮（主管专属）
     if(IS_SUP){

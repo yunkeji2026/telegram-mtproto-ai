@@ -520,6 +520,7 @@ _BASELINE = """
 /workspace/dash	GET
 /api/reply-templates	GET
 /api/workspace/export	GET
+/api/workspace/metrics	GET
 /api/reply-templates	POST
 /api/reply-templates/{template_id}	DELETE
 /api/reply-templates/{template_id}	PUT

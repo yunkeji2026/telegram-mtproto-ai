@@ -672,6 +672,23 @@ class AIChatAssistant:
                             except Exception:
                                 self.logger.debug("SLAWatcher 启动跳过", exc_info=True)
 
+                            # ── L2：WebhookNotifier 企业 IM 通知 ──────────────
+                            try:
+                                from src.inbox.webhook_notifier import WebhookNotifier
+                                _wh_list = (self.config.config or {}).get(
+                                    "notify", {}
+                                ).get("webhooks", []) or []
+                                if _wh_list:
+                                    _whn = WebhookNotifier(config=_wh_list)
+                                    web_app.state.webhook_notifier = _whn
+                                    asyncio.ensure_future(_whn.run())
+                                    self.logger.info(
+                                        "WebhookNotifier 已启动（%d 个 webhook）",
+                                        len(_wh_list),
+                                    )
+                            except Exception:
+                                self.logger.debug("WebhookNotifier 启动跳过", exc_info=True)
+
                             # E2/F2：按 auto_draft 配置注册入站新消息 → 自动草稿生成回调
                             _ad_cfg = (self.config.config or {}).get(
                                 "inbox", {}

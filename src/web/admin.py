@@ -2365,9 +2365,12 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
             register_drafts_page_routes,
             register_agent_perf_routes,
             register_export_route,
+            register_metrics_route,
         )
-        # J3: export API（主管数据导出，admin.py 内注册以便 inventory 覆盖）
+        # J3: export API（主管数据导出）
         register_export_route(app, api_auth=_api_auth)
+        # L1: metrics API（Prometheus 兼容，主管专属）
+        register_metrics_route(app, api_auth=_api_auth)
 
         register_drafts_page_routes(
             app,
