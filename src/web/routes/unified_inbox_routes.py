@@ -212,6 +212,9 @@ def _memory_bullets(request: Request, key: str, query: str = "") -> List[str]:
     return out[:6]
 
 
+_SUPERVISOR_ROLES = {"master", "admin"}
+
+
 def _session_agent(request: Request) -> Dict[str, str]:
     """从 session 解析当前坐席身份（无 SessionMiddleware 时回落 agent）。"""
     sess: Dict[str, Any] = {}
@@ -222,7 +225,19 @@ def _session_agent(request: Request) -> Dict[str, str]:
         sess = {}
     uid = str(sess.get("user_id") or sess.get("username") or "agent")
     name = sess.get("display_name") or sess.get("username") or uid
-    return {"agent_id": uid, "display_name": str(name or uid)}
+    role = str(sess.get("role") or "")
+    return {"agent_id": uid, "display_name": str(name or uid), "role": role}
+
+
+def _is_supervisor(request: Request) -> bool:
+    """主管能力 = 角色属于 master/admin（管理向功能的统一门槛）。"""
+    return _session_agent(request).get("role", "") in _SUPERVISOR_ROLES
+
+
+def _require_supervisor(request: Request) -> None:
+    """主管专属端点守卫；非主管抛 403。"""
+    if not _is_supervisor(request):
+        raise HTTPException(403, "需要主管权限")
 
 
 def _publish_follow_up(action: str, *, contact_id: str = "", task_id: str = "",
@@ -1782,6 +1797,15 @@ def register_unified_inbox_routes(
         api_auth(request)
         return _sla_alert_snapshot(request)
 
+    @app.get("/api/workspace/me")
+    async def api_workspace_me(request: Request):
+        """当前坐席身份 + 角色能力（前端按 is_supervisor 显隐管理向 UI）。"""
+        api_auth(request)
+        a = _session_agent(request)
+        return {"ok": True, "agent_id": a["agent_id"],
+                "display_name": a["display_name"], "role": a.get("role", ""),
+                "is_supervisor": _is_supervisor(request)}
+
     @app.get("/api/workspace/escalations")
     async def api_workspace_escalations(request: Request):
         """升级告警源（无人有效处理的严重超时；全局口径，不受个人静默影响）。"""
@@ -1790,8 +1814,9 @@ def register_unified_inbox_routes(
 
     @app.get("/api/workspace/escalation-log")
     async def api_workspace_escalation_log(request: Request, days: int = 7):
-        """升级历史 + 接管时延（复盘安全网成效）：升级→首个人工接管。"""
+        """升级历史 + 接管时延（复盘安全网成效）：升级→首个人工接管。主管专属。"""
         api_auth(request)
+        _require_supervisor(request)
         inbox = _inbox_store(request)
         if inbox is None:
             return {"ok": True, "days": 7, "items": [], "stats": {}}
@@ -2086,6 +2111,9 @@ def register_unified_inbox_routes(
         api_auth(request)
         span = 30 if int(days or 7) >= 30 else 7
         agent = str(agent or "").strip()
+        # 团队日报(无 agent)或他人个人日报 → 主管专属；本人个人日报放行
+        if not agent or agent != _session_agent(request)["agent_id"]:
+            _require_supervisor(request)
         if agent:
             import csv
             import io
@@ -2493,6 +2521,9 @@ def register_unified_inbox_routes(
 
     @app.get("/workspace/escalations", response_class=HTMLResponse)
     async def workspace_escalations_page(request: Request, _=Depends(page_auth)):
+        if not _is_supervisor(request):
+            from starlette.responses import RedirectResponse
+            return RedirectResponse("/workspace/dash", status_code=307)
         ctx: Dict[str, Any] = {
             "user_name": request.session.get("username") or "",
             "user_display_name": request.session.get("display_name")

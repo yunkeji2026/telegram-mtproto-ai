@@ -483,6 +483,25 @@ API：`GET /api/workspace/contact/{contact_id}` 一次返回 `{contact, timeline
 - **复用**：`CRMW.esc/fmtDur`、`ws_focus_conv`，无新表（用 6-21 的 escalations +
   6-12 的 agent_sends），仅一个关联查询。
 
+## 5z. 主管角色 / 权限分层（Phase 6-23）
+
+为后续多个管理向功能（定向升级、全员绩效、跨坐席导出）建立统一的角色门槛地基，
+**复用既有 `web_users.role` 体系**（master/admin/viewer/agent），不新增角色、不建表。
+
+- **主管能力** = `role ∈ {master, admin}`（`_is_supervisor(request)`）。`_session_agent`
+  现额外回传 `role`（从 `request.session` 读，无 SessionMiddleware 时为空）。
+- **守卫** `_require_supervisor(request)`：非主管抛 `HTTPException(403)`。
+- **身份端点** `GET /api/workspace/me`：回 `{agent_id, display_name, role, is_supervisor}`，
+  前端据此显隐管理向 UI（避免给坐席露出会 403 的入口）。
+- **门槛落点**（最小、聚焦管理/问责面，不动共享仪表盘主体）：
+  - `GET /api/workspace/escalation-log` + 页面 `/workspace/escalations`（页面非主管 307 跳 dash）。
+  - `GET /api/workspace/daily-report.csv`：团队日报（无 `agent`）或他人个人日报 → 主管专属；
+    **本人个人日报（`agent==session user_id`）放行**，坐席可自助导出自己的数据。
+- **前端**（workspace_dashboard）：先 `/me` 再渲染——主管才显示「⬇ 导出日报 CSV」、
+  「查看历史 / 接管时延」入口与坐席行的个人日报 ⬇；升级徽标/安全网对全员保留（团队兜底）。
+- **决策**：不引入新角色（admin 即主管），降低用户管理面与迁移成本；仪表盘可视主体保持
+  全员可见（避免坐席“失明”），仅把**导出/复盘/跨人**这类管理动作收口到主管。
+
 ## 6. 明确不做（后续阶段）
 
 | 项 | 原因 |

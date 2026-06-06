@@ -29,7 +29,7 @@
   <a class="db-back" href="/workspace">← 返回工作台</a>
   <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0 14px;">
     <h2 style="margin:0;font-size:18px;">今日概览</h2>
-    <a id="db-export" href="#" style="font-size:12px;padding:5px 10px;border:1px solid #d1d5db;border-radius:6px;text-decoration:none;color:#0f172a;background:#fff;">⬇ 导出日报 CSV</a>
+    <a id="db-export" href="#" style="display:none;font-size:12px;padding:5px 10px;border:1px solid #d1d5db;border-radius:6px;text-decoration:none;color:#0f172a;background:#fff;">⬇ 导出日报 CSV</a>
   </div>
   <div class="db-grid" id="db-cards"></div>
   <div class="db-sec">
@@ -61,7 +61,7 @@
   <div class="db-sec">
     <div style="display:flex;justify-content:space-between;align-items:center;">
       <h3 style="margin:0;">⚠ 升级：无人有效处理的严重超时</h3>
-      <a href="/workspace/escalations" style="font-size:12px;color:#2563eb;text-decoration:none;">查看历史 / 接管时延 →</a>
+      <a id="db-esc-hist" href="/workspace/escalations" style="font-size:12px;color:#2563eb;text-decoration:none;display:none;">查看历史 / 接管时延 →</a>
     </div>
     <div id="db-esc" style="margin-top:8px;"><span style="color:#94a3b8;font-size:13px;">加载中…</span></div>
   </div>
@@ -86,6 +86,7 @@
 </div>
 <script>
 (function(){
+  var IS_SUP=false;
   var STAGE_LABELS={INITIAL:'初始接触',ENGAGED:'深入互动',HANDOFF_READY:'引流就绪',HANDOFF_SENT:'引流已发',LINE_ENGAGED:'LINE互动',BONDED:'已绑定',CONVERTED:'已转化',LOST:'流失'};
   function esc(s){return CRMW.esc(s);}
   function card(num,lbl,warn,scope){
@@ -219,7 +220,7 @@
         return '<div class="db-row db-click" onclick="window.__dbAgentDetail('+JSON.stringify(a.agent_id||'')+')"><span>'+esc(a.agent_name||a.agent_id)+'</span>'
           +'<span>'+a.responded+'</span><span>'+fmtDur(a.avg_sec)+'</span>'
           +'<span style="color:'+rc+';font-weight:600;">'+a.attain_rate+'%</span>'
-          +'<a href="#" onclick="window.__dbAgentReport(event,'+JSON.stringify(a.agent_id||'')+')" title="导出该坐席个人日报 CSV" style="text-decoration:none;color:#2563eb;">⬇</a></div>';
+          +(IS_SUP?('<a href="#" onclick="window.__dbAgentReport(event,'+JSON.stringify(a.agent_id||'')+')" title="导出该坐席个人日报 CSV" style="text-decoration:none;color:#2563eb;">⬇</a>'):'')+'</div>';
       }).join('')) : '<span style="color:#94a3b8;font-size:13px;">暂无人工首响数据（需坐席从工作台发送）</span>';
       var sba=d.sla_by_agent||[];
       document.getElementById('db-sla-agents').innerHTML= sba.length? sba.map(function(a){
@@ -248,8 +249,17 @@
   if(_exp){ _exp.addEventListener('click', function(e){ e.preventDefault();
     window.location='/api/workspace/daily-report.csv?days='+curDays(); }); }
   var _modal=document.getElementById('db-modal'); if(_modal){ _modal.addEventListener('click', function(e){ if(e.target===_modal) closeDetail(); }); }
-  load(); setInterval(load, 60000);
-  loadEsc(); setInterval(loadEsc, 60000);
+  // 角色能力：主管才显示团队导出 / 升级历史 / 个人日报导出
+  fetch('/api/workspace/me').then(function(r){return r.json();}).then(function(m){
+    IS_SUP=!!(m&&m.is_supervisor);
+  }).catch(function(){ IS_SUP=false; }).finally(function(){
+    if(IS_SUP){
+      if(_exp) _exp.style.display='inline-block';
+      var _hist=document.getElementById('db-esc-hist'); if(_hist) _hist.style.display='inline';
+    }
+    load(); setInterval(load, 60000);
+    loadEsc(); setInterval(loadEsc, 60000);
+  });
 })();
 </script>
 {% endblock %}
