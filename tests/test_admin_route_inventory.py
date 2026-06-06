@@ -533,6 +533,7 @@ _BASELINE = """
 /api/workspace/kb-stats	GET
 /api/workspace/kb-click	POST
 /api/workspace/quality-stats	GET
+/api/workspace/workload	GET
 /api/reply-templates	POST
 /api/reply-templates/{template_id}	DELETE
 /api/reply-templates/{template_id}	PUT

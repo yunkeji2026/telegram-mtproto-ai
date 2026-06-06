@@ -178,6 +178,14 @@
       <div id="ws-create-result" style="font-size:12px;margin-top:4px;"></div>
     </div>
   </div>
+  <!-- R2: 坐席工作负荷均衡（主管专属） -->
+  <div class="db-sec" id="db-workload-sec" style="display:none;">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h3 style="margin:0;">⚖ 负荷均衡</h3>
+      <button onclick="loadWorkload()" style="font-size:11px;padding:2px 8px;border:1px solid #2563eb;border-radius:4px;background:#eff6ff;color:#2563eb;cursor:pointer;">刷新</button>
+    </div>
+    <div id="db-workload-body" style="margin-top:10px;"><span style="color:#94a3b8;font-size:13px;">加载中…</span></div>
+  </div>
   <!-- Q2+Q3: 草稿质量 & KB 命中率（主管专属） -->
   <div class="db-sec" id="db-quality-sec" style="display:none;">
     <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -566,6 +574,54 @@
   }
   window._lbRefresh=function(){ loadLeaderboard(); };
 
+  // R2: 坐席工作负荷均衡（主管专属）
+  function loadWorkload(){
+    var sec=document.getElementById('db-workload-sec');
+    var el=document.getElementById('db-workload-body');
+    if(!sec||!IS_SUP) return;
+    sec.style.display='';
+    fetch('/api/workspace/workload')
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(!d.ok){if(el) el.innerHTML='<span style="color:#94a3b8;font-size:12px;">加载失败</span>'; return;}
+        var wls=d.workloads||[];
+        var cap=d.max_cap||0;
+        var lightest=d.lightest_agent||'—';
+        var html='<div style="font-size:12px;color:#374151;margin-bottom:6px;">'
+          +'在线坐席: <strong>'+d.total_agents+'</strong>'
+          +(cap?' &nbsp; 负荷上限: <strong>'+cap+'</strong>':'')
+          +(d.overloaded_count?' &nbsp; <span style="color:#dc2626;font-weight:700;">⚠ '+d.overloaded_count+' 超负荷</span>':'')
+          +' &nbsp; 最空: <strong>'+esc(lightest)+'</strong>'
+          +'</div>';
+        if(!wls.length){
+          html+='<span style="color:#94a3b8;font-size:12px;">暂无在线坐席</span>';
+          if(el) el.innerHTML=html; return;
+        }
+        html+='<table style="width:100%;border-collapse:collapse;font-size:12px;">'
+          +'<thead><tr style="color:#64748b;border-bottom:1px solid #e2e8f0;">'
+          +'<th style="text-align:left;padding:3px 6px;">坐席</th>'
+          +'<th style="text-align:right;padding:3px 6px;">状态</th>'
+          +'<th style="text-align:right;padding:3px 6px;">活跃会话</th>'
+          +'<th style="text-align:right;padding:3px 6px;">近期操作</th>'
+          +'</tr></thead><tbody>';
+        wls.forEach(function(w){
+          var overload=w.overloaded;
+          var rowColor=overload?'#fff1f2':'';
+          var convColor=overload?'#dc2626':w.active_convs>5?'#d97706':'#16a34a';
+          var statusIcon=w.status==='online'?'🟢':w.status==='away'?'🟡':'⚫';
+          html+='<tr style="border-bottom:1px solid #f8fafc;background:'+rowColor+';">'
+            +'<td style="padding:4px 6px;font-weight:600;">'+esc(w.agent_id)+(overload?' ⚠':'')+'</td>'
+            +'<td style="text-align:right;padding:4px 6px;">'+statusIcon+' '+esc(w.status)+'</td>'
+            +'<td style="text-align:right;padding:4px 6px;color:'+convColor+';font-weight:700;">'+w.active_convs+'</td>'
+            +'<td style="text-align:right;padding:4px 6px;color:#64748b;">'+w.recent_actions+'</td>'
+            +'</tr>';
+        });
+        html+='</tbody></table>';
+        if(el) el.innerHTML=html;
+      })
+      .catch(function(){if(el) el.innerHTML='<span style="color:#94a3b8;font-size:12px;">负荷数据加载失败</span>';});
+  }
+
   // Q2+Q3: 草稿质量分布 + KB 命中率（主管专属）
   function loadQuality(){
     var sec=document.getElementById('db-quality-sec');
@@ -918,7 +974,7 @@
     load(); setInterval(load, 60000);
     loadEsc(); setInterval(loadEsc, 60000);
     loadMyPerf(); setInterval(loadMyPerf, 120000);
-    if(IS_SUP){ loadRisk(); setInterval(loadRisk, 60000); loadPresence(); setInterval(loadPresence, 30000); loadMetrics(); setInterval(loadMetrics, 60000); loadReport(); loadLeaderboard(); setInterval(loadLeaderboard, 120000); loadTrend(); setInterval(loadTrend, 300000); loadWorkspaces(); loadQuality(); setInterval(loadQuality, 300000); }
+    if(IS_SUP){ loadRisk(); setInterval(loadRisk, 60000); loadPresence(); setInterval(loadPresence, 30000); loadMetrics(); setInterval(loadMetrics, 60000); loadReport(); loadLeaderboard(); setInterval(loadLeaderboard, 120000); loadTrend(); setInterval(loadTrend, 300000); loadWorkspaces(); loadQuality(); setInterval(loadQuality, 300000); loadWorkload(); setInterval(loadWorkload, 60000); }
     loadHealth(); setInterval(loadHealth, 60000);
 
     // L3：一键 L2 自动发（主管快速操作）

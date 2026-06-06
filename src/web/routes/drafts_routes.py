@@ -716,6 +716,48 @@ def register_trend_route(app, *, api_auth):
         }
 
 
+def register_workload_route(app, *, api_auth):
+    """R2：注册 /api/workspace/workload（坐席工作负荷均衡，主管专属）。"""
+    from fastapi import Depends
+
+    @app.get("/api/workspace/workload")
+    async def api_agent_workload(
+        request: Request,
+        agent_id: str = "",
+        _=Depends(api_auth),
+    ):
+        """R2：返回坐席工作负荷（主管专属）。
+
+        ?agent_id=xxx → 单坐席详情
+        不带参数 → 所有在线坐席负荷列表（用于仪表板均衡视图）
+        """
+        if not _is_supervisor(request):
+            raise HTTPException(403, "工作负荷查看需要主管权限")
+        inbox = getattr(request.app.state, "inbox_store", None)
+        if inbox is None:
+            raise HTTPException(503, "inbox_store 未就绪")
+
+        cfg = getattr(request.app.state, "cfg", {}) or {}
+        max_cap = int((cfg.get("workspace") or {}).get("max_concurrent_convs") or 0)
+
+        if agent_id:
+            wl = inbox.get_agent_workload(agent_id.strip())
+            if max_cap > 0:
+                wl["overloaded"] = wl["active_convs"] >= max_cap
+            return {"ok": True, "workload": wl, "max_cap": max_cap}
+
+        workloads = inbox.list_agent_workloads(max_load_cap=max_cap)
+        overloaded = [w for w in workloads if w.get("overloaded")]
+        return {
+            "ok": True,
+            "workloads": workloads,
+            "max_cap": max_cap,
+            "total_agents": len(workloads),
+            "overloaded_count": len(overloaded),
+            "lightest_agent": inbox.get_lightest_agent(max_load_cap=max_cap),
+        }
+
+
 def register_kb_stats_route(app, *, api_auth):
     """Q2+Q3：注册 KB 命中率统计 + 质量评分分布（主管专属）。"""
     from fastapi import Depends

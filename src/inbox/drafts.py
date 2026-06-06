@@ -72,8 +72,10 @@ class DraftService:
         wa_services: Optional[List[Any]] = None,
         messenger_service: Optional[Any] = None,
         risk_fn: Optional[Any] = None,
+        cfg: Optional[Dict[str, Any]] = None,
     ) -> None:
         self._store = inbox_store
+        self._cfg: Dict[str, Any] = cfg or {}
         # 同步零成本规则风险函数 risk_fn(text)->(level, reasons)（P0-c）；
         # 用于给无 overlay 的草稿实时算风险徽章，不调 LLM。
         self._risk_fn = risk_fn
@@ -350,6 +352,25 @@ class DraftService:
             except Exception:
                 logger.debug("P1 draft_resolved 发布失败（已忽略）", exc_info=True)
 
+        # R3: 草稿成功批准后，按配置延迟调度 CSAT 问卷
+        if result.get("ok") and action in ("approve", "edit_send", "autosend") and conv_id and self._store is not None:
+            try:
+                _survey_cfg = (self._cfg.get("workspace") or {}).get("csat_survey") or {}
+                if bool(_survey_cfg.get("enabled", False)):
+                    import uuid as _uuid
+                    _delay = float(_survey_cfg.get("delay_minutes", 5)) * 60
+                    _sid = "srv_" + _uuid.uuid4().hex[:10]
+                    self._store.schedule_csat_survey(
+                        survey_id=_sid,
+                        conversation_id=conv_id,
+                        draft_id=draft_id,
+                        agent_id=by,
+                        delay_seconds=_delay,
+                    )
+                    logger.info("R3 CSAT survey scheduled id=%s conv=%s delay=%.0fs", _sid, conv_id, _delay)
+            except Exception:
+                logger.debug("R3 CSAT survey 调度失败（已忽略）", exc_info=True)
+
         # Q1: 草稿成功批准后，在后台生成并存储对话摘要
         if result.get("ok") and action in ("approve", "edit_send", "autosend") and conv_id and self._store is not None:
             try:
@@ -533,6 +554,27 @@ class DraftService:
                 return None
         except Exception:
             pass
+
+        # R1: 检测第一条消息，自动触发问候草稿（config-gated）
+        try:
+            _greeting_cfg = self._cfg.get("auto_greeting", {}) if self._cfg else {}
+            _greeting_enabled = bool(_greeting_cfg.get("enabled", False))
+            if _greeting_enabled:
+                from src.inbox.greeting import should_auto_greet, build_greeting_draft
+                from src.ai.chat_assistant_service import detect_language
+                _conv_meta = self._store.get_conv_meta(conv_id)
+                if should_auto_greet(_conv_meta, enabled=True):
+                    _lang = detect_language(t) or "zh"
+                    _greet_draft = build_greeting_draft(
+                        conv, _lang,
+                        templates_store=self._store,
+                        automation_mode=automation_mode,
+                    )
+                    _greet_id = self._store.upsert_draft(_greet_draft)
+                    logger.info("R1 auto_greeting draft=%s conv=%s lang=%s", _greet_id, conv_id, _lang)
+                    return _greet_id
+        except Exception:
+            logger.debug("R1 auto_greeting 失败（已忽略）", exc_info=True)
 
         try:
             from src.ai.chat_assistant_service import quick_analyze, _suggestions, detect_language
