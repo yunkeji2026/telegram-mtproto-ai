@@ -124,6 +124,25 @@ def ingest_collected_chats(
                     )
                 except Exception:
                     logger.debug("update_conv_meta 失败", exc_info=True)
+
+                # R3：检测 CSAT 问卷回复（1-5 纯数字，会话正在等待问卷）
+                try:
+                    _t_stripped = msg_text.strip()
+                    if (
+                        _t_stripped.isdigit()
+                        and 1 <= int(_t_stripped) <= 5
+                        and store.is_survey_awaiting(conv.conversation_id)
+                    ):
+                        _score = int(_t_stripped)
+                        matched = store.record_survey_response(conv.conversation_id, _score)
+                        if matched:
+                            store.set_conv_survey_awaiting(conv.conversation_id, False)
+                            logger.info(
+                                "R3 CSAT survey response conv=%s score=%d",
+                                conv.conversation_id, _score,
+                            )
+                except Exception:
+                    logger.debug("R3 survey_response 检测失败", exc_info=True)
     return inserted
 
 

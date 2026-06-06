@@ -254,6 +254,21 @@ _MIGRATIONS = [
     )""",
     "CREATE INDEX IF NOT EXISTS idx_kb_rec_entry ON kb_recommendation_log(entry_id)",
     "CREATE INDEX IF NOT EXISTS idx_kb_rec_ts    ON kb_recommendation_log(recommended_ts DESC)",
+    # R3: CSAT 问卷表
+    """CREATE TABLE IF NOT EXISTS csat_surveys (
+        id               TEXT PRIMARY KEY,
+        conversation_id  TEXT NOT NULL DEFAULT '',
+        draft_id         TEXT NOT NULL DEFAULT '',
+        agent_id         TEXT NOT NULL DEFAULT '',
+        scheduled_at     REAL NOT NULL DEFAULT 0,
+        send_at          REAL NOT NULL DEFAULT 0,
+        sent             INTEGER NOT NULL DEFAULT 0,
+        response_score   INTEGER NOT NULL DEFAULT -1,
+        response_ts      REAL NOT NULL DEFAULT 0,
+        created_at       REAL NOT NULL DEFAULT 0
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_survey_conv ON csat_surveys(conversation_id)",
+    "CREATE INDEX IF NOT EXISTS idx_survey_due  ON csat_surveys(send_at, sent)",
     # I3: 回复模板库
     """CREATE TABLE IF NOT EXISTS reply_templates (
         id           TEXT PRIMARY KEY,
@@ -1616,6 +1631,119 @@ class InboxStore:
             )
             self._conn.commit()
 
+    # ── R3: CSAT 问卷 ────────────────────────────────────────────────────
+    def schedule_csat_survey(
+        self,
+        *,
+        survey_id: str,
+        conversation_id: str,
+        draft_id: str,
+        agent_id: str,
+        delay_seconds: float = 300.0,
+    ) -> None:
+        """R3：将待发 CSAT 问卷登记到 csat_surveys 表（由 SurveyWorker 轮询发送）。"""
+        now = self._now()
+        send_at = now + float(delay_seconds)
+        with self._lock:
+            self._conn.execute(
+                """INSERT OR IGNORE INTO csat_surveys
+                   (id, conversation_id, draft_id, agent_id, scheduled_at, send_at,
+                    sent, response_score, response_ts, created_at)
+                   VALUES (?,?,?,?,?,?,0,-1,0,?)""",
+                (survey_id, conversation_id, draft_id, agent_id, now, send_at, now),
+            )
+            self._conn.commit()
+
+    def list_due_surveys(self, *, limit: int = 20) -> List[Dict[str, Any]]:
+        """R3：返回到期未发的 CSAT 问卷（send_at <= now, sent=0）。"""
+        now = self._now()
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT id, conversation_id, draft_id, agent_id, send_at
+                   FROM csat_surveys WHERE send_at <= ? AND sent = 0
+                   ORDER BY send_at LIMIT ?""",
+                (now, limit),
+            ).fetchall()
+        return [
+            dict(zip(["id", "conversation_id", "draft_id", "agent_id", "send_at"], r))
+            for r in rows
+        ]
+
+    def mark_survey_sent(self, survey_id: str) -> None:
+        """R3：标记问卷已发送。"""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE csat_surveys SET sent=1 WHERE id=?", (survey_id,)
+            )
+            self._conn.commit()
+
+    def record_survey_response(
+        self,
+        conversation_id: str,
+        score: int,
+    ) -> bool:
+        """R3：记录客户 CSAT 问卷回复（score 1-5），同时更新 conversation_meta.csat_score。
+
+        返回 True 表示匹配到待回复问卷。
+        """
+        score = max(1, min(5, int(score)))
+        now = self._now()
+        with self._lock:
+            row = self._conn.execute(
+                """SELECT id FROM csat_surveys
+                   WHERE conversation_id=? AND sent=1 AND response_score=-1
+                   ORDER BY send_at DESC LIMIT 1""",
+                (conversation_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            self._conn.execute(
+                "UPDATE csat_surveys SET response_score=?, response_ts=? WHERE id=?",
+                (score, now, row[0]),
+            )
+            # 同步更新 conv_meta.csat_score
+            self._conn.execute(
+                "UPDATE conversation_meta SET csat_score=?, updated_at=? WHERE conversation_id=?",
+                (float(score), now, conversation_id),
+            )
+            self._conn.commit()
+        return True
+
+    def set_conv_survey_awaiting(self, conversation_id: str, flag: bool) -> None:
+        """R3：在 conv_meta 中标记/清除 survey_awaiting 状态（用于识别客户回复是否为问卷响应）。"""
+        # survey_awaiting 存储在 summary 字段前缀 __survey__ 标记（简洁，不加新列）
+        now = self._now()
+        with self._lock:
+            if flag:
+                self._conn.execute(
+                    """UPDATE conversation_meta
+                       SET summary=CASE WHEN summary NOT LIKE '__survey__%'
+                           THEN '__survey__' || summary ELSE summary END,
+                       updated_at=?
+                       WHERE conversation_id=?""",
+                    (now, conversation_id),
+                )
+            else:
+                self._conn.execute(
+                    """UPDATE conversation_meta
+                       SET summary=REPLACE(summary,'__survey__',''),
+                       updated_at=?
+                       WHERE conversation_id=?""",
+                    (now, conversation_id),
+                )
+            self._conn.commit()
+
+    def is_survey_awaiting(self, conversation_id: str) -> bool:
+        """R3：检查会话是否正在等待 CSAT 问卷回复。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT summary FROM conversation_meta WHERE conversation_id=?",
+                (conversation_id,),
+            ).fetchone()
+        if row is None:
+            return False
+        return str(row[0] or "").startswith("__survey__")
+
     # ── Q1: 对话摘要 ─────────────────────────────────────────────────────
     def update_conv_summary(self, conversation_id: str, summary: str) -> None:
         """Q1：写入/更新对话摘要到 conversation_meta.summary。"""
@@ -1772,6 +1900,96 @@ class InboxStore:
                 "use_rate": use_rate,
             })
         return result
+
+    # ── R2: 坐席工作负荷均衡 ─────────────────────────────────────────────
+    def get_agent_workload(
+        self,
+        agent_id: str,
+        *,
+        active_within_sec: float = 3600,
+    ) -> Dict[str, Any]:
+        """R2：返回指定坐席当前工作负荷（活跃会话数 / 审计操作数 / 最近处置率）。
+
+        "活跃会话"定义：conversation_claims 中该坐席持有 + 过去 N 秒内有 draft_audit_log。
+        """
+        aid = str(agent_id or "").strip()
+        if not aid:
+            return {"agent_id": aid, "active_convs": 0, "recent_actions": 0, "status": "unknown"}
+        now = self._now()
+        since = now - active_within_sec
+        with self._lock:
+            # 当前会话租约数
+            claimed = self._conn.execute(
+                "SELECT COUNT(*) FROM conversation_claims WHERE agent_id=? AND expires_at>?",
+                (aid, now),
+            ).fetchone()[0]
+            # 过去 N 秒内的审计操作数
+            recent_actions = self._conn.execute(
+                "SELECT COUNT(*) FROM draft_audit_log WHERE agent_id=? AND ts>=?",
+                (aid, since),
+            ).fetchone()[0]
+            # 在线状态
+            pres_row = self._conn.execute(
+                "SELECT status FROM agent_presence WHERE agent_id=?", (aid,)
+            ).fetchone()
+            status = pres_row[0] if pres_row else "offline"
+
+        return {
+            "agent_id": aid,
+            "active_convs": int(claimed or 0),
+            "recent_actions": int(recent_actions or 0),
+            "status": str(status),
+        }
+
+    def list_agent_workloads(
+        self,
+        *,
+        active_within_sec: float = 120,
+        max_load_cap: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """R2：列出所有在线坐席的工作负荷（用于负荷均衡决策）。
+
+        active_within_sec：判断在线的心跳窗口（秒），默认 120s。
+        max_load_cap：若 > 0，标记超负荷坐席。
+        """
+        now = self._now()
+        cutoff = now - active_within_sec
+        with self._lock:
+            agents = self._conn.execute(
+                "SELECT agent_id FROM agent_presence WHERE last_seen_at >= ?",
+                (cutoff,),
+            ).fetchall()
+        result = []
+        for (aid,) in agents:
+            wl = self.get_agent_workload(aid, active_within_sec=active_within_sec)
+            if max_load_cap > 0:
+                wl["overloaded"] = wl["active_convs"] >= max_load_cap
+            result.append(wl)
+        # 按负荷升序（用于负荷均衡时选最空的坐席）
+        result.sort(key=lambda x: x["active_convs"])
+        return result
+
+    def get_lightest_agent(
+        self,
+        *,
+        active_within_sec: float = 120,
+        max_load_cap: int = 0,
+        exclude_agent: str = "",
+    ) -> Optional[str]:
+        """R2：返回负荷最轻的在线坐席 ID（用于自动再分配）。
+
+        max_load_cap > 0 时，过滤掉已超负荷的坐席。
+        """
+        workloads = self.list_agent_workloads(active_within_sec=active_within_sec)
+        for wl in workloads:
+            if wl["agent_id"] == exclude_agent:
+                continue
+            if max_load_cap > 0 and wl["active_convs"] >= max_load_cap:
+                continue
+            if wl.get("status", "offline") in ("offline",):
+                continue
+            return wl["agent_id"]
+        return None
 
     def upsert_workspace(
         self,
