@@ -73,6 +73,13 @@
     <h3>漏斗阶段分布</h3>
     <div id="db-stages"><span style="color:#94a3b8;font-size:13px;">加载中…</span></div>
   </div>
+  <div class="db-sec" id="db-risk-sec" style="display:none;">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h3 style="margin:0;">🛡 AI 草稿风险分布（主管视图）</h3>
+      <a href="/api/drafts?status=pending" style="font-size:12px;color:#2563eb;text-decoration:none;">查看待审草稿 →</a>
+    </div>
+    <div id="db-risk" style="margin-top:10px;"><span style="color:#94a3b8;font-size:13px;">加载中…</span></div>
+  </div>
 </div>
 <div id="db-modal">
   <div class="db-modal-card">
@@ -198,6 +205,35 @@
       else { if(btn){ btn.disabled=false; btn.textContent='生成跟进'; } CRMW.toast('生成失败：'+((d&&d.error)||'未知'),'#dc2626'); }
     }).catch(function(){ if(btn){ btn.disabled=false; btn.textContent='生成跟进'; } CRMW.toast('生成失败','#dc2626'); });
   }
+  // B2 风险草稿分布（主管专属）
+  var LEVEL_COLORS={L0:'#6b7280',L1:'#2563eb',L2:'#16a34a',L3:'#d97706',L4:'#dc2626'};
+  var LEVEL_LABELS={L0:'L0 手动',L1:'L1 待审',L2:'L2 自动',L3:'L3 审批',L4:'L4 拦截'};
+  function loadRisk(){
+    if(!IS_SUP) return;
+    var sec=document.getElementById('db-risk-sec');
+    if(sec) sec.style.display='block';
+    fetch('/api/drafts/risk-summary').then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok){ document.getElementById('db-risk').innerHTML='<span style="color:#ef4444;">加载失败</span>'; return; }
+      var lvls=d.by_level||{};
+      var total=d.total_pending||0;
+      var html='<div style="font-size:12px;color:#64748b;margin-bottom:8px;">待处理草稿共 '+total+' 条</div>'
+        +'<div style="display:flex;gap:10px;flex-wrap:wrap;">';
+      ['L0','L1','L2','L3','L4'].forEach(function(lv){
+        var n=lvls[lv]||0;
+        var isHigh=(lv==='L3'||lv==='L4');
+        html+='<div style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;border:1px solid '+(isHigh&&n?'#fca5a5':'#e5e7eb')+';background:'+(isHigh&&n?'#fff7f7':'#f8fafc')+';">'
+          +'<span style="font-size:18px;font-weight:700;color:'+LEVEL_COLORS[lv]+(';">'+n+'</span>')
+          +'<span style="font-size:12px;color:#64748b;">'+LEVEL_LABELS[lv]+'</span>'
+          +(isHigh&&n?'<span style="font-size:10px;background:'+LEVEL_COLORS[lv]+';color:#fff;padding:1px 5px;border-radius:4px;margin-left:2px;">需审</span>':'')
+          +'</div>';
+      });
+      html+='</div>';
+      if((lvls['L3']||0)+(lvls['L4']||0)>0){
+        html+='<div style="margin-top:10px;"><a href="/api/drafts?status=pending" style="font-size:13px;color:#dc2626;font-weight:600;">⚠ 共 '+((lvls['L3']||0)+(lvls['L4']||0))+' 条 L3/L4 草稿待主管处置 →</a></div>';
+      }
+      document.getElementById('db-risk').innerHTML=html;
+    }).catch(function(){ document.getElementById('db-risk').innerHTML='<span style="color:#ef4444;">加载失败</span>'; });
+  }
   window.__dbDetail=openDetail; window.__dbGoConv=goConv; window.__dbCloseDetail=closeDetail; window.__dbAgentDetail=openAgentDetail; window.__dbAgentReport=agentReport; window.__dbEscTask=escTask; window.__dbEscReassign=escReassign;
   function spark(rows,key,color){ return CRMW.spark(rows,key,color); }
   function sparkPct(rows,key,color){ return CRMW.sparkPct(rows,key,color); }
@@ -280,6 +316,7 @@
     }
     load(); setInterval(load, 60000);
     loadEsc(); setInterval(loadEsc, 60000);
+    if(IS_SUP){ loadRisk(); setInterval(loadRisk, 60000); }
   });
 })();
 </script>
