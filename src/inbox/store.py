@@ -217,6 +217,8 @@ _MIGRATIONS = [
         msg_count        INTEGER NOT NULL DEFAULT 0,
         updated_at       REAL NOT NULL DEFAULT 0
     )""",
+    # M1: conversation_meta 新增 csat_score 列
+    "ALTER TABLE conversation_meta ADD COLUMN csat_score REAL NOT NULL DEFAULT -1",
     "CREATE INDEX IF NOT EXISTS idx_conv_meta_updated ON conversation_meta(updated_at DESC)",
     # I3: 回复模板库
     """CREATE TABLE IF NOT EXISTS reply_templates (
@@ -1005,7 +1007,37 @@ class InboxStore:
         """
         with self._lock:
             rows = self._conn.execute(sql, params).fetchall()
-        return [dict(r) for r in rows]
+        perf = [dict(r) for r in rows]
+
+        # M1: 为每个坐席聚合 avg_csat（其处置的对话的 CSAT 均值）
+        try:
+            for p in perf:
+                aid = str(p.get("agent_id") or "")
+                if not aid:
+                    continue
+                # 找该坐席处置的所有对话 ID
+                conv_ids = self._conn.execute(
+                    "SELECT DISTINCT conversation_id FROM draft_audit_log "
+                    "WHERE agent_id=? AND ts>=? AND conversation_id!=''",
+                    (aid, float(since_ts)),
+                ).fetchall()
+                cids = [r[0] for r in conv_ids]
+                if not cids:
+                    p["avg_csat"] = None
+                    continue
+                # 查有 csat_score > 0 的对话
+                placeholders = ",".join("?" * len(cids))
+                csat_rows = self._conn.execute(
+                    f"SELECT csat_score FROM conversation_meta "
+                    f"WHERE conversation_id IN ({placeholders}) AND csat_score >= 0",
+                    cids,
+                ).fetchall()
+                scores = [r[0] for r in csat_rows if r[0] is not None and r[0] >= 0]
+                p["avg_csat"] = round(sum(scores) / len(scores), 1) if scores else None
+        except Exception:
+            pass
+
+        return perf
 
     def get_agent_perf_timeline(
         self,
@@ -1461,6 +1493,19 @@ class InboxStore:
                  json.dumps(ih, ensure_ascii=False),
                  json.dumps(eh, ensure_ascii=False),
                  mc, now),
+            )
+            self._conn.commit()
+
+    def update_conv_csat(self, conversation_id: str, csat_score: float) -> None:
+        """M1：写入对话 CSAT 评分（会话结束时调用）。"""
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            return
+        csat_score = round(max(0.0, min(5.0, float(csat_score))), 1)
+        with self._lock:
+            self._conn.execute(
+                "UPDATE conversation_meta SET csat_score=? WHERE conversation_id=?",
+                (csat_score, cid),
             )
             self._conn.commit()
 

@@ -62,6 +62,8 @@ _EVENT_ALIASES: Dict[str, Dict[str, Any]] = {
     "sla_breach": {"types": {"draft_sla_breach"}, "levels": None},
     "reassigned": {"types": {"draft_reassigned"}, "levels": None},
     "escalation": {"types": {"escalation"}, "levels": None},
+    "reply_risk": {"types": {"human_reply_risk"}, "levels": None},  # M3
+    "report": {"types": {"report"}, "levels": None},                # M2 简报推送
 }
 
 # ─── 速率限制 ────────────────────────────────────────────────────────────────
@@ -176,6 +178,21 @@ def _build_message(event_type: str, data: Dict[str, Any]) -> tuple[str, str]:
             f"**原因**: {data.get('reason', 'agent_offline')}\n"
             "[📋 前往审批](/workspace/drafts)"
         )
+
+    elif event_type == "human_reply_risk":
+        title = f"⚠️ 坐席回复质量警告 [{data.get('risk_level', '?')}]"
+        text = (
+            f"**坐席**: {data.get('agent_id', '?')}\n"
+            f"**风险等级**: {data.get('risk_level', '?')}\n"
+            f"**原因**: {', '.join(data.get('risk_reasons') or []) or '—'}\n"
+            f"**回复预览**: {data.get('text_preview', '')[:60]}\n"
+            "[📋 查看审计](/workspace/agent-perf)"
+        )
+
+    elif event_type == "report":
+        period = data.get("period", "daily")
+        title = f"📊 {'今日' if period == 'daily' else '本周'}工作简报"
+        text = str(data.get("text") or "")
 
     elif event_type == "escalation":
         title = "🔔 升级告警"

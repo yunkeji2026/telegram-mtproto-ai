@@ -101,6 +101,21 @@
     </div>
     <div id="db-metrics" style="margin-top:10px;"><span style="color:#94a3b8;font-size:13px;">加载中…</span></div>
   </div>
+  <!-- M2 工作简报（主管专属） -->
+  <div class="db-sec" id="db-report-sec" style="display:none;">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h3 style="margin:0;">📋 工作简报</h3>
+      <div style="display:flex;gap:6px;">
+        <select id="db-report-period" style="font-size:11px;padding:2px 6px;border:1px solid #e2e8f0;border-radius:4px;cursor:pointer;">
+          <option value="daily">今日</option>
+          <option value="weekly">本周</option>
+        </select>
+        <button onclick="window._reportRefresh()" style="font-size:11px;padding:2px 8px;border:1px solid #2563eb;border-radius:4px;background:#eff6ff;color:#2563eb;cursor:pointer;">刷新</button>
+        <button id="db-report-send-btn" onclick="window._reportSendWebhook()" style="font-size:11px;padding:2px 8px;border:1px solid #16a34a;border-radius:4px;background:#f0fdf4;color:#15803d;cursor:pointer;">📤 推送</button>
+      </div>
+    </div>
+    <div id="db-report-body" style="margin-top:10px;"><span style="color:#94a3b8;font-size:13px;">加载中…</span></div>
+  </div>
   <!-- E3 系统健康 Widget（所有坐席可见，主管更丰富） -->
   <div class="db-sec" id="db-health-sec">
     <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -309,6 +324,47 @@
     }).catch(function(){ if(el) el.innerHTML='<span style="color:#94a3b8;font-size:12px;">指标加载失败</span>'; });
   }
 
+  // M2: 工作简报（主管专属）
+  var _reportData = null;
+  function loadReport(){
+    var sec=document.getElementById('db-report-sec');
+    var el=document.getElementById('db-report-body');
+    if(!sec||!IS_SUP) return;
+    sec.style.display='';
+    var period=(document.getElementById('db-report-period')||{}).value||'daily';
+    fetch('/api/workspace/report?period='+period+'&format=html')
+      .then(function(r){ return r.text(); })
+      .then(function(html){
+        el.innerHTML=html||'<span style="color:#94a3b8;font-size:12px;">暂无数据</span>';
+      })
+      .catch(function(){ if(el) el.innerHTML='<span style="color:#94a3b8;font-size:12px;">简报加载失败</span>'; });
+    // 同步获取 json 数据供推送
+    fetch('/api/workspace/report?period='+period)
+      .then(function(r){ return r.json(); })
+      .then(function(d){ _reportData=d; })
+      .catch(function(){});
+  }
+  window._reportRefresh=function(){
+    var el=document.getElementById('db-report-body');
+    if(el) el.innerHTML='<span style="color:#94a3b8;font-size:13px;">加载中…</span>';
+    loadReport();
+  };
+  window._reportSendWebhook=function(){
+    var period=(document.getElementById('db-report-period')||{}).value||'daily';
+    if(!confirm('将"'+({'daily':'今日','weekly':'本周'}[period]||period)+'"简报推送到配置的 Webhook？')) return;
+    fetch('/api/workspace/report?period='+period+'&format=text')
+      .then(function(r){ return r.text(); })
+      .then(function(text){
+        // 通过 broadcast 接口发布一个 report 事件（如有配置，L2 Webhook 会接收）
+        return fetch('/api/workspace/broadcast',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({type:'report',data:{period:period,text:text}})
+        });
+      })
+      .then(function(r){ if(r.ok) alert('推送成功'); else alert('推送失败（请检查 Webhook 配置）'); })
+      .catch(function(e){ alert('推送出错：'+e); });
+  };
   // J1: 团队在线状态（主管专属）
   function loadPresence(){
     var sec=document.getElementById('db-presence-sec');
@@ -470,7 +526,7 @@
     }
     load(); setInterval(load, 60000);
     loadEsc(); setInterval(loadEsc, 60000);
-    if(IS_SUP){ loadRisk(); setInterval(loadRisk, 60000); loadPresence(); setInterval(loadPresence, 30000); loadMetrics(); setInterval(loadMetrics, 60000); }
+    if(IS_SUP){ loadRisk(); setInterval(loadRisk, 60000); loadPresence(); setInterval(loadPresence, 30000); loadMetrics(); setInterval(loadMetrics, 60000); loadReport(); }
     loadHealth(); setInterval(loadHealth, 60000);
 
     // L3：一键 L2 自动发（主管快速操作）

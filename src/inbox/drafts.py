@@ -327,6 +327,53 @@ class DraftService:
         real_action = "approve" if action == "autosend" else action
 
         result = self.resolve(draft_id, real_action, text=text, by=by)
+
+        # M1: 草稿成功处置后计算并写入 CSAT 评分
+        if result.get("ok") and conv_id and self._store is not None:
+            try:
+                from src.inbox.csat import calculate_csat
+                meta = self._store.get_conv_meta(conv_id)
+                # 获取近期决策（含本次 force_override）
+                recent = self._store.list_draft_audit(limit=50)
+                conv_decisions = [r for r in recent if str(r.get("conversation_id") or "") == conv_id][:10]
+                csat = calculate_csat(meta, conv_decisions)
+                self._store.update_conv_csat(conv_id, csat)
+            except Exception:
+                logger.debug("M1 CSAT 计算失败（已忽略）", exc_info=True)
+
+        # M3: 坐席人工编辑的回复质量监控（检测代发风险）
+        sent_text = str(text or "").strip()
+        if result.get("ok") and sent_text and action in ("approve", "edit_send"):
+            try:
+                from src.ai.chat_assistant_service import quick_analyze
+                from src.integrations.shared.event_bus import get_event_bus
+                analysis = quick_analyze(sent_text)
+                reply_risk = str(analysis.get("risk_level") or "low")
+                if reply_risk in ("high", "critical"):
+                    # 写审计日志
+                    self._write_audit(
+                        draft_id, autopilot, "reply_risk_detected", by,
+                        reason=f"坐席回复风险 {reply_risk}: {', '.join(analysis.get('risk_reasons') or [])}",
+                        risk_level=reply_risk,
+                        conversation_id=conv_id,
+                    )
+                    # 发布 SSE/Webhook 事件
+                    get_event_bus().publish("human_reply_risk", {
+                        "draft_id": draft_id,
+                        "conversation_id": conv_id,
+                        "agent_id": by,
+                        "risk_level": reply_risk,
+                        "risk_reasons": analysis.get("risk_reasons") or [],
+                        "text_preview": sent_text[:80],
+                        "autopilot_level": autopilot,
+                    })
+                    logger.warning(
+                        "M3 human_reply_risk detected: draft=%s agent=%s risk=%s",
+                        draft_id, by, reply_risk,
+                    )
+            except Exception:
+                logger.debug("M3 回复质量检查失败（已忽略）", exc_info=True)
+
         return result
 
     def _write_audit(
