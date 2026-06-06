@@ -402,6 +402,7 @@ _BASELINE = """
 /api/workspace/follow-up/{task_id}/snooze	POST
 /api/workspace/follow-ups	GET
 /api/workspace/heartbeat	POST
+/api/workspace/me	GET
 /api/workspace/my-tasks	GET
 /api/workspace/merge-reviews	GET
 /api/workspace/merge-reviews/{review_id}	POST

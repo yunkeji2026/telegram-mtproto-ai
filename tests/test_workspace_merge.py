@@ -205,8 +205,16 @@ class TestMergeApi:
 
 # ── Phase 6-1：Contact 360 ────────────────────────────────────────────────────
 
-def _client_with_inbox(cstore, gateway, inbox):
+def _client_with_inbox(cstore, gateway, inbox, role=""):
     app = FastAPI()
+
+    if role:
+        @app.middleware("http")
+        async def _inject_session(request: Request, call_next):
+            request.scope["session"] = {
+                "role": role, "username": "sup", "user_id": "sup",
+            }
+            return await call_next(request)
 
     def page_auth(request: Request):
         return True
@@ -1286,7 +1294,7 @@ class TestDailyReport:
         jid = a.journey.journey_id
         self._ev(cstore, jid, "msg_in", now - 120)
         self._ev(cstore, jid, "handoff_sent", now - 60)
-        cli = _client_with_inbox(cstore, gateway, inbox)
+        cli = _client_with_inbox(cstore, gateway, inbox, role="admin")
         r = cli.get("/api/workspace/daily-report.csv?days=7")
         assert r.status_code == 200
         assert "text/csv" in r.headers["content-type"]
@@ -1307,7 +1315,7 @@ class TestDailyReport:
     def test_daily_report_days_30(self, cstore, gateway):
         from src.inbox.store import InboxStore
         d = tempfile.mkdtemp()
-        cli = _client_with_inbox(cstore, gateway, InboxStore(Path(d) / "i.db"))
+        cli = _client_with_inbox(cstore, gateway, InboxStore(Path(d) / "i.db"), role="admin")
         r = cli.get("/api/workspace/daily-report.csv?days=30")
         lines = [ln for ln in r.text.lstrip("\ufeff").splitlines() if ln.strip()]
         assert len(lines) == 1 + 30 + 1
@@ -1490,7 +1498,7 @@ class TestAgentDailyReport:
                           direction="in", text="x", original_text="x",
                           translated_text="x", source_lang="zh", ts=now - 120)])
         inbox.record_agent_send("web:web:P", "ag1", agent_name="A", ts=now - 60)
-        cli = _client_with_inbox(cstore, gateway, inbox)
+        cli = _client_with_inbox(cstore, gateway, inbox, role="admin")
         r = cli.get("/api/workspace/daily-report.csv?days=7&agent=ag1")
         assert r.status_code == 200
         assert "agent-report-ag1" in r.headers["content-disposition"]
@@ -1641,7 +1649,7 @@ class TestEscalationLog:
         inbox.record_escalation("web:web:X", reason="unclaimed", ts=now - 200)
         inbox.record_agent_send("web:web:X", "ag1", ts=now - 140)  # 时延 60
         inbox.record_escalation("web:web:Y", reason="holder_offline", ts=now - 50)
-        cli = _client_with_inbox(cstore, gateway, inbox)
+        cli = _client_with_inbox(cstore, gateway, inbox, role="admin")
         d2 = cli.get("/api/workspace/escalation-log?days=7").json()
         assert d2["ok"] is True
         st = d2["stats"]
@@ -1650,6 +1658,47 @@ class TestEscalationLog:
         assert st["taken_rate"] == 50.0
         assert st["avg_takeover_sec"] == 60
         inbox.close()
+
+
+class TestSupervisorGate:
+    """Phase 6-23：主管角色 / 权限分层（管理向端点门槛）。"""
+
+    def test_me_reports_role(self, cstore, gateway):
+        from src.inbox.store import InboxStore
+        d = tempfile.mkdtemp()
+        sup = _client_with_inbox(cstore, gateway, InboxStore(Path(d) / "s.db"), role="admin")
+        m = sup.get("/api/workspace/me").json()
+        assert m["ok"] is True and m["is_supervisor"] is True and m["role"] == "admin"
+        ag = _client_with_inbox(cstore, gateway, InboxStore(Path(d) / "a.db"), role="agent")
+        m2 = ag.get("/api/workspace/me").json()
+        assert m2["is_supervisor"] is False and m2["role"] == "agent"
+
+    def test_escalation_log_supervisor_only(self, cstore, gateway):
+        from src.inbox.store import InboxStore
+        d = tempfile.mkdtemp()
+        ag = _client_with_inbox(cstore, gateway, InboxStore(Path(d) / "i.db"), role="agent")
+        assert ag.get("/api/workspace/escalation-log").status_code == 403
+        sup = _client_with_inbox(cstore, gateway, InboxStore(Path(d) / "j.db"), role="master")
+        assert sup.get("/api/workspace/escalation-log").status_code == 200
+
+    def test_escalations_page_redirects_non_supervisor(self, cstore, gateway):
+        from src.inbox.store import InboxStore
+        d = tempfile.mkdtemp()
+        ag = _client_with_inbox(cstore, gateway, InboxStore(Path(d) / "i.db"), role="agent")
+        r = ag.get("/workspace/escalations", follow_redirects=False)
+        assert r.status_code == 307
+        assert r.headers["location"] == "/workspace/dash"
+
+    def test_team_report_supervisor_only_personal_open(self, cstore, gateway):
+        from src.inbox.store import InboxStore
+        d = tempfile.mkdtemp()
+        ag = _client_with_inbox(cstore, gateway, InboxStore(Path(d) / "i.db"), role="agent")
+        # 团队日报(无 agent) → 403
+        assert ag.get("/api/workspace/daily-report.csv?days=7").status_code == 403
+        # 他人个人日报 → 403
+        assert ag.get("/api/workspace/daily-report.csv?days=7&agent=other").status_code == 403
+        # 本人个人日报(agent==session user_id=sup) → 放行
+        assert ag.get("/api/workspace/daily-report.csv?days=7&agent=sup").status_code == 200
 
 
 class TestCrmWidgetsAsset:
