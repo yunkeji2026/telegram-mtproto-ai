@@ -1306,6 +1306,16 @@ class InboxStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def list_claims_by_agent(self, agent_id: str) -> List[Dict[str, Any]]:
+        """K2：列出指定坐席当前持有的所有 conversation claims（已过期的不计）。"""
+        self.purge_expired_claims()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM conversation_claims WHERE agent_id = ? ORDER BY claimed_at DESC",
+                (str(agent_id or ""),),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def set_conversation_claim(
         self,
         conversation_id: str,

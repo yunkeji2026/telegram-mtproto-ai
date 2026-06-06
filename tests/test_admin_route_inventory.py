@@ -525,6 +525,7 @@ _BASELINE = """
 /api/reply-templates/{template_id}	PUT
 /api/reply-templates/{template_id}/use	POST
 /api/unified-inbox/conv-meta	GET
+/api/unified-inbox/contact-profile	GET
 /workspace/draft-audit	GET
 /workspace/drafts	GET
 /workspace/templates	GET

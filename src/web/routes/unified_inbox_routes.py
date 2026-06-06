@@ -1147,9 +1147,13 @@ def register_unified_inbox_routes(
         async def _gen():
             try:
                 # 仅 replay 最近的 inbox_message 事件，避免设备类噪声
-                _sse_types = {"inbox_message", "agent_presence",
-                              "conversation_claim", "follow_up",
-                              "draft_created"}  # G1：自动草稿生成实时推送
+                _sse_types = {
+                    "inbox_message", "agent_presence",
+                    "conversation_claim", "follow_up",
+                    "draft_created",          # G1：自动草稿生成实时推送
+                    "draft_sla_breach",       # K1：草稿 SLA 超时红线预警
+                    "draft_reassigned",       # K2：无人应答自动再分配通知
+                }
                 for evt in bus.recent_events(30):
                     if evt.get("type") in _sse_types:
                         yield f"data: {_json.dumps(evt, ensure_ascii=False)}\n\n"
@@ -1169,6 +1173,17 @@ def register_unified_inbox_routes(
                             yield fr
                         for fr in _esc_pushes():
                             yield fr
+                        # K1/K2 SLAWatcher 状态（主管专属）：通过常规 SSE 帧告知在线人数
+                        try:
+                            _watcher = getattr(request.app.state, "sla_watcher", None)
+                            if _watcher is not None and _is_supervisor(request):
+                                snap = _watcher.status_snapshot()
+                                yield "data: " + _json.dumps({
+                                    "type": "sla_watcher_status",
+                                    "data": snap,
+                                }, ensure_ascii=False) + "\n\n"
+                        except Exception:
+                            pass
                     if await request.is_disconnected():
                         break
             finally:
@@ -2926,6 +2941,90 @@ def register_unified_inbox_routes(
             "conversation_id": cid,
             "meta": meta,
         }
+
+    # ── K3：客户画像聚合 API ───────────────────────────────────────
+
+    @app.get("/api/unified-inbox/contact-profile")
+    async def api_contact_profile(
+        request: Request,
+        conversation_id: str = "",
+        _=Depends(api_auth),
+    ):
+        """K3：聚合客户画像数据（对话智能 + CRM 档案 + 近期草稿决策）。
+
+        返回：{ok, conversation_id, conv_meta, contact, recent_decisions}
+        - conv_meta: 来自 I1 conversation_meta（最近意图/情绪/历史）
+        - contact:   来自 contacts 子系统（标签/漏斗阶段/跟进状态）
+        - recent_decisions: 来自 draft_audit_log（最近 5 条草稿决策记录）
+        """
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            raise HTTPException(400, "conversation_id 不能为空")
+
+        store = _inbox_store(request)
+        result: Dict[str, Any] = {
+            "ok": True,
+            "conversation_id": cid,
+            "conv_meta": None,
+            "contact": None,
+            "recent_decisions": [],
+        }
+
+        # ① 对话智能元数据（I1）
+        if store is not None:
+            try:
+                result["conv_meta"] = store.get_conv_meta(cid)
+            except Exception:
+                pass
+
+        # ② CRM 联系人档案（contacts 子系统，可选）
+        try:
+            _cstore = _contacts_store(request)
+            if _cstore is not None:
+                # 从 conversation_id 反推平台/chat_key（格式: platform:account:chat_key）
+                parts = cid.split(":", 2)
+                if len(parts) == 3:
+                    platform_key, account_id_key, chat_key_key = parts
+                    ci = _cstore.get_ci_by_external(platform_key, account_id_key, chat_key_key)
+                    if ci is not None:
+                        contact_id = str(ci.contact_id if hasattr(ci, "contact_id") else (ci.get("contact_id") or ""))
+                        if contact_id:
+                            contact = _cstore.get_contact(contact_id)
+                            attrs = _cstore.get_contact_attributes(contact_id) or {}
+                            if contact:
+                                result["contact"] = {
+                                    "contact_id": contact_id,
+                                    "name": str(getattr(contact, "display_name", "") or contact.get("display_name") or ""),
+                                    "tags": attrs.get("tags", []),
+                                    "funnel_stage": attrs.get("funnel_stage") or attrs.get("funnel"),
+                                    "follow_up_overdue": cid in (_cstore.overdue_contact_ids() or set()),
+                                    "note": attrs.get("note") or attrs.get("notes") or "",
+                                }
+        except Exception:
+            pass
+
+        # ③ 近期草稿决策（draft_audit_log，最近 5 条）
+        if store is not None:
+            try:
+                logs = store.list_draft_audit(limit=200)
+                recent = [
+                    {
+                        "draft_id": row.get("draft_id", ""),
+                        "action": row.get("action", ""),
+                        "agent_id": row.get("agent_id", ""),
+                        "risk_level": row.get("risk_level", ""),
+                        "autopilot_level": row.get("autopilot_level", ""),
+                        "ts": row.get("ts", 0),
+                        "reason": row.get("reason", ""),
+                    }
+                    for row in logs
+                    if str(row.get("conversation_id") or "") == cid
+                ][:5]
+                result["recent_decisions"] = recent
+            except Exception:
+                pass
+
+        return result
 
     # ── I3 模板库 API ─────────────────────────────────────────────
 

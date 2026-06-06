@@ -648,6 +648,30 @@ class AIChatAssistant:
                                     )
                             except Exception:
                                 self.logger.debug("AutosendWorker 启动跳过", exc_info=True)
+
+                            # ── K1+K2：SLAWatcher 草稿 SLA 预警 + 自动再分配 ──
+                            try:
+                                from src.inbox.sla_watcher import SLAWatcher
+                                _sw_cfg = (self.config.config or {}).get(
+                                    "inbox", {}
+                                ).get("sla_watcher", {}) or {}
+                                if _sw_cfg.get("enabled", True):
+                                    _sw = SLAWatcher(
+                                        draft_service=draft_svc,
+                                        inbox_store=self.inbox_store,
+                                        config=_sw_cfg,
+                                    )
+                                    web_app.state.sla_watcher = _sw
+                                    asyncio.ensure_future(_sw.run())
+                                    self.logger.info(
+                                        "SLAWatcher 已启动（sla=%.0fh tick=%.0fs absent=%.0fs）",
+                                        float(_sw_cfg.get("sla_hours", 4)),
+                                        float(_sw_cfg.get("tick_sec", 60)),
+                                        float(_sw_cfg.get("absent_sec", 300)),
+                                    )
+                            except Exception:
+                                self.logger.debug("SLAWatcher 启动跳过", exc_info=True)
+
                             # E2/F2：按 auto_draft 配置注册入站新消息 → 自动草稿生成回调
                             _ad_cfg = (self.config.config or {}).get(
                                 "inbox", {}
