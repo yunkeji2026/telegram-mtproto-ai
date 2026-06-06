@@ -219,6 +219,9 @@ _MIGRATIONS = [
     )""",
     # M1: conversation_meta 新增 csat_score 列
     "ALTER TABLE conversation_meta ADD COLUMN csat_score REAL NOT NULL DEFAULT -1",
+    # N1: conversation_meta 新增 contact_id 列（用于跨平台会话归档）
+    "ALTER TABLE conversation_meta ADD COLUMN contact_id TEXT NOT NULL DEFAULT ''",
+    "CREATE INDEX IF NOT EXISTS idx_conv_meta_contact ON conversation_meta(contact_id)",
     "CREATE INDEX IF NOT EXISTS idx_conv_meta_updated ON conversation_meta(updated_at DESC)",
     # I3: 回复模板库
     """CREATE TABLE IF NOT EXISTS reply_templates (
@@ -1446,11 +1449,13 @@ class InboxStore:
         intent: str = "",
         emotion: str = "",
         risk: str = "low",
+        contact_id: str = "",
         max_history: int = 10,
     ) -> None:
         """I1：每次新入站消息后，更新对话智能元数据。
 
         维护滚动窗口情绪/意图历史（max_history 条），用于趋势计算。
+        N1: contact_id 用于跨平台会话归档，传入后持久化。
         """
         cid = str(conversation_id or "").strip()
         if not cid:
@@ -1461,6 +1466,9 @@ class InboxStore:
             ih = list(existing.get("intent_history") or [])
             eh = list(existing.get("emotion_history") or [])
             mc = int(existing.get("msg_count") or 0) + 1
+            # 保留已有 contact_id（如未传新值）
+            if not contact_id:
+                contact_id = str(existing.get("contact_id") or "")
         else:
             ih, eh, mc = [], [], 1
         if intent:
@@ -1474,8 +1482,8 @@ class InboxStore:
             self._conn.execute(
                 """INSERT INTO conversation_meta
                    (conversation_id, platform, last_intent, last_emotion, last_risk,
-                    intent_history, emotion_history, msg_count, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?)
+                    intent_history, emotion_history, msg_count, updated_at, contact_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(conversation_id) DO UPDATE SET
                      platform       = excluded.platform,
                      last_intent    = CASE WHEN excluded.last_intent != ''
@@ -1486,15 +1494,63 @@ class InboxStore:
                      intent_history = excluded.intent_history,
                      emotion_history= excluded.emotion_history,
                      msg_count      = excluded.msg_count,
-                     updated_at     = excluded.updated_at
+                     updated_at     = excluded.updated_at,
+                     contact_id     = CASE WHEN excluded.contact_id != ''
+                                      THEN excluded.contact_id ELSE conversation_meta.contact_id END
                 """,
                 (cid, str(platform or ""), str(intent or ""), str(emotion or ""),
                  str(risk or "low"),
                  json.dumps(ih, ensure_ascii=False),
                  json.dumps(eh, ensure_ascii=False),
-                 mc, now),
+                 mc, now, str(contact_id or "")),
             )
             self._conn.commit()
+
+    def get_contact_sessions(
+        self,
+        contact_id: str,
+        *,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """N1：返回同一 contact_id 的所有跨平台会话记录（含 CSAT/情绪趋势）。
+
+        用于客户画像 (K3) 展示该客户历史会话全貌。
+        """
+        cid = str(contact_id or "").strip()
+        if not cid:
+            return []
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM conversation_meta WHERE contact_id=? "
+                "ORDER BY updated_at DESC LIMIT ?",
+                (cid, max(1, int(limit))),
+            ).fetchall()
+        result = []
+        for row in rows:
+            d = dict(row)
+            for key in ("intent_history", "emotion_history"):
+                try:
+                    d[key] = json.loads(d.get(key) or "[]")
+                except Exception:
+                    d[key] = []
+            d["emotion_trend"] = self._compute_emotion_trend(d.get("emotion_history") or [])
+            result.append(d)
+        return result
+
+    def get_contact_csat_avg(self, contact_id: str) -> Optional[float]:
+        """N1：返回同一 contact_id 所有对话的 CSAT 均值（-1 表示无数据）。"""
+        cid = str(contact_id or "").strip()
+        if not cid:
+            return None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT AVG(csat_score) FROM conversation_meta "
+                "WHERE contact_id=? AND csat_score >= 0",
+                (cid,),
+            ).fetchone()
+        if row and row[0] is not None:
+            return round(float(row[0]), 1)
+        return None
 
     def update_conv_csat(self, conversation_id: str, csat_score: float) -> None:
         """M1：写入对话 CSAT 评分（会话结束时调用）。"""

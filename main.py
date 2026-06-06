@@ -689,6 +689,29 @@ class AIChatAssistant:
                             except Exception:
                                 self.logger.debug("WebhookNotifier 启动跳过", exc_info=True)
 
+                            # ── N2：ScheduledReporter 定时简报推送 ─────────────
+                            try:
+                                from src.inbox.scheduled_reporter import ScheduledReporter
+                                _rpt_cfg = (self.config.config or {}).get(
+                                    "report", {}
+                                ) or {}
+                                if _rpt_cfg.get("enabled", False):
+                                    _rpt = ScheduledReporter(
+                                        inbox_store=web_app.state.inbox_store,
+                                        draft_service=getattr(web_app.state, "draft_service", None),
+                                        app_state=web_app.state,
+                                        config=_rpt_cfg,
+                                    )
+                                    web_app.state.scheduled_reporter = _rpt
+                                    asyncio.ensure_future(_rpt.run())
+                                    self.logger.info(
+                                        "ScheduledReporter 已启动（daily=%s weekly=%s）",
+                                        _rpt_cfg.get("daily_time", "09:00"),
+                                        _rpt_cfg.get("weekly_day") or "禁用",
+                                    )
+                            except Exception:
+                                self.logger.debug("ScheduledReporter 启动跳过", exc_info=True)
+
                             # E2/F2：按 auto_draft 配置注册入站新消息 → 自动草稿生成回调
                             _ad_cfg = (self.config.config or {}).get(
                                 "inbox", {}

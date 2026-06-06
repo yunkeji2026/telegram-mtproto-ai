@@ -517,6 +517,13 @@ def register_metrics_route(app, *, api_auth):
         except Exception:
             metrics["webhook"] = {"running": False}
 
+        # ScheduledReporter (N2)
+        try:
+            rpt = getattr(request.app.state, "scheduled_reporter", None)
+            metrics["scheduled_reporter"] = rpt.status_snapshot() if rpt is not None else {"running": False}
+        except Exception:
+            metrics["scheduled_reporter"] = {"running": False}
+
         # InboxStore 草稿统计
         try:
             inbox = getattr(request.app.state, "inbox_store", None)
@@ -603,6 +610,68 @@ def register_metrics_route(app, *, api_auth):
             return PlainTextResponse(buf.getvalue(), media_type="text/plain; version=0.0.4")
 
         return {"ok": True, **metrics}
+
+
+def register_leaderboard_route(app, *, api_auth):
+    """N3：注册 GET /api/workspace/leaderboard（CSAT 坐席排行榜，主管专属）。"""
+    from fastapi import Depends
+
+    @app.get("/api/workspace/leaderboard")
+    async def api_workspace_leaderboard(
+        request: Request,
+        period: str = "weekly",
+        limit: int = 20,
+        _=Depends(api_auth),
+    ):
+        """N3：坐席 CSAT 排行榜（主管专属）。
+
+        period: daily（过去 24h）| weekly（过去 7d）| monthly（过去 30d）
+        limit: 最多返回 N 名坐席（默认 20）
+        返回按 avg_csat DESC, total DESC 排序的坐席列表，含排名 + 徽章。
+        """
+        if not _is_supervisor(request):
+            raise HTTPException(403, "排行榜查看需要主管权限")
+
+        inbox = getattr(request.app.state, "inbox_store", None)
+        if inbox is None:
+            raise HTTPException(503, "inbox_store 未就绪")
+
+        import time as _time
+        period_days = {"daily": 1, "weekly": 7, "monthly": 30}.get(str(period), 7)
+        since_ts = _time.time() - period_days * 86400
+
+        perf = inbox.get_agent_perf(since_ts=since_ts)
+        # 过滤出有 avg_csat 的坐席 + 排序
+        ranked = sorted(
+            [p for p in perf if p.get("total", 0) > 0],
+            key=lambda x: (
+                float(x.get("avg_csat") or -1),
+                int(x.get("total") or 0),
+            ),
+            reverse=True,
+        )
+        ranked = ranked[:max(1, int(limit))]
+
+        # 加排名 + 徽章
+        _BADGES = {1: "🏆", 2: "🥈", 3: "🥉"}
+        result = []
+        for i, p in enumerate(ranked, 1):
+            csat = p.get("avg_csat")
+            p["rank"] = i
+            p["badge"] = _BADGES.get(i, "")
+            p["csat_stars"] = (
+                "⭐" * int(round(csat)) + "☆" * (5 - int(round(csat)))
+                if csat is not None else "—"
+            )
+            result.append(p)
+
+        return {
+            "ok": True,
+            "period": period,
+            "since_ts": since_ts,
+            "updated_at": _time.time(),
+            "leaderboard": result,
+        }
 
 
 def register_broadcast_route(app, *, api_auth):

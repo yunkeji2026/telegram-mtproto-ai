@@ -3024,6 +3024,30 @@ def register_unified_inbox_routes(
             except Exception:
                 pass
 
+        # ④ N1: 跨平台会话归档（同一 contact_id 的所有历史对话）
+        if store is not None:
+            try:
+                conv_meta = result.get("conv_meta") or {}
+                linked_contact_id = str(conv_meta.get("contact_id") or "")
+                # 也尝试从 CRM contact 获取 contact_id
+                if not linked_contact_id and result.get("contact"):
+                    linked_contact_id = str(result["contact"].get("contact_id") or "")
+                if linked_contact_id:
+                    cross_sessions = store.get_contact_sessions(linked_contact_id, limit=20)
+                    # 排除当前 conversation_id
+                    cross_sessions = [s for s in cross_sessions if s.get("conversation_id") != cid]
+                    contact_csat_avg = store.get_contact_csat_avg(linked_contact_id)
+                    result["cross_platform"] = {
+                        "contact_id": linked_contact_id,
+                        "session_count": len(cross_sessions),
+                        "sessions": cross_sessions[:10],  # 最多返回 10 条
+                        "contact_csat_avg": contact_csat_avg,
+                    }
+                else:
+                    result["cross_platform"] = None
+            except Exception:
+                result["cross_platform"] = None
+
         return result
 
     # ── I3 模板库 API ─────────────────────────────────────────────
