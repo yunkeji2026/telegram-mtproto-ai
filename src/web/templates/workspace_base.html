@@ -61,8 +61,10 @@
   <a class="ws-logout" href="/workspace/contacts" style="border:0;">客户</a>
   <a class="ws-logout" href="/workspace/tasks" style="border:0;">待办</a>
   <a class="ws-logout" href="/workspace/dash" style="border:0;">概览</a>
+  <a class="ws-logout" href="/api/drafts?status=pending" style="border:0;" id="ws-drafts-link" title="L3/L4 待审草稿">草稿审批</a>
   <span class="ws-spacer"></span>
   <a class="ws-review" id="ws-esc" style="background:#7c3aed;color:#fff;text-decoration:none;cursor:pointer;" title="升级：无人处理的严重超时会话"></a>
+  <a class="ws-review" id="ws-l4-badge" href="/workspace/dash" style="background:#991b1b;color:#fff;text-decoration:none;cursor:pointer;display:none;" title="L4 高风险草稿待审批（需主管放行）"></a>
   <a class="ws-review" id="ws-sla" style="background:#dc2626;color:#fff;text-decoration:none;cursor:pointer;" title="SLA 严重超时未回复会话"></a>
   <a class="ws-review" id="ws-followup" style="background:#dc2626;color:#fff;text-decoration:none;" href="/workspace/tasks" title="到期待跟进任务"></a>
   <span id="ws-prefs-btn" style="cursor:pointer;font-size:16px;padding:0 6px;" title="告警设置（SLA 阈值 / 免打扰）">⚙</span>
@@ -304,7 +306,33 @@
   var MY_AGENT_ID='', MY_IS_SUP=false;
   fetch('/api/workspace/me').then(function(r){return r.json();}).then(function(m){
     if(m&&m.ok){ MY_AGENT_ID=String(m.agent_id||''); MY_IS_SUP=!!(m.is_supervisor); }
+    if(MY_IS_SUP) refreshL4();
   }).catch(function(){});
+
+  // B2：L4 高风险草稿 badge + 顶栏告警（主管专属）
+  var _l4Badge=document.getElementById('ws-l4-badge');
+  var _l4Prev=0;
+  function refreshL4(){
+    if(!MY_IS_SUP) return;
+    fetch('/api/drafts/risk-summary').then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok) return;
+      var l4=(d.by_level&&d.by_level['L4'])||0;
+      var l3=(d.by_level&&d.by_level['L3'])||0;
+      var high=l4+l3;
+      if(_l4Badge){
+        _l4Badge.style.display=l4?'inline-block':'none';
+        if(l4) _l4Badge.textContent='L4 '+l4;
+      }
+      // 草稿审批链接显示待审总数
+      var _dl=document.getElementById('ws-drafts-link');
+      if(_dl) _dl.textContent='草稿审批'+(high?'('+high+')':'');
+      // 新出现 L4 → loud toast（仅主管，仅增量触发）
+      if(l4>_l4Prev){
+        CRMW.toast('🚨 新增 L4 高风险草稿待审：共 '+l4+' 条（需主管放行）','#991b1b');
+      }
+      _l4Prev=l4;
+    }).catch(function(){});
+  }
 
   // SSE 实时刷新：跟进任务变更即时更新徽标（及待办页若打开）+ SLA 告警 toast
   try{
