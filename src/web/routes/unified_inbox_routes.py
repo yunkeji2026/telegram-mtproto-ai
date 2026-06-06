@@ -19,8 +19,11 @@ from fastapi.responses import HTMLResponse, Response
 from src.ai.chat_assistant_service import ChatAssistantService
 from src.ai.translation_service import TranslationService, detect_language
 from src.inbox.channel_adapters import (
+    ChannelSendError,
     collect_chats_via_adapters,
     default_inbox_adapters,
+    send_via_adapters,
+    status_via_adapters,
 )
 from src.inbox.ingest import ingest_collected_chats, ingest_thread
 from src.inbox.normalizer import (
@@ -1108,70 +1111,8 @@ def register_unified_inbox_routes(
         api_auth(request)
         limit = max(5, min(100, int(limit or 30)))
         chats = _chats_for_listing(request, limit=limit)
-        # 平台摘要（running 状态）
-        platform_status: Dict[str, Any] = {}
-        for svc in _get_line_services(request):
-            if svc is None:
-                continue
-            aid = getattr(svc, "account_id", "default")
-            try:
-                st = svc.status()
-                platform_status[f"line_{aid}"] = {
-                    "platform": "line",
-                    "account_id": aid,
-                    "label": (svc._merged_cfg if hasattr(svc, "_merged_cfg") else {}).get("label") or aid,
-                    "running": st.get("running", False),
-                    "serial": st.get("serial") or "",
-                }
-            except Exception:
-                pass
-        for svc in _get_whatsapp_services(request):
-            if svc is None:
-                continue
-            aid = getattr(svc, "account_id", "default")
-            try:
-                st = svc.status()
-                platform_status[f"wa_{aid}"] = {
-                    "platform": "whatsapp",
-                    "account_id": aid,
-                    "label": (svc._merged_cfg if hasattr(svc, "_merged_cfg") else {}).get("label") or aid,
-                    "running": st.get("running", False),
-                    "serial": st.get("serial") or "",
-                }
-            except Exception:
-                pass
-        msvc = _get_messenger_service(request)
-        if msvc:
-            try:
-                platform_status["messenger"] = {
-                    "platform": "messenger",
-                    "account_id": "default",
-                    "label": "Messenger",
-                    "running": msvc.is_running if hasattr(msvc, "is_running") else False,
-                }
-            except Exception:
-                pass
-        tg = _get_telegram_client(request)
-        platform_status["telegram"] = {
-            "platform": "telegram",
-            "account_id": "default",
-            "label": "Telegram",
-            "running": bool(getattr(tg, "running", False)) if tg else False,
-        }
-        # web 渠道：从配置读 account_id，running=enabled
-        try:
-            _wc_cfg = (config_manager.config or {}) if config_manager else {}
-            _web = (_wc_cfg.get("web_chat") or {}) if isinstance(_wc_cfg, dict) else {}
-            if _web.get("enabled"):
-                _waid = str(_web.get("account_id") or "web")
-                platform_status[f"web_{_waid}"] = {
-                    "platform": "web",
-                    "account_id": _waid,
-                    "label": str(_web.get("title") or "网页客服"),
-                    "running": True,
-                }
-        except Exception:
-            pass
+        # 平台运行状态（A2：收敛到各渠道适配器 status，与 collect/send 对称）
+        platform_status: Dict[str, Any] = status_via_adapters(request, _INBOX_ADAPTERS)
         # Phase 6-6：批量给会话挂 contact_id + 逾期跟进红点（contacts 启用时）
         try:
             _cstore = _contacts_store(request)
@@ -2830,110 +2771,15 @@ def register_unified_inbox_routes(
             except Exception:
                 logger.debug("record_agent_send 失败（已忽略）", exc_info=True)
 
-        if platform == "line":
-            svcs = _get_line_services(request)
-            target = next((s for s in svcs if getattr(s, "account_id", "default") == account_id), None)
-            if target is None and svcs:
-                target = svcs[0]
-            if target is None:
-                raise HTTPException(503, "LINE 服务未启用")
-            try:
-                result = await target.send_to_chat(chat_key=chat_key, text=text)
-                _mark_send(_conv_id("line", account_id, chat_key))
-                return {"ok": True, "result": result}
-            except AttributeError:
-                raise HTTPException(501, "LINE 暂不支持主动发送（需启用 approve 模式）")
-
-        elif platform == "whatsapp":
-            svcs = _get_whatsapp_services(request)
-            target = next((s for s in svcs if getattr(s, "account_id", "default") == account_id), None)
-            if target is None and svcs:
-                target = svcs[0]
-            if target is None:
-                raise HTTPException(503, "WhatsApp 服务未启用")
-            try:
-                result = await target.send_to_chat(chat_key=chat_key, text=text)
-                _mark_send(_conv_id("whatsapp", account_id, chat_key))
-                return {"ok": True, "result": result}
-            except AttributeError:
-                raise HTTPException(501, "WhatsApp 暂不支持主动发送（需启用 approve 模式）")
-
-        elif platform == "messenger":
-            msvc = _get_messenger_service(request)
-            if msvc is None:
-                raise HTTPException(503, "Messenger 服务未启用")
-            try:
-                result = await msvc.send_to_chat_name(chat_name=chat_key, text=text)
-                _mark_send(_conv_id("messenger", account_id, chat_key))
-                return {"ok": True, "result": result}
-            except Exception as ex:
-                raise HTTPException(500, str(ex))
-
-        elif platform == "telegram":
-            client = _get_telegram_client(request)
-            if client is None:
-                raise HTTPException(503, "Telegram 服务未启用")
-            sender = getattr(client, "send_message", None) or getattr(client, "send_text", None)
-            if not callable(sender):
-                raise HTTPException(501, "Telegram 暂不支持从统一收件箱发送")
-            try:
-                result = sender(chat_key, text)
-                if hasattr(result, "__await__"):
-                    result = await result
-                _mark_send(_conv_id("telegram", account_id, chat_key))
-                return {"ok": True, "result": result}
-            except Exception as ex:
-                raise HTTPException(500, str(ex))
-
-        elif platform == "web":
-            # 坐席人工接管：落库 + 推送给访客浏览器（SSE）+ 切 manual 让 AI 停
-            from src.integrations.web_chat.hub import get_web_outbound_hub
-            from src.integrations.web_chat.service import WebChatService
-            _wc = WebChatService.from_config(
-                (config_manager.config or {}) if config_manager else {}
+        # A2 写路径收尾：发送收敛到各渠道适配器（与 collect/status 对称）。
+        # 跨切面（坐席首响归属打点）统一留在路由，按 result.conversation_id 归属。
+        try:
+            result = await send_via_adapters(
+                request, platform, account_id, chat_key, text, _INBOX_ADAPTERS,
             )
-            visitor_id = chat_key
-            cid = _wc.conversation_id(visitor_id)
-            store = _inbox_store(request)
-            try:
-                _wc.record_message(store, visitor_id, text=text,
-                                   direction="out", display_name="")
-            except Exception:
-                logger.debug("[web_chat] 坐席出站落库失败", exc_info=True)
-            _mark_send(cid)
-            try:
-                get_web_outbound_hub().publish(cid, {
-                    "type": "web_outbound", "conversation_id": cid,
-                    "text": text, "by": "agent", "ts": time.time(),
-                })
-            except Exception:
-                logger.debug("[web_chat] 坐席出站推送失败", exc_info=True)
-            # 记入漏斗（坐席人工回复也是一次 msg_out）
-            _contacts = getattr(request.app.state, "contacts", None)
-            _hooks = getattr(_contacts, "hooks", None) if _contacts is not None else None
-            if _hooks is not None:
-                try:
-                    _hooks.on_message(
-                        channel="web", account_id=_wc.account_id, external_id=visitor_id,
-                        direction="out", text_preview=text[:120], trace_id="web-agent",
-                    )
-                except Exception:
-                    logger.debug("[web_chat] funnel(agent out) 失败", exc_info=True)
-            # 人工接管后默认停 AI（坐席可在工作台把模式切回 auto_ai 交还）
-            try:
-                _write_automation_mode(request, cid, "manual")
-            except Exception:
-                pass
-            try:
-                from src.integrations.shared.event_bus import get_event_bus
-                get_event_bus().publish("inbox_message", {
-                    "conversation_id": cid, "platform": "web",
-                    "account_id": _wc.account_id, "chat_key": visitor_id,
-                    "preview": text[:80], "direction": "out", "ts": time.time(),
-                })
-            except Exception:
-                pass
-            return {"ok": True, "result": {"delivered": True}}
-
-        else:
-            raise HTTPException(400, f"不支持的平台: {platform}")
+        except ChannelSendError as ex:
+            raise HTTPException(ex.status_code, ex.detail)
+        cid = (result.get("conversation_id") if isinstance(result, dict) else None) \
+            or _conv_id(platform, account_id, chat_key)
+        _mark_send(cid)
+        return {"ok": True, "result": result}

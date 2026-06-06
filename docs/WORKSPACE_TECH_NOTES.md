@@ -527,6 +527,28 @@ API：`GET /api/workspace/contact/{contact_id}` 一次返回 `{contact, timeline
 - **测试**：`test_inbox_readpath_a1` 增 13→若干例（平台白名单、`store_message_to_obj` 形状、
   ts 漂移去重、同文不同 id 不误并、thread flag on/off、实时源缺失时 store 兜底）。
 
+## 5ab. A2 写路径收尾：send/status 走 ChannelAdapter（蓝图 Phase A 地基）
+
+把发送与状态收敛到与读路径（`collect_chats`）对称的渠道适配器，消除路由里
+按平台的 if/elif 分发——新增渠道 = 新增一个适配器并注册，**核心三处（聚合/状态/发送）都不再改**。
+
+- **契约扩展**（`src/inbox/channel_adapters.py`）：`ChannelAdapter` 增
+  `status(request) -> {key: 状态dict}` 与 `async send(request, account_id, chat_key, text) -> result`。
+  五个适配器（line/whatsapp/messenger/telegram/web）各自实现。
+- **分发器**：`status_via_adapters` 汇总各平台状态（单适配器失败隔离）；
+  `send_via_adapters` 按 platform 路由，未知平台抛 `ChannelSendError(400)`。
+- **错误语义保持**：适配器抛 `ChannelSendError(status_code, detail)`，路由映射回
+  `HTTPException`（503 未启用 / 501 不支持主动发送 / 500 平台异常），与重构前一致。
+- **跨切面留在路由**：坐席首响归属打点 `_mark_send` 统一在路由按
+  `result.conversation_id`（取不到回落 `_conv_id`）归属，五平台一致。
+- **web 投递迁入 `WebInboxAdapter.send`**：落库 + SSE 推浏览器 + 漏斗 hook +
+  默认停 AI（set manual）+ inbox_message 事件，全部封装在适配器内（lazy import
+  web_chat/event_bus，避免 src/inbox 对上层硬依赖）；返回 `conversation_id` 供归属。
+- **决策**：web 作为服务端原生渠道，其"发送"语义与外部 RPA/client 不同，但仍纳入同一
+  适配器契约（与读路径 WebInboxAdapter 对称），路由层因此**完全无平台分支**。
+- **测试**：`test_channel_adapters` 增 status 合并/隔离、send 路由/未知 400/无服务 503/
+  telegram await 协程、web 投递落库+停 AI；既有四平台 send 冒烟（stage1）不变。
+
 ## 6. 明确不做（后续阶段）
 
 | 项 | 原因 |
