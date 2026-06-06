@@ -549,6 +549,55 @@ API：`GET /api/workspace/contact/{contact_id}` 一次返回 `{contact, timeline
 - **测试**：`test_channel_adapters` 增 status 合并/隔离、send 路由/未知 400/无服务 503/
   telegram await 协程、web 投递落库+停 AI；既有四平台 send 冒烟（stage1）不变。
 
+## 5ac. Phase 6-24：定向升级 / 指定主管指派
+
+**目标**：升级事件不再无差别广播——自动指派给负载最低的在线主管，
+前端 toast 仅对「指派给我」的主管发出 loud 通知，其他主管看 dim 灰色提示，
+普通坐席只看徽标不弹 toast。主管可从仪表盘手动转派。
+
+### Store 层（`src/inbox/store.py`）
+
+- **DDL**：`escalations` 表新增 `assigned_to TEXT NOT NULL DEFAULT ''`
+  + `idx_escalations_assigned` 索引。
+- **Migration**：`_MIGRATIONS = ["ALTER TABLE escalations ADD COLUMN assigned_to ..."]`
+  在 `__init__` 里执行（`except` 吞"列已存在"，幂等安全）。
+- **新方法**：
+  - `set_escalation_assigned(esc_id, assigned_to) -> bool`：按 id 更新指派人，返回是否有行命中。
+  - `count_assigned_escalations(agent_id, since_ts=0) -> int`：统计某主管 24 h 内指派数（负载均衡依据）。
+  - `list_my_escalations(agent_id, since_ts, limit) -> List[dict]`：返回指派给我的升级列表，
+    含 `taken_ts/taken_by/takeover_sec`（接管时延，供绩效分析）。
+
+### Routes 层（`src/web/routes/unified_inbox_routes.py`）
+
+- **`_pick_assigned_supervisor(inbox)`**：查在线 presence，
+  优先筛 `role in {master, admin}` 的主管，无则取全部在线人员；
+  取 `count_assigned_escalations` 最小者，返回其 `agent_id`（空串=回落广播）。
+- **`_esc_pushes()` 改造**：
+  1. `record_escalation(...)` 返回 `True`（新边沿）→ 调 `_pick_assigned_supervisor` → `set_escalation_assigned`。
+  2. 旧记录（`False`）→ 读 `list_escalations` 取已有 `assigned_to` 保持一致。
+  3. SSE 帧 payload 附 `assigned_to`，前端按此字段决定 toast 等级。
+- **`GET /api/workspace/escalations/mine`**（主管专属）：
+  调 `list_my_escalations(session_agent_id, since=days*86400)`；非主管返回空列表（不 403）。
+- **`POST /api/workspace/escalation/{esc_id}/assign`**（主管专属，403 on fail）：
+  body `{agent_id}` → `set_escalation_assigned`；未找到=404，空 agent_id=400。
+
+### Frontend（`workspace_base.html` + `workspace_dashboard.html`）
+
+- **`MY_AGENT_ID` / `MY_IS_SUP`**：首次加载即 fetch `/api/workspace/me`，
+  全局存储，供 SSE handler 及仪表盘判断权限。
+- **三级 toast**：
+  - `assigned_to == MY_AGENT_ID` → loud 紫色 toast，可点击跳转会话。
+  - 主管但非指派人 → dim 灰色 toast（'📋 升级（指派给 …）'）。
+  - 普通坐席 → 仅刷新徽标，无 toast。
+- **仪表盘升级卡**：行内显示 `assigned_to`，
+  指派给自己的标 `★指派给我`（紫色加粗），他人的显浅灰 `→ agent_id`。
+- **转派按钮**（主管专属）：`prompt` 输入新 agent_id → `POST /{esc_id}/assign` → 刷新列表。
+
+### 测试（`tests/test_workspace_phase624.py`）
+
+18 个用例，覆盖：Store 单元（set/count/list）、mine 端点权限（主管/非主管/无 store）、
+assign 端点（正常/403/404/400/503）、`/me` 角色字段、路由基线（两新路由在 openapi）。
+
 ## 6. 明确不做（后续阶段）
 
 | 项 | 原因 |

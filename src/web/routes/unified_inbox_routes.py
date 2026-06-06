@@ -1036,8 +1036,52 @@ def register_unified_inbox_routes(
 
         _esc_seen: set = set()
 
+        def _pick_assigned_supervisor(inbox) -> str:
+            """负载均衡：从在线主管中选当前指派数最少的那个。
+            都不在线或无法确定时返回空串（保留广播语义）。"""
+            if inbox is None:
+                return ""
+            try:
+                now = time.time()
+                since = now - 86400  # 24 h 窗口内的已指派数
+                candidates: List[Dict[str, Any]] = [
+                    p for p in inbox.list_agent_presence(
+                        active_within_sec=_presence_stale_sec(request))
+                    if p.get("status") in ("online", "busy")
+                    and p.get("agent_id") in _SUPERVISOR_ROLES.__class__.__mro__  # 占位，下面替换
+                ]
+                # 真正过滤主管：从 web_users 存储读角色
+                # 但 inbox_store 不关联 web_users → 降级：取全部在线坐席中 supervisor
+                # （实战中 presence 列表来自各坐席 POST /presence；无法区分角色）
+                # 简化策略：取在线 presence 中 role 字段为 master/admin 的；
+                # 若全无 role 字段，回落取全部在线人中负载最低的。
+                presence = inbox.list_agent_presence(
+                    active_within_sec=_presence_stale_sec(request))
+                online = [p for p in presence
+                          if p.get("status") in ("online", "busy")]
+                if not online:
+                    return ""
+                # 优先取有 supervisor role 的；无则取全部在线（团队规模小时合理）
+                sups = [p for p in online
+                        if str(p.get("role") or "") in _SUPERVISOR_ROLES]
+                pool = sups if sups else online
+                # 选指派数最少的
+                best = min(
+                    pool,
+                    key=lambda p: inbox.count_assigned_escalations(
+                        str(p["agent_id"]), since_ts=since),
+                )
+                return str(best.get("agent_id") or "")
+            except Exception:
+                logger.debug("auto-assign supervisor 失败（已忽略）", exc_info=True)
+                return ""
+
         def _esc_pushes():
-            """边沿触发：新升级会话 → 推送 escalation 帧 + 落审计（表级去重防多连接重复）。"""
+            """边沿触发：新升级 → 审计落库 + 自动指派主管 + 推定向 SSE 帧。
+
+            Phase 6-24：每条新升级自动指派给负载最低的在线主管（assigned_to）。
+            SSE 帧附带 assigned_to；前端据此决定是否显示 loud toast（指派给我）。
+            """
             frames: List[str] = []
             try:
                 snap = _escalation_snapshot(request)
@@ -1049,18 +1093,51 @@ def register_unified_inbox_routes(
                     if cid in _esc_seen:
                         continue
                     _esc_seen.add(cid)
+                    assigned_to = ""
                     if inbox is not None:
                         try:
-                            inbox.record_escalation(
+                            is_new = inbox.record_escalation(
                                 cid, reason=it.get("reason", ""),
                                 agent_id=it.get("agent_id", ""),
                                 agent_name=it.get("agent_name", ""),
                                 wait_sec=it.get("wait_sec", 0))
+                            if is_new:
+                                # 新升级：自动指派给负载最低在线主管
+                                assigned_to = _pick_assigned_supervisor(inbox)
+                                if assigned_to:
+                                    # 查刚插入的 esc_id 再更新 assigned_to
+                                    try:
+                                        rows = inbox.list_escalations(
+                                            since_ts=time.time() - 10, limit=5)
+                                        esc_id = next(
+                                            (r["id"] for r in rows
+                                             if r.get("conversation_id") == cid),
+                                            None)
+                                        if esc_id is not None:
+                                            inbox.set_escalation_assigned(
+                                                esc_id, assigned_to)
+                                    except Exception:
+                                        logger.debug("set_escalation_assigned 失败",
+                                                     exc_info=True)
+                            else:
+                                # 已有记录：查当前 assigned_to（保持前次指派）
+                                try:
+                                    rows = inbox.list_escalations(
+                                        since_ts=time.time() - 3600, limit=20)
+                                    existing = next(
+                                        (r for r in rows
+                                         if r.get("conversation_id") == cid), None)
+                                    assigned_to = str(
+                                        (existing or {}).get("assigned_to") or "")
+                                except Exception:
+                                    pass
                         except Exception:
                             logger.debug("升级审计落库失败（已忽略）", exc_info=True)
+                    payload = dict(it)
+                    payload["assigned_to"] = assigned_to
                     frames.append(
                         "data: " + _json.dumps(
-                            {"type": "escalation", "data": it},
+                            {"type": "escalation", "data": payload},
                             ensure_ascii=False) + "\n\n")
                 _esc_seen.intersection_update(cur)
             except Exception:
@@ -1800,6 +1877,46 @@ def register_unified_inbox_routes(
         """升级告警源（无人有效处理的严重超时；全局口径，不受个人静默影响）。"""
         api_auth(request)
         return _escalation_snapshot(request)
+
+    @app.get("/api/workspace/escalations/mine")
+    async def api_workspace_escalations_mine(
+        request: Request, days: int = 7,
+    ):
+        """我的指派升级列表（当前坐席被指派为责任主管的升级，含接管时延）。
+        主管专属；非主管返回空列表（不报 403，前端可安全轮询）。
+        """
+        api_auth(request)
+        if not _is_supervisor(request):
+            return {"ok": True, "items": [], "total": 0}
+        inbox = _inbox_store(request)
+        if inbox is None:
+            return {"ok": True, "items": [], "total": 0}
+        agent_id = _session_agent(request)["agent_id"]
+        since_ts = time.time() - int(max(1, min(90, days))) * 86400
+        items = inbox.list_my_escalations(
+            agent_id, since_ts=since_ts, limit=100)
+        return {"ok": True, "items": items, "total": len(items)}
+
+    @app.post("/api/workspace/escalation/{esc_id}/assign")
+    async def api_workspace_escalation_assign(
+        request: Request, esc_id: int,
+    ):
+        """主管手动将某条升级指派给另一位主管（reassign）。主管专属。
+        Body JSON: {"agent_id": "<target_supervisor_agent_id>"}
+        """
+        api_auth(request)
+        _require_supervisor(request)
+        inbox = _inbox_store(request)
+        if inbox is None:
+            raise HTTPException(503, "inbox 存储不可用")
+        body = await request.json()
+        target = str(body.get("agent_id") or "").strip()
+        if not target:
+            raise HTTPException(400, "agent_id 不能为空")
+        ok = inbox.set_escalation_assigned(esc_id, target)
+        if not ok:
+            raise HTTPException(404, f"升级记录 {esc_id} 不存在")
+        return {"ok": True, "esc_id": esc_id, "assigned_to": target}
 
     @app.get("/api/workspace/escalation-log")
     async def api_workspace_escalation_log(request: Request, days: int = 7):

@@ -179,11 +179,18 @@ CREATE TABLE IF NOT EXISTS escalations (
     agent_id          TEXT NOT NULL DEFAULT '',   -- 升级时的认领人(问责)
     agent_name        TEXT NOT NULL DEFAULT '',
     wait_sec          INTEGER NOT NULL DEFAULT 0,
-    ts                REAL NOT NULL DEFAULT 0
+    ts                REAL NOT NULL DEFAULT 0,
+    assigned_to       TEXT NOT NULL DEFAULT ''    -- 负责处理此次升级的主管 agent_id
 );
-CREATE INDEX IF NOT EXISTS idx_escalations_conv ON escalations(conversation_id, ts);
-CREATE INDEX IF NOT EXISTS idx_escalations_ts   ON escalations(ts);
+CREATE INDEX IF NOT EXISTS idx_escalations_conv     ON escalations(conversation_id, ts);
+CREATE INDEX IF NOT EXISTS idx_escalations_ts       ON escalations(ts);
+CREATE INDEX IF NOT EXISTS idx_escalations_assigned ON escalations(assigned_to, ts);
 """
+
+# 对存量 escalations 表补列（新安装已由 DDL 建好，旧库通过 migration 追加）
+_MIGRATIONS = [
+    "ALTER TABLE escalations ADD COLUMN assigned_to TEXT NOT NULL DEFAULT ''",
+]
 
 
 def _message_pk(conversation_id: str, platform_msg_id: str, text: str, ts: Any) -> str:
@@ -213,6 +220,11 @@ class InboxStore:
             self._conn.execute("PRAGMA busy_timeout=5000")
             self._conn.execute("PRAGMA synchronous=NORMAL")
             self._conn.executescript(_DDL)
+            for _sql in _MIGRATIONS:
+                try:
+                    self._conn.execute(_sql)
+                except Exception:
+                    pass  # 列已存在则忽略
             self._conn.commit()
 
     def close(self) -> None:
@@ -947,6 +959,73 @@ class InboxStore:
                 (float(since_ts), int(max(1, min(1000, limit)))),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    # ── Phase 6-24：定向升级 / 指定主管指派 ──────────────────────────
+
+    def set_escalation_assigned(self, esc_id: int, assigned_to: str) -> bool:
+        """把一条升级记录指派给指定主管（写 assigned_to，幂等）。返回是否有行更新。"""
+        aid = str(assigned_to or "").strip()
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE escalations SET assigned_to=? WHERE id=?",
+                (aid, int(esc_id)),
+            )
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    def count_assigned_escalations(
+        self, agent_id: str, since_ts: float = 0.0,
+    ) -> int:
+        """某主管在 since_ts 之后被指派的升级条数（用于负载均衡选最轻的主管）。"""
+        aid = str(agent_id or "").strip()
+        with self._lock:
+            return self._conn.execute(
+                "SELECT COUNT(*) FROM escalations "
+                "WHERE assigned_to=? AND ts>=?",
+                (aid, float(since_ts)),
+            ).fetchone()[0]
+
+    def list_my_escalations(
+        self,
+        agent_id: str,
+        since_ts: float = 0.0,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """返回指派给 agent_id 的升级列表（主管个人视图，含接管时延）。"""
+        aid = str(agent_id or "").strip()
+        sql = (
+            "SELECT e.id AS id, e.conversation_id AS cid, e.reason AS reason, "
+            "  e.agent_id AS agent_id, e.agent_name AS agent_name, "
+            "  e.wait_sec AS wait_sec, e.ts AS ts, e.assigned_to AS assigned_to, "
+            "  (SELECT MIN(s.ts) FROM agent_sends s "
+            "   WHERE s.conversation_id=e.conversation_id AND s.ts>=e.ts) AS taken_ts, "
+            "  (SELECT s.agent_id FROM agent_sends s "
+            "   WHERE s.conversation_id=e.conversation_id AND s.ts>=e.ts "
+            "   ORDER BY s.ts ASC LIMIT 1) AS taken_by "
+            "FROM escalations e WHERE e.assigned_to=? AND e.ts>=? "
+            "ORDER BY e.ts DESC LIMIT ?"
+        )
+        with self._lock:
+            rows = self._conn.execute(
+                sql, (aid, float(since_ts), int(max(1, min(500, limit))))
+            ).fetchall()
+        out = []
+        for r in rows:
+            taken = r["taken_ts"]
+            out.append({
+                "id": int(r["id"]),
+                "conversation_id": str(r["cid"]),
+                "reason": str(r["reason"] or ""),
+                "agent_id": str(r["agent_id"] or ""),
+                "agent_name": str(r["agent_name"] or ""),
+                "wait_sec": int(r["wait_sec"] or 0),
+                "ts": float(r["ts"] or 0),
+                "assigned_to": str(r["assigned_to"] or ""),
+                "taken_ts": float(taken) if taken is not None else None,
+                "taken_by": str(r["taken_by"]) if r["taken_by"] is not None else "",
+                "takeover_sec": int(float(taken) - float(r["ts"])) if taken else None,
+            })
+        return out
 
     def list_conversation_claims(self) -> List[Dict[str, Any]]:
         self.purge_expired_claims()

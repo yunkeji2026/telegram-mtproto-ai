@@ -396,7 +396,9 @@ _BASELINE = """
 /api/workspace/daily-report.csv	GET
 /api/workspace/dashboard	GET
 /api/workspace/escalation-log	GET
+/api/workspace/escalation/{esc_id}/assign	POST
 /api/workspace/escalations	GET
+/api/workspace/escalations/mine	GET
 /api/workspace/follow-up/{task_id}/assign	POST
 /api/workspace/follow-up/{task_id}/done	POST
 /api/workspace/follow-up/{task_id}/snooze	POST
