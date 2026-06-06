@@ -13,7 +13,12 @@ from __future__ import annotations
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
-from src.inbox.normalizer import store_row_to_chat
+from src.inbox.ingest import ingest_collected_chats, ingest_thread
+from src.inbox.normalizer import (
+    extract_platform_msg_id,
+    store_message_to_obj,
+    store_row_to_chat,
+)
 from src.inbox.store import InboxStore
 from src.web.routes.unified_inbox_routes import register_unified_inbox_routes
 
@@ -150,4 +155,153 @@ def test_shadow_read_consistency(tmp_path):
     # store 视图应覆盖实时聚合产生的全部会话（事实源已落库）
     assert live_ids, "live aggregation should produce conversations"
     assert live_ids <= stored_ids, f"store 缺失会话: {live_ids - stored_ids}"
+    store.close()
+
+
+# ── 稳定 message id（按平台白名单抽取）─────────────────────────────
+
+def test_extract_platform_msg_id_per_platform():
+    assert extract_platform_msg_id({"id": 123}, "telegram") == "123"
+    assert extract_platform_msg_id({"wamid": "ABC"}, "whatsapp") == "ABC"
+    assert extract_platform_msg_id({"mid": "x"}, "messenger") == "x"
+    # LINE 不取裸 id（房间 id），仅取 message_id/server_id
+    assert extract_platform_msg_id({"id": "room1"}, "line") == ""
+    assert extract_platform_msg_id({"message_id": "m1", "id": "room1"}, "line") == "m1"
+    # 未知平台默认只认 message_id
+    assert extract_platform_msg_id({"message_id": "z"}, "x") == "z"
+    assert extract_platform_msg_id({}, "telegram") == ""
+    assert extract_platform_msg_id(None, "telegram") == ""
+
+
+def test_store_message_to_obj_shape():
+    row = {
+        "message_id": "telegram:default:r:42", "platform_msg_id": "42",
+        "direction": "in", "text": "hi", "original_text": "hi",
+        "translated_text": "你好", "source_lang": "en", "target_lang": "zh",
+        "ts": 100, "media_type": "", "media_ref": "",
+    }
+    obj = store_message_to_obj(row)
+    assert obj["from_store"] is True
+    assert obj["message_id"] == "telegram:default:r:42"
+    assert obj["platform_msg_id"] == "42"
+    assert obj["translated_text"] == "你好"
+    assert obj["translation"]["provider"] == "store"
+    assert obj["translation"]["ok"] is True
+    # 无译文 + 非中文 → ok=False（待译）
+    obj2 = store_message_to_obj({"text": "hello", "source_lang": "en"})
+    assert obj2["translation"]["ok"] is False
+
+
+def test_stable_id_dedup_survives_ts_drift(tmp_path):
+    """同一条消息（同平台 id）即使 ts 漂移，也只去重为一条；hash 兜底则会重复。"""
+    store = InboxStore(tmp_path / "inbox.db")
+    chat = {
+        "conversation_id": "telegram:default:room", "platform": "telegram",
+        "account_id": "default", "chat_key": "room", "name": "U",
+        "last_msg": "hi", "last_ts": 100,
+        "last_message": {"text": "hi", "ts": 100, "direction": "in",
+                         "source": {"id": 555}},
+    }
+    # collect 路径：last_message ts=100, id=555
+    ingest_collected_chats(store, [chat])
+    # thread 路径：同 id=555 但 ts 漂移到 101（RPA 重抓常见）
+    ingest_thread(store, chat, [{"text": "hi", "ts": 101, "direction": "in",
+                                 "source": {"id": 555}}])
+    msgs = store.list_messages("telegram:default:room")
+    assert len(msgs) == 1, "稳定平台 id 应跨 ts 漂移去重为一条"
+    assert msgs[0]["platform_msg_id"] == "555"
+    store.close()
+
+
+def test_distinct_ids_not_collapsed_even_if_same_text(tmp_path):
+    """同文本同秒但平台 id 不同 → 两条（hash 兜底会误并为一条）。"""
+    store = InboxStore(tmp_path / "inbox.db")
+    chat = {
+        "conversation_id": "whatsapp:wa1:peer", "platform": "whatsapp",
+        "account_id": "wa1", "chat_key": "peer", "name": "P",
+        "last_msg": "ok", "last_ts": 200,
+    }
+    ingest_thread(store, chat, [
+        {"text": "ok", "ts": 200, "direction": "in", "source": {"wamid": "A"}},
+        {"text": "ok", "ts": 200, "direction": "in", "source": {"wamid": "B"}},
+    ])
+    msgs = store.list_messages("whatsapp:wa1:peer")
+    assert len(msgs) == 2, "不同 wamid 不应被内容哈希误并"
+    assert {m["platform_msg_id"] for m in msgs} == {"A", "B"}
+    store.close()
+
+
+# ── thread 读路径收尾（store-backed history）──────────────────────
+
+class _TgClientWithIds:
+    running = True
+    _recent_messages = [
+        {"chat_id": "tg-room", "user_name": "TG", "text": "你好", "ts": 130, "id": 7001},
+        {"chat_id": "tg-room", "user_name": "TG", "text": "在吗", "ts": 131, "id": 7002},
+    ]
+
+
+def _thread_client(read_from_store):
+    app = FastAPI()
+
+    def page_auth(request: Request):
+        return True
+
+    def api_auth(request: Request):
+        return True
+
+    register_unified_inbox_routes(app, page_auth=page_auth, api_auth=api_auth,
+                                  templates=_Templates())
+    app.state.telegram_client = _TgClientWithIds()
+    app.state.config_manager = _Cfg(read_from_store)
+    return app
+
+
+def test_thread_flag_off_is_live(tmp_path):
+    app = _thread_client(read_from_store=False)
+    app.state.inbox_store = InboxStore(tmp_path / "i.db")
+    c = TestClient(app)
+    data = c.get("/api/unified-inbox/thread?platform=telegram&chat_key=tg-room").json()
+    assert data["ok"] is True
+    assert data["messages"]
+    assert all(not m.get("from_store") for m in data["messages"])
+
+
+def test_thread_flag_on_reads_from_store(tmp_path):
+    app = _thread_client(read_from_store=True)
+    app.state.inbox_store = InboxStore(tmp_path / "i.db")
+    c = TestClient(app)
+    data = c.get("/api/unified-inbox/thread?platform=telegram&chat_key=tg-room").json()
+    assert data["ok"] is True
+    assert data["messages"], "store-backed thread 应返回历史"
+    assert all(m.get("from_store") for m in data["messages"])
+    # 稳定 id 持久：platform_msg_id 来自 MTProto id
+    pids = {m.get("platform_msg_id") for m in data["messages"]}
+    assert "7001" in pids and "7002" in pids
+    app.state.inbox_store.close()
+
+
+def test_thread_served_from_store_when_not_live(tmp_path):
+    """会话已不在实时聚合窗口，但 store 有持久档 → 仍能从 store 读出历史 + header。"""
+    store = InboxStore(tmp_path / "i.db")
+    # 预先把一条历史落库（模拟此前已 ingest），实时源此刻无该会话
+    cid = "line:line-a:gone-room"
+    chat = {
+        "conversation_id": cid, "platform": "line", "account_id": "line-a",
+        "chat_key": "gone-room", "name": "Old User", "last_msg": "再见", "last_ts": 50,
+    }
+    ingest_thread(store, chat, [{"text": "再见", "ts": 50, "direction": "in",
+                                 "source": {"message_id": "L1"}}])
+    app = FastAPI()
+    register_unified_inbox_routes(app, page_auth=lambda r: True,
+                                  api_auth=lambda r: True, templates=_Templates())
+    app.state.telegram_client = _TgClientWithIds()  # 实时源里没有 line gone-room
+    app.state.config_manager = _Cfg(True)
+    app.state.inbox_store = store
+    c = TestClient(app)
+    data = c.get("/api/unified-inbox/thread"
+                 "?platform=line&account_id=line-a&chat_key=gone-room").json()
+    assert data["ok"] is True
+    assert data["messages"] and data["messages"][0]["from_store"] is True
+    assert data["chat"] is not None and data["chat"]["conversation_id"] == cid
     store.close()

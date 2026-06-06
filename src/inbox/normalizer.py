@@ -32,6 +32,39 @@ def conv_id(platform: str, account_id: str, chat_key: str) -> str:
     return f"{platform}:{account_id}:{chat_key}"
 
 
+# 各平台「可信消息 id」字段白名单（用于稳定去重）。
+# 刻意按平台精确取：例如 LINE 的 source 行常是**会话**行，其 `id` 是房间 id 而非
+# 消息 id，故 LINE 不取裸 `id`（避免把房间 id 误当消息 id 折叠整个会话）。
+# 未命中白名单 → 返回空串，store 回落 hash(text|ts) 内容去重。
+_PLATFORM_MSG_ID_FIELDS = {
+    "telegram":  ("id", "message_id"),         # MTProto message.id
+    "whatsapp":  ("wamid", "message_id", "msg_id"),
+    "messenger": ("mid", "message_id"),
+    "line":      ("message_id", "server_id"),  # 不取裸 id（房间 id）
+    "web":       ("message_id", "id"),
+}
+
+
+def extract_platform_msg_id(source: Optional[Dict[str, Any]], platform: str = "") -> str:
+    """从平台原始 source 里提取**可信**的稳定消息 id（按平台白名单）。
+
+    取不到则返回空串（调用方/ store 会回落 hash(text|ts) 内容去重）。
+    这是「稳定 message id」的唯一抽取点：让 collect / thread 两条路径对同一条消息
+    产出同一个去重键，且避免 ts 漂移导致重复、同文本同秒被误并。
+    """
+    if not isinstance(source, dict):
+        return ""
+    fields = _PLATFORM_MSG_ID_FIELDS.get(str(platform or "").lower(), ("message_id",))
+    for f in fields:
+        v = source.get(f)
+        if v is None:
+            continue
+        s = str(v).strip()
+        if s:
+            return s
+    return ""
+
+
 def message_obj(
     *,
     text: str,
@@ -139,6 +172,41 @@ def store_row_to_chat(
         "automation_mode": mode,
         "risk": {"level": risk_level, "reasons": []},
         "relationship": {"stage": "", "intimacy_score": None},
+        "source": {},
+        "from_store": True,
+    }
+
+
+def store_message_to_obj(row: Dict[str, Any]) -> Dict[str, Any]:
+    """把 InboxStore.list_messages/list_recent_messages 的一行映射回 thread 消息 dict。
+
+    A1 读路径收尾用：store 持久消息行 → 与实时 `message_obj` 同形状的 thread 行，
+    使会话历史可跨重启/跨平台从事实源读出（前端零改动）。译文若已落库直接复用，
+    避免重复翻译；source 不持久故为 {}。
+    """
+    text = str(row.get("text") or "")
+    src_lang = str(row.get("source_lang") or "unknown")
+    translated = str(row.get("translated_text") or "")
+    direction = row.get("direction")
+    has_tr = bool(translated) and translated != text
+    return {
+        "message_id": str(row.get("message_id") or ""),
+        "platform_msg_id": str(row.get("platform_msg_id") or ""),
+        "direction": direction if direction in {"in", "out"} else "in",
+        "text": text,
+        "original_text": str(row.get("original_text") or text),
+        "translated_text": translated or text,
+        "language": src_lang,
+        "translation": {
+            "source_lang": src_lang,
+            "target_lang": str(row.get("target_lang") or "zh"),
+            "ok": has_tr or src_lang in {"zh", "unknown"} or not text.strip(),
+            "provider": "store" if has_tr else ("identity" if src_lang == "zh" else "none"),
+            "error": "",
+        },
+        "ts": row.get("ts") or 0,
+        "media_type": str(row.get("media_type") or ""),
+        "media_ref": str(row.get("media_ref") or ""),
         "source": {},
         "from_store": True,
     }

@@ -14,21 +14,24 @@ import logging
 from typing import Any, Dict, List
 
 from .models import InboxConversation, InboxMessage
+from .normalizer import extract_platform_msg_id
 
 logger = logging.getLogger(__name__)
 
 
-def _msg_from_obj(conversation_id: str, m: Dict[str, Any], *, direction: str = "") -> InboxMessage:
+def _msg_from_obj(
+    conversation_id: str, m: Dict[str, Any], *, direction: str = "", platform: str = "",
+) -> InboxMessage:
     text = str(m.get("text") or "")
-    # 注意：当前 unified_inbox 聚合出的 message dict 不带可信的稳定平台 id
-    # （Telegram 是循环下标、RPA 源多为空），不同代码路径（collect vs thread）
-    # 对同一条消息会编出不同 id。因此 bypass ingest 一律按内容去重
-    # （platform_msg_id 留空 → store 用 hash(text|ts) 作主键），跨路径一致。
-    # 真正稳定的平台 id（MTProto message.id / WhatsApp wamid）随增量 2 的
-    # ChannelAdapter（官方 API）接入后再填，届时 store 会自动改用 id 去重。
+    # 稳定 message id：从平台原始 source 按白名单提取可信 id（MTProto message.id /
+    # WhatsApp wamid 等），让 collect / thread 两条路径对同一条消息产出同一去重键。
+    # 取不到（多数 RPA 源）→ 留空，store 回落 hash(text|ts) 内容去重（跨路径仍一致，
+    # 因为两路径同文本同 ts）。LINE 不取裸 id（房间 id），见 normalizer 白名单。
+    src = m.get("source") if isinstance(m.get("source"), dict) else {}
+    pid = extract_platform_msg_id(src, platform)
     return InboxMessage(
         conversation_id=conversation_id,
-        platform_msg_id="",
+        platform_msg_id=pid,
         direction=direction or str(m.get("direction") or "in"),
         text=text,
         original_text=str(m.get("original_text") or text),
@@ -86,7 +89,7 @@ def ingest_collected_chats(
         msgs: List[InboxMessage] = []
         lm = chat.get("last_message") or {}
         if isinstance(lm, dict) and lm.get("text"):
-            msgs.append(_msg_from_obj(conv.conversation_id, lm))
+            msgs.append(_msg_from_obj(conv.conversation_id, lm, platform=conv.platform))
         n = store.ingest_batch(conv, msgs)
         inserted += n
         if publish_events and n > 0 and isinstance(lm, dict) \
@@ -103,7 +106,7 @@ def ingest_thread(store, chat: Dict[str, Any], messages: List[Dict[str, Any]]) -
     if not conv.conversation_id or not conv.platform:
         return 0
     msgs = [
-        _msg_from_obj(conv.conversation_id, m)
+        _msg_from_obj(conv.conversation_id, m, platform=conv.platform)
         for m in (messages or [])
         if isinstance(m, dict) and m.get("text")
     ]

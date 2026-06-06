@@ -28,6 +28,7 @@ from src.inbox.normalizer import (
     conv_id,
     message_obj,
     normalize_chat,
+    store_message_to_obj,
     store_row_to_chat,
 )
 
@@ -925,6 +926,43 @@ def _chats_for_listing(request: Request, limit: int = 30) -> List[Dict[str, Any]
     return live
 
 
+def _thread_messages_from_store(
+    request: Request, conversation_id: str, limit: int = 50,
+) -> Optional[List[Dict[str, Any]]]:
+    """A1 读路径收尾：从 InboxStore 读会话历史（持久事实源），映射回 thread 消息形状。
+
+    返回 None=store 不可用；返回 []=store 中该会话无消息（调用方据此决定是否回落实时）。
+    """
+    store = _inbox_store(request)
+    if store is None:
+        return None
+    try:
+        rows = store.list_recent_messages(conversation_id, limit=limit)
+    except Exception:
+        logger.debug("store thread 读取失败（已忽略）", exc_info=True)
+        return None
+    return [store_message_to_obj(r) for r in rows]
+
+
+def _store_conv_as_chat(request: Request, conversation_id: str) -> Optional[Dict[str, Any]]:
+    """从 store 取持久会话行并映射为 chat dict（thread 在实时源已无该会话时兜底 header）。"""
+    store = _inbox_store(request)
+    if store is None:
+        return None
+    try:
+        row = store.get_conversation(conversation_id)
+    except Exception:
+        return None
+    if not row:
+        return None
+    mode = _read_automation_mode(request, conversation_id)
+    try:
+        mc = store.count_messages(conversation_id)
+    except Exception:
+        mc = 0
+    return store_row_to_chat(row, automation_mode=mode, message_count=mc)
+
+
 # ── 路由注册 ─────────────────────────────────────────────────────────────
 
 def register_unified_inbox_routes(
@@ -1226,11 +1264,21 @@ def register_unified_inbox_routes(
         if not messages and target:
             messages = list(target.get("messages") or [])
 
-        # 操作员打开会话时把较完整历史落库（best-effort）
+        # 操作员打开会话时把较完整历史落库（best-effort，先于 store 读以保证新鲜）
         _ingest_thread_best_effort(request, target, messages)
 
-        out_msgs = messages[-limit:]
         cid = _conv_id(platform, account_id, chat_key)
+        out_msgs = messages[-limit:]
+        # A1 读路径收尾：flag on + store 可用时，会话历史改读持久事实源
+        # （跨重启/跨平台、稳定 id 去重）；store 无该会话消息则回落实时聚合结果。
+        if _read_from_store_enabled(request):
+            stored_msgs = _thread_messages_from_store(request, cid, limit=limit)
+            if stored_msgs:
+                out_msgs = stored_msgs
+            # 实时源已无该会话（未在最近聚合窗口内）但 store 有持久档 → 兜底 header
+            if target is None:
+                target = _store_conv_as_chat(request, cid)
+
         translate_stats: Dict[str, Any] = {"enabled": False}
         try:
             from src.workspace.inbound_translate import enrich_inbound_translations
