@@ -101,6 +101,21 @@
     </div>
     <div id="db-metrics" style="margin-top:10px;"><span style="color:#94a3b8;font-size:13px;">加载中…</span></div>
   </div>
+  <!-- N3 CSAT 坐席排行榜（主管专属） -->
+  <div class="db-sec" id="db-leaderboard-sec" style="display:none;">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h3 style="margin:0;">🏆 绩效排行榜</h3>
+      <div style="display:flex;gap:6px;">
+        <select id="db-lb-period" style="font-size:11px;padding:2px 6px;border:1px solid #e2e8f0;border-radius:4px;cursor:pointer;" onchange="window._lbRefresh()">
+          <option value="daily">今日</option>
+          <option value="weekly" selected>本周</option>
+          <option value="monthly">本月</option>
+        </select>
+        <button onclick="window._lbRefresh()" style="font-size:11px;padding:2px 8px;border:1px solid #2563eb;border-radius:4px;background:#eff6ff;color:#2563eb;cursor:pointer;">刷新</button>
+      </div>
+    </div>
+    <div id="db-leaderboard" style="margin-top:10px;"><span style="color:#94a3b8;font-size:13px;">加载中…</span></div>
+  </div>
   <!-- M2 工作简报（主管专属） -->
   <div class="db-sec" id="db-report-sec" style="display:none;">
     <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -324,6 +339,49 @@
     }).catch(function(){ if(el) el.innerHTML='<span style="color:#94a3b8;font-size:12px;">指标加载失败</span>'; });
   }
 
+  // N3: CSAT 排行榜（主管专属）
+  function loadLeaderboard(){
+    var sec=document.getElementById('db-leaderboard-sec');
+    var el=document.getElementById('db-leaderboard');
+    if(!sec||!IS_SUP) return;
+    sec.style.display='';
+    var period=(document.getElementById('db-lb-period')||{}).value||'weekly';
+    fetch('/api/workspace/leaderboard?period='+period)
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        var lb=(d&&d.leaderboard)||[];
+        if(!lb.length){
+          el.innerHTML='<span style="color:#94a3b8;font-size:13px;">暂无数据（该周期内无处置记录）</span>';
+          return;
+        }
+        var html='<table style="width:100%;border-collapse:collapse;font-size:12px;">'
+          +'<thead><tr style="color:#64748b;border-bottom:2px solid #e2e8f0;">'
+          +'<th style="text-align:left;padding:4px 6px;width:36px;">排名</th>'
+          +'<th style="text-align:left;padding:4px 6px;">坐席</th>'
+          +'<th style="text-align:right;padding:4px 6px;">CSAT</th>'
+          +'<th style="text-align:right;padding:4px 6px;">处理</th>'
+          +'<th style="text-align:right;padding:4px 6px;">批准</th>'
+          +'<th style="text-align:right;padding:4px 6px;">自动</th>'
+          +'</tr></thead><tbody>';
+        lb.forEach(function(p){
+          var csat=p.avg_csat!=null?p.avg_csat.toFixed(1)+'⭐':'—';
+          var csatColor=p.avg_csat==null?'#94a3b8':p.avg_csat>=4.5?'#16a34a':p.avg_csat>=3.5?'#d97706':'#dc2626';
+          var rowBg=p.rank===1?'#fffbeb':p.rank===2?'#f8fafc':p.rank===3?'#fff7ed':'';
+          html+='<tr style="border-bottom:1px solid #f1f5f9;background:'+rowBg+';">'
+            +'<td style="padding:5px 6px;font-weight:700;font-size:14px;">'+(p.badge||p.rank)+'</td>'
+            +'<td style="padding:5px 6px;font-weight:600;">'+esc(p.agent_id||'—')+'</td>'
+            +'<td style="padding:5px 6px;text-align:right;color:'+csatColor+';font-weight:700;">'+csat+'</td>'
+            +'<td style="padding:5px 6px;text-align:right;">'+((p.total)||0)+'</td>'
+            +'<td style="padding:5px 6px;text-align:right;">'+((p.approved)||0)+'</td>'
+            +'<td style="padding:5px 6px;text-align:right;color:#16a34a;">'+((p.autosend)||0)+'</td>'
+            +'</tr>';
+        });
+        html+='</tbody></table>';
+        el.innerHTML=html;
+      })
+      .catch(function(){ if(el) el.innerHTML='<span style="color:#94a3b8;font-size:12px;">排行榜加载失败</span>'; });
+  }
+  window._lbRefresh=function(){ loadLeaderboard(); };
   // M2: 工作简报（主管专属）
   var _reportData = null;
   function loadReport(){
@@ -526,7 +584,7 @@
     }
     load(); setInterval(load, 60000);
     loadEsc(); setInterval(loadEsc, 60000);
-    if(IS_SUP){ loadRisk(); setInterval(loadRisk, 60000); loadPresence(); setInterval(loadPresence, 30000); loadMetrics(); setInterval(loadMetrics, 60000); loadReport(); }
+    if(IS_SUP){ loadRisk(); setInterval(loadRisk, 60000); loadPresence(); setInterval(loadPresence, 30000); loadMetrics(); setInterval(loadMetrics, 60000); loadReport(); loadLeaderboard(); setInterval(loadLeaderboard, 120000); }
     loadHealth(); setInterval(loadHealth, 60000);
 
     // L3：一键 L2 自动发（主管快速操作）
