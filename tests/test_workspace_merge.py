@@ -1608,6 +1608,50 @@ class TestEscalationAudit:
         inbox.close()
 
 
+class TestEscalationLog:
+    """Phase 6-22：升级历史 + 接管时延。"""
+
+    def test_takeovers_store(self, tmp_path):
+        import time
+        from src.inbox.store import InboxStore
+        store = InboxStore(tmp_path / "i.db")
+        now = time.time()
+        # 升级 A 在 now-300，接管在 now-240 → 时延 60
+        store.record_escalation("web:web:A", reason="unclaimed", ts=now - 300)
+        store.record_agent_send("web:web:A", "ag1", agent_name="A", ts=now - 240)
+        # 升级 B 无接管
+        store.record_escalation("web:web:B", reason="holder_offline", ts=now - 100)
+        rows = {r["conversation_id"]: r for r in store.escalation_takeovers(0)}
+        assert int(rows["web:web:A"]["taken_ts"] - rows["web:web:A"]["ts"]) == 60
+        assert rows["web:web:A"]["taken_by"] == "ag1"
+        assert rows["web:web:B"]["taken_ts"] is None
+        # 接管必须晚于升级：A 升级前的发送不算
+        store.record_escalation("web:web:C", reason="unclaimed", ts=now)
+        store.record_agent_send("web:web:C", "ag2", ts=now - 9999)
+        rows2 = {r["conversation_id"]: r for r in store.escalation_takeovers(0)}
+        assert rows2["web:web:C"]["taken_ts"] is None
+        store.close()
+
+    def test_escalation_log_endpoint(self, cstore, gateway):
+        import time
+        from src.inbox.store import InboxStore
+        d = tempfile.mkdtemp()
+        inbox = InboxStore(Path(d) / "i.db")
+        now = time.time()
+        inbox.record_escalation("web:web:X", reason="unclaimed", ts=now - 200)
+        inbox.record_agent_send("web:web:X", "ag1", ts=now - 140)  # 时延 60
+        inbox.record_escalation("web:web:Y", reason="holder_offline", ts=now - 50)
+        cli = _client_with_inbox(cstore, gateway, inbox)
+        d2 = cli.get("/api/workspace/escalation-log?days=7").json()
+        assert d2["ok"] is True
+        st = d2["stats"]
+        assert st["total"] == 2
+        assert st["taken"] == 1
+        assert st["taken_rate"] == 50.0
+        assert st["avg_takeover_sec"] == 60
+        inbox.close()
+
+
 class TestCrmWidgetsAsset:
     """Phase 6-13：共享前端组件抽取的静态资产与挂载守卫。"""
 

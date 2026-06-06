@@ -1788,6 +1788,49 @@ def register_unified_inbox_routes(
         api_auth(request)
         return _escalation_snapshot(request)
 
+    @app.get("/api/workspace/escalation-log")
+    async def api_workspace_escalation_log(request: Request, days: int = 7):
+        """升级历史 + 接管时延（复盘安全网成效）：升级→首个人工接管。"""
+        api_auth(request)
+        inbox = _inbox_store(request)
+        if inbox is None:
+            return {"ok": True, "days": 7, "items": [], "stats": {}}
+        span = 30 if int(days or 7) >= 30 else 7
+        now = int(time.time())
+        lt = time.localtime(now)
+        midnight = int(time.mktime(
+            (lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1)))
+        since = midnight - (span - 1) * 86400
+        convs = {str(c.get("conversation_id") or ""): c
+                 for c in inbox.list_conversations(limit=500)}
+        rows = inbox.escalation_takeovers(since, limit=500)
+        taken_n = 0
+        dly_sum = 0.0
+        reasons: Dict[str, int] = {}
+        items: List[Dict[str, Any]] = []
+        for r in rows:
+            c = convs.get(r["conversation_id"]) or {}
+            delay = (int(r["taken_ts"] - r["ts"])
+                     if r["taken_ts"] is not None else None)
+            if delay is not None:
+                taken_n += 1
+                dly_sum += delay
+            reasons[r["reason"]] = reasons.get(r["reason"], 0) + 1
+            items.append({
+                **r,
+                "platform": str(c.get("platform") or ""),
+                "name": str(c.get("display_name") or c.get("chat_key")
+                            or r["conversation_id"]),
+                "takeover_sec": delay,
+            })
+        total = len(items)
+        return {"ok": True, "days": span, "items": items, "stats": {
+            "total": total, "taken": taken_n,
+            "taken_rate": round(taken_n / total * 100, 1) if total else 0.0,
+            "avg_takeover_sec": int(dly_sum / taken_n) if taken_n else 0,
+            "reasons": reasons,
+        }}
+
     @app.get("/api/workspace/prefs")
     async def api_workspace_prefs_get(request: Request):
         """当前坐席告警偏好 + 全局默认阈值（供设置面板回显）。"""
@@ -2447,6 +2490,22 @@ def register_unified_inbox_routes(
         except Exception:
             pass
         return templates.TemplateResponse(request, "workspace_dashboard.html", ctx)
+
+    @app.get("/workspace/escalations", response_class=HTMLResponse)
+    async def workspace_escalations_page(request: Request, _=Depends(page_auth)):
+        ctx: Dict[str, Any] = {
+            "user_name": request.session.get("username") or "",
+            "user_display_name": request.session.get("display_name")
+            or request.session.get("username") or "",
+        }
+        try:
+            if config_manager is not None:
+                _wa = (config_manager.config or {}).get("web_admin", {}) or {}
+                if _wa.get("site_name"):
+                    ctx["site_name"] = _wa.get("site_name")
+        except Exception:
+            pass
+        return templates.TemplateResponse(request, "escalation_log.html", ctx)
 
     @app.get("/api/unified-inbox/templates")
     async def api_unified_inbox_templates(request: Request):

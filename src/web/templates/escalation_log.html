@@ -1,0 +1,79 @@
+{% extends "workspace_base.html" %}
+{% block title %}升级历史{% endblock %}
+{% block head %}
+<style>
+  .el-wrap{height:100%;display:flex;flex-direction:column;background:#f7f8fa;}
+  .el-bar{padding:12px 18px;background:#fff;border-bottom:1px solid #e5e7eb;display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+  .el-bar a.back{font-size:12px;color:#2563eb;text-decoration:none;}
+  .el-sel{border:1px solid #d1d5db;border-radius:7px;padding:7px 9px;font-size:13px;background:#fff;}
+  .el-stats{display:flex;gap:10px;flex-wrap:wrap;padding:12px 18px;}
+  .el-card{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px 14px;min-width:120px;}
+  .el-num{font-size:20px;font-weight:700;color:#0f172a;}
+  .el-lbl{font-size:12px;color:#64748b;margin-top:2px;}
+  .el-list{flex:1;overflow-y:auto;padding:0 18px 18px;}
+  .el-row{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px 14px;margin-bottom:8px;display:flex;align-items:center;gap:12px;}
+  .el-name{font-weight:600;font-size:14px;cursor:pointer;color:#111827;}
+  .el-name:hover{color:#2563eb;}
+  .el-meta{font-size:12px;color:#64748b;margin-top:3px;}
+  .el-rz{display:inline-block;font-size:10px;font-weight:600;border-radius:5px;padding:1px 6px;background:#ede9fe;color:#6d28d9;}
+  .el-right{margin-left:auto;text-align:right;white-space:nowrap;}
+  .el-taken{color:#16a34a;font-weight:600;} .el-pending{color:#dc2626;font-weight:600;}
+</style>
+{% endblock %}
+{% block content %}
+<div class="el-wrap">
+  <div class="el-bar">
+    <a class="back" href="/workspace/dash">← 概览</a>
+    <span style="font-weight:600;">升级历史 / 接管时延</span>
+    <select class="el-sel" id="el-days" onchange="EL.load()">
+      <option value="7">近 7 日</option>
+      <option value="30">近 30 日</option>
+    </select>
+  </div>
+  <div class="el-stats" id="el-stats"></div>
+  <div class="el-list" id="el-list"><span style="color:#94a3b8;">加载中…</span></div>
+</div>
+<script>
+(function(){
+  var RZ={unclaimed:'无人认领',holder_offline:'坐席离线',holder_quiet:'坐席静音/免打扰'};
+  function esc(s){return CRMW.esc(s);}
+  function fmtDur(s){return CRMW.fmtDur(s);}
+  function fmtTs(ts){ if(!ts) return '—'; var d=new Date(ts*1000); return d.toLocaleDateString()+' '+d.toLocaleTimeString().slice(0,5); }
+  function card(num,lbl){ return '<div class="el-card"><div class="el-num">'+num+'</div><div class="el-lbl">'+esc(lbl)+'</div></div>'; }
+  function render(d){
+    var s=d.stats||{};
+    document.getElementById('el-stats').innerHTML=
+      card(s.total||0,'升级总数')
+      +card((s.taken||0)+' ('+(s.taken_rate||0)+'%)','已接管')
+      +card(s.taken? fmtDur(s.avg_takeover_sec):'—','平均接管时延');
+    var its=d.items||[];
+    var box=document.getElementById('el-list');
+    if(!its.length){ box.innerHTML='<span style="color:#94a3b8;">该窗口暂无升级记录</span>'; return; }
+    box.innerHTML=its.map(function(it){
+      var rz=RZ[it.reason]||it.reason;
+      var taken = it.takeover_sec!=null
+        ? '<span class="el-taken">接管 '+fmtDur(it.takeover_sec)+'</span>'
+        : '<span class="el-pending">未接管</span>';
+      var holder = it.agent_name||it.agent_id;
+      return '<div class="el-row">'
+        +'<div><div class="el-name" onclick="EL.go(\''+esc(it.conversation_id)+'\')">'+esc(it.name)+' <span style="color:#94a3b8;font-size:11px;">'+esc(it.platform)+'</span></div>'
+        +'<div class="el-meta"><span class="el-rz">'+esc(rz)+'</span> · 等待 '+fmtDur(it.wait_sec)+(holder?(' · 原认领 '+esc(holder)):'')+' · '+fmtTs(it.ts)+'</div></div>'
+        +'<div class="el-right">'+taken+(it.taken_by?('<div class="el-meta">by '+esc(it.taken_by)+'</div>'):'')+'</div>'
+        +'</div>';
+    }).join('');
+  }
+  window.EL={
+    load:function(){
+      document.getElementById('el-list').innerHTML='<span style="color:#94a3b8;">加载中…</span>';
+      var days=document.getElementById('el-days').value;
+      fetch('/api/workspace/escalation-log?days='+days).then(function(r){return r.json();}).then(function(d){
+        if(!d.ok){ document.getElementById('el-list').innerHTML='<span style="color:#94a3b8;">收件箱未启用</span>'; return; }
+        render(d);
+      }).catch(function(){ document.getElementById('el-list').innerHTML='<span style="color:#ef4444;">加载失败</span>'; });
+    },
+    go:function(cid){ try{ sessionStorage.setItem('ws_focus_conv', cid); }catch(_){ } location.href='/workspace'; }
+  };
+  EL.load(); setInterval(EL.load, 60000);
+})();
+</script>
+{% endblock %}
