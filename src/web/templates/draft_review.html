@@ -51,6 +51,30 @@
   .dr-copilot-kb{background:#f1f5f9;border-radius:6px;padding:6px 10px;margin:3px 0;font-size:11px;}
   .dr-copilot-kb strong{color:#2563eb;}
   .dr-copilot-loading{color:#94a3b8;font-style:italic;}
+  /* I1 对话智能元数据徽章 */
+  .dr-intel{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0;align-items:center;}
+  .dr-intel-badge{padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;}
+  .dr-intel-intent{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;}
+  .dr-intel-emotion{background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;}
+  .dr-intel-emotion.rising{background:#fff7ed;color:#c2410c;border-color:#fed7aa;}
+  .dr-intel-emotion.falling{background:#f0fdf4;color:#166534;border-color:#bbf7d0;}
+  .dr-intel-risk-medium{background:#fefce8;color:#854d0e;border:1px solid #fef08a;}
+  .dr-intel-risk-high{background:#fef2f2;color:#991b1b;border:1px solid #fecaca;}
+  .dr-intel-trend{font-size:15px;line-height:1;}
+  /* I3 模板选择器 */
+  .dr-tpl{background:#fafafa;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin:8px 0;font-size:12px;}
+  .dr-tpl-header{display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;}
+  .dr-tpl-body{display:none;margin-top:8px;}
+  .dr-tpl-body.open{display:block;}
+  .dr-tpl-filters{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;}
+  .dr-tpl-filter{padding:3px 8px;border-radius:6px;font-size:11px;cursor:pointer;border:1px solid #cbd5e1;background:#fff;color:#475569;}
+  .dr-tpl-filter.active{background:#3b82f6;color:#fff;border-color:#3b82f6;}
+  .dr-tpl-list{max-height:200px;overflow-y:auto;}
+  .dr-tpl-item{padding:8px 10px;border-radius:6px;cursor:pointer;margin:3px 0;transition:background .15s;border-left:3px solid transparent;}
+  .dr-tpl-item:hover{background:#eff6ff;border-left-color:#3b82f6;}
+  .dr-tpl-item-title{font-weight:600;color:#1e293b;font-size:12px;}
+  .dr-tpl-item-content{color:#64748b;font-size:11px;margin-top:2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:300px;}
+  .dr-tpl-search{width:100%;padding:5px 8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-bottom:6px;}
   /* H1 翻译面板 */
   .dr-trans{background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px 12px;margin:8px 0;font-size:12px;}
   .dr-trans-header{display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;}
@@ -203,6 +227,23 @@ function load(){
           +'<div class="dr-ctx-body" id="'+ctxId+'"></div>'
           +'</div>';
       }
+      // I3 模板选择器面板
+      var tplId='tpl-'+ix;
+      var tplHtml='';
+      if(isPending){
+        tplHtml='<div class="dr-tpl">'
+          +'<div class="dr-tpl-header" onclick="toggleTpl(\''+tplId+'\',\''+esc(dr.draft_id)+'\',this)">'
+          +'<span>📚 模板库</span><span style="font-size:11px;color:#475569;">点击展开 ▼</span></div>'
+          +'<div class="dr-tpl-body" id="'+tplId+'"></div>'
+          +'</div>';
+      }
+      // I1 对话智能徽章（通过 conv-meta API 懒加载）
+      var intelId='intel-'+ix;
+      var intelHtml='<div class="dr-intel" id="'+intelId+'">';
+      if(dr.conversation_id){
+        intelHtml+='<span style="font-size:11px;color:#94a3b8;">⏳ 加载对话洞察…</span>';
+      }
+      intelHtml+='</div>';
       // H1 翻译面板
       var transId='trans-'+ix;
       var transHtml='';
@@ -218,6 +259,7 @@ function load(){
         +'onchange="updateSelectBar()" style="margin-right:6px;cursor:pointer;" title="选择此草稿">'):' ';
       return '<div class="dr-card '+cls+'" id="card-'+ix+'" tabindex="0" '
         +'data-draft-id="'+esc(dr.draft_id)+'" data-lv="'+esc(lv)+'" data-pending="'+isPending+'" '
+        +'data-conv-id="'+esc(dr.conversation_id||'')+'" '
         +'onkeydown="cardKeydown(event,this)">'
         +'<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:6px;">'
         +'<div style="font-size:13px;font-weight:600;">'+chkHtml+platIcon+' '+esc(dr.chat_name||dr.chat_key||'未知')+'<span class="dr-platform"> · '+esc(plat)+(dr.account_label?' · '+esc(dr.account_label):'')+'</span></div>'
@@ -231,13 +273,17 @@ function load(){
         +(dr.peer_text?'<div class="dr-peer">💬 <strong>客户：</strong>'+esc(dr.peer_text)+'</div>':'')
         +(dr.draft_text?'<div class="dr-draft">🤖 <strong>AI 草稿：</strong>'+esc(dr.draft_text)+'</div>':'')
         +(reasons?'<div class="dr-reasons">⚠ 风险原因：'+esc(reasons)+'</div>':'')
+        +intelHtml
         +copilotHtml
+        +tplHtml
         +transHtml
         +ctxHtml
         +(isPending?'<textarea id="'+editBoxId+'" class="dr-edit-box" placeholder="编辑后发送…">'+esc(dr.draft_text)+'</textarea>':'')
         +'<div class="dr-actions">'+actHtml+'</div>'
         +'</div>';
     }).join('');
+    // I1：渲染后异步加载每张卡片的对话智能洞察
+    setTimeout(afterRender, 50);
   }).catch(function(){ document.getElementById('dr-list').innerHTML='<div class="dr-empty">加载失败</div>'; });
 }
 
@@ -551,6 +597,121 @@ function cardKeydown(ev, cardEl){
   } else if(ev.key==='?'){
     alert('键盘快捷键：\nA = 批准当前草稿\nR = 拒绝当前草稿\n↑/K = 上一张\n↓/J = 下一张\nSpace = 选择（批量）');
   }
+}
+
+// I1 对话智能元数据懒加载
+var _intelCache = {};
+function loadIntel(intelId, convId){
+  var el=document.getElementById(intelId);
+  if(!el || !convId) return;
+  if(_intelCache[convId]){
+    _renderIntel(el, _intelCache[convId]);
+    return;
+  }
+  fetch('/api/unified-inbox/conv-meta?conversation_id='+encodeURIComponent(convId))
+    .then(function(r){return r.json();}).then(function(d){
+      if(d&&d.found&&d.meta){
+        _intelCache[convId]=d.meta;
+        _renderIntel(el, d.meta);
+      } else {
+        el.innerHTML='';
+      }
+    }).catch(function(){ el.innerHTML=''; });
+}
+function _renderIntel(el, meta){
+  if(!el||!meta) return;
+  var trend=meta.emotion_trend||'stable';
+  var trendIcon={'rising':'📈','falling':'📉','stable':'📊'}[trend]||'📊';
+  var trendCls=trend==='rising'?'rising':trend==='falling'?'falling':'';
+  var riskCls=meta.last_risk==='high'?'dr-intel-risk-high':meta.last_risk==='medium'?'dr-intel-risk-medium':'';
+  var html='<span class="dr-intel-trend" title="情绪趋势">'+trendIcon+'</span>';
+  if(meta.last_intent) html+='<span class="dr-intel-badge dr-intel-intent" title="最近意图">'+esc(meta.last_intent)+'</span>';
+  if(meta.last_emotion) html+='<span class="dr-intel-badge dr-intel-emotion '+trendCls+'" title="最近情绪">'+esc(meta.last_emotion)+'</span>';
+  if(meta.last_risk&&meta.last_risk!=='low') html+='<span class="dr-intel-badge '+riskCls+'" title="风险">⚠ '+esc(meta.last_risk)+'</span>';
+  if(meta.msg_count) html+='<span style="font-size:10px;color:#94a3b8;">共 '+meta.msg_count+' 条</span>';
+  el.innerHTML=html;
+}
+
+// I3 模板库
+var _tplCache=null;
+var _tplLang='';
+function toggleTpl(bodyId, draftId, headerEl){
+  var body=document.getElementById(bodyId);
+  if(!body) return;
+  if(body.classList.contains('open')){
+    body.classList.remove('open');
+    headerEl.lastChild.textContent='点击展开 ▼';
+    return;
+  }
+  body.classList.add('open');
+  headerEl.lastChild.textContent='收起 ▲';
+  _renderTplBody(body, draftId, '');
+}
+function _renderTplBody(body, draftId, search){
+  body.innerHTML='<input class="dr-tpl-search" placeholder="搜索模板…" oninput="tplSearch(this,\''+bodyId(body)+'\',\''+esc(draftId)+'\')" value="'+esc(search)+'">'
+    +'<div class="dr-tpl-filters" id="tplf-'+bodyId(body)+'">'
+    +'<span class="dr-tpl-filter '+((!_tplLang)?' active':'')+'" onclick="tplLang(this,\'\',\''+bodyId(body)+'\',\''+esc(draftId)+'\')">全部</span>'
+    +'<span class="dr-tpl-filter '+((_tplLang==='zh')?' active':'')+'" onclick="tplLang(this,\'zh\',\''+bodyId(body)+'\',\''+esc(draftId)+'\')">中文</span>'
+    +'<span class="dr-tpl-filter '+((_tplLang==='en')?' active':'')+'" onclick="tplLang(this,\'en\',\''+bodyId(body)+'\',\''+esc(draftId)+'\')">EN</span>'
+    +'<span class="dr-tpl-filter '+((_tplLang==='ja')?' active':'')+'" onclick="tplLang(this,\'ja\',\''+bodyId(body)+'\',\''+esc(draftId)+'\')">日本語</span>'
+    +'</div>'
+    +'<div id="tpll-'+bodyId(body)+'"><span style="color:#94a3b8;font-size:11px;">加载中…</span></div>';
+  _loadTplList(bodyId(body), draftId, search);
+}
+function bodyId(el){ return el.id||''; }
+function tplSearch(input, bid, draftId){
+  var search=input.value.trim();
+  var listEl=document.getElementById('tpll-'+bid);
+  if(listEl) listEl.innerHTML='<span style="color:#94a3b8;font-size:11px;">搜索中…</span>';
+  clearTimeout(input._st);
+  input._st=setTimeout(function(){ _loadTplList(bid, draftId, search); }, 300);
+}
+function tplLang(el, lang, bid, draftId){
+  _tplLang=lang;
+  var fbar=document.getElementById('tplf-'+bid);
+  if(fbar) fbar.querySelectorAll('.dr-tpl-filter').forEach(function(f){ f.classList.remove('active'); });
+  if(el) el.classList.add('active');
+  _loadTplList(bid, draftId, '');
+}
+function _loadTplList(bid, draftId, search){
+  var listEl=document.getElementById('tpll-'+bid);
+  if(!listEl) return;
+  var url='/api/reply-templates?limit=50';
+  if(_tplLang) url+='&language='+encodeURIComponent(_tplLang);
+  if(search) url+='&search='+encodeURIComponent(search);
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    if(!d||!d.templates||!d.templates.length){
+      listEl.innerHTML='<span style="color:#94a3b8;font-size:11px;">暂无模板</span>';
+      return;
+    }
+    listEl.innerHTML=d.templates.map(function(t){
+      return '<div class="dr-tpl-item" onclick="applyTpl(\''+esc(t.id)+'\','+JSON.stringify(t.content)+',\''+esc(draftId)+'\')" title="点击套用模板">'
+        +'<div class="dr-tpl-item-title">'+esc(t.title)+'</div>'
+        +'<div class="dr-tpl-item-content">'+esc(t.content)+'</div>'
+        +'</div>';
+    }).join('');
+  }).catch(function(){
+    listEl.innerHTML='<span style="color:#ef4444;font-size:11px;">加载失败</span>';
+  });
+}
+function applyTpl(tplId, content, draftId){
+  // 找到对应草稿卡片的编辑框
+  var card=document.querySelector('[data-draft-id="'+CSS.escape(draftId)+'"]');
+  if(!card) return;
+  var box=card.querySelector('textarea');
+  if(!box) return;
+  fillDraft(box.id, content);
+  // 上报模板使用
+  fetch('/api/reply-templates/'+encodeURIComponent(tplId)+'/use',{method:'POST'}).catch(function(){});
+}
+
+// I1 卡片渲染后触发智能洞察加载
+function afterRender(){
+  document.querySelectorAll('[data-draft-id]').forEach(function(card, ix){
+    var convId=card.getAttribute('data-conv-id');
+    var intelId='intel-'+ix;
+    if(convId) loadIntel(intelId, convId);
+  });
 }
 
 setInterval(load, 30000);

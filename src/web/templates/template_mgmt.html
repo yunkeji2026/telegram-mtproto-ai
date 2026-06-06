@@ -1,0 +1,220 @@
+{% extends "workspace_base.html" %}
+{% block title %}模板库管理{% endblock %}
+{% block content %}
+<style>
+.tm-wrap{max-width:900px;margin:0 auto;padding:20px 16px;}
+.tm-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;}
+.tm-title{font-size:20px;font-weight:700;color:#1e293b;}
+.tm-filters{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center;}
+.tm-filter{padding:4px 12px;border-radius:8px;font-size:12px;cursor:pointer;border:1px solid #cbd5e1;background:#fff;color:#475569;transition:all .15s;}
+.tm-filter.active{background:#3b82f6;color:#fff;border-color:#3b82f6;}
+.tm-search{flex:1;min-width:200px;padding:6px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;}
+.tm-table{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.06);}
+.tm-table th{background:#f8fafc;color:#64748b;font-size:12px;font-weight:600;padding:10px 12px;text-align:left;border-bottom:1px solid #e2e8f0;}
+.tm-table td{padding:10px 12px;font-size:13px;border-bottom:1px solid #f1f5f9;vertical-align:top;color:#334155;}
+.tm-table tr:last-child td{border-bottom:none;}
+.tm-table tr:hover td{background:#f8fafc;}
+.tm-badge{display:inline-block;padding:2px 8px;border-radius:8px;font-size:11px;font-weight:600;}
+.tm-badge.zh{background:#eff6ff;color:#1d4ed8;}
+.tm-badge.en{background:#f0fdf4;color:#166534;}
+.tm-badge.ja{background:#fef3c7;color:#92400e;}
+.tm-badge.other{background:#f1f5f9;color:#475569;}
+.tm-badge.scene{background:#f8fafc;color:#64748b;border:1px solid #e2e8f0;}
+.tm-btn{padding:4px 10px;border-radius:6px;font-size:12px;cursor:pointer;border:none;font-weight:600;}
+.tm-btn-edit{background:#eff6ff;color:#1d4ed8;}
+.tm-btn-del{background:#fef2f2;color:#dc2626;}
+.tm-content-cell{max-width:280px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
+.tm-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center;}
+.tm-modal.open{display:flex;}
+.tm-dialog{background:#fff;border-radius:16px;padding:24px;width:520px;max-width:95vw;max-height:90vh;overflow-y:auto;}
+.tm-dialog h3{margin:0 0 16px;font-size:16px;color:#1e293b;}
+.tm-field{margin-bottom:12px;}
+.tm-field label{display:block;font-size:12px;color:#64748b;margin-bottom:4px;}
+.tm-field input,.tm-field select,.tm-field textarea{width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;box-sizing:border-box;}
+.tm-field textarea{min-height:100px;resize:vertical;}
+.tm-dialog-btns{display:flex;gap:8px;justify-content:flex-end;margin-top:16px;}
+.tm-empty{text-align:center;padding:40px;color:#94a3b8;font-size:14px;}
+.tm-stat{font-size:13px;color:#94a3b8;margin-bottom:12px;}
+</style>
+<div class="tm-wrap">
+  <div class="tm-header">
+    <div class="tm-title">📚 回复模板库</div>
+    <button class="tm-btn" style="background:#3b82f6;color:#fff;padding:7px 16px;font-size:13px;" onclick="openModal()">+ 新建模板</button>
+  </div>
+  <div class="tm-filters">
+    <input class="tm-search" id="tm-search" placeholder="搜索模板标题或内容…" oninput="debounceLoad()">
+    <span class="tm-filter active" onclick="setLang('',this)">全部语言</span>
+    <span class="tm-filter" onclick="setLang('zh',this)">中文</span>
+    <span class="tm-filter" onclick="setLang('en',this)">EN</span>
+    <span class="tm-filter" onclick="setLang('ja',this)">日本語</span>
+    <span class="tm-filter" onclick="setScene('',this)" style="margin-left:8px;">全部场景</span>
+    <span class="tm-filter" onclick="setScene('greeting',this)">开场白</span>
+    <span class="tm-filter" onclick="setScene('order_inquiry',this)">订单</span>
+    <span class="tm-filter" onclick="setScene('shipping',this)">物流</span>
+    <span class="tm-filter" onclick="setScene('refund',this)">退款</span>
+    <span class="tm-filter" onclick="setScene('complaint',this)">投诉</span>
+    <span class="tm-filter" onclick="setScene('closing',this)">结束语</span>
+  </div>
+  <div id="tm-stat" class="tm-stat"></div>
+  <table class="tm-table" id="tm-table">
+    <thead><tr>
+      <th>标题</th><th>语言</th><th>场景</th><th>内容预览</th><th>使用次数</th><th>操作</th>
+    </tr></thead>
+    <tbody id="tm-body"><tr><td colspan="6" class="tm-empty">加载中…</td></tr></tbody>
+  </table>
+</div>
+
+<!-- 新建/编辑 Modal -->
+<div class="tm-modal" id="tm-modal">
+  <div class="tm-dialog">
+    <h3 id="modal-title">新建模板</h3>
+    <input type="hidden" id="modal-id">
+    <div class="tm-field"><label>标题 *</label><input id="modal-ttl" placeholder="简短描述（如：中文订单确认）"></div>
+    <div class="tm-field"><label>内容 *</label><textarea id="modal-content" placeholder="模板正文。使用 {变量} 标记占位符，如 {订单号}"></textarea></div>
+    <div style="display:flex;gap:12px;">
+      <div class="tm-field" style="flex:1;"><label>语言</label>
+        <select id="modal-lang">
+          <option value="zh">中文 (zh)</option>
+          <option value="en">English (en)</option>
+          <option value="ja">日本語 (ja)</option>
+          <option value="ko">한국어 (ko)</option>
+          <option value="th">ไทย (th)</option>
+        </select>
+      </div>
+      <div class="tm-field" style="flex:1;"><label>场景</label>
+        <select id="modal-scene">
+          <option value="">通用</option>
+          <option value="greeting">开场白</option>
+          <option value="order_inquiry">订单查询</option>
+          <option value="shipping">物流查询</option>
+          <option value="refund">退款</option>
+          <option value="product_info">产品咨询</option>
+          <option value="complaint">投诉处理</option>
+          <option value="closing">结束语</option>
+        </select>
+      </div>
+      <div class="tm-field" style="flex:1;"><label>平台（留空=全平台）</label>
+        <select id="modal-plat">
+          <option value="">全平台</option>
+          <option value="line">LINE</option>
+          <option value="whatsapp">WhatsApp</option>
+          <option value="messenger">Messenger</option>
+          <option value="telegram">Telegram</option>
+        </select>
+      </div>
+    </div>
+    <div class="tm-dialog-btns">
+      <button class="tm-btn" style="background:#f1f5f9;color:#475569;" onclick="closeModal()">取消</button>
+      <button class="tm-btn" style="background:#3b82f6;color:#fff;padding:6px 18px;" onclick="saveModal()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+var _lang='', _scene='', _tmplates=[];
+function esc(s){ var d=document.createElement('div'); d.textContent=String(s||''); return d.innerHTML; }
+function load(){
+  var search=document.getElementById('tm-search').value.trim();
+  var url='/api/reply-templates?limit=200';
+  if(_lang) url+='&language='+encodeURIComponent(_lang);
+  if(_scene) url+='&scene='+encodeURIComponent(_scene);
+  if(search) url+='&search='+encodeURIComponent(search);
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    _tmplates=d.templates||[];
+    var stat=document.getElementById('tm-stat');
+    if(stat) stat.textContent='共 '+_tmplates.length+' 条模板';
+    var body=document.getElementById('tm-body');
+    if(!_tmplates.length){
+      body.innerHTML='<tr><td colspan="6" class="tm-empty">暂无模板</td></tr>';
+      return;
+    }
+    var sceneNames={greeting:'开场白',order_inquiry:'订单',shipping:'物流',refund:'退款',product_info:'产品',complaint:'投诉',closing:'结束语'};
+    body.innerHTML=_tmplates.map(function(t){
+      var lc=t.language||'zh';
+      var langBadge='<span class="tm-badge '+lc+'">'+esc(lc.toUpperCase())+'</span>';
+      var sceneBadge=t.scene?'<span class="tm-badge scene">'+esc(sceneNames[t.scene]||t.scene)+'</span>':'';
+      return '<tr>'
+        +'<td><strong>'+esc(t.title)+'</strong></td>'
+        +'<td>'+langBadge+'</td>'
+        +'<td>'+sceneBadge+'</td>'
+        +'<td class="tm-content-cell" title="'+esc(t.content)+'">'+esc(t.content)+'</td>'
+        +'<td style="text-align:center;color:#94a3b8;">'+esc(t.used_count||0)+'</td>'
+        +'<td><button class="tm-btn tm-btn-edit" onclick="editTpl(\''+esc(t.id)+'\')">编辑</button> '
+        +'<button class="tm-btn tm-btn-del" onclick="delTpl(\''+esc(t.id)+'\',\''+esc(t.title)+'\')">删除</button></td>'
+        +'</tr>';
+    }).join('');
+  }).catch(function(){
+    document.getElementById('tm-body').innerHTML='<tr><td colspan="6" class="tm-empty">加载失败</td></tr>';
+  });
+}
+var _dt;
+function debounceLoad(){ clearTimeout(_dt); _dt=setTimeout(load, 300); }
+function setLang(lang, el){
+  _lang=lang;
+  document.querySelectorAll('.tm-filters .tm-filter').forEach(function(f){
+    if(['全部语言','中文','EN','日本語'].includes(f.textContent)) f.classList.remove('active');
+  });
+  if(el) el.classList.add('active');
+  load();
+}
+function setScene(scene, el){
+  _scene=scene;
+  document.querySelectorAll('.tm-filters .tm-filter').forEach(function(f){
+    if(!['全部语言','中文','EN','日本語'].includes(f.textContent)) f.classList.remove('active');
+  });
+  if(el) el.classList.add('active');
+  load();
+}
+function openModal(){ document.getElementById('tm-modal').classList.add('open'); document.getElementById('modal-ttl').focus(); }
+function closeModal(){ document.getElementById('tm-modal').classList.remove('open'); _resetModal(); }
+function _resetModal(){
+  document.getElementById('modal-id').value='';
+  document.getElementById('modal-title').textContent='新建模板';
+  document.getElementById('modal-ttl').value='';
+  document.getElementById('modal-content').value='';
+  document.getElementById('modal-lang').value='zh';
+  document.getElementById('modal-scene').value='';
+  document.getElementById('modal-plat').value='';
+}
+function editTpl(tid){
+  var t=_tmplates.find(function(x){return x.id===tid;});
+  if(!t) return;
+  document.getElementById('modal-id').value=t.id;
+  document.getElementById('modal-title').textContent='编辑模板';
+  document.getElementById('modal-ttl').value=t.title||'';
+  document.getElementById('modal-content').value=t.content||'';
+  document.getElementById('modal-lang').value=t.language||'zh';
+  document.getElementById('modal-scene').value=t.scene||'';
+  document.getElementById('modal-plat').value=t.platform||'';
+  openModal();
+}
+function saveModal(){
+  var tid=document.getElementById('modal-id').value.trim();
+  var title=document.getElementById('modal-ttl').value.trim();
+  var content=document.getElementById('modal-content').value.trim();
+  if(!title||!content){ alert('标题和内容不能为空'); return; }
+  var body={title:title,content:content,language:document.getElementById('modal-lang').value,
+    scene:document.getElementById('modal-scene').value,platform:document.getElementById('modal-plat').value};
+  var url,method;
+  if(tid){ url='/api/reply-templates/'+encodeURIComponent(tid); method='PUT'; }
+  else { url='/api/reply-templates'; method='POST'; body.created_by='admin'; }
+  fetch(url,{method:method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d&&d.ok){ closeModal(); load(); }
+      else { alert((d&&d.detail)||'保存失败'); }
+    }).catch(function(){ alert('网络错误'); });
+}
+function delTpl(tid, title){
+  if(!confirm('确定删除模板「'+title+'」？此操作不可恢复。')) return;
+  fetch('/api/reply-templates/'+encodeURIComponent(tid),{method:'DELETE'})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d&&d.ok){ load(); }
+      else { alert((d&&d.detail)||'删除失败（可能需要主管权限）'); }
+    }).catch(function(){ alert('网络错误'); });
+}
+document.getElementById('tm-modal').addEventListener('click', function(e){
+  if(e.target===this) closeModal();
+});
+load();
+</script>
+{% endblock %}

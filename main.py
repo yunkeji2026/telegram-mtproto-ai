@@ -674,6 +674,15 @@ class AIChatAssistant:
                             else:
                                 self.logger.info("AutoDraft 已禁用（auto_draft.enabled=false）")
 
+                            # I3：预置回复模板库（幂等，id 冲突则跳过）
+                            try:
+                                from src.inbox.template_seeds import SEED_TEMPLATES
+                                _seeded = self.inbox_store.seed_templates(SEED_TEMPLATES)
+                                if _seeded > 0:
+                                    self.logger.info("模板库已预置 %d 条种子模板", _seeded)
+                            except Exception:
+                                self.logger.debug("模板库预置跳过", exc_info=True)
+
                             # ── Phase C：意图 LLM 升级 + 翻译记忆持久化（预置带依赖的 service） ──
                             _cfg_root = self.config.config or {}
                             _ia_cfg = _cfg_root.get("intent_analysis", {}) or {}

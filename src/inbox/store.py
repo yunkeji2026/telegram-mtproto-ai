@@ -205,6 +205,35 @@ _MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS idx_draft_audit_draft ON draft_audit_log(draft_id, ts)",
     "CREATE INDEX IF NOT EXISTS idx_draft_audit_ts    ON draft_audit_log(ts)",
     "CREATE INDEX IF NOT EXISTS idx_draft_audit_agent ON draft_audit_log(agent_id, ts)",
+    # I1: 对话智能分析元数据（最近意图/情绪趋势/风险）
+    """CREATE TABLE IF NOT EXISTS conversation_meta (
+        conversation_id  TEXT PRIMARY KEY,
+        platform         TEXT NOT NULL DEFAULT '',
+        last_intent      TEXT NOT NULL DEFAULT '',
+        last_emotion     TEXT NOT NULL DEFAULT '',
+        last_risk        TEXT NOT NULL DEFAULT 'low',
+        intent_history   TEXT NOT NULL DEFAULT '[]',
+        emotion_history  TEXT NOT NULL DEFAULT '[]',
+        msg_count        INTEGER NOT NULL DEFAULT 0,
+        updated_at       REAL NOT NULL DEFAULT 0
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_conv_meta_updated ON conversation_meta(updated_at DESC)",
+    # I3: 回复模板库
+    """CREATE TABLE IF NOT EXISTS reply_templates (
+        id           TEXT PRIMARY KEY,
+        title        TEXT NOT NULL DEFAULT '',
+        content      TEXT NOT NULL DEFAULT '',
+        language     TEXT NOT NULL DEFAULT 'zh',
+        platform     TEXT NOT NULL DEFAULT '',
+        scene        TEXT NOT NULL DEFAULT '',
+        created_by   TEXT NOT NULL DEFAULT 'system',
+        created_at   REAL NOT NULL DEFAULT 0,
+        updated_at   REAL NOT NULL DEFAULT 0,
+        used_count   INTEGER NOT NULL DEFAULT 0,
+        is_active    INTEGER NOT NULL DEFAULT 1
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_templates_scene    ON reply_templates(scene, language, is_active)",
+    "CREATE INDEX IF NOT EXISTS idx_templates_platform ON reply_templates(platform, language, is_active)",
 ]
 
 
@@ -1362,3 +1391,253 @@ class InboxStore:
             )
             self._conn.commit()
         return {"ok": True, "released": True, "conversation_id": cid}
+
+    # ── I1 对话智能分析元数据 ─────────────────────────────────────
+
+    _EMOTION_ORDER = ["愤怒", "不满", "催促", "焦虑", "平稳", "满意", "感谢"]
+
+    def update_conv_meta(
+        self,
+        conversation_id: str,
+        *,
+        platform: str = "",
+        intent: str = "",
+        emotion: str = "",
+        risk: str = "low",
+        max_history: int = 10,
+    ) -> None:
+        """I1：每次新入站消息后，更新对话智能元数据。
+
+        维护滚动窗口情绪/意图历史（max_history 条），用于趋势计算。
+        """
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            return
+        now = self._now()
+        existing = self.get_conv_meta(cid)
+        if existing:
+            ih = list(existing.get("intent_history") or [])
+            eh = list(existing.get("emotion_history") or [])
+            mc = int(existing.get("msg_count") or 0) + 1
+        else:
+            ih, eh, mc = [], [], 1
+        if intent:
+            ih.append(str(intent))
+        if emotion:
+            eh.append(str(emotion))
+        # 保持滚动窗口
+        ih = ih[-max_history:]
+        eh = eh[-max_history:]
+        with self._lock:
+            self._conn.execute(
+                """INSERT INTO conversation_meta
+                   (conversation_id, platform, last_intent, last_emotion, last_risk,
+                    intent_history, emotion_history, msg_count, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(conversation_id) DO UPDATE SET
+                     platform       = excluded.platform,
+                     last_intent    = CASE WHEN excluded.last_intent != ''
+                                      THEN excluded.last_intent ELSE conversation_meta.last_intent END,
+                     last_emotion   = CASE WHEN excluded.last_emotion != ''
+                                      THEN excluded.last_emotion ELSE conversation_meta.last_emotion END,
+                     last_risk      = excluded.last_risk,
+                     intent_history = excluded.intent_history,
+                     emotion_history= excluded.emotion_history,
+                     msg_count      = excluded.msg_count,
+                     updated_at     = excluded.updated_at
+                """,
+                (cid, str(platform or ""), str(intent or ""), str(emotion or ""),
+                 str(risk or "low"),
+                 json.dumps(ih, ensure_ascii=False),
+                 json.dumps(eh, ensure_ascii=False),
+                 mc, now),
+            )
+            self._conn.commit()
+
+    def get_conv_meta(self, conversation_id: str) -> Optional[Dict[str, Any]]:
+        """I1：获取对话智能元数据，含情绪趋势计算结果。"""
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            return None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM conversation_meta WHERE conversation_id = ?", (cid,)
+            ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        for key in ("intent_history", "emotion_history"):
+            try:
+                d[key] = json.loads(d.get(key) or "[]")
+            except Exception:
+                d[key] = []
+        # 计算情绪趋势
+        d["emotion_trend"] = self._compute_emotion_trend(d.get("emotion_history") or [])
+        return d
+
+    def _compute_emotion_trend(self, history: List[str]) -> str:
+        """将最近情绪序列映射为 rising/falling/stable 趋势。
+
+        用于 UI 显示趋势箭头（📈升级/📉降级/📊平稳）。
+        """
+        if len(history) < 2:
+            return "stable"
+        # 映射情绪到数值（愤怒=最高负面=0，感谢=最高正面=6）
+        order = self._EMOTION_ORDER
+        def score(e: str) -> int:
+            try:
+                idx = order.index(e)
+                # 情绪紧张度：愤怒=高，感谢=低
+                return len(order) - 1 - idx
+            except ValueError:
+                return 2  # 默认中间值
+        recent = history[-5:]
+        scores = [score(e) for e in recent]
+        if len(scores) >= 2:
+            delta = scores[-1] - scores[0]
+            if delta >= 2:
+                return "rising"   # 情绪在恶化
+            if delta <= -2:
+                return "falling"  # 情绪在好转
+        return "stable"
+
+    # ── I3 回复模板库 ─────────────────────────────────────────────
+
+    def seed_templates(self, templates: List[Dict[str, Any]]) -> int:
+        """I3：预置模板（幂等：id 冲突则跳过）。返回实际插入数量。"""
+        now = self._now()
+        inserted = 0
+        for t in templates:
+            tid = str(t.get("id") or uuid.uuid4().hex)
+            with self._lock:
+                cur = self._conn.execute(
+                    """INSERT OR IGNORE INTO reply_templates
+                       (id, title, content, language, platform, scene,
+                        created_by, created_at, updated_at, used_count, is_active)
+                       VALUES (?,?,?,?,?,?,?,?,?,0,1)""",
+                    (tid, str(t.get("title") or ""), str(t.get("content") or ""),
+                     str(t.get("language") or "zh"), str(t.get("platform") or ""),
+                     str(t.get("scene") or ""), str(t.get("created_by") or "system"),
+                     now, now),
+                )
+                self._conn.commit()
+            inserted += int(cur.rowcount or 0)
+        return inserted
+
+    def list_templates(
+        self,
+        *,
+        language: str = "",
+        platform: str = "",
+        scene: str = "",
+        search: str = "",
+        limit: int = 100,
+        active_only: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """I3：列出模板，支持多维度过滤。"""
+        clauses, params = [], []
+        if active_only:
+            clauses.append("is_active = 1")
+        if language:
+            clauses.append("language = ?")
+            params.append(language)
+        if platform:
+            clauses.append("(platform = ? OR platform = '')")
+            params.append(platform)
+        if scene:
+            clauses.append("scene = ?")
+            params.append(scene)
+        if search:
+            clauses.append("(title LIKE ? OR content LIKE ?)")
+            params.extend([f"%{search}%", f"%{search}%"])
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(min(200, max(1, int(limit))))
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT * FROM reply_templates {where} ORDER BY used_count DESC, created_at DESC LIMIT ?",
+                params,
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def create_template(
+        self,
+        *,
+        title: str,
+        content: str,
+        language: str = "zh",
+        platform: str = "",
+        scene: str = "",
+        created_by: str = "admin",
+    ) -> str:
+        """I3：创建新模板，返回 id。"""
+        tid = uuid.uuid4().hex
+        now = self._now()
+        with self._lock:
+            self._conn.execute(
+                """INSERT INTO reply_templates
+                   (id, title, content, language, platform, scene,
+                    created_by, created_at, updated_at, used_count, is_active)
+                   VALUES (?,?,?,?,?,?,?,?,?,0,1)""",
+                (tid, str(title), str(content), str(language or "zh"),
+                 str(platform or ""), str(scene or ""), str(created_by or "admin"),
+                 now, now),
+            )
+            self._conn.commit()
+        return tid
+
+    def update_template(
+        self,
+        tid: str,
+        *,
+        title: Optional[str] = None,
+        content: Optional[str] = None,
+        language: Optional[str] = None,
+        platform: Optional[str] = None,
+        scene: Optional[str] = None,
+        is_active: Optional[bool] = None,
+    ) -> bool:
+        """I3：更新模板字段（仅传入非 None 的字段），返回是否找到并更新。"""
+        updates, params = [], []
+        if title is not None:
+            updates.append("title = ?")
+            params.append(str(title))
+        if content is not None:
+            updates.append("content = ?")
+            params.append(str(content))
+        if language is not None:
+            updates.append("language = ?")
+            params.append(str(language))
+        if platform is not None:
+            updates.append("platform = ?")
+            params.append(str(platform))
+        if scene is not None:
+            updates.append("scene = ?")
+            params.append(str(scene))
+        if is_active is not None:
+            updates.append("is_active = ?")
+            params.append(1 if is_active else 0)
+        if not updates:
+            return False
+        updates.append("updated_at = ?")
+        params.append(self._now())
+        params.append(str(tid))
+        with self._lock:
+            cur = self._conn.execute(
+                f"UPDATE reply_templates SET {', '.join(updates)} WHERE id = ?", params
+            )
+            self._conn.commit()
+        return int(cur.rowcount or 0) > 0
+
+    def delete_template(self, tid: str) -> bool:
+        """I3：软删除（is_active=0），保留历史记录。"""
+        return self.update_template(tid, is_active=False)
+
+    def increment_template_usage(self, tid: str) -> None:
+        """I3：模板使用计数 +1（best-effort）。"""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE reply_templates SET used_count = used_count + 1, updated_at = ?"
+                " WHERE id = ?",
+                (self._now(), str(tid)),
+            )
+            self._conn.commit()

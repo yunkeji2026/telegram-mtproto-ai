@@ -111,6 +111,19 @@ def ingest_collected_chats(
                         _cb(conv_dict, msg_text)
                     except Exception:
                         logger.debug("new_inbound_cb 调用失败", exc_info=True)
+                # I1：异步更新对话智能元数据（best-effort，不阻断 ingest）
+                try:
+                    from src.ai.chat_assistant_service import quick_analyze
+                    _analysis = quick_analyze(msg_text)
+                    store.update_conv_meta(
+                        conv.conversation_id,
+                        platform=conv.platform,
+                        intent=str(_analysis.get("intent") or ""),
+                        emotion=str(_analysis.get("emotion") or ""),
+                        risk=str(_analysis.get("risk_level") or "low"),
+                    )
+                except Exception:
+                    logger.debug("update_conv_meta 失败", exc_info=True)
     return inserted
 
 
