@@ -467,6 +467,22 @@ API：`GET /api/workspace/contact/{contact_id}` 一次返回 `{contact, timeline
 - **问责呈现**：升级快照加 `today_count`（今日累计升级次数），仪表盘升级区段
   显示"当前 N 条 · 今日累计升级 M 次"；审计行保留升级时的认领人，便于复盘。
 
+## 5y. 升级历史页 + 接管时延（Phase 6-22）
+
+把 6-21 落库的升级审计变成可复盘的成效度量，量化「告警→升级→接管」闭环。
+
+- **关联** `inbox.escalation_takeovers(since, limit)`：每条 `escalations` 关联其后
+  首个 `agent_sends`（`ts>=升级时刻`）→ `taken_ts`/`taken_by`；None=尚未接管。
+  升级前的发送不算接管（`ts>=e.ts` 卡死方向）。
+- **端点** `GET /api/workspace/escalation-log?days=7|30`：返回明细 + 统计
+  （总数 / 已接管数 / 接管率 / 平均接管时延 / 按原因分布）。
+- **页面** `/workspace/escalations`（`escalation_log.html` 继承 workspace_base）：
+  顶部三卡（升级总数 / 已接管(率) / 平均接管时延）+ 明细行（原因徽标、原认领人、
+  等待时长、升级时刻、接管时延/未接管、接管人），点姓名 `ws_focus_conv` 跳会话。
+- **入口**：仪表盘「⚠ 升级」区段右上「查看历史 / 接管时延 →」。
+- **复用**：`CRMW.esc/fmtDur`、`ws_focus_conv`，无新表（用 6-21 的 escalations +
+  6-12 的 agent_sends），仅一个关联查询。
+
 ## 6. 明确不做（后续阶段）
 
 | 项 | 原因 |

@@ -895,6 +895,43 @@ class InboxStore:
             self._conn.commit()
         return True
 
+    def escalation_takeovers(
+        self, since_ts: float = 0.0, limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        """升级历史 + 接管时延：每条升级关联其后首个 agent_send（人工接管）。
+
+        taken_ts/taken_by 为 None ⇒ 升级后尚无人工接管。聚合交调用方。
+        """
+        sql = (
+            "SELECT e.id AS id, e.conversation_id AS cid, e.reason AS reason, "
+            "  e.agent_id AS agent_id, e.agent_name AS agent_name, "
+            "  e.wait_sec AS wait_sec, e.ts AS ts, "
+            "  (SELECT MIN(s.ts) FROM agent_sends s "
+            "   WHERE s.conversation_id=e.conversation_id AND s.ts>=e.ts) AS taken_ts, "
+            "  (SELECT s.agent_id FROM agent_sends s "
+            "   WHERE s.conversation_id=e.conversation_id AND s.ts>=e.ts "
+            "   ORDER BY s.ts ASC LIMIT 1) AS taken_by "
+            "FROM escalations e WHERE e.ts>=? ORDER BY e.ts DESC LIMIT ?"
+        )
+        with self._lock:
+            rows = self._conn.execute(
+                sql, (float(since_ts), int(max(1, min(1000, limit))))).fetchall()
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            taken = r["taken_ts"]
+            out.append({
+                "id": int(r["id"]),
+                "conversation_id": str(r["cid"]),
+                "reason": str(r["reason"] or ""),
+                "agent_id": str(r["agent_id"] or ""),
+                "agent_name": str(r["agent_name"] or ""),
+                "wait_sec": int(r["wait_sec"] or 0),
+                "ts": float(r["ts"] or 0),
+                "taken_ts": float(taken) if taken is not None else None,
+                "taken_by": str(r["taken_by"]) if r["taken_by"] is not None else "",
+            })
+        return out
+
     def count_escalations_since(self, since_ts: float = 0.0) -> int:
         with self._lock:
             return self._conn.execute(
