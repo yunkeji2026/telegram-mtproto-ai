@@ -157,14 +157,35 @@
     fetch('/api/workspace/escalations').then(function(r){return r.json();}).then(function(d){
       var its=(d&&d.items)||[]; window.__escItems=its;
       var _todayN=(d&&d.today_count)||0;
+      var myId=(typeof MY_AGENT_ID!=='undefined')?MY_AGENT_ID:'';
+      var isSup=(typeof MY_IS_SUP!=='undefined')?MY_IS_SUP:false;
       document.getElementById('db-esc').innerHTML= its.length? ('<div style="font-size:12px;color:#94a3b8;margin-bottom:6px;">当前 '+(d.count||its.length)+' 条需升级 · 今日累计升级 '+_todayN+' 次；点击姓名跳转，「生成跟进」一键建待办</div>'+its.map(function(it,ix){
         var rz=ESC_REASON[it.reason]||it.reason;
+        var asn=String(it.assigned_to||'');
+        var asnLabel=asn?(asn===myId?'<span style="color:#7c3aed;font-weight:600;font-size:11px;"> ★指派给我</span>':'<span style="color:#94a3b8;font-size:11px;"> →'+esc(asn)+'</span>'):'';
+        var reassignBtn=isSup?('<button onclick="window.__dbEscReassign(event,'+ix+')" style="font-size:11px;padding:2px 8px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;white-space:nowrap;margin-left:4px;">转派</button>'):'';
         return '<div class="db-row" style="gap:8px;">'
-          +'<span class="db-click" style="flex:1;cursor:pointer;" onclick="window.__dbGoConv(\''+esc(it.conversation_id)+'\')">'+esc(it.name)+' <span style="color:#94a3b8;font-size:11px;">'+esc(it.platform)+(it.agent_name?(' · '+esc(it.agent_name)):'')+'</span></span>'
+          +'<span class="db-click" style="flex:1;cursor:pointer;" onclick="window.__dbGoConv(\''+esc(it.conversation_id)+'\')">'+esc(it.name)+asnLabel+' <span style="color:#94a3b8;font-size:11px;">'+esc(it.platform)+(it.agent_name?(' · '+esc(it.agent_name)):'')+'</span></span>'
           +'<span style="color:#7c3aed;white-space:nowrap;">'+fmtDur(it.wait_sec)+' · '+esc(rz)+'</span>'
-          +'<button onclick="window.__dbEscTask(event,'+ix+')" style="font-size:11px;padding:2px 8px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;white-space:nowrap;">生成跟进</button></div>';
+          +'<button onclick="window.__dbEscTask(event,'+ix+')" style="font-size:11px;padding:2px 8px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;white-space:nowrap;">生成跟进</button>'
+          +reassignBtn+'</div>';
       }).join('')) : ('<span style="color:#94a3b8;font-size:13px;">无需升级的会话 · 今日累计升级 '+_todayN+' 次</span>');
     }).catch(function(){ document.getElementById('db-esc').innerHTML='<span style="color:#ef4444;">加载失败</span>'; });
+  }
+  function escReassign(ev, ix){
+    if(ev){ ev.stopPropagation(); ev.preventDefault(); }
+    var it=(window.__escItems||[])[ix]; if(!it) return;
+    var escId=it.esc_id||it.id;
+    var newAgent=prompt('转派给主管 agent_id（留空取消）：', it.assigned_to||'');
+    if(!newAgent&&newAgent!==null) return;
+    if(!newAgent) return;
+    fetch('/api/workspace/escalation/'+encodeURIComponent(escId)+'/assign',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({agent_id:newAgent})
+    }).then(function(r){return r.json();}).then(function(d){
+      if(d&&d.ok){ CRMW.toast('升级已转派给 '+esc(newAgent)); loadEsc(); }
+      else { CRMW.toast('转派失败：'+((d&&d.detail)||'未知'),'#dc2626'); }
+    }).catch(function(){ CRMW.toast('转派失败','#dc2626'); });
   }
   function escTask(ev, ix){
     if(ev){ ev.stopPropagation(); ev.preventDefault(); }
@@ -177,7 +198,7 @@
       else { if(btn){ btn.disabled=false; btn.textContent='生成跟进'; } CRMW.toast('生成失败：'+((d&&d.error)||'未知'),'#dc2626'); }
     }).catch(function(){ if(btn){ btn.disabled=false; btn.textContent='生成跟进'; } CRMW.toast('生成失败','#dc2626'); });
   }
-  window.__dbDetail=openDetail; window.__dbGoConv=goConv; window.__dbCloseDetail=closeDetail; window.__dbAgentDetail=openAgentDetail; window.__dbAgentReport=agentReport; window.__dbEscTask=escTask;
+  window.__dbDetail=openDetail; window.__dbGoConv=goConv; window.__dbCloseDetail=closeDetail; window.__dbAgentDetail=openAgentDetail; window.__dbAgentReport=agentReport; window.__dbEscTask=escTask; window.__dbEscReassign=escReassign;
   function spark(rows,key,color){ return CRMW.spark(rows,key,color); }
   function sparkPct(rows,key,color){ return CRMW.sparkPct(rows,key,color); }
   function fmtDur(sec){ return CRMW.fmtDur(sec); }

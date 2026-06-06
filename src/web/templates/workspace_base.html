@@ -300,6 +300,12 @@
   // 轻量 toast（SLA 实时告警）— 委托共享组件
   function wsToast(text){ CRMW.toast(text); }
 
+  // 当前坐席身份（Phase 6-24：定向升级 toast 需知道 MY_AGENT_ID）
+  var MY_AGENT_ID='', MY_IS_SUP=false;
+  fetch('/api/workspace/me').then(function(r){return r.json();}).then(function(m){
+    if(m&&m.ok){ MY_AGENT_ID=String(m.agent_id||''); MY_IS_SUP=!!(m.is_supervisor); }
+  }).catch(function(){});
+
   // SSE 实时刷新：跟进任务变更即时更新徽标（及待办页若打开）+ SLA 告警 toast
   try{
     var es=new EventSource('/api/workspace/stream');
@@ -313,8 +319,27 @@
         wsToast('⚠ 客户「'+(msg.data.name||'?')+'」已等待 '+fmtWaitMin(msg.data.wait_sec)+'未回复');
         refreshSla();
       } else if(msg && msg.type==='escalation' && msg.data){
-        var _rz={unclaimed:'无人认领',holder_offline:'坐席离线',holder_quiet:'坐席静音'}[msg.data.reason]||msg.data.reason;
-        CRMW.toast('🆙 升级：客户「'+(msg.data.name||'?')+'」'+fmtWaitMin(msg.data.wait_sec)+'未回复（'+_rz+'）','#7c3aed');
+        var _d=msg.data;
+        var _rz={unclaimed:'无人认领',holder_offline:'坐席离线',holder_quiet:'坐席静音'}[_d.reason]||_d.reason;
+        var _assigned=String(_d.assigned_to||'');
+        var _isMe=MY_AGENT_ID&&(_assigned===MY_AGENT_ID);
+        if(_isMe){
+          // 指派给我 → loud 紫色 toast（点击跳转对应会话）
+          var _toastEl=CRMW.toast(
+            '🔔 升级已指派给您：客户「'+(_d.name||'?')+'」'+fmtWaitMin(_d.wait_sec)+'未回复（'+_rz+'）',
+            '#7c3aed');
+          if(_toastEl && _d.conversation_id){
+            _toastEl.style.cursor='pointer';
+            _toastEl.onclick=function(){
+              try{ sessionStorage.setItem('ws_focus_conv',_d.conversation_id); }catch(_){}
+              location.href='/workspace';
+            };
+          }
+        } else if(MY_IS_SUP && !_isMe){
+          // 主管但不是我的单 → 低调灰色 toast（知情不干扰）
+          CRMW.toast('📋 升级（指派给 '+(_assigned||'未指定')+'）：客户「'+(_d.name||'?')+'」','#64748b');
+        }
+        // 普通坐席不收升级 toast（仅徽标更新）
         refreshEsc();
       }
     };
