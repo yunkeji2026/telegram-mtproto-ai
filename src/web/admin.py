@@ -2369,6 +2369,8 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
             register_report_route,
             register_broadcast_route,
             register_leaderboard_route,
+            register_trend_route,
+            register_my_perf_route,
         )
         # J3: export API（主管数据导出）
         register_export_route(app, api_auth=_api_auth)
@@ -2380,6 +2382,10 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         register_broadcast_route(app, api_auth=_api_auth)
         # N3: leaderboard API（CSAT 坐席排行榜）
         register_leaderboard_route(app, api_auth=_api_auth)
+        # O1: trend API（CSAT + Level 趋势）
+        register_trend_route(app, api_auth=_api_auth)
+        # O3: my-perf API（坐席自助绩效）
+        register_my_perf_route(app, api_auth=_api_auth)
 
         register_drafts_page_routes(
             app,
