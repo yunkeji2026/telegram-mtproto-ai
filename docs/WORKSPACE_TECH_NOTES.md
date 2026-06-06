@@ -502,6 +502,31 @@ API：`GET /api/workspace/contact/{contact_id}` 一次返回 `{contact, timeline
 - **决策**：不引入新角色（admin 即主管），降低用户管理面与迁移成本；仪表盘可视主体保持
   全员可见（避免坐席“失明”），仅把**导出/复盘/跨人**这类管理动作收口到主管。
 
+## 5aa. A1 读路径收尾 + 稳定 message id（蓝图 Phase A 地基）
+
+补齐 v2 蓝图 §9.4「A1 读路径迁移」与「稳定平台 message id」两处地基缺口
+（此前 `/chats` 列表已 store-backed，但**会话历史 `/thread` 仍只读实时源**，
+且旁路 ingest 一律丢弃平台 id、全部回落 `hash(text|ts)` 去重）。
+
+- **稳定 message id**：新增 `normalizer.extract_platform_msg_id(source, platform)`，
+  按平台白名单取**可信**消息 id（Telegram `id`=MTProto message.id / WhatsApp `wamid` /
+  Messenger `mid` / LINE `message_id|server_id`）。`ingest._msg_from_obj` 据此填
+  `platform_msg_id`，store `_message_pk` 自动改用 id 去重，取不到才回落 hash。
+  - LINE **不取裸 `id`**（其 source 行常是会话行，`id` 是房间 id，会把整会话折叠）。
+  - 收益：① collect / thread 两路径对同一条消息产出同一去重键，**ts 漂移不再重复**；
+    ② 同文本同秒但 id 不同的两条**不再被内容哈希误并**。
+- **读路径收尾**：`/api/unified-inbox/thread` 在 `inbox.read_from_store` 开 + store 可用时，
+  会话历史改读 `list_recent_messages`（经 `store_message_to_obj` 映射，`from_store=true`，
+  译文若已落库直接复用）；store 无该会话消息则回落实时聚合（零行为变化）。
+  - **额外收益**：实时源已无该会话（超出最近聚合窗口）但 store 有持久档时，
+    `_store_conv_as_chat` 兜底 header，历史仍可读——读路径真正与「实时可达性」解耦。
+- **灰度安全**：仍受 `read_from_store`（默认 false）门控；先 ingest 再读 store 保证新鲜。
+- **迁移注记**：旧库中以 hash 键存过、之后又带真实 id 重抓的消息会各存一条（hash + id）。
+  因读路径默认关、且对新库无影响，作为前向地基接受；如需消除存量重复可一次性重建
+  messages 表（事实可从实时源重抓）。
+- **测试**：`test_inbox_readpath_a1` 增 13→若干例（平台白名单、`store_message_to_obj` 形状、
+  ts 漂移去重、同文不同 id 不误并、thread flag on/off、实时源缺失时 store 兜底）。
+
 ## 6. 明确不做（后续阶段）
 
 | 项 | 原因 |

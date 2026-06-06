@@ -234,10 +234,10 @@
 
 | Phase | 子项 | 状态 | 完成度 |
 |---|---|---|---|
-| A 统一数据地基 | A1 conversations/messages/message_analysis 持久层 | 🟡 建好但读路径未迁移（旁路写入） | 80% |
+| A 统一数据地基 | A1 conversations/messages/message_analysis 持久层 | ✅ 读路径收尾：/chats + /thread 均可 store-backed（`read_from_store` 灰度） | 95% |
 | | A2 Channel Adapter（`src/inbox/channel_adapters.py`） | 🟡 收集路径已统一；send/status 未 | 75% |
 | | A3 Message Normalizer（`src/inbox/normalizer.py`） | ✅ | 100% |
-| | 稳定平台 message id | ❌ 仍 `hash(text\|ts)` 去重 | 0% |
+| | 稳定平台 message id | ✅ `extract_platform_msg_id` 平台白名单（TG id/WA wamid/…），store 自动改用 id 去重，取不到才回落 hash | 90% |
 | B 草稿/审批 + 风险驾驶 | B1 reply_drafts 统一（read-through 聚合 `DraftService`） | ✅ | 85% |
 | | B2 风险 L0–L4 落地 | 🟡 4 档 + `quick_risk`/`risk_to_autopilot`，强制审计部分 | 70% |
 | C 意图LLM + 翻译产品化 | C1 ChatAssistant 接 LLM + 落 message_analysis | ✅ | 90% |
