@@ -2,16 +2,25 @@
 
 from __future__ import annotations
 
+import asyncio
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from src.inbox.channel_adapters import (
     ChannelAdapter,
+    ChannelSendError,
     LineInboxAdapter,
     WhatsAppInboxAdapter,
     MessengerInboxAdapter,
     TelegramInboxAdapter,
+    WebInboxAdapter,
     collect_chats_via_adapters,
     default_inbox_adapters,
+    send_via_adapters,
+    status_via_adapters,
 )
 
 
@@ -117,3 +126,93 @@ def test_collect_isolates_failing_adapter():
     chats = collect_chats_via_adapters(req, 20, [_Boom(), LineInboxAdapter()])
     # 失败适配器被隔离，其它仍产出
     assert len(chats) == 1 and chats[0]["platform"] == "line"
+
+
+# ── A2 写路径：status / send 适配器对称 ─────────────────────────────
+
+class _SvcWithStatusSend:
+    account_id = "line1"
+    _merged_cfg = {"label": "LINE One"}
+
+    def status(self):
+        return {"running": True, "serial": "S1"}
+
+    async def send_to_chat(self, chat_key, text):
+        return {"chat_key": chat_key, "text": text, "sent": True}
+
+
+def test_status_via_adapters_merges_keys():
+    req = _req(
+        line_rpa_services=[_SvcWithStatusSend()],
+        telegram_client=_FakeTgClient(),
+    )
+    st = status_via_adapters(req, default_inbox_adapters())
+    assert st["line_line1"]["running"] is True
+    assert st["line_line1"]["label"] == "LINE One"
+    # telegram 始终上报（无 client 时 running=False）
+    assert "telegram" in st and st["telegram"]["platform"] == "telegram"
+
+
+def test_status_isolates_failing_adapter():
+    class _BoomStatus:
+        platform = "boom"
+
+        def status(self, request):
+            raise RuntimeError("x")
+
+    req = _req(line_rpa_services=[_SvcWithStatusSend()])
+    st = status_via_adapters(req, [_BoomStatus(), LineInboxAdapter()])
+    assert "line_line1" in st  # 失败适配器被隔离
+
+
+def test_send_via_adapters_routes_to_platform():
+    req = _req(line_rpa_services=[_SvcWithStatusSend()])
+    result = asyncio.run(send_via_adapters(req, "line", "line1", "u1", "hi",
+                                           default_inbox_adapters()))
+    assert result["sent"] is True and result["chat_key"] == "u1"
+
+
+def test_send_unknown_platform_raises_400():
+    req = _req()
+    with pytest.raises(ChannelSendError) as ei:
+        asyncio.run(send_via_adapters(req, "nope", "a", "k", "t",
+                                      default_inbox_adapters()))
+    assert ei.value.status_code == 400
+
+
+def test_send_no_service_raises_503():
+    req = _req()  # 无 line service
+    with pytest.raises(ChannelSendError) as ei:
+        asyncio.run(send_via_adapters(req, "line", "x", "k", "t",
+                                      default_inbox_adapters()))
+    assert ei.value.status_code == 503
+
+
+def test_telegram_send_awaits_coroutine():
+    class _Tg:
+        running = True
+
+        async def send_message(self, chat_key, text):
+            return {"ok_tg": True, "chat_key": chat_key}
+
+    req = _req(telegram_client=_Tg())
+    result = asyncio.run(send_via_adapters(req, "telegram", "default", "r", "hi",
+                                           default_inbox_adapters()))
+    assert result["ok_tg"] is True
+
+
+def test_web_send_delivers_records_and_sets_manual():
+    from src.inbox.store import InboxStore
+    d = tempfile.mkdtemp()
+    store = InboxStore(Path(d) / "inbox.db")
+    cm = SimpleNamespace(config={"web_chat": {"enabled": True, "account_id": "web"}})
+    req = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
+        inbox_store=store, config_manager=cm, contacts=None)))
+    result = asyncio.run(WebInboxAdapter().send(req, "web", "visitor7", "你好"))
+    cid = result["conversation_id"]
+    assert result["delivered"] is True
+    assert cid.startswith("web:")
+    # 出站落库 + 人工接管后停 AI
+    assert store.count_messages(cid) >= 1
+    assert store.get_automation_mode(cid) == "manual"
+    store.close()

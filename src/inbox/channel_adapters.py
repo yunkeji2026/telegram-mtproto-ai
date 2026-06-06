@@ -21,18 +21,41 @@ from src.inbox.normalizer import normalize_chat, store_row_to_chat
 logger = logging.getLogger(__name__)
 
 
+class ChannelSendError(Exception):
+    """渠道发送失败（携带 HTTP 语义状态码，由路由层映射成 HTTPException）。"""
+
+    def __init__(self, status_code: int, detail: str) -> None:
+        super().__init__(detail)
+        self.status_code = int(status_code)
+        self.detail = str(detail)
+
+
 @runtime_checkable
 class ChannelAdapter(Protocol):
-    """统一渠道收件箱适配器契约。
+    """统一渠道收件箱适配器契约（读 + 写对称）。
 
-    ``platform``：平台标识（line/whatsapp/messenger/telegram/…）。
+    ``platform``：平台标识（line/whatsapp/messenger/telegram/web/…）。
     ``collect_chats(request, limit)``：返回该平台最近会话的**统一格式** chat dict 列表
     （由 ``normalizer.normalize_chat`` 产出）；内部需自行容错，单账号失败不应影响其它。
+    ``status(request)``：返回 ``{platform_status_key: 状态 dict}``（可空），供收件箱顶栏。
+    ``send(request, account_id, chat_key, text)``：向该平台投递文本，返回 result dict
+    （可含 ``conversation_id`` 供归属打点）；失败抛 ``ChannelSendError``。
+
+    A2 写路径收尾：``status`` / ``send`` 与 ``collect_chats`` 对称收敛到适配器，
+    新增渠道 = 新增一个适配器并注册，**核心聚合/发送/状态三处都不再改**。
     """
 
     platform: str
 
     def collect_chats(self, request: Any, limit: int) -> List[Dict[str, Any]]:
+        ...
+
+    def status(self, request: Any) -> Dict[str, Dict[str, Any]]:
+        ...
+
+    async def send(
+        self, request: Any, account_id: str, chat_key: str, text: str
+    ) -> Dict[str, Any]:
         ...
 
 
@@ -88,6 +111,37 @@ class LineInboxAdapter:
                 ))
         return out
 
+    def status(self, request: Any) -> Dict[str, Dict[str, Any]]:
+        out: Dict[str, Dict[str, Any]] = {}
+        for svc in _line_services(request):
+            if svc is None:
+                continue
+            aid = getattr(svc, "account_id", "default")
+            try:
+                st = svc.status()
+                out[f"line_{aid}"] = {
+                    "platform": "line", "account_id": aid,
+                    "label": _account_label(svc, aid),
+                    "running": st.get("running", False), "serial": st.get("serial") or "",
+                }
+            except Exception:
+                pass
+        return out
+
+    async def send(self, request: Any, account_id: str, chat_key: str, text: str
+                   ) -> Dict[str, Any]:
+        svcs = _line_services(request)
+        target = next((s for s in svcs
+                       if getattr(s, "account_id", "default") == account_id), None)
+        if target is None and svcs:
+            target = svcs[0]
+        if target is None:
+            raise ChannelSendError(503, "LINE 服务未启用")
+        try:
+            return await target.send_to_chat(chat_key=chat_key, text=text)
+        except AttributeError:
+            raise ChannelSendError(501, "LINE 暂不支持主动发送（需启用 approve 模式）")
+
 
 class WhatsAppInboxAdapter:
     platform = "whatsapp"
@@ -119,6 +173,37 @@ class WhatsAppInboxAdapter:
                 ))
         return out
 
+    def status(self, request: Any) -> Dict[str, Dict[str, Any]]:
+        out: Dict[str, Dict[str, Any]] = {}
+        for svc in _whatsapp_services(request):
+            if svc is None:
+                continue
+            aid = getattr(svc, "account_id", "default")
+            try:
+                st = svc.status()
+                out[f"wa_{aid}"] = {
+                    "platform": "whatsapp", "account_id": aid,
+                    "label": _account_label(svc, aid),
+                    "running": st.get("running", False), "serial": st.get("serial") or "",
+                }
+            except Exception:
+                pass
+        return out
+
+    async def send(self, request: Any, account_id: str, chat_key: str, text: str
+                   ) -> Dict[str, Any]:
+        svcs = _whatsapp_services(request)
+        target = next((s for s in svcs
+                       if getattr(s, "account_id", "default") == account_id), None)
+        if target is None and svcs:
+            target = svcs[0]
+        if target is None:
+            raise ChannelSendError(503, "WhatsApp 服务未启用")
+        try:
+            return await target.send_to_chat(chat_key=chat_key, text=text)
+        except AttributeError:
+            raise ChannelSendError(501, "WhatsApp 暂不支持主动发送（需启用 approve 模式）")
+
 
 class MessengerInboxAdapter:
     platform = "messenger"
@@ -146,6 +231,30 @@ class MessengerInboxAdapter:
             ))
         return out
 
+    def status(self, request: Any) -> Dict[str, Dict[str, Any]]:
+        msvc = getattr(request.app.state, "messenger_rpa_service", None)
+        if msvc is None:
+            return {}
+        try:
+            return {"messenger": {
+                "platform": "messenger", "account_id": "default", "label": "Messenger",
+                "running": msvc.is_running if hasattr(msvc, "is_running") else False,
+            }}
+        except Exception:
+            return {}
+
+    async def send(self, request: Any, account_id: str, chat_key: str, text: str
+                   ) -> Dict[str, Any]:
+        msvc = getattr(request.app.state, "messenger_rpa_service", None)
+        if msvc is None:
+            raise ChannelSendError(503, "Messenger 服务未启用")
+        try:
+            return await msvc.send_to_chat_name(chat_name=chat_key, text=text)
+        except ChannelSendError:
+            raise
+        except Exception as ex:
+            raise ChannelSendError(500, str(ex))
+
 
 class TelegramInboxAdapter:
     platform = "telegram"
@@ -169,6 +278,31 @@ class TelegramInboxAdapter:
         except Exception:
             pass
         return out
+
+    def status(self, request: Any) -> Dict[str, Dict[str, Any]]:
+        tg = getattr(request.app.state, "telegram_client", None)
+        return {"telegram": {
+            "platform": "telegram", "account_id": "default", "label": "Telegram",
+            "running": bool(getattr(tg, "running", False)) if tg else False,
+        }}
+
+    async def send(self, request: Any, account_id: str, chat_key: str, text: str
+                   ) -> Dict[str, Any]:
+        client = getattr(request.app.state, "telegram_client", None)
+        if client is None:
+            raise ChannelSendError(503, "Telegram 服务未启用")
+        sender = getattr(client, "send_message", None) or getattr(client, "send_text", None)
+        if not callable(sender):
+            raise ChannelSendError(501, "Telegram 暂不支持从统一收件箱发送")
+        try:
+            result = sender(chat_key, text)
+            if hasattr(result, "__await__"):
+                result = await result
+            return result
+        except ChannelSendError:
+            raise
+        except Exception as ex:
+            raise ChannelSendError(500, str(ex))
 
 
 class WebInboxAdapter:
@@ -198,6 +332,70 @@ class WebInboxAdapter:
             out.append(store_row_to_chat(r, automation_mode=mode, message_count=mcount))
         return out
 
+    def _web_cfg(self, request: Any) -> Dict[str, Any]:
+        cm = getattr(request.app.state, "config_manager", None)
+        cfg = (getattr(cm, "config", None) or {}) if cm is not None else {}
+        return cfg if isinstance(cfg, dict) else {}
+
+    def status(self, request: Any) -> Dict[str, Dict[str, Any]]:
+        web = (self._web_cfg(request).get("web_chat") or {})
+        if not web.get("enabled"):
+            return {}
+        aid = str(web.get("account_id") or "web")
+        return {f"web_{aid}": {
+            "platform": "web", "account_id": aid,
+            "label": str(web.get("title") or "网页客服"), "running": True,
+        }}
+
+    async def send(self, request: Any, account_id: str, chat_key: str, text: str
+                   ) -> Dict[str, Any]:
+        """web 是服务端原生渠道：投递=落库 + SSE 推浏览器 + 漏斗 + 默认停 AI 交人工。"""
+        import time as _time
+
+        from src.integrations.web_chat.hub import get_web_outbound_hub
+        from src.integrations.web_chat.service import WebChatService
+
+        wc = WebChatService.from_config(self._web_cfg(request))
+        visitor_id = chat_key
+        cid = wc.conversation_id(visitor_id)
+        store = getattr(request.app.state, "inbox_store", None)
+        try:
+            wc.record_message(store, visitor_id, text=text, direction="out", display_name="")
+        except Exception:
+            logger.debug("[web_chat] 坐席出站落库失败", exc_info=True)
+        try:
+            get_web_outbound_hub().publish(cid, {
+                "type": "web_outbound", "conversation_id": cid,
+                "text": text, "by": "agent", "ts": _time.time(),
+            })
+        except Exception:
+            logger.debug("[web_chat] 坐席出站推送失败", exc_info=True)
+        contacts = getattr(request.app.state, "contacts", None)
+        hooks = getattr(contacts, "hooks", None) if contacts is not None else None
+        if hooks is not None:
+            try:
+                hooks.on_message(
+                    channel="web", account_id=wc.account_id, external_id=visitor_id,
+                    direction="out", text_preview=text[:120], trace_id="web-agent",
+                )
+            except Exception:
+                logger.debug("[web_chat] funnel(agent out) 失败", exc_info=True)
+        if store is not None:
+            try:
+                store.set_automation_mode(cid, "manual")  # 人工接管后停 AI
+            except Exception:
+                logger.debug("[web_chat] set manual 失败", exc_info=True)
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            get_event_bus().publish("inbox_message", {
+                "conversation_id": cid, "platform": "web", "account_id": wc.account_id,
+                "chat_key": visitor_id, "preview": text[:80],
+                "direction": "out", "ts": _time.time(),
+            })
+        except Exception:
+            pass
+        return {"delivered": True, "conversation_id": cid}
+
 
 def default_inbox_adapters() -> List[ChannelAdapter]:
     """默认渠道适配器注册表。新增渠道在此追加即可，核心聚合无需改动。"""
@@ -222,3 +420,31 @@ def collect_chats_via_adapters(
             logger.debug("适配器 %s 收集失败",
                          getattr(adapter, "platform", "?"), exc_info=True)
     return out
+
+
+def status_via_adapters(
+    request: Any, adapters: List[ChannelAdapter],
+) -> Dict[str, Dict[str, Any]]:
+    """遍历适配器汇总平台运行状态；单适配器失败不影响其它。"""
+    out: Dict[str, Dict[str, Any]] = {}
+    for adapter in adapters:
+        try:
+            st = adapter.status(request)
+            if st:
+                out.update(st)
+        except Exception:
+            logger.debug("适配器 %s status 失败",
+                         getattr(adapter, "platform", "?"), exc_info=True)
+    return out
+
+
+async def send_via_adapters(
+    request: Any, platform: str, account_id: str, chat_key: str, text: str,
+    adapters: List[ChannelAdapter],
+) -> Dict[str, Any]:
+    """按 platform 路由到对应适配器投递；未知平台抛 ChannelSendError(400)。"""
+    platform = str(platform or "").lower()
+    for adapter in adapters:
+        if getattr(adapter, "platform", "") == platform:
+            return await adapter.send(request, account_id, chat_key, text)
+    raise ChannelSendError(400, f"不支持的平台: {platform}")
