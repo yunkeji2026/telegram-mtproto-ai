@@ -716,6 +716,204 @@ def register_trend_route(app, *, api_auth):
         }
 
 
+def register_ab_testing_route(app, *, api_auth):
+    """S1：注册 A/B 测试管理 API（主管专属）。"""
+    from fastapi import Depends
+
+    @app.get("/api/workspace/ab-tests")
+    async def api_list_ab_tests(
+        request: Request,
+        status: str = "",
+        _=Depends(api_auth),
+    ):
+        """S1：列出所有 A/B 测试（主管专属）。"""
+        if not _is_supervisor(request):
+            raise HTTPException(403, "A/B 测试管理需要主管权限")
+        inbox = getattr(request.app.state, "inbox_store", None)
+        if inbox is None:
+            raise HTTPException(503, "inbox_store 未就绪")
+        from src.inbox.ab_testing import ABTestingStore
+        ab = ABTestingStore(inbox)
+        tests = ab.list_tests(status=status)
+        return {"ok": True, "tests": tests, "count": len(tests)}
+
+    @app.post("/api/workspace/ab-tests")
+    async def api_create_ab_test(
+        request: Request,
+        _=Depends(api_auth),
+    ):
+        """S1：创建新 A/B 测试（主管专属）。
+
+        Body: {name, intent_filter, template_a_id, template_b_id, description?, min_sample?}
+        """
+        if not _is_supervisor(request):
+            raise HTTPException(403, "A/B 测试管理需要主管权限")
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "请求体解析失败")
+        name = str(body.get("name") or "").strip()
+        intent_filter = str(body.get("intent_filter") or "").strip()
+        tpl_a = str(body.get("template_a_id") or "").strip()
+        tpl_b = str(body.get("template_b_id") or "").strip()
+        if not name or not tpl_a or not tpl_b:
+            raise HTTPException(400, "name / template_a_id / template_b_id 不能为空")
+        inbox = getattr(request.app.state, "inbox_store", None)
+        if inbox is None:
+            raise HTTPException(503, "inbox_store 未就绪")
+        from src.inbox.ab_testing import ABTestingStore
+        ab = ABTestingStore(inbox)
+        test_id = ab.create_test(
+            name=name,
+            intent_filter=intent_filter,
+            template_a_id=tpl_a,
+            template_b_id=tpl_b,
+            description=str(body.get("description") or ""),
+            min_sample=int(body.get("min_sample") or 30),
+            created_by=_session_agent_id(request),
+        )
+        return {"ok": True, "test_id": test_id}
+
+    @app.get("/api/workspace/ab-tests/{test_id}/results")
+    async def api_ab_test_results(
+        request: Request,
+        test_id: str,
+        _=Depends(api_auth),
+    ):
+        """S1：获取 A/B 测试详细结果（含显著性检验，主管专属）。"""
+        if not _is_supervisor(request):
+            raise HTTPException(403, "A/B 测试管理需要主管权限")
+        inbox = getattr(request.app.state, "inbox_store", None)
+        if inbox is None:
+            raise HTTPException(503, "inbox_store 未就绪")
+        from src.inbox.ab_testing import ABTestingStore
+        ab = ABTestingStore(inbox)
+        results = ab.get_results(test_id)
+        if "error" in results:
+            raise HTTPException(404, results["error"])
+        return {"ok": True, **results}
+
+    @app.post("/api/workspace/ab-tests/{test_id}/stop")
+    async def api_stop_ab_test(
+        request: Request,
+        test_id: str,
+        _=Depends(api_auth),
+    ):
+        """S1：手动停止 A/B 测试（主管专属）。"""
+        if not _is_supervisor(request):
+            raise HTTPException(403, "A/B 测试管理需要主管权限")
+        inbox = getattr(request.app.state, "inbox_store", None)
+        if inbox is None:
+            raise HTTPException(503, "inbox_store 未就绪")
+        from src.inbox.ab_testing import ABTestingStore
+        ab = ABTestingStore(inbox)
+        ok = ab.stop_test(test_id, reason="manual_api")
+        if not ok:
+            raise HTTPException(404, f"测试 {test_id} 不存在或已结束")
+        return {"ok": True, "test_id": test_id, "status": "stopped"}
+
+
+def register_trace_route(app, *, api_auth):
+    """S3：注册 /api/workspace/trace/{trace_id}（全链路时间线查询）。"""
+    from fastapi import Depends
+
+    @app.get("/api/workspace/trace/{trace_id}")
+    async def api_trace_timeline(
+        request: Request,
+        trace_id: str,
+        _=Depends(api_auth),
+    ):
+        """S3：重建指定 trace_id 的完整调用链时间线。
+
+        调用链：ingest → draft_created → audit → survey_scheduled
+        主管和普通坐席均可访问（用于自助排查生产问题）。
+        """
+        inbox = getattr(request.app.state, "inbox_store", None)
+        if inbox is None:
+            raise HTTPException(503, "inbox_store 未就绪")
+        from src.inbox.tracer import TraceTimeline
+        tl = TraceTimeline(inbox)
+        result = tl.build(trace_id)
+        if not result.get("found"):
+            raise HTTPException(404, f"trace_id={trace_id} 未找到")
+        return {"ok": True, **result}
+
+    @app.get("/api/workspace/trace")
+    async def api_recent_traces(
+        request: Request,
+        limit: int = 20,
+        platform: str = "",
+        _=Depends(api_auth),
+    ):
+        """S3：列出最近的 trace_id（主管专属）。
+
+        返回最近 limit 条对话的 trace_id + 基本信息，便于主管选取追踪。
+        """
+        if not _is_supervisor(request):
+            raise HTTPException(403, "trace 列表需要主管权限")
+        inbox = getattr(request.app.state, "inbox_store", None)
+        if inbox is None:
+            raise HTTPException(503, "inbox_store 未就绪")
+        try:
+            with inbox._lock:
+                q = """SELECT conversation_id, trace_id, platform, msg_count, updated_at,
+                              last_intent, last_emotion
+                       FROM conversation_meta
+                       WHERE trace_id != ''"""
+                params = []
+                if platform:
+                    q += " AND platform=?"
+                    params.append(platform)
+                q += " ORDER BY updated_at DESC LIMIT ?"
+                params.append(max(1, min(100, limit)))
+                rows = inbox._conn.execute(q, params).fetchall()
+            return {
+                "ok": True,
+                "traces": [dict(r) for r in rows],
+                "count": len(rows),
+            }
+        except Exception as e:
+            raise HTTPException(500, str(e))
+
+
+def register_anomaly_route(app, *, api_auth):
+    """S2：注册 /api/workspace/anomaly（异常检测状态查询，主管专属）。"""
+    from fastapi import Depends
+
+    @app.get("/api/workspace/anomaly")
+    async def api_anomaly_check(
+        request: Request,
+        _=Depends(api_auth),
+    ):
+        """S2：即时运行异常检测并返回结果（主管专属）。
+
+        不触发告警；仅返回当前检测结果供主管查看。
+        """
+        if not _is_supervisor(request):
+            raise HTTPException(403, "异常检测查看需要主管权限")
+        inbox = getattr(request.app.state, "inbox_store", None)
+        if inbox is None:
+            raise HTTPException(503, "inbox_store 未就绪")
+
+        from src.inbox.anomaly import AnomalyDetector
+        cfg = getattr(request.app.state, "cfg", {}) or {}
+        detector = AnomalyDetector(inbox, cfg)
+        results = detector.run_full_check()
+        anomaly_dicts = [r.to_dict() for r in results]
+        anomalies = [d for d in anomaly_dicts if d["is_anomaly"]]
+
+        return {
+            "ok": True,
+            "enabled": detector.is_enabled(),
+            "sensitivity": detector._sensitivity(),
+            "baseline_days": detector._baseline_days(),
+            "metrics_checked": len(results),
+            "anomaly_count": len(anomalies),
+            "anomalies": anomalies,
+            "all_metrics": anomaly_dicts,
+        }
+
+
 def register_workload_route(app, *, api_auth):
     """R2：注册 /api/workspace/workload（坐席工作负荷均衡，主管专属）。"""
     from fastapi import Depends

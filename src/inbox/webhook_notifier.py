@@ -65,7 +65,8 @@ _EVENT_ALIASES: Dict[str, Dict[str, Any]] = {
     "reply_risk": {"types": {"human_reply_risk"}, "levels": None},  # M3
     "report": {"types": {"report"}, "levels": None},                # M2 简报推送
     "csat_alert": {"types": {"csat_alert"}, "levels": None},        # O2 智能预警
-    "crm_sync": {"types": {"draft_resolved"}, "levels": None},      # P1 外部 CRM 同步
+    "crm_sync":     {"types": {"draft_resolved"}, "levels": None},   # P1 外部 CRM 同步
+    "anomaly":      {"types": {"anomaly_alert"}, "levels": None},    # S2 统计异常预警
 }
 
 # ─── 速率限制 ────────────────────────────────────────────────────────────────
@@ -195,6 +196,21 @@ def _build_message(event_type: str, data: Dict[str, Any]) -> tuple[str, str]:
         period = data.get("period", "daily")
         title = f"📊 {'今日' if period == 'daily' else '本周'}工作简报"
         text = str(data.get("text") or "")
+
+    elif event_type == "anomaly_alert":
+        # S2: 统计异常预警
+        anomalies = data.get("anomalies") or []
+        count = data.get("anomaly_count", 0)
+        title = f"🔔 统计异常预警：{count} 项指标偏离基线"
+        lines = []
+        for a in anomalies:
+            direction_icon = "📉" if a.get("direction") == "down" else "📈"
+            lines.append(
+                f"{direction_icon} **{a.get('label', a.get('metric'))}**: "
+                f"当前 {a.get('current_fmt', '?')} vs 基线 {a.get('baseline_fmt', '?')} "
+                f"（偏离 {a.get('deviation_score', 0):.1f}σ）"
+            )
+        text = "\n".join(lines) if lines else "异常详情见系统日志"
 
     elif event_type == "draft_resolved":
         # P1: CRM 同步用简洁摘要格式

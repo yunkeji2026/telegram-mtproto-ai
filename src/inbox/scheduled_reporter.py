@@ -152,6 +152,9 @@ class ScheduledReporter:
 
             # O2: 简报数据复用，直接评估预警规则（零额外 DB 查询）
             await self._evaluate_alert_rules(report_data)
+
+            # S2: 异常检测（在 O2 规则之外，用统计基线自动发现偏差）
+            await self._run_anomaly_detection(report_data)
         except Exception:
             self.total_errors += 1
             logger.warning("ScheduledReporter %s 简报推送失败", period, exc_info=True)
@@ -238,6 +241,38 @@ class ScheduledReporter:
                     )
         except Exception:
             logger.debug("O2 预警规则评估失败（已忽略）", exc_info=True)
+
+    # ── S2：统计异常检测 ─────────────────────────────────────────────────
+
+    async def _run_anomaly_detection(self, report_data: Dict[str, Any]) -> None:
+        """S2：运行统计异常检测，将异常结果发布为 anomaly_alert 事件。"""
+        try:
+            from src.inbox.anomaly import AnomalyDetector, build_anomaly_alert_payload
+            from src.integrations.shared.event_bus import get_event_bus
+            detector = AnomalyDetector(self._store, self._cfg)
+            if not detector.is_enabled():
+                return
+            # 从报告数据中提取当前指标值（复用已计算结果，零额外 DB 查询）
+            current_metrics: Dict[str, float] = {}
+            if report_data.get("avg_csat") is not None:
+                current_metrics["csat_avg"] = float(report_data["avg_csat"])
+            if report_data.get("l3l4_rate") is not None:
+                current_metrics["l3l4_rate"] = float(report_data["l3l4_rate"]) * 100
+            if report_data.get("autosend_rate") is not None:
+                current_metrics["autosend_rate"] = float(report_data["autosend_rate"]) * 100
+            results = detector.run_full_check(current_metrics)
+            payload = build_anomaly_alert_payload(
+                results,
+                detector_cfg=detector._anomaly_cfg(),
+            )
+            if payload:
+                get_event_bus().publish("anomaly_alert", payload)
+                self.total_alerts += 1
+                logger.warning(
+                    "S2 AnomalyDetector: %d 异常已发布", payload["anomaly_count"]
+                )
+        except Exception:
+            logger.debug("S2 异常检测失败（已忽略）", exc_info=True)
 
     # ── 手动触发（用于测试 / API 按钮） ─────────────────────────────────
 

@@ -2375,6 +2375,9 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
             register_workspace_route,
             register_kb_stats_route,
             register_workload_route,
+            register_ab_testing_route,
+            register_anomaly_route,
+            register_trace_route,
         )
         # J3: export API（主管数据导出）
         register_export_route(app, api_auth=_api_auth)
@@ -2398,6 +2401,12 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         register_kb_stats_route(app, api_auth=_api_auth)
         # R2: 坐席工作负荷 API
         register_workload_route(app, api_auth=_api_auth)
+        # S1: A/B 测试 API
+        register_ab_testing_route(app, api_auth=_api_auth)
+        # S2: 异常检测 API
+        register_anomaly_route(app, api_auth=_api_auth)
+        # S3: 全链路追踪 API
+        register_trace_route(app, api_auth=_api_auth)
 
         register_drafts_page_routes(
             app,
@@ -2420,9 +2429,17 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
     @app.get("/workspace/templates")
     async def _ws_templates(request: Request):
         _unified_inbox_page_auth(request)
+        sess = request.session
         return templates.TemplateResponse(
+            request,
             "template_mgmt.html",
-            {"request": request, "config_manager": config_manager},
+            {
+                "request": request,
+                "config_manager": config_manager,
+                "user_name": sess.get("username") or sess.get("agent_id") or "",
+                "user_display_name": sess.get("display_name") or sess.get("username") or "",
+                "site_name": (config_manager.config or {}).get("web_admin", {}).get("site_name", ""),
+            },
         )
 
     # ── 面向客户的网页聊天 Widget（web 渠道，公网；feature flag 默认关）──
