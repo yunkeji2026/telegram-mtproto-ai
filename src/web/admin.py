@@ -2373,6 +2373,7 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
             register_my_perf_route,
             register_kb_archive_route,
             register_workspace_route,
+            register_kb_stats_route,
         )
         # J3: export API（主管数据导出）
         register_export_route(app, api_auth=_api_auth)
@@ -2392,6 +2393,8 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         register_kb_archive_route(app, api_auth=_api_auth)
         # P3: workspace CRUD API（多租户工作区）
         register_workspace_route(app, api_auth=_api_auth)
+        # Q2+Q3: KB 命中率 + 质量统计 API
+        register_kb_stats_route(app, api_auth=_api_auth)
 
         register_drafts_page_routes(
             app,

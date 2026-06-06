@@ -239,6 +239,43 @@ def register_drafts_routes(app, *, api_auth):
         except Exception:
             pass
 
+        # Q2: 若有 draft_id，附带草稿质量评分（已存储在 reply_drafts）
+        quality_info: dict = {}
+        if draft_id:
+            try:
+                inbox_s = getattr(request.app.state, "inbox_store", None)
+                if inbox_s is not None:
+                    qr = inbox_s.get_draft_quality(draft_id)
+                    if qr and qr["quality_score"] >= 0:
+                        from src.inbox.quality import quality_to_badge
+                        quality_info = {
+                            "quality_score": qr["quality_score"],
+                            "quality_breakdown": qr["breakdown"],
+                            "quality_badge": quality_to_badge(qr["quality_score"]),
+                        }
+            except Exception:
+                pass
+
+        # Q3: 记录 KB 推荐事件（用于命中率监控）
+        if kb_matches:
+            try:
+                inbox_s2 = getattr(request.app.state, "inbox_store", None)
+                if inbox_s2 is not None:
+                    import uuid as _uuid2
+                    _agent = _session_agent_id(request)
+                    for km in kb_matches:
+                        _rec_id = _uuid2.uuid4().hex[:12]
+                        km["_rec_id"] = _rec_id  # 返回给前端，用于点击时回调
+                        inbox_s2.record_kb_recommendation(
+                            rec_id=_rec_id,
+                            entry_id=str(km.get("entry_id") or ""),
+                            entry_title=str(km.get("title") or ""),
+                            conversation_id=str(conversation_id or ""),
+                            agent_id=str(_agent or ""),
+                        )
+            except Exception:
+                pass
+
         return {
             "ok": True,
             "draft_id": draft_id,
@@ -247,6 +284,7 @@ def register_drafts_routes(app, *, api_auth):
             "suggestions": suggestions,
             "kb_matches": kb_matches,
             "template_suggestions": template_suggestions,  # J2
+            **quality_info,  # Q2: quality_score, quality_breakdown, quality_badge
         }
 
     @app.get("/api/drafts/sla-overdue")
@@ -676,6 +714,84 @@ def register_trend_route(app, *, api_auth):
                 ),
             },
         }
+
+
+def register_kb_stats_route(app, *, api_auth):
+    """Q2+Q3：注册 KB 命中率统计 + 质量评分分布（主管专属）。"""
+    from fastapi import Depends
+
+    @app.get("/api/workspace/kb-stats")
+    async def api_kb_stats(
+        request: Request,
+        days: int = 7,
+        _=Depends(api_auth),
+    ):
+        """Q3：返回 KB 条目推荐/点击/使用统计（主管专属）。
+
+        Query: ?days=7（过去 N 天，默认 7 天）
+        """
+        if not _is_supervisor(request):
+            raise HTTPException(403, "KB 统计需要主管权限")
+        inbox = getattr(request.app.state, "inbox_store", None)
+        if inbox is None:
+            raise HTTPException(503, "inbox_store 未就绪")
+        _days = max(1, min(90, int(days or 7)))
+        since_ts = time.time() - _days * 86400
+        stats = inbox.get_kb_hit_stats(since_ts=since_ts, top_n=30)
+        # 额外提供低命中率列表（命中率<30%且推荐>=3次）
+        low_hit = sorted(
+            [s for s in stats if s["recommended"] >= 3 and s["hit_rate"] < 30],
+            key=lambda x: x["hit_rate"],
+        )[:10]
+        return {
+            "ok": True,
+            "days": _days,
+            "entries": stats,
+            "low_hit_entries": low_hit,
+        }
+
+    @app.post("/api/workspace/kb-click")
+    async def api_kb_click(
+        request: Request,
+        _=Depends(api_auth),
+    ):
+        """Q3：记录坐席点击了某次 KB 推荐（client-side tracking）。
+
+        Body: {rec_id, used_in_draft?, draft_id?}
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "请求体解析失败")
+        rec_id = str(body.get("rec_id") or "").strip()
+        if not rec_id:
+            raise HTTPException(400, "rec_id 不能为空")
+        inbox = getattr(request.app.state, "inbox_store", None)
+        if inbox is None:
+            raise HTTPException(503, "inbox_store 未就绪")
+        inbox.click_kb_recommendation(
+            rec_id=rec_id,
+            used_in_draft=bool(body.get("used_in_draft")),
+            draft_id=str(body.get("draft_id") or ""),
+        )
+        return {"ok": True, "rec_id": rec_id}
+
+    @app.get("/api/workspace/quality-stats")
+    async def api_quality_stats(
+        request: Request,
+        days: int = 7,
+        _=Depends(api_auth),
+    ):
+        """Q2：草稿质量分分布统计（主管专属）。"""
+        if not _is_supervisor(request):
+            raise HTTPException(403, "质量统计需要主管权限")
+        inbox = getattr(request.app.state, "inbox_store", None)
+        if inbox is None:
+            raise HTTPException(503, "inbox_store 未就绪")
+        _days = max(1, min(90, int(days or 7)))
+        since_ts = time.time() - _days * 86400
+        stats = inbox.list_draft_quality_stats(since_ts=since_ts)
+        return {"ok": True, "days": _days, **stats}
 
 
 def register_workspace_route(app, *, api_auth):
