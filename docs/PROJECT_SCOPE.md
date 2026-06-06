@@ -7,9 +7,11 @@
 `telegram-mtproto-ai` = **多平台 AI 客服**的主骨架：
 
 - **多平台 RPA runner** — Telegram / LINE / Messenger 各自一个 runner
+- **web 渠道（网页聊天 Widget）** — 面向终端客户的公网聊天气泡（`/chat`），入站进同一 AI 大脑、落统一收件箱、坐席可人工接管（`src/integrations/web_chat/`，feature flag `web_chat.enabled` 默认关）
 - **contacts / handoff 子系统** — 跨平台的 Contact / Journey / HandoffToken，含 Messenger→LINE 引流主线
 - **知识库 + 回复逻辑** — skill_manager / KB / trigger / 回复生成 / 语言守卫
-- **Web 后台** — admin / funnel / monitoring / handoff preview
+- **三类前端** — ① 管理后台（设置/KB/人设/策略，`:18787`）② 坐席工作台（统一收件箱 `/workspace`，agent 角色，含多坐席租约锁）③ 客户网页聊天 Widget（`/chat`，访客 token）
+- **坐席协作技术备忘** — [`docs/WORKSPACE_TECH_NOTES.md`](WORKSPACE_TECH_NOTES.md)（SSE/租约锁/多实例升级路径）
 - **observability** — metrics / audit / grafana 仪表盘
 
 启动入口：`main.py`（FastAPI + 所有 runner + contacts 子系统）。

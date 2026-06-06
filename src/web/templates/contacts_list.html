@@ -1,0 +1,167 @@
+{% extends "workspace_base.html" %}
+{% block title %}客户列表{% endblock %}
+{% block head %}
+<style>
+  .cl-wrap{height:100%;display:flex;flex-direction:column;background:#f7f8fa;}
+  .cl-bar{padding:12px 18px;background:#fff;border-bottom:1px solid #e5e7eb;display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+  .cl-bar a.back{font-size:12px;color:#2563eb;text-decoration:none;}
+  .cl-search{flex:1;min-width:180px;border:1px solid #d1d5db;border-radius:7px;padding:7px 10px;font-size:13px;}
+  .cl-sel{border:1px solid #d1d5db;border-radius:7px;padding:7px 9px;font-size:13px;background:#fff;}
+  .cl-stats{padding:8px 18px;font-size:12px;color:#64748b;display:flex;gap:14px;flex-wrap:wrap;}
+  .cl-stat{cursor:pointer;}
+  .cl-stat.active{color:#2563eb;font-weight:600;}
+  .cl-list{flex:1;overflow-y:auto;padding:12px 18px;}
+  .cl-card{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:9px;cursor:pointer;display:flex;align-items:center;gap:12px;}
+  .cl-card:hover{box-shadow:0 2px 10px rgba(0,0,0,.07);}
+  .cl-name{font-weight:600;font-size:14px;}
+  .cl-meta{font-size:12px;color:#64748b;margin-top:3px;}
+  .cl-chan{display:inline-block;font-size:10px;font-weight:600;border-radius:5px;padding:0 5px;margin-right:4px;}
+  .ch-line{background:#06c755;color:#fff;} .ch-whatsapp{background:#25d366;color:#fff;}
+  .ch-messenger{background:#0084ff;color:#fff;} .ch-telegram{background:#229ed9;color:#fff;}
+  .ch-web{background:#2563eb;color:#fff;} .ch-default{background:#64748b;color:#fff;}
+  .cl-stage{font-size:11px;background:#eef2ff;color:#3730a3;border-radius:10px;padding:2px 9px;}
+  .cl-lead{font-size:11px;background:#dcfce7;color:#166534;border-radius:10px;padding:2px 8px;margin-left:5px;}
+  .cl-right{margin-left:auto;text-align:right;}
+  .cl-intim{font-size:12px;color:#0369a1;}
+  .cl-page{display:flex;gap:10px;justify-content:center;padding:10px;}
+  .cl-page button{border:1px solid #d1d5db;background:#fff;border-radius:7px;padding:6px 14px;font-size:13px;cursor:pointer;}
+  .cl-page button:disabled{opacity:.4;cursor:default;}
+</style>
+{% endblock %}
+{% block content %}
+<div class="cl-wrap">
+  <div class="cl-bar">
+    <a class="back" href="/workspace">← 工作台</a>
+    <input class="cl-search" id="cl-q" placeholder="搜索：名称 / ID / 渠道号码…" onkeydown="if(event.key==='Enter')CL.reset()">
+    <select class="cl-sel" id="cl-lead" onchange="CL.reset()">
+      <option value="">全部客户</option>
+      <option value="1">已留资</option>
+      <option value="0">未留资</option>
+    </select>
+    <select class="cl-sel" id="cl-stage" onchange="CL.reset()"><option value="">全部阶段</option></select>
+    <select class="cl-sel" id="cl-fu" onchange="CL.reset()">
+      <option value="">全部跟进</option>
+      <option value="due">待跟进(到期)</option>
+      <option value="any">有跟进计划</option>
+    </select>
+    <select class="cl-sel" id="cl-tag" onchange="CL.reset()"><option value="">全部标签</option></select>
+    <button class="cl-sel" style="cursor:pointer;" onclick="CL.exportCsv()">导出 CSV</button>
+  </div>
+  <div class="cl-stats" id="cl-stats"></div>
+  <div class="cl-list" id="cl-list"><span style="color:#94a3b8;">加载中…</span></div>
+  <div class="cl-page">
+    <button id="cl-prev" onclick="CL.prev()">上一页</button>
+    <span id="cl-pageinfo" style="font-size:12px;color:#64748b;align-self:center;"></span>
+    <button id="cl-next" onclick="CL.next()">下一页</button>
+  </div>
+</div>
+<script>
+(function(){
+  var LIMIT=30, offset=0, total=0, stageLabels={};
+  function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+  function chCls(c){return ({line:'ch-line',whatsapp:'ch-whatsapp',messenger:'ch-messenger',telegram:'ch-telegram',web:'ch-web'})[c]||'ch-default';}
+  function fmtTs(ts){ if(!ts) return '—'; var d=new Date((ts<1e12?ts*1000:ts)); return d.toLocaleDateString()+' '+d.toLocaleTimeString().slice(0,5); }
+  function params(){
+    var p=filterParams(); p.set('limit',String(LIMIT)); p.set('offset',String(offset)); return p;
+  }
+  var tagColors={};
+  function filterParams(){
+    var p=new URLSearchParams();
+    var q=(document.getElementById('cl-q').value||'').trim();
+    if(q) p.set('q',q);
+    var v;
+    if((v=document.getElementById('cl-stage').value)) p.set('stage',v);
+    if((v=document.getElementById('cl-lead').value)) p.set('has_lead',v);
+    if((v=document.getElementById('cl-fu').value)) p.set('follow_up',v);
+    if((v=document.getElementById('cl-tag').value)) p.set('tag',v);
+    return p;
+  }
+  function syncUrl(){
+    var p=filterParams();
+    if(offset>0) p.set('offset',String(offset));
+    var qs=p.toString();
+    history.replaceState(null,'', location.pathname+(qs?('?'+qs):''));
+  }
+  function readUrl(){
+    var p=new URLSearchParams(location.search);
+    if(p.get('q')!=null) document.getElementById('cl-q').value=p.get('q');
+    if(p.get('has_lead')!=null) document.getElementById('cl-lead').value=p.get('has_lead');
+    if(p.get('follow_up')!=null) document.getElementById('cl-fu').value=p.get('follow_up');
+    offset=Math.max(0,parseInt(p.get('offset')||'0',10)||0);
+    // stage/tag 选项异步填充后再设；先暂存
+    window.__pendStage=p.get('stage')||''; window.__pendTag=p.get('tag')||'';
+    // 兼容旧 #due 锚点
+    if(location.hash==='#due') document.getElementById('cl-fu').value='due';
+  }
+  function fillTagOptions(){
+    var sel=document.getElementById('cl-tag');
+    if(sel.options.length>1){ return; }
+    fetch('/api/workspace/tags').then(function(r){return r.json();}).then(function(d){
+      (d.tags||[]).forEach(function(t){
+        if(t.color) tagColors[t.tag]=t.color;
+        var o=document.createElement('option'); o.value=t.tag; o.textContent=t.tag+' ('+t.count+')'; sel.appendChild(o);
+      });
+      if(window.__pendTag){ sel.value=window.__pendTag; window.__pendTag=''; }
+    }).catch(function(){});
+  }
+  function fillStageOptions(labels, counts){
+    stageLabels=labels||{};
+    var sel=document.getElementById('cl-stage');
+    if(sel.options.length>1) return; // 只填一次
+    Object.keys(stageLabels).forEach(function(k){
+      var o=document.createElement('option'); o.value=k;
+      o.textContent=stageLabels[k]+(counts&&counts[k]?(' ('+counts[k]+')'):'');
+      sel.appendChild(o);
+    });
+    if(window.__pendStage){ sel.value=window.__pendStage; window.__pendStage=''; }
+  }
+  function renderStats(counts){
+    var box=document.getElementById('cl-stats'); var cur=document.getElementById('cl-stage').value;
+    var items=['<span class="cl-stat'+(!cur?' active':'')+'" onclick="CL.setStage(\'\')">全部 '+total+'</span>'];
+    Object.keys(counts||{}).forEach(function(k){
+      items.push('<span class="cl-stat'+(cur===k?' active':'')+'" onclick="CL.setStage(\''+k+'\')">'+esc(stageLabels[k]||k)+' '+counts[k]+'</span>');
+    });
+    box.innerHTML=items.join('');
+  }
+  function render(rows){
+    var box=document.getElementById('cl-list');
+    if(!rows.length){ box.innerHTML='<span style="color:#94a3b8;">无匹配客户</span>'; return; }
+    var now=Date.now()/1000;
+    box.innerHTML=rows.map(function(c){
+      var chans=(c.channels||[]).map(function(ch,i){return '<span class="cl-chan '+chCls(ch)+'">'+esc((c.channel_labels||[])[i]||ch)+'</span>';}).join('');
+      var intim=(c.intimacy_score!=null)?('<div class="cl-intim">亲密 '+Number(c.intimacy_score).toFixed(0)+'</div>'):'';
+      var tags=(c.tags||[]).map(function(t){var col=tagColors[t];var st=col?('background:'+esc(col)+';color:#fff;'):'background:#f1f5f9;color:#475569;';return '<span class="cl-stage" style="'+st+'">'+esc(t)+'</span>';}).join(' ');
+      var fu='';
+      if(c.follow_up_at){ var due=c.follow_up_at<=now; fu='<div style="font-size:11px;margin-top:3px;color:'+(due?'#dc2626':'#92400e')+';">'+(due?'⏰ 待跟进 ':'跟进 ')+fmtTs(c.follow_up_at)+'</div>'; }
+      return '<div class="cl-card" onclick="location.href=\'/workspace/contact/'+encodeURIComponent(c.contact_id)+'\'">'
+        +'<div><div class="cl-name">'+esc(c.primary_name||'未命名客户')+(c.has_lead?'<span class="cl-lead">已留资</span>':'')+'</div>'
+        +'<div class="cl-meta">'+chans+' · 最近活跃 '+fmtTs(c.last_active_at)+'</div>'+(tags?'<div style="margin-top:4px;">'+tags+'</div>':'')+'</div>'
+        +'<div class="cl-right">'+(c.funnel_stage?'<span class="cl-stage">'+esc(c.funnel_stage_label||c.funnel_stage)+'</span>':'')+intim+fu+'</div>'
+        +'</div>';
+    }).join('');
+  }
+  function load(){
+    document.getElementById('cl-list').innerHTML='<span style="color:#94a3b8;">加载中…</span>';
+    fetch('/api/workspace/contacts/list?'+params()).then(function(r){return r.json();}).then(function(d){
+      if(!d.ok){ document.getElementById('cl-list').innerHTML='<span style="color:#94a3b8;">联系人子系统未启用</span>'; return; }
+      total=d.total||0; fillStageOptions(d.stage_labels, d.stage_counts); fillTagOptions(); renderStats(d.stage_counts||{});
+      render(d.contacts||[]);
+      syncUrl();
+      var pg=Math.floor(offset/LIMIT)+1, pages=Math.max(1,Math.ceil(total/LIMIT));
+      document.getElementById('cl-pageinfo').textContent=pg+' / '+pages+' 页 · 共 '+total;
+      document.getElementById('cl-prev').disabled=offset<=0;
+      document.getElementById('cl-next').disabled=offset+LIMIT>=total;
+    }).catch(function(){ document.getElementById('cl-list').innerHTML='<span style="color:#ef4444;">加载失败</span>'; });
+  }
+  readUrl();
+  window.CL={
+    reset:function(){ offset=0; load(); },
+    setStage:function(s){ document.getElementById('cl-stage').value=s; offset=0; load(); },
+    prev:function(){ if(offset>0){ offset=Math.max(0,offset-LIMIT); load(); } },
+    next:function(){ if(offset+LIMIT<total){ offset+=LIMIT; load(); } },
+    exportCsv:function(){ window.open('/api/workspace/contacts/export.csv?'+filterParams().toString(), '_blank'); }
+  };
+  load();
+})();
+</script>
+{% endblock %}

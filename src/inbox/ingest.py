@@ -52,8 +52,32 @@ def _conv_from_chat(chat: Dict[str, Any]) -> InboxConversation:
     )
 
 
-def ingest_collected_chats(store, chats: List[Dict[str, Any]]) -> int:
-    """旁路写入聚合到的对话列表。返回新插入的消息条数。best-effort，调用方包 try。"""
+def _publish_inbox_message(conv: InboxConversation) -> None:
+    """有新入站消息时，向全局事件总线发 inbox_message（SSE 实时推送给工作台）。"""
+    try:
+        from src.integrations.shared.event_bus import get_event_bus
+        get_event_bus().publish("inbox_message", {
+            "conversation_id": conv.conversation_id,
+            "platform": conv.platform,
+            "account_id": conv.account_id,
+            "chat_key": conv.chat_key,
+            "name": conv.display_name,
+            "preview": (conv.last_text or "")[:80],
+            "unread": int(conv.unread or 0),
+            "ts": conv.last_ts,
+        })
+    except Exception:
+        logger.debug("inbox_message 事件发布失败", exc_info=True)
+
+
+def ingest_collected_chats(
+    store, chats: List[Dict[str, Any]], *, publish_events: bool = False
+) -> int:
+    """旁路写入聚合到的对话列表。返回新插入的消息条数。best-effort，调用方包 try。
+
+    publish_events=True 时，对**新插入的入站消息**所属会话发 inbox_message 事件
+    （供坐席工作台 SSE 实时刷新）；冷启动首轮应传 False 以免事件洪泛。
+    """
     inserted = 0
     for chat in chats or []:
         conv = _conv_from_chat(chat)
@@ -63,7 +87,11 @@ def ingest_collected_chats(store, chats: List[Dict[str, Any]]) -> int:
         lm = chat.get("last_message") or {}
         if isinstance(lm, dict) and lm.get("text"):
             msgs.append(_msg_from_obj(conv.conversation_id, lm))
-        inserted += store.ingest_batch(conv, msgs)
+        n = store.ingest_batch(conv, msgs)
+        inserted += n
+        if publish_events and n > 0 and isinstance(lm, dict) \
+                and str(lm.get("direction") or "in") == "in":
+            _publish_inbox_message(conv)
     return inserted
 
 

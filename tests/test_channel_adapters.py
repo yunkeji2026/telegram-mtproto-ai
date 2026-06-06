@@ -48,10 +48,10 @@ def _req(**state):
     return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(**state)))
 
 
-def test_default_registry_has_four_platforms():
+def test_default_registry_has_all_platforms():
     adapters = default_inbox_adapters()
     assert [a.platform for a in adapters] == [
-        "line", "whatsapp", "messenger", "telegram",
+        "line", "whatsapp", "messenger", "telegram", "web",
     ]
     for a in adapters:
         assert isinstance(a, ChannelAdapter)  # runtime_checkable Protocol

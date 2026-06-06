@@ -187,7 +187,7 @@ class TestBadInput:
         r = gw.maybe_issue_handoff(messenger_ci_id="nonexistent",
                                      latest_in_text="晚安")
         assert r.success is False
-        assert r.reason == "bad_messenger_ci"
+        assert r.reason == "bad_source_ci"
 
 
 class TestDryRun:

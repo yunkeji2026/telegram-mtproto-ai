@@ -1,8 +1,8 @@
-{% extends "base.html" %}
+{% extends "workspace_base.html" %}
 {% block title %}统一收件箱{% endblock %}
 {% block content %}
 <style>
-.inbox-layout { display:flex; gap:0; height:calc(100vh - 120px); overflow:hidden; }
+.inbox-layout { display:flex; gap:0; height:100%; overflow:hidden; }
 .inbox-sidebar { width:340px; min-width:260px; border-right:1px solid #e5e7eb; display:flex; flex-direction:column; background:#fff; }
 .inbox-main   { flex:1; display:grid; grid-template-columns:minmax(0,1fr) 300px; background:#f9fafb; min-width:0; }
 .chat-panel   { display:flex; flex-direction:column; min-width:0; }
@@ -36,7 +36,14 @@
 .chat-meta  { font-size:11px; color:#9ca3af; text-align:right; white-space:nowrap; flex-shrink:0; }
 .chat-badge { display:inline-block; background:#ef4444; color:#fff; border-radius:10px; font-size:10px; padding:1px 6px; margin-top:3px; }
 .chat-tag   { font-size:10px; color:#fff; border-radius:3px; padding:1px 5px; display:inline-block; margin-top:2px; }
-.tag-line{background:#00C300;} .tag-wa{background:#25D366;} .tag-messenger{background:#0084FF;} .tag-telegram{background:#2BA5E0;}
+.tag-line{background:#00C300;} .tag-wa{background:#25D366;} .tag-messenger{background:#0084FF;} .tag-telegram{background:#2BA5E0;} .tag-web{background:#2563eb;}
+.dot-web{background:#2563eb;}
+.plat-btn.acct{font-size:11px;padding:3px 9px;opacity:.92;}
+.ai-toggle{margin-left:auto;border:1px solid #d1d5db;border-radius:20px;padding:5px 13px;font-size:12px;cursor:pointer;background:#fff;white-space:nowrap;flex-shrink:0;}
+.ai-toggle.on{background:#10b981;color:#fff;border-color:#10b981;}
+.ai-toggle.off{background:#fff;color:#374151;}
+.xlate-row{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#374151;}
+.xlate-row select{border:1px solid #d1d5db;border-radius:6px;padding:2px 6px;font-size:11px;}
 
 /* Main panel */
 .inbox-header { padding:14px 20px; border-bottom:1px solid #e5e7eb; background:#fff; display:flex; align-items:center; gap:12px; }
@@ -50,6 +57,7 @@
 .msg-area { flex:1; overflow-y:auto; padding:16px 20px; display:flex; flex-direction:column; gap:10px; }
 .msg-bubble { max-width:72%; padding:9px 14px; border-radius:16px; font-size:13px; line-height:1.5; }
 .msg-translation { margin-top:6px; padding-top:6px; border-top:1px dashed rgba(100,116,139,.35); color:#64748b; font-size:12px; }
+.msg-translation.auto::before { content:'译 '; font-size:10px; color:#0f766e; font-weight:700; }
 .msg-tools { margin-top:4px; }
 .tiny-btn { border:1px solid #d1d5db; background:#fff; border-radius:6px; padding:2px 7px; font-size:11px; color:#374151; cursor:pointer; }
 .tiny-btn:hover { background:#f8fafc; border-color:#94a3b8; }
@@ -97,19 +105,26 @@
 .btn-approve{ background:#16a34a; color:#fff; border:none; border-radius:7px; padding:5px 14px; font-size:12px; cursor:pointer; }
 .btn-reject{ background:#fff; color:#b91c1c; border:1px solid #fecaca; border-radius:7px; padding:5px 14px; font-size:12px; cursor:pointer; }
 .btn-approve:disabled,.btn-reject:disabled{ opacity:.5; cursor:not-allowed; }
+.qr-panel{display:none;margin-top:8px;border:1px solid #e5e7eb;border-radius:8px;padding:8px;background:#fafafa;max-height:140px;overflow-y:auto;}
+.qr-chip{display:inline-block;margin:3px 4px 3px 0;padding:4px 10px;border:1px solid #d1d5db;border-radius:14px;font-size:11px;background:#fff;cursor:pointer;color:#374151;}
+.qr-chip:hover{background:#eff6ff;border-color:#93c5fd;}
+.kb-box{margin-top:6px;}
+.kb-input{width:100%;border:1px solid #d1d5db;border-radius:7px;padding:6px 8px;font-size:12px;}
+.kb-hit{border:1px solid #e5e7eb;border-radius:7px;padding:7px;margin-top:6px;background:#fff;}
+.kb-hit-title{font-size:12px;font-weight:700;color:#0f766e;}
+.kb-hit-text{font-size:12px;color:#374151;margin-top:3px;line-height:1.4;}
+.intim-bar{height:5px;border-radius:3px;background:#e5e7eb;margin-top:6px;overflow:hidden;}
+.intim-fill{height:100%;border-radius:3px;background:linear-gradient(90deg,#6366f1,#ec4899);}
+.evt-row{font-size:11px;color:#64748b;margin-top:3px;}
+.claim-badge{font-size:10px;color:#fff;background:#f59e0b;border-radius:8px;padding:1px 6px;margin-left:4px;}
+.claim-banner{padding:8px 14px;background:#fffbeb;border-bottom:1px solid #fde68a;font-size:12px;color:#92400e;display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.claim-banner button{border:1px solid #f59e0b;background:#fff;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;color:#92400e;}
 </style>
 
 <div class="inbox-layout">
   <!-- Sidebar -->
   <div class="inbox-sidebar">
-    <div class="platform-bar" id="platform-bar">
-      <button class="plat-btn active" data-plat="all">全部</button>
-      <button class="plat-btn" data-plat="telegram"><span class="plat-dot dot-telegram"></span>Telegram</button>
-      <button class="plat-btn" data-plat="line"><span class="plat-dot dot-line"></span>LINE</button>
-      <button class="plat-btn" data-plat="messenger"><span class="plat-dot dot-messenger"></span>Messenger</button>
-      <button class="plat-btn" data-plat="whatsapp"><span class="plat-dot dot-whatsapp"></span>WhatsApp</button>
-      <button class="drafts-toggle" onclick="UI.showDrafts()" title="跨平台待审草稿">📝 待审草稿 <span id="drafts-count" class="chat-badge" style="display:none"></span></button>
-    </div>
+    <div class="platform-bar" id="platform-bar"></div>
     <div class="status-strip" id="status-strip"><span class="spin"></span></div>
     <div class="chat-list" id="chat-list"><div style="padding:20px;text-align:center;color:#9ca3af;font-size:13px;"><span class="spin"></span> 加载中...</div></div>
   </div>
@@ -126,12 +141,16 @@
 
 <script>
 (function(){
-  const PLATFORM_COLORS = {telegram:'#2BA5E0',line:'#00C300',messenger:'#0084FF',whatsapp:'#25D366'};
-  const PLATFORM_ICONS  = {telegram:'✈️',line:'💚',messenger:'💙',whatsapp:'💬'};
-  const TAG_CLASS       = {telegram:'tag-telegram',line:'tag-line',messenger:'tag-messenger',whatsapp:'tag-wa'};
-  let allChats = [], filtered = [], selectedChat = null, activePlat = 'all';
+  const PLATFORM_COLORS = {telegram:'#2BA5E0',line:'#00C300',messenger:'#0084FF',whatsapp:'#25D366',web:'#2563eb'};
+  const PLATFORM_ICONS  = {telegram:'✈️',line:'💚',messenger:'💙',whatsapp:'💬',web:'🌐'};
+  const TAG_CLASS       = {telegram:'tag-telegram',line:'tag-line',messenger:'tag-messenger',whatsapp:'tag-wa',web:'tag-web'};
+  const PLAT_NAME       = {telegram:'Telegram',line:'LINE',messenger:'Messenger',whatsapp:'WhatsApp',web:'网页'};
+  let allChats = [], filtered = [], selectedChat = null, selectedKey = null, activeFilter = 'all';
   let threadMessages = [];
   let pollTimer = null;
+  let claimMap = {};          // conversation_id -> claim
+  let claimRenewTimer = null;
+  const MY_AGENT = () => (window.__wsAgent || {id:'agent',name:'agent'});
 
   function fmtTs(ts){
     if(!ts) return '';
@@ -139,6 +158,8 @@
     if(d.toDateString()===now.toDateString()) return d.toTimeString().slice(0,5);
     return (d.getMonth()+1)+'/'+(d.getDate());
   }
+
+  function fmtWait(sec){ return CRMW.fmtWait(sec); }
 
   function renderStatusStrip(ps){
     const el = document.getElementById('status-strip');
@@ -148,6 +169,36 @@
         <span class="svc-dot ${p.running?'on':'off'}"></span>
         <span>${p.label||p.account_id}</span>
       </div>`).join('');
+  }
+
+  // Phase 4：按「平台 × 账号」动态渲染分栏。filter 值：all | plat:<p> | acct:<p>:<acct>
+  function renderPlatformBar(){
+    const bar = document.getElementById('platform-bar');
+    if(!bar) return;
+    const groups = {};                          // platform -> Set(account_id)
+    const add = (p, a)=>{ (groups[p]=groups[p]||new Set()).add(a||'default'); };
+    allChats.forEach(c=> add(c.platform, c.account_id));
+    Object.values(window.__platformStatus||{}).forEach(p=> add(p.platform, p.account_id));
+    const unread = {};                          // filterKey -> 未读累计
+    allChats.forEach(c=>{
+      if(!c.unread) return;
+      unread['plat:'+c.platform] = (unread['plat:'+c.platform]||0) + c.unread;
+      unread['acct:'+c.platform+':'+(c.account_id||'default')] =
+        (unread['acct:'+c.platform+':'+(c.account_id||'default')]||0) + c.unread;
+    });
+    const badge = k => unread[k] ? `<span class="chat-badge" style="margin-left:4px">${unread[k]}</span>` : '';
+    let html = `<button class="plat-btn${activeFilter==='all'?' active':''}" data-filter="all">全部</button>`;
+    Object.keys(groups).sort().forEach(plat=>{
+      const accts = [...groups[plat]].sort();
+      const pf = 'plat:'+plat;
+      html += `<button class="plat-btn${activeFilter===pf?' active':''}" data-filter="${pf}"><span class="plat-dot dot-${plat}"></span>${esc(PLAT_NAME[plat]||plat)}${badge(pf)}</button>`;
+      if(accts.length>1){
+        accts.forEach(a=>{ const f='acct:'+plat+':'+a; html += `<button class="plat-btn acct${activeFilter===f?' active':''}" data-filter="${f}">${esc(a)}${badge(f)}</button>`; });
+      }
+    });
+    html += `<button class="drafts-toggle" onclick="UI.showDrafts()" title="跨平台待审草稿">📝 待审草稿 <span id="drafts-count" class="chat-badge" style="display:none"></span></button>`;
+    bar.innerHTML = html;
+    loadDraftsCount();
   }
 
   function renderList(){
@@ -160,17 +211,24 @@
       const initials = (c.name||'?').slice(0,2).toUpperCase();
       const color = PLATFORM_COLORS[c.platform]||'#6b7280';
       const tagCls = TAG_CLASS[c.platform]||'';
-      const isSelected = selectedChat && selectedChat._idx === i;
+      const isSelected = selectedChat && c.conversation_id===selectedChat.conversation_id;
+      const cl = claimMap[c.conversation_id];
+      const claimTag = cl ? `<span class="claim-badge" title="处理中">🔒 ${esc((cl.agent_name||cl.agent_id||'').slice(0,8))}</span>` : '';
+      const fuDot = c.follow_up_overdue ? `<span title="有逾期跟进" style="color:#dc2626;margin-left:4px;">●</span>` : '';
+      const wait = c.unanswered_sec|0;
+      const slaColor = c.sla_level==='crit'?'#dc2626':(c.sla_level==='warn'?'#d97706':'#9ca3af');
+      const waitTag = wait>0 ? `<br><span title="客户等待回复时长" style="font-size:11px;color:${slaColor};${c.sla_breach?'font-weight:700;':''}">⏱${fmtWait(wait)}</span>` : '';
       return `<div class="chat-item${isSelected?' selected':''}" onclick="UI.selectChat(${i})">
         <div class="chat-avatar" style="background:${color}">${PLATFORM_ICONS[c.platform]||'?'}</div>
         <div class="chat-body">
-          <div class="chat-name">${esc(c.name||c.chat_key||'未知')}</div>
+          <div class="chat-name">${esc(c.name||c.chat_key||'未知')}${claimTag}${fuDot}</div>
           <div class="chat-preview">${esc(c.last_msg||'')}</div>
           <span class="chat-tag ${tagCls}">${c.account_label||c.platform}</span>
         </div>
         <div class="chat-meta">
           ${fmtTs(c.last_ts)}
           ${c.unread>0?`<br><span class="chat-badge">${c.unread}</span>`:''}
+          ${waitTag}
         </div>
       </div>`;
     }).join('');
@@ -195,28 +253,50 @@
     const risk = c.risk?.level || '待分析';
     const lang = c.language || c.last_message?.language || 'unknown';
     const modes = c.send_modes || ['manual','review','multi_choice'];
+    const curClaim = claimMap[c.conversation_id];
+    const mine = curClaim && curClaim.agent_id === MY_AGENT().id;
+    const blocked = curClaim && !mine;
+    const claimBanner = blocked
+      ? `<div class="claim-banner" id="claim-banner">🔒 <strong>${esc(curClaim.agent_name||curClaim.agent_id)}</strong> 正在处理此会话
+           <button onclick="UI.forceClaim()">强制接管</button>
+           <button onclick="UI.selectChat(-1)">返回</button></div>`
+      : (curClaim ? `<div class="claim-banner" style="background:#ecfdf5;border-color:#bbf7d0;color:#166534;">✓ 您已接管此会话</div>` : '');
     document.getElementById('inbox-main').innerHTML=`
       <div class="chat-panel">
+        ${claimBanner}
         <div class="inbox-header">
           <div class="plat-icon">${PLATFORM_ICONS[c.platform]||'?'}</div>
           <div>
             <div class="chat-title">${esc(c.name||c.chat_key)}</div>
             <div class="chat-sub">${c.platform_name} · ${c.account_label||c.account_id}</div>
           </div>
+          <button id="ai-takeover-btn" class="ai-toggle ${(c.automation_mode==='auto_ai')?'on':'off'}" onclick="UI.toggleAiTakeover()" title="AI 自动接管：开=AI 秒回，关=人工处理（AI 停）">${(c.automation_mode==='auto_ai')?'🤖 AI 自动接管':'🙋 人工处理'}</button>
         </div>
         <div class="msg-area" id="msg-area">
           ${messages.length?messages.map(renderMessage).join(''):'<div style="text-align:center;color:#9ca3af;font-size:13px;padding:30px">暂无消息记录</div>'}
         </div>
         <div class="reply-wrap">
           <div class="reply-bar">
-            <textarea id="reply-text" rows="2" placeholder="${sendHint}" ${canSend?'':'disabled'}></textarea>
-            <button class="send-btn" id="send-btn" ${canSend?'':'disabled'} onclick="UI.sendReply()">发送</button>
+            <textarea id="reply-text" rows="2" placeholder="${sendHint}" ${(canSend&&!blocked)?'':'disabled'}></textarea>
+            <button class="send-btn" id="send-btn" ${(canSend&&!blocked)?'':'disabled'} onclick="UI.sendReply()">发送</button>
           </div>
           <div class="reply-tools">
-            <button class="tiny-btn" onclick="UI.previewReplyTranslation()" ${canSend?'':'disabled'}>发送前翻译预览</button>
-            <button class="tiny-btn" onclick="UI.previewVoice()" ${canSend?'':'disabled'}>生成语音预览</button>
-            <span style="font-size:11px;color:#64748b;">目标语言：${esc(lang||'auto')}</span>
+            <label class="xlate-row"><input type="checkbox" id="xlate-on" ${canSend?'':'disabled'}> 翻译成
+              <select id="xlate-lang" ${canSend?'':'disabled'}>
+                <option value="">对方语言(${esc(lang||'auto')})</option>
+                <option value="en">英语</option>
+                <option value="ja">日语</option>
+                <option value="ko">韩语</option>
+                <option value="zh">中文</option>
+                <option value="th">泰语</option>
+                <option value="vi">越南语</option>
+                <option value="id">印尼语</option>
+              </select> 后发送</label>
+            <button class="tiny-btn" onclick="UI.toggleQuickReplies()" ${canSend?'':'disabled'}>快捷回复</button>
+            <button class="tiny-btn" onclick="UI.previewReplyTranslation()" ${canSend?'':'disabled'}>翻译预览</button>
+            <button class="tiny-btn" onclick="UI.previewVoice()" ${canSend?'':'disabled'}>语音预览</button>
           </div>
+          <div class="qr-panel" id="qr-panel"></div>
           <div class="reply-preview" id="reply-preview"></div>
           <div class="voice-preview" id="voice-preview"></div>
         </div>
@@ -234,7 +314,19 @@
             ${modes.map(m=>`<option value="${esc(m)}" ${m===(c.automation_mode||'review')?'selected':''}>${modeName(m)}</option>`).join('')}
           </select>
         </div>
-        <div class="ai-section"><div class="ai-label">对象档案</div><div id="profile-box"><span class="spin"></span></div></div>
+        <div class="ai-section"><div class="ai-label">客户档案</div><div id="profile-box"><span class="spin"></span></div></div>
+        <div class="ai-section">
+          <div class="ai-label">身份管理 <button class="tiny-btn" style="float:right;" onclick="UI.loadIdentity()">查找/管理</button></div>
+          <div id="identity-box" style="font-size:12px;color:#94a3b8;">点击「查找/管理」检测跨渠道身份</div>
+        </div>
+        <div class="ai-section">
+          <div class="ai-label">知识库检索</div>
+          <div class="kb-box">
+            <input class="kb-input" id="kb-query" placeholder="输入关键词查 KB..." onkeydown="if(event.key==='Enter')UI.searchKb()">
+            <button class="tiny-btn" style="margin-top:6px;" onclick="UI.searchKb()">搜索</button>
+            <div id="kb-results"></div>
+          </div>
+        </div>
         <div class="ai-section"><div class="ai-label">下一步</div><div class="ai-value" id="ai-next">正在生成建议...</div></div>
         <div class="ai-section" id="ai-order-sec" style="display:none;"><div class="ai-label">订单/物流（事实校验）</div><div id="ai-order"></div></div>
         <div class="ai-section"><div class="ai-label">多答案建议</div><div id="ai-suggestions"><span class="spin"></span></div></div>
@@ -243,6 +335,7 @@
     if(ta) ta.addEventListener('keydown', e=>{ if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){ UI.sendReply(); } });
     loadAnalysis(c, messages);
     loadProfile(c);
+    if(window.UI && window.UI.loadQuickReplies) window.UI.loadQuickReplies();
   }
 
   async function loadAnalysis(c, messages){
@@ -251,7 +344,7 @@
     try{
       const r = await fetch('/api/unified-inbox/analyze',{
         method:'POST',
-        headers:{'Content-Type':'application/json','X-CSRF-Token':rpa?.csrf?.()??''},
+        headers:{'Content-Type':'application/json'},
         body:JSON.stringify({text, messages, chat:c})
       });
       const d = await r.json();
@@ -325,20 +418,48 @@
     const act = p.activity || {};
     const tags = p.tags || [];
     const memories = p.memories || [];
+    const ct = p.contacts || {};
+    const intim = ct.intimacy_score != null ? Number(ct.intimacy_score) : (rel.intimacy_score != null ? Number(rel.intimacy_score) : null);
+    const intimBar = intim != null ? `<div class="intim-bar" title="亲密度 ${intim.toFixed(0)}"><div class="intim-fill" style="width:${Math.min(100,intim)}%"></div></div>` : '';
+    const funnel = ct.funnel_stage_label || rel.stage || '初识';
+    const readiness = ct.readiness_score != null ? ` · 就绪 ${Number(ct.readiness_score).toFixed(0)}` : '';
+    const events = (ct.recent_events||[]).slice(0,3).map(e=>{
+      const et = e.event_type || e.type || 'event';
+      const det = (e.detail || e.payload || '').toString().slice(0,40);
+      return `<div class="evt-row">· ${esc(et)}${det?' — '+esc(det):''}</div>`;
+    }).join('');
+    const ATTR_LABELS = {phone:'手机',email:'邮箱',name:'称呼',wechat:'微信',line_id:'LINE',note:'备注'};
+    const attrs = ct.attributes || {};
+    const attrRows = Object.keys(attrs).map(k=>`<div style="font-size:12px;color:#374151;">${esc(ATTR_LABELS[k]||k)}：${esc(attrs[k])}</div>`).join('');
+    const returningBadge = ct.is_returning ? `<span class="mode-pill" style="background:#fef3c7;color:#92400e;">老客户</span>` : '';
+    const idChans = (ct.identity_channels||[]);
+    const chanLine = idChans.length>1 ? `<div style="font-size:11px;color:#64748b;margin-top:4px;">关联渠道：${idChans.map(c=>esc(c)).join(' / ')}</div>` : '';
     box.innerHTML = `
-      <div class="ai-value">${esc(p.display_name||'未知对象')}</div>
+      <div class="ai-value">${esc(p.display_name||'未知对象')} ${returningBadge}</div>
       <div style="font-size:12px;color:#64748b;margin-top:4px;">${esc(p.platform_name||p.platform||'')} · ${esc(p.account_label||p.account_id||'')}</div>
-      <div style="font-size:12px;color:#374151;margin-top:8px;">阶段：${esc(rel.stage||'初识')} · 消息数：${esc(act.message_count||0)}</div>
+      <div style="font-size:12px;color:#374151;margin-top:8px;">漏斗：${esc(funnel)}${readiness}</div>
+      <div style="font-size:12px;color:#374151;margin-top:4px;">消息数：${esc(act.message_count||0)}${intim!=null?' · 亲密 '+intim.toFixed(0):''}</div>
+      ${intimBar}
       ${tags.length?`<div class="mode-row" style="margin-top:7px;">${tags.map(t=>`<span class="mode-pill">${esc(t)}</span>`).join('')}</div>`:''}
+      ${attrRows?`<div style="margin-top:8px;padding-top:7px;border-top:1px dashed #e5e7eb;">${attrRows}</div>`:''}
+      ${chanLine}
+      ${events?`<div style="margin-top:8px;">${events}</div>`:''}
       ${memories.length?`<div style="margin-top:8px;font-size:12px;color:#374151;">${memories.map(m=>`<div>· ${esc(m)}</div>`).join('')}</div>`:'<div style="margin-top:8px;font-size:12px;color:#94a3b8;">暂无长期记忆</div>'}
+      ${ct.contact_id?`<div style="margin-top:6px;font-size:10px;color:#94a3b8;">ID ${esc(ct.contact_id.slice(0,12))}… · <a href="/workspace/contact/${esc(ct.contact_id)}" target="_blank" style="color:#2563eb;">查看全景</a></div>`:''}
+      ${ct.contact_id?`<div id="conv-tasks" style="margin-top:8px;padding-top:7px;border-top:1px dashed #e5e7eb;"></div>`:''}
     `;
+    window.__convContactId = ct.contact_id || '';
+    if(ct.contact_id) UI.loadConvTasks(ct.contact_id);
   }
 
   function renderMessage(m, idx){
     const self = m.direction === 'out';
     const text = m.text || m.original_text || '';
-    const trans = m.translated_text && m.translated_text !== text ? `<div class="msg-translation">${esc(m.translated_text)}</div>` : '';
-    const needsTranslate = !self && text && (m.language||'') !== 'zh';
+    const hasTrans = m.translated_text && m.translated_text !== text;
+    const trMeta = m.translation || {};
+    const autoCls = hasTrans && trMeta.ok ? ' auto' : '';
+    const trans = hasTrans ? `<div class="msg-translation${autoCls}">${esc(m.translated_text)}</div>` : '';
+    const needsTranslate = !self && text && !hasTrans && (m.language||'') !== 'zh' && (m.language||'') !== 'unknown';
     return `<div>
       <div class="msg-bubble ${self?'msg-self':'msg-peer'}" data-msg-idx="${idx}">
         ${esc(text)}${trans}
@@ -352,22 +473,58 @@
     return ({manual:'人工发送',review:'人工审核',multi_choice:'多答案',auto_ai:'AI自动'})[m] || m;
   }
 
+  function matchChat(c){
+    if(activeFilter==='all') return true;
+    if(activeFilter.indexOf('plat:')===0) return c.platform===activeFilter.slice(5);
+    if(activeFilter.indexOf('acct:')===0){
+      const rest = activeFilter.slice(5);
+      const i = rest.indexOf(':'); const plat = rest.slice(0,i), acct = rest.slice(i+1);
+      return c.platform===plat && (c.account_id||'default')===acct;
+    }
+    return true;
+  }
   function applyFilter(){
-    filtered = activePlat==='all' ? allChats : allChats.filter(c=>c.platform===activePlat);
-    if(selectedChat && !filtered.includes(selectedChat)) selectedChat=null;
+    filtered = allChats.filter(matchChat);
     renderList();
   }
 
   function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
+  async function loadClaims(){
+    try{
+      const r = await fetch('/api/workspace/claims');
+      if(!r.ok) return;
+      const d = await r.json();
+      claimMap = {};
+      (d.claims||[]).forEach(cl=>{ if(cl.conversation_id) claimMap[cl.conversation_id]=cl; });
+    }catch(e){}
+  }
+
   async function load(){
     try{
+      await loadClaims();
       const r = await fetch('/api/unified-inbox/chats?limit=50');
       if(!r.ok) return;
       const d = await r.json();
       allChats = (d.chats||[]).map((c,i)=>({...c,_idx:i}));
+      window.__platformStatus = d.platform_status||{};
+      // 跨轮询保持选中会话（按 conversation_id 重新绑定到最新对象，不重渲主面板，保留草稿）
+      if(selectedKey){
+        const sc = allChats.find(c=>c.conversation_id===selectedKey);
+        if(sc) selectedChat = sc;
+      }
       renderStatusStrip(d.platform_status||{});
+      renderPlatformBar();
       applyFilter();
+      // SLA 告警下钻：从顶栏徽标跳转过来时聚焦指定会话（一次性）
+      try{
+        const focus=sessionStorage.getItem('ws_focus_conv');
+        if(focus){
+          sessionStorage.removeItem('ws_focus_conv');
+          const fi=filtered.findIndex(c=>c.conversation_id===focus);
+          if(fi>=0) UI.selectChat(fi);
+        }
+      }catch(_){ }
     }catch(e){ console.error(e); }
   }
 
@@ -420,27 +577,102 @@
     }catch(e){}
   }
 
+  function _stopClaimRenew(){
+    if(claimRenewTimer){ clearInterval(claimRenewTimer); claimRenewTimer=null; }
+  }
+  async function _releaseCurrentClaim(){
+    if(!selectedChat) return;
+    try{
+      await fetch('/api/workspace/claim/release',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({conversation_id:selectedChat.conversation_id})
+      });
+    }catch(e){}
+  }
+  async function _claimChat(c, force){
+    if(!c) return {ok:true};
+    try{
+      const r = await fetch('/api/workspace/claim',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({conversation_id:c.conversation_id, force:!!force})
+      });
+      const d = await r.json();
+      if(d.ok && d.claim) claimMap[c.conversation_id]=d.claim;
+      else if(d.claim) claimMap[c.conversation_id]=d.claim;
+      return d;
+    }catch(e){ return {ok:false}; }
+  }
+  function _startClaimRenew(c){
+    _stopClaimRenew();
+    if(!c) return;
+    claimRenewTimer = setInterval(async ()=>{
+      if(!selectedChat) return;
+      try{
+        await fetch('/api/workspace/claim/renew',{
+          method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({conversation_id:selectedChat.conversation_id})
+        });
+      }catch(e){}
+    }, 60000);
+  }
+
   window.UI = {
-    selectChat(idx){
-      selectedChat = filtered[idx];
+    async selectChat(idx){
+      if(idx < 0){ selectedChat=null; selectedKey=null; _stopClaimRenew(); renderList(); renderMain(null); return; }
+      const prev = selectedChat;
+      const next = filtered[idx];
+      if(prev && prev.conversation_id !== next.conversation_id){
+        await _releaseCurrentClaim();
+      }
+      selectedChat = next;
+      selectedKey = selectedChat ? selectedChat.conversation_id : null;
+      const cr = await _claimChat(selectedChat, false);
+      await loadClaims();
       renderList();
       renderMain(selectedChat);
+      if(cr.ok) _startClaimRenew(selectedChat);
+    },
+    async forceClaim(){
+      if(!selectedChat) return;
+      const cr = await _claimChat(selectedChat, true);
+      await loadClaims();
+      renderMain(selectedChat);
+      if(cr.ok) _startClaimRenew(selectedChat);
     },
     async sendReply(){
       if(!selectedChat) return;
+      const cl = claimMap[selectedChat.conversation_id];
+      if(cl && cl.agent_id !== MY_AGENT().id){ alert('此会话由 '+ (cl.agent_name||cl.agent_id) +' 处理中'); return; }
       const ta = document.getElementById('reply-text');
       const btn = document.getElementById('send-btn');
       const text = (ta?.value||'').trim();
       if(!text) return;
       btn.disabled=true; btn.textContent='发送中...';
       try{
+        // Phase 4：翻译后发送（勾选时先把中文译成对方语言再发）
+        let outText = text;
+        const xOn = document.getElementById('xlate-on')?.checked;
+        if(xOn){
+          btn.textContent='翻译中...';
+          const tl = (document.getElementById('xlate-lang')?.value || '').trim()
+            || (selectedChat.language && selectedChat.language!=='unknown' ? selectedChat.language : 'en');
+          try{
+            const tr = await fetch('/api/unified-inbox/translate',{
+              method:'POST', headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({text, target_lang:tl, style:'chat'})
+            });
+            const td = await tr.json();
+            outText = (td.translation && td.translation.translated_text) || text;
+          }catch(_){ outText = text; }
+          btn.textContent='发送中...';
+        }
         const r = await fetch('/api/unified-inbox/send',{
           method:'POST',
-          headers:{'Content-Type':'application/json','X-CSRF-Token':rpa?.csrf?.()??''},
-          body:JSON.stringify({platform:selectedChat.platform,account_id:selectedChat.account_id,chat_key:selectedChat.chat_key,text})
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({platform:selectedChat.platform,account_id:selectedChat.account_id,chat_key:selectedChat.chat_key,text:outText})
         });
         const d = await r.json();
-        if(d.ok){ ta.value=''; await load(); }
+        if(d.ok){ ta.value=''; await load(); if(selectedChat) renderMain(selectedChat); }
         else{ alert('发送失败: '+(d.detail||JSON.stringify(d))); }
       }catch(e){ alert('网络错误'); }
       finally{ btn.disabled=false; btn.textContent='发送'; }
@@ -452,7 +684,7 @@
       try{
         const r = await fetch('/api/unified-inbox/translate',{
           method:'POST',
-          headers:{'Content-Type':'application/json','X-CSRF-Token':rpa?.csrf?.()??''},
+          headers:{'Content-Type':'application/json'},
           body:JSON.stringify({text:m.text,target_lang:'zh',source_lang:m.language||''})
         });
         const d = await r.json();
@@ -480,7 +712,7 @@
         const target = selectedChat.language && selectedChat.language !== 'unknown' ? selectedChat.language : 'en';
         const r = await fetch('/api/unified-inbox/translate',{
           method:'POST',
-          headers:{'Content-Type':'application/json','X-CSRF-Token':rpa?.csrf?.()??''},
+          headers:{'Content-Type':'application/json'},
           body:JSON.stringify({text,target_lang:target,style:'chat'})
         });
         const d = await r.json();
@@ -500,7 +732,7 @@
       try{
         const r = await fetch('/api/voice/tts-test',{
           method:'POST',
-          headers:{'Content-Type':'application/json','X-CSRF-Token':rpa?.csrf?.()??''},
+          headers:{'Content-Type':'application/json'},
           body:JSON.stringify({text, format:'mp3'})
         });
         const d = await r.json();
@@ -518,20 +750,190 @@
       const ta = document.getElementById('reply-text');
       if(s && ta){ ta.value = s.text || ''; ta.focus(); }
     },
-    async saveAutomationMode(){
+    async loadQuickReplies(){
+      try{
+        const r = await fetch('/api/unified-inbox/templates');
+        const d = await r.json();
+        window.__quickTemplates = d.templates || [];
+      }catch(e){ window.__quickTemplates = []; }
+    },
+    toggleQuickReplies(){
+      const panel = document.getElementById('qr-panel');
+      if(!panel) return;
+      const show = panel.style.display !== 'block';
+      panel.style.display = show ? 'block' : 'none';
+      if(!show) return;
+      const tpls = window.__quickTemplates || [];
+      if(!tpls.length){
+        panel.innerHTML = '<span style="font-size:12px;color:#94a3b8;">暂无快捷回复模板（可在 config workspace.quick_templates 配置）</span>';
+        return;
+      }
+      panel.innerHTML = tpls.map((t,i)=>`<span class="qr-chip" onclick="UI.useQuickReply(${i})" title="${esc(t.source||'')}">${esc(t.label)}</span>`).join('');
+    },
+    useQuickReply(idx){
+      const t = (window.__quickTemplates||[])[idx];
+      const ta = document.getElementById('reply-text');
+      if(t && ta){ ta.value = t.text || ''; ta.focus(); }
+      const panel = document.getElementById('qr-panel');
+      if(panel) panel.style.display='none';
+    },
+    async searchKb(){
+      const inp = document.getElementById('kb-query');
+      const box = document.getElementById('kb-results');
+      const q = (inp?.value||'').trim();
+      if(!box) return;
+      if(!q){ box.innerHTML='<span style="font-size:12px;color:#94a3b8;">请输入关键词</span>'; return; }
+      box.innerHTML='<span class="spin"></span>';
+      try{
+        const r = await fetch('/api/unified-inbox/kb-search?'+new URLSearchParams({q,limit:'5'}));
+        const d = await r.json();
+        const hits = d.entries || [];
+        if(!hits.length){ box.innerHTML='<span style="font-size:12px;color:#94a3b8;">未找到匹配条目</span>'; return; }
+        window.__kbHits = hits;
+        box.innerHTML = hits.map((h,i)=>`
+          <div class="kb-hit">
+            <div class="kb-hit-title">${esc(h.title||'未命名')}${h.category?` · ${esc(h.category)}`:''}</div>
+            <div class="kb-hit-text">${esc((h.answer||'').slice(0,180))}${(h.answer||'').length>180?'…':''}</div>
+            <button class="tiny-btn" style="margin-top:5px;" onclick="UI.useKbHit(${i})">填入输入框</button>
+          </div>`).join('');
+      }catch(e){ box.innerHTML='<span style="font-size:12px;color:#ef4444;">搜索失败</span>'; }
+    },
+    useKbHit(idx){
+      const h = (window.__kbHits||[])[idx];
+      const ta = document.getElementById('reply-text');
+      if(h && ta){ ta.value = h.answer || h.title || ''; ta.focus(); }
+    },
+    async loadConvTasks(contactId){
+      const box = document.getElementById('conv-tasks');
+      if(!box) return;
+      try{
+        const r = await fetch('/api/workspace/contact/'+encodeURIComponent(contactId)+'/tasks');
+        const d = await r.json();
+        const now = Date.now()/1000;
+        const tasks = (d.tasks||[]).filter(t=>!t.done_at);
+        const rows = tasks.map(t=>{
+          const due = t.due_at && t.due_at<=now;
+          return `<div style="font-size:12px;margin-top:4px;display:flex;justify-content:space-between;gap:6px;align-items:center;">
+            <span style="color:${due?'#dc2626':'#92400e'};">${due?'⏰ ':''}${fmtTs(t.due_at)}${t.note?' · '+esc(t.note):''}</span>
+            <span style="flex:0 0 auto;display:flex;gap:3px;">
+              <button class="tiny-btn" style="padding:1px 6px;" onclick="UI.snoozeConvTask('${esc(t.task_id)}',1)">+1天</button>
+              <button class="tiny-btn" style="padding:1px 6px;" onclick="UI.doneConvTask('${esc(t.task_id)}')">完成</button>
+            </span></div>`;
+        }).join('');
+        box.innerHTML = `<div style="font-size:12px;color:#374151;display:flex;justify-content:space-between;align-items:center;">
+            <span>跟进任务</span>
+            <button class="tiny-btn" style="padding:1px 7px;" onclick="UI.addConvTask()">+ 新增</button></div>
+          ${rows||'<div style="font-size:12px;color:#94a3b8;margin-top:3px;">无跟进任务</div>'}`;
+      }catch(e){ box.innerHTML=''; }
+    },
+    async addConvTask(){
+      const cid = window.__convContactId;
+      if(!cid) return;
+      const v = prompt('设置跟进时间（格式：YYYY-MM-DD HH:MM，留空取消）');
+      if(!v) return;
+      const ts = Math.floor(new Date(v.replace(' ','T')).getTime()/1000);
+      if(!ts || isNaN(ts)){ alert('时间格式不正确'); return; }
+      const note = prompt('跟进事项（可选）')||'';
+      try{
+        const r = await fetch('/api/workspace/contact/'+encodeURIComponent(cid)+'/follow-up',{method:'POST',
+          headers:{'Content-Type':'application/json'}, body:JSON.stringify({due_at:ts, note:note})});
+        const d = await r.json();
+        if(d.ok){ this.loadConvTasks(cid); } else { alert('添加失败: '+(d.error||'')); }
+      }catch(e){ alert('网络错误'); }
+    },
+    async doneConvTask(tid){
+      try{
+        await fetch('/api/workspace/follow-up/'+encodeURIComponent(tid)+'/done',{method:'POST'});
+        if(window.__convContactId) this.loadConvTasks(window.__convContactId);
+      }catch(e){ alert('网络错误'); }
+    },
+    async snoozeConvTask(tid, days){
+      try{
+        await fetch('/api/workspace/follow-up/'+encodeURIComponent(tid)+'/snooze',{method:'POST',
+          headers:{'Content-Type':'application/json'}, body:JSON.stringify({days:days})});
+        if(window.__convContactId) this.loadConvTasks(window.__convContactId);
+      }catch(e){ alert('网络错误'); }
+    },
+    async loadIdentity(){
+      const box = document.getElementById('identity-box');
+      if(!box || !selectedChat){ return; }
+      box.innerHTML='<span class="spin"></span>';
+      try{
+        const r = await fetch('/api/workspace/contacts/overview?'+new URLSearchParams({
+          platform:selectedChat.platform, account_id:selectedChat.account_id||'default',
+          chat_key:selectedChat.chat_key}));
+        const d = await r.json();
+        if(!d.ok){ box.innerHTML='<span style="font-size:12px;color:#94a3b8;">联系人子系统未启用</span>'; return; }
+        if(!d.contact){ box.innerHTML='<span style="font-size:12px;color:#94a3b8;">暂无联系人档案</span>'; return; }
+        window.__idOverview = d;
+        const ct = d.contact;
+        const ids = ct.identities||[];
+        const idsHtml = ids.map(i=>{
+          const canSplit = ids.length>1;
+          return `<div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
+            <span style="flex:1;font-size:12px;">${esc(i.channel)} · ${esc((i.external_id||'').slice(0,16))}${i.linked_via?` <span style="color:#94a3b8;">(${esc(i.linked_via)})</span>`:''}</span>
+            ${canSplit?`<button class="tiny-btn" onclick="UI.splitIdentity('${esc(i.channel_identity_id)}')">拆分</button>`:''}
+          </div>`;
+        }).join('');
+        const cands = d.candidates||[];
+        const candHtml = cands.length ? cands.map(c=>`
+          <div style="border-top:1px dashed #e5e7eb;margin-top:6px;padding-top:6px;">
+            <div style="font-size:12px;">${esc(c.primary_name||'未命名')} · ${(c.channels||[]).map(esc).join('/')}<span style="color:#94a3b8;"> (匹配:${esc(c.match_on||'')})</span></div>
+            <button class="tiny-btn" style="margin-top:4px;" onclick="UI.mergeIdentity('${esc(d.current_ci_id)}','${esc(c.contact_id)}')">合并到此客户</button>
+          </div>`).join('')
+          : '<div style="font-size:12px;color:#94a3b8;margin-top:6px;">未发现可合并的其它客户</div>';
+        box.innerHTML = `<div style="font-size:12px;color:#374151;">当前渠道身份：</div>${idsHtml}
+          <div style="font-size:12px;color:#374151;margin-top:8px;">疑似同一客户：</div>${candHtml}`;
+      }catch(e){ box.innerHTML='<span style="font-size:12px;color:#ef4444;">加载失败</span>'; }
+    },
+    async mergeIdentity(ciId, targetContactId){
+      if(!confirm('确认把当前会话身份合并到该客户？')) return;
+      try{
+        const r = await fetch('/api/workspace/contacts/merge',{method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({ci_id:ciId, target_contact_id:targetContactId})});
+        const d = await r.json();
+        if(d.ok){ await loadProfile(selectedChat); await this.loadIdentity(); }
+        else{ alert('合并失败: '+(d.error||JSON.stringify(d))); }
+      }catch(e){ alert('网络错误'); }
+    },
+    async splitIdentity(ciId){
+      if(!confirm('确认把该渠道身份从当前客户拆出（独立成新客户）？')) return;
+      try{
+        const r = await fetch('/api/workspace/contacts/split',{method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({ci_id:ciId})});
+        const d = await r.json();
+        if(d.ok){ await loadProfile(selectedChat); await this.loadIdentity(); }
+        else{ alert('拆分失败: '+(d.error||'')); }
+      }catch(e){ alert('网络错误'); }
+    },
+    async saveAutomationMode(modeOverride){
       if(!selectedChat) return;
       const sel = document.getElementById('automation-mode');
-      const mode = sel?.value || 'review';
+      const mode = modeOverride || sel?.value || 'review';
       try{
         const r = await fetch('/api/unified-inbox/automation',{
           method:'POST',
-          headers:{'Content-Type':'application/json','X-CSRF-Token':rpa?.csrf?.()??''},
+          headers:{'Content-Type':'application/json'},
           body:JSON.stringify({platform:selectedChat.platform,account_id:selectedChat.account_id,chat_key:selectedChat.chat_key,mode})
         });
         const d = await r.json();
-        if(d.ok){ selectedChat.automation_mode = d.mode; }
+        if(d.ok){
+          selectedChat.automation_mode = d.mode;
+          if(sel) sel.value = d.mode;
+        }
         else{ alert('保存回复模式失败'); }
       }catch(e){ alert('保存回复模式失败'); }
+    },
+    async toggleAiTakeover(){
+      if(!selectedChat) return;
+      const cur = selectedChat.automation_mode || 'review';
+      const next = cur==='auto_ai' ? 'manual' : 'auto_ai';
+      await this.saveAutomationMode(next);
+      const btn = document.getElementById('ai-takeover-btn');
+      const on = (selectedChat.automation_mode==='auto_ai');
+      if(btn){ btn.className='ai-toggle '+(on?'on':'off'); btn.textContent = on?'🤖 AI 自动接管':'🙋 人工处理'; }
     },
     async showDrafts(){
       const main = document.getElementById('inbox-main');
@@ -550,7 +952,7 @@
       try{
         const r = await fetch('/api/drafts/'+encodeURIComponent(id)+'/resolve',{
           method:'POST',
-          headers:{'Content-Type':'application/json','X-CSRF-Token':rpa?.csrf?.()??''},
+          headers:{'Content-Type':'application/json'},
           body:JSON.stringify({action, by:'web_admin'})
         });
         if(r.ok){
@@ -575,14 +977,50 @@
   document.getElementById('platform-bar').addEventListener('click', e=>{
     const btn = e.target.closest('.plat-btn');
     if(!btn) return;
-    activePlat = btn.dataset.plat;
+    activeFilter = btn.dataset.filter || 'all';
     document.querySelectorAll('.plat-btn').forEach(b=>b.classList.toggle('active',b===btn));
     applyFilter();
   });
 
   load();
   loadDraftsCount();
-  pollTimer = setInterval(()=>{ load(); loadDraftsCount(); }, 15000);
+  // 轮询降级为兜底（SSE 不可用/断线时仍能刷新），频率放慢到 30s
+  pollTimer = setInterval(()=>{ load(); loadDraftsCount(); }, 30000);
+
+  // ── 实时推送（SSE）：新入站消息即时刷新列表/未读，必要时刷新当前会话 ──
+  let _reloadTimer = null;
+  function _debouncedReload(){
+    if(_reloadTimer) return;
+    _reloadTimer = setTimeout(()=>{ _reloadTimer=null; load(); loadDraftsCount(); }, 800);
+  }
+  function startSSE(){
+    let es;
+    try{ es = new EventSource('/api/workspace/stream'); }
+    catch(e){ return; }
+    es.onmessage = (ev)=>{
+      let data=null; try{ data=JSON.parse(ev.data); }catch(_){ return; }
+      if(data.type==='agent_presence' && window.__wsPresence){
+        window.__wsPresence.refreshAgents();
+        return;
+      }
+      if(data.type==='conversation_claim'){
+        loadClaims().then(()=>{ renderList(); if(selectedChat) renderMain(selectedChat); });
+        return;
+      }
+      if(data.type!=='inbox_message') return;
+      _debouncedReload();
+      const cid = (data.data||{}).conversation_id;
+      if(selectedChat && cid && selectedChat.conversation_id===cid){
+        renderMain(selectedChat);
+      }
+    };
+    es.onerror = ()=>{
+      // 浏览器会自动重连；此处仅防御性兜底
+      try{ es.close(); }catch(_){}
+      setTimeout(startSSE, 5000);
+    };
+  }
+  startSSE();
 })();
 </script>
 {% endblock %}

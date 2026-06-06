@@ -173,6 +173,9 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         auth_h = request.headers.get("Authorization", "")
         if auth_h.startswith("Bearer "):
             return await call_next(request)
+        # 公网网页聊天 Widget：访客用 HMAC token 鉴权（非 session cookie），CSRF 不适用
+        if request.url.path.startswith("/chat/"):
+            return await call_next(request)
         _line_exempt = getattr(request.app.state, "line_webhook_path", None)
         if _line_exempt and request.url.path == _line_exempt:
             return await call_next(request)
@@ -347,7 +350,7 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
 
     # RBAC user store
     from src.utils.web_user_store import (WebUserStore, ROLE_MASTER, ROLE_ADMIN,
-                                           ROLE_VIEWER, ROLE_LABELS, PAGE_PERMISSIONS,
+                                           ROLE_VIEWER, ROLE_AGENT, ROLE_LABELS, PAGE_PERMISSIONS,
                                            UI_MODE_SIMPLE, UI_MODE_FULL, UI_MODE_LABELS,
                                            SIMPLE_MODE_CORE_PAGES, SIMPLE_MODE_MORE_PAGES,
                                            resolve_ui_mode, is_page_visible_in_simple)
@@ -534,6 +537,17 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
             return True  # 老式 session（无 jti），兼容过渡期
         return user_store.touch_session(jti)
 
+    # 坐席（agent）角色作用域：仅限聊天工作台，进不去任何后台设置/页面。
+    # 在 _require_auth / _api_auth 两个鉴权 choke point 内强制（避免 middleware 顺序问题）。
+    def _agent_page_allowed(path: str) -> bool:
+        return path == "/workspace" or path.startswith("/workspace")
+
+    def _agent_api_allowed(path: str) -> bool:
+        return (path.startswith("/api/unified-inbox")
+                or path.startswith("/api/workspace")
+                or path.startswith("/api/drafts")
+                or path.startswith("/api/voice/tts-test"))
+
     def _require_auth(request: Request):
         # 无用户且无 token → 引导至首次设置向导
         if user_store.user_count() == 0 and not token:
@@ -542,19 +556,28 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
             if not _check_session_valid(request):
                 request.session.clear()
                 raise HTTPException(status_code=303, headers={"Location": "/login"})
-            return
-        if token and request.session.get("auth") == token:
+        elif token and request.session.get("auth") == token:
             if not _check_session_valid(request):
                 request.session.clear()
                 raise HTTPException(status_code=303, headers={"Location": "/login"})
-            return
-        raise HTTPException(status_code=303, headers={"Location": "/login"})
+        else:
+            raise HTTPException(status_code=303, headers={"Location": "/login"})
+        # 已认证：agent 角色只能停留在工作台，其余页面一律跳回 /workspace
+        if request.session.get("role", "") == ROLE_AGENT:
+            path = request.url.path.rstrip("/") or "/"
+            if not _agent_page_allowed(path):
+                raise HTTPException(status_code=303, headers={"Location": "/workspace"})
 
     def _api_auth(request: Request):
+        def _agent_guard():
+            if request.session.get("role", "") == ROLE_AGENT:
+                if not _agent_api_allowed(request.url.path):
+                    raise HTTPException(status_code=403, detail="坐席角色仅限工作台相关接口")
         if request.session.get("user_id"):
             if not _check_session_valid(request):
                 request.session.clear()
                 raise HTTPException(status_code=401, detail="Session 已失效，请重新登录")
+            _agent_guard()
             return
         if not token:
             return
@@ -566,6 +589,7 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
             if not _check_session_valid(request):
                 request.session.clear()
                 raise HTTPException(status_code=401, detail="Session 已失效，请重新登录")
+            _agent_guard()
             return
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -585,6 +609,7 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         "/import": "import", "/export": "export",
         "/cases": "cases", "/episodic-memory": "episodic",
         "/line-rpa": "line_rpa",
+        "/workspace": "workspace",
     }
     for _dp in domain_web_pages:
         _PATH_TO_PAGE[_dp["path"]] = _dp["key"]
@@ -2320,7 +2345,8 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         from src.web.routes.unified_inbox_routes import register_unified_inbox_routes
 
         def _unified_inbox_page_auth(request: Request):
-            _require_role(request, "line_rpa")
+            # 坐席工作台：master/admin/agent 可进（agent 仅此处可达）
+            _require_role(request, "workspace")
 
         register_unified_inbox_routes(
             app,
@@ -2332,6 +2358,16 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
     except Exception:
         import logging as _log_ui
         _log_ui.getLogger("admin").debug("统一收件箱路由注册跳过", exc_info=True)
+
+    # ── 面向客户的网页聊天 Widget（web 渠道，公网；feature flag 默认关）──
+    try:
+        _wc_cfg = (config_manager.config or {}).get("web_chat", {}) or {}
+        if _wc_cfg.get("enabled"):
+            from src.web.routes.web_chat_routes import register_web_chat_routes
+            register_web_chat_routes(app, config_manager=config_manager)
+    except Exception:
+        import logging as _log_wc
+        _log_wc.getLogger("admin").debug("网页聊天 Widget 路由注册跳过", exc_info=True)
 
     # ── Voice / TTS 统一试听 API ──────────────────────────────
     try:

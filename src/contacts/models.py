@@ -12,9 +12,10 @@ CHANNEL_LINE = "line"
 CHANNEL_TELEGRAM = "telegram"
 CHANNEL_MOBILE = "mobile"
 CHANNEL_WHATSAPP = "whatsapp"
+CHANNEL_WEB = "web"
 VALID_CHANNELS = {
     CHANNEL_MESSENGER, CHANNEL_LINE, CHANNEL_TELEGRAM,
-    CHANNEL_MOBILE, CHANNEL_WHATSAPP,
+    CHANNEL_MOBILE, CHANNEL_WHATSAPP, CHANNEL_WEB,
 }
 
 # ── Journey 状态（状态机节点） ──────────────────────────────────────
@@ -59,6 +60,7 @@ class Contact:
     created_at: int = 0
     last_active_at: int = 0
     notes: str = ""
+    follow_up_at: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -70,6 +72,7 @@ class Contact:
             "created_at": self.created_at,
             "last_active_at": self.last_active_at,
             "notes": self.notes,
+            "follow_up_at": self.follow_up_at,
         }
 
 

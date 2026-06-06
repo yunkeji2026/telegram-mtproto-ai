@@ -40,8 +40,12 @@ from .models import (
     STAGE_LINE_ENGAGED,
     CHANNEL_LINE,
     CHANNEL_MESSENGER,
+    CHANNEL_WEB,
 )
 from .store import ContactStore
+
+# 可作为 handoff 「来源渠道」（向 LINE 引流）的集合。LINE 是目标，不在此列。
+HANDOFF_SOURCE_CHANNELS = {CHANNEL_MESSENGER, CHANNEL_WEB}
 
 # Optional 依赖——不强制注入，让 Gateway 能在测试里单独跑
 try:
@@ -116,6 +120,23 @@ class HandoffAttempt:
 def new_trace_id() -> str:
     """16 字符 hex，便于打日志串起跨模块调用链。"""
     return secrets.token_hex(8)
+
+
+def _normalize_phone(raw: str) -> str:
+    """手机号规整：保留前导 + 与数字，去掉空格/连字符/括号，便于跨渠道精确匹配。"""
+    s = str(raw or "").strip()
+    if not s:
+        return ""
+    plus = s.startswith("+")
+    digits = "".join(ch for ch in s if ch.isdigit())
+    if not digits:
+        return ""
+    return ("+" + digits) if plus else digits
+
+
+def _normalize_email(raw: str) -> str:
+    s = str(raw or "").strip().lower()
+    return s if ("@" in s and "." in s.split("@")[-1]) else ""
 
 
 # ── Gateway ─────────────────────────────────────────────
@@ -237,15 +258,356 @@ class ContactGateway:
                 )
         return ctx
 
+    # ── Phase 5-4：pre-chat 留资 + 身份去重合并 ─────────────
+    def capture_lead(
+        self,
+        *,
+        channel: str,
+        account_id: str,
+        external_id: str,
+        name: str = "",
+        phone: str = "",
+        email: str = "",
+        extra: Optional[Dict[str, str]] = None,
+        display_name: str = "",
+        trace_id: str = "",
+    ) -> Dict[str, Any]:
+        """记录访客留资（手机/邮箱/姓名等）并按手机/邮箱去重合并身份。
+
+        返回 ``{ok, contact_id, merged, matched_contact_id, is_returning,
+                review_id, attributes}``。
+
+        合并策略（保守）：
+          - 提交的 phone/email 在**其它** Contact 上唯一命中 → 高置信合并（relink）；
+          - 多个 Contact 命中同一手机/邮箱 → 入人工审核队列，不自动合并；
+          - 无命中 → 仅写属性到当前 Contact。
+        """
+        trace_id = trace_id or new_trace_id()
+        phone_n = _normalize_phone(phone)
+        email_n = _normalize_email(email)
+        attrs: Dict[str, str] = {}
+        if phone_n:
+            attrs["phone"] = phone_n
+        if email_n:
+            attrs["email"] = email_n
+        for k, v in (extra or {}).items():
+            kv = str(v or "").strip()
+            if kv:
+                attrs[str(k).strip().lower()] = kv
+
+        ci = self._store.get_ci_by_external(channel, account_id, external_id)
+        if ci is None:
+            ctx = self.on_peer_seen(
+                channel=channel, account_id=account_id, external_id=external_id,
+                display_name=display_name or name, trace_id=trace_id,
+            )
+            ci = ctx.channel_identity
+        own_contact_id = ci.contact_id
+
+        merged = False
+        matched_contact_id = ""
+        review_id = ""
+        # 按 phone / email 去重（强标识，唯一命中即自动合并）
+        for key in ("phone", "email"):
+            val = attrs.get(key)
+            if not val:
+                continue
+            others = self._store.find_contacts_by_attribute(
+                key, val, exclude_contact_id=own_contact_id,
+            )
+            if not others:
+                continue
+            if len(others) == 1:
+                target = others[0]
+                ok = self._store.relink_channel_identity(
+                    ci_id=ci.channel_identity_id,
+                    new_contact_id=target,
+                    linked_via=f"prechat_{key}",
+                    attribution_confidence=0.95,
+                    trace_id=trace_id,
+                )
+                if ok:
+                    merged = True
+                    matched_contact_id = target
+                    own_contact_id = target
+                    break
+            else:
+                try:
+                    review_id = self._store.enqueue_merge_review(
+                        candidate_ci_id=ci.channel_identity_id,
+                        target_contact_id=others[0],
+                        confidence=0.6,
+                        breakdown={key: 1.0},
+                    )
+                except Exception:
+                    logger.debug("capture_lead enqueue_merge_review 失败", exc_info=True)
+
+        # 把属性 + 姓名写到最终 Contact 上
+        for k, v in attrs.items():
+            self._store.set_contact_attribute(own_contact_id, k, v)
+        if name:
+            self._store.update_contact(own_contact_id, primary_name=name)
+
+        journey = self._store.get_journey_by_contact(own_contact_id)
+        if journey is not None:
+            self._store.append_event(
+                journey_id=journey.journey_id,
+                event_type="lead_captured",
+                payload={"fields": sorted(attrs.keys()), "merged": merged,
+                         "via": "prechat"},
+                trace_id=trace_id,
+            )
+
+        return {
+            "ok": True,
+            "contact_id": own_contact_id,
+            "merged": merged,
+            "matched_contact_id": matched_contact_id,
+            "is_returning": merged,
+            "review_id": review_id,
+            "attributes": attrs,
+        }
+
+    # ── Phase 5-5：坐席手动合并 / 拆分 / 审核 ────────────────
+    def contact_overview(self, contact_id: str) -> Optional[Dict[str, Any]]:
+        """聚合一个 Contact 的档案摘要（合并预览/审核用）。"""
+        contact = self._store.get_contact(contact_id)
+        if contact is None:
+            return None
+        journey = self._store.get_journey_by_contact(contact_id)
+        identities = [ci.to_dict() for ci in self._store.list_channel_identities_of(contact_id)]
+        try:
+            attributes = self._store.get_contact_attributes(contact_id)
+        except Exception:
+            attributes = {}
+        try:
+            tags = self._store.get_contact_tags(contact_id)
+        except Exception:
+            tags = []
+        try:
+            follow_up_tasks = self._store.list_follow_up_tasks(contact_id)
+        except Exception:
+            follow_up_tasks = []
+        return {
+            "contact_id": contact_id,
+            "primary_name": contact.primary_name,
+            "attributes": attributes,
+            "note": attributes.get("note", ""),
+            "tags": tags,
+            "follow_up_at": getattr(contact, "follow_up_at", 0) or 0,
+            "follow_up_tasks": follow_up_tasks,
+            "identities": identities,
+            "channels": sorted({i["channel"] for i in identities}),
+            "funnel_stage": journey.funnel_stage if journey else "",
+            "intimacy_score": journey.intimacy_score if journey else None,
+            "last_active_at": contact.last_active_at,
+        }
+
+    def update_contact_crm(
+        self,
+        contact_id: str,
+        *,
+        note: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        follow_up_at: Optional[int] = None,
+        operator: str = "",
+    ) -> Dict[str, Any]:
+        """坐席编辑客户 CRM 字段（备注/标签/跟进时间）。None=不改该项。"""
+        if self._store.get_contact(contact_id) is None:
+            return {"ok": False, "error": "contact_not_found"}
+        if note is not None:
+            self._store.set_contact_attribute(contact_id, "note", str(note)[:2000])
+        saved_tags = None
+        if tags is not None:
+            saved_tags = self._store.set_contact_tags(contact_id, tags)
+        if follow_up_at is not None:
+            self._store.set_follow_up(contact_id, int(follow_up_at))
+        journey = self._store.get_journey_by_contact(contact_id)
+        if journey is not None:
+            self._store.append_event(
+                journey_id=journey.journey_id,
+                event_type="crm_updated",
+                payload={"by": operator,
+                         "fields": [k for k, v in
+                                    (("note", note), ("tags", tags),
+                                     ("follow_up_at", follow_up_at)) if v is not None]},
+            )
+        return {
+            "ok": True,
+            "tags": saved_tags if saved_tags is not None else self._store.get_contact_tags(contact_id),
+        }
+
+    def add_follow_up_task(
+        self, contact_id: str, *, due_at: int, note: str = "",
+        assignee: str = "", operator: str = "",
+    ) -> Dict[str, Any]:
+        """坐席为客户新增跟进任务（任务化跟进）。"""
+        if self._store.get_contact(contact_id) is None:
+            return {"ok": False, "error": "contact_not_found"}
+        tid = self._store.add_follow_up_task(
+            contact_id, due_at=int(due_at or 0), note=note,
+            assignee=assignee or operator, created_by=operator,
+        )
+        journey = self._store.get_journey_by_contact(contact_id)
+        if journey is not None:
+            self._store.append_event(
+                journey_id=journey.journey_id, event_type="follow_up_added",
+                payload={"by": operator, "due_at": int(due_at or 0)},
+            )
+        return {"ok": bool(tid), "task_id": tid,
+                "follow_up_tasks": self._store.list_follow_up_tasks(contact_id)}
+
+    def complete_follow_up_task(
+        self, task_id: str, *, operator: str = "",
+    ) -> Dict[str, Any]:
+        """标记跟进任务完成。"""
+        ok = self._store.complete_follow_up_task(task_id, done_by=operator)
+        return {"ok": ok}
+
+    def list_open_tasks(
+        self, *, assignee: Optional[str] = None, due_before: Optional[int] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """未完成跟进任务列表（「我的待办」面板）。"""
+        return self._store.list_open_tasks(
+            assignee=assignee, due_before=due_before, limit=limit)
+
+    def reassign_follow_up_task(
+        self, task_id: str, *, assignee: str, operator: str = "",
+    ) -> Dict[str, Any]:
+        """改派跟进任务给某坐席。"""
+        cid = self._store.reassign_task(task_id, assignee)
+        if cid is None:
+            return {"ok": False, "error": "task_not_open"}
+        journey = self._store.get_journey_by_contact(cid)
+        if journey is not None:
+            self._store.append_event(
+                journey_id=journey.journey_id, event_type="follow_up_reassigned",
+                payload={"by": operator, "to": assignee, "task_id": task_id},
+            )
+        return {"ok": True, "contact_id": cid, "assignee": assignee}
+
+    def snooze_follow_up_task(
+        self, task_id: str, *, days: int = 0, due_at: int = 0, operator: str = "",
+    ) -> Dict[str, Any]:
+        """延期跟进任务（days 顺延或 due_at 直设）。"""
+        cid = self._store.snooze_task(task_id, days=days, due_at=due_at)
+        if cid is None:
+            return {"ok": False, "error": "task_not_open"}
+        return {"ok": True, "contact_id": cid}
+
+    def list_tag_library(self) -> List[Dict[str, Any]]:
+        return self._store.list_tag_library()
+
+    def upsert_tag_library(self, tag: str, *, color: str = "", sort_order: int = 0) -> bool:
+        return self._store.upsert_tag_library(tag, color=color, sort_order=sort_order)
+
+    def delete_tag_library(self, tag: str) -> bool:
+        return self._store.delete_tag_library(tag)
+
+    def merge_candidates_for(self, contact_id: str, *, limit: int = 5) -> List[Dict[str, Any]]:
+        """按共享强标识（phone/email）找可合并的其它 Contact，返回其档案摘要。"""
+        try:
+            attrs = self._store.get_contact_attributes(contact_id)
+        except Exception:
+            attrs = {}
+        seen: set = set()
+        out: List[Dict[str, Any]] = []
+        for key in ("phone", "email"):
+            val = attrs.get(key)
+            if not val:
+                continue
+            for cid in self._store.find_contacts_by_attribute(
+                key, val, exclude_contact_id=contact_id,
+            ):
+                if cid in seen:
+                    continue
+                seen.add(cid)
+                ov = self.contact_overview(cid)
+                if ov:
+                    ov["match_on"] = key
+                    out.append(ov)
+                if len(out) >= limit:
+                    return out
+        return out
+
+    def manual_merge_identity(
+        self, *, ci_id: str, target_contact_id: str, operator: str = "", trace_id: str = "",
+    ) -> bool:
+        """坐席手动把某渠道身份并入目标 Contact。"""
+        trace_id = trace_id or new_trace_id()
+        ok = self._store.relink_channel_identity(
+            ci_id=ci_id,
+            new_contact_id=target_contact_id,
+            linked_via="manual",
+            attribution_confidence=1.0,
+            trace_id=trace_id,
+        )
+        if ok:
+            logger.info("manual_merge ci=%s → contact=%s by=%s",
+                        ci_id, target_contact_id, operator or "?")
+        return ok
+
+    def merge_contacts(
+        self, *, source_contact_id: str, target_contact_id: str,
+        operator: str = "", trace_id: str = "",
+    ) -> bool:
+        """把 source Contact 的所有渠道身份并入 target Contact（contact 级合并）。
+
+        逐个 relink；最后一个迁走后 source Contact 作为孤岛被回收。
+        """
+        if not source_contact_id or not target_contact_id:
+            return False
+        if source_contact_id == target_contact_id:
+            return False
+        trace_id = trace_id or new_trace_id()
+        moved = 0
+        for ci in self._store.list_channel_identities_of(source_contact_id):
+            try:
+                if self._store.relink_channel_identity(
+                    ci_id=ci.channel_identity_id,
+                    new_contact_id=target_contact_id,
+                    linked_via="manual",
+                    attribution_confidence=1.0,
+                    trace_id=trace_id,
+                ):
+                    moved += 1
+            except ValueError:
+                logger.warning("merge_contacts relink 失败 ci=%s", ci.channel_identity_id)
+        if moved:
+            logger.info("merge_contacts %s → %s (%d ci) by=%s",
+                        source_contact_id, target_contact_id, moved, operator or "?")
+        return moved > 0
+
+    def split_identity(
+        self, *, ci_id: str, operator: str = "", trace_id: str = "",
+    ) -> Optional[str]:
+        """坐席手动把某渠道身份从误并的 Contact 拆出。返回新 contact_id 或 None。"""
+        trace_id = trace_id or new_trace_id()
+        new_cid = self._store.split_channel_identity(ci_id=ci_id, trace_id=trace_id)
+        if new_cid:
+            logger.info("split ci=%s → new_contact=%s by=%s", ci_id, new_cid, operator or "?")
+        return new_cid
+
+    def list_pending_merge_reviews(self, limit: int = 100) -> List[Dict[str, Any]]:
+        return self._store.list_pending_reviews(limit=limit)
+
+    def approve_merge_review(self, review_id: str, *, resolved_by: str = "") -> bool:
+        return self._merge.approve_review(review_id, resolved_by=resolved_by)
+
+    def reject_merge_review(self, review_id: str, *, resolved_by: str = "") -> bool:
+        return self._merge.reject_review(review_id, resolved_by=resolved_by)
+
     # ── 引流：签发 token ───────────────────────────────────
     def issue_handoff(self, *, messenger_ci_id: str, trace_id: str = "") -> HandoffToken:
         """为 Messenger 侧某身份签发 token。调用方负责把它写进引流话术。"""
         ci = self._store.get_channel_identity(messenger_ci_id)
         if not ci:
-            raise ValueError(f"messenger channel_identity not found: {messenger_ci_id}")
-        if ci.channel != CHANNEL_MESSENGER:
+            raise ValueError(f"source channel_identity not found: {messenger_ci_id}")
+        if ci.channel not in HANDOFF_SOURCE_CHANNELS:
             raise ValueError(
-                f"issue_handoff only accepts messenger ci, got channel={ci.channel!r}"
+                f"issue_handoff only accepts {sorted(HANDOFF_SOURCE_CHANNELS)} ci, "
+                f"got channel={ci.channel!r}"
             )
         tok = self._handoff.issue(messenger_ci_id)
         journey = self._store.get_journey_by_contact(ci.contact_id)
@@ -450,10 +812,10 @@ class ContactGateway:
         dry_run=True 时**不扣 cap 不签 token 不推 stage**，用假 token 渲染，
         给 Web UI 预览用。
         """
-        # 1. 基础存在性
+        # 1. 基础存在性（来源渠道：messenger / web 均可向 LINE 引流）
         ci = self._store.get_channel_identity(messenger_ci_id)
-        if not ci or ci.channel != CHANNEL_MESSENGER:
-            return HandoffAttempt(success=False, reason="bad_messenger_ci")
+        if not ci or ci.channel not in HANDOFF_SOURCE_CHANNELS:
+            return HandoffAttempt(success=False, reason="bad_source_ci")
         journey = self._store.get_journey_by_contact(ci.contact_id)
         if not journey:
             return HandoffAttempt(success=False, reason="no_journey")

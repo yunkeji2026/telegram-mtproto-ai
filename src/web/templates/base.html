@@ -470,9 +470,9 @@ code{background:var(--input);padding:.15rem .45rem;border-radius:5px;font-size:.
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/><circle cx="18.5" cy="7" r="2.5" fill="currentColor" opacity=".45"/></svg>
       <span>人设工作室</span>
     </a>
-    <a href="/unified-inbox" {% if active=="unified_inbox" %}class="active"{% endif %} data-help="nav_unified_inbox">
+    <a href="/workspace" target="_blank" data-help="nav_unified_inbox">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M4 9l8 5 8-5"/></svg>
-      <span>统一收件箱</span>
+      <span>坐席工作台 ↗</span>
     </a>
     <a href="/rpa-overview" {% if active=="rpa_overview" %}class="active"{% endif %} data-help="nav_rpa_overview">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
@@ -541,9 +541,9 @@ code{background:var(--input);padding:.15rem .45rem;border-radius:5px;font-size:.
       <span>{{ (i18n or {}).get('learner', 'AI 学习审核') }}</span>
       <span class="sb-badge" id="badge-learner"></span>
     </a>
-    <a href="/unified-inbox" {% if active=="unified_inbox" %}class="active"{% endif %} data-help="nav_unified_inbox">
+    <a href="/workspace" target="_blank" data-help="nav_unified_inbox">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M4 9l8 5 8-5"/></svg>
-      <span>统一收件箱</span>
+      <span>坐席工作台 ↗</span>
     </a>
     <a href="/rpa-overview" {% if active=="rpa_overview" %}class="active"{% endif %} data-help="nav_rpa_overview">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
@@ -808,7 +808,7 @@ var _cmdPagesAll=[
   {% for dp in domain_web_pages %}{name:'{{ dp.get("label_simple") or dp.get("label","") }}',url:'{{ dp.path }}',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/></svg>',keys:'{{ dp.get("cmd_keys","") }}',simple:{{ 'true' if dp.get('show_in_simple') else 'false' }}},
   {% endfor %}
   {name:'AI 学习审核',url:'/learner',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>',keys:'learner 学习 审核 AI',simple:true},
-  {name:'统一收件箱',url:'/unified-inbox',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M4 9l8 5 8-5"/></svg>',keys:'unified inbox 统一 收件箱 消息 聊天 多平台',simple:true},
+  {name:'坐席工作台',url:'/workspace',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M4 9l8 5 8-5"/></svg>',keys:'unified inbox 统一 收件箱 消息 聊天 多平台 坐席 工作台 workspace',simple:true},
   {name:'RPA 跨平台总览',url:'/rpa-overview',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>',keys:'rpa overview 总览 跨平台 telegram line messenger whatsapp',simple:true},
   {name:'数据概览',url:'/',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>',keys:'dashboard home 首页 概览 仪表盘',simple:true},
   {name:'运营分析',url:'/analytics',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',keys:'analytics 运营 分析 数据',simple:true},

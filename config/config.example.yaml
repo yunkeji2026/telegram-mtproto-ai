@@ -112,6 +112,40 @@ line:
   webhook_path: "/line/webhook"
   unsupported_type_reply: "目前仅支持文字消息，请发文字。"
 
+# 面向终端客户的网页聊天 Widget（web 渠道，公网入口；默认关）
+# 开启后：客户官网嵌入 <script src="https://你的域名/chat/embed.js"></script> 即出现聊天气泡；
+# 入站消息进同一 AI 大脑（auto_ai 自动回），落统一收件箱，坐席工作台可见、可人工接管。
+web_chat:
+  enabled: false
+  account_id: web              # 统一收件箱里的 account 标识
+  default_mode: auto_ai        # auto_ai=AI自动回 | manual/review=直接转人工等坐席回
+  greeting: "你好～有什么可以帮您？"
+  title: "在线客服"
+  theme_color: "#2563eb"
+  token_secret: ""             # 访客 token 签名密钥；留空回落 web_admin.secret_key
+  token_max_age_sec: 2592000   # 访客 token 有效期（默认 30 天）
+  rate_limit_per_min: 20       # 单访客每分钟消息上限（防滥用）
+  # 嵌入/调用来源白名单（空=不限制）。设置后：仅这些站点可 iframe 嵌入（CSP frame-ancestors）
+  # 且跨源 API 调用会校验 Origin。例：["https://shop.example.com", "https://www.example.com"]
+  allowed_origins: []
+  # web→LINE 自动引流：达到 readiness/cap/script 条件时，在 AI 回复尾部注入引流话术 + 暗号 token；
+  # 客户到 LINE 发首条（含暗号）→ on_line_first_text 自动合并身份、归因 web 来源。
+  # 需 contacts.enabled + 已配置 handoff 话术/LINE id；默认关，且首条不推（min_inbound 门槛）。
+  handoff:
+    enabled: false
+    min_inbound: 2             # 访客累计入站达到此数才尝试引流（避免一上来就推 LINE）
+  # Phase 5-4：pre-chat 留资表单（聊天前采集 姓名/手机/邮箱）。
+  # required=true 时必须填完才能开始对话；采集到的 phone/email 会跨渠道去重合并身份
+  # （老客户曾用同一手机/邮箱在 LINE/Messenger 联系过 → 自动合并为同一 Contact）。
+  prechat:
+    enabled: false
+    required: false            # true=必填才能开聊；false=可跳过
+    title: "开始对话前，请留下您的联系方式"
+    fields:                    # 支持 key: name/phone/email/wechat/line_id/note
+      - {key: name,  label: "称呼",   type: text,  required: false}
+      - {key: phone, label: "手机号", type: tel,   required: false}
+      - {key: email, label: "邮箱",   type: email, required: false}
+
 # Web 管理后台（显示名、侧边栏标题；LINE RPA 提示中的「系统」名称亦取此字段）
 web_admin:
   site_name: 智控王客户转化聊天系统
@@ -970,6 +1004,24 @@ rpa:
 # 纯旁路持久化：把各平台聚合到的会话/消息落到统一 conversations/messages 表，
 # 并把 automation_mode 从「进程内 dict（重启即丢）」迁到持久表。
 # store 故障或为空时，收件箱自动回落到原实时聚合，始终可用。
+# ── 坐席工作台（/workspace）────────────────────────────────────────
+workspace:
+  claim_ttl_sec: 900          # 会话租约 TTL（秒）；无心跳则自动释放
+  presence_stale_sec: 120     # 超过此秒数未心跳的坐席视为离线
+  # 入站自动翻译：坐席打开会话时，将外语客户消息译为中文展示（默认关，控 API 成本）
+  auto_translate_inbound:
+    enabled: false
+    target_lang: zh           # 译成何种语言
+    source_langs: []          # 空=所有非 target 语言；例 [en, ja, ko] 仅译英日韩
+    max_per_thread: 8         # 每次打开会话最多翻译条数
+    max_chars: 400            # 超长消息跳过
+  # 快捷回复模板（坐席输入栏「快捷回复」面板；与 messenger approval_templates、templates.yaml 合并展示）
+  quick_templates:
+    - label: 问候
+      text: "你好～有什么可以帮您？"
+    - label: 稍等
+      text: "好的，我查一下马上回复您～"
+
 inbox:
   enabled: true                      # 安全默认开；如需保守可设 false（全程走实时聚合）
   # db_path: config/inbox.db         # 可选：自定义 db 位置（相对路径基于 config_path）
@@ -978,6 +1030,11 @@ inbox:
   #   true         = 改从统一 store 读（跨平台/跨重启持久；仍会先跑实时聚合做旁路 ingest）。
   # 注：thread/profile 端点仍走实时聚合；列表切 store 后历史survive 重启。store 不可用自动回落。
   read_from_store: false
+  # Phase 6-8 SLA 阈值（秒）：客户消息未回复时长分级。
+  #   warn = 黄色警告（会话列表 ⏱ 变橙、计入"SLA 超时"）；
+  #   crit = 红色严重（变红加粗、计入"严重超时"）；首响达标率以 warn 为准。
+  sla_warn_sec: 1800                  # 默认 30 分钟
+  sla_crit_sec: 7200                  # 默认 2 小时
 
 # ── Phase C：意图分析 LLM 升级 ────────────────────────────────────
 # 规则版上叠 LLM：规则兜底、LLM 提升、风险只升不降；故障自动回落规则。
