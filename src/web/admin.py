@@ -2364,7 +2364,10 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         from src.web.routes.drafts_routes import (
             register_drafts_page_routes,
             register_agent_perf_routes,
+            register_export_route,
         )
+        # J3: export API（主管数据导出，admin.py 内注册以便 inventory 覆盖）
+        register_export_route(app, api_auth=_api_auth)
 
         register_drafts_page_routes(
             app,

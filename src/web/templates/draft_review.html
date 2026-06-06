@@ -404,7 +404,22 @@ function toggleCopilot(bodyId, peerEncoded, headerEl){
       +(d.risk_reasons&&d.risk_reasons.length?'<div style="font-size:11px;color:#dc2626;margin:2px 0;">⚠ '+esc(d.risk_reasons.join('、'))+'</div>':'')
       +(d.next_step?'<div style="font-size:11px;color:#374151;margin:2px 0;">💡 建议：'+esc(d.next_step)+'</div>':'')
       +suggestHtml
-      +kbHtml;
+      +kbHtml
+      // J2：模板智能推荐（来自 reply_templates DB + intent→scene 匹配）
+      +(function(){
+        if(!d.template_suggestions||!d.template_suggestions.length) return '';
+        return '<div class="dr-suggest" style="border-top-color:#bfdbfe;">'
+          +'<div class="dr-suggest-lbl" style="color:#1d4ed8;">📚 推荐模板（按意图匹配）</div>'
+          +'<div class="dr-suggest-btns">'
+          +d.template_suggestions.map(function(t){
+            return '<button class="dr-suggest-btn" style="border-color:#3b82f6;color:#1d4ed8;" '
+              +'title="'+esc(t.content||'')+'" '
+              +'onclick="fillDraft(\'edit-'+editBoxIdx+'\','+JSON.stringify(t.content||'')+');'
+              +'fetch(\'/api/reply-templates/'+encodeURIComponent(t.id||'')+'/use\',{method:\'POST\'}).catch(function(){});">'
+              +esc(t.title||t.scene)+'</button>';
+          }).join('')
+          +'</div></div>';
+      })();
   }).catch(function(){
     body.innerHTML='<span class="dr-copilot-loading">网络错误</span>';
     body.removeAttribute('data-loaded');
