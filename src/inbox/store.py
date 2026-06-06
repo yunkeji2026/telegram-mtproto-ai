@@ -230,6 +230,8 @@ class InboxStore:
         self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False, timeout=10)
         self._conn.row_factory = sqlite3.Row
         self._lock = threading.Lock()
+        # C3：L2 草稿写入通知钩子（AutosendWorker 注册，线程安全回调）
+        self._l2_callbacks: List[Any] = []
         with self._lock:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA busy_timeout=5000")
@@ -241,6 +243,14 @@ class InboxStore:
                 except Exception:
                     pass  # 列已存在则忽略
             self._conn.commit()
+
+    def register_l2_callback(self, cb: Any) -> None:
+        """注册 L2 草稿写入通知回调（C3 事件驱动 AutosendWorker）。
+
+        cb 为无参可调用对象，在 upsert_draft 写入 L2 草稿后从同步上下文调用。
+        实现方可用 loop.call_soon_threadsafe 安全地唤醒异步任务。
+        """
+        self._l2_callbacks.append(cb)
 
     def close(self) -> None:
         with self._lock:
@@ -738,6 +748,13 @@ class InboxStore:
                 ),
             )
             self._conn.commit()
+        # C3：L2 落库后锁外通知（避免回调持锁引起死锁）
+        if str(draft.get("autopilot_level") or "L1") == "L2":
+            for _cb in self._l2_callbacks:
+                try:
+                    _cb()
+                except Exception:
+                    pass
         return draft_id
 
     def get_draft(self, draft_id: str) -> Optional[Dict[str, Any]]:

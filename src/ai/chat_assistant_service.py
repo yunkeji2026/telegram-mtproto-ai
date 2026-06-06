@@ -178,6 +178,28 @@ def _merge_analysis(base: ChatAnalysis, llm: Dict[str, Any]) -> ChatAnalysis:
     return base
 
 
+def quick_analyze(text: str) -> Dict[str, Any]:
+    """同步零成本规则全量分析（不调 LLM）。返回 intent / emotion / risk / next_step。
+
+    供 Copilot API 实时分析客户来文（<1ms 响应，纯规则，无 I/O）。
+    返回字段：intent, emotion, risk_level, risk_reasons, next_step, language
+    """
+    t = str(text or "")
+    lang = detect_language(t)
+    emotion = _detect_emotion(t)
+    intent = _detect_intent(t, emotion=emotion)
+    risk_level, reasons = _detect_risk(t, emotion=emotion, intent=intent)
+    next_step = _next_step(intent, emotion, risk_level)
+    return {
+        "intent": intent,
+        "emotion": emotion,
+        "risk_level": risk_level,
+        "risk_reasons": list(reasons),
+        "next_step": next_step,
+        "language": lang,
+    }
+
+
 def quick_risk(text: str) -> "tuple[str, list]":
     """同步零成本规则风险评估（不调 LLM）。返回 (risk_level, risk_reasons)。
 
