@@ -33,6 +33,12 @@ LANG_NAMES: Dict[str, str] = {
     "tr": "Turkish",
     "vi": "Vietnamese",
     "id": "Indonesian",
+    "th": "Thai",
+    "ms": "Malay",
+    "tl": "Filipino",
+    "km": "Khmer",
+    "he": "Hebrew",
+    "el": "Greek",
     "unknown": "Unknown",
 }
 
@@ -70,25 +76,71 @@ class TranslationService:
         ai_client: Optional[Any] = None,
         default_target_lang: str = "zh",
         cache_ttl_sec: int = 86400,
+        neg_cache_ttl_sec: int = 60,
         max_cache_items: int = 1000,
         memory_store: Optional[Any] = None,
         glossary_terms: Optional[Dict[str, str]] = None,
         glossary_version: str = "",
+        glossary_protect: Optional[list] = None,
         cost_tracking: bool = False,
+        engines: Optional[list] = None,
+        engine_router: Optional[Any] = None,
     ) -> None:
         self.ai_client = ai_client
         self.default_target_lang = normalize_lang(default_target_lang) or "zh"
         self.cache_ttl_sec = max(60, int(cache_ttl_sec or 86400))
+        # 失败态（provider_unavailable / translate_failed）只做短 TTL 负缓存，
+        # 避免配好 key / 引擎恢复后仍被旧失败结果毒化一整天。
+        self.neg_cache_ttl_sec = max(1, int(neg_cache_ttl_sec or 60))
         self.max_cache_items = max(10, int(max_cache_items or 1000))
         self._cache: Dict[str, Tuple[float, TranslationResult]] = {}
         # Phase C2：持久翻译记忆（L2）+ 术语库 + 成本统计（全部可选，默认行为不变）
         self._memory_store = memory_store
         self._glossary_terms = {str(k): str(v) for k, v in (glossary_terms or {}).items()}
         self._glossary_version = str(glossary_version or "")
+        self._glossary_protect = [str(t) for t in (glossary_protect or []) if t]
         self._cost_tracking = bool(cost_tracking)
+        # P56：多引擎路由（默认 [AIEngine(ai_client)]，行为与改造前一致）
+        from src.ai.translation_engines import AIEngine, EngineRouter
+
+        if engine_router is not None:
+            self._router = engine_router
+        elif engines:
+            self._router = EngineRouter(engines)
+        else:
+            self._router = EngineRouter([AIEngine(ai_client)])
 
     def detect_language(self, text: str) -> str:
         return detect_language(text)
+
+    def engine_matrix(self, target_lang: str = "") -> Dict[str, Any]:
+        """指定目标语的引擎能力矩阵（供前端提前提示主引擎是否兜底）。"""
+        target = normalize_lang(target_lang) or self.default_target_lang
+        try:
+            return self._router.describe(target)
+        except Exception:
+            return {"target_lang": target, "primary": "none",
+                    "effective": "none", "engines": []}
+
+    def update_glossary(
+        self,
+        terms: Optional[Dict[str, str]] = None,
+        protect: Optional[list] = None,
+        version: str = "",
+    ) -> str:
+        """P59：运行时热替换术语库。version 变化 → cache_key 变 → 旧译自动失效。
+
+        不传 version 时按内容重算 hash。返回生效后的 version。
+        """
+        self._glossary_terms = {str(k): str(v) for k, v in (terms or {}).items()}
+        self._glossary_protect = [str(t) for t in (protect or []) if t]
+        if version:
+            self._glossary_version = str(version)
+        else:
+            from src.ai.translation_glossary import _hash
+            self._glossary_version = _hash(self._glossary_terms, self._glossary_protect)
+        self._cache.clear()  # 主动清 L1，避免极短窗口内读到旧译
+        return self._glossary_version
 
     async def translate(
         self,
@@ -119,7 +171,7 @@ class TranslationService:
             self._cache_put(key, mem)  # 回填 L1
             return mem
 
-        if self.ai_client is None or not hasattr(self.ai_client, "chat"):
+        if not self._router.any_available():
             result = TranslationResult(
                 src_text,
                 src_text,
@@ -132,36 +184,45 @@ class TranslationService:
             self._cache_put(key, result)
             return result
 
-        prompt = self._build_prompt(src_text, source, target, style)
-        try:
-            translated = await self.ai_client.chat(prompt, {"_skip_lang_guard": True})
-        except TypeError:
-            translated = await self.ai_client.chat(prompt)
-        except Exception as exc:
+        # P56/P57：术语强制（对所有引擎）+ 品牌词不译保护（mask→翻译→restore）
+        # terms 还原为目标译法、protect 还原为原词；AI 引擎额外收到 glossary_hint 软提示。
+        from src.ai.translation_engines import apply_glossary_mask, restore_protected
+
+        glossary_hint = self._glossary_hint(src_text)
+        hit_terms = {k: v for k, v in self._glossary_terms.items() if k and k in src_text}
+        hit_protect = [w for w in self._glossary_protect if w and w in src_text]
+        if hit_terms or hit_protect:
+            try:
+                from src.ai.glossary_hits import get_glossary_hits
+                gh = get_glossary_hits()
+                if hit_terms:
+                    gh.record_terms(hit_terms.keys())
+                if hit_protect:
+                    gh.record_protect(hit_protect)
+            except Exception:
+                pass
+        masked, mapping = apply_glossary_mask(src_text, hit_terms, self._glossary_protect)
+        res = await self._router.translate(
+            masked, source_lang=source, target_lang=target,
+            style=style, glossary_hint=glossary_hint,
+        )
+        if not res.ok or not res.text:
             result = TranslationResult(
-                src_text,
-                src_text,
-                source,
-                target,
-                False,
-                provider="ai",
-                error=f"{type(exc).__name__}: {exc}",
+                src_text, src_text, source, target, False,
+                provider=res.engine or "none",
+                error=res.error or "translate_failed",
             )
             self._cache_put(key, result)
             return result
 
-        out = _clean_translation(str(translated or ""))
+        out = restore_protected(res.text, mapping)
         result = TranslationResult(
-            src_text,
-            out or src_text,
-            source,
-            target,
-            bool(out),
-            provider="ai",
+            src_text, out or src_text, source, target,
+            bool(out), provider=res.engine,
         )
         self._cache_put(key, result)
         if result.ok:
-            self._memory_put(key, result, style)
+            self._memory_put(key, result, style, engine=res.engine)
             self._record_cost(src_text, out, source, target)
         return result
 
@@ -183,7 +244,8 @@ class TranslationService:
             provider=str(row.get("engine") or "ai"),
         )
 
-    def _memory_put(self, key: str, result: "TranslationResult", style: str) -> None:
+    def _memory_put(self, key: str, result: "TranslationResult", style: str,
+                    engine: str = "ai") -> None:
         if self._memory_store is None:
             return
         try:
@@ -194,7 +256,7 @@ class TranslationService:
                 source_lang=result.source_lang,
                 target_lang=result.target_lang,
                 style=style,
-                engine="ai",
+                engine=engine or "ai",
                 glossary_ver=self._glossary_version,
             )
         except Exception:
@@ -217,21 +279,6 @@ class TranslationService:
         except Exception:
             pass
 
-    def _build_prompt(self, text: str, source_lang: str, target_lang: str, style: str) -> str:
-        source_name = LANG_NAMES.get(source_lang, source_lang)
-        target_name = LANG_NAMES.get(target_lang, target_lang)
-        tone = (
-            "Keep the meaning, names, numbers, links, emojis and chat tone. "
-            "Do not add explanations."
-            if style == "chat"
-            else "Translate faithfully. Do not add explanations."
-        )
-        glossary = self._glossary_hint(text)
-        return (
-            f"Translate the following chat message from {source_name} to {target_name}. "
-            f"{tone}{glossary}\n\n{text}"
-        )
-
     def _glossary_hint(self, text: str) -> str:
         """命中术语注入提示（Phase C2）。仅注入文本中出现的术语，避免噪声。"""
         if not self._glossary_terms:
@@ -250,7 +297,8 @@ class TranslationService:
         if not row:
             return None
         ts, result = row
-        if time.time() - ts > self.cache_ttl_sec:
+        ttl = self.cache_ttl_sec if result.ok else self.neg_cache_ttl_sec
+        if time.time() - ts > ttl:
             self._cache.pop(key, None)
             return None
         return TranslationResult(**result.to_dict())
@@ -277,42 +325,102 @@ def normalize_lang(lang: str) -> str:
     return aliases.get(code, code)
 
 
+# 唯一脚本块 → 语种（确定性强、零歧义，覆盖跨境客服常见客户语种）。
+# 顺序重要：先查假名再查 CJK，否则日文汉字会被误判为中文。
+_SCRIPT_RE: Tuple[Tuple[str, "re.Pattern"], ...] = (
+    ("ja", re.compile(r"[\u3040-\u30ff]")),                       # 平假名/片假名
+    ("ko", re.compile(r"[\uac00-\ud7af]")),                       # 韩文
+    ("th", re.compile(r"[\u0e01-\u0e3a\u0e40-\u0e4e]")),          # 泰文字母/元音（排除 ฿ 泰铢符与泰数字，避免英文报价误判）
+    ("km", re.compile(r"[\u1780-\u17ff]")),                       # 高棉文
+    ("ar", re.compile(r"[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff]")),  # 阿拉伯文
+    ("ru", re.compile(r"[\u0400-\u04ff]")),                       # 西里尔文
+    ("hi", re.compile(r"[\u0900-\u097f]")),                       # 天城文（印地语）
+    ("he", re.compile(r"[\u0590-\u05ff]")),                       # 希伯来文
+    ("el", re.compile(r"[\u0370-\u03ff]")),                       # 希腊文
+)
+
+# 越南语：拉丁字母 + 独有变音符（ăđơư + 声调块），与葡/西的 ã/â/ê/ô 区分开。
+_VI_RE = re.compile(r"[\u0103\u0102\u0111\u0110\u01a1\u01a0\u01b0\u01af\u1ea0-\u1ef9]")
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+_LATIN_RE = re.compile(r"[A-Za-z]")
+
+# 拉丁语种关键词（小写子串匹配）。es 置于首位以保持既有行为；
+# 仅收录足够独特、不会成为英文常用词子串的词，避免误判。
+_LATIN_HINTS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("es", ("hola", "gracias", "estoy", "quiero", "buenos", "adios", "señor", "español")),
+    ("pt", ("olá", "obrigado", "obrigada", "quero", "você", "também", "português")),
+    ("fr", ("bonjour", "merci", "veux", "avec", "pourquoi", "salut", "français")),
+    ("de", ("hallo", "danke", "nicht", "bitte", "warum", "guten", "deutsch")),
+    ("it", ("ciao", "grazie", "voglio", "perché", "buongiorno", "italiano")),
+    ("tr", ("merhaba", "teşekkür", "nasılsın", "istiyorum", "türkçe")),
+    ("vi", ("xin chào", "cảm ơn", "không", "muốn")),
+    ("id", ("halo", "terima kasih", "saya", "tidak", "bagaimana", "selamat")),
+    ("tl", ("salamat", "kumusta", "magkano", "paano", "mahal kita")),
+)
+
+
+# Phase B：可选统计检测钩子（默认 None=纯确定性，行为不变）。
+# 仅当确定性核心落到弱结果（en/unknown）且文本够长时才咨询，用于精修含糊拉丁。
+_STATISTICAL_HOOK: Optional[Any] = None
+_STATISTICAL_MIN_CHARS: int = 12
+
+
+def set_statistical_detector(fn: Optional[Any], *, min_chars: int = 12) -> None:
+    """注入/清除可选统计语种检测器（进程级，启动时按配置设置一次）。
+
+    fn 形如 ``detect(text) -> Optional[str]``（ISO 639-1）；传 None 清除（回到纯确定性）。
+    min_chars：低于此长度不咨询统计层（短文本统计检测不可靠）。
+    """
+    global _STATISTICAL_HOOK, _STATISTICAL_MIN_CHARS
+    _STATISTICAL_HOOK = fn
+    _STATISTICAL_MIN_CHARS = max(1, int(min_chars or 12))
+
+
+def _maybe_statistical(text: str, weak_result: str) -> str:
+    """弱结果（en/unknown）时尝试统计回退；任何异常/无后端都保持原结果。"""
+    fn = _STATISTICAL_HOOK
+    if fn is None or len(text) < _STATISTICAL_MIN_CHARS:
+        return weak_result
+    try:
+        guess = normalize_lang(str(fn(text) or ""))
+    except Exception:
+        return weak_result
+    if not guess or guess == "unknown":
+        return weak_result
+    # 仅采信库内已知语种；越南语等已被确定性核心捕获，这里主要救拉丁小语种。
+    return guess if guess in LANG_NAMES else weak_result
+
+
 def detect_language(text: str) -> str:
-    """Deterministic language detector for chat routing and translation UI."""
+    """确定性语种检测（用于翻译路由与会话语言标注）。
+
+    分层：唯一脚本块 → 越南语变音符 → CJK 计数 → 拉丁关键词 → 拉丁变音回退。
+    弱结果（en/unknown）时若注入了统计检测器且文本够长，再做一次统计精修。
+    默认零外部依赖、可复现。
+    """
     t = str(text or "").strip()
     if not t:
         return "unknown"
-    if re.search(r"[\u3040-\u30ff]", t):
-        return "ja"
-    if re.search(r"[\uac00-\ud7af]", t):
-        return "ko"
-    if re.search(r"[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff]", t):
-        return "ar"
-    if re.search(r"[\u0400-\u04ff]", t):
-        return "ru"
-    if re.search(r"[\u0900-\u097f]", t):
-        return "hi"
-    cjk = len(re.findall(r"[\u4e00-\u9fff]", t))
-    latin = len(re.findall(r"[A-Za-z]", t))
+    for lang, pat in _SCRIPT_RE:
+        if pat.search(t):
+            return lang
+    # 越南语用拉丁字母但有独有变音符，须在通用拉丁处理前判定。
+    if _VI_RE.search(t):
+        return "vi"
+    cjk = len(_CJK_RE.findall(t))
+    latin = len(_LATIN_RE.findall(t))
     if cjk and cjk >= latin:
         return "zh"
     lower = t.lower()
-    latin_hints = {
-        "es": ("hola", "gracias", "estoy", "quiero", "buenos", "adios"),
-        "pt": ("olá", "obrigado", "obrigada", "quero", "você", "também"),
-        "fr": ("bonjour", "merci", "veux", "avec", "pourquoi", "salut"),
-        "de": ("hallo", "danke", "nicht", "bitte", "warum", "guten"),
-        "it": ("ciao", "grazie", "voglio", "perché", "buongiorno"),
-        "tr": ("merhaba", "teşekkür", "nasılsın", "istiyorum"),
-        "vi": ("xin chào", "cảm ơn", "không", "muốn"),
-        "id": ("halo", "terima kasih", "saya", "tidak"),
-    }
-    for lang, hints in latin_hints.items():
+    for lang, hints in _LATIN_HINTS:
         if any(h in lower for h in hints):
             return lang
-    if latin:
-        return "en"
-    return "unknown"
+    # 拉丁变音快速信号（关键词未命中时的兜底）：ñ→西，ã/õ→葡。
+    if "ñ" in lower:
+        return "es"
+    if "ã" in lower or "õ" in lower:
+        return "pt"
+    return _maybe_statistical(t, "en" if latin else "unknown")
 
 
 def _clean_translation(text: str) -> str:

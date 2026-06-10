@@ -52,6 +52,26 @@ async def test_translate_persists_and_hits_across_restart(tmp_path):
     store2.close()
 
 
+def test_lang_names_cover_sea_languages():
+    """P55: 跨境 SEA 语种应进入 LANG_NAMES，使翻译 prompt 用语种全名而非裸 code。"""
+    from src.ai.translation_service import LANG_NAMES
+    for code, name in (("th", "Thai"), ("ms", "Malay"), ("tl", "Filipino")):
+        assert LANG_NAMES.get(code) == name
+
+
+@pytest.mark.asyncio
+async def test_translate_thai_target_marks_cached_on_repeat(tmp_path):
+    """P55 工作台双向翻译依赖 cached 标记复用记忆，避免重复调用 AI。"""
+    ai = _AI()
+    store = TranslationMemoryStore(tmp_path / "tm.db")
+    svc = TranslationService(ai_client=ai, memory_store=store)
+    r1 = await svc.translate("hello", target_lang="th")
+    assert r1.ok and ai.calls == 1 and r1.cached is False
+    r2 = await svc.translate("hello", target_lang="th")
+    assert r2.ok and r2.cached is True and ai.calls == 1  # 命中缓存，未再调 AI
+    store.close()
+
+
 @pytest.mark.asyncio
 async def test_glossary_version_change_invalidates(tmp_path):
     db = tmp_path / "tm.db"

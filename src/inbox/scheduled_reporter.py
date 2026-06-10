@@ -67,6 +67,18 @@ class ScheduledReporter:
         self._last_daily: Optional[str] = None   # "YYYY-MM-DD"
         self._last_weekly: Optional[str] = None  # "YYYY-WNN"
         self._tick_secs: int = int(cfg.get("tick_secs") or 60)
+        # P32：SLA 坐席告警防重状态（conversation_id → last_alerted_ts）
+        self._sla_agent_alerted: Dict[str, float] = {}
+        # P32：SLA 阈值（秒）从 config 读取，回落合理默认值
+        _sla_cfg = cfg.get("sla_agent_alert") or {}
+        self._sla_warn_sec: int = int(_sla_cfg.get("warn_sec") or 300)    # 5 分钟
+        self._sla_crit_sec: int = int(_sla_cfg.get("crit_sec") or 900)    # 15 分钟
+        self._sla_renotify_sec: int = int(_sla_cfg.get("renotify_sec") or 900)  # 15 分钟内不重复
+        # P36：自动归档定时器（每 N tick 触发一次，默认 60 tick = 1小时）
+        _aa_cfg = cfg.get("auto_archive") or {}
+        self._auto_archive_idle_hours: int = int(_aa_cfg.get("idle_hours") or 24)
+        self._auto_archive_interval_ticks: int = int(_aa_cfg.get("check_interval_ticks") or 60)
+        self._auto_archive_tick_count: int = 0  # 当前 tick 计数器
 
     # ── 生命周期 ─────────────────────────────────────────────────────────
 
@@ -102,6 +114,18 @@ class ScheduledReporter:
 
     async def _check(self) -> None:
         """检查当前时刻是否需要发送简报（每 tick 调用一次）。"""
+        # P32：每 tick 检查 SLA 坐席告警
+        await self._run_sla_agent_alerts()
+
+        # P36：定期（每 hour）自动归档+质检评分
+        self._auto_archive_tick_count += 1
+        if self._auto_archive_tick_count >= self._auto_archive_interval_ticks:
+            self._auto_archive_tick_count = 0
+            await self._run_auto_archive_and_qa()
+
+        # P44：工作链自动执行（每 tick）
+        await self._run_workflow_chains()
+
         now_ts = self._now_local()
         dt = datetime.datetime.utcfromtimestamp(now_ts)
         today_str = dt.strftime("%Y-%m-%d")
@@ -273,6 +297,232 @@ class ScheduledReporter:
                 )
         except Exception:
             logger.debug("S2 异常检测失败（已忽略）", exc_info=True)
+
+    # ── P32：SLA 坐席告警（每 tick 运行，精准推送给负责坐席）────────────
+
+    async def _run_sla_agent_alerts(self) -> None:
+        """P32：检查未回复会话是否超时，向负责坐席发布定向 queue_alert 事件。
+
+        告警策略：
+          - warn_sec 以上：向 claimed_by 坐席发 warn 级告警
+          - crit_sec 以上：发 crit 级告警（颜色更深，toast 更醒目）
+          - 同一会话 renotify_sec 内不重复告警（防轰炸）
+          - 未认领会话（claimed_by 为空）发布 broadcast 告警（所有在线坐席可收）
+        """
+        if self._store is None:
+            return
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            now = time.time()
+
+            # 清理过期防重记录
+            self._sla_agent_alerted = {
+                k: v for k, v in self._sla_agent_alerted.items()
+                if now - v < self._sla_renotify_sec * 2
+            }
+
+            # 仅拉取近期活跃（last_ts 在 SLA crit 窗口内）且未归档的会话
+            # 优化：crit_sec * 4 作为扫描窗口，排除长期静默会话，减少全表扫描开销
+            convs = self._store.list_conversations(limit=500)
+            if not convs:
+                return
+            # 预过滤：只关注最近有活动的会话（last_ts 在 crit_sec * 6 以内）
+            window_cutoff = now - self._sla_crit_sec * 6
+            convs = [c for c in convs if float(c.get("last_ts") or 0) >= window_cutoff]
+            if not convs:
+                return
+            cids = [str(c.get("conversation_id") or "") for c in convs if c.get("conversation_id")]
+            last_dirs = self._store.last_message_dirs(cids)
+
+            bus = get_event_bus()
+            alerted_count = 0
+
+            for c in convs:
+                cid = str(c.get("conversation_id") or "")
+                if not cid:
+                    continue
+
+                # 只有末条为入站（客户消息未被坐席回复）才计入等待
+                info = last_dirs.get(cid, {})
+                if not info or info.get("direction") != "in":
+                    continue
+
+                wait_sec = max(0, int(now - (info.get("ts") or now)))
+                if wait_sec < self._sla_warn_sec:
+                    continue  # 未到警告阈值
+
+                # 防重：该会话最近是否已告警
+                last_alerted = self._sla_agent_alerted.get(cid, 0.0)
+                if now - last_alerted < self._sla_renotify_sec:
+                    continue
+
+                # 获取会话基础信息
+                display_name = str(c.get("display_name") or c.get("chat_key") or "未知客户")
+                platform = str(c.get("platform") or "")
+                claimed_by = str(c.get("claimed_by") or "").strip()
+
+                # 获取 claimed_by — 优先从 conv_meta 读（持久化）
+                try:
+                    meta = self._store.get_conv_meta(cid) or {}
+                    claimed_by = str(meta.get("claimed_by") or claimed_by).strip()
+                except Exception:
+                    pass
+
+                sla_level = "crit" if wait_sec >= self._sla_crit_sec else "warn"
+                wait_min = round(wait_sec / 60, 1)
+
+                event_data = {
+                    "conversation_id": cid,
+                    "display_name": display_name,
+                    "platform": platform,
+                    "wait_sec": wait_sec,
+                    "wait_min": wait_min,
+                    "sla_level": sla_level,
+                    "to_agent_id": claimed_by or None,  # None = 广播给所有在线坐席
+                    "ts": now,
+                }
+
+                bus.publish("queue_alert", event_data)
+
+                self._sla_agent_alerted[cid] = now
+                alerted_count += 1
+                logger.info(
+                    "P32 SLA 坐席告警: %s 等待 %.1f分钟 [%s] → %s",
+                    display_name, wait_min, sla_level, claimed_by or "全体"
+                )
+
+            if alerted_count > 0:
+                self.total_alerts += alerted_count
+
+        except Exception:
+            logger.debug("P32 SLA 坐席告警检查失败（已忽略）", exc_info=True)
+
+    # ── P36：自动归档 + QA 质检评分（每小时运行）────────────────────────
+
+    async def _run_auto_archive_and_qa(self) -> None:
+        """P36：自动归档长时间无活动会话，同时计算 QA 评分并持久化。
+
+        处理流程：
+          1. 从 InboxStore 拉取满足条件的候选（idle >= idle_hours + 未归档 + 未 auto_archived）
+          2. 对每条会话：计算 QA 评分 → 生成规则摘要 → 标记归档 → 发布 conv_archived 事件
+          3. 上限 50 条/次，避免批量阻塞
+        """
+        if self._store is None:
+            return
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            candidates = self._store._auto_archive_candidates(self._auto_archive_idle_hours)
+            if not candidates:
+                return
+
+            bus = get_event_bus()
+            archived_count = 0
+            now = time.time()
+
+            for c in candidates[:50]:
+                cid = str(c.get("conversation_id") or "")
+                if not cid:
+                    continue
+                try:
+                    # 步骤 1：计算 QA 评分（写入 conversation_meta.qa_score）
+                    qa = self._store.compute_and_store_qa_score(cid)
+
+                    # 步骤 2：生成规则摘要（从最后 N 条消息构造）
+                    summary = self._build_auto_summary(cid, qa)
+
+                    # 步骤 3：归档 + 更新 auto_archived_at + 写入摘要
+                    self._store.update_conv_meta(cid, {
+                        "archived": 1,
+                        "auto_archived_at": now,
+                        "summary": summary,
+                    })
+
+                    # 步骤 4：发布归档事件（Webhook / SSE 透传）
+                    bus.publish("conv_archived", {
+                        "conversation_id": cid,
+                        "display_name": c.get("display_name", ""),
+                        "platform": c.get("platform", ""),
+                        "reason": "auto_idle",
+                        "idle_hours": self._auto_archive_idle_hours,
+                        "qa_score": qa.get("score"),
+                        "summary": summary[:200] if summary else "",
+                        "ts": now,
+                    })
+                    archived_count += 1
+                    logger.info(
+                        "P36 自动归档: %s [QA=%s] 已归档（idle≥%dh）",
+                        c.get("display_name", cid), qa.get("score", "?"), self._auto_archive_idle_hours
+                    )
+                except Exception:
+                    logger.debug("P36 自动归档单条失败（已跳过）", exc_info=True)
+
+            if archived_count:
+                self.total_sent += archived_count
+                logger.info("P36 本轮自动归档 %d 条会话", archived_count)
+
+        except Exception:
+            logger.debug("P36 自动归档任务失败（已忽略）", exc_info=True)
+
+    def _build_auto_summary(self, conversation_id: str, qa: Dict[str, Any]) -> str:
+        """P36：基于消息记录生成规则摘要（LLM 不可用时的可靠兜底）。"""
+        try:
+            with self._store._lock:
+                rows = self._store._conn.execute(
+                    """SELECT direction, text, ts FROM messages
+                       WHERE conversation_id = ?
+                       ORDER BY ts ASC LIMIT 30""",
+                    (conversation_id,),
+                ).fetchall()
+            if not rows:
+                return ""
+            msgs = [dict(r) for r in rows]
+            total = len(msgs)
+            in_msgs = [m for m in msgs if m["direction"] in ("in", "inbound")]
+            out_msgs = [m for m in msgs if m["direction"] in ("out", "outbound")]
+            last_in = next((m["text"] for m in reversed(msgs)
+                           if m["direction"] in ("in", "inbound") and m["text"]), "")
+            score = qa.get("score", -1)
+            grade = qa.get("grade", "N/A")
+            duration_h = round((time.time() - float(rows[0]["ts"] or 0)) / 3600, 1)
+            parts = [
+                f"会话共 {total} 条消息（客户 {len(in_msgs)} 条，坐席 {out_msgs.__len__()} 条）",
+                f"持续约 {duration_h} 小时",
+            ]
+            if last_in:
+                parts.append(f"客户最后表达：「{last_in[:50]}{'…' if len(last_in)>50 else ''}」")
+            if score >= 0:
+                parts.append(f"质检评分 {score}/100（{grade} 级）")
+            return "；".join(parts) + "。"
+        except Exception:
+            return ""
+
+    # ── P44：工作链自动执行 ───────────────────────────────────────────────
+
+    async def _run_workflow_chains(self) -> None:
+        """P44：处理到期工作链步骤 + 按条件自动启动新链。"""
+        if self._store is None:
+            return
+        try:
+            from src.inbox.workflow_runner import WorkflowRunner
+            contacts = None
+            if self._app_state is not None:
+                cs = getattr(getattr(self._app_state, "contacts", None), "store", None)
+                contacts = cs
+            runner = WorkflowRunner(self._store, contacts_store=contacts)
+            n = runner.process_due_executions()
+            # 自动启动：每 60 tick（约 1h）扫描一次，避免每 tick 全表扫
+            if not hasattr(self, "_wf_auto_tick"):
+                self._wf_auto_tick = 0
+            self._wf_auto_tick += 1
+            if self._wf_auto_tick >= 60:
+                self._wf_auto_tick = 0
+                started = runner.auto_start_chains()
+                if started:
+                    logger.info("P44 WorkflowRunner 自动启动 %d 条工作链", started)
+            if n:
+                logger.info("P44 WorkflowRunner 执行 %d 条到期步骤", n)
+        except Exception:
+            logger.debug("P44 工作链执行失败（已忽略）", exc_info=True)
 
     # ── 手动触发（用于测试 / API 按钮） ─────────────────────────────────
 

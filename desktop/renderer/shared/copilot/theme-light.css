@@ -1,0 +1,17 @@
+/* 亮色语义色(网页端)。宿主在 <html data-cp-theme="light">。 */
+:root[data-cp-theme="light"],
+.cp-theme-light {
+  --cp-bg: #f8fafc;
+  --cp-surface: #ffffff;
+  --cp-surface-2: #f1f5f9;
+  --cp-border: #e2e8f0;
+  --cp-text: #1e293b;
+  --cp-text-dim: #64748b;
+  --cp-text-tiny: #94a3b8;
+  --cp-accent: #4f46e5;
+  --cp-accent-weak: rgba(79, 70, 229, .1);
+  --cp-ok: #0f9d75;
+  --cp-warn: #d97706;
+  --cp-danger: #dc2626;
+  --cp-track: #e2e8f0;
+}

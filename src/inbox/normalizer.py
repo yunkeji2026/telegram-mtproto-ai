@@ -65,6 +65,52 @@ def extract_platform_msg_id(source: Optional[Dict[str, Any]], platform: str = ""
     return ""
 
 
+# 媒体字段抽取（P61）：跨平台 source 字段名各异，统一映射到 media_type/media_ref。
+_MEDIA_IMAGE_KEYS = ("image_path", "image_url", "image", "photo", "photo_path")
+_MEDIA_AUDIO_KEYS = ("voice_path", "voice", "audio_path", "audio", "voice_url", "audio_url")
+_MEDIA_REF_KEYS = (
+    "media_ref", "media_path", "local_path", "file_path", "media_url", "url",
+)
+
+
+def extract_media(source: Optional[Dict[str, Any]]) -> tuple[str, str]:
+    """从平台原始 source 提取 (media_type, media_ref)。
+
+    media_type：优先 source['media_type']；否则按是否含图片/语音类字段推断
+                （image / voice）；都没有 → ''。
+    media_ref ：优先显式 media_ref/media_path/local_path/file_path/media_url/url，
+                否则取推断类别对应字段的第一个非空值。
+    纯文本消息 → ('', '')。best-effort、平台无关、不抛异常。
+    """
+    if not isinstance(source, dict):
+        return "", ""
+    mt = str(source.get("media_type") or "").strip().lower()
+    has_image = any(str(source.get(k) or "").strip() for k in _MEDIA_IMAGE_KEYS)
+    has_audio = any(str(source.get(k) or "").strip() for k in _MEDIA_AUDIO_KEYS)
+    if not mt:
+        if has_image:
+            mt = "image"
+        elif has_audio:
+            mt = "voice"
+    # ref：先显式通用键
+    ref = ""
+    for k in _MEDIA_REF_KEYS:
+        v = str(source.get(k) or "").strip()
+        if v:
+            ref = v
+            break
+    if not ref:
+        kind_keys = _MEDIA_IMAGE_KEYS if mt == "image" else _MEDIA_AUDIO_KEYS if mt in ("voice", "audio") else ()
+        for k in kind_keys:
+            v = str(source.get(k) or "").strip()
+            if v:
+                ref = v
+                break
+    if ref and not mt:
+        mt = "file"
+    return mt, ref
+
+
 def message_obj(
     *,
     text: str,
@@ -72,10 +118,18 @@ def message_obj(
     direction: str = "in",
     message_id: str = "",
     source: Optional[Dict[str, Any]] = None,
+    media_type: str = "",
+    media_ref: str = "",
 ) -> Dict[str, Any]:
-    """把一条原始消息归一为统一 message dict（含语言检测与占位翻译态）。"""
+    """把一条原始消息归一为统一 message dict（含语言检测与占位翻译态）。
+
+    P61：额外携带 media_type/media_ref（显式参数优先，否则从 source 抽取）。
+    纯加法字段——文本消息显示与既有行为完全不变。
+    """
     raw = str(text or "")
     lang = detect_language(raw)
+    if not media_type and not media_ref:
+        media_type, media_ref = extract_media(source)
     return {
         "message_id": str(message_id or ""),
         "direction": direction if direction in {"in", "out"} else "in",
@@ -91,6 +145,8 @@ def message_obj(
             "error": "" if lang in {"zh", "unknown"} else "not_requested",
         },
         "ts": ts or 0,
+        "media_type": str(media_type or ""),
+        "media_ref": str(media_ref or ""),
         "source": source or {},
     }
 

@@ -198,40 +198,41 @@ def test_unified_inbox_send_supports_four_platforms():
 
 
 def test_unified_inbox_template_contains_translation_controls():
+    """重构后三栏布局：翻译控件、AI草稿、会话列表等核心功能校验。"""
     path = Path(__file__).resolve().parent.parent / "src" / "web" / "templates" / "unified_inbox.html"
     html = path.read_text(encoding="utf-8")
-    assert "翻译为中文" in html
-    assert "翻译预览" in html
-    assert "翻译成" in html  # Phase 4：翻译后发送控件
-    assert "/api/unified-inbox/translate" in html
-    assert "/api/unified-inbox/analyze" in html
-    assert "/api/unified-inbox/profile" in html
-    assert "/api/voice/tts-test" in html
-    assert "/api/unified-inbox/automation" in html
-    assert "多答案建议" in html
-    assert "客户档案" in html
-    # Phase 4：账号分栏 + AI 接管开关 + 翻译后发送
-    assert "renderPlatformBar" in html
-    assert "data-filter" in html
-    assert "ai-takeover-btn" in html
-    assert "toggleAiTakeover" in html
-    assert "xlate-on" in html
-    assert "生成语音预览" in html
-    assert "AI 助手" in html
+    # 翻译控件（P55：双向翻译条 xlate-in/out + xlateMsg）
+    assert "xlate-in" in html
+    assert "xlate-out" in html
+    assert "xlateMsg" in html
+    assert "翻译" in html
+    # 平台导航（三栏布局核心）
+    assert "nav-rail" in html
+    assert "conv-items" in html
+    assert "chat-panel" in html
+    # AI 草稿
+    assert "toggleAiDraft" in html
+    assert "draft-panel" in html
+    # 回复功能
+    assert "reply-textarea" in html
+    assert "sendMsg" in html
+    # 账号管理抽屉
+    assert "account-drawer" in html
+    assert "openDrawer" in html
 
 
 def test_unified_inbox_template_contains_drafts_panel():
-    """P0-a：统一收件箱接入 /api/drafts 待审草稿队列（Phase B 可视化）。"""
+    """三栏重构：草稿面板使用内嵌 draft-panel 设计，包含审批 API 调用。"""
     path = Path(__file__).resolve().parent.parent / "src" / "web" / "templates" / "unified_inbox.html"
     html = path.read_text(encoding="utf-8")
+    # 核心：草稿面板存在
     assert "待审草稿" in html
-    assert "/api/drafts?status=pending" in html
-    assert "/api/drafts/stats" in html
-    assert "/resolve" in html
-    assert "UI.showDrafts" in html
-    assert "UI.resolveDraft" in html
-    assert "risk-badge" in html  # 风险徽章
-    # P0-b：订单/物流事实卡片（事实校验可视化）
-    assert "renderOrderLookup" in html
-    assert "ai-order" in html
-    assert "事实校验" in html
+    assert "draft-panel" in html
+    # 草稿 API 调用
+    assert "approveDraft" in html
+    assert "rejectDraft" in html
+    assert "/api/drafts/" in html and "/resolve" in html  # 草稿处置端点
+    assert "risk-badge" in html or "risk-" in html  # 风险徽章（样式类）
+    # 内嵌面板校验
+    assert "loadDrafts" in html
+    assert "draft-card-mini" in html or "draft-panel-items" in html

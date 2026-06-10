@@ -1,38 +1,43 @@
-"""WebhookNotifier — L2 企业 IM Webhook 通知（钉钉/飞书/企微/通用 JSON）。
+"""WebhookNotifier — L2 Webhook 通知（面向海外：Telegram / WhatsApp / Messenger）。
 
 架构思路（优于"在 SLAWatcher 内直接 HTTP"方案）：
   - 订阅全局 EventBus，与 SLAWatcher / DraftService 完全解耦
   - 任何发布到 EventBus 的事件都可被拦截，无需改动上游代码
-  - asyncio 原生 HTTP（httpx 或 aiohttp），不阻塞事件循环
+  - asyncio 原生 HTTP（在 executor 中），不阻塞事件循环
   - 内置速率限制：同一 (event_type, key) 每小时最多通知一次
+  - 运行时可 reload()，配合 config/notify_webhooks.json 覆盖层免重启增删
 
-支持事件：
-  draft_created    — 新草稿（autopilot_level 过滤）
-  draft_sla_breach — K1 SLA 超时预警
-  draft_reassigned — K2 自动再分配
-  escalation       — 升级告警（已有）
+支持事件：见 ``_EVENT_ALIASES``（含 autoreply_alert 自动回复熔断/配额告警）
 
-支持格式：
+支持格式（推荐海外渠道在前）：
+  telegram  — Telegram Bot sendMessage（token + chat_id，海外首选，免企业认证）
+  whatsapp  — WhatsApp Cloud API（Graph messages 端点 + Bearer token + 收件号）
+  messenger — Messenger Send API（Graph me/messages + page access_token + PSID）
   json      — 原始 JSON body（万能：Zapier / n8n / 自建服务）
-  dingtalk  — 钉钉机器人 Markdown 消息
-  feishu    — 飞书机器人 Text 消息（简洁，卡片格式太重）
-  wecom     — 企业微信机器人 Markdown 消息
+  dingtalk / feishu / wecom — 国内企业 IM（保留兼容，海外部署不用）
 
-配置（config.yaml::notify.webhooks）：
+配置（config.yaml::notify.webhooks，或后台「告警渠道」面板 → notify_webhooks.json）：
   webhooks:
-    - name: "dingtalk-ops"
-      url: "https://oapi.dingtalk.com/robot/send?access_token=TOKEN"
-      format: "dingtalk"
-      events: ["L4_created", "sla_breach"]   # 事件别名列表（见 _EVENT_ALIASES）
-      secret: ""          # 钉钉签名 secret（可选，填则自动签名）
-    - name: "feishu-crm"
-      url: "https://open.feishu.cn/open-apis/bot/v2/hook/TOKEN"
-      format: "feishu"
-      events: ["L3_created", "L4_created", "sla_breach", "reassigned"]
+    - name: "tg-ops"
+      format: "telegram"
+      token: "123456:ABC..."        # Bot token（或直接给完整 url）
+      target: "-1001234567890"       # chat_id（群/频道/个人）
+      events: ["autoreply_alert", "sla_breach"]
+    - name: "wa-ops"
+      format: "whatsapp"
+      url: "https://graph.facebook.com/v19.0/<PHONE_ID>/messages"
+      token: "EAAB..."               # 永久/临时 access token（Bearer）
+      target: "8613800000000"        # 收件人号码（含国家码，无 +）
+      events: ["autoreply_alert"]
+    - name: "msgr-ops"
+      format: "messenger"
+      token: "<PAGE_ACCESS_TOKEN>"   # 主页 access token（或完整 url）
+      target: "<PSID>"               # 收件人 page-scoped id
+      events: ["autoreply_alert"]
     - name: "my-server"
       url: "https://myserver.com/hook"
       format: "json"
-      events: ["all"]     # "all" 匹配所有事件
+      events: ["all"]                # "all" 匹配所有事件
 """
 
 from __future__ import annotations
@@ -43,11 +48,12 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +71,15 @@ _EVENT_ALIASES: Dict[str, Dict[str, Any]] = {
     "reply_risk": {"types": {"human_reply_risk"}, "levels": None},  # M3
     "report": {"types": {"report"}, "levels": None},                # M2 简报推送
     "csat_alert": {"types": {"csat_alert"}, "levels": None},        # O2 智能预警
-    "crm_sync":     {"types": {"draft_resolved"}, "levels": None},   # P1 外部 CRM 同步
-    "anomaly":      {"types": {"anomaly_alert"}, "levels": None},    # S2 统计异常预警
+    "crm_sync":      {"types": {"draft_resolved"}, "levels": None},   # P1 外部 CRM 同步
+    "anomaly":       {"types": {"anomaly_alert"}, "levels": None},   # S2 统计异常预警
+    # P28：会话生命周期事件
+    "new_message":   {"types": {"inbox_message"}, "levels": None},   # 新入站消息
+    "conv_archived": {"types": {"conv_archived"}, "levels": None},   # 会话归档
+    "conv_tagged":   {"types": {"conv_tagged"}, "levels": None},     # 标签变更
+    "conv_note":     {"types": {"conv_note"}, "levels": None},       # 坐席注解（@提及）
+    "queue_alert":   {"types": {"queue_alert"}, "levels": None},     # P29 队列告警
+    "autoreply_alert": {"types": {"autoreply_alert"}, "levels": None},  # 协议自动回复熔断/配额
 }
 
 # ─── 速率限制 ────────────────────────────────────────────────────────────────
@@ -131,6 +144,72 @@ _FORMATTERS = {
     "feishu": _fmt_feishu,
     "wecom": _fmt_wecom,
 }
+
+# ─── 海外即时通讯渠道（Telegram / WhatsApp / Messenger）────────────────────────
+
+CHAT_FORMATS = {"telegram", "whatsapp", "messenger"}
+
+_MD_LINK = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+_MD_BOLD = re.compile(r"\*\*([^*]+)\*\*")
+
+
+def _plainify(text: str, base_url: str = "") -> str:
+    """把内部 Markdown（**粗体** / [文字](链接) / ### 标题）转成 IM 纯文本。
+    相对链接（/workspace/...）默认只保留文字；给了 base_url 则拼成绝对地址。"""
+    def _link(m: "re.Match") -> str:
+        label, href = m.group(1), m.group(2)
+        if href.startswith("http"):
+            return f"{label}: {href}"
+        if base_url and href.startswith("/"):
+            return f"{label}: {base_url.rstrip('/')}{href}"
+        return label
+    s = _MD_LINK.sub(_link, text or "")
+    s = _MD_BOLD.sub(r"\1", s)
+    s = s.replace("### ", "")
+    return s.strip()
+
+
+def _resolve_chat_endpoint(fmt: str, url: str, token: str) -> str:
+    """渠道端点解析：给了完整 url 直接用；否则按 token 推断标准端点。
+    whatsapp 需要 phone-id，无法仅凭 token 推断，必须显式给 url。"""
+    url = (url or "").strip()
+    if url:
+        return url
+    token = (token or "").strip()
+    if fmt == "telegram" and token:
+        return f"https://api.telegram.org/bot{token}/sendMessage"
+    if fmt == "messenger" and token:
+        return ("https://graph.facebook.com/v19.0/me/messages"
+                f"?access_token={urllib.parse.quote(token)}")
+    return ""
+
+
+def _build_chat_body(
+    fmt: str, msg: str, target: str, token: str,
+) -> Tuple[bytes, Dict[str, str]]:
+    """构造海外 IM 渠道的请求体与请求头（whatsapp 走 Bearer 鉴权）。"""
+    headers = {"Content-Type": "application/json; charset=utf-8"}
+    if fmt == "telegram":
+        payload: Dict[str, Any] = {
+            "chat_id": target, "text": msg,
+            "disable_web_page_preview": True,
+        }
+    elif fmt == "whatsapp":
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        payload = {
+            "messaging_product": "whatsapp", "to": target,
+            "type": "text", "text": {"body": msg, "preview_url": False},
+        }
+    elif fmt == "messenger":
+        payload = {
+            "recipient": {"id": target},
+            "messaging_type": "UPDATE",
+            "message": {"text": msg},
+        }
+    else:
+        payload = {"text": msg}
+    return json.dumps(payload, ensure_ascii=False).encode(), headers
 
 
 # ─── 钉钉签名 ────────────────────────────────────────────────────────────────
@@ -236,6 +315,21 @@ def _build_message(event_type: str, data: Dict[str, Any]) -> tuple[str, str]:
             "[📊 查看简报](/workspace/dashboard)"
         )
 
+    elif event_type == "autoreply_alert":
+        kind = str(data.get("kind") or "")
+        kind_label = {
+            "circuit_open": "熔断（连续失败）",
+            "quota_hour": "小时配额耗尽",
+            "quota_day": "每日配额耗尽",
+        }.get(kind, kind)
+        title = f"🚨 自动回复告警：{kind_label}"
+        text = (
+            f"**平台**: {data.get('platform', '?')}\n"
+            f"**账号**: {data.get('account_id', '?')}\n"
+            f"**详情**: {data.get('detail', '')}\n"
+            "[👥 前往账号管理](/workspace/unified-inbox)"
+        )
+
     elif event_type == "escalation":
         title = "🔔 升级告警"
         text = (
@@ -273,21 +367,38 @@ class WebhookNotifier:
 
         # 预处理：每条 webhook 配置展开事件匹配规则
         self._matchers: List[Dict[str, Any]] = []
+        self._build_matchers()
+
+    def _build_matchers(self) -> None:
+        """（重）构建事件匹配规则；供 __init__ 与 reload() 复用。"""
+        matchers: List[Dict[str, Any]] = []
         for wh in self._webhooks:
+            if wh.get("enabled") is False:
+                continue
             events = list(wh.get("events") or ["all"])
             for alias in events:
                 rule = _EVENT_ALIASES.get(alias)
                 if rule is None:
                     logger.warning("未知 webhook 事件别名: %s", alias)
                     continue
-                self._matchers.append({
+                matchers.append({
                     "url": str(wh.get("url") or ""),
                     "fmt": str(wh.get("format") or "json").lower(),
                     "secret": str(wh.get("secret") or ""),
+                    "token": str(wh.get("token") or ""),
+                    "target": str(wh.get("target") or wh.get("chat_id") or ""),
                     "name": str(wh.get("name") or "webhook"),
                     "types": rule["types"],          # None → 全部
                     "levels": rule.get("levels"),    # None → 全部
                 })
+        self._matchers = matchers
+
+    def reload(self, config: Optional[List[Dict[str, Any]]] = None) -> None:
+        """运行时热更 webhook 列表（配合后台「告警渠道」面板免重启增删）。"""
+        self._webhooks = list(config or [])
+        self._build_matchers()
+        logger.info("WebhookNotifier 已热更（%d 个 webhook / %d 匹配规则）",
+                    len(self._webhooks), len(self._matchers))
 
     # ── 生命周期 ──────────────────────────────────────────────────────────
 
@@ -341,25 +452,42 @@ class WebhookNotifier:
         self._rate_limiter.cleanup()
 
     async def _send(self, matcher: Dict[str, Any], etype: str, data: Dict[str, Any]) -> None:
-        url = matcher["url"]
-        if not url:
-            return
         fmt = matcher["fmt"]
         secret = matcher["secret"]
-
+        token = matcher.get("token") or ""
+        target = matcher.get("target") or ""
         title, text = _build_message(etype, data)
-        formatter = _FORMATTERS.get(fmt, _fmt_json)
-        body = formatter(title, text, data)
 
-        # 钉钉签名（可选）
-        if fmt == "dingtalk" and secret:
-            ts, sign = _dingtalk_sign(secret)
-            sep = "&" if "?" in url else "?"
-            url = f"{url}{sep}timestamp={ts}&sign={sign}"
+        if fmt in CHAT_FORMATS:
+            url = _resolve_chat_endpoint(fmt, matcher["url"], token)
+            if not url:
+                self.total_errors += 1
+                logger.warning("Webhook 跳过 [%s]：%s 渠道缺少 url/token",
+                               matcher["name"], fmt)
+                return
+            if not target:
+                self.total_errors += 1
+                logger.warning("Webhook 跳过 [%s]：%s 渠道缺少 target",
+                               matcher["name"], fmt)
+                return
+            msg = f"{title}\n{_plainify(text)}".strip()
+            body, headers = _build_chat_body(fmt, msg, target, token)
+        else:
+            url = matcher["url"]
+            if not url:
+                return
+            formatter = _FORMATTERS.get(fmt, _fmt_json)
+            body = formatter(title, text, data)
+            headers = {"Content-Type": "application/json; charset=utf-8"}
+            # 钉钉签名（可选，保留兼容）
+            if fmt == "dingtalk" and secret:
+                ts, sign = _dingtalk_sign(secret)
+                sep = "&" if "?" in url else "?"
+                url = f"{url}{sep}timestamp={ts}&sign={sign}"
 
         try:
             await asyncio.get_event_loop().run_in_executor(
-                None, self._http_post, url, body, fmt
+                None, self._http_post, url, body, headers
             )
             self.total_sent += 1
             logger.info("Webhook 发送成功 [%s] %s", matcher["name"], etype)
@@ -368,16 +496,39 @@ class WebhookNotifier:
             logger.warning("Webhook 发送失败 [%s]: %s", matcher["name"], exc)
 
     @staticmethod
-    def _http_post(url: str, body: bytes, fmt: str) -> None:
+    def _http_post(url: str, body: bytes, headers: Optional[Dict[str, str]] = None) -> None:
         """同步 HTTP POST（在 executor 中运行，不阻塞事件循环）。"""
         req = urllib.request.Request(
             url,
             data=body,
-            headers={"Content-Type": "application/json; charset=utf-8"},
+            headers=headers or {"Content-Type": "application/json; charset=utf-8"},
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
             resp.read()
+
+    async def send_test(self, webhook: Dict[str, Any], etype: str = "autoreply_alert",
+                        data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """对单条 webhook 配置即时发一条测试消息（不经速率限制），返回结果。"""
+        rule = _EVENT_ALIASES.get((webhook.get("events") or ["all"])[0]) \
+            or _EVENT_ALIASES["all"]
+        m = {
+            "url": str(webhook.get("url") or ""),
+            "fmt": str(webhook.get("format") or "json").lower(),
+            "secret": str(webhook.get("secret") or ""),
+            "token": str(webhook.get("token") or ""),
+            "target": str(webhook.get("target") or webhook.get("chat_id") or ""),
+            "name": str(webhook.get("name") or "test"),
+            "types": rule["types"], "levels": rule.get("levels"),
+        }
+        payload = data or {
+            "kind": "circuit_open", "platform": "telegram",
+            "account_id": "test-account", "detail": "这是一条测试告警（连通性检查）",
+        }
+        before_err = self.total_errors
+        await self._send(m, etype, payload)
+        ok = self.total_errors == before_err
+        return {"ok": ok, "name": m["name"], "format": m["fmt"]}
 
     # ── 状态快照 ──────────────────────────────────────────────────────────
 

@@ -240,6 +240,9 @@ def web_funnel_snapshot(request, config_manager=None) -> Dict[str, Any]:
         "handoff_sent": 0,
         "line_converted": 0,
         "by_stage": {},
+        # 子系统是否启用——让前端区分"未启用"与"启用但今日无数据"，避免误读空心 0。
+        "contacts_enabled": False,
+        "stage_source": "unavailable",
     }
     store = getattr(request.app.state, "inbox_store", None)
     if store is not None:
@@ -266,6 +269,8 @@ def web_funnel_snapshot(request, config_manager=None) -> Dict[str, Any]:
     contacts = getattr(request.app.state, "contacts", None)
     cstore = getattr(contacts, "store", None) if contacts else None
     if cstore is not None:
+        out["contacts_enabled"] = True
+        out["stage_source"] = "contacts"
         try:
             with cstore._lock:  # noqa: SLF001
                 rows = cstore._conn.execute(  # noqa: SLF001

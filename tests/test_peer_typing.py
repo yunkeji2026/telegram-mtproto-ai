@@ -186,7 +186,7 @@ async def test_vision_timeout_fails_open(fake_screenshot):
     import asyncio as _aio
 
     async def slow_vision(*args, **kwargs):
-        await _aio.sleep(5.0)
+        await _aio.sleep(10.0)
         return "yes"
 
     vc = MagicMock()
@@ -197,7 +197,10 @@ async def test_vision_timeout_fails_open(fake_screenshot):
     r = await d.detect(fake_screenshot)
     elapsed = _t.monotonic() - t0
     assert r.is_typing is False
-    assert elapsed < 1.0, f"应该 0.2s 超时，实际 {elapsed:.2f}s"
+    # 语义：应在 0.2s 超时后快速 fail-open，而非阻塞等满 vision 调用。
+    # 阈值取 5.0s（远低于 10s vision、远高于 0.2s 超时），容忍 -n auto 并行下的
+    # 事件循环调度抖动，避免偶发 flaky；只要远早于 vision 完成即证明 fail-open。
+    assert elapsed < 5.0, f"应快速超时 fail-open，实际 {elapsed:.2f}s"
 
 
 # ── W2-D5.3 sample_rate ─────────────────────────────

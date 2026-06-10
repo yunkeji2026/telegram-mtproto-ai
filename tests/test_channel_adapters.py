@@ -60,7 +60,7 @@ def _req(**state):
 def test_default_registry_has_all_platforms():
     adapters = default_inbox_adapters()
     assert [a.platform for a in adapters] == [
-        "line", "whatsapp", "messenger", "telegram", "web",
+        "line", "whatsapp", "messenger", "telegram", "web", "protocol",
     ]
     for a in adapters:
         assert isinstance(a, ChannelAdapter)  # runtime_checkable Protocol

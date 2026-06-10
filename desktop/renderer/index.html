@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh" data-cp-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-src 'self' http://127.0.0.1:* http://localhost:*;" />
+  <title>AI 客服桌面客户端（多平台）</title>
+  <link rel="stylesheet" href="shared/copilot/tokens.css" />
+  <link rel="stylesheet" href="shared/copilot/theme-light.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <nav id="rail"></nav>
+    <main id="stage">
+      <div id="webviews"></div>
+    </main>
+    <aside id="copilot">
+      <div class="cp-head">
+        <span id="cp-title">业务助手</span>
+        <span id="cp-open-inbox" title="在统一收件箱打开该会话" hidden>📥</span>
+        <span id="cp-accounts-toggle" title="账号管理（多账号扫码登录）">👥</span>
+        <span id="cp-mode-toggle" title="切换统一 App（实验，与网页同源同款）">🧪</span>
+        <span id="cp-toggle" title="折叠/展开">⟩</span>
+      </div>
+      <div id="cp-accounts-panel" hidden>
+        <cp-accounts id="cp-accounts"></cp-accounts>
+      </div>
+      <div class="cp-tabs" id="cp-tabs" hidden>
+        <button class="cp-tab active" data-tab="reply">💬 回复</button>
+        <button class="cp-tab" data-tab="insight">🧠 洞察</button>
+        <button class="cp-tab" data-tab="customer">👤 客户</button>
+      </div>
+      <div class="cp-body">
+        <div class="cp-empty" id="cp-empty">打开一个会话即可显示智能草拟、AI 分析、知识库与客户档案</div>
+
+        <section class="cp-sec" id="cp-draft-sec" data-tab="reply" hidden>
+          <h4>✨ AI 回复</h4>
+          <div id="cp-auto-bar">
+            <label id="cp-auto-switch" title="开启后：当前会话收到客户消息会自动生成并发送回复（低风险才自动发，命中风控转人工）">
+              <input type="checkbox" id="cp-auto-toggle" />
+              <span class="cp-auto-label">全自动托管</span>
+            </label>
+            <span id="cp-auto-status" class="cp-auto-status">已关闭</span>
+          </div>
+          <div class="cp-persona-row">
+            <label for="cp-persona">人设</label>
+            <select id="cp-persona" title="选择回复使用的人设；按会话记忆">
+              <option value="">默认（domain 人设）</option>
+            </select>
+            <button id="cp-persona-pin" class="cp-pin" title="把当前人设钉到后台，对该会话全端生效（含 RPA 自动回复）">📌</button>
+          </div>
+          <div class="cp-persona-src" id="cp-persona-src"></div>
+          <div class="cp-persona-row">
+            <label for="cp-reply-lang">回复语言</label>
+            <select id="cp-reply-lang" title="把 AI 草稿翻译成客户语言；按会话记忆">
+              <option value="">跟随人设/客户</option>
+              <option value="zh">中文</option>
+              <option value="en">English</option>
+              <option value="ja">日本語</option>
+              <option value="ko">한국어</option>
+              <option value="es">Español</option>
+              <option value="pt">Português</option>
+              <option value="ru">Русский</option>
+              <option value="ar">العربية</option>
+              <option value="th">ไทย</option>
+              <option value="vi">Tiếng Việt</option>
+              <option value="id">Bahasa Indonesia</option>
+            </select>
+          </div>
+          <div class="cp-persona-row">
+            <label for="cp-contrast-lang">对比语言</label>
+            <select id="cp-contrast-lang" title="在草稿下方附一条对比翻译，方便核对；按会话记忆">
+              <option value="">不对比</option>
+              <option value="zh">中文</option>
+              <option value="en">English</option>
+              <option value="ja">日本語</option>
+              <option value="ko">한국어</option>
+              <option value="es">Español</option>
+              <option value="pt">Português</option>
+              <option value="ru">Русский</option>
+              <option value="ar">العربية</option>
+              <option value="th">ไทย</option>
+              <option value="vi">Tiếng Việt</option>
+              <option value="id">Bahasa Indonesia</option>
+            </select>
+          </div>
+          <button id="cp-draft-btn" class="cp-btn-primary">生成回复草稿</button>
+          <div id="cp-draft" class="cp-card" hidden></div>
+        </section>
+
+        <section class="cp-sec" id="cp-voice-sec" data-tab="reply" hidden>
+          <h4>🎙️ 语音克隆 / 发送</h4>
+          <cp-voice id="cp-voice"></cp-voice>
+          <p class="cp-voice-note">与 📥 统一收件箱同源 API；完整横向工具栏请用统一收件箱标签。</p>
+        </section>
+
+        <section class="cp-sec" id="cp-relstage-sec" data-tab="insight" hidden>
+          <h4>💞 关系阶段</h4>
+          <cp-rel-stage id="cp-relstage"></cp-rel-stage>
+        </section>
+
+        <section class="cp-sec" id="cp-collab-sec" data-tab="insight" hidden>
+          <h4>🤝 协作上下文</h4>
+          <cp-collab id="cp-collab"></cp-collab>
+        </section>
+
+        <section class="cp-sec" id="cp-nba-sec" data-tab="insight" hidden>
+          <h4>⚡ 下一步建议</h4>
+          <cp-next-actions id="cp-nba"></cp-next-actions>
+        </section>
+
+        <section class="cp-sec" id="cp-chain-sec" data-tab="insight" hidden>
+          <h4>🔗 工作链执行</h4>
+          <cp-chain-exec id="cp-chain"></cp-chain-exec>
+        </section>
+
+        <section class="cp-sec" id="cp-script-sec" data-tab="reply" hidden>
+          <h4>🎬 剧本话题</h4>
+          <cp-script id="cp-script"></cp-script>
+        </section>
+
+        <section class="cp-sec" id="cp-analyze-sec" data-tab="insight" hidden>
+          <h4>🧠 AI 对话分析</h4>
+          <button id="cp-analyze-btn" class="cp-btn-primary">分析当前对话</button>
+          <div id="cp-analyze" class="cp-card" hidden></div>
+          <div id="cp-analyze-replies" class="cp-list"></div>
+        </section>
+
+        <section class="cp-sec" id="cp-kb-sec" data-tab="reply" hidden>
+          <h4>📚 知识库</h4>
+          <div class="cp-search">
+            <input id="cp-kb-input" type="text" placeholder="搜索话术/知识条目…" />
+            <button id="cp-kb-btn">搜</button>
+          </div>
+          <div id="cp-kb" class="cp-list"></div>
+        </section>
+
+        <section class="cp-sec" id="cp-tpl-sec" data-tab="reply" hidden>
+          <h4>⚡ 快捷回复</h4>
+          <div id="cp-tpl" class="cp-list"></div>
+        </section>
+
+        <section class="cp-sec" id="cp-profile-sec" data-tab="customer" hidden>
+          <h4>👤 客户档案</h4>
+          <div id="cp-profile" class="cp-card"></div>
+        </section>
+      </div>
+      <!-- 灰度:统一前端 App(与网页同源同款,iframe 加载 /copilot/app.html)。默认隐藏。 -->
+      <div id="cp-appframe-wrap" hidden>
+        <iframe id="cp-appframe" title="统一业务面板" referrerpolicy="no-referrer"></iframe>
+      </div>
+    </aside>
+  </div>
+  <script src="shared/copilot/client/copilot-client.js"></script>
+  <script src="shared/copilot/components/cp-panel-base.js"></script>
+  <script src="shared/copilot/components/cp-rel-stage.js"></script>
+  <script src="shared/copilot/components/cp-next-actions.js"></script>
+  <script src="shared/copilot/components/cp-script.js"></script>
+  <script src="shared/copilot/components/cp-collab.js"></script>
+  <script src="shared/copilot/components/cp-chain-exec.js"></script>
+  <script src="shared/copilot/components/cp-accounts.js"></script>
+  <script src="shared/copilot/components/cp-voice.js"></script>
+  <script src="../webview-ua.js"></script>
+  <script src="inject-status.js"></script>
+  <script src="account-utils.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>

@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<!-- 单一前端 App 壳(三层架构 §6)。唯一一份业务 UI,网页与未来桌面 iframe 共用。
+     入口参数:?theme=light|dark · ?cid=<conversation_id> · #token=<bearer>
+     驱动:postMessage({type:'cp-context', conversationId}) 由宿主壳喂入会话。
+     单一来源 shared/copilot/,网页挂 /copilot/app.html。 -->
+<html lang="zh" data-cp-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Copilot</title>
+  <link rel="stylesheet" href="/copilot/tokens.css" />
+  <link rel="stylesheet" href="/copilot/theme-dark.css" />
+  <link rel="stylesheet" href="/copilot/theme-light.css" />
+  <style>
+    html, body { margin: 0; height: 100%; background: var(--cp-bg, #f8fafc); }
+    body { font-family: 'Inter','PingFang SC','Microsoft YaHei',system-ui,sans-serif;
+           color: var(--cp-text, #1e293b); }
+    .cp-app { padding: var(--cp-gap, 10px); display: flex; flex-direction: column;
+              gap: var(--cp-gap, 10px); }
+    .cp-app > h4 { font-size: var(--cp-fs-sm, 12px); color: var(--cp-text-dim, #64748b);
+                   margin: 2px 0; text-transform: uppercase; letter-spacing: .04em; }
+    .cp-app-empty { color: var(--cp-text-tiny, #94a3b8); font-size: var(--cp-fs-sm, 12px);
+                    text-align: center; padding: 24px 8px; }
+  </style>
+  <script src="/copilot/client/copilot-client.js"></script>
+  <script src="/copilot/components/cp-panel-base.js"></script>
+  <script src="/copilot/components/cp-rel-stage.js"></script>
+  <script src="/copilot/components/cp-next-actions.js"></script>
+  <script src="/copilot/components/cp-script.js"></script>
+  <script src="/copilot/components/cp-persona.js"></script>
+  <script src="/copilot/components/cp-collab.js"></script>
+  <script src="/copilot/components/cp-chain-exec.js"></script>
+  <script src="/copilot/components/cp-draft.js"></script>
+  <script src="/copilot/components/cp-accounts.js"></script>
+  <script src="/copilot/components/cp-voice.js"></script>
+</head>
+<body>
+  <div class="cp-app" id="cp-app">
+    <h4>👥 账号管理</h4>
+    <cp-accounts id="accounts"></cp-accounts>
+    <div class="cp-app-empty" id="cp-app-empty">等待会话上下文…</div>
+    <h4 id="t-draft" hidden>✨ 回复草稿</h4>
+    <cp-draft id="draft" hidden></cp-draft>
+    <h4 id="t-voice" hidden>🎙️ 语音克隆</h4>
+    <cp-voice id="voice" hidden></cp-voice>
+    <h4 id="t-persona" hidden>🎭 人设绑定</h4>
+    <cp-persona id="persona" hidden></cp-persona>
+    <h4 id="t-collab" hidden>🤝 协作上下文</h4>
+    <cp-collab id="collab" hidden></cp-collab>
+    <h4 id="t-relstage" hidden>💞 关系阶段</h4>
+    <cp-rel-stage id="relstage" hidden></cp-rel-stage>
+    <h4 id="t-nba" hidden>⚡ 下一步建议</h4>
+    <cp-next-actions id="nba" hidden></cp-next-actions>
+    <h4 id="t-script" hidden>🎬 剧本话题</h4>
+    <cp-script id="script" hidden></cp-script>
+    <h4 id="t-chain" hidden>🔗 工作链执行</h4>
+    <cp-chain-exec id="chain" hidden></cp-chain-exec>
+  </div>
+  <script>
+    (function () {
+      var qs = new URLSearchParams(location.search);
+      // 主题
+      var theme = qs.get("theme") === "dark" ? "dark" : "light";
+      document.documentElement.setAttribute("data-cp-theme", theme);
+      // 鉴权 token(桌面 iframe 由壳放 #token=;浏览器靠同源 cookie 不需要)
+      var hash = new URLSearchParams((location.hash || "").replace(/^#/, ""));
+      var token = hash.get("token") || qs.get("token") || "";
+      if (token && window.CopilotShared) window.CopilotShared.setAuthToken(token);
+
+      var client = window.CopilotShared ? window.CopilotShared.createCopilotClient() : null;
+      var emptyEl = document.getElementById("cp-app-empty");
+      // 账号管理:全局面板,不依赖会话,直接挂 client 触发加载
+      var accEl = document.getElementById("accounts");
+      if (accEl && client) accEl.client = client;
+      // 面板登记:[组件, 标题]
+      var panels = [
+        ["draft", "t-draft"],
+        ["persona", "t-persona"],
+        ["collab", "t-collab"],
+        ["relstage", "t-relstage"],
+        ["nba", "t-nba"],
+        ["script", "t-script"],
+        ["chain", "t-chain"],
+        ["voice", "t-voice"],
+      ].map(function (p) {
+        var el = document.getElementById(p[0]);
+        var title = document.getElementById(p[1]);
+        if (el) el.client = client;
+        return { el: el, title: title };
+      });
+
+      // chat_key 回退:conversation_id = platform:account:chat_key,取第 2 个冒号后整体
+      function chatKeyFrom(cid) {
+        var parts = String(cid || "").split(":");
+        return parts.length >= 3 ? parts.slice(2).join(":") : "";
+      }
+
+      // cp-fill:组件请求回填输入框(本壳无 composer)→ 桥给宿主父窗口
+      document.addEventListener("cp-fill", function (e) {
+        var text = e && e.detail && e.detail.text;
+        if (!text) return;
+        try { if (window.parent && window.parent !== window) window.parent.postMessage({ type: "cp-fill", text: text }, "*"); } catch (_) {}
+      });
+      // cp-send:组件请求填入并发送(护栏已过)→ 桥给宿主父窗口真正发送
+      document.addEventListener("cp-send", function (e) {
+        var det = (e && e.detail) || {};
+        if (!det.text) return;
+        try { if (window.parent && window.parent !== window) window.parent.postMessage({ type: "cp-send", text: det.text, which: det.which, risk: det.risk }, "*"); } catch (_) {}
+      });
+      // cp-action-done:动作完成,联动刷新关系阶段(剧本/NBA 可能改变阶段)
+      document.addEventListener("cp-action-done", function () {
+        var rel = document.getElementById("relstage");
+        if (rel && !rel.hidden) rel.refresh();
+        var chain = document.getElementById("chain");
+        if (chain && !chain.hidden) chain.refresh();
+      });
+      document.addEventListener("cp-rel-changed", function () {
+        var nba = document.getElementById("nba"), sc = document.getElementById("script");
+        if (nba && !nba.hidden) nba.refresh();
+        if (sc && !sc.hidden) sc.refresh();
+      });
+      // 人设绑定变更:关系阶段/建议可能随人设变化,刷新关系阶段
+      document.addEventListener("cp-persona-changed", function () {
+        var rel = document.getElementById("relstage");
+        if (rel && !rel.hidden) rel.refresh();
+      });
+
+      // 设定会话:展示所有面板并刷新
+      function setContext(ctx) {
+        var cid = ctx && ctx.conversationId;
+        if (!cid) return;
+        var ck = (ctx && ctx.chatKey) || chatKeyFrom(cid);
+        if (emptyEl) emptyEl.hidden = true;
+        panels.forEach(function (p) {
+          if (p.title) p.title.hidden = false;
+          if (p.el) { p.el.hidden = false; p.el.context = { conversationId: cid, chatKey: ck }; }
+        });
+      }
+
+      // 入口 1:URL ?cid= (&ck= 可选)
+      var cid = qs.get("cid");
+      if (cid) setContext({ conversationId: cid, chatKey: qs.get("ck") || "" });
+
+      // 入口 2:宿主壳 postMessage(桌面壳把实时会话喂进来)
+      window.addEventListener("message", function (e) {
+        var msg = e && e.data;
+        if (msg && msg.type === "cp-context" && msg.conversationId) {
+          setContext({ conversationId: msg.conversationId, chatKey: msg.chatKey || "" });
+        }
+      });
+
+      // 告知宿主壳:App 就绪,可以开始喂 context
+      try { if (window.parent && window.parent !== window) window.parent.postMessage({ type: "cp-ready" }, "*"); } catch (_) {}
+    })();
+  </script>
+</body>
+</html>

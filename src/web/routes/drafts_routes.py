@@ -589,6 +589,22 @@ def register_metrics_route(app, *, api_auth):
         except Exception:
             pass
 
+        # P57：翻译引擎用量（调用/成功率/延迟/降级）
+        try:
+            from src.ai.translation_engine_stats import get_translation_engine_stats
+            metrics["translation_engines"] = get_translation_engine_stats().dump()
+        except Exception:
+            pass
+
+        # P58：通用 provider 用量（OCR/ASR 等多模态后端）
+        try:
+            from src.ai.provider_stats import all_provider_stats
+            ap = all_provider_stats()
+            if ap:
+                metrics["providers"] = ap
+        except Exception:
+            pass
+
         fmt = str(format or "json").lower()
 
         if fmt == "prometheus":
@@ -648,6 +664,152 @@ def register_metrics_route(app, *, api_auth):
             return PlainTextResponse(buf.getvalue(), media_type="text/plain; version=0.0.4")
 
         return {"ok": True, **metrics}
+
+
+def register_glossary_route(app, *, api_auth):
+    """P59：术语库管理控制台 API（主管专属）。
+
+    GET  /api/workspace/glossary           → 合并视图（terms/protect + 来源标记 + version）
+    POST /api/workspace/glossary           → 增删改覆盖层 {op, term?, translation?, word?}
+                                             op ∈ upsert_term|remove_term|add_protect|remove_protect
+    覆盖层落 config/glossary_overrides.yaml，重建术语库并热更新到 translation_service。
+    """
+    from fastapi import Depends
+
+    def _build_view(request: Request):
+        from src.ai.translation_glossary import build_glossary
+        store = getattr(request.app.state, "glossary_store", None)
+        config = getattr(request.app.state, "glossary_config", None) or {}
+        domain_files = getattr(request.app.state, "glossary_domain_files", None) or []
+        overrides = store.load() if store is not None else {"terms": {}, "protect": []}
+        merged = build_glossary(config, domain_files=domain_files, overrides=overrides)
+        ov_terms = set((overrides.get("terms") or {}).keys())
+        ov_protect = set(overrides.get("protect") or [])
+        try:
+            from src.ai.glossary_hits import get_glossary_hits
+            hits = get_glossary_hits()
+        except Exception:
+            hits = None
+        terms = [
+            {"term": k, "translation": v,
+             "source": "console" if k in ov_terms else "base",
+             "editable": k in ov_terms,
+             "hits": hits.term_hits(k) if hits else 0}
+            for k, v in sorted(merged.terms.items())
+        ]
+        protect = [
+            {"word": w, "source": "console" if w in ov_protect else "base",
+             "editable": w in ov_protect,
+             "hits": hits.protect_hits(w) if hits else 0}
+            for w in merged.protect
+        ]
+        hd = hits.dump() if hits else {"total_term_hits": 0, "total_protect_hits": 0}
+        return {
+            "ok": True,
+            "version": merged.version,
+            "enabled": not merged.empty() or True,
+            "terms": terms,
+            "protect": protect,
+            "counts": {"terms": len(terms), "protect": len(protect),
+                       "console_terms": len(ov_terms), "console_protect": len(ov_protect),
+                       "term_hits": hd.get("total_term_hits", 0),
+                       "protect_hits": hd.get("total_protect_hits", 0)},
+            "has_store": store is not None,
+        }
+
+    def _export_csv(request: Request) -> str:
+        import csv
+        import io
+        view = _build_view(request)
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["type", "key", "value"])
+        for t in view["terms"]:
+            w.writerow(["term", t["term"], t["translation"]])
+        for p in view["protect"]:
+            w.writerow(["protect", p["word"], ""])
+        return buf.getvalue()
+
+    def _import_csv(store, text: str) -> dict:
+        import csv
+        import io
+        added_terms = 0
+        added_protect = 0
+        reader = csv.reader(io.StringIO(text))
+        for i, row in enumerate(reader):
+            if not row:
+                continue
+            kind = (row[0] or "").strip().lower()
+            if i == 0 and kind == "type":
+                continue  # 跳过表头
+            key = (row[1] if len(row) > 1 else "").strip()
+            val = (row[2] if len(row) > 2 else "").strip()
+            try:
+                if kind == "term" and key and val:
+                    store.upsert_term(key, val)
+                    added_terms += 1
+                elif kind == "protect" and key:
+                    store.add_protect(key)
+                    added_protect += 1
+            except ValueError:
+                continue
+        return {"added_terms": added_terms, "added_protect": added_protect}
+
+    def _rebuild_and_apply(request: Request):
+        from src.ai.translation_glossary import build_glossary
+        store = getattr(request.app.state, "glossary_store", None)
+        config = getattr(request.app.state, "glossary_config", None) or {}
+        domain_files = getattr(request.app.state, "glossary_domain_files", None) or []
+        overrides = store.load() if store is not None else {"terms": {}, "protect": []}
+        gl = build_glossary(config, domain_files=domain_files, overrides=overrides)
+        svc = getattr(request.app.state, "translation_service", None)
+        if svc is not None and hasattr(svc, "update_glossary"):
+            svc.update_glossary(gl.terms, gl.protect, gl.version)
+        return gl
+
+    @app.get("/api/workspace/glossary")
+    async def api_workspace_glossary_get(request: Request, format: str = "json", _=Depends(api_auth)):
+        if not _is_supervisor(request):
+            raise HTTPException(403, "术语库管理需要主管权限")
+        if str(format or "").lower() == "csv":
+            from fastapi.responses import PlainTextResponse
+            return PlainTextResponse(
+                _export_csv(request),
+                media_type="text/csv; charset=utf-8",
+                headers={"Content-Disposition": "attachment; filename=glossary.csv"},
+            )
+        return _build_view(request)
+
+    @app.post("/api/workspace/glossary")
+    async def api_workspace_glossary_edit(request: Request, _=Depends(api_auth)):
+        if not _is_supervisor(request):
+            raise HTTPException(403, "术语库管理需要主管权限")
+        store = getattr(request.app.state, "glossary_store", None)
+        if store is None:
+            return {"ok": False, "message": "术语库未初始化（翻译服务未启用）"}
+        body = await request.json()
+        op = str(body.get("op") or "").strip()
+        try:
+            if op == "upsert_term":
+                store.upsert_term(body.get("term"), body.get("translation"))
+            elif op == "remove_term":
+                store.remove_term(body.get("term"))
+            elif op == "add_protect":
+                store.add_protect(body.get("word"))
+            elif op == "remove_protect":
+                store.remove_protect(body.get("word"))
+            elif op == "import_csv":
+                imp = _import_csv(store, str(body.get("csv") or ""))
+            else:
+                return {"ok": False, "message": f"未知操作: {op}"}
+        except ValueError as ex:
+            return {"ok": False, "message": str(ex)}
+        gl = _rebuild_and_apply(request)
+        view = _build_view(request)
+        view["applied_version"] = gl.version
+        if op == "import_csv":
+            view["imported"] = imp
+        return view
 
 
 def register_trend_route(app, *, api_auth):
@@ -1591,6 +1753,22 @@ def register_agent_perf_routes(app, *, api_auth, page_auth, templates, config_ma
         since = _time.time() - max(1, min(90, int(days or 14))) * 86400
         timeline = store.get_agent_perf_timeline(since_ts=since, agent_id=agent_id or "")
         return {"ok": True, "timeline": timeline, "days": int(days)}
+
+    @app.get("/api/workspace/agent-copilot-stats")
+    async def api_agent_copilot_stats(
+        request: Request,
+        days: int = 14,
+        agent_id: str = "",
+        _=Depends(api_auth),
+    ):
+        """P54：Copilot 采纳率与质量回放（主管专属）。"""
+        if not _is_supervisor(request):
+            from fastapi import HTTPException
+            raise HTTPException(403, "需要主管权限")
+        store = _get_store(request)
+        since = _time.time() - max(1, min(90, int(days or 14))) * 86400
+        stats = store.get_copilot_stats(since_ts=since, agent_id=agent_id or "")
+        return {"ok": True, "days": int(days), **stats}
 
     @app.get("/workspace/agent-perf", response_class=HTMLResponse)
     async def workspace_agent_perf_page(request: Request, _=Depends(page_auth)):

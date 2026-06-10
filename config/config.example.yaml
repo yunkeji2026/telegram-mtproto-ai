@@ -802,6 +802,15 @@ ai:
     请保持回复简洁、有帮助，并适当使用表情符号增加亲和力。
     回复时考虑对话上下文，保持连贯性。
 
+  # P52：坐席 Copilot LLM 润色（默认关闭；仅预填/显式 polish 时触发）
+  copilot_polish:
+    enabled: false
+    max_suggestions: 2      # 单次最多润色条数
+    timeout_sec: 8
+    temperature: 0.6
+    max_tokens: 320
+    model: ""               # 空=沿用 ai.model
+
 # 陪伴关系阶段（conversion 域）；状态存 bot.db user_context JSON
 companion:
   enabled: true
@@ -1063,7 +1072,35 @@ translation:
   glossary:
     enabled: true
     extra_terms: {}                  # 全局术语，如 {"size": "尺码", "refund": "退款"}
+    protect: []                      # 不译保护词（品牌/产品名），如 ["LINE", "WhatsApp"]，逐字保留
   cost_tracking: false               # 接 llm_cost（按字符估算 token，best-effort）
+  # Phase B：可选统计语种检测（仅在确定性检测落到含糊拉丁 en/unknown 时回退精修）
+  lang_detect:
+    statistical:
+      enabled: false                 # 默认关；开后需装 lingua 或 langdetect（缺则自动跳过）
+      min_chars: 12                  # 低于此长度不咨询统计层（短文本统计不可靠）
+  # P56：多翻译引擎（按 order 故障转移；首个可用且非空者获胜，AI 兜底）
+  engines:
+    order: ["ai"]                    # 可选 ai/deepl/google，如 ["deepl", "ai"]
+    timeout_sec: 8
+    deepl:
+      api_key: ""                    # 填则启用 DeepL（缺 key 自动跳过）
+      pro: false                     # true=api.deepl.com（Pro），false=api-free.deepl.com
+    google:
+      api_key: ""                    # 填则启用 Google Translate v2（缺 key 自动跳过）
+
+# ── P61 / C-2：媒体一键翻译（免上传）──────────────────────────────
+# base_dirs：解析平台落库 media_ref → 本进程可读本地文件的白名单根目录；
+#            仅落在这些目录内的文件可被读取（防路径穿越）。空=不限制（仅信我方 store）。
+# remote_fetch：远程 http(s) 媒体受控下载（SSRF 防护），默认关——安全敏感。
+media:
+  base_dirs: []                      # 如 ["sessions/media", "config/media"]
+  remote_fetch:
+    enabled: false                   # 默认关；开后远程图片/语音可免上传直接翻译
+    max_mb: 10                       # 单文件大小上限（超限中止 → 回落上传）
+    timeout_sec: 8                   # 下载总超时
+    allow_domains: []                # 空=仅靠私网/保留 IP 段封锁；填则只放行这些域名（生产推荐）
+                                     # 如 ["cdn.telegram.org", "scontent.xx.fbcdn.net"]
 
 # ── Phase D：电商工具层（订单/物流查询 + 事实校验） ───────────────
 # 数据只能查不可编：查不到就如实告知，绝不编造订单/物流状态。

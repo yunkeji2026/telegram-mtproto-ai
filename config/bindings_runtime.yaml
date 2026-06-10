@@ -1,11 +1,4 @@
-# 会话人设绑定（运行时，自动由 PersonaManager 写入；此处为初始种子）
-# ref_bindings: chat_id → profile_id（轻量引用，推荐）
-# bindings:     chat_id → persona snapshot（内联快照，兼容旧格式）
-
 bindings: {}
-
 ref_bindings:
-  # LINE RPA —— 单设备默认聊天键，对应 config.yaml::line_rpa.chat_key
-  "line_rpa:victor": "lin_xiaoyu"
-
-updated_at: "2026-05-21T00:00:00Z"
+  line_rpa:victor: lin_xiaoyu
+updated_at: '2026-06-08T18:38:34Z'

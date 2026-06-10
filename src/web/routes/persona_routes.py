@@ -580,12 +580,10 @@ def register_persona_routes(app, auth_dep, audit_store=None, config_manager=None
         _check_master_role(request)
         body = await request.json()
         profile_id = str(body.get("profile_id") or "").strip()
-        if not profile_id:
-            raise HTTPException(400, "profile_id required")
 
         from src.utils.persona_manager import PersonaManager
         pm = PersonaManager.get_instance()
-        if pm.get_persona_by_id(profile_id) is None:
+        if profile_id and pm.get_persona_by_id(profile_id) is None:
             raise HTTPException(404, f"profile '{profile_id}' not found in PersonaManager")
 
         cm = getattr(request.app.state, "config_manager", None) or config_manager
@@ -593,20 +591,21 @@ def register_persona_routes(app, auth_dep, audit_store=None, config_manager=None
         if not wa_cfg:
             raise HTTPException(404, "whatsapp_rpa config not found")
 
+        pids = [profile_id] if profile_id else []  # 空 = 清除（回默认人设）
         # Mutate in-memory config: find account or fallback to top-level
         accounts: list = wa_cfg.get("accounts") or []
         matched = False
         for acc in accounts:
-            aid = str(acc.get("account_id") or acc.get("adb_serial") or "")
+            aid = str(acc.get("id") or acc.get("account_id") or acc.get("adb_serial") or "")
             if aid == account_id:
-                acc["persona_ids"] = [profile_id]
+                acc["persona_ids"] = pids
                 matched = True
                 break
 
         if not matched:
             if account_id in ("default", ""):
                 # Single-account mode: set top-level persona_ids
-                wa_cfg["persona_ids"] = [profile_id]
+                wa_cfg["persona_ids"] = pids
                 matched = True
 
         if not matched:
@@ -625,7 +624,7 @@ def register_persona_routes(app, auth_dep, audit_store=None, config_manager=None
                 if svc_aid == account_id or (account_id == "default" and not svc_aid):
                     # Merge updated account config into merged config
                     _merged = svc.effective_config()
-                    _merged["persona_ids"] = [profile_id]
+                    _merged["persona_ids"] = pids
                     svc.reconfigure(_merged)
                     reloaded = True
         except Exception as _e:
@@ -638,6 +637,111 @@ def register_persona_routes(app, auth_dep, audit_store=None, config_manager=None
             "config_saved": saved,
             "runner_hot_reloaded": reloaded,
         }
+
+    # ── 统一账号人设绑定：Telegram ────────────────────────────────
+    @app.post("/api/personas/tg-account/{account_id}/assign-profile")
+    async def api_tg_assign_profile(account_id: str, request: Request, _=Depends(auth_dep)):
+        """给 Telegram 账号指定/更换/清除人设 profile。
+
+        Body: {"profile_id": "..."}  —— profile_id 为空表示清除（回默认人设）。
+        写 telegram.accounts[].persona_ids；单账号(default) 写扁平 telegram.persona_ids。
+        """
+        _check_write_role(request)
+        body = await request.json()
+        profile_id = str(body.get("profile_id") or "").strip()
+        from src.utils.persona_manager import PersonaManager
+        pm = PersonaManager.get_instance()
+        if profile_id and pm.get_persona_by_id(profile_id) is None:
+            raise HTTPException(404, f"profile '{profile_id}' not found")
+
+        cm = getattr(request.app.state, "config_manager", None) or config_manager
+        if not cm:
+            raise HTTPException(503, "config_manager 不可用")
+        tg_cfg: dict = (getattr(cm, "config", None) or {}).get("telegram") or {}
+        pids = [profile_id] if profile_id else []
+
+        accounts = tg_cfg.get("accounts")
+        matched = False
+        if isinstance(accounts, list) and accounts:
+            for acc in accounts:
+                aid = str(acc.get("id") or acc.get("account_id") or "").strip()
+                if aid == account_id:
+                    acc["persona_ids"] = pids
+                    matched = True
+                    break
+        if not matched and (account_id in ("default", "") or not accounts):
+            # 单账号 / default：写扁平槽（注册表 default 分支已支持读取）
+            tg_cfg["persona_ids"] = pids
+            matched = True
+        if not matched:
+            raise HTTPException(404, f"TG account '{account_id}' not found")
+
+        cm.config["telegram"] = tg_cfg
+        saved = cm.save()
+        actor = request.session.get("username", "web_admin")
+        if audit_store:
+            audit_store.log(actor, "tg_assign_profile",
+                          f"account={account_id} profile={profile_id or '(cleared)'}")
+        return {"ok": True, "account_id": account_id, "profile_id": profile_id,
+                "config_saved": saved}
+
+    # ── 统一账号人设绑定：Messenger RPA ───────────────────────────
+    @app.post("/api/personas/mrpa-account/{account_id}/assign-profile")
+    async def api_mrpa_assign_profile(account_id: str, request: Request, _=Depends(auth_dep)):
+        """给 Messenger RPA 账号指定/更换/清除人设 profile。
+
+        Body: {"profile_id": "..."}  —— 空表示清除。
+        写 messenger_rpa.accounts[].persona_ids，best-effort 热重载 runner。
+        """
+        _check_write_role(request)
+        body = await request.json()
+        profile_id = str(body.get("profile_id") or "").strip()
+        from src.utils.persona_manager import PersonaManager
+        pm = PersonaManager.get_instance()
+        if profile_id and pm.get_persona_by_id(profile_id) is None:
+            raise HTTPException(404, f"profile '{profile_id}' not found")
+
+        cm = getattr(request.app.state, "config_manager", None) or config_manager
+        if not cm:
+            raise HTTPException(503, "config_manager 不可用")
+        mrpa_cfg: dict = (getattr(cm, "config", None) or {}).get("messenger_rpa") or {}
+        pids = [profile_id] if profile_id else []
+
+        accounts = mrpa_cfg.get("accounts") or []
+        matched = False
+        for acc in accounts:
+            aid = str(acc.get("id") or acc.get("account_id") or acc.get("adb_serial") or "").strip()
+            if aid == account_id:
+                acc["persona_ids"] = pids
+                matched = True
+                break
+        if not matched and account_id in ("default", ""):
+            mrpa_cfg["persona_ids"] = pids
+            matched = True
+        if not matched:
+            raise HTTPException(404, f"Messenger account '{account_id}' not found")
+
+        cm.config["messenger_rpa"] = mrpa_cfg
+        saved = cm.save()
+        reloaded = False
+        try:
+            _svcs = getattr(request.app.state, "messenger_rpa_services", None) or []
+            for svc in _svcs:
+                svc_aid = str(getattr(svc, "account_id", "default") or "")
+                if svc_aid == account_id or (account_id == "default" and not svc_aid):
+                    if hasattr(svc, "effective_config") and hasattr(svc, "reconfigure"):
+                        _merged = svc.effective_config()
+                        _merged["persona_ids"] = pids
+                        svc.reconfigure(_merged)
+                        reloaded = True
+        except Exception:
+            pass
+        actor = request.session.get("username", "web_admin")
+        if audit_store:
+            audit_store.log(actor, "mrpa_assign_profile",
+                          f"account={account_id} profile={profile_id or '(cleared)'}")
+        return {"ok": True, "account_id": account_id, "profile_id": profile_id,
+                "config_saved": saved, "runner_hot_reloaded": reloaded}
 
     # ── P7-C: Promote mrpa-imported profile to operator-owned ────
 

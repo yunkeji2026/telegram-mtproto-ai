@@ -132,6 +132,14 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
     _static_dir = Path(__file__).parent / "static"
     if _static_dir.is_dir():
         app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+    # 两端共享 copilot 组件库(单一事实来源 repo 根 shared/copilot);独立前缀避开 /static 匹配顺序
+    _shared_copilot_dir = Path(__file__).resolve().parents[2] / "shared" / "copilot"
+    if _shared_copilot_dir.is_dir():
+        app.mount(
+            "/copilot",
+            StaticFiles(directory=str(_shared_copilot_dir)),
+            name="copilot_shared",
+        )
     app.state.kb_conflict_checkers = []
     app.state.intent_display_names_extra = {}
     app.state.config_manager = config_manager
@@ -2378,11 +2386,14 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
             register_ab_testing_route,
             register_anomaly_route,
             register_trace_route,
+            register_glossary_route,
         )
         # J3: export API（主管数据导出）
         register_export_route(app, api_auth=_api_auth)
         # L1: metrics API（Prometheus 兼容，主管专属）
         register_metrics_route(app, api_auth=_api_auth)
+        # P59: 术语库管理控制台 API（主管专属）
+        register_glossary_route(app, api_auth=_api_auth)
         # M2: report API（工作日报/周报，主管专属）
         register_report_route(app, api_auth=_api_auth)
         # M2: broadcast API（EventBus 广播，供简报推送）
@@ -2424,6 +2435,46 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
     except Exception:
         import logging as _log_dr
         _log_dr.getLogger("admin").debug("草稿/绩效路由注册跳过", exc_info=True)
+
+    # ── P29: 实时队列看板页面 ──────────────────────────────────────
+    @app.get("/workspace/queue")
+    async def _ws_queue_monitor(request: Request):
+        _unified_inbox_page_auth(request)
+        sess = request.session
+        try:
+            _sm = getattr(request.app.state, "session_manager", None)
+            if _sm is not None and not _sm.is_supervisor(sess.get("username") or ""):
+                from fastapi.responses import RedirectResponse as _RR
+                return _RR("/workspace")
+        except Exception:
+            pass
+        ctx = {
+            "request": request,
+            "user_name": sess.get("username") or sess.get("agent_id") or "",
+            "user_display_name": sess.get("display_name") or sess.get("username") or "",
+        }
+        try:
+            ctx["site_name"] = (config_manager.config or {}).get("web_admin", {}).get("site_name", "")
+        except Exception:
+            pass
+        return templates.TemplateResponse(request, "queue_monitor.html", ctx)
+
+    # ── P37/P38: 工作流 + 路由规则管理页面 ───────────────────────────
+
+    @app.get("/workspace/workflows")
+    async def _ws_workflows(request: Request):
+        _unified_inbox_page_auth(request)
+        sess = request.session
+        ctx = {
+            "request": request,
+            "user_name": sess.get("username") or sess.get("agent_id") or "",
+            "user_display_name": sess.get("display_name") or sess.get("username") or "",
+        }
+        try:
+            ctx["site_name"] = (config_manager.config or {}).get("web_admin", {}).get("site_name", "")
+        except Exception:
+            pass
+        return templates.TemplateResponse(request, "workflows.html", ctx)
 
     # ── I3 模板库管理页面 ──────────────────────────────────────────
     @app.get("/workspace/templates")

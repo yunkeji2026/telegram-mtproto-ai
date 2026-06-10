@@ -1,0 +1,58 @@
+{
+  "backend": {
+    "base_url": "http://127.0.0.1:18787",
+    "token": "admin",
+    "user": "",
+    "pass": ""
+  },
+  "translate": {
+    "target_lang": "zh",
+    "auto": false
+  },
+  "unified_inbox": {
+    "enabled": true,
+    "label": "统一收件箱",
+    "path": "/workspace",
+    "lang": ""
+  },
+  "sync": {
+    "enabled": true
+  },
+  "debug": false,
+  "platforms": [
+    {
+      "id": "telegram",
+      "name": "Telegram",
+      "url": "https://web.telegram.org/k/",
+      "inject": "tg-inject.js"
+    },
+    {
+      "id": "whatsapp",
+      "name": "WhatsApp",
+      "url": "https://web.whatsapp.com/",
+      "inject": "tg-inject.js"
+    },
+    {
+      "id": "messenger",
+      "name": "Messenger",
+      "url": "https://www.messenger.com/",
+      "inject": "tg-inject.js"
+    },
+    {
+      "id": "line",
+      "name": "LINE",
+      "url": "https://line.me/",
+      "inject": "tg-inject.js"
+    }
+  ],
+  "accounts": [
+    {
+      "id": "tg-desktop",
+      "platform": "telegram",
+      "label": "Telegram 账号1",
+      "persona_id": "",
+      "proxy": "",
+      "enabled": true
+    }
+  ]
+}

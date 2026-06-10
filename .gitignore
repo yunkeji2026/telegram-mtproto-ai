@@ -148,6 +148,9 @@ sessions/*.session
 sessions/*.session-journal
 !sessions/.gitkeep
 
+# 协议账号下载的入站媒体（运行时落地，含用户内容，勿入库）
+src/web/static/protocol_media/
+
 # 日志 — 全目录 ignore（drafts.json / trigger_decisions.log / KB trace 可能含 PII）
 # 用 **/logs/ 覆盖根目录和任何子目录（如 config/logs/kb_direct_trace.jsonl）
 **/logs/*

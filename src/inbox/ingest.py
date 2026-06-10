@@ -29,6 +29,12 @@ def _msg_from_obj(
     # 因为两路径同文本同 ts）。LINE 不取裸 id（房间 id），见 normalizer 白名单。
     src = m.get("source") if isinstance(m.get("source"), dict) else {}
     pid = extract_platform_msg_id(src, platform)
+    # P61：携带媒体字段（message_obj 已从 source 抽取；无则回落直接读 source）
+    media_type = str(m.get("media_type") or "")
+    media_ref = str(m.get("media_ref") or "")
+    if not media_type and not media_ref:
+        from .normalizer import extract_media
+        media_type, media_ref = extract_media(src)
     return InboxMessage(
         conversation_id=conversation_id,
         platform_msg_id=pid,
@@ -37,6 +43,8 @@ def _msg_from_obj(
         original_text=str(m.get("original_text") or text),
         translated_text=str(m.get("translated_text") or ""),
         source_lang=str(m.get("language") or "unknown"),
+        media_type=media_type,
+        media_ref=media_ref,
         ts=float(m.get("ts") or 0),
     )
 
@@ -88,7 +96,8 @@ def ingest_collected_chats(
             continue
         msgs: List[InboxMessage] = []
         lm = chat.get("last_message") or {}
-        if isinstance(lm, dict) and lm.get("text"):
+        # 媒体消息可能无文本（如无 caption 的图片/语音）——有 media_ref 也应落库
+        if isinstance(lm, dict) and (lm.get("text") or lm.get("media_ref")):
             msgs.append(_msg_from_obj(conv.conversation_id, lm, platform=conv.platform))
         n = store.ingest_batch(conv, msgs)
         inserted += n

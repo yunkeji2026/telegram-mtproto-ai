@@ -9,9 +9,12 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
+import json
 import logging
+import os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
@@ -26,6 +29,23 @@ from src.inbox.channel_adapters import (
     status_via_adapters,
 )
 from src.inbox.ingest import ingest_collected_chats, ingest_thread
+from src.integrations.account_registry import get_account_registry
+from src.integrations.account_orchestrator import (
+    account_key as _acct_key,
+    ensure_builtin_workers,
+    get_orchestrator,
+    orchestrator_enabled,
+)
+from src.integrations.fingerprint import get_fingerprint_store, summarize as fp_summarize
+from src.integrations.proxy_pool import get_proxy_pool
+from src.integrations.platform_login import (
+    SUPPORTED_PLATFORMS,
+    get_login_manager,
+    get_login_provider,
+    list_modes,
+    mode_available,
+    online_account_keys,
+)
 from src.inbox.normalizer import (
     candidate_messages_from_source,
     conv_id,
@@ -148,6 +168,217 @@ def _ecommerce_tools(request: Request):
 from src.ecommerce_tools.extract import extract_order_no as _extract_order_no
 
 
+# ─── P30: 风险信号检测 + 话术衍生 ──────────────────────────────────────────
+
+_RISK_PATTERNS: List[Dict[str, Any]] = [
+    {
+        "signal": "price_negotiation",
+        "label": "价格谈判",
+        "patterns": ["多少钱", "价格", "便宜", "优惠", "折扣", "打折", "降价", "便宜点",
+                     "price", "discount", "cheaper", "offer"],
+    },
+    {
+        "signal": "complaint",
+        "label": "投诉抱怨",
+        "patterns": ["投诉", "投诉你", "找你们老板", "太差", "骗人", "退款", "退钱",
+                     "complaint", "refund", "scam", "terrible", "awful"],
+    },
+    {
+        "signal": "churn_intent",
+        "label": "流失意向",
+        "patterns": ["不买了", "取消", "算了", "不要了", "退订", "注销",
+                     "cancel", "unsubscribe", "not interested"],
+    },
+    {
+        "signal": "comparison_shopping",
+        "label": "比价竞品",
+        "patterns": ["别家", "其他家", "竞争对手", "比较", "哪家好",
+                     "competitor", "compare", "other brand", "versus"],
+    },
+    {
+        "signal": "urgency",
+        "label": "紧急催促",
+        "patterns": ["马上", "立刻", "赶紧", "尽快", "等很久", "urgent", "asap", "hurry", "immediately"],
+    },
+    {
+        "signal": "escalation_intent",
+        "label": "升级意图",
+        "patterns": ["报警", "12315", "消费者协会", "律师", "起诉", "曝光",
+                     "sue", "lawyer", "report", "media"],
+    },
+]
+
+
+# ─── P33：语种检测 + 多语言话术模板 ─────────────────────────────────────────
+
+# 印尼语 / 英语常用词（拉丁含糊文本的关键词打分，保留 P33 业务语境）
+_ID_KEYWORDS = {"anda", "saya", "ini", "itu", "tidak", "dengan", "untuk", "yang",
+                "bisa", "kami", "harga", "mau", "sudah", "belum", "tolong"}
+_EN_KEYWORDS = {"the", "is", "are", "was", "were", "have", "has", "you", "your",
+                "please", "sorry", "thank", "hello", "hi", "can", "how", "what"}
+
+
+def _detect_language(text: str) -> str:
+    """P33→统一：复用全局确定性检测器 ``translation_service.detect_language``。
+
+    与全局检测器的差异（仅业务语境兜底，逐字保留 P33 原行为）：
+    - 空文本 → 'zh'（业务主力语言，全局检测器返回 'unknown'）。
+    - 强检测器落到弱的 'en'/'unknown'（含糊拉丁）时，沿用 P33 的 id/en 关键词
+      打分，且默认回落 'zh'——避免把无明确英文关键词的拉丁文本误判为英文。
+
+    脚本类语种（zh/ja/ko/th/km/ar/ru/hi/he/el）与越南语、明确拉丁关键词
+    （es/pt/fr/de/it/tr/id/tl）一律采信全局检测器，从而白嫖其泰铢加固与新增语种。
+    """
+    if not text or not text.strip():
+        return "zh"
+
+    lang = detect_language(text)
+    if lang not in ("en", "unknown"):
+        return lang
+
+    # 含糊拉丁：保留 P33 的 id/en 关键词打分，默认业务语言 zh
+    words_lc = set(text.lower().split())
+    id_score = len(words_lc & _ID_KEYWORDS)
+    en_score = len(words_lc & _EN_KEYWORDS)
+    if id_score > en_score and id_score >= 2:
+        return "id"
+    if en_score >= 2:
+        return "en"
+    return "zh"
+
+
+# 多语言话术模板（P33）：各语种的缓和前缀、主动 CTA
+_LANG_TEMPLATES = {
+    "zh": {
+        "soothing_prefix": "非常抱歉给您带来了不便，我们高度重视您的反馈。",
+        "active_cta": "如果您有任何疑问，欢迎随时联系我们！",
+        "labels": {
+            "safe": "标准回复",
+            "active": "主动引导",
+            "soothing": "缓和共情",
+        },
+    },
+    "en": {
+        "soothing_prefix": "We sincerely apologize for any inconvenience. Your feedback is very important to us. ",
+        "active_cta": " If you have any further questions, please feel free to reach out anytime!",
+        "labels": {
+            "safe": "Standard Reply",
+            "active": "Proactive Engagement",
+            "soothing": "Empathetic Reply",
+        },
+    },
+    "id": {
+        "soothing_prefix": "Kami mohon maaf atas ketidaknyamanan ini. Masukan Anda sangat berarti bagi kami. ",
+        "active_cta": " Jika ada pertanyaan lebih lanjut, jangan ragu untuk menghubungi kami kapan saja!",
+        "labels": {
+            "safe": "Balasan Standar",
+            "active": "Pendekatan Proaktif",
+            "soothing": "Balasan Empatik",
+        },
+    },
+    "th": {
+        "soothing_prefix": "ขออภัยในความไม่สะดวกอย่างสุดซึ้ง เราให้ความสำคัญกับความคิดเห็นของคุณอย่างยิ่ง ",
+        "active_cta": " หากมีคำถามใดๆ กรุณาติดต่อเราได้ตลอดเวลา!",
+        "labels": {
+            "safe": "ตอบมาตรฐาน",
+            "active": "เชิงรุก",
+            "soothing": "เห็นอกเห็นใจ",
+        },
+    },
+}
+
+
+def _detect_risk_signals(text: str, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """P30-A：多模式风险信号检测（规则驱动，零 LLM 消耗）。
+
+    合并最近 5 条入站消息 + 当前文本，逐信号类型匹配关键词。
+    返回命中的信号列表：[{signal, label, matched}]
+    """
+    # 合并最近 5 条入站消息
+    recent_texts = [str(m.get("text") or "") for m in messages[-5:]
+                    if m.get("direction") in ("in", "inbound")] + [text]
+    combined = " ".join(recent_texts).lower()
+
+    signals: List[Dict[str, Any]] = []
+    for item in _RISK_PATTERNS:
+        matched = [p for p in item["patterns"] if p.lower() in combined]
+        if matched:
+            signals.append({
+                "signal": item["signal"],
+                "label": item["label"],
+                "matched": matched[:3],  # 最多展示 3 个命中关键词
+            })
+    return signals
+
+
+def _derive_tiered_replies(
+    base_reply: str,
+    risk_signals: List[Dict[str, Any]],
+    lang: str = "zh",
+) -> List[Dict[str, Any]]:
+    """P30-B / P33：基于 AI 基础回复衍生阶梯式话术（安全/标准/主动三档）。
+
+    lang 参数用于选择对应语种的话术前缀与 CTA（P33 多语言支持）。
+    risk_signals 影响主动档的警示标注（高风险时降级推荐主动档）。
+    """
+    has_risk = bool(risk_signals)
+    high_risk_signals = {"complaint", "escalation_intent", "churn_intent"}
+    is_high_risk = any(s["signal"] in high_risk_signals for s in risk_signals)
+
+    # 读取对应语种模板（P33），回落中文
+    tpl = _LANG_TEMPLATES.get(lang) or _LANG_TEMPLATES["zh"]
+    labels = tpl["labels"]
+    soothing_prefix = tpl["soothing_prefix"]
+    active_cta = tpl["active_cta"]
+
+    # 安全档：纯信息回复（无承诺、无价格）
+    safe = {
+        "text": base_reply,
+        "rationale": labels.get("safe", "标准 AI 建议回复"),
+        "risk_level": "low",
+        "recommended": not is_high_risk,
+        "lang": lang,
+    }
+
+    # 主动档：添加行动引导（CTA），适合低风险/价值转化场景
+    active_text = (base_reply.rstrip("。！.!") + active_cta) if base_reply else active_cta
+    active = {
+        "text": active_text,
+        "rationale": labels.get("active", "主动引导型——追加行动号召"),
+        "risk_level": "medium",
+        "recommended": not has_risk,
+        "lang": lang,
+    }
+
+    # 缓和档：高风险时（投诉/升级/流失）推荐共情优先
+    soothing_text = soothing_prefix + base_reply if base_reply else soothing_prefix
+    soothing = {
+        "text": soothing_text,
+        "rationale": labels.get("soothing", "缓和共情型——高风险场景首选"),
+        "risk_level": "high" if is_high_risk else "medium",
+        "recommended": is_high_risk,
+        "lang": lang,
+    }
+
+    return [safe, active, soothing] if not is_high_risk else [soothing, safe, active]
+
+
+def _build_context_summary(messages: List[Dict[str, Any]]) -> str:
+    """P30-C：多轮对话上下文摘要（规则兜底，LLM 可覆盖）。
+
+    取最近 10 条消息，按方向交替，输出"客户说了什么 / 坐席说了什么"简洁摘要。
+    """
+    lines: List[str] = []
+    for m in messages[-10:]:
+        text = str(m.get("text") or "").strip()
+        if not text:
+            continue
+        direction = m.get("direction", "")
+        role = "客户" if direction in ("in", "inbound") else "坐席"
+        lines.append(f"{role}：{text[:60]}{'…' if len(text)>60 else ''}")
+    return " | ".join(lines) if lines else ""
+
+
 def _read_automation_mode(request: Request, conversation_id: str) -> str:
     """优先读持久层，回落进程内 dict（修掉「重启即丢」生产阻断点）。"""
     store = _inbox_store(request)
@@ -171,12 +402,20 @@ def _write_automation_mode(request: Request, conversation_id: str, mode: str) ->
 
 
 def _ingest_best_effort(request: Request, chats: List[Dict[str, Any]]) -> None:
-    """旁路写入持久层。失败只 log，绝不影响收件箱响应。"""
+    """旁路写入持久层，并在首轮冷启动后开启实时 SSE 事件发布。
+
+    首次调用时 publish_events=False（冷启动不洪泛），之后切换为 True；
+    仅有真正新消息（store.ingest_batch n>0）时才发 inbox_message 事件。
+    """
     store = _inbox_store(request)
     if store is None or not chats:
         return
     try:
-        ingest_collected_chats(store, chats)
+        # 首轮冷启动：向 store 写入存量数据但不发事件（避免把历史消息全部推送）
+        first_done = getattr(request.app.state, "_inbox_first_ingest_done", False)
+        ingest_collected_chats(store, chats, publish_events=first_done)
+        if not first_done:
+            request.app.state._inbox_first_ingest_done = True
     except Exception:
         logger.debug("统一收件箱旁路写入失败（已忽略）", exc_info=True)
 
@@ -267,6 +506,472 @@ def _contacts_gateway(request: Request):
     """Contacts 子系统 gateway（未启用时 None）。"""
     contacts = getattr(request.app.state, "contacts", None)
     return getattr(contacts, "gateway", None) if contacts is not None else None
+
+
+def _conv_relationship_context(
+    request: Request, conversation_id: str, store: Any,
+) -> Dict[str, Any]:
+    """P43/P45：拉取会话关系阶段上下文（轮次 + 亲密度 + contact_id）。"""
+    cid = str(conversation_id or "").strip()
+    ctx: Dict[str, Any] = {
+        "conversation_id": cid,
+        "message_count": 0,
+        "exchange_count": 0,
+        "intimacy_score": None,
+        "contact_id": "",
+        "last_msg_text": "",
+        "last_msg_direction": "in",
+    }
+    if store is None or not cid:
+        return ctx
+    try:
+        msg_count = store._conn.execute(
+            "SELECT COUNT(*) as c FROM messages WHERE conversation_id = ?", (cid,),
+        ).fetchone()["c"]
+        ctx["message_count"] = int(msg_count or 0)
+        ctx["exchange_count"] = max(0, ctx["message_count"] // 2)
+        rows = store._conn.execute(
+            """SELECT direction, text FROM messages
+               WHERE conversation_id = ? ORDER BY ts DESC LIMIT 20""",
+            (cid,),
+        ).fetchall()
+        for r in rows:
+            if r["direction"] in ("in", "inbound"):
+                ctx["last_msg_text"] = str(r["text"] or "")
+                ctx["last_msg_direction"] = "in"
+                break
+            ctx["last_msg_direction"] = str(r["direction"] or "in")
+        meta = store.get_conv_meta(cid) or {}
+        ctx["contact_id"] = str(meta.get("contact_id") or "")
+        if ctx["contact_id"]:
+            cs = _contacts_store(request)
+            if cs is not None:
+                try:
+                    journey = cs.get_journey_by_contact(ctx["contact_id"])
+                    if journey is not None:
+                        ctx["intimacy_score"] = float(journey.intimacy_score or 0)
+                except Exception:
+                    pass
+    except Exception:
+        logger.debug("_conv_relationship_context 失败", exc_info=True)
+    return ctx
+
+
+def _agent_from_request(request: Request) -> Tuple[str, str]:
+    agent_id = str(request.session.get("user_name") or request.session.get("username") or "")
+    agent_name = str(request.session.get("display_name") or agent_id)
+    return agent_id, agent_name
+
+
+def _user_store_from_config(config_manager: Any) -> Any:
+    """P48：惰性加载 WebUserStore（与 admin 同路径）。"""
+    if config_manager is None:
+        return None
+    try:
+        from src.utils.web_user_store import WebUserStore
+        cfg_dir = config_manager.config_path.parent
+        return WebUserStore(cfg_dir / "web_users.db")
+    except Exception:
+        return None
+
+
+def _build_copilot_context(
+    request: Request,
+    conversation_id: str,
+    store: Any,
+    *,
+    trigger: str = "",
+    workflow_text: str = "",
+    workflow_chain_name: str = "",
+    workflow_step: int = 0,
+    mention_body: str = "",
+    mention_from: str = "",
+) -> Dict[str, Any]:
+    """P49：组装 Copilot 联动上下文（阶段 / 流失 / 工作链 / @mention）。"""
+    rel = _build_relationship_stage_payload(request, conversation_id, store)
+    mctx = _mention_context_for_conv(request, conversation_id, store)
+    me = _session_agent(request)["agent_id"]
+
+    mention_note = mention_body
+    mention_agent = mention_from
+    if store is not None and not mention_note:
+        try:
+            recent = store.get_recent_mention_note(conversation_id, me)
+            if recent:
+                mention_note = str(recent.get("body") or "")
+                mention_agent = str(recent.get("agent_name") or recent.get("agent_id") or "")
+        except Exception:
+            pass
+
+    script_topics: List[Dict[str, Any]] = []
+    if store is not None:
+        try:
+            from src.inbox.conversation_script import ConversationScriptEngine
+            engine = ConversationScriptEngine()
+            stage = str(rel.get("display_stage") or rel.get("stage") or "initial")
+            script_topics = engine.suggest_topics(
+                stage,
+                custom_topics=store.list_script_topics(),
+                reunion=bool(rel.get("reunion")),
+                limit=3,
+            ).get("topics", [])
+        except Exception:
+            pass
+
+    if not trigger and mention_note:
+        trigger = "mention"
+    elif not trigger and mctx.get("churn_level") == "high":
+        trigger = "churn"
+    elif not trigger and rel.get("reunion"):
+        trigger = "reunion"
+
+    contact_id = str((rel.get("context") or {}).get("contact_id") or "")
+    recent_downgrade = False
+    if store is not None and contact_id:
+        try:
+            import time as _t
+            week_ago = _t.time() - 7 * 86400
+            for row in store.list_contact_stage_audits(contact_id, limit=5):
+                if (
+                    row.get("action") == "stage_downgrade"
+                    and float(row.get("ts") or 0) > week_ago
+                ):
+                    recent_downgrade = True
+                    break
+        except Exception:
+            pass
+
+    return {
+        "trigger": trigger,
+        "stage": str(rel.get("display_stage") or rel.get("stage") or "initial"),
+        "stage_label": rel.get("display_stage_label") or rel.get("stage_label") or "",
+        "contact_stage": rel.get("contact_stage") or "",
+        "contact_stage_label": rel.get("contact_stage_label") or "",
+        "next_stage_label": rel.get("next_stage_label") or "",
+        "pending_stage_label": rel.get("pending_stage_label") or "",
+        "pending_advancement": bool(rel.get("pending_advancement")),
+        "reunion": bool(rel.get("reunion")),
+        "recent_downgrade": recent_downgrade,
+        "churn_level": mctx.get("churn_level") or "",
+        "claim_agent_id": mctx.get("claim_agent_id") or "",
+        "overdue_chain": mctx.get("overdue_chain"),
+        "workflow_text": workflow_text,
+        "workflow_chain_name": workflow_chain_name,
+        "workflow_step": int(workflow_step or 0),
+        "mention_note": mention_note,
+        "mention_from": mention_agent,
+        "script_topics": script_topics,
+    }
+
+
+async def _maybe_polish_copilot(
+    request: Request,
+    result: Dict[str, Any],
+    *,
+    conversation_id: str,
+    partial_text: str,
+    last_customer_msg: str,
+    polish_requested: bool,
+) -> Dict[str, Any]:
+    """P52：可选 LLM 润色（失败回退规则建议）。"""
+    from src.inbox.copilot_polisher import (
+        get_polish_config,
+        polish_suggestions,
+        should_polish,
+    )
+    cm = getattr(request.app.state, "config_manager", None)
+    cfg = get_polish_config(cm)
+    if not should_polish(
+        polish_requested=polish_requested,
+        partial_text=partial_text,
+        cfg=cfg,
+    ):
+        result["polished"] = False
+        return result
+    ai_client = getattr(request.app.state, "ai_client", None)
+    ctx = result.get("context") or {}
+    pr = await polish_suggestions(
+        ai_client,
+        result.get("suggestions") or [],
+        context=ctx,
+        last_customer_msg=last_customer_msg,
+        cfg=cfg,
+    )
+    result["suggestions"] = pr.get("suggestions") or result.get("suggestions")
+    result["polished"] = bool(pr.get("polished"))
+    if pr.get("polish_error"):
+        result["polish_error"] = pr["polish_error"]
+    if pr.get("polish_count"):
+        result["polish_count"] = pr["polish_count"]
+    if result.get("polished"):
+        store = _inbox_store(request)
+        if store is not None:
+            agent_id, _ = _agent_from_request(request)
+            store.record_draft_audit(
+                "", action="copilot_polish", agent_id=agent_id,
+                reason=f"润色 {pr.get('polish_count', 0)} 条 Copilot 建议",
+                conversation_id=conversation_id,
+            )
+    return result
+
+
+def _record_copilot_impression_if_prefill(
+    store: Any,
+    conversation_id: str,
+    agent_id: str,
+    payload: Dict[str, Any],
+    *,
+    partial_text: str,
+) -> None:
+    """P54：仅预填（空 partial）记曝光，避免打字 debounce 刷屏。"""
+    if store is None or (partial_text or "").strip():
+        return
+    suggestions = payload.get("suggestions") or []
+    if not suggestions:
+        return
+    ctx = payload.get("context") or {}
+    top = suggestions[0] if suggestions else {}
+    try:
+        store.record_copilot_impression(
+            conversation_id, agent_id,
+            trigger=str(ctx.get("trigger") or payload.get("trigger") or "open"),
+            stage=str(ctx.get("stage") or payload.get("stage") or "initial"),
+            polished=bool(payload.get("polished")),
+            suggestion_count=len(suggestions),
+            top_source=str(top.get("source") or ""),
+        )
+    except Exception:
+        pass
+
+
+def _record_copilot_adopt_from_send(
+    store: Any,
+    conversation_id: str,
+    agent_id: str,
+    text: str,
+    meta: Any,
+) -> None:
+    """P54：发送时记录 Copilot 采纳（best-effort）。"""
+    if store is None or not isinstance(meta, dict):
+        return
+    from src.inbox.copilot_stats import classify_adoption
+    suggested = str(meta.get("suggested_text") or meta.get("text") or "")
+    match = str(meta.get("match") or "").strip() or classify_adoption(suggested, text)
+    try:
+        store.record_copilot_adopt(
+            conversation_id, agent_id,
+            match=match,
+            source=str(meta.get("source") or ""),
+            polished=bool(meta.get("polished")),
+            trigger=str(meta.get("trigger") or ""),
+            stage=str(meta.get("stage") or ""),
+            suggested_preview=suggested,
+            sent_preview=text,
+        )
+    except Exception:
+        pass
+
+
+def _mention_context_for_conv(
+    request: Request, conversation_id: str, store: Any,
+) -> Dict[str, Any]:
+    """P48：组装 @mention 推荐所需会话上下文。"""
+    rel = _build_relationship_stage_payload(request, conversation_id, store)
+    ctx = rel.get("context") or {}
+    stage = str(rel.get("display_stage") or rel.get("stage") or "initial")
+    churn_level = ""
+    claim_agent_id = ""
+    overdue_chain = False
+    if store is not None:
+        try:
+            meta = store.get_conv_meta(conversation_id) or {}
+            churn_raw = str(meta.get("churn_risk") or "")
+            if churn_raw:
+                cd = json.loads(churn_raw)
+                churn_level = str(cd.get("level") or "")
+        except Exception:
+            pass
+        try:
+            claim = store.get_conversation_claim(conversation_id)
+            if claim:
+                claim_agent_id = str(claim.get("agent_id") or "")
+        except Exception:
+            pass
+        try:
+            overdue_chain = store.has_overdue_chain_execution(conversation_id)
+        except Exception:
+            pass
+    return {
+        "stage": stage,
+        "stage_label": rel.get("display_stage_label") or rel.get("stage_label") or "",
+        "churn_level": churn_level,
+        "claim_agent_id": claim_agent_id,
+        "overdue_chain": overdue_chain,
+        "contact_id": ctx.get("contact_id") or "",
+    }
+
+
+def _build_contact_relationship_payload(
+    request: Request,
+    contact_id: str,
+    store: Any,
+) -> Dict[str, Any]:
+    """P50：客户级关系阶段（聚合信号 + 冲突检测）。"""
+    from src.inbox.contact_rel_stage import (
+        detect_stage_conflict,
+        enrich_with_contact_stage,
+    )
+    from src.inbox.relationship_stage import compute_relationship_stage, enrich_with_manual_state
+
+    cs = _contacts_store(request)
+    intimacy_score = None
+    message_count = 0
+    conv_ids: List[str] = []
+    if store is not None:
+        try:
+            rows = store._conn.execute(
+                "SELECT conversation_id FROM conversations WHERE contact_id = ? LIMIT 30",
+                (contact_id,),
+            ).fetchall()
+            conv_ids = [r["conversation_id"] for r in rows]
+            if conv_ids:
+                ph = ",".join("?" * len(conv_ids))
+                message_count = store._conn.execute(
+                    f"SELECT COUNT(*) as c FROM messages WHERE conversation_id IN ({ph})",
+                    conv_ids,
+                ).fetchone()["c"]
+        except Exception:
+            pass
+    if cs is not None:
+        try:
+            journey = cs.get_journey_by_contact(contact_id)
+            if journey is not None:
+                intimacy_score = float(journey.intimacy_score or 0)
+        except Exception:
+            pass
+
+    contact_rec = store.get_contact_rel_stage(contact_id) if store else None
+    contact_stage = str((contact_rec or {}).get("confirmed_stage") or "")
+    conv_stages = store.list_conv_rel_stages_for_contact(contact_id) if store else {}
+    conflict = detect_stage_conflict(contact_stage, conv_stages)
+
+    exchange_count = max(0, int(message_count or 0) // 2)
+    computed = compute_relationship_stage(
+        exchange_count=exchange_count, intimacy_score=intimacy_score,
+        previous_stage=contact_stage,
+    )
+    confirmed = contact_stage or computed.get("stage") or "initial"
+    reunion_ack = float((contact_rec or {}).get("reunion_ack_ts") or 0)
+
+    result = enrich_with_manual_state(
+        computed,
+        confirmed_stage=confirmed,
+        pending_stage="",
+        reunion_ack_ts=reunion_ack,
+    )
+    return enrich_with_contact_stage(
+        result,
+        contact_stage=contact_stage,
+        contact_updated_by=str((contact_rec or {}).get("updated_by") or ""),
+        conflict=conflict,
+    )
+
+
+def _build_relationship_stage_payload(
+    request: Request,
+    conversation_id: str,
+    store: Any,
+    *,
+    emit_pending_event: bool = False,
+) -> Dict[str, Any]:
+    """P43/P46/P50：构建关系阶段响应（确认制 + 客户级同步）。"""
+    import time as _t
+    from src.inbox.contact_rel_stage import (
+        detect_stage_conflict,
+        enrich_with_contact_stage,
+    )
+    from src.inbox.relationship_stage import (
+        compute_relationship_stage,
+        enrich_with_manual_state,
+    )
+    from src.utils.companion_relationship import STAGE_ORDER as _STAGES
+
+    ctx = _conv_relationship_context(request, conversation_id, store)
+    contact_id = str(ctx.get("contact_id") or "")
+    meta = store.get_rel_stage_meta(conversation_id) if store else {
+        "confirmed": "", "pending": "", "pending_ts": 0.0, "reunion_ack_ts": 0.0,
+    }
+    contact_rec = store.get_contact_rel_stage(contact_id) if store and contact_id else None
+    contact_stage = str((contact_rec or {}).get("confirmed_stage") or "")
+    confirmed = meta["confirmed"]
+    computed = compute_relationship_stage(
+        exchange_count=ctx["exchange_count"],
+        intimacy_score=ctx["intimacy_score"],
+        previous_stage=confirmed or contact_stage,
+    )
+
+    # P50：首次种子 — 优先客户级，否则写回客户级
+    if store is not None and not confirmed:
+        seed = contact_stage or computed.get("stage") or ""
+        if seed:
+            store.confirm_rel_stage(conversation_id, seed)
+            confirmed = seed
+            meta["confirmed"] = confirmed
+            if contact_id and not contact_stage:
+                store.set_contact_rel_stage(contact_id, seed)
+
+    ci = _STAGES.index(computed["stage"]) if computed["stage"] in _STAGES else 0
+    di = _STAGES.index(confirmed) if confirmed in _STAGES else 0
+    pending_new = False
+    if store is not None and ci > di:
+        if meta["pending"] != computed["stage"]:
+            store.set_rel_stage_pending(conversation_id, computed["stage"])
+            pending_new = True
+        pending_stage = computed["stage"]
+    elif store is not None and meta["pending"]:
+        store.clear_rel_stage_pending(conversation_id)
+        pending_stage = ""
+    else:
+        pending_stage = meta["pending"] if ci > di else ""
+
+    reunion_ack = float(meta["reunion_ack_ts"] or 0)
+    if contact_rec and float(contact_rec.get("reunion_ack_ts") or 0) > reunion_ack:
+        reunion_ack = float(contact_rec["reunion_ack_ts"])
+
+    result = enrich_with_manual_state(
+        computed,
+        confirmed_stage=confirmed,
+        pending_stage=pending_stage,
+        reunion_ack_ts=reunion_ack,
+    )
+
+    conflict = None
+    if store and contact_id:
+        conv_stages = store.list_conv_rel_stages_for_contact(contact_id)
+        conflict = detect_stage_conflict(contact_stage, conv_stages)
+        result = enrich_with_contact_stage(
+            result,
+            contact_stage=contact_stage,
+            contact_updated_by=str((contact_rec or {}).get("updated_by") or ""),
+            conflict=conflict,
+        )
+
+    if emit_pending_event and pending_new:
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            get_event_bus().publish("stage_advance_pending", {
+                "conversation_id": conversation_id,
+                "contact_id": contact_id,
+                "confirmed_stage": confirmed,
+                "confirmed_stage_label": result.get("confirmed_stage_label"),
+                "pending_stage": result.get("pending_stage"),
+                "pending_stage_label": result.get("pending_stage_label"),
+                "ts": _t.time(),
+            })
+        except Exception:
+            pass
+
+    return {**result, "context": ctx}
 
 
 def _lookup_contacts_enrichment(
@@ -581,6 +1286,19 @@ def _collect_all_chats(request: Request, limit: int = 20) -> List[Dict[str, Any]
         mode = _read_automation_mode(request, cid)
         row["automation_mode"] = mode if mode in AUTOMATION_MODES else "review"
     return out
+
+
+def _is_protocol_account(request: Request, platform: str, account_id: str) -> bool:
+    """该账号是否为 store-backed 模式（消息 push 落库、线程/列表按 store 读出）。
+
+    含两类：``protocol``（编排器接管的真 worker）与 ``desktop``（桌面壳同步桥，无 worker）。
+    """
+    try:
+        from src.integrations.account_registry import get_account_registry
+        row = get_account_registry().get(platform, account_id)
+        return bool(row and row.get("mode") in ("protocol", "desktop"))
+    except Exception:
+        return False
 
 
 def _read_from_store_enabled(request: Request) -> bool:
@@ -1145,6 +1863,29 @@ def register_unified_inbox_routes(
             return frames
 
         async def _gen():
+            # P24: 通知队列（全局内存，保留最近 200 条重要通知）
+            _notif_types = {
+                "inbox_message", "draft_sla_breach", "draft_reassigned",
+                "anomaly_alert", "sla_alert", "escalation", "queue_alert",
+                "stage_advance", "stage_advance_pending", "stage_downgrade",
+                "stage_reunion", "stage_sync", "workflow_step",
+                "workflow_execution_completed", "workflow_execution_failed",
+                "workflow_execution_cancelled",  # P44/P47
+            }
+
+            def _maybe_push_notif(evt: dict):
+                """将重要事件写入 app.state.notif_queue（P24 通知中心）。"""
+                if evt.get("type") not in _notif_types:
+                    return
+                nq: list = getattr(request.app.state, "notif_queue", None)
+                if nq is None:
+                    nq = []
+                    request.app.state.notif_queue = nq
+                import time as _time
+                nq.append({**evt, "_notif_ts": int(_time.time() * 1000)})
+                if len(nq) > 200:
+                    del nq[:-200]
+
             try:
                 # 仅 replay 最近的 inbox_message 事件，避免设备类噪声
                 _sse_types = {
@@ -1153,10 +1894,25 @@ def register_unified_inbox_routes(
                     "draft_created",          # G1：自动草稿生成实时推送
                     "draft_sla_breach",       # K1：草稿 SLA 超时红线预警
                     "draft_reassigned",       # K2：无人应答自动再分配通知
+                    "typing",                 # Phase 11：多坐席打字状态协同
+                    "anomaly_alert",          # P24：异常告警通知
+                    "sla_alert",             # P24：SLA 告警通知
+                    "conv_note",             # P25：协作注解实时同步
+                    "queue_alert",           # P32：SLA 坐席定向告警
+                    "stage_advance",         # P43/P46：关系阶段确认进阶
+                    "stage_advance_pending", # P46：待确认进阶
+                    "stage_downgrade",       # P46：手动降级
+                    "stage_reunion",         # P46：确认回暖
+                    "stage_sync",            # P50/P53：客户级阶段对齐
+                    "workflow_step",         # P44：工作链步骤通知
+                    "workflow_execution_completed",  # P47
+                    "workflow_execution_failed",
+                    "workflow_execution_cancelled",
                 }
                 for evt in bus.recent_events(30):
                     if evt.get("type") in _sse_types:
                         yield f"data: {_json.dumps(evt, ensure_ascii=False)}\n\n"
+                        _maybe_push_notif(evt)
                 # 连接建立即推一轮当前严重超时 + 升级（无需等首个心跳）
                 for fr in _sla_pushes():
                     yield fr
@@ -1167,6 +1923,7 @@ def register_unified_inbox_routes(
                         evt = await asyncio.wait_for(queue.get(), timeout=30.0)
                         if evt.get("type") in _sse_types:
                             yield f"data: {_json.dumps(evt, ensure_ascii=False)}\n\n"
+                            _maybe_push_notif(evt)
                     except asyncio.TimeoutError:
                         yield ": heartbeat\n\n"
                         for fr in _sla_pushes():
@@ -1198,6 +1955,26 @@ def register_unified_inbox_routes(
                 "X-Accel-Buffering": "no",
             },
         )
+
+    @app.post("/api/workspace/typing")
+    async def api_workspace_typing(request: Request, _=Depends(api_auth)):
+        """Phase 11：多坐席打字状态协同 — 向同一对话的其他坐席发送实时 typing 事件。"""
+        body = await request.json()
+        conversation_id = str(body.get("conversation_id") or "").strip()
+        if not conversation_id:
+            raise HTTPException(400, "conversation_id 必填")
+        agent = _session_agent(request)
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            get_event_bus().publish("typing", {
+                "conversation_id": conversation_id,
+                "agent_id": agent["agent_id"],
+                "agent_name": agent["display_name"],
+                "ts": time.time(),
+            })
+        except Exception:
+            logger.debug("typing 事件发布失败", exc_info=True)
+        return {"ok": True}
 
     @app.get("/api/unified-inbox/chats")
     async def api_unified_inbox_chats(request: Request, limit: int = 30):
@@ -1244,12 +2021,965 @@ def register_unified_inbox_routes(
                         c["sla_level"] = ""
         except Exception:
             logger.debug("会话列表 SLA 统计失败（已忽略）", exc_info=True)
+        # T1：批量挂载会话标签 + 归档状态
+        try:
+            _ibx2 = _inbox_store(request)
+            if _ibx2 is not None and chats:
+                _cids2 = [str(c.get("conversation_id") or "") for c in chats if c.get("conversation_id")]
+                _tags_map = _ibx2.list_conv_tags_map(_cids2)
+                for c in chats:
+                    cid2 = str(c.get("conversation_id") or "")
+                    meta2 = _tags_map.get(cid2, {})
+                    c["conv_tags"] = meta2.get("tags", [])
+                    c["archived"] = meta2.get("archived", False)
+        except Exception:
+            logger.debug("会话列表 tags 加载失败（已忽略）", exc_info=True)
         return {
             "ok": True,
             "ts": time.time(),
             "chats": chats,
             "platform_status": platform_status,
         }
+
+    # ── 平台扫码登录（P3/M1：多方式并存 · 无限扫码 / 多账号接入 + 自助重连） ──
+    def _platform_login_cfg() -> Dict[str, Any]:
+        try:
+            if config_manager is None:
+                return {}
+            return (config_manager.config or {}).get("platform_login", {}) or {}
+        except Exception:
+            return {}
+
+    def _platform_login_enabled() -> bool:
+        return bool(_platform_login_cfg().get("enabled", True))
+
+    def _login_qr_data_url(qr_url: str) -> str:
+        """把 tg://login?token=… 等登录 URL 服务端渲染为 base64 PNG data URL。
+
+        令牌不出本机（避免泄露给第三方 QR 服务）。qrcode/PIL 缺失或失败时返回空串，
+        前端回落为显示链接 / 设备端指引。
+        """
+        text = str(qr_url or "")
+        if not text:
+            return ""
+        try:
+            import base64
+            import io
+            import qrcode
+            img = qrcode.make(text)
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            return "data:image/png;base64," + \
+                base64.b64encode(buf.getvalue()).decode("ascii")
+        except Exception:
+            logger.debug("登录二维码服务端渲染失败", exc_info=True)
+            return ""
+
+    def _ensure_login_providers() -> None:
+        """按需注册真实 per-(platform,mode) provider（幂等、全程降级）。"""
+        cfg = (config_manager.config if config_manager is not None else {}) or {}
+        try:
+            from src.integrations.telegram_protocol_login import maybe_register as _tg_reg
+            _tg_reg(cfg)
+        except Exception:
+            logger.debug("注册 telegram protocol provider 失败", exc_info=True)
+        try:
+            from src.integrations.whatsapp_baileys_login import maybe_register as _wa_reg
+            _wa_reg(cfg)
+        except Exception:
+            logger.debug("注册 whatsapp baileys provider 失败", exc_info=True)
+
+    def _persist_login_account(platform: str, account_id: str, sess: Any) -> None:
+        """登录成功后把账号 + mode + 代理 + 指纹 + 备注落库，并把代理标记为已分配。"""
+        try:
+            get_account_registry().upsert(
+                platform, account_id, mode=getattr(sess, "mode", "device"),
+                status="online",
+                label=(getattr(sess, "label", "") or None),
+                proxy_id=(getattr(sess, "proxy_id", "") or None),
+                fingerprint_id=(getattr(sess, "fingerprint_id", "") or None),
+            )
+            if getattr(sess, "proxy_id", ""):
+                get_proxy_pool().assign(sess.proxy_id, f"{platform}:{account_id}")
+        except Exception:
+            logger.debug("账号注册表上线 upsert 失败", exc_info=True)
+
+    @app.get("/api/platforms/{platform}/modes")
+    async def api_platform_login_modes(platform: str, request: Request):
+        api_auth(request)
+        platform = str(platform or "").lower()
+        if platform not in SUPPORTED_PLATFORMS:
+            return {"ok": False, "detail": f"不支持的平台: {platform}"}
+        _ensure_login_providers()
+        platform_cfg = _platform_login_cfg().get(platform, {}) or {}
+        return {"ok": True, "platform": platform, "modes": list_modes(platform, platform_cfg)}
+
+    @app.post("/api/platforms/{platform}/login/start")
+    async def api_platform_login_start(platform: str, request: Request):
+        api_auth(request)
+        if not _platform_login_enabled():
+            return {"ok": False, "detail": "扫码登录功能未启用（platform_login.enabled）"}
+        platform = str(platform or "").lower()
+        if platform not in SUPPORTED_PLATFORMS:
+            return {"ok": False, "detail": f"不支持的平台: {platform}"}
+        if platform == "web":
+            return {"ok": False, "detail": "网页客服为服务端原生渠道，无需扫码登录。"}
+        body: Dict[str, Any] = {}
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        account_id = str((body or {}).get("account_id") or "")
+        # M4：账号配置（防关联）
+        cfg_label = str((body or {}).get("label") or "")
+        cfg_group = str((body or {}).get("group") or "")
+        cfg_proxy_id = str((body or {}).get("proxy_id") or "")
+        cfg_use_fp = bool((body or {}).get("use_fingerprint") or False)
+        _ensure_login_providers()
+        # 解析登录方式：缺省取该平台默认 mode
+        platform_cfg = _platform_login_cfg().get(platform, {}) or {}
+        modes = list_modes(platform, platform_cfg)
+        mode = str((body or {}).get("mode") or "").lower()
+        if not mode:
+            mode = next((m["mode"] for m in modes if m["recommended"]),
+                        modes[0]["mode"] if modes else "device")
+        if not mode_available(platform, mode):
+            return {"ok": False, "detail": f"{platform} 的「{mode}」登录方式暂未启用"}
+
+        status_map = status_via_adapters(request, _INBOX_ADAPTERS)
+        baseline = online_account_keys(status_map, platform)
+        # 重连场景：目标账号当前离线，从基线移除，使其上线时被判定为「新上线」
+        if account_id:
+            baseline.discard(account_id)
+
+        # M4：解析代理 + 生成/绑定指纹，组装 provider 上下文
+        fingerprint_id = ""
+        login_ctx: Dict[str, Any] = {}
+        if cfg_proxy_id:
+            try:
+                px = get_proxy_pool().get(cfg_proxy_id, mask=False)
+                if px:
+                    login_ctx["proxy"] = px
+            except Exception:
+                logger.debug("读取代理失败", exc_info=True)
+        if cfg_use_fp:
+            try:
+                fp = get_fingerprint_store().create(seed=cfg_label or None,
+                                                    label=cfg_label)
+                fingerprint_id = fp["fingerprint_id"]
+                login_ctx["fingerprint"] = fp["profile"]
+            except Exception:
+                logger.debug("生成指纹失败", exc_info=True)
+
+        qr_url = qr_image = instruction = ""
+        poll_fn = cancel_fn = provider_state = None
+        provider = get_login_provider(platform, mode)
+        if provider is not None:
+            try:
+                try:
+                    info = provider(request, platform, mode, account_id, ctx=login_ctx)
+                except TypeError:
+                    info = provider(request, platform, mode, account_id)
+                if inspect.isawaitable(info):
+                    info = await info
+                info = info or {}
+                qr_url = str(info.get("qr_url") or "")
+                qr_image = str(info.get("qr_image") or "")
+                instruction = str(info.get("instruction") or "")
+                account_id = str(info.get("account_id") or account_id)
+                poll_fn = info.get("poll")
+                cancel_fn = info.get("cancel")
+                provider_state = info.get("state")
+            except Exception:
+                logger.debug("登录 provider[%s:%s] 失败（回落设备端指引）",
+                             platform, mode, exc_info=True)
+
+        sess = get_login_manager().create(
+            platform, account_id, baseline, mode=mode,
+            qr_url=qr_url, qr_image=qr_image, instruction=instruction,
+            label=cfg_label, group=cfg_group,
+            proxy_id=cfg_proxy_id, fingerprint_id=fingerprint_id,
+            provider_state=provider_state, poll_fn=poll_fn, cancel_fn=cancel_fn,
+        )
+        # 落库：重连/已知账号即记录（mode + 代理 + 指纹持久化，供编排器重启后正确拉起）
+        if account_id:
+            try:
+                get_account_registry().upsert(
+                    platform, account_id, mode=mode, status="pending",
+                    label=cfg_label or None, proxy_id=cfg_proxy_id or None,
+                    fingerprint_id=fingerprint_id or None)
+                if cfg_proxy_id:
+                    get_proxy_pool().assign(cfg_proxy_id, f"{platform}:{account_id}")
+            except Exception:
+                logger.debug("账号注册表 upsert 失败", exc_info=True)
+        return {
+            "ok": True,
+            "login_id": sess.login_id,
+            "mode": sess.mode,
+            "status": sess.status,
+            "qr_url": sess.qr_url,
+            "qr_image": sess.qr_image or _login_qr_data_url(sess.qr_url),
+            "instruction": sess.instruction,
+        }
+
+    @app.get("/api/platforms/{platform}/login/{login_id}/status")
+    async def api_platform_login_status(platform: str, login_id: str, request: Request):
+        api_auth(request)
+        platform = str(platform or "").lower()
+        sess = get_login_manager().get(login_id)
+        if sess is None:
+            return {"ok": True, "status": "expired", "detail": "登录会话不存在或已过期"}
+        if sess.status in ("authorized", "failed"):
+            return {"ok": True, "status": sess.status, "detail": sess.detail}
+        if sess.is_expired():
+            sess.status = "expired"
+            return {"ok": True, "status": "expired"}
+        # provider 事件驱动（protocol/web）：直接问 provider 拿登录结果
+        if sess.poll_fn is not None:
+            try:
+                res = sess.poll_fn(sess)
+                if inspect.isawaitable(res):
+                    res = await res
+                res = res or {}
+                st = str(res.get("status") or sess.status)
+                sess.status = st
+                if st == "authorized" and res.get("account_id"):
+                    _persist_login_account(platform, str(res["account_id"]), sess)
+                poll_qr = str(res.get("qr_url") or sess.qr_url)
+                if poll_qr and not sess.qr_url:
+                    sess.qr_url = poll_qr
+                return {"ok": True, "status": st,
+                        "detail": str(res.get("detail") or ""),
+                        "qr_url": poll_qr,
+                        "qr_image": str(res.get("qr_image") or "")
+                        or _login_qr_data_url(poll_qr)}
+            except Exception:
+                logger.debug("provider poll 失败", exc_info=True)
+                return {"ok": True, "status": sess.status}
+        # 实时对比基线：检测到该平台有新账号上线 → 判定登录成功
+        try:
+            status_map = status_via_adapters(request, _INBOX_ADAPTERS)
+            online = online_account_keys(status_map, platform)
+            new_accounts = online - sess.baseline
+            if new_accounts:
+                sess.status = "authorized"
+                for aid in new_accounts:
+                    _persist_login_account(platform, aid, sess)
+                return {"ok": True, "status": "authorized"}
+        except Exception:
+            logger.debug("登录状态轮询失败", exc_info=True)
+        return {"ok": True, "status": sess.status, "instruction": sess.instruction}
+
+    @app.post("/api/platforms/{platform}/login/{login_id}/cancel")
+    async def api_platform_login_cancel(platform: str, login_id: str, request: Request):
+        api_auth(request)
+        sess = get_login_manager().get(login_id)
+        if sess is not None and sess.cancel_fn is not None:
+            try:
+                res = sess.cancel_fn(sess)
+                if inspect.isawaitable(res):
+                    await res
+            except Exception:
+                logger.debug("provider cancel 失败", exc_info=True)
+        get_login_manager().cancel(login_id)
+        return {"ok": True}
+
+    # ── 代理池（M4：用户自填，一号一代理） ──────────────────────────────────
+    @app.get("/api/proxies")
+    async def api_proxies_list(request: Request):
+        api_auth(request)
+        return {"ok": True, "proxies": get_proxy_pool().list()}
+
+    @app.post("/api/proxies")
+    async def api_proxies_add(request: Request):
+        api_auth(request)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        try:
+            entry = get_proxy_pool().add(
+                scheme=str((body or {}).get("scheme") or "socks5"),
+                host=str((body or {}).get("host") or "").strip(),
+                port=int((body or {}).get("port") or 0),
+                username=str((body or {}).get("username") or ""),
+                password=str((body or {}).get("password") or ""),
+                label=str((body or {}).get("label") or ""),
+            )
+            return {"ok": True, "proxy": entry}
+        except (ValueError, TypeError) as ex:
+            return {"ok": False, "detail": str(ex)}
+
+    @app.delete("/api/proxies/{proxy_id}")
+    async def api_proxies_remove(proxy_id: str, request: Request):
+        api_auth(request)
+        get_proxy_pool().remove(proxy_id)
+        return {"ok": True}
+
+    @app.post("/api/proxies/{proxy_id}/test")
+    async def api_proxies_test(proxy_id: str, request: Request):
+        api_auth(request)
+        ok = await get_proxy_pool().test(proxy_id)
+        return {"ok": True, "reachable": ok,
+                "status": "ok" if ok else "fail"}
+
+    # ── 指纹（M4：自研，一号一指纹） ────────────────────────────────────────
+    @app.get("/api/fingerprints")
+    async def api_fingerprints_list(request: Request):
+        api_auth(request)
+        items = get_fingerprint_store().list()
+        for it in items:
+            it["summary"] = fp_summarize(it.get("profile") or {})
+        return {"ok": True, "fingerprints": items}
+
+    @app.post("/api/fingerprints/generate")
+    async def api_fingerprints_generate(request: Request):
+        api_auth(request)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        fp = get_fingerprint_store().create(
+            seed=str((body or {}).get("seed") or "") or None,
+            label=str((body or {}).get("label") or ""),
+        )
+        fp["summary"] = fp_summarize(fp.get("profile") or {})
+        return {"ok": True, **fp}
+
+    # ── 账号池编排器（M5：多账号 7×24 在线，默认关） ────────────────────────
+    def _orch():
+        cfg = (config_manager.config if config_manager is not None else {}) or {}
+        ensure_builtin_workers(cfg)
+        return get_orchestrator(cfg)
+
+    # M6①：注册 protocol→收件箱 入站 sink（worker 收到消息时落库；store 在 emit 时惰性取）
+    def _register_protocol_sink() -> None:
+        try:
+            from src.integrations.protocol_bridge import (
+                ingest_incoming, register_inbox_sink,
+            )
+
+            def _sink(m: Dict[str, Any]) -> None:
+                store = getattr(app.state, "inbox_store", None)
+                if store is None:
+                    return
+                ingest_incoming(store, **m)
+
+            register_inbox_sink(_sink)
+        except Exception:
+            logger.debug("注册 protocol 收件箱 sink 失败", exc_info=True)
+
+    _register_protocol_sink()
+
+    # Phase 3：注册 protocol 自动回复 hook（hook 内自带双闸门，恒注册、运行时按需生效）
+    def _register_protocol_autoreply() -> None:
+        try:
+            from src.integrations.protocol_autoreply import build_reply_hook
+            from src.integrations.protocol_bridge import register_reply_hook
+            register_reply_hook(build_reply_hook(app))
+        except Exception:
+            logger.debug("注册 protocol 自动回复 hook 失败", exc_info=True)
+
+    _register_protocol_autoreply()
+
+    @app.post("/api/internal/protocol/ingest")
+    async def api_protocol_ingest(request: Request):
+        """内部入站桥：Baileys(Node) 等外部 worker 把收到的消息 push 进统一收件箱。"""
+        api_auth(request)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        store = getattr(request.app.state, "inbox_store", None)
+        if store is None:
+            raise HTTPException(503, "inbox store 未就绪")
+        from src.integrations.protocol_bridge import (
+            ingest_incoming, make_message, maybe_auto_reply,
+        )
+        if not str((body or {}).get("chat_key") or ""):
+            raise HTTPException(400, "chat_key 不能为空")
+        direction = str((body or {}).get("direction") or "in")
+        cid = ingest_incoming(
+            store,
+            platform=str((body or {}).get("platform") or ""),
+            account_id=str((body or {}).get("account_id") or ""),
+            chat_key=str((body or {}).get("chat_key") or ""),
+            name=str((body or {}).get("name") or ""),
+            text=str((body or {}).get("text") or ""),
+            ts=float((body or {}).get("ts") or 0),
+            msg_id=str((body or {}).get("msg_id") or ""),
+            direction=direction,
+            media_type=str((body or {}).get("media_type") or ""),
+            media_ref=str((body or {}).get("media_ref") or ""),
+        )
+        if direction == "in":
+            await maybe_auto_reply(make_message(
+                platform=str((body or {}).get("platform") or ""),
+                account_id=str((body or {}).get("account_id") or ""),
+                chat_key=str((body or {}).get("chat_key") or ""),
+                name=str((body or {}).get("name") or ""),
+                text=str((body or {}).get("text") or ""),
+                ts=float((body or {}).get("ts") or 0),
+                msg_id=str((body or {}).get("msg_id") or ""),
+            ))
+        return {"ok": bool(cid), "conversation_id": cid or ""}
+
+    def _collect_config_accounts(cfg: Dict[str, Any]) -> List[tuple]:
+        """从 config.yaml 抽取各平台声明的账号 → (platform, account_id, mode, label)。
+
+        覆盖 telegram.accounts[]（+ 扁平单号）与 line/messenger/whatsapp_rpa.accounts[]
+        （+ 扁平 enabled 单号）。形态各异，全程防御式读取。
+        """
+        out: List[tuple] = []
+        tg = cfg.get("telegram") or {}
+        if isinstance(tg, dict):
+            if tg.get("api_id") or tg.get("session_name"):
+                out.append(("telegram", str(tg.get("session_name") or "default"),
+                            "protocol", str(tg.get("label") or "Telegram")))
+            for a in tg.get("accounts") or []:
+                if not isinstance(a, dict):
+                    continue
+                aid = str(a.get("id") or a.get("session_name") or "")
+                if aid:
+                    out.append(("telegram", aid, "protocol", str(a.get("label") or aid)))
+        for plat, key in (("line", "line_rpa"), ("messenger", "messenger_rpa"),
+                          ("whatsapp", "whatsapp_rpa")):
+            block = cfg.get(key) or {}
+            if not isinstance(block, dict):
+                continue
+            accs = block.get("accounts") or []
+            if isinstance(accs, list) and accs:
+                for a in accs:
+                    if not isinstance(a, dict):
+                        continue
+                    aid = str(a.get("account_id") or a.get("id") or "")
+                    if aid:
+                        out.append((plat, aid, "device", str(a.get("label") or aid)))
+            elif block.get("enabled"):
+                aid = str(block.get("account_id") or f"{plat}_default")
+                out.append((plat, aid, "device", str(block.get("label") or aid)))
+        return out
+
+    @app.get("/api/accounts")
+    async def api_accounts_list(request: Request):
+        """统一账号清单（Phase 2）：合并 registry + config.yaml + 运行时健康。
+
+        让桌面端 / web 后台用同一份数据渲染「账号管理」面板，不必再拼 4 个接口。
+        返回每个账号的 ``platform/account_id/mode/label/status/running/proxy_id/
+        fingerprint_id/sources``（sources 标出来源：registry/config/runtime）。
+        """
+        api_auth(request)
+        cfg = (config_manager.config if config_manager is not None else {}) or {}
+        merged: Dict[tuple, Dict[str, Any]] = {}
+
+        def _ensure(platform: str, account_id: str) -> Dict[str, Any]:
+            k = (str(platform or "").lower(), str(account_id or ""))
+            if k not in merged:
+                merged[k] = {
+                    "platform": k[0], "account_id": k[1], "mode": "",
+                    "label": "", "status": "unknown", "running": False,
+                    "proxy_id": "", "fingerprint_id": "", "auto_reply": False,
+                    "auto_reply_override": {}, "sources": [],
+                }
+            return merged[k]
+
+        # 1) 注册表（登录/编排/桌面 ingest 落库的权威账号）
+        try:
+            for row in get_account_registry().list():
+                r = _ensure(row.get("platform"), row.get("account_id"))
+                r["mode"] = row.get("mode") or r["mode"]
+                r["label"] = row.get("label") or r["label"]
+                r["status"] = row.get("status") or r["status"]
+                r["proxy_id"] = row.get("proxy_id") or r["proxy_id"]
+                r["fingerprint_id"] = row.get("fingerprint_id") or r["fingerprint_id"]
+                meta = row.get("meta") or {}
+                r["auto_reply"] = bool(meta.get("auto_reply"))
+                r["auto_reply_override"] = dict(meta.get("autoreply_override") or {})
+                if "registry" not in r["sources"]:
+                    r["sources"].append("registry")
+        except Exception:
+            logger.debug("[accounts] registry 读取失败", exc_info=True)
+
+        # 2) config.yaml 声明的账号（boot 时拉起的 RPA / 协议号）
+        for platform, account_id, mode, label in _collect_config_accounts(cfg):
+            r = _ensure(platform, account_id)
+            if not r["mode"]:
+                r["mode"] = mode
+            if not r["label"]:
+                r["label"] = label
+            if "config" not in r["sources"]:
+                r["sources"].append("config")
+
+        # 3) 运行时健康（适配器在线状态）
+        try:
+            status_map = status_via_adapters(request, _INBOX_ADAPTERS)
+            for k, v in (status_map or {}).items():
+                if not isinstance(v, dict):
+                    continue
+                platform = v.get("platform")
+                account_id = v.get("account_id") or k
+                if not platform:
+                    continue
+                r = _ensure(platform, account_id)
+                r["running"] = bool(v.get("running"))
+                if v.get("running"):
+                    r["status"] = "online"
+                if "runtime" not in r["sources"]:
+                    r["sources"].append("runtime")
+        except Exception:
+            logger.debug("[accounts] 运行时状态读取失败", exc_info=True)
+
+        # 4) 自动回复配额/熔断快照（Phase 5，仅协议号或已开自动回复的号）
+        try:
+            from src.integrations.protocol_autoreply_limits import (
+                get_autoreply_limiter,
+            )
+            from src.integrations.protocol_autoreply_settings import (
+                cfg_with_settings,
+            )
+            lim = get_autoreply_limiter(cfg_with_settings(cfg))
+            for a in merged.values():
+                if a.get("auto_reply") or a.get("mode") == "protocol":
+                    ov_rate = (a.get("auto_reply_override") or {}).get("rate") or {}
+                    a["auto_reply_quota"] = lim.snapshot(
+                        f"{a['platform']}:{a['account_id']}",
+                        hourly=ov_rate.get("hourly"), daily=ov_rate.get("daily"))
+        except Exception:
+            logger.debug("[accounts] 配额快照读取失败", exc_info=True)
+
+        accounts = sorted(merged.values(),
+                          key=lambda x: (x["platform"], x["account_id"]))
+        return {"ok": True, "accounts": accounts, "count": len(accounts)}
+
+    @app.get("/api/accounts/orchestrator")
+    async def api_orchestrator_status(request: Request):
+        api_auth(request)
+        return {"ok": True, **_orch().status()}
+
+    @app.get("/api/accounts/protocol/readiness")
+    async def api_protocol_readiness(request: Request):
+        """协议栈联调自检：配置/依赖/服务可达性/编排器/入站 sink 的结构化就绪报告。"""
+        api_auth(request)
+        cfg = (config_manager.config if config_manager is not None else {}) or {}
+        from src.integrations.protocol_diagnostics import readiness
+        report = await readiness(cfg)
+        return {"ok": True, **report}
+
+    @app.post("/api/accounts/orchestrator/sync")
+    async def api_orchestrator_sync(request: Request):
+        api_auth(request)
+        orch = _orch()
+        await orch.sync()
+        await orch.tick()
+        return {"ok": True, **orch.status()}
+
+    @app.post("/api/accounts/{platform}/{account_id}/start")
+    async def api_account_start(platform: str, account_id: str, request: Request):
+        api_auth(request)
+        orch = _orch()
+        acc = get_account_registry().get(platform, account_id) or {
+            "platform": platform, "account_id": account_id}
+        ok = await orch.start_account(acc)
+        return {"ok": ok}
+
+    @app.post("/api/accounts/{platform}/{account_id}/stop")
+    async def api_account_stop(platform: str, account_id: str, request: Request):
+        api_auth(request)
+        await _orch().stop_account(_acct_key(platform, account_id))
+        return {"ok": True}
+
+    @app.post("/api/accounts/{platform}/{account_id}/restart")
+    async def api_account_restart(platform: str, account_id: str, request: Request):
+        api_auth(request)
+        ok = await _orch().restart_account(_acct_key(platform, account_id))
+        return {"ok": ok}
+
+    @app.post("/api/accounts/{platform}/{account_id}/auto-reply")
+    async def api_account_auto_reply(platform: str, account_id: str, request: Request):
+        """切换某协议账号的 7×24 自动回复（账号闸门，写入 registry meta.auto_reply）。
+
+        注意这是「账号闸门」；真正自动发还需全局 ``config.protocol_autoreply.enabled``
+        同时打开（双闸门）。body: {enabled: bool}
+        """
+        api_auth(request)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        enabled = bool((body or {}).get("enabled"))
+        reg = get_account_registry()
+        row = reg.get(platform, account_id)
+        if row is None:
+            raise HTTPException(404, "账号不存在")
+        meta = dict(row.get("meta") or {})
+        was = bool(meta.get("auto_reply"))
+        meta["auto_reply"] = enabled
+        reg.upsert(platform, account_id, meta=meta)
+        if was != enabled:
+            try:
+                from src.integrations.protocol_autoreply_audit import (
+                    get_autoreply_audit,
+                )
+                actor = _session_agent(request)
+                get_autoreply_audit().record_config_change(
+                    actor=actor.get("agent_id", ""), scope="toggle",
+                    platform=platform, account_id=account_id,
+                    changes=[{"key": "auto_reply", "old": was, "new": enabled}])
+            except Exception:
+                logger.debug("[autoreply] 开关审计失败", exc_info=True)
+        cfg = (config_manager.config if config_manager is not None else {}) or {}
+        from src.integrations.protocol_autoreply_settings import effective_settings
+        global_on = bool(effective_settings(cfg).get("enabled", False))
+        return {"ok": True, "platform": platform, "account_id": account_id,
+                "auto_reply": enabled, "global_enabled": global_on,
+                "effective": enabled and global_on}
+
+    @app.post("/api/accounts/{platform}/{account_id}/auto-reply/override")
+    async def api_account_auto_reply_override(
+        platform: str, account_id: str, request: Request,
+    ):
+        """按账号覆盖自动回复参数(配额/营业时段/延迟)，写 registry meta.autoreply_override。
+
+        body: {rate?, hours?, delay?}（白名单深合并到现有覆盖）；
+        或 {reset: true} 清空该账号覆盖（回落全局）。
+        """
+        api_auth(request)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        reg = get_account_registry()
+        row = reg.get(platform, account_id)
+        if row is None:
+            raise HTTPException(404, "账号不存在")
+        from src.integrations.protocol_autoreply_settings import (
+            deep_merge, diff_settings, sanitize_override,
+        )
+        meta = dict(row.get("meta") or {})
+        before_ov = dict(meta.get("autoreply_override") or {})
+        if (body or {}).get("reset"):
+            meta.pop("autoreply_override", None)
+            override: Dict[str, Any] = {}
+        else:
+            clean = sanitize_override(body or {})
+            override = deep_merge(dict(meta.get("autoreply_override") or {}), clean)
+            meta["autoreply_override"] = override
+        reg.upsert(platform, account_id, meta=meta)
+        try:
+            changes = diff_settings(before_ov, override)
+            if changes:
+                from src.integrations.protocol_autoreply_audit import (
+                    get_autoreply_audit,
+                )
+                actor = _session_agent(request)
+                get_autoreply_audit().record_config_change(
+                    actor=actor.get("agent_id", ""), scope="account",
+                    platform=platform, account_id=account_id, changes=changes)
+        except Exception:
+            logger.debug("[autoreply] 覆盖审计失败", exc_info=True)
+        return {"ok": True, "platform": platform, "account_id": account_id,
+                "override": override}
+
+    @app.get("/api/accounts/auto-reply/audit")
+    async def api_account_auto_reply_audit(request: Request):
+        """自动回复实时流（Phase 4）：最近 N 条决策 + 窗口统计 + 全局闸门状态。
+
+        query: limit(默认50,≤500) / platform / account_id / since(秒,默认24h)
+        """
+        api_auth(request)
+        qp = request.query_params
+        try:
+            limit = int(qp.get("limit") or 50)
+        except Exception:
+            limit = 50
+        platform = qp.get("platform") or None
+        account_id = qp.get("account_id") or None
+        try:
+            since_sec = float(qp.get("since") or 86400)
+        except Exception:
+            since_sec = 86400
+        from src.integrations.protocol_autoreply_audit import get_autoreply_audit
+        audit = get_autoreply_audit()
+        items = audit.recent(limit=limit, platform=platform, account_id=account_id)
+        stats = audit.stats(since_ts=time.time() - max(0.0, since_sec))
+        cfg = (config_manager.config if config_manager is not None else {}) or {}
+        from src.integrations.protocol_autoreply_settings import effective_settings
+        global_on = bool(effective_settings(cfg).get("enabled", False))
+        return {"ok": True, "items": items, "stats": stats,
+                "global_enabled": global_on, "count": len(items)}
+
+    @app.get("/api/accounts/auto-reply/config")
+    async def api_account_auto_reply_config_get(request: Request):
+        """读自动回复全局有效设置（config.yaml 基底 + JSON 覆盖）。"""
+        api_auth(request)
+        cfg = (config_manager.config if config_manager is not None else {}) or {}
+        from src.integrations.protocol_autoreply_settings import effective_settings
+        return {"ok": True, "settings": effective_settings(cfg)}
+
+    @app.post("/api/accounts/auto-reply/config")
+    async def api_account_auto_reply_config_set(request: Request):
+        """改自动回复全局设置（白名单校验落盘 + 热更新限流器，无需重启）。"""
+        api_auth(request)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        from src.integrations.protocol_autoreply_settings import (
+            cfg_with_settings, diff_settings, effective_settings, save,
+        )
+        cfg0 = (config_manager.config if config_manager is not None else {}) or {}
+        before = effective_settings(cfg0)
+        merged = save(body or {})
+        after = effective_settings(cfg0)
+        try:
+            changes = diff_settings(before, after)
+            if changes:
+                from src.integrations.protocol_autoreply_audit import (
+                    get_autoreply_audit,
+                )
+                actor = _session_agent(request)
+                get_autoreply_audit().record_config_change(
+                    actor=actor.get("agent_id", ""), scope="global",
+                    changes=changes)
+        except Exception:
+            logger.debug("[autoreply] 配置变更审计失败", exc_info=True)
+        # 热更新限流器阈值
+        try:
+            from src.integrations.protocol_autoreply_limits import (
+                get_autoreply_limiter,
+            )
+            cfg = (config_manager.config if config_manager is not None else {}) or {}
+            lim = get_autoreply_limiter(cfg_with_settings(cfg))
+            rate = merged.get("rate") or {}
+            brk = merged.get("breaker") or {}
+            lim.configure(
+                hourly=rate.get("hourly"), daily=rate.get("daily"),
+                breaker_threshold=brk.get("threshold"),
+                breaker_cooldown=brk.get("cooldown_sec"),
+            )
+        except Exception:
+            logger.debug("[autoreply] 限流器热更新失败", exc_info=True)
+        cfg = (config_manager.config if config_manager is not None else {}) or {}
+        return {"ok": True, "settings": effective_settings(cfg)}
+
+    @app.get("/api/accounts/auto-reply/health")
+    async def api_account_auto_reply_health(request: Request):
+        """自动回复一键体检：全局/账号开关、配额余量、熔断、webhook、SkillManager 就绪
+        + 最近配置变更，聚合成一张放量前自检表。"""
+        api_auth(request)
+        cfg = (config_manager.config if config_manager is not None else {}) or {}
+        from src.integrations.protocol_autoreply_settings import (
+            cfg_with_settings, effective_settings,
+        )
+        from src.integrations.protocol_autoreply_limits import get_autoreply_limiter
+        from src.integrations.protocol_autoreply_audit import get_autoreply_audit
+        eff = effective_settings(cfg)
+        global_on = bool(eff.get("enabled", False))
+        lim = get_autoreply_limiter(cfg_with_settings(cfg))
+
+        accounts_on = 0
+        protocol_n = 0
+        circuit_open: List[str] = []
+        try:
+            for row in get_account_registry().list():
+                meta = row.get("meta") or {}
+                if row.get("mode") == "protocol":
+                    protocol_n += 1
+                if meta.get("auto_reply"):
+                    accounts_on += 1
+                ov_rate = (meta.get("autoreply_override") or {}).get("rate") or {}
+                snap = lim.snapshot(
+                    f"{row.get('platform')}:{row.get('account_id')}",
+                    hourly=ov_rate.get("hourly"), daily=ov_rate.get("daily"))
+                if snap.get("circuit_open"):
+                    circuit_open.append(f"{row.get('platform')}:{row.get('account_id')}")
+        except Exception:
+            logger.debug("[autoreply-health] registry 读取失败", exc_info=True)
+
+        # webhook 是否订阅了 autoreply_alert（用有效列表：覆盖层优先）
+        webhook_on = False
+        try:
+            from src.integrations.notify_webhooks_store import effective_webhooks
+            for wh in effective_webhooks(cfg):
+                if wh.get("enabled") is False:
+                    continue
+                evs = wh.get("events") or []
+                if "all" in evs or "autoreply_alert" in evs:
+                    webhook_on = True
+                    break
+        except Exception:
+            pass
+
+        sm_ready = getattr(app.state, "skill_manager", None) is not None
+        stats = get_autoreply_audit().stats(since_ts=time.time() - 86400)
+
+        warnings: List[str] = []
+        if global_on and accounts_on == 0:
+            warnings.append("全局已开，但没有任何账号开启自动回复")
+        if not global_on and accounts_on > 0:
+            warnings.append(f"{accounts_on} 个账号已开自动回复，但全局闸门关闭，不会自动发")
+        if global_on and not sm_ready:
+            warnings.append("SkillManager 未就绪，无法生成回复")
+        if circuit_open:
+            warnings.append(f"{len(circuit_open)} 个账号处于熔断中")
+        if (global_on or accounts_on) and not webhook_on:
+            warnings.append("未配置 autoreply_alert webhook，熔断/配额告警不会外推")
+
+        return {
+            "ok": True,
+            "healthy": len(warnings) == 0,
+            "global_enabled": global_on,
+            "skill_manager_ready": sm_ready,
+            "webhook_alert_configured": webhook_on,
+            "accounts": {"auto_reply_on": accounts_on, "protocol": protocol_n},
+            "circuit_open": circuit_open,
+            "limits": {
+                "hourly": lim.hourly, "daily": lim.daily,
+                "breaker_threshold": lim.breaker_threshold,
+                "breaker_cooldown": lim.breaker_cooldown,
+            },
+            "stats_24h": stats,
+            "warnings": warnings,
+            "recent_changes": get_autoreply_audit().recent_config_changes(limit=10),
+        }
+
+    @app.get("/api/accounts/auto-reply/webhooks")
+    async def api_account_auto_reply_webhooks_get(request: Request):
+        """读有效告警渠道列表（脱敏 token/secret）。"""
+        api_auth(request)
+        cfg = (config_manager.config if config_manager is not None else {}) or {}
+        from src.integrations.notify_webhooks_store import (
+            effective_webhooks, mask,
+        )
+        items = effective_webhooks(cfg)
+        return {"ok": True, "webhooks": mask(items), "count": len(items)}
+
+    @app.post("/api/accounts/auto-reply/webhooks")
+    async def api_account_auto_reply_webhooks_set(request: Request):
+        """整段保存告警渠道列表（白名单校验落盘 + 热更 WebhookNotifier，免重启）。
+        token/secret 留空 → 沿用同名旧值（前端展示是脱敏的，避免覆盖真实密钥）。"""
+        api_auth(request)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        incoming = body.get("webhooks") if isinstance(body, dict) else body
+        cfg = (config_manager.config if config_manager is not None else {}) or {}
+        from src.integrations.notify_webhooks_store import (
+            effective_webhooks, mask, sanitize_list, save_list,
+        )
+        # 按 name 保留旧密钥（前端回传脱敏值或空时不覆盖真实 token/secret）
+        old_by_name = {w.get("name"): w for w in effective_webhooks(cfg)}
+        cleaned = sanitize_list(incoming)
+        for w in cleaned:
+            old = old_by_name.get(w.get("name")) or {}
+            for k in ("token", "secret"):
+                nv = str(w.get(k) or "")
+                if (not nv) or nv.endswith("***"):
+                    w[k] = str(old.get(k) or "")
+        saved = save_list(cleaned)
+        # 热更运行中的 notifier
+        try:
+            notifier = getattr(app.state, "webhook_notifier", None)
+            if notifier is not None and hasattr(notifier, "reload"):
+                notifier.reload(saved)
+        except Exception:
+            logger.debug("[autoreply] webhook notifier 热更失败", exc_info=True)
+        return {"ok": True, "webhooks": mask(saved), "count": len(saved)}
+
+    @app.post("/api/accounts/auto-reply/webhooks/test")
+    async def api_account_auto_reply_webhooks_test(request: Request):
+        """对单条渠道即时发一条测试告警（连通性检查）。
+        body: {index} 走有效列表第 index 条；或直接传 {webhook:{...}}。"""
+        api_auth(request)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        cfg = (config_manager.config if config_manager is not None else {}) or {}
+        from src.integrations.notify_webhooks_store import (
+            effective_webhooks, sanitize_webhook,
+        )
+        items = effective_webhooks(cfg)
+        wh: Dict[str, Any] = {}
+        if isinstance(body, dict) and body.get("webhook"):
+            wh = sanitize_webhook(body.get("webhook"))
+            # 测试时若 token 脱敏/空，回退同名已存配置
+            old = next((w for w in items if w.get("name") == wh.get("name")), {})
+            for k in ("token", "secret"):
+                nv = str(wh.get(k) or "")
+                if (not nv) or nv.endswith("***"):
+                    wh[k] = str(old.get(k) or "")
+        else:
+            idx = int((body or {}).get("index", -1))
+            if 0 <= idx < len(items):
+                wh = items[idx]
+        if not wh:
+            raise HTTPException(400, "未指定有效的 webhook（index 或 webhook）")
+
+        notifier = getattr(app.state, "webhook_notifier", None)
+        if notifier is None:
+            from src.inbox.webhook_notifier import WebhookNotifier
+            notifier = WebhookNotifier(config=[])
+        try:
+            res = await notifier.send_test(wh)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+        return res
+
+    @app.get("/api/accounts/auto-reply/stream")
+    async def api_account_auto_reply_stream(request: Request):
+        """自动回复实时流 SSE：record() 经进程内事件总线即时推送，零轮询零延迟。
+        （先订阅再取最新 id 为游标：订阅后的事件必进队列，游标仅用于对订阅/
+        取游标竞态窗口内的事件去重，从而不漏不重。）"""
+        api_auth(request)
+        from starlette.responses import StreamingResponse
+        from src.integrations.protocol_autoreply_audit import (
+            get_autoreply_audit, subscribe, unsubscribe,
+        )
+        audit = get_autoreply_audit()
+        # 先订阅再取游标：订阅后产生的事件进队列，游标用于补播订阅前的增量并去重
+        queue = subscribe()
+        seed = audit.recent(limit=1)
+        cursor = int(seed[0]["id"]) if seed else 0
+
+        async def _gen():
+            import asyncio as _aio
+            last_id = cursor
+            try:
+                yield ": connected\n\n"
+                while True:
+                    try:
+                        row = await _aio.wait_for(queue.get(), timeout=15.0)
+                    except _aio.TimeoutError:
+                        if await request.is_disconnected():
+                            break
+                        yield ": heartbeat\n\n"
+                        continue
+                    rid = int(row.get("id") or 0)
+                    if rid and rid <= last_id:
+                        continue  # 已补播/已推过，去重
+                    last_id = rid
+                    yield f"data: {json.dumps(row, ensure_ascii=False)}\n\n"
+            finally:
+                unsubscribe(queue)
+
+        return StreamingResponse(_gen(), media_type="text/event-stream", headers={
+            "Cache-Control": "no-cache", "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        })
+
+    @app.on_event("startup")
+    async def _orchestrator_autostart():
+        cfg = (config_manager.config if config_manager is not None else {}) or {}
+        if not orchestrator_enabled(cfg):
+            return
+        try:
+            ensure_builtin_workers(cfg)
+            await get_orchestrator(cfg).start_loop()
+            logger.info("账号池编排器已随启动开启")
+        except Exception:
+            logger.debug("编排器自启动失败", exc_info=True)
 
     @app.get("/api/unified-inbox/thread")
     async def api_unified_inbox_thread(
@@ -1310,6 +3040,13 @@ def register_unified_inbox_routes(
             if stored_msgs:
                 out_msgs = stored_msgs
             # 实时源已无该会话（未在最近聚合窗口内）但 store 有持久档 → 兜底 header
+            if target is None:
+                target = _store_conv_as_chat(request, cid)
+        # M6①：protocol 账号无实时源（消息由 worker push 落库），线程历史固定读 store
+        elif not out_msgs and _is_protocol_account(request, platform, account_id):
+            stored_msgs = _thread_messages_from_store(request, cid, limit=limit)
+            if stored_msgs:
+                out_msgs = stored_msgs
             if target is None:
                 target = _store_conv_as_chat(request, cid)
 
@@ -2505,6 +4242,20 @@ def register_unified_inbox_routes(
             return {"ok": False, "tags": []}
         return {"ok": True, "tags": store.list_all_tags(limit=max(1, min(300, int(limit or 100))))}
 
+    @app.get("/api/workspace/tag-stats")
+    async def api_workspace_tag_stats(request: Request):
+        """T2：会话级标签统计（count / unread / platforms），用于概览 strip。"""
+        api_auth(request)
+        inbox = _inbox_store(request)
+        if inbox is None:
+            return {"ok": True, "stats": []}
+        try:
+            stats = inbox.tag_stats()
+        except Exception:
+            logger.debug("tag-stats 失败（已忽略）", exc_info=True)
+            stats = []
+        return {"ok": True, "stats": stats}
+
     @app.get("/api/workspace/tag-library")
     async def api_workspace_tag_library_list(request: Request):
         """预设标签库（名称/颜色/排序）。"""
@@ -2539,6 +4290,109 @@ def register_unified_inbox_routes(
         if gw is None:
             return {"ok": False, "error": "contacts_disabled"}
         return {"ok": gw.delete_tag_library(tag), "library": gw.list_tag_library()}
+
+    # ── T1: 会话级标签 + 归档 API ─────────────────────────────────────
+
+    @app.post("/api/workspace/conv/{conversation_id}/summarize")
+    async def api_conv_summarize(
+        conversation_id: str, request: Request, _=Depends(api_auth),
+    ):
+        """Phase 19：为会话生成 AI 摘要并持久化到 conversation_meta.summary。
+
+        调用 ChatAssistantService.analyze（与 inbox/analyze 同服务），
+        以会话最近30条消息作为上下文，生成一句话概括。结果写库后返回。
+        """
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "error": "inbox_store 不可用"}
+        msgs = store.list_recent_messages(conversation_id, limit=30)
+        if not msgs:
+            return {"ok": True, "summary": ""}
+        msg_objs = [store_message_to_obj(r) for r in msgs]
+        # 取最后一条入站文字为代表性文本
+        last_in = next((m for m in reversed(msg_objs) if m.get("direction") == "in"
+                        and m.get("text")), None)
+        text = str((last_in or msg_objs[-1]).get("text") or "")
+        try:
+            svc = _get_chat_assistant_service(request)
+            analysis = await svc.analyze(text=text, messages=msg_objs)
+            summary = str(getattr(analysis, "summary", "") or "").strip()
+            if not summary:
+                # Fallback: truncate last user message as summary
+                summary = text[:80] + ("…" if len(text) > 80 else "")
+        except Exception:
+            logger.debug("conv summarize AI 调用失败（已忽略）", exc_info=True)
+            summary = text[:80] + ("…" if len(text) > 80 else "")
+        store.save_conv_summary(conversation_id, summary)
+        return {"ok": True, "summary": summary}
+
+    @app.get("/api/workspace/conv/{conversation_id}/tags")
+    async def api_conv_tags_get(conversation_id: str, request: Request):
+        """T1：获取单个会话的标签列表。"""
+        api_auth(request)
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": True, "tags": []}
+        return {"ok": True, "tags": store.get_conv_tags(conversation_id)}
+
+    @app.put("/api/workspace/conv/{conversation_id}/tags")
+    async def api_conv_tags_put(
+        conversation_id: str, request: Request, _=Depends(api_auth),
+    ):
+        """T1+P28：覆写会话标签列表，广播 conv_tagged 事件供 Webhook 外发。"""
+        body = await request.json()
+        tags = [str(t) for t in (body.get("tags") or []) if str(t).strip()]
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "error": "inbox_store 不可用"}
+        ok = store.set_conv_tags(conversation_id, tags)
+        # P28：广播标签变更事件
+        if ok:
+            try:
+                from src.integrations.shared.event_bus import get_event_bus
+                import time as _t
+                get_event_bus().publish("conv_tagged", {
+                    "conversation_id": conversation_id,
+                    "tags": tags,
+                    "ts": _t.time(),
+                })
+            except Exception:
+                pass
+        return {"ok": ok, "tags": tags}
+
+    @app.patch("/api/workspace/conv/{conversation_id}/archive")
+    async def api_conv_archive(
+        conversation_id: str, request: Request, _=Depends(api_auth),
+    ):
+        """T1+P28：归档/取消归档会话，并广播 conv_archived 事件供 Webhook 外发。"""
+        body = await request.json()
+        archived = bool(body.get("archived", True))
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "error": "inbox_store 不可用"}
+        ok = store.set_conv_archived(conversation_id, archived)
+        if ok:
+            # P34：归档时自动触发 QA 评分计算（异步非阻塞）
+            if archived:
+                try:
+                    import asyncio as _aio
+                    _aio.get_event_loop().run_in_executor(
+                        None, store.compute_and_store_qa_score, conversation_id
+                    )
+                except Exception:
+                    pass
+            # P28：广播会话归档事件（修正 EventBus API 调用签名）
+            try:
+                from src.integrations.shared.event_bus import get_event_bus
+                import time as _t
+                get_event_bus().publish("conv_archived", {
+                    "conversation_id": conversation_id,
+                    "archived": archived,
+                    "ts": _t.time(),
+                })
+            except Exception:
+                pass
+        return {"ok": ok, "archived": archived}
 
     @app.get("/api/workspace/contacts/export.csv")
     async def api_workspace_contacts_export(
@@ -2667,28 +4521,109 @@ def register_unified_inbox_routes(
         tpls = _collect_quick_templates(config_manager)
         return {"ok": True, "templates": tpls, "count": len(tpls)}
 
+    @app.get("/api/unified-inbox/search-messages")
+    async def api_unified_inbox_search_messages(
+        request: Request,
+        q: str = "",
+        limit: int = 20,
+        platform: str = "",
+    ):
+        """Phase 21：跨会话消息全文检索（SQLite LIKE），供坐席工作台搜索消息内容。
+
+        返回：[{message_id, conversation_id, text, ts, direction, platform, display_name}]
+        """
+        api_auth(request)
+        query = str(q or "").strip()
+        if not query or len(query) < 2:
+            return {"ok": True, "results": [], "q": query}
+        limit = max(1, min(50, int(limit or 20)))
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "results": [], "error": "inbox_store 不可用"}
+        try:
+            hits = store.search_messages(query, limit=limit, platform=str(platform or ""))
+        except Exception:
+            logger.debug("search_messages 失败", exc_info=True)
+            return {"ok": False, "results": [], "error": "search_failed"}
+        # 构造归一化格式：同时补充 conversation_id 对应的 conv_id（供前端导航）
+        results = []
+        for r in hits:
+            cid = str(r.get("conversation_id") or "")
+            txt = str(r.get("text") or "")
+            results.append({
+                "message_id": str(r.get("message_id") or ""),
+                "conversation_id": cid,
+                "text": txt,
+                "text_snippet": txt[:120] + ("…" if len(txt) > 120 else ""),
+                "ts": r.get("ts") or 0,
+                "direction": r.get("direction") or "in",
+                "platform": str(r.get("platform") or ""),
+                "display_name": str(r.get("display_name") or ""),
+            })
+        return {"ok": True, "results": results, "q": query, "count": len(results)}
+
     @app.get("/api/unified-inbox/kb-search")
     async def api_unified_inbox_kb_search(
         request: Request,
         q: str = "",
         limit: int = 5,
+        platform: str = "",
+        intent: str = "",
+        auto: str = "",
     ):
-        """KB 内联检索：坐席在工作台快速查话术/知识条目。"""
+        """KB 内联检索：坐席在工作台快速查话术/知识条目。
+
+        新增参数（Phase 17）：
+          platform  — 当前会话平台，用于 platform 字段加权
+          intent    — 当前会话意图（AI 分析结果），用于 category/keyword 加权
+          auto=1    — 自动触发模式，limit 降为 3，只返回高置信条目
+        """
         api_auth(request)
         query = str(q or "").strip()
-        limit = max(1, min(10, int(limit or 5)))
+        is_auto = str(auto or "").lower() in ("1", "true", "yes")
+        if is_auto:
+            limit = max(1, min(4, int(limit or 3)))
+        else:
+            limit = max(1, min(10, int(limit or 5)))
         kb = getattr(request.app.state, "kb_store", None)
         if kb is None:
             return {"ok": False, "entries": [], "error": "kb_unavailable"}
         if not query:
             return {"ok": True, "entries": [], "search_mode": "none"}
+        fetch_k = min(limit * 3, 20)  # 先多取，后重排
         try:
-            result = kb.search(query, top_k=limit)
+            result = kb.search(query, top_k=fetch_k)
         except Exception:
             logger.debug("kb-search 失败", exc_info=True)
             return {"ok": False, "entries": [], "error": "search_failed"}
+        raw_entries: List[Dict[str, Any]] = result.get("entries") or []
+
+        # Phase 17: context re-ranking
+        # 规则：平台匹配 +0.15，意图关键词命中 +0.10，有 example_reply_zh +0.05
+        plat_ctx = str(platform or "").lower()
+        intent_ctx = str(intent or "").lower()
+        scored: List[tuple] = []
+        for row in raw_entries:
+            base = float(row.get("_score") or 0.5)
+            boost = 0.0
+            row_plat = str(row.get("platform") or "").lower()
+            if row_plat and plat_ctx and row_plat == plat_ctx:
+                boost += 0.15
+            row_kws = " ".join([
+                str(row.get("category") or ""),
+                str(row.get("keywords") or ""),
+                str(row.get("scenario") or ""),
+                str(row.get("title") or ""),
+            ]).lower()
+            if intent_ctx and intent_ctx in row_kws:
+                boost += 0.10
+            if row.get("example_reply_zh"):
+                boost += 0.05
+            scored.append((base + boost, row))
+
+        scored.sort(key=lambda x: -x[0])
         entries: List[Dict[str, Any]] = []
-        for row in result.get("entries") or []:
+        for score, row in scored[:limit]:
             answer = (
                 row.get("example_reply_zh")
                 or row.get("example_reply")
@@ -2700,13 +4635,15 @@ def register_unified_inbox_routes(
                 "title": row.get("title") or row.get("scenario") or "",
                 "answer": str(answer).strip(),
                 "category": row.get("category") or "",
-                "score": row.get("_score"),
+                "score": round(score, 3),
                 "search_mode": row.get("_mode") or result.get("search_mode"),
+                "auto": is_auto,
             })
         return {
             "ok": True,
             "entries": entries,
             "search_mode": result.get("search_mode") or "bm25",
+            "context_reranked": bool(plat_ctx or intent_ctx),
         }
 
     @app.post("/api/unified-inbox/translate")
@@ -2725,24 +4662,805 @@ def register_unified_inbox_routes(
         )
         return {"ok": result.ok, "translation": result.to_dict()}
 
+    @app.post("/api/desktop/smart-reply")
+    async def api_desktop_smart_reply(request: Request, _=Depends(api_auth)):
+        """桌面壳（嵌官方 web 客户端）专用：**人设化**智能回复。
+
+        走与 ``/api/chat/test`` 同一条产线（SkillManager → 意图 → 策略 → KB →
+        ``AIClient.generate_reply_with_intent``），由 PersonaManager 注入后台人设
+        （domain ``conversion`` 的「线上陪伴」或 account_persona_id 指定的画像），
+        因此回复带人设口吻、禁用「作为AI」等机器措辞、并融合知识库——而非通用提示词。
+
+        body: {messages:[{direction,text}], persona_id?, platform?, chat_key?, target_lang?}
+        返回: {ok, reply, persona?, intent?, translated?}
+        """
+        body = await request.json()
+        msgs = body.get("messages") if isinstance(body.get("messages"), list) else []
+        target_lang = str(body.get("target_lang") or "").strip()
+        persona_id = str(body.get("persona_id") or "").strip()
+        platform = str(body.get("platform") or "telegram").strip()
+        chat_key = str(body.get("chat_key") or "").strip()
+
+        # 归一对话历史（OpenAI 风格）+ 取最后一条入站消息作为「待回复」
+        history: List[Dict[str, str]] = []
+        last_inbound = ""
+        for m in msgs:
+            if not isinstance(m, dict):
+                continue
+            t = str(m.get("text") or "").strip()
+            if not t:
+                continue
+            is_in = m.get("direction") in ("in", "inbound")
+            history.append({"role": "user" if is_in else "assistant", "content": t})
+            if is_in:
+                last_inbound = t
+        if not last_inbound:
+            last_inbound = history[-1]["content"] if history else ""
+        if not last_inbound:
+            return {"ok": False, "detail": "无可用对话上下文"}
+
+        sm = getattr(request.app.state, "skill_manager", None)
+        if sm is None:
+            _tc = getattr(request.app.state, "telegram_client", None)
+            sm = getattr(_tc, "skill_manager", None) if _tc is not None else None
+        ai = getattr(request.app.state, "ai_client", None)
+
+        reply = None
+        used_persona = ""
+        used_intent = ""
+        # 主路径：人设 + KB + 策略（与 /api/chat/test 一致）
+        if sm is not None and getattr(sm, "ai_client", None) is not None:
+            try:
+                user_id = f"desktop:{platform}:{chat_key}" or "__desktop__"
+                intent = sm._recognize_intent(last_inbound)
+                used_intent = intent
+                try:
+                    strategy, _sid = sm.get_strategy_for_intent(intent, user_id)
+                except Exception:
+                    strategy = {}
+                kb_context = ""
+                kb = getattr(request.app.state, "kb_store", None)
+                if kb is not None:
+                    try:
+                        _res = kb.search(last_inbound, top_k=3, lang="zh")
+                        kb_context = kb.build_ai_context_from_result(_res, lang="zh")
+                    except Exception:
+                        kb_context = ""
+                ctx: Dict[str, Any] = {
+                    "user_id": user_id,
+                    "chat_id": chat_key or user_id,
+                    "channel": "desktop",
+                    "platform": platform,
+                    "intent": intent,
+                    "current_intent": intent,
+                    "_reply_strategy": strategy or {},
+                    "reply_lang": target_lang or "zh",
+                }
+                if persona_id:
+                    ctx["account_persona_id"] = persona_id
+                if len(history) > 1:
+                    hist = history[:-1] if history[-1]["role"] == "user" else history
+                    ctx["_conversation_history"] = hist[-20:]
+                if kb_context:
+                    ctx["kb_context"] = kb_context
+                so: Dict[str, Any] = {}
+                for _sk in ("temperature", "max_tokens", "context_rounds", "model", "thinking_budget"):
+                    if _sk in (strategy or {}):
+                        so[_sk] = strategy[_sk]
+                reply = await sm.ai_client.generate_reply_with_intent(
+                    user_message=last_inbound,
+                    intent=intent,
+                    user_context=ctx,
+                    strategy_overrides=so or None,
+                )
+                used_persona = persona_id or "domain"
+            except Exception:
+                logger.debug("[desktop] 人设 smart-reply 失败，回落通用", exc_info=True)
+                reply = None
+
+        # 兜底：SkillManager 不可用时退回通用提示词（保证至少有草稿）
+        if not reply and ai is not None:
+            lines = [
+                ("客户：" if m.get("direction") in ("in", "inbound") else "我：") + str(m.get("text") or "")
+                for m in msgs[-12:] if isinstance(m, dict) and str(m.get("text") or "").strip()
+            ]
+            prompt = (
+                "你是温暖、自然、像真人一样的线上陪伴/客服。基于以下对话，草拟我的下一条回复。"
+                "口吻自然口语化，禁止出现「作为AI/作为一个AI/有什么可以帮您」等机器措辞，"
+                "只输出回复正文。\n\n对话：\n" + "\n".join(lines) + "\n\n我的回复："
+            )
+            try:
+                reply = await ai.chat(prompt)
+            except Exception:
+                logger.debug("[desktop] 兜底 smart-reply 失败", exc_info=True)
+                reply = None
+
+        reply = (reply or "").strip()
+        # P1：让徽标说真话——返回「实际解析到的人设」而非「请求的 id」。
+        # 会话绑定/账号人设/domain 谁生效就报谁；解析失败回落到旧值。
+        persona_tier = ""
+        if reply:
+            try:
+                from src.utils.persona_manager import PersonaManager
+                _pm = PersonaManager.get_instance()
+                _resolved, _tier = _pm.get_persona_with_tier(chat_key or "", persona_id)
+                persona_tier = _tier
+                # 部分 profile 字典内无 'id' 字段（id 只是 YAML key），故按 tier 推导：
+                # account_profile 层 → 用请求的 persona_id；chat_binding → 用解析到的 id；
+                # domain/default → "domain"。让徽标与「实际生效」一致。
+                _rid = str((_resolved or {}).get("id") or "")
+                if _tier == "account_profile":
+                    used_persona = _rid or persona_id or "domain"
+                elif _tier == "chat_binding":
+                    used_persona = _rid or "domain"
+                else:
+                    used_persona = "domain"
+            except Exception:
+                logger.debug("[desktop] persona tier 解析失败", exc_info=True)
+        out: Dict[str, Any] = {"ok": bool(reply), "reply": reply,
+                               "persona": used_persona, "persona_tier": persona_tier,
+                               "intent": used_intent}
+        if reply and target_lang:
+            try:
+                svc = _get_translation_service(request)
+                res = await svc.translate(reply, target_lang=target_lang, style="chat")
+                if res.ok:
+                    _rd = res.to_dict()
+                    out["translated"] = _rd.get("translated_text") or _rd.get("text") or ""
+            except Exception:
+                logger.debug("[desktop] smart-reply 译文失败", exc_info=True)
+        return out
+
+    @app.post("/api/desktop/guard-check")
+    async def api_desktop_guard_check(request: Request, _=Depends(api_auth)):
+        """桌面壳「填入并发送」前风控护栏（规则层，零 LLM 成本，毫秒级）。
+
+        复用 ``src.inbox.drafts.keyword_risk_level``（支付/密码/账号安全=high→拦截；
+        优惠/投诉/法律=medium→提醒），并检测「作为AI」等机器措辞（可能露馅）。
+        body: {text}
+        返回: {ok, risk: high|medium|low, block, hits:[{term,level}], robotic:[...]}
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        text = str((body or {}).get("text") or "")
+        risk = "low"
+        hits: List[Dict[str, str]] = []
+        robotic: List[str] = []
+        try:
+            from src.inbox.drafts import keyword_risk_level, _SENSITIVE_PATTERNS
+            risk = keyword_risk_level(text) or "low"
+            for pattern, level in _SENSITIVE_PATTERNS:
+                m = pattern.search(text)
+                if m:
+                    hits.append({"term": m.group(0), "level": level})
+        except Exception:
+            logger.debug("[desktop] guard-check 规则层失败", exc_info=True)
+        _ROBOTIC = [
+            "作为AI", "作为一个AI", "作为人工智能", "我是语言模型", "我是机器人",
+            "有什么可以帮您", "很高兴为您服务", "请问有什么可以帮",
+        ]
+        for ph in _ROBOTIC:
+            if ph in text:
+                robotic.append(ph)
+        return {"ok": True, "risk": risk, "block": risk == "high",
+                "hits": hits, "robotic": robotic}
+
+    @app.post("/api/desktop/ingest")
+    async def api_desktop_ingest(request: Request, _=Depends(api_auth)):
+        """桌面壳同步桥（P1）：把官方 web 客户端 DOM 抓到的消息回流统一收件箱。
+
+        与 ``/api/internal/protocol/ingest``（Baileys 等真 worker）不同：桌面账号无服务端
+        worker、不被编排器接管，故首次同步即把账号以 ``mode="desktop"`` 落 registry——
+        让收件箱列表（ProtocolInboxAdapter）与线程（_is_protocol_account）按 store 读出，
+        而 ``worker_supported`` 不含 desktop 模式，编排器自动跳过、不会尝试拉起 worker。
+        body: {platform, account_id, chat_key, name?, text?, ts?, msg_id?, direction?,
+               media_type?, media_ref?}
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        store = getattr(request.app.state, "inbox_store", None)
+        if store is None:
+            raise HTTPException(503, "inbox store 未就绪")
+        platform = str((body or {}).get("platform") or "").lower()
+        account_id = str((body or {}).get("account_id") or "")
+        chat_key = str((body or {}).get("chat_key") or "")
+        if not platform or not account_id:
+            raise HTTPException(400, "platform / account_id 不能为空")
+        if not chat_key:
+            raise HTTPException(400, "chat_key 不能为空")
+        try:
+            from src.integrations.account_registry import get_account_registry
+            reg = get_account_registry()
+            row = reg.get(platform, account_id)
+            if not row:
+                reg.upsert(platform, account_id, mode="desktop",
+                           label=str((body or {}).get("name") or account_id),
+                           status="online")
+        except Exception:
+            logger.debug("[desktop] registry upsert 失败（已忽略）", exc_info=True)
+        from src.integrations.protocol_bridge import ingest_incoming
+        cid = ingest_incoming(
+            store,
+            platform=platform,
+            account_id=account_id,
+            chat_key=chat_key,
+            name=str((body or {}).get("name") or ""),
+            text=str((body or {}).get("text") or ""),
+            ts=float((body or {}).get("ts") or 0),
+            msg_id=str((body or {}).get("msg_id") or ""),
+            direction=str((body or {}).get("direction") or "in"),
+            media_type=str((body or {}).get("media_type") or ""),
+            media_ref=str((body or {}).get("media_ref") or ""),
+        )
+        return {"ok": bool(cid), "conversation_id": cid or ""}
+
+    @app.get("/api/unified-inbox/translation-engines")
+    async def api_unified_inbox_translation_engines(
+        request: Request, target_lang: str = "zh", _=Depends(api_auth)
+    ):
+        """指定目标语的引擎能力矩阵：让坐席在切换目标语时即知主引擎是否兜底。"""
+        svc = _get_translation_service(request)
+        return {"ok": True, "matrix": svc.engine_matrix(target_lang)}
+
+    @app.post("/api/unified-inbox/translate-image")
+    async def api_unified_inbox_translate_image(request: Request, _=Depends(api_auth)):
+        """P58：图片 OCR → 翻译。前端传 base64 图片，返回逐字 OCR 文本 + 译文。
+
+        body: {image_b64, target_lang?, source_lang?, style?}
+        复用 vision 栈（Ollama→智谱），无可用后端时返回明确提示。
+        """
+        import os as _os
+
+        from src.ai.image_translate import (
+            ImageTranslateService,
+            build_vision_ocr_fn,
+            decode_image_to_temp,
+        )
+
+        body = await request.json()
+        image_b64 = str(body.get("image_b64") or "")
+        target_lang = str(body.get("target_lang") or "zh")
+        source_lang = str(body.get("source_lang") or "")
+        style = str(body.get("style") or "chat")
+
+        cm = getattr(request.app.state, "config_manager", None)
+        vision_cfg = {}
+        try:
+            full = getattr(cm, "config", None) or {}
+            vision_cfg = dict(full.get("vision") or {})
+        except Exception:
+            vision_cfg = {}
+        if not vision_cfg.get("enabled", False):
+            return {"ok": False, "reason": "vision_disabled",
+                    "message": "图像识别未启用（config.vision.enabled）"}
+
+        try:
+            from src.vision_client import has_any_vision_backend
+            if not has_any_vision_backend(vision_cfg, vision_cfg):
+                return {"ok": False, "reason": "no_vision_backend",
+                        "message": "未配置可用的图像识别后端（Ollama base_url 或智谱 api_key）"}
+        except Exception:
+            pass
+
+        path, reason = decode_image_to_temp(image_b64)
+        if path is None:
+            return {"ok": False, "reason": reason, "message": f"图片无效：{reason}"}
+        try:
+            svc = ImageTranslateService(
+                _get_translation_service(request),
+                build_vision_ocr_fn(vision_cfg, vision_cfg),
+            )
+            return await svc.translate_image(
+                path, target_lang=target_lang, source_lang=source_lang, style=style,
+            )
+        finally:
+            try:
+                _os.remove(path)
+            except Exception:
+                pass
+
+    @app.post("/api/unified-inbox/translate-voice")
+    async def api_unified_inbox_translate_voice(request: Request, _=Depends(api_auth)):
+        """P58-2：语音转写(ASR) → 翻译。前端传 base64 音频，返回转写文本 + 译文。
+
+        body: {audio_b64, target_lang?, source_lang?, style?}
+        复用 AudioPipeline（faster-whisper/在线 ASR）。未启用/无后端返回明确提示。
+        """
+        import os as _os
+
+        from src.ai.voice_translate import (
+            VoiceTranslateService,
+            build_audio_transcribe_fn,
+            decode_audio_to_temp,
+        )
+
+        body = await request.json()
+        audio_b64 = str(body.get("audio_b64") or "")
+        target_lang = str(body.get("target_lang") or "zh")
+        source_lang = str(body.get("source_lang") or "")
+        style = str(body.get("style") or "chat")
+
+        cm = getattr(request.app.state, "config_manager", None)
+        audio_cfg = {}
+        try:
+            full = getattr(cm, "config", None) or {}
+            audio_cfg = dict(full.get("audio_pipeline") or {})
+        except Exception:
+            audio_cfg = {}
+        if not audio_cfg.get("enabled", False):
+            return {"ok": False, "reason": "asr_disabled",
+                    "message": "语音转写未启用（config.audio_pipeline.enabled）"}
+
+        path, reason = decode_audio_to_temp(audio_b64)
+        if path is None:
+            return {"ok": False, "reason": reason, "message": f"音频无效：{reason}"}
+        try:
+            svc = VoiceTranslateService(
+                _get_translation_service(request),
+                build_audio_transcribe_fn(audio_cfg),
+            )
+            return await svc.translate_voice(
+                path, target_lang=target_lang, source_lang=source_lang, style=style,
+            )
+        finally:
+            try:
+                _os.remove(path)
+            except Exception:
+                pass
+
+    def _media_base_dirs(request: Request) -> list:
+        """媒体解析白名单根目录（config.media.base_dirs）。仅在白名单内的文件可被读取。"""
+        cm = getattr(request.app.state, "config_manager", None)
+        try:
+            full = getattr(cm, "config", None) or {}
+            dirs = list((full.get("media") or {}).get("base_dirs") or [])
+        except Exception:
+            dirs = []
+        return [str(d) for d in dirs if str(d or "").strip()]
+
+    def _remote_fetch_cfg(request: Request) -> dict:
+        """config.media.remote_fetch（受控远程媒体下载，默认关）。"""
+        cm = getattr(request.app.state, "config_manager", None)
+        try:
+            full = getattr(cm, "config", None) or {}
+            return dict((full.get("media") or {}).get("remote_fetch") or {})
+        except Exception:
+            return {}
+
+    def _within_base_dirs(path: str, base_dirs: list) -> bool:
+        """容纳检查：resolved 真实路径必须落在某个白名单根内（防路径穿越）。
+        未配置白名单时放行（media_ref 来自我方 store/平台，非终端用户输入）。"""
+        if not base_dirs:
+            return True
+        try:
+            rp = os.path.realpath(path)
+            for b in base_dirs:
+                br = os.path.realpath(str(b))
+                if rp == br or rp.startswith(br + os.sep):
+                    return True
+        except Exception:
+            return False
+        return False
+
+    def _lookup_stored_media(request: Request, conversation_id: str, message_id: str):
+        """从 store 按 message_id 取该消息的 (media_type, media_ref)。取不到返回 ('','')。"""
+        store = _inbox_store(request)
+        if store is None or not conversation_id:
+            return "", ""
+        try:
+            rows = store.list_messages(conversation_id, limit=500)
+        except Exception:
+            return "", ""
+        mid = str(message_id or "")
+        for r in rows:
+            if mid and str(r.get("platform_msg_id") or "") == mid:
+                return str(r.get("media_type") or ""), str(r.get("media_ref") or "")
+        return "", ""
+
+    @app.post("/api/unified-inbox/translate-message-media")
+    async def api_unified_inbox_translate_message_media(request: Request, _=Depends(api_auth)):
+        """P61-2：会话内媒体一键翻译（可解析则免上传）。
+
+        body: {conversation_id, message_id, media_ref?, media_type?, target_lang?, source_lang?, style?}
+        优先从 store 按 message_id 取受信 media_ref；解析到本进程可读本地文件 →
+        直接复用 ImageTranslateService/VoiceTranslateService（免上传/免 base64 往返）。
+        不可解析（远程/找不到/无引用/不支持）→ 返回 reason，前端回落到上传组件。
+        """
+        from src.inbox.media_resolver import resolve_for_translate
+
+        body = await request.json()
+        conversation_id = str(body.get("conversation_id") or "")
+        message_id = str(body.get("message_id") or "")
+        target_lang = str(body.get("target_lang") or "zh")
+        source_lang = str(body.get("source_lang") or "")
+        style = str(body.get("style") or "chat")
+
+        # 受信优先：先查 store（平台落库的 media_ref），回落 body 携带值
+        media_type, media_ref = _lookup_stored_media(request, conversation_id, message_id)
+        if not media_ref:
+            media_ref = str(body.get("media_ref") or "")
+            media_type = media_type or str(body.get("media_type") or "")
+
+        base_dirs = _media_base_dirs(request)
+        # M6⑤：protocol 媒体以 /static URL 落库 → 映射回本地文件，并把其根纳入白名单
+        # （仅对 protocol 媒体扩展 base_dirs，不影响其它平台的容纳检查行为）
+        try:
+            from src.integrations.protocol_bridge import (
+                protocol_media_root, static_media_ref_to_path,
+            )
+            _local = static_media_ref_to_path(media_ref)
+            if _local:
+                media_ref = _local
+                base_dirs = base_dirs + [str(protocol_media_root())]
+        except Exception:
+            logger.debug("protocol 媒体路径映射失败", exc_info=True)
+
+        message = {"media_type": media_type, "media_ref": media_ref}
+        path, kind, reason = resolve_for_translate(message, base_dirs=base_dirs)
+
+        # C-2：远程媒体受控下载（默认关；SSRF 防护 + 大小/超时 + 域名白名单）。
+        # 仅当解析判定为 remote_unsupported（此时 kind 已校验为 image/voice）时尝试。
+        _tmp_download: Optional[str] = None
+        if reason == "remote_unsupported":
+            _rf = _remote_fetch_cfg(request)
+            if _rf.get("enabled", False):
+                from src.inbox.media_fetch import fetch_remote_media
+                _dl_path, _dl_reason = await fetch_remote_media(
+                    media_ref,
+                    kind=kind,
+                    max_bytes=int(_rf.get("max_mb", 10) or 10) * 1024 * 1024,
+                    timeout_sec=float(_rf.get("timeout_sec", 8) or 8),
+                    allow_domains=list(_rf.get("allow_domains") or []),
+                )
+                if _dl_path:
+                    path, reason, _tmp_download = _dl_path, "ok", _dl_path
+                else:
+                    return {"ok": False, "reason": _dl_reason, "fallback": "upload",
+                            "message": "远程媒体下载失败，请上传文件"}
+
+        if reason != "ok":
+            msg = {
+                "no_ref": "该消息无媒体引用",
+                "remote_unsupported": "媒体为远程链接，暂不支持免上传翻译，请上传文件",
+                "not_found": "未找到本地媒体文件，请上传文件",
+                "unsupported_kind": "暂不支持该媒体类型翻译",
+            }.get(reason, reason)
+            return {"ok": False, "reason": reason, "fallback": "upload", "message": msg}
+
+        # 下载得到的临时文件是我方可信路径，不参与 base_dirs 容纳检查（仅对平台落库路径校验）。
+        if _tmp_download is None and not _within_base_dirs(path, base_dirs):
+            return {"ok": False, "reason": "outside_base_dirs", "fallback": "upload",
+                    "message": "媒体文件不在允许目录内"}
+
+        try:
+            if kind == "image":
+                from src.ai.image_translate import ImageTranslateService, build_vision_ocr_fn
+                cm = getattr(request.app.state, "config_manager", None)
+                try:
+                    vision_cfg = dict((getattr(cm, "config", None) or {}).get("vision") or {})
+                except Exception:
+                    vision_cfg = {}
+                if not vision_cfg.get("enabled", False):
+                    return {"ok": False, "reason": "vision_disabled",
+                            "message": "图像识别未启用（config.vision.enabled）"}
+                try:
+                    from src.vision_client import has_any_vision_backend
+                    if not has_any_vision_backend(vision_cfg, vision_cfg):
+                        return {"ok": False, "reason": "no_vision_backend",
+                                "message": "未配置可用的图像识别后端"}
+                except Exception:
+                    pass
+                svc = ImageTranslateService(
+                    _get_translation_service(request),
+                    build_vision_ocr_fn(vision_cfg, vision_cfg),
+                )
+                out = await svc.translate_image(
+                    path, target_lang=target_lang, source_lang=source_lang, style=style,
+                )
+                out["media_kind"] = "image"
+                out["from_upload"] = False
+                out["from_remote"] = _tmp_download is not None
+                return out
+
+            # kind == "voice"
+            from src.ai.voice_translate import VoiceTranslateService, build_audio_transcribe_fn
+            cm = getattr(request.app.state, "config_manager", None)
+            try:
+                audio_cfg = dict((getattr(cm, "config", None) or {}).get("audio_pipeline") or {})
+            except Exception:
+                audio_cfg = {}
+            if not audio_cfg.get("enabled", False):
+                return {"ok": False, "reason": "asr_disabled",
+                        "message": "语音转写未启用（config.audio_pipeline.enabled）"}
+            svc = VoiceTranslateService(
+                _get_translation_service(request),
+                build_audio_transcribe_fn(audio_cfg),
+            )
+            out = await svc.translate_voice(
+                path, target_lang=target_lang, source_lang=source_lang, style=style,
+            )
+            out["media_kind"] = "voice"
+            out["from_upload"] = False
+            out["from_remote"] = _tmp_download is not None
+            return out
+        finally:
+            # 清理下载的临时文件（无论成功/异常）
+            if _tmp_download:
+                try:
+                    os.unlink(_tmp_download)
+                except Exception:
+                    pass
+
+    @app.post("/api/unified-inbox/mark-conversion")
+    async def api_unified_inbox_mark_conversion(request: Request, _=Depends(api_auth)):
+        """阶段 E：人工标记会话所属客户为 成交(BONDED)/已转化(CONVERTED)。
+
+        修复"空心漏斗"：此前 gateway 自动流转最高只到 LINE_ENGAGED，BONDED/CONVERTED
+        作为终点存在却无任何代码路径写入 → 转化漏斗终点 KPI 永远为 0、不可达。
+        本端点让坐席可手动闭环成交，FSM 守卫非法转移、落 stage_change event（记录操作人）。
+
+        body: {conversation_id, stage?(BONDED|CONVERTED), contact_id?, note?}
+        需启用 contacts 子系统（config.contacts.enabled）。
+        """
+        body = await request.json()
+        conversation_id = str(body.get("conversation_id") or "")
+        target = str(body.get("stage") or "BONDED").strip().upper()
+        note = str(body.get("note") or "")
+        if target not in ("BONDED", "CONVERTED"):
+            return {"ok": False, "reason": "bad_stage",
+                    "message": "stage 仅支持 BONDED(成交) 或 CONVERTED(已转化)"}
+
+        cstore = _contacts_store(request)
+        if cstore is None:
+            return {"ok": False, "reason": "contacts_disabled",
+                    "message": "客户旅程子系统未启用（config.contacts.enabled）"}
+
+        # 解析 journey：优先 body.contact_id，其次会话 meta 关联的 contact_id
+        contact_id = str(body.get("contact_id") or "")
+        if not contact_id and conversation_id:
+            istore = _inbox_store(request)
+            try:
+                meta = istore.get_conv_meta(conversation_id) if istore else {}
+                contact_id = str((meta or {}).get("contact_id") or "")
+            except Exception:
+                contact_id = ""
+        if not contact_id:
+            return {"ok": False, "reason": "no_contact",
+                    "message": "该会话尚未关联客户，无法标记成交"}
+
+        try:
+            journey = cstore.get_journey_by_contact(contact_id)
+        except Exception:
+            journey = None
+        if journey is None:
+            return {"ok": False, "reason": "no_journey",
+                    "message": "未找到该客户的旅程记录"}
+
+        try:
+            agent_id, _agent_name = _agent_from_request(request)
+        except Exception:
+            agent_id = ""
+        from src.contacts.journey_fsm import transit as _fsm_transit_fn
+        ok = _fsm_transit_fn(
+            cstore, journey_id=journey.journey_id, to_stage=target,
+            payload={"manual": True, "by": agent_id or "agent", "note": note},
+        )
+        if not ok:
+            try:
+                cur = cstore.get_journey(journey.journey_id)
+                cur_stage = cur.funnel_stage if cur else journey.funnel_stage
+            except Exception:
+                cur_stage = journey.funnel_stage
+            return {
+                "ok": False, "reason": "transition_blocked",
+                "current_stage": cur_stage,
+                "current_stage_label": FUNNEL_STAGE_LABELS.get(cur_stage, cur_stage),
+                "message": f"不能从「{FUNNEL_STAGE_LABELS.get(cur_stage, cur_stage)}」"
+                           f"直接标记为「{FUNNEL_STAGE_LABELS.get(target, target)}」",
+            }
+        try:
+            j2 = cstore.get_journey(journey.journey_id)
+            new_stage = j2.funnel_stage if j2 else target
+        except Exception:
+            new_stage = target
+        return {
+            "ok": True,
+            "funnel_stage": new_stage,
+            "funnel_stage_label": FUNNEL_STAGE_LABELS.get(new_stage, new_stage),
+        }
+
+    @app.post("/api/unified-inbox/outreach/preview")
+    async def api_unified_inbox_outreach_preview(request: Request, _=Depends(api_auth)):
+        """P61-3：分组批量触达 dry-run 预览（只读不发）。
+
+        body: {platform?, tags_any?[], rel_stages?[], min_silent_days?, max_silent_days?,
+               exclude_archived?, limit?}
+        返回命中人数、可触达名单、跳过原因（cooldown/account_cap）、每账号分布、预计耗时。
+        """
+        from src.inbox.outreach_planner import OutreachFilters, OutreachPlanner
+
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "reason": "no_store", "message": "持久层未挂载"}
+
+        body = await request.json()
+        cm = getattr(request.app.state, "config_manager", None)
+        try:
+            ocfg = dict((getattr(cm, "config", None) or {}).get("outreach") or {})
+        except Exception:
+            ocfg = {}
+
+        filters = OutreachFilters(
+            platform=str(body.get("platform") or ""),
+            tags_any=[str(t) for t in (body.get("tags_any") or []) if str(t).strip()],
+            rel_stages=[str(s) for s in (body.get("rel_stages") or []) if str(s).strip()],
+            min_silent_days=float(body.get("min_silent_days") or 0),
+            max_silent_days=float(body.get("max_silent_days") or 0),
+            exclude_archived=bool(body.get("exclude_archived", True)),
+            limit=int(body.get("limit") or 500),
+        )
+        planner = OutreachPlanner(
+            store,
+            limiter=getattr(request.app.state, "account_limiter", None),
+            cooldown_days=float(ocfg.get("cooldown_days", 14)),
+            per_send_seconds=float(ocfg.get("per_send_seconds", 8)),
+            default_account_cap=int(ocfg.get("default_account_cap", 30)),
+        )
+        plan = planner.build_plan(filters)
+        out = plan.to_dict()
+        out["ok"] = True
+        return out
+
+    @app.post("/api/unified-inbox/outreach/execute")
+    async def api_unified_inbox_outreach_execute(request: Request, _=Depends(api_auth)):
+        """P61-4：分组批量触达执行（真实发送）。需 feature-flag + 二次确认。
+
+        body: {filters{}, template, confirm:true, max_send?, batch_id?}
+        服务端按 filters 重建 plan（不信任客户端名单）→ 真实扣配额 → RPA 发送 →
+        落回执。受 config.outreach.enabled 门禁与 config.outreach.max_batch 硬上限保护。
+        """
+        from src.inbox.outreach_executor import OutreachExecutor
+        from src.inbox.outreach_planner import OutreachFilters, OutreachPlanner
+
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "reason": "no_store", "message": "持久层未挂载"}
+
+        cm = getattr(request.app.state, "config_manager", None)
+        try:
+            ocfg = dict((getattr(cm, "config", None) or {}).get("outreach") or {})
+        except Exception:
+            ocfg = {}
+        if not ocfg.get("enabled", False):
+            return {"ok": False, "reason": "outreach_disabled",
+                    "message": "批量触达未启用（config.outreach.enabled）"}
+
+        body = await request.json()
+        if body.get("confirm") is not True:
+            return {"ok": False, "reason": "confirm_required",
+                    "message": "执行批量发送需显式 confirm=true"}
+        template = str(body.get("template") or "").strip()
+        if not template:
+            return {"ok": False, "reason": "empty_template", "message": "消息模板不能为空"}
+
+        fb = body.get("filters") or {}
+        filters = OutreachFilters(
+            platform=str(fb.get("platform") or ""),
+            tags_any=[str(t) for t in (fb.get("tags_any") or []) if str(t).strip()],
+            rel_stages=[str(s) for s in (fb.get("rel_stages") or []) if str(s).strip()],
+            min_silent_days=float(fb.get("min_silent_days") or 0),
+            max_silent_days=float(fb.get("max_silent_days") or 0),
+            exclude_archived=bool(fb.get("exclude_archived", True)),
+            limit=int(fb.get("limit") or 500),
+        )
+        limiter = getattr(request.app.state, "account_limiter", None)
+        planner = OutreachPlanner(
+            store, limiter=limiter,
+            cooldown_days=float(ocfg.get("cooldown_days", 14)),
+            per_send_seconds=float(ocfg.get("per_send_seconds", 8)),
+            default_account_cap=int(ocfg.get("default_account_cap", 30)),
+        )
+        plan = planner.build_plan(filters)
+
+        hard_cap = max(1, int(ocfg.get("max_batch", 50)))
+        req_max = int(body.get("max_send") or 0)
+        max_send = min(hard_cap, req_max) if req_max > 0 else hard_cap
+
+        async def _send_fn(target, text):
+            return await send_via_adapters(
+                request, target.platform, target.account_id, target.chat_key,
+                text, _INBOX_ADAPTERS,
+            )
+
+        executor = OutreachExecutor(
+            store, _send_fn, limiter=limiter,
+            per_send_seconds=float(ocfg.get("per_send_seconds", 8)),
+            sleep_fn=asyncio.sleep,
+        )
+        result = await executor.execute(
+            plan.eligible, template,
+            batch_id=str(body.get("batch_id") or ""), max_send=max_send,
+        )
+        result["planned_eligible"] = len(plan.eligible)
+        return result
+
+    @app.get("/api/unified-inbox/outreach/batch")
+    async def api_unified_inbox_outreach_batch(
+        request: Request, batch_id: str = "", response_window_days: float = 0,
+        _=Depends(api_auth),
+    ):
+        """P61-4/5：查某批次回执统计（成功/失败计数 + P61-5 回复率）。"""
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "reason": "no_store"}
+        stats = store.outreach_batch_stats(batch_id)
+        cm = getattr(request.app.state, "config_manager", None)
+        try:
+            ocfg = dict((getattr(cm, "config", None) or {}).get("outreach") or {})
+        except Exception:
+            ocfg = {}
+        win = float(response_window_days) if response_window_days else float(ocfg.get("response_window_days", 7))
+        stats["response"] = store.outreach_response_stats(batch_id, response_window_days=win)
+        stats["ok"] = True
+        return stats
+
     @app.post("/api/unified-inbox/analyze")
     async def api_unified_inbox_analyze(request: Request, _=Depends(api_auth)):
+        """P30：升级版 AI 分析（多轮历史 + 风险预判 + 阶梯式话术建议）。
+
+        新增字段：
+          analysis.risk_signals   — 风险信号列表（price_negotiation/complaint/churn/etc）
+          analysis.suggested_replies — [{text, rationale, risk_level}] 多档话术
+          analysis.context_summary — 最近 10 轮对话摘要（LLM 生成或规则兜底）
+        """
         body = await request.json()
         text = str(body.get("text") or "")
         messages = body.get("messages") if isinstance(body.get("messages"), list) else []
         chat = body.get("chat") if isinstance(body.get("chat"), dict) else {}
-        if not text and messages:
-            last = next((m for m in reversed(messages) if isinstance(m, dict) and m.get("text")), {})
+
+        # P30：截取最近 10 条消息作为多轮上下文（比原来 8 条多 2 条，覆盖更长对话）
+        ctx_messages = [m for m in messages if isinstance(m, dict)][-10:]
+
+        if not text and ctx_messages:
+            last = next((m for m in reversed(ctx_messages) if m.get("text")), {})
             text = str(last.get("text") or "")
         svc = _get_chat_assistant_service(request)
-        analysis = await svc.analyze(text=text, messages=messages, chat=chat)
+        analysis = await svc.analyze(text=text, messages=ctx_messages, chat=chat)
         out = analysis.to_dict()
-        # C1 LLM 可能抽出 order_no（动态属性）；否则用通用兜底正则
+
+        # C1 订单号提取
         order_no = str(getattr(analysis, "order_no", "") or "").strip() or _extract_order_no(text)
         out["order_no"] = order_no
+
+        # P33：语种检测（优先检测最后入站消息，回落当前文本）
+        _lang_text = text
+        for _m in reversed(ctx_messages):
+            if _m.get("direction") in ("in", "inbound") and _m.get("text"):
+                _lang_text = str(_m["text"])
+                break
+        detected_lang = _detect_language(_lang_text)
+        out["detected_lang"] = detected_lang
+
+        # P30-A：规则级风险信号检测（快速、不消耗 LLM token）
+        out["risk_signals"] = _detect_risk_signals(text, ctx_messages)
+
+        # P30-B / P33：阶梯式话术建议（若 LLM 分析已提供 suggested_reply，基于它衍生多档，含语种适配）
+        if out.get("suggested_reply") and not out.get("suggested_replies"):
+            out["suggested_replies"] = _derive_tiered_replies(
+                out["suggested_reply"], out.get("risk_signals", []), lang=detected_lang
+            )
+
+        # P30-C：多轮摘要（若消息够多，生成简短上下文摘要供坐席快速了解背景）
+        if len(ctx_messages) >= 4:
+            out["context_summary"] = _build_context_summary(ctx_messages)
+
         result: Dict[str, Any] = {"ok": True, "analysis": out}
 
-        # Phase D：检测到订单号 + 电商工具启用 → 查订单并回事实串（事实校验，勿编造）
+        # Phase D：订单查询
         ecom = _ecommerce_tools(request)
         if order_no and ecom is not None:
             try:
@@ -2903,6 +5621,12 @@ def register_unified_inbox_routes(
                     agent_name=_send_agent.get("display_name", ""))
             except Exception:
                 logger.debug("record_agent_send 失败（已忽略）", exc_info=True)
+            # Phase 6：坐席接管发出消息 → 清除自动回复打的「需人工」标签（闭环收口）
+            try:
+                from src.integrations.protocol_autoreply import clear_needs_human
+                clear_needs_human(ibx, cid)
+            except Exception:
+                logger.debug("清除 needs-human 标签失败（已忽略）", exc_info=True)
 
         # A2 写路径收尾：发送收敛到各渠道适配器（与 collect/status 对称）。
         # 跨切面（坐席首响归属打点）统一留在路由，按 result.conversation_id 归属。
@@ -2915,7 +5639,160 @@ def register_unified_inbox_routes(
         cid = (result.get("conversation_id") if isinstance(result, dict) else None) \
             or _conv_id(platform, account_id, chat_key)
         _mark_send(cid)
+        copilot_meta = body.get("copilot_meta")
+        if copilot_meta and cid:
+            ibx = _inbox_store(request)
+            _record_copilot_adopt_from_send(
+                ibx, cid, _send_agent["agent_id"], text, copilot_meta,
+            )
         return {"ok": True, "result": result}
+
+    @app.post("/api/unified-inbox/send-media")
+    async def api_unified_inbox_send_media(request: Request, _=Depends(page_auth)):
+        """M6⑥：坐席从收件箱发送媒体（图片/语音/视频/文件）。
+
+        multipart: file + platform/account_id/chat_key/caption。
+        仅 protocol 账号（编排器接管、在线）支持；其它平台返回 501（走各自 RPA 发送）。
+        发送成功后媒体以 /static URL 回写线程，坐席侧立即可见。
+        """
+        form = await request.form()
+        platform = str(form.get("platform") or "").lower()
+        account_id = str(form.get("account_id") or "default")
+        chat_key = str(form.get("chat_key") or "")
+        caption = str(form.get("caption") or "")
+        upload = form.get("file")
+        if not chat_key or upload is None or not getattr(upload, "filename", ""):
+            raise HTTPException(400, "file 和 chat_key 不能为空")
+
+        from src.integrations.account_orchestrator import get_orchestrator
+        orch = get_orchestrator()
+        if not orch.owns_media(platform, account_id):
+            raise HTTPException(501, "该账号不支持从收件箱发送媒体（需 protocol 多开且在线）")
+
+        data = await upload.read()
+        if not data:
+            raise HTTPException(400, "空文件")
+        if len(data) > 25 * 1024 * 1024:
+            raise HTTPException(413, "文件过大（上限 25MB）")
+
+        from src.integrations.protocol_bridge import save_outbound_media
+        local, url, mtype = save_outbound_media(
+            platform, account_id, upload.filename, data)
+        _send_agent = _session_agent(request)
+        try:
+            res = await orch.send_media(
+                platform, account_id, chat_key,
+                media_path=local, media_url=url, media_type=mtype, caption=caption)
+        except Exception as ex:  # noqa: BLE001
+            raise HTTPException(502, f"媒体发送失败: {ex}")
+        cid = _conv_id(platform, account_id, chat_key)
+        try:
+            ibx = _inbox_store(request)
+            if ibx is not None:
+                ibx.record_agent_send(
+                    cid, _send_agent["agent_id"],
+                    agent_name=_send_agent.get("display_name", ""))
+        except Exception:
+            logger.debug("record_agent_send(media) 失败", exc_info=True)
+        return {"ok": True, "result": res, "media_ref": url, "media_type": mtype}
+
+    @app.post("/api/unified-inbox/send-voice")
+    async def api_unified_inbox_send_voice(request: Request, _=Depends(page_auth)):
+        """坐席发送语音回复：回复文本 → （可声音克隆）TTS 合成 → 作为语音消息发送。
+
+        Body: { platform, account_id, chat_key, text, persona_id?, caption?, voice_cfg_override? }
+        声音克隆复用 voice_profile（telegram.voice_reply / personas.*.voice_profile，
+        backend=voice_clone_command/coqui_http 等）；合成后转 OGG/Opus 以"语音消息"形态发出。
+        仅 protocol 账号（编排器接管、在线）支持；其它平台返回 501（走各自 RPA voice_output）。
+        """
+        body = await request.json()
+        platform = str(body.get("platform") or "").lower()
+        account_id = str(body.get("account_id") or "default")
+        chat_key = str(body.get("chat_key") or "")
+        text = str(body.get("text") or "").strip()
+        persona_id = body.get("persona_id") or None
+        caption = str(body.get("caption") or "")
+        cfg_override = body.get("voice_cfg_override")
+        if not chat_key or not text:
+            raise HTTPException(400, "chat_key 和 text 不能为空")
+        if len(text) > 1000:
+            raise HTTPException(400, "文本过长（语音上限 1000 字）")
+
+        orch = get_orchestrator()
+        if not orch.owns_media(platform, account_id):
+            raise HTTPException(501, "该账号不支持从收件箱发送语音（需 protocol 多开且在线）")
+
+        # 解析语音配置（含声音克隆 voice_profile），允许调用方临时覆盖
+        cm = getattr(request.app.state, "config_manager", None)
+        raw_cfg = (getattr(cm, "config", None) or {}) if cm else {}
+        from src.ai.persona_voice import resolve_voice_cfg
+        voice_cfg = resolve_voice_cfg(persona_id, raw_cfg)
+        if isinstance(cfg_override, dict):
+            voice_cfg.update({k: v for k, v in cfg_override.items() if v not in (None, "")})
+        voice_cfg["enabled"] = True
+
+        # 合成到临时目录
+        import tempfile
+        from pathlib import Path as _Path
+        out_dir = _Path(tempfile.gettempdir()) / "unified_voice_send"
+        voice_cfg["out_dir"] = str(out_dir)
+        from src.ai.tts_pipeline import TTSPipeline
+        try:
+            tts = TTSPipeline(voice_cfg)
+            result = await tts.synthesize(text, timeout_sec=45.0)
+        except Exception as ex:  # noqa: BLE001
+            raise HTTPException(502, f"语音合成失败: {ex}")
+        if not result.ok or not result.audio_path:
+            return {"ok": False, "reason": result.error or "tts_failed",
+                    "message": f"语音合成失败：{result.error or 'unknown'}"}
+
+        # 转 OGG/Opus，使其在 Telegram/WhatsApp 呈现为"语音消息"（ffmpeg 缺失则原样发）
+        audio_path = result.audio_path
+        try:
+            from src.client.voice_sender import convert_to_ogg_opus
+            converted = await asyncio.to_thread(convert_to_ogg_opus, audio_path, delete_src=True)
+            if converted:
+                audio_path = converted
+        except Exception:
+            logger.debug("OGG 转码失败，按原格式发送", exc_info=True)
+
+        # 落到出站媒体目录（线程回写可见）+ 发送（强制 media_type=voice）
+        try:
+            with open(audio_path, "rb") as fh:
+                data = fh.read()
+            from src.integrations.protocol_bridge import save_outbound_media
+            local, url, _mt = save_outbound_media(
+                platform, account_id, os.path.basename(audio_path), data)
+        except Exception as ex:  # noqa: BLE001
+            raise HTTPException(502, f"语音落盘失败: {ex}")
+        finally:
+            try:
+                os.remove(audio_path)
+            except Exception:
+                pass
+
+        _send_agent = _session_agent(request)
+        try:
+            res = await orch.send_media(
+                platform, account_id, chat_key,
+                media_path=local, media_url=url, media_type="voice", caption=caption)
+        except Exception as ex:  # noqa: BLE001
+            raise HTTPException(502, f"语音发送失败: {ex}")
+        cid = _conv_id(platform, account_id, chat_key)
+        try:
+            ibx = _inbox_store(request)
+            if ibx is not None:
+                ibx.record_agent_send(
+                    cid, _send_agent["agent_id"],
+                    agent_name=_send_agent.get("display_name", ""))
+        except Exception:
+            logger.debug("record_agent_send(voice) 失败", exc_info=True)
+        return {
+            "ok": True, "result": res, "media_ref": url, "media_type": "voice",
+            "duration_sec": getattr(result, "duration_sec", -1.0),
+            "provider": getattr(result, "provider", ""),
+            "voice": getattr(result, "voice", ""),
+        }
 
     # ── I1 对话智能元数据 API ──────────────────────────────────────
 
@@ -3156,3 +6033,1818 @@ def register_unified_inbox_routes(
         ts = _template_store(request)
         ts.increment_template_usage(template_id)
         return {"ok": True, "id": template_id}
+
+    # ─── Phase 23: 批量操作 ─────────────────────────────────────────────────
+
+    @app.post("/api/workspace/batch/archive")
+    async def api_batch_archive(request: Request, _=Depends(api_auth)):
+        """P23：批量归档/取消归档会话。
+
+        Body: {conversation_ids: [str, ...], archived: bool}
+        返回: {ok: true, updated: int}
+        """
+        body = await request.json()
+        cids = [str(x) for x in (body.get("conversation_ids") or []) if x]
+        archived = bool(body.get("archived", True))
+        if not cids:
+            return {"ok": False, "error": "conversation_ids 不能为空"}
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "error": "inbox_store 不可用"}
+        updated = 0
+        for cid in cids[:200]:  # 单次上限 200 条
+            try:
+                ok = store.set_conv_archived(cid, archived)
+                if ok:
+                    updated += 1
+            except Exception:
+                pass
+        return {"ok": True, "updated": updated, "archived": archived}
+
+    @app.post("/api/workspace/batch/tags")
+    async def api_batch_tags(request: Request, _=Depends(api_auth)):
+        """P23：批量修改会话标签。
+
+        Body: {conversation_ids: [str, ...], tags: [str, ...],
+               mode: 'set'|'add'|'remove'}
+          mode=set  → 替换全部标签
+          mode=add  → 追加（去重）
+          mode=remove → 删除指定标签
+        返回: {ok: true, updated: int}
+        """
+        body = await request.json()
+        cids = [str(x) for x in (body.get("conversation_ids") or []) if x]
+        tags = [str(t) for t in (body.get("tags") or []) if str(t).strip()]
+        mode = str(body.get("mode", "add")).lower()
+        if mode not in ("set", "add", "remove"):
+            mode = "add"
+        if not cids:
+            return {"ok": False, "error": "conversation_ids 不能为空"}
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "error": "inbox_store 不可用"}
+        import json as _json
+        updated = 0
+        for cid in cids[:200]:
+            try:
+                current = store.get_conv_tags(cid) or []
+                if mode == "set":
+                    new_tags = tags
+                elif mode == "add":
+                    new_tags = list(dict.fromkeys(current + tags))  # 保序去重
+                else:  # remove
+                    rm = set(tags)
+                    new_tags = [t for t in current if t not in rm]
+                ok = store.set_conv_tags(cid, new_tags)
+                if ok:
+                    updated += 1
+            except Exception:
+                pass
+        return {"ok": True, "updated": updated, "mode": mode}
+
+    @app.post("/api/workspace/batch/assign")
+    async def api_batch_assign(request: Request, _=Depends(api_auth)):
+        """P23：批量分配会话给坐席。
+
+        Body: {conversation_ids: [str, ...], agent_id: str}
+        返回: {ok: true, updated: int}
+        """
+        body = await request.json()
+        cids = [str(x) for x in (body.get("conversation_ids") or []) if x]
+        agent_id = str(body.get("agent_id") or "").strip()
+        if not cids or not agent_id:
+            return {"ok": False, "error": "conversation_ids / agent_id 不能为空"}
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "error": "inbox_store 不可用"}
+        updated = 0
+        for cid in cids[:200]:
+            try:
+                store.update_conv_meta(cid, {"claimed_by": agent_id})
+                updated += 1
+            except Exception:
+                pass
+        return {"ok": True, "updated": updated, "agent_id": agent_id}
+
+    # ─── Phase 24: 通知中心（SSE 事件广播） ───────────────────────────────
+
+    @app.get("/api/workspace/notifications")
+    async def api_workspace_notifications(
+        request: Request,
+        limit: int = 50,
+    ):
+        """P24：获取最近通知（SSE 事件历史，存于内存队列）。
+
+        前端在 SSE 断线重连后调用此接口同步缺漏事件。
+        """
+        # 通知队列挂在 app.state.notif_queue（由 SSE 推送时顺带写入）
+        queue: list = getattr(request.app.state, "notif_queue", [])
+        limit = max(1, min(200, int(limit or 50)))
+        return {"ok": True, "notifications": queue[-limit:]}
+
+    @app.post("/api/workspace/notifications/read")
+    async def api_workspace_notifications_read(request: Request, _=Depends(api_auth)):
+        """P24：标记所有通知为已读（仅清除前端 badge，不删除历史）。"""
+        return {"ok": True, "read_at": int(__import__("time").time() * 1000)}
+
+    # ─── Phase 29: Queue Monitor 实时看板 ──────────────────────────────
+
+    @app.get("/api/workspace/queue-monitor")
+    async def api_queue_monitor(request: Request):
+        """P29：实时运营看板——每坐席工作量快照 + 全局队列指标。
+
+        返回：
+          agents: [{agent_id, agent_name, status, open_convs, unread_total,
+                    avg_wait_sec, oldest_wait_sec, load_pct}]
+          queue:  {total_open, total_unread, avg_wait_sec, crit_count,
+                   unassigned_count}
+          ts: float  — 快照时间戳
+        """
+        api_auth(request)
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "error": "inbox_store 不可用"}
+
+        import time as _t
+        now = _t.time()
+        stale_sec = _presence_stale_sec(request)
+
+        # 1. 在线坐席
+        presence = store.list_agent_presence(active_within_sec=stale_sec) if store else []
+        agent_map: Dict[str, Dict[str, Any]] = {
+            p["agent_id"]: {
+                "agent_id": p["agent_id"],
+                "agent_name": p.get("display_name") or p["agent_id"],
+                "status": p.get("status", "offline"),
+                "open_convs": 0,
+                "unread_total": 0,
+                "wait_secs": [],
+                "avg_wait_sec": 0,
+                "oldest_wait_sec": 0,
+                "load_pct": 0,
+            }
+            for p in presence
+        }
+        # 未认领的虚拟坐席桶
+        agent_map["__unassigned__"] = {
+            "agent_id": "__unassigned__",
+            "agent_name": "（未认领）",
+            "status": "virtual",
+            "open_convs": 0, "unread_total": 0,
+            "wait_secs": [], "avg_wait_sec": 0,
+            "oldest_wait_sec": 0, "load_pct": 0,
+        }
+
+        # 2. 遍历全量未归档会话（limit 500）
+        convs = store.list_conversations(limit=500)
+        total_unread = 0
+        crit_count = 0
+        unassigned_count = 0
+        all_wait_secs: list = []
+
+        for c in convs:
+            # 跳过已归档
+            meta = store.get_conv_meta(c.get("conversation_id", "")) or {}
+            if meta.get("archived"):
+                continue
+
+            claimed = str(c.get("claimed_by") or "").strip()
+            bucket = claimed if claimed in agent_map else "__unassigned__"
+            if not claimed:
+                unassigned_count += 1
+
+            agent_map[bucket]["open_convs"] += 1
+            unread = int(c.get("unread") or 0)
+            agent_map[bucket]["unread_total"] += unread
+            total_unread += unread
+
+            wait = int(c.get("unanswered_sec") or 0)
+            if wait > 0:
+                agent_map[bucket]["wait_secs"].append(wait)
+                all_wait_secs.append(wait)
+            if c.get("sla_level") == "crit":
+                crit_count += 1
+
+        # 3. 计算每坐席统计
+        max_open = max((a["open_convs"] for a in agent_map.values()), default=1) or 1
+        for a in agent_map.values():
+            ws = a.pop("wait_secs")
+            a["avg_wait_sec"] = int(sum(ws) / len(ws)) if ws else 0
+            a["oldest_wait_sec"] = int(max(ws)) if ws else 0
+            a["load_pct"] = round(a["open_convs"] / max_open * 100)
+
+        # 排序：在线 → 忙碌 → 离线；同状态按工作量降序
+        _status_order = {"online": 0, "busy": 1, "offline": 2, "virtual": 3}
+        agents_list = sorted(
+            agent_map.values(),
+            key=lambda a: (_status_order.get(a["status"], 9), -a["open_convs"]),
+        )
+
+        avg_wait_global = int(sum(all_wait_secs) / len(all_wait_secs)) if all_wait_secs else 0
+
+        return {
+            "ok": True,
+            "agents": agents_list,
+            "queue": {
+                "total_open": sum(a["open_convs"] for a in agents_list),
+                "total_unread": total_unread,
+                "avg_wait_sec": avg_wait_global,
+                "crit_count": crit_count,
+                "unassigned_count": unassigned_count,
+            },
+            "ts": now,
+        }
+
+    # ─── Phase 28: Webhook 外发运行时配置 ─────────────────────────────
+
+    @app.get("/api/workspace/webhook-outbound")
+    async def api_webhook_outbound_list(request: Request, _=Depends(api_auth)):
+        """P28：列出当前已配置的出站 Webhook（含事件别名、格式）。"""
+        notifier = getattr(request.app.state, "webhook_notifier", None)
+        if notifier is None:
+            return {"ok": True, "webhooks": [], "note": "WebhookNotifier 未启动"}
+        # 脱敏 secret
+        hooks = []
+        for m in getattr(notifier, "_matchers", []):
+            hooks.append({
+                "url": m.get("url", ""),
+                "name": m.get("name", ""),
+                "fmt": m.get("fmt", "json"),
+                "types": list(m.get("types") or ["all"]),
+                "has_secret": bool(m.get("secret")),
+            })
+        return {
+            "ok": True,
+            "webhooks": hooks,
+            "total_sent": getattr(notifier, "total_sent", 0),
+            "total_errors": getattr(notifier, "total_errors", 0),
+        }
+
+    @app.post("/api/workspace/webhook-outbound/test")
+    async def api_webhook_outbound_test(request: Request, _=Depends(api_auth)):
+        """P28：向所有已配置 Webhook 发送测试事件（ping）。"""
+        if not _is_supervisor(request):
+            raise HTTPException(403, "需要主管权限")
+        import time as _t
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            get_event_bus().publish({
+                "type": "report",
+                "subtype": "webhook_test",
+                "data": {"message": "Webhook 测试 Ping", "ts": _t.time()},
+                "ts": _t.time(),
+            })
+            return {"ok": True, "message": "测试事件已发布到事件总线"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    @app.post("/api/workspace/queue-monitor/reassign")
+    async def api_queue_reassign(request: Request, _=Depends(api_auth)):
+        """P29：将指定会话重新分配给另一坐席（主管操作）。
+
+        Body: {conversation_id: str, to_agent_id: str}
+        """
+        if not _is_supervisor(request):
+            raise HTTPException(403, "需要主管权限")
+        body = await request.json()
+        cid = str(body.get("conversation_id") or "").strip()
+        to_agent = str(body.get("to_agent_id") or "").strip()
+        if not cid or not to_agent:
+            raise HTTPException(422, "conversation_id / to_agent_id 不能为空")
+        store = _inbox_store(request)
+        if store is None:
+            raise HTTPException(503, "inbox_store 不可用")
+        store.update_conv_meta(cid, {"claimed_by": to_agent})
+        # 事件总线广播（通知目标坐席）
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            import time as _t
+            get_event_bus().publish({
+                "type": "conversation_claim",
+                "data": {"conversation_id": cid, "agent_id": to_agent,
+                         "action": "reassigned_by_supervisor"},
+                "ts": _t.time(),
+            })
+        except Exception:
+            pass
+        return {"ok": True, "conversation_id": cid, "to_agent_id": to_agent}
+
+    # ─── Phase 25: 坐席协作注解 ─────────────────────────────────────────
+
+    # ─── Phase 48: @mention 智能路由 ─────────────────────────────────────
+
+    @app.get("/api/workspace/conv/{conversation_id}/mention-suggestions")
+    async def api_conv_mention_suggestions(
+        conversation_id: str,
+        request: Request,
+        q: str = "",
+        limit: int = 8,
+    ):
+        """P48：按关系阶段 + 负荷 + QA 推荐 @ 坐席。"""
+        api_auth(request)
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": True, "suggestions": [], "auto_cc": []}
+        from src.inbox.mention_router import MentionRouter
+        from src.workspace.agent_coordinator import AgentCoordinator
+
+        mctx = _mention_context_for_conv(request, conversation_id, store)
+        coord = AgentCoordinator.from_request(request, config_manager)
+        users = []
+        us = _user_store_from_config(config_manager)
+        if us is not None:
+            try:
+                users = us.list_users()
+            except Exception:
+                pass
+        router = MentionRouter.from_store(
+            store, presence=coord.list_presence(), users=users,
+        )
+        me = _session_agent(request)["agent_id"]
+        result = router.suggest(
+            stage=mctx["stage"],
+            stage_label=mctx["stage_label"],
+            churn_level=mctx["churn_level"],
+            claim_agent_id=mctx["claim_agent_id"],
+            overdue_chain=mctx["overdue_chain"],
+            exclude_agent_id=me,
+            query=q,
+            limit=limit,
+        )
+        return {"ok": True, "conversation_id": conversation_id, **result, "context": mctx}
+
+    @app.get("/api/workspace/conv/{conversation_id}/notes")
+    async def api_conv_notes_list(conversation_id: str, request: Request, limit: int = 50):
+        """V1：获取会话内部注解列表（坐席可见，客户不可见）。"""
+        api_auth(request)
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "error": "inbox_store 不可用"}
+        notes = store.list_conv_notes(conversation_id, limit=limit)
+        return {"ok": True, "notes": notes, "count": len(notes)}
+
+    @app.post("/api/workspace/conv/{conversation_id}/notes")
+    async def api_conv_notes_add(
+        conversation_id: str, request: Request, _=Depends(api_auth),
+    ):
+        """V1：在会话中添加内部注解。
+
+        Body: {body: str, mentions: [agent_id, ...] (可选)}
+        """
+        body_data = await request.json()
+        text = str(body_data.get("body", "")).strip()
+        if not text:
+            raise HTTPException(422, "body 不能为空")
+        mentions = [str(m) for m in (body_data.get("mentions") or []) if str(m).strip()]
+        store = _inbox_store(request)
+        if store is None:
+            raise HTTPException(503, "inbox_store 不可用")
+        # P48：高流失 + 高阶段自动抄送主管（若尚未 @）
+        auto_cc_applied: List[Dict[str, Any]] = []
+        try:
+            from src.inbox.mention_router import MentionRouter
+            from src.workspace.agent_coordinator import AgentCoordinator
+            mctx = _mention_context_for_conv(request, conversation_id, store)
+            users = []
+            us = _user_store_from_config(config_manager)
+            if us is not None:
+                users = us.list_users()
+            coord = AgentCoordinator.from_request(request, config_manager)
+            router = MentionRouter.from_store(
+                store, presence=coord.list_presence(), users=users,
+            )
+            sugg = router.suggest(
+                stage=mctx["stage"],
+                stage_label=mctx["stage_label"],
+                churn_level=mctx["churn_level"],
+                claim_agent_id=mctx["claim_agent_id"],
+                overdue_chain=mctx["overdue_chain"],
+            )
+            mention_set = set(mentions)
+            for cc in sugg.get("auto_cc") or []:
+                cc_id = str(cc.get("agent_id") or "")
+                if cc_id and cc_id not in mention_set:
+                    mentions.append(cc_id)
+                    mention_set.add(cc_id)
+                    auto_cc_applied.append(cc)
+        except Exception:
+            pass
+        # 从 session 取当前坐席身份
+        agent_id = str(request.session.get("user_name") or request.session.get("username") or "")
+        agent_name = str(request.session.get("display_name") or agent_id)
+        try:
+            note = store.add_conv_note(
+                conversation_id, text,
+                agent_id=agent_id, agent_name=agent_name, mentions=mentions,
+            )
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        # P25：通过事件总线广播注解事件（@提及 → SSE 通知目标坐席）
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            import time as _t
+            # P45：@mention 时附带协作上下文（阶段 + 推荐话题）
+            collab_hint = ""
+            try:
+                ctx = _conv_relationship_context(request, conversation_id, store)
+                from src.inbox.relationship_stage import compute_relationship_stage
+                rel = compute_relationship_stage(
+                    exchange_count=ctx["exchange_count"],
+                    intimacy_score=ctx["intimacy_score"],
+                )
+                collab_hint = rel.get("stage_label") or ""
+            except Exception:
+                pass
+            get_event_bus().publish("conv_note", {
+                **note,
+                "conversation_id": conversation_id,
+                "stage_label": collab_hint,
+                "ts": _t.time(),
+            })
+        except Exception:
+            pass
+        return {"ok": True, "note": note, "auto_cc": auto_cc_applied}
+
+    @app.patch("/api/workspace/conv/{conversation_id}/notes/{note_id}")
+    async def api_conv_notes_edit(
+        conversation_id: str, note_id: str, request: Request, _=Depends(api_auth),
+    ):
+        """V1：编辑注解内容。"""
+        body_data = await request.json()
+        text = str(body_data.get("body", "")).strip()
+        if not text:
+            raise HTTPException(422, "body 不能为空")
+        store = _inbox_store(request)
+        if store is None:
+            raise HTTPException(503, "inbox_store 不可用")
+        agent_id = str(request.session.get("user_name") or "")
+        ok = store.edit_conv_note(note_id, text, agent_id=agent_id)
+        if not ok:
+            raise HTTPException(404, "注解不存在")
+        return {"ok": True, "note_id": note_id}
+
+    @app.delete("/api/workspace/conv/{conversation_id}/notes/{note_id}")
+    async def api_conv_notes_delete(
+        conversation_id: str, note_id: str, request: Request, _=Depends(api_auth),
+    ):
+        """V1：删除注解。"""
+        store = _inbox_store(request)
+        if store is None:
+            raise HTTPException(503, "inbox_store 不可用")
+        agent_id = str(request.session.get("user_name") or "")
+        ok = store.delete_conv_note(note_id, agent_id=agent_id)
+        if not ok:
+            raise HTTPException(404, "注解不存在")
+        return {"ok": True, "note_id": note_id}
+
+    # ─── Phase 27: 客户活跃时段热力图 ───────────────────────────────────
+
+    # ─── Phase 31: 客户 360° 时间轴 ────────────────────────────────────
+
+    @app.get("/api/workspace/contact/{contact_id}/timeline")
+    async def api_contact_timeline(
+        contact_id: str, request: Request, limit: int = 100
+    ):
+        """X1：获取客户完整互动时间轴（消息/注解/归档/摘要，跨会话聚合）。"""
+        api_auth(request)
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "error": "inbox_store 不可用"}
+        limit = max(1, min(500, int(limit or 100)))
+        events = store.get_contact_timeline(contact_id, limit=limit)
+        return {"ok": True, "contact_id": contact_id, "events": events, "count": len(events)}
+
+    # ─── Phase 43: 关系阶段可视化 + 进阶提醒 ───────────────────────────
+
+    @app.get("/api/workspace/conv/{conversation_id}/relationship-stage")
+    async def api_conv_relationship_stage(conversation_id: str, request: Request):
+        """DD1/P46：关系阶段进度条 + 待确认进阶（坐席确认制）。"""
+        api_auth(request)
+        store = _inbox_store(request)
+        result = _build_relationship_stage_payload(
+            request, conversation_id, store, emit_pending_event=True,
+        )
+        return {"ok": True, "conversation_id": conversation_id, **result}
+
+    @app.post("/api/workspace/conv/{conversation_id}/relationship-stage/confirm")
+    async def api_conv_relationship_stage_confirm(
+        conversation_id: str, request: Request, _=Depends(api_auth),
+    ):
+        """P46：坐席确认关系进阶。"""
+        store = _inbox_store(request)
+        if store is None:
+            raise HTTPException(503, "inbox_store 不可用")
+        body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+        payload = _build_relationship_stage_payload(request, conversation_id, store)
+        confirmed = str(payload.get("confirmed_stage") or payload.get("stage") or "")
+        target = str(body.get("stage") or payload.get("pending_stage") or payload.get("computed_stage") or "")
+        from src.utils.companion_relationship import STAGE_ORDER
+        if target not in STAGE_ORDER:
+            raise HTTPException(422, "无效目标阶段")
+        if confirmed and STAGE_ORDER.index(target) <= STAGE_ORDER.index(confirmed):
+            raise HTTPException(422, "目标阶段必须高于当前确认阶段")
+        prev_label = payload.get("confirmed_stage_label") or payload.get("stage_label")
+        contact_id = str((payload.get("context") or {}).get("contact_id") or "")
+        agent_id, agent_name = _agent_from_request(request)
+        if contact_id:
+            store.confirm_rel_stage_with_contact(
+                conversation_id, contact_id, target,
+                updated_by=agent_id, sync_all_convs=True,
+            )
+        else:
+            store.confirm_rel_stage(conversation_id, target)
+        store.record_draft_audit(
+            "", action="stage_confirm", agent_id=agent_id,
+            reason=f"{prev_label} → {target}",
+            conversation_id=conversation_id,
+        )
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            from src.utils.companion_relationship import STAGE_LABEL_ZH
+            import time as _t
+            get_event_bus().publish("stage_advance", {
+                "conversation_id": conversation_id,
+                "contact_id": contact_id,
+                "confirmed": True,
+                "agent_id": agent_id,
+                "agent_name": agent_name,
+                "previous_stage": confirmed,
+                "previous_stage_label": prev_label,
+                "stage": target,
+                "stage_label": STAGE_LABEL_ZH.get(target, target),
+                "ts": _t.time(),
+            })
+        except Exception:
+            pass
+        refreshed = _build_relationship_stage_payload(request, conversation_id, store)
+        return {"ok": True, "conversation_id": conversation_id, **refreshed}
+
+    @app.post("/api/workspace/conv/{conversation_id}/relationship-stage/downgrade")
+    async def api_conv_relationship_stage_downgrade(
+        conversation_id: str, request: Request, _=Depends(api_auth),
+    ):
+        """P46：坐席手动降级关系阶段（附原因）。"""
+        store = _inbox_store(request)
+        if store is None:
+            raise HTTPException(503, "inbox_store 不可用")
+        body = await request.json()
+        reason = str(body.get("reason") or "").strip()
+        if not reason:
+            raise HTTPException(422, "reason 不能为空")
+        from src.inbox.relationship_stage import downgrade_stage_one_level
+        from src.utils.companion_relationship import STAGE_ORDER, STAGE_LABEL_ZH
+        payload = _build_relationship_stage_payload(request, conversation_id, store)
+        confirmed = str(payload.get("confirmed_stage") or payload.get("stage") or "initial")
+        target = str(body.get("stage") or downgrade_stage_one_level(confirmed))
+        if target not in STAGE_ORDER:
+            raise HTTPException(422, "无效目标阶段")
+        if STAGE_ORDER.index(target) >= STAGE_ORDER.index(confirmed):
+            raise HTTPException(422, "目标阶段必须低于当前确认阶段")
+        prev_label = payload.get("confirmed_stage_label") or payload.get("stage_label")
+        contact_id = str((payload.get("context") or {}).get("contact_id") or "")
+        agent_id, agent_name = _agent_from_request(request)
+        if contact_id:
+            store.confirm_rel_stage_with_contact(
+                conversation_id, contact_id, target,
+                updated_by=agent_id, sync_all_convs=True,
+            )
+        else:
+            store.confirm_rel_stage(conversation_id, target)
+        note_body = f"[关系降级] {prev_label} → {STAGE_LABEL_ZH.get(target, target)}：{reason}"
+        store.add_conv_note(
+            conversation_id, note_body,
+            agent_id=agent_id, agent_name=agent_name,
+        )
+        store.record_draft_audit(
+            "", action="stage_downgrade", agent_id=agent_id,
+            reason=note_body, conversation_id=conversation_id,
+        )
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            import time as _t
+            get_event_bus().publish("stage_downgrade", {
+                "conversation_id": conversation_id,
+                "contact_id": contact_id,
+                "agent_name": agent_name,
+                "previous_stage_label": prev_label,
+                "stage_label": STAGE_LABEL_ZH.get(target, target),
+                "reason": reason,
+                "ts": _t.time(),
+            })
+        except Exception:
+            pass
+        refreshed = _build_relationship_stage_payload(request, conversation_id, store)
+        return {"ok": True, "conversation_id": conversation_id, **refreshed}
+
+    @app.post("/api/workspace/conv/{conversation_id}/relationship-stage/reunion")
+    async def api_conv_relationship_stage_reunion(
+        conversation_id: str, request: Request, _=Depends(api_auth),
+    ):
+        """P46：确认久别重逢 — 将确认阶段同步至亲密度阶段并推荐回暖话题。"""
+        store = _inbox_store(request)
+        if store is None:
+            raise HTTPException(503, "inbox_store 不可用")
+        body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+        from src.utils.companion_relationship import derive_stage_from_intimacy, STAGE_LABEL_ZH
+        payload = _build_relationship_stage_payload(request, conversation_id, store)
+        if not payload.get("reunion"):
+            raise HTTPException(422, "当前会话未检测到久别重逢信号")
+        ctx = payload.get("context") or {}
+        intim = ctx.get("intimacy_score")
+        target = derive_stage_from_intimacy(float(intim)) if intim is not None else str(payload.get("computed_stage") or "initial")
+        confirmed = str(payload.get("confirmed_stage") or payload.get("stage") or "")
+        prev_label = payload.get("confirmed_stage_label") or payload.get("stage_label")
+        contact_id = str(ctx.get("contact_id") or "")
+        import time as _t
+        reunion_ts = _t.time()
+        agent_id, agent_name = _agent_from_request(request)
+        if contact_id:
+            store.confirm_rel_stage_with_contact(
+                conversation_id, contact_id, target,
+                updated_by=agent_id, sync_all_convs=True,
+            )
+            store.set_contact_rel_stage(
+                contact_id, target, updated_by=agent_id, reunion_ack_ts=reunion_ts,
+            )
+        else:
+            store.confirm_rel_stage(conversation_id, target)
+        store.ack_rel_reunion(conversation_id, ts=reunion_ts)
+        note = str(body.get("note") or "已确认回暖，采用自然问候策略").strip()
+        store.add_conv_note(
+            conversation_id, f"[关系回暖] {prev_label} → {STAGE_LABEL_ZH.get(target, target)}：{note}",
+            agent_id=agent_id, agent_name=agent_name,
+        )
+        reunion_reason = (
+            f"[关系回暖] {prev_label} → {STAGE_LABEL_ZH.get(target, target)}：{note}"
+        )
+        store.record_draft_audit(
+            "", action="stage_reunion", agent_id=agent_id,
+            reason=reunion_reason, conversation_id=conversation_id,
+        )
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            get_event_bus().publish("stage_reunion", {
+                "conversation_id": conversation_id,
+                "contact_id": contact_id,
+                "agent_name": agent_name,
+                "stage_label": STAGE_LABEL_ZH.get(target, target),
+                "note": note,
+                "ts": _t.time(),
+            })
+        except Exception:
+            pass
+        refreshed = _build_relationship_stage_payload(request, conversation_id, store)
+        return {"ok": True, "conversation_id": conversation_id, **refreshed}
+
+    @app.get("/api/workspace/contact/{contact_id}/relationship-stage")
+    async def api_contact_relationship_stage(contact_id: str, request: Request):
+        """P50：客户级关系阶段（含多会话冲突检测）。"""
+        api_auth(request)
+        store = _inbox_store(request)
+        result = _build_contact_relationship_payload(request, contact_id, store)
+        return {"ok": True, "contact_id": contact_id, **result}
+
+    @app.post("/api/workspace/contact/{contact_id}/relationship-stage/sync")
+    async def api_contact_relationship_stage_sync(
+        contact_id: str, request: Request, _=Depends(api_auth),
+    ):
+        """P50：一键对齐多会话阶段（to_contact | to_highest）。"""
+        store = _inbox_store(request)
+        if store is None:
+            raise HTTPException(503, "inbox_store 不可用")
+        body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+        mode = str(body.get("mode") or "to_contact").strip()
+        from src.inbox.contact_rel_stage import highest_stage
+        from src.utils.companion_relationship import STAGE_ORDER
+
+        contact_rec = store.get_contact_rel_stage(contact_id) or {}
+        contact_stage = str(contact_rec.get("confirmed_stage") or "")
+        conv_stages = store.list_conv_rel_stages_for_contact(contact_id)
+        if mode == "to_highest":
+            target = highest_stage([s for s in conv_stages.values() if s] + ([contact_stage] if contact_stage else []))
+        else:
+            target = contact_stage or highest_stage([s for s in conv_stages.values() if s])
+        if not target or target not in STAGE_ORDER:
+            raise HTTPException(422, "无可对齐的目标阶段")
+        agent_id, _ = _agent_from_request(request)
+        if not contact_stage:
+            store.set_contact_rel_stage(contact_id, target, updated_by=agent_id)
+        elif mode == "to_highest" and STAGE_ORDER.index(target) > STAGE_ORDER.index(contact_stage):
+            store.set_contact_rel_stage(contact_id, target, updated_by=agent_id)
+        synced = store.sync_convs_to_stage(contact_id, target)
+        store.record_draft_audit(
+            f"contact:{contact_id}", action="stage_sync", agent_id=agent_id,
+            reason=f"对齐至 {target}（{mode}，{synced} 会话）",
+            conversation_id="",
+        )
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            import time as _t
+            from src.utils.companion_relationship import STAGE_LABEL_ZH
+            get_event_bus().publish("stage_sync", {
+                "contact_id": contact_id,
+                "agent_id": agent_id,
+                "target_stage": target,
+                "target_stage_label": STAGE_LABEL_ZH.get(target, target),
+                "mode": mode,
+                "synced": synced,
+                "ts": _t.time(),
+            })
+        except Exception:
+            pass
+        refreshed = _build_contact_relationship_payload(request, contact_id, store)
+        return {"ok": True, "contact_id": contact_id, "synced": synced, "target_stage": target, **refreshed}
+
+    @app.get("/api/workspace/contact/{contact_id}/stage-timeline")
+    async def api_contact_stage_timeline(
+        contact_id: str, request: Request, limit: int = 50,
+    ):
+        """P51：客户关系阶段演进时间轴（确认/降级/回暖/对齐）。"""
+        api_auth(request)
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "error": "inbox_store 不可用"}
+        from src.inbox.stage_timeline import (
+            build_contact_stage_summary,
+            enrich_stage_audit_row,
+        )
+        lim = max(1, min(200, int(limit or 50)))
+        rows = store.list_contact_stage_audits(contact_id, limit=lim)
+        events = [enrich_stage_audit_row(r) for r in rows]
+        contact_rec = store.get_contact_rel_stage(contact_id)
+        summary = build_contact_stage_summary(events, contact_rec=contact_rec)
+        return {
+            "ok": True,
+            "contact_id": contact_id,
+            "events": events,
+            "count": len(events),
+            "summary": summary,
+        }
+
+    # ─── Phase 45: 多坐席协作剧本上下文 ─────────────────────────────────
+
+    @app.get("/api/workspace/contact/{contact_id}/collab-context")
+    async def api_contact_collab_context(contact_id: str, request: Request):
+        """EE1：客户级协作上下文（统一阶段 + 积分 + 话题 + 活跃工作链）。"""
+        api_auth(request)
+        store = _inbox_store(request)
+        cs = _contacts_store(request)
+        from src.inbox.conversation_script import ConversationScriptEngine
+        from src.inbox.relationship_stage import compute_relationship_stage
+
+        intimacy_score = None
+        primary_name = ""
+        if cs is not None:
+            try:
+                contact = cs.get_contact(contact_id)
+                if contact:
+                    primary_name = str(contact.primary_name or "")
+                journey = cs.get_journey_by_contact(contact_id)
+                if journey is not None:
+                    intimacy_score = float(journey.intimacy_score or 0)
+            except Exception:
+                pass
+
+        # 聚合该客户所有会话消息数
+        message_count = 0
+        conv_ids: List[str] = []
+        if store is not None:
+            try:
+                rows = store._conn.execute(
+                    "SELECT conversation_id FROM conversations WHERE contact_id = ? LIMIT 20",
+                    (contact_id,),
+                ).fetchall()
+                conv_ids = [r["conversation_id"] for r in rows]
+                if conv_ids:
+                    ph = ",".join("?" * len(conv_ids))
+                    message_count = store._conn.execute(
+                        f"SELECT COUNT(*) as c FROM messages WHERE conversation_id IN ({ph})",
+                        conv_ids,
+                    ).fetchone()["c"]
+            except Exception:
+                pass
+
+        rel_payload = _build_contact_relationship_payload(request, contact_id, store)
+        rel = {k: v for k, v in rel_payload.items() if k not in (
+            "stage_conflict", "stage_conflict_detail", "contact_updated_by",
+        )}
+        engine = ConversationScriptEngine()
+        topics = engine.suggest_topics(
+            rel.get("display_stage") or rel.get("confirmed_stage") or rel.get("stage") or "initial",
+            custom_topics=store.list_script_topics() if store else [],
+            limit=3,
+        ).get("topics", [])
+
+        engagement_raw = store.get_contact_engagement(contact_id) if store else None
+        engagement = None
+        if engagement_raw:
+            from src.inbox.engagement_scorer import EngagementScorer
+            ln, _ = EngagementScorer._level_for(int(engagement_raw.get("points") or 0))
+            engagement = {**engagement_raw, "level_name": ln}
+        active_chains: List[Dict[str, Any]] = []
+        recent_notes: List[Dict[str, Any]] = []
+        if store is not None and conv_ids:
+            for cid in conv_ids[:5]:
+                try:
+                    for ex in store.get_conv_chain_executions(cid):
+                        if ex.get("status") == "running":
+                            active_chains.append(ex)
+                    for note in store.list_conv_notes(cid, limit=5)[-3:]:
+                        recent_notes.append(note)
+                except Exception:
+                    pass
+            recent_notes.sort(key=lambda n: float(n.get("ts") or 0), reverse=True)
+            recent_notes = recent_notes[:8]
+
+        return {
+            "ok": True,
+            "contact_id": contact_id,
+            "primary_name": primary_name,
+            "relationship": rel,
+            "contact_stage": rel_payload.get("contact_stage"),
+            "contact_stage_label": rel_payload.get("contact_stage_label"),
+            "stage_conflict": rel_payload.get("stage_conflict", False),
+            "stage_conflict_detail": rel_payload.get("stage_conflict_detail"),
+            "suggested_topics": topics,
+            "engagement": engagement,
+            "active_chains": active_chains[:10],
+            "recent_notes": recent_notes,
+            "conversation_ids": conv_ids,
+        }
+
+    @app.get("/api/workspace/conv/{conversation_id}/collab-context")
+    async def api_conv_collab_context(conversation_id: str, request: Request):
+        """EE1：会话级协作条（含 @mention 时附带阶段+话题）。"""
+        api_auth(request)
+        store = _inbox_store(request)
+        rel = _build_relationship_stage_payload(request, conversation_id, store)
+        ctx = rel.get("context") or {}
+        contact_id = ctx.get("contact_id") or ""
+        if contact_id:
+            resp = await api_contact_collab_context(contact_id, request)
+            resp["conversation_id"] = conversation_id
+            resp["relationship"] = {k: v for k, v in rel.items() if k != "context"}
+            return resp
+        from src.inbox.conversation_script import ConversationScriptEngine
+        engine = ConversationScriptEngine()
+        topics = engine.suggest_topics(
+            rel.get("display_stage") or rel.get("stage") or "initial",
+            custom_topics=store.list_script_topics() if store else [],
+            limit=3,
+        ).get("topics", [])
+        return {
+            "ok": True,
+            "conversation_id": conversation_id,
+            "relationship": {k: v for k, v in rel.items() if k != "context"},
+            "suggested_topics": topics,
+            "recent_notes": store.list_conv_notes(conversation_id, limit=5) if store else [],
+        }
+
+    # ─── Phase 40: 情感陪伴剧本引擎 ─────────────────────────────────────
+
+    @app.get("/api/workspace/conv/{conversation_id}/script-suggestions")
+    async def api_conv_script_suggestions(conversation_id: str, request: Request):
+        """CC1：按关系阶段推荐话题切入点（内置 + 自定义）。"""
+        api_auth(request)
+        store = _inbox_store(request)
+        from src.inbox.conversation_script import ConversationScriptEngine
+
+        message_count = 0
+        last_msg_text = ""
+        intimacy_score: Optional[float] = None
+        exchange_count = 0
+        reunion = False
+
+        if store is not None:
+            try:
+                rows = store._conn.execute(
+                    """SELECT direction, text, ts FROM messages
+                       WHERE conversation_id = ? ORDER BY ts DESC LIMIT 30""",
+                    (conversation_id,),
+                ).fetchall()
+                message_count = store._conn.execute(
+                    "SELECT COUNT(*) as c FROM messages WHERE conversation_id = ?",
+                    (conversation_id,),
+                ).fetchone()["c"]
+                if rows:
+                    for r in rows:
+                        if r["direction"] in ("in", "inbound"):
+                            last_msg_text = str(r["text"] or "")
+                            break
+                meta = store.get_conv_meta(conversation_id) or {}
+                contact_id = str(meta.get("contact_id") or "")
+                if contact_id:
+                    cs = _contacts_store(request)
+                    if cs is not None:
+                        try:
+                            journey = cs.get_journey_by_contact(contact_id)
+                            if journey is not None:
+                                intimacy_score = float(journey.intimacy_score or 0)
+                        except Exception:
+                            pass
+                exchange_count = max(0, message_count // 2)
+            except Exception:
+                logger.debug("script-suggestions 上下文失败", exc_info=True)
+
+        custom = store.list_script_topics() if store else []
+        engine = ConversationScriptEngine()
+        stage = engine.derive_stage_from_signals(
+            exchange_count=exchange_count, intimacy_score=intimacy_score,
+        )
+        result = engine.suggest_topics(
+            stage,
+            custom_topics=custom,
+            last_msg_text=last_msg_text,
+            message_count=message_count,
+            reunion=reunion,
+            limit=6,
+        )
+        return {"ok": True, "conversation_id": conversation_id, **result}
+
+    @app.get("/api/workspace/script-topics")
+    async def api_script_topics_list(request: Request, stage: str = ""):
+        api_auth(request)
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": True, "topics": []}
+        return {"ok": True, "topics": store.list_script_topics(stage=stage)}
+
+    @app.post("/api/workspace/script-topics")
+    async def api_script_topics_create(request: Request, _=Depends(api_auth)):
+        body = await request.json()
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "error": "inbox_store 不可用"}
+        topic_id = store.upsert_script_topic(body)
+        return {"ok": True, "topic_id": topic_id}
+
+    @app.put("/api/workspace/script-topics/{topic_id}")
+    async def api_script_topics_update(topic_id: str, request: Request, _=Depends(api_auth)):
+        body = await request.json()
+        body["topic_id"] = topic_id
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False}
+        store.upsert_script_topic(body)
+        return {"ok": True, "topic_id": topic_id}
+
+    @app.delete("/api/workspace/script-topics/{topic_id}")
+    async def api_script_topics_delete(topic_id: str, request: Request, _=Depends(api_auth)):
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False}
+        ok = store.delete_script_topic(topic_id)
+        return {"ok": ok}
+
+    # ─── Phase 41: 客户互动积分与成就 ───────────────────────────────────
+
+    @app.get("/api/workspace/contact/{contact_id}/engagement")
+    async def api_contact_engagement_get(contact_id: str, request: Request):
+        """CC1：读取客户互动积分（无则返回空）。"""
+        api_auth(request)
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "engagement": None}
+        data = store.get_contact_engagement(contact_id)
+        if data is None:
+            return {"ok": True, "contact_id": contact_id, "engagement": None, "computed": False}
+        from src.inbox.engagement_scorer import _ACHIEVEMENT_DEFS, EngagementScorer
+        level_name, _ = EngagementScorer._level_for(int(data.get("points") or 0))
+        ach_details = [
+            {**_ACHIEVEMENT_DEFS.get(aid, {"name": aid, "icon": "🏅", "desc": ""}),
+             "id": aid, "unlocked": True}
+            for aid in (data.get("achievements") or [])
+        ]
+        for aid, defn in _ACHIEVEMENT_DEFS.items():
+            if aid not in (data.get("achievements") or []):
+                ach_details.append({**defn, "id": aid, "unlocked": False})
+        return {
+            "ok": True,
+            "contact_id": contact_id,
+            "computed": True,
+            "engagement": {
+                **data,
+                "level_name": level_name,
+                "achievement_details": ach_details,
+                "is_vip": int(data.get("points") or 0) >= 600,
+            },
+        }
+
+    @app.post("/api/workspace/contact/{contact_id}/engagement")
+    async def api_contact_engagement_compute(contact_id: str, request: Request, _=Depends(api_auth)):
+        """CC1：重新计算并存储互动积分。"""
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "error": "inbox_store 不可用"}
+        result = store.compute_and_store_engagement(contact_id)
+        return {"ok": True, "contact_id": contact_id, "engagement": result}
+
+    # ─── Phase 42: 坐席 AI 副驾（打字辅助） ─────────────────────────────
+
+    @app.get("/api/workspace/conv/{conversation_id}/copilot-prefill")
+    async def api_conv_copilot_prefill(
+        conversation_id: str,
+        request: Request,
+        trigger: str = "open",
+        workflow_text: str = "",
+        workflow_chain_name: str = "",
+        workflow_step: int = 0,
+        mention_body: str = "",
+        mention_from: str = "",
+        polish: bool = True,
+    ):
+        """P49/P52：事件驱动 Copilot 预填（可选 LLM 润色）。"""
+        api_auth(request)
+        store = _inbox_store(request)
+        ctx = _build_copilot_context(
+            request, conversation_id, store,
+            trigger=trigger.strip(),
+            workflow_text=workflow_text,
+            workflow_chain_name=workflow_chain_name,
+            workflow_step=workflow_step,
+            mention_body=mention_body,
+            mention_from=mention_from,
+        )
+        last_customer = ""
+        if store is not None:
+            try:
+                rows = store._conn.execute(
+                    """SELECT direction, text FROM messages
+                       WHERE conversation_id = ? ORDER BY ts DESC LIMIT 20""",
+                    (conversation_id,),
+                ).fetchall()
+                for r in rows:
+                    if r["direction"] in ("in", "inbound") and r["text"]:
+                        last_customer = str(r["text"])
+                        break
+            except Exception:
+                pass
+        templates: List[Dict[str, Any]] = []
+        if store is not None:
+            try:
+                templates = store.list_templates(limit=50, active_only=True)
+            except Exception:
+                pass
+        from src.inbox.reply_copilot import ReplyCopilot
+        result = ReplyCopilot().suggest(
+            partial_text="",
+            last_customer_msg=last_customer,
+            stage=ctx["stage"],
+            templates=templates,
+            context=ctx,
+            limit=4,
+        )
+        payload = {
+            "ok": True,
+            "conversation_id": conversation_id,
+            "trigger": ctx.get("trigger") or trigger,
+            "stage": ctx["stage"],
+            **result,
+            "context": ctx,
+        }
+        payload = await _maybe_polish_copilot(
+            request, payload,
+            conversation_id=conversation_id,
+            partial_text="",
+            last_customer_msg=last_customer,
+            polish_requested=bool(polish),
+        )
+        agent_id, _ = _agent_from_request(request)
+        _record_copilot_impression_if_prefill(
+            store, conversation_id, agent_id, payload, partial_text="",
+        )
+        return payload
+
+    @app.post("/api/workspace/conv/{conversation_id}/reply-suggest")
+    async def api_conv_reply_suggest(conversation_id: str, request: Request, _=Depends(api_auth)):
+        """CC1/P49：实时回复补全（规则 + 模板 + 阶段/工作链/@mention 联动）。"""
+        body = await request.json()
+        partial = str(body.get("partial") or body.get("text") or "")
+        recent = body.get("messages") if isinstance(body.get("messages"), list) else []
+
+        last_customer = ""
+        for m in reversed(recent):
+            if isinstance(m, dict) and m.get("direction") in ("in", "inbound") and m.get("text"):
+                last_customer = str(m["text"])
+                break
+
+        templates: List[Dict[str, Any]] = []
+        store = _inbox_store(request)
+        ctx = _build_copilot_context(
+            request, conversation_id, store,
+            trigger=str(body.get("trigger") or ""),
+            workflow_text=str(body.get("workflow_text") or ""),
+            workflow_chain_name=str(body.get("workflow_chain_name") or ""),
+            workflow_step=int(body.get("workflow_step") or 0),
+            mention_body=str(body.get("mention_body") or ""),
+            mention_from=str(body.get("mention_from") or ""),
+        ) if store is not None else {}
+
+        if store is not None:
+            try:
+                templates = store.list_templates(limit=50, active_only=True)
+            except Exception:
+                pass
+
+        from src.inbox.reply_copilot import ReplyCopilot
+        result = ReplyCopilot().suggest(
+            partial_text=partial,
+            last_customer_msg=last_customer,
+            stage=ctx.get("stage") or "initial",
+            recent_messages=recent,
+            templates=templates,
+            context=ctx,
+            limit=4 if not partial else 3,
+        )
+        polish_req = bool(body.get("polish"))
+        payload = {
+            "ok": True,
+            "conversation_id": conversation_id,
+            "partial": partial,
+            "stage": ctx.get("stage") or "initial",
+            **result,
+            "context": ctx,
+        }
+        if polish_req and not partial.strip():
+            payload = await _maybe_polish_copilot(
+                request, payload,
+                conversation_id=conversation_id,
+                partial_text=partial,
+                last_customer_msg=last_customer,
+                polish_requested=True,
+            )
+        else:
+            payload["polished"] = False
+        if not partial.strip() and store is not None:
+            agent_id, _ = _agent_from_request(request)
+            _record_copilot_impression_if_prefill(
+                store, conversation_id, agent_id, payload, partial_text=partial,
+            )
+        return payload
+
+    # ─── Phase 37: 下一步动作推荐 + 自定义动作/工作链 ───────────────────
+
+    @app.get("/api/workspace/conv/{conversation_id}/next-actions")
+    async def api_conv_next_actions(conversation_id: str, request: Request):
+        """AA1：推荐当前会话下一步动作（内置场景动作 + 用户自定义）。
+
+        Query 参数可传入会话上下文加速推荐（否则从 store 自动拉取）：
+          silence_hours, message_count, churn_risk_level
+        """
+        api_auth(request)
+        store = _inbox_store(request)
+        from src.inbox.next_action_recommender import NextActionRecommender
+
+        # 拉取最新消息（用于信号检测）
+        last_msg_text = ""
+        last_msg_direction = "in"
+        message_count = 0
+        silence_hours = 0.0
+        churn_risk_level = ""
+        risk_signals: List[Dict[str, Any]] = []
+
+        if store is not None:
+            try:
+                rows = store._conn.execute(
+                    """SELECT direction, text, ts FROM messages
+                       WHERE conversation_id = ? ORDER BY ts DESC LIMIT 30""",
+                    (conversation_id,),
+                ).fetchall()
+                if rows:
+                    message_count = store._conn.execute(
+                        "SELECT COUNT(*) as c FROM messages WHERE conversation_id = ?",
+                        (conversation_id,),
+                    ).fetchone()["c"]
+                    last = rows[0]
+                    last_msg_text = str(last["text"] or "")
+                    last_msg_direction = str(last["direction"] or "in")
+                    import time as _t
+                    silence_hours = max(0.0, (_t.time() - float(last["ts"] or 0)) / 3600)
+
+                # 读取流失风险
+                meta = store.get_conv_meta(conversation_id) or {}
+                churn_raw = str(meta.get("churn_risk") or "").strip()
+                if churn_raw:
+                    import json as _j
+                    cd = _j.loads(churn_raw)
+                    churn_risk_level = str(cd.get("level") or "")
+            except Exception:
+                logger.debug("next-actions 上下文拉取失败（已忽略）", exc_info=True)
+
+        # 拉取自定义动作（已启用）
+        custom_actions: List[Dict[str, Any]] = []
+        if store is not None:
+            try:
+                raw = store.list_workflow_actions()
+                for act in raw:
+                    import json as _j
+                    try:
+                        cfg = _j.loads(act.get("config_json") or "{}")
+                    except Exception:
+                        cfg = {}
+                    try:
+                        triggers = _j.loads(act.get("trigger_conditions") or '["any"]')
+                    except Exception:
+                        triggers = ["any"]
+                    custom_actions.append({**act, "config": cfg, "trigger_conditions": triggers})
+            except Exception:
+                pass
+
+        rec = NextActionRecommender()
+        actions = rec.recommend(
+            risk_signals=risk_signals,
+            last_msg_text=last_msg_text,
+            last_msg_direction=last_msg_direction,
+            message_count=message_count,
+            silence_hours=silence_hours,
+            churn_risk_level=churn_risk_level,
+            custom_actions=custom_actions,
+            limit=6,
+        )
+        return {
+            "ok": True,
+            "conversation_id": conversation_id,
+            "actions": actions,
+            "context": {
+                "message_count": message_count,
+                "silence_hours": round(silence_hours, 1),
+                "churn_risk_level": churn_risk_level,
+                "last_direction": last_msg_direction,
+            },
+        }
+
+    @app.post("/api/workspace/conv/{conversation_id}/execute-action")
+    async def api_conv_execute_action(conversation_id: str, request: Request, _=Depends(api_auth)):
+        """AA1：执行一个动作（发话术/创建任务/打标签/启动工作链）。"""
+        body = await request.json()
+        action_type = str(body.get("action_type") or "")
+        config = body.get("config") or {}
+        store = _inbox_store(request)
+        import time as _t
+        now = _t.time()
+        result: Dict[str, Any] = {"ok": True, "action_type": action_type}
+
+        if action_type == "task":
+            # 创建跟进任务
+            due_hours = float(config.get("due_hours") or 72)
+            note = str(config.get("note") or "")
+            contacts_store = _contacts_store(request)
+            agent_id = request.session.get("agent_id") or request.session.get("username") or ""
+            if contacts_store:
+                try:
+                    meta = store.get_conv_meta(conversation_id) if store else {}
+                    contact_id = (meta or {}).get("contact_id", "")
+                    if contact_id:
+                        contacts_store.add_follow_up_task(
+                            contact_id, now + due_hours * 3600, note=note, assignee=agent_id
+                        )
+                        result["task_created"] = True
+                except Exception:
+                    pass
+
+        elif action_type == "tag":
+            # 添加标签
+            tag = str(config.get("tag") or "")
+            if tag and store:
+                try:
+                    existing_tags = store.get_conv_tags(conversation_id)
+                    if tag not in existing_tags:
+                        store.set_conv_tags(conversation_id, existing_tags + [tag])
+                    result["tag"] = tag
+                except Exception:
+                    pass
+
+        elif action_type == "note":
+            # 添加内部注解
+            body_text = str(config.get("note_body") or config.get("hint") or "")
+            agent_id = request.session.get("agent_id") or request.session.get("username") or ""
+            agent_name = request.session.get("display_name") or agent_id
+            if body_text and store:
+                try:
+                    store.add_conv_note(
+                        conversation_id, body_text,
+                        agent_id=agent_id, agent_name=agent_name,
+                    )
+                    result["note_added"] = True
+                except Exception:
+                    pass
+
+        elif action_type == "chain":
+            # 启动工作链
+            chain_id = str(config.get("chain_id") or "")
+            if chain_id and store:
+                try:
+                    exec_id = store.start_chain_execution(
+                        chain_id, conversation_id,
+                        {"agent": request.session.get("username")},
+                        schedule_first_step=True,
+                    )
+                    result["exec_id"] = exec_id
+                except Exception:
+                    pass
+
+        elif action_type == "escalate":
+            # 发布升级事件
+            try:
+                from src.integrations.shared.event_bus import get_event_bus
+                get_event_bus().publish("escalation", {
+                    "conversation_id": conversation_id,
+                    "reason": str(config.get("reason") or "human_escalate"),
+                    "initiated_by": request.session.get("username") or "",
+                    "ts": now,
+                })
+                result["escalated"] = True
+            except Exception:
+                pass
+
+        return result
+
+    # ── 自定义动作管理 ────────────────────────────────────────────────────
+
+    @app.get("/api/workspace/workflow-actions")
+    async def api_workflow_actions_list(request: Request):
+        """AA1：列出所有自定义动作。"""
+        api_auth(request)
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": True, "actions": []}
+        actions = store.list_workflow_actions()
+        import json as _j
+        for a in actions:
+            try:
+                a["config"] = _j.loads(a.get("config_json") or "{}")
+            except Exception:
+                a["config"] = {}
+        return {"ok": True, "actions": actions}
+
+    @app.post("/api/workspace/workflow-actions")
+    async def api_workflow_actions_create(request: Request, _=Depends(api_auth)):
+        """AA1：创建自定义动作。"""
+        body = await request.json()
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "error": "inbox_store 不可用"}
+        action_id = store.upsert_workflow_action(body)
+        return {"ok": True, "action_id": action_id}
+
+    @app.put("/api/workspace/workflow-actions/{action_id}")
+    async def api_workflow_actions_update(action_id: str, request: Request, _=Depends(api_auth)):
+        body = await request.json()
+        body["action_id"] = action_id
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "error": "inbox_store 不可用"}
+        store.upsert_workflow_action(body)
+        return {"ok": True, "action_id": action_id}
+
+    @app.delete("/api/workspace/workflow-actions/{action_id}")
+    async def api_workflow_actions_delete(action_id: str, request: Request, _=Depends(api_auth)):
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False}
+        ok = store.delete_workflow_action(action_id)
+        return {"ok": ok}
+
+    # ── 工作链管理 ────────────────────────────────────────────────────────
+
+    @app.get("/api/workspace/workflow-chains")
+    async def api_workflow_chains_list(request: Request):
+        """AA1：列出所有工作链。"""
+        api_auth(request)
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": True, "chains": []}
+        import json as _j
+        chains = store.list_workflow_chains()
+        for c in chains:
+            try:
+                c["steps"] = _j.loads(c.get("steps_json") or "[]")
+            except Exception:
+                c["steps"] = []
+            try:
+                c["trigger_conditions"] = _j.loads(c.get("trigger_conditions") or "{}")
+            except Exception:
+                c["trigger_conditions"] = {}
+        return {"ok": True, "chains": chains}
+
+    @app.post("/api/workspace/workflow-chains")
+    async def api_workflow_chains_create(request: Request, _=Depends(api_auth)):
+        body = await request.json()
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "error": "inbox_store 不可用"}
+        chain_id = store.upsert_workflow_chain(body)
+        return {"ok": True, "chain_id": chain_id}
+
+    @app.put("/api/workspace/workflow-chains/{chain_id}")
+    async def api_workflow_chains_update(chain_id: str, request: Request, _=Depends(api_auth)):
+        body = await request.json()
+        body["chain_id"] = chain_id
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False}
+        store.upsert_workflow_chain(body)
+        return {"ok": True, "chain_id": chain_id}
+
+    @app.delete("/api/workspace/workflow-chains/{chain_id}")
+    async def api_workflow_chains_delete(chain_id: str, request: Request, _=Depends(api_auth)):
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False}
+        ok = store.delete_workflow_chain(chain_id)
+        return {"ok": ok}
+
+    # ─── Phase 47: 工作链执行可视化 ─────────────────────────────────────
+
+    @app.get("/api/workspace/chain-executions")
+    async def api_chain_executions_list(
+        request: Request,
+        status: str = "",
+        conversation_id: str = "",
+        limit: int = 50,
+    ):
+        """P47：全局工作链执行监控列表。"""
+        api_auth(request)
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": True, "executions": [], "count": 0}
+        from src.inbox.workflow_monitor import enrich_executions
+        rows = store.list_chain_executions(
+            status=status.strip(), conversation_id=conversation_id.strip(), limit=limit,
+        )
+        enriched = enrich_executions(rows)
+        running = sum(1 for e in enriched if e.get("status") == "running")
+        return {
+            "ok": True,
+            "executions": enriched,
+            "count": len(enriched),
+            "running_count": running,
+        }
+
+    @app.get("/api/workspace/conv/{conversation_id}/chain-executions")
+    async def api_conv_chain_executions(
+        conversation_id: str, request: Request, status: str = "", limit: int = 20,
+    ):
+        """P47：会话级工作链执行记录。"""
+        api_auth(request)
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": True, "executions": [], "conversation_id": conversation_id}
+        from src.inbox.workflow_monitor import enrich_executions
+        rows = store.list_chain_executions(
+            conversation_id=conversation_id, status=status.strip(), limit=limit,
+        )
+        return {
+            "ok": True,
+            "conversation_id": conversation_id,
+            "executions": enrich_executions(rows),
+            "count": len(rows),
+        }
+
+    @app.post("/api/workspace/chain-executions/{exec_id}/cancel")
+    async def api_cancel_chain_execution(
+        exec_id: str, request: Request, _=Depends(api_auth),
+    ):
+        """P47：取消运行中的工作链执行。"""
+        store = _inbox_store(request)
+        if store is None:
+            raise HTTPException(503, "inbox_store 不可用")
+        ex = store.get_workflow_execution(exec_id)
+        if not ex:
+            raise HTTPException(404, "执行记录不存在")
+        if ex.get("status") != "running":
+            raise HTTPException(422, "仅可取消运行中的工作链")
+        body = {}
+        if request.headers.get("content-type", "").startswith("application/json"):
+            try:
+                body = await request.json()
+            except Exception:
+                body = {}
+        reason = str(body.get("reason") or "坐席手动取消").strip()
+        agent_id, agent_name = _agent_from_request(request)
+        ok = store.cancel_workflow_execution(exec_id)
+        if not ok:
+            raise HTTPException(422, "取消失败")
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            import time as _t
+            get_event_bus().publish("workflow_execution_cancelled", {
+                "exec_id": exec_id,
+                "conversation_id": ex.get("conversation_id"),
+                "chain_id": ex.get("chain_id"),
+                "chain_name": ex.get("chain_name", ""),
+                "agent_id": agent_id,
+                "agent_name": agent_name,
+                "reason": reason,
+                "ts": _t.time(),
+            })
+        except Exception:
+            pass
+        from src.inbox.workflow_monitor import enrich_execution
+        refreshed = store.get_workflow_execution(exec_id)
+        return {
+            "ok": True,
+            "exec_id": exec_id,
+            "execution": enrich_execution(refreshed or ex),
+        }
+
+    @app.post("/api/workspace/conv/{conversation_id}/start-chain")
+    async def api_conv_start_chain(conversation_id: str, request: Request, _=Depends(api_auth)):
+        """AA1：为会话启动指定工作链。"""
+        body = await request.json()
+        chain_id = str(body.get("chain_id") or "")
+        store = _inbox_store(request)
+        if not chain_id or store is None:
+            return {"ok": False, "error": "缺少 chain_id"}
+        if store.has_running_chain(conversation_id, chain_id):
+            return {"ok": False, "error": "该会话已有同链运行中"}
+        exec_id = store.start_chain_execution(
+            chain_id, conversation_id,
+            {"agent": request.session.get("username") or ""},
+            schedule_first_step=True,
+        )
+        return {"ok": True, "exec_id": exec_id, "conversation_id": conversation_id}
+
+    # ─── Phase 38: 分流路由规则引擎 ─────────────────────────────────────
+
+    @app.get("/api/workspace/routing-rules")
+    async def api_routing_rules_list(request: Request):
+        """BB1：列出所有分流路由规则（按优先级降序）。"""
+        api_auth(request)
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": True, "rules": []}
+        import json as _j
+        rules = store.list_routing_rules()
+        for r in rules:
+            try:
+                r["conditions"] = _j.loads(r.get("conditions") or "{}")
+            except Exception:
+                r["conditions"] = {}
+        return {"ok": True, "rules": rules}
+
+    @app.post("/api/workspace/routing-rules")
+    async def api_routing_rules_create(request: Request, _=Depends(api_auth)):
+        body = await request.json()
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "error": "inbox_store 不可用"}
+        rule_id = store.upsert_routing_rule(body)
+        return {"ok": True, "rule_id": rule_id}
+
+    @app.put("/api/workspace/routing-rules/{rule_id}")
+    async def api_routing_rules_update(rule_id: str, request: Request, _=Depends(api_auth)):
+        body = await request.json()
+        body["rule_id"] = rule_id
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False}
+        store.upsert_routing_rule(body)
+        return {"ok": True, "rule_id": rule_id}
+
+    @app.delete("/api/workspace/routing-rules/{rule_id}")
+    async def api_routing_rules_delete(rule_id: str, request: Request, _=Depends(api_auth)):
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False}
+        ok = store.delete_routing_rule(rule_id)
+        return {"ok": ok}
+
+    @app.post("/api/workspace/routing-rules/evaluate")
+    async def api_routing_rules_evaluate(request: Request, _=Depends(api_auth)):
+        """BB1：对给定会话评估所有路由规则，返回命中的规则和分配目标。"""
+        body = await request.json()
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "matched": []}
+        import json as _j
+        rules = store.list_routing_rules()
+        conversation = body.get("conversation") or {}
+        platform = str(conversation.get("platform") or "").lower()
+        text = str(conversation.get("text") or "").lower()
+
+        matched = []
+        for rule in rules:
+            if not rule.get("enabled"):
+                continue
+            try:
+                conds = _j.loads(rule.get("conditions") or "{}")
+            except Exception:
+                conds = {}
+
+            hit = False
+            if conds.get("platform") and platform:
+                if str(conds["platform"]).lower() == platform:
+                    hit = True
+            if conds.get("keyword") and text:
+                if str(conds["keyword"]).lower() in text:
+                    hit = True
+            if not conds:
+                hit = True  # 空条件 = 通配
+
+            if hit:
+                matched.append({
+                    "rule_id": rule["rule_id"],
+                    "name": rule["name"],
+                    "assign_to": rule["assign_to"],
+                    "priority": rule["priority"],
+                })
+
+        # 按优先级排序，取最高优先级命中
+        matched.sort(key=lambda x: x["priority"], reverse=True)
+        best = matched[0] if matched else None
+        return {"ok": True, "matched": matched, "best_match": best}
+
+    # ─── Phase 39: 全局跨资源搜索 ───────────────────────────────────────
+
+    @app.get("/api/workspace/search")
+    async def api_workspace_global_search(
+        request: Request,
+        q: str = "",
+        types: str = "messages,contacts,notes",
+        limit: int = 20,
+    ):
+        """CC1：全局搜索（消息/联系人/注解，结果合并按相关度排序）。"""
+        api_auth(request)
+        q = str(q or "").strip()
+        if not q or len(q) < 2:
+            return {"ok": True, "q": q, "results": [], "total": 0}
+        limit = max(1, min(50, int(limit or 20)))
+        search_types = set(str(types or "").split(","))
+        store = _inbox_store(request)
+        results: List[Dict[str, Any]] = []
+
+        if store is not None:
+            # 1. 消息搜索（FTS5 优先）
+            if "messages" in search_types:
+                try:
+                    msg_results = store.search_messages(q, limit=limit)
+                    for m in msg_results:
+                        results.append({
+                            "type": "message",
+                            "icon": "💬",
+                            "title": str(m.get("display_name") or m.get("conversation_id") or ""),
+                            "preview": str(m.get("text") or "")[:100],
+                            "ts": m.get("ts"),
+                            "conversation_id": m.get("conversation_id"),
+                            "platform": m.get("platform", ""),
+                            "url": f"/workspace?focus={m.get('conversation_id', '')}",
+                        })
+                except Exception:
+                    logger.debug("global search 消息搜索失败", exc_info=True)
+
+            # 2. 注解搜索
+            if "notes" in search_types:
+                try:
+                    with store._lock:
+                        note_rows = store._conn.execute(
+                            """SELECT n.note_id, n.conversation_id, n.body, n.ts, n.agent_name,
+                                      c.display_name, c.platform
+                               FROM conv_notes n
+                               LEFT JOIN conversations c ON c.conversation_id = n.conversation_id
+                               WHERE n.body LIKE ?
+                               ORDER BY n.ts DESC LIMIT ?""",
+                            (f"%{q}%", limit),
+                        ).fetchall()
+                    for r in note_rows:
+                        results.append({
+                            "type": "note",
+                            "icon": "📝",
+                            "title": f"注解 · {r['display_name'] or r['conversation_id']}",
+                            "preview": str(r["body"] or "")[:100],
+                            "ts": r["ts"],
+                            "conversation_id": r["conversation_id"],
+                            "platform": r.get("platform", ""),
+                            "url": f"/workspace?focus={r['conversation_id']}",
+                        })
+                except Exception:
+                    logger.debug("global search 注解搜索失败", exc_info=True)
+
+        # 3. 联系人搜索
+        if "contacts" in search_types:
+            contacts_store = _contacts_store(request)
+            if contacts_store is not None:
+                try:
+                    contacts, _ = contacts_store.list_contacts_overview(q=q, limit=limit)
+                    for c in contacts:
+                        results.append({
+                            "type": "contact",
+                            "icon": "👤",
+                            "title": str(c.get("primary_name") or c.get("contact_id") or ""),
+                            "preview": " / ".join(c.get("channels") or []),
+                            "ts": c.get("last_seen_ts") or c.get("created_at"),
+                            "contact_id": c.get("contact_id"),
+                            "url": f"/workspace/contact/{c.get('contact_id', '')}",
+                        })
+                except Exception:
+                    logger.debug("global search 联系人搜索失败", exc_info=True)
+
+        # 全局按 ts 降序，截断
+        results.sort(key=lambda x: float(x.get("ts") or 0), reverse=True)
+        results = results[:limit]
+        return {"ok": True, "q": q, "results": results, "total": len(results)}
+
+    # ─── Phase 34: QA 质检评分 ───────────────────────────────────────────
+
+    @app.get("/api/workspace/conv/{conversation_id}/qa-score")
+    async def api_conv_qa_score_get(conversation_id: str, request: Request):
+        """Y1：读取已存储的质检评分（不触发重新计算）。"""
+        api_auth(request)
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "error": "inbox_store 不可用"}
+        result = store.get_qa_score(conversation_id)
+        if result is None:
+            return {"ok": True, "conversation_id": conversation_id, "qa": None, "computed": False}
+        return {"ok": True, "conversation_id": conversation_id, "qa": result, "computed": True}
+
+    @app.post("/api/workspace/conv/{conversation_id}/qa-score")
+    async def api_conv_qa_score_compute(conversation_id: str, request: Request):
+        """Y1：立即计算并存储质检评分（可在归档/关闭时调用）。"""
+        api_auth(request)
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "error": "inbox_store 不可用"}
+        result = store.compute_and_store_qa_score(conversation_id)
+        return {"ok": True, "conversation_id": conversation_id, "qa": result}
+
+    @app.get("/api/workspace/agent-qa-stats")
+    async def api_agent_qa_stats(request: Request, days: int = 30):
+        """Y1：聚合各坐席最近 N 天的质检评分统计（团队看板）。"""
+        api_auth(request)
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "agents": []}
+        days = max(1, min(90, int(days or 30)))
+        stats = store.batch_agent_qa_stats(days=days)
+        return {"ok": True, "days": days, "agents": stats, "count": len(stats)}
+
+    # ─── Phase 35: 流失预警 ──────────────────────────────────────────────
+
+    @app.get("/api/workspace/churn-risks")
+    async def api_churn_risks(
+        request: Request,
+        silence_days: int = 7,
+        limit: int = 50,
+    ):
+        """Z1：返回高/中流失风险会话列表（按风险分降序）。"""
+        api_auth(request)
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "items": []}
+        from src.inbox.churn_predictor import ChurnPredictor
+
+        silence_days = max(1, min(60, int(silence_days or 7)))
+        limit = max(1, min(200, int(limit or 50)))
+
+        # 拉取候选（沉默时间 ≥ silence_days 的未归档会话）
+        candidates = store.list_churn_risk_conversations(
+            silence_days=silence_days, limit=limit * 3
+        )
+
+        # 补全 last_dir（用于判断末条是否入站）
+        if candidates:
+            cids = [c["conversation_id"] for c in candidates if c.get("conversation_id")]
+            last_dirs = store.last_message_dirs(cids)
+            for c in candidates:
+                cid = c["conversation_id"]
+                info = last_dirs.get(cid, {})
+                c["last_dir"] = info.get("direction", "in")
+                c["last_text"] = info.get("text", "")
+
+        results = ChurnPredictor().batch_predict(candidates, silence_threshold_days=silence_days)
+        results = results[:limit]
+
+        # 持久化高风险结果到 conversation_meta
+        for r in results:
+            if r["risk_level"] == "high":
+                try:
+                    store.store_churn_risk(
+                        r["conversation_id"], r["risk_level"], r["reasons"]
+                    )
+                except Exception:
+                    pass
+
+        return {
+            "ok": True,
+            "silence_days": silence_days,
+            "items": results,
+            "high_count": sum(1 for r in results if r["risk_level"] == "high"),
+            "medium_count": sum(1 for r in results if r["risk_level"] == "medium"),
+        }
+
+    @app.get("/api/workspace/activity-heatmap")
+    async def api_workspace_activity_heatmap(
+        request: Request,
+        days: int = 30,
+        platform: str = "",
+        direction: str = "inbound",
+    ):
+        """W1：获取最近 N 天消息量按星期×小时的分布矩阵（用于热力图可视化）。"""
+        api_auth(request)
+        store = _inbox_store(request)
+        if store is None:
+            return {"ok": False, "error": "inbox_store 不可用"}
+        days = max(1, min(365, int(days or 30)))
+        data = store.activity_heatmap(days=days, platform=str(platform or ""), direction=str(direction or "inbound"))
+        return {"ok": True, **data}

@@ -1010,17 +1010,19 @@ class AIClient(LoggerMixin):
                 context["_resolved_persona_name"] = _p_name
             _req_id = str((context or {}).get("request_id", "") or "")
             if _p_tier in ("chat_binding", "account_profile"):
-                logger.info(
+                self.logger.info(
                     "[persona] tier=%s name=%r acc_pid=%r cid=%s req=%s",
                     _p_tier, _p_name, _p_acc_pid or "—", _p_cid or "—", _req_id or "—",
                 )
             else:
-                logger.debug(
+                self.logger.debug(
                     "[persona] tier=%s name=%r cid=%s",
                     _p_tier, _p_name, _p_cid or "—",
                 )
         except Exception:
-            pass
+            # 不可静默：人设块拼装失败会让回复整段丢失人设、悄悄回落域默认，
+            # 是「徽标对、人设错」类故障的根源。保留回落行为，但必须可见。
+            self.logger.warning("[persona] 人设块拼装失败，本次回复将缺失人设定位", exc_info=True)
 
         ai_cfg = (self.config.config or {}).get("ai", {}) if self.config else {}
         ai_name = "" if _suppress_global_identity else (ai_cfg.get("ai_name") or "").strip()
@@ -1733,7 +1735,7 @@ class AIClient(LoggerMixin):
                             _ld_map = {"zh-cn": "zh", "zh-tw": "zh", "zh": "zh", "ar": "ar_ur"}
                             _ld_code = _ld_map.get(_ld_raw, _ld_raw)
                             if _ld_code in self._LANG_NAMES:
-                                logger.debug(
+                                self.logger.debug(
                                     "_detect_message_language: %r → %s (prob=%.3f)",
                                     t[:50], _ld_code, _ld_top.prob,
                                 )

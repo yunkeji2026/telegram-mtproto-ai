@@ -567,6 +567,10 @@ class AIChatAssistant:
                                         event_tracker=self.telegram_client.event_tracker,
                                         log_buffer=_log_buf)
                     self._web_app = web_app  # 供收件箱后台 ingest 轮询访问 state 上的各平台 service
+                    # 翻译/意图等服务的兜底路径（inbox 未启用时）需要 ai_client，
+                    # 否则 _get_translation_service 会建出无引擎的退化实例。
+                    if getattr(self, "ai_client", None) is not None:
+                        web_app.state.ai_client = self.ai_client
                     if self.line_rpa_service is not None:
                         web_app.state.line_rpa_service = self.line_rpa_service
                     web_app.state.line_rpa_services = self.line_rpa_services
@@ -675,17 +679,25 @@ class AIChatAssistant:
                             # ── L2：WebhookNotifier 企业 IM 通知 ──────────────
                             try:
                                 from src.inbox.webhook_notifier import WebhookNotifier
-                                _wh_list = (self.config.config or {}).get(
-                                    "notify", {}
-                                ).get("webhooks", []) or []
-                                if _wh_list:
-                                    _whn = WebhookNotifier(config=_wh_list)
-                                    web_app.state.webhook_notifier = _whn
-                                    asyncio.ensure_future(_whn.run())
-                                    self.logger.info(
-                                        "WebhookNotifier 已启动（%d 个 webhook）",
-                                        len(_wh_list),
+                                # 有效列表：notify_webhooks.json 覆盖层优先，否则 config.yaml
+                                try:
+                                    from src.integrations.notify_webhooks_store import (
+                                        effective_webhooks,
                                     )
+                                    _wh_list = effective_webhooks(self.config.config or {})
+                                except Exception:
+                                    _wh_list = (self.config.config or {}).get(
+                                        "notify", {}
+                                    ).get("webhooks", []) or []
+                                # 即使当前为空也创建 notifier：便于后台「告警渠道」面板
+                                # 运行时 reload() 增删，免重启
+                                _whn = WebhookNotifier(config=_wh_list)
+                                web_app.state.webhook_notifier = _whn
+                                asyncio.ensure_future(_whn.run())
+                                self.logger.info(
+                                    "WebhookNotifier 已启动（%d 个 webhook）",
+                                    len(_wh_list),
+                                )
                             except Exception:
                                 self.logger.debug("WebhookNotifier 启动跳过", exc_info=True)
 
@@ -769,23 +781,66 @@ class AIChatAssistant:
                                     _tm_db = _cfg_dir / _tm_db
                                 _tm_store = TranslationMemoryStore(_tm_db)
                                 self.translation_memory = _tm_store
-                            _gl_cfg = _tr_cfg.get("glossary", {}) or {}
-                            _gl_terms = (_gl_cfg.get("extra_terms") or {}) if _gl_cfg.get("enabled", True) else {}
-                            import hashlib as _hl
-                            _gl_ver = _hl.sha256(
-                                repr(sorted(_gl_terms.items())).encode("utf-8")
-                            ).hexdigest()[:12] if _gl_terms else ""
+                            # P56：术语库（全局+域包合并）+ 多引擎路由
+                            from src.ai.translation_glossary import build_glossary
+                            from src.ai.translation_engines import build_engines
+                            _domain_files = []
+                            try:
+                                _dom_dir = Path(self.config.config_path).parent.parent / "domains"
+                                if _dom_dir.exists():
+                                    _domain_files = list(_dom_dir.glob("*/prompts/terminology.yaml"))
+                            except Exception:
+                                _domain_files = []
+                            # P59：术语库可编辑覆盖层（后台控制台增删改，最高优先）
+                            from src.ai.glossary_store import GlossaryStore
+                            _gloss_ov_path = _cfg_dir / "glossary_overrides.yaml"
+                            _gloss_store = GlossaryStore(_gloss_ov_path)
+                            _gloss_overrides = _gloss_store.load()
+                            _glossary = build_glossary(
+                                _cfg_root, domain_files=_domain_files, overrides=_gloss_overrides,
+                            )
+                            _engines = build_engines(_tr_cfg, self.ai_client)
+                            # 存重建上下文，供 /api/workspace/glossary 热更新复用
+                            web_app.state.glossary_store = _gloss_store
+                            web_app.state.glossary_config = _cfg_root
+                            web_app.state.glossary_domain_files = _domain_files
                             from src.ai.translation_service import TranslationService
                             web_app.state.translation_service = TranslationService(
                                 ai_client=self.ai_client,
                                 memory_store=_tm_store,
-                                glossary_terms=_gl_terms,
-                                glossary_version=_gl_ver,
+                                glossary_terms=_glossary.terms,
+                                glossary_version=_glossary.version,
+                                glossary_protect=_glossary.protect,
                                 cost_tracking=bool(_tr_cfg.get("cost_tracking", False)),
+                                engines=_engines,
                             )
-                            self.logger.info("Phase C 服务已预置（意图LLM=%s, 翻译记忆=%s）",
-                                             bool(_ia_cfg.get("use_llm", False)),
-                                             _tm_store is not None)
+                            self.logger.info(
+                                "Phase C/P56 服务已预置（意图LLM=%s, 翻译记忆=%s, 引擎=%s, 术语=%d, 保护词=%d）",
+                                bool(_ia_cfg.get("use_llm", False)),
+                                _tm_store is not None,
+                                "→".join(e.name for e in _engines),
+                                len(_glossary.terms), len(_glossary.protect),
+                            )
+
+                            # ── Phase B：可选统计语种检测（缺库自动跳过，仅精修含糊拉丁） ──
+                            try:
+                                _ld_cfg = ((_tr_cfg.get("lang_detect") or {}).get("statistical") or {})
+                                if _ld_cfg.get("enabled", False):
+                                    from src.ai.lang_detect_statistical import build_statistical_detector
+                                    from src.ai.translation_service import set_statistical_detector
+                                    _stat_fn = build_statistical_detector()
+                                    if _stat_fn is not None:
+                                        set_statistical_detector(
+                                            _stat_fn,
+                                            min_chars=int(_ld_cfg.get("min_chars", 12) or 12),
+                                        )
+                                        self.logger.info("统计语种检测已启用（回退精修含糊拉丁）")
+                                    else:
+                                        self.logger.warning(
+                                            "translation.lang_detect.statistical.enabled=true 但未装 lingua/langdetect，已跳过"
+                                        )
+                            except Exception:
+                                self.logger.debug("统计语种检测装配跳过", exc_info=True)
 
                             # ── Phase D：电商工具层（订单/物流查询 + 事实校验 + 审计） ──
                             _ec_cfg = _cfg_root.get("ecommerce_tools", {}) or {}

@@ -1,0 +1,18 @@
+/* 暗色语义色(程序端)。宿主在 <html data-cp-theme="dark">。
+   自定义属性穿透 Shadow DOM,组件内 var(--cp-*) 自动随之。 */
+:root[data-cp-theme="dark"],
+.cp-theme-dark {
+  --cp-bg: #17181f;
+  --cp-surface: #21232d;
+  --cp-surface-2: #2a2d39;
+  --cp-border: #353846;
+  --cp-text: #e7e9f0;
+  --cp-text-dim: #9aa0b0;
+  --cp-text-tiny: #6f7587;
+  --cp-accent: #7c8cff;
+  --cp-accent-weak: rgba(124, 140, 255, .16);
+  --cp-ok: #38d39f;
+  --cp-warn: #f5b945;
+  --cp-danger: #f06a6a;
+  --cp-track: #2a2d39;
+}
