@@ -248,6 +248,7 @@ ipcMain.handle("desktop:voice-enroll", async (_e, payload) => {
     fd.append("persona_id", String(p.persona_id || ""));
     fd.append("preferred_name", String(p.preferred_name || ""));
     fd.append("language_type", String(p.language_type || "Japanese"));
+    if (p.reference_text) fd.append("reference_text", String(p.reference_text));
     const r = await fetch(`${base_url}/api/voice/enroll`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },

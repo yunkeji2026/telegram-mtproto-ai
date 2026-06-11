@@ -117,7 +117,10 @@ function resolveAccounts(cfg) {
     const isInbox = id === INBOX_ID;
     document.querySelectorAll(".rail-item").forEach((el) => el.classList.toggle("active", el.dataset.id === id));
     document.querySelectorAll("#webviews webview").forEach((wv) => wv.classList.toggle("active", wv.dataset.id === id));
-    // 统一收件箱与内嵌平台均保留桌面原生右栏（与后台 /workspace 业务助手并列，不隐藏）
+    // 收件箱(/workspace)自带业务助手侧栏 → 隐藏桌面原生 #copilot,避免“两个业务助手”重复+空面板;
+    // 内嵌平台 Tab 仍保留桌面右栏(原生 copilot 数据源)。iframe 模式下 #copilot 作为 inbox 宿主,不隐藏。
+    const _cp = document.getElementById("copilot");
+    if (_cp) _cp.style.display = (isInbox && !Copilot.useIframe) ? "none" : "";
     // 连接/错误遮罩只属于收件箱：切到本标签按当前阶段决定显隐，切走则一律藏起
     if (Inbox.applyVisibility) Inbox.applyVisibility(isInbox);
     // 注入状态条只属于内嵌平台 Tab：收件箱激活时隐藏
@@ -485,8 +488,6 @@ function resolveAccounts(cfg) {
 const Copilot = {
   ctx: null, // {platform, chat_key, name, messages, webview}
   tplLoaded: false,
-  personasLoaded: false,
-  personaMap: {}, // id → 完整人设对象（供「钉到后台」用）
   activeTab: "reply", // reply | insight | customer
   chatActive: false,
   // 全自动托管：当前会话收到客户消息 → 生成 → 过风控 → 自动发（默认关）
@@ -538,31 +539,37 @@ function initCopilot() {
     const text = e && e.detail && e.detail.text;
     if (text) fillComposer(text, false);
   });
+  // 共享组件 cp-send:填入并发送(过发送风控闸门)
+  document.addEventListener("cp-send", (e) => {
+    const text = e && e.detail && e.detail.text;
+    if (text) fillComposer(text, true);
+  });
   document.addEventListener("cp-action-done", () => {
     const rel = $("cp-relstage");
     if (rel) rel.refresh();
     const chain = $("cp-chain");
     if (chain) chain.refresh();
   });
-  $("cp-draft-btn").addEventListener("click", runDraft);
   $("cp-analyze-btn").addEventListener("click", runAnalyze);
   $("cp-kb-btn").addEventListener("click", runKbSearch);
   $("cp-kb-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter") runKbSearch();
   });
-  $("cp-persona").addEventListener("change", onPersonaChange);
-  $("cp-persona-pin").addEventListener("click", pinPersonaToBackend);
-  $("cp-reply-lang").addEventListener("change", onReplyLangChange);
-  $("cp-contrast-lang").addEventListener("change", onContrastLangChange);
+  // <cp-draft> 钉绑人设 / 改回复语言后,同步给 webview 浮钮(保持原生「智能回复」一致)
+  document.addEventListener("cp-persona-pinned", () => pushPersonaToWebview());
+  document.addEventListener("cp-lang-changed", () => pushReplyLangToWebview());
   setupAutopilot();
   setupAccountsPanel();
   setupIframeMode();
   const openInboxBtn = $("cp-open-inbox");
   if (openInboxBtn) openInboxBtn.addEventListener("click", openInInbox);
-  loadPersonasOnce();
   const cpVoice = $("cp-voice");
-  if (cpVoice && window.CopilotShared) {
-    cpVoice.client = window.CopilotShared.createCopilotClient();
+  if (cpVoice && window.CopilotShared) cpVoice.client = window.CopilotShared.createCopilotClient();
+  const cpDraft = $("cp-draft");
+  if (cpDraft && window.CopilotShared) {
+    cpDraft.client = window.CopilotShared.createCopilotClient();
+    // 桌面会话是 webview 实时消息(未必落后端 inbox),注入实时上下文供 <cp-draft> 生成
+    cpDraft._messagesProvider = async () => { await ensureFullThread(); return contextMessages(); };
   }
 }
 
@@ -716,62 +723,8 @@ function postFrameContext(ctx) {
   }
 }
 
-// ── 人设下拉（按会话记忆，作用于「生成回复草稿」） ───────────────────────────
-async function loadPersonasOnce() {
-  if (Copilot.personasLoaded) return;
-  const sel = $("cp-persona");
-  try {
-    const res = await window.shell.personas();
-    Copilot.personaMap = (res && res.profiles) || {};
-    const summary = (res && res.summary) || [];
-    summary.forEach((p) => {
-      const opt = document.createElement("option");
-      opt.value = p.id;
-      opt.textContent = p.role ? `${p.name}（${p.role}）` : p.name;
-      sel.appendChild(opt);
-    });
-    Copilot.personasLoaded = true;
-    if (Copilot.ctx) restorePersonaSelection(Copilot.ctx);
-  } catch (e) {
-    /* 后端不可用时保留「默认」单项 */
-  }
-}
-
-function personaKey(c) {
-  return c ? `desktop_persona:${c.platform}:${c.chat_key}` : "";
-}
-
-// 选中优先级：本会话记忆 > 上次全局选择 > config 账号默认（""=domain 默认人设）
-function restorePersonaSelection(c) {
-  const sel = $("cp-persona");
-  let val = "";
-  try {
-    val = localStorage.getItem(personaKey(c)) || localStorage.getItem("desktop_persona_last") || "";
-  } catch (e) {}
-  // 仅当该选项存在时才设置，避免人设被删后停在无效值
-  sel.value = [...sel.options].some((o) => o.value === val) ? val : "";
-  const pin = $("cp-persona-pin");
-  if (pin) pin.classList.remove("pinned");
-  updatePersonaSource();
-  pushPersonaToWebview();
-}
-
-function onPersonaChange() {
-  const c = Copilot.ctx;
-  const val = $("cp-persona").value || "";
-  try {
-    localStorage.setItem("desktop_persona_last", val);
-    if (c) {
-      if (val) localStorage.setItem(personaKey(c), val);
-      else localStorage.removeItem(personaKey(c));
-    }
-  } catch (e) {}
-  updatePersonaSource();
-  pushPersonaToWebview();
-  flash(val ? "已切换人设，下次草拟生效" : "已恢复默认人设");
-}
-
 // 把当前生效 persona_id 下发给 webview 注入脚本（让浮钮「智能回复」一致）
+// 人设来源已迁移：权威=后台会话绑定（由 <cp-draft> 钉绑），回落账号默认
 async function pushPersonaToWebview() {
   const c = Copilot.ctx;
   if (!c || !c.webview) return;
@@ -780,36 +733,15 @@ async function pushPersonaToWebview() {
   } catch (e) {}
 }
 
-// ── 会话级「回复语言」：把 AI 草稿译成客户语言（按会话记忆，作用于草拟/浮钮）──
-function replyLangKey(c) {
-  return c ? `desktop_replylang:${c.platform}:${c.chat_key}` : "";
-}
-
-function restoreReplyLang(c) {
-  const sel = $("cp-reply-lang");
-  let val = "";
-  try {
-    val = localStorage.getItem(replyLangKey(c)) || localStorage.getItem("desktop_replylang_last") || "";
-  } catch (e) {}
-  sel.value = [...sel.options].some((o) => o.value === val) ? val : "";
-}
-
+// ── 会话级「回复语言」：把 AI 草稿译成客户语言（现由 <cp-draft> 承载,按会话记忆）──
 function selectedReplyLang() {
-  return ($("cp-reply-lang").value || "").trim();
-}
-
-function onReplyLangChange() {
-  const c = Copilot.ctx;
-  const val = selectedReplyLang();
+  // 回复语言现由 <cp-draft> 承载,按会话记忆于 cp_replylang:<conversationId>
   try {
-    localStorage.setItem("desktop_replylang_last", val);
-    if (c) {
-      if (val) localStorage.setItem(replyLangKey(c), val);
-      else localStorage.removeItem(replyLangKey(c));
-    }
-  } catch (e) {}
-  pushReplyLangToWebview();
-  flash(val ? "已设回复语言，下次草拟生效" : "回复语言跟随人设/客户");
+    const c = Copilot.ctx;
+    if (!c || !window.CopilotShared) return "";
+    const cid = window.CopilotShared.conversationId(c.platform, currentAccountId(c), c.chat_key);
+    return (localStorage.getItem("cp_replylang:" + cid) || "").trim();
+  } catch (e) { return ""; }
 }
 
 async function pushReplyLangToWebview() {
@@ -820,38 +752,7 @@ async function pushReplyLangToWebview() {
   } catch (e) {}
 }
 
-// ── 会话级「对比语言」：在草稿下方附一条对比翻译（按会话记忆，默认中文）──
-function contrastLangKey(c) {
-  return c ? `desktop_contrastlang:${c.platform}:${c.chat_key}` : "";
-}
-
-function restoreContrastLang(c) {
-  const sel = $("cp-contrast-lang");
-  if (!sel) return;
-  let val = null;
-  try {
-    val = localStorage.getItem(contrastLangKey(c));
-    if (val === null) val = localStorage.getItem("desktop_contrastlang_last");
-  } catch (e) {}
-  // 首次进入默认给中文对比，最大化「上外文下中文」开箱即用
-  if (val === null) val = "zh";
-  sel.value = [...sel.options].some((o) => o.value === val) ? val : "";
-}
-
-function selectedContrastLang() {
-  const sel = $("cp-contrast-lang");
-  return sel ? (sel.value || "").trim() : "";
-}
-
-function onContrastLangChange() {
-  const c = Copilot.ctx;
-  const val = selectedContrastLang();
-  try {
-    localStorage.setItem("desktop_contrastlang_last", val);
-    if (c) localStorage.setItem(contrastLangKey(c), val);
-  } catch (e) {}
-  flash(val ? "已设对比语言，下次草拟生效" : "已关闭对比翻译");
-}
+// 对比语言已迁移至 <cp-draft contrast>（按会话记忆于 cp_contrastlang:<conversationId>）
 
 // ── 全自动托管：当前会话收到客户消息自动回复（低风险自动发，命中风控转人工）──
 function setupAutopilot() {
@@ -972,101 +873,19 @@ async function runAutopilotReply(c, sig) {
 
 // 草拟用的 persona_id：下拉选中优先；为空时回落 config 账号绑定
 async function selectedPersonaId(c) {
-  const v = ($("cp-persona").value || "").trim();
-  if (v) return v;
+  // 人设现由 <cp-draft> 承载并钉到后台;权威来源=后台会话绑定,回落账号默认
+  try {
+    const res = await copilotClient().getPersonaBindings();
+    const ck = c ? c.chat_key : "";
+    const b = res && res.bindings && ck ? res.bindings[ck] : null;
+    const pid = b && (b.id || "");
+    if (pid) return pid;
+  } catch (e) {}
   return personaIdForAccount(c);
 }
 
-// 人设生效来源标签：让坐席看穿这条回复实际用的是哪一层人设
-function personaTierLabel(tier) {
-  return (
-    { chat_binding: "会话绑定", account_profile: "账号人设", domain: "域默认", default: "兜底" }[tier] ||
-    tier
-  );
-}
-
-// 把后端返回的 persona（id 或 "domain"）映射为可读名（取下拉里的显示文案）
-function personaDisplayName(persona) {
-  if (!persona || persona === "domain") return "默认人设（domain）";
-  const opt = [...$("cp-persona").options].find((o) => o.value === persona);
-  return opt ? opt.textContent : persona;
-}
-
-// 当前生效人设的「来源」提示（手选/记忆/账号默认/domain），让坐席清楚为何是这个人设
-async function updatePersonaSource() {
-  const el = $("cp-persona-src");
-  if (!el) return;
-  const c = Copilot.ctx;
-  const v = ($("cp-persona").value || "").trim();
-  let label;
-  if (v) {
-    let perChat = "";
-    try { perChat = localStorage.getItem(personaKey(c)) || ""; } catch (e) {}
-    label = perChat === v ? "来源：本会话手选" : "来源：沿用上次选择";
-  } else {
-    const acc = c ? personaIdForAccount(c) : "";
-    label = acc ? "来源：账号默认（config）" : "来源：domain 默认人设";
-  }
-  el.textContent = label;
-}
-
-// P5-1：切会话时回显「后台钉绑」状态——后台绑定是全端权威来源，优先于本地选择
-async function applyBackendBinding(c) {
-  if (!c || !c.chat_key) return;
-  const myKey = c.chat_key;
-  let bindings = {};
-  try {
-    const res = await window.shell.personaBindings();
-    bindings = (res && res.bindings) || {};
-  } catch (e) {
-    return;
-  }
-  // await 期间可能已切走，避免把别的会话状态画到当前
-  if (!Copilot.ctx || Copilot.ctx.chat_key !== myKey) return;
-  const b = bindings[myKey];
-  const pid = b && (b.id || "");
-  const pin = $("cp-persona-pin");
-  if (pid) {
-    const sel = $("cp-persona");
-    if ([...sel.options].some((o) => o.value === pid)) sel.value = pid;
-    if (pin) pin.classList.add("pinned");
-    const el = $("cp-persona-src");
-    if (el) el.textContent = "来源：后台钉绑（全端生效）";
-    pushPersonaToWebview();
-  }
-}
-
-// P4-2：把选中人设「钉到后台」→ 写 bindings_runtime.yaml，对该会话全端生效（含 RPA）
-async function pinPersonaToBackend() {
-  const c = Copilot.ctx;
-  if (!c || !c.chat_key) return;
-  const pid = ($("cp-persona").value || "").trim();
-  const btn = $("cp-persona-pin");
-  btn.disabled = true;
-  try {
-    let res;
-    if (pid) {
-      const persona = Copilot.personaMap && Copilot.personaMap[pid];
-      if (!persona) { flash("人设详情未加载"); return; }
-      res = await window.shell.personaBind({ chat_id: c.chat_key, persona });
-    } else {
-      res = await window.shell.personaUnbind({ chat_id: c.chat_key });
-    }
-    if (res && res.ok) {
-      btn.classList.toggle("pinned", !!pid);
-      const el = $("cp-persona-src");
-      if (el) el.textContent = pid ? "来源：后台钉绑（全端生效）" : "";
-      if (!pid) updatePersonaSource();
-      flash(pid ? "已钉到后台，全端生效 ✓" : "已取消后台绑定 ✓");
-    } else {
-      flash("钉绑失败");
-    }
-  } catch (e) {
-    flash("钉绑失败");
-  } finally {
-    btn.disabled = false;
-  }
-}
+// 人设选择/来源提示/后台钉绑（applyBackendBinding/pinPersonaToBackend）已迁移至
+// 共享组件 <cp-draft persona pin>；钉绑后经 cp-persona-pinned 事件回推 webview 浮钮。
 
 async function fillComposer(text, send) {
   const t = String(text || "").trim();
@@ -1154,16 +973,18 @@ function onActiveChat(payload, webview) {
   const accountId = payload.account_id || (webview && webview.dataset && webview.dataset.account) || "";
   Copilot.ctx = { ...payload, account_id: accountId, webview };
 
+  const _accId = currentAccountId(Copilot.ctx);
+  const _cpCtx = window.CopilotShared ? {
+    platform: payload.platform,
+    accountId: _accId,
+    chatKey: payload.chat_key,
+    conversationId: window.CopilotShared.conversationId(payload.platform, _accId, payload.chat_key),
+  } : null;
   const cpVoice = $("cp-voice");
-  if (cpVoice && window.CopilotShared) {
-    cpVoice.context = {
-      platform: payload.platform,
-      accountId: accountId,
-      chatKey: payload.chat_key,
-      conversationId: window.CopilotShared.conversationId(
-        payload.platform, accountId, payload.chat_key),
-    };
-  }
+  if (cpVoice && _cpCtx) cpVoice.context = _cpCtx;
+  // 草稿/人设/回复语言/对比语言统一由 <cp-draft persona contrast pin> 承载（两端同源）
+  const cpDraft = $("cp-draft");
+  if (cpDraft && _cpCtx && "context" in cpDraft) cpDraft.context = _cpCtx;
 
   $("cp-empty").hidden = true;
   $("cp-tabs").hidden = false;
@@ -1172,17 +993,14 @@ function onActiveChat(payload, webview) {
   $("cp-title").textContent = payload.name || "业务助手";
 
   if (switched) {
-    $("cp-draft").hidden = true;
     $("cp-analyze").hidden = true;
     $("cp-analyze-replies").innerHTML = "";
     $("cp-kb").innerHTML = "";
     $("cp-kb-input").value = "";
     Copilot.fullMessages = null;
-    restorePersonaSelection(Copilot.ctx);
-    restoreReplyLang(Copilot.ctx);
-    restoreContrastLang(Copilot.ctx);
+    // persona/reply-lang 现由 <cp-draft> 承载（context 已设触发自取）；把当前生效值（后台绑定 + 记忆语言）推给 webview 浮钮
+    pushPersonaToWebview();
     pushReplyLangToWebview();
-    applyBackendBinding(Copilot.ctx);
     // iframe 模式下,业务面板数据由统一 App 自取,跳过原生面板加载,避免重复后端调用
     if (!Copilot.useIframe) {
       loadProfile();
@@ -1372,148 +1190,8 @@ async function loadProfile() {
   }
 }
 
-// 取语言代码的可读名（从对比语言下拉的 option 文案，免维护第二份字典）
-function langLabel(code) {
-  const sel = $("cp-contrast-lang");
-  const opt = sel && [...sel.options].find((o) => o.value === code);
-  return (opt && opt.textContent) || code;
-}
-
-// 单选发送用名字（同一草稿内多块共享，保证只能选一条发）
-let _draftPickSeq = 0;
-
-// 造一个「语言块」：单选「发这条」+ 语言标签 + 可编辑文本框
-function makeLangBlock(label, value, checked) {
-  const wrap = document.createElement("div");
-  wrap.className = "cp-lang-block" + (checked ? " active" : "");
-  const head = document.createElement("label");
-  head.className = "cp-lang-head";
-  const radio = document.createElement("input");
-  radio.type = "radio";
-  radio.name = "cp-send-pick-" + _draftPickSeq;
-  radio.checked = !!checked;
-  const name = document.createElement("span");
-  name.className = "cp-lang-name";
-  name.textContent = label;
-  head.appendChild(radio);
-  head.appendChild(name);
-  const ta = document.createElement("textarea");
-  ta.className = "cp-edit";
-  ta.rows = 4;
-  ta.value = value;
-  wrap.appendChild(head);
-  wrap.appendChild(ta);
-  // 选中态：高亮当前块，点文本框也自动选中本块为发送目标
-  const select = () => {
-    radio.checked = true;
-    radio.dispatchEvent(new Event("change", { bubbles: true }));
-  };
-  radio.addEventListener("change", () => {
-    const root = wrap.parentElement;
-    if (root) root.querySelectorAll(".cp-lang-block").forEach((b) => b.classList.remove("active"));
-    if (radio.checked) wrap.classList.add("active");
-  });
-  ta.addEventListener("focus", select);
-  return { wrap, ta, radio };
-}
-
-// 把 text 译成 lang 填进文本框 ta（译完恢复可编辑）
-async function translateInto(ta, text, lang) {
-  const t = (text || "").trim();
-  if (!t) {
-    ta.value = "";
-    ta.disabled = false;
-    return;
-  }
-  ta.disabled = true;
-  ta.value = "翻译中…";
-  try {
-    const r = await window.shell.translate({ text: t, target_lang: lang });
-    ta.value = (r && r.ok && r.text) ? r.text : "翻译失败";
-  } catch (e) {
-    ta.value = "翻译失败";
-  }
-  ta.disabled = false;
-}
-
-async function runDraft() {
-  const c = Copilot.ctx;
-  if (!c) return;
-  const btn = $("cp-draft-btn");
-  const box = $("cp-draft");
-  btn.disabled = true;
-  const old = btn.textContent;
-  btn.textContent = "生成中…";
-  try {
-    await ensureFullThread();
-    const replyLang = selectedReplyLang();
-    const res = await window.shell.smartReply({
-      messages: contextMessages(),
-      platform: c.platform,
-      chat_key: c.chat_key,
-      persona_id: await selectedPersonaId(c),
-      target_lang: replyLang,
-    });
-    if (res && res.ok && res.reply) {
-      box.hidden = false;
-      box.innerHTML = "";
-      _draftPickSeq++; // 新草稿用独立单选组
-      const personaLabel = personaDisplayName(res.persona);
-      const meta = document.createElement("div");
-      meta.className = "cp-meta";
-      meta.innerHTML =
-        `<span class="badge persona">🎭 ${esc(personaLabel)}</span>` +
-        (res.persona_tier ? `<span class="badge">${esc(personaTierLabel(res.persona_tier))}</span>` : "") +
-        (res.intent ? `<span class="badge">${esc(res.intent)}</span>` : "") +
-        (replyLang && res.translated ? `<span class="badge">🌐 ${esc(replyLang)}</span>` : "");
-      // 指定回复语言时后端已让 AI 直接用该语言生成（translated≈reply），取其一即可
-      const sendText = (replyLang && res.translated) || res.reply;
-      const effReplyLang = replyLang || "zh"; // 未指定时后端按中文生成
-      const contrastLang = selectedContrastLang();
-      box.appendChild(meta);
-
-      // 回复语言块（上）：默认选中发送
-      const replyBlock = makeLangBlock(langLabel(effReplyLang), sendText, true);
-      box.appendChild(replyBlock.wrap);
-
-      // 对比语言块（下）：与回复语言不同才出；同样可编辑、可选中发送
-      let contrastBlock = null;
-      if (contrastLang && contrastLang !== effReplyLang) {
-        contrastBlock = makeLangBlock(langLabel(contrastLang), "翻译中…", false);
-        contrastBlock.ta.disabled = true;
-        box.appendChild(contrastBlock.wrap);
-      }
-
-      // 发送/填入取「选中的那条」最新文本，绝不两条一起发
-      const getSelected = () =>
-        (contrastBlock && contrastBlock.radio.checked ? contrastBlock.ta.value : replyBlock.ta.value);
-      box.appendChild(actionRow(getSelected));
-
-      if (contrastBlock) {
-        translateInto(contrastBlock.ta, sendText, contrastLang);
-        contrastBlock.ta.addEventListener("input", () => { contrastBlock.ta._userEdited = true; });
-        // 改回复语言文本时自动重译对比（用户手改过对比则不再覆盖）
-        replyBlock.ta.addEventListener("input", () => {
-          if (contrastBlock.ta._userEdited) return;
-          clearTimeout(replyBlock.ta._ct);
-          replyBlock.ta._ct = setTimeout(
-            () => translateInto(contrastBlock.ta, replyBlock.ta.value, contrastLang),
-            600,
-          );
-        });
-      }
-    } else {
-      box.hidden = false;
-      box.textContent = (res && res.detail) || "生成失败";
-    }
-  } catch (e) {
-    box.hidden = false;
-    box.textContent = "生成失败";
-  } finally {
-    btn.disabled = false;
-    btn.textContent = old;
-  }
-}
+// 草稿生成/对比语言/send-pick 已迁移至共享组件 <cp-draft persona contrast pin>
+// （见 shared/copilot/components/cp-draft.js）。两端同源,经 cp-send/cp-fill 事件落地。
 
 async function runKbSearch() {
   const c = Copilot.ctx;

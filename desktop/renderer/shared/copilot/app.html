@@ -133,7 +133,14 @@
         if (emptyEl) emptyEl.hidden = true;
         panels.forEach(function (p) {
           if (p.title) p.title.hidden = false;
-          if (p.el) { p.el.hidden = false; p.el.context = { conversationId: cid, chatKey: ck }; }
+          if (p.el) {
+            p.el.hidden = false;
+            p.el.context = {
+              conversationId: cid, chatKey: ck,
+              platform: (ctx && ctx.platform) || "",
+              accountId: (ctx && ctx.accountId) || "",
+            };
+          }
         });
       }
 

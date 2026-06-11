@@ -43,50 +43,7 @@
             </label>
             <span id="cp-auto-status" class="cp-auto-status">已关闭</span>
           </div>
-          <div class="cp-persona-row">
-            <label for="cp-persona">人设</label>
-            <select id="cp-persona" title="选择回复使用的人设；按会话记忆">
-              <option value="">默认（domain 人设）</option>
-            </select>
-            <button id="cp-persona-pin" class="cp-pin" title="把当前人设钉到后台，对该会话全端生效（含 RPA 自动回复）">📌</button>
-          </div>
-          <div class="cp-persona-src" id="cp-persona-src"></div>
-          <div class="cp-persona-row">
-            <label for="cp-reply-lang">回复语言</label>
-            <select id="cp-reply-lang" title="把 AI 草稿翻译成客户语言；按会话记忆">
-              <option value="">跟随人设/客户</option>
-              <option value="zh">中文</option>
-              <option value="en">English</option>
-              <option value="ja">日本語</option>
-              <option value="ko">한국어</option>
-              <option value="es">Español</option>
-              <option value="pt">Português</option>
-              <option value="ru">Русский</option>
-              <option value="ar">العربية</option>
-              <option value="th">ไทย</option>
-              <option value="vi">Tiếng Việt</option>
-              <option value="id">Bahasa Indonesia</option>
-            </select>
-          </div>
-          <div class="cp-persona-row">
-            <label for="cp-contrast-lang">对比语言</label>
-            <select id="cp-contrast-lang" title="在草稿下方附一条对比翻译，方便核对；按会话记忆">
-              <option value="">不对比</option>
-              <option value="zh">中文</option>
-              <option value="en">English</option>
-              <option value="ja">日本語</option>
-              <option value="ko">한국어</option>
-              <option value="es">Español</option>
-              <option value="pt">Português</option>
-              <option value="ru">Русский</option>
-              <option value="ar">العربية</option>
-              <option value="th">ไทย</option>
-              <option value="vi">Tiếng Việt</option>
-              <option value="id">Bahasa Indonesia</option>
-            </select>
-          </div>
-          <button id="cp-draft-btn" class="cp-btn-primary">生成回复草稿</button>
-          <div id="cp-draft" class="cp-card" hidden></div>
+          <cp-draft id="cp-draft" persona contrast pin></cp-draft>
         </section>
 
         <section class="cp-sec" id="cp-voice-sec" data-tab="reply" hidden>
@@ -154,6 +111,7 @@
   </div>
   <script src="shared/copilot/client/copilot-client.js"></script>
   <script src="shared/copilot/components/cp-panel-base.js"></script>
+  <script src="shared/copilot/components/cp-draft.js"></script>
   <script src="shared/copilot/components/cp-rel-stage.js"></script>
   <script src="shared/copilot/components/cp-next-actions.js"></script>
   <script src="shared/copilot/components/cp-script.js"></script>

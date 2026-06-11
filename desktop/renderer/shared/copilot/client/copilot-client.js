@@ -95,6 +95,11 @@
     async guardCheck({ text }) {
       return this._post(`/api/desktop/guard-check`, { text });
     }
+    async translate({ text, target_lang }) {
+      const r = await this._post(`/api/unified-inbox/translate`, { text, target_lang });
+      const t = (r && r.translation) || {};
+      return { ok: !!(r && r.ok), text: t.translated_text || "" };
+    }
     // —— 账号管理（Phase 2，两端共用）——
     async listAccounts() {
       return this._get(`/api/accounts`);
@@ -187,6 +192,7 @@
       fd.append("persona_id", String(p.persona_id || ""));
       fd.append("preferred_name", String(p.preferred_name || ""));
       fd.append("language_type", String(p.language_type || "Japanese"));
+      if (p.reference_text) fd.append("reference_text", String(p.reference_text));
       const r = await fetch("/api/voice/enroll", { method: "POST", headers: _authHeaders(), body: fd });
       return await r.json();
     }
@@ -276,6 +282,10 @@
     async guardCheck({ text }) {
       const s = this._shell();
       return s.guardCheck ? s.guardCheck({ text }) : { ok: false };
+    }
+    async translate({ text, target_lang }) {
+      const s = this._shell();
+      return s.translate ? s.translate({ text, target_lang }) : { ok: false, error: "shell.translate 未暴露" };
     }
     // —— 账号管理（Phase 2，两端共用）——
     async listAccounts() {

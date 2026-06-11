@@ -157,7 +157,10 @@
           <select data-role="elang"><option value="Japanese">日语</option><option value="Chinese">中文</option><option value="English">英语</option></select>
           <button data-act="enroll-submit">登记</button>
         </div>
-        <div data-role="ehint" class="hint">仅登记本人或已授权声音</div>
+        <div class="row">
+          <input type="text" data-role="ereftext" placeholder="参考音频原文（选填，填了克隆更像）" style="flex:1;" />
+        </div>
+        <div data-role="ehint" class="hint">仅登记本人或已授权声音 · 参考音频建议 10~30 秒清晰人声</div>
         <div data-role="audition"></div>
         <div class="panel">
           <h5>🔁 复用已有音色</h5>
@@ -302,6 +305,8 @@
       const name = (this.shadowRoot.querySelector('[data-role="ename"]').value || "").trim();
       const persona = this.shadowRoot.querySelector('[data-role="epersona"]').value;
       const lang = this.shadowRoot.querySelector('[data-role="elang"]').value;
+      const refEl = this.shadowRoot.querySelector('[data-role="ereftext"]');
+      const refText = ((refEl && refEl.value) || "").trim();
       const hint = this.shadowRoot.querySelector('[data-role="ehint"]');
       if (!file || !file.files || !file.files[0]) { hint.textContent = "请选择参考音频"; return; }
       if (!name || !persona) { hint.textContent = "请填写音色名并选择人设"; return; }
@@ -313,10 +318,12 @@
           d = await this._client.voiceEnroll({
             audio_b64: b64, filename: file.files[0].name,
             persona_id: persona, preferred_name: name, language_type: lang,
+            reference_text: refText,
           });
         } else {
           d = await this._client.voiceEnroll({
             file: file.files[0], persona_id: persona, preferred_name: name, language_type: lang,
+            reference_text: refText,
           });
         }
         if (d && d.ok) {

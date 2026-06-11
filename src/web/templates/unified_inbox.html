@@ -2,19 +2,20 @@
 {% block title %}聊天工作台{% endblock %}
 {% block head %}
 <!-- 两端共享 copilot 组件库(单一事实来源 repo 根 shared/copilot,挂 /copilot) -->
-<link rel="stylesheet" href="/copilot/tokens.css">
-<link rel="stylesheet" href="/copilot/theme-light.css">
+<!-- ?v= 版本号：组件改动后递增，强制浏览器丢弃旧缓存（避免“改了不生效”） -->
+<link rel="stylesheet" href="/copilot/tokens.css?v=20260611">
+<link rel="stylesheet" href="/copilot/theme-light.css?v=20260611">
 <script>document.documentElement.setAttribute('data-cp-theme','light');</script>
-<script src="/copilot/client/copilot-client.js"></script>
-<script src="/copilot/components/cp-panel-base.js"></script>
-<script src="/copilot/components/cp-rel-stage.js"></script>
-<script src="/copilot/components/cp-next-actions.js"></script>
-<script src="/copilot/components/cp-script.js"></script>
-<script src="/copilot/components/cp-persona.js"></script>
-<script src="/copilot/components/cp-collab.js"></script>
-<script src="/copilot/components/cp-chain-exec.js"></script>
-<script src="/copilot/components/cp-draft.js"></script>
-<script src="/copilot/components/cp-voice.js"></script>
+<script src="/copilot/client/copilot-client.js?v=20260611b"></script>
+<script src="/copilot/components/cp-panel-base.js?v=20260611"></script>
+<script src="/copilot/components/cp-rel-stage.js?v=20260611"></script>
+<script src="/copilot/components/cp-next-actions.js?v=20260611"></script>
+<script src="/copilot/components/cp-script.js?v=20260611"></script>
+<script src="/copilot/components/cp-persona.js?v=20260611"></script>
+<script src="/copilot/components/cp-collab.js?v=20260611"></script>
+<script src="/copilot/components/cp-chain-exec.js?v=20260611"></script>
+<script src="/copilot/components/cp-draft.js?v=20260611"></script>
+<script src="/copilot/components/cp-voice.js?v=20260611b"></script>
 {% endblock %}
 {% block content %}
 <style>
@@ -131,6 +132,8 @@
 .hdr-btn{padding:5px 11px;border-radius:8px;font-size:12px;border:1px solid var(--border);background:#fff;cursor:pointer;color:var(--text-main);display:flex;align-items:center;gap:4px;white-space:nowrap;transition:all .15s;}
 .hdr-btn:hover{border-color:var(--accent);color:var(--accent);}
 .hdr-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+.hdr-btn.autopilot-on{background:#0f9d75;color:#fff;border-color:#0f9d75;}
+.hdr-btn.autopilot-on:hover{background:#0c8a66;color:#fff;border-color:#0c8a66;}
 .mode-select{border:1px solid var(--border);border-radius:8px;padding:5px 8px;font-size:12px;background:#fff;cursor:pointer;outline:none;color:var(--text-main);}
 
 /* Claim banner */
@@ -172,6 +175,12 @@
 .rt-divider{width:1px;height:18px;background:var(--border);margin:0 3px;flex-shrink:0;}
 .rt-primary{background:#eff6ff !important;border-color:#bfdbfe !important;color:#2563eb !important;font-weight:600;}
 .rt-primary:hover{background:#dbeafe !important;}
+/* 翻译弹层：标题 + 绿色一键开启 + 分区排版 */
+.xl-pop-hd{font-size:13px;font-weight:700;color:var(--text-main);margin:0 0 8px;display:flex;align-items:center;gap:5px;}
+.xl-quick-row{display:flex;gap:8px;align-items:center;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border);}
+.xl-quick{flex:1;font:inherit;font-size:12px;font-weight:600;cursor:pointer;padding:7px 10px;border:1px solid transparent;border-radius:8px;background:#0f9d75;color:#fff;transition:background .15s;}
+.xl-quick:hover{background:#0c8a66;}
+.xl-quick-row .tiny-btn{padding:7px 12px;}
 .rt-pop-wrap{position:relative;display:inline-flex;align-items:center;gap:6px;}
 .rt-pop{position:absolute;bottom:calc(100% + 8px);left:0;z-index:60;min-width:300px;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:0 -6px 24px rgba(15,23,42,.14);padding:10px;display:none;}
 .rt-pop.show{display:block;}
@@ -662,6 +671,7 @@
             <option value="multi_choice">多选</option>
             <option value="auto_ai">全自动</option>
           </select>
+          <button class="hdr-btn" id="autopilot-btn" onclick="toggleAutopilot()" title="全自动托管：本会话收到客户消息时自动生成并发送（低风险自动发，命中风控转人工）">🤖 全自动</button>
           <button class="hdr-btn" id="ai-toggle-btn" onclick="toggleAiDraft()" title="待审 AI 草稿队列（人工审批后发送）">🤖 待审<span id="ai-pending-badge" style="display:none;margin-left:4px;background:#ef4444;color:#fff;border-radius:9px;font-size:10px;font-weight:700;padding:0 5px;">0</span></button>
           <button class="hdr-btn" id="info-toggle-btn" onclick="toggleInfoSidebar()" title="业务助手（AI回复/洞察/客户档案）">📋 助手</button>
           <button class="archive-btn" id="archive-btn" onclick="toggleArchive()" title="归档会话">📦</button>
@@ -692,8 +702,8 @@
             <!-- P26: / 命令面板 -->
             <div class="slash-panel" id="slash-panel">
               <div class="slash-panel-hdr">
-                <span>快捷指令</span>
-                <span id="slash-cmd-hint" style="font-size:10px;color:#d1d5db;">输入关键词过滤</span>
+                <span>/ 指令 · 📄回复模板 + 📚知识库</span>
+                <span id="slash-cmd-hint" style="font-size:10px;color:#d1d5db;">输入关键词过滤 · ↑↓ 选择 · Enter 确认</span>
               </div>
               <div id="slash-items"></div>
             </div>
@@ -736,7 +746,7 @@
                     </div>
                     <!-- 声纹登记/改绑/对账等深度管理已统一到右栏业务助手 cp-voice，避免双端重复维护 -->
                     <div class="rt-pop-row" style="margin-top:8px;border-top:1px dashed var(--border);padding-top:8px;">
-                      <button class="tiny-btn" onclick="_focusRightVoice()" title="声纹登记 / 改绑 / 对账 等深度管理已统一到右侧业务助手" style="flex:1;">🎚️ 录入 / 改绑 / 对账（右栏深度设置）→</button>
+                      <button class="tiny-btn" onclick="_focusRightVoice()" title="导入参考音频克隆音色 / 改绑 / 声纹对账（右侧业务助手）" style="flex:1;">🎤 导入语音克隆 / 改绑 / 对账 →</button>
                     </div>
                   </div>
                 </div>
@@ -751,8 +761,14 @@
               <!-- 翻译组：双向翻译 / 图片翻译 / 语音翻译 聚合到一个弹层 -->
               <div class="rt-pop-wrap">
                 <button class="tiny-btn" id="xlate-toggle-btn" onclick="toggleXlatePop()" title="双向翻译 / 图片翻译 / 语音翻译">🌐 翻译 ▾</button>
-                <span class="rt-xl-status" id="rt-xl-status">未开启</span>
+                <span class="rt-xl-status" id="rt-xl-status" onclick="toggleXlatePop()" style="cursor:pointer;" title="点击设置对话翻译">未开启</span>
                 <div class="rt-pop rt-pop-right" id="xlate-pop">
+                  <div class="xl-pop-hd">🌐 对话翻译</div>
+                  <!-- 一键开关：选了语言即生效，这里给最常用的快捷入口 -->
+                  <div class="xl-quick-row">
+                    <button type="button" class="xl-quick" onclick="_xlateQuickOn()" title="对方消息自动翻成中文（最常用）">🌐 一键开启</button>
+                    <button type="button" class="tiny-btn" onclick="_xlateOff()" title="关闭双向翻译">关闭</button>
+                  </div>
                   <!-- P55: 实时双向翻译控制条 -->
                   <div class="xlate-bar" id="xlate-bar" style="margin-top:0;">
                     <span class="xlate-ttl">🌐 双向翻译</span>
@@ -761,25 +777,31 @@
                       <select id="xlate-in" class="xlate-sel" onchange="_onXlateChange()" title="对方消息自动翻译成">
                         <option value="">不译</option>
                         <option value="zh">中文</option>
-                        <option value="en">English</option>
-                        <option value="th">ไทย</option>
-                        <option value="id">Indo</option>
-                        <option value="vi">Việt</option>
-                        <option value="ja">日本語</option>
-                        <option value="ko">한국어</option>
+                        <option value="en">英语</option>
+                        <option value="th">泰语</option>
+                        <option value="vi">越南语</option>
+                        <option value="id">印尼语</option>
+                        <option value="ja">日语</option>
+                        <option value="ko">韩语</option>
+                        <option value="ru">俄语</option>
+                        <option value="es">西班牙语</option>
+                        <option value="pt">葡萄牙语</option>
                       </select>
                     </div>
                     <div class="xlate-dir">
                       <span>发送</span><span class="arrow">→</span>
                       <select id="xlate-out" class="xlate-sel" onchange="_onXlateChange()" title="发送前把你的消息翻译成">
                         <option value="">不译</option>
-                        <option value="en">English</option>
-                        <option value="th">ไทย</option>
-                        <option value="id">Indo</option>
-                        <option value="vi">Việt</option>
                         <option value="zh">中文</option>
-                        <option value="ja">日本語</option>
-                        <option value="ko">한국어</option>
+                        <option value="en">英语</option>
+                        <option value="th">泰语</option>
+                        <option value="vi">越南语</option>
+                        <option value="id">印尼语</option>
+                        <option value="ja">日语</option>
+                        <option value="ko">韩语</option>
+                        <option value="ru">俄语</option>
+                        <option value="es">西班牙语</option>
+                        <option value="pt">葡萄牙语</option>
                       </select>
                     </div>
                     <span class="xlate-engine" id="xlate-engine"><span class="dot"></span>AI引擎</span>
@@ -2575,7 +2597,10 @@ function _renderSlashItems(){
   const hintEl = document.getElementById('slash-cmd-hint');
   if(!el) return;
   if(!_slashItems.length){
-    el.innerHTML = '<div class="slash-hint">没有匹配的快捷指令</div>';
+    el.innerHTML = '<div class="slash-hint" style="line-height:1.6;">'
+      + '暂无匹配项。<br>「/ 指令」用于快速调用：📄 <b>回复模板</b>（后台模板库）与 📚 <b>知识库答案</b>。<br>'
+      + '直接输入关键词过滤，或到「后台 → 回复模板 / 知识库」维护内容。'
+      + '</div>';
     if(hintEl) hintEl.textContent = '';
     return;
   }
@@ -2673,7 +2698,9 @@ let _sendSeq=0; // 防止乱序
 async function sendMediaFile(input){
   const f=input&&input.files&&input.files[0];
   input.value='';  // 复位，便于连发同名文件
-  if(!f||!selectedChat) return;
+  if(!f){ return; }
+  if(!selectedChat){ _toast('请先选择会话','#b45309'); return; }
+  if(f.size>25*1024*1024){ _toast('文件过大（上限 25MB）','#dc2626'); return; }
   const cap=(document.getElementById('reply-ta').value||'').trim();
   const fd=new FormData();
   fd.append('platform', selectedChat.platform);
@@ -2681,19 +2708,22 @@ async function sendMediaFile(input){
   fd.append('chat_key', selectedChat.chat_key);
   fd.append('caption', cap);
   fd.append('file', f);
-  showHint('发送媒体中…');
+  _toast('📤 发送中：'+f.name,'#2563eb');
   try{
     const r=await fetch('/api/unified-inbox/send-media',{method:'POST',body:fd});
     const d=await r.json().catch(()=>({}));
     if(r.ok&&d.ok){
       document.getElementById('reply-ta').value='';
-      showHint('媒体已发送');
+      _toast('✅ 媒体已发送','#0f9d75');
       await loadThread(selectedChat,true);
       await loadChats();
+    } else if(r.status===501){
+      // 仅 protocol 多开且在线账号支持从收件箱直接发媒体
+      _toast('⚠ 当前账号不支持收件箱直发媒体（需协议多开且在线）','#b45309');
     } else {
-      showHint((d&&d.detail)||(d&&d.message)||'媒体发送失败');
+      _toast('❌ '+((d&&d.detail)||(d&&d.message)||('媒体发送失败（'+r.status+'）')),'#dc2626');
     }
-  }catch(_){ showHint('媒体发送失败'); }
+  }catch(_){ _toast('❌ 媒体发送失败（网络/服务异常）','#dc2626'); }
 }
 
 async function sendMsg(){
@@ -2841,13 +2871,29 @@ async function loadModeState(c){
     const d=await r.json();
     if(d.ok){ document.getElementById('mode-select').value=d.mode||'review'; }
   }catch(_){}
+  _syncAutopilotBtn();
 }
 async function setMode(mode){
+  _syncAutopilotBtn();
   if(!selectedChat) return;
   try{
     await fetch('/api/unified-inbox/automation',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({platform:selectedChat.platform,account_id:selectedChat.account_id||'default',chat_key:selectedChat.chat_key,mode})});
   }catch(_){}
+}
+/* 全自动托管：显眼开关，联动 mode-select(auto_ai⇄review) */
+function toggleAutopilot(){
+  var sel=document.getElementById('mode-select'); if(!sel) return;
+  var next=(sel.value==='auto_ai')?'review':'auto_ai';
+  sel.value=next;
+  setMode(next);
+}
+function _syncAutopilotBtn(){
+  var sel=document.getElementById('mode-select'), b=document.getElementById('autopilot-btn');
+  if(!sel||!b) return;
+  var on=(sel.value==='auto_ai');
+  b.classList.toggle('autopilot-on',on);
+  b.textContent=on?'🤖 全自动·开':'🤖 全自动';
 }
 
 /* ===== AI 草稿 ===== */
@@ -3216,34 +3262,22 @@ async function takeClaim(cid){
 }
 
 /* ===== AI 建议 ===== */
-async function genAiReply(){
-  if(!selectedChat) return;
-  const btn=document.getElementById('ai-reply-btn');
-  const origText=btn.textContent;
-  btn.textContent='⏳'; btn.disabled=true;
-  try{
-    const lastInMsg=threadMsgs.filter(m=>m.direction==='in').pop();
-    const r=await fetch('/api/unified-inbox/analyze',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        text:lastInMsg?.text||'',
-        messages:threadMsgs.slice(-10),
-        chat:selectedChat
-      })});
-    const d=await r.json();
-    if(d.ok){
-      const analysis=d.analysis||{};
-      const suggestion=analysis.suggested_reply||analysis.suggestion||analysis.reply||'';
-      if(suggestion){
-        const rp=document.getElementById('reply-preview');
-        rp.textContent=suggestion; rp.style.display='block';
-        document.getElementById('reply-ta').value=suggestion;
-      } else {
-        showHint('AI未生成建议（消息过短？）');
-      }
-      if(infoOn) renderInfoSidebarAI(analysis);
-    }
-  }catch(_){ showHint('AI建议获取失败'); }
-  btn.textContent=origText; btn.disabled=false;
+/* 底部「AI回复」=右栏业务助手「生成草稿」的快捷入口（同一引擎，去重复）：
+   打开助手 → 回复页 → 触发 cp-draft 生成。避免两套 AI 引擎并存且点击无响应。 */
+function genAiReply(){
+  if(!selectedChat){ _toast('请先选择会话','#b45309'); return; }
+  var sb=document.getElementById('info-sidebar');
+  if(sb && !sb.classList.contains('show') && typeof toggleInfoSidebar==='function') toggleInfoSidebar();
+  if(typeof setWsCpTab==='function') setWsCpTab('reply');
+  var el=document.getElementById('ws-cp-draft');
+  var btn=el && el.shadowRoot ? el.shadowRoot.querySelector('button[data-act="gen"]') : null;
+  if(btn){
+    try{ el.scrollIntoView({behavior:'smooth',block:'nearest'}); }catch(_){}
+    btn.click();
+    _toast('正在生成草稿（右侧业务助手）','#0f9d75');
+  } else {
+    _toast('请在右侧业务助手 → 回复 中生成草稿','#b45309');
+  }
 }
 
 /* ===== 语音音色（按人设克隆）选择 ===== */
@@ -3588,6 +3622,17 @@ function _onXlateChange(){
   // 立即对当前线程入站消息补译
   if(_xlateIn && threadMsgs.length) _autoTranslateInbound();
 }
+/* 一键开启：对方消息自动翻成中文（最常用场景） */
+function _xlateQuickOn(){
+  var si=document.getElementById('xlate-in'); if(si) si.value='zh';
+  _onXlateChange();
+}
+/* 关闭：收/发均置“不译” */
+function _xlateOff(){
+  var si=document.getElementById('xlate-in'), so=document.getElementById('xlate-out');
+  if(si) si.value=''; if(so) so.value='';
+  _onXlateChange();
+}
 
 /* ===== 底部工具栏：分组弹层 + 状态徽标（收敛重复按钮） ===== */
 function _closeRtPops(except){
@@ -3608,7 +3653,18 @@ function _focusRightVoice(){
   if(typeof infoOn!=='undefined' && !infoOn && typeof toggleInfoSidebar==='function') toggleInfoSidebar();
   if(typeof setWsCpTab==='function') setWsCpTab('reply');
   var el=document.getElementById('ws-cp-voice');
-  if(el){ try{ el.scrollIntoView({behavior:'smooth',block:'center'}); }catch(_){ } }
+  if(el){
+    try{ el.scrollIntoView({behavior:'smooth',block:'center'}); }catch(_){ }
+    // 直接展开「录入克隆音色」导入表单（参考音频 → 克隆），让 #7 一步可达
+    try{
+      var sr=el.shadowRoot;
+      var panel=sr && sr.querySelector('[data-role="enroll"]');
+      if(panel && panel.hidden){
+        var tg=sr.querySelector('button[data-act="toggle-enroll"]');
+        if(tg) tg.click();
+      }
+    }catch(_){ }
+  }
 }
 function toggleXlatePop(){
   var p=document.getElementById('xlate-pop');
@@ -3626,7 +3682,7 @@ document.addEventListener('click',function(e){
 function _updateXlStatus(){
   var el=document.getElementById('rt-xl-status'); if(!el) return;
   var i=document.getElementById('xlate-in'), o=document.getElementById('xlate-out');
-  var L={zh:'中',en:'EN',th:'ไทย',id:'ID',vi:'VI',ja:'日',ko:'한'};
+  var L={zh:'中',en:'英',th:'泰',vi:'越',id:'印',ja:'日',ko:'韩',ru:'俄',es:'西',pt:'葡'};
   var inv=(i&&i.value)?('收→'+(L[i.value]||i.value)):'';
   var outv=(o&&o.value)?('发→'+(L[o.value]||o.value)):'';
   var s=[inv,outv].filter(Boolean).join(' · ');
@@ -4581,12 +4637,12 @@ Object.assign(window, {
   // 批量操作
   batchArchive, batchTagPrompt, batchAssignPrompt,
   // 会话头 / 移动端
-  closeMobileChat, toggleAiDraft, toggleInfoSidebar, toggleArchive,
+  closeMobileChat, toggleAiDraft, toggleInfoSidebar, toggleArchive, toggleAutopilot,
   // 发送 / 回复区
   sendMsg, sendMediaFile, genAiReply, genVoiceReply, sendVoiceReply, _onVoicePersonaChange,
   toggleVoiceEnroll, submitVoiceEnroll, unbindVoice, submitVoiceRebind,
   loadVoiceReconcile, purgeOrphanVoices, purgeVoice, toggleQrPanel,
-  toggleVoiceCfg, toggleXlatePop, _openSlash, _focusRightVoice,
+  toggleVoiceCfg, toggleXlatePop, _xlateQuickOn, _xlateOff, _openSlash, _focusRightVoice,
   useTemplate, useKbText, useDraftText, quoteMsg,
   // 知识库 / 模板
   dismissKbSuggest, _useKbEntry,
