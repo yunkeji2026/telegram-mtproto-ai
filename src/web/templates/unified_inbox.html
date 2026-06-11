@@ -18,8 +18,14 @@
     document.documentElement.setAttribute('data-cp-theme',eff);
     var l=document.getElementById('cp-theme-css');
     if(l){ var want='/copilot/theme-'+eff+'.css?v=20260611b'; if(l.getAttribute('href')!==want) l.setAttribute('href',want); }
+    // 注意：按钮内含 .nav-tip 子节点，不能用 btn.textContent（会清掉悬浮提示）。
+    // 图标固定 🎨（调色板＝改配色，语义明确），仅更新标题与提示里的当前模式。
+    var p=pref();
+    var lbl=(p==='auto'?'跟随系统':(p==='dark'?'暗色':'亮色'));
     var btn=document.getElementById('cp-theme-btn');
-    if(btn){ var p=pref(); btn.textContent=p==='auto'?'🌗':(p==='dark'?'🌙':'☀️'); btn.title='主题：'+(p==='auto'?'跟随系统':(p==='dark'?'暗色':'亮色'))+'（点击切换）'; }
+    if(btn) btn.title='切换主题配色 · 当前：'+lbl+'（点击循环 跟随/亮/暗）';
+    var d=document.getElementById('cp-theme-desc');
+    if(d) d.textContent='当前：'+lbl+' · 点击切换 跟随系统 / 亮色 / 暗色';
   };
   window.cpCycleTheme=function(){
     var order=['auto','light','dark'], p=pref(), i=order.indexOf(p); p=order[(i+1)%order.length];
@@ -622,9 +628,9 @@
         <div class="nav-tip"><div class="nav-tip-title"><span>账号管理</span></div>
           <div class="nav-tip-desc">查看各平台连接状态 · 扫码新增账号 · 断线重连</div></div>
       </div>
-      <div class="nav-icon-btn" onclick="cpCycleTheme()" id="cp-theme-btn">🌗
-        <div class="nav-tip"><div class="nav-tip-title"><span>主题</span></div>
-          <div class="nav-tip-desc">跟随系统 / 亮色 / 暗色 三态切换（自动持久化，同步右侧业务助手）</div></div>
+      <div class="nav-icon-btn" onclick="cpCycleTheme()" id="cp-theme-btn">🎨
+        <div class="nav-tip"><div class="nav-tip-title"><span>主题配色</span></div>
+          <div class="nav-tip-desc" id="cp-theme-desc">跟随系统 / 亮色 / 暗色 三态切换（自动持久化，同步右侧业务助手）</div></div>
       </div>
     </div>
   </div>

@@ -117,10 +117,11 @@ function resolveAccounts(cfg) {
     const isInbox = id === INBOX_ID;
     document.querySelectorAll(".rail-item").forEach((el) => el.classList.toggle("active", el.dataset.id === id));
     document.querySelectorAll("#webviews webview").forEach((wv) => wv.classList.toggle("active", wv.dataset.id === id));
-    // 收件箱(/workspace)自带业务助手侧栏 → 隐藏桌面原生 #copilot,避免“两个业务助手”重复+空面板;
-    // 内嵌平台 Tab 仍保留桌面右栏(原生 copilot 数据源)。iframe 模式下 #copilot 作为 inbox 宿主,不隐藏。
+    // 收件箱(/workspace)页面**永远自带**完整业务助手右栏 → 激活收件箱时一律隐藏桌面原生 #copilot,
+    // 避免「两个业务助手」(其中桌面侧因无会话上下文而空、功能不可用)。
+    // 内嵌平台 Tab(Telegram/WhatsApp 原生聊天)才保留桌面 #copilot(原生/ iframe 副驾数据源)。
     const _cp = document.getElementById("copilot");
-    if (_cp) _cp.style.display = (isInbox && !Copilot.useIframe) ? "none" : "";
+    if (_cp) _cp.style.display = isInbox ? "none" : "";
     // 连接/错误遮罩只属于收件箱：切到本标签按当前阶段决定显隐，切走则一律藏起
     if (Inbox.applyVisibility) Inbox.applyVisibility(isInbox);
     // 注入状态条只属于内嵌平台 Tab：收件箱激活时隐藏
