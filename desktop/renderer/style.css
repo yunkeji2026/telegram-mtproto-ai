@@ -260,3 +260,33 @@ body { font-family: "Segoe UI", system-ui, sans-serif; background: #17212b; colo
   transition: opacity .18s ease, transform .18s ease; z-index: 999999;
 }
 #cp-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ============================================================
+   业务助手副驾深色化：桌面壳为 Telegram 风深色专属，
+   原浅色面板在深壳里形成「一黑一白」。后置覆盖统一为深色，
+   不改上方浅色基线，便于审阅/回滚。强调蓝/绿、语义徽标保留。
+   ============================================================ */
+#copilot { background: #1a2330; border-left-color: #2b3947; }
+.cp-head { background: #17212b; color: #e6edf3; border-bottom-color: #2b3947; }
+.cp-tabs { background: #1a2330; border-bottom-color: #2b3947; }
+.cp-tab { color: #8a9bb0; }
+.cp-tab:hover { color: #e6edf3; }
+#cp-appframe { background: #17212b; }
+.cp-card { background: #222c3a; border-color: #2b3947; color: #e6edf3; }
+.cp-persona-row label { color: #8a9bb0; }
+.cp-persona-row select,
+.cp-search input,
+.cp-edit { background: #222c3a; border-color: #2b3947; color: #e6edf3; }
+.cp-pin { background: #222c3a; border-color: #2b3947; color: #8a9bb0; }
+.cp-item { background: #222c3a; border-color: #2b3947; color: #cdd9e5; }
+.cp-item:hover { background: #1c2733; border-color: #3b82f6; }
+.cp-item .it-title { color: #e6edf3; }
+.cp-act.ghost { background: #222c3a; border-color: #2b3947; color: #cdd9e5; }
+.cp-act.ghost:hover { color: #e6edf3; border-color: #5a8bc0; }
+.badge { background: #2b3947; color: #cdd9e5; }
+#cp-accounts-panel { background: #1a2330; border-color: #2b3947; }
+#cp-auto-bar { background: #222c3a; border-color: #2b3947; }
+.cp-auto-label { color: #e6edf3; }
+.cp-summary { color: #cdd9e5; }
+.cp-lang-block.active { background: rgba(59,130,246,.16); }
+.cp-pin.pinned { background: rgba(59,130,246,.18); color: #93c5fd; border-color: #3b82f6; }
