@@ -298,15 +298,20 @@ async function translateMediaBubble(bubble, btn, m) {
   }
 }
 
+// P0 护栏：归一后与原文一致（identity 兜底/同语种）时不渲染译文，与后台同规则
+function _aitrNorm(s) { return String(s == null ? "" : s).replace(/\s+/g, "").toLowerCase(); }
+function aitrMeaningful(orig, xl) { return !!xl && _aitrNorm(orig) !== _aitrNorm(xl); }
+
 async function translateBubble(bubble, btn) {
   const text = bubbleVisibleText(bubble);
   if (!text) return;
   const old = btn.textContent;
   btn.textContent = "翻译中…";
   const res = await ipcRenderer.invoke("desktop:translate", { text, target_lang: targetLang() });
-  btn.textContent = old;
-  if (res && res.ok && res.text) renderTranslation(bubble, res.text);
-  else btn.textContent = "翻译失败";
+  if (res && res.ok && res.text) {
+    if (aitrMeaningful(text, res.text)) { btn.textContent = old; renderTranslation(bubble, res.text); }
+    else { btn.textContent = "≈ 原文"; } // 同语种/无需翻译：不重复显示原文
+  } else { btn.textContent = "翻译失败"; }
 }
 
 function appendInjectControl(bubble, el) {
