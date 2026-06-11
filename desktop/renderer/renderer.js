@@ -659,8 +659,10 @@ async function enableIframe() {
   const b = await frameBackend();
   const base = b.base_url || "http://127.0.0.1:18787";
   Copilot._frameOrigin = frameOrigin(base);
-  // token 放 hash(不进 server access log);theme=light 与桌面/后台浅色统一
-  const src = `${base}/copilot/app.html?theme=light#token=${encodeURIComponent(b.token || "")}`;
+  // token 放 hash(不进 server access log);主题镜像宿主壳 data-cp-theme(桌面为深色专属，
+  // 将来若壳可切换，iframe 自动跟随)，使统一 App 副驾与深色壳一致，消除 iframe 模式「一黑一白」
+  const hostTheme = document.documentElement.getAttribute("data-cp-theme") === "light" ? "light" : "dark";
+  const src = `${base}/copilot/app.html?theme=${hostTheme}#token=${encodeURIComponent(b.token || "")}`;
   console.log("[iframe] enable origin=" + Copilot._frameOrigin + " src=" + src);
   frame.onload = function () { console.log("[iframe] onload fired"); };
   // 仅在 src 变化(首次/换后端)时重置 ready 并加载;否则沿用已就绪的 iframe
