@@ -14,6 +14,7 @@ import base64
 import json
 import mimetypes
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -21,6 +22,23 @@ import requests
 
 DEFAULT_TARGET_MODEL = "qwen3-tts-vc-2026-01-22"
 ENROLLMENT_MODEL = "qwen-voice-enrollment"
+
+
+def sanitize_preferred_name(name: str) -> str:
+    """规整 Qwen 声纹登记的 preferred_name。
+
+    DashScope 声纹登记要求该字段仅含小写字母与数字、长度 ≤10、且以字母开头
+    （中文/空格/符号会被云端判为 InvalidParameter）。这里只用于云端请求的
+    前缀，人设展示名/审计/本地 JSON 仍保留用户原始输入。
+
+    例：'victor'→'victor'；'小习'→'voice'；'Voice 2'→'voice2'；'123'→'v123'。
+    """
+    s = re.sub(r"[^a-z0-9]", "", str(name or "").lower())
+    if not s:
+        return "voice"
+    if not s[0].isalpha():
+        s = "v" + s
+    return s[:10]
 
 
 # ── secrets / endpoint helpers ───────────────────────────────────────────────
@@ -89,7 +107,8 @@ def build_enroll_payload(
         "input": {
             "action": "create",
             "target_model": target_model,
-            "preferred_name": preferred_name,
+            # 云端只接受 小写字母+数字、≤10、字母开头；中文等需先清洗
+            "preferred_name": sanitize_preferred_name(preferred_name),
             "audio": {"data": data_uri},
         },
     }
@@ -148,6 +167,34 @@ def build_qwen_voice_profile(
         ],
         "command_timeout_sec": command_timeout_sec,
     }
+
+
+def build_lan_voice_profile(
+    *, reference_audio_path: str, speaker_id: str,
+    base_url: str, language: str = "zh", reference_text: str = "",
+    clone_path: str = "/v1/tts/clone",
+) -> Dict[str, Any]:
+    """局域网零样本登记成功后写回人设的 voice_profile（fish_speech）。
+
+    无云端音色 ID：合成时由 TTSPipeline 的「LAN 优先」直接拿 reference_audio
+    去局域网主机零样本克隆。reference_text（参考音频原文）填了克隆效果更好。
+    enabled+owner_consent+reference_audio_path 齐备 → /api/voice/profiles 标 ready。
+    """
+    vp: Dict[str, Any] = {
+        "enabled": True,
+        "owner_consent": True,
+        "backend": "voice_clone_lan",
+        "source": "lan_zeroshot",
+        "speaker_id": speaker_id,
+        "voice": "",
+        "reference_audio_path": reference_audio_path,
+        "base_url": base_url,
+        "language": language,
+        "clone_path": clone_path,
+    }
+    if reference_text:
+        vp["reference_text"] = reference_text
+    return vp
 
 
 def without_voice_profile(persona: Dict[str, Any]) -> Dict[str, Any]:

@@ -27,6 +27,7 @@ from src.ai.voice_enroll import (
     purge_guard,
     qwen_profile_json_dict,
     reconcile_voice_assets,
+    sanitize_preferred_name,
     without_voice_profile,
 )
 
@@ -37,6 +38,26 @@ def test_build_enroll_payload_shape():
     assert p["input"]["action"] == "create"
     assert p["input"]["preferred_name"] == "victor"
     assert p["input"]["audio"]["data"].startswith("data:audio/wav;base64,")
+
+
+def test_sanitize_preferred_name_rules():
+    # 合法输入原样（小写字母/数字）
+    assert sanitize_preferred_name("victor") == "victor"
+    # 中文/符号被过滤后为空 → 回落 voice（这正是用户报错的场景：'小习'）
+    assert sanitize_preferred_name("小习") == "voice"
+    assert sanitize_preferred_name("张景光") == "voice"
+    # 大写转小写 + 去空格/符号
+    assert sanitize_preferred_name("Voice 2!") == "voice2"
+    # 数字开头 → 补字母前缀（云端要求字母开头）
+    assert sanitize_preferred_name("123abc") == "v123abc"
+    # 超长截断到 10
+    assert sanitize_preferred_name("abcdefghijklmnop") == "abcdefghij"
+
+
+def test_build_enroll_payload_sanitizes_non_ascii():
+    # 中文音色名不应直传云端（否则 InvalidParameter: preferred_name is invalid）
+    p = build_enroll_payload(data_uri="data:audio/wav;base64,AAAA", preferred_name="小习")
+    assert p["input"]["preferred_name"] == "voice"
 
 
 def test_parse_voice_id():

@@ -589,6 +589,26 @@ messenger_rpa:
             reply_length: concise
             max_reply_sentences: 4
 
+# ── 局域网语音克隆（LAN 优先 → 云端兜底）─────────────────────────────────────
+# 声音克隆放到局域网语音主机（fish_speech_s2 / AvatarHub）上跑：192.168.0.188:7855。
+# 合成时先快速健康探测（含 model_loaded）：在线 → 局域网零样本克隆（WAV）；
+# 不可用/失败 → 自动回落云端 Qwen。登记同理：LAN 在线时零样本登记（不烧云端配额）。
+# 接口契约：POST /v1/tts/clone {text, reference_audio_b64, reference_text, language, return_base64}
+#          → {ok, audio_base64(WAV), sample_rate}；GET /health → {model_loaded:true}
+# enabled=false 时完全保持现状（仅走云端）。
+voice_clone_lan:
+  enabled: true
+  base_url: http://192.168.0.188:7855    # fish_speech 语音克隆主机（7855；8000 是换脸，勿混）
+  protocol: fish_speech
+  clone_path: /v1/tts/clone              # 零样本克隆合成端点
+  health_path: /health                   # 健康探测端点（含 model_loaded）
+  health_timeout_sec: 2.0                # 探测超时；超了即判「局域网不可用」
+  health_cache_sec: 30                   # 探测结果进程级缓存秒数（避免每条都探）
+  synth_timeout_sec: 300                 # 单次克隆合成超时（fish_speech 建议 ≥300s）
+  language: zh                            # 默认合成语种（zh/en/ja...）
+  api_key: ""                            # 主机需鉴权时填（Bearer）
+  cloud_fallback: true                   # 局域网不可用/失败 → 回落云端 Qwen
+
 # WhatsApp RPA（ADB + uiautomator；与 Telegram/LINE/Messenger 共用 Skill/AI）
 # 与 messenger_rpa 结构类似，accounts[] 下为每台手机一条
 whatsapp_rpa:

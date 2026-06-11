@@ -253,6 +253,7 @@ def register_voice_routes(app, api_auth, config_manager=None):
         preferred_name = str(form.get("preferred_name") or "").strip()
         region_in = str(form.get("region") or "").strip()
         language_type = str(form.get("language_type") or "Japanese").strip() or "Japanese"
+        reference_text = str(form.get("reference_text") or "").strip()
         if upload is None or not getattr(upload, "filename", ""):
             raise HTTPException(400, "file（参考音频）必填")
         if not persona_id:
@@ -285,6 +286,43 @@ def register_voice_routes(app, api_auth, config_manager=None):
             audio_path.write_bytes(data)
         except Exception as ex:  # noqa: BLE001
             raise HTTPException(500, f"参考音频落盘失败: {ex}")
+
+        # ── 局域网优先：LAN 克隆主机在线则零样本登记（不烧云端配额）──
+        raw_full_cfg: Dict[str, Any] = {}
+        if config_manager and hasattr(config_manager, "config"):
+            raw_full_cfg = config_manager.config or {}
+        lan_cfg = raw_full_cfg.get("voice_clone_lan") or {}
+        if isinstance(lan_cfg, dict) and lan_cfg.get("enabled"):
+            try:
+                from src.ai.voice_clone_client import VoiceCloneClient
+                lan = VoiceCloneClient(lan_cfg)
+                lan_up = await asyncio.to_thread(lan.health_ok)
+            except Exception as ex:  # noqa: BLE001
+                logger.debug("[voice/enroll] LAN health probe error: %s", ex)
+                lan_up = False
+            if lan_up:
+                from src.ai.voice_enroll import build_lan_voice_profile
+                from src.utils.persona_manager import PersonaManager as _PM
+                vp_lan = build_lan_voice_profile(
+                    reference_audio_path=str(audio_path), speaker_id=safe,
+                    base_url=lan.base_url, language=str(lan_cfg.get("language") or "zh"),
+                    reference_text=reference_text,
+                    clone_path=str(lan_cfg.get("clone_path") or "/v1/tts/clone"))
+                new_persona = dict(persona)
+                new_persona["voice_profile"] = vp_lan
+                try:
+                    _pm = _PM.get_instance()
+                    _pm.upsert_profile(persona_id, new_persona)
+                    cm = getattr(request.app.state, "config_manager", None) or config_manager
+                    _pm.persist_profiles(cm)
+                except Exception as ex:  # noqa: BLE001
+                    logger.warning("[voice/enroll] LAN persist failed: %s", ex)
+                    return {"ok": False, "reason": "persist_failed", "message": str(ex)[:300]}
+                _audit(request, "voice_enroll",
+                       f"persona={persona_id} mode=lan_zeroshot name={preferred_name}")
+                return {"ok": True, "mode": "lan_zeroshot", "persona_id": persona_id,
+                        "reference_audio_path": str(audio_path), "lan_base_url": lan.base_url}
+            logger.info("[voice/enroll] voice_clone_lan 不可用 → 回落云端 Qwen 登记")
 
         from src.ai.voice_enroll import (
             build_qwen_voice_profile, enroll_voice, qwen_profile_json_dict)

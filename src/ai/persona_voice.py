@@ -62,6 +62,11 @@ def resolve_voice_cfg(
                         merged[k] = vp[k]
                 break
 
+        # ── 注入全局局域网克隆配置，让 TTSPipeline 实现「LAN 优先 → 云端兜底」──
+        vcl = full_config.get("voice_clone_lan")
+        if isinstance(vcl, dict) and vcl:
+            merged["voice_clone_lan"] = dict(vcl)
+
         return merged
     except Exception:
         return {}
