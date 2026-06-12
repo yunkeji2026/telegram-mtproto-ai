@@ -57,7 +57,7 @@ class Skill(LoggerMixin):
         return None
 
     _FALLBACK_EN = {
-        "greeting": "Hi there! I'm Camille, how can I help you?",
+        "greeting": "Hi there! I'm Ling, how can I help you?",
         "channel_info": "Let me check the channel status for you.",
         "complaint": "I understand your concern. Let me look into this for you right away.",
         "order_query": "Let me check your order status. Could you share the order number or payment screenshot?",

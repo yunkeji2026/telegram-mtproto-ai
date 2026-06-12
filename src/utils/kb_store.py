@@ -2714,7 +2714,7 @@ SYSTEM_REPLY_SEEDS: List[Dict[str, Any]] = [
         "fallback_group": "test",
         "triggers": '[]',
         "example_reply_zh": (
-            "✅ 系统运行正常！Camille AI已就绪。\n---\n"
+            "✅ 系统运行正常！小灵 AI已就绪。\n---\n"
             "测试收到，一切正常！"
         ),
     },

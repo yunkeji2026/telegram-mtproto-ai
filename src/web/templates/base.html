@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{% block title %}{{ site_name|default('智控王客户转化聊天系统') }}{% endblock %}</title>
+<title>{% block title %}{{ site_name|default('华灵科技客户转化聊天系统') }}{% endblock %}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
@@ -431,7 +431,7 @@ code{background:var(--input);padding:.15rem .45rem;border-radius:5px;font-size:.
 <aside class="sidebar" id="sidebar">
   <div class="sb-brand">
     <div class="sb-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div>
-    <span class="sb-name">{{ i18n.brand if i18n else site_name|default('智控王客户转化聊天系统') }}</span>
+    <span class="sb-name">{{ i18n.brand if i18n else site_name|default('华灵科技客户转化聊天系统') }}</span>
     <button class="sb-collapse" onclick="toggleCollapse()" title="{{ (i18n or {}).get('sidebar_toggle','折叠/展开侧栏') }}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>
     </button>
@@ -1041,7 +1041,7 @@ function showToast(msg,type='ok',dur=3500){
 }
 /* ── Onboarding Tour ───────────────────────────────── */
 var _tourSteps=[
-  {sel:'#sidebar .sb-brand',title:'欢迎使用 {{ site_name|default("智控王客户转化聊天系统") }}',body:'这里是您的管理中心。左侧导航菜单可访问所有功能模块。',pos:'right'},
+  {sel:'#sidebar .sb-brand',title:'欢迎使用 {{ site_name|default("华灵科技客户转化聊天系统") }}',body:'这里是您的管理中心。左侧导航菜单可访问所有功能模块。',pos:'right'},
   {sel:'a[href="/cases"]',title:'待处理案例',body:'这是您最常用的页面 — 查看和处理客户案例，关注高风险用户，添加备注或结案。',pos:'right'},
   {sel:'a[href="/knowledge"]',title:'知识库',body:'所有 AI 回复话术、知识条目均在此管理。在"系统话术"分类下编辑即可。',pos:'right'},
   {sel:'#cmd-trigger',title:'命令面板（Ctrl+K）',body:'随时按 Ctrl+K 唤起命令面板，快速跳转任意页面或执行操作，无需鼠标。',pos:'bottom'},
@@ -1243,8 +1243,8 @@ const TERM_DICT={
   "role_master":{"zh":"主帐号","desc":"拥有全部权限，可管理其他用户、修改系统设置、查看所有数据"},
   "role_admin":{"zh":"管理员","desc":"拥有编辑权限，可管理模板、通道、知识库，但不能管理用户和系统设置"},
   "role_viewer":{"zh":"观察员","desc":"只读权限，可查看所有数据但不能修改任何配置"},
-  /* ── {{ site_name|default('智控王客户转化聊天系统') }} ─── */
-  "bot_admin":{"zh":"{{ site_name|default('智控王客户转化聊天系统') }}","desc":"面向 Telegram 等渠道的 AI 客服与人工协同后台，用于知识库、案例、转接与监控"},
+  /* ── {{ site_name|default('华灵科技客户转化聊天系统') }} ─── */
+  "bot_admin":{"zh":"{{ site_name|default('华灵科技客户转化聊天系统') }}","desc":"面向 Telegram 等渠道的 AI 客服与人工协同后台，用于知识库、案例、转接与监控"},
   /* ── 其他 ─── */
   "token":{"zh":"Token（令牌）","desc":"AI 处理文本的基本单位。1 个 token 约等于 1.5 个中文字或 0.75 个英文单词"},
   "Bot":{"zh":"Bot（机器人）","desc":"Telegram 上的 AI 客服机器人，自动接收并回复用户消息"},

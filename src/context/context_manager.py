@@ -338,13 +338,14 @@ class ContextManager:
     ) -> bool:
         """基于上下文决定是否需要回复"""
         # 如果有@提及，总是考虑回复
-        if '@ai_zkw' in current_message or 'Camille' in current_message:
+        if '@ai_zkw' in current_message or 'Camille' in current_message or '小灵' in current_message:
             return True
         
         # 检查最近消息中是否有未回复的@提及
         recent_messages = context_messages[-5:] if len(context_messages) >= 5 else context_messages
         for msg in recent_messages:
-            if '@ai_zkw' in msg.get('text', '') or 'Camille' in msg.get('text', ''):
+            text = msg.get('text', '')
+            if '@ai_zkw' in text or 'Camille' in text or '小灵' in text:
                 return True
         
         # 消极情绪优先回复

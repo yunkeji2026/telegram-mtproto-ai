@@ -47,8 +47,8 @@ templates.env.filters["display_model"] = _display_model
 
 # Jinja2 global: site_name — dynamically set from domain pack display_name
 # Default to generic name; overridden in create_app() when domain pack loads
-templates.env.globals["site_name"] = "智控王客户转化聊天系统"
-templates.env.globals["site_name_short"] = "智控王"
+templates.env.globals["site_name"] = "华灵科技客户转化聊天系统"
+templates.env.globals["site_name_short"] = "华灵科技"
 
 # ── /api/human-escalation/schedule-status 短时缓存（减轻 is_within + 粗估重复计算）──
 _SCHEDULE_STATUS_LOCK = threading.Lock()

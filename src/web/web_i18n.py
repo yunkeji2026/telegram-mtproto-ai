@@ -3,7 +3,7 @@
 _TRANSLATIONS = {
     "zh": {
         # ── 品牌 & 导航 ──────────────────────────────
-        "brand": "智控王客户转化聊天系统",
+        "brand": "华灵科技客户转化聊天系统",
         "dashboard": "数据概览",
         "templates": "话术模板",
         "channels": "通道管理",
@@ -89,7 +89,7 @@ _TRANSLATIONS = {
         "notif_strategy": "策略告警",
         "notif_system": "系统事件",
         # ── 登录 ──────────────────────────────────────
-        "login_title": "登录 智控王客户转化聊天系统",
+        "login_title": "登录 华灵科技客户转化聊天系统",
         "login_btn": "登录",
         "token_error": "Token 错误",
         # ── 统计 ─────────────────────────────────────
@@ -126,7 +126,7 @@ _TRANSLATIONS = {
     },
     "en": {
         # ── Brand & Nav ──────────────────────────────
-        "brand": "ZhiKongWang Customer Conversion Chat System",
+        "brand": "HuaLing Customer Conversion Chat System",
         "dashboard": "Overview",
         "templates": "Templates",
         "channels": "Channels",
@@ -212,7 +212,7 @@ _TRANSLATIONS = {
         "notif_strategy": "Strategy Alert",
         "notif_system": "System Event",
         # ── Login ─────────────────────────────────────
-        "login_title": "Sign in — ZhiKongWang Customer Conversion Chat System",
+        "login_title": "Sign in — HuaLing Customer Conversion Chat System",
         "login_btn": "Login",
         "token_error": "Invalid token",
         # ── Stats ─────────────────────────────────────

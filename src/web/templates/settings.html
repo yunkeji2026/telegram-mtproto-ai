@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{% if ui_mode == 'simple' %}AI 与转接设置{% else %}系统设置{% endif %} · {{ site_name|default('智控王客户转化聊天系统') }}{% endblock %}
+{% block title %}{% if ui_mode == 'simple' %}AI 与转接设置{% else %}系统设置{% endif %} · {{ site_name|default('华灵科技客户转化聊天系统') }}{% endblock %}
 {% block page_title %}{% if ui_mode == 'simple' %}AI 与转接设置{% else %}系统设置{% endif %}{% endblock %}
 {% block head %}
 <style>
@@ -160,7 +160,7 @@ textarea.f-inp.he-json-area{font-family:ui-monospace,SFMono-Regular,Consolas,mon
           <label class="f-lbl">AI 客服名称</label>
           <input class="f-inp" type="text" id="prompt-ai_name"
             value="{{ ai.get('ai_name', '') }}"
-            placeholder="客服Camille（留空则使用提示词中的名字）">
+            placeholder="客服小灵（留空则使用提示词中的名字）">
           <div class="f-hint">修改后 AI 会以此名字自称。留空则由下方系统提示词决定。</div>
         </div>
         <div class="f-row">

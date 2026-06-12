@@ -267,3 +267,8 @@ Thumbs.db
 *.docx
 *.xls
 *.xlsx
+
+# Next.js 站点源文件（website/lib）— 覆盖上方通用 Python `lib/` 忽略，整目录纳入版本管理。
+# website 内的构建产物 / 依赖（.next、node_modules、out）由 website/.gitignore 负责忽略。
+!website/lib/
+!website/lib/**
