@@ -91,9 +91,10 @@ function Build-Lockup($brand, $orient, $lang, $themeName) {
   Write-Output ("  + " + (Split-Path -Leaf $out))
 }
 
-function Build-Avatar($brand) {
-  $S = 512
-  $mark = [System.Drawing.Image]::FromFile((Join-Path $logos $brand.mark))
+# Render a mark centered on a deep-space dark background (circle-crop / maskable friendly).
+# Used for Telegram avatars + Apple/PWA icons (transparency -> black in those contexts).
+function Render-OnDarkBg([string]$markPath, [int]$S, [double]$scale, [string]$out) {
+  $mark = [System.Drawing.Image]::FromFile($markPath)
   $bmp = New-Object System.Drawing.Bitmap($S, $S, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
@@ -101,27 +102,31 @@ function Build-Avatar($brand) {
   $g.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
   $g.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceOver
 
-  # deep-space background — solid base fill guarantees full opacity (circle-crop safe)
+  # deep-space background — solid base fill guarantees full opacity
   $rect = New-Object System.Drawing.Rectangle -ArgumentList 0, 0, $S, $S
   $base = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 8, 12, 24))  # #080C18
   $g.FillRectangle($base, $rect)
 
   # soft brand glow behind the mark (additive light over the solid base)
+  $ge = [int]($S * 0.11)
+  $gs = [int]($S * 0.78)
   $glowPath = New-Object System.Drawing.Drawing2D.GraphicsPath
-  $glowPath.AddEllipse(56, 56, 400, 400)
+  $glowPath.AddEllipse($ge, $ge, $gs, $gs)
   $glow = New-Object System.Drawing.Drawing2D.PathGradientBrush -ArgumentList $glowPath
   $glow.CenterColor = [System.Drawing.Color]::FromArgb(120, 96, 130, 255)
   $glow.SurroundColors = @([System.Drawing.Color]::FromArgb(0, 8, 12, 24))
   $g.FillPath($glow, $glowPath)
 
-  # mark centered at ~78%
-  $m = [int]($S * 0.78); $off = [int](($S - $m) / 2)
+  $m = [int]($S * $scale); $off = [int](($S - $m) / 2)
   $g.DrawImage($mark, (New-Object System.Drawing.Rectangle -ArgumentList $off, $off, $m, $m))
 
-  $out = Join-Path $logos ("{0}-avatar.png" -f $brand.key)
   $bmp.Save($out, [System.Drawing.Imaging.ImageFormat]::Png)
   $g.Dispose(); $bmp.Dispose(); $mark.Dispose()
   Write-Output ("  * " + (Split-Path -Leaf $out))
+}
+
+function Build-Avatar($brand) {
+  Render-OnDarkBg (Join-Path $logos $brand.mark) 512 0.78 (Join-Path $logos ("{0}-avatar.png" -f $brand.key))
 }
 
 # Clean old un-themed lockups from the previous revision (theme suffix is now required)
@@ -135,4 +140,31 @@ foreach ($b in $brands) {
   }
   Build-Avatar $b
 }
+
+# Transparent downscale (web nav / OG / favicon use the mark on its own).
+function Downscale-Transparent([string]$markPath, [int]$S, [string]$out) {
+  $mark = [System.Drawing.Image]::FromFile($markPath)
+  $bmp = New-Object System.Drawing.Bitmap($S, $S, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+  $g.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceOver
+  $g.Clear([System.Drawing.Color]::Transparent)
+  $g.DrawImage($mark, (New-Object System.Drawing.Rectangle -ArgumentList 0, 0, $S, $S))
+  $bmp.Save($out, [System.Drawing.Imaging.ImageFormat]::Png)
+  $g.Dispose(); $bmp.Dispose(); $mark.Dispose()
+  Write-Output ("  - " + (Split-Path -Leaf $out))
+}
+
+$masterMark = Join-Path $logos "hualing-mark.png"
+$appDir = Join-Path $root "app"
+
+# Web/favicon (transparent)
+Downscale-Transparent $masterMark 256 (Join-Path $logos "hualing-mark-256.png")
+Downscale-Transparent $masterMark 64  (Join-Path $appDir "icon.png")
+
+# App / PWA icons from the master mark (dark bg; maskable-safe padding for PWA sizes)
+Render-OnDarkBg $masterMark 180 0.78 (Join-Path $appDir "apple-icon.png")
+Render-OnDarkBg $masterMark 192 0.72 (Join-Path $logos "pwa-192.png")
+Render-OnDarkBg $masterMark 512 0.72 (Join-Path $logos "pwa-512.png")
+
 Write-Output "done"
