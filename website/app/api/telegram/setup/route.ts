@@ -9,8 +9,9 @@ export const dynamic = "force-dynamic";
  *  set channel/group name+description (+ pinned overview). Protect with SETUP_KEY env.
  *
  *  Body (JSON, optional):
- *    { "channels": true|false, "pinOverview": true|false }
+ *    { "channels": true|false, "setPhoto": true|false, "pinOverview": true|false }
  *  - channels   : also apply channel/group display name + description (default: true)
+ *  - setPhoto   : set channel/group avatar to the brand mark (default: true)
  *  - pinOverview: (re)post + pin the product overview to the channel (default: true)
  */
 export async function POST(req: NextRequest) {
@@ -23,7 +24,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
 
-  let body: { channels?: boolean; pinOverview?: boolean } = {};
+  let body: { channels?: boolean; setPhoto?: boolean; pinOverview?: boolean } = {};
   try {
     body = await req.json();
   } catch {
@@ -32,7 +33,9 @@ export async function POST(req: NextRequest) {
 
   const bot = await setupBot();
   const channels =
-    body.channels === false ? null : await setupChannels({ pinOverview: body.pinOverview });
+    body.channels === false
+      ? null
+      : await setupChannels({ setPhoto: body.setPhoto, pinOverview: body.pinOverview });
 
   return NextResponse.json({ ok: bot.ok, bot, channels });
 }

@@ -179,6 +179,24 @@ export const CHANNEL_BRAND = {
   },
 } as const;
 
+// 设置频道/群头像。需要 Bot 是管理员且有「修改群信息」权限。photo 为本地文件路径，multipart 上传。
+async function setChatPhoto(token: string, chat: string, photoPath: string): Promise<BroadcastResult> {
+  try {
+    const buf = await readFile(photoPath);
+    const form = new FormData();
+    form.append("chat_id", chat);
+    form.append("photo", new Blob([new Uint8Array(buf)]), path.basename(photoPath));
+    const res = await fetch(`https://api.telegram.org/bot${token}/setChatPhoto`, {
+      method: "POST",
+      body: form,
+    });
+    const data = await res.json();
+    return { chat: `${chat} (photo)`, ok: Boolean(data?.ok), error: data?.ok ? undefined : data?.description };
+  } catch (e) {
+    return { chat: `${chat} (photo)`, ok: false, error: String(e) };
+  }
+}
+
 async function setChatMeta(
   token: string,
   chat: string,
@@ -203,9 +221,15 @@ async function setChatMeta(
   }
 }
 
-/** Set channel & group display name + description, and (re)post + pin the overview to the channel.
- *  Bot must be an admin of each chat. Failures are returned per-target, never thrown. */
-export async function setupChannels(opts?: { pinOverview?: boolean }): Promise<{
+/** 华灵科技品牌头像（深底圆裁友好）本地路径，供频道/群 setChatPhoto 使用。 */
+function brandAvatarPath(): string {
+  return path.join(process.cwd(), "public", "brand", "logos", "hualing-avatar.png");
+}
+
+/** Set channel & group display name + description (+ avatar, + pinned overview).
+ *  Bot must be an admin of each chat with "change info" rights for title/description/photo.
+ *  Failures are returned per-target, never thrown. */
+export async function setupChannels(opts?: { pinOverview?: boolean; setPhoto?: boolean }): Promise<{
   ok: boolean;
   results: BroadcastResult[];
 }> {
@@ -229,6 +253,12 @@ export async function setupChannels(opts?: { pinOverview?: boolean }): Promise<{
       CHANNEL_BRAND.group.description
     )
   );
+
+  if (opts?.setPhoto !== false) {
+    const avatar = brandAvatarPath();
+    results.push(await setChatPhoto(token, `@${TELEGRAM_CHANNEL}`, avatar));
+    results.push(await setChatPhoto(token, `@${TELEGRAM_GROUP}`, avatar));
+  }
 
   if (opts?.pinOverview !== false) {
     const overview = buildOverviewPost("zh");
