@@ -80,6 +80,29 @@ interface Stats {
     ref: { pvSame: number | null; leadSame: number | null; leadNext: number | null };
   }[];
   publishDays?: number[];
+  miniapp?: {
+    opens: number;
+    cta: number;
+    leads: number;
+    unlocks: number;
+    viewVisits: Record<string, number>;
+    ctaByView: Record<string, number>;
+    openBySource: Record<string, number>;
+  };
+}
+
+// Mini App 视图 id → 中文标签（用于把埋点里的 view 键名展示成人话）。
+const MINIAPP_VIEW_LABELS: Record<string, string> = {
+  home: "概览",
+  liveavatar: "华影 · 换脸",
+  soulsync: "灵犀 · 成交",
+  pricing: "价格",
+  engage: "合作",
+};
+function relabel(data: Record<string, number>, map: Record<string, string>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(data)) out[map[k] ?? k] = v;
+  return out;
 }
 
 const LANG_NAMES: Record<string, string> = {
@@ -1426,6 +1449,32 @@ export default function AdminPage() {
                   <Bars title="CTA 点击位置" data={stats.ctaByWhere} />
                   <Bars title="每日留资" data={stats.leadsByDay} />
                 </div>
+
+                {stats.miniapp && (
+                  <SectionCard title="小程序漏斗（Mini App · Telegram）" Icon={TrendingUp} accent="text-violet-300">
+                    {stats.miniapp.opens === 0 ? (
+                      <div className="py-3 text-center text-[11px] text-slate-600">
+                        暂无小程序埋点数据。用户在 Telegram 打开小程序、切视图、点 CTA、留资后即会出现。
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <Funnel
+                          steps={[
+                            { label: "进入小程序", value: stats.miniapp.opens, color: "from-violet-400 to-violet-500" },
+                            { label: "点击 CTA", value: stats.miniapp.cta, color: "from-cyan-400 to-cyan-500" },
+                            { label: "留资", value: stats.miniapp.leads, color: "from-emerald-400 to-emerald-500" },
+                            { label: "解锁领码", value: stats.miniapp.unlocks, color: "from-fuchsia-400 to-fuchsia-500" },
+                          ]}
+                        />
+                        <div className="grid gap-3 md:grid-cols-3">
+                          <Bars title="各视图浏览热度" data={relabel(stats.miniapp.viewVisits, MINIAPP_VIEW_LABELS)} />
+                          <Bars title="各视图 CTA 点击" data={relabel(stats.miniapp.ctaByView, MINIAPP_VIEW_LABELS)} />
+                          <Bars title="进入来源（深链/直达）" data={stats.miniapp.openBySource} />
+                        </div>
+                      </div>
+                    )}
+                  </SectionCard>
+                )}
               </div>
             )}
 

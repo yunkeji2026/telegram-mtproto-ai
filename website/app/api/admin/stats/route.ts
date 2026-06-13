@@ -73,6 +73,34 @@ export async function GET(req: NextRequest) {
   const ctaClicks = events.filter((e) => e.event === "cta_click");
   const leadSubmits = events.filter((e) => e.event === "lead_submit");
 
+  // ── Mini App funnel (events: miniapp_*) ──
+  const propStr = (e: Record<string, unknown>, k: string) => {
+    const p = (e.props ?? {}) as Record<string, unknown>;
+    const v = p[k];
+    return v === undefined || v === null ? "" : String(v);
+  };
+  const miOpens = events.filter((e) => e.event === "miniapp_open");
+  const miViews = events.filter((e) => e.event === "miniapp_view");
+  const miCta = events.filter((e) => e.event === "miniapp_cta");
+  const miLead = events.filter((e) => e.event === "miniapp_lead");
+  const miUnlock = events.filter((e) => e.event === "miniapp_unlock");
+  const miViewVisits: Record<string, number> = {};
+  for (const e of miOpens) { const v = propStr(e, "view") || "home"; miViewVisits[v] = (miViewVisits[v] ?? 0) + 1; }
+  for (const e of miViews) { const v = propStr(e, "view") || "?"; miViewVisits[v] = (miViewVisits[v] ?? 0) + 1; }
+  const miCtaByView: Record<string, number> = {};
+  for (const e of miCta) { const v = propStr(e, "view") || "?"; miCtaByView[v] = (miCtaByView[v] ?? 0) + 1; }
+  const miOpenBySource: Record<string, number> = {};
+  for (const e of miOpens) { const s = propStr(e, "source") || "direct"; miOpenBySource[s] = (miOpenBySource[s] ?? 0) + 1; }
+  const miniapp = {
+    opens: miOpens.length,
+    cta: miCta.length,
+    leads: miLead.length,
+    unlocks: miUnlock.length,
+    viewVisits: miViewVisits,
+    ctaByView: miCtaByView,
+    openBySource: miOpenBySource,
+  };
+
   const ctaByWhere: Record<string, number> = {};
   for (const e of ctaClicks) {
     const props = (e.props ?? {}) as Record<string, unknown>;
@@ -203,5 +231,6 @@ export async function GET(req: NextRequest) {
     wow,
     publishes,
     publishDays,
+    miniapp,
   });
 }
