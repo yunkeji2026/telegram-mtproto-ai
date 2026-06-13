@@ -1,0 +1,78 @@
+# 华灵网站 · 推代码即上线 (GitHub Actions -> VPS)
+#
+# ⚠️ 这是模板：本仓库当前推送用的 PAT 缺少 `workflow` 作用域，无法直接新增 .github/workflows/ 文件，
+#    故先作为普通文件入库。启用方式（二选一）：
+#      A) 在 GitHub 网页端 Actions → New workflow → 粘贴本文件内容，路径存为 .github/workflows/deploy-website.yml
+#      B) 给推送用的 PAT 勾上 `workflow` 作用域后，把本文件复制到 .github/workflows/ 再推送
+#
+# 生效前提（在 GitHub 仓库 Settings → Secrets and variables → Actions 配置；我无法代劳）：
+#   1) 仓库 Variable:  DEPLOY_WEBSITE = true      # 总开关；未设/非 true 时本工作流自动跳过，不产生失败红叉
+#   2) 仓库 Secrets:
+#        VPS_HOST     = 165.154.203.182
+#        VPS_USER     = ubuntu
+#        VPS_SSH_KEY  = <私钥全文>                 # 推荐：ssh-keygen 生成，公钥加到服务器 ~/.ssh/authorized_keys
+#        # 或临时用密码(不推荐)：VPS_PASSWORD = <密码>，并把下方两处 key: 换成 password:
+#        SITE_URL     = https://usdt2026.cc
+#
+# 触发：推送到 feat-brand-polish 且改动 website/** 时自动部署；也可在 Actions 页手动 Run。
+# 原理：runner 打包 website/ → scp 上传(含 deploy.sh) → 远程 bash deploy.sh(原子部署+失败回滚) → 公网体检。
+
+name: Deploy Website (VPS)
+
+on:
+  push:
+    branches: [feat-brand-polish]
+    paths:
+      - 'website/**'
+      - '.github/workflows/deploy-website.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-website
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # 总开关：仅当仓库变量 DEPLOY_WEBSITE=true 时运行，避免未配置时产生失败的红叉
+    if: ${{ vars.DEPLOY_WEBSITE == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pack website/
+        run: |
+          cd website
+          tar -czf "$RUNNER_TEMP/website-deploy.tar.gz" \
+            --exclude=node_modules --exclude=.next --exclude=.git \
+            --exclude=.env.local --exclude='*.tsbuildinfo' --exclude='*.log' \
+            --exclude=og-test.png --exclude=test-fill.png .
+          cp scripts/deploy.sh "$RUNNER_TEMP/deploy.sh"
+
+      - name: Upload package + deploy.sh
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          # password: ${{ secrets.VPS_PASSWORD }}   # 若用密码登录则启用本行、注释掉上面的 key:
+          source: ${{ runner.temp }}/website-deploy.tar.gz,${{ runner.temp }}/deploy.sh
+          target: /home/ubuntu
+          strip_components: 999   # 只取文件名，平铺到 /home/ubuntu
+
+      - name: Run deploy.sh (atomic deploy + rollback)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          # password: ${{ secrets.VPS_PASSWORD }}
+          command_timeout: 15m
+          script: |
+            set -e
+            sed -i 's/\r$//' /home/ubuntu/deploy.sh
+            bash /home/ubuntu/deploy.sh /home/ubuntu/website-deploy.tar.gz
+
+      - name: Public health check
+        run: |
+          sleep 3
+          curl -fsS "${{ secrets.SITE_URL }}/api/health" | tee /dev/stderr | grep -q '"healthy":true'
