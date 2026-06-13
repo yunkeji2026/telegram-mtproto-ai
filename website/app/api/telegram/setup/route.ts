@@ -9,10 +9,14 @@ export const dynamic = "force-dynamic";
  *  set channel/group name+description (+ pinned overview). Protect with SETUP_KEY env.
  *
  *  Body (JSON, optional):
- *    { "channels": true|false, "setPhoto": true|false, "pinOverview": true|false }
+ *    { "channels": true|false, "setPhoto": true|false, "pinOverview": true|false, "webhook": true|false }
  *  - channels   : also apply channel/group display name + description (default: true)
  *  - setPhoto   : set channel/group avatar to the brand mark (default: true)
  *  - pinOverview: (re)post + pin the product overview to the channel (default: true)
+ *  - webhook    : (re)register the webhook (default: true). Set false to refresh only the
+ *                 brand identity (name/desc/commands/menu) without re-pointing the webhook —
+ *                 use this when running setup from a non-production env to avoid a webhook
+ *                 secret mismatch that would 403 (mute) the live bot.
  */
 export async function POST(req: NextRequest) {
   const key = process.env.TELEGRAM_SETUP_KEY;
@@ -24,14 +28,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
 
-  let body: { channels?: boolean; setPhoto?: boolean; pinOverview?: boolean } = {};
+  let body: {
+    channels?: boolean;
+    setPhoto?: boolean;
+    pinOverview?: boolean;
+    webhook?: boolean;
+  } = {};
   try {
     body = await req.json();
   } catch {
     /* empty body ok */
   }
 
-  const bot = await setupBot();
+  const bot = await setupBot({ skipWebhook: body.webhook === false });
   const channels =
     body.channels === false
       ? null

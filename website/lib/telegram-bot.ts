@@ -374,19 +374,24 @@ export async function handleCallback(
   }
 }
 
-export async function setupBot() {
+export async function setupBot(opts?: { skipWebhook?: boolean }) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return { ok: false, error: "no token" };
 
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET || "hualing-wh-" + token.slice(-8);
   const webhookUrl = `${SITE_URL}/api/telegram/webhook`;
 
-  await tgCall("setWebhook", {
-    url: webhookUrl,
-    secret_token: secret,
-    allowed_updates: ["message", "callback_query"],
-    drop_pending_updates: true,
-  });
+  // 安全开关：只刷新品牌身份（名称/简介/命令/菜单）而不重设 webhook。
+  // 当在与生产不同的环境运行 setup 时，重设 webhook 可能写入与线上不匹配的 secret，
+  // 导致 Telegram 回推被 403 拒绝、机器人“变哑”。skipWebhook 让品牌落地零风险。
+  if (!opts?.skipWebhook) {
+    await tgCall("setWebhook", {
+      url: webhookUrl,
+      secret_token: secret,
+      allowed_updates: ["message", "callback_query"],
+      drop_pending_updates: true,
+    });
+  }
 
   await tgCall("setMyCommands", {
     commands: [
@@ -441,5 +446,5 @@ export async function setupBot() {
   });
 
   const me = await tgCall("getMe", {});
-  return { ok: true, secret, webhookUrl, me };
+  return { ok: true, secret, webhookUrl: opts?.skipWebhook ? "skipped" : webhookUrl, me };
 }
