@@ -3,11 +3,14 @@
   流程: 打包 website/ -> SCP 上传(部署包 + deploy.sh) -> 服务器侧 deploy.sh 原子部署 -> 公网体检
   绝不在脚本中存放密码：从 $env:VPS_PASS 读取，缺失则安全提示输入(SecureString)。
 
+  认证: 优先用 SSH 密钥(无明文密码)；找不到密钥文件时回退密码($env:VPS_PASS 或交互输入)。
+  默认密钥 ~/.ssh/hualing_deploy，可用 -KeyFile 或 $env:VPS_KEY 覆盖。
+
   用法:
     cd website
-    $env:VPS_PASS = '服务器密码'            # 可选；不设则运行时按提示输入
-    ./scripts/deploy.ps1                     # 用默认主机/用户
-    ./scripts/deploy.ps1 -VpsHost 1.2.3.4 -User ubuntu
+    ./scripts/deploy.ps1                     # 默认主机/用户 + 默认密钥(推荐)
+    $env:VPS_PASS = '服务器密码'; ./scripts/deploy.ps1   # 无密钥时回退密码
+    ./scripts/deploy.ps1 -VpsHost 1.2.3.4 -User ubuntu -KeyFile C:\path\to\key
 
   依赖: 本机 tar(Win10 自带) + Posh-SSH 模块(Install-Module Posh-SSH)
 #>
@@ -15,7 +18,8 @@ param(
   [string]$VpsHost      = $(if ($env:VPS_HOST) { $env:VPS_HOST } else { '165.154.203.182' }),
   [string]$User         = $(if ($env:VPS_USER) { $env:VPS_USER } else { 'ubuntu' }),
   [string]$RemoteDir    = '/home/ubuntu',
-  [string]$SiteUrl      = $(if ($env:SITE_URL) { $env:SITE_URL } else { 'https://usdt2026.cc' })
+  [string]$SiteUrl      = $(if ($env:SITE_URL) { $env:SITE_URL } else { 'https://usdt2026.cc' }),
+  [string]$KeyFile      = $(if ($env:VPS_KEY) { $env:VPS_KEY } else { Join-Path $HOME '.ssh/hualing_deploy' })
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,16 +37,25 @@ try {
   if ($LASTEXITCODE -ne 0) { throw '打包失败' }
   Write-Host ("    包大小 {0:N1} MB" -f ((Get-Item $tar).Length / 1MB))
 
-  if ($env:VPS_PASS) { $sec = ConvertTo-SecureString $env:VPS_PASS -AsPlainText -Force }
-  else { $sec = Read-Host "VPS 密码 ($User@$VpsHost)" -AsSecureString }
-  $cred = New-Object System.Management.Automation.PSCredential($User, $sec)
+  # 认证：优先 SSH 密钥(无明文密码)，无密钥文件时回退密码。$auth 同时用于 SCP 与 SSH。
+  $auth = @{ ComputerName = $VpsHost; AcceptKey = $true }
+  if ($KeyFile -and (Test-Path $KeyFile)) {
+    $auth['Credential'] = New-Object System.Management.Automation.PSCredential($User, (New-Object System.Security.SecureString))
+    $auth['KeyFile']    = (Resolve-Path $KeyFile).Path
+    Write-Host "    认证方式: SSH 密钥 ($KeyFile)"
+  } else {
+    if ($env:VPS_PASS) { $sec = ConvertTo-SecureString $env:VPS_PASS -AsPlainText -Force }
+    else { $sec = Read-Host "VPS 密码 ($User@$VpsHost)" -AsSecureString }
+    $auth['Credential'] = New-Object System.Management.Automation.PSCredential($User, $sec)
+    Write-Host "    认证方式: 密码 (建议改用密钥：见 scripts/deploy-website.yml 注释)"
+  }
 
   Write-Host '[2/4] 上传部署包 + deploy.sh ...'
-  Set-SCPItem -ComputerName $VpsHost -Credential $cred -Path $tar -Destination $RemoteDir -AcceptKey -Force
-  Set-SCPItem -ComputerName $VpsHost -Credential $cred -Path (Join-Path $PSScriptRoot 'deploy.sh') -Destination $RemoteDir -AcceptKey -Force
+  Set-SCPItem @auth -Path $tar -Destination $RemoteDir -Force
+  Set-SCPItem @auth -Path (Join-Path $PSScriptRoot 'deploy.sh') -Destination $RemoteDir -Force
 
   Write-Host '[3/4] 服务器侧原子部署 (后台执行 deploy.sh + 轮询日志，避免长构建占用 SSH 通道超时) ...'
-  $s = New-SSHSession -ComputerName $VpsHost -Credential $cred -AcceptKey -ConnectionTimeout 30
+  $s = New-SSHSession @auth -ConnectionTimeout 30
   try {
     # sed: 规避 Windows CRLF 致 bash 解析失败；nohup+&+</dev/null: 完全脱离终端后台运行
     $launch = "sed -i 's/\r$//' $RemoteDir/deploy.sh; cd $RemoteDir && rm -f deploy.log && nohup bash deploy.sh $RemoteDir/website-deploy.tar.gz >deploy.log 2>&1 </dev/null & echo launched"
