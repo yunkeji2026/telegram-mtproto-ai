@@ -841,6 +841,35 @@ export default function AdminPage() {
     void load(true);
   }
 
+  // 把漏斗/维度/卡点数字翻译成「一句话结论」，帮运营直接看懂下一步做什么。
+  // 带样本量守卫：会话过少时只给「仅供参考」，不下硬结论，避免小样本误导。
+  function miniDiagnostics(): { level: "warn" | "good" | "info"; text: string }[] {
+    const m = stats?.miniapp;
+    if (!m?.funnel) return [];
+    const f = m.funnel;
+    const out: { level: "warn" | "good" | "info"; text: string }[] = [];
+    if (f.sessions < 10) out.push({ level: "info", text: `会话样本较少（${f.sessions}），以下结论仅供参考。` });
+    if (f.sessions > 0) {
+      const stages = [
+        { name: "进入→产生兴趣", rate: f.rates.engaged },
+        { name: "兴趣→高意向", rate: f.rates.intent },
+        { name: "高意向→转化", rate: f.rates.convert },
+      ];
+      const worst = stages.reduce((a, b) => (b.rate < a.rate ? b : a));
+      if (worst.rate < 60) out.push({ level: "warn", text: `最大流失在「${worst.name}」，仅 ${worst.rate}% 通过，优先优化此处。` });
+    }
+    const g = m.gateSteps ?? {};
+    const vf = g.verify_fail ?? 0;
+    const vo = g.verify_ok ?? 0;
+    if (vf > 0 && vf >= vo) out.push({ level: "warn", text: `解锁校验失败（${vf}）不少于成功（${vo}），检查频道/群链接或加入门槛。` });
+    if (m.leadFlow && m.leadFlow.start >= 5 && m.leadFlow.abandonRate > 50)
+      out.push({ level: "warn", text: `留资放弃率 ${m.leadFlow.abandonRate}%，建议简化表单字段或补充信任背书。` });
+    const best = (m.byLanding ?? []).filter((r) => r.sessions >= 5).sort((a, b) => b.rate - a.rate)[0];
+    if (best && best.rate > 0)
+      out.push({ level: "good", text: `落地视图「${MINIAPP_VIEW_LABELS[best.key] ?? best.key}」转化最高（${best.rate}%），建议深链优先导向。` });
+    return out.slice(0, 4);
+  }
+
   async function loadKb(k: string) {
     try {
       const res = await fetch(`/api/admin/kb`);
@@ -1561,6 +1590,28 @@ export default function AdminPage() {
                       </div>
                     ) : (
                       <div className="space-y-4">
+                        {(() => {
+                          const ins = miniDiagnostics();
+                          return ins.length > 0 ? (
+                            <div className="space-y-1">
+                              {ins.map((it, i) => (
+                                <div
+                                  key={i}
+                                  className={`rounded-lg border px-2.5 py-1.5 text-[11px] ${
+                                    it.level === "warn"
+                                      ? "border-amber-500/30 bg-amber-500/10 text-amber-200"
+                                      : it.level === "good"
+                                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                                        : "border-slate-700 bg-slate-800/40 text-slate-400"
+                                  }`}
+                                >
+                                  {it.level === "warn" ? "⚠ " : it.level === "good" ? "✓ " : "ℹ "}
+                                  {it.text}
+                                </div>
+                              ))}
+                            </div>
+                          ) : null;
+                        })()}
                         {stats.miniapp.series && (
                           <div className="grid grid-cols-3 gap-3">
                             {[
