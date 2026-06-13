@@ -169,12 +169,24 @@ export async function GET(req: NextRequest) {
   for (const e of pageviews) bump(pvSeries, e.t ?? e.ts);
   for (const e of ctaClicks) bump(ctaSeries, e.t ?? e.ts);
   for (const l of leads) bump(leadSeries, l.t);
+  // Mini App 14-day series (open/cta/lead) for trend + WoW
+  const miOpenSeries = new Array(14).fill(0);
+  const miCtaSeries = new Array(14).fill(0);
+  const miLeadSeries = new Array(14).fill(0);
+  for (const e of miOpens) bump(miOpenSeries, e.t ?? e.ts);
+  for (const e of miCta) bump(miCtaSeries, e.t ?? e.ts);
+  for (const e of miLead) bump(miLeadSeries, e.t ?? e.ts);
   const sumRange = (arr: number[], a: number, b: number) =>
     arr.slice(a, b).reduce((x, y) => x + y, 0);
   const wow = {
     pageviews: { cur: sumRange(pvSeries, 7, 14), prev: sumRange(pvSeries, 0, 7) },
     ctaClicks: { cur: sumRange(ctaSeries, 7, 14), prev: sumRange(ctaSeries, 0, 7) },
     leads: { cur: sumRange(leadSeries, 7, 14), prev: sumRange(leadSeries, 0, 7) },
+  };
+  const miWow = {
+    opens: { cur: sumRange(miOpenSeries, 7, 14), prev: sumRange(miOpenSeries, 0, 7) },
+    cta: { cur: sumRange(miCtaSeries, 7, 14), prev: sumRange(miCtaSeries, 0, 7) },
+    leads: { cur: sumRange(miLeadSeries, 7, 14), prev: sumRange(miLeadSeries, 0, 7) },
   };
 
   // ---- publish timeline (last 14 days) for impact attribution ----
@@ -231,6 +243,10 @@ export async function GET(req: NextRequest) {
     wow,
     publishes,
     publishDays,
-    miniapp,
+    miniapp: {
+      ...miniapp,
+      series: { open: miOpenSeries, cta: miCtaSeries, lead: miLeadSeries },
+      wow: miWow,
+    },
   });
 }

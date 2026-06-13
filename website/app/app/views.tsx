@@ -560,6 +560,7 @@ export function LeadForm({
   t,
   zh,
   presetInterest,
+  view,
   name,
   setName,
   contact,
@@ -568,6 +569,7 @@ export function LeadForm({
   t: Dict;
   zh: boolean;
   presetInterest: string;
+  view?: string;
   name: string;
   setName: (v: string) => void;
   contact: string;
@@ -594,7 +596,7 @@ export function LeadForm({
           lang: zh ? "zh" : "en",
         }),
       });
-      if (res.ok) track("miniapp_lead", { interest: presetInterest || "miniapp" });
+      if (res.ok) track("miniapp_lead", { interest: presetInterest || "miniapp", view: view || "home" });
       setMsg(res.ok ? (zh ? "✅ 已提交，客服会尽快联系你！" : "✅ Submitted, we'll contact you soon!") : zh ? "提交失败，请重试" : "Failed, try again");
     } catch {
       setMsg(zh ? "网络错误，请重试" : "Network error, try again");

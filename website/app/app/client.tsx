@@ -237,7 +237,7 @@ export default function MiniAppClient({ initialView }: { initialView: View }) {
               <AiChat t={t} zh={zh} />
             </div>
             <div className="mt-4">
-              <LeadForm t={t} zh={zh} presetInterest={leadInterest} name={leadName} setName={setLeadName} contact={leadContact} setContact={setLeadContact} />
+              <LeadForm t={t} zh={zh} presetInterest={leadInterest} view={view} name={leadName} setName={setLeadName} contact={leadContact} setContact={setLeadContact} />
             </div>
           </>
         )}

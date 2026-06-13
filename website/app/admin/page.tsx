@@ -88,6 +88,12 @@ interface Stats {
     viewVisits: Record<string, number>;
     ctaByView: Record<string, number>;
     openBySource: Record<string, number>;
+    series?: { open: number[]; cta: number[]; lead: number[] };
+    wow?: {
+      opens: { cur: number; prev: number };
+      cta: { cur: number; prev: number };
+      leads: { cur: number; prev: number };
+    };
   };
 }
 
@@ -1458,6 +1464,26 @@ export default function AdminPage() {
                       </div>
                     ) : (
                       <div className="space-y-4">
+                        {stats.miniapp.series && (
+                          <div className="grid grid-cols-3 gap-3">
+                            {[
+                              { label: "进入", data: stats.miniapp.series.open, color: "#a78bfa", wow: stats.miniapp.wow?.opens },
+                              { label: "CTA", data: stats.miniapp.series.cta, color: "#22d3ee", wow: stats.miniapp.wow?.cta },
+                              { label: "留资", data: stats.miniapp.series.lead, color: "#34d399", wow: stats.miniapp.wow?.leads },
+                            ].map((m) => (
+                              <div key={m.label} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                                <div className="text-[11px] text-slate-400">{m.label}（近14天）</div>
+                                <div className="mt-0.5 flex items-center gap-1.5">
+                                  <span className="text-lg font-bold text-white">{m.data.reduce((a, b) => a + b, 0)}</span>
+                                  {m.wow && <Delta cur={m.wow.cur} prev={m.wow.prev} />}
+                                </div>
+                                <div className="mt-1">
+                                  <Sparkline data={m.data} color={m.color} w={160} h={28} full labels={stats.series?.days} />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                         <Funnel
                           steps={[
                             { label: "进入小程序", value: stats.miniapp.opens, color: "from-violet-400 to-violet-500" },
