@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -85,9 +85,23 @@ interface Stats {
     cta: number;
     leads: number;
     unlocks: number;
+    chats?: number;
     viewVisits: Record<string, number>;
     ctaByView: Record<string, number>;
     openBySource: Record<string, number>;
+    funnel?: {
+      sessions: number;
+      engaged: number;
+      intent: number;
+      convert: number;
+      rates: { engaged: number; intent: number; convert: number; overall: number };
+    };
+    byLanding?: { key: string; sessions: number; convert: number; rate: number }[];
+    bySource?: { key: string; sessions: number; convert: number; rate: number }[];
+    gateSteps?: Record<string, number>;
+    leadFlow?: { start: number; done: number; abandonRate: number };
+    dropped?: number;
+    window?: number;
     series?: { open: number[]; cta: number[]; lead: number[] };
     wow?: {
       opens: { cur: number; prev: number };
@@ -104,6 +118,13 @@ const MINIAPP_VIEW_LABELS: Record<string, string> = {
   soulsync: "灵犀 · 成交",
   pricing: "价格",
   engage: "合作",
+};
+// 解锁三步埋点键名 → 人话（定位解锁流失在哪一步）。
+const GATE_LABELS: Record<string, string> = {
+  channel: "点关注频道",
+  group: "点加入群",
+  verify_ok: "校验通过",
+  verify_fail: "校验未过",
 };
 function relabel(data: Record<string, number>, map: Record<string, string>): Record<string, number> {
   const out: Record<string, number> = {};
@@ -488,6 +509,47 @@ function Funnel({ steps }: { steps: { label: string; value: number; color: strin
   );
 }
 
+/** 维度转化表：每行 维度值 | 会话数 | 转化数 | 转化率%，按会话量降序。 */
+function ConvTable({
+  title,
+  rows,
+  labels,
+}: {
+  title: string;
+  rows: { key: string; sessions: number; convert: number; rate: number }[];
+  labels?: Record<string, string>;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+      <div className="mb-2 text-[11px] text-slate-400">{title}</div>
+      {rows.length === 0 ? (
+        <div className="text-[11px] text-slate-600">暂无会话数据</div>
+      ) : (
+        <table className="w-full text-[11px]">
+          <thead>
+            <tr className="text-slate-500">
+              <th className="text-left font-medium" />
+              <th className="text-right font-medium">会话</th>
+              <th className="text-right font-medium">转化</th>
+              <th className="text-right font-medium">转化率</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.key} className="text-slate-300">
+                <td className="py-0.5 text-left">{labels?.[r.key] ?? r.key}</td>
+                <td className="py-0.5 text-right">{r.sessions}</td>
+                <td className="py-0.5 text-right text-emerald-300">{r.convert}</td>
+                <td className="py-0.5 text-right font-medium text-cyan-300">{r.rate}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 function TaskTile({
   Icon,
   label,
@@ -586,6 +648,9 @@ export default function AdminPage() {
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  // Mini App 漏斗时间窗：0=全部，7/30/90 天。用 ref 让 30s 自动刷新定时器也能读到最新窗口。
+  const [miWindow, setMiWindow] = useState(0);
+  const miWindowRef = useRef(0);
 
   // ── server-paged CRM (dedicated /api/admin/leads endpoint) ──
   const [crmSort, setCrmSort] = useState<"lastSeen" | "firstSeen" | "count" | "name" | "status">("lastSeen");
@@ -746,7 +811,7 @@ export default function AdminPage() {
     setLoading(true);
     if (!silent) setErr("");
     try {
-      const res = await fetch(`/api/admin/stats`);
+      const res = await fetch(`/api/admin/stats${miWindowRef.current ? `?days=${miWindowRef.current}` : ""}`);
       if (!res.ok) {
         // 401 on mount simply means "not logged in" -> show login card quietly.
         if (!silent && res.status !== 401) setErr("加载失败");
@@ -767,6 +832,13 @@ export default function AdminPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  // 切换 Mini App 漏斗时间窗后立即重拉（ref 同步，确保自动刷新也用新窗口）。
+  function applyMiWindow(v: number) {
+    miWindowRef.current = v;
+    setMiWindow(v);
+    void load(true);
   }
 
   async function loadKb(k: string) {
@@ -1458,9 +1530,34 @@ export default function AdminPage() {
 
                 {stats.miniapp && (
                   <SectionCard title="小程序漏斗（Mini App · Telegram）" Icon={TrendingUp} accent="text-violet-300">
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <span className="text-[11px] text-slate-500">
+                        {stats.miniapp.dropped ? `已过滤异常高频会话 ${stats.miniapp.dropped} 个（防刷）` : "会话漏斗/维度/卡点按所选时间窗统计"}
+                      </span>
+                      <div className="flex gap-1">
+                        {[
+                          { v: 0, label: "全部" },
+                          { v: 7, label: "近7天" },
+                          { v: 30, label: "近30天" },
+                          { v: 90, label: "近90天" },
+                        ].map((o) => (
+                          <button
+                            key={o.v}
+                            onClick={() => applyMiWindow(o.v)}
+                            className={`rounded-md px-2 py-0.5 text-[11px] transition-colors ${
+                              miWindow === o.v ? "bg-violet-500 text-white" : "bg-slate-800 text-slate-400 hover:text-slate-200"
+                            }`}
+                          >
+                            {o.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                     {stats.miniapp.opens === 0 ? (
                       <div className="py-3 text-center text-[11px] text-slate-600">
-                        暂无小程序埋点数据。用户在 Telegram 打开小程序、切视图、点 CTA、留资后即会出现。
+                        {miWindow > 0
+                          ? `近 ${miWindow} 天内暂无小程序数据，可切回「全部」查看历史。`
+                          : "暂无小程序埋点数据。用户在 Telegram 打开小程序、切视图、点 CTA、留资后即会出现。"}
                       </div>
                     ) : (
                       <div className="space-y-4">
@@ -1484,19 +1581,69 @@ export default function AdminPage() {
                             ))}
                           </div>
                         )}
-                        <Funnel
-                          steps={[
-                            { label: "进入小程序", value: stats.miniapp.opens, color: "from-violet-400 to-violet-500" },
-                            { label: "点击 CTA", value: stats.miniapp.cta, color: "from-cyan-400 to-cyan-500" },
-                            { label: "留资", value: stats.miniapp.leads, color: "from-emerald-400 to-emerald-500" },
-                            { label: "解锁领码", value: stats.miniapp.unlocks, color: "from-fuchsia-400 to-fuchsia-500" },
-                          ]}
-                        />
+                        {stats.miniapp.funnel && stats.miniapp.funnel.sessions > 0 ? (
+                          <div>
+                            <div className="mb-2 flex items-center justify-between">
+                              <span className="text-[11px] text-slate-400">会话级漏斗（按 sid 串联）</span>
+                              <span className="text-[11px] text-emerald-300">端到端转化 {stats.miniapp.funnel.rates.overall}%</span>
+                            </div>
+                            <Funnel
+                              steps={[
+                                { label: "进入会话", value: stats.miniapp.funnel.sessions, color: "from-violet-400 to-violet-500" },
+                                { label: "产生兴趣", value: stats.miniapp.funnel.engaged, color: "from-sky-400 to-sky-500" },
+                                { label: "高意向", value: stats.miniapp.funnel.intent, color: "from-cyan-400 to-cyan-500" },
+                                { label: "转化·留资/解锁", value: stats.miniapp.funnel.convert, color: "from-emerald-400 to-emerald-500" },
+                              ]}
+                            />
+                            <div className="mt-1.5 text-[10px] text-slate-600">
+                              互动量（事件计数，含历史无会话数据）：CTA {stats.miniapp.cta} · AI 对话 {stats.miniapp.chats ?? 0} · 留资 {stats.miniapp.leads} · 解锁 {stats.miniapp.unlocks}
+                            </div>
+                          </div>
+                        ) : (
+                          <Funnel
+                            steps={[
+                              { label: "进入小程序", value: stats.miniapp.opens, color: "from-violet-400 to-violet-500" },
+                              { label: "点击 CTA", value: stats.miniapp.cta, color: "from-cyan-400 to-cyan-500" },
+                              { label: "留资", value: stats.miniapp.leads, color: "from-emerald-400 to-emerald-500" },
+                              { label: "解锁领码", value: stats.miniapp.unlocks, color: "from-fuchsia-400 to-fuchsia-500" },
+                            ]}
+                          />
+                        )}
                         <div className="grid gap-3 md:grid-cols-3">
                           <Bars title="各视图浏览热度" data={relabel(stats.miniapp.viewVisits, MINIAPP_VIEW_LABELS)} />
                           <Bars title="各视图 CTA 点击" data={relabel(stats.miniapp.ctaByView, MINIAPP_VIEW_LABELS)} />
                           <Bars title="进入来源（深链/直达）" data={stats.miniapp.openBySource} />
                         </div>
+                        {(stats.miniapp.byLanding?.length || stats.miniapp.bySource?.length) ? (
+                          <div className="mt-3 grid gap-3 md:grid-cols-2">
+                            <ConvTable title="落地视图 → 会话转化率" rows={stats.miniapp.byLanding ?? []} labels={MINIAPP_VIEW_LABELS} />
+                            <ConvTable title="进入来源 → 会话转化率" rows={stats.miniapp.bySource ?? []} />
+                          </div>
+                        ) : null}
+                        {(Object.keys(stats.miniapp.gateSteps ?? {}).length > 0 || (stats.miniapp.leadFlow?.start ?? 0) > 0) ? (
+                          <div className="mt-3 grid gap-3 md:grid-cols-2">
+                            <Bars title="解锁卡点（关注/进群/校验）" data={relabel(stats.miniapp.gateSteps ?? {}, GATE_LABELS)} />
+                            <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                              <div className="mb-2 text-[11px] text-slate-400">留资放弃率</div>
+                              <div className="flex items-end gap-3">
+                                <div>
+                                  <div className="text-lg font-semibold text-slate-200">{stats.miniapp.leadFlow?.start ?? 0}</div>
+                                  <div className="text-[10px] text-slate-500">开始填写</div>
+                                </div>
+                                <div className="pb-1 text-slate-600">→</div>
+                                <div>
+                                  <div className="text-lg font-semibold text-emerald-300">{stats.miniapp.leadFlow?.done ?? 0}</div>
+                                  <div className="text-[10px] text-slate-500">提交成功</div>
+                                </div>
+                                <div className="ml-auto text-right">
+                                  <div className="text-lg font-semibold text-rose-300">{stats.miniapp.leadFlow?.abandonRate ?? 0}%</div>
+                                  <div className="text-[10px] text-slate-500">放弃率</div>
+                                </div>
+                              </div>
+                              <div className="mt-2 text-[10px] text-slate-600">开始填写联系方式但未成功提交的会话占比，越高说明表单/信任环节流失越大</div>
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
                     )}
                   </SectionCard>

@@ -68,6 +68,19 @@ export async function GET(req: NextRequest) {
     return isNaN(t) ? true : t >= since;
   };
 
+  // ── 时间窗：?days=7|30|90，0/缺省=全量。仅作用于 Mini App 会话漏斗/维度/卡点/顶层计数；
+  //    series（14 天图）/ wow（7v7 环比）保持各自固定语义，避免口径互相污染。
+  const daysParam = Number(new URL(req.url).searchParams.get("days") ?? "0");
+  const winDays = Number.isFinite(daysParam) && daysParam > 0 ? Math.min(Math.floor(daysParam), 365) : 0;
+  const winSince = winDays > 0 ? Date.now() - winDays * 24 * 3600 * 1000 : 0;
+  const inWindow = (e: Record<string, unknown>) => {
+    if (!winSince) return true;
+    const t = Date.parse(String(e.t ?? e.ts ?? ""));
+    return isNaN(t) ? false : t >= winSince;
+  };
+  const winEvents = winSince ? events.filter(inWindow) : events;
+  const inWin = (arr: Record<string, unknown>[]) => (winSince ? arr.filter(inWindow) : arr);
+
   // events breakdown
   const pageviews = events.filter((e) => e.event === "pageview");
   const ctaClicks = events.filter((e) => e.event === "cta_click");
@@ -91,14 +104,106 @@ export async function GET(req: NextRequest) {
   for (const e of miCta) { const v = propStr(e, "view") || "?"; miCtaByView[v] = (miCtaByView[v] ?? 0) + 1; }
   const miOpenBySource: Record<string, number> = {};
   for (const e of miOpens) { const s = propStr(e, "source") || "direct"; miOpenBySource[s] = (miOpenBySource[s] ?? 0) + 1; }
+
+  // ── 会话级漏斗：按 sid 把离散事件串成会话，算「真实转化率」（进入 N 会话→最终几个转化）。
+  // 仅统计带 sid 的事件（= sid 上线后的数据）；历史无 sid 事件不计入，避免挤进同一假会话污染口径。
+  const ENGAGED_EV = new Set(["miniapp_view", "miniapp_chat", "miniapp_cta", "miniapp_gate", "miniapp_lead_start", "miniapp_lead", "miniapp_unlock", "miniapp_tap"]);
+  const INTENT_EV = new Set(["miniapp_chat", "miniapp_cta", "miniapp_gate", "miniapp_lead_start", "miniapp_lead", "miniapp_unlock"]);
+  const CONVERT_EV = new Set(["miniapp_lead", "miniapp_unlock"]);
+  const MAX_EV_PER_SESSION = 500; // 单会话事件上限：超过视为脚本/异常，整段剔除并透明计数
+  const sessionEv: Record<string, Set<string>> = {};
+  const sessionMeta: Record<string, { landing: string; source: string }> = {};
+  const sessionCount: Record<string, number> = {};
+  for (const e of winEvents) {
+    const ev = String(e.event ?? "");
+    if (!ev.startsWith("miniapp_")) continue;
+    const sid = String(e.sid ?? "");
+    if (!sid) continue;
+    sessionCount[sid] = (sessionCount[sid] ?? 0) + 1;
+    (sessionEv[sid] ??= new Set<string>()).add(ev);
+    if (ev === "miniapp_open" && !sessionMeta[sid]) {
+      sessionMeta[sid] = { landing: propStr(e, "view") || "home", source: propStr(e, "source") || "direct" };
+    }
+  }
+  const abnormal = (sid: string) => (sessionCount[sid] ?? 0) > MAX_EV_PER_SESSION;
+  let sOpen = 0, sEngaged = 0, sIntent = 0, sConvert = 0, sDropped = 0;
+  for (const [sid, set] of Object.entries(sessionEv)) {
+    if (!set.has("miniapp_open")) continue; // 以 open 锚定一个真实会话
+    if (abnormal(sid)) { sDropped++; continue; } // 防刷：异常高频会话不计入转化口径
+    sOpen++;
+    const evs = [...set];
+    if (evs.some((x) => ENGAGED_EV.has(x))) sEngaged++;
+    if (evs.some((x) => INTENT_EV.has(x))) sIntent++;
+    if (evs.some((x) => CONVERT_EV.has(x))) sConvert++;
+  }
+  const pct = (a: number, b: number) => (b > 0 ? Number(((a / b) * 100).toFixed(1)) : 0);
+  const miFunnel = {
+    sessions: sOpen,
+    engaged: sEngaged,
+    intent: sIntent,
+    convert: sConvert,
+    rates: {
+      engaged: pct(sEngaged, sOpen),   // 进入→产生兴趣（切视图/聊天/点击等）
+      intent: pct(sIntent, sEngaged),  // 兴趣→高意向（聊天/CTA/解锁动作/开始留资）
+      convert: pct(sConvert, sIntent), // 高意向→转化（留资 or 解锁领码）
+      overall: pct(sConvert, sOpen),   // 端到端会话转化率
+    },
+  };
+
+  // ── 维度下钻：按落地视图 / 来源 的会话转化率（指导「流量往哪个入口/视图导」）+ 留资放弃 ──
+  const landingAgg: Record<string, { sessions: number; convert: number }> = {};
+  const sourceAgg: Record<string, { sessions: number; convert: number }> = {};
+  let sLeadStart = 0, sLeadDone = 0;
+  for (const [sid, set] of Object.entries(sessionEv)) {
+    if (!set.has("miniapp_open")) continue;
+    if (abnormal(sid)) continue; // 与漏斗口径一致：异常会话不进维度/留资统计
+    const meta = sessionMeta[sid] ?? { landing: "home", source: "direct" };
+    const conv = [...set].some((x) => CONVERT_EV.has(x)) ? 1 : 0;
+    (landingAgg[meta.landing] ??= { sessions: 0, convert: 0 });
+    landingAgg[meta.landing].sessions++; landingAgg[meta.landing].convert += conv;
+    (sourceAgg[meta.source] ??= { sessions: 0, convert: 0 });
+    sourceAgg[meta.source].sessions++; sourceAgg[meta.source].convert += conv;
+    if (set.has("miniapp_lead_start")) sLeadStart++;
+    if (set.has("miniapp_lead")) sLeadDone++;
+  }
+  const toRows = (m: Record<string, { sessions: number; convert: number }>) =>
+    Object.entries(m)
+      .map(([key, v]) => ({ key, sessions: v.sessions, convert: v.convert, rate: pct(v.convert, v.sessions) }))
+      .sort((a, b) => b.sessions - a.sessions);
+  const miByLanding = toRows(landingAgg);
+  const miBySource = toRows(sourceAgg);
+
+  // ── 解锁卡点：gate 三步分布（关注频道/进群/校验成功/校验失败）──
+  const miGateSteps: Record<string, number> = {};
+  for (const e of winEvents) {
+    if (e.event !== "miniapp_gate") continue;
+    const step = propStr(e, "step") || "?";
+    if (step === "verify") {
+      const ok = Boolean((e.props as Record<string, unknown> | null)?.ok);
+      const key = ok ? "verify_ok" : "verify_fail";
+      miGateSteps[key] = (miGateSteps[key] ?? 0) + 1;
+    } else {
+      miGateSteps[step] = (miGateSteps[step] ?? 0) + 1;
+    }
+  }
+  const miLeadFlow = { start: sLeadStart, done: sLeadDone, abandonRate: pct(sLeadStart - sLeadDone, sLeadStart) };
+
   const miniapp = {
-    opens: miOpens.length,
-    cta: miCta.length,
-    leads: miLead.length,
-    unlocks: miUnlock.length,
+    opens: inWin(miOpens).length,
+    cta: inWin(miCta).length,
+    leads: inWin(miLead).length,
+    unlocks: inWin(miUnlock).length,
+    chats: inWin(events.filter((e) => e.event === "miniapp_chat")).length,
     viewVisits: miViewVisits,
     ctaByView: miCtaByView,
     openBySource: miOpenBySource,
+    funnel: miFunnel,
+    byLanding: miByLanding,
+    bySource: miBySource,
+    gateSteps: miGateSteps,
+    leadFlow: miLeadFlow,
+    dropped: sDropped,
+    window: winDays,
   };
 
   const ctaByWhere: Record<string, number> = {};
