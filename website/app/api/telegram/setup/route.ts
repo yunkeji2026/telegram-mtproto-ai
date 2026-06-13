@@ -12,7 +12,10 @@ export const dynamic = "force-dynamic";
  *    { "channels": true|false, "setPhoto": true|false, "pinOverview": true|false, "webhook": true|false }
  *  - channels   : also apply channel/group display name + description (default: true)
  *  - setPhoto   : set channel/group avatar to the brand mark (default: true)
- *  - pinOverview: (re)post + pin the product overview to the channel (default: true)
+ *  - pinOverview: (re)post + pin the product overview to the channel (default: true).
+ *                 Idempotent: if the channel's current pinned message was posted by this bot,
+ *                 it is skipped to avoid duplicate posts on re-runs.
+ *  - forcePin   : ignore the idempotency check and always (re)post + pin (default: false)
  *  - webhook    : (re)register the webhook (default: true). Set false to refresh only the
  *                 brand identity (name/desc/commands/menu) without re-pointing the webhook —
  *                 use this when running setup from a non-production env to avoid a webhook
@@ -32,6 +35,7 @@ export async function POST(req: NextRequest) {
     channels?: boolean;
     setPhoto?: boolean;
     pinOverview?: boolean;
+    forcePin?: boolean;
     webhook?: boolean;
   } = {};
   try {
@@ -44,7 +48,11 @@ export async function POST(req: NextRequest) {
   const channels =
     body.channels === false
       ? null
-      : await setupChannels({ setPhoto: body.setPhoto, pinOverview: body.pinOverview });
+      : await setupChannels({
+          setPhoto: body.setPhoto,
+          pinOverview: body.pinOverview,
+          forcePin: body.forcePin,
+        });
 
   return NextResponse.json({ ok: bot.ok, bot, channels });
 }

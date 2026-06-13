@@ -210,11 +210,16 @@ async function setChatMeta(
       chat_id: chat,
       description: description.slice(0, 255),
     });
-    const ok = Boolean(t?.ok) && Boolean(d?.ok);
+    // 幂等：标题/简介未变化时 Telegram 返回 "...is not modified"，视为成功。
+    const tDesc = String((t as { description?: string })?.description || "");
+    const dDesc = String((d as { description?: string })?.description || "");
+    const okT = Boolean(t?.ok) || /is not modified/i.test(tDesc);
+    const okD = Boolean(d?.ok) || /is not modified/i.test(dDesc);
+    const ok = okT && okD;
     return {
       chat,
       ok,
-      error: ok ? undefined : t?.description || d?.description || "set_meta_failed",
+      error: ok ? undefined : tDesc || dDesc || "set_meta_failed",
     };
   } catch (e) {
     return { chat, ok: false, error: String(e) };
@@ -229,7 +234,11 @@ function brandAvatarPath(): string {
 /** Set channel & group display name + description (+ avatar, + pinned overview).
  *  Bot must be an admin of each chat with "change info" rights for title/description/photo.
  *  Failures are returned per-target, never thrown. */
-export async function setupChannels(opts?: { pinOverview?: boolean; setPhoto?: boolean }): Promise<{
+export async function setupChannels(opts?: {
+  pinOverview?: boolean;
+  setPhoto?: boolean;
+  forcePin?: boolean;
+}): Promise<{
   ok: boolean;
   results: BroadcastResult[];
 }> {
@@ -261,11 +270,33 @@ export async function setupChannels(opts?: { pinOverview?: boolean; setPhoto?: b
   }
 
   if (opts?.pinOverview !== false) {
+    // 幂等：若频道当前置顶已是本概览贴（按 caption 首行签名识别），默认跳过，避免重跑刷屏。
+    // 频道消息没有 from.id（以 sender_chat 归属频道），故用内容签名而非发送者判断。
+    // forcePin=true 可强制重发并置顶。
     const overview = buildOverviewPost("zh");
-    const posted = await photoTo(token, `@${TELEGRAM_CHANNEL}`, overview.imagePath, overview.caption, true);
-    results.push({ ...posted, chat: `@${TELEGRAM_CHANNEL} (overview)` });
-    if (posted.ok && posted.messageId) {
-      await pinMessage(`@${TELEGRAM_CHANNEL}`, posted.messageId, true);
+    const sig = overview.caption.split("\n")[0].replace(/<[^>]+>/g, "").trim();
+    let alreadyPinned = false;
+    if (!opts?.forcePin) {
+      try {
+        const chat = await callApi(token, "getChat", { chat_id: `@${TELEGRAM_CHANNEL}` });
+        const pinned = (chat as { result?: { pinned_message?: { photo?: unknown; caption?: string } } })
+          ?.result?.pinned_message;
+        alreadyPinned = Boolean(
+          pinned?.photo && typeof pinned?.caption === "string" && sig && pinned.caption.includes(sig)
+        );
+      } catch {
+        /* 查询失败则退回到正常发布逻辑 */
+      }
+    }
+
+    if (alreadyPinned) {
+      results.push({ chat: `@${TELEGRAM_CHANNEL} (overview: already pinned, skipped)`, ok: true });
+    } else {
+      const posted = await photoTo(token, `@${TELEGRAM_CHANNEL}`, overview.imagePath, overview.caption, true);
+      results.push({ ...posted, chat: `@${TELEGRAM_CHANNEL} (overview)` });
+      if (posted.ok && posted.messageId) {
+        await pinMessage(`@${TELEGRAM_CHANNEL}`, posted.messageId, true);
+      }
     }
   }
 
