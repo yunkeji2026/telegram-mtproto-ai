@@ -1,0 +1,2 @@
+# Shell 脚本强制 LF 行尾，避免在 Windows 检出后引入 CRLF 导致服务器侧 bash 解析失败
+*.sh text eol=lf
