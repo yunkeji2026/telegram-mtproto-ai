@@ -3,38 +3,8 @@
 import { useRef, useState } from "react";
 import type { Dict, Solution } from "@/lib/content";
 import { CHANNEL_URL, GROUP_URL, CONTACT_URL } from "@/lib/site";
-
-export type View = "home" | "liveavatar" | "soulsync" | "pricing" | "engage";
-
-/** 入口别名 → 视图（兼容 ?view= 与 startapp start_param 的历史别名）。 */
-export const VIEW_ALIASES: Record<string, View> = {
-  home: "home",
-  overview: "home",
-  contact: "home",
-  liveavatar: "liveavatar",
-  realtime: "liveavatar",
-  faceswap: "liveavatar",
-  voice: "liveavatar",
-  "digital-human": "liveavatar",
-  "video-dubbing": "liveavatar",
-  soulsync: "soulsync",
-  autochat: "soulsync",
-  translate: "soulsync",
-  chat: "soulsync",
-  pricing: "pricing",
-  plans: "pricing",
-  engage: "engage",
-  deploy: "engage",
-  invest: "engage",
-};
-
-export const TABS: { id: View; icon: string; zh: string; en: string }[] = [
-  { id: "home", icon: "🏠", zh: "概览", en: "Home" },
-  { id: "liveavatar", icon: "🎭", zh: "华影", en: "LiveAvatar" },
-  { id: "soulsync", icon: "💬", zh: "灵犀", en: "SoulSync" },
-  { id: "pricing", icon: "💰", zh: "价格", en: "Pricing" },
-  { id: "engage", icon: "🤝", zh: "合作", en: "Engage" },
-];
+import { track } from "@/lib/track";
+import type { View } from "./routing";
 
 const HUAYING_IDS = ["faceswap", "voice", "digital-human", "video-dubbing"];
 const LINGXI_IDS = ["translate", "private-ai"];
@@ -624,6 +594,7 @@ export function LeadForm({
           lang: zh ? "zh" : "en",
         }),
       });
+      if (res.ok) track("miniapp_lead", { interest: presetInterest || "miniapp" });
       setMsg(res.ok ? (zh ? "✅ 已提交，客服会尽快联系你！" : "✅ Submitted, we'll contact you soon!") : zh ? "提交失败，请重试" : "Failed, try again");
     } catch {
       setMsg(zh ? "网络错误，请重试" : "Network error, try again");
