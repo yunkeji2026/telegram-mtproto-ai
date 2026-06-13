@@ -154,17 +154,19 @@ export default function MiniAppClient({ initialView }: { initialView: View }) {
       | undefined;
     if (!mb) return;
 
-    const cfg: Record<View, { text: string; action: () => void }> = {
-      home: { text: zh ? "🤖 问 AI 客服" : "🤖 Ask the AI", action: () => document.getElementById("ai-chat")?.scrollIntoView({ behavior: "smooth" }) },
-      liveavatar: { text: zh ? "🎬 预约换脸演示" : "🎬 Book a demo", action: () => goContact(zh ? "华影 · 实时换脸咨询" : "LiveAvatar demo") },
-      soulsync: { text: zh ? "💬 免费试用 AI 成交" : "💬 Try AI closing", action: () => goContact(zh ? "灵犀 · AI 成交试用" : "SoulSync trial") },
-      pricing: { text: zh ? "🎁 领专属折扣码" : "🎁 Claim discount code", action: () => document.getElementById("unlock")?.scrollIntoView({ behavior: "smooth" }) },
-      engage: { text: zh ? "🤝 联系定制顾问" : "🤝 Talk to advisor", action: () => goContact(zh ? "合作方式咨询" : "Engagement inquiry") },
+    // kind 区分动作语义：scroll=页内导航(轻交互)；contact=真转化意向(由 goContact 统一打 cta，
+    // 此处不再重复打 miniapp_cta，避免同一次点击双重计数。)
+    const cfg: Record<View, { text: string; kind: "scroll" | "contact"; action: () => void }> = {
+      home: { text: zh ? "🤖 问 AI 客服" : "🤖 Ask the AI", kind: "scroll", action: () => document.getElementById("ai-chat")?.scrollIntoView({ behavior: "smooth" }) },
+      liveavatar: { text: zh ? "🎬 预约换脸演示" : "🎬 Book a demo", kind: "contact", action: () => goContact(zh ? "华影 · 实时换脸咨询" : "LiveAvatar demo") },
+      soulsync: { text: zh ? "💬 免费试用 AI 成交" : "💬 Try AI closing", kind: "contact", action: () => goContact(zh ? "灵犀 · AI 成交试用" : "SoulSync trial") },
+      pricing: { text: zh ? "🎁 领专属折扣码" : "🎁 Claim discount code", kind: "scroll", action: () => document.getElementById("unlock")?.scrollIntoView({ behavior: "smooth" }) },
+      engage: { text: zh ? "🤝 联系定制顾问" : "🤝 Talk to advisor", kind: "contact", action: () => goContact(zh ? "合作方式咨询" : "Engagement inquiry") },
     };
-    const { text, action } = cfg[view];
+    const { text, kind, action } = cfg[view];
     const onClick = () => {
       haptic("light");
-      track("miniapp_cta", { view, kind: "mainbutton" });
+      if (kind === "scroll") track("miniapp_tap", { view, from: "mainbutton" });
       action();
     };
 
@@ -203,6 +205,8 @@ export default function MiniAppClient({ initialView }: { initialView: View }) {
       if (data?.ok) {
         const unlocked = Boolean(data.channel) && Boolean(data.group);
         setGate({ channel: Boolean(data.channel), group: Boolean(data.group), code: data.code ? String(data.code) : "", checked: true });
+        // 记每次校验尝试（含失败），便于定位解锁卡在「关注频道」还是「进群」哪一步
+        track("miniapp_gate", { step: "verify", ok: unlocked, channel: Boolean(data.channel), group: Boolean(data.group) });
         if (unlocked) {
           haptic("success");
           track("miniapp_unlock", { code: Boolean(data.code) });

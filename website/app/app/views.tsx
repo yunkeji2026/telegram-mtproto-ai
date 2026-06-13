@@ -337,11 +337,11 @@ export function PricingView({
           <>
             <div className="text-sm font-semibold text-violet-200">🔓 {zh ? "关注频道 + 进群，解锁专属折扣码" : "Join channel + group to unlock a code"}</div>
             <div className="mt-2 grid grid-cols-2 gap-2">
-              <a href={CHANNEL_URL} target="_blank" rel="noreferrer" className={`rounded-xl px-2 py-2 text-center text-xs font-medium ${gate.channel ? "border border-emerald-500/50 bg-emerald-500/10 text-emerald-300" : "bg-cyan-500 text-slate-950"}`}>
+              <a onClick={() => track("miniapp_gate", { step: "channel" })} href={CHANNEL_URL} target="_blank" rel="noreferrer" className={`rounded-xl px-2 py-2 text-center text-xs font-medium ${gate.channel ? "border border-emerald-500/50 bg-emerald-500/10 text-emerald-300" : "bg-cyan-500 text-slate-950"}`}>
                 {gate.channel ? "✅ " : "① "}
                 {zh ? "关注频道" : "Channel"}
               </a>
-              <a href={GROUP_URL} target="_blank" rel="noreferrer" className={`rounded-xl px-2 py-2 text-center text-xs font-medium ${gate.group ? "border border-emerald-500/50 bg-emerald-500/10 text-emerald-300" : "border border-cyan-500/50 bg-cyan-500/10 text-cyan-300"}`}>
+              <a onClick={() => track("miniapp_gate", { step: "group" })} href={GROUP_URL} target="_blank" rel="noreferrer" className={`rounded-xl px-2 py-2 text-center text-xs font-medium ${gate.group ? "border border-emerald-500/50 bg-emerald-500/10 text-emerald-300" : "border border-cyan-500/50 bg-cyan-500/10 text-cyan-300"}`}>
                 {gate.group ? "✅ " : "② "}
                 {zh ? "加入交流群" : "Group"}
               </a>
@@ -512,6 +512,8 @@ export function AiChat({ t, zh }: { t: Dict; zh: boolean }) {
     const next = [...msgs, { role: "user" as const, content: text }];
     setMsgs(next);
     setBusy(true);
+    // AI 客服互动是高意向信号、也是留资前置；记首条便于在会话漏斗里识别「engaged/intent」会话
+    track("miniapp_chat", { first: msgs.length === 0 });
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -577,6 +579,7 @@ export function LeadForm({
 }) {
   const [msg, setMsg] = useState("");
   const [sending, setSending] = useState(false);
+  const startedRef = useRef(false);
 
   async function submit() {
     if (!contact.trim()) {
@@ -609,7 +612,19 @@ export function LeadForm({
     <section id="contact" className="rounded-2xl border border-cyan-700/40 bg-slate-900/60 p-3">
       <div className="mb-2 text-sm font-semibold text-cyan-300">📝 {zh ? "留个联系方式 · 客服联系你" : "Leave a contact · we'll reach you"}</div>
       <input value={name} onChange={(e) => setName(e.target.value)} placeholder={zh ? "称呼（选填）" : "Name (optional)"} className="mb-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-cyan-500" />
-      <input id="lead-contact" value={contact} onChange={(e) => setContact(e.target.value)} placeholder={zh ? "Telegram / 微信 / 邮箱" : "Telegram / email / etc."} className="mb-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-cyan-500" />
+      <input
+        id="lead-contact"
+        value={contact}
+        onChange={(e) => setContact(e.target.value)}
+        onFocus={() => {
+          if (!startedRef.current) {
+            startedRef.current = true;
+            track("miniapp_lead_start", { view: view || "home" });
+          }
+        }}
+        placeholder={zh ? "Telegram / 微信 / 邮箱" : "Telegram / email / etc."}
+        className="mb-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-cyan-500"
+      />
       <button onClick={submit} disabled={sending} className="w-full rounded-xl bg-cyan-500 py-2 text-sm font-semibold text-slate-950 disabled:opacity-50">{sending ? (zh ? "提交中…" : "Submitting…") : zh ? "提交留资" : "Submit"}</button>
       {msg && <div className="mt-2 text-center text-xs text-cyan-300">{msg}</div>}
     </section>

@@ -16,6 +16,7 @@ export async function POST(req: NextRequest) {
       t: new Date().toISOString(),
       event: String(data?.event ?? "").slice(0, 64),
       props: data?.props ?? null,
+      sid: String(data?.sid ?? "").slice(0, 64),
       path: String(data?.path ?? "").slice(0, 200),
       ref: String(data?.ref ?? "").slice(0, 300),
       ua: (req.headers.get("user-agent") ?? "").slice(0, 250),
