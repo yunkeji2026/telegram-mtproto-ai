@@ -18,16 +18,38 @@ async function storageCheck(): Promise<{ ok: boolean; error?: string }> {
   }
 }
 
-async function telegramCheck(): Promise<{ ok: boolean; bot?: string; error?: string }> {
+interface TelegramCheck {
+  ok: boolean;
+  bot?: string;
+  webhook?: { url: string; pending?: number; lastError?: string };
+  error?: string;
+}
+
+async function telegramCheck(): Promise<TelegramCheck> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return { ok: false, error: "no_token" };
   try {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), 5000);
-    const res = await fetch(`https://api.telegram.org/bot${token}/getMe`, { signal: ac.signal });
+    const base = `https://api.telegram.org/bot${token}`;
+    const me = await fetch(`${base}/getMe`, { signal: ac.signal }).then((r) => r.json());
+    if (!me?.ok) {
+      clearTimeout(timer);
+      return { ok: false, error: me?.description };
+    }
+    // 部署自检：确认 webhook 指向何处、是否积压/报错（bot 变哑的头号原因）。
+    const wh = await fetch(`${base}/getWebhookInfo`, { signal: ac.signal })
+      .then((r) => r.json())
+      .catch(() => null);
     clearTimeout(timer);
-    const data = await res.json();
-    return data?.ok ? { ok: true, bot: data.result?.username } : { ok: false, error: data?.description };
+    const w = wh?.result;
+    return {
+      ok: true,
+      bot: me.result?.username,
+      webhook: w
+        ? { url: w.url || "(none)", pending: w.pending_update_count, lastError: w.last_error_message }
+        : undefined,
+    };
   } catch (e) {
     return { ok: false, error: String(e).slice(0, 120) };
   }
@@ -48,6 +70,7 @@ export async function gatherHealth(deep: boolean): Promise<HealthResult> {
     deepseekKey: Boolean(process.env.DEEPSEEK_API_KEY),
     setupKey: Boolean(process.env.TELEGRAM_SETUP_KEY),
     adminKey: Boolean(process.env.ADMIN_KEY),
+    webhookSecret: Boolean(process.env.TELEGRAM_WEBHOOK_SECRET),
   };
   const storage = await storageCheck();
   const breaker = breakerState();
@@ -76,6 +99,7 @@ export async function gatherHealth(deep: boolean): Promise<HealthResult> {
     const tg = await telegramCheck();
     checks.telegram = tg;
     if (!tg.ok) reasons.push(`telegram_unreachable(${tg.error ?? "?"})`);
+    else if (tg.webhook?.lastError) reasons.push(`webhook_error(${tg.webhook.lastError})`);
   }
 
   const healthy = reasons.length === 0;
