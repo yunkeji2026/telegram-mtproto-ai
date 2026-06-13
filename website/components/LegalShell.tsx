@@ -25,7 +25,7 @@ export default function LegalShell({
     <main className="relative min-h-screen px-5 py-16">
       <div className="mx-auto max-w-3xl">
         <Link
-          href="/"
+          href={zh ? "/" : "/en"}
           className="inline-flex items-center gap-1.5 text-sm text-slate-400 transition hover:text-white"
         >
           <ArrowLeft className="h-4 w-4" />

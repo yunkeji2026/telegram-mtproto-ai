@@ -121,7 +121,12 @@ function resolveAccounts(cfg) {
     // 避免「两个业务助手」(其中桌面侧因无会话上下文而空、功能不可用)。
     // 内嵌平台 Tab(Telegram/WhatsApp 原生聊天)才保留桌面 #copilot(原生/ iframe 副驾数据源)。
     const _cp = document.getElementById("copilot");
-    if (_cp) _cp.style.display = isInbox ? "none" : "";
+    if (_cp) {
+      // 双保险：!important 内联压制任何样式表规则 + .cp-hidden 类，杜绝「两个业务助手」复发
+      _cp.classList.toggle("cp-hidden", isInbox);
+      if (isInbox) _cp.style.setProperty("display", "none", "important");
+      else _cp.style.removeProperty("display");
+    }
     // 连接/错误遮罩只属于收件箱：切到本标签按当前阶段决定显隐，切走则一律藏起
     if (Inbox.applyVisibility) Inbox.applyVisibility(isInbox);
     // 注入状态条只属于内嵌平台 Tab：收件箱激活时隐藏
@@ -167,7 +172,9 @@ function resolveAccounts(cfg) {
     // navPath=用于路由判定的纯路径；navTarget=实际加载/登录回跳的相对地址（含 ?lang= 语言对齐）
     const navPath = ui.path || "/workspace";
     const lang = ui.lang || "";
-    const navTarget = navPath + (lang ? (navPath.includes("?") ? "&" : "?") + "lang=" + encodeURIComponent(lang) : "");
+    let navTarget = navPath + (lang ? (navPath.includes("?") ? "&" : "?") + "lang=" + encodeURIComponent(lang) : "");
+    // 桌面壳是深色专属 → 给嵌入的 /workspace 强制 ?theme=dark，避免独立 webview 分区 auto→跟随系统出现「深色壳里白聊天」。
+    navTarget += (navTarget.includes("?") ? "&" : "?") + "theme=dark";
     const fullUrl = base + navTarget;
     // 凭据链：优先 token，回退用户名/密码（token 为空或失效时自动接力）
     const creds = [];

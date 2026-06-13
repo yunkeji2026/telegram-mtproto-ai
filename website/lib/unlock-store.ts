@@ -146,3 +146,109 @@ export async function listCodes(limit = 200): Promise<UnlockRec[]> {
     .sort((a, b) => (a.issuedAt < b.issuedAt ? 1 : -1))
     .slice(0, limit);
 }
+
+function clampDays(days: number): number {
+  if (!Number.isFinite(days)) return 7;
+  return Math.min(365, Math.max(1, Math.round(days)));
+}
+
+/**
+ * Extend (or revive) a single unredeemed code's expiry by `days`.
+ * Base is max(now, current expiry) so expired codes are revived and valid ones are pushed out.
+ */
+export async function extendCode(code: string, days: number): Promise<UnlockRec | null> {
+  const norm = code.trim().toUpperCase();
+  const d = clampDays(days);
+  return serialize(async () => {
+    const db = await readDb();
+    const rec = Object.values(db.byUser).find((r) => r.code === norm);
+    if (!rec || rec.redeemed) return null;
+    const base = Math.max(Date.now(), rec.expiresAt ? Date.parse(rec.expiresAt) : Date.now());
+    rec.expiresAt = new Date(base + d * 86400000).toISOString();
+    await writeDb(db);
+    return { ...rec };
+  });
+}
+
+/** Extend every unredeemed code (pending + expired) by `days`. */
+export async function extendUnredeemed(days: number): Promise<{ extended: number }> {
+  const d = clampDays(days);
+  return serialize(async () => {
+    const db = await readDb();
+    let extended = 0;
+    const now = Date.now();
+    for (const rec of Object.values(db.byUser)) {
+      if (rec.redeemed) continue;
+      const base = Math.max(now, rec.expiresAt ? Date.parse(rec.expiresAt) : now);
+      rec.expiresAt = new Date(base + d * 86400000).toISOString();
+      extended += 1;
+    }
+    if (extended) await writeDb(db);
+    return { extended };
+  });
+}
+
+/** Delete all expired, unredeemed codes (dead-code cleanup). */
+export async function voidExpired(): Promise<{ removed: number }> {
+  return serialize(async () => {
+    const db = await readDb();
+    const now = Date.now();
+    let removed = 0;
+    for (const [key, rec] of Object.entries(db.byUser)) {
+      if (!rec.redeemed && isExpired(rec, now)) {
+        delete db.byUser[key];
+        removed += 1;
+      }
+    }
+    if (removed) await writeDb(db);
+    return { removed };
+  });
+}
+
+/** Delete a single code by value. */
+export async function deleteCode(code: string): Promise<boolean> {
+  const norm = code.trim().toUpperCase();
+  return serialize(async () => {
+    const db = await readDb();
+    const entry = Object.entries(db.byUser).find(([, r]) => r.code === norm);
+    if (!entry) return false;
+    delete db.byUser[entry[0]];
+    await writeDb(db);
+    return true;
+  });
+}
+
+export interface RedemptionGroup {
+  key: string;
+  issued: number;
+  redeemed: number;
+  rate: number; // 0..1
+}
+
+/** Redemption-rate breakdown by language, plus overall. */
+export async function redemptionStats(): Promise<{
+  overall: RedemptionGroup;
+  byLang: RedemptionGroup[];
+}> {
+  const db = await readDb();
+  const all = Object.values(db.byUser);
+  const groups = new Map<string, { issued: number; redeemed: number }>();
+  let issued = 0;
+  let redeemed = 0;
+  for (const r of all) {
+    issued += 1;
+    if (r.redeemed) redeemed += 1;
+    const lang = (r.lang || "未知").toLowerCase();
+    const g = groups.get(lang) ?? { issued: 0, redeemed: 0 };
+    g.issued += 1;
+    if (r.redeemed) g.redeemed += 1;
+    groups.set(lang, g);
+  }
+  const byLang: RedemptionGroup[] = [...groups.entries()]
+    .map(([key, g]) => ({ key, issued: g.issued, redeemed: g.redeemed, rate: g.issued ? g.redeemed / g.issued : 0 }))
+    .sort((a, b) => b.issued - a.issued);
+  return {
+    overall: { key: "all", issued, redeemed, rate: issued ? redeemed / issued : 0 },
+    byLang,
+  };
+}

@@ -106,7 +106,7 @@ body { font-family: "Segoe UI", system-ui, sans-serif; background: #17212b; colo
 #copilot.collapsed { width: 36px; }
 #copilot.collapsed .cp-body, #copilot.collapsed #cp-title { display: none; }
 /* 保留 cp-hidden 类供特殊场景手动折叠整栏；默认始终显示业务助手 */
-#copilot.cp-hidden { display: none; }
+#copilot.cp-hidden { display: none !important; }
 .cp-head {
   display: flex; align-items: center; justify-content: space-between; padding: 10px 12px;
   font-size: 14px; font-weight: 700; color: #111827; background: #f8fafc;

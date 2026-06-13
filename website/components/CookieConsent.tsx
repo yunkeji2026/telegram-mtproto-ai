@@ -39,7 +39,7 @@ export default function CookieConsent() {
           {zh
             ? "我们使用本地存储记住语言偏好，并用匿名统计改进网站。"
             : "We use local storage to remember your language and anonymous analytics to improve the site."}{" "}
-          <Link href="/privacy" className="text-cyan-300 underline-offset-2 hover:underline">
+          <Link href={zh ? "/privacy" : "/en/privacy"} className="text-cyan-300 underline-offset-2 hover:underline">
             {zh ? "隐私政策" : "Privacy Policy"}
           </Link>
         </p>

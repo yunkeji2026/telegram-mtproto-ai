@@ -31,7 +31,10 @@ export const metadata: Metadata = {
     "私有部署",
     "USDT",
   ],
-  alternates: { canonical: "/" },
+  alternates: {
+    canonical: "/",
+    languages: { "zh-CN": "/", en: "/en", "x-default": "/" },
+  },
   openGraph: {
     type: "website",
     url: SITE_URL,
@@ -99,6 +102,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="zh-CN">
       <body>
+        {/* Set <html lang> to match the route locale before hydration (no dynamic render cost).
+            Static HTML defaults to zh-CN; this corrects /en* for screen readers & JS crawlers. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "(function(){try{var p=location.pathname;document.documentElement.lang=(p==='/en'||p.indexOf('/en/')===0)?'en':'zh-CN';}catch(e){}})();",
+          }}
+        />
         <Script src="https://telegram.org/js/telegram-web-app.js" strategy="beforeInteractive" />
         <script
           type="application/ld+json"

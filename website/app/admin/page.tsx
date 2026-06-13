@@ -198,9 +198,11 @@ interface HealthSnapshot {
 
 interface AlertItem {
   t: string;
-  kind: "degrade" | "recover";
+  kind: "degrade" | "recover" | "digest";
   reasons: string[];
   delivered: boolean;
+  consec?: number;
+  escalated?: boolean;
 }
 
 const TARGET_LABEL: Record<BroadcastTarget, string> = {
@@ -542,9 +544,14 @@ export default function AdminPage() {
   const [redeemMsg, setRedeemMsg] = useState("");
   const [redeeming, setRedeeming] = useState(false);
   const [codes, setCodes] = useState<
-    { code: string; contact?: string; name?: string; issuedAt: string; expiresAt?: string; redeemed: boolean; redeemedAt?: string; userId: number }[]
+    { code: string; contact?: string; name?: string; lang?: string; issuedAt: string; expiresAt?: string; redeemed: boolean; redeemedAt?: string; userId: number }[]
   >([]);
   const [codesFilter, setCodesFilter] = useState<"all" | "unused" | "used">("all");
+  const [unlockStats, setUnlockStats] = useState<{
+    overall: { issued: number; redeemed: number; rate: number };
+    byLang: { key: string; issued: number; redeemed: number; rate: number }[];
+  } | null>(null);
+  const [codesBusy, setCodesBusy] = useState(false);
   const [crmSearch, setCrmSearch] = useState("");
   const [tab, setTab] = useState<TabId>("overview");
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
@@ -930,6 +937,21 @@ export default function AdminPage() {
     }
   }
 
+  async function healthDrill(kind: "degrade" | "digest") {
+    const q = kind === "degrade" ? "simulate=degrade" : "digest=1";
+    try {
+      const res = await fetch(`/api/admin/health-check?${q}`, { method: "POST" });
+      if (res.ok) {
+        showToast(kind === "degrade" ? "已演练降级告警（看管理员私聊）" : "已发送健康日报（看管理员私聊）");
+        setTimeout(() => void loadHealth(""), 500);
+      } else {
+        showToast("演练失败", false);
+      }
+    } catch {
+      showToast("网络错误", false);
+    }
+  }
+
   async function loadDrafts(k: string) {
     try {
       const res = await fetch(`/api/admin/daily`);
@@ -1027,9 +1049,79 @@ export default function AdminPage() {
       if (res.ok) {
         const data = await res.json();
         setCodes(Array.isArray(data.codes) ? data.codes : []);
+        setUnlockStats(data.stats ?? null);
       }
     } catch {
       /* ignore */
+    }
+  }
+
+  async function extendOne(code: string, days = 7) {
+    try {
+      const res = await fetch(`/api/admin/redeem`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, days }),
+      });
+      if (res.ok) {
+        showToast(`已延长 ${code} ${days} 天`);
+        void loadCodes("");
+      } else {
+        showToast("延长失败（可能已核销）", false);
+      }
+    } catch {
+      showToast("网络错误", false);
+    }
+  }
+
+  async function extendAllPending(days = 7) {
+    if (!window.confirm(`将所有未核销折扣码有效期延长 ${days} 天（过期码也会被复活）？`)) return;
+    setCodesBusy(true);
+    try {
+      const res = await fetch(`/api/admin/redeem`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope: "unredeemed", days }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(`已延长 ${data.extended ?? 0} 个折扣码`);
+        void loadCodes("");
+      } else {
+        showToast("批量延长失败", false);
+      }
+    } catch {
+      showToast("网络错误", false);
+    } finally {
+      setCodesBusy(false);
+    }
+  }
+
+  async function voidExpiredCodes() {
+    const expiredN = codes.filter((c) => !c.redeemed && !!c.expiresAt && Date.now() > Date.parse(c.expiresAt)).length;
+    if (expiredN === 0) {
+      showToast("没有过期码需要清理");
+      return;
+    }
+    if (!window.confirm(`确认清理 ${expiredN} 个已过期且未核销的折扣码？此操作不可撤销。`)) return;
+    setCodesBusy(true);
+    try {
+      const res = await fetch(`/api/admin/redeem`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope: "expired" }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(`已清理 ${data.removed ?? 0} 个过期码`);
+        void loadCodes("");
+      } else {
+        showToast("清理失败", false);
+      }
+    } catch {
+      showToast("网络错误", false);
+    } finally {
+      setCodesBusy(false);
     }
   }
 
@@ -1339,15 +1431,29 @@ export default function AdminPage() {
 
             {tab === "system" && health && (
           <div className="mt-4 rounded-xl border border-slate-700/60 bg-slate-900/40 p-4">
-            <div className="mb-2 flex items-center justify-between">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <div className="text-sm font-semibold text-slate-200">系统状态</div>
-              <span
-                className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                  health.healthy ? "bg-emerald-900/50 text-emerald-300" : "bg-rose-900/50 text-rose-300"
-                }`}
-              >
-                {health.healthy ? "● 正常" : "● 降级"}
-              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => healthDrill("digest")}
+                  className="rounded-md border border-sky-700/50 px-2 py-0.5 text-[11px] text-sky-300 hover:border-sky-500"
+                >
+                  发送健康日报
+                </button>
+                <button
+                  onClick={() => healthDrill("degrade")}
+                  className="rounded-md border border-amber-700/50 px-2 py-0.5 text-[11px] text-amber-300 hover:border-amber-500"
+                >
+                  演练降级告警
+                </button>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                    health.healthy ? "bg-emerald-900/50 text-emerald-300" : "bg-rose-900/50 text-rose-300"
+                  }`}
+                >
+                  {health.healthy ? "● 正常" : "● 降级"}
+                </span>
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-2 text-[11px] md:grid-cols-4">
               <HealthCell label="存储" ok={health.checks.storage?.ok} text={health.checks.storage?.ok ? "可写" : "异常"} />
@@ -1371,10 +1477,11 @@ export default function AdminPage() {
               <div className="mt-3 border-t border-slate-800 pt-2">
                 <div className="mb-1 text-[11px] text-slate-500">最近告警（{alerts.length}）</div>
                 <div className="space-y-1">
-                  {alerts.slice(0, 5).map((a, i) => (
+                  {alerts.slice(0, 6).map((a, i) => (
                     <div key={i} className="flex items-center justify-between text-[11px]">
-                      <span className={a.kind === "recover" ? "text-emerald-300" : "text-rose-300"}>
-                        {a.kind === "recover" ? "✅ 恢复" : "🚨 降级"} · {a.reasons.join("、")}
+                      <span className={a.kind === "recover" ? "text-emerald-300" : a.kind === "digest" ? "text-sky-300" : "text-rose-300"}>
+                        {a.kind === "recover" ? "✅ 恢复" : a.kind === "digest" ? "📊 日报" : "🚨 降级"}
+                        {a.kind === "degrade" && a.consec ? `（连续 ${a.consec} 次）` : ""} · {a.reasons.join("、")}
                       </span>
                       <span className="text-slate-600">
                         {String(a.t).slice(5, 16).replace("T", " ")}
@@ -1540,6 +1647,50 @@ export default function AdminPage() {
               </div>
 
               <div className="mt-4">
+                {/* 核销率统计（总体 + 按语言） */}
+                {unlockStats && unlockStats.overall.issued > 0 && (
+                  <div className="mb-3 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-[11px] font-semibold text-slate-400">核销率</span>
+                      <span className="text-[11px] text-slate-300">
+                        总体 <span className="font-semibold text-violet-300">{Math.round(unlockStats.overall.rate * 100)}%</span>
+                        <span className="ml-1 text-slate-600">（{unlockStats.overall.redeemed}/{unlockStats.overall.issued}）</span>
+                      </span>
+                    </div>
+                    <div className="space-y-1.5">
+                      {unlockStats.byLang.map((g) => (
+                        <div key={g.key} className="flex items-center gap-2 text-[11px]" title={`${g.redeemed}/${g.issued}`}>
+                          <span className="w-12 shrink-0 truncate text-slate-500">{g.key}</span>
+                          <div className="h-3 flex-1 overflow-hidden rounded bg-slate-800">
+                            <div className="h-full rounded bg-violet-500" style={{ width: `${Math.round(g.rate * 100)}%` }} />
+                          </div>
+                          <span className="w-16 shrink-0 text-right tabular-nums text-slate-400">
+                            {Math.round(g.rate * 100)}% <span className="text-slate-600">{g.redeemed}/{g.issued}</span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 批量运营工具栏 */}
+                <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                  <button
+                    onClick={() => extendAllPending(7)}
+                    disabled={codesBusy}
+                    className="rounded-md border border-amber-700/50 bg-amber-900/20 px-2.5 py-1 text-[11px] text-amber-200 hover:border-amber-500 disabled:opacity-40"
+                  >
+                    延长待核销 +7天
+                  </button>
+                  <button
+                    onClick={voidExpiredCodes}
+                    disabled={codesBusy}
+                    className="rounded-md border border-rose-700/50 bg-rose-900/20 px-2.5 py-1 text-[11px] text-rose-200 hover:border-rose-500 disabled:opacity-40"
+                  >
+                    清理过期码
+                  </button>
+                </div>
+
                 <div className="mb-2 flex items-center justify-between">
                   <div className="text-[11px] text-slate-400">
                     已发 {codes.length} · 已核销 {codes.filter((c) => c.redeemed).length} · 待核销{" "}
@@ -1581,14 +1732,32 @@ export default function AdminPage() {
                               已核销 {c.redeemedAt ? String(c.redeemedAt).slice(5, 16).replace("T", " ") : ""}
                             </span>
                           ) : expired ? (
-                            <span className="shrink-0 rounded-md bg-rose-900/40 px-2 py-0.5 text-[10px] text-rose-300">已过期</span>
+                            <div className="flex shrink-0 items-center gap-1">
+                              <span className="rounded-md bg-rose-900/40 px-2 py-0.5 text-[10px] text-rose-300">已过期</span>
+                              <button
+                                onClick={() => extendOne(c.code, 7)}
+                                title="复活并延长 7 天"
+                                className="rounded-md border border-amber-700/50 px-2 py-0.5 text-[10px] text-amber-300 hover:border-amber-500"
+                              >
+                                +7天
+                              </button>
+                            </div>
                           ) : (
-                            <button
-                              onClick={() => redeemOne(c.code)}
-                              className="shrink-0 rounded-md bg-emerald-500 px-2.5 py-0.5 text-[10px] font-medium text-slate-950"
-                            >
-                              核销
-                            </button>
+                            <div className="flex shrink-0 items-center gap-1">
+                              <button
+                                onClick={() => extendOne(c.code, 7)}
+                                title="延长有效期 7 天"
+                                className="rounded-md border border-slate-700 px-2 py-0.5 text-[10px] text-slate-400 hover:border-amber-500 hover:text-amber-300"
+                              >
+                                +7天
+                              </button>
+                              <button
+                                onClick={() => redeemOne(c.code)}
+                                className="rounded-md bg-emerald-500 px-2.5 py-0.5 text-[10px] font-medium text-slate-950"
+                              >
+                                核销
+                              </button>
+                            </div>
                           )}
                         </div>
                       );

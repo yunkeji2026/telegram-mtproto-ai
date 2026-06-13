@@ -10,6 +10,9 @@
 <script>
 (function(){
   var KEY='cp_theme';
+  // 嵌入端（如桌面壳）可用 ?theme=dark|light 强制锁定主题，避免独立 webview 分区 auto→跟随系统导致「深色壳里白聊天」。
+  // 入参在首帧前写入持久化，使其成为后续生效值；桌面壳是深色专属，不需要再切换。
+  try{ var _ut=new URLSearchParams(location.search).get('theme'); if(_ut==='dark'||_ut==='light') localStorage.setItem(KEY,_ut); }catch(_){ }
   function pref(){ try{ return localStorage.getItem(KEY)||'auto'; }catch(_){ return 'auto'; } }
   function sysDark(){ try{ return window.matchMedia&&window.matchMedia('(prefers-color-scheme:dark)').matches; }catch(_){ return false; } }
   function effective(p){ p=p||pref(); return p==='auto'?(sysDark()?'dark':'light'):p; }
@@ -62,6 +65,7 @@
   --warn:#d97706;
   --border:#e5e7eb;
   --bg-page:#f3f4f6;
+  --bg-chat:#f3f4f6;     /* 聊天区底：与面板同色系（暗色下取靠近面板的层次，避免「深壳里更黑/更白」割裂） */
   --bg-panel:#ffffff;
   --bg-soft:#f8fafc;     /* 次级面/输入底/列表 hover */
   --bg-elev:#ffffff;     /* 弹层/卡片 */
@@ -75,6 +79,7 @@
 :root[data-cp-theme="dark"]{
   --border:#2a3344;
   --bg-page:#0f141c;
+  --bg-chat:#131a24;
   --bg-panel:#161d28;
   --bg-soft:#1e2735;
   --bg-elev:#1b2330;
@@ -85,6 +90,20 @@
 }
 /* 外层 workspace_base 的 body 底色随主题（顶栏 .ws-top 本就深色，天然一致） */
 :root[data-cp-theme="dark"] body{background:var(--bg-page);color:var(--text-main);}
+/* 暗色专属：浅蓝 active/选中态（#eff6ff/#bfdbfe/#dbeafe）会在暗色闪白 → 统一改半透明 accent；亮色不受影响。 */
+:root[data-cp-theme="dark"] .ftab.active,
+:root[data-cp-theme="dark"] .batch-toggle.active{background:rgba(59,130,246,.18);border-color:rgba(59,130,246,.40);}
+:root[data-cp-theme="dark"] .rt-primary{background:rgba(59,130,246,.18) !important;border-color:rgba(59,130,246,.40) !important;color:#93c5fd !important;}
+:root[data-cp-theme="dark"] .rt-primary:hover{background:rgba(59,130,246,.28) !important;}
+:root[data-cp-theme="dark"] .reply-preview{background:rgba(59,130,246,.12);border-color:rgba(59,130,246,.35);color:#cbd5e1;}
+:root[data-cp-theme="dark"] .connect-mode-badge,
+:root[data-cp-theme="dark"] .qr-chip:hover,
+:root[data-cp-theme="dark"] .search-mode-toggle,
+:root[data-cp-theme="dark"] .sv-add-btn:hover,
+:root[data-cp-theme="dark"] .sv-chip:hover{background:rgba(59,130,246,.16);border-color:rgba(59,130,246,.40);}
+:root[data-cp-theme="dark"] .sv-chip.active{background:rgba(59,130,246,.24);border-color:rgba(59,130,246,.45);}
+:root[data-cp-theme="dark"] .hdr-tag-chip{background:rgba(59,130,246,.20);color:#93c5fd;}
+:root[data-cp-theme="dark"] .draft-panel{border-top-color:rgba(59,130,246,.30);}
 
 /* 撑满父容器（workspace_base 留的 content 区，ws-body = 100vh-52px） */
 .inbox-root{display:grid;grid-template-columns:var(--nav-w) var(--list-w) 1fr;height:100%;overflow:hidden;background:var(--bg-page);}
@@ -129,12 +148,13 @@
 .ftab:hover{background:var(--bg-soft);}
 .ftab.active{background:#eff6ff;color:var(--accent);border-color:#bfdbfe;font-weight:600;}
 
-.conv-items{flex:1;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#e5e7eb transparent;}
-.conv-item{display:flex;gap:10px;padding:10px 14px;cursor:pointer;border-bottom:1px solid #f3f4f6;transition:background .1s;position:relative;}
+.conv-items{flex:1;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--border) transparent;}
+/* 名单：去掉条间白色分隔线（靠留白分隔，更清爽）；选中态用蓝色 inset accent，不挤压布局。 */
+.conv-item{display:flex;gap:10px;padding:10px 14px;cursor:pointer;transition:background .15s;position:relative;}
 .conv-item:hover{background:var(--bg-soft);}
-.conv-item.selected{background:#eff6ff;}
-.conv-item.sla-warn{border-left:3px solid var(--warn);}
-.conv-item.sla-crit{border-left:3px solid var(--red);}
+.conv-item.selected{background:rgba(59,130,246,.14);box-shadow:inset 3px 0 0 var(--accent);}
+/* SLA 超时不再用整条红/橙左竖线（太抢眼）；紧急度由 .sla-chip 角标承载，列表保持整洁。 */
+.conv-item.sla-warn,.conv-item.sla-crit{border-left:none;}
 .conv-avatar{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#fff;flex-shrink:0;position:relative;text-transform:uppercase;}
 .conv-avatar-badge{position:absolute;bottom:0;right:0;width:16px;height:16px;border-radius:50%;border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:8px;}
 .conv-body{flex:1;min-width:0;}
@@ -167,7 +187,7 @@
 .empty-list-icon{font-size:36px;opacity:.5;}
 
 /* ===== 对话详情面板 ===== */
-.chat-panel{display:flex;flex-direction:column;overflow:hidden;background:var(--bg-page);}
+.chat-panel{display:flex;flex-direction:column;overflow:hidden;background:var(--bg-chat);}
 .chat-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--text-tiny);gap:8px;}
 .chat-empty-icon{font-size:56px;opacity:.3;}
 
@@ -186,11 +206,12 @@
 .mode-select{border:1px solid var(--border);border-radius:8px;padding:5px 8px;font-size:12px;background:var(--bg-elev);cursor:pointer;outline:none;color:var(--text-main);}
 
 /* Claim banner */
-.claim-banner{padding:7px 18px;background:#fffbeb;border-bottom:1px solid #fde68a;font-size:12px;color:#92400e;display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.claim-banner{padding:7px 18px;background:rgba(245,158,11,.14);border-bottom:1px solid rgba(245,158,11,.30);font-size:12px;color:#92400e;display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+:root[data-cp-theme="dark"] .claim-banner{color:#fbbf24;}
 .claim-banner button{border:1px solid #f59e0b;background:var(--bg-elev);border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;color:#92400e;}
 
 /* Message area */
-.msg-area{flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:8px;scrollbar-width:thin;scrollbar-color:var(--border) transparent;background:var(--bg-page);}
+.msg-area{flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:8px;scrollbar-width:thin;scrollbar-color:var(--border) transparent;background:var(--bg-chat);}
 .msg-row{display:flex;flex-direction:column;}
 .msg-row.out{align-items:flex-end;}
 .msg-row.in{align-items:flex-start;}
@@ -483,7 +504,7 @@
   .inbox-root{grid-template-columns:1fr !important;}
   .nav-rail{display:none !important;}
   .conv-list-panel{display:flex;}
-  .chat-panel{display:none;position:fixed;inset:0;z-index:100;background:var(--bg-page);}
+  .chat-panel{display:none;position:fixed;inset:0;z-index:100;background:var(--bg-chat);}
   .chat-panel.mobile-open{display:flex;flex-direction:column;}
   .back-btn-mobile{display:flex !important;}
   .info-sidebar{width:100% !important;}
@@ -513,7 +534,7 @@
 /* ===== Phase 21: 消息全文检索结果 ===== */
 .msg-search-overlay{position:absolute;top:100%;left:0;right:0;background:var(--bg-elev);border:1px solid var(--border);border-top:none;border-radius:0 0 10px 10px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:40;max-height:320px;overflow-y:auto;display:none;}
 .msg-search-overlay.show{display:block;}
-.mso-item{padding:9px 14px;cursor:pointer;border-bottom:1px solid #f3f4f6;transition:background .1s;}
+.mso-item{padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--border);transition:background .1s;}
 .mso-item:hover{background:var(--bg-soft);}
 .mso-item:last-child{border-bottom:none;}
 .mso-name{font-size:12px;font-weight:600;color:var(--text-main);margin-bottom:2px;display:flex;align-items:center;gap:5px;}
@@ -556,7 +577,7 @@
 .mention-suggest{position:relative;}
 .mention-suggest-panel{position:absolute;left:0;right:0;bottom:100%;margin-bottom:4px;background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;box-shadow:0 -6px 18px rgba(0,0,0,.1);max-height:180px;overflow-y:auto;z-index:60;display:none;}
 .mention-suggest-panel.show{display:block;}
-.mention-suggest-item{padding:6px 10px;cursor:pointer;font-size:12px;border-bottom:1px solid #f3f4f6;}
+.mention-suggest-item{padding:6px 10px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);}
 .mention-suggest-item:hover,.mention-suggest-item.active{background:#f5f3ff;}
 .mention-suggest-item .ms-name{font-weight:600;color:#5b21b6;}
 .mention-suggest-item .ms-reason{font-size:10px;color:#64748b;margin-top:1px;}
@@ -584,7 +605,7 @@
 /* P26: / 命令面板 */
 .slash-panel{position:absolute;bottom:100%;left:0;right:0;background:var(--bg-elev);border:1px solid var(--border);border-radius:10px 10px 0 0;box-shadow:0 -8px 24px rgba(0,0,0,.12);max-height:280px;overflow-y:auto;z-index:50;display:none;}
 .slash-panel.show{display:block;}
-.slash-panel-hdr{padding:6px 12px;font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #f3f4f6;display:flex;justify-content:space-between;align-items:center;}
+.slash-panel-hdr{padding:6px 12px;font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;}
 /* P42: AI 副驾补全 */
 .copilot-panel{position:absolute;bottom:100%;left:0;right:0;background:var(--bg-elev);border:1px solid var(--border);border-radius:10px 10px 0 0;box-shadow:0 -6px 20px rgba(0,0,0,.1);z-index:49;display:none;}
 .copilot-panel.show{display:block;}
@@ -1705,7 +1726,7 @@ function _showTagSuggestions(q){
   sug.style.display='block';
   sug.innerHTML=all.slice(0,8).map(t=>`<div class="tag-sug-item" onclick="_addConvTag('${esc(t.replace(/'/g,"\\'"))}')">${esc(t)}</div>`).join('');
   if(q && !_tagLibrary.includes(q)){
-    sug.innerHTML+=`<div class="tag-sug-item" style="color:#6b7280;border-top:1px solid #f3f4f6;" onclick="_addConvTag('${esc(q.replace(/'/g,"\\'"))}')" >+ 创建 "${esc(q)}"</div>`;
+    sug.innerHTML+=`<div class="tag-sug-item" style="color:var(--text-sub);border-top:1px solid var(--border);" onclick="_addConvTag('${esc(q.replace(/'/g,"\\'"))}')" >+ 创建 "${esc(q)}"</div>`;
   }
 }
 

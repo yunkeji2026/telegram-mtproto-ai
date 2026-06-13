@@ -41,11 +41,11 @@ export default function Footer() {
 
         <div className="mt-10 flex flex-col items-center gap-3 border-t border-white/5 pt-6 text-center text-xs text-slate-600">
           <div className="flex items-center gap-4">
-            <Link href="/privacy" className="transition hover:text-slate-300">
+            <Link href={zh ? "/privacy" : "/en/privacy"} className="transition hover:text-slate-300">
               {zh ? "隐私政策" : "Privacy"}
             </Link>
             <span className="text-slate-700">·</span>
-            <Link href="/terms" className="transition hover:text-slate-300">
+            <Link href={zh ? "/terms" : "/en/terms"} className="transition hover:text-slate-300">
               {zh ? "服务条款" : "Terms"}
             </Link>
           </div>
