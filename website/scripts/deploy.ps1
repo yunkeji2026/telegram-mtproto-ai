@@ -1,4 +1,4 @@
-<#
+﻿<#
   华灵网站 · 本地一键部署 (Windows / PowerShell)
   流程: 打包 website/ -> SCP 上传(部署包 + deploy.sh) -> 服务器侧 deploy.sh 原子部署 -> 公网体检
   绝不在脚本中存放密码：从 $env:VPS_PASS 读取，缺失则安全提示输入(SecureString)。
@@ -55,7 +55,7 @@ try {
   Write-Host ("    healthy={0}  webhookSecret={1}  adminKey={2}  deepseek={3}" -f `
       $h.healthy, $h.checks.env.webhookSecret, $h.checks.env.adminKey, $h.checks.env.deepseekKey)
   if (-not $h.healthy) { throw '公网健康检查未通过' }
-  Write-Host '部署完成 ✔'
+  Write-Host '部署完成 [OK]'
 }
 finally {
   Pop-Location
