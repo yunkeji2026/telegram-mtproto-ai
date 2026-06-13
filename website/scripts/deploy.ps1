@@ -41,13 +41,28 @@ try {
   Set-SCPItem -ComputerName $VpsHost -Credential $cred -Path $tar -Destination $RemoteDir -AcceptKey -Force
   Set-SCPItem -ComputerName $VpsHost -Credential $cred -Path (Join-Path $PSScriptRoot 'deploy.sh') -Destination $RemoteDir -AcceptKey -Force
 
-  Write-Host '[3/4] 服务器侧原子部署 (deploy.sh) ...'
+  Write-Host '[3/4] 服务器侧原子部署 (后台执行 deploy.sh + 轮询日志，避免长构建占用 SSH 通道超时) ...'
   $s = New-SSHSession -ComputerName $VpsHost -Credential $cred -AcceptKey -ConnectionTimeout 30
   try {
-    # 规避 Windows CRLF 导致 bash 解析失败
-    $r = Invoke-SSHCommand -SessionId $s.SessionId -Command "sed -i 's/\r$//' $RemoteDir/deploy.sh && bash $RemoteDir/deploy.sh $RemoteDir/website-deploy.tar.gz"
-    $r.Output
-    if ($r.ExitStatus -ne 0) { throw "服务器部署返回非 0: $($r.ExitStatus)`n$($r.Error)" }
+    # sed: 规避 Windows CRLF 致 bash 解析失败；nohup+&+</dev/null: 完全脱离终端后台运行
+    $launch = "sed -i 's/\r$//' $RemoteDir/deploy.sh; cd $RemoteDir && rm -f deploy.log && nohup bash deploy.sh $RemoteDir/website-deploy.tar.gz >deploy.log 2>&1 </dev/null & echo launched"
+    Invoke-SSHCommand -SessionId $s.SessionId -Command $launch | Out-Null
+
+    $deadline = (Get-Date).AddMinutes(10); $done = $false
+    do {
+      Start-Sleep -Seconds 8
+      # pgrep '[b]ash' 括号技巧避免匹配到 pgrep 自身命令行
+      $p = (Invoke-SSHCommand -SessionId $s.SessionId -Command "tail -4 $RemoteDir/deploy.log 2>/dev/null; pgrep -f '[b]ash deploy.sh' >/dev/null && echo __RUN__ || echo __STOP__").Output -join "`n"
+      Write-Host ('    ' + (($p -replace '__RUN__|__STOP__','').Trim() -replace "`n","`n    "))
+      if ($p -match 'DONE @')                     { $done = $true; break }
+      if ($p -match 'deploy ERROR|rolling back')  { throw "服务器部署失败(已尝试自动回滚)，详见服务器 $RemoteDir/deploy.log" }
+      if ($p -match '__STOP__') {
+        $final = (Invoke-SSHCommand -SessionId $s.SessionId -Command "tail -25 $RemoteDir/deploy.log").Output -join "`n"
+        if ($final -match 'DONE @') { $done = $true; break }
+        throw "deploy.sh 已退出但未见 DONE，疑似中断：`n$final"
+      }
+    } until ((Get-Date) -gt $deadline)
+    if (-not $done) { throw "部署轮询超时(>10min)，请上服务器查看 $RemoteDir/deploy.log" }
   } finally { Remove-SSHSession -SessionId $s.SessionId | Out-Null }
 
   Write-Host '[4/4] 公网体检 ...'
