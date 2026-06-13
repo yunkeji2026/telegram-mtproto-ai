@@ -381,11 +381,21 @@ export async function setupBot(opts?: { skipWebhook?: boolean }) {
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET || "hualing-wh-" + token.slice(-8);
   const webhookUrl = `${SITE_URL}/api/telegram/webhook`;
 
+  // 逐项执行并记录结果。幂等：值未变化时 Telegram 返回 "...is not modified"，视为成功。
+  const steps: { step: string; ok: boolean; error?: string }[] = [];
+  const run = async (step: string, method: string, body: Record<string, unknown>) => {
+    const res = (await tgCall(method, body)) as { ok?: boolean; description?: string } | null;
+    const desc = String(res?.description || "");
+    const ok = Boolean(res?.ok) || /is not modified/i.test(desc);
+    steps.push({ step, ok, error: ok ? undefined : desc || "failed" });
+    return res;
+  };
+
   // 安全开关：只刷新品牌身份（名称/简介/命令/菜单）而不重设 webhook。
   // 当在与生产不同的环境运行 setup 时，重设 webhook 可能写入与线上不匹配的 secret，
   // 导致 Telegram 回推被 403 拒绝、机器人“变哑”。skipWebhook 让品牌落地零风险。
   if (!opts?.skipWebhook) {
-    await tgCall("setWebhook", {
+    await run("setWebhook", "setWebhook", {
       url: webhookUrl,
       secret_token: secret,
       allowed_updates: ["message", "callback_query"],
@@ -393,7 +403,7 @@ export async function setupBot(opts?: { skipWebhook?: boolean }) {
     });
   }
 
-  await tgCall("setMyCommands", {
+  await run("setMyCommands", "setMyCommands", {
     commands: [
       { command: "start", description: "主菜单 / Main menu" },
       { command: "services", description: "业务能力 · 华影&灵犀 / Solutions" },
@@ -406,20 +416,21 @@ export async function setupBot(opts?: { skipWebhook?: boolean }) {
   });
 
   // Bot 身份（BotFather 级别）：名称 / 简介 / 关于。中文为默认，并设置英文 (en) 版本。
-  await tgCall("setMyName", { name: "华灵科技 HuaLing Tech" });
-  await tgCall("setMyName", { name: "HuaLing Tech", language_code: "en" });
+  await run("setMyName(zh)", "setMyName", { name: "华灵科技 HuaLing Tech" });
+  await run("setMyName(en)", "setMyName", { name: "HuaLing Tech", language_code: "en" });
 
-  await tgCall("setMyShortDescription", {
+  await run("setMyShortDescription(zh)", "setMyShortDescription", {
     short_description:
       "华影 LiveAvatar 换脸换声·数字人 ｜ 灵犀 SoulSync AI成交·拟人翻译·AI伴侣。私有部署 · USDT 结算。",
   });
-  await tgCall("setMyShortDescription", {
+  // 注意：setMyShortDescription 上限 120 字符，超出会报 BOT_SHARETEXT_INVALID（英文版需精简）。
+  await run("setMyShortDescription(en)", "setMyShortDescription", {
     short_description:
-      "HuaYing LiveAvatar: face/voice swap & digital humans. LingXi SoulSync: AI closing, human-like translation & AI companion. Private deploy · USDT.",
+      "HuaYing: face/voice swap, digital humans. LingXi: AI closing, translation, companion. Private deploy · USDT.",
     language_code: "en",
   });
 
-  await tgCall("setMyDescription", {
+  await run("setMyDescription(zh)", "setMyDescription", {
     description:
       "华灵科技 HuaLing Tech —— 灵动智能，华丽呈现。\n\n" +
       "🎭 华影 LiveAvatar：实时换脸换声 · 数字人 · 视频翻译配音\n" +
@@ -427,7 +438,7 @@ export async function setupBot(opts?: { skipWebhook?: boolean }) {
       "🔐 华灵 Engine：无审查私有部署，数据不出网\n\n" +
       "全程 USDT 结算。点 /start 打开菜单，或直接发消息问我。",
   });
-  await tgCall("setMyDescription", {
+  await run("setMyDescription(en)", "setMyDescription", {
     description:
       "HuaLing Tech — Intelligence, gracefully delivered.\n\n" +
       "🎭 HuaYing LiveAvatar: real-time face & voice swap · digital humans · video dubbing\n" +
@@ -437,7 +448,7 @@ export async function setupBot(opts?: { skipWebhook?: boolean }) {
     language_code: "en",
   });
 
-  await tgCall("setChatMenuButton", {
+  await run("setChatMenuButton", "setChatMenuButton", {
     menu_button: {
       type: "web_app",
       text: "华灵科技 · 小程序",
@@ -446,5 +457,6 @@ export async function setupBot(opts?: { skipWebhook?: boolean }) {
   });
 
   const me = await tgCall("getMe", {});
-  return { ok: true, secret, webhookUrl: opts?.skipWebhook ? "skipped" : webhookUrl, me };
+  const ok = steps.every((s) => s.ok);
+  return { ok, secret, webhookUrl: opts?.skipWebhook ? "skipped" : webhookUrl, steps, me };
 }
