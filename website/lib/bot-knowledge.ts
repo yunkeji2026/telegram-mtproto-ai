@@ -255,13 +255,14 @@ Material:
 ${kb}`;
 }
 
-// Mini App opens the lightweight /app page (the full marketing site is too heavy
-// for some Telegram webviews). /app has #pricing and #contact anchors.
+// Mini App 是轻量多视图 SPA（完整营销站 / 留给「打开官网」按钮在浏览器打开）。
+// 每个入口带 ?view= 直达对应视图；startapp 深链(start_param)在 /app 内做别名映射。
+const APP = `${SITE_URL}/app`;
 export const WEBAPP_SECTIONS = {
-  home: `${SITE_URL}/app`,
-  realtime: `${SITE_URL}/app`,
-  autochat: `${SITE_URL}/app`,
-  pricing: `${SITE_URL}/app#pricing`,
-  engage: `${SITE_URL}/app#pricing`,
-  contact: `${SITE_URL}/app#contact`,
+  home: APP, // 概览（左下角菜单键默认入口）
+  liveavatar: `${APP}?view=liveavatar`, // 华影 · 实时换脸换声
+  soulsync: `${APP}?view=soulsync`, // 灵犀 · AI 成交聊天
+  pricing: `${APP}?view=pricing`, // 价格 · 套餐对比 + 领码
+  engage: `${APP}?view=engage`, // 合作 · 三种模式
+  contact: `${APP}?view=home`, // 留资/客服（home 视图含留资表单）
 } as const;

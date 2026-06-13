@@ -71,10 +71,11 @@ export function mainMenuKeyboard(lang: BotLang): InlineBtn[][] {
 
   return [
     [{ text: ai, callback_data: "ask_ai" }],
-    [{ text: open, web_app: { url: WEBAPP_SECTIONS.home } }],
+    // 「打开官网」用 url 按钮打开完整营销站（TG 内置浏览器），与轻量小程序分工区隔。
+    [{ text: open, url: SITE_URL }],
     [
-      { text: rt, web_app: { url: WEBAPP_SECTIONS.realtime } },
-      { text: ac, web_app: { url: WEBAPP_SECTIONS.autochat } },
+      { text: rt, web_app: { url: WEBAPP_SECTIONS.liveavatar } },
+      { text: ac, web_app: { url: WEBAPP_SECTIONS.soulsync } },
     ],
     [
       { text: pr, web_app: { url: WEBAPP_SECTIONS.pricing } },
