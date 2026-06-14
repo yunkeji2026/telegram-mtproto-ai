@@ -30,53 +30,70 @@ DEFAULTS: Dict[str, Any] = {
     "match_language": False,          # 预留：按会话语言匹配坐席技能（当前无技能数据，不生效）
 }
 
+# 后台自动认领（守护版）子配置。本轮仅落地决策逻辑（plan_auto_claims），后台 worker
+# 接线见 ROADMAP 下一阶段。默认关。
+AUTO_CLAIM_DEFAULTS: Dict[str, Any] = {
+    "enabled": False,
+    "active_within_sec": 60,          # 仅把会话自动分给近 N 秒有心跳的活跃坐席（0=不限）
+    "ttl_sec": 0,                     # soft 认领 TTL（0=沿用全局 claim_ttl_sec；>0 用更短租约）
+}
+
 _VALID_STRATEGIES = {"least_loaded", "round_robin"}
+
+
+def _coerce_nonneg_int(v: Any) -> int:
+    try:
+        return max(0, int(v or 0))
+    except Exception:
+        return 0
+
+
+def _normalize_auto_assign(raw: Any) -> Dict[str, Any]:
+    """把一份 auto_assign 配置（可能不完整 / 含 auto_claim 子段 / 仅给子集）
+    归一化为完整、类型安全的 cfg。parse_auto_assign_config 与 __init__ 共用。"""
+    out: Dict[str, Any] = dict(DEFAULTS)
+    if isinstance(raw, dict):
+        for k in DEFAULTS:
+            if k in raw and raw[k] is not None:
+                out[k] = raw[k]
+    out["enabled"] = bool(out["enabled"])
+    out["online_only"] = bool(out["online_only"])
+    out["match_language"] = bool(out["match_language"])
+    out["max_claims_per_agent"] = _coerce_nonneg_int(out["max_claims_per_agent"])
+    if out.get("strategy") not in _VALID_STRATEGIES:
+        out["strategy"] = "least_loaded"
+    # auto_claim 子段
+    ac_raw = raw.get("auto_claim") if isinstance(raw, dict) else None
+    ac: Dict[str, Any] = dict(AUTO_CLAIM_DEFAULTS)
+    if isinstance(ac_raw, dict):
+        for k in AUTO_CLAIM_DEFAULTS:
+            if k in ac_raw and ac_raw[k] is not None:
+                ac[k] = ac_raw[k]
+    ac["enabled"] = bool(ac["enabled"])
+    ac["active_within_sec"] = _coerce_nonneg_int(ac["active_within_sec"])
+    ac["ttl_sec"] = _coerce_nonneg_int(ac["ttl_sec"])
+    out["auto_claim"] = ac
+    return out
 
 
 def parse_auto_assign_config(full_config: Any) -> Dict[str, Any]:
     """从完整 config（dict）解析 workspace.auto_assign，缺省回落 DEFAULTS。"""
-    out: Dict[str, Any] = dict(DEFAULTS)
+    aa: Any = {}
     try:
         ws = (full_config or {}).get("workspace") or {}
         aa = ws.get("auto_assign") or {}
-        if isinstance(aa, dict):
-            for k in DEFAULTS:
-                if k in aa and aa[k] is not None:
-                    out[k] = aa[k]
     except Exception:
         logger.debug("解析 auto_assign 配置失败，使用默认值", exc_info=True)
-    # 归一化与防御
-    out["enabled"] = bool(out["enabled"])
-    out["online_only"] = bool(out["online_only"])
-    out["match_language"] = bool(out["match_language"])
-    try:
-        out["max_claims_per_agent"] = max(0, int(out["max_claims_per_agent"] or 0))
-    except Exception:
-        out["max_claims_per_agent"] = 0
-    if out.get("strategy") not in _VALID_STRATEGIES:
-        out["strategy"] = "least_loaded"
-    return out
+        aa = {}
+    return _normalize_auto_assign(aa if isinstance(aa, dict) else {})
 
 
 class AssignmentService:
     """坐席派单建议器（薄封装选择策略，无副作用）。"""
 
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
-        # config 可以是已解析的 auto_assign dict，也可直接给 DEFAULTS 子集
-        merged = dict(DEFAULTS)
-        if isinstance(config, dict):
-            for k in DEFAULTS:
-                if k in config and config[k] is not None:
-                    merged[k] = config[k]
-        merged["enabled"] = bool(merged["enabled"])
-        merged["online_only"] = bool(merged["online_only"])
-        try:
-            merged["max_claims_per_agent"] = max(0, int(merged["max_claims_per_agent"] or 0))
-        except Exception:
-            merged["max_claims_per_agent"] = 0
-        if merged.get("strategy") not in _VALID_STRATEGIES:
-            merged["strategy"] = "least_loaded"
-        self.cfg = merged
+        # config 可以是已解析的完整 cfg，也可直接给 DEFAULTS / auto_claim 子集
+        self.cfg = _normalize_auto_assign(config if isinstance(config, dict) else {})
 
     @classmethod
     def from_config(cls, full_config: Any) -> "AssignmentService":
@@ -85,6 +102,10 @@ class AssignmentService:
     @property
     def enabled(self) -> bool:
         return bool(self.cfg.get("enabled"))
+
+    @property
+    def auto_claim_enabled(self) -> bool:
+        return bool((self.cfg.get("auto_claim") or {}).get("enabled"))
 
     # ── 内部 ──────────────────────────────────────────────────
 
@@ -180,5 +201,55 @@ class AssignmentService:
             )
             if sug:
                 out[cid] = sug
+                extra[sug["agent_id"]] = extra.get(sug["agent_id"], 0) + 1
+        return out
+
+    def plan_auto_claims(
+        self,
+        *,
+        chats: List[Dict[str, Any]],
+        presence: List[Dict[str, Any]],
+        claims: List[Dict[str, Any]],
+        now: Optional[float] = None,
+        active_within_sec: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """产出后台自动认领计划：``[{conversation_id, agent_id, agent_name}, ...]``。
+
+        守护版决策核心（纯逻辑、无副作用）——真正的 claim 由后台 worker 执行（下一阶段）：
+          - 仅当 ``auto_claim.enabled`` 时返回非空；
+          - 活跃窗口：``active_within_sec>0`` 时只保留 ``last_seen_at`` 在窗口内的坐席，
+            避免把会话静默锁给挂机坐席（默认取 ``auto_claim.active_within_sec``）；
+          - 复用 least_loaded 选择 + 批内累加负载，跳过已认领会话。
+        """
+        ac = self.cfg.get("auto_claim") or {}
+        if not ac.get("enabled") or not chats:
+            return []
+        aw = active_within_sec if active_within_sec is not None else int(ac.get("active_within_sec") or 0)
+        pres = list(presence or [])
+        if aw and aw > 0:
+            import time as _t
+            n = now if now is not None else _t.time()
+            cutoff = n - aw
+            pres = [p for p in pres if float((p or {}).get("last_seen_at") or 0) >= cutoff]
+        claimed = {
+            str((c or {}).get("conversation_id") or "")
+            for c in (claims or [])
+            if (c or {}).get("conversation_id")
+        }
+        extra: Dict[str, int] = {}
+        out: List[Dict[str, Any]] = []
+        for c in chats:
+            cid = str((c or {}).get("conversation_id") or "")
+            if not cid or cid in claimed:
+                continue
+            sug = self.suggest(
+                presence=pres, claims=claims, conv=c, extra_load=extra,
+            )
+            if sug:
+                out.append({
+                    "conversation_id": cid,
+                    "agent_id": sug["agent_id"],
+                    "agent_name": sug["agent_name"],
+                })
                 extra[sug["agent_id"]] = extra.get(sug["agent_id"], 0) + 1
         return out

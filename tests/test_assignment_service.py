@@ -160,3 +160,98 @@ def test_from_config_helper():
     svc = AssignmentService.from_config({"workspace": {"auto_assign": {"enabled": True}}})
     assert svc.enabled is True
     assert svc.cfg["strategy"] == DEFAULTS["strategy"]
+
+
+# ── auto_claim 配置解析 ───────────────────────────────────
+
+def test_auto_claim_defaults():
+    cfg = parse_auto_assign_config({})
+    assert cfg["auto_claim"]["enabled"] is False
+    assert cfg["auto_claim"]["active_within_sec"] == 60
+    assert cfg["auto_claim"]["ttl_sec"] == 0
+
+
+def test_auto_claim_parse_and_normalize():
+    cfg = parse_auto_assign_config({"workspace": {"auto_assign": {"auto_claim": {
+        "enabled": True, "active_within_sec": "30", "ttl_sec": -5,
+    }}}})
+    assert cfg["auto_claim"]["enabled"] is True
+    assert cfg["auto_claim"]["active_within_sec"] == 30   # 字符串归一化
+    assert cfg["auto_claim"]["ttl_sec"] == 0              # 负值钳到 0
+
+
+def test_auto_claim_enabled_property():
+    assert AssignmentService({"auto_claim": {"enabled": True}}).auto_claim_enabled is True
+    assert AssignmentService({"enabled": True}).auto_claim_enabled is False
+
+
+# ── plan_auto_claims ─────────────────────────────────────
+
+def _pa(agent_id, last_seen, status="online"):
+    return {"agent_id": agent_id, "status": status,
+            "display_name": agent_id, "last_seen_at": last_seen}
+
+
+def test_plan_disabled_returns_empty():
+    svc = AssignmentService({"enabled": True})  # auto_claim 默认关
+    out = svc.plan_auto_claims(
+        chats=[{"conversation_id": "c1"}], presence=[_pa("a1", 1000)],
+        claims=[], now=1000,
+    )
+    assert out == []
+
+
+def test_plan_enabled_produces_claims():
+    svc = AssignmentService({"auto_claim": {"enabled": True, "active_within_sec": 0}})
+    out = svc.plan_auto_claims(
+        chats=[{"conversation_id": "c1"}, {"conversation_id": "c2"}],
+        presence=[_pa("a1", 1000)], claims=[], now=1000,
+    )
+    assert {o["conversation_id"] for o in out} == {"c1", "c2"}
+    assert all(o["agent_id"] == "a1" for o in out)
+
+
+def test_plan_filters_inactive_agents():
+    svc = AssignmentService({"auto_claim": {"enabled": True, "active_within_sec": 60}})
+    # a1 最近心跳 1000，now=2000 → 超 60s 活跃窗口 → 被过滤
+    out = svc.plan_auto_claims(
+        chats=[{"conversation_id": "c1"}], presence=[_pa("a1", 1000)],
+        claims=[], now=2000,
+    )
+    assert out == []
+    # a2 在窗口内（1970）→ 入选
+    out2 = svc.plan_auto_claims(
+        chats=[{"conversation_id": "c1"}], presence=[_pa("a2", 1970)],
+        claims=[], now=2000,
+    )
+    assert out2 and out2[0]["agent_id"] == "a2"
+
+
+def test_plan_skips_claimed():
+    svc = AssignmentService({"auto_claim": {"enabled": True, "active_within_sec": 0}})
+    out = svc.plan_auto_claims(
+        chats=[{"conversation_id": "c1"}, {"conversation_id": "c2"}],
+        presence=[_pa("a1", 1000)], claims=[_claim("c1", "a1")], now=1000,
+    )
+    assert {o["conversation_id"] for o in out} == {"c2"}
+
+
+def test_plan_round_robins_within_batch():
+    svc = AssignmentService({"auto_claim": {"enabled": True, "active_within_sec": 0}})
+    chats = [{"conversation_id": f"c{i}"} for i in range(4)]
+    out = svc.plan_auto_claims(
+        chats=chats, presence=[_pa("a1", 1000), _pa("a2", 1000)],
+        claims=[], now=1000,
+    )
+    agents = [o["agent_id"] for o in out]
+    assert agents.count("a1") == 2
+    assert agents.count("a2") == 2
+
+
+def test_plan_empty_when_no_active_agents():
+    svc = AssignmentService({"auto_claim": {"enabled": True, "active_within_sec": 30}})
+    out = svc.plan_auto_claims(
+        chats=[{"conversation_id": "c1"}], presence=[_pa("a1", 100)],
+        claims=[], now=1000,
+    )
+    assert out == []

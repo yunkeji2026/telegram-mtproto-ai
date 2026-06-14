@@ -1052,6 +1052,12 @@ workspace:
     online_only: true         # true=仅 status=online 坐席；false=online/busy 皆可（仍排除 offline）
     max_claims_per_agent: 0   # 0=不限；>0 时负载已达上限的坐席不再被建议
     match_language: false     # 预留：按会话语言匹配坐席技能（当前无技能数据源，暂不生效）
+    # 后台自动认领（守护版，默认关）：本轮仅落地决策逻辑 plan_auto_claims，
+    # 后台 worker 接线见下一阶段；开启决策不会自动发生 claim，需 worker 执行。
+    auto_claim:
+      enabled: false
+      active_within_sec: 60   # 仅把会话自动分给近 N 秒有心跳的活跃坐席（0=不限）
+      ttl_sec: 0              # soft 认领 TTL（0=沿用全局 claim_ttl_sec；>0 用更短租约）
   # 快捷回复模板（坐席输入栏「快捷回复」面板；与 messenger approval_templates、templates.yaml 合并展示）
   quick_templates:
     - label: 问候
