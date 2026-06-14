@@ -2,12 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { MessageSquare, X, Send, Bot, Sparkles, CheckCircle2 } from "lucide-react";
+import { MessageSquare, X, Send, Bot, Sparkles, CheckCircle2, Globe } from "lucide-react";
 import { useLang } from "./LanguageContext";
 import { useTelegram } from "./TelegramProvider";
 import { cleanMarkdown } from "@/lib/clean-markdown";
 import { CONTACT_URL } from "@/lib/site";
 import { track } from "@/lib/track";
+import { detectLang } from "@/lib/detect-lang";
 import { getSession, setSession } from "@/lib/safe-storage";
 
 type Msg = { role: "user" | "assistant"; content: string };
@@ -30,6 +31,7 @@ const COPY = {
     leadOk: "已收到，马上联系你 ✅",
     teaser: "在找出海获客方案？问我 AI 自动成交怎么帮你多赚 👋",
     human: "转人工客服",
+    replyIn: "AI 将用此语言实时回复",
   },
   en: {
     title: "AI Live Support",
@@ -46,6 +48,7 @@ const COPY = {
     leadOk: "Got it — reaching out shortly ✅",
     teaser: "Scaling cross-border sales? Ask how AI auto-closing earns you more 👋",
     human: "Talk to a human",
+    replyIn: "AI replies live in this language",
   },
 };
 
@@ -363,6 +366,18 @@ export default function AIChat() {
                   {c.human}
                 </a>
               </div>
+              {input.trim() &&
+                (() => {
+                  const d = detectLang(input);
+                  return d.code ? (
+                    <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-medium text-neon-cyan">
+                      <Globe className="h-3 w-3" />
+                      <span>
+                        {d.native} · {c.replyIn}
+                      </span>
+                    </div>
+                  ) : null;
+                })()}
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
