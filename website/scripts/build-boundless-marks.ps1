@@ -10,6 +10,8 @@
 #      (TG renders transparency as black, so bake a dark gradient, circle-crop friendly)
 #   4) app/favicon.ico (16/32/48) + app/icon.png (512 transparent)
 #      + app/apple-icon.png (180 dark-bg) -> Next.js convention browser/iOS icons
+#   5) public/brand/products/{key}.png 256 transparent (from {key}-white.png) -> the
+#      5 product icons (facex/voicex/livex/lingox/chatx) for ProductMatrix / brand page / Mini App
 #
 # Re-run from website/:  powershell -ExecutionPolicy Bypass -File scripts/build-boundless-marks.ps1
 
@@ -105,6 +107,17 @@ function Build-Transparent([int]$size, $outPath) {
   $bmp.Dispose()
 }
 
+# Resize an existing (already-transparent) PNG into a centered $size square, contain-fit.
+function Resize-Png($inPath, $outPath, [int]$size, [double]$padRatio) {
+  $img = [System.Drawing.Image]::FromFile($inPath)
+  $c = New-Canvas $size $size
+  $bmp = $c[0]; $g = $c[1]
+  $g.Clear([System.Drawing.Color]::Transparent)
+  Draw-Contained $g $img $size $padRatio
+  Save-Png $bmp $outPath
+  $g.Dispose(); $bmp.Dispose(); $img.Dispose()
+}
+
 function Build-Avatar([int]$size, $outPath, [double]$padRatio) {
   $bmp = Render-Mark $size $padRatio $true
   Save-Png $bmp $outPath
@@ -161,4 +174,15 @@ Write-Host "Building app icons (favicon / icon / apple-icon) ..."
 Build-Ico (Join-Path $app "favicon.ico") @(16, 32, 48)
 Build-Transparent 512 (Join-Path $app "icon.png")
 Build-Avatar      180 (Join-Path $app "apple-icon.png") 0.14
+
+# Product icons: key out the white bg of each {key}-white.png (glossy 3D set) and emit a
+# 256 transparent {key}.png. Used by ProductMatrix / /brand page / Mini App home cards.
+Write-Host "Building product icons ..."
+$products = Join-Path $root "public\brand\products"
+foreach ($k in @("facex", "voicex", "livex", "lingox", "chatx")) {
+  $tmp = Join-Path $products "$k-keyed.png"
+  Build-Master (Join-Path $products "$k-white.png") $tmp
+  Resize-Png $tmp (Join-Path $products "$k.png") 256 0.08
+  Remove-Item $tmp -Force
+}
 Write-Host "Done."

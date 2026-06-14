@@ -3,7 +3,7 @@
 import { useLang } from "./LanguageContext";
 import Reveal from "./fx/Reveal";
 import { BRAND, PRODUCT_ORDER } from "@/lib/brand";
-import { PRODUCT_ICONS, PRODUCT_ANCHOR } from "./productMeta";
+import { PRODUCT_IMG, PRODUCT_ANCHOR } from "./productMeta";
 import { track } from "@/lib/track";
 import { ArrowRight, ShieldCheck } from "lucide-react";
 
@@ -52,7 +52,6 @@ export default function ProductMatrix() {
         <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {PRODUCT_ORDER.map((key, idx) => {
             const p = BRAND.products[key];
-            const Icon = PRODUCT_ICONS[key];
             return (
               <Reveal key={key} delay={idx * 0.05}>
                 <a
@@ -61,9 +60,14 @@ export default function ProductMatrix() {
                   className="group relative flex h-full flex-col overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] p-5 transition hover:border-neon-cyan/40 hover:bg-white/[0.05]"
                 >
                   <div className="mb-4 flex items-center justify-between">
-                    <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-neon-cyan/20 to-neon-violet/20 text-neon-cyan">
-                      <Icon className="h-5 w-5" />
-                    </span>
+                    <img
+                      src={PRODUCT_IMG[key]}
+                      alt={`${p.zh} ${p.en}`}
+                      width={48}
+                      height={48}
+                      className="h-12 w-12 object-contain transition-transform group-hover:scale-110"
+                      draggable={false}
+                    />
                     <span className="font-mono text-xs text-slate-600">0{idx + 1}</span>
                   </div>
                   <div className="flex items-baseline gap-2">

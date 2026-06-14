@@ -2,7 +2,7 @@
 
 import { useLang } from "@/components/LanguageContext";
 import { BRAND, PRODUCT_ORDER } from "@/lib/brand";
-import { PRODUCT_ICONS } from "@/components/productMeta";
+import { PRODUCT_IMG } from "@/components/productMeta";
 import BrandMark from "@/components/BrandMark";
 import { CONTACT_URL } from "@/lib/site";
 import { track } from "@/lib/track";
@@ -111,16 +111,20 @@ export default function BrandPage() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {PRODUCT_ORDER.map((key, idx) => {
               const p = BRAND.products[key];
-              const Icon = PRODUCT_ICONS[key];
               return (
                 <div
                   key={key}
                   className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] p-5 transition hover:border-neon-cyan/40 hover:bg-white/[0.05]"
                 >
                   <div className="mb-4 flex items-center justify-between">
-                    <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-neon-cyan/20 to-neon-violet/20 text-neon-cyan">
-                      <Icon className="h-5 w-5" />
-                    </span>
+                    <img
+                      src={PRODUCT_IMG[key]}
+                      alt={`${p.zh} ${p.en}`}
+                      width={48}
+                      height={48}
+                      className="h-12 w-12 object-contain transition-transform group-hover:scale-110"
+                      draggable={false}
+                    />
                     <span className="text-xs font-mono text-slate-600">0{idx + 1}</span>
                   </div>
                   <div className="flex items-baseline gap-2">

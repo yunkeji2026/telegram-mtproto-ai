@@ -1,23 +1,16 @@
-// 五产品的「展示元数据」单一来源：图标 + 首页内锚点。
-// 纯文案/名称在 lib/brand.ts；这里只补 UI 层需要、又不该污染纯数据源的部分
-// （lucide 图标是 React/UI 依赖，故不放进 brand.ts）。
-// ProductMatrix 与 /brand 页共用本文件，避免「同一映射散落多份、改一处漏一处」。
-import {
-  ScanFace,
-  AudioLines,
-  Video,
-  Languages,
-  Bot,
-  type LucideIcon,
-} from "lucide-react";
+// 五产品的「展示元数据」单一来源：图标路径 + 首页内锚点。
+// 纯文案/名称在 lib/brand.ts；这里只补 UI 层需要、又不该污染纯数据源的部分。
+// ProductMatrix / /brand 页 / 小程序首页共用本文件，避免「同一映射散落多份、改一处漏一处」。
 import type { ProductKey } from "@/lib/brand";
 
-export const PRODUCT_ICONS: Record<ProductKey, LucideIcon> = {
-  facex: ScanFace,
-  voicex: AudioLines,
-  livex: Video,
-  lingox: Languages,
-  chatx: Bot,
+// 五产品专属玻璃 3D 图标（透明底）：由 scripts/build-boundless-marks.ps1 从 {key}-white.png
+// 抠白生成 public/brand/products/{key}.png（与主 ∞ 标识同一视觉语言）。
+export const PRODUCT_IMG: Record<ProductKey, string> = {
+  facex: "/brand/products/facex.png",
+  voicex: "/brand/products/voicex.png",
+  livex: "/brand/products/livex.png",
+  lingox: "/brand/products/lingox.png",
+  chatx: "/brand/products/chatx.png",
 };
 
 // 每个产品在首页跳转到的现有 demo / 详情 section（均为已存在的真实锚点，
