@@ -14,7 +14,7 @@ export default function Error({ reset }: { error: Error; reset: () => void }) {
           ⚡
         </div>
         <div className="text-lg font-bold tracking-tight text-white">
-          华灵科技 <span className="text-gradient">HuaLing Tech</span>
+          无界科技 <span className="text-gradient">BOUNDLESS</span>
         </div>
         <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed text-slate-400">
           页面加载遇到点小问题，请重试，或直接联系客服获取方案。

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useLang } from "./LanguageContext";
 import BrandMark from "./BrandMark";
+import { BRAND } from "@/lib/brand";
 
 const anchors = ["#showcase", "#pricing", "#about", "#contact"];
 
@@ -18,7 +19,7 @@ export default function Footer() {
           <div className="max-w-sm">
             <div className="flex items-center gap-2">
               <BrandMark className="h-8 w-8" />
-              <span className="font-semibold text-white">华灵科技 HuaLing Tech</span>
+              <span className="font-semibold text-white">{BRAND.company.zh} {BRAND.company.en}</span>
             </div>
             <p className="mt-4 text-xs leading-relaxed text-slate-500">
               <span className="font-medium text-slate-400">{t.footer.disclaimerTitle}：</span>

@@ -7,6 +7,7 @@ import { useTelegram } from "./TelegramProvider";
 import { CONTACT_URL } from "@/lib/site";
 import { track } from "@/lib/track";
 import BrandMark from "./BrandMark";
+import { BRAND } from "@/lib/brand";
 
 export default function Navbar() {
   const { t, lang, toggle } = useLang();
@@ -58,7 +59,7 @@ export default function Navbar() {
         <a href="#top" className="flex items-center gap-2">
           <BrandMark className="h-9 w-9" />
           <span className="text-lg font-semibold tracking-wide text-white">
-            华灵科技 <span className="text-slate-400">HuaLing Tech</span>
+            {BRAND.company.zh} <span className="text-slate-400">{BRAND.company.en}</span>
           </span>
         </a>
 
@@ -77,6 +78,9 @@ export default function Navbar() {
               )}
             </a>
           ))}
+          <a href="/brand" className="relative text-sm text-slate-300 transition-colors hover:text-white">
+            {lang === "zh" ? "品牌" : "Brand"}
+          </a>
         </div>
 
         <div className="flex items-center gap-3">
@@ -130,6 +134,13 @@ export default function Navbar() {
                 {l.label}
               </a>
             ))}
+            <a
+              href="/brand"
+              onClick={() => setOpen(false)}
+              className="rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/5 hover:text-white"
+            >
+              {lang === "zh" ? "品牌" : "Brand"}
+            </a>
             <a
               href={isMiniApp ? "#contact" : CONTACT_URL}
               target={isMiniApp ? undefined : "_blank"}

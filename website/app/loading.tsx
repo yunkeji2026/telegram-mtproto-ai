@@ -11,7 +11,7 @@ export default function Loading() {
           aria-label="加载中 / Loading"
         />
         <div className="text-sm font-medium tracking-wide text-slate-400">
-          华灵科技 <span className="text-gradient">HuaLing Tech</span>
+          无界科技 <span className="text-gradient">BOUNDLESS</span>
         </div>
       </div>
     </main>

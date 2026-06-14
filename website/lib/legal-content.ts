@@ -95,11 +95,11 @@ export const termsSections: LegalSection[] = [
     h: { zh: "服务说明", en: "Service description" },
     p: {
       zh: [
-        "华灵科技 HuaLing Tech 提供 AI 技术服务，旗下华影 LiveAvatar（实时换脸换声、声音克隆、数字人、视频翻译配音）与灵犀 SoulSync（AI 自动成交聊天、多语种拟人翻译、AI 伴侣），以及华灵 Engine 私有化部署等的选型、部署、定制与支持。",
+        "无界科技 BOUNDLESS 提供 AI 技术服务，覆盖 AI 换脸、声音克隆、实时直播换脸换声、实时换语言互译，以及 AI 自动成交聊天等能力，并提供无界底座 BOUNDLESS Engine 私有化部署的选型、部署、定制与支持。",
         "具体交付内容、规格与时效以双方在下单沟通中确认的方案为准。",
       ],
       en: [
-        "HuaLing Tech provides AI technical services across HuaYing LiveAvatar (real-time face & voice swap, voice cloning, digital humans, video dubbing) and LingXi SoulSync (AI auto-closing chat, human-like multi-language translation, AI companion), plus HuaLing Engine private deployment — including selection, deployment, customization and support.",
+        "BOUNDLESS provides AI technical services covering AI face swap, voice cloning, real-time live face & voice swap, real-time language translation, and AI auto-closing chat, plus BOUNDLESS Engine private deployment — including selection, deployment, customization and support.",
         "The exact deliverables, specifications and timelines are those confirmed between both parties during the ordering conversation.",
       ],
     },

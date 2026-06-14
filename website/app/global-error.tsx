@@ -17,7 +17,7 @@ export default function GlobalError({ reset }: { error: Error; reset: () => void
           }}
         >
           <div style={{ fontSize: 40 }}>⚡</div>
-          <div style={{ fontSize: 18, fontWeight: 700 }}>华灵科技 HuaLing Tech</div>
+          <div style={{ fontSize: 18, fontWeight: 700 }}>无界科技 BOUNDLESS</div>
           <div style={{ fontSize: 14, color: "#94a3b8", maxWidth: 320 }}>
             页面加载遇到点小问题，请重试。也可以直接联系我们获取 AI 自动成交 / 换脸换声 / 私有部署方案。
           </div>

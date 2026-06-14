@@ -11,7 +11,7 @@ export default function NotFound() {
       <div className="glass relative z-10 w-full max-w-md rounded-3xl p-8">
         <div className="text-gradient text-6xl font-black tracking-tighter">404</div>
         <div className="mt-2 text-lg font-bold tracking-tight text-white">
-          华灵科技 <span className="text-gradient">HuaLing Tech</span>
+          无界科技 <span className="text-gradient">BOUNDLESS</span>
         </div>
         <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed text-slate-400">
           找不到这个页面，它可能已被移动或不存在。
