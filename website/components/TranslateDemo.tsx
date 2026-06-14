@@ -43,13 +43,8 @@ export default function TranslateDemo() {
   const [res, setRes] = useState<Tr[]>([]);
   const [err, setErr] = useState(false);
 
-  async function run(q: string) {
-    const v = q.trim();
-    if (!v || busy) return;
-    setBusy(true);
-    setErr(false);
-    setRes([]);
-    track("translate_demo", { len: v.length });
+  // 单次调用：成功返回译文数组，任何失败（含 nginx 502 HTML 体导致的 json 解析异常）返回 null。
+  async function callOnce(v: string): Promise<Tr[] | null> {
     try {
       const r = await fetch("/api/translate", {
         method: "POST",
@@ -57,13 +52,29 @@ export default function TranslateDemo() {
         body: JSON.stringify({ text: v }),
       });
       const d = await r.json();
-      if (d?.ok && Array.isArray(d.translations) && d.translations.length) setRes(d.translations);
-      else setErr(true);
+      if (d?.ok && Array.isArray(d.translations) && d.translations.length) return d.translations as Tr[];
+      return null;
     } catch {
-      setErr(true);
-    } finally {
-      setBusy(false);
+      return null;
     }
+  }
+
+  async function run(q: string) {
+    const v = q.trim();
+    if (!v || busy) return;
+    setBusy(true);
+    setErr(false);
+    setRes([]);
+    track("translate_demo", { len: v.length });
+    // 自动重试一次：消除 pm2 重启后冷启动 / 上游超时导致的首玩 502 毛刺。
+    let out = await callOnce(v);
+    if (!out) {
+      await new Promise((r) => setTimeout(r, 700));
+      out = await callOnce(v);
+    }
+    if (out) setRes(out);
+    else setErr(true);
+    setBusy(false);
   }
 
   return (
