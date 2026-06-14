@@ -197,6 +197,97 @@ def test_unified_inbox_send_supports_four_platforms():
         assert resp.json()["ok"] is True
 
 
+class _LangStore:
+    """最小 inbox_store stub：仅实现 outbound 自动翻译需要的 get_conversation。"""
+
+    def __init__(self, language="zh"):
+        self._language = language
+
+    def get_conversation(self, cid):
+        return {"id": cid, "language": self._language}
+
+    def record_agent_send(self, *a, **k):
+        return None
+
+
+def test_send_without_target_lang_sends_original():
+    c = _client()
+    resp = c.post(
+        "/api/unified-inbox/send",
+        json={"platform": "line", "account_id": "line-a", "chat_key": "line-room", "text": "hello"},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["sent_text"] == "hello"
+    assert data["original_text"] == "hello"
+    assert data["translation"] is None
+
+
+def test_send_with_target_lang_translates_before_send():
+    c = _client()
+    resp = c.post(
+        "/api/unified-inbox/send",
+        json={
+            "platform": "line", "account_id": "line-a", "chat_key": "line-room",
+            "text": "hello friend", "target_lang": "zh",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["original_text"] == "hello friend"
+    assert data["sent_text"] == "你好朋友"  # FakeAI 译文
+    assert data["translation"]["ok"] is True
+
+
+def test_send_skip_translate_sends_original():
+    c = _client()
+    resp = c.post(
+        "/api/unified-inbox/send",
+        json={
+            "platform": "line", "account_id": "line-a", "chat_key": "line-room",
+            "text": "hello", "target_lang": "zh", "skip_translate": True,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["sent_text"] == "hello"
+    assert data["translation"] is None
+
+
+def test_send_target_auto_infers_conversation_language():
+    c = _client()
+    c.app.state.inbox_store = _LangStore(language="zh")
+    resp = c.post(
+        "/api/unified-inbox/send",
+        json={
+            "platform": "line", "account_id": "line-a", "chat_key": "line-room",
+            "text": "hello friend", "target_lang": "auto",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["sent_text"] == "你好朋友"
+    assert data["translation"]["target_lang"] == "zh"
+
+
+def test_send_target_auto_unknown_language_sends_original():
+    c = _client()
+    c.app.state.inbox_store = _LangStore(language="unknown")
+    resp = c.post(
+        "/api/unified-inbox/send",
+        json={
+            "platform": "line", "account_id": "line-a", "chat_key": "line-room",
+            "text": "hello", "target_lang": "auto",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["sent_text"] == "hello"
+    assert data["translation"] is None
+
+
 def test_unified_inbox_template_contains_translation_controls():
     """重构后三栏布局：翻译控件、AI草稿、会话列表等核心功能校验。"""
     path = Path(__file__).resolve().parent.parent / "src" / "web" / "templates" / "unified_inbox.html"

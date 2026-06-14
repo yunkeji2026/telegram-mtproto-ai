@@ -159,6 +159,24 @@ def _inbox_store(request: Request):
     return getattr(request.app.state, "inbox_store", None)
 
 
+def _resolve_conv_language(request: Request, platform: str, account_id: str, chat_key: str) -> str:
+    """读取会话持久化的客户语言（conversations.language）用于 outbound 自动翻译。
+
+    供 send 的 ``target_lang: "auto"`` 推断目标语言。读不到 / 为 'unknown' 时返回 ""，
+    调用方据此回落「不翻译，按原文发送」，保证 best-effort 永不阻断发送。
+    """
+    ibx = _inbox_store(request)
+    if ibx is None:
+        return ""
+    try:
+        conv = ibx.get_conversation(_conv_id(platform, account_id, chat_key))
+        lang = str((conv or {}).get("language") or "").strip()
+        return "" if lang in ("", "unknown") else lang
+    except Exception:
+        logger.debug("[send] 读取会话语言失败（忽略）", exc_info=True)
+        return ""
+
+
 def _ecommerce_tools(request: Request):
     """电商工具服务（Phase D）。未启用时返回 None（feature-flag ecommerce_tools.enabled）。"""
     return getattr(request.app.state, "ecommerce_tools", None)
@@ -5597,8 +5615,17 @@ def register_unified_inbox_routes(
 
     @app.post("/api/unified-inbox/send")
     async def api_unified_inbox_send(request: Request, _=Depends(page_auth)):
-        """向指定平台/账号发送消息。
-        Body: { platform, account_id, chat_key, text }
+        """向指定平台/账号发送消息（可选发送前自动翻译成客户语言）。
+
+        Body: { platform, account_id, chat_key, text,
+                target_lang?, source_lang?, skip_translate?, copilot_meta? }
+
+        发送前翻译（outbound 闭环）：
+        - 不传 target_lang（或 skip_translate=true）→ 行为不变，按原文发送（向后兼容）。
+        - target_lang="auto" → 用会话持久化的客户语言（conversations.language）。
+        - target_lang 具体语种 → 译成该语言。
+        翻译失败 / 目标==源 / 目标为空 → best-effort 回落原文，绝不阻断发送。
+        返回额外字段 original_text / sent_text / translation 供前端展示「发出的实际译文」。
         """
         body = await request.json()
         platform = str(body.get("platform") or "").lower()
@@ -5607,6 +5634,30 @@ def register_unified_inbox_routes(
         text = str(body.get("text") or "").strip()
         if not chat_key or not text:
             raise HTTPException(400, "chat_key 和 text 不能为空")
+
+        # —— 发送前翻译（outbound 闭环）：默认关闭，显式 target_lang / "auto" 才触发 ——
+        original_text = text
+        translation_info: Optional[Dict[str, Any]] = None
+        target_lang = str(body.get("target_lang") or "").strip()
+        source_lang = str(body.get("source_lang") or "").strip()
+        skip_translate = bool(body.get("skip_translate"))
+        if target_lang.lower() == "auto":
+            target_lang = _resolve_conv_language(request, platform, account_id, chat_key)
+        if (
+            target_lang
+            and not skip_translate
+            and target_lang.lower() not in ("unknown", source_lang.lower())
+        ):
+            try:
+                svc = _get_translation_service(request)
+                res = await svc.translate(
+                    text, target_lang=target_lang, source_lang=source_lang, style="chat",
+                )
+                if res.ok and (res.translated_text or "").strip():
+                    text = res.translated_text.strip()
+                    translation_info = res.to_dict()
+            except Exception:
+                logger.debug("[send] 发送前翻译失败，按原文发送", exc_info=True)
 
         _send_agent = _session_agent(request)
 
@@ -5642,10 +5693,17 @@ def register_unified_inbox_routes(
         copilot_meta = body.get("copilot_meta")
         if copilot_meta and cid:
             ibx = _inbox_store(request)
+            # copilot 采纳记录用坐席原始输入（而非译文），保持「坐席选了哪条草稿」语义。
             _record_copilot_adopt_from_send(
-                ibx, cid, _send_agent["agent_id"], text, copilot_meta,
+                ibx, cid, _send_agent["agent_id"], original_text, copilot_meta,
             )
-        return {"ok": True, "result": result}
+        return {
+            "ok": True,
+            "result": result,
+            "original_text": original_text,
+            "sent_text": text,
+            "translation": translation_info,
+        }
 
     @app.post("/api/unified-inbox/send-media")
     async def api_unified_inbox_send_media(request: Request, _=Depends(page_auth)):
