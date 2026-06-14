@@ -228,8 +228,15 @@ class LineRpaRunner:
     def _cfg_get(self, key: str, default: Any = None) -> Any:
         return self._cfg.get(key, default)
 
-    def _resolve_line_reply_lang(self, chat_key: str) -> str:
-        """P7-D: 语言优先级链 — 全局 force > 对话锁定 > default_reply_lang。"""
+    def _resolve_line_reply_lang(self, chat_key: str, peer_text: str = "") -> str:
+        """语言优先级链：全局 force > 对话锁定 forced_lang > 客户消息语言检测 > default_reply_lang。
+
+        既往链条止于 default_reply_lang（默认 'zh'），缺「消息级检测」一层，导致运营未显式
+        force/lock 时，外语客户也被回中文。本次补上「跟随客户语言」——用统一检测器
+        ``translation_service.detect_language`` 检测当前（或最近）客户消息语言。
+        force / per-chat forced_lang 仍优先，保留运营强制开关；检测不出（短句/emoji）时
+        才回落 default_reply_lang。
+        """
         # 1. Global force (operator override via config)
         _force = str(self._cfg.get("force_reply_lang") or "").strip().lower()
         if _force and _force not in ("auto", "detect", ""):
@@ -243,7 +250,23 @@ class LineRpaRunner:
                     return _fl
             except Exception:
                 pass
-        # 3. Config default
+        # 3. 跟随客户语言：检测当前消息；为空则回落 state_store 里最近一条客户消息
+        _txt = (peer_text or "").strip()
+        if not _txt and self._state_store is not None:
+            try:
+                _cs = self._state_store.get_chat_state(chat_key) or {}
+                _txt = str(_cs.get("last_peer_text") or "").strip()
+            except Exception:
+                _txt = ""
+        if _txt:
+            try:
+                from src.ai.translation_service import detect_language as _detect
+                _d = str(_detect(_txt) or "").strip().lower()
+                if _d and _d != "unknown":
+                    return _d
+            except Exception:
+                logger.debug("[line] 客户语言检测失败，回落 default_reply_lang", exc_info=True)
+        # 4. Config default
         return str(self._cfg_get("default_reply_lang", "zh") or "zh").lower()
 
     # ── P6-C: LINE TTS approval-only ─────────────────────────────────────
@@ -666,7 +689,7 @@ class LineRpaRunner:
             "request_id": req_id,
             "channel": "line_rpa",
             "platform": "line_rpa",  # S5: CrossPlatformIdentity
-            "reply_lang": self._resolve_line_reply_lang(chat_key),
+            "reply_lang": self._resolve_line_reply_lang(chat_key, peer_text),
             "line_rpa_chat_key": chat_key,
             "line_rpa_style_hint": line_style,
             "account_persona_id": self._account_persona_id(),  # private path
@@ -1090,7 +1113,7 @@ class LineRpaRunner:
                 "request_id": req_id,
                 "channel": "line_rpa",
                 "platform": "line_rpa",  # S5: CrossPlatformIdentity
-                "reply_lang": self._resolve_line_reply_lang(chat_key),
+                "reply_lang": self._resolve_line_reply_lang(chat_key, vpeer),
                 "line_rpa_chat_key": chat_key,
                 "line_rpa_style_hint": str(self._cfg_get("reply_style_hint") or ""),
                 "is_group": False,
@@ -1282,7 +1305,7 @@ class LineRpaRunner:
             "request_id": req_id,
             "channel": "line_rpa",
             "platform": "line_rpa",  # S5: CrossPlatformIdentity
-            "reply_lang": self._resolve_line_reply_lang(chat_key),
+            "reply_lang": self._resolve_line_reply_lang(chat_key, peer_text),
             "line_rpa_chat_key": chat_key,
             "line_rpa_style_hint": verdict.style_hint,
             "is_group": verdict.is_group,
