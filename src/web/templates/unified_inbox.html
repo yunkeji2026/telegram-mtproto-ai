@@ -869,6 +869,7 @@
                       <span>发送</span><span class="arrow">→</span>
                       <select id="xlate-out" class="xlate-sel" onchange="_onXlateChange()" title="发送前把你的消息翻译成">
                         <option value="">不译</option>
+                        <option value="auto">自动（客户语言）</option>
                         <option value="zh">中文</option>
                         <option value="en">英语</option>
                         <option value="th">泰语</option>
@@ -2815,14 +2816,20 @@ async function sendMsg(){
   const btn=document.getElementById('send-btn');
 
   // P55: 发送前翻译 —— 第一次点击译出预览，第二次点击确认发送
-  if(_xlateOut){
+  // 'auto'：解析为会话客户语言（list 持久化的 conversations.language），无效则回落不译。
+  let _outLang=_xlateOut;
+  if(_outLang==='auto'){
+    const _cl=String((selectedChat&&selectedChat.language)||(selectedChat&&selectedChat.last_message&&selectedChat.last_message.language)||'').trim();
+    _outLang=(_cl&&_cl!=='unknown')?_cl:'';
+  }
+  if(_outLang){
     if(_outXlPending && _outXlPending.orig===text){
       text=_outXlPending.translated;   // 确认：发送译文
       _resetOutPreview();
     } else {
       btn.disabled=true; btn.textContent='翻译中…';
       try{
-        const res=await _doTranslate(text,_xlateOut);
+        const res=await _doTranslate(text,_outLang);
         btn.disabled=false;
         if(res){
           _outXlPending={orig:text, translated:res.text};
@@ -3768,7 +3775,7 @@ document.addEventListener('click',function(e){
 function _updateXlStatus(){
   var el=document.getElementById('rt-xl-status'); if(!el) return;
   var i=document.getElementById('xlate-in'), o=document.getElementById('xlate-out');
-  var L={zh:'中',en:'英',th:'泰',vi:'越',id:'印',ja:'日',ko:'韩',ru:'俄',es:'西',pt:'葡'};
+  var L={zh:'中',en:'英',th:'泰',vi:'越',id:'印',ja:'日',ko:'韩',ru:'俄',es:'西',pt:'葡',auto:'自动'};
   var inv=(i&&i.value)?('收→'+(L[i.value]||i.value)):'';
   var outv=(o&&o.value)?('发→'+(L[o.value]||o.value)):'';
   var s=[inv,outv].filter(Boolean).join(' · ');
@@ -3818,7 +3825,11 @@ const _engineMatrixCache=new Map();   // target_lang -> matrix（引擎配置启
 async function _updateEngineHint(){
   const el=document.getElementById('xlate-engine');
   if(!el) return;
-  const target=_xlateOut||_xlateIn||'';
+  let target=_xlateOut||_xlateIn||'';
+  if(target==='auto'){
+    const _cl=String((selectedChat&&selectedChat.language)||'').trim();
+    target=(_cl&&_cl!=='unknown')?_cl:'';
+  }
   if(!target){ el.innerHTML='<span class="dot"></span>AI引擎'; el.title=''; return; }
   try{
     let m=_engineMatrixCache.get(target);

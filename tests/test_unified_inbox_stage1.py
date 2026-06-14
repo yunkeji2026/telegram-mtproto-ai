@@ -297,6 +297,9 @@ def test_unified_inbox_template_contains_translation_controls():
     assert "xlate-out" in html
     assert "xlateMsg" in html
     assert "翻译" in html
+    # A：发送翻译目标支持「自动（客户语言）」——前端解析为会话 language 后复用两击预览
+    assert 'value="auto"' in html
+    assert "自动（客户语言）" in html
     # 平台导航（三栏布局核心）
     assert "nav-rail" in html
     assert "conv-items" in html
