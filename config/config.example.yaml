@@ -1044,6 +1044,14 @@ workspace:
     source_langs: []          # 空=所有非 target 语言；例 [en, ja, ko] 仅译英日韩
     max_per_thread: 8         # 每次打开会话最多翻译条数
     max_chars: 400            # 超长消息跳过
+  # 自动派单（建议接管）：为未认领会话推荐在线坐席，仅产出「建议」不自动锁定，
+  # 不改变现有手动 claim 流程（默认关；开启后会话列表 chats[].suggested_agent 出现建议）
+  auto_assign:
+    enabled: false
+    strategy: least_loaded    # least_loaded=挑当前认领数最少的在线坐席（round_robin 预留）
+    online_only: true         # true=仅 status=online 坐席；false=online/busy 皆可（仍排除 offline）
+    max_claims_per_agent: 0   # 0=不限；>0 时负载已达上限的坐席不再被建议
+    match_language: false     # 预留：按会话语言匹配坐席技能（当前无技能数据源，暂不生效）
   # 快捷回复模板（坐席输入栏「快捷回复」面板；与 messenger approval_templates、templates.yaml 合并展示）
   quick_templates:
     - label: 问候

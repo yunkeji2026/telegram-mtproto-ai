@@ -2052,6 +2052,27 @@ def register_unified_inbox_routes(
                     c["archived"] = meta2.get("archived", False)
         except Exception:
             logger.debug("会话列表 tags 加载失败（已忽略）", exc_info=True)
+        # 自动派单（建议接管）：对未认领会话附 suggested_agent（默认关；只读附字段，
+        # 不改变 claim 状态，对现有手动认领零破坏）。
+        try:
+            from src.workspace.assignment import AssignmentService
+            _asvc = AssignmentService.from_config(
+                (config_manager.config if config_manager is not None else {}) or {}
+            )
+            if _asvc.enabled and chats:
+                from src.workspace.agent_coordinator import AgentCoordinator
+                _coord = AgentCoordinator.from_request(request, config_manager)
+                _sugg = _asvc.suggest_for_chats(
+                    chats=chats,
+                    presence=_coord.list_presence(),
+                    claims=_coord.list_claims(),
+                )
+                for c in chats:
+                    s = _sugg.get(str(c.get("conversation_id") or ""))
+                    if s:
+                        c["suggested_agent"] = s
+        except Exception:
+            logger.debug("会话列表自动派单建议失败（已忽略）", exc_info=True)
         return {
             "ok": True,
             "ts": time.time(),

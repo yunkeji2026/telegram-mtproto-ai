@@ -315,6 +315,58 @@ def test_unified_inbox_template_contains_translation_controls():
     assert "openDrawer" in html
 
 
+def _client_with_auto_assign():
+    """启用 auto_assign 的 chats API 客户端，预置一个在线坐席（内存 coordinator）。"""
+    from src.workspace.agent_coordinator import AgentCoordinator
+
+    class _CM:
+        config = {"workspace": {"auto_assign": {"enabled": True}}}
+
+    app = FastAPI()
+
+    def page_auth(request: Request):
+        return None
+
+    def api_auth(request: Request):
+        return True
+
+    register_unified_inbox_routes(
+        app,
+        page_auth=page_auth,
+        api_auth=api_auth,
+        templates=_Templates(),
+        config_manager=_CM(),
+    )
+    app.state.line_rpa_services = [LineSvc()]
+    app.state.whatsapp_rpa_services = []
+    app.state.messenger_rpa_service = None
+    app.state.telegram_client = None
+    app.state.ai_client = FakeAI()
+    coord = AgentCoordinator(store=None)
+    coord.set_presence("alice", display_name="Alice", status="online")
+    app.state.agent_coordinator = coord
+    return TestClient(app)
+
+
+def test_chats_attach_suggested_agent_when_auto_assign_enabled():
+    c = _client_with_auto_assign()
+    resp = c.get("/api/unified-inbox/chats")
+    assert resp.status_code == 200, resp.text
+    chats = resp.json()["chats"]
+    assert chats, "应至少有一个 LINE 会话"
+    sugg = [ch.get("suggested_agent") for ch in chats if ch.get("suggested_agent")]
+    assert sugg, "启用 auto_assign 后未认领会话应附 suggested_agent"
+    assert sugg[0]["agent_id"] == "alice"
+
+
+def test_chats_no_suggested_agent_when_disabled():
+    c = _client()  # config_manager=None → auto_assign 默认关
+    resp = c.get("/api/unified-inbox/chats")
+    assert resp.status_code == 200, resp.text
+    chats = resp.json()["chats"]
+    assert all("suggested_agent" not in ch for ch in chats)
+
+
 def test_unified_inbox_template_contains_drafts_panel():
     """三栏重构：草稿面板使用内嵌 draft-panel 设计，包含审批 API 调用。"""
     path = Path(__file__).resolve().parent.parent / "src" / "web" / "templates" / "unified_inbox.html"
