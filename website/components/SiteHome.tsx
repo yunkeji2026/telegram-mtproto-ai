@@ -2,6 +2,7 @@ import Navbar from "@/components/Navbar";
 import SectionNav from "@/components/SectionNav";
 import Hero from "@/components/Hero";
 import TrustBar from "@/components/TrustBar";
+import ProductMatrix from "@/components/ProductMatrix";
 import Personas from "@/components/Personas";
 import Compare from "@/components/Compare";
 import AutoChat from "@/components/AutoChat";
@@ -27,6 +28,7 @@ export default function SiteHome() {
       <SectionNav />
       <Hero />
       <TrustBar />
+      <ProductMatrix />
       <Personas />
       <Compare />
       <AutoChat />

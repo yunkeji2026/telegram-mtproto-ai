@@ -388,7 +388,7 @@ const zh: Dict = {
     cta: "立即咨询",
   },
   hero: {
-    badge: "AI 自动成交聊天系统 · 多语种拟人翻译 · USDT 结算",
+    badge: "无界科技 · AI 自动成交聊天 · 多语种拟人翻译 · USDT 结算",
     title: "AI 自动成交",
     titleAccent: "聊天系统",
     rotating: ["AI 全自动接客成交", "多语种拟人翻译", "人设语音聊天", "多平台号聚合", "实时换脸换声", "无禁区私有 AI"],
@@ -405,13 +405,13 @@ const zh: Dict = {
     ],
   },
   solutionsSection: {
-    title: "两大产品线 · 六项能力",
-    subtitle: "华影 LiveAvatar 负责「看得见的分身」，灵犀 SoulSync 负责「听得懂的对话」，由华灵 Engine 私有部署底座支撑——同一套技术栈按需组合。",
+    title: "五条产品线 · 一个无界底座",
+    subtitle: "幻颜换脸、幻声克隆、幻影直播分身、通译实时互译、智聊自动成交——五条产品线共享无界底座，私有部署、数据不出网，按需单独选用或组合。",
   },
   solutions: [
     {
       id: "voice",
-      tag: "华影 · 声音",
+      tag: "幻声 VoiceX",
       title: "声音克隆 VoiceClone",
       desc: "几十秒样本即可克隆任意音色，支持多语种 TTS 与实时变声。",
       features: ["秒级音色克隆", "多语种合成", "实时变声 API", "可接入语音客服"],
@@ -424,7 +424,7 @@ const zh: Dict = {
     },
     {
       id: "faceswap",
-      tag: "华影 · 形象",
+      tag: "幻颜 FaceX",
       title: "AI 换脸 FaceSwap",
       desc: "图片 / 视频换脸与数字人形象定制；实时换脸见上方旗舰服务（部署到你自己的设备）。",
       features: ["图片视频换脸", "实时换脸部署", "数字人形象", "高清无痕"],
@@ -437,7 +437,7 @@ const zh: Dict = {
     },
     {
       id: "translate",
-      tag: "灵犀 · 对话",
+      tag: "通译 LingoX",
       title: "聊天聚合 + 实时翻译",
       desc: "TG / LINE / WhatsApp / Messenger 多号聚合，收发即时双向翻译，AI 自动回复 + 人工接管。",
       features: ["多平台多号聚合", "双向实时翻译", "AI 自动回复", "人工接管 + 知识库"],
@@ -451,7 +451,7 @@ const zh: Dict = {
     },
     {
       id: "private-ai",
-      tag: "华灵 Engine",
+      tag: "无界底座",
       title: "无审查 · 无禁区 AI 私有部署",
       desc: "私有化部署无内容审查、无话题禁区的大模型，不上传公网、数据不出本地，可定制微调。",
       features: ["无内容审查", "无话题禁区", "私有部署不出网", "模型微调定制"],
@@ -464,7 +464,7 @@ const zh: Dict = {
     },
     {
       id: "digital-human",
-      tag: "华影 · 数字人",
+      tag: "幻影 LiveX",
       title: "数字人 / 虚拟主播",
       desc: "声音克隆 + 换脸 + 口型同步，一键克隆你自己的数字分身。",
       features: ["克隆形象 + 声音", "口型同步", "虚拟主播直播", "口播视频生成"],
@@ -475,7 +475,7 @@ const zh: Dict = {
     },
     {
       id: "video-dubbing",
-      tag: "华影 · 视频",
+      tag: "幻影 LiveX",
       title: "AI 视频翻译配音",
       desc: "上传视频自动翻译、克隆原声配音、对口型，出海短视频刚需。",
       features: ["自动字幕翻译", "原声克隆配音", "口型对齐", "批量处理"],
@@ -678,8 +678,8 @@ const zh: Dict = {
     errGeneric: "换脸失败，请换一张更清晰的正脸照片重试。",
   },
   about: {
-    title: "为什么选择华灵科技",
-    subtitle: "华影看得见、灵犀听得懂——技术自研、出海友好、私有可控。",
+    title: "为什么选择无界科技",
+    subtitle: "形象看得见、对话听得懂——技术自研、出海友好、私有可控。",
     points: [
       { title: "技术自研", desc: "声音 / 形象 / 对话 / 部署四大引擎自研可控，非简单套壳。" },
       { title: "出海友好", desc: "全程 USDT 结算，无需绑卡，跨境团队即买即用。" },
@@ -791,7 +791,7 @@ const zh: Dict = {
     badge: "为什么选我们",
     title: "我们 vs 市面方案",
     subtitle: "同样是聚合聊天，差距在“会不会成交”。",
-    cols: ["华灵 AI", "普通聚合翻译软件", "纯人工团队"],
+    cols: ["无界 AI", "普通聚合翻译软件", "纯人工团队"],
     rows: [
       { label: "翻译质量", us: "AI 拟人 · 地道口语/俚语", them: "谷歌式直译 · 生硬易错", manual: "看人，水平不一" },
       { label: "自动成交", us: "AI 主动促单 · 转化客户", them: "不支持", manual: "靠经验 · 易漏单" },
@@ -1002,7 +1002,7 @@ const zh: Dict = {
     cta: "联系 Telegram 客服",
   },
   footer: {
-    rights: "华灵科技 HuaLing Tech · 保留所有权利",
+    rights: "无界科技 BOUNDLESS · 保留所有权利",
     disclaimerTitle: "授权与免责声明",
     disclaimer:
       "本平台服务仅供合法用途。用户须确保对所使用的肖像、声音及内容拥有完整授权，严禁用于诈骗、伪造、侵权或任何违法活动。使用即表示同意自行承担相应法律责任。",
@@ -1023,7 +1023,7 @@ const en: Dict = {
     cta: "Get Started",
   },
   hero: {
-    badge: "AI Auto-Closing Chat System · human-like multi-language · USDT",
+    badge: "BOUNDLESS · AI Auto-Closing Chat · human-like multi-language · USDT",
     title: "AI Auto-Closing",
     titleAccent: "Chat System",
     rotating: ["AI closes deals 24/7", "Human-like translation", "Persona voice chat", "Multi-platform inbox", "Real-time face & voice swap", "No-limit private AI"],
@@ -1040,13 +1040,13 @@ const en: Dict = {
     ],
   },
   solutionsSection: {
-    title: "Two Product Lines · Six Capabilities",
-    subtitle: "HuaYing LiveAvatar powers \"the face you can see\"; LingXi SoulSync powers \"the conversation it understands\" — all on the HuaLing Engine private-deployment base, composable on demand.",
+    title: "Five Product Lines · One Boundless Core",
+    subtitle: "FaceX swaps faces, VoiceX clones voices, LiveX powers live digital twins, LingoX translates in real time, ChatX closes deals — five lines on one BOUNDLESS core, privately deployed and composable on demand.",
   },
   solutions: [
     {
       id: "voice",
-      tag: "LiveAvatar · Voice",
+      tag: "VoiceX",
       title: "Voice Cloning",
       desc: "Clone any voice from a short sample, with multilingual TTS and real-time voice changing.",
       features: ["Instant voice cloning", "Multilingual TTS", "Real-time voice API", "Voice agent ready"],
@@ -1059,7 +1059,7 @@ const en: Dict = {
     },
     {
       id: "faceswap",
-      tag: "LiveAvatar · Face",
+      tag: "FaceX",
       title: "AI Face Swap",
       desc: "Image / video face swap and digital avatars; real-time swap is the flagship above (deployed on your own device).",
       features: ["Image & video swap", "Live swap deploy", "Digital avatars", "HD seamless"],
@@ -1072,7 +1072,7 @@ const en: Dict = {
     },
     {
       id: "translate",
-      tag: "SoulSync · Chat",
+      tag: "LingoX",
       title: "Chat Aggregation + Live Translation",
       desc: "Unify TG / LINE / WhatsApp / Messenger accounts with instant two-way translation, AI auto-reply and human handoff.",
       features: ["Multi-platform inbox", "Two-way translation", "AI auto-reply", "Handoff + knowledge base"],
@@ -1086,7 +1086,7 @@ const en: Dict = {
     },
     {
       id: "private-ai",
-      tag: "HuaLing Engine",
+      tag: "BOUNDLESS Engine",
       title: "Uncensored · No-limit AI Deploy",
       desc: "Privately deploy uncensored, unrestricted LLMs. Off the public internet, data stays local, fine-tuning available.",
       features: ["No content filtering", "No topic limits", "Off the public net", "Custom fine-tuning"],
@@ -1099,7 +1099,7 @@ const en: Dict = {
     },
     {
       id: "digital-human",
-      tag: "LiveAvatar · Twin",
+      tag: "LiveX",
       title: "Digital Human / Virtual Streamer",
       desc: "Voice cloning + face swap + lip sync to spin up your own digital twin in one click.",
       features: ["Cloned face + voice", "Lip sync", "Live streaming avatar", "Talking-head videos"],
@@ -1110,7 +1110,7 @@ const en: Dict = {
     },
     {
       id: "video-dubbing",
-      tag: "LiveAvatar · Video",
+      tag: "LiveX",
       title: "AI Video Translation & Dubbing",
       desc: "Auto-translate videos, dub with cloned original voice, and align lip movements — built for global short video.",
       features: ["Auto subtitle translation", "Cloned voice dubbing", "Lip alignment", "Batch processing"],
@@ -1313,8 +1313,8 @@ const en: Dict = {
     errGeneric: "Swap failed. Please try a clearer front-facing photo.",
   },
   about: {
-    title: "Why HuaLing Tech",
-    subtitle: "HuaYing you can see, LingXi you can feel — self-built tech, global-friendly, privately controllable.",
+    title: "Why BOUNDLESS",
+    subtitle: "Faces you can see, conversations you can feel — self-built tech, global-friendly, privately controllable.",
     points: [
       { title: "Self-built tech", desc: "Voice / face / chat / deployment engines built in-house, not thin wrappers." },
       { title: "Global-friendly", desc: "Settle fully in USDT — no cards, instant onboarding for cross-border teams." },
@@ -1426,7 +1426,7 @@ const en: Dict = {
     badge: "Why us",
     title: "Us vs the rest",
     subtitle: "Same chat aggregation — the difference is whether it closes.",
-    cols: ["HuaLing AI", "Ordinary aggregator", "Pure human team"],
+    cols: ["BOUNDLESS AI", "Ordinary aggregator", "Pure human team"],
     rows: [
       { label: "Translation quality", us: "Human-like · slang & idioms", them: "Google-style literal · stiff", manual: "Varies by person" },
       { label: "Auto-closing", us: "AI pushes the sale & converts", them: "Not supported", manual: "Skill-based · misses leads" },
@@ -1637,7 +1637,7 @@ const en: Dict = {
     cta: "Contact on Telegram",
   },
   footer: {
-    rights: "HuaLing Tech · All rights reserved",
+    rights: "BOUNDLESS · All rights reserved",
     disclaimerTitle: "Authorization & Disclaimer",
     disclaimer:
       "Services are for lawful use only. Users must hold full rights to any likeness, voice or content used, and must not use the services for fraud, forgery, infringement or any illegal activity. Use implies acceptance of full legal responsibility.",
