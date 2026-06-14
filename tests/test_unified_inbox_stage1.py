@@ -382,3 +382,13 @@ def test_unified_inbox_template_contains_drafts_panel():
     # 内嵌面板校验
     assert "loadDrafts" in html
     assert "draft-card-mini" in html or "draft-panel-items" in html
+
+
+def test_unified_inbox_template_contains_assign_suggestion():
+    """自动派单：会话列表「建议你接管」徽章 + 判定逻辑入模板。"""
+    path = Path(__file__).resolve().parent.parent / "src" / "web" / "templates" / "unified_inbox.html"
+    html = path.read_text(encoding="utf-8")
+    assert "_convSuggestMine" in html          # 判定函数
+    assert "conv-suggest-chip" in html          # 徽章样式类
+    assert "建议你接管" in html                 # 徽章文案
+    assert "suggested_agent" in html            # 读取后端字段
