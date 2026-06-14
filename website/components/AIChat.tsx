@@ -18,7 +18,7 @@ const COPY = {
   zh: {
     title: "AI 在线客服",
     sub: "由 AI 自动成交聊天系统驱动",
-    greet: "你好 👋 我是华灵科技 AI 客服。华影 LiveAvatar（换脸/换声/数字人）、灵犀 SoulSync（AI 自动成交/拟人翻译/AI 伴侣）、私有部署、价格——都可以问我。\n（支持任意语言：用你客户的母语问我试试 🌍）",
+    greet: "你好 👋 我是无界科技 BOUNDLESS 的 AI 客服。换脸、克隆声音、直播换脸换声、实时换语言、AI 自动成交、私有部署、价格——都可以问我。\n（支持任意语言：用你客户的母语问我试试 🌍）",
     placeholder: "任意语言输入你的问题…",
     suggestions: ["AI 自动成交怎么收费？", "实时换脸支持视频通话吗？", "¿Cuánto cuesta el chat con IA?"],
     leave: "留个联系方式，让客服联系我",
@@ -34,7 +34,7 @@ const COPY = {
   en: {
     title: "AI Live Support",
     sub: "Powered by our AI auto-closing chat",
-    greet: "Hi 👋 I'm HuaLing Tech's AI agent. Ask me about HuaYing LiveAvatar (face/voice swap, digital human), LingXi SoulSync (AI auto-closing, human-like translation, AI companion), private deployment, pricing.\n(Any language works — try your customer's native tongue 🌍)",
+    greet: "Hi 👋 I'm BOUNDLESS's AI agent. Ask me about face swap, voice cloning, live face/voice swap, live translation, AI auto-closing, private deployment, pricing.\n(Any language works — try your customer's native tongue 🌍)",
     placeholder: "Type in any language…",
     suggestions: ["How is AI closing priced?", "Does live swap work on video calls?", "¿Cuánto cuesta el chat con IA?"],
     leave: "Leave my contact for support",

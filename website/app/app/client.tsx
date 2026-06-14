@@ -158,8 +158,8 @@ export default function MiniAppClient({ initialView }: { initialView: View }) {
     // 此处不再重复打 miniapp_cta，避免同一次点击双重计数。)
     const cfg: Record<View, { text: string; kind: "scroll" | "contact"; action: () => void }> = {
       home: { text: zh ? "🤖 问 AI 客服" : "🤖 Ask the AI", kind: "scroll", action: () => document.getElementById("ai-chat")?.scrollIntoView({ behavior: "smooth" }) },
-      liveavatar: { text: zh ? "🎬 预约换脸演示" : "🎬 Book a demo", kind: "contact", action: () => goContact(zh ? "华影 · 实时换脸咨询" : "LiveAvatar demo") },
-      soulsync: { text: zh ? "💬 免费试用 AI 成交" : "💬 Try AI closing", kind: "contact", action: () => goContact(zh ? "灵犀 · AI 成交试用" : "SoulSync trial") },
+      liveavatar: { text: zh ? "🎬 预约换脸演示" : "🎬 Book a demo", kind: "contact", action: () => goContact(zh ? "视觉分身 · 换脸换声咨询" : "Visual / FaceX-LiveX demo") },
+      soulsync: { text: zh ? "💬 免费试用 AI 成交" : "💬 Try AI closing", kind: "contact", action: () => goContact(zh ? "智聊 · AI 成交试用" : "ChatX trial") },
       pricing: { text: zh ? "🎁 领专属折扣码" : "🎁 Claim discount code", kind: "scroll", action: () => document.getElementById("unlock")?.scrollIntoView({ behavior: "smooth" }) },
       engage: { text: zh ? "🤝 联系定制顾问" : "🤝 Talk to advisor", kind: "contact", action: () => goContact(zh ? "合作方式咨询" : "Engagement inquiry") },
     };
@@ -225,8 +225,8 @@ export default function MiniAppClient({ initialView }: { initialView: View }) {
     <main className="mx-auto min-h-screen max-w-lg bg-slate-950 px-4 pb-28 pt-4 text-slate-100">
       <header className="flex items-center justify-between">
         <div>
-          <div className="text-lg font-bold">华灵科技 HuaLing Tech</div>
-          <div className="text-[11px] text-cyan-300">{zh ? "华影 LiveAvatar × 灵犀 SoulSync · USDT 结算" : "HuaYing LiveAvatar × LingXi SoulSync · USDT"}</div>
+          <div className="text-lg font-bold">无界科技 BOUNDLESS</div>
+          <div className="text-[11px] text-cyan-300">{zh ? "让沟通，无界 · USDT 结算" : "Communication, Boundless · USDT"}</div>
         </div>
         <button onClick={() => setLang(zh ? "en" : "zh")} className="rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-300">
           {zh ? "EN" : "中文"}

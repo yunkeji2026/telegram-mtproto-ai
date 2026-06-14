@@ -14,6 +14,7 @@ import {
   matchFreeText,
 } from "./bot-knowledge";
 import { CONTACT_URL, SITE_URL, CHANNEL_URL, GROUP_URL, BOT_URL, MINIAPP_URL } from "./site";
+import { BRAND } from "./brand";
 import { askDeepSeek } from "./deepseek";
 import {
   appendLead,
@@ -266,8 +267,8 @@ export async function handleGroupMessage(
   if (!text.trim()) {
     const intro =
       lang === "zh"
-        ? "👋 <b>华灵科技 HuaLing Tech AI 助手</b>在这\n🎭 华影 LiveAvatar：实时换脸换声 · 数字人　💬 灵犀 SoulSync：AI 自动成交 · 拟人翻译 · AI 伴侣 · 🔐 私有部署\n\n直接 @我提问，或点下方按钮 👇"
-        : "👋 <b>HuaLing Tech AI assistant</b> here\n🎭 HuaYing LiveAvatar: live face/voice swap · digital human　💬 LingXi SoulSync: AI auto-closing · human-like translation · AI companion · 🔐 private deployment\n\n@mention me with a question, or tap below 👇";
+        ? "👋 <b>无界科技 BOUNDLESS AI 助手</b>在这\n🎭 换脸 · 🎙 克隆声音 · 🎬 直播换脸换声 · 🌐 实时换语言 · 💬 AI 自动成交 · 🔐 私有部署\n\n直接 @我提问，或点下方按钮 👇"
+        : "👋 <b>BOUNDLESS AI assistant</b> here\n🎭 face swap · 🎙 voice clone · 🎬 live face/voice swap · 🌐 live translation · 💬 AI closing · 🔐 private deploy\n\n@mention me with a question, or tap below 👇";
     await sendText(chatId, intro, links, { replyTo });
     return;
   }
@@ -407,9 +408,9 @@ export async function setupBot(opts?: { skipWebhook?: boolean }) {
   await run("setMyCommands", "setMyCommands", {
     commands: [
       { command: "start", description: "主菜单 / Main menu" },
-      { command: "services", description: "业务能力 · 华影&灵犀 / Solutions" },
+      { command: "services", description: "业务能力 · 五大产品线 / Solutions" },
       { command: "pricing", description: "价格 / Pricing" },
-      { command: "autochat", description: "灵犀 · AI 自动成交聊天 / LingXi AI closing" },
+      { command: "autochat", description: "智聊 · AI 自动成交聊天 / ChatX AI closing" },
       { command: "deploy", description: "合作方式 · 私有部署 / Engagement" },
       { command: "faq", description: "常见问题 / FAQ" },
       { command: "contact", description: "联系下单 / Contact" },
@@ -417,34 +418,40 @@ export async function setupBot(opts?: { skipWebhook?: boolean }) {
   });
 
   // Bot 身份（BotFather 级别）：名称 / 简介 / 关于。中文为默认，并设置英文 (en) 版本。
-  await run("setMyName(zh)", "setMyName", { name: "华灵科技 HuaLing Tech" });
-  await run("setMyName(en)", "setMyName", { name: "HuaLing Tech", language_code: "en" });
+  await run("setMyName(zh)", "setMyName", { name: BRAND.company.full });
+  await run("setMyName(en)", "setMyName", { name: BRAND.company.en, language_code: "en" });
 
   await run("setMyShortDescription(zh)", "setMyShortDescription", {
     short_description:
-      "华影 LiveAvatar 换脸换声·数字人 ｜ 灵犀 SoulSync AI成交·拟人翻译·AI伴侣。私有部署 · USDT 结算。",
+      "换脸·克隆声音·直播换脸换声·实时换语言·AI自动成交。私有部署 · USDT 结算。",
   });
   // 注意：setMyShortDescription 上限 120 字符，超出会报 BOT_SHARETEXT_INVALID（英文版需精简）。
   await run("setMyShortDescription(en)", "setMyShortDescription", {
     short_description:
-      "HuaYing: face/voice swap, digital humans. LingXi: AI closing, translation, companion. Private deploy · USDT.",
+      "Face swap, voice clone, live face/voice swap, live translation, AI auto-closing. Private deploy · USDT.",
     language_code: "en",
   });
 
   await run("setMyDescription(zh)", "setMyDescription", {
     description:
-      "华灵科技 HuaLing Tech —— 灵动智能，华丽呈现。\n\n" +
-      "🎭 华影 LiveAvatar：实时换脸换声 · 数字人 · 视频翻译配音\n" +
-      "💬 灵犀 SoulSync：AI 自动成交聊天 · 多语种拟人翻译 · AI 伴侣\n" +
-      "🔐 华灵 Engine：无审查私有部署，数据不出网\n\n" +
+      `${BRAND.company.full} —— ${BRAND.company.tagline.zh}。\n\n` +
+      "🎭 幻颜 FaceX：AI 换脸\n" +
+      "🎙 幻声 VoiceX：AI 声音克隆\n" +
+      "🎬 幻影 LiveX：实时直播换脸换声\n" +
+      "🌐 通译 LingoX：实时换语言互译\n" +
+      "💬 智聊 ChatX：AI 自动成交聊天\n" +
+      "🔐 无界底座：无审查私有部署，数据不出网\n\n" +
       "全程 USDT 结算。点 /start 打开菜单，或直接发消息问我。",
   });
   await run("setMyDescription(en)", "setMyDescription", {
     description:
-      "HuaLing Tech — Intelligence, gracefully delivered.\n\n" +
-      "🎭 HuaYing LiveAvatar: real-time face & voice swap · digital humans · video dubbing\n" +
-      "💬 LingXi SoulSync: AI auto-closing chat · human-like translation · AI companion\n" +
-      "🔐 HuaLing Engine: uncensored private deployment, data stays off-net\n\n" +
+      `${BRAND.company.full} — ${BRAND.company.tagline.en}\n\n` +
+      "🎭 FaceX: AI face swap\n" +
+      "🎙 VoiceX: AI voice cloning\n" +
+      "🎬 LiveX: real-time live face & voice swap\n" +
+      "🌐 LingoX: real-time language translation\n" +
+      "💬 ChatX: AI auto-closing chat\n" +
+      "🔐 BOUNDLESS Engine: uncensored private deployment, data stays off-net\n\n" +
       "Settled in USDT. Tap /start for the menu, or just message me.",
     language_code: "en",
   });
@@ -452,7 +459,7 @@ export async function setupBot(opts?: { skipWebhook?: boolean }) {
   await run("setChatMenuButton", "setChatMenuButton", {
     menu_button: {
       type: "web_app",
-      text: "华灵科技 · 小程序",
+      text: "无界科技 · 小程序",
       web_app: { url: WEBAPP_SECTIONS.home },
     },
   });

@@ -1,5 +1,6 @@
 import { content } from "./content";
 import { SITE_URL } from "./site";
+import { BRAND, productLineItems, productLinesText } from "./brand";
 
 export type BotLang = "zh" | "en";
 
@@ -18,27 +19,26 @@ function t(lang: BotLang) {
 }
 
 export function buildWelcome(lang: BotLang) {
+  const lines = productLinesText(lang, { html: true });
   return lang === "zh"
-    ? `👋 欢迎来到 <b>华灵科技 HuaLing Tech</b> —— 一站式 AI 技术服务
+    ? `👋 欢迎来到 <b>${BRAND.company.full}</b> —— ${BRAND.company.tagline.zh}
 
 🤖 <b>AI 智能客服</b>：直接发消息问我，7×24 秒回（价格 / 方案 / 对接都能答）
 👤 <b>人工客服</b>：需要真人就点下方「人工客服」
 
-两大产品线：
-· 🎭 <b>华影 LiveAvatar</b>：实时换脸换声 · 数字人 · 视频翻译配音（直播 / 连麦 / 视频通话）
-· 💬 <b>灵犀 SoulSync</b>：AI 自动成交聊天 · 多语种拟人翻译 · AI 伴侣
-· 🔐 底座：无审查私有部署，数据不出网
+五条产品线：
+${lines}
+· 🔐 <b>无界底座</b>：无审查私有部署，数据不出网
 
 👇 点下方功能菜单，或直接发消息开聊`
-    : `👋 Welcome to <b>HuaLing Tech</b> — one-stop AI technical services
+    : `👋 Welcome to <b>${BRAND.company.full}</b> — ${BRAND.company.tagline.en}
 
 🤖 <b>AI assistant</b>: just message me, 24/7 instant replies (pricing / solutions / onboarding)
 👤 <b>Human support</b>: tap "Human support" below anytime
 
-Two product lines:
-· 🎭 <b>HuaYing · LiveAvatar</b>: real-time face & voice swap · digital human · video dubbing (live / video call)
-· 💬 <b>LingXi · SoulSync</b>: AI auto-closing chat · human-like translation · AI companion
-· 🔐 Base: uncensored private deployment, data stays off-net
+Five product lines:
+${lines}
+· 🔐 <b>BOUNDLESS Engine</b>: uncensored private deployment, data stays off-net
 
 👇 Tap the menu below, or just send me a message`;
 }
@@ -180,10 +180,13 @@ export function buildKnowledgeContext(lang: BotLang): string {
   const c = t(lang);
   const parts: string[] = [];
 
+  const lineSummary = productLineItems(lang)
+    .map((it) => `${it.name}（${it.desc}）`)
+    .join(lang === "zh" ? "、" : "; ");
   parts.push(
     lang === "zh"
-      ? "公司：华灵科技 HuaLing Tech。两大产品线：华影 LiveAvatar（数字形象/换脸/直播）、灵犀 SoulSync（AI自动成交聊天/实时翻译/AI伴侣）。主推产品：灵犀 SoulSync 驱动的 AI 自动成交聊天系统。结算：全程 USDT。"
-      : "Company: HuaLing Tech. Two product lines: HuaYing LiveAvatar (digital avatar/face swap/live) and LingXi SoulSync (AI auto-closing chat/live translation/AI companion). Flagship: AI Auto-Closing Chat System powered by LingXi SoulSync. Settlement: USDT only."
+      ? `公司：${BRAND.company.full}（${BRAND.company.tagline.zh}）。五条产品线：${lineSummary}。主推产品：智聊 ChatX 驱动的 AI 自动成交聊天系统。结算：全程 USDT。`
+      : `Company: ${BRAND.company.full} (${BRAND.company.tagline.en}). Five product lines: ${lineSummary}. Flagship: AI Auto-Closing Chat System powered by ChatX. Settlement: USDT only.`
   );
 
   parts.push(
@@ -224,8 +227,11 @@ export function buildKnowledgeContext(lang: BotLang): string {
 
 export function systemPrompt(lang: BotLang): string {
   const kb = buildKnowledgeContext(lang);
+  const names = productLineItems(lang)
+    .map((it) => it.name)
+    .join(lang === "zh" ? "、" : ", ");
   return lang === "zh"
-    ? `你是「华灵科技 HuaLing Tech」的专业 AI 售前客服（产品线：华影 LiveAvatar、灵犀 SoulSync）。只能根据下面提供的资料回答，不要编造价格、参数或承诺收益。
+    ? `你是「${BRAND.company.full}」的专业 AI 售前客服（五条产品线：${names}）。只能根据下面提供的资料回答，不要编造价格、参数或承诺收益。
 
 要求：
 - 【语言镜像】务必用「用户最新一条消息所用的语言」作答：用户用西班牙语/葡萄牙语/阿拉伯语/泰语/英语等，就用同种语言地道、口语化地回复（像本地母语销售，不要翻译腔）。用户用中文则用简体中文。
@@ -239,7 +245,7 @@ export function systemPrompt(lang: BotLang): string {
 
 资料：
 ${kb}`
-    : `You are the professional AI pre-sales agent for "HuaLing Tech" (product lines: HuaYing LiveAvatar, LingXi SoulSync). Answer ONLY from the material below. Never invent prices, specs or guarantee returns.
+    : `You are the professional AI pre-sales agent for "${BRAND.company.full}" (five product lines: ${names}). Answer ONLY from the material below. Never invent prices, specs or guarantee returns.
 
 Rules:
 - [Language mirroring] ALWAYS reply in the SAME language as the user's latest message: if they write Spanish/Portuguese/Arabic/Thai/etc., reply fluently and idiomatically in that exact language (like a native salesperson, no translationese). If Chinese, reply in Simplified Chinese.
@@ -260,8 +266,8 @@ ${kb}`;
 const APP = `${SITE_URL}/app`;
 export const WEBAPP_SECTIONS = {
   home: APP, // 概览（左下角菜单键默认入口）
-  liveavatar: `${APP}?view=liveavatar`, // 华影 · 实时换脸换声
-  soulsync: `${APP}?view=soulsync`, // 灵犀 · AI 成交聊天
+  liveavatar: `${APP}?view=liveavatar`, // 视觉系 · 幻颜/幻声/幻影（换脸·克隆声音·直播换脸换声）
+  soulsync: `${APP}?view=soulsync`, // 沟通系 · 通译/智聊（实时换语言·AI 自动成交）
   pricing: `${APP}?view=pricing`, // 价格 · 套餐对比 + 领码
   engage: `${APP}?view=engage`, // 合作 · 三种模式
   contact: `${APP}?view=home`, // 留资/客服（home 视图含留资表单）

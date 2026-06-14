@@ -114,8 +114,8 @@ interface Stats {
 // Mini App 视图 id → 中文标签（用于把埋点里的 view 键名展示成人话）。
 const MINIAPP_VIEW_LABELS: Record<string, string> = {
   home: "概览",
-  liveavatar: "华影 · 换脸",
-  soulsync: "灵犀 · 成交",
+  liveavatar: "视觉分身",
+  soulsync: "智聊沟通",
   pricing: "价格",
   engage: "合作",
 };
@@ -1357,7 +1357,7 @@ export default function AdminPage() {
           <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-7">
             <div className="mb-1 flex items-center gap-2">
               <ShieldCheck className="h-6 w-6 text-cyan-400" />
-              <span className="text-lg font-bold text-white">华灵科技 · 控制台</span>
+              <span className="text-lg font-bold text-white">无界科技 · 控制台</span>
             </div>
             <p className="mb-5 text-xs text-slate-500">输入管理口令进入运营后台</p>
             <div className="relative">
@@ -1387,7 +1387,7 @@ export default function AdminPage() {
             <div className="mx-auto max-w-6xl px-5">
               <div className="flex h-14 items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
-                  <span className="text-base font-bold text-white">华灵科技 · 控制台</span>
+                  <span className="text-base font-bold text-white">无界科技 · 控制台</span>
                   {health && (
                     <span
                       className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${

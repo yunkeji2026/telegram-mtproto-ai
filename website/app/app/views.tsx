@@ -4,10 +4,16 @@ import { useRef, useState } from "react";
 import type { Dict, Solution } from "@/lib/content";
 import { CHANNEL_URL, GROUP_URL, CONTACT_URL } from "@/lib/site";
 import { track } from "@/lib/track";
-import type { View } from "./routing";
+import { BRAND, PRODUCT_ORDER, productLineItems } from "@/lib/brand";
+import { PRODUCT_VIEW, type View } from "./routing";
 
-const HUAYING_IDS = ["faceswap", "voice", "digital-human", "video-dubbing"];
-const LINGXI_IDS = ["translate", "private-ai"];
+// 视觉系（liveavatar view）= 幻颜/幻声/幻影；沟通系（soulsync view）= 通译/智聊。
+// 各产品对应的 content.solutions SKU id 收口在 brand.ts::products[].skuIds，这里按 view 派生，
+// 不再散落硬编码 id 列表（改产品↔SKU 映射只动 brand.ts 一处）。
+const skuByView = (v: View): string[] =>
+  PRODUCT_ORDER.filter((k) => PRODUCT_VIEW[k] === v).flatMap((k) => [...BRAND.products[k].skuIds]);
+const VISUAL_IDS = skuByView("liveavatar");
+const CHAT_IDS = [...skuByView("soulsync"), "private-ai"]; // 通译/智聊 + 无界底座(private-ai)
 
 /* ───────────────────────── shared bits ───────────────────────── */
 
@@ -111,7 +117,7 @@ function BeforeAfter({ before, after, t }: { before: string; after: string; t: D
   );
 }
 
-/* ───────────────────────── Chat theater (灵犀) ───────────────────────── */
+/* ───────────────────────── Chat theater (智聊 ChatX) ───────────────────────── */
 
 function ChatTheater({ t }: { t: Dict }) {
   const d = t.autochat.demo;
@@ -154,14 +160,14 @@ export function HomeView({ t, zh, onGo }: { t: Dict; zh: boolean; onGo: (v: View
     <div>
       {/* hero */}
       <div className="rounded-2xl border border-cyan-700/30 bg-gradient-to-br from-cyan-500/10 via-slate-900 to-violet-500/10 p-4">
-        <div className="text-[11px] font-medium text-cyan-300">{zh ? "灵动智能 · 华丽呈现" : "Intelligence, gracefully delivered"}</div>
+        <div className="text-[11px] font-medium text-cyan-300">{zh ? "让沟通，无界" : "Communication, Boundless"}</div>
         <h1 className="mt-1 text-xl font-extrabold leading-snug text-white">
-          {zh ? "AI 自动成交 · 实时换脸换声" : "AI auto-closing · real-time face/voice swap"}
+          {zh ? "换脸换声 · 实时换语言 · AI 自动成交" : "Face/voice swap · live translation · AI closing"}
         </h1>
         <p className="mt-1.5 text-xs leading-relaxed text-slate-300">
           {zh
-            ? "华影 LiveAvatar 看得见的分身，灵犀 SoulSync 听得懂的对话 —— 私有部署、数据不出网、USDT 结算。"
-            : "HuaYing LiveAvatar you can see, LingXi SoulSync that understands — private, off-net, USDT."}
+            ? "无界科技 BOUNDLESS —— 用 AI 打破容貌、声音、语言、成交的边界。私有部署、数据不出网、USDT 结算。"
+            : "BOUNDLESS — break the barriers of face, voice, language and sales with AI. Private, off-net, USDT."}
         </p>
         <div className="mt-3 grid grid-cols-4 gap-1.5">
           {t.hero.stats.map((s) => (
@@ -173,20 +179,29 @@ export function HomeView({ t, zh, onGo }: { t: Dict; zh: boolean; onGo: (v: View
         </div>
       </div>
 
-      {/* two product lines */}
-      <SectionTitle icon="🧭" title={zh ? "两大产品线" : "Two product lines"} />
+      {/* five product lines */}
+      <SectionTitle icon="🧭" title={zh ? "五大产品" : "Five products"} sub={zh ? "点产品进入对应演示" : "Tap a product for its demo"} />
       <div className="grid grid-cols-2 gap-2">
-        <button onClick={() => onGo("liveavatar")} className="rounded-2xl border border-slate-800 bg-slate-900/60 p-3 text-left active:scale-[0.98] transition">
-          <div className="text-2xl">🎭</div>
-          <div className="mt-1 text-sm font-bold text-white">华影 LiveAvatar</div>
-          <div className="mt-0.5 text-[11px] leading-snug text-slate-400">{zh ? "实时换脸换声 · 数字人 · 视频翻译配音" : "Live swap · digital human · dubbing"}</div>
-          <div className="mt-2 text-[11px] font-medium text-cyan-300">{zh ? "查看 →" : "Explore →"}</div>
-        </button>
-        <button onClick={() => onGo("soulsync")} className="rounded-2xl border border-slate-800 bg-slate-900/60 p-3 text-left active:scale-[0.98] transition">
-          <div className="text-2xl">💬</div>
-          <div className="mt-1 text-sm font-bold text-white">灵犀 SoulSync</div>
-          <div className="mt-0.5 text-[11px] leading-snug text-slate-400">{zh ? "AI 自动成交 · 拟人翻译 · AI 伴侣" : "AI closing · human-like translation"}</div>
-          <div className="mt-2 text-[11px] font-medium text-violet-300">{zh ? "查看 →" : "Explore →"}</div>
+        {productLineItems(zh ? "zh" : "en").map((p) => (
+          <button
+            key={p.key}
+            onClick={() => onGo(PRODUCT_VIEW[p.key])}
+            className="rounded-2xl border border-slate-800 bg-slate-900/60 p-3 text-left active:scale-[0.98] transition"
+          >
+            <div className="text-2xl">{p.emoji}</div>
+            <div className="mt-1 text-sm font-bold text-white">{p.name}</div>
+            <div className="mt-0.5 text-[11px] leading-snug text-slate-400">{p.desc}</div>
+            <div className="mt-2 text-[11px] font-medium text-cyan-300">{zh ? "查看 →" : "Explore →"}</div>
+          </button>
+        ))}
+        <button
+          onClick={() => onGo("engage")}
+          className="rounded-2xl border border-cyan-500/30 bg-gradient-to-br from-cyan-500/10 to-violet-500/10 p-3 text-left active:scale-[0.98] transition"
+        >
+          <div className="text-2xl">🔐</div>
+          <div className="mt-1 text-sm font-bold text-white">{zh ? "无界底座" : "BOUNDLESS Engine"}</div>
+          <div className="mt-0.5 text-[11px] leading-snug text-slate-400">{zh ? "无审查私有部署 · 数据不出网" : "Uncensored private deploy · off-net"}</div>
+          <div className="mt-2 text-[11px] font-medium text-violet-300">{zh ? "了解合作 →" : "Engage →"}</div>
         </button>
       </div>
 
@@ -202,10 +217,10 @@ export function HomeView({ t, zh, onGo }: { t: Dict; zh: boolean; onGo: (v: View
 }
 
 export function LiveAvatarView({ t, zh, onContact }: { t: Dict; zh: boolean; onContact: (interest: string) => void }) {
-  const sols = t.solutions.filter((s) => HUAYING_IDS.includes(s.id));
+  const sols = t.solutions.filter((s) => VISUAL_IDS.includes(s.id));
   return (
     <div>
-      <SectionTitle icon="🎭" title={zh ? "华影 LiveAvatar · 看得见的分身" : "HuaYing LiveAvatar"} sub={t.realtime.subtitle} />
+      <SectionTitle icon="🎭" title={zh ? "视觉分身 · 幻颜 / 幻声 / 幻影" : "Visual · FaceX / VoiceX / LiveX"} sub={t.realtime.subtitle} />
       <BeforeAfter before="/showcase/live-before.png" after="/showcase/live-after.png" t={t} />
 
       <SectionTitle icon="⚡" title={zh ? "为什么是真·实时" : "Why true real-time"} />
@@ -218,7 +233,7 @@ export function LiveAvatarView({ t, zh, onContact }: { t: Dict; zh: boolean; onC
         ))}
       </div>
 
-      <SectionTitle icon="📦" title={zh ? "六项形象能力" : "Avatar capabilities"} />
+      <SectionTitle icon="📦" title={zh ? "形象与声音能力" : "Face & voice capabilities"} />
       <div className="space-y-2">
         {sols.map((s) => (
           <SolutionCard key={s.id} s={s} />
@@ -244,16 +259,16 @@ export function LiveAvatarView({ t, zh, onContact }: { t: Dict; zh: boolean; onC
       </div>
       <p className="mt-2 text-[11px] text-amber-300/80">⏳ {t.realtime.availability}</p>
 
-      <CtaButton label={zh ? "🎬 预约换脸演示 / 咨询" : "🎬 Book a swap demo"} onClick={() => onContact(zh ? "华影 · 实时换脸咨询" : "LiveAvatar demo")} />
+      <CtaButton label={zh ? "🎬 预约换脸演示 / 咨询" : "🎬 Book a swap demo"} onClick={() => onContact(zh ? "视觉分身 · 换脸换声咨询" : "Visual / FaceX-LiveX demo")} />
     </div>
   );
 }
 
 export function SoulSyncView({ t, zh, onContact }: { t: Dict; zh: boolean; onContact: (interest: string) => void }) {
-  const sols = t.solutions.filter((s) => LINGXI_IDS.includes(s.id));
+  const sols = t.solutions.filter((s) => CHAT_IDS.includes(s.id));
   return (
     <div>
-      <SectionTitle icon="💬" title={zh ? "灵犀 SoulSync · AI 自动成交" : "LingXi SoulSync · AI closing"} sub={t.autochat.subtitle} />
+      <SectionTitle icon="💬" title={zh ? "智能沟通 · 通译 / 智聊" : "Chat · LingoX / ChatX"} sub={t.autochat.subtitle} />
       <ChatTheater t={t} />
 
       <SectionTitle icon="✨" title={zh ? "四大能力" : "Four capabilities"} />
@@ -297,7 +312,7 @@ export function SoulSyncView({ t, zh, onContact }: { t: Dict; zh: boolean; onCon
         ))}
       </div>
 
-      <CtaButton label={zh ? "💬 免费试用 AI 成交" : "💬 Try AI closing free"} onClick={() => onContact(zh ? "灵犀 · AI 成交试用" : "SoulSync trial")} />
+      <CtaButton label={zh ? "💬 免费试用 AI 成交" : "💬 Try AI closing free"} onClick={() => onContact(zh ? "智聊 · AI 成交试用" : "ChatX trial")} />
     </div>
   );
 }
@@ -401,7 +416,7 @@ export function PricingView({
       </div>
 
       {/* all products */}
-      <SectionTitle icon="📦" title={zh ? "六大产品挂牌价" : "All products"} sub={t.pricingSection.note} />
+      <SectionTitle icon="📦" title={zh ? "全部能力挂牌价" : "All capabilities"} sub={t.pricingSection.note} />
       <div className="space-y-2">
         {t.solutions.map((s) => (
           <SolutionCard key={s.id} s={s} />

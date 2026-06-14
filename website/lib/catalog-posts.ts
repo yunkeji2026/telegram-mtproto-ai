@@ -69,14 +69,14 @@ export function buildOverviewPost(lang: "zh" | "en" = "zh"): { caption: string; 
   const index = posts.map((p) => `· ${EMOJI[p.id] ?? "📦"} ${esc(p.title)}`).join("\n");
   const caption =
     lang === "zh"
-      ? `✨ <b>华灵科技 HuaLing Tech · 一站式 AI 技术服务</b>\n\n` +
-        `从声音、形象到对话与私有部署，同一套技术栈按需组合。\n\n` +
-        `<b>📦 六大产品</b>\n${index}\n\n` +
+      ? `✨ <b>无界科技 BOUNDLESS · 一站式 AI 技术服务</b>\n\n` +
+        `从容貌、声音到语言、对话与私有部署，同一套技术栈按需组合。\n\n` +
+        `<b>📦 核心能力</b>\n${index}\n\n` +
         `全程 USDT 结算 · 数据私有不出网 · 可私有定制\n\n` +
         `👇 点下方打开官网 / 小程序 / 联系客服`
-      : `✨ <b>HuaLing Tech · One-stop AI technical services</b>\n\n` +
-        `From voice, face to chat & private deployment — one stack, mix as you need.\n\n` +
-        `<b>📦 Six products</b>\n${index}\n\n` +
+      : `✨ <b>BOUNDLESS · One-stop AI technical services</b>\n\n` +
+        `From face, voice to language, chat & private deployment — one stack, mix as you need.\n\n` +
+        `<b>📦 Core capabilities</b>\n${index}\n\n` +
         `USDT only · data stays private · fully customizable\n\n` +
         `👇 Open the site / Mini App / contact us below`;
   return {

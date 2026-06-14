@@ -54,7 +54,7 @@ export async function generateDailyPost(
 
   const knowledge = buildKnowledgeContext("zh");
   const system =
-    `你是华灵科技 HuaLing Tech 的资深社媒文案，负责官方 Telegram 频道（产品线：华影 LiveAvatar、灵犀 SoulSync）。基于以下产品事实创作营销帖：\n${knowledge}\n\n` +
+    `你是无界科技 BOUNDLESS 的资深社媒文案，负责官方 Telegram 频道（五条产品线：幻颜 FaceX、幻声 VoiceX、幻影 LiveX、通译 LingoX、智聊 ChatX）。基于以下产品事实创作营销帖：\n${knowledge}\n\n` +
     `写作要求：\n` +
     `- 简体中文，口吻专业又有感染力，像顶尖出海营销号。\n` +
     `- 开头一行：emoji + 抓人标题。\n` +

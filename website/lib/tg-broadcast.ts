@@ -165,17 +165,17 @@ export async function deleteMessage(chat: string, messageId: number): Promise<bo
 
 export const CHANNEL_BRAND = {
   channel: {
-    title: "华灵科技 HuaLing Tech · 官方频道",
+    title: "无界科技 BOUNDLESS · 官方频道",
     description:
-      "华灵科技官方频道 · 灵动智能，华丽呈现。" +
-      "🎭 华影 LiveAvatar：换脸换声/数字人/视频配音　💬 灵犀 SoulSync：AI自动成交/拟人翻译/AI伴侣　🔐 华灵 Engine 私有部署。" +
+      "无界科技官方频道 · 让沟通，无界。" +
+      "🎭换脸 🎙克隆声音 🎬直播换脸换声 🌐实时换语言 💬AI自动成交 🔐私有部署。" +
       "真实案例 · 新功能 · 限时优惠第一时间发布 · USDT 结算。官网与客服见置顶。",
   },
   group: {
-    title: "华灵科技 · 交流群",
+    title: "无界科技 · 交流群",
     description:
-      "华灵科技官方交流群 · 华影 LiveAvatar / 灵犀 SoulSync。" +
-      "提问、领试用、同行交流。@小灵 或点客服随时响应；广告与刷屏将被移除。",
+      "无界科技官方交流群 · 换脸/克隆声音/直播分身/实时换语言/AI 自动成交。" +
+      "提问、领试用、同行交流。@小界 或点客服随时响应；广告与刷屏将被移除。",
   },
 } as const;
 
@@ -226,7 +226,8 @@ async function setChatMeta(
   }
 }
 
-/** 华灵科技品牌头像（深底圆裁友好）本地路径，供频道/群 setChatPhoto 使用。 */
+/** 无界科技品牌头像（深底圆裁友好）本地路径，供频道/群 setChatPhoto 使用。
+ *  注：当前沿用过渡期资源 hualing-avatar.png，新「界」字头像在视觉重制阶段替换。 */
 function brandAvatarPath(): string {
   return path.join(process.cwd(), "public", "brand", "logos", "hualing-avatar.png");
 }
