@@ -316,6 +316,16 @@ def _suggestions(
     emotion: str,
     risk: str,
 ) -> List[ReplySuggestion]:
+    """生成给【坐席】的快速回复建议（温柔/简短/深入三版）。
+
+    设计契约（勿误改成「按 lang 本地化」）：
+      建议正文刻意使用坐席工作母语（中文），**不随 `lang` 变化**。`lang` 仅供上层把
+      草稿的 draft_lang 标注为客户语言；面向客户的语言转换发生在【发送时】——坐席选定
+      建议 → 填入输入框 → 由 outbound 翻译（``/api/unified-inbox/send`` 的
+      ``target_lang``/``"auto"`` 或前端 ``#xlate-out``）译成客户语言再发出。
+      若把建议正文直接产成外语，中文坐席将看不懂自己即将发出的内容，故此处不做本地化。
+      （另注：inbox 源自动草稿 resolve 只更新状态、不直发平台，不存在「中文直发外语客户」。）
+    """
     if risk == "high":
         return [
             ReplySuggestion("review", "人工审核", "这条内容可能涉及敏感边界，我先帮你转人工确认后再回复。", "high"),
