@@ -1654,17 +1654,6 @@ class AIClient(LoggerMixin):
         
         return ""
 
-    _LANG_PATTERNS = [
-        (r"[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]", "ar_ur"),
-        (r"[\u0900-\u097F]", "hi"),
-        (r"[\u0400-\u04FF]", "ru"),
-        (r"[\u3040-\u309F\u30A0-\u30FF]", "ja"),
-        (r"[\uAC00-\uD7AF\u1100-\u11FF]", "ko"),
-        (r"[\u0E00-\u0E7F]", "th"),
-        (r"[\u0A00-\u0A7F]", "pa"),
-        (r"[\u0980-\u09FF]", "bn"),
-    ]
-
     _LANG_NAMES = {
         "zh": "中文", "en": "English", "ar_ur": "Arabic/Urdu",
         "hi": "Hindi", "ru": "Русский", "ja": "日本語",
@@ -1674,17 +1663,6 @@ class AIClient(LoggerMixin):
         "tr": "Türkçe", "vi": "Tiếng Việt", "id": "Bahasa Indonesia",
     }
 
-    _LATIN_LANG_HINTS = {
-        "pt": ["obrigado", "pagamento", "consulta", "transferência", "reembolso", "ajuda", "saldo", "taxa"],
-        "es": ["gracias", "pago", "consulta", "transferencia", "reembolso", "ayuda", "saldo", "tasa", "monto"],
-        "fr": ["merci", "paiement", "virement", "remboursement", "aide", "solde", "taux", "montant", "frais"],
-        "de": ["danke", "zahlung", "überweisung", "rückerstattung", "hilfe", "guthaben", "kurs", "betrag", "gebühr"],
-        "it": ["grazie", "pagamento", "trasferimento", "rimborso", "aiuto", "saldo", "tasso", "importo", "tariffa"],
-        "tr": ["teşekkür", "ödeme", "transfer", "iade", "yardım", "bakiye", "oran", "tutar", "ücret", "sipariş"],
-        "vi": ["cảm ơn", "thanh toán", "chuyển khoản", "hoàn tiền", "hỗ trợ", "số dư", "tỷ giá", "đơn hàng"],
-        "id": ["terima kasih", "pembayaran", "pemindahan", "bayaran", "bantuan", "saldo", "pesanan"],
-    }
-
     _SHORT_EN_WORDS = frozenset({
         "ok", "hi", "no", "yes", "hey", "bye", "thx", "ty", "gm", "gn",
         "good", "fine", "done", "help", "how", "why", "what", "who",
@@ -1692,38 +1670,47 @@ class AIClient(LoggerMixin):
     })
 
     def _detect_message_language(self, text: str) -> str:
-        """粗判用户消息主语言，支持中英日韩阿拉伯乌尔都印地俄语等15+种语言。"""
+        """粗判用户消息主语言（回复镜像用）。确定性核心委托全局检测器，保留本类语义。
+
+        统一收敛（沿用 P33 模式）：脚本块 + 拉丁关键词的确定性核心委托全局
+        translation_service.detect_language（单一规则来源，白嫖泰铢加固 + km/he/el/tl
+        新语种 + 可注入统计层）。本方法只保留「回复镜像」特有语义：
+          - 空 / 仅 @mention -> 'zh'（回复默认主力中文）
+          - 阿拉伯/乌尔都 -> 'ar_ur'（本类下游 prompt 契约，全局返回 'ar'）
+          - 旁遮普 / 孟加拉：全局未覆盖（会落 zh），委托前本地拦截以保留既有能力
+          - 含糊拉丁兜底 -> 'en'（英文客户回英文，区别于 inbox 业务默认 zh），并保留
+            langdetect 末端精修，使能力不依赖全局统计层是否配置。
+        """
         if not text or not isinstance(text, str):
             return "zh"
-        t = text.strip()
-        if not t:
-            return "zh"
-        t = re.sub(r"@\w+", "", t).strip()
+        t = re.sub(r"@\w+", "", text.strip()).strip()
         if not t:
             return "zh"
 
+        # 旁遮普(古木基文)/孟加拉文：全局检测器未含 -> 会被其 cjk>=latin 短路成 zh，
+        # 故委托前先本地拦截，保留本类原有的 pa/bn 识别。
+        if re.search(r"[\u0A00-\u0A7F]", t):
+            return "pa"
+        if re.search(r"[\u0980-\u09FF]", t):
+            return "bn"
+
+        # 确定性核心：委托全局单一检测器（脚本块 + 越南语 + CJK + 拉丁关键词）。
+        from src.ai.translation_service import detect_language as _global_detect
+
+        lang = _global_detect(t)
+        if lang not in ("en", "unknown"):
+            return "ar_ur" if lang == "ar" else lang
+
+        # —— 含糊拉丁 / 弱结果：本类回复镜像兜底 ——
         cjk = len(re.findall(r"[\u4e00-\u9fff]", t))
         letters = len(re.findall(r"[A-Za-z]", t))
 
-        # \u2605 \u975e CJK \u7684 script \u4f18\u5148\uff08hiragana/katakana/hangul/arabic/...\uff09
-        # \u542b\u6c49\u5b57 + \u5047\u540d\u65f6\uff08\u5982\u300c\u4eca\u65e5\u306f\u826f\u3044\u5929\u6c17\u300d\uff09\u4e5f\u5e94\u5224 ja\uff0c\u56e0\u4e3a\u5047\u540d\u662f\u65e5\u6587\u4e13\u5c5e
-        for pattern, lang in self._LANG_PATTERNS:
-            if re.search(pattern, t):
-                return lang
-
-        # \u542b\u6c49\u5b57\u4f46\u65e0\u4efb\u4f55 script \u2192 \u5224 zh\uff08\u4e2d\u6587\uff09
-        if cjk > 0:
-            if letters > 0 and letters > cjk * 3:
-                pass
-            else:
-                return "zh"
+        # 中文为主、夹少量英文词（letters 未显著超过 cjk）-> 判 zh（保留原比例规则）
+        if cjk > 0 and not (letters > cjk * 3):
+            return "zh"
 
         if letters >= 3:
-            t_lower = t.lower()
-            for lang, hints in self._LATIN_LANG_HINTS.items():
-                if any(h in t_lower for h in hints):
-                    return lang
-            # langdetect fallback：对较长 Latin 文字提升多语言识别精度（含置信度过滤）
+            # langdetect 末端精修：不依赖全局统计层配置，保留本类既有多语言识别能力。
             if len(t) >= 8:
                 try:
                     from langdetect import detect_langs as _ld_detect_langs  # type: ignore
