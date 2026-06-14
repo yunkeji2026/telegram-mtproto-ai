@@ -607,6 +607,15 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         if not user_store.can_access_page(role, page_key):
             raise HTTPException(status_code=403, detail="无权访问此页面")
 
+    # 暴露鉴权闭包到 app.state，供 main.py 在 create_app 之后挂载的子路由
+    # （drafts / contacts / ecommerce）复用同一鉴权 choke point。
+    # 历史缺陷：这些子路由的 _drafts_api_auth/_contacts_api_auth 依赖 state.require_role，
+    # 但该属性从未被挂载 → hasattr 恒为 False → 外层鉴权空操作（坐席端点无鉴权）。
+    # 此处补齐挂载，使子路由统一走 _api_auth（含 agent 白名单与登录校验），
+    # 主管专属端点仍由各路由内部 _is_supervisor 守卫。
+    app.state.api_auth = _api_auth
+    app.state.require_role = _require_role
+
     _PATH_TO_PAGE = {
         "/": "dash", "/templates": "tpl", "/templates/update": "tpl",
         "/strategies": "strategies", "/strategy-analytics": "strategies",
