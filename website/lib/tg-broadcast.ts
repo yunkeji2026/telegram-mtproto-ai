@@ -227,9 +227,9 @@ async function setChatMeta(
 }
 
 /** 无界科技品牌头像（深底圆裁友好）本地路径，供频道/群 setChatPhoto 使用。
- *  注：当前沿用过渡期资源 hualing-avatar.png，新「界」字头像在视觉重制阶段替换。 */
+ *  由 scripts/build-boundless-marks.ps1 生成 boundless-avatar.png（深底渐变 + ∞ 破框主形）。 */
 function brandAvatarPath(): string {
-  return path.join(process.cwd(), "public", "brand", "logos", "hualing-avatar.png");
+  return path.join(process.cwd(), "public", "brand", "logos", "boundless-avatar.png");
 }
 
 /** Set channel & group display name + description (+ avatar, + pinned overview).

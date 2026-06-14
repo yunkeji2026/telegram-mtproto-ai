@@ -8,7 +8,7 @@ export const contentType = "image/png";
 // Load the bundled brand mark (256px) at build time and inline it as a data URL.
 // Edge-safe: fetch(new URL(..., import.meta.url)) resolves the traced asset, no network.
 const markPromise = fetch(
-  new URL("../public/brand/logos/hualing-mark-256.png", import.meta.url)
+  new URL("../public/brand/logos/boundless-mark-256.png", import.meta.url)
 )
   .then((res) => res.arrayBuffer())
   .catch(() => null);
