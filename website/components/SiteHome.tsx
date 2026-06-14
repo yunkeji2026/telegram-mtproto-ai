@@ -6,6 +6,7 @@ import ProductMatrix from "@/components/ProductMatrix";
 import Personas from "@/components/Personas";
 import Compare from "@/components/Compare";
 import AutoChat from "@/components/AutoChat";
+import TranslateDemo from "@/components/TranslateDemo";
 import RealtimeSwap from "@/components/RealtimeSwap";
 import Showcase from "@/components/Showcase";
 import Cases from "@/components/Cases";
@@ -32,6 +33,7 @@ export default function SiteHome() {
       <Personas />
       <Compare />
       <AutoChat />
+      <TranslateDemo />
       <RealtimeSwap />
       <Showcase />
       <Cases />

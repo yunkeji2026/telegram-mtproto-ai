@@ -11,6 +11,7 @@ export default function SectionNav() {
     { id: "top", label: lang === "zh" ? "首页" : "Home" },
     { id: "products", label: lang === "zh" ? "产品" : "Products" },
     { id: "autochat", label: t.nav.autochat },
+    { id: "translate", label: lang === "zh" ? "实时翻译" : "Translate" },
     { id: "realtime", label: t.nav.demo },
     { id: "showcase", label: t.nav.solutions },
     { id: "cases", label: t.nav.cases },
