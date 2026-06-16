@@ -80,6 +80,7 @@ _EVENT_ALIASES: Dict[str, Dict[str, Any]] = {
     "conv_note":     {"types": {"conv_note"}, "levels": None},       # 坐席注解（@提及）
     "queue_alert":   {"types": {"queue_alert"}, "levels": None},     # P29 队列告警
     "autoreply_alert": {"types": {"autoreply_alert"}, "levels": None},  # 协议自动回复熔断/配额
+    "health_alert":  {"types": {"health_alert"}, "levels": None},    # D3 运行时健康告警
 }
 
 # ─── 速率限制 ────────────────────────────────────────────────────────────────
@@ -329,6 +330,25 @@ def _build_message(event_type: str, data: Dict[str, Any]) -> tuple[str, str]:
             f"**详情**: {data.get('detail', '')}\n"
             "[👥 前往账号管理](/workspace/unified-inbox)"
         )
+
+    elif event_type == "health_alert":
+        light = str(data.get("light") or "")
+        icon = {"red": "🔴", "yellow": "🟡"}.get(light, "🩺")
+        if data.get("recovered"):
+            title = "✅ 系统已恢复健康"
+            text = (
+                f"**状态**: 全部组件恢复正常\n"
+                "[🩺 查看健康面板](/dashboard)"
+            )
+        else:
+            probs = data.get("problems") or []
+            lines = [f"- {p.get('name','?')}：{p.get('detail','')}" for p in probs[:8]]
+            title = f"{icon} 系统健康告警（{light or '异常'}）"
+            text = (
+                f"**异常组件**: {len(probs)} 项\n"
+                + "\n".join(lines) + "\n"
+                "[🩺 查看健康面板](/dashboard)"
+            )
 
     elif event_type == "escalation":
         title = "🔔 升级告警"
