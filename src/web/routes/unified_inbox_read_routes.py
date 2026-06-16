@@ -1,0 +1,229 @@
+"""统一收件箱——主读路径路由域（巨石拆分 slice 37b）。
+
+把 ``register_unified_inbox_routes`` 巨型闭包中物理分离的主读端点外移为
+``register_read_routes(app, *, api_auth, config_manager=None)``，由主 register
+在 chats 原位置调用：
+
+- ``unified-inbox/chats``：会话列表（聚合 + contacts/SLA/tags/assignment 富集）
+- ``unified-inbox/thread``：会话线程（store 读路径 + 入站自动翻译 + 出向原文富集）
+
+端点路径/方法/响应零变化（admin_route_inventory URL 契约守卫 + slice 37b 端点契约断言）。
+
+依赖全部朝下：aggregate 读路径族 + ``_enrich_outbound_originals``（slice 37b 下沉）、
+services、sla、channel_adapters.status_via_adapters、normalizer、inbound_translate。
+收 api_auth + config_manager（assignment / 入站翻译配置）。
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+from typing import Any, Dict, List
+
+from fastapi import HTTPException, Request
+
+from src.inbox.channel_adapters import status_via_adapters
+from src.inbox.normalizer import (
+    candidate_messages_from_source,
+    conv_id,
+    message_obj,
+)
+from src.web.routes.unified_inbox_aggregate import (
+    _INBOX_ADAPTERS,
+    _chats_for_listing,
+    _collect_all_chats,
+    _enrich_outbound_originals,
+    _ingest_thread_best_effort,
+    _is_protocol_account,
+    _read_from_store_enabled,
+    _store_conv_as_chat,
+    _thread_messages_from_store,
+)
+from src.web.routes.unified_inbox_services import (
+    _contacts_store,
+    _get_telegram_client,
+    _get_translation_service,
+    _inbox_store,
+)
+from src.web.routes.unified_inbox_sla import _sla_cfg
+
+logger = logging.getLogger(__name__)
+
+
+def _enrich_chat_list(request: Request, chats: List[Dict[str, Any]], *, config_manager) -> None:
+    """Best-effort 富集会话列表：contact 关联 / SLA / tags / 自动派单建议。"""
+    try:
+        cstore = _contacts_store(request)
+        if cstore is not None and chats:
+            pairs = [(str(c.get("platform") or ""), str(c.get("chat_key") or ""))
+                     for c in chats]
+            cmap = cstore.resolve_contacts_by_external(pairs)
+            overdue = cstore.overdue_contact_ids()
+            for c in chats:
+                cid = cmap.get((str(c.get("platform") or ""),
+                                str(c.get("chat_key") or "")))
+                if cid:
+                    c["contact_id"] = cid
+                    c["follow_up_overdue"] = cid in overdue
+    except Exception:
+        logger.debug("会话列表 contact 关联失败（已忽略）", exc_info=True)
+
+    try:
+        ibx = _inbox_store(request)
+        if ibx is not None and chats:
+            sla = _sla_cfg(request)
+            cids = [str(c.get("conversation_id") or "") for c in chats]
+            dirs = ibx.last_message_dirs([x for x in cids if x])
+            now = time.time()
+            for c in chats:
+                info = dirs.get(str(c.get("conversation_id") or ""))
+                if info and info.get("direction") == "in":
+                    wait = max(0, int(now - (info.get("ts") or now)))
+                    c["unanswered_sec"] = wait
+                    c["sla_breach"] = wait >= sla["warn"]
+                    c["sla_level"] = ("crit" if wait >= sla["crit"]
+                                      else "warn" if wait >= sla["warn"] else "")
+                else:
+                    c["unanswered_sec"] = 0
+                    c["sla_breach"] = False
+                    c["sla_level"] = ""
+    except Exception:
+        logger.debug("会话列表 SLA 统计失败（已忽略）", exc_info=True)
+
+    try:
+        ibx2 = _inbox_store(request)
+        if ibx2 is not None and chats:
+            cids2 = [str(c.get("conversation_id") or "") for c in chats if c.get("conversation_id")]
+            tags_map = ibx2.list_conv_tags_map(cids2)
+            for c in chats:
+                cid2 = str(c.get("conversation_id") or "")
+                meta2 = tags_map.get(cid2, {})
+                c["conv_tags"] = meta2.get("tags", [])
+                c["archived"] = meta2.get("archived", False)
+    except Exception:
+        logger.debug("会话列表 tags 加载失败（已忽略）", exc_info=True)
+
+    try:
+        from src.workspace.assignment import AssignmentService
+        asvc = AssignmentService.from_config(
+            (config_manager.config if config_manager is not None else {}) or {}
+        )
+        if asvc.enabled and chats:
+            from src.workspace.agent_coordinator import AgentCoordinator
+            coord = AgentCoordinator.from_request(request, config_manager)
+            sugg = asvc.suggest_for_chats(
+                chats=chats,
+                presence=coord.list_presence(),
+                claims=coord.list_claims(),
+            )
+            for c in chats:
+                s = sugg.get(str(c.get("conversation_id") or ""))
+                if s:
+                    c["suggested_agent"] = s
+    except Exception:
+        logger.debug("会话列表自动派单建议失败（已忽略）", exc_info=True)
+
+
+def register_read_routes(app, *, api_auth, config_manager=None) -> None:
+    """挂载主读路径端点（chats GET / thread GET）。"""
+
+    @app.get("/api/unified-inbox/chats")
+    async def api_unified_inbox_chats(request: Request, limit: int = 30):
+        api_auth(request)
+        limit = max(5, min(100, int(limit or 30)))
+        chats = _chats_for_listing(request, limit=limit)
+        platform_status: Dict[str, Any] = status_via_adapters(request, _INBOX_ADAPTERS)
+        _enrich_chat_list(request, chats, config_manager=config_manager)
+        return {
+            "ok": True,
+            "ts": time.time(),
+            "chats": chats,
+            "platform_status": platform_status,
+        }
+
+    @app.get("/api/unified-inbox/thread")
+    async def api_unified_inbox_thread(
+        request: Request,
+        platform: str,
+        account_id: str = "default",
+        chat_key: str = "",
+        limit: int = 50,
+    ):
+        api_auth(request)
+        platform = str(platform or "").lower()
+        account_id = str(account_id or "default")
+        chat_key = str(chat_key or "")
+        if not platform or not chat_key:
+            raise HTTPException(400, "platform 和 chat_key 不能为空")
+        limit = max(1, min(100, int(limit or 50)))
+
+        chats = _collect_all_chats(request, limit=100)
+        target = next(
+            (
+                c for c in chats
+                if c.get("platform") == platform
+                and str(c.get("account_id") or "default") == account_id
+                and str(c.get("chat_key") or "") == chat_key
+            ),
+            None,
+        )
+
+        messages: List[Dict[str, Any]] = []
+        if platform == "telegram":
+            client = _get_telegram_client(request)
+            recent = getattr(client, "_recent_messages", None) if client is not None else []
+            for idx, m in enumerate(list(recent or [])[-limit:]):
+                if str(m.get("chat_id") or "") != chat_key:
+                    continue
+                messages.append(message_obj(
+                    text=m.get("text") or "",
+                    ts=m.get("ts") or 0,
+                    direction="out" if m.get("is_self") else "in",
+                    message_id=str(m.get("id") or m.get("message_id") or idx),
+                    source=m,
+                ))
+
+        if not messages and target:
+            messages = candidate_messages_from_source(target.get("source") or {})
+        if not messages and target:
+            messages = list(target.get("messages") or [])
+
+        _ingest_thread_best_effort(request, target, messages)
+
+        cid = conv_id(platform, account_id, chat_key)
+        out_msgs = messages[-limit:]
+        if _read_from_store_enabled(request):
+            stored_msgs = _thread_messages_from_store(request, cid, limit=limit)
+            if stored_msgs:
+                out_msgs = stored_msgs
+            if target is None:
+                target = _store_conv_as_chat(request, cid)
+        elif not out_msgs and _is_protocol_account(request, platform, account_id):
+            stored_msgs = _thread_messages_from_store(request, cid, limit=limit)
+            if stored_msgs:
+                out_msgs = stored_msgs
+            if target is None:
+                target = _store_conv_as_chat(request, cid)
+
+        translate_stats: Dict[str, Any] = {"enabled": False}
+        try:
+            from src.workspace.inbound_translate import enrich_inbound_translations
+            out_msgs, translate_stats = await enrich_inbound_translations(
+                request,
+                out_msgs,
+                conversation_id=cid,
+                config_manager=config_manager,
+                translation_svc=_get_translation_service(request),
+            )
+        except Exception:
+            logger.debug("入站自动翻译失败（已忽略）", exc_info=True)
+
+        _enrich_outbound_originals(request, cid, out_msgs)
+
+        return {
+            "ok": True,
+            "chat": target,
+            "messages": out_msgs,
+            "count": len(out_msgs),
+            "auto_translate": translate_stats,
+        }
