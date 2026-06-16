@@ -81,6 +81,7 @@ _EVENT_ALIASES: Dict[str, Dict[str, Any]] = {
     "queue_alert":   {"types": {"queue_alert"}, "levels": None},     # P29 队列告警
     "autoreply_alert": {"types": {"autoreply_alert"}, "levels": None},  # 协议自动回复熔断/配额
     "health_alert":  {"types": {"health_alert"}, "levels": None},    # D3 运行时健康告警
+    "billing_alert": {"types": {"billing_alert"}, "levels": None},   # E3 计费异常（超席位/超额）
 }
 
 # ─── 速率限制 ────────────────────────────────────────────────────────────────
@@ -348,6 +349,20 @@ def _build_message(event_type: str, data: Dict[str, Any]) -> tuple[str, str]:
                 f"**异常组件**: {len(probs)} 项\n"
                 + "\n".join(lines) + "\n"
                 "[🩺 查看健康面板](/dashboard)"
+            )
+
+    elif event_type == "billing_alert":
+        anomalies = data.get("anomalies") or []
+        if data.get("recovered"):
+            title = "✅ 计费异常已解除"
+            text = "**状态**: 席位/用量已回到授权额度内\n[💸 查看运营总览](/admin/ops)"
+        else:
+            lines = [f"- {a.get('message','')}" for a in anomalies[:8]]
+            title = "💸 计费异常告警"
+            text = (
+                f"**异常**: {len(anomalies)} 项\n"
+                + "\n".join(lines) + "\n"
+                "[💸 查看运营总览](/admin/ops)"
             )
 
     elif event_type == "escalation":

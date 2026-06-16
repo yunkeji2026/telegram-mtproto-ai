@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>运营总览 · Ops Overview</title>
+  <style>
+    :root { --bg:#0f1419; --card:#1a2029; --line:#2a323d; --fg:#e6edf3; --mut:#8b98a5;
+            --green:#2ea043; --yellow:#d29922; --red:#da3633; --accent:#388bfd; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 -apple-system,Segoe UI,Roboto,"Microsoft YaHei",sans-serif; }
+    .wrap { max-width:1100px; margin:0 auto; padding:24px 16px 64px; }
+    header { display:flex; align-items:center; gap:14px; margin-bottom:18px; }
+    h1 { font-size:20px; margin:0; }
+    .light-dot { width:14px; height:14px; border-radius:50%; display:inline-block; }
+    .green{background:var(--green);} .yellow{background:var(--yellow);} .red{background:var(--red);} .unknown{background:#586069;}
+    .muted { color:var(--mut); }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:12px; margin-bottom:20px; }
+    .kpi { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+    .kpi .label { color:var(--mut); font-size:12px; }
+    .kpi .val { font-size:24px; font-weight:600; margin-top:6px; }
+    .kpi .sub { color:var(--mut); font-size:12px; margin-top:2px; }
+    section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+    section h2 { font-size:15px; margin:0 0 12px; display:flex; align-items:center; gap:8px; }
+    table { width:100%; border-collapse:collapse; }
+    th,td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); font-size:13px; }
+    th { color:var(--mut); font-weight:500; }
+    .badge { padding:2px 8px; border-radius:999px; font-size:12px; }
+    .badge.fail{background:rgba(218,54,51,.18); color:#ff7b72;}
+    .badge.warn{background:rgba(210,153,34,.18); color:#e3b341;}
+    .badge.open{background:rgba(56,139,253,.18); color:#79c0ff;}
+    .badge.acked{background:rgba(210,153,34,.18); color:#e3b341;}
+    .badge.resolved{background:rgba(46,160,67,.18); color:#56d364;}
+    button { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:5px 12px; cursor:pointer; font-size:12px; }
+    button:disabled { opacity:.5; cursor:default; }
+    .empty { color:var(--mut); padding:10px; }
+    .refresh { margin-left:auto; }
+    a { color:var(--accent); text-decoration:none; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span id="overallDot" class="light-dot unknown"></span>
+    <h1>运营总览</h1>
+    <span class="muted" id="updatedAt"></span>
+    <a class="refresh" href="/" >← 返回仪表盘</a>
+  </header>
+
+  <div class="grid" id="kpis"></div>
+
+  <section>
+    <h2>📈 趋势</h2>
+    <div style="display:flex; gap:24px; flex-wrap:wrap;">
+      <div>
+        <div class="muted" style="font-size:12px; margin-bottom:4px;">AI 发送量（按日）</div>
+        <div id="sparkAI"></div>
+      </div>
+      <div>
+        <div class="muted" style="font-size:12px; margin-bottom:4px;">处置量（按时段）</div>
+        <div id="sparkRel"></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>💸 计费异常</h2>
+    <div id="billingAnomalies"><div class="empty">加载中…</div></div>
+  </section>
+
+  <section>
+    <h2>🚨 运维事件（health_alert 闭环）</h2>
+    <div id="incidents"><div class="empty">加载中…</div></div>
+    <div style="margin-top:10px;">
+      <button id="loadMoreBtn" style="display:none;" onclick="loadMoreIncidents()">加载更多历史</button>
+    </div>
+  </section>
+</div>
+
+<script>
+var CAN_MANAGE_OPS = {{ 'true' if can_manage_ops else 'false' }};
+function fmt(v, suffix){ if(v===null||v===undefined||v==='') return '—'; return v + (suffix||''); }
+function dot(light){ var c=({green:'green',yellow:'yellow',red:'red'})[light]||'unknown'; return '<span class="light-dot '+c+'"></span>'; }
+function tsfmt(ts){ if(!ts) return '—'; try{ return new Date(ts*1000).toLocaleString(); }catch(e){ return '—'; } }
+
+// 纯 SVG 迷你折线（无依赖）。values: number[]; 末点高亮。
+function sparkline(values, opts){
+  opts = opts || {};
+  var w = opts.w || 220, h = opts.h || 44, pad = 4, color = opts.color || '#388bfd';
+  var vals = (values || []).map(function(v){ return Number(v) || 0; });
+  if(vals.length < 2){ return '<div class="muted" style="font-size:12px;">数据不足</div>'; }
+  var max = Math.max.apply(null, vals), min = Math.min.apply(null, vals);
+  var span = (max - min) || 1;
+  var n = vals.length;
+  var pts = vals.map(function(v, i){
+    var x = pad + i * (w - 2*pad) / (n - 1);
+    var y = h - pad - (v - min) / span * (h - 2*pad);
+    return x.toFixed(1) + ',' + y.toFixed(1);
+  });
+  var last = pts[pts.length-1].split(',');
+  return '<svg width="'+w+'" height="'+h+'" viewBox="0 0 '+w+' '+h+'">' +
+    '<polyline fill="none" stroke="'+color+'" stroke-width="1.8" points="'+pts.join(' ')+'"/>' +
+    '<circle cx="'+last[0]+'" cy="'+last[1]+'" r="2.6" fill="'+color+'"/>' +
+    '</svg> <span class="muted" style="font-size:12px;">峰 '+max+'</span>';
+}
+
+async function loadOverview(){
+  try{
+    const r = await fetch('/api/admin/ops-overview', {credentials:'same-origin'});
+    const d = await r.json();
+    const k = d.kpis || {};
+    document.getElementById('overallDot').className = 'light-dot ' + (({green:'green',yellow:'yellow',red:'red'})[d.overall_light]||'unknown');
+    document.getElementById('updatedAt').textContent = '更新于 ' + tsfmt(d.ts);
+
+    const cards = [
+      ['总体健康', '<span class="val">'+dot(k.health_light)+'</span>', '可靠性 '+dot(k.reliability_light)+' 评分 '+fmt(k.reliability_score)],
+      ['转化数', '<span class="val">'+fmt(k.conversions)+'</span>', '线索 '+fmt(k.leads)+' · 转化率 '+fmt(k.conversion_rate)],
+      ['AI 占比', '<span class="val">'+fmt(k.ai_share_pct,'%')+'</span>', '节省 '+fmt(k.saved_hours)+' 小时'],
+      ['节省金额', '<span class="val">'+fmt(k.saved_money)+'</span>', '自动化价值'],
+      ['本期计费', '<span class="val">'+fmt(k.billing_total)+'</span>', fmt(k.billing_currency,'')+' · 套餐 '+fmt(k.plan)],
+      ['超席位', '<span class="val">'+fmt(k.over_seats)+'</span>', '计费异常 '+fmt(k.billing_anomaly_count)+' 项'],
+      ['未关闭事件', '<span class="val">'+fmt(k.open_incidents)+'</span>', '近期告警 '+fmt(k.open_alerts)],
+    ];
+    document.getElementById('kpis').innerHTML = cards.map(function(c){
+      return '<div class="kpi"><div class="label">'+c[0]+'</div><div class="val">'+c[1]+'</div><div class="sub">'+c[2]+'</div></div>';
+    }).join('');
+
+    var sec = d.sections || {};
+    var aiTrend = (((sec.roi||{}).automation)||{}).trend || [];
+    document.getElementById('sparkAI').innerHTML = sparkline(aiTrend.map(function(p){ return p.ai; }), {color:'#2ea043'});
+    var relTrend = ((sec.reliability||{}).trend) || [];
+    document.getElementById('sparkRel').innerHTML = sparkline(relTrend.map(function(p){ return p.total; }), {color:'#388bfd'});
+
+    const an = d.billing_anomalies || [];
+    document.getElementById('billingAnomalies').innerHTML = an.length ? (
+      '<table><tr><th>级别</th><th>说明</th></tr>' + an.map(function(a){
+        return '<tr><td><span class="badge '+a.severity+'">'+a.severity+'</span></td><td>'+a.message+'</td></tr>';
+      }).join('') + '</table>'
+    ) : '<div class="empty">无计费异常 ✓</div>';
+  }catch(e){
+    document.getElementById('kpis').innerHTML = '<div class="empty">加载失败：'+e+'</div>';
+  }
+}
+
+var _suggestedAssignee = '';
+var _incCursor = null;
+var _incPageSize = 30;
+
+function incidentRow(it){
+  var problems = (it.problems||[]).map(function(p){return (p.name||p.id)+'：'+(p.detail||'');}).join('；') || '—';
+  var canAck = it.status !== 'resolved' && CAN_MANAGE_OPS;
+  var kindLabel = it.kind === 'billing' ? '💸 计费' : '🩺 健康';
+  return '<tr>'+
+    '<td>'+kindLabel+'</td>'+
+    '<td><span class="badge '+it.status+'">'+it.status+'</span></td>'+
+    '<td>'+dot(it.light)+'</td>'+
+    '<td>'+problems+'</td>'+
+    '<td class="muted">'+tsfmt(it.opened_ts)+'</td>'+
+    '<td>'+(it.assigned_to||'—')+'</td>'+
+    '<td>'+(canAck?'<button onclick="ackIncident('+it.id+')">确认</button>':'')+'</td>'+
+  '</tr>';
+}
+
+function updateMoreBtn(){
+  document.getElementById('loadMoreBtn').style.display = _incCursor ? '' : 'none';
+}
+
+async function loadIncidents(){
+  try{
+    const r = await fetch('/api/admin/incidents?limit='+_incPageSize, {credentials:'same-origin'});
+    const d = await r.json();
+    var sug = d.suggested_assignee;
+    _suggestedAssignee = (sug && sug.agent_id) ? String(sug.agent_id) : '';
+    _incCursor = d.next_cursor || null;
+    const items = d.incidents || [];
+    if(!items.length){ document.getElementById('incidents').innerHTML = '<div class="empty">无运维事件 ✓</div>'; updateMoreBtn(); return; }
+    document.getElementById('incidents').innerHTML =
+      '<table id="incTable"><tr><th>类型</th><th>状态</th><th>灯</th><th>问题</th><th>开始</th><th>处理人</th><th></th></tr>' +
+      items.map(incidentRow).join('') + '</table>';
+    updateMoreBtn();
+  }catch(e){
+    document.getElementById('incidents').innerHTML = '<div class="empty">加载失败：'+e+'</div>';
+  }
+}
+
+async function loadMoreIncidents(){
+  if(!_incCursor) return;
+  try{
+    const r = await fetch('/api/admin/incidents?limit='+_incPageSize+'&before_id='+_incCursor, {credentials:'same-origin'});
+    const d = await r.json();
+    _incCursor = d.next_cursor || null;
+    var tbl = document.getElementById('incTable');
+    if(tbl){ tbl.insertAdjacentHTML('beforeend', (d.incidents||[]).map(incidentRow).join('')); }
+    updateMoreBtn();
+  }catch(e){ /* 静默 */ }
+}
+
+async function ackIncident(id){
+  var who = prompt('指派给（坐席/主管 ID，可留空仅确认）：', _suggestedAssignee) || '';
+  var csrf=(document.cookie.match(/csrf_token=([^;]+)/)||[])[1]||'';
+  try{
+    await fetch('/api/admin/incidents/'+id+'/ack', {
+      method:'POST', credentials:'same-origin',
+      headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},
+      body: JSON.stringify({assigned_to: who}),
+    });
+    loadIncidents(); loadOverview();
+  }catch(e){ alert('操作失败：'+e); }
+}
+
+function refreshAll(){ loadOverview(); loadIncidents(); }
+refreshAll();
+setInterval(refreshAll, 60000);
+</script>
+</body>
+</html>

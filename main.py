@@ -771,6 +771,8 @@ class AIChatAssistant:
                                         interval_sec=float(_hw_cfg.get("interval_sec", 300)),
                                         pending_threshold=int(_hw_cfg.get("queue_threshold", 200)),
                                         alert_on_warn=bool(_hw_cfg.get("alert_on_warn", False)),
+                                        billing_interval_sec=float(_hw_cfg.get("billing_interval_sec", 3600)),
+                                        incident_retention_days=float(_hw_cfg.get("incident_retention_days", 30)),
                                     )
                                     web_app.state.health_watchdog = _hw
                                     asyncio.ensure_future(_hw.run())

@@ -60,6 +60,7 @@ _SSE_EVENT_TYPES = frozenset({
     "workflow_execution_failed",
     "workflow_execution_cancelled",
     "health_alert",
+    "billing_alert",
 })
 
 # 写入 app.state.notif_queue 的重要事件类型
@@ -71,6 +72,7 @@ _NOTIF_EVENT_TYPES = frozenset({
     "workflow_execution_completed", "workflow_execution_failed",
     "workflow_execution_cancelled",
     "health_alert",
+    "billing_alert",
 })
 
 
