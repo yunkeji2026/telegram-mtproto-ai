@@ -208,7 +208,7 @@ def generate_wallpaper(number: int, label: str, location: str,
 
     # ── 底部 brand
     font_brand = _get_font(int(width * 0.035))
-    draw_center("OpenClaw · AI RPA", font_brand, int(height * 0.88),
+    draw_center("华灵 Engine · AI RPA", font_brand, int(height * 0.88),
                 color=(80, 100, 120))
 
     out_path = os.path.join(out_dir, f"wp_{number:02d}_{label}.png")

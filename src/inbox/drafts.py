@@ -592,6 +592,14 @@ class DraftService:
             suggestions = _suggestions(t, lang=lang, intent=intent, emotion=emotion, risk=risk_level)
             draft_text = suggestions[0].text if suggestions else "感谢您的消息，我们稍后为您回复。"
 
+            # S3: 从 conv_meta 继承 trace_id，传播到草稿
+            _trace_id = ""
+            try:
+                _cm = self._store.get_conv_meta(conv_id) or {}
+                _trace_id = str(_cm.get("trace_id") or "")
+            except Exception:
+                pass
+
             draft_id = self._store.upsert_draft({
                 "source_kind": "inbox",
                 "source_id": conv_id,  # 用 conv_id 作为 source_id 保证每会话唯一幂等键
@@ -607,6 +615,7 @@ class DraftService:
                 "risk_reasons": analysis.get("risk_reasons") or [],
                 "autopilot_level": autopilot,
                 "status": "pending",
+                "trace_id": _trace_id,
             })
             # Q2: 草稿创建后即时计算质量评分（亚毫秒，不阻塞流程）
             try:

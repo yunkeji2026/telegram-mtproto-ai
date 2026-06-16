@@ -1390,7 +1390,7 @@ class TestAgentPrefs:
 
     def test_dnd_active(self):
         import time as _t
-        from src.web.routes.unified_inbox_routes import _dnd_active
+        from src.web.routes.unified_inbox_helpers import _dnd_active
         # 构造一个跨午夜 22:00-08:00，取 23:00 应 active
         base = _t.struct_time((2026, 6, 6, 23, 0, 0, 5, 157, -1))
         now = _t.mktime(base)

@@ -494,14 +494,17 @@ def _safe_remote_name(path: Path) -> str:
 
 
 def _mime_for(path: Path) -> str:
-    mt, _ = mimetypes.guess_type(str(path))
-    if mt:
-        return mt
+    # 显式表优先：mimetypes.guess_type 对 .wav 等的结果随 OS 漂移
+    # （Linux 给 audio/x-wav，Windows 给 audio/wav），发送的 MIME 不应依赖平台。
     suffix = path.suffix.lower()
-    return {
+    explicit = {
         ".wav": "audio/wav",
         ".m4a": "audio/mp4",
         ".opus": "audio/ogg",
         ".ogg": "audio/ogg",
         ".mp3": "audio/mpeg",
-    }.get(suffix, "audio/mpeg")
+    }
+    if suffix in explicit:
+        return explicit[suffix]
+    mt, _ = mimetypes.guess_type(str(path))
+    return mt or "audio/mpeg"

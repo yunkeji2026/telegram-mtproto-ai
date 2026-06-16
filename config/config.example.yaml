@@ -148,7 +148,7 @@ web_chat:
 
 # Web 管理后台（显示名、侧边栏标题；LINE RPA 提示中的「系统」名称亦取此字段）
 web_admin:
-  site_name: 智控王客户转化聊天系统
+  site_name: 华灵科技客户转化聊天系统
   host: 127.0.0.1
   port: 18787
   auth_token: YOUR_ADMIN_TOKEN
@@ -565,7 +565,7 @@ messenger_rpa:
           你是自然的 Messenger 私聊对象，不是客服机器人。优先短句、口语、像真人聊天。
           用户很短时只回一小句；用户认真倾诉时先接住情绪，再轻问一个问题。
         persona:
-          name: Camille
+          name: 小灵
           role: 朋友式陪聊与转化助手
           personality:
             traits: [温柔, 机灵, 有边界感]
@@ -582,12 +582,32 @@ messenger_rpa:
           面向明确咨询、订单、付款、商务问题时使用。先给结论，再给下一步动作。
           避免恋爱腔，避免大段解释。
         persona:
-          name: Camille
+          name: 小灵
           role: 专业但不生硬的客户沟通助手
           speaking:
             language_follow: true
             reply_length: concise
             max_reply_sentences: 4
+
+# ── 局域网语音克隆（LAN 优先 → 云端兜底）─────────────────────────────────────
+# 声音克隆放到局域网语音主机（fish_speech_s2 / AvatarHub）上跑：192.168.0.188:7855。
+# 合成时先快速健康探测（含 model_loaded）：在线 → 局域网零样本克隆（WAV）；
+# 不可用/失败 → 自动回落云端 Qwen。登记同理：LAN 在线时零样本登记（不烧云端配额）。
+# 接口契约：POST /v1/tts/clone {text, reference_audio_b64, reference_text, language, return_base64}
+#          → {ok, audio_base64(WAV), sample_rate}；GET /health → {model_loaded:true}
+# enabled=false 时完全保持现状（仅走云端）。
+voice_clone_lan:
+  enabled: true
+  base_url: http://192.168.0.188:7855    # fish_speech 语音克隆主机（7855；8000 是换脸，勿混）
+  protocol: fish_speech
+  clone_path: /v1/tts/clone              # 零样本克隆合成端点
+  health_path: /health                   # 健康探测端点（含 model_loaded）
+  health_timeout_sec: 2.0                # 探测超时；超了即判「局域网不可用」
+  health_cache_sec: 30                   # 探测结果进程级缓存秒数（避免每条都探）
+  synth_timeout_sec: 300                 # 单次克隆合成超时（fish_speech 建议 ≥300s）
+  language: zh                            # 默认合成语种（zh/en/ja...）
+  api_key: ""                            # 主机需鉴权时填（Bearer）
+  cloud_fallback: true                   # 局域网不可用/失败 → 回落云端 Qwen
 
 # WhatsApp RPA（ADB + uiautomator；与 Telegram/LINE/Messenger 共用 Skill/AI）
 # 与 messenger_rpa 结构类似，accounts[] 下为每台手机一条
@@ -645,7 +665,7 @@ personas:
   default: warm_companion
   profiles:
     - id: warm_companion
-      name: Camille
+      name: 小灵
       enabled: true
       style_hint: |
         你是自然的私聊对象，不是客服机器人。优先短句、口语、像真人聊天。
@@ -660,7 +680,7 @@ personas:
         command_args: []
         command_timeout_sec: 120
     - id: professional_support
-      name: Camille
+      name: 小灵
       enabled: true
       style_hint: |
         面向明确咨询、订单、付款、商务问题时使用。先给结论，再给下一步动作。
@@ -798,9 +818,18 @@ ai:
 
   # 系统提示词
   system_prompt: |
-    你是智能助手Camille，为用户提供友好、专业的客服服务。
+    你是智能助手小灵，为用户提供友好、专业的客服服务。
     请保持回复简洁、有帮助，并适当使用表情符号增加亲和力。
     回复时考虑对话上下文，保持连贯性。
+
+  # P52：坐席 Copilot LLM 润色（默认关闭；仅预填/显式 polish 时触发）
+  copilot_polish:
+    enabled: false
+    max_suggestions: 2      # 单次最多润色条数
+    timeout_sec: 8
+    temperature: 0.6
+    max_tokens: 320
+    model: ""               # 空=沿用 ai.model
 
 # 陪伴关系阶段（conversion 域）；状态存 bot.db user_context JSON
 companion:
@@ -1008,6 +1037,12 @@ rpa:
 workspace:
   claim_ttl_sec: 900          # 会话租约 TTL（秒）；无心跳则自动释放
   presence_stale_sec: 120     # 超过此秒数未心跳的坐席视为离线
+  # P0-3 老板视角 ROI 看板（/workspace/roi，主管专属）：
+  #   sec_per_reply: 每条 AI 自动应答估算省下的人工处理时长（秒），用于「节省人力」估算，默认 180
+  #   cost_per_hour: 坐席每人时成本（元）；>0 时看板出「节省金额」卡，0=隐藏（默认 0）
+  roi:
+    sec_per_reply: 180
+    cost_per_hour: 0
   # 入站自动翻译：坐席打开会话时，将外语客户消息译为中文展示（默认关，控 API 成本）
   auto_translate_inbound:
     enabled: false
@@ -1015,6 +1050,21 @@ workspace:
     source_langs: []          # 空=所有非 target 语言；例 [en, ja, ko] 仅译英日韩
     max_per_thread: 8         # 每次打开会话最多翻译条数
     max_chars: 400            # 超长消息跳过
+  # 自动派单（建议接管）：为未认领会话推荐在线坐席，仅产出「建议」不自动锁定，
+  # 不改变现有手动 claim 流程（默认关；开启后会话列表 chats[].suggested_agent 出现建议）
+  auto_assign:
+    enabled: false
+    strategy: least_loaded    # least_loaded=挑当前认领数最少的在线坐席（round_robin 预留）
+    online_only: true         # true=仅 status=online 坐席；false=online/busy 皆可（仍排除 offline）
+    max_claims_per_agent: 0   # 0=不限；>0 时负载已达上限的坐席不再被建议
+    match_language: false     # true=把会话语言优先派给「会该语言」的坐席（坐席在工作台「我的偏好」
+                              # 声明语言，存 agent_prefs.languages）；无人会该语言则回退全体
+    # 后台自动认领（守护版，默认关）：本轮仅落地决策逻辑 plan_auto_claims，
+    # 后台 worker 接线见下一阶段；开启决策不会自动发生 claim，需 worker 执行。
+    auto_claim:
+      enabled: false
+      active_within_sec: 60   # 仅把会话自动分给近 N 秒有心跳的活跃坐席（0=不限）
+      ttl_sec: 0              # soft 认领 TTL（0=沿用全局 claim_ttl_sec；>0 用更短租约）
   # 快捷回复模板（坐席输入栏「快捷回复」面板；与 messenger approval_templates、templates.yaml 合并展示）
   quick_templates:
     - label: 问候
@@ -1063,7 +1113,35 @@ translation:
   glossary:
     enabled: true
     extra_terms: {}                  # 全局术语，如 {"size": "尺码", "refund": "退款"}
+    protect: []                      # 不译保护词（品牌/产品名），如 ["LINE", "WhatsApp"]，逐字保留
   cost_tracking: false               # 接 llm_cost（按字符估算 token，best-effort）
+  # Phase B：可选统计语种检测（仅在确定性检测落到含糊拉丁 en/unknown 时回退精修）
+  lang_detect:
+    statistical:
+      enabled: false                 # 默认关；开后需装 lingua 或 langdetect（缺则自动跳过）
+      min_chars: 12                  # 低于此长度不咨询统计层（短文本统计不可靠）
+  # P56：多翻译引擎（按 order 故障转移；首个可用且非空者获胜，AI 兜底）
+  engines:
+    order: ["ai"]                    # 可选 ai/deepl/google，如 ["deepl", "ai"]
+    timeout_sec: 8
+    deepl:
+      api_key: ""                    # 填则启用 DeepL（缺 key 自动跳过）
+      pro: false                     # true=api.deepl.com（Pro），false=api-free.deepl.com
+    google:
+      api_key: ""                    # 填则启用 Google Translate v2（缺 key 自动跳过）
+
+# ── P61 / C-2：媒体一键翻译（免上传）──────────────────────────────
+# base_dirs：解析平台落库 media_ref → 本进程可读本地文件的白名单根目录；
+#            仅落在这些目录内的文件可被读取（防路径穿越）。空=不限制（仅信我方 store）。
+# remote_fetch：远程 http(s) 媒体受控下载（SSRF 防护），默认关——安全敏感。
+media:
+  base_dirs: []                      # 如 ["sessions/media", "config/media"]
+  remote_fetch:
+    enabled: false                   # 默认关；开后远程图片/语音可免上传直接翻译
+    max_mb: 10                       # 单文件大小上限（超限中止 → 回落上传）
+    timeout_sec: 8                   # 下载总超时
+    allow_domains: []                # 空=仅靠私网/保留 IP 段封锁；填则只放行这些域名（生产推荐）
+                                     # 如 ["cdn.telegram.org", "scontent.xx.fbcdn.net"]
 
 # ── Phase D：电商工具层（订单/物流查询 + 事实校验） ───────────────
 # 数据只能查不可编：查不到就如实告知，绝不编造订单/物流状态。
@@ -1115,3 +1193,36 @@ mobile_bridge:
   mobile_api_base: "http://127.0.0.1:18080"
   # 轮询间隔（秒），建议 10~60
   poll_interval_sec: 15
+
+# ── C0-1 离线授权（License）─────────────────────────────────────────
+# 私有化部署的商业化授权。厂商用 Ed25519 私钥签发授权码，产品内置公钥离线验签。
+# 客户把授权码放到 config/license.key（或设环境变量 LICENSE_KEY）即可。
+# 本阶段仅「只读状态展示 + 启动日志」，不强制功能（gating 后续接入）。
+#   - 签发工具：python scripts/license_tool.py issue ...
+#   - 状态查询：GET /api/admin/license（管理后台首页「授权状态卡」）
+licensing:
+  enforce: false                      # 预留：true 时过期降级只读（当前未生效）
+  # key_path: config/license.key      # 授权码路径（默认 config/license.key）
+
+# ── 计费价目表（C2-2）──────────────────────────────────────────
+# 对账单（GET /api/workspace/billing）据此把用量换算成应收金额。
+# 不配则用内置默认；included_*=0 表示「不限/不计超额」。
+pricing:
+  currency: USD
+  plans:
+    community: { monthly: 0,   included_messages: 0,     included_seats: 0 }
+    basic:     { monthly: 49,  included_messages: 5000,  included_seats: 2 }
+    pro:       { monthly: 149, included_messages: 20000, included_seats: 5 }
+    flagship:  { monthly: 499, included_messages: 0,     included_seats: 0 }
+  overage:
+    per_message: 0.0                  # 超出含额每条消息单价
+    per_seat: 0.0                     # 超出含额每席位单价
+
+# ── 健康看门狗（D3）──────────────────────────────────────────────
+# 周期巡检运行时健康（DB/AI/授权/渠道/worker/队列），异常时经 EventBus →
+# WebhookNotifier 主动推送。需在「告警渠道」里给某条 webhook 订阅 health_alert 事件。
+health_watchdog:
+  enabled: true
+  interval_sec: 300                   # 巡检周期（秒）
+  queue_threshold: 200                # 草稿队列积压告警阈值
+  alert_on_warn: false                # true=黄灯(warn)也告警；默认仅红灯(fail)告警

@@ -1,0 +1,75 @@
+# 场景预设：陪聊转化 + Messenger→LINE 引流
+# ─────────────────────────────────────────────────────────────────────
+# 适用：私域转化场景，自然陪聊建立关系，达成熟度后引导客户加 LINE 成交。
+# 开局只需填：① ai.api_key ② telegram（若用 TG）③ contacts.line_ids_by_account
+# 引流话术文件：config/handoff_scripts.yaml、config/handoff_compliance.yaml（缺则警告）
+# 填完运行：python main.py --check   应为 0 错误。
+# ─────────────────────────────────────────────────────────────────────
+
+domain: conversion
+
+ai:
+  provider: openai_compatible
+  api_key: "YOUR_API_KEY"            # ← 必填
+  base_url: "https://api.deepseek.com"
+  model: "deepseek-chat"
+  temperature: 0.8                   # 陪聊更口语，温度略高
+  max_tokens: 1024
+  timeout: 30
+
+telegram:
+  api_id: "YOUR_API_ID"
+  api_hash: "YOUR_API_HASH"
+  phone_number: "+8612345678900"
+  session_name: outreach_bot
+  process_private: true
+
+skills:
+  enabled: [greeting, small_talk]
+
+# 陪伴关系阶段（陌生→升温→亲密→稳定；沉默衰减自动降阶 + 回暖提示）
+companion:
+  enabled: true
+  natural_dialogue:
+    enabled: true
+  intimacy_fusion:
+    enabled: true
+
+# 跨平台 Contacts 子系统 + Messenger→LINE 引流漏斗
+contacts:
+  enabled: true
+  daily_cap: 15                      # 每个账号每天最多引流次数
+  token_ttl_hours: 72
+  readiness_threshold: 70            # 达此成熟度才开引流窗
+  min_silent_days: 3
+  scripts_path: config/handoff_scripts.yaml
+  compliance_path: config/handoff_compliance.yaml
+  default_line_id: "@our_line"       # ← 填你的 LINE id
+  line_ids_by_account: {}            # 每个 Messenger 账号对应的 LINE id
+
+# 网页 Widget 也可引流（达门槛在 AI 回复尾部注入引流话术 + 暗号）
+web_chat:
+  enabled: true
+  account_id: web
+  default_mode: auto_ai
+  greeting: "嗨～在的，想聊点什么？"
+  token_secret: ""
+  handoff:
+    enabled: true                    # 依赖 contacts.enabled（已开）
+    min_inbound: 2
+
+inbox:
+  enabled: true
+  sla_warn_sec: 1800
+  sla_crit_sec: 7200
+
+web_admin:
+  site_name: 私域转化系统
+  host: 127.0.0.1
+  port: 18787
+  auth_token: "YOUR_ADMIN_TOKEN"
+  secret_key: "YOUR_FLASK_SECRET_KEY"
+
+logging:
+  level: INFO
+  file: logs/app.log

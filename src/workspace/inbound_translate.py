@@ -144,7 +144,7 @@ async def enrich_inbound_translations(
             logger.debug("overlay store translations 失败", exc_info=True)
 
     if translation_svc is None:
-        from src.web.routes.unified_inbox_routes import _get_translation_service
+        from src.web.routes.unified_inbox_services import _get_translation_service
         translation_svc = _get_translation_service(request)
 
     # 只处理最近的入站、未译、需译消息
@@ -166,6 +166,7 @@ async def enrich_inbound_translations(
         if len(candidates) >= cfg["max_per_thread"]:
             break
 
+    by_src_lang: Dict[str, int] = {}  # P3：新译出消息的客户来源语言分布（喂跨语言总览）
     for m in candidates:
         text = str(m.get("text") or m.get("original_text") or "")
         src_lang = str(m.get("language") or detect_language(text))
@@ -185,6 +186,8 @@ async def enrich_inbound_translations(
         m["translated_text"] = result.translated_text
         m["translation"] = result.to_dict()
         stats["translated"] += 1
+        _src = normalize_lang(str(result.source_lang or src_lang)) or "unknown"
+        by_src_lang[_src] = by_src_lang.get(_src, 0) + 1
         mid = str(m.get("message_id") or "")
         if store is not None and conversation_id and mid:
             try:
@@ -196,5 +199,18 @@ async def enrich_inbound_translations(
                 )
             except Exception:
                 logger.debug("persist translation 失败", exc_info=True)
+
+    # P3：把本次「新译出 + 失败」按日累计进入站漏斗（命中缓存的 from_store 不计，避免重开重复）。
+    if store is not None and hasattr(store, "record_inbound_xlate") and (
+        stats["translated"] or stats["failed"]
+    ):
+        try:
+            store.record_inbound_xlate(
+                translated=stats["translated"],
+                failed=stats["failed"],
+                by_lang=by_src_lang,
+            )
+        except Exception:
+            logger.debug("record_inbound_xlate 失败（已忽略）", exc_info=True)
 
     return messages, stats

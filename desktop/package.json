@@ -1,0 +1,18 @@
+{
+  "name": "telegram-ai-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "桌面壳：嵌官方 web 客户端 + 注入点击翻译/智能回复（对接本仓库 FastAPI 后端）",
+  "main": "main.js",
+  "scripts": {
+    "copy-shared": "node copy-shared.js",
+    "prestart": "node copy-shared.js",
+    "predev": "node copy-shared.js",
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "test": "node test/inject-status.test.js && node test/account-utils.test.js && node test/media-format.test.js && node test/webview-ua.test.js"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0"
+  }
+}

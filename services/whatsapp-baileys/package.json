@@ -1,0 +1,22 @@
+{
+  "name": "wa-baileys-login-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WhatsApp (Baileys) 协议多开登录微服务 — 为 telegram-mtproto-ai 提供网页二维码登录与多账号连接",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.0",
+    "express": "^4.19.2",
+    "https-proxy-agent": "^7.0.5",
+    "pino": "^9.0.0",
+    "qrcode": "^1.5.3",
+    "socks-proxy-agent": "^8.0.4"
+  }
+}

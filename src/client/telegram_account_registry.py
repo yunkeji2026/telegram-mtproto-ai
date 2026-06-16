@@ -176,7 +176,12 @@ class TelegramAccountRegistry:
                     session_name=str(
                         telegram_cfg.get("session_name") or "camille_bot"
                     ).strip(),
-                    persona_ids=[],
+                    # 单账号也支持扁平 telegram.persona_ids（Web 人设工作室指定人设后写入）
+                    persona_ids=[
+                        str(p)
+                        for p in (telegram_cfg.get("persona_ids") or [])
+                        if p
+                    ],
                 )
             )
             logger.info("[tg_registry] 单账号模式（default）")

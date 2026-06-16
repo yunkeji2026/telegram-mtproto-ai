@@ -77,6 +77,24 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS idx_msg_conv_ts ON messages(conversation_id, ts DESC);
 
+-- P1：出向译文旁路表。坐席「一击直发」让后端把中文原文译成客户语言后投递，
+-- 但出向消息回到 messages 的路径异构（web record_message / protocol worker push /
+-- 多数 RPA 根本不回读），无法在 messages 里稳定保存「中文原文 ↔ 实发译文」配对。
+-- 故此处旁路记录，按 (conversation_id, 实发译文 hash) 键；thread 读取时富集回原文，
+-- 实现跨刷新/重启/设备的出向双行展示，且完全不触碰 messages 去重。
+CREATE TABLE IF NOT EXISTS outbound_translations (
+    conversation_id   TEXT NOT NULL,
+    sent_hash         TEXT NOT NULL,
+    original_text     TEXT NOT NULL DEFAULT '',
+    source_lang       TEXT NOT NULL DEFAULT '',
+    target_lang       TEXT NOT NULL DEFAULT '',
+    provider          TEXT NOT NULL DEFAULT '',
+    error             TEXT NOT NULL DEFAULT '',
+    created_at        REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (conversation_id, sent_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_outxl_conv ON outbound_translations(conversation_id);
+
 CREATE TABLE IF NOT EXISTS message_analysis (
     analysis_id        TEXT PRIMARY KEY,
     message_id         TEXT NOT NULL,
@@ -269,6 +287,39 @@ _MIGRATIONS = [
     )""",
     "CREATE INDEX IF NOT EXISTS idx_survey_conv ON csat_surveys(conversation_id)",
     "CREATE INDEX IF NOT EXISTS idx_survey_due  ON csat_surveys(send_at, sent)",
+    # S1: A/B 测试表
+    """CREATE TABLE IF NOT EXISTS ab_tests (
+        id              TEXT PRIMARY KEY,
+        name            TEXT NOT NULL DEFAULT '',
+        intent_filter   TEXT NOT NULL DEFAULT '',
+        template_a_id   TEXT NOT NULL DEFAULT '',
+        template_b_id   TEXT NOT NULL DEFAULT '',
+        description     TEXT NOT NULL DEFAULT '',
+        min_sample      INTEGER NOT NULL DEFAULT 30,
+        status          TEXT NOT NULL DEFAULT 'active',
+        created_by      TEXT NOT NULL DEFAULT '',
+        created_at      REAL NOT NULL DEFAULT 0,
+        updated_at      REAL NOT NULL DEFAULT 0,
+        n_a             INTEGER NOT NULL DEFAULT 0,
+        n_b             INTEGER NOT NULL DEFAULT 0,
+        sat_a           INTEGER NOT NULL DEFAULT 0,
+        sat_b           INTEGER NOT NULL DEFAULT 0
+    )""",
+    """CREATE TABLE IF NOT EXISTS ab_assignments (
+        test_id         TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        variant         TEXT NOT NULL DEFAULT 'A',
+        assigned_ts     REAL NOT NULL DEFAULT 0,
+        csat_score      REAL NOT NULL DEFAULT -1,
+        outcome_ts      REAL NOT NULL DEFAULT 0,
+        PRIMARY KEY (test_id, conversation_id)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_ab_assign_conv ON ab_assignments(conversation_id)",
+    # S3: 全链路追踪 trace_id
+    "ALTER TABLE conversation_meta ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE reply_drafts ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''",
+    "CREATE INDEX IF NOT EXISTS idx_conv_trace ON conversation_meta(trace_id)",
+    "CREATE INDEX IF NOT EXISTS idx_draft_trace ON reply_drafts(trace_id)",
     # I3: 回复模板库
     """CREATE TABLE IF NOT EXISTS reply_templates (
         id           TEXT PRIMARY KEY,
@@ -285,6 +336,180 @@ _MIGRATIONS = [
     )""",
     "CREATE INDEX IF NOT EXISTS idx_templates_scene    ON reply_templates(scene, language, is_active)",
     "CREATE INDEX IF NOT EXISTS idx_templates_platform ON reply_templates(platform, language, is_active)",
+    # T1: 会话级标签 + 归档（Phase 14）
+    "ALTER TABLE conversation_meta ADD COLUMN conv_tags TEXT NOT NULL DEFAULT '[]'",
+    "ALTER TABLE conversation_meta ADD COLUMN archived  INTEGER NOT NULL DEFAULT 0",
+    "CREATE INDEX IF NOT EXISTS idx_conv_meta_archived ON conversation_meta(archived)",
+    # U1: FTS5 全文索引（Phase 22）
+    # FTS5 虚拟表：独立存储，触发器同步，搜索降级至 LIKE 若不可用
+    """CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts
+       USING fts5(message_id UNINDEXED, conversation_id UNINDEXED,
+                  text, ts UNINDEXED, direction UNINDEXED,
+                  tokenize='unicode61 remove_diacritics 1')""",
+    """CREATE TRIGGER IF NOT EXISTS messages_fts_ai AFTER INSERT ON messages BEGIN
+         INSERT INTO messages_fts(message_id, conversation_id, text, ts, direction)
+         VALUES (new.message_id, new.conversation_id, new.text, new.ts, new.direction);
+       END""",
+    """CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON messages BEGIN
+         DELETE FROM messages_fts WHERE message_id = old.message_id;
+       END""",
+    """CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE OF text ON messages BEGIN
+         DELETE FROM messages_fts WHERE message_id = old.message_id;
+         INSERT INTO messages_fts(message_id, conversation_id, text, ts, direction)
+         VALUES (new.message_id, new.conversation_id, new.text, new.ts, new.direction);
+       END""",
+    # Y1: QA 质检评分 + 流失风险（Phase 34/35）
+    "ALTER TABLE conversation_meta ADD COLUMN qa_score TEXT NOT NULL DEFAULT '{}'",
+    "ALTER TABLE conversation_meta ADD COLUMN churn_risk TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE conversation_meta ADD COLUMN auto_archived_at REAL NOT NULL DEFAULT 0",
+    "CREATE INDEX IF NOT EXISTS idx_conv_meta_last_ts ON conversation_meta(updated_at DESC)",
+    # V1: 坐席协作注解（Phase 25）
+    """CREATE TABLE IF NOT EXISTS conv_notes (
+         note_id    TEXT PRIMARY KEY,
+         conversation_id TEXT NOT NULL,
+         agent_id   TEXT NOT NULL DEFAULT '',
+         agent_name TEXT NOT NULL DEFAULT '',
+         body       TEXT NOT NULL DEFAULT '',
+         mentions   TEXT NOT NULL DEFAULT '[]',
+         ts         REAL NOT NULL DEFAULT 0,
+         edited_ts  REAL NOT NULL DEFAULT 0
+       )""",
+    "CREATE INDEX IF NOT EXISTS idx_conv_notes_conv ON conv_notes(conversation_id, ts DESC)",
+    # AA1: 自定义动作 + 工作链（Phase 37）
+    """CREATE TABLE IF NOT EXISTS workflow_actions (
+         action_id   TEXT PRIMARY KEY,
+         name        TEXT NOT NULL DEFAULT '',
+         action_type TEXT NOT NULL DEFAULT 'template',
+         config_json TEXT NOT NULL DEFAULT '{}',
+         icon        TEXT NOT NULL DEFAULT '💡',
+         enabled     INTEGER NOT NULL DEFAULT 1,
+         sort_order  INTEGER NOT NULL DEFAULT 0,
+         created_at  REAL NOT NULL DEFAULT 0,
+         updated_at  REAL NOT NULL DEFAULT 0
+       )""",
+    """CREATE TABLE IF NOT EXISTS workflow_chains (
+         chain_id    TEXT PRIMARY KEY,
+         name        TEXT NOT NULL DEFAULT '',
+         steps_json  TEXT NOT NULL DEFAULT '[]',
+         trigger_conditions TEXT NOT NULL DEFAULT '{}',
+         enabled     INTEGER NOT NULL DEFAULT 1,
+         created_at  REAL NOT NULL DEFAULT 0,
+         updated_at  REAL NOT NULL DEFAULT 0
+       )""",
+    """CREATE TABLE IF NOT EXISTS workflow_executions (
+         exec_id       TEXT PRIMARY KEY,
+         chain_id      TEXT NOT NULL DEFAULT '',
+         conversation_id TEXT NOT NULL DEFAULT '',
+         current_step  INTEGER NOT NULL DEFAULT 0,
+         status        TEXT NOT NULL DEFAULT 'pending',
+         context_json  TEXT NOT NULL DEFAULT '{}',
+         started_at    REAL NOT NULL DEFAULT 0,
+         updated_at    REAL NOT NULL DEFAULT 0
+       )""",
+    "CREATE INDEX IF NOT EXISTS idx_wf_exec_conv ON workflow_executions(conversation_id, updated_at DESC)",
+    "ALTER TABLE workflow_executions ADD COLUMN next_step_at REAL NOT NULL DEFAULT 0",
+    "ALTER TABLE workflow_executions ADD COLUMN last_result_json TEXT NOT NULL DEFAULT ''",
+    "CREATE INDEX IF NOT EXISTS idx_wf_exec_due ON workflow_executions(status, next_step_at)",
+    # DD1: 关系阶段缓存（P43 进阶检测）
+    "ALTER TABLE conversation_meta ADD COLUMN rel_stage_cached TEXT NOT NULL DEFAULT ''",
+    # P46: 关系阶段人工确认
+    "ALTER TABLE conversation_meta ADD COLUMN rel_stage_pending TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE conversation_meta ADD COLUMN rel_stage_pending_ts REAL NOT NULL DEFAULT 0",
+    "ALTER TABLE conversation_meta ADD COLUMN rel_reunion_ack_ts REAL NOT NULL DEFAULT 0",
+    # P50: 客户级关系阶段（跨会话同步）
+    """CREATE TABLE IF NOT EXISTS contact_rel_stage (
+         contact_id       TEXT PRIMARY KEY,
+         confirmed_stage  TEXT NOT NULL DEFAULT '',
+         updated_by       TEXT NOT NULL DEFAULT '',
+         updated_at       REAL NOT NULL DEFAULT 0,
+         reunion_ack_ts   REAL NOT NULL DEFAULT 0
+       )""",
+    "CREATE INDEX IF NOT EXISTS idx_contact_rel_stage_updated ON contact_rel_stage(updated_at DESC)",
+    # BB1: 分流路由规则（Phase 38）
+    """CREATE TABLE IF NOT EXISTS routing_rules (
+         rule_id    TEXT PRIMARY KEY,
+         name       TEXT NOT NULL DEFAULT '',
+         conditions TEXT NOT NULL DEFAULT '{}',
+         assign_to  TEXT NOT NULL DEFAULT '',
+         priority   INTEGER NOT NULL DEFAULT 0,
+         enabled    INTEGER NOT NULL DEFAULT 1,
+         created_at REAL NOT NULL DEFAULT 0,
+         updated_at REAL NOT NULL DEFAULT 0
+       )""",
+    "CREATE INDEX IF NOT EXISTS idx_routing_rules_priority ON routing_rules(priority DESC, enabled)",
+    # CC1: 剧本话题 + 互动积分（Phase 40/41）
+    """CREATE TABLE IF NOT EXISTS script_topics (
+         topic_id    TEXT PRIMARY KEY,
+         stage       TEXT NOT NULL DEFAULT 'initial',
+         title       TEXT NOT NULL DEFAULT '',
+         opener      TEXT NOT NULL DEFAULT '',
+         hint        TEXT NOT NULL DEFAULT '',
+         tags_json   TEXT NOT NULL DEFAULT '[]',
+         chain_id    TEXT NOT NULL DEFAULT '',
+         enabled     INTEGER NOT NULL DEFAULT 1,
+         sort_order  INTEGER NOT NULL DEFAULT 0,
+         created_at  REAL NOT NULL DEFAULT 0,
+         updated_at  REAL NOT NULL DEFAULT 0
+       )""",
+    "CREATE INDEX IF NOT EXISTS idx_script_topics_stage ON script_topics(stage, enabled, sort_order)",
+    """CREATE TABLE IF NOT EXISTS contact_engagement (
+         contact_id       TEXT PRIMARY KEY,
+         points           INTEGER NOT NULL DEFAULT 0,
+         level            TEXT NOT NULL DEFAULT 'new',
+         breakdown_json   TEXT NOT NULL DEFAULT '{}',
+         achievements_json TEXT NOT NULL DEFAULT '[]',
+         history_json     TEXT NOT NULL DEFAULT '[]',
+         updated_at       REAL NOT NULL DEFAULT 0
+       )""",
+    # P61-3：分组批量触达（再激活）日志——cooldown 判定 + 回执统计
+    """CREATE TABLE IF NOT EXISTS outreach_log (
+         id              INTEGER PRIMARY KEY AUTOINCREMENT,
+         conversation_id TEXT NOT NULL,
+         batch_id        TEXT NOT NULL DEFAULT '',
+         platform        TEXT NOT NULL DEFAULT '',
+         account_id      TEXT NOT NULL DEFAULT '',
+         status          TEXT NOT NULL DEFAULT 'sent',
+         note            TEXT NOT NULL DEFAULT '',
+         ts              REAL NOT NULL DEFAULT 0
+       )""",
+    "CREATE INDEX IF NOT EXISTS idx_outreach_conv ON outreach_log(conversation_id, ts DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_outreach_batch ON outreach_log(batch_id)",
+    # P3：坐席技能语言（CSV 规范 ISO 码，如 "en,ja"）。供 auto_assign 的 match_language
+    # 把外语会话优先派给会该语言的坐席（坐席在工作台「我的偏好」声明）。
+    "ALTER TABLE agent_prefs ADD COLUMN languages TEXT NOT NULL DEFAULT ''",
+    # P3：出向翻译漏斗「按日」持久化聚合（看板按 7/30 日窗读取，跨重启/含趋势线）。
+    # 与内存版 OutboundTranslationStats 同口径；day 用本地日期，与 dashboard 其它面板分桶一致。
+    # by_lang_json 为该日各目标语译出次数的 JSON（读改写，已在锁内）。
+    """CREATE TABLE IF NOT EXISTS outbound_xlate_daily (
+         day             TEXT PRIMARY KEY,
+         sends           INTEGER NOT NULL DEFAULT 0,
+         requested       INTEGER NOT NULL DEFAULT 0,
+         translated      INTEGER NOT NULL DEFAULT 0,
+         skipped         INTEGER NOT NULL DEFAULT 0,
+         failed          INTEGER NOT NULL DEFAULT 0,
+         auto_requested  INTEGER NOT NULL DEFAULT 0,
+         auto_unresolved INTEGER NOT NULL DEFAULT 0,
+         degraded        INTEGER NOT NULL DEFAULT 0,
+         by_lang_json    TEXT NOT NULL DEFAULT '{}'
+       )""",
+    # P3：入站翻译漏斗「按日」持久化（客户→坐席自动翻译）。语义与出向不同：入站为打开会话
+    # 时懒翻译，只记「新译出」（成功后即缓存，再开走 store 不重复计）与 failed；by_lang_json
+    # 为该日各「客户来源语言」译出次数（与出向的目标语分布合成跨语言总览）。
+    """CREATE TABLE IF NOT EXISTS inbound_xlate_daily (
+         day          TEXT PRIMARY KEY,
+         translated   INTEGER NOT NULL DEFAULT 0,
+         failed       INTEGER NOT NULL DEFAULT 0,
+         by_lang_json TEXT NOT NULL DEFAULT '{}'
+       )""",
+    # P3：自动派单（AutoClaimWorker）「按日」持久化。进程内 status_snapshot 是累计且重启清零，
+    # 看板需按 7/30 日窗回溯，故落表。claimed=当日自动认领总数，lang_matched=其中按语言命中数，
+    # by_lang_json=命中派单的会话语言分布（系统按哪些语言在精准路由）。
+    """CREATE TABLE IF NOT EXISTS auto_claim_daily (
+         day          TEXT PRIMARY KEY,
+         claimed      INTEGER NOT NULL DEFAULT 0,
+         lang_matched INTEGER NOT NULL DEFAULT 0,
+         by_lang_json TEXT NOT NULL DEFAULT '{}'
+       )""",
 ]
 
 
@@ -325,6 +550,34 @@ class InboxStore:
                 except Exception:
                     pass  # 列已存在则忽略
             self._conn.commit()
+            # U1: FTS5 冷启动重建（首次建表后一次性填充存量消息，后续由触发器维护）
+            self._fts5_available = self._rebuild_fts5_if_empty()
+
+    def _rebuild_fts5_if_empty(self) -> bool:
+        """U1：检查 FTS5 表是否可用且已填充；若空则从存量 messages 批量导入。
+
+        返回 True 表示 FTS5 可用（可用于 search_messages 优先路径）。
+        """
+        try:
+            # 确认 messages_fts 表存在
+            self._conn.execute("SELECT count(*) FROM messages_fts LIMIT 1").fetchone()
+        except Exception:
+            return False  # FTS5 不可用（SQLite 编译时未包含）
+        try:
+            # 若 FTS5 表为空且 messages 表有数据，执行全量同步（best-effort）
+            fts_cnt = self._conn.execute(
+                "SELECT count(*) FROM messages_fts"
+            ).fetchone()[0]
+            if fts_cnt == 0:
+                self._conn.execute(
+                    """INSERT INTO messages_fts(message_id, conversation_id, text, ts, direction)
+                       SELECT message_id, conversation_id, text, ts, direction
+                       FROM messages WHERE text != ''"""
+                )
+                self._conn.commit()
+            return True
+        except Exception:
+            return False  # 插入失败，降级为 LIKE
 
     def register_l2_callback(self, cb: Any) -> None:
         """注册 L2 草稿写入通知回调（C3 事件驱动 AutosendWorker）。
@@ -467,6 +720,80 @@ class InboxStore:
         return inserted
 
     # ── 读取（unified_inbox 路由调用）──────────────────────────
+
+    def search_messages(
+        self, query: str, *, limit: int = 20, platform: str = ""
+    ) -> List[Dict[str, Any]]:
+        """Phase 22（U1）：跨会话消息全文检索。
+
+        优先路径：FTS5 MATCH（精准分词 + rank 排序）。
+        降级路径：SQLite LIKE（兜底，FTS5 不可用时自动切换）。
+
+        每个命中返回：message_id, conversation_id, text, ts, direction,
+                      platform, display_name, fts_mode（'fts5'|'like'）。
+        """
+        query = str(query or "").strip()
+        if not query:
+            return []
+        limit = max(1, min(100, int(limit or 20)))
+
+        # FTS5 优先路径：支持 phrase、prefix、NOT 等高级语法
+        if getattr(self, "_fts5_available", False):
+            try:
+                return self._search_messages_fts5(query, limit=limit, platform=platform)
+            except Exception:
+                pass  # FTS5 查询失败（特殊字符/语法错），降级 LIKE
+
+        return self._search_messages_like(query, limit=limit, platform=platform)
+
+    def _search_messages_fts5(
+        self, query: str, *, limit: int, platform: str
+    ) -> List[Dict[str, Any]]:
+        """FTS5 全文检索路径（Phase 22）。"""
+        # 净化 query：去掉 FTS5 特殊字符，防止语法报错
+        safe_q = query.replace('"', '').replace("'", "")
+        params: List[Any] = [safe_q]
+        extra = ""
+        if platform:
+            extra = " AND c.platform = ?"
+            params.append(str(platform))
+        params.append(limit)
+        sql = f"""
+            SELECT f.message_id, f.conversation_id, f.text, f.ts, f.direction,
+                   c.platform, c.display_name, 'fts5' AS fts_mode
+            FROM messages_fts f
+            LEFT JOIN conversations c ON c.conversation_id = f.conversation_id
+            WHERE messages_fts MATCH ?{extra}
+            ORDER BY rank
+            LIMIT ?
+        """
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def _search_messages_like(
+        self, query: str, *, limit: int, platform: str
+    ) -> List[Dict[str, Any]]:
+        """LIKE 降级路径（Phase 21 / 22 兜底）。"""
+        like = f"%{query}%"
+        params: List[Any] = [like]
+        extra = ""
+        if platform:
+            extra = " AND c.platform = ?"
+            params.append(str(platform))
+        params.append(limit)
+        sql = f"""
+            SELECT m.message_id, m.conversation_id, m.text, m.ts, m.direction,
+                   c.platform, c.display_name, 'like' AS fts_mode
+            FROM messages m
+            LEFT JOIN conversations c ON c.conversation_id = m.conversation_id
+            WHERE m.text LIKE ?{extra}
+            ORDER BY m.ts DESC
+            LIMIT ?
+        """
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
 
     def list_conversations(
         self, *, limit: int = 50, platform: str = ""
@@ -689,6 +1016,333 @@ class InboxStore:
             self._conn.commit()
             return int(cur.rowcount or 0) > 0
 
+    @staticmethod
+    def _sent_hash(sent_text: str) -> str:
+        return hashlib.sha256(str(sent_text or "").encode("utf-8")).hexdigest()[:16]
+
+    def record_outbound_translation(
+        self,
+        conversation_id: str,
+        sent_text: str,
+        original_text: str,
+        *,
+        source_lang: str = "",
+        target_lang: str = "",
+        provider: str = "",
+        error: str = "",
+    ) -> bool:
+        """P1：记录一条出向译文 → 原文/质量映射（一击直发后供 thread 富集双行）。
+
+        按 (conversation_id, hash(实发译文)) 去重 upsert；译文与原文相同（未真正翻译）
+        时不记录，避免无意义副行。best-effort，调用方包 try。
+        """
+        cid = str(conversation_id or "").strip()
+        sent = str(sent_text or "").strip()
+        orig = str(original_text or "").strip()
+        if not cid or not sent or not orig or sent == orig:
+            return False
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO outbound_translations
+                    (conversation_id, sent_hash, original_text, source_lang,
+                     target_lang, provider, error, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(conversation_id, sent_hash) DO UPDATE SET
+                    original_text = excluded.original_text,
+                    source_lang   = excluded.source_lang,
+                    target_lang   = excluded.target_lang,
+                    provider      = excluded.provider,
+                    error         = excluded.error,
+                    created_at    = excluded.created_at
+                """,
+                (cid, self._sent_hash(sent), orig, str(source_lang or ""),
+                 str(target_lang or ""), str(provider or ""), str(error or ""),
+                 self._now()),
+            )
+            self._conn.commit()
+        return True
+
+    def get_outbound_translations(self, conversation_id: str) -> Dict[str, Dict[str, Any]]:
+        """返回该会话的出向译文映射 {sent_hash: {original_text, target_lang, provider, error}}。"""
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            return {}
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT sent_hash, original_text, source_lang, target_lang, provider, error"
+                " FROM outbound_translations WHERE conversation_id = ?",
+                (cid,),
+            ).fetchall()
+        return {
+            str(r["sent_hash"]): {
+                "original_text": r["original_text"],
+                "source_lang": r["source_lang"],
+                "target_lang": r["target_lang"],
+                "provider": r["provider"],
+                "error": r["error"],
+            }
+            for r in rows
+        }
+
+    def record_outbound_xlate(
+        self,
+        *,
+        requested: bool,
+        is_auto: bool = False,
+        auto_resolved: Optional[bool] = None,
+        translated: bool = False,
+        target_lang: str = "",
+        degraded: bool = False,
+        failed: bool = False,
+    ) -> None:
+        """P3：把一次出向发送的翻译漏斗结果累计进「按日」表（看板窗口读取，跨重启）。
+
+        口径与内存版 ``OutboundTranslationStats.record_send`` 完全一致：
+        failed 与 translated 互斥优先 failed；skipped = 请求了但未译且未失败。
+        day 用本地日期，与 dashboard 其它面板的 day 分桶对齐。best-effort，调用方包 try。
+        """
+        day = time.strftime("%Y-%m-%d", time.localtime(self._now()))
+        inc_translated = 1 if (translated and not failed) else 0
+        inc_skipped = 1 if (requested and not failed and not inc_translated) else 0
+        inc_degraded = 1 if (inc_translated and degraded) else 0
+        inc_auto_req = 1 if is_auto else 0
+        inc_auto_unres = 1 if (is_auto and auto_resolved is False) else 0
+        inc_requested = 1 if requested else 0
+        inc_failed = 1 if failed else 0
+        lang = (str(target_lang or "").strip() or "unknown") if inc_translated else ""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT by_lang_json FROM outbound_xlate_daily WHERE day = ?", (day,)
+            ).fetchone()
+            if row is None:
+                by_lang: Dict[str, int] = {}
+                if lang:
+                    by_lang[lang] = 1
+                self._conn.execute(
+                    """INSERT INTO outbound_xlate_daily
+                         (day, sends, requested, translated, skipped, failed,
+                          auto_requested, auto_unresolved, degraded, by_lang_json)
+                       VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    (day, 1, inc_requested, inc_translated, inc_skipped, inc_failed,
+                     inc_auto_req, inc_auto_unres, inc_degraded,
+                     json.dumps(by_lang, ensure_ascii=False)),
+                )
+            else:
+                try:
+                    by_lang = json.loads(row["by_lang_json"] or "{}")
+                except Exception:
+                    by_lang = {}
+                if lang:
+                    by_lang[lang] = int(by_lang.get(lang, 0)) + 1
+                self._conn.execute(
+                    """UPDATE outbound_xlate_daily SET
+                         sends = sends + 1,
+                         requested = requested + ?,
+                         translated = translated + ?,
+                         skipped = skipped + ?,
+                         failed = failed + ?,
+                         auto_requested = auto_requested + ?,
+                         auto_unresolved = auto_unresolved + ?,
+                         degraded = degraded + ?,
+                         by_lang_json = ?
+                       WHERE day = ?""",
+                    (inc_requested, inc_translated, inc_skipped, inc_failed,
+                     inc_auto_req, inc_auto_unres, inc_degraded,
+                     json.dumps(by_lang, ensure_ascii=False), day),
+                )
+            self._conn.commit()
+
+    def get_outbound_xlate_stats(self, since_ts: float) -> Dict[str, Any]:
+        """P3：读取 since_ts 起的出向翻译漏斗按日聚合（看板窗口数据 + 趋势）。
+
+        返回与内存版 ``dump()`` 同形的 totals/coverage/by_target_lang，并附 ``trend``
+        （每日 sends/translated/coverage 百分比，供 sparkPct 折线）。
+        """
+        since_day = time.strftime("%Y-%m-%d", time.localtime(since_ts))
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT day, sends, requested, translated, skipped, failed,"
+                " auto_requested, auto_unresolved, degraded, by_lang_json"
+                " FROM outbound_xlate_daily WHERE day >= ? ORDER BY day",
+                (since_day,),
+            ).fetchall()
+        tot = {"sends_total": 0, "requested": 0, "translated": 0, "skipped": 0,
+               "failed": 0, "auto_requested": 0, "auto_unresolved": 0, "degraded": 0}
+        by_lang: Dict[str, int] = {}
+        trend = []
+        for r in rows:
+            s = int(r["sends"] or 0)
+            t = int(r["translated"] or 0)
+            tot["sends_total"] += s
+            tot["requested"] += int(r["requested"] or 0)
+            tot["translated"] += t
+            tot["skipped"] += int(r["skipped"] or 0)
+            tot["failed"] += int(r["failed"] or 0)
+            tot["auto_requested"] += int(r["auto_requested"] or 0)
+            tot["auto_unresolved"] += int(r["auto_unresolved"] or 0)
+            tot["degraded"] += int(r["degraded"] or 0)
+            try:
+                bl = json.loads(r["by_lang_json"] or "{}")
+            except Exception:
+                bl = {}
+            for k, v in bl.items():
+                by_lang[k] = by_lang.get(k, 0) + int(v)
+            trend.append({"day": str(r["day"])[5:], "sends": s, "translated": t,
+                          "cov_pct": round(t / s * 100, 1) if s else 0.0})
+        sends = tot["sends_total"]
+        areq = tot["auto_requested"]
+        out = dict(tot)
+        out["coverage_rate"] = round(tot["translated"] / sends, 4) if sends else 0
+        out["auto_unresolved_rate"] = round(tot["auto_unresolved"] / areq, 4) if areq else 0
+        out["by_target_lang"] = dict(sorted(by_lang.items()))
+        out["trend"] = trend
+        return out
+
+    def record_inbound_xlate(
+        self,
+        *,
+        translated: int = 0,
+        failed: int = 0,
+        by_lang: Optional[Dict[str, int]] = None,
+    ) -> None:
+        """P3：累计一次会话打开的入站翻译结果进「按日」表（客户→坐席）。
+
+        translated 为本次**新译出**条数（命中 store 缓存的不计，避免重开重复计数）；
+        by_lang 为这些新译出消息的客户来源语言分布。translated 与 failed 全 0 时不写。
+        best-effort，调用方包 try。
+        """
+        translated = max(0, int(translated or 0))
+        failed = max(0, int(failed or 0))
+        if translated <= 0 and failed <= 0:
+            return
+        by_lang = {str(k): int(v) for k, v in (by_lang or {}).items() if int(v) > 0}
+        day = time.strftime("%Y-%m-%d", time.localtime(self._now()))
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT by_lang_json FROM inbound_xlate_daily WHERE day = ?", (day,)
+            ).fetchone()
+            if row is None:
+                self._conn.execute(
+                    """INSERT INTO inbound_xlate_daily (day, translated, failed, by_lang_json)
+                       VALUES (?,?,?,?)""",
+                    (day, translated, failed, json.dumps(by_lang, ensure_ascii=False)),
+                )
+            else:
+                try:
+                    merged = json.loads(row["by_lang_json"] or "{}")
+                except Exception:
+                    merged = {}
+                for k, v in by_lang.items():
+                    merged[k] = int(merged.get(k, 0)) + int(v)
+                self._conn.execute(
+                    """UPDATE inbound_xlate_daily SET
+                         translated = translated + ?,
+                         failed = failed + ?,
+                         by_lang_json = ?
+                       WHERE day = ?""",
+                    (translated, failed, json.dumps(merged, ensure_ascii=False), day),
+                )
+            self._conn.commit()
+
+    def get_inbound_xlate_stats(self, since_ts: float) -> Dict[str, Any]:
+        """P3：读取 since_ts 起的入站翻译按日聚合（客户来源语言分布 + 趋势）。"""
+        since_day = time.strftime("%Y-%m-%d", time.localtime(since_ts))
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT day, translated, failed, by_lang_json"
+                " FROM inbound_xlate_daily WHERE day >= ? ORDER BY day",
+                (since_day,),
+            ).fetchall()
+        translated = failed = 0
+        by_lang: Dict[str, int] = {}
+        trend = []
+        for r in rows:
+            t = int(r["translated"] or 0)
+            translated += t
+            failed += int(r["failed"] or 0)
+            try:
+                bl = json.loads(r["by_lang_json"] or "{}")
+            except Exception:
+                bl = {}
+            for k, v in bl.items():
+                by_lang[k] = by_lang.get(k, 0) + int(v)
+            trend.append({"day": str(r["day"])[5:], "translated": t})
+        return {
+            "translated": translated,
+            "failed": failed,
+            "by_source_lang": dict(sorted(by_lang.items())),
+            "trend": trend,
+        }
+
+    def record_auto_claim(self, *, matched: bool, lang: str = "") -> None:
+        """P3：累计一次自动派单进「按日」表。
+
+        matched 表示该次派单是否按坐席语言命中；lang 为命中时的会话语言（用于分布）。
+        best-effort，调用方包 try。
+        """
+        lang = str(lang or "").strip()
+        day = time.strftime("%Y-%m-%d", time.localtime(self._now()))
+        inc_matched = 1 if matched else 0
+        bl_inc = {lang: 1} if (matched and lang) else {}
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT by_lang_json FROM auto_claim_daily WHERE day = ?", (day,)
+            ).fetchone()
+            if row is None:
+                self._conn.execute(
+                    """INSERT INTO auto_claim_daily
+                         (day, claimed, lang_matched, by_lang_json)
+                       VALUES (?,?,?,?)""",
+                    (day, 1, inc_matched, json.dumps(bl_inc, ensure_ascii=False)),
+                )
+            else:
+                try:
+                    merged = json.loads(row["by_lang_json"] or "{}")
+                except Exception:
+                    merged = {}
+                for k, v in bl_inc.items():
+                    merged[k] = int(merged.get(k, 0)) + int(v)
+                self._conn.execute(
+                    """UPDATE auto_claim_daily SET
+                         claimed = claimed + 1,
+                         lang_matched = lang_matched + ?,
+                         by_lang_json = ?
+                       WHERE day = ?""",
+                    (inc_matched, json.dumps(merged, ensure_ascii=False), day),
+                )
+            self._conn.commit()
+
+    def get_auto_claim_stats(self, since_ts: float) -> Dict[str, Any]:
+        """P3：读取 since_ts 起的自动派单按日聚合（命中语言分布 + 趋势）。"""
+        since_day = time.strftime("%Y-%m-%d", time.localtime(since_ts))
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT day, claimed, lang_matched, by_lang_json"
+                " FROM auto_claim_daily WHERE day >= ? ORDER BY day",
+                (since_day,),
+            ).fetchall()
+        claimed = lang_matched = 0
+        by_lang: Dict[str, int] = {}
+        trend = []
+        for r in rows:
+            c = int(r["claimed"] or 0)
+            claimed += c
+            lang_matched += int(r["lang_matched"] or 0)
+            try:
+                bl = json.loads(r["by_lang_json"] or "{}")
+            except Exception:
+                bl = {}
+            for k, v in bl.items():
+                by_lang[k] = by_lang.get(k, 0) + int(v)
+            trend.append({"day": str(r["day"])[5:], "claimed": c})
+        return {
+            "claimed": claimed,
+            "lang_matched": lang_matched,
+            "by_lang": dict(sorted(by_lang.items())),
+            "trend": trend,
+        }
+
     def count_messages(self, conversation_id: str = "") -> int:
         with self._lock:
             if conversation_id:
@@ -804,8 +1458,8 @@ class InboxStore:
                      source_kind, source_id, peer_text, draft_text, final_text,
                      draft_lang, translated_preview, risk_level, risk_reasons_json,
                      autopilot_level, status, decided_by, decided_at, sent_at, error,
-                     created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     created_at, updated_at, trace_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(source_kind, source_id) DO UPDATE SET
                     risk_level = excluded.risk_level,
                     risk_reasons_json = excluded.risk_reasons_json,
@@ -819,7 +1473,9 @@ class InboxStore:
                     decided_at = excluded.decided_at,
                     sent_at = excluded.sent_at,
                     error = excluded.error,
-                    updated_at = excluded.updated_at
+                    updated_at = excluded.updated_at,
+                    trace_id = CASE WHEN reply_drafts.trace_id = '' OR reply_drafts.trace_id IS NULL
+                               THEN excluded.trace_id ELSE reply_drafts.trace_id END
                 """,
                 (
                     draft_id, str(draft.get("conversation_id") or ""),
@@ -834,7 +1490,7 @@ class InboxStore:
                     str(draft.get("status") or "pending"),
                     str(draft.get("decided_by") or ""), float(draft.get("decided_at") or 0),
                     float(draft.get("sent_at") or 0), str(draft.get("error") or ""),
-                    now, now,
+                    now, now, str(draft.get("trace_id") or ""),
                 ),
             )
             self._conn.commit()
@@ -953,6 +1609,25 @@ class InboxStore:
         if count > 0:
             logger.info("cleanup_old_drafts: 删除 %d 条超龄草稿（age>%dd statuses=%s）",
                         count, max_age_days, safe_statuses)
+        return count
+
+    def cleanup_outbound_translations(self, *, max_age_days: int = 30) -> int:
+        """P3：删除超龄出向译文旁路记录，防 outbound_translations 表无限膨胀。
+
+        出向译文映射仅为「双行展示」服务，超过保留期的历史会话基本不再回看，
+        按 created_at 删除即可。返回删除行数。best-effort。
+        """
+        cutoff_ts = self._now() - max(1, int(max_age_days)) * 86400
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM outbound_translations WHERE created_at < ?",
+                (cutoff_ts,),
+            )
+            self._conn.commit()
+        count = int(cur.rowcount or 0)
+        if count > 0:
+            logger.info("cleanup_outbound_translations: 删除 %d 条超龄出向译文（age>%dd）",
+                        count, max_age_days)
         return count
 
     # ── B2 草稿审计日志 ──────────────────────────────────────────
@@ -1122,6 +1797,31 @@ class InboxStore:
             rows = self._conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
+    def get_reliability_timeline(
+        self, since_ts: float = 0.0, *, bucket_sec: int = 3600,
+    ) -> List[Dict[str, Any]]:
+        """D2 运维可靠性：按时间桶聚合 draft_audit_log 全量处置（不过滤 agent）。
+
+        持久来源，重启不丢。返回每桶 total/autosend/blocked/rejected，
+        供「处置量 + 拦截/弃用率」趋势曲线。block_rate=blocked/total 是系统拦截高风险的占比。
+        """
+        bkt = max(300, int(bucket_sec))
+        sql = f"""
+            SELECT
+                (CAST(ts / {bkt} AS INTEGER) * {bkt}) AS bucket_ts,
+                COUNT(*) AS total,
+                SUM(CASE WHEN action='autosend' THEN 1 ELSE 0 END) AS autosend,
+                SUM(CASE WHEN action='blocked'  THEN 1 ELSE 0 END) AS blocked,
+                SUM(CASE WHEN action='rejected' THEN 1 ELSE 0 END) AS rejected
+            FROM draft_audit_log
+            WHERE ts >= ?
+            GROUP BY bucket_ts
+            ORDER BY bucket_ts
+        """
+        with self._lock:
+            rows = self._conn.execute(sql, [float(since_ts)]).fetchall()
+        return [dict(r) for r in rows]
+
     def get_csat_trend(
         self,
         *,
@@ -1197,6 +1897,339 @@ class InboxStore:
             })
         return result
 
+    def get_automation_roi_stats(
+        self, since_ts: float = 0.0, until_ts: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """P0-3 ROI：按动作聚合 draft_audit_log，拆「AI 自动发 / 人工发 / 拦截」。
+
+        与 ``get_agent_perf`` 不同：**不过滤 agent_id**，故 AutosendWorker 的无主
+        autosend 也计入——这正是「AI 替代多少人工」的真实口径。
+
+        ``until_ts`` 给定时只统计 ``[since_ts, until_ts)`` 半开区间（用于环比上一窗口）。
+
+        返回::
+
+            {
+              "ai_sent": int,        # autosend（AI 自动发送）
+              "human_sent": int,     # approved + edit_send + force_override（坐席处置后发）
+              "suppressed": int,     # rejected + blocked（生成但未发）
+              "total_sent": int,     # ai_sent + human_sent
+              "ai_share": float,     # ai_sent / total_sent（0–1）
+              "trend": [{"day": "MM-DD", "ai": int, "human": int}, ...],
+            }
+        """
+        _AI = ("autosend",)
+        _HUMAN = ("approved", "edit_send", "force_override")
+        _SUPPRESS = ("rejected", "blocked")
+        clause = "ts >= ?"
+        params: List[Any] = [float(since_ts)]
+        if until_ts is not None:
+            clause += " AND ts < ?"
+            params.append(float(until_ts))
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT action, COUNT(*) FROM draft_audit_log "
+                f"WHERE {clause} GROUP BY action",
+                params,
+            ).fetchall()
+            day_rows = self._conn.execute(
+                f"SELECT action, ts FROM draft_audit_log WHERE {clause}",
+                params,
+            ).fetchall()
+        counts: Dict[str, int] = {str(r[0] or ""): int(r[1] or 0) for r in rows}
+        ai_sent = sum(counts.get(a, 0) for a in _AI)
+        human_sent = sum(counts.get(a, 0) for a in _HUMAN)
+        suppressed = sum(counts.get(a, 0) for a in _SUPPRESS)
+        total_sent = ai_sent + human_sent
+        per_day: Dict[str, Dict[str, int]] = {}
+        for action, ts in day_rows:
+            act = str(action or "")
+            if act in _AI:
+                key = "ai"
+            elif act in _HUMAN:
+                key = "human"
+            else:
+                continue
+            day = time.strftime("%Y-%m-%d", time.localtime(float(ts)))
+            bucket = per_day.setdefault(day, {"ai": 0, "human": 0})
+            bucket[key] += 1
+        trend = [{"day": d[5:], "ai": v["ai"], "human": v["human"]}
+                 for d, v in sorted(per_day.items())]
+        return {
+            "ai_sent": ai_sent,
+            "human_sent": human_sent,
+            "suppressed": suppressed,
+            "total_sent": total_sent,
+            "ai_share": round(ai_sent / total_sent, 3) if total_sent else 0.0,
+            "trend": trend,
+        }
+
+    def get_quality_stats(
+        self, since_ts: float = 0.0, until_ts: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """P3-1 AI 回复质量：按动作 + 风险等级聚合 draft_audit_log（**不过滤 agent**）。
+
+        ``until_ts`` 给定时只统计 ``[since_ts, until_ts)`` 半开区间（用于环比上一窗口）。
+
+        与 ``get_agent_perf`` 不同：含 AutosendWorker 的无主 autosend，故口径是
+        「全部 AI 草稿处置」，用于「AI 答得好不好」质量闭环。
+
+        派生率：
+        - ``auto_pass_rate``：autosend / 总处置（AI 直接放行占比，越高越省人）
+        - ``edit_rate``：edit_send / 人工发送（坐席需改写才发的占比，越高说明 AI 初稿越差）
+        - ``reject_rate``：rejected / 总处置（被坐席弃用占比）
+        - ``block_rate``：blocked / 总处置（L4 高风险拦截占比）
+        - ``high_risk_rate``：(L3+L4) / 有等级的处置
+
+        返回 counts / levels / 各率 + 按日 trend（total/autosend/edit_send/rejected/high_risk）。
+        """
+        _DISPOSITIONS = ("autosend", "approved", "edit_send",
+                         "rejected", "blocked", "force_override")
+        _HUMAN_SENT = ("approved", "edit_send", "force_override")
+        _IN = ("autosend", "approved", "edit_send",
+               "rejected", "blocked", "force_override")
+        _ph = ",".join("?" * len(_IN))
+        win = "ts >= ?"
+        base: list = [float(since_ts)]
+        if until_ts is not None:
+            win += " AND ts < ?"
+            base.append(float(until_ts))
+        with self._lock:
+            act_rows = self._conn.execute(
+                f"SELECT action, COUNT(*) FROM draft_audit_log "
+                f"WHERE {win} AND action IN ({_ph}) GROUP BY action",
+                base + list(_IN),
+            ).fetchall()
+            lvl_rows = self._conn.execute(
+                f"SELECT autopilot_level, COUNT(*) FROM draft_audit_log "
+                f"WHERE {win} AND autopilot_level != '' GROUP BY autopilot_level",
+                base,
+            ).fetchall()
+            day_rows = self._conn.execute(
+                f"SELECT action, autopilot_level, ts FROM draft_audit_log "
+                f"WHERE {win} AND action IN ({_ph})",
+                base + list(_IN),
+            ).fetchall()
+        counts: Dict[str, int] = {a: 0 for a in _DISPOSITIONS}
+        for action, cnt in act_rows:
+            counts[str(action)] = int(cnt or 0)
+        levels: Dict[str, int] = {str(lv): int(c or 0) for lv, c in lvl_rows}
+        total = sum(counts.values())
+        human_sent = sum(counts[a] for a in _HUMAN_SENT)
+        leveled = sum(levels.values())
+        high_risk = levels.get("L3", 0) + levels.get("L4", 0)
+
+        def _rate(num: int, den: int) -> float:
+            return round(num / den, 3) if den else 0.0
+
+        per_day: Dict[str, Dict[str, int]] = {}
+        for action, level, ts in day_rows:
+            day = time.strftime("%Y-%m-%d", time.localtime(float(ts)))
+            b = per_day.setdefault(
+                day, {"total": 0, "autosend": 0, "edit_send": 0,
+                      "rejected": 0, "high_risk": 0})
+            b["total"] += 1
+            act = str(action or "")
+            if act in b:
+                b[act] += 1
+            if str(level or "") in ("L3", "L4"):
+                b["high_risk"] += 1
+        trend = [
+            {"day": d[5:], **v} for d, v in sorted(per_day.items())
+        ]
+        return {
+            "counts": counts,
+            "levels": levels,
+            "total": total,
+            "sent": counts["autosend"] + human_sent,
+            "human_sent": human_sent,
+            "auto_pass_rate": _rate(counts["autosend"], total),
+            "edit_rate": _rate(counts["edit_send"], human_sent),
+            "reject_rate": _rate(counts["rejected"], total),
+            "block_rate": _rate(counts["blocked"], total),
+            "high_risk_rate": _rate(high_risk, leveled),
+            "trend": trend,
+        }
+
+    def get_usage_stats(
+        self, since_ts: float = 0.0, until_ts: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """C0-2 用量计量：从既有 messages + draft_audit_log 聚合可计费用量。
+
+        单一数据源、零新表零迁移，口径与 ROI/质量看板一致。``until_ts`` 给定时只统计
+        ``[since_ts, until_ts)`` 半开区间（环比）。
+
+        返回::
+
+            {
+              "messages_in": int, "messages_out": int, "messages_total": int,
+              "ai_calls": int,        # draft_audit_log 处置行数 ≈ AI 生成草稿数
+              "ai_sent": int,         # autosend（AI 自动发）
+              "active_agents": int,   # 窗口内有处置记录的去重坐席数（计费口径代理）
+              "active_agent_ids": [...],
+              "trend": [{"day":"MM-DD","messages":int,"ai_calls":int}, ...],
+            }
+        """
+        mwin = "ts >= ?"
+        mparams: List[Any] = [float(since_ts)]
+        if until_ts is not None:
+            mwin += " AND ts < ?"
+            mparams.append(float(until_ts))
+        with self._lock:
+            msg_rows = self._conn.execute(
+                f"SELECT direction, COUNT(*) FROM messages WHERE {mwin} "
+                "GROUP BY direction",
+                mparams,
+            ).fetchall()
+            msg_day_rows = self._conn.execute(
+                f"SELECT ts FROM messages WHERE {mwin}", mparams,
+            ).fetchall()
+            audit_act_rows = self._conn.execute(
+                f"SELECT action, COUNT(*) FROM draft_audit_log WHERE {mwin} "
+                "GROUP BY action",
+                mparams,
+            ).fetchall()
+            agent_rows = self._conn.execute(
+                f"SELECT DISTINCT agent_id FROM draft_audit_log WHERE {mwin} "
+                "AND agent_id != ''",
+                mparams,
+            ).fetchall()
+            audit_day_rows = self._conn.execute(
+                f"SELECT ts FROM draft_audit_log WHERE {mwin}", mparams,
+            ).fetchall()
+        msg_by_dir: Dict[str, int] = {str(r[0] or "in"): int(r[1] or 0)
+                                      for r in msg_rows}
+        messages_in = msg_by_dir.get("in", 0)
+        messages_out = msg_by_dir.get("out", 0)
+        act_counts: Dict[str, int] = {str(r[0] or ""): int(r[1] or 0)
+                                      for r in audit_act_rows}
+        ai_calls = sum(act_counts.values())
+        ai_sent = act_counts.get("autosend", 0)
+        agent_ids = sorted(str(r[0]) for r in agent_rows if r[0])
+
+        per_day: Dict[str, Dict[str, int]] = {}
+        for (ts,) in msg_day_rows:
+            day = time.strftime("%Y-%m-%d", time.localtime(float(ts)))
+            per_day.setdefault(day, {"messages": 0, "ai_calls": 0})["messages"] += 1
+        for (ts,) in audit_day_rows:
+            day = time.strftime("%Y-%m-%d", time.localtime(float(ts)))
+            per_day.setdefault(day, {"messages": 0, "ai_calls": 0})["ai_calls"] += 1
+        trend = [{"day": d[5:], "messages": v["messages"], "ai_calls": v["ai_calls"]}
+                 for d, v in sorted(per_day.items())]
+        return {
+            "messages_in": messages_in,
+            "messages_out": messages_out,
+            "messages_total": messages_in + messages_out,
+            "ai_calls": ai_calls,
+            "ai_sent": ai_sent,
+            "active_agents": len(agent_ids),
+            "active_agent_ids": agent_ids,
+            "trend": trend,
+        }
+
+    def ping(self) -> bool:
+        """轻量连通性自检：能否对 DB 执行一次 SELECT（健康检查用）。"""
+        try:
+            with self._lock:
+                self._conn.execute("SELECT 1").fetchone()
+            return True
+        except Exception:
+            logger.debug("InboxStore.ping 失败", exc_info=True)
+            return False
+
+    def count_demo(self, prefix: str = "demo:") -> Dict[str, int]:
+        """统计 demo 命名空间（conversation_id 以 prefix 开头）的行数。"""
+        like = f"{prefix}%"
+        with self._lock:
+            conv = self._conn.execute(
+                "SELECT COUNT(*) FROM conversations WHERE conversation_id LIKE ?",
+                (like,)).fetchone()[0]
+            msg = self._conn.execute(
+                "SELECT COUNT(*) FROM messages WHERE conversation_id LIKE ?",
+                (like,)).fetchone()[0]
+            audit = self._conn.execute(
+                "SELECT COUNT(*) FROM draft_audit_log WHERE conversation_id LIKE ?",
+                (like,)).fetchone()[0]
+        return {"conversations": int(conv), "messages": int(msg),
+                "draft_audits": int(audit)}
+
+    def purge_demo(self, prefix: str = "demo:") -> Dict[str, int]:
+        """删除 demo 命名空间的全部行（会话/消息/草稿审计），返回删除计数。
+
+        仅按 conversation_id 前缀删除，绝不触碰真实数据。messages FTS 触发器随删同步。
+        """
+        like = f"{prefix}%"
+        before = self.count_demo(prefix)
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM messages WHERE conversation_id LIKE ?", (like,))
+            self._conn.execute(
+                "DELETE FROM draft_audit_log WHERE conversation_id LIKE ?", (like,))
+            self._conn.execute(
+                "DELETE FROM conversations WHERE conversation_id LIKE ?", (like,))
+            self._conn.commit()
+        return before
+
+    def get_kb_improvement_candidates(
+        self, since_ts: float = 0.0, *, limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """P3-2 质量→KB 闭环：把「AI 答错被改写/拒绝」的会话挑成 KB 改进候选。
+
+        取 ``draft_audit_log`` 中 action ∈ {edit_send, rejected} 的近期记录，关联：
+        - ``question``：处置时刻前最后一条**入站**消息（客户问句 → 候选 trigger）；
+        - ``suggested_reply``：edit_send 时取处置时刻后第一条**出站**消息（坐席改写后真正
+          发出的好答案 → 候选 example_reply）；rejected 无好答案，留空待人工补。
+
+        无客户问句（纯媒体/取不到）的候选跳过。返回最多 limit 条，最新在前。
+        """
+        limit = max(1, min(100, int(limit or 20)))
+        with self._lock:
+            audit_rows = self._conn.execute(
+                "SELECT conversation_id, action, ts, reason FROM draft_audit_log "
+                "WHERE ts >= ? AND action IN ('edit_send','rejected') "
+                "AND conversation_id != '' ORDER BY ts DESC LIMIT ?",
+                (float(since_ts), limit * 3),
+            ).fetchall()
+            out: List[Dict[str, Any]] = []
+            seen_q: set = set()
+            for ar in audit_rows:
+                cid = str(ar["conversation_id"] or "")
+                ats = float(ar["ts"] or 0)
+                action = str(ar["action"] or "")
+                q = self._conn.execute(
+                    "SELECT text FROM messages WHERE conversation_id=? "
+                    "AND direction='in' AND ts<=? AND text!='' "
+                    "ORDER BY ts DESC LIMIT 1",
+                    (cid, ats + 1),
+                ).fetchone()
+                question = str(q["text"]).strip() if q and q["text"] else ""
+                if not question:
+                    continue
+                dedup_key = (cid, question[:80])
+                if dedup_key in seen_q:
+                    continue
+                seen_q.add(dedup_key)
+                suggested = ""
+                if action == "edit_send":
+                    rep = self._conn.execute(
+                        "SELECT text FROM messages WHERE conversation_id=? "
+                        "AND direction='out' AND ts>=? AND text!='' "
+                        "ORDER BY ts ASC LIMIT 1",
+                        (cid, ats - 1),
+                    ).fetchone()
+                    suggested = str(rep["text"]).strip() if rep and rep["text"] else ""
+                out.append({
+                    "conversation_id": cid,
+                    "action": action,
+                    "ts": ats,
+                    "reason": str(ar["reason"] or ""),
+                    "question": question,
+                    "suggested_reply": suggested,
+                })
+                if len(out) >= limit:
+                    break
+        return out
+
     # ── Phase 5：坐席 presence + 会话租约 ─────────────────────
 
     def upsert_agent_presence(
@@ -1240,8 +2273,12 @@ class InboxStore:
     def list_agent_presence(self, *, active_within_sec: float = 120) -> List[Dict[str, Any]]:
         cutoff = self._now() - max(0.0, float(active_within_sec or 0))
         with self._lock:
+            # P3：LEFT JOIN agent_prefs 带出坐席技能语言（供 auto_assign match_language）。
             rows = self._conn.execute(
-                "SELECT * FROM agent_presence WHERE last_seen_at >= ? ORDER BY last_seen_at DESC",
+                "SELECT p.*, COALESCE(pr.languages, '') AS languages"
+                " FROM agent_presence p"
+                " LEFT JOIN agent_prefs pr ON pr.agent_id = p.agent_id"
+                " WHERE p.last_seen_at >= ? ORDER BY p.last_seen_at DESC",
                 (cutoff,),
             ).fetchall()
         return [dict(r) for r in rows]
@@ -1281,7 +2318,8 @@ class InboxStore:
                 ).fetchone()
         if row is None:
             return {"agent_id": aid, "warn_sec": 0, "crit_sec": 0,
-                    "muted": 0, "dnd_start": -1, "dnd_end": -1, "updated_at": 0}
+                    "muted": 0, "dnd_start": -1, "dnd_end": -1, "updated_at": 0,
+                    "languages": ""}
         return dict(row)
 
     def set_agent_prefs(
@@ -1303,6 +2341,26 @@ class InboxStore:
                 "updated_at=excluded.updated_at",
                 (aid, int(warn_sec or 0), int(crit_sec or 0), 1 if muted else 0,
                  int(dnd_start), int(dnd_end), now))
+            self._conn.commit()
+        return self.get_agent_prefs(aid)
+
+    def set_agent_languages(self, agent_id: str, languages: str) -> Dict[str, Any]:
+        """P3：写坐席技能语言（CSV 规范码），只动 languages 列，不影响告警偏好。
+
+        languages 已由调用方规范化（normalize_lang + 去重）。新坐席无 prefs 行时插入，
+        告警字段取默认（沿用全局 / 无免打扰）。
+        """
+        aid = str(agent_id or "").strip()
+        if not aid:
+            raise ValueError("agent_id required")
+        langs = str(languages or "")
+        now = self._now()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO agent_prefs (agent_id, languages, updated_at) VALUES (?,?,?) "
+                "ON CONFLICT(agent_id) DO UPDATE SET languages=excluded.languages, "
+                "updated_at=excluded.updated_at",
+                (aid, langs, now))
             self._conn.commit()
         return self.get_agent_prefs(aid)
 
@@ -1584,6 +2642,7 @@ class InboxStore:
             return
         now = self._now()
         existing = self.get_conv_meta(cid)
+        trace_id_to_use = ""
         if existing:
             ih = list(existing.get("intent_history") or [])
             eh = list(existing.get("emotion_history") or [])
@@ -1591,8 +2650,13 @@ class InboxStore:
             # 保留已有 contact_id（如未传新值）
             if not contact_id:
                 contact_id = str(existing.get("contact_id") or "")
+            # S3: 继承已有 trace_id；没有则新生成
+            trace_id_to_use = str(existing.get("trace_id") or "")
         else:
             ih, eh, mc = [], [], 1
+        if not trace_id_to_use:
+            from src.inbox.tracer import new_trace_id
+            trace_id_to_use = new_trace_id()
         if intent:
             ih.append(str(intent))
         if emotion:
@@ -1605,8 +2669,8 @@ class InboxStore:
             self._conn.execute(
                 """INSERT INTO conversation_meta
                    (conversation_id, platform, last_intent, last_emotion, last_risk,
-                    intent_history, emotion_history, msg_count, updated_at, contact_id, workspace_id)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                    intent_history, emotion_history, msg_count, updated_at, contact_id, workspace_id, trace_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(conversation_id) DO UPDATE SET
                      platform       = excluded.platform,
                      last_intent    = CASE WHEN excluded.last_intent != ''
@@ -1621,13 +2685,15 @@ class InboxStore:
                      contact_id     = CASE WHEN excluded.contact_id != ''
                                       THEN excluded.contact_id ELSE conversation_meta.contact_id END,
                      workspace_id   = CASE WHEN excluded.workspace_id != 'default'
-                                      THEN excluded.workspace_id ELSE conversation_meta.workspace_id END
+                                      THEN excluded.workspace_id ELSE conversation_meta.workspace_id END,
+                     trace_id       = CASE WHEN conversation_meta.trace_id = '' OR conversation_meta.trace_id IS NULL
+                                      THEN excluded.trace_id ELSE conversation_meta.trace_id END
                 """,
                 (cid, str(platform or ""), str(intent or ""), str(emotion or ""),
                  str(risk or "low"),
                  json.dumps(ih, ensure_ascii=False),
                  json.dumps(eh, ensure_ascii=False),
-                 mc, now, str(contact_id or ""), _wsid),
+                 mc, now, str(contact_id or ""), _wsid, trace_id_to_use),
             )
             self._conn.commit()
 
@@ -2102,7 +3168,7 @@ class InboxStore:
         return None
 
     def update_conv_csat(self, conversation_id: str, csat_score: float) -> None:
-        """M1：写入对话 CSAT 评分（会话结束时调用）。"""
+        """M1：写入对话 CSAT 评分（会话结束时调用），同时触发 S1 A/B 结果回填。"""
         cid = str(conversation_id or "").strip()
         if not cid:
             return
@@ -2113,6 +3179,123 @@ class InboxStore:
                 (csat_score, cid),
             )
             self._conn.commit()
+        # S1: 自动回填 A/B 测试结果（best-effort，不影响主流程）
+        try:
+            from src.inbox.ab_testing import ABTestingStore
+            ab = ABTestingStore(self)
+            ab.record_outcome(conversation_id=cid, csat_score=csat_score)
+        except Exception:
+            import logging as _log
+            _log.getLogger(__name__).debug("S1 A/B outcome 回填失败（已忽略）", exc_info=True)
+
+    # ── P61-3：分组批量触达日志 ───────────────────────────
+    def record_outreach(
+        self, conversation_id: str, *, batch_id: str = "", platform: str = "",
+        account_id: str = "", status: str = "sent", note: str = "",
+        ts: Optional[float] = None,
+    ) -> int:
+        """记录一次触达（execution 阶段调用）。返回新行 id。"""
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            return 0
+        t = float(ts if ts is not None else self._now())
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO outreach_log (conversation_id, batch_id, platform, "
+                "account_id, status, note, ts) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (cid, str(batch_id or ""), str(platform or ""), str(account_id or ""),
+                 str(status or "sent"), str(note or ""), t),
+            )
+            self._conn.commit()
+            return int(cur.lastrowid or 0)
+
+    def last_outreach_ts(self, conversation_id: str) -> float:
+        """该会话最近一次触达时间戳；从未触达返回 0（用于 cooldown 判定）。"""
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            return 0.0
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT ts FROM outreach_log WHERE conversation_id=? "
+                "ORDER BY ts DESC LIMIT 1", (cid,),
+            ).fetchone()
+        return float(row["ts"]) if row else 0.0
+
+    def last_outreach_ts_bulk(self, conversation_ids: List[str]) -> Dict[str, float]:
+        """批量取多会话最近触达 ts（避免 N+1 查询）。"""
+        ids = [str(c or "").strip() for c in (conversation_ids or []) if str(c or "").strip()]
+        if not ids:
+            return {}
+        placeholders = ",".join("?" * len(ids))
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT conversation_id, MAX(ts) AS mx FROM outreach_log "
+                f"WHERE conversation_id IN ({placeholders}) GROUP BY conversation_id",
+                ids,
+            ).fetchall()
+        return {r["conversation_id"]: float(r["mx"] or 0) for r in rows}
+
+    def outreach_batch_stats(self, batch_id: str) -> Dict[str, Any]:
+        """某批次的回执统计：按 status 计数 + 总数。"""
+        bid = str(batch_id or "").strip()
+        if not bid:
+            return {"batch_id": "", "total": 0, "by_status": {}}
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT status, COUNT(*) AS n FROM outreach_log WHERE batch_id=? "
+                "GROUP BY status", (bid,),
+            ).fetchall()
+        by_status = {r["status"]: int(r["n"]) for r in rows}
+        return {"batch_id": bid, "total": sum(by_status.values()), "by_status": by_status}
+
+    def outreach_response_stats(
+        self, batch_id: str, *,
+        response_window_days: float = 7.0,
+        now: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """P61-5：触达效果回流——某批次"已发送"消息的回复率。
+
+        判定：对每条 status='sent' 的触达，看其会话在触达 ts 之后（且在
+        response_window_days 窗口内，<=0 表示不限窗）是否收到**入站**消息。
+        返回 sent / responded / response_rate / avg_response_minutes。
+        纯查询、无副作用，可随时回看（回复是异步累积的）。
+        """
+        bid = str(batch_id or "").strip()
+        if not bid:
+            return {"batch_id": "", "sent": 0, "responded": 0,
+                    "response_rate": 0.0, "avg_response_minutes": 0.0}
+        window_s = float(response_window_days) * 86400.0 if response_window_days and response_window_days > 0 else 0.0
+        # 每条 sent 触达 → 该会话触达后首个入站消息 ts（相关子查询，走 idx_msg_conv_ts）
+        sql = (
+            "SELECT o.ts AS sent_ts, "
+            "(SELECT MIN(m.ts) FROM messages m "
+            " WHERE m.conversation_id = o.conversation_id "
+            "   AND m.direction = 'in' AND m.ts > o.ts) AS reply_ts "
+            "FROM outreach_log o WHERE o.batch_id = ? AND o.status = 'sent'"
+        )
+        with self._lock:
+            rows = self._conn.execute(sql, (bid,)).fetchall()
+        sent = len(rows)
+        responded = 0
+        latencies: List[float] = []
+        for r in rows:
+            reply_ts = r["reply_ts"]
+            if reply_ts is None:
+                continue
+            delta = float(reply_ts) - float(r["sent_ts"])
+            if delta <= 0:
+                continue
+            if window_s > 0 and delta > window_s:
+                continue
+            responded += 1
+            latencies.append(delta)
+        rate = round(responded / sent, 4) if sent else 0.0
+        avg_min = round(sum(latencies) / len(latencies) / 60.0, 1) if latencies else 0.0
+        return {
+            "batch_id": bid, "sent": sent, "responded": responded,
+            "response_rate": rate, "avg_response_minutes": avg_min,
+            "response_window_days": response_window_days,
+        }
 
     def get_conv_meta(self, conversation_id: str) -> Optional[Dict[str, Any]]:
         """I1：获取对话智能元数据，含情绪趋势计算结果。"""
@@ -2301,3 +3484,1502 @@ class InboxStore:
                 (self._now(), str(tid)),
             )
             self._conn.commit()
+
+    # ── T1: 会话级标签 + 归档 ──────────────────────────────────────────
+    def save_conv_summary(self, conversation_id: str, summary: str) -> bool:
+        """Phase 19：写入会话 AI 摘要（归档时自动生成）。"""
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            return False
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO conversation_meta (conversation_id, summary, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(conversation_id) DO UPDATE SET
+                    summary    = excluded.summary,
+                    updated_at = excluded.updated_at
+                """,
+                (cid, str(summary or ""), self._now()),
+            )
+            self._conn.commit()
+        return True
+
+    def get_conv_tags(self, conversation_id: str) -> List[str]:
+        """T1：获取会话标签列表。"""
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            return []
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT conv_tags FROM conversation_meta WHERE conversation_id = ?", (cid,)
+            ).fetchone()
+        if row is None:
+            return []
+        try:
+            return json.loads(row["conv_tags"] or "[]")
+        except Exception:
+            return []
+
+    def set_conv_tags(self, conversation_id: str, tags: List[str]) -> bool:
+        """T1：覆写会话标签列表；如 conversation_meta 行不存在则插入。"""
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            return False
+        tags = [str(t).strip() for t in tags if str(t).strip()]
+        tags_json = json.dumps(tags, ensure_ascii=False)
+        now = self._now()
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO conversation_meta (conversation_id, conv_tags, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(conversation_id) DO UPDATE SET
+                    conv_tags  = excluded.conv_tags,
+                    updated_at = excluded.updated_at
+                """,
+                (cid, tags_json, now),
+            )
+            self._conn.commit()
+        return True
+
+    def set_conv_archived(self, conversation_id: str, archived: bool) -> bool:
+        """T1：标记/取消归档；如 conversation_meta 行不存在则插入。"""
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            return False
+        val = 1 if archived else 0
+        now = self._now()
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO conversation_meta (conversation_id, archived, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(conversation_id) DO UPDATE SET
+                    archived   = excluded.archived,
+                    updated_at = excluded.updated_at
+                """,
+                (cid, val, now),
+            )
+            self._conn.commit()
+        return True
+
+    def tag_stats(self, *, since: float = 0.0) -> List[Dict[str, Any]]:
+        """T2：聚合每个标签的会话数、未读数、平均等待秒数（用于标签概览 strip）。
+
+        算法：扫 conversation_meta 中 conv_tags 非空的行，join conversations 表取
+        unread / last_ts；join messages 最近1条方向判断是否等待回复。
+        since=0 表示全量（不按时间过滤）。
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT m.conversation_id, m.conv_tags, m.archived,
+                       c.unread, c.last_ts, c.platform
+                FROM conversation_meta m
+                LEFT JOIN conversations c ON c.conversation_id = m.conversation_id
+                WHERE m.conv_tags != '[]' AND m.conv_tags != ''
+                """
+            ).fetchall()
+        # 聚合
+        tag_map: Dict[str, Dict[str, Any]] = {}
+        for r in rows:
+            try:
+                tags = json.loads(r["conv_tags"] or "[]")
+            except Exception:
+                tags = []
+            for tag in tags:
+                if not tag:
+                    continue
+                entry = tag_map.setdefault(tag, {
+                    "tag": tag, "count": 0, "unread": 0,
+                    "archived": 0, "platforms": set(),
+                })
+                entry["count"] += 1
+                entry["unread"] += int(r["unread"] or 0)
+                if r.get("archived"):
+                    entry["archived"] += 1
+                if r.get("platform"):
+                    entry["platforms"].add(str(r["platform"]))
+        result = []
+        for entry in sorted(tag_map.values(), key=lambda x: -x["count"]):
+            result.append({
+                "tag": entry["tag"],
+                "count": entry["count"],
+                "unread": entry["unread"],
+                "archived": entry["archived"],
+                "platforms": sorted(entry["platforms"]),
+            })
+        return result
+
+    def list_conv_tags_map(self, conversation_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """T1：批量获取会话标签+归档状态（用于列表渲染）。
+
+        返回 {conv_id: {"tags": [...], "archived": bool}}。
+        """
+        if not conversation_ids:
+            return {}
+        placeholders = ",".join("?" * len(conversation_ids))
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT conversation_id, conv_tags, archived FROM conversation_meta"
+                f" WHERE conversation_id IN ({placeholders})",
+                conversation_ids,
+            ).fetchall()
+        result: Dict[str, Dict[str, Any]] = {}
+        for r in rows:
+            try:
+                tags = json.loads(r["conv_tags"] or "[]")
+            except Exception:
+                tags = []
+            result[r["conversation_id"]] = {
+                "tags": tags,
+                "archived": bool(r.get("archived", 0)),
+            }
+        return result
+
+    # ── V1: 坐席协作注解（Phase 25） ─────────────────────────────────────
+    def add_conv_note(
+        self,
+        conversation_id: str,
+        body: str,
+        *,
+        agent_id: str = "",
+        agent_name: str = "",
+        mentions: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """V1：在会话中添加内部注解（对客户不可见）。
+
+        返回刚插入的 note dict；body 为空时抛 ValueError。
+        """
+        body = str(body or "").strip()
+        if not body:
+            raise ValueError("note body 不能为空")
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            raise ValueError("conversation_id 不能为空")
+        import uuid as _uuid
+        note_id = str(_uuid.uuid4())
+        ts = self._now()
+        mentions_list: List[str] = [str(m) for m in (mentions or []) if str(m).strip()]
+        with self._lock:
+            self._conn.execute(
+                """INSERT INTO conv_notes
+                   (note_id, conversation_id, agent_id, agent_name, body, mentions, ts, edited_ts)
+                   VALUES (?,?,?,?,?,?,?,0)""",
+                (note_id, cid, str(agent_id or ""), str(agent_name or ""),
+                 body, json.dumps(mentions_list, ensure_ascii=False), ts),
+            )
+            self._conn.commit()
+        return {
+            "note_id": note_id, "conversation_id": cid,
+            "agent_id": agent_id, "agent_name": agent_name,
+            "body": body, "mentions": mentions_list, "ts": ts, "edited_ts": 0,
+        }
+
+    def list_conv_notes(
+        self, conversation_id: str, *, limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """V1：获取会话的全部内部注解（按时间升序）。"""
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            return []
+        limit = max(1, min(200, int(limit or 50)))
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT note_id, conversation_id, agent_id, agent_name,
+                          body, mentions, ts, edited_ts
+                   FROM conv_notes WHERE conversation_id = ?
+                   ORDER BY ts ASC LIMIT ?""",
+                (cid, limit),
+            ).fetchall()
+        result = []
+        for r in rows:
+            try:
+                mentions_list = json.loads(r["mentions"] or "[]")
+            except Exception:
+                mentions_list = []
+            result.append({
+                "note_id": r["note_id"], "conversation_id": r["conversation_id"],
+                "agent_id": r["agent_id"], "agent_name": r["agent_name"],
+                "body": r["body"], "mentions": mentions_list,
+                "ts": r["ts"], "edited_ts": r["edited_ts"],
+            })
+        return result
+
+    def edit_conv_note(
+        self, note_id: str, body: str, *, agent_id: str = ""
+    ) -> bool:
+        """V1：编辑注解内容（仅注解作者或管理员可编辑，此处由 API 层鉴权）。"""
+        body = str(body or "").strip()
+        if not body:
+            return False
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE conv_notes SET body=?, edited_ts=? WHERE note_id=?",
+                (body, self._now(), str(note_id)),
+            )
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    def delete_conv_note(self, note_id: str, *, agent_id: str = "") -> bool:
+        """V1：删除注解（由 API 层控制权限）。"""
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM conv_notes WHERE note_id=?", (str(note_id),)
+            )
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    # ── X1: 客户 360° 时间轴（Phase 31） ────────────────────────────────
+
+    def get_contact_timeline(
+        self, contact_id: str, *, limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """X1：聚合指定客户所有互动事件，按时间倒序返回时间轴。
+
+        事件类型（event_type）：
+          message   — 入站/出站消息
+          note      — 坐席内部注解（含@提及）
+          archived  — 会话归档
+          summary   — AI 摘要生成
+          conv_open — 会话首次建立
+
+        优化：主体采用 UNION ALL 单次扫描 + Python 侧合并，减少 DB 往返次数。
+        """
+        cid = str(contact_id or "").strip()
+        if not cid:
+            return []
+        limit = max(1, min(500, int(limit or 100)))
+
+        events: List[Dict[str, Any]] = []
+
+        with self._lock:
+            # 第一步：查属于该 contact 的所有会话（最多 50 条）
+            conv_rows = self._conn.execute(
+                """SELECT conversation_id, platform, display_name, created_at
+                   FROM conversations WHERE contact_id = ?
+                   ORDER BY last_ts DESC LIMIT 50""",
+                (cid,),
+            ).fetchall()
+            if not conv_rows:
+                return []
+
+            conv_ids = [r["conversation_id"] for r in conv_rows]
+            conv_info = {r["conversation_id"]: dict(r) for r in conv_rows}
+
+            # 会话建立事件
+            for cv in conv_rows:
+                events.append({
+                    "event_type": "conv_open",
+                    "ts": float(cv["created_at"] or 0),
+                    "conversation_id": cv["conversation_id"],
+                    "platform": cv["platform"],
+                    "display_name": cv["display_name"],
+                    "preview": f"开始 {cv['platform']} 会话",
+                    "meta": {},
+                    "_sort_key": float(cv["created_at"] or 0),
+                })
+
+            ph = ",".join("?" * len(conv_ids))
+            fetch_limit = min(limit * 4, 400)  # 多拉一些以保证排序后截断准确
+
+            # 第二步：UNION ALL 一次性拉取消息 + 注解（同型字段）
+            union_rows = self._conn.execute(
+                f"""
+                SELECT 'message' AS etype, m.conversation_id, m.ts,
+                       substr(m.text, 1, 120) AS preview,
+                       m.direction AS dir, m.media_type AS extra1, m.message_id AS extra2, '' AS extra3
+                FROM messages m
+                WHERE m.conversation_id IN ({ph}) AND m.text != ''
+
+                UNION ALL
+
+                SELECT 'note' AS etype, n.conversation_id, n.ts,
+                       substr(n.body, 1, 120) AS preview,
+                       n.agent_name AS dir, n.note_id AS extra1, n.mentions AS extra2, '' AS extra3
+                FROM conv_notes n
+                WHERE n.conversation_id IN ({ph})
+
+                ORDER BY ts DESC LIMIT ?
+                """,
+                conv_ids + conv_ids + [fetch_limit],
+            ).fetchall()
+
+            for r in union_rows:
+                cv = conv_info.get(r["conversation_id"], {})
+                ts = float(r["ts"] or 0)
+                if r["etype"] == "message":
+                    events.append({
+                        "event_type": "message",
+                        "ts": ts,
+                        "conversation_id": r["conversation_id"],
+                        "platform": cv.get("platform", ""),
+                        "display_name": cv.get("display_name", ""),
+                        "preview": str(r["preview"] or ""),
+                        "meta": {
+                            "direction": r["dir"],
+                            "media_type": r["extra1"] or None,
+                            "message_id": r["extra2"],
+                        },
+                        "_sort_key": ts,
+                    })
+                else:  # note
+                    try:
+                        mentions = json.loads(r["extra2"] or "[]")
+                    except Exception:
+                        mentions = []
+                    events.append({
+                        "event_type": "note",
+                        "ts": ts,
+                        "conversation_id": r["conversation_id"],
+                        "platform": cv.get("platform", ""),
+                        "display_name": cv.get("display_name", ""),
+                        "preview": str(r["preview"] or ""),
+                        "meta": {
+                            "note_id": r["extra1"],
+                            "agent_name": r["dir"],
+                            "mentions": mentions,
+                        },
+                        "_sort_key": ts,
+                    })
+
+            # 第三步：会话 meta（归档 + 摘要，单独查询，数量少）
+            meta_rows = self._conn.execute(
+                f"""SELECT conversation_id, archived, summary, updated_at
+                    FROM conversation_meta WHERE conversation_id IN ({ph})""",
+                conv_ids,
+            ).fetchall()
+            for r in meta_rows:
+                cv = conv_info.get(r["conversation_id"], {})
+                ts = float(r["updated_at"] or 0)
+                if r["archived"]:
+                    events.append({
+                        "event_type": "archived",
+                        "ts": ts,
+                        "conversation_id": r["conversation_id"],
+                        "platform": cv.get("platform", ""),
+                        "display_name": cv.get("display_name", ""),
+                        "preview": "会话已归档",
+                        "meta": {"archived": True},
+                        "_sort_key": ts,
+                    })
+                if r["summary"]:
+                    events.append({
+                        "event_type": "summary",
+                        "ts": ts,
+                        "conversation_id": r["conversation_id"],
+                        "platform": cv.get("platform", ""),
+                        "display_name": cv.get("display_name", ""),
+                        "preview": str(r["summary"] or "")[:120],
+                        "meta": {"summary": r["summary"]},
+                        "_sort_key": ts,
+                    })
+
+        # 全局按 ts 降序，移除内部排序辅助键，截断
+        events.sort(key=lambda e: e.get("_sort_key", e["ts"]), reverse=True)
+        for e in events:
+            e.pop("_sort_key", None)
+        return events[:limit]
+
+    # ── W1: 客户活跃时段热力图（Phase 27） ───────────────────────────────
+    def activity_heatmap(
+        self, *, days: int = 30, platform: str = "", direction: str = "inbound"
+    ) -> Dict[str, Any]:
+        """W1：统计最近 N 天的消息量按星期×小时分布（本地时区）。
+
+        返回:
+          {
+            hours: [0..23],          # x 轴
+            weekdays: [0..6],        # y 轴 (0=周一, 6=周日)
+            matrix: [[int,…],…],    # shape: 7×24, 每格消息数
+            peak_hour: int,          # 全局峰值小时
+            peak_weekday: int,       # 全局峰值星期
+            total: int,              # 总消息数
+          }
+        """
+        import time as _time
+        since_ts = _time.time() - max(1, min(365, int(days or 30))) * 86400
+        dir_cond = ""
+        params: List[Any] = [since_ts]
+        if direction in ("inbound", "outbound"):
+            dir_cond = " AND direction = ?"
+            params.append(direction)
+        plat_cond = ""
+        if platform:
+            plat_cond = """
+                AND conversation_id IN (
+                    SELECT conversation_id FROM conversations WHERE platform = ?
+                )"""
+            params.append(str(platform))
+
+        sql = f"""
+            SELECT ts FROM messages
+            WHERE ts >= ?{dir_cond}{plat_cond}
+              AND text != ''
+        """
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+
+        # 初始化 7×24 矩阵
+        matrix = [[0] * 24 for _ in range(7)]
+        for r in rows:
+            ts_val = r[0]
+            try:
+                import datetime as _dt
+                dt = _dt.datetime.fromtimestamp(float(ts_val))
+                wd = dt.weekday()  # 0=Monday
+                hr = dt.hour
+                matrix[wd][hr] += 1
+            except Exception:
+                pass
+
+        total = sum(matrix[wd][hr] for wd in range(7) for hr in range(24))
+        peak_hour, peak_wd = 0, 0
+        peak_val = -1
+        for wd in range(7):
+            for hr in range(24):
+                if matrix[wd][hr] > peak_val:
+                    peak_val = matrix[wd][hr]
+                    peak_hour = hr
+                    peak_wd = wd
+
+        return {
+            "hours": list(range(24)),
+            "weekdays": list(range(7)),
+            "matrix": matrix,
+            "peak_hour": peak_hour,
+            "peak_weekday": peak_wd,
+            "total": total,
+            "days": days,
+            "direction": direction,
+        }
+
+    # ── Y1: QA 质检评分（Phase 34） ───────────────────────────────────────
+
+    def compute_and_store_qa_score(self, conversation_id: str) -> Dict[str, Any]:
+        """Y1：计算指定会话的质检评分并持久化到 conversation_meta。
+
+        Steps:
+          1. 拉取会话全量消息
+          2. 调用 QAScorer 进行规则评分
+          3. 将结果 JSON 写入 conversation_meta.qa_score
+          4. 返回评分结果
+        """
+        from src.inbox.qa_scorer import QAScorer
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            return {}
+        # 拉取消息（最多最近 200 条，足够评分）
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT direction, text, ts FROM messages
+                   WHERE conversation_id = ?
+                   ORDER BY ts ASC LIMIT 200""",
+                (cid,),
+            ).fetchall()
+        messages = [dict(r) for r in rows]
+        result = QAScorer().score(messages)
+        # 写回 conversation_meta
+        self.patch_conv_meta(cid, {"qa_score": json.dumps(result, ensure_ascii=False)})
+        return result
+
+    def get_qa_score(self, conversation_id: str) -> Optional[Dict[str, Any]]:
+        """Y1：读取已存储的质检评分（不重新计算）。"""
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            return None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT qa_score FROM conversation_meta WHERE conversation_id = ?",
+                (cid,),
+            ).fetchone()
+        if not row:
+            return None
+        raw = str(row["qa_score"] or "").strip()
+        if not raw or raw == "{}":
+            return None
+        try:
+            return json.loads(raw)
+        except Exception:
+            return None
+
+    def batch_agent_qa_stats(
+        self, *, days: int = 30
+    ) -> List[Dict[str, Any]]:
+        """Y1：聚合最近 N 天各坐席的 QA 评分均值（用于 agent_perf 看板）。
+
+        返回 [{agent_id, agent_name, avg_score, count, grade_dist}]
+        """
+        since = time.time() - days * 86400
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT cm.claimed_by, cm.qa_score, cm.updated_at
+                   FROM conversation_meta cm
+                   WHERE cm.updated_at >= ? AND cm.qa_score != '' AND cm.qa_score != '{}'
+                   ORDER BY cm.updated_at DESC LIMIT 2000""",
+                (since,),
+            ).fetchall()
+        # 按 claimed_by 分组聚合
+        agg: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            agent = str(row["claimed_by"] or "").strip()
+            if not agent:
+                continue
+            try:
+                qa = json.loads(row["qa_score"] or "{}")
+                score = int(qa.get("score") or 0)
+                grade = str(qa.get("grade") or "N/A")
+            except Exception:
+                continue
+            if agent not in agg:
+                agg[agent] = {"agent_id": agent, "scores": [], "grades": {}}
+            agg[agent]["scores"].append(score)
+            agg[agent]["grades"][grade] = agg[agent]["grades"].get(grade, 0) + 1
+
+        result = []
+        for agent_id, data in sorted(agg.items()):
+            scores = data["scores"]
+            avg = round(sum(scores) / len(scores)) if scores else 0
+            result.append({
+                "agent_id": agent_id,
+                "agent_name": agent_id,  # 可在 API 层替换真实姓名
+                "avg_score": avg,
+                "count": len(scores),
+                "grade": QAScorer_grade(avg),
+                "grade_dist": data["grades"],
+            })
+        result.sort(key=lambda x: x["avg_score"], reverse=True)
+        return result
+
+    # ── Z1: 流失预警（Phase 35）──────────────────────────────────────────────
+
+    def list_churn_risk_conversations(
+        self,
+        *,
+        silence_days: int = 7,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """Z1：列出高流失风险会话（最近 N 天无活动且末条为入站）。
+
+        辅助 ChurnPredictor 的数据获取层（独立于联系人表）。
+        """
+        cutoff = time.time() - silence_days * 86400
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT c.conversation_id, c.platform, c.display_name,
+                          c.contact_id, c.last_ts, cm.claimed_by, cm.churn_risk,
+                          cm.qa_score, cm.archived
+                   FROM conversations c
+                   LEFT JOIN conversation_meta cm
+                     ON cm.conversation_id = c.conversation_id
+                   WHERE c.last_ts <= ? AND (cm.archived IS NULL OR cm.archived = 0)
+                   ORDER BY c.last_ts ASC LIMIT ?""",
+                (cutoff, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def store_churn_risk(self, conversation_id: str, risk_level: str, reasons: List[str]) -> None:
+        """Z1：持久化流失风险评估结果。"""
+        data = json.dumps({"level": risk_level, "reasons": reasons, "ts": time.time()}, ensure_ascii=False)
+        self.patch_conv_meta(conversation_id, {"churn_risk": data})
+
+    # ── 辅助（跨方法） ───────────────────────────────────────────────────────
+
+    def _auto_archive_candidates(self, idle_hours: int = 24) -> List[Dict[str, Any]]:
+        """P36：查找超过 idle_hours 小时未活动且未归档的会话。"""
+        cutoff = time.time() - idle_hours * 3600
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT c.conversation_id, c.display_name, c.platform, c.last_ts, c.contact_id
+                   FROM conversations c
+                   LEFT JOIN conversation_meta cm ON cm.conversation_id = c.conversation_id
+                   WHERE c.last_ts <= ? AND (cm.archived IS NULL OR cm.archived = 0)
+                     AND (cm.auto_archived_at IS NULL OR cm.auto_archived_at = 0)
+                   ORDER BY c.last_ts ASC LIMIT 100""",
+                (cutoff,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+
+    # ── AA1: 自定义动作 / 工作链 CRUD（Phase 37） ─────────────────────────
+
+    def list_workflow_actions(self) -> List[Dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM workflow_actions ORDER BY sort_order ASC, created_at ASC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def upsert_workflow_action(self, data: Dict[str, Any]) -> str:
+        import uuid as _uuid
+        action_id = str(data.get("action_id") or _uuid.uuid4())
+        now = time.time()
+        with self._lock:
+            self._conn.execute(
+                """INSERT INTO workflow_actions
+                   (action_id, name, action_type, config_json, icon, enabled, sort_order, created_at, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(action_id) DO UPDATE SET
+                     name=excluded.name, action_type=excluded.action_type,
+                     config_json=excluded.config_json, icon=excluded.icon,
+                     enabled=excluded.enabled, sort_order=excluded.sort_order,
+                     updated_at=excluded.updated_at""",
+                (
+                    action_id,
+                    str(data.get("name") or ""),
+                    str(data.get("action_type") or "template"),
+                    json.dumps(data.get("config") or {}, ensure_ascii=False),
+                    str(data.get("icon") or "💡"),
+                    1 if data.get("enabled", True) else 0,
+                    int(data.get("sort_order") or 0),
+                    float(data.get("created_at") or now),
+                    now,
+                ),
+            )
+            self._conn.commit()
+        return action_id
+
+    def delete_workflow_action(self, action_id: str) -> bool:
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM workflow_actions WHERE action_id = ?", (action_id,)
+            )
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    def list_workflow_chains(self) -> List[Dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM workflow_chains ORDER BY created_at ASC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def upsert_workflow_chain(self, data: Dict[str, Any]) -> str:
+        import uuid as _uuid
+        chain_id = str(data.get("chain_id") or _uuid.uuid4())
+        now = time.time()
+        with self._lock:
+            self._conn.execute(
+                """INSERT INTO workflow_chains
+                   (chain_id, name, steps_json, trigger_conditions, enabled, created_at, updated_at)
+                   VALUES (?,?,?,?,?,?,?)
+                   ON CONFLICT(chain_id) DO UPDATE SET
+                     name=excluded.name, steps_json=excluded.steps_json,
+                     trigger_conditions=excluded.trigger_conditions,
+                     enabled=excluded.enabled, updated_at=excluded.updated_at""",
+                (
+                    chain_id,
+                    str(data.get("name") or ""),
+                    json.dumps(data.get("steps") or [], ensure_ascii=False),
+                    json.dumps(data.get("trigger_conditions") or {}, ensure_ascii=False),
+                    1 if data.get("enabled", True) else 0,
+                    float(data.get("created_at") or now),
+                    now,
+                ),
+            )
+            self._conn.commit()
+        return chain_id
+
+    def delete_workflow_chain(self, chain_id: str) -> bool:
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM workflow_chains WHERE chain_id = ?", (chain_id,)
+            )
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    def start_chain_execution(
+        self,
+        chain_id: str,
+        conversation_id: str,
+        context: Dict[str, Any],
+        *,
+        schedule_first_step: bool = True,
+    ) -> str:
+        import uuid as _uuid
+        exec_id = str(_uuid.uuid4())
+        now = time.time()
+        next_at = 0.0
+        if schedule_first_step:
+            chain = self.get_workflow_chain(chain_id)
+            if chain:
+                try:
+                    steps = json.loads(chain.get("steps_json") or "[]")
+                    if steps:
+                        delay_h = float(steps[0].get("delay_hours") or 0)
+                        next_at = now if delay_h <= 0 else now + delay_h * 3600
+                except Exception:
+                    next_at = now
+            else:
+                next_at = now
+        with self._lock:
+            self._conn.execute(
+                """INSERT INTO workflow_executions
+                   (exec_id, chain_id, conversation_id, current_step, status,
+                    context_json, started_at, updated_at, next_step_at, last_result_json)
+                   VALUES (?,?,?,0,'running',?,?,?,?, '')""",
+                (exec_id, chain_id, conversation_id,
+                 json.dumps(context, ensure_ascii=False), now, now, next_at),
+            )
+            self._conn.commit()
+        return exec_id
+
+    def get_workflow_chain(self, chain_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM workflow_chains WHERE chain_id = ?", (chain_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def get_workflow_execution(self, exec_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            row = self._conn.execute(
+                """SELECT we.*, wc.name as chain_name, wc.steps_json
+                   FROM workflow_executions we
+                   LEFT JOIN workflow_chains wc ON wc.chain_id = we.chain_id
+                   WHERE we.exec_id = ?""",
+                (exec_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def has_running_chain(self, conversation_id: str, chain_id: str) -> bool:
+        with self._lock:
+            row = self._conn.execute(
+                """SELECT 1 FROM workflow_executions
+                   WHERE conversation_id = ? AND chain_id = ? AND status = 'running' LIMIT 1""",
+                (conversation_id, chain_id),
+            ).fetchone()
+        return row is not None
+
+    def list_due_workflow_executions(
+        self, now: float, *, limit: int = 30, stuck_sec: float = 120,
+    ) -> List[Dict[str, Any]]:
+        """P44/P47：拉取到期应执行的工作链（含卡住恢复）。"""
+        stuck_before = now - stuck_sec
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT we.*, wc.name as chain_name, wc.steps_json
+                   FROM workflow_executions we
+                   LEFT JOIN workflow_chains wc ON wc.chain_id = we.chain_id
+                   WHERE we.status = 'running'
+                     AND (
+                       (we.next_step_at > 0 AND we.next_step_at <= ?)
+                       OR (we.next_step_at = 0 AND we.updated_at <= ?)
+                     )
+                   ORDER BY we.next_step_at ASC, we.updated_at ASC LIMIT ?""",
+                (now, stuck_before, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def update_workflow_execution(
+        self,
+        exec_id: str,
+        *,
+        current_step: int = 0,
+        next_step_at: float = 0,
+        last_result: Optional[Dict[str, Any]] = None,
+        status: str = "",
+        context_json: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        now = time.time()
+        sets = ["current_step = ?", "updated_at = ?", "next_step_at = ?"]
+        params: List[Any] = [current_step, now, next_step_at]
+        if last_result is not None:
+            sets.append("last_result_json = ?")
+            params.append(json.dumps(last_result, ensure_ascii=False))
+        if context_json is not None:
+            sets.append("context_json = ?")
+            params.append(json.dumps(context_json, ensure_ascii=False))
+        if status:
+            sets.append("status = ?")
+            params.append(status)
+        params.append(exec_id)
+        with self._lock:
+            self._conn.execute(
+                f"UPDATE workflow_executions SET {', '.join(sets)} WHERE exec_id = ?",
+                params,
+            )
+            self._conn.commit()
+
+    def complete_workflow_execution(self, exec_id: str, *, status: str = "completed") -> None:
+        self.update_workflow_execution(exec_id, status=status, next_step_at=0)
+
+    def cancel_workflow_execution(self, exec_id: str) -> bool:
+        """P47：取消运行中的工作链执行。"""
+        ex = self.get_workflow_execution(exec_id)
+        if not ex or ex.get("status") != "running":
+            return False
+        self.complete_workflow_execution(exec_id, status="cancelled")
+        return True
+
+    def list_chain_executions(
+        self,
+        *,
+        status: str = "",
+        conversation_id: str = "",
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """P47：全局/按会话列出工作链执行记录（含会话展示名）。"""
+        clauses = ["1=1"]
+        params: List[Any] = []
+        if status:
+            clauses.append("we.status = ?")
+            params.append(status)
+        if conversation_id:
+            clauses.append("we.conversation_id = ?")
+            params.append(conversation_id)
+        params.append(max(1, min(int(limit), 200)))
+        with self._lock:
+            rows = self._conn.execute(
+                f"""SELECT we.*, wc.name as chain_name, wc.steps_json,
+                           c.display_name, c.platform
+                   FROM workflow_executions we
+                   LEFT JOIN workflow_chains wc ON wc.chain_id = we.chain_id
+                   LEFT JOIN conversations c ON c.conversation_id = we.conversation_id
+                   WHERE {' AND '.join(clauses)}
+                   ORDER BY
+                     CASE we.status WHEN 'running' THEN 0 WHEN 'failed' THEN 1 ELSE 2 END,
+                     we.updated_at DESC
+                   LIMIT ?""",
+                params,
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    _META_PATCH_COLUMNS = frozenset({
+        "rel_stage_cached", "rel_stage_pending", "rel_stage_pending_ts",
+        "rel_reunion_ack_ts", "qa_score", "churn_risk",
+    })
+
+    def _ensure_conv_meta_row(self, conversation_id: str) -> None:
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            return
+        now = self._now()
+        with self._lock:
+            self._conn.execute(
+                """INSERT OR IGNORE INTO conversation_meta (conversation_id, updated_at)
+                   VALUES (?, ?)""",
+                (cid, now),
+            )
+            self._conn.commit()
+
+    def patch_conv_meta(self, conversation_id: str, fields: Dict[str, Any]) -> None:
+        """按列名局部更新 conversation_meta（仅允许白名单字段）。"""
+        cid = str(conversation_id or "").strip()
+        if not cid or not fields:
+            return
+        safe = {k: v for k, v in fields.items() if k in self._META_PATCH_COLUMNS}
+        if not safe:
+            return
+        self._ensure_conv_meta_row(cid)
+        now = self._now()
+        sets = [f"{k}=?" for k in safe]
+        vals = list(safe.values()) + [now, cid]
+        with self._lock:
+            self._conn.execute(
+                f"UPDATE conversation_meta SET {', '.join(sets)}, updated_at=? WHERE conversation_id=?",
+                vals,
+            )
+            self._conn.commit()
+
+    def get_rel_stage_cached(self, conversation_id: str) -> str:
+        meta = self.get_rel_stage_meta(conversation_id)
+        return meta["confirmed"]
+
+    def get_rel_stage_meta(self, conversation_id: str) -> Dict[str, Any]:
+        with self._lock:
+            row = self._conn.execute(
+                """SELECT rel_stage_cached, rel_stage_pending, rel_stage_pending_ts,
+                          rel_reunion_ack_ts
+                   FROM conversation_meta WHERE conversation_id = ?""",
+                (conversation_id,),
+            ).fetchone()
+        if not row:
+            return {
+                "confirmed": "", "pending": "", "pending_ts": 0.0, "reunion_ack_ts": 0.0,
+            }
+        return {
+            "confirmed": str(row["rel_stage_cached"] or ""),
+            "pending": str(row["rel_stage_pending"] or ""),
+            "pending_ts": float(row["rel_stage_pending_ts"] or 0),
+            "reunion_ack_ts": float(row["rel_reunion_ack_ts"] or 0),
+        }
+
+    def set_rel_stage_cached(self, conversation_id: str, stage: str) -> None:
+        self.patch_conv_meta(conversation_id, {"rel_stage_cached": str(stage or "")})
+
+    def set_rel_stage_pending(self, conversation_id: str, stage: str, *, ts: Optional[float] = None) -> None:
+        now = float(ts if ts is not None else self._now())
+        self.patch_conv_meta(conversation_id, {
+            "rel_stage_pending": str(stage or ""),
+            "rel_stage_pending_ts": now,
+        })
+
+    def clear_rel_stage_pending(self, conversation_id: str) -> None:
+        self.patch_conv_meta(conversation_id, {
+            "rel_stage_pending": "",
+            "rel_stage_pending_ts": 0,
+        })
+
+    def confirm_rel_stage(self, conversation_id: str, stage: str) -> None:
+        self.patch_conv_meta(conversation_id, {
+            "rel_stage_cached": str(stage or ""),
+            "rel_stage_pending": "",
+            "rel_stage_pending_ts": 0,
+        })
+
+    # ── P50: 客户级关系阶段 ───────────────────────────────────────────────
+
+    def get_contact_rel_stage(self, contact_id: str) -> Optional[Dict[str, Any]]:
+        cid = str(contact_id or "").strip()
+        if not cid:
+            return None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM contact_rel_stage WHERE contact_id = ?", (cid,),
+            ).fetchone()
+        if not row:
+            return None
+        return dict(row)
+
+    def set_contact_rel_stage(
+        self,
+        contact_id: str,
+        stage: str,
+        *,
+        updated_by: str = "",
+        reunion_ack_ts: Optional[float] = None,
+    ) -> None:
+        cid = str(contact_id or "").strip()
+        if not cid:
+            return
+        now = self._now()
+        ack = float(reunion_ack_ts) if reunion_ack_ts is not None else None
+        with self._lock:
+            if ack is not None:
+                self._conn.execute(
+                    """INSERT INTO contact_rel_stage
+                       (contact_id, confirmed_stage, updated_by, updated_at, reunion_ack_ts)
+                       VALUES (?,?,?,?,?)
+                       ON CONFLICT(contact_id) DO UPDATE SET
+                         confirmed_stage = excluded.confirmed_stage,
+                         updated_by = excluded.updated_by,
+                         updated_at = excluded.updated_at,
+                         reunion_ack_ts = excluded.reunion_ack_ts""",
+                    (cid, str(stage or ""), str(updated_by or ""), now, ack),
+                )
+            else:
+                self._conn.execute(
+                    """INSERT INTO contact_rel_stage
+                       (contact_id, confirmed_stage, updated_by, updated_at, reunion_ack_ts)
+                       VALUES (?,?,?,?,0)
+                       ON CONFLICT(contact_id) DO UPDATE SET
+                         confirmed_stage = excluded.confirmed_stage,
+                         updated_by = excluded.updated_by,
+                         updated_at = excluded.updated_at""",
+                    (cid, str(stage or ""), str(updated_by or ""), now),
+                )
+            self._conn.commit()
+
+    def list_conv_rel_stages_for_contact(self, contact_id: str) -> Dict[str, str]:
+        """返回该客户各会话的已确认阶段。"""
+        cid = str(contact_id or "").strip()
+        if not cid:
+            return {}
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT c.conversation_id, COALESCE(cm.rel_stage_cached, '') AS stage
+                   FROM conversations c
+                   LEFT JOIN conversation_meta cm ON cm.conversation_id = c.conversation_id
+                   WHERE c.contact_id = ?""",
+                (cid,),
+            ).fetchall()
+        return {str(r["conversation_id"]): str(r["stage"] or "") for r in rows}
+
+    def sync_convs_to_stage(self, contact_id: str, stage: str) -> int:
+        """P50：将该客户所有会话的确认阶段对齐为 stage，返回更新条数。"""
+        cid = str(contact_id or "").strip()
+        st = str(stage or "")
+        if not cid or not st:
+            return 0
+        conv_ids = list(self.list_conv_rel_stages_for_contact(cid).keys())
+        n = 0
+        for conv_id in conv_ids:
+            self.confirm_rel_stage(conv_id, st)
+            n += 1
+        return n
+
+    def list_contact_stage_audits(
+        self, contact_id: str, *, limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """P51：查询客户级关系阶段审计事件（跨会话聚合）。"""
+        cid = str(contact_id or "").strip()
+        if not cid:
+            return []
+        lim = max(1, min(200, int(limit or 50)))
+        actions = (
+            "stage_confirm", "stage_downgrade", "stage_reunion", "stage_sync",
+        )
+        ph_act = ",".join("?" * len(actions))
+        with self._lock:
+            rows = self._conn.execute(
+                f"""
+                SELECT dal.*, c.platform, c.display_name
+                FROM draft_audit_log dal
+                LEFT JOIN conversations c ON c.conversation_id = dal.conversation_id
+                WHERE (
+                    dal.conversation_id IN (
+                        SELECT conversation_id FROM conversations WHERE contact_id = ?
+                    )
+                    OR dal.draft_id = ?
+                )
+                AND dal.action IN ({ph_act})
+                ORDER BY dal.ts DESC
+                LIMIT ?
+                """,
+                (cid, f"contact:{cid}", *actions, lim),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ── P54: Copilot 采纳率统计 ─────────────────────────────────────────
+
+    def record_copilot_impression(
+        self,
+        conversation_id: str,
+        agent_id: str,
+        *,
+        trigger: str = "",
+        stage: str = "",
+        polished: bool = False,
+        suggestion_count: int = 0,
+        top_source: str = "",
+    ) -> None:
+        from src.inbox.copilot_stats import encode_impression
+        self.record_draft_audit(
+            "", action="copilot_impression", agent_id=agent_id,
+            reason=encode_impression(
+                trigger=trigger, stage=stage, polished=polished,
+                suggestion_count=suggestion_count, top_source=top_source,
+            ),
+            conversation_id=conversation_id,
+        )
+
+    def record_copilot_adopt(
+        self,
+        conversation_id: str,
+        agent_id: str,
+        *,
+        match: str = "exact",
+        source: str = "",
+        polished: bool = False,
+        trigger: str = "",
+        stage: str = "",
+        suggested_preview: str = "",
+        sent_preview: str = "",
+    ) -> None:
+        from src.inbox.copilot_stats import encode_adopt
+        self.record_draft_audit(
+            "", action="copilot_adopt", agent_id=agent_id,
+            reason=encode_adopt(
+                match=match, source=source, polished=polished,
+                trigger=trigger, stage=stage,
+                suggested_preview=suggested_preview, sent_preview=sent_preview,
+            ),
+            conversation_id=conversation_id,
+        )
+
+    def list_copilot_audit_rows(
+        self, *, since_ts: float = 0.0, agent_id: str = "", limit: int = 2000,
+    ) -> List[Dict[str, Any]]:
+        actions = ("copilot_impression", "copilot_adopt", "copilot_polish")
+        ph = ",".join("?" * len(actions))
+        clauses = [f"action IN ({ph})", "ts>=?"]
+        params: List[Any] = [*actions, float(since_ts)]
+        if agent_id:
+            clauses.append("agent_id=?")
+            params.append(str(agent_id))
+        sql = (
+            f"SELECT * FROM draft_audit_log WHERE {' AND '.join(clauses)} "
+            f"ORDER BY ts DESC LIMIT ?"
+        )
+        params.append(max(1, min(5000, int(limit))))
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_copilot_stats(
+        self, *, since_ts: float = 0.0, agent_id: str = "",
+    ) -> Dict[str, Any]:
+        from src.inbox.copilot_stats import aggregate_copilot_stats
+        rows = self.list_copilot_audit_rows(
+            since_ts=since_ts, agent_id=agent_id, limit=3000,
+        )
+        return aggregate_copilot_stats(rows)
+
+    def confirm_rel_stage_with_contact(
+        self,
+        conversation_id: str,
+        contact_id: str,
+        stage: str,
+        *,
+        updated_by: str = "",
+        sync_all_convs: bool = True,
+    ) -> None:
+        """P50：确认会话阶段并同步客户级（可选同步全部会话）。"""
+        self.confirm_rel_stage(conversation_id, stage)
+        cid = str(contact_id or "").strip()
+        if not cid:
+            return
+        self.set_contact_rel_stage(cid, stage, updated_by=updated_by)
+        if sync_all_convs:
+            self.sync_convs_to_stage(cid, stage)
+
+    def ack_rel_reunion(self, conversation_id: str, *, ts: Optional[float] = None) -> None:
+        now = float(ts if ts is not None else self._now())
+        self.patch_conv_meta(conversation_id, {"rel_reunion_ack_ts": now})
+
+    def get_agent_stage_confirm_counts(
+        self, *, since_ts: float = 0.0,
+    ) -> Dict[str, Dict[str, int]]:
+        """P48：统计各坐席确认过的关系阶段次数（来自 stage_confirm 审计）。"""
+        from src.utils.companion_relationship import STAGE_ORDER
+        stage_set = set(STAGE_ORDER)
+        out: Dict[str, Dict[str, int]] = {}
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT agent_id, reason FROM draft_audit_log
+                   WHERE ts >= ? AND action = 'stage_confirm' AND agent_id != ''""",
+                (float(since_ts),),
+            ).fetchall()
+        for row in rows:
+            aid = str(row["agent_id"] or "").strip()
+            reason = str(row["reason"] or "")
+            if not aid or "→" not in reason:
+                continue
+            target = reason.split("→")[-1].strip()
+            stage_id = target if target in stage_set else ""
+            if not stage_id:
+                from src.utils.companion_relationship import STAGE_LABEL_ZH
+                for sid in stage_set:
+                    if target == STAGE_LABEL_ZH.get(sid, sid):
+                        stage_id = sid
+                        break
+            if stage_id not in stage_set:
+                continue
+            out.setdefault(aid, {})
+            out[aid][stage_id] = out[aid].get(stage_id, 0) + 1
+        return out
+
+    def get_agent_mention_counts(self, *, since_ts: float = 0.0) -> Dict[str, int]:
+        """P48：统计各坐席被 @ 次数（协作活跃度代理）。"""
+        counts: Dict[str, int] = {}
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT mentions FROM conv_notes WHERE ts >= ?",
+                (float(since_ts),),
+            ).fetchall()
+        for row in rows:
+            try:
+                mentions = json.loads(row["mentions"] or "[]")
+            except Exception:
+                mentions = []
+            for m in mentions:
+                aid = str(m or "").strip()
+                if aid:
+                    counts[aid] = counts.get(aid, 0) + 1
+        return counts
+
+    def get_recent_mention_note(
+        self,
+        conversation_id: str,
+        agent_id: str,
+        *,
+        within_hours: float = 48,
+    ) -> Optional[Dict[str, Any]]:
+        """P49：获取最近 @ 指定坐席的协作注解。"""
+        cid = str(conversation_id or "").strip()
+        aid = str(agent_id or "").strip()
+        if not cid or not aid:
+            return None
+        cutoff = time.time() - max(1.0, float(within_hours)) * 3600
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT note_id, agent_id, agent_name, body, mentions, ts
+                   FROM conv_notes
+                   WHERE conversation_id = ? AND ts >= ?
+                   ORDER BY ts DESC LIMIT 30""",
+                (cid, cutoff),
+            ).fetchall()
+        for row in rows:
+            try:
+                mentions = json.loads(row["mentions"] or "[]")
+            except Exception:
+                mentions = []
+            if aid in [str(m) for m in mentions]:
+                return {
+                    "note_id": row["note_id"],
+                    "body": row["body"],
+                    "agent_id": row["agent_id"],
+                    "agent_name": row["agent_name"],
+                    "ts": float(row["ts"] or 0),
+                }
+        return None
+
+    def has_overdue_chain_execution(
+        self, conversation_id: str, *, overdue_sec: float = 3600,
+    ) -> bool:
+        """P48：会话是否有超时未推进的运行中工作链。"""
+        cutoff = time.time() - max(60.0, float(overdue_sec))
+        with self._lock:
+            row = self._conn.execute(
+                """SELECT 1 FROM workflow_executions
+                   WHERE conversation_id = ? AND status = 'running'
+                     AND next_step_at > 0 AND next_step_at < ?
+                   LIMIT 1""",
+                (conversation_id, cutoff),
+            ).fetchone()
+        return row is not None
+
+    def get_conv_chain_executions(self, conversation_id: str) -> List[Dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT we.*, wc.name as chain_name
+                   FROM workflow_executions we
+                   LEFT JOIN workflow_chains wc ON wc.chain_id = we.chain_id
+                   WHERE we.conversation_id = ?
+                   ORDER BY we.started_at DESC LIMIT 20""",
+                (conversation_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ── BB1: 分流路由规则 CRUD（Phase 38） ────────────────────────────────
+
+    def list_routing_rules(self) -> List[Dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM routing_rules ORDER BY priority DESC, created_at ASC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def upsert_routing_rule(self, data: Dict[str, Any]) -> str:
+        import uuid as _uuid
+        rule_id = str(data.get("rule_id") or _uuid.uuid4())
+        now = time.time()
+        with self._lock:
+            self._conn.execute(
+                """INSERT INTO routing_rules
+                   (rule_id, name, conditions, assign_to, priority, enabled, created_at, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?)
+                   ON CONFLICT(rule_id) DO UPDATE SET
+                     name=excluded.name, conditions=excluded.conditions,
+                     assign_to=excluded.assign_to, priority=excluded.priority,
+                     enabled=excluded.enabled, updated_at=excluded.updated_at""",
+                (
+                    rule_id,
+                    str(data.get("name") or ""),
+                    json.dumps(data.get("conditions") or {}, ensure_ascii=False),
+                    str(data.get("assign_to") or ""),
+                    int(data.get("priority") or 0),
+                    1 if data.get("enabled", True) else 0,
+                    float(data.get("created_at") or now),
+                    now,
+                ),
+            )
+            self._conn.commit()
+        return rule_id
+
+    def delete_routing_rule(self, rule_id: str) -> bool:
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM routing_rules WHERE rule_id = ?", (rule_id,)
+            )
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    # ── CC1: 剧本话题 CRUD（Phase 40） ────────────────────────────────────
+
+    def list_script_topics(self, stage: str = "") -> List[Dict[str, Any]]:
+        with self._lock:
+            if stage:
+                rows = self._conn.execute(
+                    """SELECT * FROM script_topics WHERE stage = ? AND enabled = 1
+                       ORDER BY sort_order ASC, created_at ASC""",
+                    (stage,),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT * FROM script_topics ORDER BY stage, sort_order ASC"
+                ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["tags"] = json.loads(d.pop("tags_json", "[]") or "[]")
+            except Exception:
+                d["tags"] = []
+            result.append(d)
+        return result
+
+    def upsert_script_topic(self, data: Dict[str, Any]) -> str:
+        import uuid as _uuid
+        topic_id = str(data.get("topic_id") or _uuid.uuid4())
+        now = time.time()
+        tags = data.get("tags") or []
+        with self._lock:
+            self._conn.execute(
+                """INSERT INTO script_topics
+                   (topic_id, stage, title, opener, hint, tags_json, chain_id,
+                    enabled, sort_order, created_at, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(topic_id) DO UPDATE SET
+                     stage=excluded.stage, title=excluded.title, opener=excluded.opener,
+                     hint=excluded.hint, tags_json=excluded.tags_json, chain_id=excluded.chain_id,
+                     enabled=excluded.enabled, sort_order=excluded.sort_order,
+                     updated_at=excluded.updated_at""",
+                (
+                    topic_id,
+                    str(data.get("stage") or "initial"),
+                    str(data.get("title") or ""),
+                    str(data.get("opener") or ""),
+                    str(data.get("hint") or ""),
+                    json.dumps(tags, ensure_ascii=False),
+                    str(data.get("chain_id") or ""),
+                    1 if data.get("enabled", True) else 0,
+                    int(data.get("sort_order") or 0),
+                    float(data.get("created_at") or now),
+                    now,
+                ),
+            )
+            self._conn.commit()
+        return topic_id
+
+    def delete_script_topic(self, topic_id: str) -> bool:
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM script_topics WHERE topic_id = ?", (topic_id,)
+            )
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    def get_messages_for_contact(self, contact_id: str, limit: int = 500) -> List[Dict[str, Any]]:
+        """P41：拉取客户所有会话的消息（跨会话聚合）。"""
+        cid = str(contact_id or "").strip()
+        if not cid:
+            return []
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT m.conversation_id, m.direction, m.text, m.ts
+                   FROM messages m
+                   JOIN conversations c ON c.conversation_id = m.conversation_id
+                   WHERE c.contact_id = ?
+                   ORDER BY m.ts ASC LIMIT ?""",
+                (cid, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def compute_and_store_engagement(self, contact_id: str) -> Dict[str, Any]:
+        """P41：计算并持久化客户互动积分。"""
+        from src.inbox.engagement_scorer import EngagementScorer
+        cid = str(contact_id or "").strip()
+        if not cid:
+            return {}
+
+        existing_ach: List[str] = []
+        prev_points = 0
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT points, achievements_json, history_json FROM contact_engagement WHERE contact_id = ?",
+                (cid,),
+            ).fetchone()
+        if row:
+            prev_points = int(row["points"] or 0)
+            try:
+                existing_ach = json.loads(row["achievements_json"] or "[]")
+            except Exception:
+                existing_ach = []
+
+        messages = self.get_messages_for_contact(cid)
+        # 沉默天数
+        silence_days = 0.0
+        if messages:
+            inbound = [m for m in messages if m.get("direction") in ("in", "inbound")]
+            if inbound:
+                last_ts = max(float(m.get("ts") or 0) for m in inbound)
+                silence_days = max(0.0, (time.time() - last_ts) / 86400)
+
+        result = EngagementScorer().compute(
+            messages,
+            existing_achievements=existing_ach,
+            last_silence_days=silence_days,
+        )
+
+        # 历史快照（保留最近 30 条）
+        history: List[Dict[str, Any]] = []
+        if row:
+            try:
+                history = json.loads(row["history_json"] or "[]")
+            except Exception:
+                history = []
+        history.append({"ts": time.time(), "points": result["points"]})
+        history = history[-30:]
+
+        with self._lock:
+            self._conn.execute(
+                """INSERT INTO contact_engagement
+                   (contact_id, points, level, breakdown_json, achievements_json, history_json, updated_at)
+                   VALUES (?,?,?,?,?,?,?)
+                   ON CONFLICT(contact_id) DO UPDATE SET
+                     points=excluded.points, level=excluded.level,
+                     breakdown_json=excluded.breakdown_json,
+                     achievements_json=excluded.achievements_json,
+                     history_json=excluded.history_json,
+                     updated_at=excluded.updated_at""",
+                (
+                    cid,
+                    int(result["points"]),
+                    str(result["level"]),
+                    json.dumps(result["breakdown"], ensure_ascii=False),
+                    json.dumps(result["achievements"], ensure_ascii=False),
+                    json.dumps(history, ensure_ascii=False),
+                    time.time(),
+                ),
+            )
+            self._conn.commit()
+        result["previous_points"] = prev_points
+        result["history"] = history
+        return result
+
+    def get_contact_engagement(self, contact_id: str) -> Optional[Dict[str, Any]]:
+        cid = str(contact_id or "").strip()
+        if not cid:
+            return None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM contact_engagement WHERE contact_id = ?", (cid,)
+            ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        try:
+            d["breakdown"] = json.loads(d.pop("breakdown_json", "{}") or "{}")
+        except Exception:
+            d["breakdown"] = {}
+        try:
+            d["achievements"] = json.loads(d.pop("achievements_json", "[]") or "[]")
+        except Exception:
+            d["achievements"] = []
+        try:
+            d["history"] = json.loads(d.pop("history_json", "[]") or "[]")
+        except Exception:
+            d["history"] = []
+        return d
+
+
+def QAScorer_grade(score: int) -> str:
+    """模块级辅助：直接从分数得等级（避免重复实例化）。"""
+    if score >= 90: return "A"
+    if score >= 75: return "B"
+    if score >= 60: return "C"
+    if score >= 45: return "D"
+    return "F"

@@ -148,6 +148,9 @@ sessions/*.session
 sessions/*.session-journal
 !sessions/.gitkeep
 
+# 协议账号下载的入站媒体（运行时落地，含用户内容，勿入库）
+src/web/static/protocol_media/
+
 # 日志 — 全目录 ignore（drafts.json / trigger_decisions.log / KB trace 可能含 PII）
 # 用 **/logs/ 覆盖根目录和任何子目录（如 config/logs/kb_direct_trace.jsonl）
 **/logs/*
@@ -155,6 +158,13 @@ sessions/*.session-journal
 
 # 配置文件（不包含实际凭证）
 config/config.yaml
+# P1-1 接入向导写入的凭证 overlay（含密钥，绝不入库）
+config/config.local.yaml
+
+# C0-1 授权：客户授权码 + 厂商私钥（切勿入库）
+config/license.key
+config/.vendor_license_private.pem
+*.vendor_license_private.pem
 
 # SQLite 数据库（所有变体，含 WAL/SHM/备份）
 *.db
@@ -264,3 +274,8 @@ Thumbs.db
 *.docx
 *.xls
 *.xlsx
+
+# Next.js 站点源文件（website/lib）— 覆盖上方通用 Python `lib/` 忽略，整目录纳入版本管理。
+# website 内的构建产物 / 依赖（.next、node_modules、out）由 website/.gitignore 负责忽略。
+!website/lib/
+!website/lib/**

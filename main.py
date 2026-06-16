@@ -253,6 +253,31 @@ class AIChatAssistant:
             
             self.logger.info("✅ AI聊天助手初始化完成")
 
+            # C0-1 授权状态（只读提示，不阻断启动）
+            try:
+                from src.licensing import configure_license_manager
+
+                # C0-3：按 config 配置强制开关（licensing.enforce，默认关）
+                _lic_cfg = (self.config.config or {}).get("licensing", {}) or {}
+                _lic = configure_license_manager(
+                    enforce=bool(_lic_cfg.get("enforce", False)))
+                if _lic.state == "active":
+                    _exp = ("永久" if not _lic.expires_at
+                            else f"剩 {_lic.days_left} 天")
+                    self.logger.info(
+                        "🔑 授权：%s · %s · 客户=%s · %s",
+                        _lic.plan, _lic.state, _lic.customer or "—", _exp,
+                    )
+                elif _lic.state == "unlicensed":
+                    self.logger.info("🔑 授权：社区模式（未检测到授权文件）")
+                else:
+                    self.logger.warning(
+                        "🔑 授权状态=%s：%s",
+                        _lic.state, "；".join(_lic.messages) or "—",
+                    )
+            except Exception:
+                self.logger.debug("授权状态读取跳过", exc_info=True)
+
             self._startup_advisory_events = []
             try:
                 from src.utils.config_advisories import (
@@ -567,6 +592,10 @@ class AIChatAssistant:
                                         event_tracker=self.telegram_client.event_tracker,
                                         log_buffer=_log_buf)
                     self._web_app = web_app  # 供收件箱后台 ingest 轮询访问 state 上的各平台 service
+                    # 翻译/意图等服务的兜底路径（inbox 未启用时）需要 ai_client，
+                    # 否则 _get_translation_service 会建出无引擎的退化实例。
+                    if getattr(self, "ai_client", None) is not None:
+                        web_app.state.ai_client = self.ai_client
                     if self.line_rpa_service is not None:
                         web_app.state.line_rpa_service = self.line_rpa_service
                     web_app.state.line_rpa_services = self.line_rpa_services
@@ -608,8 +637,18 @@ class AIChatAssistant:
                             )
                             web_app.state.draft_service = draft_svc
 
-                            def _drafts_api_auth(request):
-                                if hasattr(web_app.state, "require_role"):
+                            from starlette.requests import Request as _DraftReq
+
+                            def _drafts_api_auth(request: _DraftReq):
+                                # 统一走 admin 的 _api_auth：登录校验 + 坐席(agent)白名单放行
+                                # （/api/drafts 已在 _agent_api_allowed 内）；主管端点由路由内
+                                # _is_supervisor 守卫。回退 require_role 仅为极端兜底。
+                                # 注：参数必须带 Request 注解，否则 FastAPI 会把 request 当作
+                                # 必填 query 参数导致全部 422。
+                                _fn = getattr(web_app.state, "api_auth", None)
+                                if _fn is not None:
+                                    _fn(request)
+                                elif hasattr(web_app.state, "require_role"):
                                     web_app.state.require_role(request, "line_rpa")
 
                             register_drafts_routes(web_app, api_auth=_drafts_api_auth)
@@ -672,22 +711,76 @@ class AIChatAssistant:
                             except Exception:
                                 self.logger.debug("SLAWatcher 启动跳过", exc_info=True)
 
+                            # ── P3：AutoClaimWorker auto_assign 自动认领执行端 ──
+                            # 默认关（workspace.auto_assign.auto_claim.enabled=false）；
+                            # worker 每 tick 重读配置，开关无需重启。仅在 inbox 可用时启。
+                            try:
+                                from src.workspace.auto_claim_worker import AutoClaimWorker
+                                _ac_cfg = (((self.config.config or {}).get(
+                                    "workspace", {}) or {}).get(
+                                    "auto_assign", {}) or {}).get("auto_claim", {}) or {}
+                                _acw = AutoClaimWorker(
+                                    inbox_store=self.inbox_store,
+                                    config_manager=self.config,
+                                    config=_ac_cfg,
+                                )
+                                web_app.state.auto_claim_worker = _acw
+                                asyncio.ensure_future(_acw.run())
+                                self.logger.info(
+                                    "AutoClaimWorker 已启动（默认关，按 auto_claim.enabled 热生效）")
+                            except Exception:
+                                self.logger.debug("AutoClaimWorker 启动跳过", exc_info=True)
+
                             # ── L2：WebhookNotifier 企业 IM 通知 ──────────────
                             try:
                                 from src.inbox.webhook_notifier import WebhookNotifier
-                                _wh_list = (self.config.config or {}).get(
-                                    "notify", {}
-                                ).get("webhooks", []) or []
-                                if _wh_list:
-                                    _whn = WebhookNotifier(config=_wh_list)
-                                    web_app.state.webhook_notifier = _whn
-                                    asyncio.ensure_future(_whn.run())
-                                    self.logger.info(
-                                        "WebhookNotifier 已启动（%d 个 webhook）",
-                                        len(_wh_list),
+                                # 有效列表：notify_webhooks.json 覆盖层优先，否则 config.yaml
+                                try:
+                                    from src.integrations.notify_webhooks_store import (
+                                        effective_webhooks,
                                     )
+                                    _wh_list = effective_webhooks(self.config.config or {})
+                                except Exception:
+                                    _wh_list = (self.config.config or {}).get(
+                                        "notify", {}
+                                    ).get("webhooks", []) or []
+                                # 即使当前为空也创建 notifier：便于后台「告警渠道」面板
+                                # 运行时 reload() 增删，免重启
+                                _whn = WebhookNotifier(config=_wh_list)
+                                web_app.state.webhook_notifier = _whn
+                                asyncio.ensure_future(_whn.run())
+                                self.logger.info(
+                                    "WebhookNotifier 已启动（%d 个 webhook）",
+                                    len(_wh_list),
+                                )
                             except Exception:
                                 self.logger.debug("WebhookNotifier 启动跳过", exc_info=True)
+
+                            # ── D3：HealthWatchdog 运行时健康主动告警 ─────────
+                            # 默认开；周期巡检 D1 健康，异常经 EventBus→WebhookNotifier
+                            # 推送（需在「告警渠道」订阅 health_alert 事件才会真正发出）。
+                            try:
+                                from src.inbox.health_watchdog import HealthWatchdog
+                                _hw_cfg = (self.config.config or {}).get(
+                                    "health_watchdog", {}
+                                ) or {}
+                                if _hw_cfg.get("enabled", True):
+                                    _hw = HealthWatchdog(
+                                        app=web_app,
+                                        config_manager=self.config,
+                                        interval_sec=float(_hw_cfg.get("interval_sec", 300)),
+                                        pending_threshold=int(_hw_cfg.get("queue_threshold", 200)),
+                                        alert_on_warn=bool(_hw_cfg.get("alert_on_warn", False)),
+                                    )
+                                    web_app.state.health_watchdog = _hw
+                                    asyncio.ensure_future(_hw.run())
+                                    self.logger.info(
+                                        "HealthWatchdog 已启动（interval=%ss alert_on_warn=%s）",
+                                        _hw_cfg.get("interval_sec", 300),
+                                        _hw_cfg.get("alert_on_warn", False),
+                                    )
+                            except Exception:
+                                self.logger.debug("HealthWatchdog 启动跳过", exc_info=True)
 
                             # ── N2：ScheduledReporter 定时简报推送 ─────────────
                             try:
@@ -769,23 +862,66 @@ class AIChatAssistant:
                                     _tm_db = _cfg_dir / _tm_db
                                 _tm_store = TranslationMemoryStore(_tm_db)
                                 self.translation_memory = _tm_store
-                            _gl_cfg = _tr_cfg.get("glossary", {}) or {}
-                            _gl_terms = (_gl_cfg.get("extra_terms") or {}) if _gl_cfg.get("enabled", True) else {}
-                            import hashlib as _hl
-                            _gl_ver = _hl.sha256(
-                                repr(sorted(_gl_terms.items())).encode("utf-8")
-                            ).hexdigest()[:12] if _gl_terms else ""
+                            # P56：术语库（全局+域包合并）+ 多引擎路由
+                            from src.ai.translation_glossary import build_glossary
+                            from src.ai.translation_engines import build_engines
+                            _domain_files = []
+                            try:
+                                _dom_dir = Path(self.config.config_path).parent.parent / "domains"
+                                if _dom_dir.exists():
+                                    _domain_files = list(_dom_dir.glob("*/prompts/terminology.yaml"))
+                            except Exception:
+                                _domain_files = []
+                            # P59：术语库可编辑覆盖层（后台控制台增删改，最高优先）
+                            from src.ai.glossary_store import GlossaryStore
+                            _gloss_ov_path = _cfg_dir / "glossary_overrides.yaml"
+                            _gloss_store = GlossaryStore(_gloss_ov_path)
+                            _gloss_overrides = _gloss_store.load()
+                            _glossary = build_glossary(
+                                _cfg_root, domain_files=_domain_files, overrides=_gloss_overrides,
+                            )
+                            _engines = build_engines(_tr_cfg, self.ai_client)
+                            # 存重建上下文，供 /api/workspace/glossary 热更新复用
+                            web_app.state.glossary_store = _gloss_store
+                            web_app.state.glossary_config = _cfg_root
+                            web_app.state.glossary_domain_files = _domain_files
                             from src.ai.translation_service import TranslationService
                             web_app.state.translation_service = TranslationService(
                                 ai_client=self.ai_client,
                                 memory_store=_tm_store,
-                                glossary_terms=_gl_terms,
-                                glossary_version=_gl_ver,
+                                glossary_terms=_glossary.terms,
+                                glossary_version=_glossary.version,
+                                glossary_protect=_glossary.protect,
                                 cost_tracking=bool(_tr_cfg.get("cost_tracking", False)),
+                                engines=_engines,
                             )
-                            self.logger.info("Phase C 服务已预置（意图LLM=%s, 翻译记忆=%s）",
-                                             bool(_ia_cfg.get("use_llm", False)),
-                                             _tm_store is not None)
+                            self.logger.info(
+                                "Phase C/P56 服务已预置（意图LLM=%s, 翻译记忆=%s, 引擎=%s, 术语=%d, 保护词=%d）",
+                                bool(_ia_cfg.get("use_llm", False)),
+                                _tm_store is not None,
+                                "→".join(e.name for e in _engines),
+                                len(_glossary.terms), len(_glossary.protect),
+                            )
+
+                            # ── Phase B：可选统计语种检测（缺库自动跳过，仅精修含糊拉丁） ──
+                            try:
+                                _ld_cfg = ((_tr_cfg.get("lang_detect") or {}).get("statistical") or {})
+                                if _ld_cfg.get("enabled", False):
+                                    from src.ai.lang_detect_statistical import build_statistical_detector
+                                    from src.ai.translation_service import set_statistical_detector
+                                    _stat_fn = build_statistical_detector()
+                                    if _stat_fn is not None:
+                                        set_statistical_detector(
+                                            _stat_fn,
+                                            min_chars=int(_ld_cfg.get("min_chars", 12) or 12),
+                                        )
+                                        self.logger.info("统计语种检测已启用（回退精修含糊拉丁）")
+                                    else:
+                                        self.logger.warning(
+                                            "translation.lang_detect.statistical.enabled=true 但未装 lingua/langdetect，已跳过"
+                                        )
+                            except Exception:
+                                self.logger.debug("统计语种检测装配跳过", exc_info=True)
 
                             # ── Phase D：电商工具层（订单/物流查询 + 事实校验 + 审计） ──
                             _ec_cfg = _cfg_root.get("ecommerce_tools", {}) or {}
@@ -830,8 +966,11 @@ class AIChatAssistant:
                             from starlette.requests import Request as _Req
 
                             def _contacts_api_auth(request: _Req):
-                                # 复用 admin 的权限体系；若不存在则无鉴权（内网）
-                                if hasattr(web_app.state, "require_role"):
+                                # 复用 admin 的 _api_auth（登录校验）；回退 require_role 仅兜底。
+                                _fn = getattr(web_app.state, "api_auth", None)
+                                if _fn is not None:
+                                    _fn(request)
+                                elif hasattr(web_app.state, "require_role"):
                                     web_app.state.require_role(request, "line_rpa")
 
                             register_contacts_routes(
@@ -1549,6 +1688,85 @@ class AIChatAssistant:
         asyncio.create_task(self.stop())
 
 
+def run_config_check(config_path: str = None) -> int:
+    """``python main.py --check`` 干跑模式：仅加载并体检配置，不启动任何服务。
+
+    返回进程退出码（有 error 级问题 → 1，否则 0），便于 CI / 部署脚本 gate。
+    """
+    import yaml
+
+    from src.utils.config_check import check_config, format_report, has_errors
+    from src.utils.config_manager import ConfigManager
+
+    cm = ConfigManager(config_path)
+    path = cm.config_path
+    if not Path(path).exists():
+        print(f"✗ 配置文件不存在: {path}")
+        print("  → 复制 config/config.example.yaml 为 config/config.yaml 并填写")
+        return 1
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+    except yaml.YAMLError as exc:
+        print(f"✗ YAML 解析失败: {path}\n  → {exc}")
+        return 1
+
+    print(f"配置文件: {path}")
+    issues = check_config(config, config_path=path)
+    print(format_report(issues, config=config if isinstance(config, dict) else None))
+    return 1 if has_errors(issues) else 0
+
+
+def run_init(preset: str, config_path: str = None, set_pairs=None, force: bool = False) -> int:
+    """``python main.py --init [PRESET]`` 场景预设脚手架。
+
+    无 PRESET → 列出可用预设并退出；有 PRESET → 生成 config.yaml + 跑自检闭环。
+    """
+    from src.utils.config_init import (
+        describe_preset,
+        list_presets,
+        parse_set_args,
+        scaffold_config,
+    )
+    from src.utils.config_check import format_report, has_errors
+    from src.utils.config_manager import ConfigManager
+
+    presets = list_presets()
+    if not preset:
+        print("可用场景预设（python main.py --init <名称>）:")
+        for name in presets:
+            desc = describe_preset(name)
+            print(f"  - {name:<12} {desc}")
+        if not presets:
+            print("  （config/presets/ 下暂无预设）")
+        return 0
+
+    if preset not in presets:
+        print(f"✗ 未知预设: {preset}；可用: {', '.join(presets) or '（无）'}")
+        return 1
+
+    dest = Path(config_path) if config_path else ConfigManager().config_path
+    if str(dest).endswith("config.example.yaml"):
+        # 默认路径在 config.yaml 不存在时会回落 example；--init 应写 config.yaml
+        dest = Path(dest).parent / "config.yaml"
+
+    overrides = parse_set_args(set_pairs)
+    # 交互补填关键空位（仅 TTY；非交互/CI 走 --set）
+    if sys.stdin.isatty():
+        if "ai.api_key" not in overrides:
+            ans = input("AI api_key（回车跳过，稍后手填）: ").strip()
+            if ans:
+                overrides["ai.api_key"] = ans
+
+    ok, msg, issues = scaffold_config(preset, dest, overrides=overrides, force=force)
+    print(msg)
+    if not ok:
+        return 1
+    print(format_report(issues, config=None))
+    print("\n下一步: 编辑上面文件填好必填项，再运行 `python main.py --check` 复核。")
+    return 1 if has_errors(issues) else 0
+
+
 async def main():
     """主函数"""
     assistant = AIChatAssistant()
@@ -1569,6 +1787,31 @@ async def main():
 
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Telegram MTProto AI 多平台客服主程序")
+    parser.add_argument(
+        "--check", action="store_true",
+        help="只体检配置并退出（不启动服务）；有 error 级问题返回非零退出码")
+    parser.add_argument(
+        "--init", nargs="?", const="", metavar="PRESET",
+        help="用场景预设生成 config.yaml（无名称则列出可用预设）")
+    parser.add_argument(
+        "--set", action="append", metavar="KEY=VAL",
+        help="--init 时覆盖配置项，如 --set ai.api_key=sk-xxx（可多次）")
+    parser.add_argument(
+        "--force", action="store_true", help="--init 时覆盖已存在的 config.yaml")
+    parser.add_argument(
+        "--config", default=None, help="指定 config.yaml 路径（默认 config/config.yaml）")
+    args = parser.parse_args()
+
+    if args.init is not None:
+        sys.exit(run_init(args.init, args.config, args.set, args.force))
+
+    if args.check:
+        sys.exit(run_config_check(args.config))
+
     # 设置默认事件循环策略（Windows需要）
     if sys.platform == 'win32':
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())

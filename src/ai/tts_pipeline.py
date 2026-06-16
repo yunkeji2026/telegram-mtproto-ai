@@ -8,6 +8,7 @@ text/approval without blocking the RPA loop.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import shlex
 import subprocess
@@ -16,6 +17,8 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -75,6 +78,12 @@ class TTSPipeline:
         self.voice_profile = (
             cfg.get("voice_profile") if isinstance(cfg.get("voice_profile"), dict) else {}
         )
+        # 局域网克隆主机配置（LAN 优先 → 云端兜底）；由 resolve_voice_cfg 注入
+        self.voice_clone_lan = (
+            cfg.get("voice_clone_lan")
+            if isinstance(cfg.get("voice_clone_lan"), dict)
+            else {}
+        )
 
     def stats(self) -> Dict[str, Any]:
         return {
@@ -111,6 +120,11 @@ class TTSPipeline:
         suffix = "wav" if self.backend == "pyttsx3" else self.format
         out = self.out_dir / f"tts-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}.{suffix}"
         t0 = time.monotonic()
+        # ── 局域网克隆优先：在线则走 LAN 零样本克隆；不可用/失败按配置回落云端 ──
+        if self._should_try_lan():
+            lan_rv = await self._try_lan_clone(rv, out, t0)
+            if lan_rv is not None:
+                return lan_rv  # LAN 成功 或 硬失败(未开兜底)；None = 回落云端
         try:
             await asyncio.wait_for(
                 asyncio.to_thread(self._synthesize_sync, rv.text, out, rv.voice),
@@ -146,6 +160,86 @@ class TTSPipeline:
         if bool(self.voice_profile.get("enabled", False)):
             return str(self.voice_profile.get("speaker_id") or self.voice).strip()
         return self.voice
+
+    def _should_try_lan(self) -> bool:
+        """是否应尝试局域网克隆：LAN 启用 + 已请求克隆(有同意+参考音频文件)。"""
+        lan = self.voice_clone_lan or {}
+        if not lan.get("enabled"):
+            return False
+        vp = self.voice_profile or {}
+        if not (vp.get("enabled") and vp.get("owner_consent")):
+            return False
+        ref = str(vp.get("reference_audio_path") or "").strip()
+        return bool(ref) and Path(ref).is_file()
+
+    async def _try_lan_clone(
+        self, rv: "TTSResult", out: Path, t0: float,
+    ) -> Optional["TTSResult"]:
+        """尝试局域网零样本克隆。
+
+        返回值语义：
+          - TTSResult：LAN 成功，或硬失败且未开云端兜底（直接定稿）
+          - None：局域网不可用/失败且允许兜底 → 调用方回落云端
+        """
+        from src.ai.voice_clone_client import VoiceCloneClient
+
+        lan = VoiceCloneClient(self.voice_clone_lan)
+        ref = str(self.voice_profile.get("reference_audio_path") or "").strip()
+        ref_text = str(self.voice_profile.get("reference_text") or "").strip()
+        # fish_speech 返回 WAV：用 .wav 产物并据此标记格式/测时长
+        lan_out = out.with_suffix(".wav")
+
+        def _finalize_err(msg: str) -> "TTSResult":
+            rv.error = msg
+            rv.latency_ms = int((time.monotonic() - t0) * 1000)
+            return rv
+
+        # 健康探测（短超时 + 进程缓存）
+        if not await asyncio.to_thread(lan.health_ok):
+            if lan.cloud_fallback:
+                logger.info("[tts] voice_clone_lan unreachable → 回落云端")
+                return None
+            return _finalize_err("voice_clone_lan_unreachable")
+
+        def _do_clone() -> None:
+            lan.synthesize_clone(rv.text, ref, lan_out, reference_text=ref_text)
+
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(_do_clone),
+                timeout=lan.synth_timeout_sec,
+            )
+        except Exception as ex:
+            try:
+                lan_out.unlink(missing_ok=True)  # type: ignore[call-arg]
+            except Exception:
+                pass
+            if lan.cloud_fallback:
+                logger.warning("[tts] voice_clone_lan failed (%s) → 回落云端", ex)
+                return None
+            return _finalize_err(f"voice_clone_lan_failed:{str(ex)[:200]}")
+
+        if lan_out.exists() and lan_out.stat().st_size > 0:
+            rv.ok = True
+            rv.provider = "voice_clone_lan"
+            rv.format = "wav"
+            rv.audio_path = str(lan_out)
+            rv.extra["bytes"] = lan_out.stat().st_size
+            rv.extra["lan_base_url"] = lan.base_url
+            try:
+                dur, src = compute_audio_duration_sec(str(lan_out), "wav")
+                rv.duration_sec = float(dur)
+                rv.duration_source = str(src)
+            except Exception:
+                rv.duration_sec = -1.0
+                rv.duration_source = "unknown"
+            rv.latency_ms = int((time.monotonic() - t0) * 1000)
+            return rv
+
+        # 产物为空
+        if lan.cloud_fallback:
+            return None
+        return _finalize_err("voice_clone_lan_empty")
 
     def _validate_voice_profile(self) -> None:
         if not bool(self.voice_profile.get("enabled", False)):

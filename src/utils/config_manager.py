@@ -20,9 +20,11 @@ class ConfigManager:
         Args:
             config_path: 配置文件路径，如果为None则使用默认路径
         """
+        # logger 必须先于 _get_default_config_path()，后者在回退到 example 配置时
+        # 会用 self.logger.warning（纯净 checkout 无 config.yaml 时即触发）。
+        self.logger = logging.getLogger(__name__)
         self.config_path = Path(config_path) if config_path else self._get_default_config_path()
         self.config: Dict[str, Any] = {}
-        self.logger = logging.getLogger(__name__)
         self._quota_rules_cache: Optional[Dict[str, Any]] = None
         self._quota_rules_mtime: float = 0
         self._templates_cache: Optional[Dict[str, Any]] = None
@@ -59,14 +61,22 @@ class ConfigManager:
                 return False
             
             with open(self.config_path, 'r', encoding='utf-8') as f:
-                self.config = yaml.safe_load(f)
-            
+                self.config = yaml.safe_load(f) or {}
+
+            # P1-1：凭证 overlay（config.local.yaml）深合并覆盖在主配置之上。
+            # 接入向导只写这个小文件 → 主 config.yaml 的注释/结构永不被改写，
+            # 且密钥与 git 跟踪文件分离（overlay 应进 .gitignore）。
+            self._merge_overlay()
+
             # 验证配置
             if not self._validate_config():
                 return False
             
             self._config_mtime = os.path.getmtime(self.config_path)
             self.logger.info(f"配置文件加载成功: {self.config_path}")
+            # P0-1：非阻断启动自检 — 把 error/warn 摘要打到日志，引导修复错配，
+            # 但不改变启动成败（严格 gate 走 `python main.py --check`）。
+            self._run_startup_self_check()
             return True
             
         except yaml.YAMLError as e:
@@ -76,6 +86,137 @@ class ConfigManager:
             self.logger.error(f"加载配置文件失败: {e}")
             return False
     
+    def _overlay_path(self) -> Path:
+        """凭证 overlay 路径：主配置同目录下的 config.local.yaml。"""
+        return self.config_path.parent / "config.local.yaml"
+
+    @staticmethod
+    def _deep_merge(base: Dict[str, Any], over: Dict[str, Any]) -> Dict[str, Any]:
+        """递归合并 over 到 base（就地改 base）；dict 递归，其余以 over 覆盖。"""
+        for k, v in (over or {}).items():
+            if isinstance(v, dict) and isinstance(base.get(k), dict):
+                ConfigManager._deep_merge(base[k], v)
+            else:
+                base[k] = v
+        return base
+
+    def _merge_overlay(self) -> None:
+        """若存在 config.local.yaml，深合并覆盖到 self.config（缺失/损坏则静默跳过）。"""
+        path = self._overlay_path()
+        try:
+            if not path.exists():
+                return
+            with open(path, "r", encoding="utf-8") as f:
+                overlay = yaml.safe_load(f) or {}
+            if isinstance(overlay, dict) and overlay:
+                self._deep_merge(self.config, overlay)
+                self.logger.info("已合并凭证 overlay: %s", path)
+        except Exception as exc:
+            self.logger.warning("凭证 overlay 合并失败（忽略）: %s", exc)
+
+    def save_channel_credentials(
+        self, channel: str, values: Dict[str, Any],
+    ) -> tuple:
+        """P1-1 接入向导：把某渠道的凭证字段写入 config.local.yaml 并即时生效。
+
+        只接受 channel_setup 声明的已知字段（防注入任意键），写 overlay（保住主
+        config 注释），随后深合并进 self.config 让本进程立即可见。
+        返回 (成功?, 说明, issues:list)。
+        """
+        try:
+            from src.utils.channel_setup import apply_channel_values
+        except Exception as exc:
+            return False, f"channel_setup 不可用: {exc}", []
+        path = self._overlay_path()
+        try:
+            overlay: Dict[str, Any] = {}
+            if path.exists():
+                with open(path, "r", encoding="utf-8") as f:
+                    overlay = yaml.safe_load(f) or {}
+            ok, msg = apply_channel_values(overlay, channel, values)
+            if not ok:
+                return False, msg, []
+            tmp = path.with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write("# 接入向导写入的凭证 overlay（深合并覆盖 config.yaml）。\n")
+                f.write("# 请勿提交到 git（应在 .gitignore）。\n")
+                yaml.dump(overlay, f, default_flow_style=False,
+                          allow_unicode=True, sort_keys=False)
+            tmp.replace(path)
+            self._deep_merge(self.config, overlay)
+        except Exception as exc:
+            self.logger.error("写入凭证 overlay 失败: %s", exc)
+            return False, f"写入失败: {exc}", []
+        issues = []
+        try:
+            from src.utils.config_check import check_config
+            issues = check_config(self.config, config_path=self.config_path)
+        except Exception:
+            self.logger.debug("写入后自检失败（忽略）", exc_info=True)
+        return True, "已保存", issues
+
+    def save_branding(self, values: Dict[str, Any]) -> tuple:
+        """C1-1 白标：把品牌字段写入 config.local.yaml 的 ``brand:`` 段并即时生效。
+
+        只接受白名单字段（防注入任意键），写 overlay（保住主 config 注释），随后深合并
+        进 self.config 让本进程立即可见。返回 (成功?, 说明)。
+        """
+        allowed = {
+            "site_name", "site_name_short", "primary_color",
+            "logo_url", "login_subtitle", "hide_powered_by",
+        }
+        clean: Dict[str, Any] = {}
+        for k, v in (values or {}).items():
+            if k not in allowed:
+                continue
+            if k == "hide_powered_by":
+                clean[k] = bool(v)
+            else:
+                clean[k] = ("" if v is None else str(v)).strip()
+        path = self._overlay_path()
+        try:
+            overlay: Dict[str, Any] = {}
+            if path.exists():
+                with open(path, "r", encoding="utf-8") as f:
+                    overlay = yaml.safe_load(f) or {}
+            brand = dict(overlay.get("brand") or {})
+            brand.update(clean)
+            overlay["brand"] = brand
+            tmp = path.with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write("# 白标/凭证 overlay（深合并覆盖 config.yaml）。\n")
+                f.write("# 请勿提交到 git（应在 .gitignore）。\n")
+                yaml.dump(overlay, f, default_flow_style=False,
+                          allow_unicode=True, sort_keys=False)
+            tmp.replace(path)
+            self._deep_merge(self.config, overlay)
+        except Exception as exc:
+            self.logger.error("写入品牌 overlay 失败: %s", exc)
+            return False, f"写入失败: {exc}"
+        return True, "已保存"
+
+    def _run_startup_self_check(self) -> None:
+        """启动时跑配置自检并把 error/warn 摘要写日志（永不抛、永不阻断启动）。"""
+        try:
+            from src.utils.config_check import check_config
+        except Exception:
+            return
+        try:
+            issues = check_config(self.config, config_path=self.config_path)
+        except Exception as exc:
+            self.logger.debug("配置自检执行异常（忽略）: %s", exc)
+            return
+        errors = [i for i in issues if i.severity == "error"]
+        warns = [i for i in issues if i.severity == "warn"]
+        for i in errors:
+            self.logger.error("配置自检[错误] %s: %s", i.path, i.message)
+        for i in warns:
+            self.logger.warning("配置自检[警告] %s: %s", i.path, i.message)
+        if errors or warns:
+            self.logger.warning(
+                "配置自检发现 %d 错误 / %d 警告；详情运行 `python main.py --check`",
+                len(errors), len(warns))
+
     def _validate_config(self) -> bool:
         """验证配置文件"""
         required_sections = ['telegram', 'ai', 'skills']

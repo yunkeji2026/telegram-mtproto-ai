@@ -448,6 +448,28 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
 .gr-card.collapsed{opacity:.85}
 .gr-collapse-btn{background:transparent;border:none;cursor:pointer;color:var(--t3);font-size:.65rem;padding:0 2px;transition:transform .15s;flex-shrink:0}
 .gr-collapse-btn.open{transform:rotate(90deg)}
+/* ── Persona Picker Modal ─────────────────────────────────────────────────── */
+.pp-modal-ov{display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.45);align-items:center;justify-content:center}
+.pp-modal-ov.open{display:flex}
+.pp-modal{width:min(520px,92vw);max-height:80vh;display:flex;flex-direction:column;background:var(--bg);border:1px solid var(--bd);border-radius:14px;box-shadow:0 18px 60px rgba(0,0,0,.4);overflow:hidden}
+.pp-modal-hd{display:flex;align-items:flex-start;justify-content:space-between;padding:.95rem 1.1rem .65rem}
+.pp-modal-ttl{font-size:1rem;font-weight:700;color:var(--t1)}
+.pp-modal-sub{font-size:.74rem;color:var(--t2);margin-top:.15rem}
+.pp-modal-x{background:transparent;border:none;color:var(--t2);font-size:1rem;cursor:pointer;padding:.1rem .35rem;border-radius:6px}
+.pp-modal-x:hover{background:var(--bd);color:var(--t1)}
+.pp-modal-search{padding:0 1.1rem .6rem}
+.pp-modal-search input{width:100%;padding:.5rem .65rem;border:1px solid var(--bd);border-radius:9px;background:var(--bg2,var(--bg));color:var(--t1);font-size:.85rem}
+.pp-modal-list{flex:1;overflow-y:auto;padding:0 .75rem .35rem}
+.pp-item{display:flex;align-items:center;gap:.65rem;padding:.55rem .65rem;border-radius:10px;cursor:pointer;border:1px solid transparent}
+.pp-item:hover{background:rgba(91,124,246,.08)}
+.pp-item.cur{border-color:var(--accent,#5b7cf6);background:rgba(91,124,246,.1)}
+.pp-item-av{width:34px;height:34px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:.78rem;font-weight:700;color:#fff;background:#5b7cf6}
+.pp-item-main{flex:1;min-width:0}
+.pp-item-name{font-size:.85rem;font-weight:600;color:var(--t1)}
+.pp-item-role{font-size:.72rem;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pp-item-cur{font-size:.66rem;color:var(--accent,#5b7cf6);font-weight:600;flex-shrink:0}
+.pp-modal-empty{padding:1.4rem 0;text-align:center;color:var(--t2);font-size:.82rem}
+.pp-modal-foot{display:flex;justify-content:space-between;gap:.5rem;padding:.7rem 1.1rem;border-top:1px solid var(--bd)}
 </style>
 
 <div class="topbar">
@@ -485,6 +507,10 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
     全局规则
     <span class="tb-cnt" id="tb-rules-cnt"></span>
+  </button>
+  <button class="st-tab" id="tabn-default" onclick="switchTab('default')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+    默认人设
   </button>
 </div>
 
@@ -960,7 +986,7 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
     <div id="pe-canonical-banner" class="diff-banner" style="margin-top:.1rem"></div>
     <div class="field-row"><label>Profile ID</label><input id="pe-id" type="text" placeholder="warm_companion_2024" style="font-family:monospace"><span id="pe-id-warn" style="display:none;font-size:.72rem;color:#ef4444;margin-top:.2rem">⚠ 该 ID 已存在，保存将覆盖现有人设</span></div>
     <div class="ps-row">
-      <div class="field-row"><label>名称</label><input id="pe-name" type="text" placeholder="Camille"></div>
+      <div class="field-row"><label>名称</label><input id="pe-name" type="text" placeholder="小灵"></div>
       <div class="field-row"><label>角色</label><input id="pe-role" type="text" placeholder="亲密的私聊对象"></div>
     </div>
     <div class="field-row"><label>性格 / 风格</label><textarea id="pe-personality" rows="5" placeholder="温柔体贴，喜欢用撒娇语气…"></textarea><span id="pe-pers-notice" class="pers-notice">✓ 已将结构化格式转换为可读文本</span></div>
@@ -1059,6 +1085,83 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
   <div id="pe-status" class="tts-status" style="padding:0 1.28rem .48rem;flex-shrink:0;min-height:1.1em"></div>
 </div>
 
+<!-- ══ Tab 5: Default Persona ════════════════════════════════════════════════ -->
+<div class="st-pane" id="tab-default">
+  <div style="padding:1.4rem 1.8rem;max-width:760px">
+    <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem">
+      <h2 style="margin:0;font-size:1.05rem">默认人设</h2>
+      <span id="dp-source" style="font-size:.72rem;color:var(--t2)"></span>
+    </div>
+    <p style="font-size:.8rem;color:var(--t2);line-height:1.6;margin:.2rem 0 1rem">
+      未单独绑定画像的会话（含桌面端 Telegram）都使用这套人设。保存后写入
+      <code>persona_runtime.yaml</code> 并立即生效（无需重启后端）。
+      <br>客户问"你叫什么"时，AI 会用下面的<strong>名字</strong>回答——填一个像真人的名字（如「小雨」），别用角色定位。
+    </p>
+
+    <div class="field-row" style="margin-bottom:.85rem">
+      <label style="display:block;font-size:.8rem;font-weight:600;margin-bottom:.3rem">名字（AI 的身份名）</label>
+      <input id="p-name" type="text" placeholder="如：小雨" style="width:100%;padding:.5rem .65rem;border:1px solid var(--bd);border-radius:7px;background:var(--bg);color:var(--t1);font-size:.85rem">
+    </div>
+
+    <div class="field-row" style="margin-bottom:.85rem">
+      <label style="display:block;font-size:.8rem;font-weight:600;margin-bottom:.3rem">角色定位 role</label>
+      <input id="p-role" type="text" placeholder="如：情感向线上陪伴，像朋友一样自然接话" style="width:100%;padding:.5rem .65rem;border:1px solid var(--bd);border-radius:7px;background:var(--bg);color:var(--t1);font-size:.85rem">
+    </div>
+
+    <div class="field-row" style="margin-bottom:.85rem">
+      <label style="display:block;font-size:.8rem;font-weight:600;margin-bottom:.3rem">性格 / 说话风格</label>
+      <textarea id="p-personality" rows="3" placeholder="如：口语像私聊微信；短消息就短回；不套客服模板" style="width:100%;padding:.5rem .65rem;border:1px solid var(--bd);border-radius:7px;background:var(--bg);color:var(--t1);font-size:.85rem;resize:vertical"></textarea>
+    </div>
+
+    <div style="display:flex;gap:.85rem;margin-bottom:1rem;flex-wrap:wrap">
+      <div class="field-row" style="flex:1;min-width:160px">
+        <label style="display:block;font-size:.8rem;font-weight:600;margin-bottom:.3rem">回复语言</label>
+        <select id="p-language" style="width:100%;padding:.5rem .65rem;border:1px solid var(--bd);border-radius:7px;background:var(--bg);color:var(--t1);font-size:.85rem">
+          <option value="">跟随对方语言</option>
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+          <option value="th">ไทย</option>
+        </select>
+      </div>
+      <div class="field-row" style="flex:1;min-width:160px">
+        <label style="display:block;font-size:.8rem;font-weight:600;margin-bottom:.3rem">回复长度</label>
+        <select id="p-reply-length" style="width:100%;padding:.5rem .65rem;border:1px solid var(--bd);border-radius:7px;background:var(--bg);color:var(--t1);font-size:.85rem">
+          <option value="short">简短</option>
+          <option value="balanced">均衡</option>
+          <option value="detailed">详细</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:.6rem">
+      <button class="btn btn-primary btn-sm" onclick="saveDefaultPersona()">保存默认人设</button>
+      <button class="btn btn-sm" onclick="previewPrompt()">预览 AI 实际收到的提示词</button>
+    </div>
+    <pre id="prompt-preview" style="display:none;margin-top:.9rem;padding:.75rem;background:var(--bg);border:1px solid var(--bd);border-radius:8px;font-size:.76rem;line-height:1.5;white-space:pre-wrap;max-height:360px;overflow:auto;color:var(--t1)"></pre>
+  </div>
+</div>
+
+<!-- ══ Persona Picker Modal（账号 → 人设 统一选择器，替换 prompt()）═══════════ -->
+<div id="pp-modal-ov" class="pp-modal-ov" onclick="_ppModalOvClick(event)">
+  <div class="pp-modal">
+    <div class="pp-modal-hd">
+      <div>
+        <div class="pp-modal-ttl">选择人设</div>
+        <div class="pp-modal-sub" id="pp-modal-sub"></div>
+      </div>
+      <button class="pp-modal-x" onclick="closePersonaPicker()" title="关闭">✕</button>
+    </div>
+    <div class="pp-modal-search">
+      <input id="pp-modal-search" type="search" placeholder="搜索名字 / 角色 / 标签 / ID…" oninput="_ppRenderList()" autocomplete="off">
+    </div>
+    <div id="pp-modal-list" class="pp-modal-list"></div>
+    <div class="pp-modal-foot">
+      <button class="btn btn-sm btn-danger" id="pp-modal-clear" onclick="_ppPick('')">清除绑定（回默认人设）</button>
+      <button class="btn btn-sm" onclick="closePersonaPicker()">取消</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast container -->
 <div class="toast-wrap" id="toast-wrap"></div>
 <!-- P19-3: Inline tag editor -->
@@ -1079,6 +1182,7 @@ function switchTab(id) {
   if (tab)  tab.classList.add('active');
   if (id === 'dashboard') refreshStatus();
   if (id === 'bindings')  _populateBindingsTabSelects();
+  if (id === 'default')   loadDefaultPersonaForm();
 }
 
 // ── Drawer helpers ────────────────────────────────────────────────────────────
@@ -1268,7 +1372,7 @@ function _renderDashboard(d) {
   if (!wrap) return;
   let html = '';
 
-  function _renderAccSection(accounts, title, color) {
+  function _renderAccSection(accounts, title, color, platform) {
     if (!accounts || !accounts.length) return '';
     var _sOnline = accounts.filter(function(a){ return a.status === 'active'; }).length;
     var _sClr = _sOnline === accounts.length ? '#10b981' : (_sOnline === 0 ? '#ef4444' : '#d97706');
@@ -1279,9 +1383,9 @@ function _renderDashboard(d) {
       var hasP = !!a.active_profile;
       var pname = hasP ? (a.active_profile.name || a.active_profile.id) : null;
       var initials = (a.label || a.account_id || '?').slice(0,2).toUpperCase();
-      var isWa = (title.indexOf('WhatsApp') >= 0);
-      var assignBtn = isWa
-        ? '<button class="btn btn-sm" style="font-size:.67rem;padding:.15rem .42rem' + (!hasP ? ';background:rgba(59,130,246,.1);border-color:rgba(59,130,246,.3);color:#3b82f6' : '') + '" onclick="_assignWaProfile(\'' + a.account_id + '\')">' + (hasP ? '更换' : '指定人设') + '</button>'
+      var curPid = (a.persona_ids && a.persona_ids[0]) || '';
+      var assignBtn = platform
+        ? '<button class="btn btn-sm" style="font-size:.67rem;padding:.15rem .42rem' + (!hasP ? ';background:rgba(59,130,246,.1);border-color:rgba(59,130,246,.3);color:#3b82f6' : '') + '" onclick="openPersonaPicker(\'' + platform + '\',\'' + String(a.account_id).replace(/'/g,"\\'") + '\',\'' + String(curPid).replace(/'/g,"\\'") + '\')">' + (hasP ? '更换' : '指定人设') + '</button>'
         : '';
       var statusClass = a.status === 'active' ? 'online' : (a.status === 'error' ? 'error' : 'offline');
       h += '<div class="acc-card' + (!hasP ? ' no-pf' : '') + '">';
@@ -1299,10 +1403,10 @@ function _renderDashboard(d) {
     return h;
   }
 
-  html += _renderAccSection(d.tg_accounts,   '🔵 Telegram 账号',     '#2CA5E0');
-  html += _renderAccSection(d.mrpa_accounts, '📦 Messenger RPA 账号', '#0866FF');
-  html += _renderAccSection(d.wa_accounts,   '💬 WhatsApp RPA 账号',  '#25D366');
-  html += _renderAccSection(d.line_rpa,      '🟢 LINE RPA 账号',      '#00C300');
+  html += _renderAccSection(d.tg_accounts,   '🔵 Telegram 账号',     '#2CA5E0', 'tg');
+  html += _renderAccSection(d.mrpa_accounts, '📦 Messenger RPA 账号', '#0866FF', 'mrpa');
+  html += _renderAccSection(d.wa_accounts,   '💬 WhatsApp RPA 账号',  '#25D366', 'wa');
+  html += _renderAccSection(d.line_rpa,      '🟢 LINE RPA 账号',      '#00C300', '');
 
   if (!html) {
     html = '<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="42" height="42"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><h4>暂无接入平台</h4><p>请在 config.yaml 中配置账号后重启</p></div>';
@@ -1546,19 +1650,53 @@ function _dashRefresh() {
   });
 }
 
+// 当前默认人设完整数据（保存时基于它合并，避免丢掉 deny_ai/forbidden_phrases 等表单未覆盖的字段）
+var _defaultPersonaFull = null;
+
+function _dpVal(id) { var el = document.getElementById(id); return el ? (el.value || '').trim() : ''; }
+function _dpSet(id, v) { var el = document.getElementById(id); if (el) el.value = (v == null ? '' : v); }
+
 function _personaPayload() {
-  return {
-    name: document.getElementById('p-name').value.trim(),
-    role: document.getElementById('p-role').value.trim(),
-    personality: document.getElementById('p-personality').value.trim(),
-    language: document.getElementById('p-language').value,
-    reply_length: document.getElementById('p-reply-length').value,
-    voice_profile: {
-      enabled: document.getElementById('vp-enabled').checked,
-      backend: document.getElementById('vp-backend').value,
-      voice: document.getElementById('vp-voice').value.trim(),
-    }
-  };
+  // 基于已加载的完整人设做合并，只覆盖表单里的字段
+  var base = _defaultPersonaFull ? JSON.parse(JSON.stringify(_defaultPersonaFull)) : {};
+  base.name = _dpVal('p-name');
+  base.role = _dpVal('p-role');
+  var styleText = _dpVal('p-personality');
+  if (base.personality && typeof base.personality === 'object') {
+    base.personality.style = styleText;   // 保留 traits/emoji_level
+  } else {
+    base.personality = styleText;
+  }
+  var lang = _dpVal('p-language');
+  base.language = lang;                    // 空 = 跟随对方语言
+  var rl = _dpVal('p-reply-length');
+  if (rl) {
+    base.reply_length = rl;
+    if (base.speaking && typeof base.speaking === 'object') base.speaking.reply_length = rl;
+  }
+  return base;
+}
+
+// 打开「默认人设」tab 时，把后端当前默认人设回填到表单
+async function loadDefaultPersonaForm() {
+  try {
+    var r = await fetch('/api/persona');   // chat_id 为空 → 域级默认人设
+    var d = await r.json();
+    var p = (d && d.persona) || {};
+    _defaultPersonaFull = p;
+    _dpSet('p-name', p.name || '');
+    _dpSet('p-role', p.role || '');
+    var style = (p.personality && typeof p.personality === 'object')
+      ? (p.personality.style || '')
+      : (p.personality || '');
+    _dpSet('p-personality', style);
+    _dpSet('p-language', p.language || '');
+    _dpSet('p-reply-length', p.reply_length || (p.speaking && p.speaking.reply_length) || 'balanced');
+    var src = document.getElementById('dp-source');
+    if (src) src.textContent = p.name ? ('当前：' + p.name) : '';
+  } catch (e) {
+    _toast('加载默认人设失败: ' + e, 'err');
+  }
 }
 
 async function saveDefaultPersona() {
@@ -1571,7 +1709,10 @@ async function saveDefaultPersona() {
       body: JSON.stringify({persona: _personaPayload()})
     });
     const d = await r.json();
-    if (d.ok) { _toast('已保存默认人设', 'ok'); st.textContent = '✓ 已保存'; st.className = 'tts-status ok'; }
+    if (d.ok) {
+      _toast('已保存默认人设', 'ok'); st.textContent = '✓ 已保存'; st.className = 'tts-status ok';
+      loadDefaultPersonaForm();
+    }
     else { st.textContent = '保存失败: ' + (d.detail || ''); st.className = 'tts-status err'; }
   } catch(e) {
     st.textContent = '请求失败: ' + e; st.className = 'tts-status err';
@@ -2586,22 +2727,82 @@ async function _autoRefreshStatus() {
   } catch(e) {}
 }
 
-// ── WA profile assign ─────────────────────────────────────────────────────────
-async function _assignWaProfile(accountId) {
-  if (!_allProfiles.length) { _toast('请先等待 profiles 加载', 'err'); return; }
-  var opts = _allProfiles.map(function(p){ return p.id + ' (' + (p.name||'') + ')'; }).join('\n');
-  var pid = prompt('为 WhatsApp 账号 ' + accountId + ' 选择人设 ID:\n' + opts);
-  if (!pid) return;
+// ── 统一人设选择器（替换 prompt()，四平台共用）────────────────────────────────
+var _ppCtx = { platform: '', accountId: '', currentPid: '' };
+var PLAT_LABEL = { tg: 'Telegram', mrpa: 'Messenger', wa: 'WhatsApp', line: 'LINE' };
+var PLAT_ENDPOINT = {
+  tg:   function(aid){ return '/api/personas/tg-account/'   + encodeURIComponent(aid) + '/assign-profile'; },
+  mrpa: function(aid){ return '/api/personas/mrpa-account/' + encodeURIComponent(aid) + '/assign-profile'; },
+  wa:   function(aid){ return '/api/personas/wa-account/'   + encodeURIComponent(aid) + '/assign-profile'; },
+};
+
+function openPersonaPicker(platform, accountId, currentPid) {
+  if (!_allProfiles.length) { _toast('人设池还在加载，请稍候…', 'err'); return; }
+  if (!PLAT_ENDPOINT[platform]) { _toast('该平台暂不支持在此指定人设', 'err'); return; }
+  _ppCtx = { platform: platform, accountId: accountId, currentPid: currentPid || '' };
+  var sub = document.getElementById('pp-modal-sub');
+  if (sub) sub.textContent = (PLAT_LABEL[platform] || platform) + ' · ' + accountId;
+  var clr = document.getElementById('pp-modal-clear');
+  if (clr) clr.style.display = currentPid ? '' : 'none';   // 没绑过就不显示"清除"
+  var search = document.getElementById('pp-modal-search');
+  if (search) search.value = '';
+  _ppRenderList();
+  document.getElementById('pp-modal-ov').classList.add('open');
+  if (search) setTimeout(function(){ search.focus(); }, 50);
+}
+
+function closePersonaPicker() {
+  document.getElementById('pp-modal-ov').classList.remove('open');
+}
+function _ppModalOvClick(e) {
+  if (e.target === document.getElementById('pp-modal-ov')) closePersonaPicker();
+}
+
+function _ppRenderList() {
+  var box = document.getElementById('pp-modal-list');
+  if (!box) return;
+  var q = (document.getElementById('pp-modal-search').value || '').trim().toLowerCase();
+  var list = _allProfiles.filter(function(p) {
+    if (!q) return true;
+    var hay = [(p.id||''), (p.name||''), (p.role||''), (p.tags||[]).join(' ')].join(' ').toLowerCase();
+    return hay.indexOf(q) >= 0;
+  });
+  if (!list.length) { box.innerHTML = '<div class="pp-modal-empty">没有匹配的人设</div>'; return; }
+  box.innerHTML = list.map(function(p) {
+    var nm = p.name || p.id;
+    var av = (nm || '?').slice(0, 2).toUpperCase();
+    var isCur = p.id === _ppCtx.currentPid;
+    return '<div class="pp-item' + (isCur ? ' cur' : '') + '" onclick="_ppPick(\'' + String(p.id).replace(/'/g,"\\'") + '\')">'
+      + '<div class="pp-item-av">' + av + '</div>'
+      + '<div class="pp-item-main"><div class="pp-item-name">' + nm + '</div>'
+      + '<div class="pp-item-role">' + (p.role || p.id) + '</div></div>'
+      + (isCur ? '<span class="pp-item-cur">当前 ✓</span>' : '')
+      + '</div>';
+  }).join('');
+}
+
+async function _ppPick(profileId) {
+  var ctx = _ppCtx;
+  var ep = PLAT_ENDPOINT[ctx.platform];
+  if (!ep) return;
+  closePersonaPicker();
   try {
-    const r = await fetch('/api/personas/wa-assign', {
+    const r = await fetch(ep(ctx.accountId), {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({account_id: accountId, profile_id: pid})
+      body: JSON.stringify({ profile_id: profileId })
     });
     const d = await r.json();
-    if (d.ok) { _toast('已为 ' + accountId + ' 指定人设 ' + pid, 'ok'); refreshStatus(); }
-    else { _toast('指定失败: ' + (d.detail || ''), 'err'); }
+    if (r.ok && d.ok) {
+      _toast(profileId ? ('已指定人设：' + profileId) : '已清除人设（回默认）', 'ok');
+      refreshStatus();
+    } else {
+      _toast('指定失败: ' + (d.detail || ('HTTP ' + r.status)), 'err');
+    }
   } catch(e) { _toast('请求失败: ' + e, 'err'); }
 }
+
+// 兼容旧调用名
+function _assignWaProfile(accountId) { openPersonaPicker('wa', accountId, ''); }
 
 // ── DOMContentLoaded ──────────────────────────────────────────────────────────
 // ── P16: Bindings tab platform filter ─────────────────────────────────────────

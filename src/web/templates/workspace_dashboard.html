@@ -28,6 +28,7 @@
 {% endblock %}
 {% block content %}
 <div class="db-wrap">
+  <div id="db-onboard" style="display:none;"></div>
   <a class="db-back" href="/workspace">← 返回工作台</a>
   <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0 14px;">
     <h2 style="margin:0;font-size:18px;">今日概览</h2>
@@ -54,6 +55,10 @@
   <div class="db-sec">
     <h3>解决时长趋势（首条进线 → 引流已发，按解决日 / 分钟）</h3>
     <div id="db-res"><span style="color:#94a3b8;font-size:13px;">加载中…</span></div>
+  </div>
+  <div class="db-sec">
+    <h3>🌐 跨语言总览（按所选日窗）</h3>
+    <div id="db-xlate"><span style="color:#94a3b8;font-size:13px;">加载中…</span></div>
   </div>
   <div class="db-sec">
     <h3>坐席首响绩效（窗口内，按人工发送归属）</h3>
@@ -388,6 +393,7 @@
       var wh=d.webhook||{};
       var dr=d.drafts||{};
       var eb=d.event_bus||{};
+      var ac=d.auto_claim||{};
 
       function _pill(v, ok, label){
         var color=ok?'#16a34a':'#dc2626';
@@ -398,6 +404,7 @@
       var html='<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">'
         +_pill(as.running?'运行中':'停止',as.running,'自动发')
         +_pill(sw.running?'运行中':'停止',sw.running,'SLA监控')
+        +_pill(ac.running?'运行中':'关闭',ac.running,'自动派单')
         +_pill(wh.running?'运行中（'+wh.webhooks+'）':wh.webhooks>0?'未启动':'未配置',wh.running,'Webhook')
         +_pill(eb.subscriber_count||0,true,'SSE客户端')
         +'</div>'
@@ -406,6 +413,8 @@
         +(as.total_errors?'<span style="color:#dc2626">❌ 错误: <b>'+as.total_errors+'</b></span>':'')
         +'<span>⏰ SLA告警: <b>'+(sw.total_breach_events||0)+'</b></span>'
         +'<span>🔄 再分配: <b>'+(sw.total_reassigned||0)+'</b></span>'
+        +'<span>📥 自动派单: <b>'+(ac.total_claimed||0)+'</b>'
+          +(ac.total_claimed?'（🌐语言命中 '+(ac.total_lang_matched||0)+'）':'')+'</span>'
         +'<span>📨 Webhook: <b>'+(wh.total_sent||0)+'</b></span>'
         +'<span>📋 待审草稿: <b>'+(dr.pending_total||0)+'</b></span>'
         +'</div>';
@@ -843,6 +852,49 @@
     }).catch(function(){ if(el) el.innerHTML='<span style="color:#94a3b8;font-size:12px;">状态加载失败</span>'; });
   }
 
+  // P2-2 首次使用引导：未上线（清单非绿）时浮出「N 步上线」卡片，串联各向导。
+  // 用户可「不再提示」（localStorage），但仍有红灯硬性问题时强制显示（不可忽略）。
+  function loadOnboard(){
+    var box=document.getElementById('db-onboard');
+    if(!box) return;
+    fetch('/api/setup/checklist').then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok) return;
+      if(d.light==='green'){ box.style.display='none'; return; }  // 已就绪不打扰
+      var dismissed=false;
+      try{ dismissed=localStorage.getItem('hl_onboard_dismiss')==='1'; }catch(e){}
+      // 黄灯（仅软性）允许忽略；红灯（有硬性 fail）强制显示
+      if(dismissed && d.light==='yellow'){ box.style.display='none'; return; }
+      var pending=(d.checks||[]).filter(function(c){return c.status!=='ok';});
+      var steps=pending.map(function(c){
+        var color=c.status==='fail'?'#dc2626':'#f59e0b';
+        var act=c.action_url?'<a href="'+c.action_url+'" style="margin-left:auto;font-size:12px;font-weight:600;color:#1d4ed8;text-decoration:none;border:1px solid #bfdbfe;border-radius:7px;padding:5px 11px;background:#fff;white-space:nowrap;">'+(c.action_label||'去处理')+' →</a>':'';
+        return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid #fde68a;">'
+          +'<span style="width:9px;height:9px;border-radius:50%;background:'+color+';flex-shrink:0;"></span>'
+          +'<div style="min-width:0;"><div style="font-size:13px;font-weight:600;color:#0f172a;">'+escHtml(c.name)+'</div>'
+          +'<div style="font-size:11px;color:#92400e;">'+escHtml(c.detail)+'</div></div>'+act+'</div>';
+      }).join('');
+      var s=d.summary||{};
+      var headline=d.light==='red'?'还差几步即可上线':'快完成了，建议完善以下项';
+      var dismissBtn=d.light==='yellow'
+        ? '<span onclick="dismissOnboard()" style="cursor:pointer;font-size:12px;color:#92400e;text-decoration:underline;">不再提示</span>'
+        : '';
+      box.innerHTML='<div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:14px;padding:16px 18px;margin-bottom:14px;">'
+        +'<div style="display:flex;align-items:center;gap:10px;">'
+        +'<span style="font-size:20px;">🚀</span>'
+        +'<div><div style="font-size:15px;font-weight:700;color:#0f172a;">'+headline+'</div>'
+        +'<div style="font-size:12px;color:#92400e;">已完成 '+(s.ok||0)+' / '+(s.total||0)+' 项 · '
+        +'<a href="/workspace/golive" style="color:#1d4ed8;">查看完整上线自检 →</a></div></div>'
+        +'<span style="margin-left:auto;">'+dismissBtn+'</span></div>'
+        +steps+'</div>';
+      box.style.display='block';
+    }).catch(function(){});
+  }
+  function escHtml(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  function dismissOnboard(){
+    try{ localStorage.setItem('hl_onboard_dismiss','1'); }catch(e){}
+    var box=document.getElementById('db-onboard'); if(box) box.style.display='none';
+  }
+
   function loadHealth(){
     var el=document.getElementById('db-health');
     var tsEl=document.getElementById('db-health-ts');
@@ -928,6 +980,65 @@
       document.getElementById('db-res').innerHTML= hasRt?
         spark(rt,'avg_min','#0891b2')
         : '<span style="color:#94a3b8;font-size:13px;">暂无解决数据（需漏斗推进到引流已发）</span>';
+      // P3：跨语言翻译面板（消费 outbound_translation 漏斗）
+      (function(){
+        var el=document.getElementById('db-xlate'); if(!el) return;
+        var xl=d.translation||{}, xin=d.translation_inbound||{}, acs=d.auto_claim||{};
+        var hasOut=!!xl.sends_total, hasIn=!!(xin.translated||xin.failed), hasAC=!!acs.claimed;
+        if(!hasOut && !hasIn && !hasAC){ el.innerHTML='<span style="color:#94a3b8;font-size:13px;">所选日窗内暂无翻译/派单数据（坐席发送 / 客户消息自动翻译 / 自动派单触发后按日持久化）</span>'; return; }
+        var LL={zh:'中文',en:'英语',ja:'日语',ko:'韩语',th:'泰语',vi:'越南语',id:'印尼语',es:'西班牙语',pt:'葡萄牙语',ru:'俄语',fr:'法语',de:'德语',it:'意大利语',ar:'阿拉伯语',tr:'土耳其语',tl:'他加禄语',hi:'印地语',unknown:'未知'};
+        function langBars(map,color){
+          var out=[],ks=Object.keys(map||{}); if(!ks.length) return out;
+          var maxN=Math.max.apply(null,ks.map(function(k){return map[k];}).concat([1]));
+          ks.sort(function(a,b){return map[b]-map[a];}).forEach(function(k){
+            out.push('<div class="db-row"><span>'+esc(LL[k]||k)+'</span><span class="db-bar"><i style="width:'+(map[k]/maxN*100)+'%;background:'+color+';"></i></span><span>'+map[k]+'</span></div>');
+          });
+          return out;
+        }
+        var rows=[];
+        // ── 出向（坐席 → 客户）──
+        rows.push('<div style="font-weight:600;color:#0369a1;margin-bottom:2px;">↗ 出向（坐席 → 客户）</div>');
+        if(hasOut){
+          var cov=Math.round((xl.coverage_rate||0)*1000)/10;
+          var autoFail=Math.round((xl.auto_unresolved_rate||0)*1000)/10;
+          var covColor=cov>=60?'#16a34a':(cov>=30?'#d97706':'#64748b');
+          rows.push('<div class="db-row"><span>翻译覆盖率（译出/总发送）</span><span style="color:'+covColor+';font-weight:600;">'+cov+'% （'+(xl.translated||0)+'/'+(xl.sends_total||0)+'）</span></div>');
+          rows.push('<div class="db-row"><span>auto 客户语言识别失败率</span><span style="color:'+(autoFail>20?'#dc2626':'#64748b')+';">'+autoFail+'% （'+(xl.auto_unresolved||0)+'/'+(xl.auto_requested||0)+'）</span></div>');
+          rows.push('<div class="db-row"><span>引擎降级译文</span><span style="color:'+((xl.degraded||0)>0?'#d97706':'#16a34a')+';">'+(xl.degraded||0)+' 条</span></div>');
+          rows.push('<div class="db-row"><span>翻译失败 / 跳过</span><span>'+(xl.failed||0)+' / '+(xl.skipped||0)+'</span></div>');
+          var ob=langBars(xl.by_target_lang,'#0ea5e9');
+          if(ob.length){ rows.push('<div style="margin-top:6px;font-size:12px;color:#64748b;">我方服务语言分布（按客户语言译出）</div>'); rows=rows.concat(ob); }
+          var xt=xl.trend||[];
+          if(xt.some(function(x){return x.sends>0;})){
+            rows.push('<div style="margin-top:6px;font-size:12px;color:#64748b;">翻译覆盖率趋势（译出/发送 %）</div>');
+            rows.push(sparkPct(xt,'cov_pct','#0ea5e9'));
+          }
+        } else { rows.push('<div style="color:#94a3b8;font-size:13px;">所选日窗无出向发送</div>'); }
+        // ── 入站（客户 → 坐席）──
+        rows.push('<div style="font-weight:600;color:#be185d;margin:10px 0 2px;">↘ 入站（客户 → 坐席，自动翻译）</div>');
+        if(hasIn){
+          rows.push('<div class="db-row"><span>自动翻译客户消息</span><span style="font-weight:600;">'+(xin.translated||0)+' 条</span></div>');
+          rows.push('<div class="db-row"><span>翻译失败</span><span style="color:'+((xin.failed||0)>0?'#dc2626':'#16a34a')+';">'+(xin.failed||0)+' 条</span></div>');
+          var ib=langBars(xin.by_source_lang,'#ec4899');
+          if(ib.length){ rows.push('<div style="margin-top:6px;font-size:12px;color:#64748b;">客户来源语言分布</div>'); rows=rows.concat(ib); }
+        } else { rows.push('<div style="color:#94a3b8;font-size:13px;">所选日窗无入站自动翻译（需开启 auto_translate_inbound 且坐席打开过外语会话）</div>'); }
+        // ── 自动派单（按语言路由）──
+        rows.push('<div style="font-weight:600;color:#0f766e;margin:10px 0 2px;">🤖 自动派单（按语言路由）</div>');
+        if(hasAC){
+          var hitPct=acs.claimed?Math.round((acs.lang_matched||0)/acs.claimed*1000)/10:0;
+          var hitColor=hitPct>=60?'#16a34a':(hitPct>=30?'#d97706':'#64748b');
+          rows.push('<div class="db-row"><span>自动派单总量</span><span style="font-weight:600;">'+(acs.claimed||0)+' 单</span></div>');
+          rows.push('<div class="db-row"><span>按语言命中率</span><span style="color:'+hitColor+';font-weight:600;">'+hitPct+'% （'+(acs.lang_matched||0)+'/'+(acs.claimed||0)+'）</span></div>');
+          var acb=langBars(acs.by_lang,'#0f766e');
+          if(acb.length){ rows.push('<div style="margin-top:6px;font-size:12px;color:#64748b;">命中派单的会话语言分布</div>'); rows=rows.concat(acb); }
+          var act=(acs.trend||[]).map(function(t){return t.claimed||0;});
+          if(act.some(function(v){return v>0;})){
+            rows.push('<div style="margin-top:6px;font-size:12px;color:#64748b;">自动派单量趋势</div>');
+            rows.push(_sparkline(act,{w:160,h:36,color:'#0f766e',fill:'#0f766e'}));
+          }
+        } else { rows.push('<div style="color:#94a3b8;font-size:13px;">所选日窗无自动派单（需开启 workspace.auto_assign.auto_claim 且有等待中的未认领会话）</div>'); }
+        el.innerHTML=rows.join('');
+      })();
       var afrt=d.agent_frt||[];
       document.getElementById('db-agent-frt').innerHTML= afrt.length? ('<div class="db-row" style="font-size:11px;color:#94a3b8;"><span>坐席</span><span>首响数</span><span>平均首响</span><span>达标率</span></div>'+afrt.map(function(a){
         var rc = a.attain_rate>=80?'#16a34a':(a.attain_rate>=50?'#d97706':'#dc2626');
@@ -970,6 +1081,7 @@
     if(IS_SUP){
       if(_exp) _exp.style.display='inline-block';
       var _hist=document.getElementById('db-esc-hist'); if(_hist) _hist.style.display='inline';
+      loadOnboard();  // P2-2：未上线时浮出「3 步上线」引导
     }
     load(); setInterval(load, 60000);
     loadEsc(); setInterval(loadEsc, 60000);

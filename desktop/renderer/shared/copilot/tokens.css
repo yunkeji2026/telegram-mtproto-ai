@@ -1,0 +1,26 @@
+/* 两端共享 · 主题无关比例尺(圆角/间距/字号/阴影/动效)
+   语义色变量在 theme-dark.css / theme-light.css 里按宿主主题覆盖。
+   单一事实来源:shared/copilot/ — 禁止在 renderer.js / 模板内各写一份。 */
+:root {
+  --cp-radius-sm: 6px;
+  --cp-radius: 10px;
+  --cp-radius-lg: 14px;
+
+  --cp-gap-xs: 4px;
+  --cp-gap-sm: 6px;
+  --cp-gap: 10px;
+  --cp-gap-lg: 14px;
+
+  --cp-fs-tiny: 11px;
+  --cp-fs-sm: 12px;
+  --cp-fs: 13px;
+  --cp-fs-lg: 15px;
+
+  --cp-fw-medium: 500;
+  --cp-fw-bold: 700;
+
+  --cp-shadow-sm: 0 1px 3px rgba(0, 0, 0, .08);
+  --cp-shadow: 0 4px 16px rgba(0, 0, 0, .12);
+
+  --cp-dur: .2s;
+}

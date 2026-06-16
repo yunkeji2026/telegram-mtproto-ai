@@ -281,9 +281,14 @@ class TestG1DraftCreatedSSE:
         assert mock_bus.publish.call_count == first_call_count
 
     def test_draft_created_in_sse_whitelist(self):
-        """draft_created 已加入 SSE 类型白名单。"""
-        import ast, pathlib
-        src = pathlib.Path("src/web/routes/unified_inbox_routes.py").read_text(encoding="utf-8")
+        """draft_created 已加入 SSE 类型白名单。
+
+        巨石拆分后 SSE 白名单下沉到 realtime 路由域，故断言其落点模块。
+        """
+        import pathlib
+        src = pathlib.Path(
+            "src/web/routes/unified_inbox_realtime_routes.py"
+        ).read_text(encoding="utf-8")
         assert "draft_created" in src
 
     def test_peer_text_truncated_to_100(self, tmp_store):

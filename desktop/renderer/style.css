@@ -1,0 +1,292 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body, #app { height: 100%; width: 100%; }
+body { font-family: "Segoe UI", system-ui, sans-serif; background: #17212b; color: #e6edf3; }
+
+#app { display: flex; height: 100vh; }
+
+#rail {
+  width: 76px; background: #0e1621; display: flex; flex-direction: column;
+  align-items: center; padding: 12px 0; gap: 8px; flex-shrink: 0;
+}
+.rail-item {
+  width: 56px; height: 56px; border-radius: 14px; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; cursor: pointer; font-size: 11px;
+  color: #8a9bb0; background: transparent; gap: 2px; user-select: none;
+}
+.rail-item:hover { background: #1c2733; }
+.rail-item.active { background: #2b5278; color: #fff; }
+.rail-item .ic { font-size: 20px; }
+.rail-item.disabled { opacity: .4; cursor: not-allowed; }
+/* 无网页版聊天的平台（Messenger/LINE）：dim 显示 + 「↪收件箱」标记，点了切到统一收件箱 */
+.rail-item.via-inbox { opacity: .6; }
+.rail-item.via-inbox:hover { opacity: .9; background: #1c2733; }
+.rail-item .via-tag { font-size: 8px; color: #5a8bc0; line-height: 1; }
+/* 运行时新增账号(_auto)的「✕」移除角标：默认隐藏，hover rail 项才显现 */
+.rail-item { position: relative; }
+.rail-item .rm {
+  position: absolute; top: 2px; right: 4px; font-size: 10px; line-height: 1;
+  color: #8a9bb0; opacity: 0; transition: opacity .12s; padding: 2px;
+}
+.rail-item:hover .rm { opacity: .8; }
+.rail-item .rm:hover { color: #ff7a7a; opacity: 1; }
+/* 「➕新增」内嵌账号按钮 */
+.rail-item.rail-add { color: #6f8196; }
+.rail-item.rail-add:hover { background: #1c2733; color: #cdd9e5; }
+/* 新增账号平台选择浮层（贴 ➕ 右侧弹出） */
+.rail-add-menu {
+  position: fixed; z-index: 50; min-width: 150px; padding: 5px;
+  background: #1c2733; border: 1px solid #2b3947; border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .45); display: flex; flex-direction: column; gap: 2px;
+}
+.rail-add-menu button {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  font: inherit; font-size: 13px; cursor: pointer; padding: 7px 10px;
+  background: transparent; color: #cdd9e5; border: 0; border-radius: 7px;
+}
+.rail-add-menu button:hover { background: #2b5278; color: #fff; }
+.rail-add-menu button .ic { font-size: 16px; }
+
+#stage { flex: 1; position: relative; }
+#webviews { position: absolute; inset: 0; }
+#webviews webview { position: absolute; inset: 0; width: 100%; height: 100%; display: none; }
+#webviews webview.active { display: flex; }
+
+.placeholder {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: #5a6b7d; font-size: 14px;
+}
+
+/* ── 内嵌平台注入状态条（右上角小药丸）：注入正常/失配/未登录 ──────────────── */
+#inject-status {
+  position: absolute; top: 8px; right: 12px; z-index: 6;
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 14px; font-size: 11px;
+  background: rgba(14, 22, 33, .85); color: #cdd9e5; user-select: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .3); cursor: default;
+}
+#inject-status .is-dot { width: 8px; height: 8px; border-radius: 50%; background: #8a9bb0; flex-shrink: 0; }
+#inject-status.is-ok .is-dot { background: #4fd08a; }
+#inject-status.is-warn .is-dot { background: #ffc35a; }
+#inject-status.is-bad .is-dot { background: #ff7a7a; }
+#inject-status.is-wait .is-dot { background: #8a9bb0; }
+/* 正常态弱化存在感，hover 才完全显现 */
+#inject-status.is-ok { opacity: .7; }
+#inject-status.is-ok:hover { opacity: 1; }
+
+/* ── 统一收件箱连接遮罩（loading / error），盖在后台 webview 上 ──────────────
+   配色对齐后台 /workspace 浅色内容区（--bg-page #f3f4f6 / --accent #3b82f6），
+   避免深色壳遮罩盖在浅色页上造成跳变。 */
+.inbox-overlay {
+  position: absolute; inset: 0; z-index: 5; display: none;
+  align-items: center; justify-content: center; background: #f3f4f6;
+}
+.inbox-overlay-card {
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  max-width: 460px; padding: 24px 28px; text-align: center;
+}
+.inbox-msg { color: #374151; font-size: 13.5px; line-height: 1.6; white-space: pre-line; }
+.inbox-overlay.err .inbox-msg { color: #b91c1c; }
+.inbox-spinner {
+  width: 30px; height: 30px; border-radius: 50%;
+  border: 3px solid #d1d5db; border-top-color: #3b82f6; animation: inbox-spin .8s linear infinite;
+}
+@keyframes inbox-spin { to { transform: rotate(360deg); } }
+.inbox-retry {
+  padding: 8px 18px; border: 0; border-radius: 8px; background: #3b82f6; color: #fff;
+  font-size: 13px; cursor: pointer;
+}
+.inbox-retry:hover { background: #2563eb; }
+
+/* ── P2 业务右栏（浅色，与后台 /workspace 统一）──────────────────────
+   配色对齐后台：面板 #fff · 边框 #e5e7eb · 文字 #111827/#6b7280 · 主色 #3b82f6。 */
+#copilot {
+  width: 320px; flex-shrink: 0; background: #ffffff; border-left: 1px solid #e5e7eb;
+  display: flex; flex-direction: column; transition: width .15s ease;
+}
+#copilot.collapsed { width: 36px; }
+#copilot.collapsed .cp-body, #copilot.collapsed #cp-title { display: none; }
+/* 保留 cp-hidden 类供特殊场景手动折叠整栏；默认始终显示业务助手 */
+#copilot.cp-hidden { display: none !important; }
+.cp-head {
+  display: flex; align-items: center; justify-content: space-between; padding: 10px 12px;
+  font-size: 14px; font-weight: 700; color: #111827; background: #f8fafc;
+  border-bottom: 1px solid #e5e7eb; flex-shrink: 0;
+}
+#cp-toggle { cursor: pointer; color: #6b7280; user-select: none; }
+#cp-mode-toggle { cursor: pointer; color: #9ca3af; user-select: none; margin-left: auto; margin-right: 10px; font-size: 13px; }
+#cp-mode-toggle.active { color: #4f46e5; }
+/* 灰度:统一 App iframe 模式——隐藏原生 tabs/body,撑满 iframe */
+#copilot.iframe-mode .cp-tabs,
+#copilot.iframe-mode .cp-body { display: none; }
+#cp-appframe-wrap { display: none; flex: 1; min-height: 0; flex-direction: column; }
+#copilot.iframe-mode #cp-appframe-wrap { display: flex; }
+#copilot.iframe-mode.collapsed #cp-appframe-wrap { display: none; }
+#cp-appframe { flex: 1; width: 100%; border: 0; background: #f8fafc; }
+.cp-tabs { display: flex; gap: 4px; padding: 8px 12px 0; flex-shrink: 0; background: #ffffff; border-bottom: 1px solid #e5e7eb; }
+.cp-tab {
+  flex: 1; font: inherit; font-size: 12px; cursor: pointer; padding: 6px 0;
+  border: none; background: transparent; color: #6b7280;
+  border-bottom: 2px solid transparent; transition: color .15s, border-color .15s;
+}
+.cp-tab:hover { color: #111827; }
+.cp-tab.active { color: #3b82f6; border-bottom-color: #3b82f6; font-weight: 600; }
+#copilot.collapsed .cp-tabs { display: none; }
+.cp-body { flex: 1; overflow-y: auto; padding: 10px 12px; }
+.cp-empty { color: #9ca3af; font-size: 12px; text-align: center; padding: 30px 8px; line-height: 1.6; }
+.cp-sec { margin-bottom: 16px; }
+.cp-sec h4 { font-size: 11px; color: #9ca3af; margin-bottom: 6px; text-transform: uppercase; letter-spacing: .04em; font-weight: 700; }
+.cp-voice-note { font-size: 11px; color: #9ca3af; margin: 6px 0 0; line-height: 1.4; }
+.cp-card {
+  background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 10px;
+  font-size: 13px; line-height: 1.5; color: #111827; white-space: pre-wrap; word-break: break-word;
+}
+.cp-card .tag {
+  display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 10px;
+  background: #eff6ff; color: #2563eb; margin: 0 4px 4px 0;
+}
+.cp-persona-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.cp-persona-row label { font-size: 12px; color: #6b7280; flex: 0 0 auto; }
+.cp-persona-row select {
+  flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid #e5e7eb; border-radius: 6px;
+  background: #fff; color: #111827; font-size: 13px; cursor: pointer;
+}
+.cp-pin {
+  flex: 0 0 auto; padding: 5px 8px; border: 1px solid #e5e7eb; border-radius: 6px;
+  background: #fff; color: #6b7280; font-size: 13px; cursor: pointer; line-height: 1;
+}
+.cp-pin:hover { border-color: #3b82f6; color: #3b82f6; }
+.cp-pin.pinned { background: #eff6ff; color: #2563eb; border-color: #3b82f6; }
+.cp-persona-src { font-size: 11px; color: #9ca3af; margin: 0 0 8px 2px; }
+.cp-btn-primary {
+  width: 100%; padding: 8px; border: 0; border-radius: 8px; background: #3b82f6; color: #fff;
+  font-size: 13px; font-weight: 600; cursor: pointer; transition: background .15s;
+}
+.cp-btn-primary:hover { background: #2563eb; }
+.cp-btn-primary:disabled { opacity: .6; cursor: default; }
+.cp-search { display: flex; gap: 6px; margin-bottom: 8px; }
+.cp-search input {
+  flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid #e5e7eb; border-radius: 6px;
+  background: #fff; color: #111827; font-size: 13px;
+}
+.cp-search button {
+  padding: 0 12px; border: 0; border-radius: 6px; background: #3b82f6; color: #fff; cursor: pointer;
+}
+.cp-list { display: flex; flex-direction: column; gap: 6px; }
+.cp-item {
+  background: #f8fafc; border-radius: 8px; padding: 7px 9px; font-size: 12.5px; line-height: 1.45;
+  color: #374151; cursor: pointer; border: 1px solid #e5e7eb;
+}
+.cp-item:hover { border-color: #3b82f6; background: #eff6ff; }
+.cp-item .it-title { color: #111827; font-weight: 600; font-size: 12px; margin-bottom: 2px; }
+.cp-hint { color: #9ca3af; font-size: 11.5px; padding: 4px 2px; }
+
+/* 统一操作行：填入 / 填入并发送 / 复制 */
+.cp-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.cp-act {
+  border: 0; border-radius: 6px; padding: 5px 11px; font-size: 12px; cursor: pointer;
+  line-height: 1.2; transition: background .12s ease, transform .06s ease; user-select: none;
+}
+.cp-act:active { transform: translateY(1px); }
+.cp-act.primary { background: #3b82f6; color: #fff; }
+.cp-act.primary:hover { background: #2563eb; }
+.cp-act.send { background: #16a34a; color: #fff; }
+.cp-act.send:hover { background: #15803d; }
+.cp-act.ghost { background: #fff; color: #6b7280; border: 1px solid #e5e7eb; }
+.cp-act.ghost:hover { color: #111827; border-color: #9ca3af; }
+
+/* 草稿：人设徽标 + 可编辑文本框 */
+.cp-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.badge {
+  display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 10px;
+  background: #f3f4f6; color: #6b7280;
+}
+.badge.persona { background: #ede9fe; color: #7c3aed; }
+.cp-edit {
+  width: 100%; box-sizing: border-box; resize: vertical; min-height: 64px;
+  background: #fff; color: #111827; border: 1px solid #e5e7eb; border-radius: 6px;
+  padding: 7px 9px; font-size: 13px; line-height: 1.5; font-family: inherit;
+}
+.cp-edit:focus { outline: none; border-color: #3b82f6; }
+
+/* 账号管理:头部 👥 入口 + 覆盖面板 */
+#cp-accounts-toggle { cursor: pointer; opacity: .8; }
+#cp-accounts-toggle:hover { opacity: 1; }
+/* 会话深链:头部 📥「在收件箱打开」入口 */
+#cp-open-inbox { cursor: pointer; opacity: .8; margin-left: 8px; }
+#cp-open-inbox:hover { opacity: 1; }
+/* 账号管理：从副驾内联改为右侧独立悬浮抽屉（加宽，按钮排得开，不再挤压会话面板） */
+#cp-accounts-panel {
+  position: fixed; top: 46px; right: 0; width: 400px; max-width: 94vw;
+  max-height: calc(100vh - 60px); overflow-y: auto;
+  padding: 12px; background: #fff; border: 1px solid #e5e7eb; border-radius: 10px 0 0 10px;
+  box-shadow: -10px 10px 30px rgba(15, 23, 42, .2); z-index: 200;
+}
+
+/* 全自动托管开关条 */
+#cp-auto-bar {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+  padding: 6px 8px; border-radius: 7px; background: #f8fafc; border: 1px solid #e5e7eb;
+}
+#cp-auto-switch { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+#cp-auto-switch input[type="checkbox"] { width: 15px; height: 15px; accent-color: #16a34a; cursor: pointer; }
+.cp-auto-label { font-size: 13px; color: #111827; }
+.cp-auto-status { margin-left: auto; font-size: 11px; color: #6b7280; }
+.cp-auto-status.on { color: #16a34a; }
+.cp-auto-status.warn { color: #d97706; }
+.cp-auto-status.off { color: #9ca3af; }
+
+/* 草稿多语言块：每条一个块（单选「发这条」+ 可编辑文本框），只发选中那条 */
+.cp-lang-block { margin-top: 8px; padding: 6px 8px; border-radius: 7px; border: 1px solid transparent; }
+.cp-lang-block.active { border-color: #3b82f6; background: #eff6ff; }
+.cp-lang-head {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 4px;
+  font-size: 12px; color: #6b7280; cursor: pointer; user-select: none;
+}
+.cp-lang-head input[type="radio"] { accent-color: #3b82f6; cursor: pointer; }
+.cp-lang-block.active .cp-lang-name { color: #1d4ed8; }
+.cp-lang-name { flex: 1; min-width: 0; }
+
+/* 分析：摘要块 + 语义 chip */
+.cp-summary { margin-bottom: 8px; color: #374151; }
+.cp-chips { display: flex; gap: 5px; flex-wrap: wrap; }
+.cp-card .tag.danger { background: #fee2e2; color: #dc2626; }
+.cp-card .tag.warn { background: #fef3c7; color: #d97706; }
+
+/* 填入/复制成功的轻量 toast */
+#cp-toast {
+  position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(10px);
+  background: #16a34a; color: #fff; font-size: 13px; padding: 8px 16px; border-radius: 20px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.18); opacity: 0; pointer-events: none;
+  transition: opacity .18s ease, transform .18s ease; z-index: 999999;
+}
+#cp-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ============================================================
+   业务助手副驾深色化：桌面壳为 Telegram 风深色专属，
+   原浅色面板在深壳里形成「一黑一白」。后置覆盖统一为深色，
+   不改上方浅色基线，便于审阅/回滚。强调蓝/绿、语义徽标保留。
+   ============================================================ */
+#copilot { background: #1a2330; border-left-color: #2b3947; }
+.cp-head { background: #17212b; color: #e6edf3; border-bottom-color: #2b3947; }
+.cp-tabs { background: #1a2330; border-bottom-color: #2b3947; }
+.cp-tab { color: #8a9bb0; }
+.cp-tab:hover { color: #e6edf3; }
+#cp-appframe { background: #17212b; }
+.cp-card { background: #222c3a; border-color: #2b3947; color: #e6edf3; }
+.cp-persona-row label { color: #8a9bb0; }
+.cp-persona-row select,
+.cp-search input,
+.cp-edit { background: #222c3a; border-color: #2b3947; color: #e6edf3; }
+.cp-pin { background: #222c3a; border-color: #2b3947; color: #8a9bb0; }
+.cp-item { background: #222c3a; border-color: #2b3947; color: #cdd9e5; }
+.cp-item:hover { background: #1c2733; border-color: #3b82f6; }
+.cp-item .it-title { color: #e6edf3; }
+.cp-act.ghost { background: #222c3a; border-color: #2b3947; color: #cdd9e5; }
+.cp-act.ghost:hover { color: #e6edf3; border-color: #5a8bc0; }
+.badge { background: #2b3947; color: #cdd9e5; }
+#cp-accounts-panel { background: #1a2330; border-color: #2b3947; }
+#cp-auto-bar { background: #222c3a; border-color: #2b3947; }
+.cp-auto-label { color: #e6edf3; }
+.cp-summary { color: #cdd9e5; }
+.cp-lang-block.active { background: rgba(59,130,246,.16); }
+.cp-pin.pinned { background: rgba(59,130,246,.18); color: #93c5fd; border-color: #3b82f6; }

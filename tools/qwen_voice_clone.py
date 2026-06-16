@@ -1,110 +1,38 @@
-"""Create/list Qwen cloned voices using Alibaba Cloud Model Studio.
+"""Create/list Qwen cloned voices using Alibaba Cloud Model Studio (CLI).
 
-Requires DASHSCOPE_API_KEY in the environment. This script uses the REST API
-directly so the project does not need the DashScope SDK just to enroll a voice.
+Thin wrapper over ``src.ai.voice_enroll`` (the importable core). Requires
+DASHSCOPE_API_KEY in the environment / .env.local / config/secrets.local.json.
 """
 from __future__ import annotations
 
 import argparse
-import base64
 import json
-import mimetypes
 import os
+import sys
 from pathlib import Path
-from typing import Any, Dict
 
-import requests
+# 允许 `python tools/qwen_voice_clone.py` 直接运行时导入 src 包
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from src.ai.voice_enroll import (  # noqa: E402
+    DEFAULT_TARGET_MODEL,
+    delete_cloned_voice,
+    enroll_voice,
+    list_cloned_voices,
+)
 
-DEFAULT_MODEL = "qwen3-tts-vc-2026-01-22"
-ENROLLMENT_MODEL = "qwen-voice-enrollment"
-
-
-def _load_local_secret(name: str) -> str:
-    if os.getenv(name):
-        return os.getenv(name, "")
-    root = Path(__file__).resolve().parents[1]
-    candidates = [
-        Path(".env.local"),
-        Path("config/secrets.local.json"),
-        root / ".env.local",
-        root / "config" / "secrets.local.json",
-    ]
-    for path in candidates:
-        if not path.is_file():
-            continue
-        if path.suffix == ".json":
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
-                continue
-            value = data.get(name) or data.get(name.lower())
-            if value:
-                return str(value).strip()
-            continue
-        for line in path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            if k.strip() == name:
-                return v.strip().strip('"').strip("'")
-    return ""
+DEFAULT_MODEL = DEFAULT_TARGET_MODEL  # 向后兼容旧引用
 
 
-def _endpoint(region: str) -> str:
-    if region.strip().lower() in ("cn", "china", "beijing", "mainland"):
-        return "https://dashscope.aliyuncs.com/api/v1/services/audio/tts/customization"
-    return "https://dashscope-intl.aliyuncs.com/api/v1/services/audio/tts/customization"
-
-
-def _mime(path: Path) -> str:
-    mt, _ = mimetypes.guess_type(str(path))
-    if mt:
-        return mt
-    if path.suffix.lower() == ".wav":
-        return "audio/wav"
-    if path.suffix.lower() == ".m4a":
-        return "audio/mp4"
-    return "audio/mpeg"
-
-
-def _post(payload: Dict[str, Any], *, api_key: str, region: str, timeout: float) -> Dict[str, Any]:
-    resp = requests.post(
-        _endpoint(region),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json=payload,
-        timeout=timeout,
+def create_voice(args: argparse.Namespace) -> dict:
+    res = enroll_voice(
+        audio_path=args.audio,
+        preferred_name=args.preferred_name,
+        api_key=args.api_key,
+        region=args.region,
+        target_model=args.target_model,
+        timeout=args.timeout,
     )
-    if resp.status_code != 200:
-        raise RuntimeError(f"qwen_voice_api_failed:{resp.status_code}:{resp.text[:500]}")
-    return resp.json()
-
-
-def create_voice(args: argparse.Namespace) -> Dict[str, Any]:
-    api_key = args.api_key or _load_local_secret("DASHSCOPE_API_KEY")
-    if not api_key:
-        raise RuntimeError("missing DASHSCOPE_API_KEY")
-    audio = Path(args.audio).resolve()
-    if not audio.is_file():
-        raise FileNotFoundError(str(audio))
-    data_uri = f"data:{_mime(audio)};base64,{base64.b64encode(audio.read_bytes()).decode()}"
-    payload = {
-        "model": ENROLLMENT_MODEL,
-        "input": {
-            "action": "create",
-            "target_model": args.target_model,
-            "preferred_name": args.preferred_name,
-            "audio": {"data": data_uri},
-        },
-    }
-    result = _post(payload, api_key=api_key, region=args.region, timeout=args.timeout)
-    voice = str(((result.get("output") or {}).get("voice")) or "")
-    if not voice:
-        raise RuntimeError(f"missing voice in response:{json.dumps(result, ensure_ascii=False)[:500]}")
     if args.out:
         out = Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -112,34 +40,38 @@ def create_voice(args: argparse.Namespace) -> Dict[str, Any]:
             json.dumps(
                 {
                     "provider": "qwen",
-                    "voice": voice,
+                    "voice": res["voice"],
                     "target_model": args.target_model,
                     "preferred_name": args.preferred_name,
-                    "reference_audio_path": str(audio),
+                    "reference_audio_path": str(Path(args.audio).resolve()),
                     "region": args.region,
-                    "request_id": result.get("request_id", ""),
+                    "request_id": res.get("request_id", ""),
                 },
                 ensure_ascii=False,
                 indent=2,
             ),
             encoding="utf-8",
         )
-    return result
+    return res.get("raw", res)
 
 
-def list_voices(args: argparse.Namespace) -> Dict[str, Any]:
-    api_key = args.api_key or _load_local_secret("DASHSCOPE_API_KEY")
-    if not api_key:
-        raise RuntimeError("missing DASHSCOPE_API_KEY")
-    payload = {
-        "model": ENROLLMENT_MODEL,
-        "input": {
-            "action": "list",
-            "page_size": int(args.page_size),
-            "page_index": int(args.page_index),
-        },
-    }
-    return _post(payload, api_key=api_key, region=args.region, timeout=args.timeout)
+def list_voices(args: argparse.Namespace) -> dict:
+    return list_cloned_voices(
+        api_key=args.api_key,
+        region=args.region,
+        page_size=args.page_size,
+        page_index=args.page_index,
+        timeout=args.timeout,
+    )
+
+
+def delete_voice(args: argparse.Namespace) -> dict:
+    return delete_cloned_voice(
+        voice=args.voice,
+        api_key=args.api_key,
+        region=args.region,
+        timeout=args.timeout,
+    )
 
 
 def main() -> None:
@@ -159,8 +91,16 @@ def main() -> None:
     l.add_argument("--page-size", type=int, default=10)
     l.add_argument("--page-index", type=int, default=0)
 
+    d = sub.add_parser("delete")
+    d.add_argument("--voice", required=True)
+
     args = parser.parse_args()
-    result = create_voice(args) if args.cmd == "create" else list_voices(args)
+    if args.cmd == "create":
+        result = create_voice(args)
+    elif args.cmd == "delete":
+        result = delete_voice(args)
+    else:
+        result = list_voices(args)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

@@ -1,0 +1,68 @@
+"use strict";
+
+// 壳层 renderer 用的桥：拿配置 + 各平台注入脚本的绝对 file:// 路径（webview preload 需绝对路径）。
+const { contextBridge, ipcRenderer } = require("electron");
+const path = require("path");
+const { pathToFileURL } = require("url");
+
+function injectUrl(file) {
+  return pathToFileURL(path.join(__dirname, "inject", file)).toString();
+}
+
+contextBridge.exposeInMainWorld("shell", {
+  getConfig: () => ipcRenderer.invoke("desktop:config"),
+  applyWhatsappUa: (args) => ipcRenderer.invoke("desktop:apply-whatsapp-ua", args),
+  backendHealth: () => ipcRenderer.invoke("desktop:backend-health"),
+  injectUrl,
+  // P2 业务右栏：renderer → 主进程 → 后端（CSP 安全）
+  profile: (args) => ipcRenderer.invoke("desktop:profile", args),
+  kbSearch: (args) => ipcRenderer.invoke("desktop:kb-search", args),
+  templates: () => ipcRenderer.invoke("desktop:templates"),
+  personas: () => ipcRenderer.invoke("desktop:personas"),
+  personaBindings: () => ipcRenderer.invoke("desktop:persona-bindings"),
+  personaBind: (args) => ipcRenderer.invoke("desktop:persona-bind", args),
+  guardCheck: (args) => ipcRenderer.invoke("desktop:guard-check", args),
+  personaUnbind: (args) => ipcRenderer.invoke("desktop:persona-unbind", args),
+  smartReply: (args) => ipcRenderer.invoke("desktop:smart-reply", args),
+  translate: (args) => ipcRenderer.invoke("desktop:translate", args),
+  relStage: (args) => ipcRenderer.invoke("desktop:rel-stage", args),
+  relConfirm: (args) => ipcRenderer.invoke("desktop:rel-confirm", args),
+  relDowngrade: (args) => ipcRenderer.invoke("desktop:rel-downgrade", args),
+  relReunion: (args) => ipcRenderer.invoke("desktop:rel-reunion", args),
+  relSync: (args) => ipcRenderer.invoke("desktop:rel-sync", args),
+  nbaList: (args) => ipcRenderer.invoke("desktop:nba-list", args),
+  nbaExec: (args) => ipcRenderer.invoke("desktop:nba-exec", args),
+  scriptList: (args) => ipcRenderer.invoke("desktop:script-list", args),
+  startChain: (args) => ipcRenderer.invoke("desktop:start-chain", args),
+  collabContext: (args) => ipcRenderer.invoke("desktop:collab-context", args),
+  chainExecutions: (args) => ipcRenderer.invoke("desktop:chain-executions", args),
+  chainCancel: (args) => ipcRenderer.invoke("desktop:chain-cancel", args),
+  accountsList: () => ipcRenderer.invoke("desktop:accounts-list"),
+  platformModes: (args) => ipcRenderer.invoke("desktop:platform-modes", args),
+  loginStart: (args) => ipcRenderer.invoke("desktop:login-start", args),
+  loginStatus: (args) => ipcRenderer.invoke("desktop:login-status", args),
+  loginCancel: (args) => ipcRenderer.invoke("desktop:login-cancel", args),
+  accountStart: (args) => ipcRenderer.invoke("desktop:account-start", args),
+  accountStop: (args) => ipcRenderer.invoke("desktop:account-stop", args),
+  setAutoReply: (args) => ipcRenderer.invoke("desktop:account-auto-reply", args),
+  setAccountOverride: (args) => ipcRenderer.invoke("desktop:account-auto-reply-override", args),
+  autoReplyAudit: (args) => ipcRenderer.invoke("desktop:auto-reply-audit", args),
+  autoReplyConfig: () => ipcRenderer.invoke("desktop:auto-reply-config-get"),
+  autoReplyHealth: () => ipcRenderer.invoke("desktop:auto-reply-health"),
+  autoReplyWebhooks: () => ipcRenderer.invoke("desktop:auto-reply-webhooks-get"),
+  setAutoReplyWebhooks: (list) => ipcRenderer.invoke("desktop:auto-reply-webhooks-set", list),
+  testAutoReplyWebhook: (payload) => ipcRenderer.invoke("desktop:auto-reply-webhooks-test", payload),
+  setAutoReplyConfig: (args) => ipcRenderer.invoke("desktop:auto-reply-config-set", args),
+  analyze: (args) => ipcRenderer.invoke("desktop:analyze", args),
+  thread: (args) => ipcRenderer.invoke("desktop:thread", args),
+  copy: (text) => ipcRenderer.invoke("desktop:copy", text),
+  voiceProfiles: () => ipcRenderer.invoke("desktop:voice-profiles"),
+  voiceTts: (args) => ipcRenderer.invoke("desktop:voice-tts", args),
+  sendVoice: (body) => ipcRenderer.invoke("desktop:send-voice", body),
+  voiceReconcile: () => ipcRenderer.invoke("desktop:voice-reconcile"),
+  voicePurge: (body) => ipcRenderer.invoke("desktop:voice-purge", body),
+  voicePurgeOrphans: () => ipcRenderer.invoke("desktop:voice-purge-orphans"),
+  voiceUnbind: (args) => ipcRenderer.invoke("desktop:voice-unbind", args),
+  voiceRebind: (body) => ipcRenderer.invoke("desktop:voice-rebind", body),
+  voiceEnroll: (payload) => ipcRenderer.invoke("desktop:voice-enroll", payload),
+});

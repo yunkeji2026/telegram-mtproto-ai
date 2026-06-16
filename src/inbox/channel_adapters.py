@@ -397,6 +397,72 @@ class WebInboxAdapter:
         return {"delivered": True, "conversation_id": cid}
 
 
+class ProtocolInboxAdapter:
+    """protocol 多账号（Telegram pyrogram / WhatsApp Baileys）的收件箱视图。
+
+    与 RPA 适配器不同：protocol 账号的消息由 worker **实时 push 落库**（见
+    ``src/integrations/protocol_bridge.py``），故本适配器从 ``inbox_store`` 读出
+    （形如 ``WebInboxAdapter``），只挑 ``account_registry`` 中 ``mode==protocol`` 的账号，
+    避免与 RPA 适配器对同一平台重复出数。``send`` 不走这里——由 ``send_via_adapters``
+    在进入平台适配器前，先按 ``orchestrator.owns`` 路由到对应 worker。
+    """
+
+    platform = "protocol"  # 哨兵：不参与按平台的 send 路由
+
+    def _protocol_ids(self) -> Dict[str, set]:
+        try:
+            from src.integrations.account_registry import get_account_registry
+            rows = get_account_registry().list() or []
+        except Exception:
+            return {}
+        out: Dict[str, set] = {}
+        for a in rows:
+            # protocol=真 worker push 落库；desktop=桌面壳同步桥落库（均按 store 读出）
+            if a.get("mode") not in ("protocol", "desktop") or a.get("status") == "removed":
+                continue
+            out.setdefault(str(a.get("platform") or ""), set()).add(
+                str(a.get("account_id") or ""))
+        return out
+
+    def collect_chats(self, request: Any, limit: int) -> List[Dict[str, Any]]:
+        store = getattr(request.app.state, "inbox_store", None)
+        if store is None:
+            return []
+        ids_by_plat = self._protocol_ids()
+        if not ids_by_plat:
+            return []
+        out: List[Dict[str, Any]] = []
+        for plat, ids in ids_by_plat.items():
+            try:
+                rows = store.list_conversations(limit=limit * 4, platform=plat) or []
+            except Exception:
+                logger.debug("ProtocolInboxAdapter list_conversations[%s] 失败",
+                             plat, exc_info=True)
+                continue
+            for r in rows:
+                if str(r.get("account_id") or "") not in ids:
+                    continue
+                mode = "review"
+                mcount = 0
+                cid = str(r.get("conversation_id") or "")
+                try:
+                    mode = store.get_automation_mode(cid)
+                    mcount = store.count_messages(cid)
+                except Exception:
+                    pass
+                out.append(store_row_to_chat(r, automation_mode=mode,
+                                             message_count=mcount))
+        return out
+
+    def status(self, request: Any) -> Dict[str, Dict[str, Any]]:
+        # protocol 账号运行状态由编排器汇总（前端走 /api/accounts/orchestrator）
+        return {}
+
+    async def send(self, request: Any, account_id: str, chat_key: str, text: str
+                   ) -> Dict[str, Any]:
+        raise ChannelSendError(501, "protocol 账号发送由编排器路由")
+
+
 def default_inbox_adapters() -> List[ChannelAdapter]:
     """默认渠道适配器注册表。新增渠道在此追加即可，核心聚合无需改动。"""
     return [
@@ -405,6 +471,7 @@ def default_inbox_adapters() -> List[ChannelAdapter]:
         MessengerInboxAdapter(),
         TelegramInboxAdapter(),
         WebInboxAdapter(),
+        ProtocolInboxAdapter(),
     ]
 
 
@@ -442,8 +509,26 @@ async def send_via_adapters(
     request: Any, platform: str, account_id: str, chat_key: str, text: str,
     adapters: List[ChannelAdapter],
 ) -> Dict[str, Any]:
-    """按 platform 路由到对应适配器投递；未知平台抛 ChannelSendError(400)。"""
+    """按 platform 路由到对应适配器投递；未知平台抛 ChannelSendError(400)。
+
+    M6①：protocol 多账号优先——若编排器拥有该 (platform, account_id) 的运行中 worker，
+    直接经 worker 发送（多开账号各自独立连接），否则回落到平台适配器（RPA/单连接）。
+    """
     platform = str(platform or "").lower()
+    try:
+        from src.integrations.account_orchestrator import get_orchestrator
+        orch = get_orchestrator()
+        if orch.owns(platform, account_id):
+            try:
+                return await orch.send(platform, account_id, chat_key, text)
+            except ChannelSendError:
+                raise
+            except Exception as ex:  # noqa: BLE001
+                raise ChannelSendError(502, f"protocol 发送失败: {ex}")
+    except ChannelSendError:
+        raise
+    except Exception:
+        logger.debug("编排器路由不可用，回落平台适配器", exc_info=True)
     for adapter in adapters:
         if getattr(adapter, "platform", "") == platform:
             return await adapter.send(request, account_id, chat_key, text)

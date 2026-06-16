@@ -22,6 +22,26 @@
   .ch-messenger{background:#0084ff;color:#fff;} .ch-telegram{background:#229ed9;color:#fff;}
   .ch-web{background:#2563eb;color:#fff;} .ch-default{background:#64748b;color:#fff;}
   .tl-xlate{font-size:12px;color:#0369a1;margin-top:3px;border-top:1px dashed #cbd5e1;padding-top:3px;}
+  /* P31：360° 时间轴选项卡 */
+  .c360-tabs{display:flex;gap:0;border-bottom:2px solid #e5e7eb;background:#fff;padding:0 16px;}
+  .c360-tab{padding:9px 16px;font-size:13px;font-weight:500;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;color:#64748b;}
+  .c360-tab.active{color:#2563eb;border-bottom-color:#2563eb;}
+  .c360-tab:hover{color:#1d4ed8;}
+  /* P31：互动时间轴 */
+  .itl-wrap{flex:1;overflow-y:auto;padding:16px;background:#f7f8fa;}
+  .itl-item{display:flex;gap:10px;margin-bottom:12px;}
+  .itl-dot{width:30px;height:30px;border-radius:50%;flex:0 0 30px;display:flex;align-items:center;justify-content:center;font-size:14px;margin-top:2px;}
+  .itl-dot.message-in{background:#dbeafe;} .itl-dot.message-out{background:#dcfce7;}
+  .itl-dot.note{background:#fef3c7;} .itl-dot.archived{background:#f1f5f9;}
+  .itl-dot.summary{background:#ede9fe;} .itl-dot.conv_open{background:#d1fae5;}
+  .itl-body{flex:1;background:#fff;border-radius:8px;padding:8px 12px;box-shadow:0 1px 3px rgba(0,0,0,.06);}
+  .itl-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;}
+  .itl-kind{font-size:11px;font-weight:600;color:#475569;}
+  .itl-ts{font-size:10px;color:#94a3b8;}
+  .itl-txt{font-size:13px;color:#1e293b;white-space:pre-wrap;word-break:break-word;}
+  .itl-meta{font-size:11px;color:#64748b;margin-top:4px;}
+  .itl-badge{display:inline-block;background:#e0f2fe;color:#0369a1;border-radius:5px;padding:0 6px;font-size:10px;margin-right:4px;}
+  .itl-empty{color:#94a3b8;font-size:13px;text-align:center;padding:40px 0;}
   .c360-sec{margin-bottom:16px;}
   .c360-sec h4{margin:0 0 7px;font-size:13px;color:#374151;}
   .c360-attr{font-size:12px;color:#374151;margin-top:3px;}
@@ -31,6 +51,32 @@
   .tiny-btn:hover{background:#f3f4f6;}
   .c360-search{width:100%;border:1px solid #d1d5db;border-radius:7px;padding:7px 9px;font-size:13px;}
   .c360-back{font-size:12px;color:#2563eb;text-decoration:none;}
+  /* P41: 互动积分 */
+  .eng-wrap{background:linear-gradient(135deg,#faf5ff,#f0fdfa);border-radius:10px;padding:10px 12px;margin-bottom:12px;}
+  .eng-pts{font-size:28px;font-weight:700;color:#5b21b6;}
+  .eng-level{display:inline-block;background:#7c3aed;color:#fff;border-radius:8px;padding:2px 10px;font-size:11px;font-weight:600;margin-left:6px;}
+  .eng-vip{background:#f59e0b;color:#fff;}
+  .ach-grid{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+  .ach-item{font-size:11px;padding:4px 8px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#64748b;}
+  .ach-item.unlocked{border-color:#a78bfa;background:#f5f3ff;color:#5b21b6;}
+  /* P51：关系演进时间轴 */
+  .stl-wrap{flex:1;overflow-y:auto;padding:16px;background:#f7f8fa;}
+  .stl-summary{background:linear-gradient(135deg,#f5f3ff,#ede9fe);border-radius:10px;padding:12px 14px;margin-bottom:14px;}
+  .stl-cur{font-size:20px;font-weight:700;color:#5b21b6;}
+  .stl-stats{font-size:11px;color:#64748b;margin-top:6px;display:flex;flex-wrap:wrap;gap:8px;}
+  .stl-item{display:flex;gap:10px;margin-bottom:12px;}
+  .stl-dot{width:32px;height:32px;border-radius:50%;flex:0 0 32px;display:flex;align-items:center;justify-content:center;font-size:15px;margin-top:2px;}
+  .stl-dot.stage_confirm{background:#ede9fe;color:#5b21b6;}
+  .stl-dot.stage_downgrade{background:#ffedd5;color:#c2410c;}
+  .stl-dot.stage_reunion{background:#fce7f3;color:#be185d;}
+  .stl-dot.stage_sync{background:#dbeafe;color:#1d4ed8;}
+  .stl-body{flex:1;background:#fff;border-radius:8px;padding:8px 12px;box-shadow:0 1px 3px rgba(0,0,0,.06);}
+  .stl-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;}
+  .stl-kind{font-size:11px;font-weight:600;color:#475569;}
+  .stl-ts{font-size:10px;color:#94a3b8;}
+  .stl-txt{font-size:13px;color:#1e293b;}
+  .stl-meta{font-size:11px;color:#64748b;margin-top:4px;}
+  .stl-link{color:#2563eb;cursor:pointer;text-decoration:underline;font-size:11px;}
 </style>
 {% endblock %}
 {% block content %}
@@ -42,9 +88,32 @@
       <div class="c360-sub" id="c360-sub"></div>
       <div id="c360-tags"></div>
     </div>
+    <!-- P31：选项卡 -->
+    <div class="c360-tabs">
+      <div class="c360-tab active" id="tab-msg" onclick="C360.switchTab('msg')">💬 消息记录</div>
+      <div class="c360-tab" id="tab-itl" onclick="C360.switchTab('itl')">📋 互动时间轴</div>
+      <div class="c360-tab" id="tab-stl" onclick="C360.switchTab('stl')">💜 关系演进</div>
+    </div>
     <div class="c360-tl" id="c360-tl"><span style="color:#94a3b8;">加载消息时间线…</span></div>
+    <!-- P31：360° 互动时间轴面板 -->
+    <div class="itl-wrap" id="c360-itl" style="display:none;">
+      <div class="itl-empty">点击「互动时间轴」加载客户全部事件记录</div>
+    </div>
+    <!-- P51：关系阶段演进时间轴 -->
+    <div class="stl-wrap" id="c360-stl" style="display:none;">
+      <div class="itl-empty">点击「关系演进」加载阶段变更记录</div>
+    </div>
   </div>
   <aside class="c360-side">
+    <div class="c360-sec" id="stl-side-sec">
+      <h4>💜 关系阶段</h4>
+      <div id="stl-side-box"><span style="color:#94a3b8;font-size:12px;">加载中…</span></div>
+    </div>
+    <!-- P41: 互动积分 -->
+    <div class="c360-sec" id="eng-section">
+      <h4>🏅 互动积分</h4>
+      <div id="eng-box"><span style="color:#94a3b8;font-size:12px;">加载中…</span></div>
+    </div>
     <div class="c360-sec">
       <h4>留资信息</h4>
       <div id="c360-attrs"><span style="color:#94a3b8;font-size:12px;">无</span></div>
@@ -323,8 +392,167 @@
         }).catch(function(){ alert('网络错误'); });
     }
   };
+  // P31：360° 互动时间轴
+  var _itlLoaded=false;
+  var _ITL_ICONS={
+    'message':'💬','note':'📝','archived':'📁','summary':'🤖','conv_open':'🔗'
+  };
+  var _ITL_LABELS={
+    'message':'消息','note':'坐席注解','archived':'归档','summary':'AI摘要','conv_open':'会话建立'
+  };
+  function loadItl(){
+    if(_itlLoaded) return;
+    var box=document.getElementById('c360-itl');
+    box.innerHTML='<div class="itl-empty">加载中…</div>';
+    fetch('/api/workspace/contact/'+encodeURIComponent(CONTACT_ID)+'/timeline?limit=100')
+      .then(function(r){return r.json();}).then(function(d){
+        _itlLoaded=true;
+        if(!d.ok){ box.innerHTML='<div class="itl-empty">加载失败：'+(d.error||'')+'</div>'; return; }
+        renderItl(d.events||[], box);
+      }).catch(function(){ box.innerHTML='<div class="itl-empty">网络错误</div>'; });
+  }
+  function renderItl(events, box){
+    if(!events.length){ box.innerHTML='<div class="itl-empty">暂无互动记录</div>'; return; }
+    box.innerHTML=events.map(function(e){
+      var icon=_ITL_ICONS[e.event_type]||'•';
+      var label=_ITL_LABELS[e.event_type]||e.event_type;
+      var dotCls='itl-dot '+e.event_type+(e.event_type==='message'?(e.meta&&e.meta.direction==='out'?'-out':'-in'):'');
+      var meta='';
+      if(e.event_type==='message' && e.meta){
+        meta='<div class="itl-meta">'+(e.meta.direction==='out'?'↑ 坐席回复':'↓ 客户消息')+(e.platform?(' · '+esc(e.platform)):'')+'</div>';
+      } else if(e.event_type==='note' && e.meta){
+        meta='<div class="itl-meta">坐席：'+esc(e.meta.agent_name||'')
+          +(e.meta.mentions&&e.meta.mentions.length?' · 提及：'+e.meta.mentions.map(esc).join('、'):'')+'</div>';
+      } else if(e.event_type==='conv_open' && e.platform){
+        meta='<div class="itl-meta">'+esc(e.platform)+' 渠道</div>';
+      }
+      return '<div class="itl-item">'
+        +'<div class="'+dotCls+'">'+icon+'</div>'
+        +'<div class="itl-body">'
+          +'<div class="itl-hd">'
+            +'<span class="itl-kind">'+esc(label)+'</span>'
+            +'<span class="itl-ts">'+fmtTs(e.ts)+'</span>'
+          +'</div>'
+          +(e.preview?'<div class="itl-txt">'+esc(e.preview)+'</div>':'')
+          +meta
+        +'</div>'
+        +'</div>';
+    }).join('');
+  }
+
+  // P51：关系阶段演进时间轴
+  var _stlLoaded=false;
+  function loadStlSide(){
+    var box=document.getElementById('stl-side-box'); if(!box) return;
+    fetch('/api/workspace/contact/'+encodeURIComponent(CONTACT_ID)+'/stage-timeline?limit=1')
+      .then(function(r){return r.json();}).then(function(d){
+        if(!d.ok||!d.summary){ box.innerHTML='<span style="color:#94a3b8;font-size:12px;">暂无阶段数据</span>'; return; }
+        var s=d.summary;
+        box.innerHTML='<div style="font-size:16px;font-weight:700;color:#5b21b6;">'+esc(s.current_stage_label||'初识')+'</div>'
+          +'<div style="font-size:11px;color:#64748b;margin-top:4px;">'
+          +(s.updated_by?('由 '+esc(s.updated_by)+' 更新 · '):'')
+          +(s.total_confirms?'进阶 '+s.total_confirms+' 次 · ':'')
+          +(s.total_downgrades?'降级 '+s.total_downgrades+' 次':'')
+          +'</div>'
+          +'<button class="tiny-btn" style="margin-top:6px;width:100%;" onclick="C360.switchTab(\'stl\')">查看演进历史</button>';
+      }).catch(function(){ box.innerHTML='<span style="color:#94a3b8;font-size:12px;">加载失败</span>'; });
+  }
+  function loadStl(){
+    if(_stlLoaded) return;
+    var box=document.getElementById('c360-stl');
+    box.innerHTML='<div class="itl-empty">加载中…</div>';
+    fetch('/api/workspace/contact/'+encodeURIComponent(CONTACT_ID)+'/stage-timeline?limit=80')
+      .then(function(r){return r.json();}).then(function(d){
+        _stlLoaded=true;
+        if(!d.ok){ box.innerHTML='<div class="itl-empty">加载失败</div>'; return; }
+        renderStl(d, box);
+      }).catch(function(){ box.innerHTML='<div class="itl-empty">网络错误</div>'; });
+  }
+  function renderStl(d, box){
+    var events=d.events||[];
+    var s=d.summary||{};
+    var sum='<div class="stl-summary">'
+      +'<div class="stl-cur">'+esc(s.current_stage_label||'初识')+'</div>'
+      +'<div class="stl-stats">'
+      +(s.total_confirms?'<span>⬆ 进阶 '+s.total_confirms+'</span>':'')
+      +(s.total_downgrades?'<span>⬇ 降级 '+s.total_downgrades+'</span>':'')
+      +(s.total_reunions?'<span>🌸 回暖 '+s.total_reunions+'</span>':'')
+      +(s.total_syncs?'<span>↔ 对齐 '+s.total_syncs+'</span>':'')
+      +(s.agent_ids&&s.agent_ids.length?'<span>坐席 '+s.agent_ids.map(esc).join('、')+'</span>':'')
+      +'</div></div>';
+    if(!events.length){
+      box.innerHTML=sum+'<div class="itl-empty">暂无阶段变更记录（确认进阶后将自动记录）</div>';
+      return;
+    }
+    box.innerHTML=sum+events.map(function(e){
+      var conv=e.conversation_id
+        ?'<span class="stl-link" onclick="C360.openConv(\''+esc(e.conversation_id)+'\')">'
+          +esc(e.platform||'会话')+(e.display_name?(' · '+esc(e.display_name)):'')+'</span>'
+        :'<span class="stl-meta">客户级操作</span>';
+      return '<div class="stl-item">'
+        +'<div class="stl-dot '+esc(e.event_type||'')+'">'+(e.icon||'•')+'</div>'
+        +'<div class="stl-body">'
+          +'<div class="stl-hd"><span class="stl-kind">'+esc(e.label||'')+'</span>'
+          +'<span class="stl-ts">'+fmtTs(e.ts)+'</span></div>'
+          +'<div class="stl-txt">'+esc(e.preview||'')+'</div>'
+          +'<div class="stl-meta">'+(e.agent_id?'@'+esc(e.agent_id)+' · ':'')+conv+'</div>'
+        +'</div></div>';
+    }).join('');
+  }
+
+  // 选项卡切换
+  C360.switchTab=function(tab){
+    document.getElementById('tab-msg').classList.toggle('active',tab==='msg');
+    document.getElementById('tab-itl').classList.toggle('active',tab==='itl');
+    document.getElementById('tab-stl').classList.toggle('active',tab==='stl');
+    document.getElementById('c360-tl').style.display=tab==='msg'?'':'none';
+    document.getElementById('c360-itl').style.display=tab==='itl'?'':'none';
+    document.getElementById('c360-stl').style.display=tab==='stl'?'':'none';
+    if(tab==='itl') loadItl();
+    if(tab==='stl') loadStl();
+  };
+  C360.openConv=function(convId){
+    if(!convId) return;
+    try{ sessionStorage.setItem('ws_focus_conv', convId); }catch(_){}
+    location.href='/workspace';
+  };
+
   loadAgents();
+  loadEngagement();
+  loadStlSide();
   load();
 })();
+
+// P41: 互动积分
+function loadEngagement(){
+  var box=document.getElementById('eng-box'); if(!box) return;
+  fetch('/api/workspace/contact/'+encodeURIComponent(CONTACT_ID)+'/engagement')
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d.computed||!d.engagement){
+        box.innerHTML='<div style="font-size:12px;color:#94a3b8;">暂无积分数据</div>'
+          +'<button class="tiny-btn" style="margin-top:6px;width:100%;" onclick="computeEngagement()">计算积分</button>';
+        return;
+      }
+      var e=d.engagement;
+      var vipCls=e.is_vip?' eng-vip':'';
+      var achs=(e.achievement_details||[]);
+      box.innerHTML='<div class="eng-wrap">'
+        +'<div><span class="eng-pts">'+Number(e.points||0)+'</span>'
+        +'<span class="eng-level'+vipCls+'">'+(e.level_name||e.level||'')+(e.is_vip?' VIP':'')+'</span></div>'
+        +'<div style="font-size:11px;color:#64748b;margin-top:4px;">近30天活跃 '+Number(e.days_active_30d||0)+' 天 · 消息 '+Number(e.message_count||0)+' 条</div>'
+        +'<div class="ach-grid">'+achs.map(function(a){
+          return '<span class="ach-item'+(a.unlocked?' unlocked':'')+'" title="'+esc(a.desc||'')+'">'+(a.unlocked?(a.icon||'🏅'):'🔒')+' '+esc(a.name||'')+'</span>';
+        }).join('')+'</div>'
+        +'<button class="tiny-btn" style="margin-top:8px;width:100%;font-size:11px;" onclick="computeEngagement()">刷新积分</button>'
+        +'</div>';
+    }).catch(function(){ box.innerHTML='<span style="color:#94a3b8;font-size:12px;">加载失败</span>'; });
+}
+function computeEngagement(){
+  fetch('/api/workspace/contact/'+encodeURIComponent(CONTACT_ID)+'/engagement',{method:'POST'})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d.ok) loadEngagement();
+    });
+}
+window.computeEngagement=computeEngagement;
 </script>
 {% endblock %}

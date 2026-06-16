@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{% if ui_mode == 'simple' %}数据概览{% else %}仪表盘{% endif %} · {{ site_name|default('智控王客户转化聊天系统') }}{% endblock %}
+{% block title %}{% if ui_mode == 'simple' %}数据概览{% else %}仪表盘{% endif %} · {{ site_name|default('华灵科技客户转化聊天系统') }}{% endblock %}
 {% block page_title %}{% if ui_mode == 'simple' %}数据概览{% else %}仪表盘{% endif %}{% endblock %}
 {% block head %}
 <style>
@@ -123,6 +123,158 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
   <span class="sys-upd" id="sys-upd-time"></span>
   <button class="sys-refresh" onclick="loadSysBar()" title="刷新状态">↻</button>
 </div>
+
+<!-- C0-1 授权状态卡（JS 动态填充） -->
+<div id="lic-card" style="display:none;margin-bottom:.9rem;border-radius:var(--r);
+  border:1px solid var(--bd);background:var(--card);padding:.85rem 1rem;
+  align-items:center;gap:.9rem;font-size:.82rem;">
+  <span id="lic-icon" style="font-size:1.3rem;flex-shrink:0;">🔑</span>
+  <div style="flex:1;min-width:0;">
+    <div id="lic-title" style="font-weight:700;color:var(--t);"></div>
+    <div id="lic-sub" style="color:var(--t2);font-size:.76rem;margin-top:.12rem;"></div>
+  </div>
+  <span id="lic-badge" style="flex-shrink:0;padding:.22rem .7rem;border-radius:20px;
+    font-size:.72rem;font-weight:700;white-space:nowrap;"></span>
+</div>
+<script>
+(function(){
+  var META={
+    active:   {bg:'var(--gs)',  fg:'var(--green)', icon:'🔑', label:'已授权'},
+    grace:    {bg:'var(--as)',  fg:'var(--amber)', icon:'⏳', label:'宽限期'},
+    expired:  {bg:'var(--rs)',  fg:'var(--red)',   icon:'⛔', label:'已过期'},
+    unlicensed:{bg:'var(--input)',fg:'var(--t2)',  icon:'🌱', label:'社区模式'},
+    invalid:  {bg:'var(--rs)',  fg:'var(--red)',   icon:'⚠️', label:'授权无效'},
+    unavailable:{bg:'var(--input)',fg:'var(--t2)', icon:'❓', label:'无法校验'}
+  };
+  function planName(p){return {community:'社区版',basic:'基础版',pro:'专业版',flagship:'旗舰版'}[p]||p||'—';}
+  fetch('/api/admin/license').then(function(r){return r.json();}).then(function(d){
+    if(!d||!d.ok) return;
+    var card=document.getElementById('lic-card'); if(!card) return;
+    var m=META[d.state]||META.unlicensed;
+    card.style.display='flex';
+    card.style.borderLeft='4px solid '+m.fg;
+    document.getElementById('lic-icon').textContent=m.icon;
+    var title=planName(d.plan);
+    if(d.customer) title+=' · '+d.customer;
+    if(d.days_left!=null && d.state!=='unlicensed') title+=(d.days_left>=0?'（剩 '+d.days_left+' 天）':'（已逾期 '+(-d.days_left)+' 天）');
+    document.getElementById('lic-title').textContent=title;
+    var sub=(d.messages&&d.messages.length)?d.messages.join('；'):'';
+    if(!sub && d.state==='active') sub='授权正常'+(d.expires_at? '':' · 永久授权');
+    if(d.seats) sub+=(sub?' · ':'')+'席位 '+d.seats;
+    if(d.channels&&d.channels.length) sub+=(sub?' · ':'')+'渠道 '+d.channels.join('/');
+    document.getElementById('lic-sub').textContent=sub;
+    var b=document.getElementById('lic-badge');
+    b.textContent=m.label; b.style.background=m.bg; b.style.color=m.fg;
+  }).catch(function(){});
+})();
+</script>
+
+<!-- D1 运行时健康卡（JS 动态填充） -->
+<div id="health-card" style="display:none;margin-bottom:.9rem;border-radius:var(--r);
+  border:1px solid var(--bd);background:var(--card);padding:.85rem 1rem;font-size:.82rem;">
+  <div style="display:flex;align-items:center;gap:.9rem;">
+    <span id="health-icon" style="font-size:1.3rem;flex-shrink:0;">🩺</span>
+    <div style="flex:1;min-width:0;">
+      <div id="health-title" style="font-weight:700;color:var(--t);"></div>
+      <div id="health-sub" style="color:var(--t2);font-size:.76rem;margin-top:.12rem;"></div>
+    </div>
+    <span id="health-badge" style="flex-shrink:0;padding:.22rem .7rem;border-radius:20px;
+      font-size:.72rem;font-weight:700;white-space:nowrap;"></span>
+  </div>
+  <div id="health-comps" style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.7rem;"></div>
+</div>
+<script>
+(function(){
+  var LMETA={
+    green:{bg:'var(--gs)',fg:'var(--green)',icon:'🟢',label:'健康'},
+    yellow:{bg:'var(--as)',fg:'var(--amber)',icon:'🟡',label:'注意'},
+    red:{bg:'var(--rs)',fg:'var(--red)',icon:'🔴',label:'异常'}
+  };
+  var SMETA={ok:'var(--green)',warn:'var(--amber)',fail:'var(--red)'};
+  function render(){
+    fetch('/api/admin/health').then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok) return;
+      var card=document.getElementById('health-card'); if(!card) return;
+      var m=LMETA[d.light]||LMETA.yellow;
+      card.style.display='block'; card.style.borderLeft='4px solid '+m.fg;
+      document.getElementById('health-icon').textContent=m.icon;
+      document.getElementById('health-title').textContent='系统运行状态';
+      var s=d.summary||{};
+      document.getElementById('health-sub').textContent=
+        '正常 '+(s.ok||0)+' · 注意 '+(s.warn||0)+' · 异常 '+(s.fail||0);
+      var b=document.getElementById('health-badge');
+      b.textContent=m.label; b.style.background=m.bg; b.style.color=m.fg;
+      document.getElementById('health-comps').innerHTML=(d.components||[]).map(function(c){
+        var col=SMETA[c.status]||'var(--t2)';
+        return '<span title="'+(c.detail||'').replace(/"/g,'&quot;')+'" '
+          +'style="display:inline-flex;align-items:center;gap:.3rem;padding:.18rem .55rem;'
+          +'border:1px solid var(--bd);border-radius:14px;font-size:.72rem;color:var(--t2);">'
+          +'<i style="width:7px;height:7px;border-radius:50%;background:'+col+';display:inline-block;"></i>'
+          +(c.name||c.id)+'</span>';
+      }).join('');
+    }).catch(function(){});
+  }
+  render(); setInterval(render, 60000);
+})();
+</script>
+
+<!-- D2 运维可靠性卡（JS 动态填充） -->
+<div id="rel-card" style="display:none;margin-bottom:.9rem;border-radius:var(--r);
+  border:1px solid var(--bd);background:var(--card);padding:.85rem 1rem;font-size:.82rem;">
+  <div style="display:flex;align-items:center;gap:.9rem;">
+    <span id="rel-icon" style="font-size:1.3rem;flex-shrink:0;">📈</span>
+    <div style="flex:1;min-width:0;">
+      <div style="font-weight:700;color:var(--t);">运维可靠性（近 24h）</div>
+      <div id="rel-sub" style="color:var(--t2);font-size:.76rem;margin-top:.12rem;"></div>
+    </div>
+    <span id="rel-score" style="flex-shrink:0;padding:.22rem .7rem;border-radius:20px;
+      font-size:.72rem;font-weight:700;white-space:nowrap;"></span>
+  </div>
+  <div id="rel-workers" style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.7rem;"></div>
+  <div id="rel-spark" style="display:flex;align-items:flex-end;gap:2px;height:42px;margin-top:.7rem;"></div>
+</div>
+<script>
+(function(){
+  var LM={green:{fg:'var(--green)',icon:'📈',label:'良好'},
+    yellow:{fg:'var(--amber)',icon:'📉',label:'注意'},
+    red:{fg:'var(--red)',icon:'⚠️',label:'异常'}};
+  var SM={ok:'var(--green)',warn:'var(--amber)',fail:'var(--red)'};
+  function render(){
+    fetch('/api/admin/reliability?hours=24').then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok) return;
+      var card=document.getElementById('rel-card'); if(!card) return;
+      var m=LM[d.light]||LM.yellow;
+      card.style.display='block'; card.style.borderLeft='4px solid '+m.fg;
+      document.getElementById('rel-icon').textContent=m.icon;
+      var t=d.totals||{};
+      document.getElementById('rel-sub').textContent=
+        '处置 '+(t.dispositions||0)+' · 拦截率 '+Math.round((t.block_rate||0)*100)+'%'
+        +' · 弃用率 '+Math.round((t.reject_rate||0)*100)+'% · 近期告警 '+(d.alert_count||0);
+      var b=document.getElementById('rel-score');
+      b.textContent=m.label+' '+(d.score||0); b.style.color=m.fg;
+      b.style.background='color-mix(in srgb,'+m.fg+' 14%,transparent)';
+      document.getElementById('rel-workers').innerHTML=(d.workers||[]).map(function(w){
+        var col=SM[w.status]||'var(--t2)';
+        var er=Math.round((w.error_rate||0)*100);
+        return '<span title="发送 '+(w.total_sent||0)+' / 错误 '+(w.total_errors||0)+'" '
+          +'style="display:inline-flex;align-items:center;gap:.3rem;padding:.18rem .55rem;'
+          +'border:1px solid var(--bd);border-radius:14px;font-size:.72rem;color:var(--t2);">'
+          +'<i style="width:7px;height:7px;border-radius:50%;background:'+col+';display:inline-block;"></i>'
+          +(w.name||w.id)+(w.total_sent||w.total_errors?(' '+er+'%err'):'')+'</span>';
+      }).join('');
+      var tr=d.trend||[]; var max=1; tr.forEach(function(x){max=Math.max(max,x.total||0);});
+      document.getElementById('rel-spark').innerHTML=tr.map(function(x){
+        var h=Math.round((x.total||0)/max*38);
+        var bad=(x.blocked||0)+(x.rejected||0);
+        var bg=bad>0?'var(--amber)':'#93c5fd';
+        return '<i title="处置 '+(x.total||0)+'，拦截/弃用 '+bad+'" style="flex:1;min-width:2px;'
+          +'height:'+Math.max(2,h)+'px;background:'+bg+';border-radius:1px;display:inline-block;"></i>';
+      }).join('');
+    }).catch(function(){});
+  }
+  render(); setInterval(render, 60000);
+})();
+</script>
 
 <!-- 紧急告警横幅（JS 动态填充） -->
 <div id="alert-banner">

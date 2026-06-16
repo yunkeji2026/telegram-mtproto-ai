@@ -96,17 +96,20 @@ class MessengerVoiceSender:
 
     @staticmethod
     def _mime_for(path: Path) -> str:
-        mt, _ = mimetypes.guess_type(str(path))
-        if mt:
-            return mt
+        # 显式表优先：mimetypes.guess_type 对 .wav 等的结果随 OS 漂移
+        # （Linux 给 audio/x-wav，Windows 给 audio/wav），发送的 MIME 不应依赖平台。
         suffix = path.suffix.lower()
-        if suffix == ".wav":
-            return "audio/wav"
-        if suffix == ".m4a":
-            return "audio/mp4"
-        if suffix == ".opus":
-            return "audio/ogg"
-        return "audio/mpeg"
+        explicit = {
+            ".wav": "audio/wav",
+            ".m4a": "audio/mp4",
+            ".opus": "audio/ogg",
+            ".ogg": "audio/ogg",
+            ".mp3": "audio/mpeg",
+        }
+        if suffix in explicit:
+            return explicit[suffix]
+        mt, _ = mimetypes.guess_type(str(path))
+        return mt or "audio/mpeg"
 
     @staticmethod
     def _bounds(raw: str) -> Optional[Tuple[int, int, int, int]]:

@@ -90,6 +90,7 @@ l1_rule_trigger:
       - 帮助
       - 有问题
       - 怎么用
+      - 小灵
       - camille
       - 支持
     all_keywords:
@@ -424,6 +425,7 @@ l1_rule_trigger:
     enabled: true
     usernames:
     - '@ai_zkw'
+    - 小灵
     - Camille
     - camille
     - 客服

@@ -290,6 +290,30 @@ class TestJ1Presence:
         online = store.list_agent_presence(active_within_sec=120)
         assert len(online) == 2
 
+    def test_presence_carries_agent_languages(self):
+        """P3：list_agent_presence LEFT JOIN agent_prefs 带出坐席技能语言。"""
+        store = _make_store()
+        store.upsert_agent_presence("agent-1", display_name="Alice", status="online")
+        store.upsert_agent_presence("agent-2", display_name="Bob", status="online")
+        store.set_agent_languages("agent-1", "en,ja")
+        rows = {p["agent_id"]: p for p in store.list_agent_presence(active_within_sec=120)}
+        assert rows["agent-1"]["languages"] == "en,ja"
+        assert rows["agent-2"]["languages"] == ""   # 未声明 → 空串
+
+    def test_set_agent_languages_preserves_alert_prefs(self):
+        """P3：写语言只动 languages 列，不影响告警偏好；反之亦然。"""
+        store = _make_store()
+        store.set_agent_prefs("agent-1", warn_sec=90, crit_sec=300, muted=1)
+        store.set_agent_languages("agent-1", "zh,en")
+        prefs = store.get_agent_prefs("agent-1")
+        assert prefs["languages"] == "zh,en"
+        assert prefs["warn_sec"] == 90
+        assert prefs["crit_sec"] == 300
+        assert prefs["muted"] == 1
+        # 再改告警偏好不应抹掉语言
+        store.set_agent_prefs("agent-1", warn_sec=120)
+        assert store.get_agent_prefs("agent-1")["languages"] == "zh,en"
+
     def test_list_presence_excludes_old(self):
         store = _make_store()
         # Manually insert old presence

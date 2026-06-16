@@ -1460,7 +1460,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                         self.context_manager.add_message(
                             chat_id=chat_id,
                             user_id=0,  # AI用户
-                            username="Camille",
+                            username="小灵",
                             text=sent_text_for_context,
                             is_ai=True
                         )
@@ -1499,7 +1499,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                         self.context_manager.add_message(
                             chat_id=chat_id,
                             user_id=0,
-                            username="Camille",
+                            username="小灵",
                             text=reply_final,
                             is_ai=True,
                         )

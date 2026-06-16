@@ -314,6 +314,52 @@ class TestL1MetricsAPI:
         r = client.get("/api/workspace/metrics?format=prometheus")
         assert "ws_webhook_total_sent" in r.text
 
+    def test_auto_claim_default_when_no_worker(self):
+        """无 AutoClaimWorker 接线时，auto_claim 字段降级为 running:False。"""
+        store = _make_store()
+        svc = _make_svc(store)
+        client = _make_metrics_app(store, svc, role="admin")
+        r = client.get("/api/workspace/metrics")
+        assert r.status_code == 200
+        d = r.json()
+        assert "auto_claim" in d
+        assert d["auto_claim"].get("running") is False
+
+    def test_auto_claim_snapshot_surfaces(self):
+        """接线 AutoClaimWorker 后，status_snapshot 字段透出到 JSON。"""
+        store = _make_store()
+        svc = _make_svc(store)
+        client = _make_metrics_app(store, svc, role="admin")
+
+        class _FakeACW:
+            def status_snapshot(self):
+                return {"running": True, "total_claimed": 7,
+                        "total_lang_matched": 4}
+
+        client.app.state.auto_claim_worker = _FakeACW()
+        r = client.get("/api/workspace/metrics")
+        d = r.json()
+        assert d["auto_claim"]["running"] is True
+        assert d["auto_claim"]["total_claimed"] == 7
+        assert d["auto_claim"]["total_lang_matched"] == 4
+
+    def test_prometheus_has_auto_claim_gauges(self):
+        store = _make_store()
+        svc = _make_svc(store)
+        client = _make_metrics_app(store, svc, role="admin")
+
+        class _FakeACW:
+            def status_snapshot(self):
+                return {"running": True, "total_claimed": 3,
+                        "total_lang_matched": 2}
+
+        client.app.state.auto_claim_worker = _FakeACW()
+        r = client.get("/api/workspace/metrics?format=prometheus")
+        text = r.text
+        assert "ws_auto_claim_running 1" in text
+        assert "ws_auto_claim_total 3" in text
+        assert "ws_auto_claim_lang_matched_total 2" in text
+
     def test_json_format_has_drafts(self):
         store = _make_store()
         svc = _make_svc(store)
@@ -372,3 +418,11 @@ class TestL3KeyboardAndQuickActions:
         assert "db-metrics-sec" in html
         assert "loadMetrics" in html
         assert "format=prometheus" in html
+
+    def test_dashboard_metrics_widget_has_auto_claim(self):
+        """L1 指标卡须呈现 auto_claim 自动派单（状态 + 量 + 语言命中）。"""
+        with open("src/web/templates/workspace_dashboard.html", encoding="utf-8") as f:
+            html = f.read()
+        assert "d.auto_claim" in html
+        assert "自动派单" in html
+        assert "total_lang_matched" in html

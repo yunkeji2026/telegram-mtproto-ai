@@ -419,7 +419,7 @@ class PersonaManager:
         count = 0
         for pid, pdata in profiles_data.items():
             if isinstance(pdata, dict) and pid:
-                self._profile_personas[str(pid)] = copy.deepcopy(pdata)
+                self._profile_personas[str(pid)] = copy.deepcopy(self.normalize_profile_shape(pdata))
                 self._profile_sources[str(pid)] = "runtime"  # P6: runtime overrides canonical
                 count += 1
         # Restore history (optional section, ignore if absent/malformed)
@@ -463,7 +463,7 @@ class PersonaManager:
             count = 0
             for pid, pdata in profiles.items():
                 if isinstance(pdata, dict) and pid:
-                    self._profile_personas[str(pid)] = copy.deepcopy(pdata)
+                    self._profile_personas[str(pid)] = copy.deepcopy(self.normalize_profile_shape(pdata))
                     self._profile_sources[str(pid)] = "canonical"  # P6: canonical overrides config
                     count += 1
             if count:
@@ -554,7 +554,7 @@ class PersonaManager:
             pid = str(entry.get("id") or "").strip()
             if not pid:
                 continue
-            self._profile_personas[pid] = copy.deepcopy(entry)
+            self._profile_personas[pid] = copy.deepcopy(self.normalize_profile_shape(entry))
             self._profile_sources[pid] = "config"  # P6: direct assign — reload sets 'config'
             count += 1
         if count:
@@ -672,7 +672,7 @@ class PersonaManager:
                 "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "persona": copy.deepcopy(existing),
             })
-        self._profile_personas[pid] = copy.deepcopy(persona_data)
+        self._profile_personas[pid] = copy.deepcopy(self.normalize_profile_shape(persona_data))
         # P6: mrpa-tagged data keeps 'mrpa' source; operator studio saves become 'studio'
         if persona_data.get("_mrpa_source"):
             self._profile_sources[pid] = "mrpa"
@@ -836,9 +836,35 @@ class PersonaManager:
             p, name_override=name_override, platform=platform, funnel_stage=funnel_stage
         )
 
+    @staticmethod
+    def normalize_profile_shape(persona: Dict[str, Any]) -> Dict[str, Any]:
+        """把人设结构归一到「格式化器期望的 schema」，不就地修改入参，返回浅拷贝。
+
+        兼容历史/自由格式数据漂移，杜绝「字符串当字典 .get()」类崩溃：
+          - personality 是字符串（rich/自由格式人设）→ 收敛为 {'style': <原文>}；
+          - personality / speaking / identity / boundaries / emotion / context
+            非 dict（None、list、str 等）→ 统一兜成 {} 或对应收敛。
+        """
+        if not isinstance(persona, dict):
+            return {}
+        out = dict(persona)
+        # 只就「已存在且类型错误」的键做收敛——绝不注入缺失键，
+        # 以保「存入==取出」的数据保真（persist/diff/相等断言依赖此）。
+        if "personality" in out:
+            pers = out["personality"]
+            if isinstance(pers, str):
+                out["personality"] = {"style": pers.strip()}
+            elif not isinstance(pers, dict):
+                out["personality"] = {}
+        for _k in ("speaking", "identity", "boundaries", "emotion", "context"):
+            if _k in out and not isinstance(out[_k], dict):
+                out[_k] = {}
+        return out
+
     def _format_persona_compact(
         self, persona: Dict[str, Any], *, name_override: str = ""
     ) -> str:
+        persona = self.normalize_profile_shape(persona)
         name = (name_override or "").strip() or persona.get("name", "Assistant")
         role = persona.get("role", "")
         lines: List[str] = [
@@ -972,6 +998,7 @@ class PersonaManager:
         platform: str = "", funnel_stage: str = ""
     ) -> str:
         """Convert persona.yaml into natural language instructions for the LLM."""
+        persona = self.normalize_profile_shape(persona)
         lines: List[str] = []
         name = (name_override or "").strip() or persona.get("name", "Assistant")
         role = persona.get("role", "AI 助手")

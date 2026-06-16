@@ -26,7 +26,10 @@ from starlette.middleware.sessions import SessionMiddleware
 logger = logging.getLogger("WebAdmin")
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
-templates = Jinja2Templates(directory=str(_TEMPLATE_DIR), auto_reload=True)
+# 跨 Starlette 版本兼容：1.x 起 Jinja2Templates 不再透传 **env_options，
+# auto_reload 作为构造参数会 TypeError，改为构造后直接设到 Jinja2 Environment。
+templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
+templates.env.auto_reload = True
 
 # ── 模型显示名映射（UI 层展示，不影响实际 API 调用）─────────────
 _MODEL_DISPLAY_MAP: dict = {
@@ -47,8 +50,8 @@ templates.env.filters["display_model"] = _display_model
 
 # Jinja2 global: site_name — dynamically set from domain pack display_name
 # Default to generic name; overridden in create_app() when domain pack loads
-templates.env.globals["site_name"] = "智控王客户转化聊天系统"
-templates.env.globals["site_name_short"] = "智控王"
+templates.env.globals["site_name"] = "华灵科技客户转化聊天系统"
+templates.env.globals["site_name_short"] = "华灵科技"
 
 # ── /api/human-escalation/schedule-status 短时缓存（减轻 is_within + 粗估重复计算）──
 _SCHEDULE_STATUS_LOCK = threading.Lock()
@@ -128,10 +131,63 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         templates.env.globals["site_name"] = domain_display
         templates.env.globals["site_name_short"] = domain_display
 
+    # ── C1-1 白标：品牌 overlay 注入 Jinja globals（优先于 domain pack）──
+    def _apply_branding_globals():
+        try:
+            from src.licensing import get_license_manager
+            from src.utils.branding import get_branding
+
+            _b = get_branding(getattr(config_manager, "config", None) or {},
+                              get_license_manager().status())
+            templates.env.globals["site_name"] = _b["site_name"]
+            templates.env.globals["site_name_short"] = _b["site_name_short"]
+            templates.env.globals["brand_primary_color"] = _b["primary_color"]
+            templates.env.globals["brand_logo_url"] = _b["logo_url"]
+            templates.env.globals["brand_login_subtitle"] = _b["login_subtitle"]
+            templates.env.globals["show_powered_by"] = _b["show_powered_by"]
+            templates.env.globals["powered_by_text"] = _b["powered_by_text"]
+        except Exception:
+            import logging as _lb
+            _lb.getLogger("admin").debug("品牌 globals 注入跳过", exc_info=True)
+
+    _apply_branding_globals()
+    app_branding_refresh = _apply_branding_globals
+
     app = FastAPI(title=templates.env.globals["site_name"], docs_url=None, redoc_url=None)
+
+    # ── C0-3 授权强制：只读模式拦截写操作（enforce 关 / 授权有效时零开销直通）──
+    @app.middleware("http")
+    async def _license_readonly_guard(request, call_next):
+        try:
+            from src.licensing import get_license_manager, is_write_blocked
+
+            st = get_license_manager().status()
+            if is_write_blocked(request.url.path, request.method, st):
+                from fastapi.responses import JSONResponse
+
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "ok": False,
+                        "error": "license_readonly",
+                        "detail": "授权已失效，系统处于只读模式，请联系厂商续费后恢复。",
+                    },
+                )
+        except Exception:  # pragma: no cover - 守卫自身异常绝不阻断请求
+            pass
+        return await call_next(request)
+
     _static_dir = Path(__file__).parent / "static"
     if _static_dir.is_dir():
         app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+    # 两端共享 copilot 组件库(单一事实来源 repo 根 shared/copilot);独立前缀避开 /static 匹配顺序
+    _shared_copilot_dir = Path(__file__).resolve().parents[2] / "shared" / "copilot"
+    if _shared_copilot_dir.is_dir():
+        app.mount(
+            "/copilot",
+            StaticFiles(directory=str(_shared_copilot_dir)),
+            name="copilot_shared",
+        )
     app.state.kb_conflict_checkers = []
     app.state.intent_display_names_extra = {}
     app.state.config_manager = config_manager
@@ -599,6 +655,15 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         if not user_store.can_access_page(role, page_key):
             raise HTTPException(status_code=403, detail="无权访问此页面")
 
+    # 暴露鉴权闭包到 app.state，供 main.py 在 create_app 之后挂载的子路由
+    # （drafts / contacts / ecommerce）复用同一鉴权 choke point。
+    # 历史缺陷：这些子路由的 _drafts_api_auth/_contacts_api_auth 依赖 state.require_role，
+    # 但该属性从未被挂载 → hasattr 恒为 False → 外层鉴权空操作（坐席端点无鉴权）。
+    # 此处补齐挂载，使子路由统一走 _api_auth（含 agent 白名单与登录校验），
+    # 主管专属端点仍由各路由内部 _is_supervisor 守卫。
+    app.state.api_auth = _api_auth
+    app.state.require_role = _require_role
+
     _PATH_TO_PAGE = {
         "/": "dash", "/templates": "tpl", "/templates/update": "tpl",
         "/strategies": "strategies", "/strategy-analytics": "strategies",
@@ -686,6 +751,47 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         _log_au.getLogger("admin").warning(
             "auth_user 路由注册失败", exc_info=True
         )
+
+    # ── C0-1 授权状态只读 API ──────────────────────────────
+    try:
+        from src.web.routes.license_routes import register_license_routes
+
+        register_license_routes(app, api_auth=_api_auth)
+    except Exception:
+        import logging as _log_lic
+
+        _log_lic.getLogger("admin").warning("license 路由注册失败", exc_info=True)
+
+    # ── C1-1 白标品牌设置 API ──────────────────────────────
+    try:
+        from src.web.routes.branding_routes import register_branding_routes
+
+        app.state.branding_refresh = app_branding_refresh
+        register_branding_routes(app, api_auth=_api_auth, config_manager=config_manager)
+    except Exception:
+        import logging as _log_br
+
+        _log_br.getLogger("admin").warning("branding 路由注册失败", exc_info=True)
+
+    # ── C1-2 试用/Demo 数据 API ────────────────────────────
+    try:
+        from src.web.routes.demo_routes import register_demo_routes
+
+        register_demo_routes(app, api_auth=_api_auth, config_manager=config_manager)
+    except Exception:
+        import logging as _log_demo
+
+        _log_demo.getLogger("admin").warning("demo 路由注册失败", exc_info=True)
+
+    # ── D1 运行时健康检查 API（/api/admin/health）──────────
+    try:
+        from src.web.routes.runtime_health_routes import register_runtime_health_routes
+
+        register_runtime_health_routes(app, api_auth=_api_auth, config_manager=config_manager)
+    except Exception:
+        import logging as _log_rhealth
+
+        _log_rhealth.getLogger("admin").warning("runtime health 路由注册失败", exc_info=True)
 
     # 系统状态/指标/reactivation dry-run/审计热力图 已抽到 routes/monitoring_routes.py（批 G2-①）
     # （register_monitoring_routes 在 _admin_ctx + kb_store 就绪后调用，见下方 learner 注册附近）
@@ -2375,11 +2481,17 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
             register_workspace_route,
             register_kb_stats_route,
             register_workload_route,
+            register_ab_testing_route,
+            register_anomaly_route,
+            register_trace_route,
+            register_glossary_route,
         )
         # J3: export API（主管数据导出）
         register_export_route(app, api_auth=_api_auth)
         # L1: metrics API（Prometheus 兼容，主管专属）
         register_metrics_route(app, api_auth=_api_auth)
+        # P59: 术语库管理控制台 API（主管专属）
+        register_glossary_route(app, api_auth=_api_auth)
         # M2: report API（工作日报/周报，主管专属）
         register_report_route(app, api_auth=_api_auth)
         # M2: broadcast API（EventBus 广播，供简报推送）
@@ -2398,6 +2510,12 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         register_kb_stats_route(app, api_auth=_api_auth)
         # R2: 坐席工作负荷 API
         register_workload_route(app, api_auth=_api_auth)
+        # S1: A/B 测试 API
+        register_ab_testing_route(app, api_auth=_api_auth)
+        # S2: 异常检测 API
+        register_anomaly_route(app, api_auth=_api_auth)
+        # S3: 全链路追踪 API
+        register_trace_route(app, api_auth=_api_auth)
 
         register_drafts_page_routes(
             app,
@@ -2416,13 +2534,61 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         import logging as _log_dr
         _log_dr.getLogger("admin").debug("草稿/绩效路由注册跳过", exc_info=True)
 
+    # ── P29: 实时队列看板页面 ──────────────────────────────────────
+    @app.get("/workspace/queue")
+    async def _ws_queue_monitor(request: Request):
+        _unified_inbox_page_auth(request)
+        sess = request.session
+        try:
+            _sm = getattr(request.app.state, "session_manager", None)
+            if _sm is not None and not _sm.is_supervisor(sess.get("username") or ""):
+                from fastapi.responses import RedirectResponse as _RR
+                return _RR("/workspace")
+        except Exception:
+            pass
+        ctx = {
+            "request": request,
+            "user_name": sess.get("username") or sess.get("agent_id") or "",
+            "user_display_name": sess.get("display_name") or sess.get("username") or "",
+        }
+        try:
+            ctx["site_name"] = (config_manager.config or {}).get("web_admin", {}).get("site_name", "")
+        except Exception:
+            pass
+        return templates.TemplateResponse(request, "queue_monitor.html", ctx)
+
+    # ── P37/P38: 工作流 + 路由规则管理页面 ───────────────────────────
+
+    @app.get("/workspace/workflows")
+    async def _ws_workflows(request: Request):
+        _unified_inbox_page_auth(request)
+        sess = request.session
+        ctx = {
+            "request": request,
+            "user_name": sess.get("username") or sess.get("agent_id") or "",
+            "user_display_name": sess.get("display_name") or sess.get("username") or "",
+        }
+        try:
+            ctx["site_name"] = (config_manager.config or {}).get("web_admin", {}).get("site_name", "")
+        except Exception:
+            pass
+        return templates.TemplateResponse(request, "workflows.html", ctx)
+
     # ── I3 模板库管理页面 ──────────────────────────────────────────
     @app.get("/workspace/templates")
     async def _ws_templates(request: Request):
         _unified_inbox_page_auth(request)
+        sess = request.session
         return templates.TemplateResponse(
+            request,
             "template_mgmt.html",
-            {"request": request, "config_manager": config_manager},
+            {
+                "request": request,
+                "config_manager": config_manager,
+                "user_name": sess.get("username") or sess.get("agent_id") or "",
+                "user_display_name": sess.get("display_name") or sess.get("username") or "",
+                "site_name": (config_manager.config or {}).get("web_admin", {}).get("site_name", ""),
+            },
         )
 
     # ── 面向客户的网页聊天 Widget（web 渠道，公网；feature flag 默认关）──

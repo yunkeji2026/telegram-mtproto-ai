@@ -3458,6 +3458,18 @@ def register_messenger_rpa_routes(
             body += get_llm_cost().dump_prom()
         except Exception:
             pass
+        # ★ P57：附上翻译引擎用量（attempts/fail/fallbacks per engine）
+        try:
+            from src.ai.translation_engine_stats import get_translation_engine_stats
+            body += get_translation_engine_stats().dump_prom()
+        except Exception:
+            pass
+        # ★ P58：附上通用 provider 用量（OCR/ASR 等）
+        try:
+            from src.ai.provider_stats import all_provider_prom
+            body += all_provider_prom()
+        except Exception:
+            pass
         return PlainTextResponse(
             content=body,
             media_type="text/plain; version=0.0.4; charset=utf-8",
