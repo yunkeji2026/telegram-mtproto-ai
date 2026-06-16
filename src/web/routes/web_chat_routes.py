@@ -430,13 +430,30 @@ def register_web_chat_routes(app, *, config_manager=None) -> None:
         # frame-ancestors 控制「哪些站点能把本 widget 嵌进 iframe」（嵌入级白名单）
         return {"Content-Security-Policy": service.frame_ancestors_csp()}
 
+    def _brand(request: Request) -> dict:
+        """C1-1：取生效品牌（widget 用作主题色/标题回退 + Powered by 控制）。"""
+        try:
+            from src.utils.branding import get_branding
+            lic = None
+            try:
+                from src.licensing import get_license_manager
+                lic = get_license_manager().status()
+            except Exception:
+                pass
+            cfg = (config_manager.config or {}) if config_manager else {}
+            return get_branding(cfg, lic)
+        except Exception:
+            return {}
+
     @app.get("/chat", response_class=HTMLResponse)
     async def chat_page(request: Request):
-        return HTMLResponse(_widget_html(service, standalone=True), headers=_csp_headers())
+        return HTMLResponse(_widget_html(service, standalone=True, brand=_brand(request)),
+                            headers=_csp_headers())
 
     @app.get("/chat/widget", response_class=HTMLResponse)
     async def chat_widget(request: Request):
-        return HTMLResponse(_widget_html(service, standalone=False), headers=_csp_headers())
+        return HTMLResponse(_widget_html(service, standalone=False, brand=_brand(request)),
+                            headers=_csp_headers())
 
     @app.get("/chat/embed.js")
     async def chat_embed(request: Request):
@@ -448,10 +465,28 @@ def register_web_chat_routes(app, *, config_manager=None) -> None:
 
 # ── 前端资源（自包含，无外部依赖）────────────────────────────────────────────
 
-def _widget_html(service: WebChatService, *, standalone: bool) -> str:
+def _html_escape(s: str) -> str:
+    import html as _html
+    return _html.escape(str(s or ""), quote=True)
+
+
+def _widget_html(service: WebChatService, *, standalone: bool, brand: dict = None) -> str:
+    brand = brand or {}
+    # 品牌回退：web_chat 显式配置优先；为默认值时回退到全局品牌
     theme = service.theme_color
+    if theme in ("", "#2563eb") and brand.get("primary_color"):
+        theme = brand["primary_color"]
     title = service.title
-    return """<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
+    if title in ("", "在线客服") and brand.get("site_name_short"):
+        title = brand["site_name_short"]
+    powered = ""
+    if brand.get("show_powered_by"):
+        powered = (
+            '<div class="wc-powered">'
+            + _html_escape(brand.get("powered_by_text") or "")
+            + "</div>"
+        )
+    return ("""<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>__TITLE__</title>
 <style>
@@ -479,6 +514,7 @@ def _widget_html(service: WebChatService, *, standalone: bool) -> str:
 .wc-pc-go{background:__THEME__;color:#fff}
 .wc-pc-skip{background:#e5e7eb;color:#374151}
 .wc-pc-err{font-size:12px;color:#dc2626;min-height:14px}
+.wc-powered{flex:0 0 auto;text-align:center;font-size:11px;color:#9ca3af;padding:5px 0 7px;background:#fff}
 </style></head><body>
 <div class="wc-wrap" style="position:relative">
   <div class="wc-head"><span>__TITLE__</span><span class="wc-status" id="wcStatus">连接中…</span></div>
@@ -488,6 +524,7 @@ def _widget_html(service: WebChatService, *, standalone: bool) -> str:
     <textarea id="wcText" rows="1" placeholder="输入消息…"></textarea>
     <button id="wcSend">发送</button>
   </div>
+  __POWERED__
   <div class="wc-prechat" id="wcPrechat">
     <h3 id="wcPcTitle"></h3>
     <div id="wcPcFields"></div>
@@ -563,7 +600,9 @@ def _widget_html(service: WebChatService, *, standalone: bool) -> str:
   ta.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});
   start();
 })();
-</script></body></html>""".replace("__TITLE__", title).replace("__THEME__", theme)
+</script></body></html>""".replace("__TITLE__", _html_escape(title))
+            .replace("__THEME__", theme)
+            .replace("__POWERED__", powered))
 
 
 def _embed_js(service: WebChatService) -> str:

@@ -158,6 +158,13 @@ src/web/static/protocol_media/
 
 # 配置文件（不包含实际凭证）
 config/config.yaml
+# P1-1 接入向导写入的凭证 overlay（含密钥，绝不入库）
+config/config.local.yaml
+
+# C0-1 授权：客户授权码 + 厂商私钥（切勿入库）
+config/license.key
+config/.vendor_license_private.pem
+*.vendor_license_private.pem
 
 # SQLite 数据库（所有变体，含 WAL/SHM/备份）
 *.db
