@@ -1469,6 +1469,16 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
 
         _log_ops.getLogger("admin").warning("ops dashboard 路由注册失败", exc_info=True)
 
+    # E 线：运营总览（聚合 ROI/计费/健康/可靠性）+ 运维事件闭环
+    try:
+        from src.web.routes.ops_overview_routes import register_ops_overview_routes
+
+        register_ops_overview_routes(app, _admin_ctx)
+    except Exception:
+        import logging as _log_ovw
+
+        _log_ovw.getLogger("admin").warning("ops overview 路由注册失败", exc_info=True)
+
     # ── 告警状态 API ───────────────────────────────────────────
     # ── Webhook 通知 ──────────────────────────────────────────
     # 配置存储路径：{config_dir}/webhook_settings.json

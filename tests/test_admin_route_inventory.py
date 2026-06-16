@@ -13,6 +13,7 @@ from starlette.routing import Route
 # 基线端点（path<TAB>methods，methods 为逗号分隔且不含 HEAD/OPTIONS）。
 _BASELINE = """
 /	GET
+/admin/ops	GET
 /admin/tts-dashboard	GET
 /ai-studio	GET
 /analytics	GET
@@ -25,6 +26,9 @@ _BASELINE = """
 /api/admin/demo/clear	POST
 /api/admin/demo/seed	POST
 /api/admin/health	GET
+/api/admin/incidents	GET
+/api/admin/incidents/{incident_id}/ack	POST
+/api/admin/ops-overview	GET
 /api/admin/reliability	GET
 /api/admin/license	GET
 /api/admin/license/reload	POST
