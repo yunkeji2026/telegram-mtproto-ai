@@ -2,9 +2,15 @@ name: tests
 
 on:
   push:
-    branches: [main]
+    # feat-* 也触发：避免长命名分支攒一堆 Linux-only 问题，直到开 PR 才暴露。
+    branches: [main, 'feat-*']
   pull_request:
     branches: [main]
+
+# 同一分支新推送时取消进行中的旧跑，省 runner、加快反馈。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   regression:
@@ -24,6 +30,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-ci.txt
+
+      - name: Validate dependency graph (pip check)
+        # 校验已装依赖之间版本兼容、无缺失子依赖（与 --collect-only 互补）。
+        run: pip check
 
       - name: Collect tests (fast fail on import errors)
         # pytest.ini 里已 --ignore 掉 14 个预存不稳定文件（污染型 7 + 失败型 7）
