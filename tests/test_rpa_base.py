@@ -79,11 +79,14 @@ class TestDailyCapTracker:
         assert cap.remaining() == 10
 
     def test_initial_sent_recovery(self) -> None:
-        # 模拟从 DB 恢复
+        # 模拟从 DB 恢复。initial_day 必须与 tracker 的 _today_key 同时区，
+        # 否则在本地时区 != tracker tz 的环境（如 CI 用 UTC）会被误判跨日而 reset。
+        # 这里把两边都钉到 UTC：tz_offset_hours=0 + time.gmtime()。
         cap = DailyCapTracker(
             daily_cap=10,
+            tz_offset_hours=0,
             initial_sent=4,
-            initial_day=time.strftime("%Y-%m-%d"),
+            initial_day=time.strftime("%Y-%m-%d", time.gmtime()),
         )
         assert cap.daily_sent == 4
         assert cap.remaining() == 6
