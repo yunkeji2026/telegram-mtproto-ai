@@ -26,7 +26,10 @@ from starlette.middleware.sessions import SessionMiddleware
 logger = logging.getLogger("WebAdmin")
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
-templates = Jinja2Templates(directory=str(_TEMPLATE_DIR), auto_reload=True)
+# 跨 Starlette 版本兼容：1.x 起 Jinja2Templates 不再透传 **env_options，
+# auto_reload 作为构造参数会 TypeError，改为构造后直接设到 Jinja2 Environment。
+templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
+templates.env.auto_reload = True
 
 # ── 模型显示名映射（UI 层展示，不影响实际 API 调用）─────────────
 _MODEL_DISPLAY_MAP: dict = {

@@ -13,6 +13,11 @@ aiohttp>=3.9.0
 # 工具和实用程序
 PyYAML>=6.0.1
 colorama>=0.4.6
+# 多语言 TTS 语言识别（src/integrations/whatsapp_rpa/lang_detect.py 软依赖；
+# 缺失时 Latin 语种会退化为 fallback）
+langdetect>=1.0.9
+# 工时/营业时间用 zoneinfo（Asia/Shanghai 等）；Windows 无系统时区库，需此包。
+tzdata>=2024.1
 
 # 日志和监控
 loguru>=0.7.2
