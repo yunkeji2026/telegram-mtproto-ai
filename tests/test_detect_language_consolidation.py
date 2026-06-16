@@ -4,7 +4,7 @@
 「保留的 P33 业务语境行为」，也验证「合并后白嫖的脚本/语种增强」。
 """
 
-from src.web.routes.unified_inbox_routes import _detect_language
+from src.web.routes.unified_inbox_helpers import _detect_language
 
 
 def test_business_default_preserved():

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from src.ai.translation_service import detect_language, normalize_lang
 from src.ai.ai_client import AIClient
-from src.web.routes.unified_inbox_routes import _detect_language as inbox_detect
+from src.web.routes.unified_inbox_helpers import _detect_language as inbox_detect
 from src.integrations.messenger_rpa.runner import _detect_peer_lang
 from src.integrations.whatsapp_rpa.lang_detect import (
     detect_tts_lang,

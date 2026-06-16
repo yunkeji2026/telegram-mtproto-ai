@@ -10,16 +10,39 @@
   - 选择策略默认 ``least_loaded``：在候选坐席里挑当前认领数最少者，agent_id 升序做
     确定性 tiebreak（便于测试与可预期）。批量建议时在批内累加负载，避免把同一批未认领
     会话全部挤给同一个坐席（自然产生轮转效果）。
-  - 语言/平台匹配为预留能力：当前 presence 行不携带坐席技能数据，``match_language`` 仅作
-    占位开关；真正按语言派单需后续补「坐席技能」数据源（见 ROADMAP）。
+  - ``match_language``（P3 已落地）：presence 行经 store LEFT JOIN agent_prefs 携带坐席技能
+    语言（``languages`` CSV，坐席在工作台「我的偏好」声明）。开启后把会话语言优先派给会该
+    语言的坐席；无人会该语言则回退全体（有人接 > 没人接）。坐席未声明语言则等价于旧行为。
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
+
+
+def _norm_lang(v: Any) -> str:
+    """轻量语言码归一（zh-cn→zh / 大小写 / 去空白）。
+
+    复用 translation_service.normalize_lang 保持与会话/出向译文同一套口径；
+    导入失败（极端裁剪环境）时回落到「小写 + 取连字符前段」的朴素归一，绝不抛错。
+    """
+    s = str(v or "").strip()
+    if not s:
+        return ""
+    try:
+        from src.ai.translation_service import normalize_lang
+        return normalize_lang(s)
+    except Exception:
+        return s.lower().split("-")[0]
+
+
+def _agent_langs(p: Dict[str, Any]) -> Set[str]:
+    """解析 presence 行携带的坐席技能语言（CSV）为规范码集合。"""
+    raw = str((p or {}).get("languages") or "")
+    return {x for x in (_norm_lang(t) for t in raw.split(",")) if x}
 
 # 默认配置（与 config.example.yaml::workspace.auto_assign 对齐）
 DEFAULTS: Dict[str, Any] = {
@@ -27,7 +50,7 @@ DEFAULTS: Dict[str, Any] = {
     "strategy": "least_loaded",      # 目前仅 least_loaded（round_robin 预留）
     "max_claims_per_agent": 0,        # 0 = 不限；>0 时超过该负载的坐席不再被建议
     "online_only": True,              # True=仅 status=online；False=online/busy 皆可（仍排除 offline）
-    "match_language": False,          # 预留：按会话语言匹配坐席技能（当前无技能数据，不生效）
+    "match_language": False,          # 开启后按会话语言优先派给会该语言的坐席（坐席语言在「我的偏好」声明）
 }
 
 # 后台自动认领（守护版）子配置。本轮仅落地决策逻辑（plan_auto_claims），后台 worker
@@ -159,6 +182,15 @@ class AssignmentService:
             agents = [a for a in agents if load.get(str(a["agent_id"]), 0) < cap]
             if not agents:
                 return None
+        # match_language：把会话语言优先派给「会该语言」的坐席。命中则收窄候选到该组，
+        # 无人会该语言则回退全体（绝不因语言不匹配把会话晾着——有人接 > 没人接）。
+        matched_language = False
+        conv_lang = _norm_lang((conv or {}).get("language")) if self.cfg.get("match_language") else ""
+        if conv_lang and conv_lang != "unknown":
+            speakers = [a for a in agents if conv_lang in _agent_langs(a)]
+            if speakers:
+                agents = speakers
+                matched_language = True
         # least_loaded：负载升序，agent_id 升序做确定性 tiebreak
         agents.sort(key=lambda a: (load.get(str(a["agent_id"]), 0), str(a["agent_id"])))
         best = agents[0]
@@ -168,6 +200,7 @@ class AssignmentService:
             "agent_name": str(best.get("display_name") or "") or aid,
             "load": load.get(aid, 0),
             "strategy": self.cfg["strategy"],
+            "matched_language": matched_language,
         }
 
     def suggest_for_chats(
@@ -250,6 +283,7 @@ class AssignmentService:
                     "conversation_id": cid,
                     "agent_id": sug["agent_id"],
                     "agent_name": sug["agent_name"],
+                    "matched_language": sug.get("matched_language", False),
                 })
                 extra[sug["agent_id"]] = extra.get(sug["agent_id"], 0) + 1
         return out

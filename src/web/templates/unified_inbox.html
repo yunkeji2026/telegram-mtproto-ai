@@ -283,6 +283,15 @@
 .msg-row.out .msg-translation .tm-badge{color:#fff;background:rgba(255,255,255,.28);}
 .msg-translation .xl-loading{color:#6366f1;font-style:italic;}
 .msg-row.out .msg-translation .xl-loading{color:rgba(255,255,255,.85);}
+/* P0：翻译质量徽章（引擎不可用/降级/失败时提示「译文可能不准」） */
+.msg-translation .xl-warn-badge{display:inline-block;font-size:8px;font-weight:700;color:#9a3412;background:#ffedd5;border-radius:4px;padding:0 4px;margin-left:5px;vertical-align:middle;cursor:help;}
+.msg-row.out .msg-translation .xl-warn-badge{color:#fff;background:rgba(251,146,60,.55);}
+/* P0：出向消息「原文」副行——展示坐席输入的中文原文（实发为上方译文） */
+.msg-orig-sub{margin-top:5px;padding-top:5px;border-top:1px dashed rgba(255,255,255,.35);font-size:11px;line-height:1.45;color:rgba(255,255,255,.82);}
+.msg-orig-sub::before{content:"✎ ";font-size:9px;opacity:.8;}
+/* P0：发送前预览开关行 */
+.xl-preview-row{display:flex;align-items:center;gap:6px;margin-top:7px;padding-top:6px;border-top:1px solid var(--border-soft,#eee);font-size:11.5px;color:var(--text-sub);cursor:pointer;user-select:none;}
+.xl-preview-row input{margin:0;cursor:pointer;}
 /* 发送前译文预览 */
 .outxl-preview{margin-top:7px;border:1px solid #ddd6fe;background:#f5f3ff;border-radius:8px;padding:8px 10px;font-size:12px;color:#5b21b6;display:none;}
 .outxl-preview .oxl-hd{font-size:10px;font-weight:700;color:#7c3aed;margin-bottom:3px;display:flex;align-items:center;gap:4px;}
@@ -892,6 +901,12 @@
                     <button type="button" class="imgxl-btn" id="voicexl-btn" onclick="document.getElementById('voicexl-file').click()" title="上传客户语音，转写并翻译">🎙 语音翻译</button>
                     <input type="file" id="voicexl-file" accept="audio/*" style="display:none;" onchange="_onVoiceXlatePick(this)">
                   </div>
+                  <!-- P0：发送前预览开关。默认关＝一击直发（后端自动翻译成客户语言）；
+                       开＝两段式（先译出预览、再确认发送），照顾对译文质量谨慎的坐席。 -->
+                  <label class="xl-preview-row" title="开启后发送需两步：先看译文预览，再确认发送">
+                    <input type="checkbox" id="xlate-out-preview" onchange="_onXlatePreviewToggle()">
+                    <span>发送前预览译文（默认一击直发）</span>
+                  </label>
                 </div>
               </div>
               <span style="flex:1;"></span>
@@ -1508,6 +1523,7 @@ function selectChat(key){
   _clearUnread(c);
 
   _xlCache.clear();            // P55: 切换会话清空翻译缓存
+  _outOrigMap.clear();         // P0: 切换会话清空出向原文映射
   _loadXlateForConv(c);        // P55: 恢复该会话的双向翻译设置
   _loadVoiceForConv(c);        // 恢复该会话的语音音色选择
   loadModeState(c);
@@ -1519,7 +1535,37 @@ function selectChat(key){
   syncWsCopilot(c);  // 业务助手右栏（与桌面同源 shared/copilot 组件）
   _showSlashPanel(false);         // P26：切换会话时关闭 slash 面板
   _hideCopilot();                 // P42：切换会话关闭副驾
+  _loadSendCaps(c);               // 媒体/语音直发能力探测 → 事先置灰按钮
   startAdaptivePoll(); // 切换会话立即进入快轮询模式
+}
+
+/* 媒体/语音直发能力：仅 protocol 多开且在线账号支持；其它平台事先置灰按钮 + 说明，
+   把「点了才撞 501」改为「事先可知」。乐观默认支持，查得能力后再按需置灰，
+   避免协议账号被误禁；网络异常则保持乐观（点击仍有 501 兜底）。 */
+function _applySendCaps(caps){
+  const set=(id, ok, okTitle, noTitle)=>{
+    const b=document.getElementById(id);
+    if(!b) return;
+    b.disabled=!ok;
+    b.style.opacity=ok?'':'.45';
+    b.style.cursor=ok?'':'not-allowed';
+    b.title=ok?okTitle:noTitle;
+  };
+  const okM=!caps||caps.can_media!==false;
+  const okV=!caps||caps.can_voice!==false;
+  set('send-media-btn', okM, '发送图片/语音/文件（协议多开账号）',
+      '该平台账号暂不支持收件箱直发媒体（需协议多开且在线）');
+  set('voice-btn', okV, '把输入框文字转成语音并发送',
+      '该平台账号暂不支持收件箱直发语音（需协议多开且在线）');
+}
+async function _loadSendCaps(c){
+  _applySendCaps(null);  // 乐观：先按支持渲染
+  if(!c||!c.platform) return;
+  try{
+    const r=await fetch(`/api/unified-inbox/send-caps?platform=${encodeURIComponent(c.platform)}&account_id=${encodeURIComponent(c.account_id||'default')}`);
+    const d=await r.json().catch(()=>({}));
+    if(d&&d.ok) _applySendCaps(d);
+  }catch(_){ /* 网络异常：保持乐观，点击时仍有 501 兜底 */ }
 }
 
 /* 清除指定会话的未读计数（本地状态 + O(1) DOM 更新） */
@@ -2769,8 +2815,23 @@ function renderMessages(c, msgs, opts={}){
     const ts=m.ts?new Date(m.ts*1000).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}):'';
     const _xlText=(typeof m.translation==='string')?m.translation:(m.translated_text||(m.translation&&m.translation.translated_text)||'');
     const _xlAuto=(m._xlLang||(m.translation&&typeof m.translation==='object'&&m.translation.provider))?' auto':'';
-    // P0 护栏：仅当译文与原文实质不同才渲染译文行
-    const xlate=_meaningfulXlate(m.text,_xlText)?`<div class="msg-translation${_xlAuto}">${esc(_xlText)}${m._xlCached?'<span class="tm-badge">记忆</span>':''}</div>`:'';
+    // P0 护栏：仅当译文与原文实质不同才渲染译文行（入向译文行附质量徽章）
+    const _inMeta=m._xlMeta||((m.translation&&typeof m.translation==='object')?m.translation:null);
+    const xlate=_meaningfulXlate(m.text,_xlText)?`<div class="msg-translation${_xlAuto}">${esc(_xlText)}${m._xlCached?'<span class="tm-badge">记忆</span>':''}${_inMeta?_xlWarnBadge(_inMeta):''}</div>`:'';
+    // P0/P1：出向「原文」副行——一击直发后实发为译文（气泡主体），此处回显坐席输入的中文原文。
+    // 优先用服务端持久映射（m.agent_original，跨刷新/重启），回退会话级内存 _outOrigMap。
+    let _outSub='';
+    if(isOut && m.text){
+      let _oOrig='', _oMeta=null;
+      if(m.agent_original && _meaningfulXlate(m.text,m.agent_original)){
+        _oOrig=m.agent_original; _oMeta=m.agent_xlate||null;
+      } else {
+        const _ck=((typeof convKey==='function'&&selectedChat)?convKey(selectedChat):'')+'\u0001'+m.text;
+        const _o=_outOrigMap.get(_ck);
+        if(_o && _o.orig && _meaningfulXlate(m.text,_o.orig)){ _oOrig=_o.orig; _oMeta=_o.meta||null; }
+      }
+      if(_oOrig) _outSub=`<div class="msg-orig-sub">${esc(_oOrig)}${_oMeta?_xlWarnBadge(_oMeta):''}</div>`;
+    }
     const _mk=_mediaKind(m);
     const mediaBtn=(!isOut && _mk)?`<button class="tiny-btn" onclick="xlateMsgMedia('${esc(m.message_id||'')}')">${_mk==='image'?'识别翻译':'转写翻译'}</button>`:'';
     const tools=isOut?'':(`<div class="msg-tools">
@@ -2788,7 +2849,7 @@ function renderMessages(c, msgs, opts={}){
     const textBody=m.text?`<span>${esc(m.text)}</span>`:'';
     const bubbleContent=mediaHtml||textBody||'<span style="opacity:.6">[消息]</span>';
     html+=`<div class="msg-row ${isOut?'out':'in'}" id="msg-${esc(m.message_id||m._optimistic||'')}">
-      <div class="msg-bubble"${optClass}${failClass}>${bubbleContent}${optStatus}${xlate}</div>
+      <div class="msg-bubble"${optClass}${failClass}>${bubbleContent}${optStatus}${xlate}${_outSub}</div>
       <div class="msg-ts">${ts}${m._failed?'<span style="color:#ef4444;margin-left:4px;">✗ 发送失败</span>':''}</div>
       ${tools}
     </div>`;
@@ -2839,30 +2900,38 @@ async function sendMsg(){
   if(!text||!selectedChat) return;
   const btn=document.getElementById('send-btn');
 
-  // P55: 发送前翻译 —— 第一次点击译出预览，第二次点击确认发送
-  // 'auto'：解析为会话客户语言（list 持久化的 conversations.language），无效则回落不译。
-  let _outLang=_xlateOut;
-  if(_outLang==='auto'){
-    const _cl=String((selectedChat&&selectedChat.language)||(selectedChat&&selectedChat.last_message&&selectedChat.last_message.language)||'').trim();
-    _outLang=(_cl&&_cl!=='unknown')?_cl:'';
-  }
+  // P0：出向翻译。默认「一击直发」——原文交后端按 target_lang（含 'auto'）翻译后投递，
+  // 坐席无需两次点击；开启「发送前预览」则回到两段式（先译出预览、再确认发送）。
+  let _outLang=_xlateOut;          // ''/'auto'/具体语种（'auto'＝会话客户语言）
+  let _serverXlate=false;          // 是否让后端在 /send 内翻译
+  let _origText=text;              // 坐席输入的原文（用于出向副行回显）
+  let _previewMeta=null;           // 预览模式确认时携带的译文质量元数据
   if(_outLang){
-    if(_outXlPending && _outXlPending.orig===text){
-      text=_outXlPending.translated;   // 确认：发送译文
-      _resetOutPreview();
+    if(_outPreview){
+      // 预览模式：'auto' 交服务端解析（与一击直发同一 _resolve_conv_language），
+      // 前端不再本地推断客户语言，预览与实发走同一翻译真相源。
+      if(_outXlPending && _outXlPending.orig===text){
+        _origText=_outXlPending.orig;
+        _previewMeta=_outXlPending.meta||null;
+        text=_outXlPending.translated;   // 确认：发送译文（后端不再二次翻译）
+        _resetOutPreview();
+      } else {
+        btn.disabled=true; btn.textContent='翻译中…';
+        try{
+          const res=await _doTranslate(text,_outLang);
+          btn.disabled=false;
+          if(res){
+            _outXlPending={orig:text, translated:res.text, meta:res};
+            document.getElementById('outxl-text').innerHTML=esc(res.text)+_xlWarnBadge(res);
+            document.getElementById('outxl-preview').style.display='block';
+            btn.textContent='确认发送';
+            return; // 等待第二次点击
+          } else { showHint('未识别客户语言或翻译失败，将按原文发送'); }
+        }catch(_){ btn.disabled=false; showHint('翻译失败，将按原文发送'); }
+      }
     } else {
-      btn.disabled=true; btn.textContent='翻译中…';
-      try{
-        const res=await _doTranslate(text,_outLang);
-        btn.disabled=false;
-        if(res){
-          _outXlPending={orig:text, translated:res.text};
-          document.getElementById('outxl-text').textContent=res.text;
-          document.getElementById('outxl-preview').style.display='block';
-          btn.textContent='确认发送';
-          return; // 等待第二次点击
-        } else { showHint('翻译失败，将按原文发送'); }
-      }catch(_){ btn.disabled=false; showHint('翻译失败，将按原文发送'); }
+      // 一击直发：保持原文，交后端翻译（单次往返，去掉客户端预译双击）
+      _serverXlate=true;
     }
   }
 
@@ -2890,6 +2959,7 @@ async function sendMsg(){
       chat_key: selectedChat.chat_key,
       text: text,
     };
+    if(_serverXlate) body.target_lang=_outLang;   // P0：一击直发让后端翻译（含 'auto'）
     if(_copilotApplyMeta && _copilotApplyMeta.text){
       var m=_copilotApplyMeta;
       var match='edit';
@@ -2904,6 +2974,16 @@ async function sendMsg(){
     const d=await r.json();
     if(d.ok){
       _copilotApplyMeta=null;
+      // P0：记录出向「实发译文 → 原文/质量」，供 thread 重载后回显中文原文副行。
+      try{
+        const _sent=String(d.sent_text||text);
+        const _orig=String(d.original_text||_origText);
+        const _meta=d.translation||_previewMeta||null;
+        if(_sent && _orig && _meaningfulXlate(_sent,_orig)){
+          _outOrigMap.set(convKey(selectedChat)+'\u0001'+_sent, {orig:_orig, meta:_meta});
+        }
+        if(d.translation && d.translation.provider) _setXlateEngine(d.translation.provider);
+      }catch(_){}
       // 成功：移除乐观消息（下次 loadThread 会带真实消息）
       threadMsgs=threadMsgs.filter(m=>m.message_id!==optId);
       await loadThread(selectedChat,true);
@@ -3703,7 +3783,11 @@ async function sendVoiceReply(){
 /* ===== P55: 实时双向翻译 ===== */
 const _XL_KEY='ws_xlate_prefs_v1';        // { [convKey]: {in:'zh', out:'en'} }
 let _xlateIn='', _xlateOut='';            // 当前会话设置
+let _outPreview=false;                      // P0：发送前预览开关（默认关＝一击直发）
 const _xlCache=new Map();                  // text+lang -> 译文（会话内去重，省 token）
+// P0：出向「译文 → 原文/质量」映射，键 convKey+'\u0001'+译文。
+// 用于一击直发后在 thread 重载时仍能把坐席输入的中文原文作为副行展示。切换会话清空。
+const _outOrigMap=new Map();
 
 function _xlatePrefs(){
   try{ return JSON.parse(localStorage.getItem(_XL_KEY)||'{}'); }catch(_){ return {}; }
@@ -3714,9 +3798,11 @@ function _loadXlateForConv(c){
   // P1：会话无独立设置时继承全局默认（一键开启后对所有新会话生效，避免「每个会话都要重开」）
   const p=all[key]||all.__default__||{};
   _xlateIn=p.in||''; _xlateOut=p.out||'';
+  _outPreview=!!(p.preview!==undefined ? p.preview : (all.__default__||{}).preview);
   const si=document.getElementById('xlate-in'), so=document.getElementById('xlate-out');
   if(si){ si.value=_xlateIn; si.classList.toggle('on',!!_xlateIn); }
   if(so){ so.value=_xlateOut; so.classList.toggle('on',!!_xlateOut); }
+  const pv=document.getElementById('xlate-out-preview'); if(pv) pv.checked=_outPreview;
   _resetOutPreview();
   _updateEngineHint();
   _updateXlStatus();
@@ -3726,18 +3812,28 @@ function _onXlateChange(){
   _xlateIn=si?si.value:''; _xlateOut=so?so.value:'';
   if(si) si.classList.toggle('on',!!_xlateIn);
   if(so) so.classList.toggle('on',!!_xlateOut);
-  {
-    const prefs=_xlatePrefs();
-    if(selectedChat) prefs[convKey(selectedChat)]={in:_xlateIn,out:_xlateOut};
-    // 同步全局默认：用户的最新选择成为新会话的默认（开了到处开、关了到处关）
-    prefs.__default__={in:_xlateIn,out:_xlateOut};
-    try{ localStorage.setItem(_XL_KEY,JSON.stringify(prefs)); }catch(_){}
-  }
+  _persistXlatePrefs();
   _resetOutPreview();
   _updateEngineHint();
   _updateXlStatus();
   // 立即对当前线程入站消息补译
   if(_xlateIn && threadMsgs.length) _autoTranslateInbound();
+}
+/* P0：统一持久化翻译偏好（含发送前预览开关），会话级 + 全局默认。 */
+function _persistXlatePrefs(){
+  const prefs=_xlatePrefs();
+  const entry={in:_xlateIn,out:_xlateOut,preview:_outPreview};
+  if(selectedChat) prefs[convKey(selectedChat)]=entry;
+  // 同步全局默认：用户的最新选择成为新会话的默认（开了到处开、关了到处关）
+  prefs.__default__=entry;
+  try{ localStorage.setItem(_XL_KEY,JSON.stringify(prefs)); }catch(_){}
+}
+/* P0：发送前预览开关切换。关闭时清掉任何待确认预览，回到一击直发。 */
+function _onXlatePreviewToggle(){
+  const pv=document.getElementById('xlate-out-preview');
+  _outPreview=!!(pv && pv.checked);
+  if(!_outPreview) _resetOutPreview();
+  _persistXlatePrefs();
 }
 /* 一键开启：对方消息自动翻成中文（最常用场景） */
 function _xlateQuickOn(){
@@ -3828,16 +3924,34 @@ function _setPendingBadge(n){
 async function _doTranslate(text, lang){
   if(!text||!lang) return null;
   const ck=lang+'\u0001'+text;
-  if(_xlCache.has(ck)) return {text:_xlCache.get(ck), cached:true};
+  if(_xlCache.has(ck)) return {text:_xlCache.get(ck), cached:true, provider:'cache', ok:true};
+  // P1-2：'auto' 由服务端统一解析客户语言（与 /send 同一逻辑），随 body 传会话定位。
+  const body={text,target_lang:lang};
+  if(lang==='auto' && selectedChat){
+    body.platform=selectedChat.platform;
+    body.account_id=selectedChat.account_id||'default';
+    body.chat_key=selectedChat.chat_key;
+  }
   const r=await fetch('/api/unified-inbox/translate',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({text,target_lang:lang})});
+    body:JSON.stringify(body)});
   const d=await r.json();
+  // 'auto' 未能解析客户语言（resolved_target 空）→ 不翻译，调用方回落按原文发送
+  if(d && d.resolved_target==='') return null;
   const t=d.translation||{};
   const out=t.translated_text||t.translated||t.text||'';
   const cached=!!t.cached;
   if(t.provider) _setXlateEngine(t.provider);
-  if(out){ _xlCache.set(ck,out); return {text:out, cached}; }
+  if(out){ _xlCache.set(ck,out); return {text:out, cached, provider:t.provider||'', ok:t.ok!==false, error:t.error||''}; }
   return null;
+}
+/* P0：根据翻译结果元数据判断是否降级（引擎不可用/失败），返回徽章 HTML（否则空串）。 */
+function _xlWarnBadge(meta){
+  if(!meta) return '';
+  const prov=String(meta.provider||'').toLowerCase();
+  const degraded=(meta.ok===false)||(meta.error&&meta.error!=='')||prov==='none'||prov==='identity';
+  if(!degraded) return '';
+  const why=prov==='none'?'翻译引擎未就绪':(prov==='identity'?'未翻译（同语种）':(meta.error||'翻译降级'));
+  return `<span class="xl-warn-badge" title="${esc('译文可能不准：'+why)}">⚠ 待核</span>`;
 }
 const _XL_ENGINE_LABEL={ai:'AI引擎',deepl:'DeepL',google:'Google',identity:'原文',none:'未启用'};
 function _setXlateEngine(provider){
@@ -3894,7 +4008,7 @@ async function xlateMsg(msgId,text){
   try{
     const res=await _doTranslate(text,lang);
     if(res){
-      if(_meaningfulXlate(text,res.text)) tx.innerHTML=esc(res.text)+(res.cached?'<span class="tm-badge">记忆</span>':'');
+      if(_meaningfulXlate(text,res.text)) tx.innerHTML=esc(res.text)+(res.cached?'<span class="tm-badge">记忆</span>':'')+_xlWarnBadge(res);
       else tx.innerHTML='<span style="opacity:.6;font-size:11px;">≈ 与原文一致，无需翻译</span>';
     }
     else tx.textContent='翻译不可用';
@@ -3961,7 +4075,7 @@ async function _autoTranslateInbound(){
     try{
       const res=await _doTranslate(m.text,lang);
       if(res){
-        m._xlLang=lang; m._xlCached=res.cached;
+        m._xlLang=lang; m._xlCached=res.cached; m._xlMeta=res;
         // P0 护栏：identity / 同语种回原文时不写译文、不渲染重复行
         if(!_meaningfulXlate(m.text,res.text)){ m.translation=''; continue; }
         m.translation=res.text;
@@ -3970,7 +4084,7 @@ async function _autoTranslateInbound(){
           const bub=el.querySelector('.msg-bubble');
           let tx=bub.querySelector('.msg-translation');
           if(!tx){tx=document.createElement('div');tx.className='msg-translation auto';bub.appendChild(tx);}
-          tx.innerHTML=esc(res.text)+(res.cached?'<span class="tm-badge">记忆</span>':'');
+          tx.innerHTML=esc(res.text)+(res.cached?'<span class="tm-badge">记忆</span>':'')+_xlWarnBadge(res);
         }
       }
     }catch(_){}
@@ -4770,6 +4884,7 @@ Object.assign(window, {
   toggleVoiceEnroll, submitVoiceEnroll, unbindVoice, submitVoiceRebind,
   loadVoiceReconcile, purgeOrphanVoices, purgeVoice, toggleQrPanel,
   toggleVoiceCfg, toggleXlatePop, _xlateQuickOn, _xlateOff, _openSlash, _focusRightVoice,
+  _onXlateChange, _onXlatePreviewToggle,
   useTemplate, useKbText, useDraftText, quoteMsg,
   // 知识库 / 模板
   dismissKbSuggest, _useKbEntry,

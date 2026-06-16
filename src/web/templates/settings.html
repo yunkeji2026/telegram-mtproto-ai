@@ -122,6 +122,153 @@ textarea.f-inp.he-json-area{font-family:ui-monospace,SFMono-Regular,Consolas,mon
 
 <div class="settings-grid">
 
+  <!-- ══ C1-1 品牌 / 白标 ═══════════════════════════════════════ -->
+  <div class="acc">
+    <div class="acc-hd" onclick="toggleAcc(this)">
+      <div class="acc-hd-icon" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 7.4H22l-6 4.6 2.3 7.4-6.3-4.6L5.7 21l2.3-7.4-6-4.6h7.6z"/></svg>
+      </div>
+      <div>
+        <div class="acc-title">品牌 / 白标 <span id="br-plan-tag" style="font-size:.68rem;padding:.12rem .45rem;border-radius:5px;background:rgba(139,92,246,.14);color:#7c3aed;font-weight:600;vertical-align:middle;margin-left:.4rem"></span></div>
+        <div class="acc-sub">自定义系统名称 / 主题色 / Logo / 登录文案；去除厂商署名为旗舰版功能</div>
+      </div>
+      <svg class="acc-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+    <div class="acc-body" id="body-brand">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1rem;">
+        <div>
+          <label class="f-lbl">系统名称</label>
+          <input class="f-inp" type="text" id="br-site_name" placeholder="如：星辰客户转化系统">
+        </div>
+        <div>
+          <label class="f-lbl">简称（顶栏/气泡标题）</label>
+          <input class="f-inp" type="text" id="br-site_name_short" placeholder="如：星辰科技">
+        </div>
+        <div>
+          <label class="f-lbl">主题色</label>
+          <input class="f-inp" type="text" id="br-primary_color" placeholder="#2563eb">
+        </div>
+        <div>
+          <label class="f-lbl">Logo 链接（URL）</label>
+          <input class="f-inp" type="text" id="br-logo_url" placeholder="https://…/logo.png">
+        </div>
+        <div style="grid-column:1/-1;">
+          <label class="f-lbl">登录页副标题</label>
+          <input class="f-inp" type="text" id="br-login_subtitle" placeholder="如：让每一次对话都成交">
+        </div>
+      </div>
+      <label style="display:flex;align-items:center;gap:.5rem;margin-top:1rem;font-size:.85rem;" id="br-hide-wrap">
+        <input type="checkbox" id="br-hide_powered_by">
+        <span>去除「Powered by」厂商署名</span>
+        <span id="br-hide-lock" style="font-size:.72rem;color:#b45309;display:none;">（旗舰版功能，当前套餐不可用）</span>
+      </label>
+      <div style="margin-top:1rem;display:flex;align-items:center;gap:.8rem;">
+        <button class="btn-primary" onclick="brSave()" style="padding:.5rem 1.2rem;border:0;border-radius:8px;background:var(--p);color:#fff;font-weight:600;cursor:pointer;">保存品牌</button>
+        <span class="save-result" id="br-res" style="font-size:.82rem;"></span>
+      </div>
+      <p style="font-size:.76rem;color:var(--t3);margin-top:.8rem;line-height:1.6;">
+        保存即写入 <code>config.local.yaml</code> 并即时生效（部分页面需刷新）。品牌文件不入库，安全隔离。
+      </p>
+    </div>
+  </div>
+  <script>
+  (function(){
+    function g(id){return document.getElementById(id);}
+    function load(){
+      fetch('/api/admin/branding').then(function(r){return r.json();}).then(function(d){
+        if(!d||!d.ok) return;
+        g('br-site_name').value=d.site_name||'';
+        g('br-site_name_short').value=d.site_name_short||'';
+        g('br-primary_color').value=d.primary_color||'';
+        g('br-logo_url').value=d.logo_url||'';
+        g('br-login_subtitle').value=d.login_subtitle||'';
+        g('br-hide_powered_by').checked=!!d.hide_powered_by;
+        var tag=g('br-plan-tag'); if(tag) tag.textContent=(d.white_label?'白标可用':'基础品牌');
+        if(!d.white_label){
+          g('br-hide_powered_by').disabled=true;
+          g('br-hide-lock').style.display='inline';
+        }
+      }).catch(function(){});
+    }
+    window.brSave=function(){
+      var res=g('br-res'); res.textContent='保存中…'; res.style.color='var(--t3)';
+      var values={
+        site_name:g('br-site_name').value, site_name_short:g('br-site_name_short').value,
+        primary_color:g('br-primary_color').value, logo_url:g('br-logo_url').value,
+        login_subtitle:g('br-login_subtitle').value,
+        hide_powered_by:g('br-hide_powered_by').checked
+      };
+      fetch('/api/admin/branding',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({values:values})})
+        .then(function(r){return r.json();}).then(function(d){
+          if(d&&d.ok){ res.textContent='✓ 已保存（刷新后全面生效）'; res.style.color='#16a34a'; }
+          else { res.textContent='保存失败：'+((d&&d.detail)||'未知错误'); res.style.color='#dc2626'; }
+        }).catch(function(){ res.textContent='保存失败（网络错误）'; res.style.color='#dc2626'; });
+    };
+    load();
+  })();
+  </script>
+
+  <!-- ══ C1-2 试用 / 演示数据 ═══════════════════════════════════ -->
+  <div class="acc">
+    <div class="acc-hd" onclick="toggleAcc(this)">
+      <div class="acc-hd-icon" style="background:linear-gradient(135deg,#06b6d4,#0891b2)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      </div>
+      <div>
+        <div class="acc-title">试用 / 演示数据 <span id="demo-tag" style="font-size:.68rem;padding:.12rem .45rem;border-radius:5px;background:rgba(6,182,212,.14);color:#0891b2;font-weight:600;vertical-align:middle;margin-left:.4rem"></span></div>
+        <div class="acc-sub">一键铺示例会话/草稿/坐席数据，让 ROI/质量/用量看板当场有效果；可一键清空</div>
+      </div>
+      <svg class="acc-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+    <div class="acc-body" id="body-demo">
+      <div style="padding:.8rem 1rem;background:rgba(124,58,237,.06);border:1px solid rgba(124,58,237,.2);border-radius:10px;font-size:.82rem;color:var(--t2);line-height:1.6;margin-bottom:1rem;">
+        示例数据全部写在 <code>demo:</code> 命名空间，<strong>一键可整体清空，绝不污染真实数据</strong>。适合销售演示 / 上线前体验看板效果。
+      </div>
+      <div id="demo-status" style="font-size:.85rem;color:var(--t2);margin-bottom:1rem;">加载中…</div>
+      <div style="display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;">
+        <button onclick="demoSeed()" id="demo-seed-btn" style="padding:.5rem 1.2rem;border:0;border-radius:8px;background:#7c3aed;color:#fff;font-weight:600;cursor:pointer;">铺示例数据</button>
+        <button onclick="demoClear()" id="demo-clear-btn" style="padding:.5rem 1.2rem;border:1px solid #d1d5db;border-radius:8px;background:#fff;color:#374151;font-weight:600;cursor:pointer;">清空演示数据</button>
+        <span class="save-result" id="demo-res" style="font-size:.82rem;"></span>
+      </div>
+    </div>
+  </div>
+  <script>
+  (function(){
+    function g(id){return document.getElementById(id);}
+    function fmt(c){c=c||{};return '会话 '+(c.conversations||0)+' · 消息 '+(c.messages||0)+' · 草稿处置 '+(c.draft_audits||0);}
+    function refresh(){
+      fetch('/api/admin/demo').then(function(r){return r.json();}).then(function(d){
+        if(!d||!d.ok){ g('demo-status').textContent='状态读取失败'; return; }
+        var tag=g('demo-tag');
+        if(d.present){ g('demo-status').textContent='当前已有演示数据：'+fmt(d.counts); if(tag) tag.textContent='演示中'; }
+        else { g('demo-status').textContent='当前无演示数据。'; if(tag) tag.textContent=''; }
+      }).catch(function(){ g('demo-status').textContent='状态读取失败'; });
+    }
+    window.demoSeed=function(){
+      var res=g('demo-res'); res.textContent='铺设中…'; res.style.color='var(--t3)';
+      g('demo-seed-btn').disabled=true;
+      fetch('/api/admin/demo/seed',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
+        .then(function(r){return r.json();}).then(function(d){
+          g('demo-seed-btn').disabled=false;
+          if(d&&d.ok){ res.textContent='✓ 已铺设（会话 '+d.conversations+' · 消息 '+d.messages+' · 处置 '+d.draft_audits+'）'; res.style.color='#16a34a'; refresh(); }
+          else { res.textContent='铺设失败：'+((d&&d.detail)||'未知'); res.style.color='#dc2626'; }
+        }).catch(function(){ g('demo-seed-btn').disabled=false; res.textContent='铺设失败（网络错误）'; res.style.color='#dc2626'; });
+    };
+    window.demoClear=function(){
+      if(!confirm('确认清空所有演示数据？（仅删 demo: 命名空间，不影响真实数据）')) return;
+      var res=g('demo-res'); res.textContent='清空中…'; res.style.color='var(--t3)';
+      g('demo-clear-btn').disabled=true;
+      fetch('/api/admin/demo/clear',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
+        .then(function(r){return r.json();}).then(function(d){
+          g('demo-clear-btn').disabled=false;
+          if(d&&d.ok){ res.textContent='✓ 已清空'; res.style.color='#16a34a'; refresh(); }
+          else { res.textContent='清空失败：'+((d&&d.detail)||'未知'); res.style.color='#dc2626'; }
+        }).catch(function(){ g('demo-clear-btn').disabled=false; res.textContent='清空失败（网络错误）'; res.style.color='#dc2626'; });
+    };
+    refresh();
+  })();
+  </script>
+
   <!-- ══ AI 提示词 & 行为配置 ═══════════════════════════════════ -->
   <div class="acc">
     <div class="acc-hd open" onclick="toggleAcc(this)">

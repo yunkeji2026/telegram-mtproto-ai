@@ -1037,6 +1037,12 @@ rpa:
 workspace:
   claim_ttl_sec: 900          # 会话租约 TTL（秒）；无心跳则自动释放
   presence_stale_sec: 120     # 超过此秒数未心跳的坐席视为离线
+  # P0-3 老板视角 ROI 看板（/workspace/roi，主管专属）：
+  #   sec_per_reply: 每条 AI 自动应答估算省下的人工处理时长（秒），用于「节省人力」估算，默认 180
+  #   cost_per_hour: 坐席每人时成本（元）；>0 时看板出「节省金额」卡，0=隐藏（默认 0）
+  roi:
+    sec_per_reply: 180
+    cost_per_hour: 0
   # 入站自动翻译：坐席打开会话时，将外语客户消息译为中文展示（默认关，控 API 成本）
   auto_translate_inbound:
     enabled: false
@@ -1051,7 +1057,8 @@ workspace:
     strategy: least_loaded    # least_loaded=挑当前认领数最少的在线坐席（round_robin 预留）
     online_only: true         # true=仅 status=online 坐席；false=online/busy 皆可（仍排除 offline）
     max_claims_per_agent: 0   # 0=不限；>0 时负载已达上限的坐席不再被建议
-    match_language: false     # 预留：按会话语言匹配坐席技能（当前无技能数据源，暂不生效）
+    match_language: false     # true=把会话语言优先派给「会该语言」的坐席（坐席在工作台「我的偏好」
+                              # 声明语言，存 agent_prefs.languages）；无人会该语言则回退全体
     # 后台自动认领（守护版，默认关）：本轮仅落地决策逻辑 plan_auto_claims，
     # 后台 worker 接线见下一阶段；开启决策不会自动发生 claim，需 worker 执行。
     auto_claim:
@@ -1186,3 +1193,36 @@ mobile_bridge:
   mobile_api_base: "http://127.0.0.1:18080"
   # 轮询间隔（秒），建议 10~60
   poll_interval_sec: 15
+
+# ── C0-1 离线授权（License）─────────────────────────────────────────
+# 私有化部署的商业化授权。厂商用 Ed25519 私钥签发授权码，产品内置公钥离线验签。
+# 客户把授权码放到 config/license.key（或设环境变量 LICENSE_KEY）即可。
+# 本阶段仅「只读状态展示 + 启动日志」，不强制功能（gating 后续接入）。
+#   - 签发工具：python scripts/license_tool.py issue ...
+#   - 状态查询：GET /api/admin/license（管理后台首页「授权状态卡」）
+licensing:
+  enforce: false                      # 预留：true 时过期降级只读（当前未生效）
+  # key_path: config/license.key      # 授权码路径（默认 config/license.key）
+
+# ── 计费价目表（C2-2）──────────────────────────────────────────
+# 对账单（GET /api/workspace/billing）据此把用量换算成应收金额。
+# 不配则用内置默认；included_*=0 表示「不限/不计超额」。
+pricing:
+  currency: USD
+  plans:
+    community: { monthly: 0,   included_messages: 0,     included_seats: 0 }
+    basic:     { monthly: 49,  included_messages: 5000,  included_seats: 2 }
+    pro:       { monthly: 149, included_messages: 20000, included_seats: 5 }
+    flagship:  { monthly: 499, included_messages: 0,     included_seats: 0 }
+  overage:
+    per_message: 0.0                  # 超出含额每条消息单价
+    per_seat: 0.0                     # 超出含额每席位单价
+
+# ── 健康看门狗（D3）──────────────────────────────────────────────
+# 周期巡检运行时健康（DB/AI/授权/渠道/worker/队列），异常时经 EventBus →
+# WebhookNotifier 主动推送。需在「告警渠道」里给某条 webhook 订阅 health_alert 事件。
+health_watchdog:
+  enabled: true
+  interval_sec: 300                   # 巡检周期（秒）
+  queue_threshold: 200                # 草稿队列积压告警阈值
+  alert_on_warn: false                # true=黄灯(warn)也告警；默认仅红灯(fail)告警

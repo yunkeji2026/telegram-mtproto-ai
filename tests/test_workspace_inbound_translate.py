@@ -116,6 +116,47 @@ async def test_store_overlay_before_api_call(tmp_path):
     store2.close()
 
 
+def test_inbound_xlate_daily_roundtrip(tmp_path):
+    """P3：入站翻译漏斗按日 record/get 往返 + 全 0 不写 + by_source_lang 合并。"""
+    store = InboxStore(tmp_path / "inbox.db")
+    store.record_inbound_xlate(translated=2, failed=1, by_lang={"en": 2})
+    store.record_inbound_xlate(translated=1, by_lang={"ja": 1})
+    store.record_inbound_xlate(translated=0, failed=0)  # 全 0 不写
+    s = store.get_inbound_xlate_stats(0)
+    assert s["translated"] == 3
+    assert s["failed"] == 1
+    assert s["by_source_lang"] == {"en": 2, "ja": 1}
+    assert len(s["trend"]) == 1
+    assert s["trend"][0]["translated"] == 3
+    store.close()
+
+
+@pytest.mark.asyncio
+async def test_enrich_records_inbound_funnel(tmp_path):
+    """P3：开启入站翻译且挂 store 时，新译出按客户来源语言落入站漏斗。"""
+    store = InboxStore(tmp_path / "inbox.db")
+    app = FastAPI()
+    app.state.inbox_store = store
+    app.state.ai_client = MagicMock()
+    svc = TranslationService(ai_client=app.state.ai_client)
+
+    async def _fake_chat(prompt, ctx=None):
+        return "你好"
+
+    app.state.ai_client.chat = AsyncMock(side_effect=_fake_chat)
+    req = Request({"type": "http", "method": "GET", "path": "/", "headers": [], "app": app})
+
+    msgs = [message_obj(text="hello there", direction="in", message_id="m1")]
+    out, stats = await enrich_inbound_translations(
+        req, msgs, conversation_id="line:a:1", config_manager=_Cfg(), translation_svc=svc,
+    )
+    assert stats["translated"] == 1
+    s = store.get_inbound_xlate_stats(0)
+    assert s["translated"] == 1
+    assert s["by_source_lang"].get("en", 0) == 1
+    store.close()
+
+
 def test_thread_endpoint_returns_auto_translate_meta(tmp_path):
     store = InboxStore(tmp_path / "inbox.db")
 

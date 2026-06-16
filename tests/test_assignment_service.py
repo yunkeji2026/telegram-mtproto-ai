@@ -156,6 +156,72 @@ def test_for_chats_no_online_agents_returns_empty():
     assert out == {}
 
 
+# ── match_language（按会话语言派单）────────────────────────
+
+def _pl(agent_id, langs, status="online", name=""):
+    return {"agent_id": agent_id, "status": status,
+            "display_name": name or agent_id, "languages": langs}
+
+
+def test_match_language_off_ignores_languages():
+    """关闭时不看语言：仍按 least_loaded（a2 负载更低）。"""
+    svc = AssignmentService({"enabled": True, "match_language": False})
+    presence = [_pl("a1", "ja"), _pl("a2", "")]
+    claims = [_claim("c1", "a1")]  # a1 负载 1，a2 负载 0
+    sug = svc.suggest(presence=presence, claims=claims, conv={"language": "ja"})
+    assert sug["agent_id"] == "a2"
+    assert sug["matched_language"] is False
+
+
+def test_match_language_prefers_speaker_over_lower_load():
+    """开启时语言命中优先：即便 a1 负载更高，会日语的 a1 仍被选中。"""
+    svc = AssignmentService({"enabled": True, "match_language": True})
+    presence = [_pl("a1", "en,ja"), _pl("a2", "zh")]
+    claims = [_claim("c1", "a1")]  # a1 负载 1，a2 负载 0，但只有 a1 会 ja
+    sug = svc.suggest(presence=presence, claims=claims, conv={"language": "ja"})
+    assert sug["agent_id"] == "a1"
+    assert sug["matched_language"] is True
+
+
+def test_match_language_least_loaded_within_speakers():
+    """多个会该语言的坐席之间仍按 least_loaded。"""
+    svc = AssignmentService({"enabled": True, "match_language": True})
+    presence = [_pl("a1", "ja"), _pl("a2", "ja")]
+    claims = [_claim("c1", "a1")]  # 两人都会 ja，a2 负载更低
+    sug = svc.suggest(presence=presence, claims=claims, conv={"language": "ja"})
+    assert sug["agent_id"] == "a2"
+    assert sug["matched_language"] is True
+
+
+def test_match_language_falls_back_when_no_speaker():
+    """无人会该语言 → 回退全体（不晾着会话）。"""
+    svc = AssignmentService({"enabled": True, "match_language": True})
+    presence = [_pl("a1", "zh"), _pl("a2", "en")]
+    sug = svc.suggest(presence=presence, claims=[], conv={"language": "ja"})
+    assert sug["agent_id"] in {"a1", "a2"}
+    assert sug["matched_language"] is False
+
+
+def test_match_language_unknown_conv_lang_no_filter():
+    """会话语言空/unknown → 不按语言过滤，退化为 least_loaded。"""
+    svc = AssignmentService({"enabled": True, "match_language": True})
+    presence = [_pl("a1", "ja"), _pl("a2", "")]
+    claims = [_claim("c1", "a1")]
+    sug = svc.suggest(presence=presence, claims=claims, conv={"language": "unknown"})
+    assert sug["agent_id"] == "a2"
+    assert sug["matched_language"] is False
+
+
+def test_match_language_normalizes_region_codes():
+    """zh-CN 会话语言归一为 zh，命中声明 zh 的坐席。"""
+    svc = AssignmentService({"enabled": True, "match_language": True})
+    presence = [_pl("a1", "zh"), _pl("a2", "en")]
+    claims = [_claim("c1", "a1")]  # a1 负载更高，但会 zh
+    sug = svc.suggest(presence=presence, claims=claims, conv={"language": "zh-CN"})
+    assert sug["agent_id"] == "a1"
+    assert sug["matched_language"] is True
+
+
 def test_from_config_helper():
     svc = AssignmentService.from_config({"workspace": {"auto_assign": {"enabled": True}}})
     assert svc.enabled is True

@@ -195,6 +195,16 @@ class AutosendWorker:
                         lambda: store.cleanup_old_drafts(max_age_days=self._cleanup_age_days),
                     )
                     self.total_cleaned += n
+                    # P3：顺带清理超龄出向译文旁路记录（best-effort，独立 try）
+                    if hasattr(store, "cleanup_outbound_translations"):
+                        try:
+                            await asyncio.get_event_loop().run_in_executor(
+                                None, store.cleanup_outbound_translations,
+                            )
+                        except Exception:
+                            logger.debug(
+                                "[AutosendWorker] cleanup_outbound_translations 失败",
+                                exc_info=True)
                     self._last_cleanup_ts = time.time()
             except Exception:
                 logger.debug("[AutosendWorker] cleanup_old_drafts 失败", exc_info=True)

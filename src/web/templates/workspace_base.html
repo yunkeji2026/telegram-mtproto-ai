@@ -97,6 +97,12 @@
         <a href="/workspace/tasks">待办</a>
         <a href="/workspace/drafts" id="ws-drafts-link" title="L3/L4 待审草稿">草稿审批</a>
         <a href="/workspace/templates" title="回复模板库">模板库</a>
+        <a href="/workspace/golive" id="ws-golive-link" style="display:none;" title="上线自检清单（主管）">上线自检</a>
+        <a href="/workspace/setup" id="ws-setup-link" style="display:none;" title="渠道接入向导（主管）">接入向导</a>
+        <a href="/workspace/kb-start" id="ws-kbstart-link" style="display:none;" title="知识库冷启动（主管）">知识库起步</a>
+        <a href="/workspace/roi" id="ws-roi-link" style="display:none;" title="经营 ROI 看板（老板/主管）">ROI 看板</a>
+        <a href="/workspace/ai-quality" id="ws-aiq-link" style="display:none;" title="AI 回复质量看板（主管）">AI 质量</a>
+        <a href="/workspace/usage" id="ws-usage-link" style="display:none;" title="用量计量看板（老板/主管）">用量</a>
         <a href="/workspace/agent-perf" id="ws-perf-link" style="display:none;" title="坐席绩效看板（主管）">绩效</a>
         <a href="/workspace/queue" id="ws-queue-link" style="display:none;" title="实时运营队列看板（主管）">队列</a>
         <a href="/workspace/workflows" id="ws-workflow-link" style="display:none;" title="工作流 / 路由规则配置">工作流</a>
@@ -323,6 +329,7 @@ document.addEventListener('click',function(e){ var m=document.getElementById('ws
         +'<label style="display:flex;justify-content:space-between;align-items:center;margin:8px 0;">免打扰 起<input id="wp-dnds" type="time" style="padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;"></label>'
         +'<label style="display:flex;justify-content:space-between;align-items:center;margin:8px 0;">免打扰 止<input id="wp-dnde" type="time" style="padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;"></label>'
         +'<label style="display:flex;justify-content:space-between;align-items:center;margin:8px 0;">完全静音告警<input id="wp-mute" type="checkbox"></label>'
+        +'<label style="display:flex;flex-direction:column;gap:4px;margin:8px 0;"><span>我会的语言（自动派单按语言匹配）</span><input id="wp-langs" type="text" placeholder="如 en,ja,zh（逗号分隔，留空=不限）" style="padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;"></label>'
         +'<div id="wp-hint" style="font-size:12px;color:#94a3b8;margin:6px 0 12px;"></div>'
         +'<div style="display:flex;gap:8px;justify-content:flex-end;"><button id="wp-cancel" style="padding:6px 14px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;">取消</button><button id="wp-save" style="padding:6px 14px;border:0;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer;">保存</button></div>'
         +'</div>';
@@ -340,16 +347,19 @@ document.addEventListener('click',function(e){ var m=document.getElementById('ws
       document.getElementById('wp-dnds').value = _hm(p.dnd_start);
       document.getElementById('wp-dnde').value = _hm(p.dnd_end);
       document.getElementById('wp-mute').checked = !!p.muted;
+      var _lg=document.getElementById('wp-langs'); if(_lg) _lg.value = p.languages||'';
       document.getElementById('wp-hint').textContent = '全局默认：警告 '+Math.round(d.global_warn_sec/60)+' 分 / 严重 '+Math.round(d.global_crit_sec/60)+' 分';
     }).catch(function(){});
   }
   function savePrefs(){
     var warn=parseInt(document.getElementById('wp-warn').value,10);
     var crit=parseInt(document.getElementById('wp-crit').value,10);
+    var _lgEl=document.getElementById('wp-langs');
     var body={ warn_sec: isNaN(warn)?0:warn*60, crit_sec: isNaN(crit)?0:crit*60,
       muted: document.getElementById('wp-mute').checked?1:0,
       dnd_start: _toMin(document.getElementById('wp-dnds').value),
-      dnd_end: _toMin(document.getElementById('wp-dnde').value) };
+      dnd_end: _toMin(document.getElementById('wp-dnde').value),
+      languages: _lgEl? _lgEl.value : '' };
     fetch('/api/workspace/prefs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
       .then(function(r){return r.json();}).then(function(d){
         if(d&&d.ok){ document.getElementById('ws-prefs-modal').style.display='none'; CRMW.toast('告警设置已保存'); refreshSla(); }
@@ -366,8 +376,44 @@ document.addEventListener('click',function(e){ var m=document.getElementById('ws
   var MY_AGENT_ID='', MY_IS_SUP=false;
   fetch('/api/workspace/me').then(function(r){return r.json();}).then(function(m){
     if(m&&m.ok){ MY_AGENT_ID=String(m.agent_id||''); MY_IS_SUP=!!(m.is_supervisor); }
+    // C1-2：演示模式横幅（存在 demo 数据时）
+    if(m && m.demo_mode){
+      var dbar=document.getElementById('ws-demo-banner');
+      if(!dbar){
+        dbar=document.createElement('div'); dbar.id='ws-demo-banner';
+        dbar.style.cssText='background:#7c3aed;color:#fff;text-align:center;font-size:12px;'
+          +'padding:5px 12px;font-weight:600;';
+        dbar.textContent='🎬 演示模式：当前含示例数据，可在「设置 → 试用/演示」一键清空';
+        var body=document.querySelector('.ws-body');
+        if(body&&body.parentNode){ body.parentNode.insertBefore(dbar, body); }
+      }
+    }
+    // C0-3：授权失效只读模式 → 全局橙色横幅
+    if(m && m.license && m.license.read_only){
+      var bar=document.getElementById('ws-lic-readonly');
+      if(!bar){
+        bar=document.createElement('div'); bar.id='ws-lic-readonly';
+        bar.style.cssText='background:#b91c1c;color:#fff;text-align:center;font-size:13px;'
+          +'padding:7px 12px;font-weight:600;';
+        bar.textContent='⛔ '+(m.license.message||'授权已失效，系统处于只读模式，请联系厂商续费。');
+        var body=document.querySelector('.ws-body');
+        if(body&&body.parentNode){ body.parentNode.insertBefore(bar, body); }
+      }
+    }
     if(MY_IS_SUP){
       refreshL4();
+      var _gl=document.getElementById('ws-golive-link');
+      if(_gl) _gl.style.display='block';  // P2-1: 上线自检仅主管可见
+      var _sl=document.getElementById('ws-setup-link');
+      if(_sl) _sl.style.display='block';  // P1-1: 接入向导仅主管可见
+      var _ksl=document.getElementById('ws-kbstart-link');
+      if(_ksl) _ksl.style.display='block';  // P1-2: 知识库冷启动仅主管可见
+      var _rl=document.getElementById('ws-roi-link');
+      if(_rl) _rl.style.display='block';  // P0-3: ROI 看板仅主管/老板可见
+      var _aql=document.getElementById('ws-aiq-link');
+      if(_aql) _aql.style.display='block';  // P3-1: AI 质量看板仅主管可见
+      var _ul=document.getElementById('ws-usage-link');
+      if(_ul) _ul.style.display='block';  // C0-2: 用量看板仅主管/老板可见
       var _pl=document.getElementById('ws-perf-link');
       if(_pl) _pl.style.display='block';
       var _ql=document.getElementById('ws-queue-link');
@@ -463,6 +509,21 @@ document.addEventListener('click',function(e){ var m=document.getElementById('ws
       // P24：通知中心 — 所有重要事件写入铃铛
       if(msg && ['inbox_message','draft_sla_breach','draft_reassigned','anomaly_alert','sla_alert','escalation','queue_alert','stage_advance','stage_advance_pending','stage_downgrade','stage_reunion','stage_sync','workflow_step','workflow_execution_completed','workflow_execution_failed','workflow_execution_cancelled'].indexOf(msg.type)>=0){
         if(window.__wsNotif) window.__wsNotif.add(msg);
+      }
+      // P3：auto_assign 自动派单 → 仅「被分配到的坐席」收到 toast（可点开聚焦该会话）
+      if(msg && msg.type==='conversation_claim' && msg.data && msg.data.action==='auto_claimed'){
+        var _ac=msg.data, _acClaim=_ac.claim||{};
+        if(_acClaim.agent_id && _acClaim.agent_id===MY_AGENT_ID){
+          var _acMsg=_ac.matched_language?'🌐 系统已按语言把一位客户分给你':'📥 系统已把一位客户自动分给你';
+          var _acEl=CRMW.toast(_acMsg+'（可在工作台查看 / 释放）','#0f766e');
+          if(_acEl && _ac.conversation_id){
+            _acEl.style.cursor='pointer';
+            _acEl.onclick=function(){
+              try{ sessionStorage.setItem('ws_focus_conv',_ac.conversation_id); }catch(_){}
+              location.href='/workspace';
+            };
+          }
+        }
       }
       // P46：待确认进阶
       if(msg && msg.type==='stage_advance_pending' && msg.data){

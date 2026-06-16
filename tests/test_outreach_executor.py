@@ -192,10 +192,10 @@ def test_execute_endpoint_sends_and_batch_stats():
     cfg = {"outreach": {"enabled": True, "per_send_seconds": 0, "default_account_cap": 10,
                         "cooldown_days": 0, "max_batch": 50}}
     client = _client(cfg, store)
-    # 替换适配器为假适配器（模块级 _INBOX_ADAPTERS）
-    import src.web.routes.unified_inbox_routes as mod
-    old = mod._INBOX_ADAPTERS
-    mod._INBOX_ADAPTERS = [_Adapter()]
+    # 替换适配器为假适配器（slice 32 外移后 handler 绑定在 conversion_outreach 模块）
+    import src.web.routes.unified_inbox_conversion_outreach_routes as outreach_mod
+    old = outreach_mod._INBOX_ADAPTERS
+    outreach_mod._INBOX_ADAPTERS = [_Adapter()]
     try:
         r = client.post("/api/unified-inbox/outreach/execute",
                         json={"filters": {"min_silent_days": 3}, "template": "Hi {name}",
@@ -207,7 +207,7 @@ def test_execute_endpoint_sends_and_batch_stats():
         b = client.get("/api/unified-inbox/outreach/batch?batch_id=bx").json()
         assert b["ok"] is True and b["by_status"].get("sent") == 2
     finally:
-        mod._INBOX_ADAPTERS = old
+        outreach_mod._INBOX_ADAPTERS = old
 
 
 def test_execute_endpoint_max_batch_hard_cap():
@@ -217,9 +217,9 @@ def test_execute_endpoint_max_batch_hard_cap():
     cfg = {"outreach": {"enabled": True, "per_send_seconds": 0, "default_account_cap": 10,
                         "cooldown_days": 0, "max_batch": 1}}
     client = _client(cfg, store)
-    import src.web.routes.unified_inbox_routes as mod
-    old = mod._INBOX_ADAPTERS
-    mod._INBOX_ADAPTERS = [_Adapter()]
+    import src.web.routes.unified_inbox_conversion_outreach_routes as outreach_mod
+    old = outreach_mod._INBOX_ADAPTERS
+    outreach_mod._INBOX_ADAPTERS = [_Adapter()]
     try:
         r = client.post("/api/unified-inbox/outreach/execute",
                         json={"filters": {"min_silent_days": 3}, "template": "Hi",
@@ -227,4 +227,4 @@ def test_execute_endpoint_max_batch_hard_cap():
         # 硬上限 max_batch=1 生效
         assert r["attempted"] == 1
     finally:
-        mod._INBOX_ADAPTERS = old
+        outreach_mod._INBOX_ADAPTERS = old

@@ -77,6 +77,24 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS idx_msg_conv_ts ON messages(conversation_id, ts DESC);
 
+-- P1：出向译文旁路表。坐席「一击直发」让后端把中文原文译成客户语言后投递，
+-- 但出向消息回到 messages 的路径异构（web record_message / protocol worker push /
+-- 多数 RPA 根本不回读），无法在 messages 里稳定保存「中文原文 ↔ 实发译文」配对。
+-- 故此处旁路记录，按 (conversation_id, 实发译文 hash) 键；thread 读取时富集回原文，
+-- 实现跨刷新/重启/设备的出向双行展示，且完全不触碰 messages 去重。
+CREATE TABLE IF NOT EXISTS outbound_translations (
+    conversation_id   TEXT NOT NULL,
+    sent_hash         TEXT NOT NULL,
+    original_text     TEXT NOT NULL DEFAULT '',
+    source_lang       TEXT NOT NULL DEFAULT '',
+    target_lang       TEXT NOT NULL DEFAULT '',
+    provider          TEXT NOT NULL DEFAULT '',
+    error             TEXT NOT NULL DEFAULT '',
+    created_at        REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (conversation_id, sent_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_outxl_conv ON outbound_translations(conversation_id);
+
 CREATE TABLE IF NOT EXISTS message_analysis (
     analysis_id        TEXT PRIMARY KEY,
     message_id         TEXT NOT NULL,
@@ -456,6 +474,42 @@ _MIGRATIONS = [
        )""",
     "CREATE INDEX IF NOT EXISTS idx_outreach_conv ON outreach_log(conversation_id, ts DESC)",
     "CREATE INDEX IF NOT EXISTS idx_outreach_batch ON outreach_log(batch_id)",
+    # P3：坐席技能语言（CSV 规范 ISO 码，如 "en,ja"）。供 auto_assign 的 match_language
+    # 把外语会话优先派给会该语言的坐席（坐席在工作台「我的偏好」声明）。
+    "ALTER TABLE agent_prefs ADD COLUMN languages TEXT NOT NULL DEFAULT ''",
+    # P3：出向翻译漏斗「按日」持久化聚合（看板按 7/30 日窗读取，跨重启/含趋势线）。
+    # 与内存版 OutboundTranslationStats 同口径；day 用本地日期，与 dashboard 其它面板分桶一致。
+    # by_lang_json 为该日各目标语译出次数的 JSON（读改写，已在锁内）。
+    """CREATE TABLE IF NOT EXISTS outbound_xlate_daily (
+         day             TEXT PRIMARY KEY,
+         sends           INTEGER NOT NULL DEFAULT 0,
+         requested       INTEGER NOT NULL DEFAULT 0,
+         translated      INTEGER NOT NULL DEFAULT 0,
+         skipped         INTEGER NOT NULL DEFAULT 0,
+         failed          INTEGER NOT NULL DEFAULT 0,
+         auto_requested  INTEGER NOT NULL DEFAULT 0,
+         auto_unresolved INTEGER NOT NULL DEFAULT 0,
+         degraded        INTEGER NOT NULL DEFAULT 0,
+         by_lang_json    TEXT NOT NULL DEFAULT '{}'
+       )""",
+    # P3：入站翻译漏斗「按日」持久化（客户→坐席自动翻译）。语义与出向不同：入站为打开会话
+    # 时懒翻译，只记「新译出」（成功后即缓存，再开走 store 不重复计）与 failed；by_lang_json
+    # 为该日各「客户来源语言」译出次数（与出向的目标语分布合成跨语言总览）。
+    """CREATE TABLE IF NOT EXISTS inbound_xlate_daily (
+         day          TEXT PRIMARY KEY,
+         translated   INTEGER NOT NULL DEFAULT 0,
+         failed       INTEGER NOT NULL DEFAULT 0,
+         by_lang_json TEXT NOT NULL DEFAULT '{}'
+       )""",
+    # P3：自动派单（AutoClaimWorker）「按日」持久化。进程内 status_snapshot 是累计且重启清零，
+    # 看板需按 7/30 日窗回溯，故落表。claimed=当日自动认领总数，lang_matched=其中按语言命中数，
+    # by_lang_json=命中派单的会话语言分布（系统按哪些语言在精准路由）。
+    """CREATE TABLE IF NOT EXISTS auto_claim_daily (
+         day          TEXT PRIMARY KEY,
+         claimed      INTEGER NOT NULL DEFAULT 0,
+         lang_matched INTEGER NOT NULL DEFAULT 0,
+         by_lang_json TEXT NOT NULL DEFAULT '{}'
+       )""",
 ]
 
 
@@ -962,6 +1016,333 @@ class InboxStore:
             self._conn.commit()
             return int(cur.rowcount or 0) > 0
 
+    @staticmethod
+    def _sent_hash(sent_text: str) -> str:
+        return hashlib.sha256(str(sent_text or "").encode("utf-8")).hexdigest()[:16]
+
+    def record_outbound_translation(
+        self,
+        conversation_id: str,
+        sent_text: str,
+        original_text: str,
+        *,
+        source_lang: str = "",
+        target_lang: str = "",
+        provider: str = "",
+        error: str = "",
+    ) -> bool:
+        """P1：记录一条出向译文 → 原文/质量映射（一击直发后供 thread 富集双行）。
+
+        按 (conversation_id, hash(实发译文)) 去重 upsert；译文与原文相同（未真正翻译）
+        时不记录，避免无意义副行。best-effort，调用方包 try。
+        """
+        cid = str(conversation_id or "").strip()
+        sent = str(sent_text or "").strip()
+        orig = str(original_text or "").strip()
+        if not cid or not sent or not orig or sent == orig:
+            return False
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO outbound_translations
+                    (conversation_id, sent_hash, original_text, source_lang,
+                     target_lang, provider, error, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(conversation_id, sent_hash) DO UPDATE SET
+                    original_text = excluded.original_text,
+                    source_lang   = excluded.source_lang,
+                    target_lang   = excluded.target_lang,
+                    provider      = excluded.provider,
+                    error         = excluded.error,
+                    created_at    = excluded.created_at
+                """,
+                (cid, self._sent_hash(sent), orig, str(source_lang or ""),
+                 str(target_lang or ""), str(provider or ""), str(error or ""),
+                 self._now()),
+            )
+            self._conn.commit()
+        return True
+
+    def get_outbound_translations(self, conversation_id: str) -> Dict[str, Dict[str, Any]]:
+        """返回该会话的出向译文映射 {sent_hash: {original_text, target_lang, provider, error}}。"""
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            return {}
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT sent_hash, original_text, source_lang, target_lang, provider, error"
+                " FROM outbound_translations WHERE conversation_id = ?",
+                (cid,),
+            ).fetchall()
+        return {
+            str(r["sent_hash"]): {
+                "original_text": r["original_text"],
+                "source_lang": r["source_lang"],
+                "target_lang": r["target_lang"],
+                "provider": r["provider"],
+                "error": r["error"],
+            }
+            for r in rows
+        }
+
+    def record_outbound_xlate(
+        self,
+        *,
+        requested: bool,
+        is_auto: bool = False,
+        auto_resolved: Optional[bool] = None,
+        translated: bool = False,
+        target_lang: str = "",
+        degraded: bool = False,
+        failed: bool = False,
+    ) -> None:
+        """P3：把一次出向发送的翻译漏斗结果累计进「按日」表（看板窗口读取，跨重启）。
+
+        口径与内存版 ``OutboundTranslationStats.record_send`` 完全一致：
+        failed 与 translated 互斥优先 failed；skipped = 请求了但未译且未失败。
+        day 用本地日期，与 dashboard 其它面板的 day 分桶对齐。best-effort，调用方包 try。
+        """
+        day = time.strftime("%Y-%m-%d", time.localtime(self._now()))
+        inc_translated = 1 if (translated and not failed) else 0
+        inc_skipped = 1 if (requested and not failed and not inc_translated) else 0
+        inc_degraded = 1 if (inc_translated and degraded) else 0
+        inc_auto_req = 1 if is_auto else 0
+        inc_auto_unres = 1 if (is_auto and auto_resolved is False) else 0
+        inc_requested = 1 if requested else 0
+        inc_failed = 1 if failed else 0
+        lang = (str(target_lang or "").strip() or "unknown") if inc_translated else ""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT by_lang_json FROM outbound_xlate_daily WHERE day = ?", (day,)
+            ).fetchone()
+            if row is None:
+                by_lang: Dict[str, int] = {}
+                if lang:
+                    by_lang[lang] = 1
+                self._conn.execute(
+                    """INSERT INTO outbound_xlate_daily
+                         (day, sends, requested, translated, skipped, failed,
+                          auto_requested, auto_unresolved, degraded, by_lang_json)
+                       VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    (day, 1, inc_requested, inc_translated, inc_skipped, inc_failed,
+                     inc_auto_req, inc_auto_unres, inc_degraded,
+                     json.dumps(by_lang, ensure_ascii=False)),
+                )
+            else:
+                try:
+                    by_lang = json.loads(row["by_lang_json"] or "{}")
+                except Exception:
+                    by_lang = {}
+                if lang:
+                    by_lang[lang] = int(by_lang.get(lang, 0)) + 1
+                self._conn.execute(
+                    """UPDATE outbound_xlate_daily SET
+                         sends = sends + 1,
+                         requested = requested + ?,
+                         translated = translated + ?,
+                         skipped = skipped + ?,
+                         failed = failed + ?,
+                         auto_requested = auto_requested + ?,
+                         auto_unresolved = auto_unresolved + ?,
+                         degraded = degraded + ?,
+                         by_lang_json = ?
+                       WHERE day = ?""",
+                    (inc_requested, inc_translated, inc_skipped, inc_failed,
+                     inc_auto_req, inc_auto_unres, inc_degraded,
+                     json.dumps(by_lang, ensure_ascii=False), day),
+                )
+            self._conn.commit()
+
+    def get_outbound_xlate_stats(self, since_ts: float) -> Dict[str, Any]:
+        """P3：读取 since_ts 起的出向翻译漏斗按日聚合（看板窗口数据 + 趋势）。
+
+        返回与内存版 ``dump()`` 同形的 totals/coverage/by_target_lang，并附 ``trend``
+        （每日 sends/translated/coverage 百分比，供 sparkPct 折线）。
+        """
+        since_day = time.strftime("%Y-%m-%d", time.localtime(since_ts))
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT day, sends, requested, translated, skipped, failed,"
+                " auto_requested, auto_unresolved, degraded, by_lang_json"
+                " FROM outbound_xlate_daily WHERE day >= ? ORDER BY day",
+                (since_day,),
+            ).fetchall()
+        tot = {"sends_total": 0, "requested": 0, "translated": 0, "skipped": 0,
+               "failed": 0, "auto_requested": 0, "auto_unresolved": 0, "degraded": 0}
+        by_lang: Dict[str, int] = {}
+        trend = []
+        for r in rows:
+            s = int(r["sends"] or 0)
+            t = int(r["translated"] or 0)
+            tot["sends_total"] += s
+            tot["requested"] += int(r["requested"] or 0)
+            tot["translated"] += t
+            tot["skipped"] += int(r["skipped"] or 0)
+            tot["failed"] += int(r["failed"] or 0)
+            tot["auto_requested"] += int(r["auto_requested"] or 0)
+            tot["auto_unresolved"] += int(r["auto_unresolved"] or 0)
+            tot["degraded"] += int(r["degraded"] or 0)
+            try:
+                bl = json.loads(r["by_lang_json"] or "{}")
+            except Exception:
+                bl = {}
+            for k, v in bl.items():
+                by_lang[k] = by_lang.get(k, 0) + int(v)
+            trend.append({"day": str(r["day"])[5:], "sends": s, "translated": t,
+                          "cov_pct": round(t / s * 100, 1) if s else 0.0})
+        sends = tot["sends_total"]
+        areq = tot["auto_requested"]
+        out = dict(tot)
+        out["coverage_rate"] = round(tot["translated"] / sends, 4) if sends else 0
+        out["auto_unresolved_rate"] = round(tot["auto_unresolved"] / areq, 4) if areq else 0
+        out["by_target_lang"] = dict(sorted(by_lang.items()))
+        out["trend"] = trend
+        return out
+
+    def record_inbound_xlate(
+        self,
+        *,
+        translated: int = 0,
+        failed: int = 0,
+        by_lang: Optional[Dict[str, int]] = None,
+    ) -> None:
+        """P3：累计一次会话打开的入站翻译结果进「按日」表（客户→坐席）。
+
+        translated 为本次**新译出**条数（命中 store 缓存的不计，避免重开重复计数）；
+        by_lang 为这些新译出消息的客户来源语言分布。translated 与 failed 全 0 时不写。
+        best-effort，调用方包 try。
+        """
+        translated = max(0, int(translated or 0))
+        failed = max(0, int(failed or 0))
+        if translated <= 0 and failed <= 0:
+            return
+        by_lang = {str(k): int(v) for k, v in (by_lang or {}).items() if int(v) > 0}
+        day = time.strftime("%Y-%m-%d", time.localtime(self._now()))
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT by_lang_json FROM inbound_xlate_daily WHERE day = ?", (day,)
+            ).fetchone()
+            if row is None:
+                self._conn.execute(
+                    """INSERT INTO inbound_xlate_daily (day, translated, failed, by_lang_json)
+                       VALUES (?,?,?,?)""",
+                    (day, translated, failed, json.dumps(by_lang, ensure_ascii=False)),
+                )
+            else:
+                try:
+                    merged = json.loads(row["by_lang_json"] or "{}")
+                except Exception:
+                    merged = {}
+                for k, v in by_lang.items():
+                    merged[k] = int(merged.get(k, 0)) + int(v)
+                self._conn.execute(
+                    """UPDATE inbound_xlate_daily SET
+                         translated = translated + ?,
+                         failed = failed + ?,
+                         by_lang_json = ?
+                       WHERE day = ?""",
+                    (translated, failed, json.dumps(merged, ensure_ascii=False), day),
+                )
+            self._conn.commit()
+
+    def get_inbound_xlate_stats(self, since_ts: float) -> Dict[str, Any]:
+        """P3：读取 since_ts 起的入站翻译按日聚合（客户来源语言分布 + 趋势）。"""
+        since_day = time.strftime("%Y-%m-%d", time.localtime(since_ts))
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT day, translated, failed, by_lang_json"
+                " FROM inbound_xlate_daily WHERE day >= ? ORDER BY day",
+                (since_day,),
+            ).fetchall()
+        translated = failed = 0
+        by_lang: Dict[str, int] = {}
+        trend = []
+        for r in rows:
+            t = int(r["translated"] or 0)
+            translated += t
+            failed += int(r["failed"] or 0)
+            try:
+                bl = json.loads(r["by_lang_json"] or "{}")
+            except Exception:
+                bl = {}
+            for k, v in bl.items():
+                by_lang[k] = by_lang.get(k, 0) + int(v)
+            trend.append({"day": str(r["day"])[5:], "translated": t})
+        return {
+            "translated": translated,
+            "failed": failed,
+            "by_source_lang": dict(sorted(by_lang.items())),
+            "trend": trend,
+        }
+
+    def record_auto_claim(self, *, matched: bool, lang: str = "") -> None:
+        """P3：累计一次自动派单进「按日」表。
+
+        matched 表示该次派单是否按坐席语言命中；lang 为命中时的会话语言（用于分布）。
+        best-effort，调用方包 try。
+        """
+        lang = str(lang or "").strip()
+        day = time.strftime("%Y-%m-%d", time.localtime(self._now()))
+        inc_matched = 1 if matched else 0
+        bl_inc = {lang: 1} if (matched and lang) else {}
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT by_lang_json FROM auto_claim_daily WHERE day = ?", (day,)
+            ).fetchone()
+            if row is None:
+                self._conn.execute(
+                    """INSERT INTO auto_claim_daily
+                         (day, claimed, lang_matched, by_lang_json)
+                       VALUES (?,?,?,?)""",
+                    (day, 1, inc_matched, json.dumps(bl_inc, ensure_ascii=False)),
+                )
+            else:
+                try:
+                    merged = json.loads(row["by_lang_json"] or "{}")
+                except Exception:
+                    merged = {}
+                for k, v in bl_inc.items():
+                    merged[k] = int(merged.get(k, 0)) + int(v)
+                self._conn.execute(
+                    """UPDATE auto_claim_daily SET
+                         claimed = claimed + 1,
+                         lang_matched = lang_matched + ?,
+                         by_lang_json = ?
+                       WHERE day = ?""",
+                    (inc_matched, json.dumps(merged, ensure_ascii=False), day),
+                )
+            self._conn.commit()
+
+    def get_auto_claim_stats(self, since_ts: float) -> Dict[str, Any]:
+        """P3：读取 since_ts 起的自动派单按日聚合（命中语言分布 + 趋势）。"""
+        since_day = time.strftime("%Y-%m-%d", time.localtime(since_ts))
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT day, claimed, lang_matched, by_lang_json"
+                " FROM auto_claim_daily WHERE day >= ? ORDER BY day",
+                (since_day,),
+            ).fetchall()
+        claimed = lang_matched = 0
+        by_lang: Dict[str, int] = {}
+        trend = []
+        for r in rows:
+            c = int(r["claimed"] or 0)
+            claimed += c
+            lang_matched += int(r["lang_matched"] or 0)
+            try:
+                bl = json.loads(r["by_lang_json"] or "{}")
+            except Exception:
+                bl = {}
+            for k, v in bl.items():
+                by_lang[k] = by_lang.get(k, 0) + int(v)
+            trend.append({"day": str(r["day"])[5:], "claimed": c})
+        return {
+            "claimed": claimed,
+            "lang_matched": lang_matched,
+            "by_lang": dict(sorted(by_lang.items())),
+            "trend": trend,
+        }
+
     def count_messages(self, conversation_id: str = "") -> int:
         with self._lock:
             if conversation_id:
@@ -1230,6 +1611,25 @@ class InboxStore:
                         count, max_age_days, safe_statuses)
         return count
 
+    def cleanup_outbound_translations(self, *, max_age_days: int = 30) -> int:
+        """P3：删除超龄出向译文旁路记录，防 outbound_translations 表无限膨胀。
+
+        出向译文映射仅为「双行展示」服务，超过保留期的历史会话基本不再回看，
+        按 created_at 删除即可。返回删除行数。best-effort。
+        """
+        cutoff_ts = self._now() - max(1, int(max_age_days)) * 86400
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM outbound_translations WHERE created_at < ?",
+                (cutoff_ts,),
+            )
+            self._conn.commit()
+        count = int(cur.rowcount or 0)
+        if count > 0:
+            logger.info("cleanup_outbound_translations: 删除 %d 条超龄出向译文（age>%dd）",
+                        count, max_age_days)
+        return count
+
     # ── B2 草稿审计日志 ──────────────────────────────────────────
 
     def record_draft_audit(
@@ -1397,6 +1797,31 @@ class InboxStore:
             rows = self._conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
+    def get_reliability_timeline(
+        self, since_ts: float = 0.0, *, bucket_sec: int = 3600,
+    ) -> List[Dict[str, Any]]:
+        """D2 运维可靠性：按时间桶聚合 draft_audit_log 全量处置（不过滤 agent）。
+
+        持久来源，重启不丢。返回每桶 total/autosend/blocked/rejected，
+        供「处置量 + 拦截/弃用率」趋势曲线。block_rate=blocked/total 是系统拦截高风险的占比。
+        """
+        bkt = max(300, int(bucket_sec))
+        sql = f"""
+            SELECT
+                (CAST(ts / {bkt} AS INTEGER) * {bkt}) AS bucket_ts,
+                COUNT(*) AS total,
+                SUM(CASE WHEN action='autosend' THEN 1 ELSE 0 END) AS autosend,
+                SUM(CASE WHEN action='blocked'  THEN 1 ELSE 0 END) AS blocked,
+                SUM(CASE WHEN action='rejected' THEN 1 ELSE 0 END) AS rejected
+            FROM draft_audit_log
+            WHERE ts >= ?
+            GROUP BY bucket_ts
+            ORDER BY bucket_ts
+        """
+        with self._lock:
+            rows = self._conn.execute(sql, [float(since_ts)]).fetchall()
+        return [dict(r) for r in rows]
+
     def get_csat_trend(
         self,
         *,
@@ -1472,6 +1897,339 @@ class InboxStore:
             })
         return result
 
+    def get_automation_roi_stats(
+        self, since_ts: float = 0.0, until_ts: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """P0-3 ROI：按动作聚合 draft_audit_log，拆「AI 自动发 / 人工发 / 拦截」。
+
+        与 ``get_agent_perf`` 不同：**不过滤 agent_id**，故 AutosendWorker 的无主
+        autosend 也计入——这正是「AI 替代多少人工」的真实口径。
+
+        ``until_ts`` 给定时只统计 ``[since_ts, until_ts)`` 半开区间（用于环比上一窗口）。
+
+        返回::
+
+            {
+              "ai_sent": int,        # autosend（AI 自动发送）
+              "human_sent": int,     # approved + edit_send + force_override（坐席处置后发）
+              "suppressed": int,     # rejected + blocked（生成但未发）
+              "total_sent": int,     # ai_sent + human_sent
+              "ai_share": float,     # ai_sent / total_sent（0–1）
+              "trend": [{"day": "MM-DD", "ai": int, "human": int}, ...],
+            }
+        """
+        _AI = ("autosend",)
+        _HUMAN = ("approved", "edit_send", "force_override")
+        _SUPPRESS = ("rejected", "blocked")
+        clause = "ts >= ?"
+        params: List[Any] = [float(since_ts)]
+        if until_ts is not None:
+            clause += " AND ts < ?"
+            params.append(float(until_ts))
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT action, COUNT(*) FROM draft_audit_log "
+                f"WHERE {clause} GROUP BY action",
+                params,
+            ).fetchall()
+            day_rows = self._conn.execute(
+                f"SELECT action, ts FROM draft_audit_log WHERE {clause}",
+                params,
+            ).fetchall()
+        counts: Dict[str, int] = {str(r[0] or ""): int(r[1] or 0) for r in rows}
+        ai_sent = sum(counts.get(a, 0) for a in _AI)
+        human_sent = sum(counts.get(a, 0) for a in _HUMAN)
+        suppressed = sum(counts.get(a, 0) for a in _SUPPRESS)
+        total_sent = ai_sent + human_sent
+        per_day: Dict[str, Dict[str, int]] = {}
+        for action, ts in day_rows:
+            act = str(action or "")
+            if act in _AI:
+                key = "ai"
+            elif act in _HUMAN:
+                key = "human"
+            else:
+                continue
+            day = time.strftime("%Y-%m-%d", time.localtime(float(ts)))
+            bucket = per_day.setdefault(day, {"ai": 0, "human": 0})
+            bucket[key] += 1
+        trend = [{"day": d[5:], "ai": v["ai"], "human": v["human"]}
+                 for d, v in sorted(per_day.items())]
+        return {
+            "ai_sent": ai_sent,
+            "human_sent": human_sent,
+            "suppressed": suppressed,
+            "total_sent": total_sent,
+            "ai_share": round(ai_sent / total_sent, 3) if total_sent else 0.0,
+            "trend": trend,
+        }
+
+    def get_quality_stats(
+        self, since_ts: float = 0.0, until_ts: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """P3-1 AI 回复质量：按动作 + 风险等级聚合 draft_audit_log（**不过滤 agent**）。
+
+        ``until_ts`` 给定时只统计 ``[since_ts, until_ts)`` 半开区间（用于环比上一窗口）。
+
+        与 ``get_agent_perf`` 不同：含 AutosendWorker 的无主 autosend，故口径是
+        「全部 AI 草稿处置」，用于「AI 答得好不好」质量闭环。
+
+        派生率：
+        - ``auto_pass_rate``：autosend / 总处置（AI 直接放行占比，越高越省人）
+        - ``edit_rate``：edit_send / 人工发送（坐席需改写才发的占比，越高说明 AI 初稿越差）
+        - ``reject_rate``：rejected / 总处置（被坐席弃用占比）
+        - ``block_rate``：blocked / 总处置（L4 高风险拦截占比）
+        - ``high_risk_rate``：(L3+L4) / 有等级的处置
+
+        返回 counts / levels / 各率 + 按日 trend（total/autosend/edit_send/rejected/high_risk）。
+        """
+        _DISPOSITIONS = ("autosend", "approved", "edit_send",
+                         "rejected", "blocked", "force_override")
+        _HUMAN_SENT = ("approved", "edit_send", "force_override")
+        _IN = ("autosend", "approved", "edit_send",
+               "rejected", "blocked", "force_override")
+        _ph = ",".join("?" * len(_IN))
+        win = "ts >= ?"
+        base: list = [float(since_ts)]
+        if until_ts is not None:
+            win += " AND ts < ?"
+            base.append(float(until_ts))
+        with self._lock:
+            act_rows = self._conn.execute(
+                f"SELECT action, COUNT(*) FROM draft_audit_log "
+                f"WHERE {win} AND action IN ({_ph}) GROUP BY action",
+                base + list(_IN),
+            ).fetchall()
+            lvl_rows = self._conn.execute(
+                f"SELECT autopilot_level, COUNT(*) FROM draft_audit_log "
+                f"WHERE {win} AND autopilot_level != '' GROUP BY autopilot_level",
+                base,
+            ).fetchall()
+            day_rows = self._conn.execute(
+                f"SELECT action, autopilot_level, ts FROM draft_audit_log "
+                f"WHERE {win} AND action IN ({_ph})",
+                base + list(_IN),
+            ).fetchall()
+        counts: Dict[str, int] = {a: 0 for a in _DISPOSITIONS}
+        for action, cnt in act_rows:
+            counts[str(action)] = int(cnt or 0)
+        levels: Dict[str, int] = {str(lv): int(c or 0) for lv, c in lvl_rows}
+        total = sum(counts.values())
+        human_sent = sum(counts[a] for a in _HUMAN_SENT)
+        leveled = sum(levels.values())
+        high_risk = levels.get("L3", 0) + levels.get("L4", 0)
+
+        def _rate(num: int, den: int) -> float:
+            return round(num / den, 3) if den else 0.0
+
+        per_day: Dict[str, Dict[str, int]] = {}
+        for action, level, ts in day_rows:
+            day = time.strftime("%Y-%m-%d", time.localtime(float(ts)))
+            b = per_day.setdefault(
+                day, {"total": 0, "autosend": 0, "edit_send": 0,
+                      "rejected": 0, "high_risk": 0})
+            b["total"] += 1
+            act = str(action or "")
+            if act in b:
+                b[act] += 1
+            if str(level or "") in ("L3", "L4"):
+                b["high_risk"] += 1
+        trend = [
+            {"day": d[5:], **v} for d, v in sorted(per_day.items())
+        ]
+        return {
+            "counts": counts,
+            "levels": levels,
+            "total": total,
+            "sent": counts["autosend"] + human_sent,
+            "human_sent": human_sent,
+            "auto_pass_rate": _rate(counts["autosend"], total),
+            "edit_rate": _rate(counts["edit_send"], human_sent),
+            "reject_rate": _rate(counts["rejected"], total),
+            "block_rate": _rate(counts["blocked"], total),
+            "high_risk_rate": _rate(high_risk, leveled),
+            "trend": trend,
+        }
+
+    def get_usage_stats(
+        self, since_ts: float = 0.0, until_ts: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """C0-2 用量计量：从既有 messages + draft_audit_log 聚合可计费用量。
+
+        单一数据源、零新表零迁移，口径与 ROI/质量看板一致。``until_ts`` 给定时只统计
+        ``[since_ts, until_ts)`` 半开区间（环比）。
+
+        返回::
+
+            {
+              "messages_in": int, "messages_out": int, "messages_total": int,
+              "ai_calls": int,        # draft_audit_log 处置行数 ≈ AI 生成草稿数
+              "ai_sent": int,         # autosend（AI 自动发）
+              "active_agents": int,   # 窗口内有处置记录的去重坐席数（计费口径代理）
+              "active_agent_ids": [...],
+              "trend": [{"day":"MM-DD","messages":int,"ai_calls":int}, ...],
+            }
+        """
+        mwin = "ts >= ?"
+        mparams: List[Any] = [float(since_ts)]
+        if until_ts is not None:
+            mwin += " AND ts < ?"
+            mparams.append(float(until_ts))
+        with self._lock:
+            msg_rows = self._conn.execute(
+                f"SELECT direction, COUNT(*) FROM messages WHERE {mwin} "
+                "GROUP BY direction",
+                mparams,
+            ).fetchall()
+            msg_day_rows = self._conn.execute(
+                f"SELECT ts FROM messages WHERE {mwin}", mparams,
+            ).fetchall()
+            audit_act_rows = self._conn.execute(
+                f"SELECT action, COUNT(*) FROM draft_audit_log WHERE {mwin} "
+                "GROUP BY action",
+                mparams,
+            ).fetchall()
+            agent_rows = self._conn.execute(
+                f"SELECT DISTINCT agent_id FROM draft_audit_log WHERE {mwin} "
+                "AND agent_id != ''",
+                mparams,
+            ).fetchall()
+            audit_day_rows = self._conn.execute(
+                f"SELECT ts FROM draft_audit_log WHERE {mwin}", mparams,
+            ).fetchall()
+        msg_by_dir: Dict[str, int] = {str(r[0] or "in"): int(r[1] or 0)
+                                      for r in msg_rows}
+        messages_in = msg_by_dir.get("in", 0)
+        messages_out = msg_by_dir.get("out", 0)
+        act_counts: Dict[str, int] = {str(r[0] or ""): int(r[1] or 0)
+                                      for r in audit_act_rows}
+        ai_calls = sum(act_counts.values())
+        ai_sent = act_counts.get("autosend", 0)
+        agent_ids = sorted(str(r[0]) for r in agent_rows if r[0])
+
+        per_day: Dict[str, Dict[str, int]] = {}
+        for (ts,) in msg_day_rows:
+            day = time.strftime("%Y-%m-%d", time.localtime(float(ts)))
+            per_day.setdefault(day, {"messages": 0, "ai_calls": 0})["messages"] += 1
+        for (ts,) in audit_day_rows:
+            day = time.strftime("%Y-%m-%d", time.localtime(float(ts)))
+            per_day.setdefault(day, {"messages": 0, "ai_calls": 0})["ai_calls"] += 1
+        trend = [{"day": d[5:], "messages": v["messages"], "ai_calls": v["ai_calls"]}
+                 for d, v in sorted(per_day.items())]
+        return {
+            "messages_in": messages_in,
+            "messages_out": messages_out,
+            "messages_total": messages_in + messages_out,
+            "ai_calls": ai_calls,
+            "ai_sent": ai_sent,
+            "active_agents": len(agent_ids),
+            "active_agent_ids": agent_ids,
+            "trend": trend,
+        }
+
+    def ping(self) -> bool:
+        """轻量连通性自检：能否对 DB 执行一次 SELECT（健康检查用）。"""
+        try:
+            with self._lock:
+                self._conn.execute("SELECT 1").fetchone()
+            return True
+        except Exception:
+            logger.debug("InboxStore.ping 失败", exc_info=True)
+            return False
+
+    def count_demo(self, prefix: str = "demo:") -> Dict[str, int]:
+        """统计 demo 命名空间（conversation_id 以 prefix 开头）的行数。"""
+        like = f"{prefix}%"
+        with self._lock:
+            conv = self._conn.execute(
+                "SELECT COUNT(*) FROM conversations WHERE conversation_id LIKE ?",
+                (like,)).fetchone()[0]
+            msg = self._conn.execute(
+                "SELECT COUNT(*) FROM messages WHERE conversation_id LIKE ?",
+                (like,)).fetchone()[0]
+            audit = self._conn.execute(
+                "SELECT COUNT(*) FROM draft_audit_log WHERE conversation_id LIKE ?",
+                (like,)).fetchone()[0]
+        return {"conversations": int(conv), "messages": int(msg),
+                "draft_audits": int(audit)}
+
+    def purge_demo(self, prefix: str = "demo:") -> Dict[str, int]:
+        """删除 demo 命名空间的全部行（会话/消息/草稿审计），返回删除计数。
+
+        仅按 conversation_id 前缀删除，绝不触碰真实数据。messages FTS 触发器随删同步。
+        """
+        like = f"{prefix}%"
+        before = self.count_demo(prefix)
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM messages WHERE conversation_id LIKE ?", (like,))
+            self._conn.execute(
+                "DELETE FROM draft_audit_log WHERE conversation_id LIKE ?", (like,))
+            self._conn.execute(
+                "DELETE FROM conversations WHERE conversation_id LIKE ?", (like,))
+            self._conn.commit()
+        return before
+
+    def get_kb_improvement_candidates(
+        self, since_ts: float = 0.0, *, limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """P3-2 质量→KB 闭环：把「AI 答错被改写/拒绝」的会话挑成 KB 改进候选。
+
+        取 ``draft_audit_log`` 中 action ∈ {edit_send, rejected} 的近期记录，关联：
+        - ``question``：处置时刻前最后一条**入站**消息（客户问句 → 候选 trigger）；
+        - ``suggested_reply``：edit_send 时取处置时刻后第一条**出站**消息（坐席改写后真正
+          发出的好答案 → 候选 example_reply）；rejected 无好答案，留空待人工补。
+
+        无客户问句（纯媒体/取不到）的候选跳过。返回最多 limit 条，最新在前。
+        """
+        limit = max(1, min(100, int(limit or 20)))
+        with self._lock:
+            audit_rows = self._conn.execute(
+                "SELECT conversation_id, action, ts, reason FROM draft_audit_log "
+                "WHERE ts >= ? AND action IN ('edit_send','rejected') "
+                "AND conversation_id != '' ORDER BY ts DESC LIMIT ?",
+                (float(since_ts), limit * 3),
+            ).fetchall()
+            out: List[Dict[str, Any]] = []
+            seen_q: set = set()
+            for ar in audit_rows:
+                cid = str(ar["conversation_id"] or "")
+                ats = float(ar["ts"] or 0)
+                action = str(ar["action"] or "")
+                q = self._conn.execute(
+                    "SELECT text FROM messages WHERE conversation_id=? "
+                    "AND direction='in' AND ts<=? AND text!='' "
+                    "ORDER BY ts DESC LIMIT 1",
+                    (cid, ats + 1),
+                ).fetchone()
+                question = str(q["text"]).strip() if q and q["text"] else ""
+                if not question:
+                    continue
+                dedup_key = (cid, question[:80])
+                if dedup_key in seen_q:
+                    continue
+                seen_q.add(dedup_key)
+                suggested = ""
+                if action == "edit_send":
+                    rep = self._conn.execute(
+                        "SELECT text FROM messages WHERE conversation_id=? "
+                        "AND direction='out' AND ts>=? AND text!='' "
+                        "ORDER BY ts ASC LIMIT 1",
+                        (cid, ats - 1),
+                    ).fetchone()
+                    suggested = str(rep["text"]).strip() if rep and rep["text"] else ""
+                out.append({
+                    "conversation_id": cid,
+                    "action": action,
+                    "ts": ats,
+                    "reason": str(ar["reason"] or ""),
+                    "question": question,
+                    "suggested_reply": suggested,
+                })
+                if len(out) >= limit:
+                    break
+        return out
+
     # ── Phase 5：坐席 presence + 会话租约 ─────────────────────
 
     def upsert_agent_presence(
@@ -1515,8 +2273,12 @@ class InboxStore:
     def list_agent_presence(self, *, active_within_sec: float = 120) -> List[Dict[str, Any]]:
         cutoff = self._now() - max(0.0, float(active_within_sec or 0))
         with self._lock:
+            # P3：LEFT JOIN agent_prefs 带出坐席技能语言（供 auto_assign match_language）。
             rows = self._conn.execute(
-                "SELECT * FROM agent_presence WHERE last_seen_at >= ? ORDER BY last_seen_at DESC",
+                "SELECT p.*, COALESCE(pr.languages, '') AS languages"
+                " FROM agent_presence p"
+                " LEFT JOIN agent_prefs pr ON pr.agent_id = p.agent_id"
+                " WHERE p.last_seen_at >= ? ORDER BY p.last_seen_at DESC",
                 (cutoff,),
             ).fetchall()
         return [dict(r) for r in rows]
@@ -1556,7 +2318,8 @@ class InboxStore:
                 ).fetchone()
         if row is None:
             return {"agent_id": aid, "warn_sec": 0, "crit_sec": 0,
-                    "muted": 0, "dnd_start": -1, "dnd_end": -1, "updated_at": 0}
+                    "muted": 0, "dnd_start": -1, "dnd_end": -1, "updated_at": 0,
+                    "languages": ""}
         return dict(row)
 
     def set_agent_prefs(
@@ -1578,6 +2341,26 @@ class InboxStore:
                 "updated_at=excluded.updated_at",
                 (aid, int(warn_sec or 0), int(crit_sec or 0), 1 if muted else 0,
                  int(dnd_start), int(dnd_end), now))
+            self._conn.commit()
+        return self.get_agent_prefs(aid)
+
+    def set_agent_languages(self, agent_id: str, languages: str) -> Dict[str, Any]:
+        """P3：写坐席技能语言（CSV 规范码），只动 languages 列，不影响告警偏好。
+
+        languages 已由调用方规范化（normalize_lang + 去重）。新坐席无 prefs 行时插入，
+        告警字段取默认（沿用全局 / 无免打扰）。
+        """
+        aid = str(agent_id or "").strip()
+        if not aid:
+            raise ValueError("agent_id required")
+        langs = str(languages or "")
+        now = self._now()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO agent_prefs (agent_id, languages, updated_at) VALUES (?,?,?) "
+                "ON CONFLICT(agent_id) DO UPDATE SET languages=excluded.languages, "
+                "updated_at=excluded.updated_at",
+                (aid, langs, now))
             self._conn.commit()
         return self.get_agent_prefs(aid)
 

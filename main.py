@@ -253,6 +253,31 @@ class AIChatAssistant:
             
             self.logger.info("✅ AI聊天助手初始化完成")
 
+            # C0-1 授权状态（只读提示，不阻断启动）
+            try:
+                from src.licensing import configure_license_manager
+
+                # C0-3：按 config 配置强制开关（licensing.enforce，默认关）
+                _lic_cfg = (self.config.config or {}).get("licensing", {}) or {}
+                _lic = configure_license_manager(
+                    enforce=bool(_lic_cfg.get("enforce", False)))
+                if _lic.state == "active":
+                    _exp = ("永久" if not _lic.expires_at
+                            else f"剩 {_lic.days_left} 天")
+                    self.logger.info(
+                        "🔑 授权：%s · %s · 客户=%s · %s",
+                        _lic.plan, _lic.state, _lic.customer or "—", _exp,
+                    )
+                elif _lic.state == "unlicensed":
+                    self.logger.info("🔑 授权：社区模式（未检测到授权文件）")
+                else:
+                    self.logger.warning(
+                        "🔑 授权状态=%s：%s",
+                        _lic.state, "；".join(_lic.messages) or "—",
+                    )
+            except Exception:
+                self.logger.debug("授权状态读取跳过", exc_info=True)
+
             self._startup_advisory_events = []
             try:
                 from src.utils.config_advisories import (
@@ -686,6 +711,26 @@ class AIChatAssistant:
                             except Exception:
                                 self.logger.debug("SLAWatcher 启动跳过", exc_info=True)
 
+                            # ── P3：AutoClaimWorker auto_assign 自动认领执行端 ──
+                            # 默认关（workspace.auto_assign.auto_claim.enabled=false）；
+                            # worker 每 tick 重读配置，开关无需重启。仅在 inbox 可用时启。
+                            try:
+                                from src.workspace.auto_claim_worker import AutoClaimWorker
+                                _ac_cfg = (((self.config.config or {}).get(
+                                    "workspace", {}) or {}).get(
+                                    "auto_assign", {}) or {}).get("auto_claim", {}) or {}
+                                _acw = AutoClaimWorker(
+                                    inbox_store=self.inbox_store,
+                                    config_manager=self.config,
+                                    config=_ac_cfg,
+                                )
+                                web_app.state.auto_claim_worker = _acw
+                                asyncio.ensure_future(_acw.run())
+                                self.logger.info(
+                                    "AutoClaimWorker 已启动（默认关，按 auto_claim.enabled 热生效）")
+                            except Exception:
+                                self.logger.debug("AutoClaimWorker 启动跳过", exc_info=True)
+
                             # ── L2：WebhookNotifier 企业 IM 通知 ──────────────
                             try:
                                 from src.inbox.webhook_notifier import WebhookNotifier
@@ -710,6 +755,32 @@ class AIChatAssistant:
                                 )
                             except Exception:
                                 self.logger.debug("WebhookNotifier 启动跳过", exc_info=True)
+
+                            # ── D3：HealthWatchdog 运行时健康主动告警 ─────────
+                            # 默认开；周期巡检 D1 健康，异常经 EventBus→WebhookNotifier
+                            # 推送（需在「告警渠道」订阅 health_alert 事件才会真正发出）。
+                            try:
+                                from src.inbox.health_watchdog import HealthWatchdog
+                                _hw_cfg = (self.config.config or {}).get(
+                                    "health_watchdog", {}
+                                ) or {}
+                                if _hw_cfg.get("enabled", True):
+                                    _hw = HealthWatchdog(
+                                        app=web_app,
+                                        config_manager=self.config,
+                                        interval_sec=float(_hw_cfg.get("interval_sec", 300)),
+                                        pending_threshold=int(_hw_cfg.get("queue_threshold", 200)),
+                                        alert_on_warn=bool(_hw_cfg.get("alert_on_warn", False)),
+                                    )
+                                    web_app.state.health_watchdog = _hw
+                                    asyncio.ensure_future(_hw.run())
+                                    self.logger.info(
+                                        "HealthWatchdog 已启动（interval=%ss alert_on_warn=%s）",
+                                        _hw_cfg.get("interval_sec", 300),
+                                        _hw_cfg.get("alert_on_warn", False),
+                                    )
+                            except Exception:
+                                self.logger.debug("HealthWatchdog 启动跳过", exc_info=True)
 
                             # ── N2：ScheduledReporter 定时简报推送 ─────────────
                             try:
@@ -1617,6 +1688,85 @@ class AIChatAssistant:
         asyncio.create_task(self.stop())
 
 
+def run_config_check(config_path: str = None) -> int:
+    """``python main.py --check`` 干跑模式：仅加载并体检配置，不启动任何服务。
+
+    返回进程退出码（有 error 级问题 → 1，否则 0），便于 CI / 部署脚本 gate。
+    """
+    import yaml
+
+    from src.utils.config_check import check_config, format_report, has_errors
+    from src.utils.config_manager import ConfigManager
+
+    cm = ConfigManager(config_path)
+    path = cm.config_path
+    if not Path(path).exists():
+        print(f"✗ 配置文件不存在: {path}")
+        print("  → 复制 config/config.example.yaml 为 config/config.yaml 并填写")
+        return 1
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+    except yaml.YAMLError as exc:
+        print(f"✗ YAML 解析失败: {path}\n  → {exc}")
+        return 1
+
+    print(f"配置文件: {path}")
+    issues = check_config(config, config_path=path)
+    print(format_report(issues, config=config if isinstance(config, dict) else None))
+    return 1 if has_errors(issues) else 0
+
+
+def run_init(preset: str, config_path: str = None, set_pairs=None, force: bool = False) -> int:
+    """``python main.py --init [PRESET]`` 场景预设脚手架。
+
+    无 PRESET → 列出可用预设并退出；有 PRESET → 生成 config.yaml + 跑自检闭环。
+    """
+    from src.utils.config_init import (
+        describe_preset,
+        list_presets,
+        parse_set_args,
+        scaffold_config,
+    )
+    from src.utils.config_check import format_report, has_errors
+    from src.utils.config_manager import ConfigManager
+
+    presets = list_presets()
+    if not preset:
+        print("可用场景预设（python main.py --init <名称>）:")
+        for name in presets:
+            desc = describe_preset(name)
+            print(f"  - {name:<12} {desc}")
+        if not presets:
+            print("  （config/presets/ 下暂无预设）")
+        return 0
+
+    if preset not in presets:
+        print(f"✗ 未知预设: {preset}；可用: {', '.join(presets) or '（无）'}")
+        return 1
+
+    dest = Path(config_path) if config_path else ConfigManager().config_path
+    if str(dest).endswith("config.example.yaml"):
+        # 默认路径在 config.yaml 不存在时会回落 example；--init 应写 config.yaml
+        dest = Path(dest).parent / "config.yaml"
+
+    overrides = parse_set_args(set_pairs)
+    # 交互补填关键空位（仅 TTY；非交互/CI 走 --set）
+    if sys.stdin.isatty():
+        if "ai.api_key" not in overrides:
+            ans = input("AI api_key（回车跳过，稍后手填）: ").strip()
+            if ans:
+                overrides["ai.api_key"] = ans
+
+    ok, msg, issues = scaffold_config(preset, dest, overrides=overrides, force=force)
+    print(msg)
+    if not ok:
+        return 1
+    print(format_report(issues, config=None))
+    print("\n下一步: 编辑上面文件填好必填项，再运行 `python main.py --check` 复核。")
+    return 1 if has_errors(issues) else 0
+
+
 async def main():
     """主函数"""
     assistant = AIChatAssistant()
@@ -1637,6 +1787,31 @@ async def main():
 
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Telegram MTProto AI 多平台客服主程序")
+    parser.add_argument(
+        "--check", action="store_true",
+        help="只体检配置并退出（不启动服务）；有 error 级问题返回非零退出码")
+    parser.add_argument(
+        "--init", nargs="?", const="", metavar="PRESET",
+        help="用场景预设生成 config.yaml（无名称则列出可用预设）")
+    parser.add_argument(
+        "--set", action="append", metavar="KEY=VAL",
+        help="--init 时覆盖配置项，如 --set ai.api_key=sk-xxx（可多次）")
+    parser.add_argument(
+        "--force", action="store_true", help="--init 时覆盖已存在的 config.yaml")
+    parser.add_argument(
+        "--config", default=None, help="指定 config.yaml 路径（默认 config/config.yaml）")
+    args = parser.parse_args()
+
+    if args.init is not None:
+        sys.exit(run_init(args.init, args.config, args.set, args.force))
+
+    if args.check:
+        sys.exit(run_config_check(args.config))
+
     # 设置默认事件循环策略（Windows需要）
     if sys.platform == 'win32':
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())

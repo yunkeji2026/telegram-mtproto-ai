@@ -17,6 +17,13 @@ python -m pytest tests/ -n auto -q
 ```
 预期：全绿，0 fail，CI ~50 秒（baseline 266 → 4x+ 当前规模；不存具体数字，每次合 PR 会增加，按 `git log` 看实际）。
 
+> ⚠️ 本机若有常驻服务（app/RPA runner）在跑，`-n auto` 会与之争 CPU 把全量拖到数分钟，
+> 且**无超时时任一 worker 卡住会无限等**（曾出现「跑 50 分钟不结束」）。本机跑全量建议固定带超时兜底
+> （挂起会被点名而非无限等，已装 `pytest-timeout`）：
+> ```bash
+> python -m pytest tests/ -n auto -q --timeout=90 --timeout-method=thread
+> ```
+
 **仅 contacts/handoff 主线**（快速回归）：
 ```bash
 python -m pytest tests/test_contacts_*.py tests/test_gateway_*.py \

@@ -128,7 +128,52 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         templates.env.globals["site_name"] = domain_display
         templates.env.globals["site_name_short"] = domain_display
 
+    # ── C1-1 白标：品牌 overlay 注入 Jinja globals（优先于 domain pack）──
+    def _apply_branding_globals():
+        try:
+            from src.licensing import get_license_manager
+            from src.utils.branding import get_branding
+
+            _b = get_branding(getattr(config_manager, "config", None) or {},
+                              get_license_manager().status())
+            templates.env.globals["site_name"] = _b["site_name"]
+            templates.env.globals["site_name_short"] = _b["site_name_short"]
+            templates.env.globals["brand_primary_color"] = _b["primary_color"]
+            templates.env.globals["brand_logo_url"] = _b["logo_url"]
+            templates.env.globals["brand_login_subtitle"] = _b["login_subtitle"]
+            templates.env.globals["show_powered_by"] = _b["show_powered_by"]
+            templates.env.globals["powered_by_text"] = _b["powered_by_text"]
+        except Exception:
+            import logging as _lb
+            _lb.getLogger("admin").debug("品牌 globals 注入跳过", exc_info=True)
+
+    _apply_branding_globals()
+    app_branding_refresh = _apply_branding_globals
+
     app = FastAPI(title=templates.env.globals["site_name"], docs_url=None, redoc_url=None)
+
+    # ── C0-3 授权强制：只读模式拦截写操作（enforce 关 / 授权有效时零开销直通）──
+    @app.middleware("http")
+    async def _license_readonly_guard(request, call_next):
+        try:
+            from src.licensing import get_license_manager, is_write_blocked
+
+            st = get_license_manager().status()
+            if is_write_blocked(request.url.path, request.method, st):
+                from fastapi.responses import JSONResponse
+
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "ok": False,
+                        "error": "license_readonly",
+                        "detail": "授权已失效，系统处于只读模式，请联系厂商续费后恢复。",
+                    },
+                )
+        except Exception:  # pragma: no cover - 守卫自身异常绝不阻断请求
+            pass
+        return await call_next(request)
+
     _static_dir = Path(__file__).parent / "static"
     if _static_dir.is_dir():
         app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
@@ -703,6 +748,47 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         _log_au.getLogger("admin").warning(
             "auth_user 路由注册失败", exc_info=True
         )
+
+    # ── C0-1 授权状态只读 API ──────────────────────────────
+    try:
+        from src.web.routes.license_routes import register_license_routes
+
+        register_license_routes(app, api_auth=_api_auth)
+    except Exception:
+        import logging as _log_lic
+
+        _log_lic.getLogger("admin").warning("license 路由注册失败", exc_info=True)
+
+    # ── C1-1 白标品牌设置 API ──────────────────────────────
+    try:
+        from src.web.routes.branding_routes import register_branding_routes
+
+        app.state.branding_refresh = app_branding_refresh
+        register_branding_routes(app, api_auth=_api_auth, config_manager=config_manager)
+    except Exception:
+        import logging as _log_br
+
+        _log_br.getLogger("admin").warning("branding 路由注册失败", exc_info=True)
+
+    # ── C1-2 试用/Demo 数据 API ────────────────────────────
+    try:
+        from src.web.routes.demo_routes import register_demo_routes
+
+        register_demo_routes(app, api_auth=_api_auth, config_manager=config_manager)
+    except Exception:
+        import logging as _log_demo
+
+        _log_demo.getLogger("admin").warning("demo 路由注册失败", exc_info=True)
+
+    # ── D1 运行时健康检查 API（/api/admin/health）──────────
+    try:
+        from src.web.routes.runtime_health_routes import register_runtime_health_routes
+
+        register_runtime_health_routes(app, api_auth=_api_auth, config_manager=config_manager)
+    except Exception:
+        import logging as _log_rhealth
+
+        _log_rhealth.getLogger("admin").warning("runtime health 路由注册失败", exc_info=True)
 
     # 系统状态/指标/reactivation dry-run/审计热力图 已抽到 routes/monitoring_routes.py（批 G2-①）
     # （register_monitoring_routes 在 _admin_ctx + kb_store 就绪后调用，见下方 learner 注册附近）
