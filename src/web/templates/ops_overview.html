@@ -70,6 +70,19 @@
 
   <section>
     <h2>🚨 运维事件（health_alert 闭环）</h2>
+    <div style="display:flex; gap:10px; margin-bottom:10px; align-items:center;">
+      <select id="fltKind" onchange="loadIncidents()" style="background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:4px 8px;">
+        <option value="">全部类型</option>
+        <option value="health">🩺 健康</option>
+        <option value="billing">💸 计费</option>
+      </select>
+      <select id="fltStatus" onchange="loadIncidents()" style="background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:4px 8px;">
+        <option value="">全部状态</option>
+        <option value="open">open</option>
+        <option value="acked">acked</option>
+        <option value="resolved">resolved</option>
+      </select>
+    </div>
     <div id="incidents"><div class="empty">加载中…</div></div>
     <div style="margin-top:10px;">
       <button id="loadMoreBtn" style="display:none;" onclick="loadMoreIncidents()">加载更多历史</button>
@@ -83,24 +96,33 @@ function fmt(v, suffix){ if(v===null||v===undefined||v==='') return '—'; retur
 function dot(light){ var c=({green:'green',yellow:'yellow',red:'red'})[light]||'unknown'; return '<span class="light-dot '+c+'"></span>'; }
 function tsfmt(ts){ if(!ts) return '—'; try{ return new Date(ts*1000).toLocaleString(); }catch(e){ return '—'; } }
 
-// 纯 SVG 迷你折线（无依赖）。values: number[]; 末点高亮。
+// 纯 SVG 迷你折线（无依赖）。values: number[]; opts.labels: 各点标签（hover 提示）。
 function sparkline(values, opts){
   opts = opts || {};
   var w = opts.w || 220, h = opts.h || 44, pad = 4, color = opts.color || '#388bfd';
+  var labels = opts.labels || [];
   var vals = (values || []).map(function(v){ return Number(v) || 0; });
   if(vals.length < 2){ return '<div class="muted" style="font-size:12px;">数据不足</div>'; }
   var max = Math.max.apply(null, vals), min = Math.min.apply(null, vals);
   var span = (max - min) || 1;
   var n = vals.length;
-  var pts = vals.map(function(v, i){
+  var xy = vals.map(function(v, i){
     var x = pad + i * (w - 2*pad) / (n - 1);
     var y = h - pad - (v - min) / span * (h - 2*pad);
-    return x.toFixed(1) + ',' + y.toFixed(1);
+    return [x, y];
   });
-  var last = pts[pts.length-1].split(',');
+  var poly = xy.map(function(p){ return p[0].toFixed(1)+','+p[1].toFixed(1); }).join(' ');
+  // 逐点透明 hover 圆 + <title>：鼠标悬停显示「标签: 数值」。
+  var hovers = xy.map(function(p, i){
+    var lbl = labels[i] != null ? (labels[i] + '：') : '';
+    return '<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="6" '+
+      'fill="transparent" style="cursor:pointer;"><title>'+lbl+vals[i]+'</title></circle>';
+  }).join('');
+  var last = xy[xy.length-1];
   return '<svg width="'+w+'" height="'+h+'" viewBox="0 0 '+w+' '+h+'">' +
-    '<polyline fill="none" stroke="'+color+'" stroke-width="1.8" points="'+pts.join(' ')+'"/>' +
-    '<circle cx="'+last[0]+'" cy="'+last[1]+'" r="2.6" fill="'+color+'"/>' +
+    '<polyline fill="none" stroke="'+color+'" stroke-width="1.8" points="'+poly+'"/>' +
+    '<circle cx="'+last[0].toFixed(1)+'" cy="'+last[1].toFixed(1)+'" r="2.6" fill="'+color+'"/>' +
+    hovers +
     '</svg> <span class="muted" style="font-size:12px;">峰 '+max+'</span>';
 }
 
@@ -127,9 +149,15 @@ async function loadOverview(){
 
     var sec = d.sections || {};
     var aiTrend = (((sec.roi||{}).automation)||{}).trend || [];
-    document.getElementById('sparkAI').innerHTML = sparkline(aiTrend.map(function(p){ return p.ai; }), {color:'#2ea043'});
+    document.getElementById('sparkAI').innerHTML = sparkline(
+      aiTrend.map(function(p){ return p.ai; }),
+      {color:'#2ea043', labels: aiTrend.map(function(p){ return p.day; })});
     var relTrend = ((sec.reliability||{}).trend) || [];
-    document.getElementById('sparkRel').innerHTML = sparkline(relTrend.map(function(p){ return p.total; }), {color:'#388bfd'});
+    document.getElementById('sparkRel').innerHTML = sparkline(
+      relTrend.map(function(p){ return p.total; }),
+      {color:'#388bfd', labels: relTrend.map(function(p){
+        try{ return new Date(p.ts*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); }catch(e){ return ''; }
+      })});
 
     const an = d.billing_anomalies || [];
     document.getElementById('billingAnomalies').innerHTML = an.length ? (
@@ -165,9 +193,15 @@ function updateMoreBtn(){
   document.getElementById('loadMoreBtn').style.display = _incCursor ? '' : 'none';
 }
 
+function incFilterQS(){
+  var k = (document.getElementById('fltKind')||{}).value || '';
+  var s = (document.getElementById('fltStatus')||{}).value || '';
+  return (k?('&kind='+encodeURIComponent(k)):'') + (s?('&status='+encodeURIComponent(s)):'');
+}
+
 async function loadIncidents(){
   try{
-    const r = await fetch('/api/admin/incidents?limit='+_incPageSize, {credentials:'same-origin'});
+    const r = await fetch('/api/admin/incidents?limit='+_incPageSize+incFilterQS(), {credentials:'same-origin'});
     const d = await r.json();
     var sug = d.suggested_assignee;
     _suggestedAssignee = (sug && sug.agent_id) ? String(sug.agent_id) : '';
@@ -186,7 +220,7 @@ async function loadIncidents(){
 async function loadMoreIncidents(){
   if(!_incCursor) return;
   try{
-    const r = await fetch('/api/admin/incidents?limit='+_incPageSize+'&before_id='+_incCursor, {credentials:'same-origin'});
+    const r = await fetch('/api/admin/incidents?limit='+_incPageSize+'&before_id='+_incCursor+incFilterQS(), {credentials:'same-origin'});
     const d = await r.json();
     _incCursor = d.next_cursor || null;
     var tbl = document.getElementById('incTable');
