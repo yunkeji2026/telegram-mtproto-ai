@@ -510,6 +510,26 @@ _MIGRATIONS = [
          lang_matched INTEGER NOT NULL DEFAULT 0,
          by_lang_json TEXT NOT NULL DEFAULT '{}'
        )""",
+    # E2：运维事件（health_alert 闭环）。watchdog 红/黄告警按 signature 去重落表，
+    # 恢复时自动 resolve；主管可 ack/指派。让系统告警可追踪到处理人而非只推一条通知。
+    """CREATE TABLE IF NOT EXISTS ops_incidents (
+         id            INTEGER PRIMARY KEY AUTOINCREMENT,
+         kind          TEXT NOT NULL DEFAULT 'health',
+         signature     TEXT NOT NULL DEFAULT '',
+         light         TEXT NOT NULL DEFAULT '',
+         summary_json  TEXT NOT NULL DEFAULT '{}',
+         problems_json TEXT NOT NULL DEFAULT '[]',
+         status        TEXT NOT NULL DEFAULT 'open',
+         assigned_to   TEXT NOT NULL DEFAULT '',
+         opened_ts     REAL NOT NULL DEFAULT 0,
+         updated_ts    REAL NOT NULL DEFAULT 0,
+         acked_ts      REAL NOT NULL DEFAULT 0,
+         resolved_ts   REAL NOT NULL DEFAULT 0
+       )""",
+    "CREATE INDEX IF NOT EXISTS idx_ops_incidents_status ON ops_incidents(status, opened_ts)",
+    "CREATE INDEX IF NOT EXISTS idx_ops_incidents_sig    ON ops_incidents(kind, signature, status)",
+    # 存量库（本分支早期已建表者）补 kind 列
+    "ALTER TABLE ops_incidents ADD COLUMN kind TEXT NOT NULL DEFAULT 'health'",
 ]
 
 
@@ -2457,6 +2477,144 @@ class InboxStore:
             )
             self._conn.commit()
         return cur.rowcount > 0
+
+    # ── E2：运维事件（health_alert 闭环）────────────────────────────────────
+
+    def open_or_update_incident(
+        self,
+        *,
+        signature: str,
+        light: str,
+        kind: str = "health",
+        summary: Optional[Dict[str, Any]] = None,
+        problems: Optional[List[Dict[str, Any]]] = None,
+        ts: Optional[float] = None,
+    ) -> int:
+        """按 (kind, signature) 去重地开/更新一条未关闭的运维事件。
+
+        同类型同 signature 已有未 resolved 事件 → 更新 light/summary/problems/updated_ts；
+        否则新建 open 事件。返回事件 id。kind ∈ health|billing。
+        """
+        now = float(ts if ts is not None else time.time())
+        sig = str(signature or "")
+        knd = str(kind or "health")
+        summary_json = json.dumps(summary or {}, ensure_ascii=False)
+        problems_json = json.dumps(problems or [], ensure_ascii=False)
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id FROM ops_incidents "
+                "WHERE kind=? AND signature=? AND status!='resolved' "
+                "ORDER BY id DESC LIMIT 1",
+                (knd, sig),
+            ).fetchone()
+            if row:
+                iid = int(row["id"])
+                self._conn.execute(
+                    "UPDATE ops_incidents SET light=?, summary_json=?, "
+                    "problems_json=?, updated_ts=? WHERE id=?",
+                    (str(light or ""), summary_json, problems_json, now, iid),
+                )
+                self._conn.commit()
+                return iid
+            cur = self._conn.execute(
+                "INSERT INTO ops_incidents "
+                "(kind, signature, light, summary_json, problems_json, status, "
+                " opened_ts, updated_ts) "
+                "VALUES (?,?,?,?,?,'open',?,?)",
+                (knd, sig, str(light or ""), summary_json, problems_json, now, now),
+            )
+            self._conn.commit()
+            return int(cur.lastrowid)
+
+    def resolve_open_incidents(
+        self, *, kind: str = "", ts: Optional[float] = None,
+    ) -> int:
+        """把未 resolved 的事件标记为 resolved；kind 非空时仅限该类型。返回受影响条数。"""
+        now = float(ts if ts is not None else time.time())
+        sql = "UPDATE ops_incidents SET status='resolved', resolved_ts=?, updated_ts=? WHERE status!='resolved'"
+        params: List[Any] = [now, now]
+        if kind:
+            sql += " AND kind=?"
+            params.append(str(kind))
+        with self._lock:
+            cur = self._conn.execute(sql, tuple(params))
+            self._conn.commit()
+        return cur.rowcount
+
+    def ack_incident(
+        self, incident_id: int, *, assigned_to: str = "", ts: Optional[float] = None,
+    ) -> bool:
+        """主管确认/认领一条事件（status→acked，记 acked_ts 与 assigned_to）。"""
+        now = float(ts if ts is not None else time.time())
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE ops_incidents SET status='acked', acked_ts=?, "
+                "assigned_to=?, updated_ts=? WHERE id=? AND status!='resolved'",
+                (now, str(assigned_to or ""), now, int(incident_id)),
+            )
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    def list_incidents(
+        self, *, status: str = "", kind: str = "", limit: int = 50,
+        before_id: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """列出运维事件（默认全部，可按 status / kind 过滤），新→旧。
+
+        before_id>0 时只返回 id 小于它的（游标分页，回看历史）。
+        """
+        sql = "SELECT * FROM ops_incidents"
+        clauses: List[str] = []
+        params: List[Any] = []
+        if status:
+            clauses.append("status=?")
+            params.append(str(status))
+        if kind:
+            clauses.append("kind=?")
+            params.append(str(kind))
+        if before_id and int(before_id) > 0:
+            clauses.append("id<?")
+            params.append(int(before_id))
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(int(limit))
+        out: List[Dict[str, Any]] = []
+        with self._lock:
+            rows = self._conn.execute(sql, tuple(params)).fetchall()
+        for r in rows:
+            d = dict(r)
+            try:
+                d["summary"] = json.loads(d.pop("summary_json", "{}") or "{}")
+            except Exception:
+                d["summary"] = {}
+            try:
+                d["problems"] = json.loads(d.pop("problems_json", "[]") or "[]")
+            except Exception:
+                d["problems"] = []
+            out.append(d)
+        return out
+
+    def count_open_incidents(self) -> int:
+        """未关闭（open + acked）的事件数。"""
+        with self._lock:
+            return self._conn.execute(
+                "SELECT COUNT(*) FROM ops_incidents WHERE status!='resolved'"
+            ).fetchone()[0]
+
+    def purge_resolved_incidents(self, older_than_ts: float) -> int:
+        """删除 resolved_ts 早于阈值的已关闭事件（保留期清理）。返回删除条数。
+
+        只删 status='resolved' 且 resolved_ts>0 的；未关闭事件永不删。
+        """
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM ops_incidents "
+                "WHERE status='resolved' AND resolved_ts>0 AND resolved_ts<?",
+                (float(older_than_ts),),
+            )
+            self._conn.commit()
+        return cur.rowcount
 
     def count_assigned_escalations(
         self, agent_id: str, since_ts: float = 0.0,

@@ -142,19 +142,30 @@ class HealthWatchdog:
         interval_sec: float = 300.0,
         pending_threshold: int = 200,
         alert_on_warn: bool = False,
+        billing_interval_sec: float = 3600.0,
+        incident_retention_days: float = 30.0,
     ) -> None:
         self._app = app
         self._config_manager = config_manager
         self._interval = max(30.0, float(interval_sec))
         self._pending_threshold = int(pending_threshold)
+        # 计费巡检比健康巡检稀疏（默认 1h）：对账单是月窗聚合，无需每个健康周期都算。
+        self._billing_interval = max(self._interval, float(billing_interval_sec))
+        self._last_billing_check_ts = 0.0
+        # 已关闭事件保留期（天）；<=0 关闭清理。每日节流跑一次 DELETE，防表无限膨胀。
+        self._retention_days = float(incident_retention_days)
+        self._purge_interval = 86400.0
+        self._last_purge_ts = 0.0
         # 默认只对 fail（red）告警；warn 噪音大，可显式开
         self._alert_on_warn = bool(alert_on_warn)
         self._stop_evt = asyncio.Event()
         self._running = False
         self._last_sig: Optional[str] = None
         self._last_light: str = "green"
+        self._last_billing_sig: Optional[str] = None
         self.total_alerts: int = 0
         self.total_recoveries: int = 0
+        self.total_billing_alerts: int = 0
         self.last_check_ts: float = 0.0
         self.last_light: str = "green"
 
@@ -210,22 +221,166 @@ class HealthWatchdog:
             self._last_sig = None
             self._last_light = light
 
+        # E3：计费异常巡检（超席位/超额），独立去抖，经 D3 通道外发。
+        try:
+            self._check_billing()
+        except Exception:
+            logger.debug("计费巡检异常（已忽略）", exc_info=True)
+
+        # 运维卫生：按保留期清理已关闭事件（每日节流一次）。
+        try:
+            self._maybe_purge_incidents()
+        except Exception:
+            logger.debug("事件清理异常（已忽略）", exc_info=True)
+
+    def _license_quota(self) -> Dict[str, Any]:
+        try:
+            from src.licensing import get_license_manager
+            st = get_license_manager().status()
+            return {
+                "plan": st.plan, "state": st.state,
+                "customer": getattr(st, "customer", ""),
+                "seats": st.seats, "channels": list(st.channels),
+            }
+        except Exception:
+            return {"plan": "community", "state": "unavailable", "customer": "",
+                    "seats": 0, "channels": []}
+
+    def _check_billing(self, *, now: Optional[float] = None) -> None:
+        ts = float(now if now is not None else time.time())
+        # 节流：距上次计费巡检不足 billing_interval 则跳过（首次 last=0 必跑）。
+        if self._last_billing_check_ts and (ts - self._last_billing_check_ts) < self._billing_interval:
+            return
+        inbox = self._inbox()
+        if inbox is None or not hasattr(inbox, "get_usage_stats"):
+            return
+        self._last_billing_check_ts = ts
+        from src.utils.billing import compute_statement
+        from src.utils.ops_overview import billing_anomalies
+
+        config = getattr(self._config_manager, "config", None) or {}
+        pricing = config.get("pricing")
+        lt = time.localtime()
+        try:
+            statement = compute_statement(
+                inbox, lt.tm_year, lt.tm_mon,
+                license_status=self._license_quota(), pricing=pricing,
+            )
+        except Exception:
+            logger.debug("对账单计算失败（已忽略）", exc_info=True)
+            return
+        anomalies = billing_anomalies(statement)
+        sig = "|".join(sorted(a.get("code", "") for a in anomalies))
+
+        if anomalies:
+            if sig != self._last_billing_sig:
+                self._emit_billing_alert(anomalies)
+                self.total_billing_alerts += 1
+            self._last_billing_sig = sig
+        else:
+            if self._last_billing_sig:
+                self._emit_billing_recovery()
+            self._last_billing_sig = None
+
+    def _emit_billing_alert(self, anomalies: List[Dict[str, Any]]) -> None:
+        # E3↔E2：计费异常也进 ops_incidents（kind=billing），与健康事件统一可 ack/指派/恢复。
+        try:
+            inbox = self._inbox()
+            if inbox is not None and hasattr(inbox, "open_or_update_incident"):
+                has_fail = any(a.get("severity") == "fail" for a in anomalies)
+                problems = [
+                    {"id": a.get("code"), "name": "计费", "status": a.get("severity"),
+                     "detail": a.get("message")}
+                    for a in anomalies
+                ]
+                inbox.open_or_update_incident(
+                    kind="billing",
+                    signature="|".join(sorted(a.get("code", "") for a in anomalies)),
+                    light="red" if has_fail else "yellow",
+                    summary={"anomalies": len(anomalies)},
+                    problems=problems,
+                )
+        except Exception:
+            logger.debug("计费事件落表失败（已忽略）", exc_info=True)
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            get_event_bus().publish("billing_alert", {
+                "anomalies": anomalies, "recovered": False,
+            })
+            logger.warning("HealthWatchdog 发出计费异常告警：%d 项", len(anomalies))
+        except Exception:
+            logger.debug("billing_alert 发布失败（已忽略）", exc_info=True)
+
+    def _emit_billing_recovery(self) -> None:
+        try:
+            inbox = self._inbox()
+            if inbox is not None and hasattr(inbox, "resolve_open_incidents"):
+                inbox.resolve_open_incidents(kind="billing")
+        except Exception:
+            logger.debug("计费事件 resolve 失败（已忽略）", exc_info=True)
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            get_event_bus().publish("billing_alert", {"anomalies": [], "recovered": True})
+            logger.info("HealthWatchdog 发出计费恢复通知")
+        except Exception:
+            logger.debug("billing recovery 发布失败（已忽略）", exc_info=True)
+
+    def _maybe_purge_incidents(self, *, now: Optional[float] = None) -> int:
+        if self._retention_days <= 0:
+            return 0
+        ts = float(now if now is not None else time.time())
+        if self._last_purge_ts and (ts - self._last_purge_ts) < self._purge_interval:
+            return 0
+        inbox = self._inbox()
+        if inbox is None or not hasattr(inbox, "purge_resolved_incidents"):
+            return 0
+        self._last_purge_ts = ts
+        cutoff = ts - self._retention_days * 86400.0
+        n = inbox.purge_resolved_incidents(cutoff)
+        if n:
+            logger.info("HealthWatchdog 清理已关闭运维事件 %d 条（保留 %.0f 天）",
+                        n, self._retention_days)
+        return n
+
+    def _inbox(self):
+        return getattr(getattr(self._app, "state", self._app), "inbox_store", None)
+
     def _emit_alert(self, health: Dict[str, Any]) -> None:
+        problems = problems_of(health)
+        # E2：先落表为运维事件（按健康签名去重 open/update），可追踪到处理人。
+        try:
+            inbox = self._inbox()
+            if inbox is not None and hasattr(inbox, "open_or_update_incident"):
+                inbox.open_or_update_incident(
+                    kind="health",
+                    signature=health_signature(health),
+                    light=str(health.get("light") or ""),
+                    summary=health.get("summary") or {},
+                    problems=problems,
+                )
+        except Exception:
+            logger.debug("运维事件落表失败（已忽略）", exc_info=True)
         try:
             from src.integrations.shared.event_bus import get_event_bus
             get_event_bus().publish("health_alert", {
                 "light": health.get("light"),
-                "problems": problems_of(health),
+                "problems": problems,
                 "summary": health.get("summary"),
                 "recovered": False,
             })
             logger.warning("HealthWatchdog 发出健康告警：light=%s 异常 %d 项",
-                           health.get("light"),
-                           len(problems_of(health)))
+                           health.get("light"), len(problems))
         except Exception:
             logger.debug("health_alert 发布失败（已忽略）", exc_info=True)
 
     def _emit_recovery(self, health: Dict[str, Any]) -> None:
+        # E2：健康恢复时把未关闭的「健康」事件标 resolved（不动计费事件）。
+        try:
+            inbox = self._inbox()
+            if inbox is not None and hasattr(inbox, "resolve_open_incidents"):
+                inbox.resolve_open_incidents(kind="health")
+        except Exception:
+            logger.debug("运维事件 resolve 失败（已忽略）", exc_info=True)
         try:
             from src.integrations.shared.event_bus import get_event_bus
             get_event_bus().publish("health_alert", {
@@ -242,6 +397,7 @@ class HealthWatchdog:
             "alert_on_warn": self._alert_on_warn,
             "total_alerts": self.total_alerts,
             "total_recoveries": self.total_recoveries,
+            "total_billing_alerts": self.total_billing_alerts,
             "last_check_ts": self.last_check_ts,
             "last_light": self.last_light,
         }

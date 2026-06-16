@@ -85,6 +85,7 @@ WRITE_PERMISSIONS = {
     "manage_settings":{ROLE_MASTER},
     "import_export":  {ROLE_MASTER},
     "edit_persona":   {ROLE_MASTER, ROLE_ADMIN},
+    "manage_ops":     {ROLE_MASTER, ROLE_ADMIN},  # E2：确认/指派运维事件
 }
 
 
