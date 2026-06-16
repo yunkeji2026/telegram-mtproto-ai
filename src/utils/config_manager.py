@@ -20,9 +20,11 @@ class ConfigManager:
         Args:
             config_path: 配置文件路径，如果为None则使用默认路径
         """
+        # logger 必须先于 _get_default_config_path()，后者在回退到 example 配置时
+        # 会用 self.logger.warning（纯净 checkout 无 config.yaml 时即触发）。
+        self.logger = logging.getLogger(__name__)
         self.config_path = Path(config_path) if config_path else self._get_default_config_path()
         self.config: Dict[str, Any] = {}
-        self.logger = logging.getLogger(__name__)
         self._quota_rules_cache: Optional[Dict[str, Any]] = None
         self._quota_rules_mtime: float = 0
         self._templates_cache: Optional[Dict[str, Any]] = None
