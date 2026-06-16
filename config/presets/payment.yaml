@@ -1,0 +1,59 @@
+# 场景预设：支付通道客服（Telegram 为主 + 收窄回复 + 人工转接）
+# ─────────────────────────────────────────────────────────────────────
+# 适用：代收/代付通道群客服，群内只答「通道/额度/状态」类，敏感问题转人工。
+# 开局只需填：① telegram.api_id/api_hash/phone_number ② ai.api_key
+# 填完运行：python main.py --check   应为 0 错误。
+# ─────────────────────────────────────────────────────────────────────
+
+domain: payment
+
+ai:
+  provider: openai_compatible
+  api_key: "YOUR_API_KEY"            # ← 必填
+  base_url: "https://api.deepseek.com"
+  model: "deepseek-chat"
+  temperature: 0.6
+  max_tokens: 1024
+  timeout: 30
+  channel_status_include_fee: false  # 对客不宣读具体费率数值
+
+telegram:
+  api_id: "YOUR_API_ID"              # ← 必填
+  api_hash: "YOUR_API_HASH"          # ← 必填
+  phone_number: "+8612345678900"     # ← 必填（带国际区号）
+  session_name: payment_bot
+  process_private: true
+  process_groups: true               # 通道群常在群内答（按需）
+
+skills:
+  enabled: [greeting, channel_info, status_check, price_check, order_query, complaint]
+
+# 收窄回复：只处理在线确认 / 通道状态·额度·成功率类，订单/退款/凭证不自动答
+narrow_reply:
+  enabled: true
+  allowed_intents: [greeting, channel_info, status_check]
+
+# 人工转接：同问多次自动 @ 人工（值班名单在 agents[] 填）
+human_escalation:
+  enabled: true
+  repeat_threshold: 3
+  repeat_window_sec: 600
+  duty_mode: always
+  timezone: Asia/Shanghai
+  agents: []                         # 填客服 user_id/username
+
+inbox:
+  enabled: true
+  sla_warn_sec: 1800
+  sla_crit_sec: 7200
+
+web_admin:
+  site_name: 通道客服系统
+  host: 127.0.0.1
+  port: 18787
+  auth_token: "YOUR_ADMIN_TOKEN"
+  secret_key: "YOUR_FLASK_SECRET_KEY"
+
+logging:
+  level: INFO
+  file: logs/app.log

@@ -477,6 +477,35 @@ def register_kb_routes(app, ctx):
                             f"added={result['added']},updated={result['updated']}")
         return result
 
+    # ── P1-2 冷启动向导：空 KB 一键播种场景起步 FAQ 包 ----------
+    @app.get("/api/kb/cold-start")
+    async def api_kb_cold_start(request: Request):
+        """KB 冷启动现状 + 可选起步包列表（供向导渲染）。"""
+        _api_auth(request)
+        from src.utils.kb_starter import kb_readiness, list_starter_packs
+        return {"ok": True, "readiness": kb_readiness(_kb_store),
+                "packs": list_starter_packs()}
+
+    @app.post("/api/kb/seed-pack")
+    async def api_kb_seed_pack(request: Request):
+        """播种某场景起步包到 KB（按标题去重）。Body: {domain, dedup?}"""
+        _api_auth(request)
+        from src.utils.kb_starter import kb_readiness, seed_starter_pack
+        body = await request.json()
+        domain = str(body.get("domain") or "general")
+        dedup = bool(body.get("dedup", True))
+        try:
+            added, skipped, titles = seed_starter_pack(
+                _kb_store, domain, dedup=dedup)
+        except Exception as exc:
+            return {"ok": False, "detail": str(exc)}
+        actor = request.session.get("username", "web_admin")
+        if audit_store:
+            audit_store.log(actor, "kb_seed_pack",
+                            f"domain={domain},added={added},skipped={skipped}")
+        return {"ok": True, "added": added, "skipped": skipped,
+                "added_titles": titles, "readiness": kb_readiness(_kb_store)}
+
     # ── 过期检测 / 批量操作 / 使用率（批 5D）----------
     @app.get("/api/kb/stale")
     async def api_kb_stale(request: Request, days: int = 7):
@@ -910,6 +939,55 @@ def register_kb_routes(app, ctx):
         except Exception:
             pass
         return {"id": entry_id, "ok": True}
+
+    # ── P3-2 质量→KB 改进闭环：把「AI 答错被改写/拒绝」会话沉淀为 KB 条目 ──
+    @app.get("/api/kb/improvements")
+    async def api_kb_improvements(request: Request, days: int = 7, limit: int = 20):
+        """改进候选：近期被坐席改写/拒绝的 AI 草稿 → 客户问句 + 改写后好答案。"""
+        _api_auth(request)
+        import time as _t
+        inbox = getattr(request.app.state, "inbox_store", None)
+        if inbox is None or not hasattr(inbox, "get_kb_improvement_candidates"):
+            return {"ok": True, "candidates": [], "available": False}
+        days = max(1, min(90, int(days or 7)))
+        since = _t.time() - days * 86400
+        try:
+            cands = inbox.get_kb_improvement_candidates(since, limit=int(limit or 20))
+        except Exception:
+            return {"ok": True, "candidates": [], "available": False}
+        return {"ok": True, "candidates": cands, "available": True, "days": days}
+
+    @app.post("/api/kb/improvements/convert")
+    async def api_kb_improvements_convert(request: Request):
+        """把一条改进候选转为 KB 条目（trigger=客户问句，reply=改写后答案）+ 后台 AI 填充。"""
+        _api_auth(request)
+        data = await request.json()
+        question = (data.get("question") or "").strip()
+        if not question:
+            raise HTTPException(status_code=400, detail="question 不能为空")
+        _title = (data.get("title") or question[:50]).strip()
+        _cat = data.get("category", "其他")
+        reply = (data.get("suggested_reply") or "").strip()
+        entry_id = _kb_store.add_entry({
+            "category": _cat,
+            "title": _title,
+            "triggers": [question],
+            "scenario": f"客户问：{question}",
+            "example_reply_zh": reply,
+        })
+        actor = request.session.get("username", "web_admin")
+        if audit_store:
+            audit_store.log(actor, "kb_improve_convert", entry_id)
+        # 无改写答案（rejected 候选）时后台用 AI 填充；有答案则保留人工好答案不覆盖
+        if not reply:
+            import asyncio as _asyncio
+            try:
+                _asyncio.get_running_loop().create_task(
+                    auto_fill_entry(config_manager, _kb_store, entry_id, _title, _cat,
+                                    source_query=question))
+            except Exception:
+                pass
+        return {"id": entry_id, "ok": True, "ai_filled": not reply}
 
     @app.post("/api/kb/accept-suggestion")
     async def api_kb_accept_suggestion(request: Request):

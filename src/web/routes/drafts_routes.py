@@ -545,6 +545,14 @@ def register_metrics_route(app, *, api_auth):
         except Exception:
             metrics["sla_watcher"] = {"running": False}
 
+        # P3：AutoClaimWorker（auto_assign 自动认领执行端）
+        try:
+            acw = getattr(request.app.state, "auto_claim_worker", None)
+            metrics["auto_claim"] = (acw.status_snapshot()
+                                     if acw is not None else {"running": False})
+        except Exception:
+            metrics["auto_claim"] = {"running": False}
+
         # WebhookNotifier (L2)
         try:
             whn = getattr(request.app.state, "webhook_notifier", None)
@@ -596,6 +604,13 @@ def register_metrics_route(app, *, api_auth):
         except Exception:
             pass
 
+        # P1-4：出向翻译漏斗（覆盖率/auto 解析失败率/降级率/按语言分布）
+        try:
+            from src.ai.outbound_translation_stats import get_outbound_translation_stats
+            metrics["outbound_translation"] = get_outbound_translation_stats().dump()
+        except Exception:
+            pass
+
         # P58：通用 provider 用量（OCR/ASR 等多模态后端）
         try:
             from src.ai.provider_stats import all_provider_stats
@@ -640,6 +655,17 @@ def register_metrics_route(app, *, api_auth):
                    metrics["sla_watcher"].get("total_reassigned", 0),
                    "Total drafts auto-reassigned")
 
+            ac = metrics.get("auto_claim", {})
+            _gauge("ws_auto_claim_running",
+                   1 if ac.get("running") else 0,
+                   "AutoClaimWorker is running")
+            _gauge("ws_auto_claim_total",
+                   ac.get("total_claimed", 0),
+                   "Total conversations auto-claimed")
+            _gauge("ws_auto_claim_lang_matched_total",
+                   ac.get("total_lang_matched", 0),
+                   "Auto-claims where agent language matched conversation")
+
             _gauge("ws_webhook_total_sent",
                    metrics["webhook"].get("total_sent", 0),
                    "Total webhook notifications sent")
@@ -660,6 +686,13 @@ def register_metrics_route(app, *, api_auth):
             _gauge("ws_sse_subscribers",
                    eb.get("subscriber_count", 0),
                    "Active SSE subscriber count")
+
+            # P1-4：出向翻译漏斗（覆盖率/auto 失败/降级/按语言）以 counter 形式输出
+            try:
+                from src.ai.outbound_translation_stats import get_outbound_translation_stats
+                buf.write(get_outbound_translation_stats().dump_prom())
+            except Exception:
+                pass
 
             return PlainTextResponse(buf.getvalue(), media_type="text/plain; version=0.0.4")
 

@@ -1,0 +1,192 @@
+{% extends "workspace_base.html" %}
+{% block title %}AI 回复质量{% endblock %}
+{% block head %}
+<style>
+  .aq-wrap{height:100%;overflow-y:auto;background:#f7f8fa;padding:18px;max-width:900px;margin:0 auto;}
+  .aq-head{display:flex;justify-content:space-between;align-items:center;margin:6px 0 16px;}
+  .aq-head h2{margin:0;font-size:19px;}
+  .aq-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));gap:14px;margin-bottom:16px;}
+  .aq-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:16px;}
+  .aq-card .v{font-size:28px;font-weight:800;color:#0f172a;}
+  .aq-card .v.good{color:#15803d;} .aq-card .v.warn{color:#b45309;} .aq-card .v.bad{color:#b91c1c;}
+  .aq-card .l{font-size:12px;color:#64748b;margin-top:4px;}
+  .aq-card .d{font-size:11px;margin-top:4px;font-weight:600;}
+  .aq-card .d.up{color:#b91c1c;} .aq-card .d.down{color:#15803d;} .aq-card .d.flat{color:#94a3b8;}
+  .aq-sec{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:18px;margin-bottom:14px;}
+  .aq-sec h3{margin:0 0 12px;font-size:14px;color:#374151;}
+  .aq-bar{display:flex;height:26px;border-radius:7px;overflow:hidden;background:#f1f5f9;}
+  .aq-bar i{display:block;height:100%;}
+  .aq-legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:#475569;margin-top:10px;}
+  .aq-dot{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;}
+  .aq-spark{display:flex;align-items:flex-end;gap:3px;height:50px;margin-top:6px;}
+  .aq-spark .col{flex:1;min-width:3px;background:#e5e7eb;border-radius:1px;position:relative;}
+  .aq-spark .col i{position:absolute;bottom:0;left:0;right:0;background:#2563eb;border-radius:1px;}
+  .aq-hint{font-size:13px;padding:10px 12px;border-radius:9px;margin-bottom:8px;}
+  .aq-hint.warn{background:#fffbeb;color:#92400e;border:1px solid #fcd34d;}
+  .aq-hint.good{background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;}
+  .aq-hint.info{background:#f1f5f9;color:#475569;}
+  .aq-back{font-size:12px;color:#2563eb;text-decoration:none;}
+  .aq-pill{font-size:12px;padding:4px 10px;border:1px solid #d1d5db;border-radius:14px;background:#fff;cursor:pointer;}
+  .aq-pill.active{background:#2563eb;color:#fff;border-color:#2563eb;}
+</style>
+{% endblock %}
+{% block content %}
+<div class="aq-wrap">
+  <a class="aq-back" href="/workspace/dash">← 返回今日概览</a>
+  <div class="aq-head">
+    <h2>AI 回复质量</h2>
+    <div style="display:flex;gap:8px;">
+      <span class="aq-pill active" data-days="7" onclick="aqDays(7,this)">近 7 天</span>
+      <span class="aq-pill" data-days="30" onclick="aqDays(30,this)">近 30 天</span>
+    </div>
+  </div>
+
+  <div id="aq-empty" style="display:none;color:#94a3b8;font-size:14px;padding:40px;text-align:center;">
+    暂无 AI 草稿处置数据（接入渠道 + 开启 AI 自动应答后将逐步积累）。
+  </div>
+
+  <div id="aq-body" style="display:none;">
+    <div id="aq-hints"></div>
+    <div class="aq-grid" id="aq-cards"></div>
+    <div class="aq-sec">
+      <h3>处置构成（窗口内全部 AI 草稿）</h3>
+      <div class="aq-bar" id="aq-bar"></div>
+      <div class="aq-legend" id="aq-legend"></div>
+    </div>
+    <div class="aq-sec">
+      <h3>自动通过率趋势</h3>
+      <div class="aq-spark" id="aq-spark"></div>
+      <div style="font-size:11px;color:#94a3b8;margin-top:4px;">每日 autosend / 当日处置总数</div>
+    </div>
+    <div class="aq-sec">
+      <h3>📥 知识库改进候选（AI 答错被改写/拒绝的会话）</h3>
+      <div style="font-size:12px;color:#64748b;margin-bottom:10px;">把这些「人工纠正过」的问答一键沉淀为知识，AI 下次就会了。</div>
+      <div id="aq-improve"><span style="color:#94a3b8;font-size:13px;">加载中…</span></div>
+    </div>
+  </div>
+</div>
+<style>
+  .imp-item{border:1px solid #e5e7eb;border-radius:10px;padding:12px;margin-bottom:10px;}
+  .imp-q{font-size:13px;color:#0f172a;font-weight:600;}
+  .imp-tag{font-size:11px;font-weight:700;padding:2px 8px;border-radius:7px;margin-left:8px;}
+  .imp-tag.edit{background:#fef3c7;color:#b45309;} .imp-tag.reject{background:#fee2e2;color:#b91c1c;}
+  .imp-r{font-size:12px;color:#475569;margin-top:6px;background:#f8fafc;border-radius:7px;padding:8px;}
+  .imp-r.empty{color:#94a3b8;font-style:italic;}
+  .imp-act{margin-top:8px;display:flex;gap:8px;align-items:center;}
+  .imp-act button{border:0;border-radius:7px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;background:#16a34a;color:#fff;}
+  .imp-act button:disabled{background:#cbd5e1;}
+  .imp-msg{font-size:12px;}
+  .imp-msg.ok{color:#15803d;} .imp-msg.err{color:#b91c1c;}
+</style>
+
+<script>
+var AQ_DAYS=7;
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function aqDays(d,el){ AQ_DAYS=d; document.querySelectorAll('.aq-pill').forEach(function(p){p.classList.remove('active');}); if(el)el.classList.add('active'); load(); }
+
+function delta(dp, goodWhenDown){
+  if(dp==null) return '<div class="d flat">环比 —</div>';
+  var improving = goodWhenDown ? dp<0 : dp>0;
+  var cls = dp===0?'flat':(improving?'down':'up');
+  var arrow = dp>0?'▲':(dp<0?'▼':'■');
+  return '<div class="d '+cls+'">环比 '+arrow+' '+Math.abs(dp)+'pp</div>';
+}
+
+function card(v, label, cls, deltaH){
+  return '<div class="aq-card"><div class="v '+(cls||'')+'">'+esc(v)+'</div>'
+    +'<div class="l">'+esc(label)+'</div>'+(deltaH||'')+'</div>';
+}
+
+var SEG=[['autosend','#2563eb','AI 自动发'],['approved','#16a34a','批准发'],
+         ['edit_send','#f59e0b','改写后发'],['force_override','#7c3aed','强制放行'],
+         ['rejected','#9ca3af','拒绝'],['blocked','#dc2626','拦截']];
+
+function renderBar(counts){
+  var total=0; SEG.forEach(function(s){total+=counts[s[0]]||0;});
+  var bar=document.getElementById('aq-bar'), leg=document.getElementById('aq-legend');
+  if(!total){ bar.innerHTML='<i style="width:100%;background:#f1f5f9;"></i>'; leg.innerHTML='<span style="color:#94a3b8;">暂无处置</span>'; return; }
+  bar.innerHTML=SEG.map(function(s){var n=counts[s[0]]||0; var w=n/total*100; return w>0?'<i style="width:'+w+'%;background:'+s[1]+';" title="'+s[2]+' '+n+'"></i>':'';}).join('');
+  leg.innerHTML=SEG.map(function(s){var n=counts[s[0]]||0; return '<span><span class="aq-dot" style="background:'+s[1]+'"></span>'+s[2]+' '+n+'</span>';}).join('');
+}
+
+function renderSpark(trend){
+  var el=document.getElementById('aq-spark');
+  if(!trend||!trend.length){ el.innerHTML='<span style="font-size:11px;color:#cbd5e1;">暂无数据</span>'; return; }
+  el.innerHTML=trend.map(function(t){
+    var rate=t.total?Math.round((t.autosend||0)/t.total*100):0;
+    return '<div class="col" title="'+esc(t.day)+'：'+rate+'%（'+(t.autosend||0)+'/'+(t.total||0)+'）"><i style="height:'+rate+'%"></i></div>';
+  }).join('');
+}
+
+function renderHints(hints){
+  document.getElementById('aq-hints').innerHTML=(hints||[]).map(function(h){
+    return '<div class="aq-hint '+(h.level||'info')+'">'+esc(h.text)+'</div>';
+  }).join('');
+}
+
+function loadQ(){
+  fetch('/api/workspace/ai-quality?days='+AQ_DAYS).then(function(r){return r.json();}).then(function(d){
+    if(!d||!d.ok) return;
+    if(!d.available || !d.total){
+      document.getElementById('aq-empty').style.display='block';
+      document.getElementById('aq-body').style.display='none';
+      return;
+    }
+    document.getElementById('aq-empty').style.display='none';
+    document.getElementById('aq-body').style.display='block';
+    var m=d.metrics||{}, c=d.compare||{};
+    var cards='';
+    cards+=card(m.auto_pass_rate+'%','自动通过率', m.auto_pass_rate>=60?'good':'', delta(c.auto_pass_delta_pp,false));
+    cards+=card(m.edit_rate+'%','人工改写率', m.edit_rate>=40?'bad':(m.edit_rate>=20?'warn':'good'), delta(c.edit_delta_pp,true));
+    cards+=card(m.reject_rate+'%','拒绝率', m.reject_rate>=20?'bad':(m.reject_rate>=10?'warn':'good'), delta(c.reject_delta_pp,true));
+    cards+=card(m.high_risk_rate+'%','高风险占比', m.high_risk_rate>=30?'bad':(m.high_risk_rate>=15?'warn':'good'),'');
+    cards+=card(d.total||0,'总处置数','');
+    document.getElementById('aq-cards').innerHTML=cards;
+    renderHints(d.hints);
+    renderBar(d.counts||{});
+    renderSpark(d.trend||[]);
+  }).catch(function(){});
+}
+
+function loadImprovements(){
+  var el=document.getElementById('aq-improve');
+  if(!el) return;
+  fetch('/api/kb/improvements?days='+AQ_DAYS).then(function(r){return r.json();}).then(function(d){
+    if(!d||!d.ok){ el.innerHTML='<span style="color:#94a3b8;font-size:13px;">加载失败</span>'; return; }
+    var cs=d.candidates||[];
+    if(!cs.length){ el.innerHTML='<span style="color:#94a3b8;font-size:13px;">暂无候选（近期无被改写/拒绝的草稿）。</span>'; return; }
+    el.innerHTML=cs.map(function(c,i){
+      var tag=c.action==='edit_send'?'<span class="imp-tag edit">改写后发</span>':'<span class="imp-tag reject">已拒绝</span>';
+      var reply=c.suggested_reply
+        ? '<div class="imp-r">✏ 坐席答案：'+esc(c.suggested_reply)+'</div>'
+        : '<div class="imp-r empty">无改写答案（转入后由 AI 自动填充初稿，再人工校对）</div>';
+      return '<div class="imp-item" id="imp-'+i+'">'
+        +'<div class="imp-q">'+esc(c.question)+tag+'</div>'+reply
+        +'<div class="imp-act"><button onclick="convertImp('+i+')">转为知识条目</button>'
+        +'<span class="imp-msg" id="imp-msg-'+i+'"></span></div></div>';
+    }).join('');
+    window.__impCands=cs;
+  }).catch(function(){ el.innerHTML='<span style="color:#94a3b8;font-size:13px;">加载失败</span>'; });
+}
+
+function convertImp(i){
+  var c=(window.__impCands||[])[i]; if(!c) return;
+  var msg=document.getElementById('imp-msg-'+i);
+  var btn=document.querySelector('#imp-'+i+' button');
+  btn.disabled=true; msg.className='imp-msg'; msg.textContent='转入中…';
+  fetch('/api/kb/improvements/convert',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({question:c.question, suggested_reply:c.suggested_reply, category:'其他'})})
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok){ btn.disabled=false; msg.className='imp-msg err'; msg.textContent='失败'; return; }
+      msg.className='imp-msg ok';
+      msg.textContent='✓ 已建条目'+(d.ai_filled?'（AI 正在填充初稿）':'');
+      btn.textContent='已转入';
+    }).catch(function(){ btn.disabled=false; msg.className='imp-msg err'; msg.textContent='网络错误'; });
+}
+
+function load(){ loadQ(); loadImprovements(); }
+load();
+setInterval(loadQ, 60000);
+setInterval(loadImprovements, 120000);
+</script>
+{% endblock %}

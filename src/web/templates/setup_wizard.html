@@ -1,0 +1,147 @@
+{% extends "workspace_base.html" %}
+{% block title %}渠道接入向导{% endblock %}
+{% block head %}
+<style>
+  .sw-wrap{height:100%;overflow-y:auto;background:#f7f8fa;padding:18px;max-width:920px;margin:0 auto;}
+  .sw-head{margin:6px 0 16px;}
+  .sw-head h2{margin:0 0 4px;font-size:19px;}
+  .sw-head p{margin:0;font-size:13px;color:#64748b;}
+  .sw-prog{display:flex;align-items:center;gap:8px;font-size:12px;color:#475569;margin:10px 0 18px;}
+  .sw-prog .bar{flex:1;height:8px;border-radius:5px;background:#e5e7eb;overflow:hidden;}
+  .sw-prog .bar i{display:block;height:100%;background:#16a34a;transition:width .3s;}
+  .sw-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;margin-bottom:14px;overflow:hidden;}
+  .sw-ch-hd{display:flex;align-items:center;gap:10px;padding:14px 18px;cursor:pointer;}
+  .sw-ch-hd:hover{background:#f8fafc;}
+  .sw-ch-name{font-size:15px;font-weight:700;color:#0f172a;}
+  .sw-ch-intro{font-size:12px;color:#64748b;margin-top:2px;}
+  .sw-badge{font-size:11px;font-weight:700;padding:3px 9px;border-radius:8px;margin-left:auto;white-space:nowrap;}
+  .b-ready{background:#dcfce7;color:#15803d;} .b-conf{background:#dbeafe;color:#1d4ed8;}
+  .b-miss{background:#fef3c7;color:#b45309;}
+  .sw-body{display:none;padding:0 18px 18px;border-top:1px solid #f1f5f9;}
+  .sw-body.open{display:block;}
+  .sw-field{margin:14px 0;}
+  .sw-field label{display:block;font-size:13px;font-weight:600;color:#334155;margin-bottom:4px;}
+  .sw-field label .req{color:#dc2626;} .sw-field label .opt{color:#94a3b8;font-weight:400;}
+  .sw-field input{width:100%;height:38px;border:1px solid #d1d5db;border-radius:8px;padding:0 12px;font-size:14px;}
+  .sw-field input:focus{outline:none;border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.12);}
+  .sw-field .hint{font-size:11px;color:#94a3b8;margin-top:4px;}
+  .sw-field .cur{font-size:11px;color:#16a34a;margin-top:4px;}
+  .sw-actions{display:flex;gap:10px;align-items:center;margin-top:14px;}
+  .sw-btn{border:0;border-radius:8px;padding:9px 18px;font-size:14px;font-weight:600;cursor:pointer;}
+  .sw-btn.primary{background:#2563eb;color:#fff;} .sw-btn.primary:hover{background:#1d4ed8;}
+  .sw-btn.ghost{background:#f1f5f9;color:#334155;text-decoration:none;display:inline-block;}
+  .sw-msg{font-size:12px;}
+  .sw-msg.ok{color:#15803d;} .sw-msg.err{color:#b91c1c;}
+  .sw-issues{margin-top:10px;}
+  .sw-issue{font-size:12px;padding:6px 0;border-bottom:1px solid #f8fafc;color:#475569;}
+  .sw-issue b{color:#b45309;} .sw-issue.error b{color:#b91c1c;}
+  .sw-login{margin-top:12px;padding:12px;background:#eff6ff;border-radius:10px;font-size:13px;color:#1e40af;}
+</style>
+{% endblock %}
+{% block content %}
+<div class="sw-wrap">
+  <a class="db-back" href="/workspace/dash" style="font-size:12px;color:#2563eb;text-decoration:none;">← 返回今日概览</a>
+  <div class="sw-head">
+    <h2>渠道接入向导</h2>
+    <p>选择渠道 → 填入凭证（即时校验）→ 保存生效。凭证写入 <code>config.local.yaml</code>，不改动主配置注释。</p>
+  </div>
+  <div class="sw-prog">
+    <span id="sw-prog-text">已就绪 0 / 0</span>
+    <div class="bar"><i id="sw-prog-bar" style="width:0"></i></div>
+  </div>
+  <div id="sw-list"></div>
+  <div style="margin-top:18px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:14px 16px;font-size:13px;color:#15803d;">
+    渠道接好后，别忘了给 AI 喂知识 → <a href="/workspace/kb-start" style="color:#15803d;font-weight:700;">知识库冷启动（一键播种起步话术）</a>
+  </div>
+</div>
+
+<script>
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+
+function badge(c){
+  if(c.ready) return '<span class="sw-badge b-ready">✓ 已就绪</span>';
+  if(c.configured) return '<span class="sw-badge b-conf">已填，待启用/登录</span>';
+  if(c.missing&&c.missing.length) return '<span class="sw-badge b-miss">缺 '+c.missing.length+' 项</span>';
+  return '<span class="sw-badge b-miss">未配置</span>';
+}
+
+function fieldHtml(ch, f){
+  var req = f.required ? '<span class="req">*</span>' : '<span class="opt">（可选）</span>';
+  var cur = f.filled ? '<div class="cur">当前：'+esc(f.display)+'（留空则不变）</div>' : '';
+  var ph = f.filled ? '已填，留空保持不变' : (f.help||'');
+  return '<div class="sw-field"><label>'+esc(f.label)+' '+req+'</label>'
+    +'<input data-key="'+esc(f.key.split('.').pop())+'" type="'+(f.secret?'password':'text')+'" placeholder="'+esc(ph)+'">'
+    +(f.help?'<div class="hint">'+esc(f.help)+'</div>':'')+cur+'</div>';
+}
+
+function loginHint(ch){
+  if(!ch.login_required) return '';
+  return '<div class="sw-login">填好凭证保存后，前往 <a href="/workspace">账号管理</a> 扫码 / 验证码登录该平台账号。</div>';
+}
+
+function bodyHtml(ch){
+  var fields = (ch.fields||[]).map(function(f){return fieldHtml(ch,f);}).join('');
+  if(!ch.fields||!ch.fields.length){
+    fields='<p style="font-size:13px;color:#64748b;margin:14px 0;">'+esc(ch.intro||'无需凭证，开启即用。')+'</p>';
+  }
+  return fields
+    +'<div class="sw-actions">'
+    +'<button class="sw-btn primary" onclick="swSave(\''+ch.id+'\',this)">保存并启用</button>'
+    +'<span class="sw-msg" id="sw-msg-'+ch.id+'"></span></div>'
+    +'<div class="sw-issues" id="sw-iss-'+ch.id+'"></div>'
+    +loginHint(ch);
+}
+
+function render(data){
+  var list=document.getElementById('sw-list');
+  list.innerHTML=(data.channels||[]).map(function(ch){
+    return '<div class="sw-card" data-id="'+ch.id+'">'
+      +'<div class="sw-ch-hd" onclick="swToggle(\''+ch.id+'\')">'
+      +'<div><div class="sw-ch-name">'+esc(ch.name)+'</div>'
+      +'<div class="sw-ch-intro">'+esc(ch.intro||'')+'</div></div>'
+      +badge(ch)+'</div>'
+      +'<div class="sw-body" id="sw-body-'+ch.id+'">'+bodyHtml(ch)+'</div></div>';
+  }).join('');
+  var r=data.ready_count||0, t=data.total||0;
+  document.getElementById('sw-prog-text').textContent='已就绪 '+r+' / '+t;
+  document.getElementById('sw-prog-bar').style.width=(t?Math.round(r/t*100):0)+'%';
+}
+
+function swToggle(id){
+  var b=document.getElementById('sw-body-'+id);
+  if(b) b.classList.toggle('open');
+}
+
+function swSave(id, btn){
+  var body=document.getElementById('sw-body-'+id);
+  var vals={};
+  body.querySelectorAll('input[data-key]').forEach(function(i){
+    if(i.value.trim()) vals[i.getAttribute('data-key')]=i.value.trim();
+  });
+  var msg=document.getElementById('sw-msg-'+id);
+  btn.disabled=true; msg.className='sw-msg'; msg.textContent='保存中…';
+  fetch('/api/setup/channels/'+id,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({values:vals})}).then(function(r){return r.json();}).then(function(d){
+    btn.disabled=false;
+    if(!d.ok){ msg.className='sw-msg err'; msg.textContent=d.detail||'保存失败'; return; }
+    msg.className='sw-msg ok'; msg.textContent='已保存生效';
+    var iss=document.getElementById('sw-iss-'+id);
+    iss.innerHTML=(d.issues||[]).map(function(i){
+      return '<div class="sw-issue '+(i.severity==='error'?'error':'')+'"><b>['+esc(i.severity)+']</b> '+esc(i.message)+'</div>';
+    }).join('');
+    load(true);  // 刷新徽章/进度
+  }).catch(function(){ btn.disabled=false; msg.className='sw-msg err'; msg.textContent='网络错误'; });
+}
+
+function load(keepOpen){
+  var open={};
+  if(keepOpen) document.querySelectorAll('.sw-body.open').forEach(function(b){open[b.id]=1;});
+  fetch('/api/setup/channels').then(function(r){return r.json();}).then(function(d){
+    if(!d||!d.ok) return;
+    render(d);
+    Object.keys(open).forEach(function(bid){var b=document.getElementById(bid);if(b)b.classList.add('open');});
+  }).catch(function(){});
+}
+load();
+</script>
+{% endblock %}
