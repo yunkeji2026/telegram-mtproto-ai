@@ -386,3 +386,57 @@ def test_billing_alert_event_alias_and_message():
     assert "超授权席位" in text
     t2, _ = _build_message("billing_alert", {"recovered": True})
     assert "解除" in t2
+
+
+# ── H1：运营周报自动外发 ───────────────────────────────────────────────────
+
+def test_weekly_report_disabled_by_default(tmp_path, monkeypatch):
+    published = []
+    from src.integrations.shared import event_bus as eb
+    monkeypatch.setattr(eb, "get_event_bus",
+                        lambda: types.SimpleNamespace(publish=lambda t, d: published.append((t, d))))
+    store = InboxStore(tmp_path / "inbox.db")
+    app = types.SimpleNamespace(state=types.SimpleNamespace(inbox_store=store))
+    wd = HealthWatchdog(app=app, config_manager=_cm({}), interval_sec=60)
+    assert wd._maybe_weekly_report(now=wd._last_weekly_ts + 1_000_000) is None
+    assert not [t for (t, d) in published if t == "ops_report"]
+
+
+def test_weekly_report_emits_and_throttles(tmp_path, monkeypatch):
+    published = []
+    from src.integrations.shared import event_bus as eb
+    monkeypatch.setattr(eb, "get_event_bus",
+                        lambda: types.SimpleNamespace(publish=lambda t, d: published.append((t, d))))
+    store = InboxStore(tmp_path / "inbox.db")
+    app = types.SimpleNamespace(state=types.SimpleNamespace(inbox_store=store))
+    wd = HealthWatchdog(app=app, config_manager=_cm({}), interval_sec=60,
+                        weekly_report_enabled=True, weekly_interval_sec=604800)
+    # 周报窗口相对 now（近 7 天），事件 ts 须落在 [now-604800, now] 内 → 以锚点定位。
+    anchor = wd._last_weekly_ts
+    store.open_or_update_incident(kind="health", signature="db:fail", light="red",
+                                  ts=anchor + 600000)
+    store.resolve_open_incidents(kind="health", ts=anchor + 603600)  # 解决耗时 3600s
+    t0 = anchor + 700000  # 超一周触发
+    rep = wd._maybe_weekly_report(now=t0)
+    assert rep is not None
+    assert rep["incidents"]["total"] == 1
+    ops = [d for (t, d) in published if t == "ops_report"]
+    assert len(ops) == 1
+    assert wd.total_weekly_reports == 1
+    # 节流：距上次不足一周 → 不再发
+    assert wd._maybe_weekly_report(now=t0 + 60) is None
+    assert len([d for (t, d) in published if t == "ops_report"]) == 1
+
+
+def test_ops_report_event_alias_and_message():
+    from src.inbox.webhook_notifier import _EVENT_ALIASES, _build_message
+    assert "ops_report" in _EVENT_ALIASES
+    title, text = _build_message("ops_report", {
+        "days": 7,
+        "headline": ["近 7 天运维事件 3 起（已解决 2）"],
+        "compare": {"incidents_delta": 1, "ai_share_delta_pp": 5.0},
+    })
+    assert "运营周报" in title
+    assert "运维事件" in text
+    assert "环比上周" in text
+    assert "/admin/ops" in text

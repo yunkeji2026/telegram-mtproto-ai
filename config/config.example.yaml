@@ -1228,3 +1228,5 @@ health_watchdog:
   alert_on_warn: false                # true=黄灯(warn)也告警；默认仅红灯(fail)告警
   billing_interval_sec: 3600          # E3 计费异常巡检周期（秒，比健康巡检稀疏；超席位/超额→billing_alert）
   incident_retention_days: 30         # 已关闭运维事件保留天数（每日清理一次，防表膨胀；<=0 关闭清理）
+  weekly_report_enabled: false        # H1 运营周报自动外发（默认关；开后每周经 ops_report 事件推送，需在「告警渠道」订阅 ops_report）
+  weekly_interval_sec: 604800         # 周报推送周期（秒，默认 7 天）

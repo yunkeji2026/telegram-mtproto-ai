@@ -144,6 +144,8 @@ class HealthWatchdog:
         alert_on_warn: bool = False,
         billing_interval_sec: float = 3600.0,
         incident_retention_days: float = 30.0,
+        weekly_report_enabled: bool = False,
+        weekly_interval_sec: float = 604800.0,
     ) -> None:
         self._app = app
         self._config_manager = config_manager
@@ -156,6 +158,12 @@ class HealthWatchdog:
         self._retention_days = float(incident_retention_days)
         self._purge_interval = 86400.0
         self._last_purge_ts = 0.0
+        # H1：运营周报自动外发（默认关，遵循「新子系统默认 enabled:false」）。
+        # _last_weekly_ts 初始化为「现在」→ 首份周报在启动一个周期后才发，避免每次重启刷屏。
+        self._weekly_enabled = bool(weekly_report_enabled)
+        self._weekly_interval = max(3600.0, float(weekly_interval_sec))
+        self._last_weekly_ts = time.time()
+        self.total_weekly_reports: int = 0
         # 默认只对 fail（red）告警；warn 噪音大，可显式开
         self._alert_on_warn = bool(alert_on_warn)
         self._stop_evt = asyncio.Event()
@@ -233,6 +241,12 @@ class HealthWatchdog:
         except Exception:
             logger.debug("事件清理异常（已忽略）", exc_info=True)
 
+        # H1：运营周报自动外发（每周节流一次，默认关）。
+        try:
+            self._maybe_weekly_report()
+        except Exception:
+            logger.debug("运营周报生成异常（已忽略）", exc_info=True)
+
     def _license_quota(self) -> Dict[str, Any]:
         try:
             from src.licensing import get_license_manager
@@ -255,19 +269,10 @@ class HealthWatchdog:
         if inbox is None or not hasattr(inbox, "get_usage_stats"):
             return
         self._last_billing_check_ts = ts
-        from src.utils.billing import compute_statement
         from src.utils.ops_overview import billing_anomalies
 
-        config = getattr(self._config_manager, "config", None) or {}
-        pricing = config.get("pricing")
-        lt = time.localtime()
-        try:
-            statement = compute_statement(
-                inbox, lt.tm_year, lt.tm_mon,
-                license_status=self._license_quota(), pricing=pricing,
-            )
-        except Exception:
-            logger.debug("对账单计算失败（已忽略）", exc_info=True)
+        statement = self._compute_statement()
+        if statement is None:
             return
         anomalies = billing_anomalies(statement)
         sig = "|".join(sorted(a.get("code", "") for a in anomalies))
@@ -281,6 +286,23 @@ class HealthWatchdog:
             if self._last_billing_sig:
                 self._emit_billing_recovery()
             self._last_billing_sig = None
+
+    def _compute_statement(self) -> Optional[Dict[str, Any]]:
+        """算当月对账单（_check_billing 与周报共用）。失败/无 store 返回 None。"""
+        inbox = self._inbox()
+        if inbox is None or not hasattr(inbox, "get_usage_stats"):
+            return None
+        from src.utils.billing import compute_statement
+        config = getattr(self._config_manager, "config", None) or {}
+        lt = time.localtime()
+        try:
+            return compute_statement(
+                inbox, lt.tm_year, lt.tm_mon,
+                license_status=self._license_quota(), pricing=config.get("pricing"),
+            )
+        except Exception:
+            logger.debug("对账单计算失败（已忽略）", exc_info=True)
+            return None
 
     def _emit_billing_alert(self, anomalies: List[Dict[str, Any]]) -> None:
         # E3↔E2：计费异常也进 ops_incidents（kind=billing），与健康事件统一可 ack/指派/恢复。
@@ -342,6 +364,76 @@ class HealthWatchdog:
                         n, self._retention_days)
         return n
 
+    def _build_weekly_report(self, *, days: int = 7, now: Optional[float] = None) -> Optional[Dict[str, Any]]:
+        """无 request 装配运营周报：事件统计 + 自动化价值 + 计费 + 环比上周。
+
+        ROI 的「经营/首响」段需 request（依赖 _daily_report_rows），watchdog 取不到，
+        故周报以「运维 + 自动化 + 计费」为主，business 段从缺（build_ops_report 优雅降级）。
+        """
+        inbox = self._inbox()
+        if inbox is None or not hasattr(inbox, "get_incident_stats"):
+            return None
+        from src.utils.ops_intel import automation_value, build_ops_report, weekly_compare
+
+        ts = float(now if now is not None else time.time())
+        span_sec = days * 86400.0
+        since = ts - span_sec
+        prev_since = since - span_sec
+
+        config = getattr(self._config_manager, "config", None) or {}
+        roi_cfg = ((config.get("workspace") or {}).get("roi") or {})
+        sec_per_reply = int(roi_cfg.get("sec_per_reply") or 180)
+        cost_per_hour = float(roi_cfg.get("cost_per_hour") or 0)
+
+        def _roi_for(since_ts: float, until_ts: Optional[float]) -> Dict[str, Any]:
+            auto_stats = {}
+            if hasattr(inbox, "get_automation_roi_stats"):
+                try:
+                    auto_stats = (inbox.get_automation_roi_stats(since_ts, until_ts=until_ts)
+                                  if until_ts is not None
+                                  else inbox.get_automation_roi_stats(since_ts))
+                except TypeError:
+                    auto_stats = inbox.get_automation_roi_stats(since_ts)
+                except Exception:
+                    logger.debug("自动化统计失败（已忽略）", exc_info=True)
+            return {"automation": automation_value(
+                auto_stats, sec_per_reply=sec_per_reply, cost_per_hour=cost_per_hour)}
+
+        cur_inc = inbox.get_incident_stats(since)
+        prev_inc = inbox.get_incident_stats(prev_since, until_ts=since)
+        cur_roi = _roi_for(since, None)
+        prev_roi = _roi_for(prev_since, since)
+        billing = self._compute_statement()
+
+        # weekly_compare 只读 incidents.total 与 automation 几个键，故用轻量 view 即可，
+        # 避免为算环比额外整套 build_ops_report（构建从 3 次降到 1 次）。
+        compare = weekly_compare(
+            {"incidents": {"total": cur_inc.get("total")}, "automation": cur_roi["automation"]},
+            {"incidents": {"total": prev_inc.get("total")}, "automation": prev_roi["automation"]},
+        )
+        return build_ops_report(days=days, incident_stats=cur_inc, roi=cur_roi,
+                                billing=billing, compare=compare)
+
+    def _maybe_weekly_report(self, *, now: Optional[float] = None) -> Optional[Dict[str, Any]]:
+        if not self._weekly_enabled:
+            return None
+        ts = float(now if now is not None else time.time())
+        if self._last_weekly_ts and (ts - self._last_weekly_ts) < self._weekly_interval:
+            return None
+        report = self._build_weekly_report(now=ts)
+        if report is None:
+            return None
+        self._last_weekly_ts = ts
+        self.total_weekly_reports += 1
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            get_event_bus().publish("ops_report", report)
+            logger.info("HealthWatchdog 发出运营周报（事件 %d 起）",
+                        (report.get("incidents") or {}).get("total", 0))
+        except Exception:
+            logger.debug("ops_report 发布失败（已忽略）", exc_info=True)
+        return report
+
     def _inbox(self):
         return getattr(getattr(self._app, "state", self._app), "inbox_store", None)
 
@@ -398,6 +490,7 @@ class HealthWatchdog:
             "total_alerts": self.total_alerts,
             "total_recoveries": self.total_recoveries,
             "total_billing_alerts": self.total_billing_alerts,
+            "total_weekly_reports": self.total_weekly_reports,
             "last_check_ts": self.last_check_ts,
             "last_light": self.last_light,
         }
