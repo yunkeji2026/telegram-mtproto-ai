@@ -2602,14 +2602,25 @@ class InboxStore:
                 "SELECT COUNT(*) FROM ops_incidents WHERE status!='resolved'"
             ).fetchone()[0]
 
-    def get_incident_stats(self, since_ts: float = 0.0) -> Dict[str, Any]:
-        """统计 since_ts 起开启的运维事件：总数/各状态/各类型/平均解决时长（秒）。"""
+    def get_incident_stats(self, since_ts: float = 0.0,
+                           until_ts: Optional[float] = None) -> Dict[str, Any]:
+        """统计 [since_ts, until_ts) 开启的运维事件：总数/各状态/各类型/平均解决时长（秒）。
+
+        until_ts=None 表示「到现在」（无上界），用于环比上一窗口时显式给 until。
+        """
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT kind, status, opened_ts, resolved_ts FROM ops_incidents "
-                "WHERE opened_ts>=?",
-                (float(since_ts),),
-            ).fetchall()
+            if until_ts is None:
+                rows = self._conn.execute(
+                    "SELECT kind, status, opened_ts, resolved_ts FROM ops_incidents "
+                    "WHERE opened_ts>=?",
+                    (float(since_ts),),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT kind, status, opened_ts, resolved_ts FROM ops_incidents "
+                    "WHERE opened_ts>=? AND opened_ts<?",
+                    (float(since_ts), float(until_ts)),
+                ).fetchall()
         total = len(rows)
         by_status: Dict[str, int] = {}
         by_kind: Dict[str, int] = {}

@@ -82,6 +82,7 @@ _EVENT_ALIASES: Dict[str, Dict[str, Any]] = {
     "autoreply_alert": {"types": {"autoreply_alert"}, "levels": None},  # 协议自动回复熔断/配额
     "health_alert":  {"types": {"health_alert"}, "levels": None},    # D3 运行时健康告警
     "billing_alert": {"types": {"billing_alert"}, "levels": None},   # E3 计费异常（超席位/超额）
+    "ops_report":    {"types": {"ops_report"}, "levels": None},       # H1 运营周报自动外发
 }
 
 # ─── 速率限制 ────────────────────────────────────────────────────────────────
@@ -364,6 +365,23 @@ def _build_message(event_type: str, data: Dict[str, Any]) -> tuple[str, str]:
                 + "\n".join(lines) + "\n"
                 "[💸 查看运营总览](/admin/ops)"
             )
+
+    elif event_type == "ops_report":
+        days = data.get("days", 7)
+        title = f"📰 运营周报（近 {days} 天）"
+        lines = [f"- {h}" for h in (data.get("headline") or [])]
+        cmp = data.get("compare") or {}
+        ic = cmp.get("incidents_delta")
+        pp = cmp.get("ai_share_delta_pp")
+        cmp_parts = []
+        if ic is not None:
+            cmp_parts.append(f"事件 {ic:+d} 起")
+        if pp is not None:
+            cmp_parts.append(f"AI 占比 {pp:+.1f}pp")
+        if cmp_parts:
+            lines.append("- 环比上周：" + "、".join(cmp_parts))
+        text = ("\n".join(lines) if lines else "本周无显著运营事件") + \
+            "\n[📊 查看运营总览](/admin/ops)"
 
     elif event_type == "escalation":
         title = "🔔 升级告警"

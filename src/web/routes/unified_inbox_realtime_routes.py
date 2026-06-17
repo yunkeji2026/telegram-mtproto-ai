@@ -52,6 +52,7 @@ _SSE_EVENT_TYPES = frozenset({
     "queue_alert",
     "stage_advance",
     "stage_advance_pending",
+    "ops_report",
     "stage_downgrade",
     "stage_reunion",
     "stage_sync",
@@ -61,6 +62,7 @@ _SSE_EVENT_TYPES = frozenset({
     "workflow_execution_cancelled",
     "health_alert",
     "billing_alert",
+    "ops_report",
 })
 
 # 写入 app.state.notif_queue 的重要事件类型
@@ -73,6 +75,7 @@ _NOTIF_EVENT_TYPES = frozenset({
     "workflow_execution_cancelled",
     "health_alert",
     "billing_alert",
+    "ops_report",
 })
 
 

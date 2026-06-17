@@ -77,6 +77,57 @@ def detect_trend_anomaly(
     }
 
 
+def automation_value(
+    stats: Optional[Dict[str, Any]],
+    *,
+    sec_per_reply: int = 180,
+    cost_per_hour: float = 0.0,
+) -> Dict[str, Any]:
+    """把 get_automation_roi_stats 的原始计数换算成「自动化价值」段（纯函数）。
+
+    与 unified_inbox_roi.build_roi_summary 同口径：节省人力 = AI 应答数 × 每条秒数。
+    便于 watchdog 在无 request 时也能装配 ROI.automation 子段。
+    """
+    stats = stats or {}
+    ai = int(stats.get("ai_sent") or 0)
+    human = int(stats.get("human_sent") or 0)
+    total = ai + human
+    saved_hours = round(ai * max(0, int(sec_per_reply)) / 3600.0, 1)
+    return {
+        "ai_sent": ai,
+        "human_sent": human,
+        "total_sent": total,
+        "ai_share_pct": round(ai / total * 100, 1) if total else 0.0,
+        "saved_hours": saved_hours,
+        "saved_money": round(saved_hours * float(cost_per_hour), 2) if cost_per_hour else 0.0,
+        "trend": stats.get("trend", []),
+    }
+
+
+def weekly_compare(
+    cur: Optional[Dict[str, Any]], prev: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """两份 build_ops_report 输出的环比（cur vs prev）。基数为 0 的比率项返回 None。"""
+    cur = cur or {}
+    prev = prev or {}
+    ci, pi = cur.get("incidents") or {}, prev.get("incidents") or {}
+    ca, pa = cur.get("automation") or {}, prev.get("automation") or {}
+    cb, pb = cur.get("business") or {}, prev.get("business") or {}
+
+    def dpct(c: Any, p: Any) -> Optional[float]:
+        c, p = float(c or 0), float(p or 0)
+        return round((c - p) / p * 100, 1) if p else None
+
+    return {
+        "incidents_delta": int(ci.get("total") or 0) - int(pi.get("total") or 0),
+        "incidents_delta_pct": dpct(ci.get("total"), pi.get("total")),
+        "saved_hours_delta_pct": dpct(ca.get("saved_hours"), pa.get("saved_hours")),
+        "ai_share_delta_pp": round(float(ca.get("ai_share_pct") or 0)
+                                   - float(pa.get("ai_share_pct") or 0), 1),
+        "conversions_delta": int(cb.get("conversions") or 0) - int(pb.get("conversions") or 0),
+    }
+
+
 def build_ops_report(
     *,
     days: int = 7,
@@ -84,8 +135,9 @@ def build_ops_report(
     roi: Optional[Dict[str, Any]] = None,
     reliability: Optional[Dict[str, Any]] = None,
     billing: Optional[Dict[str, Any]] = None,
+    compare: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """装配运营周报（纯函数）。各子数据由路由层算好传入。"""
+    """装配运营周报（纯函数）。各子数据由路由层算好传入。compare 为环比段（可选）。"""
     inc = incident_stats or {}
     roi = roi or {}
     reliability = reliability or {}
@@ -127,6 +179,16 @@ def build_ops_report(
         headline.append(f"转化 {business['conversions']} 单（转化率 {business.get('conversion_rate')}）")
     if rel["score"] is not None:
         headline.append(f"可靠性评分 {rel['score']}（{rel['light']}）")
+    if compare:
+        ic = compare.get("incidents_delta")
+        pp = compare.get("ai_share_delta_pp")
+        parts = []
+        if ic is not None:
+            parts.append(f"事件 {ic:+d} 起")
+        if pp is not None:
+            parts.append(f"AI 占比 {pp:+.1f}pp")
+        if parts:
+            headline.append("环比上周：" + "、".join(parts))
 
     return {
         "ok": True,
@@ -137,6 +199,7 @@ def build_ops_report(
         "reliability": rel,
         "billing": {"total": charges.get("total"), "currency": charges.get("currency"),
                     "anomalies": billing.get("reconcile", {}).get("over_seats", 0)},
+        "compare": compare or {},
         "headline": headline,
         "ts": time.time(),
     }
