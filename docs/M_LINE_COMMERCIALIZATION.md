@@ -51,8 +51,12 @@
 
 **落点**：`store.get_resolution_stats(since, until)` → 接入 `unified_inbox_roi.build_roi_summary` 的 automation 段 + `ops_intel.build_ops_report` 周报 + ROI 看板展示。
 
-### M7 反封号 v1（守命门）
-账号预热状态机 + 1账号1代理 + 每日配额/随机延迟 + 账号健康红绿灯，接 D/E 线 health 看板。（设计待 M6 完成后细化回写。）
+### M7 反封号 v1（守命门）✅ 完成
+**审计先行**：日配额（`AccountLimiter`）、proxy 绑定（`account.proxy_id`+`proxy_pool`）、设备 fail_rate 统计已存在。真正缺口 = **预热爬坡 + 账号健康红绿灯**。
+**已交付**：
+- `src/skills/account_health.py`（纯函数）：`warmup_cap`（新号每日上限从 start 在 ramp_days 内线性升到 target）、`account_health`（信号→0-100 分 + green/amber/red + 建议上限 + 原因）、`fleet_health`（机群汇总，取最差灯）。
+- `AccountLimiter` 增**可选**预热爬坡：`warmup_enabled` + `age_days_fn` 回调；`effective_cap()` = min(daily_cap, warmup_cap(age))；新号超预热上限拒发并报 `warmup_cap_exceeded`；阈值告警与 `get_counts` 同步用 effective cap。**默认关 → 历史行为零变更**（既有 account_limiter/cap_alert 测试全过）。
+- 健康信号：age_days / sends_today / flood_waits_24h / errors_24h / proxy_bound / banned。
 
 ### M8 结构化转人工
 转人工携带 intent+历史+客户画像（`conversation_meta` 已有 last_intent/summary/csat），接 contacts/handoff。
@@ -62,8 +66,8 @@
 
 ## 4. 当前状态（每次更新）
 
-- **现在在做**：Phase 1 · M7 反封号 v1（M6 已完成）。
-- **下一步**：M7 → 测试 → 回写 → M8 → M5。
+- **现在在做**：Phase 1 · M8 结构化转人工（M6、M7 已完成）。
+- **下一步**：M8 → 测试 → 回写 → M5 → Phase 1 收口。
 
 ## 5. 执行日志（每阶段追加，勿删历史）
 
@@ -77,3 +81,10 @@
   - **测试结果**：`test_resolution_stats + test_ops_intel + test_ops_incidents + test_unified_inbox_stage1` 共 **158 passed**，0 fail；改动文件无 lint。
   - 优化思考：再联系判定最初设计为「last_ts 后查 until 边界外」，发现 since-only 场景恒为 0 → 改为「会话内相邻动作间隔落在 (session_gap, recontact_window] 」的自包含算法，更稳健且无需第二次 SQL。
   - 下一步可优化：①真实「再联系」应结合 messages 入站（当前用 audit 动作近似，足够 v1）；②解决率环比（compare）；③按 workspace_id 维度拆分。
+- 2026-06-17 · **M7 反封号 v1 ✅ 完成**：
+  - 审计：日配额/proxy 绑定/设备 fail_rate 已存在；补齐缺口「预热爬坡 + 健康红绿灯」。
+  - `src/skills/account_health.py`：warmup_cap / account_health / fleet_health（纯函数）。
+  - `AccountLimiter` 可选预热爬坡（effective_cap，默认关零破坏）。
+  - 测试 `tests/test_account_health.py`（16 例）+ 回归 `test_account_limiter`/`test_cap_alert` 共 **37 passed**；无 lint。
+  - 优化思考：预热设计为 limiter 的 opt-in 旁路（age_days_fn 回调）而非硬编码，既零破坏又可让上层用任意「账号天龄」来源（contacts 表/registry）。健康评分用「最差账号灯=机群灯」的保守聚合，避免一个红号被均值掩盖。
+  - 下一步可优化：①把 fleet_health 接进 /api/rpa-overview 或 ops health 看板（需集中账号 age/flood 信号源）；②FLOOD_WAIT 计数实时采集；③随机延迟 pacing 纳入评分。

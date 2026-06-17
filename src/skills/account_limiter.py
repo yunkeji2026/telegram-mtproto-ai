@@ -45,10 +45,20 @@ class AccountLimiter:
         global_cap: int = 0,   # 0 = 不启用全域限额
         alert_thresholds_pct: Optional[list] = None,   # 如 [80, 100]；None=不告警
         on_threshold_crossed: Optional[Callable[[str, int, int, int], None]] = None,
+        warmup_enabled: bool = False,   # M7：新号预热爬坡（默认关→行为不变）
+        warmup_start_cap: int = 2,
+        warmup_ramp_days: int = 14,
+        age_days_fn: Optional[Callable[[str], Optional[float]]] = None,
     ) -> None:
         self._store = store
         self._daily_cap = max(1, int(daily_cap))
         self._global_cap = max(0, int(global_cap))
+        # M7：预热爬坡——effective_cap = warmup_cap(age) ≤ daily_cap。
+        # 仅当 warmup_enabled 且 age_days_fn 给出有效天龄时生效；否则恒回退 daily_cap。
+        self._warmup_enabled = bool(warmup_enabled)
+        self._warmup_start_cap = max(0, int(warmup_start_cap))
+        self._warmup_ramp_days = max(1, int(warmup_ramp_days))
+        self._age_days_fn = age_days_fn
         # W4-Cap-Alert：跨过任意 pct 阈值时触发回调（stateless：基于 old→new 区间）
         self._thresholds = sorted(set(
             int(p) for p in (alert_thresholds_pct or []) if 0 < int(p) <= 100
@@ -68,10 +78,33 @@ class AccountLimiter:
         ts = ts if ts is not None else int(time.time())
         return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
 
+    def effective_cap(self, account_id: str) -> int:
+        """该账号当前生效的每日上限。
+
+        预热关闭/无天龄信息 → 恒为配置 ``daily_cap``（行为不变）。
+        预热开启且能取到天龄 → ``min(daily_cap, warmup_cap(age))``，新号更低、随天龄爬坡。
+        """
+        if not self._warmup_enabled or self._age_days_fn is None:
+            return self._daily_cap
+        try:
+            age = self._age_days_fn(account_id)
+        except Exception:
+            logger.debug("age_days_fn 取天龄失败，回退 daily_cap (acc=%s)", account_id,
+                         exc_info=True)
+            return self._daily_cap
+        if age is None:
+            return self._daily_cap
+        from src.skills.account_health import warmup_cap
+        ramped = warmup_cap(
+            age, self._daily_cap,
+            start_cap=self._warmup_start_cap, ramp_days=self._warmup_ramp_days,
+        )
+        return min(self._daily_cap, max(0, ramped))
+
     def remaining_for(self, account_id: str, *, now: Optional[int] = None) -> int:
         day = self._utc_day(now)
         used = self._store.get_account_handoff_counter(account_id, day)
-        return max(0, self._daily_cap - used)
+        return max(0, self.effective_cap(account_id) - used)
 
     def global_remaining(self, *, now: Optional[int] = None) -> int:
         if self._global_cap <= 0:
@@ -89,6 +122,7 @@ class AccountLimiter:
             "global_count": self._store.sum_account_handoff_counters(day),
             "global_cap": self._global_cap,
             "daily_cap": self._daily_cap,
+            "effective_cap": self.effective_cap(account_id),
         }
 
     # ── 预判 + 扣减（原子一对）──────────────────────────
@@ -113,11 +147,14 @@ class AccountLimiter:
                     remaining_today=0,
                     global_count_today=global_used,
                 )
-        # 账号级
+        # 账号级（M7：用 effective_cap——预热关时即 daily_cap，行为不变）
+        eff_cap = self.effective_cap(account_id)
         acct_used = self._store.get_account_handoff_counter(account_id, day)
-        if acct_used >= self._daily_cap:
+        if acct_used >= eff_cap:
             return LimitDecision(
-                ok=False, reason="account_cap_exceeded",
+                ok=False,
+                reason="warmup_cap_exceeded" if eff_cap < self._daily_cap
+                else "account_cap_exceeded",
                 remaining_today=0,
                 account_count_today=acct_used,
             )
@@ -126,27 +163,30 @@ class AccountLimiter:
         global_used_after = self._store.sum_account_handoff_counters(day) \
             if self._global_cap > 0 else 0
         logger.info("AccountLimiter reserved: acc=%s day=%s count=%d/%d",
-                    account_id, day, new_count, self._daily_cap)
-        # W4-Cap-Alert：阈值跨越检测（stateless——仅看 old→new 区间）
-        self._emit_threshold_crossings(account_id, new_count)
+                    account_id, day, new_count, eff_cap)
+        # W4-Cap-Alert：阈值跨越检测（stateless——仅看 old→new 区间，按 effective cap）
+        self._emit_threshold_crossings(account_id, new_count, cap=eff_cap)
         return LimitDecision(
             ok=True, reason="reserved",
-            remaining_today=max(0, self._daily_cap - new_count),
+            remaining_today=max(0, eff_cap - new_count),
             account_count_today=new_count,
             global_count_today=global_used_after,
         )
 
     # ── W4-Cap-Alert ──────────────────────────────────────
-    def _emit_threshold_crossings(self, account_id: str, new_count: int) -> None:
+    def _emit_threshold_crossings(
+        self, account_id: str, new_count: int, *, cap: Optional[int] = None,
+    ) -> None:
         """new_count 刚 +1。若上一步的 pct < 某阈值 <= 新 pct，触发回调。
 
         stateless：基于 (old_count, new_count) 计算——每次跨越只触发一次，
         当天后续扣减不会重复触发同一阈值（因为 pct 单调递增）。
+        ``cap`` 缺省用 daily_cap；预热开启时调用方传 effective cap。
         """
         if not self._thresholds or self._on_threshold is None:
             return
         old_count = new_count - 1
-        cap = self._daily_cap
+        cap = self._daily_cap if cap is None else max(1, int(cap))
         old_pct = old_count * 100.0 / cap
         new_pct = new_count * 100.0 / cap
         for pct in self._thresholds:
