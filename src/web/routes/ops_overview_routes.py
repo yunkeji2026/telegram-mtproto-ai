@@ -214,6 +214,55 @@ def register_ops_overview_routes(app, ctx) -> None:
                 logger.debug("ack 审计写入失败（已忽略）", exc_info=True)
         return {"ok": bool(ok), "incident_id": int(incident_id)}
 
+    # H2：根因建议的「一键动作」——可重置 worker 标识 → app.state 属性。
+    _WORKER_ATTRS = {"autosend": "autosend_worker", "autoclaim": "auto_claim_worker"}
+
+    @app.post("/api/admin/workers/{worker_id}/reset-circuit")
+    async def api_reset_worker_circuit(worker_id: str, request: Request,
+                                       _=Depends(api_write("manage_ops"))):
+        """重置某 worker 的熔断器（H2 一键动作）。需 manage_ops；写审计。"""
+        attr = _WORKER_ATTRS.get(str(worker_id or ""))
+        worker = getattr(request.app.state, attr, None) if attr else None
+        if worker is None or not hasattr(worker, "reset_circuit"):
+            return JSONResponse({"ok": False, "error": "worker_unavailable"}, status_code=404)
+        was_open = bool(worker.reset_circuit())
+        if audit_store is not None:
+            try:
+                actor = request.session.get("username", "api")
+                audit_store.log(actor, "reset_circuit", f"worker:{worker_id}", "",
+                                "was_open" if was_open else "noop")
+            except Exception:
+                logger.debug("reset_circuit 审计写入失败（已忽略）", exc_info=True)
+        return {"ok": True, "worker_id": worker_id, "was_open": was_open}
+
+    @app.post("/api/admin/health/recheck")
+    async def api_health_recheck(request: Request, _=Depends(api_write("manage_ops"))):
+        """立即重巡运行时健康（H2 一键动作）：修复后点一下即可让事件自动开/关。
+
+        有 watchdog 时调 recheck()（会即时落表/恢复事件）；否则退化为只读 collect_health。
+        """
+        import asyncio
+
+        from src.inbox.health_watchdog import collect_health
+        wd = getattr(request.app.state, "health_watchdog", None)
+        try:
+            if wd is not None and hasattr(wd, "recheck"):
+                health = await asyncio.get_event_loop().run_in_executor(None, wd.recheck)
+            else:
+                health = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: collect_health(request.app, config_manager))
+        except Exception:
+            logger.debug("健康重巡失败（已忽略）", exc_info=True)
+            return JSONResponse({"ok": False, "error": "recheck_failed"}, status_code=500)
+        if audit_store is not None:
+            try:
+                actor = request.session.get("username", "api")
+                audit_store.log(actor, "health_recheck", "health", "",
+                                str(health.get("light") or ""))
+            except Exception:
+                logger.debug("health_recheck 审计写入失败（已忽略）", exc_info=True)
+        return {"ok": True, "light": health.get("light"), "summary": health.get("summary")}
+
     @app.get("/admin/ops", response_class=HTMLResponse)
     async def ops_overview_page(request: Request, _=Depends(page_auth)):
         # 计算当前用户是否有 manage_ops 写权限，供模板决定是否渲染「确认」按钮。

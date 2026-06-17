@@ -440,3 +440,91 @@ def test_ops_report_event_alias_and_message():
     assert "运维事件" in text
     assert "环比上周" in text
     assert "/admin/ops" in text
+
+
+# ── H2：一键动作（重置熔断 + 重新巡检）─────────────────────────────────────
+
+def test_autosend_worker_reset_circuit():
+    from src.inbox.autosend_worker import AutosendWorker
+    w = AutosendWorker.__new__(AutosendWorker)  # 跳过 __init__，仅测熔断字段
+    w._circuit_open = True
+    w._circuit_open_ts = 123.0
+    w._consecutive_errors = 9
+    assert w.reset_circuit() is True       # 调用前确处于熔断
+    assert w._circuit_open is False
+    assert w._consecutive_errors == 0
+    assert w.reset_circuit() is False      # 已闭合 → noop
+
+
+def test_watchdog_recheck_resolves_after_fix(monkeypatch):
+    from src.integrations.shared import event_bus as eb
+    monkeypatch.setattr(eb, "get_event_bus",
+                        lambda: types.SimpleNamespace(publish=lambda t, d: None))
+    inbox, calls = _recording_inbox()
+    app = types.SimpleNamespace(state=types.SimpleNamespace(inbox_store=inbox))
+    cm = _cm({"ai": {"provider": ""}})
+    wd = HealthWatchdog(app=app, config_manager=cm, interval_sec=60)
+    h1 = wd.recheck()          # AI 缺 → red → 开事件
+    assert h1["light"] == "red"
+    assert len(calls["opened"]) == 1
+    cm.config = {"ai": {"provider": "openai", "api_key": "sk-real-123"}}
+    h2 = wd.recheck()          # 修复后重巡 → 恢复 → resolve
+    assert calls["resolved"] == 1
+    assert h2["light"] != "red"
+
+
+def _ops_app_with_worker(worker):
+    from fastapi import FastAPI
+    from starlette.middleware.sessions import SessionMiddleware
+
+    from src.web.routes.ops_overview_routes import register_ops_overview_routes
+    app = FastAPI()
+    app.add_middleware(SessionMiddleware, secret_key="t")
+    app.state.inbox_store = types.SimpleNamespace()
+    app.state.autosend_worker = worker
+    audited = []
+    ctx = types.SimpleNamespace(
+        api_auth=lambda request: None,
+        api_write=lambda perm: (lambda: None),
+        page_auth=lambda: None,
+        templates=None,
+        config_manager=types.SimpleNamespace(config={}),
+        audit_store=types.SimpleNamespace(log=lambda *a, **k: audited.append(a)),
+        user_store=None,
+        token="",
+    )
+    register_ops_overview_routes(app, ctx)
+    return app, audited
+
+
+def test_reset_circuit_endpoint():
+    from fastapi.testclient import TestClient
+    worker = types.SimpleNamespace(reset_circuit=lambda: True)
+    app, audited = _ops_app_with_worker(worker)
+    client = TestClient(app)
+    r = client.post("/api/admin/workers/autosend/reset-circuit")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True and body["was_open"] is True
+    assert audited and audited[0][1] == "reset_circuit"
+
+
+def test_reset_circuit_unknown_worker_404():
+    from fastapi.testclient import TestClient
+    app, _ = _ops_app_with_worker(types.SimpleNamespace(reset_circuit=lambda: True))
+    client = TestClient(app)
+    r = client.post("/api/admin/workers/nope/reset-circuit")
+    assert r.status_code == 404
+
+
+def test_health_recheck_endpoint():
+    from fastapi.testclient import TestClient
+    app, audited = _ops_app_with_worker(types.SimpleNamespace(reset_circuit=lambda: False))
+    # 挂一个假 watchdog，recheck 返回绿灯
+    app.state.health_watchdog = types.SimpleNamespace(
+        recheck=lambda: {"light": "green", "summary": {"ok": 3}})
+    client = TestClient(app)
+    r = client.post("/api/admin/health/recheck")
+    assert r.status_code == 200
+    assert r.json()["light"] == "green"
+    assert any(a[1] == "health_recheck" for a in audited)
