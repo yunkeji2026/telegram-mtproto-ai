@@ -2602,6 +2602,34 @@ class InboxStore:
                 "SELECT COUNT(*) FROM ops_incidents WHERE status!='resolved'"
             ).fetchone()[0]
 
+    def get_incident_stats(self, since_ts: float = 0.0) -> Dict[str, Any]:
+        """统计 since_ts 起开启的运维事件：总数/各状态/各类型/平均解决时长（秒）。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT kind, status, opened_ts, resolved_ts FROM ops_incidents "
+                "WHERE opened_ts>=?",
+                (float(since_ts),),
+            ).fetchall()
+        total = len(rows)
+        by_status: Dict[str, int] = {}
+        by_kind: Dict[str, int] = {}
+        durations: List[float] = []
+        for r in rows:
+            by_status[r["status"]] = by_status.get(r["status"], 0) + 1
+            by_kind[r["kind"]] = by_kind.get(r["kind"], 0) + 1
+            if r["status"] == "resolved" and r["resolved_ts"] and r["opened_ts"]:
+                d = float(r["resolved_ts"]) - float(r["opened_ts"])
+                if d >= 0:
+                    durations.append(d)
+        return {
+            "total": total,
+            "open": by_status.get("open", 0) + by_status.get("acked", 0),
+            "resolved": by_status.get("resolved", 0),
+            "by_status": by_status,
+            "by_kind": by_kind,
+            "mttr_sec": round(sum(durations) / len(durations), 1) if durations else None,
+        }
+
     def purge_resolved_incidents(self, older_than_ts: float) -> int:
         """删除 resolved_ts 早于阈值的已关闭事件（保留期清理）。返回删除条数。
 

@@ -118,10 +118,52 @@ def register_ops_overview_routes(app, ctx) -> None:
             except Exception:
                 logger.debug("自动认领统计失败（已忽略）", exc_info=True)
 
-        return assemble_ops_overview(
+        overview = assemble_ops_overview(
             roi=roi, billing=billing, health=health, reliability=reliability,
             auto_claim=auto_claim, open_incidents=open_incidents,
         )
+        # G2：趋势异动标注（AI 发送量 / 处置量）。
+        from src.utils.ops_intel import detect_trend_anomaly
+        ai_trend = (((roi or {}).get("automation") or {}).get("trend")) or []
+        rel_trend = ((reliability or {}).get("trend")) or []
+        # 末桶为「当前未走完」时段（今天 / 当前小时），drop_last 丢弃以免半桶误报。
+        overview["anomalies"] = {
+            "ai_sent": detect_trend_anomaly([p.get("ai") for p in ai_trend], drop_last=True),
+            "dispositions": detect_trend_anomaly([p.get("total") for p in rel_trend], drop_last=True),
+        }
+        return overview
+
+    @app.get("/api/admin/ops-report")
+    async def api_ops_report(request: Request, days: int = 7):
+        """G3 运营周报：近 N 天事件统计(MTTR) + 自动化/业务/可靠性/计费 摘要。"""
+        api_auth(request)
+        from src.utils.ops_intel import build_ops_report
+
+        span = int(days or 7)
+        inbox = getattr(request.app.state, "inbox_store", None)
+        incident_stats = None
+        if inbox is not None and hasattr(inbox, "get_incident_stats"):
+            try:
+                incident_stats = inbox.get_incident_stats(time.time() - span * 86400)
+            except Exception:
+                logger.debug("事件统计失败（已忽略）", exc_info=True)
+        roi = reliability = billing = None
+        try:
+            from src.web.routes.unified_inbox_roi import build_roi_summary
+            roi = build_roi_summary(request, config_manager, span=span)
+        except Exception:
+            logger.debug("ROI 周报段失败（已忽略）", exc_info=True)
+        try:
+            reliability = _reliability_payload(request, span * 24)
+        except Exception:
+            logger.debug("可靠性周报段失败（已忽略）", exc_info=True)
+        try:
+            from src.web.routes.unified_inbox_usage_routes import build_billing_statement
+            billing = build_billing_statement(request, "")
+        except Exception:
+            logger.debug("计费周报段失败（已忽略）", exc_info=True)
+        return build_ops_report(days=span, incident_stats=incident_stats,
+                                roi=roi, reliability=reliability, billing=billing)
 
     @app.get("/api/admin/incidents")
     async def api_list_incidents(request: Request, status: str = "", kind: str = "",
@@ -133,9 +175,12 @@ def register_ops_overview_routes(app, ctx) -> None:
         if inbox is None or not hasattr(inbox, "list_incidents"):
             return {"ok": True, "incidents": [], "open": 0,
                     "suggested_assignee": None, "next_cursor": None}
+        from src.utils.ops_intel import incident_advice
         lim = int(limit or 50)
         items = inbox.list_incidents(status=status or "", kind=kind or "",
                                      limit=lim, before_id=int(before_id or 0))
+        for it in items:
+            it["advice"] = incident_advice(it.get("problems"))
         open_n = inbox.count_open_incidents() if hasattr(inbox, "count_open_incidents") else 0
         suggested = None
         if open_n:

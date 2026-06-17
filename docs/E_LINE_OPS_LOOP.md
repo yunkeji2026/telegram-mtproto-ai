@@ -104,3 +104,20 @@ health_watchdog:
 - **kind 隔离恢复**：计费并入事件后，健康恢复绝不误清计费事件，反之亦然。
 - **piggyback watchdog**：计费巡检 + 过期清理都挂在既有周期任务上、各自独立节流，不引入新 worker。
 - **复用 D3 投递**：计费异常不造新通道，复用 webhook/SSE/通知三处既有 plumbing。
+
+## 10. G 线 · 运营智能化（看板 → 洞察）
+
+E/F 线把数据「摆出来」；G 线把数据「读懂」，给出可执行结论。三块纯函数集中在
+`src/utils/ops_intel.py`（不碰 IO，路由层喂数据）：
+
+| 能力 | 函数 | 接入点 | 价值 |
+| --- | --- | --- | --- |
+| **G1 根因建议** | `incident_advice(problems)` | `/api/admin/incidents` 每条带 `advice`；总览页事件行「💡 建议」 | 把「告警」升级成「告警 + 该怎么办」 |
+| **G2 趋势异动** | `detect_trend_anomaly(values, drop_last=)` | `/api/admin/ops-overview` 返回 `anomalies`；总览页趋势标题旁「↑/↓ N% 异动」徽章 | 主动点名突增突降，不靠人盯折线 |
+| **G3 运营周报** | `build_ops_report(...)` + store `get_incident_stats(since)` | `/api/admin/ops-report?days=7`；总览页「📰 运营周报」区 | 一段话摘要：事件数/MTTR/自动化省时/转化/可靠性 |
+
+设计要点：
+
+- **根因映射**：按问题 `id`（`db`/`ai`/`license`/`channels`/`worker_*`/`queue` + 计费 `over_seats`/`message_overage`）查表给「可能根因 + 处置建议」，`worker_*` 走前缀，未知项有兜底文案。
+- **半桶去噪**：日/时趋势的末桶是「当前未走完」时段，直接比会误报「↓ 异动」。`detect_trend_anomaly(drop_last=True)` 丢弃半桶、以「最后一个已完结桶」为候选点，既消噪又仍能抓昨天/上一小时的突变。
+- **MTTR**：`get_incident_stats` 用 `resolved_ts - opened_ts` 在 SQL 侧聚合已解决事件平均解决时长，周报换算成小时展示。
