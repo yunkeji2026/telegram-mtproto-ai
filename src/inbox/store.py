@@ -1984,6 +1984,86 @@ class InboxStore:
             "trend": trend,
         }
 
+    def get_resolution_stats(
+        self,
+        since_ts: float = 0.0,
+        until_ts: Optional[float] = None,
+        *,
+        session_gap_sec: float = 3600.0,       # 1h：界定「会话静默间隔」
+        recontact_window_sec: float = 259200.0,  # 72h：再联系判定窗口
+    ) -> Dict[str, Any]:
+        """M6 AI 解决率：按会话聚合 draft_audit_log，拆「AI 独立解决 / 转人工 / 再联系」。
+
+        与 ``get_automation_roi_stats``（按动作条数）不同：本方法按 **会话** 维度统计，
+        回答「多少比例的会话被 AI 全程独立解决」——售卖与续费的核心价值数字。
+
+        口径（会话级，窗口 ``[since_ts, until_ts)``）：
+        - ``ai_handled``：窗口内有 ≥1 ``autosend`` 且 **0 人工动作** 的会话。
+        - ``human_handled``：有 ≥1 人工动作（approved/edit_send/force_override）的会话。
+        - ``reopened``（再联系/假解决）：``ai_handled`` 会话内两次动作出现
+          ``session_gap_sec < 间隔 ≤ recontact_window_sec`` —— 即客户静默后又在 72h 内回来。
+          该判定**仅用窗口内数据**，不依赖 until_ts 边界，故 since-only 也有效。
+        - ``ai_resolved = ai_handled − reopened``。
+
+        返回各分子分母 + 比率（resolution / true_resolution / recontact / escalation）。
+        """
+        _AI = ("autosend",)
+        _HUMAN = ("approved", "edit_send", "force_override")
+        clause = "ts >= ? AND conversation_id != ''"
+        params: List[Any] = [float(since_ts)]
+        if until_ts is not None:
+            clause += " AND ts < ?"
+            params.append(float(until_ts))
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT conversation_id, action, ts FROM draft_audit_log WHERE {clause}",
+                params,
+            ).fetchall()
+        convs: Dict[str, Dict[str, Any]] = {}
+        for cid, action, ts in rows:
+            cid = str(cid or "")
+            if not cid:
+                continue
+            act = str(action or "")
+            c = convs.setdefault(cid, {"has_ai": False, "has_human": False, "ts": []})
+            if act in _HUMAN:
+                c["has_human"] = True
+            elif act in _AI:
+                c["has_ai"] = True
+            else:
+                continue  # rejected/blocked 不参与"已处置"会话分类
+            c["ts"].append(float(ts or 0.0))
+        ai_handled = 0
+        human_handled = 0
+        reopened = 0
+        for c in convs.values():
+            if c["has_human"]:
+                human_handled += 1
+                continue
+            if not c["has_ai"]:
+                continue  # 仅 rejected/blocked，无实际处置
+            ai_handled += 1
+            tss = sorted(c["ts"])
+            for a, b in zip(tss, tss[1:]):
+                gap = b - a
+                if session_gap_sec < gap <= recontact_window_sec:
+                    reopened += 1
+                    break
+        decided = ai_handled + human_handled
+        ai_resolved = ai_handled - reopened
+        return {
+            "ai_handled": ai_handled,
+            "human_handled": human_handled,
+            "decided": decided,
+            "reopened": reopened,
+            "ai_resolved": ai_resolved,
+            "ai_resolution_rate": round(ai_handled / decided, 4) if decided else 0.0,
+            "true_resolution_rate": round(ai_resolved / decided, 4) if decided else 0.0,
+            "recontact_rate": round(reopened / ai_handled, 4) if ai_handled else 0.0,
+            "escalation_rate": round(human_handled / decided, 4) if decided else 0.0,
+            "recontact_window_hours": round(float(recontact_window_sec) / 3600.0, 1),
+        }
+
     def get_quality_stats(
         self, since_ts: float = 0.0, until_ts: Optional[float] = None,
     ) -> Dict[str, Any]:

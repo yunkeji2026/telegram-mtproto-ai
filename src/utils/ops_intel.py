@@ -182,6 +182,13 @@ def build_ops_report(
         "conversions": biz.get("conversions"),
         "conversion_rate": biz.get("conversion_rate"),
     }
+    res = roi.get("resolution") or {}
+    resolution = {
+        "ai_resolution_rate_pct": res.get("ai_resolution_rate_pct"),
+        "true_resolution_rate_pct": res.get("true_resolution_rate_pct"),
+        "recontact_rate_pct": res.get("recontact_rate_pct"),
+        "decided": res.get("decided"),
+    }
     rel = {"score": reliability.get("score"), "light": reliability.get("light")}
 
     # 文字摘要（便于直接贴进周报/IM）。
@@ -191,6 +198,11 @@ def build_ops_report(
     if automation["saved_hours"] is not None:
         headline.append(f"AI 自动化节省约 {automation['saved_hours']} 小时"
                         + (f"、{automation['saved_money']} 成本" if automation.get('saved_money') else ""))
+    if resolution["ai_resolution_rate_pct"] is not None and resolution.get("decided"):
+        headline.append(
+            f"AI 解决率 {resolution['ai_resolution_rate_pct']}%"
+            f"（{resolution['decided']} 会话，再联系 {resolution.get('recontact_rate_pct')}%）"
+        )
     if business["conversions"] is not None:
         headline.append(f"转化 {business['conversions']} 单（转化率 {business.get('conversion_rate')}）")
     if rel["score"] is not None:
@@ -211,6 +223,7 @@ def build_ops_report(
         "days": days,
         "incidents": incidents,
         "automation": automation,
+        "resolution": resolution,
         "business": business,
         "reliability": rel,
         "billing": {"total": charges.get("total"), "currency": charges.get("currency"),

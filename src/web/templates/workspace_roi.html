@@ -110,9 +110,17 @@ function renderSpark(trend){
 function loadRoi(){
   fetch('/api/workspace/roi?days='+ROI_DAYS).then(function(r){return r.json();}).then(function(d){
     if(!d||!d.ok) return;
-    var a=d.automation||{}, b=d.business||{}, h=d.config_health||{}, cmp=a.compare||{};
+    var a=d.automation||{}, b=d.business||{}, h=d.config_health||{}, cmp=a.compare||{}, rs=d.resolution||{};
     // KPI 卡
     var cards='';
+    if(rs.decided>0){
+      cards+=card(rs.ai_resolution_rate_pct+'%','AI 解决率',
+        rs.ai_handled+'/'+rs.decided+' 会话 AI 独立解决',
+        rs.ai_resolution_rate_pct>=60?'good':(rs.ai_resolution_rate_pct>=30?'warn':'bad'));
+      cards+=card(rs.recontact_rate_pct+'%','再联系率',
+        rs.recontact_window_hours+'h 内回访（越低越好）',
+        rs.recontact_rate_pct<=10?'good':(rs.recontact_rate_pct<=25?'warn':'bad'));
+    }
     cards+=card(a.ai_share_pct!=null?a.ai_share_pct+'%':'—','AI 自动应答占比','共 '+(a.total_sent||0)+' 条回复',
       a.ai_share_pct>=50?'good':'', deltaHtml(cmp.ai_share_delta_pp,'pp'));
     cards+=card(a.saved_hours!=null?a.saved_hours:'—','节省人力（人时）','按每条 '+(a.sec_per_reply||180)+'s 估算',

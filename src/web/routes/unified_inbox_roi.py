@@ -133,6 +133,27 @@ def build_roi_summary(
         },
     }
 
+    # ── M6 AI 解决率（会话级：AI 独立解决 / 转人工 / 再联系）──────────────
+    resolution: Dict[str, Any] = {}
+    try:
+        inbox = _inbox_store(request)
+        if inbox is not None and hasattr(inbox, "get_resolution_stats"):
+            resolution = inbox.get_resolution_stats(since)
+    except Exception:
+        logger.debug("ROI 解决率聚合失败（已忽略）", exc_info=True)
+    out["resolution"] = {
+        "ai_handled": int(resolution.get("ai_handled", 0)),
+        "human_handled": int(resolution.get("human_handled", 0)),
+        "decided": int(resolution.get("decided", 0)),
+        "ai_resolved": int(resolution.get("ai_resolved", 0)),
+        "reopened": int(resolution.get("reopened", 0)),
+        "ai_resolution_rate_pct": round(float(resolution.get("ai_resolution_rate", 0.0)) * 100, 1),
+        "true_resolution_rate_pct": round(float(resolution.get("true_resolution_rate", 0.0)) * 100, 1),
+        "recontact_rate_pct": round(float(resolution.get("recontact_rate", 0.0)) * 100, 1),
+        "escalation_rate_pct": round(float(resolution.get("escalation_rate", 0.0)) * 100, 1),
+        "recontact_window_hours": resolution.get("recontact_window_hours", 72.0),
+    }
+
     # ── 配置健康度卡（复用 P0-1 校验器）────────────────────────────────
     out["config_health"] = _config_health(config_manager)
     return out
