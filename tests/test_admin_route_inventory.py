@@ -29,6 +29,7 @@ _BASELINE = """
 /api/admin/incidents	GET
 /api/admin/incidents/{incident_id}/ack	POST
 /api/admin/ops-overview	GET
+/api/admin/ops-report	GET
 /api/admin/reliability	GET
 /api/admin/license	GET
 /api/admin/license/reload	POST

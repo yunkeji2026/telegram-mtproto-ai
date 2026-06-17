@@ -53,14 +53,19 @@
     <h2>📈 趋势</h2>
     <div style="display:flex; gap:24px; flex-wrap:wrap;">
       <div>
-        <div class="muted" style="font-size:12px; margin-bottom:4px;">AI 发送量（按日）</div>
+        <div class="muted" style="font-size:12px; margin-bottom:4px;">AI 发送量（按日）<span id="anomAI"></span></div>
         <div id="sparkAI"></div>
       </div>
       <div>
-        <div class="muted" style="font-size:12px; margin-bottom:4px;">处置量（按时段）</div>
+        <div class="muted" style="font-size:12px; margin-bottom:4px;">处置量（按时段）<span id="anomRel"></span></div>
         <div id="sparkRel"></div>
       </div>
     </div>
+  </section>
+
+  <section>
+    <h2>📰 运营周报（近 7 天）</h2>
+    <div id="opsReport"><div class="empty">加载中…</div></div>
   </section>
 
   <section>
@@ -95,6 +100,15 @@ var CAN_MANAGE_OPS = {{ 'true' if can_manage_ops else 'false' }};
 function fmt(v, suffix){ if(v===null||v===undefined||v==='') return '—'; return v + (suffix||''); }
 function dot(light){ var c=({green:'green',yellow:'yellow',red:'red'})[light]||'unknown'; return '<span class="light-dot '+c+'"></span>'; }
 function tsfmt(ts){ if(!ts) return '—'; try{ return new Date(ts*1000).toLocaleString(); }catch(e){ return '—'; } }
+
+// 趋势异动徽章：up=橙、down=蓝。
+function anomBadge(a){
+  if(!a) return '';
+  var up = a.direction === 'up';
+  var pct = (a.delta_pct === null || a.delta_pct === undefined) ? '新增' : (Math.abs(a.delta_pct)+'%');
+  var color = up ? 'var(--yellow)' : 'var(--accent)';
+  return ' <span style="color:'+color+'; font-weight:600;">'+(up?'↑':'↓')+' '+pct+' 异动</span>';
+}
 
 // 纯 SVG 迷你折线（无依赖）。values: number[]; opts.labels: 各点标签（hover 提示）。
 function sparkline(values, opts){
@@ -158,6 +172,9 @@ async function loadOverview(){
       {color:'#388bfd', labels: relTrend.map(function(p){
         try{ return new Date(p.ts*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); }catch(e){ return ''; }
       })});
+    var anom = d.anomalies || {};
+    document.getElementById('anomAI').innerHTML = anomBadge(anom.ai_sent);
+    document.getElementById('anomRel').innerHTML = anomBadge(anom.dispositions);
 
     const an = d.billing_anomalies || [];
     document.getElementById('billingAnomalies').innerHTML = an.length ? (
@@ -176,13 +193,15 @@ var _incPageSize = 30;
 
 function incidentRow(it){
   var problems = (it.problems||[]).map(function(p){return (p.name||p.id)+'：'+(p.detail||'');}).join('；') || '—';
+  var advice = (it.advice||[]).map(function(a){return a.action;}).filter(function(v,i,arr){return arr.indexOf(v)===i;});
+  var adviceHtml = advice.length ? '<div class="muted" style="font-size:12px;margin-top:3px;">💡 '+advice.join('；')+'</div>' : '';
   var canAck = it.status !== 'resolved' && CAN_MANAGE_OPS;
   var kindLabel = it.kind === 'billing' ? '💸 计费' : '🩺 健康';
   return '<tr>'+
     '<td>'+kindLabel+'</td>'+
     '<td><span class="badge '+it.status+'">'+it.status+'</span></td>'+
     '<td>'+dot(it.light)+'</td>'+
-    '<td>'+problems+'</td>'+
+    '<td>'+problems+adviceHtml+'</td>'+
     '<td class="muted">'+tsfmt(it.opened_ts)+'</td>'+
     '<td>'+(it.assigned_to||'—')+'</td>'+
     '<td>'+(canAck?'<button onclick="ackIncident('+it.id+')">确认</button>':'')+'</td>'+
@@ -242,7 +261,23 @@ async function ackIncident(id){
   }catch(e){ alert('操作失败：'+e); }
 }
 
-function refreshAll(){ loadOverview(); loadIncidents(); }
+async function loadReport(){
+  try{
+    const r = await fetch('/api/admin/ops-report?days=7', {credentials:'same-origin'});
+    const d = await r.json();
+    var lines = (d.headline||[]).map(function(s){ return '<li>'+s+'</li>'; }).join('');
+    var inc = d.incidents||{};
+    var byKind = Object.keys(inc.by_kind||{}).map(function(k){ return k+': '+inc.by_kind[k]; }).join('，') || '无';
+    document.getElementById('opsReport').innerHTML =
+      (lines ? '<ul style="margin:0 0 10px 18px;">'+lines+'</ul>' : '') +
+      '<div class="muted" style="font-size:13px;">事件分布：'+byKind+
+      ' · 平均解决：'+(inc.mttr_hours!=null?inc.mttr_hours+'h':'—')+'</div>';
+  }catch(e){
+    document.getElementById('opsReport').innerHTML = '<div class="empty">加载失败：'+e+'</div>';
+  }
+}
+
+function refreshAll(){ loadOverview(); loadIncidents(); loadReport(); }
 refreshAll();
 setInterval(refreshAll, 60000);
 </script>

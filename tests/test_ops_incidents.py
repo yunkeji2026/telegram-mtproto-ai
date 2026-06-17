@@ -256,6 +256,31 @@ def test_watchdog_purge_disabled_when_retention_nonpositive(tmp_path):
     assert len(store.list_incidents()) == 1  # 未删
 
 
+def test_get_incident_stats(tmp_path):
+    store = InboxStore(tmp_path / "inbox.db")
+    # 2 健康（1 已解决，解决耗时 3600s）+ 1 计费 open
+    store.open_or_update_incident(kind="health", signature="a", light="red", ts=1000)
+    store.resolve_open_incidents(kind="health", ts=4600)  # a: 3600s
+    store.open_or_update_incident(kind="health", signature="b", light="red", ts=5000)
+    store.open_or_update_incident(kind="billing", signature="over_seats", light="red", ts=5000)
+
+    stats = store.get_incident_stats(since_ts=0)
+    assert stats["total"] == 3
+    assert stats["resolved"] == 1
+    assert stats["open"] == 2
+    assert stats["by_kind"]["health"] == 2
+    assert stats["by_kind"]["billing"] == 1
+    assert stats["mttr_sec"] == 3600.0
+
+
+def test_get_incident_stats_respects_since(tmp_path):
+    store = InboxStore(tmp_path / "inbox.db")
+    store.open_or_update_incident(kind="health", signature="old", light="red", ts=1000)
+    store.open_or_update_incident(kind="health", signature="new", light="red", ts=9_000_000)
+    stats = store.get_incident_stats(since_ts=5_000_000)
+    assert stats["total"] == 1  # 只算窗口内
+
+
 def test_list_incidents_cursor_pagination(tmp_path):
     store = InboxStore(tmp_path / "inbox.db")
     ids = [store.open_or_update_incident(kind="health", signature="s%d" % i, light="red")
@@ -300,12 +325,19 @@ def test_ops_overview_and_incidents_e2e(tmp_path):
     assert ov["ok"] is True
     assert "kpis" in ov and "sections" in ov
     assert ov["kpis"]["open_incidents"] == 1
+    assert "anomalies" in ov  # G2 趋势异动段
 
     inc = client.get("/api/admin/incidents?limit=10").json()
     assert inc["ok"] is True
     assert inc["open"] == 1
     assert inc["incidents"][0]["kind"] == "health"
     assert inc["next_cursor"] is None  # 仅一条，不足一页
+    assert "advice" in inc["incidents"][0]  # G1 根因建议
+
+    rep = client.get("/api/admin/ops-report?days=7").json()
+    assert rep["ok"] is True
+    assert rep["incidents"]["total"] == 1
+    assert "headline" in rep
 
 
 def test_ack_incident_writes_audit():
