@@ -70,8 +70,21 @@
 
 ## 4. 当前状态（每次更新）
 
-- **现在在做**：Phase 1 收口完成（M6/M7/M8 ✅，M5 审计已存在）；准备进入 Phase 2。
-- **下一步**：Phase 2 · M9 KB 缺口飞轮 / M10 Copilot 内联 / M11 白标转售 / M12 评测 harness（逐项先审计后补缺）。
+- **现在在做**：Phase 2 收口完成（M9-M12 审计均已存在，M9+ 加优先级待办增强）；准备全量回归收尾。
+- **下一步**：连跑全量测试 2 次，不过即补测试，直到全绿。
+
+## 3b. Phase 2 审计结论（代码实况）
+
+逐项 grep 验证，**M9-M12 均已存在**（再次印证「文档落后于代码」）：
+
+| 任务 | 证据 | 结论 |
+|---|---|---|
+| M9 KB 缺口飞轮 | `kb_store.py`：`kb_miss_log`+`log_miss`+`get_miss_stats`+`get_weak_hits`+`get_overloaded_entries`+`get_auto_suggestions`；`kb_routes.py`：`/api/kb/auto-suggestions`、`/api/kb/miss-to-entry`（一键入库）、`/api/kb/reply-quality` | ✅ 已具备 |
+| M10 Copilot 内联 | `copilot_polisher.py`、`copilot_stats.py`、`copilot_routes.py` | ✅ 已具备 |
+| M11 白标转售 | `branding_routes.py`、`utils/branding.py` | ✅ 已具备 |
+| M12 评测 harness | `src/eval/faq_eval.py`、`src/eval/intent_eval.py`、`scripts/run_eval.py`、`contacts/draft_eval.py`、`tests/test_eval_harness.py` | ✅ 已具备 |
+
+**M9+ 增量增强（本次新增，非重复造轮子）**：`src/utils/kb_gap.py` 把分散的 miss/弱命中/过载建议折算成**统一数值优先级**（来源权重 × 对数频次）排成一条可执行待办，折进 `/api/kb/auto-suggestions` 的 `backlog`/`backlog_summary` 字段——解决「一堆建议不知先做哪条」。
 
 ## 5. 执行日志（每阶段追加，勿删历史）
 
@@ -99,3 +112,8 @@
   - 优化思考：简报做成纯函数 + 瘦端点，store 取数失败逐项 try/except 优雅降级（永不因缺元数据阻断接手）。highlights 用关键词集合判定负面情绪/高风险，便于后续扩词。
 - 2026-06-17 · **M5 首跑向导 ✅ 审计已存在**：setup_wizard.html / golive_checklist.html / channel_setup.py 已覆盖，无需新建。
 - 2026-06-17 · **Phase 1 收口**：M6/M7/M8 交付 + M5 审计；进入 Phase 2。
+- 2026-06-17 · **Phase 2 审计 + M9+ 增强 ✅**：
+  - 审计：M9 KB 飞轮 / M10 Copilot / M11 白标 / M12 评测 harness **均已存在**（证据见 §3b）。
+  - M9+ `src/utils/kb_gap.py`：rank_kb_gaps / gap_priority_score / gap_backlog_summary（纯函数），折进 `/api/kb/auto-suggestions`。
+  - 测试 `tests/test_kb_gap.py`（7 例）+ KB 全量 **130 passed**；无 lint。
+  - 优化思考：不重写已有飞轮，只补「统一优先级」这块缺失的连接组织；频次用对数压缩避免长尾被碾压；折进既有端点而非新增路由（零契约 churn）。
