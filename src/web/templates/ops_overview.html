@@ -87,6 +87,7 @@
         <option value="acked">acked</option>
         <option value="resolved">resolved</option>
       </select>
+      <button id="recheckBtn" style="display:none;margin-left:auto;" onclick="recheckHealth()">🔄 立即重新巡检</button>
     </div>
     <div id="incidents"><div class="empty">加载中…</div></div>
     <div style="margin-top:10px;">
@@ -193,8 +194,13 @@ var _incPageSize = 30;
 
 function incidentRow(it){
   var problems = (it.problems||[]).map(function(p){return (p.name||p.id)+'：'+(p.detail||'');}).join('；') || '—';
-  var advice = (it.advice||[]).map(function(a){return a.action;}).filter(function(v,i,arr){return arr.indexOf(v)===i;});
-  var adviceHtml = advice.length ? '<div class="muted" style="font-size:12px;margin-top:3px;">💡 '+advice.join('；')+'</div>' : '';
+  var adviceHtml = (it.advice||[]).map(function(a){
+    var link = a.link ? ' <a href="'+a.link+'" target="_blank">去处理 →</a>' : '';
+    var fix = (a.fix && CAN_MANAGE_OPS)
+      ? ' <button style="padding:2px 8px;" onclick="runFix(\''+a.fix.key+'\',\''+a.fix.target+'\')">'+a.fix.label+'</button>'
+      : '';
+    return '<div class="muted" style="font-size:12px;margin-top:3px;">💡 '+a.action+link+fix+'</div>';
+  }).join('');
   var canAck = it.status !== 'resolved' && CAN_MANAGE_OPS;
   var kindLabel = it.kind === 'billing' ? '💸 计费' : '🩺 健康';
   return '<tr>'+
@@ -248,6 +254,35 @@ async function loadMoreIncidents(){
   }catch(e){ /* 静默 */ }
 }
 
+function csrfToken(){ return (document.cookie.match(/csrf_token=([^;]+)/)||[])[1]||''; }
+
+async function runFix(key, target){
+  if(!confirm('确认对「'+target+'」执行一键动作：'+key+'？')) return;
+  try{
+    var r = await fetch('/api/admin/workers/'+encodeURIComponent(target)+'/reset-circuit', {
+      method:'POST', credentials:'same-origin',
+      headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken()},
+    });
+    var d = await r.json();
+    if(!d.ok){ alert('动作失败：'+(d.error||'未知')); return; }
+    // 动作后立即重巡，让相关事件自动恢复。
+    await recheckHealth();
+  }catch(e){ alert('动作失败：'+e); }
+}
+
+async function recheckHealth(){
+  var btn = document.getElementById('recheckBtn');
+  if(btn){ btn.disabled = true; btn.textContent = '巡检中…'; }
+  try{
+    await fetch('/api/admin/health/recheck', {
+      method:'POST', credentials:'same-origin',
+      headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken()},
+    });
+  }catch(e){ /* 静默 */ }
+  if(btn){ btn.disabled = false; btn.textContent = '🔄 立即重新巡检'; }
+  loadOverview(); loadIncidents();
+}
+
 async function ackIncident(id){
   var who = prompt('指派给（坐席/主管 ID，可留空仅确认）：', _suggestedAssignee) || '';
   var csrf=(document.cookie.match(/csrf_token=([^;]+)/)||[])[1]||'';
@@ -277,6 +312,7 @@ async function loadReport(){
   }
 }
 
+if(CAN_MANAGE_OPS){ var _rb=document.getElementById('recheckBtn'); if(_rb) _rb.style.display=''; }
 function refreshAll(){ loadOverview(); loadIncidents(); loadReport(); }
 refreshAll();
 setInterval(refreshAll, 60000);

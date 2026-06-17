@@ -145,3 +145,19 @@ health_watchdog:
   weekly_report_enabled: false   # 开后每周自动外发运营周报
   weekly_interval_sec: 604800    # 周报周期（秒，默认 7 天）
 ```
+
+### H2 根因建议直达 + 一键动作
+
+把 G1 的「文字建议」升级成「点过去 / 点一下就解决」：
+
+- **直达链接**：`incident_advice` 每条 advice 带 `link`，指向能直接动手的后台页（均为已存在路由）：
+  `ai→/settings`、`channels→/workspace/setup`、`queue→/workspace/drafts`、
+  `over_seats|message_overage→/workspace/usage`、`db|license|worker_*→/admin/ops`。
+- **一键动作**：advice 在「安全可自动化」时带 `fix={key,label,target}`。当前覆盖
+  **熔断中的 autosend worker**（`worker_autosend` 且 `status=warn`）→「重置熔断」。
+  fail（未运行）需进程级处理，故不给一键钮，避免误操作。
+- **端点**（均 `manage_ops` + 审计留痕）：
+  - `POST /api/admin/workers/{worker_id}/reset-circuit` —— 调 `AutosendWorker.reset_circuit()`（闭合熔断、清连续错误计数），返回 `was_open`。
+  - `POST /api/admin/health/recheck` —— 调 `HealthWatchdog.recheck()`（复用 `_evaluate_health`，即时开/关事件）；无 watchdog 时退化为只读 `collect_health`。
+- **闭环体感**：修复 → 点「重置熔断 / 立即重新巡检」→ 事件即时 resolved，无需等下个巡检周期。
+  前端一键钮/巡检钮均受 `can_manage_ops` 控制可见性（后端仍是硬闸）。

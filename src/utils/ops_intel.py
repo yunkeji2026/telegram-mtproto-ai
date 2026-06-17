@@ -11,30 +11,46 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List, Optional
 
-# 问题 id → (可能根因, 处置建议)。worker_* 走前缀匹配。
+# 问题 id → (可能根因, 处置建议, 直达页面)。worker_* 走前缀匹配。
+# link 指向能「直接动手解决」的后台页（已存在的路由），让建议从「知道」到「点过去干」。
 _ADVICE = {
-    "db": ("持久层不可达（磁盘满/文件锁/进程异常）", "检查 SQLite 文件与磁盘空间，必要时重启进程"),
-    "ai": ("AI provider 或 api_key 缺失/占位", "在「设置」填入有效 ai.api_key 并确认 provider"),
-    "license": ("授权过期或失效", "续期或重新导入授权文件，避免降级只读"),
-    "channels": ("无消息渠道就绪/登录", "到「渠道管理」完成登录或配置至少一个渠道"),
-    "queue": ("草稿队列积压，处理跟不上产出", "增派坐席处理，或排查 autosend worker 是否卡顿"),
-    "over_seats": ("活跃坐席数超过授权席位", "升级席位额度，或减少同时在线坐席"),
-    "message_overage": ("本期消息量超出套餐额度", "升级套餐，或对外发量做节流/收口"),
+    "db": ("持久层不可达（磁盘满/文件锁/进程异常）", "检查 SQLite 文件与磁盘空间，必要时重启进程", "/admin/ops"),
+    "ai": ("AI provider 或 api_key 缺失/占位", "在「设置」填入有效 ai.api_key 并确认 provider", "/settings"),
+    "license": ("授权过期或失效", "续期或重新导入授权文件，避免降级只读", "/admin/ops"),
+    "channels": ("无消息渠道就绪/登录", "到「渠道接入」完成登录或配置至少一个渠道", "/workspace/setup"),
+    "queue": ("草稿队列积压，处理跟不上产出", "增派坐席处理，或排查 autosend worker 是否卡顿", "/workspace/drafts"),
+    "over_seats": ("活跃坐席数超过授权席位", "升级席位额度，或减少同时在线坐席", "/workspace/usage"),
+    "message_overage": ("本期消息量超出套餐额度", "升级套餐，或对外发量做节流/收口", "/workspace/usage"),
 }
-_WORKER_ADVICE = ("后台 worker 未运行或处于熔断", "查看日志定位错误并重启对应 worker")
+_WORKER_ADVICE = ("后台 worker 未运行或处于熔断", "查看日志定位错误并重启对应 worker", "/admin/ops")
+
+# 支持「一键动作」的可重置 worker：健康组件 id → worker 标识（reset-circuit 端点用）。
+# 仅在该 worker 处于 warn（熔断中）时提供，fail（未运行）需进程级处理，不给一键钮。
+_RESETTABLE_WORKERS = {"worker_autosend": "autosend"}
 
 
 def incident_advice(problems: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
-    """为事件的每个问题项给出根因+建议。返回 [{id, name, cause, action}]。"""
+    """为事件的每个问题项给出根因+建议+直达链接（+可选一键动作）。
+
+    返回 [{id, name, cause, action, link, fix?}]；fix={key,label,target} 仅在
+    该问题支持安全的一键动作（如熔断中的 worker 可「重置熔断」）时出现。
+    """
     out: List[Dict[str, Any]] = []
     for p in problems or []:
         pid = str((p or {}).get("id") or "")
         name = str((p or {}).get("name") or pid)
+        status = str((p or {}).get("status") or "")
         if pid.startswith("worker_"):
-            cause, action = _WORKER_ADVICE
+            cause, action, link = _WORKER_ADVICE
         else:
-            cause, action = _ADVICE.get(pid, ("未归类异常", "查看事件详情与日志进一步定位"))
-        out.append({"id": pid, "name": name, "cause": cause, "action": action})
+            cause, action, link = _ADVICE.get(
+                pid, ("未归类异常", "查看事件详情与日志进一步定位", "/admin/ops"))
+        entry: Dict[str, Any] = {"id": pid, "name": name, "cause": cause,
+                                 "action": action, "link": link}
+        if pid in _RESETTABLE_WORKERS and status == "warn":
+            entry["fix"] = {"key": "reset_circuit", "label": "重置熔断",
+                            "target": _RESETTABLE_WORKERS[pid]}
+        out.append(entry)
     return out
 
 

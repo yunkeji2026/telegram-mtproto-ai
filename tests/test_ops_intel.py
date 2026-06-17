@@ -33,6 +33,29 @@ def test_advice_unknown_falls_back():
     assert out[0]["cause"] == "未归类异常"
 
 
+def test_advice_carries_direct_link():
+    out = incident_advice([{"id": "ai", "name": "AI"}, {"id": "channels", "name": "渠道"}])
+    by = {a["id"]: a for a in out}
+    assert by["ai"]["link"] == "/settings"
+    assert by["channels"]["link"] == "/workspace/setup"
+
+
+def test_advice_offers_fix_for_circuit_open_worker():
+    # warn（熔断中）的可重置 worker → 给一键动作
+    out = incident_advice([{"id": "worker_autosend", "name": "L2", "status": "warn"}])
+    assert out[0]["fix"]["key"] == "reset_circuit"
+    assert out[0]["fix"]["target"] == "autosend"
+
+
+def test_advice_no_fix_when_worker_failed():
+    # fail（未运行）→ 需进程级处理，不给一键钮
+    out = incident_advice([{"id": "worker_autosend", "name": "L2", "status": "fail"}])
+    assert "fix" not in out[0]
+    # 不可重置的 worker 即便 warn 也无 fix
+    out2 = incident_advice([{"id": "worker_autoclaim", "name": "AC", "status": "warn"}])
+    assert "fix" not in out2[0]
+
+
 def test_advice_empty():
     assert incident_advice(None) == []
     assert incident_advice([]) == []

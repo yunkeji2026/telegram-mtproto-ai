@@ -242,6 +242,22 @@ class AutosendWorker:
                 self._current_interval * 1.5, self._max_interval
             )
 
+    # ── 运维动作 ──────────────────────────────────────────────
+
+    def reset_circuit(self) -> bool:
+        """手动重置熔断器（H2 一键动作）。
+
+        当熔断因连续错误开启、但根因已被人工排除时，主管可立即闭合熔断让 worker
+        恢复，无需等冷却期。返回「调用前是否处于熔断态」（True=确实做了重置）。
+        """
+        was_open = self._circuit_open
+        self._circuit_open = False
+        self._circuit_open_ts = 0.0
+        self._consecutive_errors = 0
+        if was_open:
+            logger.info("[AutosendWorker] 熔断器被手动重置（运维一键动作）")
+        return was_open
+
     # ── 指标快照 ──────────────────────────────────────────────
 
     def status_snapshot(self) -> Dict[str, Any]:

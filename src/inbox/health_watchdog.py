@@ -204,7 +204,8 @@ class HealthWatchdog:
     def stop(self) -> None:
         self._stop_evt.set()
 
-    def _tick(self) -> None:
+    def _evaluate_health(self) -> Dict[str, Any]:
+        """采集健康并按签名变化 emit 告警/恢复（_tick 与 recheck 共用）。返回 health。"""
         health = collect_health(self._app, self._config_manager,
                                 pending_threshold=self._pending_threshold)
         self.last_check_ts = time.time()
@@ -228,6 +229,17 @@ class HealthWatchdog:
                 self.total_recoveries += 1
             self._last_sig = None
             self._last_light = light
+        return health
+
+    def recheck(self) -> Dict[str, Any]:
+        """按需立即重巡健康（H2 一键动作）：复用 _evaluate_health，会即时开/关事件。
+
+        只跑健康部分（不触发计费/清理/周报），让主管修复后点一下即可看到事件自动恢复。
+        """
+        return self._evaluate_health()
+
+    def _tick(self) -> None:
+        self._evaluate_health()
 
         # E3：计费异常巡检（超席位/超额），独立去抖，经 D3 通道外发。
         try:
