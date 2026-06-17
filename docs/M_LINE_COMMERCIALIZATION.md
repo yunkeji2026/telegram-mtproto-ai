@@ -5,6 +5,17 @@
 > 每完成一个阶段：跑测试 → 把结果与进度回写「执行日志」→ 自动进入下一阶段。
 > 项目铁律：**文档可能落后于代码，动手前先 grep/读码验证实况**（见 CLAUDE.md）。
 
+## ⚠️ 0. 产品定位修正（2026-06-17，最高优先，先读这条）
+
+**本产品的核心是「AI 情感陪伴聊天」，不是客服/订单/查单。**
+个人号主动获客 → 建立长期情感关系 → AI 扮演有人设的角色陪聊 → 提升亲密度与长期留存。
+运营形态 = **全自动**（AI 全程扮演角色，真人几乎不接管）。
+
+由此推翻早期"客服模型"假设，关键纠偏：
+- **北极星指标是「关系深度 + 留存」，不是「解决率/首响」**。客服要"快速结案"，陪聊要"聊得久、黏、用户愿意回来"——**用户回访=好事(留存)，不是坏事(复发工单)**。
+- 已有成熟情感栈（以代码为准）：`persona_manager`（人设/多角色/禁客服腔）、`episodic_memory_store`+`portrait_extractor`（长期记忆/画像）、`intimacy_engine`+`companion_relationship`（亲密度+四阶段 initial→warming→intimate→steady，直接注入 prompt）、`emotional_context`+`reunion_prompts`+`reactivation_scheduler/loop`（情绪+久别重逢+沉默召回）。
+- 早期 M6「AI 解决率」**方向错误已重构**为「关系健康·留存」（见 §7）。M7 反封号仍是命门（个人号规模化），保留。M8 转人工/M9 KB 在全自动陪聊里降为边缘。
+
 ## 0. 商业模式与定价（开发前提）
 
 - **交付模式**：单租户自托管 + **agency 白标转售**（复刻 GoHighLevel 护城河；白标能力已具备）。
@@ -138,3 +149,19 @@
   - 测试 `tests/test_kb_gap.py`（7 例）+ KB 全量 **130 passed**；无 lint。
   - 优化思考：不重写已有飞轮，只补「统一优先级」这块缺失的连接组织；频次用对数压缩避免长尾被碾压；折进既有端点而非新增路由（零契约 churn）。
 - 2026-06-17 · **全量回归收尾 ✅**：连跑全量 2 次，均 **4830 passed / 31 skipped / 0 failed**（见 §4 表）。本轮 M 线开发全部完成。
+- 2026-06-17 · **🔄 产品方向修正 + M6 重构（见 §0、§7）**：明确产品=情感陪聊+全自动运营；M6「AI 解决率」方向错误（解决率/再联系率在陪聊里指标相反），**重构为关系健康·留存**。
+
+## 7. 关系健康·留存看板（替代错误的 M6 解决率）
+
+**为什么换**：客服「解决率/再联系率」=快速结案、用户别再来；情感陪聊正相反——要聊得深、黏、用户主动回来。旧 `recontact_rate`（72h 回来=坏）在陪聊里恰恰是**留存(好事)**，指标方向反了，故重构。
+
+**已交付（以 messages 为真实信号源，非 AI/人工拆分）**：
+- `store.get_engagement_stats(since, until)`：`active_relationships`（有用户入站的关系）、`messages_in/out`、`avg_turns`（关系深度）、`reciprocity`（应答充分度）、`sticky_relationships`/`sticky_rate`（跨天回访黏性）、逐日 trend。
+- `store.get_retention_cohorts(since, until, horizons=(1,7,30))`：以「首次入站落窗口内」为同期群，算 D1/D7/D30 回访率——**陪聊真正的"解决率"**。
+- `build_roi_summary` 的 `resolution` 段 → 换为 `relationship` 段；`ops_intel.build_ops_report` 同步；`workspace_roi.html` 解决率/再联系卡 → 换为「活跃关系/黏性/人均轮次/D7 留存」卡。
+- 测试 `tests/test_engagement_stats.py`（6 例，替代已删的 test_resolution_stats）；engagement+ops+stage1+route inventory 共 **168 passed**；无 lint。
+
+**下一步（情感陪聊路线候选，待排期）**：
+- 关系看板纳入**亲密度分布与递进**（数据在 contacts/journeys：`intimacy_score`/`funnel_stage`，需跨 store 聚合）。
+- 情绪深度升级（词典规则 → LLM 级共情）。
+- 关系阶段自动推进编排；主动陪伴个性化增强；M7 反封号接通 runner+健康灯。

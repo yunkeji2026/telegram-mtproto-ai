@@ -110,16 +110,19 @@ function renderSpark(trend){
 function loadRoi(){
   fetch('/api/workspace/roi?days='+ROI_DAYS).then(function(r){return r.json();}).then(function(d){
     if(!d||!d.ok) return;
-    var a=d.automation||{}, b=d.business||{}, h=d.config_health||{}, cmp=a.compare||{}, rs=d.resolution||{};
+    var a=d.automation||{}, b=d.business||{}, h=d.config_health||{}, cmp=a.compare||{}, rel=d.relationship||{};
     // KPI 卡
     var cards='';
-    if(rs.decided>0){
-      cards+=card(rs.ai_resolution_rate_pct+'%','AI 解决率',
-        rs.ai_handled+'/'+rs.decided+' 会话 AI 独立解决',
-        rs.ai_resolution_rate_pct>=60?'good':(rs.ai_resolution_rate_pct>=30?'warn':'bad'));
-      cards+=card(rs.recontact_rate_pct+'%','再联系率',
-        rs.recontact_window_hours+'h 内回访（越低越好）',
-        rs.recontact_rate_pct<=10?'good':(rs.recontact_rate_pct<=25?'warn':'bad'));
+    if(rel.active_relationships>0){
+      cards+=card(rel.active_relationships,'活跃关系','期内有用户互动的关系数','good');
+      cards+=card(rel.sticky_rate_pct+'%','关系黏性',
+        rel.sticky_relationships+' 个跨天回访（越高越好）',
+        rel.sticky_rate_pct>=40?'good':(rel.sticky_rate_pct>=20?'warn':'bad'));
+      cards+=card(rel.avg_turns,'人均往来轮次','关系深度（越高越深）',
+        rel.avg_turns>=10?'good':(rel.avg_turns>=4?'warn':'bad'));
+      cards+=card(rel.retention_d7_pct+'%','D7 留存',
+        '新关系 '+(rel.cohort_size||0)+' 个的 7 日回访',
+        rel.retention_d7_pct>=30?'good':(rel.retention_d7_pct>=15?'warn':'bad'));
     }
     cards+=card(a.ai_share_pct!=null?a.ai_share_pct+'%':'—','AI 自动应答占比','共 '+(a.total_sent||0)+' 条回复',
       a.ai_share_pct>=50?'good':'', deltaHtml(cmp.ai_share_delta_pp,'pp'));

@@ -1984,31 +1984,26 @@ class InboxStore:
             "trend": trend,
         }
 
-    def get_resolution_stats(
+    def get_engagement_stats(
         self,
         since_ts: float = 0.0,
         until_ts: Optional[float] = None,
-        *,
-        session_gap_sec: float = 3600.0,       # 1h：界定「会话静默间隔」
-        recontact_window_sec: float = 259200.0,  # 72h：再联系判定窗口
     ) -> Dict[str, Any]:
-        """M6 AI 解决率：按会话聚合 draft_audit_log，拆「AI 独立解决 / 转人工 / 再联系」。
+        """情感陪聊·关系参与度：按 **会话(=关系)** 聚合 ``messages``，衡量「聊得多深、多黏」。
 
-        与 ``get_automation_roi_stats``（按动作条数）不同：本方法按 **会话** 维度统计，
-        回答「多少比例的会话被 AI 全程独立解决」——售卖与续费的核心价值数字。
+        与客服「解决率」相反——陪聊的目标是 **更长、更黏、用户愿意回来**，故这里看
+        参与轮次、互惠比、跨天活跃（黏性），而非「快速结案」。窗口 ``[since_ts, until_ts)``。
 
-        口径（会话级，窗口 ``[since_ts, until_ts)``）：
-        - ``ai_handled``：窗口内有 ≥1 ``autosend`` 且 **0 人工动作** 的会话。
-        - ``human_handled``：有 ≥1 人工动作（approved/edit_send/force_override）的会话。
-        - ``reopened``（再联系/假解决）：``ai_handled`` 会话内两次动作出现
-          ``session_gap_sec < 间隔 ≤ recontact_window_sec`` —— 即客户静默后又在 72h 内回来。
-          该判定**仅用窗口内数据**，不依赖 until_ts 边界，故 since-only 也有效。
-        - ``ai_resolved = ai_handled − reopened``。
-
-        返回各分子分母 + 比率（resolution / true_resolution / recontact / escalation）。
+        口径：
+        - ``active_relationships``：窗口内 **有 ≥1 条用户入站(in)** 的会话数（真正在聊的关系）。
+        - ``messages_in/out``：用户/角色消息条数；``total_turns`` 两者之和。
+        - ``avg_turns``：人均(每关系)往来轮次——关系深度。
+        - ``reciprocity``：out/in 比值，衡量 AI 角色的应答充分度（≈1 健康，过低=冷落）。
+        - ``sticky_relationships``：窗口内在 **≥2 个不同自然日** 有入站的会话（会回来的关系）。
+        - ``sticky_rate`` = sticky / active：黏性（陪聊的核心健康指标）。
+        - ``trend``：逐日 {day, active, in, out}。
         """
-        _AI = ("autosend",)
-        _HUMAN = ("approved", "edit_send", "force_override")
+        import datetime as _dt
         clause = "ts >= ? AND conversation_id != ''"
         params: List[Any] = [float(since_ts)]
         if until_ts is not None:
@@ -2016,52 +2011,102 @@ class InboxStore:
             params.append(float(until_ts))
         with self._lock:
             rows = self._conn.execute(
-                f"SELECT conversation_id, action, ts FROM draft_audit_log WHERE {clause}",
+                f"SELECT conversation_id, direction, ts FROM messages WHERE {clause}",
                 params,
             ).fetchall()
         convs: Dict[str, Dict[str, Any]] = {}
-        for cid, action, ts in rows:
+        per_day: Dict[str, Dict[str, Any]] = {}
+        messages_in = messages_out = 0
+        for cid, direction, ts in rows:
             cid = str(cid or "")
             if not cid:
                 continue
-            act = str(action or "")
-            c = convs.setdefault(cid, {"has_ai": False, "has_human": False, "ts": []})
-            if act in _HUMAN:
-                c["has_human"] = True
-            elif act in _AI:
-                c["has_ai"] = True
+            is_in = str(direction or "in").lower() == "in"
+            tsf = float(ts or 0.0)
+            day = _dt.date.fromtimestamp(tsf).isoformat()
+            c = convs.setdefault(cid, {"in": 0, "out": 0, "days": set()})
+            if is_in:
+                c["in"] += 1
+                messages_in += 1
+                c["days"].add(day)
             else:
-                continue  # rejected/blocked 不参与"已处置"会话分类
-            c["ts"].append(float(ts or 0.0))
-        ai_handled = 0
-        human_handled = 0
-        reopened = 0
-        for c in convs.values():
-            if c["has_human"]:
-                human_handled += 1
-                continue
-            if not c["has_ai"]:
-                continue  # 仅 rejected/blocked，无实际处置
-            ai_handled += 1
-            tss = sorted(c["ts"])
-            for a, b in zip(tss, tss[1:]):
-                gap = b - a
-                if session_gap_sec < gap <= recontact_window_sec:
-                    reopened += 1
-                    break
-        decided = ai_handled + human_handled
-        ai_resolved = ai_handled - reopened
+                c["out"] += 1
+                messages_out += 1
+            b = per_day.setdefault(day, {"active": set(), "in": 0, "out": 0})
+            if is_in:
+                b["in"] += 1
+                b["active"].add(cid)
+            else:
+                b["out"] += 1
+        active = [c for c in convs.values() if c["in"] > 0]
+        active_n = len(active)
+        sticky_n = sum(1 for c in active if len(c["days"]) >= 2)
+        total_turns = messages_in + messages_out
+        trend = [
+            {"day": d[5:], "active": len(v["active"]), "in": v["in"], "out": v["out"]}
+            for d, v in sorted(per_day.items())
+        ]
         return {
-            "ai_handled": ai_handled,
-            "human_handled": human_handled,
-            "decided": decided,
-            "reopened": reopened,
-            "ai_resolved": ai_resolved,
-            "ai_resolution_rate": round(ai_handled / decided, 4) if decided else 0.0,
-            "true_resolution_rate": round(ai_resolved / decided, 4) if decided else 0.0,
-            "recontact_rate": round(reopened / ai_handled, 4) if ai_handled else 0.0,
-            "escalation_rate": round(human_handled / decided, 4) if decided else 0.0,
-            "recontact_window_hours": round(float(recontact_window_sec) / 3600.0, 1),
+            "active_relationships": active_n,
+            "messages_in": messages_in,
+            "messages_out": messages_out,
+            "total_turns": total_turns,
+            "avg_turns": round(total_turns / active_n, 1) if active_n else 0.0,
+            "reciprocity": round(messages_out / messages_in, 2) if messages_in else 0.0,
+            "sticky_relationships": sticky_n,
+            "sticky_rate": round(sticky_n / active_n, 4) if active_n else 0.0,
+            "trend": trend,
+        }
+
+    def get_retention_cohorts(
+        self,
+        since_ts: float = 0.0,
+        until_ts: Optional[float] = None,
+        *,
+        horizons: tuple = (1, 7, 30),
+    ) -> Dict[str, Any]:
+        """情感陪聊·留存：以「首次入站落在窗口内」的会话为同期群，算 D1/D7/D30 回访率。
+
+        留存 = 用户在首次接触后的第 N 天内 **又回来发消息**——这才是陪聊的"解决率"。
+        以入站(in)消息为准（用户主动说话才算"在关系里"）。日偏移按自然日计算。
+        """
+        import datetime as _dt
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT conversation_id, ts FROM messages "
+                "WHERE direction='in' AND conversation_id != '' ORDER BY ts ASC",
+            ).fetchall()
+        # 每会话的入站自然日序列 + 全局首次入站 ts
+        first_ts: Dict[str, float] = {}
+        days_by_conv: Dict[str, set] = {}
+        for cid, ts in rows:
+            cid = str(cid or "")
+            if not cid:
+                continue
+            tsf = float(ts or 0.0)
+            if cid not in first_ts:
+                first_ts[cid] = tsf
+            days_by_conv.setdefault(cid, set()).add(_dt.date.fromtimestamp(tsf).toordinal())
+        hi = sorted(int(h) for h in horizons if int(h) > 0)
+        cohort = [
+            cid for cid, t0 in first_ts.items()
+            if t0 >= float(since_ts) and (until_ts is None or t0 < float(until_ts))
+        ]
+        retained = {h: 0 for h in hi}
+        for cid in cohort:
+            first_ord = _dt.date.fromtimestamp(first_ts[cid]).toordinal()
+            offsets = {d - first_ord for d in days_by_conv[cid]}
+            for h in hi:
+                if any(1 <= off <= h for off in offsets):
+                    retained[h] += 1
+        size = len(cohort)
+        return {
+            "cohort_size": size,
+            "horizons": hi,
+            "retained": {f"d{h}": retained[h] for h in hi},
+            "retention_rate": {
+                f"d{h}": round(retained[h] / size, 4) if size else 0.0 for h in hi
+            },
         }
 
     def get_quality_stats(
