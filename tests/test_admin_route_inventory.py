@@ -522,6 +522,7 @@ _BASELINE = """
 /api/workspace/escalation/{esc_id}/assign	POST
 /api/workspace/escalations	GET
 /api/workspace/escalations/mine	GET
+/api/workspace/handoff-brief	GET
 /api/workspace/follow-up/{task_id}/assign	POST
 /api/workspace/follow-up/{task_id}/done	POST
 /api/workspace/follow-up/{task_id}/snooze	POST

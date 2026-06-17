@@ -58,16 +58,20 @@
 - `AccountLimiter` 增**可选**预热爬坡：`warmup_enabled` + `age_days_fn` 回调；`effective_cap()` = min(daily_cap, warmup_cap(age))；新号超预热上限拒发并报 `warmup_cap_exceeded`；阈值告警与 `get_counts` 同步用 effective cap。**默认关 → 历史行为零变更**（既有 account_limiter/cap_alert 测试全过）。
 - 健康信号：age_days / sends_today / flood_waits_24h / errors_24h / proxy_bound / banned。
 
-### M8 结构化转人工
-转人工携带 intent+历史+客户画像（`conversation_meta` 已有 last_intent/summary/csat），接 contacts/handoff。
+### M8 结构化转人工 ✅ 完成
+**审计**：escalations 仅携带 reason/agent/wait_sec，**无结构化上下文**；conversation_meta 已有 intent/emotion/risk/csat/summary。
+**已交付**：
+- `src/utils/handoff_brief.py::build_handoff_brief`（纯函数）：汇 conversation_meta + 最近往来 → 结构化简报（profile + recent_turns + highlights 风险提醒）。
+- 端点 `GET /api/workspace/handoff-brief?conversation_id=&reason=`：坐席接手前一键拉取，3 秒进入状态；store/元数据缺失优雅降级。
+- 已登记 route inventory 契约。
 
-### M5 首跑向导
-串 `setup`/`golive`/`kb-start` 成一条龙首跑引导。
+### M5 首跑向导 ✅ 审计：已存在
+`setup.html`、`setup_wizard.html`、`golive_checklist.html`、`src/utils/channel_setup.py` 已具备首跑/上线引导。Phase 1 收口确认其覆盖即可，无需新建。
 
 ## 4. 当前状态（每次更新）
 
-- **现在在做**：Phase 1 · M8 结构化转人工（M6、M7 已完成）。
-- **下一步**：M8 → 测试 → 回写 → M5 → Phase 1 收口。
+- **现在在做**：Phase 1 收口完成（M6/M7/M8 ✅，M5 审计已存在）；准备进入 Phase 2。
+- **下一步**：Phase 2 · M9 KB 缺口飞轮 / M10 Copilot 内联 / M11 白标转售 / M12 评测 harness（逐项先审计后补缺）。
 
 ## 5. 执行日志（每阶段追加，勿删历史）
 
@@ -88,3 +92,10 @@
   - 测试 `tests/test_account_health.py`（16 例）+ 回归 `test_account_limiter`/`test_cap_alert` 共 **37 passed**；无 lint。
   - 优化思考：预热设计为 limiter 的 opt-in 旁路（age_days_fn 回调）而非硬编码，既零破坏又可让上层用任意「账号天龄」来源（contacts 表/registry）。健康评分用「最差账号灯=机群灯」的保守聚合，避免一个红号被均值掩盖。
   - 下一步可优化：①把 fleet_health 接进 /api/rpa-overview 或 ops health 看板（需集中账号 age/flood 信号源）；②FLOOD_WAIT 计数实时采集；③随机延迟 pacing 纳入评分。
+- 2026-06-17 · **M8 结构化转人工 ✅ 完成**：
+  - `src/utils/handoff_brief.py::build_handoff_brief`（纯函数）：profile + recent_turns + highlights。
+  - 端点 `GET /api/workspace/handoff-brief`（已登记 route inventory）。
+  - 测试 `tests/test_handoff_brief.py`（6 例）+ route inventory 共 **10 passed**；无 lint。
+  - 优化思考：简报做成纯函数 + 瘦端点，store 取数失败逐项 try/except 优雅降级（永不因缺元数据阻断接手）。highlights 用关键词集合判定负面情绪/高风险，便于后续扩词。
+- 2026-06-17 · **M5 首跑向导 ✅ 审计已存在**：setup_wizard.html / golive_checklist.html / channel_setup.py 已覆盖，无需新建。
+- 2026-06-17 · **Phase 1 收口**：M6/M7/M8 交付 + M5 审计；进入 Phase 2。
