@@ -1258,3 +1258,145 @@ grep `deferred-outbox|deferred_outbox` 于 `src/web` → 0 命中，确认无现
 - **deferred outbox 运营动作**（可选）：失败条一键重排 / 清空 expired（CSRF + 审计）。
 - **质量趋势持久化**：把 quality-overview 按小时落 SQLite，画 7 日趋势（当前只有即时窗口）。
 - **⚠️ 拆分提交护盘（强烈建议，最高优先）**：工作区未提交变更持续累积，应优先按子系统拆 PR 落盘再继续新功能。
+
+> 注：上述「deferred 运营动作 / 质量趋势持久化 / 拆分提交」三项已在后续一轮全部完成
+> （deferred retry/cancel/pause/resume + quality_trend_store 时序 + 10 提交拆分 PR #72 squash 合入 main）。
+
+## 37. Phase K2 · C 端变现闭环（端用户订阅/付费解锁/打赏 + 权益 gate + 营收台账）
+
+### 立项重扫（以代码为准，确认空白）
+重扫六竞品后定位最大未做商业差距 = onechat 的「虚拟人陪聊 + **C 端变现闭环**」。grep 验证代码实况：
+- `persona_routes.py`/`persona_manager.py` 人设管理**已成熟**（CRUD+四层配置+绑定）→ 排除「人设市场」为伪空白。
+- `billing.py` 只有 **B2B 运营计费**（月账单/套餐含量/超额/CSV，对账维度全是 messages/seats）；
+  `web_user_store` 是运营/坐席账户；`entitlement|wallet|credit|ledger` grep 在 src 内**零业务命中**。
+- → **C 端变现确为整仓空白**。付费主体 = 与 AI 陪伴对话的**端用户**（contact），以 `contact_key`
+  （= 收件箱 `conversation_id`，与 care_schedule O4 对齐）为唯一标识。
+
+### 设计原则（复用既有范式，零重造）
+- 纯函数仿 `billing.py`、SQLite store 仿 `care_schedule`/`crisis_event_store`、gate 原语仿 `licensing/gate.py`
+  （`gate_enabled=False → 恒放行`，零破坏陪伴行为）、路由/注入/懒建单例仿 `care_routes`。
+- 与 B2B `pricing` **正交**：本块是「端用户→运营方」内容/会员变现，两套价目互不污染。
+
+### 4.K2-1 · monetization 纯函数 ✅
+- [x] `src/utils/monetization.py`：`DEFAULT_CATALOG`（currency + tiers free/vip/svip 各带 grants + items 解锁项 + gifts 礼物）+ `merge_catalog`（config 深合并不污染默认）+ `tier_grants`/`subscription_active`/`effective_tier`（过期降级 free）/`entitlement_allows`（grant 或 unlock 命中）/`feature_allowed`（**gate 原语，关时恒放行**）/`quote`（三类报价）/`revenue_from_txs`（聚合，跳过非 paid）。无副作用、无 DB、无 FastAPI 依赖。
+
+### 4.K2-2 · EntitlementStore（SQLite）✅
+- [x] `src/utils/entitlement_store.py`：三表 `subscriptions`（一人一条当前订阅，upsert）/`unlocks`（contact+item 唯一，幂等）/`tx_ledger`（**`ref` 唯一索引 → 支付回调幂等**）。
+- [x] 写：`record_tx`（ref 重复跳过）/`grant_subscription`（upsert+入账，ref 幂等不重复发权益）/`record_unlock`（已持有不重复）/`record_gift`（纯入账）。
+- [x] 读：`get_entitlement`（有效 tier+grants+已解锁，绝不抛缺则 free）/`revenue_summary`（单次 GROUP BY 聚合）/`top_spenders`/`active_subscription_count`/`active_subscriptions`/`recent_tx`/`expire_subscriptions`。
+- [x] 镜像约定：单连接 `check_same_thread=False` + 写锁 + 绝不抛 + `:memory:`/文件双模式 + 进程内单例 `get_entitlement_store`（+ `reset_entitlement_store` 供测）。
+
+### 4.K2-3 · gate 原语 + runtime 单例 ✅
+- [x] gate 原语 `feature_allowed`（在 monetization.py）+ runtime 访问器 `get_entitlement_store`（在 entitlement_store.py）已就绪。
+- [x] **刻意不强插 send 热路径**——仿 Phase J「seat_exceeded 先定义导出、后在边界 wire」的精神：变现基建+台账+权益+gate 原语先落地可单测，实际功能门控点（语音/主动频次/剧情解锁）待产品定后单独 wire（默认 `monetization.gate.enabled:false` 恒放行，零行为风险）。
+
+### 4.K2-4 · routes + 后台页 + config + 接线 ✅
+- [x] `src/web/routes/monetization_routes.py`：`GET /api/monetize/overview`（营收概览+活跃订阅+Top消费+最近流水）/`GET catalog`/`GET entitlement`/`POST grant`（运营手动开通）/`POST webhook`（支付服务商桩：`X-Monetize-Secret` 共享密钥校验 + ref 幂等记账发权益）。store 经 `app.state.entitlement_store` 注入、缺则懒建单例。
+- [x] `admin.py` 注册 + `/monetization` 页面（role=monetization）+ `_PATH_TO_ACTIVE`/`_PATH_TO_PAGE` 两 map；`web_user_store.PAGE_PERMISSIONS["monetization"]={master,admin}`（营收数据仅主帐号+管理员）。
+- [x] `monetization.html`：营收卡（近N天总额/活跃订阅/订阅·解锁·打赏分项）+ Top 消费榜 + 最近流水表 + 运营手动开通/查权益表单。base.html 桌面+移动导航接入。
+- [x] config `monetization.*`（enabled/webhook_secret/expire_on_startup/gate.enabled/catalog）**默认全关**。
+- [x] `main.py::_maybe_init_monetization`（gated）：enabled 时按 catalog 建 EntitlementStore 单例→挂 app.state→启动清理过期订阅；关时不建库（路由按需懒建只读）。
+- [x] 单测：`tests/test_monetization.py`（16 项：纯函数 8 + store 8）+ `tests/test_monetization_routes.py`（8 项：catalog/overview/grant 三类/webhook 幂等/密钥校验）；route inventory 白名单 +5 端点 +1 页面。
+
+**测试**：✅ K2 栈 24 passed；route inventory + config_check 37 passed；`import main` ok；Jinja 解析 ok；全量 **5668 passed / 31 skipped / 0 fail（273s）**。
+
+**K2 实施中的再优化（在原方案上又改进）**：
+1. **付费主体定为 `contact_key`（= conversation_id）而非新造端用户表**：与 care_schedule/inbox 同 ID 空间，变现信号天然可与关怀/健康卡聚合（未来一处 contact 看「关系+变现」全貌），不引入第四套身份。
+2. **`tx_ledger.ref` 唯一索引做幂等**：支付服务商回调天然会重投（at-least-once），用 `ref` 唯一约束 + `grant_subscription` 检测「ref 已存在→不重复发权益」彻底防「重投发两次会员」，比应用层查重更可靠。
+3. **gate 默认放行 + 不强插热路径**：变现门控 `gate_enabled=False` 恒放行，且本轮**不动陪伴 send 路径**——遵 AGENTS.md「控风险」与 Phase J 范式，基建先行、门控点后定，避免「为变现改了陪伴行为」的回归面。
+4. **catalog 深合并不污染默认**：`merge_catalog` deepcopy 默认目录再合并 config 覆盖，单测钉死「改 config 不改 `DEFAULT_CATALOG`」，防多实例/多测试间状态串味。
+5. **营收聚合用单次 SQL GROUP BY**（revenue_summary/top_spenders）而非拉全表内存算——量大也稳，与既有 store 性能纪律一致。
+
+**已知局限 / 留待后续**：
+- **支付网关未真接**：webhook 为 provider-agnostic 桩（共享密钥校验占位），真接 Stripe/支付宝/微信/Telegram Stars 需各自验签 + 事件映射（按目标市场单独立项）。
+- **gate 未 wire 到具体功能**：语音回复/主动关怀频次/剧情解锁等付费门控点待产品定义后接（gate 原语已就绪、默认关）。
+- **退款/订阅自动续费状态机简化**：当前 tx 有 refunded 状态但无退款流程；续费靠 grant 覆盖 active_until（无自动扣费循环）。
+
+**下一阶段建议**：
+- **K2 延伸·gate 接一个真实门控点**（如「语音陪伴回复仅 VIP+」）+ 端用户付费引导话术（陪伴 prompt 在恰当时机软提示升级），把「能记账」升级为「能转化」。
+- **变现×关系健康聚合**：把 `tx_ledger` 的 LTV/付费档接入 Phase P 健康卡（高价值付费用户单列预警），复用 §31 身份桥。
+- **支付网关真接**（按目标市场：Telegram Stars / Stripe / 微信支付）单独立项。
+- **⚠️ 拆分提交护盘**：本轮 K2 变更（5 新文件 + admin/main/base/config/web_user_store 接线）建议尽快按子系统落盘。
+
+## 38. Phase K2b · 变现真实门控点 + 付费转化引导（feature-check API + 主动关怀配额门控）
+
+### 立项（承 §37 下一阶段建议①）
+K2 落地了变现基建+台账+权益+gate **原语**，但 gate 未接任何真实功能 → 「能记账、不能转化」。
+本轮把原语接成「陪伴→门控→升级引导」闭环：**一个集成缝 API + 一个真实门控点 + 得体的转化文案**。
+门控点选 **主动关怀配额**（我们自己的 `care_dispatcher`，非 RPA 发送路径，低风险），刻意**不碰**
+语音/RPA 发送链（散落各 runner，AGENTS.md 红线）。
+
+### 4.K2b-1 · upsell 转化决策 + 配额纯函数 ✅
+- [x] `monetization.py` 增：`upsell_offer(entitlement, feature, *, catalog, gate_enabled)`——为缺某功能的端用户算**最便宜**的可解锁 tier（找不到 tier 再看同名 item），gate 关/已拥有 → None；`upsell_pitch_hint(offer, persona_name)`——**得体、贴人设**的软引导文案（"升级 VIP，{她}就能更常陪着你～💕"，非弹窗式硬推销）；`proactive_quota_allowed(entitlement, sent_count, *, free_quota, gate_enabled)`——免费超额拦、`unlimited_proactive` 不限、gate 关恒放行。
+
+### 4.K2b-2 · 变现运行时门控 ✅
+- [x] `src/utils/monetization_runtime.py::MonetizationRuntime`（`from_app(app)` 从 app.state 组装 store+config，store 缺→None）：`gate_enabled()`（enabled ∧ gate.enabled）/`feature_check(ck, feature)`（→ allowed+entitlement+upsell+pitch_hint）/`proactive_allowed(ck, sent_count)`。全 best-effort、绝不抛、缺则放行。
+
+### 4.K2b-3 · feature-check 集成缝 API ✅
+- [x] `POST /api/monetize/feature-check`（body `{contact_key, feature}`）：任意前端付费功能（语音按钮/剧情解锁/主动等）发送前先查 → `{allowed, upsell?, pitch_hint?}`。gate 关恒 allowed=True（零破坏）；runtime 缺失也安全放行。路由白名单 +1。
+
+### 4.K2b-4 · 真实门控点 wire（主动关怀配额，默认关）✅
+- [x] `CareScheduleStore.count_sent_since(contact_key, since)`：窗口内已发主动关怀数（配额计数，复用既有 sent_at，无新状态）。
+- [x] `CareDispatcher` 增可选注入回调 `proactive_allowed(contact_key)->bool`（仿 `already_discussed` 范式）：返回 False → `_mark_skipped(sid, "paywall_quota")`，**放在 LLM 之前**超额不白耗 token；**未注入（None）则行为与原来完全一致**。
+- [x] `main.py::_build_care_paywall(care_store)`：仅当 `monetization.enabled ∧ gate.enabled` 才返回回调（否则 None=零破坏）；回调**懒读** `MonetizationRuntime.from_app(web_app)` → 近 24h 已发主动数 vs 免费配额。`_maybe_init_monetization` 提前到 proactive_care 之前，保证 gate 开时 store 已就绪。
+- [x] config `monetization.upsell.free_proactive_daily`（默认 1）。
+- [x] 单测 +17：upsell 选最便宜 tier/item 回退/已拥有或 gate 关→None/文案口吻；proactive_quota 四态；runtime feature_check（gate 关放行/免费拒+upsell/订阅放行）+ proactive_allowed 配额；`count_sent_since`；feature-check 路由 4 项；care_dispatcher paywall（超额跳过+原因/放行/None 零变）3 项。
+
+**测试**：✅ K2b 栈 96 passed（含 monetization 全栈 + care_dispatcher + route inventory + config_check）；`import main` ok；全量 **5685 passed / 31 skipped / 0 fail（260s）**。
+
+**K2b 实施中的再优化（在原方案上又改进）**：
+1. **门控点选「主动关怀配额」而非语音回复**：勘察发现语音散落各 RPA runner（发送路径，AGENTS.md 红线），改选 `care_dispatcher`（我们自己的代码、已有注入回调+skip-with-reason 基建）——价值等价（"她主动找你"是陪伴付费点）、风险低一个数量级，且零碰 RPA。
+2. **转化不污染陪伴对话**：付费引导走 **feature-check API + UI/坐席展示**（`pitch_hint`），**不**把销售话术自动注入端用户收到的关怀消息——守北极星「陪伴深度」，避免「到点打卡式推销」毁体验；门控只调**频次**（免费少、VIP 不限），不塞广告文案。
+3. **回调懒读 runtime**：`proactive_allowed` 闭包在 dispatch 时才 `from_app` 取 store/config，而非构造期绑定——即使 store 晚于 dispatcher 构造、或运行中热更 config 都能跟上；构造期只判「要不要注入」（gate 关→None 彻底零开销）。
+4. **paywall 检查置于 LLM 之前**：超额用户直接 skip，不白烧生成 token；skip 原因 `paywall_quota` 进 §36 质量看板（与其它 skip 原因同口径可观测）。
+
+**已知局限 / 留待后续**：
+- 仅 wire 了「主动关怀配额」一个门控点；语音/剧情解锁等需各自在**可编程**层接 feature-check（RPA 语音不在本轮）。
+- `free_proactive_daily` 配额按「自然 24h 滚动窗 + sent 计数」近似，未做按日历日重置（够灰度用）。
+- 转化文案 `pitch_hint` 已生成但前端尚未消费（feature-check 返回，等具体付费 UI 接入）；真支付仍是 webhook 桩。
+
+**下一阶段建议**：
+- **K2c·变现×关系健康聚合**（承 §37 建议②）：把 `tx_ledger` 的 LTV/付费档接入 Phase P 健康卡（高价值付费用户单列），复用 §31 身份桥——让运营一眼看到「谁在付费、谁该挽留」。
+- **付费 UI 消费 pitch_hint**：前端/坐席台在 feature-check 拒绝时渲染升级卡片（把已备的 `pitch_hint`/`upsell` 用起来）。
+- **支付网关真接**（Telegram Stars / Stripe / 微信）单独立项。
+- **⚠️ 拆分提交护盘（最高优先）**：K2 + K2b 已累计 7 新文件 + 多处接线，强烈建议尽快按子系统拆 PR 落盘。
+
+## 39. Phase K2c · 变现×关系健康聚合（LTV/会员档接入预警榜 + 付费流失单列）
+
+**目标**（承 §38 建议①）：把 §37 建好的 `tx_ledger`/订阅数据，复用 §31 身份桥反推的 conversation_id，聚合进 Phase P 单人健康卡 + 流失预警榜——让运营一眼看到「谁在付费、谁是付费用户正在流失（最该挽留）」。**零新表、零新路由、纯叠加既有两条线**。
+
+### 4.K2c-1 · EntitlementStore 批量聚合方法 ✅
+- `spend_by_contacts(keys)`：分块 IN 查询 `tx_ledger`（仅 `status='paid'`，`refunded` 不计）→ `{contact_key: LTV}`，避免预警榜 N+1。
+- `tiers_by_contacts(keys, now)`：批量取**当前有效**会员档（`status='active'` 且 `tier!='free'` 且 `active_until>now`，过期自动排除）。
+- 两者都 500 一批、绝不抛（变现不可用不拖垮健康榜）。
+
+### 4.K2c-2 · best_tier / tier_rank 纯函数 ✅
+- `tier_rank(tier, catalog)` 按 catalog 月费给档位排序权重；`best_tier(tiers, catalog)` 从单人多会话的若干 tier 里取**最高档**（一个人可能在多平台会话各有订阅，合并取最高）。
+
+### 4.K2c-3 · contacts_routes 聚合缝（复用身份桥）✅
+- `_monetization_for_keys(conv_ids)`（单卡）+ `_monetization_batch(jids,…)`（榜单，复用榜单已算好的 `convkeys_by_contact`，一次 SQL 取全量 key）。
+- 单卡 `GET /api/relations/health/{jid}` 新增 `monetization` 块；榜单 `GET /api/relations/health-board` 上榜行带 `monetization` + 顶层 `payer_count` 汇总。
+- **减噪**：非付费用户（LTV=0 且无有效会员）→ 该块为 None，不占视觉。变现未启用（无 `app.state.entitlement_store`）→ 全 None，零行为变化（自然门控，**不**懒建库）。
+
+### 4.K2c-4 · 前端预警榜「付费」列 + 付费流失高亮 ✅
+- 新增「付费」列：付费用户显示 `币种 LTV` 绿徽 + 会员档紫徽；汇总条加「付费用户 / 付费流失」两枚 pill。
+- **付费用户正流失**（付费/会员 ∧ at_risk/critical）→ 行紫色高亮 + 「付费流失」红标，盖过普通「高价值流失」——把最该挽留的人推到最显眼。
+- 重逢草稿弹窗：发送前展示 `💎 付费用户 · LTV · 档位`，坐席挽留时知道对方价值。
+
+**测试**：✅ K2c 新增 9 测试（best_tier/tier_rank + 批量 spend/tiers + 单卡 payer/free/无 store + 榜单列 payer_count）；全量 **5691 passed / 31 skipped / 0 fail（271s）**。
+
+**K2c 实施中的再优化（在原方案上又改进）**：
+1. **批量复用榜单已算的 `convkeys_by_contact`**：不另做一次 CI 反查，变现聚合搭 care/inbox 的便车——榜单一次身份解析喂三个域（care pending + inbox 语境 + 变现 LTV）。
+2. **聚合点放「上榜行」而非「全扫描行」**：镜像 §26 R2——SQL 随 `limit`（默认 30）增长而非 `scan`（默认 400），上量也不放大变现库压力。
+3. **多会话 LTV 合并 + 取最高档**：一个端用户可能在 Telegram/Messenger 多会话分别付费，身份桥合并后 LTV 求和、会员档取 `best_tier`——避免「同一人被算成多个小付费」。
+4. **展示而非改排序**（本轮克制）：变现信号目前只**单列展示 + 高亮**，不改健康分排序模型（避免 §27 R3 那样的排序复杂度蔓延）；「付费权重并入 value_at_risk 排序」留作可选下一步（见下）。
+
+**已知局限 / 留待后续**：
+- 变现信号不参与榜单**排序**（仅展示/高亮）；若要「付费流失绝对置顶」，需扩 `_board_sort_key` 加 payer 维度（建议跟 §27 一样走 config flag，默认关）。
+- LTV 取全时段累计，未分「近 30 天活跃付费 vs 历史」；运营若要「近期掉付费」预警需再加时间窗聚合（`spend_by_contacts` 已支持 `since`，仅前端未透出）。
+
+**下一阶段建议**：
+- **①付费流失排序加权（config flag）**：把 `payer_at_risk` 并入 `_board_sort_key`，让付费正流失绝对置顶；低风险（沿用 R3 flag 模式）。
+- **②付费 UI 消费 pitch_hint**（仍未做）：feature-check 拒绝时前端渲染升级卡片。
+- **③支付网关真接**（Telegram Stars / Stripe）单独立项。
+- **⚠️ 拆分提交护盘（最高优先升级）**：K2 + K2b + K2c 已累计 7 新文件 + 多模块接线（monetization 全栈 / care_dispatcher / contacts_routes / 前端 / 配置），**强烈建议本轮后立即按子系统拆 PR 落盘**，避免大改积压。
