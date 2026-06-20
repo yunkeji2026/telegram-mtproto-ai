@@ -1422,3 +1422,53 @@ config `companion.relations_health.health_board.payer_sort_priority`（默认关
 
 **下一阶段建议**：②付费 UI 消费 `pitch_hint`（feature-check 拒绝时渲染升级卡片）；
 ③支付网关真接（Telegram Stars / Stripe）；④LTV 近 30 天时间窗聚合（`spend_by_contacts` 已支持 `since`，仅前端未透出）。
+
+## 41. Phase K2②③ · 升级卡片消费 pitch_hint + 支付网关真接（Stripe / Telegram Stars）
+
+承 §40 建议②③，一并落地「转化引导前端」+「真支付通路」。**provider 默认全关**，未配密钥时
+对应 checkout/webhook 直接拒绝；陪伴主流程零影响。
+
+### 4.K2③-1 · payment_gateway.py 纯函数核心（可测、无网络）✅
+- **Stripe**：`stripe_verify_signature`（`t=,v1=` HMAC-SHA256 + `compare_digest` 防时序 + 时间容差防重放）、
+  `parse_stripe_event`（`checkout.session.completed` → grant 字典，金额从 `amount_total` 分还原，
+  ref=事件 id）、`build_stripe_checkout_params`（Checkout Session form 参数，grant 进 metadata）。
+- **Telegram Stars**：`telegram_verify_secret`（`X-Telegram-Bot-Api-Secret-Token`，空密钥拒绝）、
+  `parse_telegram_successful_payment`（XTR 整数星 / 法币分两种口径）、`extract_telegram_pre_checkout`、
+  `build_telegram_invoice_params`（`createInvoiceLink`，grant 编码进 payload 回传）。
+
+### 4.K2③-2 · 路由：checkout + provider 专用 webhook ✅
+- `POST /api/monetize/checkout`：按 catalog 报价 → 构建参数 → best-effort 调 provider API 拿 `pay_url`；
+  provider 未启用/未配密钥 → `provider_disabled`，未知项 → `unknown_item`。
+- `POST /api/monetize/webhook/stripe`：验 `Stripe-Signature` → 解析 → 幂等发权益。
+- `POST /api/monetize/webhook/telegram`：验 secret 头 → 应答 `pre_checkout`（10s 内）/ 解析 `successful_payment` 发权益。
+- 抽出 `_apply_grant(store, grant, source)` 归一三种回调（generic/stripe/telegram）统一落库，
+  全走 `ref` 幂等（支付回调 at-least-once 必须幂等）。
+- 网络调用经 `_provider_request`（aiohttp，已声明依赖）best-effort 包裹，失败返回 `(0, {})` 不抛。
+
+### 4.K2②-1 · 升级卡片面板消费 feature-check（monetization.html）✅
+- 新增「功能门控 / 升级卡片预览」面板：输入 contact_key + 功能位 → 调 `/api/monetize/feature-check`：
+  - allowed → 绿条「已拥有」；denied → 渲染**升级卡片**（pitch_hint 文案 + 价格 + 含的功能位 +
+    Stripe / Telegram Stars 两个「去支付」CTA）。
+  - CTA 调 `/api/monetize/checkout` 拿 `pay_url` 内联展示。
+- 顺手给 `upsell_offer`（subscribe 分支）补 `grants` 字段，卡片可列出「升级后获得哪些功能位」。
+
+**测试**：✅ 新增 ~20 测试（payment_gateway 验签/解析/参数构建全覆盖 + checkout 禁用/未知项/未知 provider +
+stripe webhook 验签失败/成功幂等 + telegram 未授权/pre_checkout/successful_payment）；
+路由白名单补 3 条；全量 **5712 passed / 31 skipped / 0 fail（260s）**。
+
+**实施中的再优化**：
+1. **纯函数与网络解耦**：验签/解析/参数构建全做成无网络纯函数单测覆盖；真网络调用隔离在 `_provider_request`
+   best-effort 层（不进单测、不 flaky），既「真接」又可测。
+2. **三回调归一 `_apply_grant`**：generic webhook + stripe + telegram 落库逻辑收敛到一处，
+   全部 `ref` 幂等，避免三套发权益逻辑漂移。
+3. **本仓只有后台前端**：端用户 MiniApp 不在本仓，故②落成**坐席/运营**可用的升级卡片预览
+   （也正是端用户触达付费墙时该看到的卡片），即时可用且零端依赖。
+
+**已知局限 / 留待后续**：
+- checkout 的 provider 网络调用未进单测（避免真打 Stripe/Telegram）；建议接真密钥后手测一次回路。
+- Telegram Stars 计价：catalog 暂无 `stars` 字段，用 `round(amount)` 兜底；接入前应在目录显式标星价。
+- Stripe 订阅用 `mode=payment`（一次性）+ days 授予，非 Stripe 原生 recurring subscription；
+  续费目前靠运营/再次 checkout（原生续费 + `invoice.paid` 周期发权益可后续接）。
+
+**下一阶段建议**：④LTV 近 30 天时间窗聚合透出前端；⑤Stripe 原生 recurring 订阅 + 自动续费发权益；
+⑥端用户 MiniApp 接 checkout（本仓 API 已就绪，跨仓前端单独立项）。

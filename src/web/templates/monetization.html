@@ -25,6 +25,18 @@
 .mz-ent{font-size:.82rem;color:var(--t2);margin-top:.5rem;padding:.6rem .8rem;background:var(--input);border-radius:8px;display:none}
 .mz-ent strong{color:var(--t1)}
 .section-h{font-size:.9rem;font-weight:700;color:var(--t1);margin:.4rem 0 .6rem}
+.mz-fc-result{margin-top:.7rem;display:none}
+.mz-allow{padding:.55rem .8rem;border-radius:8px;font-size:.85rem;font-weight:600;background:rgba(16,185,129,.12);color:var(--green)}
+.upsell-card{border:1px solid rgba(168,85,247,.35);border-radius:12px;padding:1rem 1.1rem;background:linear-gradient(135deg,rgba(168,85,247,.08),rgba(91,124,246,.06));max-width:380px}
+.upsell-card .uc-pitch{font-size:.95rem;color:var(--t1);margin-bottom:.6rem;line-height:1.5}
+.upsell-card .uc-meta{font-size:.8rem;color:var(--t2);margin-bottom:.7rem}
+.upsell-card .uc-meta .price{font-size:1.3rem;font-weight:700;color:#a855f7}
+.upsell-card .uc-grants{font-size:.74rem;color:var(--t3);margin-bottom:.7rem}
+.upsell-card .uc-cta{display:flex;gap:.5rem;flex-wrap:wrap}
+.uc-btn{border:none;border-radius:8px;padding:.4rem .9rem;font-size:.82rem;font-weight:600;cursor:pointer;color:#fff;background:#a855f7}
+.uc-btn.tg{background:#229ED9}
+.uc-btn:hover{opacity:.9}
+.uc-paylink{margin-top:.6rem;font-size:.78rem;word-break:break-all}
 </style>
 {% endblock %}
 {% block content %}
@@ -79,6 +91,30 @@
     <button type="button" class="btn" onclick="mzLookup()">查权益</button>
   </div>
   <div class="mz-ent" id="g-ent"></div>
+</div>
+
+<div class="card fa">
+  <h2>
+    功能门控 / 升级卡片预览
+    <span style="font-size:.75rem;font-weight:400;color:var(--t2);margin-left:.4rem">模拟端用户触达付费墙时看到的升级引导（消费 feature-check 的 upsell + pitch_hint）</span>
+  </h2>
+  <div class="mz-grant">
+    <div class="f-grp"><label class="f-lb">联系人 key</label><input type="text" id="fc-contact" class="f-input" placeholder="conversation_id"></div>
+    <div class="f-grp"><label class="f-lb">功能位</label>
+      <select id="fc-feature" class="f-input" style="width:170px">
+        <option value="unlimited_proactive">unlimited_proactive 主动陪伴</option>
+        <option value="voice_reply">voice_reply 语音回复</option>
+        <option value="priority_reply">priority_reply 优先回复</option>
+        <option value="exclusive_persona">exclusive_persona 专属人设</option>
+        <option value="all_story">all_story 全部剧情</option>
+        <option value="story_ch1">story_ch1 剧情第一章</option>
+        <option value="exclusive_album">exclusive_album 专属相册</option>
+      </select>
+    </div>
+    <button type="button" class="btn btn-p" onclick="mzFeatureCheck()">检查门控</button>
+    <span id="fc-flag" style="font-size:.78rem;color:var(--t3)"></span>
+  </div>
+  <div class="mz-fc-result" id="fc-result"></div>
 </div>
 
 <script>
@@ -157,6 +193,58 @@ function renderEnt(ent){
     (ent.active?'（有效至 '+until+'）':'（无有效订阅）')+
     ' · 功能位：'+(ent.grants&&ent.grants.length?ent.grants.map(esc).join(', '):'—')+
     ' · 已解锁：'+(ent.unlocked&&ent.unlocked.length?ent.unlocked.map(esc).join(', '):'—');
+}
+
+async function mzFeatureCheck(){
+  const contact=document.getElementById('fc-contact').value.trim();
+  const feature=document.getElementById('fc-feature').value;
+  const flag=document.getElementById('fc-flag');
+  const box=document.getElementById('fc-result');
+  if(!contact){alert('请填联系人 key');return;}
+  flag.textContent='检查中…';box.style.display='none';
+  try{
+    const res=await fetch('/api/monetize/feature-check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contact_key:contact,feature:feature})});
+    const d=await res.json();
+    if(!d.ok){flag.textContent='失败：'+(d.message||d.reason);return;}
+    flag.textContent=d.gate_enabled?'门控已启用':'门控未启用（gate.enabled=false → 恒放行）';
+    box.style.display='block';
+    if(d.allowed){
+      box.innerHTML='<div class="mz-allow">✅ 已拥有「'+esc(feature)+'」权限，无需升级</div>';
+      return;
+    }
+    box.innerHTML=renderUpsellCard(contact,d.upsell,d.pitch_hint);
+  }catch(e){flag.textContent='请求失败: '+e;}
+}
+
+function renderUpsellCard(contact,offer,pitch){
+  if(!offer)return '<div class="mz-allow" style="background:rgba(245,158,11,.12);color:var(--amber)">无可推荐的升级项（gate 关或目录无对应套餐）</div>';
+  var grants=(offer.grants||[]);
+  var cur=esc(offer.currency||'USD');
+  var html='<div class="upsell-card">'+
+    '<div class="uc-pitch">'+esc(pitch||('升级「'+(offer.label||offer.tier)+'」即可解锁'))+'</div>'+
+    '<div class="uc-meta">'+esc(offer.label||offer.item_id)+' · <span class="price">'+cur+' '+(offer.amount||0)+'</span>'+(offer.kind==='subscribe'?' / 月':'')+'</div>';
+  if(grants.length)html+='<div class="uc-grants">含功能位：'+grants.map(esc).join(', ')+'</div>';
+  html+='<div class="uc-cta">'+
+    '<button type="button" class="uc-btn" onclick="mzCheckout(this,\''+esc(contact)+'\',\''+esc(offer.kind)+'\',\''+esc(offer.item_id)+'\',\'stripe\')">Stripe 结账</button>'+
+    '<button type="button" class="uc-btn tg" onclick="mzCheckout(this,\''+esc(contact)+'\',\''+esc(offer.kind)+'\',\''+esc(offer.item_id)+'\',\'telegram\')">Telegram Stars</button>'+
+    '</div>'+
+    '<div class="uc-paylink" id="uc-paylink"></div>'+
+    '</div>';
+  return html;
+}
+
+async function mzCheckout(btn,contact,kind,item,provider){
+  const link=document.getElementById('uc-paylink');
+  btn.disabled=true;link.textContent='创建结账链接中…';
+  try{
+    const res=await fetch('/api/monetize/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contact_key:contact,kind:kind,item_id:item,provider:provider})});
+    const d=await res.json();
+    if(!d.ok){
+      link.innerHTML='<span style="color:var(--amber)">'+esc(d.message||d.reason||'失败')+'</span>';
+      return;
+    }
+    link.innerHTML='支付链接：<a href="'+esc(d.pay_url)+'" target="_blank" rel="noopener">'+esc(d.pay_url)+'</a>';
+  }catch(e){link.textContent='请求失败: '+e;}finally{btn.disabled=false;}
 }
 
 document.addEventListener('DOMContentLoaded',mzLoad);

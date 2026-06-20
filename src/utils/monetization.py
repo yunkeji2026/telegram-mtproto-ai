@@ -231,6 +231,7 @@ def upsell_offer(
             "kind": "subscribe", "tier": tname, "item_id": tname,
             "amount": round(price, 2), "currency": cur,
             "label": str(tcfg.get("label") or tname), "feature": str(feature),
+            "grants": sorted(str(g) for g in (tcfg.get("grants") or [])),
         }
     items = cat.get("items") or {}
     if str(feature) in items:
