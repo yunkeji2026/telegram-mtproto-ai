@@ -68,6 +68,9 @@ _BASELINE = """
 /api/monetize/feature-check	POST
 /api/monetize/grant	POST
 /api/monetize/webhook	POST
+/api/monetize/checkout	POST
+/api/monetize/webhook/stripe	POST
+/api/monetize/webhook/telegram	POST
 /api/cases/active	GET
 /api/cases/{case_id}/close	POST
 /api/cases/{case_id}/note	POST

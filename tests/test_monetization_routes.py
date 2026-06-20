@@ -1,10 +1,14 @@
 """Phase K2：/api/monetize/* 路由契约 + 支付回调桩。"""
+import hashlib
+import hmac
+import json
 import time
 
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from src.utils.entitlement_store import EntitlementStore
+from src.utils.payment_gateway import encode_invoice_payload
 from src.web.routes.monetization_routes import register_monetization_routes
 
 
@@ -136,3 +140,87 @@ def test_webhook_secret_enforced():
                      headers={"X-Monetize-Secret": "s3cr3t"},
                      json={"contact_key": "c1", "kind": "gift", "item_id": "rose", "ref": "g1"})
     assert ok.json()["ok"] is True and ok.json()["applied"] is True
+
+
+# ── ④ 支付网关：checkout + provider webhook ─────────────────────────────
+def test_checkout_provider_disabled():
+    client, _ = _client(mon_cfg={"enabled": True})  # 无 providers
+    r = client.post("/api/monetize/checkout", json={
+        "contact_key": "c1", "kind": "subscribe", "item_id": "vip",
+        "provider": "stripe"})
+    assert r.json()["ok"] is False
+    assert r.json()["reason"] == "provider_disabled"
+
+
+def test_checkout_unknown_item_and_provider():
+    client, _ = _client(mon_cfg={"enabled": True})
+    r = client.post("/api/monetize/checkout", json={
+        "contact_key": "c1", "kind": "subscribe", "item_id": "nope",
+        "provider": "stripe"})
+    assert r.json()["reason"] == "unknown_item"
+    r2 = client.post("/api/monetize/checkout", json={
+        "contact_key": "c1", "kind": "gift", "item_id": "rose",
+        "provider": "paypal"})
+    assert r2.json()["reason"] == "unknown_provider"
+
+
+def _stripe_sig(raw: bytes, secret: str, t: int) -> str:
+    v1 = hmac.new(secret.encode(), f"{t}.".encode() + raw,
+                  hashlib.sha256).hexdigest()
+    return f"t={t},v1={v1}"
+
+
+def test_webhook_stripe_bad_signature():
+    client, _ = _client(mon_cfg={
+        "enabled": True, "providers": {"stripe": {"webhook_secret": "whsec_x"}}})
+    r = client.post("/api/monetize/webhook/stripe", content=b"{}",
+                    headers={"Stripe-Signature": "t=1,v1=deadbeef"})
+    assert r.json()["ok"] is False and r.json()["reason"] == "bad_signature"
+
+
+def test_webhook_stripe_applies_idempotent():
+    client, store = _client(mon_cfg={
+        "enabled": True, "providers": {"stripe": {"webhook_secret": "whsec_x"}}})
+    event = {"id": "evt_9", "type": "checkout.session.completed",
+             "data": {"object": {"amount_total": 990, "currency": "usd",
+                                  "metadata": {"contact_key": "c1",
+                                               "kind": "subscribe",
+                                               "item_id": "vip", "days": "30"}}}}
+    raw = json.dumps(event).encode()
+    t = int(time.time())
+    hdr = {"Stripe-Signature": _stripe_sig(raw, "whsec_x", t)}
+    r1 = client.post("/api/monetize/webhook/stripe", content=raw, headers=hdr)
+    assert r1.json()["applied"] is True
+    assert store.get_entitlement("c1")["tier"] == "vip"
+    # 重投同事件 id → 幂等
+    r2 = client.post("/api/monetize/webhook/stripe", content=raw, headers=hdr)
+    assert r2.json()["applied"] is False
+
+
+def test_webhook_telegram_unauthorized():
+    client, _ = _client(mon_cfg={
+        "enabled": True,
+        "providers": {"telegram_stars": {"webhook_secret": "tok"}}})
+    r = client.post("/api/monetize/webhook/telegram", json={"message": {}},
+                    headers={"X-Telegram-Bot-Api-Secret-Token": "wrong"})
+    assert r.json()["reason"] == "unauthorized"
+
+
+def test_webhook_telegram_pre_checkout_and_payment():
+    client, store = _client(mon_cfg={
+        "enabled": True,
+        "providers": {"telegram_stars": {"webhook_secret": "tok"}}})  # bot_token 空→不发网络
+    hdr = {"X-Telegram-Bot-Api-Secret-Token": "tok"}
+    payload = encode_invoice_payload({"contact_key": "c1", "kind": "subscribe",
+                                      "item_id": "vip", "days": 30})
+    # pre_checkout
+    pc = client.post("/api/monetize/webhook/telegram", headers=hdr, json={
+        "pre_checkout_query": {"id": "pcq", "invoice_payload": payload}})
+    assert pc.json()["pre_checkout"] is True
+    # successful_payment
+    sp = client.post("/api/monetize/webhook/telegram", headers=hdr, json={
+        "message": {"successful_payment": {
+            "invoice_payload": payload, "currency": "XTR", "total_amount": 120,
+            "telegram_payment_charge_id": "ch_9"}}})
+    assert sp.json()["applied"] is True
+    assert store.get_entitlement("c1")["tier"] == "vip"

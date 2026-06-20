@@ -1467,6 +1467,19 @@ monetization:
   # 付费转化：免费用户配额 + 升级引导（gate.enabled 开时生效）
   upsell:
     free_proactive_daily: 1           # 免费用户每日主动关怀上限（超额则跳过，VIP=unlimited_proactive 不限）
+  # ④ 支付网关（默认全关；空密钥时对应 checkout/webhook 直接拒绝）。
+  # checkout 创建结账链接；成功支付经各自 webhook 幂等落库（ref=事件/charge id）。
+  providers:
+    stripe:
+      enabled: false
+      secret_key: ""                  # sk_live_… / sk_test_…（创建 Checkout Session 用）
+      webhook_secret: ""              # whsec_…（校验 Stripe-Signature 头，空=拒绝回调）
+      success_url: ""                 # 支付成功跳转
+      cancel_url: ""                  # 取消跳转
+    telegram_stars:
+      enabled: false
+      bot_token: ""                   # 机器人 token（createInvoiceLink + answerPreCheckoutQuery）
+      webhook_secret: ""              # X-Telegram-Bot-Api-Secret-Token（空=拒绝回调）
   # 价目目录（深合并到内置默认；留空用默认 free/vip/svip + 解锁项 + 礼物）。
   catalog:
     currency: USD
