@@ -50,6 +50,9 @@ try:
 except ImportError:
     PYROGRAM_AVAILABLE = False
     ParseMode = None  # type: ignore
+    # 无 pyrogram（如 CI requirements-ci）时也保留模块级占位，确保 import-safe 且可被测试 patch
+    Client = None  # type: ignore
+    filters = None  # type: ignore
     # 创建模拟类型以便代码可以运行
     class Message:
         """模拟Message类"""
