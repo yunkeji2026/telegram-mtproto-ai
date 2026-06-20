@@ -114,6 +114,51 @@ async def test_skips_when_no_messenger_identity(base_setup):
     base_setup["send_callback"].assert_not_awaited()
 
 
+# ── 多平台选渠道 ────────────────────────────────────
+@pytest.mark.asyncio
+async def test_picks_telegram_when_priority_includes_it(base_setup):
+    # 只有 telegram 身份；priority 含 telegram → 用 telegram 渠道发
+    base_setup["store"].identities = [
+        _StubChannelIdentity(channel="telegram", external_id="12345",
+                             display_name="Bob", account_id="tg_acc"),
+    ]
+    loop = _make_loop(base_setup, platform_priority=["messenger", "telegram"])
+    n = await loop.run_once()
+    assert n == 1
+    args = base_setup["send_callback"].await_args.args
+    assert args[0] == "telegram" and args[1] == "tg_acc" and args[2] == "12345"
+
+
+@pytest.mark.asyncio
+async def test_messenger_preferred_over_telegram(base_setup):
+    # 同时有 messenger + telegram；priority messenger 在前 → 选 messenger
+    base_setup["store"].identities = [
+        _StubChannelIdentity(channel="telegram", external_id="999"),
+        _StubChannelIdentity(channel="messenger", external_id="Alice"),
+    ]
+    loop = _make_loop(base_setup, platform_priority=["messenger", "telegram"])
+    n = await loop.run_once()
+    assert n == 1
+    assert base_setup["send_callback"].await_args.args[0] == "messenger"
+
+
+@pytest.mark.asyncio
+async def test_skips_when_no_supported_platform(base_setup):
+    # 只有 zalo，不在 priority → skip（不在受支持平台上）
+    base_setup["store"].identities = [_StubChannelIdentity(channel="zalo")]
+    loop = _make_loop(base_setup, platform_priority=["messenger", "telegram"])
+    assert await loop.run_once() == 0
+    base_setup["send_callback"].assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_default_priority_is_messenger_only(base_setup):
+    # 不传 platform_priority → 默认仅 messenger；line-only contact 仍 skip
+    base_setup["store"].identities = [_StubChannelIdentity(channel="line")]
+    loop = _make_loop(base_setup)
+    assert await loop.run_once() == 0
+
+
 @pytest.mark.asyncio
 async def test_skips_when_llm_empty(base_setup):
     base_setup["ai_client"].chat = AsyncMock(return_value="")

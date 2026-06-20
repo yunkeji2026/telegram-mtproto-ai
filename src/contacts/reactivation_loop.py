@@ -58,7 +58,17 @@ SendCallback = Callable[
 EpisodicProvider = Callable[[Any], str]
 
 
-_REACTIVATION_PROMPT = """你是「{ai_name}」，正在和对方在 Facebook Messenger 上私聊。
+# 各渠道在 prompt 里的口语化平台名（让"在哪聊"自然，不写死 Messenger）
+_PLATFORM_LABELS = {
+    "messenger": "Facebook Messenger",
+    "telegram": "Telegram",
+    "line": "LINE",
+    "whatsapp": "WhatsApp",
+    "instagram": "Instagram",
+    "zalo": "Zalo",
+}
+
+_REACTIVATION_PROMPT = """你是「{ai_name}」，正在和对方在 {platform_label} 上私聊。
 对方上次互动是 **{silent_days:.0f} 天前**，需要你主动发一条消息把关系延续下去。
 
 【画像 / 已知信息】
@@ -104,6 +114,7 @@ class ReactivationLoop:
         dry_run: bool = False,
         first_run_grace_minutes: float = 60.0,
         first_run_max_per_tick: int = 1,
+        platform_priority: Optional[List[str]] = None,
     ) -> None:
         self._scheduler = scheduler
         self._store = store
@@ -111,6 +122,11 @@ class ReactivationLoop:
         self._send = send_callback
         self._episodic_provider = episodic_provider
         self._ai_name = ai_name or "她"
+        # 多平台：按优先级在该 contact 的 ChannelIdentity 里选一个渠道发。
+        # 默认仅 messenger（零破坏既有行为）；main.py 可经 config 放宽到 telegram/line/…
+        # 非 messenger 渠道经 send_callback 路由到多平台 deferred 队列（main.py 接线）。
+        _pri = [str(p).strip() for p in (platform_priority or ["messenger"]) if str(p).strip()]
+        self._platform_priority = _pri or ["messenger"]
         self._max_per_tick = max(1, int(max_per_tick))
         self._interval = max(60.0, float(interval_sec))
         self._skip_if_no_episodic = bool(skip_if_no_episodic)
@@ -210,23 +226,36 @@ class ReactivationLoop:
                              c.contact_id, exc_info=True)
         return scheduled
 
+    def _pick_identity(self, identities):
+        """按 platform_priority 在该 contact 的 ChannelIdentity 里选一个渠道。
+
+        返回 (channel, identity)；都没命中 → (None, None)。同渠道多身份取首个。
+        """
+        by_channel = {}
+        for i in identities or []:
+            ch = str(getattr(i, "channel", "") or "")
+            if ch and ch not in by_channel:
+                by_channel[ch] = i
+        for ch in self._platform_priority:
+            if ch in by_channel:
+                return ch, by_channel[ch]
+        return None, None
+
     async def _schedule_one(self, cand: ReactivationCandidate) -> bool:
-        # 找 messenger 上的身份（陪护产品当前主战场是 messenger）
+        # 按平台优先级选渠道（默认 messenger；config 放宽后可跨平台）
         try:
             identities = self._store.list_channel_identities_of(cand.contact_id)
         except Exception:
             return False
-        msgr_id = next(
-            (i for i in identities if getattr(i, "channel", "") == "messenger"),
-            None,
-        )
-        if msgr_id is None:
-            return False  # 这个 contact 没在 messenger 上 → 跳过
-        chat_name = (getattr(msgr_id, "external_id", "") or "").strip() \
-            or (getattr(msgr_id, "display_name", "") or "").strip()
-        account_id = str(getattr(msgr_id, "account_id", "default") or "default")
+        channel, ident = self._pick_identity(identities)
+        if ident is None:
+            return False  # 这个 contact 不在任何受支持平台上 → 跳过
+        chat_name = (getattr(ident, "external_id", "") or "").strip() \
+            or (getattr(ident, "display_name", "") or "").strip()
+        account_id = str(getattr(ident, "account_id", "default") or "default")
         if not chat_name:
             return False
+        platform_label = _PLATFORM_LABELS.get(channel, channel)
 
         # 拿 portrait + episodic
         contact = None
@@ -259,6 +288,7 @@ class ReactivationLoop:
         lang = (getattr(contact, "language_hint", "") or "ja").strip() or "ja"
         prompt = _REACTIVATION_PROMPT.format(
             ai_name=self._ai_name,
+            platform_label=platform_label,
             silent_days=cand.silent_days,
             portrait_block=portrait_block or "(无更多信息)",
             episodic_block=episodic_block or "(无具体事)",
@@ -361,6 +391,7 @@ class ReactivationLoop:
                 get_metrics_store().record_reactivation_dry_run(sample={
                     "contact_id": cand.contact_id,
                     "chat_name": chat_name,
+                    "platform": channel,
                     "account_id": account_id,
                     "reply_text": reply,
                     "silent_days": cand.silent_days,
@@ -375,7 +406,7 @@ class ReactivationLoop:
 
         try:
             row_id = await self._send(
-                "messenger", account_id, chat_name, reply, defer_until,
+                channel, account_id, chat_name, reply, defer_until,
                 f"reactivation:silent_{int(cand.silent_days)}d",
                 86400.0,  # staleness 24h
                 {
