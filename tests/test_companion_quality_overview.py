@@ -69,3 +69,29 @@ def test_quality_overview_endpoint(auth_client):
     assert "care" in body and "reactivation" in body
     assert body["care"]["skipped"] >= 1
     assert body["window_sec"] == 24 * 3600
+
+
+def test_quality_trend_endpoint_disabled(auth_client):
+    # 未注入 store → enabled:false（不报错）
+    if hasattr(auth_client.app.state, "quality_trend_store"):
+        delattr(auth_client.app.state, "quality_trend_store")
+    r = auth_client.get("/api/companion/quality-trend?hours=24")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True and body["enabled"] is False
+
+
+def test_quality_trend_endpoint_enabled(auth_client):
+    from src.monitoring.quality_trend_store import QualityTrendStore
+    store = QualityTrendStore(":memory:")
+    store.record_snapshot({"window_sec": 86400, "care": {"skipped": 2}})
+    auth_client.app.state.quality_trend_store = store
+    try:
+        r = auth_client.get("/api/companion/quality-trend?hours=24")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True and body["enabled"] is True
+        assert body["count"] == 1
+        assert body["points"][0]["care_skipped"] == 2
+    finally:
+        delattr(auth_client.app.state, "quality_trend_store")

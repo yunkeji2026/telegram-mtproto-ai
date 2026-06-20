@@ -117,6 +117,8 @@ class AIChatAssistant:
         self._companion_proactive_loop = None
         # 多平台 deferred 队列（非 messenger 主动消息走此队列；关程序时 stop）
         self._deferred_outbox_dispatcher = None
+        # 质量趋势持久化快照器（周期落地 companion_quality_overview；关程序时 stop）
+        self._quality_trend_snapshotter = None
         # 坐席工作台实时化（D5a）：收件箱后台 ingest 轮询任务 + web_app 引用
         self._web_app = None  # type: Optional[Any]  # noqa: F821
         self._inbox_ingest_task = None
@@ -1317,6 +1319,9 @@ class AIChatAssistant:
                 # ★ 多平台 deferred 队列（非 messenger 主动消息的发送闭环；默认关）
                 await self._maybe_start_deferred_outbox()
 
+                # ★ 质量趋势持久化（周期落地 companion_quality_overview；默认关）
+                await self._maybe_start_quality_trend()
+
                 # ★ Q 延伸：ingest 回写 contact_id（默认关）
                 self._maybe_wire_ingest_contact_writeback()
 
@@ -1584,6 +1589,62 @@ class AIChatAssistant:
             self.logger.info("✅ 多平台 deferred 队列 drain loop 已启动")
         except Exception:
             self.logger.warning("多平台 deferred 队列启动跳过", exc_info=True)
+
+    def _ensure_quality_trend(self):
+        """惰性建质量趋势快照器（周期落地 companion_quality_overview）。
+
+        返回 snapshotter（未 start），或 None（功能关/不可用）。幂等。
+        store 挂到 app.state.quality_trend_store 供 /api/companion/quality-trend 读。
+        """
+        if self._quality_trend_snapshotter is not None:
+            return self._quality_trend_snapshotter
+        try:
+            comp = (self.config.config.get("companion") or {})
+            cfg = (comp.get("quality_trend") or {})
+            if not cfg.get("enabled", False):
+                return None
+            from src.monitoring.metrics_store import get_metrics_store
+            from src.monitoring.quality_trend_store import (
+                QualityTrendSnapshotter, QualityTrendStore,
+            )
+
+            _cfg_dir = Path(self.config.config_path).parent
+            store = QualityTrendStore(_cfg_dir / "quality_trend.db")
+            win_h = float(cfg.get("window_hours", 24))
+
+            def _overview():
+                return get_metrics_store().companion_quality_overview(
+                    window_sec=max(1.0, win_h) * 3600.0)
+
+            snap = QualityTrendSnapshotter(
+                store=store,
+                overview_fn=_overview,
+                interval_sec=float(cfg.get("interval_sec", 300)),
+                retention_days=float(cfg.get("retention_days", 30)),
+            )
+            self._quality_trend_snapshotter = snap
+            if self._web_app is not None:
+                self._web_app.state.quality_trend_store = store
+            self.logger.info(
+                "✅ 质量趋势持久化已就绪（interval=%ss retention=%sd）",
+                cfg.get("interval_sec", 300), cfg.get("retention_days", 30))
+            return snap
+        except Exception:
+            self.logger.warning("质量趋势持久化初始化失败", exc_info=True)
+            return None
+
+    async def _maybe_start_quality_trend(self) -> None:
+        """启动质量趋势快照循环（默认关）。"""
+        try:
+            snap = self._ensure_quality_trend()
+            if snap is None:
+                self.logger.info(
+                    "质量趋势持久化未启用（companion.quality_trend.enabled=false）")
+                return
+            await snap.start()
+            self.logger.info("✅ 质量趋势快照循环已启动")
+        except Exception:
+            self.logger.warning("质量趋势持久化启动跳过", exc_info=True)
 
     async def _maybe_start_proactive_care(self, web_app=None) -> None:
         """Phase O：主动关怀引擎（默认关，companion.proactive_care.enabled 开）。
@@ -2405,6 +2466,14 @@ class AIChatAssistant:
                     self.logger.info("多平台 deferred 队列已停止")
                 except Exception as ex:
                     self.logger.warning("deferred_outbox 停止异常: %s", ex)
+
+            # 质量趋势快照器优雅停止
+            if self._quality_trend_snapshotter is not None:
+                try:
+                    await self._quality_trend_snapshotter.stop()
+                    self.logger.info("质量趋势快照器已停止")
+                except Exception as ex:
+                    self.logger.warning("quality_trend 停止异常: %s", ex)
 
             if self.mobile_bridge is not None:
                 try:

@@ -940,6 +940,13 @@ companion:
     quiet_end_hour: 8        # 安静时段止
     # 注册 sender 的平台白名单（留空用默认全集）；messenger 永不在此（走 RPA 路径）
     platforms: [telegram, line, whatsapp, instagram, zalo]
+  # 质量趋势持久化：周期把 companion_quality_overview（内存即时聚合）快照落地为时序，
+  # 看板据此画「质量在变好还是变差」的趋势线（/api/companion/quality-trend）。默认关。
+  quality_trend:
+    enabled: false           # 总开关（默认关）
+    interval_sec: 300        # 快照间隔（秒）
+    window_hours: 24         # 每次快照统计的回看窗口（小时）
+    retention_days: 30       # 时序保留天数（超期自动清理）
   # 主动话题调度（沉默驱动）：用户久未说话时，从其高置信记忆挑话题主动开场
   # （"上次你说在备考，后来怎么样？"）。仅 Telegram 协议号；只在「我方说完后冷场」时主动
   # （对方未回属 SLA，不在此）。与 proactive_care(承诺驱动) 互补，且对已排关怀的会话自动让路。
