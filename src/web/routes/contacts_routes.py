@@ -1242,6 +1242,7 @@ def register_contacts_routes(
         from src.skills.intimacy_engine import IntimacyEngine as _IE
 
         _SEVEN_D = 7 * 86400
+        _LTV_RECENT_DAYS = 30  # ④：变现「近 N 天活跃付费」窗口（识别掉付费/流失付费用户）
 
         def _care_store():
             return getattr(app.state, "care_schedule_store", None)
@@ -1315,17 +1316,24 @@ def register_contacts_routes(
             if store is None or not keys:
                 return None
             try:
+                import time as _t
                 from src.utils.monetization import best_tier as _best_tier
                 ks = list(dict.fromkeys(str(k) for k in keys if str(k)))
                 spend = store.spend_by_contacts(ks)
+                recent = store.spend_by_contacts(
+                    ks, since=_t.time() - _LTV_RECENT_DAYS * 86400)
                 tiers = store.tiers_by_contacts(ks)
                 ltv = round(sum(spend.values()), 2)
+                ltv_recent = round(sum(recent.values()), 2)
                 tier = _best_tier(tiers.values(), getattr(store, "catalog", None))
                 if ltv <= 0 and tier == "free":
                     return None
                 cat = getattr(store, "catalog", None) or {}
                 return {
                     "ltv": ltv,
+                    "ltv_recent": ltv_recent,
+                    "recent_days": _LTV_RECENT_DAYS,
+                    "lapsed": bool(ltv > 0 and ltv_recent <= 0),
                     "tier": tier,
                     "is_payer": ltv > 0,
                     "is_member": tier != "free",
@@ -1341,12 +1349,15 @@ def register_contacts_routes(
             if store is None or not jids or not convkeys_by_contact:
                 return {}
             try:
+                import time as _t
                 from src.utils.monetization import best_tier as _best_tier
                 all_keys = list(dict.fromkeys(
                     k for ks in convkeys_by_contact.values() for k in ks))
                 if not all_keys:
                     return {}
                 spend = store.spend_by_contacts(all_keys)
+                recent = store.spend_by_contacts(
+                    all_keys, since=_t.time() - _LTV_RECENT_DAYS * 86400)
                 tiers = store.tiers_by_contacts(all_keys)
                 cat = getattr(store, "catalog", None) or {}
                 cur = str(cat.get("currency") or "USD")
@@ -1357,13 +1368,17 @@ def register_contacts_routes(
                     if not keys:
                         continue
                     ltv = round(sum(spend.get(k, 0) for k in keys), 2)
+                    ltv_recent = round(sum(recent.get(k, 0) for k in keys), 2)
                     tier = _best_tier(
                         (tiers[k] for k in keys if k in tiers),
                         getattr(store, "catalog", None))
                     if ltv <= 0 and tier == "free":
                         continue
                     out[jid] = {
-                        "ltv": ltv, "tier": tier, "is_payer": ltv > 0,
+                        "ltv": ltv, "ltv_recent": ltv_recent,
+                        "recent_days": _LTV_RECENT_DAYS,
+                        "lapsed": bool(ltv > 0 and ltv_recent <= 0),
+                        "tier": tier, "is_payer": ltv > 0,
                         "is_member": tier != "free", "currency": cur,
                     }
                 return out

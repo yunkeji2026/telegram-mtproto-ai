@@ -418,6 +418,30 @@ def test_health_card_monetization_payer(client):
     assert mon["is_member"] is True
 
 
+def test_health_card_monetization_recent_window_and_lapsed(client):
+    """④：近 30 天窗 LTV + 掉付费标记（历史付费但近 30 天无付费）。"""
+    from src.inbox.normalizer import conv_id
+    es = _attach_entitlements(client)
+    jid = _seed_journey(client.store, client.gateway, "fb_lapsed",
+                        in_n=15, out_n=14, last_offset_days=10)
+    ck = conv_id("messenger", "a", "fb_lapsed")
+    # 40 天前付费（落在近 30 天窗外）
+    es.record_gift(ck, "crown", amount=20.0, now=_t.time() - 40 * 86400)
+    r = client.get(f"/api/relations/health/{jid}")
+    mon = r.json()["monetization"]
+    assert mon["ltv"] == 20.0
+    assert mon["ltv_recent"] == 0.0
+    assert mon["lapsed"] is True
+    assert mon["recent_days"] == 30
+    # 再来一笔近期付费 → 不再算掉付费
+    es.record_gift(ck, "rose", amount=5.0)
+    r2 = client.get(f"/api/relations/health/{jid}")
+    mon2 = r2.json()["monetization"]
+    assert mon2["ltv"] == 25.0
+    assert mon2["ltv_recent"] == 5.0
+    assert mon2["lapsed"] is False
+
+
 def test_health_card_monetization_none_for_free(client):
     """非付费用户（无流水无会员）→ monetization 为 None 减噪。"""
     _attach_entitlements(client)

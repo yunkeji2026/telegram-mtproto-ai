@@ -28,6 +28,8 @@
 .badge-churn{display:inline-block;padding:.1rem .4rem;border-radius:4px;font-size:.68rem;background:rgba(245,158,11,.12);color:var(--amber)}
 .badge-pay{display:inline-block;padding:.1rem .4rem;border-radius:4px;font-size:.66rem;font-weight:700;background:rgba(16,185,129,.14);color:var(--green)}
 .badge-tier{display:inline-block;padding:.1rem .4rem;border-radius:4px;font-size:.62rem;font-weight:700;background:rgba(168,85,247,.16);color:#a855f7;margin-left:.25rem;text-transform:uppercase}
+.badge-lapsed{display:inline-block;padding:.08rem .35rem;border-radius:4px;font-size:.6rem;font-weight:700;background:rgba(239,68,68,.16);color:var(--red);margin-left:.25rem}
+.badge-recent{display:inline-block;padding:.08rem .35rem;border-radius:4px;font-size:.6rem;font-weight:600;background:rgba(16,185,129,.12);color:var(--green);margin-left:.25rem}
 .rh-table tr.payvar td{background:rgba(168,85,247,.07)}
 .rh-act{background:none;border:1px solid var(--p);color:var(--p);cursor:pointer;font-size:.72rem;font-weight:600;padding:.2rem .55rem;border-radius:6px}
 .rh-act:hover{background:rgba(91,124,246,.08)}
@@ -136,7 +138,14 @@ function payCell(mb){
   if(!mb)return '<span style="color:var(--t3)">—</span>';
   var out='';
   if(mb.is_payer){
-    out+='<span class="badge-pay" title="累计付费(LTV)">'+esc(mb.currency||'')+' '+(mb.ltv||0)+'</span>';
+    var rd=mb.recent_days||30;
+    var tip='累计付费(LTV) · 近'+rd+'天 '+esc(mb.currency||'')+' '+(mb.ltv_recent||0);
+    out+='<span class="badge-pay" title="'+tip+'">'+esc(mb.currency||'')+' '+(mb.ltv||0)+'</span>';
+    if(mb.lapsed){
+      out+='<span class="badge-lapsed" title="历史付费但近'+rd+'天无付费">掉付费</span>';
+    }else if((mb.ltv_recent||0)>0){
+      out+='<span class="badge-recent" title="近'+rd+'天活跃付费">+'+(mb.ltv_recent||0)+'</span>';
+    }
   }
   if(mb.is_member && mb.tier && mb.tier!=='free'){
     out+='<span class="badge-tier">'+esc(mb.tier)+'</span>';
@@ -163,12 +172,14 @@ async function rhLoad(){
     const var_n=items.filter(function(x){return x.value_at_risk;}).length;
     const pay_n=d.payer_count||0;
     const payvar_n=items.filter(function(x){var m=x.monetization;return m&&(m.is_payer||m.is_member)&&(x.risk_level==='at_risk'||x.risk_level==='critical');}).length;
+    const lapsed_n=items.filter(function(x){var m=x.monetization;return m&&m.lapsed;}).length;
     sum.innerHTML=
       '<div class="rh-pill">扫描 <strong>'+(d.scanned||0)+'</strong> 段关系</div>'+
       '<div class="rh-pill">榜单 <strong>'+items.length+'</strong> 条</div>'+
       '<div class="rh-pill"'+(var_n?' style="background:rgba(239,68,68,.12)"':'')+'>高价值流失 <strong>'+var_n+'</strong></div>'+
       '<div class="rh-pill"'+(pay_n?' style="background:rgba(16,185,129,.12)"':'')+'>付费用户 <strong>'+pay_n+'</strong></div>'+
-      '<div class="rh-pill"'+(payvar_n?' style="background:rgba(168,85,247,.12)"':'')+'>付费流失 <strong>'+payvar_n+'</strong></div>';
+      '<div class="rh-pill"'+(payvar_n?' style="background:rgba(168,85,247,.12)"':'')+'>付费流失 <strong>'+payvar_n+'</strong></div>'+
+      '<div class="rh-pill"'+(lapsed_n?' style="background:rgba(239,68,68,.12)"':'')+'>掉付费 <strong>'+lapsed_n+'</strong></div>';
     var sortDesc=d.payer_sort_priority?'付费流失置顶 + ':'';
     sortDesc+='高价值流失优先 + 健康分升序';
     if(d.inbox_sort_tiebreak)sortDesc+=' + inbox 情绪/流失 tie-break';
@@ -224,6 +235,8 @@ async function rhDraft(el){
     if(mb&&(mb.is_payer||mb.is_member)){
       var seg='💎 付费用户';
       if(mb.is_payer)seg+=' · LTV '+esc(mb.currency||'')+' '+(mb.ltv||0);
+      if(mb.is_payer)seg+=' · 近'+(mb.recent_days||30)+'天 '+esc(mb.currency||'')+' '+(mb.ltv_recent||0);
+      if(mb.lapsed)seg+=' · ⚠️掉付费';
       if(mb.is_member&&mb.tier&&mb.tier!=='free')seg+=' · '+esc(mb.tier);
       parts.unshift(seg);
     }
