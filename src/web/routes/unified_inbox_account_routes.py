@@ -222,6 +222,25 @@ def register_account_routes(app, *, api_auth, config_manager=None) -> None:
         except Exception:
             logger.debug("[accounts] 运行时状态读取失败", exc_info=True)
 
+        # 3.5) 账号池编排器 managed 状态（N4：protocol/official worker 不经 inbox 适配器，
+        #       须单独并入，否则扫码登入并被编排器拉起的协议号会显示为「未在线」）
+        try:
+            for oa in (_orch().status().get("accounts") or []):
+                platform = oa.get("platform")
+                account_id = oa.get("account_id")
+                if not platform or not account_id:
+                    continue
+                r = _ensure(platform, account_id)
+                if not r["mode"]:
+                    r["mode"] = oa.get("mode") or ""
+                if oa.get("state") == "running":
+                    r["running"] = True
+                    r["status"] = "online"
+                if "orchestrator" not in r["sources"]:
+                    r["sources"].append("orchestrator")
+        except Exception:
+            logger.debug("[accounts] 编排器状态读取失败", exc_info=True)
+
         # 4) 自动回复配额/熔断快照（Phase 5，仅协议号或已开自动回复的号）
         try:
             from src.integrations.protocol_autoreply_limits import (
@@ -248,6 +267,33 @@ def register_account_routes(app, *, api_auth, config_manager=None) -> None:
     async def api_orchestrator_status(request: Request):
         api_auth(request)
         return {"ok": True, **_orch().status()}
+
+    @app.get("/api/accounts/fleet-health")
+    async def api_accounts_fleet_health(request: Request):
+        """N 线 N6：机群反封号健康灯 + 生命周期分布（云端多开运维总览）。
+
+        信号源统一：注册表(天龄/代理/状态) + 自动回复限额计数(今日发送/熔断)，
+        经 companion_send_gate.aggregate_fleet(M7) 汇成总体灯色 + 每号建议上限/原因，
+        并按 pending/warming/active/restricted/banned/offline 统计生命周期分布。
+        """
+        api_auth(request)
+        cfg = (config_manager.config if config_manager is not None else {}) or {}
+        from src.skills.account_signals import fleet_overview
+        from src.integrations.protocol_autoreply_limits import get_autoreply_limiter
+        from src.integrations.protocol_autoreply_settings import cfg_with_settings
+        reg = get_account_registry()
+        try:
+            lim = get_autoreply_limiter(cfg_with_settings(cfg))
+        except Exception:
+            lim = None
+        accounts = [
+            (r.get("platform"), r.get("account_id"), r.get("status", ""))
+            for r in reg.list()
+        ]
+        overview = fleet_overview(
+            accounts, registry=reg, limiter=lim, config=cfg
+        )
+        return {"ok": True, **overview}
 
     @app.get("/api/accounts/protocol/readiness")
     async def api_protocol_readiness(request: Request):
@@ -286,6 +332,32 @@ def register_account_routes(app, *, api_auth, config_manager=None) -> None:
         api_auth(request)
         ok = await _orch().restart_account(_acct_key(platform, account_id))
         return {"ok": ok}
+
+    @app.post("/api/accounts/{platform}/{account_id}/label")
+    async def api_account_set_label(
+        platform: str, account_id: str, request: Request,
+    ):
+        """P2：给账号起人格名（落 registry.label，权威人格名来源）。
+
+        body: {label: str}。空字符串=清除别名（回落显示 account_id）。
+        对 config 声明但还没进注册表的号（如 A 线 default）会建一条承载 label 的
+        记录；**不传 mode**（upsert 默认 device，telegram device 无 worker factory，
+        不会被编排器拉起 → 不会触发重复连接 / database lock）。
+        """
+        api_auth(request)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        label = str((body or {}).get("label") or "").strip()[:40]
+        reg = get_account_registry()
+        row = reg.get(platform, account_id)
+        if row is None:
+            reg.upsert(platform, account_id, label=label, status="pending")
+        else:
+            reg.upsert(platform, account_id, label=label)
+        return {"ok": True, "platform": platform,
+                "account_id": account_id, "label": label}
 
     @app.post("/api/accounts/{platform}/{account_id}/auto-reply")
     async def api_account_auto_reply(platform: str, account_id: str, request: Request):

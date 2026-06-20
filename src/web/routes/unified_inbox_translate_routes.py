@@ -19,12 +19,58 @@ from fastapi import Depends, Request
 
 from src.ai.translation_service import normalize_lang
 from src.web.routes.unified_inbox_services import (
+    _conv_id,
     _get_translation_service,
     _inbox_store,
+    _resolve_conv_engine,
     _resolve_conv_language,
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def _do_document_translation(
+    *, xlate, data: bytes, kind: str, target_lang: str, source_lang: str,
+    style: str, engine: str, base: str, progress=None,
+) -> dict:
+    """L2/L2b/L2c：按 kind 分派文档翻译，统一产出端点响应 dict。
+
+    ``.docx/.xlsx`` → 存令牌存储返回 ``download_url``；``.pdf`` → 返回 ``text``。
+    ``progress(done,total)`` 透传给底层翻译（供 SSE 进度）。同步路径传 None。
+    """
+    from src.ai import document_file_translate as dft
+
+    if kind == "pdf":
+        result = await dft.translate_pdf_to_text(
+            data, xlate=xlate, target_lang=target_lang,
+            source_lang=source_lang, style=style, engine=engine, progress=progress)
+        if not result.get("ok"):
+            return result
+        return {"ok": True, "kind": "text", "filename": f"{base}.{target_lang}.txt",
+                "text": result.get("text", ""), "stats": result.get("stats", {})}
+
+    fn = dft.translate_docx if kind == "docx" else dft.translate_xlsx
+    result = await fn(
+        data, xlate=xlate, target_lang=target_lang,
+        source_lang=source_lang, style=style, engine=engine, progress=progress)
+    if not result.get("ok"):
+        return {k: v for k, v in result.items() if k != "data"}
+    # L2c-1：译后二进制存临时令牌存储 → 返回短链，避免 JSON 塞大 base64（内存翻倍）
+    out_name = f"{base}.{target_lang}.{kind}"
+    ctype = (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        if kind == "docx"
+        else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    from src.web.translated_file_store import get_translated_file_store
+    token = get_translated_file_store().put(result["data"], out_name, ctype)
+    return {
+        "ok": True,
+        "kind": "file",
+        "filename": out_name,
+        "download_url": f"/api/unified-inbox/translated-file/{token}",
+        "stats": result.get("stats", {}),
+    }
 
 
 def _media_base_dirs(request: Request) -> list:
@@ -99,14 +145,12 @@ def register_translate_routes(app, *, api_auth) -> None:
         target_lang = str(body.get("target_lang") or "zh").strip()
         source_lang = normalize_lang(str(body.get("source_lang") or ""))
         style = str(body.get("style") or "chat")
+        platform = str(body.get("platform") or "").lower()
+        account_id = str(body.get("account_id") or "default")
+        chat_key = str(body.get("chat_key") or "")
 
         if target_lang.lower() == "auto":
-            target_lang = _resolve_conv_language(
-                request,
-                str(body.get("platform") or "").lower(),
-                str(body.get("account_id") or "default"),
-                str(body.get("chat_key") or ""),
-            )
+            target_lang = _resolve_conv_language(request, platform, account_id, chat_key)
         else:
             target_lang = normalize_lang(target_lang)
 
@@ -121,14 +165,59 @@ def register_translate_routes(app, *, api_auth) -> None:
                 },
             }
 
+        # F+：调用方未显式指定引擎时，回落会话首选引擎（多线路对照择优后记住的）
+        engine = str(body.get("engine") or "").strip().lower()
+        if not engine:
+            engine = _resolve_conv_engine(request, platform, account_id, chat_key)
+
         svc = _get_translation_service(request)
         result = await svc.translate(
             text,
             target_lang=target_lang,
             source_lang=source_lang,
             style=style,
+            engine=engine,
         )
-        return {"ok": result.ok, "resolved_target": target_lang, "translation": result.to_dict()}
+        return {
+            "ok": result.ok,
+            "resolved_target": target_lang,
+            "pref_engine": engine,
+            "translation": result.to_dict(),
+        }
+
+    @app.get("/api/unified-inbox/conv-engine")
+    async def api_unified_inbox_get_conv_engine(
+        request: Request, platform: str = "", account_id: str = "default",
+        chat_key: str = "", _=Depends(api_auth),
+    ):
+        """F+2：读会话当前首选翻译引擎（前端切会话时取来显示徽标 / 离线提示）。"""
+        platform = str(platform or "").lower()
+        if not chat_key or not platform:
+            return {"ok": False, "pref_engine": ""}
+        ibx = _inbox_store(request)
+        if ibx is None:
+            return {"ok": False, "pref_engine": ""}
+        eng = _resolve_conv_engine(request, platform, account_id, chat_key)
+        return {"ok": True, "pref_engine": eng}
+
+    @app.post("/api/unified-inbox/conv-engine")
+    async def api_unified_inbox_set_conv_engine(request: Request, _=Depends(api_auth)):
+        """F+：设置 / 清除会话首选翻译引擎（坐席多线路对照择优后记住，跨刷新/重启生效）。
+
+        body：``{platform, account_id?, chat_key, engine}``。``engine=""`` → 清除偏好（回 failover）。
+        """
+        body = await request.json()
+        platform = str(body.get("platform") or "").lower()
+        account_id = str(body.get("account_id") or "default")
+        chat_key = str(body.get("chat_key") or "")
+        engine = str(body.get("engine") or "").strip().lower()
+        if not chat_key or not platform:
+            return {"ok": False, "error": "missing_conversation"}
+        ibx = _inbox_store(request)
+        if ibx is None:
+            return {"ok": False, "error": "inbox_unavailable"}
+        ok = ibx.set_conversation_pref_engine(_conv_id(platform, account_id, chat_key), engine)
+        return {"ok": bool(ok), "pref_engine": engine}
 
     @app.get("/api/unified-inbox/translation-engines")
     async def api_unified_inbox_translation_engines(
@@ -137,6 +226,226 @@ def register_translate_routes(app, *, api_auth) -> None:
         """指定目标语的引擎能力矩阵：让坐席在切换目标语时即知主引擎是否兜底。"""
         svc = _get_translation_service(request)
         return {"ok": True, "matrix": svc.engine_matrix(target_lang)}
+
+    @app.post("/api/unified-inbox/translate-compare")
+    async def api_unified_inbox_translate_compare(request: Request, _=Depends(api_auth)):
+        """多线路对照选译：所有引擎各译一遍，返回候选列表供坐席择优（对标拓译多线路对照）。
+
+        body：``{text, target_lang?(支持 auto), source_lang?, style?, platform?, account_id?, chat_key?}``。
+        不写缓存/记忆；坐席择优后仍走 ``/translate`` 或 ``/send`` 正常落库。
+        """
+        body = await request.json()
+        text = str(body.get("text") or "")
+        target_lang = str(body.get("target_lang") or "zh").strip()
+        source_lang = normalize_lang(str(body.get("source_lang") or ""))
+        style = str(body.get("style") or "chat")
+
+        if target_lang.lower() == "auto":
+            target_lang = _resolve_conv_language(
+                request,
+                str(body.get("platform") or "").lower(),
+                str(body.get("account_id") or "default"),
+                str(body.get("chat_key") or ""),
+            )
+        else:
+            target_lang = normalize_lang(target_lang)
+
+        if not target_lang:
+            return {"ok": False, "resolved_target": "", "error": "auto_unresolved",
+                    "candidates": []}
+
+        svc = _get_translation_service(request)
+        data = await svc.compare_translations(
+            text, target_lang=target_lang, source_lang=source_lang, style=style,
+        )
+        cands = data.get("candidates") or []
+        return {
+            "ok": any(c.get("ok") for c in cands),
+            "resolved_target": target_lang,
+            "compare": data,
+        }
+
+    @app.post("/api/unified-inbox/translate-document")
+    async def api_unified_inbox_translate_document(request: Request, _=Depends(api_auth)):
+        """Phase L：长文 / 文档整篇翻译（.txt / 粘贴）。
+
+        body：``{text, target_lang?(支持 auto), source_lang?, style?, engine?, platform?, account_id?, chat_key?}``。
+        逐段复用 ``/translate`` 同一 TranslationService（缓存/术语/F+ 会话首选引擎），按原排版重组。
+        """
+        body = await request.json()
+        text = str(body.get("text") or "")
+        target_lang = str(body.get("target_lang") or "zh").strip()
+        source_lang = normalize_lang(str(body.get("source_lang") or ""))
+        style = str(body.get("style") or "chat")
+        platform = str(body.get("platform") or "").lower()
+        account_id = str(body.get("account_id") or "default")
+        chat_key = str(body.get("chat_key") or "")
+
+        if target_lang.lower() == "auto":
+            target_lang = _resolve_conv_language(request, platform, account_id, chat_key)
+        else:
+            target_lang = normalize_lang(target_lang)
+        if not target_lang:
+            return {"ok": False, "reason": "auto_unresolved",
+                    "message": "目标语未解析（会话客户语言未知）", "translated_text": ""}
+
+        engine = str(body.get("engine") or "").strip().lower()
+        if not engine:
+            engine = _resolve_conv_engine(request, platform, account_id, chat_key)
+
+        from src.ai.document_translate import DocumentTranslateService
+        svc = DocumentTranslateService(_get_translation_service(request))
+        return await svc.translate_document(
+            text, target_lang=target_lang, source_lang=source_lang,
+            style=style, engine=engine,
+        )
+
+    @app.post("/api/unified-inbox/translate-document-file")
+    async def api_unified_inbox_translate_document_file(request: Request, _=Depends(api_auth)):
+        """Phase L2/L2b：上传文档整篇翻译。
+
+        - ``.docx`` / ``.xlsx``：**保版式**真往返，返回译后文件（base64 + filename）。
+        - ``.pdf``：抽取文本→译→**纯文本**（pdf 不可结构化回填），返回 ``text``。
+
+        body：``{file_b64, filename, target_lang?(支持 auto), source_lang?, style?, engine?,
+                platform?, account_id?, chat_key?}``。复用 TranslationService（F+ 引擎/术语/缓存）。
+        """
+        import base64
+
+        body = await request.json()
+        file_b64 = str(body.get("file_b64") or "")
+        filename = str(body.get("filename") or "document.docx")
+        target_lang = str(body.get("target_lang") or "zh").strip()
+        source_lang = normalize_lang(str(body.get("source_lang") or ""))
+        style = str(body.get("style") or "chat")
+        platform = str(body.get("platform") or "").lower()
+        account_id = str(body.get("account_id") or "default")
+        chat_key = str(body.get("chat_key") or "")
+
+        low = filename.lower()
+        if low.endswith(".docx"):
+            kind = "docx"
+        elif low.endswith(".xlsx"):
+            kind = "xlsx"
+        elif low.endswith(".pdf"):
+            kind = "pdf"
+        else:
+            return {"ok": False, "reason": "unsupported_ext",
+                    "message": "文档翻译支持 .docx / .xlsx / .pdf（其他请用「文档翻译」粘贴文本）"}
+
+        raw = file_b64.partition(",")[2] if file_b64.startswith("data:") else file_b64
+        try:
+            data = base64.b64decode(raw, validate=False)
+        except Exception:
+            return {"ok": False, "reason": "decode_failed", "message": "文件解码失败"}
+        if not data:
+            return {"ok": False, "reason": "empty", "message": "空文件"}
+        if len(data) > 10 * 1024 * 1024:
+            return {"ok": False, "reason": "too_large", "message": "文件过大（上限 10MB）"}
+
+        if target_lang.lower() == "auto":
+            target_lang = _resolve_conv_language(request, platform, account_id, chat_key)
+        else:
+            target_lang = normalize_lang(target_lang)
+        if not target_lang:
+            return {"ok": False, "reason": "auto_unresolved",
+                    "message": "目标语未解析（会话客户语言未知）"}
+
+        engine = str(body.get("engine") or "").strip().lower()
+        if not engine:
+            engine = _resolve_conv_engine(request, platform, account_id, chat_key)
+
+        base = filename.rsplit(".", 1)[0]
+        params = dict(data=data, kind=kind, target_lang=target_lang,
+                      source_lang=source_lang, style=style, engine=engine, base=base)
+
+        # L2c-2：stream=true → 暂存输入换 job_id，翻译在 SSE GET 长连接内执行并推进度
+        if bool(body.get("stream")):
+            from src.web.document_job_store import get_document_job_store
+            job_id = get_document_job_store().create(params)
+            return {"ok": True, "job_id": job_id,
+                    "progress_url": f"/api/unified-inbox/translate-document-progress/{job_id}"}
+
+        xlate = _get_translation_service(request)
+        return await _do_document_translation(xlate=xlate, **params)
+
+    @app.get("/api/unified-inbox/translated-file/{token}")
+    async def api_unified_inbox_translated_file(token: str, request: Request, _=Depends(api_auth)):
+        """L2c-1：凭一次性 token 下载译后文档（取回即删，TTL 10 分钟）。
+
+        浏览器 ``<a download>`` 导航携会话 cookie 过鉴权；二进制直传，不经 base64。
+        """
+        from fastapi import Response
+        from urllib.parse import quote
+
+        from src.web.translated_file_store import get_translated_file_store
+        entry = get_translated_file_store().take(token)
+        if entry is None:
+            return Response(content="link expired or not found", status_code=404)
+        # filename* 用 RFC5987 编码兼容非 ASCII 文件名
+        disp = f"attachment; filename*=UTF-8''{quote(entry.filename)}"
+        return Response(
+            content=entry.data,
+            media_type=entry.content_type,
+            headers={"Content-Disposition": disp},
+        )
+
+    @app.get("/api/unified-inbox/translate-document-progress/{job_id}")
+    async def api_unified_inbox_translate_document_progress(
+        job_id: str, request: Request, _=Depends(api_auth)
+    ):
+        """L2c-2：SSE 进度流。翻译在本 GET 长连接内执行，逐段推 ``{status,done,total}``，
+        结束 event 带 ``download_url``（file）或 ``text``（pdf）。job_id 来自 POST stream=true。
+        """
+        import asyncio as _aio
+        import json as _json
+
+        from fastapi.responses import StreamingResponse
+
+        from src.web.document_job_store import get_document_job_store
+
+        params = get_document_job_store().take(job_id)
+        xlate = _get_translation_service(request)
+
+        async def _gen():
+            if params is None:
+                yield f"data: {_json.dumps({'status': 'error', 'reason': 'job_not_found', 'message': '任务不存在或已过期'})}\n\n"
+                return
+            prog = {"done": 0, "total": 0}
+
+            def _cb(done, total):
+                prog["done"] = int(done)
+                prog["total"] = int(total)
+
+            task = _aio.ensure_future(
+                _do_document_translation(xlate=xlate, progress=_cb, **params)
+            )
+            last = None
+            while not task.done():
+                cur = (prog["done"], prog["total"])
+                if cur != last:
+                    yield f"data: {_json.dumps({'status': 'running', 'done': cur[0], 'total': cur[1]})}\n\n"
+                    last = cur
+                await _aio.sleep(0.2)
+            try:
+                res = task.result()
+            except Exception:
+                logger.warning("[doc-job] SSE 翻译作业异常", exc_info=True)
+                yield f"data: {_json.dumps({'status': 'error', 'reason': 'exception', 'message': '翻译作业异常'})}\n\n"
+                return
+            if res.get("ok"):
+                done_evt = {"status": "done", "kind": res.get("kind", ""),
+                            "filename": res.get("filename", ""),
+                            "stats": res.get("stats", {})}
+                if res.get("kind") == "file":
+                    done_evt["download_url"] = res.get("download_url", "")
+                else:
+                    done_evt["text"] = res.get("text", "")
+                yield f"data: {_json.dumps(done_evt, ensure_ascii=False)}\n\n"
+            else:
+                yield f"data: {_json.dumps({'status': 'error', 'reason': res.get('reason', 'error'), 'message': res.get('message', '')}, ensure_ascii=False)}\n\n"
+
+        return StreamingResponse(_gen(), media_type="text/event-stream")
 
     @app.post("/api/unified-inbox/translate-image")
     async def api_unified_inbox_translate_image(request: Request, _=Depends(api_auth)):

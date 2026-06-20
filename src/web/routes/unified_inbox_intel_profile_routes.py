@@ -21,7 +21,11 @@ from typing import Any, Dict
 
 from fastapi import Depends, HTTPException, Request
 
-from src.web.routes.unified_inbox_services import _contacts_store, _inbox_store
+from src.web.routes.unified_inbox_services import (
+    _contacts_store,
+    _inbox_store,
+    _skill_manager,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -168,5 +172,35 @@ def register_intel_profile_routes(app, *, api_auth) -> None:
                 result["conv_summary"] = _summary if _summary else None
             except Exception:
                 result["conv_summary"] = None
+
+        # ⑥ R9d/R9e: 危机概览（把 R9 安全链送到坐席手边，处置不切后台）
+        result["crisis"] = None
+        sm = None
+        try:
+            sm = _skill_manager(request)
+            if sm is not None and hasattr(sm, "crisis_summary_for_user"):
+                parts = cid.split(":", 2)
+                chat_key_key = parts[2] if len(parts) == 3 else cid
+                summary = sm.crisis_summary_for_user(chat_key_key, limit=5)
+                # 仅在有危机记录时挂出，避免给侧栏添噪
+                if summary and summary.get("total"):
+                    result["crisis"] = summary
+        except Exception:
+            result["crisis"] = None
+
+        # ⑦ R14: 记忆画像聚合（已知 N 条稳定事实 / M 条 AI 待确认推断）
+        result["memory_profile"] = None
+        try:
+            if sm is not None and hasattr(sm, "episodic_profile_summary"):
+                parts = cid.split(":", 2)
+                chat_key_key = parts[2] if len(parts) == 3 else cid
+                # 先按 chat_key（私聊=对端 user_id，episodic 主存储键），无则退回完整 cid
+                summary = sm.episodic_profile_summary(chat_key_key, top_stable=3)
+                if not summary.get("total"):
+                    summary = sm.episodic_profile_summary(cid, top_stable=3)
+                if summary and summary.get("total"):
+                    result["memory_profile"] = summary
+        except Exception:
+            result["memory_profile"] = None
 
         return result

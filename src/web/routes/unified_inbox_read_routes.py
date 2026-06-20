@@ -50,6 +50,67 @@ from src.web.routes.unified_inbox_sla import _sla_cfg
 logger = logging.getLogger(__name__)
 
 
+def _merge_orchestrator_status(
+    platform_status: Dict[str, Any], config_manager,
+) -> None:
+    """N4：把账号池编排器在管的 protocol/official 账号并入 platform_status。
+
+    inbox 适配器只反映"单连接/RPA"运行态，**不含**扫码登入后由编排器拉起的协议多开号。
+    若不并入，连接中心抽屉只会看到 A 线 config 账号（default），看不到扫码新增的号。
+    """
+    try:
+        from src.integrations.account_orchestrator import get_orchestrator
+        from src.integrations.account_registry import get_account_registry
+
+        # P2：注册表 label 是账号「人格名」的权威来源（编排器 to_dict 不带 label）。
+        # 取一份 label 映射，既给新并入条目命名，也回填既有条目的空 label，
+        # 让前端账号切换条 / 会话角标显示用户起的人格名而非裸 account_id。
+        label_map: Dict[str, str] = {}
+        try:
+            for row in get_account_registry().list():
+                lbl = str(row.get("label") or "")
+                if lbl:
+                    label_map[f"{row.get('platform')}:{row.get('account_id')}"] = lbl
+        except Exception:
+            logger.debug("[chats] 读取注册表 label 失败", exc_info=True)
+
+        cfg = (config_manager.config if config_manager is not None else {}) or {}
+        for oa in (get_orchestrator(cfg).status().get("accounts") or []):
+            plat = oa.get("platform")
+            aid = oa.get("account_id")
+            if not plat or not aid:
+                continue
+            # 跳过 stopped 幽灵条目（已从注册表移除但仍滞留 _managed 的占位）；
+            # 真正断线的 worker 状态为 error/starting，仍会进抽屉供重连。
+            if oa.get("state") == "stopped":
+                continue
+            running = oa.get("state") == "running"
+            key = f"{plat}:{aid}"
+            label = label_map.get(key) or oa.get("label") or ""
+            existing = platform_status.get(key)
+            if existing is None:
+                platform_status[key] = {
+                    "platform": plat,
+                    "account_id": aid,
+                    "running": running,
+                    "label": label,
+                    "mode": oa.get("mode") or "",
+                }
+            else:
+                existing["running"] = bool(existing.get("running")) or running
+                # 注册表 label 是用户显式起的人格名 → 覆盖适配器的通用 label
+                if label_map.get(key):
+                    existing["label"] = label_map[key]
+
+        # 收尾：对所有 platform_status 条目（含未经编排器的 A 线 default）统一用
+        # 注册表 label 覆盖，确保改名对每个号都即时反映到对话栏 / 切换条。
+        for k, v in platform_status.items():
+            if isinstance(v, dict) and label_map.get(k):
+                v["label"] = label_map[k]
+    except Exception:
+        logger.debug("[chats] 并入编排器账号状态失败", exc_info=True)
+
+
 def _enrich_chat_list(request: Request, chats: List[Dict[str, Any]], *, config_manager) -> None:
     """Best-effort 富集会话列表：contact 关联 / SLA / tags / 自动派单建议。"""
     try:
@@ -77,6 +138,8 @@ def _enrich_chat_list(request: Request, chats: List[Dict[str, Any]], *, config_m
             now = time.time()
             for c in chats:
                 info = dirs.get(str(c.get("conversation_id") or ""))
+                # P2：顺手挂最后一条消息方向（in=对方/out=我方），供列表预览前缀，零额外查询
+                c["last_direction"] = (info.get("direction") or "") if info else ""
                 if info and info.get("direction") == "in":
                     wait = max(0, int(now - (info.get("ts") or now)))
                     c["unanswered_sec"] = wait
@@ -133,6 +196,7 @@ def register_read_routes(app, *, api_auth, config_manager=None) -> None:
         limit = max(5, min(100, int(limit or 30)))
         chats = _chats_for_listing(request, limit=limit)
         platform_status: Dict[str, Any] = status_via_adapters(request, _INBOX_ADAPTERS)
+        _merge_orchestrator_status(platform_status, config_manager)
         _enrich_chat_list(request, chats, config_manager=config_manager)
         return {
             "ok": True,

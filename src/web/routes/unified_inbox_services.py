@@ -46,6 +46,12 @@ def _get_telegram_client(request: Request):
     return getattr(request.app.state, "telegram_client", None)
 
 
+def _skill_manager(request: Request):
+    """SkillManager（经 telegram_client 暴露）或 None。"""
+    tc = getattr(request.app.state, "telegram_client", None)
+    return getattr(tc, "skill_manager", None) if tc else None
+
+
 def _get_translation_service(request: Request) -> TranslationService:
     svc = getattr(request.app.state, "translation_service", None)
     if isinstance(svc, TranslationService):
@@ -96,6 +102,23 @@ def _resolve_conv_language(request: Request, platform: str, account_id: str, cha
         return "" if lang in ("", "unknown") else lang
     except Exception:
         logger.debug("[send] 读取会话语言失败（忽略）", exc_info=True)
+        return ""
+
+
+def _resolve_conv_engine(request: Request, platform: str, account_id: str, chat_key: str) -> str:
+    """读取会话持久化的首选翻译引擎（conversations.pref_engine）。F+。
+
+    供 translate / send 在调用方未显式指定 ``engine`` 时回落到会话偏好；读不到 / 空 →
+    返回 ""，调用方据此走现有 failover（零回归）。
+    """
+    ibx = _inbox_store(request)
+    if ibx is None:
+        return ""
+    try:
+        conv = ibx.get_conversation(_conv_id(platform, account_id, chat_key))
+        return str((conv or {}).get("pref_engine") or "").strip().lower()
+    except Exception:
+        logger.debug("[translate] 读取会话首选引擎失败（忽略）", exc_info=True)
         return ""
 
 

@@ -35,6 +35,7 @@ from src.web.routes.unified_inbox_context import _record_copilot_adopt_from_send
 from src.web.routes.unified_inbox_services import (
     _get_translation_service,
     _inbox_store,
+    _resolve_conv_engine,
     _resolve_conv_language,
 )
 
@@ -89,8 +90,11 @@ def register_send_routes(app, *, api_auth, page_auth) -> None:
         ):
             try:
                 svc = _get_translation_service(request)
+                # F+：会话首选引擎（多线路对照择优后记住的）优先；无 → 现有 failover
+                _pref_engine = _resolve_conv_engine(request, platform, account_id, chat_key)
                 res = await svc.translate(
-                    text, target_lang=target_lang, source_lang=source_lang, style="chat",
+                    text, target_lang=target_lang, source_lang=source_lang,
+                    style="chat", engine=_pref_engine,
                 )
                 if res.ok and (res.translated_text or "").strip():
                     text = res.translated_text.strip()

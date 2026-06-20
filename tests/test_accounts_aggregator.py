@@ -33,6 +33,28 @@ def test_accounts_merges_registry_entry(auth_client):
     assert "registry" in rec["sources"]
 
 
+def test_fleet_health_endpoint(auth_client):
+    """N 线 N6：机群健康灯 + 生命周期分布端点。"""
+    from src.integrations.account_registry import get_account_registry
+
+    get_account_registry().upsert(
+        "telegram", "acct_fleet_test", mode="protocol",
+        proxy_id="px-fleet", status="online",
+    )
+    r = auth_client.get("/api/accounts/fleet-health")
+    assert r.status_code == 200
+    d = r.json()
+    assert d.get("ok") is True
+    assert "fleet" in d and "fleet_light" in d["fleet"]
+    assert "lifecycle" in d
+    assert isinstance(d.get("accounts"), list)
+    hit = [a for a in d["accounts"] if a["account_id"] == "acct_fleet_test"]
+    assert hit, "注册表账号未出现在 fleet-health"
+    assert hit[0]["stage"] in (
+        "pending", "warming", "active", "restricted", "banned", "offline"
+    )
+
+
 def test_auto_reply_audit_endpoint(auth_client):
     r = auth_client.get("/api/accounts/auto-reply/audit")
     assert r.status_code == 200

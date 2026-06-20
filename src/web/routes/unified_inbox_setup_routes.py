@@ -91,6 +91,18 @@ def register_setup_routes(app, *, api_auth, config_manager=None) -> None:
             online_agents=_count_online_agents(request),
         )
 
+    @app.get("/api/setup/companion-preflight")
+    async def api_setup_companion_preflight(request: Request):
+        """Phase N：真号扫码陪聊上线前自检——开关一致性 + 反封号护栏就绪红绿灯。
+
+        把 N-Line checklist §1/§4 的开关一致性固化成可机检的红绿灯，operator 扫码前先看。
+        """
+        api_auth(request)
+        _require_supervisor(request)
+        from src.ops.companion_preflight import build_companion_preflight
+        config = getattr(config_manager, "config", None) or {}
+        return build_companion_preflight(config)
+
     @app.post("/api/setup/channels/{channel}")
     async def api_setup_channel_save(channel: str, request: Request):
         """保存某渠道凭证到 overlay 并即时生效；返回该渠道最新现状 + 自检问题。"""
