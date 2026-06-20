@@ -13,13 +13,40 @@
 .badge-emb{display:inline-block;padding:.1rem .4rem;border-radius:4px;font-size:.65rem;font-weight:600}
 .badge-emb.on{background:rgba(16,185,129,.15);color:var(--green)}
 .badge-emb.off{background:var(--input);color:var(--t3)}
+.badge-src{display:inline-block;padding:.1rem .4rem;border-radius:4px;font-size:.65rem;font-weight:600}
+.badge-src.stated{background:rgba(16,185,129,.15);color:var(--green)}
+.badge-src.inferred{background:rgba(245,158,11,.15);color:var(--amber)}
+.badge-tier{display:inline-block;padding:.1rem .35rem;border-radius:4px;font-size:.6rem;font-weight:700;margin-left:.25rem;text-transform:uppercase}
+.badge-tier.stable{background:rgba(91,124,246,.15);color:var(--p)}
+.badge-tier.stale{background:var(--input);color:var(--t3);text-decoration:line-through}
 .mono{font-family:Consolas,monospace;font-size:.76rem;word-break:break-all}
 .btn-del{background:none;border:none;color:var(--red);cursor:pointer;font-size:.78rem;font-weight:600;padding:.2rem .4rem;border-radius:6px}
 .btn-del:hover{background:var(--rs)}
+.cs-grid{display:flex;flex-wrap:wrap;gap:1rem;margin-bottom:.8rem}
+.cs-stat{flex:1;min-width:120px;background:var(--input);border-radius:10px;padding:.7rem .9rem}
+.cs-stat .num{font-size:1.4rem;font-weight:700;color:var(--p)}
+.cs-stat .lb{font-size:.7rem;color:var(--t3);margin-top:.15rem}
+.cs-actor{display:inline-block;padding:.15rem .5rem;border-radius:6px;background:rgba(91,124,246,.1);color:var(--p);font-size:.72rem;margin:.15rem .25rem .15rem 0}
 </style>
 {% endblock %}
 {% block content %}
 {% set active="episodic" %}
+
+<div class="card fa">
+  <h2>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+    记忆校正质量
+    <span style="font-size:.75rem;font-weight:400;color:var(--t2);margin-left:.4rem">坐席把 AI 推断确认为事实的采纳情况（近 <span id="cs-win">30</span> 天）</span>
+  </h2>
+  <div class="cs-grid" id="cs-grid">
+    <div class="cs-stat"><div class="num" id="cs-confirmed">—</div><div class="lb">已采纳（确认数）</div></div>
+    <div class="cs-stat"><div class="num" id="cs-pending">—</div><div class="lb">待确认推断</div></div>
+    <div class="cs-stat"><div class="num" id="cs-rate">—</div><div class="lb">采纳率（近似）</div></div>
+    <div class="cs-stat"><div class="num" id="cs-total">—</div><div class="lb">库内 AI 推断累计</div></div>
+  </div>
+  <div id="cs-actors" style="font-size:.78rem;color:var(--t2)"></div>
+  <div id="cs-trend" style="margin-top:.6rem"></div>
+</div>
 
 <div class="card fa">
   <h2>
@@ -31,6 +58,14 @@
     <div class="f-grp">
       <label class="f-lb">筛选 memory_key</label>
       <input type="text" id="em-prefix" placeholder="用户 id 或 群id_用户id" class="f-input">
+    </div>
+    <div class="f-grp">
+      <label class="f-lb">来源</label>
+      <select id="em-source" class="f-input" style="width:130px">
+        <option value="">全部</option>
+        <option value="user_stated">用户明说</option>
+        <option value="ai_inferred">AI 推断</option>
+      </select>
     </div>
     <div class="f-grp">
       <label class="f-lb">条数</label>
@@ -49,12 +84,13 @@
           <th style="width:70px">ID</th>
           <th style="min-width:140px">memory_key</th>
           <th>内容</th>
+          <th style="width:130px">来源/层级</th>
           <th style="width:90px">向量</th>
           <th style="width:160px">时间</th>
           <th style="width:70px">操作</th>
         </tr>
       </thead>
-      <tbody id="em-body"><tr><td colspan="6" style="padding:2rem;color:var(--t3)">点击「加载」</td></tr></tbody>
+      <tbody id="em-body"><tr><td colspan="7" style="padding:2rem;color:var(--t3)">点击「加载」</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -66,27 +102,37 @@ async function emLoad() {
   const limit = document.getElementById('em-limit').value || 80;
   const st = document.getElementById('em-status');
   const body = document.getElementById('em-body');
+  const source = document.getElementById('em-source').value;
   st.textContent = '加载中…';
-  body.innerHTML = '<tr><td colspan="6" style="padding:2rem">…</td></tr>';
+  body.innerHTML = '<tr><td colspan="7" style="padding:2rem">…</td></tr>';
   try {
     const q = new URLSearchParams({ limit: String(limit) });
     if (prefix) q.set('prefix', prefix);
+    if (source) q.set('source', source);
     const res = await fetch('/api/episodic-memory?' + q.toString());
     if (!res.ok) { st.textContent = '错误 ' + res.status; return; }
     const d = await res.json();
     const items = d.items || [];
     st.textContent = '共 ' + (d.count || items.length) + ' 条';
     if (!items.length) {
-      body.innerHTML = '<tr><td colspan="6" style="padding:2rem;color:var(--t3)">无记录</td></tr>';
+      body.innerHTML = '<tr><td colspan="7" style="padding:2rem;color:var(--t3)">无记录</td></tr>';
       return;
     }
     body.innerHTML = items.map(function(it) {
       var ts = it.created_at ? new Date(it.created_at * 1000).toLocaleString() : '—';
       var emb = it.has_embedding ? '<span class="badge-emb on">已索引</span>' : '<span class="badge-emb off">无向量</span>';
+      var srcOn = it.source === 'ai_inferred';
+      var src = srcOn
+        ? '<span class="badge-src inferred">AI 推断</span>'
+        : '<span class="badge-src stated">用户明说</span>';
+      var tier = '';
+      if (it.tier === 'stable') tier = '<span class="badge-tier stable">稳定</span>';
+      else if (it.tier === 'stale') tier = '<span class="badge-tier stale">已弃</span>';
+      var hits = (it.hits && it.hits > 1) ? ' <span style="color:var(--t3);font-size:.65rem">×' + it.hits + '</span>' : '';
       var op = emCanDelete
         ? '<button type="button" class="btn-del" onclick="emDel(' + it.id + ')">删除</button>'
         : '<span style="color:var(--t3);font-size:.75rem">—</span>';
-      return '<tr data-id="' + it.id + '"><td>' + it.id + '</td><td class="mono">' + (it.memory_key || '').replace(/</g,'&lt;') + '</td><td>' + (it.content || '').replace(/</g,'&lt;') + '</td><td>' + emb + '</td><td class="mono">' + ts + '</td><td>' + op + '</td></tr>';
+      return '<tr data-id="' + it.id + '"><td>' + it.id + '</td><td class="mono">' + (it.memory_key || '').replace(/</g,'&lt;') + '</td><td>' + (it.content || '').replace(/</g,'&lt;') + '</td><td>' + src + tier + hits + '</td><td>' + emb + '</td><td class="mono">' + ts + '</td><td>' + op + '</td></tr>';
     }).join('');
   } catch (e) {
     st.textContent = '请求失败: ' + e;
@@ -129,6 +175,42 @@ async function emBackfill() {
   } catch (e) { st.textContent = '请求失败: ' + e; }
   finally { if (btn) btn.disabled = false; }
 }
+async function csLoad() {
+  try {
+    const res = await fetch('/api/episodic-memory/correction-stats?days=30');
+    if (!res.ok) return;
+    const d = await res.json();
+    document.getElementById('cs-confirmed').textContent = d.confirmed != null ? d.confirmed : '—';
+    document.getElementById('cs-pending').textContent = d.pending_inferred != null ? d.pending_inferred : '—';
+    document.getElementById('cs-total').textContent = d.total_inferred != null ? d.total_inferred : '—';
+    document.getElementById('cs-rate').textContent = ((d.adoption_rate || 0) * 100).toFixed(1) + '%';
+    document.getElementById('cs-win').textContent = d.window_days || 30;
+    var actors = d.by_actor || [];
+    var box = document.getElementById('cs-actors');
+    if (actors.length) {
+      box.innerHTML = '各坐席确认量：' + actors.map(function(a) {
+        return '<span class="cs-actor">' + (a.actor || '?').replace(/</g, '&lt;') + ' · ' + a.count + '</span>';
+      }).join('');
+    } else {
+      box.innerHTML = '<span style="color:var(--t3)">近 ' + (d.window_days || 30) + ' 天暂无确认记录</span>';
+    }
+    // 每日确认量趋势（迷你柱）
+    var trend = d.trend || [];
+    var tbox = document.getElementById('cs-trend');
+    if (trend.length) {
+      var maxc = Math.max.apply(null, trend.map(function(t) { return t.count; }));
+      tbox.innerHTML = '<div style="font-size:.7rem;color:var(--t3);margin-bottom:.25rem">每日确认量</div>'
+        + '<div style="display:flex;align-items:flex-end;gap:3px;height:42px">'
+        + trend.map(function(t) {
+            var h = maxc ? Math.max(3, Math.round(t.count / maxc * 40)) : 3;
+            return '<div title="' + t.date + '：' + t.count + ' 条" style="width:10px;height:' + h + 'px;background:var(--p);border-radius:2px 2px 0 0;opacity:.75"></div>';
+          }).join('')
+        + '</div>';
+    } else {
+      tbox.innerHTML = '';
+    }
+  } catch (e) { /* 看板失败不阻断主表 */ }
+}
 document.addEventListener('DOMContentLoaded', function() {
   var _urlQ = new URLSearchParams(window.location.search).get('q');
   if (_urlQ) {
@@ -136,6 +218,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (_inp) _inp.value = _urlQ;
   }
   emLoad();
+  csLoad();
 });
 </script>
 {% endblock %}

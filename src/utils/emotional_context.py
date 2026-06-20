@@ -276,6 +276,54 @@ def reflect_on_memories(memory_bullets: str, exchange_count: int = 0) -> str:
 # 4. 关系温度 — 交流深度递进
 # ────────────────────────────────────────────────────────────────────────
 
+# Q2（关系热度信号归一）：温度档位的语气指导抽成单一字典，供
+# ``compute_warmth_level``（reply_count 启发式回退）与 ``warmth_from_stage``
+# （companion 关系阶段 — 权威信号）共用，确保两处文案完全一致、不再各写一份。
+_WARMTH_GUIDANCE: Dict[str, str] = {
+    "stranger": (
+        "你们还不太熟。保持礼貌和友好，但不要太热情或太私人。\n"
+        "用词偏正常社交，不要用太多语气词和 emoji。\n"
+        "目标：让对方觉得你好相处，愿意继续聊下去。"
+    ),
+    "acquaintance": (
+        "你们有一些了解了，像认识不久的朋友。\n"
+        "可以适当放松一点，偶尔开个小玩笑。\n"
+        "语气词可以多一些（嘛、呀、啦），但不要太撒娇。\n"
+        "可以主动分享一些日常（但不要太私密）。"
+    ),
+    "familiar": (
+        "你们已经比较熟了，像经常聊天的朋友。\n"
+        "说话可以随意一些，可以调侃、吐槽、撒小娇。\n"
+        "可以提到之前聊过的事，关心对方最近的状况。\n"
+        "偶尔可以用缩写、口语化表达，显得真实亲近。"
+    ),
+    "close": (
+        "你们很熟了，像闺蜜/好朋友/暧昧对象。\n"
+        "说话完全放松自然，想到什么说什么。\n"
+        "可以撒娇、抱怨、分享心事、主动关心。\n"
+        "偶尔可以「欺负」对方（轻松的调侃方式）。\n"
+        "对方说的事你会上心，过几天还会主动问后续。"
+    ),
+}
+
+# companion 关系阶段（initial/warming/intimate/steady）→ 温度档位（stranger…close）。
+# 1:1 对齐，使「关系阶段」块与「关系温度」块在同一 prompt 内永不矛盾。
+_STAGE_TO_WARMTH: Dict[str, str] = {
+    "initial": "stranger",
+    "warming": "acquaintance",
+    "intimate": "familiar",
+    "steady": "close",
+}
+
+# 各档位的代表性 warmth_score（用于回传，仅作语义占位，非用于排序判断）
+_WARMTH_SCORE_HINT: Dict[str, float] = {
+    "stranger": 0.1,
+    "acquaintance": 0.25,
+    "familiar": 0.5,
+    "close": 0.8,
+}
+
+
 def compute_warmth_level(
     exchange_count: int,
     total_messages: int = 0,
@@ -283,10 +331,11 @@ def compute_warmth_level(
     days_known: float = 0.0,
 ) -> Dict[str, Any]:
     """
-    计算关系温度等级。
+    计算关系温度等级（启发式回退路径）。
 
     基于 exchange_count (来回次数), avg_valence (平均情感极性),
-    days_known (认识天数) 综合评分。
+    days_known (认识天数) 综合评分。当 companion 关系阶段可用时，
+    上层优先走 ``warmth_from_stage``；此函数用于非 companion / 无阶段场景。
 
     返回:
     {
@@ -308,42 +357,60 @@ def compute_warmth_level(
 
     if warmth < 0.15:
         label = "stranger"
-        guidance = (
-            "你们还不太熟。保持礼貌和友好，但不要太热情或太私人。\n"
-            "用词偏正常社交，不要用太多语气词和 emoji。\n"
-            "目标：让对方觉得你好相处，愿意继续聊下去。"
-        )
     elif warmth < 0.35:
         label = "acquaintance"
-        guidance = (
-            "你们有一些了解了，像认识不久的朋友。\n"
-            "可以适当放松一点，偶尔开个小玩笑。\n"
-            "语气词可以多一些（嘛、呀、啦），但不要太撒娇。\n"
-            "可以主动分享一些日常（但不要太私密）。"
-        )
     elif warmth < 0.65:
         label = "familiar"
-        guidance = (
-            "你们已经比较熟了，像经常聊天的朋友。\n"
-            "说话可以随意一些，可以调侃、吐槽、撒小娇。\n"
-            "可以提到之前聊过的事，关心对方最近的状况。\n"
-            "偶尔可以用缩写、口语化表达，显得真实亲近。"
-        )
     else:
         label = "close"
-        guidance = (
-            "你们很熟了，像闺蜜/好朋友/暧昧对象。\n"
-            "说话完全放松自然，想到什么说什么。\n"
-            "可以撒娇、抱怨、分享心事、主动关心。\n"
-            "偶尔可以「欺负」对方（轻松的调侃方式）。\n"
-            "对方说的事你会上心，过几天还会主动问后续。"
-        )
 
     return {
         "warmth_score": round(warmth, 2),
         "warmth_label": label,
-        "tone_guidance": guidance,
+        "tone_guidance": _WARMTH_GUIDANCE[label],
     }
+
+
+def warmth_from_stage(stage: Optional[str]) -> Optional[Dict[str, Any]]:
+    """把 companion 关系阶段映射为温度档位（权威信号路径）。
+
+    stage 为 None / 空 / 未知 → 返回 None，调用方应回退到
+    ``compute_warmth_level``。返回结构与 ``compute_warmth_level`` 一致。
+    """
+    label = _STAGE_TO_WARMTH.get(str(stage or "").strip())
+    if not label:
+        return None
+    return {
+        "warmth_score": _WARMTH_SCORE_HINT[label],
+        "warmth_label": label,
+        "tone_guidance": _WARMTH_GUIDANCE[label],
+    }
+
+
+def lookup_companion_stage(
+    user_context: Dict[str, Any], chat_id: Any = None
+) -> str:
+    """从 user_context 持久化的 companion_relationship 读出当前会话关系阶段。
+
+    优先按 chat_id 对应的 chat_key 取；取不到时若整个 user_ctx 只有单一会话
+    则用那一条（单聊场景）。无则返回 ""，由调用方回退到启发式温度。
+    """
+    rel = user_context.get("companion_relationship")
+    if not isinstance(rel, dict) or not rel:
+        return ""
+    try:
+        from src.utils.companion_relationship import chat_storage_key
+    except Exception:
+        return ""
+    if chat_id is not None:
+        st = rel.get(chat_storage_key(chat_id))
+        if isinstance(st, dict) and st.get("stage"):
+            return str(st["stage"]).strip()
+    if len(rel) == 1:
+        st = next(iter(rel.values()))
+        if isinstance(st, dict) and st.get("stage"):
+            return str(st["stage"]).strip()
+    return ""
 
 
 # ────────────────────────────────────────────────────────────────────────
@@ -354,17 +421,26 @@ def build_emotion_arc_hint(
     current_emotion: Dict[str, Any],
     prev_emotion_label: str = "",
     prev_valence: float = 0.0,
+    *,
+    strategy_active: bool = False,
 ) -> str:
     """
     根据上次和这次的情绪变化，生成情感弧线提示。
     帮助 AI 理解用户情绪的走向并做出恰当回应。
+
+    R1 去重：当应对策略块（empathy_strategy）已开启（``strategy_active=True``）时，
+    本块**只保留"跨情绪转折"这一独有价值**（让 AI 注意到情绪变化并自然点出），而把
+    "当前情绪该怎么接"（先共情/陪着就好/轻松聊…）让给策略块，避免两块对同一情绪
+    反复叮嘱、白耗 prompt token。策略关闭时回退到完整指引，保证不丢情绪引导。
     """
     cur = current_emotion.get("primary_emotion", "neutral")
     cur_v = current_emotion.get("valence", 0.0)
     cur_dim = current_emotion.get("dimension", "neutral")
 
     if not prev_emotion_label:
-        # 无历史情绪数据
+        # 无历史 → 无"转折"可述；当前情绪应对交给策略块（策略关时才回退给基础指引）
+        if strategy_active:
+            return ""
         if cur_dim == "negative":
             return "对方现在似乎心情不太好。先关注TA的情绪，不要急着讲道理或转移话题。"
         elif cur_dim == "low_energy":
@@ -376,6 +452,7 @@ def build_emotion_arc_hint(
     # 有历史情绪 → 计算弧线
     delta = cur_v - prev_valence
 
+    # 跨情绪转折（arc 独有价值：点出"变化"本身）——无论策略是否开都保留
     if prev_valence < -0.2 and cur_v > 0.1:
         return (
             f"对方之前心情低落（{prev_emotion_label}），现在好多了（{cur}）。\n"
@@ -386,7 +463,11 @@ def build_emotion_arc_hint(
             f"对方上次还挺开心（{prev_emotion_label}），现在感觉不太好（{cur}）。\n"
             "要关心一下怎么了。不要装没发现。先问「怎么了？」再说其他的。"
         )
-    elif cur_dim == "negative" and delta < -0.3:
+
+    # 以下为"当前情绪应对"，与策略块重叠：策略开则交由策略块，避免重复叮嘱
+    if strategy_active:
+        return ""
+    if cur_dim == "negative" and delta < -0.3:
         return (
             f"对方情绪在恶化（{prev_emotion_label}→{cur}）。\n"
             "请认真对待，不要敷衍。可以说「我感觉你现在很不舒服，想聊聊吗？」"
@@ -407,11 +488,17 @@ def build_emotional_context_block(
     user_message: str,
     user_context: Dict[str, Any],
     memory_bullets: str = "",
+    *,
+    chat_id: Any = None,
+    enable_strategy: bool = True,
+    enable_wellbeing: bool = True,
+    enable_anti_sycophancy: bool = True,
+    wellbeing_hotline: str = "",
 ) -> str:
     """
     一站式生成完整情感上下文块，注入到 AI prompt。
 
-    合并：情绪分析 + 时间感知 + 记忆反思 + 关系温度 + 情感弧线
+    合并：安全守卫 + 情绪分析 + 时间感知 + 情感弧线 + 应对策略 + 关系温度 + 记忆反思
     """
     parts: List[str] = []
 
@@ -420,6 +507,37 @@ def build_emotional_context_block(
     cur_emotion = emotion["primary_emotion"]
     cur_intensity = emotion["primary_intensity"]
     cur_valence = emotion["valence"]
+
+    # ── 0. 安全底线守卫（危机识别 + 反谄媚）：置于最前，优先级最高 ──
+    # R4：自伤/轻生 / 深度绝望信号 → 注入「安全优先」应对指令；反谄媚护栏仅在**负向情绪
+    # 或危机**时附加（开心闲聊无谄媚风险，省 token、不串味）。纯 prompt 提示、零行为风险。
+    if enable_wellbeing or enable_anti_sycophancy:
+        try:
+            from src.utils.wellbeing_guard import build_wellbeing_block, detect_crisis
+            _sig = detect_crisis(user_message) if enable_wellbeing else {"level": "none"}
+            _antisyc_now = enable_anti_sycophancy and (
+                cur_valence < -0.05 or _sig["level"] != "none"
+            )
+            _wb = build_wellbeing_block(
+                user_message,
+                enable_crisis=enable_wellbeing,
+                enable_anti_sycophancy=_antisyc_now,
+                hotline=wellbeing_hotline,
+            )
+            if _wb:
+                parts.append(_wb)
+            if enable_wellbeing:
+                # 每轮都写（含 none）→ 平静轮自动清零，避免危机等级"粘住"导致
+                # 连击计数(R8)误增 / 误升级。
+                user_context["_wellbeing_crisis_level"] = _sig["level"]
+                user_context["_wellbeing_crisis_category"] = _sig.get("category", "")
+                if _sig["level"] != "none":
+                    logger.warning(
+                        "[wellbeing] 危机信号 level=%s category=%s matched=%s",
+                        _sig["level"], _sig["category"], _sig["matched"][:3],
+                    )
+        except Exception:
+            logger.debug("wellbeing_guard inject skipped", exc_info=True)
 
     # ── 2. 时间感知 ──
     last_ts = user_context.get("last_message_time") or user_context.get("last_reply_time")
@@ -430,20 +548,48 @@ def build_emotional_context_block(
     # ── 3. 情感弧线 ──
     prev_emotion_label = user_context.get("_prev_emotion", "")
     prev_valence = float(user_context.get("_prev_valence", 0.0) or 0.0)
-    arc_hint = build_emotion_arc_hint(emotion, prev_emotion_label, prev_valence)
+    arc_hint = build_emotion_arc_hint(
+        emotion, prev_emotion_label, prev_valence, strategy_active=enable_strategy,
+    )
     if arc_hint:
         parts.append(f"【情感感知】{arc_hint}")
 
-    # ── 4. 关系温度 ──
+    # 情绪弧线方向（worsening/improving）：供应对策略选择参考
+    arc_dir = ""
+    if prev_emotion_label:
+        _delta = cur_valence - prev_valence
+        if _delta <= -0.3:
+            arc_dir = "worsening"
+        elif _delta >= 0.3:
+            arc_dir = "improving"
+
+    # ── 4. 关系温度（先算阶段，应对策略与温度共用同一关系阶段）──
+    # Q2 关系热度信号归一：优先采用 companion 关系阶段（权威、可配置、含 intimacy
+    # 融合）映射出的温度档位，使「关系阶段」块与「关系温度」块同向；无阶段（非
+    # companion / 首轮）时回退到 reply_count 启发式，保持向后兼容。
     exchange_count = int(user_context.get("reply_count", 0) or 0)
-    # 计算认识天数
-    first_ts = user_context.get("_first_contact_ts")
-    days_known = (time.time() - float(first_ts)) / 86400 if first_ts else 0.0
-    warmth = compute_warmth_level(
-        exchange_count=exchange_count,
-        avg_valence=prev_valence * 0.5 + cur_valence * 0.5,
-        days_known=days_known,
-    )
+    _stage = lookup_companion_stage(user_context, chat_id)
+
+    # ── 4b. 应对策略（蒸馏版 STRIDE-ED / 主动倾听）：先选策略再生成 ──
+    if enable_strategy:
+        try:
+            from src.utils.empathy_strategy import build_strategy_block
+            _strat = build_strategy_block(emotion, stage=_stage, arc=arc_dir)
+            if _strat:
+                parts.append(_strat)
+        except Exception:
+            logger.debug("empathy_strategy inject skipped", exc_info=True)
+
+    warmth = warmth_from_stage(_stage)
+    if warmth is None:
+        # 计算认识天数
+        first_ts = user_context.get("_first_contact_ts")
+        days_known = (time.time() - float(first_ts)) / 86400 if first_ts else 0.0
+        warmth = compute_warmth_level(
+            exchange_count=exchange_count,
+            avg_valence=prev_valence * 0.5 + cur_valence * 0.5,
+            days_known=days_known,
+        )
     if warmth["tone_guidance"]:
         parts.append(
             f"【关系温度 — {warmth['warmth_label']}（交流 {exchange_count} 次）】\n"
