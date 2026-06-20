@@ -1,0 +1,259 @@
+{% extends "base.html" %}
+{% block title %}流失预警 · {{ site_name|default('华灵科技客户转化聊天系统') }}{% endblock %}
+{% block page_title %}流失预警{% endblock %}
+{% block head %}
+<style>
+.rh-summary{display:flex;flex-wrap:wrap;gap:.6rem;margin-bottom:.9rem;font-size:.82rem}
+.rh-pill{padding:.35rem .7rem;border-radius:8px;background:var(--input);color:var(--t2)}
+.rh-pill strong{color:var(--t1)}
+.rh-filters{display:flex;flex-wrap:wrap;gap:.6rem;align-items:flex-end;margin-bottom:1rem}
+.table-wrap{overflow-x:auto}
+.rh-table{width:100%;border-collapse:collapse;font-size:.82rem}
+.rh-table th,.rh-table td{padding:.55rem .65rem;border-bottom:1px solid var(--bd);text-align:left;vertical-align:top}
+.rh-table th{color:var(--t3);font-weight:600;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
+.rh-table tr:hover td{background:rgba(91,124,246,.04)}
+.rh-table tr.var td{background:rgba(239,68,68,.05)}
+.mono{font-family:Consolas,monospace;font-size:.74rem;word-break:break-all}
+.badge-rl{display:inline-block;padding:.12rem .45rem;border-radius:4px;font-size:.65rem;font-weight:700}
+.badge-rl.healthy{background:rgba(16,185,129,.15);color:var(--green)}
+.badge-rl.watch{background:rgba(91,124,246,.15);color:var(--p)}
+.badge-rl.at_risk{background:rgba(245,158,11,.15);color:var(--amber)}
+.badge-rl.critical{background:rgba(239,68,68,.15);color:var(--red)}
+.badge-grade{display:inline-block;width:1.5rem;text-align:center;border-radius:4px;font-weight:700;font-size:.72rem;background:var(--input);color:var(--t2)}
+.badge-var{display:inline-block;padding:.1rem .35rem;border-radius:4px;font-size:.62rem;font-weight:700;background:rgba(239,68,68,.15);color:var(--red);margin-left:.3rem}
+.badge-trend{display:inline-block;padding:.1rem .4rem;border-radius:4px;font-size:.68rem;font-weight:600}
+.badge-trend.rising{background:rgba(239,68,68,.12);color:var(--red)}
+.badge-trend.falling{background:rgba(16,185,129,.12);color:var(--green)}
+.badge-trend.stable{background:var(--input);color:var(--t2)}
+.badge-churn{display:inline-block;padding:.1rem .4rem;border-radius:4px;font-size:.68rem;background:rgba(245,158,11,.12);color:var(--amber)}
+.rh-act{background:none;border:1px solid var(--p);color:var(--p);cursor:pointer;font-size:.72rem;font-weight:600;padding:.2rem .55rem;border-radius:6px}
+.rh-act:hover{background:rgba(91,124,246,.08)}
+.rh-reasons{color:var(--t3);font-size:.74rem}
+.rh-modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:900;display:none;align-items:center;justify-content:center}
+.rh-modal-bg.open{display:flex}
+.rh-modal{background:var(--card);border-radius:12px;padding:1.25rem;max-width:480px;width:92%;box-shadow:0 8px 32px rgba(0,0,0,.2)}
+.rh-modal h3{margin:0 0 .5rem;font-size:1rem}
+.rh-modal textarea{width:100%;min-height:96px;resize:vertical;font-family:inherit;font-size:.9rem;padding:.55rem;border:1px solid var(--bd);border-radius:8px;background:var(--input);color:var(--t1)}
+.rh-modal-meta{font-size:.76rem;color:var(--t2);margin:.5rem 0}
+.rh-modal-actions{display:flex;gap:.5rem;justify-content:flex-end;margin-top:.75rem}
+.rh-backfill{margin:.2rem 0 .8rem;border:1px solid var(--bd);border-radius:8px;padding:.4rem .65rem;font-size:.8rem}
+.rh-backfill summary{cursor:pointer;color:var(--t2);font-weight:600}
+.rh-bf-body{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;margin-top:.55rem}
+.rh-bf-actions{display:flex;align-items:center;gap:.35rem;margin-left:auto}
+</style>
+{% endblock %}
+{% block content %}
+{% set active="relations_health" %}
+
+<div class="card fa">
+  <h2>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+    流失预警榜
+    <span style="font-size:.75rem;font-weight:400;color:var(--t2);margin-left:.4rem">谁在降温 · 该唤醒谁 · 发现→生成话术→发送闭环</span>
+  </h2>
+  <div class="rh-summary" id="rh-summary"></div>
+  <div class="rh-filters">
+    <div class="f-grp">
+      <label class="f-lb">风险等级</label>
+      <select id="rh-risk" class="f-input" style="width:130px">
+        <option value="">全部</option>
+        <option value="critical">危机</option>
+        <option value="at_risk">风险</option>
+        <option value="watch">观察</option>
+        <option value="healthy">健康</option>
+      </select>
+    </div>
+    <div class="f-grp"><label class="f-lb">最低亲密度</label><input type="number" id="rh-minintim" value="0" min="0" max="100" class="f-input" style="width:100px"></div>
+    <div class="f-grp"><label class="f-lb">榜单条数</label><input type="number" id="rh-limit" value="30" min="1" max="100" class="f-input" style="width:90px"></div>
+    <button type="button" class="btn btn-p" onclick="rhLoad()">刷新</button>
+  </div>
+  <p id="rh-status" style="font-size:.8rem;color:var(--t2);margin-bottom:.6rem"></p>
+  <details class="rh-backfill" id="rh-backfill">
+    <summary>跨域归档诊断 · contact_id 回填命中率</summary>
+    <div class="rh-bf-body">
+      <span id="rh-bf-status" style="font-size:.78rem;color:var(--t2)">加载中…</span>
+      <div class="rh-bf-actions">
+        <label class="f-lb" style="margin:0 .3rem 0 .6rem">扫描上限</label>
+        <input type="number" id="rh-bf-limit" value="200" min="1" max="2000" class="f-input" style="width:90px">
+        <button type="button" class="btn" onclick="rhBackfill(true)">评估(dry-run)</button>
+        <button type="button" class="btn btn-p" onclick="rhBackfill(false)">执行回填</button>
+      </div>
+    </div>
+  </details>
+  <div class="table-wrap">
+    <table class="rh-table">
+      <thead>
+        <tr>
+          <th style="width:50px">健康</th>
+          <th style="width:60px">等级</th>
+          <th style="width:64px">亲密度</th>
+          <th style="width:72px">沉默天</th>
+          <th style="width:76px">情绪</th>
+          <th style="width:80px">流失</th>
+          <th>风险原因</th>
+          <th style="min-width:130px">建议动作</th>
+          <th style="min-width:170px">journey</th>
+          <th style="width:110px">操作</th>
+        </tr>
+      </thead>
+      <tbody id="rh-body"><tr><td colspan="8" style="padding:2rem;color:var(--t3)">加载中…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="rh-modal-bg" id="rh-modal-bg" onclick="if(event.target===this)rhCloseModal()">
+  <div class="rh-modal" role="dialog">
+    <h3>重逢开场草稿</h3>
+    <div class="rh-modal-meta" id="rh-modal-meta"></div>
+    <div class="rh-modal-meta" id="rh-modal-inbox" style="display:none"></div>
+    <textarea id="rh-modal-draft" placeholder="生成中…"></textarea>
+    <div class="rh-modal-actions">
+      <button type="button" class="btn" onclick="rhCloseModal()">关闭</button>
+      <button type="button" class="btn" id="rh-copy-btn" onclick="rhCopy()">复制</button>
+      <button type="button" class="btn btn-p" id="rh-sent-btn" onclick="rhMarkSent()">标记已发</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let _rhPendingJid = null;
+function esc(s){return String(s||'').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
+function rlBadge(rl){return '<span class="badge-rl '+esc(rl)+'">'+({critical:'危机',at_risk:'风险',watch:'观察',healthy:'健康'}[rl]||esc(rl))+'</span>';}
+function trendBadge(t){
+  if(!t)return '<span style="color:var(--t3)">—</span>';
+  var lbl={rising:'恶化↑',falling:'好转↓',stable:'平稳→'}[t]||esc(t);
+  return '<span class="badge-trend '+esc(t)+'">'+lbl+'</span>';
+}
+function churnCell(ib){
+  if(!ib||!ib.churn_risk)return '<span style="color:var(--t3)">—</span>';
+  return '<span class="badge-churn" title="'+esc(ib.last_intent||'')+'">'+esc(ib.churn_risk)+'</span>';
+}
+
+async function rhLoad(){
+  const risk=document.getElementById('rh-risk').value;
+  const minIntim=document.getElementById('rh-minintim').value||0;
+  const limit=document.getElementById('rh-limit').value||30;
+  const body=document.getElementById('rh-body');
+  const st=document.getElementById('rh-status');
+  const sum=document.getElementById('rh-summary');
+  st.textContent='加载中…';
+  body.innerHTML='<tr><td colspan="10" style="padding:2rem">…</td></tr>';
+  try{
+    const q=new URLSearchParams({limit:String(limit),min_intimacy:String(minIntim),scan:'400'});
+    if(risk)q.set('risk',risk);
+    const res=await fetch('/api/relations/health-board?'+q.toString());
+    if(!res.ok){st.textContent='错误 '+res.status;return;}
+    const d=await res.json();
+    const items=d.items||[];
+    const var_n=items.filter(function(x){return x.value_at_risk;}).length;
+    sum.innerHTML=
+      '<div class="rh-pill">扫描 <strong>'+(d.scanned||0)+'</strong> 段关系</div>'+
+      '<div class="rh-pill">榜单 <strong>'+items.length+'</strong> 条</div>'+
+      '<div class="rh-pill"'+(var_n?' style="background:rgba(239,68,68,.12)"':'')+'>高价值流失 <strong>'+var_n+'</strong></div>';
+    st.textContent=d.inbox_sort_tiebreak
+      ? '按「高价值流失优先 + 健康分升序 + inbox 情绪/流失 tie-break」排序'
+      : '按「高价值流失优先 + 健康分升序」排序';
+    if(!items.length){body.innerHTML='<tr><td colspan="10" style="padding:2rem;color:var(--t3)">无记录</td></tr>';return;}
+    body.innerHTML=items.map(function(it){
+      var ib=it.inbox||null;
+      var canDraft=(it.action==='reactivate'||it.action==='schedule_care'||it.risk_level==='at_risk'||it.risk_level==='critical');
+      var op=canDraft
+        ? '<button type="button" class="rh-act" data-jid="'+esc(it.journey_id)+'" onclick="rhDraft(this)">生成话术</button>'
+        : '<span style="color:var(--t3);font-size:.72rem">—</span>';
+      return '<tr class="'+(it.value_at_risk?'var':'')+'">'+
+        '<td><strong>'+it.score+'</strong></td>'+
+        '<td><span class="badge-grade">'+esc(it.grade)+'</span></td>'+
+        '<td>'+(it.intimacy_score!=null?it.intimacy_score:'—')+'</td>'+
+        '<td>'+(it.days_since_last_msg!=null?it.days_since_last_msg:'∞')+'</td>'+
+        '<td>'+trendBadge(ib?ib.emotion_trend:'')+'</td>'+
+        '<td>'+churnCell(ib)+'</td>'+
+        '<td class="rh-reasons">'+(it.reasons||[]).map(esc).join('；')+(it.value_at_risk?'<span class="badge-var">高价值</span>':'')+'</td>'+
+        '<td>'+rlBadge(it.risk_level)+' <span style="font-size:.74rem;color:var(--t2)">'+esc(it.action_hint)+'</span></td>'+
+        '<td class="mono">'+esc(it.journey_id)+'</td>'+
+        '<td>'+op+'</td></tr>';
+    }).join('');
+  }catch(e){st.textContent='请求失败: '+e;}
+}
+
+async function rhDraft(el){
+  const jid=el.getAttribute('data-jid');
+  _rhPendingJid=jid;
+  document.getElementById('rh-modal-meta').textContent='journey '+jid+' · 生成中…';
+  document.getElementById('rh-modal-draft').value='';
+  document.getElementById('rh-sent-btn').disabled=true;
+  var ibx=document.getElementById('rh-modal-inbox');ibx.style.display='none';ibx.textContent='';
+  document.getElementById('rh-modal-bg').classList.add('open');
+  // Phase R：拉单人健康卡，展示 inbox 跨域语境（情绪趋势/风险/摘要）供发送前参考
+  fetch('/api/relations/health/'+encodeURIComponent(jid)).then(function(r){return r.ok?r.json():null;}).then(function(d){
+    if(!d||!d.inbox)return;
+    var ib=d.inbox;
+    var trend={rising:'情绪恶化↑',falling:'情绪好转↓',stable:'情绪平稳→'}[ib.emotion_trend]||'';
+    var parts=[];
+    if(trend)parts.push(trend);
+    if(ib.churn_risk)parts.push('流失风险:'+esc(ib.churn_risk));
+    if(ib.last_intent)parts.push('意图:'+esc(ib.last_intent));
+    if(ib.summary)parts.push('摘要:'+esc(ib.summary));
+    if(parts.length){ibx.innerHTML='📥 '+parts.join(' · ');ibx.style.display='block';}
+  }).catch(function(){});
+  try{
+    const res=await fetch('/api/reactivation/'+encodeURIComponent(jid)+'/draft-reunion',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    if(!res.ok){
+      document.getElementById('rh-modal-meta').textContent='生成失败 '+res.status+'（需 ai_client + reactivation 已接线）';
+      return;
+    }
+    const d=await res.json();
+    document.getElementById('rh-modal-draft').value=d.draft_text||'';
+    document.getElementById('rh-modal-meta').textContent=
+      '亲密度 '+(d.intimacy_score!=null?Math.round(d.intimacy_score):'?')+
+      ' · 沉默 '+(d.silent_days||0)+' 天 · '+(d.funnel_stage||'')+' · 语言 '+(d.draft_lang||'');
+    document.getElementById('rh-sent-btn').disabled=false;
+  }catch(e){document.getElementById('rh-modal-meta').textContent='请求失败: '+e;}
+}
+
+function rhCloseModal(){_rhPendingJid=null;document.getElementById('rh-modal-bg').classList.remove('open');}
+function rhCopy(){
+  var ta=document.getElementById('rh-modal-draft');ta.select();
+  try{document.execCommand('copy');}catch(e){}
+}
+async function rhMarkSent(){
+  if(!_rhPendingJid)return;
+  const btn=document.getElementById('rh-sent-btn');btn.disabled=true;
+  try{
+    const res=await fetch('/api/reactivation/'+encodeURIComponent(_rhPendingJid)+'/mark-sent',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    if(!res.ok){alert('标记失败 '+res.status);return;}
+    rhCloseModal();rhLoad();
+  }catch(e){alert(e);}finally{btn.disabled=false;}
+}
+
+function rhRenderBackfill(r){
+  var el=document.getElementById('rh-bf-status');
+  if(!r){el.textContent='尚未运行回填（可点「评估」预演命中率）';return;}
+  var trig=r.trigger==='startup'?'启动自动':'手动';
+  var pct=Math.round((r.hit_rate||0)*100);
+  el.innerHTML='最近一次（'+trig+(r.dry_run?' · dry-run':'')+'）：扫描 <strong>'+(r.scanned||0)+
+    '</strong> · 命中 <strong>'+(r.resolved||0)+'</strong>（'+pct+'%）· 写回 <strong>'+(r.written||0)+'</strong>';
+}
+async function rhBackfillStatus(){
+  try{
+    const res=await fetch('/api/relations/backfill-status');
+    if(!res.ok)return;
+    const d=await res.json();
+    rhRenderBackfill(d.result);
+  }catch(e){}
+}
+async function rhBackfill(dryRun){
+  var el=document.getElementById('rh-bf-status');
+  var lim=document.getElementById('rh-bf-limit').value||200;
+  if(!dryRun && !confirm('确认对最多 '+lim+' 条历史会话写回 contact_id？建议先 dry-run 评估。'))return;
+  el.textContent=dryRun?'评估中…':'回填中…';
+  try{
+    const q=new URLSearchParams({dry_run:String(dryRun),limit:String(lim)});
+    const res=await fetch('/api/relations/backfill-run?'+q.toString(),{method:'POST'});
+    if(!res.ok){el.textContent='失败 '+res.status;return;}
+    const d=await res.json();
+    rhRenderBackfill(d.result);
+  }catch(e){el.textContent='请求失败: '+e;}
+}
+document.addEventListener('DOMContentLoaded',function(){rhLoad();rhBackfillStatus();});
+</script>
+{% endblock %}

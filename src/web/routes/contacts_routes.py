@@ -1225,6 +1225,296 @@ def register_contacts_routes(
                 "summary_length": len(summary),
             }
 
+    # ── Phase P：单人关系健康卡 + 流失预警榜 ───────────────
+    # 复用 IntimacyEngine 事件重放（now / now-7d 两快照算趋势）+ 纯函数打分器。
+    # 与全域 /api/relations/digest 的区别：digest 全盘聚合，本组逐联系人 + 排序 + 给建议。
+    if intimacy_engine is not None:
+        from src.contacts.relationship_health import (
+            ContactHealthSignals as _CHS,
+            score_contact_health as _score_health,
+        )
+        from src.contacts.identity_bridge import conversation_ids_for_identities as _conv_ids_for
+        from src.contacts.inbox_enrichment import (
+            health_board_sort_key as _board_sort_key,
+            inbox_enrichment_batch_for_journeys as _inbox_batch,
+            inbox_enrichment_for_conv_ids as _inbox_for_ids,
+        )
+        from src.skills.intimacy_engine import IntimacyEngine as _IE
+
+        _SEVEN_D = 7 * 86400
+
+        def _care_store():
+            return getattr(app.state, "care_schedule_store", None)
+
+        def _inbox_store():
+            return getattr(app.state, "inbox_store", None)
+
+        def _conv_ids_for_journey(j, *, extra_keys=None):
+            """Phase Q：contact 的 channel_identities 反推候选 conversation_id（+ 显式补充）。
+
+            三路合并（去重保序）：
+            1. 前向镜像 ``conversation_ids_for_identities``（external_id≡chat_key 的平台）；
+            2. Q 延伸·writeback 反查 ``list_conversation_ids_for_contact``（ingest 已回写时）；
+            3. Q 延伸·前向后缀匹配 ``find_conversation_ids_by_external``（读 inbox 真实 chat_key，
+               补 Messenger/WA 前缀差异，不依赖 writeback flag）。
+            """
+            keys = list(extra_keys or [])
+            contact_id = getattr(j, "contact_id", "") or ""
+            try:
+                if contact_id:
+                    cis = contacts_store.list_channel_identities_of(contact_id)
+                    keys = _conv_ids_for(cis) + keys
+                    inbox = _inbox_store()
+                    if inbox is not None:
+                        keys.extend(inbox.list_conversation_ids_for_contact(contact_id))
+                        for ci in cis:
+                            ch = getattr(ci, "channel", "")
+                            ext = getattr(ci, "external_id", "")
+                            if not ch or not ext:
+                                continue
+                            acc = getattr(ci, "account_id", "") or "default"
+                            keys.extend(
+                                inbox.find_conversation_ids_by_external(ch, acc, ext))
+            except Exception:
+                logger.debug("conv_ids CI resolve failed", exc_info=True)
+            return list(dict.fromkeys(keys))  # 去重保序
+
+        def _care_pending_for_keys(keys):
+            cs = _care_store()
+            if cs is None or not keys:
+                return 0
+            try:
+                return int(sum(cs.pending_counts_by_contacts(list(keys)).values()))
+            except Exception:
+                return 0
+
+        def _inbox_enrichment(conv_ids):
+            """Phase R：跨域富集——从 contact 的会话取 inbox 侧语境（最近活跃那条为主）。"""
+            store = _inbox_store()
+            if store is None or not conv_ids:
+                return None
+            try:
+                conv_map = store.get_conversations_for_ids(conv_ids)
+                meta_map = store.get_conv_meta_for_ids(list(conv_map.keys()))
+                return _inbox_for_ids(conv_ids, conv_map, meta_map, compact=False)
+            except Exception:
+                logger.debug("inbox enrichment lookup failed", exc_info=True)
+                return None
+
+        def _health_board_inbox_sort_enabled() -> bool:
+            """R3：config companion.relations_health.health_board.inbox_sort_tiebreak（默认关）。"""
+            cm = getattr(app.state, "config_manager", None)
+            if cm is None:
+                return False
+            try:
+                cfg = getattr(cm, "config", None) or {}
+                hb = (
+                    ((cfg.get("companion") or {}).get("relations_health") or {})
+                    .get("health_board") or {}
+                )
+                return bool(hb.get("inbox_sort_tiebreak", False))
+            except Exception:
+                return False
+
+        def _signals_from_events(events, *, now, funnel_stage,
+                                 pending_care=0, recent_react=False):
+            bd = _IE.compute_intimacy_from_events(events, now=now)
+            bd_prev = _IE.compute_intimacy_from_events(events, now=now - _SEVEN_D)
+            prev = (bd_prev.score
+                    if bd_prev.days_since_last_msg != float("inf") else None)
+            sig = _CHS(
+                intimacy_score=bd.score,
+                days_since_last_msg=bd.days_since_last_msg,
+                prev_intimacy_score=prev,
+                funnel_stage=funnel_stage or "INITIAL",
+                turn_count_in=bd.turn_count_in,
+                turn_count_out=bd.turn_count_out,
+                pending_care=pending_care,
+                has_recent_reactivation=recent_react,
+            )
+            return sig, bd
+
+        @app.get("/api/relations/health/{journey_id}")
+        async def relation_health_card(
+            journey_id: str, contact_key: str = "", _=Depends(api_auth),
+        ):
+            """单人关系健康卡。
+
+            Phase Q：自动从该 contact 的 channel_identities 反查 care `pending_care`，
+            无需手传 contact_key；``contact_key`` 仍可作显式补充（叠加，不冲突）。
+            """
+            import time as _t
+            j = contacts_store.get_journey(journey_id)
+            if j is None:
+                raise HTTPException(status_code=404, detail="journey_not_found")
+            now = int(_t.time())
+            conv_ids = _conv_ids_for_journey(
+                j, extra_keys=([contact_key] if contact_key else None))
+            pending = _care_pending_for_keys(conv_ids)
+            events = contacts_store.list_events(journey_id, limit=500)
+            sig, bd = _signals_from_events(
+                events, now=now, funnel_stage=(j.funnel_stage or "INITIAL"),
+                pending_care=pending)
+            card = _score_health(sig)
+            return {"ok": True, "journey_id": journey_id,
+                    "card": card.as_dict(), "intimacy": bd.to_dict(),
+                    "inbox": _inbox_enrichment(conv_ids)}
+
+        @app.get("/api/relations/health-board")
+        async def relation_health_board(
+            limit: int = 20, risk: str = "", min_intimacy: float = 0.0,
+            scan: int = 300, _=Depends(api_auth),
+        ):
+            """流失预警榜：按关系强度扫 top-N journey，逐个打健康分，排序输出最该干预的。
+
+            排序：value_at_risk（高价值正流失）优先，再按健康分升序（越不健康越靠前）。
+            R3（可选，config 开）：同分相邻行按 inbox 高流失 / 情绪恶化次级 tie-break。
+            ``risk`` 可过滤 healthy/watch/at_risk/critical；``min_intimacy`` 过滤弱关系噪声。
+            """
+            import time as _t
+            now = int(_t.time())
+            lim = max(1, min(int(limit), 100))
+            scan_n = max(lim, min(int(scan), 1000))
+            try:
+                with contacts_store._lock:  # noqa: SLF001
+                    rows = contacts_store._conn.execute(  # noqa: SLF001
+                        "SELECT j.journey_id, j.funnel_stage, j.contact_id FROM journeys j "
+                        "WHERE j.intimacy_score >= ? "
+                        "ORDER BY j.intimacy_score DESC LIMIT ?",
+                        (float(min_intimacy), scan_n),
+                    ).fetchall()
+            except Exception as e:  # noqa: BLE001
+                logger.debug("health-board query failed: %s", e)
+                rows = []
+            jids = [r[0] for r in rows]
+            stage_by = {r[0]: (r[1] or "INITIAL") for r in rows}
+            contact_by = {r[0]: (r[2] or "") for r in rows}
+            events_by = contacts_store.list_events_for_journeys(
+                jids, limit_per_journey=500) if jids else {}
+
+            # Phase Q/R2：批量 CI 反查 conversation_id（care + inbox 共用）
+            convkeys_by_contact: dict = {}
+            if jids:
+                try:
+                    cids = [c for c in {contact_by.get(j) for j in jids} if c]
+                    ci_map = (
+                        contacts_store.list_channel_identities_for_contacts(cids)
+                        if cids else {}
+                    )
+                    convkeys_by_contact = {
+                        cid: _conv_ids_for(cilist) for cid, cilist in ci_map.items()
+                    }
+                    inbox = _inbox_store()
+                    if inbox is not None:
+                        for cid in {c for c in contact_by.values() if c}:
+                            extra = inbox.list_conversation_ids_for_contact(cid)
+                            if not extra:
+                                continue
+                            base = convkeys_by_contact.get(cid, [])
+                            convkeys_by_contact[cid] = list(
+                                dict.fromkeys(base + extra))
+                except Exception:
+                    logger.debug("health-board CI resolve failed", exc_info=True)
+
+            # Phase Q：批量聚合 care pending
+            pending_by_jid = {}
+            cs = _care_store()
+            if cs is not None and jids and convkeys_by_contact:
+                try:
+                    all_keys = [
+                        k for ks in convkeys_by_contact.values() for k in ks]
+                    care_counts = cs.pending_counts_by_contacts(
+                        list(dict.fromkeys(all_keys)))
+                    for jid in jids:
+                        cid = contact_by.get(jid) or ""
+                        keys = convkeys_by_contact.get(cid, [])
+                        pending_by_jid[jid] = int(
+                            sum(care_counts.get(k, 0) for k in keys))
+                except Exception:
+                    logger.debug("health-board care aggregate failed", exc_info=True)
+
+            items = []
+            for jid in jids:
+                sig, bd = _signals_from_events(
+                    events_by.get(jid, []), now=now,
+                    funnel_stage=stage_by.get(jid, "INITIAL"),
+                    pending_care=pending_by_jid.get(jid, 0))
+                card = _score_health(sig)
+                if risk and card.risk_level != risk:
+                    continue
+                d = bd.days_since_last_msg
+                items.append({
+                    "journey_id": jid,
+                    **card.as_dict(),
+                    "intimacy_score": bd.score,
+                    "days_since_last_msg": (None if d == float("inf") else round(d, 1)),
+                })
+            inbox_sort = _health_board_inbox_sort_enabled()
+            if inbox_sort and items:
+                # R3：tie-break 需 inbox 信号参与排序 → 先批量富集全部候选再 sort
+                inbox_all = _inbox_batch(
+                    [it["journey_id"] for it in items],
+                    contact_by, convkeys_by_contact, _inbox_store(), compact=True,
+                )
+                for it in items:
+                    ib = inbox_all.get(it["journey_id"])
+                    if ib:
+                        it["inbox"] = ib
+            items.sort(key=lambda c: _board_sort_key(c, inbox_tiebreak=inbox_sort))
+            top = items[:lim]
+            if not inbox_sort:
+                # R2 默认：仅对最终上榜行富集（SQL 随 limit 而非 scan 增长）
+                inbox_by = _inbox_batch(
+                    [it["journey_id"] for it in top],
+                    contact_by, convkeys_by_contact, _inbox_store(), compact=True,
+                )
+                for it in top:
+                    ib = inbox_by.get(it["journey_id"])
+                    if ib:
+                        it["inbox"] = ib
+            return {"ok": True, "items": top,
+                    "scanned": len(jids), "count": min(len(items), lim),
+                    "inbox_sort_tiebreak": inbox_sort}
+
+    # ── Q 延伸·回填状态查询 + 按需 dry_run 触发 ───────────────
+    @app.get("/api/relations/backfill-status")
+    async def relation_backfill_status(_=Depends(api_auth)):
+        """最近一次 contact_id 回填结果（启动自动跑 or 手动触发的）。"""
+        st = getattr(app.state, "last_contact_backfill", None)
+        if not st:
+            return {"ok": True, "status": "not_run", "result": None}
+        return {"ok": True, "status": "ok", "result": st}
+
+    @app.post("/api/relations/backfill-run")
+    async def relation_backfill_run(
+        dry_run: bool = True, limit: int = 200, platform: str = "",
+        _=Depends(api_auth),
+    ):
+        """按需触发 contact_id 回填。**默认 dry_run**（只评估命中率，不写库）。
+
+        显式 ``dry_run=false`` 才真写。结果同时缓存到 app.state 供 status 端点读。
+        """
+        inbox = getattr(app.state, "inbox_store", None)
+        if inbox is None:
+            raise HTTPException(status_code=503, detail="inbox_store_unavailable")
+        from starlette.concurrency import run_in_threadpool
+        from src.contacts.contact_backfill import backfill_contact_ids
+        from src.contacts.identity_bridge import resolve_contact_id
+
+        def _resolver(p, a, c):
+            return resolve_contact_id(
+                contacts_store, platform=p, account_id=a, chat_key=c)
+
+        lim = max(1, min(int(limit), 2000))
+        res = await run_in_threadpool(
+            backfill_contact_ids, inbox, _resolver,
+            limit=lim, platform=str(platform or ""), dry_run=bool(dry_run),
+        )
+        import time as _t
+        out = {**res.as_dict(), "trigger": "manual", "ts": _t.time()}
+        app.state.last_contact_backfill = out
+        return {"ok": True, "result": out}
+
     # ── 可选：reactivation 候选列表 ───────────────────────
     if reactivation_scheduler is not None:
         @app.get("/api/reactivation/candidates")

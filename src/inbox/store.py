@@ -530,6 +530,8 @@ _MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS idx_ops_incidents_sig    ON ops_incidents(kind, signature, status)",
     # 存量库（本分支早期已建表者）补 kind 列
     "ALTER TABLE ops_incidents ADD COLUMN kind TEXT NOT NULL DEFAULT 'health'",
+    # F+：会话级首选翻译引擎（坐席多线路对照择优后持久化，跨刷新/重启生效）
+    "ALTER TABLE conversations ADD COLUMN pref_engine TEXT NOT NULL DEFAULT ''",
 ]
 
 
@@ -559,6 +561,8 @@ class InboxStore:
         self._l2_callbacks: List[Any] = []
         # E2：入站新消息通知钩子（AutoDraft 注册，参数 conv_dict + text）
         self._new_inbound_cbs: List[Any] = []
+        # Q 延伸：ingest 热路径 contact_id 反查（contacts_store → contact_id）
+        self._contact_resolver: Any = None
         with self._lock:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA busy_timeout=5000")
@@ -614,6 +618,14 @@ class InboxStore:
         在 ingest 锁外调用，best-effort，异常自动静默。
         """
         self._new_inbound_cbs.append(cb)
+
+    def register_contact_resolver(self, cb: Any) -> None:
+        """Q 延伸：注册 contact_id 反查回调。
+
+        cb 签名：``cb(platform, account_id, chat_key) -> contact_id str``；
+        ingest 旁路写入 ``conversations`` / ``conversation_meta`` 时 best-effort 调用。
+        """
+        self._contact_resolver = cb
 
     def close(self) -> None:
         with self._lock:
@@ -837,6 +849,93 @@ class InboxStore:
                 (conversation_id,),
             ).fetchone()
         return dict(row) if row else None
+
+    def list_conversation_ids_for_contact(self, contact_id: str) -> List[str]:
+        """Q 延伸：按 contact_id 反查已归档的 inbox 会话 id（ingest 回写后命中）。"""
+        cid = str(contact_id or "").strip()
+        if not cid:
+            return []
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT conversation_id FROM conversations "
+                "WHERE contact_id=? ORDER BY last_ts DESC",
+                (cid,),
+            ).fetchall()
+        return [str(r["conversation_id"]) for r in rows if r["conversation_id"]]
+
+    def find_conversation_ids_by_external(
+        self, platform: str, account_id: str, external_id: str,
+    ) -> List[str]:
+        """Q 延伸前向：按 external_id 后缀匹配真实 conv_id（不依赖 writeback）。
+
+        CI 的 external_id 多为裸 peer 名（"Bob"），inbox chat_key 可能带前缀
+        （"messenger_rpa:Bob"）。匹配 ``chat_key == external_id`` 或
+        ``chat_key endswith ':external_id'``——读真实数据、不猜前缀。
+        platform+account_id 走 idx_conv_platform 收窄；按 last_ts 优先。
+        """
+        plat = str(platform or "").strip()
+        acc = str(account_id or "default").strip() or "default"
+        ext = str(external_id or "").strip()
+        if not plat or not ext:
+            return []
+        # 转义 LIKE 通配符（peer 名可能含 _ / %），用 ESCAPE 子句
+        esc = ext.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT conversation_id FROM conversations "
+                "WHERE platform=? AND account_id=? "
+                "AND (chat_key=? OR chat_key LIKE ? ESCAPE '\\') "
+                "ORDER BY last_ts DESC",
+                (plat, acc, ext, f"%:{esc}"),
+            ).fetchall()
+        return [str(r["conversation_id"]) for r in rows if r["conversation_id"]]
+
+    def list_conversations_missing_contact_id(
+        self, *, limit: int = 200, platform: str = "",
+    ) -> List[Dict[str, Any]]:
+        """Q 延伸回填：列出尚未归档 contact_id 的会话（按最近活跃优先）。
+
+        只取回填解析所需字段（platform/account_id/chat_key），轻量。
+        """
+        lim = max(1, min(int(limit or 200), 2000))
+        sql = ("SELECT conversation_id, platform, account_id, chat_key "
+               "FROM conversations WHERE (contact_id IS NULL OR contact_id='')")
+        params: List[Any] = []
+        if platform:
+            sql += " AND platform=?"
+            params.append(platform)
+        sql += " ORDER BY last_ts DESC LIMIT ?"
+        params.append(lim)
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def set_conversation_contact_id(
+        self, conversation_id: str, contact_id: str,
+    ) -> bool:
+        """Q 延伸回填：把 contact_id 写入 conversations + conversation_meta。
+
+        返回是否更新了 conversations 行（会话不存在 → False）。conv_meta 行不存在时跳过
+        （不凭空建——meta 由 ingest 智能分析负责生成）。
+        """
+        cid = str(conversation_id or "").strip()
+        contact = str(contact_id or "").strip()
+        if not cid or not contact:
+            return False
+        now = self._now()
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE conversations SET contact_id=?, updated_at=? "
+                "WHERE conversation_id=?",
+                (contact, now, cid),
+            )
+            self._conn.execute(
+                "UPDATE conversation_meta SET contact_id=?, updated_at=? "
+                "WHERE conversation_id=? AND (contact_id IS NULL OR contact_id='')",
+                (contact, now, cid),
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
 
     def list_messages(self, conversation_id: str, *, limit: int = 50) -> List[Dict[str, Any]]:
         limit = max(1, min(500, int(limit or 50)))
@@ -3630,15 +3729,47 @@ class InboxStore:
             ).fetchone()
         if row is None:
             return None
+        return self._row_to_conv_meta(row)
+
+    def _row_to_conv_meta(self, row: Any) -> Dict[str, Any]:
         d = dict(row)
         for key in ("intent_history", "emotion_history"):
             try:
                 d[key] = json.loads(d.get(key) or "[]")
             except Exception:
                 d[key] = []
-        # 计算情绪趋势
         d["emotion_trend"] = self._compute_emotion_trend(d.get("emotion_history") or [])
         return d
+
+    def get_conversations_for_ids(
+        self, conversation_ids: List[str],
+    ) -> Dict[str, Dict[str, Any]]:
+        """批量取会话事实（health-board 等跨域富集用，避免逐行 get_conversation）。"""
+        ids = list(dict.fromkeys(
+            str(x).strip() for x in (conversation_ids or []) if str(x).strip()))
+        if not ids:
+            return {}
+        ph = ",".join("?" * len(ids))
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT * FROM conversations WHERE conversation_id IN ({ph})", ids,
+            ).fetchall()
+        return {r["conversation_id"]: dict(r) for r in rows}
+
+    def get_conv_meta_for_ids(
+        self, conversation_ids: List[str],
+    ) -> Dict[str, Dict[str, Any]]:
+        """批量取对话智能元数据（含 emotion_trend），与 get_conv_meta 字段一致。"""
+        ids = list(dict.fromkeys(
+            str(x).strip() for x in (conversation_ids or []) if str(x).strip()))
+        if not ids:
+            return {}
+        ph = ",".join("?" * len(ids))
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT * FROM conversation_meta WHERE conversation_id IN ({ph})", ids,
+            ).fetchall()
+        return {r["conversation_id"]: self._row_to_conv_meta(r) for r in rows}
 
     def _compute_emotion_trend(self, history: List[str]) -> str:
         """将最近情绪序列映射为 rising/falling/stable 趋势。
@@ -3864,6 +3995,25 @@ class InboxStore:
             )
             self._conn.commit()
         return True
+
+    def set_conversation_pref_engine(self, conversation_id: str, engine: str) -> bool:
+        """F+：持久化会话首选翻译引擎（多线路对照择优后记住）。空串=清除偏好。
+
+        直接更新 ``conversations.pref_engine``；会话行不存在（未收过消息）→ 返回 False。
+        """
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            return False
+        eng = str(engine or "").strip().lower()
+        now = self._now()
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE conversations SET pref_engine = ?, updated_at = ? "
+                "WHERE conversation_id = ?",
+                (eng, now, cid),
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
 
     def set_conv_archived(self, conversation_id: str, archived: bool) -> bool:
         """T1：标记/取消归档；如 conversation_meta 行不存在则插入。"""
