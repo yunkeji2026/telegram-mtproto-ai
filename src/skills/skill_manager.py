@@ -166,6 +166,27 @@ def _episodic_backfill_charge_budget(n: int, mvec: Dict[str, Any]) -> None:
     _EPISODIC_BACKFILL_BUDGET_USED += n
 
 
+# 陪伴/闲聊类意图族（与 P0-G 的 _INTENT_FAMILIES["chat"] 一致）——陪伴记忆抽取的默认目标
+CHAT_FAMILY_INTENTS = frozenset({
+    "greeting", "small_talk", "direct_chat", "casual_chat", "chitchat", "free_chat",
+})
+
+
+def should_extract_intent(intent: str, ex_cfg: Dict[str, Any]) -> bool:
+    """记忆抽取意图闸（Phase D：可单测的纯函数，替代内联 ``intent not in intents``）。
+
+    语义（**保持存量部署零回归**）：
+    - ``extract.match_all: true`` → 任何意图都抽（陪伴产品「全记」开关，需显式开）。
+    - 否则按 ``extract.intents`` 白名单；未配置/空 → 不抽（与历史行为一致，不给存量加 token 成本）。
+    """
+    if (ex_cfg or {}).get("match_all"):
+        return True
+    intents = (ex_cfg or {}).get("intents")
+    if not intents:
+        return False
+    return intent in set(intents)
+
+
 class SkillManager(LoggerMixin):
     """Skill管理�?"""
     
@@ -230,6 +251,18 @@ class SkillManager(LoggerMixin):
         # J1: 人工升级冷却 {user
         # FIXME: _id: last_escalation_ts}
         self._escalation_cooldown: Dict[str, float] = {}
+        # R8: 危机人工接管冷却 {user_id: last_crisis_escalation_ts}
+        self._crisis_escalation_cooldown: Dict[str, float] = {}
+
+        # 人设一致性守卫：默认开（仅当人设声明了 forbidden_phrases / deny_ai 才实际生效，
+        # 故对无禁用项的默认人设是零影响）。可经 companion.persona_guard.enabled 关闭。
+        self._persona_guard_enabled: bool = True
+        try:
+            if hasattr(config, "config") and isinstance(getattr(config, "config", None), dict):
+                _pg = ((config.config or {}).get("companion") or {}).get("persona_guard") or {}
+                self._persona_guard_enabled = bool(_pg.get("enabled", True))
+        except Exception:
+            self._persona_guard_enabled = True
 
         self._memory_cfg: Dict[str, Any] = {}
         self._episodic_store = None
@@ -256,6 +289,15 @@ class SkillManager(LoggerMixin):
             self._cpi = CrossPlatformIdentity(_epath)
         except Exception as _cpi_err:
             self.logger.warning("CrossPlatformIdentity 初始化失败: %s", _cpi_err)
+
+        # R9: 危机事件审计库（默认随 wellbeing.crisis_audit 开；落 bot.db 同库独立表）
+        self._crisis_store = None
+        try:
+            from src.utils.crisis_event_store import CrisisEventStore
+            self._crisis_store = CrisisEventStore(cfg_dir / "bot.db")
+        except Exception as _ce_err:
+            self.logger.warning("危机事件库初始化失败（将禁用审计）: %s", _ce_err)
+            self._crisis_store = None
 
         self._ai_fallback_replies = (
             self.config.config.get('reply', {}).get('ai_fallback_replies', [])
@@ -728,7 +770,27 @@ class SkillManager(LoggerMixin):
             try:
                 from src.utils.emotional_context import build_emotional_context_block
                 _epi_text = (user_context.get("_episodic_memory_text") or "").strip()
-                _emo_block = build_emotional_context_block(text, user_context, _epi_text)
+                # 共情策略选择器开关（默认开；纯 prompt 提示，零行为风险）
+                _cfg_es = self.config.config if hasattr(self.config, "config") else {}
+                _es_on = bool(
+                    ((_cfg_es.get("companion") or {}).get("empathy_strategy") or {})
+                    .get("enabled", True)
+                ) if isinstance(_cfg_es, dict) else True
+                # R4 安全守卫开关（默认开，与 persona_guard 同为安全家族；纯 prompt 提示）
+                _wb_cfg = (
+                    ((_cfg_es.get("companion") or {}).get("wellbeing") or {})
+                    if isinstance(_cfg_es, dict) else {}
+                )
+                _wb_on = bool(_wb_cfg.get("enabled", True))
+                _antisyc_on = bool(_wb_cfg.get("anti_sycophancy", True))
+                _wb_hotline = str(_wb_cfg.get("crisis_resources", "") or "")
+                _emo_block = build_emotional_context_block(
+                    text, user_context, _epi_text, chat_id=_chat_id,
+                    enable_strategy=_es_on,
+                    enable_wellbeing=_wb_on,
+                    enable_anti_sycophancy=_antisyc_on,
+                    wellbeing_hotline=_wb_hotline,
+                )
                 if _emo_block:
                     user_context["_emotional_context_block"] = _emo_block
                     self.logger.info(
@@ -1523,6 +1585,29 @@ class SkillManager(LoggerMixin):
                 user_context.pop("_anti_repeat_hint", None)
             user_context.pop("_topic_switch_hint", None)
 
+            # 5c. 人设一致性守卫：剥离 LLM 漏出的禁用语/AI 自我暴露（保护陪聊沉浸感）
+            if reply:
+                reply = self._enforce_persona_consistency(
+                    reply,
+                    chat_id=str(_chat_id if _chat_id not in (None, "") else context.get("chat_id", "") or ""),
+                    account_persona_id=str(user_context.get("account_persona_id", "") or ""),
+                    log_prefix=log_prefix,
+                )
+
+            # 5d. 危机事后兜底（R6）：回复自身触自伤红线 → 覆盖安全兜底；
+            #     severe 危机可选补附求助资源。预防(R4)+兜底(R6) 双保险。
+            if reply:
+                reply = self._apply_crisis_safety_net(
+                    reply, user_context=user_context, log_prefix=log_prefix,
+                )
+
+            # 5e. 危机人工接管/升级（R8）：severe 连续命中 → 触发 handoff 告警（默认关）。
+            #     机器兜底之上让真人介入——自动陪聊对真实危机最负责任的处理。
+            self._maybe_escalate_crisis(
+                user_id=user_id_str, chat_id=_chat_id,
+                user_context=user_context, log_prefix=log_prefix,
+            )
+
             if reply:
                 # 设置隐式反�等待标志（KB 上下文注入过说明知识库参与了�回��?
                 if user_context.get("kb_context"):
@@ -2057,6 +2142,88 @@ class SkillManager(LoggerMixin):
         except Exception as _e:
             self.logger.debug("slow_think skipped: %s", _e)
 
+    def _enforce_persona_consistency(
+        self, reply: str, *, chat_id: str = "", account_persona_id: str = "",
+        log_prefix: str = "",
+    ) -> str:
+        """后置人设守卫：剥离回复中漏出的禁用语 / AI 自曝身份（陪聊沉浸感保护）。
+
+        仅当人设声明了 ``speaking.forbidden_phrases`` 或 ``identity.deny_ai`` 才有实际效果；
+        守卫异常或剥离后为空时一律保留原回复（绝不因守卫吞掉回复）。
+        """
+        if not reply or not getattr(self, "_persona_guard_enabled", True):
+            return reply
+        try:
+            from src.utils.persona_manager import PersonaManager
+            from src.utils.persona_guard import sanitize
+            persona = PersonaManager.get_instance().get_persona(
+                chat_id=chat_id, account_persona_id=account_persona_id
+            )
+            cleaned, violations = sanitize(reply, persona or {})
+            if violations:
+                self.logger.warning(
+                    "%s[persona_guard] 拦截人设违规片段 %r（已剥离，保护沉浸感）",
+                    log_prefix, violations[:5],
+                )
+                return cleaned or reply
+            return reply
+        except Exception:
+            self.logger.debug("[persona_guard] 守卫异常，保留原回复", exc_info=True)
+            return reply
+
+    def _apply_crisis_safety_net(
+        self, reply: str, *, user_context: Dict[str, Any], log_prefix: str = "",
+    ) -> str:
+        """R6 危机事后兜底（预防 R4 之上加一道事后保险）：
+
+        ① **红线兜底**（默认开，无论是否检出输入危机）：若回复**自身**鼓励/认同自伤
+           （如"那就去死吧"），整段覆盖为温柔的安全兜底——这是最不可接受的失败，必须拦下；
+        ② **资源保障**（``crisis_resource_assurance`` 默认关）：severe 危机且配了热线且回复
+           未提及求助时，温柔补一句资源。
+
+        纯文本后处理，任何异常都保留原回复（绝不因兜底吞掉回复）。
+        """
+        if not reply:
+            return reply
+        try:
+            from src.utils.wellbeing_guard import (
+                detect_harmful_reply,
+                safe_fallback_reply,
+            )
+            _cfg = self.config.config if hasattr(self.config, "config") else {}
+            _wb = (
+                ((_cfg.get("companion") or {}).get("wellbeing") or {})
+                if isinstance(_cfg, dict) else {}
+            )
+            if not _wb.get("enabled", True):
+                return reply
+            hotline = str(_wb.get("crisis_resources", "") or "")
+            level = str(user_context.get("_wellbeing_crisis_level", "") or "")
+
+            harmful = detect_harmful_reply(reply)
+            if harmful:
+                self.logger.error(
+                    "%s[wellbeing] 回复触自伤红线 %r → 覆盖安全兜底",
+                    log_prefix, harmful[:3],
+                )
+                user_context["_wellbeing_safety_override"] = True
+                return safe_fallback_reply(level or "severe", hotline=hotline)
+
+            if (
+                level == "severe"
+                and _wb.get("crisis_resource_assurance", False)
+                and hotline
+                and not any(k in reply for k in ("热线", "求助", "咨询", hotline))
+            ):
+                self.logger.warning(
+                    "%s[wellbeing] severe 危机补附求助资源", log_prefix,
+                )
+                return reply.rstrip() + f"\n如果你愿意，也可以找人聊聊：{hotline}。"
+            return reply
+        except Exception:
+            self.logger.debug("[wellbeing] crisis safety net skipped", exc_info=True)
+            return reply
+
     def _inject_episodic_into_context(
         self,
         user_context: Dict[str, Any],
@@ -2080,6 +2247,12 @@ class SkillManager(LoggerMixin):
         use_fusion = bool(vcfg.get("inject_fusion", True)) and bool(query_embedding)
         vw = float(vcfg.get("vector_weight", 0.5))
         kw_w = float(vcfg.get("keyword_weight", 0.5))
+        # R2（REMT-lite）：情绪显著性 + 时间衰减重排（默认关 → 行为同旧版）
+        scfg = mcfg.get("salience_rerank") or {}
+        use_sal = bool(scfg.get("enabled", False))
+        sw = float(scfg.get("salience_weight", 0.15))
+        rw = float(scfg.get("recency_weight", 0.10))
+        hl = float(scfg.get("recency_half_life_days", 30.0))
         txt = self._episodic_store.get_bullets_for_prompt(
             key,
             mx,
@@ -2090,6 +2263,10 @@ class SkillManager(LoggerMixin):
             use_vector_fusion=use_fusion,
             vector_weight=vw,
             keyword_weight=kw_w,
+            use_salience_rerank=use_sal,
+            salience_weight=sw,
+            recency_weight=rw,
+            recency_half_life_days=hl,
         )
         if txt:
             user_context["_episodic_memory_text"] = txt
@@ -2103,11 +2280,22 @@ class SkillManager(LoggerMixin):
                     "episodic inject fusion key=%s chars=%s", key, len(txt)
                 )
 
+    def _episodic_embeddings_needed(self) -> bool:
+        """R7：写入期/补全是否需要落 embedding——任一向量消费方开启即需要。
+
+        既有 ``memory.vector.enabled``（检索向量融合）或 R5
+        ``memory.consolidation.semantic_dedup``（近义去重）任一为真，就应保证事实带
+        embedding——覆盖率**跟随需求**自动普及，成本仍由各功能各自的显式开关把关。
+        """
+        mcfg = self._memory_cfg or {}
+        if (mcfg.get("vector") or {}).get("enabled", False):
+            return True
+        return bool((mcfg.get("consolidation") or {}).get("semantic_dedup"))
+
     async def _episodic_patch_embedding(self, row_id: Optional[int], fact_text: str) -> None:
         if not row_id or not self._episodic_store:
             return
-        vcfg = (self._memory_cfg or {}).get("vector") or {}
-        if not vcfg.get("enabled", False) or not self.ai_client:
+        if not self._episodic_embeddings_needed() or not self.ai_client:
             return
         ft = (fact_text or "").strip()
         if len(ft) < 2:
@@ -2192,11 +2380,10 @@ class SkillManager(LoggerMixin):
             )
             return
         ex = (self._memory_cfg.get("extract") or {})
-        intents = set(ex.get("intents") or [])
-        if intent not in intents:
+        if not should_extract_intent(intent, ex):
             self.logger.info(
-                "[episodic] skip: intent=%r not in %s user=%s",
-                intent, sorted(intents), user_id,
+                "[episodic] skip: intent=%r not extractable (match_all=%s intents=%s) user=%s",
+                intent, bool(ex.get("match_all")), sorted(set(ex.get("intents") or [])), user_id,
             )
             return
         mu = (user_msg or "").strip()
@@ -2213,7 +2400,10 @@ class SkillManager(LoggerMixin):
 
         try:
             for fact in extract_heuristic_facts(mu):
-                rid = self._episodic_store.add_fact(key, fact, "heuristic")
+                # R12：启发式事实从用户原话正则提取 → user_stated（高置信）
+                rid = self._episodic_store.add_fact(
+                    key, fact, "heuristic", source="user_stated"
+                )
                 await self._episodic_patch_embedding(rid, fact)
 
             facts_llm: List[str] = []
@@ -2228,9 +2418,54 @@ class SkillManager(LoggerMixin):
                 self._memory_llm_last[key] = time.time()
 
             for f in facts_llm:
-                rid = self._episodic_store.add_fact(key, f, "llm")
+                # R12：LLM 抽取是对话推断/概括 → ai_inferred（晋升/推翻 stable 需更高置信）
+                rid = self._episodic_store.add_fact(
+                    key, f, "llm", source="ai_inferred"
+                )
                 await self._episodic_patch_embedding(rid, f)
 
+            # R3：裁剪前先做离线巩固——把复发/情绪浓的事实晋升 stable（永不被裁剪）
+            ccfg = self._memory_cfg.get("consolidation") or {}
+            if ccfg.get("enabled", False):
+                try:
+                    _ms = ccfg.get("min_salience")
+                    # R5：语义近似去重阈值（None=关；开则先并近义再晋升）
+                    _dd = ccfg.get("semantic_dedup")
+                    _dd_thr = None
+                    if _dd:
+                        _dd_thr = float(_dd) if not isinstance(_dd, bool) else 0.92
+                    res = self._episodic_store.consolidate(
+                        key,
+                        min_hits=int(ccfg.get("min_hits", 2)),
+                        min_salience=(float(_ms) if _ms is not None else None),
+                        dedup_threshold=_dd_thr,
+                        resolve_contradictions=bool(
+                            ccfg.get("resolve_contradictions", False)
+                        ),
+                        # R11：新证据推翻旧 stable 结论（搬家/分手）；默认关
+                        supersede_stable=bool(ccfg.get("supersede_stable", False)),
+                        stable_min_hits=int(ccfg.get("stable_min_hits", 2)),
+                        # R12：按来源分级置信（ai_inferred 晋升/推翻门槛更高）；默认关
+                        source_aware=bool(ccfg.get("source_aware", False)),
+                        inferred_min_hits=(
+                            int(ccfg["inferred_min_hits"])
+                            if ccfg.get("inferred_min_hits") is not None
+                            else None
+                        ),
+                    )
+                    if (
+                        res.get("promoted") or res.get("merged")
+                        or res.get("superseded") or res.get("stable_superseded")
+                    ):
+                        self.logger.info(
+                            "[episodic] consolidate key=%s promoted=%s merged=%s "
+                            "superseded=%s stable_superseded=%s stable=%s",
+                            key, res.get("promoted"), res.get("merged"),
+                            res.get("superseded"), res.get("stable_superseded"),
+                            res.get("stable_total"),
+                        )
+                except Exception:
+                    self.logger.debug("episodic consolidate failed", exc_info=True)
             keep = int(self._memory_cfg.get("max_items_per_user", 40))
             pr = self._episodic_store.prune_oldest(key, keep)
             if pr:
@@ -2244,15 +2479,145 @@ class SkillManager(LoggerMixin):
         except Exception as _e:
             self.logger.warning("[episodic] extract failed key=%s: %s", key, _e)
 
-    def episodic_list_for_admin(self, prefix: str = "", limit: int = 100) -> List[Dict[str, Any]]:
+    def episodic_list_for_admin(
+        self, prefix: str = "", limit: int = 100, source: str = "",
+    ) -> List[Dict[str, Any]]:
         if not self._episodic_store:
             return []
-        return self._episodic_store.list_rows(prefix=prefix, limit=limit)
+        return self._episodic_store.list_rows(prefix=prefix, limit=limit, source=source)
 
     def episodic_delete_for_admin(self, row_id: int) -> bool:
         if not self._episodic_store:
             return False
         return self._episodic_store.delete_by_id(int(row_id))
+
+    def episodic_confirm_for_admin(self, row_id: int) -> Optional[str]:
+        """R15/R16：确认一条 AI 推断，升格 user_stated + 置 stable。
+
+        返回被确认的 ``content``（供路由层写审计），未命中/未启用返回 ``None``。
+        """
+        store = getattr(self, "_episodic_store", None)
+        if not store or not hasattr(store, "confirm_inferred_fact"):
+            return None
+        try:
+            return store.confirm_inferred_fact(int(row_id))
+        except Exception:
+            return None
+
+    def build_proactive_opener(
+        self,
+        memory_key: str,
+        *,
+        silent_hours: float,
+        stage: str = "",
+        intimacy: float = 0.0,
+        min_silent_hours: float = 24.0,
+    ) -> Dict[str, Any]:
+        """P1：为某用户挑一个"主动开场话题"（从其高置信记忆回访）。
+
+        返回 ``{mode, fact, directive, ...}``；记忆库不可用或沉默不足时 mode 为空。
+        只回访 user_stated/已确认事实（不拿 AI 推断去回访，猜错伤信任）。
+        """
+        empty = {"mode": "", "fact": "", "directive": "", "silent_hours": 0.0}
+        store = getattr(self, "_episodic_store", None)
+        key = str(memory_key or "").strip()
+        if not store or not key or not hasattr(store, "list_rows"):
+            return empty
+        try:
+            from src.utils.proactive_topic import select_proactive_topic
+            facts = store.list_rows(prefix=key, limit=50) or []
+            return select_proactive_topic(
+                facts, silent_hours=silent_hours, stage=stage,
+                intimacy=intimacy, min_silent_hours=min_silent_hours,
+            )
+        except Exception:
+            return empty
+
+    def episodic_inferred_counts(self) -> Dict[str, int]:
+        """R17：全库 AI 推断计数（pending 待确认 / total），供校正质量看板。"""
+        store = getattr(self, "_episodic_store", None)
+        if not store or not hasattr(store, "inferred_counts"):
+            return {"pending": 0, "total": 0}
+        try:
+            return store.inferred_counts()
+        except Exception:
+            return {"pending": 0, "total": 0}
+
+    # ── R9b: 危机事件审计后台读写包装 ──────────────────────────────────
+    def crisis_list_for_admin(
+        self, *, limit: int = 50, only_unhandled: bool = False, user_prefix: str = "",
+    ) -> List[Dict[str, Any]]:
+        store = getattr(self, "_crisis_store", None)
+        if not store:
+            return []
+        return store.list_recent(
+            limit=limit, only_unhandled=only_unhandled, user_prefix=user_prefix,
+        )
+
+    def crisis_count_for_admin(self, *, only_unhandled: bool = False) -> int:
+        store = getattr(self, "_crisis_store", None)
+        return store.count(only_unhandled=only_unhandled) if store else 0
+
+    def crisis_mark_handled_for_admin(
+        self, event_id: int, *, handled_by: str = "", note: str = "",
+    ) -> bool:
+        store = getattr(self, "_crisis_store", None)
+        if not store:
+            return False
+        return store.mark_handled(int(event_id), handled_by=handled_by, note=note)
+
+    def crisis_summary_for_user(self, user_key: str, *, limit: int = 5) -> Dict[str, Any]:
+        """R9d/R9e：某用户/会话的危机概览，供坐席工作台侧栏一眼掌握。
+
+        以 ``user_key`` 同时匹配 ``user_id`` 前缀**或** ``chat_id`` 精确——一个 key 覆盖
+        1:1 私聊（key=对端 user_id）与群聊（key=群 chat_id）两种场景。返回最近若干条
+        + 其中未处理数 + 最新一条精简信息；store 不可用或无命中时返回空概览（绝不抛）。
+        """
+        store = getattr(self, "_crisis_store", None)
+        key = str(user_key or "").strip()
+        empty = {"total": 0, "unhandled": 0, "has_more": False, "latest": None, "recent": []}
+        if not store or not key:
+            return empty
+        try:
+            lim = max(1, min(int(limit or 5), 20))
+            rows = store.list_recent(limit=lim, match_key=key)
+        except Exception:
+            return empty
+        if not rows:
+            return empty
+
+        def _compact(r: Dict[str, Any]) -> Dict[str, Any]:
+            return {
+                "id": r.get("id"),
+                "level": r.get("level"),
+                "category": r.get("category"),
+                "escalated": bool(r.get("escalated")),
+                "handled": bool(r.get("handled")),
+                "created_at": r.get("created_at"),
+            }
+
+        unhandled = sum(1 for r in rows if not r.get("handled"))
+        return {
+            "total": len(rows),
+            "unhandled": unhandled,
+            "has_more": len(rows) >= lim,
+            "latest": _compact(rows[0]),
+            "recent": [_compact(r) for r in rows],
+        }
+
+    def episodic_profile_summary(self, memory_key: str, *, top_stable: int = 3) -> Dict[str, Any]:
+        """R14：某 memory_key 的记忆画像聚合（tier/source 计数 + top stable）。"""
+        empty = {
+            "total": 0, "stable": 0, "raw": 0,
+            "user_stated": 0, "ai_inferred": 0, "top_stable": [],
+        }
+        store = getattr(self, "_episodic_store", None)
+        if not store or not str(memory_key or "").strip():
+            return empty
+        try:
+            return store.profile_summary(str(memory_key), top_stable=top_stable)
+        except Exception:
+            return empty
 
     async def episodic_backfill_embeddings(
         self, limit: int = 20, memory_key_prefix: str = ""
@@ -2261,7 +2626,8 @@ class SkillManager(LoggerMixin):
         if not self._episodic_store or not self.ai_client:
             return {"ok": False, "error": "no_store"}
         mvec = (self._memory_cfg or {}).get("vector") or {}
-        if not mvec.get("enabled", False):
+        # R7：向量融合或 R5 近义去重任一开启即允许补全（覆盖率跟随需求）
+        if not self._episodic_embeddings_needed():
             return {"ok": False, "error": "vector_disabled"}
         lim = max(1, min(int(limit or 20), 100))
         budcfg = mvec.get("daily_embed_budget") or {}
@@ -2971,6 +3337,119 @@ class SkillManager(LoggerMixin):
                 await client.post(wh_cfg["url"], content=payload, headers=headers)
         except Exception as e:
             self.logger.debug("J1 升级 webhook 发�€�失�? %s", e)
+
+    # ── R8: 危机人工接管/升级 ───────────────────────────────────────────
+    _CRISIS_ESCALATION_COOLDOWN_SEC = 1800  # 危机比普通升级更急，30 分钟冷却
+
+    def _maybe_escalate_crisis(
+        self, *, user_id: str, chat_id: Any,
+        user_context: Dict[str, Any], log_prefix: str = "",
+    ) -> None:
+        """R8：severe 危机连续命中 → 触发人工接管告警（复用既有 escalation webhook）。
+
+        始终维护危机连击计数（severe 自增、非危机清零、elevated 维持）；仅当
+        ``companion.wellbeing.crisis_escalation`` 开（默认关，需配 webhook + 真人值守）
+        且连击 ≥ ``escalate_after``（默认 1）且过冷却时才真正告警。纯旁路，任何异常不影响回复。
+        """
+        try:
+            level = str(user_context.get("_wellbeing_crisis_level", "") or "")
+            streak = int(user_context.get("_wellbeing_crisis_streak", 0) or 0)
+            if level == "severe":
+                streak += 1
+            elif level != "elevated":
+                streak = 0
+            user_context["_wellbeing_crisis_streak"] = streak
+            # safety_override 是上一步(_apply_crisis_safety_net)的本轮信号，读后清零
+            safety_override = bool(user_context.pop("_wellbeing_safety_override", False))
+
+            _cfg = self.config.config if hasattr(self.config, "config") else {}
+            _wb = (
+                ((_cfg.get("companion") or {}).get("wellbeing") or {})
+                if isinstance(_cfg, dict) else {}
+            )
+            wb_enabled = bool(_wb.get("enabled", True))
+
+            escalated_now = False
+            if wb_enabled and _wb.get("crisis_escalation", False) and level == "severe":
+                escalate_after = max(1, int(_wb.get("escalate_after", 1)))
+                if streak >= escalate_after:
+                    now = time.time()
+                    last = self._crisis_escalation_cooldown.get(str(user_id), 0.0)
+                    if now - last >= self._CRISIS_ESCALATION_COOLDOWN_SEC:
+                        self._crisis_escalation_cooldown[str(user_id)] = now
+                        user_context["_crisis_escalation_triggered"] = True
+                        user_context["_crisis_escalation_ts"] = now
+                        escalated_now = True
+                        self.logger.warning(
+                            "%s[wellbeing] 危机人工接管触发 user=%s streak=%s"
+                            "（已告警/待真人介入）",
+                            log_prefix, user_id, streak,
+                        )
+                        try:
+                            loop = asyncio.get_running_loop()
+                            if loop.is_running():
+                                loop.create_task(self._fire_crisis_webhook(
+                                    user_id, chat_id, streak,
+                                    str(user_context.get("chat_title", "") or ""),
+                                ))
+                        except RuntimeError:
+                            pass
+
+            # R9 审计落库（独立于升级开关；默认关，由 crisis_audit 控制）
+            if (
+                wb_enabled and _wb.get("crisis_audit", False)
+                and level in ("severe", "elevated")
+                and getattr(self, "_crisis_store", None) is not None
+            ):
+                try:
+                    self._crisis_store.record(
+                        user_id=str(user_id), chat_id=str(chat_id), level=level,
+                        category=str(user_context.get("_wellbeing_crisis_category", "") or ""),
+                        streak=streak, escalated=escalated_now,
+                        safety_override=safety_override,
+                        excerpt=str(user_context.get("last_message", "") or ""),
+                    )
+                except Exception:
+                    self.logger.debug("[wellbeing] crisis audit record failed", exc_info=True)
+        except Exception:
+            self.logger.debug("[wellbeing] crisis escalation skipped", exc_info=True)
+
+    async def _fire_crisis_webhook(self, user_id, chat_id, streak, chat_title):
+        """危机告警 webhook（复用 escalation_needed 事件通道，附 category=crisis）。"""
+        try:
+            cfg_dir = (
+                Path(self.config.config_path).parent
+                if hasattr(self.config, "config_path") else Path("config")
+            )
+            wh_path = cfg_dir / "webhook_settings.json"
+            if not wh_path.exists():
+                return
+            wh_cfg = json.loads(wh_path.read_text(encoding="utf-8"))
+            if not wh_cfg.get("enabled") or not wh_cfg.get("url"):
+                return
+            events = wh_cfg.get("events", [])
+            if "escalation_needed" not in events and "config_change" not in events:
+                return
+            import httpx
+            payload = json.dumps({
+                "event": "escalation_needed",
+                "category": "crisis",
+                "severity": "high",
+                "actor": "system",
+                "target": f"user:{user_id}",
+                "summary": (
+                    f"⚠️ 危机人工接管请求\n"
+                    f"用户: {user_id}\n群组: {chat_title or chat_id}\n"
+                    f"连续危机信号: {streak} 次（疑似自伤/轻生）\n"
+                    f"请尽快人工介入。"
+                ),
+                "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+            }, ensure_ascii=False)
+            headers = {"Content-Type": "application/json"}
+            async with httpx.AsyncClient(timeout=8) as client:
+                await client.post(wh_cfg["url"], content=payload, headers=headers)
+        except Exception as e:
+            self.logger.debug("R8 危机 webhook 发送失败: %s", e)
 
     def _cleanup_cache(self):
         """清理过期的缓存条�?"""

@@ -10,6 +10,11 @@ telegram:
   api_hash: "YOUR_API_HASH"       # 示例: "abcdef1234567890abcdef1234567890"
   phone_number: "+8612345678900"  # 手机号，带国际区号
   session_name: "camille_bot"     # 会话文件名 (不要带扩展名)
+
+  # N5 登录注册统一（默认关）：开后启动时把本块定义的 config 账号（phone+code）
+  # 并入持久注册表 config/account_registry.db，与 QR 扫码登录账号共用同一张表，
+  # 供账号编排器/舰队健康视图统一查看。幂等、不破坏 QR 既有登录态（session_string/online）。
+  unify_login_registry: false
   
   # 安全设置
   use_test_dc: false              # 是否使用测试服务器
@@ -111,6 +116,50 @@ line:
   channel_access_token: ""
   webhook_path: "/line/webhook"
   unsupported_type_reply: "目前仅支持文字消息，请发文字。"
+
+# WhatsApp Cloud API（官方 Business 通道：合规/高送达/不封号，根治 RPA 封号）
+# 控制台 Webhook URL 填: https://你的域名/wa/webhook（与 webhook_path 一致）。
+# 与 WhatsApp RPA(mode=device)/Baileys(mode=protocol) 可按账号并存；官方走 mode=official。
+# ⚠️ 24h 客服窗口：窗口外需用模板消息（本版先发自由文本，模板回退待补）。
+whatsapp_cloud:
+  enabled: false
+  phone_number_id: ""            # Cloud API 的 Phone Number ID（非手机号）
+  access_token: ""               # 永久/系统用户 access token
+  app_secret: ""                 # X-Hub-Signature-256 webhook 验签
+  verify_token: ""               # GET 校验自定义口令（控制台填同值）
+  webhook_path: "/wa/webhook"
+  unsupported_type_reply: "目前仅支持文字消息。"
+
+# Instagram Messaging（官方，Graph API；与 Messenger 同体系，Phase H）。默认关。
+# webhook object=instagram；收件人是 IGSID；发送端点用 IG 账号 id + 关联 Page token。
+instagram:
+  enabled: false
+  ig_id: ""                      # IG 专业账号 id（Graph）
+  page_access_token: ""          # 关联 Page 的 access token
+  app_secret: ""                 # X-Hub-Signature-256 验签
+  verify_token: ""               # GET 校验自定义口令
+  webhook_path: "/ig/webhook"
+  unsupported_type_reply: "目前仅支持文字消息。"
+
+# Zalo Official Account OA OpenAPI v3.0（东南亚出海重点区，Phase H）。默认关。
+# ⚠️ cs（客服消息）仅能发给 7 天内与 OA 互动过的用户。
+zalo:
+  enabled: false
+  oa_id: ""
+  access_token: ""               # OA access token（有时效，需刷新）
+  oa_secret: ""                  # webhook MAC 验签（X-ZEvent-Signature）；留空→跳过验签（仅开发期）
+  message_type: "cs"             # cs | transaction | promotion
+  webhook_path: "/zalo/webhook"
+  unsupported_type_reply: "目前仅支持文字消息。"
+
+# 官方通道入站统一主管道（G4c）：默认关 → LINE/Messenger/WhatsApp 各 webhook 维持自身
+# SkillManager 自答（零回归）。开启后官方入站改走 protocol_autoreply 主管道，享：
+# kill-switch 决策期早退 / canary 放量 / 陪伴记忆 / 限速熔断 / 审计 / 转人工；回复经
+# orch.send→官方 worker 出站（需官方账号 mode=official 且被编排器接管，account_id 与
+# 入站镜像一致：WhatsApp=phone_number_id、Messenger=page_id、LINE=line.account_id 或 "official"）。
+# ⚠️ 开启但未注册官方 worker / autoreply 全局闸门关 → run_autoreply 判 disabled 不发（官方渠道静默），属预期。
+official_pipeline:
+  enabled: false
 
 # 面向终端客户的网页聊天 Widget（web 渠道，公网入口；默认关）
 # 开启后：客户官网嵌入 <script src="https://你的域名/chat/embed.js"></script> 即出现聊天气泡；
@@ -834,6 +883,105 @@ ai:
 # 陪伴关系阶段（conversion 域）；状态存 bot.db user_context JSON
 companion:
   enabled: true
+  # 人设一致性守卫：回复生成后做确定性后置体检，剥离 LLM 漏出的禁用语
+  # （persona.speaking.forbidden_phrases）与 AI 自曝身份（persona.identity.deny_ai）。
+  # 默认开；仅当人设声明了上述项才实际生效（对无禁用项的默认人设零影响）。
+  persona_guard:
+    enabled: true
+  # 共情策略选择器（蒸馏版 STRIDE-ED / 主动倾听）：在「情绪理解→回复生成」之间插一层
+  # 显式策略提示（确认安抚 / 主动倾听探询 / 低能量陪伴 / 共享放大 / 顺势好奇 / 承接式倾听），
+  # 按情绪维度×强度×弧线×关系阶段确定性选出并注入一行行动指令。纯 prompt 提示、零行为风险。
+  empathy_strategy:
+    enabled: true
+  # 安全底线守卫（与 persona_guard 同为安全家族）：在「情绪理解→回复生成」前注入
+  #   - 危机识别：自伤/轻生 / 深度绝望信号 → 注入「安全优先」应对指令（共情接住、不说教、
+  #     不轻描淡写、温柔引导求助、绝不附和自伤）；保守匹配，"累死了/笑死/想死你了"等惯用语不误伤。
+  #   - 反谄媚：仅在负向情绪或危机时附一条护栏（不为讨好而强化自毁/有害念头；开心闲聊不注入）。
+  # 纯 prompt 提示、零行为风险（预防优于事后修剪）。默认开（漏接危机是最坏结果）。
+  wellbeing:
+    enabled: true            # 危机识别 + 安全优先指令 + 回复红线兜底(R6)
+    anti_sycophancy: true    # 反谄媚护栏（负向情绪/危机时附加）
+    crisis_resources: ""     # 可选求助热线文案；填写后仅在 severe 危机时自然附带
+    # R6 事后兜底：回复自身鼓励自伤("那就去死吧") → 整段覆盖为温柔安全兜底（红线，随 enabled 默认开）。
+    # 资源保障：severe 危机且回复未提求助时强制补一句热线（默认关，避免每条都附显机械）。
+    crisis_resource_assurance: false
+    # R8 危机人工接管：severe 连续命中 ≥ escalate_after → 触发 escalation_needed webhook 告警
+    # （category=crisis）让真人介入。默认关（需配 webhook_settings.json + 真人值守）。
+    crisis_escalation: false
+    escalate_after: 1        # severe 连击达到此值即告警（1=首次 severe 即告警）
+    # R9 审计落库：severe/elevated 危机事件落 bot.db 的 crisis_event 表（时间/等级/连击/
+    # 是否升级/是否触发兜底/短摘要 ≤120 字），供复盘/合规/人工处置追踪。默认关（含隐私敏感数据）。
+    crisis_audit: false
+  # Phase O 主动关怀引擎：从入站消息抽取「时间约定/未来事件」（你说周五面试…），到点由 AI
+  # 主动发一条引用具体事的关心消息。复用 reactivation 的 deferred 发送队列（享 gate/pacing/
+  # quiet_hours/kill-switch）。把「沉默才捞」升级为「记得你说的事、到点主动关心」。默认全关。
+  proactive_care:
+    enabled: false           # 总开关：开启后才捕获入站约定 + 启动到期派发循环
+    capture: true            # 是否捕获入站消息中的约定（enabled 时生效）
+    min_confidence: 0.6      # 入库置信度阈值（挡无主题低质项）
+    dedup_window_days: 3     # 同 contact+主题 邻近窗口去重
+    max_per_tick: 3          # 每轮最多派发条数（限流）
+    interval_sec: 600        # 派发循环间隔
+    skip_if_no_context: true # 无可引用上下文 → 跳过不发空话
+    quiet_start_hour: 23     # 安静时段开始（命中则顺延发送，不打扰）
+    quiet_end_hour: 8        # 安静时段结束
+    dry_run: false           # 灰度：只生成+log 不真发
+    grace_days: 1            # 逾期超此天数的待办标记 expired（错过时机不补发）
+  # 多平台 deferred 发送队列：care/reactivation 的**非 messenger** 主动消息发送闭环。
+  # messenger 仍走既有 RPA runner deferred 路径；本队列服务 telegram/line/whatsapp 等
+  # 可编程发送平台——经编排器 worker 统一投递，复用 kill-switch/quiet_hours/pacing/
+  # staleness 通用护栏。默认关；开启后 care 抽到的非 messenger 约定才会真发（否则丢弃）。
+  multiplatform_deferred:
+    enabled: false           # 总开关（默认关）
+    interval_sec: 120        # drain 循环间隔（秒）
+    max_per_tick: 3          # 每轮最多真发条数（慢清，防一波轰）
+    min_gap_sec: 45          # 同 (platform,account) 两次发送最小间隔（pacing）
+    quiet_start_hour: 23     # 安静时段起（命中则顺延，不打扰），24h 制
+    quiet_end_hour: 8        # 安静时段止
+    # 注册 sender 的平台白名单（留空用默认全集）；messenger 永不在此（走 RPA 路径）
+    platforms: [telegram, line, whatsapp, instagram, zalo]
+  # 质量趋势持久化：周期把 companion_quality_overview（内存即时聚合）快照落地为时序，
+  # 看板据此画「质量在变好还是变差」的趋势线（/api/companion/quality-trend）。默认关。
+  quality_trend:
+    enabled: false           # 总开关（默认关）
+    interval_sec: 300        # 快照间隔（秒）
+    window_hours: 24         # 每次快照统计的回看窗口（小时）
+    retention_days: 30       # 时序保留天数（超期自动清理）
+  # 主动话题调度（沉默驱动）：用户久未说话时，从其高置信记忆挑话题主动开场
+  # （"上次你说在备考，后来怎么样？"）。仅 Telegram 协议号；只在「我方说完后冷场」时主动
+  # （对方未回属 SLA，不在此）。与 proactive_care(承诺驱动) 互补，且对已排关怀的会话自动让路。
+  # 预览/试发/评分回流端点（/api/companion/proactive/*）即便本块关闭也可用（开闸前先观测）。
+  proactive_topic:
+    enabled: false           # 总开关（默认关）
+    dry_run: false           # 灰度：只计划不真发（先看 preview + 试发采样确认无误再关）
+    interval_sec: 900        # 调度循环间隔（秒）
+    scan_limit: 200          # 每轮扫描最近多少条会话
+    min_silent_hours: 24     # 沉默至少这么久才主动（低于不打扰活跃用户）
+    cooldown_hours: 72       # 同一会话两次主动开场最小间隔（防骚扰）
+    max_per_tick: 3          # 每轮最多主动开场会话数
+    quiet_start_hour: 23     # 安静时段起（不打扰），24h 制
+    quiet_end_hour: 8        # 安静时段止
+    # few-shot 风格示范：把人工高赞/差评改写样本作为「口吻示范」拼进生成 prompt
+    # （只学风格不照抄内容）。默认关——先用「调参建议」人审样本质量，再开此自我改进环。
+    few_shot:
+      enabled: false         # 默认关（人审样本后再开）
+      max_examples: 3        # 最多注入几条示范
+  # Phase P/R：关系健康卡 + 流失预警榜（/relations-health）
+  relations_health:
+    # Q 延伸：ingest 热路径回写 conversations/conversation_meta.contact_id（默认关）。
+    # 不动 RPA；读侧用 chat_key 后缀候选反查 CI（messenger_rpa:Bob → Bob）。
+    ingest_contact_id_writeback: false
+    # Q 延伸·存量回填：启动后一次性给历史会话补 contact_id（ingest 回写只对新消息生效）。
+    # 默认关；dry_run=true 只解析+log 命中率不写库（上线前评估用）。
+    contact_id_backfill:
+      enabled: false
+      limit: 200             # 单次最多扫描会话数（按最近活跃优先）
+      dry_run: false         # true=只评估命中率不写库
+      delay_seconds: 20      # 启动后延迟（避开冷启动高峰）
+    health_board:
+      # R3：同分相邻行按 inbox 高流失 / 情绪恶化做次级 tie-break（不替代关系健康主排序）。
+      # 默认关；开启后榜单会对全部候选批量查 inbox 再排序（仍仅 2 次 SQL）。
+      inbox_sort_tiebreak: false
   thresholds:
     initial_to_warming_exchanges: 4
     warming_to_intimate_exchanges: 14
@@ -856,6 +1004,18 @@ companion:
       to_warming: 25
       to_intimate: 55
       to_steady: 80
+
+# ── 长期记忆（情景记忆 / 画像）──────────────────────────────────────
+# 顶层 memory 块；多数子项（enabled / scope / vector / consolidation.* 如
+# inferred_min_hits / stable_min_hits 等）走代码默认，未列出即用默认值。
+memory:
+  # R19：AI 推断采纳率告警（仪表盘 /api/alert-status 的 memory_adoption 项）
+  # 采纳率持续偏低 = AI 推断在产噪声、白占坐席精力 → warn 提示调高 inferred_min_hits。
+  adoption_alert:
+    enabled: true            # 关掉则不再产生 memory_adoption 告警
+    window_days: 30          # 统计窗口（天，1-365）；与看板趋势同口径
+    min_sample: 10           # 样本闸门：confirmed+pending 不足此数不报（防小样本误报）
+    low_rate: 0.30           # 采纳率低于此值才报（0-1；0.30 = 30%）
 
 # 图像理解：zhipu（智谱 GLM-4V）或 openai_compatible（Ollama 等，多模态 Gemma/LLaVA）
 # 若同时配置 Ollama(base_url) 与智谱 key，请求时优先 Ollama，不可用或空结果时自动回退智谱
@@ -1193,6 +1353,78 @@ mobile_bridge:
   mobile_api_base: "http://127.0.0.1:18080"
   # 轮询间隔（秒），建议 10~60
   poll_interval_sec: 15
+
+# ── 协议多开登录 / 账号池编排器 / 统一运行时（N 线）──────────────────────
+# 让"扫码/手机登录的个人号"被纳管、7×24 在线、并跑 A 线"有灵魂"的陪聊 client。
+# 全部默认关；需用测试号验证后再逐项开启（涉及 pyrogram DC 迁移等底层，无法无真号联调）。
+platform_login:
+  # 账号池编排器：进程启动后读 account_registry，按账号 (platform, mode) 用对应 worker
+  # 拉起并持续健康监督（失败指数退避重启）。关 → 不持有任何协议连接。
+  orchestrator_enabled: false
+  telegram:
+    # 关联设备二维码登录 provider（统一收件箱「账号管理 → ＋ 扫码新增」）。
+    # 需 telegram.api_id/api_hash 已配 + pyrogram 已装。
+    protocol_enabled: false
+    # N4 统一运行时：开 → 协议号（扫码 session）跑 A 线 TelegramClient
+    #   （记忆/人设/情绪/语音图片/四层触发/人工转接全在线 + N4b 收发镜像进收件箱，坐席可见）；
+    # 关 → 用 B 线薄连接 worker（仅收消息→收件箱 + 简单 autoreply）。
+    # 依赖：protocol_enabled=true 且 orchestrator_enabled=true（否则不会被拉起）。
+    companion_runtime: false
+    # 首连历史回填的会话数（0=不回填）。
+    backfill_dialogs: 20
+    # Q3 关系事实源接通：开 → A 线 Telegram 把每条收/发写入 contacts 子系统
+    #   → 生成 journey + IntimacyEngine 刷新 intimacy_score → 注回 companion_relationship
+    #   双信号融合（长沉默自动降阶 + reunion 问候），与 LINE/Messenger 各线对齐。
+    # 默认关（遵循"新子系统默认关"）：关时只读查询仍注册但无数据→恒回退旧行为；
+    #   开前需确认 contacts.enabled=true 且接受 telegram 联系人被纳入 contacts 下游
+    #   （reactivation / handoff 等）的纳管范围。受 contacts.rpa_hooks.telegram 总开关约束。
+    contacts_recording: false
+  # 官方 API 出站 worker（mode=official）：让 companion/autoreply 主管道经官方通道发
+  # （LINE Messaging / Messenger Send / WhatsApp Cloud），与 RPA/Baileys 按账号并存。
+  # 凭证优先读账号 meta，回退到对应通道块（line / facebook_messenger / whatsapp_cloud）。
+  # 任一 official.<platform>.enabled 或对应通道块 enabled → 该平台官方 worker 自动注册。
+  # 依赖 orchestrator_enabled=true + 账号 mode=official。官方发送已内建 Kill-Switch 守卫。
+  official:
+    line: { enabled: false }
+    messenger: { enabled: false }
+    whatsapp: { enabled: false }
+    instagram: { enabled: false }
+    zalo: { enabled: false }
+
+# ── 反封号发送闸门（N3 / 优化1）──────────────────────────────────────
+# A/B 两线共用：发送前按账号健康（天龄/代理/今日发送量/熔断）给红黄绿灯 + 建议日上限，
+# 新号自动预热爬坡（warmup_start_cap → 几天内升到 target_cap）。默认关 → 不拦截任何发送。
+companion_send_gate:
+  enabled: false
+  target_cap: 15        # 养熟后的单号日发上限
+  warmup_start_cap: 2   # 新号第 0 天的日发上限（须 ≤ target_cap）
+  warmup_ramp_days: 14  # 从 start 爬升到 target 的天数
+
+# ── G1 全局 Kill-Switch（反封号护栏：紧急停发总闸）──────────────────
+# 运营发现封号潮/内容事故时，一键（毫秒级）冻结自动发送，与上面的预热闸门正交
+# （无视 companion_send_gate.enabled 都生效）。三级作用域 global / platform:<p> /
+# account:<p>:<id>，状态落 config/runtime_flags.db（重启不丢），可选 TTL 自动恢复。
+# 这是「永远在线的应急刹车」，无需开关；本节仅声明状态库路径，便于运维知悉。
+#   - 置位：POST   /api/ops/kill-switch  {scope?, reason?, ttl_sec?}（scope 缺省 global）
+#   - 解除：DELETE /api/ops/kill-switch  {scope?}
+#   - 查看：GET    /api/ops/kill-switch
+ops:
+  kill_switch:
+    db_path: config/runtime_flags.db   # 紧急停发状态持久化（SQLite）
+  # ── G3 金丝雀放量（激进上量护栏：先小批真发，绿灯稳定再扩面）──────────
+  # 与 Kill-Switch 正交、且独立于 companion_send_gate 开关。启用后「不在 cohort 的号」
+  # 自动 hold（决策期早退，不生成不发，与 disabled 同抑制）。manual=运营手点扩面；
+  # auto_health=watchdog 按机群绿灯自动 plan_expansion 扩面（扩面集落 runtime_flags.db）。
+  #   - 查看：GET    /api/ops/canary
+  #   - 扩面：POST   /api/ops/canary  {members:["telegram:123",...]}
+  #   - 移除/清空：DELETE /api/ops/canary  {member?}
+  canary:
+    enabled: false                     # 默认关→零破坏；激进首发时开，先只放 pinned 几个号
+    mode: manual                       # manual | auto_health
+    pinned_accounts: []                # 永久在 cohort（如 ["telegram:10001"]；裸 id 视为 telegram）
+    step: 5                            # auto_health 每轮最多扩入的新号数
+    hold_hours: 24                     # auto_health 绿灯需连续稳定的小时数（watchdog 用）
+    red_rate_threshold: 0.1            # 机群红灯率超此值则不推进扩面
 
 # ── C0-1 离线授权（License）─────────────────────────────────────────
 # 私有化部署的商业化授权。厂商用 Ed25519 私钥签发授权码，产品内置公钥离线验签。

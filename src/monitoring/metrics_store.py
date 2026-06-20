@@ -80,6 +80,11 @@ class MetricsStore:
         # ★ W2-D5.1 + W3-D3.5：dry_run 话术样本（容量 200 覆盖 24h+ 灰度）
         self._reactivation_dry_samples: deque = deque(maxlen=200)
         # 元素结构：{ts, contact_id, chat_name, reply_text, silent_days, account_id, ...}
+        # ★ Phase O 质量闭环：care dispatcher dry_run 话术样本（与 reactivation 同范式）
+        self._care_dry_samples: deque = deque(maxlen=200)
+        # ★ O·P 联动质量看板：care 派发 skip 原因 + 人工反馈（与 reactivation 同范式）
+        self._care_skipped_recent: deque = deque(maxlen=500)    # (ts, reason)
+        self._care_feedback_recent: deque = deque(maxlen=200)   # (ts, verdict)
         # ★ W2-D6.3：pacing 延迟分布观测（最近 200 次 _maybe_pacing_defer 决策的 delay_sec）
         self._pacing_delays_recent: deque = deque(maxlen=200)
         # ★ W2-D6.1：reactivation 24h 回复率归因（loop tick 末尾写）
@@ -328,6 +333,102 @@ class MetricsStore:
             except Exception:
                 pass
         return ordered[:max(1, int(limit))]
+
+    def record_care_dry_run(self, sample: Optional[Dict[str, Any]] = None) -> None:
+        """Phase O 质量闭环：care dispatcher dry_run 样本（供运营审核）。"""
+        if not sample:
+            return
+        with self._lock:
+            rec = dict(sample)
+            rec["ts"] = time.time()
+            rec["ts_iso"] = time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ", time.gmtime(rec["ts"]),
+            )
+            self._care_dry_samples.append(rec)
+
+    def care_dry_samples(
+        self, limit: int = 50, *, before_ts: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
+        """读最近 N 条 care dry_run 话术（最新在前，支持 before_ts 增量加载）。"""
+        with self._lock:
+            samples = list(self._care_dry_samples)
+        ordered = list(reversed(samples))
+        if before_ts is not None:
+            try:
+                cut = float(before_ts)
+                ordered = [s for s in ordered if float(s.get("ts") or 0) < cut]
+            except Exception:
+                pass
+        return ordered[:max(1, int(limit))]
+
+    def record_care_skipped(self, reason: str = "") -> None:
+        """O·P：care 派发 skip 原因（no_context/already_discussed/identity_leak/…）。"""
+        with self._lock:
+            self._care_skipped_recent.append((time.time(), (reason or "")[:60]))
+
+    def record_care_feedback(self, verdict: str = "") -> None:
+        """O·P：care dry_run 样本的人工 like/dislike 计数。"""
+        v = (verdict or "").strip().lower()
+        if v not in ("like", "dislike"):
+            return
+        with self._lock:
+            self._care_feedback_recent.append((time.time(), v))
+
+    @staticmethod
+    def _reason_hist(items, since: float) -> Dict[str, int]:
+        """把 (ts, reason) 序列在 since 之后的部分按 reason 计数。"""
+        hist: Dict[str, int] = {}
+        for ts, reason in items:
+            if ts >= since:
+                key = reason or "(none)"
+                hist[key] = hist.get(key, 0) + 1
+        return hist
+
+    def companion_quality_overview(self, *, window_sec: float = 86400) -> Dict[str, Any]:
+        """O·P 联动质量看板：care + reactivation 的发送质量统一视图。
+
+        含两条主动线的 skip 原因分布 + 人工 like/dislike 反馈 + dry_run 计数，
+        以及共享 dislike 黑名单规模。供运营一眼看「质量在变好还是变差、卡在哪」。
+        """
+        now = time.time()
+        since = now - max(60.0, float(window_sec))
+        with self._lock:
+            re_skip = list(self._reactivation_skipped_recent)
+            re_fb = list(self._reactivation_feedback_recent)
+            re_sched = list(self._reactivation_scheduled_recent)
+            re_dry = list(self._reactivation_dry_run_recent)
+            ca_skip = list(self._care_skipped_recent)
+            ca_fb = list(self._care_feedback_recent)
+            ca_dry = list(self._care_dry_samples)
+            blacklist_n = len(self._reactivation_disliked_replies)
+
+        def _fb_counts(items_with_verdict):
+            like = sum(1 for t, v in items_with_verdict if t >= since and v == "like")
+            dislike = sum(1 for t, v in items_with_verdict if t >= since and v == "dislike")
+            total = like + dislike
+            return {
+                "like": like, "dislike": dislike,
+                "like_rate_pct": round(like / total * 100, 1) if total else None,
+            }
+
+        re_fb2 = [(t, v) for t, v, _ in re_fb]
+        return {
+            "window_sec": int(window_sec),
+            "reactivation": {
+                "scheduled": sum(1 for t, _ in re_sched if t >= since),
+                "skipped": sum(1 for t, _ in re_skip if t >= since),
+                "skip_reasons": self._reason_hist(re_skip, since),
+                "dry_run": sum(1 for t in re_dry if t >= since),
+                "feedback": _fb_counts(re_fb2),
+            },
+            "care": {
+                "skipped": sum(1 for t, _ in ca_skip if t >= since),
+                "skip_reasons": self._reason_hist(ca_skip, since),
+                "dry_run": sum(1 for s in ca_dry if float(s.get("ts") or 0) >= since),
+                "feedback": _fb_counts(ca_fb),
+            },
+            "disliked_blacklist_size": blacklist_n,
+        }
 
     @staticmethod
     def _bucket_counts(items, *, n_buckets: int = 12, bucket_sec: int = 300) -> List[int]:

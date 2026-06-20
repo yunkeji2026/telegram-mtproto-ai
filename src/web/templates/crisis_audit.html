@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+{% block title %}危机审计 · {{ site_name|default('华灵科技客户转化聊天系统') }}{% endblock %}
+{% block page_title %}危机审计{% endblock %}
+{% block head %}
+<style>
+.ca-filters{display:flex;flex-wrap:wrap;gap:.6rem;align-items:flex-end;margin-bottom:1rem}
+.ca-filters input{min-width:180px}
+.table-wrap{overflow-x:auto}
+.ca-table{width:100%;border-collapse:collapse;font-size:.82rem}
+.ca-table th,.ca-table td{padding:.55rem .65rem;border-bottom:1px solid var(--bd);text-align:left;vertical-align:top}
+.ca-table th{color:var(--t3);font-weight:600;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
+.ca-table tr:hover td{background:rgba(91,124,246,.04)}
+.ca-table tr.row-handled td{opacity:.65}
+.mono{font-family:Consolas,monospace;font-size:.76rem;word-break:break-all}
+.badge-lv{display:inline-block;padding:.12rem .45rem;border-radius:4px;font-size:.65rem;font-weight:700;text-transform:uppercase}
+.badge-lv.severe{background:rgba(239,68,68,.15);color:var(--red)}
+.badge-lv.elevated{background:rgba(245,158,11,.15);color:var(--amber)}
+.badge-lv.other{background:var(--input);color:var(--t3)}
+.badge-flag{display:inline-block;padding:.1rem .35rem;border-radius:4px;font-size:.62rem;font-weight:600;margin-right:.25rem}
+.badge-flag.on{background:rgba(239,68,68,.12);color:var(--red)}
+.badge-flag.ok{background:rgba(16,185,129,.12);color:var(--green)}
+.btn-handle{background:none;border:1px solid var(--p);color:var(--p);cursor:pointer;font-size:.76rem;font-weight:600;padding:.25rem .55rem;border-radius:6px}
+.btn-handle:hover{background:rgba(91,124,246,.08)}
+.ca-summary{display:flex;flex-wrap:wrap;gap:.75rem;margin-bottom:.75rem;font-size:.82rem}
+.ca-pill{padding:.35rem .7rem;border-radius:8px;background:var(--input);color:var(--t2)}
+.ca-pill strong{color:var(--t1)}
+.ca-pill.warn strong{color:var(--amber)}
+.ca-pill.crit strong{color:var(--red)}
+.ca-modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:900;display:none;align-items:center;justify-content:center}
+.ca-modal-bg.open{display:flex}
+.ca-modal{background:var(--card);border-radius:12px;padding:1.25rem;max-width:420px;width:92%;box-shadow:0 8px 32px rgba(0,0,0,.2)}
+.ca-modal h3{margin:0 0 .75rem;font-size:1rem}
+.ca-modal textarea{width:100%;min-height:72px;resize:vertical;font-family:inherit;font-size:.85rem;padding:.5rem;border:1px solid var(--bd);border-radius:8px;background:var(--input);color:var(--t1)}
+.ca-modal-actions{display:flex;gap:.5rem;justify-content:flex-end;margin-top:.75rem}
+</style>
+{% endblock %}
+{% block content %}
+{% set active="crisis_audit" %}
+
+<div class="card fa">
+  <h2>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    危机事件审计
+    <span style="font-size:.75rem;font-weight:400;color:var(--t2);margin-left:.4rem">R4→R6→R8 安全链留痕 · 需开启 companion.wellbeing.crisis_audit</span>
+  </h2>
+  <div class="ca-summary" id="ca-summary"></div>
+  <div class="ca-filters">
+    <div class="f-grp">
+      <label class="f-lb">筛选用户 ID</label>
+      <input type="text" id="ca-prefix" placeholder="user_id 前缀" class="f-input">
+    </div>
+    <div class="f-grp">
+      <label class="f-lb">条数</label>
+      <input type="number" id="ca-limit" value="50" min="1" max="500" class="f-input" style="width:90px">
+    </div>
+    <label class="f-grp" style="display:flex;align-items:center;gap:.35rem;padding-bottom:.35rem">
+      <input type="checkbox" id="ca-only-unhandled" checked>
+      <span style="font-size:.82rem;color:var(--t2)">仅未处理</span>
+    </label>
+    <button type="button" class="btn btn-p" onclick="caLoad()">加载</button>
+  </div>
+  <p id="ca-status" style="font-size:.8rem;color:var(--t2);margin-bottom:.6rem"></p>
+  <div class="table-wrap">
+    <table class="ca-table" id="ca-table">
+      <thead>
+        <tr>
+          <th style="width:56px">ID</th>
+          <th style="min-width:120px">用户</th>
+          <th style="width:72px">等级</th>
+          <th style="width:90px">类别</th>
+          <th>摘要</th>
+          <th style="width:56px">连击</th>
+          <th style="width:120px">标记</th>
+          <th style="width:150px">时间</th>
+          <th style="width:88px">操作</th>
+        </tr>
+      </thead>
+      <tbody id="ca-body"><tr><td colspan="9" style="padding:2rem;color:var(--t3)">加载中…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="ca-modal-bg" id="ca-modal-bg" onclick="if(event.target===this)caCloseModal()">
+  <div class="ca-modal" role="dialog" aria-labelledby="ca-modal-title">
+    <h3 id="ca-modal-title">标记已处理</h3>
+    <p id="ca-modal-hint" style="font-size:.82rem;color:var(--t2);margin:0 0 .6rem"></p>
+    <textarea id="ca-modal-note" placeholder="处置备注（可选）：已电话联系 / 已转人工 / …"></textarea>
+    <div class="ca-modal-actions">
+      <button type="button" class="btn" onclick="caCloseModal()">取消</button>
+      <button type="button" class="btn btn-p" id="ca-modal-confirm" onclick="caConfirmHandle()">确认处置</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const caCanHandle = {{ 'true' if user_role in ('master', 'admin') else 'false' }};
+let _caPendingId = null;
+
+function esc(s) {
+  return String(s || '').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+}
+function lvBadge(lv) {
+  var cls = (lv === 'severe') ? 'severe' : ((lv === 'elevated') ? 'elevated' : 'other');
+  return '<span class="badge-lv ' + cls + '">' + esc(lv || '—') + '</span>';
+}
+function flagBadge(on, labelOn, labelOff) {
+  return on
+    ? '<span class="badge-flag on">' + labelOn + '</span>'
+    : '<span class="badge-flag ok">' + labelOff + '</span>';
+}
+
+async function caLoad() {
+  const prefix = document.getElementById('ca-prefix').value.trim();
+  const limit = document.getElementById('ca-limit').value || 50;
+  const onlyUnhandled = document.getElementById('ca-only-unhandled').checked;
+  const st = document.getElementById('ca-status');
+  const body = document.getElementById('ca-body');
+  const summary = document.getElementById('ca-summary');
+  st.textContent = '加载中…';
+  body.innerHTML = '<tr><td colspan="9" style="padding:2rem">…</td></tr>';
+  try {
+    const q = new URLSearchParams({ limit: String(limit) });
+    if (prefix) q.set('prefix', prefix);
+    if (onlyUnhandled) q.set('only_unhandled', 'true');
+    const res = await fetch('/api/crisis-events?' + q.toString());
+    if (!res.ok) { st.textContent = '错误 ' + res.status; return; }
+    const d = await res.json();
+    const items = d.items || [];
+    const unhandled = d.unhandled_total || 0;
+    summary.innerHTML =
+      '<div class="ca-pill">本页 <strong>' + (d.count || items.length) + '</strong> 条</div>' +
+      '<div class="ca-pill' + (unhandled > 0 ? ' warn' : '') + '">未处理合计 <strong>' + unhandled + '</strong></div>';
+    st.textContent = '最近危机事件（按时间倒序）';
+    if (!items.length) {
+      body.innerHTML = '<tr><td colspan="9" style="padding:2rem;color:var(--t3)">无记录</td></tr>';
+      return;
+    }
+    body.innerHTML = items.map(function(it) {
+      var ts = it.created_at ? new Date(it.created_at * 1000).toLocaleString() : '—';
+      var flags = flagBadge(it.escalated, '已升级', '未升级') +
+        flagBadge(it.safety_override, '兜底', '—');
+      var handledInfo = it.handled
+        ? esc(it.handled_by || '—') + (it.note ? '<br><span style="color:var(--t3);font-size:.72rem">' + esc(it.note) + '</span>' : '')
+        : '<span style="color:var(--amber);font-weight:600">待处理</span>';
+      var op = '';
+      if (!it.handled && caCanHandle) {
+        op = '<button type="button" class="btn-handle" data-id="' + it.id + '" data-user="' + esc(it.user_id) + '" onclick="caOpenModal(this)">处置</button>';
+      } else if (it.handled) {
+        op = '<span style="color:var(--t3);font-size:.75rem">已结案</span>';
+      } else {
+        op = '<span style="color:var(--t3);font-size:.75rem">只读</span>';
+      }
+      return '<tr class="' + (it.handled ? 'row-handled' : '') + '" data-id="' + it.id + '">' +
+        '<td>' + it.id + '</td>' +
+        '<td class="mono">' + esc(it.user_id) + '</td>' +
+        '<td>' + lvBadge(it.level) + '</td>' +
+        '<td class="mono">' + esc(it.category || '—') + '</td>' +
+        '<td>' + esc(it.excerpt) + '</td>' +
+        '<td>' + (it.streak || 1) + '</td>' +
+        '<td>' + flags + '</td>' +
+        '<td class="mono">' + ts + '</td>' +
+        '<td>' + op + '</td></tr>';
+    }).join('');
+    document.querySelectorAll('#badge-crisis').forEach(function(badge) {
+      if (unhandled > 0) {
+        badge.textContent = unhandled > 99 ? '99+' : String(unhandled);
+        badge.classList.add('has-count');
+      } else {
+        badge.textContent = '';
+        badge.classList.remove('has-count');
+      }
+    });
+  } catch (e) {
+    st.textContent = '请求失败: ' + e;
+  }
+}
+
+function caOpenModal(el) {
+  _caPendingId = parseInt(el.getAttribute('data-id'), 10);
+  var userId = el.getAttribute('data-user') || '';
+  document.getElementById('ca-modal-hint').textContent = '事件 #' + _caPendingId + ' · 用户 ' + userId;
+  document.getElementById('ca-modal-note').value = '';
+  document.getElementById('ca-modal-bg').classList.add('open');
+}
+function caCloseModal() {
+  _caPendingId = null;
+  document.getElementById('ca-modal-bg').classList.remove('open');
+}
+async function caConfirmHandle() {
+  if (!_caPendingId) return;
+  const btn = document.getElementById('ca-modal-confirm');
+  const note = document.getElementById('ca-modal-note').value.trim();
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/crisis-events/' + _caPendingId + '/handle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note: note })
+    });
+    if (!res.ok) { alert('处置失败 ' + res.status); return; }
+    caCloseModal();
+    caLoad();
+  } catch (e) { alert(e); }
+  finally { btn.disabled = false; }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  var q = new URLSearchParams(window.location.search);
+  if (q.get('only_unhandled') === '1') {
+    document.getElementById('ca-only-unhandled').checked = true;
+  }
+  if (q.get('user')) {
+    document.getElementById('ca-prefix').value = q.get('user');
+  }
+  caLoad();
+});
+</script>
+{% endblock %}

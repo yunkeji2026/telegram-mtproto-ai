@@ -11119,6 +11119,16 @@ class MessengerRpaRunner:
 
         非 ASCII 字符且 ADB Keyboard 不可用时，自动失败并 log，避免发送乱码。
         """
+        # G1 全局 Kill-Switch（Phase C：RPA 覆盖）：紧急冻结时跳过物理发送
+        try:
+            from src.integrations.shared.rpa_send_guard import rpa_send_blocked
+            _ks_on, _ks_scope = rpa_send_blocked("messenger", self._account_id)
+            if _ks_on:
+                logger.warning("[messenger_rpa][kill-switch] 冻结发送，跳过（scope=%s）", _ks_scope)
+                result["kill_switch"] = _ks_scope
+                return False
+        except Exception:
+            pass
         ime = (self._cfg.get("adb_keyboard_ime") or "").strip()
         use_adb_keyboard = bool(self._cfg.get("use_adb_keyboard", True))
         if use_adb_keyboard and ime:

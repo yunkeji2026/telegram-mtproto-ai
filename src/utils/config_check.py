@@ -233,9 +233,18 @@ def _check_contacts(ctx: _Ctx) -> None:
         if _is_placeholder(rel):
             continue
         if ctx.config_dir is not None:
+            cfg_dir = ctx.config_dir
             p = Path(rel)
             if not p.is_absolute():
-                p = ctx.config_dir / p
+                # 与 src/contacts/bootstrap.py 的解析保持一致：config.yaml 通常位于
+                # config/ 下，而相对路径形如 "config/handoff_*.yaml" 已含 config/ 前缀，
+                # 直接拼到 config_dir 会得到重复的 config/config/...（误报文件不存在）。
+                p = cfg_dir.parent / p if cfg_dir.name == "config" else cfg_dir / p
+            # config/ 下也是常见位置，回退到同名文件
+            if not p.exists():
+                alt = cfg_dir / Path(rel).name
+                if alt.exists():
+                    p = alt
             if not p.exists():
                 ctx.add(WARN, f"contacts.{key}", f"引流话术文件不存在: {p}")
 
@@ -279,6 +288,63 @@ def _check_workspace(ctx: _Ctx) -> None:
                 "同时开启 workspace.auto_assign.enabled")
 
 
+def _check_protocol_login(ctx: _Ctx) -> None:
+    """N 线 协议登录 / 编排器 / 统一运行时的跨字段一致性（开关依赖 footgun）。"""
+    pl = ctx.section("platform_login")
+    if not pl:
+        return
+    tg = pl.get("telegram") if isinstance(pl.get("telegram"), dict) else {}
+    protocol_on = bool(tg.get("protocol_enabled", False))
+    companion_on = bool(tg.get("companion_runtime", False))
+    orch_on = bool(pl.get("orchestrator_enabled", False))
+
+    def _has_tg_creds() -> bool:
+        if not _is_placeholder(ctx.get("telegram.api_id")) and not _is_placeholder(
+            ctx.get("telegram.api_hash")
+        ):
+            return True
+        for a in (ctx.get("telegram.accounts") or []):
+            if isinstance(a, dict) and not _is_placeholder(
+                a.get("api_id")
+            ) and not _is_placeholder(a.get("api_hash")):
+                return True
+        return False
+
+    if (protocol_on or companion_on) and not _has_tg_creds():
+        ctx.add(WARN, "platform_login.telegram.protocol_enabled",
+                "已开 Telegram 协议登录，但 telegram.api_id/api_hash 未配置",
+                "从 https://my.telegram.org 获取并填入 telegram.* 或 telegram.accounts[]")
+    if companion_on and not protocol_on:
+        ctx.add(WARN, "platform_login.telegram.companion_runtime",
+                "companion_runtime 已开，但 protocol_enabled=false（协议号无法扫码登录/被拉起）",
+                "同时设 platform_login.telegram.protocol_enabled: true")
+    if companion_on and not orch_on:
+        ctx.add(WARN, "platform_login.telegram.companion_runtime",
+                "companion_runtime 已开，但 platform_login.orchestrator_enabled=false"
+                "（编排器不运行，协议号不会被拉起为 A 线 client）",
+                "设 platform_login.orchestrator_enabled: true")
+
+
+def _check_companion_send_gate(ctx: _Ctx) -> None:
+    """反封号闸门阈值合法性（仅启用时检查）。"""
+    g = ctx.section("companion_send_gate")
+    if not g or not g.get("enabled"):
+        return
+    try:
+        start = int(g.get("warmup_start_cap", 2))
+        target = int(g.get("target_cap", 15))
+        if start > target:
+            ctx.add(WARN, "companion_send_gate.warmup_start_cap",
+                    f"预热起始上限({start}) 不应大于目标上限({target})",
+                    "应满足 warmup_start_cap ≤ target_cap")
+    except (TypeError, ValueError):
+        ctx.add(WARN, "companion_send_gate.warmup_start_cap",
+                "warmup_start_cap / target_cap 不是有效整数")
+    if g.get("warmup_ramp_days") is not None:
+        _check_positive_int(ctx, "companion_send_gate.warmup_ramp_days",
+                            g.get("warmup_ramp_days"))
+
+
 def _check_inbox(ctx: _Ctx) -> None:
     warn = ctx.get("inbox.sla_warn_sec")
     crit = ctx.get("inbox.sla_crit_sec")
@@ -305,6 +371,8 @@ _CHECKS: List[Callable[[_Ctx], None]] = [
     _check_translation,
     _check_voice_recognition,
     _check_workspace,
+    _check_protocol_login,
+    _check_companion_send_gate,
     _check_inbox,
 ]
 

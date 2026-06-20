@@ -161,6 +161,12 @@
 .conv-name{font-size:13px;font-weight:600;color:var(--text-main);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .conv-preview{font-size:12px;color:var(--text-sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;}
 .conv-time{font-size:10px;color:var(--text-tiny);white-space:nowrap;margin-bottom:4px;}
+/* P2: 预览方向前缀（我方最后发言） */
+.conv-dir-me{color:var(--text-tiny);font-weight:500;}
+/* P1: 未读会话视觉强调——名字加重、预览转主色加粗、时间转主色 */
+.conv-item.has-unread .conv-name{font-weight:800;}
+.conv-item.has-unread .conv-preview{color:var(--text-main);font-weight:500;}
+.conv-item.has-unread .conv-time{color:var(--accent,#6b8af8);font-weight:700;}
 .conv-meta{display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0;}
 .unread-dot{background:var(--accent);color:#fff;border-radius:10px;font-size:10px;font-weight:700;min-width:18px;height:18px;display:flex;align-items:center;justify-content:center;padding:0 4px;}
 .sla-chip{font-size:9px;font-weight:700;border-radius:6px;padding:1px 5px;}
@@ -311,9 +317,37 @@
 .imgxl-seg .val.tr{color:#1e3a5f;font-weight:500;}
 .imgxl-act{display:flex;gap:6px;margin-top:4px;}
 
+/* P0: 账号/人格切换条 */
+.account-chips{display:flex;gap:6px;padding:6px 10px;flex-wrap:wrap;border-bottom:1px solid var(--border);background:var(--bg-soft);}
+.acct-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;border:1px solid var(--border);background:var(--bg-panel);cursor:pointer;font-size:12px;color:var(--text-sub);transition:all .15s;white-space:nowrap;max-width:160px;}
+.acct-chip:hover{border-color:var(--accent,#6b8af8);}
+.acct-chip.active{background:var(--accent,#6b8af8);color:#fff;border-color:var(--accent,#6b8af8);}
+.acct-chip .ac-dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto;}
+.acct-chip .ac-dot.on{box-shadow:0 0 0 2px rgba(34,197,94,.25);}
+.acct-chip .ac-name{overflow:hidden;text-overflow:ellipsis;}
+.acct-chip .ac-unread{background:#ef4444;color:#fff;border-radius:999px;font-size:10px;padding:0 5px;min-width:16px;text-align:center;line-height:15px;}
+.acct-chip.active .ac-unread{background:rgba(255,255,255,.3);}
+.acct-chip.ac-toggle{margin-left:auto;border-style:dashed;}
+/* P0: 会话条上的账号/人格角标 + 左侧人格色条 */
+.conv-item{position:relative;}
+.conv-item .conv-acct-accent{position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;}
+.conv-acct-badge{display:inline-flex;align-items:center;gap:3px;font-size:10px;padding:0 6px;line-height:15px;border-radius:999px;font-weight:600;vertical-align:middle;margin-left:4px;}
+.conv-acct-badge .cab-dot{width:5px;height:5px;border-radius:50%;}
+/* P2: 会话条悬浮快捷操作（认领/归档/标签）——hover 才显示，避免常态拥挤 */
+.conv-quick{position:absolute;right:8px;bottom:6px;display:none;gap:4px;z-index:3;}
+.conv-item:hover .conv-quick{display:flex;}
+.conv-quick .cq-btn{width:24px;height:24px;border-radius:7px;border:1px solid var(--border);background:var(--bg-panel);cursor:pointer;font-size:12px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;box-shadow:0 1px 3px rgba(0,0,0,.08);transition:all .12s;}
+.conv-quick .cq-btn:hover{border-color:var(--accent,#6b8af8);transform:translateY(-1px);}
+.conv-quick .cq-btn.claimed{background:var(--accent,#6b8af8);border-color:var(--accent,#6b8af8);}
+/* P2: 抽屉账号卡人格色点 + 未命名标记 */
+.acct-persona-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle;}
+.acct-unnamed{font-size:10px;color:var(--text-tiny);background:var(--bg-soft);border:1px dashed var(--border);border-radius:6px;padding:0 5px;margin-left:6px;font-weight:400;}
+
 /* P55: 今日数据计数条（超越打粉计数器） */
 .today-strip{display:flex;gap:6px;padding:7px 10px;flex-wrap:wrap;}
 .today-stat{flex:1;min-width:58px;background:var(--bg-soft);border:1px solid var(--border);border-radius:9px;padding:5px 8px;text-align:center;transition:all .15s;}
+.today-stat.clickable{cursor:pointer;}
+.today-stat.clickable:hover{border-color:var(--accent,#6b8af8);transform:translateY(-1px);box-shadow:0 2px 8px rgba(0,0,0,.06);}
 .today-stat .ts-num{font-size:16px;font-weight:800;line-height:1.1;color:var(--text-main);}
 .today-stat .ts-lbl{font-size:9px;color:var(--text-tiny);margin-top:1px;white-space:nowrap;}
 .today-stat.new .ts-num{color:#2563eb;}
@@ -681,11 +715,11 @@
         <!-- P23: 多选切换按钮 -->
         <button class="batch-toggle" id="batch-toggle-btn" onclick="toggleBatchMode()" title="多选批量操作">☑ 多选</button>
       </div>
-      <!-- P55: 今日数据计数条 -->
+      <!-- P55: 今日数据计数条（P1：点击即快捷筛选） -->
       <div class="today-strip" id="today-strip">
-        <div class="today-stat new"><div class="ts-num" id="ts-new">0</div><div class="ts-lbl">今日活跃</div></div>
-        <div class="today-stat"><div class="ts-num" id="ts-active">0</div><div class="ts-lbl">会话总数</div></div>
-        <div class="today-stat wait"><div class="ts-num" id="ts-wait">0</div><div class="ts-lbl">待回复</div></div>
+        <div class="today-stat new clickable" onclick="setFilter('all')" title="查看全部对话"><div class="ts-num" id="ts-new">0</div><div class="ts-lbl">今日活跃</div></div>
+        <div class="today-stat clickable" onclick="setFilter('all')" title="查看全部对话"><div class="ts-num" id="ts-active">0</div><div class="ts-lbl">会话总数</div></div>
+        <div class="today-stat wait clickable" onclick="setFilter('unread')" title="只看待回复（未读）"><div class="ts-num" id="ts-wait">0</div><div class="ts-lbl">待回复</div></div>
         <div class="today-stat done"><div class="ts-num" id="ts-done">0</div><div class="ts-lbl">已成交</div></div>
       </div>
       <div class="search-box" style="position:relative;">
@@ -714,6 +748,9 @@
     </div>
     <!-- Phase 16: 标签概览 strip -->
     <div class="tag-strip collapsed" id="tag-strip"></div>
+
+    <!-- P0: 账号/人格切换条（同平台 ≥2 账号时显示，按 account_id 分流） -->
+    <div class="account-chips" id="account-chips" style="display:none;"></div>
 
     <div class="conv-items" id="conv-items">
       <div class="empty-list"><span class="spin"></span><span style="margin-top:8px;font-size:13px;">加载中…</span></div>
@@ -900,6 +937,8 @@
                     <input type="file" id="imgxl-file" accept="image/*" style="display:none;" onchange="_onImgXlatePick(this)">
                     <button type="button" class="imgxl-btn" id="voicexl-btn" onclick="document.getElementById('voicexl-file').click()" title="上传客户语音，转写并翻译">🎙 语音翻译</button>
                     <input type="file" id="voicexl-file" accept="audio/*" style="display:none;" onchange="_onVoiceXlatePick(this)">
+                    <button type="button" class="imgxl-btn" id="xlcompare-btn" onclick="_onXlateCompare()" title="多线路对照：各翻译引擎各译一遍，点选最满意的填入输入框">⇄ 多线路对照</button>
+                    <button type="button" class="imgxl-btn" id="docxl-btn" onclick="_openDocXlate()" title="文档翻译：粘贴长文或上传 .txt，整篇翻译并保留排版">📄 文档翻译</button>
                   </div>
                   <!-- P0：发送前预览开关。默认关＝一击直发（后端自动翻译成客户语言）；
                        开＝两段式（先译出预览、再确认发送），照顾对译文质量谨慎的坐席。 -->
@@ -919,6 +958,22 @@
             <div class="imgxl-panel" id="voicexl-panel">
               <div class="imgxl-hd"><span>🎙 语音转写 + 翻译</span><span class="imgxl-close" onclick="document.getElementById('voicexl-panel').style.display='none'">✕</span></div>
               <div class="imgxl-body" id="voicexl-body"></div>
+            </div>
+            <div class="imgxl-panel" id="docxl-panel">
+              <div class="imgxl-hd"><span>📄 文档整篇翻译</span><span class="imgxl-close" onclick="document.getElementById('docxl-panel').style.display='none'">✕</span></div>
+              <div class="imgxl-body" id="docxl-body">
+                <textarea id="docxl-input" placeholder="粘贴要翻译的长文，或点「上传 .txt」…" style="width:100%;min-height:90px;font-size:12px;border:1px solid var(--border);border-radius:6px;padding:6px;resize:vertical;"></textarea>
+                <div class="imgxl-act" style="margin-top:6px;">
+                  <button class="tiny-btn" id="docxl-file-btn" onclick="document.getElementById('docxl-file').click()">上传 .txt</button>
+                  <input type="file" id="docxl-file" accept=".txt,text/plain" style="display:none;" onchange="_onDocFilePick(this)">
+                  <button class="tiny-btn" id="docxl-run-btn" onclick="_onDocXlateRun()">翻译整篇</button>
+                  <span style="width:1px;height:16px;background:var(--border);align-self:center;"></span>
+                  <button class="tiny-btn" id="docxl-docx-btn" onclick="document.getElementById('docxl-docx-file').click()" title="上传 .docx/.xlsx 保版式翻译，或 .pdf 抽取文本翻译，自动下载结果">📎 文档翻译 (.docx/.xlsx/.pdf)</button>
+                  <input type="file" id="docxl-docx-file" accept=".docx,.xlsx,.pdf" style="display:none;" onchange="_onDocxFilePick(this)">
+                  <span id="docxl-status" style="font-size:11px;color:var(--text-tiny);align-self:center;"></span>
+                </div>
+                <div id="docxl-result" style="margin-top:6px;"></div>
+              </div>
             </div>
             <div id="qr-panel" class="qr-panel"></div>
             <!-- Phase 17: KB 自动推送（会话打开时自动触发）-->
@@ -1137,6 +1192,9 @@ const FUNNEL = {INITIAL:'初始接触',ENGAGED:'深入互动',WARMING:'升温中
 
 /* ===== 状态 ===== */
 let allChats=[], filtered=[], platFilter='all', chatFilter='all', searchQ='', tagFilter='';
+let accountFilter='all';        // P0: 账号/人格维度过滤（按 account_id）
+let accountMeta={};             // P0: 'platform:account_id' -> {label, running}
+let accountOnlineOnly=false;    // P2: 切换条「仅在线」精简开关
 let selectedChat=null, selectedKey=null;
 let threadMsgs=[], pollTimer=null, pollFast=false;
 let _outXlPending=null; // P55: 发送前译文待确认 {orig, translated}
@@ -1154,10 +1212,16 @@ const MY_AGENT = ()=>(window.__wsAgent||{id:'agent',name:'agent'});
 function fmtTs(ts){
   if(!ts) return '';
   const d=new Date(ts*1000), now=new Date();
-  if(d.toDateString()===now.toDateString()) return d.toTimeString().slice(0,5);
-  const diff = (now-d)/86400000;
-  if(diff<7) return ['日','一','二','三','四','五','六'][d.getDay()]+'曜';
-  return (d.getMonth()+1)+'/'+(d.getDate());
+  const sec=(now-d)/1000;
+  if(sec<0) return d.toTimeString().slice(0,5);     // 时钟漂移兜底
+  if(sec<60) return '刚刚';
+  if(sec<3600) return Math.floor(sec/60)+'分钟前';
+  if(d.toDateString()===now.toDateString()) return d.toTimeString().slice(0,5);  // 今天更早 → HH:MM
+  const y=new Date(now); y.setDate(now.getDate()-1);
+  if(d.toDateString()===y.toDateString()) return '昨天';
+  if((now-d)/86400000<7) return '周'+['日','一','二','三','四','五','六'][d.getDay()];
+  if(d.getFullYear()===now.getFullYear()) return (d.getMonth()+1)+'/'+d.getDate();
+  return d.getFullYear()+'/'+(d.getMonth()+1)+'/'+d.getDate();
 }
 function fmtWait(sec){
   if(!sec||sec<60) return '';
@@ -1168,6 +1232,97 @@ function avatarInitial(name){ return (name||'?').trim().charAt(0).toUpperCase();
 function platColor(p){ return PC[p]||'#6b7280'; }
 function platIcon(p){ return PI[p]||'💬'; }
 function platName(p){ return PN[p]||p; }
+
+/* ===== P0: 账号/人格维度 ===== */
+// 稳定的人格配色：由 account_id 哈希出一个柔和色相（同号每次同色）
+const _ACCT_PALETTE=['#6b8af8','#f59e0b','#10b981','#ec4899','#8b5cf6','#06b6d4','#ef4444','#84cc16'];
+function _acctColor(aid){
+  const s=String(aid||'default');
+  let h=0; for(let i=0;i<s.length;i++){ h=(h*31+s.charCodeAt(i))>>>0; }
+  return _ACCT_PALETTE[h%_ACCT_PALETTE.length];
+}
+// 账号友好名（人格名）：优先注册表 label，回落 account_id；default 显示"主账号"
+function _acctLabel(platform, aid){
+  const id=String(aid||'default');
+  const meta=accountMeta[`${platform}:${id}`];
+  if(meta&&meta.label&&meta.label!==platName(platform)) return meta.label;
+  if(id==='default') return '主账号';
+  return id;
+}
+// 重建 accountMeta（从 platform_status 抽取每个号的 label/running）
+function rebuildAccountMeta(){
+  accountMeta={};
+  Object.values(platformStatus||{}).forEach(a=>{
+    const pl=a.platform||'web'; const id=a.account_id||'default';
+    accountMeta[`${pl}:${id}`]={label:a.label||'', running:!!a.running};
+  });
+}
+// 汇总某平台的账号列表（合并 platform_status 已知号 + 有会话的号），含未读/会话数
+function _accountsForPlatform(p){
+  const map={};
+  Object.values(platformStatus||{}).forEach(a=>{
+    if((a.platform||'web')!==p) return;
+    const id=a.account_id||'default';
+    map[id]=map[id]||{account_id:id,running:!!a.running,unread:0,count:0};
+    map[id].running=map[id].running||!!a.running;
+  });
+  (allChats||[]).forEach(c=>{
+    if((c.platform||'web')!==p) return;
+    const id=c.account_id||'default';
+    map[id]=map[id]||{account_id:id,running:false,unread:0,count:0};
+    map[id].count++; map[id].unread+=(c.unread||0);
+  });
+  return Object.values(map).sort((a,b)=>(a.account_id>b.account_id?1:-1));
+}
+// 哪些平台是多账号（≥2 号）→ 决定是否在会话条显示账号角标
+function _multiAcctPlatforms(){
+  const cnt={};
+  Object.values(platformStatus||{}).forEach(a=>{ const pl=a.platform||'web'; (cnt[pl]=cnt[pl]||new Set()).add(a.account_id||'default'); });
+  (allChats||[]).forEach(c=>{ const pl=c.platform||'web'; (cnt[pl]=cnt[pl]||new Set()).add(c.account_id||'default'); });
+  const s=new Set(); Object.keys(cnt).forEach(pl=>{ if(cnt[pl].size>=2) s.add(pl); });
+  return s;
+}
+// 渲染账号切换条：仅当选中某具体平台且该平台 ≥2 账号
+function buildAccountChips(){
+  const bar=document.getElementById('account-chips'); if(!bar) return;
+  if(platFilter==='all'){ bar.style.display='none'; bar.innerHTML=''; return; }
+  let accts=_accountsForPlatform(platFilter);
+  if(accts.length<2){ bar.style.display='none'; bar.innerHTML=''; return; }
+  const hasOffline=accts.some(a=>!a.running);
+  // P2：未读多的人格排前面（需关注的浮左），同未读按号稳定排序
+  accts.sort((a,b)=>(b.unread-a.unread)||(a.account_id>b.account_id?1:-1));
+  // P2：「仅在线」精简——隐藏离线号；若当前选中号被隐藏则回落「全部」
+  let shown=accts;
+  if(accountOnlineOnly){
+    shown=accts.filter(a=>a.running);
+    if(accountFilter!=='all' && !shown.some(a=>a.account_id===accountFilter)) accountFilter='all';
+  }
+  const totUnread=accts.reduce((s,a)=>s+a.unread,0);
+  let html=`<div class="acct-chip ${accountFilter==='all'?'active':''}" onclick="setAccountFilter('all')">
+      <span class="ac-name">全部账号</span>${totUnread?`<span class="ac-unread">${totUnread>99?'99+':totUnread}</span>`:''}</div>`;
+  shown.forEach(a=>{
+    const clr=_acctColor(a.account_id);
+    html+=`<div class="acct-chip ${accountFilter===a.account_id?'active':''}" onclick="setAccountFilter('${esc(a.account_id)}')" title="${esc(a.account_id)}">
+      <span class="ac-dot ${a.running?'on':''}" style="background:${a.running?'#22c55e':'#94a3b8'};"></span>
+      <span class="ac-name" style="${accountFilter===a.account_id?'':'color:'+clr};">${esc(_acctLabel(platFilter,a.account_id))}</span>
+      ${a.unread?`<span class="ac-unread">${a.unread>99?'99+':a.unread}</span>`:''}</div>`;
+  });
+  // 仅当确有离线号时才给「仅在线」开关（否则无意义）
+  if(hasOffline){
+    html+=`<div class="acct-chip ac-toggle ${accountOnlineOnly?'active':''}" onclick="toggleAccountOnlineOnly()" title="只显示在线人格">⚡ 仅在线</div>`;
+  }
+  bar.innerHTML=html; bar.style.display='flex';
+}
+function setAccountFilter(aid){
+  accountFilter=aid;
+  buildAccountChips();
+  applyFilters();
+}
+function toggleAccountOnlineOnly(){
+  accountOnlineOnly=!accountOnlineOnly;
+  buildAccountChips();
+  applyFilters();
+}
 
 /* ===== 平台导航栏 ===== */
 // 判断某平台连接态：'on'(有账号在线) / 'off'(有账号但全断) / 'none'(未配置账号)
@@ -1233,25 +1388,39 @@ function _navIconPlat(p, count){
 
 function setPlatFilter(p){
   platFilter=p;
+  accountFilter='all';   // P0: 切平台时重置账号筛选
   const listTitle = document.getElementById('list-title-text');
   listTitle.textContent = p==='all'?'所有对话':platName(p)+' 对话';
   document.querySelectorAll('.nav-plat').forEach(el=>{
     el.classList.toggle('active', el.dataset.plat===p);
   });
+  buildAccountChips();
   applyFilters();
 }
 
 /* ===== 过滤 ===== */
 function setFilter(f,el){
   chatFilter=f;
-  document.querySelectorAll('.ftab').forEach(t=>t.classList.remove('active'));
-  el.classList.add('active');
+  // el 可空（如今日计数条快捷筛选触发）→ 按 data-f 高亮对应 tab
+  document.querySelectorAll('.ftab').forEach(t=>t.classList.toggle('active', el? (t===el) : (t.dataset.f===f)));
   applyFilters();
 }
 function onSearch(q){ searchQ=q.trim().toLowerCase(); applyFilters(); }
+// P1：一键清空所有筛选（空态引导按钮）
+function resetAllFilters(){
+  chatFilter='all'; searchQ=''; tagFilter=''; accountFilter='all'; platFilter='all';
+  const si=document.getElementById('search-input'); if(si) si.value='';
+  document.querySelectorAll('.ftab').forEach(t=>t.classList.toggle('active', t.dataset.f==='all'));
+  document.querySelectorAll('.nav-plat').forEach(el=>el.classList.toggle('active', el.dataset.plat==='all'));
+  const lt=document.getElementById('list-title-text'); if(lt) lt.textContent='所有对话';
+  buildAccountChips();
+  applyFilters();
+}
 function applyFilters(){
   filtered = allChats.filter(c=>{
     if(platFilter!=='all' && c.platform!==platFilter) return false;
+    if(accountFilter!=='all' && (c.account_id||'default')!==accountFilter) return false; // P0
+
     // 归档过滤：默认隐藏已归档；archived tab 仅显示归档
     if(chatFilter==='archived'){
       if(!c.archived) return false;
@@ -1275,6 +1444,7 @@ function updateTotalBadge(){
 /* ===== 会话列表渲染（增量 diff + O(1) 元素映射）===== */
 // key → {dom: HTMLElement, sig: string}
 const _domMap = new Map();
+let _multiAcctSet = new Set();   // P0: 渲染前刷新——含 ≥2 账号的平台才在会话条显示账号角标
 
 // 自动派单：该会话是否「建议当前坐席接管」（后端仅对未认领会话附 suggested_agent；
 // 前端再用 claimMap 二次确认未认领，避免认领后徽章残留）。
@@ -1292,8 +1462,15 @@ function _convItemSig(c, isSel){
     isSel?1:0, c.unread||0, c.last_text||'', c.last_ts||0,
     c.sla_level||'', c.unanswered_sec||0,
     (c.conv_tags||[]).join(','), c.archived?1:0,
-    _convSuggestMine(c)?1:0
+    _convSuggestMine(c)?1:0,
+    c.account_id||'default', _multiAcctSet.has(c.platform)?1:0,  // P0: 账号维度变化触发重绘
+    c.last_direction||''   // P2: 方向变化（我方/对方）触发预览前缀更新
   ].join('|');
+}
+// P2: 会话预览 HTML——我方最后发言加「你：」前缀，一眼知道该不该自己回
+function _previewHtml(c){
+  const prefix = (c.last_direction==='out') ? '<span class="conv-dir-me">你：</span>' : '';
+  return prefix + esc(c.last_text||'');
 }
 
 function _buildConvItemDom(c, isSel){
@@ -1309,11 +1486,16 @@ function _buildConvItemDom(c, isSel){
   const archiveIcon=c.archived?'<span style="font-size:10px;color:#94a3b8;" title="已归档">📦</span>':'';
   const suggestHtml=_convSuggestMine(c)?`<div class="conv-suggest-row"><span class="conv-suggest-chip" title="系统建议你接管这条未认领会话">⚡ 建议你接管</span></div>`:'';
   const cid = c.conversation_id || key;
+  const claimedMine = !!(c.conversation_id && claimMap[c.conversation_id]
+                         && claimMap[c.conversation_id].agent_id===MY_AGENT().id);
   const div=document.createElement('div');
-  div.className=`conv-item ${isSel?'selected':''} ${slaClass}`.trim();
+  div.className=`conv-item ${isSel?'selected':''} ${slaClass} ${c.unread>0?'has-unread':''}`.replace(/\s+/g,' ').trim();
   div.dataset.key=key;
   div.dataset.cid=cid;
   div.onclick=(e)=>{
+    // P2: 悬浮快捷操作优先拦截（认领/归档/标签），不触发选中/打开
+    const qb=e.target.closest && e.target.closest('.cq-btn');
+    if(qb){ e.stopPropagation(); _handleQuickAction(qb.dataset.act, div.dataset.key); return; }
     if(_batchMode){
       // P23: 批量模式下点击切换选中
       const cb = div.querySelector('.conv-checkbox');
@@ -1330,7 +1512,7 @@ function _buildConvItemDom(c, isSel){
     </div>
     <div class="conv-body">
       <div class="conv-name">${esc(c.name||c.chat_key||'未知')} ${archiveIcon}</div>
-      <div class="conv-preview">${esc(c.last_text||'')}</div>
+      <div class="conv-preview">${_previewHtml(c)}</div>
       ${tagsHtml}
       ${suggestHtml}
     </div>
@@ -1338,16 +1520,130 @@ function _buildConvItemDom(c, isSel){
       <div class="conv-time">${ts}</div>
       ${unreadBadge}
       ${slaBadge}
+    </div>
+    <div class="conv-quick">
+      <button class="cq-btn ${claimedMine?'claimed':''}" data-act="claim" title="${claimedMine?'释放认领':'认领'}">🙋</button>
+      <button class="cq-btn" data-act="archive" title="${c.archived?'取消归档':'归档'}">📦</button>
+      <button class="cq-btn" data-act="tag" title="打标签">🏷️</button>
     </div>`;
+  _applyAcctVisuals(div, c);   // P0: 多账号平台 → 加人格色条 + 角标
   return div;
+}
+
+// P0: 在会话条上施加/移除账号视觉（左侧人格色条 + 名称行人格角标）。
+//     build 与增量 diff 路径都调用，保证第二个号上线后既有条目也能补上角标。
+function _applyAcctVisuals(dom, c){
+  const show=_multiAcctSet.has(c.platform);
+  const clr=_acctColor(c.account_id||'default');
+  let acc=dom.querySelector('.conv-acct-accent');
+  if(show){
+    if(!acc){ acc=document.createElement('div'); acc.className='conv-acct-accent'; dom.prepend(acc); }
+    acc.style.background=clr;
+  } else if(acc){ acc.remove(); }
+  const nameEl=dom.querySelector('.conv-name');
+  if(nameEl){
+    let badge=nameEl.querySelector('.conv-acct-badge');
+    if(show){
+      if(!badge){ badge=document.createElement('span'); badge.className='conv-acct-badge'; nameEl.appendChild(badge); }
+      badge.style.background=clr+'22'; badge.style.color=clr;
+      badge.innerHTML=`<span class="cab-dot" style="background:${clr};"></span>${esc(_acctLabel(c.platform,c.account_id))}`;
+    } else if(badge){ badge.remove(); }
+  }
+}
+
+/* ===== P2: 会话条悬浮快捷操作（按 key 取实时对象，避免闭包过期） ===== */
+function _handleQuickAction(act, key){
+  const c=allChats.find(x=>convKey(x)===key);
+  if(!c) return;
+  if(act==='archive') _setArchivedByKey(key, !c.archived);
+  else if(act==='tag') quickTagByConv(c);
+  else if(act==='claim') quickClaimByConv(c);
+}
+async function _setArchivedByKey(key, archived){
+  const c=allChats.find(x=>convKey(x)===key);
+  if(!c) return;
+  c.archived=archived;
+  if(selectedKey===key && selectedChat){ selectedChat.archived=archived; renderChatHeader(selectedChat); }
+  applyFilters();
+  _toast(archived?'已归档':'已取消归档', archived?'#64748b':'#16a34a');
+  const cid=c.conversation_id; if(!cid) return;
+  try{
+    await fetch(`/api/workspace/conv/${encodeURIComponent(cid)}/archive`,{
+      method:'PATCH',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({archived})});
+  }catch(_){ _toast('归档保存失败','#dc2626'); }
+  if(archived && typeof _triggerSummarize==='function') _triggerSummarize(cid);
+}
+async function quickTagByConv(c){
+  const cid=c.conversation_id;
+  if(!cid){ _toast('该会话暂不支持打标签','#b45309'); return; }
+  const t=window.prompt('给该会话添加标签（如 高意向 / 待跟进）：','');
+  if(t===null) return;
+  const tag=t.trim().slice(0,20);
+  if(!tag) return;
+  const tags=Array.from(new Set([...(c.conv_tags||[]), tag]));
+  c.conv_tags=tags;
+  applyFilters();
+  try{
+    await fetch(`/api/workspace/conv/${encodeURIComponent(cid)}/tags`,{
+      method:'PUT',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({tags})});
+    _toast(`已加标签「${tag}」`,'#16a34a');
+  }catch(_){ _toast('标签保存失败','#dc2626'); }
+}
+async function quickClaimByConv(c){
+  const cid=c.conversation_id;
+  if(!cid){ _toast('该会话暂不支持认领','#b45309'); return; }
+  const cur=claimMap[cid];
+  const mine=cur && cur.agent_id===MY_AGENT().id;
+  try{
+    if(mine){
+      await fetch('/api/workspace/claim/release',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({conversation_id:cid})});
+      claimMap[cid]=null; _toast('已释放认领','#64748b');
+    } else {
+      const r=await fetch('/api/workspace/claim',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({conversation_id:cid, force:!!cur})});
+      const d=await r.json(); claimMap[cid]=d.claim||null;
+      _toast(cur?'已接管会话':'已认领','#16a34a');
+    }
+  }catch(_){ _toast('操作失败','#dc2626'); }
+  const ent=_domMap.get(convKey(c));
+  if(ent && ent.dom) _refreshQuickButtons(ent.dom, c);   // 直接刷新该条按钮高亮
+  applyFilters();
+}
+// 同步快捷按钮的认领高亮/归档文案（认领态不在 diff 签名内，需单独刷新）
+function _refreshQuickButtons(dom, c){
+  const q=dom.querySelector('.conv-quick'); if(!q) return;
+  const cb=q.querySelector('[data-act="claim"]');
+  if(cb){
+    const mine=!!(c.conversation_id && claimMap[c.conversation_id]
+                  && claimMap[c.conversation_id].agent_id===MY_AGENT().id);
+    cb.classList.toggle('claimed', mine);
+    cb.title=mine?'释放认领':'认领';
+  }
+  const ab=q.querySelector('[data-act="archive"]');
+  if(ab) ab.title=c.archived?'取消归档':'归档';
 }
 
 function renderConvList(){
   const el = document.getElementById('conv-items');
+  _multiAcctSet = _multiAcctPlatforms();   // P0: 每次渲染前刷新多账号平台集合
 
   if(!filtered.length){
     _domMap.clear();
-    el.innerHTML=`<div class="empty-list"><div class="empty-list-icon">🔍</div><div style="font-size:13px;">没有符合条件的对话</div></div>`;
+    // P1：区分「本就没有会话」与「被筛选条件挡掉」，给可操作引导
+    const hasAny=(allChats||[]).length>0;
+    const filtering = chatFilter!=='all' || !!searchQ || !!tagFilter || accountFilter!=='all' || platFilter!=='all';
+    let icon,title,hint;
+    if(hasAny && filtering){
+      icon='🔍'; title='没有符合当前筛选的对话';
+      hint='<button class="tiny-btn" style="margin-top:10px;" onclick="resetAllFilters()">清除筛选条件</button>';
+    } else {
+      icon='🌱'; title='还没有会话';
+      hint='<div style="font-size:12px;color:var(--text-tiny);margin-top:6px;line-height:1.6;">用「账号与平台管理」扫码接入账号，<br>或等待对方私信，会话会自动出现在这里。</div>';
+    }
+    el.innerHTML=`<div class="empty-list"><div class="empty-list-icon">${icon}</div><div style="font-size:13px;font-weight:600;">${title}</div>${hint}</div>`;
     return;
   }
 
@@ -1386,9 +1682,9 @@ function renderConvList(){
       // 内容变化 → 最小化 DOM 更新（只改必要字段）
       if(entry.sig !== sig){
         const dom=entry.dom;
-        dom.className=`conv-item ${isSel?'selected':''} ${c.sla_level==='crit'?'sla-crit':c.sla_level==='warn'?'sla-warn':''}`.trim();
+        dom.className=`conv-item ${isSel?'selected':''} ${c.sla_level==='crit'?'sla-crit':c.sla_level==='warn'?'sla-warn':''} ${c.unread>0?'has-unread':''}`.replace(/\s+/g,' ').trim();
         const preview=dom.querySelector('.conv-preview');
-        if(preview) preview.textContent=c.last_text||'';
+        if(preview) preview.innerHTML=_previewHtml(c);
         const time=dom.querySelector('.conv-time');
         if(time) time.textContent=fmtTs(c.last_ts);
         const meta=dom.querySelector('.conv-meta');
@@ -1431,6 +1727,8 @@ function renderConvList(){
             if(sgRow) sgRow.remove();
           }
         }
+        _applyAcctVisuals(dom, c);   // P0: conv-name 重建后补回人格角标 + 色条
+        _refreshQuickButtons(dom, c); // P2: 同步快捷按钮归档文案/认领高亮
         entry.sig=sig;
       }
       // 位置修正（会话有新消息时顺序变化）
@@ -1470,7 +1768,9 @@ async function loadChats(){
     allChats=d.chats||[];
     allChats.forEach(c=>{ if(prevUnreadCleared.has(convKey(c))) c.unread=0; });
     platformStatus=d.platform_status||{};
+    rebuildAccountMeta();          // P0: 刷新账号 label/running 映射
     buildNavRail(allChats);
+    buildAccountChips();           // P0: 刷新账号切换条
     applyFilters(); // 内部调用 renderConvList (diff 渲染)
     _updateTodayStrip(allChats); // P55: 今日数据计数
     renderDrawerAccounts();
@@ -3804,8 +4104,31 @@ function _loadXlateForConv(c){
   if(so){ so.value=_xlateOut; so.classList.toggle('on',!!_xlateOut); }
   const pv=document.getElementById('xlate-out-preview'); if(pv) pv.checked=_outPreview;
   _resetOutPreview();
+  _convPrefEngine='';                 // F+2：先清空，异步取回该会话首选引擎再刷新徽标
+  _loadConvPrefEngine(c);
   _updateEngineHint();
   _updateXlStatus();
+}
+// F+2：取回会话首选翻译引擎（多线路对照择优后记住的），用于引擎徽标 / 离线提示
+let _convPrefEngine='';
+async function _loadConvPrefEngine(c){
+  if(!c){ _convPrefEngine=''; return; }
+  try{
+    const qs='platform='+encodeURIComponent(c.platform||'')
+      +'&account_id='+encodeURIComponent(c.account_id||'default')
+      +'&chat_key='+encodeURIComponent(c.chat_key||'');
+    const r=await fetch('/api/unified-inbox/conv-engine?'+qs);
+    const d=await r.json();
+    _convPrefEngine=(d&&d.ok&&d.pref_engine)?String(d.pref_engine):'';
+  }catch(_){ _convPrefEngine=''; }
+  _updateEngineHint();   // 取回后刷新徽标
+}
+// F+2：清除本会话首选引擎（回落 failover）
+async function _clearConvPrefEngine(){
+  if(!selectedChat) return;
+  await _rememberConvEngine('');   // 复用 POST，engine="" 即清除
+  _convPrefEngine='';
+  _updateEngineHint();
 }
 function _onXlateChange(){
   const si=document.getElementById('xlate-in'), so=document.getElementById('xlate-out');
@@ -3958,6 +4281,69 @@ function _setXlateEngine(provider){
   const el=document.getElementById('xlate-engine');
   if(el) el.innerHTML='<span class="dot"></span>'+(_XL_ENGINE_LABEL[provider]||provider);
 }
+/* Phase F：多线路对照选译——各引擎各译一遍，点选满意的填入输入框（对标拓译多线路对照）。 */
+async function _onXlateCompare(){
+  const inp=document.getElementById('reply-input')||document.querySelector('textarea');
+  const text=(inp&&inp.value||'').trim();
+  if(!text){ alert('请先在输入框写要发送的内容，再做多线路对照。'); return; }
+  let target=_xlateOut||'auto';
+  const body={text,target_lang:target,style:'chat'};
+  if(target==='auto' && selectedChat){
+    body.platform=selectedChat.platform; body.account_id=selectedChat.account_id||'default';
+    body.chat_key=selectedChat.chat_key;
+  }
+  let d;
+  try{
+    const r=await fetch('/api/unified-inbox/translate-compare',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    d=await r.json();
+  }catch(e){ alert('对照请求失败：'+e); return; }
+  if(!d||!d.ok){ alert('对照不可用：'+((d&&d.compare&&d.compare.error)||(d&&d.error)||'无可用引擎')); return; }
+  const cands=(d.compare&&d.compare.candidates)||[];
+  const ok=cands.filter(c=>c.ok&&c.translated_text);
+  if(!ok.length){ alert('各线路均未返回译文（可能引擎未配置 key）。'); return; }
+  // 极简择优：列出各线路译文，点选填入输入框
+  const wrap=document.createElement('div');
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;';
+  const card=document.createElement('div');
+  card.style.cssText='background:#fff;border-radius:10px;max-width:560px;width:90%;max-height:80vh;overflow:auto;padding:16px;';
+  card.innerHTML='<div style="font-weight:600;margin-bottom:4px;">⇄ 多线路对照 → '+esc(d.resolved_target||target)+'（点选填入）</div>'+
+    '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#6b7280;margin-bottom:8px;"><input type="checkbox" id="xlcompare-remember" checked>记住所选线路用于本会话（之后自动翻译走它）</label>';
+  ok.forEach(c=>{
+    const row=document.createElement('button');
+    row.type='button';
+    row.style.cssText='display:block;width:100%;text-align:left;border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin:6px 0;cursor:pointer;background:#f9fafb;';
+    row.innerHTML='<div style="font-size:12px;color:#6b7280;">'+(_XL_ENGINE_LABEL[c.engine]||esc(c.engine))+'</div><div>'+esc(c.translated_text)+'</div>';
+    row.onclick=()=>{
+      if(inp){ inp.value=c.translated_text; inp.focus(); }
+      const rem=document.getElementById('xlcompare-remember');
+      if(rem&&rem.checked&&selectedChat){ _rememberConvEngine(c.engine); }
+      document.body.removeChild(wrap);
+    };
+    card.appendChild(row);
+  });
+  const close=document.createElement('button');
+  close.type='button'; close.textContent='取消';
+  close.style.cssText='margin-top:8px;padding:6px 14px;border:1px solid #d1d5db;border-radius:6px;cursor:pointer;';
+  close.onclick=()=>document.body.removeChild(wrap);
+  card.appendChild(close);
+  wrap.appendChild(card);
+  wrap.onclick=(e)=>{ if(e.target===wrap) document.body.removeChild(wrap); };
+  document.body.appendChild(wrap);
+}
+/* F+：持久化本会话首选翻译引擎（多线路对照择优后记住，跨刷新/重启生效）。best-effort。 */
+async function _rememberConvEngine(engine){
+  if(!selectedChat) return;
+  try{
+    await fetch('/api/unified-inbox/conv-engine',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({platform:selectedChat.platform,
+        account_id:selectedChat.account_id||'default',
+        chat_key:selectedChat.chat_key, engine:String(engine||'')})});
+    _convPrefEngine=String(engine||'');   // F+2：即时反映徽标，无需重取
+    _updateEngineHint();
+  }catch(e){ /* 记住失败不影响填入，忽略 */ }
+}
 // C-1：切换目标语时提前查引擎能力矩阵，提示主引擎是否会被兜底（坐席对译文质量有预期）
 const _engineMatrixCache=new Map();   // target_lang -> matrix（引擎配置启动时固定，可缓存）
 async function _updateEngineHint(){
@@ -3968,7 +4354,7 @@ async function _updateEngineHint(){
     const _cl=String((selectedChat&&selectedChat.language)||'').trim();
     target=(_cl&&_cl!=='unknown')?_cl:'';
   }
-  if(!target){ el.innerHTML='<span class="dot"></span>AI引擎'; el.title=''; return; }
+  if(!target){ el.innerHTML='<span class="dot"></span>AI引擎'+_prefEngineBadge(null); el.title=''; return; }
   try{
     let m=_engineMatrixCache.get(target);
     if(!m){
@@ -3980,20 +4366,39 @@ async function _updateEngineHint(){
     const eff=m.effective, primary=m.primary;
     const effLabel=_XL_ENGINE_LABEL[eff]||eff;
     if(eff==='none'){
-      el.innerHTML='<span class="dot" style="background:#ef4444;"></span>翻译未就绪';
+      el.innerHTML='<span class="dot" style="background:#ef4444;"></span>翻译未就绪'+_prefEngineBadge(m);
       el.title='目标语 '+target+'：无可用引擎';
     }else if(primary&&primary!==eff){
       const pr=(m.engines||[]).find(x=>x.engine===primary);
       const reason=(pr&&pr.available===false)
         ?(effLabel+' · '+(_XL_ENGINE_LABEL[primary]||primary)+'未配置')
         :((_XL_ENGINE_LABEL[primary]||primary)+'不支持·'+effLabel+'兜底');
-      el.innerHTML='<span class="dot" style="background:#f59e0b;"></span>'+esc(reason);
+      el.innerHTML='<span class="dot" style="background:#f59e0b;"></span>'+esc(reason)+_prefEngineBadge(m);
       el.title='目标语 '+target+'：实际由 '+effLabel+' 处理';
     }else{
-      el.innerHTML='<span class="dot"></span>'+esc(effLabel);
+      el.innerHTML='<span class="dot"></span>'+esc(effLabel)+_prefEngineBadge(m);
       el.title='目标语 '+target+'：'+effLabel;
     }
   }catch(_){}
+}
+/* F+2：会话首选引擎徽标。在引擎提示后追加「📌 <引擎>」；该引擎对当前目标语不可用→红色离线警示。
+   matrix 为 null（未取到/无目标语）时只显示徽标不判离线。点 ✕ 清除偏好回 failover。 */
+function _prefEngineBadge(matrix){
+  const e=_convPrefEngine;
+  if(!e) return '';
+  const label=_XL_ENGINE_LABEL[e]||e;
+  let offline=false;
+  if(matrix && Array.isArray(matrix.engines)){
+    const row=matrix.engines.find(x=>x.engine===e);
+    offline=!!(row && row.available===false) || (matrix.engines.length>0 && !row);
+  }
+  const color=offline?'#ef4444':'#4338ca';
+  const tip=offline?('首选线路 '+label+' 对当前目标语离线，已自动兜底——点 ✕ 取消偏好')
+                    :('本会话首选线路：'+label+'（多线路对照择优记住）——点 ✕ 取消');
+  return ' <span title="'+esc(tip)+'" style="margin-left:6px;padding:1px 6px;border-radius:10px;'
+    +'font-size:10px;background:'+(offline?'#fee2e2':'#eef2ff')+';color:'+color+';white-space:nowrap;">'
+    +(offline?'⚠ ':'📌 ')+esc(label)
+    +' <span onclick="event.stopPropagation();_clearConvPrefEngine();" style="cursor:pointer;font-weight:700;">✕</span></span>';
 }
 
 // 手动单条翻译（保留「译」按钮）
@@ -4158,6 +4563,188 @@ function _imgxlToCompose(txt){
 }
 function _imgxlCopy(txt){
   try{ navigator.clipboard.writeText(txt); }catch(_){}
+}
+
+// ── Phase L：文档整篇翻译（粘贴 / .txt） ─────────────────────────────────
+function _openDocXlate(){
+  const p=document.getElementById('docxl-panel');
+  if(p) p.style.display='block';
+  const inp=document.getElementById('docxl-input'); if(inp) inp.focus();
+}
+function _onDocFilePick(input){
+  const f=input&&input.files&&input.files[0];
+  input.value='';
+  if(!f) return;
+  if(f.size>2*1024*1024){ alert('文件过大（上限 2MB 文本）'); return; }
+  const rd=new FileReader();
+  rd.onload=function(){ const ta=document.getElementById('docxl-input'); if(ta) ta.value=String(rd.result||''); };
+  rd.readAsText(f);
+}
+async function _onDocXlateRun(){
+  const ta=document.getElementById('docxl-input');
+  const text=(ta&&ta.value||'').trim();
+  const status=document.getElementById('docxl-status');
+  const out=document.getElementById('docxl-result');
+  const btn=document.getElementById('docxl-run-btn');
+  if(!text){ alert('请先粘贴或上传要翻译的文本。'); return; }
+  const target=_xlateOut||_xlateIn||'zh';
+  const body={text:text,target_lang:target,style:'chat'};
+  if(target==='auto' && selectedChat){
+    body.platform=selectedChat.platform; body.account_id=selectedChat.account_id||'default';
+    body.chat_key=selectedChat.chat_key;
+  }
+  if(status) status.textContent='翻译中…';
+  if(btn) btn.disabled=true;
+  if(out) out.innerHTML='';
+  try{
+    const r=await fetch('/api/unified-inbox/translate-document',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await r.json();
+    if(!d||!d.ok){
+      const msg=d&&d.message||({auto_unresolved:'目标语未解析（客户语言未知）',too_large:'文档过长',
+        too_many_segments:'段落过多',empty:'内容为空'}[d&&d.reason]||('翻译失败：'+((d&&d.reason)||'未知')));
+      if(status) status.textContent='';
+      if(out) out.innerHTML='<span style="color:#b91c1c;">'+esc(msg)+'</span>';
+      return;
+    }
+    const s=d.stats||{};
+    if(status) status.textContent='完成：'+(s.translated||0)+'/'+(s.total||0)+' 段'+(s.failed?('，'+s.failed+' 段回退原文'):'');
+    const trText=d.translated_text||'';
+    out.innerHTML='<div class="imgxl-seg"><span class="lbl">整篇译文 → '+esc(d.target_lang||target)+'</span>'
+      +'<div class="val tr" style="max-height:240px;overflow:auto;">'+esc(trText)+'</div>'
+      +'<div class="imgxl-act">'
+      +'<button class="tiny-btn" onclick="_imgxlCopy('+JSON.stringify(trText).replace(/"/g,'&quot;')+')">复制全文</button>'
+      +'<button class="tiny-btn" onclick="_docxlDownload('+JSON.stringify(trText).replace(/"/g,'&quot;')+')">下载 .txt</button>'
+      +'</div></div>';
+  }catch(e){
+    if(status) status.textContent='';
+    if(out) out.innerHTML='<span style="color:#b91c1c;">网络错误，请重试</span>';
+  }finally{
+    if(btn) btn.disabled=false;
+  }
+}
+function _docxlDownload(txt){
+  try{
+    const blob=new Blob([txt],{type:'text/plain;charset=utf-8'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download='translation.txt';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); document.body.removeChild(a); },0);
+  }catch(_){ }
+}
+// L2/L2b/L2c：.docx/.xlsx 保版式 → 下载译后文件；.pdf 抽取文本 → 译后纯文本。
+// L2c-2：流式进度（POST 拿 job_id → SSE 推进度条 → done 事件出结果）。
+async function _onDocxFilePick(input){
+  const f=input&&input.files&&input.files[0];
+  input.value='';
+  if(!f) return;
+  if(f.size>10*1024*1024){ alert('文档过大（上限 10MB）'); return; }
+  const status=document.getElementById('docxl-status');
+  const out=document.getElementById('docxl-result');
+  if(out) out.innerHTML='';
+  const isPdf=/\.pdf$/i.test(f.name);
+  if(status) status.textContent=isPdf?'抽取并翻译中…':'翻译中（保留版式）…';
+  try{
+    const b64=await new Promise(function(res,rej){
+      const rd=new FileReader();
+      rd.onload=function(){ res(String(rd.result||'')); };
+      rd.onerror=rej; rd.readAsDataURL(f);
+    });
+    const target=_xlateOut||_xlateIn||'zh';
+    const body={file_b64:b64,filename:f.name,target_lang:target,style:'chat',
+                stream: !!window.EventSource};
+    if(target==='auto' && selectedChat){
+      body.platform=selectedChat.platform; body.account_id=selectedChat.account_id||'default';
+      body.chat_key=selectedChat.chat_key;
+    }
+    const r=await fetch('/api/unified-inbox/translate-document-file',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await r.json();
+    if(!d||!d.ok){
+      const msg=d&&d.message||('翻译失败：'+((d&&d.reason)||'未知'));
+      if(status) status.textContent='';
+      if(out) out.innerHTML='<span style="color:#b91c1c;">'+esc(msg)+'</span>';
+      return;
+    }
+    // 流式：拿 job_id → SSE
+    if(d.job_id && d.progress_url){
+      _docxlStream(d.progress_url, f.name, status, out);
+      return;
+    }
+    // 非流式回退（旧浏览器无 EventSource）：POST 已直接返回结果
+    _docxlApplyResult(d, status, out);
+  }catch(e){
+    if(status) status.textContent='';
+    if(out) out.innerHTML='<span style="color:#b91c1c;">网络错误，请重试</span>';
+  }
+}
+
+// L2c-2：进度条 + SSE 监听
+function _docxlStream(url, srcName, status, out){
+  if(out){
+    out.innerHTML='<div style="font-size:11px;color:var(--text-tiny);margin-bottom:3px;" id="docxl-prog-label">准备中…</div>'
+      +'<div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden;">'
+      +'<div id="docxl-prog-bar" style="height:100%;width:0%;background:#2563eb;transition:width .2s;"></div></div>';
+  }
+  const bar=document.getElementById('docxl-prog-bar');
+  const label=document.getElementById('docxl-prog-label');
+  let es;
+  try{ es=new EventSource(url); }catch(_){ if(out) out.innerHTML='<span style="color:#b91c1c;">进度连接失败</span>'; return; }
+  es.onmessage=function(ev){
+    let d; try{ d=JSON.parse(ev.data); }catch(_){ return; }
+    if(d.status==='running'){
+      const pct=d.total?Math.round(d.done/d.total*100):0;
+      if(bar) bar.style.width=pct+'%';
+      if(label) label.textContent='翻译中… '+(d.done||0)+'/'+(d.total||0)+' 段（'+pct+'%）';
+    }else if(d.status==='done'){
+      es.close();
+      if(bar) bar.style.width='100%';
+      _docxlApplyResult(d, status, out);
+    }else if(d.status==='error'){
+      es.close();
+      if(status) status.textContent='';
+      if(out) out.innerHTML='<span style="color:#b91c1c;">'+esc(d.message||('翻译失败：'+(d.reason||'未知')))+'</span>';
+    }
+  };
+  es.onerror=function(){
+    es.close();
+    if(status) status.textContent='';
+    if(out && !out.querySelector('textarea')) out.innerHTML='<span style="color:#b91c1c;">进度流中断，请重试</span>';
+  };
+}
+
+// 应用最终结果（file 短链下载 / text 文本展示），流式与非流式共用
+function _docxlApplyResult(d, status, out){
+  const s=d.stats||{};
+  const segLabel=(s.translated||0)+'/'+(s.total||0)+' 段'+(s.failed?('，'+s.failed+' 段保留原文'):'');
+  if(d.kind==='text'){
+    if(status) status.textContent='完成：'+segLabel;
+    const txt=d.text||'';
+    if(out){
+      out.innerHTML='<textarea readonly style="width:100%;min-height:120px;font-size:12px;border:1px solid var(--border);border-radius:6px;padding:6px;"></textarea>'
+        +'<div style="margin-top:4px;"><button class="tiny-btn" id="docxl-pdf-dl">下载 .txt</button></div>';
+      out.querySelector('textarea').value=txt;
+      const dl=document.getElementById('docxl-pdf-dl');
+      if(dl) dl.onclick=function(){ _docxlDownloadNamed(txt,d.filename||'translation.txt'); };
+    }
+    return;
+  }
+  if(status) status.textContent='完成：'+segLabel+'，已下载';
+  // L2c-1：短链下载（二进制直传，不经 base64）。一次性令牌，导航即取回即删。
+  const a=document.createElement('a');
+  a.href=d.download_url; a.download=d.filename||'translated.docx';
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ document.body.removeChild(a); },0);
+}
+
+function _docxlDownloadNamed(txt,name){
+  try{
+    const blob=new Blob([txt],{type:'text/plain;charset=utf-8'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download=name||'translation.txt';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); document.body.removeChild(a); },0);
+  }catch(_){ }
 }
 
 // ── P58-2：语音转写 → 翻译 ─────────────────────────────────────────────
@@ -4329,11 +4916,13 @@ function renderDrawerAccounts(){
         const on=a.running;
         const statusText=on?'已连接':'已断线';
         const statusColor=on?'var(--green)':'var(--red)';
-        html+=`<div class="acct-card">
+        const pClr=_acctColor(a.account_id||'default');
+        const pName=a.label||((a.account_id==='default')?'主账号':(a.account_id||pl));
+        html+=`<div class="acct-card" style="border-left:3px solid ${pClr};">
           <div class="acct-card-head">
             <div class="acct-plat-icon" style="background:${platColor(pl)};">${platIcon(pl)}</div>
-            <div>
-              <div class="acct-name">${esc(a.label||a.account_id||pl)}</div>
+            <div style="flex:1;min-width:0;">
+              <div class="acct-name"><span class="acct-persona-dot" style="background:${pClr};"></span>${esc(pName)}${a.label?'':'<span class="acct-unnamed">未命名</span>'}</div>
               <div class="acct-id">ID: ${esc(a.account_id||'-')}</div>
             </div>
             <div class="acct-status" style="color:${statusColor};">
@@ -4346,6 +4935,7 @@ function renderDrawerAccounts(){
               ? `<button class="acct-btn" onclick="refreshAcct('${esc(pl)}','${esc(a.account_id||'')}')">🔄 刷新</button>`
               : `<button class="acct-btn reconnect" onclick="reconnectAcct('${esc(pl)}','${esc(a.account_id||'')}')">🔗 重连</button>`
             }
+            <button class="acct-btn" onclick="renameAcct('${esc(pl)}','${esc(a.account_id||'')}')">✏️ 改名</button>
             <button class="acct-btn" onclick="viewAcctChats('${esc(pl)}')">查看会话</button>
           </div>
         </div>`;
@@ -4385,6 +4975,24 @@ async function refreshAcct(pl,aid){
 async function reconnectAcct(pl,aid){
   // 重连 = 重新扫码登录该账号
   openConnect(pl, aid);
+}
+// P2：给账号起人格名（落 registry.label → 切换条 / 会话角标即时反映）
+async function renameAcct(pl,aid){
+  const cur=(accountMeta[`${pl}:${aid}`]||{}).label||'';
+  const name=window.prompt(`给账号「${aid}」起个人格名（如 小柔 / 客服A），留空则清除：`, cur);
+  if(name===null) return;           // 取消
+  const label=name.trim().slice(0,40);
+  try{
+    const r=await fetch(`/api/accounts/${encodeURIComponent(pl)}/${encodeURIComponent(aid)}/label`,{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({label})
+    });
+    const d=await r.json();
+    if(!d.ok) throw new Error('save failed');
+    _toast(label?`已命名为「${label}」`:'已清除人格名','#16a34a');
+    await loadChats();              // 刷新 platformStatus → rebuildAccountMeta + chips + 角标
+    renderDrawerAccounts();
+  }catch(_){ _toast('改名失败','#dc2626'); }
 }
 function viewAcctChats(pl){
   closeDrawer();
@@ -4796,7 +5404,9 @@ async function _refreshChatsBadges(){
     if(!d.ok) return;
     allChats=d.chats||[];
     platformStatus=d.platform_status||{};
+    rebuildAccountMeta();   // P0
     buildNavRail(allChats);
+    buildAccountChips();    // P0
     applyFilters();
     renderDrawerAccounts();
   }catch(_){}

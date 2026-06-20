@@ -309,6 +309,65 @@ class EngineRouter:
             "engines": rows,
         }
 
+    def engine_by_name(self, name: str) -> Optional[Any]:
+        n = str(name or "").strip().lower()
+        for e in self._engines:
+            if getattr(e, "name", "") == n:
+                return e
+        return None
+
+    async def translate_with(
+        self, name: str, text: str, *, source_lang: str, target_lang: str,
+        style: str = "chat", glossary_hint: str = "",
+    ) -> EngineResult:
+        """强制走指定引擎（坐席多线路对照/手动选路），**不做故障转移**。
+
+        引擎不存在/不可用 → ok=False，便于前端把该路显示为「不可用」。
+        """
+        eng = self.engine_by_name(name)
+        if eng is None:
+            return EngineResult("", str(name or "?"), False, "unknown_engine")
+        if not getattr(eng, "available", False):
+            return EngineResult("", eng.name, False, "unavailable")
+        try:
+            return await eng.translate(
+                text, source_lang=source_lang, target_lang=target_lang,
+                style=style, glossary_hint=glossary_hint,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return EngineResult("", eng.name, False, f"{type(exc).__name__}: {exc}")
+
+    async def compare(
+        self, text: str, *, source_lang: str, target_lang: str,
+        style: str = "chat", glossary_hint: str = "",
+    ) -> List[EngineResult]:
+        """并发对所有「可用且支持该目标语」的引擎各译一遍，供坐席多线路对照择优。
+
+        不可用/不支持的引擎也返回一行（ok=False + 原因），前端可灰显。
+        """
+        import asyncio as _aio
+
+        async def _one(eng: Any) -> EngineResult:
+            name = getattr(eng, "name", "?")
+            if not getattr(eng, "available", False):
+                return EngineResult("", name, False, "unavailable")
+            try:
+                if hasattr(eng, "supports_target") and not eng.supports_target(target_lang):
+                    return EngineResult("", name, False, f"unsupported_target:{target_lang}")
+            except Exception:
+                pass
+            try:
+                return await eng.translate(
+                    text, source_lang=source_lang, target_lang=target_lang,
+                    style=style, glossary_hint=glossary_hint,
+                )
+            except Exception as exc:  # noqa: BLE001
+                return EngineResult("", name, False, f"{type(exc).__name__}: {exc}")
+
+        if not self._engines:
+            return []
+        return list(await _aio.gather(*[_one(e) for e in self._engines]))
+
     async def translate(
         self, text: str, *, source_lang: str, target_lang: str,
         style: str = "chat", glossary_hint: str = "",

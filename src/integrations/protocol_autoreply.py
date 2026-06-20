@@ -163,6 +163,28 @@ async def run_autoreply(
     if not is_autoreply_enabled(cfg, row):
         return _result("disabled")
 
+    # G1 全局 Kill-Switch：紧急冻结时在决策期就早退（不生成、不发、不浪费 token）；
+    # 与预热闸门正交（无视 companion_send_gate.enabled）。入站仍由收件箱 ingest 收录，
+    # 故不另打人工标签（避免全局停发时人工队列被瞬时灌爆），等同 disabled 抑制。
+    try:
+        from src.ops.kill_switch import is_blocked as _ks_blocked
+        _ks_on, _ks_scope, _ks_reason = _ks_blocked(platform, account_id)
+    except Exception:
+        _ks_on, _ks_scope = False, ""
+    if _ks_on:
+        logger.warning("[kill-switch] 冻结发送 %s:%s（scope=%s）", platform, account_id, _ks_scope)
+        return _result("kill_switch", inbound=text)
+
+    # G3 金丝雀放量：启用且本号不在 cohort → 决策期早退（不生成、不发；与 disabled 同抑制，
+    # 不打人工标签避免放量期人工队列被灌爆）。未启用→零破坏。
+    try:
+        from src.ops.canary import is_held as _canary_held
+        _ch_on, _ = _canary_held(platform, account_id, cfg)
+    except Exception:
+        _ch_on = False
+    if _ch_on:
+        return _result("canary_hold", inbound=text)
+
     ts = now if now is not None else time.time()
     # 账号级有效设置 = 全局有效 protocol_autoreply ⊕ 账号 meta.autoreply_override
     acct_pa = _account_effective_pa(cfg, row)
@@ -363,19 +385,74 @@ def build_reply_hook(app: Any) -> Callable[[Dict[str, Any]], Awaitable[None]]:
             sm = getattr(tc, "skill_manager", None) if tc is not None else None
         if sm is None or not hasattr(sm, "process_message"):
             return None
-        ctx: Dict[str, Any] = {
-            "chat_id": chat_key, "channel": "protocol", "platform": platform,
-        }
-        if persona_id:
-            ctx["account_persona_id"] = persona_id
+        # N 线 核心1：复用共享 companion_context 装配标准上下文（与 A 线同一套）。
+        # 记忆/情绪由 skill_manager 内部按 platform+user_id+chat_id 注入；
+        # 此处保证平台/会话标识 + 人设一致（协议线默认私聊）。
+        from src.utils.companion_context import build_companion_context
+        _emo = getattr(app.state, "emotion_enhancer", None)
+        if _emo is None:
+            _tc = getattr(app.state, "telegram_client", None)
+            _emo = getattr(_tc, "emotion_enhancer", None) if _tc is not None else None
+        ctx = build_companion_context(
+            platform=platform,
+            chat_id=chat_key,
+            text=text,
+            chat_type="private",
+            persona_id=persona_id,
+            emotion_enhancer=_emo,
+            extra={"channel": "protocol"},
+        )
         return await sm.process_message(
             text, user_id=f"{platform}:{account_id}:{chat_key}", context=ctx
         )
 
     async def _send(*, platform, account_id, chat_key, text):
         from src.integrations.account_orchestrator import get_orchestrator
-        orch = get_orchestrator(_cfg())
-        return await orch.send(platform, account_id, chat_key, text)
+        cfg = _cfg()
+        # G1 Kill-Switch（防御兜底）：无视预热闸门是否开，直达发送边界的硬停——
+        # 任何绕过 run_autoreply 决策直接调 _send 的路径（如编排器/手动）也被冻结覆盖。
+        try:
+            from src.ops.kill_switch import is_blocked as _ks_blocked
+            _ks_on, _ks_scope, _ = _ks_blocked(platform, account_id)
+        except Exception:
+            _ks_on, _ks_scope = False, ""
+        if _ks_on:
+            raise RuntimeError(f"kill_switch_blocked:{_ks_scope}")
+        # N 线 核心3：发送前反封号闸门（A/B 两线共用 companion_send_gate；默认关→零破坏）。
+        # 拦截 → 抛错，交由 run_autoreply 既有熔断/转人工处理。
+        from src.skills.companion_send_gate import evaluate, gate_enabled
+        if gate_enabled(cfg):
+            try:
+                from src.integrations.account_registry import get_account_registry
+                from src.integrations.protocol_autoreply_limits import (
+                    get_autoreply_limiter,
+                )
+                from src.skills.account_signals import build_account_signals
+                # N3 信号接线：真 sends_today(限额计数) + age_days/proxy/banned(注册表)
+                sig = build_account_signals(
+                    platform, account_id,
+                    registry=get_account_registry(),
+                    limiter=get_autoreply_limiter(cfg),
+                )
+                dec = evaluate(sig, cfg)
+            except Exception:
+                logger.debug("[send_gate] 信号装配失败，放行", exc_info=True)
+                dec = {"allowed": True}
+            if not dec.get("allowed", True):
+                raise RuntimeError(f"send_gate_blocked:{dec.get('reason')}")
+        orch = get_orchestrator(cfg)
+        try:
+            return await orch.send(platform, account_id, chat_key, text)
+        except Exception as _send_exc:
+            # G2 封号信号自动急停：风控错误 → 分级处置（退避/暂停/封禁），再抛回既有熔断
+            try:
+                from src.ops.ban_signal import handle_send_exception as _g2
+                from src.integrations.account_registry import get_account_registry
+                _g2(platform, account_id, _send_exc,
+                    registry=get_account_registry(), alert=publish_alert)
+            except Exception:
+                pass
+            raise
 
     async def hook(payload: Dict[str, Any]) -> None:
         from src.integrations.account_registry import get_account_registry

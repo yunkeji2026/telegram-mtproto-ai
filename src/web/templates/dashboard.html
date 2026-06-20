@@ -446,6 +446,36 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
         <div style="color:var(--t3)">点开后按"刷新"加载</div>
       </div>
     </details>
+    <!-- ★ Phase O 质量闭环：care dry_run 关怀话术审核面板 -->
+    <details id="bm-care-dry-samples" style="margin-top:.5rem;font-size:.73rem">
+      <summary style="cursor:pointer;color:var(--t2);user-select:none">
+        待审核关怀话术 <span id="bm-care-dry-count" style="color:var(--t3)">(–)</span>
+        <button class="btn btn-s btn-xs" style="margin-left:.6rem;padding:.1rem .5rem;font-size:.65rem" onclick="event.preventDefault();loadCareDry(true)">刷新</button>
+      </summary>
+      <div id="bm-care-dry-list" style="margin-top:.5rem;display:flex;flex-direction:column;gap:.4rem">
+        <div style="color:var(--t3)">点开后按"刷新"加载</div>
+      </div>
+    </details>
+    <!-- ★ O·P 联动质量看板 -->
+    <details id="bm-quality" style="margin-top:.5rem;font-size:.73rem">
+      <summary style="cursor:pointer;color:var(--t2);user-select:none">
+        主动消息质量（care + 唤醒） <span id="bm-q-rate" style="color:var(--t3)">(–)</span>
+        <button class="btn btn-s btn-xs" style="margin-left:.6rem;padding:.1rem .5rem;font-size:.65rem" onclick="event.preventDefault();loadQualityOverview()">刷新</button>
+      </summary>
+      <div id="bm-q-body" style="margin-top:.5rem">
+        <div style="color:var(--t3)">点开后按"刷新"加载</div>
+      </div>
+    </details>
+    <!-- ★ 多平台 deferred 队列 · 运营可观测 -->
+    <details id="bm-deferred-outbox" style="margin-top:.5rem;font-size:.73rem">
+      <summary style="cursor:pointer;color:var(--t2);user-select:none">
+        多平台 deferred 队列 <span id="bm-dob-count" style="color:var(--t3)">(–)</span>
+        <button class="btn btn-s btn-xs" style="margin-left:.6rem;padding:.1rem .5rem;font-size:.65rem" onclick="event.preventDefault();loadDeferredOutbox()">刷新</button>
+      </summary>
+      <div id="bm-dob-body" style="margin-top:.5rem">
+        <div style="color:var(--t3)">点开后按"刷新"加载</div>
+      </div>
+    </details>
   </div>
 </div>
 
@@ -1050,6 +1080,234 @@ async function submitDryFb(btn,ts,verdict){
     if(btns){btns.querySelectorAll('button').forEach(b=>{b.disabled=false;});}
   }
 }
+
+// ★ Phase O 质量闭环：care dry_run 关怀话术审核（与 reactivation 同范式，共享黑名单）
+let _careDryShown=[];
+function _renderCareSample(s){
+  const ts=s.ts||0;
+  const tsLabel=s.ts_iso?new Date(ts*1000).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-';
+  return `<div data-ts="${ts}" style="padding:.5rem .55rem;background:var(--input);border-radius:6px;border-left:3px solid var(--t3)">
+    <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;font-size:.7rem;color:var(--t3)">
+      <span><b style="color:var(--t)">${_esc(s.topic||'?')}</b></span>
+      <span>· ${tsLabel}</span>
+      <span>· ${_esc(s.platform||'')}</span>
+      <span>· ${_esc(s.chat_key||s.contact_key||'')}</span>
+      <span>· ${_esc(s.lang||'')}</span>
+      <span style="margin-left:auto" class="dry-fb-btns">
+        <button class="btn btn-s btn-xs" data-v="like" onclick="submitCareDryFb(this,${ts},'like')" style="padding:.15rem .5rem">👍</button>
+        <button class="btn btn-s btn-xs" data-v="dislike" onclick="submitCareDryFb(this,${ts},'dislike')" style="padding:.15rem .5rem">👎</button>
+      </span>
+    </div>
+    <div style="margin-top:.4rem;font-size:.78rem;line-height:1.45;color:var(--t)">${_esc(s.reply_text||'')}</div>
+  </div>`;
+}
+function _renderCareList(){
+  const list=document.getElementById('bm-care-dry-list');
+  const cnt=document.getElementById('bm-care-dry-count');
+  if(!list)return;
+  if(cnt)cnt.textContent='('+_careDryShown.length+')';
+  if(!_careDryShown.length){
+    list.innerHTML='<div style="color:var(--t3)">还没有 care dry_run 样本（proactive_care.enabled=true && dry_run=true 后等几分钟）</div>';
+    return;
+  }
+  const items=_careDryShown.map(_renderCareSample).join('');
+  const more=`<button class="btn btn-s btn-xs" style="margin-top:.3rem;padding:.2rem .8rem" onclick="event.preventDefault();loadMoreCareDry()">加载更早 (+20)</button>`;
+  list.innerHTML=items+more;
+}
+async function loadCareDry(reset){
+  const list=document.getElementById('bm-care-dry-list');
+  if(!list)return;
+  if(reset){_careDryShown=[];list.innerHTML='<div style="color:var(--t3)">加载中...</div>';}
+  try{
+    const r=await fetch('/api/care/dry-run-samples?limit=20',{credentials:'same-origin'});
+    if(!r.ok){list.innerHTML='<div style="color:var(--red)">加载失败</div>';return;}
+    const d=await r.json();
+    _careDryShown=d.samples||[];
+    _renderCareList();
+  }catch(e){list.innerHTML='<div style="color:var(--red)">'+_esc(String(e))+'</div>';}
+}
+async function loadMoreCareDry(){
+  const earliest=_careDryShown.length?_careDryShown[_careDryShown.length-1].ts:0;
+  if(!earliest)return;
+  try{
+    const r=await fetch('/api/care/dry-run-samples?limit=20&before_ts='+earliest,{credentials:'same-origin'});
+    if(!r.ok)return;
+    const d=await r.json();
+    const more=d.samples||[];
+    if(!more.length){
+      const list=document.getElementById('bm-care-dry-list');
+      if(list){const btn=list.querySelector('button.btn');if(btn)btn.outerHTML='<div style="color:var(--t3);font-size:.7rem;margin-top:.3rem">已加载全部</div>';}
+      return;
+    }
+    _careDryShown=_careDryShown.concat(more);
+    _renderCareList();
+  }catch(_){}
+}
+async function submitCareDryFb(btn,ts,verdict){
+  const wrap=btn.closest('div[data-ts]');
+  const btns=btn.parentElement;
+  if(btns){btns.querySelectorAll('button').forEach(b=>{b.disabled=true;});}
+  const csrf=(document.cookie.match(/csrf_token=([^;]+)/)||[])[1]||'';
+  try{
+    const r=await fetch('/api/care/dry-run-feedback',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},
+      credentials:'same-origin',
+      body:JSON.stringify({sample_ts:ts,verdict:verdict}),
+    });
+    if(r.ok){
+      if(btns){
+        const tip=verdict==='dislike'
+          ? '已反馈 👎 · 已加入内存黑名单（care/唤醒都会规避；重启后清空）'
+          : '已反馈 👍';
+        btns.innerHTML='<span style="color:'+(verdict==='like'?'var(--green)':'var(--amber)')+';font-size:.65rem">'+tip+'</span>';
+      }
+      if(wrap){wrap.style.opacity='.55';wrap.style.borderLeftColor=verdict==='dislike'?'var(--amber)':'var(--green)';}
+    }else{
+      if(btns){btns.querySelectorAll('button').forEach(b=>{b.disabled=false;});}
+    }
+  }catch(_){
+    if(btns){btns.querySelectorAll('button').forEach(b=>{b.disabled=false;});}
+  }
+}
+
+// ★ O·P 联动质量看板
+function _qLine(name, b){
+  const fb=b.feedback||{};
+  const rate=(fb.like_rate_pct==null)?'—':(fb.like_rate_pct+'%');
+  const reasons=Object.entries(b.skip_reasons||{}).sort((a,c)=>c[1]-a[1])
+    .map(([k,v])=>_esc(k)+' <b>'+v+'</b>').join(' · ')||'—';
+  return '<div style="padding:.4rem .55rem;background:var(--input);border-radius:6px;margin-top:.3rem">'+
+    '<div><b style="color:var(--t)">'+name+'</b> · 👍 <b>'+(fb.like||0)+'</b> / 👎 <b>'+(fb.dislike||0)+'</b> · 赞率 <b>'+rate+'</b> · dry_run <b>'+(b.dry_run||0)+'</b></div>'+
+    '<div style="margin-top:.2rem;color:var(--t3)">skip('+(b.skipped||0)+')：'+reasons+'</div>'+
+    '</div>';
+}
+async function loadQualityOverview(){
+  const body=document.getElementById('bm-q-body');
+  const rate=document.getElementById('bm-q-rate');
+  if(!body)return;
+  body.innerHTML='<div style="color:var(--t3)">加载中...</div>';
+  try{
+    const r=await fetch('/api/companion/quality-overview?window_hours=24',{credentials:'same-origin'});
+    if(!r.ok){body.innerHTML='<div style="color:var(--red)">加载失败</div>';return;}
+    const d=await r.json();
+    if(!d.ok){body.innerHTML='<div style="color:var(--red)">'+_esc(d.error||'error')+'</div>';return;}
+    const ca=d.care||{}, re=d.reactivation||{};
+    const totLike=((ca.feedback||{}).like||0)+((re.feedback||{}).like||0);
+    const totDis=((ca.feedback||{}).dislike||0)+((re.feedback||{}).dislike||0);
+    if(rate)rate.textContent='(👍'+totLike+'/👎'+totDis+')';
+    let html='<div style="font-size:.72rem">24h 窗口 · 共享黑名单 <b>'+(d.disliked_blacklist_size||0)+'</b> 条</div>';
+    html+=_qLine('主动关怀 care', ca);
+    html+=_qLine('主动唤醒 reactivation', re);
+    html+='<div id="bm-q-trend" style="margin-top:.5rem"></div>';
+    body.innerHTML=html;
+    loadQualityTrend();
+  }catch(e){body.innerHTML='<div style="color:var(--red)">'+_esc(String(e))+'</div>';}
+}
+
+// ★ 质量趋势（持久化时序）：迷你 sparkline
+function _spark(vals,color){
+  if(!vals||!vals.length)return '<span style="color:var(--t3)">—</span>';
+  const w=120,h=22,mx=Math.max(1,Math.max.apply(null,vals)),n=vals.length;
+  const pts=vals.map((v,i)=>(n<2?0:(i/(n-1)*w)).toFixed(1)+','+(h-(v/mx)*h).toFixed(1)).join(' ');
+  return '<svg width="'+w+'" height="'+h+'" style="vertical-align:middle">'+
+    '<polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="1.5"/></svg>';
+}
+async function loadQualityTrend(){
+  const el=document.getElementById('bm-q-trend');
+  if(!el)return;
+  try{
+    const r=await fetch('/api/companion/quality-trend?hours=24',{credentials:'same-origin'});
+    if(!r.ok)return;
+    const d=await r.json();
+    if(!d.enabled){el.innerHTML='<div style="color:var(--t3);font-size:.68rem">趋势持久化未启用（companion.quality_trend.enabled=false）</div>';return;}
+    const pts=d.points||[];
+    if(pts.length<2){el.innerHTML='<div style="color:var(--t3);font-size:.68rem">趋势：样本累积中（'+pts.length+' 点）</div>';return;}
+    const careLike=pts.map(p=>(p.care_like||0)+(p.re_like||0));
+    const skipped=pts.map(p=>(p.care_skipped||0)+(p.re_skipped||0));
+    const dry=pts.map(p=>(p.care_dry||0)+(p.re_dry||0));
+    el.innerHTML='<div style="font-size:.68rem;color:var(--t3);line-height:1.9">'+
+      '<div>趋势（'+pts.length+' 点 / 24h）</div>'+
+      '<div>👍 like '+_spark(careLike,'var(--green)')+'</div>'+
+      '<div>skip '+_spark(skipped,'var(--amber)')+'</div>'+
+      '<div>dry_run '+_spark(dry,'var(--p)')+'</div>'+
+      '</div>';
+  }catch(e){/* 趋势失败不影响主看板 */}
+}
+
+// ★ 多平台 deferred 队列运营可观测
+function _kvRow(label, obj){
+  const entries=Object.entries(obj||{});
+  if(!entries.length)return '<span style="color:var(--t3)">'+label+'：—</span>';
+  const parts=entries.map(([k,v])=>_esc(k)+' <b>'+v+'</b>').join(' · ');
+  return '<div style="margin-top:.25rem">'+label+'：'+parts+'</div>';
+}
+async function loadDeferredOutbox(){
+  const body=document.getElementById('bm-dob-body');
+  const cnt=document.getElementById('bm-dob-count');
+  if(!body)return;
+  body.innerHTML='<div style="color:var(--t3)">加载中...</div>';
+  try{
+    const r=await fetch('/api/deferred-outbox/status?limit=30',{credentials:'same-origin'});
+    if(!r.ok){body.innerHTML='<div style="color:var(--red)">加载失败</div>';return;}
+    const d=await r.json();
+    if(!d.enabled){
+      if(cnt)cnt.textContent='(关)';
+      body.innerHTML='<div style="color:var(--t3)">'+_esc(d.message||'未启用')+'</div>';
+      return;
+    }
+    const st=d.stats||{};
+    const by=st.by_status||{};
+    if(cnt)cnt.textContent='('+(st.total||0)+')';
+    let html='<div style="font-size:.72rem;line-height:1.6">';
+    html+=_kvRow('状态', by);
+    html+=_kvRow('pending·平台', st.pending_by_platform);
+    html+=_kvRow('pending·卡在护栏', st.pending_by_reason);  // 可观测性核心
+    html+='<div style="margin-top:.25rem">已注册 sender：'+
+      ((d.senders||[]).map(_esc).join(', ')||'<span style="color:var(--amber)">无</span>')+'</div>';
+    const paused=d.paused||[];
+    html+='<div style="margin-top:.25rem">已暂停：'+
+      (paused.length?paused.map(_esc).join(', '):'<span style="color:var(--t3)">无</span>')+'</div>';
+    html+='</div>';
+    // 运营动作：重试失败 / 清积压（卡在某护栏）/ 暂停·恢复平台
+    html+='<div style="margin-top:.5rem;display:flex;gap:.35rem;flex-wrap:wrap">'+
+      '<button class="btn btn-s btn-xs" style="padding:.12rem .5rem;font-size:.65rem" onclick="event.preventDefault();_dobRetryFailed()">重试 failed</button>'+
+      '<button class="btn btn-s btn-xs" style="padding:.12rem .5rem;font-size:.65rem" onclick="event.preventDefault();_dobCancelReason()">清某护栏积压</button>'+
+      '<button class="btn btn-s btn-xs" style="padding:.12rem .5rem;font-size:.65rem" onclick="event.preventDefault();_dobPause()">暂停平台</button>'+
+      '<button class="btn btn-s btn-xs" style="padding:.12rem .5rem;font-size:.65rem" onclick="event.preventDefault();_dobResume()">恢复平台</button>'+
+      '</div>';
+    const recent=d.recent||[];
+    if(recent.length){
+      html+='<div style="margin-top:.5rem;max-height:220px;overflow:auto;display:flex;flex-direction:column;gap:.3rem">';
+      for(const it of recent){
+        const sc={pending:'var(--p)',sent:'var(--green)',failed:'var(--red)',expired:'var(--t3)'}[it.status]||'var(--t3)';
+        html+='<div style="padding:.35rem .5rem;background:var(--input);border-radius:5px;border-left:3px solid '+sc+';font-size:.68rem;color:var(--t3)">'+
+          '<b style="color:var(--t)">'+_esc(it.platform||'?')+'</b> · '+_esc(it.chat_key||'')+
+          ' · <span style="color:'+sc+'">'+_esc(it.status||'')+'</span>'+
+          (it.reason?' · '+_esc(it.reason):'')+
+          (it.error?' · <span style="color:var(--red)">'+_esc(it.error)+'</span>':'')+
+          '</div>';
+      }
+      html+='</div>';
+    }
+    body.innerHTML=html;
+  }catch(e){body.innerHTML='<div style="color:var(--red)">'+_esc(String(e))+'</div>';}
+}
+// ★ deferred 队列运营动作（mutate；经 api_auth）
+async function _dobPost(path,payload){
+  try{
+    const r=await fetch(path,{method:'POST',credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(payload||{})});
+    const d=await r.json();
+    if(!d.ok){alert('操作失败：'+(d.error||'未知'));}
+    loadDeferredOutbox();
+    return d;
+  }catch(e){alert('操作异常：'+String(e));}
+}
+function _dobRetryFailed(){if(confirm('把所有 failed 消息重新入队？'))_dobPost('/api/deferred-outbox/retry',{status:'failed'});}
+function _dobCancelReason(){const r=prompt('取消卡在哪道护栏的 pending 积压？填 reason（如 no_sender / quiet_hours / pacing_min_gap）：');if(r)_dobPost('/api/deferred-outbox/cancel',{reason:r.trim()});}
+function _dobPause(){const p=prompt('暂停哪个平台投递？（如 line / whatsapp）：');if(p)_dobPost('/api/deferred-outbox/pause',{platform:p.trim()});}
+function _dobResume(){const p=prompt('恢复哪个平台投递？：');if(p)_dobPost('/api/deferred-outbox/resume',{platform:p.trim()});}
 
 const _isSimple=document.documentElement.getAttribute('data-ui-mode')==='simple';
 if(!_isSimple){loadBotMetrics();}

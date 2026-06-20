@@ -1404,6 +1404,15 @@ class WhatsAppRpaRunner:
     async def _pace_and_send(
         self, xml_bytes: Optional[bytes], text: str
     ) -> Dict[str, Any]:
+        # G1 全局 Kill-Switch（Phase C：RPA 覆盖）：紧急冻结时跳过物理发送
+        try:
+            from src.integrations.shared.rpa_send_guard import rpa_send_blocked
+            _ks_on, _ks_scope = rpa_send_blocked("whatsapp", self._account_id)
+            if _ks_on:
+                logger.warning("[wa_rpa][kill-switch] 冻结发送，跳过（scope=%s）", _ks_scope)
+                return {"ok": False, "error": "kill_switch", "scope": _ks_scope, "parts": []}
+        except Exception:
+            pass
         pacing = self._pacing
         if pacing.enabled:
             await asyncio.sleep(jitter_ms(pacing.read_pause_ms_lo, pacing.read_pause_ms_hi))

@@ -63,6 +63,30 @@ def _conv_from_chat(chat: Dict[str, Any]) -> InboxConversation:
     )
 
 
+def _resolve_contact_id(store, conv: InboxConversation) -> str:
+    """Q 延伸：best-effort 反查 contact_id（需 store.register_contact_resolver）。"""
+    resolver = getattr(store, "_contact_resolver", None)
+    if resolver is None or not conv.platform or not conv.chat_key:
+        return ""
+    try:
+        return str(
+            resolver(conv.platform, conv.account_id, conv.chat_key) or "",
+        ).strip()
+    except Exception:
+        logger.debug("contact_resolver 失败", exc_info=True)
+        return ""
+
+
+def _apply_contact_id(store, conv: InboxConversation) -> str:
+    """解析并写入 conv.contact_id（供 conversations + conv_meta 共用）。"""
+    if conv.contact_id:
+        return conv.contact_id
+    cid = _resolve_contact_id(store, conv)
+    if cid:
+        conv.contact_id = cid
+    return cid
+
+
 def _publish_inbox_message(conv: InboxConversation) -> None:
     """有新入站消息时，向全局事件总线发 inbox_message（SSE 实时推送给工作台）。"""
     try:
@@ -94,6 +118,7 @@ def ingest_collected_chats(
         conv = _conv_from_chat(chat)
         if not conv.conversation_id or not conv.platform:
             continue
+        contact_id = _apply_contact_id(store, conv)
         msgs: List[InboxMessage] = []
         lm = chat.get("last_message") or {}
         # 媒体消息可能无文本（如无 caption 的图片/语音）——有 media_ref 也应落库
@@ -130,6 +155,7 @@ def ingest_collected_chats(
                         intent=str(_analysis.get("intent") or ""),
                         emotion=str(_analysis.get("emotion") or ""),
                         risk=str(_analysis.get("risk_level") or "low"),
+                        contact_id=contact_id,
                     )
                 except Exception:
                     logger.debug("update_conv_meta 失败", exc_info=True)
@@ -162,6 +188,7 @@ def ingest_thread(store, chat: Dict[str, Any], messages: List[Dict[str, Any]]) -
     conv = _conv_from_chat(chat)
     if not conv.conversation_id or not conv.platform:
         return 0
+    _apply_contact_id(store, conv)
     msgs = [
         _msg_from_obj(conv.conversation_id, m, platform=conv.platform)
         for m in (messages or [])

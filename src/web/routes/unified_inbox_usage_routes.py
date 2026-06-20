@@ -96,7 +96,37 @@ def build_usage_summary(request: Request, span: int = 30) -> Dict[str, Any]:
     }
     out["trend"] = cur.get("trend", [])
     out["quota"] = _quota_status(out["usage"], out["license"])
+    # K：月度消息配额软状态（本月至今 vs 套餐含量）——只提示不阻断
+    out["message_quota"] = _message_quota(request, out["license"])
     return out
+
+
+def _month_to_date_messages(request: Request) -> Optional[int]:
+    """本月（自然月）至今的消息总量；store 不可用/出错 → None。"""
+    try:
+        from src.utils.billing import month_window
+        lt = time.localtime()
+        since, _until = month_window(lt.tm_year, lt.tm_mon)
+        inbox = _inbox_store(request)
+        if inbox is None or not hasattr(inbox, "get_usage_stats"):
+            return None
+        u = inbox.get_usage_stats(since)
+        return int(u.get("messages_total", 0) or 0)
+    except Exception:
+        logger.debug("月度消息量统计失败（已忽略）", exc_info=True)
+        return None
+
+
+def _message_quota(request: Request, lic: Dict[str, Any]) -> Dict[str, Any]:
+    """月度消息配额对照（本月至今 vs 套餐含量）。无数据 → 不限占位。"""
+    from src.utils.billing import message_quota_status, plan_included_messages
+
+    included = plan_included_messages(str(lic.get("plan") or "community"), _pricing(request))
+    mtd = _month_to_date_messages(request)
+    if mtd is None:
+        return {"used": 0, "included": included, "ratio": None,
+                "level": "ok", "text": "消息量不限" if included <= 0 else "本月用量暂不可用"}
+    return message_quota_status(mtd, included)
 
 
 def _quota_status(usage: Dict[str, Any], lic: Dict[str, Any]) -> Dict[str, Any]:

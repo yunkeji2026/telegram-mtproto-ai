@@ -40,8 +40,25 @@ def _truncate_text(s: str) -> str:
     return s[: LINE_TEXT_MAX - 1] + "…"
 
 
-async def line_reply(reply_token: str, text: str, access_token: str) -> bool:
+def _line_kill_switch_blocked(account_id: str) -> bool:
+    """G2：官方 LINE 通道发送前查 Kill-Switch（global/platform:line/account:line:<id>）。"""
+    try:
+        from src.integrations.shared.rpa_send_guard import rpa_send_blocked
+        blocked, scope = rpa_send_blocked("line", account_id or "default")
+        if blocked:
+            logger.warning("[line][kill-switch] 冻结发送，跳过（scope=%s）", scope)
+        return blocked
+    except Exception:
+        return False
+
+
+async def line_reply(
+    reply_token: str, text: str, access_token: str,
+    *, account_id: str = "default", check_kill_switch: bool = True,
+) -> bool:
     """replyToken 仅可使用一次。"""
+    if check_kill_switch and _line_kill_switch_blocked(account_id):
+        return False
     text = _truncate_text(text)
     if not text:
         return True
@@ -72,9 +89,12 @@ async def line_reply(reply_token: str, text: str, access_token: str) -> bool:
 
 
 async def line_push(
-    to: str, text: str, access_token: str, *, notification_disabled: bool = False
+    to: str, text: str, access_token: str, *, notification_disabled: bool = False,
+    account_id: str = "default", check_kill_switch: bool = True,
 ) -> bool:
     """Push（无 replyToken 时后续发消息）。"""
+    if check_kill_switch and _line_kill_switch_blocked(account_id):
+        return False
     text = _truncate_text(text)
     if not text:
         return True
@@ -133,6 +153,15 @@ def register_line_routes(
     unsupported = (cfg.get("unsupported_type_reply") or "").strip() or (
         "目前仅支持文字消息。"
     )
+    # Phase G4：官方渠道统一收件箱镜像用的稳定账号标识（坐席台据此分组官方会话）
+    line_account_id = str(cfg.get("account_id") or "official")
+    # Phase G4c：官方入站是否走 protocol_autoreply 主管道（默认关→维持下方自答）
+    try:
+        from src.integrations.official_api_worker import official_pipeline_enabled
+        line_use_pipeline = official_pipeline_enabled(
+            getattr(config_manager, "config", None) or {})
+    except Exception:
+        line_use_pipeline = False
 
     async def line_webhook(request: Request) -> Response:
         raw = await request.body()
@@ -152,6 +181,22 @@ def register_line_routes(
                 continue
             msg = ev.get("message") or {}
             if msg.get("type") != "text":
+                # Phase I1：入站媒体可见化——镜像占位（坐席台可见/可接管），再回不支持
+                try:
+                    src0 = ev.get("source") or {}
+                    _uid0 = src0.get("userId") or ""
+                    _st0 = src0.get("type")
+                    if _st0 in ("group", "room"):
+                        _ck0 = f"line:{_st0}:{src0.get('groupId') or src0.get('roomId') or _uid0}"
+                    else:
+                        _ck0 = f"line:user:{_uid0}"
+                    from src.integrations.shared.official_inbound import mirror_inbound_media
+                    mirror_inbound_media(
+                        platform="line", account_id=line_account_id, chat_key=_ck0,
+                        media_type=str(msg.get("type") or "file"),
+                        name=_uid0, msg_id=str(msg.get("id") or ""))
+                except Exception:
+                    pass
                 rt = ev.get("replyToken")
                 if rt:
                     await line_reply(rt, unsupported, access_token)
@@ -191,6 +236,30 @@ def register_line_routes(
                 "_send_to_chat": _send_followup,
             }
 
+            # Phase G4：入站镜像进统一收件箱（旁路，坐席台可见/可接管/SLA/危机）
+            try:
+                from src.integrations.shared.inbox_mirror import mirror_to_inbox
+                mirror_to_inbox("line", line_account_id, chat_key, text,
+                                direction="in", name=line_uid,
+                                msg_id=str(msg.get("id") or ""))
+            except Exception:
+                pass
+
+            # Phase G4c：走主管道 → 交 maybe_auto_reply（享护栏/canary/记忆），回复经
+            # orch.send→官方 worker（line_push）出站；不在此自答（避免双回复）。
+            if line_use_pipeline:
+                try:
+                    from src.integrations.protocol_bridge import (
+                        make_message, maybe_auto_reply,
+                    )
+                    await maybe_auto_reply(make_message(
+                        platform="line", account_id=line_account_id,
+                        chat_key=chat_key, text=text, direction="in",
+                        name=line_uid, msg_id=str(msg.get("id") or "")))
+                except Exception:
+                    logger.debug("LINE 主管道回复失败", exc_info=True)
+                continue
+
             try:
                 reply_text = await sm.process_message(
                     text=text,
@@ -208,6 +277,13 @@ def register_line_routes(
 
             if reply_text:
                 await line_reply(reply_token, str(reply_text), access_token)
+                # Phase G4：出站镜像（坐席台看到 AI 自动回复了什么）
+                try:
+                    from src.integrations.shared.inbox_mirror import mirror_to_inbox
+                    mirror_to_inbox("line", line_account_id, chat_key,
+                                    str(reply_text), direction="out")
+                except Exception:
+                    pass
 
         return Response(status_code=200, content=b"OK")
 

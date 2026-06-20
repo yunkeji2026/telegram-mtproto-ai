@@ -1,5 +1,7 @@
 """inbox.ingest 映射测试（Phase A）。"""
 
+from unittest.mock import patch
+
 from src.inbox.store import InboxStore
 from src.inbox.ingest import ingest_collected_chats, ingest_thread
 
@@ -61,4 +63,33 @@ def test_ingest_thread_persists_history(tmp_path):
     assert ingest_thread(store, chat, messages) == 3
     rows = store.list_messages("whatsapp:wa-a:room")
     assert [r["text"] for r in rows] == ["m1", "m2", "m3"]
+    store.close()
+
+
+def test_ingest_writes_contact_id_when_resolver_registered(tmp_path):
+    """Q 延伸：register_contact_resolver → conversations + conv_meta 回写 contact_id。"""
+    store = InboxStore(tmp_path / "inbox.db")
+    store.register_contact_resolver(
+        lambda platform, account_id, chat_key: (
+            "contact-xyz" if chat_key == "messenger_rpa:Bob" else ""
+        ),
+    )
+    chat = _chat(
+        platform="messenger",
+        account_id="a",
+        chat_key="messenger_rpa:Bob",
+        conversation_id="messenger:a:messenger_rpa:Bob",
+        last_message={"text": "hi", "ts": 110, "direction": "in", "language": "en"},
+    )
+    with patch(
+        "src.ai.chat_assistant_service.quick_analyze",
+        return_value={"intent": "chitchat", "emotion": "neutral", "risk_level": "low"},
+    ):
+        ingest_collected_chats(store, [chat])
+    conv = store.get_conversation("messenger:a:messenger_rpa:Bob")
+    assert conv is not None
+    assert conv["contact_id"] == "contact-xyz"
+    meta = store.get_conv_meta("messenger:a:messenger_rpa:Bob")
+    assert meta is not None
+    assert meta["contact_id"] == "contact-xyz"
     store.close()

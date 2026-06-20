@@ -215,8 +215,55 @@ class TelegramSenderMixin:
             s = s[:max_c] + "…"
         return s
 
+    def _shared_send_limiter(self, cfg):
+        """取与 B 线协议自动回复共用的 AutoReplyLimiter 单例（一个计数器喂两线）。
+
+        失败返回 None（闸门/计数静默降级，绝不阻断 A 线发送）。
+        """
+        try:
+            from src.integrations.protocol_autoreply_limits import (
+                get_autoreply_limiter,
+            )
+            return get_autoreply_limiter(cfg or {})
+        except Exception:
+            return None
+
     async def _send_reply(self, original_message, reply_text: str, parse_mode=None):
         try:
+            # G1 全局 Kill-Switch：紧急冻结时直接跳过发送（无视预热闸门是否开）。
+            try:
+                from src.ops.kill_switch import is_blocked as _ks_blocked
+                _ks_on, _ks_scope, _ = _ks_blocked(
+                    "telegram", getattr(self, "account_id", "default"))
+                if _ks_on:
+                    self.logger.warning(
+                        "[kill-switch] 冻结发送，跳过 A 线回复（scope=%s）", _ks_scope)
+                    return
+            except Exception:
+                pass
+            # N 线 核心3：发送前反封号闸门（A/B 两线共用 companion_send_gate；默认关→零破坏）
+            # 优化1：sends_today 取自与 B 线共用的同一计数器（_shared_send_limiter），
+            # A 线发送在成功后也记入该计数器 → 一个计数器喂两线，A 线反封号满血。
+            try:
+                from src.skills.companion_send_gate import evaluate, gate_enabled
+                from src.skills.account_signals import build_account_signals
+                _gcfg = self.config.config if hasattr(self.config, "config") else {}
+                if gate_enabled(_gcfg):
+                    _sig = build_account_signals(
+                        "telegram", getattr(self, "account_id", "default"),
+                        limiter=self._shared_send_limiter(_gcfg),
+                        extra={"proxy_bound": bool(getattr(self, "proxy_id", ""))},
+                    )
+                    _dec = evaluate(_sig, _gcfg)
+                    if not _dec.get("allowed", True):
+                        self.logger.warning(
+                            "[send_gate] 账号 %s 被反封号闸门拦截: %s (light=%s, score=%s)",
+                            _sig["account_id"], _dec.get("reason"),
+                            _dec.get("light"), _dec.get("score"),
+                        )
+                        return
+            except Exception:
+                pass
             split_cfg = self.config.get("reply", {}).get("split_send", {})
             min_interval = float(split_cfg.get("min_interval_seconds", 0) or 0)
             if min_interval > 0 and self._last_send_wallclock > 0:
@@ -238,6 +285,37 @@ class TelegramSenderMixin:
                 send_kw["parse_mode"] = parse_mode
             await self.client.send_message(**send_kw)
             self._last_send_wallclock = time.time()
+            # 优化1：记入共用发送计数器（与 B 线 AutoReplyLimiter 同一份 day_used），
+            # 供反封号闸门 + 机群健康灯统计本号今日外发量（best-effort，绝不阻断发送）。
+            try:
+                _lim = self._shared_send_limiter(
+                    self.config.config if hasattr(self.config, "config") else {}
+                )
+                if _lim is not None:
+                    _lim.record_sent(f"telegram:{getattr(self, 'account_id', 'default')}")
+            except Exception:
+                pass
+            # N4b：出站镜像（companion 模式才生效）→ 坐席台看到 AI 自动回复的内容
+            try:
+                _emit = getattr(self, "_emit_inbox", None)
+                if _emit is not None:
+                    _emit(chat_id=original_message.chat.id, text=_out_text,
+                          direction="out")
+            except Exception:
+                pass
+            # Q3：出站记入 contacts（recorder 未开则 no-op）→ IntimacyEngine 才有
+            # 收/发互动（mutuality）信号，分数不再因只见入站而偏低
+            try:
+                from src.utils.companion_context import (
+                    record_relationship_message as _rec_rel_msg,
+                )
+                _rec_rel_msg(
+                    getattr(self, "account_id", "default"),
+                    original_message.chat.id, "out",
+                    text_preview=_out_text or "",
+                )
+            except Exception:
+                pass
             if getattr(original_message, 'from_user', None) and getattr(original_message.from_user, 'id', None):
                 self._record_session_reply(original_message.chat.id, original_message.from_user.id)
                 if getattr(self, 'four_layer_trigger', None):
@@ -248,6 +326,12 @@ class TelegramSenderMixin:
             self.logger.info("已回复消息: %s", self._log_safe_text(reply_text))
         except Exception as e:
             self.logger.error("发送回复失败: %s", e)
+            # G2 封号信号自动急停：风控错误 → 分级处置（退避/暂停/封禁），best-effort
+            try:
+                from src.ops.ban_signal import handle_send_exception as _g2
+                _g2("telegram", getattr(self, "account_id", "default"), e)
+            except Exception:
+                pass
 
     async def send_message(self, chat_id: int, text: str) -> bool:
         try:

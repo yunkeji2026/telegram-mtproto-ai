@@ -182,6 +182,13 @@ def build_ops_report(
         "conversions": biz.get("conversions"),
         "conversion_rate": biz.get("conversion_rate"),
     }
+    rel_h = roi.get("relationship") or {}
+    relationship = {
+        "active_relationships": rel_h.get("active_relationships"),
+        "sticky_rate_pct": rel_h.get("sticky_rate_pct"),
+        "avg_turns": rel_h.get("avg_turns"),
+        "retention_d7_pct": rel_h.get("retention_d7_pct"),
+    }
     rel = {"score": reliability.get("score"), "light": reliability.get("light")}
 
     # 文字摘要（便于直接贴进周报/IM）。
@@ -191,6 +198,12 @@ def build_ops_report(
     if automation["saved_hours"] is not None:
         headline.append(f"AI 自动化节省约 {automation['saved_hours']} 小时"
                         + (f"、{automation['saved_money']} 成本" if automation.get('saved_money') else ""))
+    if relationship["active_relationships"]:
+        headline.append(
+            f"活跃关系 {relationship['active_relationships']} 个"
+            f"（黏性 {relationship.get('sticky_rate_pct')}%，"
+            f"人均 {relationship.get('avg_turns')} 轮，D7 留存 {relationship.get('retention_d7_pct')}%）"
+        )
     if business["conversions"] is not None:
         headline.append(f"转化 {business['conversions']} 单（转化率 {business.get('conversion_rate')}）")
     if rel["score"] is not None:
@@ -211,6 +224,7 @@ def build_ops_report(
         "days": days,
         "incidents": incidents,
         "automation": automation,
+        "relationship": relationship,
         "business": business,
         "reliability": rel,
         "billing": {"total": charges.get("total"), "currency": charges.get("currency"),

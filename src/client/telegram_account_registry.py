@@ -55,6 +55,8 @@ class TelegramAccountContext:
     session_name: str = "camille_bot"
     persona_ids: List[str] = field(default_factory=list)
     status: str = "active"
+    # N 线 核心2：绑定 proxy_pool 条目 → 每号独立出口 IP（反封号）
+    proxy_id: str = ""
 
     def account_cfg(self) -> Dict[str, Any]:
         """Return the overlay dict to pass to ``TelegramClient(account_cfg=...)``."""
@@ -72,6 +74,8 @@ class TelegramAccountContext:
             cfg["session_name"] = self.session_name
         if self.persona_ids:
             cfg["persona_ids"] = list(self.persona_ids)
+        if self.proxy_id:
+            cfg["proxy_id"] = self.proxy_id
         return cfg
 
     @property
@@ -148,6 +152,7 @@ class TelegramAccountRegistry:
                         ).strip(),
                         persona_ids=[str(p) for p in persona_ids_raw if p],
                         status=str(entry.get("status") or "active"),
+                        proxy_id=str(entry.get("proxy_id") or "").strip(),
                     )
                 )
             if contexts:
@@ -182,6 +187,7 @@ class TelegramAccountRegistry:
                         for p in (telegram_cfg.get("persona_ids") or [])
                         if p
                     ],
+                    proxy_id=str(telegram_cfg.get("proxy_id") or "").strip(),
                 )
             )
             logger.info("[tg_registry] 单账号模式（default）")
@@ -206,6 +212,82 @@ class TelegramAccountRegistry:
     def is_multi_account(self) -> bool:
         return self.size() > 1 or not self.primary().is_default
 
+    # ── N5: 登录注册统一 ───────────────────────────────────────────────────────
+
+    def sync_to_account_registry(
+        self,
+        registry: Any,
+        *,
+        platform: str = "telegram",
+        include_default: bool = True,
+    ) -> List[str]:
+        """N5：把 A 线 config 账号（phone+code）并入 B 线持久注册表（QR 共用）。
+
+        让"配置定义"与"扫码登录"两类账号汇入**同一张 platform_accounts 表**，
+        编排器/舰队健康视图无需区分来源即可看全。幂等且**不破坏既有登录态**：
+
+        - **不覆盖会话凭据**：合并而非替换 meta——读出既有 meta，仅叠加 config 派生的
+          静态身份字段（session_name/phone/persona_ids），绝不丢 QR 登录写入的
+          ``session_string``。
+        - **不打翻在线态/登录模式**：已存在的账号保留其 ``status`` 与 ``mode``（如某号
+          已 QR online，本同步不会把它打回 pending）；仅新账号写 mode=protocol/status=pending。
+        - **config 为静态属性源**：``label``/``proxy_id`` 以 config 为准刷新（这两项本就
+          由配置管理），其余运行态字段不动。
+
+        Args:
+            registry: B 线 ``AccountRegistry`` 实例（duck-typed：需 get/upsert）。
+            platform: 注册表平台键，默认 ``telegram``。
+            include_default: 是否纳入单账号回退的 ``default`` 上下文。
+
+        Returns:
+            已同步的 account_id 列表。
+        """
+        synced: List[str] = []
+        if registry is None:
+            return synced
+        for ctx in self.all_contexts():
+            if ctx.account_id == "default" and not include_default:
+                continue
+            try:
+                existing = registry.get(platform, ctx.account_id)
+            except Exception:
+                existing = None
+            # 合并 meta：保留既有（含 QR 的 session_string），叠加 config 静态身份
+            meta: Dict[str, Any] = dict((existing or {}).get("meta") or {})
+            if ctx.session_name:
+                meta["session_name"] = ctx.session_name
+            if ctx.phone_number:
+                meta["phone_number"] = ctx.phone_number
+            if ctx.persona_ids:
+                meta["persona_ids"] = list(ctx.persona_ids)
+            meta["config_synced"] = True  # 标记来源含 config 同步
+            if existing:
+                # 既有账号：保留 mode/status/会话凭据，仅刷新 config 拥有的静态属性
+                kwargs: Dict[str, Any] = {"meta": meta}
+                if ctx.label:
+                    kwargs["label"] = ctx.label
+                # proxy_id 以 config 为准（含清空：config 删了代理则同步清空）
+                kwargs["proxy_id"] = ctx.proxy_id or ""
+                try:
+                    registry.upsert(platform, ctx.account_id, **kwargs)
+                except Exception:
+                    continue
+            else:
+                # 新账号：phone+code = protocol 模式，待编排器拉起（pending）
+                try:
+                    registry.upsert(
+                        platform, ctx.account_id,
+                        mode="protocol",
+                        label=ctx.label or "",
+                        proxy_id=ctx.proxy_id or "",
+                        status="pending",
+                        meta=meta,
+                    )
+                except Exception:
+                    continue
+            synced.append(ctx.account_id)
+        return synced
+
     def stats(self) -> Dict[str, Any]:
         return {
             "total": self.size(),
@@ -217,6 +299,7 @@ class TelegramAccountRegistry:
                     "session_name": c.session_name,
                     "persona_ids": c.persona_ids,
                     "status": c.status,
+                    "proxy_id": c.proxy_id,
                 }
                 for c in self.all_contexts()
             ],

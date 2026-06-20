@@ -1,0 +1,131 @@
+# 场景预设：AI 情感陪伴 · 全自动 7×24（陪伴模式）
+# ─────────────────────────────────────────────────────────────────────
+# 适用：把扫码/手机登录的「个人号」纳管成有灵魂的 AI 陪伴数字员工——
+#   记忆/人设/情绪/共情/语音图片/四层触发全在线，协议号 7×24 自动收发。
+# 与 outreach（引流转化）预设的区别：本预设核心是「关系深度·留存」，
+#   且把【反封号闸门 + 危机安全网】默认开（陪伴+全自动的商业准入底线）。
+#
+# 开局只需填：① ai.api_key ② telegram（api_id/api_hash/phone/session）
+# 填完运行：python main.py --check   应为 0 错误。
+#
+# ⚠️ 激进上量提示：本预设把 protocol_autoreply + companion_runtime 默认开（真·全自动）。
+#   首轮务必先用 1 个测试号灰度，盯 /api/accounts/fleet-health 红黄绿灯稳定再扩面；
+#   companion_send_gate（预热爬坡）已默认开，不要关——它是不烧号的最后一道闸。
+# ─────────────────────────────────────────────────────────────────────
+
+domain: conversion
+
+ai:
+  provider: openai_compatible
+  api_key: "YOUR_API_KEY"            # ← 必填
+  base_url: "https://api.deepseek.com"
+  model: "deepseek-chat"
+  temperature: 0.85                  # 陪伴更口语、更有温度，温度略高
+  max_tokens: 1024
+  timeout: 30
+
+telegram:
+  api_id: "YOUR_API_ID"              # ← 必填
+  api_hash: "YOUR_API_HASH"          # ← 必填
+  phone_number: "+8612345678900"     # ← 必填
+  session_name: companion_bot
+  process_private: true
+  process_groups: false              # 陪伴以私聊一对一为主
+
+skills:
+  enabled: [greeting, small_talk]    # 陪伴以问候 + 闲聊为主，不挂业务技能
+
+# ── 协议多开登录 / 编排器 / 统一运行时（N 线核心）──────────────────
+# 让协议号被纳管、7×24 在线，并跑 A 线「有灵魂」的陪聊 client。
+platform_login:
+  enabled: true
+  orchestrator_enabled: true         # 账号池编排器：失败指数退避自动重启
+  telegram:
+    protocol_enabled: true           # 关联设备二维码登录 provider
+    companion_runtime: true          # ★ 协议号跑 A 线全功能（记忆/人设/情绪/四层触发/收发镜像）
+    backfill_dialogs: 20
+    contacts_recording: true         # 收/发写入 contacts → IntimacyEngine 关系阶段融合
+  whatsapp:
+    protocol_enabled: false
+
+# ── 协议号 7×24 自动回复（双闸门：全局 enabled + 账号 meta.auto_reply 皆开才发）──
+protocol_autoreply:
+  enabled: true                      # ★ 全局闸门开（账号侧仍需 meta.auto_reply=true）
+  delay:                             # 拟人随机延迟，降低机器感与风控
+    min_sec: 3
+    max_sec: 18
+  hours:
+    enabled: false                   # 如需「营业时段外转人工」可开并填 start/end/tz_offset
+
+# ── 反封号发送闸门（不可关的护栏）────────────────────────────────────
+# A/B 两线共用：按账号健康（天龄/代理/今日发送量/熔断）给红黄绿灯 + 预热爬坡。
+companion_send_gate:
+  enabled: true                      # ★ 护栏默认开：新号自动从 warmup_start_cap 爬坡到 target_cap
+  target_cap: 15                     # 养熟后单号日发上限
+  warmup_start_cap: 2                # 新号第 0 天日发上限
+  warmup_ramp_days: 14               # 14 天内从 start 爬到 target
+  block_on_red: true                 # 红灯（高风险）直接拒发——不烧号的最后一道闸
+
+# ── 陪伴关系阶段 + 安全网（陪伴模式的灵魂与底线）──────────────────
+companion:
+  enabled: true
+  natural_dialogue:
+    enabled: true                    # 自然口语、克制连发
+  intimacy_fusion:
+    enabled: true                    # 长沉默自动降阶 + 久别回暖问候
+  empathy_strategy:
+    enabled: true                    # STRIDE-ED 式共情策略选择
+  persona_guard:
+    enabled: true                    # 后置剥离「作为AI」自曝/客服腔
+  # 安全底线守卫：危机识别 + 反谄媚 + 回复红线兜底。陪伴+全自动场景默认全开（漏接危机最坏）。
+  wellbeing:
+    enabled: true
+    anti_sycophancy: true
+    crisis_escalation: true          # ★ severe 危机 → escalation_needed webhook，真人介入
+    escalate_after: 1
+    crisis_audit: true               # ★ 危机事件落库（复盘/合规/人工处置追踪）
+    crisis_resources: ""             # 可选：填求助热线文案，severe 时自然附带
+
+# ── 陪伴记忆闭环（Phase D：让 AI「记得住」——陪伴产品的核心护城河）──────────
+# 闲聊里抽取用户事实（喜好/工作/家人/经历）→ 复发/情绪浓的晋升 stable（永不被裁剪）→
+# 新证据推翻旧结论（搬家/分手）→ 按来源分级置信（用户原话>AI 推断）。陪伴模式默认全开。
+memory:
+  enabled: true
+  extract:
+    enabled: true
+    match_all: true              # ★ 陪伴「全记」：任何闲聊都尝试抽取（非陪伴部署留空走白名单）
+    intents: [greeting, small_talk, direct_chat, casual_chat, chitchat, free_chat]
+    use_llm: true                # LLM 抽取要点（与启发式正则并行；有 cooldown 控成本）
+    min_user_chars: 4
+    cooldown_seconds: 20
+  consolidation:
+    enabled: true                # ★ 离线巩固：复发/情绪浓 → 晋升 stable
+    min_hits: 2
+    semantic_dedup: 0.92         # 语义近义合并（避免「喜欢猫」反复存多条）
+    resolve_contradictions: true # 矛盾消解（旧「住北京」vs 新「搬上海」）
+    supersede_stable: true       # 新证据可推翻旧 stable 结论
+    source_aware: true           # 按来源分级置信（ai_inferred 晋升门槛更高）
+  salience:
+    enabled: true                # 显著性加权（情绪强/首次披露的事实更不易被裁剪）
+
+# 统一收件箱：高风险/危机/转人工时坐席可见、可接管
+inbox:
+  enabled: true
+  sla_warn_sec: 1800
+  sla_crit_sec: 7200
+
+# 健康看门狗：周期巡检 + 异常 webhook 推送（配合反封号闸门盯机群）
+health_watchdog:
+  enabled: true
+  interval_sec: 300
+
+web_admin:
+  site_name: AI 陪伴运营台
+  host: 127.0.0.1
+  port: 18787
+  auth_token: "YOUR_ADMIN_TOKEN"
+  secret_key: "YOUR_FLASK_SECRET_KEY"
+
+logging:
+  level: INFO
+  file: logs/app.log

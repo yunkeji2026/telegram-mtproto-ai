@@ -23,6 +23,32 @@ from src.workspace.agent_coordinator import AgentCoordinator, web_funnel_snapsho
 logger = logging.getLogger(__name__)
 
 
+def _online_agent_ids(request: Request, within_sec: int = 120) -> list:
+    """近 within_sec 秒内 status=online 的坐席 id（席位强制用）。store 不可用 → []。"""
+    try:
+        from src.web.routes.unified_inbox_services import _inbox_store
+        inbox = _inbox_store(request)
+        if inbox is None or not hasattr(inbox, "list_agent_presence"):
+            return []
+        rows = inbox.list_agent_presence(active_within_sec=within_sec)
+        return [str(r.get("agent_id") or "") for r in rows
+                if str(r.get("status") or "") == "online"]
+    except Exception:
+        logger.debug("统计在线坐席失败（席位强制放行）", exc_info=True)
+        return []
+
+
+def _seat_block(request: Request, agent_id: str) -> bool:
+    """该坐席上线是否应被授权席位拦截。任何异常 → False（放行，绝不误伤）。"""
+    try:
+        from src.licensing import get_license_manager, seat_block_on_online
+        st = get_license_manager().status()
+        return bool(seat_block_on_online(st, _online_agent_ids(request), agent_id))
+    except Exception:
+        logger.debug("席位强制判定失败（放行）", exc_info=True)
+        return False
+
+
 def register_workspace_presence_routes(app, *, api_auth, config_manager=None) -> None:
     """挂载坐席 presence / 会话租约 / web 漏斗快照端点（/api/workspace/presence|claim|claims|heartbeat）。"""
 
@@ -39,6 +65,13 @@ def register_workspace_presence_routes(app, *, api_auth, config_manager=None) ->
         status = str(body.get("status") or "online")
         agent = _session_agent(request)
         coord = AgentCoordinator.from_request(request, config_manager)
+        # J·席位强制（License enforce）：仅当 licensing.enforce 开 + 授权有限席位时，
+        # 新坐席「上线」超额 → 403。enforce 关 / seats=0 → 恒放行（零破坏）。
+        if status == "online" and _seat_block(request, agent["agent_id"]):
+            raise HTTPException(
+                status_code=403,
+                detail="seat_limit:活跃坐席已达授权席位上限，请升级套餐或让其他坐席下线",
+            )
         row = coord.set_presence(
             agent["agent_id"],
             display_name=str(body.get("display_name") or agent["display_name"]),

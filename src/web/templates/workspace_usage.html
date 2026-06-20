@@ -126,13 +126,19 @@ function renderLicense(lic,quota){
   b.textContent=lvl==='over'?'超额':(lvl==='warn'?'接近上限':'正常');
 }
 
-function renderCards(u,cmp){
+function renderCards(u,cmp,mq){
   var cards=[
     {v:u.messages_total, l:'消息总量', d:deltaHtml(cmp.messages_delta_pct)},
     {v:u.ai_calls, l:'AI 调用数', d:deltaHtml(cmp.ai_calls_delta_pct)},
     {v:u.ai_sent, l:'AI 自动发送', d:''},
     {v:u.active_agents, l:'活跃坐席', d:''}
   ];
+  // K：月度消息配额卡片（included>0 才显示；按 level 上色）
+  if(mq && mq.included>0){
+    var c=mq.level==='over'?'#dc2626':(mq.level==='warn'?'#d97706':'#16a34a');
+    cards.push({v:mq.used+'/'+mq.included, l:'本月消息配额',
+      d:'<div style="font-size:11px;color:'+c+';">'+esc(mq.text||'')+'</div>'});
+  }
   document.getElementById('ug-cards').innerHTML=cards.map(function(c){
     return '<div class="ug-card"><div class="v">'+c.v+'</div><div class="l">'+c.l+'</div>'+(c.d||'')+'</div>';
   }).join('');
@@ -162,7 +168,7 @@ function load(){
     }
     document.getElementById('ug-empty').style.display='none';
     document.getElementById('ug-body').style.display='block';
-    renderCards(d.usage, d.compare||{});
+    renderCards(d.usage, d.compare||{}, d.message_quota);
     renderSpark(d.trend||[]);
   }).catch(function(){});
 }

@@ -110,6 +110,25 @@ def build_checklist(
         checks.append(_check("agents", "坐席在线", "warn",
                              "当前无坐席在线（纯 AI 自动应答仍可运行）"))
 
+    # 6) N 线扫码陪聊就绪——仅当启用时纳入总表（开关一致性 + 反封号护栏，N2）
+    try:
+        from src.ops.companion_preflight import build_companion_preflight
+        pf = build_companion_preflight(config)
+        if pf.get("applicable"):
+            s = pf.get("summary") or {}
+            if pf.get("light") == "red":
+                checks.append(_check("companion", "扫码陪聊就绪", "fail",
+                                     f"{s.get('fail', 0)} 项阻断（开关一致性/凭证）",
+                                     "/rpa", "查看"))
+            elif pf.get("light") == "yellow":
+                checks.append(_check("companion", "扫码陪聊就绪", "warn",
+                                     f"{s.get('warn', 0)} 项建议（反封号闸门/代理）",
+                                     "/rpa", "查看"))
+            else:
+                checks.append(_check("companion", "扫码陪聊就绪", "ok", "开关一致 + 护栏就绪"))
+    except Exception:
+        pass
+
     fails = sum(1 for c in checks if c["status"] == "fail")
     warns = sum(1 for c in checks if c["status"] == "warn")
     oks = sum(1 for c in checks if c["status"] == "ok")

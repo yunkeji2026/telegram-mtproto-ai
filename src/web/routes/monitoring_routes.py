@@ -226,6 +226,41 @@ def register_monitoring_routes(app, ctx):
                 pass
         return {"ok": True, "verdict": verdict, "sample_ts": sample_ts}
 
+    # ── O·P 联动质量看板：care + reactivation 发送质量统一视图 ──────
+    @app.get("/api/companion/quality-overview")
+    async def api_companion_quality_overview(request: Request, window_hours: float = 24):
+        """两条主动线（care/reactivation）的 skip 原因 + like/dislike 反馈 + dry_run 计数。"""
+        _api_auth(request)
+        try:
+            from src.monitoring.metrics_store import get_metrics_store
+            win = max(1.0, min(float(window_hours or 24), 720)) * 3600.0
+            return {"ok": True, **get_metrics_store().companion_quality_overview(
+                window_sec=win)}
+        except Exception as ex:
+            return {"ok": False, "error": f"{type(ex).__name__}:{ex}"}
+
+    # ── 质量趋势（持久化时序）：companion_quality_overview 的历史快照 ──
+    @app.get("/api/companion/quality-trend")
+    async def api_companion_quality_trend(request: Request, hours: float = 24):
+        """返回质量看板的时序快照（care/reactivation 的 like/skip/dry 随时间变化）。
+
+        数据由 QualityTrendSnapshotter 周期落地（companion.quality_trend.enabled 开）；
+        未启用 → enabled:false，不报错。
+        """
+        _api_auth(request)
+        import time as _t
+        store = getattr(request.app.state, "quality_trend_store", None)
+        if store is None:
+            return {"ok": True, "enabled": False,
+                    "message": "质量趋势持久化未启用（companion.quality_trend.enabled=false）"}
+        try:
+            since = _t.time() - max(1.0, min(float(hours or 24), 720)) * 3600.0
+            points = store.recent(since_ts=since, limit=3000)
+            return {"ok": True, "enabled": True, "count": len(points),
+                    "points": points}
+        except Exception as ex:
+            return {"ok": False, "enabled": True, "error": f"{type(ex).__name__}:{ex}"}
+
     # ── 操作记录活动热力图 ────────────────────────────────────
     @app.get("/api/audit/activity")
     async def api_audit_activity(request: Request, days: int = 84):

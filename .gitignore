@@ -147,6 +147,12 @@ out/
 sessions/*.session
 sessions/*.session-journal
 !sessions/.gitkeep
+# 登录临时密钥文件（脚本用完即删；此处兜底防中断残留入库）
+code.txt
+2fa_password.txt
+# 账号注册表（含加密会话；运行时落地）
+config/account_registry.db
+config/account_registry.db-*
 
 # 协议账号下载的入站媒体（运行时落地，含用户内容，勿入库）
 src/web/static/protocol_media/

@@ -168,6 +168,75 @@ def test_workspace_auto_claim_without_auto_assign_warns():
     assert _by_path(issues, "workspace.auto_assign.auto_claim.enabled")
 
 
+# ── N 线 协议登录 / 编排器 / 统一运行时 ──────────────────────────────────────
+
+def _tg_creds():
+    return {"api_id": 123456, "api_hash": "abcdef0123456789",
+            "phone_number": "+10000000000"}
+
+
+def test_protocol_login_absent_no_warn():
+    issues = check_config(_ok_base())
+    assert "platform_login.telegram.companion_runtime" not in _paths(issues)
+    assert "platform_login.telegram.protocol_enabled" not in _paths(issues)
+
+
+def test_companion_runtime_without_protocol_warns():
+    cfg = _ok_base()
+    cfg["telegram"] = _tg_creds()
+    cfg["platform_login"] = {"orchestrator_enabled": True,
+                             "telegram": {"protocol_enabled": False,
+                                          "companion_runtime": True}}
+    issues = check_config(cfg)
+    hit = _by_path(issues, "platform_login.telegram.companion_runtime")
+    assert hit and any("protocol_enabled" in i.message for i in hit)
+
+
+def test_companion_runtime_without_orchestrator_warns():
+    cfg = _ok_base()
+    cfg["telegram"] = _tg_creds()
+    cfg["platform_login"] = {"orchestrator_enabled": False,
+                             "telegram": {"protocol_enabled": True,
+                                          "companion_runtime": True}}
+    issues = check_config(cfg)
+    hit = _by_path(issues, "platform_login.telegram.companion_runtime")
+    assert hit and any("orchestrator_enabled" in i.message for i in hit)
+
+
+def test_protocol_enabled_without_creds_warns():
+    cfg = _ok_base()  # 无 telegram 凭证
+    cfg["platform_login"] = {"telegram": {"protocol_enabled": True}}
+    issues = check_config(cfg)
+    assert _by_path(issues, "platform_login.telegram.protocol_enabled")
+
+
+def test_companion_fully_wired_no_protocol_login_warn():
+    cfg = _ok_base()
+    cfg["telegram"] = _tg_creds()
+    cfg["platform_login"] = {"orchestrator_enabled": True,
+                             "telegram": {"protocol_enabled": True,
+                                          "companion_runtime": True}}
+    issues = check_config(cfg)
+    assert "platform_login.telegram.companion_runtime" not in _paths(issues)
+    assert "platform_login.telegram.protocol_enabled" not in _paths(issues)
+
+
+def test_send_gate_start_above_target_warns():
+    cfg = _ok_base()
+    cfg["companion_send_gate"] = {"enabled": True, "warmup_start_cap": 20,
+                                  "target_cap": 15}
+    issues = check_config(cfg)
+    assert _by_path(issues, "companion_send_gate.warmup_start_cap")
+
+
+def test_send_gate_disabled_skips_checks():
+    cfg = _ok_base()
+    cfg["companion_send_gate"] = {"enabled": False, "warmup_start_cap": 20,
+                                  "target_cap": 15}
+    issues = check_config(cfg)
+    assert "companion_send_gate.warmup_start_cap" not in _paths(issues)
+
+
 # ── 跨字段 / 文件存在性 ────────────────────────────────────────────────────
 
 def test_contacts_missing_script_file_warns(tmp_path):

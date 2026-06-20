@@ -258,6 +258,29 @@
   <div class="rpa-kpi"><div class="rpa-kpi-n red" id="ov-agg-alerts">—</div><div class="rpa-kpi-l">未确认告警</div></div>
 </div>
 
+<!-- N 线 N6：账号反封号机群健康（统一信号源：注册表天龄/代理 + 限额今日发送 → M7 健康灯） -->
+<div class="ov-summary" id="ov-fleet" style="margin-top:.6rem" title="协议号反封号机群健康：总体灯色取最差账号；按生命周期统计">
+  <div class="rpa-kpi"><div class="rpa-kpi-n" id="ov-fleet-light">—</div><div class="rpa-kpi-l">机群健康灯</div></div>
+  <div class="rpa-kpi"><div class="rpa-kpi-n green" id="ov-fleet-active">—</div><div class="rpa-kpi-l">活跃号</div></div>
+  <div class="rpa-kpi"><div class="rpa-kpi-n amber" id="ov-fleet-warming">—</div><div class="rpa-kpi-l">预热中</div></div>
+  <div class="rpa-kpi"><div class="rpa-kpi-n red" id="ov-fleet-risk">—</div><div class="rpa-kpi-l">受限/封禁</div></div>
+  <div class="rpa-kpi" id="ov-preflight-cell" title="真号扫码陪聊上线前自检：开关一致性 + 反封号护栏就绪（点查看明细）" style="cursor:pointer"><div class="rpa-kpi-n" id="ov-preflight-light">—</div><div class="rpa-kpi-l">扫码陪聊就绪</div></div>
+</div>
+<div id="ov-preflight-detail" style="display:none;margin-top:.4rem;background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:.5rem .85rem;font-size:.76rem;line-height:1.6"></div>
+
+<!-- 主动话题预览（dry-run 可观测：本轮会主动联系谁、引用哪条记忆、是否被关怀去重让路；只读不发送） -->
+<div id="ov-proactive-card" style="margin-top:.6rem;background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:.6rem .85rem">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem">
+    <div style="font-weight:600;font-size:.82rem">💬 主动话题预览 <span id="ov-pp-status" style="font-weight:400;color:var(--muted);font-size:.72rem"></span></div>
+    <span>
+      <button id="ov-pp-advice" style="font-size:.72rem;padding:.18rem .6rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="基于采样评分给调参建议（只读，不改配置）">调参建议</button>
+      <button id="ov-pp-refresh" style="font-size:.72rem;padding:.18rem .6rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer">刷新预览</button>
+    </span>
+  </div>
+  <div id="ov-pp-body" style="margin-top:.45rem;font-size:.76rem;line-height:1.5;color:var(--muted)">点「刷新预览」查看本轮候选（沉默/冷却/安静时段/关怀去重过滤后，不发送）。</div>
+  <div id="ov-pp-sample-out" style="margin-top:.45rem"></div>
+</div>
+
 <!-- 4 平台卡片 -->
 <div class="ov-grid" id="ov-grid">
   <!-- Telegram -->
@@ -873,11 +896,213 @@ async function ovRefresh(){
     }
     if(pd && pd.items){ ovRenderPending(pd.items); }
     if(al && al.items){ ovRenderAlerts(al.items); }
+    ovRefreshFleet();  // N6：机群反封号健康灯（独立拉取，失败不影响主刷新）
+    ovRefreshPreflight();  // N：真号扫码陪聊上线前自检红绿灯（独立拉取）
     document.getElementById('ov-last').textContent = new Date().toLocaleTimeString('zh-CN',{hour12:false});
   }catch(e){
     console.warn('overview refresh failed', e);
     rpa.toast('刷新失败：'+e, 'err');
   }
+}
+
+// N6：机群反封号健康灯 + 生命周期分布（统一 /api/accounts/fleet-health）
+async function ovRefreshFleet(){
+  try{
+    const d = await rpa.get('/api/accounts/fleet-health');
+    if(!d || !d.ok) return;
+    const fl = d.fleet || {}; const lc = d.lifecycle || {};
+    const lightMap = {green:'🟢 健康', amber:'🟡 注意', red:'🔴 风险', unknown:'— 无号'};
+    const el = document.getElementById('ov-fleet-light');
+    if(el){
+      el.textContent = lightMap[fl.fleet_light] || '—';
+      el.className = 'rpa-kpi-n ' + (fl.fleet_light==='green'?'green':fl.fleet_light==='amber'?'amber':fl.fleet_light==='red'?'red':'');
+    }
+    const setN = (id,v)=>{ const e=document.getElementById(id); if(e) e.textContent=String(v||0); };
+    setN('ov-fleet-active', lc.active);
+    setN('ov-fleet-warming', lc.warming);
+    setN('ov-fleet-risk', (lc.restricted||0)+(lc.banned||0));
+  }catch(e){ /* 看板非关键路径，静默 */ }
+}
+
+// N：真号扫码陪聊上线前自检红绿灯（开关一致性 + 反封号护栏就绪）
+async function ovRefreshPreflight(){
+  try{
+    const d = await rpa.get('/api/setup/companion-preflight');
+    if(!d || !d.ok) return;
+    const el = document.getElementById('ov-preflight-light');
+    if(el){
+      const map = {green:'🟢 就绪', yellow:'🟡 可上线', red:'🔴 阻断'};
+      el.textContent = d.applicable ? (map[d.light]||'—') : '未启用';
+      el.className = 'rpa-kpi-n ' + (d.light==='green'?'green':d.light==='yellow'?'amber':d.light==='red'?'red':'');
+    }
+    const det = document.getElementById('ov-preflight-detail');
+    if(det){
+      det.innerHTML = (d.checks||[]).map(function(c){
+        const ic = c.status==='ok'?'✅':c.status==='warn'?'🟡':'⛔';
+        return '<div>'+ic+' <strong>'+(c.name||'')+'</strong> — '+(c.detail||'')+'</div>';
+      }).join('');
+    }
+  }catch(e){ /* 非关键路径，静默 */ }
+}
+
+// 主动话题预览（dry-run）：本轮会主动联系谁、引用哪条记忆、是否被关怀去重让路。只读不发送。
+function _ovPpEsc(s){
+  return String(s==null?'':s).replace(/[&<>"]/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];
+  });
+}
+async function ovRefreshProactivePreview(){
+  var body = document.getElementById('ov-pp-body');
+  var st = document.getElementById('ov-pp-status');
+  if(body){ body.textContent = '加载中…'; }
+  try{
+    var d = await rpa.get('/api/companion/proactive/preview?limit=50');
+    if(!d || !d.ok){ if(body){ body.textContent = '预览不可用'; } return; }
+    if(d.available===false){ if(st){ st.textContent=''; } if(body){ body.textContent = d.message||'未就绪'; } return; }
+    if(st){
+      var line = (d.enabled?'已启用':'未启用·仅预览') + (d.dry_run?' · dry_run':'')
+        + ' · 扫描'+(d.scanned||0) + ' · 候选'+(d.candidates||0)
+        + ' · 沉默≥'+(d.min_silent_hours||0)+'h'
+        + (d.care_dedup_active?' · 关怀去重on':'');
+      try{
+        var sm = await rpa.get('/api/companion/proactive/samples?limit=1');
+        if(sm && sm.available && sm.stats && sm.stats.rated>0){
+          line += ' · 采样'+sm.stats.total+'·好评率'+Math.round((sm.stats.up_rate||0)*100)+'%';
+        }
+      }catch(e){ /* 统计非关键 */ }
+      st.textContent = line;
+    }
+    var plans = d.plans || [];
+    if(!plans.length){ if(body){ body.innerHTML = '<span style="color:var(--muted)">本轮无候选（无人满足沉默/冷却/安静时段条件）。</span>'; } return; }
+    var rows = plans.map(function(p){
+      var send = p.would_send_this_tick ? '🟢' : '⏸';
+      var facts = (p.context_facts||[]).join('、');
+      var cid = p.conversation_id||'';
+      return '<tr style="border-top:1px solid var(--bd)">'
+        + '<td title="'+(p.would_send_this_tick?'本轮会发':'超出每轮上限，顺延')+'">'+send+'</td>'
+        + '<td>'+_ovPpEsc(p.account_id||'')+'</td>'
+        + '<td>'+_ovPpEsc(p.chat_key||cid)+'</td>'
+        + '<td>'+(p.silent_hours||0)+'h</td>'
+        + '<td>'+_ovPpEsc(p.mode||'')+'</td>'
+        + '<td>'+_ovPpEsc(p.fact||'(温和问候)')
+          +(facts?' <span style="color:var(--muted)">（背景：'+_ovPpEsc(facts)+'）</span>':'')+'</td>'
+        + '<td><button class="ov-pp-sample" data-cid="'+_ovPpEsc(cid)+'" '
+          + 'style="font-size:.7rem;padding:.12rem .5rem;border:1px solid var(--bd);border-radius:5px;background:transparent;color:inherit;cursor:pointer" '
+          + 'title="生成 AI 实际会发的那句话，但不发送（有 token 成本）">试发</button></td>'
+        + '</tr>';
+    }).join('');
+    body.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:.73rem">'
+      + '<thead><tr style="text-align:left;color:var(--muted)"><th>本轮</th><th>账号</th><th>对端</th><th>沉默</th><th>模式</th><th>话题/背景记忆</th><th></th></tr></thead>'
+      + '<tbody>'+rows+'</tbody></table>';
+    Array.prototype.forEach.call(document.querySelectorAll('#ov-pp-body .ov-pp-sample'), function(b){
+      b.addEventListener('click', function(){ ovProactiveSample(b.getAttribute('data-cid'), b); });
+    });
+  }catch(e){ if(body){ body.textContent = '预览请求失败'; } }
+}
+
+// 试发采样：对某会话生成 AI 实际会发的那句话（不发送），展示在结果区。
+async function ovProactiveSample(cid, btn){
+  var out = document.getElementById('ov-pp-sample-out');
+  if(btn){ btn.disabled = true; btn.textContent = '生成中…'; }
+  try{
+    var res = await fetch('/api/companion/proactive/sample', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      credentials:'same-origin', body: JSON.stringify({conversation_id: cid})
+    });
+    var d = await res.json();
+    if(out){
+      if(d && d.generated){
+        var sid = d.sample_id;
+        var rateBar = (sid!=null)
+          ? '<div id="ov-pp-rate" data-sid="'+sid+'" style="margin-top:.45rem;display:flex;gap:.4rem;align-items:center">'
+            + '<button class="ov-pp-up" style="font-size:.72rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:5px;background:transparent;color:inherit;cursor:pointer">👍 好</button>'
+            + '<button class="ov-pp-down" style="font-size:.72rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:5px;background:transparent;color:inherit;cursor:pointer">👎 改</button>'
+            + '<span id="ov-pp-rate-msg" style="color:var(--muted);font-size:.72rem"></span></div>'
+            + '<div id="ov-pp-edit-wrap" style="display:none;margin-top:.35rem">'
+            + '<textarea id="ov-pp-edit" rows="2" style="width:100%;font-size:.78rem;box-sizing:border-box;border:1px solid var(--bd);border-radius:6px;background:var(--card);color:inherit;padding:.35rem"></textarea>'
+            + '<button id="ov-pp-edit-save" style="margin-top:.25rem;font-size:.72rem;padding:.12rem .6rem;border:1px solid var(--bd);border-radius:5px;background:transparent;color:inherit;cursor:pointer">保存改写（记差评）</button></div>'
+          : '';
+        out.innerHTML = '<div style="background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:.5rem .8rem">'
+          + '<div style="color:var(--muted);font-size:.7rem">📝 试发文案（未发送）· '+_ovPpEsc(cid)+'</div>'
+          + '<div style="margin-top:.25rem;font-size:.84rem;line-height:1.5">'+_ovPpEsc(d.text||'')+'</div>'
+          + rateBar + '</div>';
+        if(sid!=null){ _ovPpBindRate(sid, d.text||''); }
+      }else{
+        out.innerHTML = '<div style="color:var(--muted);font-size:.74rem">未生成：'+_ovPpEsc((d&&d.message)||'不可用')+'</div>';
+      }
+    }
+  }catch(e){ if(out){ out.textContent = '试发请求失败'; } }
+  if(btn){ btn.disabled = false; btn.textContent = '试发'; }
+}
+
+// 绑定 👍/👎 评分回流（差评可附改写文案）。
+function _ovPpBindRate(sid, originalText){
+  var up = document.querySelector('#ov-pp-rate .ov-pp-up');
+  var down = document.querySelector('#ov-pp-rate .ov-pp-down');
+  var wrap = document.getElementById('ov-pp-edit-wrap');
+  var ta = document.getElementById('ov-pp-edit');
+  var save = document.getElementById('ov-pp-edit-save');
+  if(up){ up.addEventListener('click', function(){ ovProactiveRate(sid, 'up', ''); }); }
+  if(down){ down.addEventListener('click', function(){
+    if(wrap){ wrap.style.display = 'block'; }
+    if(ta && !ta.value){ ta.value = originalText || ''; }
+  }); }
+  if(save){ save.addEventListener('click', function(){
+    ovProactiveRate(sid, 'down', (ta && ta.value) || '');
+  }); }
+}
+async function ovProactiveRate(sid, rating, editedText){
+  var msg = document.getElementById('ov-pp-rate-msg');
+  try{
+    var res = await fetch('/api/companion/proactive/sample/'+sid+'/rate', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      credentials:'same-origin',
+      body: JSON.stringify({rating: rating, edited_text: editedText||''})
+    });
+    var d = await res.json();
+    if(msg){ msg.textContent = (d && d.ok) ? ('已记录 '+(rating==='up'?'👍':'👎')) : ('记录失败：'+((d&&d.message)||'')); }
+  }catch(e){ if(msg){ msg.textContent = '评分请求失败'; } }
+}
+
+// 调参建议（只读）：按采样评分给整体判定 + 低分 mode 针对性建议 + 差评改写 few-shot。
+var _OV_PP_VERDICT = {good:'🟢 良好', watch:'🟡 可提升', low:'🔴 偏低', insufficient:'⚪ 样本不足'};
+async function ovProactiveAdvice(){
+  var out = document.getElementById('ov-pp-sample-out');
+  if(out){ out.textContent = '分析中…'; }
+  try{
+    var d = await rpa.get('/api/companion/proactive/tuning-advice');
+    if(!d || !d.ok || d.available===false){ if(out){ out.textContent = '调参建议不可用（采样存储未就绪）'; } return; }
+    var a = d.advice || {};
+    var ov = a.overall || {};
+    var html = '<div style="background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:.55rem .8rem">';
+    html += '<div style="font-weight:600;font-size:.78rem">调参建议 '
+      + (_OV_PP_VERDICT[ov.verdict]||'') + ' <span style="color:var(--muted);font-weight:400">已评 '+(ov.rated||0)
+      + (ov.up_rate!=null?(' · 好评率'+Math.round(ov.up_rate*100)+'%'):'')+'</span></div>';
+    (a.suggestions||[]).forEach(function(s){
+      html += '<div style="margin-top:.2rem;font-size:.75rem">• '+_ovPpEsc(s)+'</div>';
+    });
+    var bm = (a.by_mode||[]).filter(function(m){ return (m.suggestions||[]).length; });
+    if(bm.length){
+      html += '<div style="margin-top:.4rem;font-size:.74rem;color:var(--muted)">低分 mode 针对性建议：</div>';
+      bm.forEach(function(m){
+        html += '<div style="margin-top:.15rem;font-size:.74rem"><strong>'+_ovPpEsc(m.mode)
+          +'</strong>（好评率'+(m.up_rate!=null?Math.round(m.up_rate*100)+'%':'—')+'）</div>';
+        (m.suggestions||[]).forEach(function(s){
+          html += '<div style="font-size:.73rem;margin-left:.6rem">– '+_ovPpEsc(s)+'</div>';
+        });
+      });
+    }
+    var imp = (a.few_shot && a.few_shot.improved) || [];
+    if(imp.length){
+      html += '<div style="margin-top:.4rem;font-size:.74rem;color:var(--muted)">差评改写（可作 few-shot 正样本）：</div>';
+      imp.forEach(function(e){
+        html += '<div style="margin-top:.15rem;font-size:.73rem"><span style="color:var(--muted)">原：</span>'+_ovPpEsc(e.original||'(空)')
+          +' <span style="color:var(--muted)">→ 改：</span>'+_ovPpEsc(e.better||'')+'</div>';
+      });
+    }
+    html += '</div>';
+    if(out){ out.innerHTML = html; }
+  }catch(e){ if(out){ out.textContent = '调参建议请求失败'; } }
 }
 
 let _ovTimer = null;
@@ -901,6 +1126,18 @@ document.addEventListener('DOMContentLoaded', function(){
   });
   ovRefresh();
   ovScheduleRefresh();
+  // N：点「扫码陪聊就绪」格展开/收起自检明细
+  var _pfCell = document.getElementById('ov-preflight-cell');
+  if(_pfCell){ _pfCell.addEventListener('click', function(){
+    var det = document.getElementById('ov-preflight-detail');
+    if(det){ det.style.display = det.style.display==='none' ? 'block' : 'none'; }
+  }); }
+  // 主动话题预览：按需刷新（首屏拉一次，避免与主刷新循环耦合）
+  var _ppBtn = document.getElementById('ov-pp-refresh');
+  if(_ppBtn){ _ppBtn.addEventListener('click', ovRefreshProactivePreview); }
+  var _ppAdv = document.getElementById('ov-pp-advice');
+  if(_ppAdv){ _ppAdv.addEventListener('click', ovProactiveAdvice); }
+  ovRefreshProactivePreview();
   // P5 + Q4: 运营漏斗初始加载 + 60s 轮询，默认 scope=all（跨平台总览）
   if(window.rpa && window.rpa.funnel){ window.rpa.funnel.init({intervalSec:60, defaultScope:'all'}); }
 

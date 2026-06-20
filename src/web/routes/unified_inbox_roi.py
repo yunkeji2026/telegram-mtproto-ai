@@ -133,6 +133,33 @@ def build_roi_summary(
         },
     }
 
+    # ── 情感陪聊·关系健康 + 留存（陪聊的"北极星"：聊得深、黏、用户回来）──────
+    engagement: Dict[str, Any] = {}
+    retention: Dict[str, Any] = {}
+    try:
+        inbox = _inbox_store(request)
+        if inbox is not None and hasattr(inbox, "get_engagement_stats"):
+            engagement = inbox.get_engagement_stats(since)
+        if inbox is not None and hasattr(inbox, "get_retention_cohorts"):
+            retention = inbox.get_retention_cohorts(since)
+    except Exception:
+        logger.debug("ROI 关系健康聚合失败（已忽略）", exc_info=True)
+    rr = retention.get("retention_rate", {}) or {}
+    out["relationship"] = {
+        "active_relationships": int(engagement.get("active_relationships", 0)),
+        "messages_in": int(engagement.get("messages_in", 0)),
+        "messages_out": int(engagement.get("messages_out", 0)),
+        "avg_turns": float(engagement.get("avg_turns", 0.0)),
+        "reciprocity": float(engagement.get("reciprocity", 0.0)),
+        "sticky_relationships": int(engagement.get("sticky_relationships", 0)),
+        "sticky_rate_pct": round(float(engagement.get("sticky_rate", 0.0)) * 100, 1),
+        "trend": engagement.get("trend", []),
+        "cohort_size": int(retention.get("cohort_size", 0)),
+        "retention_d1_pct": round(float(rr.get("d1", 0.0)) * 100, 1),
+        "retention_d7_pct": round(float(rr.get("d7", 0.0)) * 100, 1),
+        "retention_d30_pct": round(float(rr.get("d30", 0.0)) * 100, 1),
+    }
+
     # ── 配置健康度卡（复用 P0-1 校验器）────────────────────────────────
     out["config_health"] = _config_health(config_manager)
     return out

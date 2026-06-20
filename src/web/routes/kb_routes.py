@@ -1433,12 +1433,21 @@ def register_kb_routes(app, ctx):
 
     @app.get("/api/kb/auto-suggestions")
     async def api_kb_auto_suggestions(request: Request):
-        """综合 miss + 弱命中 + 过载条目，返回自动建议列表"""
+        """综合 miss + 弱命中 + 过载条目，返回自动建议列表。
+
+        M9+：额外返回 ``backlog``——把异构建议折算成统一数值优先级（priority_score）
+        并降序排成一条可执行待办，运营据此「先做哪条」；``backlog_summary`` 给一句话概览。
+        """
         _api_auth(request)
+        from src.utils.kb_gap import rank_kb_gaps, gap_backlog_summary
+        suggestions = _kb_store.get_auto_suggestions()
+        backlog = rank_kb_gaps(suggestions)
         return {
-            "suggestions": _kb_store.get_auto_suggestions(),
+            "suggestions": suggestions,
             "weak_hits":   _kb_store.get_weak_hits(top_k=10),
             "overloaded":  _kb_store.get_overloaded_entries(),
+            "backlog":     backlog,
+            "backlog_summary": gap_backlog_summary(backlog),
         }
 
     @app.get("/api/kb/reply-quality")

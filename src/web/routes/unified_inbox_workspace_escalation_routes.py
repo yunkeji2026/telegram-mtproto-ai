@@ -115,6 +115,34 @@ def register_workspace_escalation_routes(app, *, api_auth) -> None:
             raise HTTPException(404, f"升级记录 {esc_id} 不存在")
         return {"ok": True, "esc_id": esc_id, "assigned_to": target}
 
+    @app.get("/api/workspace/handoff-brief")
+    async def api_workspace_handoff_brief(
+        request: Request, conversation_id: str = "", reason: str = "",
+    ):
+        """M8 结构化转人工简报：客户画像（意图/情绪/风险/CSAT/摘要）+ 最近往来 + 亮点提醒。
+
+        坐席接手前一键拉取，3 秒进入状态。任何已认证坐席可读（读取会话上下文）。
+        store 缺失或会话无元数据时优雅降级为空画像（不报错）。
+        """
+        api_auth(request)
+        from src.utils.handoff_brief import build_handoff_brief
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            raise HTTPException(400, "conversation_id 不能为空")
+        inbox = _inbox_store(request)
+        meta = None
+        recent: List[Dict[str, Any]] = []
+        if inbox is not None:
+            try:
+                meta = inbox.get_conv_meta(cid)
+            except Exception:
+                logger.debug("get_conv_meta 失败（已忽略）", exc_info=True)
+            try:
+                recent = inbox.list_recent_messages(cid, limit=12)
+            except Exception:
+                logger.debug("list_recent_messages 失败（已忽略）", exc_info=True)
+        return build_handoff_brief(cid, meta, recent, reason=reason)
+
     @app.get("/api/workspace/escalation-log")
     async def api_workspace_escalation_log(request: Request, days: int = 7):
         """升级历史 + 接管时延（复盘安全网成效）：升级→首个人工接管。主管专属。"""
