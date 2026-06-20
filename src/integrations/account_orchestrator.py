@@ -30,7 +30,8 @@ from src.integrations.account_registry import get_account_registry
 logger = logging.getLogger(__name__)
 
 # 仅这些 mode 由编排器接管（device 归既有 RPA runner；web 待 M6）
-ORCHESTRATED_MODES = ("protocol",)
+# official = 官方 API 出站 worker（LINE/Messenger/WhatsApp Cloud，无状态 HTTP，G 延伸）
+ORCHESTRATED_MODES = ("protocol", "official")
 
 # 监督参数
 DEFAULT_INTERVAL = 15.0      # 监督步间隔（秒）
@@ -365,8 +366,17 @@ def ensure_builtin_workers(config: Dict[str, Any]) -> None:
         if (tg_enabled(config) and is_pyrogram_available()
                 and resolve_credentials(config) is not None
                 and get_worker_factory("telegram", "protocol") is None):
-            register_worker("telegram", "protocol",
-                            lambda acc, cfg: TelegramProtocolWorker(acc, cfg))
+            # N 线 核心4：companion_runtime 开 → 协议号跑 A 线"有灵魂"client；否则用 B 线薄连接
+            from src.integrations.telegram_companion_worker import (
+                TelegramCompanionWorker, companion_runtime_enabled,
+            )
+            if companion_runtime_enabled(config):
+                register_worker("telegram", "protocol",
+                                lambda acc, cfg: TelegramCompanionWorker(acc, cfg))
+                logger.info("[orchestrator] Telegram 协议号将使用 A 线统一运行时（companion_runtime）")
+            else:
+                register_worker("telegram", "protocol",
+                                lambda acc, cfg: TelegramProtocolWorker(acc, cfg))
     except Exception:
         logger.debug("[orchestrator] 注册 telegram worker 失败", exc_info=True)
     try:
@@ -376,6 +386,12 @@ def ensure_builtin_workers(config: Dict[str, Any]) -> None:
                             lambda acc, cfg: WhatsAppProtocolWorker(acc, cfg))
     except Exception:
         logger.debug("[orchestrator] 注册 whatsapp worker 失败", exc_info=True)
+    # 官方 API 出站 worker（LINE/Messenger/WhatsApp Cloud，mode=official；G 延伸）
+    try:
+        from src.integrations.official_api_worker import register_official_workers
+        register_official_workers(config)
+    except Exception:
+        logger.debug("[orchestrator] 注册官方 worker 失败", exc_info=True)
 
 
 class TelegramProtocolWorker:
@@ -386,6 +402,8 @@ class TelegramProtocolWorker:
         self.config = config
         self.account_id = str(account.get("account_id") or "")
         self.session_name = str((account.get("meta") or {}).get("session_name") or "")
+        # N2/N4：优先 session_string 内存启动（抗文件 session SQLite 锁 / DC 迁移不稳）
+        self.session_string = str((account.get("meta") or {}).get("session_string") or "")
         self.client: Any = None
         self.state = "stopped"
         self.detail = ""
@@ -404,8 +422,8 @@ class TelegramProtocolWorker:
     async def start(self) -> None:
         from src.integrations.telegram_protocol_login import resolve_credentials
         creds = resolve_credentials(self.config)
-        if creds is None or not self.session_name:
-            raise RuntimeError("缺少 api 凭据或 session_name")
+        if creds is None or not (self.session_name or self.session_string):
+            raise RuntimeError("缺少 api 凭据或 session_name/session_string")
         api_id, api_hash = creds
         # 重试前先清理可能残留的旧 client，避免连接泄漏
         if self.client is not None:
@@ -415,11 +433,18 @@ class TelegramProtocolWorker:
                 pass
             self.client = None
         from pyrogram import Client
-        kwargs: Dict[str, Any] = dict(api_id=api_id, api_hash=api_hash, workdir="sessions")
+        kwargs: Dict[str, Any] = dict(api_id=api_id, api_hash=api_hash)
         proxy = self._proxy()
         if proxy:
             kwargs["proxy"] = proxy
-        self.client = Client(self.session_name, **kwargs)
+        if self.session_string:
+            # N2/N4：内存会话启动——不碰 sessions/*.session 文件，规避扫码 client
+            # 残留连接造成的 "database is locked"，也更抗 DC 迁移。
+            name = self.session_name or f"mem_{self.account_id}"
+            self.client = Client(name, session_string=self.session_string, **kwargs)
+        else:
+            kwargs["workdir"] = "sessions"
+            self.client = Client(self.session_name, **kwargs)
         await self.client.start()
         self._wire_inbound()
         self.state = "running"

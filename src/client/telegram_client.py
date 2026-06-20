@@ -173,6 +173,17 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
         self.account_id: str = str(_ov.get('account_id') or 'default')
         self.account_label: str = str(_ov.get('account_label') or self.account_id)
         self.account_persona_ids: List[str] = list(_ov.get('persona_ids') or [])
+        # N 线 核心2：每号独立代理（反封号命门）。proxy_id 指向 proxy_pool 条目；
+        # 与 B 线协议 worker 复用同一份 proxy_pool + _to_pyrogram_proxy，不另造代理逻辑。
+        self.proxy_id: str = str(
+            _ov.get('proxy_id') or telegram_config.get('proxy_id') or ''
+        ).strip()
+        # N 线 核心4（统一运行时）：session_string 直接喂已授权 session（扫码/手机登录产物），
+        # 让协议号无需 phone 即可拉起 A 线"有灵魂"client。空则回落 session 文件 / phone 登录。
+        self.session_string: str = str(_ov.get('session_string') or '').strip()
+        # N 线 N4b（入站镜像）：开启后把本号收/发的消息镜像进统一收件箱（坐席台可见）。
+        # 默认关 → standalone main.py 行为不变；companion worker 拉起协议号时置 True。
+        self._mirror_inbox: bool = bool(_ov.get('mirror_inbox', False))
         
         # 初始化语音转录服务
         self.voice_transcriber = None
@@ -291,21 +302,38 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                 self.logger.error("pyrogram库未安装，请运行: pip install pyrogram")
                 return False
             
-            # 检查API凭证
-            if not all([self.api_id, self.api_hash, self.phone_number]):
+            # 检查 API 凭证：api_id/api_hash 必需；phone 仅在"无既有 session"时必需。
+            # N 线 核心4：有 session_string 或已落盘 session 文件 → 视为已授权，免 phone 拉起。
+            if not (self.api_id and self.api_hash):
                 self.logger.error("Telegram API凭证不完整")
                 self.logger.error("请从 https://my.telegram.org 获取api_id和api_hash")
-                self.logger.error("并在配置文件中填写phone_number")
+                return False
+            _has_session = bool(self.session_string) or os.path.exists(self._session_file_path())
+            if not _has_session and not self.phone_number:
+                self.logger.error("Telegram 登录信息不完整：需 phone_number 或已有 session（session_string/会话文件）")
                 return False
             
             # 创建客户端
-            self.client = Client(
+            _client_kwargs: Dict[str, Any] = dict(
                 name=self.session_name,
                 api_id=int(self.api_id),
                 api_hash=self.api_hash,
-                phone_number=self.phone_number,
-                workdir="sessions"  # 会话文件保存目录
+                workdir="sessions",  # 会话文件保存目录
             )
+            if self.phone_number:
+                _client_kwargs["phone_number"] = self.phone_number
+            # N 线 核心4：session_string 优先（in-memory 已授权 session，协议多开/云端拉起常用）
+            if self.session_string:
+                _client_kwargs["session_string"] = self.session_string
+            # N 线 核心2：注入每号独立代理（复用 B 线 proxy_pool + _to_pyrogram_proxy）
+            _proxy = self._resolve_proxy()
+            if _proxy:
+                _client_kwargs["proxy"] = _proxy
+                self.logger.info(
+                    "Telegram 客户端绑定代理 proxy_id=%s (%s)",
+                    self.proxy_id, _proxy.get("hostname"),
+                )
+            self.client = Client(**_client_kwargs)
             
             self.logger.info("Telegram客户端创建成功")
             return True
@@ -314,6 +342,23 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             self.logger.error(f"初始化Telegram客户端失败: {e}")
             return False
     
+    def _resolve_proxy(self) -> Optional[Dict[str, Any]]:
+        """解析本账号绑定的代理 → pyrogram proxy 配置（无 / 失败 → None）。
+
+        N 线 核心2：复用 B 线 ``proxy_pool`` + ``_to_pyrogram_proxy``，A/B 同一套代理源，
+        不重复造代理逻辑。``proxy_id`` 为空或解析失败时静默返回 None（保持直连旧行为）。
+        """
+        if not self.proxy_id:
+            return None
+        try:
+            from src.integrations.proxy_pool import get_proxy_pool
+            from src.integrations.telegram_protocol_login import _to_pyrogram_proxy
+            entry = get_proxy_pool().get(self.proxy_id, mask=False)
+            return _to_pyrogram_proxy(entry)
+        except Exception as ex:
+            self.logger.warning("代理解析失败 proxy_id=%s: %s", self.proxy_id, ex)
+            return None
+
     def _session_file_path(self) -> str:
         """会话文件路径：workdir 为 sessions 时，文件为 sessions/{name}.session"""
         import os
@@ -463,8 +508,13 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
         )
         return None
     
-    async def start(self):
-        """启动Telegram客户端"""
+    async def start(self, block: bool = True):
+        """启动Telegram客户端。
+
+        block=True（默认，main.py 独立运行）：末尾进入 ``idle()`` 常驻；
+        block=False（N 线 核心4，编排器托管）：连接+装处理器+起消息处理任务后即返回，
+        由外部事件循环（编排器监督循环）保活，便于按账号生命周期 start/stop。
+        """
         try:
             if not self.client:
                 self.logger.error("Telegram客户端未初始化")
@@ -509,7 +559,10 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             ec = self.config.get('emoticons', {})
             self.logger.info("情绪增强: %s", "已启用" if ec.get('enabled', True) else "已禁用（emoticons.enabled: false）")
             self.logger.info("✅ Telegram客户端已启动，等待消息...")
-            
+
+            # N 线 核心4：编排器托管模式不进入 idle()，直接返回让监督循环保活
+            if not block:
+                return
             # 保持客户端运行（可用 pyrogram.idle() 替代，此处用简单循环）
             try:
                 from pyrogram import idle
@@ -1166,6 +1219,37 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                 if m:
                     m.set_active_tasks(self._active_tasks, self._max_concurrent)
 
+    def _emit_inbox(self, *, chat_id: Any, text: str, direction: str,
+                    name: str = "", msg_id: str = "",
+                    media_type: str = "", media_ref: str = "") -> None:
+        """N4b：companion 运行时把 A 线收/发的消息镜像进统一收件箱（坐席台可见）。
+
+        默认关（``self._mirror_inbox`` False）→ standalone main.py 零影响。仅 emit 到
+        收件箱 sink（不触发 B 线 autoreply，避免与 A 线自身回复重复）。best-effort，
+        绝不影响主消息流。
+        """
+        if not getattr(self, "_mirror_inbox", False):
+            return
+        try:
+            from src.integrations.protocol_bridge import emit_incoming, make_message
+            emit_incoming(make_message(
+                platform="telegram",
+                account_id=getattr(self, "account_id", "default"),
+                chat_key=str(chat_id),
+                name=name or "",
+                text=text or "",
+                ts=time.time(),
+                msg_id=str(msg_id or ""),
+                direction=direction,
+                media_type=media_type,
+                media_ref=media_ref,
+            ))
+        except Exception:
+            try:
+                self.logger.debug("[mirror] 收件箱镜像失败", exc_info=True)
+            except Exception:
+                pass
+
     async def _process_message_async(self, message_data: Dict[str, Any]):
         """异步处理消息"""
         import time
@@ -1176,7 +1260,14 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             user_id = message_data['user_id']
             text = message_data['text']
             chat_id = message_data['chat_id']
-            
+
+            # N4b：入站镜像（companion 模式才生效）→ 坐席台/统一收件箱可见用户原话
+            self._emit_inbox(
+                chat_id=chat_id, text=text, direction="in",
+                name=str(message_data.get('username') or ''),
+                msg_id=str(getattr(message, 'id', '') or ''),
+            )
+
             _es_cnt, _es_key = 0, ""
             if text and self._human_escalation:
                 try:
@@ -1269,53 +1360,65 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                     if f"@{uname}" in t_lower or f"@{uname}\u200b" in t_lower:
                         triggered_by_mention = True
             # 情绪粗判传入 AI prompt（在情绪增强之前，与 enhance_reply 独立）
-            user_emotion_hint = "neutral"
-            if self.emotion_enhancer:
-                try:
-                    _ea = self.emotion_enhancer.analyze_message_emotion(text)
-                    user_emotion_hint = (_ea or {}).get("emotion", "neutral") or "neutral"
-                except Exception:
-                    pass
+            # N 线 核心1：复用共享 companion_context（A/B 两线同一套情绪/人设逻辑）
+            from src.utils.companion_context import (
+                emotion_hint as _companion_emotion_hint,
+                record_relationship_message as _record_relationship_message,
+                resolve_funnel_stage as _resolve_funnel_stage,
+                resolve_intimacy_score as _resolve_intimacy_score,
+                route_persona_id as _route_persona_id,
+            )
+            user_emotion_hint = _companion_emotion_hint(text, self.emotion_enhancer)
+            # Q3：先把本条入站记入 contacts（recorder 未开则 no-op）→ 刷新 journey 的
+            # intimacy_score，再读出，保证融合用到的是"含本轮"的最新分（与 RPA 各线同序）。
+            _record_relationship_message(
+                self.account_id, chat_id, "in",
+                text_preview=text or "",
+                display_name=str(message_data.get('username') or ''),
+            )
+            # Q3：注入统一关系事实源（contacts.IntimacyEngine）→ companion_relationship
+            # 双信号融合（沉默衰减自动降阶 + reunion 提示）。provider 未注册时返回 None，
+            # 行为完全等同旧版（A 线此前从不传 intimacy_score → 融合恒跳过）。
+            _intimacy_score = _resolve_intimacy_score(self.account_id, chat_id)
+            _funnel_stage = _resolve_funnel_stage(self.account_id, chat_id)
             # 语音转录：AI 只需看纯文本，剥掉 [语音转录] 前缀标记
             _VOICE_PREFIX = "[语音转录] "
             ai_text = text[len(_VOICE_PREFIX):] if text.startswith(_VOICE_PREFIX) else text
 
             # 调用Skill管理器处理消息，传递上下文分析结果、图片 OCR、机器人消息、群名、request_id、情绪、发群消息回调（供 gxp 代发命令等）
+            _sm_context = {
+                'chat_id': chat_id,
+                'chat_title': chat_title,
+                'context_analysis': context_analysis,
+                'image_ocr_text': image_ocr_text,
+                'recent_bot_messages': recent_bot_messages,
+                'request_id': request_id,
+                'user_emotion_hint': user_emotion_hint,
+                'triggered_by_mention': triggered_by_mention,
+                '_trigger_path': message_data.get('_trigger_path'),
+                '_send_to_chat': self.send_message,
+                '_record_gxp_cmd': self.record_gxp_command,
+                '_i18n': self.i18n,
+                '_event_tracker': self.event_tracker,
+                'user_id': user_id,
+                'user_msg_id': getattr(message, 'id', 0),
+                # N 线 核心1：复用共享 companion_context.route_persona_id（A/B 同一套 3-tier 路由）
+                'account_persona_id': _route_persona_id(
+                    getattr(self, 'account_persona_ids', None), _chat_type_str
+                ),
+                'is_group': _is_group,
+                'chat_type': _chat_type_str or 'private',
+                'platform': 'telegram',  # S5: CrossPlatformIdentity
+            }
+            # Q3：仅在有值时注入，None 不写键 → 与 RPA 各线一致、向后兼容
+            if _intimacy_score is not None:
+                _sm_context['intimacy_score'] = _intimacy_score
+            if _funnel_stage:
+                _sm_context['funnel_stage'] = _funnel_stage
             reply_text = await self.skill_manager.process_message(
                 text=ai_text,
                 user_id=user_id,
-                context={
-                    'chat_id': chat_id,
-                    'chat_title': chat_title,
-                    'context_analysis': context_analysis,
-                    'image_ocr_text': image_ocr_text,
-                    'recent_bot_messages': recent_bot_messages,
-                    'request_id': request_id,
-                    'user_emotion_hint': user_emotion_hint,
-                    'triggered_by_mention': triggered_by_mention,
-                    '_trigger_path': message_data.get('_trigger_path'),
-                    '_send_to_chat': self.send_message,
-                    '_record_gxp_cmd': self.record_gxp_command,
-                    '_i18n': self.i18n,
-                    '_event_tracker': self.event_tracker,
-                    'chat_id': chat_id,
-                    'user_id': user_id,
-                    'user_msg_id': getattr(message, 'id', 0),
-                    'account_persona_id': (
-                        (
-                            self.account_persona_ids[2]
-                            if _chat_type_str == 'channel' and len(self.account_persona_ids) > 2
-                            else self.account_persona_ids[1]
-                            if _is_group and len(self.account_persona_ids) > 1
-                            else self.account_persona_ids[0]
-                        )
-                        if getattr(self, 'account_persona_ids', None)
-                        else ""
-                    ),
-                    'is_group': _is_group,
-                    'chat_type': _chat_type_str or 'private',
-                    'platform': 'telegram',  # S5: CrossPlatformIdentity
-                }
+                context=_sm_context,
             )
             
             # 情绪增强（仅在启用时）

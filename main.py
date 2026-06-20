@@ -111,6 +111,12 @@ class AIChatAssistant:
         self._web_server = None
         # W2-D4: 主动唤醒循环引用（关程序时 stop）
         self._reactivation_loop = None
+        # Phase O: 主动关怀派发器引用（关程序时 stop）
+        self._care_dispatcher = None
+        # P2: 陪伴主动话题调度循环引用（关程序时 stop）
+        self._companion_proactive_loop = None
+        # 多平台 deferred 队列（非 messenger 主动消息走此队列；关程序时 stop）
+        self._deferred_outbox_dispatcher = None
         # 坐席工作台实时化（D5a）：收件箱后台 ingest 轮询任务 + web_app 引用
         self._web_app = None  # type: Optional[Any]  # noqa: F821
         self._inbox_ingest_task = None
@@ -205,6 +211,17 @@ class AIChatAssistant:
             self.skill_manager = SkillManager(self.config, self.ai_client)
             await self.skill_manager.initialize()
             self.logger.info("Skill管理器初始化成功")
+
+            # N 线 核心4：注入统一运行时上下文，供编排器把协议号（扫码登录）拉起为 A 线丰富 client
+            try:
+                from src.integrations.telegram_companion_worker import set_companion_context
+                set_companion_context(
+                    config_manager=self.config,
+                    skill_manager=self.skill_manager,
+                    ai_client=self.ai_client,
+                )
+            except Exception as _ctx_ex:
+                self.logger.debug("companion runtime 上下文注入失败: %s", _ctx_ex)
             
             # 5. 初始化Telegram客户端（支持多账号并行）
             try:
@@ -214,6 +231,24 @@ class AIChatAssistant:
             except Exception as _reg_ex:
                 self.logger.warning("TelegramAccountRegistry 构建失败，回退单账号: %s", _reg_ex)
                 _tg_registry = None
+
+            # N5：登录注册统一（默认关）——把 A 线 config 账号并入 B 线持久注册表，
+            # 与 QR 扫码登录共用一张 platform_accounts 表，供编排器/舰队视图看全。
+            # 幂等且不破坏既有 QR 登录态（session_string/online 保留）。
+            if _tg_registry is not None and bool(
+                (tg_raw_cfg or {}).get("unify_login_registry", False)
+            ):
+                try:
+                    from src.integrations.account_registry import get_account_registry
+                    _synced = _tg_registry.sync_to_account_registry(
+                        get_account_registry()
+                    )
+                    self.logger.info(
+                        "[N5] config 账号已并入统一注册表：%s",
+                        ", ".join(_synced) or "（无）",
+                    )
+                except Exception as _sync_ex:
+                    self.logger.warning("[N5] 登录注册统一同步失败（忽略）: %s", _sync_ex)
 
             _primary_ctx = None if _tg_registry is None else _tg_registry.primary()
             _primary_cfg = _primary_ctx.account_cfg() if _primary_ctx else None
@@ -464,6 +499,50 @@ class AIChatAssistant:
                     # 这样线上每条 inbound/outbound 都会被记到 contacts DB。
                     # W4-Hooks-Flag：允许按 channel 单独关闭（灰度或隔离排错）。
                     _hooks = self.contacts.hooks
+                    # Q3：把同一套 IntimacyEngine 事实源注册为进程级 provider，
+                    # 让 A 线 Telegram（含 companion 运行时）也吃上 intimacy/funnel
+                    # → companion_relationship 双信号融合。telegram hook 也受同一开关控制。
+                    try:
+                        from src.utils.companion_context import (
+                            set_relationship_providers,
+                        )
+                        if self.contacts.is_rpa_hook_enabled("telegram"):
+                            # 只读查询：始终注册（无数据时 resolve_* 返回 None，安全）
+                            set_relationship_providers(
+                                intimacy_lookup=getattr(
+                                    _hooks, "get_journey_intimacy", None),
+                                funnel_lookup=getattr(
+                                    _hooks, "get_journey_funnel_stage", None),
+                            )
+                            # 写入 contacts（生成 journey + 刷新 intimacy）：仅在显式
+                            # 开启时注册 → 默认零行为变化，避免意外激活下游流程。
+                            _cfg_all = (
+                                self.config.config
+                                if hasattr(self.config, "config") else {}
+                            )
+                            _tg_login = (
+                                (_cfg_all.get("platform_login") or {})
+                                .get("telegram") or {}
+                            )
+                            if _tg_login.get("contacts_recording", False):
+                                set_relationship_providers(
+                                    message_recorder=getattr(
+                                        _hooks, "on_message", None),
+                                )
+                                self.logger.info(
+                                    "Telegram A 线已接入关系事实源 "
+                                    "(intimacy/funnel + 收发记录写入 contacts)")
+                            else:
+                                self.logger.info(
+                                    "Telegram A 线已接入关系事实源 "
+                                    "(只读 intimacy/funnel；contacts_recording 未开)")
+                        else:
+                            self.logger.info(
+                                "Telegram 关系事实源已按配置禁用 "
+                                "(contacts.rpa_hooks.telegram=false)")
+                    except Exception:
+                        self.logger.warning(
+                            "set_relationship_providers 失败", exc_info=True)
                     if self.messenger_rpa_service is not None:
                         if self.contacts.is_rpa_hook_enabled("messenger"):
                             try:
@@ -608,6 +687,26 @@ class AIChatAssistant:
                         web_app.state.device_coordinator_service = self.device_coordinator_service
                     if self.hotplug_watcher is not None:
                         web_app.state.hotplug_watcher = self.hotplug_watcher
+
+                    # ── G1 全局 Kill-Switch：初始化单例（回填持久化的冻结态，重启不丢）──
+                    try:
+                        from src.ops.kill_switch import get_kill_switch
+                        _cfg_dir0 = Path(self.config.config_path).parent
+                        _ks_cfg = ((self.config.config or {}).get("ops") or {}).get("kill_switch") or {}
+                        _ks_db = Path(_ks_cfg.get("db_path") or (_cfg_dir0 / "runtime_flags.db"))
+                        if not _ks_db.is_absolute():
+                            _ks_db = _cfg_dir0 / _ks_db
+                        _ks = get_kill_switch(_ks_db)
+                        web_app.state.kill_switch = _ks
+                        _active = _ks.status()
+                        if _active:
+                            self.logger.warning(
+                                "🛑 Kill-Switch 启动即生效（重启回填）：%s",
+                                [i["scope"] for i in _active])
+                        else:
+                            self.logger.info("Kill-Switch 已就绪（%s）", _ks_db)
+                    except Exception:
+                        self.logger.warning("Kill-Switch 初始化跳过", exc_info=True)
 
                     # ── 统一收件箱持久层（Phase A：纯旁路，store 故障/为空自动回落） ──
                     try:
@@ -1212,6 +1311,24 @@ class AIChatAssistant:
                 # 必须在 contacts + messenger_rpa_service + ai_client 都就绪后启动
                 await self._maybe_start_reactivation_loop()
 
+                # ★ Phase O：主动关怀引擎（记忆驱动的约定/事件跟进）
+                await self._maybe_start_proactive_care(self._web_app)
+
+                # ★ 多平台 deferred 队列（非 messenger 主动消息的发送闭环；默认关）
+                await self._maybe_start_deferred_outbox()
+
+                # ★ Q 延伸：ingest 回写 contact_id（默认关）
+                self._maybe_wire_ingest_contact_writeback()
+
+                # ★ Q 延伸·存量回填：给历史会话补 contact_id（默认关，一次性）
+                asyncio.create_task(
+                    self._maybe_run_contact_id_backfill(),
+                    name="contact_id_backfill",
+                )
+
+                # ★ P2：陪伴主动话题调度（沉默检测 + 冷却 → P1 选题 → 主动开场）
+                await self._maybe_start_companion_proactive()
+
                 # 坐席工作台实时化（D5a）：后台轻量 ingest 轮询 → 新入站消息发 SSE 事件
                 self._maybe_start_inbox_ingest_loop()
 
@@ -1280,6 +1397,620 @@ class AIChatAssistant:
                 self.logger.debug("收件箱 ingest 轮询异常", exc_info=True)
             await asyncio.sleep(interval)
 
+    def _build_contact_resolver(self):
+        """Q 延伸：构造 (platform, account_id, chat_key) → contact_id 解析器。
+
+        inbox/contacts 未就绪时返回 None。供 ingest 回写与存量回填共用。
+        """
+        if self.inbox_store is None or self.contacts is None:
+            return None
+        from src.contacts.identity_bridge import resolve_contact_id
+
+        cstore = self.contacts.store
+
+        def _resolver(platform: str, account_id: str, chat_key: str) -> str:
+            return resolve_contact_id(
+                cstore, platform=platform, account_id=account_id, chat_key=chat_key)
+
+        return _resolver
+
+    def _maybe_wire_ingest_contact_writeback(self) -> None:
+        """Q 延伸：ingest 热路径回写 contact_id（默认关，companion.relations_health）。"""
+        try:
+            rh = ((self.config.config.get("companion") or {})
+                  .get("relations_health") or {})
+            if not rh.get("ingest_contact_id_writeback", False):
+                self.logger.info(
+                    "ingest contact_id 回写未启用"
+                    "（companion.relations_health.ingest_contact_id_writeback=false）")
+                return
+            resolver = self._build_contact_resolver()
+            if resolver is None:
+                self.logger.info("ingest contact_id 回写跳过（inbox/contacts 未就绪）")
+                return
+            self.inbox_store.register_contact_resolver(resolver)
+            self.logger.info("✅ ingest contact_id 回写已接线（Q 延伸）")
+        except Exception:
+            self.logger.warning("ingest contact_id 回写接线跳过", exc_info=True)
+
+    async def _maybe_run_contact_id_backfill(self) -> None:
+        """Q 延伸·存量回填：给历史会话补 contact_id（默认关，可 dry_run）。
+
+        config: companion.relations_health.contact_id_backfill.{enabled, limit, dry_run,
+        delay_seconds}。一次性启动任务，DB 扫描放线程池避免阻塞事件循环。
+        """
+        try:
+            rh = ((self.config.config.get("companion") or {})
+                  .get("relations_health") or {})
+            bf = (rh.get("contact_id_backfill") or {})
+            if not bf.get("enabled", False):
+                return
+            resolver = self._build_contact_resolver()
+            if resolver is None:
+                self.logger.info("contact_id 存量回填跳过（inbox/contacts 未就绪）")
+                return
+            delay = float(bf.get("delay_seconds", 20))
+            await asyncio.sleep(max(0.0, delay))
+            if not self.running:
+                return
+            from src.contacts.contact_backfill import backfill_contact_ids
+
+            limit = max(1, min(int(bf.get("limit", 200)), 2000))
+            dry_run = bool(bf.get("dry_run", False))
+            result = await asyncio.to_thread(
+                backfill_contact_ids, self.inbox_store, resolver,
+                limit=limit, dry_run=dry_run,
+            )
+            import time as _time
+            out = {**result.as_dict(), "trigger": "startup", "ts": _time.time()}
+            if self._web_app is not None:
+                self._web_app.state.last_contact_backfill = out
+            self.logger.info("✅ contact_id 存量回填完成: %s", out)
+        except Exception:
+            self.logger.warning("contact_id 存量回填失败", exc_info=True)
+
+    def _ensure_deferred_outbox(self):
+        """惰性建/起多平台 deferred 队列（非 messenger 主动消息走此队列）。
+
+        返回 dispatcher（已 start），或 None（功能关/不可用）。幂等：重复调用复用同一实例。
+        sender 用编排器 `orch.send(platform,account,chat_key,text)` 统一投递（编排器已
+        路由到对应平台 worker 并回写收件箱出站镜像）；worker 未就绪 → 抛 NotReady 推后重试。
+        messenger 不走此队列（保留既有 runner deferred 路径）。
+        """
+        if self._deferred_outbox_dispatcher is not None:
+            return self._deferred_outbox_dispatcher
+        try:
+            comp = (self.config.config.get("companion") or {})
+            cfg = (comp.get("multiplatform_deferred") or {})
+            if not cfg.get("enabled", False):
+                return None
+            from src.integrations.shared.deferred_outbox import (
+                DeferredDispatcher, DeferredOutboxStore, DeferredSenderNotReady,
+            )
+
+            _cfg_dir = Path(self.config.config_path).parent
+            store = DeferredOutboxStore(_cfg_dir / "deferred_outbox.db")
+
+            async def _universal_send(account_id, chat_key, text, *, platform):
+                # 1) 编排器受管 worker（telegram/whatsapp/line… 任一暴露 send 的）
+                try:
+                    from src.integrations.account_orchestrator import get_orchestrator
+                    orch = get_orchestrator(self.config.config or {})
+                    if orch.owns(platform, account_id):
+                        res = await orch.send(platform, account_id, chat_key, text)
+                        return bool((res or {}).get("delivered", True))
+                except DeferredSenderNotReady:
+                    raise
+                except Exception:
+                    self.logger.debug("[deferred_outbox] 编排器发送异常 %s:%s",
+                                      platform, account_id, exc_info=True)
+                # 2) 回落：主 A 线客户端（仅 telegram default）
+                if platform == "telegram" and self.telegram_client is not None:
+                    try:
+                        target = int(chat_key)
+                    except (TypeError, ValueError):
+                        target = chat_key
+                    try:
+                        return bool(await self.telegram_client.send_message(target, text))
+                    except Exception:
+                        self.logger.debug("[deferred_outbox] 主客户端发送失败", exc_info=True)
+                        return False
+                # 3) 该账号此刻无可用 worker → 暂态，推后重试（不丢、不标失败）
+                raise DeferredSenderNotReady(f"no worker for {platform}:{account_id}")
+
+            def _make_sender(platform):
+                async def _s(account_id, chat_key, text):
+                    return await _universal_send(account_id, chat_key, text,
+                                                 platform=platform)
+                return _s
+
+            dispatcher = DeferredDispatcher(
+                store=store,
+                quiet_start_hour=float(cfg.get("quiet_start_hour", 23)),
+                quiet_end_hour=float(cfg.get("quiet_end_hour", 8)),
+                min_gap_sec=float(cfg.get("min_gap_sec", 45)),
+                max_per_tick=int(cfg.get("max_per_tick", 3)),
+                interval_sec=float(cfg.get("interval_sec", 120)),
+            )
+            platforms = cfg.get("platforms") or [
+                "telegram", "line", "whatsapp", "instagram", "zalo",
+            ]
+            for p in platforms:
+                dispatcher.register_sender(str(p), _make_sender(str(p)))
+
+            self._deferred_outbox_dispatcher = dispatcher
+            if self._web_app is not None:
+                self._web_app.state.deferred_outbox_store = store
+                self._web_app.state.deferred_outbox_dispatcher = dispatcher
+            self.logger.info(
+                "✅ 多平台 deferred 队列已就绪（platforms=%s interval=%ss）",
+                platforms, cfg.get("interval_sec", 120))
+            return dispatcher
+        except Exception:
+            self.logger.warning("多平台 deferred 队列初始化失败（非 messenger 主动消息将被丢弃）",
+                                 exc_info=True)
+            return None
+
+    def _enqueue_deferred_outbox(self, channel, account_id, chat_name, reply,
+                                 defer_until, reason, staleness_sec, extra) -> int:
+        """把非 messenger 主动消息入多平台 deferred 队列。返回 row_id（0=未入队）。
+
+        作为 care/reactivation send_callback 的非 messenger 分支：队列关或不可用 → 返回 0
+        （上层据此 mark_skipped/failed，与原「return 0」语义一致，零破坏）。
+        """
+        dispatcher = self._ensure_deferred_outbox()
+        if dispatcher is None:
+            return 0
+        try:
+            return dispatcher._store.enqueue(
+                platform=str(channel), account_id=str(account_id or "default"),
+                chat_key=str(chat_name), reply_text=str(reply),
+                defer_until=float(defer_until), reason=str(reason or ""),
+                staleness_sec=float(staleness_sec), extra=extra or {})
+        except Exception:
+            self.logger.debug("deferred_outbox enqueue 失败 %s", channel, exc_info=True)
+            return 0
+
+    async def _maybe_start_deferred_outbox(self) -> None:
+        """启动多平台 deferred 队列 drain loop（默认关）。"""
+        try:
+            dispatcher = self._ensure_deferred_outbox()
+            if dispatcher is None:
+                self.logger.info(
+                    "多平台 deferred 队列未启用"
+                    "（companion.multiplatform_deferred.enabled=false）")
+                return
+            await dispatcher.start()
+            self.logger.info("✅ 多平台 deferred 队列 drain loop 已启动")
+        except Exception:
+            self.logger.warning("多平台 deferred 队列启动跳过", exc_info=True)
+
+    async def _maybe_start_proactive_care(self, web_app=None) -> None:
+        """Phase O：主动关怀引擎（默认关，companion.proactive_care.enabled 开）。
+
+        捕获：入站新消息回调 → 抽取约定入 care_schedule（gated）。
+        派发：到期由 CareDispatcher 经 messenger deferred 队列发出（复用 reactivation 护栏）。
+        """
+        try:
+            cfg = ((self.config.config.get("companion") or {}).get("proactive_care") or {})
+            if not cfg.get("enabled", False):
+                self.logger.info("proactive_care 未启用（companion.proactive_care.enabled=false）")
+                return
+            from src.contacts.care_schedule import get_care_schedule_store
+
+            _cfg_dir = Path(self.config.config_path).parent
+            care_store = get_care_schedule_store(_cfg_dir / "care_schedule.db")
+            if web_app is not None:
+                web_app.state.care_schedule_store = care_store
+            # 启动时清理逾期太久的待办（错过时机不补发）
+            try:
+                care_store.expire_overdue(grace_days=float(cfg.get("grace_days", 1)))
+            except Exception:
+                pass
+
+            # 捕获接线：入站新消息 → 抽取入库（gated，复用 inbox 既有回调钩子）
+            if self.inbox_store is not None and cfg.get("capture", True):
+                try:
+                    from src.contacts.care_capture import make_care_inbound_cb
+                    self.inbox_store.register_new_inbound_cb(
+                        make_care_inbound_cb(care_store, self.config))
+                    self.logger.info("✅ proactive_care 入站捕获已接线")
+                except Exception:
+                    self.logger.warning("proactive_care 捕获接线跳过", exc_info=True)
+
+            # 派发循环：需 messenger deferred 队列（与 reactivation 同款发送）
+            if self.messenger_rpa_service is None or self.ai_client is None:
+                self.logger.info("proactive_care 派发循环跳过（messenger_rpa/ai 未就绪），仅捕获")
+                return
+            from src.contacts.care_dispatcher import CareDispatcher
+
+            async def _care_send(channel, account_id, chat_name, reply, defer_until,
+                                 reason, staleness_sec, extra):
+                if channel != "messenger":
+                    # 非 messenger → 多平台 deferred 队列（关/不可用则返回 0，零破坏）
+                    return self._enqueue_deferred_outbox(
+                        channel, account_id, chat_name, reply, defer_until,
+                        reason, staleness_sec, extra)
+                return await self.messenger_rpa_service.enqueue_reactivation_deferred(
+                    account_id=account_id, chat_name=chat_name, reply_text=reply,
+                    defer_until=defer_until, defer_reason=reason,
+                    staleness_sec=staleness_sec, extra=extra)
+
+            def _care_context(contact_key: str) -> str:
+                # 最近若干条消息文本作 prompt 可引用要点（best-effort）
+                try:
+                    msgs = self.inbox_store.list_messages(contact_key, limit=8) \
+                        if self.inbox_store else []
+                    lines = [str(m.get("text") or "").strip() for m in (msgs or [])]
+                    return "\n".join(t for t in lines if t)[:800]
+                except Exception:
+                    return ""
+
+            ai_name = "她"
+            try:
+                ai_name = str((self.config.get_ai_config() or {}).get("ai_name") or "她")
+            except Exception:
+                ai_name = "她"
+
+            dispatcher = CareDispatcher(
+                store=care_store, ai_client=self.ai_client, send_callback=_care_send,
+                context_provider=_care_context, ai_name=ai_name,
+                max_per_tick=int(cfg.get("max_per_tick", 3)),
+                interval_sec=float(cfg.get("interval_sec", 600)),
+                skip_if_no_context=bool(cfg.get("skip_if_no_context", True)),
+                quiet_start_hour=float(cfg.get("quiet_start_hour", 23)),
+                quiet_end_hour=float(cfg.get("quiet_end_hour", 8)),
+                dry_run=bool(cfg.get("dry_run", False)),
+            )
+            await dispatcher.start()
+            self._care_dispatcher = dispatcher
+            self.logger.info("✅ proactive_care 派发循环已启动（interval=%ss）",
+                             cfg.get("interval_sec", 600))
+        except Exception as ex:
+            self.logger.warning("proactive_care 启动跳过: %s", ex)
+            self.logger.debug("proactive_care 启动异常", exc_info=True)
+
+    async def _maybe_start_companion_proactive(self) -> None:
+        """P2：陪伴主动话题调度（默认关，companion.proactive_topic.enabled 开）。
+
+        沉默检测 + 冷却 → P1 选题（build_proactive_opener，只回访高置信记忆）→
+        ai 生成一句自然开场 → 经编排器受管 worker / 主 A 线客户端发出（自动镜像收件箱）。
+        仅 Telegram 协议号；与 proactive_care(messenger 约定驱动) 互补、不重叠。
+        """
+        try:
+            comp = (self.config.config.get("companion") or {})
+            cfg = (comp.get("proactive_topic") or {})
+            enabled = bool(cfg.get("enabled", False))
+            # 预览（可观测面板）仅需 inbox + skill_manager；ai 仅"真发"时才需要。
+            # 故即便未启用 / ai 未就绪，也先挂上"会发给谁、引用哪条记忆"的预览能力，
+            # 让运营在真正开闸前先 dry-run 看清本轮候选。
+            if self.inbox_store is None or self.skill_manager is None:
+                self.logger.info(
+                    "companion proactive_topic 跳过（inbox_store/skill_manager 未就绪，预览亦不可用）")
+                return
+            from src.integrations.companion_proactive import (
+                CompanionProactiveLoop, JsonCooldownStore, plan_proactive_sends,
+            )
+
+            scan_limit = int(cfg.get("scan_limit", 200))
+            min_silent_hours = float(cfg.get("min_silent_hours", 24))
+
+            def _conversations():
+                try:
+                    rows = self.inbox_store.list_conversations(
+                        limit=scan_limit, platform="telegram") or []
+                except Exception:
+                    return []
+                cids = [str(r.get("conversation_id") or "")
+                        for r in rows if r.get("conversation_id")]
+                try:
+                    dirs = self.inbox_store.last_message_dirs(cids)
+                except Exception:
+                    dirs = {}
+                try:
+                    tags_map = self.inbox_store.list_conv_tags_map(cids)
+                except Exception:
+                    tags_map = {}
+                out = []
+                for r in rows:
+                    cid = str(r.get("conversation_id") or "")
+                    chat_key = str(r.get("chat_key") or "")
+                    meta = tags_map.get(cid, {}) or {}
+                    out.append({
+                        "conversation_id": cid,
+                        "platform": str(r.get("platform") or "telegram"),
+                        "account_id": str(r.get("account_id") or "default"),
+                        "chat_key": chat_key,
+                        "last_ts": r.get("last_ts") or 0,
+                        "last_direction": (dirs.get(cid) or {}).get("direction") or "",
+                        "archived": bool(meta.get("archived")),
+                        # 私聊：episodic 记忆 key == 对端 id == chat_key
+                        "memory_key": chat_key,
+                        "stage": "",
+                        "intimacy": 0.0,
+                    })
+                return out
+
+            def _opener(*, memory_key, silent_hours, stage, intimacy):
+                return self.skill_manager.build_proactive_opener(
+                    memory_key, silent_hours=silent_hours, stage=stage,
+                    intimacy=intimacy, min_silent_hours=min_silent_hours)
+
+            cd_path = Path(self.config.config_path).parent / "companion_proactive_cooldown.json"
+
+            # 与 proactive_care(Phase O) 去重：已排关怀的会话让路（best-effort）。
+            # 仅在 care 子系统已就绪（store 已挂 web_app.state）时生效，否则不去重、无害。
+            care_store = None
+            try:
+                care_store = getattr(
+                    getattr(self._web_app, "state", None), "care_schedule_store", None)
+            except Exception:
+                care_store = None
+
+            def _has_pending_care(conversation_id: str) -> bool:
+                if care_store is None:
+                    return False
+                try:
+                    return int(care_store.count_pending_by_contact(conversation_id)) > 0
+                except Exception:
+                    return False
+
+            # 采样评分回流存储（质量闭环）：试发采样落库，供 👍/👎 评分 + 调参看板。
+            sample_store = None
+            try:
+                from src.integrations.companion_sample_store import (
+                    get_companion_sample_store,
+                )
+                _sdb = Path(self.config.config_path).parent / "companion_samples.db"
+                sample_store = get_companion_sample_store(_sdb)
+                self._web_app.state.companion_sample_store = sample_store
+            except Exception:
+                sample_store = None
+                self.logger.debug("[proactive] 采样评分存储初始化失败", exc_info=True)
+
+            # few-shot 风格示范注入（默认关，人审样本后开）：把人工高赞/改写样本作口吻示范
+            # 拼进生成 prompt（只学风格不照抄内容），让评分数据反哺生成——自我改进环。
+            _fs_cfg = (cfg.get("few_shot") or {})
+            _fs_enabled = bool(_fs_cfg.get("enabled", False))
+            _fs_max = int(_fs_cfg.get("max_examples", 3))
+
+            _pp_params = dict(
+                min_silent_hours=min_silent_hours,
+                cooldown_hours=float(cfg.get("cooldown_hours", 72)),
+                quiet_start_hour=float(cfg.get("quiet_start_hour", 23)),
+                quiet_end_hour=float(cfg.get("quiet_end_hour", 8)),
+            )
+            _real_max_per_tick = int(cfg.get("max_per_tick", 3))
+
+            def _proactive_preview(limit=50):
+                """可观测预览（dry-run）：本轮"会主动联系谁、引用哪条记忆、带哪些背景"。
+                不发送、不写冷却；即便功能未启用也可调用（开闸前先看清候选）。"""
+                lim = max(1, min(int(limit or 50), 200))
+                try:
+                    convs = _conversations()
+                except Exception:
+                    convs = []
+                try:
+                    cooldown_map = JsonCooldownStore(cd_path).snapshot()
+                except Exception:
+                    cooldown_map = {}
+                # 预览展示全部候选（最多 lim 条），不受 max_per_tick 截断；
+                # 另标出本 tick 实际会发的前 N 条（按沉默时长降序）。
+                plans = plan_proactive_sends(
+                    convs, cooldown_map=cooldown_map, opener_fn=_opener,
+                    has_pending_care=_has_pending_care, max_per_tick=lim, **_pp_params)
+                for i, p in enumerate(plans):
+                    p["would_send_this_tick"] = i < _real_max_per_tick
+                return {
+                    "enabled": enabled,
+                    "dry_run": bool(cfg.get("dry_run", False)),
+                    "scanned": len(convs),
+                    "candidates": len(plans),
+                    "max_per_tick": _real_max_per_tick,
+                    "min_silent_hours": min_silent_hours,
+                    "cooldown_hours": _pp_params["cooldown_hours"],
+                    "quiet_hours": [_pp_params["quiet_start_hour"], _pp_params["quiet_end_hour"]],
+                    "care_dedup_active": care_store is not None,
+                    "plans": plans,
+                }
+
+            ai_name = "她"
+            try:
+                ai_name = str((self.config.get_ai_config() or {}).get("ai_name") or "她")
+            except Exception:
+                ai_name = "她"
+
+            async def _gen_text(plan):
+                """按 plan 生成"要发出去的那一句"（directive + 背景记忆 + 最近上下文）。
+                只生成、不发送；ai 未就绪或空回复 → 返回 ""。真发 _send 与试发预览共用。"""
+                ctx_lines = []
+                try:
+                    msgs = self.inbox_store.list_recent_messages(
+                        plan["conversation_id"], limit=6) or []
+                    ctx_lines = [str(m.get("text") or "").strip()
+                                 for m in msgs if str(m.get("text") or "").strip()]
+                except Exception:
+                    ctx_lines = []
+                ctx = "\n".join(ctx_lines[-6:])[:600]
+                prompt = (
+                    f"你是「{ai_name}」，正在主动给一位许久未联系的朋友发消息。\n"
+                    f"{plan['directive']}\n"
+                    f"要求：只输出要发出去的那一句话本身，口语化、温暖、自然，不超过40字，"
+                    f"不要解释、不要加引号、不要署名。\n"
+                )
+                # P1b：把其他高置信记忆作"背景"喂给模型，让开场更贴心自然，
+                # 但严格只作背景——绝不罗列、不逐条追问（与 directive 的克制一致）。
+                extra_facts = [
+                    str(f).strip()
+                    for f in (plan.get("context_facts") or [])
+                    if str(f).strip()
+                ]
+                if extra_facts:
+                    prompt += (
+                        "\n（背景：你还记得关于TA的这些事，仅用来把这一句说得更走心，"
+                        "绝不要罗列、不要逐条追问）：\n- "
+                        + "\n- ".join(extra_facts[:3]) + "\n"
+                    )
+                if ctx:
+                    prompt += f"\n（可参考你们最近的聊天，但不要复读原话）：\n{ctx}\n"
+                # few-shot 风格示范（默认关）：人工认可样本作口吻示范，反哺生成。
+                if _fs_enabled and sample_store is not None:
+                    try:
+                        from src.integrations.companion_sample_store import (
+                            build_few_shot_block,
+                        )
+                        rows = (sample_store.list_recent(limit=50, rating="down")
+                                + sample_store.list_recent(limit=50, rating="up"))
+                        # 按当前 plan 的 mode 分桶取示范（follow_up / gentle_checkin 各用各的）
+                        fs_block = build_few_shot_block(
+                            rows, max_examples=_fs_max,
+                            mode=str(plan.get("mode") or ""))
+                        if fs_block:
+                            prompt += fs_block
+                    except Exception:
+                        pass
+                try:
+                    text = await self.ai_client.chat(prompt)
+                except Exception:
+                    return ""
+                return (text or "").strip()
+
+            async def _proactive_generate(conversation_id):
+                """试发采样：对某会话生成 AI 实际会说的那句话，但**不发送、不写冷却**。
+                让运营开闸前先读到真实文案（会真实调用一次 AI，有 token 成本）。"""
+                if self.ai_client is None:
+                    return {"generated": False, "reason": "ai_not_ready", "message": "AI 未就绪"}
+                cid = str(conversation_id or "")
+                if not cid:
+                    return {"generated": False, "reason": "missing",
+                            "message": "缺 conversation_id"}
+                try:
+                    conv = next((c for c in (_conversations() or [])
+                                 if str(c.get("conversation_id")) == cid), None)
+                except Exception:
+                    conv = None
+                if conv is None:
+                    return {"generated": False, "reason": "not_found",
+                            "message": "会话不在当前扫描范围"}
+                import time as _time
+                try:
+                    last_ts = float(conv.get("last_ts") or 0)
+                except (TypeError, ValueError):
+                    last_ts = 0.0
+                silent_hours = (_time.time() - last_ts) / 3600.0 if last_ts > 0 else 0.0
+                try:
+                    opener = _opener(
+                        memory_key=str(conv.get("memory_key") or ""),
+                        silent_hours=silent_hours,
+                        stage=str(conv.get("stage") or ""),
+                        intimacy=float(conv.get("intimacy") or 0.0)) or {}
+                except Exception:
+                    opener = {}
+                if not opener.get("mode") or not opener.get("directive"):
+                    return {"generated": False, "reason": "not_eligible",
+                            "message": "该会话当前不构成主动开场（沉默不足/无可回访记忆）"}
+                plan = {
+                    "conversation_id": cid,
+                    "directive": str(opener.get("directive") or ""),
+                    "context_facts": list(opener.get("context_facts") or []),
+                    "mode": str(opener.get("mode") or ""),
+                }
+                text = await _gen_text(plan)
+                # 采样落库（质量闭环）：供运营 👍/👎 评分回流；失败不影响返回文案。
+                sample_id = None
+                if sample_store is not None and text:
+                    try:
+                        sample_id = sample_store.record_sample(
+                            conversation_id=cid,
+                            account_id=str(conv.get("account_id") or ""),
+                            mode=str(opener.get("mode") or ""),
+                            fact=str(opener.get("fact") or ""),
+                            context_facts_n=len(opener.get("context_facts") or []),
+                            silent_hours=silent_hours, text=text)
+                    except Exception:
+                        sample_id = None
+                return {
+                    "generated": bool(text),
+                    "text": text,
+                    "sample_id": sample_id,
+                    "mode": str(opener.get("mode") or ""),
+                    "fact": str(opener.get("fact") or ""),
+                    "context_facts": [str(f) for f in (opener.get("context_facts") or [])],
+                    "silent_hours": round(silent_hours, 1),
+                }
+
+            try:
+                self._web_app.state.companion_proactive_preview = _proactive_preview
+                self._web_app.state.companion_proactive_generate = _proactive_generate
+            except Exception:
+                self.logger.debug("[proactive] 预览/试发回调挂载失败", exc_info=True)
+
+            if not enabled:
+                self.logger.info(
+                    "companion proactive_topic 未启用"
+                    "（预览可用：GET /api/companion/proactive/preview）")
+                return
+            if self.ai_client is None:
+                self.logger.info(
+                    "companion proactive_topic 已启用但 ai 未就绪，调度不启动（预览仍可用）")
+                return
+
+            async def _send(plan):
+                # 1) 生成开场文案（复用 _gen_text：directive + 背景记忆 + 最近上下文）
+                text = await _gen_text(plan)
+                if not text:
+                    return False
+                platform = plan["platform"]
+                account_id = plan["account_id"]
+                chat_key = plan["chat_key"]
+                # 2) 优先编排器受管 worker（自动回写收件箱出站镜像）
+                try:
+                    from src.integrations.account_orchestrator import get_orchestrator
+                    orch = get_orchestrator(self.config.config or {})
+                    if orch.owns(platform, account_id):
+                        res = await orch.send(platform, account_id, chat_key, text)
+                        return bool((res or {}).get("delivered", True))
+                except Exception:
+                    self.logger.debug("[proactive] 编排器发送失败，回落主客户端", exc_info=True)
+                # 3) 回落：主 A 线客户端（default 账号）
+                if self.telegram_client is not None and platform == "telegram":
+                    try:
+                        target = int(chat_key)
+                    except (TypeError, ValueError):
+                        target = chat_key
+                    try:
+                        ok = await self.telegram_client.send_message(target, text)
+                        return bool(ok)
+                    except Exception:
+                        self.logger.debug("[proactive] 主客户端发送失败", exc_info=True)
+                        return False
+                return False
+
+            loop = CompanionProactiveLoop(
+                conversations_provider=_conversations,
+                opener_fn=_opener,
+                send_fn=_send,
+                cooldown_store=JsonCooldownStore(cd_path),
+                interval_sec=float(cfg.get("interval_sec", 900)),
+                min_silent_hours=min_silent_hours,
+                cooldown_hours=float(cfg.get("cooldown_hours", 72)),
+                max_per_tick=int(cfg.get("max_per_tick", 3)),
+                quiet_start_hour=float(cfg.get("quiet_start_hour", 23)),
+                quiet_end_hour=float(cfg.get("quiet_end_hour", 8)),
+                dry_run=bool(cfg.get("dry_run", False)),
+                has_pending_care=_has_pending_care,
+            )
+            await loop.start()
+            self._companion_proactive_loop = loop
+            self.logger.info(
+                "✅ companion proactive_topic 调度已启动"
+                "（interval=%ss min_silent=%sh cooldown=%sh dry_run=%s）",
+                cfg.get("interval_sec", 900), min_silent_hours,
+                cfg.get("cooldown_hours", 72), cfg.get("dry_run", False))
+        except Exception as ex:
+            self.logger.warning("companion proactive_topic 启动跳过: %s", ex)
+            self.logger.debug("companion proactive_topic 启动异常", exc_info=True)
+
     async def _maybe_start_reactivation_loop(self) -> None:
         """W2-D4.2/4.3：启动 reactivation 主动唤醒循环（陪护核心）。
 
@@ -1302,7 +2033,10 @@ class AIChatAssistant:
             async def _send_to_messenger(channel, account_id, chat_name, reply,
                                          defer_until, reason, staleness_sec, extra):
                 if channel != "messenger":
-                    return 0
+                    # 非 messenger → 多平台 deferred 队列（关/不可用则返回 0，零破坏）
+                    return self._enqueue_deferred_outbox(
+                        channel, account_id, chat_name, reply, defer_until,
+                        reason, staleness_sec, extra)
                 return await self.messenger_rpa_service.enqueue_reactivation_deferred(
                     account_id=account_id,
                     chat_name=chat_name,
@@ -1348,6 +2082,10 @@ class AIChatAssistant:
                 ),
                 first_run_max_per_tick=int(
                     cfg_react.get("first_run_max_per_tick", 1),
+                ),
+                platform_priority=(
+                    cfg_react.get("platform_priority")
+                    or ["messenger", "telegram", "line", "whatsapp"]
                 ),
             )
             await loop.start()
@@ -1643,6 +2381,30 @@ class AIChatAssistant:
                     self.logger.info("reactivation_loop 已停止")
                 except Exception as ex:
                     self.logger.warning("reactivation_loop 停止异常: %s", ex)
+
+            # P2：companion 主动话题调度优雅停止
+            if self._companion_proactive_loop is not None:
+                try:
+                    await self._companion_proactive_loop.stop()
+                    self.logger.info("companion proactive_topic 调度已停止")
+                except Exception as ex:
+                    self.logger.warning("companion proactive_topic 停止异常: %s", ex)
+
+            # Phase O：care_dispatcher 优雅停止
+            if self._care_dispatcher is not None:
+                try:
+                    await self._care_dispatcher.stop()
+                    self.logger.info("care_dispatcher 已停止")
+                except Exception as ex:
+                    self.logger.warning("care_dispatcher 停止异常: %s", ex)
+
+            # 多平台 deferred 队列优雅停止
+            if self._deferred_outbox_dispatcher is not None:
+                try:
+                    await self._deferred_outbox_dispatcher.stop()
+                    self.logger.info("多平台 deferred 队列已停止")
+                except Exception as ex:
+                    self.logger.warning("deferred_outbox 停止异常: %s", ex)
 
             if self.mobile_bridge is not None:
                 try:

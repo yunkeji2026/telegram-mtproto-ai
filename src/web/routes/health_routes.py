@@ -18,6 +18,7 @@ def register_health_routes(app, ctx) -> None:
     config_manager = ctx.config_manager
     audit_store = ctx.audit_store
     event_tracker = ctx.event_tracker
+    telegram_client = ctx.telegram_client
     _page_auth = ctx.page_auth
     domain_web_pages = ctx.domain_web_pages
     domain_dashboard_widgets = ctx.domain_dashboard_widgets
@@ -202,6 +203,68 @@ def register_health_routes(app, ctx) -> None:
                             "body": f"策略 {strats} 质量评分低于 40 分，建议优化。",
                             "action_url": "/strategy-analytics",
                             "action_label": "查看分析",
+                        })
+            except Exception:
+                pass
+
+            # 3. 未处理危机事件（R9c：接 crisis_audit 落库数据）
+            try:
+                sm = getattr(telegram_client, "skill_manager", None) if telegram_client else None
+                if sm:
+                    unhandled = sm.crisis_count_for_admin(only_unhandled=True)
+                    if unhandled > 0:
+                        recent = sm.crisis_list_for_admin(limit=20, only_unhandled=True)
+                        severe_n = sum(1 for x in recent if x.get("level") == "severe")
+                        lvl = "critical" if severe_n > 0 else "warn"
+                        body = f"有 {unhandled} 条危机事件尚未人工处置"
+                        if severe_n > 0:
+                            body += f"（含 {severe_n} 条 severe 级）"
+                        body += "。请尽快跟进用户安全。"
+                        alerts.append({
+                            "level": lvl,
+                            "type": "crisis",
+                            "title": f"{unhandled} 条未处理危机",
+                            "body": body,
+                            "action_url": "/crisis-audit?only_unhandled=1",
+                            "action_label": "危机审计",
+                        })
+            except Exception:
+                pass
+
+            # 4. AI 推断低采纳（R18：采纳率持续偏低=推断在产噪声，提示调阈值）
+            #    R19：窗口/样本/采纳率阈值经 memory.adoption_alert 可配（默认 30/10/0.30）
+            try:
+                sm = getattr(telegram_client, "skill_manager", None) if telegram_client else None
+                _mcfg = getattr(config_manager, "config", None) or {}
+                _acfg = ((_mcfg.get("memory") or {}).get("adoption_alert") or {}) \
+                    if isinstance(_mcfg, dict) else {}
+                _alert_on = bool(_acfg.get("enabled", True))
+                if sm and audit_store and _alert_on:
+                    from src.web.routes.episodic_identity_routes import (
+                        build_correction_stats,
+                    )
+                    win = max(1, min(int(_acfg.get("window_days", 30) or 30), 365))
+                    min_sample = max(1, int(_acfg.get("min_sample", 10) or 10))
+                    low_rate = float(_acfg.get("low_rate", 0.30) or 0.30)
+                    stats = build_correction_stats(
+                        audit_store, sm, days=win, recent_limit=0, with_trend=False,
+                    )
+                    sample = int(stats.get("sample", 0) or 0)
+                    rate = float(stats.get("adoption_rate", 0) or 0)
+                    # 仅在样本足够且采纳率偏低时提示，避免小样本误报
+                    if sample >= min_sample and rate < low_rate:
+                        pct = round(rate * 100, 1)
+                        alerts.append({
+                            "level": "warn",
+                            "type": "memory_adoption",
+                            "title": f"AI 推断采纳率偏低 {pct}%",
+                            "body": (
+                                f"近 {win} 天 {stats.get('confirmed', 0)} 条被采纳 / "
+                                f"{stats.get('pending_inferred', 0)} 条待确认，采纳率 {pct}%。"
+                                "AI 推断可能在产噪声，建议调高 memory.inferred_min_hits 阈值或人工清理。"
+                            ),
+                            "action_url": "/episodic-memory",
+                            "action_label": "记忆校正",
                         })
             except Exception:
                 pass

@@ -519,6 +519,19 @@ code{background:var(--input);padding:.15rem .45rem;border-radius:5px;font-size:.
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/><line x1="8" y1="7" x2="16" y2="7"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
         <span>情景记忆</span>
       </a>
+      <a href="/crisis-audit" {% if active=="crisis_audit" %}class="active"{% endif %} data-help="nav_crisis_audit">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <span>危机审计</span>
+        <span class="sb-badge" id="badge-crisis"></span>
+      </a>
+      <a href="/care-schedule" {% if active=="care" %}class="active"{% endif %} data-help="nav_care">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
+        <span>主动关怀</span>
+      </a>
+      <a href="/relations-health" {% if active=="relations_health" %}class="active"{% endif %} data-help="nav_relations_health">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        <span>流失预警</span>
+      </a>
       <a href="/help" {% if active=="help" %}class="active"{% endif %} data-help="nav_help">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
         <span>{{ (i18n or {}).get('help_center', '帮助中心') }}</span>
@@ -609,6 +622,19 @@ code{background:var(--input);padding:.15rem .45rem;border-radius:5px;font-size:.
     <a href="/episodic-memory" {% if active=="episodic" %}class="active"{% endif %} data-help="nav_episodic">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/><line x1="8" y1="7" x2="16" y2="7"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
       <span>情景记忆</span>
+    </a>
+    <a href="/crisis-audit" {% if active=="crisis_audit" %}class="active"{% endif %} data-help="nav_crisis_audit">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      <span>危机审计</span>
+      <span class="sb-badge" id="badge-crisis"></span>
+    </a>
+    <a href="/care-schedule" {% if active=="care" %}class="active"{% endif %} data-help="nav_care">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
+      <span>主动关怀</span>
+    </a>
+    <a href="/relations-health" {% if active=="relations_health" %}class="active"{% endif %} data-help="nav_relations_health">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+      <span>流失预警</span>
     </a>
     <a href="/logs" {% if active=="logs" %}class="active"{% endif %} data-help="nav_logs">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
@@ -942,6 +968,9 @@ window.addEventListener('resize',function(){
   }).catch(()=>{});
   fetch('/api/learner/drafts?status=pending',{credentials:'same-origin'}).then(r=>r.json()).then(d=>{
     setBadge('badge-learner',(d.drafts||[]).length);
+  }).catch(()=>{});
+  fetch('/api/crisis-events?only_unhandled=true&limit=1',{credentials:'same-origin'}).then(r=>r.json()).then(d=>{
+    setBadge('badge-crisis',d.unhandled_total||0);
   }).catch(()=>{});
 })();
 /* User menu */

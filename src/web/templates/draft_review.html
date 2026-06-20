@@ -720,6 +720,7 @@ function toggleProfile(bodyId, convEnc, headerEl){
   body.setAttribute('data-loaded','1');
   body.innerHTML='<span style="color:#94a3b8;font-size:12px;">加载中…</span>';
   var cid=decodeURIComponent(convEnc);
+  body.setAttribute('data-cid',cid);
   fetch('/api/unified-inbox/contact-profile?conversation_id='+encodeURIComponent(cid))
     .then(function(r){return r.json();})
     .then(function(d){ _renderProfile(body, d); })
@@ -727,6 +728,21 @@ function toggleProfile(bodyId, convEnc, headerEl){
 }
 function _renderProfile(body, d){
   var html='';
+  // R9d 危机概览（最高优先级，置顶醒目）
+  var cr=d.crisis;
+  if(cr&&cr.total){
+    var lt=cr.latest||{};
+    var sev=lt.level==='severe';
+    var bg=sev?'#fee2e2':'#fef3c7', fg=sev?'#991b1b':'#92400e';
+    var when=lt.created_at?new Date(lt.created_at*1000).toLocaleString():'';
+    html+='<div style="background:'+bg+';color:'+fg+';border-radius:8px;padding:8px 10px;margin-bottom:8px;">';
+    html+='<div style="font-weight:700;font-size:12px;margin-bottom:3px;">⚠️ 危机记录 · 最近 '+cr.total+' 条'
+      +(cr.unhandled>0?(' · <span style="text-decoration:underline;">未处理 '+cr.unhandled+'</span>'):' · 均已处置')+'</div>';
+    html+='<div style="font-size:11px;">最新：'+esc(lt.level||'')+(lt.category?('／'+esc(lt.category)):'')
+      +(lt.escalated?' · 已升级':'')+(when?(' · '+when):'')+'</div>';
+    html+='<a href="/crisis-audit?only_unhandled=1" target="_blank" style="display:inline-block;margin-top:4px;font-size:11px;color:'+fg+';font-weight:600;">前往危机审计 →</a>';
+    html+='</div>';
+  }
   var m=d.conv_meta||{};
   // 对话智能
   if(m&&(m.last_intent||m.last_emotion||m.msg_count)){
@@ -758,6 +774,31 @@ function _renderProfile(body, d){
     html+='</div>';
     if(c.note) html+='<div style="font-size:11px;color:#374151;margin-top:2px;">备注：'+esc(c.note)+'</div>';
   }
+  // R14 记忆画像聚合（确切知道什么 vs AI 待确认）
+  var mp=d.memory_profile;
+  if(mp&&mp.total){
+    html+='<div style="font-weight:600;font-size:11px;color:#5b21b6;margin:6px 0 4px;">记忆画像</div>';
+    html+='<div class="dr-profile-row">';
+    html+='<span class="dr-profile-tag" style="background:#dbeafe;color:#1e40af;">稳定 '+mp.stable+'</span>';
+    html+='<span class="dr-profile-tag">原始 '+mp.raw+'</span>';
+    html+='<span class="dr-profile-tag" style="background:#dcfce7;color:#166534;">用户明说 '+mp.user_stated+'</span>';
+    if(mp.ai_inferred>0) html+='<span class="dr-profile-tag" style="background:#fef3c7;color:#92400e;">AI 推断 '+mp.ai_inferred+'</span>';
+    html+='</div>';
+    if(mp.top_stable&&mp.top_stable.length){
+      html+='<div style="font-size:11px;color:#374151;margin-top:2px;">核心：'
+        +mp.top_stable.map(function(t){ return '<span style="padding:1px 5px;background:#eff6ff;border-radius:6px;margin-right:3px;">'+esc(t)+'</span>'; }).join('')+'</div>';
+    }
+    // R15 待确认推断：坐席一键转明说
+    if(mp.pending_inferred&&mp.pending_inferred.length){
+      html+='<div style="font-size:11px;color:#92400e;margin-top:5px;">待确认推断（确认后转为已知稳定事实）：</div>';
+      mp.pending_inferred.forEach(function(p){
+        html+='<div style="display:flex;align-items:center;gap:6px;margin-top:3px;">'
+          +'<span style="flex:1;font-size:11px;background:#fef3c7;color:#92400e;border-radius:6px;padding:2px 6px;">'+esc(p.content)+'</span>'
+          +'<button onclick="_confirmFact(this,'+p.id+')" style="font-size:11px;border:none;background:#16a34a;color:#fff;border-radius:6px;padding:2px 8px;cursor:pointer;">确认</button>'
+          +'</div>';
+      });
+    }
+  }
   // 近期草稿决策
   var decs=d.recent_decisions||[];
   if(decs.length){
@@ -772,6 +813,25 @@ function _renderProfile(body, d){
   }
   if(!html) html='<span style="color:#94a3b8;font-size:12px;">暂无客户画像数据</span>';
   body.innerHTML=html;
+}
+
+// R15：确认一条 AI 推断为属实，成功后就地刷新画像
+function _confirmFact(btn, id){
+  btn.disabled=true; var old=btn.textContent; btn.textContent='…';
+  var holder=btn; while(holder&&!holder.getAttribute('data-cid')) holder=holder.parentNode;
+  fetch('/api/episodic-memory/'+id+'/confirm',{method:'POST'})
+    .then(function(r){ if(!r.ok) throw 0; return r.json(); })
+    .then(function(){
+      if(holder){
+        var cid=holder.getAttribute('data-cid');
+        holder.innerHTML='<span style="color:#94a3b8;font-size:12px;">刷新中…</span>';
+        fetch('/api/unified-inbox/contact-profile?conversation_id='+encodeURIComponent(cid))
+          .then(function(r){return r.json();})
+          .then(function(d){ _renderProfile(holder, d); })
+          .catch(function(){ holder.innerHTML='<span style="color:#94a3b8;font-size:12px;">刷新失败</span>'; });
+      }
+    })
+    .catch(function(){ btn.disabled=false; btn.textContent=old; });
 }
 
 function toggleTpl(bodyId, draftId, headerEl){

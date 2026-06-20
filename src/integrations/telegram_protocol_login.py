@@ -88,6 +88,8 @@ class TelegramQrLogin:
         self.phone = ""
         self.qr_url = ""
         self.detail = ""
+        # N2：扫码成功时导出的 session_string（in-memory 启动用，比文件 session 抗 DC 迁移）
+        self.session_string = ""
 
     def result(self) -> Dict[str, Any]:
         return {
@@ -180,6 +182,12 @@ class TelegramQrLogin:
             await self.client.storage.is_bot(False)
             self.status = "authorized"
             self.detail = ""
+            # N2：趁连接未断导出 session_string（A 线可 in-memory 启动，抗文件 session DC 迁移不稳）
+            try:
+                self.session_string = str(await self.client.export_session_string() or "")
+            except Exception:  # noqa: BLE001
+                self.session_string = ""
+                logger.debug("[tg_protocol_login] 导出 session_string 失败（忽略）", exc_info=True)
         except Exception as ex:  # noqa: BLE001
             self.status = "failed"
             self.detail = f"完成登录失败：{ex}"
@@ -237,10 +245,13 @@ def make_provider(config: Dict[str, Any], sessions_dir: str = _DEFAULT_SESSIONS_
             res = await login.poll()
             if res.get("status") == "authorized" and res.get("account_id"):
                 try:
+                    _meta = {"session_name": login.session_name, "phone": login.phone}
+                    # N2：有 session_string 则一并存（A 线优先 in-memory 启动；见 telegram_client）
+                    if getattr(login, "session_string", ""):
+                        _meta["session_string"] = login.session_string
                     get_account_registry().upsert(
                         "telegram", res["account_id"], mode="protocol",
-                        status="online",
-                        meta={"session_name": login.session_name, "phone": login.phone},
+                        status="online", meta=_meta,
                     )
                 except Exception:  # noqa: BLE001
                     logger.debug("[tg_protocol_login] 注册表写入失败", exc_info=True)

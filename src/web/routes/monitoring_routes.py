@@ -226,6 +226,19 @@ def register_monitoring_routes(app, ctx):
                 pass
         return {"ok": True, "verdict": verdict, "sample_ts": sample_ts}
 
+    # ── O·P 联动质量看板：care + reactivation 发送质量统一视图 ──────
+    @app.get("/api/companion/quality-overview")
+    async def api_companion_quality_overview(request: Request, window_hours: float = 24):
+        """两条主动线（care/reactivation）的 skip 原因 + like/dislike 反馈 + dry_run 计数。"""
+        _api_auth(request)
+        try:
+            from src.monitoring.metrics_store import get_metrics_store
+            win = max(1.0, min(float(window_hours or 24), 720)) * 3600.0
+            return {"ok": True, **get_metrics_store().companion_quality_overview(
+                window_sec=win)}
+        except Exception as ex:
+            return {"ok": False, "error": f"{type(ex).__name__}:{ex}"}
+
     # ── 操作记录活动热力图 ────────────────────────────────────
     @app.get("/api/audit/activity")
     async def api_audit_activity(request: Request, days: int = 84):

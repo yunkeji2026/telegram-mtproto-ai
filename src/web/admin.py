@@ -445,6 +445,9 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         "/analytics": "analytics", "/help": "help", "/users": "users",
         "/knowledge": "knowledge", "/learner": "learner", "/settings": "settings",
         "/cases": "cases", "/episodic-memory": "episodic",
+        "/crisis-audit": "crisis_audit",
+        "/care-schedule": "care",
+        "/relations-health": "relations_health",
         "/line-rpa": "line_rpa",
         "/messenger-rpa": "messenger_rpa",
         "/whatsapp-rpa": "whatsapp_rpa",
@@ -673,6 +676,9 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         "/analytics": "analytics",
         "/import": "import", "/export": "export",
         "/cases": "cases", "/episodic-memory": "episodic",
+        "/crisis-audit": "crisis_audit",
+        "/care-schedule": "care",
+        "/relations-health": "care",
         "/line-rpa": "line_rpa",
         "/workspace": "workspace",
     }
@@ -792,6 +798,40 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         import logging as _log_rhealth
 
         _log_rhealth.getLogger("admin").warning("runtime health 路由注册失败", exc_info=True)
+
+    # ── Phase O4 主动关怀待办 API（/api/care/schedule*）──────
+    try:
+        from src.web.routes.care_routes import register_care_routes
+
+        register_care_routes(app, api_auth=_api_auth, config_manager=config_manager)
+    except Exception:
+        import logging as _log_care
+
+        _log_care.getLogger("admin").warning("care 路由注册失败", exc_info=True)
+
+    # ── 多平台 deferred 队列·运营可观测 API（/api/deferred-outbox/status）──
+    try:
+        from src.web.routes.deferred_outbox_routes import (
+            register_deferred_outbox_routes,
+        )
+
+        register_deferred_outbox_routes(app, api_auth=_api_auth)
+    except Exception:
+        import logging as _log_dob
+
+        _log_dob.getLogger("admin").warning("deferred-outbox 路由注册失败", exc_info=True)
+
+    # ── 陪伴主动话题·可观测预览 API（/api/companion/proactive/preview）──
+    try:
+        from src.web.routes.companion_proactive_routes import (
+            register_companion_proactive_routes,
+        )
+
+        register_companion_proactive_routes(app, api_auth=_api_auth)
+    except Exception:
+        import logging as _log_cpp
+
+        _log_cpp.getLogger("admin").warning("companion proactive 预览路由注册失败", exc_info=True)
 
     # 系统状态/指标/reactivation dry-run/审计热力图 已抽到 routes/monitoring_routes.py（批 G2-①）
     # （register_monitoring_routes 在 _admin_ctx + kb_store 就绪后调用，见下方 learner 注册附近）
@@ -2327,6 +2367,24 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         _require_role(request, "episodic")
         return templates.TemplateResponse(request, "episodic_memory.html", {})
 
+    # ── R9c：危机事件审计页面 ──
+    @app.get("/crisis-audit", response_class=HTMLResponse)
+    async def crisis_audit_page(request: Request, _=Depends(_page_auth)):
+        _require_role(request, "crisis_audit")
+        return templates.TemplateResponse(request, "crisis_audit.html", {})
+
+    # ── Phase O5：主动关怀待办页面 ──
+    @app.get("/care-schedule", response_class=HTMLResponse)
+    async def care_schedule_page(request: Request, _=Depends(_page_auth)):
+        _require_role(request, "care")
+        return templates.TemplateResponse(request, "care_schedule.html", {})
+
+    # ── Phase P4：关系健康 / 流失预警榜页面 ──
+    @app.get("/relations-health", response_class=HTMLResponse)
+    async def relations_health_page(request: Request, _=Depends(_page_auth)):
+        _require_role(request, "care")
+        return templates.TemplateResponse(request, "relations_health.html", {})
+
     # ── 情景记忆 + 跨平台身份 API（Phase E1 续拆 → episodic_identity_routes） ──
     # 仅 API 端点迁出；上方 2 个页面路由因需 templates 仍留本文件（与既有约定一致）。
     try:
@@ -2339,6 +2397,36 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         import logging as _log_ei
 
         _log_ei.getLogger("admin").warning("情景记忆/身份 路由注册失败", exc_info=True)
+
+    # ── R9b：危机事件审计 API（/api/crisis-events*） ──
+    try:
+        from src.web.routes.crisis_audit_routes import register_crisis_audit_routes
+
+        register_crisis_audit_routes(app, _admin_ctx)
+    except Exception:
+        import logging as _log_ca
+
+        _log_ca.getLogger("admin").warning("危机事件审计 路由注册失败", exc_info=True)
+
+    # ── G1：全局 Kill-Switch 紧急停发 API（/api/ops/kill-switch*） ──
+    try:
+        from src.web.routes.ops_killswitch_routes import register_ops_killswitch_routes
+
+        register_ops_killswitch_routes(app, _admin_ctx)
+    except Exception:
+        import logging as _log_ks
+
+        _log_ks.getLogger("admin").warning("Kill-Switch 路由注册失败", exc_info=True)
+
+    # ── G3：金丝雀放量 cohort API（/api/ops/canary*） ──
+    try:
+        from src.web.routes.ops_canary_routes import register_ops_canary_routes
+
+        register_ops_canary_routes(app, _admin_ctx)
+    except Exception:
+        import logging as _log_cn
+
+        _log_cn.getLogger("admin").warning("Canary 路由注册失败", exc_info=True)
 
     try:
         from src.integrations.line_webhook import register_line_routes
@@ -2362,6 +2450,38 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         _log_fb.getLogger("admin").debug(
             "FB Messenger Webhook 注册跳过", exc_info=True
         )
+
+    # ── WhatsApp Cloud API（官方）Webhook（Phase G1） ──
+    try:
+        from src.integrations.whatsapp_cloud import register_whatsapp_cloud_routes
+
+        register_whatsapp_cloud_routes(app, config_manager, telegram_client)
+    except Exception:
+        import logging as _log_wac
+
+        _log_wac.getLogger("admin").debug(
+            "WhatsApp Cloud Webhook 注册跳过", exc_info=True
+        )
+
+    # ── Instagram Messaging（官方，Graph API）Webhook（Phase H） ──
+    try:
+        from src.integrations.instagram_webhook import register_instagram_routes
+
+        register_instagram_routes(app, config_manager, telegram_client)
+    except Exception:
+        import logging as _log_ig
+
+        _log_ig.getLogger("admin").debug("Instagram Webhook 注册跳过", exc_info=True)
+
+    # ── Zalo OA（官方）Webhook（Phase H） ──
+    try:
+        from src.integrations.zalo_webhook import register_zalo_routes
+
+        register_zalo_routes(app, config_manager, telegram_client)
+    except Exception:
+        import logging as _log_zalo
+
+        _log_zalo.getLogger("admin").debug("Zalo Webhook 注册跳过", exc_info=True)
 
     # ── LINE RPA（个人号自动聊天）Web 管理页 + REST ──
     try:

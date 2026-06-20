@@ -36,6 +36,12 @@ cryptography>=42.0.0
 # 失败时模块会自动降级（捕获 ImportError），但生产部署仍应显式安装。
 watchdog>=3.0.0
 
+# L2/L2b 文档翻译：.docx/.xlsx 带版式整篇翻译 + .pdf 文本抽取翻译
+# （src/ai/document_file_translate.py）。任一缺失时对应格式软失败，不影响其他翻译能力。
+python-docx>=1.1.0
+openpyxl>=3.1.0
+pdfminer.six>=20221105
+
 # 可选：本地数据库支持
 # aiosqlite>=0.19.0
 

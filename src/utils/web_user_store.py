@@ -32,7 +32,7 @@ UI_MODE_LABELS = {
 
 SIMPLE_MODE_CORE_PAGES = {"cases", "knowledge", "ch", "learner"}
 
-SIMPLE_MODE_MORE_PAGES = {"dash", "analytics", "audit", "episodic", "help", "line_rpa"}
+SIMPLE_MODE_MORE_PAGES = {"dash", "analytics", "audit", "episodic", "crisis_audit", "help", "line_rpa"}
 
 ROLE_DEFAULT_UI_MODE = {
     ROLE_MASTER: UI_MODE_SIMPLE,
@@ -70,6 +70,8 @@ PAGE_PERMISSIONS = {
     "export":     {ROLE_MASTER},
     "cases":      {ROLE_MASTER, ROLE_ADMIN, ROLE_VIEWER},
     "episodic":   {ROLE_MASTER, ROLE_ADMIN, ROLE_VIEWER},
+    "crisis_audit": {ROLE_MASTER, ROLE_ADMIN, ROLE_VIEWER},
+    "care":       {ROLE_MASTER, ROLE_ADMIN, ROLE_VIEWER},
     "line_rpa":   {ROLE_MASTER, ROLE_ADMIN, ROLE_VIEWER},
     "personas":   {ROLE_MASTER, ROLE_ADMIN, ROLE_VIEWER},
     # 坐席工作台（统一收件箱）：master/admin/agent 可用（viewer 只读不接管）

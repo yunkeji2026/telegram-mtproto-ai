@@ -69,10 +69,28 @@ class AccountRegistry:
     def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
         d = dict(row)
         try:
-            d["meta"] = json.loads(d.pop("meta_json", "{}") or "{}")
+            meta = json.loads(d.pop("meta_json", "{}") or "{}")
         except (json.JSONDecodeError, TypeError):
-            d["meta"] = {}
+            meta = {}
+        # N3：读出时解密 meta 敏感字段（session_string 等）；旧明文行透传不破
+        try:
+            from src.integrations.registry_crypto import decrypt_meta
+            meta = decrypt_meta(meta)
+        except Exception:
+            pass
+        d["meta"] = meta
         return d
+
+    @staticmethod
+    def _meta_json(meta: Optional[Dict[str, Any]]) -> str:
+        """N3：写盘前加密 meta 敏感字段再 json 序列化（best-effort）。"""
+        m = meta or {}
+        try:
+            from src.integrations.registry_crypto import encrypt_meta
+            m = encrypt_meta(m)
+        except Exception:
+            pass
+        return json.dumps(m, ensure_ascii=False)
 
     def upsert(
         self,
@@ -105,7 +123,7 @@ class AccountRegistry:
                     (platform, account_id,
                      mode or "device", label or "", proxy_id or "",
                      fingerprint_id or "", status or "pending",
-                     json.dumps(meta or {}, ensure_ascii=False),
+                     self._meta_json(meta),
                      now, now, now if status == "online" else 0),
                 )
             else:
@@ -116,7 +134,7 @@ class AccountRegistry:
                 new_fp = (fingerprint_id if fingerprint_id is not None
                           else cur["fingerprint_id"])
                 new_status = status if status is not None else cur["status"]
-                new_meta = (json.dumps(meta, ensure_ascii=False)
+                new_meta = (self._meta_json(meta)
                             if meta is not None else cur["meta_json"])
                 last_online = (now if new_status == "online"
                                else cur["last_online_at"])

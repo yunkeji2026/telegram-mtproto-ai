@@ -77,17 +77,30 @@ async def fb_send_message(
     *,
     messaging_type: str = "RESPONSE",
     message_tag: Optional[str] = None,
+    account_id: str = "default",
+    check_kill_switch: bool = True,
 ) -> Dict[str, Any]:
     """通过 Send API 发文字消息。
 
     返回 {"ok": True, "data": ...} 或 {"ok": False, "error": "..."}。
     永不抛异常。
 
+    G2：发送前查 Kill-Switch（platform=messenger；global/platform:messenger/account:messenger:<page>）。
+
     messaging_type:
       - RESPONSE: 24h 内回复（**默认**，要求用户最近 24h 主动给 Page 发过消息）
       - UPDATE: 不要求用户互动，但内容受限
       - MESSAGE_TAG: 24h 外发，必须带合法 tag（CONFIRMED_EVENT_UPDATE/POST_PURCHASE_UPDATE/ACCOUNT_UPDATE/HUMAN_AGENT）
     """
+    if check_kill_switch:
+        try:
+            from src.integrations.shared.rpa_send_guard import rpa_send_blocked
+            blocked, scope = rpa_send_blocked("messenger", account_id or "default")
+            if blocked:
+                logger.warning("[fb][kill-switch] 冻结发送，跳过（scope=%s）", scope)
+                return {"ok": False, "error": f"kill_switch:{scope}"}
+        except Exception:
+            pass
     text = _truncate(text)
     if not text:
         return {"ok": True, "data": {"skipped": "empty"}}
@@ -130,11 +143,13 @@ async def fb_send_with_window_fallback(
     page_access_token: str,
     *,
     fallback_tag: str = "ACCOUNT_UPDATE",
+    account_id: str = "default",
 ) -> Dict[str, Any]:
     """优先用 RESPONSE 发；若返回 24h window 错误（10:2534022），
-    自动降级用 MESSAGE_TAG=fallback_tag 重发。"""
+    自动降级用 MESSAGE_TAG=fallback_tag 重发。``account_id`` 透传给 Kill-Switch 账号级作用域。"""
     out = await fb_send_message(
-        psid, text, page_access_token, messaging_type="RESPONSE"
+        psid, text, page_access_token, messaging_type="RESPONSE",
+        account_id=account_id,
     )
     if out.get("ok"):
         return out
@@ -147,6 +162,7 @@ async def fb_send_with_window_fallback(
             page_access_token,
             messaging_type="MESSAGE_TAG",
             message_tag=fallback_tag,
+            account_id=account_id,
         )
     return out
 
@@ -196,6 +212,12 @@ def register_fb_messenger_routes(
     unsupported = (cfg.get("unsupported_type_reply") or "").strip() or (
         "目前仅支持文字消息。"
     )
+    try:
+        from src.integrations.official_api_worker import official_pipeline_enabled
+        fb_use_pipeline = official_pipeline_enabled(
+            getattr(config_manager, "config", None) or {})
+    except Exception:
+        fb_use_pipeline = False
 
     path = cfg.get("webhook_path") or "/fb/webhook"
     if isinstance(path, str) and not path.startswith("/"):
@@ -246,6 +268,7 @@ def register_fb_messenger_routes(
                     fallback_tag=fallback_tag,
                     unsupported=unsupported,
                     page_id_filter=page_id,
+                    use_pipeline=fb_use_pipeline,
                 )
             except Exception as e:
                 logger.exception("FB 事件处理异常: %s", e)
@@ -279,6 +302,7 @@ async def _handle_one_event(
     fallback_tag: str,
     unsupported: str,
     page_id_filter: str,
+    use_pipeline: bool = False,
 ) -> None:
     """单条 messaging 事件路由。"""
     page_id = str(ev.get("_page_id") or "")
@@ -305,18 +329,50 @@ async def _handle_one_event(
     text = (msg.get("text") or "").strip()
     if not text:
         # 附件 / sticker 等
-        if msg.get("attachments"):
+        atts = msg.get("attachments")
+        if atts:
+            # Phase I1：入站媒体可见化——先镜像占位（坐席台看到「[图片]」等并可接管），再回不支持
+            try:
+                from src.integrations.shared.official_inbound import mirror_inbound_media
+                _atype = str((atts[0] or {}).get("type") or "file") if isinstance(atts, list) and atts else "file"
+                mirror_inbound_media(
+                    platform="messenger", account_id=(page_id or "official"),
+                    chat_key=f"fb:user:{sender_id}", media_type=_atype,
+                    name=sender_id, msg_id=str(msg.get("mid") or ""))
+            except Exception:
+                pass
             await fb_send_with_window_fallback(
                 sender_id,
                 unsupported,
                 page_token,
                 fallback_tag=fallback_tag,
+                account_id=(page_id or "official"),
             )
         return
 
     chat_key = f"fb:user:{sender_id}"
     user_key = f"fb:{sender_id}"
     req_id = f"r-{uuid.uuid4().hex[:12]}"
+    _mirror_acct = page_id or "official"
+
+    # Phase G4：入站镜像进统一收件箱（旁路，坐席台可见/可接管）
+    try:
+        from src.integrations.shared.inbox_mirror import mirror_to_inbox
+        mirror_to_inbox("messenger", _mirror_acct, chat_key, text,
+                        direction="in", name=sender_id, msg_id=str(msg.get("mid") or ""))
+    except Exception:
+        pass
+
+    # Phase G4c：走主管道 → maybe_auto_reply（护栏/canary/记忆），回复经 orch.send→官方 worker；不在此自答。
+    if use_pipeline:
+        try:
+            from src.integrations.protocol_bridge import make_message, maybe_auto_reply
+            await maybe_auto_reply(make_message(
+                platform="messenger", account_id=_mirror_acct, chat_key=chat_key,
+                text=text, direction="in", name=sender_id, msg_id=str(msg.get("mid") or "")))
+        except Exception:
+            logger.debug("Messenger 主管道回复失败", exc_info=True)
+        return
 
     async def _send_followup(_chat_id: Any, t: str) -> bool:
         out = await fb_send_with_window_fallback(
@@ -358,4 +414,11 @@ async def _handle_one_event(
             str(reply_text),
             page_token,
             fallback_tag=fallback_tag,
+            account_id=_mirror_acct,
         )
+        try:
+            from src.integrations.shared.inbox_mirror import mirror_to_inbox
+            mirror_to_inbox("messenger", _mirror_acct, chat_key, str(reply_text),
+                            direction="out")
+        except Exception:
+            pass

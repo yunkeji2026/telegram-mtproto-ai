@@ -764,6 +764,16 @@ class LineRpaRunner:
 
         返回汇总结果：ok 需全部成功；parts 记录每条发送结果与耗时。
         """
+        # G1 全局 Kill-Switch（Phase C：RPA 覆盖）：紧急冻结时跳过物理发送
+        try:
+            from src.integrations.shared.rpa_send_guard import rpa_send_blocked
+            _ks_on, _ks_scope = rpa_send_blocked(
+                "line", self._cfg_get("account_id", "default"))
+            if _ks_on:
+                logger.warning("[line_rpa][kill-switch] 冻结发送，跳过（scope=%s）", _ks_scope)
+                return {"ok": False, "error": "kill_switch", "scope": _ks_scope, "parts": []}
+        except Exception:
+            pass
         pacing = self._pacing
         # 1) 读停顿（让对方看到"对方在打字/思考"的感觉）
         if pacing.enabled:

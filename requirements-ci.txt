@@ -19,3 +19,6 @@ Pillow>=10.0.0      # tests/test_line_rpa_screen.py 等 PIL 相关测试 collect
 requests>=2.28.0    # src/integrations/line_rpa/chat_list_scanner.py 用的 HTTP client
 cryptography>=42.0.0  # C0-1 授权 Ed25519 签发/验签；tests/test_licensing.py 需要
 langdetect>=1.0.9   # tests/test_wa_lang_detect.py Latin 语种路径需要
+python-docx>=1.1.0  # L2 文档翻译；tests/test_document_file_translate.py 需要
+openpyxl>=3.1.0  # L2b .xlsx 文档翻译
+pdfminer.six>=20221105  # L2b .pdf 文本抽取翻译
