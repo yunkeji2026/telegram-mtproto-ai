@@ -66,3 +66,16 @@ def seat_exceeded(status: Any, active_agents: int) -> bool:
     if seats <= 0:
         return False
     return int(active_agents or 0) > seats
+
+
+def seat_block_on_online(status: Any, online_agent_ids: Any, agent_id: str) -> bool:
+    """坐席 ``agent_id`` 将「上线」时是否应被席位限制拦截（纯函数，供 presence 端点用）。
+
+    把「自己之外的在线坐席」+ 自己 = prospective 活跃数，再过 ``seat_exceeded``。这样：
+    - 已在线坐席重复 set/heartbeat → prospective == 当前在线数 → 不会把正在工作的坐席踢下线；
+    - 仅当**新坐席**上线会令在线数超席位时才拦截。
+    enforce 关 / seats=0 → `seat_exceeded` 恒 False → 永不拦截（零破坏）。
+    """
+    aid = str(agent_id or "")
+    others = {str(a) for a in (online_agent_ids or []) if a and str(a) != aid}
+    return seat_exceeded(status, len(others) + 1)

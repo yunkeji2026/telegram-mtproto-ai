@@ -15,6 +15,7 @@ from .gate import (
     channel_allowed,
     feature_allowed,
     is_write_blocked,
+    seat_block_on_online,
     seat_exceeded,
 )
 from .license_manager import (
@@ -45,5 +46,6 @@ __all__ = [
     "channel_allowed",
     "feature_allowed",
     "is_write_blocked",
+    "seat_block_on_online",
     "seat_exceeded",
 ]

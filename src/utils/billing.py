@@ -68,6 +68,36 @@ def _f(v: Any, default: float = 0.0) -> float:
         return default
 
 
+def plan_included_messages(plan: str, pricing: Optional[Dict[str, Any]] = None) -> int:
+    """某套餐的月含消息量；0 = 不限。缺套餐回退 community。"""
+    pr = pricing or DEFAULT_PRICING
+    plans = pr.get("plans") or DEFAULT_PRICING["plans"]
+    cfg = plans.get(str(plan or "community")) or plans.get("community") or {}
+    return int(_f(cfg.get("included_messages")))
+
+
+def message_quota_status(used: int, included: int) -> Dict[str, Any]:
+    """月度消息配额软状态（纯函数，K 阶段）。``included=0`` → 不限。
+
+    level：ok / warn（≥80%）/ over（超含量，将按超额计费）。**只产状态、不阻断发送**——
+    硬限交由独立 enforce 开关（避免误切付费客户）。
+    """
+    used = int(used or 0)
+    included = int(included or 0)
+    if included <= 0:
+        return {"used": used, "included": 0, "ratio": None,
+                "level": "ok", "text": "消息量不限"}
+    ratio = round(used / included, 2)
+    if used > included:
+        level, text = "over", f"本月消息 {used} 已超套餐含量 {included}，超出部分按量计费"
+    elif ratio >= 0.8:
+        level, text = "warn", f"本月消息 {used}/{included}，接近套餐含量"
+    else:
+        level, text = "ok", f"本月消息 {used}/{included}"
+    return {"used": used, "included": included, "ratio": ratio,
+            "level": level, "text": text}
+
+
 def compute_charges(statement: Dict[str, Any], pricing: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """按价目表把对账单用量换算成应收金额（纯函数）。
 
