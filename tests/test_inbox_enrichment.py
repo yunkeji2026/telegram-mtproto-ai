@@ -49,6 +49,22 @@ def test_health_board_sort_key_with_tiebreak():
     assert health_board_sort_key(a) == health_board_sort_key(b)
 
 
+def test_health_board_sort_key_payer_priority():
+    # 付费用户正流失 vs 非付费高价值流失：开 payer_priority 时前者绝对置顶
+    payer = {"value_at_risk": False, "score": 60, "risk_level": "at_risk",
+             "monetization": {"is_payer": True}}
+    vrisk = {"value_at_risk": True, "score": 20, "risk_level": "critical"}
+    assert health_board_sort_key(payer, payer_priority=True) < \
+        health_board_sort_key(vrisk, payer_priority=True)
+    # 关 payer_priority 时回到原序：value_at_risk 的 vrisk 在前
+    assert health_board_sort_key(vrisk) < health_board_sort_key(payer)
+    # 免费/健康用户不算 payer_at_risk
+    free_healthy = {"value_at_risk": False, "score": 90,
+                    "risk_level": "healthy", "monetization": {"is_payer": True}}
+    assert health_board_sort_key(payer, payer_priority=True) < \
+        health_board_sort_key(free_healthy, payer_priority=True)
+
+
 def test_pick_primary_by_last_ts():
     conv_map = {
         "a:1:x": {"conversation_id": "a:1:x", "last_ts": 100},

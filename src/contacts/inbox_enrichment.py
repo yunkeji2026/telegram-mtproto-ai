@@ -38,13 +38,25 @@ def inbox_sort_tiebreak_key(inbox: Optional[Mapping[str, Any]]) -> Tuple[int, in
     return (_CHURN_PRIO.get(churn, 2), _EMOTION_PRIO.get(trend, 3))
 
 
+def is_payer_at_risk(item: Mapping[str, Any]) -> bool:
+    """付费/会员用户且处于 at_risk/critical——最该挽留（K2c①）。"""
+    mb = item.get("monetization") or {}
+    return bool(
+        (mb.get("is_payer") or mb.get("is_member"))
+        and item.get("risk_level") in ("at_risk", "critical"))
+
+
 def health_board_sort_key(
     item: Mapping[str, Any],
     *,
     inbox_tiebreak: bool = False,
+    payer_priority: bool = False,
 ) -> Tuple[Any, ...]:
-    """流失预警榜排序键：value_at_risk 优先 → 健康分升序 →（可选）inbox 次级 tie-break。"""
+    """流失预警榜排序键：（可选①）付费流失绝对置顶 → value_at_risk 优先 →
+    健康分升序 →（可选 R3）inbox 次级 tie-break。"""
     base: Tuple[Any, ...] = (not item.get("value_at_risk"), item.get("score", 0))
+    if payer_priority:
+        base = (not is_payer_at_risk(item),) + base
     if not inbox_tiebreak:
         return base
     return base + inbox_sort_tiebreak_key(item.get("inbox"))

@@ -982,6 +982,9 @@ companion:
       # R3：同分相邻行按 inbox 高流失 / 情绪恶化做次级 tie-break（不替代关系健康主排序）。
       # 默认关；开启后榜单会对全部候选批量查 inbox 再排序（仍仅 2 次 SQL）。
       inbox_sort_tiebreak: false
+      # K2c①：付费/会员用户正流失（at_risk/critical）绝对置顶——运营最该挽留的人。
+      # 默认关；需 monetization 已启用 + tx_ledger 有数据才有效。开启后对全部候选批量查变现再排序。
+      payer_sort_priority: false
   thresholds:
     initial_to_warming_exchanges: 4
     warming_to_intimate_exchanges: 14

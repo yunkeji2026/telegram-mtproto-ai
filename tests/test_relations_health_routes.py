@@ -453,3 +453,40 @@ def test_health_board_monetization_columns(client):
     assert target["monetization"]["ltv"] == 12.5
     assert target["monetization"]["tier"] == "svip"
     assert target["monetization"]["is_payer"] is True
+
+
+def test_health_board_payer_sort_priority(client):
+    """K2c①：开 payer_sort_priority 后，付费用户正流失绝对置顶（盖过普通高价值流失）。"""
+    from types import SimpleNamespace
+    from src.inbox.normalizer import conv_id
+    es = _attach_entitlements(client)
+    client.app.state.config_manager = SimpleNamespace(config={
+        "companion": {"relations_health": {"health_board": {
+            "payer_sort_priority": True,
+        }}},
+    })
+    # 关系 A：非付费、强关系长沉默 → value_at_risk（默认会置顶）
+    _seed_journey(client.store, client.gateway, "fb_vrisk",
+                  in_n=40, out_n=40, last_offset_days=22, start_days_ago=160)
+    # 关系 B：付费用户、中度沉默 → at_risk 但非 value_at_risk 顶格
+    _seed_journey(client.store, client.gateway, "fb_payerisk",
+                  in_n=20, out_n=18, last_offset_days=14, start_days_ago=90)
+    ck = conv_id("messenger", "a", "fb_payerisk")
+    es.record_gift(ck, "rose", amount=30.0)
+    es.grant_subscription(ck, "vip", active_until=_t.time() + 86400,
+                          record_ledger=False)
+    r = client.get("/api/relations/health-board?limit=10&scan=100")
+    d = r.json()
+    assert d["payer_sort_priority"] is True
+    # 若付费用户确实落入 at_risk/critical，应排在榜首
+    payer_item = next(
+        (it for it in d["items"]
+         if (it.get("monetization") or {}).get("is_payer")), None)
+    if payer_item and payer_item.get("risk_level") in ("at_risk", "critical"):
+        assert d["items"][0]["journey_id"] == payer_item["journey_id"]
+
+
+def test_health_board_payer_sort_disabled_by_default(client):
+    _attach_entitlements(client)
+    r = client.get("/api/relations/health-board?limit=5&scan=50")
+    assert r.json().get("payer_sort_priority") is False

@@ -1386,6 +1386,24 @@ def register_contacts_routes(
             except Exception:
                 return False
 
+        def _health_board_payer_priority_enabled() -> bool:
+            """①：config companion.relations_health.health_board.payer_sort_priority（默认关）。
+
+            开启后付费/会员用户正流失（at_risk/critical）绝对置顶——运营最该挽留的人。
+            """
+            cm = getattr(app.state, "config_manager", None)
+            if cm is None:
+                return False
+            try:
+                cfg = getattr(cm, "config", None) or {}
+                hb = (
+                    ((cfg.get("companion") or {}).get("relations_health") or {})
+                    .get("health_board") or {}
+                )
+                return bool(hb.get("payer_sort_priority", False))
+            except Exception:
+                return False
+
         def _signals_from_events(events, *, now, funnel_stage,
                                  pending_care=0, recent_react=False):
             bd = _IE.compute_intimacy_from_events(events, now=now)
@@ -1521,6 +1539,7 @@ def register_contacts_routes(
                     "days_since_last_msg": (None if d == float("inf") else round(d, 1)),
                 })
             inbox_sort = _health_board_inbox_sort_enabled()
+            payer_sort = _health_board_payer_priority_enabled()
             if inbox_sort and items:
                 # R3：tie-break 需 inbox 信号参与排序 → 先批量富集全部候选再 sort
                 inbox_all = _inbox_batch(
@@ -1531,7 +1550,17 @@ def register_contacts_routes(
                     ib = inbox_all.get(it["journey_id"])
                     if ib:
                         it["inbox"] = ib
-            items.sort(key=lambda c: _board_sort_key(c, inbox_tiebreak=inbox_sort))
+            if payer_sort and items:
+                # ①：付费流失排序需变现信号参与 → 先批量富集全部候选再 sort
+                mon_all = _monetization_batch(
+                    [it["journey_id"] for it in items],
+                    contact_by, convkeys_by_contact)
+                for it in items:
+                    mb = mon_all.get(it["journey_id"])
+                    if mb:
+                        it["monetization"] = mb
+            items.sort(key=lambda c: _board_sort_key(
+                c, inbox_tiebreak=inbox_sort, payer_priority=payer_sort))
             top = items[:lim]
             if not inbox_sort:
                 # R2 默认：仅对最终上榜行富集（SQL 随 limit 而非 scan 增长）
@@ -1543,19 +1572,23 @@ def register_contacts_routes(
                     ib = inbox_by.get(it["journey_id"])
                     if ib:
                         it["inbox"] = ib
-            # K2c：变现信号——仅富集最终上榜行（高价值付费用户单列预警）
-            mon_by = _monetization_batch(
-                [it["journey_id"] for it in top], contact_by, convkeys_by_contact)
-            payer_count = 0
-            for it in top:
-                mb = mon_by.get(it["journey_id"])
-                if mb:
-                    it["monetization"] = mb
-                    if mb.get("is_payer") or mb.get("is_member"):
-                        payer_count += 1
+            if not payer_sort:
+                # K2c 默认：变现信号仅富集最终上榜行（SQL 随 limit 而非 scan 增长）
+                mon_by = _monetization_batch(
+                    [it["journey_id"] for it in top],
+                    contact_by, convkeys_by_contact)
+                for it in top:
+                    mb = mon_by.get(it["journey_id"])
+                    if mb:
+                        it["monetization"] = mb
+            payer_count = sum(
+                1 for it in top
+                if (it.get("monetization") or {}).get("is_payer")
+                or (it.get("monetization") or {}).get("is_member"))
             return {"ok": True, "items": top,
                     "scanned": len(jids), "count": min(len(items), lim),
                     "inbox_sort_tiebreak": inbox_sort,
+                    "payer_sort_priority": payer_sort,
                     "payer_count": payer_count}
 
     # ── Q 延伸·回填状态查询 + 按需 dry_run 触发 ───────────────
