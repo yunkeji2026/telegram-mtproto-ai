@@ -387,3 +387,69 @@ def test_health_board_min_intimacy_filter(client):
                   in_n=1, out_n=0, last_offset_days=1, start_days_ago=2)
     r = client.get("/api/relations/health-board?min_intimacy=90&scan=50")
     assert r.json()["count"] == 0
+
+
+# ── K2c：变现×关系健康聚合 ──────────────────────────────────
+
+def _attach_entitlements(client):
+    from src.utils.entitlement_store import EntitlementStore
+    es = EntitlementStore(":memory:")
+    client.app.state.entitlement_store = es
+    client.entitlements = es  # type: ignore[attr-defined]
+    return es
+
+
+def test_health_card_monetization_payer(client):
+    """K2c：单卡聚合该 contact 的 LTV + 当前会员档（复用 CI 反推 conv_id 作 key）。"""
+    from src.inbox.normalizer import conv_id
+    es = _attach_entitlements(client)
+    jid = _seed_journey(client.store, client.gateway, "fb_payer",
+                        in_n=15, out_n=14, last_offset_days=10)
+    ck = conv_id("messenger", "a", "fb_payer")
+    es.record_gift(ck, "rose", amount=5.0)
+    es.grant_subscription(ck, "vip", active_until=_t.time() + 86400,
+                          record_ledger=False)
+    r = client.get(f"/api/relations/health/{jid}")
+    mon = r.json()["monetization"]
+    assert mon is not None
+    assert mon["is_payer"] is True
+    assert mon["ltv"] == 5.0
+    assert mon["tier"] == "vip"
+    assert mon["is_member"] is True
+
+
+def test_health_card_monetization_none_for_free(client):
+    """非付费用户（无流水无会员）→ monetization 为 None 减噪。"""
+    _attach_entitlements(client)
+    jid = _seed_journey(client.store, client.gateway, "fb_free",
+                        in_n=10, out_n=10, last_offset_days=3)
+    r = client.get(f"/api/relations/health/{jid}")
+    assert r.json()["monetization"] is None
+
+
+def test_health_card_monetization_absent_when_store_missing(client):
+    """变现未启用（无 entitlement_store）→ monetization 字段 None，不报错。"""
+    jid = _seed_journey(client.store, client.gateway, "fb_nostore",
+                        in_n=10, out_n=10, last_offset_days=3)
+    r = client.get(f"/api/relations/health/{jid}")
+    assert r.json()["monetization"] is None
+
+
+def test_health_board_monetization_columns(client):
+    """K2c：预警榜上榜行带回变现信号 + payer_count 汇总。"""
+    from src.inbox.normalizer import conv_id
+    es = _attach_entitlements(client)
+    _seed_journey(client.store, client.gateway, "fb_boardpay",
+                  in_n=30, out_n=30, last_offset_days=18, start_days_ago=120)
+    ck = conv_id("messenger", "a", "fb_boardpay")
+    es.record_gift(ck, "rose", amount=12.5)
+    es.grant_subscription(ck, "svip", active_until=_t.time() + 86400,
+                          record_ledger=False)
+    r = client.get("/api/relations/health-board?limit=10&scan=100")
+    d = r.json()
+    assert d["payer_count"] >= 1
+    target = next((it for it in d["items"] if it.get("monetization")), None)
+    assert target is not None
+    assert target["monetization"]["ltv"] == 12.5
+    assert target["monetization"]["tier"] == "svip"
+    assert target["monetization"]["is_payer"] is True

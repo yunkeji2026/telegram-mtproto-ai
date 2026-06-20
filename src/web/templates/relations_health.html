@@ -26,6 +26,9 @@
 .badge-trend.falling{background:rgba(16,185,129,.12);color:var(--green)}
 .badge-trend.stable{background:var(--input);color:var(--t2)}
 .badge-churn{display:inline-block;padding:.1rem .4rem;border-radius:4px;font-size:.68rem;background:rgba(245,158,11,.12);color:var(--amber)}
+.badge-pay{display:inline-block;padding:.1rem .4rem;border-radius:4px;font-size:.66rem;font-weight:700;background:rgba(16,185,129,.14);color:var(--green)}
+.badge-tier{display:inline-block;padding:.1rem .4rem;border-radius:4px;font-size:.62rem;font-weight:700;background:rgba(168,85,247,.16);color:#a855f7;margin-left:.25rem;text-transform:uppercase}
+.rh-table tr.payvar td{background:rgba(168,85,247,.07)}
 .rh-act{background:none;border:1px solid var(--p);color:var(--p);cursor:pointer;font-size:.72rem;font-weight:600;padding:.2rem .55rem;border-radius:6px}
 .rh-act:hover{background:rgba(91,124,246,.08)}
 .rh-reasons{color:var(--t3);font-size:.74rem}
@@ -90,13 +93,14 @@
           <th style="width:72px">沉默天</th>
           <th style="width:76px">情绪</th>
           <th style="width:80px">流失</th>
+          <th style="width:96px">付费</th>
           <th>风险原因</th>
           <th style="min-width:130px">建议动作</th>
           <th style="min-width:170px">journey</th>
           <th style="width:110px">操作</th>
         </tr>
       </thead>
-      <tbody id="rh-body"><tr><td colspan="8" style="padding:2rem;color:var(--t3)">加载中…</td></tr></tbody>
+      <tbody id="rh-body"><tr><td colspan="11" style="padding:2rem;color:var(--t3)">加载中…</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -128,6 +132,17 @@ function churnCell(ib){
   if(!ib||!ib.churn_risk)return '<span style="color:var(--t3)">—</span>';
   return '<span class="badge-churn" title="'+esc(ib.last_intent||'')+'">'+esc(ib.churn_risk)+'</span>';
 }
+function payCell(mb){
+  if(!mb)return '<span style="color:var(--t3)">—</span>';
+  var out='';
+  if(mb.is_payer){
+    out+='<span class="badge-pay" title="累计付费(LTV)">'+esc(mb.currency||'')+' '+(mb.ltv||0)+'</span>';
+  }
+  if(mb.is_member && mb.tier && mb.tier!=='free'){
+    out+='<span class="badge-tier">'+esc(mb.tier)+'</span>';
+  }
+  return out||'<span style="color:var(--t3)">—</span>';
+}
 
 async function rhLoad(){
   const risk=document.getElementById('rh-risk').value;
@@ -137,7 +152,7 @@ async function rhLoad(){
   const st=document.getElementById('rh-status');
   const sum=document.getElementById('rh-summary');
   st.textContent='加载中…';
-  body.innerHTML='<tr><td colspan="10" style="padding:2rem">…</td></tr>';
+  body.innerHTML='<tr><td colspan="11" style="padding:2rem">…</td></tr>';
   try{
     const q=new URLSearchParams({limit:String(limit),min_intimacy:String(minIntim),scan:'400'});
     if(risk)q.set('risk',risk);
@@ -146,28 +161,37 @@ async function rhLoad(){
     const d=await res.json();
     const items=d.items||[];
     const var_n=items.filter(function(x){return x.value_at_risk;}).length;
+    const pay_n=d.payer_count||0;
+    const payvar_n=items.filter(function(x){var m=x.monetization;return m&&(m.is_payer||m.is_member)&&(x.risk_level==='at_risk'||x.risk_level==='critical');}).length;
     sum.innerHTML=
       '<div class="rh-pill">扫描 <strong>'+(d.scanned||0)+'</strong> 段关系</div>'+
       '<div class="rh-pill">榜单 <strong>'+items.length+'</strong> 条</div>'+
-      '<div class="rh-pill"'+(var_n?' style="background:rgba(239,68,68,.12)"':'')+'>高价值流失 <strong>'+var_n+'</strong></div>';
+      '<div class="rh-pill"'+(var_n?' style="background:rgba(239,68,68,.12)"':'')+'>高价值流失 <strong>'+var_n+'</strong></div>'+
+      '<div class="rh-pill"'+(pay_n?' style="background:rgba(16,185,129,.12)"':'')+'>付费用户 <strong>'+pay_n+'</strong></div>'+
+      '<div class="rh-pill"'+(payvar_n?' style="background:rgba(168,85,247,.12)"':'')+'>付费流失 <strong>'+payvar_n+'</strong></div>';
     st.textContent=d.inbox_sort_tiebreak
       ? '按「高价值流失优先 + 健康分升序 + inbox 情绪/流失 tie-break」排序'
       : '按「高价值流失优先 + 健康分升序」排序';
-    if(!items.length){body.innerHTML='<tr><td colspan="10" style="padding:2rem;color:var(--t3)">无记录</td></tr>';return;}
+    if(!items.length){body.innerHTML='<tr><td colspan="11" style="padding:2rem;color:var(--t3)">无记录</td></tr>';return;}
     body.innerHTML=items.map(function(it){
       var ib=it.inbox||null;
       var canDraft=(it.action==='reactivate'||it.action==='schedule_care'||it.risk_level==='at_risk'||it.risk_level==='critical');
       var op=canDraft
         ? '<button type="button" class="rh-act" data-jid="'+esc(it.journey_id)+'" onclick="rhDraft(this)">生成话术</button>'
         : '<span style="color:var(--t3);font-size:.72rem">—</span>';
-      return '<tr class="'+(it.value_at_risk?'var':'')+'">'+
+      var mb=it.monetization||null;
+      // 付费用户正流失 = 最该挽留：紫色高亮（盖过普通 var 红条）
+      var payAtRisk=mb&&(mb.is_payer||mb.is_member)&&(it.risk_level==='at_risk'||it.risk_level==='critical');
+      var rowCls=payAtRisk?'payvar':(it.value_at_risk?'var':'');
+      return '<tr class="'+rowCls+'">'+
         '<td><strong>'+it.score+'</strong></td>'+
         '<td><span class="badge-grade">'+esc(it.grade)+'</span></td>'+
         '<td>'+(it.intimacy_score!=null?it.intimacy_score:'—')+'</td>'+
         '<td>'+(it.days_since_last_msg!=null?it.days_since_last_msg:'∞')+'</td>'+
         '<td>'+trendBadge(ib?ib.emotion_trend:'')+'</td>'+
         '<td>'+churnCell(ib)+'</td>'+
-        '<td class="rh-reasons">'+(it.reasons||[]).map(esc).join('；')+(it.value_at_risk?'<span class="badge-var">高价值</span>':'')+'</td>'+
+        '<td>'+payCell(mb)+'</td>'+
+        '<td class="rh-reasons">'+(it.reasons||[]).map(esc).join('；')+(it.value_at_risk?'<span class="badge-var">高价值</span>':'')+(payAtRisk?'<span class="badge-var" style="background:rgba(168,85,247,.16);color:#a855f7">付费流失</span>':'')+'</td>'+
         '<td>'+rlBadge(it.risk_level)+' <span style="font-size:.74rem;color:var(--t2)">'+esc(it.action_hint)+'</span></td>'+
         '<td class="mono">'+esc(it.journey_id)+'</td>'+
         '<td>'+op+'</td></tr>';
@@ -185,14 +209,23 @@ async function rhDraft(el){
   document.getElementById('rh-modal-bg').classList.add('open');
   // Phase R：拉单人健康卡，展示 inbox 跨域语境（情绪趋势/风险/摘要）供发送前参考
   fetch('/api/relations/health/'+encodeURIComponent(jid)).then(function(r){return r.ok?r.json():null;}).then(function(d){
-    if(!d||!d.inbox)return;
-    var ib=d.inbox;
-    var trend={rising:'情绪恶化↑',falling:'情绪好转↓',stable:'情绪平稳→'}[ib.emotion_trend]||'';
+    if(!d)return;
     var parts=[];
-    if(trend)parts.push(trend);
-    if(ib.churn_risk)parts.push('流失风险:'+esc(ib.churn_risk));
-    if(ib.last_intent)parts.push('意图:'+esc(ib.last_intent));
-    if(ib.summary)parts.push('摘要:'+esc(ib.summary));
+    var ib=d.inbox;
+    if(ib){
+      var trend={rising:'情绪恶化↑',falling:'情绪好转↓',stable:'情绪平稳→'}[ib.emotion_trend]||'';
+      if(trend)parts.push(trend);
+      if(ib.churn_risk)parts.push('流失风险:'+esc(ib.churn_risk));
+      if(ib.last_intent)parts.push('意图:'+esc(ib.last_intent));
+      if(ib.summary)parts.push('摘要:'+esc(ib.summary));
+    }
+    var mb=d.monetization;
+    if(mb&&(mb.is_payer||mb.is_member)){
+      var seg='💎 付费用户';
+      if(mb.is_payer)seg+=' · LTV '+esc(mb.currency||'')+' '+(mb.ltv||0);
+      if(mb.is_member&&mb.tier&&mb.tier!=='free')seg+=' · '+esc(mb.tier);
+      parts.unshift(seg);
+    }
     if(parts.length){ibx.innerHTML='📥 '+parts.join(' · ');ibx.style.display='block';}
   }).catch(function(){});
   try{

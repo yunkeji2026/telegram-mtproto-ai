@@ -1301,6 +1301,76 @@ def register_contacts_routes(
                 logger.debug("inbox enrichment lookup failed", exc_info=True)
                 return None
 
+        def _entitlement_store():
+            return getattr(app.state, "entitlement_store", None)
+
+        def _monetization_for_keys(keys):
+            """K2c：跨域聚合该 contact 的变现信号（LTV / 当前最高会员档）。
+
+            复用 §31 身份桥反查的 conversation_id 集合（==entitlement contact_key），
+            把分散在多平台会话上的付费合并成单人 LTV。store 不在（变现未启用）→ None，
+            非付费用户（LTV=0 且无有效会员）→ None 减噪。绝不抛。
+            """
+            store = _entitlement_store()
+            if store is None or not keys:
+                return None
+            try:
+                from src.utils.monetization import best_tier as _best_tier
+                ks = list(dict.fromkeys(str(k) for k in keys if str(k)))
+                spend = store.spend_by_contacts(ks)
+                tiers = store.tiers_by_contacts(ks)
+                ltv = round(sum(spend.values()), 2)
+                tier = _best_tier(tiers.values(), getattr(store, "catalog", None))
+                if ltv <= 0 and tier == "free":
+                    return None
+                cat = getattr(store, "catalog", None) or {}
+                return {
+                    "ltv": ltv,
+                    "tier": tier,
+                    "is_payer": ltv > 0,
+                    "is_member": tier != "free",
+                    "currency": str(cat.get("currency") or "USD"),
+                }
+            except Exception:
+                logger.debug("monetization aggregate failed", exc_info=True)
+                return None
+
+        def _monetization_batch(jids, contact_by, convkeys_by_contact):
+            """K2c：批量版（健康榜上榜行）。一次 SQL 取全部 key 的 LTV/档，再按 jid 归并。"""
+            store = _entitlement_store()
+            if store is None or not jids or not convkeys_by_contact:
+                return {}
+            try:
+                from src.utils.monetization import best_tier as _best_tier
+                all_keys = list(dict.fromkeys(
+                    k for ks in convkeys_by_contact.values() for k in ks))
+                if not all_keys:
+                    return {}
+                spend = store.spend_by_contacts(all_keys)
+                tiers = store.tiers_by_contacts(all_keys)
+                cat = getattr(store, "catalog", None) or {}
+                cur = str(cat.get("currency") or "USD")
+                out = {}
+                for jid in jids:
+                    cid = contact_by.get(jid) or ""
+                    keys = convkeys_by_contact.get(cid, [])
+                    if not keys:
+                        continue
+                    ltv = round(sum(spend.get(k, 0) for k in keys), 2)
+                    tier = _best_tier(
+                        (tiers[k] for k in keys if k in tiers),
+                        getattr(store, "catalog", None))
+                    if ltv <= 0 and tier == "free":
+                        continue
+                    out[jid] = {
+                        "ltv": ltv, "tier": tier, "is_payer": ltv > 0,
+                        "is_member": tier != "free", "currency": cur,
+                    }
+                return out
+            except Exception:
+                logger.debug("monetization batch failed", exc_info=True)
+                return {}
+
         def _health_board_inbox_sort_enabled() -> bool:
             """R3：config companion.relations_health.health_board.inbox_sort_tiebreak（默认关）。"""
             cm = getattr(app.state, "config_manager", None)
@@ -1358,7 +1428,8 @@ def register_contacts_routes(
             card = _score_health(sig)
             return {"ok": True, "journey_id": journey_id,
                     "card": card.as_dict(), "intimacy": bd.to_dict(),
-                    "inbox": _inbox_enrichment(conv_ids)}
+                    "inbox": _inbox_enrichment(conv_ids),
+                    "monetization": _monetization_for_keys(conv_ids)}
 
         @app.get("/api/relations/health-board")
         async def relation_health_board(
@@ -1472,9 +1543,20 @@ def register_contacts_routes(
                     ib = inbox_by.get(it["journey_id"])
                     if ib:
                         it["inbox"] = ib
+            # K2c：变现信号——仅富集最终上榜行（高价值付费用户单列预警）
+            mon_by = _monetization_batch(
+                [it["journey_id"] for it in top], contact_by, convkeys_by_contact)
+            payer_count = 0
+            for it in top:
+                mb = mon_by.get(it["journey_id"])
+                if mb:
+                    it["monetization"] = mb
+                    if mb.get("is_payer") or mb.get("is_member"):
+                        payer_count += 1
             return {"ok": True, "items": top,
                     "scanned": len(jids), "count": min(len(items), lim),
-                    "inbox_sort_tiebreak": inbox_sort}
+                    "inbox_sort_tiebreak": inbox_sort,
+                    "payer_count": payer_count}
 
     # ── Q 延伸·回填状态查询 + 按需 dry_run 触发 ───────────────
     @app.get("/api/relations/backfill-status")
