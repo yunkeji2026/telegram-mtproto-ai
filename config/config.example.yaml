@@ -1450,6 +1450,35 @@ pricing:
     per_message: 0.0                  # 超出含额每条消息单价
     per_seat: 0.0                     # 超出含额每席位单价
 
+# ── Phase K2 · C 端变现闭环（端用户→运营方的内容/会员变现）──────────────
+# 与上面 pricing（B2B 运营方→平台席位/消息计费）正交：本块面向**与 AI 陪伴对话的
+# 端用户**（contact）。订阅会员 tier 授予功能位、付费解锁一次性内容、打赏/虚拟礼物入账。
+# 营收/权益落 config/entitlements.db；后台 /monetization 看营收+手动开通。
+# 默认全关：enabled 关时不建库不接线；gate.enabled 关时变现门控对陪伴行为零影响。
+monetization:
+  enabled: false                      # 总开关：开启后启动建库 + 挂 app.state（路由始终注册，关时库懒建只读）
+  webhook_secret: ""                  # 支付服务商回调共享密钥（校验 X-Monetize-Secret 头）；空=接受（仅自测）
+  expire_on_startup: true             # 启动时把过期订阅标 expired（状态收敛，不影响有效判定）
+  gate:
+    enabled: false                    # 变现功能门控总开关（关=feature_allowed 恒放行，零破坏陪伴行为）
+  # 付费转化：免费用户配额 + 升级引导（gate.enabled 开时生效）
+  upsell:
+    free_proactive_daily: 1           # 免费用户每日主动关怀上限（超额则跳过，VIP=unlimited_proactive 不限）
+  # 价目目录（深合并到内置默认；留空用默认 free/vip/svip + 解锁项 + 礼物）。
+  catalog:
+    currency: USD
+    tiers:
+      free: { monthly: 0,    label: "免费", grants: [] }
+      vip:  { monthly: 9.9,  label: "VIP",  grants: [unlimited_proactive, voice_reply, priority_reply] }
+      svip: { monthly: 29.9, label: "SVIP", grants: [unlimited_proactive, voice_reply, priority_reply, exclusive_persona, all_story] }
+    items:
+      story_ch1:       { price: 1.99, label: "剧情·第一章" }
+      exclusive_album: { price: 4.99, label: "专属相册" }
+    gifts:
+      rose:   { amount: 0.99, label: "🌹 玫瑰" }
+      coffee: { amount: 2.99, label: "☕ 咖啡" }
+      crown:  { amount: 9.99, label: "👑 皇冠" }
+
 # ── 健康看门狗（D3）──────────────────────────────────────────────
 # 周期巡检运行时健康（DB/AI/授权/渠道/worker/队列），异常时经 EventBus →
 # WebhookNotifier 主动推送。需在「告警渠道」里给某条 webhook 订阅 health_alert 事件。

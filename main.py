@@ -1313,6 +1313,10 @@ class AIChatAssistant:
                 # 必须在 contacts + messenger_rpa_service + ai_client 都就绪后启动
                 await self._maybe_start_reactivation_loop()
 
+                # ★ Phase K2：C 端变现（端用户订阅/解锁/打赏；默认关）
+                # 先于 proactive_care，使变现门控开启时 EntitlementStore 已就绪
+                self._maybe_init_monetization(self._web_app)
+
                 # ★ Phase O：主动关怀引擎（记忆驱动的约定/事件跟进）
                 await self._maybe_start_proactive_care(self._web_app)
 
@@ -1646,6 +1650,62 @@ class AIChatAssistant:
         except Exception:
             self.logger.warning("质量趋势持久化启动跳过", exc_info=True)
 
+    def _maybe_init_monetization(self, web_app=None) -> None:
+        """Phase K2：C 端变现（默认关，monetization.enabled 开）。
+
+        开启时建 EntitlementStore 单例（落 config/entitlements.db）→ 挂 app.state 供路由用，
+        并按 catalog 注入价目；启动可选清理过期订阅。关时不建库（路由会按需懒建只读单例）。
+        """
+        try:
+            mon = (self.config.config.get("monetization") or {})
+            if not mon.get("enabled", False):
+                self.logger.info("C 端变现未启用（monetization.enabled=false）")
+                return
+            from src.utils.entitlement_store import get_entitlement_store
+            from src.utils.monetization import merge_catalog
+
+            catalog = merge_catalog(mon.get("catalog"))
+            _cfg_dir = Path(self.config.config_path).parent
+            store = get_entitlement_store(_cfg_dir / "entitlements.db", catalog=catalog)
+            if web_app is not None:
+                web_app.state.entitlement_store = store
+            if mon.get("expire_on_startup", True):
+                try:
+                    store.expire_subscriptions()
+                except Exception:
+                    pass
+            self.logger.info("✅ C 端变现已就绪（EntitlementStore 已挂载）")
+        except Exception:
+            self.logger.warning("C 端变现初始化跳过", exc_info=True)
+
+    def _build_care_paywall(self, care_store):
+        """K2b：构造主动关怀配额门控回调。变现 gate 关 → 返回 None（不拦，零破坏）。
+
+        回调懒读 app.state 的 MonetizationRuntime：免费用户近 24h 已发主动数超配额 → False。
+        """
+        try:
+            mon = (self.config.config.get("monetization") or {})
+            if not (mon.get("enabled") and (mon.get("gate") or {}).get("enabled")):
+                return None
+        except Exception:
+            return None
+
+        def _allowed(contact_key: str) -> bool:
+            try:
+                import time as _t
+                from src.utils.monetization_runtime import MonetizationRuntime
+                rt = MonetizationRuntime.from_app(self._web_app)
+                if rt is None:
+                    return True
+                since = _t.time() - 86400.0
+                sent = care_store.count_sent_since(contact_key, since)
+                return rt.proactive_allowed(contact_key, sent)
+            except Exception:
+                return True  # 门控异常绝不拦关怀
+
+        self.logger.info("✅ 主动关怀变现配额门控已接入")
+        return _allowed
+
     async def _maybe_start_proactive_care(self, web_app=None) -> None:
         """Phase O：主动关怀引擎（默认关，companion.proactive_care.enabled 开）。
 
@@ -1713,9 +1773,13 @@ class AIChatAssistant:
             except Exception:
                 ai_name = "她"
 
+            # K2b：变现配额门控回调（仅当变现 gate 开启才注入；否则 None=不拦，零破坏）
+            proactive_paywall = self._build_care_paywall(care_store)
+
             dispatcher = CareDispatcher(
                 store=care_store, ai_client=self.ai_client, send_callback=_care_send,
-                context_provider=_care_context, ai_name=ai_name,
+                context_provider=_care_context, proactive_allowed=proactive_paywall,
+                ai_name=ai_name,
                 max_per_tick=int(cfg.get("max_per_tick", 3)),
                 interval_sec=float(cfg.get("interval_sec", 600)),
                 skip_if_no_context=bool(cfg.get("skip_if_no_context", True)),

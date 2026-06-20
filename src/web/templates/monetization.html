@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}变现营收 · {{ site_name|default('华灵科技客户转化聊天系统') }}{% endblock %}
+{% block page_title %}变现营收{% endblock %}
+{% block head %}
+<style>
+.mz-cards{display:flex;flex-wrap:wrap;gap:.8rem;margin-bottom:1rem}
+.mz-card{flex:1;min-width:150px;padding:.85rem 1rem;background:var(--input);border-radius:10px}
+.mz-card .lb{font-size:.72rem;color:var(--t3);text-transform:uppercase;letter-spacing:.04em}
+.mz-card .v{font-size:1.5rem;font-weight:700;color:var(--t1);margin-top:.25rem}
+.mz-card .v.green{color:var(--green)}
+.mz-card .sub{font-size:.72rem;color:var(--t2);margin-top:.2rem}
+.mz-filters{display:flex;flex-wrap:wrap;gap:.6rem;align-items:flex-end;margin-bottom:1rem}
+.table-wrap{overflow-x:auto}
+.mz-table{width:100%;border-collapse:collapse;font-size:.82rem;margin-bottom:1rem}
+.mz-table th,.mz-table td{padding:.5rem .65rem;border-bottom:1px solid var(--bd);text-align:left;vertical-align:top}
+.mz-table th{color:var(--t3);font-weight:600;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
+.mz-table tr:hover td{background:rgba(91,124,246,.04)}
+.mono{font-family:Consolas,monospace;font-size:.76rem;word-break:break-all}
+.badge-k{display:inline-block;padding:.12rem .45rem;border-radius:4px;font-size:.65rem;font-weight:700}
+.badge-k.subscribe{background:rgba(91,124,246,.15);color:var(--p)}
+.badge-k.unlock{background:rgba(16,185,129,.15);color:var(--green)}
+.badge-k.gift{background:rgba(245,158,11,.15);color:var(--amber)}
+.mz-grant{display:flex;flex-wrap:wrap;gap:.5rem;align-items:flex-end;padding:.75rem;background:var(--input);border-radius:10px;margin-bottom:1rem}
+.mz-grant input,.mz-grant select{min-width:110px}
+.mz-ent{font-size:.82rem;color:var(--t2);margin-top:.5rem;padding:.6rem .8rem;background:var(--input);border-radius:8px;display:none}
+.mz-ent strong{color:var(--t1)}
+.section-h{font-size:.9rem;font-weight:700;color:var(--t1);margin:.4rem 0 .6rem}
+</style>
+{% endblock %}
+{% block content %}
+{% set active="monetization" %}
+
+<div class="card fa">
+  <h2>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+    C 端变现营收
+    <span style="font-size:.75rem;font-weight:400;color:var(--t2);margin-left:.4rem">端用户订阅 / 付费解锁 / 打赏 · 需开启 monetization.enabled</span>
+  </h2>
+
+  <div class="mz-filters">
+    <div class="f-grp"><label class="f-lb">统计窗口（天）</label><input type="number" id="mz-days" value="30" min="1" max="365" class="f-input" style="width:100px"></div>
+    <button type="button" class="btn btn-p" onclick="mzLoad()">刷新</button>
+    <span id="mz-flag" style="font-size:.78rem;color:var(--t3)"></span>
+  </div>
+
+  <div class="mz-cards" id="mz-cards"></div>
+
+  <div class="section-h">Top 消费端用户</div>
+  <div class="table-wrap">
+    <table class="mz-table">
+      <thead><tr><th style="min-width:160px">联系人</th><th style="width:120px">累计消费</th><th style="width:90px">笔数</th></tr></thead>
+      <tbody id="mz-spenders"><tr><td colspan="3" style="padding:1.2rem;color:var(--t3)">加载中…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="section-h">最近交易流水</div>
+  <div class="table-wrap">
+    <table class="mz-table">
+      <thead><tr><th style="width:70px">类型</th><th style="min-width:140px">联系人</th><th style="min-width:90px">项目</th><th style="width:90px">金额</th><th style="width:90px">来源</th><th style="width:150px">时间</th></tr></thead>
+      <tbody id="mz-tx"><tr><td colspan="6" style="padding:1.2rem;color:var(--t3)">加载中…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card fa">
+  <h2>运营手动开通 / 查询权益</h2>
+  <div class="mz-grant">
+    <div class="f-grp"><label class="f-lb">联系人 key</label><input type="text" id="g-contact" class="f-input" placeholder="conversation_id"></div>
+    <div class="f-grp"><label class="f-lb">类型</label>
+      <select id="g-kind" class="f-input" style="width:130px">
+        <option value="subscribe">订阅会员</option>
+        <option value="unlock">解锁内容</option>
+        <option value="gift">打赏礼物</option>
+      </select>
+    </div>
+    <div class="f-grp"><label class="f-lb">项目 ID</label><input type="text" id="g-item" class="f-input" placeholder="vip / story_ch1 / rose"></div>
+    <div class="f-grp"><label class="f-lb">订阅天数</label><input type="number" id="g-days" class="f-input" value="30" min="1" style="width:90px"></div>
+    <button type="button" class="btn btn-p" onclick="mzGrant()">开通 / 入账</button>
+    <button type="button" class="btn" onclick="mzLookup()">查权益</button>
+  </div>
+  <div class="mz-ent" id="g-ent"></div>
+</div>
+
+<script>
+function esc(s){return String(s||'').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
+function kBadge(k){return '<span class="badge-k '+esc(k)+'">'+esc(k||'—')+'</span>';}
+
+async function mzLoad(){
+  const days=document.getElementById('mz-days').value||30;
+  const cards=document.getElementById('mz-cards');
+  const sp=document.getElementById('mz-spenders');
+  const tx=document.getElementById('mz-tx');
+  const flag=document.getElementById('mz-flag');
+  try{
+    const res=await fetch('/api/monetize/overview?days='+encodeURIComponent(days));
+    if(!res.ok){flag.textContent='错误 '+res.status;return;}
+    const d=await res.json();
+    flag.textContent=d.enabled?'变现已启用':'变现未启用（monetization.enabled=false，下方仍可查看/手动开通）';
+    const rev=d.revenue||{};
+    const bk=rev.by_kind||{};
+    const cur=rev.currency||'USD';
+    function kindAmt(k){return (bk[k]&&bk[k].amount||0).toFixed(2);}
+    cards.innerHTML=
+      '<div class="mz-card"><div class="lb">近'+(d.window_days||30)+'天营收</div><div class="v green">'+cur+' '+((rev.total||0).toFixed(2))+'</div><div class="sub">'+(rev.count||0)+' 笔</div></div>'+
+      '<div class="mz-card"><div class="lb">活跃订阅</div><div class="v">'+(d.active_subscriptions||0)+'</div><div class="sub">当前有效会员</div></div>'+
+      '<div class="mz-card"><div class="lb">订阅收入</div><div class="v">'+cur+' '+kindAmt('subscribe')+'</div><div class="sub">'+((bk.subscribe&&bk.subscribe.count)||0)+' 笔</div></div>'+
+      '<div class="mz-card"><div class="lb">解锁收入</div><div class="v">'+cur+' '+kindAmt('unlock')+'</div><div class="sub">'+((bk.unlock&&bk.unlock.count)||0)+' 笔</div></div>'+
+      '<div class="mz-card"><div class="lb">打赏收入</div><div class="v">'+cur+' '+kindAmt('gift')+'</div><div class="sub">'+((bk.gift&&bk.gift.count)||0)+' 笔</div></div>';
+    const spenders=d.top_spenders||[];
+    sp.innerHTML=spenders.length?spenders.map(function(s){
+      return '<tr><td class="mono">'+esc(s.contact_key)+'</td><td>'+cur+' '+((s.spent||0).toFixed(2))+'</td><td>'+(s.tx_count||0)+'</td></tr>';
+    }).join(''):'<tr><td colspan="3" style="padding:1.2rem;color:var(--t3)">暂无消费</td></tr>';
+    const txs=d.recent_tx||[];
+    tx.innerHTML=txs.length?txs.map(function(t){
+      var ts=t.ts?new Date(t.ts*1000).toLocaleString():'—';
+      return '<tr><td>'+kBadge(t.kind)+'</td><td class="mono">'+esc(t.contact_key)+'</td><td>'+esc(t.item_id||'—')+'</td><td>'+esc(t.currency||cur)+' '+((t.amount||0).toFixed(2))+'</td><td style="color:var(--t3);font-size:.74rem">'+esc(t.source||'—')+'</td><td class="mono">'+ts+'</td></tr>';
+    }).join(''):'<tr><td colspan="6" style="padding:1.2rem;color:var(--t3)">无流水</td></tr>';
+  }catch(e){flag.textContent='请求失败: '+e;}
+}
+
+document.getElementById('g-kind').addEventListener('change',function(){
+  document.getElementById('g-days').parentElement.style.display=this.value==='subscribe'?'':'none';
+});
+
+async function mzGrant(){
+  const contact=document.getElementById('g-contact').value.trim();
+  const kind=document.getElementById('g-kind').value;
+  const item=document.getElementById('g-item').value.trim();
+  if(!contact||!item){alert('联系人 key 和项目 ID 必填');return;}
+  const payload={contact_key:contact,kind:kind,item_id:item};
+  if(kind==='subscribe')payload.days=parseFloat(document.getElementById('g-days').value||'30');
+  try{
+    const res=await fetch('/api/monetize/grant',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const d=await res.json();
+    if(!d.ok){alert('失败：'+(d.message||d.reason));return;}
+    if(d.entitlement)renderEnt(d.entitlement);
+    mzLoad();
+  }catch(e){alert(e);}
+}
+
+async function mzLookup(){
+  const contact=document.getElementById('g-contact').value.trim();
+  if(!contact){alert('请填联系人 key');return;}
+  try{
+    const res=await fetch('/api/monetize/entitlement?contact_key='+encodeURIComponent(contact));
+    const d=await res.json();
+    if(!d.ok){alert('失败：'+(d.message||d.reason));return;}
+    renderEnt(d.entitlement);
+  }catch(e){alert(e);}
+}
+
+function renderEnt(ent){
+  const box=document.getElementById('g-ent');
+  box.style.display='block';
+  var until=ent.active_until?new Date(ent.active_until*1000).toLocaleString():'—';
+  box.innerHTML='<strong>'+esc(ent.contact_key)+'</strong> · 会员档：<strong>'+esc(ent.tier)+'</strong>'+
+    (ent.active?'（有效至 '+until+'）':'（无有效订阅）')+
+    ' · 功能位：'+(ent.grants&&ent.grants.length?ent.grants.map(esc).join(', '):'—')+
+    ' · 已解锁：'+(ent.unlocked&&ent.unlocked.length?ent.unlocked.map(esc).join(', '):'—');
+}
+
+document.addEventListener('DOMContentLoaded',mzLoad);
+</script>
+{% endblock %}

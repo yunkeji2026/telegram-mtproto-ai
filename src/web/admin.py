@@ -448,6 +448,7 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         "/crisis-audit": "crisis_audit",
         "/care-schedule": "care",
         "/relations-health": "relations_health",
+        "/monetization": "monetization",
         "/line-rpa": "line_rpa",
         "/messenger-rpa": "messenger_rpa",
         "/whatsapp-rpa": "whatsapp_rpa",
@@ -679,6 +680,7 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         "/crisis-audit": "crisis_audit",
         "/care-schedule": "care",
         "/relations-health": "care",
+        "/monetization": "monetization",
         "/line-rpa": "line_rpa",
         "/workspace": "workspace",
     }
@@ -820,6 +822,16 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         import logging as _log_dob
 
         _log_dob.getLogger("admin").warning("deferred-outbox 路由注册失败", exc_info=True)
+
+    # ── Phase K2 C 端变现 API（/api/monetize/*）──────────────────────────
+    try:
+        from src.web.routes.monetization_routes import register_monetization_routes
+
+        register_monetization_routes(app, api_auth=_api_auth, config_manager=config_manager)
+    except Exception:
+        import logging as _log_mon2
+
+        _log_mon2.getLogger("admin").warning("monetize 路由注册失败", exc_info=True)
 
     # ── 陪伴主动话题·可观测预览 API（/api/companion/proactive/preview）──
     try:
@@ -2384,6 +2396,12 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
     async def relations_health_page(request: Request, _=Depends(_page_auth)):
         _require_role(request, "care")
         return templates.TemplateResponse(request, "relations_health.html", {})
+
+    # ── Phase K2：C 端变现营收页面 ──
+    @app.get("/monetization", response_class=HTMLResponse)
+    async def monetization_page(request: Request, _=Depends(_page_auth)):
+        _require_role(request, "monetization")
+        return templates.TemplateResponse(request, "monetization.html", {})
 
     # ── 情景记忆 + 跨平台身份 API（Phase E1 续拆 → episodic_identity_routes） ──
     # 仅 API 端点迁出；上方 2 个页面路由因需 templates 仍留本文件（与既有约定一致）。

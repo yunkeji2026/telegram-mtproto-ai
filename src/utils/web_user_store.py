@@ -72,6 +72,7 @@ PAGE_PERMISSIONS = {
     "episodic":   {ROLE_MASTER, ROLE_ADMIN, ROLE_VIEWER},
     "crisis_audit": {ROLE_MASTER, ROLE_ADMIN, ROLE_VIEWER},
     "care":       {ROLE_MASTER, ROLE_ADMIN, ROLE_VIEWER},
+    "monetization": {ROLE_MASTER, ROLE_ADMIN},   # 营收/变现数据：仅主帐号+管理员
     "line_rpa":   {ROLE_MASTER, ROLE_ADMIN, ROLE_VIEWER},
     "personas":   {ROLE_MASTER, ROLE_ADMIN, ROLE_VIEWER},
     # 坐席工作台（统一收件箱）：master/admin/agent 可用（viewer 只读不接管）

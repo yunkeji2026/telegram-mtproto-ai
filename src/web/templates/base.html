@@ -532,6 +532,10 @@ code{background:var(--input);padding:.15rem .45rem;border-radius:5px;font-size:.
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
         <span>流失预警</span>
       </a>
+      <a href="/monetization" {% if active=="monetization" %}class="active"{% endif %} data-help="nav_monetization">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+        <span>变现营收</span>
+      </a>
       <a href="/help" {% if active=="help" %}class="active"{% endif %} data-help="nav_help">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
         <span>{{ (i18n or {}).get('help_center', '帮助中心') }}</span>
@@ -635,6 +639,10 @@ code{background:var(--input);padding:.15rem .45rem;border-radius:5px;font-size:.
     <a href="/relations-health" {% if active=="relations_health" %}class="active"{% endif %} data-help="nav_relations_health">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
       <span>流失预警</span>
+    </a>
+    <a href="/monetization" {% if active=="monetization" %}class="active"{% endif %} data-help="nav_monetization">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+      <span>变现营收</span>
     </a>
     <a href="/logs" {% if active=="logs" %}class="active"{% endif %} data-help="nav_logs">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>

@@ -62,6 +62,12 @@ _BASELINE = """
 /api/deferred-outbox/cancel	POST
 /api/deferred-outbox/pause	POST
 /api/deferred-outbox/resume	POST
+/api/monetize/overview	GET
+/api/monetize/catalog	GET
+/api/monetize/entitlement	GET
+/api/monetize/feature-check	POST
+/api/monetize/grant	POST
+/api/monetize/webhook	POST
 /api/cases/active	GET
 /api/cases/{case_id}/close	POST
 /api/cases/{case_id}/note	POST
@@ -672,6 +678,7 @@ _BASELINE = """
 /care-schedule	GET
 /crisis-audit	GET
 /relations-health	GET
+/monetization	GET
 /diff	GET
 /episodic-memory	GET
 /episodic_memory	GET
