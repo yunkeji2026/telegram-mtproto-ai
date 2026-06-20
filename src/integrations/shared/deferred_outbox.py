@@ -248,6 +248,83 @@ class DeferredOutboxStore:
             "total": sum(by_status.values()),
         }
 
+    # ── 运营动作（mutate）：重试 / 取消 / 清理 ──────────────────────
+    _TERMINAL = ("failed", "expired", "cancelled")
+
+    def requeue(self, row_id: int, *, now: Optional[float] = None) -> bool:
+        """把单条终态行（failed/expired/cancelled）重新入队 pending（立即到期）。"""
+        n = float(now if now is not None else time.time())
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE deferred_outbox SET status='pending', defer_until=?, "
+                "error='', reason='requeued' "
+                "WHERE id=? AND status IN ('failed','expired','cancelled')",
+                (n, int(row_id)),
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
+
+    def requeue_status(
+        self, status: str, *, now: Optional[float] = None, limit: int = 500,
+    ) -> int:
+        """批量把某终态（failed/expired/cancelled）的行重入队。返回受影响条数。"""
+        st = str(status or "").strip()
+        if st not in self._TERMINAL:
+            return 0
+        n = float(now if now is not None else time.time())
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE deferred_outbox SET status='pending', defer_until=?, "
+                "error='', reason='requeued' WHERE id IN ("
+                " SELECT id FROM deferred_outbox WHERE status=? ORDER BY id LIMIT ?)",
+                (n, st, max(1, int(limit))),
+            )
+            self._conn.commit()
+            return int(cur.rowcount)
+
+    def cancel_pending(self, *, reason: str = "", platform: str = "") -> int:
+        """把 pending 行按 reason/平台软取消（status='cancelled'）。返回条数。
+
+        必须至少给一个过滤条件（reason 或 platform），避免误清空整个队列。
+        典型用法：清掉卡在某道护栏（如 no_sender / quiet_hours）的积压。
+        """
+        reason = str(reason or "").strip()
+        platform = str(platform or "").strip()
+        if not reason and not platform:
+            return 0
+        clauses = ["status='pending'"]
+        params: List[Any] = []
+        if reason:
+            clauses.append("reason=?")
+            params.append(reason)
+        if platform:
+            clauses.append("platform=?")
+            params.append(platform)
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE deferred_outbox SET status='cancelled', "
+                "error='cancelled_by_op' WHERE " + " AND ".join(clauses),
+                params,
+            )
+            self._conn.commit()
+            return int(cur.rowcount)
+
+    def purge_terminal(
+        self, *, older_than_sec: float = 604800.0, now: Optional[float] = None,
+    ) -> int:
+        """删除超过保留期的终态行（sent/expired/failed/cancelled）瘦身。返回条数。"""
+        n = float(now if now is not None else time.time())
+        cut = n - max(0.0, float(older_than_sec))
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM deferred_outbox WHERE status IN "
+                "('sent','expired','failed','cancelled') AND "
+                "COALESCE(NULLIF(sent_at,0), created_at) < ?",
+                (cut,),
+            )
+            self._conn.commit()
+            return int(cur.rowcount)
+
     def list_recent(
         self, *, status: str = "", limit: int = 100,
     ) -> List[Dict[str, Any]]:
@@ -306,6 +383,8 @@ class DeferredDispatcher:
         self._no_sender_backoff = max(60.0, float(no_sender_backoff_sec))
         # per-(platform,account) 最近发送时刻（内存，pacing 用）
         self._last_sent: Dict[Tuple[str, str], float] = {}
+        # 运营手动暂停的平台（内存；重启复位为全部活跃）
+        self._paused: set = set()
         self._stop_evt: Optional[asyncio.Event] = None
         self._task: Optional[asyncio.Task] = None
 
@@ -320,6 +399,21 @@ class DeferredDispatcher:
     def registered_platforms(self) -> List[str]:
         """已注册 sender 的平台列表（供运营可观测性展示）。"""
         return sorted(self._senders.keys())
+
+    def pause(self, platform: str) -> None:
+        """运营手动暂停某平台投递（pending 不丢，逐 tick 推后等 resume）。"""
+        p = str(platform or "").strip()
+        if p:
+            self._paused.add(p)
+
+    def resume(self, platform: str) -> None:
+        self._paused.discard(str(platform or "").strip())
+
+    def is_paused(self, platform: str) -> bool:
+        return str(platform or "").strip() in self._paused
+
+    def paused_platforms(self) -> List[str]:
+        return sorted(self._paused)
 
     async def start(self) -> None:
         if self._task and not self._task.done():
@@ -392,6 +486,12 @@ class DeferredDispatcher:
         staleness = float(row.get("staleness_sec") or 0)
         if staleness > 0 and created_at > 0 and (now - created_at) > staleness:
             self._store.mark_expired(row_id, "stale")
+            return False
+
+        # 1.5 运营暂停：该平台被手动暂停 → 推后到下一 tick 再看（不丢）
+        if platform in self._paused:
+            self._store.push_until(
+                row_id, now + self._interval, note="paused")
             return False
 
         # 2. kill-switch

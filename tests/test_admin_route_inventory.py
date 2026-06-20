@@ -58,6 +58,10 @@ _BASELINE = """
 /api/care/dry-run-samples	GET
 /api/care/dry-run-feedback	POST
 /api/deferred-outbox/status	GET
+/api/deferred-outbox/retry	POST
+/api/deferred-outbox/cancel	POST
+/api/deferred-outbox/pause	POST
+/api/deferred-outbox/resume	POST
 /api/cases/active	GET
 /api/cases/{case_id}/close	POST
 /api/cases/{case_id}/note	POST
@@ -545,6 +549,7 @@ _BASELINE = """
 /api/setup/companion-preflight	GET
 /api/companion/proactive/preview	GET
 /api/companion/quality-overview	GET
+/api/companion/quality-trend	GET
 /api/companion/proactive/sample	POST
 /api/companion/proactive/sample/{sid}/rate	POST
 /api/companion/proactive/samples	GET

@@ -247,3 +247,82 @@ def test_registered_platforms_sorted():
     d.register_sender("whatsapp", _x)
     d.register_sender("line", _x)
     assert d.registered_platforms() == ["line", "whatsapp"]
+
+
+# ── 运营动作：重试 / 取消 / 清理 / 暂停 ──────────────────────────────────
+def test_requeue_single_terminal_row():
+    s = DeferredOutboxStore(":memory:")
+    rid = s.enqueue(platform="line", account_id="a", chat_key="c",
+                    reply_text="x", defer_until=NOW, now=NOW)
+    s.mark_failed(rid, "boom")
+    assert s.requeue(rid, now=NOW) is True
+    assert s.count(status="pending") == 1 and s.count(status="failed") == 0
+    # 已是 pending 的不可再 requeue（仅终态可）
+    assert s.requeue(rid, now=NOW) is False
+
+
+def test_requeue_status_bulk_only_terminal():
+    s = DeferredOutboxStore(":memory:")
+    for i in range(3):
+        rid = s.enqueue(platform="line", account_id="a", chat_key=f"c{i}",
+                        reply_text="x", defer_until=NOW, now=NOW)
+        s.mark_failed(rid, "boom")
+    assert s.requeue_status("failed", now=NOW) == 3
+    assert s.count(status="pending") == 3
+    # 非法 status 不动
+    assert s.requeue_status("pending", now=NOW) == 0
+
+
+def test_cancel_pending_requires_filter():
+    s = DeferredOutboxStore(":memory:")
+    s.enqueue(platform="line", account_id="a", chat_key="c",
+              reply_text="x", defer_until=NOW + 9999, now=NOW)
+    # 无过滤条件 → 不动（防误清空）
+    assert s.cancel_pending() == 0
+    assert s.count(status="pending") == 1
+
+
+def test_cancel_pending_by_reason_and_platform():
+    s = DeferredOutboxStore(":memory:")
+    r1 = s.enqueue(platform="line", account_id="a", chat_key="c1",
+                   reply_text="x", defer_until=NOW + 9999, now=NOW)
+    s.push_until(r1, NOW + 9999, note="no_sender")
+    s.enqueue(platform="telegram", account_id="a", chat_key="c2",
+              reply_text="x", defer_until=NOW + 9999, now=NOW, reason="other")
+    assert s.cancel_pending(reason="no_sender") == 1
+    assert s.count(status="cancelled") == 1
+    assert s.count(status="pending") == 1
+    # 按平台取消剩下那条
+    assert s.cancel_pending(platform="telegram") == 1
+    assert s.count(status="pending") == 0
+
+
+def test_purge_terminal_removes_old_only():
+    s = DeferredOutboxStore(":memory:")
+    old = s.enqueue(platform="line", account_id="a", chat_key="old",
+                    reply_text="x", defer_until=NOW, now=NOW - 100000)
+    s.mark_failed(old, "boom")
+    fresh = s.enqueue(platform="line", account_id="a", chat_key="fresh",
+                      reply_text="x", defer_until=NOW, now=NOW)
+    s.mark_failed(fresh, "boom")
+    removed = s.purge_terminal(older_than_sec=3600, now=NOW)
+    assert removed == 1
+    rows = s.list_recent(limit=10)
+    assert [r["chat_key"] for r in rows] == ["fresh"]
+
+
+async def test_paused_platform_pushes_without_send():
+    s = DeferredOutboxStore(":memory:")
+    s.enqueue(platform="line", account_id="a", chat_key="c",
+              reply_text="x", defer_until=NOW - 10, now=NOW - 100)
+    sent, send = _recorder()
+    d = _disp(s, {"line": send})
+    d.pause("line")
+    n = await d.run_once(now=NOW)
+    assert n == 0 and len(sent) == 0
+    assert s.count(status="pending") == 1
+    assert s.stats()["pending_by_reason"].get("paused") == 1
+    # resume 后恢复投递（暂停时 defer_until 被推后 interval，故须越过该时点）
+    d.resume("line")
+    n2 = await d.run_once(now=NOW + 200)
+    assert n2 == 1 and len(sent) == 1
