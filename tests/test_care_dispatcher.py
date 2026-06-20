@@ -109,6 +109,42 @@ async def test_skip_when_no_context():
     assert s.count(status="skipped") == 1
 
 
+# ── K2b：变现配额门控回调 ────────────────────────────────────────────────
+async def test_paywall_blocks_over_quota_free_user():
+    s = _store_with()
+    rec = []
+    d = CareDispatcher(store=s, ai_client=_AI(), send_callback=_sender(rec),
+                       context_provider=lambda ck: "ctx",
+                       proactive_allowed=lambda ck: False)  # 模拟免费超额
+    n = await d.run_once(now=NOW)
+    assert n == 0 and not rec
+    assert s.count(status="skipped") == 1
+    # 跳过原因可见
+    item = s.list_recent(status="skipped")[0]
+    assert item["note"] == "paywall_quota"
+
+
+async def test_paywall_allows_when_callback_true():
+    s = _store_with()
+    rec = []
+    d = CareDispatcher(store=s, ai_client=_AI(), send_callback=_sender(rec),
+                       context_provider=lambda ck: "ctx",
+                       proactive_allowed=lambda ck: True)
+    n = await d.run_once(now=NOW)
+    assert n == 1 and len(rec) == 1
+    assert s.count(status="sent") == 1
+
+
+async def test_paywall_none_callback_no_change():
+    # 未注入回调（gate 关）→ 行为与原来完全一致
+    s = _store_with()
+    rec = []
+    d = CareDispatcher(store=s, ai_client=_AI(), send_callback=_sender(rec),
+                       context_provider=lambda ck: "ctx", proactive_allowed=None)
+    n = await d.run_once(now=NOW)
+    assert n == 1 and s.count(status="sent") == 1
+
+
 async def test_already_discussed_skips():
     s = _store_with()
     rec = []

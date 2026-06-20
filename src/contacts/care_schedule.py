@@ -291,6 +291,18 @@ class CareScheduleStore:
             logger.debug("care_schedule expire failed: %s", e)
             return 0
 
+    def count_sent_since(self, contact_key: str, since: float) -> int:
+        """某联系人在 ``since`` 之后已发送（sent）的主动关怀数（变现配额门控用）。"""
+        try:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM care_schedule WHERE contact_key = ?"
+                " AND status = 'sent' AND sent_at >= ?",
+                (str(contact_key), float(since)),
+            ).fetchone()
+            return int(row[0]) if row else 0
+        except Exception:
+            return 0
+
     def count(self, *, status: str = "") -> int:
         try:
             if status:

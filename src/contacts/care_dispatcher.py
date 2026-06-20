@@ -32,6 +32,8 @@ SendCallback = Callable[[str, str, str, str, float, str, float, dict], Awaitable
 ContextProvider = Callable[[str], str]
 # already_discussed：(contact_key, topic) -> bool（近期是否已主动聊过该事）
 AlreadyDiscussed = Callable[[str, str], bool]
+# proactive_allowed：(contact_key) -> bool（变现配额门控；False=免费用户超额不主动）
+ProactiveAllowed = Callable[[str], bool]
 
 _IDENTITY_LEAK = ("作为AI", "作为一个AI", "AI助手", "as an AI", "i'm an ai", "i am an ai")
 
@@ -102,6 +104,7 @@ class CareDispatcher:
         send_callback: SendCallback,
         context_provider: Optional[ContextProvider] = None,
         already_discussed: Optional[AlreadyDiscussed] = None,
+        proactive_allowed: Optional[ProactiveAllowed] = None,
         ai_name: str = "她",
         default_lang: str = "zh",
         max_per_tick: int = 3,
@@ -119,6 +122,7 @@ class CareDispatcher:
         self._send = send_callback
         self._context_provider = context_provider
         self._already_discussed = already_discussed
+        self._proactive_allowed = proactive_allowed
         self._ai_name = ai_name or "她"
         self._default_lang = default_lang or "zh"
         self._max_per_tick = max(1, int(max_per_tick))
@@ -213,6 +217,16 @@ class CareDispatcher:
         if not chat_key or not platform:
             self._mark_skipped(sid, "missing platform/chat_key")
             return False
+
+        # K2b：变现配额门控——免费用户主动关怀超额 → 跳过（gate 关时回调返 True 不拦）。
+        # 放在 LLM 之前，超额时不白耗 token。
+        if self._proactive_allowed is not None:
+            try:
+                if not self._proactive_allowed(contact_key):
+                    self._mark_skipped(sid, "paywall_quota")
+                    return False
+            except Exception:
+                logger.debug("proactive_allowed 异常（忽略放行）", exc_info=True)
 
         # O3 改进①：近期已主动聊过该事 → 跳过（防到点打卡）
         if self._already_discussed is not None:
