@@ -283,12 +283,18 @@ def register_monetization_routes(app, *, api_auth, config_manager=None) -> None:
                 return {"ok": False, "reason": "provider_disabled",
                         "message": "stripe 未启用或未配 secret_key"}
             from src.utils.payment_gateway import build_stripe_checkout_params
+            # 订阅默认走原生 recurring（providers.stripe.recurring，默认开）；body 可显式覆盖
+            recurring = body.get("recurring")
+            if recurring is None:
+                recurring = bool(pc.get("recurring", True))
             params = build_stripe_checkout_params(
                 contact_key=ck, kind=kind, item_id=item_id,
                 amount=float(q.get("amount") or 0), currency=str(q.get("currency") or "USD"),
                 label=str(q.get("label") or item_id), days=days,
                 success_url=str(pc.get("success_url") or ""),
-                cancel_url=str(pc.get("cancel_url") or ""))
+                cancel_url=str(pc.get("cancel_url") or ""),
+                recurring=bool(recurring),
+                interval=str(pc.get("interval") or "month"))
             status, js = await _provider_request(
                 "POST", "https://api.stripe.com/v1/checkout/sessions",
                 headers={"Authorization": f"Bearer {pc.get('secret_key')}"},

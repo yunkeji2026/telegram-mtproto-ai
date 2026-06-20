@@ -100,6 +100,63 @@ def test_build_stripe_checkout_params():
     assert p["success_url"] == "https://ok"
 
 
+def test_build_stripe_checkout_params_recurring():
+    p = build_stripe_checkout_params(
+        contact_key="c1", kind="subscribe", item_id="vip", amount=9.9,
+        currency="USD", label="VIP", days=30, recurring=True, interval="month")
+    assert p["mode"] == "subscription"
+    assert p["line_items[0][price_data][recurring][interval]"] == "month"
+    # 续费溯源：grant 挂到 subscription metadata
+    assert p["subscription_data[metadata][contact_key]"] == "c1"
+    assert p["subscription_data[metadata][item_id]"] == "vip"
+    assert p["subscription_data[metadata][days]"] == "30"
+    # recurring 对非订阅无效（仍 payment）
+    p2 = build_stripe_checkout_params(
+        contact_key="c1", kind="gift", item_id="rose", amount=0.99,
+        currency="USD", recurring=True)
+    assert p2["mode"] == "payment"
+
+
+def test_parse_stripe_subscription_checkout_defers():
+    # mode=subscription 的 checkout.session.completed 让位给 invoice.paid（防双发）
+    event = {"id": "evt_s", "type": "checkout.session.completed",
+             "data": {"object": {"mode": "subscription", "amount_total": 990,
+                                  "currency": "usd",
+                                  "metadata": {"contact_key": "c1",
+                                               "kind": "subscribe",
+                                               "item_id": "vip"}}}}
+    assert parse_stripe_event(event) is None
+
+
+def test_parse_stripe_invoice_paid_renewal():
+    # 续费发票：metadata 在 subscription_details；金额从 amount_paid；ref=发票 id
+    event = {"id": "evt_inv", "type": "invoice.paid",
+             "data": {"object": {
+                 "id": "in_999", "amount_paid": 990, "currency": "usd",
+                 "subscription_details": {"metadata": {
+                     "contact_key": "c1", "kind": "subscribe",
+                     "item_id": "vip", "days": "30"}}}}}
+    g = parse_stripe_event(event)
+    assert g["contact_key"] == "c1"
+    assert g["kind"] == "subscribe"
+    assert g["amount"] == 9.9
+    assert g["ref"] == "in_999"  # 发票 id → 每期幂等
+    assert g["days"] == 30.0
+
+
+def test_parse_stripe_invoice_paid_lines_metadata_fallback():
+    event = {"id": "e", "type": "invoice.paid",
+             "data": {"object": {
+                 "id": "in_1", "amount_paid": 199, "currency": "usd",
+                 "lines": {"data": [{"metadata": {
+                     "contact_key": "c2", "kind": "subscribe",
+                     "item_id": "svip"}}]}}}}
+    g = parse_stripe_event(event)
+    assert g["contact_key"] == "c2"
+    assert g["item_id"] == "svip"
+    assert g["amount"] == 1.99
+
+
 # ── Telegram ──────────────────────────────────────────────────────────────
 def test_telegram_verify_secret():
     assert telegram_verify_secret("tok123", "tok123") is True

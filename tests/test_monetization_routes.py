@@ -197,6 +197,34 @@ def test_webhook_stripe_applies_idempotent():
     assert r2.json()["applied"] is False
 
 
+def test_webhook_stripe_invoice_paid_recurring():
+    client, store = _client(mon_cfg={
+        "enabled": True, "providers": {"stripe": {"webhook_secret": "whsec_x"}}})
+    # 订阅首付的 checkout.session.completed（mode=subscription）应被忽略（让位 invoice.paid）
+    sess = {"id": "evt_s", "type": "checkout.session.completed",
+            "data": {"object": {"mode": "subscription", "amount_total": 990,
+                                 "currency": "usd",
+                                 "metadata": {"contact_key": "c1",
+                                              "kind": "subscribe",
+                                              "item_id": "vip", "days": "30"}}}}
+    raw_s = json.dumps(sess).encode()
+    t = int(time.time())
+    r0 = client.post("/api/monetize/webhook/stripe", content=raw_s,
+                     headers={"Stripe-Signature": _stripe_sig(raw_s, "whsec_x", t)})
+    assert r0.json()["applied"] is False
+    # invoice.paid（首付/续费）真正发权益
+    inv = {"id": "evt_i", "type": "invoice.paid",
+           "data": {"object": {"id": "in_1", "amount_paid": 990, "currency": "usd",
+                               "subscription_details": {"metadata": {
+                                   "contact_key": "c1", "kind": "subscribe",
+                                   "item_id": "vip", "days": "30"}}}}}
+    raw_i = json.dumps(inv).encode()
+    r1 = client.post("/api/monetize/webhook/stripe", content=raw_i,
+                     headers={"Stripe-Signature": _stripe_sig(raw_i, "whsec_x", t)})
+    assert r1.json()["applied"] is True
+    assert store.get_entitlement("c1")["tier"] == "vip"
+
+
 def test_webhook_telegram_unauthorized():
     client, _ = _client(mon_cfg={
         "enabled": True,

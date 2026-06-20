@@ -1476,6 +1476,8 @@ monetization:
       webhook_secret: ""              # whsec_…（校验 Stripe-Signature 头，空=拒绝回调）
       success_url: ""                 # 支付成功跳转
       cancel_url: ""                  # 取消跳转
+      recurring: true                 # 订阅走原生 recurring（mode=subscription，按期 invoice.paid 自动续费发权益）
+      interval: month                 # recurring 计费周期（month/week/year）
     telegram_stars:
       enabled: false
       bot_token: ""                   # 机器人 token（createInvoiceLink + answerPreCheckoutQuery）

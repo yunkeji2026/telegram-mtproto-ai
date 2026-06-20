@@ -60,9 +60,13 @@ def stripe_verify_signature(
 def parse_stripe_event(event: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """把已验签的 Stripe 事件解析成 grant 字典；不支持的事件 → None。
 
-    支持 ``checkout.session.completed``（一次性 + 订阅首付）；我们在创建 session 时把
-    ``contact_key/kind/item_id/days`` 塞进 ``metadata``，金额从 ``amount_total``（分）还原。
-    幂等 ``ref`` 用事件 id（同一事件重投不重复发权益）。
+    - ``checkout.session.completed``（一次性 ``mode=payment``）：从 session ``metadata`` 取，
+      金额从 ``amount_total`` 还原，ref=事件 id。
+    - ``checkout.session.completed`` 且 ``mode=subscription`` → **None**（让位给 ``invoice.paid``，
+      避免首付被 session 与 invoice 双发）。
+    - ``invoice.paid``（订阅首付 + 每期续费）：metadata 依次从 ``subscription_details.metadata`` /
+      ``lines.data[].metadata`` / 顶层 ``metadata`` 取，金额从 ``amount_paid`` 还原，ref=发票 id
+      （每期一张 → 续费天然按期发权益且幂等）。
     """
     if not isinstance(event, dict):
         return None
@@ -70,17 +74,30 @@ def parse_stripe_event(event: Optional[Dict[str, Any]]) -> Optional[Dict[str, An
     if etype not in ("checkout.session.completed", "invoice.paid"):
         return None
     obj = ((event.get("data") or {}).get("object") or {})
-    md = obj.get("metadata") or {}
+    if etype == "checkout.session.completed":
+        if str(obj.get("mode") or "") == "subscription":
+            return None  # 订阅首付由 invoice.paid 统一发，防双发
+        md = obj.get("metadata") or {}
+        cents = obj.get("amount_total")
+        ref = str(event.get("id") or obj.get("id") or "").strip()
+    else:  # invoice.paid（首付 + 续费）
+        md = (obj.get("subscription_details") or {}).get("metadata") or {}
+        if not md:
+            lines = ((obj.get("lines") or {}).get("data") or [])
+            if lines and isinstance(lines[0], dict):
+                md = lines[0].get("metadata") or {}
+        if not md:
+            md = obj.get("metadata") or {}
+        cents = obj.get("amount_paid")
+        if cents is None:
+            cents = obj.get("amount_total")
+        ref = str(obj.get("id") or event.get("id") or "").strip()
     ck = str(md.get("contact_key") or "").strip()
     kind = str(md.get("kind") or "").strip().lower()
     item_id = str(md.get("item_id") or "").strip()
     if not ck or kind not in ("subscribe", "unlock", "gift") or not item_id:
         return None
-    cents = obj.get("amount_total")
-    if cents is None:
-        cents = obj.get("amount_paid")
     amount = round(float(cents) / 100.0, 2) if cents is not None else None
-    ref = str(event.get("id") or obj.get("id") or "").strip()
     out: Dict[str, Any] = {
         "contact_key": ck, "kind": kind, "item_id": item_id,
         "amount": amount, "currency": str(obj.get("currency") or "").upper(),
@@ -105,17 +122,23 @@ def build_stripe_checkout_params(
     days: float = 30,
     success_url: str = "",
     cancel_url: str = "",
+    recurring: bool = False,
+    interval: str = "month",
 ) -> Dict[str, str]:
     """构建 Stripe Checkout Session create 的 form 参数（application/x-www-form-urlencoded）。
 
-    一次性付费用 ``mode=payment``；金额转分（unit_amount）；grant 信息进 metadata。
-    返回扁平 form-key 字典（便于直接喂 aiohttp data= 与单测断言）。
+    - 一次性付费 / 默认：``mode=payment``。
+    - ``recurring=True``（仅订阅）：``mode=subscription`` + price_data 带 ``recurring[interval]``；
+      grant 信息**同时**写到 session metadata 与 ``subscription_data[metadata]``——后者让**续费发票**
+      （``invoice.paid``）也能溯源到端用户（首付从 invoice.paid 发，session.completed 让位防双发）。
+    金额转分（unit_amount）。返回扁平 form-key 字典（便于直接喂 aiohttp data= 与单测断言）。
     """
     cents = int(round(float(amount or 0) * 100))
     cur = str(currency or "usd").lower()
     name = label or item_id
+    is_sub = bool(recurring) and str(kind) == "subscribe"
     params: Dict[str, str] = {
-        "mode": "payment",
+        "mode": "subscription" if is_sub else "payment",
         "line_items[0][price_data][currency]": cur,
         "line_items[0][price_data][product_data][name]": str(name),
         "line_items[0][price_data][unit_amount]": str(cents),
@@ -126,6 +149,13 @@ def build_stripe_checkout_params(
     }
     if str(kind) == "subscribe":
         params["metadata[days]"] = str(int(days or 30))
+    if is_sub:
+        params["line_items[0][price_data][recurring][interval]"] = str(interval or "month")
+        # 续费发票溯源：把 grant 关键字段挂到订阅 metadata
+        params["subscription_data[metadata][contact_key]"] = str(contact_key)
+        params["subscription_data[metadata][kind]"] = "subscribe"
+        params["subscription_data[metadata][item_id]"] = str(item_id)
+        params["subscription_data[metadata][days]"] = str(int(days or 30))
     if success_url:
         params["success_url"] = str(success_url)
     if cancel_url:

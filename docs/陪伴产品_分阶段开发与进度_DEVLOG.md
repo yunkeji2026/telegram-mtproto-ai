@@ -1472,3 +1472,40 @@ stripe webhook 验签失败/成功幂等 + telegram 未授权/pre_checkout/succe
 
 **下一阶段建议**：④LTV 近 30 天时间窗聚合透出前端；⑤Stripe 原生 recurring 订阅 + 自动续费发权益；
 ⑥端用户 MiniApp 接 checkout（本仓 API 已就绪，跨仓前端单独立项）。
+
+## 42. Phase K2④⑤ · 近 30 天 LTV 透出 + Stripe 原生 recurring 订阅
+
+承 §41 建议④⑤，一并落地「掉付费识别」+「订阅自动续费」。
+
+### 4.K2④ · 近 30 天活跃付费窗 + 掉付费预警 ✅
+- 聚合层（`_monetization_for_keys`/`_monetization_batch`）复用 `spend_by_contacts(since=)` 加算
+  `ltv_recent`（近 `_LTV_RECENT_DAYS=30` 天）、`recent_days`、`lapsed`（历史付费但近 30 天 0 付费）。
+- 前端预警榜「付费」列：LTV 旁加 `+近期额` 绿徽 / **掉付费** 红徽；汇总条加「掉付费」pill；
+  重逢草稿弹窗付费行展示「近 30 天 X · ⚠️掉付费」——运营一眼识别「曾付费正在流失」的高挽留价值用户。
+- 仍只多 1 次批量 SQL（同一批 key 加一个 `since` 查询），口径与全时段 LTV 一致。
+
+### 4.K2⑤ · Stripe 原生 recurring 订阅 + invoice.paid 周期发权益 ✅
+- `build_stripe_checkout_params(recurring=True)`：`mode=subscription` + `price_data[recurring][interval]`，
+  并把 grant 写进 `subscription_data[metadata]`——让**续费发票**也能溯源端用户。
+- `parse_stripe_event`：
+  - `checkout.session.completed` 且 `mode=subscription` → **None**（让位 `invoice.paid`，防首付双发）；
+  - `invoice.paid`（首付 + 每期续费）→ metadata 依次取 `subscription_details`/`lines`/顶层，
+    金额从 `amount_paid`，**ref=发票 id**（每期一张 → 续费天然按期发权益且幂等）。
+- checkout 路由：订阅默认走 recurring（`providers.stripe.recurring` 默认开，body 可覆盖）+ `interval` 可配。
+
+**测试**：✅ 新增 6 测试（recurring 参数构建 + 订阅 checkout 让位 + invoice.paid 首付/续费/lines 兜底 +
+路由 invoice.paid 发权益 + 健康卡近 30 天窗/掉付费）；全量 **5718 passed / 31 skipped / 0 fail（225s）**。
+
+**实施中的判断**：
+1. **防双发**：订阅首付 Stripe 会同时发 `checkout.session.completed` + `invoice.paid`；统一只认 `invoice.paid`
+   （ref=发票 id），session 让位——首付与续费走同一条路径，零特例。
+2. **续费溯源**：session metadata 不传播到续费发票，故把 grant 冗余写到 `subscription_data[metadata]`，
+   解析时多源兜底（`subscription_details`→`lines`→顶层），兼容不同 API 版本。
+3. **掉付费 = 高价值挽留信号**：`lapsed`（有 LTV 但近 30 天断付）比单纯 LTV 更可执行，直接进预警榜视觉。
+
+**已知局限**：`grant_subscription` 续费按 `now+days` 绝对设置（非在原有效期上叠加）；月度账单到期续费时
+`now≈旧到期`，误差可忽略；若需严格不丢天，可后续改 additive。退订（`customer.subscription.deleted`）
+暂未接，靠 `active_until` 自然过期 + `expire_on_startup` 收敛。
+
+**下一阶段建议**：⑥端用户 MiniApp 接 checkout（本仓 API 就绪，跨仓前端单独立项）；
+⑦退订事件接入（`customer.subscription.deleted` → 立即标 expired）；⑧掉付费用户自动触发挽留关怀（接 Phase O）。
