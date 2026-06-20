@@ -17,7 +17,11 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
 
+# 翻译/语种显示名（ISO 639-1 为主）。仅作「显示名 + 统计回退白名单」用——
+# 确定性检测（脚本范围 + 拉丁关键词）只产出它已知的码，扩这张表不影响既有检测行为，
+# 纯增量：① AI 翻译 prompt 的 source/target 名 ② 统计回退 `guess in LANG_NAMES` 放行面。
 LANG_NAMES: Dict[str, str] = {
+    # ── 原有 20 语种（保持在前，行为不变）──
     "zh": "Chinese",
     "en": "English",
     "ja": "Japanese",
@@ -39,6 +43,72 @@ LANG_NAMES: Dict[str, str] = {
     "km": "Khmer",
     "he": "Hebrew",
     "el": "Greek",
+    # ── 欧洲 ──
+    "nl": "Dutch",
+    "pl": "Polish",
+    "uk": "Ukrainian",
+    "ro": "Romanian",
+    "cs": "Czech",
+    "sv": "Swedish",
+    "da": "Danish",
+    "fi": "Finnish",
+    "no": "Norwegian",
+    "hu": "Hungarian",
+    "bg": "Bulgarian",
+    "hr": "Croatian",
+    "sr": "Serbian",
+    "sk": "Slovak",
+    "sl": "Slovenian",
+    "lt": "Lithuanian",
+    "lv": "Latvian",
+    "et": "Estonian",
+    "be": "Belarusian",
+    "mk": "Macedonian",
+    "sq": "Albanian",
+    "is": "Icelandic",
+    "ga": "Irish",
+    "cy": "Welsh",
+    "eu": "Basque",
+    "ca": "Catalan",
+    "gl": "Galician",
+    # ── 中东 / 中亚 ──
+    "fa": "Persian",
+    "ur": "Urdu",
+    "ps": "Pashto",
+    "ku": "Kurdish",
+    "az": "Azerbaijani",
+    "kk": "Kazakh",
+    "uz": "Uzbek",
+    "ky": "Kyrgyz",
+    "tg": "Tajik",
+    "tk": "Turkmen",
+    "hy": "Armenian",
+    "ka": "Georgian",
+    "mn": "Mongolian",
+    # ── 南亚 ──
+    "bn": "Bengali",
+    "ta": "Tamil",
+    "te": "Telugu",
+    "ml": "Malayalam",
+    "kn": "Kannada",
+    "mr": "Marathi",
+    "gu": "Gujarati",
+    "pa": "Punjabi",
+    "si": "Sinhala",
+    "ne": "Nepali",
+    # ── 东南亚 ──
+    "my": "Burmese",
+    "lo": "Lao",
+    "jv": "Javanese",
+    # ── 非洲 ──
+    "sw": "Swahili",
+    "am": "Amharic",
+    "zu": "Zulu",
+    "af": "Afrikaans",
+    "ha": "Hausa",
+    "yo": "Yoruba",
+    "ig": "Igbo",
+    "so": "Somali",
     "unknown": "Unknown",
 }
 
@@ -122,6 +192,50 @@ class TranslationService:
             return {"target_lang": target, "primary": "none",
                     "effective": "none", "engines": []}
 
+    async def compare_translations(
+        self, text: str, *, target_lang: str = "", source_lang: str = "",
+        style: str = "chat",
+    ) -> Dict[str, Any]:
+        """多线路对照选译：所有引擎各译一遍，返回候选列表供坐席择优。
+
+        与 ``translate`` 同样应用术语强制 + 品牌词不译保护（mask→译→restore），
+        故每条候选都已是「术语合规」的成品。不写缓存/记忆（对照是一次性比较，
+        择优后由前端走正常 translate/send 落库，避免把非首选引擎结果污染记忆）。
+        """
+        from src.ai.translation_engines import apply_glossary_mask, restore_protected
+
+        src_text = str(text or "")
+        target = normalize_lang(target_lang) or self.default_target_lang
+        source = normalize_lang(source_lang) or detect_language(src_text)
+        out: Dict[str, Any] = {
+            "source_lang": source, "target_lang": target,
+            "original_text": src_text, "candidates": [],
+        }
+        if not src_text.strip() or not target:
+            return out
+
+        glossary_hint = self._glossary_hint(src_text)
+        hit_terms = {k: v for k, v in self._glossary_terms.items() if k and k in src_text}
+        masked, mapping = apply_glossary_mask(src_text, hit_terms, self._glossary_protect)
+        try:
+            results = await self._router.compare(
+                masked, source_lang=source, target_lang=target,
+                style=style, glossary_hint=glossary_hint,
+            )
+        except Exception as exc:  # noqa: BLE001
+            out["error"] = f"{type(exc).__name__}: {exc}"
+            return out
+
+        for r in results:
+            text_out = restore_protected(r.text, mapping) if (r.ok and r.text) else ""
+            out["candidates"].append({
+                "engine": r.engine,
+                "ok": bool(r.ok and text_out),
+                "translated_text": text_out,
+                "error": r.error,
+            })
+        return out
+
     def update_glossary(
         self,
         terms: Optional[Dict[str, str]] = None,
@@ -149,16 +263,20 @@ class TranslationService:
         target_lang: str = "",
         source_lang: str = "",
         style: str = "chat",
+        engine: str = "",
     ) -> TranslationResult:
+        """``engine``（F+）：会话首选引擎名（如 ``deepl``）。指定且可用 → 强制走该引擎，
+        失败再回落现有 failover 路由；空 / 不可用 → 维持原 failover 行为（零回归）。"""
         src_text = str(text or "")
         target = normalize_lang(target_lang) or self.default_target_lang
         source = normalize_lang(source_lang) or detect_language(src_text)
+        pref_engine = str(engine or "").strip().lower()
         if not src_text.strip():
             return TranslationResult(src_text, "", source, target, True, provider="none")
         if source == target:
             return TranslationResult(src_text, src_text, source, target, True, provider="identity")
 
-        key = self._cache_key(src_text, source, target, style)
+        key = self._cache_key(src_text, source, target, style, engine=pref_engine)
         # L1：进程内 TTL 缓存
         cached = self._cache_get(key)
         if cached is not None:
@@ -202,10 +320,25 @@ class TranslationService:
             except Exception:
                 pass
         masked, mapping = apply_glossary_mask(src_text, hit_terms, self._glossary_protect)
-        res = await self._router.translate(
-            masked, source_lang=source, target_lang=target,
-            style=style, glossary_hint=glossary_hint,
-        )
+        res = None
+        # F+：会话首选引擎优先（强制单引擎，不故障转移）；失败再回落 failover
+        if pref_engine:
+            try:
+                eng = self._router.engine_by_name(pref_engine)
+                if eng is not None and getattr(eng, "available", False):
+                    res = await self._router.translate_with(
+                        pref_engine, masked, source_lang=source, target_lang=target,
+                        style=style, glossary_hint=glossary_hint,
+                    )
+                    if not (res and res.ok and res.text):
+                        res = None  # 首选引擎失败 → 下方 failover 兜底
+            except Exception:
+                res = None
+        if res is None:
+            res = await self._router.translate(
+                masked, source_lang=source, target_lang=target,
+                style=style, glossary_hint=glossary_hint,
+            )
         if not res.ok or not res.text:
             result = TranslationResult(
                 src_text, src_text, source, target, False,
@@ -288,8 +421,11 @@ class TranslationService:
             return ""
         return " Use these term translations: " + "; ".join(hits[:20]) + "."
 
-    def _cache_key(self, text: str, source_lang: str, target_lang: str, style: str) -> str:
-        raw = f"{source_lang}|{target_lang}|{style}|{self._glossary_version}|{text[:2000]}"
+    def _cache_key(self, text: str, source_lang: str, target_lang: str, style: str,
+                   engine: str = "") -> str:
+        # engine 参与 key：指定首选引擎的译文与 failover 译文分桶缓存，互不串味
+        eng = str(engine or "").strip().lower()
+        raw = f"{source_lang}|{target_lang}|{style}|{eng}|{self._glossary_version}|{text[:2000]}"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def _cache_get(self, key: str) -> Optional[TranslationResult]:
