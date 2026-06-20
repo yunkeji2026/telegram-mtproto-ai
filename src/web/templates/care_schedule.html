@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block title %}主动关怀 · {{ site_name|default('华灵科技客户转化聊天系统') }}{% endblock %}
+{% block page_title %}主动关怀{% endblock %}
+{% block head %}
+<style>
+.cs-summary{display:flex;flex-wrap:wrap;gap:.6rem;margin-bottom:.9rem;font-size:.82rem}
+.cs-pill{padding:.35rem .7rem;border-radius:8px;background:var(--input);color:var(--t2)}
+.cs-pill strong{color:var(--t1)}
+.cs-pill.pending strong{color:var(--p)}
+.cs-pill.sent strong{color:var(--green)}
+.cs-pill.skipped strong{color:var(--amber)}
+.cs-pill.expired strong{color:var(--t3)}
+.cs-filters{display:flex;flex-wrap:wrap;gap:.6rem;align-items:flex-end;margin-bottom:1rem}
+.table-wrap{overflow-x:auto}
+.cs-table{width:100%;border-collapse:collapse;font-size:.82rem}
+.cs-table th,.cs-table td{padding:.55rem .65rem;border-bottom:1px solid var(--bd);text-align:left;vertical-align:top}
+.cs-table th{color:var(--t3);font-weight:600;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
+.cs-table tr:hover td{background:rgba(91,124,246,.04)}
+.mono{font-family:Consolas,monospace;font-size:.76rem;word-break:break-all}
+.badge-st{display:inline-block;padding:.12rem .45rem;border-radius:4px;font-size:.65rem;font-weight:700}
+.badge-st.pending{background:rgba(91,124,246,.15);color:var(--p)}
+.badge-st.sent{background:rgba(16,185,129,.15);color:var(--green)}
+.badge-st.skipped{background:rgba(245,158,11,.15);color:var(--amber)}
+.badge-st.expired,.badge-st.cancelled{background:var(--input);color:var(--t3)}
+.cs-act{background:none;border:1px solid var(--bd);color:var(--t2);cursor:pointer;font-size:.72rem;font-weight:600;padding:.2rem .5rem;border-radius:6px;margin-right:.3rem}
+.cs-act.p{border-color:var(--p);color:var(--p)}
+.cs-act:hover{background:rgba(91,124,246,.08)}
+.cs-add{display:flex;flex-wrap:wrap;gap:.5rem;align-items:flex-end;margin-bottom:1rem;padding:.75rem;background:var(--input);border-radius:10px}
+.cs-add input{min-width:120px}
+</style>
+{% endblock %}
+{% block content %}
+{% set active="care" %}
+
+<div class="card fa">
+  <h2>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
+    主动关怀待办
+    <span style="font-size:.75rem;font-weight:400;color:var(--t2);margin-left:.4rem">记住对方说的事，到点主动关心 · 需开启 companion.proactive_care.enabled</span>
+  </h2>
+  <div class="cs-summary" id="cs-summary"></div>
+
+  <div class="cs-add">
+    <div class="f-grp"><label class="f-lb">联系人 key</label><input type="text" id="cs-a-contact" class="f-input" placeholder="conversation_id"></div>
+    <div class="f-grp"><label class="f-lb">平台</label><input type="text" id="cs-a-platform" class="f-input" placeholder="messenger" style="width:110px"></div>
+    <div class="f-grp"><label class="f-lb">chat_key</label><input type="text" id="cs-a-chat" class="f-input" placeholder="fb:123" style="width:130px"></div>
+    <div class="f-grp"><label class="f-lb">关怀主题</label><input type="text" id="cs-a-topic" class="f-input" placeholder="面试 / 复查 …"></div>
+    <div class="f-grp"><label class="f-lb">多少小时后</label><input type="number" id="cs-a-hours" class="f-input" value="24" min="1" style="width:90px"></div>
+    <button type="button" class="btn btn-p" onclick="csAdd()">手动加一条</button>
+  </div>
+
+  <div class="cs-filters">
+    <div class="f-grp">
+      <label class="f-lb">状态</label>
+      <select id="cs-status" class="f-input" style="width:130px">
+        <option value="">全部</option>
+        <option value="pending" selected>待关怀</option>
+        <option value="sent">已发</option>
+        <option value="skipped">已跳过</option>
+        <option value="expired">已过期</option>
+        <option value="cancelled">已取消</option>
+      </select>
+    </div>
+    <div class="f-grp"><label class="f-lb">条数</label><input type="number" id="cs-limit" value="100" min="1" max="500" class="f-input" style="width:90px"></div>
+    <button type="button" class="btn btn-p" onclick="csLoad()">加载</button>
+  </div>
+  <p id="cs-status-line" style="font-size:.8rem;color:var(--t2);margin-bottom:.6rem"></p>
+  <div class="table-wrap">
+    <table class="cs-table">
+      <thead>
+        <tr>
+          <th style="width:50px">ID</th>
+          <th style="min-width:110px">联系人</th>
+          <th style="width:90px">平台</th>
+          <th style="min-width:90px">主题</th>
+          <th>原话摘要</th>
+          <th style="width:150px">到期</th>
+          <th style="width:80px">状态</th>
+          <th style="min-width:120px">备注</th>
+          <th style="width:130px">操作</th>
+        </tr>
+      </thead>
+      <tbody id="cs-body"><tr><td colspan="9" style="padding:2rem;color:var(--t3)">加载中…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+function esc(s){return String(s||'').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
+function stBadge(s){return '<span class="badge-st '+esc(s)+'">'+esc(s||'—')+'</span>';}
+
+async function csLoad(){
+  const status=document.getElementById('cs-status').value;
+  const limit=document.getElementById('cs-limit').value||100;
+  const body=document.getElementById('cs-body');
+  const sl=document.getElementById('cs-status-line');
+  const sum=document.getElementById('cs-summary');
+  sl.textContent='加载中…';
+  body.innerHTML='<tr><td colspan="9" style="padding:2rem">…</td></tr>';
+  try{
+    const q=new URLSearchParams({limit:String(limit)});
+    if(status)q.set('status',status);
+    const res=await fetch('/api/care/schedule?'+q.toString());
+    if(!res.ok){sl.textContent='错误 '+res.status;return;}
+    const d=await res.json();
+    const items=d.items||[];
+    const su=d.summary||{};
+    sum.innerHTML=
+      '<div class="cs-pill pending">待关怀 <strong>'+(su.pending||0)+'</strong></div>'+
+      '<div class="cs-pill sent">已发 <strong>'+(su.sent||0)+'</strong></div>'+
+      '<div class="cs-pill skipped">已跳过 <strong>'+(su.skipped||0)+'</strong></div>'+
+      '<div class="cs-pill expired">已过期 <strong>'+(su.expired||0)+'</strong></div>'+
+      '<div class="cs-pill">已取消 <strong>'+(su.cancelled||0)+'</strong></div>';
+    sl.textContent='共 '+(d.count||items.length)+' 条（按到期升序）';
+    if(!items.length){body.innerHTML='<tr><td colspan="9" style="padding:2rem;color:var(--t3)">无记录</td></tr>';return;}
+    body.innerHTML=items.map(function(it){
+      var due=it.due_at?new Date(it.due_at*1000).toLocaleString():'—';
+      var op='';
+      if(it.status==='pending'){
+        op='<button type="button" class="cs-act p" onclick="csSendNow('+it.id+')">立即发</button>'+
+           '<button type="button" class="cs-act" onclick="csCancel('+it.id+')">取消</button>';
+      }else{op='<span style="color:var(--t3);font-size:.72rem">—</span>';}
+      return '<tr><td>'+it.id+'</td>'+
+        '<td class="mono">'+esc(it.contact_key)+'</td>'+
+        '<td class="mono">'+esc(it.platform||'—')+'</td>'+
+        '<td>'+esc(it.topic||'—')+'</td>'+
+        '<td>'+esc(it.source_text||'')+'</td>'+
+        '<td class="mono">'+due+'</td>'+
+        '<td>'+stBadge(it.status)+'</td>'+
+        '<td style="color:var(--t3);font-size:.74rem">'+esc(it.note||'')+'</td>'+
+        '<td>'+op+'</td></tr>';
+    }).join('');
+  }catch(e){sl.textContent='请求失败: '+e;}
+}
+
+async function csAdd(){
+  const contact=document.getElementById('cs-a-contact').value.trim();
+  const topic=document.getElementById('cs-a-topic').value.trim();
+  if(!contact||!topic){alert('联系人 key 和关怀主题必填');return;}
+  const payload={
+    contact_key:contact,topic:topic,
+    platform:document.getElementById('cs-a-platform').value.trim(),
+    chat_key:document.getElementById('cs-a-chat').value.trim(),
+    due_in_hours:parseFloat(document.getElementById('cs-a-hours').value||'24')
+  };
+  try{
+    const res=await fetch('/api/care/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const d=await res.json();
+    if(!d.ok){alert('添加失败：'+(d.message||d.reason));return;}
+    document.getElementById('cs-a-topic').value='';
+    csLoad();
+  }catch(e){alert(e);}
+}
+
+async function csSendNow(id){
+  if(!confirm('立即发：将提前到现在，下个派发轮次即处理（仍走发送护栏）。继续？'))return;
+  try{
+    const res=await fetch('/api/care/schedule/'+id+'/send-now',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    const d=await res.json();
+    if(!d.ok){alert('操作失败：'+(d.message||d.reason));return;}
+    csLoad();
+  }catch(e){alert(e);}
+}
+async function csCancel(id){
+  if(!confirm('取消这条关怀待办？'))return;
+  try{
+    const res=await fetch('/api/care/schedule/'+id+'/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    const d=await res.json();
+    if(!d.ok){alert('取消失败：'+(d.message||d.reason));return;}
+    csLoad();
+  }catch(e){alert(e);}
+}
+
+document.addEventListener('DOMContentLoaded',csLoad);
+</script>
+{% endblock %}
