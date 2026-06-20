@@ -135,6 +135,20 @@ def register_monetization_routes(app, *, api_auth, config_manager=None) -> None:
         return {"ok": True, "entitlement": ent,
                 "tx": store.recent_tx(limit=20)}
 
+    @app.get("/api/monetize/retention")
+    async def api_monetize_retention(request: Request, recent_days: float = 30,
+                                     limit: int = 50, _=Depends(api_auth)):
+        """⑧ 流失付费挽回榜：有历史付费但近 N 天 0 付费的端用户（按 LTV 降序）。
+
+        运营据此主动挽回；与健康榜「掉付费」互补（这里是变现库全量、不限健康榜扫描范围）。
+        """
+        store = _store(request)
+        d = max(1.0, min(float(recent_days or 30), 365.0))
+        items = store.lapsed_payers(recent_days=d, limit=int(limit or 50))
+        return {"ok": True, "recent_days": d,
+                "currency": str(_catalog().get("currency") or "USD"),
+                "count": len(items), "items": items}
+
     @app.post("/api/monetize/feature-check")
     async def api_monetize_feature_check(request: Request, _=Depends(api_auth)):
         """付费功能门控集成缝：任意前端/功能（语音/剧情/主动等）发送前先查。body：
@@ -335,7 +349,8 @@ def register_monetization_routes(app, *, api_auth, config_manager=None) -> None:
         secret = str(pc.get("webhook_secret") or "")
         raw = await request.body()
         from src.utils.payment_gateway import (
-            parse_stripe_event, stripe_verify_signature)
+            parse_stripe_cancellation, parse_stripe_event,
+            stripe_verify_signature)
         sig = request.headers.get("stripe-signature") or ""
         if not stripe_verify_signature(raw, sig, secret):
             return {"ok": False, "reason": "bad_signature"}
@@ -343,6 +358,13 @@ def register_monetization_routes(app, *, api_auth, config_manager=None) -> None:
             event = json.loads(raw.decode() if isinstance(raw, bytes) else raw)
         except Exception:
             return {"ok": False, "reason": "bad_payload"}
+        # ⑦ 退订：立即作废该端用户订阅
+        cancel = parse_stripe_cancellation(event)
+        if cancel:
+            store = _store(request)
+            ok = store.cancel_subscription(cancel["contact_key"])
+            return {"ok": True, "cancelled": bool(ok),
+                    "contact_key": cancel["contact_key"]}
         g = parse_stripe_event(event)
         if not g:
             return {"ok": True, "applied": False, "reason": "ignored_event"}

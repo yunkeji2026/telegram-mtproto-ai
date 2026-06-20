@@ -1509,3 +1509,38 @@ stripe webhook 验签失败/成功幂等 + telegram 未授权/pre_checkout/succe
 
 **下一阶段建议**：⑥端用户 MiniApp 接 checkout（本仓 API 就绪，跨仓前端单独立项）；
 ⑦退订事件接入（`customer.subscription.deleted` → 立即标 expired）；⑧掉付费用户自动触发挽留关怀（接 Phase O）。
+
+## 43. Phase K2⑦⑧ · Stripe 退订即时收敛 + 流失付费挽回榜
+
+承 §42 建议⑦⑧。⑧刻意**不**走「自动往陪伴对话注入续费话术」（违背北极星 + 需产品确认），
+改做**运营驱动的挽回工作台**：变现库全量识别流失付费用户，运营一眼看「该挽回谁」。
+
+### 4.K2⑦ · Stripe 退订即时作废 ✅
+- `parse_stripe_cancellation`（`customer.subscription.deleted` → contact_key，依赖 ⑤ 写入的
+  `subscription_data[metadata]`）+ `EntitlementStore.cancel_subscription`（立即 status=expired、
+  active_until=now）。`/webhook/stripe` 先判退订再判发权益。
+- 价值：用户主动退订 / 账单失败到期，Stripe 发 deleted → 立即收敛，不再等 `active_until` 自然过期，
+  让⑧的「流失」判定更准。
+
+### 4.K2⑧ · 流失付费挽回榜 ✅
+- `EntitlementStore.lapsed_payers(recent_days=30)`：单条 SQL（GROUP BY + HAVING total>0 AND recent<=0）
+  找「有历史已付但近 N 天 0 付费」，按累计 LTV 降序；附 `days_since_paid` + **最后已知会员档**
+  （含已过期/退订，挽回时知道对方原是什么档）。
+- `GET /api/monetize/retention` + 后台 monetization 页「流失付费挽回榜」面板（LTV / 距上次付费 / 原档 +
+  「挽回」按钮一键回填 contact 查权益 / 手动开通）。
+- 与 §40④ 健康榜「掉付费」互补：那里是**按 journey** 在健康榜扫描范围内标记，这里是**变现库全量**
+  按 LTV 排序的挽回清单，运营视角不同、互不替代。
+
+**测试**：✅ 新增 5 测试（cancel_subscription + lapsed_payers + parse_stripe_cancellation +
+退订 webhook 收敛 + retention 端点）；全量 **5723 passed / 31 skipped / 0 fail（191s）**。
+
+**实施中的判断**：
+1. **⑧不碰陪伴对话**：把「掉付费」变可执行靠**运营清单**而非自动话术——守北极星、零品牌风险、
+   无脆弱启动接线；自动挽回关怀（接 Phase O）作为需产品确认的后续项保留。
+2. **「原档」读 raw tier**：lapsed 用户订阅多已过期，`tiers_by_contacts`（仅 active）会全返 free；
+   故 `lapsed_payers` 单独查 subscriptions 原始 tier，挽回时能看到对方原来是 VIP/SVIP。
+3. **退订先于发权益判定**：webhook 里 `customer.subscription.deleted` 优先短路，语义清晰不误入发权益分支。
+
+**下一阶段建议**：⑥端用户 MiniApp 接 checkout（跨仓单独立项）；
+⑧-ext 掉付费自动挽回关怀（接 Phase O，**需产品确认文案策略**——保持温暖陪伴口吻而非推销）；
+⑨退订/流失漏斗分析（订阅时长分布、退订率、挽回成功率）。

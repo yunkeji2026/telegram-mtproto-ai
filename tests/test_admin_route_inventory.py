@@ -65,6 +65,7 @@ _BASELINE = """
 /api/monetize/overview	GET
 /api/monetize/catalog	GET
 /api/monetize/entitlement	GET
+/api/monetize/retention	GET
 /api/monetize/feature-check	POST
 /api/monetize/grant	POST
 /api/monetize/webhook	POST

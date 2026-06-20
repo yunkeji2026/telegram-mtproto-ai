@@ -165,6 +165,35 @@ def test_store_spend_and_tiers_by_contacts():
     assert s.spend_by_contacts([]) == {}
 
 
+def test_store_cancel_subscription():
+    s = EntitlementStore(":memory:")
+    s.grant_subscription("c1", "vip", time.time() + 30 * 86400, record_ledger=False)
+    assert s.get_entitlement("c1")["active"] is True
+    assert s.cancel_subscription("c1") is True
+    ent = s.get_entitlement("c1")
+    assert ent["active"] is False
+    assert ent["tier"] == "free"
+    # 不存在的 contact → False
+    assert s.cancel_subscription("nope") is False
+
+
+def test_store_lapsed_payers():
+    s = EntitlementStore(":memory:")
+    now = time.time()
+    # c1：40 天前付费 20（流失）；c2：近期付费（不算）；c3：从未付费（不算）
+    s.record_gift("c1", "crown", amount=20.0, now=now - 40 * 86400)
+    s.grant_subscription("c1", "vip", now - 10 * 86400, record_ledger=False)
+    s.record_gift("c2", "rose", amount=5.0, now=now - 3 * 86400)
+    rows = s.lapsed_payers(recent_days=30, now=now)
+    keys = [r["contact_key"] for r in rows]
+    assert "c1" in keys
+    assert "c2" not in keys  # 近期有付费
+    c1 = next(r for r in rows if r["contact_key"] == "c1")
+    assert c1["ltv"] == 20.0
+    assert c1["tier"] == "vip"  # 原档（即便已过期）
+    assert c1["days_since_paid"] >= 39
+
+
 def test_store_grant_subscription_and_entitlement():
     s = EntitlementStore(":memory:")
     assert s.grant_subscription("c1", "vip", NOW + 30 * DAY, now=NOW) is True

@@ -72,6 +72,14 @@
       <tbody id="mz-tx"><tr><td colspan="6" style="padding:1.2rem;color:var(--t3)">加载中…</td></tr></tbody>
     </table>
   </div>
+
+  <div class="section-h">流失付费挽回榜 <span style="font-size:.72rem;font-weight:400;color:var(--t3)">有历史付费但近期断付的端用户，按累计 LTV 降序——优先挽回高价值</span></div>
+  <div class="table-wrap">
+    <table class="mz-table">
+      <thead><tr><th style="min-width:160px">联系人</th><th style="width:110px">累计 LTV</th><th style="width:120px">距上次付费</th><th style="width:80px">原档</th><th style="width:90px">操作</th></tr></thead>
+      <tbody id="mz-retention"><tr><td colspan="5" style="padding:1.2rem;color:var(--t3)">加载中…</td></tr></tbody>
+    </table>
+  </div>
 </div>
 
 <div class="card fa">
@@ -154,6 +162,34 @@ async function mzLoad(){
   }catch(e){flag.textContent='请求失败: '+e;}
 }
 
+async function mzRetention(){
+  const tb=document.getElementById('mz-retention');
+  try{
+    const res=await fetch('/api/monetize/retention?recent_days=30&limit=50');
+    if(!res.ok){tb.innerHTML='<tr><td colspan="5" style="padding:1.2rem;color:var(--t3)">错误 '+res.status+'</td></tr>';return;}
+    const d=await res.json();
+    const cur=d.currency||'USD';
+    const items=d.items||[];
+    if(!items.length){tb.innerHTML='<tr><td colspan="5" style="padding:1.2rem;color:var(--t3)">近 '+(d.recent_days||30)+' 天无流失付费用户 🎉</td></tr>';return;}
+    tb.innerHTML=items.map(function(it){
+      var tier=(it.tier&&it.tier!=='free')?'<span class="badge-tier" style="display:inline-block;padding:.1rem .4rem;border-radius:4px;font-size:.62rem;font-weight:700;background:rgba(168,85,247,.16);color:#a855f7;text-transform:uppercase">'+esc(it.tier)+'</span>':'<span style="color:var(--t3)">—</span>';
+      var dsp=(it.days_since_paid!=null)?(it.days_since_paid+' 天'):'—';
+      return '<tr><td class="mono">'+esc(it.contact_key)+'</td>'+
+        '<td><strong style="color:var(--amber)">'+cur+' '+(it.ltv||0)+'</strong></td>'+
+        '<td>'+dsp+'</td>'+
+        '<td>'+tier+'</td>'+
+        '<td><button type="button" class="btn" style="font-size:.72rem;padding:.2rem .55rem" onclick="mzPickContact(\''+esc(it.contact_key)+'\')">挽回</button></td></tr>';
+    }).join('');
+  }catch(e){tb.innerHTML='<tr><td colspan="5" style="padding:1.2rem;color:var(--t3)">请求失败: '+e+'</td></tr>';}
+}
+
+function mzPickContact(ck){
+  document.getElementById('g-contact').value=ck;
+  document.getElementById('fc-contact').value=ck;
+  mzLookup();
+  document.getElementById('g-contact').scrollIntoView({behavior:'smooth',block:'center'});
+}
+
 document.getElementById('g-kind').addEventListener('change',function(){
   document.getElementById('g-days').parentElement.style.display=this.value==='subscribe'?'':'none';
 });
@@ -170,7 +206,7 @@ async function mzGrant(){
     const d=await res.json();
     if(!d.ok){alert('失败：'+(d.message||d.reason));return;}
     if(d.entitlement)renderEnt(d.entitlement);
-    mzLoad();
+    mzLoad();mzRetention();
   }catch(e){alert(e);}
 }
 
@@ -247,6 +283,6 @@ async function mzCheckout(btn,contact,kind,item,provider){
   }catch(e){link.textContent='请求失败: '+e;}finally{btn.disabled=false;}
 }
 
-document.addEventListener('DOMContentLoaded',mzLoad);
+document.addEventListener('DOMContentLoaded',function(){mzLoad();mzRetention();});
 </script>
 {% endblock %}

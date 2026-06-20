@@ -464,6 +464,75 @@ class EntitlementStore:
             logger.debug("expire_subscriptions failed: %s", e)
             return 0
 
+    def cancel_subscription(self, contact_key: str, *, now: Optional[float] = None) -> bool:
+        """⑦ 退订：立即把某端用户订阅标 expired 且 active_until=now（Stripe 退订事件触发）。"""
+        n = float(now if now is not None else time.time())
+        ck = str(contact_key or "").strip()
+        if not ck:
+            return False
+        try:
+            with self._lock:
+                c = self._conn.execute(
+                    "UPDATE subscriptions SET status='expired', active_until=?,"
+                    " updated_at=? WHERE contact_key=?",
+                    (n, n, ck),
+                )
+                self._conn.commit()
+                return int(c.rowcount) > 0
+        except Exception as e:  # noqa: BLE001
+            logger.debug("cancel_subscription failed: %s", e)
+            return False
+
+    def lapsed_payers(self, *, recent_days: float = 30,
+                      now: Optional[float] = None, limit: int = 50) -> List[Dict[str, Any]]:
+        """⑧ 流失付费挽回榜：有历史已付但近 N 天 0 付费的端用户，按累计 LTV 降序。
+
+        每行含 ``ltv / last_paid_ts / days_since_paid / tier``（当前有效档，多已 free）。
+        纯读、绝不抛。运营据此主动挽回（高 LTV 优先）。
+        """
+        n = float(now if now is not None else time.time())
+        since = n - max(1.0, float(recent_days)) * 86400.0
+        lim = max(1, min(int(limit or 50), 500))
+        try:
+            rows = self._conn.execute(
+                "SELECT contact_key, COALESCE(SUM(amount),0) AS total, MAX(ts) AS last_ts,"
+                " COALESCE(SUM(CASE WHEN ts >= ? THEN amount ELSE 0 END),0) AS recent"
+                " FROM tx_ledger WHERE status='paid' GROUP BY contact_key"
+                " HAVING total > 0 AND recent <= 0 ORDER BY total DESC LIMIT ?",
+                (since, lim),
+            ).fetchall()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("lapsed_payers failed: %s", e)
+            return []
+        keys = [str(r[0]) for r in rows]
+        # 取最后已知会员档（含已过期/退订；挽回时知道对方原来是什么档）
+        raw_tiers: Dict[str, str] = {}
+        try:
+            for i in range(0, len(keys), 500):
+                chunk = keys[i:i + 500]
+                ph = ",".join("?" * len(chunk))
+                trows = self._conn.execute(
+                    f"SELECT contact_key, tier FROM subscriptions"
+                    f" WHERE contact_key IN ({ph})", tuple(chunk)).fetchall()
+                for tr in trows:
+                    raw_tiers[str(tr[0])] = str(tr[1])
+        except Exception as e:  # noqa: BLE001
+            logger.debug("lapsed_payers tier lookup failed: %s", e)
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            ck = str(r[0])
+            last_ts = float(r[2] or 0)
+            out.append({
+                "contact_key": ck,
+                "ltv": round(float(r[1] or 0), 2),
+                "last_paid_ts": last_ts,
+                "days_since_paid": (round((n - last_ts) / 86400.0, 1)
+                                    if last_ts else None),
+                "tier": raw_tiers.get(ck, "free"),
+                "recent_days": int(recent_days),
+            })
+        return out
+
     def count_tx(self) -> int:
         try:
             r = self._conn.execute("SELECT COUNT(*) FROM tx_ledger").fetchone()

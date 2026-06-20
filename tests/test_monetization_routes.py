@@ -225,6 +225,35 @@ def test_webhook_stripe_invoice_paid_recurring():
     assert store.get_entitlement("c1")["tier"] == "vip"
 
 
+def test_webhook_stripe_cancellation_expires():
+    client, store = _client(mon_cfg={
+        "enabled": True, "providers": {"stripe": {"webhook_secret": "whsec_x"}}})
+    store.grant_subscription("c1", "vip", time.time() + 30 * 86400,
+                             record_ledger=False)
+    assert store.get_entitlement("c1")["active"] is True
+    event = {"id": "evt_c", "type": "customer.subscription.deleted",
+             "data": {"object": {"id": "sub_1",
+                                 "metadata": {"contact_key": "c1"}}}}
+    raw = json.dumps(event).encode()
+    t = int(time.time())
+    r = client.post("/api/monetize/webhook/stripe", content=raw,
+                    headers={"Stripe-Signature": _stripe_sig(raw, "whsec_x", t)})
+    assert r.json()["cancelled"] is True
+    assert store.get_entitlement("c1")["active"] is False
+
+
+def test_retention_endpoint_lists_lapsed():
+    client, store = _client()
+    now = time.time()
+    store.record_gift("c1", "crown", amount=20.0, now=now - 40 * 86400)
+    store.record_gift("c2", "rose", amount=5.0, now=now - 2 * 86400)
+    d = client.get("/api/monetize/retention?recent_days=30").json()
+    assert d["ok"] is True
+    keys = [it["contact_key"] for it in d["items"]]
+    assert "c1" in keys and "c2" not in keys
+    assert d["items"][0]["ltv"] == 20.0
+
+
 def test_webhook_telegram_unauthorized():
     client, _ = _client(mon_cfg={
         "enabled": True,

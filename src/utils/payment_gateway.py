@@ -111,6 +111,24 @@ def parse_stripe_event(event: Optional[Dict[str, Any]]) -> Optional[Dict[str, An
     return out
 
 
+def parse_stripe_cancellation(event: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """⑦：解析 ``customer.subscription.deleted``（退订/到期作废）→ {contact_key, ref}。
+
+    依赖创建订阅时写入的 ``subscription_data[metadata][contact_key]``（见 build 函数）。
+    非该事件 / 无 contact_key → None。
+    """
+    if not isinstance(event, dict):
+        return None
+    if str(event.get("type") or "") != "customer.subscription.deleted":
+        return None
+    obj = ((event.get("data") or {}).get("object") or {})
+    md = obj.get("metadata") or {}
+    ck = str(md.get("contact_key") or "").strip()
+    if not ck:
+        return None
+    return {"contact_key": ck, "ref": str(obj.get("id") or event.get("id") or "").strip()}
+
+
 def build_stripe_checkout_params(
     *,
     contact_key: str,
@@ -280,6 +298,7 @@ def build_telegram_invoice_params(
 __all__ = [
     "stripe_verify_signature",
     "parse_stripe_event",
+    "parse_stripe_cancellation",
     "build_stripe_checkout_params",
     "telegram_verify_secret",
     "encode_invoice_payload",

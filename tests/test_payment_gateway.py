@@ -8,6 +8,7 @@ from src.utils.payment_gateway import (
     build_telegram_invoice_params,
     encode_invoice_payload,
     extract_telegram_pre_checkout,
+    parse_stripe_cancellation,
     parse_stripe_event,
     parse_telegram_successful_payment,
     stripe_verify_signature,
@@ -155,6 +156,20 @@ def test_parse_stripe_invoice_paid_lines_metadata_fallback():
     assert g["contact_key"] == "c2"
     assert g["item_id"] == "svip"
     assert g["amount"] == 1.99
+
+
+def test_parse_stripe_cancellation():
+    event = {"id": "evt_c", "type": "customer.subscription.deleted",
+             "data": {"object": {"id": "sub_1",
+                                 "metadata": {"contact_key": "c1"}}}}
+    c = parse_stripe_cancellation(event)
+    assert c["contact_key"] == "c1"
+    assert c["ref"] == "sub_1"
+    # 其它事件 / 缺 metadata → None
+    assert parse_stripe_cancellation({"type": "invoice.paid"}) is None
+    assert parse_stripe_cancellation({
+        "type": "customer.subscription.deleted",
+        "data": {"object": {"id": "s"}}}) is None
 
 
 # ── Telegram ──────────────────────────────────────────────────────────────
