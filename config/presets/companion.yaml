@@ -77,6 +77,14 @@ companion:
     enabled: true                    # STRIDE-ED 式共情策略选择
   persona_guard:
     enabled: true                    # 后置剥离「作为AI」自曝/客服腔
+  # 主动话题发起（P1/P2）：沉默一段时间后，自然回访对方真正在意的高置信记忆
+  #   （「上次你说在备考，结果怎么样？」），而非干巴巴「好久没聊」。这是「记得住」
+  #   护城河最直观的体现。只回访 user_stated/已确认事实，绝不拿 AI 猜测开口。
+  #   发送经 companion_send_gate 预热爬坡 + 冷却，与 messenger 约定驱动的 care 互补。
+  proactive_topic:
+    enabled: true                    # ★ 记忆驱动的主动惦记开场（仅 Telegram 协议号）
+    min_silent_hours: 24             # 沉默不足此时长不主动打扰（避免插话活跃用户）
+    scan_limit: 200                  # 每轮扫描候选会话上限
   # 安全底线守卫：危机识别 + 反谄媚 + 回复红线兜底。陪伴+全自动场景默认全开（漏接危机最坏）。
   wellbeing:
     enabled: true
@@ -105,8 +113,15 @@ memory:
     resolve_contradictions: true # 矛盾消解（旧「住北京」vs 新「搬上海」）
     supersede_stable: true       # 新证据可推翻旧 stable 结论
     source_aware: true           # 按来源分级置信（ai_inferred 晋升门槛更高）
-  salience:
-    enabled: true                # 显著性加权（情绪强/首次披露的事实更不易被裁剪）
+  salience_rerank:
+    enabled: true                # 显著性加权（情绪强/首次披露的事实更不易被裁剪）；
+                                 # ★ 键名须为 salience_rerank（曾误写 salience 导致静默失效）
+  # 语义向量召回（按意思而非字面找记忆）：需 embedding-capable 的 ai provider。
+  # deepseek-chat 无 embeddings 端点时本块自动降级为纯关键词召回，不报错。
+  # 接入可嵌入模型后开启即生效（行内 embeddings 已随 semantic_dedup 生成）。
+  # vector:
+  #   enabled: true
+  #   inject_fusion: true
 
 # 统一收件箱：高风险/危机/转人工时坐席可见、可接管
 inbox:

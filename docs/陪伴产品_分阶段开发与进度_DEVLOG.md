@@ -1544,3 +1544,56 @@ stripe webhook 验签失败/成功幂等 + telegram 未授权/pre_checkout/succe
 **下一阶段建议**：⑥端用户 MiniApp 接 checkout（跨仓单独立项）；
 ⑧-ext 掉付费自动挽回关怀（接 Phase O，**需产品确认文案策略**——保持温暖陪伴口吻而非推销）；
 ⑨退订/流失漏斗分析（订阅时长分布、退订率、挽回成功率）。
+
+---
+
+## 44. 回到竞品对标主线 · 立项「记忆→成长→剧情」需求链（2026-06-21 重扫）
+
+> 用户纠偏：变现栈（K2 全家桶）已过度打磨，**退回竞品分析对比主节奏**。
+> 以 grep 核实代码实况（不信 DEVLOG 自述），多维 GAP 重扫，剔除「需外部推理服务」
+> （语音/换脸）与「重·偏战略」（UGC 角色市场），收敛出**全自治 + 北极星对齐 + 与已建
+> 系统咬合**的一条需求链：**记忆（记得住）→ 成长（看得见关系变深）→ 剧情（深到一定
+> 程度解锁新体验）**——正好把已建的 episodic 记忆、intimacy_engine、变现目录三个半成品串通。
+> 用户拍板：①→②→③ 顺序都做，逐阶段实现+回归+报告。
+
+### Phase ① · 长期记忆深化激活 ✅
+
+**勘探结论（关键）**：episodic 记忆引擎**早已全量写好且全链接线**——
+`EpisodicMemoryStore`（R2–R17：salience/分层 stable/复发 hits/矛盾消解/新证据推翻 stable/
+来源分级/近义去重/向量融合/画像）+ `skill_manager` 注入·抽取·巩固·补嵌入·后台 CRUD +
+`proactive_topic.select_proactive_topic`（回访高置信记忆开场）+ `main._maybe_start_companion_proactive`
+全部就绪。**「深化」不是重建，而是激活 + 修配置漂移 + 防再漂移**。
+
+**发现的真实缺陷（配置在、代码读不到）**：
+1. **salience 键名漂移**：`companion.yaml` 写 `memory.salience.enabled`，但代码读
+   `memory.salience_rerank.enabled` → 情绪显著性重排这条护城河特性被**静默关掉**。
+2. **记忆驱动主动开场未激活**：预设未设 `companion.proactive_topic.enabled` →
+   「主动惦记你说过的事」（记忆护城河最直观体现）在旗舰预设里休眠。
+3. **语义向量召回**：预设开了 `semantic_dedup`（行内已生成 embedding）却没开
+   `memory.vector.enabled` → query 侧不嵌入、存好的向量从不用于检索（且需 embed-capable
+   provider，deepseek-chat 无嵌入端点）→ 留为带说明的注释 opt-in，不强开（守自治）。
+
+**改动**：
+- `skill_manager.resolve_salience_rerank_cfg(memory_cfg)`：单一事实源解析器，**容忍
+  `salience_rerank` / `salience` 两种键名**（规范键优先），inject 路径改用之 → 修复静默失效，
+  且对历史误写向后兼容。纯本地启发式重排，**零 API 成本、零行为风险**（默认仍关）。
+- `config/presets/companion.yaml`：键改回规范 `salience_rerank`；新增
+  `companion.proactive_topic.enabled: true`（min_silent_hours 24 / scan_limit 200）激活记忆
+  驱动主动开场；vector 语义召回留注释 opt-in + 降级说明。
+- **防漂移契约测试** `test_companion_preset_memory_contract.py`：把「预设激活意图」与
+  「代码真实读取口径」绑定（salience 经 `resolve_salience_rerank_cfg` 判定 + proactive_topic
+  键名与 main 一致 + 巩固三件套 resolve/supersede/source_aware），任一侧再漂移即红——
+  直击 AGENTS.md「文档/配置落后于代码」教训。
+
+**测试**：✅ 新增 5 测试；全量 **5728 passed / 31 skipped / 0 fail（186s）**。
+
+**实施中的判断**：
+1. **不强开 vector**：语义召回需嵌入模型=外部资源，强开会让无嵌入 provider 白付 embed 成本；
+   留 opt-in 注释守「全自治」边界，与北极星「翻译/多模态只补到不被否决」一致。
+2. **代码侧做别名而非只改预设**：别名解析器同时修复任何历史 config.yaml 的同款误写，
+   而不仅修一个预设文件——根治而非补丁。
+3. **契约测试绑定代码口径**：直接 import `resolve_salience_rerank_cfg` 喂预设，避免测试里
+   复刻解析逻辑造成二次漂移。
+
+**下一阶段**：Phase ② 端用户可见关系成长系统（亲密度等级/里程碑 + 咬合变现解锁；
+后端 journey_fsm/relationship_stager/intimacy_engine 已 50%，缺端用户可见进阶面 + 解锁联动）。

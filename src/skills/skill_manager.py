@@ -172,6 +172,18 @@ CHAT_FAMILY_INTENTS = frozenset({
 })
 
 
+def resolve_salience_rerank_cfg(memory_cfg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """解析「情绪显著性重排」配置（R2/REMT-lite），容忍两种键名。
+
+    历史/预设里既出现过 ``memory.salience_rerank`` 也出现过简写 ``memory.salience``
+    （companion 预设曾误用后者，导致这条护城河特性被静默关掉——配置在、代码却读不到）。
+    统一在此解析：优先 ``salience_rerank``，回退 ``salience``，让两种拼写都生效，
+    并作为预设契约测试的单一事实源（防再次漂移）。
+    """
+    mcfg = memory_cfg or {}
+    return dict(mcfg.get("salience_rerank") or mcfg.get("salience") or {})
+
+
 def should_extract_intent(intent: str, ex_cfg: Dict[str, Any]) -> bool:
     """记忆抽取意图闸（Phase D：可单测的纯函数，替代内联 ``intent not in intents``）。
 
@@ -2247,8 +2259,9 @@ class SkillManager(LoggerMixin):
         use_fusion = bool(vcfg.get("inject_fusion", True)) and bool(query_embedding)
         vw = float(vcfg.get("vector_weight", 0.5))
         kw_w = float(vcfg.get("keyword_weight", 0.5))
-        # R2（REMT-lite）：情绪显著性 + 时间衰减重排（默认关 → 行为同旧版）
-        scfg = mcfg.get("salience_rerank") or {}
+        # R2（REMT-lite）：情绪显著性 + 时间衰减重排（默认关 → 行为同旧版）。
+        # 经 resolve_salience_rerank_cfg 容忍 salience_rerank / salience 两种键名。
+        scfg = resolve_salience_rerank_cfg(mcfg)
         use_sal = bool(scfg.get("enabled", False))
         sw = float(scfg.get("salience_weight", 0.15))
         rw = float(scfg.get("recency_weight", 0.10))
