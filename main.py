@@ -530,10 +530,12 @@ class AIChatAssistant:
                                 set_relationship_providers(
                                     message_recorder=getattr(
                                         _hooks, "on_message", None),
+                                    story_recorder=getattr(
+                                        _hooks, "on_story_complete", None),
                                 )
                                 self.logger.info(
                                     "Telegram A 线已接入关系事实源 "
-                                    "(intimacy/funnel + 收发记录写入 contacts)")
+                                    "(intimacy/funnel + 收发记录 + 剧情镜像写入 contacts)")
                             else:
                                 self.logger.info(
                                     "Telegram A 线已接入关系事实源 "

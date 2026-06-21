@@ -85,6 +85,52 @@ class TestOnMessage:
             direction="upward", text_preview="x",
         ) is None
 
+
+class TestStoryCompletion:
+    """剧情收场镜像：落 story_complete 事件，但不动 intimacy 事实源。"""
+
+    def test_appends_story_complete_event(self, wiring):
+        store, _, _, gw = wiring
+        eid = gw.record_story_completion(
+            channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_1",
+            scenario_id="coffee_date", ending="warm", intimacy_bonus=4.0,
+            title="初次约会",
+        )
+        assert eid
+        j = store.get_journey_by_contact(
+            store.get_ci_by_external(CHANNEL_MESSENGER, "a", "fb_1").contact_id)
+        evs = [e for e in store.list_events(j.journey_id)
+               if e["event_type"] == "story_complete"]
+        assert len(evs) == 1
+        pl = evs[0]["payload"]
+        assert pl["scenario_id"] == "coffee_date"
+        assert pl["ending"] == "warm"
+        assert pl["intimacy_bonus"] == 4.0
+        assert pl["title"] == "初次约会"
+
+    def test_does_not_touch_intimacy_score(self, wiring):
+        store, _, _, gw = wiring
+        # 先建 journey（intimacy_score 默认 0）
+        ctx = gw.on_peer_seen(
+            channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_2")
+        before = store.get_journey(ctx.journey.journey_id).intimacy_score
+        gw.record_story_completion(
+            channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_2",
+            scenario_id="coffee_date", intimacy_bonus=9.0)
+        after = store.get_journey(ctx.journey.journey_id).intimacy_score
+        assert after == before  # 镜像不重算/不写 intimacy_score
+
+    def test_negative_bonus_clamped_to_zero(self, wiring):
+        store, _, _, gw = wiring
+        gw.record_story_completion(
+            channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_3",
+            scenario_id="x", intimacy_bonus=-5)
+        j = store.get_journey_by_contact(
+            store.get_ci_by_external(CHANNEL_MESSENGER, "a", "fb_3").contact_id)
+        ev = [e for e in store.list_events(j.journey_id)
+              if e["event_type"] == "story_complete"][0]
+        assert ev["payload"]["intimacy_bonus"] == 0.0
+
     def test_long_text_preview_truncated(self, wiring):
         store, _, _, gw = wiring
         ctx = gw.on_message(

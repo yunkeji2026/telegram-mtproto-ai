@@ -3107,8 +3107,38 @@ class SkillManager(LoggerMixin):
             t = (title or "").strip()
             if t:
                 user_context["bond_fresh_milestone"] = f"story:一起经历了《{t}》"
+            # 统一镜像（best-effort）：把首次收场写进 contacts journey 事件流，
+            # 让运营健康卡用同一公式算出与会话侧一致的 effective bond。
+            # 仅首次（防刷已在上面 gate），与会话侧加成同源同量、不双算（健康卡读事件、
+            # 会话读 rel_state，两条互不叠加）。provider 未注册 → no-op，零行为变化。
+            self._mirror_story_completion_to_journey(
+                user_context, chat_id, sid, t, float(bonus or 0.0), str(ending or ""))
         except Exception:
             self.logger.debug("story completion record failed", exc_info=True)
+
+    def _mirror_story_completion_to_journey(
+        self, user_context: Dict[str, Any], chat_id: Any,
+        scenario_id: str, title: str, bonus: float, ending: str = "",
+    ) -> bool:
+        """把剧情首次收场镜像进 contacts journey（供运营健康卡统一 effective bond）。
+
+        寻址需要 ``account_id`` + ``platform``（A 线 telegram_client 已注入 account_id）；
+        缺任一 → 跳过。任何失败都吞掉、绝不影响回复管线（会话侧加成已独立生效）。
+        """
+        try:
+            account_id = user_context.get("account_id")
+            channel = str(user_context.get("platform") or "").strip() or "telegram"
+            if not account_id or chat_id in (None, ""):
+                return False
+            from src.utils.companion_context import record_story_completion
+            return record_story_completion(
+                account_id, chat_id, scenario_id,
+                channel=channel, ending=ending,
+                intimacy_bonus=bonus, title=title,
+            )
+        except Exception:
+            self.logger.debug("story journey mirror skipped", exc_info=True)
+            return False
 
     def _story_outcomes(self, user_context: Dict[str, Any], chat_id: Any) -> Dict[str, str]:
         """已完成剧情 → 所取结局 ``{scenario_id: ending_id_or_""}``（供 requires_story gate）。"""

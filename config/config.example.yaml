@@ -995,6 +995,9 @@ companion:
     enabled: false
     advance_turns: 3           # 每 N 个用户轮次推进一个 beat（剧终自动收场）
     max_intimacy_bonus: 12     # 剧情累计关系加成封顶（防刷满，叠加进 bond 计算）
+    #   ↑ 此封顶同时被运营健康卡复用：开 platform_login.telegram.contacts_recording 后，
+    #     剧情首次收场会镜像一条 story_complete 事件进 journey，健康卡用 base+封顶 story bonus
+    #     算 effective bond，与用户对话内体感一屏对齐（不改 intimacy 事实源 / reactivation 不受影响）。
     proactive_prefer_category: story  # 主动开场优先回访剧情共享经历（story 类目）
     scenarios:
       coffee_date:

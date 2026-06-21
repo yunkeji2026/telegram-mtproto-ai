@@ -32,6 +32,7 @@ _REL_PROVIDERS: Dict[str, Optional[_RelLookup]] = {
     "intimacy": None,
     "funnel": None,
     "record": None,
+    "story": None,
 }
 
 
@@ -40,6 +41,7 @@ def set_relationship_providers(
     intimacy_lookup: Optional[_RelLookup] = None,
     funnel_lookup: Optional[_RelLookup] = None,
     message_recorder: Optional[_RelLookup] = None,
+    story_recorder: Optional[_RelLookup] = None,
 ) -> None:
     """注册关系事实源查询器/记录器（幂等；仅覆盖显式传入的项）。
 
@@ -47,6 +49,9 @@ def set_relationship_providers(
     - ``message_recorder``：把 Telegram 收/发写入 contacts → 生成 journey + 刷新 intimacy。
       **仅在显式开启** ``platform_login.telegram.contacts_recording`` 时注册；未注册时
       ``record_relationship_message`` 为 no-op → 默认零行为变化（遵循"新子系统默认关"）。
+    - ``story_recorder``：把陪伴剧情**首次收场**镜像进 journey 事件流（story_complete），
+      供运营健康卡用与对话侧同一公式算 effective bond。同样**仅在 contacts_recording 开**
+      时注册；未注册 → ``record_story_completion`` 为 no-op（会话侧加成仍由 rel_state 权威生效）。
     """
     if intimacy_lookup is not None:
         _REL_PROVIDERS["intimacy"] = intimacy_lookup
@@ -54,6 +59,8 @@ def set_relationship_providers(
         _REL_PROVIDERS["funnel"] = funnel_lookup
     if message_recorder is not None:
         _REL_PROVIDERS["record"] = message_recorder
+    if story_recorder is not None:
+        _REL_PROVIDERS["story"] = story_recorder
 
 
 def reset_relationship_providers() -> None:
@@ -61,6 +68,7 @@ def reset_relationship_providers() -> None:
     _REL_PROVIDERS["intimacy"] = None
     _REL_PROVIDERS["funnel"] = None
     _REL_PROVIDERS["record"] = None
+    _REL_PROVIDERS["story"] = None
 
 
 def record_relationship_message(
@@ -90,6 +98,39 @@ def record_relationship_message(
         )
     except Exception:
         pass
+
+
+def record_story_completion(
+    account_id: Any,
+    chat_key: Any,
+    scenario_id: str,
+    *,
+    channel: str = "telegram",
+    ending: str = "",
+    intimacy_bonus: float = 0.0,
+    title: str = "",
+) -> bool:
+    """把一次剧情**首次收场**镜像进 contacts journey（story_complete 事件）。
+
+    未注册 story_recorder（默认）→ 静默 no-op 返回 False；异常一律吞掉，绝不影响主链路。
+    成功（recorder 返回非 None）→ True。会话侧加成与此无关、独立权威生效（不双算）。
+    """
+    fn = _REL_PROVIDERS.get("story")
+    if fn is None or chat_key in (None, "") or not str(scenario_id or "").strip():
+        return False
+    try:
+        res = fn(
+            channel=channel,
+            account_id=str(account_id or "default"),
+            external_id=str(chat_key),
+            scenario_id=str(scenario_id),
+            ending=str(ending or ""),
+            intimacy_bonus=float(intimacy_bonus or 0.0),
+            title=str(title or ""),
+        )
+        return res is not None
+    except Exception:
+        return False
 
 
 def resolve_intimacy_score(
@@ -219,6 +260,7 @@ __all__ = [
     "set_relationship_providers",
     "reset_relationship_providers",
     "record_relationship_message",
+    "record_story_completion",
     "resolve_intimacy_score",
     "resolve_funnel_stage",
 ]

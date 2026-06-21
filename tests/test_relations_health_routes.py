@@ -121,6 +121,55 @@ def test_health_board_items_carry_bond_level(client):
     assert all("bond_level" in it and "bond_name" in it for it in items)
 
 
+def test_health_card_bond_reflects_story_bonus(client):
+    """Phase ④续⁴：剧情收场镜像进 journey → 健康卡 effective bond 与对话侧同公式对齐。"""
+    jid = _seed_journey(client.store, client.gateway, "fb_story",
+                        in_n=20, out_n=20, last_offset_days=0.2)
+    base = client.get(f"/api/relations/health/{jid}").json()["intimacy"]["score"]
+    # 经统一桥镜像一次剧情收场（+8 加成）
+    client.gateway.record_story_completion(
+        channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_story",
+        scenario_id="coffee_date", ending="warm", intimacy_bonus=8.0,
+        title="初次约会")
+    bond = client.get(f"/api/relations/health/{jid}").json()["bond"]
+    assert bond["story_bonus"] == 8.0
+    assert bond["effective_intimacy"] == round(min(100.0, base + 8.0), 1)
+
+
+def test_health_card_story_bonus_capped(client):
+    """剧情加成封顶——与会话侧 max_intimacy_bonus 同源同值（默认 12）。"""
+    jid = _seed_journey(client.store, client.gateway, "fb_storycap",
+                        in_n=10, out_n=10, last_offset_days=1)
+    # 两次大额加成（防刷由会话侧 gate；此处直接验证健康卡聚合封顶）
+    for end in ("a", "b"):
+        client.gateway.record_story_completion(
+            channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_storycap",
+            scenario_id=f"s_{end}", ending=end, intimacy_bonus=20.0)
+    bond = client.get(f"/api/relations/health/{jid}").json()["bond"]
+    assert bond["story_bonus"] == 12.0  # 封顶，而非 40
+
+
+def test_health_card_no_story_bonus_field_when_absent(client):
+    """无剧情事件 → bond 不带 story_bonus/effective_intimacy（行为零变化）。"""
+    jid = _seed_journey(client.store, client.gateway, "fb_nostory",
+                        in_n=20, out_n=20, last_offset_days=0.2)
+    bond = client.get(f"/api/relations/health/{jid}").json()["bond"]
+    assert "story_bonus" not in bond
+    assert "effective_intimacy" not in bond
+
+
+def test_health_board_carries_story_bonus(client):
+    jid = _seed_journey(client.store, client.gateway, "fb_boardstory",
+                        in_n=20, out_n=20, last_offset_days=0.2)
+    client.gateway.record_story_completion(
+        channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_boardstory",
+        scenario_id="coffee_date", intimacy_bonus=6.0)
+    items = client.get("/api/relations/health-board?limit=10&scan=100").json()["items"]
+    target = next(it for it in items if it["journey_id"] == jid)
+    assert target["story_bonus"] == 6.0
+    assert target["effective_intimacy"] >= target["intimacy_score"]
+
+
 def test_health_card_unknown_journey_404(client):
     r = client.get("/api/relations/health/nope")
     assert r.status_code == 404

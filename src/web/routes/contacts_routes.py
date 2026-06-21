@@ -1441,26 +1441,66 @@ def register_contacts_routes(
             )
             return sig, bd
 
-        def _bond_for(bd, *, created_at=None, now=None):
+        def _story_bonus_cap() -> float:
+            """剧情累计加成上限——与会话侧 ``companion.story.max_intimacy_bonus`` 同源同值，
+            保证健康卡 effective bond 与用户实际体感一致（默认 12）。"""
+            cm = getattr(app.state, "config_manager", None)
+            try:
+                cfg = cm.config if cm is not None else {}
+                v = ((cfg.get("companion") or {}).get("story") or {}).get(
+                    "max_intimacy_bonus", 12)
+                return float(v or 12)
+            except Exception:
+                return 12.0
+
+        def _story_bonus_from_events(events) -> float:
+            """从 journey 的 ``story_complete`` 事件聚合剧情加成（封顶；与会话侧同公式）。
+
+            会话侧 ``_record_story_completion`` 仅在**首次**完成镜像事件 → 每场景至多一条，
+            sum 即等于会话侧累计的 story_bonus。无事件 → 0.0（行为零变化）。
+            """
+            total = 0.0
+            for e in (events or []):
+                if e.get("event_type") != "story_complete":
+                    continue
+                try:
+                    import json as _json
+                    pl = e.get("payload")
+                    if isinstance(pl, str):
+                        pl = _json.loads(pl or "{}")
+                    total += max(0.0, float((pl or {}).get("intimacy_bonus", 0) or 0))
+                except Exception:
+                    continue
+            return round(min(_story_bonus_cap(), total), 2)
+
+        def _bond_for(bd, *, created_at=None, now=None, events=None):
             """Phase ②：从 intimacy 分 + 相识天数 + 交心句数派生关系成长卡。
 
             纯派生（不写库）：等级/进度复用 companion_relationship 规范阶段；里程碑
             含相识时长（需 journey.created_at）/交心句数/升级。绝不抛——异常返回 None。
+
+            统一 effective（Phase ④续⁴）：叠加该 journey 的剧情加成（story_complete 事件，
+            封顶），等级/进度/里程碑都用 effective 分派生 → 与对话内成长面板一屏对齐。
             """
             try:
                 days_known = None
                 if created_at and now:
                     days_known = max(0.0, (float(now) - float(created_at)) / 86400.0)
-                level = _compute_bond(bd.score)
+                sb = _story_bonus_from_events(events)
+                eff = max(0.0, min(100.0, float(bd.score or 0) + sb))
+                level = _compute_bond(eff)
                 if not level.get("level"):
                     return None
                 level["days_known"] = (round(days_known, 1)
                                        if days_known is not None else None)
                 level["milestones"] = _bond_milestones(
-                    intimacy_score=bd.score,
+                    intimacy_score=eff,
                     days_known=days_known,
                     turn_count_in=bd.turn_count_in,
                 )
+                if sb > 0:
+                    level["story_bonus"] = sb
+                    level["effective_intimacy"] = round(eff, 1)
                 return level
             except Exception:
                 logger.debug("bond derive failed", exc_info=True)
@@ -1490,7 +1530,8 @@ def register_contacts_routes(
             card = _score_health(sig)
             return {"ok": True, "journey_id": journey_id,
                     "card": card.as_dict(), "intimacy": bd.to_dict(),
-                    "bond": _bond_for(bd, created_at=j.created_at, now=now),
+                    "bond": _bond_for(bd, created_at=j.created_at, now=now,
+                                      events=events),
                     "inbox": _inbox_enrichment(conv_ids),
                     "monetization": _monetization_for_keys(conv_ids)}
 
@@ -1577,8 +1618,10 @@ def register_contacts_routes(
                 if risk and card.risk_level != risk:
                     continue
                 d = bd.days_since_last_msg
-                _bl = _compute_bond(bd.score)
-                items.append({
+                _sb = _story_bonus_from_events(events_by.get(jid, []))
+                _eff = max(0.0, min(100.0, float(bd.score or 0) + _sb))
+                _bl = _compute_bond(_eff)
+                _item = {
                     "journey_id": jid,
                     **card.as_dict(),
                     "intimacy_score": bd.score,
@@ -1586,7 +1629,11 @@ def register_contacts_routes(
                     "bond_level": _bl.get("level"),
                     "bond_name": _bl.get("name"),
                     "bond_progress": _bl.get("progress"),
-                })
+                }
+                if _sb > 0:
+                    _item["story_bonus"] = _sb
+                    _item["effective_intimacy"] = round(_eff, 1)
+                items.append(_item)
             inbox_sort = _health_board_inbox_sort_enabled()
             payer_sort = _health_board_payer_priority_enabled()
             if inbox_sort and items:

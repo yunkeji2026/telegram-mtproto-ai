@@ -55,6 +55,7 @@ class _SM:
     _story_bonus_cap = _SMcls._story_bonus_cap
     _apply_story_intimacy_bonus = _SMcls._apply_story_intimacy_bonus
     _record_story_completion = _SMcls._record_story_completion
+    _mirror_story_completion_to_journey = _SMcls._mirror_story_completion_to_journey
     _match_scenario = _SMcls._match_scenario
     _scenario_title = staticmethod(_SMcls._scenario_title)
     _story_outcomes = _SMcls._story_outcomes
@@ -294,3 +295,66 @@ def test_story_list_shows_prerequisite_hint():
     sm = _SM()
     out = sm._handle_story_command("剧情列表", _ctx(intimacy=40), "chatA")
     assert "咖啡续约（经历过《初次咖啡约会》后解锁）" in out
+
+
+# ── Phase ④续⁴ 统一镜像：首次收场镜像进 journey（best-effort） ─────────────
+
+def _with_story_recorder():
+    """注册一个记录调用的 story_recorder provider；返回 (calls, cleanup)。"""
+    from src.utils.companion_context import (
+        reset_relationship_providers, set_relationship_providers,
+    )
+    calls = []
+
+    def _rec(**kw):
+        calls.append(kw)
+        return "evt-1"
+
+    reset_relationship_providers()
+    set_relationship_providers(story_recorder=_rec)
+    return calls, reset_relationship_providers
+
+
+def test_first_completion_mirrors_to_journey():
+    sm = _SM()
+    calls, cleanup = _with_story_recorder()
+    try:
+        ctx = {"intimacy_score": 50.0, "account_id": "acct1", "platform": "telegram"}
+        sm._record_story_completion(ctx, "chat9", "coffee_date", "初次约会", 6,
+                                    ending="warm")
+        assert len(calls) == 1
+        c = calls[0]
+        assert c["account_id"] == "acct1"
+        assert c["external_id"] == "chat9"
+        assert c["channel"] == "telegram"
+        assert c["scenario_id"] == "coffee_date"
+        assert c["ending"] == "warm"
+        assert c["intimacy_bonus"] == 6.0
+        assert c["title"] == "初次约会"
+    finally:
+        cleanup()
+
+
+def test_replay_completion_does_not_mirror():
+    sm = _SM()
+    calls, cleanup = _with_story_recorder()
+    try:
+        ctx = {"intimacy_score": 50.0, "account_id": "acct1", "platform": "telegram"}
+        sm._record_story_completion(ctx, "chat9", "coffee_date", "初次约会", 6)
+        sm._record_story_completion(ctx, "chat9", "coffee_date", "初次约会", 6)
+        assert len(calls) == 1  # 仅首次镜像（防刷），重复完成不再写 journey
+    finally:
+        cleanup()
+
+
+def test_mirror_skipped_without_account_id():
+    sm = _SM()
+    calls, cleanup = _with_story_recorder()
+    try:
+        # 缺 account_id（如 B 线未注入）→ 镜像跳过，会话侧加成仍正常生效
+        ctx = {"intimacy_score": 50.0, "platform": "telegram"}
+        sm._record_story_completion(ctx, "chat9", "coffee_date", "初次约会", 6)
+        assert calls == []
+        assert sm._effective_intimacy(ctx, "chat9") == 56.0
+    finally:
+        cleanup()

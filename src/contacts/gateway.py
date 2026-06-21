@@ -258,6 +258,49 @@ class ContactGateway:
                 )
         return ctx
 
+    def record_story_completion(
+        self,
+        *,
+        channel: str,
+        account_id: str,
+        external_id: str,
+        scenario_id: str,
+        ending: str = "",
+        intimacy_bonus: float = 0.0,
+        title: str = "",
+        trace_id: str = "",
+    ) -> Optional[str]:
+        """陪伴剧情首次收场 → 在该会话 journey 落一条 ``story_complete`` 事件。
+
+        这是「对话内成长」与「运营关系健康卡」的**统一镜像**：会话侧的剧情加成
+        仍由 skill_manager 的 rel_state 权威累计（零依赖、必定生效），本方法只把
+        「完成了哪个剧情/取了什么结局/加多少分」镜像进 journey 事件流，供健康卡
+        用**同一公式**（base + 封顶 story bonus）算出与用户实际体感一致的 effective bond。
+
+        刻意**不**重算 / 不写 ``journeys.intimacy_score`` —— 保持 intimacy 事实源纯净
+        （reactivation / funnel 读的仍是基础分，行为零变化）。返回事件 id；失败返回 None。
+        """
+        ctx = self.on_peer_seen(
+            channel=channel, account_id=account_id, external_id=external_id,
+            trace_id=trace_id,
+        )
+        try:
+            bonus = max(0.0, float(intimacy_bonus or 0.0))
+        except (TypeError, ValueError):
+            bonus = 0.0
+        return self._store.append_event(
+            journey_id=ctx.journey.journey_id,
+            event_type="story_complete",
+            payload={
+                "channel": channel,
+                "scenario_id": str(scenario_id or ""),
+                "ending": str(ending or ""),
+                "title": str(title or ""),
+                "intimacy_bonus": round(bonus, 2),
+            },
+            trace_id=trace_id,
+        )
+
     # ── Phase 5-4：pre-chat 留资 + 身份去重合并 ─────────────
     def capture_lead(
         self,

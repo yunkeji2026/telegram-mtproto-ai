@@ -86,6 +86,17 @@ class ContactHooks(Protocol):
         trace_id: str = "",
     ) -> Optional[MergeOutcome]: ...
 
+    def on_story_complete(
+        self, *, channel: str, account_id: str, external_id: str,
+        scenario_id: str, ending: str = "", intimacy_bonus: float = 0.0,
+        title: str = "", trace_id: str = "",
+    ) -> Optional[str]:
+        """陪伴剧情首次收场 → 在该会话 journey 镜像一条 story_complete 事件。
+
+        供健康卡用与对话侧同一公式算 effective bond；不改 intimacy 事实源。
+        """
+        ...
+
     def get_journey_intimacy(
         self, *, channel: str, account_id: str, external_id: str,
     ) -> Optional[float]:
@@ -206,6 +217,22 @@ class GatewayContactHooks:
             logger.warning("hook on_line_first_text failed: %s", e)
             return None
 
+    def on_story_complete(
+        self, *, channel: str, account_id: str, external_id: str,
+        scenario_id: str, ending: str = "", intimacy_bonus: float = 0.0,
+        title: str = "", trace_id: str = "",
+    ) -> Optional[str]:
+        """剧情收场镜像。委托 gateway.record_story_completion；吞异常返回 None。"""
+        try:
+            return self._gw.record_story_completion(
+                channel=channel, account_id=account_id, external_id=external_id,
+                scenario_id=scenario_id, ending=ending,
+                intimacy_bonus=intimacy_bonus, title=title, trace_id=trace_id,
+            )
+        except Exception as e:
+            logger.warning("hook on_story_complete failed: %s", e)
+            return None
+
     def get_journey_intimacy(
         self, *, channel: str, account_id: str, external_id: str,
     ) -> Optional[float]:
@@ -314,6 +341,7 @@ class NoopContactHooks:
     def issue_handoff_for_messenger(self, **_: object) -> None: return None
     def on_handoff_sent(self, **_: object) -> None: return None
     def on_line_first_text(self, **_: object) -> None: return None
+    def on_story_complete(self, **_: object) -> None: return None
     def get_journey_intimacy(self, **_: object) -> None: return None
     def get_journey_funnel_stage(self, **_: object) -> None: return None
 

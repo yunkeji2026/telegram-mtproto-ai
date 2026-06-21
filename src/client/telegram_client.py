@@ -1412,6 +1412,9 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                 'is_group': _is_group,
                 'chat_type': _chat_type_str or 'private',
                 'platform': 'telegram',  # S5: CrossPlatformIdentity
+                # 供 skill_manager 剧情收场把 story_complete 镜像进 contacts journey
+                # （与 resolve_intimacy_score 用同一 account_id 寻址同一 journey）。
+                'account_id': self.account_id,
             }
             # Q3：仅在有值时注入，None 不写键 → 与 RPA 各线一致、向后兼容
             if _intimacy_score is not None:

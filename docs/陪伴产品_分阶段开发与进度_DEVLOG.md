@@ -1858,3 +1858,46 @@ gateway/IntimacyEngine 写成 journey 事件（跨模块，单独立项）；端
 **叙事链成形**：coffee_date（warm 结局）→ 解锁 starry_night；记忆/成长/剧情飞轮之上再叠一条
 「剧情→剧情」的有向因果，章节式留存钩子成型。**遗留**：分支结局的「多分支树」（A 结局解锁剧情 X、
 B 结局解锁剧情 Y）现已天然支持（按 ending 配不同续作即可），可在内容侧扩展。
+
+## 52. Phase ④续⁴ · 真·journey 加成统一（剧情加成镜像进 journey → 运营健康卡 effective bond 对齐）
+
+**立项判断**（兑现 ## 50 遗留的「journey 侧 effective 统一」）。先做有界勘探，结论改写了原方案：
+- **割裂确为真**：主平台 Telegram(A 线) 经 `companion_context.resolve_intimacy_score`/`record_relationship_message`
+  接入 contacts journey；但剧情加成只活在会话侧 `rel_state.story_bonus`（`_effective_intimacy` 叠加）→
+  运营关系健康卡读 `journey.intimacy_score`（基础分）算 bond，**比用户对话内体感低**。
+- **不碰核心评分**：`IntimacyEngine` 喂 reactivation/funnel，把加成烤进 `intimacy_score` 既有回归风险、
+  又会与会话侧 shim **双算**。故定方案 C：加成**不进** intimacy 事实源，改走 journey 事件流镜像 +
+  健康卡用**同一公式**（base + 封顶 story bonus）派生 effective bond。IntimacyEngine / reactivation /
+  funnel / 会话路径**全部零改动**，无 ALTER TABLE。
+
+**改动**：
+- `contacts/gateway.py`：`record_story_completion(...)` → `on_peer_seen` + `append_event("story_complete", {scenario/ending/bonus/title})`；
+  **刻意不重算/不写 intimacy_score**（保持事实源纯净）。
+- `contacts/rpa_hooks.py`：`GatewayContactHooks.on_story_complete`（委托 gateway，吞异常）+ 协议声明 + Noop 占位。
+- `utils/companion_context.py`：新增进程级 `story` provider + `record_story_completion(...)`（与既有
+  intimacy/funnel/record 同一惰性注册座；未注册 → no-op 返回 False，零行为变化）。
+- `main.py`：`story_recorder=hooks.on_story_complete` 与 `message_recorder` 同闸——**仅 contacts_recording 开**时注册。
+- `client/telegram_client.py`：`_sm_context` 注入 `account_id`（与 resolve_intimacy 同一寻址，供镜像定位 journey）。
+- `skills/skill_manager.py`：`_record_story_completion` 首次收场分支调 `_mirror_story_completion_to_journey`
+  （best-effort：缺 account_id/provider → 跳过；会话侧加成已独立权威生效，不依赖镜像）。**仅首次**镜像 ⇒
+  每场景至多一条 story_complete 事件 ⇒ 健康卡 sum 恰等于会话侧累计 story_bonus（同源同量、互不叠加）。
+- `web/routes/contacts_routes.py`：`_story_bonus_from_events`（聚合封顶，cap 读 `companion.story.max_intimacy_bonus`
+  同源）+ `_bond_for(..., events=)` 用 effective 分派生等级/进度/里程碑，单卡 + 预警榜均透出 `story_bonus`/`effective_intimacy`。
+- **测试**：companion_context 5 测（注册/参数/None/空输入短路/吞异常）；gateway 3 测（落事件/不动 intimacy/负值钳零）；
+  路由 4 测（健康卡反映/封顶/无事件零变化/榜单透出）；wiring 3 测（首次镜像参数/重复不镜像/缺 account_id 跳过且会话侧仍生效）。
+  全量 **5816 passed / 31 skipped / 0 fail（215s，+15 测）**。
+
+**实施中的再优化**：
+1. **从「烤进 intimacy_score」改道「事件镜像 + 健康卡同公式」**：勘探发现前者既动 reactivation/funnel
+   评分（用户明确担心的回归面）、又与会话侧 shim 双算。改道后**风险面归零**——事实源不动、会话路径不动，
+   只是健康卡多读一类既有事件，新行为仅「story-active 用户 bond 显示更高」（正是统一目标）。
+2. **复用既有 provider 座 + contacts_recording 同闸**：不新造 bootstrap 接线，沿用 N 线已验证的惰性
+   provider；默认关 → 零影响，遵循「新子系统默认关」。
+3. **首次镜像 = 防刷与对账双赢**：与会话侧 `story_done` gate 同点触发，天然保证「健康卡聚合 == 会话累计」，
+   无需第二套封顶/去重逻辑，cap 也从同一 config key 取，杜绝两侧漂移。
+4. **best-effort 且非阻断**：镜像失败/未寐线（B 线/RPA 未注入 account_id）一律跳过，会话侧加成始终生效——
+   统一是「锦上添花的 ops 可见性」，绝不成为回复链路的新依赖。
+
+**统一闭环**：用户在对话内看到的 bond（含剧情加成）= 运营在健康卡/预警榜看到的 effective bond，同源同公式同封顶。
+**遗留**：① B 线/各 RPA runner 若要同享镜像，仅需在其 context 注入 account_id（一行级，按需）；② 端 MiniApp
+（跨仓前端）仍待，但「成长可见」的用户侧（## 50 面板）与 ops 侧（本期）已双双落地。

@@ -8,6 +8,7 @@ from src.utils.companion_context import (
     build_companion_context,
     emotion_hint,
     record_relationship_message,
+    record_story_completion,
     reset_relationship_providers,
     resolve_funnel_stage,
     resolve_intimacy_score,
@@ -272,3 +273,60 @@ def test_set_providers_is_partial_update():
     # 两者都还在（partial 覆盖，不互相清空）
     assert resolve_intimacy_score("a", "1") == 10.0
     assert resolve_funnel_stage("a", "1") == "warming"
+
+
+# ── record_story_completion（剧情收场镜像） ──────────────────────────────────
+
+def test_story_recorder_noop_when_unregistered():
+    reset_relationship_providers()
+    # 未注册 → no-op，返回 False，不抛
+    assert record_story_completion("a", "1", "coffee_date", intimacy_bonus=4) is False
+
+
+def test_story_recorder_passes_kwargs_and_returns_true():
+    calls = []
+
+    def _rec(*, channel, account_id, external_id, scenario_id, ending,
+             intimacy_bonus, title):
+        calls.append({
+            "channel": channel, "account_id": account_id,
+            "external_id": external_id, "scenario_id": scenario_id,
+            "ending": ending, "intimacy_bonus": intimacy_bonus, "title": title,
+        })
+        return "evt-1"  # 非 None → 视为成功
+
+    set_relationship_providers(story_recorder=_rec)
+    ok = record_story_completion(
+        "acctZ", 99, "coffee_date", ending="warm", intimacy_bonus=4.0,
+        title="初次约会")
+    assert ok is True
+    assert len(calls) == 1
+    c = calls[0]
+    assert c["channel"] == "telegram"
+    assert c["account_id"] == "acctZ"
+    assert c["external_id"] == "99"
+    assert c["scenario_id"] == "coffee_date"
+    assert c["ending"] == "warm"
+    assert c["intimacy_bonus"] == 4.0
+    assert c["title"] == "初次约会"
+
+
+def test_story_recorder_false_when_recorder_returns_none():
+    set_relationship_providers(story_recorder=lambda **_: None)
+    assert record_story_completion("a", "1", "coffee_date", intimacy_bonus=2) is False
+
+
+def test_story_recorder_short_circuits_on_empty_inputs():
+    calls = []
+    set_relationship_providers(story_recorder=lambda **k: calls.append(k) or "x")
+    assert record_story_completion("a", "", "coffee_date") is False
+    assert record_story_completion("a", "1", "") is False  # 空 scenario_id
+    assert calls == []
+
+
+def test_story_recorder_swallows_exception():
+    def _boom(**_):
+        raise RuntimeError("write fail")
+
+    set_relationship_providers(story_recorder=_boom)
+    assert record_story_completion("a", "1", "coffee_date", intimacy_bonus=3) is False
