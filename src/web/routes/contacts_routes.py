@@ -1233,6 +1233,10 @@ def register_contacts_routes(
             ContactHealthSignals as _CHS,
             score_contact_health as _score_health,
         )
+        from src.contacts.relationship_level import (
+            bond_milestones as _bond_milestones,
+            compute_bond_level as _compute_bond,
+        )
         from src.contacts.identity_bridge import conversation_ids_for_identities as _conv_ids_for
         from src.contacts.inbox_enrichment import (
             health_board_sort_key as _board_sort_key,
@@ -1437,6 +1441,31 @@ def register_contacts_routes(
             )
             return sig, bd
 
+        def _bond_for(bd, *, created_at=None, now=None):
+            """Phase ②：从 intimacy 分 + 相识天数 + 交心句数派生关系成长卡。
+
+            纯派生（不写库）：等级/进度复用 companion_relationship 规范阶段；里程碑
+            含相识时长（需 journey.created_at）/交心句数/升级。绝不抛——异常返回 None。
+            """
+            try:
+                days_known = None
+                if created_at and now:
+                    days_known = max(0.0, (float(now) - float(created_at)) / 86400.0)
+                level = _compute_bond(bd.score)
+                if not level.get("level"):
+                    return None
+                level["days_known"] = (round(days_known, 1)
+                                       if days_known is not None else None)
+                level["milestones"] = _bond_milestones(
+                    intimacy_score=bd.score,
+                    days_known=days_known,
+                    turn_count_in=bd.turn_count_in,
+                )
+                return level
+            except Exception:
+                logger.debug("bond derive failed", exc_info=True)
+                return None
+
         @app.get("/api/relations/health/{journey_id}")
         async def relation_health_card(
             journey_id: str, contact_key: str = "", _=Depends(api_auth),
@@ -1461,6 +1490,7 @@ def register_contacts_routes(
             card = _score_health(sig)
             return {"ok": True, "journey_id": journey_id,
                     "card": card.as_dict(), "intimacy": bd.to_dict(),
+                    "bond": _bond_for(bd, created_at=j.created_at, now=now),
                     "inbox": _inbox_enrichment(conv_ids),
                     "monetization": _monetization_for_keys(conv_ids)}
 
@@ -1547,11 +1577,15 @@ def register_contacts_routes(
                 if risk and card.risk_level != risk:
                     continue
                 d = bd.days_since_last_msg
+                _bl = _compute_bond(bd.score)
                 items.append({
                     "journey_id": jid,
                     **card.as_dict(),
                     "intimacy_score": bd.score,
                     "days_since_last_msg": (None if d == float("inf") else round(d, 1)),
+                    "bond_level": _bl.get("level"),
+                    "bond_name": _bl.get("name"),
+                    "bond_progress": _bl.get("progress"),
                 })
             inbox_sort = _health_board_inbox_sort_enabled()
             payer_sort = _health_board_payer_priority_enabled()

@@ -96,6 +96,31 @@ def test_health_card_active_is_healthy(client):
     assert d["intimacy"]["score"] > 0
 
 
+def test_health_card_includes_bond_level(client):
+    """Phase ②：单人健康卡透出关系成长卡（等级/进度/里程碑）。"""
+    jid = _seed_journey(client.store, client.gateway, "fb_bond",
+                        in_n=20, out_n=20, last_offset_days=0.2)
+    r = client.get(f"/api/relations/health/{jid}")
+    bond = r.json()["bond"]
+    assert bond is not None
+    assert bond["level"] >= 1
+    assert bond["name"]
+    assert 0.0 <= bond["progress"] <= 1.0
+    assert "milestones" in bond
+    # 高亲密活跃关系 → 至少含升级里程碑（journey.created_at=now，故不断言相识时长里程碑）
+    codes = {m["code"] for m in bond["milestones"]}
+    assert any(c.startswith("reached_") for c in codes)
+
+
+def test_health_board_items_carry_bond_level(client):
+    _seed_journey(client.store, client.gateway, "fb_b1",
+                  in_n=20, out_n=20, last_offset_days=0.2)
+    r = client.get("/api/relations/health-board?limit=10&scan=100")
+    items = r.json()["items"]
+    assert items
+    assert all("bond_level" in it and "bond_name" in it for it in items)
+
+
 def test_health_card_unknown_journey_404(client):
     r = client.get("/api/relations/health/nope")
     assert r.status_code == 404

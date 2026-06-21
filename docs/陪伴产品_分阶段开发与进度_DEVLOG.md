@@ -1597,3 +1597,48 @@ stripe webhook 验签失败/成功幂等 + telegram 未授权/pre_checkout/succe
 
 **下一阶段**：Phase ② 端用户可见关系成长系统（亲密度等级/里程碑 + 咬合变现解锁；
 后端 journey_fsm/relationship_stager/intimacy_engine 已 50%，缺端用户可见进阶面 + 解锁联动）。
+
+---
+
+## 45. Phase ② · 关系成长系统（Bond Level）——让用户「看见关系在变深」
+
+竞品对标（星野/Replika/Talkie）：陪伴留存的核心是**可见的成长**（等级 + 进度条 + 里程碑 +
+按级解锁）。本仓已有 `intimacy_score`（0-100）与规范阶段（`companion_relationship`：
+initial/warming/intimate/steady，阈值 25/55/80），但只是**运营侧信号**；缺端用户可见的成长机制。
+
+**勘探结论**：阶段/阈值/中文标签已有**单一事实源** `companion_relationship`（含
+`derive_stage_from_intimacy` / `STAGE_ORDER` / `STAGE_LABEL_ZH` / `INTIMACY_BAND_DEFAULTS`）。
+另有 `relationship_stager._intim_band` 是平行的第二套 band 命名——为**不再增第三套**，本期
+全部 import 自 `companion_relationship`，等级即「阶段序号 + 段内进度」。
+
+**改动**：
+- 新增纯函数模块 `src/contacts/relationship_level.py`：
+  - `compute_bond_level(score)` → `{level 1..4, stage, name, progress, score_to_next, next_name, is_max}`，
+    阶段判定**直接调** `derive_stage_from_intimacy`（零阈值漂移）。
+  - `bond_milestones(intimacy/days_known/turn_count_in)` → 已达成里程碑（相识时长/交心句数/升级）。
+  - `level_unlocks(level, unlock_map)` → 按等级**累计解锁预览**（键支持 1..N 或阶段 code）；
+    **不做付费判定**，只回答「关系深度配解锁什么」，绝不作绕过付费后门。
+  - `build_bond_level_block(...)` → 克制的【关系进展】prompt 块：仅 intimate/steady 或刚达成
+    里程碑时给一句背景，让 AI 自然流露关系厚度而非游戏化播报；initial/warming 无里程碑 → 空。
+- **透出（看得见）**：`/api/relations/health/{jid}` 单卡新增 `bond`（含 days_known + milestones）；
+  `/api/relations/health-board` 各行带 `bond_level/bond_name/bond_progress`；`relations_health.html`
+  榜单亲密度列追加等级名、单卡 modal 顶部加「💞 阶段 LvN（进度%）· 最近里程碑」。
+- **接 AI 回路**：`skill_manager` 注入 `_bond_level_block`（默认关 `companion.bond_level.enabled`），
+  `ai_client` 在 companion 域消费，`context_store` 加入 per-request 非持久键白名单。
+- **配置**：`config.example.yaml` 加 `companion.bond_level`（默认关 + unlocks 注释示例）；
+  `companion.yaml` 预设默认开 + 给 intimate→exclusive_album / steady→all_story 解锁预览。
+- **测试**：新增 `test_relationship_level.py`（16）+ 健康卡/榜单透出 2 测 + 预设契约 bond 断言；
+  全量 **5747 passed / 31 skipped / 0 fail（222s）**。
+
+**实施中的判断**：
+1. **复用规范阶段而非造第三套 taxonomy**：阈值/标签全 import `companion_relationship`，单测断言
+   每级 stage 与 `derive_stage_from_intimacy` 完全一致——杜绝「又一套 0-25-55-80」漂移。
+2. **解锁是预览非门控**：`level_unlocks` 明确不替代 monetization tier gating，防把「关系深度」
+   误用成绕过付费的后门（守住已建变现的收口）。
+3. **prompt 块极度克制**：陌生/升温期不谈深度（免越界油腻），只在深关系或纪念点给一句，
+   且不让 AI 像 NPC 宣告等级——陪伴口吻优先于游戏化。
+4. **days_known 来自 journey.created_at**：测试环境 created_at=now 故时长里程碑不触发（已在测试中
+   规避断言），生产环境首见即建档、随时间自然累积。
+
+**下一阶段**：Phase ③ 剧情/场景 roleplay 引擎——填补变现目录里 `story_ch1`/`all_story` 空占位，
+与本期 bond_level 的 steady→all_story 解锁天然咬合，形成「记忆→成长→剧情解锁」完整闭环。

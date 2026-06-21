@@ -894,6 +894,27 @@ class SkillManager(LoggerMixin):
             except Exception:
                 self.logger.debug("relationship_stager inject skipped", exc_info=True)
 
+            # Phase ②：关系成长「厚度/里程碑」感知块（默认关，companion.bond_level.enabled）。
+            # 复用上面已取的 intimacy_score；只在 intimate/steady 或刚达成里程碑时产出一句，
+            # 由 build_bond_level_block 内部克制（initial/warming 无里程碑 → 空，不打扰）。
+            try:
+                _bl_cfg = ((self.config.config or {}).get("companion") or {}).get(
+                    "bond_level"
+                ) if hasattr(self.config, "config") else None
+                if _bl_cfg and _bl_cfg.get("enabled", False):
+                    from src.contacts.relationship_level import build_bond_level_block
+                    _bscore = (context or {}).get("intimacy_score")
+                    _days_known = (context or {}).get("relationship_days")
+                    _bl_block = build_bond_level_block(
+                        _bscore,
+                        days_known=_days_known,
+                        fresh_milestone=(context or {}).get("bond_fresh_milestone"),
+                    )
+                    if _bl_block:
+                        user_context["_bond_level_block"] = _bl_block
+            except Exception:
+                self.logger.debug("bond_level inject skipped", exc_info=True)
+
             from src.hooks.registry import HookRegistry as _HR
             _hooks = _HR.get_instance()
 

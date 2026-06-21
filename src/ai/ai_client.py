@@ -1392,6 +1392,12 @@ class AIClient(LoggerMixin):
         if _fd and not (_rp and _is_companion):
             # companion 已注入完整关系块时不再重复；其他域正常追加
             prompt_parts.append(_fd)
+        # Phase ②：关系成长「厚度/纪念点」感知（默认关，companion.bond_level.enabled）；
+        # 与语气指令互补——只在 intimate/steady 或刚达成里程碑时给一句背景，让 AI 自然
+        # 流露关系深度而非游戏化播报。克制由 build_bond_level_block 内部负责。
+        _bl = (context.get("_bond_level_block") or "").strip()
+        if _bl and _is_companion:
+            prompt_parts.append(_bl)
         # ★ 情感智能上下文引擎（时间感知 + 情绪弧线 + 关系温度 + 记忆反思）
         _emo_block = (context.get("_emotional_context_block") or "").strip()
         if _emo_block:

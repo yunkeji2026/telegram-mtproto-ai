@@ -31,6 +31,7 @@ _NON_PERSIST = frozenset({
     "relationship_stage",
     "_funnel_directive",   # W3-3M: per-request, re-computed each turn
     "funnel_stage",        # W3-3M: injected by runner, not persistent
+    "_bond_level_block",   # Phase ②: per-request 关系成长厚度/里程碑感知块
 })
 
 

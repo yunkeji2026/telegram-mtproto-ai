@@ -85,6 +85,13 @@ companion:
     enabled: true                    # ★ 记忆驱动的主动惦记开场（仅 Telegram 协议号）
     min_silent_hours: 24             # 沉默不足此时长不主动打扰（避免插话活跃用户）
     scan_limit: 200                  # 每轮扫描候选会话上限
+  # 关系成长系统（Phase ②）：让用户「看见关系在变深」——等级/进度/里程碑经健康卡透出，
+  #   并让 AI 在 intimate/steady 阶段或刚达成纪念点时自然流露关系厚度（克制、不播报）。
+  bond_level:
+    enabled: true                    # ★ 陪伴模式默认开：AI 感知关系深度/里程碑
+    unlocks:                         # 按关系等级解锁预览（真放行仍由 monetization 判）
+      intimate: [exclusive_album]
+      steady: [all_story]
   # 安全底线守卫：危机识别 + 反谄媚 + 回复红线兜底。陪伴+全自动场景默认全开（漏接危机最坏）。
   wellbeing:
     enabled: true

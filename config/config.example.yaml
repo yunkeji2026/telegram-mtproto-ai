@@ -966,6 +966,19 @@ companion:
     few_shot:
       enabled: false         # 默认关（人审样本后再开）
       max_examples: 3        # 最多注入几条示范
+  # Phase ②：关系成长系统（Bond Level）——把 intimacy_score 升华为「看得见的成长」。
+  # 等级/进度/里程碑由 relations-health 健康卡 API 透出（运营/MiniApp 可见）；
+  # 此开关只控「是否给 AI 注入关系厚度感知块」（默认关；开后仅在 intimate/steady 或
+  # 刚达成里程碑时给一句背景，让 AI 自然流露深度而非游戏化播报）。
+  bond_level:
+    enabled: false
+    # 按关系等级解锁的「预览」映射（键可为 1..4 或阶段 code initial/warming/intimate/steady）。
+    # 仅供前端展示「这段关系配解锁什么」；是否真放行仍由 monetization tier gating 决定，
+    # 本映射绝不作为绕过付费的后门。默认空=不解锁任何东西。
+    # unlocks:
+    #   warming: [voice_reply]
+    #   intimate: [exclusive_album, story_ch1]
+    #   steady: [all_story]
   # Phase P/R：关系健康卡 + 流失预警榜（/relations-health）
   relations_health:
     # Q 延伸：ingest 热路径回写 conversations/conversation_meta.contact_id（默认关）。

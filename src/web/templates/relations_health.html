@@ -198,7 +198,7 @@ async function rhLoad(){
       return '<tr class="'+rowCls+'">'+
         '<td><strong>'+it.score+'</strong></td>'+
         '<td><span class="badge-grade">'+esc(it.grade)+'</span></td>'+
-        '<td>'+(it.intimacy_score!=null?it.intimacy_score:'—')+'</td>'+
+        '<td>'+(it.intimacy_score!=null?it.intimacy_score:'—')+(it.bond_name?' <span style="font-size:.7rem;color:var(--t2)" title="关系等级 Lv'+it.bond_level+(it.bond_progress!=null?' · 进度'+Math.round(it.bond_progress*100)+'%':'')+'">'+esc(it.bond_name)+'</span>':'')+'</td>'+
         '<td>'+(it.days_since_last_msg!=null?it.days_since_last_msg:'∞')+'</td>'+
         '<td>'+trendBadge(ib?ib.emotion_trend:'')+'</td>'+
         '<td>'+churnCell(ib)+'</td>'+
@@ -239,6 +239,14 @@ async function rhDraft(el){
       if(mb.lapsed)seg+=' · ⚠️掉付费';
       if(mb.is_member&&mb.tier&&mb.tier!=='free')seg+=' · '+esc(mb.tier);
       parts.unshift(seg);
+    }
+    // Phase ②：关系成长——等级 + 进度 +（最近）里程碑
+    var bd=d.bond;
+    if(bd&&bd.level){
+      var bseg='💞 '+esc(bd.name)+' Lv'+bd.level;
+      if(!bd.is_max&&bd.progress!=null)bseg+='（进度'+Math.round(bd.progress*100)+'%）';
+      if(bd.milestones&&bd.milestones.length)bseg+=' · '+esc(bd.milestones[bd.milestones.length-1].label);
+      parts.unshift(bseg);
     }
     if(parts.length){ibx.innerHTML='📥 '+parts.join(' · ');ibx.style.display='block';}
   }).catch(function(){});

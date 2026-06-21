@@ -88,3 +88,17 @@ def test_proactive_topic_enabled(preset):
     # min_silent_hours 给了就该是正数（避免打扰活跃用户）
     if "min_silent_hours" in pt:
         assert float(pt["min_silent_hours"]) > 0
+
+
+def test_bond_level_enabled(preset):
+    """Phase ②：关系成长系统须在陪伴预设激活（AI 感知关系深度/里程碑）。"""
+    comp = preset.get("companion") or {}
+    bl = comp.get("bond_level") or {}
+    assert bl.get("enabled") is True, "companion.bond_level.enabled 应为 True"
+    # unlocks 给了就该是映射，键为合法等级/阶段
+    unlocks = bl.get("unlocks")
+    if unlocks is not None:
+        from src.contacts.relationship_level import level_unlocks
+        # 满级应能解出所有配置条目（验证键名合法、可被代码解析）
+        all_items = {i for items in unlocks.values() for i in (items or [])}
+        assert set(level_unlocks(4, unlocks)) == all_items
