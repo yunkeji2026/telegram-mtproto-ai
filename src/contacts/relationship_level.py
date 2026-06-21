@@ -267,6 +267,9 @@ def _milestone_label(code: str) -> str:
         st = c[len("reached_"):]
         if st in STAGE_ORDER:
             return f"关系升至「{STAGE_LABEL_ZH.get(st, st)}」"
+    # Phase ④续：剧情完成纪念点——``story:<人话标签>``，标签随码透传（避免本模块耦合剧情表）
+    if c.startswith("story:"):
+        return c[len("story:"):].strip()
     return ""
 
 

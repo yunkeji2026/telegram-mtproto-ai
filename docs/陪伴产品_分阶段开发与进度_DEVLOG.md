@@ -1756,3 +1756,36 @@ Phase ③ 把三件事串成一条**直线**。本期「做深」的关键 insig
 **飞轮闭环验收**：完成 starry_night（+5）/coffee warm（+4）→ story_bonus 累加 → effective
 intimacy 抬升 → bond 升级 → 解锁更深剧情；同时共享经历入 episodic（story 类目）→ 沉默回归
 被 proactive_topic 优先回访。记忆/成长/剧情三系统互相喂养的正循环已端到端跑通且全程可测。
+
+## 49. Phase ④续² · 飞轮质量与情感硬化（防刷一次性加成 + 首次完成关系纪念点）
+
+**立项判断 / 主动改方向**：上轮建议「健康卡叠加 effective intimacy（#1）」，本轮勘探确认
+**`story_bonus` 仅存 user_context，而健康卡 bond 取自 journey 表（IntimacyEngine）——
+skill_manager 无 contacts/journey 句柄**，要在 ops 卡片叠加 effective 必须跨库桥接
+（contact↔user_context 或写 journey 事件），属上轮已明确延后的跨模块工程；半吊子桥接脆弱、
+价值低（ops 视图美观问题、非用户侧护城河）。故**透明改做**两项全自治、且直接强化刚建好飞轮
+质量的改进；同时确认 proactive 循环本就有 72h/会话冷却，回访重复天然受限，「新鲜度」不是缺口。
+
+**改动**：
+- **防刷·一次性加成**：新增 `_record_story_completion`——`rel_state.story_done` 记已完成场景；
+  首次完成才结算 `intimacy_bonus`，重复完成归零（记忆仍照常回写、复发自然累积，但关系深度只认
+  「真实的新经历」，杜绝刷同一剧情冲等级）。`advance_state` 收场改走此口（不再裸调
+  `_apply_story_intimacy_bonus`）。
+- **情感闭环·完成纪念点**：首次完成 → 置一次性 `user_context["bond_fresh_milestone"]
+  = "story:一起经历了《<剧情名>》"`；bond 块注入处**一次性消费并清除**（pop），下一轮 AI 自然
+  致意（"我们刚一起经历了那次约会，感觉离你更近了"）——把「剧情→成长」从数字变成可感知的真情
+  流露。`relationship_level._milestone_label` 认 `story:<人话标签>` 形态（标签随码透传，不耦合剧情表）。
+- **测试**：wiring 加首次加成+置纪念点 / 重复完成不刷分不置点 / `story:` 码标签解析三测；
+  全量 **5785 passed / 31 skipped / 0 fail（245s）**。
+
+**实施中的再优化**：
+1. **认清 #1 是跨模块、果断改道而非硬桥**：勘探 `grep` 实锤 skill_manager 无 journey 句柄后，
+   不做脆弱的 contact↔user_context 反查，转做两项全自治改进——符合「有更好替代就优化」。
+2. **防刷不牺牲记忆复发**：重复完成仍回写记忆（dedup 累加 hits→利好 consolidation 晋升），
+   只掐 intimacy 加成——既挡刷分、又让「重温喜欢的剧情」依然强化共享记忆，体验不打折。
+3. **纪念点用一次性 pop 而非常驻标志**：致意只出现在剧情收场后的下一轮，自然不啰嗦；
+   `_milestone_label` 走「码携带人话标签」而非在纯函数里塞剧情字典，守住模块零耦合。
+
+**遗留（明确下一步候选）**：健康卡/看板 effective intimacy 统一 = 需把 story_bonus 经
+gateway/IntimacyEngine 写成 journey 事件（跨模块，单独立项）；端用户 MiniApp 接 bond/story/checkout
+（跨仓前端）。

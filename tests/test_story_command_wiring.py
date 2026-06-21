@@ -48,6 +48,7 @@ class _SM:
     _effective_intimacy = _SMcls._effective_intimacy
     _story_bonus_cap = _SMcls._story_bonus_cap
     _apply_story_intimacy_bonus = _SMcls._apply_story_intimacy_bonus
+    _record_story_completion = _SMcls._record_story_completion
     _match_scenario = _SMcls._match_scenario
     _handle_story_command = _SMcls._handle_story_command
     _writeback_story_memory = _SMcls._writeback_story_memory
@@ -215,3 +216,34 @@ def test_effective_intimacy_none_base_stays_none():
     ctx = {}   # 无基础信号 → 不臆造关系
     sm._apply_story_intimacy_bonus(ctx, "chatA", 4)
     assert sm._effective_intimacy(ctx, "chatA") is None
+
+
+# ── Phase ④续 防刷 + 完成纪念点 ───────────────────────────────────
+
+def test_first_completion_grants_bonus_and_milestone():
+    sm = _SM()
+    ctx = {"intimacy_score": 50.0}
+    sm._record_story_completion(ctx, "chatA", "coffee_date", "初次咖啡约会", 4)
+    assert sm._effective_intimacy(ctx, "chatA") == 54.0
+    assert ctx["bond_fresh_milestone"] == "story:一起经历了《初次咖啡约会》"
+    from src.utils.companion_relationship import get_rel_state
+    assert "coffee_date" in get_rel_state(ctx, "chatA")["story_done"]
+
+
+def test_replay_completion_no_bonus_no_milestone():
+    sm = _SM()
+    ctx = {"intimacy_score": 50.0}
+    sm._record_story_completion(ctx, "chatA", "coffee_date", "初次咖啡约会", 4)
+    eff_after_first = sm._effective_intimacy(ctx, "chatA")
+    ctx.pop("bond_fresh_milestone", None)
+    # 重复完成同一剧情 → 不再加成、不再置纪念点
+    sm._record_story_completion(ctx, "chatA", "coffee_date", "初次咖啡约会", 4)
+    assert sm._effective_intimacy(ctx, "chatA") == eff_after_first
+    assert "bond_fresh_milestone" not in ctx
+
+
+def test_milestone_label_resolves_story_code():
+    from src.contacts.relationship_level import build_bond_level_block
+    blk = build_bond_level_block(
+        60.0, fresh_milestone="story:一起经历了《初次咖啡约会》")
+    assert "一起经历了《初次咖啡约会》" in blk

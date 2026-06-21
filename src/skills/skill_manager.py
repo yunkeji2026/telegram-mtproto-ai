@@ -922,10 +922,15 @@ class SkillManager(LoggerMixin):
                     if _bscore is None:
                         _bscore = (context or {}).get("intimacy_score")
                     _days_known = (context or {}).get("relationship_days")
+                    # Phase ④续：一次性消费剧情完成纪念点（持久于 user_context，致意后清除）
+                    _fresh = (
+                        user_context.pop("bond_fresh_milestone", None)
+                        or (context or {}).get("bond_fresh_milestone")
+                    )
                     _bl_block = build_bond_level_block(
                         _bscore,
                         days_known=_days_known,
-                        fresh_milestone=(context or {}).get("bond_fresh_milestone"),
+                        fresh_milestone=_fresh,
                     )
                     if _bl_block:
                         user_context["_bond_level_block"] = _bl_block
@@ -3051,6 +3056,39 @@ class SkillManager(LoggerMixin):
         except Exception:
             self.logger.debug("story intimacy bonus apply failed", exc_info=True)
 
+    def _record_story_completion(
+        self, user_context: Dict[str, Any], chat_id: Any,
+        scenario_id: str, title: str, bonus: float,
+    ) -> None:
+        """剧情收场结算（Phase ④续）：首次完成才给加成 + 关系纪念点；重复完成不刷分。
+
+        - **防刷**：``rel_state.story_done`` 记已完成场景；重复完成 intimacy_bonus 归零
+          （记忆仍照常回写、复发自然累积，但关系深度只认「真实的新经历」）。
+        - **情感闭环**：首次完成 → 置一次性 ``bond_fresh_milestone``，下一轮 bond 块自然
+          致意（"我们刚一起经历了那次约会，感觉更近了"）——剧情→成长→真情流露。
+        任何失败不打断回复管线。
+        """
+        sid = str(scenario_id or "").strip()
+        try:
+            from src.utils.companion_relationship import get_rel_state
+            st = get_rel_state(user_context, chat_id)
+            done = st.get("story_done")
+            if not isinstance(done, list):
+                done = []
+                st["story_done"] = done
+            is_first = bool(sid) and sid not in done
+            if not is_first:
+                self.logger.info("[story] replay (no bonus) scenario=%s", sid)
+                return
+            done.append(sid)
+            if float(bonus or 0.0) > 0:
+                self._apply_story_intimacy_bonus(user_context, chat_id, bonus)
+            t = (title or "").strip()
+            if t:
+                user_context["bond_fresh_milestone"] = f"story:一起经历了《{t}》"
+        except Exception:
+            self.logger.debug("story completion record failed", exc_info=True)
+
     def _effective_intimacy(self, user_context: Dict[str, Any], chat_id: Any = ""):
         """基础 intimacy_score + 剧情累计加成（封顶 100）；无基础信号时返回原值（不臆造）。"""
         base = user_context.get("intimacy_score")
@@ -3200,6 +3238,7 @@ class SkillManager(LoggerMixin):
                     from src.skills.story_engine import advance_state
                     _at = int(_scfg.get("advance_turns", 0) or 0)
                     _kw = {"advance_turns": _at} if _at > 0 else {}
+                    _sid = str(_sstate.get("scenario_id") or "")
                     _new, _fin, _payload = advance_state(
                         _sstate, self._story_scenarios(),
                         user_message=user_msg, **_kw)
@@ -3211,9 +3250,12 @@ class SkillManager(LoggerMixin):
                             self._writeback_story_memory(
                                 user_id, chat_id, user_context, _mem)
                         _bonus = float(_payload.get("intimacy_bonus") or 0.0)
-                        if _bonus > 0:
-                            self._apply_story_intimacy_bonus(
-                                user_context, chat_id, _bonus)
+                        _title = str(
+                            (self._story_scenarios().get(_sid) or {}).get("title")
+                            or _sid
+                        )
+                        self._record_story_completion(
+                            user_context, chat_id, _sid, _title, _bonus)
         except Exception:
             self.logger.debug("story advance skipped", exc_info=True)
 
