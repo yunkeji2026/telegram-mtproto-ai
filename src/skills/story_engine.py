@@ -94,6 +94,54 @@ def _story_prereq_unmet(scn: Dict[str, Any], completed: Optional[Dict[str, str]]
     return ""
 
 
+def satisfied_prerequisite(
+    scn: Dict[str, Any], completed: Optional[Dict[str, str]]
+) -> Optional[Tuple[str, str]]:
+    """返回该场景**已满足**的首个前置剧情 ``(scenario_id, ending_taken)``，无则 None。
+
+    供「主动剧情邀约」织入个性化召回钩子：续作邀约里自然提起「上次我们一起经历的《前传》
+    （以及那次的结局）」。仅在 ``select_story_invite`` 已判定可邀约（前置全满足）后调用，
+    故 ``completed`` 里命中的即为满足项。``ending_taken`` 为用户当时所取结局 id（可空）。
+    """
+    reqs = scn.get("requires_story") if isinstance(scn, dict) else None
+    if not reqs:
+        return None
+    done = completed if isinstance(completed, dict) else {}
+    if isinstance(reqs, str):
+        reqs = [{"scenario": reqs}]
+    for cond in reqs:
+        if isinstance(cond, str):
+            cond = {"scenario": cond}
+        if not isinstance(cond, dict):
+            continue
+        sid = str(cond.get("scenario") or "").strip()
+        if sid and sid in done:
+            return sid, str(done.get(sid) or "")
+    return None
+
+
+def ending_memory(scn: Dict[str, Any], ending_id: str) -> str:
+    """取某场景某结局回写的「共享经历」文本（无结局/无 memory → on_complete 兜底 → ""）。
+
+    供续作邀约引用前传那次的真实共同经历（"上次我们约好下次再一起喝咖啡…"），
+    让召回有据可依、不空泛。纯读取，不抛。
+    """
+    if not isinstance(scn, dict):
+        return ""
+    eid = str(ending_id or "").strip()
+    endings = scn.get("endings")
+    if eid and isinstance(endings, dict):
+        node = endings.get(eid)
+        if isinstance(node, dict):
+            mem = str(node.get("memory") or "").strip()
+            if mem:
+                return mem
+    oc = scn.get("on_complete")
+    if isinstance(oc, dict):
+        return str(oc.get("memory") or "").strip()
+    return ""
+
+
 def scenario_locked_reason(
     scn: Dict[str, Any],
     *,
@@ -376,6 +424,8 @@ __all__ = [
     "DEFAULT_ADVANCE_TURNS",
     "scenario_locked_reason",
     "scenario_available",
+    "satisfied_prerequisite",
+    "ending_memory",
     "list_scenarios",
     "select_story_invite",
     "start_scenario",

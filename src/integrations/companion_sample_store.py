@@ -200,6 +200,11 @@ _MODE_HINTS = {
         "无记忆开场易空泛：下调 min_silent_hours 让更多有记忆钩子的会话走 follow_up",
         "丰富温和问候模板，避免千篇一律",
     ],
+    "story_invite": [
+        "邀约太硬/像广告：收紧 directive，先共情再顺势提议，别一上来报剧情名",
+        "续作召回核对前传共同经历是否被自然提起（satisfied_prerequisite/ending_memory）",
+        "若打扰感强：上调 cooldown_hours 或仅对高 bond 用户邀约（min_bond_level 内容侧调高）",
+    ],
 }
 
 

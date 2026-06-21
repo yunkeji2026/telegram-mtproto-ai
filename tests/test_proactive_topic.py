@@ -258,6 +258,7 @@ class _SM:
     _story_cfg = _SMcls._story_cfg
     _story_scenarios = _SMcls._story_scenarios
     _story_bonus_cap = _SMcls._story_bonus_cap
+    _scenario_title = staticmethod(_SMcls._scenario_title)
 
     def __init__(self, store, *, story_cfg=None, context=None):
         self._episodic_store = store
@@ -351,3 +352,39 @@ def test_proactive_invite_disabled_when_story_off():
              story_cfg=cfg, context={"u1": {}})
     out = sm.build_proactive_opener("u1", silent_hours=48, intimacy=50.0)
     assert out["mode"] == MODE_FOLLOW_UP
+
+
+# ── Phase ④续⁶ 个性化召回（续作邀约引用前传共同经历） ────────────────────
+
+_SEQUEL_CFG = {
+    "enabled": True,
+    "max_intimacy_bonus": 12,
+    "scenarios": {
+        "coffee_date": {
+            "title": "初次咖啡约会", "min_bond_level": 2,
+            "beats": [{"id": "a", "directive": "x"}],
+            "endings": {"warm": {"directive": "y", "memory": "我们约好下次再一起喝咖啡"}},
+        },
+        "starry_seq": {
+            "title": "星空下的约定", "min_bond_level": 2,
+            "requires_story": [{"scenario": "coffee_date", "ending": "warm"}],
+            "beats": [{"id": "a", "directive": "x"}],
+        },
+    },
+}
+
+
+def test_proactive_sequel_invite_references_prerequisite():
+    # 已以 warm 结局完成 coffee_date → 续作 starry_seq 解锁 → 邀约话术回忆前传
+    ctx = {"u1": {"companion_relationship": {"u1": {
+        "story_done": ["coffee_date"],
+        "story_outcomes": {"coffee_date": "warm"},
+    }}}}
+    sm = _SM(_StubStore([_fact("x")]), story_cfg=_SEQUEL_CFG, context=ctx)
+    out = sm.build_proactive_opener("u1", silent_hours=72, intimacy=50.0)
+    assert out["mode"] == "story_invite"
+    assert out["scenario_id"] == "starry_seq"
+    # 个性化：directive 同时带上前传标题 + 那次结局回写的共享经历
+    assert "初次咖啡约会" in out["directive"]
+    assert "我们约好下次再一起喝咖啡" in out["directive"]
+    assert "续作" in out["directive"]

@@ -16,7 +16,9 @@ from src.skills.story_engine import (
     advance_state,
     build_story_prompt_block,
     current_directive,
+    ending_memory,
     list_scenarios,
+    satisfied_prerequisite,
     scenario_available,
     scenario_locked_reason,
     select_story_invite,
@@ -171,6 +173,35 @@ def test_invite_skips_completed_and_active():
 def test_invite_none_for_empty_or_bad():
     assert select_story_invite(None, bond_level=5) is None
     assert select_story_invite({}, bond_level=5) is None
+
+
+# ── 个性化召回 satisfied_prerequisite / ending_memory ─────────────────
+
+def test_satisfied_prerequisite_returns_completed_prereq():
+    scn = SCENARIOS["sequel"]  # requires branch_date warm
+    assert satisfied_prerequisite(scn, {"branch_date": "warm"}) == ("branch_date", "warm")
+
+
+def test_satisfied_prerequisite_none_when_no_requires():
+    assert satisfied_prerequisite(SCENARIOS["coffee_date"], {"coffee_date": ""}) is None
+
+
+def test_satisfied_prerequisite_none_when_not_completed():
+    assert satisfied_prerequisite(SCENARIOS["sequel"], {}) is None
+
+
+def test_ending_memory_reads_ending_node():
+    assert ending_memory(SCENARIOS["branch_date"], "warm") == "我们约好下次再一起散步"
+    assert ending_memory(SCENARIOS["branch_date"], "cool") == "我们一起散过一次步"
+
+
+def test_ending_memory_falls_back_to_on_complete():
+    # coffee_date 无 endings → on_complete.memory 兜底
+    assert ending_memory(SCENARIOS["coffee_date"], "warm") == "我们一起喝过一次咖啡"
+
+
+def test_ending_memory_empty_when_absent():
+    assert ending_memory({"title": "x"}, "warm") == ""
 
 
 def test_start_blocked_by_prerequisite():

@@ -2649,22 +2649,44 @@ class SkillManager(LoggerMixin):
             bond_level = int(compute_bond_level(eff).get("level", 0))
         except Exception:
             bond_level = 0
-        from src.skills.story_engine import select_story_invite
+        from src.skills.story_engine import (
+            ending_memory,
+            satisfied_prerequisite,
+            select_story_invite,
+        )
         inv = select_story_invite(
             scenarios, bond_level=bond_level, completed=completed)
         if not inv:
             return None
+        sid = inv["scenario_id"]
         title = inv["title"]
-        directive = (
-            f"你想邀TA一起开启一段你们还没经历过的新故事《{title}》。用一句温暖、不突兀的话"
-            f"发出邀约——可先轻轻提一下你们关系的靠近，再顺势提议要不要一起经历这段故事。"
-            f"别用菜单/命令口吻、别罗列、别催。"
-        )
+        scn = scenarios.get(sid) or {}
+        # 个性化召回（Phase ④续⁶）：若是「续作」且用户已走过前传，把那次的共同经历
+        # （前传标题 + 该结局回写的共享记忆）自然织进邀约 → 召回有回忆钩子、不空泛。
+        callback = ""
+        prereq = satisfied_prerequisite(scn, completed)
+        if prereq:
+            pid, pend = prereq
+            ptitle = self._scenario_title(scenarios, pid)
+            pmem = ending_memory(scenarios.get(pid) or {}, pend)
+            callback = f"《{ptitle}》" + (f"（{pmem}）" if pmem else "")
+        if callback:
+            directive = (
+                f"你和TA一起经历过{callback}。你想顺着那段共同经历，邀TA一起开启续作《{title}》。"
+                f"用一句温暖、不突兀的话发出邀约——先自然提起上次那段经历，再顺势提议要不要"
+                f"一起继续这段故事。别用菜单/命令口吻、别罗列、别催。"
+            )
+        else:
+            directive = (
+                f"你想邀TA一起开启一段你们还没经历过的新故事《{title}》。用一句温暖、不突兀的话"
+                f"发出邀约——可先轻轻提一下你们关系的靠近，再顺势提议要不要一起经历这段故事。"
+                f"别用菜单/命令口吻、别罗列、别催。"
+            )
         return {
             "mode": "story_invite",
             "fact": title,
             "directive": directive,
-            "scenario_id": inv["scenario_id"],
+            "scenario_id": sid,
             "context_facts": [],
             "silent_hours": 0.0,
         }
