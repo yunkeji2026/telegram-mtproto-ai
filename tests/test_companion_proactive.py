@@ -360,6 +360,93 @@ async def test_loop_threads_crisis_block_callback(tmp_path):
     assert escalated == ["c1"]
 
 
+def _opener_teaser(*, memory_key, silent_hours, stage, intimacy, **_kw):
+    return {"mode": "story_teaser", "directive": f"预告 {memory_key}",
+            "fact": "海边之旅", "scenario_id": "beach_trip", "feature": "story_ch1"}
+
+
+def test_plan_carries_scenario_and_feature_for_teaser():
+    # Stage 3：付费预告计划须携带 scenario_id/feature（漏斗归因）；普通 opener 为空串
+    convs = [_conv("c1", last_ts=_NOON - 48 * _H)]
+    plans = plan_proactive_sends(
+        convs, cooldown_map={}, opener_fn=_opener_teaser, now=_NOON)
+    assert plans[0]["scenario_id"] == "beach_trip"
+    assert plans[0]["feature"] == "story_ch1"
+    # 普通 follow_up opener → 元数据空串（不影响）
+    plans2 = plan_proactive_sends(
+        convs, cooldown_map={}, opener_fn=_opener_follow_up, now=_NOON)
+    assert plans2[0]["scenario_id"] == ""
+    assert plans2[0]["feature"] == ""
+
+
+@pytest.mark.asyncio
+async def test_loop_on_sent_fires_with_plan(tmp_path):
+    """Stage 3：发送成功后 on_sent 被调用，拿到完整 plan（含 scenario_id/feature）。"""
+    seen = []
+
+    async def _send(plan):
+        return True
+
+    store = JsonCooldownStore(tmp_path / "cd.json")
+    convs = [_conv("c1", last_ts=_NOON - 48 * _H)]
+    loop = CompanionProactiveLoop(
+        conversations_provider=lambda: convs,
+        opener_fn=_opener_teaser,
+        send_fn=_send,
+        cooldown_store=store,
+        on_sent=lambda p: seen.append(p),
+        now=lambda: _NOON,
+    )
+    res = await loop.run_once()
+    assert res == {"planned": 1, "sent": 1}
+    assert len(seen) == 1
+    assert seen[0]["scenario_id"] == "beach_trip"
+    assert seen[0]["feature"] == "story_ch1"
+
+
+@pytest.mark.asyncio
+async def test_loop_on_sent_not_called_on_send_failure(tmp_path):
+    seen = []
+
+    async def _send(plan):
+        return False
+
+    store = JsonCooldownStore(tmp_path / "cd.json")
+    convs = [_conv("c1", last_ts=_NOON - 48 * _H)]
+    loop = CompanionProactiveLoop(
+        conversations_provider=lambda: convs,
+        opener_fn=_opener_teaser,
+        send_fn=_send,
+        cooldown_store=store,
+        on_sent=lambda p: seen.append(p),
+        now=lambda: _NOON,
+    )
+    await loop.run_once()
+    assert seen == []  # 未发成功 → 不埋点
+
+
+@pytest.mark.asyncio
+async def test_loop_on_sent_error_does_not_break(tmp_path):
+    async def _send(plan):
+        return True
+
+    def _boom(p):
+        raise RuntimeError("boom")
+
+    store = JsonCooldownStore(tmp_path / "cd.json")
+    convs = [_conv("c1", last_ts=_NOON - 48 * _H)]
+    loop = CompanionProactiveLoop(
+        conversations_provider=lambda: convs,
+        opener_fn=_opener_teaser,
+        send_fn=_send,
+        cooldown_store=store,
+        on_sent=_boom,
+        now=lambda: _NOON,
+    )
+    res = await loop.run_once()
+    assert res == {"planned": 1, "sent": 1}  # 埋点抛错不影响派发计数
+
+
 def test_json_cooldown_store_persists(tmp_path):
     p = tmp_path / "cd.json"
     s1 = JsonCooldownStore(p)

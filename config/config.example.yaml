@@ -1533,6 +1533,10 @@ monetization:
   #   skill_manager.process_message 的 user_id（端用户身份，如 telegram:account:chat_key）——
   #   支付流水（subscribe/unlock）须按同一 key 写入 EntitlementStore，闸才查得到、付费用户才进得去。
   #   enabled=false 时 resolver 不注册 → 付费场景对所有人锁（与旧版一致，零回归）。
+  # 【Stage 3 转化漏斗】enabled 开启后另建 companion_funnel.db：companion.story.paid_teaser 发出的
+  #   付费预告即记一条 teaser 事件，配合 tx_ledger 已付流水做归因。看板/接口：
+  #   GET /api/monetize/teaser-funnel?window_days=30&attribution_days=14 → 发出数/触达人数/转化率/
+  #   按场景分布（精确转化=已付 item_id 命中预告 feature）。无配置项，纯埋点+查询期归因。
   webhook_secret: ""                  # 支付服务商回调共享密钥（校验 X-Monetize-Secret 头）；空=接受（仅自测）
   expire_on_startup: true             # 启动时把过期订阅标 expired（状态收敛，不影响有效判定）
   gate:

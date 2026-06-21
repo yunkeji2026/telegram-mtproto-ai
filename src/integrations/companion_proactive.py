@@ -82,8 +82,8 @@ def plan_proactive_sends(
 
     Returns:
         计划列表 ``[{conversation_id, platform, account_id, chat_key, mode,
-        directive, fact, context_facts, silent_hours}]``，按沉默时长降序，
-        截断到 max_per_tick。
+        directive, fact, context_facts, scenario_id, feature, silent_hours}]``，
+        按沉默时长降序，截断到 max_per_tick。
     """
     now = now if now is not None else time.time()
     local_hour = time.localtime(now).tm_hour
@@ -158,6 +158,9 @@ def plan_proactive_sends(
                 for f in (opener.get("context_facts") or [])
                 if str(f).strip()
             ],
+            # Stage 3：剧情邀约/付费预告携带归因元数据（转化漏斗用；其余 opener 为空串）。
+            "scenario_id": str(opener.get("scenario_id") or ""),
+            "feature": str(opener.get("feature") or ""),
             "silent_hours": round(silent_hours, 1),
         })
 
@@ -211,6 +214,7 @@ class CompanionProactiveLoop:
         dry_run: bool = False,
         has_pending_care: Optional[Callable[[str], bool]] = None,
         on_crisis_block: Optional[Callable[[Dict[str, Any]], None]] = None,
+        on_sent: Optional[Callable[[Dict[str, Any]], None]] = None,
         now: Callable[[], float] = time.time,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
@@ -220,6 +224,7 @@ class CompanionProactiveLoop:
         self._cooldown = cooldown_store
         self._has_pending_care = has_pending_care
         self._on_crisis_block = on_crisis_block
+        self._on_sent = on_sent
         self._interval = float(interval_sec)
         self._min_silent_hours = float(min_silent_hours)
         self._cooldown_hours = float(cooldown_hours)
@@ -265,6 +270,13 @@ class CompanionProactiveLoop:
                 if self._cooldown:
                     self._cooldown.mark(p["conversation_id"], self._now())
                 sent += 1
+                # Stage 3：发送成功钩子（转化漏斗埋点等）。best-effort，绝不影响派发。
+                if self._on_sent is not None:
+                    try:
+                        self._on_sent(p)
+                    except Exception:
+                        logger.debug("[proactive] on_sent 失败 cid=%s",
+                                     p.get("conversation_id"), exc_info=True)
         if plans:
             logger.info("[proactive] tick: planned=%d sent=%d dry_run=%s",
                         len(plans), sent, self._dry_run)

@@ -408,6 +408,36 @@ class EntitlementStore:
             logger.debug("spend_by_contacts failed: %s", e)
         return out
 
+    def paid_events_for(
+        self, contact_keys, *, since: float = 0.0,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """批量取多个端用户的**已付**事件流（供预告转化漏斗归因）。
+
+        返回 ``{contact_key: [{item_id, kind, ts}, ...]}``（按 ts 升序，仅 status='paid'）。
+        无 key → {}。绝不抛。`since` 限制只取该时间点之后的事件（缩小归因扫描）。
+        """
+        keys = [str(k) for k in (contact_keys or []) if str(k)]
+        out: Dict[str, List[Dict[str, Any]]] = {}
+        if not keys:
+            return out
+        lo = float(since or 0)
+        try:
+            for i in range(0, len(keys), 500):
+                chunk = keys[i:i + 500]
+                ph = ",".join("?" * len(chunk))
+                rows = self._conn.execute(
+                    f"SELECT contact_key, item_id, kind, ts FROM tx_ledger"
+                    f" WHERE status='paid' AND ts >= ? AND contact_key IN ({ph})"
+                    f" ORDER BY ts ASC",
+                    (lo, *chunk),
+                ).fetchall()
+                for r in rows:
+                    out.setdefault(str(r[0]), []).append(
+                        {"item_id": str(r[1]), "kind": str(r[2]), "ts": float(r[3])})
+        except Exception as e:  # noqa: BLE001
+            logger.debug("paid_events_for failed: %s", e)
+        return out
+
     def tiers_by_contacts(self, contact_keys, *, now: Optional[float] = None) -> Dict[str, str]:
         """批量取多个端用户当前**有效**会员档（非 free 且未过期）。"""
         n = float(now if now is not None else time.time())

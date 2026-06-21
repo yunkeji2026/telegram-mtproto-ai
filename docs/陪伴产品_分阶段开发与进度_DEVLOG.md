@@ -2223,3 +2223,54 @@ re-engagement 闭环从「免费剧情邀约」延伸到「付费剧情预告」
 **下一步**：① Stage 2.1 预告话术接 `pitch_hint`（可选，软引导一句"可解锁"）；② Stage 3 转化漏斗
 可观测（预告发出→回流→解锁的归因埋点，看预告真实转化率）；③ 付费预告专属 cooldown（比免费邀约更长，
 当前共用会话级 72h cooldown，已不算 spammy，但精细化可独立配）。
+
+## 61. 变现主线 · Stage 3 · 付费预告「转化漏斗」可观测（把"凭感觉推销"变"看数据调参"）
+
+**立项**：Stage 2 把付费预告发出去了，但**无归因**——不知道预告是否真的把人推向付费，`paid_teaser`
+该不该常开、话术好不好全凭感觉。本期补埋点 + 归因，让预告产生可衡量的商业价值。
+
+**关键设计判断**：变现库 `tx_ledger` 已逐笔时间戳记录所有已付事件（unlock/subscribe）——**它本身
+就是转化真相源**，无需在解锁路径另插埋点（少改一处、零回归风险）。故只需记「预告发出」事件，查询期
+与 `tx_ledger` 做时间窗归因即可。
+
+**改动**（新增独立埋点库 + 复用既有派发/变现栈，零 schema 改既有表）：
+- `utils/companion_funnel_store.py`（**新**）：`CompanionFunnelStore`（SQLite，镜像 entitlement_store
+  约定：单连接 + Lock + 绝不抛 + :memory:/文件双模）。表 `teaser_events`(contact_key, scenario_id,
+  feature, ts)。`funnel_stats(*, paid_lookup, window_days, attribution_days)` 在查询期归因：端用户
+  **最早预告后** attribution 窗内有已付事件 → 记转化；已付 item_id 命中预告 feature → 记**精确转化**
+  （更强信号）。`paid_lookup` 注入式（不耦合变现内部 → 可纯单测）；缺省→转化恒 0 仅看触达。
+- `utils/entitlement_store.py`：加 `paid_events_for(contact_keys, *, since)`——批量取多人已付事件流
+  （`{ck: [{item_id, kind, ts}]}`，仅 status='paid'，IN 分块），作漏斗真实 `paid_lookup` 底座。
+- `companion_proactive.py`：`plan_proactive_sends` 计划携带 `scenario_id/feature`（归因元数据，普通
+  opener 为空串）；`CompanionProactiveLoop` 加 `on_sent(plan)` 钩子——发送**成功后**触发（best-effort，
+  抛错不影响派发计数）。
+- `main.py`：变现就绪时建 `companion_funnel.db` 挂 app.state；proactive loop 注入 `_on_teaser_sent`
+  回调——仅 `mode == story_teaser` 时记一条 teaser 事件（contact_key=conversation_id，与 Stage 1/2 同 key）。
+- `web/routes/monetization_routes.py`：`GET /api/monetize/teaser-funnel?window_days=&attribution_days=`
+  → 发出数/触达人数/转化数/精确转化数/转化率/按场景分布 + 最近 20 条；漏斗库未挂（变现/预告未开）→
+  `enabled:false` 空漏斗（不报错）。
+- config.example：`monetization` 段注明 Stage 3 漏斗库与查询接口（无配置项，纯埋点 + 查询期归因）。
+- **测试**：funnel store 14 测（记录/空 key 跳过/recent 序/无 lookup 仅触达/窗内归因+精确命中/窗外不计/
+  预告前付费不计/订阅算转化但非精确/window 排除旧预告/lookup 异常吞/空库/单例复用重置/paid_events_for
+  批量+仅 paid+since 过滤+空 key）；proactive 5 测（计划携带 scenario/feature/普通为空、on_sent 成功触发/
+  失败不触发/抛错不破派发）；route 2 测（无库 enabled:false / 端到端归因转化率）；路由清单 +1。
+  全量 **5907 passed / 31 skipped / 0 fail（212s，+21 测）**。
+
+**实施中的再优化**：
+1. **复用 tx_ledger 作转化真相源，不在解锁路径插埋点**（最关键）：解锁/订阅已逐笔带 ts，查询期时间窗
+   归因即可——避免在 record_unlock/grant_subscription/webhook 多处插钩子（散落、易漏、有回归风险）。
+   一处只读 `paid_events_for` + 注入式 `paid_lookup` 收口。
+2. **注入式 paid_lookup 让漏斗库与变现解耦**：store 不 import entitlement_store，转化逻辑可用假 lookup
+   纯单测；main/route 才注入真实底座。同 N 线 provider 范式（改一处不牵连）。
+3. **精确转化 vs 泛转化双指标**：item_id 命中预告 feature=精确转化（强归因）；预告后任意付费=泛转化
+   （含订阅顺带解锁、被预告勾起后买了别的）。两个率都给运营，避免单一口径误判。
+4. **on_sent 通用钩子而非 teaser 专用**：循环只暴露"发送成功"通用事件，main 侧按 mode 过滤记 teaser——
+   循环不耦合变现概念，未来别的埋点（邀约点击率等）可复用同一钩子。
+5. **归因窗口/统计窗口都做查询参数而非配置**：运营可在看板即时切 7/14/30 天看不同口径，无需改配置重启。
+
+**变现主线 Stage 3 收口**：预告发出即埋点 → tx_ledger 时间窗归因 → 转化率/精确转化率/按场景分布上 API。
+"凭感觉推销"变"看数据调参"的闭环建立（未启用变现/预告→空漏斗零回归）。
+**下一步**：① **回流(reply)中间指标**——本期做了"发出→解锁"两端，中间的"用户被预告后是否回了消息"需在
+入站消息路径插一个轻量归因钩子（预告后该会话首条 inbound → 记 return 事件），补全三段漏斗、定位是
+"没人理"还是"理了不买"；② 漏斗卡片接进 workspace_usage 模板可视化（当前是 JSON API）；③ 转化数据回哺
+Stage 2 选择：低转化场景自动降权/停推（用 funnel_stats 反向调 `select_paid_teaser` 候选）。

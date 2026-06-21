@@ -115,6 +115,7 @@ class AIChatAssistant:
         self._care_dispatcher = None
         # P2: 陪伴主动话题调度循环引用（关程序时 stop）
         self._companion_proactive_loop = None
+        self._companion_funnel_store = None
         # 多平台 deferred 队列（非 messenger 主动消息走此队列；关程序时 stop）
         self._deferred_outbox_dispatcher = None
         # 质量趋势持久化快照器（周期落地 companion_quality_overview；关程序时 stop）
@@ -1686,6 +1687,18 @@ class AIChatAssistant:
                     store.expire_subscriptions()
                 except Exception:
                     pass
+            # Stage 3：付费预告转化漏斗埋点库（teaser 发出 → tx_ledger 归因）。
+            try:
+                from src.utils.companion_funnel_store import (
+                    get_companion_funnel_store,
+                )
+                funnel = get_companion_funnel_store(_cfg_dir / "companion_funnel.db")
+                self._companion_funnel_store = funnel
+                if web_app is not None:
+                    web_app.state.companion_funnel_store = funnel
+                self.logger.info("✅ 付费预告转化漏斗埋点已就绪")
+            except Exception:
+                self.logger.debug("companion funnel store 初始化跳过", exc_info=True)
             self.logger.info("✅ C 端变现已就绪（EntitlementStore 已挂载）")
         except Exception:
             self.logger.warning("C 端变现初始化跳过", exc_info=True)
@@ -2191,6 +2204,21 @@ class AIChatAssistant:
                         return False
                 return False
 
+            def _on_teaser_sent(plan) -> None:
+                # Stage 3：付费预告（story_teaser）发出即记一条漏斗事件，供归因转化率。
+                if str((plan or {}).get("mode") or "") != "story_teaser":
+                    return
+                funnel = self._companion_funnel_store
+                if funnel is None:
+                    return
+                try:
+                    funnel.record_teaser(
+                        str(plan.get("conversation_id") or ""),
+                        str(plan.get("scenario_id") or ""),
+                        str(plan.get("feature") or ""))
+                except Exception:
+                    self.logger.debug("[proactive] 预告漏斗埋点失败", exc_info=True)
+
             loop = CompanionProactiveLoop(
                 conversations_provider=_conversations,
                 opener_fn=_opener,
@@ -2205,6 +2233,7 @@ class AIChatAssistant:
                 dry_run=bool(cfg.get("dry_run", False)),
                 has_pending_care=_has_pending_care,
                 on_crisis_block=_on_crisis_block,
+                on_sent=_on_teaser_sent,
             )
             await loop.start()
             self._companion_proactive_loop = loop

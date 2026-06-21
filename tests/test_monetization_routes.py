@@ -46,6 +46,36 @@ def test_overview_empty():
     assert d["active_subscriptions"] == 0
 
 
+def test_teaser_funnel_disabled_when_no_store():
+    # 漏斗库未挂 app.state → enabled=false 空漏斗（不报错）
+    client, _ = _client()
+    d = client.get("/api/monetize/teaser-funnel").json()
+    assert d["ok"] is True
+    assert d["enabled"] is False
+    assert d["funnel"]["teasers"] == 0
+
+
+def test_teaser_funnel_attributes_conversion_end_to_end():
+    from src.utils.companion_funnel_store import CompanionFunnelStore
+    client, store = _client()
+    now = time.time()
+    funnel = CompanionFunnelStore(":memory:")
+    client.app.state.companion_funnel_store = funnel
+    # u1 被预告并随后买了 story_ch1（精确转化）；u2 仅被预告
+    funnel.record_teaser("u1", "beach_trip", "story_ch1", now=now - 2 * 86400)
+    funnel.record_teaser("u2", "beach_trip", "story_ch1", now=now - 2 * 86400)
+    store.record_unlock("u1", "story_ch1", source="manual", now=now - 86400)
+    d = client.get("/api/monetize/teaser-funnel?window_days=30&attribution_days=14").json()
+    assert d["ok"] is True and d["enabled"] is True
+    f = d["funnel"]
+    assert f["teasers"] == 2
+    assert f["contacts_teased"] == 2
+    assert f["conversions"] == 1
+    assert f["feature_conversions"] == 1
+    assert f["conversion_rate"] == 0.5
+    assert len(d["recent"]) == 2
+
+
 def test_grant_subscribe_then_entitlement():
     client, _ = _client()
     r = client.post("/api/monetize/grant", json={

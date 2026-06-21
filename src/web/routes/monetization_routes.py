@@ -149,6 +149,34 @@ def register_monetization_routes(app, *, api_auth, config_manager=None) -> None:
                 "currency": str(_catalog().get("currency") or "USD"),
                 "count": len(items), "items": items}
 
+    @app.get("/api/monetize/teaser-funnel")
+    async def api_monetize_teaser_funnel(
+        request: Request, window_days: float = 30, attribution_days: float = 14,
+        _=Depends(api_auth),
+    ):
+        """Stage 3：付费解锁预告「转化漏斗」——发了多少预告 / 触达多少人 / 归因转化率。
+
+        转化归因：端用户被预告后 ``attribution_days`` 内有已付事件即记转化（精确转化=已付
+        item_id 命中预告 feature）。漏斗库未就绪（变现/预告未开）→ 返回空漏斗（enabled=false）。
+        """
+        funnel = getattr(request.app.state, "companion_funnel_store", None)
+        if funnel is None:
+            return {"ok": True, "enabled": False,
+                    "funnel": {"teasers": 0, "contacts_teased": 0,
+                               "conversions": 0, "conversion_rate": 0.0,
+                               "by_scenario": []}}
+        store = _store(request)
+        wd = max(1.0, min(float(window_days or 30), 365.0))
+        ad = max(0.0, min(float(attribution_days or 14), 365.0))
+
+        def _paid_lookup(keys):
+            return store.paid_events_for(keys, since=0.0)
+
+        stats = funnel.funnel_stats(
+            paid_lookup=_paid_lookup, window_days=wd, attribution_days=ad)
+        return {"ok": True, "enabled": True, "funnel": stats,
+                "recent": funnel.recent(limit=20)}
+
     @app.post("/api/monetize/feature-check")
     async def api_monetize_feature_check(request: Request, _=Depends(api_auth)):
         """付费功能门控集成缝：任意前端/功能（语音/剧情/主动等）发送前先查。body：
