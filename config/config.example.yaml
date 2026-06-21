@@ -999,6 +999,10 @@ companion:
     #     剧情首次收场会镜像一条 story_complete 事件进 journey，健康卡用 base+封顶 story bonus
     #     算 effective bond，与用户对话内体感一屏对齐（不改 intimacy 事实源 / reactivation 不受影响）。
     proactive_prefer_category: story  # 主动开场优先回访剧情共享经历（story 类目）
+    proactive_invite: true     # 沉默期主动「剧情邀约」：把已解锁但未经历的免费剧情接进
+    #   re-engagement 闭环（剧情解锁→主动邀约→回流→更多剧情）。优先于记忆回访，无可邀约
+    #   时无缝回落记忆话题。仅邀约关系/前置已满足的免费场景（付费留店内引导）。需同时开
+    #   companion.proactive_topic 主动循环；按真实 intimacy 判等级（沉默扫描已注入 resolve_*）。
     scenarios:
       coffee_date:
         title: "初次咖啡约会"

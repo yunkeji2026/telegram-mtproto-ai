@@ -233,14 +233,38 @@ class _StubStore:
         return list(self._rows)
 
 
-class _SM:
-    build_proactive_opener = (
-        __import__("src.skills.skill_manager", fromlist=["SkillManager"])
-        .SkillManager.build_proactive_opener
-    )
+class _StubCtxStore:
+    """极简 ContextStore：按 key 返回预置的持久化 user_context。"""
 
-    def __init__(self, store):
+    def __init__(self, by_key=None):
+        self._by_key = by_key or {}
+
+    def get(self, user_id):
+        return self._by_key.get(str(user_id), {})
+
+
+import logging as _logging  # noqa: E402
+from types import SimpleNamespace as _NS  # noqa: E402
+
+_SMcls = (
+    __import__("src.skills.skill_manager", fromlist=["SkillManager"]).SkillManager
+)
+
+
+class _SM:
+    build_proactive_opener = _SMcls.build_proactive_opener
+    _proactive_story_invite = _SMcls._proactive_story_invite
+    _story_progress_from_context = staticmethod(_SMcls._story_progress_from_context)
+    _story_cfg = _SMcls._story_cfg
+    _story_scenarios = _SMcls._story_scenarios
+    _story_bonus_cap = _SMcls._story_bonus_cap
+
+    def __init__(self, store, *, story_cfg=None, context=None):
         self._episodic_store = store
+        self.logger = _logging.getLogger("test_proactive")
+        self.config = _NS(config=(
+            {"companion": {"story": story_cfg}} if story_cfg is not None else {}))
+        self._context_store = _StubCtxStore(context)
 
 
 def test_skill_manager_opener_from_store():
@@ -258,3 +282,72 @@ def test_skill_manager_opener_no_store():
 def test_skill_manager_opener_blank_key():
     sm = _SM(_StubStore([_fact("x")]))
     assert sm.build_proactive_opener("", silent_hours=48)["mode"] == ""
+
+
+# ── Phase ④续⁵ 主动剧情邀约 ─────────────────────────────────────────────
+
+_STORY_CFG = {
+    "enabled": True,
+    "max_intimacy_bonus": 12,
+    "scenarios": {
+        "coffee_date": {"title": "初次咖啡约会", "min_bond_level": 2,
+                        "beats": [{"id": "a", "directive": "x"}]},
+        "starry_night": {"title": "星空下的约定", "min_bond_level": 3,
+                         "require_unlock": "all_story",
+                         "beats": [{"id": "a", "directive": "x"}]},
+    },
+}
+
+
+def test_proactive_invites_available_free_story():
+    # intimacy 50 → bond level 2 ≥ coffee_date 门槛；未完成 → 邀约
+    sm = _SM(_StubStore([_fact("在学吉他", tier="stable")]),
+             story_cfg=_STORY_CFG, context={"u1": {}})
+    out = sm.build_proactive_opener("u1", silent_hours=48, intimacy=50.0)
+    assert out["mode"] == "story_invite"
+    assert out["fact"] == "初次咖啡约会"
+    assert out["scenario_id"] == "coffee_date"
+    assert "初次咖啡约会" in out["directive"]
+    assert out["silent_hours"] == 48.0
+
+
+def test_proactive_invite_skips_completed_falls_back_to_memory():
+    # 已完成 coffee_date（starry_night 付费被排除）→ 无可邀约 → 回落记忆话题
+    ctx = {"u1": {"companion_relationship": {"u1": {"story_done": ["coffee_date"]}}}}
+    sm = _SM(_StubStore([_fact("在学吉他", tier="stable", hits=3)]),
+             story_cfg=_STORY_CFG, context=ctx)
+    out = sm.build_proactive_opener("u1", silent_hours=48, intimacy=50.0)
+    assert out["mode"] == MODE_FOLLOW_UP
+    assert out["fact"] == "在学吉他"
+
+
+def test_proactive_invite_respects_bond_level():
+    # intimacy 10 → bond level 不足 coffee_date(2) → 无邀约 → 回落记忆
+    sm = _SM(_StubStore([_fact("在学吉他", tier="stable")]),
+             story_cfg=_STORY_CFG, context={"u1": {}})
+    out = sm.build_proactive_opener("u1", silent_hours=48, intimacy=10.0)
+    assert out["mode"] == MODE_FOLLOW_UP
+
+
+def test_proactive_invite_effective_intimacy_unlocks():
+    # 基础 intimacy 38 略低，但剧情累计加成把 effective 顶过 level2 门槛 → 可邀约
+    ctx = {"u1": {"companion_relationship": {"u1": {"story_bonus": 10}}}}
+    sm = _SM(_StubStore([_fact("x")]), story_cfg=_STORY_CFG, context=ctx)
+    out = sm.build_proactive_opener("u1", silent_hours=48, intimacy=38.0)
+    assert out["mode"] == "story_invite"
+
+
+def test_proactive_invite_disabled_flag():
+    cfg = dict(_STORY_CFG, proactive_invite=False)
+    sm = _SM(_StubStore([_fact("在学吉他", tier="stable")]),
+             story_cfg=cfg, context={"u1": {}})
+    out = sm.build_proactive_opener("u1", silent_hours=48, intimacy=50.0)
+    assert out["mode"] == MODE_FOLLOW_UP
+
+
+def test_proactive_invite_disabled_when_story_off():
+    cfg = dict(_STORY_CFG, enabled=False)
+    sm = _SM(_StubStore([_fact("在学吉他", tier="stable")]),
+             story_cfg=cfg, context={"u1": {}})
+    out = sm.build_proactive_opener("u1", silent_hours=48, intimacy=50.0)
+    assert out["mode"] == MODE_FOLLOW_UP

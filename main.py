@@ -1838,23 +1838,47 @@ class AIChatAssistant:
                     tags_map = self.inbox_store.list_conv_tags_map(cids)
                 except Exception:
                     tags_map = {}
+                # Phase ④续⁵：把真实 intimacy/funnel 注入快照——既让记忆开场的沉默阈值
+                # 缩放更准，也让「主动剧情邀约」能按真实关系等级判断可邀约剧情。
+                # 复用 N 线已就绪的进程级 provider（resolve_*）；未注册 → 返回 None → 退回 0/""。
+                try:
+                    from src.utils.companion_context import (
+                        resolve_funnel_stage as _resolve_funnel_stage,
+                        resolve_intimacy_score as _resolve_intimacy_score,
+                    )
+                except Exception:
+                    _resolve_intimacy_score = None
+                    _resolve_funnel_stage = None
                 out = []
                 for r in rows:
                     cid = str(r.get("conversation_id") or "")
                     chat_key = str(r.get("chat_key") or "")
+                    platform = str(r.get("platform") or "telegram")
+                    account_id = str(r.get("account_id") or "default")
                     meta = tags_map.get(cid, {}) or {}
+                    _intim = 0.0
+                    _stage = ""
+                    if _resolve_intimacy_score is not None and chat_key:
+                        try:
+                            _v = _resolve_intimacy_score(
+                                account_id, chat_key, channel=platform)
+                            _intim = float(_v) if _v is not None else 0.0
+                            _stage = _resolve_funnel_stage(
+                                account_id, chat_key, channel=platform) or ""
+                        except Exception:
+                            _intim, _stage = 0.0, ""
                     out.append({
                         "conversation_id": cid,
-                        "platform": str(r.get("platform") or "telegram"),
-                        "account_id": str(r.get("account_id") or "default"),
+                        "platform": platform,
+                        "account_id": account_id,
                         "chat_key": chat_key,
                         "last_ts": r.get("last_ts") or 0,
                         "last_direction": (dirs.get(cid) or {}).get("direction") or "",
                         "archived": bool(meta.get("archived")),
                         # 私聊：episodic 记忆 key == 对端 id == chat_key
                         "memory_key": chat_key,
-                        "stage": "",
-                        "intimacy": 0.0,
+                        "stage": _stage,
+                        "intimacy": _intim,
                     })
                 return out
 

@@ -19,6 +19,7 @@ from src.skills.story_engine import (
     list_scenarios,
     scenario_available,
     scenario_locked_reason,
+    select_story_invite,
     start_scenario,
 )
 
@@ -126,6 +127,50 @@ def test_prereq_checked_before_unlock():
     # 满足前置但缺付费 → 才报 need_unlock
     assert scenario_locked_reason(
         scn, completed={"branch_date": "warm"}) == "need_unlock:all_story"
+
+
+# ── 主动剧情邀约 select_story_invite ───────────────────────────────
+
+def test_invite_picks_first_available_free_unfinished():
+    # bond2：coffee_date 达标且免费、未完成 → 首选（声明序第一个合格者）
+    inv = select_story_invite(SCENARIOS, bond_level=2, completed={})
+    assert inv["scenario_id"] == "coffee_date"
+    assert inv["title"] == "初次咖啡约会"
+
+
+def test_invite_skips_locked_by_bond():
+    # bond0：coffee_date 锁（need bond2）→ 跳到 branch_date（bond0 免费）
+    inv = select_story_invite(SCENARIOS, bond_level=0, completed={})
+    assert inv["scenario_id"] == "branch_date"
+
+
+def test_invite_excludes_paid_scenarios():
+    # 只有付费场景候选时（高 bond 但都做完免费的）→ 付费不邀约 → None
+    done = {"coffee_date": "", "branch_date": "warm", "sequel_any": ""}
+    inv = select_story_invite(SCENARIOS, bond_level=5, completed=done)
+    assert inv is None  # paid_trip / sequel 均付费，entitlement=None 不邀约
+
+
+def test_invite_unlocks_sequel_after_prerequisite():
+    # 免费续作 sequel_any 需完成 branch_date；完成后（且 coffee_date 已做）→ 邀约 sequel_any
+    done = {"coffee_date": "", "branch_date": "warm"}
+    inv = select_story_invite(SCENARIOS, bond_level=2, completed=done)
+    assert inv["scenario_id"] == "sequel_any"
+
+
+def test_invite_skips_completed_and_active():
+    # coffee_date 完成 + branch_date 进行中 → 跳过两者 → 取下一个免费可邀约（sequel_any 需前置未满足）
+    # 此处 branch_date 未完成（只是 active）→ 它不在 completed → 但被 active_id 跳过；
+    # sequel_any 需 branch_date 完成（未完成）→ 锁；故 None
+    inv = select_story_invite(
+        SCENARIOS, bond_level=2, completed={"coffee_date": ""},
+        active_id="branch_date")
+    assert inv is None
+
+
+def test_invite_none_for_empty_or_bad():
+    assert select_story_invite(None, bond_level=5) is None
+    assert select_story_invite({}, bond_level=5) is None
 
 
 def test_start_blocked_by_prerequisite():

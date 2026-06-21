@@ -170,6 +170,46 @@ def list_scenarios(
     return out
 
 
+def select_story_invite(
+    scenarios: Optional[Dict[str, Any]],
+    *,
+    bond_level: int = 0,
+    completed: Optional[Dict[str, str]] = None,
+    active_id: str = "",
+    entitlement: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """挑一个「现在就能开启、但用户还没经历过」的剧情作**主动邀约**（纯函数）。
+
+    用于沉默期主动开场把新内容接进 re-engagement 闭环：剧情解锁 → 主动邀约 → 回流 →
+    更多剧情。只邀约 **关系/前置已满足 + 当前权益可进入 + 未完成 + 非进行中** 的场景。
+
+    - ``entitlement=None``（默认）→ 仅免费场景（``require_unlock`` 为空）通过；付费场景
+      留给店内引导，不在沉默期隔空 teasing 锁住的内容。
+    - ``completed``：``{scenario_id: ending}`` 已完成足迹（供 requires_story 判定 + 去重）。
+    - ``active_id``：当前进行中的场景 id（跳过，避免「邀你开始你正在玩的」）。
+
+    返回 ``{scenario_id, title}`` 或 ``None``（无可邀约/配置非法）。按 scenarios 声明顺序
+    取第一个合格者（内容侧可借声明序表达推荐优先级）。
+    """
+    if not isinstance(scenarios, dict):
+        return None
+    done = completed if isinstance(completed, dict) else {}
+    aid = str(active_id or "")
+    for sid, scn in scenarios.items():
+        if not isinstance(scn, dict):
+            continue
+        sid_s = str(sid)
+        if sid_s in done or sid_s == aid:
+            continue
+        if not _beats(scn):           # 空场景无法开启 → 不邀约
+            continue
+        if scenario_available(
+            scn, entitlement=entitlement, bond_level=bond_level, completed=done
+        ):
+            return {"scenario_id": sid_s, "title": str(scn.get("title") or sid_s)}
+    return None
+
+
 def start_scenario(
     scenario_id: str,
     scenarios: Optional[Dict[str, Any]],
@@ -337,6 +377,7 @@ __all__ = [
     "scenario_locked_reason",
     "scenario_available",
     "list_scenarios",
+    "select_story_invite",
     "start_scenario",
     "advance_state",
     "current_directive",

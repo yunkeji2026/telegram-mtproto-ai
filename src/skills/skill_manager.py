@@ -2587,6 +2587,88 @@ class SkillManager(LoggerMixin):
         except Exception:
             return None
 
+    @staticmethod
+    def _story_progress_from_context(ctx: Dict[str, Any]):
+        """从持久化的 user_context 汇总剧情完成足迹 + 累计加成（跨 rel_state 键 union）。
+
+        proactive 路径用 ``memory_key`` 取 context，但 rel_state 按 ``chat_storage_key``
+        分桶、键不必等于 memory_key；私聊一个对端通常仅一桶，故**并集**所有桶的
+        ``story_done``/``story_outcomes`` 最稳——避免键不匹配导致漏判/误邀。
+        返回 ``(completed: {sid: ending}, story_bonus: float)``。
+        """
+        completed: Dict[str, str] = {}
+        bonus = 0.0
+        root = ctx.get("companion_relationship") if isinstance(ctx, dict) else None
+        if isinstance(root, dict):
+            for st in root.values():
+                if not isinstance(st, dict):
+                    continue
+                for sid in (st.get("story_done") or []):
+                    completed.setdefault(str(sid), "")
+                oc = st.get("story_outcomes")
+                if isinstance(oc, dict):
+                    for sid, end in oc.items():
+                        completed[str(sid)] = str(end or "")
+                try:
+                    bonus = max(bonus, float(st.get("story_bonus", 0) or 0))
+                except (TypeError, ValueError):
+                    pass
+        return completed, bonus
+
+    def _proactive_story_invite(
+        self, memory_key: str, intimacy: float
+    ) -> Optional[Dict[str, Any]]:
+        """沉默期主动剧情邀约：挑一个「已解锁但未经历」的免费剧情发出温暖邀约。
+
+        准入复用 ``story_engine.select_story_invite``（关系/前置已满足 + 免费 + 未完成）；
+        关系等级用 **effective intimacy**（基础分 + 封顶剧情加成）算，与对话面/健康卡同源。
+        story 未启用 / 关闭 invite / 无 context / 无可邀约 → 返回 None（回落记忆话题）。
+        """
+        scfg = self._story_cfg()
+        if not scfg.get("enabled", False):
+            return None
+        if not bool(scfg.get("proactive_invite", True)):
+            return None
+        scenarios = self._story_scenarios()
+        store = getattr(self, "_context_store", None)
+        key = str(memory_key or "").strip()
+        if not scenarios or store is None or not key:
+            return None
+        try:
+            ctx = store.get(key)
+        except Exception:
+            return None
+        completed, bonus = self._story_progress_from_context(ctx if isinstance(ctx, dict) else {})
+        try:
+            eff = max(0.0, min(100.0, float(intimacy or 0.0)
+                               + min(self._story_bonus_cap(), bonus)))
+        except (TypeError, ValueError):
+            eff = float(intimacy or 0.0)
+        try:
+            from src.contacts.relationship_level import compute_bond_level
+            bond_level = int(compute_bond_level(eff).get("level", 0))
+        except Exception:
+            bond_level = 0
+        from src.skills.story_engine import select_story_invite
+        inv = select_story_invite(
+            scenarios, bond_level=bond_level, completed=completed)
+        if not inv:
+            return None
+        title = inv["title"]
+        directive = (
+            f"你想邀TA一起开启一段你们还没经历过的新故事《{title}》。用一句温暖、不突兀的话"
+            f"发出邀约——可先轻轻提一下你们关系的靠近，再顺势提议要不要一起经历这段故事。"
+            f"别用菜单/命令口吻、别罗列、别催。"
+        )
+        return {
+            "mode": "story_invite",
+            "fact": title,
+            "directive": directive,
+            "scenario_id": inv["scenario_id"],
+            "context_facts": [],
+            "silent_hours": 0.0,
+        }
+
     def build_proactive_opener(
         self,
         memory_key: str,
@@ -2602,6 +2684,16 @@ class SkillManager(LoggerMixin):
         只回访 user_stated/已确认事实（不拿 AI 推断去回访，猜错伤信任）。
         """
         empty = {"mode": "", "fact": "", "directive": "", "silent_hours": 0.0}
+        # Phase ④续⁵：主动剧情邀约——沉默期把「已解锁但未经历」的新剧情接进 re-engagement
+        # 闭环（剧情解锁→主动邀约→回流→更多剧情）。优先于记忆回访（新内容钩子更强），
+        # 无可邀约时无缝回落到记忆话题。任何失败都不打断 → 仍走记忆路径。
+        try:
+            _inv = self._proactive_story_invite(memory_key, intimacy)
+            if _inv:
+                _inv["silent_hours"] = round(float(silent_hours or 0.0), 1)
+                return _inv
+        except Exception:
+            self.logger.debug("proactive story invite skipped", exc_info=True)
         store = getattr(self, "_episodic_store", None)
         key = str(memory_key or "").strip()
         if not store or not key or not hasattr(store, "list_rows"):
