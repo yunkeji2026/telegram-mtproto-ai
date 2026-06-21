@@ -60,6 +60,7 @@ class _SM:
     _scenario_title = staticmethod(_SMcls._scenario_title)
     _story_outcomes = _SMcls._story_outcomes
     _handle_story_command = _SMcls._handle_story_command
+    _ensure_entitlement = _SMcls._ensure_entitlement
     _writeback_story_memory = _SMcls._writeback_story_memory
     _episodic_storage_key = _SMcls._episodic_storage_key
 
@@ -154,6 +155,81 @@ def test_unknown_scenario():
 def test_non_command_passthrough():
     sm = _SM()
     assert sm._handle_story_command("今天天气真好", _ctx(intimacy=40), "chatA") is None
+
+
+# ── Stage 1：_ensure_entitlement 把真实权益接进 user_context ──────────────────
+
+def test_ensure_entitlement_injects_and_unlocks_paid():
+    from src.utils.companion_context import (
+        reset_relationship_providers, set_relationship_providers,
+    )
+    reset_relationship_providers()
+    try:
+        set_relationship_providers(
+            entitlement_resolver=lambda ck: {
+                "grants": ["all_story"], "unlocked": []})
+        sm = _SM()
+        ctx = _ctx(intimacy=95)  # 关系够深，但 ctx 里没 entitlement
+        # 注入前：付费场景锁
+        assert "专属剧情" in sm._handle_story_command(
+            "开始剧情 星空下的约定", ctx, "chatA")
+        # 解析真实权益进 ctx
+        sm._ensure_entitlement("tg:acc:u1", ctx)
+        assert ctx["entitlement"]["grants"] == ["all_story"]
+        # 注入后：付费用户进得去
+        assert sm._handle_story_command("开始剧情 星空下的约定", ctx, "chatA") is None
+        assert sm._get_story_state(ctx, "chatA")["scenario_id"] == "starry_night"
+    finally:
+        reset_relationship_providers()
+
+
+def test_ensure_entitlement_noop_when_unregistered():
+    """无 resolver（变现未就绪）→ 不动 ctx，付费场景仍锁（零回归）。"""
+    from src.utils.companion_context import reset_relationship_providers
+    reset_relationship_providers()
+    sm = _SM()
+    ctx = _ctx(intimacy=95)
+    sm._ensure_entitlement("tg:acc:u1", ctx)
+    assert "entitlement" not in ctx
+    assert "专属剧情" in sm._handle_story_command(
+        "开始剧情 星空下的约定", ctx, "chatA")
+
+
+def test_ensure_entitlement_skipped_when_story_disabled():
+    """story 未启用 → 不解析（零开销），ctx 不变。"""
+    from src.utils.companion_context import (
+        reset_relationship_providers, set_relationship_providers,
+    )
+    reset_relationship_providers()
+    try:
+        called = []
+        set_relationship_providers(
+            entitlement_resolver=lambda ck: called.append(ck) or {"grants": []})
+        sm = _SM(enabled=False)
+        ctx = _ctx(intimacy=95)
+        sm._ensure_entitlement("tg:acc:u1", ctx)
+        assert called == [] and "entitlement" not in ctx
+    finally:
+        reset_relationship_providers()
+
+
+def test_ensure_entitlement_ttl_cache_avoids_requery():
+    """5 分钟内已解析 → 不重复查库（复用缓存）。"""
+    from src.utils.companion_context import (
+        reset_relationship_providers, set_relationship_providers,
+    )
+    reset_relationship_providers()
+    try:
+        calls = []
+        set_relationship_providers(
+            entitlement_resolver=lambda ck: calls.append(ck) or {"grants": ["x"]})
+        sm = _SM()
+        ctx = _ctx(intimacy=95)
+        sm._ensure_entitlement("tg:acc:u1", ctx)
+        sm._ensure_entitlement("tg:acc:u1", ctx)  # 第二次应命中缓存
+        assert len(calls) == 1
+    finally:
+        reset_relationship_providers()
 
 
 # ── Phase ④ 完成回写共享记忆 ──────────────────────────────────────

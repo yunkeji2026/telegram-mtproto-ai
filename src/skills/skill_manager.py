@@ -751,6 +751,10 @@ class SkillManager(LoggerMixin):
                 self._context_store.flush(user_id_str)
                 return _forget_reply
 
+            # Stage 1：剧情/成长指令前懒解析端用户真实付费权益进 user_context——
+            # 让付费剧情闸（story_engine.require_unlock）据真实拥有判准入（付费用户进得去、
+            # 免费看到锁）。resolver 未注册（变现未就绪）→ entitlement 维持 None，零回归。
+            self._ensure_entitlement(user_id_str, user_context)
             # Phase ③：剧情指令（列表/开始/结束）。返回字符串=短路；None=非指令或开始成功
             # （开始成功只置 state，后续正常生成带【剧情场景】块的开场）。
             try:
@@ -3354,6 +3358,31 @@ class SkillManager(LoggerMixin):
     def _scenario_title(scenarios: Dict[str, Any], sid: str) -> str:
         scn = (scenarios or {}).get(str(sid)) or {}
         return str(scn.get("title") or sid)
+
+    def _ensure_entitlement(self, user_id: Any, user_context: Dict[str, Any]) -> None:
+        """Stage 1：把端用户真实付费权益懒解析进 ``user_context["entitlement"]``。
+
+        仅 story 启用时解析（普通消息零开销）；5 分钟 TTL 缓存（权益变动罕见，避免每条
+        消息查库）。resolver 未注册（monetization 未就绪）→ 不动 user_context（entitlement
+        维持原值/None → 付费场景锁，零回归）。绝不抛——任何失败退回旧行为。
+        """
+        try:
+            if not self._story_cfg().get("enabled", False):
+                return
+            cached = user_context.get("entitlement")
+            try:
+                ts = float(user_context.get("_entitlement_at") or 0)
+            except (TypeError, ValueError):
+                ts = 0.0
+            if isinstance(cached, dict) and (time.time() - ts) < 300.0:
+                return  # 近 5 分钟已解析，复用（避免每条消息查库）
+            from src.utils.companion_context import resolve_entitlement
+            ent = resolve_entitlement(user_id)
+            if isinstance(ent, dict):
+                user_context["entitlement"] = ent
+                user_context["_entitlement_at"] = time.time()
+        except Exception:
+            self.logger.debug("entitlement resolve skipped", exc_info=True)
 
     def _handle_story_command(self, text: str, user_context: Dict[str, Any], chat_id: Any):
         """剧情指令（默认关 companion.story.enabled）：列表 / 开始 / 结束。

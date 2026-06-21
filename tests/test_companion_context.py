@@ -10,6 +10,7 @@ from src.utils.companion_context import (
     record_relationship_message,
     record_story_completion,
     reset_relationship_providers,
+    resolve_entitlement,
     resolve_funnel_stage,
     resolve_intimacy_score,
     route_persona_id,
@@ -330,3 +331,39 @@ def test_story_recorder_swallows_exception():
 
     set_relationship_providers(story_recorder=_boom)
     assert record_story_completion("a", "1", "coffee_date", intimacy_bonus=3) is False
+
+
+# ── resolve_entitlement（Stage 1 付费权益接线） ──────────────────────────────
+
+def test_resolve_entitlement_none_when_unregistered():
+    reset_relationship_providers()
+    assert resolve_entitlement("tg:acc:u1") is None
+
+
+def test_resolve_entitlement_returns_dict_from_provider():
+    reset_relationship_providers()
+    seen = []
+    ent = {"tier": "vip", "grants": ["story_ch1"], "unlocked": []}
+    set_relationship_providers(
+        entitlement_resolver=lambda ck: seen.append(ck) or ent)
+    out = resolve_entitlement("tg:acc:u1")
+    assert out == ent
+    assert seen == ["tg:acc:u1"]  # 以 contact_key 调用
+
+
+def test_resolve_entitlement_none_on_blank_key():
+    set_relationship_providers(entitlement_resolver=lambda ck: {"tier": "vip"})
+    assert resolve_entitlement("") is None
+    assert resolve_entitlement(None) is None
+
+
+def test_resolve_entitlement_swallows_exception():
+    def _boom(ck):
+        raise RuntimeError("store down")
+    set_relationship_providers(entitlement_resolver=_boom)
+    assert resolve_entitlement("tg:acc:u1") is None
+
+
+def test_resolve_entitlement_none_when_provider_returns_non_dict():
+    set_relationship_providers(entitlement_resolver=lambda ck: "not-a-dict")
+    assert resolve_entitlement("tg:acc:u1") is None

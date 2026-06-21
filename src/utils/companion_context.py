@@ -33,6 +33,7 @@ _REL_PROVIDERS: Dict[str, Optional[_RelLookup]] = {
     "funnel": None,
     "record": None,
     "story": None,
+    "entitlement": None,
 }
 
 
@@ -42,6 +43,7 @@ def set_relationship_providers(
     funnel_lookup: Optional[_RelLookup] = None,
     message_recorder: Optional[_RelLookup] = None,
     story_recorder: Optional[_RelLookup] = None,
+    entitlement_resolver: Optional[_RelLookup] = None,
 ) -> None:
     """注册关系事实源查询器/记录器（幂等；仅覆盖显式传入的项）。
 
@@ -52,6 +54,11 @@ def set_relationship_providers(
     - ``story_recorder``：把陪伴剧情**首次收场**镜像进 journey 事件流（story_complete），
       供运营健康卡用与对话侧同一公式算 effective bond。同样**仅在 contacts_recording 开**
       时注册；未注册 → ``record_story_completion`` 为 no-op（会话侧加成仍由 rel_state 权威生效）。
+    - ``entitlement_resolver``：``(contact_key) -> entitlement dict``——把端用户真实付费权益
+      （tier/grants/unlocked）接进对话路径，让付费剧情闸（``story_engine`` 的 ``require_unlock``）
+      据真实拥有判准入。**仅在 monetization store 就绪时注册**；未注册 → ``resolve_entitlement``
+      返回 None → 行为等同旧版（付费场景对所有人锁，零回归）。约定：``contact_key`` ==
+      ``process_message`` 的 ``user_id``（端用户身份），支付流水须按同一 key 写权益。
     """
     if intimacy_lookup is not None:
         _REL_PROVIDERS["intimacy"] = intimacy_lookup
@@ -61,6 +68,8 @@ def set_relationship_providers(
         _REL_PROVIDERS["record"] = message_recorder
     if story_recorder is not None:
         _REL_PROVIDERS["story"] = story_recorder
+    if entitlement_resolver is not None:
+        _REL_PROVIDERS["entitlement"] = entitlement_resolver
 
 
 def reset_relationship_providers() -> None:
@@ -69,6 +78,7 @@ def reset_relationship_providers() -> None:
     _REL_PROVIDERS["funnel"] = None
     _REL_PROVIDERS["record"] = None
     _REL_PROVIDERS["story"] = None
+    _REL_PROVIDERS["entitlement"] = None
 
 
 def record_relationship_message(
@@ -170,6 +180,22 @@ def resolve_funnel_stage(
         return None
 
 
+def resolve_entitlement(contact_key: Any) -> Optional[Dict[str, Any]]:
+    """查端用户当前付费权益快照（``{tier, grants, unlocked, ...}``）；供付费剧情闸判准入。
+
+    未注册 resolver（默认 / monetization 未就绪）/ 空 key / 异常 → None
+    （调用方据此降级为「无权益」= 付费场景锁，与旧版一致、零回归）。
+    """
+    fn = _REL_PROVIDERS.get("entitlement")
+    if fn is None or contact_key in (None, ""):
+        return None
+    try:
+        ent = fn(str(contact_key))
+        return ent if isinstance(ent, dict) else None
+    except Exception:
+        return None
+
+
 def route_persona_id(
     account_persona_ids: Optional[List[Any]], chat_type: str = ""
 ) -> str:
@@ -263,4 +289,5 @@ __all__ = [
     "record_story_completion",
     "resolve_intimacy_score",
     "resolve_funnel_stage",
+    "resolve_entitlement",
 ]

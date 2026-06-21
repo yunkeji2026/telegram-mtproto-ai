@@ -1671,6 +1671,16 @@ class AIChatAssistant:
             store = get_entitlement_store(_cfg_dir / "entitlements.db", catalog=catalog)
             if web_app is not None:
                 web_app.state.entitlement_store = store
+            # Stage 1：把真实权益接进对话路径——注册进程级 resolver，让付费剧情闸
+            # （story_engine.require_unlock）据端用户真实拥有判准入。仅在变现就绪时注册，
+            # 故未启用时 resolve_entitlement 恒 None → 付费场景仍对所有人锁（零回归）。
+            try:
+                from src.utils.companion_context import set_relationship_providers
+                set_relationship_providers(
+                    entitlement_resolver=lambda ck: store.get_entitlement(ck))
+                self.logger.info("✅ 对话剧情付费闸已接入真实权益（entitlement resolver 已注册）")
+            except Exception:
+                self.logger.debug("entitlement resolver 注册失败", exc_info=True)
             if mon.get("expire_on_startup", True):
                 try:
                     store.expire_subscriptions()

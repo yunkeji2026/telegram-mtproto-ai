@@ -1524,6 +1524,11 @@ pricing:
 # 默认全关：enabled 关时不建库不接线；gate.enabled 关时变现门控对陪伴行为零影响。
 monetization:
   enabled: false                      # 总开关：开启后启动建库 + 挂 app.state（路由始终注册，关时库懒建只读）
+  # 【Stage 1 权益接线约定】enabled 开启后，对话路径会注册「权益 resolver」，让付费剧情闸
+  #   （companion.story 的 require_unlock）据端用户真实拥有判准入。约定：权益 contact_key ==
+  #   skill_manager.process_message 的 user_id（端用户身份，如 telegram:account:chat_key）——
+  #   支付流水（subscribe/unlock）须按同一 key 写入 EntitlementStore，闸才查得到、付费用户才进得去。
+  #   enabled=false 时 resolver 不注册 → 付费场景对所有人锁（与旧版一致，零回归）。
   webhook_secret: ""                  # 支付服务商回调共享密钥（校验 X-Monetize-Secret 头）；空=接受（仅自测）
   expire_on_startup: true             # 启动时把过期订阅标 expired（状态收敛，不影响有效判定）
   gate:
