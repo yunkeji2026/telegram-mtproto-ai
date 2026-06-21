@@ -751,6 +751,20 @@ class SkillManager(LoggerMixin):
                 self._context_store.flush(user_id_str)
                 return _forget_reply
 
+            # Phase ③：剧情指令（列表/开始/结束）。返回字符串=短路；None=非指令或开始成功
+            # （开始成功只置 state，后续正常生成带【剧情场景】块的开场）。
+            try:
+                _story_reply = self._handle_story_command(
+                    text, user_context, _chat_id
+                )
+            except Exception:
+                _story_reply = None
+                self.logger.debug("story command skipped", exc_info=True)
+            if _story_reply is not None:
+                self._context_store.mark_dirty(user_id_str)
+                self._context_store.flush(user_id_str)
+                return _story_reply
+
             # 2. 冷却
             if not self._check_cooldown(text, user_id_str, chat_id=_chat_id):
                 self.logger.warning(f"{log_prefix}用户 {user_id_str} 处于冷却期，跳过回�")
@@ -914,6 +928,20 @@ class SkillManager(LoggerMixin):
                         user_context["_bond_level_block"] = _bl_block
             except Exception:
                 self.logger.debug("bond_level inject skipped", exc_info=True)
+
+            # Phase ③：活动剧情 → 注入当前 beat 的【剧情场景】导演指令（默认关）。
+            try:
+                _scfg = self._story_cfg()
+                if _scfg.get("enabled", False):
+                    _sstate = self._get_story_state(user_context, _chat_id)
+                    if _sstate:
+                        from src.skills.story_engine import build_story_prompt_block
+                        _sblk = build_story_prompt_block(
+                            _sstate, self._story_scenarios())
+                        if _sblk:
+                            user_context["_story_block"] = _sblk
+            except Exception:
+                self.logger.debug("story inject skipped", exc_info=True)
 
             from src.hooks.registry import HookRegistry as _HR
             _hooks = _HR.get_instance()
@@ -2917,6 +2945,125 @@ class SkillManager(LoggerMixin):
         except Exception:
             return ""
 
+    # ── Phase ③ 剧情/场景 roleplay ────────────────────────────────
+    def _story_cfg(self) -> Dict[str, Any]:
+        try:
+            cfg = self.config.config if hasattr(self.config, "config") else {}
+            if not isinstance(cfg, dict):
+                return {}
+            return (cfg.get("companion") or {}).get("story") or {}
+        except Exception:
+            return {}
+
+    def _story_scenarios(self) -> Dict[str, Any]:
+        sc = self._story_cfg().get("scenarios")
+        return sc if isinstance(sc, dict) else {}
+
+    def _story_state_root(self, user_context: Dict[str, Any]) -> Dict[str, Any]:
+        root = user_context.get("story_state")
+        if not isinstance(root, dict):
+            root = {}
+            user_context["story_state"] = root
+        return root
+
+    def _get_story_state(self, user_context: Dict[str, Any], chat_id: Any):
+        from src.utils.companion_relationship import chat_storage_key
+        return self._story_state_root(user_context).get(chat_storage_key(chat_id))
+
+    def _set_story_state(self, user_context: Dict[str, Any], chat_id: Any, state) -> None:
+        from src.utils.companion_relationship import chat_storage_key
+        root = self._story_state_root(user_context)
+        key = chat_storage_key(chat_id)
+        if state is None:
+            root.pop(key, None)
+        else:
+            root[key] = state
+
+    def _bond_level_from_context(self, user_context: Dict[str, Any]) -> int:
+        try:
+            from src.contacts.relationship_level import compute_bond_level
+            return int(compute_bond_level(
+                user_context.get("intimacy_score")).get("level", 0))
+        except Exception:
+            return 0
+
+    def _match_scenario(self, scenarios: Dict[str, Any], name: str):
+        n = (name or "").strip().lower()
+        if not n:
+            return None
+        for sid, scn in scenarios.items():
+            title = str((scn or {}).get("title", "")).strip().lower()
+            if n == str(sid).lower() or n == title:
+                return sid
+        for sid, scn in scenarios.items():
+            title = str((scn or {}).get("title", "")).strip().lower()
+            if (title and n in title) or n in str(sid).lower():
+                return sid
+        return None
+
+    def _handle_story_command(self, text: str, user_context: Dict[str, Any], chat_id: Any):
+        """剧情指令（默认关 companion.story.enabled）：列表 / 开始 / 结束。
+
+        返回回复字符串=短路（列表/结束/锁定提示）；返回 None=非剧情指令或「开始成功」
+        （成功时只置 state，让正常回复流程带着【剧情场景】块自然开场）。
+        """
+        cfg = self._story_cfg()
+        if not cfg.get("enabled", False):
+            return None
+        t = (text or "").strip()
+        scenarios = self._story_scenarios()
+        if not scenarios:
+            return None
+        ent = user_context.get("entitlement")
+        ent = ent if isinstance(ent, dict) else None
+        bond = self._bond_level_from_context(user_context)
+
+        if t in ("结束剧情", "退出剧情", "/story stop", "story stop"):
+            if self._get_story_state(user_context, chat_id):
+                self._set_story_state(user_context, chat_id, None)
+                return "好呀，那我们先回到平常聊天～"
+            return None
+
+        if t in ("剧情列表", "剧情", "/story", "story", "story list"):
+            from src.skills.story_engine import list_scenarios
+            rows = list_scenarios(scenarios, entitlement=ent, bond_level=bond)
+            if not rows:
+                return None
+            lines = []
+            for r in rows:
+                if r["available"]:
+                    lines.append(f"· {r['title']}（发「开始剧情 {r['title']}」）")
+                elif r["locked_reason"].startswith("need_bond"):
+                    lines.append(f"· {r['title']}（我们再熟一点就能解锁）")
+                else:
+                    lines.append(f"· {r['title']}（专属剧情，需解锁）")
+            return "想一起经历点什么吗？\n" + "\n".join(lines)
+
+        prefix = None
+        for p in ("开始剧情", "/story start ", "story start "):
+            if t.startswith(p):
+                prefix = p
+                break
+        if prefix is None:
+            return None
+        name = t[len(prefix):].strip()
+        sid = self._match_scenario(scenarios, name)
+        if not sid:
+            return "嗯…我还不会这个剧情呢，发「剧情列表」看看有哪些？"
+        from src.skills.story_engine import scenario_locked_reason, start_scenario
+        state = start_scenario(sid, scenarios, entitlement=ent, bond_level=bond)
+        if state is None:
+            reason = scenario_locked_reason(
+                scenarios.get(sid) or {}, entitlement=ent, bond_level=bond)
+            if reason.startswith("need_bond"):
+                return "这个故事要我们更熟一些才能解锁哦，再多陪我聊聊吧～"
+            if reason.startswith("need_unlock"):
+                return "这是一段专属剧情，解锁后我们就能一起体验啦。"
+            return None
+        self._set_story_state(user_context, chat_id, state)
+        self.logger.info("[story] start scenario=%s chat=%s", sid, chat_id)
+        return None
+
     def _update_after_reply(self, reply: str, user_id: str, user_context: Dict[str, Any],
                             chat_id: Any = ''):
         """回�后更新状�?"""
@@ -2952,6 +3099,22 @@ class SkillManager(LoggerMixin):
                 reconcile_stage_after_assistant_reply(st, _comp_cfg)
         except Exception:
             pass
+
+        # Phase ③：活动剧情按用户轮次确定性推进 beat（剧终自动收场）。
+        try:
+            _scfg = self._story_cfg()
+            if _scfg.get("enabled", False) and (reply or "").strip():
+                _sstate = self._get_story_state(user_context, chat_id)
+                if _sstate:
+                    from src.skills.story_engine import advance_state
+                    _at = int(_scfg.get("advance_turns", 0) or 0)
+                    _kw = {"advance_turns": _at} if _at > 0 else {}
+                    _new, _fin = advance_state(
+                        _sstate, self._story_scenarios(), **_kw)
+                    self._set_story_state(
+                        user_context, chat_id, None if _fin else _new)
+        except Exception:
+            self.logger.debug("story advance skipped", exc_info=True)
 
         self.global_last_reply_time = current_time
         if chat_id:

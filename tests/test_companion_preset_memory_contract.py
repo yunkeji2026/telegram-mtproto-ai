@@ -102,3 +102,32 @@ def test_bond_level_enabled(preset):
         # 满级应能解出所有配置条目（验证键名合法、可被代码解析）
         all_items = {i for items in unlocks.values() for i in (items or [])}
         assert set(level_unlocks(4, unlocks)) == all_items
+
+
+def test_story_enabled_and_scenarios_valid(preset):
+    """Phase ③：剧情引擎在陪伴预设激活，且场景定义可被引擎正确解析/gate。"""
+    from src.skills.story_engine import list_scenarios, start_scenario
+
+    comp = preset.get("companion") or {}
+    story = comp.get("story") or {}
+    assert story.get("enabled") is True
+    scenarios = story.get("scenarios") or {}
+    assert scenarios, "陪伴预设应至少配置一个剧情场景"
+
+    # 每个场景须有非空 beats（含 directive）
+    for sid, scn in scenarios.items():
+        beats = [b for b in (scn.get("beats") or [])
+                 if (b.get("directive") or "").strip()]
+        assert beats, f"场景 {sid} 无有效 beat"
+
+    # 满权益 + 满关系等级时，免费场景与付费场景都应可进入（验证 gate 键名合法）
+    full_ent = {"grants": ("all_story",), "unlocked": ("story_ch1",)}
+    rows = list_scenarios(scenarios, entitlement=full_ent, bond_level=4)
+    assert rows and all(r["available"] for r in rows)
+
+    # 付费专属场景在「无权益」时应被锁（验证 require_unlock 真生效）
+    paid = [sid for sid, scn in scenarios.items() if scn.get("require_unlock")]
+    for sid in paid:
+        assert start_scenario(
+            sid, scenarios, entitlement={"grants": (), "unlocked": ()},
+            bond_level=4) is None

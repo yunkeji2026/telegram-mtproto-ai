@@ -92,6 +92,26 @@ companion:
     unlocks:                         # 按关系等级解锁预览（真放行仍由 monetization 判）
       intimate: [exclusive_album]
       steady: [all_story]
+  # 剧情/场景 roleplay（Phase ③）：场景化沉浸玩法 + 付费解锁点，咬合 bond_level/变现。
+  #   「剧情列表」查看 ·「开始剧情 <名称>」进入 ·「结束剧情」退出。
+  story:
+    enabled: true                    # ★ 陪伴模式默认开
+    advance_turns: 3
+    scenarios:
+      coffee_date:                   # 免费：关系到「试探/升温」即可解锁
+        title: "初次咖啡约会"
+        min_bond_level: 2
+        beats:
+          - {id: arrive,  directive: "场景：你和对方约在安静的咖啡馆初次见面，自然描述环境、点单，营造轻松氛围。"}
+          - {id: chat,    directive: "场景推进：你们聊起彼此近况，气氛渐渐熟络，多倾听、多回应对方。"}
+          - {id: closing, directive: "场景收尾：约会接近尾声，自然表达期待下次再见，温柔道别。"}
+      starry_night:                  # 付费专属：需 all_story 权益（SVIP 授予）+ 关系够深
+        title: "星空下的约定"
+        min_bond_level: 3
+        require_unlock: all_story
+        beats:
+          - {id: rooftop, directive: "场景：你们在天台并肩看星空，气氛安静而亲密，轻声分享心事。"}
+          - {id: promise, directive: "场景推进：聊到彼此对未来的期待，自然许下一个温柔的小约定。"}
   # 安全底线守卫：危机识别 + 反谄媚 + 回复红线兜底。陪伴+全自动场景默认全开（漏接危机最坏）。
   wellbeing:
     enabled: true

@@ -1398,6 +1398,10 @@ class AIClient(LoggerMixin):
         _bl = (context.get("_bond_level_block") or "").strip()
         if _bl and _is_companion:
             prompt_parts.append(_bl)
+        # Phase ③：剧情/场景 roleplay 导演指令（活动剧情时由 skill_manager 注入）
+        _story = (context.get("_story_block") or "").strip()
+        if _story and _is_companion:
+            prompt_parts.append(_story)
         # ★ 情感智能上下文引擎（时间感知 + 情绪弧线 + 关系温度 + 记忆反思）
         _emo_block = (context.get("_emotional_context_block") or "").strip()
         if _emo_block:

@@ -979,6 +979,23 @@ companion:
     #   warming: [voice_reply]
     #   intimate: [exclusive_album, story_ch1]
     #   steady: [all_story]
+  # Phase ③：剧情/场景 roleplay 引擎——场景化沉浸体验，天然的付费解锁点。
+  # 用户发「剧情列表」查看、「开始剧情 <名称>」进入、「结束剧情」退出；引擎按用户轮次
+  # 确定性推进 beat，每 beat 一行导演指令注入回复层演绎（默认关）。
+  # 双 gate：min_bond_level（关系等级，咬合 Phase ②）+ require_unlock（付费 feature，
+  # 走 monetization.entitlement——绝不绕过真实收费）。
+  story:
+    enabled: false
+    advance_turns: 3           # 每 N 个用户轮次推进一个 beat（剧终自动收场）
+    scenarios:
+      coffee_date:
+        title: "初次咖啡约会"
+        min_bond_level: 2        # 需关系等级≥2（试探/升温）
+        # require_unlock: story_ch1   # 如需付费解锁，填 catalog item / grant id
+        beats:
+          - {id: arrive,  directive: "场景：你和对方约在安静的咖啡馆初次见面，自然描述环境、点单，营造轻松氛围。"}
+          - {id: chat,    directive: "场景推进：你们聊起彼此近况，气氛渐渐熟络，多倾听、多回应对方。"}
+          - {id: closing, directive: "场景收尾：约会接近尾声，自然表达期待下次再见，温柔道别。"}
   # Phase P/R：关系健康卡 + 流失预警榜（/relations-health）
   relations_health:
     # Q 延伸：ingest 热路径回写 conversations/conversation_meta.contact_id（默认关）。
