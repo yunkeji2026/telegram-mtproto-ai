@@ -117,9 +117,11 @@ companion:
         endings:
           warm: {directive: "结局：对方答应了，你们开心约好下次再见，温柔道别。", memory: "我们约好了下次再一起喝咖啡", intimacy_bonus: 4}
           cool: {directive: "结局：对方没多说，你体贴地不勉强，礼貌温柔地道别。", memory: "我们一起喝过一次咖啡", intimacy_bonus: 1}
-      starry_night:                  # 付费专属：需 all_story 权益（SVIP 授予）+ 关系够深
+      starry_night:                  # 付费专属续作：需关系够深 + 先以 warm 结局走过 coffee_date + all_story 权益
         title: "星空下的约定"
         min_bond_level: 3
+        requires_story:              # 跨场景因果：前传 coffee_date 须以 warm 结局完成
+          - {scenario: coffee_date, ending: warm}
         require_unlock: all_story
         beats:
           - {id: rooftop, directive: "场景：你们在天台并肩看星空，气氛安静而亲密，轻声分享心事。"}

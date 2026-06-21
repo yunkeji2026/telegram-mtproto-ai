@@ -34,6 +34,12 @@ _SCENARIOS = {
         "require_unlock": "all_story",
         "beats": [{"id": "rooftop", "directive": "场景：天台看星空。"}],
     },
+    "sequel": {
+        "title": "咖啡续约",
+        "min_bond_level": 2,
+        "requires_story": [{"scenario": "coffee_date", "ending": "warm"}],
+        "beats": [{"id": "s", "directive": "续作场景。"}],
+    },
 }
 
 
@@ -50,6 +56,8 @@ class _SM:
     _apply_story_intimacy_bonus = _SMcls._apply_story_intimacy_bonus
     _record_story_completion = _SMcls._record_story_completion
     _match_scenario = _SMcls._match_scenario
+    _scenario_title = staticmethod(_SMcls._scenario_title)
+    _story_outcomes = _SMcls._story_outcomes
     _handle_story_command = _SMcls._handle_story_command
     _writeback_story_memory = _SMcls._writeback_story_memory
     _episodic_storage_key = _SMcls._episodic_storage_key
@@ -247,3 +255,42 @@ def test_milestone_label_resolves_story_code():
     blk = build_bond_level_block(
         60.0, fresh_milestone="story:一起经历了《初次咖啡约会》")
     assert "一起经历了《初次咖啡约会》" in blk
+
+
+# ── Phase ④续³ 跨场景因果（requires_story） ───────────────────────
+
+def test_completion_records_outcome_ending():
+    sm = _SM()
+    ctx = {"intimacy_score": 50.0}
+    sm._record_story_completion(ctx, "chatA", "coffee_date", "初次咖啡约会", 4,
+                                ending="warm")
+    assert sm._story_outcomes(ctx, "chatA") == {"coffee_date": "warm"}
+
+
+def test_sequel_locked_until_prerequisite_then_unlocks():
+    sm = _SM()
+    ctx = _ctx(intimacy=40)   # bond level 2，满足 sequel 的 min_bond_level
+    # 没经历过前传 → 开始 sequel 被前置 gate 挡，提示先经历前传
+    out = sm._handle_story_command("开始剧情 咖啡续约", ctx, "chatA")
+    assert out and "先一起经历" in out and "初次咖啡约会" in out
+    # 以 warm 结局完成 coffee_date → 解锁 sequel
+    sm._record_story_completion(ctx, "chatA", "coffee_date", "初次咖啡约会", 0,
+                                ending="warm")
+    assert sm._handle_story_command("开始剧情 咖啡续约", ctx, "chatA") is None
+    assert sm._get_story_state(ctx, "chatA")["scenario_id"] == "sequel"
+
+
+def test_sequel_wrong_ending_stays_locked():
+    sm = _SM()
+    ctx = _ctx(intimacy=40)
+    # cool 结局完成前传 → sequel 仍锁（需 warm）
+    sm._record_story_completion(ctx, "chatA", "coffee_date", "初次咖啡约会", 0,
+                                ending="cool")
+    out = sm._handle_story_command("开始剧情 咖啡续约", ctx, "chatA")
+    assert out and "先一起经历" in out
+
+
+def test_story_list_shows_prerequisite_hint():
+    sm = _SM()
+    out = sm._handle_story_command("剧情列表", _ctx(intimacy=40), "chatA")
+    assert "咖啡续约（经历过《初次咖啡约会》后解锁）" in out

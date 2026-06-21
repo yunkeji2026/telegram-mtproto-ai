@@ -60,6 +60,18 @@ SCENARIOS = {
         "min_bond_level": 0,
         "beats": [{"id": "go", "directive": "场景：一起去海边。"}],
     },
+    "sequel": {                       # 续作：需先以 warm 结局走过 branch_date
+        "title": "续作",
+        "min_bond_level": 0,
+        "requires_story": [{"scenario": "branch_date", "ending": "warm"}],
+        "require_unlock": "all_story",
+        "beats": [{"id": "s", "directive": "续作场景。"}],
+    },
+    "sequel_any": {                   # 续作：完成过 branch_date 即可（任意结局）
+        "title": "续作B",
+        "requires_story": ["branch_date"],
+        "beats": [{"id": "s", "directive": "续作B场景。"}],
+    },
     "empty": {"title": "空场景", "beats": []},
 }
 
@@ -83,6 +95,43 @@ def test_bond_checked_before_unlock():
     scn = {"require_unlock": "story_ch1", "min_bond_level": 3,
            "beats": [{"directive": "x"}]}
     assert scenario_locked_reason(scn, bond_level=1) == "need_bond:3"
+
+
+# ── 跨场景前置 requires_story ──────────────────────────────────────
+
+def test_locked_by_missing_prerequisite():
+    scn = SCENARIOS["sequel_any"]
+    assert scenario_locked_reason(scn, completed={}) == "need_story:branch_date"
+    assert scenario_available(scn, completed={"branch_date": ""})
+
+
+def test_locked_by_wrong_ending():
+    scn = SCENARIOS["sequel"]
+    # 完成了 branch_date 但走的是 cool 结局 → 仍锁（需 warm）
+    assert scenario_locked_reason(
+        scn, completed={"branch_date": "cool"},
+        entitlement={"grants": ("all_story",), "unlocked": ()},
+    ) == "need_story:branch_date"
+    # warm 结局 + 有 all_story → 放行
+    assert scenario_available(
+        scn, completed={"branch_date": "warm"},
+        entitlement={"grants": ("all_story",), "unlocked": ()},
+    )
+
+
+def test_prereq_checked_before_unlock():
+    scn = SCENARIOS["sequel"]
+    # 缺前置 + 缺付费 → 优先报 need_story（更友好/可行动）
+    assert scenario_locked_reason(scn, completed={}) == "need_story:branch_date"
+    # 满足前置但缺付费 → 才报 need_unlock
+    assert scenario_locked_reason(
+        scn, completed={"branch_date": "warm"}) == "need_unlock:all_story"
+
+
+def test_start_blocked_by_prerequisite():
+    assert start_scenario("sequel_any", SCENARIOS, completed={}) is None
+    assert start_scenario(
+        "sequel_any", SCENARIOS, completed={"branch_date": "cool"}) is not None
 
 
 def test_list_scenarios_marks_availability():

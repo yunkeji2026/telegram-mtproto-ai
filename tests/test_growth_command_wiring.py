@@ -40,6 +40,7 @@ class _SM:
     _bond_level_from_context = _SMcls._bond_level_from_context
     _story_cfg = _SMcls._story_cfg
     _story_scenarios = _SMcls._story_scenarios
+    _story_outcomes = _SMcls._story_outcomes
 
     def __init__(self, *, companion=True, story=True, domain="conversion",
                  unlocks=None):

@@ -120,14 +120,23 @@ def test_story_enabled_and_scenarios_valid(preset):
                  if (b.get("directive") or "").strip()]
         assert beats, f"场景 {sid} 无有效 beat"
 
-    # 满权益 + 满关系等级时，免费场景与付费场景都应可进入（验证 gate 键名合法）
+    # 满权益 + 满关系等级 + 满足全部前置剧情时，所有场景都应可进入（验证 gate 键名合法）。
+    # requires_story 的前置以「最易满足结局」喂满（任意 ending 串都给到，warm 也覆盖）。
     full_ent = {"grants": ("all_story",), "unlocked": ("story_ch1",)}
-    rows = list_scenarios(scenarios, entitlement=full_ent, bond_level=4)
+    completed_all = {}
+    for scn in scenarios.values():
+        for cond in (scn.get("requires_story") or []):
+            if isinstance(cond, str):
+                completed_all[cond] = ""
+            elif isinstance(cond, dict) and cond.get("scenario"):
+                completed_all[str(cond["scenario"])] = str(cond.get("ending") or "")
+    rows = list_scenarios(
+        scenarios, entitlement=full_ent, bond_level=4, completed=completed_all)
     assert rows and all(r["available"] for r in rows)
 
-    # 付费专属场景在「无权益」时应被锁（验证 require_unlock 真生效）
+    # 付费专属场景在「无权益」时应被锁（验证 require_unlock 真生效；前置已喂满以隔离变量）
     paid = [sid for sid, scn in scenarios.items() if scn.get("require_unlock")]
     for sid in paid:
         assert start_scenario(
             sid, scenarios, entitlement={"grants": (), "unlocked": ()},
-            bond_level=4) is None
+            bond_level=4, completed=completed_all) is None

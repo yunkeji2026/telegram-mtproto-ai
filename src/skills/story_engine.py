@@ -61,16 +61,52 @@ def _endings(scn: Dict[str, Any]) -> Dict[str, Any]:
     return e if isinstance(e, dict) else {}
 
 
+def _story_prereq_unmet(scn: Dict[str, Any], completed: Optional[Dict[str, str]]) -> str:
+    """Phase ④续³ 跨场景前置：``requires_story`` 全部满足才放行，返回首个未满足的场景 id。
+
+    schema（AND 语义）::
+
+        requires_story:
+          - {scenario: coffee_date}              # 完成过即可（任意结局）
+          - {scenario: coffee_date, ending: warm} # 必须以 warm 结局完成
+
+    ``completed`` = ``{scenario_id: ending_id_or_""}``（已完成剧情 → 所取结局）。
+    """
+    reqs = scn.get("requires_story")
+    if not reqs:
+        return ""
+    done = completed if isinstance(completed, dict) else {}
+    if isinstance(reqs, str):
+        reqs = [{"scenario": reqs}]
+    for cond in reqs:
+        if isinstance(cond, str):
+            cond = {"scenario": cond}
+        if not isinstance(cond, dict):
+            continue
+        sid = str(cond.get("scenario") or "").strip()
+        if not sid:
+            continue
+        if sid not in done:
+            return sid
+        need_ending = str(cond.get("ending") or "").strip()
+        if need_ending and str(done.get(sid) or "") != need_ending:
+            return sid
+    return ""
+
+
 def scenario_locked_reason(
     scn: Dict[str, Any],
     *,
     entitlement: Optional[Dict[str, Any]] = None,
     bond_level: int = 0,
+    completed: Optional[Dict[str, str]] = None,
 ) -> str:
     """返回锁定原因 code（``""`` = 可进入）。
 
+    判定顺序（越友好/越可行动者优先）：关系 → 前置剧情 → 付费。
+    - ``need_bond:<n>``：关系等级不足。
+    - ``need_story:<scenario>``：需先经历某前置剧情（或以特定结局完成）。
     - ``need_unlock:<feature>``：需付费解锁/会员授予（走 entitlement_allows）。
-    - ``need_bond:<n>``：关系等级不足（先判，更友好）。
     """
     try:
         min_bond = int(scn.get("min_bond_level") or 0)
@@ -78,6 +114,10 @@ def scenario_locked_reason(
         min_bond = 0
     if min_bond and int(bond_level or 0) < min_bond:
         return f"need_bond:{min_bond}"
+
+    prereq = _story_prereq_unmet(scn, completed)
+    if prereq:
+        return f"need_story:{prereq}"
 
     feat = str(scn.get("require_unlock") or "").strip()
     if feat:
@@ -93,9 +133,10 @@ def scenario_available(
     *,
     entitlement: Optional[Dict[str, Any]] = None,
     bond_level: int = 0,
+    completed: Optional[Dict[str, str]] = None,
 ) -> bool:
     return scenario_locked_reason(
-        scn, entitlement=entitlement, bond_level=bond_level
+        scn, entitlement=entitlement, bond_level=bond_level, completed=completed
     ) == ""
 
 
@@ -104,8 +145,9 @@ def list_scenarios(
     *,
     entitlement: Optional[Dict[str, Any]] = None,
     bond_level: int = 0,
+    completed: Optional[Dict[str, str]] = None,
 ) -> List[Dict[str, Any]]:
-    """列出全部场景及其准入状态（供后台/MiniApp 展示「可玩 / 需解锁 / 需升级」）。"""
+    """列出全部场景及其准入状态（供后台/MiniApp 展示「可玩 / 需解锁 / 需升级 / 需前传」）。"""
     out: List[Dict[str, Any]] = []
     if not isinstance(scenarios, dict):
         return out
@@ -113,7 +155,7 @@ def list_scenarios(
         if not isinstance(scn, dict):
             continue
         reason = scenario_locked_reason(
-            scn, entitlement=entitlement, bond_level=bond_level
+            scn, entitlement=entitlement, bond_level=bond_level, completed=completed
         )
         out.append({
             "id": str(sid),
@@ -134,13 +176,16 @@ def start_scenario(
     *,
     entitlement: Optional[Dict[str, Any]] = None,
     bond_level: int = 0,
+    completed: Optional[Dict[str, str]] = None,
     now: Optional[float] = None,
 ) -> Optional[Dict[str, Any]]:
     """开启一个场景 → 初始 state（不可进入/未知/无 beat → None）。"""
     scn = _scenario(scenarios, scenario_id)
     if not scn or not _beats(scn):
         return None
-    if not scenario_available(scn, entitlement=entitlement, bond_level=bond_level):
+    if not scenario_available(
+        scn, entitlement=entitlement, bond_level=bond_level, completed=completed
+    ):
         return None
     ts = float(now if now is not None else time.time())
     return {

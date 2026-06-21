@@ -1824,3 +1824,37 @@ gateway/IntimacyEngine 写成 journey 事件（跨模块，单独立项）；端
 
 **遗留**：journey 侧 effective 统一（ops 看板，跨模块）；端 MiniApp（跨仓前端）——面板已先用
 对话内形态交付了其用户价值。
+
+## 51. Phase ④续³ · 剧情跨场景因果（requires_story）——把孤立剧情连成有因果的故事线
+
+**立项判断**（勘探确认未开发：`story_engine` 仅 min_bond + require_unlock 两道 gate，无任何「前置
+剧情/结局」依赖；`_record_story_completion` 只记 `story_done` 列表、不存结局）。竞品（恋与/筑梦岛）
+的章节制叙事靠「前一章的选择决定后一章」吸住用户。本期补这条「剧情→剧情」的因果边。
+
+**改动**：
+- `story_engine`：新增第三道 gate `requires_story`（AND 语义）：
+  - `{scenario: X}` = 完成过 X 即可；`{scenario: X, ending: warm}` = 须以 warm 结局完成。
+  - `_story_prereq_unmet(scn, completed)` 纯判定；`scenario_locked_reason` 判定顺序
+    **关系 → 前置剧情 → 付费**（越友好/可行动者优先：缺前传提示「先经历《X》」而非直接报付费）。
+  - `completed` = `{scenario_id: ending}` 经 `scenario_available/list_scenarios/start_scenario` 全程透传。
+- `skill_manager`：
+  - `_record_story_completion` 加 `ending` 形参，落 `rel_state.story_outcomes[sid]=ending`
+    （首次/重复都刷新最近结局，供因果 gate）；advance 收场处捕获 `_sstate.ending_id` 传入。
+  - `_story_outcomes` 取结局足迹；`_handle_story_command`（列表/开始）与 `_handle_growth_command`
+    面板全程传 `completed`，锁定时给「经历过《前传》后解锁」温暖话术；`_scenario_title` 解析前传名。
+- **配置**：预设 `starry_night` 升级为续作——`requires_story: [{scenario: coffee_date, ending: warm}]`
+  （须以 warm 结局走过咖啡约会）+ 原 bond3 + all_story；example 同步 schema 注释。
+- **测试**：engine 加 缺前置/错结局/前置先于付费判定/start 拦截 4 测；wiring 加 结局落库/续作前
+  锁后解/错结局仍锁/列表前传提示 4 测；契约测随之喂满前置。全量 **5801 passed / 31 skipped / 0 fail**。
+
+**实施中的再优化**：
+1. **gate 判定顺序「关系→前置→付费」**：缺前传时优先提示「先经历《前传》」（可行动），而非
+   一上来报「需付费」劝退——叙事引导优先于变现话术，且 require_unlock 仍最后兜底不被绕过。
+2. **结局足迹与「共享记忆」双轨**：因果 gate 用结构化 `story_outcomes`（机器判定），而剧情连续感
+   仍由既有「warm 结局回写的共享记忆」经 episodic 自然带出（AI 在续作里能提起前传）——结构解锁 +
+   情感延续两条线并行，不互相耦合。
+3. **首次/重复都刷新 outcome**：重温前传改走另一结局后，续作 gate 立即按最新结局重判，符合直觉。
+
+**叙事链成形**：coffee_date（warm 结局）→ 解锁 starry_night；记忆/成长/剧情飞轮之上再叠一条
+「剧情→剧情」的有向因果，章节式留存钩子成型。**遗留**：分支结局的「多分支树」（A 结局解锁剧情 X、
+B 结局解锁剧情 Y）现已天然支持（按 ending 配不同续作即可），可在内容侧扩展。

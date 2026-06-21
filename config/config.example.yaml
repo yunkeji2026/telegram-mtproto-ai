@@ -988,6 +988,9 @@ companion:
   #   - beat 可设 branch 选择点：按用户回应关键词路由到不同 endings（无命中走 default_ending）。
   #   - endings/on_complete 的 memory：剧终把「共享经历」写回情景记忆（user_stated 高置信），
   #     可被 consolidate 晋升 stable、被 proactive_topic 日后主动回访 → 记忆/成长/剧情成正循环。
+  #   - requires_story（跨场景因果）：列出前置剧情，全部满足才解锁（AND）。
+  #     {scenario: X}=完成过 X 即可；{scenario: X, ending: warm}=须以 warm 结局完成 X。
+  #     判定顺序 关系→前置剧情→付费；缺前传时提示「先经历《X》」而非直接报付费。
   story:
     enabled: false
     advance_turns: 3           # 每 N 个用户轮次推进一个 beat（剧终自动收场）

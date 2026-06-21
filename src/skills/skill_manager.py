@@ -3070,12 +3070,14 @@ class SkillManager(LoggerMixin):
 
     def _record_story_completion(
         self, user_context: Dict[str, Any], chat_id: Any,
-        scenario_id: str, title: str, bonus: float,
+        scenario_id: str, title: str, bonus: float, ending: str = "",
     ) -> None:
         """剧情收场结算（Phase ④续）：首次完成才给加成 + 关系纪念点；重复完成不刷分。
 
         - **防刷**：``rel_state.story_done`` 记已完成场景；重复完成 intimacy_bonus 归零
           （记忆仍照常回写、复发自然累积，但关系深度只认「真实的新经历」）。
+        - **跨场景因果（Phase ④续³）**：``rel_state.story_outcomes[sid]=ending`` 记下所取结局，
+          供后续剧情的 ``requires_story`` 前置 gate 判定——孤立剧情连成有因果的故事线。
         - **情感闭环**：首次完成 → 置一次性 ``bond_fresh_milestone``，下一轮 bond 块自然
           致意（"我们刚一起经历了那次约会，感觉更近了"）——剧情→成长→真情流露。
         任何失败不打断回复管线。
@@ -3088,6 +3090,13 @@ class SkillManager(LoggerMixin):
             if not isinstance(done, list):
                 done = []
                 st["story_done"] = done
+            # 结局足迹（首次/重复都刷新为最近一次所取结局，供因果 gate）
+            outcomes = st.get("story_outcomes")
+            if not isinstance(outcomes, dict):
+                outcomes = {}
+                st["story_outcomes"] = outcomes
+            if sid:
+                outcomes[sid] = str(ending or "")
             is_first = bool(sid) and sid not in done
             if not is_first:
                 self.logger.info("[story] replay (no bonus) scenario=%s", sid)
@@ -3100,6 +3109,15 @@ class SkillManager(LoggerMixin):
                 user_context["bond_fresh_milestone"] = f"story:一起经历了《{t}》"
         except Exception:
             self.logger.debug("story completion record failed", exc_info=True)
+
+    def _story_outcomes(self, user_context: Dict[str, Any], chat_id: Any) -> Dict[str, str]:
+        """已完成剧情 → 所取结局 ``{scenario_id: ending_id_or_""}``（供 requires_story gate）。"""
+        try:
+            from src.utils.companion_relationship import get_rel_state
+            oc = get_rel_state(user_context, chat_id).get("story_outcomes")
+            return oc if isinstance(oc, dict) else {}
+        except Exception:
+            return {}
 
     def _effective_intimacy(self, user_context: Dict[str, Any], chat_id: Any = ""):
         """基础 intimacy_score + 剧情累计加成（封顶 100）；无基础信号时返回原值（不臆造）。"""
@@ -3141,6 +3159,11 @@ class SkillManager(LoggerMixin):
                 return sid
         return None
 
+    @staticmethod
+    def _scenario_title(scenarios: Dict[str, Any], sid: str) -> str:
+        scn = (scenarios or {}).get(str(sid)) or {}
+        return str(scn.get("title") or sid)
+
     def _handle_story_command(self, text: str, user_context: Dict[str, Any], chat_id: Any):
         """剧情指令（默认关 companion.story.enabled）：列表 / 开始 / 结束。
 
@@ -3157,6 +3180,7 @@ class SkillManager(LoggerMixin):
         ent = user_context.get("entitlement")
         ent = ent if isinstance(ent, dict) else None
         bond = self._bond_level_from_context(user_context, chat_id)
+        completed = self._story_outcomes(user_context, chat_id)
 
         if t in ("结束剧情", "退出剧情", "/story stop", "story stop"):
             if self._get_story_state(user_context, chat_id):
@@ -3166,7 +3190,8 @@ class SkillManager(LoggerMixin):
 
         if t in ("剧情列表", "剧情", "/story", "story", "story list"):
             from src.skills.story_engine import list_scenarios
-            rows = list_scenarios(scenarios, entitlement=ent, bond_level=bond)
+            rows = list_scenarios(
+                scenarios, entitlement=ent, bond_level=bond, completed=completed)
             if not rows:
                 return None
             lines = []
@@ -3175,6 +3200,10 @@ class SkillManager(LoggerMixin):
                     lines.append(f"· {r['title']}（发「开始剧情 {r['title']}」）")
                 elif r["locked_reason"].startswith("need_bond"):
                     lines.append(f"· {r['title']}（我们再熟一点就能解锁）")
+                elif r["locked_reason"].startswith("need_story"):
+                    pre = self._scenario_title(
+                        scenarios, r["locked_reason"].split(":", 1)[-1])
+                    lines.append(f"· {r['title']}（经历过《{pre}》后解锁）")
                 else:
                     lines.append(f"· {r['title']}（专属剧情，需解锁）")
             return "想一起经历点什么吗？\n" + "\n".join(lines)
@@ -3191,12 +3220,17 @@ class SkillManager(LoggerMixin):
         if not sid:
             return "嗯…我还不会这个剧情呢，发「剧情列表」看看有哪些？"
         from src.skills.story_engine import scenario_locked_reason, start_scenario
-        state = start_scenario(sid, scenarios, entitlement=ent, bond_level=bond)
+        state = start_scenario(
+            sid, scenarios, entitlement=ent, bond_level=bond, completed=completed)
         if state is None:
             reason = scenario_locked_reason(
-                scenarios.get(sid) or {}, entitlement=ent, bond_level=bond)
+                scenarios.get(sid) or {}, entitlement=ent, bond_level=bond,
+                completed=completed)
             if reason.startswith("need_bond"):
                 return "这个故事要我们更熟一些才能解锁哦，再多陪我聊聊吧～"
+            if reason.startswith("need_story"):
+                pre = self._scenario_title(scenarios, reason.split(":", 1)[-1])
+                return f"这段故事是后续呢，我们先一起经历《{pre}》吧～"
             if reason.startswith("need_unlock"):
                 return "这是一段专属剧情，解锁后我们就能一起体验啦。"
             return None
@@ -3280,12 +3314,14 @@ class SkillManager(LoggerMixin):
                 ent = user_context.get("entitlement")
                 ent = ent if isinstance(ent, dict) else None
                 bond = self._bond_level_from_context(user_context, chat_id)
+                completed = self._story_outcomes(user_context, chat_id)
                 try:
                     from src.utils.companion_relationship import get_rel_state
                     done_ids = set(get_rel_state(user_context, chat_id).get("story_done") or [])
                 except Exception:
                     done_ids = set()
-                rows = list_scenarios(scenarios, entitlement=ent, bond_level=bond)
+                rows = list_scenarios(
+                    scenarios, entitlement=ent, bond_level=bond, completed=completed)
                 done_titles, avail, locked = [], [], []
                 for r in rows:
                     if r["id"] in done_ids:
@@ -3361,6 +3397,7 @@ class SkillManager(LoggerMixin):
                     _at = int(_scfg.get("advance_turns", 0) or 0)
                     _kw = {"advance_turns": _at} if _at > 0 else {}
                     _sid = str(_sstate.get("scenario_id") or "")
+                    _ending = str(_sstate.get("ending_id") or "")
                     _new, _fin, _payload = advance_state(
                         _sstate, self._story_scenarios(),
                         user_message=user_msg, **_kw)
@@ -3377,7 +3414,8 @@ class SkillManager(LoggerMixin):
                             or _sid
                         )
                         self._record_story_completion(
-                            user_context, chat_id, _sid, _title, _bonus)
+                            user_context, chat_id, _sid, _title, _bonus,
+                            ending=_ending)
         except Exception:
             self.logger.debug("story advance skipped", exc_info=True)
 
