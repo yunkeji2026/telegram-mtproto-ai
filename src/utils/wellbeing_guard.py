@@ -191,6 +191,10 @@ def build_wellbeing_block(
 _NEGATIVE_EMOTIONS = frozenset({
     "sad", "sadness", "depressed", "depression", "grief", "lonely",
     "anger", "angry", "fear", "anxiety", "anxious", "despair",
+    # 中文标签（与 inbox conversation_meta.last_emotion / _EMOTION_ORDER 对齐）：
+    # 愤怒/不满/焦虑为明确负面，此刻推「播放性」内容（剧情邀约）会显得冷漠 → soft 抑制。
+    # （催促=不耐烦而非低谷、平稳/满意/感谢=中性正面，均不计入。）
+    "愤怒", "不满", "焦虑",
 })
 
 

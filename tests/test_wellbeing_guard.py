@@ -167,6 +167,19 @@ def test_gate_none_on_neutral_or_positive_emotion():
     assert proactive_emotion_gate(None, now=_NOW, last_emotion="") == ""
 
 
+def test_gate_soft_on_chinese_negative_last_emotion():
+    """Phase ④续⁹：中文负面标签（与 inbox conversation_meta 对齐）→ soft。"""
+    assert proactive_emotion_gate(None, now=_NOW, last_emotion="焦虑") == "soft"
+    assert proactive_emotion_gate(None, now=_NOW, last_emotion="愤怒") == "soft"
+    assert proactive_emotion_gate(None, now=_NOW, last_emotion="不满") == "soft"
+
+
+def test_gate_none_on_chinese_neutral_or_positive_emotion():
+    """中文中性/正面（平稳/满意/感谢）+ 不耐烦（催促）→ 不抑制。"""
+    for emo in ("平稳", "满意", "感谢", "催促"):
+        assert proactive_emotion_gate(None, now=_NOW, last_emotion=emo) == ""
+
+
 def test_gate_severe_beats_emotion():
     # 危机优先于末条情绪：recent severe → block（即便末条情绪是中性）
     assert proactive_emotion_gate(_crisis("severe", 1), now=_NOW, last_emotion="happy") == "block"

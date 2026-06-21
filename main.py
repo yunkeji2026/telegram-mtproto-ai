@@ -1838,6 +1838,12 @@ class AIChatAssistant:
                     tags_map = self.inbox_store.list_conv_tags_map(cids)
                 except Exception:
                     tags_map = {}
+                # Phase ④续⁹：把 inbox 末条情绪并入快照——让情绪护栏的 soft 档覆盖「非危机
+                # 但明显低谷」（最近一条被分析为愤怒/不满/焦虑）→ 抑制剧情邀约、留温和问候。
+                try:
+                    meta_intel = self.inbox_store.get_conv_meta_for_ids(cids)
+                except Exception:
+                    meta_intel = {}
                 # Phase ④续⁵：把真实 intimacy/funnel 注入快照——既让记忆开场的沉默阈值
                 # 缩放更准，也让「主动剧情邀约」能按真实关系等级判断可邀约剧情。
                 # 复用 N 线已就绪的进程级 provider（resolve_*）；未注册 → 返回 None → 退回 0/""。
@@ -1879,13 +1885,16 @@ class AIChatAssistant:
                         "memory_key": chat_key,
                         "stage": _stage,
                         "intimacy": _intim,
+                        "last_emotion": str(
+                            (meta_intel.get(cid) or {}).get("last_emotion") or ""),
                     })
                 return out
 
-            def _opener(*, memory_key, silent_hours, stage, intimacy):
+            def _opener(*, memory_key, silent_hours, stage, intimacy, last_emotion=""):
                 return self.skill_manager.build_proactive_opener(
                     memory_key, silent_hours=silent_hours, stage=stage,
-                    intimacy=intimacy, min_silent_hours=min_silent_hours)
+                    intimacy=intimacy, min_silent_hours=min_silent_hours,
+                    last_emotion=last_emotion)
 
             cd_path = Path(self.config.config_path).parent / "companion_proactive_cooldown.json"
 

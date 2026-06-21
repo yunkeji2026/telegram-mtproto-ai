@@ -415,6 +415,25 @@ def test_proactive_gate_none_when_crisis_stale():
     assert out["mode"] == "story_invite"
 
 
+def test_proactive_gate_soft_on_negative_last_emotion_no_crisis():
+    """Phase ④续⁹：无危机事件，但末条情绪为中文负面（焦虑）→ soft 抑邀约、留记忆问候。"""
+    sm = _SM(_StubStore([_fact("在学吉他", tier="stable", hits=3)]),
+             story_cfg=_STORY_CFG, context={"u1": {}})
+    out = sm.build_proactive_opener(
+        "u1", silent_hours=48, intimacy=50.0, last_emotion="焦虑")
+    assert out["mode"] == MODE_FOLLOW_UP
+    assert out["fact"] == "在学吉他"
+
+
+def test_proactive_gate_none_on_positive_last_emotion():
+    """末条情绪为正面/中性（感谢）→ 不抑制 → 仍可剧情邀约。"""
+    sm = _SM(_StubStore([_fact("在学吉他", tier="stable")]),
+             story_cfg=_STORY_CFG, context={"u1": {}})
+    out = sm.build_proactive_opener(
+        "u1", silent_hours=48, intimacy=50.0, last_emotion="感谢")
+    assert out["mode"] == "story_invite"
+
+
 def test_proactive_sequel_invite_references_prerequisite():
     # 已以 warm 结局完成 coffee_date → 续作 starry_seq 解锁 → 邀约话术回忆前传
     ctx = {"u1": {"companion_relationship": {"u1": {

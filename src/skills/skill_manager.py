@@ -2734,6 +2734,7 @@ class SkillManager(LoggerMixin):
         stage: str = "",
         intimacy: float = 0.0,
         min_silent_hours: float = 24.0,
+        last_emotion: str = "",
     ) -> Dict[str, Any]:
         """P1：为某用户挑一个"主动开场话题"（从其高置信记忆回访）。
 
@@ -2744,7 +2745,7 @@ class SkillManager(LoggerMixin):
         # Phase ④续⁷：情绪自适应护栏——近期危机/低落时抑制主动打扰，绝不在情绪低谷
         # 推「播放性」内容（如约会剧情邀约）。severe 近期危机 → 完全不主动；elevated/负面
         # → 仅抑制剧情邀约、保留温和问候。护栏失效不阻断正常关怀（异常→无抑制）。
-        _gate = self._proactive_emotion_gate(memory_key)
+        _gate = self._proactive_emotion_gate(memory_key, last_emotion)
         if _gate == "block":
             # severe 近期危机：不静默放弃，而是带「危机关怀升级」信号交由派发层
             # 把该用户排进 care 队列（人工/关怀兜底）——把"静默"变"接住"。

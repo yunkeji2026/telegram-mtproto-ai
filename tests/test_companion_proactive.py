@@ -19,7 +19,7 @@ _NOON = time.mktime(time.struct_time((2026, 6, 19, 14, 0, 0, 4, 170, -1)))
 _H = 3600.0
 
 
-def _opener_follow_up(*, memory_key, silent_hours, stage, intimacy):
+def _opener_follow_up(*, memory_key, silent_hours, stage, intimacy, **_kw):
     if not memory_key:
         return {"mode": "", "directive": ""}
     return {"mode": "follow_up", "directive": f"回访 {memory_key}", "fact": "x"}
@@ -131,7 +131,7 @@ def test_pending_care_predicate_error_does_not_block():
 
 # ── 危机关怀升级（Phase ④续⁸）────────────────────────────────────────────────
 
-def _opener_crisis_block(*, memory_key, silent_hours, stage, intimacy):
+def _opener_crisis_block(*, memory_key, silent_hours, stage, intimacy, **_kw):
     """模拟情绪护栏：severe 近期危机 → mode 空 + blocked=crisis_severe。"""
     return {"mode": "", "directive": "", "blocked": "crisis_severe"}
 
@@ -175,7 +175,7 @@ def test_crisis_block_callback_error_does_not_break_plan():
         _conv("c2", last_ts=_NOON - 36 * _H),
     ]
 
-    def _opener(*, memory_key, silent_hours, stage, intimacy):
+    def _opener(*, memory_key, silent_hours, stage, intimacy, **_kw):
         if memory_key == "crisis":
             return {"mode": "", "directive": "", "blocked": "crisis_severe"}
         return {"mode": "follow_up", "directive": "x", "fact": "y"}
@@ -187,9 +187,40 @@ def test_crisis_block_callback_error_does_not_break_plan():
     assert [p["conversation_id"] for p in plans] == ["c2"]
 
 
+def test_last_emotion_threaded_to_opener():
+    """Phase ④续⁹：快照 last_emotion 透传进 opener_fn（供情绪护栏判低谷 soft 抑制）。"""
+    seen = {}
+
+    def _opener(*, memory_key, silent_hours, stage, intimacy, last_emotion="", **_kw):
+        seen["last_emotion"] = last_emotion
+        return {"mode": "follow_up", "directive": "x", "fact": "y"}
+
+    conv = _conv("c1", last_ts=_NOON - 48 * _H)
+    conv["last_emotion"] = "焦虑"
+    plans = plan_proactive_sends(
+        [conv], cooldown_map={}, opener_fn=_opener, now=_NOON)
+    assert len(plans) == 1
+    assert seen["last_emotion"] == "焦虑"
+
+
+def test_last_emotion_defaults_empty_when_absent():
+    """快照无 last_emotion 字段 → 透传空串，不报错。"""
+    seen = {}
+
+    def _opener(*, memory_key, silent_hours, stage, intimacy, last_emotion="x", **_kw):
+        seen["last_emotion"] = last_emotion
+        return {"mode": "follow_up", "directive": "x", "fact": "y"}
+
+    plans = plan_proactive_sends(
+        [_conv("c1", last_ts=_NOON - 48 * _H)],
+        cooldown_map={}, opener_fn=_opener, now=_NOON)
+    assert len(plans) == 1
+    assert seen["last_emotion"] == ""
+
+
 def test_context_facts_passthrough_and_sanitized():
     """opener 的 context_facts 透传进 plan，并过滤空白项。"""
-    def _opener_rich(*, memory_key, silent_hours, stage, intimacy):
+    def _opener_rich(*, memory_key, silent_hours, stage, intimacy, **_kw):
         return {
             "mode": "follow_up", "directive": "回访", "fact": "在备考",
             "context_facts": ["养了只猫", "  ", "下月搬家"],
