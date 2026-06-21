@@ -129,6 +129,64 @@ def test_pending_care_predicate_error_does_not_block():
     assert len(plans) == 1
 
 
+# ── 危机关怀升级（Phase ④续⁸）────────────────────────────────────────────────
+
+def _opener_crisis_block(*, memory_key, silent_hours, stage, intimacy):
+    """模拟情绪护栏：severe 近期危机 → mode 空 + blocked=crisis_severe。"""
+    return {"mode": "", "directive": "", "blocked": "crisis_severe"}
+
+
+def test_crisis_block_escalates_to_care_and_not_sent():
+    """severe 被护栏拦下：不进发送计划，但回调被调用（排进 care）。"""
+    escalated = []
+    convs = [_conv("c1", last_ts=_NOON - 48 * _H)]
+    plans = plan_proactive_sends(
+        convs, cooldown_map={}, opener_fn=_opener_crisis_block, now=_NOON,
+        on_crisis_block=lambda c: escalated.append(c["conversation_id"]))
+    assert plans == []
+    assert escalated == ["c1"]
+
+
+def test_crisis_block_without_callback_just_skips():
+    """未提供 on_crisis_block → 仅静默跳过（向后兼容，不报错）。"""
+    convs = [_conv("c1", last_ts=_NOON - 48 * _H)]
+    plans = plan_proactive_sends(
+        convs, cooldown_map={}, opener_fn=_opener_crisis_block, now=_NOON)
+    assert plans == []
+
+
+def test_normal_opener_does_not_escalate():
+    """普通可发送会话 → 不触发危机升级回调。"""
+    escalated = []
+    convs = [_conv("c1", last_ts=_NOON - 48 * _H)]
+    plans = plan_proactive_sends(
+        convs, cooldown_map={}, opener_fn=_opener_follow_up, now=_NOON,
+        on_crisis_block=lambda c: escalated.append(c["conversation_id"]))
+    assert len(plans) == 1
+    assert escalated == []
+
+
+def test_crisis_block_callback_error_does_not_break_plan():
+    """on_crisis_block 抛错 → 吞掉，不影响其余会话计划。"""
+    def _boom(c):
+        raise RuntimeError("care store down")
+    convs = [
+        _conv("c1", last_ts=_NOON - 48 * _H, memory_key="crisis"),
+        _conv("c2", last_ts=_NOON - 36 * _H),
+    ]
+
+    def _opener(*, memory_key, silent_hours, stage, intimacy):
+        if memory_key == "crisis":
+            return {"mode": "", "directive": "", "blocked": "crisis_severe"}
+        return {"mode": "follow_up", "directive": "x", "fact": "y"}
+
+    plans = plan_proactive_sends(
+        convs, cooldown_map={}, opener_fn=_opener, now=_NOON,
+        on_crisis_block=_boom)
+    # c1 升级失败被吞，c2 正常计划
+    assert [p["conversation_id"] for p in plans] == ["c2"]
+
+
 def test_context_facts_passthrough_and_sanitized():
     """opener 的 context_facts 透传进 plan，并过滤空白项。"""
     def _opener_rich(*, memory_key, silent_hours, stage, intimacy):
@@ -247,6 +305,28 @@ async def test_loop_passes_pending_care_predicate(tmp_path):
     )
     res = await loop.run_once()
     assert res == {"planned": 0, "sent": 0}
+
+
+@pytest.mark.asyncio
+async def test_loop_threads_crisis_block_callback(tmp_path):
+    """循环把 on_crisis_block 透传给计划：severe 会话不发，但回调被触发。"""
+    async def _send(plan):
+        raise AssertionError("severe 会话不应发送")
+
+    escalated = []
+    store = JsonCooldownStore(tmp_path / "cd.json")
+    convs = [_conv("c1", last_ts=_NOON - 48 * _H)]
+    loop = CompanionProactiveLoop(
+        conversations_provider=lambda: convs,
+        opener_fn=_opener_crisis_block,
+        send_fn=_send,
+        cooldown_store=store,
+        on_crisis_block=lambda c: escalated.append(c["conversation_id"]),
+        now=lambda: _NOON,
+    )
+    res = await loop.run_once()
+    assert res == {"planned": 0, "sent": 0}
+    assert escalated == ["c1"]
 
 
 def test_json_cooldown_store_persists(tmp_path):

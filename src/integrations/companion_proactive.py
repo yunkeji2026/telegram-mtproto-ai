@@ -59,6 +59,7 @@ def plan_proactive_sends(
     quiet_start_hour: float = 23.0,
     quiet_end_hour: float = 8.0,
     has_pending_care: Optional[Callable[[str], bool]] = None,
+    on_crisis_block: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> List[Dict[str, Any]]:
     """决定本轮该主动开场的会话清单（确定性纯函数）。
 
@@ -71,6 +72,10 @@ def plan_proactive_sends(
             {mode, directive, fact, context_facts, ...}``（即 build_proactive_opener）。
         has_pending_care: 可选谓词 ``(conversation_id) -> bool``——返回 True 表示该会话
             已被 proactive_care(Phase O) 排了待发关怀，本主动话题让路跳过（去重）。
+        on_crisis_block: 可选回调 ``(conversation_snapshot) -> None``——当 opener 因近期
+            severe 危机被护栏拦下（``blocked == "crisis_severe"``）时调用，让派发层把该
+            用户排进 care 队列（危机关怀升级：把"静默"变"接住"）。IO 留在回调里、纯函数
+            不落库；失败吞掉、绝不影响其余会话的计划。
         now: 注入"现在"（测试用）。
 
     Returns:
@@ -125,6 +130,13 @@ def plan_proactive_sends(
         except Exception:
             logger.debug("[proactive] opener_fn 失败 cid=%s", cid, exc_info=True)
             continue
+        # 危机关怀升级：被情绪护栏拦下的 severe 会话 → 排进 care 队列（best-effort），
+        # 再正常跳过（mode 为空，不会作普通主动文案发出）。
+        if str(opener.get("blocked") or "") == "crisis_severe" and on_crisis_block is not None:
+            try:
+                on_crisis_block(c)
+            except Exception:
+                logger.debug("[proactive] on_crisis_block 失败 cid=%s", cid, exc_info=True)
         mode = str(opener.get("mode") or "")
         directive = str(opener.get("directive") or "")
         if not mode or not directive:
@@ -194,6 +206,7 @@ class CompanionProactiveLoop:
         quiet_end_hour: float = 8.0,
         dry_run: bool = False,
         has_pending_care: Optional[Callable[[str], bool]] = None,
+        on_crisis_block: Optional[Callable[[Dict[str, Any]], None]] = None,
         now: Callable[[], float] = time.time,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
@@ -202,6 +215,7 @@ class CompanionProactiveLoop:
         self._send_fn = send_fn
         self._cooldown = cooldown_store
         self._has_pending_care = has_pending_care
+        self._on_crisis_block = on_crisis_block
         self._interval = float(interval_sec)
         self._min_silent_hours = float(min_silent_hours)
         self._cooldown_hours = float(cooldown_hours)
@@ -232,6 +246,7 @@ class CompanionProactiveLoop:
             quiet_start_hour=self._quiet_start,
             quiet_end_hour=self._quiet_end,
             has_pending_care=self._has_pending_care,
+            on_crisis_block=self._on_crisis_block,
         )
         sent = 0
         for p in plans:

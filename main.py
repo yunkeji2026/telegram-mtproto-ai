@@ -1906,6 +1906,39 @@ class AIChatAssistant:
                 except Exception:
                     return False
 
+            # Phase ④续⁸：危机关怀升级——severe 近期危机的沉默用户被情绪护栏拦下时，
+            # 不只静默，而是排一条高优先 care 待办（人工/关怀兜底），把"静默"变"接住"。
+            # 幂等：排进后 has_pending_care→True，下个 tick 该会话整段让路、不会重排。
+            _crisis_escalation_on = bool(cfg.get("crisis_care_escalation", True))
+
+            def _on_crisis_block(conv) -> None:
+                if care_store is None or not _crisis_escalation_on:
+                    return
+                cid = str((conv or {}).get("conversation_id") or "")
+                if not cid:
+                    return
+                try:
+                    import time as _time
+                    from src.contacts.care_commitment import CareCommitment
+                    _now = _time.time()
+                    care_store.add_commitment(
+                        CareCommitment(
+                            due_at=_now,            # 立即到期 → 下个派发 tick 即可被关怀/坐席接住
+                            event_at=_now,
+                            topic="情绪关怀",
+                            sentiment="negative",
+                            anchor_text="",
+                            source_text="近期危机信号，主动护栏拦下打扰，转关怀回访",
+                            confidence=1.0,
+                        ),
+                        contact_key=cid,
+                        platform=str((conv or {}).get("platform") or ""),
+                        account_id=str((conv or {}).get("account_id") or ""),
+                        chat_key=str((conv or {}).get("chat_key") or ""),
+                    )
+                except Exception:
+                    self.logger.debug("[proactive] 危机关怀升级排队失败 cid=%s", cid, exc_info=True)
+
             # 采样评分回流存储（质量闭环）：试发采样落库，供 👍/👎 评分 + 调参看板。
             sample_store = None
             try:
@@ -2150,6 +2183,7 @@ class AIChatAssistant:
                 quiet_end_hour=float(cfg.get("quiet_end_hour", 8)),
                 dry_run=bool(cfg.get("dry_run", False)),
                 has_pending_care=_has_pending_care,
+                on_crisis_block=_on_crisis_block,
             )
             await loop.start()
             self._companion_proactive_loop = loop

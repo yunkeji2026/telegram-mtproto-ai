@@ -388,9 +388,10 @@ def test_proactive_gate_blocks_all_on_recent_severe():
     crisis = {"level": "severe", "created_at": _t.time() - 86400}  # 1 天前
     sm = _SM(_StubStore([_fact("在学吉他", tier="stable", hits=3)]),
              story_cfg=_STORY_CFG, context={"u1": {}}, crisis_latest=crisis)
-    # 近期 severe 危机 → 完全不主动（连记忆问候都不发）
+    # 近期 severe 危机 → 完全不主动（连记忆问候都不发），但带危机升级信号
     out = sm.build_proactive_opener("u1", silent_hours=48, intimacy=50.0)
     assert out["mode"] == ""
+    assert out.get("blocked") == "crisis_severe"  # Phase ④续⁸：交派发层转关怀
 
 
 def test_proactive_gate_soft_suppresses_invite_keeps_memory():

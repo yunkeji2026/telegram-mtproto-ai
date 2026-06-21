@@ -2746,7 +2746,11 @@ class SkillManager(LoggerMixin):
         # → 仅抑制剧情邀约、保留温和问候。护栏失效不阻断正常关怀（异常→无抑制）。
         _gate = self._proactive_emotion_gate(memory_key)
         if _gate == "block":
-            return empty
+            # severe 近期危机：不静默放弃，而是带「危机关怀升级」信号交由派发层
+            # 把该用户排进 care 队列（人工/关怀兜底）——把"静默"变"接住"。
+            # mode 仍为空 → 不会被当作普通主动文案发出；blocked 字段供 plan 识别升级。
+            return {"mode": "", "fact": "", "directive": "",
+                    "silent_hours": 0.0, "blocked": "crisis_severe"}
         # Phase ④续⁵：主动剧情邀约——沉默期把「已解锁但未经历」的新剧情接进 re-engagement
         # 闭环（剧情解锁→主动邀约→回流→更多剧情）。优先于记忆回访（新内容钩子更强），
         # 无可邀约时无缝回落到记忆话题。soft 档（情绪低落）抑制邀约，仅走温和记忆问候。
