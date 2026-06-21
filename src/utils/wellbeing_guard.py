@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 # 含"死"等字但属日常夸张/亲昵的惯用语：先从工作副本里抹掉，再跑危机匹配，
 # 从根上消除"累死了""笑死""想死你了"这类误报。
@@ -187,9 +187,56 @@ def build_wellbeing_block(
     return "\n\n".join(parts)
 
 
+# 末条消息情绪里被视作「情绪低谷」的标签（用于主动护栏软抑制；保守只收明确负面）。
+_NEGATIVE_EMOTIONS = frozenset({
+    "sad", "sadness", "depressed", "depression", "grief", "lonely",
+    "anger", "angry", "fear", "anxiety", "anxious", "despair",
+})
+
+
+def proactive_emotion_gate(
+    crisis_latest: Optional[Dict[str, Any]],
+    *,
+    now: float,
+    window_days: float = 14.0,
+    last_emotion: str = "",
+) -> str:
+    """主动开场情绪护栏（纯函数）：依「最近危机事件」+「末条情绪」决定主动推送抑制级别。
+
+    返回：
+      - ``"block"``：近期 ``severe`` 危机（自伤/轻生信号）→ **完全不主动打扰**——主动召回/
+        剧情邀约这类「播放性」内容在此刻是冒犯，交人工/关怀跟进，AI 不主动发起。
+      - ``"soft"``：近期 ``elevated`` 危机（深度绝望）**或**末条明确负面情绪 → 抑制剧情邀约，
+        仅允许温和问候式开场（一句「想着你」可以，约会剧情不行）。
+      - ``""``：无抑制。
+
+    保守优先：危机仅在 ``window_days`` 内才计（窗口外视作已缓和，只看 ``last_emotion``）。
+    任何异常都按「无抑制」处理由调用方兜底——护栏失效不应反而阻断正常关怀。
+    """
+    try:
+        win = max(0.0, float(window_days or 0)) * 86400.0
+    except (TypeError, ValueError):
+        win = 14 * 86400.0
+    if isinstance(crisis_latest, dict):
+        level = str(crisis_latest.get("level") or "").strip().lower()
+        try:
+            ts = float(crisis_latest.get("created_at") or 0)
+        except (TypeError, ValueError):
+            ts = 0.0
+        if ts > 0 and (float(now) - ts) <= win:
+            if level == "severe":
+                return "block"
+            if level == "elevated":
+                return "soft"
+    if str(last_emotion or "").strip().lower() in _NEGATIVE_EMOTIONS:
+        return "soft"
+    return ""
+
+
 __all__ = [
     "detect_crisis",
     "build_wellbeing_block",
     "detect_harmful_reply",
     "safe_fallback_reply",
+    "proactive_emotion_gate",
 ]

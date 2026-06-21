@@ -6,7 +6,11 @@
 
 from __future__ import annotations
 
-from src.utils.wellbeing_guard import build_wellbeing_block, detect_crisis
+from src.utils.wellbeing_guard import (
+    build_wellbeing_block,
+    detect_crisis,
+    proactive_emotion_gate,
+)
 
 
 # ── 危机分级识别 ────────────────────────────────────────────────────────
@@ -125,3 +129,49 @@ def test_emotional_context_wellbeing_off():
     )
     assert "安全优先" not in out and "真诚陪伴" not in out
     assert "_wellbeing_crisis_level" not in ctx
+
+
+# ── Phase ④续⁷ 主动开场情绪护栏 proactive_emotion_gate ──────────────────
+
+_NOW = 1_700_000_000.0  # 真实量级 epoch（避免回看若干天后 created_at 变负）
+
+
+def _crisis(level, ago_days):
+    return {"level": level, "created_at": _NOW - ago_days * 86400.0}
+
+
+def test_gate_blocks_recent_severe():
+    assert proactive_emotion_gate(_crisis("severe", 1), now=_NOW) == "block"
+
+
+def test_gate_soft_on_recent_elevated():
+    assert proactive_emotion_gate(_crisis("elevated", 3), now=_NOW) == "soft"
+
+
+def test_gate_none_when_crisis_outside_window():
+    # 20 天前的 severe，窗口 14 天 → 视作已缓和，不抑制
+    assert proactive_emotion_gate(_crisis("severe", 20), now=_NOW, window_days=14) == ""
+
+
+def test_gate_window_configurable():
+    assert proactive_emotion_gate(_crisis("severe", 20), now=_NOW, window_days=30) == "block"
+
+
+def test_gate_soft_on_negative_last_emotion():
+    assert proactive_emotion_gate(None, now=_NOW, last_emotion="sad") == "soft"
+    assert proactive_emotion_gate(None, now=_NOW, last_emotion="angry") == "soft"
+
+
+def test_gate_none_on_neutral_or_positive_emotion():
+    assert proactive_emotion_gate(None, now=_NOW, last_emotion="happy") == ""
+    assert proactive_emotion_gate(None, now=_NOW, last_emotion="") == ""
+
+
+def test_gate_severe_beats_emotion():
+    # 危机优先于末条情绪：recent severe → block（即便末条情绪是中性）
+    assert proactive_emotion_gate(_crisis("severe", 1), now=_NOW, last_emotion="happy") == "block"
+
+
+def test_gate_safe_on_garbage_input():
+    assert proactive_emotion_gate({"level": "severe", "created_at": "bad"}, now=_NOW) == ""
+    assert proactive_emotion_gate("notadict", now=_NOW) == ""  # type: ignore[arg-type]

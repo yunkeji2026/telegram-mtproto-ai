@@ -2615,6 +2615,41 @@ class SkillManager(LoggerMixin):
                     pass
         return completed, bonus
 
+    def _proactive_crisis_window_days(self) -> float:
+        """主动护栏的危机回看窗（天）：``companion.proactive_topic.crisis_guard_days``，默认 14。"""
+        try:
+            cfg = self.config.config if hasattr(self.config, "config") else {}
+            pt = (cfg.get("companion") or {}).get("proactive_topic") or {}
+            return float(pt.get("crisis_guard_days", 14) or 14)
+        except Exception:
+            return 14.0
+
+    def _proactive_emotion_gate(
+        self, memory_key: str, last_emotion: str = ""
+    ) -> str:
+        """主动开场前的情绪护栏档位：``"block"`` / ``"soft"`` / ``""``（见 wellbeing_guard）。
+
+        以 memory_key 反查该用户最近危机事件（crisis_event_store，已就绪才查）；窗口内
+        severe→block、elevated→soft；末条负面情绪→soft。任何失败 → ``""``（不抑制，
+        交后续正常关怀兜底——护栏只做「该静默时静默」，绝不反向阻断关怀）。
+        """
+        try:
+            latest = None
+            if getattr(self, "_crisis_store", None) is not None:
+                latest = (self.crisis_summary_for_user(memory_key, limit=3)
+                          or {}).get("latest")
+            if latest is None and not str(last_emotion or "").strip():
+                return ""
+            from src.utils.wellbeing_guard import proactive_emotion_gate
+            return proactive_emotion_gate(
+                latest, now=time.time(),
+                window_days=self._proactive_crisis_window_days(),
+                last_emotion=last_emotion,
+            )
+        except Exception:
+            self.logger.debug("proactive emotion gate skipped", exc_info=True)
+            return ""
+
     def _proactive_story_invite(
         self, memory_key: str, intimacy: float
     ) -> Optional[Dict[str, Any]]:
@@ -2706,16 +2741,23 @@ class SkillManager(LoggerMixin):
         只回访 user_stated/已确认事实（不拿 AI 推断去回访，猜错伤信任）。
         """
         empty = {"mode": "", "fact": "", "directive": "", "silent_hours": 0.0}
+        # Phase ④续⁷：情绪自适应护栏——近期危机/低落时抑制主动打扰，绝不在情绪低谷
+        # 推「播放性」内容（如约会剧情邀约）。severe 近期危机 → 完全不主动；elevated/负面
+        # → 仅抑制剧情邀约、保留温和问候。护栏失效不阻断正常关怀（异常→无抑制）。
+        _gate = self._proactive_emotion_gate(memory_key)
+        if _gate == "block":
+            return empty
         # Phase ④续⁵：主动剧情邀约——沉默期把「已解锁但未经历」的新剧情接进 re-engagement
         # 闭环（剧情解锁→主动邀约→回流→更多剧情）。优先于记忆回访（新内容钩子更强），
-        # 无可邀约时无缝回落到记忆话题。任何失败都不打断 → 仍走记忆路径。
-        try:
-            _inv = self._proactive_story_invite(memory_key, intimacy)
-            if _inv:
-                _inv["silent_hours"] = round(float(silent_hours or 0.0), 1)
-                return _inv
-        except Exception:
-            self.logger.debug("proactive story invite skipped", exc_info=True)
+        # 无可邀约时无缝回落到记忆话题。soft 档（情绪低落）抑制邀约，仅走温和记忆问候。
+        if _gate != "soft":
+            try:
+                _inv = self._proactive_story_invite(memory_key, intimacy)
+                if _inv:
+                    _inv["silent_hours"] = round(float(silent_hours or 0.0), 1)
+                    return _inv
+            except Exception:
+                self.logger.debug("proactive story invite skipped", exc_info=True)
         store = getattr(self, "_episodic_store", None)
         key = str(memory_key or "").strip()
         if not store or not key or not hasattr(store, "list_rows"):

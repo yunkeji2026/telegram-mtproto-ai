@@ -259,13 +259,22 @@ class _SM:
     _story_scenarios = _SMcls._story_scenarios
     _story_bonus_cap = _SMcls._story_bonus_cap
     _scenario_title = staticmethod(_SMcls._scenario_title)
+    _proactive_emotion_gate = _SMcls._proactive_emotion_gate
+    _proactive_crisis_window_days = _SMcls._proactive_crisis_window_days
 
-    def __init__(self, store, *, story_cfg=None, context=None):
+    def __init__(self, store, *, story_cfg=None, context=None, crisis_latest=None):
         self._episodic_store = store
         self.logger = _logging.getLogger("test_proactive")
-        self.config = _NS(config=(
-            {"companion": {"story": story_cfg}} if story_cfg is not None else {}))
+        _comp = {}
+        if story_cfg is not None:
+            _comp["story"] = story_cfg
+        self.config = _NS(config=({"companion": _comp} if _comp else {}))
         self._context_store = _StubCtxStore(context)
+        self._crisis_latest = crisis_latest
+        self._crisis_store = object() if crisis_latest is not None else None
+
+    def crisis_summary_for_user(self, key, *, limit=5):
+        return {"latest": self._crisis_latest}
 
 
 def test_skill_manager_opener_from_store():
@@ -372,6 +381,37 @@ _SEQUEL_CFG = {
         },
     },
 }
+
+
+def test_proactive_gate_blocks_all_on_recent_severe():
+    import time as _t
+    crisis = {"level": "severe", "created_at": _t.time() - 86400}  # 1 天前
+    sm = _SM(_StubStore([_fact("在学吉他", tier="stable", hits=3)]),
+             story_cfg=_STORY_CFG, context={"u1": {}}, crisis_latest=crisis)
+    # 近期 severe 危机 → 完全不主动（连记忆问候都不发）
+    out = sm.build_proactive_opener("u1", silent_hours=48, intimacy=50.0)
+    assert out["mode"] == ""
+
+
+def test_proactive_gate_soft_suppresses_invite_keeps_memory():
+    import time as _t
+    crisis = {"level": "elevated", "created_at": _t.time() - 86400}
+    sm = _SM(_StubStore([_fact("在学吉他", tier="stable", hits=3)]),
+             story_cfg=_STORY_CFG, context={"u1": {}}, crisis_latest=crisis)
+    # elevated → 抑制剧情邀约，但温和记忆问候仍可
+    out = sm.build_proactive_opener("u1", silent_hours=48, intimacy=50.0)
+    assert out["mode"] == MODE_FOLLOW_UP
+    assert out["fact"] == "在学吉他"
+
+
+def test_proactive_gate_none_when_crisis_stale():
+    import time as _t
+    crisis = {"level": "severe", "created_at": _t.time() - 40 * 86400}  # 40 天前
+    sm = _SM(_StubStore([_fact("x")]),
+             story_cfg=_STORY_CFG, context={"u1": {}}, crisis_latest=crisis)
+    # 窗口外（默认 14 天）→ 不抑制 → 仍可邀约
+    out = sm.build_proactive_opener("u1", silent_hours=48, intimacy=50.0)
+    assert out["mode"] == "story_invite"
 
 
 def test_proactive_sequel_invite_references_prerequisite():
