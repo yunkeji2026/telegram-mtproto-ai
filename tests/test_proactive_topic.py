@@ -254,6 +254,7 @@ _SMcls = (
 class _SM:
     build_proactive_opener = _SMcls.build_proactive_opener
     _proactive_story_invite = _SMcls._proactive_story_invite
+    _proactive_story_teaser = _SMcls._proactive_story_teaser
     _story_progress_from_context = staticmethod(_SMcls._story_progress_from_context)
     _story_cfg = _SMcls._story_cfg
     _story_scenarios = _SMcls._story_scenarios
@@ -448,3 +449,112 @@ def test_proactive_sequel_invite_references_prerequisite():
     assert "初次咖啡约会" in out["directive"]
     assert "我们约好下次再一起喝咖啡" in out["directive"]
     assert "续作" in out["directive"]
+
+
+# ── Stage 2 付费解锁预告 _proactive_story_teaser ──────────────────────────
+
+import pytest as _pytest  # noqa: E402
+from src.utils import companion_context as _cc  # noqa: E402
+
+# coffee_date 免费(bond2)；beach_trip 付费仅差 story_ch1（bond2 已满足）。
+_TEASER_CFG = {
+    "enabled": True,
+    "max_intimacy_bonus": 12,
+    "paid_teaser": True,
+    "scenarios": {
+        "coffee_date": {"title": "初次咖啡约会", "min_bond_level": 2,
+                        "beats": [{"id": "a", "directive": "x"}]},
+        "beach_trip": {"title": "海边之旅", "min_bond_level": 2,
+                       "require_unlock": "story_ch1",
+                       "beats": [{"id": "a", "directive": "x"}]},
+    },
+}
+
+# coffee_date 已完成的 context → 免费邀约用尽 → 走付费预告分支。
+_DONE_FREE_CTX = {"u1": {"companion_relationship": {"u1": {"story_done": ["coffee_date"]}}}}
+
+
+@_pytest.fixture
+def _free_ent():
+    """注册一个「免费、无任何 grant」的权益 resolver；用例结束后清空。"""
+    _cc.set_relationship_providers(
+        entitlement_resolver=lambda ck: {"tier": "free", "grants": [], "unlocked": []})
+    try:
+        yield
+    finally:
+        _cc.reset_relationship_providers()
+
+
+def test_proactive_teaser_when_only_paid_left(_free_ent):
+    # 免费 coffee_date 已完成 → 无免费可邀约 → 付费预告 beach_trip（只差 story_ch1）
+    sm = _SM(_StubStore([_fact("在学吉他", tier="stable", hits=3)]),
+             story_cfg=_TEASER_CFG, context=_DONE_FREE_CTX)
+    out = sm.build_proactive_opener(
+        "u1", silent_hours=48, intimacy=50.0, contact_key="tg:acc:u1")
+    assert out["mode"] == "story_teaser"
+    assert out["scenario_id"] == "beach_trip"
+    assert out["feature"] == "story_ch1"
+    assert "海边之旅" in out["directive"]
+    assert out["silent_hours"] == 48.0
+
+
+def test_proactive_free_invite_beats_teaser(_free_ent):
+    # coffee_date 未完成且免费可邀约 → 免费邀约优先于付费预告
+    sm = _SM(_StubStore([_fact("x")]), story_cfg=_TEASER_CFG, context={"u1": {}})
+    out = sm.build_proactive_opener(
+        "u1", silent_hours=48, intimacy=50.0, contact_key="tg:acc:u1")
+    assert out["mode"] == "story_invite"
+    assert out["scenario_id"] == "coffee_date"
+
+
+def test_proactive_teaser_excludes_already_unlocked():
+    # 已解锁 story_ch1 → beach_trip 变 available（非 need_unlock）→ 不预告 → 回落记忆
+    _cc.set_relationship_providers(
+        entitlement_resolver=lambda ck: {"grants": ["story_ch1"], "unlocked": []})
+    try:
+        sm = _SM(_StubStore([_fact("在学吉他", tier="stable", hits=3)]),
+                 story_cfg=_TEASER_CFG, context=_DONE_FREE_CTX)
+        out = sm.build_proactive_opener(
+            "u1", silent_hours=48, intimacy=50.0, contact_key="tg:acc:u1")
+        assert out["mode"] == MODE_FOLLOW_UP
+        assert out["fact"] == "在学吉他"
+    finally:
+        _cc.reset_relationship_providers()
+
+
+def test_proactive_teaser_disabled_flag(_free_ent):
+    # paid_teaser=False → 不预告 → 回落记忆
+    cfg = dict(_TEASER_CFG, paid_teaser=False)
+    sm = _SM(_StubStore([_fact("在学吉他", tier="stable", hits=3)]),
+             story_cfg=cfg, context=_DONE_FREE_CTX)
+    out = sm.build_proactive_opener(
+        "u1", silent_hours=48, intimacy=50.0, contact_key="tg:acc:u1")
+    assert out["mode"] == MODE_FOLLOW_UP
+
+
+def test_proactive_teaser_requires_contact_key(_free_ent):
+    # 无 contact_key → 无法解析端用户权益 → 不预告 → 回落记忆
+    sm = _SM(_StubStore([_fact("在学吉他", tier="stable", hits=3)]),
+             story_cfg=_TEASER_CFG, context=_DONE_FREE_CTX)
+    out = sm.build_proactive_opener("u1", silent_hours=48, intimacy=50.0)
+    assert out["mode"] == MODE_FOLLOW_UP
+
+
+def test_proactive_teaser_no_resolver_registered():
+    # 未注册 resolver（变现未就绪）→ resolve_entitlement 返回 None → 不空推 → 回落记忆
+    _cc.reset_relationship_providers()
+    sm = _SM(_StubStore([_fact("在学吉他", tier="stable", hits=3)]),
+             story_cfg=_TEASER_CFG, context=_DONE_FREE_CTX)
+    out = sm.build_proactive_opener(
+        "u1", silent_hours=48, intimacy=50.0, contact_key="tg:acc:u1")
+    assert out["mode"] == MODE_FOLLOW_UP
+
+
+def test_proactive_teaser_suppressed_on_soft_emotion(_free_ent):
+    # 末条负面情绪 → soft 闸 → 连付费预告都抑制（不在低谷推销）→ 仅记忆问候
+    sm = _SM(_StubStore([_fact("在学吉他", tier="stable", hits=3)]),
+             story_cfg=_TEASER_CFG, context=_DONE_FREE_CTX)
+    out = sm.build_proactive_opener(
+        "u1", silent_hours=48, intimacy=50.0, contact_key="tg:acc:u1",
+        last_emotion="焦虑")
+    assert out["mode"] == MODE_FOLLOW_UP

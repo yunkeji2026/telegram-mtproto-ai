@@ -205,6 +205,11 @@ _MODE_HINTS = {
         "续作召回核对前传共同经历是否被自然提起（satisfied_prerequisite/ending_memory）",
         "若打扰感强：上调 cooldown_hours 或仅对高 bond 用户邀约（min_bond_level 内容侧调高）",
     ],
+    "story_teaser": [
+        "预告像推销/逼单：删一切价格暗示，只勾「向往+一起经历」的期待感，softer 措辞",
+        "转化低：核对是否只对「关系/前置已满足、只差付费」的用户发（need_unlock-only），别推够不着的",
+        "打扰/反感：付费预告比免费邀约更敏感——上调 cooldown 或仅对高 bond/高活跃用户开 paid_teaser",
+    ],
 }
 
 

@@ -69,8 +69,9 @@ def plan_proactive_sends(
             stage/intimacy``。
         cooldown_map: ``{conversation_id: 上次主动开场时间戳}``。
         opener_fn: ``opener_fn(memory_key=, silent_hours=, stage=, intimacy=,
-            last_emotion=) -> {mode, directive, fact, context_facts, ...}``
-            （即 build_proactive_opener；``last_emotion`` 供情绪护栏判低谷 soft 抑制）。
+            last_emotion=, contact_key=) -> {mode, directive, fact, context_facts, ...}``
+            （即 build_proactive_opener；``last_emotion`` 供情绪护栏判低谷 soft 抑制；
+            ``contact_key`` 供付费解锁预告查端用户真实权益、排除已解锁者）。
         has_pending_care: 可选谓词 ``(conversation_id) -> bool``——返回 True 表示该会话
             已被 proactive_care(Phase O) 排了待发关怀，本主动话题让路跳过（去重）。
         on_crisis_block: 可选回调 ``(conversation_snapshot) -> None``——当 opener 因近期
@@ -128,6 +129,7 @@ def plan_proactive_sends(
                 stage=str(c.get("stage") or ""),
                 intimacy=float(c.get("intimacy") or 0.0),
                 last_emotion=str(c.get("last_emotion") or ""),
+                contact_key=str(c.get("conversation_id") or ""),
             ) or {}
         except Exception:
             logger.debug("[proactive] opener_fn 失败 cid=%s", cid, exc_info=True)

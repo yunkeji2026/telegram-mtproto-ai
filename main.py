@@ -1900,11 +1900,12 @@ class AIChatAssistant:
                     })
                 return out
 
-            def _opener(*, memory_key, silent_hours, stage, intimacy, last_emotion=""):
+            def _opener(*, memory_key, silent_hours, stage, intimacy,
+                        last_emotion="", contact_key=""):
                 return self.skill_manager.build_proactive_opener(
                     memory_key, silent_hours=silent_hours, stage=stage,
                     intimacy=intimacy, min_silent_hours=min_silent_hours,
-                    last_emotion=last_emotion)
+                    last_emotion=last_emotion, contact_key=contact_key)
 
             cd_path = Path(self.config.config_path).parent / "companion_proactive_cooldown.json"
 

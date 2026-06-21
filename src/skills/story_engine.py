@@ -258,6 +258,51 @@ def select_story_invite(
     return None
 
 
+def select_paid_teaser(
+    scenarios: Optional[Dict[str, Any]],
+    *,
+    bond_level: int = 0,
+    completed: Optional[Dict[str, str]] = None,
+    active_id: str = "",
+    entitlement: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """挑一个「关系/前置都满足、**只差付费**」的付费剧情作**解锁预告**（纯函数）。
+
+    用于沉默期主动转化：用户已经"够格"体验某付费剧情，只是还没解锁 → 发温暖预告勾起向往，
+    引导其去解锁（真正的付费/报价交给店内/回消息时的 paywall，预告本身不硬推价格）。
+
+    准入条件（区别 ``select_story_invite`` 的免费邀约）：
+    - ``scenario_locked_reason`` **恰为 ``need_unlock:*``**——即关系等级 + 前置剧情都已满足，
+      唯一拦路的是付费。被关系/前置锁的不选（那是"还没够格"，预告解锁是误导）。
+    - 用真实 ``entitlement`` 判：已解锁者其 reason 为 ``""``（available）→ 自然不会被选中
+      （不会骚扰已付费用户）。
+    - 跳过已完成 / 进行中 / 无 beat 的场景。
+
+    返回 ``{scenario_id, title, feature}``（feature=所需解锁项）或 ``None``。按声明序取第一个。
+    """
+    if not isinstance(scenarios, dict):
+        return None
+    done = completed if isinstance(completed, dict) else {}
+    aid = str(active_id or "")
+    for sid, scn in scenarios.items():
+        if not isinstance(scn, dict):
+            continue
+        sid_s = str(sid)
+        if sid_s in done or sid_s == aid:
+            continue
+        if not _beats(scn):
+            continue
+        reason = scenario_locked_reason(
+            scn, entitlement=entitlement, bond_level=bond_level, completed=done)
+        if reason.startswith("need_unlock:"):
+            return {
+                "scenario_id": sid_s,
+                "title": str(scn.get("title") or sid_s),
+                "feature": reason.split(":", 1)[1],
+            }
+    return None
+
+
 def start_scenario(
     scenario_id: str,
     scenarios: Optional[Dict[str, Any]],
@@ -428,6 +473,7 @@ __all__ = [
     "ending_memory",
     "list_scenarios",
     "select_story_invite",
+    "select_paid_teaser",
     "start_scenario",
     "advance_state",
     "current_directive",

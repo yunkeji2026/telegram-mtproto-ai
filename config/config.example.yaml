@@ -1009,6 +1009,10 @@ companion:
     #   re-engagement 闭环（剧情解锁→主动邀约→回流→更多剧情）。优先于记忆回访，无可邀约
     #   时无缝回落记忆话题。仅邀约关系/前置已满足的免费场景（付费留店内引导）。需同时开
     #   companion.proactive_topic 主动循环；按真实 intimacy 判等级（沉默扫描已注入 resolve_*）。
+    paid_teaser: false         # Stage 2 付费「解锁预告」召回（默认关，转化敏感、需运营确认）：
+    #   免费邀约用尽后，若用户「关系/前置都满足、只差付费」（need_unlock-only），沉默期发温暖
+    #   预告勾起向往、引导解锁。只勾期待不报价（真正付费交回消息时的店内 paywall）。
+    #   需 monetization.enabled（接真实权益排除已解锁者）；情绪护栏 soft/block 一律抑制（不在低谷推销）。
     scenarios:
       coffee_date:
         title: "初次咖啡约会"

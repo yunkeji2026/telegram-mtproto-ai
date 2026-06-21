@@ -21,6 +21,7 @@ from src.skills.story_engine import (
     satisfied_prerequisite,
     scenario_available,
     scenario_locked_reason,
+    select_paid_teaser,
     select_story_invite,
     start_scenario,
 )
@@ -173,6 +174,70 @@ def test_invite_skips_completed_and_active():
 def test_invite_none_for_empty_or_bad():
     assert select_story_invite(None, bond_level=5) is None
     assert select_story_invite({}, bond_level=5) is None
+
+
+# ── 付费解锁预告 select_paid_teaser（Stage 2） ─────────────────────────────
+
+def test_teaser_picks_paywall_only_scenario():
+    # bond2 + 无权益：coffee_date/branch_date 免费可玩(available)→跳过；paid_trip 仅差付费 → 选中
+    tea = select_paid_teaser(SCENARIOS, bond_level=2, completed={}, entitlement=None)
+    assert tea["scenario_id"] == "paid_trip"
+    assert tea["title"] == "海边之旅"
+    assert tea["feature"] == "story_ch1"
+
+
+def test_teaser_excludes_already_unlocked():
+    # 已解锁 story_ch1 → paid_trip 变 available（非 need_unlock）→ 不预告；
+    # sequel 被前置(branch_date warm 未完成)锁=need_story 非 need_unlock → 不选 → None
+    ent = {"grants": ["story_ch1"], "unlocked": []}
+    tea = select_paid_teaser(SCENARIOS, bond_level=5, completed={}, entitlement=ent)
+    assert tea is None
+
+
+def test_teaser_skips_scenario_locked_by_prereq():
+    # sequel 同时 need_story(branch_date warm) + need_unlock(all_story)；前置未满足 →
+    # reason=need_story（非 need_unlock）→ 不预告（够不着的不推）
+    only_sequel = {"sequel": SCENARIOS["sequel"]}
+    tea = select_paid_teaser(only_sequel, bond_level=5, completed={}, entitlement=None)
+    assert tea is None
+
+
+def test_teaser_picks_sequel_when_prereq_met_only_paywall():
+    # branch_date 以 warm 完成 → sequel 前置满足，只差 all_story 付费 → 预告 sequel
+    only_sequel = {"sequel": SCENARIOS["sequel"]}
+    tea = select_paid_teaser(
+        only_sequel, bond_level=5, completed={"branch_date": "warm"}, entitlement=None)
+    assert tea["scenario_id"] == "sequel"
+    assert tea["feature"] == "all_story"
+
+
+def test_teaser_skips_bond_locked_paid():
+    # 付费场景但关系等级不足 → reason=need_bond（非 need_unlock）→ 不推够不着的
+    scn = {"vip_date": {"title": "VIP约会", "min_bond_level": 5,
+                        "require_unlock": "vip_story",
+                        "beats": [{"id": "a", "directive": "x"}]}}
+    assert select_paid_teaser(scn, bond_level=1, completed={}, entitlement=None) is None
+    # 关系达标后 → 只差付费 → 预告
+    tea = select_paid_teaser(scn, bond_level=5, completed={}, entitlement=None)
+    assert tea["scenario_id"] == "vip_date"
+
+
+def test_teaser_skips_completed_and_active():
+    only_paid = {"paid_trip": SCENARIOS["paid_trip"]}
+    assert select_paid_teaser(
+        only_paid, bond_level=5, completed={"paid_trip": ""}, entitlement=None) is None
+    assert select_paid_teaser(
+        only_paid, bond_level=5, active_id="paid_trip", entitlement=None) is None
+
+
+def test_teaser_none_when_no_paid_scenarios():
+    free_only = {"coffee_date": SCENARIOS["coffee_date"]}
+    assert select_paid_teaser(free_only, bond_level=5, entitlement=None) is None
+
+
+def test_teaser_none_for_empty_or_bad():
+    assert select_paid_teaser(None, bond_level=5) is None
+    assert select_paid_teaser({}, bond_level=5) is None
 
 
 # ── 个性化召回 satisfied_prerequisite / ending_memory ─────────────────

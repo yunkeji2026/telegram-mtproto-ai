@@ -2730,6 +2730,69 @@ class SkillManager(LoggerMixin):
             "silent_hours": 0.0,
         }
 
+    def _proactive_story_teaser(
+        self, memory_key: str, intimacy: float, contact_key: str
+    ) -> Optional[Dict[str, Any]]:
+        """Stage 2 付费解锁预告：挑一个用户「关系/前置已满足、只差付费」的剧情发温暖预告。
+
+        准入：story 启用 + ``paid_teaser`` 开 + 有 context + **解析到真实权益**（经 Stage 1
+        ``resolve_entitlement``）。复用 ``story_engine.select_paid_teaser``（仅选 ``need_unlock``-only
+        场景；已解锁者 reason 为空 → 不会被选 → 不骚扰付费用户）。关系等级用 effective intimacy 算。
+        无 contact_key / 无权益源（变现未就绪）/ 无可预告 → None（回落记忆话题，不空推）。
+        """
+        scfg = self._story_cfg()
+        if not scfg.get("enabled", False):
+            return None
+        if not bool(scfg.get("paid_teaser", False)):
+            return None
+        scenarios = self._story_scenarios()
+        store = getattr(self, "_context_store", None)
+        key = str(memory_key or "").strip()
+        ck = str(contact_key or "").strip()
+        if not scenarios or store is None or not key or not ck:
+            return None
+        # 解析端用户真实权益；无权益源（resolver 未注册/查不到）→ 不预告（不对未知状态乱推）
+        from src.utils.companion_context import resolve_entitlement
+        ent = resolve_entitlement(ck)
+        if not isinstance(ent, dict):
+            return None
+        try:
+            ctx = store.get(key)
+        except Exception:
+            return None
+        completed, bonus = self._story_progress_from_context(
+            ctx if isinstance(ctx, dict) else {})
+        try:
+            eff = max(0.0, min(100.0, float(intimacy or 0.0)
+                               + min(self._story_bonus_cap(), bonus)))
+        except (TypeError, ValueError):
+            eff = float(intimacy or 0.0)
+        try:
+            from src.contacts.relationship_level import compute_bond_level
+            bond_level = int(compute_bond_level(eff).get("level", 0))
+        except Exception:
+            bond_level = 0
+        from src.skills.story_engine import select_paid_teaser
+        tea = select_paid_teaser(
+            scenarios, bond_level=bond_level, completed=completed, entitlement=ent)
+        if not tea:
+            return None
+        title = tea["title"]
+        directive = (
+            f"你心里惦记着一段你和TA还没一起经历、但你很想带TA去体验的特别故事《{title}》。"
+            f"用一句温暖、带点向往的话自然提起这段「专属故事」，让TA感到你想和TA一起解锁这段"
+            f"特别的经历——只勾起期待与靠近感。别报价格、别像广告推销、别催、别罗列菜单。"
+        )
+        return {
+            "mode": "story_teaser",
+            "fact": title,
+            "directive": directive,
+            "scenario_id": tea["scenario_id"],
+            "feature": tea.get("feature", ""),
+            "context_facts": [],
+            "silent_hours": 0.0,
+        }
+
     def build_proactive_opener(
         self,
         memory_key: str,
@@ -2739,6 +2802,7 @@ class SkillManager(LoggerMixin):
         intimacy: float = 0.0,
         min_silent_hours: float = 24.0,
         last_emotion: str = "",
+        contact_key: str = "",
     ) -> Dict[str, Any]:
         """P1：为某用户挑一个"主动开场话题"（从其高置信记忆回访）。
 
@@ -2767,6 +2831,15 @@ class SkillManager(LoggerMixin):
                     return _inv
             except Exception:
                 self.logger.debug("proactive story invite skipped", exc_info=True)
+            # Stage 2：付费解锁预告——无免费可邀约时，若用户已"够格"某付费剧情（只差付费），
+            # 发温暖预告勾起向往、引导解锁（转化驱动）。同样 soft/block 抑制（不在低谷推销）。
+            try:
+                _tea = self._proactive_story_teaser(memory_key, intimacy, contact_key)
+                if _tea:
+                    _tea["silent_hours"] = round(float(silent_hours or 0.0), 1)
+                    return _tea
+            except Exception:
+                self.logger.debug("proactive story teaser skipped", exc_info=True)
         store = getattr(self, "_episodic_store", None)
         key = str(memory_key or "").strip()
         if not store or not key or not hasattr(store, "list_rows"):
