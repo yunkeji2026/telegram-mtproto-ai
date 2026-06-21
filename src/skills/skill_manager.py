@@ -1696,7 +1696,8 @@ class SkillManager(LoggerMixin):
                     user_context.pop("_bot_question_intent", None)
                 # 6. 更新状�€?
                 self._update_after_reply(reply, user_id_str, user_context,
-                                         chat_id=context.get('chat_id', ''))
+                                         chat_id=context.get('chat_id', ''),
+                                         user_msg=text)
                 # P3-deep diag (2026-05-04)
                 _flag_dis = user_context.get("disable_episodic_memory")
                 self.logger.info(
@@ -2979,6 +2980,29 @@ class SkillManager(LoggerMixin):
         else:
             root[key] = state
 
+    def _writeback_story_memory(
+        self, user_id: str, chat_id: Any, user_context: Dict[str, Any], memory: str
+    ) -> None:
+        """剧情收场 → 把「共享经历」回写情景记忆（Phase ④ 闭环核心）。
+
+        共享经历在虚构里真实发生过 → 以 ``user_stated`` 高置信入库：可被 consolidate
+        晋升 stable、可被 proactive_topic 日后主动回访（"还记得那次……吗"）。add_fact
+        以内容哈希去重，重复收场不会灌水。任何失败都不得打断回复管线。
+        """
+        store = getattr(self, "_episodic_store", None)
+        mem = (memory or "").strip()
+        if not store or not mem:
+            return
+        try:
+            platform = str(user_context.get("platform", "") or "")
+            key = self._episodic_storage_key(user_id, chat_id, platform)
+            store.add_fact(key, mem, "story", source="user_stated")
+            self.logger.info(
+                "[story] writeback shared-memory key=%s mem=%r", key, mem[:60]
+            )
+        except Exception:
+            self.logger.debug("story memory writeback failed", exc_info=True)
+
     def _bond_level_from_context(self, user_context: Dict[str, Any]) -> int:
         try:
             from src.contacts.relationship_level import compute_bond_level
@@ -3065,7 +3089,7 @@ class SkillManager(LoggerMixin):
         return None
 
     def _update_after_reply(self, reply: str, user_id: str, user_context: Dict[str, Any],
-                            chat_id: Any = ''):
+                            chat_id: Any = '', user_msg: str = ''):
         """回�后更新状�?"""
         current_time = time.time()
         
@@ -3100,7 +3124,8 @@ class SkillManager(LoggerMixin):
         except Exception:
             pass
 
-        # Phase ③：活动剧情按用户轮次确定性推进 beat（剧终自动收场）。
+        # Phase ③/④：活动剧情按用户轮次确定性推进 beat（用户回应驱动分支路由），
+        # 剧终自动收场并把「共享经历」回写情景记忆——闭环到 ①（被巩固/被 proactive_topic 回访）。
         try:
             _scfg = self._story_cfg()
             if _scfg.get("enabled", False) and (reply or "").strip():
@@ -3109,10 +3134,14 @@ class SkillManager(LoggerMixin):
                     from src.skills.story_engine import advance_state
                     _at = int(_scfg.get("advance_turns", 0) or 0)
                     _kw = {"advance_turns": _at} if _at > 0 else {}
-                    _new, _fin = advance_state(
-                        _sstate, self._story_scenarios(), **_kw)
+                    _new, _fin, _mem = advance_state(
+                        _sstate, self._story_scenarios(),
+                        user_message=user_msg, **_kw)
                     self._set_story_state(
                         user_context, chat_id, None if _fin else _new)
+                    if _fin and (_mem or "").strip():
+                        self._writeback_story_memory(
+                            user_id, chat_id, user_context, _mem)
         except Exception:
             self.logger.debug("story advance skipped", exc_info=True)
 

@@ -47,6 +47,8 @@ class _SM:
     _bond_level_from_context = _SMcls._bond_level_from_context
     _match_scenario = _SMcls._match_scenario
     _handle_story_command = _SMcls._handle_story_command
+    _writeback_story_memory = _SMcls._writeback_story_memory
+    _episodic_storage_key = _SMcls._episodic_storage_key
 
     def __init__(self, *, enabled=True):
         cfg = {"companion": {"story": {
@@ -54,6 +56,9 @@ class _SM:
         }}}
         self.config = SimpleNamespace(config=cfg)
         self.logger = logging.getLogger("test_story")
+        self._episodic_store = None
+        self._memory_cfg = {"scope": "user"}
+        self._cpi = None
 
 
 def _ctx(intimacy=None, entitlement=None):
@@ -136,3 +141,36 @@ def test_unknown_scenario():
 def test_non_command_passthrough():
     sm = _SM()
     assert sm._handle_story_command("今天天气真好", _ctx(intimacy=40), "chatA") is None
+
+
+# ── Phase ④ 完成回写共享记忆 ──────────────────────────────────────
+
+class _FakeStore:
+    def __init__(self):
+        self.calls = []
+
+    def add_fact(self, key, text, label, source="user_stated"):
+        self.calls.append((key, text, label, source))
+        return len(self.calls)
+
+
+def test_writeback_writes_shared_memory_user_stated():
+    sm = _SM()
+    sm._episodic_store = _FakeStore()
+    sm._writeback_story_memory("u1", "chatA", {"platform": "telegram"},
+                               "我们约好了下次再一起喝咖啡")
+    assert len(sm._episodic_store.calls) == 1
+    key, text, label, source = sm._episodic_store.calls[0]
+    assert text == "我们约好了下次再一起喝咖啡"
+    assert label == "story"
+    assert source == "user_stated"
+
+
+def test_writeback_noop_without_store_or_memory():
+    sm = _SM()
+    # 无 store → 静默跳过
+    sm._writeback_story_memory("u1", "chatA", {}, "x")
+    # 有 store 但空记忆 → 不写
+    sm._episodic_store = _FakeStore()
+    sm._writeback_story_memory("u1", "chatA", {}, "   ")
+    assert sm._episodic_store.calls == []
