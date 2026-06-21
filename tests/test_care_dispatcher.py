@@ -284,6 +284,87 @@ async def test_dry_run_records_sample():
     assert "面试" in samples[0]["reply_text"]
 
 
+# ── Phase ④续¹⁰：危机来源关怀「克制陪伴」专线 ──────────────────────────────
+from src.contacts.care_schedule import CRISIS_CARE_TOPIC
+
+
+def _crisis_store(contact="tg:u1", chat="u1"):
+    s = CareScheduleStore(":memory:")
+    c = CareCommitment(due_at=NOW - 60, event_at=NOW - 60, topic=CRISIS_CARE_TOPIC,
+                       sentiment="negative", anchor_text="",
+                       source_text="近期危机信号，主动护栏拦下打扰，转关怀回访", confidence=1.0)
+    s.add_commitment(c, contact_key=contact, platform="telegram",
+                     account_id="default", chat_key=chat)
+    return s
+
+
+async def test_crisis_care_uses_restrained_prompt():
+    """危机来源关怀 → 用克制陪伴模板（不寒暄/不追问），且不引用 topic「情绪关怀」字样。"""
+    s = _crisis_store()
+    rec = []
+    ai = _AI(reply="我这两天一直想着你，不用急着回我，我都在。")
+    d = CareDispatcher(store=s, ai_client=ai, send_callback=_sender(rec),
+                       context_provider=lambda ck: "ctx", default_lang="zh")
+    n = await d.run_once(now=NOW)
+    assert n == 1 and len(rec) == 1
+    p = ai.prompts[0]
+    # 用的是克制模板：含陪伴措辞、明令不追问；不把保留 topic 当"具体事"塞进话术
+    assert "不带任何压力" in p and "汇报近况" in p
+    assert "情绪关怀" not in p
+    assert rec[0]["reason"] == "care:crisis"
+    assert rec[0]["extra"]["crisis_care"] is True
+
+
+async def test_crisis_care_sends_even_without_context():
+    """无对话上下文也照发（陪伴本身即目的，不走 no_context skip）。"""
+    s = _crisis_store()
+    rec = []
+    d = CareDispatcher(store=s, ai_client=_AI(reply="我在，你不是一个人。"),
+                       send_callback=_sender(rec),
+                       context_provider=lambda ck: "", skip_if_no_context=True)
+    n = await d.run_once(now=NOW)
+    assert n == 1 and len(rec) == 1
+    assert s.count(status="sent") == 1
+
+
+async def test_crisis_care_bypasses_paywall():
+    """免费超额也不掐断危机关怀（伦理优先于变现）。"""
+    s = _crisis_store()
+    rec = []
+    d = CareDispatcher(store=s, ai_client=_AI(reply="我在，慢慢来，我陪着你。"),
+                       send_callback=_sender(rec),
+                       context_provider=lambda ck: "ctx",
+                       proactive_allowed=lambda ck: False)  # 模拟免费超额
+    n = await d.run_once(now=NOW)
+    assert n == 1 and len(rec) == 1
+    assert s.count(status="sent") == 1
+
+
+async def test_crisis_care_does_not_inject_dialogue_context():
+    """克制模板不注入对话要点（避免回放低谷内容）→ context_provider 不被调用。"""
+    s = _crisis_store()
+    called = []
+    d = CareDispatcher(store=s, ai_client=_AI(reply="我在呢。"),
+                       send_callback=_sender([]),
+                       context_provider=lambda ck: called.append(ck) or "ctx")
+    await d.run_once(now=NOW)
+    assert called == []  # 危机关怀不取对话上下文
+
+
+async def test_normal_care_still_uses_generic_prompt():
+    """普通关怀（非危机 topic）行为不变：仍用通用模板、仍引用 topic。"""
+    s = _store_with(topic="复查")
+    rec = []
+    ai = _AI(reply="记得你说要去复查，结果还好吗？")
+    d = CareDispatcher(store=s, ai_client=ai, send_callback=_sender(rec),
+                       context_provider=lambda ck: "上次聊到复查", default_lang="zh")
+    n = await d.run_once(now=NOW)
+    assert n == 1
+    assert "复查" in ai.prompts[0]
+    assert "不带任何压力" not in ai.prompts[0]  # 不是克制模板
+    assert rec[0]["reason"].startswith("care:复查")
+
+
 async def test_quiet_hours_defers_send_time():
     # now 在深夜 → defer_until 应被顺延到早 8 点以后
     late = datetime(2026, 6, 17, 23, 50, 0).timestamp()

@@ -24,6 +24,10 @@ _DEFAULT_MIN_CONFIDENCE = 0.6   # 挡住 O1 无主题兜底（0.5）等低质项
 _DEFAULT_DEDUP_WINDOW_DAYS = 3.0
 _DAY = 86400.0
 
+# Phase ④续¹⁰：危机关怀升级（## 56）排进 care 队列时用的保留 topic——派发器据此切到
+# 「克制陪伴」语气模板（不寒暄、不追问、不引用具体事），区别普通约定回访。两端共享此常量。
+CRISIS_CARE_TOPIC = "情绪关怀"
+
 _STATUSES = ("pending", "sent", "skipped", "expired", "cancelled")
 
 
@@ -330,4 +334,5 @@ def get_care_schedule_store(db_path=None) -> "CareScheduleStore":
     return _singleton
 
 
-__all__ = ["CareScheduleStore", "get_care_schedule_store", "_topic_norm"]
+__all__ = ["CareScheduleStore", "get_care_schedule_store", "_topic_norm",
+           "CRISIS_CARE_TOPIC"]

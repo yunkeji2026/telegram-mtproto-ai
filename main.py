@@ -1929,12 +1929,13 @@ class AIChatAssistant:
                 try:
                     import time as _time
                     from src.contacts.care_commitment import CareCommitment
+                    from src.contacts.care_schedule import CRISIS_CARE_TOPIC
                     _now = _time.time()
                     care_store.add_commitment(
                         CareCommitment(
                             due_at=_now,            # 立即到期 → 下个派发 tick 即可被关怀/坐席接住
                             event_at=_now,
-                            topic="情绪关怀",
+                            topic=CRISIS_CARE_TOPIC,  # 派发器据此切「克制陪伴」语气模板
                             sentiment="negative",
                             anchor_text="",
                             source_text="近期危机信号，主动护栏拦下打扰，转关怀回访",
