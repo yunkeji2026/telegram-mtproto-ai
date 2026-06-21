@@ -99,6 +99,8 @@ companion:
   story:
     enabled: true                    # ★ 陪伴模式默认开
     advance_turns: 3
+    max_intimacy_bonus: 12           # 剧情累计关系加成封顶（防刷满；约一个等级带）
+    proactive_prefer_category: story # 主动开场优先回访剧情回写的共享经历
     scenarios:
       coffee_date:                   # 免费：关系到「试探/升温」即可解锁；带分支多结局
         title: "初次咖啡约会"
@@ -113,8 +115,8 @@ companion:
               - {keywords: ["算了", "忙", "不", "下次再说"],    ending: cool}
             default_ending: warm
         endings:
-          warm: {directive: "结局：对方答应了，你们开心约好下次再见，温柔道别。", memory: "我们约好了下次再一起喝咖啡"}
-          cool: {directive: "结局：对方没多说，你体贴地不勉强，礼貌温柔地道别。", memory: "我们一起喝过一次咖啡"}
+          warm: {directive: "结局：对方答应了，你们开心约好下次再见，温柔道别。", memory: "我们约好了下次再一起喝咖啡", intimacy_bonus: 4}
+          cool: {directive: "结局：对方没多说，你体贴地不勉强，礼貌温柔地道别。", memory: "我们一起喝过一次咖啡", intimacy_bonus: 1}
       starry_night:                  # 付费专属：需 all_story 权益（SVIP 授予）+ 关系够深
         title: "星空下的约定"
         min_bond_level: 3
@@ -122,7 +124,7 @@ companion:
         beats:
           - {id: rooftop, directive: "场景：你们在天台并肩看星空，气氛安静而亲密，轻声分享心事。"}
           - {id: promise, directive: "场景推进：聊到彼此对未来的期待，自然许下一个温柔的小约定。"}
-        on_complete: {memory: "我们在星空下许下过一个温柔的约定"}
+        on_complete: {memory: "我们在星空下许下过一个温柔的约定", intimacy_bonus: 5}
   # 安全底线守卫：危机识别 + 反谄媚 + 回复红线兜底。陪伴+全自动场景默认全开（漏接危机最坏）。
   wellbeing:
     enabled: true

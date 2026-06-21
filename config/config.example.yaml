@@ -991,6 +991,8 @@ companion:
   story:
     enabled: false
     advance_turns: 3           # 每 N 个用户轮次推进一个 beat（剧终自动收场）
+    max_intimacy_bonus: 12     # 剧情累计关系加成封顶（防刷满，叠加进 bond 计算）
+    proactive_prefer_category: story  # 主动开场优先回访剧情共享经历（story 类目）
     scenarios:
       coffee_date:
         title: "初次咖啡约会"
@@ -1006,11 +1008,12 @@ companion:
               - {keywords: ["好", "愿意", "想", "约"], ending: warm}
               - {keywords: ["算了", "忙", "不"],        ending: cool}
             default_ending: warm
-        endings:                 # 多结局（可选）：每个结局可带不同的回写记忆
-          warm: {directive: "结局：对方答应了，你们开心约好下次再见。", memory: "我们约好了下次再一起喝咖啡"}
-          cool: {directive: "结局：对方没多说，你体贴地不勉强，温柔道别。", memory: "我们一起喝过一次咖啡"}
-        # on_complete:           # 无分支/无结局时的兜底完成回写（可选）
+        endings:                 # 多结局（可选）：memory=收场回写情景记忆；intimacy_bonus=关系加成
+          warm: {directive: "结局：对方答应了，你们开心约好下次再见。", memory: "我们约好了下次再一起喝咖啡", intimacy_bonus: 4}
+          cool: {directive: "结局：对方没多说，你体贴地不勉强，温柔道别。", memory: "我们一起喝过一次咖啡", intimacy_bonus: 1}
+        # on_complete:           # 无分支/无结局时的兜底收场（可选）
         #   memory: "我们一起度过了一段愉快的时光"
+        #   intimacy_bonus: 2
   # Phase P/R：关系健康卡 + 流失预警榜（/relations-health）
   relations_health:
     # Q 延伸：ingest 热路径回写 conversations/conversation_meta.contact_id（默认关）。

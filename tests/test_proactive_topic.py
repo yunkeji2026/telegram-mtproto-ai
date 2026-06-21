@@ -176,6 +176,41 @@ def test_context_facts_empty_on_gentle_checkin():
     assert out["context_facts"] == []
 
 
+# ── prefer_category（Phase ④：优先回访剧情共享经历） ──────────────────────
+
+def _cat_fact(content, category, hits=1, tier="raw"):
+    f = _fact(content, hits=hits, tier=tier)
+    f["category"] = category
+    return f
+
+
+def test_prefer_category_lifts_story_memory():
+    facts = [
+        _cat_fact("在备考", "llm", hits=20, tier="stable"),       # 高分但非偏好类目
+        _cat_fact("我们一起看过星空", "story", hits=1, tier="raw"),
+    ]
+    # 不偏好 → 选高分的备考
+    assert select_proactive_topic(facts, silent_hours=48)["fact"] == "在备考"
+    # 偏好 story → 共享经历领先一档，被优先回访
+    out = select_proactive_topic(facts, silent_hours=48, prefer_category="story")
+    assert out["fact"] == "我们一起看过星空"
+
+
+def test_prefer_category_no_match_falls_back_to_score():
+    facts = [_cat_fact("在备考", "llm", hits=5), _cat_fact("养了猫", "heuristic", hits=2)]
+    # 无 story 类目 → 退回普通排序（高 hits 优先）
+    out = select_proactive_topic(facts, silent_hours=48, prefer_category="story")
+    assert out["fact"] == "在备考"
+
+
+def test_prefer_category_default_unchanged():
+    facts = [_cat_fact("我们一起看过星空", "story", hits=1),
+             _cat_fact("在备考", "llm", hits=9)]
+    # 默认不传 prefer_category → 行为等同旧版（按分数选）
+    out = select_proactive_topic(facts, silent_hours=48)
+    assert out["fact"] == "在备考"
+
+
 # ── block 装配 ──────────────────────────────────────────────────────────
 
 def test_block_empty_when_no_topic():

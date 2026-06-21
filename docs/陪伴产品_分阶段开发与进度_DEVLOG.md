@@ -1717,3 +1717,42 @@ Phase ③ 把三件事串成一条**直线**。本期「做深」的关键 insig
 
 **做成循环后的链路**：记忆①→成长②→剧情③→（剧终回写）→记忆① → proactive_topic 主动回访 →
 关系更深② → 解锁更深剧情③……四期把单向链闭成自我强化的飞轮。
+
+## 48. Phase ④续 · 把飞轮真正转起来——剧情→成长加成 + 主动回访偏好共享经历
+
+**立项判断**（勘探确认两条边都未接实）：
+- `intimacy_score` 由 IntimacyEngine 拥有、写在 `journeys` 表（contacts/gateway 路径），
+  **skill_manager 无直写口**——上期遗留的「剧情→成长」是悬空的。
+- `proactive_topic._fact_score` 只按 stable/hits/recency 排序，**不认 category**，
+  共享经历回写后并不会被优先回访。
+
+**改动**：
+- **剧情→成长（autonomous，不动事实源）**：engine `advance_state` 收场 payload 升级为
+  `{"memory", "intimacy_bonus"}`（endings/on_complete 可声明 `intimacy_bonus`）。skill_manager
+  新增 `_apply_story_intimacy_bonus`：把加成累加进 `rel_state.story_bonus`（随 user_context
+  持久、按 chat 维度、`max_intimacy_bonus` 封顶防刷）；`_effective_intimacy` = 基础
+  intimacy + story_bonus（封顶 100，无基础信号则返回 None 不臆造）。`_bond_level_from_context`
+  与 bond_level prompt 块改用 effective —— **完成深度剧情真实推动 bond 等级 → 解锁更深剧情**。
+- **记忆→主动回访（pure，opt-in）**：`proactive_topic` 加 `prefer_category` 参数，命中类目
+  （`story`）的事实领先一档；`build_proactive_opener` 从 `companion.story.proactive_prefer_category`
+  （默认 `story`）传入。共享经历 `category="story"` 由 Phase ④ 回写时写入 → 沉默回归时
+  AI 优先「还记得我们一起看过的星空吗」开场。默认 `""` 行为等同旧版（零回归）。
+- **配置**：预设/example 给 endings 补 `intimacy_bonus`、story 段补 `max_intimacy_bonus` +
+  `proactive_prefer_category`。
+- **测试**：engine 3-tuple→payload 化 + 加成断言；wiring 加加成累加/封顶/按 chat 隔离/无基础
+  信号保持 None；proactive 加 prefer_category 抬升/无命中回退/默认不变三测。story 相关 66 passed；
+  **全量 5782 passed / 31 skipped / 0 fail（222s）**。
+
+**实施中的再优化**：
+1. **认清 intimacy_score 不可直写 → 改用「独立累加项」而非 hack 事实源**：曾想在
+   user_context 直接改 intimacy_score，但 runner 每轮会用 IntimacyEngine 值覆盖它 → 不持久。
+   改存 `rel_state.story_bonus` 独立项、在 `_effective_intimacy` 处叠加：既不篡改 IntimacyEngine
+   事实源、又持久生效，且后续 RPA/journey 侧若要接真加成也不冲突。
+2. **`_effective_intimacy` 无基础信号返回 None（不臆造关系）**：纯命令/无亲密度追踪的路径
+   不会凭空冒出 bond 块，保 Phase ② 在该路径的休眠现状不变。
+3. **prefer_category 做成参数、策略留在 wiring 层**：纯函数保持中立可测，是否偏好 story 由
+   config 决定，默认空=零回归——这条「记忆→主动回访」边可随时关。
+
+**飞轮闭环验收**：完成 starry_night（+5）/coffee warm（+4）→ story_bonus 累加 → effective
+intimacy 抬升 → bond 升级 → 解锁更深剧情；同时共享经历入 episodic（story 类目）→ 沉默回归
+被 proactive_topic 优先回访。记忆/成长/剧情三系统互相喂养的正循环已端到端跑通且全程可测。

@@ -45,6 +45,9 @@ class _SM:
     _get_story_state = _SMcls._get_story_state
     _set_story_state = _SMcls._set_story_state
     _bond_level_from_context = _SMcls._bond_level_from_context
+    _effective_intimacy = _SMcls._effective_intimacy
+    _story_bonus_cap = _SMcls._story_bonus_cap
+    _apply_story_intimacy_bonus = _SMcls._apply_story_intimacy_bonus
     _match_scenario = _SMcls._match_scenario
     _handle_story_command = _SMcls._handle_story_command
     _writeback_story_memory = _SMcls._writeback_story_memory
@@ -174,3 +177,41 @@ def test_writeback_noop_without_store_or_memory():
     sm._episodic_store = _FakeStore()
     sm._writeback_story_memory("u1", "chatA", {}, "   ")
     assert sm._episodic_store.calls == []
+
+
+# ── Phase ④ 剧情→成长（intimacy 加成） ────────────────────────────
+
+def test_story_bonus_accumulates_and_lifts_bond():
+    sm = _SM()
+    ctx = {"intimacy_score": 55.0}   # 基础亲密度
+    base_bond = sm._bond_level_from_context(ctx, "chatA")
+    # 完成两次剧情各 +4 → story_bonus=8，有效亲密度 63
+    sm._apply_story_intimacy_bonus(ctx, "chatA", 4)
+    sm._apply_story_intimacy_bonus(ctx, "chatA", 4)
+    assert sm._effective_intimacy(ctx, "chatA") == 63.0
+    assert sm._bond_level_from_context(ctx, "chatA") >= base_bond
+
+
+def test_story_bonus_is_capped():
+    sm = _SM()
+    ctx = {"intimacy_score": 10.0}
+    for _ in range(20):
+        sm._apply_story_intimacy_bonus(ctx, "chatA", 4)
+    from src.utils.companion_relationship import get_rel_state
+    assert get_rel_state(ctx, "chatA")["story_bonus"] == sm._story_bonus_cap()
+
+
+def test_story_bonus_per_chat_isolated():
+    sm = _SM()
+    ctx = {"intimacy_score": 50.0}
+    sm._apply_story_intimacy_bonus(ctx, "chatA", 4)
+    assert sm._effective_intimacy(ctx, "chatA") == 54.0
+    # 另一会话无加成
+    assert sm._effective_intimacy(ctx, "chatB") == 50.0
+
+
+def test_effective_intimacy_none_base_stays_none():
+    sm = _SM()
+    ctx = {}   # 无基础信号 → 不臆造关系
+    sm._apply_story_intimacy_bonus(ctx, "chatA", 4)
+    assert sm._effective_intimacy(ctx, "chatA") is None

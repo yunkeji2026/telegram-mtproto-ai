@@ -153,6 +153,19 @@ def start_scenario(
     }
 
 
+def _finish_payload(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """从结局/on_complete 节点提取收场副作用：共享记忆文本 + 关系加成。"""
+    d = d if isinstance(d, dict) else {}
+    try:
+        bonus = float(d.get("intimacy_bonus") or 0.0)
+    except (TypeError, ValueError):
+        bonus = 0.0
+    return {
+        "memory": str(d.get("memory") or "").strip(),
+        "intimacy_bonus": bonus,
+    }
+
+
 def _match_branch(branch: Any, default_ending: str, user_message: str) -> str:
     """选择点路由：按用户回应关键词匹配 → 结局 id；无命中回 default_ending。"""
     msg = (user_message or "").lower()
@@ -175,23 +188,24 @@ def advance_state(
     user_message: str = "",
     advance_turns: int = DEFAULT_ADVANCE_TURNS,
     now: Optional[float] = None,
-) -> Tuple[Optional[Dict[str, Any]], bool, str]:
+) -> Tuple[Optional[Dict[str, Any]], bool, Dict[str, Any]]:
     """登记「一个用户轮次」并按需推进 beat / 路由分支 / 收场（确定性）。
 
-    返回 ``(new_state, finished, memory)``：
+    返回 ``(new_state, finished, payload)``：
       - 满 ``advance_turns`` 轮推进；遇 ``branch`` beat 按 ``user_message`` 路由到结局段。
-      - ``finished=True`` 时 ``memory`` 为该结局（或 ``on_complete``）声明的「共享经历」回写
-        文本（可空）；调用方据此写情景记忆。
-      - state/场景非法 → ``(None, True, "")`` 安全降级。
+      - ``finished=True`` 时 ``payload`` = ``{"memory": str, "intimacy_bonus": float}``，
+        取自该结局（或 ``on_complete``）声明的收场副作用：调用方据此回写情景记忆 +
+        给关系加成（Phase ④ 把「剧情→记忆」「剧情→成长」两条边都接实）。
+      - 未收场时 ``payload`` 为 ``{}``；state/场景非法 → ``(None, True, {})`` 安全降级。
     """
     if not isinstance(state, dict):
-        return None, True, ""
+        return None, True, {}
     scn = _scenario(scenarios, str(state.get("scenario_id") or ""))
     if not scn:
-        return None, True, ""
+        return None, True, {}
     beats = _beats(scn)
     if not beats:
-        return None, True, ""
+        return None, True, {}
 
     at = max(1, int(advance_turns or DEFAULT_ADVANCE_TURNS))
     turns = int(state.get("turns_in_beat") or 0) + 1
@@ -199,19 +213,18 @@ def advance_state(
     ending_id = str(state.get("ending_id") or "")
     endings = _endings(scn)
 
-    # 已在结局段：演绎满 advance_turns 轮 → 收场并回写该结局记忆
+    # 已在结局段：演绎满 advance_turns 轮 → 收场并结算该结局副作用
     if ending_id:
         if turns >= at:
-            mem = str((endings.get(ending_id) or {}).get("memory") or "").strip()
-            return None, True, mem
+            return None, True, _finish_payload(endings.get(ending_id))
         new_state = dict(state)
         new_state.update(turns_in_beat=turns, updated_at=ts)
-        return new_state, False, ""
+        return new_state, False, {}
 
     if turns < at:
         new_state = dict(state)
         new_state.update(turns_in_beat=turns, updated_at=ts)
-        return new_state, False, ""
+        return new_state, False, {}
 
     # 到点推进：先看当前 beat 是否为选择点
     idx = int(state.get("beat_index") or 0)
@@ -223,17 +236,16 @@ def advance_state(
         if chosen and chosen in endings:
             new_state = dict(state)
             new_state.update(ending_id=chosen, turns_in_beat=0, updated_at=ts)
-            return new_state, False, ""
+            return new_state, False, {}
         # 分支未配妥 → 退化为线性收场
 
     # 线性推进 / 收场
     if idx + 1 < len(beats):
         new_state = dict(state)
         new_state.update(beat_index=idx + 1, turns_in_beat=0, updated_at=ts)
-        return new_state, False, ""
-    # 末 beat 之后：无分支结局 → on_complete 兜底回写
-    mem = str((scn.get("on_complete") or {}).get("memory") or "").strip()
-    return None, True, mem
+        return new_state, False, {}
+    # 末 beat 之后：无分支结局 → on_complete 兜底结算
+    return None, True, _finish_payload(scn.get("on_complete"))
 
 
 def current_directive(

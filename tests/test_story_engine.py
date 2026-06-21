@@ -31,7 +31,7 @@ SCENARIOS = {
             {"id": "chat", "directive": "场景推进：聊起近况。"},
             {"id": "closing", "directive": "场景收尾：温柔道别。"},
         ],
-        "on_complete": {"memory": "我们一起喝过一次咖啡"},
+        "on_complete": {"memory": "我们一起喝过一次咖啡", "intimacy_bonus": 2},
     },
     "branch_date": {
         "title": "分岔约会",
@@ -49,7 +49,8 @@ SCENARIOS = {
             },
         ],
         "endings": {
-            "warm": {"directive": "结局：开心约好下次。", "memory": "我们约好下次再一起散步"},
+            "warm": {"directive": "结局：开心约好下次。", "memory": "我们约好下次再一起散步",
+                     "intimacy_bonus": 4},
             "cool": {"directive": "结局：礼貌道别。", "memory": "我们一起散过一次步"},
         },
     },
@@ -119,18 +120,19 @@ def test_start_unknown_or_empty():
 def test_advance_progresses_beats_deterministically():
     st = start_scenario("coffee_date", SCENARIOS, bond_level=2)
     finished = False
-    mem = ""
+    payload = {}
     seen_beats = [st["beat_index"]]
     for _ in range(6):
-        st, finished, mem = advance_state(st, SCENARIOS, advance_turns=2)
+        st, finished, payload = advance_state(st, SCENARIOS, advance_turns=2)
         if finished:
             break
         seen_beats.append(st["beat_index"])
     assert finished is True
     assert st is None
     assert seen_beats == [0, 0, 1, 1, 2, 2]
-    # 末 beat 之后无分支 → on_complete 兜底回写
-    assert mem == "我们一起喝过一次咖啡"
+    # 末 beat 之后无分支 → on_complete 兜底结算（记忆 + 关系加成）
+    assert payload["memory"] == "我们一起喝过一次咖啡"
+    assert payload["intimacy_bonus"] == 2.0
 
 
 def test_advance_single_turn_per_beat():
@@ -139,14 +141,14 @@ def test_advance_single_turn_per_beat():
     assert not fin and st["beat_index"] == 1
     st, fin, _ = advance_state(st, SCENARIOS, advance_turns=1)
     assert not fin and st["beat_index"] == 2
-    st, fin, mem = advance_state(st, SCENARIOS, advance_turns=1)
+    st, fin, payload = advance_state(st, SCENARIOS, advance_turns=1)
     assert fin and st is None
-    assert mem == "我们一起喝过一次咖啡"
+    assert payload["memory"] == "我们一起喝过一次咖啡"
 
 
 def test_advance_invalid_is_safe():
-    assert advance_state(None, SCENARIOS) == (None, True, "")
-    assert advance_state({"scenario_id": "gone"}, SCENARIOS) == (None, True, "")
+    assert advance_state(None, SCENARIOS) == (None, True, {})
+    assert advance_state({"scenario_id": "gone"}, SCENARIOS) == (None, True, {})
 
 
 # ── 分支多结局 ────────────────────────────────────────────────────
@@ -160,10 +162,11 @@ def test_branch_routes_to_warm_ending_and_writes_memory():
     st, fin, _ = advance_state(st, SCENARIOS, user_message="好呀，我愿意", advance_turns=1)
     assert not fin and st["ending_id"] == "warm"
     assert current_directive(st, SCENARIOS) == "结局：开心约好下次。"
-    # 结局段演绎满 advance_turns → 收场回写 warm 记忆
-    st, fin, mem = advance_state(st, SCENARIOS, advance_turns=1)
+    # 结局段演绎满 advance_turns → 收场结算 warm 记忆 + 关系加成
+    st, fin, payload = advance_state(st, SCENARIOS, advance_turns=1)
     assert fin and st is None
-    assert mem == "我们约好下次再一起散步"
+    assert payload["memory"] == "我们约好下次再一起散步"
+    assert payload["intimacy_bonus"] == 4.0
 
 
 def test_branch_routes_to_cool_ending():
@@ -171,8 +174,10 @@ def test_branch_routes_to_cool_ending():
     st, _, _ = advance_state(st, SCENARIOS, advance_turns=1)
     st, fin, _ = advance_state(st, SCENARIOS, user_message="算了我有点忙", advance_turns=1)
     assert st["ending_id"] == "cool"
-    st, fin, mem = advance_state(st, SCENARIOS, advance_turns=1)
-    assert fin and mem == "我们一起散过一次步"
+    st, fin, payload = advance_state(st, SCENARIOS, advance_turns=1)
+    assert fin and payload["memory"] == "我们一起散过一次步"
+    # cool 结局未配 intimacy_bonus → 0
+    assert payload["intimacy_bonus"] == 0.0
 
 
 def test_branch_no_keyword_falls_back_to_default_ending():

@@ -51,8 +51,16 @@ def _eligible_facts(memory_facts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
-def _fact_score(f: Dict[str, Any], now: float) -> tuple:
-    """回访优先级：稳定层优先 → 复发多 → 越近越优先。返回可比较元组。"""
+def _fact_score(f: Dict[str, Any], now: float, prefer_category: str = "") -> tuple:
+    """回访优先级：偏好类目优先 → 稳定层 → 复发多 → 越近越优先。返回可比较元组。
+
+    ``prefer_category`` 非空时，该类目（如剧情回写的 ``story`` 共享经历）领先一档——
+    让「一起经历过的事」优先被主动回访（"还记得那次星空下的约定吗"），把
+    剧情→记忆→主动回访这条飞轮转起来。默认 ""（行为完全等同旧版）。
+    """
+    pref = (prefer_category or "").strip().lower()
+    cat = str(f.get("category") or "").strip().lower()
+    pref_bonus = 1 if (pref and cat == pref) else 0
     tier = str(f.get("tier") or "raw").strip().lower()
     stable_bonus = 1 if tier == "stable" else 0
     try:
@@ -64,7 +72,7 @@ def _fact_score(f: Dict[str, Any], now: float) -> tuple:
         last_seen = float(last_seen)
     except (TypeError, ValueError):
         last_seen = 0.0
-    return (stable_bonus, hits, last_seen)
+    return (pref_bonus, stable_bonus, hits, last_seen)
 
 
 def select_proactive_topic(
@@ -75,17 +83,19 @@ def select_proactive_topic(
     intimacy: float = 0.0,
     min_silent_hours: float = 24.0,
     max_context_facts: int = _DEFAULT_CONTEXT_FACTS,
+    prefer_category: str = "",
     now: Optional[float] = None,
 ) -> Dict[str, Any]:
     """选出一个主动开场话题种子（确定性）。
 
     Args:
         memory_facts: 该用户长期记忆条目，每项含 ``content`` 及可选 ``source/tier/hits/
-            last_seen/created_at``（即 episodic ``list_rows`` 行）。
+            last_seen/created_at/category``（即 episodic ``list_rows`` 行）。
         silent_hours: 距上次互动的小时数。
         stage: 关系阶段（initial/warming/intimate/steady…），用于克制修饰。
         intimacy: 亲密度 0-100（预留）。
         min_silent_hours: 低于此沉默时长不主动开场（避免打扰活跃用户）。
+        prefer_category: 优先回访的记忆类目（如 ``story`` 共享经历）；空则不偏好。
         now: 注入"现在"时间戳（测试用）。
 
     Returns:
@@ -110,14 +120,14 @@ def select_proactive_topic(
     long_absence = sh >= _LONG_ABSENCE_HOURS
     eligible = _eligible_facts(memory_facts)
     if eligible:
-        best = max(eligible, key=lambda f: _fact_score(f, now))
+        best = max(eligible, key=lambda f: _fact_score(f, now, prefer_category))
         fact = str(best.get("content") or "").strip()
         # P1b：除选中事实外，再挑几条高置信事实作背景（按同一优先级排序，去重）。
         context_facts: List[str] = []
         if max_context_facts > 0:
             others = sorted(
                 (f for f in eligible if f is not best),
-                key=lambda f: _fact_score(f, now), reverse=True,
+                key=lambda f: _fact_score(f, now, prefer_category), reverse=True,
             )
             for f in others:
                 c = str(f.get("content") or "").strip()
@@ -162,13 +172,15 @@ def build_proactive_topic_block(
     stage: str = "",
     intimacy: float = 0.0,
     min_silent_hours: float = 24.0,
+    prefer_category: str = "",
     now: Optional[float] = None,
 ) -> str:
     """组装【主动话题】prompt 块；无需开场时返回 ""（绝不抛）。"""
     try:
         sel = select_proactive_topic(
             memory_facts, silent_hours=silent_hours, stage=stage,
-            intimacy=intimacy, min_silent_hours=min_silent_hours, now=now,
+            intimacy=intimacy, min_silent_hours=min_silent_hours,
+            prefer_category=prefer_category, now=now,
         )
     except Exception:
         return ""

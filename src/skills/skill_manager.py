@@ -917,7 +917,10 @@ class SkillManager(LoggerMixin):
                 ) if hasattr(self.config, "config") else None
                 if _bl_cfg and _bl_cfg.get("enabled", False):
                     from src.contacts.relationship_level import build_bond_level_block
-                    _bscore = (context or {}).get("intimacy_score")
+                    # Phase ④：基础 intimacy + 剧情累计加成（完成深度剧情真实推动 bond）
+                    _bscore = self._effective_intimacy(user_context, _chat_id)
+                    if _bscore is None:
+                        _bscore = (context or {}).get("intimacy_score")
                     _days_known = (context or {}).get("relationship_days")
                     _bl_block = build_bond_level_block(
                         _bscore,
@@ -2589,9 +2592,19 @@ class SkillManager(LoggerMixin):
         try:
             from src.utils.proactive_topic import select_proactive_topic
             facts = store.list_rows(prefix=key, limit=50) or []
+            # Phase ④：优先回访剧情回写的「共享经历」（story 类目）→ 转动飞轮。
+            _pref = "story"
+            try:
+                _pref = str(
+                    ((self._story_cfg() or {}).get("proactive_prefer_category"))
+                    or "story"
+                )
+            except Exception:
+                _pref = "story"
             return select_proactive_topic(
                 facts, silent_hours=silent_hours, stage=stage,
                 intimacy=intimacy, min_silent_hours=min_silent_hours,
+                prefer_category=_pref,
             )
         except Exception:
             return empty
@@ -3003,11 +3016,64 @@ class SkillManager(LoggerMixin):
         except Exception:
             self.logger.debug("story memory writeback failed", exc_info=True)
 
-    def _bond_level_from_context(self, user_context: Dict[str, Any]) -> int:
+    def _story_bonus_cap(self) -> float:
+        """剧情累计加成上限（防止刷剧情把关系刷满；默认 12，约够升一个等级带）。"""
+        try:
+            return float(self._story_cfg().get("max_intimacy_bonus", 12) or 12)
+        except Exception:
+            return 12.0
+
+    def _apply_story_intimacy_bonus(
+        self, user_context: Dict[str, Any], chat_id: Any, bonus: float
+    ) -> None:
+        """剧情收场 → 累加一份「共同经历」关系加成（Phase ④「剧情→成长」边）。
+
+        intimacy_score 由 IntimacyEngine 拥有（不可从此处直写），故把剧情加成作为
+        **独立累加项**存 rel_state.story_bonus（随 user_context 持久化、按 chat 维度），
+        在 ``_effective_intimacy`` 处叠加进 bond 计算——既不篡改事实源、又让「完成深度
+        剧情」真实推动关系等级与更深剧情解锁。封顶防刷；失败不打断管线。
+        """
+        try:
+            b = float(bonus or 0.0)
+        except (TypeError, ValueError):
+            return
+        if b <= 0:
+            return
+        try:
+            from src.utils.companion_relationship import get_rel_state
+            st = get_rel_state(user_context, chat_id)
+            cur = float(st.get("story_bonus", 0) or 0)
+            st["story_bonus"] = round(min(self._story_bonus_cap(), cur + b), 2)
+            self.logger.info(
+                "[story] intimacy bonus +%.1f → story_bonus=%.1f chat=%s",
+                b, st["story_bonus"], chat_id,
+            )
+        except Exception:
+            self.logger.debug("story intimacy bonus apply failed", exc_info=True)
+
+    def _effective_intimacy(self, user_context: Dict[str, Any], chat_id: Any = ""):
+        """基础 intimacy_score + 剧情累计加成（封顶 100）；无基础信号时返回原值（不臆造）。"""
+        base = user_context.get("intimacy_score")
+        if base is None:
+            return None
+        try:
+            b = float(base)
+        except (TypeError, ValueError):
+            return base
+        try:
+            from src.utils.companion_relationship import get_rel_state
+            bonus = float(get_rel_state(user_context, chat_id).get("story_bonus", 0) or 0)
+        except Exception:
+            bonus = 0.0
+        return max(0.0, min(100.0, b + bonus))
+
+    def _bond_level_from_context(
+        self, user_context: Dict[str, Any], chat_id: Any = ""
+    ) -> int:
         try:
             from src.contacts.relationship_level import compute_bond_level
             return int(compute_bond_level(
-                user_context.get("intimacy_score")).get("level", 0))
+                self._effective_intimacy(user_context, chat_id)).get("level", 0))
         except Exception:
             return 0
 
@@ -3040,7 +3106,7 @@ class SkillManager(LoggerMixin):
             return None
         ent = user_context.get("entitlement")
         ent = ent if isinstance(ent, dict) else None
-        bond = self._bond_level_from_context(user_context)
+        bond = self._bond_level_from_context(user_context, chat_id)
 
         if t in ("结束剧情", "退出剧情", "/story stop", "story stop"):
             if self._get_story_state(user_context, chat_id):
@@ -3134,14 +3200,20 @@ class SkillManager(LoggerMixin):
                     from src.skills.story_engine import advance_state
                     _at = int(_scfg.get("advance_turns", 0) or 0)
                     _kw = {"advance_turns": _at} if _at > 0 else {}
-                    _new, _fin, _mem = advance_state(
+                    _new, _fin, _payload = advance_state(
                         _sstate, self._story_scenarios(),
                         user_message=user_msg, **_kw)
                     self._set_story_state(
                         user_context, chat_id, None if _fin else _new)
-                    if _fin and (_mem or "").strip():
-                        self._writeback_story_memory(
-                            user_id, chat_id, user_context, _mem)
+                    if _fin and isinstance(_payload, dict):
+                        _mem = str(_payload.get("memory") or "").strip()
+                        if _mem:
+                            self._writeback_story_memory(
+                                user_id, chat_id, user_context, _mem)
+                        _bonus = float(_payload.get("intimacy_bonus") or 0.0)
+                        if _bonus > 0:
+                            self._apply_story_intimacy_bonus(
+                                user_context, chat_id, _bonus)
         except Exception:
             self.logger.debug("story advance skipped", exc_info=True)
 
