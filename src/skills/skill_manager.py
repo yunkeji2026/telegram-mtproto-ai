@@ -765,6 +765,18 @@ class SkillManager(LoggerMixin):
                 self._context_store.flush(user_id_str)
                 return _story_reply
 
+            # Phase ④续³：关系/成长面板（端用户在对话内查询自己的成长——把记忆/成长/剧情
+            # 整条链的进度一屏看见）。返回字符串=短路；None=非指令。
+            try:
+                _growth_reply = self._handle_growth_command(
+                    text, user_context, _chat_id
+                )
+            except Exception:
+                _growth_reply = None
+                self.logger.debug("growth command skipped", exc_info=True)
+            if _growth_reply is not None:
+                return _growth_reply
+
             # 2. 冷却
             if not self._check_cooldown(text, user_id_str, chat_id=_chat_id):
                 self.logger.warning(f"{log_prefix}用户 {user_id_str} 处于冷却期，跳过回�")
@@ -3191,6 +3203,116 @@ class SkillManager(LoggerMixin):
         self._set_story_state(user_context, chat_id, state)
         self.logger.info("[story] start scenario=%s chat=%s", sid, chat_id)
         return None
+
+    _GROWTH_TRIGGERS = frozenset({
+        "我们的关系", "关系进度", "关系状态", "我的等级", "成长", "成长进度",
+        "/status", "/relationship", "我们的故事",
+    })
+
+    @staticmethod
+    def _progress_bar(progress: float, cells: int = 10) -> str:
+        try:
+            p = max(0.0, min(1.0, float(progress)))
+        except (TypeError, ValueError):
+            p = 0.0
+        filled = int(round(p * cells))
+        return "▮" * filled + "▯" * (cells - filled)
+
+    def _handle_growth_command(
+        self, text: str, user_context: Dict[str, Any], chat_id: Any
+    ):
+        """关系/成长面板（端用户在对话内一屏看见成长）：等级+进度+里程碑+剧情足迹。
+
+        返回字符串=短路；None=非指令 / 非陪伴域。纯读已算好的数据（compute_bond_level /
+        bond_milestones / list_scenarios / rel_state.story_done），不写库、不调 LLM。
+        """
+        t = (text or "").strip()
+        if t not in self._GROWTH_TRIGGERS:
+            return None
+        cfg0 = self.config.config if hasattr(self.config, "config") else {}
+        comp = (cfg0.get("companion") or {}) if isinstance(cfg0, dict) else {}
+        if effective_domain_name(cfg0) != "conversion" or not comp.get("enabled", True):
+            return None
+
+        from src.contacts.relationship_level import (
+            bond_milestones as _bm,
+            compute_bond_level as _cbl,
+            level_unlocks as _lu,
+        )
+
+        eff = self._effective_intimacy(user_context, chat_id)
+        if eff is None:
+            eff = user_context.get("intimacy_score")
+        lvl = _cbl(eff)
+        days_known = user_context.get("relationship_days")
+
+        lines: List[str] = []
+        if lvl.get("level", 0) >= 1:
+            head = f"💞 我们现在是「{lvl['name']}」的关系"
+            if not lvl.get("is_max") and lvl.get("next_name"):
+                head += f"（再深一点就是「{lvl['next_name']}」啦）"
+            lines.append(head)
+            bar = self._progress_bar(lvl.get("progress", 0.0))
+            if lvl.get("is_max"):
+                lines.append(f"{bar}  已经是最亲密的关系了呢")
+            else:
+                stn = lvl.get("score_to_next")
+                tail = f"，再积累一点点就能更进一步" if stn else ""
+                lines.append(f"{bar}  {int(round(lvl.get('progress', 0.0) * 100))}%{tail}")
+        else:
+            lines.append("💞 我们才刚认识不久，多陪我聊聊，关系会慢慢变深的～")
+
+        # 里程碑（含相识时长 + 升级；剧情纪念点单独在下方剧情足迹体现）
+        try:
+            ms = _bm(intimacy_score=eff, days_known=days_known)
+            if ms:
+                labels = "、".join(m["label"] for m in ms[:5])
+                lines.append(f"🌱 一起走过：{labels}")
+        except Exception:
+            self.logger.debug("growth milestones skipped", exc_info=True)
+
+        # 剧情足迹：经历过 / 还能一起经历 / 待解锁
+        scfg = self._story_cfg()
+        if scfg.get("enabled", False):
+            scenarios = self._story_scenarios()
+            if scenarios:
+                from src.skills.story_engine import list_scenarios
+                ent = user_context.get("entitlement")
+                ent = ent if isinstance(ent, dict) else None
+                bond = self._bond_level_from_context(user_context, chat_id)
+                try:
+                    from src.utils.companion_relationship import get_rel_state
+                    done_ids = set(get_rel_state(user_context, chat_id).get("story_done") or [])
+                except Exception:
+                    done_ids = set()
+                rows = list_scenarios(scenarios, entitlement=ent, bond_level=bond)
+                done_titles, avail, locked = [], [], []
+                for r in rows:
+                    if r["id"] in done_ids:
+                        done_titles.append(r["title"])
+                    elif r["available"]:
+                        avail.append(r["title"])
+                    else:
+                        locked.append(r["title"])
+                if done_titles:
+                    lines.append("📖 我们一起经历过：" + "、".join(f"《{x}》" for x in done_titles))
+                if avail:
+                    lines.append("✨ 还能一起经历：" + "、".join(f"《{x}》" for x in avail)
+                                 + "（发「开始剧情 名称」）")
+                if locked:
+                    lines.append("🔒 等关系更深/解锁后可体验：" + "、".join(f"《{x}》" for x in locked))
+
+        # 等级解锁预览（若配置了 bond_level.unlocks）
+        try:
+            bl_cfg = comp.get("bond_level") or {}
+            if bl_cfg.get("enabled", False):
+                unlocked = _lu(lvl.get("level", 0), bl_cfg.get("unlocks"))
+                if unlocked:
+                    lines.append("🎁 当前等级已解锁：" + "、".join(unlocked))
+        except Exception:
+            self.logger.debug("growth unlocks skipped", exc_info=True)
+
+        return "\n".join(lines)
 
     def _update_after_reply(self, reply: str, user_id: str, user_context: Dict[str, Any],
                             chat_id: Any = '', user_msg: str = ''):

@@ -1789,3 +1789,38 @@ skill_manager 无 contacts/journey 句柄**，要在 ops 卡片叠加 effective 
 **遗留（明确下一步候选）**：健康卡/看板 effective intimacy 统一 = 需把 story_bonus 经
 gateway/IntimacyEngine 写成 journey 事件（跨模块，单独立项）；端用户 MiniApp 接 bond/story/checkout
 （跨仓前端）。
+
+## 50. Phase ④续³ · 关系/成长面板（对话内一屏看见整条链的成长）
+
+**立项判断 / 主动改方向**：上轮建议下一步做「真·journey 加成」统一 ops 数据面。本轮勘探
+（读 `intimacy_engine.py` + `rpa_hooks.py`）确认：IntimacyEngine 是 **event-stream-is-truth**
+（journey_events 聚合 0-100），contacts hooks **挂在各 runner、不在 skill_manager**；要把 story
+加成沉到 journey 须新增 event 类型 + 改 IntimacyEngine 打分 + 经**多个 runner** 发事件 + store
+迁移，且动的是喂 reactivation/funnel/handoff 的核心分数——**高面积高回归风险、却只换来 ops 视觉
+统一（非用户侧护城河）**。按「有更好替代就优化」纪律，**透明延后** journey 统一，转做用户侧
+价值更高且全自治的一环：把整条「记忆→成长→剧情」链的进度做成**对话内可查的成长面板**——
+这正是当初建链要给端用户的回报，也是 MiniApp 面板的「无前端」先行版。
+
+**改动**（纯新增指令，零改既有逻辑）：
+- `_handle_growth_command`（接在 `_handle_story_command` 后短路链）：触发词
+  「我们的关系 / 关系进度 / 成长 / 我的等级 / 我们的故事 / /status …」→ 一屏返回：
+  - 💞 当前 bond 等级 + 名称 +（距下一级）；进度条 `▮▮▮▯▯…` + 百分比（`compute_bond_level`）；
+  - 🌱 已达成里程碑（`bond_milestones`：相识时长 + 升级）；
+  - 📖 剧情足迹：一起经历过（`rel_state.story_done`）/ ✨ 还能一起经历 / 🔒 待解锁
+    （`list_scenarios` 复用双 gate，不绕付费）；
+  - 🎁 当前等级解锁预览（`level_unlocks`，配 bond_level.unlocks 才出）。
+- 用 `_effective_intimacy` 取数 → 与对话面 bond 完全一致（含剧情加成）；非陪伴域/未启用 → 返回
+  None 不劫持；空亲密度 → 温和兜底「刚认识不久」。
+- **测试**：新建 `test_growth_command_wiring.py` 8 测（触发/非域不劫持/等级进度/剧情足迹
+  经历过·可玩·待解锁/解锁预览/低分兜底/进度条边界）；全量 **5793 passed / 31 skipped / 0 fail（278s）**。
+
+**实施中的再优化**：
+1. **代码实锤后果断改道**：读 IntimacyEngine + hooks 确认 journey 统一是跨多 runner 改核心分数，
+   不硬上；改做用户侧 ROI 更高的对话面板——且它顺带给了「成长可见」这件事的真正落点（用户而非 ops）。
+2. **面板全程复用既有纯函数**（compute_bond_level/bond_milestones/list_scenarios/level_unlocks），
+   零新增业务逻辑、零写库——把链的「读」侧收成一个口，drift 风险最低。
+3. **取数走 `_effective_intimacy`**：面板显示的等级与 AI 对话感知、与剧情解锁门槛三者同源一致，
+   不会出现「面板说 Lv2、AI 当 Lv3」的新割裂。
+
+**遗留**：journey 侧 effective 统一（ops 看板，跨模块）；端 MiniApp（跨仓前端）——面板已先用
+对话内形态交付了其用户价值。
