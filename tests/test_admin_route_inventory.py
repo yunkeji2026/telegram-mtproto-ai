@@ -69,6 +69,8 @@ _BASELINE = """
 /api/monetize/teaser-funnel	GET
 /api/monetize/selfie-funnel	GET
 /api/monetize/selfie-cap	GET
+/api/monetize/selfie-contacts	GET
+/api/monetize/teaser-contacts	GET
 /api/monetize/feature-check	POST
 /api/monetize/grant	POST
 /api/monetize/webhook	POST

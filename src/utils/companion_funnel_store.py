@@ -140,6 +140,38 @@ class CompanionFunnelStore:
         except Exception:
             return 0
 
+    def teaser_contacts(
+        self,
+        *,
+        scenario_id: Optional[str] = None,
+        now: Optional[float] = None,
+        window_days: float = 30.0,
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        """下钻：窗口内被预告的端用户清单（按次数降序）。可按 ``scenario_id`` 过滤。
+
+        返回 ``[{contact_key, count, first_ts, last_ts}]``——供运营点开漏斗看「具体谁被预告」、
+        再据 first_ts 做转化归因/挽回。绝不抛。
+        """
+        n = float(now if now is not None else time.time())
+        since = n - max(1.0, float(window_days)) * _DAY
+        lim = max(1, min(int(limit or 200), 1000))
+        sql = ("SELECT contact_key, COUNT(*), MIN(ts), MAX(ts) FROM teaser_events"
+               " WHERE ts >= ?")
+        params: List[Any] = [since]
+        sid = str(scenario_id or "").strip()
+        if sid:
+            sql += " AND scenario_id = ?"
+            params.append(sid)
+        sql += " GROUP BY contact_key ORDER BY COUNT(*) DESC, MAX(ts) DESC LIMIT ?"
+        params.append(lim)
+        try:
+            rows = self._conn.execute(sql, tuple(params)).fetchall()
+        except Exception:
+            return []
+        return [{"contact_key": str(r[0]), "count": int(r[1]),
+                 "first_ts": float(r[2]), "last_ts": float(r[3])} for r in rows]
+
     def funnel_stats(
         self,
         *,
@@ -299,6 +331,37 @@ class CompanionFunnelStore:
             return int(r[0]) if r else 0
         except Exception:
             return 0
+
+    def selfie_contacts(
+        self,
+        kind: str,
+        *,
+        now: Optional[float] = None,
+        window_days: float = 30.0,
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        """下钻：窗口内某 ``kind`` 的端用户清单（按次数降序）。``kind`` ∈ ``SELFIE_KINDS``。
+
+        返回 ``[{contact_key, count, first_ts, last_ts}]``——locked=该挽回谁、capped=预算压在谁身上、
+        delivered=谁是出图重度用户。非法 kind → 空。绝不抛。
+        """
+        k = str(kind or "").strip()
+        if k not in SELFIE_KINDS:
+            return []
+        n = float(now if now is not None else time.time())
+        since = n - max(1.0, float(window_days)) * _DAY
+        lim = max(1, min(int(limit or 200), 1000))
+        try:
+            rows = self._conn.execute(
+                "SELECT contact_key, COUNT(*), MIN(ts), MAX(ts) FROM selfie_events"
+                " WHERE kind = ? AND ts >= ? GROUP BY contact_key"
+                " ORDER BY COUNT(*) DESC, MAX(ts) DESC LIMIT ?",
+                (k, since, lim),
+            ).fetchall()
+        except Exception:
+            return []
+        return [{"contact_key": str(r[0]), "count": int(r[1]),
+                 "first_ts": float(r[2]), "last_ts": float(r[3])} for r in rows]
 
     def selfie_funnel_stats(
         self,

@@ -307,6 +307,44 @@ def test_selfie_funnel_counts_capped_kind():
     assert st["requests"] == 3
 
 
+# ── Stage K：下钻（per-contact 清单） ─────────────────────────────────────
+
+def test_selfie_contacts_groups_by_contact_and_kind():
+    s = _store()
+    s.record_selfie("u1", "locked", now=_NOW)
+    s.record_selfie("u1", "locked", now=_NOW + 10)   # u1 触墙 2 次
+    s.record_selfie("u2", "locked", now=_NOW + 5)
+    s.record_selfie("u3", "delivered", now=_NOW)     # 不同 kind 不混入
+    items = s.selfie_contacts("locked", now=_NOW + 100, window_days=30)
+    assert [it["contact_key"] for it in items] == ["u1", "u2"]  # 按次数降序
+    u1 = items[0]
+    assert u1["count"] == 2
+    assert u1["first_ts"] == _NOW and u1["last_ts"] == _NOW + 10
+    # 非法 kind → 空
+    assert s.selfie_contacts("nope", now=_NOW + 100) == []
+
+
+def test_selfie_contacts_window_filters_old():
+    s = _store()
+    s.record_selfie("old", "capped", now=_NOW - 40 * 86400)  # 窗外
+    s.record_selfie("new", "capped", now=_NOW - 1 * 86400)   # 窗内
+    items = s.selfie_contacts("capped", now=_NOW, window_days=30)
+    assert [it["contact_key"] for it in items] == ["new"]
+
+
+def test_teaser_contacts_groups_and_scenario_filter():
+    s = _store()
+    s.record_teaser("u1", "beach", "story_ch1", now=_NOW)
+    s.record_teaser("u1", "beach", "story_ch1", now=_NOW + 10)
+    s.record_teaser("u2", "city", "story_ch2", now=_NOW + 5)
+    allc = s.teaser_contacts(now=_NOW + 100, window_days=30)
+    assert [it["contact_key"] for it in allc] == ["u1", "u2"]
+    assert allc[0]["count"] == 2
+    # 按场景过滤
+    beach = s.teaser_contacts(scenario_id="beach", now=_NOW + 100, window_days=30)
+    assert [it["contact_key"] for it in beach] == ["u1"]
+
+
 # ── EntitlementStore.paid_events_for（漏斗的真实 paid_lookup 底座） ─────────
 
 def test_paid_events_for_batched_and_paid_only():

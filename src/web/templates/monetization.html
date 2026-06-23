@@ -104,6 +104,20 @@
 
   <div class="section-h" style="margin-top:1.1rem">全局出图预算 <span style="font-size:.72rem;font-weight:400;color:var(--t3)">companion.selfie.daily_global_cap · 跨所有端用户/账号的当日出图硬上限，护出图 API 账单 · 按 UTC+8 0 点归零</span></div>
   <div class="mz-cards" id="mz-selfiecap-cards"></div>
+
+  <div class="section-h" style="margin-top:1.1rem">名单下钻 <span style="font-size:.72rem;font-weight:400;color:var(--t3)">点开看具体端用户——谁触墙该挽回 / 谁被预算拦 / 谁是出图重度用户 / 谁被预告（复用上方统计窗口，归因窗 14 天）</span></div>
+  <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.6rem">
+    <button type="button" class="btn btn-p" onclick="mzSelfieContacts('locked')">触墙名单</button>
+    <button type="button" class="btn btn-p" onclick="mzSelfieContacts('capped')">被预算拦名单</button>
+    <button type="button" class="btn btn-p" onclick="mzSelfieContacts('delivered')">送达名单</button>
+    <button type="button" class="btn btn-p" onclick="mzTeaserContacts()">预告触达名单</button>
+  </div>
+  <div class="table-wrap">
+    <table class="mz-table">
+      <thead><tr><th id="mz-drill-h" style="min-width:160px">端用户</th><th style="width:80px">次数</th><th style="width:120px">最近</th><th style="width:90px">转化</th></tr></thead>
+      <tbody id="mz-drill"><tr><td colspan="4" style="padding:1.2rem;color:var(--t3)">点上方按钮查看具体名单</td></tr></tbody>
+    </table>
+  </div>
 </div>
 
 <div class="card fa">
@@ -263,6 +277,44 @@ async function mzSelfieCap(){
       fCard('用量',pct(cap>0?used/cap:0),low?'⚠ 接近上限':'')+
       fCard('自拍功能',d.selfie_enabled?'已开':'未开');
   }catch(e){cards.innerHTML='<div class="mz-card"><div class="lb">全局出图预算</div><div class="v" style="font-size:.9rem;color:var(--amber)">请求失败</div></div>';}
+}
+
+function drillTs(ts){
+  if(!ts) return '—';
+  var d=new Date(ts*1000);
+  return (d.getMonth()+1)+'/'+d.getDate()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+}
+function drillRender(items,showConv){
+  var tb=document.getElementById('mz-drill');
+  if(!items||!items.length){tb.innerHTML='<tr><td colspan="4" style="padding:1.2rem;color:var(--t3)">窗口内无记录</td></tr>';return;}
+  tb.innerHTML=items.map(function(it){
+    var conv=showConv?(it.converted?'<span class="green">已转化</span>':'<span style="color:var(--t3)">未转化</span>'):'—';
+    return '<tr><td class="mono">'+esc(it.contact_key)+'</td><td>'+(it.count||0)+'</td><td>'+drillTs(it.last_ts)+'</td><td>'+conv+'</td></tr>';
+  }).join('');
+}
+async function mzSelfieContacts(kind){
+  var days=document.getElementById('mz-days').value||30;
+  var tb=document.getElementById('mz-drill');
+  document.getElementById('mz-drill-h').textContent='端用户（自拍·'+kind+'）';
+  tb.innerHTML='<tr><td colspan="4" style="padding:1.2rem;color:var(--t3)">加载中…</td></tr>';
+  try{
+    var res=await fetch('/api/monetize/selfie-contacts?kind='+encodeURIComponent(kind)+'&window_days='+encodeURIComponent(days)+'&attribution_days=14&limit=100');
+    var d=await res.json();
+    if(!d.enabled){tb.innerHTML='<tr><td colspan="4" style="padding:1.2rem;color:var(--t3)">漏斗未启用</td></tr>';return;}
+    drillRender(d.items,kind==='locked');
+  }catch(e){tb.innerHTML='<tr><td colspan="4" style="padding:1.2rem;color:var(--amber)">请求失败</td></tr>';}
+}
+async function mzTeaserContacts(){
+  var days=document.getElementById('mz-days').value||30;
+  var tb=document.getElementById('mz-drill');
+  document.getElementById('mz-drill-h').textContent='端用户（预告触达）';
+  tb.innerHTML='<tr><td colspan="4" style="padding:1.2rem;color:var(--t3)">加载中…</td></tr>';
+  try{
+    var res=await fetch('/api/monetize/teaser-contacts?window_days='+encodeURIComponent(days)+'&attribution_days=14&limit=100');
+    var d=await res.json();
+    if(!d.enabled){tb.innerHTML='<tr><td colspan="4" style="padding:1.2rem;color:var(--t3)">漏斗未启用</td></tr>';return;}
+    drillRender(d.items,true);
+  }catch(e){tb.innerHTML='<tr><td colspan="4" style="padding:1.2rem;color:var(--amber)">请求失败</td></tr>';}
 }
 
 async function mzRetention(){

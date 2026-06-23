@@ -123,6 +123,12 @@ def test_monetization_page_wires_both_funnels():
     assert "/api/monetize/selfie-cap" in html
     assert 'id="mz-selfiecap-cards"' in html
     assert "mzSelfieCap(" in html
+    # Stage K：名单下钻接线
+    assert "/api/monetize/selfie-contacts" in html
+    assert "/api/monetize/teaser-contacts" in html
+    assert 'id="mz-drill"' in html
+    assert "mzSelfieContacts(" in html
+    assert "mzTeaserContacts(" in html
 
 
 # ── Stage J：全局出图预算快照（/api/monetize/selfie-cap） ──────────────────
@@ -183,6 +189,68 @@ def test_selfie_cap_reports_used_and_remaining():
     assert d["remaining"] == 3
     assert d["reset_at_ts"] > 0
     reset_selfie_cap_tracker()
+
+
+# ── Stage K：名单下钻（/api/monetize/{selfie,teaser}-contacts） ─────────────
+
+def test_selfie_contacts_disabled_when_no_store():
+    client, _ = _client()
+    d = client.get("/api/monetize/selfie-contacts?kind=locked").json()
+    assert d["ok"] is True and d["enabled"] is False and d["items"] == []
+
+
+def test_selfie_contacts_bad_kind():
+    client, _ = _client()
+    d = client.get("/api/monetize/selfie-contacts?kind=bogus").json()
+    assert d["ok"] is False and d["reason"] == "bad_kind"
+
+
+def test_selfie_contacts_locked_annotates_conversion():
+    from src.utils.companion_funnel_store import CompanionFunnelStore
+    client, store = _client()
+    now = time.time()
+    funnel = CompanionFunnelStore(":memory:")
+    client.app.state.companion_funnel_store = funnel
+    funnel.record_selfie("u1", "locked", now=now - 2 * 86400)
+    funnel.record_selfie("u2", "locked", now=now - 2 * 86400)
+    store.record_unlock("u1", "exclusive_album", source="manual", now=now - 86400)
+    d = client.get(
+        "/api/monetize/selfie-contacts?kind=locked&window_days=30&attribution_days=14").json()
+    assert d["ok"] is True and d["enabled"] is True and d["kind"] == "locked"
+    by = {it["contact_key"]: it for it in d["items"]}
+    assert by["u1"]["converted"] is True
+    assert by["u2"]["converted"] is False
+
+
+def test_selfie_contacts_capped_no_conversion_field_logic():
+    from src.utils.companion_funnel_store import CompanionFunnelStore
+    client, _ = _client()
+    now = time.time()
+    funnel = CompanionFunnelStore(":memory:")
+    client.app.state.companion_funnel_store = funnel
+    funnel.record_selfie("u9", "capped", now=now - 3600)
+    d = client.get("/api/monetize/selfie-contacts?kind=capped").json()
+    assert d["ok"] is True and d["count"] == 1
+    assert d["items"][0]["contact_key"] == "u9"
+    assert d["items"][0]["count"] == 1
+
+
+def test_teaser_contacts_annotates_conversion_and_scenario_filter():
+    from src.utils.companion_funnel_store import CompanionFunnelStore
+    client, store = _client()
+    now = time.time()
+    funnel = CompanionFunnelStore(":memory:")
+    client.app.state.companion_funnel_store = funnel
+    funnel.record_teaser("u1", "beach", "story_ch1", now=now - 2 * 86400)
+    funnel.record_teaser("u2", "city", "story_ch2", now=now - 2 * 86400)
+    store.record_unlock("u1", "story_ch1", source="manual", now=now - 86400)
+    d = client.get("/api/monetize/teaser-contacts?window_days=30").json()
+    by = {it["contact_key"]: it for it in d["items"]}
+    assert by["u1"]["converted"] is True
+    assert by["u2"]["converted"] is False
+    # 场景过滤
+    d2 = client.get("/api/monetize/teaser-contacts?scenario_id=beach").json()
+    assert [it["contact_key"] for it in d2["items"]] == ["u1"]
 
 
 def test_grant_subscribe_then_entitlement():

@@ -237,6 +237,84 @@ def register_monetization_routes(app, *, api_auth, config_manager=None) -> None:
             "selfie_enabled": bool(scfg.get("enabled", False)),
         }
 
+    def _annotate_converted(request, items, *, attribution_days, item_id=None):
+        """给下钻清单标注「首次事件后归因窗内是否付费」。item_id=None→任意付费即转化。"""
+        if not items:
+            return items
+        store = _store(request)
+        keys = [it["contact_key"] for it in items]
+        try:
+            paid = store.paid_events_for(keys, since=0.0) or {}
+        except Exception:
+            paid = {}
+        attr = max(0.0, float(attribution_days)) * _DAY
+        for it in items:
+            conv = False
+            lo = float(it.get("first_ts") or 0)
+            hi = lo + attr
+            for p in paid.get(it["contact_key"]) or []:
+                if item_id is not None and str(p.get("item_id") or "") != item_id:
+                    continue
+                try:
+                    pts = float(p.get("ts") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if lo <= pts <= hi:
+                    conv = True
+                    break
+            it["converted"] = conv
+        return items
+
+    @app.get("/api/monetize/selfie-contacts")
+    async def api_monetize_selfie_contacts(
+        request: Request, kind: str = "locked", window_days: float = 30,
+        attribution_days: float = 14, limit: int = 100, _=Depends(api_auth),
+    ):
+        """Stage K 下钻：某自拍漏斗桶（locked/capped/delivered/too_soon）的端用户清单。
+
+        locked 群体额外标注是否在归因窗内买了 exclusive_album（converted）——运营点开「触墙」即见
+        「谁该挽回、谁已转化」。漏斗库未就绪 → enabled=false 空清单。
+        """
+        from src.utils.companion_funnel_store import (
+            SELFIE_CONVERSION_ITEM, SELFIE_KINDS)
+        funnel = getattr(request.app.state, "companion_funnel_store", None)
+        k = str(kind or "locked").strip()
+        if k not in SELFIE_KINDS:
+            return {"ok": False, "reason": "bad_kind",
+                    "message": f"kind 须为 {list(SELFIE_KINDS)}"}
+        if funnel is None:
+            return {"ok": True, "enabled": False, "kind": k, "count": 0, "items": []}
+        wd = max(1.0, min(float(window_days or 30), 365.0))
+        ad = max(0.0, min(float(attribution_days or 14), 365.0))
+        items = funnel.selfie_contacts(k, window_days=wd, limit=int(limit or 100))
+        if k == "locked":
+            items = _annotate_converted(request, items, attribution_days=ad,
+                                        item_id=SELFIE_CONVERSION_ITEM)
+        return {"ok": True, "enabled": True, "kind": k, "window_days": wd,
+                "count": len(items), "items": items}
+
+    @app.get("/api/monetize/teaser-contacts")
+    async def api_monetize_teaser_contacts(
+        request: Request, scenario_id: str = "", window_days: float = 30,
+        attribution_days: float = 14, limit: int = 100, _=Depends(api_auth),
+    ):
+        """Stage K 下钻：被付费预告触达的端用户清单（可按 scenario_id 过滤），标注是否转化。
+
+        converted=首次预告后归因窗内有任意已付事件——运营点开漏斗即见「谁被预告了/谁买单了」。
+        漏斗库未就绪 → enabled=false 空清单。
+        """
+        funnel = getattr(request.app.state, "companion_funnel_store", None)
+        if funnel is None:
+            return {"ok": True, "enabled": False, "count": 0, "items": []}
+        wd = max(1.0, min(float(window_days or 30), 365.0))
+        ad = max(0.0, min(float(attribution_days or 14), 365.0))
+        sid = str(scenario_id or "").strip()
+        items = funnel.teaser_contacts(scenario_id=sid or None, window_days=wd,
+                                       limit=int(limit or 100))
+        items = _annotate_converted(request, items, attribution_days=ad)
+        return {"ok": True, "enabled": True, "scenario_id": sid,
+                "window_days": wd, "count": len(items), "items": items}
+
     @app.post("/api/monetize/feature-check")
     async def api_monetize_feature_check(request: Request, _=Depends(api_auth)):
         """付费功能门控集成缝：任意前端/功能（语音/剧情/主动等）发送前先查。body：

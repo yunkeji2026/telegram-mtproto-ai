@@ -2694,3 +2694,42 @@ voice 成功则 `not _voice_sent` 跳过文本）。但其真发 `send_telegram_
 接近上限告警」，预算从"埋在代码里"变"看得见、调得动"；与两条转化漏斗（Stage E）同页，变现可观测面再补一块。
 **下一步**：① **漏斗下钻**（capped/locked → 端用户列表，运营点开看谁被拦/被墙）；② **出图缓存/多候选**（控成本提质量）；
 ③ **分进程部署时 cap 落共享存储**（多进程一致看板）；④ **发送入口审计**（proactive/worker 旁路是否纳入统一栈）。
+
+---
+
+## 72. Stage K：漏斗下钻——变现可观测从「看趋势」到「可行动」
+
+**实施前的代码实况核对**：两条漏斗（teaser/selfie）+ 预算快照都只返回**聚合数字**（locked=2、capped=3…），
+运营看到「2 人触墙」却**点不开看是谁** → 无法针对性挽回/调参。store 已有 `recent/selfie_recent`（裸事件流，
+按 ts 倒序限量）但**无 per-contact 聚合**（谁触了几次、最近何时、是否转化）。故 Stage K 补「按端用户下钻」。
+
+**改动**（store 出聚合查询、route 做转化标注、UI 点开看名单）：
+- `companion_funnel_store.py` 加两个 **SQL GROUP BY** 聚合查询（高效、绝不抛）：
+  - `selfie_contacts(kind, *, window_days, limit)`：某桶（locked/capped/delivered/too_soon）的端用户清单
+    `[{contact_key, count, first_ts, last_ts}]`，按次数降序。非法 kind → 空。
+  - `teaser_contacts(*, scenario_id=None, window_days, limit)`：被预告端用户清单，可按场景过滤。
+- `monetization_routes.py` 加 `GET /api/monetize/selfie-contacts` + `/teaser-contacts`，共用 `_annotate_converted`
+  辅助（按 first_ts + 归因窗 + `paid_events_for` 标 `converted`）：selfie 的 **locked** 桶标 exclusive_album 转化、
+  teaser 标任意付费转化。漏斗库未就绪 → enabled=false 空清单；selfie 非法 kind → ok=false。
+- `monetization.html` 名单下钻区：4 个按钮（触墙/被预算拦/送达/预告触达）→ `mzSelfieContacts(kind)`/`mzTeaserContacts()`
+  拉清单渲染进共享表（端用户/次数/最近时间/转化态），表头随桶动态切换。
+- `test_admin_route_inventory` 收录两端点。
+- **测试 +9**（store：分桶聚合/窗口过滤/场景过滤；route：未就绪空/非法 kind/locked 转化标注/capped 清单/teaser
+    转化+场景过滤；页面接线）。**全量 5996 passed / 31 skipped / 0 fail（单进程，~13min）**。
+
+**实施中的再优化**：
+1. **SQL GROUP BY 而非 Python 聚合**：直接库内 `COUNT/MIN/MAX ... GROUP BY contact_key ORDER BY COUNT DESC`，
+   大表也高效，limit 封顶 1000 防拉爆。
+2. **转化标注抽 `_annotate_converted` 共用**：selfie-locked 与 teaser 两端点同一份归因逻辑（item_id 可选——
+   selfie 限 exclusive_album、teaser 任意付费）——杜绝两处归因口径漂移。
+3. **store 零耦合变现**：聚合查询只出事件清单，转化标注在 route 用注入式 `paid_events_for`——store 仍可纯单测。
+4. **桶可点、表头随桶切**：locked 看「该挽回谁」、capped 看「预算压在谁身上」、delivered 看「出图重度用户」、
+   teaser 看「谁被预告/谁买单」——一个表复用四种视角，运营心智低。
+
+**能否再优化**：当前下钻只给 contact_key + 次数 + 转化态——可进一步在每行加「跳转到该端用户权益/统一收件箱」深链
+（运营一键挽回，属交互增强）；teaser 下钻可补 by_scenario 维度的 features 命中（精确转化下钻）。均属锦上添花。
+
+**Stage K 收口**：变现漏斗从「聚合趋势」下探到「端用户名单」——运营点「触墙名单」即见「u2 触墙未转化」可去挽回、
+点「被预算拦名单」即见「谁被 cap 挡住」可据此提额，可观测从**看趋势**真正落到**可行动**。变现可观测面（漏斗+预算+下钻）成闭环。
+**下一步**：① **下钻行加深链**（→端用户权益/收件箱，一键挽回）；② **出图缓存/多候选**（控成本提质量）；
+③ **分进程 cap 落共享存储**；④ **发送入口审计**（proactive/worker 旁路）。
