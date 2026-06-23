@@ -3258,6 +3258,21 @@ class SkillManager(LoggerMixin):
         except Exception:
             return False
 
+    def _record_selfie_event(self, contact_key: str, kind: str) -> None:
+        """Stage B：把自拍准入结果(too_soon/locked/delivered)埋点进转化漏斗（best-effort）。
+
+        只 ``peek`` 已存在的漏斗单例（monetization 就绪才有）——未初始化则静默 no-op，
+        绝不在自拍主流程里误建 ``:memory:`` store，也绝不抛。``contact_key`` 取 ``user_id``
+        （与 entitlement/tx_ledger 同一身份键），保证后续 ``exclusive_album`` 付费可归因。
+        """
+        try:
+            from src.utils.companion_funnel_store import peek_companion_funnel_store
+            store = peek_companion_funnel_store()
+            if store is not None:
+                store.record_selfie(str(contact_key or ""), kind)
+        except Exception:
+            self.logger.debug("record_selfie_event skipped", exc_info=True)
+
     async def _handle_selfie_request(
         self, text: str, user_id_str: str, user_context: Dict[str, Any], chat_id: Any,
     ) -> Optional[str]:
@@ -3303,11 +3318,14 @@ class SkillManager(LoggerMixin):
         )
         action = decision.get("action")
         if action == "too_soon":
+            self._record_selfie_event(user_id_str, "too_soon")
             return (f"哎呀，我们才刚开始熟悉呢，等再多聊聊、更亲近一点，"
                     f"{persona_name}就给你看我的样子好不好～")
         if action == "locked":
+            self._record_selfie_event(user_id_str, "locked")
             return self._selfie_upsell_text(ent, persona_name)
         # action == allow：尝试出图（默认 disabled → 退回文字）
+        self._record_selfie_event(user_id_str, "delivered")
         prompt = build_selfie_prompt(
             self._selfie_persona_for_prompt(user_context),
             scene_hint=str(scfg.get("scene_hint") or ""),

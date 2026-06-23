@@ -29,6 +29,12 @@ PaidLookup = Callable[[List[str]], Dict[str, List[Dict[str, Any]]]]
 
 _DAY = 86400.0
 
+# Stage B：自拍漏斗归因的目标付费项（变现目录 items.exclusive_album）。
+# 与 ``src.ai.companion_selfie.SELFIE_FEATURE`` 同值，但此处硬编码以保持 store **零耦合** ai 层。
+SELFIE_CONVERSION_ITEM = "exclusive_album"
+# 自拍事件 kind 取值（准入决策三态镜像 decide_selfie 的 action）。
+SELFIE_KINDS = ("too_soon", "locked", "delivered")
+
 
 class CompanionFunnelStore:
     _DDL = """
@@ -41,6 +47,15 @@ class CompanionFunnelStore:
     );
     CREATE INDEX IF NOT EXISTS idx_teaser_ts ON teaser_events(ts);
     CREATE INDEX IF NOT EXISTS idx_teaser_contact ON teaser_events(contact_key);
+
+    CREATE TABLE IF NOT EXISTS selfie_events (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        contact_key TEXT NOT NULL,
+        kind        TEXT NOT NULL DEFAULT '',
+        ts          REAL NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_selfie_ts ON selfie_events(ts);
+    CREATE INDEX IF NOT EXISTS idx_selfie_contact ON selfie_events(contact_key);
     """
 
     def __init__(self, db_path):
@@ -224,6 +239,150 @@ class CompanionFunnelStore:
         )
         return out
 
+    # ── Stage B：自拍/形象照（exclusive_album）转化漏斗 ────────────────────
+    def record_selfie(
+        self,
+        contact_key: str,
+        kind: str,
+        *,
+        now: Optional[float] = None,
+    ) -> Optional[int]:
+        """记一条自拍请求事件。``kind`` ∈ ``SELFIE_KINDS``（too_soon/locked/delivered）。
+
+        绝不抛（埋点失败不影响自拍主流程）。空 contact_key / 非法 kind → 不写、返回 None。
+        """
+        ck = str(contact_key or "").strip()
+        k = str(kind or "").strip()
+        if not ck or k not in SELFIE_KINDS:
+            return None
+        n = float(now if now is not None else time.time())
+        try:
+            with self._lock:
+                c = self._conn.execute(
+                    "INSERT INTO selfie_events (contact_key, kind, ts) VALUES (?,?,?)",
+                    (ck, k, n),
+                )
+                self._conn.commit()
+                return int(c.lastrowid) if c.lastrowid else None
+        except Exception as e:  # noqa: BLE001
+            logger.debug("record_selfie failed: %s", e)
+            return None
+
+    def _selfie_events_since(self, since: float) -> List[Dict[str, Any]]:
+        try:
+            rows = self._conn.execute(
+                "SELECT contact_key, kind, ts FROM selfie_events"
+                " WHERE ts >= ? ORDER BY ts ASC",
+                (float(since),),
+            ).fetchall()
+        except Exception:
+            return []
+        return [{"contact_key": str(r[0]), "kind": str(r[1]), "ts": float(r[2])}
+                for r in rows]
+
+    def selfie_recent(self, *, limit: int = 50) -> List[Dict[str, Any]]:
+        lim = max(1, min(int(limit or 50), 500))
+        try:
+            rows = self._conn.execute(
+                "SELECT id, contact_key, kind, ts FROM selfie_events"
+                " ORDER BY ts DESC LIMIT ?",
+                (lim,),
+            ).fetchall()
+        except Exception:
+            return []
+        cols = ["id", "contact_key", "kind", "ts"]
+        return [dict(zip(cols, r)) for r in rows]
+
+    def selfie_count(self) -> int:
+        try:
+            r = self._conn.execute("SELECT COUNT(*) FROM selfie_events").fetchone()
+            return int(r[0]) if r else 0
+        except Exception:
+            return 0
+
+    def selfie_funnel_stats(
+        self,
+        *,
+        paid_lookup: Optional[PaidLookup] = None,
+        now: Optional[float] = None,
+        window_days: float = 30.0,
+        attribution_days: float = 14.0,
+    ) -> Dict[str, Any]:
+        """自拍转化漏斗：需求(requests) → 触墙(locked) → 解锁付费(exclusive_album) 归因。
+
+        核心运营问句：**自拍付费墙真的把人推向 ``exclusive_album`` 了吗？**
+
+        - ``requests``：窗口内自拍事件总数；``contacts``：去重端用户数。
+        - ``too_soon/locked/delivered``：按准入态分桶计数（关系浅搪塞 / 触墙引导 / 真送达）。
+        - 转化（注入 ``paid_lookup`` 时）：**触墙(locked) 群体**中，其首次触墙后 attribution 窗口内
+          有 ``item_id == exclusive_album`` 的已付事件 → 记一次转化。``conversion_rate`` 以
+          ``locked_contacts`` 为分母（= 付费墙转化率，最关键单一指标）。
+        - ``paid_lookup`` 缺省（变现未接）→ 转化恒 0，仅看需求/触墙规模与分布。
+        """
+        n = float(now if now is not None else time.time())
+        since = n - max(1.0, float(window_days)) * _DAY
+        attr = max(0.0, float(attribution_days)) * _DAY
+        rows = self._selfie_events_since(since)
+        out: Dict[str, Any] = {
+            "window_days": float(window_days),
+            "attribution_days": float(attribution_days),
+            "requests": len(rows),
+            "contacts": 0,
+            "too_soon": 0,
+            "locked": 0,
+            "delivered": 0,
+            "locked_contacts": 0,
+            "conversions": 0,
+            "conversion_rate": 0.0,
+        }
+        if not rows:
+            return out
+
+        contacts = set()
+        # 触墙群体：ck -> 首次 locked ts（最早触墙）。
+        locked_first: Dict[str, float] = {}
+        for r in rows:
+            ck = r["contact_key"]
+            k = r["kind"]
+            contacts.add(ck)
+            if k in out:
+                out[k] = int(out[k]) + 1
+            if k == "locked":
+                prev = locked_first.get(ck)
+                locked_first[ck] = r["ts"] if prev is None else min(prev, r["ts"])
+
+        out["contacts"] = len(contacts)
+        out["locked_contacts"] = len(locked_first)
+        if not locked_first:
+            return out
+
+        paid_map: Dict[str, List[Dict[str, Any]]] = {}
+        if paid_lookup is not None:
+            try:
+                paid_map = paid_lookup(list(locked_first.keys())) or {}
+            except Exception:
+                logger.debug("selfie paid_lookup failed", exc_info=True)
+                paid_map = {}
+
+        converted = set()
+        for ck, first_ts in locked_first.items():
+            hi = float(first_ts) + attr
+            for p in paid_map.get(ck) or []:
+                if str(p.get("item_id") or "") != SELFIE_CONVERSION_ITEM:
+                    continue
+                try:
+                    p_ts = float(p.get("ts") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if float(first_ts) <= p_ts <= hi:
+                    converted.add(ck)
+                    break
+
+        out["conversions"] = len(converted)
+        lc = out["locked_contacts"]
+        out["conversion_rate"] = round(len(converted) / lc, 4) if lc else 0.0
+        return out
+
 
 _singleton: Optional["CompanionFunnelStore"] = None
 _singleton_lock = threading.Lock()
@@ -239,6 +398,15 @@ def get_companion_funnel_store(db_path=None) -> "CompanionFunnelStore":
     return _singleton
 
 
+def peek_companion_funnel_store() -> Optional["CompanionFunnelStore"]:
+    """返回**已存在**的单例；从不创建（None=未初始化）。
+
+    供 ``skill_manager`` 在自拍主流程里 best-effort 埋点：仅当 ``main`` 已用真实 db_path
+    初始化（monetization 就绪）时才记录，避免误建 ``:memory:`` 抛弃式 store。
+    """
+    return _singleton
+
+
 def reset_companion_funnel_store() -> None:
     """测试辅助：清空单例。"""
     global _singleton
@@ -250,6 +418,9 @@ def reset_companion_funnel_store() -> None:
 
 __all__ = [
     "CompanionFunnelStore",
+    "SELFIE_CONVERSION_ITEM",
+    "SELFIE_KINDS",
     "get_companion_funnel_store",
+    "peek_companion_funnel_store",
     "reset_companion_funnel_store",
 ]

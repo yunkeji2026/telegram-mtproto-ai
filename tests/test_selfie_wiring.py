@@ -11,6 +11,10 @@ from types import SimpleNamespace
 import pytest
 
 from src.ai.companion_selfie import SELFIE_FEATURE, reset_selfie_provider
+from src.utils.companion_funnel_store import (
+    get_companion_funnel_store,
+    reset_companion_funnel_store,
+)
 
 _SMcls = __import__(
     "src.skills.skill_manager", fromlist=["SkillManager"]
@@ -21,6 +25,7 @@ class _SM:
     _selfie_cfg = _SMcls._selfie_cfg
     _monetization_gate_enabled = _SMcls._monetization_gate_enabled
     _handle_selfie_request = _SMcls._handle_selfie_request
+    _record_selfie_event = _SMcls._record_selfie_event
     _selfie_upsell_text = _SMcls._selfie_upsell_text
     _try_send_selfie_media = _SMcls._try_send_selfie_media
     _selfie_persona_for_prompt = _SMcls._selfie_persona_for_prompt
@@ -103,3 +108,49 @@ async def test_gate_off_allows_without_album():
     out = await sm._handle_selfie_request("来张照片", "u1", ctx, "c1")
     assert out is not None
     assert "专属相册" not in out  # gate 关不应出现付费引导
+
+
+# ── Stage B：埋点接线（准入态 → 自拍漏斗） ────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_funnel_records_locked_event():
+    reset_companion_funnel_store()
+    funnel = get_companion_funnel_store(":memory:")
+    try:
+        sm = _SM(selfie_cfg=dict(_ON, free_daily=0), gate=True)
+        ctx = {"intimacy_score": 60, "entitlement": {"grants": [], "unlocked": []}}
+        await sm._handle_selfie_request("想看你的照片", "u_lk", ctx, "c1")
+        rows = funnel.selfie_recent(limit=10)
+        assert len(rows) == 1
+        assert rows[0]["contact_key"] == "u_lk"
+        assert rows[0]["kind"] == "locked"
+    finally:
+        reset_companion_funnel_store()
+
+
+@pytest.mark.asyncio
+async def test_funnel_records_delivered_and_too_soon():
+    reset_companion_funnel_store()
+    funnel = get_companion_funnel_store(":memory:")
+    reset_selfie_provider()
+    try:
+        sm = _SM(selfie_cfg=_ON, gate=True)
+        await sm._handle_selfie_request(
+            "发张照片", "u_dl", {"intimacy_score": 60,
+                              "entitlement": {"grants": [], "unlocked": []}}, "c1")
+        await sm._handle_selfie_request(
+            "发张自拍", "u_ts", {"intimacy_score": 3}, "c1")
+        kinds = {r["contact_key"]: r["kind"] for r in funnel.selfie_recent(limit=10)}
+        assert kinds["u_dl"] == "delivered"
+        assert kinds["u_ts"] == "too_soon"
+    finally:
+        reset_companion_funnel_store()
+
+
+@pytest.mark.asyncio
+async def test_funnel_noop_when_store_not_initialized():
+    reset_companion_funnel_store()  # 无单例 → peek 返回 None → 不记录、不报错
+    sm = _SM(selfie_cfg=_ON, gate=True)
+    ctx = {"intimacy_score": 60, "entitlement": {"grants": [], "unlocked": []}}
+    out = await sm._handle_selfie_request("想看你的照片", "u1", ctx, "c1")
+    assert out is not None  # 主流程不受埋点缺失影响

@@ -158,6 +158,144 @@ def test_singleton_reuse_and_reset():
     assert s3 is not s1
 
 
+# ── Stage B：自拍/形象照（exclusive_album）转化漏斗 ──────────────────────
+
+def test_selfie_record_kinds_and_count():
+    s = _store()
+    assert s.record_selfie("u1", "locked", now=_NOW) is not None
+    assert s.record_selfie("u1", "delivered", now=_NOW) is not None
+    assert s.record_selfie("u2", "too_soon", now=_NOW) is not None
+    assert s.selfie_count() == 3
+
+
+def test_selfie_record_rejects_bad_kind_and_blank_key():
+    s = _store()
+    assert s.record_selfie("u1", "bogus", now=_NOW) is None
+    assert s.record_selfie("", "locked", now=_NOW) is None
+    assert s.selfie_count() == 0
+
+
+def test_selfie_recent_orders_desc():
+    s = _store()
+    s.record_selfie("u1", "locked", now=_NOW - 10)
+    s.record_selfie("u2", "delivered", now=_NOW)
+    rows = s.selfie_recent(limit=10)
+    assert rows[0]["contact_key"] == "u2"
+    assert rows[1]["contact_key"] == "u1"
+
+
+def test_selfie_funnel_counts_by_kind_without_paid_lookup():
+    s = _store()
+    s.record_selfie("u1", "locked", now=_NOW)
+    s.record_selfie("u1", "delivered", now=_NOW)  # 同人两态
+    s.record_selfie("u2", "too_soon", now=_NOW)
+    s.record_selfie("u3", "locked", now=_NOW)
+    st = s.selfie_funnel_stats(now=_NOW + 60)
+    assert st["requests"] == 4
+    assert st["contacts"] == 3
+    assert st["locked"] == 2
+    assert st["delivered"] == 1
+    assert st["too_soon"] == 1
+    assert st["locked_contacts"] == 2  # u1, u3
+    assert st["conversions"] == 0
+    assert st["conversion_rate"] == 0.0
+
+
+def test_selfie_funnel_attributes_locked_to_album_purchase():
+    s = _store()
+    s.record_selfie("u1", "locked", now=_NOW)
+    s.record_selfie("u2", "locked", now=_NOW)
+
+    def paid_lookup(keys):
+        # u1 触墙后 3 天买 exclusive_album → 转化；u2 没买
+        return {"u1": [{"item_id": "exclusive_album", "kind": "unlock",
+                        "ts": _NOW + 3 * _DAY}]}
+
+    st = s.selfie_funnel_stats(paid_lookup=paid_lookup, now=_NOW + 5 * _DAY,
+                               window_days=30, attribution_days=14)
+    assert st["locked_contacts"] == 2
+    assert st["conversions"] == 1
+    assert st["conversion_rate"] == 0.5
+
+
+def test_selfie_funnel_only_album_item_counts():
+    s = _store()
+    s.record_selfie("u1", "locked", now=_NOW)
+
+    def paid_lookup(keys):
+        # 买的是别的项（非 exclusive_album）→ 不算自拍墙转化
+        return {"u1": [{"item_id": "story_ch1", "kind": "unlock", "ts": _NOW + _DAY}]}
+
+    st = s.selfie_funnel_stats(paid_lookup=paid_lookup, now=_NOW + 5 * _DAY)
+    assert st["conversions"] == 0
+
+
+def test_selfie_funnel_only_locked_cohort_converts():
+    s = _store()
+    s.record_selfie("u1", "delivered", now=_NOW)   # 免费送达，没触墙
+    s.record_selfie("u1", "too_soon", now=_NOW)
+
+    def paid_lookup(keys):
+        return {"u1": [{"item_id": "exclusive_album", "kind": "unlock",
+                        "ts": _NOW + _DAY}]}
+
+    st = s.selfie_funnel_stats(paid_lookup=paid_lookup, now=_NOW + 5 * _DAY)
+    assert st["locked_contacts"] == 0  # 没人触墙
+    assert st["conversions"] == 0
+
+
+def test_selfie_funnel_paid_outside_window_not_counted():
+    s = _store()
+    s.record_selfie("u1", "locked", now=_NOW)
+
+    def paid_lookup(keys):
+        return {"u1": [{"item_id": "exclusive_album", "kind": "unlock",
+                        "ts": _NOW + 20 * _DAY}]}
+
+    st = s.selfie_funnel_stats(paid_lookup=paid_lookup, now=_NOW + 30 * _DAY,
+                               window_days=60, attribution_days=14)
+    assert st["conversions"] == 0
+
+
+def test_selfie_funnel_paid_before_locked_not_counted():
+    s = _store()
+    s.record_selfie("u1", "locked", now=_NOW)
+
+    def paid_lookup(keys):
+        return {"u1": [{"item_id": "exclusive_album", "kind": "unlock",
+                        "ts": _NOW - _DAY}]}
+
+    st = s.selfie_funnel_stats(paid_lookup=paid_lookup, now=_NOW + _DAY)
+    assert st["conversions"] == 0
+
+
+def test_selfie_funnel_window_excludes_old_events():
+    s = _store()
+    s.record_selfie("u_old", "locked", now=_NOW - 40 * _DAY)
+    s.record_selfie("u_new", "locked", now=_NOW)
+    st = s.selfie_funnel_stats(now=_NOW + 60, window_days=30)
+    assert st["requests"] == 1
+    assert st["locked_contacts"] == 1
+
+
+def test_selfie_funnel_paid_lookup_error_swallowed():
+    s = _store()
+    s.record_selfie("u1", "locked", now=_NOW)
+
+    def boom(keys):
+        raise RuntimeError("db down")
+
+    st = s.selfie_funnel_stats(paid_lookup=boom, now=_NOW + 60)
+    assert st["conversions"] == 0
+
+
+def test_selfie_funnel_empty_store():
+    st = _store().selfie_funnel_stats(now=_NOW)
+    assert st["requests"] == 0
+    assert st["contacts"] == 0
+    assert st["locked_contacts"] == 0
+
+
 # ── EntitlementStore.paid_events_for（漏斗的真实 paid_lookup 底座） ─────────
 
 def test_paid_events_for_batched_and_paid_only():

@@ -177,6 +177,34 @@ def register_monetization_routes(app, *, api_auth, config_manager=None) -> None:
         return {"ok": True, "enabled": True, "funnel": stats,
                 "recent": funnel.recent(limit=20)}
 
+    @app.get("/api/monetize/selfie-funnel")
+    async def api_monetize_selfie_funnel(
+        request: Request, window_days: float = 30, attribution_days: float = 14,
+        _=Depends(api_auth),
+    ):
+        """Stage B：自拍/形象照「转化漏斗」——需求(requests)→触墙(locked)→exclusive_album 付费。
+
+        核心指标 ``conversion_rate``=付费墙转化率（分母=触墙端用户数）：触墙后 ``attribution_days``
+        内买了 ``exclusive_album`` 即记转化。漏斗库未就绪（变现/自拍未开）→ 返回空漏斗。
+        """
+        funnel = getattr(request.app.state, "companion_funnel_store", None)
+        if funnel is None:
+            return {"ok": True, "enabled": False,
+                    "funnel": {"requests": 0, "contacts": 0, "too_soon": 0,
+                               "locked": 0, "delivered": 0, "locked_contacts": 0,
+                               "conversions": 0, "conversion_rate": 0.0}}
+        store = _store(request)
+        wd = max(1.0, min(float(window_days or 30), 365.0))
+        ad = max(0.0, min(float(attribution_days or 14), 365.0))
+
+        def _paid_lookup(keys):
+            return store.paid_events_for(keys, since=0.0)
+
+        stats = funnel.selfie_funnel_stats(
+            paid_lookup=_paid_lookup, window_days=wd, attribution_days=ad)
+        return {"ok": True, "enabled": True, "funnel": stats,
+                "recent": funnel.selfie_recent(limit=20)}
+
     @app.post("/api/monetize/feature-check")
     async def api_monetize_feature_check(request: Request, _=Depends(api_auth)):
         """付费功能门控集成缝：任意前端/功能（语音/剧情/主动等）发送前先查。body：

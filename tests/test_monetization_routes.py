@@ -76,6 +76,39 @@ def test_teaser_funnel_attributes_conversion_end_to_end():
     assert len(d["recent"]) == 2
 
 
+def test_selfie_funnel_disabled_when_no_store():
+    client, _ = _client()
+    d = client.get("/api/monetize/selfie-funnel").json()
+    assert d["ok"] is True
+    assert d["enabled"] is False
+    assert d["funnel"]["requests"] == 0
+    assert d["funnel"]["conversions"] == 0
+
+
+def test_selfie_funnel_attributes_album_conversion_end_to_end():
+    from src.utils.companion_funnel_store import CompanionFunnelStore
+    client, store = _client()
+    now = time.time()
+    funnel = CompanionFunnelStore(":memory:")
+    client.app.state.companion_funnel_store = funnel
+    # u1 触墙后买 exclusive_album（转化）；u2 仅触墙；u3 免费送达（不入墙群体）
+    funnel.record_selfie("u1", "locked", now=now - 2 * 86400)
+    funnel.record_selfie("u2", "locked", now=now - 2 * 86400)
+    funnel.record_selfie("u3", "delivered", now=now - 2 * 86400)
+    store.record_unlock("u1", "exclusive_album", source="manual", now=now - 86400)
+    d = client.get(
+        "/api/monetize/selfie-funnel?window_days=30&attribution_days=14").json()
+    assert d["ok"] is True and d["enabled"] is True
+    f = d["funnel"]
+    assert f["requests"] == 3
+    assert f["locked"] == 2
+    assert f["delivered"] == 1
+    assert f["locked_contacts"] == 2
+    assert f["conversions"] == 1
+    assert f["conversion_rate"] == 0.5
+    assert len(d["recent"]) == 3
+
+
 def test_grant_subscribe_then_entitlement():
     client, _ = _client()
     r = client.post("/api/monetize/grant", json={

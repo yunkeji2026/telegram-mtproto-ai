@@ -1561,6 +1561,10 @@ monetization:
   #   付费预告即记一条 teaser 事件，配合 tx_ledger 已付流水做归因。看板/接口：
   #   GET /api/monetize/teaser-funnel?window_days=30&attribution_days=14 → 发出数/触达人数/转化率/
   #   按场景分布（精确转化=已付 item_id 命中预告 feature）。无配置项，纯埋点+查询期归因。
+  # 【Stage B 自拍漏斗】同一 companion_funnel.db：companion.selfie 的准入态(too_soon/locked/delivered)
+  #   逐条埋点；触墙(locked)群体在 attribution 窗内买了 exclusive_album 即记转化。看板/接口：
+  #   GET /api/monetize/selfie-funnel?window_days=30&attribution_days=14 → 需求/触墙/送达数 +
+  #   付费墙转化率（conversion_rate 分母=触墙端用户数）。同样无配置项，纯埋点+查询期归因。
   webhook_secret: ""                  # 支付服务商回调共享密钥（校验 X-Monetize-Secret 头）；空=接受（仅自测）
   expire_on_startup: true             # 启动时把过期订阅标 expired（状态收敛，不影响有效判定）
   gate:

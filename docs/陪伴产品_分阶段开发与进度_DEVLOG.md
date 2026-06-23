@@ -2319,3 +2319,55 @@ Replika 的招牌情感钩子=「她发来一张照片」，本仓**完全空白
 ② **每平台发图栈补全**（当前依赖编排器受管 media worker；A 线主客户端 send_photo 直发可补，扩大覆盖）；
 ③ **自拍转化接 Stage 3 漏斗**（locked→付费引导也记 funnel 事件，scenario_id="selfie"/feature="exclusive_album"，
 与剧情预告同口径看相册转化率）；④ **持久化免费额度**（当前在 user_context，可落库防重启绕过）。
+
+---
+
+## 63. Stage B：自拍「转化可观测」——exclusive_album 付费墙是否真把人推向付费（续 Stage A③）
+
+**背景/动机**：Stage A 让 `exclusive_album` 通了电（locked 软付费引导 + 准入出图），但**有没有真转化无数据**。
+本期补上观测闭环——精确回答运营最关心的：**自拍付费墙(locked)真的把人推向买 exclusive_album 了吗？**
+
+**实施前的代码实况核对**（遵循"以代码为准"）：`rg selfie` 确认 `_handle_selfie_request` 仅在 user_context
+内存里 `_selfie_used` 计数、**零持久化埋点**；Stage 3 的 `CompanionFunnelStore` 只记剧情预告 `teaser_events`，
+不含自拍。结论：本功能此前未开发，且 Stage 3 漏斗库的归因基建（单连接+锁+`:memory:`/文件+软失败+
+`paid_events_for` 注入式归因）正可**复用扩展**而非另起炉灶。
+
+**改动**（**扩展** `CompanionFunnelStore`，剧情 teaser 路径零改动 → 对刚提交的 Stage 3 零回归风险）：
+- `utils/companion_funnel_store.py`：新增 `selfie_events` 表 + `record_selfie(ck, kind)`（kind∈too_soon/locked/
+  delivered，与 `decide_selfie` 三态一一镜像）+ `selfie_recent/selfie_count` + `selfie_funnel_stats(...)`。
+  归因核心指标 `conversion_rate`=**付费墙转化率**（分母=触墙端用户数）：触墙(locked)群体在 attribution 窗内买了
+  `exclusive_album`(item_id 命中)即记一次转化。新增 `peek_companion_funnel_store()`（**只取已存在单例、绝不创建**）。
+- `skills/skill_manager.py`：`_record_selfie_event(ck, kind)` best-effort 埋点——只 `peek` 已就绪单例
+  （monetization 接了才有）、未初始化静默 no-op、绝不抛；`contact_key` 取 `user_id`（与 entitlement/tx_ledger
+  同一身份键，保证 exclusive_album 付费可归因）。在 `_handle_selfie_request` 三个准入分支各记一条。
+- `web/routes/monetization_routes.py`：`GET /api/monetize/selfie-funnel?window_days=30&attribution_days=14`
+  → 需求(requests)/触墙(locked)/送达(delivered)数 + 付费墙转化率（镜像 teaser-funnel，复用 `paid_events_for`）。
+- `config.example.yaml`：变现段补 Stage B 漏斗说明（无新配置项，纯埋点+查询期归因，与 Stage 3 同库）。
+- **测试**：store 13 测（kind 计数/非法 kind+空 key 拒写/recent 倒序/无 paid_lookup 仅分桶/locked→album 归因/
+  只 album item 算转化/只 locked 群体能转化/窗外不算/付费早于 locked 不算/旧事件出窗/paid_lookup 异常吞掉/空库）；
+  接线 3 测（locked/delivered/too_soon 各自落正确事件 + 单例未就绪时 no-op 不破坏主流程）；路由 2 测（无库空漏斗/
+  端到端 album 归因）。**全量 5955 passed / 31 skipped / 0 fail（单进程 703s，+~18 测）**。
+
+**实施中的再优化**：
+1. **复用扩展而非另起新库**（最关键）：本可新造 `SelfieFunnelStore`，但 Stage 3 已有同一套归因基建——
+   扩 `selfie_events` 表 + 专用方法，**teaser 路径一行未碰**，既零回归又不重复造轮子（同一 companion_funnel.db）。
+2. **新增 `peek`（只取不建）解决埋点污染**：`get_companion_funnel_store(None)` 会误建 `:memory:` 抛弃式 store；
+   skill_manager 改用 `peek` → 仅 monetization 用真 db_path 初始化后才记录，避免对话路径里悄悄建脏库。
+3. **kind 三态 == decide_selfie 三 action**：埋点语义与准入决策 1:1 对齐（too_soon/locked/delivered），
+   可测、无映射歧义；转化只认 **locked 群体**（真触墙才是付费机会，免费送达/关系浅不混入分母）。
+4. **store 零耦合 ai 层**：归因目标项 `exclusive_album` 在 store 内硬编码常量（不 import companion_selfie），
+   保持纯单测、与变现内部解耦（同 Stage 3 设计哲学）。
+
+**能否再优化**：可在 `selfie_events` 加 `used_free` 维度细分免费/owned 送达，或把 requests 也按 persona/account
+分桶看哪个人设最招自拍需求——属下一阶段看板细化，不阻塞本期闭环。
+
+**踩坑/环境**：全量 `-n auto` 在本机反复"卡死"（数十分钟不结束），经诊断**非本期代码、非测试失败**：
+collection 7s 正常、单进程 `-p no:xdist` 11m43s 全绿（5955 passed/0 fail）→ 确认是 **pytest-xdist worker
+关停期**在本 Windows 环境的挂起（与外部常驻进程无关，killed 后仍复现）。**本机回归改用单进程兜底**；CI（Linux）
+不受影响仍走 `-n auto`。
+
+**Stage B 收口**：自拍准入三态全埋点 → 触墙群体 exclusive_album 付费归因 → `/api/monetize/selfie-funnel` 看板。
+**下一步**：① **真接图像 provider**（openai images/本地 SD command 已留口，接真模型即出图，让 delivered 真出片）；
+② **A 线主客户端 send_photo 直发**（当前依赖编排器受管 media worker，补主客户端直发扩大覆盖）；
+③ **看板 UI**（teaser-funnel + selfie-funnel 合并进变现总览页，运营一眼看两条转化链）；
+④ **持久化免费额度**（自拍免费额度当前在 user_context，落库防重启绕过）。
