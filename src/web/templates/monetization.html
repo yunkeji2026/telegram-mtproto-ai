@@ -101,6 +101,9 @@
 
   <div class="section-h" style="margin-top:1.1rem">自拍 / 形象照漏斗 <span style="font-size:.72rem;font-weight:400;color:var(--t3)">自拍请求 → 触墙(locked) → exclusive_album 付费（转化率分母=触墙端用户数）</span></div>
   <div class="mz-cards" id="mz-selfie-cards"></div>
+
+  <div class="section-h" style="margin-top:1.1rem">全局出图预算 <span style="font-size:.72rem;font-weight:400;color:var(--t3)">companion.selfie.daily_global_cap · 跨所有端用户/账号的当日出图硬上限，护出图 API 账单 · 按 UTC+8 0 点归零</span></div>
+  <div class="mz-cards" id="mz-selfiecap-cards"></div>
 </div>
 
 <div class="card fa">
@@ -192,6 +195,7 @@ async function mzFunnels(){
   const days=document.getElementById('mz-days').value||30;
   await mzTeaserFunnel(days);
   await mzSelfieFunnel(days);
+  await mzSelfieCap();
 }
 
 async function mzTeaserFunnel(days){
@@ -231,10 +235,34 @@ async function mzSelfieFunnel(days){
     cards.innerHTML=
       fCard('自拍请求',f.requests||0,(f.contacts||0)+' 人')+
       fCard('触墙(locked)',f.locked||0,(f.locked_contacts||0)+' 人')+
-      fCard('送达',f.delivered||0)+
+      fCard('送达',f.delivered||0,(f.capped||0)+' 预算拦')+
       fCard('相册转化',f.conversions||0)+
       fCard('付费墙转化率',pct(f.conversion_rate),'触墙→相册',true);
   }catch(e){cards.innerHTML='<div class="mz-card"><div class="lb">自拍漏斗</div><div class="v" style="font-size:.9rem;color:var(--amber)">请求失败</div></div>';}
+}
+
+async function mzSelfieCap(){
+  const cards=document.getElementById('mz-selfiecap-cards');
+  try{
+    const res=await fetch('/api/monetize/selfie-cap');
+    const d=await res.json();
+    if(!d.enabled){
+      cards.innerHTML='<div class="mz-card"><div class="lb">全局出图预算</div><div class="v" style="font-size:1rem;color:var(--t3)">不限</div><div class="sub">daily_global_cap=0（未设上限）</div></div>';
+      return;
+    }
+    const used=d.daily_sent||0, cap=d.daily_cap||0, rem=(d.remaining==null?-1:d.remaining);
+    let resetTxt='—';
+    if(d.reset_at_ts&&d.reset_at_ts>0){
+      const mins=Math.max(0,Math.round((d.reset_at_ts*1000-Date.now())/60000));
+      resetTxt=(mins>=60?(Math.floor(mins/60)+'h'+(mins%60)+'m'):mins+'m')+' 后归零';
+    }
+    const low=(cap>0&&rem>=0&&rem<=Math.max(1,Math.ceil(cap*0.1)));
+    cards.innerHTML=
+      fCard('今日已出图',used,'上限 '+cap)+
+      fCard('剩余额度',(rem<0?'∞':rem),resetTxt,!low)+
+      fCard('用量',pct(cap>0?used/cap:0),low?'⚠ 接近上限':'')+
+      fCard('自拍功能',d.selfie_enabled?'已开':'未开');
+  }catch(e){cards.innerHTML='<div class="mz-card"><div class="lb">全局出图预算</div><div class="v" style="font-size:.9rem;color:var(--amber)">请求失败</div></div>';}
 }
 
 async function mzRetention(){

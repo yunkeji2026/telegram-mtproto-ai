@@ -205,6 +205,38 @@ def register_monetization_routes(app, *, api_auth, config_manager=None) -> None:
         return {"ok": True, "enabled": True, "funnel": stats,
                 "recent": funnel.selfie_recent(limit=20)}
 
+    @app.get("/api/monetize/selfie-cap")
+    async def api_monetize_selfie_cap(request: Request, _=Depends(api_auth)):
+        """Stage J：全局每日出图预算（``companion.selfie.daily_global_cap``）实时快照。
+
+        让运营看见「今日出图已用/剩余/归零时刻」——Stage F 的护栏从「只在后台生效」变「可观测可调参」。
+        cap=0（不限）→ enabled=False；未出过图（跟踪器未建）→ 用 config 展示 used=0。归零按 UTC+8 0 点。
+        """
+        scfg = {}
+        c = _cfg()
+        if isinstance(c, dict):
+            scfg = ((c.get("companion") or {}).get("selfie") or {})
+        cap_cfg = int(scfg.get("daily_global_cap", 0) or 0)
+        from src.utils.selfie_cap import peek_selfie_cap_tracker
+        t = peek_selfie_cap_tracker()
+        if t is None:
+            used = 0
+            reset_at = 0.0
+        else:
+            snap = t.snapshot()
+            used = int(snap.daily_sent)
+            reset_at = float(snap.reset_at_ts)
+        remaining = (max(0, cap_cfg - used) if cap_cfg > 0 else -1)
+        return {
+            "ok": True,
+            "enabled": cap_cfg > 0,
+            "daily_cap": cap_cfg,
+            "daily_sent": used,
+            "remaining": remaining,
+            "reset_at_ts": reset_at,
+            "selfie_enabled": bool(scfg.get("enabled", False)),
+        }
+
     @app.post("/api/monetize/feature-check")
     async def api_monetize_feature_check(request: Request, _=Depends(api_auth)):
         """付费功能门控集成缝：任意前端/功能（语音/剧情/主动等）发送前先查。body：

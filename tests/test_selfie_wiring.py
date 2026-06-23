@@ -16,6 +16,7 @@ from src.utils.companion_funnel_store import (
     get_companion_funnel_store,
     reset_companion_funnel_store,
 )
+from src.utils.selfie_cap import reset_selfie_cap_tracker
 
 _SMcls = __import__(
     "src.skills.skill_manager", fromlist=["SkillManager"]
@@ -366,6 +367,7 @@ async def test_global_cap_blocks_second_and_preserves_quota(monkeypatch):
     from src.ai import companion_selfie as cs
     cs.reset_selfie_provider()
     reset_companion_funnel_store()
+    reset_selfie_cap_tracker()  # 单例：清前序测试残留计数，保证从 0 起
     funnel = get_companion_funnel_store(":memory:")
     prov = cs.get_selfie_provider({"enabled": True, "backend": "openai"})
 
@@ -389,6 +391,7 @@ async def test_global_cap_blocks_second_and_preserves_quota(monkeypatch):
     finally:
         cs.reset_selfie_provider()
         reset_companion_funnel_store()
+        reset_selfie_cap_tracker()
 
 
 @pytest.mark.asyncio

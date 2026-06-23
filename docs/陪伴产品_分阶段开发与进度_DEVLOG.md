@@ -2653,3 +2653,44 @@ voice 成功则 `not _voice_sent` 跳过文本）。但其真发 `send_telegram_
 记账上**完全对齐**——语音不再是账号安全/可观测的最后盲区。「账号安全 + 富媒体可观测」这条主线（Stage G→H→I）收口。
 **下一步**：① **cap 快照上看板**（出图预算已用/剩余/归零时刻，运营可视）；② **漏斗下钻**（capped/locked→端用户列表）；
 ③ **出图缓存/多候选**（控成本、提质量）；④ **发送入口审计**（proactive/worker 旁路是否纳入统一栈）。
+
+---
+
+## 71. Stage J：全局出图预算上看板——Stage F 护栏从「后台静默」变「可观测可调参」
+
+**实施前的代码实况核对**：Stage F 的全局出图预算用 `DailyCapTracker`，但它是 **SkillManager 实例属性**
+（`self._selfie_cap_tracker`）——Web 路由（`monetization_routes` 读 `app.state.*`）**够不着**；预算用尽时运营
+只能翻日志。对比 `companion_funnel_store` 是**进程级单例**（`get/peek_*`）+ main.py 同时挂 `app.state`，
+所以 skill_manager 与路由读的是**同一份**。故 Stage J 先把 cap 跟踪器**对齐这个单例范式**，再上看板。
+
+**改动**（既修可达性、又顺带修正「全局」语义）：
+- 新增 `utils/selfie_cap.py`：进程级单例 `get/peek/reset_selfie_cap_tracker`（与 funnel store 同型，底层仍
+  `DailyCapTracker`）。`skill_manager._get_selfie_cap` 改为委托单例——**副作用是更正确**：原实例属性是「每
+  SkillManager 一份」，单例后是**跨所有账号/实例真·全局**一份，与「单一全局 config `daily_global_cap`」语义一致
+  （多账号部署下出图账单是整盘的，本就该全局共算）。
+- `monetization_routes` 加 `GET /api/monetize/selfie-cap`：读 config 的 `daily_global_cap` + peek 单例快照，
+  返回 `{enabled, daily_cap, daily_sent, remaining, reset_at_ts, selfie_enabled}`。cap=0→enabled=false（不限）；
+  未出过图（单例未建）→ used=0 用 config 展示；归零时刻来自 `DailyCapTracker.snapshot()`（UTC+8 0 点）。
+- `monetization.html`：转化漏斗卡片区新增「全局出图预算」卡（今日已出图/剩余+归零倒计时/用量%+接近上限⚠/
+  自拍开关），`mzSelfieCap()` 拉取渲染；并把 Stage F 的 `capped` 计数补进自拍漏斗「送达」卡副标（"N 预算拦"）。
+- `test_admin_route_inventory` 收录新端点。
+- **测试 +4**（cap=0 不限、未出图用 config、已出图报已用/剩余/归零、页面接线）+ Stage F 三测加单例 reset 隔离。
+  **全量 5988 passed / 31 skipped / 0 fail（单进程，~11min）**。
+
+**实施中的再优化**：
+1. **单例化顺带修正语义**：本要做"可观测"，核对中发现实例属性对「全局」预算其实是 bug（多实例各算各的）——
+   单例化一并修正为真·全局，护账单更准。一次改动修两个问题。
+2. **复用 funnel store 单例范式**：get/peek/reset 同型——心智一致、main.py 无需额外挂 app.state（路由直接 peek 模块单例）。
+3. **未出图也能看 cap**：跟踪器懒建（出图才创建）；路由在 None 时回退 config 展示 used=0——运营随时能看见预算设置。
+4. **capped 顺手上看板**：Stage F 记的 `capped` 事件之前只在 API、本期渲染进卡片副标，预算拦截量肉眼可见。
+5. **归零倒计时**：前端把 `reset_at_ts` 算成「Xh Ym 后归零」，运营知道何时恢复。
+
+**能否再优化**：单例是**进程内存态**——若 A 线主客户端与 Web 后台**分进程**部署，看板读的单例与出图进程的单例
+不是同一份（看板会显示 used=0）。当前 main.py「FastAPI 内嵌 RPA/client」同进程 → 一致；分进程部署需把计数落
+共享存储（Redis/DB）方能跨进程看板，属后续部署形态相关增强（已在 Stage F「能否再优化」记过多进程方向）。
+另可加运维「手动重置今日预算」按钮（调 `reset` / `record_sent` 负数），属运营操作增强。
+
+**Stage J 收口**：Stage F 的出图预算护栏接通运营可视闭环——`/monetization` 一屏看见「今日已出图/剩余/归零倒计时/
+接近上限告警」，预算从"埋在代码里"变"看得见、调得动"；与两条转化漏斗（Stage E）同页，变现可观测面再补一块。
+**下一步**：① **漏斗下钻**（capped/locked → 端用户列表，运营点开看谁被拦/被墙）；② **出图缓存/多候选**（控成本提质量）；
+③ **分进程部署时 cap 落共享存储**（多进程一致看板）；④ **发送入口审计**（proactive/worker 旁路是否纳入统一栈）。

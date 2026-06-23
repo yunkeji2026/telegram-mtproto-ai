@@ -119,6 +119,70 @@ def test_monetization_page_wires_both_funnels():
     assert 'id="mz-teaser-cards"' in html
     assert 'id="mz-selfie-cards"' in html
     assert "mzFunnels(" in html  # 初始加载/刷新都触发
+    # Stage J：全局出图预算快照卡接线
+    assert "/api/monetize/selfie-cap" in html
+    assert 'id="mz-selfiecap-cards"' in html
+    assert "mzSelfieCap(" in html
+
+
+# ── Stage J：全局出图预算快照（/api/monetize/selfie-cap） ──────────────────
+
+def _client_full(full_cfg):
+    app = FastAPI()
+
+    def _auth(request: Request):
+        return True
+
+    cm = _CM(full_cfg)
+    app.state.config_manager = cm
+    register_monetization_routes(app, api_auth=_auth, config_manager=cm)
+    app.state.entitlement_store = EntitlementStore(":memory:")
+    return TestClient(app)
+
+
+def test_selfie_cap_unlimited_when_zero():
+    from src.utils.selfie_cap import reset_selfie_cap_tracker
+    reset_selfie_cap_tracker()
+    client = _client_full({"monetization": {"enabled": True},
+                           "companion": {"selfie": {"enabled": True,
+                                                    "daily_global_cap": 0}}})
+    d = client.get("/api/monetize/selfie-cap").json()
+    assert d["ok"] is True
+    assert d["enabled"] is False        # cap=0 → 不限
+    assert d["remaining"] == -1
+    assert d["selfie_enabled"] is True
+
+
+def test_selfie_cap_no_tracker_uses_config():
+    from src.utils.selfie_cap import reset_selfie_cap_tracker
+    reset_selfie_cap_tracker()          # 未出过图 → 跟踪器未建
+    client = _client_full({"monetization": {"enabled": True},
+                           "companion": {"selfie": {"enabled": True,
+                                                    "daily_global_cap": 3}}})
+    d = client.get("/api/monetize/selfie-cap").json()
+    assert d["enabled"] is True
+    assert d["daily_cap"] == 3
+    assert d["daily_sent"] == 0
+    assert d["remaining"] == 3
+    reset_selfie_cap_tracker()
+
+
+def test_selfie_cap_reports_used_and_remaining():
+    from src.utils.selfie_cap import (
+        get_selfie_cap_tracker, reset_selfie_cap_tracker)
+    reset_selfie_cap_tracker()
+    t = get_selfie_cap_tracker(5)
+    t.record_sent(2)                    # 模拟今日已出 2 张
+    client = _client_full({"monetization": {"enabled": True},
+                           "companion": {"selfie": {"enabled": True,
+                                                    "daily_global_cap": 5}}})
+    d = client.get("/api/monetize/selfie-cap").json()
+    assert d["enabled"] is True
+    assert d["daily_cap"] == 5
+    assert d["daily_sent"] == 2
+    assert d["remaining"] == 3
+    assert d["reset_at_ts"] > 0
+    reset_selfie_cap_tracker()
 
 
 def test_grant_subscribe_then_entitlement():

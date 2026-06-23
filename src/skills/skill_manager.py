@@ -3259,20 +3259,14 @@ class SkillManager(LoggerMixin):
             return False
 
     def _get_selfie_cap(self, cap: int):
-        """进程级全局出图预算跟踪器（复用 DailyCapTracker，按 tz 0 点自动归零）。
+        """全局出图预算跟踪器（进程级单例，复用 DailyCapTracker，按 tz 0 点自动归零）。
 
-        护住出图 API（OpenAI images 等）账单：**跨所有端用户**的当日出图总次数硬上限——
+        护住出图 API（OpenAI images 等）账单：**跨所有端用户/所有账号**的当日出图总次数硬上限——
         与「按端用户免费额度」互补（后者限单人、前者限全局爆发面，防 N 个新用户各刷免费图烧钱）。
-        0=不限。运行时 set_cap 跟随 config 调整。
+        0=不限。运行时 set_cap 跟随 config 调整。Stage J：提升为单例后 Web 看板可 peek 同一份取快照。
         """
-        t = getattr(self, "_selfie_cap_tracker", None)
-        if t is None:
-            from src.integrations.rpa_base.daily_cap import DailyCapTracker
-            t = DailyCapTracker(daily_cap=int(cap))
-            self._selfie_cap_tracker = t
-        else:
-            t.set_cap(int(cap))
-        return t
+        from src.utils.selfie_cap import get_selfie_cap_tracker
+        return get_selfie_cap_tracker(int(cap))
 
     def _record_selfie_event(self, contact_key: str, kind: str) -> None:
         """Stage B：把自拍准入结果(too_soon/locked/delivered)埋点进转化漏斗（best-effort）。
