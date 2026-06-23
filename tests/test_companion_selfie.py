@@ -150,3 +150,140 @@ def test_singleton_reuse_and_reset():
     reset_selfie_provider()
     c = get_selfie_provider({})
     assert c is not a
+
+
+# ── openai images 后端（注入假 client，无网络） ──────────────────────────
+
+import base64 as _b64  # noqa: E402
+
+
+class _FakeItem:
+    def __init__(self, b64_json=None, url=None):
+        self.b64_json = b64_json
+        self.url = url
+
+
+class _FakeResp:
+    def __init__(self, items):
+        self.data = items
+
+
+class _FakeClient:
+    """模拟 openai client：记录请求参数、返回预置 data。"""
+    def __init__(self, items):
+        self._items = items
+        self.last_kwargs = None
+
+        class _Images:
+            def __init__(self, outer):
+                self._outer = outer
+
+            def generate(self, **kwargs):
+                self._outer.last_kwargs = kwargs
+                return _FakeResp(self._outer._items)
+
+        self.images = _Images(self)
+
+
+def test_openai_generate_bytes_from_b64():
+    p = SelfieProvider({"enabled": True, "backend": "openai",
+                        "api_key": "k", "model": "gpt-image-1"})
+    raw = b"\x89PNG real-ish bytes"
+    client = _FakeClient([_FakeItem(b64_json=_b64.b64encode(raw).decode())])
+    out = p._openai_generate_bytes(client, "a prompt")
+    assert out == raw
+    # gpt-image-1 不应传 response_format（传了真实 API 会报错）
+    assert "response_format" not in client.last_kwargs
+    assert client.last_kwargs["model"] == "gpt-image-1"
+
+
+def test_openai_dalle_sets_b64_response_format():
+    p = SelfieProvider({"enabled": True, "backend": "openai",
+                        "api_key": "k", "model": "dall-e-3"})
+    client = _FakeClient([_FakeItem(b64_json=_b64.b64encode(b"x").decode())])
+    p._openai_generate_bytes(client, "a prompt")
+    assert client.last_kwargs["response_format"] == "b64_json"
+
+
+def test_openai_quality_passthrough():
+    p = SelfieProvider({"enabled": True, "backend": "openai",
+                        "api_key": "k", "model": "gpt-image-1", "quality": "high"})
+    client = _FakeClient([_FakeItem(b64_json=_b64.b64encode(b"x").decode())])
+    p._openai_generate_bytes(client, "a prompt")
+    assert client.last_kwargs["quality"] == "high"
+
+
+def test_openai_url_fallback(monkeypatch):
+    p = SelfieProvider({"enabled": True, "backend": "openai",
+                        "api_key": "k", "model": "dall-e-3"})
+    client = _FakeClient([_FakeItem(b64_json=None, url="http://img/x.png")])
+    monkeypatch.setattr(p, "_download_image", lambda url: b"downloaded-bytes")
+    out = p._openai_generate_bytes(client, "a prompt")
+    assert out == b"downloaded-bytes"
+
+
+def test_openai_no_b64_or_url_raises():
+    p = SelfieProvider({"enabled": True, "backend": "openai", "api_key": "k"})
+    client = _FakeClient([_FakeItem(b64_json=None, url=None)])
+    with pytest.raises(RuntimeError):
+        p._openai_generate_bytes(client, "a prompt")
+
+
+def test_openai_empty_data_raises():
+    p = SelfieProvider({"enabled": True, "backend": "openai", "api_key": "k"})
+    client = _FakeClient([])
+    with pytest.raises(RuntimeError):
+        p._openai_generate_bytes(client, "a prompt")
+
+
+def test_openai_missing_key_raises():
+    p = SelfieProvider({"enabled": True, "backend": "openai", "api_key": ""})
+    with pytest.raises(RuntimeError):
+        p._make_openai_client()
+
+
+@pytest.mark.asyncio
+async def test_openai_generate_end_to_end_writes_image(tmp_path, monkeypatch):
+    p = SelfieProvider({"enabled": True, "backend": "openai", "api_key": "k",
+                        "model": "gpt-image-1", "out_dir": str(tmp_path / "out")})
+    raw = b"\x89PNG end-to-end"
+    client = _FakeClient([_FakeItem(b64_json=_b64.b64encode(raw).decode())])
+    monkeypatch.setattr(p, "_make_openai_client", lambda: client)
+    res = await p.generate("portrait, safe-for-work")
+    assert res.ok is True
+    assert res.image_path.endswith(".png")
+    assert res.provider == "openai"
+    from pathlib import Path as _P
+    assert _P(res.image_path).read_bytes() == raw
+
+
+@pytest.mark.asyncio
+async def test_openai_generate_times_out_with_explicit_override(monkeypatch, tmp_path):
+    import time as _t
+    p = SelfieProvider({"enabled": True, "backend": "openai", "api_key": "k",
+                        "out_dir": str(tmp_path / "out")})
+
+    class _SlowImages:
+        def generate(self, **kwargs):
+            _t.sleep(2.0)
+            return _FakeResp([_FakeItem(b64_json="")])
+
+    client = type("C", (), {"images": _SlowImages()})()
+    monkeypatch.setattr(p, "_make_openai_client", lambda: client)
+    res = await p.generate("a prompt", timeout_sec=0.2)
+    assert res.ok is False
+    assert "selfie_timeout" in res.error
+
+
+@pytest.mark.asyncio
+async def test_openai_generate_soft_fails_on_client_error(monkeypatch, tmp_path):
+    p = SelfieProvider({"enabled": True, "backend": "openai", "api_key": "k",
+                        "out_dir": str(tmp_path / "out")})
+
+    def _boom():
+        raise RuntimeError("api down")
+
+    monkeypatch.setattr(p, "_make_openai_client", _boom)
+    res = await p.generate("a prompt")
+    assert res.ok is False  # 绝不抛，软失败退回
+    assert "api down" in res.error

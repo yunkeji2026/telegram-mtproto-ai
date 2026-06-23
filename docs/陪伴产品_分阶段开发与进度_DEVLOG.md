@@ -2371,3 +2371,46 @@ collection 7s 正常、单进程 `-p no:xdist` 11m43s 全绿（5955 passed/0 fai
 ② **A 线主客户端 send_photo 直发**（当前依赖编排器受管 media worker，补主客户端直发扩大覆盖）；
 ③ **看板 UI**（teaser-funnel + selfie-funnel 合并进变现总览页，运营一眼看两条转化链）；
 ④ **持久化免费额度**（自拍免费额度当前在 user_context，落库防重启绕过）。
+
+---
+
+## 64. Stage C：真接 openai images 出图 provider——让 delivered 从"文字兜底"变"真出片"（续 Stage B①）
+
+**背景/动机**：Stage A 写了 `SelfieProvider` 骨架，但 `_generate_openai` 只是"看起来能跑"的占位——实测有真实缺陷，
+接真模型必翻车。本期把它**做成生产可用 + 可单测（无网络）**，让整条 exclusive_album 变现链真正交付图片。
+
+**实施前的代码实况核对**：复核 `_generate_openai` 发现三处真 bug/隐患：
+1. **只取 `resp.data[0].b64_json`**——`dall-e-2/3` 默认返回 **url**（不带 `response_format=b64_json` 时 b64 为空）→
+   接 dall-e 直接 `empty b64` 报错；
+2. **不传 client timeout**——HTTP 请求不会自中断，全靠外层 `wait_for`，但外层默认 60s == 无独立请求超时；
+3. **外层 `wait_for(timeout_sec=60)` 与请求超时同值**——会在合法出图（gpt-image-1 high 常 30~90s）中途误砍，
+   掩盖底层精确错误。另：`gpt-image-1` **不接受** `response_format` 参数（传了真实 API 报错），不能一刀切传。
+
+**改动**（`ai/companion_selfie.py`，沿用 `tts_pipeline` 的"provider 自带 key/base_url"约定——全局 `ai` 是
+DeepSeek/openai_compatible 不支持图像，**绝不可共用那把 key**）：
+- `_generate_openai` 拆为可测三段：`_make_openai_client()`（测试缝，可 monkeypatch 注入假 client）+
+  `_openai_generate_bytes(client, prompt)`（model 感知请求 + b64/url 双回退）+ `_download_image(url)`（stdlib urllib，
+  不引依赖）。**model 感知**：`dall-e*` 才加 `response_format=b64_json`；`gpt-image-1` 不传（避免报错）。
+- 新增 config：`quality`（gpt-image-1 low/medium/high/auto 透传）、`request_timeout_sec`（client 单请求超时，默认 60，
+  真正能自中断挂起请求）。client 构造带 `timeout`。
+- **外层 wait_for 改兜底语义**：`generate(timeout_sec=None)` 时 `eff = inner(请求/命令超时) + 15s 余量`——严格大于
+  底层超时，只在底层完全失控时才兜底触发，平时让底层吐精确错误（而非笼统 outer timeout）。
+- **测试 +10**：openai 路径全用**注入假 client**（无网络）——b64 解码/dall-e 自动加 response_format/quality 透传/
+  url 回退/无 b64+无 url 报错/空 data 报错/缺 key 报错/端到端写文件/client 异常软失败不抛/显式超时兜底。
+  **全量 5965 passed / 31 skipped / 0 fail（单进程 711s）**。
+
+**实施中的再优化**：
+1. **拆出 `_make_openai_client` 测试缝**（最关键）：原 `_generate_openai` 把"建 client + 发请求 + 写文件"焊死，
+   无法不联网测。拆出注入点后，openai 出图逻辑首次拥有**确定性单测**（覆盖 b64/url/各错误分支），不再是黑盒占位。
+2. **model 感知请求**：发现 gpt-image-1 与 dall-e 的 response_format 行为相反——一刀切必有一方报错；按 model 前缀分流。
+3. **b64/url 双回退**：兼容官方 + 自建/代理 images 网关（base_url 场景）的返回差异，提升真实环境鲁棒性。
+4. **两层超时分工明确**：client timeout 管请求自中断、外层 wait_for 管线程失控兜底（+15s 余量），消除互相误砍。
+5. **坚持 provider 独立 key**：核对后确认不能复用全局 ai（DeepSeek）key——技术上不支持图像，强行复用会误导运营。
+
+**能否再优化**：可加 `n>1` 多图候选 + 选优、或本地缓存"同 persona 提示词→图"避免重复计费——属成本/质量调优，
+非交付闭环必需。出图后**发送通道**仍依赖编排器受管 media worker（A 线主客户端 send_photo 直发是下一步②）。
+
+**Stage C 收口**：openai images（gpt-image-1/dall-e）生产可用、可单测、双回退、双超时分工；接真 key 即出真图。
+**下一步**：① **A 线主客户端 `send_photo` 直发**（脱离对编排器 media worker 的依赖，让主平台 Telegram 直接发图，
+扩大 delivered 实际触达面）；② **变现看板 UI 合并**（teaser-funnel + selfie-funnel 进总览页）；
+③ **持久化自拍免费额度**（落库防重启绕过）；④ **出图缓存/多候选**（控成本、提质量）。

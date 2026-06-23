@@ -138,7 +138,8 @@ class SelfieProvider:
     Config（``companion.selfie.provider``）：
         enabled: false
         backend: disabled | openai | command
-        model/size/api_key/base_url：openai images 用
+        model/size/api_key/base_url：openai images 用（model=gpt-image-1 默认；亦支持 dall-e-3）
+        quality: 可选（gpt-image-1：low|medium|high|auto）；request_timeout_sec: 单请求超时(默认 60)
         command_args / command_template：本地推理（ComfyUI/SD 脚本），占位 {prompt}/{out}
         out_dir: tmp_selfies
     """
@@ -149,8 +150,10 @@ class SelfieProvider:
         self.backend = str(cfg.get("backend", "disabled")).strip().lower()
         self.model = str(cfg.get("model") or "gpt-image-1").strip()
         self.size = str(cfg.get("size") or "1024x1024").strip()
+        self.quality = str(cfg.get("quality") or "").strip()
         self.api_key = str(cfg.get("api_key") or "").strip()
         self.base_url = str(cfg.get("base_url") or "").strip().rstrip("/")
+        self.request_timeout_sec = float(cfg.get("request_timeout_sec", 60) or 60)
         self.out_dir = Path(str(cfg.get("out_dir") or "tmp_selfies"))
         self.command_args = cfg.get("command_args")
         self.command_template = str(cfg.get("command_template") or "").strip()
@@ -160,7 +163,9 @@ class SelfieProvider:
         return {"enabled": self.enabled, "backend": self.backend,
                 "model": self.model, "out_dir": str(self.out_dir)}
 
-    async def generate(self, prompt: str, *, timeout_sec: float = 60.0) -> SelfieResult:
+    async def generate(
+        self, prompt: str, *, timeout_sec: Optional[float] = None
+    ) -> SelfieResult:
         rv = SelfieResult(prompt=str(prompt or ""), provider=self.backend)
         if not self.enabled or self.backend in ("", "disabled"):
             rv.error = "provider_disabled"
@@ -168,13 +173,18 @@ class SelfieProvider:
         if not rv.prompt.strip():
             rv.error = "empty_prompt"
             return rv
+        # 外层 wait_for 是兜底：须严格大于 client/命令各自的请求超时，否则会在请求合法运行中途
+        # 误砍，掩盖掉底层（client.timeout / command_timeout）的精确错误。取请求超时 + 15s 余量。
+        inner = (self.command_timeout_sec if self.backend == "command"
+                 else self.request_timeout_sec)
+        eff_timeout = float(timeout_sec) if timeout_sec else float(inner) + 15.0
         self.out_dir.mkdir(parents=True, exist_ok=True)
         out = self.out_dir / f"selfie-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}.png"
         t0 = time.monotonic()
         try:
             await asyncio.wait_for(
                 asyncio.to_thread(self._generate_sync, rv.prompt, out),
-                timeout=timeout_sec,
+                timeout=eff_timeout,
             )
             if out.exists() and out.stat().st_size > 0:
                 rv.ok = True
@@ -183,7 +193,7 @@ class SelfieProvider:
             else:
                 rv.error = "empty_image"
         except asyncio.TimeoutError:
-            rv.error = f"selfie_timeout({timeout_sec:.0f}s)"
+            rv.error = f"selfie_timeout({eff_timeout:.0f}s)"
         except Exception as ex:  # noqa: BLE001
             rv.error = f"{type(ex).__name__}: {ex}"
         rv.latency_ms = int((time.monotonic() - t0) * 1000)
@@ -199,21 +209,59 @@ class SelfieProvider:
         raise RuntimeError(f"unknown backend {self.backend}")
 
     def _generate_openai(self, prompt: str, out: Path) -> None:
-        import base64 as _b64
+        client = self._make_openai_client()
+        out.write_bytes(self._openai_generate_bytes(client, prompt))
 
+    def _make_openai_client(self) -> Any:
+        """构造 OpenAI 客户端（独立测试缝：测试可 monkeypatch 本方法注入假 client）。"""
         from openai import OpenAI  # type: ignore
         if not self.api_key:
             raise RuntimeError("missing api_key for openai images")
-        kwargs: Dict[str, Any] = {"api_key": self.api_key}
+        kwargs: Dict[str, Any] = {"api_key": self.api_key,
+                                  "timeout": self.request_timeout_sec}
         if self.base_url:
             kwargs["base_url"] = self.base_url
-        client = OpenAI(**kwargs)
-        resp = client.images.generate(
-            model=self.model, prompt=prompt, size=self.size, n=1)
-        b64 = resp.data[0].b64_json  # type: ignore[attr-defined]
-        if not b64:
-            raise RuntimeError("openai images: empty b64")
-        out.write_bytes(_b64.b64decode(b64))
+        return OpenAI(**kwargs)
+
+    def _openai_generate_bytes(self, client: Any, prompt: str) -> bytes:
+        """调 images.generate 并取回 PNG 字节。model 感知 + b64/url 双回退。
+
+        - ``gpt-image-1``：恒返回 b64（且**不接受** response_format 参数，传了会报错）。
+        - ``dall-e-2/3``：默认返回 url；显式要 ``response_format=b64_json`` 才回 b64。
+        - 兜底：拿不到 b64 但有 url → 下载 url（兼容自建/代理 images 网关行为差异）。
+        """
+        import base64 as _b64
+
+        req: Dict[str, Any] = {"model": self.model, "prompt": prompt,
+                               "size": self.size, "n": 1}
+        if self.quality:
+            req["quality"] = self.quality
+        if self.model.startswith("dall-e"):
+            req["response_format"] = "b64_json"
+        resp = client.images.generate(**req)
+        data = getattr(resp, "data", None) or []
+        if not data:
+            raise RuntimeError("openai images: empty response data")
+        item = data[0]
+        b64 = getattr(item, "b64_json", None) if not isinstance(item, dict) \
+            else item.get("b64_json")
+        if b64:
+            return _b64.b64decode(b64)
+        url = getattr(item, "url", None) if not isinstance(item, dict) \
+            else item.get("url")
+        if url:
+            return self._download_image(str(url))
+        raise RuntimeError("openai images: no b64_json/url in response")
+
+    def _download_image(self, url: str) -> bytes:
+        """下载远端图片（stdlib，不引依赖）；受 request_timeout_sec 约束。"""
+        import urllib.request
+
+        with urllib.request.urlopen(url, timeout=self.request_timeout_sec) as r:
+            data = r.read()
+        if not data:
+            raise RuntimeError("openai images: empty download")
+        return data
 
     def _generate_command(self, prompt: str, out: Path) -> None:
         raw_args = self.command_args
