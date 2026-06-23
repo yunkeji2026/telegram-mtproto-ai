@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -232,6 +233,80 @@ async def test_sender_send_photo_success_failure_and_no_client():
     assert await _S(_Cli(fail=True)).send_photo(7, "/p.png", "cap") is False
     assert await _S(None).send_photo(7, "/p.png") is False
     assert await _S(_Cli()).send_photo(7, "") is False  # 空路径不发
+
+
+# ── Stage G：send_photo 纳入统一发送护栏/节流/记账（图不绕过风控） ──────────
+
+class _PhotoCli:
+    def __init__(self, fail=False):
+        self.fail = fail
+        self.calls = []
+
+    async def send_photo(self, chat_id, photo, caption=""):
+        if self.fail:
+            raise RuntimeError("rpc")
+        self.calls.append((chat_id, photo, caption))
+
+
+def _photo_sender(cli, *, min_interval=0, last_send=0.0):
+    from src.client.sender import TelegramSenderMixin
+
+    class _Cfg:
+        def get(self, k, d=None):
+            if k == "reply":
+                return {"split_send": {"min_interval_seconds": min_interval}}
+            return d if d is not None else {}
+
+    class _S(TelegramSenderMixin):
+        def __init__(self):
+            self.client = cli
+            self.logger = logging.getLogger("test_sender_g")
+            self.account_id = "a"
+            self.config = _Cfg()
+            self._last_send_wallclock = last_send
+
+    s = _S()
+    s._shared_send_limiter = lambda cfg: None  # 不触 DB/限流器副作用
+    return s
+
+
+@pytest.mark.asyncio
+async def test_send_photo_blocked_by_presend_guard(monkeypatch):
+    s = _photo_sender(_PhotoCli())
+    monkeypatch.setattr(s, "_presend_blocked", lambda: True)  # 冻结/被闸门拦
+    assert await s.send_photo(7, "/p.png", "c") is False
+    assert s.client.calls == []  # 护栏拦下，照片未真发（不绕过风控）
+
+
+@pytest.mark.asyncio
+async def test_send_photo_paces_against_shared_wallclock(monkeypatch):
+    slept = {}
+
+    async def _fake_sleep(sec):
+        slept["sec"] = sec
+
+    monkeypatch.setattr("src.client.sender.asyncio.sleep", _fake_sleep)
+    s = _photo_sender(_PhotoCli(), min_interval=5, last_send=time.time())
+    monkeypatch.setattr(s, "_presend_blocked", lambda: False)
+    ok = await s.send_photo(7, "/p.png", "c")
+    assert ok is True
+    assert slept.get("sec") is not None and slept["sec"] > 0  # 距上次<5s→补足节流
+    assert s.client.calls == [(7, "/p.png", "c")]
+    assert s._last_send_wallclock > 0  # 记账刷新墙钟（下次文本据此排队）
+
+
+@pytest.mark.asyncio
+async def test_send_photo_no_pace_when_interval_zero(monkeypatch):
+    slept = {}
+
+    async def _fake_sleep(sec):
+        slept["sec"] = sec
+
+    monkeypatch.setattr("src.client.sender.asyncio.sleep", _fake_sleep)
+    s = _photo_sender(_PhotoCli(), min_interval=0, last_send=time.time())
+    monkeypatch.setattr(s, "_presend_blocked", lambda: False)
+    assert await s.send_photo(7, "/p.png", "c") is True
+    assert "sec" not in slept  # min_interval=0 → 不节流（行为不变）
 
 
 # ── Stage F：全局每日出图预算 cap（护出图 API 账单） ──────────────────────
