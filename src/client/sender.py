@@ -572,6 +572,12 @@ class TelegramSenderMixin:
                 )
                 return False
 
+            # 统一发送前护栏（与文本/照片共用）：冻结/被反封号闸门拦 → 不出语音、也不白跑 TTS。
+            # 返回 False → 调用方回退文本 _send_reply，文本同样会被护栏拦 → 冻结期彻底静默。
+            if self._presend_blocked():
+                self.logger.info("[voice_reply] skip: 发送前护栏拦截（kill-switch/反封号闸门）")
+                return False
+
             # ── Resolve persona → voice config (3-tier fallback) ──
             from src.ai.persona_voice import resolve_voice_cfg
 
@@ -628,6 +634,8 @@ class TelegramSenderMixin:
             # ── Send voice ──
             from src.client.voice_sender import send_telegram_voice
 
+            # 统一节流：与文本/照片共用墙钟，语音不与前一条外发瞬时双发。
+            await self._presend_pace()
             sent = await send_telegram_voice(
                 self.client,
                 original_message.chat.id,
@@ -645,8 +653,11 @@ class TelegramSenderMixin:
                     "[voice_reply] voice sent chat=%s persona=%s dur=%s",
                     original_message.chat.id, persona_id, dur_int,
                 )
+                # 统一记账：语音也刷墙钟 + 计入今日外发量（反封号/健康灯不漏算语音条）。
+                self._postsend_record_count()
                 if vr_cfg.get("send_text_summary", False):
-                    # 文本摘要走 _send_reply→已自带镜像/记账，避免重复记一次。
+                    # 文本摘要走 _send_reply→自带护栏/节流/计数/镜像/记账
+                    # （语音+文本=确有 2 条外发，各记一次属正确口径）。
                     await self._send_reply(original_message, reply_text)
                 else:
                     # 仅发语音时也要镜像/记账，否则坐席台/亲密度看不到这次外发。

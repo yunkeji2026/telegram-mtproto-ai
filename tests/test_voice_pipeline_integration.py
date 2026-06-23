@@ -427,3 +427,151 @@ class TestTryTranscribePeerVoiceDisabled:
         runner._cfg = {"voice_input": {"enabled": True}}
         result = await runner._try_transcribe_peer_voice("")
         assert result == ""
+
+
+# ─────────────────────────────────────────────────────────────────
+# Stage I: voice note 纳入统一发送栈（presend 护栏 + 节流 + 计数）
+# ─────────────────────────────────────────────────────────────────
+
+class TestVoiceUnifiedSendStack:
+    """语音发送与文本/照片共用：发前护栏 + 节流 + 计数 + 镜像/记账。"""
+
+    def _make_sender(self, monkeypatch, *, summary=False):
+        import logging
+
+        from src.client.sender import TelegramSenderMixin
+
+        class _Cfg:
+            config = {"telegram": {"voice_reply": {
+                "enabled": True, "trigger": "always", "max_text_chars": 500,
+                "max_seconds": 60, "send_text_summary": summary,
+            }}}
+
+            def get(self, k, d=None):
+                return d if d is not None else {}
+
+        class _S(TelegramSenderMixin):
+            def __init__(self):
+                self.config = _Cfg()
+                self.client = object()
+                self.logger = logging.getLogger("voice_stack")
+                self.account_id = "a"
+                self._last_send_wallclock = 0.0
+                self.account_persona_ids = []
+
+        # 出图/语音配置解析 + persona 解析确定化，避免触真单例/DB
+        monkeypatch.setattr(
+            "src.ai.persona_voice.resolve_voice_cfg",
+            lambda pid, raw: {"enabled": True, "backend": "disabled"},
+        )
+        return _S()
+
+    @pytest.mark.asyncio
+    async def test_voice_blocked_by_presend_guard_skips_tts_and_send(self, monkeypatch):
+        from src.ai import tts_pipeline
+        import src.client.voice_sender as vs
+
+        synth = AsyncMock()
+        monkeypatch.setattr(tts_pipeline.TTSPipeline, "synthesize", synth)
+        sent = AsyncMock(return_value=True)
+        monkeypatch.setattr(vs, "send_telegram_voice", sent)
+
+        s = self._make_sender(monkeypatch)
+        monkeypatch.setattr(s, "_presend_blocked", lambda: True)  # 冻结/被闸门拦
+        msg = types.SimpleNamespace(chat=types.SimpleNamespace(id=7), id=1, from_user=None)
+
+        out = await s._maybe_send_voice_reply(msg, "hi", is_peer_voice=False)
+        assert out is False              # 回退文本（文本也会被护栏拦→静默）
+        synth.assert_not_called()        # 护栏先于 TTS：不白跑合成
+        sent.assert_not_called()         # 语音未发（不绕过风控）
+
+    @pytest.mark.asyncio
+    async def test_voice_sent_runs_pace_count_and_mirror(self, monkeypatch, tmp_path):
+        from src.ai import tts_pipeline
+        import src.client.voice_sender as vs
+        import src.utils.companion_context as cc
+
+        audio = tmp_path / "a.ogg"
+        audio.write_bytes(b"x")
+        res = types.SimpleNamespace(ok=True, audio_path=str(audio),
+                                    duration_sec=3.0, error=None)
+        monkeypatch.setattr(tts_pipeline.TTSPipeline, "synthesize",
+                            AsyncMock(return_value=res))
+        sent_calls = {}
+
+        async def _fake_send(client, chat, path, duration=None, reply_to_message_id=None):
+            sent_calls.update({"chat": chat, "path": path})
+            return True
+
+        monkeypatch.setattr(vs, "send_telegram_voice", _fake_send)
+        recorded = {}
+        monkeypatch.setattr(
+            cc, "record_relationship_message",
+            lambda acc, chat, direction, **k: recorded.update(
+                {"dir": direction, "prev": k.get("text_preview")}),
+        )
+
+        s = self._make_sender(monkeypatch)
+        monkeypatch.setattr(s, "_presend_blocked", lambda: False)
+        paced = {}
+        counted = {}
+
+        async def _pace():
+            paced["hit"] = True
+
+        monkeypatch.setattr(s, "_presend_pace", _pace)
+        monkeypatch.setattr(s, "_postsend_record_count",
+                            lambda: counted.update({"hit": True}))
+        emitted = {}
+        s._emit_inbox = lambda **kw: emitted.update(kw)
+
+        msg = types.SimpleNamespace(chat=types.SimpleNamespace(id=7), id=1, from_user=None)
+        out = await s._maybe_send_voice_reply(msg, "hi", is_peer_voice=False)
+
+        assert out is True
+        assert sent_calls["chat"] == 7
+        assert paced.get("hit") is True       # 发前节流（共用墙钟）
+        assert counted.get("hit") is True     # 发后计数（语音计入今日外发量）
+        assert emitted == {"chat_id": 7, "text": "[语音]", "direction": "out"}
+        assert recorded == {"dir": "out", "prev": "[语音]"}
+
+    @pytest.mark.asyncio
+    async def test_voice_with_text_summary_delegates_to_send_reply(self, monkeypatch, tmp_path):
+        from src.ai import tts_pipeline
+        import src.client.voice_sender as vs
+
+        audio = tmp_path / "a.ogg"
+        audio.write_bytes(b"x")
+        res = types.SimpleNamespace(ok=True, audio_path=str(audio),
+                                    duration_sec=2.0, error=None)
+        monkeypatch.setattr(tts_pipeline.TTSPipeline, "synthesize",
+                            AsyncMock(return_value=res))
+        monkeypatch.setattr(vs, "send_telegram_voice",
+                            AsyncMock(return_value=True))
+
+        s = self._make_sender(monkeypatch, summary=True)
+        monkeypatch.setattr(s, "_presend_blocked", lambda: False)
+
+        async def _pace():
+            pass
+
+        monkeypatch.setattr(s, "_presend_pace", _pace)
+        counted = {"n": 0}
+        monkeypatch.setattr(s, "_postsend_record_count",
+                            lambda: counted.update({"n": counted["n"] + 1}))
+        reply_calls = {}
+
+        async def _send_reply(orig, text, parse_mode=None):
+            reply_calls.update({"text": text})
+
+        monkeypatch.setattr(s, "_send_reply", _send_reply)
+        # 仅语音分支才会调；summary 路径不应触发 mirror/record
+        s._postsend_mirror_and_record = lambda *a, **k: reply_calls.update({"mirror": True})
+
+        msg = types.SimpleNamespace(chat=types.SimpleNamespace(id=7), id=1, from_user=None)
+        out = await s._maybe_send_voice_reply(msg, "hello there", is_peer_voice=False)
+
+        assert out is True
+        assert reply_calls.get("text") == "hello there"   # 文本摘要交给 _send_reply
+        assert "mirror" not in reply_calls                # summary 路径不重复 mirror
+        assert counted["n"] == 1                          # 语音计一次（文本由 _send_reply 自记）

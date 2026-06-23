@@ -2616,3 +2616,40 @@ voice 仍走**裸**发送（`send_telegram_voice` 未过 Stage G 的 presend 护
 **下一步**：① **voice note 纳入统一发送栈**（presend 护栏+节流+计数，与照片同构，补语音账号安全）；
 ② **cap 快照上看板**（出图预算已用/剩余/归零时刻，运营可视）；③ **漏斗下钻**（capped/locked→端用户列表）；
 ④ **出图缓存/多候选**（控成本、提质量）。
+
+---
+
+## 70. Stage I：voice note 纳入统一发送栈——A 线三类外发（文本/图片/语音）安全栈全对齐
+
+**实施前的代码实况核对**：`_maybe_send_voice_reply` 在文本回复**之前**尝试（`telegram_client` 1518-1530：
+voice 成功则 `not _voice_sent` 跳过文本）。但其真发 `send_telegram_voice` 是**裸路径**——Stage G 给照片/文本
+补的 presend 护栏（Kill-Switch + 反封号闸门）、节流、计数**一个都没走**：账号被冻结/被闸门拦时，**文本会被拦
+但语音照发**（与改前照片同款风控盲区，且语音先于文本 → 盲区更靠前）。
+
+**改动**（复用 Stage G 抽好的三个共用方法，语音与照片**同构**接入）：
+- `client/sender.py::_maybe_send_voice_reply`：
+  - **发前护栏**：在 TTS 合成**之前**插 `_presend_blocked()`——拦则返 False（不白跑 TTS 省成本；调用方回退
+    `_send_reply`，文本同样被护栏拦 → 冻结期彻底静默，语音不再抢跑绕过）。
+  - **节流**：`send_telegram_voice` 前插 `_presend_pace()`——与文本/照片共用 `_last_send_wallclock`，语音不与
+    前一条外发瞬时双发。
+  - **计数**：发成功后 `_postsend_record_count()`——语音也计入今日外发量（反封号/健康灯不漏算语音条）。
+  - `send_text_summary=true` 分支走 `_send_reply`（自带护栏/节流/计数/镜像/记账）——语音 1 条 + 文本 1 条
+    = 确有 2 条外发、各记一次，口径正确；不重复 mirror。
+- **测试 +3**：护栏拦截则**不跑 TTS、不发语音**、发成功跑 pace+count+mirror（`[语音]`/记 out）、
+  text_summary 路径委托 `_send_reply` 且语音只计一次不重复 mirror。
+  **全量 5985 passed / 31 skipped / 0 fail（单进程，~11min）**。
+
+**实施中的再优化**：
+1. **护栏前置于 TTS**：放在合成之前而非之后——冻结期不白跑 TTS（省算力/费用），比照片更进一步（照片无合成成本）。
+2. **复用 Stage G 三方法**：语音/照片/文本走同一套 presend/pace/count——三类外发安全栈**完全同构**，无第四种写法。
+3. **计数口径正确**：voice+text_summary 记 2 次（确有 2 条外发），voice-only 记 1 次——反封号统计不偏不漏。
+4. **静默一致性**：护栏拦语音→回退文本→文本同样被拦→冻结期 A 线彻底不外发（语音不再是"先发的漏网之鱼"）。
+
+**能否再优化**：proactive / companion worker 等若有**独立**于 `_send_reply` 的发送入口（如 `send_message`
+简化版 helper、主动触达 loop），可同样复核是否纳入本统一栈（属"发送入口审计"，本期聚焦 A 线被动回复三态已闭环）。
+富媒体 preview 脱敏同 Stage H 结论（低风险，暂不做）。
+
+**Stage I 收口**：A 线**三类外发（文本/图片/语音）** 在 Kill-Switch + 反封号闸门 + 节流 + 计数 + 出站镜像 + contacts
+记账上**完全对齐**——语音不再是账号安全/可观测的最后盲区。「账号安全 + 富媒体可观测」这条主线（Stage G→H→I）收口。
+**下一步**：① **cap 快照上看板**（出图预算已用/剩余/归零时刻，运营可视）；② **漏斗下钻**（capped/locked→端用户列表）；
+③ **出图缓存/多候选**（控成本、提质量）；④ **发送入口审计**（proactive/worker 旁路是否纳入统一栈）。
