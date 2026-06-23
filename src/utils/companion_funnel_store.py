@@ -32,8 +32,8 @@ _DAY = 86400.0
 # Stage B：自拍漏斗归因的目标付费项（变现目录 items.exclusive_album）。
 # 与 ``src.ai.companion_selfie.SELFIE_FEATURE`` 同值，但此处硬编码以保持 store **零耦合** ai 层。
 SELFIE_CONVERSION_ITEM = "exclusive_album"
-# 自拍事件 kind 取值（准入决策三态镜像 decide_selfie 的 action）。
-SELFIE_KINDS = ("too_soon", "locked", "delivered")
+# 自拍事件 kind：准入三态（镜像 decide_selfie 的 action）+ ``capped``（全局出图预算用尽被拦）。
+SELFIE_KINDS = ("too_soon", "locked", "delivered", "capped")
 
 
 class CompanionFunnelStore:
@@ -331,6 +331,7 @@ class CompanionFunnelStore:
             "too_soon": 0,
             "locked": 0,
             "delivered": 0,
+            "capped": 0,
             "locked_contacts": 0,
             "conversions": 0,
             "conversion_rate": 0.0,

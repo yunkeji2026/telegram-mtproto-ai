@@ -296,6 +296,17 @@ def test_selfie_funnel_empty_store():
     assert st["locked_contacts"] == 0
 
 
+def test_selfie_funnel_counts_capped_kind():
+    s = _store()
+    s.record_selfie("u1", "capped", now=_NOW)
+    s.record_selfie("u1", "delivered", now=_NOW)
+    s.record_selfie("u2", "capped", now=_NOW)
+    st = s.selfie_funnel_stats(now=_NOW + 60)
+    assert st["capped"] == 2
+    assert st["delivered"] == 1
+    assert st["requests"] == 3
+
+
 # ── EntitlementStore.paid_events_for（漏斗的真实 paid_lookup 底座） ─────────
 
 def test_paid_events_for_batched_and_paid_only():

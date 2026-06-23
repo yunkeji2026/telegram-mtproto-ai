@@ -1006,6 +1006,10 @@ companion:
   selfie:
     enabled: false
     free_daily: 1              # gate 开时每日免费张数（勾引），超额走 exclusive_album 付费引导；gate 关则不限
+    #   ↑ 按端用户计、已持久化（bot.db ContextStore，重启不清零）；限单人滥用
+    daily_global_cap: 0        # 全局每日出图总次数硬上限（跨所有端用户），0=不限——护出图 API 账单：
+    #   防 N 个新用户各刷免费图烧钱。仅在 provider 真出图(enabled+backend≠disabled)时计数/拦截；
+    #   达上限→优雅兜底文案、不消耗用户免费额度、记 capped 事件（自拍漏斗可见）。按 UTC+8 0 点归零。
     min_bond_level: 2          # 关系等级门槛（< 此值温柔搪塞，不发）
     appearance: ""             # 默认外貌描述（persona 无 appearance 字段时的兜底出图描述）
     style: ""                  # 出图风格附加（如 "soft daylight, cozy room, candid"）

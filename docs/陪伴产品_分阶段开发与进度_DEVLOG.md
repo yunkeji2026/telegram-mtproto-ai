@@ -2492,3 +2492,47 @@ A 线是 **Pyrogram**（非 Telethon），`send_message` 在 `TelegramSenderMixi
 **下一步**：① **持久化自拍免费额度**（当前在 user_context，重启清零可绕过，落库防滥用 + 跨进程一致）；
 ② **发送节流统一**（send_photo 纳入 A 线 min_interval，图文混发不触风控）；③ **漏斗下钻**（by_scenario→端用户列表）；
 ④ **出图缓存/多候选**（控成本、提质量）。
+
+---
+
+## 67. Stage F：全局每日出图预算 cap——护住出图 API 账单（修正 Stage E① 的过期假设 + 补真缺口）
+
+**实施前的代码实况核对（重要修正，遵循"以代码实况为准"）**：原计划"持久化自拍免费额度"基于一个**错误假设**
+——以为 `_selfie_used`/`_selfie_date` 在 user_context 是内存态、重启清零。核对 `_get_user_context` 实况：
+它返回 `self._context_store.get(user_id)`（**SQLite 持久化** bot.db），且 `_handle_selfie_request` 调用方在返回前
+`mark_dirty(user_id)+flush(user_id)`——**按端用户的免费额度本就已持久化、重启不清零**。原计划是伪需求。
+
+**真正的缺口**（核对后定位）：per-user `free_daily` 只限**单个**端用户；但 **N 个不同新用户各刷免费图**会让
+出图 API（OpenAI images 等，按张计费）总开销**无上限**——这才是上线前真金白银的风险。无任何全局/账号级
+当日出图总量护栏（`rg daily_cap/global_cap/budget` 确认：RPA 有发送 cap，出图无）。故 Stage F 转做这个真护栏。
+
+**改动**（复用既有 `DailyCapTracker` 范式，不造新轮子；默认 0=不限 → 行为零变化）：
+- `config.companion.selfie.daily_global_cap`（int，0=不限）：跨所有端用户的**当日出图总次数**硬上限。
+- `skills/skill_manager.py`：`_get_selfie_cap(cap)` 惰性持有进程级 `DailyCapTracker`（tz 0 点自动归零、线程安全、
+  运行时 `set_cap` 跟随 config）。`_handle_selfie_request` 的 allow 路径：仅当 provider **真出图**
+  （enabled 且 backend≠disabled，即真有 API 成本）时才计数/拦截——`would_exceed`→优雅兜底文案、
+  **不消耗用户免费额度、不记 delivered、记 capped 事件**；放行则 `record_sent(1)` 后再 generate。
+  provider disabled（无成本）时 cap 完全不介入（行为不变）。
+- `utils/companion_funnel_store.py`：`SELFIE_KINDS` 增 `capped`；`selfie_funnel_stats` 输出 `capped` 计数
+  （运营可在自拍漏斗看「多少需求因预算被拦」——预算调参的依据）。
+- **测试 +5**：全局 cap 拦第二次且不消耗用户免费额度+记 capped、cap=0 不限、provider disabled 时 cap 不介入、
+  store capped kind 计数。**全量 5976 passed / 31 skipped / 0 fail（单进程，~11min）**。
+
+**实施中的再优化**：
+1. **核对推翻伪需求、改做真缺口**（最关键）：没有盲目"持久化"一个本已持久化的东西，而是按代码实况重定位到
+   真正的烧钱风险（全局出图无上限），把工时投在有效护栏上——正是"以代码实况为准"避免 tasklist drift。
+2. **只对真出图计数**：cap 仅在 provider 真会产生 API 成本时介入；文字兜底（provider disabled）零拦截，
+   不误伤"功能开但模型没接"的常态体验。
+3. **per-user 持久额度 × 全局当日 cap 双层防滥用**：前者限单人（已持久化）、后者限全局爆发面（本期补），互补。
+4. **capped 入漏斗可观测**：预算拦截不是黑箱——运营能看到被拦量，据此调 cap/加预算（数据驱动）。
+5. **复用 DailyCapTracker**：tz 归零/线程安全/set_cap 热调全有，零新代码风险。
+
+**能否再优化**：全局 cap 为进程内存态——多进程部署需共享计数（可后续落 Redis/DB）；当前单进程足够，
+且 per-user 额度已持久（重启只重置全局上限，攻击者无法重启我方服务，风险可接受）。可加 `/api/monetize`
+暴露 cap 快照（已用/剩余/归零时刻）供看板显示——属运维可视化增强。
+
+**Stage F 收口**：全局每日出图预算护栏接通——出图 API 账单有硬上限（默认关、开即生效），叠加已持久化的
+per-user 免费额度，自拍变现链上线前的烧钱风险收敛。同时**修正了一个过期任务假设**（per-user 额度本已持久化）。
+**下一步**：① **发送节流统一**（send_photo 纳入 A 线 min_interval，图文混发不触 Telegram 风控）；
+② **cap 快照上看板**（已用/剩余/归零时刻，运营可视）；③ **漏斗下钻**（by_scenario/capped→端用户列表）；
+④ **出图缓存/多候选**（控成本、提质量）。

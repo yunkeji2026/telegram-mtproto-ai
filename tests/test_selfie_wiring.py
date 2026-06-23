@@ -26,6 +26,7 @@ class _SM:
     _monetization_gate_enabled = _SMcls._monetization_gate_enabled
     _handle_selfie_request = _SMcls._handle_selfie_request
     _record_selfie_event = _SMcls._record_selfie_event
+    _get_selfie_cap = _SMcls._get_selfie_cap
     _selfie_upsell_text = _SMcls._selfie_upsell_text
     _try_send_selfie_media = _SMcls._try_send_selfie_media
     _selfie_persona_for_prompt = _SMcls._selfie_persona_for_prompt
@@ -231,6 +232,74 @@ async def test_sender_send_photo_success_failure_and_no_client():
     assert await _S(_Cli(fail=True)).send_photo(7, "/p.png", "cap") is False
     assert await _S(None).send_photo(7, "/p.png") is False
     assert await _S(_Cli()).send_photo(7, "") is False  # 空路径不发
+
+
+# ── Stage F：全局每日出图预算 cap（护出图 API 账单） ──────────────────────
+
+@pytest.mark.asyncio
+async def test_global_cap_blocks_second_and_preserves_quota(monkeypatch):
+    from src.ai import companion_selfie as cs
+    cs.reset_selfie_provider()
+    reset_companion_funnel_store()
+    funnel = get_companion_funnel_store(":memory:")
+    prov = cs.get_selfie_provider({"enabled": True, "backend": "openai"})
+
+    async def _gen(p, **k):
+        return cs.SelfieResult(ok=True, image_path="/tmp/x.png", provider="openai")
+
+    monkeypatch.setattr(prov, "generate", _gen)
+    try:
+        sm = _SM(selfie_cfg=dict(_ON, free_daily=5, daily_global_cap=1,
+                                 provider={"enabled": True, "backend": "openai"}),
+                 gate=True)
+        ctx = {"intimacy_score": 60, "entitlement": {"grants": [], "unlocked": []}}
+        out1 = await sm._handle_selfie_request("发张照片", "u1", ctx, 1)
+        assert out1 is not None and out1 != ""        # 第1次正常出图(无通道→配文)
+        assert ctx.get("_selfie_used") == 1
+        out2 = await sm._handle_selfie_request("再发张照片", "u1", ctx, 1)
+        assert "明天" in out2                          # 第2次全局额度用尽→capped 兜底
+        assert ctx.get("_selfie_used") == 1            # 未再消耗用户免费额度
+        kinds = [r["kind"] for r in funnel.selfie_recent(limit=10)]
+        assert "capped" in kinds and kinds.count("delivered") == 1
+    finally:
+        cs.reset_selfie_provider()
+        reset_companion_funnel_store()
+
+
+@pytest.mark.asyncio
+async def test_global_cap_zero_means_unlimited(monkeypatch):
+    from src.ai import companion_selfie as cs
+    cs.reset_selfie_provider()
+    prov = cs.get_selfie_provider({"enabled": True, "backend": "openai"})
+
+    async def _gen(p, **k):
+        return cs.SelfieResult(ok=True, image_path="/tmp/x.png")
+
+    monkeypatch.setattr(prov, "generate", _gen)
+    try:
+        sm = _SM(selfie_cfg=dict(_ON, daily_global_cap=0,
+                                 provider={"enabled": True, "backend": "openai"}),
+                 gate=False)
+        for _ in range(3):
+            out = await sm._handle_selfie_request(
+                "发张照片", "u1", {"intimacy_score": 60, "entitlement": None}, 1)
+            assert "明天" not in out  # cap=0 → 永不拦
+    finally:
+        cs.reset_selfie_provider()
+
+
+@pytest.mark.asyncio
+async def test_global_cap_ignored_when_provider_disabled():
+    from src.ai import companion_selfie as cs
+    cs.reset_selfie_provider()  # provider disabled → 无出图成本 → 不计 cap
+    try:
+        sm = _SM(selfie_cfg=dict(_ON, daily_global_cap=1), gate=False)
+        for _ in range(3):
+            out = await sm._handle_selfie_request(
+                "发张照片", "u1", {"intimacy_score": 60, "entitlement": None}, 1)
+            assert "明天" not in out  # 恒文字兜底，cap 不介入
+    finally:
+        cs.reset_selfie_provider()
 
 
 @pytest.mark.asyncio

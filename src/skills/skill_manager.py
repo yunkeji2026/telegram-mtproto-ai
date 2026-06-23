@@ -3258,6 +3258,22 @@ class SkillManager(LoggerMixin):
         except Exception:
             return False
 
+    def _get_selfie_cap(self, cap: int):
+        """进程级全局出图预算跟踪器（复用 DailyCapTracker，按 tz 0 点自动归零）。
+
+        护住出图 API（OpenAI images 等）账单：**跨所有端用户**的当日出图总次数硬上限——
+        与「按端用户免费额度」互补（后者限单人、前者限全局爆发面，防 N 个新用户各刷免费图烧钱）。
+        0=不限。运行时 set_cap 跟随 config 调整。
+        """
+        t = getattr(self, "_selfie_cap_tracker", None)
+        if t is None:
+            from src.integrations.rpa_base.daily_cap import DailyCapTracker
+            t = DailyCapTracker(daily_cap=int(cap))
+            self._selfie_cap_tracker = t
+        else:
+            t.set_cap(int(cap))
+        return t
+
     def _record_selfie_event(self, contact_key: str, kind: str) -> None:
         """Stage B：把自拍准入结果(too_soon/locked/delivered)埋点进转化漏斗（best-effort）。
 
@@ -3325,6 +3341,16 @@ class SkillManager(LoggerMixin):
             self._record_selfie_event(user_id_str, "locked")
             return self._selfie_upsell_text(ent, persona_name)
         # action == allow：尝试出图（默认 disabled → 退回文字）
+        provider = get_selfie_provider(scfg.get("provider") or {})
+        will_generate = bool(getattr(provider, "enabled", False)) and \
+            str(getattr(provider, "backend", "")).lower() not in ("", "disabled")
+        cap = int(scfg.get("daily_global_cap", 0) or 0)
+        if will_generate and cap > 0 and self._get_selfie_cap(cap).would_exceed(1):
+            # 全局出图预算用尽：优雅兜底——不记 delivered、不消耗用户免费额度，护住出图 API 账单。
+            self.logger.info("selfie daily_global_cap=%d 已达上限，软兜底", cap)
+            self._record_selfie_event(user_id_str, "capped")
+            return (f"{persona_name}今天已经拍了好多照片啦，有点累咯～"
+                    f"明天再给你拍新的好不好？😊")
         self._record_selfie_event(user_id_str, "delivered")
         prompt = build_selfie_prompt(
             self._selfie_persona_for_prompt(user_context),
@@ -3332,9 +3358,10 @@ class SkillManager(LoggerMixin):
             style=str(scfg.get("style") or ""),
             default_appearance=str(scfg.get("appearance") or ""),
         )
-        provider = get_selfie_provider(scfg.get("provider") or {})
         caption = str(scfg.get("caption")
                       or f"这是刚拍的，给你看～ 喜欢{persona_name}吗？😊")
+        if will_generate and cap > 0:
+            self._get_selfie_cap(cap).record_sent(1)
         try:
             res = await provider.generate(prompt)
         except Exception:
