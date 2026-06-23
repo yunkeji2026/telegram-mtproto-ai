@@ -109,6 +109,18 @@ def test_selfie_funnel_attributes_album_conversion_end_to_end():
     assert len(d["recent"]) == 3
 
 
+def test_monetization_page_wires_both_funnels():
+    """Stage E：变现看板 UI 引用两条转化漏斗端点与渲染容器（防接线被误删）。"""
+    from pathlib import Path
+    tpl = Path(__file__).resolve().parents[1] / "src" / "web" / "templates" / "monetization.html"
+    html = tpl.read_text(encoding="utf-8")
+    assert "/api/monetize/teaser-funnel" in html
+    assert "/api/monetize/selfie-funnel" in html
+    assert 'id="mz-teaser-cards"' in html
+    assert 'id="mz-selfie-cards"' in html
+    assert "mzFunnels(" in html  # 初始加载/刷新都触发
+
+
 def test_grant_subscribe_then_entitlement():
     client, _ = _client()
     r = client.post("/api/monetize/grant", json={

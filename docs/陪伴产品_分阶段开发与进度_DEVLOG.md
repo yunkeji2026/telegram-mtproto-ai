@@ -2455,3 +2455,40 @@ A 线是 **Pyrogram**（非 Telethon），`send_message` 在 `TelegramSenderMixi
 **下一步**：① **变现看板 UI 合并**（teaser-funnel + selfie-funnel 进变现总览页，运营一眼看两条转化链，纯前端零风险）；
 ② **持久化自拍免费额度**（当前在 user_context，落库防重启绕过）；③ **发送节流统一**（send_photo 纳入 min_interval）；
 ④ **出图缓存/多候选**（控成本、提质量）。
+
+---
+
+## 66. Stage E：变现看板 UI 合并——两条转化漏斗进总览页（续 Stage D①，让 Stage B/C/D 可观测真正被用起来）
+
+**背景/动机**：Stage B/3 已建好 `teaser-funnel` / `selfie-funnel` 两个 API，但运营**没有入口看**——数据躺在
+接口里没人用。本期把两条转化链渲染进既有变现看板 `/monetization`，让"预告→剧情付费""自拍触墙→相册付费"
+一眼可见。纯前端（模板 + 原生 JS），零后端改动、零风险。
+
+**实施前的代码实况核对**：`rg monetization.html` 确认看板是 `templates/monetization.html`（Jinja 继承 base.html +
+原生 JS fetch `/api/monetize/*` 渲染），已有 `mzLoad/mzRetention` 范式 + `.mz-card` 卡片样式可复用；
+两漏斗 API 已存在且已测。结论：UI 此前未做，且可**纯复用既有渲染范式**，不引任何新依赖/组件。
+
+**改动**（`web/templates/monetization.html`，纯前端）：
+- 新增「转化漏斗」card：①付费预告漏斗（发出预告/触达人数/转化/转化率 4 卡 + 按场景分布表，精确转化=已付项
+  命中预告 feature）；②自拍/形象照漏斗（自拍请求/触墙/送达/相册转化/付费墙转化率 5 卡）。
+- JS `mzFunnels()` → `mzTeaserFunnel()` + `mzSelfieFunnel()`：复用上方统计窗口（window_days）+ 固定归因窗 14 天，
+  fetch 两端点渲染；`enabled=false`（功能未开）优雅显示"未启用"而非报错；请求失败显示降级提示。
+- 接入初始加载（DOMContentLoaded）与「刷新」按钮 → 与营收/挽回榜同步刷新。
+- **测试 +1**：模板接线 smoke（断言引用两端点 + 渲染容器 id + mzFunnels 触发，防接线被误删）。
+  **全量 5972 passed / 31 skipped / 0 fail（单进程）**；另跑 jinja parse 校验模板语法无误。
+
+**实施中的再优化**：
+1. **纯复用既有渲染范式 + 卡片样式**（最关键）：不引图表库/前端框架——`.mz-card`/`.mz-table` 既有样式 +
+   `fCard()` 小工厂函数即可，保持看板视觉一致、零新依赖、加载零额外体积。
+2. **`enabled=false` 优雅降级**：功能未开时显示"未启用 + 需开哪个 flag"提示而非空白/报错，运营自助可诊断。
+3. **复用统一统计窗口**：漏斗 window_days 跟随页面顶部「统计窗口」输入，刷新按钮一键同步营收+漏斗，交互一致。
+4. **smoke 测守接线而非脆断言渲染**：只断言端点/容器/触发函数存在（稳定），不耦合具体 DOM 文案（易变）。
+
+**能否再优化**：可加归因窗（attribution_days）独立输入、或把 by_scenario 做成可点击下钻到具体端用户列表——
+属看板交互深化；当前已满足"一眼看两条转化链"的核心诉求。
+
+**Stage E 收口**：`/monetization` 看板新增两条转化漏斗可视化——Stage B/C/D 的数据/能力首次有统一运营入口，
+变现闭环（意图→双闸→出图→送达→**可观测**）在 UI 层收口。
+**下一步**：① **持久化自拍免费额度**（当前在 user_context，重启清零可绕过，落库防滥用 + 跨进程一致）；
+② **发送节流统一**（send_photo 纳入 A 线 min_interval，图文混发不触风控）；③ **漏斗下钻**（by_scenario→端用户列表）；
+④ **出图缓存/多候选**（控成本、提质量）。

@@ -51,7 +51,7 @@
 
   <div class="mz-filters">
     <div class="f-grp"><label class="f-lb">统计窗口（天）</label><input type="number" id="mz-days" value="30" min="1" max="365" class="f-input" style="width:100px"></div>
-    <button type="button" class="btn btn-p" onclick="mzLoad()">刷新</button>
+    <button type="button" class="btn btn-p" onclick="mzLoad();mzFunnels()">刷新</button>
     <span id="mz-flag" style="font-size:.78rem;color:var(--t3)"></span>
   </div>
 
@@ -80,6 +80,27 @@
       <tbody id="mz-retention"><tr><td colspan="5" style="padding:1.2rem;color:var(--t3)">加载中…</td></tr></tbody>
     </table>
   </div>
+</div>
+
+<div class="card fa">
+  <h2>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+    转化漏斗
+    <span style="font-size:.75rem;font-weight:400;color:var(--t2);margin-left:.4rem">付费预告→剧情解锁 · 自拍触墙→专属相册 · 复用上方统计窗口，归因窗 14 天</span>
+  </h2>
+
+  <div class="section-h">付费预告漏斗 <span style="font-size:.72rem;font-weight:400;color:var(--t3)">沉默期发出的剧情付费预告 → tx_ledger 已付归因（精确=已付项命中预告 feature）</span></div>
+  <div class="mz-cards" id="mz-teaser-cards"></div>
+  <div class="section-h" style="font-size:.78rem">按场景分布</div>
+  <div class="table-wrap">
+    <table class="mz-table">
+      <thead><tr><th style="min-width:140px">场景</th><th style="width:90px">预告数</th><th style="width:90px">触达人数</th><th style="width:80px">转化</th><th style="width:90px">转化率</th></tr></thead>
+      <tbody id="mz-teaser-scn"><tr><td colspan="5" style="padding:1.2rem;color:var(--t3)">加载中…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="section-h" style="margin-top:1.1rem">自拍 / 形象照漏斗 <span style="font-size:.72rem;font-weight:400;color:var(--t3)">自拍请求 → 触墙(locked) → exclusive_album 付费（转化率分母=触墙端用户数）</span></div>
+  <div class="mz-cards" id="mz-selfie-cards"></div>
 </div>
 
 <div class="card fa">
@@ -160,6 +181,60 @@ async function mzLoad(){
       return '<tr><td>'+kBadge(t.kind)+'</td><td class="mono">'+esc(t.contact_key)+'</td><td>'+esc(t.item_id||'—')+'</td><td>'+esc(t.currency||cur)+' '+((t.amount||0).toFixed(2))+'</td><td style="color:var(--t3);font-size:.74rem">'+esc(t.source||'—')+'</td><td class="mono">'+ts+'</td></tr>';
     }).join(''):'<tr><td colspan="6" style="padding:1.2rem;color:var(--t3)">无流水</td></tr>';
   }catch(e){flag.textContent='请求失败: '+e;}
+}
+
+function pct(x){return ((Number(x)||0)*100).toFixed(1)+'%';}
+function fCard(lb,v,sub,green){
+  return '<div class="mz-card"><div class="lb">'+esc(lb)+'</div><div class="v'+(green?' green':'')+'">'+esc(v)+'</div>'+(sub?'<div class="sub">'+esc(sub)+'</div>':'')+'</div>';
+}
+
+async function mzFunnels(){
+  const days=document.getElementById('mz-days').value||30;
+  await mzTeaserFunnel(days);
+  await mzSelfieFunnel(days);
+}
+
+async function mzTeaserFunnel(days){
+  const cards=document.getElementById('mz-teaser-cards');
+  const scn=document.getElementById('mz-teaser-scn');
+  try{
+    const res=await fetch('/api/monetize/teaser-funnel?window_days='+encodeURIComponent(days)+'&attribution_days=14');
+    const d=await res.json();
+    const f=(d&&d.funnel)||{};
+    if(!d.enabled){
+      cards.innerHTML='<div class="mz-card"><div class="lb">付费预告漏斗</div><div class="v" style="font-size:1rem;color:var(--t3)">未启用</div><div class="sub">需开 monetization + companion.story.paid_teaser</div></div>';
+      scn.innerHTML='<tr><td colspan="5" style="padding:1.2rem;color:var(--t3)">—</td></tr>';
+      return;
+    }
+    cards.innerHTML=
+      fCard('发出预告',f.teasers||0)+
+      fCard('触达人数',f.contacts_teased||0)+
+      fCard('转化',f.conversions||0,(f.feature_conversions||0)+' 精确')+
+      fCard('转化率',pct(f.conversion_rate),'精确 '+pct(f.feature_conversion_rate),true);
+    const by=f.by_scenario||[];
+    scn.innerHTML=by.length?by.map(function(s){
+      return '<tr><td class="mono">'+esc(s.scenario_id||'—')+'</td><td>'+(s.teasers||0)+'</td><td>'+(s.contacts||0)+'</td><td>'+(s.conversions||0)+'</td><td>'+pct(s.conversion_rate)+'</td></tr>';
+    }).join(''):'<tr><td colspan="5" style="padding:1.2rem;color:var(--t3)">窗口内无预告</td></tr>';
+  }catch(e){cards.innerHTML='<div class="mz-card"><div class="lb">付费预告漏斗</div><div class="v" style="font-size:.9rem;color:var(--amber)">请求失败</div></div>';}
+}
+
+async function mzSelfieFunnel(days){
+  const cards=document.getElementById('mz-selfie-cards');
+  try{
+    const res=await fetch('/api/monetize/selfie-funnel?window_days='+encodeURIComponent(days)+'&attribution_days=14');
+    const d=await res.json();
+    const f=(d&&d.funnel)||{};
+    if(!d.enabled){
+      cards.innerHTML='<div class="mz-card"><div class="lb">自拍漏斗</div><div class="v" style="font-size:1rem;color:var(--t3)">未启用</div><div class="sub">需开 monetization + companion.selfie</div></div>';
+      return;
+    }
+    cards.innerHTML=
+      fCard('自拍请求',f.requests||0,(f.contacts||0)+' 人')+
+      fCard('触墙(locked)',f.locked||0,(f.locked_contacts||0)+' 人')+
+      fCard('送达',f.delivered||0)+
+      fCard('相册转化',f.conversions||0)+
+      fCard('付费墙转化率',pct(f.conversion_rate),'触墙→相册',true);
+  }catch(e){cards.innerHTML='<div class="mz-card"><div class="lb">自拍漏斗</div><div class="v" style="font-size:.9rem;color:var(--amber)">请求失败</div></div>';}
 }
 
 async function mzRetention(){
@@ -283,6 +358,6 @@ async function mzCheckout(btn,contact,kind,item,provider){
   }catch(e){link.textContent='请求失败: '+e;}finally{btn.disabled=false;}
 }
 
-document.addEventListener('DOMContentLoaded',function(){mzLoad();mzRetention();});
+document.addEventListener('DOMContentLoaded',function(){mzLoad();mzRetention();mzFunnels();});
 </script>
 {% endblock %}
