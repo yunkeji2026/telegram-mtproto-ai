@@ -154,3 +154,107 @@ async def test_funnel_noop_when_store_not_initialized():
     ctx = {"intimacy_score": 60, "entitlement": {"grants": [], "unlocked": []}}
     out = await sm._handle_selfie_request("想看你的照片", "u1", ctx, "c1")
     assert out is not None  # 主流程不受埋点缺失影响
+
+
+# ── Stage D：A 线主客户端 send_photo 直发兜底 ───────────────────────────────
+
+@pytest.mark.asyncio
+async def test_try_send_selfie_media_direct_callback():
+    sm = _SM(selfie_cfg=_ON)
+    sent = {}
+
+    async def _fake_send(chat_id, path, caption):
+        sent["args"] = (chat_id, path, caption)
+        return True
+
+    # 无 platform/account → 编排器路跳过 → 走 A 线直发回调
+    ok = await sm._try_send_selfie_media(
+        {"_send_photo_to_chat": _fake_send}, 12345, "/tmp/x.png", "hi")
+    assert ok is True
+    assert sent["args"] == (12345, "/tmp/x.png", "hi")
+
+
+@pytest.mark.asyncio
+async def test_try_send_selfie_media_no_channel_returns_false():
+    sm = _SM(selfie_cfg=_ON)
+    ok = await sm._try_send_selfie_media({}, 1, "/tmp/x.png", "hi")
+    assert ok is False
+
+
+@pytest.mark.asyncio
+async def test_try_send_selfie_media_no_image_returns_false():
+    sm = _SM(selfie_cfg=_ON)
+
+    async def _fake_send(c, p, cap):
+        return True
+
+    ok = await sm._try_send_selfie_media(
+        {"_send_photo_to_chat": _fake_send}, 1, "", "hi")
+    assert ok is False
+
+
+@pytest.mark.asyncio
+async def test_try_send_selfie_media_callback_failure_soft_false():
+    sm = _SM(selfie_cfg=_ON)
+
+    async def _boom(c, p, cap):
+        raise RuntimeError("net down")
+
+    ok = await sm._try_send_selfie_media(
+        {"_send_photo_to_chat": _boom}, 1, "/tmp/x.png", "hi")
+    assert ok is False  # 直发失败软兜底，不抛
+
+
+@pytest.mark.asyncio
+async def test_sender_send_photo_success_failure_and_no_client():
+    from src.client.sender import TelegramSenderMixin
+
+    class _Cli:
+        def __init__(self, fail=False):
+            self.fail = fail
+            self.calls = []
+
+        async def send_photo(self, chat_id, photo, caption=""):
+            if self.fail:
+                raise RuntimeError("rpc")
+            self.calls.append((chat_id, photo, caption))
+
+    class _S(TelegramSenderMixin):
+        def __init__(self, cli):
+            self.client = cli
+            self.logger = logging.getLogger("test_sender")
+            self.account_id = "a"
+
+    ok = _S(_Cli())
+    assert await ok.send_photo(7, "/p.png", "cap") is True
+    assert ok.client.calls == [(7, "/p.png", "cap")]
+    assert await _S(_Cli(fail=True)).send_photo(7, "/p.png", "cap") is False
+    assert await _S(None).send_photo(7, "/p.png") is False
+    assert await _S(_Cli()).send_photo(7, "") is False  # 空路径不发
+
+
+@pytest.mark.asyncio
+async def test_allow_direct_send_returns_empty_when_photo_sent(monkeypatch):
+    from src.ai import companion_selfie as cs
+    cs.reset_selfie_provider()
+    prov = cs.get_selfie_provider({"enabled": True, "backend": "disabled"})
+
+    async def _fake_gen(prompt, **kw):
+        return cs.SelfieResult(ok=True, image_path="/tmp/fake.png", provider="x")
+
+    monkeypatch.setattr(prov, "generate", _fake_gen)
+    sent = {}
+
+    async def _fake_send(chat_id, path, caption):
+        sent["path"] = path
+        return True
+
+    try:
+        sm = _SM(selfie_cfg=_ON, gate=False)  # 准入不限
+        ctx = {"intimacy_score": 60, "entitlement": None,
+               "_send_photo_to_chat": _fake_send}
+        out = await sm._handle_selfie_request("发张照片", "u1", ctx, 999)
+        assert out == ""  # 媒体已发出 → 空串(不再补普通文字回复)
+        assert sent["path"] == "/tmp/fake.png"
+    finally:
+        cs.reset_selfie_provider()

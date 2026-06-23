@@ -3394,26 +3394,39 @@ class SkillManager(LoggerMixin):
         self, user_context: Dict[str, Any], chat_id: Any,
         image_path: str, caption: str,
     ) -> bool:
-        """best-effort 经编排器受管媒体 worker 发出照片。无可用通道 → False（调用方退回文字）。"""
+        """best-effort 发出照片。① 编排器受管媒体 worker（B 线/受管账号）；
+        ② A 线主客户端直发（user_context 注入的 ``_send_photo_to_chat`` 回调）。
+
+        两路都不可用 → False（调用方退回文字陪伴）。任一路成功即 True。
+        """
+        if not image_path:
+            return False
+        # ① 编排器受管媒体 worker（需 platform+account+chat_key 且 owns_media）
         try:
             platform = str(user_context.get("platform") or "").strip()
             account_id = str(user_context.get("account_id")
                              or user_context.get("account_persona_id") or "").strip()
             chat_key = str(chat_id or "").strip()
-            if not (platform and account_id and chat_key and image_path):
-                return False
-            from src.integrations.account_orchestrator import get_orchestrator
-            orch = get_orchestrator(self.config.config or {})
-            if not orch.owns_media(platform, account_id):
-                return False
-            await orch.send_media(
-                platform, account_id, chat_key,
-                media_path=image_path, media_url="", media_type="image",
-                caption=caption)
-            return True
+            if platform and account_id and chat_key:
+                from src.integrations.account_orchestrator import get_orchestrator
+                orch = get_orchestrator(self.config.config or {})
+                if orch.owns_media(platform, account_id):
+                    await orch.send_media(
+                        platform, account_id, chat_key,
+                        media_path=image_path, media_url="", media_type="image",
+                        caption=caption)
+                    return True
         except Exception:
-            self.logger.debug("selfie media send failed", exc_info=True)
-            return False
+            self.logger.debug("selfie orchestrator media send failed", exc_info=True)
+        # ② A 线主客户端直发（Pyrogram send_photo 经回调注入；主平台 Telegram 无受管 worker 时兜底）
+        try:
+            sender = user_context.get("_send_photo_to_chat")
+            if callable(sender):
+                ok = await sender(chat_id, image_path, caption)
+                return bool(ok)
+        except Exception:
+            self.logger.debug("selfie direct send failed", exc_info=True)
+        return False
 
     def _story_scenarios(self) -> Dict[str, Any]:
         sc = self._story_cfg().get("scenarios")

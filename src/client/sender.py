@@ -345,6 +345,30 @@ class TelegramSenderMixin:
             self.logger.error("发送消息失败: %s", e)
             return False
 
+    async def send_photo(self, chat_id: Any, photo_path: str,
+                         caption: str = "") -> bool:
+        """A 线主客户端直发照片（Pyrogram send_photo）。供陪伴形象照「直发」缝。
+
+        失败绝不抛、返回 False（调用方退回文字陪伴）；命中风控走 G2 封号信号分级处置。
+        """
+        try:
+            if not self.client:
+                self.logger.error("客户端未初始化")
+                return False
+            if not photo_path:
+                return False
+            await self.client.send_photo(chat_id, photo_path, caption=caption or "")
+            self.logger.info("已发送照片到 %s（%s）", chat_id, photo_path)
+            return True
+        except Exception as e:
+            self.logger.error("发送照片失败: %s", e)
+            try:
+                from src.ops.ban_signal import handle_send_exception as _g2
+                _g2("telegram", getattr(self, "account_id", "default"), e)
+            except Exception:
+                pass
+            return False
+
     async def _send_escalation_private_jump_hint(
         self,
         peer: Any,

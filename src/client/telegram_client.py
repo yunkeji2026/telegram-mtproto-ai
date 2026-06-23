@@ -1400,6 +1400,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                 'triggered_by_mention': triggered_by_mention,
                 '_trigger_path': message_data.get('_trigger_path'),
                 '_send_to_chat': self.send_message,
+                '_send_photo_to_chat': self.send_photo,
                 '_record_gxp_cmd': self.record_gxp_command,
                 '_i18n': self.i18n,
                 '_event_tracker': self.event_tracker,

@@ -2414,3 +2414,44 @@ DeepSeek/openai_compatible 不支持图像，**绝不可共用那把 key**）：
 **下一步**：① **A 线主客户端 `send_photo` 直发**（脱离对编排器 media worker 的依赖，让主平台 Telegram 直接发图，
 扩大 delivered 实际触达面）；② **变现看板 UI 合并**（teaser-funnel + selfie-funnel 进总览页）；
 ③ **持久化自拍免费额度**（落库防重启绕过）；④ **出图缓存/多候选**（控成本、提质量）。
+
+---
+
+## 65. Stage D：A 线主客户端 send_photo 直发——出图能力的"最后一公里"（续 Stage C①）
+
+**背景/动机**：Stage A-C 让自拍能"判准入→出真图"，但 `_try_send_selfie_media` **只走编排器受管媒体 worker**
+（B 线/受管账号）。主平台 Telegram 的 A 线主客户端（`TelegramClient`）**不注册为编排器 worker**，故
+`owns_media` 恒 False → 出了图也发不出、永远退回文字。本期补"直发"兜底：A 线直接 `send_photo` 把图送达。
+
+**实施前的代码实况核对**：`rg send_photo/send_media/owns_media` 确认——`_try_send_selfie_media` 仅编排器单路；
+A 线是 **Pyrogram**（非 Telethon），`send_message` 在 `TelegramSenderMixin`（`client/sender.py`），且 A 线已把
+`'_send_to_chat': self.send_message` 注入 user_context（既有"回调注入"范式）。结论：直发能力此前未开发，
+且可**复用同一注入范式**加一个 `_send_photo_to_chat`，不必让 skill_manager 持有客户端引用（解耦）。
+
+**改动**（沿用既有"回调注入"缝，零侵入 skill_manager 与客户端耦合）：
+- `client/sender.py`：`TelegramSenderMixin` 新增 `async send_photo(chat_id, photo_path, caption)`——镜像
+  `send_message`：无 client/空路径→False，命中风控走 G2 封号信号分级处置，**绝不抛、失败返 False**。
+- `client/telegram_client.py`：A 线 `_sm_context` 注入 `'_send_photo_to_chat': self.send_photo`（与 `_send_to_chat`
+  并列），让 skill_manager 在不持有客户端引用的前提下能回调直发。
+- `skills/skill_manager.py`：`_try_send_selfie_media` 改**双路兜底**——①编排器受管 worker（owns_media 时）；
+  ②A 线 `_send_photo_to_chat` 回调直发。任一成功即 True，两路皆不可用才退文字。
+- **测试 +8**：`_try_send_selfie_media` 直发回调成功/无通道 False/空图 False/回调异常软兜底；`send_photo`
+  成功/RPC 失败/无 client/空路径；`_handle_selfie_request` 准入出图→直发→返回 ""（媒体已发不补文字）端到端。
+  **全量 5971 passed / 31 skipped / 0 fail（单进程 754s）**。
+
+**实施中的再优化**：
+1. **复用"回调注入"范式而非给 skill_manager 塞客户端引用**（最关键）：A 线早有 `_send_to_chat` 注入先例，
+   加 `_send_photo_to_chat` 与之对齐——skill_manager 不耦合具体客户端、可纯单测（stub 回调即可），架构一致。
+2. **双路兜底顺序：编排器优先、直发兜底**：受管账号（B 线/统一收件箱）走编排器保持原行为不变；只有主平台
+   A 线（无受管 worker）才落直发——既不改既有受管路径（零回归），又补齐主平台触达。
+3. **send_photo 与 send_message 同构 + G2 封号信号**：直发照片同样吃风控分级急停，不让发图绕过安全护栏。
+4. **空路径/无 client 早退**：直发回调对脏输入鲁棒，绝不抛进对话主链路。
+
+**能否再优化**：可把 `send_photo` 也纳入 A 线 `min_interval` 全局发送节流（当前仅 send_message 计时）避免图文
+混发触发风控——属节流策略细化，可下一阶段统一；当前直发已走 G2 异常处置兜底。
+
+**Stage D 收口**：A 线主客户端 `send_photo` 直发兜底接通——自拍出图能力"最后一公里"打通，主平台 Telegram
+准入用户真能收到形象照（编排器受管账号仍走原 worker，零回归）。
+**下一步**：① **变现看板 UI 合并**（teaser-funnel + selfie-funnel 进变现总览页，运营一眼看两条转化链，纯前端零风险）；
+② **持久化自拍免费额度**（当前在 user_context，落库防重启绕过）；③ **发送节流统一**（send_photo 纳入 min_interval）；
+④ **出图缓存/多候选**（控成本、提质量）。
