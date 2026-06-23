@@ -997,6 +997,30 @@ companion:
   #   - requires_story（跨场景因果）：列出前置剧情，全部满足才解锁（AND）。
   #     {scenario: X}=完成过 X 即可；{scenario: X, ending: warm}=须以 warm 结局完成 X。
   #     判定顺序 关系→前置剧情→付费；缺前传时提示「先经历《X》」而非直接报付费。
+  # Stage A：陪伴「形象照/自拍」——把变现目录里的 exclusive_album（专属相册）真正通电。
+  # 用户在对话里要照片（「给我看看你 / 自拍 / what do you look like」）→ 按关系等级 + 付费权益判：
+  #   - 关系浅(< min_bond_level) → 温柔搪塞（避免轻浮）；
+  #   - gate 开 + 未拥有 exclusive_album + 免费额度用尽 → 软付费引导（驱动相册解锁）；
+  #   - 准入 → provider 出图（人设一致 + 强制 SFW），有受管媒体 worker 则经编排器发出，否则退回文字陪伴。
+  # 默认全关；provider.backend=disabled 时即使 enabled 也只走「文字兜底/付费引导」（不接真模型零行为）。
+  selfie:
+    enabled: false
+    free_daily: 1              # gate 开时每日免费张数（勾引），超额走 exclusive_album 付费引导；gate 关则不限
+    min_bond_level: 2          # 关系等级门槛（< 此值温柔搪塞，不发）
+    appearance: ""             # 默认外貌描述（persona 无 appearance 字段时的兜底出图描述）
+    style: ""                  # 出图风格附加（如 "soft daylight, cozy room, candid"）
+    scene_hint: ""             # 场景提示（如 "sitting by the window with a coffee"）
+    caption: ""                # 出图配文（空=用内置人设化默认文案）
+    provider:
+      enabled: false
+      backend: disabled        # disabled | openai | command
+      model: gpt-image-1       # openai images 模型
+      size: "1024x1024"
+      api_key: ""
+      base_url: ""
+      # 本地推理（ComfyUI/SD 脚本）：占位 {prompt} {out}
+      # command_args: [python, tools/sd_infer.py, --prompt, "{prompt}", --out, "{out}"]
+      out_dir: tmp_selfies
   story:
     enabled: false
     advance_turns: 3           # 每 N 个用户轮次推进一个 beat（剧终自动收场）

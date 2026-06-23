@@ -2274,3 +2274,48 @@ re-engagement 闭环从「免费剧情邀约」延伸到「付费剧情预告」
 入站消息路径插一个轻量归因钩子（预告后该会话首条 inbound → 记 return 事件），补全三段漏斗、定位是
 "没人理"还是"理了不买"；② 漏斗卡片接进 workspace_usage 模板可视化（当前是 JSON API）；③ 转化数据回哺
 Stage 2 选择：低转化场景自动降权/停推（用 funnel_stats 反向调 `select_paid_teaser` 候选）。
+
+## 62. 竞品对标 · Stage A · 陪伴「形象照/自拍」生成（把 exclusive_album 真正通电）
+
+**立项判断 + 关键发现**（用户问"竞品对标还有哪些要做"，逐竞品盘点代码实况后定）。对标星野/Talkie/
+Replika 的招牌情感钩子=「她发来一张照片」，本仓**完全空白**。更关键：变现目录 `monetization.items`
+里早已定义付费项 `exclusive_album`（专属相册 ¥4.99），但**全仓库零交付代码**——又一处"装了付费项
+却没通电"（同 Stage 1 entitlement 病灶）。故本期把自拍能力补上并直接咬合 exclusive_album 付费闸。
+
+**改动**（新增纯逻辑引擎 + 软失败 provider 骨架，复用 K2 变现 gate / 编排器媒体通道，默认全关）：
+- `ai/companion_selfie.py`（**新**，镜像 `tts_pipeline` 范式）：
+  - `detect_selfie_request(text)`：多语保守意图识别（自拍/你长什么样/what do you look like/send a pic…），
+    刻意避开"用户自述照片"误命中、超长叙述不命中。
+  - `build_selfie_prompt(persona, *, scene_hint, style, default_appearance, sfw)`：出图提示词纯函数，
+    外貌优先级 persona 真实外貌→config default_appearance→按 name 通用→中性兜底；**强制 SFW 安全约束**。
+  - `decide_selfie(*, entitlement, gate_enabled, free_used, free_daily, bond_level, min_bond_level)`：准入纯
+    函数——关系浅→`too_soon`；拥有相册/gate 关→`allow` 不限；免费额度内→`allow(used_free)`；用尽→`locked`。
+  - `SelfieProvider`（enabled/backend=disabled|openai|command，软失败、绝不抛）+ `SelfieResult` + 单例。
+- `skills/skill_manager.py`：`_handle_selfie_request`（async）接入 `_handle_message_guarded`（growth 指令后、
+  冷却前）。`too_soon`→温柔搪塞；`locked`→复用 `monetization.upsell_*` 出 exclusive_album 软付费引导
+  （把死目录项变活 paywall 触点）；`allow`→`SelfieProvider` 出图，有受管媒体 worker 则经
+  `account_orchestrator.send_media` 发出（返回 ""=已发不再补文字），否则优雅退回文字陪伴。免费额度按天
+  在 user_context 计数（仅 gate 开+未拥有时消耗）。`_monetization_gate_enabled` 复用变现总闸判定。
+- `config.example.yaml`：`companion.selfie` 段（enabled/free_daily/min_bond_level/appearance/style/scene_hint/
+  caption/provider）默认全关 + provider.backend=disabled（不接真模型零行为）。
+- **测试**：引擎 16 测（意图正/负样本、提示词外貌优先级+SFW、决策 too_soon/gate 关不限/拥有相册不限/
+  免费额度→locked、provider disabled/未知 backend/空 prompt 软失败/command 后端真出图/单例）；接线 7 测
+  （未开→None/非请求→None/关系浅搪塞/未解锁付费引导/免费额度兜底并计数/拥有相册不计数/gate 关不引导）。
+  全量 **5938 passed / 31 skipped / 0 fail（180s，+23 测）**。
+
+**实施中的再优化**：
+1. **发现 exclusive_album"付费项没通电"为切入点**（最关键）：不是凭空加自拍，而是补上一个已售卖却无
+   交付的付费项——和 Stage 1 同源的"以代码实况为准"判断，先让已有商品可交付再谈扩展。
+2. **软付费引导（locked 路径）零依赖即生效**：locked 分支是纯文字 upsell，不依赖任何图像 provider——
+   即使不接真模型，也立刻把 exclusive_album 从死目录变成对话内活 paywall 触点（直接续 Stage 1-3 变现链）。
+3. **provider 默认 disabled 仍优雅**：未接模型时 `allow` 路径退回文字陪伴而非报错/沉默，付费用户体验不破。
+4. **外貌描述四级回落 + SFW 硬约束在 prompt 层**：persona 无 appearance 字段也能出图（config 兜底），
+   安全约束不依赖模型自觉。
+5. **媒体发送走既有编排器通道、best-effort**：不新造每平台发图栈——有受管媒体 worker 就发、没有就退文字，
+   `owns_media` 守卫 + try/except，零破坏既有发送链。
+
+**Stage A 收口**：自拍意图 → 关系/付费双 gate → 出图(默认文字兜底) → exclusive_album 付费闸通电。
+**下一步**：① **真接图像 provider**（openai images 已写、本地 ComfyUI/SD command 模板已留口，接真模型即出图）；
+② **每平台发图栈补全**（当前依赖编排器受管 media worker；A 线主客户端 send_photo 直发可补，扩大覆盖）；
+③ **自拍转化接 Stage 3 漏斗**（locked→付费引导也记 funnel 事件，scenario_id="selfie"/feature="exclusive_album"，
+与剧情预告同口径看相册转化率）；④ **持久化免费额度**（当前在 user_context，可落库防重启绕过）。

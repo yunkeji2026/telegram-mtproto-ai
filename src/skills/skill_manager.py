@@ -781,6 +781,20 @@ class SkillManager(LoggerMixin):
             if _growth_reply is not None:
                 return _growth_reply
 
+            # Stage A：形象照/自拍请求（「给我看看你」）。返回字符串=短路（搪塞/付费引导/
+            # 出图配文/兜底）；""=媒体已发出不再补文字；None=非请求或功能未开。
+            try:
+                _selfie_reply = await self._handle_selfie_request(
+                    text, user_id_str, user_context, _chat_id
+                )
+            except Exception:
+                _selfie_reply = None
+                self.logger.debug("selfie request skipped", exc_info=True)
+            if _selfie_reply is not None:
+                self._context_store.mark_dirty(user_id_str)
+                self._context_store.flush(user_id_str)
+                return _selfie_reply or None
+
             # 2. 冷却
             if not self._check_cooldown(text, user_id_str, chat_id=_chat_id):
                 self.logger.warning(f"{log_prefix}用户 {user_id_str} 处于冷却期，跳过回�")
@@ -3223,6 +3237,165 @@ class SkillManager(LoggerMixin):
             return (cfg.get("companion") or {}).get("story") or {}
         except Exception:
             return {}
+
+    def _selfie_cfg(self) -> Dict[str, Any]:
+        """Stage A：陪伴形象照配置（companion.selfie）。缺/异常 → {}（默认关）。"""
+        try:
+            cfg = self.config.config if hasattr(self.config, "config") else {}
+            if not isinstance(cfg, dict):
+                return {}
+            sc = (cfg.get("companion") or {}).get("selfie")
+            return sc if isinstance(sc, dict) else {}
+        except Exception:
+            return {}
+
+    def _monetization_gate_enabled(self) -> bool:
+        """变现门控总闸：monetization.enabled 且 gate.enabled。任一关 → False（不计费）。"""
+        try:
+            cfg = self.config.config if hasattr(self.config, "config") else {}
+            mon = (cfg.get("monetization") or {}) if isinstance(cfg, dict) else {}
+            return bool(mon.get("enabled") and (mon.get("gate") or {}).get("enabled"))
+        except Exception:
+            return False
+
+    async def _handle_selfie_request(
+        self, text: str, user_id_str: str, user_context: Dict[str, Any], chat_id: Any,
+    ) -> Optional[str]:
+        """Stage A：处理「给我看看你/发张自拍」——按关系等级 + 付费权益判准入。
+
+        返回字符串=短路（搪塞/付费引导/出图后的配文/兜底文字）；None=非自拍请求或功能未开。
+        关系浅→温柔搪塞；gate 开+未拥有 exclusive_album+免费额度用尽→软付费引导（驱动解锁）；
+        准入→provider 出图（默认 disabled 则退回文字陪伴），有受管媒体 worker 时经编排器发出。
+        """
+        scfg = self._selfie_cfg()
+        if not scfg.get("enabled", False):
+            return None
+        from src.ai.companion_selfie import (
+            build_selfie_prompt,
+            decide_selfie,
+            detect_selfie_request,
+            get_selfie_provider,
+        )
+        if not detect_selfie_request(text):
+            return None
+        persona_name = self._get_persona_name_for_context(user_context) or "我"
+        # 免费额度按天计（仅 gate 开且未拥有相册时才消耗；拥有者/不计费时不限）
+        today = time.strftime("%Y%m%d")
+        if user_context.get("_selfie_date") != today:
+            user_context["_selfie_date"] = today
+            user_context["_selfie_used"] = 0
+        free_used = int(user_context.get("_selfie_used") or 0)
+        # 权益：复用已懒解析的 entitlement，否则即时解析（best-effort）
+        ent = user_context.get("entitlement")
+        if not isinstance(ent, dict):
+            try:
+                from src.utils.companion_context import resolve_entitlement
+                ent = resolve_entitlement(user_id_str)
+            except Exception:
+                ent = None
+        decision = decide_selfie(
+            entitlement=ent if isinstance(ent, dict) else None,
+            gate_enabled=self._monetization_gate_enabled(),
+            free_used=free_used,
+            free_daily=int(scfg.get("free_daily", 1) or 0),
+            bond_level=self._bond_level_from_context(user_context, chat_id),
+            min_bond_level=int(scfg.get("min_bond_level", 2) or 0),
+        )
+        action = decision.get("action")
+        if action == "too_soon":
+            return (f"哎呀，我们才刚开始熟悉呢，等再多聊聊、更亲近一点，"
+                    f"{persona_name}就给你看我的样子好不好～")
+        if action == "locked":
+            return self._selfie_upsell_text(ent, persona_name)
+        # action == allow：尝试出图（默认 disabled → 退回文字）
+        prompt = build_selfie_prompt(
+            self._selfie_persona_for_prompt(user_context),
+            scene_hint=str(scfg.get("scene_hint") or ""),
+            style=str(scfg.get("style") or ""),
+            default_appearance=str(scfg.get("appearance") or ""),
+        )
+        provider = get_selfie_provider(scfg.get("provider") or {})
+        caption = str(scfg.get("caption")
+                      or f"这是刚拍的，给你看～ 喜欢{persona_name}吗？😊")
+        try:
+            res = await provider.generate(prompt)
+        except Exception:
+            res = None
+            self.logger.debug("selfie generate error", exc_info=True)
+        if res is not None and getattr(res, "ok", False):
+            sent = await self._try_send_selfie_media(
+                user_context, chat_id, res.image_path, caption)
+            if decision.get("used_free"):
+                user_context["_selfie_used"] = free_used + 1
+            if sent:
+                return ""  # 媒体已发出，无需再发文字（空串=已处理、不再生成普通回复）
+            # 出图成功但无可用媒体通道 → 退回配文文字（至少有温暖回应）
+            return caption
+        # provider 未配/失败 → 优雅退回文字陪伴（不报错给用户）
+        if decision.get("used_free"):
+            user_context["_selfie_used"] = free_used + 1
+        return (f"{persona_name}现在不太方便拍照呢，不过我一直在这儿陪你～"
+                f"想我了的话，多跟我说说话好不好？")
+
+    def _selfie_persona_for_prompt(self, user_context: Dict[str, Any]) -> Any:
+        """取出图用 persona（dict 含 name/appearance 等）；拿不到则回 name 字符串/空。"""
+        try:
+            persona_id = (user_context or {}).get("account_persona_id") or ""
+            if persona_id:
+                from src.utils.persona_manager import PersonaManager
+                p = PersonaManager.get_instance().get_persona_by_id(str(persona_id))
+                if isinstance(p, dict):
+                    return p
+        except Exception:
+            pass
+        return self._get_persona_name_for_context(user_context)
+
+    def _selfie_upsell_text(self, entitlement: Any, persona_name: str) -> str:
+        """付费相册软引导（不硬推销，贴人设）。复用 monetization.upsell_*。"""
+        from src.ai.companion_selfie import SELFIE_FEATURE
+        try:
+            from src.utils.monetization import (
+                merge_catalog,
+                upsell_offer,
+                upsell_pitch_hint,
+            )
+            cfg = self.config.config if hasattr(self.config, "config") else {}
+            mon = (cfg.get("monetization") or {}) if isinstance(cfg, dict) else {}
+            catalog = merge_catalog(mon.get("catalog"))
+            offer = upsell_offer(
+                entitlement if isinstance(entitlement, dict) else None,
+                SELFIE_FEATURE, catalog=catalog, gate_enabled=True)
+            hint = upsell_pitch_hint(offer, persona_name=persona_name)
+        except Exception:
+            hint = ""
+        lead = f"我的照片是只给最亲近的人看的小秘密哦～"
+        return (lead + hint) if hint else (
+            lead + f"解锁「专属相册」就能看到{persona_name}啦～")
+
+    async def _try_send_selfie_media(
+        self, user_context: Dict[str, Any], chat_id: Any,
+        image_path: str, caption: str,
+    ) -> bool:
+        """best-effort 经编排器受管媒体 worker 发出照片。无可用通道 → False（调用方退回文字）。"""
+        try:
+            platform = str(user_context.get("platform") or "").strip()
+            account_id = str(user_context.get("account_id")
+                             or user_context.get("account_persona_id") or "").strip()
+            chat_key = str(chat_id or "").strip()
+            if not (platform and account_id and chat_key and image_path):
+                return False
+            from src.integrations.account_orchestrator import get_orchestrator
+            orch = get_orchestrator(self.config.config or {})
+            if not orch.owns_media(platform, account_id):
+                return False
+            await orch.send_media(
+                platform, account_id, chat_key,
+                media_path=image_path, media_url="", media_type="image",
+                caption=caption)
+            return True
+        except Exception:
+            self.logger.debug("selfie media send failed", exc_info=True)
+            return False
 
     def _story_scenarios(self) -> Dict[str, Any]:
         sc = self._story_cfg().get("scenarios")
