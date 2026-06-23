@@ -2578,3 +2578,41 @@ per-user 免费额度，自拍变现链上线前的烧钱风险收敛。同时**
 形象照不再是风控盲区，图文混发也排队。变现自拍链（出图→直发）上线前的**账号安全**缺口收敛。
 **下一步**：① **voice/照片纳入出站镜像 + contacts 记账**（坐席台/亲密度看到富媒体外发）；
 ② **voice note 纳入统一发送栈**（与照片同构）；③ **cap 快照上看板**；④ **漏斗下钻**（capped→端用户）。
+
+---
+
+## 69. Stage H：富媒体外发的出站镜像 + contacts 记账——坐席台/亲密度「看见」图与语音
+
+**实施前的代码实况核对**：文本回复 `_send_reply` 发后做两件可观测/记账：**N4b 出站镜像**（`_emit_inbox`
+→ 坐席台看到 AI 自动回复内容）+ **Q3 contacts 记账**（`record_relationship_message(..., "out", ...)`
+→ IntimacyEngine 计入一次外发互动，mutuality 不偏低）。但 Stage D/G 的 `send_photo` 与 voice
+（`_maybe_send_voice_reply` 在 `send_text_summary=false` 时）**两步都没做**——形成数据空洞：
+- 坐席台**看不到** AI 给端用户发过照片/语音（人工接管时信息缺失）；
+- IntimacyEngine **只见入站、不见这些富媒体外发** → 收发失衡、亲密度分数偏低（误判关系冷淡）。
+
+**改动**（抽公共方法，文本/照片/语音**单一来源**）：
+- `client/sender.py` 抽 `_postsend_mirror_and_record(chat_id, preview)`：出站镜像 + contacts 记账两步
+  （各自 best-effort）。富媒体传带标记 preview：照片「`[图片] {配文}`」（无配文则「`[图片]`」）、语音「`[语音]`」。
+- `_send_reply` 重构为调用该方法（逐字抽取、行为不变）。
+- `send_photo` 发后接入（先 `_postsend_record_count` 计数，再镜像/记账）。
+- `_maybe_send_voice_reply`：仅发语音（无文本摘要）时也镜像/记账；`send_text_summary=true` 时走 `_send_reply`
+  已自带、不重复记。
+- **测试 +3**：照片镜像带 `[图片] 配文` 前缀 + contacts 记 out、空配文 → `[图片]`、无 `_emit_inbox` 属性时
+  镜像优雅跳过但 contacts 照记。**全量 5982 passed / 31 skipped / 0 fail（单进程，~10min）**。
+
+**实施中的再优化**：
+1. **范围含 voice**：不止照片——voice note 同样有此空洞，一并纳入（与用户「voice/照片」建议一致）。
+2. **单一实现来源**：镜像+记账逻辑抽成一处，文本/照片/语音共用——日后改镜像格式/记账口径只改一处，杜绝漂移。
+3. **带类型标记的 preview**：坐席台一眼区分「文字/图片/语音」，而非只看到配文误以为是纯文本。
+4. **不重复记账**：voice 的 `send_text_summary` 分支走 `_send_reply`（已记）→ else 分支才补记，避免一次外发记两笔。
+5. **缺省优雅降级**：`_emit_inbox` 未挂（非 companion 模式）→ 镜像静默跳过，contacts 记账不受影响。
+
+**能否再优化**：富媒体 preview 目前未脱敏（沿用文本镜像同款原文直显，配文为 AI 文案无敏感信息，风险低）；
+voice 仍走**裸**发送（`send_telegram_voice` 未过 Stage G 的 presend 护栏/计数）——下一步可让 voice 与照片
+**同构**接入统一发送栈（presend_blocked + pace + record_count），补齐语音的账号安全维度。
+
+**Stage H 收口**：A 线富媒体外发（照片 Stage G 安全栈 + 本期镜像/记账；语音本期镜像/记账）对**坐席台可见、
+对 IntimacyEngine 可计**——「AI 发了图/语音但系统当没发过」的数据空洞收敛，亲密度分数不再因富媒体外发漏算而偏低。
+**下一步**：① **voice note 纳入统一发送栈**（presend 护栏+节流+计数，与照片同构，补语音账号安全）；
+② **cap 快照上看板**（出图预算已用/剩余/归零时刻，运营可视）；③ **漏斗下钻**（capped/locked→端用户列表）；
+④ **出图缓存/多候选**（控成本、提质量）。

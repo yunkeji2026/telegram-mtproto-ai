@@ -301,6 +301,30 @@ class TelegramSenderMixin:
         except Exception:
             pass
 
+    def _postsend_mirror_and_record(self, chat_id: Any, preview: str) -> None:
+        """发送成功后：出站镜像到坐席台（N4b）+ 记入 contacts 的外发互动（Q3）。
+
+        文本回复与富媒体（照片/语音）共用——富媒体传带标记的 preview（如「[图片] 配文」/「[语音]」），
+        让坐席台**看见** AI 发了富媒体、IntimacyEngine 也**计入**一次外发（否则只见入站、mutuality 偏低）。
+        两步各自 best-effort，绝不阻断发送。
+        """
+        try:
+            _emit = getattr(self, "_emit_inbox", None)
+            if _emit is not None:
+                _emit(chat_id=chat_id, text=preview, direction="out")
+        except Exception:
+            pass
+        try:
+            from src.utils.companion_context import (
+                record_relationship_message as _rec_rel_msg,
+            )
+            _rec_rel_msg(
+                getattr(self, "account_id", "default"),
+                chat_id, "out", text_preview=preview or "",
+            )
+        except Exception:
+            pass
+
     async def _send_reply(self, original_message, reply_text: str, parse_mode=None):
         try:
             # 统一发送前护栏（与 send_photo 共用）：G1 Kill-Switch + N 线反封号闸门。
@@ -325,27 +349,8 @@ class TelegramSenderMixin:
             # 统一发送后记账（与 send_photo 共用）：刷新墙钟 + 记入共用发送计数器
             # （喂反封号闸门 + 机群健康灯今日外发量，best-effort 绝不阻断发送）。
             self._postsend_record_count()
-            # N4b：出站镜像（companion 模式才生效）→ 坐席台看到 AI 自动回复的内容
-            try:
-                _emit = getattr(self, "_emit_inbox", None)
-                if _emit is not None:
-                    _emit(chat_id=original_message.chat.id, text=_out_text,
-                          direction="out")
-            except Exception:
-                pass
-            # Q3：出站记入 contacts（recorder 未开则 no-op）→ IntimacyEngine 才有
-            # 收/发互动（mutuality）信号，分数不再因只见入站而偏低
-            try:
-                from src.utils.companion_context import (
-                    record_relationship_message as _rec_rel_msg,
-                )
-                _rec_rel_msg(
-                    getattr(self, "account_id", "default"),
-                    original_message.chat.id, "out",
-                    text_preview=_out_text or "",
-                )
-            except Exception:
-                pass
+            # N4b 出站镜像（坐席台）+ Q3 contacts 外发互动（mutuality）——与富媒体共用一处。
+            self._postsend_mirror_and_record(original_message.chat.id, _out_text)
             if getattr(original_message, 'from_user', None) and getattr(original_message.from_user, 'id', None):
                 self._record_session_reply(original_message.chat.id, original_message.from_user.id)
                 if getattr(self, 'four_layer_trigger', None):
@@ -396,6 +401,10 @@ class TelegramSenderMixin:
             await self.client.send_photo(chat_id, photo_path, caption=caption or "")
             # 统一记账：刷新墙钟 + 记入共用计数器（照片也计入今日外发量，反封号不漏算）。
             self._postsend_record_count()
+            # 出站镜像 + contacts 记账：坐席台看见「AI 发了图」、亲密度计入这次外发。
+            _cap = (caption or "").strip()
+            self._postsend_mirror_and_record(
+                chat_id, f"[图片] {_cap}".strip() if _cap else "[图片]")
             self.logger.info("已发送照片到 %s（%s）", chat_id, photo_path)
             return True
         except Exception as e:
@@ -637,7 +646,12 @@ class TelegramSenderMixin:
                     original_message.chat.id, persona_id, dur_int,
                 )
                 if vr_cfg.get("send_text_summary", False):
+                    # 文本摘要走 _send_reply→已自带镜像/记账，避免重复记一次。
                     await self._send_reply(original_message, reply_text)
+                else:
+                    # 仅发语音时也要镜像/记账，否则坐席台/亲密度看不到这次外发。
+                    self._postsend_mirror_and_record(
+                        original_message.chat.id, "[语音]")
                 return True
             return False
         except Exception as ex:

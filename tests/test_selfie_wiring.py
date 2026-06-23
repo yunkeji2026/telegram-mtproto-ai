@@ -309,6 +309,56 @@ async def test_send_photo_no_pace_when_interval_zero(monkeypatch):
     assert "sec" not in slept  # min_interval=0 → 不节流（行为不变）
 
 
+# ── Stage H：富媒体外发的出站镜像 + contacts 记账（坐席台/亲密度看见图） ──────
+
+@pytest.mark.asyncio
+async def test_send_photo_mirrors_and_records(monkeypatch):
+    emitted = {}
+    recorded = {}
+
+    def _rec(acc, chat, direction, **kw):
+        recorded.update({"acc": acc, "chat": chat, "dir": direction,
+                         "prev": kw.get("text_preview", "")})
+
+    import src.utils.companion_context as cc
+    monkeypatch.setattr(cc, "record_relationship_message", _rec)
+
+    s = _photo_sender(_PhotoCli())
+    monkeypatch.setattr(s, "_presend_blocked", lambda: False)
+    s._emit_inbox = lambda **kw: emitted.update(kw)
+
+    assert await s.send_photo(7, "/p.png", "看我新裙子") is True
+    # 坐席台镜像：带 [图片] 前缀 + 配文，方向 out
+    assert emitted == {"chat_id": 7, "text": "[图片] 看我新裙子", "direction": "out"}
+    # contacts 记账：外发互动计入 IntimacyEngine（mutuality）
+    assert recorded["dir"] == "out" and recorded["prev"] == "[图片] 看我新裙子"
+    assert recorded["chat"] == 7 and recorded["acc"] == "a"
+
+
+@pytest.mark.asyncio
+async def test_send_photo_empty_caption_preview(monkeypatch):
+    emitted = {}
+    import src.utils.companion_context as cc
+    monkeypatch.setattr(cc, "record_relationship_message", lambda *a, **k: None)
+    s = _photo_sender(_PhotoCli())
+    monkeypatch.setattr(s, "_presend_blocked", lambda: False)
+    s._emit_inbox = lambda **kw: emitted.update(kw)
+    assert await s.send_photo(7, "/p.png", "") is True
+    assert emitted["text"] == "[图片]"  # 无配文 → 仅标记
+
+
+@pytest.mark.asyncio
+async def test_postsend_mirror_record_no_emit_attr_still_records(monkeypatch):
+    recorded = {}
+    import src.utils.companion_context as cc
+    monkeypatch.setattr(cc, "record_relationship_message",
+                        lambda *a, **k: recorded.update({"hit": True}))
+    s = _photo_sender(_PhotoCli())  # 无 _emit_inbox 属性
+    monkeypatch.setattr(s, "_presend_blocked", lambda: False)
+    assert await s.send_photo(7, "/p.png", "hi") is True  # 镜像缺省→优雅跳过、不抛
+    assert recorded.get("hit") is True  # contacts 记账照常
+
+
 # ── Stage F：全局每日出图预算 cap（护出图 API 账单） ──────────────────────
 
 @pytest.mark.asyncio
