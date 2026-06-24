@@ -215,6 +215,8 @@ class CompanionProactiveLoop:
         has_pending_care: Optional[Callable[[str], bool]] = None,
         on_crisis_block: Optional[Callable[[Dict[str, Any]], None]] = None,
         on_sent: Optional[Callable[[Dict[str, Any]], None]] = None,
+        ritual_fn: Optional[Callable[[List[Dict[str, Any]], float], List[Dict[str, Any]]]] = None,
+        ritual_cooldown: Any = None,
         now: Callable[[], float] = time.time,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
@@ -222,6 +224,8 @@ class CompanionProactiveLoop:
         self._opener_fn = opener_fn
         self._send_fn = send_fn
         self._cooldown = cooldown_store
+        self._ritual_fn = ritual_fn
+        self._ritual_cooldown = ritual_cooldown
         self._has_pending_care = has_pending_care
         self._on_crisis_block = on_crisis_block
         self._on_sent = on_sent
@@ -257,6 +261,18 @@ class CompanionProactiveLoop:
             has_pending_care=self._has_pending_care,
             on_crisis_block=self._on_crisis_block,
         )
+        # 每日仪式问候（晨 / 晚安）：时段驱动、独立每日每档去重；与沉默回访互补。
+        # 同一会话本 tick 既到仪式点又够沉默时，仪式优先（不重复打扰一人）。
+        if self._ritual_fn is not None:
+            try:
+                ritual_plans = list(self._ritual_fn(convs, self._now()) or [])
+            except Exception:
+                logger.debug("[proactive] ritual_fn 失败", exc_info=True)
+                ritual_plans = []
+            if ritual_plans:
+                ritual_ids = {p.get("conversation_id") for p in ritual_plans}
+                plans = ritual_plans + [
+                    p for p in plans if p.get("conversation_id") not in ritual_ids]
         sent = 0
         for p in plans:
             ok = False
@@ -267,7 +283,11 @@ class CompanionProactiveLoop:
                              p.get("conversation_id"), exc_info=True)
                 ok = False
             if ok:
-                if self._cooldown:
+                # 仪式问候记每日每档冷却；沉默回访记会话冷却（互不干扰）。
+                rk = p.get("ritual_key")
+                if rk and self._ritual_cooldown is not None:
+                    self._ritual_cooldown.mark(rk, self._now())
+                elif self._cooldown:
                     self._cooldown.mark(p["conversation_id"], self._now())
                 sent += 1
                 # Stage 3：发送成功钩子（转化漏斗埋点等）。best-effort，绝不影响派发。

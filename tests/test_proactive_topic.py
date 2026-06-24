@@ -253,6 +253,7 @@ _SMcls = (
 
 class _SM:
     build_proactive_opener = _SMcls.build_proactive_opener
+    build_ritual_opener = _SMcls.build_ritual_opener
     _proactive_story_invite = _SMcls._proactive_story_invite
     _proactive_story_teaser = _SMcls._proactive_story_teaser
     _story_progress_from_context = staticmethod(_SMcls._story_progress_from_context)
@@ -558,3 +559,55 @@ def test_proactive_teaser_suppressed_on_soft_emotion(_free_ent):
         "u1", silent_hours=48, intimacy=50.0, contact_key="tg:acc:u1",
         last_emotion="焦虑")
     assert out["mode"] == MODE_FOLLOW_UP
+
+
+# ── Stage L：每日仪式问候 opener（build_ritual_opener）─────────────────────
+
+def test_ritual_opener_morning_with_memory_hook():
+    sm = _SM(_StubStore([_fact("在备考", tier="stable", hits=3)]))
+    out = sm.build_ritual_opener("morning", memory_key="u1", intimacy=50.0)
+    assert out["mode"] == "ritual_morning"
+    assert "早安" in out["directive"]
+    assert out["fact"] == "在备考"
+    assert "在备考" in out["directive"]  # 自然轻提一句记忆钩子
+
+
+def test_ritual_opener_night_basic():
+    sm = _SM(_StubStore([]))
+    out = sm.build_ritual_opener("night", memory_key="u1", intimacy=50.0)
+    assert out["mode"] == "ritual_night"
+    assert "晚安" in out["directive"]
+    assert out["fact"] == ""
+
+
+def test_ritual_opener_invalid_slot():
+    sm = _SM(_StubStore([_fact("x")]))
+    assert sm.build_ritual_opener("noon", memory_key="u1")["mode"] == ""
+
+
+def test_ritual_opener_blocked_on_recent_severe():
+    import time as _t
+    crisis = {"level": "severe", "created_at": _t.time() - 86400}
+    sm = _SM(_StubStore([_fact("在备考", tier="stable")]),
+             context={"u1": {}}, crisis_latest=crisis)
+    out = sm.build_ritual_opener("morning", memory_key="u1", intimacy=50.0)
+    # 近期 severe → 不发欢快早安，带升级信号
+    assert out["mode"] == ""
+    assert out.get("blocked") == "crisis_severe"
+
+
+def test_ritual_opener_soft_drops_memory_hook():
+    sm = _SM(_StubStore([_fact("在备考", tier="stable", hits=3)]))
+    out = sm.build_ritual_opener(
+        "morning", memory_key="u1", intimacy=50.0, last_emotion="焦虑")
+    # soft 档：仍问候但克制、不带记忆钩子
+    assert out["mode"] == "ritual_morning"
+    assert out["fact"] == ""
+    assert "在备考" not in out["directive"]
+
+
+def test_ritual_opener_new_relationship_restrained():
+    sm = _SM(_StubStore([]))
+    out = sm.build_ritual_opener(
+        "morning", memory_key="u1", intimacy=20.0, stage="warming")
+    assert "点到为止" in out["directive"]

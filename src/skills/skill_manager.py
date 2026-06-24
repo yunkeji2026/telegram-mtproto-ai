@@ -2878,6 +2878,58 @@ class SkillManager(LoggerMixin):
         except Exception:
             return empty
 
+    def build_ritual_opener(
+        self,
+        slot: str,
+        *,
+        memory_key: str = "",
+        stage: str = "",
+        intimacy: float = 0.0,
+        last_emotion: str = "",
+        contact_key: str = "",
+    ) -> Dict[str, Any]:
+        """每日仪式问候 directive（晨安 / 晚安）——含情绪护栏 + 可选记忆钩子。
+
+        与 ``build_proactive_opener`` 共用情绪护栏：severe 近期危机 → 不发欢快问候
+        （``blocked``，交派发层视情升级 care）；低落（soft）→ 改克制陪伴口吻、不带记忆钩子；
+        其余档可自然轻提一句 TA 在意的高置信记忆（一句带过、不追问）。
+        """
+        s = str(slot or "").strip().lower()
+        if s not in ("morning", "night"):
+            return {"mode": "", "directive": "", "fact": ""}
+        gate = self._proactive_emotion_gate(memory_key, last_emotion)
+        if gate == "block":
+            # severe 危机：不道早晚安，带 blocked 信号交派发层升级 care（同 proactive_opener）
+            return {"mode": "", "directive": "", "fact": "", "blocked": "crisis_severe"}
+        fact = ""
+        if gate != "soft":
+            try:
+                store = getattr(self, "_episodic_store", None)
+                key = str(memory_key or "").strip()
+                if store and key and hasattr(store, "list_rows"):
+                    from src.utils.proactive_topic import select_proactive_topic
+                    facts = store.list_rows(prefix=key, limit=50) or []
+                    sel = select_proactive_topic(
+                        facts, silent_hours=10 ** 6, min_silent_hours=0.0)
+                    fact = str(sel.get("fact") or "")
+            except Exception:
+                self.logger.debug("ritual memory hook skipped", exc_info=True)
+                fact = ""
+        if s == "morning":
+            directive = "主动给TA道一句早安，温暖自然、像每天醒来都会惦记着TA的人；"
+        else:
+            directive = "主动给TA道一句晚安，温柔放松、像睡前会想起TA的人；"
+        if gate == "soft":
+            directive += "语气轻柔克制，别过分欢快，只是静静陪着、让TA知道有人在。"
+        elif fact:
+            directive += f"可以很自然地轻轻提一句TA在意的「{fact}」（一句带过、别追问、别罗列）。"
+        else:
+            directive += "一句问候即可，别强行找话题、别追问。"
+        if str(stage or "").strip().lower() in ("initial", "warming"):
+            directive += "（关系还偏新：点到为止、别过分亲密。）"
+        return {"mode": f"ritual_{s}", "directive": directive, "fact": fact,
+                "context_facts": []}
+
     def episodic_inferred_counts(self) -> Dict[str, int]:
         """R17：全库 AI 推断计数（pending 待确认 / total），供校正质量看板。"""
         store = getattr(self, "_episodic_store", None)

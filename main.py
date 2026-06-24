@@ -2219,6 +2219,65 @@ class AIChatAssistant:
                 except Exception:
                     self.logger.debug("[proactive] 预告漏斗埋点失败", exc_info=True)
 
+            # Stage L：每日仪式感主动问候（晨安 / 晚安，按用户活跃时段择时）。默认关。
+            # 与沉默回访共用同一发送回路 / 情绪护栏 / care 去重；独立每日每档冷却。
+            _ritual_fn = None
+            _ritual_cd = None
+            _r_cfg = (cfg.get("daily_ritual") or {})
+            if bool(_r_cfg.get("enabled", False)):
+                from src.utils.daily_ritual import plan_daily_rituals as _plan_rituals
+                _ritual_cd = JsonCooldownStore(
+                    Path(self.config.config_path).parent
+                    / "companion_ritual_cooldown.json")
+
+                def _ritual_opener(*, slot, memory_key, stage, intimacy,
+                                   last_emotion="", contact_key=""):
+                    return self.skill_manager.build_ritual_opener(
+                        slot, memory_key=memory_key, stage=stage, intimacy=intimacy,
+                        last_emotion=last_emotion, contact_key=contact_key)
+
+                _personalize = bool(_r_cfg.get("personalize_active_hour", True))
+
+                def _active_hours(cid):
+                    # 该用户历史**入站**消息的本地小时样本，推断习惯晨 / 晚点（仅候选才查）。
+                    try:
+                        msgs = self.inbox_store.list_recent_messages(
+                            cid, limit=80) or []
+                    except Exception:
+                        return []
+                    hrs = []
+                    for m in msgs:
+                        if str(m.get("direction") or "") != "in":
+                            continue
+                        try:
+                            ts = float(m.get("ts") or 0)
+                        except (TypeError, ValueError):
+                            ts = 0.0
+                        if ts > 0:
+                            hrs.append(time.localtime(ts).tm_hour)
+                    return hrs
+
+                _r_morning = tuple(_r_cfg.get("morning_window", [7, 10]))
+                _r_night = tuple(_r_cfg.get("night_window", [21, 24]))
+                _r_min_intim = float(_r_cfg.get("min_intimacy", 20))
+                _r_gap = float(_r_cfg.get("min_quiet_gap_hours", 3))
+                _r_max = int(_r_cfg.get("max_per_tick", 5))
+
+                def _ritual_fn(convs, now_ts):
+                    return _plan_rituals(
+                        convs,
+                        ritual_sent=(_ritual_cd.snapshot() if _ritual_cd else {}),
+                        opener_fn=_ritual_opener,
+                        now=now_ts,
+                        morning_window=_r_morning,
+                        night_window=_r_night,
+                        min_intimacy=_r_min_intim,
+                        min_quiet_gap_hours=_r_gap,
+                        max_per_tick=_r_max,
+                        has_pending_care=_has_pending_care,
+                        active_hours_provider=_active_hours if _personalize else None,
+                    )
+
             loop = CompanionProactiveLoop(
                 conversations_provider=_conversations,
                 opener_fn=_opener,
@@ -2234,6 +2293,8 @@ class AIChatAssistant:
                 has_pending_care=_has_pending_care,
                 on_crisis_block=_on_crisis_block,
                 on_sent=_on_teaser_sent,
+                ritual_fn=_ritual_fn,
+                ritual_cooldown=_ritual_cd,
             )
             await loop.start()
             self._companion_proactive_loop = loop

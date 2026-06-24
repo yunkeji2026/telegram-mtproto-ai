@@ -2733,3 +2733,52 @@ voice 成功则 `not _voice_sent` 跳过文本）。但其真发 `send_telegram_
 点「被预算拦名单」即见「谁被 cap 挡住」可据此提额，可观测从**看趋势**真正落到**可行动**。变现可观测面（漏斗+预算+下钻）成闭环。
 **下一步**：① **下钻行加深链**（→端用户权益/收件箱，一键挽回）；② **出图缓存/多候选**（控成本提质量）；
 ③ **分进程 cap 落共享存储**；④ **发送入口审计**（proactive/worker 旁路）。
+
+---
+
+## 73. Stage L：每日仪式感主动问候——补日活（DAU）留存核心钩子
+
+**实施前的代码实况核对**：竞品对标盘点（Replika/星野/Talkie）后定位最高价值、最干净的缺口。
+`companion_proactive.plan_proactive_sends` 是**纯沉默驱动**（`silent_hours ≥ min_silent_hours` 才回访某条记忆）+
+全局安静时段——确认**没有任何「每天到点的晨/晚安仪式」**。竞品留存核心恰是「每天有人惦记着你」的固定仪式感
+（清晨一句早安、睡前一句晚安）。两条互补：旧的**沉默驱动**（久未联系才回访），新的**时段驱动**（每天到点问候）。
+消息表 `messages.ts` 可廉价反推用户活跃时段 → 可做个性化择时（早起的人早收、夜猫子晚收）。
+
+**改动**（纯函数 planner + ritual opener + 循环薄接线 + 配置 + main 接线，全程零破坏、默认关）：
+- 新 `src/utils/daily_ritual.py`（纯函数、零 IO、可单测，与 `plan_proactive_sends` 同范式）：
+  - `window_hours / current_slot`：问候窗口（闭开区间，支持跨午夜）→ 当前落晨/晚哪档。
+  - `infer_active_hour(samples, slot)`：从历史消息小时直方图推断习惯活跃点（晨档并列取最早、晚档取最晚）。
+  - `plan_daily_rituals(...)`：时段驱动决策——非问候时段→空；护栏（亲密度门槛/每日每档去重/距上次互动 gap/
+    care 去重/情绪护栏 blocked 跳过）；**个性化择时**（注入 `active_hours_provider` 则只在用户目标小时问候，
+    个性化点落窗口内才采纳、否则窗口起点）；按亲密度降序截断。
+- `skill_manager.build_ritual_opener(slot, ...)`：晨安/晚安 directive——复用 `_proactive_emotion_gate`
+  （severe 危机→blocked 不发欢快问候、低落 soft→克制陪伴不带记忆钩子）；其余档自然轻提一句高置信记忆。
+- `CompanionProactiveLoop` 加可选 `ritual_fn` + `ritual_cooldown`：每 tick 跑仪式计划，**仪式优先**（同会话本 tick
+  既到点又够沉默→只发一次仪式，不重复打扰）；仪式记**每日每档**冷却（`{cid}:{daykey}:{slot}`），沉默记会话冷却，互不干扰。
+- `main.py`：装配 ritual opener + `active_hours_provider`（仅候选才查、只取**入站**消息小时）+ 独立冷却 JSON + planner 闭包，注入 loop。
+- 配置：`companion.proactive_topic.daily_ritual`（example 默认关 / companion 预设默认开）：窗口/亲密度门槛/gap/每轮上限/个性化开关。
+- **测试 +35**（daily_ritual 纯函数 23：窗口/档位/活跃点推断/各护栏/个性化择时/排序+循环集成；
+  ritual opener 6：晨钩子/晚基础/非法档/危机 blocked/soft 去钩子/新关系克制）。
+
+**实施中的再优化**：
+1. **复用同一发送回路 + 情绪护栏 + care 去重**：仪式不另起循环/不另写护栏——`build_ritual_opener` 共用
+   `_proactive_emotion_gate`，planner 共用 `has_pending_care`，loop 共用 `send_fn/on_sent` → 危机用户不会收到欢快早安。
+2. **个性化择时只对候选查库**：`active_hours_provider` 仅在通过亲密度/去重/gap 后才被调（少量调用），
+   不为全表每会话查历史；个性化点落窗口外或无历史 → 优雅退回窗口起点（确定性、每日唯一触发小时）。
+3. **每日每档去重键** `{cid}:{daykey}:{slot}`：一天最多一句早安 + 一句晚安；与沉默冷却物理隔离（独立 JSON），互不误伤。
+4. **仪式优先于沉默**：合并计划时仪式覆盖同会话沉默项 → 同一人一个 tick 只被打扰一次。
+
+**能否再优化**：① 仪式文案可走「采样评分回流」few-shot（与沉默路径同质量闭环）；② 活跃时段可缓存/落库
+（免每候选每 tick 查 80 条）；③ 可扩纪念日/节日仪式（生日、相识 N 天）；④ 个性化点可学习「最佳响应时段」
+（按历史回应率而非单纯活跃频次）。均属增强，当前已闭环可上线（默认开 companion 预设）。
+
+**踩坑（卡死根因）**：全量 `pytest tests/` 在本机**稳定卡在 ~1%** 某测试死锁；反复中断后**残留 9 个卡死 pytest 进程**
+（各跑 10–13min 不退），持续抢 CPU + 占 `config/` 下共享 SQLite 写锁 → 后续任何子集（哪怕 2s 的纯函数测试）都被饿死挂起。
+**根因不是测试逻辑，是僵尸进程堆积 + 常驻 `pythonw` 服务占锁**。清掉僵尸后，本阶段相关子集
+（daily_ritual/proactive_topic/companion_proactive/config_check/admin_route_inventory）**142 passed / 7.4s**；
+扩 companion/wellbeing/care 簇 **178 passed / 5.7s**。**结论：本机禁跑全量 `tests/`（必 wedge），改跑有界子集 + timeout**。
+
+**Stage L 收口**：陪伴从「你不理我我才找你」进化到「每天主动惦记你」——晨安/晚安按用户作息择时、危机自动让位、
+每日每档防骚扰，补上竞品对标的日活留存核心钩子。沉默回访（情节驱动）+ 每日仪式（节律驱动）双引擎成形。
+**下一步**：① **仪式文案 few-shot 质量闭环**；② **活跃时段缓存/落库**（降查询）；③ **纪念日/节日仪式扩展**；
+④ **发送入口审计**（proactive/worker 旁路是否绕过统一发送护栏）。

@@ -972,6 +972,18 @@ companion:
     few_shot:
       enabled: false         # 默认关（人审样本后再开）
       max_examples: 3        # 最多注入几条示范
+    # Stage L：每日仪式感主动问候（晨安 / 晚安）——竞品对标的日活留存核心钩子。
+    #   与上面「沉默回访」互补：那条沉默驱动（久未联系才回访记忆），本条时段驱动（每天到点问候）。
+    #   每日每档去重（一天最多一句早安 + 一句晚安）；共用情绪护栏（危机不发欢快问候）+ care 去重。
+    #   个性化择时：按用户历史入站消息活跃时段推断 TA 习惯的晨 / 晚点，只在那个点问候。
+    daily_ritual:
+      enabled: false               # 默认关（companion 预设里默认开）
+      morning_window: [7, 10]      # 早安时段 [起,止)（闭开区间）；个性化点落此内才采纳，否则取起点
+      night_window: [21, 24]       # 晚安时段 [起,止)
+      min_intimacy: 20             # 关系太浅不做仪式问候（不对刚认识的人道"早安亲爱的"）
+      min_quiet_gap_hours: 3       # 距上次互动不足此时长不问候（人还在场，道早晚安多余）
+      max_per_tick: 5              # 每轮最多问候人数
+      personalize_active_hour: true  # 按用户历史活跃时段择时；关则统一在窗口起点问候
   # Phase ②：关系成长系统（Bond Level）——把 intimacy_score 升华为「看得见的成长」。
   # 等级/进度/里程碑由 relations-health 健康卡 API 透出（运营/MiniApp 可见）；
   # 此开关只控「是否给 AI 注入关系厚度感知块」（默认关；开后仅在 intimate/steady 或
