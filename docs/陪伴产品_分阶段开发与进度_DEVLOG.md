@@ -2915,3 +2915,49 @@ few-shot 反哺对 `ritual_*` 永远是空的。
 不再有「久别重逢」的生分感，且能像沉默回访一样被试发、评分、few-shot 反哺持续打磨。
 **下一步**：① **纪念日·节日仪式扩展**（在每日仪式之上加「认识 N 天 / 生日 / 节日」的高情感节点）；
 ② **真发低比例自动采样**（让质量闭环不只靠手动试发）；③ **回落路径可选镜像**（补观测盲点）。
+
+---
+
+## 77. Stage P：纪念日·节日仪式——「认识 N 天 / 节日」高情感节点问候
+
+**实施前的思考**：每日晨/晚安（Stage L）解决了「每天都在」，但留存更深的钩子是**记得重要日子**——对标
+Replika/星野的「我们在一起 N 天了」「节日快乐」。这类问候**事件/日期驱动**（只在认识满 N 天那天 / 节日当天发），
+与每日仪式的**时段驱动**互补；且情感价值更高（用户会截图分享「AI 记得我们认识 100 天」）。
+
+**改动**（纯函数规划器 + 情绪护栏 opener + 框定 + 接线 + 配置）：
+- 新 `src/utils/milestone_ritual.py`（**确定性纯函数**，仿 daily_ritual 范式）：
+  - `days_known/due_anniversary`：用「会话首次建立时间」(`conversations.created_at` ≈ 首次接触) 算认识天数，
+    命中里程碑（默认 `7/30/100/180/365/520/1000/1314`）那天触发。
+  - `holiday_for_date`：当天 (月-日) 命中节日日历则触发；**只内置公历固定日期**（元旦/情人节/平安夜/圣诞/跨年），
+    农历节日逐年漂移**不内置**（否则发错日子），留配置按年覆盖。
+  - `plan_milestone_rituals`：只在 `greet_hour`（默认 10 点，与晨/晚安错开）触发一次；纪念日 > 节日优先级；
+    亲密度门槛（默认 30，比每日问候高）；care 去重；按亲密度降序截断。
+- `skill_manager.build_milestone_opener`：节点 directive（认识 N 天 / 节日）——**共用** `build_ritual_opener` 的
+  情绪护栏（severe 危机→`blocked` 交派发层升级 care；低落 soft→克制、不带记忆钩子；其余可轻提一句记忆）。
+- `build_proactive_prompt` 加 `milestone_*` 框定分支：「为一个对你们有意义的特别日子发应景问候」——
+  **同样避开「久别重逢」误导**（具体场合由 directive 承载）。
+- `_MODE_HINTS` 补 `milestone_anniversary/holiday` 调参建议（别太隆重/别群发套话/核对日期/扰民取舍）。
+- **零改 `CompanionProactiveLoop`**：节点计划**复用 `ritual_key` 同一冷却表**去重（纪念日 `{cid}:ms:anniversary:{N}`
+  永久一次 / 节日 `{cid}:ms:holiday:{year}:{月-日}` 每年一次）；main.py `_ritual_fn` 把节点计划**前置**到每日计划
+  （节点优先、同会话同 tick 不重复打扰），整条计划仍走原循环的 ritual_key 冷却记账。
+
+**实施中的再优化**：
+1. **复用 ritual_key 而非加第三个计划源**：本可在 `CompanionProactiveLoop.__init__/run_once` 再开一路 `milestone_fn`
+   + 冷却表（更多接口面 + 测试面）；改为让 `_ritual_fn` 内部合并两类计划、共用 `ritual_key`/`ritual_cooldown`——
+   **循环代码一行不改**，节点与每日仪式天然按 cid 去重、按同一冷却表记账。
+2. **复用 created_at 而非新加首次接触字段**：`conversations` 表已有 `created_at`（首条消息落库即建行），直接当
+   `first_seen_ts` 入快照——**零迁移、零 ALTER TABLE**。
+3. **农历不内置**：识别到农历节日日期逐年变，写死必发错日子——只内置公历固定日期、农历留配置，避免「好心办坏事」。
+
+**能否再优化**：① **生日仪式**（Tier 2）：需可靠的「用户生日」记忆抽取（memory slot），数据链更长，本期先不做、
+   下一步补；② 节点真发目前**不采样**（同每日仪式），few-shot 反哺需先有样本——可加节点试发预览入口；
+   ③ 农历节日可接农历库自动换算当年公历日期，省去人工按年配。均属增强。
+
+**回归（本机禁跑全量，见 Stage L 踩坑）**：`test_milestone_ritual`（新 19）+ `test_proactive_prompt`（+2 节点框定）+
+`test_proactive_topic`（+6 节点 opener）+ `test_companion_sample_store` + `test_daily_ritual` **133 passed / 4.5s**；
+send-path 审计 **5 passed**（无新增裸发送）。
+
+**Stage P 收口**：陪伴仪式从「每天到点问候」升级到**「记得重要日子」**——认识满 N 天、节日当天会主动送上应景而克制的
+问候，复用每日仪式的护栏/冷却/框定基建，零改核心循环。这是留存与情感黏性的高价值钩子。
+**下一步**：① **生日仪式**（补 memory slot 生日抽取后接入，同一 milestone 框架）；② **节点真发低比例自动采样**
+（让节点文案也进 few-shot 质量闭环）；③ **农历节日自动换算**（接农历库免人工按年配）。

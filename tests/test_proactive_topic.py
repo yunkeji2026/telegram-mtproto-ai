@@ -254,6 +254,7 @@ _SMcls = (
 class _SM:
     build_proactive_opener = _SMcls.build_proactive_opener
     build_ritual_opener = _SMcls.build_ritual_opener
+    build_milestone_opener = _SMcls.build_milestone_opener
     _proactive_story_invite = _SMcls._proactive_story_invite
     _proactive_story_teaser = _SMcls._proactive_story_teaser
     _story_progress_from_context = staticmethod(_SMcls._story_progress_from_context)
@@ -610,4 +611,59 @@ def test_ritual_opener_new_relationship_restrained():
     sm = _SM(_StubStore([]))
     out = sm.build_ritual_opener(
         "morning", memory_key="u1", intimacy=20.0, stage="warming")
+    assert "点到为止" in out["directive"]
+
+
+# ── Stage P：纪念日·节日仪式 opener（build_milestone_opener）─────────────────
+
+def test_milestone_anniversary_with_memory_hook():
+    sm = _SM(_StubStore([_fact("在备考", tier="stable", hits=3)]))
+    out = sm.build_milestone_opener(
+        event_type="anniversary", days=100, memory_key="u1", intimacy=60.0)
+    assert out["mode"] == "milestone_anniversary"
+    assert "100" in out["directive"]
+    assert out["fact"] == "在备考"
+    assert "在备考" in out["directive"]
+
+
+def test_milestone_holiday_basic():
+    sm = _SM(_StubStore([]))
+    out = sm.build_milestone_opener(
+        event_type="holiday", event_label="圣诞节", memory_key="u1", intimacy=60.0)
+    assert out["mode"] == "milestone_holiday"
+    assert "圣诞节" in out["directive"]
+    assert out["fact"] == ""
+
+
+def test_milestone_invalid_event_type():
+    sm = _SM(_StubStore([_fact("x")]))
+    assert sm.build_milestone_opener(event_type="birthday", memory_key="u1")["mode"] == ""
+
+
+def test_milestone_blocked_on_recent_severe():
+    import time as _t
+    crisis = {"level": "severe", "created_at": _t.time() - 86400}
+    sm = _SM(_StubStore([_fact("在备考", tier="stable")]),
+             context={"u1": {}}, crisis_latest=crisis)
+    out = sm.build_milestone_opener(
+        event_type="anniversary", days=100, memory_key="u1", intimacy=60.0)
+    assert out["mode"] == ""
+    assert out.get("blocked") == "crisis_severe"
+
+
+def test_milestone_soft_drops_memory_hook():
+    sm = _SM(_StubStore([_fact("在备考", tier="stable", hits=3)]))
+    out = sm.build_milestone_opener(
+        event_type="holiday", event_label="元旦", memory_key="u1",
+        intimacy=60.0, last_emotion="焦虑")
+    assert out["mode"] == "milestone_holiday"
+    assert out["fact"] == ""
+    assert "在备考" not in out["directive"]
+
+
+def test_milestone_new_relationship_restrained():
+    sm = _SM(_StubStore([]))
+    out = sm.build_milestone_opener(
+        event_type="anniversary", days=30, memory_key="u1",
+        intimacy=35.0, stage="warming")
     assert "点到为止" in out["directive"]

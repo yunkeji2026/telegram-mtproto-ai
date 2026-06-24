@@ -1902,6 +1902,8 @@ class AIChatAssistant:
                         "account_id": account_id,
                         "chat_key": chat_key,
                         "last_ts": r.get("last_ts") or 0,
+                        # 会话首次建立时间 ≈ 首次接触 → 供「认识 N 天」纪念日计算（Stage P）
+                        "first_seen_ts": r.get("created_at") or 0,
                         "last_direction": (dirs.get(cid) or {}).get("direction") or "",
                         "archived": bool(meta.get("archived")),
                         # 私聊：episodic 记忆 key == 对端 id == chat_key
@@ -2262,8 +2264,34 @@ class AIChatAssistant:
                 _r_gap = float(_r_cfg.get("min_quiet_gap_hours", 3))
                 _r_max = int(_r_cfg.get("max_per_tick", 5))
 
+                # Stage P：纪念日·节日仪式（认识 N 天 / 节日）——事件驱动、复用 ritual_key
+                # 同一冷却表去重；节点优先于每日晨/晚安（同会话同 tick 不重复打扰）。默认关。
+                _m_cfg = (cfg.get("milestone_ritual") or {})
+                _m_enabled = bool(_m_cfg.get("enabled", False))
+                _plan_milestones = None
+                _milestone_opener = None
+                if _m_enabled:
+                    from src.utils.milestone_ritual import (
+                        DEFAULT_ANNIVERSARY_DAYS as _M_DEF_ANNIV,
+                        plan_milestone_rituals as _plan_milestones,
+                    )
+
+                    def _milestone_opener(*, event_type, event_label="", days=0,
+                                          memory_key="", stage="", intimacy=0.0,
+                                          last_emotion="", contact_key=""):
+                        return self.skill_manager.build_milestone_opener(
+                            event_type=event_type, event_label=event_label, days=days,
+                            memory_key=memory_key, stage=stage, intimacy=intimacy,
+                            last_emotion=last_emotion, contact_key=contact_key)
+
+                    _m_greet_hour = int(_m_cfg.get("greet_hour", 10))
+                    _m_min_intim = float(_m_cfg.get("min_intimacy", 30))
+                    _m_max = int(_m_cfg.get("max_per_tick", 5))
+                    _m_anniv = _m_cfg.get("anniversary_days") or list(_M_DEF_ANNIV)
+                    _m_holidays = _m_cfg.get("holiday_calendar") or None
+
                 def _ritual_fn(convs, now_ts):
-                    return _plan_rituals(
+                    daily = _plan_rituals(
                         convs,
                         ritual_sent=(_ritual_cd.snapshot() if _ritual_cd else {}),
                         opener_fn=_ritual_opener,
@@ -2275,7 +2303,31 @@ class AIChatAssistant:
                         max_per_tick=_r_max,
                         has_pending_care=_has_pending_care,
                         active_hours_provider=_active_hours if _personalize else None,
-                    )
+                    ) or []
+                    if _plan_milestones is None:
+                        return daily
+                    try:
+                        mil = _plan_milestones(
+                            convs,
+                            ritual_sent=(_ritual_cd.snapshot() if _ritual_cd else {}),
+                            opener_fn=_milestone_opener,
+                            now=now_ts,
+                            greet_hour=_m_greet_hour,
+                            min_intimacy=_m_min_intim,
+                            max_per_tick=_m_max,
+                            anniversary_milestones=_m_anniv,
+                            holiday_calendar=_m_holidays,
+                            has_pending_care=_has_pending_care,
+                        ) or []
+                    except Exception:
+                        self.logger.debug("[milestone] 规划失败", exc_info=True)
+                        mil = []
+                    if not mil:
+                        return daily
+                    # 节点优先：同会话本 tick 既有节点又到晨/晚安档，只发节点（更高情感价值）
+                    mil_ids = {p.get("conversation_id") for p in mil}
+                    return mil + [
+                        p for p in daily if p.get("conversation_id") not in mil_ids]
 
             loop = CompanionProactiveLoop(
                 conversations_provider=_conversations,

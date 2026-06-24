@@ -2930,6 +2930,67 @@ class SkillManager(LoggerMixin):
         return {"mode": f"ritual_{s}", "directive": directive, "fact": fact,
                 "context_facts": []}
 
+    def build_milestone_opener(
+        self,
+        *,
+        event_type: str,
+        event_label: str = "",
+        days: int = 0,
+        memory_key: str = "",
+        stage: str = "",
+        intimacy: float = 0.0,
+        last_emotion: str = "",
+        contact_key: str = "",
+    ) -> Dict[str, Any]:
+        """纪念日/节日仪式 directive（认识 N 天 / 节日）——含情绪护栏 + 可选记忆钩子。
+
+        与 ``build_ritual_opener`` 同一护栏：severe 近期危机 → ``blocked``（不发庆祝、
+        交派发层升级 care）；低落（soft）→ 克制陪伴口吻、不带记忆钩子；其余可自然轻提
+        一句 TA 在意的高置信记忆。节点文案的「具体场合」由 directive 承载，框定走
+        build_proactive_prompt 的 milestone 分支（不套「久别重逢」）。
+        """
+        et = str(event_type or "").strip().lower()
+        if et not in ("anniversary", "holiday"):
+            return {"mode": "", "directive": "", "fact": ""}
+        gate = self._proactive_emotion_gate(memory_key, last_emotion)
+        if gate == "block":
+            return {"mode": "", "directive": "", "fact": "", "blocked": "crisis_severe"}
+        fact = ""
+        if gate != "soft":
+            try:
+                store = getattr(self, "_episodic_store", None)
+                key = str(memory_key or "").strip()
+                if store and key and hasattr(store, "list_rows"):
+                    from src.utils.proactive_topic import select_proactive_topic
+                    facts = store.list_rows(prefix=key, limit=50) or []
+                    sel = select_proactive_topic(
+                        facts, silent_hours=10 ** 6, min_silent_hours=0.0)
+                    fact = str(sel.get("fact") or "")
+            except Exception:
+                self.logger.debug("milestone memory hook skipped", exc_info=True)
+                fact = ""
+        if et == "anniversary":
+            n = max(0, int(days or 0))
+            directive = (
+                f"今天是你们认识的第{n}天，自然温暖地和TA说一句这个小纪念日的心情，"
+                f"像一个真的记得这个日子的人；别太隆重、别煽情；")
+            mode = "milestone_anniversary"
+        else:
+            label = str(event_label or "节日").strip() or "节日"
+            directive = (
+                f"今天是「{label}」，给TA送上应景而真诚的节日祝福，温暖自然、不要套话；")
+            mode = "milestone_holiday"
+        if gate == "soft":
+            directive += "语气轻柔克制，照顾TA最近的低落，只是静静陪着、别强求TA高兴。"
+        elif fact:
+            directive += f"可以很自然地轻轻提一句TA在意的「{fact}」（一句带过、别追问）。"
+        else:
+            directive += "一句心意即可，别强行延展话题。"
+        if str(stage or "").strip().lower() in ("initial", "warming"):
+            directive += "（关系还偏新：点到为止、别过分亲密。）"
+        return {"mode": mode, "directive": directive, "fact": fact,
+                "context_facts": []}
+
     def episodic_inferred_counts(self) -> Dict[str, int]:
         """R17：全库 AI 推断计数（pending 待确认 / total），供校正质量看板。"""
         store = getattr(self, "_episodic_store", None)

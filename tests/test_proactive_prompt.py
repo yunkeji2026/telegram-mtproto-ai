@@ -21,6 +21,21 @@ def test_ritual_night_framing():
     assert "许久未联系" not in p
 
 
+def test_milestone_anniversary_framing_not_long_absence():
+    p = build_proactive_prompt(
+        "小柔", {"mode": "milestone_anniversary", "directive": "认识第100天"})
+    assert "特别" in p and "应景" in p
+    assert "许久未联系" not in p  # 节点不套「久别重逢」框定（Stage P）
+    assert "认识第100天" in p  # 具体场合由 directive 承载
+
+
+def test_milestone_holiday_framing():
+    p = build_proactive_prompt(
+        "小柔", {"mode": "milestone_holiday", "directive": "圣诞快乐"})
+    assert "许久未联系" not in p
+    assert "圣诞快乐" in p
+
+
 def test_silence_mode_keeps_long_absence_framing():
     p = build_proactive_prompt("小柔", {"mode": "follow_up", "directive": "回访备考"})
     assert "许久未联系" in p

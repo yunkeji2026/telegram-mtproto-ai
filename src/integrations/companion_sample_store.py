@@ -220,6 +220,16 @@ _MODE_HINTS = {
         "时点不对：开 personalize_active_hour，按用户历史活跃晚点择时（夜猫子晚发）",
         "扰民：上调 min_quiet_gap_hours，人还在场就别硬道晚安",
     ],
+    "milestone_anniversary": [
+        "纪念日太隆重/煽情：收紧 directive，像随口记得的人轻轻一提，别仪式感过载",
+        "天数算错/发错日子：核对 first_seen_ts 与 anniversary_days 里程碑配置",
+        "扰民：上调 min_intimacy，只对关系够深的用户庆「认识 N 天」",
+    ],
+    "milestone_holiday": [
+        "节日祝福像群发套话：收紧 directive，结合 TA 的具体处境/记忆，去模板化",
+        "发错日子：农历节日逐年漂移，别写死，按年在 holiday_calendar 配置当年公历日期",
+        "扰民/没共鸣：只对关系够深用户发，冷门节日按受众取舍",
+    ],
 }
 
 

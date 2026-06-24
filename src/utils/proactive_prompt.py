@@ -36,15 +36,22 @@ def build_proactive_prompt(
     plan = plan or {}
     mode = str(plan.get("mode") or "")
     directive = str(plan.get("directive") or "")
-    is_ritual = mode.startswith("ritual_")
 
-    if is_ritual:
+    if mode.startswith("ritual_"):
         slot = _RITUAL_SLOT_LABEL.get(mode, "问候")
         header = (
             f"你是「{name}」，正在像一个每天都会惦记着TA的人那样，给TA发一句平常的"
             f"{slot}问候——不是久别重逢，就是日常里每天一句的牵挂。"
         )
         length = "不超过30字"
+    elif mode.startswith("milestone_"):
+        # 纪念日/节日：具体场合由 directive 承载，这里只给「为特别的日子发问候」的框定，
+        # 同样避开「久别重逢」误导（节点是惦记着重要日子，不是好久没联系）。
+        header = (
+            f"你是「{name}」，正在为一个对你们有意义的特别日子，主动给TA发一句应景的"
+            f"问候（具体是什么日子见下方指令，按它来）。"
+        )
+        length = "不超过40字"
     else:
         header = f"你是「{name}」，正在主动给一位许久未联系的朋友发消息。"
         length = "不超过40字"
