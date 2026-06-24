@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import time
 
-from src.utils.birthday import extract_birthday, is_birthday_today
+from src.utils.birthday import (
+    extract_birthday,
+    is_birthday_today,
+    should_ask_birthday,
+)
 
 
 def _at(year, month, day):
@@ -70,3 +74,44 @@ def test_is_birthday_today_bad_input():
     assert is_birthday_today(None, _at(2026, 3, 5)) is False
     assert is_birthday_today((13, 40), _at(2026, 3, 5)) is False
     assert is_birthday_today((3,), _at(2026, 3, 5)) is False
+
+
+# ── should_ask_birthday（Stage R）─────────────────────────────────────────
+
+_NOW = 1_700_000_000.0
+
+
+def _ask(**over):
+    base = dict(opener_mode="gentle_checkin", intimacy=60.0, min_intimacy=45.0,
+                birthday_known=False, last_ask_ts=0.0, now=_NOW, cooldown_days=30.0)
+    base.update(over)
+    return should_ask_birthday(**base)
+
+
+def test_ask_basic_true():
+    assert _ask() is True
+
+
+def test_ask_only_on_gentle_checkin():
+    assert _ask(opener_mode="follow_up") is False
+    assert _ask(opener_mode="ask_birthday") is False
+
+
+def test_ask_skip_when_birthday_known():
+    assert _ask(birthday_known=True) is False
+
+
+def test_ask_skip_when_relationship_shallow():
+    assert _ask(intimacy=30.0) is False
+
+
+def test_ask_skip_within_cooldown():
+    assert _ask(last_ask_ts=_NOW - 5 * 86400) is False  # 5 天前问过，30 天冷却内
+
+
+def test_ask_ok_after_cooldown():
+    assert _ask(last_ask_ts=_NOW - 40 * 86400) is True  # 40 天前问过，已过冷却
+
+
+def test_ask_bad_intimacy_safe():
+    assert _ask(intimacy="x") is False

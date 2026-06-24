@@ -85,6 +85,12 @@ companion:
     enabled: true                    # ★ 记忆驱动的主动惦记开场（仅 Telegram 协议号）
     min_silent_hours: 24             # 沉默不足此时长不主动打扰（避免插话活跃用户）
     scan_limit: 200                  # 每轮扫描候选会话上限
+    # Stage R：生日主动采集——关系够深却还不知生日时，借最没话说的 gentle_checkin 顺势问一句，
+    #   让生日仪式真正转得起来。只升级 gentle_checkin；危机/低落不问；已知永不问；冷却内不重问。
+    birthday_ask:
+      enabled: true                  # ★ 陪伴模式默认开：让生日仪式"会主动了解"
+      min_intimacy: 45               # 关系够深才问（问生日更私人，门槛更高）
+      cooldown_days: 30              # 问过这么多天内不再问同一人
     # Stage L：每日仪式感主动问候（晨安 / 晚安）——日活留存核心钩子，与沉默回访互补。
     #   时段驱动、每日每档去重；按用户历史活跃时段择时（早起的人早收、夜猫子晚收）。
     daily_ritual:

@@ -3019,6 +3019,32 @@ class SkillManager(LoggerMixin):
             self.logger.debug("resolve_birthday failed", exc_info=True)
         return None
 
+    def build_birthday_ask_opener(
+        self,
+        *,
+        memory_key: str = "",
+        stage: str = "",
+        intimacy: float = 0.0,
+        last_emotion: str = "",
+        contact_key: str = "",
+    ) -> Dict[str, Any]:
+        """主动采集生日的开场 directive（Stage R）——让生日仪式「转得起来」。
+
+        仅在情绪护栏正常（非危机/非低落）时问；危机/低落时不合时宜 → 返回空（交回原开场）。
+        门槛（关系够深 / 生日未知 / 冷却）由上层 ``should_ask_birthday`` 决定，本方法只产文案。
+        """
+        gate = self._proactive_emotion_gate(memory_key, last_emotion)
+        if gate != "":  # block(危机) 或 soft(低落) 都不问生日
+            return {"mode": "", "directive": "", "fact": ""}
+        directive = (
+            "主动开场：好久没聊了，先自然轻松地问候一句；再像朋友间随口好奇那样，"
+            "顺势问一句还不知道TA生日是哪天呢——别像填表或查户口，问完顺其自然，"
+            "TA不想说也别追。")
+        if str(stage or "").strip().lower() in ("initial", "warming"):
+            directive += "（关系还偏新：更随意带过、别显得刻意打听。）"
+        return {"mode": "ask_birthday", "directive": directive, "fact": "",
+                "context_facts": []}
+
     def episodic_inferred_counts(self) -> Dict[str, int]:
         """R17：全库 AI 推断计数（pending 待确认 / total），供校正质量看板。"""
         store = getattr(self, "_episodic_store", None)

@@ -3000,3 +3000,47 @@ send-path 审计 **5 passed**（无新增裸发送）。
 生日作最高优先级、保守取数（宁漏勿错），复用 Stage L/O/P 的护栏/冷却/框定/调参基建，零改核心循环。
 **下一步**：① **生日主动采集**（关系够深时自然问一句生日，把"读"升级为"会问"）；② **节点真发低比例自动采样**
 （让节点文案进 few-shot 闭环）；③ **抽取结果回写结构化 slot**（免重扫 + 供画像）。
+
+---
+
+## 79. Stage R：生日主动采集——让生日仪式真正「转得起来」
+
+**实施前的思考**：Stage Q 的生日仪式只会**读**记忆里的生日——可没人主动说生日，就**永远触发不了**。要让它转起来，
+得让 AI 在合适时机**自然问一句**生日。难点：问生日很私人，问得不好像「查户口」，问太勤像「采集信息」，会破坏陪伴感。
+
+**关键洞察**：沉默回访开场里，**最没价值的是 `gentle_checkin`**（无可回访记忆时的「好久没聊，问候一句」干巴巴兜底）。
+把**这一种**升级成「顺势随口问生日」——既不打断有记忆钩子的高价值回访（`follow_up` 不动），又把最 bland 的开场
+变成有目的的采集时机，**天然低频**（随沉默冷却走）。一旦问到，`resolve_birthday` 命中 → **永不再问**（最强去重）。
+
+**改动**（纯函数决策 + 护栏 opener + 复用沉默回路）：
+- `src/utils/birthday.py::should_ask_birthday`（**纯函数**）：`gentle_checkin` + 生日未知 + 关系够深 +
+  距上次问过冷却 → True。门槛逻辑全可单测。
+- `skill_manager.build_birthday_ask_opener`：产「先共情问候、再像朋友随口好奇问一句生日、问完不强求」directive；
+  **共用情绪护栏**——危机(block)/低落(soft) 一律不问（返回空 → 交回原 gentle_checkin），不合时宜时绝不开口。
+- main.py `_opener` 闭包升级：仅当 `gentle_checkin` 时，便宜条件（关系深 + 不在冷却）先过滤**再**查
+  `resolve_birthday`（控 IO 成本），命中 `should_ask_birthday` 才覆盖为 `ask_birthday` 开场。
+- 独立 30 天冷却（`companion_birthday_ask_cooldown.json`）：`_on_teaser_sent` 钩子里 `ask_birthday` 发出即记冷却，
+  避免反复打听；配置 `proactive_topic.birthday_ask`（enabled / min_intimacy=45 / cooldown_days=30）。
+- `_MODE_HINTS` 补 `ask_birthday` 调参建议（别像查户口 / 别太频繁 / 放最没话说时问）。
+
+**实施中的再优化**：
+1. **只升级 gentle_checkin、不新增冷启动消息**：本可做成一条独立的「冷问生日」主动消息，但那种「突然问生日」很突兀。
+   改为**寄生在最没价值的兜底开场上**——有记忆就回访记忆（更暖），实在没话说才顺势问生日，最自然、零额外打扰面。
+2. **决策抽成纯函数 + 便宜条件前置**：决策逻辑（`should_ask_birthday`）抽出可单测（7 个分支用例）；闭包里先过
+   关系/冷却的便宜检查，**再**查记忆（IO），避免对每个 gentle_checkin 候选都扫记忆。
+3. **三重去重**：①生日已知永不问（resolve_birthday）；②30 天冷却（问过不重问）；③沉默冷却（随回路天然限频）——
+   把「问烦了」的风险压到最低。
+4. **护栏复用**：危机/低落不问生日，直接复用 `_proactive_emotion_gate`，与晨/晚安、节点同一套情绪纪律。
+
+**能否再优化**：① 问到生日后目前靠下次记忆抽取被动落库，可在收到回复时**主动解析并回写结构化 slot**（即时生效、
+   免重扫）；② 可扩到主动采集其他高价值缺失信息（所在城市/称呼）——同「升级 bland 开场」范式；③ `ask_birthday`
+   真发可纳入 few-shot 采样闭环。均属增强。
+
+**回归（本机禁跑全量）**：`test_birthday`（+7 should_ask）+ `test_proactive_topic`（+4 ask opener）+
+`test_companion_sample_store`/`test_milestone_ritual`/`test_proactive_prompt` **143 passed / 3.4s**；
+send-path 审计 **5 passed**（无新增裸发送）。
+
+**Stage R 收口**：生日仪式从「会记得」升级到**「会主动了解」**——关系够深却还不知生日时，AI 会借最没话说的时机
+自然问一句，三重去重确保不打扰。Stage Q+R 让「生日」这个最高情感节点形成**采集→记住→当天庆祝**的完整闭环。
+**下一步**：① **回复即解析回写生日 slot**（把被动读升级为收到即记）；② **节点/采集真发低比例自动采样**（进 few-shot 闭环）；
+③ **主动采集扩展**（城市/称呼等高价值缺失信息，同范式）。

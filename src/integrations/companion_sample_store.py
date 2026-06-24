@@ -200,6 +200,11 @@ _MODE_HINTS = {
         "无记忆开场易空泛：下调 min_silent_hours 让更多有记忆钩子的会话走 follow_up",
         "丰富温和问候模板，避免千篇一律",
     ],
+    "ask_birthday": [
+        "问得像查户口/填表：收紧 directive，先共情问候再随口好奇带一句，别一上来就要信息",
+        "太频繁/被反感：上调 birthday_ask.cooldown_days 或 min_intimacy，只对够熟的人问",
+        "不自然：放在 gentle_checkin（最没话说时）顺势问，别硬塞进有记忆钩子的回访",
+    ],
     "story_invite": [
         "邀约太硬/像广告：收紧 directive，先共情再顺势提议，别一上来报剧情名",
         "续作召回核对前传共同经历是否被自然提起（satisfied_prerequisite/ending_memory）",

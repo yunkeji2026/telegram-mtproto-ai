@@ -1845,6 +1845,18 @@ class AIChatAssistant:
             scan_limit = int(cfg.get("scan_limit", 200))
             min_silent_hours = float(cfg.get("min_silent_hours", 24))
 
+            # Stage R：生日主动采集——把最 bland 的 gentle_checkin 开场，在「关系够深 +
+            # 还不知道生日 + 距上次问够久」时升级成"顺势自然问一句生日"，让生日仪式转得起来。
+            _ba_cfg = (cfg.get("birthday_ask") or {})
+            _ba_on = bool(_ba_cfg.get("enabled", False))
+            _ba_min_intim = float(_ba_cfg.get("min_intimacy", 45))
+            _ba_cooldown_days = float(_ba_cfg.get("cooldown_days", 30))
+            _ba_cd = None
+            if _ba_on:
+                _ba_cd = JsonCooldownStore(
+                    Path(self.config.config_path).parent
+                    / "companion_birthday_ask_cooldown.json")
+
             def _conversations():
                 try:
                     rows = self.inbox_store.list_conversations(
@@ -1917,10 +1929,40 @@ class AIChatAssistant:
 
             def _opener(*, memory_key, silent_hours, stage, intimacy,
                         last_emotion="", contact_key=""):
-                return self.skill_manager.build_proactive_opener(
+                op = self.skill_manager.build_proactive_opener(
                     memory_key, silent_hours=silent_hours, stage=stage,
                     intimacy=intimacy, min_silent_hours=min_silent_hours,
                     last_emotion=last_emotion, contact_key=contact_key)
+                # Stage R：bland gentle_checkin → 顺势问生日（关系深 + 生日未知 + 未在冷却）。
+                # 便宜条件先过滤再查记忆（resolve_birthday 是 IO），控成本。
+                if _ba_on and str((op or {}).get("mode") or "") == "gentle_checkin":
+                    try:
+                        import time as _t
+                        from src.utils.birthday import should_ask_birthday
+                        cid = str(contact_key or memory_key or "")
+                        _now = _t.time()
+                        last_ask = float(
+                            (_ba_cd.snapshot().get(cid) if _ba_cd else 0) or 0)
+                        if (float(intimacy) >= _ba_min_intim
+                                and (_now - last_ask) >= _ba_cooldown_days * 86400.0):
+                            known = self.skill_manager.resolve_birthday(
+                                memory_key) is not None
+                            if should_ask_birthday(
+                                    opener_mode="gentle_checkin", intimacy=intimacy,
+                                    min_intimacy=_ba_min_intim, birthday_known=known,
+                                    last_ask_ts=last_ask, now=_now,
+                                    cooldown_days=_ba_cooldown_days):
+                                ask = self.skill_manager.build_birthday_ask_opener(
+                                    memory_key=memory_key, stage=stage,
+                                    intimacy=intimacy, last_emotion=last_emotion,
+                                    contact_key=contact_key)
+                                if ask.get("mode"):
+                                    ask["silent_hours"] = (op or {}).get(
+                                        "silent_hours", 0.0)
+                                    return ask
+                    except Exception:
+                        self.logger.debug("[proactive] 生日采集升级跳过", exc_info=True)
+                return op
 
             cd_path = Path(self.config.config_path).parent / "companion_proactive_cooldown.json"
 
@@ -2206,8 +2248,18 @@ class AIChatAssistant:
                 return False
 
             def _on_teaser_sent(plan) -> None:
+                _mode = str((plan or {}).get("mode") or "")
+                # Stage R：生日采集发出 → 记冷却（cooldown_days 内不再问同一人，避免反复打听）。
+                if _mode == "ask_birthday" and _ba_cd is not None:
+                    try:
+                        import time as _t
+                        _cid = str((plan or {}).get("conversation_id") or "")
+                        if _cid:
+                            _ba_cd.mark(_cid, _t.time())
+                    except Exception:
+                        self.logger.debug("[proactive] 生日采集冷却落盘失败", exc_info=True)
                 # Stage 3：付费预告（story_teaser）发出即记一条漏斗事件，供归因转化率。
-                if str((plan or {}).get("mode") or "") != "story_teaser":
+                if _mode != "story_teaser":
                     return
                 funnel = self._companion_funnel_store
                 if funnel is None:

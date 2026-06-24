@@ -255,6 +255,7 @@ class _SM:
     build_proactive_opener = _SMcls.build_proactive_opener
     build_ritual_opener = _SMcls.build_ritual_opener
     build_milestone_opener = _SMcls.build_milestone_opener
+    build_birthday_ask_opener = _SMcls.build_birthday_ask_opener
     resolve_birthday = _SMcls.resolve_birthday
     _proactive_story_invite = _SMcls._proactive_story_invite
     _proactive_story_teaser = _SMcls._proactive_story_teaser
@@ -694,3 +695,35 @@ def test_resolve_birthday_from_memory():
 def test_resolve_birthday_none_when_absent():
     sm = _SM(_StubStore([_fact("喜欢猫"), _fact("在备考")]))
     assert sm.resolve_birthday("u1") is None
+
+
+# ── Stage R：生日主动采集 opener（build_birthday_ask_opener）─────────────────
+
+def test_birthday_ask_opener_basic():
+    sm = _SM(_StubStore([]))
+    out = sm.build_birthday_ask_opener(memory_key="u1", intimacy=60.0)
+    assert out["mode"] == "ask_birthday"
+    assert "生日" in out["directive"]
+
+
+def test_birthday_ask_opener_blocked_on_severe():
+    import time as _t
+    crisis = {"level": "severe", "created_at": _t.time() - 86400}
+    sm = _SM(_StubStore([]), context={"u1": {}}, crisis_latest=crisis)
+    out = sm.build_birthday_ask_opener(memory_key="u1", intimacy=60.0)
+    assert out["mode"] == ""  # 危机期不问生日
+
+
+def test_birthday_ask_opener_soft_skips():
+    sm = _SM(_StubStore([]))
+    out = sm.build_birthday_ask_opener(
+        memory_key="u1", intimacy=60.0, last_emotion="焦虑")
+    assert out["mode"] == ""  # 低落期不问生日
+
+
+def test_birthday_ask_opener_new_relationship_restrained():
+    sm = _SM(_StubStore([]))
+    out = sm.build_birthday_ask_opener(
+        memory_key="u1", intimacy=50.0, stage="warming")
+    assert out["mode"] == "ask_birthday"
+    assert "随意" in out["directive"] or "刻意" in out["directive"]
