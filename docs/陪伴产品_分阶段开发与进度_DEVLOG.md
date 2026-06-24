@@ -2961,3 +2961,42 @@ send-path 审计 **5 passed**（无新增裸发送）。
 问候，复用每日仪式的护栏/冷却/框定基建，零改核心循环。这是留存与情感黏性的高价值钩子。
 **下一步**：① **生日仪式**（补 memory slot 生日抽取后接入，同一 milestone 框架）；② **节点真发低比例自动采样**
 （让节点文案也进 few-shot 质量闭环）；③ **农历节日自动换算**（接农历库免人工按年配）。
+
+---
+
+## 78. Stage Q：生日仪式——补齐「重要日子」三件套，单点情感价值最高
+
+**实施前的思考**：生日是**单用户最高情感价值**的节点（"AI 记得我生日"远胜节日群发感），但难点是
+**可靠拿到生日**——`memory_slots` 现有 name/residence/relationship/preference 槽，**没有生日**。关键风险：
+**宁可漏发、绝不错发**——在错的日子说"生日快乐"比不说更尴尬。
+
+**改动**（保守抽取 + 注入式取数 + 复用 P 框架）：
+- 新 `src/utils/birthday.py`（**确定性纯函数**）：`extract_birthday(text)→(月,日)`——**必须命中生日关键词**
+  （生日/出生/birthday/born）才解析日期，否则不认（避免「3月5日开会」被误当生日）；支持中文「X月Y日/号」、
+  含年「1995-03-05」、裸「03-05」、英文「March 5 / Dec 25」。`is_birthday_today` 判当日，**2/29 生日平年顺延 2/28**。
+- `skill_manager.resolve_birthday(memory_key)`：扫该用户 episodic 记忆（优先 `user_stated`），命中首条可解析生日即返回。
+- `milestone_ritual` 加 `birthday_provider` 注入参 + `MODE_BIRTHDAY`：优先级 **生日 > 纪念日 > 节日**；
+  仅对**通过亲密度门槛的候选**查一次生日（控成本，同 `active_hours_provider` 范式）；去重 `{cid}:ms:birthday:{year}`（每年一次）。
+- `build_milestone_opener` 加 birthday 分支（"独一无二的生日祝福、别像贺卡套话"）；共用情绪护栏 + 记忆钩子。
+- `build_proactive_prompt` 的 `milestone_*` 框定天然覆盖 `milestone_birthday`；`_MODE_HINTS` 补生日调参建议。
+- main.py 接 `birthday_provider`（闭包→`resolve_birthday`）+ 配置 `celebrate_birthday`（默认开，companion 预设开）。
+
+**实施中的再优化**：
+1. **关键词门控的抽取**：最初想直接抓任意日期，意识到会把闲聊日期误当生日→错发。改为**强制要求生日关键词**才解析——
+   把「错发」风险压到最低（符合"宁漏勿错"）。负向用例（"3月5日开会"/"1995-03-05认识的"→None）专门守这条线。
+2. **注入式 birthday_provider 而非塞进会话快照**：扫记忆是 IO，若在 `_conversations()` 给每个会话都查生日，
+   每 tick 全量扫记忆太贵。改为**仅对过了亲密度门槛的候选、且只在 greet_hour** 查一次——与 Stage L 的
+   `active_hours_provider` 惰性取数同范式，成本可控。
+3. **2/29 闰日顺延**：识别到闰日生日在平年永远不触发的边界，加平年顺延 2/28 的体贴处理。
+
+**能否再优化**：① 生日目前只**读**记忆、不**主动问**——可加「关系到一定深度时自然问一句生日」的采集闭环（更主动）；
+② 抽到的生日可回写成结构化 memory slot（避免每次重扫、也供画像展示）；③ 农历生日同农历节日，需农历库换算。均属增强。
+
+**回归（本机禁跑全量）**：`test_birthday`（新 12）+ `test_milestone_ritual`（+5 生日）+ `test_proactive_topic`
+（+4 生日 opener/resolve）+ `test_proactive_prompt`（+1 框定）+ `test_companion_sample_store` **132 passed / 3.2s**；
+send-path 审计 **5 passed**（无新增裸发送）。
+
+**Stage Q 收口**：「重要日子」三件套补齐——**每日（晨/晚安）+ 认识 N 天 + 节日 + 生日**，覆盖陪伴留存的全部高情感节点。
+生日作最高优先级、保守取数（宁漏勿错），复用 Stage L/O/P 的护栏/冷却/框定/调参基建，零改核心循环。
+**下一步**：① **生日主动采集**（关系够深时自然问一句生日，把"读"升级为"会问"）；② **节点真发低比例自动采样**
+（让节点文案进 few-shot 闭环）；③ **抽取结果回写结构化 slot**（免重扫 + 供画像）。

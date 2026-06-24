@@ -20,6 +20,9 @@ def _at(year, month, day, hour=10):
 
 def _opener(**kw):
     et = kw.get("event_type")
+    if et == "birthday":
+        return {"mode": "milestone_birthday",
+                "directive": "生日快乐", "fact": "", "context_facts": []}
     if et == "anniversary":
         return {"mode": "milestone_anniversary",
                 "directive": f"认识第{kw.get('days')}天", "fact": "", "context_facts": []}
@@ -200,3 +203,53 @@ def test_plan_sorts_by_intimacy_and_caps():
 
 def test_default_milestones_nonempty():
     assert 100 in DEFAULT_ANNIVERSARY_DAYS and 365 in DEFAULT_ANNIVERSARY_DAYS
+
+
+# ── 生日（Stage Q）─────────────────────────────────────────────────────────
+
+def test_plan_birthday_fires():
+    now = _at(2026, 3, 5, hour=10)
+    plans = plan_milestone_rituals(
+        [_conv(first_seen_ts=now - 50 * 86400)], ritual_sent={}, opener_fn=_opener,
+        now=now, birthday_provider=lambda mk: (3, 5))
+    assert len(plans) == 1
+    assert plans[0]["mode"] == "milestone_birthday"
+    assert plans[0]["event_type"] == "birthday"
+    assert plans[0]["ritual_key"] == "telegram:default:1:ms:birthday:2026"
+
+
+def test_plan_birthday_priority_over_anniversary_and_holiday():
+    # 生日恰逢圣诞 + 认识 100 天 → 取生日（最高优先级）
+    now = _at(2026, 12, 25, hour=10)
+    first = now - 100 * 86400
+    plans = plan_milestone_rituals(
+        [_conv(first_seen_ts=first)], ritual_sent={}, opener_fn=_opener,
+        now=now, birthday_provider=lambda mk: (12, 25))
+    assert plans[0]["event_type"] == "birthday"
+
+
+def test_plan_birthday_not_today_falls_through():
+    # 生日不是今天 → 退回纪念日
+    now = _at(2026, 4, 11, hour=10)
+    first = now - 100 * 86400
+    plans = plan_milestone_rituals(
+        [_conv(first_seen_ts=first)], ritual_sent={}, opener_fn=_opener,
+        now=now, birthday_provider=lambda mk: (8, 8))
+    assert plans[0]["event_type"] == "anniversary"
+
+
+def test_plan_birthday_provider_none_no_birthday():
+    now = _at(2026, 3, 5, hour=10)
+    plans = plan_milestone_rituals(
+        [_conv(first_seen_ts=now - 50 * 86400)], ritual_sent={}, opener_fn=_opener,
+        now=now)  # 无 provider，非纪念日/节日 → 空
+    assert plans == []
+
+
+def test_plan_birthday_dedup():
+    now = _at(2026, 3, 5, hour=10)
+    key = "telegram:default:1:ms:birthday:2026"
+    plans = plan_milestone_rituals(
+        [_conv(first_seen_ts=now - 50 * 86400)], ritual_sent={key: now - 60},
+        opener_fn=_opener, now=now, birthday_provider=lambda mk: (3, 5))
+    assert plans == []

@@ -255,6 +255,7 @@ class _SM:
     build_proactive_opener = _SMcls.build_proactive_opener
     build_ritual_opener = _SMcls.build_ritual_opener
     build_milestone_opener = _SMcls.build_milestone_opener
+    resolve_birthday = _SMcls.resolve_birthday
     _proactive_story_invite = _SMcls._proactive_story_invite
     _proactive_story_teaser = _SMcls._proactive_story_teaser
     _story_progress_from_context = staticmethod(_SMcls._story_progress_from_context)
@@ -637,7 +638,7 @@ def test_milestone_holiday_basic():
 
 def test_milestone_invalid_event_type():
     sm = _SM(_StubStore([_fact("x")]))
-    assert sm.build_milestone_opener(event_type="birthday", memory_key="u1")["mode"] == ""
+    assert sm.build_milestone_opener(event_type="wedding", memory_key="u1")["mode"] == ""
 
 
 def test_milestone_blocked_on_recent_severe():
@@ -667,3 +668,29 @@ def test_milestone_new_relationship_restrained():
         event_type="anniversary", days=30, memory_key="u1",
         intimacy=35.0, stage="warming")
     assert "点到为止" in out["directive"]
+
+
+def test_milestone_birthday_basic():
+    sm = _SM(_StubStore([]))
+    out = sm.build_milestone_opener(
+        event_type="birthday", memory_key="u1", intimacy=60.0)
+    assert out["mode"] == "milestone_birthday"
+    assert "生日" in out["directive"]
+
+
+def test_milestone_birthday_with_memory_hook():
+    sm = _SM(_StubStore([_fact("在备考", tier="stable", hits=3)]))
+    out = sm.build_milestone_opener(
+        event_type="birthday", memory_key="u1", intimacy=60.0)
+    assert out["fact"] == "在备考"
+    assert "在备考" in out["directive"]
+
+
+def test_resolve_birthday_from_memory():
+    sm = _SM(_StubStore([_fact("随便聊聊"), _fact("我生日是3月5日")]))
+    assert sm.resolve_birthday("u1") == (3, 5)
+
+
+def test_resolve_birthday_none_when_absent():
+    sm = _SM(_StubStore([_fact("喜欢猫"), _fact("在备考")]))
+    assert sm.resolve_birthday("u1") is None

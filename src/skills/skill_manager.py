@@ -2950,7 +2950,7 @@ class SkillManager(LoggerMixin):
         build_proactive_prompt 的 milestone 分支（不套「久别重逢」）。
         """
         et = str(event_type or "").strip().lower()
-        if et not in ("anniversary", "holiday"):
+        if et not in ("anniversary", "holiday", "birthday"):
             return {"mode": "", "directive": "", "fact": ""}
         gate = self._proactive_emotion_gate(memory_key, last_emotion)
         if gate == "block":
@@ -2969,7 +2969,12 @@ class SkillManager(LoggerMixin):
             except Exception:
                 self.logger.debug("milestone memory hook skipped", exc_info=True)
                 fact = ""
-        if et == "anniversary":
+        if et == "birthday":
+            directive = (
+                "今天是TA的生日！送上温暖真诚、独一无二的生日祝福，"
+                "让TA感到被记得、被在乎；自然走心、别像贺卡套话；")
+            mode = "milestone_birthday"
+        elif et == "anniversary":
             n = max(0, int(days or 0))
             directive = (
                 f"今天是你们认识的第{n}天，自然温暖地和TA说一句这个小纪念日的心情，"
@@ -2990,6 +2995,29 @@ class SkillManager(LoggerMixin):
             directive += "（关系还偏新：点到为止、别过分亲密。）"
         return {"mode": mode, "directive": directive, "fact": fact,
                 "context_facts": []}
+
+    def resolve_birthday(self, memory_key: str):
+        """从某用户 episodic 记忆里扫出生日 (月, 日)；扫不到 → None（Stage Q）。
+
+        保守：优先 ``user_stated``（用户亲口说的），其次全部；命中第一条可解析的即返回。
+        生日的「日期」抽取在 ``src.utils.birthday.extract_birthday``（要求带生日关键词）。
+        """
+        store = getattr(self, "_episodic_store", None)
+        key = str(memory_key or "").strip()
+        if not store or not key or not hasattr(store, "list_rows"):
+            return None
+        try:
+            from src.utils.birthday import extract_birthday
+            rows = store.list_rows(prefix=key, limit=80, source="user_stated") or []
+            if not rows:
+                rows = store.list_rows(prefix=key, limit=80) or []
+            for r in rows:
+                bd = extract_birthday((r or {}).get("content") or "")
+                if bd is not None:
+                    return bd
+        except Exception:
+            self.logger.debug("resolve_birthday failed", exc_info=True)
+        return None
 
     def episodic_inferred_counts(self) -> Dict[str, int]:
         """R17：全库 AI 推断计数（pending 待确认 / total），供校正质量看板。"""

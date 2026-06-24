@@ -220,6 +220,11 @@ _MODE_HINTS = {
         "时点不对：开 personalize_active_hour，按用户历史活跃晚点择时（夜猫子晚发）",
         "扰民：上调 min_quiet_gap_hours，人还在场就别硬道晚安",
     ],
+    "milestone_birthday": [
+        "生日祝福像贺卡套话：收紧 directive，结合 TA 的具体记忆/近况，写独一无二的那句",
+        "发错日子：核对 resolve_birthday 抽取（要求带生日关键词）与时区，宁可漏发别错发",
+        "扰民/尴尬：仅对关系够深用户庆生，关系浅时点到为止",
+    ],
     "milestone_anniversary": [
         "纪念日太隆重/煽情：收紧 directive，像随口记得的人轻轻一提，别仪式感过载",
         "天数算错/发错日子：核对 first_seen_ts 与 anniversary_days 里程碑配置",

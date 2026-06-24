@@ -5,12 +5,14 @@
 - 每日仪式：**时段驱动**（每天到点道早/晚安）。
 - 本模块：**事件/日期驱动**（只在认识满 N 天那天 / 节日当天，到点问候一次）。
 
-两类事件（本期）：
+三类事件：
+- **生日**（最高优先）：经注入式 ``birthday_provider`` 从该用户记忆扫出 (月,日)，当天问候一次。
 - **认识 N 天纪念日**：用「会话首次建立时间」(``first_seen_ts``，≈ 首次接触）算认识天数，
   命中配置里的里程碑（7/30/100/365/520/1314…）那天问候一次。
 - **节日**：当天 (月-日) 命中配置日历则问候（内置公历常见节日；农历逐年变，留给配置覆盖）。
 
 去重：复用 ``ritual_key`` 机制（与 daily_ritual 同一冷却表）——
+- 生日 ``{cid}:ms:birthday:{year}``（每年只一次）；
 - 纪念日 ``{cid}:ms:anniversary:{N}``（每个 N 永久只一次）；
 - 节日 ``{cid}:ms:holiday:{year}:{月-日}``（每年只一次）。
 故**无需改 CompanionProactiveLoop**：上层把本计划并进 ritual 计划即可。
@@ -26,6 +28,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+MODE_BIRTHDAY = "milestone_birthday"
 MODE_ANNIVERSARY = "milestone_anniversary"
 MODE_HOLIDAY = "milestone_holiday"
 
@@ -87,8 +90,16 @@ def _detect_event(
     anniversary_milestones: Any,
     holiday: Optional[Tuple[str, str]],
     year: int,
+    birthday: Optional[Tuple[int, int]] = None,
 ) -> Optional[Dict[str, Any]]:
-    """该会话今天应触发的事件（优先级：纪念日 > 节日）；无 → None。"""
+    """该会话今天应触发的事件（优先级：生日 > 纪念日 > 节日）；无 → None。"""
+    if birthday is not None:
+        from src.utils.birthday import is_birthday_today
+        if is_birthday_today(birthday, now):
+            return {
+                "type": "birthday", "mode": MODE_BIRTHDAY,
+                "tag": str(year), "days": 0, "label": "生日",
+            }
     anniv = due_anniversary(conv.get("first_seen_ts"), now, anniversary_milestones)
     if anniv is not None:
         return {
@@ -116,6 +127,7 @@ def plan_milestone_rituals(
     anniversary_milestones: Any = DEFAULT_ANNIVERSARY_DAYS,
     holiday_calendar: Any = None,
     has_pending_care: Optional[Callable[[str], bool]] = None,
+    birthday_provider: Optional[Callable[[str], Optional[Tuple[int, int]]]] = None,
 ) -> List[Dict[str, Any]]:
     """决定本 tick 该给谁发纪念日/节日问候（确定性纯函数）。非问候时点 → 空。
 
@@ -153,9 +165,16 @@ def plan_milestone_rituals(
             intimacy = 0.0
         if intimacy < float(min_intimacy):
             continue
+        # 生日取数（IO，注入式）：仅对通过亲密度门槛的候选查一次，控成本（同 active_hours 范式）。
+        bday = None
+        if birthday_provider is not None:
+            try:
+                bday = birthday_provider(str(c.get("memory_key") or ""))
+            except Exception:
+                bday = None
         event = _detect_event(
             c, now, anniversary_milestones=anniversary_milestones,
-            holiday=holiday, year=year)
+            holiday=holiday, year=year, birthday=bday)
         if event is None:
             continue
         ritual_key = f"{cid}:ms:{event['type']}:{event['tag']}"
@@ -212,6 +231,7 @@ def plan_milestone_rituals(
 
 
 __all__ = [
+    "MODE_BIRTHDAY",
     "MODE_ANNIVERSARY",
     "MODE_HOLIDAY",
     "DEFAULT_ANNIVERSARY_DAYS",

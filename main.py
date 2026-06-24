@@ -2289,6 +2289,11 @@ class AIChatAssistant:
                     _m_max = int(_m_cfg.get("max_per_tick", 5))
                     _m_anniv = _m_cfg.get("anniversary_days") or list(_M_DEF_ANNIV)
                     _m_holidays = _m_cfg.get("holiday_calendar") or None
+                    # Stage Q：生日仪式——从记忆扫出 (月,日)，当天庆生（最高优先级节点）。
+                    _m_bday_on = bool(_m_cfg.get("celebrate_birthday", True))
+
+                    def _birthday_provider(memory_key):
+                        return self.skill_manager.resolve_birthday(memory_key)
 
                 def _ritual_fn(convs, now_ts):
                     daily = _plan_rituals(
@@ -2318,6 +2323,8 @@ class AIChatAssistant:
                             anniversary_milestones=_m_anniv,
                             holiday_calendar=_m_holidays,
                             has_pending_care=_has_pending_care,
+                            birthday_provider=(
+                                _birthday_provider if _m_bday_on else None),
                         ) or []
                     except Exception:
                         self.logger.debug("[milestone] 规划失败", exc_info=True)

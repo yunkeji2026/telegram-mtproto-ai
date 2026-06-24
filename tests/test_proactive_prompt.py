@@ -36,6 +36,13 @@ def test_milestone_holiday_framing():
     assert "圣诞快乐" in p
 
 
+def test_milestone_birthday_framing():
+    p = build_proactive_prompt(
+        "小柔", {"mode": "milestone_birthday", "directive": "生日快乐呀"})
+    assert "许久未联系" not in p
+    assert "生日快乐呀" in p
+
+
 def test_silence_mode_keeps_long_absence_framing():
     p = build_proactive_prompt("小柔", {"mode": "follow_up", "directive": "回访备考"})
     assert "许久未联系" in p
