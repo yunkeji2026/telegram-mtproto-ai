@@ -3229,3 +3229,36 @@ send-path 审计 **5 passed**（无新增裸发送）。
 热更新闭环真正跑通：失配 → 信标上报 → 看板定位 → D1 覆写层热修，全程无需重发桌面包。
 **下一步**：① 用真号现场校准四平台选择器并打开 `canIngest`；② 失配告警 + 看板 UI；
 ③ **D3** 每账号指纹注入；④ **D4** 双向收件箱桥 + 受控 autopilot。
+
+---
+
+## 84. Stage D1c：桌面注入健康看板 + 失配告警——让 D1b 信标被运营用起来
+
+**实施前的思考**：D1b 建了信标 + `GET /api/desktop/inject-health`，但「数据有了、人看不见」。D1c 把它挂到运营已天天看的
+`rpa-overview` 页，闭环最后一环（人）补上：一张卡片显示各内嵌账号注入状态，失配自动弹告警。成本低、即时可用。
+
+**改动**（仅 `src/web/templates/rpa_overview.html`，无新端点/无后端改动，复用 D1b 的 GET）：
+- 在「主动话题预览」卡后加 **🖥 桌面注入健康卡**：标题徽标显示「共 N 账号 · 正常 X · 失配 Y」（失配数标红），
+  下方逐账号列出 `平台·account_id` + 状态（注入正常/输入框失配/气泡失配/未登录/无档案，配色与语义同 D1b/前端
+  `deriveInjectState`），失配账号附「缺:composer/bubble」明细，>90s 未上报标「⚠停摆」，并标注「通用档/回流关」。
+- **失配告警**：失配数从 0→>0 时 `rpa.toast` 弹一次红提醒（提示可热修 selector-profiles），用 `_dhLastMismatch`
+  去重避免每轮刷屏。
+- 接线：`ovRefreshDesktopHealth()` 挂进主刷新循环 `ovRefresh`（独立拉取、失败不影响主刷新，跟随 `ov-interval` 自动刷）
+  + 手动「刷新」按钮 + 首屏拉一次。
+
+**实施中的再优化**：
+1. **复用既有看板而非新建页**：挂到运营已常驻的 rpa-overview，零学习成本、零新路由（不污染路由清单契约）。
+2. **告警去重**：只在「无→有」跳变时弹一次（`_dhLastMismatch`），而非每轮都弹，避免告警疲劳。
+3. **口径三处统一**：卡片状态文案/配色 = D1b 后端 `classify_inject_health` = 前端 `deriveInjectState`，
+   三处同一套语义，杜绝「条/卡/看板各说各话」。
+
+**能否再优化**：① 目前是「即时态」告警（toast），无「失配持续 N 分钟→进告警流/通知」的升级（可接 alerts 体系）；
+② 无历史趋势曲线；③ 可点账号跳到对应选择器覆写编辑。均属增强。
+
+**回归**：`jinja2` 编译 `rpa_overview.html` 通过；`tests/test_rpa_overview.py` + `test_admin_route_inventory` +
+`test_desktop_inject_health` + `test_desktop_selectors` **52 passed**（端点契约/分类/存储不回归）。
+
+**Stage D1c 收口**：D1b 信标真正「被人看见 + 主动告警」——运营在总览页一眼看到「IG 的 ig3 号 composer 失配」并被
+toast 提醒，再走 D1 覆写层热修。桌面多平台内嵌的「接入→热更新→可观测→告警」全链路闭合。
+**下一步**：① **D3** 每账号指纹注入（复用 `M4 fingerprint`，多号防关联封）；② 真号现场校准选择器并打开 `canIngest`；
+③ 失配持续告警升级（接 alerts 通知）；④ **D4** 双向收件箱桥 + 受控 autopilot。

@@ -281,6 +281,15 @@
   <div id="ov-pp-sample-out" style="margin-top:.45rem"></div>
 </div>
 
+<!-- D1c：桌面壳内嵌注入健康（逐选择器失配可观测，数据来自 /api/desktop/inject-health 信标）-->
+<div id="ov-desktop-health-card" style="margin-top:.6rem;background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:.6rem .85rem">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem">
+    <div style="font-weight:600;font-size:.82rem">🖥 桌面注入健康 <span id="ov-dh-summary" style="font-weight:400;color:var(--muted);font-size:.72rem"></span></div>
+    <button id="ov-dh-refresh" style="font-size:.72rem;padding:.18rem .6rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="内嵌平台注入逐选择器命中；失配多为官方网页改版，可改 config/desktop_selector_profiles.json 热修">刷新</button>
+  </div>
+  <div id="ov-dh-body" style="margin-top:.45rem;font-size:.76rem;line-height:1.5;color:var(--muted)">载入中…</div>
+</div>
+
 <!-- 4 平台卡片 -->
 <div class="ov-grid" id="ov-grid">
   <!-- Telegram -->
@@ -898,6 +907,7 @@ async function ovRefresh(){
     if(al && al.items){ ovRenderAlerts(al.items); }
     ovRefreshFleet();  // N6：机群反封号健康灯（独立拉取，失败不影响主刷新）
     ovRefreshPreflight();  // N：真号扫码陪聊上线前自检红绿灯（独立拉取）
+    ovRefreshDesktopHealth();  // D1c：桌面壳内嵌注入健康（独立拉取）
     document.getElementById('ov-last').textContent = new Date().toLocaleTimeString('zh-CN',{hour12:false});
   }catch(e){
     console.warn('overview refresh failed', e);
@@ -1105,6 +1115,54 @@ async function ovProactiveAdvice(){
   }catch(e){ if(out){ out.textContent = '调参建议请求失败'; } }
 }
 
+// ── D1c：桌面注入健康看板 + 失配告警 ──────────────────────────────────────────
+const _DH_STATUS = {
+  ok:                {t:'注入正常',        c:'#3fb950'},
+  mismatch_composer: {t:'输入框失配',      c:'#f85149'},
+  mismatch_bubble:   {t:'气泡失配',        c:'#f85149'},
+  no_chat:           {t:'未登录/未进会话', c:'#d29922'},
+  unsupported:       {t:'无注入档案',      c:'var(--muted)'},
+};
+function _dhEsc(s){ return (window.rpa&&rpa.esc)?rpa.esc(s):String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+let _dhLastMismatch = 0;
+async function ovRefreshDesktopHealth(){
+  const body = document.getElementById('ov-dh-body');
+  const sum  = document.getElementById('ov-dh-summary');
+  if(!body) return;
+  try{
+    const d = await fetch('/api/desktop/inject-health').then(r=>r.json());
+    const accs = (d&&d.accounts)||[];
+    const s = (d&&d.summary)||{};
+    const mismatch = s.mismatch||0;
+    if(sum){
+      sum.innerHTML = '共 '+(s.total||0)+' 账号 · 正常 '+(s.ok||0)
+        + (mismatch ? ' · <strong style="color:#f85149">失配 '+mismatch+'</strong>' : '');
+    }
+    // 失配告警：新出现失配（上次为 0 本次 >0）时弹一次提醒，避免刷屏
+    if(mismatch>0 && _dhLastMismatch===0 && window.rpa && rpa.toast){
+      rpa.toast('桌面注入有 '+mismatch+' 个账号选择器失配，疑似官方改版（可热修 selector-profiles）', 'err');
+    }
+    _dhLastMismatch = mismatch;
+    if(!accs.length){
+      body.innerHTML = '<span style="color:var(--muted)">暂无桌面注入上报（桌面端未运行 / 未打开会话）。</span>';
+      return;
+    }
+    body.innerHTML = accs.map(function(a){
+      const st = _DH_STATUS[a.status] || {t:a.status||'未知', c:'var(--muted)'};
+      const stale = a.stale ? ' <span style="color:#d29922" title="超过 90s 未上报，注入可能已停摆">⚠停摆</span>' : '';
+      const sel = a.selectors||{};
+      const bad = ['composer','bubble','sendBtn','peerTitle'].filter(function(k){ return sel[k]===false; });
+      const selNote = (String(a.status||'').indexOf('mismatch')===0 && bad.length)
+        ? ' <span style="color:var(--muted);font-size:.68rem">缺:'+bad.join('/')+'</span>' : '';
+      const gen = a.generic ? ' <span style="color:var(--muted);font-size:.68rem">通用档</span>' : '';
+      const ing = a.can_ingest ? '' : ' <span style="color:var(--muted);font-size:.68rem" title="同步回流未开（选择器校准后可经覆写层打开 canIngest）">回流关</span>';
+      return '<div style="display:flex;justify-content:space-between;gap:.5rem;padding:.2rem 0;border-bottom:1px solid var(--bd)">'
+        + '<span>'+_dhEsc(a.platform)+' · '+_dhEsc(a.account_id||'—')+gen+ing+'</span>'
+        + '<span style="color:'+st.c+'">'+st.t+selNote+stale+'</span></div>';
+    }).join('');
+  }catch(e){ body.textContent = '桌面注入健康请求失败'; }
+}
+
 let _ovTimer = null;
 function ovScheduleRefresh(){
   if(_ovTimer){ clearInterval(_ovTimer); _ovTimer = null; }
@@ -1138,6 +1196,9 @@ document.addEventListener('DOMContentLoaded', function(){
   var _ppAdv = document.getElementById('ov-pp-advice');
   if(_ppAdv){ _ppAdv.addEventListener('click', ovProactiveAdvice); }
   ovRefreshProactivePreview();
+  // D1c：桌面注入健康（按钮手动刷新 + 随主循环 ovRefresh 自动刷新）
+  var _dhBtn = document.getElementById('ov-dh-refresh');
+  if(_dhBtn){ _dhBtn.addEventListener('click', ovRefreshDesktopHealth); }
   // P5 + Q4: 运营漏斗初始加载 + 60s 轮询，默认 scope=all（跨平台总览）
   if(window.rpa && window.rpa.funnel){ window.rpa.funnel.init({intervalSec:60, defaultScope:'all'}); }
 
