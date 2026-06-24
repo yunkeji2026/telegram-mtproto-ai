@@ -39,6 +39,24 @@
       "inject": "tg-inject.js"
     },
     {
+      "id": "instagram",
+      "name": "Instagram",
+      "url": "https://www.instagram.com/direct/inbox/",
+      "inject": "tg-inject.js"
+    },
+    {
+      "id": "x",
+      "name": "X (Twitter)",
+      "url": "https://x.com/messages",
+      "inject": "tg-inject.js"
+    },
+    {
+      "id": "zalo",
+      "name": "Zalo",
+      "url": "https://chat.zalo.me/",
+      "inject": "tg-inject.js"
+    },
+    {
       "id": "line",
       "name": "LINE",
       "url": "https://line.me/",

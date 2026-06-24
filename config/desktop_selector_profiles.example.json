@@ -1,0 +1,18 @@
+{
+  "_README": "桌面壳选择器热更新覆写层（D1）。把本文件改名为 desktop_selector_profiles.json 即生效（后端 /api/desktop/selector-profiles 下发，桌面注入启动时叠加到内置档）。官方网页改版导致按钮没出现/抓不到文本时，运营在此填修正选择器，无需重发桌面包。只下发『补丁』，留空字段沿用内置档（profiles.js）。仅以下白名单字段可覆盖；自定义解析函数永不可远程替换。",
+  "_OVERLAYABLE_KEYS": [
+    "bubble", "bubbleText", "composer", "sendBtn", "peerTitle",
+    "outFlag", "outSelector", "mediaImg", "mediaAudio",
+    "supported", "canIngest", "richInput"
+  ],
+  "profiles": {
+    "instagram": {
+      "_note": "示例：现场 F12 校准后填真实选择器，并把 canIngest 设 true 打开同步回流。",
+      "bubble": "div[role='row']",
+      "bubbleText": "div[dir='auto']",
+      "composer": "div[role='textbox'][contenteditable='true']",
+      "sendBtn": "div[role='button'][aria-label='Send']",
+      "canIngest": false
+    }
+  }
+}

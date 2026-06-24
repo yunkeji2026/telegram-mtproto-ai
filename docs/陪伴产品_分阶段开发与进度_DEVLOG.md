@@ -3141,3 +3141,51 @@ send-path 审计 **5 passed**（无新增裸发送）。
 **按优先级顺势补一项画像**（先生日、后称呼），新增槽位近乎零成本。能力从「会主动了解生日」升维到「会主动补全画像」。
 **下一步**：① **称呼即时回写**（比照 Stage S 把称呼也提到 intent 门控前，补上裸答兜底）；
 ② **节点/采集真发低比例自动采样**（把仪式/采集真发喂进 few-shot 质量闭环，质量复利）；③ **画像覆盖率看板**。
+
+---
+
+## 82. Stage D1+D2：桌面多平台内嵌登录+注入——选择器档案外置热更新 + Tier1 平台接入
+
+**实施前的思考（竞品对标）**：竞品（ChatX 等）能在一个壳里内嵌 IG/Messenger/X/Zalo 的官方网页登录并注入翻译/智能回复。
+核对**本仓库自身代码**发现：桌面壳 `desktop/`（Electron + webview + preload 注入）**早已具备这套架构**，只是
+`BUILTIN_PROFILES`/`EMBEDDABLE` 仅开了 telegram/whatsapp。即「引擎已在，只差给更多平台配选择器档案」。
+比单纯抄竞品更进一步的杀手锏：把选择器做成**后端可热更新**——官方网页改版时不必重发桌面包。
+
+**改动**：
+- 新增纯模块 `desktop/inject/profiles.js`（从 `tg-inject.js` 外移 PROFILES，可 Node 单测）：
+  ① `detectPlatform(hostname)`（加 instagram/x/zalo，twitter→x、facebook→messenger）；
+  ② **内置定制档** telegram/whatsapp（逐字搬迁，零回归）；
+  ③ **通用工厂档** `makeGenericProfile(cfg)`——声明式选择器 → 标准 text/isOut/mid/peerId/peerName/media 函数，
+     新增平台只填数据。据此接入 **instagram / messenger / x / zalo** 四个 Tier1 平台；
+  ④ **覆写层** `applySelectorOverlay(profile, patch)`——仅白名单字段（选择器串 + 少量布尔）可被远程覆盖，
+     **自定义解析函数永不可远程替换**（安全边界）。
+- `tg-inject.js`：改 `require("./profiles.js")`；PROFILE 先用内置档同步起步（零等待/零回归），再**非阻塞**拉取
+  覆写层（1.5s 软超时，失败静默用内置档）就地热更新。
+- 后端：新增纯模块 `src/web/desktop_selectors.py`（加载 `config/desktop_selector_profiles.json` + 清洗/类型守卫 +
+  内容散列版本）+ `GET /api/desktop/selector-profiles` 端点（只下发『补丁』，内置档仍是唯一权威，避免漂移）；
+  路由清单基线同步加该 URL。`main.js` 加 `desktop:selector-profiles` IPC。给运营备 `*.example.json`。
+- `renderer.js`：`EMBEDDABLE`/`ICONS` 加四平台；`config.json` 加 IG/X/Zalo 模板。
+- **UA 泛化**（IG/Meta/X 拒载 Electron UA 否则登录页都打不开）：`webview-ua.js` 加 `needsChromeUa`/`urlNeedsChromeUa`，
+  main+renderer 对 whatsapp/instagram/messenger/x/zalo 统一伪装 Chrome UA；**telegram 仍用默认 UA**（已验证可用，零回归）。
+
+**实施中的再优化**：
+1. **「宁缺毋错」默认关回流**：通用工厂档 `canIngest` 默认 **false**——选择器未现场 F12 校准前，宁可不把消息回流统一收件箱，
+   也不要用未校准的 `isOut`/碎片 text 把脏数据/错方向灌进库。校准后经覆写层把 `canIngest` 改 true 即可打开（运营零改码）。
+   翻译/智能回复/注入状态不依赖回流，**当下即可用**。
+2. **混合架构而非全量重写**：telegram/whatsapp 的自定义解析（WA data-id 拆 jid 等）保留逐字实现保零回归；只让新平台走通用工厂。
+   覆写层对两类档**通用**——内置定制档的方法读 `this.bubble/...`，故远程改选择器串即可热修最常坏的失配（composer/sendBtn/bubble）。
+3. **后端只下发补丁**：不复制全套选择器到后端 → 内置档（profiles.js）唯一权威，杜绝两处漂移；常态补丁为空，注入直接用内置档。
+4. **安全守卫**：覆写仅白名单字段 + 类型守卫（布尔字段拒收字符串、字符串字段拒空串、未知键丢弃），防运营误填把注入打挂。
+
+**能否再优化**：① 四平台选择器目前是 best-effort，需真号现场 F12 校准（已留热更新通道，校准成本=改一个 JSON）；
+② **D1b 韧性选择器**（多候选 + role/aria 语义兜底）与**注入健康信标**（失配自动上报）可让失配更早被发现；
+③ **D3 每账号指纹**（复用已有 `M4 fingerprint`）注入 webview 分区，多号更稳；④ **D4 双向收件箱桥 + 受控 autopilot**
+（把内嵌账号变收件箱一等公民 + autopilot 接 send-gate/kill-switch）。均为后续里程碑。
+
+**回归**：`desktop npm test` **103 passed**（含新增 `profiles.test.js` 61：detectPlatform/工厂档/覆写层类型守卫/UA 判定）；
+`tests/test_desktop_selectors.py`（新增 11）+ `tests/test_admin_route_inventory.py`（路由清单含新端点）**16 passed**。
+
+**Stage D1+D2 收口**：桌面端从「内嵌 2 平台」扩到 **6 平台**（+IG/Messenger/X/Zalo），且地基升级为**选择器后端可热更新**——
+官方改版不再需重发桌面包，比竞品多一层运维韧性。能力对标竞品「多平台内嵌登录+注入」并在可维护性上反超。
+**下一步**：① **D1b** 韧性选择器 + 注入健康信标；② 用真号现场校准四平台选择器并经覆写层打开 `canIngest`；
+③ **D3** 每账号指纹注入；④ **D4** 双向收件箱桥 + 受控 autopilot（接 send-gate/kill-switch）。

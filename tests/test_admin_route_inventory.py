@@ -447,6 +447,7 @@ _BASELINE = """
 /api/desktop/smart-reply	POST
 /api/desktop/guard-check	POST
 /api/desktop/ingest	POST
+/api/desktop/selector-profiles	GET
 /api/telegram/log-tail	GET
 /api/telegram/recent-contacts	GET
 /api/telegram/settings	GET

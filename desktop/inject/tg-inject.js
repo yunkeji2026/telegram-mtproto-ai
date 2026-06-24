@@ -4,12 +4,14 @@
 // 作为 webview 的 preload 运行：与页面共享 DOM，但跑在隔离世界，可用 ipcRenderer 调主进程。
 // 主进程再去请求本仓库 FastAPI 后端（规避 webview 的跨域/混合内容限制）。
 //
-// 架构：按 location.hostname 探测平台 → 选用对应「选择器档案 PROFILE」。
-//   - telegram（web.telegram.org/k，webk）：完整支持（翻译/同步/智能回复/填入发送）。
-//   - whatsapp（web.whatsapp.com）：best-effort 档案（beta，类名随版本变，需现场用 F12 校准）。
-//   - messenger / line / unknown：显式不支持 → 不挂任何 UI，也绝不把消息误标成 telegram。
+// 架构：按 location.hostname 探测平台 → 选用对应「选择器档案 PROFILE」（见 profiles.js）。
+//   - telegram / whatsapp：完整定制档（翻译/同步/智能回复/填入发送）。
+//   - instagram / messenger / x / zalo：通用工厂档（翻译/智能回复/注入状态可用；同步回流默认关闭，
+//     待现场 F12 校准选择器后经 /api/desktop/selector-profiles 覆写层打开 canIngest）。
+//   - line / unknown：显式不支持 → 不挂任何 UI，也绝不把消息误标成其它平台。
 //
-// ⚠️ 各平台类名会随官方改版变化。若按钮没出现/抓不到文本，按对应 PROFILE 注释调整（F12 看真实 DOM）。
+// ⚠️ 各平台类名会随官方改版变化。选择器失配时优先用「后端覆写层热更新」（改 config/
+//    desktop_selector_profiles.json）即可热修，无需重发桌面包；内置档见 profiles.js。
 
 const { ipcRenderer } = require("electron");
 // 媒体翻译结果格式化（纯函数，可单测）。require 失败时退化：不提供媒体翻译，不影响文本链路。
@@ -20,195 +22,37 @@ try {
   /* 媒体格式化模块缺失：媒体翻译降级关闭 */
 }
 
-// ── 通用文本清洗（跨平台共用）────────────────────────────────────────────────
-function cleanVisibleText(raw) {
-  let txt = String(raw || "");
-  // 去图标字体私用区字形（已读勾/状态，E000–F8FF），否则夹进正文/时间戳
-  txt = txt.replace(/[\uE000-\uF8FF]/g, "");
-  // 兜底：剥掉尾部粘连且重复的时间戳，如「你好哦17:1017:10」
-  txt = txt.replace(/(\d{1,2}:\d{2})\1+\s*$/, "");
-  return txt.trim();
-}
-
-// ── 平台探测 ─────────────────────────────────────────────────────────────────
-function detectPlatform() {
-  const h = (location.hostname || "").toLowerCase();
-  if (h.indexOf("web.telegram.org") >= 0) return "telegram";
-  if (h.indexOf("web.whatsapp.com") >= 0) return "whatsapp";
-  if (h.indexOf("messenger.com") >= 0 || h.indexOf("facebook.com") >= 0) return "messenger";
-  if (h.indexOf("line.me") >= 0 || h.indexOf("line-apps.com") >= 0) return "line";
-  return "unknown";
-}
-
-// ── 选择器档案 ───────────────────────────────────────────────────────────────
-const PROFILES = {
-  // Telegram webk —— 与原实现逐字等价，保持零回归。
-  telegram: {
-    platform: "telegram",
-    supported: true,
-    canIngest: true,
-    richInput: false, // 用 textContent + input 事件（webk 已验证可行）
-    bubble: ".bubble",
-    bubbleText: ".message, .translatable-message",
-    outFlag: "is-out",
-    composer: ".input-message-input",
-    sendBtn: ".btn-send",
-    peerTitle:
-      ".chat-info .peer-title, .topbar .peer-title, .chat .user-title, .sidebar-header .peer-title",
-    isContent(b) {
-      if (!b || !b.classList) return false;
-      // 排除日期分隔/系统/服务/赞助气泡（否则「January 21」被当消息，污染上下文）
-      return !(
-        b.classList.contains("service") ||
-        b.classList.contains("is-date") ||
-        b.classList.contains("is-system") ||
-        b.classList.contains("is-sponsored") ||
-        b.classList.contains("bubble-first-unread")
-      );
-    },
-    text(bubble) {
-      // 文件/文档气泡：只取文件名，避免把尺寸/层级元信息抓成乱码
-      const docName = bubble.querySelector(
-        ".document-name, .document .name, .media-container .document-name"
-      );
-      if (docName && !bubble.querySelector(this.bubbleText)) {
-        const name = (docName.textContent || "").replace(/\s+/g, " ").trim();
-        return name ? "[文件] " + name : "[文件]";
-      }
-      const node = bubble.querySelector(this.bubbleText) || bubble;
-      const clone = node.cloneNode(true);
-      // 剔除：① 注入块/按钮 ② 时间戳/已读/反应 ③ 文档/语音/附件/引用容器
-      clone
-        .querySelectorAll(
-          ".aitr-box,.aitr-btn,.time,.message-time,.reactions,.bubble-beside-button," +
-            ".document,.audio,.attachment,.web,.reply"
-        )
-        .forEach((n) => n.remove());
-      return cleanVisibleText(clone.textContent || "");
-    },
-    isOut(b) {
-      return b.classList.contains(this.outFlag);
-    },
-    mid(bubble) {
-      return (
-        bubble.getAttribute("data-mid") ||
-        bubble.getAttribute("data-message-id") ||
-        (bubble.closest && bubble.closest("[data-mid]")
-          ? bubble.closest("[data-mid]").getAttribute("data-mid")
-          : "") ||
-        ""
-      );
-    },
-    peerId(bubble) {
-      // 只用数字 peer-id，不回落 hash（hash 可能是 @username，混用会把会话拆成两条）
-      const fromBubble = bubble.getAttribute("data-peer-id");
-      if (fromBubble) return fromBubble;
-      const container = bubble.closest && bubble.closest("[data-peer-id]");
-      if (container) return container.getAttribute("data-peer-id") || "";
-      return "";
-    },
-    peerName() {
-      const el = document.querySelector(this.peerTitle);
-      return el ? (el.textContent || "").trim() : "";
-    },
-    // 纯媒体气泡 → {kind:"image"|"voice", url}（图片 OCR / 语音转写翻译用）。取不到返回 null。
-    media(bubble) {
-      const img = bubble.querySelector(".media-photo, .media-container img, .attachment img");
-      if (img && img.src && img.src.indexOf("data:") !== 0) return { kind: "image", url: img.src };
-      const audio = bubble.querySelector("audio[src]");
-      if (audio && audio.getAttribute("src")) return { kind: "voice", url: audio.src };
-      return null;
-    },
-  },
-
-  // WhatsApp Web —— best-effort（beta）。类名相对稳定，但官方改版可能失效。
-  //   消息行：div.message-in / div.message-out；文本：span.selectable-text。
-  //   会话/消息 id：最近的 [data-id]，格式 {fromMe}_{chatId}_{msgId}（chatId 形如 6591234567@c.us）。
-  whatsapp: {
-    platform: "whatsapp",
-    supported: true,
-    canIngest: true,
-    richInput: true, // contenteditable + React/Lexical，需 execCommand insertText
-    bubble: "div.message-in, div.message-out, div[data-id*='@c.us'], div[data-id*='@g.us']",
-    // 多候选 + 多语言，抗官方改版（只增不删；新版 contenteditable 常带 role=textbox）
-    composer:
-      'footer div[contenteditable="true"][data-tab], div[contenteditable="true"][data-tab="10"], ' +
-      'footer div[contenteditable="true"][role="textbox"], div[contenteditable="true"][aria-label]',
-    sendBtn:
-      'button[aria-label="发送"], button[aria-label="Send"], button[data-testid="compose-btn-send"], ' +
-      'span[data-icon="send"], span[data-icon="send-light"], span[data-icon="wds-ic-send-filled"]',
-    isContent(b) {
-      if (!b || !b.getAttribute) return false;
-      if (b.classList && (b.classList.contains("message-in") || b.classList.contains("message-out"))) {
-        return true;
-      }
-      const did = b.getAttribute("data-id") || "";
-      return did.indexOf("@c.us") >= 0 || did.indexOf("@g.us") >= 0;
-    },
-    _dataId(bubble) {
-      // data-id 常在子节点上（不在 message-in/out 根上），仅 closest 会漏
-      const inner = bubble.querySelector && bubble.querySelector("[data-id]");
-      if (inner) return inner.getAttribute("data-id") || "";
-      const host = bubble.closest && bubble.closest("[data-id]");
-      return (host && host.getAttribute("data-id")) || "";
-    },
-    text(bubble) {
-      const span = bubble.querySelector(
-        "span.selectable-text, .copyable-text span.selectable-text, [data-testid='selectable-text']"
-      );
-      let raw = span ? span.textContent : "";
-      if (!raw) {
-        const cp = bubble.querySelector(".copyable-text, .copyable-area");
-        raw = cp ? cp.textContent : "";
-      }
-      if (!raw && bubble.getAttribute && bubble.getAttribute("data-id")) {
-        raw = bubble.textContent || "";
-      }
-      return cleanVisibleText(raw);
-    },
-    isOut(b) {
-      return b.classList.contains("message-out");
-    },
-    mid(bubble) {
-      const parts = this._dataId(bubble).split("_");
-      return parts.length >= 3 ? parts[parts.length - 1] : "";
-    },
-    peerId(bubble) {
-      const parts = this._dataId(bubble).split("_");
-      if (parts.length >= 3 && parts[1].indexOf("@") >= 0) return parts[1];
-      return this.conversationPeerId ? this.conversationPeerId() : "";
-    },
-    peerName() {
-      const el =
-        document.querySelector('header span[dir="auto"][title]') ||
-        document.querySelector('header [data-testid="conversation-info-header-chat-title"]') ||
-        document.querySelector('header span[dir="auto"]');
-      return el ? (el.getAttribute("title") || el.textContent || "").trim() : "";
-    },
-    conversationPeerId() {
-      // 消息行尚未带 data-id 时，从会话主面板/header 回落 chat jid
-      const sel =
-        '#main [data-id*="@c.us"], #main [data-id*="@g.us"], ' +
-        'header [data-id*="@c.us"], header [data-id*="@g.us"]';
-      const el = document.querySelector(sel);
-      if (!el) return "";
-      const parts = (el.getAttribute("data-id") || "").split("_");
-      if (parts.length >= 2 && parts[1].indexOf("@") >= 0) return parts[1];
-      return "";
-    },
-    // 纯媒体气泡 → {kind, url}。WhatsApp 图片/语音多为 blob: URL（同源可 fetch）。
-    media(bubble) {
-      const img = bubble.querySelector('img[src^="blob:"], img[src^="http"]');
-      if (img && img.src) return { kind: "image", url: img.src };
-      const audio = bubble.querySelector("audio[src]");
-      if (audio && audio.getAttribute("src")) return { kind: "voice", url: audio.src };
-      return null;
-    },
-  },
-};
+// ── 选择器档案（外置到 profiles.js，便于热更新/单测/扩展平台）────────────────────
+// 内置定制档 telegram/whatsapp + 通用工厂档 instagram/messenger/x/zalo + 远程覆写层。
+const {
+  detectPlatform,
+  BUILTIN_PROFILES,
+  applySelectorOverlay,
+} = require("./profiles.js");
 
 const PLATFORM = detectPlatform();
-const PROFILE = PROFILES[PLATFORM] || { platform: PLATFORM, supported: false };
+const PROFILES = BUILTIN_PROFILES; // 别名，兼容下文引用
+// PROFILE 可被远程覆写层热更新（见 bootstrapOverlay）：先用内置档同步起步，零等待、零回归。
+let PROFILE = PROFILES[PLATFORM] || { platform: PLATFORM, supported: false };
+
+// 远程选择器覆写：非阻塞拉取（200ms 软超时），成功则就地热更新 PROFILE，失败静默用内置档。
+// 官方改版后运营改 config/desktop_selector_profiles.json 即可热修，无需重发桌面包。
+(async function bootstrapOverlay() {
+  if (!PROFILES[PLATFORM]) return; // unsupported 平台无需覆写
+  try {
+    const res = await Promise.race([
+      ipcRenderer.invoke("desktop:selector-profiles"),
+      new Promise((r) => setTimeout(() => r(null), 1500)),
+    ]);
+    const profiles = res && res.ok && res.profiles;
+    if (profiles && profiles[PLATFORM]) {
+      PROFILE = applySelectorOverlay(PROFILES[PLATFORM], profiles[PLATFORM]);
+      try { ipcRenderer.invoke("desktop:diag", `[selector-overlay:${PLATFORM}] applied`); } catch (e) {}
+    }
+  } catch (e) {
+    /* 后端不可达/无覆写：静默用内置档 */
+  }
+})();
 
 const PUSHED = new Set(); // 同步桥去重：peerId:mid
 

@@ -3,7 +3,7 @@
 const { app, BrowserWindow, ipcMain, session, clipboard, Menu } = require("electron");
 const path = require("path");
 const fs = require("fs");
-const { chromeLikeUserAgent, isWhatsappUrl } = require("./webview-ua.js");
+const { chromeLikeUserAgent, isWhatsappUrl, needsChromeUa, urlNeedsChromeUa } = require("./webview-ua.js");
 
 const CONFIG_PATH = path.join(__dirname, "config.json");
 
@@ -136,6 +136,17 @@ ipcMain.handle("desktop:copy", (_e, text) => {
 ipcMain.handle("desktop:diag", (_e, msg) => {
   console.log(`[inject] ${msg}`);
   return true;
+});
+
+// 选择器覆写层（D1 热更新）：注入脚本启动时拉取后端下发的选择器修正。
+// 官方改版导致选择器失配时，运营改 config/desktop_selector_profiles.json 即可热修，
+// 无需重发桌面包。后端不可达/无覆写时返回 {ok:true, profiles:{}}，注入静默用内置档。
+ipcMain.handle("desktop:selector-profiles", async () => {
+  try {
+    return await backendGet("/api/desktop/selector-profiles");
+  } catch (e) {
+    return { ok: false, profiles: {}, error: String(e) };
+  }
 });
 
 ipcMain.handle("desktop:translate", async (_e, { text, target_lang }) => {
@@ -629,9 +640,10 @@ async function applyProxyForAccount(acc) {
   }
 }
 
-/** WhatsApp Web 拒载含 Electron 的 UA；在 partition 级伪装 Chrome（须在首次导航前）。 */
+/** WhatsApp/Instagram/Messenger/X/Zalo 等拒载含 Electron 的 UA；在 partition 级伪装 Chrome
+ *  （须在首次导航前）。telegram 用默认 UA 已验证可用 → 跳过，保持零回归。 */
 async function applyWhatsappSessionUa(acc) {
-  if (!acc || String(acc.platform || "").toLowerCase() !== "whatsapp") return;
+  if (!acc || !needsChromeUa(acc.platform)) return;
   try {
     await session.fromPartition(`persist:${acc.id}`).setUserAgent(
       chromeLikeUserAgent(process.versions.chrome));
@@ -643,7 +655,7 @@ async function applyWhatsappSessionUa(acc) {
 function bindWhatsappWebviewUa(wc) {
   const waUa = chromeLikeUserAgent(process.versions.chrome);
   function maybeSet(url) {
-    if (isWhatsappUrl(url)) {
+    if (urlNeedsChromeUa(url)) {
       try { wc.setUserAgent(waUa); } catch (_) { /* ignore */ }
     }
   }

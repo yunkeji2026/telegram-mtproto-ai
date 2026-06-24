@@ -265,3 +265,19 @@ def register_desktop_routes(app, *, api_auth) -> None:
             media_ref=str((body or {}).get("media_ref") or ""),
         )
         return {"ok": bool(cid), "conversation_id": cid or ""}
+
+    @app.get("/api/desktop/selector-profiles")
+    async def api_desktop_selector_profiles(_=Depends(api_auth)):
+        """桌面壳选择器覆写层（D1 热更新）：下发官方网页改版后的「选择器修正」补丁。
+
+        注入脚本（``desktop/inject/profiles.js``）启动时拉取本端点，把补丁叠加到内置档：
+        官方改版导致按钮没出现/抓不到文本时，运营改 ``config/desktop_selector_profiles.json``
+        即可热修，无需重发桌面包。文件不存在=空补丁（注入用内置档，常态）。
+        返回: {ok, version, profiles: {platform: {selectorKey: value}}}
+        """
+        from src.web.desktop_selectors import selector_profiles_payload
+        try:
+            return selector_profiles_payload()
+        except Exception:
+            logger.debug("[desktop] selector-profiles 读取失败", exc_info=True)
+            return {"ok": True, "version": "empty", "profiles": {}}

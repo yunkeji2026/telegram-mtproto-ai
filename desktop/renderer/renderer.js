@@ -1,13 +1,17 @@
 "use strict";
 
-const ICONS = { telegram: "✈️", whatsapp: "🟢", line: "💬", messenger: "💠", instagram: "📷", signal: "🔵" };
+const ICONS = { telegram: "✈️", whatsapp: "🟢", line: "💬", messenger: "💠", instagram: "📷", x: "𝕏", zalo: "💙", signal: "🔵" };
 
 // 统一收件箱标签页的固定 id（区别于 config.accounts[] 的真实账号）
 const INBOX_ID = "__inbox__";
 
-// 可内嵌官方网页并注入的平台（须与 inject/tg-inject.js 的 PROFILES[*].supported 保持一致）。
-// Messenger/LINE 无可用网页版聊天 → 不开内嵌死页，统一引导到收件箱。
-const EMBEDDABLE = { telegram: true, whatsapp: true };
+// 可内嵌官方网页并注入的平台（须与 inject/profiles.js 的 BUILTIN_PROFILES[*].supported 对齐）。
+// telegram/whatsapp：完整定制档；instagram/messenger/x/zalo：通用工厂档（翻译/智能回复/状态可用，
+// 同步回流默认关闭待选择器现场校准，可经 /api/desktop/selector-profiles 热更新打开）。
+// LINE 无可用完整网页版聊天（line.me 为营销页）→ 仍不内嵌，统一引导到收件箱。
+const EMBEDDABLE = {
+  telegram: true, whatsapp: true, instagram: true, messenger: true, x: true, zalo: true,
+};
 function isEmbeddable(platform) { return !!EMBEDDABLE[platform]; }
 
 // 注入诊断：保存各账号最近一次 inject-status 上报，按激活 Tab 渲染顶部状态条。
@@ -96,13 +100,18 @@ function resolveAccounts(cfg) {
   function whatsappUserAgent() {
     return WHATSAPP_UA || (typeof chromeLikeUserAgent === "function" ? chromeLikeUserAgent() : "");
   }
+  // D2：whatsapp/instagram/messenger/x/zalo 等拒载 Electron UA 的平台统一伪装 Chrome；
+  // telegram 用默认 UA（零回归）。needsChromeUa 由 webview-ua.js 提供（全局 / 单测共用）。
+  function uaNeedsSpoof(platform) {
+    return typeof needsChromeUa === "function" && needsChromeUa(platform);
+  }
   function applyWhatsappWebviewAttrs(wv, platform) {
-    if (!wv || typeof isWhatsappPlatform !== "function" || !isWhatsappPlatform(platform)) return;
+    if (!wv || !uaNeedsSpoof(platform)) return;
     const ua = whatsappUserAgent();
     if (ua) wv.setAttribute("useragent", ua);
   }
   async function ensureWhatsappSessionUa(acc) {
-    if (!acc || typeof isWhatsappPlatform !== "function" || !isWhatsappPlatform(acc.platform)) return;
+    if (!acc || !uaNeedsSpoof(acc.platform)) return;
     if (!window.shell.applyWhatsappUa) return;
     try { await window.shell.applyWhatsappUa({ id: acc.id, platform: acc.platform }); } catch (_) {}
   }
