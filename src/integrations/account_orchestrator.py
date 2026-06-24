@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from src.integrations.account_registry import get_account_registry
+from src.integrations.shared.send_guard import send_blocked
 
 logger = logging.getLogger(__name__)
 
@@ -299,6 +300,13 @@ class AccountOrchestrator:
         media_path: str, media_url: str, media_type: str, caption: str = "",
     ) -> Dict[str, Any]:
         """经 worker 发送媒体，并把出站媒体消息回写收件箱线程（media_ref 用 /static URL）。"""
+        # Stage M：编排器发送入口统一护栏（Kill-Switch + 反封号闸门）——富媒体与文本同守。
+        _blk, _reason = send_blocked(
+            platform, account_id, config=self._config, registry=self._registry)
+        if _blk:
+            logger.warning("[orchestrator] 媒体发送被护栏拦截 %s:%s (%s)",
+                           platform, account_id, _reason)
+            return {"delivered": False, "blocked": _reason}
         m = self._managed.get(account_key(platform, account_id))
         if not (m is not None and m.state == "running"
                 and m.worker is not None and hasattr(m.worker, "send_media")):
@@ -320,6 +328,14 @@ class AccountOrchestrator:
         self, platform: str, account_id: str, chat_key: str, text: str
     ) -> Dict[str, Any]:
         """经受管 worker 发送，并把出站消息回写收件箱线程。"""
+        # Stage M：编排器发送入口统一护栏（Kill-Switch + 反封号闸门）——所有经编排器的
+        # 外发（主动问候/唤醒/关怀/接管）都从这里走，旁路发送不再绕过急停与反封号。
+        _blk, _reason = send_blocked(
+            platform, account_id, config=self._config, registry=self._registry)
+        if _blk:
+            logger.warning("[orchestrator] 发送被护栏拦截 %s:%s (%s)",
+                           platform, account_id, _reason)
+            return {"delivered": False, "blocked": _reason}
         m = self._managed.get(account_key(platform, account_id))
         if not (m is not None and m.state == "running"
                 and m.worker is not None and hasattr(m.worker, "send")):

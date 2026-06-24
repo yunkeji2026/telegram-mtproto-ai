@@ -2782,3 +2782,54 @@ voice 成功则 `not _voice_sent` 跳过文本）。但其真发 `send_telegram_
 每日每档防骚扰，补上竞品对标的日活留存核心钩子。沉默回访（情节驱动）+ 每日仪式（节律驱动）双引擎成形。
 **下一步**：① **仪式文案 few-shot 质量闭环**；② **活跃时段缓存/落库**（降查询）；③ **纪念日/节日仪式扩展**；
 ④ **发送入口审计**（proactive/worker 旁路是否绕过统一发送护栏）。
+
+---
+
+## 74. Stage M：发送入口审计——堵住主动外发的反封号旁路缺口
+
+**实施前的代码实况核对（全量发送入口审计）**：A 线自动回复（`_send_reply`/`send_photo`/语音）已纳入统一发送栈
+（Kill-Switch + 反封号闸门 + 节流 + 记账 + 镜像，Stage G/H/I）；三端 RPA + IG/Zalo/FB/WA-Cloud webhook 已接
+`rpa_send_blocked`（Kill-Switch）。**但审出两处旁路缺口**——主动问候/唤醒/关怀/接管 的外发从这里走、却绕过急停与反封号：
+- **`TelegramSenderMixin.send_message`（sender.py）是裸 Pyrogram 调用**：被 `TelegramCompanionWorker.send`（A 线
+  受管 worker，companion_runtime 下**主动问候的主路径**）+ deferred_outbox 回落 + proactive 回落 直接调用 → 整条主动
+  外发不受 Kill-Switch/反封号约束（冻结期照发图文、爆发期不被闸门拦）。
+- **`AccountOrchestrator.send/send_media`（编排器中心派发）无任何护栏**：B 线协议号 / WhatsApp / 官方 API
+  LINE·Messenger·WhatsApp Cloud 的 worker 全经此直发裸 client → 所有经编排器的外发都旁路。
+
+**改动**（中心化一处守卫 + 补齐裸入口，纵深防御、零破坏）：
+- 新 `src/integrations/shared/send_guard.py::send_blocked(platform, account_id, *, config, registry)`：编排器发送侧
+  统一守卫——**Kill-Switch 恒查**（紧急急停绝不可绕过）+ **反封号闸门按 `companion_send_gate.enabled` 才查**
+  （复用 A/B 线同一份 `build_account_signals`，口径统一）；返回 `(blocked, reason)`，任何异常一律放行（broken guard
+  不得反噬卡死全部发送）。
+- `AccountOrchestrator.send/send_media`：发送前调 `send_blocked` → 命中返回 `{delivered: False, blocked: <reason>}`，
+  **不派发给 worker**。调用方（proactive 看 `delivered`、deferred_outbox 看 `delivered`）据此不记冷却、择机重试
+  （冻结是暂态）。一处守卫覆盖**所有平台所有 worker**（含 A 线 CompanionWorker，双层防御无害）。
+- `TelegramSenderMixin.send_message`：补齐 `_presend_blocked + _presend_pace + _postsend_record_count` + 异常 G2 封号信号
+  分级处置（与 `_send_reply` 同一套）；**不加出站镜像**（避免与编排器中心化收件箱回写重复镜像）。覆盖编排器**不持有**
+  该账号时的直发回落路径（deferred/proactive fallback）。
+- **审计确认无需改的**：messenger_rpa 的 3 处 `tg.client.send_message` 是**风控/告警发给管理员 TG**——冻结期反而**更要**
+  送达，故**有意不受 Kill-Switch 约束**（正确）。
+- **测试 +18**（send_blocked：账号/全局 KS 拦截、无标志放行、gate 关放行、gate 开拦 banned、守卫异常 failopen；
+  编排器：KS 拦 send/send_media 不派发 worker + 解除后正常派发；send_message：被护栏拦不真发、成功记账、节流、
+  无 client、RPC 异常返 False）。
+
+**实施中的再优化**：
+1. **中心化一处守卫胜过补 N 个 worker**：所有受管 worker 都过 `AccountOrchestrator.send` 这一咽喉 → 一处加守卫即覆盖
+   telegram(A+B)/whatsapp/官方三端，新 worker 自动继承，杜绝「新增发送路径忘加护栏」复发。
+2. **复用既有信号源不另造**：`send_blocked` 直接用 `build_account_signals`(registry+limiter) + `companion_send_gate.evaluate`
+   → 与 A/B 线发送闸门**同一份事实/同一套阈值**，不会出现「编排器与 A 线判定不一致」。
+3. **blocked 返回 delivered=False 而非抛**：让上层把「被冻结」当「暂未送达」自然进重试/不记冷却，语义正确且零破坏
+   （冻结解除后下个 tick 自然恢复）。
+4. **send_message 不重复镜像**：识破「编排器已中心化回写收件箱」→ mixin 只补安全/记账、不补镜像，避免出站消息在坐席台双显。
+
+**能否再优化**：① deferred/proactive **回落直发**路径目前不镜像收件箱（编排器持号时才镜像）——属既有观测盲点，可后续给
+   `send_message` 加可选镜像开关（默认关，仅回落时开）补齐；② 反封号闸门当前在编排器与 mixin 各算一次（双层），可抽成
+   单次计算缓存（微优化）；③ 可加「发送入口审计自检」启动期断言（枚举所有 send 路径是否过守卫，防回归）。均属增强。
+
+**回归（本机禁跑全量，见 Stage L 踩坑）**：护栏簇（kill_switch/ban_signal/rpa_send_guard/companion_send_gate/
+account_signals/send_guard/account_orchestrator）**84 passed / 4.5s**；叠加 selfie_wiring **45 passed**。
+
+**Stage M 收口**：「全局 Kill-Switch」「反封号闸门」终于**名副其实覆盖所有外发入口**——自动回复、主动问候、唤醒、关怀、
+接管、RPA 三端、官方 API，无一旁路。一键急停真能停下整个机群的每一条消息，反封号护栏不再被主动外发绕过。
+**下一步**：① **回落路径可选镜像**（补观测盲点）；② **发送入口自检断言**（防新增路径漏挂护栏回归）；
+③ 回到陪伴价值线：**仪式文案 few-shot 质量闭环** / **纪念日仪式**。

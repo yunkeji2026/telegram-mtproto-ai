@@ -369,15 +369,32 @@ class TelegramSenderMixin:
                 pass
 
     async def send_message(self, chat_id: int, text: str) -> bool:
+        """A 线主动外发文本（主动问候/唤醒/关怀/编排器受管 worker 都经此）。
+
+        Stage M：此前是裸 Pyrogram 调用，绕过 Kill-Switch/反封号/节流——成为旁路风控缺口
+        （主动问候经 CompanionWorker.send→本方法 直发）。现统一走与 ``_send_reply`` 同一套发送前
+        护栏 + 节流 + 记账。**不**做出站镜像（避免与编排器中心化收件箱回写重复镜像）。
+        """
         try:
+            # 统一发送前护栏：G1 Kill-Switch + N 线反封号闸门（与 _send_reply/send_photo 共用）
+            if self._presend_blocked():
+                return False
+            await self._presend_pace()
             if not self.client:
                 self.logger.error("客户端未初始化")
                 return False
             await self.client.send_message(chat_id, text)
+            self._postsend_record_count()
             self.logger.info("已发送消息到 %s: %s...", chat_id, text[:50])
             return True
         except Exception as e:
             self.logger.error("发送消息失败: %s", e)
+            # G2 封号信号自动急停：风控错误 → 分级处置（退避/暂停/封禁），best-effort
+            try:
+                from src.ops.ban_signal import handle_send_exception as _g2
+                _g2("telegram", getattr(self, "account_id", "default"), e)
+            except Exception:
+                pass
             return False
 
     async def send_photo(self, chat_id: Any, photo_path: str,
