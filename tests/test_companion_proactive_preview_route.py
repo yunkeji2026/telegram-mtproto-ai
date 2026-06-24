@@ -120,6 +120,26 @@ def test_sample_passthrough_generated_text():
     assert body["fact"] == "在备考"
 
 
+def test_sample_ritual_slot_passthrough():
+    # Stage O：slot=morning → 试发每日仪式问候，slot 透传给生成回调
+    app, client = _client()
+    captured = {}
+
+    async def _gen(cid, slot=""):
+        captured["cid"] = cid
+        captured["slot"] = slot
+        return {"generated": True, "text": "早安呀，今天也要好好的～",
+                "mode": "ritual_morning"}
+
+    app.state.companion_proactive_generate = _gen
+    r = client.post("/api/companion/proactive/sample",
+                    json={"conversation_id": "telegram:default:1", "slot": "morning"})
+    body = r.json()
+    assert body["ok"] is True and body["generated"] is True
+    assert captured["slot"] == "morning"
+    assert body["mode"] == "ritual_morning"
+
+
 def test_sample_soft_fails_when_callback_raises():
     app, client = _client()
 

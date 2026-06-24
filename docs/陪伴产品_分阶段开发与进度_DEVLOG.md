@@ -2872,3 +2872,46 @@ account_signals/send_guard/account_orchestrator）**84 passed / 4.5s**；叠加 
 要么显式登记并说明理由，否则 CI 红。安全护栏第一次有了「防回归的护栏」。
 **下一步**：① 回陪伴价值线 **仪式文案 few-shot 质量闭环** / **纪念日·节日仪式**；② **回落路径可选镜像**（补观测盲点）；
 ③ **RPA 物理输入审计**（把自检扩到 type/click 发送入口）。
+
+---
+
+## 76. Stage O：仪式文案 few-shot 质量闭环——修掉框定错配 + 接入采样评分回流
+
+**实施前的思考**：Stage L 的每日晨/晚安问候**复用**了沉默回访的发送回路与文案生成（`_gen_text`），但
+`_gen_text` 把框定**写死**为「你正在主动给一位**许久未联系**的朋友发消息」。对「每天到点的日常问候」，这个
+「久别重逢」框定会把文案带偏——生成出「好久不见 / 终于想起你」式的生分感，与「每天一句牵挂」的体验背道而驰。
+更糟：仪式问候**进不了已有的质量闭环**（试发采样 `_proactive_generate` 只支持沉默回访，无法预览/评分仪式文案），
+few-shot 反哺对 `ritual_*` 永远是空的。
+
+**改动**（框定按 mode 自适应 + 把仪式接入采样评分 + 调参建议补全）：
+- 新 `src/utils/proactive_prompt.py::build_proactive_prompt`（**确定性纯函数**）：把 prompt 组装从 main.py 闭包抽出，
+  按 `plan.mode` 给框定——`ritual_morning/night` → 「像每天都会惦记 TA 的人，发一句平常的早/晚安（不是久别重逢）」+
+  「≤30 字」；其余沿用「许久未联系」+「≤40 字」。零 IO、可单测。
+- `main.py::_gen_text` 改为调该纯函数（**真发 `_send` 与试发 `_proactive_generate` 同时受益**，框定一处修复全覆盖）；
+  few-shot 块仍按 `plan.mode` 分桶注入（`build_few_shot_block` 本就支持任意 mode，仪式样本攒够即自动反哺）。
+- `_proactive_generate(cid, slot="")` 加 `slot` 形参：`morning/night` → 走 `skill_manager.build_ritual_opener`
+  生成仪式开场并采样落库（mode=`ritual_morning/night`），运营可像沉默回访一样 👍/👎 评分 → 喂回 few-shot。
+- `/api/companion/proactive/sample` body 加可选 `slot`（透传，缺省即原沉默回访行为，**向后兼容**）。
+- `companion_sample_store::_MODE_HINTS` 补 `ritual_morning/ritual_night` 两组针对性调参建议（低好评率时给方向：
+  框定核对 / 别千篇一律 / 按活跃时段择时 / 别扰民），让 `build_tuning_advice` 对仪式 mode 也能给建议而非空。
+
+**实施中的再优化**：
+1. **prompt 组装抽纯函数**：原本埋在 main.py 闭包里、混着 inbox IO 与 AI 调用，无法单测；抽出后框定逻辑
+   8 个用例全覆盖（含「仪式不含『许久未联系』」的反向断言），框定回归直接 CI 拦。
+2. **一处修复双路径生效**：`_send`（真发）与 `_proactive_generate`（试发）共用 `_gen_text`，框定修在底层，
+   真发与试发的文案口吻天然一致——运营试发看到的就是真发会发的。
+3. **slot 透传而非新路由**：仪式试发复用现成 `/sample` 端点 + 评分 + few-shot 基建，零新增观测面，
+   闭环「能看→能评→能调」对仪式一并打通。
+
+**能否再优化**：① 真发（`_send`）目前**不采样**，质量闭环仅靠运营手动试发驱动——可加「真发按低比例自动采样」
+   让样本随真实流量自然累积；② 仪式 few-shot 目前晨/晚安分桶独立，可探索「跨槽共享温暖口吻、仅槽位措辞差异化」；
+   ③ 后台 UI 可加「仪式试发」入口（晨/晚安按钮），当前需带 `slot` 调 API。均属增强。
+
+**回归（本机禁跑全量，见 Stage L 踩坑）**：`test_proactive_prompt`（新 8）+ `test_companion_sample_store`
+（+1 仪式建议）+ `test_companion_proactive_preview_route`（+1 slot 透传）+ `test_proactive_topic` +
+`test_daily_ritual` **119 passed / 4.1s**。
+
+**Stage O 收口**：Stage L 的仪式问候从「套错框定的复用」升级为**有专属框定、且接入数据质量闭环**——晨/晚安文案
+不再有「久别重逢」的生分感，且能像沉默回访一样被试发、评分、few-shot 反哺持续打磨。
+**下一步**：① **纪念日·节日仪式扩展**（在每日仪式之上加「认识 N 天 / 生日 / 节日」的高情感节点）；
+② **真发低比例自动采样**（让质量闭环不只靠手动试发）；③ **回落路径可选镜像**（补观测盲点）。

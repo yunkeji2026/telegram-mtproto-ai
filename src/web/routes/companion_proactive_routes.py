@@ -57,8 +57,10 @@ def register_companion_proactive_routes(app, *, api_auth) -> None:
         cid = str((body or {}).get("conversation_id") or "").strip()
         if not cid:
             return {"ok": False, "generated": False, "message": "缺 conversation_id"}
+        # Stage O：slot ∈ {morning,night} → 试发每日仪式问候（晨/晚安）；空 → 沉默回访开场。
+        slot = str((body or {}).get("slot") or "").strip().lower()
         try:
-            data = await fn(cid)
+            data = await fn(cid, slot) if slot else await fn(cid)
         except Exception:
             logger.warning("companion proactive sample 失败", exc_info=True)
             return {"ok": False, "generated": False, "message": "生成失败"}

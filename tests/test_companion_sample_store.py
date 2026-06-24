@@ -102,6 +102,19 @@ def test_advice_low_mode_gets_hints():
     assert any("context_facts" in s for s in fm["suggestions"])
 
 
+def test_advice_ritual_modes_get_hints():
+    # Stage O：仪式问候（晨/晚安）低好评率时也有针对性调参建议
+    for mode in ("ritual_morning", "ritual_night"):
+        stats = {
+            "rated": 8, "up": 2, "down": 6, "up_rate": 0.25,
+            "by_mode": {mode: {"up": 2, "down": 6}},
+        }
+        adv = build_tuning_advice(stats, [], min_samples=5, low_up_rate=0.6)
+        rm = next(m for m in adv["by_mode"] if m["mode"] == mode)
+        assert rm["verdict"] == "low"
+        assert rm["suggestions"]  # 有针对性建议（非空）
+
+
 def test_advice_good_no_mode_hints():
     stats = {
         "rated": 10, "up": 9, "down": 1, "up_rate": 0.9,

@@ -2050,28 +2050,9 @@ class AIChatAssistant:
                 except Exception:
                     ctx_lines = []
                 ctx = "\n".join(ctx_lines[-6:])[:600]
-                prompt = (
-                    f"你是「{ai_name}」，正在主动给一位许久未联系的朋友发消息。\n"
-                    f"{plan['directive']}\n"
-                    f"要求：只输出要发出去的那一句话本身，口语化、温暖、自然，不超过40字，"
-                    f"不要解释、不要加引号、不要署名。\n"
-                )
-                # P1b：把其他高置信记忆作"背景"喂给模型，让开场更贴心自然，
-                # 但严格只作背景——绝不罗列、不逐条追问（与 directive 的克制一致）。
-                extra_facts = [
-                    str(f).strip()
-                    for f in (plan.get("context_facts") or [])
-                    if str(f).strip()
-                ]
-                if extra_facts:
-                    prompt += (
-                        "\n（背景：你还记得关于TA的这些事，仅用来把这一句说得更走心，"
-                        "绝不要罗列、不要逐条追问）：\n- "
-                        + "\n- ".join(extra_facts[:3]) + "\n"
-                    )
-                if ctx:
-                    prompt += f"\n（可参考你们最近的聊天，但不要复读原话）：\n{ctx}\n"
                 # few-shot 风格示范（默认关）：人工认可样本作口吻示范，反哺生成。
+                # 按当前 plan 的 mode 分桶取示范（follow_up/gentle_checkin/ritual_* 各用各的口吻）。
+                fs_block = ""
                 if _fs_enabled and sample_store is not None:
                     try:
                         from src.integrations.companion_sample_store import (
@@ -2079,23 +2060,28 @@ class AIChatAssistant:
                         )
                         rows = (sample_store.list_recent(limit=50, rating="down")
                                 + sample_store.list_recent(limit=50, rating="up"))
-                        # 按当前 plan 的 mode 分桶取示范（follow_up / gentle_checkin 各用各的）
                         fs_block = build_few_shot_block(
                             rows, max_examples=_fs_max,
-                            mode=str(plan.get("mode") or ""))
-                        if fs_block:
-                            prompt += fs_block
+                            mode=str(plan.get("mode") or "")) or ""
                     except Exception:
-                        pass
+                        fs_block = ""
+                # Stage O：prompt 组装抽成纯函数，按 mode 自适应框定（仪式问候不再套「久别重逢」）。
+                from src.utils.proactive_prompt import build_proactive_prompt
+                prompt = build_proactive_prompt(
+                    ai_name, plan, recent_context=ctx, few_shot_block=fs_block)
                 try:
                     text = await self.ai_client.chat(prompt)
                 except Exception:
                     return ""
                 return (text or "").strip()
 
-            async def _proactive_generate(conversation_id):
+            async def _proactive_generate(conversation_id, slot=""):
                 """试发采样：对某会话生成 AI 实际会说的那句话，但**不发送、不写冷却**。
-                让运营开闸前先读到真实文案（会真实调用一次 AI，有 token 成本）。"""
+                让运营开闸前先读到真实文案（会真实调用一次 AI，有 token 成本）。
+
+                Stage O：``slot`` ∈ {morning,night} 时试发**每日仪式问候**（晨/晚安），
+                走 build_ritual_opener；空则试发沉默回访开场（原行为）。两者采样同表，
+                按 mode 分桶喂 few-shot（ritual_* 与 follow_up 各学各的口吻）。"""
                 if self.ai_client is None:
                     return {"generated": False, "reason": "ai_not_ready", "message": "AI 未就绪"}
                 cid = str(conversation_id or "")
@@ -2116,17 +2102,30 @@ class AIChatAssistant:
                 except (TypeError, ValueError):
                     last_ts = 0.0
                 silent_hours = (_time.time() - last_ts) / 3600.0 if last_ts > 0 else 0.0
+                _slot = str(slot or "").strip().lower()
                 try:
-                    opener = _opener(
-                        memory_key=str(conv.get("memory_key") or ""),
-                        silent_hours=silent_hours,
-                        stage=str(conv.get("stage") or ""),
-                        intimacy=float(conv.get("intimacy") or 0.0)) or {}
+                    if _slot in ("morning", "night"):
+                        opener = self.skill_manager.build_ritual_opener(
+                            _slot,
+                            memory_key=str(conv.get("memory_key") or ""),
+                            stage=str(conv.get("stage") or ""),
+                            intimacy=float(conv.get("intimacy") or 0.0),
+                            last_emotion=str(conv.get("last_emotion") or ""),
+                            contact_key=cid) or {}
+                        silent_hours = 0.0
+                    else:
+                        opener = _opener(
+                            memory_key=str(conv.get("memory_key") or ""),
+                            silent_hours=silent_hours,
+                            stage=str(conv.get("stage") or ""),
+                            intimacy=float(conv.get("intimacy") or 0.0)) or {}
                 except Exception:
                     opener = {}
                 if not opener.get("mode") or not opener.get("directive"):
                     return {"generated": False, "reason": "not_eligible",
-                            "message": "该会话当前不构成主动开场（沉默不足/无可回访记忆）"}
+                            "message": ("该会话当前不构成仪式问候（危机抑制/关系太浅）"
+                                        if _slot in ("morning", "night")
+                                        else "该会话当前不构成主动开场（沉默不足/无可回访记忆）")}
                 plan = {
                     "conversation_id": cid,
                     "directive": str(opener.get("directive") or ""),

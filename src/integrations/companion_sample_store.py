@@ -210,6 +210,16 @@ _MODE_HINTS = {
         "转化低：核对是否只对「关系/前置已满足、只差付费」的用户发（need_unlock-only），别推够不着的",
         "打扰/反感：付费预告比免费邀约更敏感——上调 cooldown 或仅对高 bond/高活跃用户开 paid_teaser",
     ],
+    "ritual_morning": [
+        "早安太生分/像久别重逢：核对 build_proactive_prompt 走了仪式框定（非「许久未联系」）",
+        "千篇一律：让 directive 偶尔自然轻提一句 TA 在意的记忆（一句带过、别追问）",
+        "扰民：上调 min_quiet_gap_hours 或收窄 morning_window，只在用户真实活跃晨点发",
+    ],
+    "ritual_night": [
+        "晚安太敷衍/套路：收紧 directive，温柔放松、像睡前真的想起 TA",
+        "时点不对：开 personalize_active_hour，按用户历史活跃晚点择时（夜猫子晚发）",
+        "扰民：上调 min_quiet_gap_hours，人还在场就别硬道晚安",
+    ],
 }
 
 
