@@ -3087,3 +3087,51 @@ send-path 审计 **5 passed**（无新增裸发送）。
 不再等下一轮、不被意图门控漏掉。Stage Q→R→S 让「生日」形成完整自驱闭环：**主动问→即时记→当天庆**。
 **下一步**：① **主动采集扩展**（城市/称呼等高价值缺失信息，同「升级 bland 开场 + 即时回写」范式）；
 ② **节点/采集真发低比例自动采样**（进 few-shot 质量闭环）；③ **抽取结果回写 contacts 画像**（供侧栏展示）。
+
+---
+
+## 81. Stage T：主动采集扩展——把生日采集范式泛化成通用「画像采集框架」
+
+**实施前的思考**：Stage R+S 给生日做了完整闭环（主动问→即时记），但代码是生日专用的。要让 AI「越来越懂你」，
+该把这套**「升级 bland 开场顺势问 + 即时回写」**范式泛化，让新增可采集槽位（称呼/城市/…）只需登记
+一条 directive + 一个「已知判定」即可，而不是复制一遍生日的全栈。
+
+**实施中的方向优化（capture 可靠性筛选）**：原计划第二槽位选**居住地/城市**，但核对代码发现——居住地 capture
+脏（`memory_slots` 居住地正则需动词「住在X」，用户回访问裸答「上海」抓不到，比生日还难，且无强关键词靠 AI 复述兜底）。
+改选**称呼（preferred name）**：① capture **已现成**——`memory_heuristic` 早已抽「叫我X/我是X/call me/name(EN)」落库，
+**无需新增 capture 代码**（最低风险）；② 价值更高（按名字称呼是第一личное个性化）；③ 已知判定可复用
+`memory_slots.extract_slot` 的 name 槽（单一解析源）。故 Stage T = 通用框架 + 称呼槽位（capture 复用既有）。
+
+**改动**：
+- 新增纯模块 `src/utils/profile_collect.py`：`should_ask_profile_slot`（槽位无关的"该不该借这次开场问"决策，
+  Stage R 的 `should_ask_birthday` 下沉至此并保留为兼容入口）+ `ask_directive`（生日/称呼 directive 注册表，
+  关系浅时追加克制提示）+ `select_missing_slot` + `PROFILE_SLOTS` 优先级（birthday→name，一次开场只问一个）。
+- `skill_manager`：加通用 `build_profile_ask_opener(slot, …)`（mode=`ask_<slot>`、复用情绪护栏）；
+  `build_birthday_ask_opener` 改为它的兼容薄封装（Stage R 测试零改动仍绿）；加 `resolve_preferred_name`
+  （扫 episodic 用 `extract_slot` 取 name 槽，只读不写）。
+- `main.py`：把 Stage R 的生日专用 `_ba_*` 块重构成**通用 `_collect_specs` 列表**（每槽位 = enable/min_intimacy/
+  cooldown/resolver/独立冷却文件），`_opener` 升级改为**按优先级遍历择一问**；`_on_teaser_sent` 用 `mode→冷却 store` 映射
+  落盘（生日冷却文件名沿用 `companion_birthday_ask_cooldown.json`，行为完全保留）。
+- `companion_sample_store._MODE_HINTS` 加 `ask_name` 调参建议；config 加 `name_ask` 块（example 默认关、companion 预设默认开，
+  门槛 35 比生日 45 低——称呼没那么私人可早点问）。
+
+**实施中的再优化**：
+1. **方向级优化（选称呼而非城市）**：在实施中核对 capture 现状后改了第二槽位选择——选「capture 已现成且更高价值」的称呼，
+   而非「capture 脏」的城市。避免为追求覆盖面引入低质量采集（坚持「宁可漏发、绝不错发」）。
+2. **通用框架而非平行复制**：把决策逻辑下沉成 `should_ask_profile_slot`、文案下沉成 `ask_directive` 注册表、
+   main 升级改成 spec 列表遍历——杜绝 Stage R/O 反复批评过的「近重复块」，新增槽位边际成本≈一条配置 + 一个 resolver。
+3. **零回归兼容**：`build_birthday_ask_opener`/`should_ask_birthday` 保留为薄封装，生日冷却文件名/config key 全沿用，
+   Stage R 全部测试不改即绿；main 生日行为逐字保留。
+
+**能否再优化**：① 称呼 capture 仍走 intent 门控之后（不像生日 Stage S 提到门控之前）——多数用户在 onboarding 报称呼
+   意图可抽，命中率可接受；若发现漏，可比照 Stage S 加「同轮即时回写」；② 城市等「无强关键词」槽位需专门的
+   capture（AI 复述兜底 / 上一轮 ask 上下文宽松解析），属独立增强；③ 可把已知槽位覆盖率做成看板，指导该问谁。均属增强。
+
+**回归（本机禁跑全量）**：`test_profile_collect`（新增 22 纯函数）+ `test_proactive_topic`（+7 称呼/通用 opener）+
+`test_birthday` + `test_companion_sample_store` + `test_milestone_ritual` + `test_proactive_prompt` **175 passed / 4.9s**；
+`main.py` 编译通过；send-path 审计 **5 passed**。
+
+**Stage T 收口**：生日采集范式**泛化为通用画像采集框架**——AI 现在会在关系够深却缺信息时，借最没话说的时机
+**按优先级顺势补一项画像**（先生日、后称呼），新增槽位近乎零成本。能力从「会主动了解生日」升维到「会主动补全画像」。
+**下一步**：① **称呼即时回写**（比照 Stage S 把称呼也提到 intent 门控前，补上裸答兜底）；
+② **节点/采集真发低比例自动采样**（把仪式/采集真发喂进 few-shot 质量闭环，质量复利）；③ **画像覆盖率看板**。

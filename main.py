@@ -1845,17 +1845,34 @@ class AIChatAssistant:
             scan_limit = int(cfg.get("scan_limit", 200))
             min_silent_hours = float(cfg.get("min_silent_hours", 24))
 
-            # Stage R：生日主动采集——把最 bland 的 gentle_checkin 开场，在「关系够深 +
-            # 还不知道生日 + 距上次问够久」时升级成"顺势自然问一句生日"，让生日仪式转得起来。
-            _ba_cfg = (cfg.get("birthday_ask") or {})
-            _ba_on = bool(_ba_cfg.get("enabled", False))
-            _ba_min_intim = float(_ba_cfg.get("min_intimacy", 45))
-            _ba_cooldown_days = float(_ba_cfg.get("cooldown_days", 30))
-            _ba_cd = None
-            if _ba_on:
-                _ba_cd = JsonCooldownStore(
-                    Path(self.config.config_path).parent
-                    / "companion_birthday_ask_cooldown.json")
+            # Stage T：主动画像采集——把最 bland 的 gentle_checkin 开场，在「关系够深 +
+            # 该槽位未知 + 距上次问够久」时升级成"顺势自然问一句"，让缺失画像补得起来。
+            # 生日(birthday, Stage R)、称呼(name, Stage T) 共用一套通用框架，按优先级择一问。
+            _collect_specs = []
+
+            def _add_collect_spec(slot, cfg_key, resolver, default_min):
+                c = (cfg.get(cfg_key) or {})
+                if not bool(c.get("enabled", False)):
+                    return
+                _collect_specs.append({
+                    "slot": slot,
+                    "min_intim": float(c.get("min_intimacy", default_min)),
+                    "cooldown_days": float(c.get("cooldown_days", 30)),
+                    "resolve": resolver,
+                    "cd": JsonCooldownStore(
+                        Path(self.config.config_path).parent
+                        / f"companion_{slot}_ask_cooldown.json"),
+                })
+
+            _add_collect_spec(
+                "birthday", "birthday_ask",
+                self.skill_manager.resolve_birthday, 45)
+            _add_collect_spec(
+                "name", "name_ask",
+                self.skill_manager.resolve_preferred_name, 35)
+            # mode(ask_<slot>) → 冷却 store，供发出后记冷却。
+            _collect_cd_by_mode = {
+                f"ask_{s['slot']}": s["cd"] for s in _collect_specs}
 
             def _conversations():
                 try:
@@ -1933,35 +1950,40 @@ class AIChatAssistant:
                     memory_key, silent_hours=silent_hours, stage=stage,
                     intimacy=intimacy, min_silent_hours=min_silent_hours,
                     last_emotion=last_emotion, contact_key=contact_key)
-                # Stage R：bland gentle_checkin → 顺势问生日（关系深 + 生日未知 + 未在冷却）。
-                # 便宜条件先过滤再查记忆（resolve_birthday 是 IO），控成本。
-                if _ba_on and str((op or {}).get("mode") or "") == "gentle_checkin":
+                # Stage T：bland gentle_checkin → 顺势采集某缺失画像（关系深 + 槽位未知 + 未在冷却）。
+                # 按优先级择一问（一次开场只问一个，不连环逼问）；便宜条件(冷却/亲密)先过滤再查
+                # 记忆（resolve 是 IO），控成本。生日 capture 见 Stage S；称呼 capture 由 heuristic 落库。
+                if _collect_specs and str((op or {}).get("mode") or "") == "gentle_checkin":
                     try:
                         import time as _t
-                        from src.utils.birthday import should_ask_birthday
+                        from src.utils.profile_collect import should_ask_profile_slot
                         cid = str(contact_key or memory_key or "")
                         _now = _t.time()
-                        last_ask = float(
-                            (_ba_cd.snapshot().get(cid) if _ba_cd else 0) or 0)
-                        if (float(intimacy) >= _ba_min_intim
-                                and (_now - last_ask) >= _ba_cooldown_days * 86400.0):
-                            known = self.skill_manager.resolve_birthday(
-                                memory_key) is not None
-                            if should_ask_birthday(
+                        for spec in _collect_specs:
+                            last_ask = float(
+                                (spec["cd"].snapshot().get(cid)) or 0)
+                            if float(intimacy) < spec["min_intim"]:
+                                continue
+                            if (_now - last_ask) < spec["cooldown_days"] * 86400.0:
+                                continue
+                            if spec["resolve"](memory_key) is not None:
+                                continue  # 该槽位已知 → 不问
+                            if not should_ask_profile_slot(
                                     opener_mode="gentle_checkin", intimacy=intimacy,
-                                    min_intimacy=_ba_min_intim, birthday_known=known,
+                                    min_intimacy=spec["min_intim"], slot_known=False,
                                     last_ask_ts=last_ask, now=_now,
-                                    cooldown_days=_ba_cooldown_days):
-                                ask = self.skill_manager.build_birthday_ask_opener(
-                                    memory_key=memory_key, stage=stage,
-                                    intimacy=intimacy, last_emotion=last_emotion,
-                                    contact_key=contact_key)
-                                if ask.get("mode"):
-                                    ask["silent_hours"] = (op or {}).get(
-                                        "silent_hours", 0.0)
-                                    return ask
+                                    cooldown_days=spec["cooldown_days"]):
+                                continue
+                            ask = self.skill_manager.build_profile_ask_opener(
+                                spec["slot"], memory_key=memory_key, stage=stage,
+                                intimacy=intimacy, last_emotion=last_emotion,
+                                contact_key=contact_key)
+                            if ask.get("mode"):
+                                ask["silent_hours"] = (op or {}).get(
+                                    "silent_hours", 0.0)
+                                return ask
                     except Exception:
-                        self.logger.debug("[proactive] 生日采集升级跳过", exc_info=True)
+                        self.logger.debug("[proactive] 画像采集升级跳过", exc_info=True)
                 return op
 
             cd_path = Path(self.config.config_path).parent / "companion_proactive_cooldown.json"
@@ -2249,15 +2271,16 @@ class AIChatAssistant:
 
             def _on_teaser_sent(plan) -> None:
                 _mode = str((plan or {}).get("mode") or "")
-                # Stage R：生日采集发出 → 记冷却（cooldown_days 内不再问同一人，避免反复打听）。
-                if _mode == "ask_birthday" and _ba_cd is not None:
+                # Stage T：画像采集发出 → 记对应槽位冷却（cooldown_days 内不再问同一人，避免反复打听）。
+                _collect_cd = _collect_cd_by_mode.get(_mode)
+                if _collect_cd is not None:
                     try:
                         import time as _t
                         _cid = str((plan or {}).get("conversation_id") or "")
                         if _cid:
-                            _ba_cd.mark(_cid, _t.time())
+                            _collect_cd.mark(_cid, _t.time())
                     except Exception:
-                        self.logger.debug("[proactive] 生日采集冷却落盘失败", exc_info=True)
+                        self.logger.debug("[proactive] 画像采集冷却落盘失败", exc_info=True)
                 # Stage 3：付费预告（story_teaser）发出即记一条漏斗事件，供归因转化率。
                 if _mode != "story_teaser":
                     return

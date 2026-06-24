@@ -88,25 +88,14 @@ def should_ask_birthday(
 ) -> bool:
     """是否该借这次主动开场顺势问 TA 生日（确定性纯函数，Stage R）。
 
-    只在**最没话说的 bland 开场**（``gentle_checkin``，即无可回访记忆的温和问候）上升级——
-    有记忆钩子时回访记忆更有价值，不打断。其余门槛：关系够深、生日未知、距上次问足够久。
+    Stage T：生日只是通用画像采集的一个槽位，逻辑下沉到 ``profile_collect.should_ask_profile_slot``，
+    本函数保留为兼容入口（生日 = slot ``birthday``）。
     """
-    if str(opener_mode or "") != "gentle_checkin":
-        return False
-    if birthday_known:
-        return False
-    try:
-        if float(intimacy) < float(min_intimacy):
-            return False
-    except (TypeError, ValueError):
-        return False
-    try:
-        last = float(last_ask_ts or 0)
-    except (TypeError, ValueError):
-        last = 0.0
-    if last > 0 and (float(now) - last) < float(cooldown_days) * 86400.0:
-        return False
-    return True
+    from src.utils.profile_collect import should_ask_profile_slot
+    return should_ask_profile_slot(
+        opener_mode=opener_mode, intimacy=intimacy, min_intimacy=min_intimacy,
+        slot_known=birthday_known, last_ask_ts=last_ask_ts, now=now,
+        cooldown_days=cooldown_days)
 
 
 def birthday_from_turn(user_msg: Any, reply: Any) -> Optional[Tuple[int, int]]:

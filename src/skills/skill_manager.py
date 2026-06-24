@@ -3053,6 +3053,33 @@ class SkillManager(LoggerMixin):
             self.logger.debug("resolve_birthday failed", exc_info=True)
         return None
 
+    def build_profile_ask_opener(
+        self,
+        slot: str,
+        *,
+        memory_key: str = "",
+        stage: str = "",
+        intimacy: float = 0.0,
+        last_emotion: str = "",
+        contact_key: str = "",
+    ) -> Dict[str, Any]:
+        """主动采集某画像槽位（生日 / 称呼 / …）的开场 directive（Stage T 通用版）。
+
+        仅在情绪护栏正常（非危机/非低落）时问；危机/低落不合时宜 → 返回空（交回原开场）。
+        门槛（关系够深 / 槽位未知 / 冷却）由上层 ``should_ask_profile_slot`` 决定，本方法只产文案。
+        ``mode`` 为 ``ask_<slot>``（如 ask_birthday / ask_name）。
+        """
+        from src.utils.profile_collect import ask_directive
+        s = str(slot or "").strip().lower()
+        directive = ask_directive(s, stage=stage)
+        if not directive:  # 未登记的槽位
+            return {"mode": "", "directive": "", "fact": ""}
+        gate = self._proactive_emotion_gate(memory_key, last_emotion)
+        if gate != "":  # block(危机) 或 soft(低落) 都不主动采集
+            return {"mode": "", "directive": "", "fact": ""}
+        return {"mode": f"ask_{s}", "directive": directive, "fact": "",
+                "context_facts": []}
+
     def build_birthday_ask_opener(
         self,
         *,
@@ -3062,22 +3089,33 @@ class SkillManager(LoggerMixin):
         last_emotion: str = "",
         contact_key: str = "",
     ) -> Dict[str, Any]:
-        """主动采集生日的开场 directive（Stage R）——让生日仪式「转得起来」。
+        """主动采集生日开场（Stage R）——Stage T 起为 build_profile_ask_opener('birthday') 的兼容入口。"""
+        return self.build_profile_ask_opener(
+            "birthday", memory_key=memory_key, stage=stage, intimacy=intimacy,
+            last_emotion=last_emotion, contact_key=contact_key)
 
-        仅在情绪护栏正常（非危机/非低落）时问；危机/低落时不合时宜 → 返回空（交回原开场）。
-        门槛（关系够深 / 生日未知 / 冷却）由上层 ``should_ask_birthday`` 决定，本方法只产文案。
+    def resolve_preferred_name(self, memory_key: str):
+        """从某用户 episodic 记忆里扫出 TA 希望的称呼/名字；扫不到 → None（Stage T）。
+
+        复用 ``memory_slots.extract_slot``（单值身份槽 name）解析既有记忆事实——称呼 capture
+        早已由 ``memory_heuristic``（叫我X/我是X/call me/my name）落库，这里只读不写。
         """
-        gate = self._proactive_emotion_gate(memory_key, last_emotion)
-        if gate != "":  # block(危机) 或 soft(低落) 都不问生日
-            return {"mode": "", "directive": "", "fact": ""}
-        directive = (
-            "主动开场：好久没聊了，先自然轻松地问候一句；再像朋友间随口好奇那样，"
-            "顺势问一句还不知道TA生日是哪天呢——别像填表或查户口，问完顺其自然，"
-            "TA不想说也别追。")
-        if str(stage or "").strip().lower() in ("initial", "warming"):
-            directive += "（关系还偏新：更随意带过、别显得刻意打听。）"
-        return {"mode": "ask_birthday", "directive": directive, "fact": "",
-                "context_facts": []}
+        store = getattr(self, "_episodic_store", None)
+        key = str(memory_key or "").strip()
+        if not store or not key or not hasattr(store, "list_rows"):
+            return None
+        try:
+            from src.utils.memory_slots import SLOT_NAME, extract_slot
+            rows = store.list_rows(prefix=key, limit=80, source="user_stated") or []
+            if not rows:
+                rows = store.list_rows(prefix=key, limit=80) or []
+            for r in rows:
+                slot = extract_slot((r or {}).get("content") or "")
+                if slot and slot[0] == SLOT_NAME and slot[1]:
+                    return slot[1]
+        except Exception:
+            self.logger.debug("resolve_preferred_name failed", exc_info=True)
+        return None
 
     def episodic_inferred_counts(self) -> Dict[str, int]:
         """R17：全库 AI 推断计数（pending 待确认 / total），供校正质量看板。"""

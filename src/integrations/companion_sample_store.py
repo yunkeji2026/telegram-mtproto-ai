@@ -205,6 +205,11 @@ _MODE_HINTS = {
         "太频繁/被反感：上调 birthday_ask.cooldown_days 或 min_intimacy，只对够熟的人问",
         "不自然：放在 gentle_checkin（最没话说时）顺势问，别硬塞进有记忆钩子的回访",
     ],
+    "ask_name": [
+        "问得太正式/像注册：收紧 directive，随口问'喜欢我怎么叫你'，别要全名/真实姓名",
+        "太频繁/被反感：上调 name_ask.cooldown_days 或 min_intimacy，只对够熟的人问",
+        "不自然：放在 gentle_checkin（最没话说时）顺势问，别硬塞进有记忆钩子的回访",
+    ],
     "story_invite": [
         "邀约太硬/像广告：收紧 directive，先共情再顺势提议，别一上来报剧情名",
         "续作召回核对前传共同经历是否被自然提起（satisfied_prerequisite/ending_memory）",

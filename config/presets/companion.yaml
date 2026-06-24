@@ -91,6 +91,10 @@ companion:
       enabled: true                  # ★ 陪伴模式默认开：让生日仪式"会主动了解"
       min_intimacy: 45               # 关系够深才问（问生日更私人，门槛更高）
       cooldown_days: 30              # 问过这么多天内不再问同一人
+    name_ask:
+      enabled: true                  # ★ 陪伴模式默认开：主动了解"该怎么称呼TA"
+      min_intimacy: 35               # 关系略熟即可问（称呼没那么私人，门槛更低）
+      cooldown_days: 30              # 问过这么多天内不再问同一人
     # Stage L：每日仪式感主动问候（晨安 / 晚安）——日活留存核心钩子，与沉默回访互补。
     #   时段驱动、每日每档去重；按用户历史活跃时段择时（早起的人早收、夜猫子晚收）。
     daily_ritual:
