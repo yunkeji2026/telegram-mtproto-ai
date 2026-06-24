@@ -281,3 +281,31 @@ def register_desktop_routes(app, *, api_auth) -> None:
         except Exception:
             logger.debug("[desktop] selector-profiles 读取失败", exc_info=True)
             return {"ok": True, "version": "empty", "profiles": {}}
+
+    @app.post("/api/desktop/inject-health")
+    async def api_desktop_inject_health(request: Request, _=Depends(api_auth)):
+        """桌面壳注入健康信标（D1b）：收注入脚本的「逐选择器命中」上报，存最新一条。
+
+        注入在状态变化或每 30s 心跳上报；后端据此让运营看板区分某账号是注入正常 / 输入框失配 /
+        气泡失配 / 未登录。失配多半是官方网页改版，可走 D1 覆写层热修。
+        body: {platform, account_id, supported, composer, bubbles, chatOpen, selectors{...}, ...}
+        返回: {ok, status}
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        from src.web.desktop_inject_health import get_inject_health_store
+        rec = get_inject_health_store().record(body or {})
+        return {"ok": True, "status": rec.get("status")}
+
+    @app.get("/api/desktop/inject-health")
+    async def api_desktop_inject_health_list(_=Depends(api_auth)):
+        """桌面壳注入健康看板数据：各内嵌账号最新状态 + 概览计数。
+
+        超过 90s 未上报标记 ``stale``（注入可能已停摆/页面被关）。
+        返回: {ok, summary:{ok,mismatch,no_chat,...,total}, accounts:[{platform,account_id,status,stale,...}]}
+        """
+        from src.web.desktop_inject_health import get_inject_health_store
+        store = get_inject_health_store()
+        return {"ok": True, "summary": store.summary(), "accounts": store.latest(stale_after=90.0)}

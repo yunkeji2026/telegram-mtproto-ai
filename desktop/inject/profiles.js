@@ -398,6 +398,25 @@ function resolveProfile(platform, overlay) {
   return patch ? applySelectorOverlay(base, patch) : base;
 }
 
+// ── D1b 选择器健康探针 ───────────────────────────────────────────────────────
+// 逐个关键选择器探测 DOM 是否命中 → {bubble, composer, sendBtn, peerTitle} 布尔表。
+// 供注入健康信标上报：官方改版导致某选择器失配时，运营能精确看到「IG composer 失配」而非笼统「坏了」。
+// doc 可显式传入（单测）；缺省读全局 document（preload 运行时）。容错：任何异常视为未命中。
+function selectorHealth(profile, doc) {
+  const d = doc || (typeof document !== "undefined" ? document : null);
+  function probe(sel) {
+    if (!sel || !d || !d.querySelector) return false;
+    try { return !!d.querySelector(sel); } catch (e) { return false; }
+  }
+  const p = profile || {};
+  return {
+    bubble: probe(p.bubble),
+    composer: probe(p.composer),
+    sendBtn: probe(p.sendBtn),
+    peerTitle: probe(p.peerTitle),
+  };
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     cleanVisibleText,
@@ -405,6 +424,7 @@ if (typeof module !== "undefined" && module.exports) {
     makeGenericProfile,
     applySelectorOverlay,
     resolveProfile,
+    selectorHealth,
     BUILTIN_PROFILES,
     OVERLAYABLE_KEYS,
   };

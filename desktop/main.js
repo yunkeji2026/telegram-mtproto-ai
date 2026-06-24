@@ -149,6 +149,16 @@ ipcMain.handle("desktop:selector-profiles", async () => {
   }
 });
 
+// 注入健康信标（D1b）：注入脚本把「逐选择器命中」状态上报后端，供运营看板判断
+// 哪个账号/平台的注入因官方改版失配（而非笼统「坏了」）。后端不可达静默忽略。
+ipcMain.handle("desktop:inject-health", async (_e, payload) => {
+  try {
+    return await backendPost("/api/desktop/inject-health", payload || {});
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
 ipcMain.handle("desktop:translate", async (_e, { text, target_lang }) => {
   try {
     return { ok: true, text: await backendTranslate(String(text || ""), target_lang) };

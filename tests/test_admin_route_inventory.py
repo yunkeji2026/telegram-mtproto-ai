@@ -448,6 +448,8 @@ _BASELINE = """
 /api/desktop/guard-check	POST
 /api/desktop/ingest	POST
 /api/desktop/selector-profiles	GET
+/api/desktop/inject-health	POST
+/api/desktop/inject-health	GET
 /api/telegram/log-tail	GET
 /api/telegram/recent-contacts	GET
 /api/telegram/settings	GET

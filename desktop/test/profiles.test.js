@@ -7,6 +7,7 @@ const {
   makeGenericProfile,
   applySelectorOverlay,
   resolveProfile,
+  selectorHealth,
   BUILTIN_PROFILES,
   OVERLAYABLE_KEYS,
 } = require("../inject/profiles.js");
@@ -101,6 +102,33 @@ ok("resolve unsupported", resolveProfile("nope", null).supported === false);
 ["bubble", "composer", "sendBtn", "canIngest"].forEach((k) =>
   ok(`overlayable 含 ${k}`, OVERLAYABLE_KEYS.indexOf(k) >= 0)
 );
+
+// ── D1b selectorHealth：逐选择器命中探针 ─────────────────────────────────────
+function fakeDoc(present) {
+  return { querySelector: (sel) => (present.indexOf(sel) >= 0 ? {} : null) };
+}
+const prof = makeGenericProfile({
+  platform: "demo2",
+  bubble: ".b",
+  bubbleText: ".t",
+  composer: ".c",
+  sendBtn: ".s",
+  peerTitle: ".p",
+});
+let h = selectorHealth(prof, fakeDoc([".b", ".c", ".s", ".p"]));
+ok("health 全命中 bubble", h.bubble === true);
+ok("health 全命中 composer", h.composer === true);
+ok("health 全命中 sendBtn", h.sendBtn === true);
+ok("health 全命中 peerTitle", h.peerTitle === true);
+h = selectorHealth(prof, fakeDoc([".b", ".p"]));
+ok("health composer 失配", h.composer === false);
+ok("health sendBtn 失配", h.sendBtn === false);
+ok("health bubble 仍命中", h.bubble === true);
+// 空选择器 / 探针异常 → 一律未命中（不抛）
+const empty = selectorHealth({ bubble: "", composer: null }, fakeDoc([]));
+ok("空选择器视为未命中", empty.bubble === false && empty.composer === false);
+const thrower = { querySelector: () => { throw new Error("bad selector"); } };
+ok("探针异常吞掉", selectorHealth(prof, thrower).bubble === false);
 
 // ── webview-ua：多平台 Chrome UA 伪装判定 ────────────────────────────────────
 ok("ua whatsapp", needsChromeUa("whatsapp") === true);

@@ -28,6 +28,7 @@ const {
   detectPlatform,
   BUILTIN_PROFILES,
   applySelectorOverlay,
+  selectorHealth,
 } = require("./profiles.js");
 
 const PLATFORM = detectPlatform();
@@ -293,6 +294,8 @@ function findComposer() {
 }
 let _statusAt = 0;
 let _lastStatusSig = "";
+let _healthBeaconAt = 0;
+const _HEALTH_HEARTBEAT_MS = 30000; // 状态不变也每 30s 发一次心跳，让后端能区分「健康」与「停摆」
 function reportInjectStatus(bubbles) {
   const now = Date.now();
   if (now - _statusAt < 2500) return; // 2.5s 节流
@@ -304,21 +307,41 @@ function reportInjectStatus(bubbles) {
   const composer = !!findComposer();
   const peer = currentPeerName();
   const chatOpen = !!peer || count > 0;
-  // 状态指纹：仅在变化时上报，避免刷屏
-  const sig = (composer ? "1" : "0") + "|" + (count > 0 ? "1" : "0") + "|" + (chatOpen ? "1" : "0");
-  if (sig === _lastStatusSig) return;
-  _lastStatusSig = sig;
+  // D1b：逐选择器健康（哪一个失配，便于精确定位官方改版）
+  let selectors = { bubble: count > 0, composer, sendBtn: false, peerTitle: !!peer };
   try {
-    ipcRenderer.sendToHost("inject-status", {
-      platform: PLATFORM,
-      account_id: ACCOUNT_ID,
-      supported: !!PROFILE.supported,
-      composer,
-      bubbles: count,
-      chatOpen,
-    });
-  } catch (e) {
-    /* 非 webview 宿主环境，忽略 */
+    if (selectorHealth) selectors = selectorHealth(PROFILE);
+  } catch (e) { /* 探针异常：用上面的粗粒度兜底 */ }
+  const payload = {
+    platform: PLATFORM,
+    account_id: ACCOUNT_ID,
+    supported: !!PROFILE.supported,
+    generic: !!PROFILE.generic,
+    can_ingest: !!PROFILE.canIngest,
+    composer,
+    bubbles: count,
+    chatOpen,
+    selectors,
+  };
+  // 状态指纹：渲染层仅在变化时刷新，避免刷屏
+  const sig = (composer ? "1" : "0") + "|" + (count > 0 ? "1" : "0") + "|" + (chatOpen ? "1" : "0");
+  const changed = sig !== _lastStatusSig;
+  if (changed) {
+    _lastStatusSig = sig;
+    try {
+      ipcRenderer.sendToHost("inject-status", payload);
+    } catch (e) {
+      /* 非 webview 宿主环境，忽略 */
+    }
+  }
+  // 后端健康信标：状态变化即报，否则每 30s 心跳一次（让运营看板能判断注入是否还活着 + 哪个选择器失配）
+  if (changed || now - _healthBeaconAt >= _HEALTH_HEARTBEAT_MS) {
+    _healthBeaconAt = now;
+    try {
+      ipcRenderer.invoke("desktop:inject-health", payload);
+    } catch (e) {
+      /* 后端不可达：忽略，下次心跳重试 */
+    }
   }
 }
 

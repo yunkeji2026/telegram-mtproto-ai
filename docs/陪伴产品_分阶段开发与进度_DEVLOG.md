@@ -3189,3 +3189,43 @@ send-path 审计 **5 passed**（无新增裸发送）。
 官方改版不再需重发桌面包，比竞品多一层运维韧性。能力对标竞品「多平台内嵌登录+注入」并在可维护性上反超。
 **下一步**：① **D1b** 韧性选择器 + 注入健康信标；② 用真号现场校准四平台选择器并经覆写层打开 `canIngest`；
 ③ **D3** 每账号指纹注入；④ **D4** 双向收件箱桥 + 受控 autopilot（接 send-gate/kill-switch）。
+
+---
+
+## 83. Stage D1b：注入健康信标——失配可观测（哪个选择器坏了，而非笼统「坏了」）
+
+**实施前的思考**：D1+D2 让六平台能内嵌，但通用档选择器是 best-effort，官方一改版就失配。D1 已给了「热更新通道」，
+但**缺一只眼睛**：运营不知道哪个账号、哪个选择器失配了，热更新就成了「盲修」。D1b 补上可观测闭环——
+让注入把**逐选择器命中**实时上报后端，运营看板一眼看到「IG 的 ig3 号 composer 失配」，再走 D1 覆写层精准热修。
+
+**改动**：
+- `profiles.js`：加纯函数 `selectorHealth(profile, doc)`——逐个探测 `bubble/composer/sendBtn/peerTitle` 是否命中
+  （doc 可注入，便于单测；异常吞掉视为未命中）。
+- `tg-inject.js`：`reportInjectStatus` 升级——除给壳层状态条上报外，计算 `selectorHealth` 并**发后端健康信标**
+  （`desktop:inject-health`）：状态变化即报，否则**每 30s 心跳一次**（让后端能区分「健康稳定」与「注入停摆」）；
+  上报体加 `generic/can_ingest/selectors{}` 细节。
+- `main.js`：加 `desktop:inject-health` IPC → `POST /api/desktop/inject-health`。
+- 后端：新增 `src/web/desktop_inject_health.py`——`classify_inject_health`（纯函数，分类
+  `ok/mismatch_composer/mismatch_bubble/no_chat/unsupported`，**与渲染层 `deriveInjectState` 同口径**）+
+  线程安全 `InjectHealthStore`（每账号留最新一条、ts 倒序、>90s 标 `stale`、概览计数、软上限淘汰最旧）。
+  加 `POST/GET /api/desktop/inject-health`（录入 / 看板数据），路由清单基线同步。
+
+**实施中的再优化（含两处自检修复）**：
+1. **心跳而非纯变化上报**：只在 sig 变化上报会导致「健康稳定」时 ts 永远停在首次 → 看板分不清「一直好」和「已停摆」。
+   加 30s 心跳兜底，`stale` 判定才有意义。
+2. **分类口径与前端对齐**：后端 `classify_inject_health` 刻意复用 `inject-status.js::deriveInjectState` 的判定顺序，
+   保证壳层状态条与后端看板**口径一致**，不出现「条说正常、看板说失配」的割裂。
+3. **自检发现并修两处 bug**（测试驱动）：① `not rec` 把**空 dict** 误判 unsupported（空字典 falsy）→ 改 `rec is None`；
+   ② `latest(stale_after=…)` **就地给存储里的记录加 `stale` 字段**污染后续读取 → 改返回浅拷贝。两处都加了回归断言。
+
+**能否再优化**：① 信标目前只录最新态，无趋势/告警（可加「失配持续 N 分钟→告警」与历史曲线）；
+② 看板 UI 未做（数据已就绪，可挂到 rpa-overview 或新页）；③ 可把 `selectors` 细节回流到壳层状态条 tooltip。均属增强。
+
+**回归**：`desktop npm test` **112 passed**（`profiles.test.js` +9 → 70，含 selectorHealth 命中/失配/异常吞掉）；
+`tests/test_desktop_inject_health.py`（新增 14：分类 6 + 存储 8）+ `test_desktop_selectors` + `test_admin_route_inventory`
+（清单含 2 新端点）**30 passed**。
+
+**Stage D1b 收口**：内嵌六平台从「能用、坏了能热修」升到「**坏了能被发现、能定位到哪个选择器**」——
+热更新闭环真正跑通：失配 → 信标上报 → 看板定位 → D1 覆写层热修，全程无需重发桌面包。
+**下一步**：① 用真号现场校准四平台选择器并打开 `canIngest`；② 失配告警 + 看板 UI；
+③ **D3** 每账号指纹注入；④ **D4** 双向收件箱桥 + 受控 autopilot。
