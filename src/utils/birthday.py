@@ -109,6 +109,28 @@ def should_ask_birthday(
     return True
 
 
+def birthday_from_turn(user_msg: Any, reply: Any) -> Optional[Tuple[int, int]]:
+    """从一轮对话（用户消息 + AI 回复）里抽生日 (月,日)，闭合「问→答→记」（Stage S）。
+
+    两路自包含、无需跨边界状态：
+    1. **用户原话**含生日（"我生日是3月5日"）→ 直接抽。
+    2. **AI 回复**含生日确认（"记住啦，你3月5号生日"）→ 抽 AI 回复——这覆盖了用户只回一个
+       裸日期（"3月5号"，无关键词不被路1命中）、而 AI 在本轮自然复述确认的情况。
+
+    两路都要求**生日关键词**：AI 的「提问」回复（"你生日哪天呀？"）无日期 → 不会误抽；
+    只有「确认」回复（带日期）才命中——天然区分问 vs 答，零误报。
+    """
+    bd = extract_birthday(user_msg)
+    if bd is not None:
+        return bd
+    return extract_birthday(reply)
+
+
+def birthday_fact_text(month: int, day: int) -> str:
+    """规范化生日记忆文案：``用户的生日：M月D日``（含关键词，可被 extract_birthday 复解析）。"""
+    return f"用户的生日：{int(month)}月{int(day)}日"
+
+
 def _is_leap(year: int) -> bool:
     return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
 
@@ -132,4 +154,10 @@ def is_birthday_today(birthday: Any, now: float) -> bool:
     return False
 
 
-__all__ = ["extract_birthday", "is_birthday_today", "should_ask_birthday"]
+__all__ = [
+    "extract_birthday",
+    "is_birthday_today",
+    "should_ask_birthday",
+    "birthday_from_turn",
+    "birthday_fact_text",
+]

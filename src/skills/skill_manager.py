@@ -2470,6 +2470,34 @@ class SkillManager(LoggerMixin):
                 "[episodic] schedule failed: no running loop user=%s", user_id,
             )
 
+    async def _capture_birthday_fact(
+        self, user_id: str, user_msg: str, reply: str, chat_id: Any,
+        platform: str = "",
+    ) -> None:
+        """Stage S：本轮若出现用户生日（原话或 AI 确认）→ 规范化落库为 user_stated 事实。
+
+        幂等：已知且相同 → 跳过；未知或**不同（用户更正）**→ 写入新规范事实。
+        复用 ``extract_birthday``（关键词门控）作单一解析源，``resolve_birthday`` 复解析。
+        """
+        if not self._episodic_store:
+            return
+        from src.utils.birthday import birthday_fact_text, birthday_from_turn
+        bd = birthday_from_turn(user_msg, reply)
+        if bd is None:
+            return
+        key = self._episodic_storage_key(user_id, chat_id, platform)
+        if not key:
+            return
+        try:
+            if self.resolve_birthday(key) == bd:
+                return  # 已知且一致，不重复落库
+        except Exception:
+            pass
+        fact = birthday_fact_text(bd[0], bd[1])
+        rid = self._episodic_store.add_fact(key, fact, "heuristic", source="user_stated")
+        await self._episodic_patch_embedding(rid, fact)
+        self.logger.info("[episodic] birthday captured user=%s %s", user_id, fact)
+
     async def _episodic_memory_extract_async(
         self, user_id: str, user_msg: str, reply: str, intent: str, chat_id: Any,
         platform: str = "",  # S5
@@ -2480,6 +2508,12 @@ class SkillManager(LoggerMixin):
                 user_id, intent,
             )
             return
+        # Stage S：生日即时回写——**独立于 intent/长度门控**，收到即解析落库，闭合 Stage R
+        # 的采集环（问→答→立刻记住→当天庆）。即便本轮意图不可抽取，也不漏掉用户主动报的生日。
+        try:
+            await self._capture_birthday_fact(user_id, user_msg, reply, chat_id, platform)
+        except Exception:
+            self.logger.debug("[episodic] birthday capture skipped", exc_info=True)
         ex = (self._memory_cfg.get("extract") or {})
         if not should_extract_intent(intent, ex):
             self.logger.info(

@@ -5,6 +5,8 @@ from __future__ import annotations
 import time
 
 from src.utils.birthday import (
+    birthday_fact_text,
+    birthday_from_turn,
     extract_birthday,
     is_birthday_today,
     should_ask_birthday,
@@ -115,3 +117,76 @@ def test_ask_ok_after_cooldown():
 
 def test_ask_bad_intimacy_safe():
     assert _ask(intimacy="x") is False
+
+
+# ── birthday_from_turn / birthday_fact_text（Stage S）─────────────────────
+
+def test_turn_from_user_msg():
+    assert birthday_from_turn("我生日是3月5日", "好的~") == (3, 5)
+
+
+def test_turn_from_ai_confirm_reply():
+    # 用户回裸日期（无关键词，路1不命中）；AI 回复确认（含关键词+日期）→ 路2命中
+    assert birthday_from_turn("3月5号", "记住啦，你3月5号生日！") == (3, 5)
+
+
+def test_turn_ask_reply_no_false_positive():
+    # AI 的「提问」回复无日期 → 不会把用户无关日期误当生日
+    assert birthday_from_turn("3月5号有个会", "顺便问下你生日哪天呀？") is None
+
+
+def test_turn_none_when_no_birthday():
+    assert birthday_from_turn("今天天气真好", "是呀~") is None
+
+
+def test_fact_text_roundtrips():
+    txt = birthday_fact_text(3, 5)
+    assert "生日" in txt
+    assert extract_birthday(txt) == (3, 5)  # 规范文案能被复解析（resolve_birthday 可用）
+
+
+# ── _capture_birthday_fact（Stage S，集成）────────────────────────────────
+
+import logging as _logging  # noqa: E402
+
+from src.skills.skill_manager import SkillManager as _SMcls  # noqa: E402
+from src.utils.episodic_memory_store import EpisodicMemoryStore  # noqa: E402
+
+
+class _CapSM:
+    _episodic_storage_key = _SMcls._episodic_storage_key
+    resolve_birthday = _SMcls.resolve_birthday
+    _capture_birthday_fact = _SMcls._capture_birthday_fact
+
+    def __init__(self, store):
+        self._episodic_store = store
+        self._memory_cfg = {"scope": "user"}
+        self._cpi = None
+        self.logger = _logging.getLogger("test_capture")
+
+    async def _episodic_patch_embedding(self, rid, fact):
+        return None
+
+
+async def test_capture_writes_birthday_fact(tmp_path):
+    store = EpisodicMemoryStore(tmp_path / "epi.db")
+    sm = _CapSM(store)
+    await sm._capture_birthday_fact("u1", "我生日是3月5日", "好的~", chat_id="u1")
+    assert sm.resolve_birthday("u1") == (3, 5)
+
+
+async def test_capture_idempotent_same_birthday(tmp_path):
+    store = EpisodicMemoryStore(tmp_path / "epi.db")
+    sm = _CapSM(store)
+    await sm._capture_birthday_fact("u1", "我生日是3月5日", "", chat_id="u1")
+    await sm._capture_birthday_fact("u1", "对，3月5日生日", "", chat_id="u1")
+    rows = [r for r in store.list_rows(prefix="u1", limit=50)
+            if "生日" in str(r.get("content") or "")]
+    assert len(rows) == 1  # 相同生日不重复落库
+
+
+async def test_capture_noop_when_no_birthday(tmp_path):
+    store = EpisodicMemoryStore(tmp_path / "epi.db")
+    sm = _CapSM(store)
+    await sm._capture_birthday_fact("u1", "今天天气好", "是呀", chat_id="u1")
+    assert sm.resolve_birthday("u1") is None
