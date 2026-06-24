@@ -58,6 +58,27 @@ def send_url(phone_number_id: str) -> str:
     return f"{GRAPH_BASE}/{phone_number_id}/messages"
 
 
+def _fail(platform: str, status: int, raw_body: str) -> Dict[str, Any]:
+    """构造统一失败结果：分类 error_kind（窗口/token/限速…），不再只丢不透明 HTTP 串。"""
+    parsed: Any = None
+    try:
+        parsed = json.loads(raw_body)
+    except Exception:
+        parsed = None
+    out: Dict[str, Any] = {"ok": False, "error": f"HTTP {status}: {raw_body[:200]}"}
+    try:
+        from src.integrations.shared.official_send_error import (
+            classify_official_send_error,
+        )
+        info = classify_official_send_error(
+            platform, status=status, body=parsed, error_text=raw_body)
+        out["error_kind"] = info["kind"]
+        out["retriable"] = info["retriable"]
+    except Exception:
+        out["error_kind"] = "unknown"
+    return out
+
+
 def verify_wa_signature(body: bytes, signature_header: str, app_secret: str) -> bool:
     """校验 X-Hub-Signature-256（'sha256=<hex>'）。空 secret 硬拒。"""
     if not app_secret or not signature_header:
@@ -113,7 +134,7 @@ async def wa_send_text(
                 body = await resp.text()
                 if resp.status != 200:
                     logger.warning("WA send HTTP %s: %s", resp.status, body[:500])
-                    return {"ok": False, "error": f"HTTP {resp.status}: {body[:200]}"}
+                    return _fail("whatsapp", resp.status, body)
                 try:
                     data = json.loads(body)
                 except Exception:

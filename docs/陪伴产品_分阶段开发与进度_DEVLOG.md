@@ -262,6 +262,12 @@ python -m pytest tests/ -n auto -q --timeout=120 --timeout-method=thread
 - 2026-06-19：Phase K ✅ C 端变现·月度消息配额软限（`message_quota_status`/`plan_included_messages` + 用量看板卡片，+9 测试，全量 5257 passed）——本月消息量 vs 套餐含量软提示（ok/warn/over），软限不硬切走超额计费
 - 2026-06-19：Phase I ✅ 媒体 AI·官方入站媒体可见化（`media_placeholder`/`mirror_inbound_media` + LINE/WA/FB 非文字分支镜像占位，+13 测试，全量 5270 passed）——客户端层（faceswap/voice/tts）早已成熟待 GPU；本轮补「坐席台看见客户发的图片/语音」
   （`official_api_worker.py`，+12 测试）。主管道可经官方 API 发；orchestrator 回归 224 passed。
+- 2026-06-24：**Phase H2 ✅ 官方通道发送错误统一分类 + IG 24h 窗口回退（可上线收口）**
+  - **背景（回正轨·用户选"多平台官方通道收口"）**：盘点发现 Messenger 早有 `fb_send_with_window_fallback`（24h 窗外降级 MESSAGE_TAG 重发），但 **WhatsApp/Instagram/Zalo 零窗口感知**——窗外/token 失效/限速失败都被打包成不透明 `"HTTP 4xx: ..."` 串**默默丢**，回复没送达却无人知、无法分流。陪伴产品有延迟/主动回复，窗口外静默失败是真·生产隐患。
+  - **改动**：① 新建纯模块 `src/integrations/shared/official_send_error.py::classify_official_send_error`——跨平台错误归一表（window_expired/invalid_token/rate_limited/recipient_unavailable/unsupported/transient），按各家 error.code（WA 131047… / Graph code+subcode 2534022 / Zalo -213…）+ 文本关键词 + HTTP 状态三级兜底，设计同 `ban_signal.classify`（纯函数、零网络、可注入假响应单测）。② wa/ig/zalo 三个 send 助手失败路径透出 `error_kind`+`retriable`（additive，旧测全过）。③ `OfficialApiWorker.send` 统一 `_result()`，失败时透出 `error_kind`（供 pipeline/可观测分流，不再当"没发出"）。④ `ig_send_with_window_fallback`（opt-in `instagram.human_agent_fallback`，默认关）——窗外降级 MESSAGE_TAG=HUMAN_AGENT 重发，与 Messenger 对称（HUMAN_AGENT 需账号权限，未开通时回退仍失败但已可观测）。
+  - **再优化**：① 选**统一分类器**而非给每端各写一套窗口判断——一处分类多处复用，新增平台只加一张码表；② IG 回退 **opt-in 默认关**（HUMAN_AGENT 需平台审批，默认开会让回退本身失败）；③ 全程 additive + 软吞，零回归。
+  - **能否再优化**：① WA/Zalo 窗外自由文本无模板无法补救——下一步可做 **window_expired→转人工/系统提示镜像**（让坐席台看见"这条没发出去，需模板/人工"）；② WA **模板消息**发送（需平台审批模板，属运营+代码）；③ 把 error_kind 汇成**官方通道送达率看板**。
+  - **回归**：official 全家桶（send_error/phase_h/whatsapp_cloud/api_worker/kill_switch/inbox_mirror/pipeline/takeover/inbound_media）**92 passed**；send-path 审计 + fb/line webhook **16 passed**；五个官方模块编译通过；无 lint。
 
 ---
 

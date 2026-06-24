@@ -109,8 +109,20 @@ async def zalo_send_text(
                 # Zalo 200 也可能 body.error!=0 表示失败
                 if resp.status != 200 or int((data or {}).get("error", 0) or 0) != 0:
                     logger.warning("Zalo send 失败 HTTP %s: %s", resp.status, raw[:500])
-                    return {"ok": False, "error": f"HTTP {resp.status}: {raw[:200]}",
-                            "data": data}
+                    out: Dict[str, Any] = {
+                        "ok": False, "error": f"HTTP {resp.status}: {raw[:200]}",
+                        "data": data}
+                    try:
+                        from src.integrations.shared.official_send_error import (
+                            classify_official_send_error,
+                        )
+                        info = classify_official_send_error(
+                            "zalo", status=resp.status, body=data, error_text=raw)
+                        out["error_kind"] = info["kind"]
+                        out["retriable"] = info["retriable"]
+                    except Exception:
+                        out["error_kind"] = "unknown"
+                    return out
                 return {"ok": True, "data": data}
     except Exception as e:  # noqa: BLE001
         logger.warning("Zalo send failed: %s", e)

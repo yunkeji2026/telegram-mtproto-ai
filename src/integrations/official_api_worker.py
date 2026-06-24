@@ -129,8 +129,8 @@ class OfficialApiWorker:
             from src.integrations.facebook_webhook import fb_send_with_window_fallback
             out = await fb_send_with_window_fallback(
                 dest, text, c["access_token"], account_id=self.account_id)
-            return {"delivered": bool(out.get("ok")),
-                    "message_id": str(((out.get("data") or {}).get("message_id")) or "")}
+            return self._result(
+                out, str(((out.get("data") or {}).get("message_id")) or ""))
         if self.platform == "whatsapp":
             from src.integrations.whatsapp_cloud import wa_send_text
             out = await wa_send_text(dest, text, c["phone_number_id"], c["access_token"])
@@ -140,13 +140,22 @@ class OfficialApiWorker:
                 mid = str(((data.get("messages") or [{}])[0]).get("id") or "")
             except Exception:
                 mid = ""
-            return {"delivered": bool(out.get("ok")), "message_id": mid}
+            return self._result(out, mid)
         if self.platform == "instagram":
-            from src.integrations.instagram_webhook import ig_send_text
-            out = await ig_send_text(dest, text, c.get("ig_id", ""),
-                                     c["access_token"], account_id=self.account_id)
-            return {"delivered": bool(out.get("ok")),
-                    "message_id": str(((out.get("data") or {}).get("message_id")) or "")}
+            from src.integrations.instagram_webhook import (
+                ig_send_text, ig_send_with_window_fallback,
+            )
+            ig_cfg = _cfg_block(self.config, "instagram")
+            if bool(_meta(self.account).get("human_agent_fallback")
+                    or ig_cfg.get("human_agent_fallback")):
+                out = await ig_send_with_window_fallback(
+                    dest, text, c.get("ig_id", ""), c["access_token"],
+                    account_id=self.account_id)
+            else:
+                out = await ig_send_text(dest, text, c.get("ig_id", ""),
+                                         c["access_token"], account_id=self.account_id)
+            return self._result(
+                out, str(((out.get("data") or {}).get("message_id")) or ""))
         if self.platform == "zalo":
             from src.integrations.zalo_webhook import zalo_send_text
             out = await zalo_send_text(dest, text, c["access_token"],
@@ -154,8 +163,20 @@ class OfficialApiWorker:
                                        account_id=self.account_id)
             data = out.get("data") or {}
             mid = str((data.get("data") or {}).get("message_id") or "") if isinstance(data, dict) else ""
-            return {"delivered": bool(out.get("ok")), "message_id": mid}
+            return self._result(out, mid)
         raise RuntimeError(f"不支持的官方平台: {self.platform}")
+
+    @staticmethod
+    def _result(out: Dict[str, Any], message_id: str) -> Dict[str, Any]:
+        """统一出站结果：delivered + message_id，失败时透出 error_kind（窗口/token/限速…）。
+
+        让上层（pipeline/可观测）能据 ``error_kind`` 分流，而非把失败默默当"没发出"。
+        """
+        res: Dict[str, Any] = {"delivered": bool(out.get("ok")), "message_id": message_id}
+        if not out.get("ok"):
+            res["error_kind"] = str(out.get("error_kind") or "unknown")
+            res["error"] = str(out.get("error") or "")
+        return res
 
 
 def official_pipeline_enabled(config: Dict[str, Any]) -> bool:

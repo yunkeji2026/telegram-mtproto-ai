@@ -140,6 +140,9 @@ instagram:
   verify_token: ""               # GET 校验自定义口令
   webhook_path: "/ig/webhook"
   unsupported_type_reply: "目前仅支持文字消息。"
+  # 24h 客服窗口外回退：用 MESSAGE_TAG=HUMAN_AGENT 重发（把窗口延到 7 天，与 Messenger 对称）。
+  # ⚠️ 需账号开通「Human Agent」权限，否则回退仍会失败（但已带 error_kind 可观测）。默认关。
+  human_agent_fallback: false
 
 # Zalo Official Account OA OpenAPI v3.0（东南亚出海重点区，Phase H）。默认关。
 # ⚠️ cs（客服消息）仅能发给 7 天内与 OA 互动过的用户。

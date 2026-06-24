@@ -42,6 +42,27 @@ def _truncate(text: str) -> str:
     return s if len(s) <= IG_TEXT_MAX else s[: IG_TEXT_MAX - 1] + "…"
 
 
+def _ig_fail(status: int, raw_body: str) -> Dict[str, Any]:
+    """统一失败结果：分类 error_kind（窗口/token/限速…）。"""
+    parsed: Any = None
+    try:
+        parsed = json.loads(raw_body)
+    except Exception:
+        parsed = None
+    out: Dict[str, Any] = {"ok": False, "error": f"HTTP {status}: {raw_body[:200]}"}
+    try:
+        from src.integrations.shared.official_send_error import (
+            classify_official_send_error,
+        )
+        info = classify_official_send_error(
+            "instagram", status=status, body=parsed, error_text=raw_body)
+        out["error_kind"] = info["kind"]
+        out["retriable"] = info["retriable"]
+    except Exception:
+        out["error_kind"] = "unknown"
+    return out
+
+
 async def ig_send_text(
     igsid: str,
     text: str,
@@ -50,8 +71,14 @@ async def ig_send_text(
     *,
     account_id: str = "default",
     check_kill_switch: bool = True,
+    messaging_type: str = "RESPONSE",
+    message_tag: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """通过 Graph API 发 IG DM 文本。永不抛异常。G2：发送前查 Kill-Switch（platform=instagram）。"""
+    """通过 Graph API 发 IG DM 文本。永不抛异常。G2：发送前查 Kill-Switch（platform=instagram）。
+
+    ``messaging_type``：``RESPONSE``（24h 窗口内回）/ ``MESSAGE_TAG``（窗口外，需带 ``message_tag``，
+    IG 仅支持 ``HUMAN_AGENT``——把窗口从 24h 延到 7 天，需账号开通 Human Agent 权限）。
+    """
     if check_kill_switch:
         try:
             from src.integrations.shared.rpa_send_guard import rpa_send_blocked
@@ -66,11 +93,13 @@ async def ig_send_text(
         return {"ok": True, "data": {"skipped": "empty"}}
     send_id = str(ig_id or "").strip() or "me"
     url = f"{GRAPH_BASE}/{send_id}/messages"
-    payload = {
+    payload: Dict[str, Any] = {
         "recipient": {"id": igsid},
         "message": {"text": text},
-        "messaging_type": "RESPONSE",
+        "messaging_type": str(messaging_type or "RESPONSE"),
     }
+    if message_tag and str(messaging_type) == "MESSAGE_TAG":
+        payload["tag"] = message_tag
     params = {"access_token": page_access_token}
     try:
         timeout = aiohttp.ClientTimeout(total=20)
@@ -79,7 +108,7 @@ async def ig_send_text(
                 body = await resp.text()
                 if resp.status != 200:
                     logger.warning("IG send HTTP %s: %s", resp.status, body[:500])
-                    return {"ok": False, "error": f"HTTP {resp.status}: {body[:200]}"}
+                    return _ig_fail(resp.status, body)
                 try:
                     data = json.loads(body)
                 except Exception:
@@ -88,6 +117,30 @@ async def ig_send_text(
     except Exception as e:  # noqa: BLE001
         logger.warning("IG send failed: %s", e)
         return {"ok": False, "error": str(e)}
+
+
+async def ig_send_with_window_fallback(
+    igsid: str,
+    text: str,
+    ig_id: str,
+    page_access_token: str,
+    *,
+    account_id: str = "default",
+    fallback_tag: str = "HUMAN_AGENT",
+) -> Dict[str, Any]:
+    """优先 RESPONSE 发；若命中 24h 窗口错误 → 用 MESSAGE_TAG=HUMAN_AGENT 重发（与 Messenger 对称）。
+
+    ⚠️ HUMAN_AGENT 需账号开通「Human Agent」权限，否则回退仍会失败（已带 error_kind 可观测）。
+    故由上层 opt-in（``instagram.human_agent_fallback``），默认走纯 ``ig_send_text``。
+    """
+    out = await ig_send_text(igsid, text, ig_id, page_access_token,
+                             account_id=account_id, messaging_type="RESPONSE")
+    if out.get("ok") or out.get("error_kind") != "window_expired":
+        return out
+    logger.info("IG 24h 窗口已关闭，降级 tag=%s 重发", fallback_tag)
+    return await ig_send_text(
+        igsid, text, ig_id, page_access_token, account_id=account_id,
+        messaging_type="MESSAGE_TAG", message_tag=fallback_tag)
 
 
 def extract_ig_messages(body: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -130,6 +183,7 @@ def register_instagram_routes(
         return
 
     ig_account_id = ig_id or "official"
+    human_agent_fallback = bool(cfg.get("human_agent_fallback"))
     unsupported = (cfg.get("unsupported_type_reply") or "").strip() or "目前仅支持文字消息。"
     try:
         from src.integrations.official_api_worker import official_pipeline_enabled
@@ -169,7 +223,8 @@ def register_instagram_routes(
                 await _handle_ig_message(
                     sender=m["sender"], text=m["text"], mid=m["mid"], sm=sm,
                     ig_id=ig_id, ig_account_id=ig_account_id, page_token=page_token,
-                    use_pipeline=use_pipeline)
+                    use_pipeline=use_pipeline,
+                    human_agent_fallback=human_agent_fallback)
             except Exception as e:  # noqa: BLE001
                 logger.exception("IG 事件处理异常: %s", e)
         return Response(status_code=200, content=b"OK")
@@ -182,6 +237,7 @@ def register_instagram_routes(
 async def _handle_ig_message(
     *, sender: str, text: str, mid: str, sm: Any, ig_id: str,
     ig_account_id: str, page_token: str, use_pipeline: bool = False,
+    human_agent_fallback: bool = False,
 ) -> None:
     """单条 IG 入站 → 镜像 +（管道 or 自答）。"""
     import uuid
@@ -209,13 +265,18 @@ async def _handle_ig_message(
         logger.exception("IG process_message 异常: %s", e)
         return
     if reply_text:
-        await ig_send_text(sender, str(reply_text), ig_id, page_token,
-                           account_id=ig_account_id)
+        if human_agent_fallback:
+            await ig_send_with_window_fallback(
+                sender, str(reply_text), ig_id, page_token, account_id=ig_account_id)
+        else:
+            await ig_send_text(sender, str(reply_text), ig_id, page_token,
+                               account_id=ig_account_id)
         await mirror_official_outbound(
             platform="instagram", account_id=ig_account_id, chat_key=chat_key,
             text=str(reply_text))
 
 
 __all__ = [
-    "ig_send_text", "extract_ig_messages", "register_instagram_routes",
+    "ig_send_text", "ig_send_with_window_fallback", "extract_ig_messages",
+    "register_instagram_routes",
 ]
