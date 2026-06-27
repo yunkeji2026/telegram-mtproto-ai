@@ -200,6 +200,52 @@ def register_desktop_routes(app, *, api_auth) -> None:
         store = get_inject_health_store()
         return {"ok": True, "summary": store.summary(), "accounts": store.latest(stale_after=90.0)}
 
+    @app.get("/api/desktop/outbound")
+    async def api_desktop_outbound_pull(request: Request, _=Depends(api_auth)):
+        """桌面壳 / 扩展轮询「受控出站队列」：认领某内嵌账号的待发命令（D4）。
+
+        全自动 autopilot 决定要发给 desktop 模式账号时，回复已**先过 send-gate/kill-switch
+        闸门**再落队列；桌面壳/扩展据 ``account_id`` 轮询本端点取走，在官方网页 DOM 填入并
+        发送（复用 inject ``fill-composer``），再调 ``/api/desktop/outbound/ack`` 回执。
+        认领即标 ``claimed``（>180s 未 ack 自动回收防卡死）。
+        query: platform, account_id, limit?
+        返回: {ok, items:[{id,platform,account_id,chat_key,text,kind,...}]}
+        """
+        platform = str(request.query_params.get("platform") or "").lower()
+        account_id = str(request.query_params.get("account_id") or "")
+        try:
+            limit = int(request.query_params.get("limit") or 20)
+        except Exception:
+            limit = 20
+        if not platform or not account_id:
+            raise HTTPException(400, "platform / account_id 不能为空")
+        from src.inbox.desktop_outbound import get_desktop_outbound_queue
+        items = get_desktop_outbound_queue().pull(platform, account_id, limit=limit)
+        return {"ok": True, "items": items}
+
+    @app.post("/api/desktop/outbound/ack")
+    async def api_desktop_outbound_ack(request: Request, _=Depends(api_auth)):
+        """桌面壳 / 扩展发完一条出站命令后回执（D4）：claimed→sent/failed。
+
+        body: {id, ok?, error?}
+        返回: {ok, acked}
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        try:
+            item_id = int((body or {}).get("id") or 0)
+        except Exception:
+            item_id = 0
+        if not item_id:
+            raise HTTPException(400, "id 不能为空")
+        ok = bool((body or {}).get("ok", True))
+        error = str((body or {}).get("error") or "")
+        from src.inbox.desktop_outbound import get_desktop_outbound_queue
+        acked = get_desktop_outbound_queue().ack(item_id, ok=ok, error=error)
+        return {"ok": True, "acked": acked}
+
     @app.get("/api/desktop/fingerprint")
     async def api_desktop_fingerprint(request: Request, _=Depends(api_auth)):
         """桌面壳内嵌 webview 的「一号一指纹」（D3 防关联封号）。

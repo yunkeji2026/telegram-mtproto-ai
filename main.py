@@ -894,6 +894,17 @@ class AIChatAssistant:
                                                     platform, account_id)
                                             return _ok
 
+                                        def _is_desktop_account(platform, account_id) -> bool:
+                                            """会话账号是否为内嵌「桌面/扩展」模式（无服务端 worker）。"""
+                                            try:
+                                                from src.integrations.account_registry import (
+                                                    get_account_registry as _gar,
+                                                )
+                                                _row = _gar().get(platform, account_id) or {}
+                                                return str(_row.get("mode") or "") == "desktop"
+                                            except Exception:
+                                                return False
+
                                         async def _autosend_deliver(
                                             platform, account_id, chat_key, text
                                         ):
@@ -907,6 +918,37 @@ class AIChatAssistant:
                                             except Exception:
                                                 _assistant_ref.logger.debug(
                                                     "[autosend voice] 失败，回落文本", exc_info=True)
+                                            # D4：桌面内嵌账号无服务端 worker，send_via_adapters 发不出去。
+                                            # desktop_bridge 开启时把回复路由到「受控出站队列」——enqueue 内部
+                                            # 先过 send-gate/kill-switch 闸门，通过才落队列，由桌面壳/扩展轮询
+                                            # DOM 发送。被闸门拦截则返回 ok=False，让 worker 记 autosend_failed。
+                                            try:
+                                                _cfg = _assistant_ref.config.config or {}
+                                                _br = ((_cfg.get("inbox", {}) or {}).get(
+                                                    "l2_autosend", {}) or {}).get(
+                                                    "desktop_bridge", {}) or {}
+                                                if (_br.get("enabled", False)
+                                                        and _is_desktop_account(platform, account_id)):
+                                                    from src.inbox.desktop_outbound import (
+                                                        get_desktop_outbound_queue as _gdoq,
+                                                    )
+                                                    from src.integrations.account_registry import (
+                                                        get_account_registry as _gar2,
+                                                    )
+                                                    _res = _gdoq().enqueue(
+                                                        platform, account_id, chat_key, text,
+                                                        config=_cfg, registry=_gar2(),
+                                                    )
+                                                    if _res.get("enqueued"):
+                                                        return {"ok": True,
+                                                                "delivered_as": "desktop_queued",
+                                                                "id": _res.get("id")}
+                                                    return {"ok": False,
+                                                            "error": "blocked:" + str(
+                                                                _res.get("blocked") or "")}
+                                            except Exception:
+                                                _assistant_ref.logger.debug(
+                                                    "[autosend desktop_bridge] 路由失败", exc_info=True)
                                             # AutosendWorker 跑在主 loop；而协议号(telegram/whatsapp
                                             # pyrogram/Baileys)的 worker 由编排器经 FastAPI startup
                                             # 钩子启动，活在「web 线程的 web_loop」上。直接在主 loop

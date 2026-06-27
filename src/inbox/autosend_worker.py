@@ -214,8 +214,16 @@ class AutosendWorker:
                         item.get("platform", ""), item.get("account_id", "default"),
                         item.get("chat_key", ""), item.get("text", ""),
                     )
-                    if isinstance(res, dict) and res.get("ok") is False:
-                        raise RuntimeError(str(res.get("error") or "send not ok"))
+                    # 投递失败判定：除显式 ok=False 外，编排器/出站闸门返回
+                    # {delivered: False} 或 {blocked: ...}（如 kill-switch/send-gate 拦截、
+                    # 桌面出站被闸门拒）也算未送达——否则会把「被拦截」误计为已送达刷指标。
+                    if isinstance(res, dict) and (
+                        res.get("ok") is False
+                        or res.get("delivered") is False
+                        or res.get("blocked")
+                    ):
+                        raise RuntimeError(str(
+                            res.get("error") or res.get("blocked") or "send not ok"))
                     self.total_delivered += 1
                 except Exception as exc:  # noqa: BLE001
                     self.total_deliver_errors += 1

@@ -168,6 +168,25 @@ ipcMain.handle("desktop:inject-health", async (_e, payload) => {
   }
 });
 
+// D4 受控出站桥：轮询「受控出站队列」取走发给本内嵌账号的全自动回复（已先过后端
+// send-gate/kill-switch 闸门），renderer 据此调 webview fill-composer 在官方页 DOM 发送，
+// 再回执。后端不可达静默忽略（autopilot 命令仍留在队列，下轮重取）。
+ipcMain.handle("desktop:outbound-pull", async (_e, { platform, account_id, limit }) => {
+  try {
+    return await backendGet("/api/desktop/outbound", { platform, account_id, limit: limit || 20 });
+  } catch (e) {
+    return { ok: false, items: [], error: String(e) };
+  }
+});
+
+ipcMain.handle("desktop:outbound-ack", async (_e, { id, ok, error }) => {
+  try {
+    return await backendPost("/api/desktop/outbound/ack", { id, ok: ok !== false, error: error || "" });
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
 ipcMain.handle("desktop:translate", async (_e, { text, target_lang }) => {
   try {
     return { ok: true, text: await backendTranslate(String(text || ""), target_lang) };
@@ -722,8 +741,8 @@ async function createWindow() {
     wc.on("did-finish-load", () => console.log("[diag] webview page loaded"));
     wc.on("did-fail-load", (_e2, code, desc) =>
       console.log(`[diag] webview load FAILED ${code} ${desc}`));
-    wc.on("console-message", (_e2, _lvl, msg) =>
-      console.log(`[webview] ${msg}`));
+    wc.on("console-message", (_e2, _lvl, msg, line, sourceId) =>
+      console.log(`[webview] ${msg}${sourceId ? ` (${sourceId}:${line})` : ""}`));
   });
 
   console.log(`[diag] platforms enabled: ${(config.platforms || []).filter((p) => p.enabled).map((p) => p.id).join(",")}`);

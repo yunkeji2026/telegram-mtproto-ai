@@ -139,6 +139,16 @@ const HANDLERS = {
     try { return await backendPost("/api/desktop/inject-health", a || {}); }
     catch (e) { return { ok: false, error: String(e) }; }
   },
+  // D4 受控出站桥：轮询取走发给本账号的全自动回复（已过后端 send-gate/kill-switch 闸门），
+  // content script 据此在官方页 DOM 填入并发送，再回执。
+  outboundPull: async (a) => {
+    try { return await backendGet("/api/desktop/outbound", { platform: a && a.platform, account_id: a && a.account_id, limit: (a && a.limit) || 20 }); }
+    catch (e) { return { ok: false, items: [], error: String(e) }; }
+  },
+  outboundAck: async (a) => {
+    try { return await backendPost("/api/desktop/outbound/ack", { id: a && a.id, ok: !(a && a.ok === false), error: (a && a.error) || "" }); }
+    catch (e) { return { ok: false, error: String(e) }; }
+  },
 };
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

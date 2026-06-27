@@ -452,6 +452,8 @@ _BASELINE = """
 /api/desktop/selector-profiles	GET
 /api/desktop/inject-health	POST
 /api/desktop/inject-health	GET
+/api/desktop/outbound	GET
+/api/desktop/outbound/ack	POST
 /api/desktop/fingerprint	GET
 /api/telegram/log-tail	GET
 /api/telegram/recent-contacts	GET
