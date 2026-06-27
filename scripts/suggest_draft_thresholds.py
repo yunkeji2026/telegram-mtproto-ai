@@ -71,12 +71,18 @@ def observed_from_pipeline(dp: Dict[str, Any]) -> Dict[str, Any]:
     total = dp.get("total") or {}
     rates = dp.get("rates_vs_generated") or {}
     latency = dp.get("latency") or {}
+    window = dp.get("window") or {}
     gen = int(total.get("generated") or 0)
+    win_gen = int(window.get("generated") or 0)
 
     def _rate(key: str) -> float:
         if key in rates:
             return float(rates.get(key) or 0.0)
         return round(int(total.get(key) or 0) / gen, 4) if gen > 0 else 0.0
+
+    def _wrate(key: str) -> float:
+        # 窗口口径：与 watchdog._check_draft_quality 一致（window[name]/window.generated）。
+        return round(int(window.get(key) or 0) / win_gen, 4) if win_gen > 0 else 0.0
 
     return {
         "generated": gen,
@@ -85,6 +91,11 @@ def observed_from_pipeline(dp: Dict[str, Any]) -> Dict[str, Any]:
         "empty": _rate("empty"),
         "p95_ms": int(latency.get("p95_ms") or 0),
         "latency_count": int(latency.get("count") or 0),
+        # watchdog 视角（窗口率）——供「触发口径」对照；推荐仍基于稳态累计，见 recommend_*。
+        "window_generated": win_gen,
+        "window_sec": int(dp.get("window_sec") or 0),
+        "window_memory_hit": _wrate("memory_hit"),
+        "window_fast_path": _wrate("fast_path"),
     }
 
 
@@ -137,7 +148,11 @@ def recommend_quality_thresholds(
         "status": "ok",
         "generated": gen,
         "observed": {"memory_hit": mem, "fast_path": fast, "p95_ms": p95,
-                     "empty": float(observed.get("empty") or 0.0)},
+                     "empty": float(observed.get("empty") or 0.0),
+                     "window_generated": int(observed.get("window_generated") or 0),
+                     "window_sec": int(observed.get("window_sec") or 0),
+                     "window_memory_hit": float(observed.get("window_memory_hit") or 0.0),
+                     "window_fast_path": float(observed.get("window_fast_path") or 0.0)},
         "recommendations": recommendations,
     }
 
@@ -195,9 +210,15 @@ def _print_report(report: Dict[str, Any]) -> None:
     elif status == "ok":
         obs = q.get("observed") or {}
         print(f"== 草稿质量阈值校准（来源 {src}，generated={q.get('generated')}）==")
-        print(f"观测：memory_hit={obs.get('memory_hit', 0):.0%}  "
+        print(f"稳态累计：memory_hit={obs.get('memory_hit', 0):.0%}  "
               f"fast_path={obs.get('fast_path', 0):.0%}  "
               f"empty={obs.get('empty', 0):.0%}  p95={obs.get('p95_ms', 0)}ms")
+        win_gen = int(obs.get("window_generated") or 0)
+        if win_gen:
+            print(f"窗口(watchdog 视角, {obs.get('window_sec', 0)}s, n={win_gen})："
+                  f"memory_hit={obs.get('window_memory_hit', 0):.0%}  "
+                  f"fast_path={obs.get('window_fast_path', 0):.0%}"
+                  "  ← 告警按此触发；下方推荐基于稳态累计（更抗噪）")
         for k, info in (q.get("recommendations") or {}).items():
             flag = "  ← 建议调整" if info.get("changed") else ""
             print(f"  {k:<20} 现={info.get('current')}  推荐={info.get('recommended')}{flag}")

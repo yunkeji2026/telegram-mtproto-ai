@@ -61,6 +61,14 @@ class TestPipelineMetricsEndpoint:
         # 若被 /{draft_id} 截获且无 draft_service → 503；正确路由命中应为 200。
         assert r.status_code == 200
 
+    def test_window_sec_clamped(self):
+        """window_sec 钳制到 [60, 86400]，并回传到 draft_pipeline.window_sec。"""
+        c = _make_app()
+        lo = c.get("/api/drafts/pipeline-metrics?window_sec=1").json()
+        assert lo["draft_pipeline"]["window_sec"] == 60
+        hi = c.get("/api/drafts/pipeline-metrics?window_sec=99999999").json()
+        assert hi["draft_pipeline"]["window_sec"] == 86400
+
 
 class TestDraftRatesCompleteness:
     def test_rates_include_fast_path_and_empty(self):

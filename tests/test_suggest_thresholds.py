@@ -46,6 +46,23 @@ class TestObservedFromPipeline:
         assert obs["generated"] == 0
         assert obs["fast_path"] == 0.0
 
+    def test_window_rates_aligned_with_watchdog_basis(self):
+        """窗口口径 = window[name]/window.generated（与 watchdog 触发口径一致）。"""
+        dp = {
+            "total": {"generated": 1000},
+            "rates_vs_generated": {"memory_hit": 0.9, "fast_path": 0.9},
+            "latency": {},
+            "window": {"generated": 40, "memory_hit": 10, "fast_path": 36},
+            "window_sec": 3600,
+        }
+        obs = observed_from_pipeline(dp)
+        assert obs["window_generated"] == 40
+        assert obs["window_sec"] == 3600
+        assert obs["window_memory_hit"] == 0.25   # 10/40，明显有别于稳态 0.9
+        assert obs["window_fast_path"] == 0.9      # 36/40
+        # 稳态口径不受窗口影响
+        assert obs["memory_hit"] == 0.9
+
 
 class TestRecommendQualityThresholds:
     def test_insufficient_samples(self):

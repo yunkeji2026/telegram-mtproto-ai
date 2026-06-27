@@ -68,6 +68,10 @@ cd desktop && npm test
 本 repo **2026-04-24 首次进 git**。现阶段：
 - `main` 为主分支；baseline 见 `git log`（初次 import + AGENTS.md + gitignore 强化）
 - 后续 feature 走 `feat-*` 分支 + PR（参考 `mobile-auto0423` 的 squash merge 流程）
+- **多 agent 并发用 `git worktree` 隔离**：普通分支只隔离提交历史，多个 agent 仍共用
+  同一工作目录 → 文件互相串改、`index.lock` 互撞（本仓曾反复踩）。各 agent 各开
+  `git worktree add -b feat-xxx ../telegram-mtproto-ai-xxx <base>`（独立工作目录 +
+  独立 index、共用 .git refs），冲突只在 merge 时显式解决；收尾 `git worktree remove`。
 
 ### 崩溃恢复提示
 
