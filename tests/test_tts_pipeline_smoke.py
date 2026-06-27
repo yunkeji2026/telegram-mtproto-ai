@@ -197,7 +197,7 @@ def test_tts_falls_back_to_edge_when_network_backend_fails(tmp_path, monkeypatch
         from urllib.error import URLError
         raise URLError("<urlopen error [WinError 10060]>")
 
-    async def fake_edge(self, text, out, voice):
+    async def fake_edge(self, text, out, voice, spec=None):
         calls["edge"] += 1
         out.write_bytes(b"ID3edge-audio-bytes" + b"\x00" * 512)
 
@@ -237,7 +237,7 @@ def test_tts_consent_error_does_not_fall_back(tmp_path, monkeypatch):
     ref.write_bytes(b"wav")
     edge_called = {"n": 0}
 
-    async def fake_edge(self, text, out, voice):
+    async def fake_edge(self, text, out, voice, spec=None):
         edge_called["n"] += 1
         out.write_bytes(b"ID3edge" + b"\x00" * 512)
 

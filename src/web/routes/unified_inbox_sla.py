@@ -83,12 +83,15 @@ def _sla_alert_snapshot(request: Request) -> Dict[str, Any]:
     convs = inbox.list_conversations(limit=500)
     cmap = {str(c.get("conversation_id") or ""): c for c in convs}
     dirs = inbox.last_message_dirs(list(cmap))
+    archived = _archived_set(inbox, list(cmap))
     now = time.time()
     waiting = breaching = 0
     items: List[Dict[str, Any]] = []
     for cid, info in dirs.items():
         if info.get("direction") != "in":
             continue
+        if cid in archived:
+            continue  # 已归档=已处理/已忽略，不再计入告警（前端「忽略」即清零）
         if exclude_groups and _is_non_alert_conv(cmap.get(cid) or {}):
             continue  # 群组/频道不计入 SLA 告警，改走「群组动态」
         waiting += 1
@@ -134,6 +137,23 @@ def _is_non_alert_conv(conv: Dict[str, Any]) -> bool:
     return str((conv or {}).get("chat_type") or "private").lower() in _NON_ALERT_CHAT_TYPES
 
 
+def _archived_set(inbox, conv_ids: List[str]) -> set:
+    """已归档会话 id 集合（conversation_meta.archived=1）。
+
+    归档=已处理/已忽略，不应再刷 SLA/升级告警 —— 这给前端「忽略」按钮一个
+    真正能让「严重超时/待接管」清零的杠杆（接管只去掉「无人接管」，回复才去掉超时；
+    归档则把整条移出告警口径）。
+    """
+    if inbox is None or not conv_ids:
+        return set()
+    try:
+        meta = inbox.list_conv_tags_map(list(conv_ids))
+        return {cid for cid, m in meta.items() if m.get("archived")}
+    except Exception:
+        logger.debug("读取归档状态失败（已忽略）", exc_info=True)
+        return set()
+
+
 def _presence_stale_sec(request: Request) -> float:
     """在线判定窗口（秒）：config.workspace.presence_stale_sec，默认 120。"""
     cm = getattr(request.app.state, "config_manager", None)
@@ -163,6 +183,7 @@ def _escalation_snapshot(request: Request) -> Dict[str, Any]:
     convs = inbox.list_conversations(limit=500)
     cmap = {str(c.get("conversation_id") or ""): c for c in convs}
     dirs = inbox.last_message_dirs(list(cmap))
+    archived = _archived_set(inbox, list(cmap))
     claim_map: Dict[str, Dict[str, str]] = {}
     try:
         for cl in inbox.list_conversation_claims():
@@ -183,6 +204,8 @@ def _escalation_snapshot(request: Request) -> Dict[str, Any]:
     for cid, info in dirs.items():
         if info.get("direction") != "in":
             continue
+        if cid in archived:
+            continue  # 已归档=已处理/已忽略，不再进升级告警
         if exclude_groups and _is_non_alert_conv(cmap.get(cid) or {}):
             continue  # 群组/频道不进升级告警
         wait = now - (info.get("ts") or now)

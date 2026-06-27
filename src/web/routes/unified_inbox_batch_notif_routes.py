@@ -19,6 +19,7 @@ import logging
 
 from fastapi import Depends, Request
 
+from src.web.routes.unified_inbox_auth import _session_agent
 from src.web.routes.unified_inbox_services import _inbox_store
 
 logger = logging.getLogger(__name__)
@@ -133,9 +134,27 @@ def register_batch_notif_routes(app, *, api_auth) -> None:
         # 通知队列挂在 app.state.notif_queue（由 SSE 推送时顺带写入）
         queue: list = getattr(request.app.state, "notif_queue", [])
         limit = max(1, min(200, int(limit or 50)))
-        return {"ok": True, "notifications": queue[-limit:]}
+        # P8：随历史一并回传该坐席「已读水位线」，前端据此跨设备恢复已读状态
+        read_at = 0
+        try:
+            store = _inbox_store(request)
+            if store is not None:
+                agent = _session_agent(request)
+                read_at = int(store.get_agent_prefs(agent["agent_id"]).get("notif_read_at") or 0)
+        except Exception:
+            logger.debug("读取 notif_read_at 失败（已忽略）", exc_info=True)
+        return {"ok": True, "notifications": queue[-limit:], "read_at": read_at}
 
     @app.post("/api/workspace/notifications/read")
     async def api_workspace_notifications_read(request: Request, _=Depends(api_auth)):
-        """P24：标记所有通知为已读（仅清除前端 badge，不删除历史）。"""
-        return {"ok": True, "read_at": int(__import__("time").time() * 1000)}
+        """P24/P8：标记所有通知为已读 —— 写「已读水位线」到坐席偏好（跨设备保留）。"""
+        now_ms = int(__import__("time").time() * 1000)
+        read_at = now_ms
+        try:
+            store = _inbox_store(request)
+            if store is not None:
+                agent = _session_agent(request)
+                read_at = int(store.set_notif_read_at(agent["agent_id"], now_ms) or now_ms)
+        except Exception:
+            logger.debug("写 notif_read_at 失败（仅前端生效）", exc_info=True)
+        return {"ok": True, "read_at": read_at}

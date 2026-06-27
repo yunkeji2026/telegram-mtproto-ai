@@ -19,11 +19,17 @@ from typing import Any, Dict, Optional
 def resolve_voice_cfg(
     persona_id: Optional[str],
     full_config: Dict[str, Any],
+    *,
+    tier: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Return a ``voice_output``-style dict ready for ``TTSPipeline``.
 
     Merges layers bottom-up so higher-priority keys always win.
     Never raises; returns ``{}`` on any error so callers stay safe.
+
+    P3：传入端用户会员 ``tier``（如 ``get_entitlement(contact_key)["tier"]``）后，
+    按 ``voice_routing`` 策略改写后端（VIP→elevenlabs，免费→edge 降级省成本）。
+    ``tier=None``（默认）或 ``voice_routing.enabled=false`` → 不路由，行为不变。
     """
     try:
         # ── Layer 0 (lowest): messenger_rpa.voice_output compat shim ──
@@ -66,6 +72,25 @@ def resolve_voice_cfg(
         vcl = full_config.get("voice_clone_lan")
         if isinstance(vcl, dict) and vcl:
             merged["voice_clone_lan"] = dict(vcl)
+
+        # ── 注入全局 ElevenLabs 配置（付费情感旗舰档，backend=elevenlabs 时消费）──
+        el = full_config.get("elevenlabs")
+        if isinstance(el, dict) and el:
+            merged["elevenlabs"] = dict(el)
+
+        # ── P3：注入 TTS 成本费率（供 provider_stats 记账，与是否路由无关）──
+        routing_block = full_config.get("voice_routing")
+        if isinstance(routing_block, dict):
+            rates = routing_block.get("cost_per_1k_chars")
+            if isinstance(rates, dict) and rates:
+                merged["cost_per_1k_chars"] = dict(rates)
+
+        # ── P3：按端用户档位分层路由（VIP→旗舰，免费→降级省成本）──
+        if tier is not None:
+            from src.ai.voice_routing import resolve_voice_routing, route_voice_backend
+            routing = resolve_voice_routing(full_config)
+            if routing.get("enabled"):
+                merged = route_voice_backend(merged, tier=tier, routing=routing)
 
         return merged
     except Exception:

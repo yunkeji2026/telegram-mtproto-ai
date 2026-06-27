@@ -8,6 +8,7 @@ text/approval without blocking the RPA loop.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import shlex
@@ -15,9 +16,10 @@ import subprocess
 import threading
 import time
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,10 @@ _NON_FALLBACK_ERROR_MARKERS = (
     "unknown backend",       # 配置写错后端名 → 暴露而非掩盖
     "empty_text",
     "pipeline_disabled",
+    # ElevenLabs 本地配置错误（缺 key/voice_id）：本地即可判定的 misconfig，
+    # 应暴露给运营修正，而非用通用音色静默掩盖（API 侧 401/配额错误仍走兜底出声）。
+    "elevenlabs_missing_api_key",
+    "elevenlabs_missing_voice_id",
 )
 
 
@@ -87,6 +93,56 @@ def _assert_http_reachable(base_url: str, timeout: float = 3.0) -> None:
             f"tts_host_unreachable:{host}:{port}:{type(exc).__name__}") from exc
 
 
+# ── TTS 输出缓存（进程级、有界 LRU、线程安全）────────────────────────────────
+# 问候 / FAQ / 常用句会被反复合成——同一 (text, voice, backend, format, emotion,
+# 参考音频指纹) 命中缓存可直接复用字节，省外部调用与延迟。只缓存**字节**（短语音
+# 几 KB~几百 KB），neutral 情绪 == 与升级前完全一致的输出，缓存对行为无副作用。
+_TTS_CACHE_LOCK = threading.Lock()
+_TTS_CACHE: "OrderedDict[str, Tuple[bytes, str, str, str]]" = OrderedDict()
+# value = (audio_bytes, fmt, provider, voice)
+_TTS_CACHE_MAX = 128
+
+
+def _tts_cache_get(key: str) -> Optional[Tuple[bytes, str, str, str]]:
+    if not key:
+        return None
+    with _TTS_CACHE_LOCK:
+        item = _TTS_CACHE.get(key)
+        if item is None:
+            return None
+        _TTS_CACHE.move_to_end(key)
+        return item
+
+
+def _tts_cache_put(key: str, value: Tuple[bytes, str, str, str], *, max_entries: int) -> None:
+    if not key or not value or not value[0]:
+        return
+    with _TTS_CACHE_LOCK:
+        _TTS_CACHE[key] = value
+        _TTS_CACHE.move_to_end(key)
+        cap = max(1, int(max_entries))
+        while len(_TTS_CACHE) > cap:
+            _TTS_CACHE.popitem(last=False)
+
+
+def reset_tts_cache() -> None:
+    """清空 TTS 输出缓存（测试用 / 音色变更后强制重合成）。"""
+    with _TTS_CACHE_LOCK:
+        _TTS_CACHE.clear()
+
+
+def _reference_fingerprint(voice_profile: Dict[str, Any]) -> str:
+    """参考音频指纹（路径+大小+mtime）——换了参考音频则缓存键自动失效。"""
+    try:
+        ref = str((voice_profile or {}).get("reference_audio_path") or "").strip()
+        if not ref:
+            return ""
+        st = os.stat(ref)
+        return f"{ref}:{st.st_size}:{int(st.st_mtime)}"
+    except Exception:
+        return ""
+
+
 @dataclass
 class TTSResult:
     ok: bool = False
@@ -109,7 +165,7 @@ class TTSPipeline:
 
     Config:
         enabled: true/false
-        backend: edge_tts | pyttsx3 | openai | voice_clone_command | coqui_http | disabled
+        backend: edge_tts | pyttsx3 | openai | elevenlabs | voice_clone_command | coqui_http | disabled
         voice: provider-specific voice id
         model: online model name, defaults to gpt-4o-mini-tts
         format: mp3 | wav | opus
@@ -157,6 +213,24 @@ class TTSPipeline:
         self.fallback_on_error = bool(cfg.get("fallback_on_error", True))
         self.fallback_backend = str(cfg.get("fallback_backend") or "edge_tts").strip().lower()
         self.fallback_voice = str(cfg.get("fallback_voice") or "zh-CN-XiaoxiaoNeural").strip()
+        # ── P0：TTS 输出缓存（默认开；neutral 输出与升级前一致，缓存无行为副作用）──
+        cache_cfg = cfg.get("tts_cache") if isinstance(cfg.get("tts_cache"), dict) else {}
+        self.cache_enabled = bool(cache_cfg.get("enabled", True))
+        self.cache_max_entries = int(cache_cfg.get("max_entries", _TTS_CACHE_MAX) or _TTS_CACHE_MAX)
+        # ── P1：情感层（默认关 → 不传 emotion 即 neutral，零行为变更）──
+        emo_cfg = cfg.get("emotion") if isinstance(cfg.get("emotion"), dict) else {}
+        self.emotion_enabled = bool(emo_cfg.get("enabled", False))
+        self.emotion_default = str(emo_cfg.get("default") or "warm").strip().lower()
+        # ── P2-Cloud：ElevenLabs v3 付费情感旗舰档配置 ──
+        self.elevenlabs = (
+            cfg.get("elevenlabs") if isinstance(cfg.get("elevenlabs"), dict) else {}
+        )
+        # ── P3：可观测（provider_stats "tts" namespace）+ 成本费率 ──
+        self.metrics_enabled = bool(cfg.get("metrics_enabled", True))
+        self.cost_rates = (
+            cfg.get("cost_per_1k_chars")
+            if isinstance(cfg.get("cost_per_1k_chars"), dict) else {}
+        )
 
     def stats(self) -> Dict[str, Any]:
         return {
@@ -176,6 +250,125 @@ class TTSPipeline:
         *,
         voice: Optional[str] = None,
         timeout_sec: float = 30.0,
+        emotion: Any = None,
+    ) -> TTSResult:
+        """合成语音。``emotion`` 可为 None / 情绪字符串 / dict / EmotionSpec。
+
+        - 不传 ``emotion`` 且未开 ``emotion.enabled`` → neutral（与升级前完全一致）。
+        - 命中 TTS 缓存（同 text+voice+backend+format+情绪+参考音频指纹）→ 直接复用字节。
+        """
+        from src.ai.voice_emotion import NEUTRAL, coerce_emotion, derive_emotion
+
+        text_s = str(text or "")
+        if emotion is not None:
+            spec = coerce_emotion(emotion)
+        elif self.emotion_enabled:
+            spec = derive_emotion(text=text_s, default=self.emotion_default)
+        else:
+            spec = NEUTRAL
+
+        # ── P0：缓存查找（命中即秒回，省外部调用）──
+        if self.enabled and self.cache_enabled and text_s.strip():
+            eff_backend = self._effective_backend()
+            eff_voice = voice or self._effective_voice()
+            cache_key = self._cache_key(text_s, eff_voice, eff_backend, spec)
+            hit = _tts_cache_get(cache_key)
+            if hit is not None:
+                cached = self._result_from_cache(hit, text_s)
+                if cached is not None:
+                    self._record_stats(cached, text_s, cache_hit=True)
+                    return cached
+        else:
+            cache_key = ""
+
+        rv = await self._synthesize_uncached(
+            text_s, voice=voice, timeout_sec=timeout_sec, spec=spec)
+
+        # ── 成功且非缓存命中 → 写入缓存 ──
+        if (self.cache_enabled and cache_key and rv.ok and rv.audio_path
+                and not rv.extra.get("cache_hit")):
+            try:
+                data = Path(rv.audio_path).read_bytes()
+                if data:
+                    _tts_cache_put(
+                        cache_key, (data, rv.format, rv.provider, rv.voice),
+                        max_entries=self.cache_max_entries)
+            except Exception:
+                pass
+        self._record_stats(rv, text_s, cache_hit=False)
+        return rv
+
+    def _record_stats(self, rv: "TTSResult", text: str, *, cache_hit: bool) -> None:
+        """记 TTS 用量到 provider_stats "tts" namespace（成功/失败/成本/缓存命中）。绝不抛。"""
+        if not self.metrics_enabled:
+            return
+        try:
+            from src.ai.provider_stats import get_provider_stats
+            stats = get_provider_stats("tts", "tts")
+            if cache_hit:
+                stats.record_cache_hit()
+                return
+            # 仅在该轮真正发生过合成（含失败）时记一次
+            if not rv.text.strip():
+                return
+            provider = rv.provider or self._effective_backend()
+            if rv.ok:
+                from src.ai.voice_routing import estimate_tts_cost
+                cost = estimate_tts_cost(provider, len(text or ""), self.cost_rates)
+                stats.record(provider, ok=True, latency_ms=rv.latency_ms, cost_usd=cost)
+                if rv.extra.get("fallback_from"):
+                    stats.record_fallback()
+            elif rv.error not in ("pipeline_disabled", "empty_text"):
+                stats.record(provider, ok=False, latency_ms=rv.latency_ms)
+        except Exception:
+            pass
+
+    def _cache_key(self, text: str, voice: str, backend: str, spec: Any) -> str:
+        """TTS 缓存键：克隆类后端额外并入参考音频指纹（换音频自动失效）。"""
+        ref_fp = ""
+        if backend in ("voice_clone_lan", "voice_clone_command", "coqui_http"):
+            ref_fp = _reference_fingerprint(self.voice_profile)
+        emo = spec.cache_key() if spec is not None else ""
+        base = "|".join([
+            backend, voice or "", self.format, self.model or "",
+            self.instructions or "", emo, ref_fp, text,
+        ])
+        return hashlib.sha1(base.encode("utf-8")).hexdigest()
+
+    def _result_from_cache(
+        self, hit: Tuple[bytes, str, str, str], text: str,
+    ) -> Optional["TTSResult"]:
+        """把缓存字节落盘成新文件并构造 TTSResult。失败返回 None（回落正常合成）。"""
+        data, fmt, provider, voice = hit
+        try:
+            self.out_dir.mkdir(parents=True, exist_ok=True)
+            suffix = fmt or self.format
+            out = self.out_dir / (
+                f"tts-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}.{suffix}")
+            out.write_bytes(data)
+        except Exception:
+            return None
+        rv = TTSResult(
+            ok=True, text=text, provider=provider, voice=voice,
+            format=fmt, audio_path=str(out))
+        rv.extra["bytes"] = len(data)
+        rv.extra["cache_hit"] = True
+        try:
+            dur, src = compute_audio_duration_sec(str(out), fmt)
+            rv.duration_sec = float(dur)
+            rv.duration_source = str(src)
+        except Exception:
+            rv.duration_sec = -1.0
+            rv.duration_source = "unknown"
+        return rv
+
+    async def _synthesize_uncached(
+        self,
+        text: str,
+        *,
+        voice: Optional[str] = None,
+        timeout_sec: float = 30.0,
+        spec: Any = None,
     ) -> TTSResult:
         rv = TTSResult(
             text=str(text or ""),
@@ -202,7 +395,8 @@ class TTSPipeline:
         # ── 主后端合成 ──
         primary_backend = self._effective_backend()
         err = await self._run_backend(
-            rv, rv.text, out, rv.voice, primary_backend, rv.format, timeout_sec)
+            rv, rv.text, out, rv.voice, primary_backend, rv.format, timeout_sec,
+            spec=spec)
         if err is None:
             rv.latency_ms = int((time.monotonic() - t0) * 1000)
             return rv
@@ -221,7 +415,8 @@ class TTSPipeline:
             fb_fmt = "mp3" if fb == "edge_tts" else self.format
             fb_out = out.with_suffix(f".{fb_fmt}")
             fb_err = await self._run_backend(
-                rv, rv.text, fb_out, self.fallback_voice, fb, fb_fmt, timeout_sec)
+                rv, rv.text, fb_out, self.fallback_voice, fb, fb_fmt, timeout_sec,
+                spec=spec)
             if fb_err is None:
                 rv.provider = fb
                 rv.format = fb_fmt
@@ -245,11 +440,13 @@ class TTSPipeline:
         backend: str,
         fmt: str,
         timeout_sec: float,
+        *,
+        spec: Any = None,
     ) -> Optional[str]:
         """用指定 backend 合成到 out。成功 → 写回 rv 并返回 None；失败 → 返回错误串。"""
         try:
             await asyncio.wait_for(
-                asyncio.to_thread(self._synthesize_sync, text, out, voice, backend),
+                asyncio.to_thread(self._synthesize_sync, text, out, voice, backend, spec),
                 timeout=timeout_sec,
             )
         except asyncio.TimeoutError:
@@ -374,10 +571,11 @@ class TTSPipeline:
 
     def _synthesize_sync(
         self, text: str, out: Path, voice: str, backend: Optional[str] = None,
+        spec: Any = None,
     ) -> None:
         backend = (backend or self._effective_backend())
         if backend == "edge_tts":
-            asyncio.run(self._edge_tts(text, out, voice))
+            asyncio.run(self._edge_tts(text, out, voice, spec))
             return
         if backend == "pyttsx3":
             import pyttsx3  # type: ignore
@@ -406,8 +604,16 @@ class TTSPipeline:
                 "input": text,
                 "response_format": self.format,
             }
-            if self.instructions:
-                req["instructions"] = self.instructions
+            # P1：情感 → instructions（在运营已配置的 instructions 之后追加，不覆盖）
+            instr = self.instructions
+            if spec is not None and not getattr(spec, "is_neutral", lambda: True)():
+                try:
+                    from src.ai.voice_emotion import to_openai_instructions
+                    instr = to_openai_instructions(spec, base=self.instructions)
+                except Exception:
+                    instr = self.instructions
+            if instr:
+                req["instructions"] = instr
             resp = client.audio.speech.create(**req)
             if hasattr(resp, "write_to_file"):
                 resp.write_to_file(str(out))
@@ -420,6 +626,9 @@ class TTSPipeline:
             return
         if backend == "coqui_http":
             self._synthesize_coqui_http(text, out)
+            return
+        if backend == "elevenlabs":
+            self._synthesize_elevenlabs(text, out, voice, spec)
             return
         if backend == "disabled":
             raise RuntimeError("backend disabled")
@@ -475,6 +684,30 @@ class TTSPipeline:
         if r.returncode != 0:
             msg = (r.stderr or r.stdout or "")[:500]
             raise RuntimeError(f"voice_clone_command_failed:{msg}")
+
+    def _synthesize_elevenlabs(
+        self, text: str, out: Path, voice: str, spec: Any = None,
+    ) -> None:
+        """ElevenLabs v3 合成（情感 + 克隆音色）。voice_id 取 voice_profile.voice 优先。"""
+        from src.ai.elevenlabs_client import ElevenLabsClient, output_format_for
+
+        el = self.elevenlabs or {}
+        # model：优先 elevenlabs.model_id；其次顶层 model（若以 eleven 开头）；否则默认 v3
+        model_id = str(el.get("model_id") or "").strip()
+        if not model_id and str(self.model or "").lower().startswith("eleven"):
+            model_id = self.model
+        client = ElevenLabsClient({
+            "api_key": el.get("api_key") or self.api_key,
+            "base_url": el.get("base_url") or "",
+            "model_id": model_id or "eleven_v3",
+            "timeout_sec": el.get("timeout_sec") or 120,
+            "similarity_boost": el.get("similarity_boost") or 0.75,
+        })
+        # voice_id：人设 voice_profile.voice（云端音色 ID）优先，回落 voice/全局
+        vp = self.voice_profile or {}
+        voice_id = str(vp.get("voice") or voice or self.voice or "").strip()
+        out_fmt = output_format_for(self.format)
+        client.synthesize(text, voice_id, out, emotion=spec, output_format=out_fmt)
 
     def _synthesize_coqui_http(self, text: str, out: Path) -> None:
         """Call Coqui XTTS-v2 server (custom OpenAI-compatible API).
@@ -551,10 +784,20 @@ class TTSPipeline:
             audio_bytes = response_bytes
         out.write_bytes(audio_bytes)
 
-    async def _edge_tts(self, text: str, out: Path, voice: str) -> None:
+    async def _edge_tts(
+        self, text: str, out: Path, voice: str, spec: Any = None,
+    ) -> None:
         import edge_tts  # type: ignore
 
-        communicate = edge_tts.Communicate(text, voice or self.voice)
+        kwargs: Dict[str, Any] = {}
+        # P1：情感 → edge_tts rate/pitch 近似情绪（neutral 不调，行为不变）
+        if spec is not None and not getattr(spec, "is_neutral", lambda: True)():
+            try:
+                from src.ai.voice_emotion import edge_prosody
+                kwargs.update(edge_prosody(spec))
+            except Exception:
+                kwargs = {}
+        communicate = edge_tts.Communicate(text, voice or self.voice, **kwargs)
         await communicate.save(str(out))
 
 

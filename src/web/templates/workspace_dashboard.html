@@ -24,6 +24,32 @@
   .db-tab.active{background:#2563eb;color:#fff;border-color:#2563eb;}
   .db-exp-item{display:block;padding:10px 16px;font-size:13px;color:#1e293b;text-decoration:none;border-bottom:1px solid #f1f5f9;}
   .db-exp-item:hover{background:#eff6ff;}
+  /* ===== 夜间模式：跟随顶栏主题切换（data-cp-theme=dark），与全站一致 ===== */
+  [data-cp-theme="dark"] .db-wrap{background:#0b1120;}
+  [data-cp-theme="dark"] .db-card,
+  [data-cp-theme="dark"] .db-sec{background:#1e293b;border-color:#334155;}
+  [data-cp-theme="dark"] .db-num{color:#f1f5f9;}
+  [data-cp-theme="dark"] .db-num.warn{color:#f87171;}
+  [data-cp-theme="dark"] .db-lbl{color:#94a3b8;}
+  [data-cp-theme="dark"] .db-sec h3,
+  [data-cp-theme="dark"] .db-wrap h2{color:#e2e8f0;}
+  [data-cp-theme="dark"] .db-row{border-bottom-color:#334155;color:#cbd5e1;}
+  [data-cp-theme="dark"] .db-row.db-click:hover{background:#243044;}
+  [data-cp-theme="dark"] .db-bar{background:#334155;}
+  [data-cp-theme="dark"] .db-bar i{background:#3b82f6;}
+  [data-cp-theme="dark"] .db-back,
+  [data-cp-theme="dark"] .db-num.warn ~ .db-lbl{color:#60a5fa;}
+  [data-cp-theme="dark"] .db-click:hover{box-shadow:0 2px 12px rgba(0,0,0,.5);}
+  [data-cp-theme="dark"] .db-tab{background:#1e293b;border-color:#475569;color:#cbd5e1;}
+  [data-cp-theme="dark"] .db-tab.active{background:#3b82f6;border-color:#3b82f6;color:#fff;}
+  [data-cp-theme="dark"] .db-modal-card{background:#1e293b;color:#e2e8f0;}
+  [data-cp-theme="dark"] .db-exp-item{color:#cbd5e1;border-bottom-color:#334155;}
+  [data-cp-theme="dark"] .db-exp-item:hover{background:#243044;}
+  [data-cp-theme="dark"] #db-modal{background:rgba(2,6,23,.6);}
+  /* 行内浅色控件（select / 链接）夜间覆写 */
+  [data-cp-theme="dark"] .db-wrap select{background:#0f172a !important;color:#f1f5f9 !important;border-color:#475569 !important;}
+  [data-cp-theme="dark"] #db-export{background:#1e293b !important;color:#e2e8f0 !important;border-color:#475569 !important;}
+  [data-cp-theme="dark"] #db-quick-approve{background:rgba(22,163,74,.18) !important;color:#86efac !important;border-color:#16a34a !important;}
 </style>
 {% endblock %}
 {% block content %}

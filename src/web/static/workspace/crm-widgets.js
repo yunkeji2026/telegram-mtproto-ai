@@ -96,6 +96,7 @@
     t.onclick = function () { try { box.removeChild(t); } catch (_) { } };
     box.appendChild(t);
     setTimeout(function () { try { box.removeChild(t); } catch (_) { } }, 8000);
+    return t;  // 返回元素，便于调用方覆写 onclick（如点击通知跳转会话）
   }
 
   window.CRMW = {

@@ -5993,6 +5993,16 @@ function startAdaptivePoll(){
 }
 
 /* ===== SSE 实时推送 ===== */
+// 同一条入站消息可能被多条 ingest 路径重复发布，按 会话+预览 在 8s 窗口去重，避免未读数重复 +1
+var _ibSeen={};
+function _ibDup(d){
+  d=d||{};
+  var k=String(d.conversation_id||d.chat_key||'')+'|'+String(d.preview||d.text||'').slice(0,80);
+  var now=Date.now();
+  for(var kk in _ibSeen){ if(now-_ibSeen[kk]>15000) delete _ibSeen[kk]; }
+  if(_ibSeen[k] && (now-_ibSeen[k])<8000) return true;
+  _ibSeen[k]=now; return false;
+}
 function initSSE(){
   try{
     if(_sseEs){ _sseEs.close(); _sseEs=null; }
@@ -6003,6 +6013,7 @@ function initSSE(){
       const t=msg.type;
       const data=msg.data||msg;
 
+      if(t==='inbox_message' && _ibDup(data)) return;
       if(t==='inbox_message'){
         // 入站新消息：若是当前对话 → 即时刷新线程；否则只刷新会话列表
         const isCurrent = selectedChat &&
@@ -6218,6 +6229,25 @@ function _tryRestoreFocus(){
     }
   }catch(_){}
 }
+
+/* 实时定位会话：供顶栏消息提示点击调用（已在工作台时直接选中并滚动到该会话）。
+   找不到（新联系人未在列表）→ 先刷新会话列表再试一次。 */
+window.__wsFocusConv = function(convId){
+  if(!convId) return false;
+  function _doFocus(){
+    var c = allChats.find(function(ch){ return ch.conversation_id===convId || convKey(ch)===convId; });
+    if(!c) return false;
+    selectChat(convKey(c));
+    setTimeout(function(){
+      var entry=_domMap.get(convKey(c));
+      if(entry && entry.dom) entry.dom.scrollIntoView({block:'nearest'});
+    }, 200);
+    return true;
+  }
+  if(_doFocus()) return true;
+  try{ loadChats().then(function(){ _doFocus(); }); }catch(_){}
+  return true;
+};
 
 /* ===== 初始化 ===== */
 async function init(){

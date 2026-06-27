@@ -98,6 +98,9 @@ _BASELINE = """
 /api/episodic-memory/correction-stats	GET
 /api/episodic-memory/{row_id}	DELETE
 /api/episodic-memory/{row_id}/confirm	POST
+/api/episodic-memory/key-health	GET
+/api/episodic-memory/key-migrate	POST
+/api/episodic-memory/key-migrate/plan	GET
 /api/events	GET
 /api/export-strategy-events	GET
 /api/health-check	GET

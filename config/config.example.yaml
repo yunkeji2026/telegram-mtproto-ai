@@ -37,7 +37,7 @@ telegram:
     # never           — 关闭（与 enabled:false 等效）
     trigger: when_peer_voice
     probability: 0.3              # trigger=random 时生效
-    backend: edge_tts             # edge_tts | openai | voice_clone_command
+    backend: edge_tts             # edge_tts | openai | elevenlabs | voice_clone_command
     voice: ja-JP-NanamiNeural     # edge_tts 声音 ID
     model: gpt-4o-mini-tts        # openai backend 模型
     format: mp3                   # mp3 | ogg；ogg 需 ffmpeg 转码
@@ -46,6 +46,19 @@ telegram:
     max_seconds: 60               # TTS 时长超限自动回退文字
     timeout_sec: 30               # TTS 合成超时（秒）
     send_text_summary: false      # true=语音发送后额外追加一条文字
+    # ── P1 情感层（默认关 → 不传 emotion 即 neutral，与升级前完全一致）──
+    # 开后：按文本线索/意图自动派生情绪，翻成各引擎可消费的控制信号——
+    #   openai backend → instructions（"用温暖、略带笑意的语气说"）
+    #   edge_tts       → rate/pitch 近似情绪
+    #   elevenlabs     → 内联音频标签 [warmly]/[laughs] + voice_settings（已接入，见顶层 elevenlabs）
+    emotion:
+      enabled: false
+      default: warm               # 无情绪信号时的默认基调（见 voice_emotion.EMOTIONS）
+    # ── P0 TTS 输出缓存（默认开；同 文本+音色+后端+格式+情绪+参考音频指纹 命中即复用）──
+    # neutral 输出与升级前一致，缓存对行为无副作用；换参考音频会自动失效。
+    tts_cache:
+      enabled: true
+      max_entries: 128
     # 人设级音色覆盖（优先于此处；见 personas.profiles[].voice_profile）
     voice_profile:
       enabled: false
@@ -679,6 +692,38 @@ voice_clone_lan:
   language: zh                            # 默认合成语种（zh/en/ja...）
   api_key: ""                            # 主机需鉴权时填（Bearer）
   cloud_fallback: true                   # 局域网不可用/失败 → 回落云端 Qwen
+
+# ── ElevenLabs v3 付费情感旗舰档（P2-Cloud）────────────────────────────────────
+# 「真人感情」语音：v3 通过内联音频标签 + voice_settings（stability 调低更听情绪、
+# style 放大个性）做高表现力合成；非实时，适合聊天语音条。需先在 ElevenLabs 控制台
+# 用参考音频做「克隆音色」，把得到的 voice_id 填到人设 voice_profile.voice。
+# 用法：把人设 voice_profile.backend 设为 elevenlabs（或 telegram.voice_reply.backend）。
+# 失败时：缺 key/voice_id（本地 misconfig）→ 硬失败暴露；API 401/配额 → 回落 edge 出声。
+# 成本：贵（按字符计）；TTS 输出缓存（见 voice_reply.tts_cache）对问候/FAQ 命中率高，显著降本。
+elevenlabs:
+  api_key: ""                            # ElevenLabs xi-api-key
+  model_id: eleven_v3                     # eleven_v3（最具表现力）| eleven_flash_v2_5（低延迟）
+  base_url: https://api.elevenlabs.io
+  similarity_boost: 0.75                  # 与克隆音源相似度（越高越像，但放大原录音底噪）
+  timeout_sec: 120
+
+# ── 语音引擎分层路由（P3）：按端用户会员档位选 TTS 后端 ────────────────────────
+# 把「真人感情语音」做成付费溢价点 + 天然控成本：免费/普通走便宜/自建后端，
+# VIP/SVIP 走 ElevenLabs 旗舰。降级到非克隆后端时会自动关克隆门（含 LAN 优先），
+# 确保免费档拿通用音色而非偷偷克隆 → 真正省钱。
+# 接入：调用方拿到端用户 tier（get_entitlement(contact_key)["tier"]）后，
+#       resolve_voice_cfg(persona_id, config, tier=tier)。tier=None 或 enabled=false → 不路由。
+# enabled=false 时完全保持现状。
+voice_routing:
+  enabled: false
+  default_backend: edge_tts               # 未在 tiers 列出的档（含 free）用此后端；空=不改
+  tiers:
+    vip: elevenlabs
+    svip: elevenlabs
+  # TTS 成本费率（USD / 1000 字符），仅对按字符计费的 provider 有意义；供成本看板记账。
+  # 按你与 provider 的实际合同覆盖（ElevenLabs 价随档位浮动）。
+  cost_per_1k_chars:
+    elevenlabs: 0.30
 
 # WhatsApp RPA（ADB + uiautomator；与 Telegram/LINE/Messenger 共用 Skill/AI）
 # 与 messenger_rpa 结构类似，accounts[] 下为每台手机一条

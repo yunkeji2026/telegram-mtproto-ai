@@ -18,7 +18,8 @@ from typing import Any, Dict, Optional
 class ProviderStats:
     """按 provider 名聚合 调用/成功/失败/平均延迟 + 全局降级次数。"""
 
-    __slots__ = ("_lock", "_rows", "_started_at", "_last_ts", "_fallbacks", "_total", "_prefix")
+    __slots__ = ("_lock", "_rows", "_started_at", "_last_ts", "_fallbacks",
+                 "_total", "_prefix", "_cache_hits")
 
     def __init__(self, metric_prefix: str = "provider") -> None:
         self._lock = threading.RLock()
@@ -27,18 +28,24 @@ class ProviderStats:
         self._last_ts = 0.0
         self._fallbacks = 0
         self._total = 0
+        self._cache_hits = 0
         self._prefix = str(metric_prefix or "provider")
 
-    def record(self, name: str, *, ok: bool, latency_ms: int = 0) -> None:
+    def record(
+        self, name: str, *, ok: bool, latency_ms: int = 0, cost_usd: float = 0.0,
+    ) -> None:
+        """记一次 provider 调用。``cost_usd`` 累加该 provider 的花费（如 TTS 字符计费）。"""
         name = str(name or "unknown")
         with self._lock:
             row = self._rows.get(name)
             if row is None:
-                row = {"calls": 0, "ok": 0, "fail": 0, "latency_ms_sum": 0}
+                row = {"calls": 0, "ok": 0, "fail": 0, "latency_ms_sum": 0,
+                       "cost_usd_sum": 0.0}
                 self._rows[name] = row
             row["calls"] += 1
             row["ok" if ok else "fail"] += 1
             row["latency_ms_sum"] += max(0, int(latency_ms or 0))
+            row["cost_usd_sum"] = row.get("cost_usd_sum", 0.0) + max(0.0, float(cost_usd or 0))
             self._total += 1
             self._last_ts = time.time()
 
@@ -46,11 +53,20 @@ class ProviderStats:
         with self._lock:
             self._fallbacks += 1
 
+    def record_cache_hit(self) -> None:
+        """记一次缓存命中（未触达 provider，省一次调用/花费）。"""
+        with self._lock:
+            self._cache_hits += 1
+            self._last_ts = time.time()
+
     def dump(self) -> Dict[str, Any]:
         with self._lock:
             rows = []
+            total_cost = 0.0
             for name, v in sorted(self._rows.items()):
                 calls = v["calls"]
+                cost = round(v.get("cost_usd_sum", 0.0), 4)
+                total_cost += v.get("cost_usd_sum", 0.0)
                 rows.append({
                     "provider": name,
                     "calls": int(calls),
@@ -58,12 +74,18 @@ class ProviderStats:
                     "fail": int(v["fail"]),
                     "success_rate": round(v["ok"] / calls, 4) if calls else 0,
                     "avg_latency_ms": round(v["latency_ms_sum"] / calls, 1) if calls else 0,
+                    "cost_usd": cost,
                 })
+            # 缓存命中率 = hits / (hits + 实际调用)
+            denom = self._cache_hits + self._total
             return {
                 "started_at": self._started_at,
                 "last_record_ts": self._last_ts,
                 "total_attempts": self._total,
                 "fallbacks": self._fallbacks,
+                "cache_hits": self._cache_hits,
+                "cache_hit_rate": round(self._cache_hits / denom, 4) if denom else 0,
+                "total_cost_usd": round(total_cost, 4),
                 "rows": rows,
             }
 
@@ -77,12 +99,22 @@ class ProviderStats:
             f"# HELP {p}_fallbacks_total {p} fallbacks (primary failed)",
             f"# TYPE {p}_fallbacks_total counter",
         ]
+        lines += [
+            f"# HELP {p}_cache_hits_total {p} cache hits (provider not called)",
+            f"# TYPE {p}_cache_hits_total counter",
+            f"# HELP {p}_cost_usd_total {p} cumulative cost in USD by provider",
+            f"# TYPE {p}_cost_usd_total counter",
+        ]
         with self._lock:
             lines.append(f"{p}_fallbacks_total {self._fallbacks}")
+            lines.append(f"{p}_cache_hits_total {self._cache_hits}")
             for name, v in self._rows.items():
                 lbl = f'provider="{_esc(name)}"'
                 lines.append(f'{p}_attempts_total{{{lbl}}} {int(v["calls"])}')
                 lines.append(f'{p}_fail_total{{{lbl}}} {int(v["fail"])}')
+                cost = round(v.get("cost_usd_sum", 0.0), 6)
+                if cost:
+                    lines.append(f'{p}_cost_usd_total{{{lbl}}} {cost}')
         return "\n".join(lines) + "\n"
 
     def reset(self) -> None:
@@ -90,6 +122,7 @@ class ProviderStats:
             self._rows.clear()
             self._fallbacks = 0
             self._total = 0
+            self._cache_hits = 0
             self._last_ts = 0.0
 
 

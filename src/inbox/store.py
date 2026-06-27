@@ -483,6 +483,8 @@ _MIGRATIONS = [
     # P3：坐席技能语言（CSV 规范 ISO 码，如 "en,ja"）。供 auto_assign 的 match_language
     # 把外语会话优先派给会该语言的坐席（坐席在工作台「我的偏好」声明）。
     "ALTER TABLE agent_prefs ADD COLUMN languages TEXT NOT NULL DEFAULT ''",
+    # P8：通知中心「已读水位线」上云（跨设备保留「全部已读」状态，毫秒时戳）。
+    "ALTER TABLE agent_prefs ADD COLUMN notif_read_at INTEGER NOT NULL DEFAULT 0",
     # P3：出向翻译漏斗「按日」持久化聚合（看板按 7/30 日窗读取，跨重启/含趋势线）。
     # 与内存版 OutboundTranslationStats 同口径；day 用本地日期，与 dashboard 其它面板分桶一致。
     # by_lang_json 为该日各目标语译出次数的 JSON（读改写，已在锁内）。
@@ -2707,8 +2709,28 @@ class InboxStore:
         if row is None:
             return {"agent_id": aid, "warn_sec": 0, "crit_sec": 0,
                     "muted": 0, "dnd_start": -1, "dnd_end": -1, "updated_at": 0,
-                    "languages": ""}
+                    "languages": "", "notif_read_at": 0}
         return dict(row)
+
+    def set_notif_read_at(self, agent_id: str, read_at_ms: int) -> int:
+        """P8：写通知中心「已读水位线」(毫秒时戳)；只单调前进，返回生效值。"""
+        aid = str(agent_id or "").strip()
+        if not aid:
+            return 0
+        ts = max(0, int(read_at_ms or 0))
+        now = self._now()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO agent_prefs (agent_id, notif_read_at, updated_at) "
+                "VALUES (?,?,?) ON CONFLICT(agent_id) DO UPDATE SET "
+                "notif_read_at=MAX(agent_prefs.notif_read_at, excluded.notif_read_at), "
+                "updated_at=excluded.updated_at",
+                (aid, ts, now))
+            self._conn.commit()
+            row = self._conn.execute(
+                "SELECT notif_read_at FROM agent_prefs WHERE agent_id=?", (aid,)
+            ).fetchone()
+        return int(row[0]) if row else ts
 
     def set_agent_prefs(
         self, agent_id: str, *, warn_sec: int = 0, crit_sec: int = 0,

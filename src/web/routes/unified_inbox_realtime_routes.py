@@ -78,6 +78,11 @@ _NOTIF_EVENT_TYPES = frozenset({
     "ops_report",
 })
 
+# 复发型告警：按「类型+会话」在 notif_queue 内合并，仅保留最新一条（避免历史堆叠）
+_COALESCE_NOTIF_TYPES = frozenset({
+    "escalation", "sla_alert", "draft_sla_breach", "queue_alert", "anomaly_alert",
+})
+
 
 def register_realtime_routes(app, *, api_auth) -> None:
     """挂载 SSE 实时推送 + typing 协同端点。"""
@@ -204,13 +209,32 @@ def register_realtime_routes(app, *, api_auth) -> None:
             return frames
 
         def _maybe_push_notif(evt: dict):
-            """将重要事件写入 app.state.notif_queue（P24 通知中心）。"""
-            if evt.get("type") not in _NOTIF_EVENT_TYPES:
+            """将重要事件写入 app.state.notif_queue（P24 通知中心）。
+
+            复发型告警（升级/会话SLA/草稿SLA/队列/异常）按「类型+会话」合并：
+            写入前先剔除队列中同 key 的旧条，仅保留最新一条 —— 从源头避免历史里
+            同一会话堆几十条同义告警（前端亦有合并，这里是 defense-in-depth）。
+            """
+            etype = evt.get("type")
+            if etype not in _NOTIF_EVENT_TYPES:
                 return
             nq: list = getattr(request.app.state, "notif_queue", None)
             if nq is None:
                 nq = []
                 request.app.state.notif_queue = nq
+            if etype in _COALESCE_NOTIF_TYPES:
+                d = evt.get("data") or {}
+                key = str(d.get("conversation_id") or d.get("draft_id") or d.get("id") or "")
+                if key:
+                    nq[:] = [
+                        n for n in nq
+                        if not (
+                            n.get("type") == etype
+                            and str((n.get("data") or {}).get("conversation_id")
+                                    or (n.get("data") or {}).get("draft_id")
+                                    or (n.get("data") or {}).get("id") or "") == key
+                        )
+                    ]
             nq.append({**evt, "_notif_ts": int(time.time() * 1000)})
             if len(nq) > 200:
                 del nq[:-200]
