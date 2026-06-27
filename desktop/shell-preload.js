@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld("shell", {
   getConfig: () => ipcRenderer.invoke("desktop:config"),
   applyWhatsappUa: (args) => ipcRenderer.invoke("desktop:apply-whatsapp-ua", args),
   backendHealth: () => ipcRenderer.invoke("desktop:backend-health"),
+  backendSpawnStatus: () => ipcRenderer.invoke("desktop:backend-spawn-status"),
+  saveConfig: (patch) => ipcRenderer.invoke("desktop:save-config", patch),
   injectUrl,
   // P2 业务右栏：renderer → 主进程 → 后端（CSP 安全）
   profile: (args) => ipcRenderer.invoke("desktop:profile", args),
@@ -65,4 +67,8 @@ contextBridge.exposeInMainWorld("shell", {
   voiceUnbind: (args) => ipcRenderer.invoke("desktop:voice-unbind", args),
   voiceRebind: (body) => ipcRenderer.invoke("desktop:voice-rebind", body),
   voiceEnroll: (payload) => ipcRenderer.invoke("desktop:voice-enroll", payload),
+  // D4b 受控出站桥：轮询取走发给本内嵌账号的全自动回复（已过后端 send-gate/kill-switch），
+  // 在对应 webview 的官方页 DOM 填入并发送，再回执。
+  outboundPull: (args) => ipcRenderer.invoke("desktop:outbound-pull", args),
+  outboundAck: (args) => ipcRenderer.invoke("desktop:outbound-ack", args),
 });

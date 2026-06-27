@@ -46,6 +46,7 @@ let ACCOUNTS = []; // 解析后的账号列表（rail 渲染源）
 const ACCOUNT_BY_ID = {}; // account_id → 解析后账号
 let TEMPLATES = {}; // platform → config.platforms[*] 模板（运行时新增内嵌账号取 url/inject）
 const RENDERED = new Set(); // 已渲染 rail Tab 的 id，运行时新增/重建去重
+const ACTIVE_CHAT_BY_ACCOUNT = {}; // D4b：account_id → 当前打开会话 chat_key（受控出站分发用）
 
 // 运行时新增的内嵌账号持久化到 localStorage，重启后自动重建（partition=persist:id 故会话也续上）。
 const RUNTIME_ACCOUNTS_KEY = "desktop_runtime_accounts";
@@ -262,6 +263,15 @@ function resolveAccounts(cfg) {
         let ok = false;
         try { const h = await window.shell.backendHealth(); ok = !!(h && h.ok); } catch (e) {}
         if (ok) { reload(); return; }
+        // 桌面自拉起后端时，把笼统的「等待重连」细化为启动阶段，降低首启焦虑。
+        try {
+          const st = window.shell.backendSpawnStatus ? await window.shell.backendSpawnStatus() : null;
+          const phase = st && st.status;
+          if (phase === "starting" || phase === "probing")
+            setPhase("error", "正在启动后台服务，请稍候…（首次启动较慢）");
+          else if (phase === "failed")
+            setPhase("error", "后台启动失败：" + (st.lastError || "未知错误") + "\n详见 用户数据/logs/backend.log；将持续重试…");
+        } catch (e) {}
         Inbox._reconnectTimer = setTimeout(tick, 2000);
       };
       Inbox._reconnectTimer = setTimeout(tick, 2000);
@@ -510,6 +520,7 @@ function resolveAccounts(cfg) {
     const ob = document.getElementById("cp-open-inbox");
     if (ob) ob.hidden = false; // 内嵌平台 Tab 右栏：一键在统一收件箱打开同会话
   }
+  if (EMBEDDED_ON) startOutboundPoll(); // D4b：受控出站轮询（仅内嵌模式）
 })();
 
 // ── 业务右栏逻辑 ─────────────────────────────────────────────────────────────
@@ -969,6 +980,43 @@ async function fillComposer(text, send) {
   flash(send ? "已填入并发送 ✓" : "已填入 ✓");
 }
 
+// ── D4b：受控桌面出站轮询 ────────────────────────────────────────────────────
+// 从后端「受控出站队列」取走发给各内嵌账号的全自动回复（已在服务端过 send-gate/
+// kill-switch 闸门），分发到对应 webview 的官方页 DOM 发送，再回执。
+// 安全：只对**当前已打开对应会话**的账号拉取（chat_key 过滤）——注入 fill-composer 只填
+// 当前打开的 composer、不会按 chat_key 导航，故未打开的会话命令留队列等打开，绝不发错聊天。
+let _outboundTimer = null;
+async function pollOutboundOnce() {
+  if (!window.shell || !window.shell.outboundPull) return;
+  const wvs = document.querySelectorAll('#webviews webview[data-account]');
+  for (const wv of wvs) {
+    const account_id = wv.dataset.account;
+    const platform = wv.dataset.platform;
+    if (!account_id || !platform) continue;
+    const chat_key = ACTIVE_CHAT_BY_ACCOUNT[account_id];
+    if (!chat_key) continue; // 该账号未打开任何会话 → 不拉（命令留队列等打开）
+    let res;
+    try {
+      res = await window.shell.outboundPull({ platform, account_id, chat_key, limit: 10 });
+    } catch (e) { continue; }
+    const items = (res && res.items) || [];
+    for (const it of items) {
+      try {
+        wv.send("fill-composer", { text: it.text, send: true });
+        await window.shell.outboundAck({ id: it.id, ok: true });
+        // 多条间隔，避免连发把 composer 冲掉（注入 send 后 ~150ms 才点发送）
+        await new Promise((r) => setTimeout(r, 600));
+      } catch (e) {
+        try { await window.shell.outboundAck({ id: it.id, ok: false, error: String(e) }); } catch (_) {}
+      }
+    }
+  }
+}
+function startOutboundPoll() {
+  if (_outboundTimer) return;
+  _outboundTimer = setInterval(() => { pollOutboundOnce().catch(() => {}); }, 5000);
+}
+
 // 发送前风控：命中支付/密码=high 需确认；优惠/投诉=medium 提醒；AI 口吻提醒。护栏不可用不阻断。
 async function guardConfirm(text) {
   let v;
@@ -1045,6 +1093,9 @@ function onActiveChat(payload, webview) {
   // 账号归属:优先 inject 上报；回落该 webview 的 dataset（renderer 才是权威来源）
   const accountId = payload.account_id || (webview && webview.dataset && webview.dataset.account) || "";
   Copilot.ctx = { ...payload, account_id: accountId, webview };
+  // D4b：记录每个内嵌账号「当前打开的会话」——受控出站轮询据此只把命令分发到
+  // 已打开对应会话的 webview（注入 fill-composer 不导航，防止发错聊天）。
+  if (accountId) ACTIVE_CHAT_BY_ACCOUNT[accountId] = payload.chat_key;
 
   const _accId = currentAccountId(Copilot.ctx);
   const _cpCtx = window.CopilotShared ? {

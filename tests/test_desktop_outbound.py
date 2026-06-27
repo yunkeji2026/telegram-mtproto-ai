@@ -119,6 +119,27 @@ def test_stale_claimed_is_reclaimed_on_pull():
     assert again[0]["attempts"] == 2  # 第二次认领
 
 
+def test_pull_filters_by_chat_key():
+    q = _q()
+    q.enqueue("instagram", "ig1", "cA", "给A", guard=_allow)
+    q.enqueue("instagram", "ig1", "cB", "给B", guard=_allow)
+    # 只拉当前打开会话 cA → 只认领 cA，cB 留队列（不发错聊天、不丢）
+    got = q.pull("instagram", "ig1", chat_key="cA")
+    assert [it["text"] for it in got] == ["给A"]
+    assert q.pending_count("instagram", "ig1") == 2  # cB 仍在途/待发
+    # 切到 cB 才认领 cB
+    got2 = q.pull("instagram", "ig1", chat_key="cB")
+    assert [it["text"] for it in got2] == ["给B"]
+
+
+def test_pull_without_chat_key_takes_all():
+    q = _q()
+    q.enqueue("instagram", "ig1", "cA", "给A", guard=_allow)
+    q.enqueue("instagram", "ig1", "cB", "给B", guard=_allow)
+    got = q.pull("instagram", "ig1")  # 不限会话 → 全取
+    assert {it["text"] for it in got} == {"给A", "给B"}
+
+
 def test_summary_counts_by_status():
     q = _q()
     q.enqueue("instagram", "ig1", "c1", "a", guard=_allow)

@@ -290,6 +290,15 @@
   <div id="ov-dh-body" style="margin-top:.45rem;font-size:.76rem;line-height:1.5;color:var(--muted)">载入中…</div>
 </div>
 
+<!-- D4b：受控桌面出站队列（autopilot 发给内嵌账号的回复，已过 send-gate/kill-switch 闸门）-->
+<div id="ov-desktop-outbound-card" style="margin-top:.6rem;background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:.6rem .85rem">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem">
+    <div style="font-weight:600;font-size:.82rem">📤 桌面出站队列 <span id="ov-dob-summary" style="font-weight:400;color:var(--muted);font-size:.72rem"></span></div>
+    <button id="ov-dob-refresh" style="font-size:.72rem;padding:.18rem .6rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="全自动回复发给内嵌(桌面/扩展)账号前已过 send-gate/kill-switch 闸门；命令入队后由桌面壳/扩展轮询 DOM 发送。默认关，需 inbox.l2_autosend.desktop_bridge.enabled">刷新</button>
+  </div>
+  <div id="ov-dob-body" style="margin-top:.45rem;font-size:.76rem;line-height:1.5;color:var(--muted)">载入中…</div>
+</div>
+
 <!-- 4 平台卡片 -->
 <div class="ov-grid" id="ov-grid">
   <!-- Telegram -->
@@ -908,6 +917,7 @@ async function ovRefresh(){
     ovRefreshFleet();  // N6：机群反封号健康灯（独立拉取，失败不影响主刷新）
     ovRefreshPreflight();  // N：真号扫码陪聊上线前自检红绿灯（独立拉取）
     ovRefreshDesktopHealth();  // D1c：桌面壳内嵌注入健康（独立拉取）
+    ovRefreshDesktopOutbound();  // D4b：受控桌面出站队列（独立拉取）
     document.getElementById('ov-last').textContent = new Date().toLocaleTimeString('zh-CN',{hour12:false});
   }catch(e){
     console.warn('overview refresh failed', e);
@@ -1163,6 +1173,47 @@ async function ovRefreshDesktopHealth(){
   }catch(e){ body.textContent = '桌面注入健康请求失败'; }
 }
 
+// ── D4b：受控桌面出站队列看板 ────────────────────────────────────────────────
+const _DOB_STATUS = {
+  pending: {t:'待发',  c:'#d29922'},
+  claimed: {t:'认领中', c:'#58a6ff'},
+  sent:    {t:'已发',  c:'#3fb950'},
+  failed:  {t:'失败',  c:'#f85149'},
+};
+let _dobLastFailed = 0;
+async function ovRefreshDesktopOutbound(){
+  const body = document.getElementById('ov-dob-body');
+  const sum  = document.getElementById('ov-dob-summary');
+  if(!body) return;
+  try{
+    const d = await fetch('/api/desktop/outbound/stats').then(r=>r.json());
+    const s = (d&&d.summary)||{};
+    const recent = (d&&d.recent)||[];
+    const inflight = (s.pending||0)+(s.claimed||0);
+    const failed = s.failed||0;
+    if(sum){
+      sum.innerHTML = '在途 '+inflight+' · 已发 '+(s.sent||0)
+        + (failed ? ' · <strong style="color:#f85149">失败 '+failed+'</strong>' : '');
+    }
+    // 失败告警：新出现失败时弹一次（去重，避免刷屏）
+    if(failed>_dobLastFailed && window.rpa && rpa.toast){
+      rpa.toast('桌面出站队列新增 '+(failed-_dobLastFailed)+' 条失败（DOM 发送失败/被闸门拦截）', 'err');
+    }
+    _dobLastFailed = failed;
+    if(!recent.length){
+      body.innerHTML = '<span style="color:var(--muted)">暂无出站命令（未开 desktop_bridge / 无 desktop 账号全自动回复）。</span>';
+      return;
+    }
+    body.innerHTML = recent.map(function(it){
+      const st = _DOB_STATUS[it.status] || {t:it.status||'未知', c:'var(--muted)'};
+      const att = (it.attempts>1) ? ' <span style="color:var(--muted);font-size:.68rem">×'+it.attempts+'</span>' : '';
+      return '<div style="display:flex;justify-content:space-between;gap:.5rem;padding:.2rem 0;border-bottom:1px solid var(--bd)">'
+        + '<span>'+_dhEsc(it.platform)+' · '+_dhEsc(it.account_id||'—')+' <span style="color:var(--muted);font-size:.68rem">'+_dhEsc(it.preview||'')+'</span></span>'
+        + '<span style="color:'+st.c+'">'+st.t+att+'</span></div>';
+    }).join('');
+  }catch(e){ body.textContent = '桌面出站队列请求失败'; }
+}
+
 let _ovTimer = null;
 function ovScheduleRefresh(){
   if(_ovTimer){ clearInterval(_ovTimer); _ovTimer = null; }
@@ -1199,6 +1250,9 @@ document.addEventListener('DOMContentLoaded', function(){
   // D1c：桌面注入健康（按钮手动刷新 + 随主循环 ovRefresh 自动刷新）
   var _dhBtn = document.getElementById('ov-dh-refresh');
   if(_dhBtn){ _dhBtn.addEventListener('click', ovRefreshDesktopHealth); }
+  // D4b：桌面出站队列（按钮手动刷新 + 随主循环自动刷新）
+  var _dobBtn = document.getElementById('ov-dob-refresh');
+  if(_dobBtn){ _dobBtn.addEventListener('click', ovRefreshDesktopOutbound); }
   // P5 + Q4: 运营漏斗初始加载 + 60s 轮询，默认 scope=all（跨平台总览）
   if(window.rpa && window.rpa.funnel){ window.rpa.funnel.init({intervalSec:60, defaultScope:'all'}); }
 

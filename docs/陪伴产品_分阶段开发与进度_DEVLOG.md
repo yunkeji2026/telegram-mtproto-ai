@@ -3441,3 +3441,53 @@ durable、可回收**」——「受控 autopilot」的服务端骨架闭合，a
 kill-switch。双向桥的出站半边铺通（入站 §82 已通）。
 **下一步（D4b）**：① renderer/扩展轮询→按账号 webview 分发 DOM 发送（最后一跳，需真号验证）；
 ② 出站队列看板；③ Tier1 `canIngest` 真号校准打开入站全平台。
+
+---
+
+## 91. Stage D4b：出站桥最后一跳——按账号 webview 分发 DOM 发送 + 队列看板
+
+**实施前的思考**：D4a 铺好了「受控出站队列」（服务端），但命令进了队列**没人取**——桌面壳/扩展还没
+轮询分发。D4b 接最后一跳：renderer 轮询队列 → 把命令发到**对应账号的 webview** 走官方页 DOM 发送。
+探查发现一个**致命安全点**：注入的 `fill-composer` 只填**当前打开的会话** composer、**不会按 chat_key
+导航**——若目标会话没打开，autopilot 回复会发进**错的聊天**（串话 = 比不发更严重的事故）。
+
+**关键安全设计（chat_key 闸）**：给队列 `pull` 加 **chat_key 过滤**——客户端只拉「**当前已打开对应
+会话**」的命令，其余命令**留在队列**等那个会话被打开。这样：① 绝不发错聊天（每条命令只会进它该进的
+会话）；② 不丢（未打开的留队列，会话一打开下轮即取）；③ 无需脆弱的「按 chat_key 自动导航」（那需
+逐平台真号校准）。renderer 维护 `account_id → 当前打开 chat_key`（从各 webview 的 active-chat 上报），
+轮询时只对「有打开会话」的账号按其 chat_key 拉取。
+
+**改动**：
+- `desktop_outbound.py`：`pull(..., chat_key=None)`——给定 chat_key 时只认领该会话命令（默认 None=全取，
+  向后兼容）。
+- 路由：`GET /api/desktop/outbound` 加可选 `chat_key`；新增 `GET /api/desktop/outbound/stats`（看板：状态
+  概览 + 近期命令，**文本仅 24 字预览**防全文泄露）；路由清单 +1。
+- 客户端：`shell-preload.js` 暴露 `outboundPull/outboundAck`；`renderer.js` 加 `ACTIVE_CHAT_BY_ACCOUNT`
+  （onActiveChat 回写）+ `pollOutboundOnce`/`startOutboundPoll`（5s 轮询，仅 `EMBEDDED_ON`）：遍历已加载内嵌
+  webview，对有打开会话者按 chat_key 拉取 → `wv.send("fill-composer",{text,send:true})`（复用既有原语）→
+  ack；多条间 600ms 间隔防连发冲掉 composer。
+- 看板：`rpa_overview.html` 加「📤 桌面出站队列」卡（仿 D1c）——在途/已发/失败计数 + 近期命令状态色块 +
+  新增失败 toast 告警（去重），挂进主刷新循环 ovRefresh + 手动刷新按钮。
+
+**实施中的再优化**：
+1. **chat_key 闸替代自动导航**：原始方案要让注入「先导航到 chat_key 再填」，但那要逐平台真号校准导航
+   选择器、又脆。改用「只拉当前打开会话」——把「发对聊天」的保证从「脆弱的导航」下沉为「队列侧
+   chat_key 过滤」这条硬约束，零真号依赖即安全。
+2. **看板文本预览而非全文**：stats 端点只回 24 字预览（出站含客户对话内容），既可观测又不在运营页泄露全文。
+3. **复用既有 DOM 原语**：分发就是把命令喂给手动「填入并发送」验证过的 `fill-composer` 路径，不新造发送逻辑。
+
+**能否再优化**：① 当前「未打开会话的命令」要等人/系统打开该会话才发——若需「无人值守也能发任意会话」，
+仍需逐平台真号校准 chat 导航（独立增强，已有 chat_key 闸兜底安全）；② ack ok=true 现表「已分发」非
+「已确认送达」（DOM send 是 fire-and-forget），可让注入回传真实发送结果再精确 ack；③ 扩展 content 侧的
+同款轮询循环（background handler 已就绪，content 分发循环待补）。
+
+**回归**：`test_desktop_outbound`（+2 chat_key 过滤：只取当前会话/留其余、不限会话全取，共 19）+
+`test_autosend_blocked_not_delivered` + `test_admin_route_inventory`（清单含 3 新端点）+ `test_rpa_overview`
+（看板模板编译）**42 passed**；`desktop npm test` **152 passed**（renderer/preload `node --check` 通过）；
+全量 **6326 passed / 31 skipped / 0 failed**（另有 1 例 `test_web_users` 并行 worker 崩溃，单独复跑 13 passed，
+与本改动无关——见 CLAUDE.md `-n auto` 与常驻服务争用告警）。
+
+**Stage D4b 收口**：受控出站桥**端到端闭合**——autopilot 决定发 → 经 send-gate/kill-switch 闸门入队 →
+桌面壳按账号+当前会话轮询取走 → 官方页 DOM 发送 → 看板可见。**绝不发错聊天**（chat_key 闸）、不丢命令、
+全程受控可观测。D4「双向收件箱桥 + 受控 autopilot」自治部分完成，剩真号侧（chat 导航 + canIngest 校准）。
+**下一步**：① 真号验证 DOM 发送 + Tier1 `canIngest` 校准；② 注入回传真实发送结果精确 ack；③ 扩展 content 轮询循环。

@@ -159,15 +159,21 @@ class DesktopOutboundQueue:
         platform: str,
         account_id: str,
         *,
+        chat_key: Optional[str] = None,
         limit: int = 20,
         now: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
         """认领某账号的 pending 命令（pending→claimed，attempts+1），按 id 升序。
 
+        ``chat_key`` 给定时**仅认领该会话**的命令——注入 ``fill-composer`` 只填当前打开的
+        会话、不会按 chat_key 导航；客户端按「当前打开会话」拉取，其余命令留队列等会话打开，
+        既不丢、也**绝不发错聊天**（防封号/防串话的关键安全闸）。
+
         认领前先回收**超时未 ack** 的 claimed（桌面壳崩溃/页面关闭），避免命令卡死。
         """
         p = str(platform or "").lower()
         a = str(account_id or "")
+        ck = None if chat_key is None else str(chat_key)
         lim = max(1, min(int(limit or 20), 100))
         ts = float(now if now is not None else time.time())
         with self._lock:
@@ -178,12 +184,15 @@ class DesktopOutboundQueue:
                 "AND claimed_at IS NOT NULL AND (? - claimed_at) > ?",
                 (p, a, ts, _RECLAIM_AFTER_SEC),
             )
-            rows = self._conn.execute(
-                "SELECT * FROM desktop_outbound "
-                "WHERE platform=? AND account_id=? AND status='pending' "
-                "ORDER BY id ASC LIMIT ?",
-                (p, a, lim),
-            ).fetchall()
+            sql = ("SELECT * FROM desktop_outbound "
+                   "WHERE platform=? AND account_id=? AND status='pending'")
+            args: List[Any] = [p, a]
+            if ck is not None:
+                sql += " AND chat_key=?"
+                args.append(ck)
+            sql += " ORDER BY id ASC LIMIT ?"
+            args.append(lim)
+            rows = self._conn.execute(sql, tuple(args)).fetchall()
             items: List[Dict[str, Any]] = []
             for r in rows:
                 rid = int(r["id"])

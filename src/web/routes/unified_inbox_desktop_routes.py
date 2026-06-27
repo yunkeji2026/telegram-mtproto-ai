@@ -213,6 +213,9 @@ def register_desktop_routes(app, *, api_auth) -> None:
         """
         platform = str(request.query_params.get("platform") or "").lower()
         account_id = str(request.query_params.get("account_id") or "")
+        # chat_key 给定 → 仅认领该会话命令（注入只填当前打开会话、不导航，防发错聊天）
+        _ck = request.query_params.get("chat_key")
+        chat_key = None if _ck is None else str(_ck)
         try:
             limit = int(request.query_params.get("limit") or 20)
         except Exception:
@@ -220,8 +223,33 @@ def register_desktop_routes(app, *, api_auth) -> None:
         if not platform or not account_id:
             raise HTTPException(400, "platform / account_id 不能为空")
         from src.inbox.desktop_outbound import get_desktop_outbound_queue
-        items = get_desktop_outbound_queue().pull(platform, account_id, limit=limit)
+        items = get_desktop_outbound_queue().pull(
+            platform, account_id, chat_key=chat_key, limit=limit)
         return {"ok": True, "items": items}
+
+    @app.get("/api/desktop/outbound/stats")
+    async def api_desktop_outbound_stats(request: Request, _=Depends(api_auth)):
+        """受控出站队列看板数据（D4b）：按状态概览 + 近期命令（文本仅预览，防泄露全文）。
+
+        返回: {ok, summary:{pending,claimed,sent,failed,total}, recent:[{id,platform,
+               account_id,chat_key,status,attempts,preview}]}
+        """
+        from src.inbox.desktop_outbound import get_desktop_outbound_queue
+        q = get_desktop_outbound_queue()
+        try:
+            limit = int(request.query_params.get("limit") or 30)
+        except Exception:
+            limit = 30
+        recent = []
+        for it in q.recent(limit=limit):
+            _t = str(it.get("text") or "")
+            recent.append({
+                "id": it.get("id"), "platform": it.get("platform"),
+                "account_id": it.get("account_id"), "chat_key": it.get("chat_key"),
+                "status": it.get("status"), "attempts": it.get("attempts"),
+                "preview": (_t[:24] + "…") if len(_t) > 24 else _t,
+            })
+        return {"ok": True, "summary": q.summary(), "recent": recent}
 
     @app.post("/api/desktop/outbound/ack")
     async def api_desktop_outbound_ack(request: Request, _=Depends(api_auth)):
