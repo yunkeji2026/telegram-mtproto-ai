@@ -126,6 +126,66 @@ async def line_push(
     return True
 
 
+async def line_push_media(
+    to: str,
+    media_url: str,
+    access_token: str,
+    *,
+    media_type: str = "audio",
+    duration_ms: int = 0,
+    preview_url: str = "",
+    account_id: str = "default",
+    check_kill_switch: bool = True,
+) -> bool:
+    """Push 一条媒体消息（audio/image）。LINE 仅接受**公网可达 https URL**（不上传字节）。
+
+    - audio：``{type:'audio', originalContentUrl, duration(ms)}``——duration 必填，
+      为 0 时回退 60000ms（LINE 仅作进度条展示，长度不精确不影响播放）。
+    - image：``{type:'image', originalContentUrl, previewImageUrl}``。
+    返回是否成功投递；``media_url`` 非 https → 直接判失败（LINE 必须 https）。
+    """
+    if check_kill_switch and _line_kill_switch_blocked(account_id):
+        return False
+    if not media_url or not str(media_url).lower().startswith("https://"):
+        logger.warning("[line] 媒体发送需 https 公网 URL，得到: %s", media_url)
+        return False
+    mt = str(media_type or "").lower()
+    if mt in ("voice", "audio"):
+        msg: Dict[str, Any] = {
+            "type": "audio",
+            "originalContentUrl": media_url,
+            "duration": int(duration_ms) if int(duration_ms or 0) > 0 else 60000,
+        }
+    elif mt == "image":
+        msg = {
+            "type": "image",
+            "originalContentUrl": media_url,
+            "previewImageUrl": preview_url or media_url,
+        }
+    else:
+        logger.warning("[line] 不支持的媒体类型: %s", media_type)
+        return False
+    payload = {"to": to, "messages": [msg]}
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+    try:
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                LINE_PUSH_URL, headers=headers, json=payload
+            ) as resp:
+                if resp.status != 200:
+                    body = await resp.text()
+                    logger.warning("LINE push media HTTP %s: %s", resp.status, body[:500])
+                    return False
+    except Exception as e:  # noqa: BLE001
+        logger.warning("LINE push media failed: %s", e)
+        return False
+    return True
+
+
 def register_line_routes(
     app: FastAPI,
     config_manager: Any,
@@ -242,6 +302,15 @@ def register_line_routes(
                 mirror_to_inbox("line", line_account_id, chat_key, text,
                                 direction="in", name=line_uid,
                                 msg_id=str(msg.get("id") or ""))
+            except Exception:
+                pass
+
+            # Phase A：auto_ai 让位——交统一收件箱 autosend(System Z) 全自动接管
+            # （人设+语言+风控+拟人延迟，与 Telegram 同一条），跳过自答/管道避免双发。
+            try:
+                from src.integrations.shared.official_inbound import inbox_will_autosend
+                if inbox_will_autosend("line", line_account_id, chat_key):
+                    continue
             except Exception:
                 pass
 

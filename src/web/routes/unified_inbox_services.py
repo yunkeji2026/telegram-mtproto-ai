@@ -122,6 +122,83 @@ def _resolve_conv_engine(request: Request, platform: str, account_id: str, chat_
         return ""
 
 
+# P3：默认译文显示语言 KV 键前缀（运营级，区别于会话级 conversations.pref_engine）。
+_DEFAULT_LANG_KEY = "inbox.default_lang"
+# P4-C：默认「回复语言」KV 键前缀（出站轴：把坐席草稿译成客户语言；区别于上面的入站显示语言）。
+#       桌面 copilot 草稿语言选择器在无会话级记忆时回落到此（账号 > 平台 > 全局）。
+_REPLY_LANG_KEY = "inbox.default_reply_lang"
+
+
+def _resolve_default_lang(
+    request: Request, platform: str, account_id: str, *, base: str = _DEFAULT_LANG_KEY,
+) -> dict:
+    """P3：解析「默认译文显示语言」。优先级：账号 > 平台 > 全局。
+
+    均未配置 → ``resolved=""``（前端据此回落浏览器本地/内置 zh）。返回还含 ``scopes``
+    （各维度已配置原始值，供运营编辑回显）。best-effort：store 不可用/异常 → 全空。
+    P4-C：``base`` 可切到 ``_REPLY_LANG_KEY`` 复用同一解析逻辑做「默认回复语言」。
+    """
+    out = {"resolved": "", "scopes": {"global": "", "platform": "", "account": ""}}
+    ibx = _inbox_store(request)
+    if ibx is None:
+        return out
+    p = str(platform or "").lower().strip()
+    a = str(account_id or "default").strip()
+    try:
+        g = normalize_lang(ibx.get_app_setting(base))
+        pl = normalize_lang(ibx.get_app_setting(f"{base}.platform.{p}")) if p else ""
+        ac = normalize_lang(
+            ibx.get_app_setting(f"{base}.account.{p}.{a}")
+        ) if p else ""
+        out["scopes"] = {"global": g, "platform": pl, "account": ac}
+        out["resolved"] = ac or pl or g or ""
+    except Exception:
+        logger.debug("[default-lang] 解析失败（忽略）", exc_info=True)
+    return out
+
+
+def _resolve_default_reply_lang(request: Request, platform: str, account_id: str) -> dict:
+    """P4-C：解析「默认回复语言」（出站轴）。复用 _resolve_default_lang 的优先级。"""
+    return _resolve_default_lang(request, platform, account_id, base=_REPLY_LANG_KEY)
+
+
+def _list_default_langs(request: Request, *, base: str = _DEFAULT_LANG_KEY) -> list:
+    """P4-A：列出所有已配置的「默认译文语言」并解析回 scope 维度（运营管理面板用）。
+
+    返回 ``[{scope, platform, account_id, lang, updated_by, updated_at}]``。store 不可用 → []。
+    P4-C：``base`` 可切到 ``_REPLY_LANG_KEY`` 复用同一列出逻辑做「默认回复语言」。
+    """
+    items: list = []
+    ibx = _inbox_store(request)
+    if ibx is None:
+        return items
+    try:
+        rows = ibx.list_app_settings(base)
+    except Exception:
+        logger.debug("[default-lang] 列出失败（忽略）", exc_info=True)
+        return items
+    pf_prefix, ac_prefix = base + ".platform.", base + ".account."
+    for r in rows:
+        k = str(r.get("key") or "")
+        if k == base:
+            scope, platform, account = "global", "", ""
+        elif k.startswith(pf_prefix):
+            scope, platform, account = "platform", k[len(pf_prefix):], ""
+        elif k.startswith(ac_prefix):
+            rest = k[len(ac_prefix):]
+            parts = rest.split(".", 1)
+            scope, platform = "account", parts[0]
+            account = parts[1] if len(parts) > 1 else ""
+        else:
+            continue
+        items.append({
+            "scope": scope, "platform": platform, "account_id": account,
+            "lang": r.get("value") or "", "updated_by": r.get("updated_by") or "",
+            "updated_at": r.get("updated_at") or 0,
+        })
+    return items
+
+
 def _ecommerce_tools(request: Request):
     """电商工具服务（Phase D）。未启用时返回 None（feature-flag ecommerce_tools.enabled）。"""
     return getattr(request.app.state, "ecommerce_tools", None)

@@ -140,9 +140,10 @@ class TestAutosendWorker:
             {"draft_id": "d1", "autopilot_level": "L3", "status": "pending"},
         ])
         w = AutosendWorker(draft_service=svc, config={})
-        sent, errors = w._process_batch()
+        sent, errors, to_deliver = w._process_batch()
         assert sent == 0
         assert errors == 0
+        assert to_deliver == []
 
     def test_process_batch_sends_l2(self):
         svc = self._make_svc(drafts=[
@@ -151,9 +152,11 @@ class TestAutosendWorker:
             {"draft_id": "inbox:a3", "autopilot_level": "L4", "status": "pending"},
         ], ok=True)
         w = AutosendWorker(draft_service=svc, config={})
-        sent, errors = w._process_batch()
+        sent, errors, to_deliver = w._process_batch()
         assert sent == 2
         assert errors == 0
+        # 无 send_callback 时不收集投递载荷（保持旧行为：仅 DB 标记）
+        assert to_deliver == []
 
     def test_process_batch_isolates_errors(self):
         svc = MagicMock()
@@ -169,9 +172,125 @@ class TestAutosendWorker:
         svc.resolve_with_audit.side_effect = _resolve
 
         w = AutosendWorker(draft_service=svc, config={})
-        sent, errors = w._process_batch()
+        sent, errors, _ = w._process_batch()
         assert sent == 1
         assert errors == 1
+
+    def test_process_batch_collects_deliver_payload_when_callback(self):
+        """注入 send_callback 后，resolve 成功的 L2 草稿收集投递载荷（含 text/平台路由键）。"""
+        async def _noop(*a, **k):
+            return {"ok": True}
+        svc = self._make_svc(drafts=[
+            {"draft_id": "inbox:a1", "autopilot_level": "L2", "status": "pending",
+             "platform": "line", "account_id": "line-a", "chat_key": "room1",
+             "conversation_id": "line:line-a:room1", "draft_text": "您好，已收到"},
+            {"draft_id": "inbox:a2", "autopilot_level": "L2", "status": "pending",
+             "platform": "telegram", "chat_key": "tg1", "draft_text": "hi",
+             "final_text": "您好（终）"},
+        ], ok=True)
+        w = AutosendWorker(draft_service=svc, config={}, send_callback=_noop)
+        sent, errors, to_deliver = w._process_batch()
+        assert sent == 2 and errors == 0
+        assert len(to_deliver) == 2
+        assert to_deliver[0]["platform"] == "line"
+        assert to_deliver[0]["chat_key"] == "room1"
+        assert to_deliver[0]["text"] == "您好，已收到"
+        # final_text 优先于 draft_text
+        assert to_deliver[1]["text"] == "您好（终）"
+
+    def test_tick_delivers_via_callback(self):
+        """_tick：resolve 成功后真正调用 send_callback 投递，更新 delivered 计数。"""
+        delivered = []
+
+        async def _cb(platform, account_id, chat_key, text):
+            delivered.append((platform, account_id, chat_key, text))
+            return {"ok": True}
+
+        svc = self._make_svc(drafts=[
+            {"draft_id": "inbox:a1", "autopilot_level": "L2", "status": "pending",
+             "platform": "line", "account_id": "line-a", "chat_key": "room1",
+             "draft_text": "您好"},
+        ], ok=True)
+        w = AutosendWorker(draft_service=svc, config={"min_interval_sec": 0}, send_callback=_cb)
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(w._tick())
+        finally:
+            loop.close()
+        assert delivered == [("line", "line-a", "room1", "您好")]
+        assert w.total_delivered == 1
+        assert w.total_deliver_errors == 0
+        snap = w.status_snapshot()
+        assert snap["deliver_enabled"] is True
+        assert snap["total_delivered"] == 1
+
+    def test_tick_deliver_failure_counts_not_resend(self):
+        """投递失败计入 deliver_errors，但草稿已 resolve（不会重发，避免刷屏）。"""
+        async def _cb(platform, account_id, chat_key, text):
+            raise RuntimeError("platform down")
+
+        svc = self._make_svc(drafts=[
+            {"draft_id": "inbox:a1", "autopilot_level": "L2", "status": "pending",
+             "platform": "line", "chat_key": "room1", "draft_text": "您好"},
+        ], ok=True)
+        w = AutosendWorker(draft_service=svc, config={"min_interval_sec": 0}, send_callback=_cb)
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(w._tick())
+        finally:
+            loop.close()
+        assert w.total_delivered == 0
+        assert w.total_deliver_errors == 1
+        # resolve 成功 → sent 计数仍 +1（投递失败不回滚审计，宁丢不重发）
+        assert w.total_sent == 1
+
+    def test_tick_deliver_failure_writes_audit(self):
+        """投递失败时调用 DraftService.record_autosend_failure（写 autosend_failed 审计）。"""
+        async def _cb(platform, account_id, chat_key, text):
+            raise RuntimeError("platform down")
+
+        svc = self._make_svc(drafts=[
+            {"draft_id": "inbox:a1", "autopilot_level": "L2", "status": "pending",
+             "platform": "line", "chat_key": "room1", "draft_text": "您好",
+             "conversation_id": "line:default:room1"},
+        ], ok=True)
+        w = AutosendWorker(draft_service=svc, config={"min_interval_sec": 0}, send_callback=_cb)
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(w._tick())
+        finally:
+            loop.close()
+        svc.record_autosend_failure.assert_called_once()
+        _args, _kw = svc.record_autosend_failure.call_args
+        assert _args[0] == "inbox:a1"
+        assert _kw.get("conversation_id") == "line:default:room1"
+
+    def test_startup_delay_interrupted_by_event(self):
+        """首发延迟可被新 L2 事件提前唤醒（不傻等满 startup_delay）。"""
+        svc = self._make_svc(drafts=[])
+        # startup_delay 很大，但事件触发应让 run() 几乎立即跳过等待进入循环
+        w = AutosendWorker(
+            draft_service=svc,
+            config={"startup_delay_sec": 30, "min_interval_sec": 0, "max_interval_sec": 0},
+        )
+
+        async def _drive():
+            task = asyncio.ensure_future(w.run())
+            await asyncio.sleep(0.02)
+            w.notify_new_l2()          # 模拟新 L2 草稿落库
+            await asyncio.sleep(0.05)  # 给 run() 机会跑过 startup 等待 + 首个 _tick
+            w.stop()
+            w.notify_new_l2()          # 唤醒循环让其检查 _running=False 退出
+            await asyncio.wait_for(task, timeout=2.0)
+
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(_drive())
+        finally:
+            loop.close()
+        # 若 startup 等待未被打断，0.05s 内不可能 cycles>=1（startup_delay=30s）
+        assert w.cycles >= 1
+        assert w.event_triggers >= 1
 
     def test_circuit_breaker_opens(self):
         svc = MagicMock()

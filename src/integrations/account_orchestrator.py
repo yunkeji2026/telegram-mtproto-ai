@@ -298,8 +298,14 @@ class AccountOrchestrator:
     async def send_media(
         self, platform: str, account_id: str, chat_key: str, *,
         media_path: str, media_url: str, media_type: str, caption: str = "",
+        inbox_text: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """经 worker 发送媒体，并把出站媒体消息回写收件箱线程（media_ref 用 /static URL）。"""
+        """经 worker 发送媒体，并把出站媒体消息回写收件箱线程（media_ref 用 /static URL）。
+
+        ``inbox_text``：**仅**回写给收件箱（坐席台可读）的文本，不发给客户；为 None 时回落
+        ``caption``（向后兼容）。语音出站用它把「念了什么」带进会话视图——坐席不播放也能读，
+        客户那边仍是纯语音（caption 不变）。
+        """
         # Stage M：编排器发送入口统一护栏（Kill-Switch + 反封号闸门）——富媒体与文本同守。
         _blk, _reason = send_blocked(
             platform, account_id, config=self._config, registry=self._registry)
@@ -311,13 +317,24 @@ class AccountOrchestrator:
         if not (m is not None and m.state == "running"
                 and m.worker is not None and hasattr(m.worker, "send_media")):
             raise RuntimeError(f"无可用的运行中 worker(媒体): {platform}:{account_id}")
-        res = await m.worker.send_media(
-            chat_key, media_path=media_path, media_type=media_type, caption=caption)
+        # 透传 media_url 给支持的 worker（LINE/Messenger 官方通道需公网 URL 拉取）；
+        # 旧 worker（telegram/wa-protocol/测试 fake）签名无此参 → 经签名探测跳过，零回归。
+        _sm = m.worker.send_media
+        _kw: Dict[str, Any] = dict(
+            media_path=media_path, media_type=media_type, caption=caption)
+        try:
+            import inspect
+            if "media_url" in inspect.signature(_sm).parameters:
+                _kw["media_url"] = media_url
+        except (ValueError, TypeError):
+            pass
+        res = await _sm(chat_key, **_kw)
         try:
             from src.integrations.protocol_bridge import emit_incoming, make_message
+            _itext = inbox_text if inbox_text is not None else caption
             emit_incoming(make_message(
                 platform=platform, account_id=account_id, chat_key=chat_key,
-                text=caption, direction="out",
+                text=_itext, direction="out",
                 media_type=media_type, media_ref=media_url,
             ))
         except Exception:

@@ -145,6 +145,151 @@ async def wa_send_text(
         return {"ok": False, "error": str(e)}
 
 
+# ── 媒体出站（Phase B：语音/图片/视频/文件，与 Telegram 出站对齐）──────────────
+# WhatsApp Cloud 媒体须先 upload→media_id 再 send（不接受外链本地文件），故无需公网 URL。
+# 语音条（PTT 麦克风样式）要求 audio/ogg + opus 编码；上游 send-voice 路由已转 OGG/Opus。
+
+_WA_MIME_BY_TYPE: Dict[str, str] = {
+    "voice": "audio/ogg",
+    "audio": "audio/ogg",
+    "image": "image/jpeg",
+    "video": "video/mp4",
+}
+# 扩展名 → mime（上传需精确 mime，否则 Cloud API 拒收）
+_WA_MIME_BY_EXT: Dict[str, str] = {
+    ".ogg": "audio/ogg", ".opus": "audio/ogg", ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4", ".aac": "audio/aac", ".amr": "audio/amr",
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+    ".webp": "image/webp", ".mp4": "video/mp4", ".pdf": "application/pdf",
+}
+
+
+def _wa_guess_mime(media_path: str, media_type: str) -> str:
+    """优先按扩展名（上传 mime 必须精确），回退按 media_type 粗分类。"""
+    import os
+    ext = os.path.splitext(str(media_path or ""))[1].lower()
+    if ext in _WA_MIME_BY_EXT:
+        return _WA_MIME_BY_EXT[ext]
+    return _WA_MIME_BY_TYPE.get(str(media_type or "").lower(), "application/octet-stream")
+
+
+def _wa_send_kind(media_type: str, mime: str) -> str:
+    """映射到 Cloud API message type：audio/image/video/document。"""
+    mt = str(media_type or "").lower()
+    if mt in ("voice", "audio") or mime.startswith("audio/"):
+        return "audio"
+    if mt == "image" or mime.startswith("image/"):
+        return "image"
+    if mt == "video" or mime.startswith("video/"):
+        return "video"
+    return "document"
+
+
+async def wa_upload_media(
+    media_path: str,
+    mime_type: str,
+    phone_number_id: str,
+    access_token: str,
+) -> Dict[str, Any]:
+    """上传媒体到 Cloud API，返回 {ok, media_id} 或 {ok:False, error[, error_kind]}；永不抛。"""
+    import os
+    if not media_path or not os.path.isfile(media_path):
+        return {"ok": False, "error": f"file not found: {media_path}",
+                "error_kind": "bad_request"}
+    url = f"{GRAPH_BASE}/{phone_number_id}/media"
+    headers = {"Authorization": f"Bearer {access_token}"}
+    try:
+        timeout = aiohttp.ClientTimeout(total=60)
+        with open(media_path, "rb") as fh:
+            form = aiohttp.FormData()
+            form.add_field("messaging_product", "whatsapp")
+            form.add_field("type", mime_type)
+            form.add_field(
+                "file", fh, filename=os.path.basename(media_path),
+                content_type=mime_type)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url, headers=headers, data=form) as resp:
+                    body = await resp.text()
+                    if resp.status != 200:
+                        logger.warning("WA media upload HTTP %s: %s", resp.status, body[:500])
+                        return _fail("whatsapp", resp.status, body)
+                    try:
+                        data = json.loads(body)
+                    except Exception:
+                        data = {}
+                    mid = str((data or {}).get("id") or "")
+                    if not mid:
+                        return {"ok": False, "error": "upload returned no media id",
+                                "error_kind": "unknown"}
+                    return {"ok": True, "media_id": mid}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("WA media upload failed: %s", e)
+        return {"ok": False, "error": str(e), "error_kind": "network"}
+
+
+async def wa_send_media(
+    to: str,
+    media_path: str,
+    phone_number_id: str,
+    access_token: str,
+    *,
+    media_type: str = "",
+    caption: str = "",
+    check_kill_switch: bool = True,
+) -> Dict[str, Any]:
+    """上传并发送媒体（语音/图片/视频/文件）。返回 {ok, data} 或 {ok:False, error}；永不抛。
+
+    语音（media_type=voice/audio，且为 ogg/opus）→ WhatsApp 呈现为语音条（PTT）。
+    ``caption`` 仅 image/video/document 生效（audio 无 caption，Cloud API 不支持）。
+    """
+    if check_kill_switch:
+        try:
+            from src.integrations.shared.rpa_send_guard import rpa_send_blocked
+            blocked, scope = rpa_send_blocked("whatsapp", phone_number_id)
+            if blocked:
+                logger.warning("[wa_cloud][kill-switch] 冻结媒体发送，跳过（scope=%s）", scope)
+                return {"ok": False, "error": f"kill_switch:{scope}"}
+        except Exception:
+            pass
+    mime = _wa_guess_mime(media_path, media_type)
+    up = await wa_upload_media(media_path, mime, phone_number_id, access_token)
+    if not up.get("ok"):
+        return up
+    kind = _wa_send_kind(media_type, mime)
+    obj: Dict[str, Any] = {"id": up["media_id"]}
+    if kind in ("image", "video", "document") and caption:
+        obj["caption"] = _truncate(caption)
+    payload: Dict[str, Any] = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": str(to),
+        "type": kind,
+        kind: obj,
+    }
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+    try:
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                send_url(phone_number_id), headers=headers, json=payload
+            ) as resp:
+                body = await resp.text()
+                if resp.status != 200:
+                    logger.warning("WA send media HTTP %s: %s", resp.status, body[:500])
+                    return _fail("whatsapp", resp.status, body)
+                try:
+                    data = json.loads(body)
+                except Exception:
+                    data = {"raw": body[:500]}
+                return {"ok": True, "data": data}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("WA send media failed: %s", e)
+        return {"ok": False, "error": str(e), "error_kind": "network"}
+
+
 def extract_inbound_messages(body: Dict[str, Any]) -> list:
     """从 Cloud API webhook 顶层结构提取入站文字消息事件。
 
@@ -275,6 +420,15 @@ async def _handle_one_message(
         from src.integrations.shared.inbox_mirror import mirror_to_inbox
         mirror_to_inbox("whatsapp", phone_number_id, chat_key, text,
                         direction="in", name=sender, msg_id=str(msg.get("id") or ""))
+    except Exception:
+        pass
+
+    # Phase A：auto_ai 让位——该会话由统一收件箱 autosend(System Z) 全自动接管
+    # （人设+语言+风控+拟人延迟，与 Telegram 同一条），跳过自答/管道避免双发。
+    try:
+        from src.integrations.shared.official_inbound import inbox_will_autosend
+        if inbox_will_autosend("whatsapp", phone_number_id, chat_key):
+            return
     except Exception:
         pass
 

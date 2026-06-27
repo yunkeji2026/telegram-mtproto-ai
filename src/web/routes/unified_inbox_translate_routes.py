@@ -19,11 +19,16 @@ from fastapi import Depends, Request
 
 from src.ai.translation_service import normalize_lang
 from src.web.routes.unified_inbox_services import (
+    _DEFAULT_LANG_KEY,
+    _REPLY_LANG_KEY,
     _conv_id,
     _get_translation_service,
     _inbox_store,
+    _list_default_langs,
     _resolve_conv_engine,
     _resolve_conv_language,
+    _resolve_default_lang,
+    _resolve_default_reply_lang,
 )
 
 logger = logging.getLogger(__name__)
@@ -178,6 +183,19 @@ def register_translate_routes(app, *, api_auth) -> None:
             style=style,
             engine=engine,
         )
+        # P4-B：入站显示翻译（客户→坐席）按日聚合，供经理看板量化「常驻双语」成本/语言分布。
+        # 仅计 purpose=inbound_display；命中翻译记忆缓存的不计（非新增 API 成本，与 record 语义一致）。
+        if str(body.get("purpose") or "").strip() == "inbound_display":
+            try:
+                ibx = _inbox_store(request)
+                if ibx is not None and hasattr(ibx, "record_inbound_xlate"):
+                    if result.ok and not getattr(result, "cached", False):
+                        src = normalize_lang(getattr(result, "source_lang", "") or source_lang or "")
+                        ibx.record_inbound_xlate(translated=1, by_lang=({src: 1} if src else None))
+                    elif not result.ok:
+                        ibx.record_inbound_xlate(failed=1)
+            except Exception:
+                logger.debug("[translate] 入站翻译漏斗记账失败（忽略）", exc_info=True)
         return {
             "ok": result.ok,
             "resolved_target": target_lang,
@@ -218,6 +236,105 @@ def register_translate_routes(app, *, api_auth) -> None:
             return {"ok": False, "error": "inbox_unavailable"}
         ok = ibx.set_conversation_pref_engine(_conv_id(platform, account_id, chat_key), engine)
         return {"ok": bool(ok), "pref_engine": engine}
+
+    @app.get("/api/unified-inbox/default-lang")
+    async def api_unified_inbox_get_default_lang(
+        request: Request, platform: str = "", account_id: str = "default",
+        _=Depends(api_auth),
+    ):
+        """P3：读「默认译文显示语言」解析结果 + 各维度原始值。
+
+        前端切会话时取 ``resolved`` 作为默认（优先级：账号 > 平台 > 全局，置于「会话级偏好」
+        之下、「浏览器本地默认」之上）；``scopes`` 供运营在弹层回显已配置的各维度值。
+        """
+        info = _resolve_default_lang(request, platform, account_id)
+        return {"ok": True, **info}
+
+    @app.get("/api/unified-inbox/default-lang/all")
+    async def api_unified_inbox_list_default_lang(request: Request, _=Depends(api_auth)):
+        """P4-A：列出所有已配置的「默认译文语言」（运营管理面板：全局/各平台/各账号 + 谁/何时改）。"""
+        return {"ok": True, "items": _list_default_langs(request)}
+
+    @app.post("/api/unified-inbox/default-lang")
+    async def api_unified_inbox_set_default_lang(request: Request, _=Depends(api_auth)):
+        """P3：设置/清除「默认译文显示语言」（运营级，换机/换坐席生效）。
+
+        body：``{scope: global|platform|account, platform?, account_id?, lang, updated_by?}``。
+        ``lang=""`` → 清除该维度；scope=platform/account 需带 platform（account 还需 account_id）。
+        P4-A：``updated_by`` 记录修改人（best-effort 审计）。
+        """
+        body = await request.json()
+        scope = str(body.get("scope") or "global").strip().lower()
+        lang = normalize_lang(str(body.get("lang") or "").strip())
+        platform = str(body.get("platform") or "").lower().strip()
+        account_id = str(body.get("account_id") or "default").strip()
+        updated_by = str(body.get("updated_by") or "").strip()
+        ibx = _inbox_store(request)
+        if ibx is None:
+            return {"ok": False, "error": "inbox_unavailable"}
+        if scope == "global":
+            key = _DEFAULT_LANG_KEY
+        elif scope == "platform":
+            if not platform:
+                return {"ok": False, "error": "missing_platform"}
+            key = f"{_DEFAULT_LANG_KEY}.platform.{platform}"
+        elif scope == "account":
+            if not platform:
+                return {"ok": False, "error": "missing_platform"}
+            key = f"{_DEFAULT_LANG_KEY}.account.{platform}.{account_id}"
+        else:
+            return {"ok": False, "error": "bad_scope"}
+        ok = ibx.set_app_setting(key, lang, updated_by=updated_by)
+        return {"ok": bool(ok), "scope": scope, "lang": lang}
+
+    @app.get("/api/unified-inbox/default-reply-lang")
+    async def api_unified_inbox_get_default_reply_lang(
+        request: Request, platform: str = "", account_id: str = "default",
+        _=Depends(api_auth),
+    ):
+        """P4-C：读「默认回复语言」（出站轴）解析结果 + 各维度原始值。
+
+        桌面 copilot 草稿语言选择器在无会话级记忆时取 ``resolved`` 作默认（账号 > 平台 >
+        全局），``resolved=""`` 则回落原有「跟随人设/客户」。``scopes`` 供运营回显。
+        """
+        info = _resolve_default_reply_lang(request, platform, account_id)
+        return {"ok": True, **info}
+
+    @app.get("/api/unified-inbox/default-reply-lang/all")
+    async def api_unified_inbox_list_default_reply_lang(request: Request, _=Depends(api_auth)):
+        """P4-C：列出所有已配置的「默认回复语言」（运营管理面板：全局/各平台/各账号 + 谁/何时改）。"""
+        return {"ok": True, "items": _list_default_langs(request, base=_REPLY_LANG_KEY)}
+
+    @app.post("/api/unified-inbox/default-reply-lang")
+    async def api_unified_inbox_set_default_reply_lang(request: Request, _=Depends(api_auth)):
+        """P4-C：设置/清除「默认回复语言」（出站轴，运营级，桌面草稿默认）。
+
+        body 同 default-lang：``{scope: global|platform|account, platform?, account_id?, lang, updated_by?}``。
+        ``lang=""`` → 清除该维度；scope=platform/account 需带 platform（account 还需 account_id）。
+        """
+        body = await request.json()
+        scope = str(body.get("scope") or "global").strip().lower()
+        lang = normalize_lang(str(body.get("lang") or "").strip())
+        platform = str(body.get("platform") or "").lower().strip()
+        account_id = str(body.get("account_id") or "default").strip()
+        updated_by = str(body.get("updated_by") or "").strip()
+        ibx = _inbox_store(request)
+        if ibx is None:
+            return {"ok": False, "error": "inbox_unavailable"}
+        if scope == "global":
+            key = _REPLY_LANG_KEY
+        elif scope == "platform":
+            if not platform:
+                return {"ok": False, "error": "missing_platform"}
+            key = f"{_REPLY_LANG_KEY}.platform.{platform}"
+        elif scope == "account":
+            if not platform:
+                return {"ok": False, "error": "missing_platform"}
+            key = f"{_REPLY_LANG_KEY}.account.{platform}.{account_id}"
+        else:
+            return {"ok": False, "error": "bad_scope"}
+        ok = ibx.set_app_setting(key, lang, updated_by=updated_by)
+        return {"ok": bool(ok), "scope": scope, "lang": lang}
 
     @app.get("/api/unified-inbox/translation-engines")
     async def api_unified_inbox_translation_engines(

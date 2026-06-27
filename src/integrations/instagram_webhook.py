@@ -143,6 +143,61 @@ async def ig_send_with_window_fallback(
         messaging_type="MESSAGE_TAG", message_tag=fallback_tag)
 
 
+async def ig_send_attachment(
+    igsid: str,
+    media_url: str,
+    ig_id: str,
+    page_access_token: str,
+    *,
+    media_type: str = "image",
+    account_id: str = "default",
+    check_kill_switch: bool = True,
+) -> Dict[str, Any]:
+    """通过 Graph API 发 IG DM 媒体附件（按**公网 https URL**；IG 不支持 filedata 上传）。
+
+    支持 image/audio/video（音频 IG 支持度有限，best-effort）。永不抛。
+    """
+    if check_kill_switch:
+        try:
+            from src.integrations.shared.rpa_send_guard import rpa_send_blocked
+            blocked, scope = rpa_send_blocked("instagram", account_id or "default")
+            if blocked:
+                logger.warning("[ig][kill-switch] 冻结媒体发送，跳过（scope=%s）", scope)
+                return {"ok": False, "error": f"kill_switch:{scope}"}
+        except Exception:
+            pass
+    if not media_url or not str(media_url).lower().startswith("https://"):
+        return {"ok": False, "error": f"attachment needs https url: {media_url}",
+                "error_kind": "no_public_url"}
+    att_type = {"voice": "audio", "audio": "audio", "image": "image",
+                "video": "video"}.get(str(media_type or "").lower(), "image")
+    send_id = str(ig_id or "").strip() or "me"
+    url = f"{GRAPH_BASE}/{send_id}/messages"
+    payload: Dict[str, Any] = {
+        "recipient": {"id": igsid},
+        "message": {"attachment": {"type": att_type,
+                                   "payload": {"url": media_url, "is_reusable": False}}},
+        "messaging_type": "RESPONSE",
+    }
+    params = {"access_token": page_access_token}
+    try:
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, params=params, json=payload) as resp:
+                body = await resp.text()
+                if resp.status != 200:
+                    logger.warning("IG send attachment HTTP %s: %s", resp.status, body[:500])
+                    return _ig_fail(resp.status, body)
+                try:
+                    data = json.loads(body)
+                except Exception:
+                    data = {"raw": body[:500]}
+                return {"ok": True, "data": data}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("IG send attachment failed: %s", e)
+        return {"ok": False, "error": str(e), "error_kind": "network"}
+
+
 def extract_ig_messages(body: Dict[str, Any]) -> List[Dict[str, Any]]:
     """解析 IG webhook（object="instagram"）→ [{sender, text, mid}]（仅文字、非 echo）。"""
     if str(body.get("object") or "") != "instagram":

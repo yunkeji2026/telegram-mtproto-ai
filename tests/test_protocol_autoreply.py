@@ -154,3 +154,61 @@ async def test_outbound_payload_ignored():
     )
     assert res["skipped"] == "not_inbound"
     assert sent == []
+
+
+# ── Phase 3 防双发：会话已由收件箱全自动托管 → 直发链路早退 ──────────────
+
+@pytest.mark.asyncio
+async def test_inbox_autopilot_conv_skips_direct_send():
+    """会话 automation_mode=auto_ai（收件箱全自动）→ protocol_autoreply 早退，不直发。"""
+    sent = []
+    gen_called = []
+
+    async def _gen(**kw):
+        gen_called.append(kw)
+        return "不该生成"
+
+    res = await pa.run_autoreply(
+        _payload(), registry=_FakeRegistry(_row()),
+        cfg={"protocol_autoreply": {"enabled": True}},
+        generate=_gen, send=_make_send(sent),
+        risk_fn=lambda t: "low",
+        inbox_mode_fn=lambda p, a, c: "auto_ai",
+    )
+    assert res["skipped"] == "inbox_autopilot"
+    assert sent == []
+    assert gen_called == []  # 早退在生成之前，连 token 都不烧
+
+
+@pytest.mark.asyncio
+async def test_non_auto_ai_conv_still_direct_sends():
+    """会话非 auto_ai（如 review/manual）→ 直发链路照常工作（账号级闸门开时）。"""
+    sent = []
+    res = await pa.run_autoreply(
+        _payload(), registry=_FakeRegistry(_row()),
+        cfg={"protocol_autoreply": {"enabled": True}},
+        generate=_make_gen("亲，在的~"), send=_make_send(sent),
+        risk_fn=lambda t: "low",
+        inbox_mode_fn=lambda p, a, c: "review",
+    )
+    assert res["sent"] is True
+    assert len(sent) == 1
+
+
+@pytest.mark.asyncio
+async def test_inbox_mode_fn_exception_does_not_block():
+    """inbox_mode_fn 抛错 → 不影响主流程（容错放行）。"""
+    sent = []
+
+    def _boom(p, a, c):
+        raise RuntimeError("store down")
+
+    res = await pa.run_autoreply(
+        _payload(), registry=_FakeRegistry(_row()),
+        cfg={"protocol_autoreply": {"enabled": True}},
+        generate=_make_gen("亲，在的~"), send=_make_send(sent),
+        risk_fn=lambda t: "low",
+        inbox_mode_fn=_boom,
+    )
+    assert res["sent"] is True
+    assert len(sent) == 1

@@ -140,12 +140,16 @@ async def run_autoreply(
     now: Optional[float] = None,
     limiter: Any = None,
     sleep: Optional[Callable[[float], Awaitable[Any]]] = None,
+    inbox_mode_fn: Optional[Callable[[str, str, str], str]] = None,
 ) -> Dict[str, Any]:
     """核心：判断并执行一次自动回复。返回结构化结果（便于测试/观测）。
 
     依赖注入：registry.get(platform, account_id) / generate(...) / send(...)。
     ``limiter`` 可选（按账号限速 + 熔断）；None 表示不限流（保持纯逻辑可测）。
     ``sleep`` 可选（拟人化发送延迟，生产传 asyncio.sleep）；None 表示不延迟。
+    ``inbox_mode_fn`` 可选（Phase 3 防双发）：(platform, account_id, chat_key)→会话
+    automation_mode。若返回 ``auto_ai`` 表示该会话已由**收件箱全自动**（草稿/审批/
+    autosend 链路，带人设+二次风控）托管，本直发链路早退，避免对同一条消息双生成、双发。
     """
     if (payload or {}).get("direction", "in") != "in":
         return _result("not_inbound")
@@ -162,6 +166,15 @@ async def run_autoreply(
         row = {}
     if not is_autoreply_enabled(cfg, row):
         return _result("disabled")
+
+    # Phase 3 防双发：会话已由收件箱「全自动」(auto_ai) 托管 → 交给 inbox 草稿/autosend
+    # 链路（带人设+二次风控+L3/L4 审批），本直发链路早退，杜绝同一条消息双生成、双发。
+    if inbox_mode_fn is not None:
+        try:
+            if inbox_mode_fn(platform, account_id, chat_key) == "auto_ai":
+                return _result("inbox_autopilot", inbound=text)
+        except Exception:
+            logger.debug("[protocol-autoreply] inbox_mode_fn 检查失败（忽略）", exc_info=True)
 
     # G1 全局 Kill-Switch：紧急冻结时在决策期就早退（不生成、不发、不浪费 token）；
     # 与预热闸门正交（无视 companion_send_gate.enabled）。入站仍由收件箱 ingest 收录，
@@ -461,10 +474,25 @@ def build_reply_hook(app: Any) -> Callable[[Dict[str, Any]], Awaitable[None]]:
         )
         import asyncio
         cfg = _cfg()
+
+        # Phase 3 防双发：用收件箱持久层的 per-conv automation_mode 作为闸门。
+        def _inbox_mode(platform: str, account_id: str, chat_key: str) -> str:
+            store = getattr(app.state, "inbox_store", None)
+            if store is None:
+                return ""
+            try:
+                from src.inbox.normalizer import conv_id
+                return store.get_automation_mode(
+                    conv_id(platform, account_id, chat_key)
+                )
+            except Exception:
+                return ""
+
         res = await run_autoreply(
             payload, registry=get_account_registry(), cfg=cfg,
             generate=_generate, send=_send,
             limiter=get_autoreply_limiter(cfg), sleep=asyncio.sleep,
+            inbox_mode_fn=_inbox_mode,
         )
         # Phase 5：熔断刚触发 → 告警（断路器自身已在冷却期拦截后续）
         if res.get("breaker_opened"):

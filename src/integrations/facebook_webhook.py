@@ -167,6 +167,142 @@ async def fb_send_with_window_fallback(
     return out
 
 
+async def fb_send_attachment(
+    psid: str,
+    media_url: str,
+    page_access_token: str,
+    *,
+    media_type: str = "audio",
+    messaging_type: str = "RESPONSE",
+    account_id: str = "default",
+    check_kill_switch: bool = True,
+) -> Dict[str, Any]:
+    """通过 Send API 发媒体附件（audio/image/video/file，按 URL）。
+
+    Messenger 接受**公网可达 URL**附件（FB 自取），故 ``media_url`` 须为 https 公网链接。
+    返回 {"ok": True, "data": ...} 或 {"ok": False, "error"[, "error_kind"]}；永不抛。
+    """
+    if check_kill_switch:
+        try:
+            from src.integrations.shared.rpa_send_guard import rpa_send_blocked
+            blocked, scope = rpa_send_blocked("messenger", account_id or "default")
+            if blocked:
+                logger.warning("[fb][kill-switch] 冻结媒体发送，跳过（scope=%s）", scope)
+                return {"ok": False, "error": f"kill_switch:{scope}"}
+        except Exception:
+            pass
+    if not media_url or not str(media_url).lower().startswith("https://"):
+        return {"ok": False, "error": f"attachment needs https url: {media_url}",
+                "error_kind": "no_public_url"}
+    mt = str(media_type or "").lower()
+    att_type = {"voice": "audio", "audio": "audio", "image": "image",
+                "video": "video"}.get(mt, "file")
+    payload: Dict[str, Any] = {
+        "recipient": {"id": psid},
+        "message": {
+            "attachment": {
+                "type": att_type,
+                "payload": {"url": media_url, "is_reusable": False},
+            }
+        },
+        "messaging_type": messaging_type,
+    }
+    params = {"access_token": page_access_token}
+    try:
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                SEND_API_URL, params=params, json=payload
+            ) as resp:
+                body = await resp.text()
+                if resp.status != 200:
+                    logger.warning("FB send_attachment HTTP %s: %s", resp.status, body[:500])
+                    return {"ok": False, "error": f"HTTP {resp.status}: {body[:200]}"}
+                try:
+                    data = json.loads(body)
+                except Exception:
+                    data = {"raw": body[:500]}
+                return {"ok": True, "data": data}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("FB send_attachment failed: %s", e)
+        return {"ok": False, "error": str(e), "error_kind": "network"}
+
+
+# 出站媒体 ext → mime（multipart 上传需精确 mime）。
+_FB_MIME_BY_EXT: Dict[str, str] = {
+    ".ogg": "audio/ogg", ".opus": "audio/ogg", ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4", ".aac": "audio/aac", ".wav": "audio/wav",
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+    ".gif": "image/gif", ".mp4": "video/mp4",
+}
+
+
+def _fb_attachment_type(media_type: str) -> str:
+    return {"voice": "audio", "audio": "audio", "image": "image",
+            "video": "video"}.get(str(media_type or "").lower(), "file")
+
+
+async def fb_send_attachment_upload(
+    psid: str,
+    media_path: str,
+    page_access_token: str,
+    *,
+    media_type: str = "audio",
+    messaging_type: str = "RESPONSE",
+    account_id: str = "default",
+    check_kill_switch: bool = True,
+) -> Dict[str, Any]:
+    """通过 Send API 以 multipart ``filedata`` **上传本地字节**发媒体附件（**免公网 URL**）。
+
+    优于 URL 式（``fb_send_attachment``）：无需把音频托管到公网即可发——与 WhatsApp Cloud
+    上传式对齐。返回 {"ok": True, "data": ...} 或 {"ok": False, "error"[, "error_kind"]}；永不抛。
+    """
+    import os
+    if check_kill_switch:
+        try:
+            from src.integrations.shared.rpa_send_guard import rpa_send_blocked
+            blocked, scope = rpa_send_blocked("messenger", account_id or "default")
+            if blocked:
+                logger.warning("[fb][kill-switch] 冻结媒体上传，跳过（scope=%s）", scope)
+                return {"ok": False, "error": f"kill_switch:{scope}"}
+        except Exception:
+            pass
+    if not media_path or not os.path.isfile(media_path):
+        return {"ok": False, "error": f"file not found: {media_path}",
+                "error_kind": "bad_request"}
+    att_type = _fb_attachment_type(media_type)
+    ext = os.path.splitext(media_path)[1].lower()
+    mime = _FB_MIME_BY_EXT.get(ext, "application/octet-stream")
+    recipient = json.dumps({"id": psid})
+    message = json.dumps({"attachment": {"type": att_type,
+                                         "payload": {"is_reusable": False}}})
+    params = {"access_token": page_access_token}
+    try:
+        timeout = aiohttp.ClientTimeout(total=60)
+        with open(media_path, "rb") as fh:
+            form = aiohttp.FormData()
+            form.add_field("recipient", recipient)
+            form.add_field("message", message)
+            form.add_field("messaging_type", messaging_type)
+            form.add_field("filedata", fh, filename=os.path.basename(media_path),
+                           content_type=mime)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(SEND_API_URL, params=params, data=form) as resp:
+                    body = await resp.text()
+                    if resp.status != 200:
+                        logger.warning("FB attachment upload HTTP %s: %s",
+                                       resp.status, body[:500])
+                        return {"ok": False, "error": f"HTTP {resp.status}: {body[:200]}"}
+                    try:
+                        data = json.loads(body)
+                    except Exception:
+                        data = {"raw": body[:500]}
+                    return {"ok": True, "data": data}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("FB attachment upload failed: %s", e)
+        return {"ok": False, "error": str(e), "error_kind": "network"}
+
+
 def _extract_messaging_events(body: Dict[str, Any]) -> list:
     """FB Webhook 顶层结构：{object, entry:[{id,time,messaging:[...]}]}。"""
     if str(body.get("object") or "") != "page":
@@ -360,6 +496,15 @@ async def _handle_one_event(
         from src.integrations.shared.inbox_mirror import mirror_to_inbox
         mirror_to_inbox("messenger", _mirror_acct, chat_key, text,
                         direction="in", name=sender_id, msg_id=str(msg.get("mid") or ""))
+    except Exception:
+        pass
+
+    # Phase A：auto_ai 让位——交统一收件箱 autosend(System Z) 全自动接管
+    # （人设+语言+风控+拟人延迟，与 Telegram 同一条），跳过自答/管道避免双发。
+    try:
+        from src.integrations.shared.official_inbound import inbox_will_autosend
+        if inbox_will_autosend("messenger", _mirror_acct, chat_key):
+            return
     except Exception:
         pass
 

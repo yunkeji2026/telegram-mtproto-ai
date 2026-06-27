@@ -166,6 +166,101 @@ class OfficialApiWorker:
             return self._result(out, mid)
         raise RuntimeError(f"不支持的官方平台: {self.platform}")
 
+    def _public_media_url(self, media_url: str) -> str:
+        """把 ``/static`` 相对 URL 拼成公网绝对 https URL（LINE/Messenger 必须，FB/LINE 自取字节）。
+
+        - 已是 http(s) 绝对 URL → 原样返回。
+        - 否则取 ``config.official_media.public_base_url`` 前缀拼接；未配置 → 返回空串
+          （调用方据此回 ``no_public_url``，可观测而非静默失败）。
+        """
+        u = str(media_url or "").strip()
+        if u.lower().startswith(("http://", "https://")):
+            return u
+        base = str(
+            (((self.config or {}).get("official_media") or {}).get("public_base_url")) or ""
+        ).strip().rstrip("/")
+        if not base or not u:
+            return ""
+        if not u.startswith("/"):
+            u = "/" + u
+        return base + u
+
+    async def send_media(
+        self, chat_key: str, *, media_path: str, media_type: str,
+        caption: str = "", media_url: str = "",
+    ) -> Dict[str, Any]:
+        """官方通道媒体出站（语音/图片/…），与 ``orch.send_media`` 契约一致。
+
+        - WhatsApp：上传本地文件 → media_id 发送（**无需公网 URL**）。
+        - LINE / Messenger：按**公网 https URL** 发送（需配 ``official_media.public_base_url``，
+          否则回 ``error_kind=no_public_url``）。
+        - Instagram / Zalo：官方 API 媒体出站暂未接入 → ``not_supported``。
+        """
+        c = self._creds()
+        dest = dest_from_chat_key(chat_key)
+        mt = str(media_type or "").lower()
+        if self.platform == "whatsapp":
+            from src.integrations.whatsapp_cloud import wa_send_media
+            out = await wa_send_media(
+                dest, media_path, c["phone_number_id"], c["access_token"],
+                media_type=mt, caption=caption)
+            mid = ""
+            try:
+                mid = str((((out.get("data") or {}).get("messages") or [{}])[0]).get("id") or "")
+            except Exception:
+                mid = ""
+            return self._result(out, mid)
+        if self.platform == "line":
+            pub = self._public_media_url(media_url)
+            if not pub:
+                return {"delivered": False, "error_kind": "no_public_url",
+                        "error": "LINE 媒体需公网 https URL（配 official_media.public_base_url）"}
+            dur = 0
+            if mt in ("voice", "audio"):
+                try:
+                    from src.client.voice_sender import probe_audio_duration_ms
+                    dur = int(probe_audio_duration_ms(media_path) or 0)
+                except Exception:
+                    dur = 0
+            from src.integrations.line_webhook import line_push_media
+            ok = await line_push_media(
+                dest, pub, c["access_token"], media_type=mt,
+                duration_ms=dur, account_id=self.account_id)
+            return {"delivered": True} if ok else {
+                "delivered": False, "error_kind": "send_failed"}
+        if self.platform == "messenger":
+            # 优先公网 URL；未配则 multipart 字节上传（免公网托管，与 WhatsApp 对齐）。
+            pub = self._public_media_url(media_url)
+            if pub:
+                from src.integrations.facebook_webhook import fb_send_attachment
+                out = await fb_send_attachment(
+                    dest, pub, c["access_token"], media_type=mt, account_id=self.account_id)
+            else:
+                from src.integrations.facebook_webhook import fb_send_attachment_upload
+                out = await fb_send_attachment_upload(
+                    dest, media_path, c["access_token"], media_type=mt,
+                    account_id=self.account_id)
+            return self._result(
+                out, str(((out.get("data") or {}).get("message_id")) or ""))
+        if self.platform == "instagram":
+            # IG DM 附件仅支持公网 URL（不支持 filedata 上传）。
+            pub = self._public_media_url(media_url)
+            if not pub:
+                return {"delivered": False, "error_kind": "no_public_url",
+                        "error": "Instagram 媒体需公网 https URL（配 official_media.public_base_url）"}
+            from src.integrations.instagram_webhook import ig_send_attachment
+            out = await ig_send_attachment(
+                dest, pub, c.get("ig_id", ""), c["access_token"],
+                media_type=mt, account_id=self.account_id)
+            return self._result(
+                out, str(((out.get("data") or {}).get("message_id")) or ""))
+        if self.platform == "zalo":
+            # Zalo OA API 无语音消息出站能力（图片/文件另需 upload 流程，暂未接入）。
+            return {"delivered": False, "error_kind": "not_supported",
+                    "error": "Zalo OA API 暂不支持语音/媒体消息出站"}
+        return {"delivered": False, "error_kind": "not_supported",
+                "error": f"{self.platform} 官方通道媒体出站暂未接入"}
+
     @staticmethod
     def _result(out: Dict[str, Any], message_id: str) -> Dict[str, Any]:
         """统一出站结果：delivered + message_id，失败时透出 error_kind（窗口/token/限速…）。

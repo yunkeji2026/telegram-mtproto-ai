@@ -22,6 +22,38 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def inbox_will_autosend(platform: str, account_id: str, chat_key: str) -> bool:
+    """统一收件箱 autosend（System Z）是否会接管该会话的**全自动**回复。
+
+    返回 True 仅当**两者皆满足**：
+      1. 会话 ``automation_mode == 'auto_ai'``（坐席台「🚀 全自动」开关）；
+      2. 编排器拥有该账号（``orch.send`` 投得出，否则 System Z 发不出 → 不该让位）。
+
+    官方 webhook 据此早退、把全自动统一交给 System Z（与 Telegram 同一条：人设 + 语言
+    跟随 + 风控分级 + 拟人延迟），避免与 webhook 自答**双发**；任一不满足 → 返回 False
+    （webhook 维持原有 SkillManager 自答，零回归）。高风险消息 System Z 不放行 autosend
+    （停泊待人工），让位即正确地不抢发——风控优先。
+    """
+    plat = str(platform or "").lower()
+    acct = str(account_id or "default")
+    try:
+        from src.integrations.protocol_bridge import get_inbox_store
+        store = get_inbox_store()
+        if store is None:
+            return False
+        from src.inbox.normalizer import conv_id
+        cid = conv_id(plat, acct, str(chat_key))
+        if str(store.get_automation_mode(cid) or "").lower() != "auto_ai":
+            return False
+    except Exception:
+        return False
+    try:
+        from src.integrations.account_orchestrator import get_orchestrator
+        return bool(get_orchestrator().owns(plat, acct))
+    except Exception:
+        return False
+
+
 async def process_official_inbound(
     *,
     platform: str,
@@ -32,13 +64,17 @@ async def process_official_inbound(
     msg_id: str = "",
     use_pipeline: bool = False,
 ) -> bool:
-    """镜像入站并（按开关）委托主管道。返回 True = 已由主管道托管，调用方跳过自答。"""
+    """镜像入站并（按开关）委托主管道。返回 True = 已托管（管道或 System Z），调用方跳过自答。"""
     try:
         from src.integrations.shared.inbox_mirror import mirror_to_inbox
         mirror_to_inbox(platform, account_id, chat_key, text,
                         direction="in", name=name, msg_id=msg_id)
     except Exception:
         logger.debug("[official_inbound] 入站镜像失败 platform=%s", platform, exc_info=True)
+
+    # auto_ai 让位：该会话由统一收件箱 autosend(System Z) 全自动接管 → 跳过自答/管道，避免双发。
+    if inbox_will_autosend(platform, account_id, chat_key):
+        return True
 
     if not use_pipeline:
         return False
@@ -100,5 +136,5 @@ async def mirror_official_outbound(
 
 __all__ = [
     "process_official_inbound", "mirror_official_outbound",
-    "mirror_inbound_media", "media_placeholder",
+    "mirror_inbound_media", "media_placeholder", "inbox_will_autosend",
 ]
