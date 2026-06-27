@@ -136,7 +136,13 @@ def register_drafts_routes(app, *, api_auth):
         worker = getattr(request.app.state, "autosend_worker", None)
         if worker is None:
             return {"ok": True, "worker": None, "note": "AutosendWorker 未启用"}
-        return {"ok": True, "worker": worker.status_snapshot()}
+        snap = worker.status_snapshot()
+        try:
+            from src.inbox.voice_autosend import metrics_snapshot as _vms
+            snap["voice"] = _vms()  # 全自动语音：sent/fallback/last_reason/last_duration_ms
+        except Exception:
+            pass
+        return {"ok": True, "worker": snap}
 
     @app.get("/api/drafts/audit")
     async def api_drafts_audit(

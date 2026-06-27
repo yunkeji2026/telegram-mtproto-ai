@@ -450,6 +450,24 @@ class DraftService:
 
         return result
 
+    def record_autosend_failure(
+        self,
+        draft_id: str,
+        *,
+        conversation_id: str = "",
+        reason: str = "",
+        autopilot_level: str = "L2",
+    ) -> None:
+        """全自动投递失败时写审计（action=autosend_failed），供安全条/记录弹窗可视化。
+
+        注：草稿已在 resolve_with_audit 阶段写过 autosend（DB 标记 approved），此处补记
+        平台投递失败，便于坐席看到「自动发了但没送达」。不回滚状态（宁丢不重发）。
+        """
+        self._write_audit(
+            draft_id, autopilot_level, "autosend_failed", "autosend_worker",
+            reason=reason, conversation_id=conversation_id,
+        )
+
     def _write_audit(
         self,
         draft_id: str,
@@ -518,14 +536,21 @@ class DraftService:
         text: str,
         *,
         automation_mode: str = "review",
+        enrich: bool = False,
     ) -> Optional[str]:
         """入站新消息触发，自动生成 inbox 草稿（best-effort，不抛异常）。
 
         安全不变量：
-          1. 若该会话已有 pending 草稿，跳过（幂等保护，避免洪泛）。
+          1. 若该会话已有 pending/enriching 草稿，跳过（幂等保护，避免洪泛）。
           2. 消息极短（< 3 字符）或已是 out 方向，跳过。
           3. high → L4 拦截草稿；medium → L3 必审；low → L2 自动放行。
           4. 草稿文本取规则建议首条（<1ms，不调 LLM）。
+
+        ``enrich=True``（Phase 2）：草稿先建为 **停泊态** ``status='enriching'``——
+        不进 pending 队列、不触发 autosend、不在待审列表露出半成品。规则模板正文仅作
+        兜底占位；随后由调用方（main.py 回调）异步走人设产线（与手动「生成草稿」同一条）
+        生成正文，再经 ``enrich_draft`` 收尾翻成 pending + 重新定级。这样「全自动回复」
+        与「手动生成草稿」共用人设/上下文/KB，不再是干瘪规则模板。
 
         返回生成的 draft_id，跳过/失败时返回 None。
         """
@@ -545,12 +570,14 @@ class DraftService:
             return None
 
         try:
-            # 幂等保护：同一会话已有 pending draft 则跳过
-            existing = self._store.list_drafts(
-                source_kind="inbox", status="pending", conversation_id=conv_id, limit=1
+            # 幂等保护：同一会话已有 pending 或 enriching（停泊待补全）草稿则跳过，
+            # 避免洪泛与补全窗口内的重复生成。
+            _existing = self._store.list_drafts(
+                source_kind="inbox", conversation_id=conv_id, limit=20
             )
-            if existing:
-                logger.debug("auto_generate_draft 跳过（已有 pending）: %s", conv_id)
+            if any(str(d.get("status") or "") in ("pending", "enriching")
+                   for d in _existing):
+                logger.debug("auto_generate_draft 跳过（已有 pending/enriching）: %s", conv_id)
                 return None
         except Exception:
             pass
@@ -600,6 +627,8 @@ class DraftService:
             except Exception:
                 pass
 
+            # enrich=True：停泊态落库，待人设产线补全后再翻 pending（见 enrich_draft）。
+            _status = "enriching" if enrich else "pending"
             draft_id = self._store.upsert_draft({
                 "source_kind": "inbox",
                 "source_id": conv_id,  # 用 conv_id 作为 source_id 保证每会话唯一幂等键
@@ -614,7 +643,7 @@ class DraftService:
                 "risk_level": risk_level,
                 "risk_reasons": analysis.get("risk_reasons") or [],
                 "autopilot_level": autopilot,
-                "status": "pending",
+                "status": _status,
                 "trace_id": _trace_id,
             })
             # Q2: 草稿创建后即时计算质量评分（亚毫秒，不阻塞流程）
@@ -650,6 +679,77 @@ class DraftService:
         except Exception:
             logger.debug("auto_generate_draft 失败", exc_info=True)
             return None
+
+    def enrich_draft(
+        self,
+        draft_id: str,
+        *,
+        reply_text: str,
+        reply_lang: str = "",
+        automation_mode: str = "review",
+    ) -> bool:
+        """Phase 2：用人设产线生成的正文收尾停泊态草稿（与手动「生成草稿」同源）。
+
+        安全不变量：
+          - 对生成正文二次风控（keyword_risk_level，只升不降）；
+          - effective_risk = max(草稿原 peer 风险, 回复风险)；
+          - autopilot 按 effective_risk + automation_mode 重算——高风险**回复**会被顶到
+            L3/L4 而不再自动发（防止 AI 把敏感话术自动送出）。
+          - 仅当草稿仍为 ``enriching`` 时生效（幂等 + 防与人工竞态）。
+
+        reply_text 为空（生成失败）→ 返回 False，调用方应改用 ``release_enriching_draft``
+        兜底（保留规则模板占位，降级为旧行为）。返回是否成功收尾。
+        """
+        if self._store is None:
+            return False
+        reply = str(reply_text or "").strip()
+        if not reply:
+            return False
+        draft = self._store.get_draft(draft_id)
+        if draft is None or str(draft.get("status") or "") != "enriching":
+            return False
+        base_risk = str(draft.get("risk_level") or "low")
+        reply_risk = keyword_risk_level(reply)
+        effective_risk = _max_risk(base_risk, reply_risk)
+        autopilot = risk_to_autopilot(effective_risk, automation_mode)
+        lang = reply_lang or str(draft.get("draft_lang") or "")
+        ok = self._store.finalize_draft_enrichment(
+            draft_id,
+            draft_text=reply,
+            autopilot_level=autopilot,
+            risk_level=effective_risk,
+            draft_lang=lang,
+            status="pending",
+        )
+        if ok:
+            try:
+                from src.inbox.quality import calculate_draft_quality
+                q, bd = calculate_draft_quality(
+                    reply, peer_text=str(draft.get("peer_text") or ""),
+                    risk_level=effective_risk, lang=lang,
+                )
+                self._store.update_draft_quality(draft_id, q, bd)
+            except Exception:
+                logger.debug("enrich_draft 质量分写入失败（已忽略）", exc_info=True)
+            logger.info(
+                "enrich_draft OK draft_id=%s level=%s risk=%s",
+                draft_id, autopilot, effective_risk,
+            )
+        return ok
+
+    def release_enriching_draft(self, draft_id: str) -> bool:
+        """人设补全失败的兜底：把停泊草稿原样翻 pending（保留规则模板占位，降级旧行为）。"""
+        if self._store is None:
+            return False
+        draft = self._store.get_draft(draft_id)
+        if draft is None or str(draft.get("status") or "") != "enriching":
+            return False
+        return self._store.finalize_draft_enrichment(
+            draft_id,
+            draft_text=str(draft.get("draft_text") or ""),
+            autopilot_level=str(draft.get("autopilot_level") or "L1"),
+            status="pending",
+        )
 
     # ── 统计 ─────────────────────────────────────────────────
 

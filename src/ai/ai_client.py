@@ -880,8 +880,6 @@ class AIClient(LoggerMixin):
         _rl = context.get("reply_lang")
         if not _rl or _rl == "zh" or context.get("_skip_lang_guard"):
             return reply
-        _cfg_ctx = (self.config.config or {}) if self.config else {}
-        _is_companion = isinstance(_cfg_ctx, dict) and effective_domain_name(_cfg_ctx) == "conversion"
         # ja/ko: Japanese uses lots of kanji so the CJK-ratio check is unreliable.
         # Instead, trigger only when the reply has NO kana at all (clearly Chinese).
         if _rl in ("ja", "ko"):
@@ -889,8 +887,11 @@ class AIClient(LoggerMixin):
             cjk = len(re.findall(r"[\u4e00-\u9fff]", reply))
             if not (kana == 0 and cjk > 8):
                 return reply
-        elif _is_companion:
-            return reply
+        # 注：companion(domain=conversion) 模式过去在此整段跳过守卫，导致英文客户
+        # 在「中文人设 + 长段中文历史」惯性下仍被回中文（prompt 级语言指令顶不住）。
+        # 现统一走 _reply_lang_mismatch：仅当回复「明显不符」（如目标英文却是纯中文，
+        # cjk 占绝对多数）才纠正——对中文会话(reply_lang=zh 已在上方短路)与正常
+        # 目标语回复零误伤，只兜底「客户切语言、模型没跟上」这类明确事故。
         elif not self._reply_lang_mismatch(reply, _rl):
             return reply
         _lang_name = self._LANG_NAMES.get(_rl, _rl)
@@ -1074,13 +1075,23 @@ class AIClient(LoggerMixin):
                         " Use Korean ONLY."
                     )
                 else:
-                    _no_zh_extra = ""
+                    # Latin/其他非 CJK 目标语（en/es/pt…）：中文字符是明确错误，
+                    # 与非 companion 同等硬禁。companion 无 EP/JC 支付通道名，故不留例外。
+                    # 修复前此处为空串，导致英文客户在「中文人设+长段中文历史」惯性下
+                    # 仍被回中文（线上实测客户抱怨 "Why don't you speak English anymore?"）。
+                    _no_zh_extra = (
+                        " 绝不要输出任何中文字符；中文人设/模板/知识库内容必须先翻译成目标语言再输出。"
+                        " DO NOT output any Chinese characters — translate any Chinese"
+                        " persona/template/KB content into the target language first."
+                    )
             else:
                 _no_zh_extra = " DO NOT output any Chinese characters (except channel names like EP/JC/EasyPaisa/JazzCash)."
             parts.append(
                 f"【LANGUAGE RULE — TOP PRIORITY — MANDATORY】\n"
-                f"DETECTED USER LANGUAGE: {_lang_name}.\n"
+                f"DETECTED USER LANGUAGE (from the user's LATEST message): {_lang_name}.\n"
                 f"You MUST reply ENTIRELY in {_lang_name}.{_no_zh_extra}\n"
+                f"If earlier turns were in another language, SWITCH to {_lang_name} NOW — "
+                f"follow the user's LATEST message, NOT the previous conversation language.\n"
                 f"Any Chinese templates or knowledge base content MUST be translated to {_lang_name} before output.\n"
                 f"Commands (/cxds etc) stay as-is.\n"
                 f"Violating this rule is MORE SERIOUS than giving wrong content."
