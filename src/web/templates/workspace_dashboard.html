@@ -901,9 +901,10 @@
     // 并发拉取两个端点，然后合并展示
     Promise.all([
       fetch('/api/drafts/autosend-status').then(function(r){return r.json();}).catch(function(){return null;}),
-      fetch('/api/drafts/risk-summary').then(function(r){return r.json();}).catch(function(){return null;})
+      fetch('/api/drafts/risk-summary').then(function(r){return r.json();}).catch(function(){return null;}),
+      fetch('/api/episodic-memory/key-health').then(function(r){return r.json();}).catch(function(){return null;})
     ]).then(function(results){
-      var ws=results[0], rs=results[1];
+      var ws=results[0], rs=results[1], kh=results[2];
       var now=new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
       if(tsEl) tsEl.textContent='刷新于 '+now;
       var rows=[];
@@ -937,6 +938,47 @@
         rows.push('<div class="db-row"><span>🔴 L3/L4 待审</span>'
           +'<span style="color:'+urgentColor+';font-weight:600;">'+urgentN+' 条</span></div>');
         rows.push('<div class="db-row"><span>📋 待处理草稿总量</span><span>'+(rs.total_pending||0)+' 条</span></div>');
+      }
+      // 统一草稿引擎规则栈生效观测（draft_pipeline）
+      var dp=(ws&&ws.worker)?ws.worker.draft_pipeline:null;
+      if(dp&&dp.total){
+        var gen=parseInt(dp.total.generated||0)||0;
+        var rt=dp.rates_vs_generated||{};
+        function pct(x){ return (x==null)?'—':(Math.round(x*1000)/10)+'%'; }
+        // 记忆命中率：自动回复「记得住」的核心指标，骤降标红
+        var memR=rt.memory_hit;
+        var memColor=(memR==null)?'#94a3b8':(memR<0.3?'#dc2626':(memR<0.5?'#d97706':'#16a34a'));
+        rows.push('<div class="db-row"><span>🧠 记忆命中率（草稿）</span>'
+          +'<span style="color:'+memColor+';font-weight:600;">'+pct(memR)+'</span></div>');
+        // 复读重试率：偏高说明模型爱重复，需关注
+        var rtyR=rt.retry_applied;
+        var rtyColor=(rtyR==null)?'#94a3b8':(rtyR>0.25?'#d97706':'#16a34a');
+        rows.push('<div class="db-row"><span>♻️ 复读重试率</span>'
+          +'<span style="color:'+rtyColor+';">'+pct(rtyR)+'</span></div>');
+        // 人设守卫拦截率：偏高说明 LLM 常漏机器措辞
+        var pgR=rt.persona_guard_intercept;
+        var pgColor=(pgR==null)?'#94a3b8':(pgR>0.2?'#d97706':'#16a34a');
+        rows.push('<div class="db-row"><span>🛡️ 人设守卫拦截率</span>'
+          +'<span style="color:'+pgColor+';">'+pct(pgR)+'</span></div>');
+        // p95 延迟预算：>8s 标红，>4s 标黄
+        var lat=dp.latency||{};
+        if(lat.count){
+          var p95=parseInt(lat.p95_ms||0)||0;
+          var latColor=p95>8000?'#dc2626':(p95>4000?'#d97706':'#16a34a');
+          rows.push('<div class="db-row"><span>⏱️ 草稿生成 p95</span>'
+            +'<span style="color:'+latColor+';font-weight:600;">'+(Math.round(p95/100)/10)+'s</span>'
+            +'<span style="color:#94a3b8;font-size:11px;margin-left:6px;">(n='+lat.count+', 生成 '+gen+')</span></div>');
+        }
+      }
+      // 记忆 key 健康：裸 key（无 platform 前缀）漂移 → 记忆对引擎不可见、拉低命中率
+      if(kh&&kh.ok&&kh.enabled){
+        var bare=parseInt(kh.bare_keys||0)||0;
+        var bareColor=bare>0?(bare>=50?'#dc2626':'#d97706'):'#16a34a';
+        var bareTxt=bare>0?(bare+' 个裸 key（'+(kh.bare_facts||0)+' 条记忆失联）'):'✓ 全 canonical';
+        rows.push('<div class="db-row"><span>🧭 记忆 key 健康</span>'
+          +'<span style="color:'+bareColor+';font-weight:600;">'+bareTxt+'</span>'
+          +(bare>0?'<span style="color:#94a3b8;font-size:11px;margin-left:6px;">可在运营总览一键并入</span>':'')
+          +'</div>');
       }
       if(el) el.innerHTML=rows.length?rows.join(''):'<span style="color:#94a3b8;font-size:13px;">健康数据不可用</span>';
     }).catch(function(){

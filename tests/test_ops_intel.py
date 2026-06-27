@@ -56,6 +56,17 @@ def test_advice_no_fix_when_worker_failed():
     assert "fix" not in out2[0]
 
 
+def test_advice_offers_fix_for_memory_key_drift():
+    # 记忆 key 漂移（warn/fail）→ 给一键「并入 canonical」动作（幂等）
+    out = incident_advice([{"id": "memory_key_drift", "name": "记忆 key 漂移",
+                            "status": "warn"}])
+    assert out[0]["fix"]["key"] == "migrate_memory_keys"
+    assert out[0]["fix"]["target"] == "telegram"
+    assert "/episodic-memory" in out[0]["link"]
+    out2 = incident_advice([{"id": "memory_key_drift", "name": "x", "status": "fail"}])
+    assert out2[0]["fix"]["key"] == "migrate_memory_keys"
+
+
 def test_advice_empty():
     assert incident_advice(None) == []
     assert incident_advice([]) == []

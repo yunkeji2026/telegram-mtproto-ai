@@ -1811,6 +1811,7 @@ class SkillManager(LoggerMixin):
         persona_id: str = "",
         reply_lang: str = "",
         channel: str = "inbox",
+        risk_level: str = "",
     ) -> Optional[Dict[str, Any]]:
         """收件箱草稿生成的「统一规则引擎」（单一事实源）。
 
@@ -1849,6 +1850,27 @@ class SkillManager(LoggerMixin):
             except Exception:
                 pass
 
+        _t0 = time.time()
+
+        # 风险分档：低风险（占自动发送大头）走快路省延迟，仅中/高风险吃满全栈。
+        # 调用方传入 risk_level（单一事实源）优先；缺省时用廉价关键词分类兜底（纯正则，无 LLM）。
+        _eff_risk = str(risk_level or "").strip().lower()
+        if not _eff_risk:
+            try:
+                from src.inbox.drafts import keyword_risk_level
+                _eff_risk = (keyword_risk_level(text) or "low")
+            except Exception:
+                _eff_risk = "low"
+        try:
+            _cfg_fp = self.config.config if hasattr(self.config, "config") else {}
+            _fast_path_on = bool(
+                ((_cfg_fp.get("inbox") or {}).get("auto_draft") or {})
+                .get("fast_path_low_risk", True)
+            ) if isinstance(_cfg_fp, dict) else True
+        except Exception:
+            _fast_path_on = True
+        _is_fast_path = _fast_path_on and _eff_risk not in ("high", "medium")
+
         try:
             self._refresh_strategies()
         except Exception:
@@ -1876,7 +1898,26 @@ class SkillManager(LoggerMixin):
             _hist.append({"role": _role, "content": _c})
         if _hist and _hist[-1]["role"] == "user" and _hist[-1]["content"] == text:
             _hist = _hist[:-1]
-        user_context["_conversation_history"] = _hist[-20:]
+        # 长会话历史摘要复用：超过阈值时把更早的消息压成摘要（承载早期长期事实，
+        # 否则只取最近 N 条会「失忆」），最近 N 条逐字保留。摘要写入持久 user_context，
+        # 并按已覆盖条数缓存——只在新增足够多（>=6 条）时才重算，避免每稿一次 LLM。
+        _KEEP_VERBATIM = 10
+        _COMPRESS_AT = 16
+        if len(_hist) > _COMPRESS_AT:
+            _old = _hist[:-_KEEP_VERBATIM]
+            _cached = (user_context.get("_conversation_summary") or "").strip()
+            _upto = int(user_context.get("_inbox_summary_upto") or 0)
+            if not (_cached and (len(_old) - _upto) < 6):
+                try:
+                    _summary = await self._summarize_history_with_fallback(_old)
+                    if _summary:
+                        user_context["_conversation_summary"] = _summary
+                        user_context["_inbox_summary_upto"] = len(_old)
+                        _metric("history_summarized")
+                except Exception:
+                    self.logger.debug("%s历史摘要跳过", log_prefix, exc_info=True)
+            _hist = _hist[-_KEEP_VERBATIM:]
+        user_context["_conversation_history"] = _hist
 
         try:
             # 1. 情景记忆注入（与 process_message step 3 同逻辑/同 key）
@@ -1981,13 +2022,17 @@ class SkillManager(LoggerMixin):
             except Exception:
                 self.logger.debug("%sKB 检索跳过", log_prefix, exc_info=True)
 
-            # 7. 慢思考（与 process_message 同配置门控；默认关→零额外开销）
-            try:
-                await self._maybe_slow_think(intent, text, user_context, log_prefix)
-                if (user_context.get("_slow_think_outline") or "").strip():
-                    _metric("slow_think")
-            except Exception:
-                self.logger.debug("%s慢思考跳过", log_prefix, exc_info=True)
+            # 7. 慢思考（与 process_message 同配置门控；默认关→零额外开销）。
+            #    低风险快路跳过慢思考这一额外 LLM 调用——延迟预算的主要省点。
+            if _is_fast_path:
+                _metric("fast_path")
+            else:
+                try:
+                    await self._maybe_slow_think(intent, text, user_context, log_prefix)
+                    if (user_context.get("_slow_think_outline") or "").strip():
+                        _metric("slow_think")
+                except Exception:
+                    self.logger.debug("%s慢思考跳过", log_prefix, exc_info=True)
 
             # 8. 生成（PersonaManager 注入人设 + 全部上下文块由 _build_context_prompt 消费）
             _so: Dict[str, Any] = {}
@@ -2073,6 +2118,13 @@ class SkillManager(LoggerMixin):
                 pass
 
             _metric("generated")
+            try:
+                from src.monitoring.metrics_store import get_metrics_store
+                get_metrics_store().record_inbox_draft_latency(
+                    (time.time() - _t0) * 1000.0
+                )
+            except Exception:
+                pass
             return {"reply": reply, "intent": intent}
         except Exception:
             self.logger.warning("%s生成失败，回落上层兜底", log_prefix, exc_info=True)
@@ -3405,6 +3457,49 @@ class SkillManager(LoggerMixin):
             return store.inferred_counts()
         except Exception:
             return {"pending": 0, "total": 0}
+
+    def episodic_key_health(self, sample: int = 10) -> Dict[str, Any]:
+        """记忆 key 健康概览（裸 key 漂移监测），供运维探针/看板。
+
+        裸 key（无 ``platform:`` 前缀）下的记忆对收件箱引擎不可见 → 拉低命中率。
+        一次性迁移清存量后，本探针让复发可观测。未启用记忆返回 ``{"enabled": False}``。
+        """
+        store = getattr(self, "_episodic_store", None)
+        if not store or not hasattr(store, "key_health"):
+            return {"enabled": False}
+        try:
+            return {"enabled": True, **store.key_health(sample=sample)}
+        except Exception:
+            return {"enabled": False}
+
+    def episodic_plan_key_migration(
+        self, platform: str, *, only_simple: bool = True,
+    ) -> Dict[str, Any]:
+        """裸 key → canonical 迁移 dry-run（只读），供后台预览影响面。"""
+        store = getattr(self, "_episodic_store", None)
+        if not store:
+            return {"enabled": False, "plan": []}
+        try:
+            from src.utils.episodic_key_migration import plan_canonical_migration
+            plan = plan_canonical_migration(store, platform, only_simple=only_simple)
+            return {"enabled": True, "platform": platform,
+                    "candidates": len(plan), "plan": plan}
+        except Exception:
+            return {"enabled": False, "plan": []}
+
+    def episodic_apply_key_migration(
+        self, platform: str, *, only_simple: bool = True,
+    ) -> Dict[str, Any]:
+        """裸 key → canonical 迁移落地（幂等、按 content_hash 去重）。供后台一键修复。"""
+        store = getattr(self, "_episodic_store", None)
+        if not store:
+            return {"enabled": False, "moved_rows": 0, "merged_keys": 0}
+        try:
+            from src.utils.episodic_key_migration import apply_canonical_migration
+            rep = apply_canonical_migration(store, platform, only_simple=only_simple)
+            return {"enabled": True, **rep}
+        except Exception:
+            return {"enabled": False, "moved_rows": 0, "merged_keys": 0}
 
     # ── R9b: 危机事件审计后台读写包装 ──────────────────────────────────
     def crisis_list_for_admin(

@@ -256,6 +256,60 @@ def test_episodic_backfill_400_vector_disabled(tmp_path):
     assert "向量" in str(r.json().get("detail", ""))
 
 
+def test_episodic_key_health_endpoint(episodic_app_and_client):
+    client, sm = episodic_app_and_client
+    sm.episodic_key_health = MagicMock(return_value={
+        "enabled": True, "total_keys": 10, "canonical_keys": 8,
+        "bare_keys": 2, "bare_facts": 5, "bare_ratio": 0.2,
+        "bare_samples": [{"key": "123", "facts": 3}],
+    })
+    r = client.get("/api/episodic-memory/key-health?sample=5")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["ok"] is True and d["bare_keys"] == 2
+    sm.episodic_key_health.assert_called_once_with(sample=5)
+
+
+def test_episodic_key_migrate_plan_endpoint(episodic_app_and_client):
+    client, sm = episodic_app_and_client
+    sm.episodic_plan_key_migration = MagicMock(return_value={
+        "enabled": True, "platform": "telegram", "candidates": 1,
+        "plan": [{"old_key": "123", "new_key": "telegram:123",
+                  "action": "rename", "fact_count": 3}],
+    })
+    r = client.get("/api/episodic-memory/key-migrate/plan?platform=telegram")
+    assert r.status_code == 200
+    assert r.json().get("candidates") == 1
+    sm.episodic_plan_key_migration.assert_called_once_with("telegram")
+
+
+def test_episodic_key_migrate_apply_endpoint_and_audit(tmp_path):
+    cm = _run_async(_load_cm(tmp_path))
+    audit = AuditStore(db_path=tmp_path / "audit.db")
+    tc = MagicMock()
+    sm = MagicMock()
+    sm.episodic_apply_key_migration = MagicMock(return_value={
+        "enabled": True, "platform": "telegram",
+        "candidates": 2, "merged_keys": 2, "moved_rows": 5, "details": [],
+    })
+    tc.skill_manager = sm
+    app = create_app(cm, audit_store=audit, boot_ts=0, telegram_client=tc)
+    with TestClient(app, raise_server_exceptions=True) as client:
+        client.headers.update({"Authorization": "Bearer test-token-123"})
+        r = client.post("/api/episodic-memory/key-migrate?platform=telegram")
+    assert r.status_code == 200
+    assert r.json().get("moved_rows") == 5
+    sm.episodic_apply_key_migration.assert_called_once_with("telegram")
+    rows = audit.query(limit=10, action="episodic_key_migrate")
+    assert rows and rows[0]["target"] == "telegram"
+    assert "moved=5" in rows[0]["new_val"]
+
+
+def test_episodic_key_health_503_without_bot(auth_client):
+    r = auth_client.get("/api/episodic-memory/key-health")
+    assert r.status_code == 503
+
+
 def test_episodic_backfill_429_budget(tmp_path):
     cm = _run_async(_load_cm(tmp_path))
     audit = AuditStore(db_path=tmp_path / "audit.db")

@@ -171,9 +171,16 @@ class HealthWatchdog:
         self._last_sig: Optional[str] = None
         self._last_light: str = "green"
         self._last_billing_sig: Optional[str] = None
+        # 草稿质量告警去抖（记忆命中率/p95 延迟/风险分类回检）
+        self._last_draft_quality_sig: Optional[str] = None
+        # 记忆 key 漂移巡检（裸 key 复发）——结构性数据，独立稀疏节流 + 去抖
+        self._last_drift_check_ts: float = 0.0
+        self._last_drift_sig: Optional[str] = None
         self.total_alerts: int = 0
         self.total_recoveries: int = 0
         self.total_billing_alerts: int = 0
+        self.total_draft_quality_alerts: int = 0
+        self.total_memory_key_drift_alerts: int = 0
         self.last_check_ts: float = 0.0
         self.last_light: str = "green"
 
@@ -246,6 +253,18 @@ class HealthWatchdog:
             self._check_billing()
         except Exception:
             logger.debug("计费巡检异常（已忽略）", exc_info=True)
+
+        # 统一草稿引擎质量巡检（记忆命中率/p95/风险分类回检），独立去抖。
+        try:
+            self._check_draft_quality()
+        except Exception:
+            logger.debug("草稿质量巡检异常（已忽略）", exc_info=True)
+
+        # 记忆 key 漂移巡检（裸 key 复发 → 记忆对引擎不可见），稀疏节流 + 独立去抖。
+        try:
+            self._check_memory_key_drift()
+        except Exception:
+            logger.debug("记忆 key 漂移巡检异常（已忽略）", exc_info=True)
 
         # 运维卫生：按保留期清理已关闭事件（每日节流一次）。
         try:
@@ -372,6 +391,231 @@ class HealthWatchdog:
             logger.info("HealthWatchdog 发出计费恢复通知")
         except Exception:
             logger.debug("billing recovery 发布失败（已忽略）", exc_info=True)
+
+    def _check_draft_quality(self) -> None:
+        """统一草稿引擎质量巡检：基于**窗口速率**评估（可触发、可恢复）。
+
+        三项规则（阈值见 ``inbox.auto_draft.quality_alert``）：
+          - 记忆命中率过低 → 自动回复可能「记不住」客户信息
+          - p95 生成延迟过高 → 延迟预算被突破
+          - 低风险快路占比过高 → 风险分类可能过宽（敏感消息或未走全栈/审核）
+
+        用**窗口**速率而非累计：累计率一旦退化无法回弹，无法表达「已恢复」；窗口率
+        随近 1h 流量实时升降，触发与恢复都灵敏。窗口样本不足时静默（不改状态）。
+        """
+        cfg = getattr(self._config_manager, "config", None) or {}
+        qa = (((cfg.get("inbox") or {}).get("auto_draft") or {}).get("quality_alert")
+              or {}) if isinstance(cfg, dict) else {}
+        if not qa.get("enabled", True):
+            return
+        try:
+            from src.monitoring.metrics_store import get_metrics_store
+            snap = get_metrics_store().get_inbox_draft_metrics()
+        except Exception:
+            return
+
+        window = snap.get("window") or {}
+        win_gen = int(window.get("generated") or 0)
+        min_samples = int(qa.get("min_samples", 30))
+        if win_gen < max(1, min_samples):
+            return  # 样本不足，静默（不改变既有告警/恢复态）
+
+        def _rate(name: str) -> float:
+            return (int(window.get(name) or 0) / win_gen) if win_gen else 0.0
+
+        problems: List[Dict[str, Any]] = []
+
+        # 分级：严重退化升 red（fail），轻微越界为 yellow（warn）。
+        mem_min = float(qa.get("memory_hit_min", 0.30))
+        mem_severe = float(qa.get("memory_hit_severe", 0.15))
+        mem_r = _rate("memory_hit")
+        if mem_r < mem_min:
+            problems.append({
+                "id": "memory_hit_low", "name": "草稿记忆命中率",
+                "status": "fail" if mem_r < mem_severe else "warn",
+                "detail": (f"近窗口记忆命中率 {mem_r:.0%} < 阈值 {mem_min:.0%}"
+                           f"{'（严重失忆）' if mem_r < mem_severe else '（自动回复可能记不住客户信息）'}"),
+            })
+
+        latency = snap.get("latency") or {}
+        p95_max = int(qa.get("p95_ms_max", 8000))
+        p95_severe = int(qa.get("p95_ms_severe", p95_max * 2))
+        p95 = int(latency.get("p95_ms") or 0)
+        if latency.get("count") and p95 > p95_max:
+            problems.append({
+                "id": "latency_high", "name": "草稿生成 p95 延迟",
+                "status": "fail" if p95 > p95_severe else "warn",
+                "detail": f"p95 {p95}ms > 阈值 {p95_max}ms（n={latency.get('count')}）",
+            })
+
+        fp_max = float(qa.get("fast_path_ratio_max", 0.98))
+        fp_ratio = _rate("fast_path")
+        if fp_ratio > fp_max:
+            problems.append({
+                "id": "risk_classify_loose", "name": "风险分类可能过宽",
+                "status": "warn",  # 配置质量信号，非故障 → 恒 yellow
+                "detail": (f"近窗口低风险快路占比 {fp_ratio:.0%} > 阈值 {fp_max:.0%}"
+                           "（几乎全判低风险，敏感消息可能未走全栈/人工审核）"),
+            })
+
+        # 签名带上 status：轻微→严重的升级会改变签名 → 重新发一条（值班能感知升级）。
+        sig = "|".join(sorted(f"{p['id']}:{p['status']}" for p in problems))
+        light = "red" if any(p["status"] == "fail" for p in problems) else "yellow"
+        if problems:
+            if sig != self._last_draft_quality_sig:
+                self._emit_draft_quality_alert(problems, light)
+                self.total_draft_quality_alerts += 1
+            self._last_draft_quality_sig = sig
+        else:
+            if self._last_draft_quality_sig:
+                self._emit_draft_quality_recovery()
+            self._last_draft_quality_sig = None
+
+    def _emit_draft_quality_alert(
+        self, problems: List[Dict[str, Any]], light: str = "yellow",
+    ) -> None:
+        try:
+            inbox = self._inbox()
+            if inbox is not None and hasattr(inbox, "open_or_update_incident"):
+                inbox.open_or_update_incident(
+                    kind="draft_quality",
+                    signature="|".join(sorted(p["id"] for p in problems)),
+                    light=light,
+                    summary={"problems": len(problems)},
+                    problems=problems,
+                )
+        except Exception:
+            logger.debug("草稿质量事件落表失败（已忽略）", exc_info=True)
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            get_event_bus().publish("draft_quality_alert", {
+                "light": light, "problems": problems, "recovered": False,
+            })
+            logger.warning("HealthWatchdog 发出草稿质量告警：light=%s %d 项",
+                           light, len(problems))
+        except Exception:
+            logger.debug("draft_quality_alert 发布失败（已忽略）", exc_info=True)
+
+    def _emit_draft_quality_recovery(self) -> None:
+        try:
+            inbox = self._inbox()
+            if inbox is not None and hasattr(inbox, "resolve_open_incidents"):
+                inbox.resolve_open_incidents(kind="draft_quality")
+        except Exception:
+            logger.debug("草稿质量事件 resolve 失败（已忽略）", exc_info=True)
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            get_event_bus().publish("draft_quality_alert", {
+                "problems": [], "recovered": True,
+            })
+            logger.info("HealthWatchdog 发出草稿质量恢复通知")
+        except Exception:
+            logger.debug("draft_quality recovery 发布失败（已忽略）", exc_info=True)
+
+    def _skill_manager(self):
+        return getattr(getattr(self._app, "state", self._app), "skill_manager", None)
+
+    def _check_memory_key_drift(self, *, now: Optional[float] = None) -> None:
+        """记忆 key 漂移巡检：裸 key（无 ``platform:`` 前缀）复发即告警。
+
+        一次性迁移（:mod:`src.utils.episodic_key_migration`）清存量后，若某入口又漏传
+        platform，记忆会重新落到裸 key、对收件箱引擎不可见 → 静默拉低命中率。本巡检
+        让漂移**自我守护**：``bare_keys`` 超阈即发 ``memory_key_drift`` 事件（可恢复）。
+
+        结构性数据（key 集合慢变），故独立稀疏节流（默认 1h）；阈值见
+        ``inbox.auto_draft.key_drift_alert``。
+        """
+        cfg = getattr(self._config_manager, "config", None) or {}
+        kd = (((cfg.get("inbox") or {}).get("auto_draft") or {}).get("key_drift_alert")
+              or {}) if isinstance(cfg, dict) else {}
+        if not kd.get("enabled", True):
+            return
+        ts = float(now if now is not None else time.time())
+        interval = max(self._interval, float(kd.get("interval_sec", 3600)))
+        if self._last_drift_check_ts and (ts - self._last_drift_check_ts) < interval:
+            return
+        sm = self._skill_manager()
+        if sm is None or not hasattr(sm, "episodic_key_health"):
+            return
+        try:
+            health = sm.episodic_key_health(sample=5)
+        except Exception:
+            return
+        if not health.get("enabled"):
+            return
+        self._last_drift_check_ts = ts
+
+        bare = int(health.get("bare_keys") or 0)
+        bare_max = int(kd.get("bare_keys_max", 0))
+        bare_severe = int(kd.get("bare_keys_severe", 50))
+        problems: List[Dict[str, Any]] = []
+        if bare > bare_max:
+            samples = ", ".join(
+                str(s.get("key")) for s in (health.get("bare_samples") or [])[:5]
+            )
+            problems.append({
+                "id": "memory_key_drift", "name": "记忆 key 漂移",
+                "status": "fail" if bare >= bare_severe else "warn",
+                "detail": (
+                    f"检测到 {bare} 个裸 key（无 platform 前缀，含 "
+                    f"{int(health.get('bare_facts') or 0)} 条事实）对收件箱引擎不可见 → "
+                    f"拉低命中率；样例: {samples}。"
+                    "可运行 src.utils.episodic_key_migration 并入 canonical key"
+                ),
+            })
+
+        sig = "|".join(sorted(f"{p['id']}:{p['status']}" for p in problems))
+        light = "red" if any(p["status"] == "fail" for p in problems) else "yellow"
+        if problems:
+            if sig != self._last_drift_sig:
+                self._emit_memory_key_drift_alert(problems, light)
+                self.total_memory_key_drift_alerts += 1
+            self._last_drift_sig = sig
+        else:
+            if self._last_drift_sig:
+                self._emit_memory_key_drift_recovery()
+            self._last_drift_sig = None
+
+    def _emit_memory_key_drift_alert(
+        self, problems: List[Dict[str, Any]], light: str = "yellow",
+    ) -> None:
+        try:
+            inbox = self._inbox()
+            if inbox is not None and hasattr(inbox, "open_or_update_incident"):
+                inbox.open_or_update_incident(
+                    kind="memory_key_drift",
+                    signature="|".join(sorted(p["id"] for p in problems)),
+                    light=light,
+                    summary={"problems": len(problems)},
+                    problems=problems,
+                )
+        except Exception:
+            logger.debug("记忆 key 漂移事件落表失败（已忽略）", exc_info=True)
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            get_event_bus().publish("memory_key_drift_alert", {
+                "light": light, "problems": problems, "recovered": False,
+            })
+            logger.warning("HealthWatchdog 发出记忆 key 漂移告警：light=%s %d 项",
+                           light, len(problems))
+        except Exception:
+            logger.debug("memory_key_drift_alert 发布失败（已忽略）", exc_info=True)
+
+    def _emit_memory_key_drift_recovery(self) -> None:
+        try:
+            inbox = self._inbox()
+            if inbox is not None and hasattr(inbox, "resolve_open_incidents"):
+                inbox.resolve_open_incidents(kind="memory_key_drift")
+        except Exception:
+            logger.debug("记忆 key 漂移事件 resolve 失败（已忽略）", exc_info=True)
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            get_event_bus().publish("memory_key_drift_alert", {
+                "problems": [], "recovered": True,
+            })
+            logger.info("HealthWatchdog 发出记忆 key 漂移恢复通知")
+        except Exception:
+            logger.debug("memory_key_drift recovery 发布失败（已忽略）", exc_info=True)
 
     def _maybe_purge_incidents(self, *, now: Optional[float] = None) -> int:
         if self._retention_days <= 0:
@@ -516,6 +760,8 @@ class HealthWatchdog:
             "total_alerts": self.total_alerts,
             "total_recoveries": self.total_recoveries,
             "total_billing_alerts": self.total_billing_alerts,
+            "total_draft_quality_alerts": self.total_draft_quality_alerts,
+            "total_memory_key_drift_alerts": self.total_memory_key_drift_alerts,
             "total_weekly_reports": self.total_weekly_reports,
             "last_check_ts": self.last_check_ts,
             "last_light": self.last_light,

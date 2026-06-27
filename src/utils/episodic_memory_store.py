@@ -186,6 +186,79 @@ class EpisodicMemoryStore:
             logger.debug("episodic insert failed: %s", e)
             return None
 
+    def list_key_stats(self) -> List[Tuple[str, int]]:
+        """返回 ``[(user_id_key, fact_count), ...]``，按事实数降序。
+
+        供跨平台记忆 key 迁移工具盘点：哪些是「裸 key」（旧产线遗留、未带 platform
+        前缀），需要并入 canonical key 才能被新收件箱产线命中。
+        """
+        try:
+            rows = self._conn.execute(
+                "SELECT user_id, COUNT(*) FROM episodic_memory"
+                " GROUP BY user_id ORDER BY COUNT(*) DESC"
+            ).fetchall()
+            return [(str(r[0]), int(r[1])) for r in rows]
+        except Exception as e:
+            logger.debug("list_key_stats failed: %s", e)
+            return []
+
+    def key_health(self, sample: int = 10) -> Dict[str, Any]:
+        """记忆 key 健康概览：盘点「裸 key」（无 ``platform:`` 前缀）漂移。
+
+        裸 key 是旧产线遗留或某入口漏传 platform 的产物——新收件箱引擎按 canonical
+        (``platform:uid``) 读取，裸 key 下的记忆对其不可见 → 拉低命中率。一次性迁移
+        （:mod:`src.utils.episodic_key_migration`）清掉存量后，本探针让**复发可观测**：
+        运维/看板随时能看到 bare_keys 是否回升，而非靠低命中率事后倒查。
+
+        返回 ``{total_keys, canonical_keys, bare_keys, bare_facts, bare_ratio,
+        bare_samples:[{key,facts}...]}``；store 异常返回零值（绝不抛）。
+        """
+        try:
+            stats = self.list_key_stats()
+        except Exception:
+            stats = []
+        total_keys = len(stats)
+        bare = [(k, n) for k, n in stats if ":" not in str(k)]
+        n_sample = max(0, int(sample or 0))
+        return {
+            "total_keys": total_keys,
+            "canonical_keys": total_keys - len(bare),
+            "bare_keys": len(bare),
+            "bare_facts": sum(n for _, n in bare),
+            "bare_ratio": round(len(bare) / total_keys, 4) if total_keys else 0.0,
+            "bare_samples": [{"key": k, "facts": n} for k, n in bare[:n_sample]],
+        }
+
+    def merge_key(self, old_key: str, new_key: str) -> int:
+        """把 ``old_key`` 的事实并入 ``new_key``（幂等、按 content_hash 去重）。
+
+        用 ``UPDATE OR IGNORE`` 迁移：与目标 key 内容重复的行迁移被忽略（保留目标既
+        有），再 ``DELETE`` 掉旧 key 残留行。返回成功迁移（非重复）的行数。
+        """
+        old_key = str(old_key or "")
+        new_key = str(new_key or "")
+        if not old_key or not new_key or old_key == new_key:
+            return 0
+        try:
+            cur = self._conn.execute(
+                "UPDATE OR IGNORE episodic_memory SET user_id=? WHERE user_id=?",
+                (new_key, old_key),
+            )
+            moved = int(cur.rowcount or 0)
+            # 删除因 (user_id, content_hash) 冲突未能迁移的旧残留行
+            self._conn.execute(
+                "DELETE FROM episodic_memory WHERE user_id=?", (old_key,)
+            )
+            self._conn.commit()
+            return moved
+        except Exception as e:
+            logger.debug("merge_key %s→%s failed: %s", old_key, new_key, e)
+            try:
+                self._conn.rollback()
+            except Exception:
+                pass
+            return 0
+
     @staticmethod
     def _compute_salience(content: str) -> Optional[float]:
         """写入期算一次情绪显著性（0-1）；失败回 None，不阻断写入。"""

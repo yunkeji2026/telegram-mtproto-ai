@@ -124,6 +124,8 @@ class MetricsStore:
         # 暴露于 /api/drafts/autosend-status 的 draft_pipeline 段，让「规则是否真生效」可监控。
         self._inbox_draft_metrics: Dict[str, int] = defaultdict(int)
         self._inbox_draft_recent: deque = deque(maxlen=2000)  # (ts, name)
+        # 草稿生成延迟（端到端 ms）：算 p50/p95，做延迟预算告警
+        self._inbox_draft_latency_ms: deque = deque(maxlen=500)
 
     @classmethod
     def get_instance(cls) -> "MetricsStore":
@@ -277,8 +279,19 @@ class MetricsStore:
             for _ in range(min(c, 50)):  # 时序仅记前 50，避免单次爆量挤掉历史
                 self._inbox_draft_recent.append((now, name))
 
+    def record_inbox_draft_latency(self, ms: float) -> None:
+        """记录单条草稿端到端生成延迟（ms）。"""
+        try:
+            v = float(ms)
+        except (TypeError, ValueError):
+            return
+        if v < 0:
+            return
+        with self._lock:
+            self._inbox_draft_latency_ms.append(v)
+
     def get_inbox_draft_metrics(self, window_sec: float = 3600.0) -> Dict[str, Any]:
-        """统一草稿引擎规则栈快照：``total`` 累计 + ``window`` 最近窗口聚合。"""
+        """统一草稿引擎规则栈快照：``total`` 累计 + ``window`` 最近窗口聚合 + 延迟分位。"""
         with self._lock:
             total = dict(self._inbox_draft_metrics)
             cutoff = time.time() - float(window_sec or 3600.0)
@@ -286,6 +299,18 @@ class MetricsStore:
             for ts, name in self._inbox_draft_recent:
                 if ts >= cutoff:
                     window[name] += 1
+            _lat = sorted(self._inbox_draft_latency_ms)
+        latency: Dict[str, Any] = {"count": len(_lat)}
+        if _lat:
+            def _pct(p: float) -> int:
+                idx = min(len(_lat) - 1, max(0, int(round(p * (len(_lat) - 1)))))
+                return int(_lat[idx])
+            latency.update({
+                "p50_ms": _pct(0.50),
+                "p95_ms": _pct(0.95),
+                "max_ms": int(_lat[-1]),
+                "avg_ms": int(sum(_lat) / len(_lat)),
+            })
         out_total = dict(total)
         gen = int(out_total.get("generated", 0)) or 0
         # 便于一眼看比例：命中率（基于累计 generated）
@@ -300,6 +325,7 @@ class MetricsStore:
             "window": dict(window),
             "window_sec": int(window_sec or 3600.0),
             "rates_vs_generated": rates,
+            "latency": latency,
         }
 
     def set_startup_advisory_counts(self, total: int, warning_events: int) -> None:

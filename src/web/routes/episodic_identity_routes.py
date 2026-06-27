@@ -121,6 +121,58 @@ def register_episodic_identity_routes(app, ctx) -> None:
             raise HTTPException(status_code=404, detail="记录不存在或记忆未启用")
         return {"ok": True, "deleted": int(row_id)}
 
+    @app.get("/api/episodic-memory/key-health")
+    async def api_episodic_key_health(request: Request, sample: int = 10):
+        """记忆 key 健康探针：盘点裸 key（无 ``platform:`` 前缀）漂移。
+
+        裸 key 下的记忆对收件箱引擎不可见 → 拉低命中率。一次性迁移清存量后，本探针
+        让复发可观测（``bare_keys`` 回升即说明某入口又漏传 platform）。
+        """
+        _api_auth(request)
+        sm = getattr(telegram_client, "skill_manager", None) if telegram_client else None
+        if not sm or not hasattr(sm, "episodic_key_health"):
+            raise HTTPException(status_code=503, detail="Bot 未就绪或未注入 SkillManager")
+        return {"ok": True, **sm.episodic_key_health(sample=max(0, min(int(sample or 10), 100)))}
+
+    @app.get("/api/episodic-memory/key-migrate/plan")
+    async def api_episodic_key_migrate_plan(request: Request, platform: str = "telegram"):
+        """裸 key → canonical 迁移 dry-run（只读）：预览将并入哪些 key。"""
+        _api_auth(request)
+        sm = getattr(telegram_client, "skill_manager", None) if telegram_client else None
+        if not sm or not hasattr(sm, "episodic_plan_key_migration"):
+            raise HTTPException(status_code=503, detail="Bot 未就绪或未注入 SkillManager")
+        plat = (platform or "telegram").strip()[:32]
+        if not plat:
+            raise HTTPException(status_code=400, detail="需要 platform")
+        return {"ok": True, **sm.episodic_plan_key_migration(plat)}
+
+    @app.post("/api/episodic-memory/key-migrate")
+    async def api_episodic_key_migrate_apply(request: Request, platform: str = "telegram"):
+        """裸 key → canonical 迁移落地（幂等、按 content_hash 去重）。一键修复漂移。"""
+        _api_write("episodic_memory")(request)
+        sm = getattr(telegram_client, "skill_manager", None) if telegram_client else None
+        if not sm or not hasattr(sm, "episodic_apply_key_migration"):
+            raise HTTPException(status_code=503, detail="Bot 未就绪或未注入 SkillManager")
+        plat = (platform or "telegram").strip()[:32]
+        if not plat:
+            raise HTTPException(status_code=400, detail="需要 platform")
+        rep = sm.episodic_apply_key_migration(plat)
+        # 落审计：谁在何时把哪个平台的裸 key 并入 canonical
+        audit = getattr(ctx, "audit_store", None)
+        if audit and rep.get("enabled"):
+            try:
+                actor = str(
+                    request.session.get("username")
+                    or request.session.get("role") or "web_admin"
+                )
+                audit.log(
+                    actor, "episodic_key_migrate", target=plat,
+                    new_val=f"merged={rep.get('merged_keys',0)} moved={rep.get('moved_rows',0)}",
+                )
+            except Exception:
+                pass
+        return {"ok": True, **rep}
+
     @app.get("/api/episodic-memory/correction-stats")
     async def api_episodic_correction_stats(request: Request, days: int = 30):
         """R17：记忆校正质量看板——AI 推断采纳量/采纳率 + 各坐席确认量。

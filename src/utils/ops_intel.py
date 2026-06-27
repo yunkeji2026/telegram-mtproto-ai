@@ -21,12 +21,17 @@ _ADVICE = {
     "queue": ("草稿队列积压，处理跟不上产出", "增派坐席处理，或排查 autosend worker 是否卡顿", "/workspace/drafts"),
     "over_seats": ("活跃坐席数超过授权席位", "升级席位额度，或减少同时在线坐席", "/workspace/usage"),
     "message_overage": ("本期消息量超出套餐额度", "升级套餐，或对外发量做节流/收口", "/workspace/usage"),
+    "memory_key_drift": ("某入口写记忆时漏传 platform，记忆落到裸 key、对收件箱引擎不可见",
+                         "一键并入 canonical key（幂等去重），或到情景记忆页核对",
+                         "/episodic-memory"),
 }
 _WORKER_ADVICE = ("后台 worker 未运行或处于熔断", "查看日志定位错误并重启对应 worker", "/admin/ops")
 
 # 支持「一键动作」的可重置 worker：健康组件 id → worker 标识（reset-circuit 端点用）。
 # 仅在该 worker 处于 warn（熔断中）时提供，fail（未运行）需进程级处理，不给一键钮。
 _RESETTABLE_WORKERS = {"worker_autosend": "autosend"}
+# native bot 唯一会产生裸数字 key 的平台（其余 runner 均显式设 platform）。
+_DRIFT_DEFAULT_PLATFORM = "telegram"
 
 
 def incident_advice(problems: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
@@ -50,6 +55,10 @@ def incident_advice(problems: Optional[List[Dict[str, Any]]]) -> List[Dict[str, 
         if pid in _RESETTABLE_WORKERS and status == "warn":
             entry["fix"] = {"key": "reset_circuit", "label": "重置熔断",
                             "target": _RESETTABLE_WORKERS[pid]}
+        elif pid == "memory_key_drift" and status in ("warn", "fail"):
+            # 幂等且只并简单 DM key（跳过群/复合 key）→ 可安全提供一键修复。
+            entry["fix"] = {"key": "migrate_memory_keys", "label": "并入 canonical",
+                            "target": _DRIFT_DEFAULT_PLATFORM}
         out.append(entry)
     return out
 

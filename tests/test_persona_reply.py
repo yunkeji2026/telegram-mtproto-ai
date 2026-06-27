@@ -289,10 +289,12 @@ class _FakeSMUnified(_FakeSM):
         self.episodic_writeback_calls = []
 
     async def generate_inbox_draft(self, *, text, chat_key, platform,
-                                   history=None, persona_id="", reply_lang=""):
+                                   history=None, persona_id="", reply_lang="",
+                                   risk_level=""):
         self.inbox_draft_calls.append({
             "text": text, "chat_key": chat_key, "platform": platform,
             "persona_id": persona_id, "reply_lang": reply_lang,
+            "risk_level": risk_level,
             "history_len": len(history or []),
         })
         return {"reply": f"[统一]{text}", "intent": "unified_intent"}
@@ -312,6 +314,7 @@ async def test_persona_reply_prefers_unified_engine():
     out = await generate_persona_reply(
         app=app, platform="telegram", chat_key="7340576921",
         last_inbound=last, history=history, persona_id="p1",
+        risk_level="medium",
     )
     assert out["ok"] is True
     assert out["reply"] == "[统一]我叫Jun，记得吗"
@@ -321,6 +324,7 @@ async def test_persona_reply_prefers_unified_engine():
     assert call["chat_key"] == "7340576921"
     assert call["platform"] == "telegram"
     assert call["persona_id"] == "p1"
+    assert call["risk_level"] == "medium"  # 风险分档透传到统一引擎
     # 统一引擎自带记忆写回 → persona_reply 不应再触发一次（避免双写）
     assert sm.episodic_writeback_calls == []
     # 统一引擎主路径不应回落到直连 ai_client

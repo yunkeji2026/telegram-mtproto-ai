@@ -80,6 +80,8 @@
         <option value="">全部类型</option>
         <option value="health">🩺 健康</option>
         <option value="billing">💸 计费</option>
+        <option value="draft_quality">📉 草稿质量</option>
+        <option value="memory_key_drift">🧭 记忆漂移</option>
       </select>
       <select id="fltStatus" onchange="loadIncidents()" style="background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:4px 8px;">
         <option value="">全部状态</option>
@@ -202,7 +204,7 @@ function incidentRow(it){
     return '<div class="muted" style="font-size:12px;margin-top:3px;">💡 '+a.action+link+fix+'</div>';
   }).join('');
   var canAck = it.status !== 'resolved' && CAN_MANAGE_OPS;
-  var kindLabel = it.kind === 'billing' ? '💸 计费' : '🩺 健康';
+  var kindLabel = ({billing:'💸 计费', draft_quality:'📉 草稿质量', memory_key_drift:'🧭 记忆漂移', health:'🩺 健康'})[it.kind] || '🩺 健康';
   return '<tr>'+
     '<td>'+kindLabel+'</td>'+
     '<td><span class="badge '+it.status+'">'+it.status+'</span></td>'+
@@ -256,15 +258,26 @@ async function loadMoreIncidents(){
 
 function csrfToken(){ return (document.cookie.match(/csrf_token=([^;]+)/)||[])[1]||''; }
 
+function fixEndpoint(key, target){
+  if(key === 'migrate_memory_keys'){
+    return '/api/episodic-memory/key-migrate?platform=' + encodeURIComponent(target);
+  }
+  // 默认：worker 熔断重置
+  return '/api/admin/workers/' + encodeURIComponent(target) + '/reset-circuit';
+}
+
 async function runFix(key, target){
   if(!confirm('确认对「'+target+'」执行一键动作：'+key+'？')) return;
   try{
-    var r = await fetch('/api/admin/workers/'+encodeURIComponent(target)+'/reset-circuit', {
+    var r = await fetch(fixEndpoint(key, target), {
       method:'POST', credentials:'same-origin',
       headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken()},
     });
     var d = await r.json();
     if(!d.ok){ alert('动作失败：'+(d.error||'未知')); return; }
+    if(key === 'migrate_memory_keys'){
+      alert('已并入 canonical：' + (d.merged_keys||0) + ' 个 key、' + (d.moved_rows||0) + ' 条事实');
+    }
     // 动作后立即重巡，让相关事件自动恢复。
     await recheckHealth();
   }catch(e){ alert('动作失败：'+e); }

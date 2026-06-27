@@ -206,3 +206,271 @@ def test_collect_health_reused_by_route():
     from src.web.routes import runtime_health_routes
     src = inspect.getsource(runtime_health_routes)
     assert "collect_health" in src
+
+
+# ── 草稿质量告警闭环（记忆命中率 / p95 / 风险分类回检）──────────────────────
+
+def _reset_draft_metrics():
+    from src.monitoring import metrics_store as _ms
+    _ms.MetricsStore._instance = None
+    return _ms.get_metrics_store()
+
+
+def _qa_cm(**over):
+    qa = {"enabled": True, "min_samples": 10, "memory_hit_min": 0.30,
+          "p95_ms_max": 8000, "fast_path_ratio_max": 0.98}
+    qa.update(over)
+    return _CM({"ai": {"provider": "openai", "api_key": "sk-real-123"},
+                "inbox": {"auto_draft": {"quality_alert": qa}}})
+
+
+def _bus(monkeypatch, sink):
+    from src.integrations.shared import event_bus as eb
+
+    class _Bus:
+        def publish(self, t, d): sink.append((t, d))
+    monkeypatch.setattr(eb, "get_event_bus", lambda: _Bus())
+
+
+def test_draft_quality_alert_on_low_memory_hit(monkeypatch):
+    published = []
+    _bus(monkeypatch, published)
+    m = _reset_draft_metrics()
+    for _ in range(30):
+        m.record_inbox_draft_event("generated")
+    for _ in range(3):  # 命中率 3/30 = 10% < 30%
+        m.record_inbox_draft_event("memory_hit")
+
+    app = _fake_app()
+    wd = HealthWatchdog(app=app, config_manager=_qa_cm(), interval_sec=60)
+    wd._check_draft_quality()
+
+    assert published, "记忆命中率过低应发告警"
+    typ, data = published[0]
+    assert typ == "draft_quality_alert"
+    assert data["recovered"] is False
+    assert any(p["id"] == "memory_hit_low" for p in data["problems"])
+    assert wd.total_draft_quality_alerts == 1
+
+
+def test_draft_quality_dedup_then_recover(monkeypatch):
+    published = []
+    _bus(monkeypatch, published)
+    m = _reset_draft_metrics()
+    for _ in range(30):
+        m.record_inbox_draft_event("generated")
+    for _ in range(3):
+        m.record_inbox_draft_event("memory_hit")
+
+    app = _fake_app()
+    wd = HealthWatchdog(app=app, config_manager=_qa_cm(), interval_sec=60)
+    wd._check_draft_quality()
+    wd._check_draft_quality()  # 签名不变 → 不重复发
+    assert len(published) == 1
+
+    # 拉高命中率：再来一批高命中样本 → 窗口率回到阈值上 → 恢复
+    for _ in range(30):
+        m.record_inbox_draft_event("generated")
+        m.record_inbox_draft_event("memory_hit")
+    wd._check_draft_quality()
+    assert len(published) == 2
+    assert published[1][1]["recovered"] is True
+
+
+def test_draft_quality_silent_when_low_samples(monkeypatch):
+    published = []
+    _bus(monkeypatch, published)
+    m = _reset_draft_metrics()
+    for _ in range(5):  # < min_samples=10
+        m.record_inbox_draft_event("generated")
+
+    app = _fake_app()
+    wd = HealthWatchdog(app=app, config_manager=_qa_cm(), interval_sec=60)
+    wd._check_draft_quality()
+    assert published == []
+
+
+def test_draft_quality_risk_classify_loose(monkeypatch):
+    published = []
+    _bus(monkeypatch, published)
+    m = _reset_draft_metrics()
+    for _ in range(30):  # 全是低风险快路 + 高记忆命中（隔离 fast_path 信号）
+        m.record_inbox_draft_event("generated")
+        m.record_inbox_draft_event("fast_path")
+        m.record_inbox_draft_event("memory_hit")
+
+    app = _fake_app()
+    wd = HealthWatchdog(app=app, config_manager=_qa_cm(), interval_sec=60)
+    wd._check_draft_quality()
+    assert published
+    data = published[0][1]
+    ids = {p["id"] for p in data["problems"]}
+    assert "risk_classify_loose" in ids
+    assert "memory_hit_low" not in ids  # 高命中率不应误报
+
+
+def test_draft_quality_disabled_no_alert(monkeypatch):
+    published = []
+    _bus(monkeypatch, published)
+    m = _reset_draft_metrics()
+    for _ in range(30):
+        m.record_inbox_draft_event("generated")
+
+    app = _fake_app()
+    wd = HealthWatchdog(app=app, config_manager=_qa_cm(enabled=False), interval_sec=60)
+    wd._check_draft_quality()
+    assert published == []
+
+
+def test_draft_quality_severity_grading(monkeypatch):
+    """严重失忆(<15%) → red+fail；轻微(<30%) → yellow+warn。"""
+    # 严重：3/30 = 10% < 15%
+    pub1 = []
+    _bus(monkeypatch, pub1)
+    m = _reset_draft_metrics()
+    for _ in range(30):
+        m.record_inbox_draft_event("generated")
+    for _ in range(3):
+        m.record_inbox_draft_event("memory_hit")
+    wd = HealthWatchdog(app=_fake_app(), config_manager=_qa_cm(), interval_sec=60)
+    wd._check_draft_quality()
+    data = pub1[0][1]
+    assert data["light"] == "red"
+    assert any(p["id"] == "memory_hit_low" and p["status"] == "fail"
+               for p in data["problems"])
+
+    # 轻微：6/30 = 20%（15%~30%）→ yellow+warn
+    pub2 = []
+    _bus(monkeypatch, pub2)
+    m2 = _reset_draft_metrics()
+    for _ in range(30):
+        m2.record_inbox_draft_event("generated")
+    for _ in range(6):
+        m2.record_inbox_draft_event("memory_hit")
+    wd2 = HealthWatchdog(app=_fake_app(), config_manager=_qa_cm(), interval_sec=60)
+    wd2._check_draft_quality()
+    data2 = pub2[0][1]
+    assert data2["light"] == "yellow"
+    assert any(p["id"] == "memory_hit_low" and p["status"] == "warn"
+               for p in data2["problems"])
+
+
+def test_draft_quality_event_alias_and_message():
+    from src.inbox.webhook_notifier import _EVENT_ALIASES, _build_message
+    assert "draft_quality" in _EVENT_ALIASES
+    title, text = _build_message("draft_quality_alert", {
+        "light": "red",
+        "problems": [{"name": "草稿记忆命中率", "detail": "近窗口记忆命中率 10% < 阈值 30%"}]})
+    assert "草稿质量告警" in title
+    assert "记忆命中率" in text
+    t2, x2 = _build_message("draft_quality_alert", {"recovered": True})
+    assert "恢复" in t2
+
+
+# ── 记忆 key 漂移告警闭环（裸 key 复发自我守护）────────────────────────────
+
+def _kd_cm(**over):
+    kd = {"enabled": True, "bare_keys_max": 0, "bare_keys_severe": 50,
+          "interval_sec": 60}
+    kd.update(over)
+    return _CM({"ai": {"provider": "openai", "api_key": "sk-real-123"},
+                "inbox": {"auto_draft": {"key_drift_alert": kd}}})
+
+
+def _kh(bare, *, facts=None):
+    """构造 episodic_key_health 返回值（bare 个裸 key）。"""
+    return {
+        "enabled": True, "total_keys": bare + 5, "canonical_keys": 5,
+        "bare_keys": bare, "bare_facts": facts if facts is not None else bare * 2,
+        "bare_ratio": 0.0,
+        "bare_samples": [{"key": str(i), "facts": 1} for i in range(min(bare, 5))],
+    }
+
+
+def _app_with_sm(health):
+    """_fake_app 叠加 state.skill_manager.episodic_key_health（可经 holder 改值）。"""
+    app = _fake_app()
+    holder = {"h": health}
+    app.state.skill_manager = types.SimpleNamespace(
+        episodic_key_health=lambda sample=5: holder["h"])
+    return app, holder
+
+
+def test_memory_key_drift_alert_yellow(monkeypatch):
+    pub = []
+    _bus(monkeypatch, pub)
+    app, _ = _app_with_sm(_kh(3))
+    wd = HealthWatchdog(app=app, config_manager=_kd_cm(), interval_sec=60)
+    wd._check_memory_key_drift(now=1000)
+    assert pub and pub[0][0] == "memory_key_drift_alert"
+    d = pub[0][1]
+    assert d["recovered"] is False and d["light"] == "yellow"
+    assert any(p["id"] == "memory_key_drift" and p["status"] == "warn"
+               for p in d["problems"])
+    assert wd.total_memory_key_drift_alerts == 1
+
+
+def test_memory_key_drift_red_when_severe(monkeypatch):
+    pub = []
+    _bus(monkeypatch, pub)
+    app, _ = _app_with_sm(_kh(60))
+    wd = HealthWatchdog(app=app, config_manager=_kd_cm(), interval_sec=60)
+    wd._check_memory_key_drift(now=1000)
+    assert pub[0][1]["light"] == "red"
+    assert any(p["status"] == "fail" for p in pub[0][1]["problems"])
+
+
+def test_memory_key_drift_dedup_then_recover(monkeypatch):
+    pub = []
+    _bus(monkeypatch, pub)
+    app, holder = _app_with_sm(_kh(3))
+    wd = HealthWatchdog(app=app, config_manager=_kd_cm(), interval_sec=60)
+    wd._check_memory_key_drift(now=1000)
+    wd._check_memory_key_drift(now=1100)  # 签名不变 → 不重复发
+    assert len(pub) == 1
+    holder["h"] = _kh(0)                   # 漂移清零 → 恢复
+    wd._check_memory_key_drift(now=1200)
+    assert len(pub) == 2
+    assert pub[1][1]["recovered"] is True
+
+
+def test_memory_key_drift_throttled_within_interval(monkeypatch):
+    pub = []
+    _bus(monkeypatch, pub)
+    app, _ = _app_with_sm(_kh(3))
+    wd = HealthWatchdog(app=app, config_manager=_kd_cm(interval_sec=3600),
+                        interval_sec=60)
+    wd._check_memory_key_drift(now=1000)
+    wd._check_memory_key_drift(now=1500)  # 距上次<3600 → 节流跳过
+    assert len(pub) == 1
+
+
+def test_memory_key_drift_disabled_no_alert(monkeypatch):
+    pub = []
+    _bus(monkeypatch, pub)
+    app, _ = _app_with_sm(_kh(3))
+    wd = HealthWatchdog(app=app, config_manager=_kd_cm(enabled=False),
+                        interval_sec=60)
+    wd._check_memory_key_drift(now=1000)
+    assert pub == []
+
+
+def test_memory_key_drift_clean_no_alert(monkeypatch):
+    pub = []
+    _bus(monkeypatch, pub)
+    app, _ = _app_with_sm(_kh(0))         # 迁移后干净 → 不告警
+    wd = HealthWatchdog(app=app, config_manager=_kd_cm(), interval_sec=60)
+    wd._check_memory_key_drift(now=1000)
+    assert pub == []
+
+
+def test_memory_key_drift_event_alias_and_message():
+    from src.inbox.webhook_notifier import _EVENT_ALIASES, _build_message
+    assert "memory_key_drift" in _EVENT_ALIASES
+    title, text = _build_message("memory_key_drift_alert", {
+        "light": "red",
+        "problems": [{"name": "记忆 key 漂移", "detail": "检测到 60 个裸 key"}]})
+    assert "记忆 key 漂移" in title
+    assert "裸 key" in text
+    t2, _ = _build_message("memory_key_drift_alert", {"recovered": True})
+    assert "恢复" in t2

@@ -83,6 +83,10 @@ _EVENT_ALIASES: Dict[str, Dict[str, Any]] = {
     "health_alert":  {"types": {"health_alert"}, "levels": None},    # D3 运行时健康告警
     "billing_alert": {"types": {"billing_alert"}, "levels": None},   # E3 计费异常（超席位/超额）
     "ops_report":    {"types": {"ops_report"}, "levels": None},       # H1 运营周报自动外发
+    # 统一草稿引擎质量告警（记忆命中率/p95 延迟/风险分类回检）
+    "draft_quality": {"types": {"draft_quality_alert"}, "levels": None},
+    # 记忆 key 漂移告警（裸 key 复发 → 记忆对引擎不可见）
+    "memory_key_drift": {"types": {"memory_key_drift_alert"}, "levels": None},
 }
 
 # ─── 速率限制 ────────────────────────────────────────────────────────────────
@@ -382,6 +386,42 @@ def _build_message(event_type: str, data: Dict[str, Any]) -> tuple[str, str]:
             lines.append("- 环比上周：" + "、".join(cmp_parts))
         text = ("\n".join(lines) if lines else "本周无显著运营事件") + \
             "\n[📊 查看运营总览](/admin/ops)"
+
+    elif event_type == "draft_quality_alert":
+        if data.get("recovered"):
+            title = "✅ 草稿质量已恢复"
+            text = (
+                "**状态**: 记忆命中率 / 生成延迟 / 风险分类均回到阈值内\n"
+                "[📊 查看运营总览](/admin/ops)"
+            )
+        else:
+            probs = data.get("problems") or []
+            lines = [f"- {p.get('name','?')}：{p.get('detail','')}" for p in probs[:8]]
+            icon = {"red": "🔴", "yellow": "🟡"}.get(str(data.get("light") or ""), "📉")
+            title = f"{icon} 草稿质量告警（{data.get('light') or '异常'}）"
+            text = (
+                f"**异常**: {len(probs)} 项\n"
+                + "\n".join(lines) + "\n"
+                "[📊 查看运营总览](/admin/ops)"
+            )
+
+    elif event_type == "memory_key_drift_alert":
+        if data.get("recovered"):
+            title = "✅ 记忆 key 漂移已恢复"
+            text = (
+                "**状态**: 裸 key 已清零（记忆重新对收件箱引擎可见）\n"
+                "[📊 查看运营总览](/admin/ops)"
+            )
+        else:
+            probs = data.get("problems") or []
+            lines = [f"- {p.get('name','?')}：{p.get('detail','')}" for p in probs[:5]]
+            icon = {"red": "🔴", "yellow": "🟡"}.get(str(data.get("light") or ""), "🧭")
+            title = f"{icon} 记忆 key 漂移告警（{data.get('light') or '异常'}）"
+            text = (
+                f"**异常**: {len(probs)} 项\n"
+                + "\n".join(lines) + "\n"
+                "[📊 查看运营总览](/admin/ops)"
+            )
 
     elif event_type == "escalation":
         title = "🔔 升级告警"

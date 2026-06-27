@@ -149,6 +149,7 @@ async def generate_persona_reply(
     persona_id: str = "",
     target_lang: str = "",
     reply_lang: str = "",
+    risk_level: str = "",
 ) -> Dict[str, Any]:
     """人设化智能回复（单一事实源）。
 
@@ -220,6 +221,7 @@ async def generate_persona_reply(
                     history=history,
                     persona_id=persona_id,
                     reply_lang=resolved_lang,
+                    risk_level=risk_level,
                 )
                 if _res and (_res.get("reply") or "").strip():
                     reply = _res["reply"]
