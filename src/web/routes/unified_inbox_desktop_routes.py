@@ -190,15 +190,54 @@ def register_desktop_routes(app, *, api_auth) -> None:
         return {"ok": True, "status": rec.get("status")}
 
     @app.get("/api/desktop/inject-health")
-    async def api_desktop_inject_health_list(_=Depends(api_auth)):
+    async def api_desktop_inject_health_list(request: Request, _=Depends(api_auth)):
         """桌面壳注入健康看板数据：各内嵌账号最新状态 + 概览计数。
 
-        超过 90s 未上报标记 ``stale``（注入可能已停摆/页面被关）。
-        返回: {ok, summary:{ok,mismatch,no_chat,...,total}, accounts:[{platform,account_id,status,stale,...}]}
+        超过 90s 未上报标记 ``stale``（注入可能已停摆/页面被关）；失配账号附 ``mismatch_secs``
+        （已持续秒数）。``summary.persistent_mismatch`` = 失配持续超 ``persist_sec``（默认 300s）的账号数。
+        返回: {ok, persist_sec, summary:{ok,mismatch,persistent_mismatch,...,total},
+               accounts:[{platform,account_id,status,stale,mismatch_secs,...}]}
         """
-        from src.web.desktop_inject_health import get_inject_health_store
+        from src.web.desktop_inject_health import (
+            get_inject_health_store, DEFAULT_PERSIST_SEC,
+        )
+        try:
+            persist_sec = float(request.query_params.get("persist_sec")
+                                or DEFAULT_PERSIST_SEC)
+        except Exception:
+            persist_sec = DEFAULT_PERSIST_SEC
         store = get_inject_health_store()
-        return {"ok": True, "summary": store.summary(), "accounts": store.latest(stale_after=90.0)}
+        return {"ok": True, "persist_sec": persist_sec,
+                "summary": store.summary(persist_sec=persist_sec),
+                "accounts": store.latest(stale_after=90.0)}
+
+    @app.get("/api/desktop/inject-health/alerts")
+    async def api_desktop_inject_health_alerts(request: Request, _=Depends(api_auth)):
+        """注入失配「持续告警流 + 趋势」（D4 续，#4 失配持续告警升级）。
+
+        把 D1c 的「即时 toast」升级为「失配持续 ≥ persist_sec → 告警」+ 状态跃迁历史（趋势）。
+        即时失配会自愈（一闪而过的抖动不告警）；只有**连续**失配超阈值才进告警，运营据此走
+        D1 覆写层精准热修。
+        query: persist_sec?（默认 300）、limit?（趋势事件条数，默认 50）
+        返回: {ok, persist_sec, alerts:[{platform,account_id,status,mismatch_secs,selectors}],
+               events:[{platform,account_id,status,from,ts}]}
+        """
+        from src.web.desktop_inject_health import (
+            get_inject_health_store, DEFAULT_PERSIST_SEC,
+        )
+        try:
+            persist_sec = float(request.query_params.get("persist_sec")
+                                or DEFAULT_PERSIST_SEC)
+        except Exception:
+            persist_sec = DEFAULT_PERSIST_SEC
+        try:
+            limit = int(request.query_params.get("limit") or 50)
+        except Exception:
+            limit = 50
+        store = get_inject_health_store()
+        return {"ok": True, "persist_sec": persist_sec,
+                "alerts": store.persistent_mismatches(persist_sec),
+                "events": store.recent_events(limit=limit)}
 
     @app.get("/api/desktop/outbound")
     async def api_desktop_outbound_pull(request: Request, _=Depends(api_auth)):

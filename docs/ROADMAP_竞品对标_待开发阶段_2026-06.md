@@ -20,7 +20,7 @@
 | 1 | ✅ | **D3 一号一指纹注入** | `desktop/inject/fingerprint.js` + 后端按 account_id 确定性派生指纹，覆盖 navigator/Intl/WebGL/Canvas，多号内嵌互不关联防关联封（DEVLOG §85，commit `cc35a5a`；含注入核心下沉 shared/ + 浏览器扩展通道） | [自治] | onechat/ChatX 多号风控 |
 | 2 | 🔄 | **D4 双向收件箱桥 + 受控 autopilot** | 内嵌账号变收件箱一等公民；autopilot 接 send-gate / kill-switch；浏览器扩展通道(extension/)回流打通。**D4a（§90）**：受控出站队列（闸门内置 enqueue→pull→ack，durable）+ autosend desktop 路由 + worker 成功判定修复。**D4b（§91）**：renderer 按账号+当前会话(chat_key 闸防发错聊天)轮询分发 DOM 发送 + 出站队列看板。**自治部分已完成**；剩真号侧：chat 导航(无人值守发任意会话) + Tier1 canIngest 现场校准 + 注入回传真实送达结果精确 ack | [自治]（剩余[需外部]真号） | engagelab journey 雏形 |
 | 3 | ⏸ | **四平台选择器现场校准** | 真号 F12 校准 IG/Messenger/X/Zalo 选择器，经覆写层打开 `canIngest`（当前默认关，宁缺毋错） | [需外部]（真号） | 云译/海王平台广度 |
-| 4 | ⬜ | **注入失配持续告警升级** | D1c 现为即时 toast；加「失配持续 N 分钟 → 进 alerts 通知流」+ 历史趋势曲线 | [自治] | 运维韧性反超 |
+| 4 | ✅ | **注入失配持续告警升级** | D1c 即时 toast → 「失配持续 N 分钟才告警」(降噪去抖) + 逐账号持续时长 + 跃迁趋势 + `/inject-health/alerts` 告警流（DEVLOG §92，commit）。剩余增强：外发 EventBus→webhook/TG + sparkline 曲线 | [自治] | 运维韧性反超 |
 | 5 | ⬜ | **A1 读路径迁移** | 统一收件箱从 `src/inbox/store.py` 读，替代实时聚合 → 解锁跨平台历史 / SLA（`read_from_store` 灰度转默认） | [自治] | — |
 | 6 | ⬜ | **稳定平台 message id 收尾** | `extract_platform_msg_id` 白名单覆盖收口，彻底替代 hash 去重 | [自治] | — |
 

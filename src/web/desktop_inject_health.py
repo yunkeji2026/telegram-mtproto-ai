@@ -15,9 +15,10 @@
 
 from __future__ import annotations
 
+import collections
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional
 
 
 def classify_inject_health(rec: Dict[str, Any]) -> str:
@@ -39,6 +40,9 @@ def classify_inject_health(rec: Dict[str, Any]) -> str:
 # 失配类状态（运营需关注：很可能官方改版导致选择器失效）
 MISMATCH_STATUSES = ("mismatch_composer", "mismatch_bubble")
 
+# 「持续失配」默认阈值（秒）——失配连续超过此时长升级为持续告警（区别于一闪而过的抖动）
+DEFAULT_PERSIST_SEC = 300.0
+
 
 def _norm_selectors(raw: Any) -> Dict[str, bool]:
     out = {"bubble": False, "composer": False, "sendBtn": False, "peerTitle": False}
@@ -51,17 +55,24 @@ def _norm_selectors(raw: Any) -> Dict[str, bool]:
 class InjectHealthStore:
     """线程安全的「每账号最新健康」内存存储（实时态，无需持久化）。"""
 
-    def __init__(self, cap: int = 1000) -> None:
+    def __init__(self, cap: int = 1000, event_cap: int = 200) -> None:
         self._cap = max(1, int(cap))
         self._lock = threading.Lock()
         self._latest: Dict[str, Dict[str, Any]] = {}
+        # 状态跃迁历史环（趋势/告警流用）：status 变化时各记一条
+        self._events: Deque[Dict[str, Any]] = collections.deque(
+            maxlen=max(1, int(event_cap)))
 
     @staticmethod
     def _key(platform: str, account_id: str) -> str:
         return f"{platform}\t{account_id}"
 
     def record(self, rec: Dict[str, Any]) -> Dict[str, Any]:
-        """归一并落最新一条；返回带 status/ts 的规范记录。"""
+        """归一并落最新一条；返回带 status/ts 的规范记录。
+
+        附带**状态跃迁追踪**：维护 `mismatch_since`（进入失配的起始 ts，跨 composer↔bubble
+        子状态连续保留；恢复非失配时清空），用于「失配持续 N 分钟」判定；状态变化时写跃迁历史环。
+        """
         platform = str((rec or {}).get("platform") or "").lower()
         account_id = str((rec or {}).get("account_id") or "")
         norm = {
@@ -79,7 +90,27 @@ class InjectHealthStore:
         norm["status"] = classify_inject_health(norm)
         if not platform and not account_id:
             return norm  # 无主键不入库（仍返回分类，便于探针自测）
+        is_mismatch = norm["status"] in MISMATCH_STATUSES
         with self._lock:
+            prev = self._latest.get(self._key(platform, account_id))
+            prev_status = prev.get("status") if prev else None
+            prev_mismatch_since = (prev or {}).get("mismatch_since")
+            # mismatch_since：持续在失配态则沿用起点；刚进入失配记当前 ts；非失配清空
+            if is_mismatch:
+                norm["mismatch_since"] = (
+                    prev_mismatch_since
+                    if (prev_status in MISMATCH_STATUSES and prev_mismatch_since)
+                    else norm["ts"]
+                )
+            else:
+                norm["mismatch_since"] = None
+            # 状态跃迁 → 记历史环（含首次出现）
+            if prev_status != norm["status"]:
+                self._events.append({
+                    "platform": platform, "account_id": account_id,
+                    "status": norm["status"], "from": prev_status or "",
+                    "ts": norm["ts"],
+                })
             self._latest[self._key(platform, account_id)] = norm
             # 软上限：超量则丢弃最旧（按 ts）
             if len(self._latest) > self._cap:
@@ -87,20 +118,57 @@ class InjectHealthStore:
                 self._latest.pop(oldest, None)
         return norm
 
-    def latest(self, stale_after: Optional[float] = None) -> List[Dict[str, Any]]:
-        """返回所有账号最新记录（按 ts 倒序）。stale_after 给定时为每条标注 stale。"""
-        now = time.time()
+    def latest(self, stale_after: Optional[float] = None,
+               now: Optional[float] = None) -> List[Dict[str, Any]]:
+        """返回所有账号最新记录（按 ts 倒序）。
+
+        stale_after 给定时为每条标注 stale；并为失配账号附 `mismatch_secs`（已持续秒数）。
+        """
+        _now = float(now if now is not None else time.time())
         with self._lock:
-            # 返回浅拷贝：避免调用方（或 stale 标注）污染存储中的原记录
+            # 返回浅拷贝：避免调用方（或标注）污染存储中的原记录
             rows = [dict(r) for r in self._latest.values()]
         rows.sort(key=lambda r: r.get("ts", 0), reverse=True)
-        if stale_after:
-            for r in rows:
-                r["stale"] = (now - r.get("ts", 0)) > stale_after
+        for r in rows:
+            if stale_after:
+                r["stale"] = (_now - r.get("ts", 0)) > stale_after
+            ms = r.get("mismatch_since")
+            r["mismatch_secs"] = (max(0.0, _now - ms) if ms else 0.0)
         return rows
 
-    def summary(self) -> Dict[str, int]:
-        """状态计数概览（看板顶部徽标用）。"""
+    def persistent_mismatches(
+        self, threshold_sec: float = DEFAULT_PERSIST_SEC,
+        now: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
+        """返回失配已**持续 ≥ threshold_sec** 的账号（告警流用，按持续时长倒序）。"""
+        _now = float(now if now is not None else time.time())
+        thr = max(0.0, float(threshold_sec))
+        out: List[Dict[str, Any]] = []
+        with self._lock:
+            for r in self._latest.values():
+                ms = r.get("mismatch_since")
+                if r.get("status") in MISMATCH_STATUSES and ms:
+                    dur = _now - ms
+                    if dur >= thr:
+                        d = dict(r)
+                        d["mismatch_secs"] = max(0.0, dur)
+                        out.append(d)
+        out.sort(key=lambda r: r.get("mismatch_secs", 0), reverse=True)
+        return out
+
+    def recent_events(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """状态跃迁历史（最新在前）——供趋势/告警流展示。"""
+        with self._lock:
+            evs = list(self._events)
+        evs.reverse()
+        return evs[:max(1, min(int(limit or 50), 500))]
+
+    def summary(self, persist_sec: Optional[float] = None,
+                now: Optional[float] = None) -> Dict[str, int]:
+        """状态计数概览（看板顶部徽标用）。
+
+        persist_sec 给定时附 `persistent_mismatch`（失配持续超阈值的账号数）。
+        """
         counts: Dict[str, int] = {}
         with self._lock:
             for r in self._latest.values():
@@ -108,11 +176,15 @@ class InjectHealthStore:
                 counts[s] = counts.get(s, 0) + 1
         counts["total"] = sum(v for k, v in counts.items() if k != "total")
         counts["mismatch"] = sum(counts.get(s, 0) for s in MISMATCH_STATUSES)
+        if persist_sec is not None:
+            counts["persistent_mismatch"] = len(
+                self.persistent_mismatches(persist_sec, now=now))
         return counts
 
     def clear(self) -> None:
         with self._lock:
             self._latest.clear()
+            self._events.clear()
 
 
 _STORE: Optional[InjectHealthStore] = None

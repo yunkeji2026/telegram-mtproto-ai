@@ -452,6 +452,7 @@ _BASELINE = """
 /api/desktop/selector-profiles	GET
 /api/desktop/inject-health	POST
 /api/desktop/inject-health	GET
+/api/desktop/inject-health/alerts	GET
 /api/desktop/outbound	GET
 /api/desktop/outbound/ack	POST
 /api/desktop/outbound/stats	GET

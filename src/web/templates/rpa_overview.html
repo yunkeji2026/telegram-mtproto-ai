@@ -1134,7 +1134,8 @@ const _DH_STATUS = {
   unsupported:       {t:'无注入档案',      c:'var(--muted)'},
 };
 function _dhEsc(s){ return (window.rpa&&rpa.esc)?rpa.esc(s):String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-let _dhLastMismatch = 0;
+function _dhDur(sec){ sec=Math.floor(sec||0); if(sec<60) return sec+'s'; const m=Math.floor(sec/60); if(m<60) return m+'m'; return Math.floor(m/60)+'h'+(m%60)+'m'; }
+let _dhLastPersist = 0;
 async function ovRefreshDesktopHealth(){
   const body = document.getElementById('ov-dh-body');
   const sum  = document.getElementById('ov-dh-summary');
@@ -1144,15 +1145,18 @@ async function ovRefreshDesktopHealth(){
     const accs = (d&&d.accounts)||[];
     const s = (d&&d.summary)||{};
     const mismatch = s.mismatch||0;
+    const persist = s.persistent_mismatch||0;  // #4：失配持续超阈值的账号数
     if(sum){
       sum.innerHTML = '共 '+(s.total||0)+' 账号 · 正常 '+(s.ok||0)
-        + (mismatch ? ' · <strong style="color:#f85149">失配 '+mismatch+'</strong>' : '');
+        + (mismatch ? ' · <strong style="color:#f85149">失配 '+mismatch+'</strong>' : '')
+        + (persist ? ' · <strong style="color:#f85149" title="失配已持续超过阈值（疑似官方改版而非抖动）">持续 '+persist+'</strong>' : '');
     }
-    // 失配告警：新出现失配（上次为 0 本次 >0）时弹一次提醒，避免刷屏
-    if(mismatch>0 && _dhLastMismatch===0 && window.rpa && rpa.toast){
-      rpa.toast('桌面注入有 '+mismatch+' 个账号选择器失配，疑似官方改版（可热修 selector-profiles）', 'err');
+    // #4 告警升级：从「即时失配 0→>0 边沿」升级为「失配持续 N 分钟」——只对**新增持续失配**弹一次，
+    // 抖动型一闪而过的失配会自愈、不再打扰运营。
+    if(persist>_dhLastPersist && window.rpa && rpa.toast){
+      rpa.toast('桌面注入有 '+persist+' 个账号选择器**持续**失配（疑似官方改版，可热修 selector-profiles）', 'err');
     }
-    _dhLastMismatch = mismatch;
+    _dhLastPersist = persist;
     if(!accs.length){
       body.innerHTML = '<span style="color:var(--muted)">暂无桌面注入上报（桌面端未运行 / 未打开会话）。</span>';
       return;
@@ -1164,11 +1168,14 @@ async function ovRefreshDesktopHealth(){
       const bad = ['composer','bubble','sendBtn','peerTitle'].filter(function(k){ return sel[k]===false; });
       const selNote = (String(a.status||'').indexOf('mismatch')===0 && bad.length)
         ? ' <span style="color:var(--muted);font-size:.68rem">缺:'+bad.join('/')+'</span>' : '';
+      // #4：失配持续时长（≥1 分钟标红，提示是「持续」而非「抖动」）
+      const ms = a.mismatch_secs||0;
+      const durNote = (ms>0) ? ' <span style="font-size:.68rem;color:'+(ms>=60?'#f85149':'var(--muted)')+'" title="失配已持续时长">持续 '+_dhDur(ms)+'</span>' : '';
       const gen = a.generic ? ' <span style="color:var(--muted);font-size:.68rem">通用档</span>' : '';
       const ing = a.can_ingest ? '' : ' <span style="color:var(--muted);font-size:.68rem" title="同步回流未开（选择器校准后可经覆写层打开 canIngest）">回流关</span>';
       return '<div style="display:flex;justify-content:space-between;gap:.5rem;padding:.2rem 0;border-bottom:1px solid var(--bd)">'
         + '<span>'+_dhEsc(a.platform)+' · '+_dhEsc(a.account_id||'—')+gen+ing+'</span>'
-        + '<span style="color:'+st.c+'">'+st.t+selNote+stale+'</span></div>';
+        + '<span style="color:'+st.c+'">'+st.t+selNote+durNote+stale+'</span></div>';
     }).join('');
   }catch(e){ body.textContent = '桌面注入健康请求失败'; }
 }

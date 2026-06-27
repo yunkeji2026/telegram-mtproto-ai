@@ -3491,3 +3491,47 @@ kill-switch。双向桥的出站半边铺通（入站 §82 已通）。
 桌面壳按账号+当前会话轮询取走 → 官方页 DOM 发送 → 看板可见。**绝不发错聊天**（chat_key 闸）、不丢命令、
 全程受控可观测。D4「双向收件箱桥 + 受控 autopilot」自治部分完成，剩真号侧（chat 导航 + canIngest 校准）。
 **下一步**：① 真号验证 DOM 发送 + Tier1 `canIngest` 校准；② 注入回传真实发送结果精确 ack；③ 扩展 content 轮询循环。
+
+---
+
+## 92. Stage D5：注入失配持续告警升级——从「即时 toast」到「持续 N 分钟 + 趋势」（路线图 Tier1 #4）
+
+**实施前的思考**：D1c 给了注入失配的即时可观测（toast + 看板），但告警是「mismatch 数 0→>0 边沿弹一次」——
+**抖动型失配**（官方页加载瞬间、切会话一闪）会误报，而真正该关注的是「**连续**失配（官方改版了）」。
+路线图 #4 要把它升级为「失配**持续 N 分钟** → 进告警 + 历史趋势」。探查确认：`InjectHealthStore` 只存每账号
+最新一条、**无失配起始时间/历史**，故无法判「持续多久」。
+
+**关键设计（读时计算持续，无需后台任务）**：失配「已持续秒数」= `now - mismatch_since`，可在**读取时**算出——
+故**不需要新增 watchdog/EventBus/main.py 改动**（零侵入、零新常驻任务、零回归面）。只在 store 里加**状态跃迁
+追踪**即可：进入失配记 `mismatch_since`、跨 composer↔bubble 子状态连续保留、恢复非失配清空。
+
+**改动**（全部收敛在注入健康子系统内）：
+- `desktop_inject_health.py`：`record()` 加跃迁追踪——`mismatch_since`（失配起点，跨子状态续、恢复清）+
+  **状态跃迁历史环**（`deque`，status 变化各记一条，趋势用）。新增 `latest()` 附 `mismatch_secs`（已持续秒数）、
+  `persistent_mismatches(threshold_sec)`（失配超阈值的账号，按时长倒序）、`recent_events(limit)`（跃迁历史）、
+  `summary(persist_sec)` 附 `persistent_mismatch` 计数。所有方法收 `now` 便于确定性单测。
+- 路由：`GET /api/desktop/inject-health` 增 `persist_sec` 入参 + 返回 `mismatch_secs`/`summary.persistent_mismatch`
+  （向后兼容，纯增字段）；新增 `GET /api/desktop/inject-health/alerts`（持续失配告警流 + 跃迁趋势）；路由清单 +1。
+- 看板 `rpa_overview.html`：D1c 卡每行显示「持续 Xm」（≥1 分钟标红 = 持续而非抖动）、徽标加「持续 N」计数；
+  **告警升级**——toast 从「即时失配边沿」改为「**新增持续失配**」才弹（抖动自愈不打扰），`_dhLastPersist` 去重。
+
+**实施中的再优化**：
+1. **读时算持续 > 后台 watchdog**：持续时长是 `now - mismatch_since` 的纯函数，看板本就轮询——故在读取/查询时
+   现算即可，**砍掉了一个常驻 watchdog + EventBus 接线**（探查曾建议的方案），零新失败面、零 main.py 改动。
+2. **跨子状态连续**：composer↔bubble 都算失配，`mismatch_since` 不因子状态切换重置——「持续」语义正确（官方改版
+   常表现为多个选择器同时坏、状态在子类间跳）。
+3. **告警语义从「失配」收紧到「持续失配」**：抖动型一闪而过不再误报，运营只在「真该热修」时被打扰（降噪）。
+
+**能否再优化**：① 当前「告警流」在桌面注入子系统内自洽（`/inject-health/alerts` + 看板），未并入 RPA 的
+`/api/rpa-overview/alerts` 统一未确认告警 tab（语义/单账号聚合差异，属独立增强）；② 持续失配可进一步外发
+（EventBus `inject_mismatch_alert` → webhook/Telegram，需接 `_EVENT_ALIASES`）；③ 历史趋势现为跃迁事件列表，
+可升级为 sparkline 曲线；④ `mismatch_since` 现为内存态（重启清零，与「最新态内存存储」一致），如需跨重启留痕
+可落 `ops_incidents`。均属增强。
+
+**回归**：`test_desktop_inject_health`（+7：mismatch_since 进入/跨子状态/恢复清、mismatch_secs、persistent 阈值、
+summary 持续计数、恢复排除、跃迁历史）+ `test_admin_route_inventory`（清单含新端点）+ `test_rpa_overview`
+（看板模板编译）**47 passed**；全量 **6338 passed / 31 skipped / 0 failed**（209s，无 worker 崩溃）。
+
+**Stage D5 收口**：注入失配告警从「数变了就弹（含抖动误报）」升级为「**持续超阈值才告警** + 逐账号持续时长 +
+跃迁趋势」——降噪且更可信，运营被打扰时基本都是「真该走 D1 覆写层热修」。路线图 Tier1 #4 完成。
+**下一步**：① 持续失配外发（EventBus→webhook/TG）；② 真号校准 Tier1 `canIngest`；③ 趋势 sparkline。

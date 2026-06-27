@@ -124,3 +124,76 @@ def test_soft_cap_evicts_oldest():
 def test_mismatch_statuses_constant():
     assert "mismatch_composer" in MISMATCH_STATUSES
     assert "mismatch_bubble" in MISMATCH_STATUSES
+
+
+# ── #4 失配持续告警升级：跃迁追踪 / 持续时长 / 历史 ──────────────────────────
+def _rec(store, status_kwargs, ts):
+    base = {"platform": "instagram", "account_id": "ig1", "supported": True}
+    base.update(status_kwargs)
+    base["ts"] = ts
+    return store.record(base)
+
+
+def test_mismatch_since_set_on_entry_and_persists_across_substatus():
+    store = InjectHealthStore()
+    _rec(store, {"composer": True, "bubbles": 1, "chatOpen": True}, 100)   # ok
+    r1 = _rec(store, {"composer": False, "bubbles": 1, "chatOpen": True}, 110)  # mismatch_composer
+    assert r1["mismatch_since"] == 110
+    # 切到另一种失配子状态（composer→bubble）→ mismatch_since 不重置（持续在失配）
+    r2 = _rec(store, {"composer": True, "bubbles": 0, "chatOpen": True}, 150)  # mismatch_bubble
+    assert r2["mismatch_since"] == 110
+
+
+def test_mismatch_since_cleared_on_recovery():
+    store = InjectHealthStore()
+    _rec(store, {"composer": False, "bubbles": 1, "chatOpen": True}, 100)  # mismatch
+    r = _rec(store, {"composer": True, "bubbles": 1, "chatOpen": True}, 120)  # ok 恢复
+    assert r["mismatch_since"] is None
+    # 再次失配 → 重新计起点（非沿用旧的）
+    r2 = _rec(store, {"composer": False, "bubbles": 1, "chatOpen": True}, 200)
+    assert r2["mismatch_since"] == 200
+
+
+def test_latest_reports_mismatch_secs():
+    store = InjectHealthStore()
+    _rec(store, {"composer": False, "bubbles": 1, "chatOpen": True}, 1000)  # mismatch@1000
+    rows = store.latest(now=1180)
+    assert rows[0]["mismatch_secs"] == 180
+
+
+def test_persistent_mismatches_threshold():
+    store = InjectHealthStore()
+    _rec(store, {"composer": False, "bubbles": 1, "chatOpen": True}, 1000)  # mismatch@1000
+    # 阈值 300s：t=1200 时未到 → 空；t=1400 时已过 → 命中
+    assert store.persistent_mismatches(300, now=1200) == []
+    hit = store.persistent_mismatches(300, now=1400)
+    assert len(hit) == 1 and hit[0]["account_id"] == "ig1"
+    assert hit[0]["mismatch_secs"] == 400
+
+
+def test_summary_persistent_count():
+    store = InjectHealthStore()
+    _rec(store, {"composer": False, "bubbles": 1, "chatOpen": True}, 1000)
+    s = store.summary(persist_sec=300, now=1400)
+    assert s["persistent_mismatch"] == 1
+    # 未给 persist_sec → 不含该键（向后兼容）
+    assert "persistent_mismatch" not in store.summary()
+
+
+def test_recovery_excludes_from_persistent():
+    store = InjectHealthStore()
+    _rec(store, {"composer": False, "bubbles": 1, "chatOpen": True}, 1000)
+    _rec(store, {"composer": True, "bubbles": 1, "chatOpen": True}, 1500)  # 恢复
+    assert store.persistent_mismatches(300, now=2000) == []
+
+
+def test_recent_events_records_transitions():
+    store = InjectHealthStore()
+    _rec(store, {"composer": True, "bubbles": 1, "chatOpen": True}, 100)   # ok（首次）
+    _rec(store, {"composer": True, "bubbles": 1, "chatOpen": True}, 110)   # ok（不变→不记）
+    _rec(store, {"composer": False, "bubbles": 1, "chatOpen": True}, 120)  # →mismatch_composer
+    _rec(store, {"composer": True, "bubbles": 1, "chatOpen": True}, 130)   # →ok
+    evs = store.recent_events()
+    # 最新在前：ok(130) ← mismatch(120) ← ok(100)；中间不变那条不记
+    assert [e["status"] for e in evs] == ["ok", "mismatch_composer", "ok"]
+    assert evs[0]["from"] == "mismatch_composer"
