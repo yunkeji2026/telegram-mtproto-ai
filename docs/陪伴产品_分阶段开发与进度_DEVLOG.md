@@ -3262,3 +3262,123 @@ send-path 审计 **5 passed**（无新增裸发送）。
 toast 提醒，再走 D1 覆写层热修。桌面多平台内嵌的「接入→热更新→可观测→告警」全链路闭合。
 **下一步**：① **D3** 每账号指纹注入（复用 `M4 fingerprint`，多号防关联封）；② 真号现场校准选择器并打开 `canIngest`；
 ③ 失配持续告警升级（接 alerts 通知）；④ **D4** 双向收件箱桥 + 受控 autopilot。
+
+---
+
+## 85. Stage D3：注入核心抽到 shared/ + 浏览器扩展通道 + 每账号指纹注入（commit `cc35a5a`）
+
+**实施前的思考**：D1–D1c 把桌面壳的多平台内嵌做到「接入→热更新→可观测」，但注入核心（profiles/media-format/core）
+**只长在 `desktop/inject/` 里**，浏览器扩展若想复用就得复制一份 → 必漂移。且多号内嵌共用同一浏览器指纹，官方一关联
+就连坐封号。D3 一次性解三件事：把注入核心**下沉为单一事实源**、**开一条浏览器扩展通道**复用同一引擎、给每个 account
+**确定性派生独立指纹**防关联。
+
+**改动**：
+- 注入核心下沉：`desktop/inject/{profiles,media-format,core}.js` → `shared/inject/`（单一事实源），桌面壳 `tg-inject.js`
+  改 `require` 共享核心；`desktop/test/{profiles,media-format}.test.js` 指向 shared，零回归。
+- 新增 `extension/`（浏览器扩展通道）：`manifest.json` + `background.js` + `content/bridge.js` + `options.{html,js}` +
+  `build.js`，`vendor/` 由 `shared/inject/` 同步（git 识别为 `desktop/inject → extension/vendor` 重命名，历史保留）。
+- **D3 每账号指纹**：新增 `desktop/inject/fingerprint.js`——按 `account_id` 确定性派生（navigator/Intl/WebGL/Canvas 维度），
+  同号每次一致、跨号互不关联；后端 `src/integrations/fingerprint.py` 派生对齐。注入 webview 分区，多号内嵌防关联封。
+- `desktop/main.js`/`renderer.js`/`config.json`/`package.json` 接线；`unified_inbox_desktop_routes.py` 配合。
+
+**实施中的再优化**：
+1. **单一事实源而非复制**：shared/inject 唯一权威，桌面与扩展都从它取，杜绝「两处注入档漂移」（D1+D2 已批评过的近重复块问题）。
+2. **确定性派生而非随机**：指纹由 account_id 派生而非随机，保证同号重启指纹稳定（随机会让官方看到「同账号天天换设备」反而更可疑）。
+
+**能否再优化**：① 扩展通道的回流/autopilot 尚未与统一收件箱打通（属 D4）；② 指纹维度可再扩（字体/音频指纹）；
+③ 扩展 vendor 与 shared/inject 目前靠 build 同步，可加 CI 校验防漂移。
+
+**回归**：`desktop npm test`（新增 `fingerprint.test.js`）+ `tests/test_proxy_fingerprint.py` 全绿；并入全量 6306 passed。
+
+**Stage D3 收口**：注入引擎从「桌面专属」升为 **shared 单一事实源 + 桌面/扩展双通道**，并补上**每账号确定性指纹**——
+多号内嵌互不关联，防关联封的最后一块地基补齐。
+**下一步**：① **D4** 双向收件箱桥 + 受控 autopilot（接 send-gate/kill-switch）；② 扩展通道回流打通；③ 真号校准 `canIngest`。
+
+---
+
+## 86. Stage 全自动语音：System Z autosend 的 TTS 出站跨平台闭环（commit `75d3b01`）
+
+**实施前的思考**：全自动聊天 + 翻译 + 语音三件套里，**语音只缺最后一块**——统一收件箱 autosend 只发文本，auto-voice
+仅存在于原生 TG 客户端与 RPA 设备号。要让「全自动陪伴」真有声音，得给 System Z autosend 补「按策略把回复转 TTS」。
+
+**改动**：
+- 新增 `src/inbox/voice_autosend.py`：把 autosend 文本回复按策略合成语音，经 `orch.send_media(media_type="voice")`
+  走 TG/WA/Messenger/LINE/IG 全平台；**复用既有件**——`tts_pipeline.TTSPipeline` 合成、`voice_sender.convert_to_ogg_opus`
+  转格式、`protocol_bridge.save_outbound_media` 落盘（与坐席「发送语音」同一目录）。
+- 触发护栏仿 `sender._maybe_send_voice_reply`（trigger / 长度上限 / 失败回落文本）。`tts_pipeline.py`/`voice_sender.py` 配合扩展。
+- **默认关**（`inbox.l2_autosend.voice.enabled=false`）→ 全自动仍纯文本，零行为变更；任何环节失败回落文本绝不卡主流程。
+
+**实施中的再优化**：
+1. **复用而非重造**：合成/转码/落盘全用既有模块，新代码只做「编排 + 护栏」，最小风险接通最后一公里。
+2. **失败软回落**：TTS/转码任一失败都返回「不发语音」让上层回落文本，全自动主流程绝不因语音卡住。
+
+**能否再优化**：① 语音情绪/语速随人设/情绪自适应；② 长文本分段合成；③ 入站 ASR→出站 TTS 的真·实时语音陪伴（需语音主机，属路线图 #11）。
+
+**回归**：`tests/test_voice_autosend.py` + `test_official_voice_send.py` + `test_tts_pipeline_smoke.py` 全绿；并入全量 6306 passed。
+
+**收口**：全自动语音出站**一处生效、全平台共用**——「全自动聊天+翻译+语音」闭环凑齐，默认关零回归，开关一开即有声音。
+**下一步**：① 语音情绪自适应；② 实时语音陪伴（ASR↔TTS）。
+
+---
+
+## 87. Stage 人设化回复单一事实源：消除全自动草稿质量割裂（commit `88f7e84`）
+
+**实施前的思考**：「给客户拟一条人设化回复」历史上有三处实现（手动「生成草稿」走 smart-reply、协议自动回复走
+`SkillManager.process_message`、收件箱全自动草稿走规则模板 `_suggestions`），最后者**无人设、无上下文、不查 KB**，
+导致「全自动草稿」与「手动生成」质量割裂。
+
+**改动**：
+- 新增 `src/inbox/persona_reply.py`：把 smart-reply 产线（SkillManager 意图→策略→KB→`AIClient.generate_reply_with_intent`
+  + PersonaManager 注入后台人设/禁机器措辞/可选译文）抽成**唯一**异步函数 `generate_persona_reply`，供手动按钮 / 全自动草稿 /
+  （后续）协议自动回复复用。层级仅依赖 `src.ai` + `persona_manager`，不反依赖 `src.web`，可纯单测。
+- `src/inbox/drafts.py::auto_generate_draft` 接入该函数（全自动草稿从规则模板升级为真人设产线）；`drafts_routes.py`/`ai_client.py` 配合。
+
+**实施中的再优化**：
+1. **单一事实源**：三处共用一条产线，杜绝「手动好、自动差」的割裂，新增调用方零成本。
+2. **零反向依赖**：模块不依赖 web 层，inbox/web 双向复用且可纯单测。
+
+**能否再优化**：① 协议自动回复也切到该函数统一上下文装配；② 产线结果可记采样进 few-shot 质量闭环。
+
+**回归**：`tests/test_persona_reply.py` + `test_auto_draft_persona_enrich.py` 全绿；并入全量 6306 passed。
+
+**收口**：全自动草稿质量与手动生成对齐——「人设化回复」收敛为单一产线，自动/手动同质。
+**下一步**：协议自动回复并入同产线。
+
+---
+
+## 88. Stage 官方通道入站收口：自动 AI 去重 + 译文录写 + autosend 投递延迟 + 语言守卫（commit `b353919`）
+
+**实施前的思考**：官方四端（IG/FB/LINE/WA）入站接通后暴露几个边角：同一入站可能触发**重复自动回复**；入站译文未录写
+影响坐席回看；autosend 秒回太「机器」；companion 场景语言易漂。本阶段一次收口这几处。
+
+**改动**：
+- 入站**自动 AI 去重**：`official_api_worker.py` + IG/FB/LINE/WA webhook + `shared/official_inbound.py` 防同一入站重复自动回复。
+- 入站**译文录写**：入站消息译文落库供坐席回看。
+- **autosend 投递延迟**：`autosend_worker.py` 加投递延迟更拟人（非秒回）。
+- **语言守卫**：统一收件箱默认语言 + companion 语言守卫，防回复语言漂移；`unified_inbox_translate_routes.py`/`services.py` 装配。
+
+**回归**：`test_official_auto_ai_dedup.py` + `test_inbound_xlate_recording.py` + `test_protocol_autoreply.py` +
+`test_autosend_deliver_delay.py` + `test_autosend_worker_perf.py` + `test_lang_guard_companion.py` +
+`test_unified_inbox_default_lang.py` 全绿；并入全量 6306 passed。
+
+**收口**：官方通道入站从「能收能自动回」升到「不重复、译文留痕、回复拟人且不漂语言」。
+**下一步**：WA/Zalo 模板消息回退（24h 窗口外）；送达率看板。
+
+---
+
+## 89. Stage PWA + 统一收件箱 UI + copilot 共享组件收口（commit `c307dbb`）
+
+**实施前的思考**：前述 Stage（语音/人设/语言）多在后端接通，需 UI 把新能力透出；同时统一收件箱需可装到手机当 App 用
+（离线壳）；桌面与后台两份 copilot 组件需对齐防漂移。
+
+**改动**：
+- **PWA**：新增 `src/web/static/pwa/`（`manifest.webmanifest` + `sw.js` + `offline.html` + 图标），统一收件箱可装为 App、离线兜底。
+- **统一收件箱 UI 升级**（`unified_inbox.html` +1040 行）：接通语音/人设/语言等新能力的前端入口；`workspace_base.html` 挂 PWA。
+- **copilot 共享组件对齐**：`shared/copilot/{app.html,copilot-client.js,cp-draft.js}` 与桌面 `desktop/renderer/shared/copilot/` 同步。
+- 接线收口：`main.py` / `store.py` / `admin.py` / 统一收件箱各路由 + `config/{bindings_runtime,config.example}.yaml`。
+
+**回归**：`test_admin_route_inventory.py` + `test_unified_inbox_stage1.py` + `test_unified_inbox_stage2.py` 全绿；
+全量回归 **6306 passed / 31 skipped / 0 failed（209s）**。
+
+**收口**：后端新能力全部有了前端入口 + PWA 可装可离线 + 两端 copilot 同源。本批（§85–§89）全绿入库。
+**下一步**：① 推送远端；② 路线图 D3 → ✅；③ D4 双向收件箱桥 + 受控 autopilot。
