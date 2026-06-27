@@ -28,6 +28,36 @@ def _ffmpeg_available() -> bool:
     return shutil.which("ffmpeg") is not None
 
 
+def probe_audio_duration_ms(path: str) -> Optional[int]:
+    """用 ffprobe 探测音频时长（毫秒）。ffprobe 缺失/失败/无效返回 ``None``。
+
+    LINE 音频消息（``audio``）要求 ``duration`` 毫秒整数；官方通道语音出站据此填值。
+    """
+    if shutil.which("ffprobe") is None:
+        return None
+    p = Path(path)
+    if not p.is_file():
+        return None
+    try:
+        r = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(p),
+            ],
+            capture_output=True, text=True, timeout=20,
+        )
+        if r.returncode != 0:
+            return None
+        secs = float((r.stdout or "").strip() or 0.0)
+        if secs <= 0:
+            return None
+        return int(round(secs * 1000))
+    except Exception:
+        return None
+
+
 def convert_to_ogg_opus(src_path: str, *, delete_src: bool = False) -> Optional[str]:
     """Convert an audio file to OGG/Opus using ffmpeg.
 

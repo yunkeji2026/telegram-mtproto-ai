@@ -27,6 +27,10 @@ from src.inbox.normalizer import PLATFORM_DISPLAY, message_obj, normalize_chat
 logger = logging.getLogger(__name__)
 
 _sink: Optional[Callable[[Dict[str, Any]], Any]] = None
+# 入站 store 的惰性取法（web 层启动时注册 lambda: app.state.inbox_store）。
+# 供非 FastAPI 模块（官方 webhook 的 auto_ai 让位护栏）只读查 automation_mode，
+# 不引入对 FastAPI/app 的硬依赖。
+_inbox_store_getter: Optional[Callable[[], Any]] = None
 
 # 媒体落地：下载到 web 静态目录，前端按 /static/... URL 直接加载（复用既有 StaticFiles 挂载）
 _STATIC_MEDIA_SUBDIR = "protocol_media"
@@ -153,6 +157,23 @@ def register_inbox_sink(fn: Optional[Callable[[Dict[str, Any]], Any]]) -> None:
 
 def get_inbox_sink() -> Optional[Callable[[Dict[str, Any]], Any]]:
     return _sink
+
+
+def register_inbox_store_getter(fn: Optional[Callable[[], Any]]) -> None:
+    """注册 inbox store 惰性取法（web 层启动时注入）。"""
+    global _inbox_store_getter
+    _inbox_store_getter = fn
+
+
+def get_inbox_store() -> Any:
+    """取当前 inbox store（未注册/异常返回 None）。"""
+    fn = _inbox_store_getter
+    if fn is None:
+        return None
+    try:
+        return fn()
+    except Exception:
+        return None
 
 
 def emit_incoming(msg: Dict[str, Any]) -> None:

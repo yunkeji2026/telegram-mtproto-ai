@@ -182,6 +182,88 @@ def test_tts_voice_clone_command_injects_dashscope_env(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
+def test_tts_falls_back_to_edge_when_network_backend_fails(tmp_path, monkeypatch):
+    """coqui_http 等网络后端连不上时（如 LAN 主机离线 / WinError 10060），
+    应自动回落到 edge_tts 出声，而不是把 URLError 硬抛给用户。"""
+    import asyncio
+    from src.ai.tts_pipeline import TTSPipeline
+
+    ref = tmp_path / "me.wav"
+    ref.write_bytes(b"wav")
+    calls = {"coqui": 0, "edge": 0}
+
+    def fake_coqui(self, text, out):
+        calls["coqui"] += 1
+        from urllib.error import URLError
+        raise URLError("<urlopen error [WinError 10060]>")
+
+    async def fake_edge(self, text, out, voice):
+        calls["edge"] += 1
+        out.write_bytes(b"ID3edge-audio-bytes" + b"\x00" * 512)
+
+    monkeypatch.setattr(TTSPipeline, "_synthesize_coqui_http", fake_coqui)
+    monkeypatch.setattr(TTSPipeline, "_edge_tts", fake_edge)
+
+    async def run():
+        p = TTSPipeline({
+            "enabled": True,
+            "backend": "coqui_http",
+            "base_url": "http://192.168.0.166:7851",
+            "format": "wav",
+            "out_dir": str(tmp_path),
+            "voice_profile": {
+                "enabled": True,
+                "owner_consent": True,
+                "backend": "coqui_http",
+                "reference_audio_path": str(ref),
+            },
+        })
+        rv = await p.synthesize("你好")
+        assert rv.ok is True
+        assert rv.provider == "edge_tts"
+        assert rv.extra.get("fallback_from") == "coqui_http"
+        assert "WinError 10060" in rv.extra.get("primary_error", "")
+        assert calls["coqui"] == 1 and calls["edge"] == 1
+
+    asyncio.run(run())
+
+
+def test_tts_consent_error_does_not_fall_back(tmp_path, monkeypatch):
+    """owner_consent 缺失属配置/授权错误：必须硬失败，不能用通用音色掩盖。"""
+    import asyncio
+    from src.ai.tts_pipeline import TTSPipeline
+
+    ref = tmp_path / "me.wav"
+    ref.write_bytes(b"wav")
+    edge_called = {"n": 0}
+
+    async def fake_edge(self, text, out, voice):
+        edge_called["n"] += 1
+        out.write_bytes(b"ID3edge" + b"\x00" * 512)
+
+    monkeypatch.setattr(TTSPipeline, "_edge_tts", fake_edge)
+
+    async def run():
+        p = TTSPipeline({
+            "enabled": True,
+            "backend": "voice_clone_command",
+            "out_dir": str(tmp_path),
+            "voice_profile": {
+                "enabled": True,
+                "owner_consent": False,
+                "reference_audio_path": str(ref),
+                "backend": "voice_clone_command",
+                "command_template": "echo {text} > {out}",
+            },
+        })
+        rv = await p.synthesize("hello")
+        assert rv.ok is False
+        assert "voice_profile_requires_owner_consent" in rv.error
+        assert edge_called["n"] == 0
+
+    asyncio.run(run())
+
+
 def test_qwen_wrapper_loads_env_local_secret(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env.local").write_text(

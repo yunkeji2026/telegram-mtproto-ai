@@ -21,6 +21,50 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger(__name__)
 
 
+# 这些错误源于配置/授权问题（非传输故障），不应被「兜底合成」掩盖——
+# 否则会用通用音色悄悄绕过 owner_consent 等门禁，或藏住缺文件/缺命令的配置错误。
+_NON_FALLBACK_ERROR_MARKERS = (
+    "voice_profile_requires_owner_consent",
+    "voice_profile_missing_reference_audio_path",
+    "voice_profile_reference_audio_missing",
+    "voice_profile_missing_command",
+    "backend disabled",      # 用户显式关闭 TTS（backend: disabled）→ 不得兜底
+    "unknown backend",       # 配置写错后端名 → 暴露而非掩盖
+    "empty_text",
+    "pipeline_disabled",
+)
+
+
+def _is_non_fallback_error(err: Optional[str]) -> bool:
+    """判断错误是否属于「配置/授权类」——是则不走兜底，直接暴露。"""
+    if not err:
+        return False
+    return any(m in err for m in _NON_FALLBACK_ERROR_MARKERS)
+
+
+def _assert_http_reachable(base_url: str, timeout: float = 3.0) -> None:
+    """对 base_url 的 host:port 做一次短超时 TCP 连接预检；不可达则抛异常。
+
+    用于在真正发起（可能 300s 超时的）合成请求前快速判断局域网/云主机是否在线，
+    把「主机离线」从 OS 级 ~21s 连接超时（Windows WinError 10060）缩短到 ~3s，
+    让上层兜底（edge_tts）几乎即时生效。
+    """
+    import socket
+    from urllib.parse import urlparse
+
+    parsed = urlparse(base_url)
+    host = parsed.hostname
+    if not host:
+        return  # 解析不出主机名就不预检，交给后续请求自然报错
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return
+    except OSError as exc:
+        raise RuntimeError(
+            f"tts_host_unreachable:{host}:{port}:{type(exc).__name__}") from exc
+
+
 @dataclass
 class TTSResult:
     ok: bool = False
@@ -84,6 +128,13 @@ class TTSPipeline:
             if isinstance(cfg.get("voice_clone_lan"), dict)
             else {}
         )
+        # ── 后端不可达/失败时的兜底合成 ──────────────────────────────────────
+        # 主后端（如 coqui_http / voice_clone_command 指向的局域网/云主机）连不上时，
+        # 回落到免额外基建的在线 edge_tts，避免「生成失败 + WinError 10060」直接抛给用户。
+        # 兜底会丢掉克隆音色（换成通用音色），但「有声音」远胜「硬失败」。
+        self.fallback_on_error = bool(cfg.get("fallback_on_error", True))
+        self.fallback_backend = str(cfg.get("fallback_backend") or "edge_tts").strip().lower()
+        self.fallback_voice = str(cfg.get("fallback_voice") or "zh-CN-XiaoxiaoNeural").strip()
 
     def stats(self) -> Dict[str, Any]:
         return {
@@ -125,31 +176,75 @@ class TTSPipeline:
             lan_rv = await self._try_lan_clone(rv, out, t0)
             if lan_rv is not None:
                 return lan_rv  # LAN 成功 或 硬失败(未开兜底)；None = 回落云端
-        try:
-            await asyncio.wait_for(
-                asyncio.to_thread(self._synthesize_sync, rv.text, out, rv.voice),
-                timeout=timeout_sec,
-            )
-            if out.exists() and out.stat().st_size > 0:
-                rv.ok = True
-                rv.audio_path = str(out)
-                rv.extra["bytes"] = out.stat().st_size
-                # ── P3-A：合成后立即测时长，带上 duration_source 供上游审计 ──
-                try:
-                    dur, src = compute_audio_duration_sec(str(out), rv.format)
-                    rv.duration_sec = float(dur)
-                    rv.duration_source = str(src)
-                except Exception:
-                    rv.duration_sec = -1.0
-                    rv.duration_source = "unknown"
-            else:
-                rv.error = "empty_audio"
-        except asyncio.TimeoutError:
-            rv.error = f"tts_timeout({timeout_sec:.0f}s)"
-        except Exception as ex:
-            rv.error = f"{type(ex).__name__}: {ex}"
+
+        # ── 主后端合成 ──
+        primary_backend = self._effective_backend()
+        err = await self._run_backend(
+            rv, rv.text, out, rv.voice, primary_backend, rv.format, timeout_sec)
+        if err is None:
+            rv.latency_ms = int((time.monotonic() - t0) * 1000)
+            return rv
+
+        # ── 主后端失败 → 回落到免基建的在线 edge_tts（避免硬失败 / WinError 10060）──
+        # 仅对「传输/运行时」失败兜底；配置/授权类错误（缺同意、缺参考音频等）应直接
+        # 暴露给用户，不能用通用音色悄悄掩盖。
+        fb = self.fallback_backend
+        if (self.fallback_on_error and fb and fb != primary_backend
+                and not _is_non_fallback_error(err)):
+            logger.warning(
+                "[tts] backend '%s' failed (%s) → 回落 '%s'", primary_backend, err, fb)
+            fb_fmt = "mp3" if fb == "edge_tts" else self.format
+            fb_out = out.with_suffix(f".{fb_fmt}")
+            fb_err = await self._run_backend(
+                rv, rv.text, fb_out, self.fallback_voice, fb, fb_fmt, timeout_sec)
+            if fb_err is None:
+                rv.provider = fb
+                rv.format = fb_fmt
+                rv.voice = self.fallback_voice
+                rv.extra["fallback_from"] = primary_backend
+                rv.extra["primary_error"] = err
+                rv.latency_ms = int((time.monotonic() - t0) * 1000)
+                return rv
+            err = f"{err} | fallback({fb}):{fb_err}"
+
+        rv.error = err
         rv.latency_ms = int((time.monotonic() - t0) * 1000)
         return rv
+
+    async def _run_backend(
+        self,
+        rv: "TTSResult",
+        text: str,
+        out: Path,
+        voice: str,
+        backend: str,
+        fmt: str,
+        timeout_sec: float,
+    ) -> Optional[str]:
+        """用指定 backend 合成到 out。成功 → 写回 rv 并返回 None；失败 → 返回错误串。"""
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(self._synthesize_sync, text, out, voice, backend),
+                timeout=timeout_sec,
+            )
+        except asyncio.TimeoutError:
+            return f"tts_timeout({timeout_sec:.0f}s)"
+        except Exception as ex:
+            return f"{type(ex).__name__}: {ex}"
+        if not (out.exists() and out.stat().st_size > 0):
+            return "empty_audio"
+        rv.ok = True
+        rv.audio_path = str(out)
+        rv.extra["bytes"] = out.stat().st_size
+        # ── P3-A：合成后立即测时长，带上 duration_source 供上游审计 ──
+        try:
+            dur, src = compute_audio_duration_sec(str(out), fmt)
+            rv.duration_sec = float(dur)
+            rv.duration_source = str(src)
+        except Exception:
+            rv.duration_sec = -1.0
+            rv.duration_source = "unknown"
+        return None
 
     def _effective_backend(self) -> str:
         if bool(self.voice_profile.get("enabled", False)):
@@ -252,8 +347,10 @@ class TTSPipeline:
         if not Path(ref).is_file():
             raise RuntimeError(f"voice_profile_reference_audio_missing:{ref}")
 
-    def _synthesize_sync(self, text: str, out: Path, voice: str) -> None:
-        backend = self._effective_backend()
+    def _synthesize_sync(
+        self, text: str, out: Path, voice: str, backend: Optional[str] = None,
+    ) -> None:
+        backend = (backend or self._effective_backend())
         if backend == "edge_tts":
             asyncio.run(self._edge_tts(text, out, voice))
             return
@@ -367,6 +464,9 @@ class TTSPipeline:
         import urllib.request as _ur
 
         base = (self.base_url or "http://127.0.0.1:7851").rstrip("/")
+        # 快速可达性预检：主机离线时 ~3s 失败并触发兜底，避免 OS TCP 连接超时
+        # （WinError 10060）拖到 ~21s。预检通过才走正常合成（合成本身仍给足超时）。
+        _assert_http_reachable(base, timeout=3.0)
         vp = self.voice_profile
         fmt = (self.format or "wav").lower()
         language = str(vp.get("language") or "zh-cn")
