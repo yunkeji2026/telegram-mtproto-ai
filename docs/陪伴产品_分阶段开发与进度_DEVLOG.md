@@ -3535,3 +3535,48 @@ summary 持续计数、恢复排除、跃迁历史）+ `test_admin_route_invento
 **Stage D5 收口**：注入失配告警从「数变了就弹（含抖动误报）」升级为「**持续超阈值才告警** + 逐账号持续时长 +
 跃迁趋势」——降噪且更可信，运营被打扰时基本都是「真该走 D1 覆写层热修」。路线图 Tier1 #4 完成。
 **下一步**：① 持续失配外发（EventBus→webhook/TG）；② 真号校准 Tier1 `canIngest`；③ 趋势 sparkline。
+
+---
+
+## 93. Stage A1：读路径迁移——`read_from_store` 灰度转默认 + live≡store 等价硬化（路线图 Tier1 #5）
+
+**实施前的思考**：A1 的骨架早已落地——`/chats`+`/thread` 在 `read_from_store=true` 时改读 `InboxStore`，且
+**每次请求仍先跑实时聚合做旁路 ingest 保持 store 新鲜**，再读 store（故对「当前数据」天然行为等价、并额外解锁
+实时窗口外历史/SLA）。路线图 #5 要「灰度转默认」，但**验收硬指标是「`/chats`+`/thread` 行为不变」**。探查发现
+store 读路径与实时聚合存在**可视差异**，直接翻默认会引入静默回归：① `store_row_to_chat` 把 `account_label`
+设为账号 id（实时聚合用人设/标签友好名）→ 列表显示账号 id 的回归；② `last_message=None`/`messages=[]`（实时
+聚合恒由末条建 `last_message`）→ 前端读 `last_message.text` 预览的路径退化。
+
+**关键设计（先硬化等价，再翻默认；不动代码缺省）**：
+1. **`store_row_to_chat` 等价硬化**（`src/inbox/normalizer.py`）：与 `normalize_chat` 同构——有末条文本才由
+   `message_obj(last_text, direction="in")` 重建 `last_message`，`messages=[msg] if last_text else []`；
+   `language` 改为对 `last_text` 现场检测（与 live 的 `msg["language"]` 同源，末条相同则判定一致），仅无末条时
+   兜底 store 持久 language；新增 `account_label` 入参（缺省回落账号 id）。`source` 仍 `{}`（store 不持久平台
+   原始结构，列表视图不消费）。
+2. **`account_label` 借 live 同源回填**（`unified_inbox_aggregate.py`）：`_chats_for_listing` 本就先算 `live`，
+   据此派生 `{(platform, account_id): account_label}` 友好名映射，传入 `_collect_chats_from_store` 回填——
+   store-only 历史账号 live 无对应项则回落账号 id（live 本也无其 label，等价成立）。
+3. **示例默认翻 true**（`config/config.example.yaml`）：`inbox.read_from_store: true` + 重写注释；**代码 fallback
+   仍 false**（`_read_from_store_enabled` 无 config 时返回 false，保无 config 环境安全，不靠默认意外切 store）。
+
+**强等价测试（比 shadow 更硬）**：新增 `test_chats_live_store_equivalence`——同一 fixture 下 flag off(live) 与
+flag on(store) 对每个会话逐字段相等（`name`/`last_msg`/`last_ts`/`account_label`/`language`/`last_message.text`）。
+原 shadow 仅验「ID 覆盖」，本测验「内容等价」，直接守住验收「行为不变」。
+
+**实施中发现并修正**（强等价测试一把抓出）：Telegram 实时聚合 `collect_chats` 是**一条消息一行**（历史窗口快照），
+对同一会话产出多行同 `conversation_id`、末条不同；store 收口为「每会话一行 + 末条（最新 ts）」。这是 live 既有
+**重复行**怪癖，store 读反而**去重更正确**（非回归）。测试遂以「live 每会话 `last_ts` 最大者」为基准（= store 语义）
+比对，等价成立。
+
+**能否再优化 / 已知接受**：① RPA 坐席出站不入 `messages`（`/send` 只调 adapter）——但 live RPA thread 同样不录
+出站，故等价（非 A1 引入）；② 纯 media（无 caption）thread 旁路 ingest 被过滤——live/store 同源；③ 是否把**代码
+缺省**也翻 true，留待生产灰度观察后再定（当前以 config 为准，最稳）。
+
+**回归**：A1 相关范围单线程（本机有常驻 RPA runner，`-n auto` 会争 CPU 挂起，故按 CLAUDE.md 走 scoped+超时）——
+`test_inbox_readpath_a1`（+3 等价/回落断言 + 强等价测试）/`test_inbox_normalizer`/`test_inbox_ingest`/
+`test_unified_inbox_stage1·2`/`test_channel_adapters`/`test_protocol_bridge`/`test_admin_route_inventory` 等
+**214 passed**。（唯一 fail 为工作树内**无关的** episodic-memory WIP 新路由未登记到清单，非 A1 改动，未纳入本提交。）
+
+**Stage A1 收口**：统一收件箱读路径以 store 为默认事实源，`/chats`+/thread 经「先 live 旁路 ingest 再读 store」
+对当前数据**逐字段等价于实时聚合**，并解锁实时窗口外的历史会话/SLA；等价由强测试守门。路线图 Tier1 #5 完成。
+**下一步**：① 观察生产后决定是否翻代码缺省；② Tier1 #6 稳定平台 message id 收尾。
