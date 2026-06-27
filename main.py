@@ -1233,6 +1233,14 @@ class AIChatAssistant:
                                             _persona_id = str((_row.get("meta") or {}).get("persona_id") or "")
                                         except Exception:
                                             _persona_id = ""
+                                        # 风险分档（单一事实源）：草稿创建时已算好 risk_level，
+                                        # 取出透传给统一引擎 → 低风险走快路省延迟、中/高风险吃满全栈。
+                                        _risk_level = ""
+                                        try:
+                                            _drow = draft_svc.get_draft(draft_id) or {}
+                                            _risk_level = str(_drow.get("risk_level") or "")
+                                        except Exception:
+                                            _risk_level = ""
                                         # 语言决策收敛到 generate_persona_reply（单一事实源，
                                         # 含短消息防误切）；这里不再各自重复检测，直接采信其
                                         # 返回的 reply_lang 落库 draft_lang。
@@ -1240,6 +1248,7 @@ class AIChatAssistant:
                                             app=_ad_app, platform=platform, chat_key=chat_key,
                                             last_inbound=last, history=history,
                                             persona_id=_persona_id,
+                                            risk_level=_risk_level,
                                         )
                                         if out.get("ok") and out.get("reply"):
                                             done = draft_svc.enrich_draft(

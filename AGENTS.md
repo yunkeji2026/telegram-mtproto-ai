@@ -23,6 +23,10 @@ python -m pytest tests/ -n auto -q
 > ```bash
 > python -m pytest tests/ -n auto -q --timeout=90 --timeout-method=thread
 > ```
+>
+> 防陈旧字节码 flaky（曾偶发 `test_*_event_alias`）：用 `scripts/regression.ps1`（Win）/
+> `scripts/regression.sh`（posix）——跑前清 `src/tests` 的 `__pycache__` 并 `PYTHONDONTWRITEBYTECODE=1`，
+> 含上述超时兜底；可透传 pytest 参数（如 `scripts\regression.ps1 tests\test_x.py`）。
 
 **仅 contacts/handoff 主线**（快速回归 — P24-D 起默认开 `-n auto` 并行，~1.9x 加速）：
 ```bash
