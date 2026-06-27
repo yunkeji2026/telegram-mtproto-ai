@@ -417,15 +417,23 @@ function selectorHealth(profile, doc) {
   };
 }
 
-if (typeof module !== "undefined" && module.exports) {
-  module.exports = {
-    cleanVisibleText,
-    detectPlatform,
-    makeGenericProfile,
-    applySelectorOverlay,
-    resolveProfile,
-    selectorHealth,
-    BUILTIN_PROFILES,
-    OVERLAYABLE_KEYS,
-  };
-}
+// 双模式导出（单一源，桌面 preload 与浏览器扩展 content script 共用）：
+//   - Node/Electron preload：CommonJS require → module.exports。
+//   - 浏览器扩展 content script（隔离世界无 require）：挂到 globalThis.AInjectProfiles。
+(function (api) {
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = api;
+  }
+  if (typeof globalThis !== "undefined") {
+    globalThis.AInjectProfiles = api;
+  }
+})({
+  cleanVisibleText,
+  detectPlatform,
+  makeGenericProfile,
+  applySelectorOverlay,
+  resolveProfile,
+  selectorHealth,
+  BUILTIN_PROFILES,
+  OVERLAYABLE_KEYS,
+});

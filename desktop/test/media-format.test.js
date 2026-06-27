@@ -2,7 +2,7 @@
 
 // 媒体翻译结果格式化纯函数单测（无框架，node 直跑）：node test/media-format.test.js
 const assert = require("assert");
-const { formatMediaResult, pickTranslated } = require("../inject/media-format.js");
+const { formatMediaResult, pickTranslated } = require("../../shared/inject/media-format.js");
 
 let pass = 0;
 function ok(name, cond) {

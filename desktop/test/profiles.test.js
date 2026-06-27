@@ -10,7 +10,7 @@ const {
   selectorHealth,
   BUILTIN_PROFILES,
   OVERLAYABLE_KEYS,
-} = require("../inject/profiles.js");
+} = require("../../shared/inject/profiles.js");
 const { needsChromeUa, urlNeedsChromeUa } = require("../webview-ua.js");
 
 let pass = 0;

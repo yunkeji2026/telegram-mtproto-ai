@@ -1,6 +1,6 @@
 {
   "backend": {
-    "base_url": "http://127.0.0.1:18787",
+    "base_url": "http://127.0.0.1:18799",
     "token": "admin",
     "user": "",
     "pass": ""
@@ -17,6 +17,10 @@
   },
   "sync": {
     "enabled": true
+  },
+  "embedded_official_pages": {
+    "enabled": false,
+    "_note": "桌面默认仅显示统一收件箱（与网页同源同款）。置 true 可恢复左侧账号栏 + 内嵌官方 Telegram/WhatsApp 网页 Tab（免安卓真机扫码 + 注入翻译/智能回复）。"
   },
   "debug": false,
   "platforms": [

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>AI 客服助手 · 设置</title>
+<style>
+  body{font-family:'Inter','PingFang SC','Microsoft YaHei',system-ui,sans-serif;margin:0;padding:18px;width:320px;background:#1b2038;color:#e6edf3;}
+  h1{font-size:15px;margin:0 0 14px;}
+  label{display:block;font-size:12px;color:#aeb8d4;margin:12px 0 4px;}
+  input[type=text]{width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid #2b3947;border-radius:8px;background:#0e1621;color:#e6edf3;font-size:13px;}
+  .row{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px;}
+  .row input{width:16px;height:16px;}
+  button{margin-top:16px;width:100%;background:#3b82f6;color:#fff;border:0;border-radius:9px;padding:9px;font-size:14px;cursor:pointer;}
+  button:hover{background:#2563eb;}
+  .hint{font-size:11px;color:#7a879b;margin-top:10px;line-height:1.6;}
+  #status{font-size:12px;color:#34d399;margin-top:10px;min-height:16px;}
+</style>
+</head>
+<body>
+  <h1>AI 客服助手 · 设置</h1>
+  <label>后端地址（base_url）</label>
+  <input id="base_url" type="text" placeholder="http://127.0.0.1:18799">
+  <label>令牌（token）</label>
+  <input id="token" type="text" placeholder="admin">
+  <label>翻译目标语言</label>
+  <input id="target_lang" type="text" placeholder="zh">
+  <div class="row"><input id="auto_translate" type="checkbox"><span>自动翻译每条新消息</span></div>
+  <div class="row"><input id="sync_enabled" type="checkbox"><span>回流消息到统一收件箱</span></div>
+  <div class="row"><input id="debug" type="checkbox"><span>调试自检（启动测一次翻译链路）</span></div>
+  <button id="save">保存</button>
+  <button id="open-panel" style="background:#0e1621;border:1px solid #2b3947;">打开业务面板（统一收件箱）</button>
+  <div id="status"></div>
+  <div class="hint">远程后端（非 127.0.0.1/localhost）需在扩展详情页授予该站点访问权限。保存后刷新官方网页标签即可生效。</div>
+  <script src="options.js"></script>
+</body>
+</html>

@@ -4,6 +4,15 @@ const { app, BrowserWindow, ipcMain, session, clipboard, Menu } = require("elect
 const path = require("path");
 const fs = require("fs");
 const { chromeLikeUserAgent, isWhatsappUrl, needsChromeUa, urlNeedsChromeUa } = require("./webview-ua.js");
+const { fingerprintArg, accountIdFromPartition } = require("./inject/fingerprint.js");
+
+// D3：每账号确定性指纹缓存（account_id → fingerprint）。启动/运行时新增账号前拉取，
+// 供 session UA / Accept-Language / webview additionalArguments 注入，使多号内嵌互不关联。
+const FP_BY_ACCOUNT = {};
+function fpEnabled() {
+  const f = (config && config.fingerprint) || {};
+  return f.enabled !== false; // 默认开启
+}
 
 const CONFIG_PATH = path.join(__dirname, "config.json");
 
@@ -700,6 +709,13 @@ async function createWindow() {
     console.log(`[diag] render process gone: ${JSON.stringify(d)}`));
   win.webContents.on("console-message", (_e, _lvl, msg) =>
     console.log(`[renderer] ${msg}`));
+  // webview 子 webContents 在 Electron 默认是 sandboxed（与父窗口 sandbox:false 无关），
+  // 沙箱内 preload 只能 require electron，无法 require 本地模块（./profiles.js / ./media-format.js）→
+  // 注入脚本 tg-inject.js 整体加载失败「module not found: ./profiles.js」。这里对内嵌 webview 关闭
+  // 沙箱，使 preload 能加载选择器档案/媒体格式化模块（DOM 注入与 ipcRenderer 不受影响）。
+  win.webContents.on("will-attach-webview", (_e, webPreferences) => {
+    webPreferences.sandbox = false;
+  });
   win.webContents.on("did-attach-webview", (_e, wc) => {
     console.log("[diag] webview attached");
     bindWhatsappWebviewUa(wc);

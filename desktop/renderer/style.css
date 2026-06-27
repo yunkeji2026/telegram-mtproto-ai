@@ -8,6 +8,8 @@ body { font-family: "Segoe UI", system-ui, sans-serif; background: #17212b; colo
   width: 76px; background: #0e1621; display: flex; flex-direction: column;
   align-items: center; padding: 12px 0; gap: 8px; flex-shrink: 0;
 }
+/* Option C：关闭内嵌官方网页时，桌面只剩统一收件箱（stage 由 flex:1 自动铺满），隐藏左侧账号栏。 */
+#app.no-embedded #rail { display: none; }
 .rail-item {
   width: 56px; height: 56px; border-radius: 14px; display: flex; flex-direction: column;
   align-items: center; justify-content: center; cursor: pointer; font-size: 11px;

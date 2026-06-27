@@ -39,6 +39,12 @@ const REASON_TEXT = {
   no_speech: "未识别到语音内容",
 };
 
-if (typeof module !== "undefined" && module.exports) {
-  module.exports = { formatMediaResult, pickTranslated, REASON_TEXT };
-}
+// 双模式导出（单一源，桌面 preload 与浏览器扩展 content script 共用）。
+(function (api) {
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = api;
+  }
+  if (typeof globalThis !== "undefined") {
+    globalThis.AInjectMediaFormat = api;
+  }
+})({ formatMediaResult, pickTranslated, REASON_TEXT });

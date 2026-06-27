@@ -9,18 +9,19 @@
 
 端点路径/方法/响应零变化（admin_route_inventory URL 契约守卫 + slice 33 端点契约断言）。
 
-依赖全部朝下：services._get_translation_service；ingest 走 protocol_bridge.ingest_incoming
-+ account_registry（handler 内局部 import）。只收 api_auth 一个参数。
+依赖全部朝下：smart-reply 走 inbox.persona_reply（单一事实源，与收件箱全自动草稿同产线）；
+ingest 走 protocol_bridge.ingest_incoming + account_registry（handler 内局部 import）。
+只收 api_auth 一个参数。
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Dict, List
 
 from fastapi import Depends, HTTPException, Request
 
-from src.web.routes.unified_inbox_services import _get_translation_service
+from src.inbox.persona_reply import generate_persona_reply, normalize_history
 
 logger = logging.getLogger(__name__)
 
@@ -54,133 +55,22 @@ def register_desktop_routes(app, *, api_auth) -> None:
         chat_key = str(body.get("chat_key") or "").strip()
 
         # 归一对话历史（OpenAI 风格）+ 取最后一条入站消息作为「待回复」
-        history: List[Dict[str, str]] = []
-        last_inbound = ""
-        for m in msgs:
-            if not isinstance(m, dict):
-                continue
-            t = str(m.get("text") or "").strip()
-            if not t:
-                continue
-            is_in = m.get("direction") in ("in", "inbound")
-            history.append({"role": "user" if is_in else "assistant", "content": t})
-            if is_in:
-                last_inbound = t
-        if not last_inbound:
-            last_inbound = history[-1]["content"] if history else ""
+        history, last_inbound = normalize_history(msgs)
         if not last_inbound:
             return {"ok": False, "detail": "无可用对话上下文"}
 
-        sm = getattr(request.app.state, "skill_manager", None)
-        if sm is None:
-            _tc = getattr(request.app.state, "telegram_client", None)
-            sm = getattr(_tc, "skill_manager", None) if _tc is not None else None
-        ai = getattr(request.app.state, "ai_client", None)
-
-        reply = None
-        used_persona = ""
-        used_intent = ""
-        # 主路径：人设 + KB + 策略（与 /api/chat/test 一致）
-        if sm is not None and getattr(sm, "ai_client", None) is not None:
-            try:
-                user_id = f"desktop:{platform}:{chat_key}" or "__desktop__"
-                intent = sm._recognize_intent(last_inbound)
-                used_intent = intent
-                try:
-                    strategy, _sid = sm.get_strategy_for_intent(intent, user_id)
-                except Exception:
-                    strategy = {}
-                kb_context = ""
-                kb = getattr(request.app.state, "kb_store", None)
-                if kb is not None:
-                    try:
-                        _res = kb.search(last_inbound, top_k=3, lang="zh")
-                        kb_context = kb.build_ai_context_from_result(_res, lang="zh")
-                    except Exception:
-                        kb_context = ""
-                ctx: Dict[str, Any] = {
-                    "user_id": user_id,
-                    "chat_id": chat_key or user_id,
-                    "channel": "desktop",
-                    "platform": platform,
-                    "intent": intent,
-                    "current_intent": intent,
-                    "_reply_strategy": strategy or {},
-                    "reply_lang": target_lang or "zh",
-                }
-                if persona_id:
-                    ctx["account_persona_id"] = persona_id
-                if len(history) > 1:
-                    hist = history[:-1] if history[-1]["role"] == "user" else history
-                    ctx["_conversation_history"] = hist[-20:]
-                if kb_context:
-                    ctx["kb_context"] = kb_context
-                so: Dict[str, Any] = {}
-                for _sk in ("temperature", "max_tokens", "context_rounds", "model", "thinking_budget"):
-                    if _sk in (strategy or {}):
-                        so[_sk] = strategy[_sk]
-                reply = await sm.ai_client.generate_reply_with_intent(
-                    user_message=last_inbound,
-                    intent=intent,
-                    user_context=ctx,
-                    strategy_overrides=so or None,
-                )
-                used_persona = persona_id or "domain"
-            except Exception:
-                logger.debug("[desktop] 人设 smart-reply 失败，回落通用", exc_info=True)
-                reply = None
-
-        # 兜底：SkillManager 不可用时退回通用提示词（保证至少有草稿）
-        if not reply and ai is not None:
-            lines = [
-                ("客户：" if m.get("direction") in ("in", "inbound") else "我：") + str(m.get("text") or "")
-                for m in msgs[-12:] if isinstance(m, dict) and str(m.get("text") or "").strip()
-            ]
-            prompt = (
-                "你是温暖、自然、像真人一样的线上陪伴/客服。基于以下对话，草拟我的下一条回复。"
-                "口吻自然口语化，禁止出现「作为AI/作为一个AI/有什么可以帮您」等机器措辞，"
-                "只输出回复正文。\n\n对话：\n" + "\n".join(lines) + "\n\n我的回复："
-            )
-            try:
-                reply = await ai.chat(prompt)
-            except Exception:
-                logger.debug("[desktop] 兜底 smart-reply 失败", exc_info=True)
-                reply = None
-
-        reply = (reply or "").strip()
-        # P1：让徽标说真话——返回「实际解析到的人设」而非「请求的 id」。
-        # 会话绑定/账号人设/domain 谁生效就报谁；解析失败回落到旧值。
-        persona_tier = ""
-        if reply:
-            try:
-                from src.utils.persona_manager import PersonaManager
-                _pm = PersonaManager.get_instance()
-                _resolved, _tier = _pm.get_persona_with_tier(chat_key or "", persona_id)
-                persona_tier = _tier
-                # 部分 profile 字典内无 'id' 字段（id 只是 YAML key），故按 tier 推导：
-                # account_profile 层 → 用请求的 persona_id；chat_binding → 用解析到的 id；
-                # domain/default → "domain"。让徽标与「实际生效」一致。
-                _rid = str((_resolved or {}).get("id") or "")
-                if _tier == "account_profile":
-                    used_persona = _rid or persona_id or "domain"
-                elif _tier == "chat_binding":
-                    used_persona = _rid or "domain"
-                else:
-                    used_persona = "domain"
-            except Exception:
-                logger.debug("[desktop] persona tier 解析失败", exc_info=True)
-        out: Dict[str, Any] = {"ok": bool(reply), "reply": reply,
-                               "persona": used_persona, "persona_tier": persona_tier,
-                               "intent": used_intent}
-        if reply and target_lang:
-            try:
-                svc = _get_translation_service(request)
-                res = await svc.translate(reply, target_lang=target_lang, style="chat")
-                if res.ok:
-                    _rd = res.to_dict()
-                    out["translated"] = _rd.get("translated_text") or _rd.get("text") or ""
-            except Exception:
-                logger.debug("[desktop] smart-reply 译文失败", exc_info=True)
+        # 人设化回复走单一事实源（persona_reply.generate_persona_reply）：
+        # 与收件箱全自动草稿 / 协议自动回复同一条产线，避免逻辑分叉。
+        out = await generate_persona_reply(
+            app=request.app,
+            platform=platform,
+            chat_key=chat_key,
+            last_inbound=last_inbound,
+            history=history,
+            persona_id=persona_id,
+            target_lang=target_lang,
+        )
+        out.pop("detail", None)
         return out
 
     @app.post("/api/desktop/guard-check")
@@ -309,3 +199,18 @@ def register_desktop_routes(app, *, api_auth) -> None:
         from src.web.desktop_inject_health import get_inject_health_store
         store = get_inject_health_store()
         return {"ok": True, "summary": store.summary(), "accounts": store.latest(stale_after=90.0)}
+
+    @app.get("/api/desktop/fingerprint")
+    async def api_desktop_fingerprint(request: Request, _=Depends(api_auth)):
+        """桌面壳内嵌 webview 的「一号一指纹」（D3 防关联封号）。
+
+        以 ``account_id`` 为种子**确定性**派生（同账号永远同指纹，无需持久化）：桌面端据此
+        给每个账号的 webview 分区设独立 UA/Accept-Language + 注入 navigator/Intl/WebGL/Canvas 覆盖，
+        使多号内嵌时互不关联（IG/Meta/X 反作弊会把「同机同环境多号」连坐封）。仅桌面 UA 子池。
+        query: account_id（种子；空则随机一次性）、platform（仅日志）
+        返回: {ok, fingerprint: {...}}
+        """
+        account_id = str(request.query_params.get("account_id") or "").strip()
+        from src.integrations.fingerprint import generate_fingerprint
+        fp = generate_fingerprint(account_id or None, desktop_only=True)
+        return {"ok": True, "fingerprint": fp}

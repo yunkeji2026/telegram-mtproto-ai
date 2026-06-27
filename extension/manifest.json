@@ -1,0 +1,44 @@
+{
+  "manifest_version": 3,
+  "name": "AI 客服助手（官方页注入）",
+  "version": "0.1.0",
+  "description": "在 Telegram / WhatsApp 等官方网页注入「点击翻译 / 智能回复」，对接本仓库 AI 客服后端。注入核心与桌面端共用 shared/inject 单一源（Phase 2）。",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_page": "options.html",
+  "action": {
+    "default_title": "AI 客服助手设置",
+    "default_popup": "options.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://web.telegram.org/*",
+        "https://web.whatsapp.com/*",
+        "https://*.messenger.com/*",
+        "https://www.instagram.com/*",
+        "https://x.com/*",
+        "https://twitter.com/*",
+        "https://chat.zalo.me/*"
+      ],
+      "js": [
+        "vendor/profiles.js",
+        "vendor/media-format.js",
+        "vendor/core.js",
+        "content/bridge.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
+}

@@ -104,3 +104,34 @@ def test_fingerprint_store_roundtrip():
     got = st.get(rec["fingerprint_id"])
     assert got["profile"]["user_agent"] == rec["profile"]["user_agent"]
     assert len(st.list()) == 1
+
+
+# ── D3：桌面壳「一号一指纹」（desktop_only 子池）───────────────────────────────
+
+def test_fingerprint_desktop_only_excludes_mobile():
+    # 桌面子池：扫多个种子，UA 永不含移动标识，OS 仅桌面三系
+    for i in range(40):
+        fp = generate_fingerprint(f"acct-{i}", desktop_only=True)
+        ua = fp["user_agent"]
+        assert "Mobile" not in ua and "iPhone" not in ua and "Android" not in ua
+        assert fp["os"] in ("Windows", "macOS", "Linux")
+        # 屏幕取桌面尺寸（宽 >= 1366）
+        assert fp["screen"]["width"] >= 1366
+
+
+def test_fingerprint_desktop_only_still_deterministic():
+    a = generate_fingerprint("acct-A", desktop_only=True)
+    b = generate_fingerprint("acct-A", desktop_only=True)
+    assert a == b
+    # desktop_only 与默认是不同子池，同 seed 可能不同 UA（互不影响既有行为）
+    assert a["user_agent"]
+
+
+def test_fingerprint_desktop_diversity_across_accounts():
+    # 多账号应得到有差异的指纹（防关联的前提）：UA+timezone+language 组合不应全同
+    combos = {
+        (f := generate_fingerprint(f"a{i}", desktop_only=True))["user_agent"]
+        + f["timezone"] + f["language"]
+        for i in range(12)
+    }
+    assert len(combos) >= 4

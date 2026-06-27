@@ -10,7 +10,7 @@
     "predev": "node copy-shared.js",
     "start": "electron .",
     "dev": "electron . --dev",
-    "test": "node test/inject-status.test.js && node test/account-utils.test.js && node test/media-format.test.js && node test/webview-ua.test.js && node test/profiles.test.js"
+    "test": "node test/inject-status.test.js && node test/account-utils.test.js && node test/media-format.test.js && node test/webview-ua.test.js && node test/profiles.test.js && node test/fingerprint.test.js"
   },
   "devDependencies": {
     "electron": "^31.0.0"

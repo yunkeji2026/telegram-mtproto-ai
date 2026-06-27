@@ -96,6 +96,13 @@ function resolveAccounts(cfg) {
 
 (async function () {
   const cfg = await window.shell.getConfig();
+  // Option C：默认只保留统一收件箱（与网页同源同款），关掉左侧账号栏 rail + 内嵌官方网页 Tab。
+  // 置 config.embedded_official_pages.enabled=true 可整套恢复（免真机扫码 + 注入栈）。
+  const EMBEDDED_ON = ((cfg.embedded_official_pages || {}).enabled === true);
+  if (!EMBEDDED_ON) {
+    const appEl = document.getElementById("app");
+    if (appEl) appEl.classList.add("no-embedded");
+  }
   let WHATSAPP_UA = cfg.whatsapp_user_agent || "";
   function whatsappUserAgent() {
     return WHATSAPP_UA || (typeof chromeLikeUserAgent === "function" ? chromeLikeUserAgent() : "");
@@ -487,12 +494,16 @@ function resolveAccounts(cfg) {
     flash("已移除内嵌标签");
   }
 
-  buildRailAddButton();
-  ACCOUNTS.forEach((a, idx) => {
-    if (!isEmbeddable(a.platform)) return addViaInboxItem(a);
-    // 统一收件箱开启时它占首屏，内嵌平台一律非激活；未开启时回退老行为（首个可内嵌账号激活）
-    addAccountTab(a, { active: !inboxOn && idx === firstEmbeddableIdx });
-  });
+  // Option C：内嵌官方网页关闭时，桌面只剩统一收件箱（rail 由 #app.no-embedded 隐藏），
+  // 不渲染任何内嵌平台 Tab / webview / ➕新增，与网页 /workspace 完全一致。
+  if (EMBEDDED_ON) {
+    buildRailAddButton();
+    ACCOUNTS.forEach((a, idx) => {
+      if (!isEmbeddable(a.platform)) return addViaInboxItem(a);
+      // 统一收件箱开启时它占首屏，内嵌平台一律非激活；未开启时回退老行为（首个可内嵌账号激活）
+      addAccountTab(a, { active: !inboxOn && idx === firstEmbeddableIdx });
+    });
+  }
 
   initCopilot();
   if (inboxOn) {
@@ -639,7 +650,15 @@ function setupAccountsPanel() {
 // ── 灰度:统一前端 App(iframe 加载 /copilot/app.html,与网页同源同款) ──────────
 function setupIframeMode() {
   const btn = $("cp-mode-toggle");
-  try { Copilot.useIframe = localStorage.getItem("cp_use_iframe") === "1"; } catch (e) { Copilot.useIframe = false; }
+  // 统一前端 App 默认开启（与网页同源同款）；显式存 "0" 才回退到原生 aside（保留兜底/对照）。
+  // 一次性迁移到新基线：旧会话可能持久化过 cp_use_iframe=0，这里以「默认开」覆盖一次，之后仍尊重用户手动 🧪 切换。
+  try {
+    if (localStorage.getItem("cp_iframe_default_v2") !== "1") {
+      localStorage.setItem("cp_iframe_default_v2", "1");
+      localStorage.setItem("cp_use_iframe", "1");
+    }
+    Copilot.useIframe = localStorage.getItem("cp_use_iframe") !== "0";
+  } catch (e) { Copilot.useIframe = true; }
   if (btn) {
     btn.addEventListener("click", toggleIframeMode);
     btn.classList.toggle("active", Copilot.useIframe);
@@ -674,7 +693,7 @@ async function enableIframe() {
   document.getElementById("copilot").classList.add("iframe-mode");
   const frame = $("cp-appframe");
   const b = await frameBackend();
-  const base = b.base_url || "http://127.0.0.1:18787";
+  const base = b.base_url || "http://127.0.0.1:18799";
   Copilot._frameOrigin = frameOrigin(base);
   // token 放 hash(不进 server access log);主题镜像宿主壳 data-cp-theme(桌面为深色专属，
   // 将来若壳可切换，iframe 自动跟随)，使统一 App 副驾与深色壳一致，消除 iframe 模式「一黑一白」
@@ -715,6 +734,17 @@ function onFrameMessage(e) {
   }
   if (msg.type === "cp-fill" && msg.text) { fillComposer(msg.text, false); return; }
   if (msg.type === "cp-send" && msg.text) { sendComposer(msg.text); return; }
+  // 全自动托管开关由统一 App 上吐 → 落到桌面壳的 webview 自动回复能力（HostBridge）
+  if (msg.type === "cp-autopilot") {
+    if (Copilot.autopilot) Copilot.autopilot.on = !!msg.on;
+    try { localStorage.setItem("desktop_autopilot", msg.on ? "1" : "0"); } catch (e) {}
+    const t = $("cp-auto-toggle"); if (t) t.checked = !!msg.on;
+    if (typeof setAutopilotStatus === "function") {
+      setAutopilotStatus(msg.on ? "待命中（收到客户消息将自动回复）" : "已关闭", msg.on ? "on" : "off");
+    }
+    flash(msg.on ? "⚠ 已开启全自动托管：当前会话将自动回复客户" : "已关闭全自动托管");
+    return;
+  }
 }
 
 // 统一 App 已在组件侧过了护栏,这里直接发送(不重复弹确认)
@@ -729,10 +759,34 @@ async function feedActiveChat() {
   const c = Copilot.ctx;
   if (!Copilot.useIframe || !c || !c.chat_key || !window.CopilotShared) return;
   try {
-    const cid = window.CopilotShared.conversationId(c.platform, currentAccountId(c), c.chat_key);
-    const ctx = { type: "cp-context", conversationId: cid, chatKey: c.chat_key };
+    const acc = currentAccountId(c);
+    const cid = window.CopilotShared.conversationId(c.platform, acc, c.chat_key);
+    const ctx = {
+      type: "cp-context",
+      conversationId: cid,
+      chatKey: c.chat_key,
+      platform: c.platform,
+      accountId: acc,
+      // 桌面壳具备「内嵌官方网页 webview 自动回复」能力 → 声明 autopilot，统一 App 才显示托管开关
+      caps: { autopilot: true },
+      autopilotOn: !!(Copilot.autopilot && Copilot.autopilot.on),
+      customer: {
+        platform: c.platform,
+        account_id: acc,
+        account_label: c.account_label || "",
+        chat_key: c.chat_key,
+        summary: c.name ? ("会话对象：" + c.name) : "",
+      },
+    };
     if (Copilot._frameReady) postFrameContext(ctx); else Copilot._pendingFrameCtx = ctx;
   } catch (e) { /* ignore */ }
+}
+
+// 壳浮钮深链 → 统一 App 指令（iframe 模式）：focus-draft / focus-voice / set-tab
+function postFrameCmd(cmd, extra) {
+  if (!Copilot.useIframe) return false;
+  postFrameContext(Object.assign({ type: "cp-cmd", cmd: cmd }, extra || {}));
+  return true;
 }
 
 function postFrameContext(ctx) {

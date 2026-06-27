@@ -34,6 +34,9 @@ _UA_POOL = [
      "Chrome/124.0.0.0 Mobile Safari/537.36", "Linux armv8l", "Android"),
 ]
 _SCREENS = [(1920, 1080), (1536, 864), (1440, 900), (1366, 768), (2560, 1440), (390, 844), (412, 915)]
+# 桌面壳内嵌 webview 专用子池：仅桌面 UA/屏幕（移动 UA 会让站点切手机版导致选择器失配）。
+_DESKTOP_UA_POOL = [e for e in _UA_POOL if e[2] in ("Windows", "macOS", "Linux")]
+_DESKTOP_SCREENS = [(1920, 1080), (1536, 864), (1440, 900), (1366, 768), (2560, 1440)]
 _TIMEZONES = [
     "Asia/Shanghai", "Asia/Hong_Kong", "Asia/Singapore", "Asia/Tokyo",
     "Asia/Manila", "Asia/Bangkok", "America/New_York", "Europe/London",
@@ -58,12 +61,16 @@ def _pick(values: List[Any], digest: bytes, offset: int) -> Any:
     return values[idx]
 
 
-def generate_fingerprint(seed: Optional[str] = None) -> Dict[str, Any]:
-    """确定性生成一套指纹画像。``seed`` 为空则随机。"""
+def generate_fingerprint(seed: Optional[str] = None, desktop_only: bool = False) -> Dict[str, Any]:
+    """确定性生成一套指纹画像。``seed`` 为空则随机。
+
+    ``desktop_only=True``：只从桌面 UA/屏幕子池取（桌面壳内嵌 webview 用——移动 UA 会让
+    站点切到手机版导致选择器失配，且与桌面窗口尺寸自相矛盾，反而更易被风控识破）。
+    """
     seed = seed or secrets.token_hex(8)
     digest = hashlib.sha256(str(seed).encode("utf-8")).digest()
-    ua, platform, os_name = _pick(_UA_POOL, digest, 0)
-    width, height = _pick(_SCREENS, digest, 1)
+    ua, platform, os_name = _pick(_DESKTOP_UA_POOL if desktop_only else _UA_POOL, digest, 0)
+    width, height = _pick(_DESKTOP_SCREENS if desktop_only else _SCREENS, digest, 1)
     timezone = _pick(_TIMEZONES, digest, 2)
     languages = _pick(_LANGS, digest, 3)
     webgl_vendor, webgl_renderer = _pick(_WEBGL_VENDORS, digest, 4)
