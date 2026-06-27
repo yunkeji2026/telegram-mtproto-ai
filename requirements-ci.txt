@@ -22,3 +22,4 @@ langdetect>=1.0.9   # tests/test_wa_lang_detect.py Latin 语种路径需要
 python-docx>=1.1.0  # L2 文档翻译；tests/test_document_file_translate.py 需要
 openpyxl>=3.1.0  # L2b .xlsx 文档翻译
 pdfminer.six>=20221105  # L2b .pdf 文本抽取翻译
+openai>=1.40.0  # tests/test_companion_selfie.py::test_openai_missing_key_raises 需 import openai（纯 Python 小依赖，非 torch/whisper 级）

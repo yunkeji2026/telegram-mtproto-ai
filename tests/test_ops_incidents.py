@@ -2,8 +2,24 @@
 
 import types
 
+import pytest
+
 from src.inbox.health_watchdog import HealthWatchdog
 from src.inbox.store import InboxStore
+
+
+@pytest.fixture(autouse=True)
+def _isolate_draft_metrics():
+    """隔离全局 MetricsStore 单例。
+
+    watchdog._tick() 会调 _check_draft_quality()，读全局 MetricsStore 单例；其它测试
+    文件（如 test_alert_delivery_e2e / test_health_watchdog）在同一 xdist worker 里可能
+    残留 ≥min_samples 条低命中 draft 指标 → 误触发 draft_quality，使「red 仅 1 条 health
+    incident」的断言变成 2。前后各重置一次，令本文件 incident 计数与全局状态无关。"""
+    from src.monitoring import metrics_store as _ms
+    _ms.MetricsStore._instance = None
+    yield
+    _ms.MetricsStore._instance = None
 
 
 # ── E2：store incidents ──────────────────────────────────────────────────

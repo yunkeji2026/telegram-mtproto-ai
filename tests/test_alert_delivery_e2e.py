@@ -25,6 +25,16 @@ from src.inbox.webhook_notifier import WebhookNotifier
 
 # ── 共享脚手架 ────────────────────────────────────────────────────────────────
 
+@pytest.fixture(autouse=True)
+def _isolate_draft_metrics():
+    """本文件会往全局 MetricsStore 单例灌 draft 指标（full_stack 用例）。前后各重置，
+    避免泄漏到同 xdist worker 的其它测试（曾污染 test_ops_incidents 的 incident 计数）。"""
+    from src.monitoring import metrics_store as _ms
+    _ms.MetricsStore._instance = None
+    yield
+    _ms.MetricsStore._instance = None
+
+
 def _reset_bus():
     """重置 EventBus 单例，隔离用例（notifier.run 与 publish 共用此单例）。"""
     from src.integrations.shared import event_bus as eb
