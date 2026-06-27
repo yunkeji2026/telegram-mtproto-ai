@@ -188,6 +188,30 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
             StaticFiles(directory=str(_shared_copilot_dir)),
             name="copilot_shared",
         )
+
+    # ── PWA（Phase 1：把 /workspace 做成可安装的原生官网）──────────────
+    # service worker 必须从根路径供应才能控制整个 origin 作用域；manifest 须带正确 MIME。
+    # 两者均为公开端点（浏览器/SW 自身需在无 session 时也能拉取）。
+    from fastapi.responses import FileResponse as _FileResponse
+
+    _pwa_dir = _static_dir / "pwa"
+
+    @app.get("/sw.js", include_in_schema=False)
+    async def _pwa_service_worker():
+        resp = _FileResponse(
+            str(_pwa_dir / "sw.js"), media_type="application/javascript"
+        )
+        # 允许根作用域；SW 文件本身不缓存，保证版本号变更即时生效
+        resp.headers["Service-Worker-Allowed"] = "/"
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+    @app.get("/manifest.webmanifest", include_in_schema=False)
+    async def _pwa_manifest():
+        return _FileResponse(
+            str(_pwa_dir / "manifest.webmanifest"),
+            media_type="application/manifest+json",
+        )
     app.state.kb_conflict_checkers = []
     app.state.intent_display_names_extra = {}
     app.state.config_manager = config_manager

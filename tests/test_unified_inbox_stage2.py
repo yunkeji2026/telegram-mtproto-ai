@@ -145,6 +145,35 @@ def test_history_reads_persisted_messages(tmp_path):
     store2.close()
 
 
+def test_history_returns_most_recent_when_over_limit(tmp_path):
+    """回归：会话消息数 > limit 时，/history 必须返回**最近** limit 条（ts 升序），
+    而非最旧 limit 条。否则长会话的 AI 草稿上下文会停留在早期话题，与当前对话错位。"""
+    from src.inbox.models import InboxConversation, InboxMessage
+
+    store = InboxStore(tmp_path / "inbox.db")
+    cid = "telegram:default:tg-room"
+    store.upsert_conversation(InboxConversation(
+        conversation_id=cid, platform="telegram", account_id="default", chat_key="tg-room",
+    ))
+    for i in range(50):
+        store.ingest_message(InboxMessage(
+            conversation_id=cid, platform_msg_id=str(i),
+            direction="in" if i % 2 == 0 else "out",
+            text=f"msg-{i:02d}", ts=1000 + i,
+        ))
+
+    c = _client(inbox_store=store)
+    resp = c.get(f"/api/unified-inbox/history?conversation_id={cid}&limit=30")
+    assert resp.status_code == 200
+    data = resp.json()
+    texts = [m["text"] for m in data["messages"]]
+    # 应是最近 30 条（msg-20 ~ msg-49），升序排列
+    assert texts == [f"msg-{i:02d}" for i in range(20, 50)]
+    assert texts[-1] == "msg-49"
+    assert data["count"] == 50
+    store.close()
+
+
 def test_history_not_found_returns_empty(tmp_path):
     store = InboxStore(tmp_path / "inbox.db")
     c = _client(inbox_store=store)

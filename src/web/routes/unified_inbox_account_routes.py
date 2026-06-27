@@ -49,7 +49,7 @@ def register_account_routes(app, *, api_auth, config_manager=None) -> None:
     def _register_protocol_sink() -> None:
         try:
             from src.integrations.protocol_bridge import (
-                ingest_incoming, register_inbox_sink,
+                ingest_incoming, register_inbox_sink, register_inbox_store_getter,
             )
 
             def _sink(m: Dict[str, Any]) -> None:
@@ -59,6 +59,9 @@ def register_account_routes(app, *, api_auth, config_manager=None) -> None:
                 ingest_incoming(store, **m)
 
             register_inbox_sink(_sink)
+            # 供官方 webhook 的 auto_ai 让位护栏只读查 automation_mode（System Z 去重）
+            register_inbox_store_getter(
+                lambda: getattr(app.state, "inbox_store", None))
         except Exception:
             logger.debug("注册 protocol 收件箱 sink 失败", exc_info=True)
 

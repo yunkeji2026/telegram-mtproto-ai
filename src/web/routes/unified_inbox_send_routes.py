@@ -320,7 +320,8 @@ def register_send_routes(app, *, api_auth, page_auth) -> None:
         try:
             res = await orch.send_media(
                 platform, account_id, chat_key,
-                media_path=local, media_url=url, media_type="voice", caption=caption)
+                media_path=local, media_url=url, media_type="voice", caption=caption,
+                inbox_text=text)
         except Exception as ex:  # noqa: BLE001
             raise HTTPException(502, f"语音发送失败: {ex}")
         cid = _conv_id(platform, account_id, chat_key)

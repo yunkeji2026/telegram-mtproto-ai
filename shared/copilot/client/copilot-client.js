@@ -100,6 +100,18 @@
       const t = (r && r.translation) || {};
       return { ok: !!(r && r.ok), text: t.translated_text || "" };
     }
+    // P4-C：服务端「默认回复语言」（账号>平台>全局）。草稿语言选择器无会话级记忆时取作默认。
+    async defaultReplyLang({ platform, account_id } = {}) {
+      const qs = new URLSearchParams();
+      if (platform) qs.set("platform", platform);
+      if (account_id) qs.set("account_id", account_id);
+      const q = qs.toString();
+      return this._get(`/api/unified-inbox/default-reply-lang${q ? "?" + q : ""}`);
+    }
+    // AI 对话分析（风险预判 + 阶梯话术 + 摘要）。两端 iframe 同源直达。
+    async analyze({ text, messages, chat }) {
+      return this._post(`/api/unified-inbox/analyze`, { text: text || "", messages: messages || [], chat: chat || {} });
+    }
     // —— 账号管理（Phase 2，两端共用）——
     async listAccounts() {
       return this._get(`/api/accounts`);
@@ -286,6 +298,15 @@
     async translate({ text, target_lang }) {
       const s = this._shell();
       return s.translate ? s.translate({ text, target_lang }) : { ok: false, error: "shell.translate 未暴露" };
+    }
+    // P4-C：桌面壳未暴露此 IPC（草稿组件跑在同源 copilot iframe，走 Web 适配器取）→ 优雅回落。
+    async defaultReplyLang(args) {
+      const s = this._shell();
+      return s.defaultReplyLang ? s.defaultReplyLang(args || {}) : { ok: false, error: "shell.defaultReplyLang 未暴露" };
+    }
+    async analyze(args) {
+      const s = this._shell();
+      return s.analyze ? s.analyze(args || {}) : { ok: false, error: "shell.analyze 未暴露" };
     }
     // —— 账号管理（Phase 2，两端共用）——
     async listAccounts() {

@@ -116,6 +116,25 @@
         `<div class="slot"></div>`
       );
       if (wantPersona) this._loadPersonas();
+      // P4-C：无会话级记忆时，回落服务端「默认回复语言」（账号>平台>全局）。不写本地（仅默认，非用户选择）。
+      if (!lang) this._applyServerReplyDefault(this._ctx && this._ctx.conversationId);
+    }
+
+    // 取服务端默认回复语言并回填选择器（仅当当前仍是同一会话、且用户未手动改/无本地记忆）。best-effort。
+    async _applyServerReplyDefault(cid) {
+      if (!cid || !this._client || typeof this._client.defaultReplyLang !== "function") return;
+      const parts = String(cid).split(":");
+      const platform = (this._ctx && this._ctx.platform) || parts[0] || "";
+      const accountId = parts.length >= 2 ? parts[1] : "default";
+      let r;
+      try { r = await this._client.defaultReplyLang({ platform, account_id: accountId }); }
+      catch (e) { return; }
+      const resolved = (r && r.ok && r.resolved) ? String(r.resolved) : "";
+      if (!resolved) return;
+      // 会话可能在 await 期间被切走；且若期间已落本地记忆，则尊重之，不覆盖。
+      if (!this._ctx || this._ctx.conversationId !== cid || this._loadLang()) return;
+      const sel = this.shadowRoot.querySelector('select[data-role="lang"]');
+      if (sel && sel.value === "" && LANGS.some(([v]) => v === resolved)) sel.value = resolved;
     }
 
     _contrastKey() { return "cp_contrastlang:" + (this._ctx && this._ctx.conversationId || ""); }
@@ -335,6 +354,9 @@
       }
       this._draft = r;
       this._draftLang = lang || "zh";
+      // P4-C：记录本次实际请求的回复语言（可能源自服务端默认，未落本地记忆）；
+      //       供 _paintDraft 判定是否取译文文本，替代仅看本地记忆的 _loadLang()。
+      this._reqLang = lang;
       this._paintDraft(r);
     }
 
@@ -352,7 +374,7 @@
       const contrastLang = contrastSel ? contrastSel.value : "";
       const replyLang = this._draftLang || "zh";
       // 指定回复语言时后端已用该语言生成(translated≈reply)，取可读文本
-      const replyText = (this._loadLang() && r.translated) ? r.translated : r.reply;
+      const replyText = (this._reqLang && r.translated) ? r.translated : r.reply;
       if (wantContrast && contrastLang && contrastLang !== replyLang) {
         this._pickSeq += 1;
         const nm = "cppick" + this._pickSeq;

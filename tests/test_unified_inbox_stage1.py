@@ -225,6 +225,49 @@ def test_unified_inbox_automation_mode_roundtrip():
     assert tg["automation_mode"] == "multi_choice"
 
 
+def test_unified_inbox_automation_stats_returns_conversation_audit(tmp_path):
+    """B-1：全自动安全条 API —— 按会话聚合今日 autosend/blocked + 近期审计记录。"""
+    from src.inbox.store import InboxStore
+
+    c = _client()
+    store = InboxStore(tmp_path / "auto_stats.db")
+    c.app.state.inbox_store = store
+    cid = "telegram:default:tg-room"
+    store.record_draft_audit("d1", action="autosend", conversation_id=cid, autopilot_level="L2")
+    store.record_draft_audit("d2", action="blocked", conversation_id=cid, autopilot_level="L4", reason="高风险")
+    store.record_draft_audit("d3", action="autosend_failed", conversation_id=cid, autopilot_level="L2", reason="平台投递失败")
+
+    resp = c.get("/api/unified-inbox/automation-stats?platform=telegram&account_id=default&chat_key=tg-room")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["stats"]["autosend"] >= 1
+    assert data["stats"]["blocked"] >= 1
+    # 投递失败可视化：autosend_failed 计入 stats.failed 且出现在 recent
+    assert data["stats"]["failed"] >= 1
+    assert any(r.get("action") == "autosend" for r in data["recent"])
+    assert any(r.get("action") == "autosend_failed" for r in data["recent"])
+
+
+def test_inbox_store_conversations_blocked_counts_batch(tmp_path):
+    """B-2 风控可视：批量查会话今日 blocked 次数（单次 IN 查询，供列表高亮）。"""
+    from src.inbox.store import InboxStore
+
+    store = InboxStore(tmp_path / "inbox.db")
+    cid_a = "telegram:default:a"
+    cid_b = "telegram:default:b"
+    store.record_draft_audit("d1", action="blocked", conversation_id=cid_a, autopilot_level="L4")
+    store.record_draft_audit("d2", action="blocked", conversation_id=cid_a, autopilot_level="L3")
+    store.record_draft_audit("d3", action="autosend", conversation_id=cid_b, autopilot_level="L2")
+    counts = store.conversations_blocked_counts([cid_a, cid_b, "telegram:default:none"], since_ts=0.0)
+    assert counts.get(cid_a) == 2
+    # 仅 autosend 的会话不计入；无记录会话不出现
+    assert cid_b not in counts
+    assert "telegram:default:none" not in counts
+    # 空入参安全
+    assert store.conversations_blocked_counts([], since_ts=0.0) == {}
+
+
 def test_unified_inbox_send_supports_four_platforms():
     c = _client()
     cases = [
@@ -1371,6 +1414,7 @@ def test_stored_read_routes_slice29_registers_contract():
         ("/api/unified-inbox/history", "GET"),
         ("/api/unified-inbox/automation", "GET"),
         ("/api/unified-inbox/automation", "POST"),
+        ("/api/unified-inbox/automation-stats", "GET"),
     }
     assert expected <= live, f"A1 持久化读/自动化模式路由域端点缺失：{expected - live}"
 
@@ -2119,6 +2163,66 @@ def test_unified_inbox_template_contains_oneclick_outbound_translation():
     # P1-2：'auto' 交服务端统一解析（预览与一击同源），前端读 resolved_target 回落
     assert "resolved_target" in html
     assert "lang==='auto'" in html
+
+
+def test_unified_inbox_translation_tokens_no_theme_drift():
+    """P0-P3 美化：翻译链路语义色全部 token 化（亮/暗双块定义），防止再退回写死色造成暗色失真。
+
+    历史 bug：翻译模块的靛蓝/紫/红字面量散落、无暗色覆盖 → 暗色下深字压深底看不清。
+    收口为 --xl-* token 后，本哨兵锁定『双块都定义 + 控件用 var() + 无写死报错红』，
+    任何回退（重新引入 style="color:#xxxxxx" 或删掉暗色块）都会在 CI 被点名。
+    """
+    path = Path(__file__).resolve().parent.parent / "src" / "web" / "templates" / "unified_inbox.html"
+    html = path.read_text(encoding="utf-8")
+    # 亮 + 暗双块都必须定义这些语义 token（出现 >=2 次＝至少各一次）
+    for tok in (
+        "--xl-accent:",
+        "--xl-trans-text:",
+        "--xl-warn-text:",
+        "--xl-err-text:",
+        "--xl-badge-bg:",
+        "--btn-border:",
+    ):
+        assert html.count(tok) >= 2, f"翻译 token {tok} 缺少亮或暗定义（防漂移）"
+    # 暗色主题块本身存在
+    assert '[data-cp-theme="dark"]' in html
+    # 翻译报错文字不得再用写死深红内联（暗色下不可读）——必须走 .xl-err token 类
+    assert 'style="color:#b91c1c;"' not in html
+    assert ".xl-err{color:var(--xl-err-text)" in html
+    # 关键控件确实引用 token 而非字面量
+    assert ".xl-loading{color:var(--xl-accent)" in html
+    assert "color:var(--xl-warn-text)" in html
+    # P1：单次翻译工具分区 + 状态强语义胶囊
+    assert "xl-tools-row" in html
+    assert ".rt-xl-status.on{" in html
+    # P2：多线路对照弹窗已卡片化 + 主题感知（不再写死白底）
+    assert "xlcompare-card" in html
+    assert "xlcompare-opt" in html
+    # P3+：管理员认领从占满状态栏的横幅收敛为头部紧凑按钮（同款配色，亮暗双适配）
+    assert 'id="claim-hdr-btn"' in html
+    assert ".claim-hdr-btn.mine" in html
+    assert ".claim-hdr-btn.other" in html
+    # 方案A：AI 自动化档位收敛为单一入口（删除重复的「全自动·开」autopilot-btn），
+    # mode-select 全自动档变绿 + 「待审」按档位智能显隐
+    assert 'id="autopilot-btn"' not in html
+    assert "function toggleAutopilot" not in html
+    assert "_syncAutoUi" in html
+    assert ".mode-select.auto-on" in html
+    # 原生 confirm 弹窗已替换为同款主题确认框
+    assert "function _appConfirm" in html
+    # B-1/B-4：全自动安全条 + 暂停记忆原档
+    assert 'id="auto-safety-bar"' in html
+    assert "function pauseAutoMode" in html
+    assert "function _loadAutoStats" in html
+    assert "/api/unified-inbox/automation-stats" in html
+    # B-2：风控可视——被拦截会话列表高亮 + 风险 chip + 进 diff 签名
+    assert "conv-risk-chip" in html
+    assert ".conv-item.risk-blocked" in html
+    assert "c.risk_blocked" in html
+    # 投递失败可视化：安全条/记录弹窗反映 autosend_failed
+    assert "autosend_failed" in html
+    assert "has-fail" in html
+    assert ".autolog-row .act.fail" in html
 
 
 def _client_with_auto_assign():

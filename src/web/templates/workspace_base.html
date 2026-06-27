@@ -80,6 +80,44 @@
 })();
 </script>
 <script src="/static/workspace/crm-widgets.js"></script>
+<!-- PWA（Phase 1）：把工作台做成可安装的原生官网（独立窗口 + 离线壳）。-->
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#1b2038">
+<link rel="apple-touch-icon" href="/static/pwa/icon.svg">
+<script>
+(function(){
+  if('serviceWorker' in navigator){
+    window.addEventListener('load', function(){
+      navigator.serviceWorker.register('/sw.js', {scope:'/'}).catch(function(){});
+    });
+  }
+  // 安装：捕获 beforeinstallprompt → 浮一个「安装App」按钮（自包含，不改顶栏结构）
+  var deferred=null, btn=null;
+  function makeBtn(){
+    if(btn) return btn;
+    btn=document.createElement('button');
+    btn.id='ws-pwa-install';
+    btn.type='button';
+    btn.textContent='⬇ 安装App';
+    btn.style.cssText='position:fixed;right:16px;bottom:16px;z-index:9999;'+
+      'background:#3b82f6;color:#fff;border:0;border-radius:10px;padding:9px 16px;'+
+      'font-size:13px;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.22);';
+    btn.addEventListener('click', function(){
+      if(!deferred) return;
+      deferred.prompt();
+      deferred.userChoice.finally(function(){ deferred=null; btn.remove(); btn=null; });
+    });
+    document.body.appendChild(btn);
+    return btn;
+  }
+  window.addEventListener('beforeinstallprompt', function(e){
+    e.preventDefault(); deferred=e;
+    // 独立窗口（已安装）下不再提示
+    if(!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)) makeBtn();
+  });
+  window.addEventListener('appinstalled', function(){ if(btn){ btn.remove(); btn=null; } });
+})();
+</script>
 </head>
 <body>
 <header class="ws-top">

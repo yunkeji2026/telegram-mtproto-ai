@@ -161,8 +161,26 @@ zalo:
 # orch.send→官方 worker 出站（需官方账号 mode=official 且被编排器接管，account_id 与
 # 入站镜像一致：WhatsApp=phone_number_id、Messenger=page_id、LINE=line.account_id 或 "official"）。
 # ⚠️ 开启但未注册官方 worker / autoreply 全局闸门关 → run_autoreply 判 disabled 不发（官方渠道静默），属预期。
+# 官方通道（LINE/Messenger/WhatsApp-Cloud/IG/Zalo）入站是否走 protocol_autoreply 主管道。
+# false（默认）：各 webhook 维持自身 SkillManager 自答（零回归）。
 official_pipeline:
   enabled: false
+
+# ── 官方通道「全自动聊天 + 翻译 + 语音」横向铺到 WhatsApp/LINE/Messenger 的开关说明 ──
+# 文本全自动 + 翻译：后端产线本就平台无关，**无需额外开发**，按以下三步启用某平台某会话：
+#   1) 账号以 mode=official 注册进编排器（orch.send 才发得出）；
+#   2) 该会话在统一收件箱设「🚀 全自动」(automation_mode=auto_ai)；
+#   3) 入站即由统一收件箱 autosend（与 Telegram 同一条：人设+语言跟随+风控+拟人延迟）发出，
+#      官方 webhook 自答会自动「让位」给它，不会双发（见 official_inbound.inbox_will_autosend）。
+# 语音发送（TTS）：
+#   - WhatsApp Cloud / Messenger：上传字节即可，**无需公网 URL**（开箱即用）；
+#   - LINE / Instagram：平台要求公网 https URL 拉取，需配下面的 public_base_url；
+#   - Zalo：OA API 暂不支持语音消息出站。
+official_media:
+  # 官方通道发媒体/语音时，把 /static 相对路径拼成公网绝对 https URL 的前缀。
+  # LINE 音频(originalContentUrl)与 Instagram 附件**必须**公网可达；留空则这两端语音回 no_public_url。
+  # 例：通过反代/隧道把本服务暴露为 https://bot.example.com 后填该值。
+  public_base_url: ""
 
 # 面向终端客户的网页聊天 Widget（web 渠道，公网入口；默认关）
 # 开启后：客户官网嵌入 <script src="https://你的域名/chat/embed.js"></script> 即出现聊天气泡；
@@ -1404,8 +1422,42 @@ inbox:
                               # review:   low→L1, medium→L3, high→L4（无 L2 自动发）
                               # auto_ai:  low→L2, medium→L3, high→L4（L2 由 AutosendWorker 自动发）
     skip_platforms: []        # 跳过指定平台不生成草稿，如: [line, messenger]
+    persona_enrich: true      # ⭐ true（默认）= 自动草稿正文走「人设产线」（与手动「生成草稿」同源：
+                              #   SkillManager 意图→策略→KB→人设 LLM + 会话历史 + 客户语言），
+                              #   先停泊(enriching)再补全翻 pending；生成正文二次风控只升不降。
+                              #   false = 回落规则模板（干瘪、无人设、无上下文，仅兜底场景用）。
     cleanup_age_days: 7       # 已处理草稿（approved/rejected/cancelled）超龄删除天数（0=禁用）
     cleanup_enabled: true     # false = 禁用自动清理（AutosendWorker 每日执行一次）
+    # 注：会话档位优先——AutoDraft 实际用每会话 automation_mode（收件箱「🚀全自动」开关），
+    #     未显式设置的会话回落上面的全局 automation_mode；manual 档跳过不生成草稿。
+
+  # L2 草稿自动发送 worker（全自动回复的「发送」环节）。
+  l2_autosend:
+    enabled: true             # false = 不启动 worker（L2 草稿不会被自动处置）
+    deliver: false            # ⚠ 关键开关：true 才真正把 L2 草稿发到客户平台；
+                              #   false（默认）仅在 DB 标记 approved + 写 autosend 审计，不发客户。
+                              #   双重 opt-in：deliver=true 且会话档位=全自动(auto_ai) 才真自动回。
+    min_interval_sec: 60      # 有活动时最短轮询间隔
+    max_interval_sec: 600     # 静默时最长兜底间隔（指数扩张到此）
+    startup_delay_sec: 60     # 首次启动延迟（默认=min_interval）。可被新 L2 草稿事件提前唤醒，
+                              # 故全自动首条回复实际≈草稿落库瞬间；可调小（如 5）让冷启动更跟手。
+    circuit_threshold: 5      # 连续 resolve 错误次数触发熔断
+    cooldown_sec: 300         # 熔断冷却时间
+    deliver_delay:            # Phase 4：投递前拟人打字延迟（降低秒回露馅/反封号）
+      min_sec: 0              # 默认 0=不延迟（向后兼容）；拟人建议如 min 3 / max 12
+      max_sec: 0
+    # ── 全自动语音（把「全自动聊天+翻译+语音」凑齐成闭环）──────────────
+    # 开后：auto_ai 会话的 L2 回复在投递时先按策略转 TTS 语音发出（合成/投递失败自动回落文本）。
+    # 一处生效全平台：Telegram / WhatsApp / Messenger / LINE / Instagram（经 orch.send_media）。
+    # 声音来源 = 账号人设 voice_profile（见 ai.persona_voice / telegram.voice_reply）。
+    # LINE/Instagram 走 URL 式媒体，需先配 official_media.public_base_url；WhatsApp/Messenger 直传字节。
+    voice:
+      enabled: false          # 默认关 → 全自动仍纯文本（零行为变更）；true 才尝试语音
+      trigger: when_peer_voice # never | always | when_peer_voice（默认）：
+                              #   when_peer_voice = 仅当客户上一条入站是语音时才回语音（最拟人最克制）
+                              #   always = 每条全自动回复都尝试转语音
+      min_chars: 1            # 文本长度护栏：短于此不发语音
+      max_chars: 200          # 长于此回落文本（长文本念语音体验差/合成慢）
 
 # ── Phase C：意图分析 LLM 升级 ────────────────────────────────────
 # 规则版上叠 LLM：规则兜底、LLM 提升、风险只升不降；故障自动回落规则。

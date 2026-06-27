@@ -167,6 +167,22 @@ def _enrich_chat_list(request: Request, chats: List[Dict[str, Any]], *, config_m
         logger.debug("会话列表 tags 加载失败（已忽略）", exc_info=True)
 
     try:
+        # B-2 风控可视：批量标记今日命中风控转人工(blocked)的会话，供列表高亮，
+        # 与全自动安全条形成闭环（看到拦截数 → 列表一眼定位被拦会话）。单次 IN 查询。
+        ibx3 = _inbox_store(request)
+        if ibx3 is not None and chats and hasattr(ibx3, "conversations_blocked_counts"):
+            from datetime import datetime as _dt
+            _now = _dt.now()
+            _since = _dt(_now.year, _now.month, _now.day).timestamp()
+            cids3 = [str(c.get("conversation_id") or "") for c in chats if c.get("conversation_id")]
+            blocked_map = ibx3.conversations_blocked_counts(cids3, since_ts=_since)
+            for c in chats:
+                n = blocked_map.get(str(c.get("conversation_id") or ""), 0)
+                c["risk_blocked"] = int(n)
+    except Exception:
+        logger.debug("会话列表风控拦截标记失败（已忽略）", exc_info=True)
+
+    try:
         from src.workspace.assignment import AssignmentService
         asvc = AssignmentService.from_config(
             (config_manager.config if config_manager is not None else {}) or {}

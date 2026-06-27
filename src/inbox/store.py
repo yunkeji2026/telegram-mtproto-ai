@@ -532,6 +532,16 @@ _MIGRATIONS = [
     "ALTER TABLE ops_incidents ADD COLUMN kind TEXT NOT NULL DEFAULT 'health'",
     # F+：会话级首选翻译引擎（坐席多线路对照择优后持久化，跨刷新/重启生效）
     "ALTER TABLE conversations ADD COLUMN pref_engine TEXT NOT NULL DEFAULT ''",
+    # P3（译文默认语言运营化）：通用 KV 配置表。供「默认译文显示语言」按
+    # 全局/平台/账号维度持久化（key 形如 inbox.default_lang[.platform.<p>][.account.<p>.<a>]），
+    # 换机/换坐席不丢，区别于 conversations.pref_engine（会话级）。值空＝未配置。
+    """CREATE TABLE IF NOT EXISTS app_settings (
+         skey       TEXT PRIMARY KEY,
+         sval       TEXT NOT NULL DEFAULT '',
+         updated_at REAL NOT NULL DEFAULT 0
+       )""",
+    # P4-A：app_settings 审计列——记录最后修改人（运营级配置可追责）。
+    "ALTER TABLE app_settings ADD COLUMN updated_by TEXT NOT NULL DEFAULT ''",
 ]
 
 
@@ -1644,6 +1654,63 @@ class InboxStore:
             self._conn.commit()
         return int(cur.rowcount or 0) > 0
 
+    def finalize_draft_enrichment(
+        self,
+        draft_id: str,
+        *,
+        draft_text: str,
+        autopilot_level: str = "",
+        risk_level: str = "",
+        risk_reasons: Optional[List[str]] = None,
+        draft_lang: str = "",
+        status: str = "pending",
+    ) -> bool:
+        """Phase 2：人设补全收尾——把停泊态（status='enriching'）草稿翻成可处置态。
+
+        把异步人设产线生成的正文写回 ``draft_text``（``upsert_draft`` 的 ON CONFLICT
+        刻意不更新 draft_text，故需本专用方法），并按「生成结果二次风控」可能升级的
+        ``autopilot_level``/``risk_level`` 一并落库，最后置 ``status``（默认 pending）。
+
+        仅在草稿仍处于 ``enriching`` 时更新（幂等 + 防与人工处置竞态）。置为 L2 + pending
+        后**锁外**补发 L2 回调，唤醒 AutosendWorker 用「人设正文」投递（而非占位模板）。
+        返回是否真的更新了记录。
+        """
+        did = str(draft_id or "").strip()
+        if not did:
+            return False
+        now = self._now()
+        sets = ["draft_text=?", "status=?", "updated_at=?"]
+        params: List[Any] = [str(draft_text or ""), str(status or "pending"), now]
+        if autopilot_level:
+            sets.append("autopilot_level=?")
+            params.append(str(autopilot_level))
+        if risk_level:
+            sets.append("risk_level=?")
+            params.append(str(risk_level))
+        if risk_reasons is not None:
+            sets.append("risk_reasons_json=?")
+            params.append(json.dumps(list(risk_reasons), ensure_ascii=False))
+        if draft_lang:
+            sets.append("draft_lang=?")
+            params.append(str(draft_lang))
+        params.append(did)
+        with self._lock:
+            cur = self._conn.execute(
+                f"UPDATE reply_drafts SET {', '.join(sets)} "
+                "WHERE draft_id=? AND status='enriching'",
+                tuple(params),
+            )
+            self._conn.commit()
+        updated = int(cur.rowcount or 0) > 0
+        # 翻成 L2 + pending 后补发 L2 回调（锁外），让 autosend 用人设正文投递
+        if updated and str(autopilot_level or "") == "L2" and str(status) == "pending":
+            for _cb in self._l2_callbacks:
+                try:
+                    _cb()
+                except Exception:
+                    pass
+        return updated
+
     def get_draft(self, draft_id: str) -> Optional[Dict[str, Any]]:
         with self._lock:
             row = self._conn.execute(
@@ -1790,10 +1857,11 @@ class InboxStore:
         *,
         draft_id: str = "",
         agent_id: str = "",
+        conversation_id: str = "",
         since_ts: float = 0.0,
         limit: int = 200,
     ) -> List[Dict[str, Any]]:
-        """查审计日志（可按 draft_id / agent_id / 时间过滤）。"""
+        """查审计日志（可按 draft_id / agent_id / conversation_id / 时间过滤）。"""
         clauses: List[str] = ["ts>=?"]
         params: List[Any] = [float(since_ts)]
         if draft_id:
@@ -1802,6 +1870,9 @@ class InboxStore:
         if agent_id:
             clauses.append("agent_id=?")
             params.append(str(agent_id))
+        if conversation_id:
+            clauses.append("conversation_id=?")
+            params.append(str(conversation_id))
         sql = (
             "SELECT * FROM draft_audit_log WHERE "
             + " AND ".join(clauses)
@@ -1811,6 +1882,62 @@ class InboxStore:
         with self._lock:
             rows = self._conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
+
+    def get_conversation_automation_stats(
+        self,
+        conversation_id: str,
+        *,
+        since_ts: float = 0.0,
+    ) -> Dict[str, Any]:
+        """按会话聚合 draft_audit_log（今日自动发 / 拦截等），供全自动安全条展示。"""
+        cid = str(conversation_id or "")
+        if not cid:
+            return {"autosend": 0, "blocked": 0, "approved": 0, "failed": 0, "total": 0}
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT "
+                "SUM(CASE WHEN action='autosend' THEN 1 ELSE 0 END) AS autosend, "
+                "SUM(CASE WHEN action='blocked' THEN 1 ELSE 0 END) AS blocked, "
+                "SUM(CASE WHEN action IN ('approved','edit_send') THEN 1 ELSE 0 END) AS approved, "
+                "SUM(CASE WHEN action='autosend_failed' THEN 1 ELSE 0 END) AS failed, "
+                "COUNT(*) AS total "
+                "FROM draft_audit_log WHERE conversation_id=? AND ts>=?",
+                (cid, float(since_ts)),
+            ).fetchone()
+        if not row:
+            return {"autosend": 0, "blocked": 0, "approved": 0, "failed": 0, "total": 0}
+        return {
+            "autosend": int(row["autosend"] or 0),
+            "blocked": int(row["blocked"] or 0),
+            "approved": int(row["approved"] or 0),
+            "failed": int(row["failed"] or 0),
+            "total": int(row["total"] or 0),
+        }
+
+    def conversations_blocked_counts(
+        self,
+        conversation_ids: List[str],
+        *,
+        since_ts: float = 0.0,
+    ) -> Dict[str, int]:
+        """批量查一组会话今日「风控拦截(blocked)」次数（单次 IN 查询，供收件箱列表高亮）。
+
+        命中风控转人工的会话 = draft_audit_log.action='blocked'。返回 {cid: count}，
+        只含 count>0 的会话；空入参或全 0 返回空 dict。
+        """
+        cids = [str(c) for c in (conversation_ids or []) if c]
+        if not cids:
+            return {}
+        placeholders = ",".join("?" for _ in cids)
+        sql = (
+            "SELECT conversation_id, COUNT(*) AS n FROM draft_audit_log "
+            f"WHERE action='blocked' AND ts>=? AND conversation_id IN ({placeholders}) "
+            "GROUP BY conversation_id"
+        )
+        params: List[Any] = [float(since_ts), *cids]
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return {str(r["conversation_id"]): int(r["n"] or 0) for r in rows if int(r["n"] or 0) > 0}
 
     # ── Phase A / C1：坐席绩效聚合 ───────────────────────────
 
@@ -4014,6 +4141,73 @@ class InboxStore:
             )
             self._conn.commit()
             return cur.rowcount > 0
+
+    def get_app_setting(self, key: str, default: str = "") -> str:
+        """P3：读通用 KV 配置（app_settings）。键不存在/空 → 返回 default。"""
+        k = str(key or "").strip()
+        if not k:
+            return default
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT sval FROM app_settings WHERE skey = ?", (k,)
+            ).fetchone()
+        if row is None:
+            return default
+        val = row[0]
+        return str(val) if val is not None else default
+
+    def set_app_setting(self, key: str, value: str, updated_by: str = "") -> bool:
+        """P3：写通用 KV 配置；``value`` 为空串 → 删除该键（视为「清除/未配置」）。
+
+        P4-A：``updated_by`` 记录最后修改人（运营级配置可追责，best-effort）。
+        """
+        k = str(key or "").strip()
+        if not k:
+            return False
+        v = str(value or "").strip()
+        by = str(updated_by or "").strip()
+        now = self._now()
+        with self._lock:
+            if not v:
+                self._conn.execute("DELETE FROM app_settings WHERE skey = ?", (k,))
+            else:
+                self._conn.execute(
+                    """INSERT INTO app_settings (skey, sval, updated_at, updated_by)
+                       VALUES (?, ?, ?, ?)
+                       ON CONFLICT(skey) DO UPDATE SET
+                            sval = excluded.sval, updated_at = excluded.updated_at,
+                            updated_by = excluded.updated_by""",
+                    (k, v, now, by),
+                )
+            self._conn.commit()
+        return True
+
+    def list_app_settings(self, prefix: str = "") -> List[Dict[str, Any]]:
+        """P4-A：列出（前缀匹配的）通用 KV 配置，按 key 升序。
+
+        返回 ``[{key, value, updated_by, updated_at}]``（仅含已存在的非空配置）。
+        ``prefix=""`` 列全部。
+        """
+        pfx = str(prefix or "")
+        with self._lock:
+            if pfx:
+                rows = self._conn.execute(
+                    "SELECT skey, sval, updated_by, updated_at FROM app_settings "
+                    "WHERE skey LIKE ? ESCAPE '\\' ORDER BY skey",
+                    (pfx.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%",),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT skey, sval, updated_by, updated_at FROM app_settings ORDER BY skey"
+                ).fetchall()
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            out.append({
+                "key": r[0], "value": r[1],
+                "updated_by": r[2] if len(r) > 2 else "",
+                "updated_at": r[3] if len(r) > 3 else 0,
+            })
+        return out
 
     def set_conv_archived(self, conversation_id: str, archived: bool) -> bool:
         """T1：标记/取消归档；如 conversation_meta 行不存在则插入。"""

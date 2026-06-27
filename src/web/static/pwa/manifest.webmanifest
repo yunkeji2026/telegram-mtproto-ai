@@ -1,0 +1,19 @@
+{
+  "name": "AI 客服工作台",
+  "short_name": "客服工作台",
+  "description": "统一收件箱 · 多平台 AI 客服坐席工作台",
+  "id": "/workspace",
+  "start_url": "/workspace?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
+  "orientation": "any",
+  "background_color": "#1b2038",
+  "theme_color": "#1b2038",
+  "lang": "zh-CN",
+  "categories": ["business", "productivity"],
+  "icons": [
+    { "src": "/static/pwa/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/static/pwa/icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

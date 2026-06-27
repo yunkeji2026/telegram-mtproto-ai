@@ -774,9 +774,174 @@ class AIChatAssistant:
                                         "cleanup_enabled": bool(_ad_cleanup.get("cleanup_enabled", True)),
                                         **_as_cfg,
                                     }
+                                    # 全自动真实投递：默认 false（仅 DB 标记+审计，不发客户）。
+                                    # 置 inbox.l2_autosend.deliver=true 才真正把 L2 草稿发到平台，
+                                    # 且仅对会话档位=全自动(auto_ai) 的低风险草稿生效（双重 opt-in）。
+                                    _deliver = bool(_as_cfg.get("deliver", False))
+                                    _send_cb = None
+                                    if _deliver:
+                                        from types import SimpleNamespace as _SNS
+                                        from src.inbox.channel_adapters import (
+                                            send_via_adapters as _send_via,
+                                            default_inbox_adapters as _dia,
+                                        )
+                                        _send_adapters = _dia()
+                                        _send_shim = _SNS(app=web_app)
+                                        _assistant_ref = self
+
+                                        async def _try_autosend_voice(
+                                            platform, account_id, chat_key, text
+                                        ) -> bool:
+                                            """全自动语音（gated, 默认关）：按策略把本条回复转 TTS
+                                            语音经 orch.send_media 发出。返回 True=已作为语音发出；
+                                            False=未发（未启用/不满足策略/合成或投递失败）→ 调用方回落文本。
+                                            一处生效全平台（telegram/whatsapp/messenger/line/ig）。"""
+                                            _cfg = _assistant_ref.config.config or {}
+                                            from src.inbox.voice_autosend import (
+                                                resolve_voice_autosend_cfg,
+                                                should_send_voice, stage_voice_file,
+                                                record_voice_sent, record_voice_fallback,
+                                            )
+                                            _vb = resolve_voice_autosend_cfg(_cfg)
+                                            if not _vb.get("enabled"):
+                                                return False
+                                            # 反双发：仅对**编排器管理**的账号发语音。原生 standalone
+                                            # Telegram（camille_test）不归编排器 → owns_media=False →
+                                            # 这里早退，让原生 voice_reply 独占（无双发）；编排器协议/
+                                            # 官方号用裸 client + reply-hook，无原生语音 → System Z 接手。
+                                            from src.integrations.account_orchestrator import (
+                                                get_orchestrator as _go,
+                                            )
+                                            _orch = _go(_cfg)
+                                            if not _orch.owns_media(platform, account_id):
+                                                return False
+                                            # trigger=when_peer_voice：查客户上一条入站是否语音
+                                            _peer_voice = False
+                                            try:
+                                                from src.inbox.normalizer import conv_id as _cidf
+                                                _st = getattr(_assistant_ref, "inbox_store", None)
+                                                if _st is not None:
+                                                    _cid = _cidf(platform, account_id, chat_key)
+                                                    for _m in reversed(
+                                                        _st.list_recent_messages(_cid, limit=6) or []
+                                                    ):
+                                                        if str(_m.get("direction") or "in") == "in":
+                                                            _peer_voice = str(
+                                                                _m.get("media_type") or ""
+                                                            ).lower() in ("voice", "audio")
+                                                            break
+                                            except Exception:
+                                                _peer_voice = False
+                                            if not should_send_voice(
+                                                _vb, text, peer_sent_voice=_peer_voice
+                                            ):
+                                                return False
+                                            # 账号级人设（声音克隆 voice_profile 来源）
+                                            _pid = ""
+                                            try:
+                                                from src.integrations.account_registry import (
+                                                    get_account_registry as _gar,
+                                                )
+                                                _row = _gar().get(platform, account_id) or {}
+                                                _pid = str((_row.get("meta") or {}).get("persona_id") or "")
+                                            except Exception:
+                                                _pid = ""
+                                            # 至此策略已判定「该发语音」：合成/投递的成败计入指标。
+                                            _staged = await stage_voice_file(
+                                                _cfg, platform, account_id, _pid, text)
+                                            if not _staged:
+                                                record_voice_fallback("synth_failed")
+                                                _assistant_ref.logger.info(
+                                                    "[autosend voice] 合成失败回落文本 platform=%s acct=%s",
+                                                    platform, account_id)
+                                                return False
+                                            _local, _url = _staged
+
+                                            async def _vcoro():
+                                                # caption="" → 客户收纯语音；inbox_text=text →
+                                                # 坐席台会话里显示「自动语音念了什么」(转写)。
+                                                return await _orch.send_media(
+                                                    platform, account_id, chat_key,
+                                                    media_path=_local, media_url=_url,
+                                                    media_type="voice", caption="",
+                                                    inbox_text=text)
+
+                                            _wl = getattr(_assistant_ref, "_web_loop", None)
+                                            if _wl is not None and _wl.is_running():
+                                                _vf = asyncio.run_coroutine_threadsafe(_vcoro(), _wl)
+                                                _vres = await asyncio.wrap_future(_vf)
+                                            else:
+                                                _vres = await _vcoro()
+                                            _ok = bool(
+                                                isinstance(_vres, dict) and _vres.get("delivered"))
+                                            if _ok:
+                                                _dur = 0
+                                                try:
+                                                    from src.client.voice_sender import (
+                                                        probe_audio_duration_ms as _probe,
+                                                    )
+                                                    _dur = int(_probe(_local) or 0)
+                                                except Exception:
+                                                    _dur = 0
+                                                record_voice_sent(_dur)
+                                                _assistant_ref.logger.info(
+                                                    "[autosend voice] 已发语音 platform=%s acct=%s dur=%sms",
+                                                    platform, account_id, _dur)
+                                            else:
+                                                record_voice_fallback("deliver_failed")
+                                                _assistant_ref.logger.info(
+                                                    "[autosend voice] 投递失败回落文本 platform=%s acct=%s",
+                                                    platform, account_id)
+                                            return _ok
+
+                                        async def _autosend_deliver(
+                                            platform, account_id, chat_key, text
+                                        ):
+                                            # 全自动语音优先（gated）：成功即作为语音发出；
+                                            # 未启用/不满足/失败 → 回落到下面的文本投递（零行为变更）。
+                                            try:
+                                                if await _try_autosend_voice(
+                                                    platform, account_id, chat_key, text
+                                                ):
+                                                    return {"ok": True, "delivered_as": "voice"}
+                                            except Exception:
+                                                _assistant_ref.logger.debug(
+                                                    "[autosend voice] 失败，回落文本", exc_info=True)
+                                            # AutosendWorker 跑在主 loop；而协议号(telegram/whatsapp
+                                            # pyrogram/Baileys)的 worker 由编排器经 FastAPI startup
+                                            # 钩子启动，活在「web 线程的 web_loop」上。直接在主 loop
+                                            # await orch.send → client.send_message 会触发
+                                            # "Future attached to a different loop"。故：编排器拥有
+                                            # 该账号时，把整次投递调度到 web_loop 执行再跨线程取回。
+                                            def _make_coro():
+                                                return _send_via(
+                                                    _send_shim, platform, account_id,
+                                                    chat_key, text, _send_adapters,
+                                                )
+                                            _wl = getattr(_assistant_ref, "_web_loop", None)
+                                            _orch_owns = False
+                                            try:
+                                                from src.integrations.account_orchestrator import (
+                                                    get_orchestrator as _get_orch,
+                                                )
+                                                _orch_owns = _get_orch(
+                                                    _assistant_ref.config.config or {}
+                                                ).owns(platform, account_id)
+                                            except Exception:
+                                                _orch_owns = False
+                                            if (_orch_owns and _wl is not None
+                                                    and _wl.is_running()):
+                                                _fut = asyncio.run_coroutine_threadsafe(
+                                                    _make_coro(), _wl
+                                                )
+                                                return await asyncio.wrap_future(_fut)
+                                            return await _make_coro()
+
+                                        _send_cb = _autosend_deliver
                                     _as_worker = AutosendWorker(
                                         draft_service=draft_svc,
                                         config=_merged_as_cfg,
+                                        send_callback=_send_cb,
                                     )
                                     web_app.state.autosend_worker = _as_worker
                                     # C3：注册 L2 事件驱动钩子，新草稿落库时立即唤醒
@@ -785,9 +950,10 @@ class AIChatAssistant:
                                     )
                                     asyncio.ensure_future(_as_worker.run())
                                     self.logger.info(
-                                        "AutosendWorker 已启动（min=%ss max=%ss）",
+                                        "AutosendWorker 已启动（min=%ss max=%ss deliver=%s）",
                                         _as_cfg.get("min_interval_sec", 60),
                                         _as_cfg.get("max_interval_sec", 600),
+                                        _deliver,
                                     )
                             except Exception:
                                 self.logger.debug("AutosendWorker 启动跳过", exc_info=True)
@@ -921,20 +1087,124 @@ class AIChatAssistant:
                                 _ad_mode = str(_ad_cfg.get("automation_mode", "auto_ai"))
                                 _ad_min_len = int(_ad_cfg.get("min_text_len", 3))
                                 _ad_skip = set(_ad_cfg.get("skip_platforms", []) or [])
+                                # Phase 2：自动草稿正文走人设产线（与手动「生成草稿」同源）。
+                                # 默认开；关闭则回落旧规则模板（向后兼容）。
+                                _ad_enrich = bool(_ad_cfg.get("persona_enrich", True))
+                                _ad_store = self.inbox_store
+                                _ad_app = web_app
+                                try:
+                                    _ad_loop = asyncio.get_running_loop()
+                                except RuntimeError:
+                                    _ad_loop = asyncio.get_event_loop()
+
+                                async def _enrich_auto_draft(
+                                    conv: dict, text: str, draft_id: str, mode: str
+                                ) -> None:
+                                    """异步：拉历史 → 人设产线生成正文 → enrich_draft 收尾。
+
+                                    失败任意环节都兜底 release（保留规则模板占位，降级旧行为），
+                                    保证停泊草稿不会卡死在 enriching。"""
+                                    try:
+                                        from src.inbox.persona_reply import (
+                                            generate_persona_reply, normalize_history,
+                                        )
+                                        cid = str(conv.get("conversation_id") or "")
+                                        platform = str(conv.get("platform") or "")
+                                        chat_key = str(conv.get("chat_key") or "")
+                                        account_id = str(conv.get("account_id") or "default")
+                                        msgs = []
+                                        try:
+                                            for r in _ad_store.list_recent_messages(cid, limit=30):
+                                                msgs.append({
+                                                    "direction": r.get("direction") or "in",
+                                                    "text": r.get("text") or "",
+                                                })
+                                        except Exception:
+                                            msgs = []
+                                        history, last = normalize_history(msgs)
+                                        if not last:
+                                            last = str(text or "")
+                                        # 账号级人设（registry meta.persona_id），best-effort
+                                        _persona_id = ""
+                                        try:
+                                            from src.integrations.account_registry import (
+                                                get_account_registry,
+                                            )
+                                            _row = get_account_registry().get(platform, account_id) or {}
+                                            _persona_id = str((_row.get("meta") or {}).get("persona_id") or "")
+                                        except Exception:
+                                            _persona_id = ""
+                                        # 语言决策收敛到 generate_persona_reply（单一事实源，
+                                        # 含短消息防误切）；这里不再各自重复检测，直接采信其
+                                        # 返回的 reply_lang 落库 draft_lang。
+                                        out = await generate_persona_reply(
+                                            app=_ad_app, platform=platform, chat_key=chat_key,
+                                            last_inbound=last, history=history,
+                                            persona_id=_persona_id,
+                                        )
+                                        if out.get("ok") and out.get("reply"):
+                                            done = draft_svc.enrich_draft(
+                                                draft_id, reply_text=out["reply"],
+                                                reply_lang=str(out.get("reply_lang") or "zh"),
+                                                automation_mode=mode,
+                                            )
+                                            if done:
+                                                return
+                                        # 生成失败/为空 → 兜底放行（规则模板占位）
+                                        draft_svc.release_enriching_draft(draft_id)
+                                    except Exception:
+                                        self.logger.debug(
+                                            "[AutoDraft] 人设补全失败，兜底放行 draft_id=%s",
+                                            draft_id, exc_info=True)
+                                        try:
+                                            draft_svc.release_enriching_draft(draft_id)
+                                        except Exception:
+                                            pass
 
                                 def _auto_draft_cb(conv: dict, text: str) -> None:
                                     if conv.get("platform", "") in _ad_skip:
                                         return
                                     if len(str(text or "").strip()) < _ad_min_len:
                                         return
-                                    draft_svc.auto_generate_draft(
-                                        conv, text, automation_mode=_ad_mode
+                                    # 每会话档位优先：UI 把会话设为 全自动(auto_ai) 才走自动；
+                                    # manual 跳过不生成；未显式设置回落全局默认 _ad_mode。
+                                    # 这让收件箱「🚀 全自动」开关真正决定该会话是否自动回复，
+                                    # 不再因全局配置对所有会话一刀切。
+                                    mode = _ad_mode
+                                    try:
+                                        cid = str(conv.get("conversation_id") or "")
+                                        if cid and _ad_store is not None:
+                                            cm = _ad_store.get_automation_mode(cid)
+                                            if cm:
+                                                mode = cm
+                                    except Exception:
+                                        pass
+                                    if mode == "manual":
+                                        return
+                                    draft_id = draft_svc.auto_generate_draft(
+                                        conv, text, automation_mode=mode, enrich=_ad_enrich
                                     )
+                                    # enrich：草稿已停泊（enriching），异步走人设产线补全正文
+                                    if draft_id and _ad_enrich:
+                                        try:
+                                            asyncio.run_coroutine_threadsafe(
+                                                _enrich_auto_draft(conv, text, draft_id, mode),
+                                                _ad_loop,
+                                            )
+                                        except Exception:
+                                            # 调度失败 → 立即兜底放行，避免卡 enriching
+                                            self.logger.debug(
+                                                "[AutoDraft] 补全调度失败，兜底放行", exc_info=True)
+                                            try:
+                                                draft_svc.release_enriching_draft(draft_id)
+                                            except Exception:
+                                                pass
 
                                 self.inbox_store.register_new_inbound_cb(_auto_draft_cb)
                                 self.logger.info(
-                                    "AutoDraft 已启用（mode=%s min_len=%s skip=%s）",
-                                    _ad_mode, _ad_min_len, _ad_skip,
+                                    "AutoDraft 已启用（per-conv 优先, 全局默认 mode=%s min_len=%s "
+                                    "persona_enrich=%s skip=%s）",
+                                    _ad_mode, _ad_min_len, _ad_enrich, _ad_skip,
                                 )
                             else:
                                 self.logger.info("AutoDraft 已禁用（auto_draft.enabled=false）")

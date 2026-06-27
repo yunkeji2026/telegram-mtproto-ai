@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="AI ¢å\ð">
+  <rect width="512" height="512" rx="112" fill="#1b2038"/>
+  <path d="M128 144h256a40 40 0 0 1 40 40v112a40 40 0 0 1-40 40H248l-72 60v-60h-48a40 40 0 0 1-40-40V184a40 40 0 0 1 40-40z" fill="#ffffff"/>
+  <circle cx="208" cy="240" r="18" fill="#1b2038"/>
+  <circle cx="272" cy="240" r="18" fill="#1b2038"/>
+  <circle cx="336" cy="240" r="18" fill="#1b2038"/>
+  <path d="M384 92l15 39 39 15-39 15-15 39-15-39-39-15 39-15z" fill="#3b82f6"/>
+</svg>

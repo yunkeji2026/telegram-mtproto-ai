@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>离线 · AI 客服工作台</title>
+<style>
+  html,body{height:100%;margin:0;font-family:'Inter','PingFang SC','Microsoft YaHei',system-ui,sans-serif;
+    background:#1b2038;color:#e6edf3;display:flex;align-items:center;justify-content:center;}
+  .box{text-align:center;padding:32px;max-width:360px;}
+  .ic{width:72px;height:72px;margin:0 auto 18px;display:block;}
+  h1{font-size:18px;margin:0 0 8px;}
+  p{font-size:13px;color:#aeb8d4;line-height:1.7;margin:0 0 20px;}
+  button{background:#3b82f6;color:#fff;border:0;border-radius:9px;padding:10px 22px;font-size:14px;cursor:pointer;}
+  button:hover{background:#2563eb;}
+</style>
+</head>
+<body>
+  <div class="box">
+    <img class="ic" src="/static/pwa/icon.svg" alt="">
+    <h1>暂时无法连接</h1>
+    <p>当前网络不可用或后台服务未响应。请检查网络后重试 —— 已收到的会话在恢复连接后会自动同步。</p>
+    <button onclick="location.reload()">重新连接</button>
+  </div>
+</body>
+</html>

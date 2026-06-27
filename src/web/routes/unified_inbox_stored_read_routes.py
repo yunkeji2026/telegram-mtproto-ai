@@ -19,6 +19,7 @@ _get_telegram_client / _message_obj），不在本刀范围，随核心 live 集
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 from fastapi import Depends, HTTPException, Request
 
@@ -75,7 +76,12 @@ def register_stored_read_routes(app, *, api_auth) -> None:
         if conv is None:
             return {"ok": True, "found": False, "source": "store",
                     "conversation_id": cid, "messages": [], "count": 0}
-        messages = store.list_messages(cid, limit=limit)
+        # 取**最近** limit 条（ts 升序），而非最旧 limit 条：
+        # AI 草稿/时间线都要看「当前正在聊的内容」，用最旧会导致长会话上下文错位。
+        if hasattr(store, "list_recent_messages"):
+            messages = store.list_recent_messages(cid, limit=limit)
+        else:
+            messages = store.list_messages(cid, limit=limit)
         analysis = None
         if hasattr(store, "latest_analysis"):
             try:
@@ -115,3 +121,31 @@ def register_stored_read_routes(app, *, api_auth) -> None:
         cid = _conv_id(platform, account_id, chat_key)
         _write_automation_mode(request, cid, mode)
         return {"ok": True, "conversation_id": cid, "mode": mode}
+
+    @app.get("/api/unified-inbox/automation-stats")
+    async def api_unified_inbox_automation_stats(
+        request: Request,
+        platform: str,
+        account_id: str = "default",
+        chat_key: str = "",
+        limit: int = 30,
+    ):
+        """全自动安全条：本会话今日自动发/拦截统计 + 近期审计记录（draft_audit_log）。"""
+        api_auth(request)
+        store = _inbox_store(request)
+        if store is None:
+            raise HTTPException(503, "统一收件箱持久层未启用")
+        cid = _conv_id(str(platform or "").lower(), str(account_id or "default"), str(chat_key or ""))
+        now = datetime.now()
+        since_ts = datetime(now.year, now.month, now.day).timestamp()
+        stats = store.get_conversation_automation_stats(cid, since_ts=since_ts)
+        recent = store.list_draft_audit(
+            conversation_id=cid, since_ts=since_ts, limit=max(1, min(100, int(limit or 30))),
+        )
+        return {
+            "ok": True,
+            "conversation_id": cid,
+            "since_ts": since_ts,
+            "stats": stats,
+            "recent": recent,
+        }

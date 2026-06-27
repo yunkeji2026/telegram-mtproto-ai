@@ -13,6 +13,8 @@ from starlette.routing import Route
 # 基线端点（path<TAB>methods，methods 为逗号分隔且不含 HEAD/OPTIONS）。
 _BASELINE = """
 /	GET
+/manifest.webmanifest	GET
+/sw.js	GET
 /admin/ops	GET
 /admin/tts-dashboard	GET
 /ai-studio	GET
@@ -450,6 +452,7 @@ _BASELINE = """
 /api/desktop/selector-profiles	GET
 /api/desktop/inject-health	POST
 /api/desktop/inject-health	GET
+/api/desktop/fingerprint	GET
 /api/telegram/log-tail	GET
 /api/telegram/recent-contacts	GET
 /api/telegram/settings	GET
@@ -466,6 +469,7 @@ _BASELINE = """
 /api/unified-inbox/analyze	POST
 /api/unified-inbox/automation	GET
 /api/unified-inbox/automation	POST
+/api/unified-inbox/automation-stats	GET
 /api/unified-inbox/chats	GET
 /api/unified-inbox/history	GET
 /api/unified-inbox/kb-search	GET
@@ -481,6 +485,12 @@ _BASELINE = """
 /api/unified-inbox/thread	GET
 /api/unified-inbox/conv-engine	GET
 /api/unified-inbox/conv-engine	POST
+/api/unified-inbox/default-lang	GET
+/api/unified-inbox/default-lang	POST
+/api/unified-inbox/default-lang/all	GET
+/api/unified-inbox/default-reply-lang	GET
+/api/unified-inbox/default-reply-lang	POST
+/api/unified-inbox/default-reply-lang/all	GET
 /api/unified-inbox/translate	POST
 /api/unified-inbox/translate-compare	POST
 /api/unified-inbox/translate-document	POST
