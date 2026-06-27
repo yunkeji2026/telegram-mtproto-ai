@@ -39,19 +39,73 @@ class ConfigManager:
         self._on_reload_callbacks: list = []
     
     def _get_default_config_path(self) -> Path:
-        """获取默认配置文件路径"""
-        # 优先使用当前目录下的config/config.yaml
+        """获取默认配置文件路径。
+
+        解析优先级：
+        1. ``AITR_CONFIG_PATH`` 环境变量（显式指向 config.yaml）——打包/自包含部署用，
+           桌面端把它指向用户**可写目录**，避免写进只读的安装包。
+        2. ``AITR_DATA_DIR`` 环境变量（数据根）——config = ``$AITR_DATA_DIR/config/config.yaml``。
+        3. 仓库默认 ``<repo>/config/config.yaml``（开发态，行为不变）。
+
+        命中 1/2 时若目标不存在，会从**内置 example** 自播种到该可写路径（见 ``_ensure_seeded``），
+        使首次运行即有可编辑的 config，无需 launcher 额外搬运。
+        """
+        env_path = os.environ.get("AITR_CONFIG_PATH")
+        if env_path:
+            target = Path(env_path).expanduser()
+            self._ensure_seeded(target)
+            return target
+
+        env_dir = os.environ.get("AITR_DATA_DIR")
+        if env_dir:
+            target = Path(env_dir).expanduser() / "config" / "config.yaml"
+            self._ensure_seeded(target)
+            return target
+
+        # 优先使用仓库 config/config.yaml
         current_dir = Path(__file__).parent.parent.parent
         config_file = current_dir / "config" / "config.yaml"
-        
+
         # 如果不存在，使用config.example.yaml
         if not config_file.exists():
             example_file = current_dir / "config" / "config.example.yaml"
             if example_file.exists():
                 self.logger.warning(f"配置文件 {config_file} 不存在，请复制 {example_file} 并编辑")
                 return example_file
-        
+
         return config_file
+
+    def _bundled_example_path(self) -> Optional[Path]:
+        """内置 example 配置路径（开发态=仓库 config/；打包态=冻结资源内 config/）。
+
+        PyInstaller onedir 下 ``__file__`` 落在 ``_internal/src/utils/...``，故
+        parent.parent.parent 即 ``_internal``，与 ``--add-data config/...`` 落点一致。
+        """
+        try:
+            base = Path(__file__).resolve().parent.parent.parent
+            ex = base / "config" / "config.example.yaml"
+            return ex if ex.exists() else None
+        except Exception:
+            return None
+
+    def _ensure_seeded(self, target: Path) -> None:
+        """打包/自包含部署：目标 config 不存在时，从内置 example 播种到用户可写目录。
+
+        失败永不抛（仅告警）；无内置 example 时不创建（load() 会报缺失并提示）。
+        """
+        try:
+            if target.exists():
+                return
+            target.parent.mkdir(parents=True, exist_ok=True)
+            ex = self._bundled_example_path()
+            if ex and ex.exists():
+                import shutil
+                shutil.copyfile(str(ex), str(target))
+                self.logger.warning("配置不存在，已从内置示例播种到可写目录: %s", target)
+            else:
+                self.logger.warning("配置不存在且无内置 example，可写目录仍缺 config: %s", target)
+        except Exception as exc:
+            self.logger.warning("配置播种失败（忽略）: %s", exc)
     
     async def load(self) -> bool:
         """加载配置文件"""
@@ -67,6 +121,11 @@ class ConfigManager:
             # 接入向导只写这个小文件 → 主 config.yaml 的注释/结构永不被改写，
             # 且密钥与 git 跟踪文件分离（overlay 应进 .gitignore）。
             self._merge_overlay()
+
+            # 打包/自包含部署：用 AITR_WEB_* 覆盖 web_admin.{host,port,auth_token}，
+            # 使后端「serve 的端口/令牌」与桌面壳 renderer「talk 的 base_url/token」强一致，
+            # 无需改随包 example（server 端口/令牌保持 canonical）。开发/server 态无 env→零影响。
+            self._apply_env_overrides()
 
             # 验证配置
             if not self._validate_config():
@@ -86,6 +145,43 @@ class ConfigManager:
             self.logger.error(f"加载配置文件失败: {e}")
             return False
     
+    @staticmethod
+    def _env_truthy(name: str) -> bool:
+        return str(os.environ.get(name) or "").strip().lower() in (
+            "1", "true", "yes", "on")
+
+    def _apply_env_overrides(self) -> None:
+        """以 ``AITR_WEB_*`` 环境变量覆盖 ``web_admin.{host,port,auth_token}``（仅当设置时）。
+
+        桌面/打包态由 launcher（``backend-launcher.js``）注入，保证后端 serve 与 renderer
+        调用的 host/port/token 一致；server/开发态不设这些 env，行为不变。
+
+        另：``AITR_DESKTOP_MODE`` 为真时**强制** ``web_admin.enabled=true``——统一收件箱 /
+        翻译 / D1 选择器热更新 / D4 受控外发等路由都挂在 web 后台下，桌面壳没有它即不可用，
+        故不依赖随包 example 是否显式写了 ``enabled``。
+        """
+        desktop = self._env_truthy("AITR_DESKTOP_MODE")
+        host = os.environ.get("AITR_WEB_HOST")
+        port = os.environ.get("AITR_WEB_PORT")
+        token = os.environ.get("AITR_WEB_TOKEN")
+        if not (desktop or host or port or token):
+            return
+        web = self.config.get("web_admin")
+        if not isinstance(web, dict):
+            web = {}
+            self.config["web_admin"] = web
+        if host:
+            web["host"] = host
+        if port:
+            try:
+                web["port"] = int(str(port).strip())
+            except (TypeError, ValueError):
+                self.logger.warning("AITR_WEB_PORT 非法（忽略）: %r", port)
+        if token:
+            web["auth_token"] = token
+        if desktop:
+            web["enabled"] = True
+
     def _overlay_path(self) -> Path:
         """凭证 overlay 路径：主配置同目录下的 config.local.yaml。"""
         return self.config_path.parent / "config.local.yaml"

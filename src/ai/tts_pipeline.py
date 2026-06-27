@@ -12,6 +12,7 @@ import logging
 import os
 import shlex
 import subprocess
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -19,6 +20,15 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
+
+
+# ── 不可达主机短路缓存 ───────────────────────────────────────────────────────
+# coqui_http / voice_clone 等局域网主机离线时，若每次合成都做 3s TCP 预检，会白等
+# 3s + 刷一条 WARNING。这里缓存「最近探测不可达」的 host:port，冷却期内直接秒回落，
+# 不再触网；主机恢复后（冷却到期再探一次成功）自动清缓存复用。进程级共享、线程安全。
+_TTS_UNREACHABLE_TTL_SEC = 60.0
+_tts_unreachable_lock = threading.Lock()
+_tts_unreachable_until: Dict[str, float] = {}  # "host:port" -> monotonic 解禁时刻
 
 
 # 这些错误源于配置/授权问题（非传输故障），不应被「兜底合成」掩盖——
@@ -57,10 +67,22 @@ def _assert_http_reachable(base_url: str, timeout: float = 3.0) -> None:
     if not host:
         return  # 解析不出主机名就不预检，交给后续请求自然报错
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    key = f"{host}:{port}"
+    now = time.monotonic()
+    # 冷却期内：跳过 TCP 探测，直接抛「缓存命中」错（上层据此秒回落且不刷 WARNING）。
+    with _tts_unreachable_lock:
+        until = _tts_unreachable_until.get(key, 0.0)
+    if until and now < until:
+        raise RuntimeError(
+            f"tts_host_unreachable_cached:{key}:retry_in_{int(until - now)}s")
     try:
         with socket.create_connection((host, int(port)), timeout=timeout):
+            with _tts_unreachable_lock:
+                _tts_unreachable_until.pop(key, None)  # 探测成功 → 解除短路
             return
     except OSError as exc:
+        with _tts_unreachable_lock:
+            _tts_unreachable_until[key] = now + _TTS_UNREACHABLE_TTL_SEC
         raise RuntimeError(
             f"tts_host_unreachable:{host}:{port}:{type(exc).__name__}") from exc
 
@@ -191,7 +213,10 @@ class TTSPipeline:
         fb = self.fallback_backend
         if (self.fallback_on_error and fb and fb != primary_backend
                 and not _is_non_fallback_error(err)):
-            logger.warning(
+            # 冷却期内的「缓存命中不可达」是已知稳态 → DEBUG，避免主机长时间离线时
+            # 每次语音合成都刷 WARNING；首次探测失败（刚写入缓存）仍按 WARNING 记。
+            _cached_dead = "tts_host_unreachable_cached:" in (err or "")
+            (logger.debug if _cached_dead else logger.warning)(
                 "[tts] backend '%s' failed (%s) → 回落 '%s'", primary_backend, err, fb)
             fb_fmt = "mp3" if fb == "edge_tts" else self.format
             fb_out = out.with_suffix(f".{fb_fmt}")

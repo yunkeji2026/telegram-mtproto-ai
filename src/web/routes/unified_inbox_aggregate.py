@@ -125,14 +125,22 @@ def _read_from_store_enabled(request: Request) -> bool:
     return bool((cfg.get("inbox") or {}).get("read_from_store", False))
 
 
-def _collect_chats_from_store(request: Request, limit: int = 30) -> List[Dict[str, Any]]:
+def _collect_chats_from_store(
+    request: Request,
+    limit: int = 30,
+    label_map: Optional[Dict[tuple, str]] = None,
+) -> List[Dict[str, Any]]:
     """A1 读路径：直接从 InboxStore（持久事实源）读会话列表，映射回 chat dict 形状。
 
+    ``label_map``：实时聚合派生的 {(platform, account_id): account_label} 友好名映射
+    （store 不持久 account_label，借 live 同源回填，消除「列表显示账号 id」可视回归；
+    store-only 历史账号 live 无对应项则回落 account_id——live 本也无其 label）。
     返回 None 表示 store 不可用（调用方回落实时聚合）。
     """
     store = _inbox_store(request)
     if store is None:
         return None  # type: ignore[return-value]
+    lmap = label_map or {}
     convs = store.list_conversations(limit=min(200, max(1, limit * 4)))
     out: List[Dict[str, Any]] = []
     for c in convs:
@@ -142,7 +150,11 @@ def _collect_chats_from_store(request: Request, limit: int = 30) -> List[Dict[st
             mc = store.count_messages(cid)
         except Exception:
             mc = 0
-        out.append(store_row_to_chat(c, automation_mode=mode, message_count=mc))
+        key = (str(c.get("platform") or ""), str(c.get("account_id") or "default"))
+        out.append(store_row_to_chat(
+            c, automation_mode=mode, message_count=mc,
+            account_label=lmap.get(key),
+        ))
     return out
 
 
@@ -156,7 +168,13 @@ def _chats_for_listing(request: Request, limit: int = 30) -> List[Dict[str, Any]
     """
     live = _collect_all_chats(request, limit=limit)
     if _read_from_store_enabled(request):
-        stored = _collect_chats_from_store(request, limit=limit)
+        # 借实时聚合结果派生 account_label 友好名映射，store 读路径回填以与 live 等价
+        label_map = {
+            (str(r.get("platform") or ""), str(r.get("account_id") or "default")):
+                str(r.get("account_label") or "")
+            for r in live if r.get("account_label")
+        }
+        stored = _collect_chats_from_store(request, limit=limit, label_map=label_map)
         if stored is not None:
             return stored
     return live

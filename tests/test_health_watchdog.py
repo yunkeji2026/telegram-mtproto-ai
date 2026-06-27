@@ -161,6 +161,46 @@ def test_health_alert_event_alias_and_message():
     assert "恢复" in t2
 
 
+def test_billing_reconciles_stale_incident_on_startup(monkeypatch):
+    """修复某计费异常后重启：进程内 _last_billing_sig 为空，但 DB 里仍挂着上一进程
+    的 open 计费事件。首次巡检发现无异常时应静默 resolve 掉它（不外发恢复通知）。"""
+    published = []
+    from src.integrations.shared import event_bus as eb
+
+    class _Bus:
+        def publish(self, t, d): published.append((t, d))
+    monkeypatch.setattr(eb, "get_event_bus", lambda: _Bus())
+
+    class _FakeInbox:
+        def __init__(self):
+            self.resolved_kinds = []
+
+        def ping(self):
+            return True
+
+        def get_usage_stats(self, since, until_ts=None):
+            # 1 个活跃坐席、seats=0（community）→ over_seats=0 → 无计费异常
+            return {"messages_in": 1, "messages_out": 1, "messages_total": 2,
+                    "ai_calls": 1, "ai_sent": 0, "active_agents": 1,
+                    "active_agent_ids": ["alice"], "trend": []}
+
+        def resolve_open_incidents(self, *, kind="", ts=None):
+            self.resolved_kinds.append(kind)
+            return 1  # 模拟确有一条遗留 open 事件被关闭
+
+    inbox = _FakeInbox()
+    app = types.SimpleNamespace(state=types.SimpleNamespace(inbox_store=inbox))
+    cm = _CM({"ai": {"provider": "openai", "api_key": "sk-real-123"}})
+    wd = HealthWatchdog(app=app, config_manager=cm, interval_sec=60)
+
+    wd._check_billing()
+
+    # 静默 reconcile：resolve 被调用，但没有外发 billing_alert 恢复事件
+    assert inbox.resolved_kinds == ["billing"]
+    assert all(t != "billing_alert" for t, _ in published)
+    assert wd._last_billing_sig is None
+
+
 def test_collect_health_reused_by_route():
     import inspect
     from src.web.routes import runtime_health_routes

@@ -60,6 +60,7 @@ def _conv_from_chat(chat: Dict[str, Any]) -> InboxConversation:
         last_text=str(chat.get("last_msg") or ""),
         last_ts=float(chat.get("last_ts") or 0),
         unread=int(chat.get("unread") or 0),
+        chat_type=str(chat.get("chat_type") or "private"),
     )
 
 
@@ -97,6 +98,7 @@ def _publish_inbox_message(conv: InboxConversation) -> None:
             "account_id": conv.account_id,
             "chat_key": conv.chat_key,
             "name": conv.display_name,
+            "chat_type": conv.chat_type or "private",
             "preview": (conv.last_text or "")[:80],
             "unread": int(conv.unread or 0),
             "ts": conv.last_ts,

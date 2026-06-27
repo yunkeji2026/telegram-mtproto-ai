@@ -116,6 +116,14 @@ class MetricsStore:
         self._messenger_rpa_metrics: Dict[str, int] = defaultdict(int)
         # P11.7 时间序列：(ts, name) 最近 2000 条 → 支持任意窗口聚合
         self._messenger_rpa_metrics_recent: deque = deque(maxlen=2000)
+        # ★ 统一草稿引擎（generate_inbox_draft）规则栈生效观测：累计 + 时间序列。
+        # event name 例：
+        #   generated / empty
+        #   memory_hit / emotional_active / companion_active
+        #   slow_think / retry_applied / persona_guard_intercept / crisis_override
+        # 暴露于 /api/drafts/autosend-status 的 draft_pipeline 段，让「规则是否真生效」可监控。
+        self._inbox_draft_metrics: Dict[str, int] = defaultdict(int)
+        self._inbox_draft_recent: deque = deque(maxlen=2000)  # (ts, name)
 
     @classmethod
     def get_instance(cls) -> "MetricsStore":
@@ -251,6 +259,48 @@ class MetricsStore:
                 if ts >= cutoff:
                     agg[name] += 1
             return dict(agg)
+
+    def record_inbox_draft_event(self, name: str, count: int = 1) -> None:
+        """统一草稿引擎规则事件计数（累计 + 时间序列）。
+
+        让运营在 dashboard 上看到「全自动/手动草稿到底有没有命中记忆/情感/陪伴/守卫」，
+        防止规则被悄悄关掉或退化而无人察觉。
+        """
+        if not name:
+            return
+        c = int(max(0, count))
+        if c <= 0:
+            return
+        now = time.time()
+        with self._lock:
+            self._inbox_draft_metrics[name] += c
+            for _ in range(min(c, 50)):  # 时序仅记前 50，避免单次爆量挤掉历史
+                self._inbox_draft_recent.append((now, name))
+
+    def get_inbox_draft_metrics(self, window_sec: float = 3600.0) -> Dict[str, Any]:
+        """统一草稿引擎规则栈快照：``total`` 累计 + ``window`` 最近窗口聚合。"""
+        with self._lock:
+            total = dict(self._inbox_draft_metrics)
+            cutoff = time.time() - float(window_sec or 3600.0)
+            window: Dict[str, int] = defaultdict(int)
+            for ts, name in self._inbox_draft_recent:
+                if ts >= cutoff:
+                    window[name] += 1
+        out_total = dict(total)
+        gen = int(out_total.get("generated", 0)) or 0
+        # 便于一眼看比例：命中率（基于累计 generated）
+        rates: Dict[str, float] = {}
+        if gen > 0:
+            for _k in ("memory_hit", "emotional_active", "companion_active",
+                       "slow_think", "retry_applied", "persona_guard_intercept",
+                       "crisis_override"):
+                rates[_k] = round(int(out_total.get(_k, 0)) / gen, 4)
+        return {
+            "total": out_total,
+            "window": dict(window),
+            "window_sec": int(window_sec or 3600.0),
+            "rates_vs_generated": rates,
+        }
 
     def set_startup_advisory_counts(self, total: int, warning_events: int) -> None:
         """启动 collect_production_advisories 之后调用。"""

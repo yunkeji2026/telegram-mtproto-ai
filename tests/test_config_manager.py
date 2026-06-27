@@ -75,6 +75,56 @@ class TestSaveExchangeRates:
         assert reloaded["channels"]["ep"]["fee_rate"] == "1.0%"
 
 
+class TestEnvConfigPathOverride:
+    """打包/自包含部署：AITR_CONFIG_PATH / AITR_DATA_DIR 环境覆盖 + 自播种。"""
+
+    def test_aitr_config_path_overrides_default(self, tmp_path, monkeypatch):
+        target = tmp_path / "writable" / "config" / "config.yaml"
+        target.parent.mkdir(parents=True)
+        target.write_text(yaml.dump({
+            "telegram": {"api_id": "1", "api_hash": "a", "phone_number": "+1"},
+            "ai": {"api_key": "k"}, "skills": {"enabled": []},
+        }, allow_unicode=True), encoding="utf-8")
+        monkeypatch.setenv("AITR_CONFIG_PATH", str(target))
+        mgr = ConfigManager()  # 无参 → 走默认解析 → 命中 env
+        assert mgr.config_path == target
+
+    def test_aitr_data_dir_derives_config(self, tmp_path, monkeypatch):
+        data_dir = tmp_path / "data"
+        monkeypatch.delenv("AITR_CONFIG_PATH", raising=False)
+        monkeypatch.setenv("AITR_DATA_DIR", str(data_dir))
+        mgr = ConfigManager()
+        assert mgr.config_path == data_dir / "config" / "config.yaml"
+
+    def test_seeds_from_bundled_example_when_missing(self, tmp_path, monkeypatch):
+        # 内置 example 一定存在于仓库 config/，自播种应把它拷到可写目标
+        target = tmp_path / "writable" / "config" / "config.yaml"
+        assert not target.exists()
+        monkeypatch.setenv("AITR_CONFIG_PATH", str(target))
+        mgr = ConfigManager()
+        assert mgr.config_path == target
+        assert target.exists(), "自播种应已创建 config.yaml"
+        # 内容来自 example（含 telegram/ai 等关键节）
+        seeded = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+        assert isinstance(seeded, dict) and seeded, "播种内容应为非空 dict"
+
+    def test_existing_target_not_overwritten(self, tmp_path, monkeypatch):
+        target = tmp_path / "writable" / "config" / "config.yaml"
+        target.parent.mkdir(parents=True)
+        target.write_text("telegram: {api_id: KEEP}\n", encoding="utf-8")
+        monkeypatch.setenv("AITR_CONFIG_PATH", str(target))
+        ConfigManager()
+        assert "KEEP" in target.read_text(encoding="utf-8"), "已存在的 config 不应被播种覆盖"
+
+    def test_no_env_uses_repo_default(self, monkeypatch):
+        monkeypatch.delenv("AITR_CONFIG_PATH", raising=False)
+        monkeypatch.delenv("AITR_DATA_DIR", raising=False)
+        mgr = ConfigManager()
+        # 仓库默认路径（开发态行为不变）
+        assert mgr.config_path.name in ("config.yaml", "config.example.yaml")
+        assert "config" in mgr.config_path.parts
+
+
 class TestHotReload:
     def test_no_change_returns_false(self, cm):
         cm._last_hot_reload_check = 0
@@ -118,3 +168,71 @@ class TestHotReload:
         cm._last_hot_reload_check = 0
         cm.check_and_hot_reload()
         assert len(fired) == 1
+
+
+class TestWebAdminEnvOverride:
+    """AITR_WEB_* / AITR_DESKTOP_MODE 覆盖 web_admin（桌面壳 serve↔talk 强一致）。"""
+
+    def _make(self, tmp_path, web_admin=None):
+        cfg = {
+            "telegram": {"api_id": "111", "api_hash": "abc", "phone_number": "+1"},
+            "ai": {"api_key": "test"},
+            "skills": {"enabled": []},
+        }
+        if web_admin is not None:
+            cfg["web_admin"] = web_admin
+        p = tmp_path / "config.yaml"
+        p.write_text(yaml.dump(cfg, allow_unicode=True), encoding="utf-8")
+        return p
+
+    def test_env_overrides_host_port_token(self, tmp_path, monkeypatch):
+        p = self._make(tmp_path, {"enabled": True, "host": "0.0.0.0",
+                                  "port": 18787, "auth_token": "OLD"})
+        monkeypatch.delenv("AITR_DESKTOP_MODE", raising=False)
+        monkeypatch.setenv("AITR_WEB_HOST", "127.0.0.1")
+        monkeypatch.setenv("AITR_WEB_PORT", "18799")
+        monkeypatch.setenv("AITR_WEB_TOKEN", "admin")
+        mgr = ConfigManager(str(p))
+        asyncio.run(mgr.load())
+        web = mgr.config["web_admin"]
+        assert web["host"] == "127.0.0.1"
+        assert web["port"] == 18799 and isinstance(web["port"], int)
+        assert web["auth_token"] == "admin"
+
+    def test_invalid_port_ignored(self, tmp_path, monkeypatch):
+        p = self._make(tmp_path, {"enabled": True, "port": 18787})
+        monkeypatch.delenv("AITR_DESKTOP_MODE", raising=False)
+        monkeypatch.delenv("AITR_WEB_HOST", raising=False)
+        monkeypatch.delenv("AITR_WEB_TOKEN", raising=False)
+        monkeypatch.setenv("AITR_WEB_PORT", "not-a-number")
+        mgr = ConfigManager(str(p))
+        asyncio.run(mgr.load())
+        assert mgr.config["web_admin"]["port"] == 18787
+
+    def test_desktop_mode_forces_web_enabled(self, tmp_path, monkeypatch):
+        # web_admin.enabled 缺省/为假，桌面模式必须强制开启（否则桌面壳全无路由）
+        p = self._make(tmp_path, {"enabled": False})
+        for k in ("AITR_WEB_HOST", "AITR_WEB_PORT", "AITR_WEB_TOKEN"):
+            monkeypatch.delenv(k, raising=False)
+        monkeypatch.setenv("AITR_DESKTOP_MODE", "1")
+        mgr = ConfigManager(str(p))
+        asyncio.run(mgr.load())
+        assert mgr.config["web_admin"]["enabled"] is True
+
+    def test_desktop_mode_creates_web_admin_when_missing(self, tmp_path, monkeypatch):
+        p = self._make(tmp_path, None)
+        for k in ("AITR_WEB_HOST", "AITR_WEB_PORT", "AITR_WEB_TOKEN"):
+            monkeypatch.delenv(k, raising=False)
+        monkeypatch.setenv("AITR_DESKTOP_MODE", "1")
+        mgr = ConfigManager(str(p))
+        asyncio.run(mgr.load())
+        assert mgr.config.get("web_admin", {}).get("enabled") is True
+
+    def test_no_env_leaves_web_admin_untouched(self, tmp_path, monkeypatch):
+        p = self._make(tmp_path, {"enabled": True, "port": 18787, "auth_token": "KEEP"})
+        for k in ("AITR_DESKTOP_MODE", "AITR_WEB_HOST", "AITR_WEB_PORT", "AITR_WEB_TOKEN"):
+            monkeypatch.delenv(k, raising=False)
+        mgr = ConfigManager(str(p))
+        asyncio.run(mgr.load())
+        web = mgr.config["web_admin"]
+        assert web["port"] == 18787 and web["auth_token"] == "KEEP"

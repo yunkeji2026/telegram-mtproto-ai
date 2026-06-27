@@ -79,6 +79,7 @@ def _sla_alert_snapshot(request: Request) -> Dict[str, Any]:
                 "items": [], "quiet": False}
     sla = _agent_sla_cfg(request)
     quiet = bool(sla["muted"] or sla["dnd"])
+    exclude_groups = _alerts_exclude_groups(request)
     convs = inbox.list_conversations(limit=500)
     cmap = {str(c.get("conversation_id") or ""): c for c in convs}
     dirs = inbox.last_message_dirs(list(cmap))
@@ -88,6 +89,8 @@ def _sla_alert_snapshot(request: Request) -> Dict[str, Any]:
     for cid, info in dirs.items():
         if info.get("direction") != "in":
             continue
+        if exclude_groups and _is_non_alert_conv(cmap.get(cid) or {}):
+            continue  # 群组/频道不计入 SLA 告警，改走「群组动态」
         waiting += 1
         wait = now - (info.get("ts") or now)
         if wait >= sla["warn"]:
@@ -106,6 +109,29 @@ def _sla_alert_snapshot(request: Request) -> Dict[str, Any]:
     return {"ok": True, "waiting": waiting, "breaching": breaching,
             "critical": len(items), "items": [] if quiet else items[:50],
             "quiet": quiet, "warn_sec": sla["warn"], "crit_sec": sla["crit"]}
+
+
+_NON_ALERT_CHAT_TYPES = ("group", "channel")
+
+
+def _alerts_exclude_groups(request: Request) -> bool:
+    """是否把群组/频道排除出升级/SLA 告警（默认开）。
+
+    config.inbox.alerts.exclude_groups：群组消息不抢回复时效、不该刷升级告警，
+    改由前端「群组动态」被动展示。设为 false 可恢复旧行为（群组也告警）。
+    """
+    cm = getattr(request.app.state, "config_manager", None)
+    cfg = getattr(cm, "config", None) if cm is not None else None
+    if isinstance(cfg, dict):
+        alerts = ((cfg.get("inbox") or {}).get("alerts") or {})
+        if isinstance(alerts, dict) and "exclude_groups" in alerts:
+            return bool(alerts.get("exclude_groups"))
+    return True
+
+
+def _is_non_alert_conv(conv: Dict[str, Any]) -> bool:
+    """该会话是否属于「不告警」类型（群组/频道）。"""
+    return str((conv or {}).get("chat_type") or "private").lower() in _NON_ALERT_CHAT_TYPES
 
 
 def _presence_stale_sec(request: Request) -> float:
@@ -132,6 +158,7 @@ def _escalation_snapshot(request: Request) -> Dict[str, Any]:
     if inbox is None:
         return {"ok": True, "count": 0, "items": []}
     sla = _sla_cfg(request)  # 全局团队阈值，不叠加个人覆盖
+    exclude_groups = _alerts_exclude_groups(request)
     now = time.time()
     convs = inbox.list_conversations(limit=500)
     cmap = {str(c.get("conversation_id") or ""): c for c in convs}
@@ -156,6 +183,8 @@ def _escalation_snapshot(request: Request) -> Dict[str, Any]:
     for cid, info in dirs.items():
         if info.get("direction") != "in":
             continue
+        if exclude_groups and _is_non_alert_conv(cmap.get(cid) or {}):
+            continue  # 群组/频道不进升级告警
         wait = now - (info.get("ts") or now)
         if wait < sla["crit"]:
             continue
@@ -214,6 +243,7 @@ def _sla_detail(
     if inbox is None:
         return {"ok": True, "scope": scope, "items": [], "count": 0}
     sla = _sla_cfg(request)
+    exclude_groups = _alerts_exclude_groups(request)
     now = time.time()
     convs = inbox.list_conversations(limit=500)
     cmap = {str(c.get("conversation_id") or ""): c for c in convs}
@@ -248,6 +278,8 @@ def _sla_detail(
         midnight = time.mktime(
             (lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1))
         for r in inbox.first_response_rows(midnight):
+            if exclude_groups and _is_non_alert_conv(cmap.get(r["cid"]) or {}):
+                continue
             if r["t_out"] is None:
                 wait = now - r["t_in"]
                 level = ("crit" if wait >= sla["crit"]
@@ -259,6 +291,8 @@ def _sla_detail(
         dirs = inbox.last_message_dirs(list(cmap))
         for cid, info in dirs.items():
             if info.get("direction") != "in":
+                continue
+            if exclude_groups and _is_non_alert_conv(cmap.get(cid) or {}):
                 continue
             wait = now - (info.get("ts") or now)
             if wait < thr:

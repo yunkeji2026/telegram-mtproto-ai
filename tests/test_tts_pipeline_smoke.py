@@ -264,6 +264,67 @@ def test_tts_consent_error_does_not_fall_back(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
+def test_assert_http_reachable_caches_unreachable_host(monkeypatch):
+    """主机不可达时应缓存短路：冷却期内第二次预检不再发起 TCP 连接，
+    直接抛 cached 错误（让上层秒回落、且降噪不刷 WARNING）。"""
+    import socket
+    from src.ai import tts_pipeline as T
+
+    # 清理进程级缓存，避免跨用例污染
+    with T._tts_unreachable_lock:
+        T._tts_unreachable_until.clear()
+
+    attempts = {"n": 0}
+
+    def fake_create_connection(addr, timeout=None):
+        attempts["n"] += 1
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(socket, "create_connection", fake_create_connection)
+
+    base = "http://192.168.0.166:7851"
+    # 第一次：真探测 → 失败 → 写缓存
+    try:
+        T._assert_http_reachable(base, timeout=0.1)
+        assert False, "应抛不可达"
+    except RuntimeError as e:
+        assert "tts_host_unreachable:" in str(e)
+    assert attempts["n"] == 1
+
+    # 第二次：冷却期内 → 不再触网，直接命中缓存
+    try:
+        T._assert_http_reachable(base, timeout=0.1)
+        assert False, "应抛缓存命中"
+    except RuntimeError as e:
+        assert "tts_host_unreachable_cached:" in str(e)
+    assert attempts["n"] == 1  # 没有新增 TCP 连接尝试
+
+    with T._tts_unreachable_lock:
+        T._tts_unreachable_until.clear()
+
+
+def test_assert_http_reachable_clears_cache_on_recovery(monkeypatch):
+    """主机恢复后探测成功应解除短路缓存。"""
+    import socket
+    import time
+    from src.ai import tts_pipeline as T
+
+    with T._tts_unreachable_lock:
+        # 预置一个「已过期」的短路：到期后应重新探测，成功则清缓存
+        T._tts_unreachable_until["192.168.0.166:7851"] = time.monotonic() - 1.0
+
+    class _Sock:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    monkeypatch.setattr(socket, "create_connection", lambda addr, timeout=None: _Sock())
+
+    # 探测成功 → 不抛异常 + 清除缓存
+    T._assert_http_reachable("http://192.168.0.166:7851", timeout=0.1)
+    with T._tts_unreachable_lock:
+        assert "192.168.0.166:7851" not in T._tts_unreachable_until
+
+
 def test_qwen_wrapper_loads_env_local_secret(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env.local").write_text(

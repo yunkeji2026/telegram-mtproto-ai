@@ -192,9 +192,46 @@ async def generate_persona_reply(
     reply = None
     used_persona = ""
     used_intent = ""
+    used_unified = False  # 统一引擎已自带记忆写回 → 避免文末重复写
 
-    # 主路径：人设 + KB + 策略（与 /api/chat/test 一致）
-    if sm is not None and getattr(sm, "ai_client", None) is not None:
+    # ★ 统一规则引擎（单一事实源·彻底对齐）：优先走 SkillManager.generate_inbox_draft，
+    # 与原生 bot/RPA 同享情感引擎/陪伴阶段/慢思考/人设守卫/危机兜底/记忆读写全栈规则。
+    # 可经 config inbox.auto_draft.unified_pipeline=false 秒级回退到下方直连路径。
+    if (
+        sm is not None
+        and hasattr(sm, "generate_inbox_draft")
+        and getattr(sm, "ai_client", None) is not None
+    ):
+        _unified_on = True
+        try:
+            _cfg = getattr(getattr(sm, "config", None), "config", None) or {}
+            _unified_on = bool(
+                ((_cfg.get("inbox") or {}).get("auto_draft") or {})
+                .get("unified_pipeline", True)
+            )
+        except Exception:
+            _unified_on = True
+        if _unified_on:
+            try:
+                _res = await sm.generate_inbox_draft(
+                    text=last_inbound,
+                    chat_key=chat_key,
+                    platform=platform,
+                    history=history,
+                    persona_id=persona_id,
+                    reply_lang=resolved_lang,
+                )
+                if _res and (_res.get("reply") or "").strip():
+                    reply = _res["reply"]
+                    used_intent = _res.get("intent") or ""
+                    used_persona = persona_id or "domain"
+                    used_unified = True
+            except Exception:
+                logger.debug("[persona_reply] 统一引擎失败，回落直连", exc_info=True)
+                reply = None
+
+    # 主路径（回落）：人设 + KB + 策略（与 /api/chat/test 一致）
+    if not reply and sm is not None and getattr(sm, "ai_client", None) is not None:
         try:
             user_id = f"desktop:{platform}:{chat_key}" or "__desktop__"
             intent = sm._recognize_intent(last_inbound)
@@ -228,6 +265,19 @@ async def generate_persona_reply(
                 ctx["_conversation_history"] = hist[-20:]
             if kb_context:
                 ctx["kb_context"] = kb_context
+            # ★ 情景记忆注入（单一事实源补全）：全自动/手动产线此前不读长期记忆，导致
+            # 「跨会话记不住（如名字）」。复用 SkillManager 既有读取逻辑，按 chat_key 命中
+            # 该联系人的长期事实，写入 ctx["_episodic_memory_text"]——generate_reply 会把它
+            # 作为「用户长期记忆要点」注入系统提示。读/写用同一 key，保证闭环一致。
+            if chat_key and hasattr(sm, "_inject_episodic_into_context"):
+                try:
+                    sm._inject_episodic_into_context(
+                        ctx, str(chat_key), "",
+                        current_user_text=last_inbound,
+                        platform=platform,
+                    )
+                except Exception:
+                    logger.debug("[persona_reply] 情景记忆注入跳过", exc_info=True)
             so: Dict[str, Any] = {}
             for _sk in ("temperature", "max_tokens", "context_rounds", "model", "thinking_budget"):
                 if _sk in (strategy or {}):
@@ -268,6 +318,17 @@ async def generate_persona_reply(
             reply = None
 
     reply = (reply or "").strip()
+    # ★ 情景记忆写回（闭环）：本轮成功生成回复后，按与读取相同的 key 抽取并落库事实，
+    # 让全自动/手动产线像 native bot 一样「越聊越记得」。fire-and-forget——绝不阻塞、
+    # 失败也不影响回复发送；记忆开关/抽取意图门控仍由 SkillManager 内部既有逻辑把关。
+    if reply and not used_unified and sm is not None and chat_key and hasattr(sm, "_episodic_memory_extract_async"):
+        try:
+            import asyncio as _aio
+            _aio.create_task(sm._episodic_memory_extract_async(
+                str(chat_key), last_inbound, reply, used_intent or "", "", platform,
+            ))
+        except Exception:
+            logger.debug("[persona_reply] 情景记忆写回调度跳过", exc_info=True)
     persona_tier = ""
     if reply:
         used_persona, persona_tier = _resolve_persona_badge(

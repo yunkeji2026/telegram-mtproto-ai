@@ -20,12 +20,14 @@
         <span id="cp-title">业务助手</span>
         <span id="cp-open-inbox" title="在统一收件箱打开该会话" hidden>📥</span>
         <span id="cp-accounts-toggle" title="账号管理（多账号扫码登录）">👥</span>
+        <span id="cp-health-toggle" title="自动化健康：全账号注入命中 + 受控出站队列概览">🩺</span>
         <span id="cp-mode-toggle" title="切换统一 App（实验，与网页同源同款）">🧪</span>
         <span id="cp-toggle" title="折叠/展开">⟩</span>
       </div>
       <div id="cp-accounts-panel" hidden>
         <cp-accounts id="cp-accounts"></cp-accounts>
       </div>
+      <div id="cp-health-panel" hidden></div>
       <div class="cp-tabs" id="cp-tabs" hidden>
         <button class="cp-tab active" data-tab="reply">💬 回复</button>
         <button class="cp-tab" data-tab="insight">🧠 洞察</button>
@@ -123,5 +125,7 @@
   <script src="inject-status.js"></script>
   <script src="account-utils.js"></script>
   <script src="renderer.js"></script>
+  <script src="first-run.js"></script>
+  <script src="health-panel.js"></script>
 </body>
 </html>

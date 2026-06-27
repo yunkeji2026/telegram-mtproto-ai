@@ -1800,7 +1800,286 @@ class SkillManager(LoggerMixin):
         finally:
             if user_ctx_for_cleanup is not None:
                 user_ctx_for_cleanup.pop("_slow_think_outline", None)
-    
+
+    async def generate_inbox_draft(
+        self,
+        *,
+        text: str,
+        chat_key: str,
+        platform: str,
+        history: Optional[List[Dict[str, Any]]] = None,
+        persona_id: str = "",
+        reply_lang: str = "",
+        channel: str = "inbox",
+    ) -> Optional[Dict[str, Any]]:
+        """收件箱草稿生成的「统一规则引擎」（单一事实源）。
+
+        与 ``process_message`` 共用全部规则 helper（情景记忆读写、情感智能上下文、
+        陪伴关系阶段推进、慢思考、人设守卫、危机兜底、回复后状态推进），让**全自动/
+        手动收件箱草稿**与原生 bot/RPA 产线规则**一次性对齐**。
+
+        与 ``process_message`` 的两点关键差异（这正是本方法存在的理由）：
+
+          1. **无状态历史**：收件箱对话历史以 ``inbox.db`` 为权威，每次按需重算。
+             故本方法用调用方传入的 ``history`` **覆盖** ``_conversation_history``，
+             不依赖、也不污染 ``process_message`` 自维护的流式历史累积。
+          2. **零发送副作用**：不走「自拍/形象照直接发媒体」「冷却/ S5 静默跳过回复」
+             这些会绕过收件箱风险闸（L2/L3/L4）或吞掉草稿的分支——是否真正外发由
+             下游 autosend 风险闸决定，本方法只负责「拟一条对齐全部规则的草稿」。
+
+        关系/记忆状态仍按 ``chat_key`` 持久化（复用 ``_get_user_context``），故陪伴
+        阶段（exchange_count / stage）能像原生 bot 一样**越聊越进**。
+
+        返回 ``{"reply": str, "intent": str}``；无法生成时返回 ``None``（调用方回落）。
+        """
+        text = str(text or "").strip()
+        if not text or not self.ai_client:
+            return None
+        user_id = str(chat_key or "").strip()
+        if not user_id:
+            return None
+        log_prefix = "[inbox_draft] "
+        chat_id = ""  # 记忆 key == platform:chat_key（与注入/写回/历史 backfill 一致）
+
+        def _metric(_name: str) -> None:
+            """规则栈生效埋点（best-effort，绝不影响生成）。"""
+            try:
+                from src.monitoring.metrics_store import get_metrics_store
+                get_metrics_store().record_inbox_draft_event(_name)
+            except Exception:
+                pass
+
+        try:
+            self._refresh_strategies()
+        except Exception:
+            pass
+
+        user_context = self._get_user_context(user_id)
+        if persona_id:
+            user_context["account_persona_id"] = str(persona_id)
+        if platform:
+            user_context["platform"] = platform
+        if reply_lang:
+            # 收件箱已是语言决策单一事实源 → 锁定，避免引擎二次猜测
+            user_context["reply_lang"] = reply_lang
+            user_context["reply_lang_locked"] = True
+
+        # 历史：以 inbox 为权威覆盖（去掉末条「待回复」锚点，避免与本轮 text 重复）
+        _hist: List[Dict[str, Any]] = []
+        for _m in (history or []):
+            if not isinstance(_m, dict):
+                continue
+            _c = str(_m.get("content") or "").strip()
+            if not _c:
+                continue
+            _role = "user" if _m.get("role") == "user" else "assistant"
+            _hist.append({"role": _role, "content": _c})
+        if _hist and _hist[-1]["role"] == "user" and _hist[-1]["content"] == text:
+            _hist = _hist[:-1]
+        user_context["_conversation_history"] = _hist[-20:]
+
+        try:
+            # 1. 情景记忆注入（与 process_message step 3 同逻辑/同 key）
+            if not user_context.get("disable_episodic_memory"):
+                try:
+                    _q_emb = None
+                    _mvec = (self._memory_cfg or {}).get("vector") or {}
+                    if (
+                        self._episodic_store
+                        and (self._memory_cfg or {}).get("enabled", True)
+                        and _mvec.get("enabled", False)
+                        and self.ai_client
+                    ):
+                        _q_emb = await self._embed_user_message_for_episodic(text)
+                    self._inject_episodic_into_context(
+                        user_context, user_id, chat_id,
+                        current_user_text=text, query_embedding=_q_emb,
+                        platform=platform,
+                    )
+                    if (user_context.get("_episodic_memory_text") or "").strip():
+                        _metric("memory_hit")
+                except Exception:
+                    self.logger.debug("%s记忆注入跳过", log_prefix, exc_info=True)
+
+            # 2. 情感智能上下文引擎（与 process_message step 3b 同逻辑）
+            try:
+                from src.utils.emotional_context import build_emotional_context_block
+                _epi_text = (user_context.get("_episodic_memory_text") or "").strip()
+                _cfg_es = self.config.config if hasattr(self.config, "config") else {}
+                _es_on = bool(
+                    ((_cfg_es.get("companion") or {}).get("empathy_strategy") or {})
+                    .get("enabled", True)
+                ) if isinstance(_cfg_es, dict) else True
+                _wb_cfg = (
+                    ((_cfg_es.get("companion") or {}).get("wellbeing") or {})
+                    if isinstance(_cfg_es, dict) else {}
+                )
+                _emo_block = build_emotional_context_block(
+                    text, user_context, _epi_text, chat_id=chat_id,
+                    enable_strategy=_es_on,
+                    enable_wellbeing=bool(_wb_cfg.get("enabled", True)),
+                    enable_anti_sycophancy=bool(_wb_cfg.get("anti_sycophancy", True)),
+                    wellbeing_hotline=str(_wb_cfg.get("crisis_resources", "") or ""),
+                )
+                if _emo_block:
+                    user_context["_emotional_context_block"] = _emo_block
+                    _metric("emotional_active")
+            except Exception:
+                self.logger.debug("%s情感上下文跳过", log_prefix, exc_info=True)
+
+            # 3. 陪伴关系阶段（conversion 域；与 process_message P1 同逻辑）
+            try:
+                _cfg_dom = self.config.config if hasattr(self.config, "config") else {}
+                _comp_cfg = (_cfg_dom.get("companion") or {}) if isinstance(_cfg_dom, dict) else {}
+                if effective_domain_name(_cfg_dom) == "conversion" and _comp_cfg.get("enabled", True):
+                    from src.utils.companion_relationship import (
+                        build_relationship_prompt_block,
+                        downgrade_from_user_text,
+                        get_rel_state,
+                    )
+                    _rst = get_rel_state(user_context, chat_id)
+                    downgrade_from_user_text(_rst, text, _comp_cfg)
+                    _ain = ""
+                    try:
+                        _ain = str((self.config.get_ai_config() or {}).get("ai_name") or "").strip()
+                    except Exception:
+                        pass
+                    user_context["_relationship_prompt_block"] = build_relationship_prompt_block(
+                        _rst, _comp_cfg, ai_name=_ain, user_message=text,
+                    )
+                    user_context["relationship_stage"] = str(_rst.get("stage") or "")
+                    if (user_context.get("_relationship_prompt_block") or "").strip():
+                        _metric("companion_active")
+            except Exception:
+                self.logger.debug("%s陪伴关系跳过", log_prefix, exc_info=True)
+
+            # 4. 意图识别（草稿模式不做意图继承/链跟踪，保持无状态纯净）
+            intent = self._recognize_intent(text)
+            user_context["current_intent"] = intent
+
+            # 5. 回复策略
+            try:
+                strategy, strategy_id = self.get_strategy_for_intent(intent, user_id)
+            except Exception:
+                strategy, strategy_id = ({}, "")
+            strategy = dict(strategy or {})
+            # 草稿必出（是否真发由下游风险闸决定）：禁静默概率/禁 skip_ai 复读
+            strategy["reply_probability"] = 1.0
+            strategy["skip_ai"] = False
+            user_context["_reply_strategy"] = strategy
+            user_context["_reply_strategy_id"] = strategy_id
+
+            # 6. KB 混合检索（与 smart-reply 一致）
+            try:
+                _kb = self._kb_store_if_exists()
+                if _kb:
+                    _lang = (user_context or {}).get("reply_lang", "zh")
+                    _res = _kb.search(text, top_k=3, lang=_lang)
+                    _kbc = _kb.build_ai_context_from_result(_res, lang=_lang)
+                    if _kbc:
+                        user_context["kb_context"] = _kbc
+            except Exception:
+                self.logger.debug("%sKB 检索跳过", log_prefix, exc_info=True)
+
+            # 7. 慢思考（与 process_message 同配置门控；默认关→零额外开销）
+            try:
+                await self._maybe_slow_think(intent, text, user_context, log_prefix)
+                if (user_context.get("_slow_think_outline") or "").strip():
+                    _metric("slow_think")
+            except Exception:
+                self.logger.debug("%s慢思考跳过", log_prefix, exc_info=True)
+
+            # 8. 生成（PersonaManager 注入人设 + 全部上下文块由 _build_context_prompt 消费）
+            _so: Dict[str, Any] = {}
+            for _sk in ("temperature", "max_tokens", "context_rounds", "model", "thinking_budget"):
+                if _sk in strategy:
+                    _so[_sk] = strategy[_sk]
+            reply = await self.ai_client.generate_reply_with_intent(
+                user_message=text,
+                intent=intent,
+                user_context=user_context,
+                strategy_overrides=_so or None,
+            )
+            reply = (reply or "").strip()
+            if not reply:
+                _metric("empty")
+                return None
+
+            # 8b. 相似度重试（与 process_message 5b 同思路）：与上条回复重复度 >65%
+            #     → 注入「换角度」指令 + 抬温度重生一次；更优才采纳，否则保留原回复。
+            _prev_reply = (user_context.get("last_reply") or "").strip()
+            if _prev_reply:
+                try:
+                    _sim = self._reply_similarity(_prev_reply, reply)
+                except Exception:
+                    _sim = 0.0
+                if _sim > 0.65:
+                    user_context["_anti_repeat_hint"] = (
+                        "1. 换一个完全不同的开头（禁止用上次的前5个字）\n"
+                        "2. 换一个不同的重点（上次说了什么，这次说别的）\n"
+                        "3. 风格要有明显区别，就像换了个心情在聊"
+                    )
+                    _so2 = dict(_so)
+                    _so2["temperature"] = min(
+                        float(_so2.get("temperature", 0.85)) + 0.15, 1.0
+                    )
+                    try:
+                        _retry = await self.ai_client.generate_reply_with_intent(
+                            user_message=text, intent=intent,
+                            user_context=user_context,
+                            strategy_overrides=_so2 or None,
+                        )
+                        _retry = (_retry or "").strip()
+                        if _retry and self._reply_similarity(_prev_reply, _retry) < _sim:
+                            reply = _retry
+                            _metric("retry_applied")
+                    except Exception:
+                        self.logger.debug("%s重试跳过", log_prefix, exc_info=True)
+                    user_context.pop("_anti_repeat_hint", None)
+
+            # 9. 人设一致性守卫 + 危机事后兜底（与 process_message 5c/5d 同）
+            _before_guard = reply
+            reply = self._enforce_persona_consistency(
+                reply, chat_id=str(chat_id or user_id),
+                account_persona_id=str(persona_id or ""), log_prefix=log_prefix,
+            )
+            if reply != _before_guard:
+                _metric("persona_guard_intercept")
+            reply = self._apply_crisis_safety_net(
+                reply, user_context=user_context, log_prefix=log_prefix,
+            )
+            if user_context.get("_wellbeing_safety_override"):
+                _metric("crisis_override")
+
+            # 10. 回复后状态推进（陪伴 exchange_count/stage、剧情）+ 记忆写回
+            try:
+                self._update_after_reply(
+                    reply, user_id, user_context, chat_id=chat_id, user_msg=text,
+                )
+            except Exception:
+                self.logger.debug("%s状态推进跳过", log_prefix, exc_info=True)
+            if not user_context.get("disable_episodic_memory"):
+                try:
+                    self._schedule_episodic_memory_extract(
+                        user_id, text, reply, intent, chat_id, platform=platform,
+                    )
+                except Exception:
+                    self.logger.debug("%s记忆写回跳过", log_prefix, exc_info=True)
+
+            try:
+                self._context_store.mark_dirty(user_id)
+                self._context_store.flush(user_id)
+            except Exception:
+                pass
+
+            _metric("generated")
+            return {"reply": reply, "intent": intent}
+        except Exception:
+            self.logger.warning("%s生成失败，回落上层兜底", log_prefix, exc_info=True)
+            return None
+        finally:
+            user_context.pop("_slow_think_outline", None)
+
     def _run_autopilot(self) -> None:
         """Auto-Pilot：�查策略健康状态，���重映射持���效策略�€?
         # 安全设�:

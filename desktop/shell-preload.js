@@ -58,6 +58,8 @@ contextBridge.exposeInMainWorld("shell", {
   analyze: (args) => ipcRenderer.invoke("desktop:analyze", args),
   thread: (args) => ipcRenderer.invoke("desktop:thread", args),
   copy: (text) => ipcRenderer.invoke("desktop:copy", text),
+  // 原生系统通知（新私聊消息弹窗）：{title, body} → 主进程 Notification，点击聚焦主窗口。
+  notify: (args) => ipcRenderer.invoke("desktop:notify", args),
   voiceProfiles: () => ipcRenderer.invoke("desktop:voice-profiles"),
   voiceTts: (args) => ipcRenderer.invoke("desktop:voice-tts", args),
   sendVoice: (body) => ipcRenderer.invoke("desktop:send-voice", body),
@@ -71,4 +73,9 @@ contextBridge.exposeInMainWorld("shell", {
   // 在对应 webview 的官方页 DOM 填入并发送，再回执。
   outboundPull: (args) => ipcRenderer.invoke("desktop:outbound-pull", args),
   outboundAck: (args) => ipcRenderer.invoke("desktop:outbound-ack", args),
+  // 🩺 自动化健康看板（壳层聚合读，复用后端既有 API）：全账号注入健康 + 受控出站队列概览。
+  injectHealthList: (args) => ipcRenderer.invoke("desktop:inject-health-list", args),
+  outboundStats: (args) => ipcRenderer.invoke("desktop:outbound-stats", args),
+  // 注入「持续失配」告警流（红点预警 + 告警块）。
+  injectAlerts: (args) => ipcRenderer.invoke("desktop:inject-alerts", args),
 });

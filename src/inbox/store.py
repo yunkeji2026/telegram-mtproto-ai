@@ -39,6 +39,11 @@ logger = logging.getLogger(__name__)
 AUTOMATION_MODES = {"manual", "review", "multi_choice", "auto_ai"}
 _DEFAULT_AUTOMATION_MODE = "review"
 
+# 计费席位口径：draft_audit_log.agent_id 里有「机器/系统」actor（L2 自动发送
+# worker、SLA 看门狗、工作链、无登录用户回退），它们不是人工坐席，不应计入授权
+# 席位（否则会把自动化跑量误判成 over_seats 触发计费红灯告警）。统计活跃坐席时排除。
+_NON_BILLABLE_AGENT_IDS = ("autosend_worker", "system")
+
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS conversations (
@@ -49,6 +54,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     contact_id        TEXT NOT NULL DEFAULT '',
     display_name      TEXT NOT NULL DEFAULT '',
     language          TEXT NOT NULL DEFAULT 'unknown',
+    chat_type         TEXT NOT NULL DEFAULT 'private',
     last_text         TEXT NOT NULL DEFAULT '',
     last_ts           REAL NOT NULL DEFAULT 0,
     unread            INTEGER NOT NULL DEFAULT 0,
@@ -542,6 +548,10 @@ _MIGRATIONS = [
        )""",
     # P4-A：app_settings 审计列——记录最后修改人（运营级配置可追责）。
     "ALTER TABLE app_settings ADD COLUMN updated_by TEXT NOT NULL DEFAULT ''",
+    # 群组分流：会话类型列（private/group/channel）。群组不进升级/SLA 告警，改走「群组动态」。
+    # 存量行默认 'private'（保守按私聊照常告警），后续 ingest 会按实况回填。
+    "ALTER TABLE conversations ADD COLUMN chat_type TEXT NOT NULL DEFAULT 'private'",
+    "CREATE INDEX IF NOT EXISTS idx_conv_chat_type ON conversations(chat_type)",
 ]
 
 
@@ -659,13 +669,15 @@ class InboxStore:
                 """
                 INSERT INTO conversations
                     (conversation_id, platform, account_id, chat_key, contact_id,
-                     display_name, language, last_text, last_ts, unread,
+                     display_name, language, chat_type, last_text, last_ts, unread,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(conversation_id) DO UPDATE SET
                     display_name = excluded.display_name,
                     language = CASE WHEN excluded.language != 'unknown'
                                     THEN excluded.language ELSE conversations.language END,
+                    chat_type = CASE WHEN excluded.chat_type != 'private'
+                                     THEN excluded.chat_type ELSE conversations.chat_type END,
                     last_text = CASE WHEN excluded.last_ts >= conversations.last_ts
                                      THEN excluded.last_text ELSE conversations.last_text END,
                     last_ts = MAX(excluded.last_ts, conversations.last_ts),
@@ -676,7 +688,8 @@ class InboxStore:
                 """,
                 (
                     conv.conversation_id, conv.platform, conv.account_id, conv.chat_key,
-                    conv.contact_id, conv.display_name, conv.language, conv.last_text,
+                    conv.contact_id, conv.display_name, conv.language,
+                    (conv.chat_type or "private"), conv.last_text,
                     float(conv.last_ts or 0), int(conv.unread or 0), now, now,
                 ),
             )
@@ -717,13 +730,15 @@ class InboxStore:
                 """
                 INSERT INTO conversations
                     (conversation_id, platform, account_id, chat_key, contact_id,
-                     display_name, language, last_text, last_ts, unread,
+                     display_name, language, chat_type, last_text, last_ts, unread,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(conversation_id) DO UPDATE SET
                     display_name = excluded.display_name,
                     language = CASE WHEN excluded.language != 'unknown'
                                     THEN excluded.language ELSE conversations.language END,
+                    chat_type = CASE WHEN excluded.chat_type != 'private'
+                                     THEN excluded.chat_type ELSE conversations.chat_type END,
                     last_text = CASE WHEN excluded.last_ts >= conversations.last_ts
                                      THEN excluded.last_text ELSE conversations.last_text END,
                     last_ts = MAX(excluded.last_ts, conversations.last_ts),
@@ -734,7 +749,8 @@ class InboxStore:
                 """,
                 (
                     conv.conversation_id, conv.platform, conv.account_id, conv.chat_key,
-                    conv.contact_id, conv.display_name, conv.language, conv.last_text,
+                    conv.contact_id, conv.display_name, conv.language,
+                    (conv.chat_type or "private"), conv.last_text,
                     float(conv.last_ts or 0), int(conv.unread or 0), now, now,
                 ),
             )
@@ -2460,10 +2476,11 @@ class InboxStore:
                 "GROUP BY action",
                 mparams,
             ).fetchall()
+            _excl = ",".join("?" * len(_NON_BILLABLE_AGENT_IDS))
             agent_rows = self._conn.execute(
                 f"SELECT DISTINCT agent_id FROM draft_audit_log WHERE {mwin} "
-                "AND agent_id != ''",
-                mparams,
+                f"AND agent_id != '' AND agent_id NOT IN ({_excl})",
+                mparams + list(_NON_BILLABLE_AGENT_IDS),
             ).fetchall()
             audit_day_rows = self._conn.execute(
                 f"SELECT ts FROM draft_audit_log WHERE {mwin}", mparams,

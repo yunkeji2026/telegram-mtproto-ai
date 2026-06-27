@@ -1,10 +1,12 @@
 "use strict";
 
-const { app, BrowserWindow, ipcMain, session, clipboard, Menu } = require("electron");
+const { app, BrowserWindow, ipcMain, session, clipboard, Menu, Notification } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const { spawn, exec } = require("child_process");
 const { chromeLikeUserAgent, isWhatsappUrl, needsChromeUa, urlNeedsChromeUa } = require("./webview-ua.js");
 const { fingerprintArg, accountIdFromPartition } = require("./inject/fingerprint.js");
+const { createBackendManager } = require("./backend-launcher.js");
 
 // D3：每账号确定性指纹缓存（account_id → fingerprint）。启动/运行时新增账号前拉取，
 // 供 session UA / Accept-Language / webview additionalArguments 注入，使多号内嵌互不关联。
@@ -30,6 +32,27 @@ function loadConfig() {
 }
 
 let config = loadConfig();
+
+// 后端 sidecar 生命周期：免手动起 Python。拉起前先探活（已在跑→复用），退出回收。
+const backendManager = createBackendManager({ app, spawn, exec, fs, fetch: global.fetch });
+
+/** 浅合并并持久化 config.json（首启向导用）；同步更新内存 config。返回 {ok}。 */
+function saveConfigPatch(patch) {
+  try {
+    const next = Object.assign({}, config);
+    for (const [k, v] of Object.entries(patch || {})) {
+      next[k] = (v && typeof v === "object" && !Array.isArray(v))
+        ? Object.assign({}, config[k] || {}, v) : v;
+    }
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(next, null, 2), "utf-8");
+    config = next;
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
+ipcMain.handle("desktop:save-config", (_e, patch) => saveConfigPatch(patch || {}));
 
 /** 调用后端翻译接口（主进程发起，规避 webview 的 CORS / 混合内容限制）。 */
 async function backendTranslate(text, targetLang) {
@@ -118,6 +141,10 @@ ipcMain.handle("desktop:config", () => ({
 
 /** 后端可达性探针（主进程发起，规避 webview/renderer 的 CSP/CORS）。
  *  /login 无需鉴权即返回 200；任何 HTTP 响应都代表后端可达。用于「后端未起→自动重连」。 */
+// 后端拉起状态（idle/probing/starting/ready/running-external/failed/disabled/stopped）。
+// renderer 可据此把「正在连接后台」细化为「正在启动后台服务…」并在 failed 时给指引。
+ipcMain.handle("desktop:backend-spawn-status", () => backendManager.getStatus());
+
 ipcMain.handle("desktop:backend-health", async () => {
   const { base_url } = config.backend || {};
   if (!base_url) return { ok: false, error: "no base_url" };
@@ -147,6 +174,28 @@ ipcMain.handle("desktop:diag", (_e, msg) => {
   return true;
 });
 
+// 原生系统通知（新私聊消息弹窗，由工作台前端按用户选择的「弹窗方式」调用）。
+// 点击通知 → 唤起并聚焦主窗口。系统不支持/被禁用时返回 {ok:false}，前端回落浏览器通知/应用内提示。
+ipcMain.handle("desktop:notify", (_e, args) => {
+  try {
+    const a = args || {};
+    if (!Notification.isSupported()) return { ok: false, error: "unsupported" };
+    const n = new Notification({
+      title: String(a.title || "新消息"),
+      body: String(a.body || ""),
+      silent: a.silent === true,
+    });
+    n.on("click", () => {
+      const w = BrowserWindow.getAllWindows()[0];
+      if (w) { try { if (w.isMinimized()) w.restore(); w.show(); w.focus(); } catch (e) { /* ignore */ } }
+    });
+    n.show();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+});
+
 // 选择器覆写层（D1 热更新）：注入脚本启动时拉取后端下发的选择器修正。
 // 官方改版导致选择器失配时，运营改 config/desktop_selector_profiles.json 即可热修，
 // 无需重发桌面包。后端不可达/无覆写时返回 {ok:true, profiles:{}}，注入静默用内置档。
@@ -165,6 +214,40 @@ ipcMain.handle("desktop:inject-health", async (_e, payload) => {
     return await backendPost("/api/desktop/inject-health", payload || {});
   } catch (e) {
     return { ok: false, error: String(e) };
+  }
+});
+
+// 自动化健康看板（壳层聚合读）：把后端「全账号注入健康 + 持续失配」汇总下发给壳层 🩺 面板，
+// 让运营在桌面壳内一眼看清各内嵌账号注入是否健康（而非只看当前聚焦 webview）。后端不可达返回空摘要。
+ipcMain.handle("desktop:inject-health-list", async (_e, args) => {
+  try {
+    const persist_sec = (args && args.persist_sec) || undefined;
+    return await backendGet("/api/desktop/inject-health", { persist_sec });
+  } catch (e) {
+    return { ok: false, summary: {}, accounts: [], error: String(e) };
+  }
+});
+
+// 受控出站队列概览（D4b 壳层读）：pending/claimed/sent/failed 计数 + 近期命令预览，
+// 让运营看清全自动回复经 send-gate/kill-switch 后是否在正常流转/有无卡死。后端不可达返回空摘要。
+ipcMain.handle("desktop:outbound-stats", async (_e, args) => {
+  try {
+    const limit = (args && args.limit) || undefined;
+    return await backendGet("/api/desktop/outbound/stats", { limit });
+  } catch (e) {
+    return { ok: false, summary: {}, recent: [], error: String(e) };
+  }
+});
+
+// 注入「持续失配」告警流（壳层 🩺 红点预警 + 面板告警块用）：只有**连续**失配超阈值才进 alerts
+// （即时抖动自愈、不误报）；events 为状态跃迁趋势。后端不可达返回空告警（红点不亮）。
+ipcMain.handle("desktop:inject-alerts", async (_e, args) => {
+  try {
+    const persist_sec = (args && args.persist_sec) || undefined;
+    const limit = (args && args.limit) || undefined;
+    return await backendGet("/api/desktop/inject-health/alerts", { persist_sec, limit });
+  } catch (e) {
+    return { ok: false, alerts: [], events: [], error: String(e) };
   }
 });
 
@@ -810,9 +893,35 @@ function buildChineseMenu() {
   return Menu.buildFromTemplate(template);
 }
 
+/** 自动更新（仅发布态；dev 跳过。失败不阻断启动）。需 package.json::build.publish 指向真实更新源。 */
+function setupAutoUpdate() {
+  if (!app.isPackaged) return;
+  try {
+    const { autoUpdater } = require("electron-updater");
+    autoUpdater.autoDownload = true;
+    autoUpdater.on("error", (e) => console.log(`[updater] ${String((e && e.message) || e)}`));
+    autoUpdater.on("update-downloaded", () => console.log("[updater] 更新已下载，下次重启生效"));
+    autoUpdater.checkForUpdatesAndNotify().catch((e) =>
+      console.log(`[updater] check failed: ${String((e && e.message) || e)}`));
+  } catch (e) {
+    console.log(`[updater] 不可用：${String((e && e.message) || e)}`);
+  }
+}
+
 app.whenReady().then(() => {
   Menu.setApplicationMenu(buildChineseMenu());
+  // 后台自拉起（不阻塞开窗：renderer 已有「正在连接后台→自动重连」遮罩兜底）。
+  backendManager.start(config).catch((e) => console.log(`[backend] start error: ${e}`));
   createWindow();
+  setupAutoUpdate();
+});
+
+// 退出时回收后端进程，避免残留 Python/二进制占端口。
+let _backendStopped = false;
+app.on("before-quit", () => {
+  if (_backendStopped) return;
+  _backendStopped = true;
+  try { backendManager.stop(); } catch (e) { /* 回收失败不阻断退出 */ }
 });
 
 app.on("window-all-closed", () => {

@@ -32,8 +32,53 @@ OVERLAYABLE_KEYS = (
 
 _BOOL_KEYS = {"supported", "canIngest", "richInput"}
 
-# 覆写文件默认路径：<repo>/config/desktop_selector_profiles.json（不存在=无覆写，常态）。
-_DEFAULT_PATH = Path(__file__).resolve().parents[2] / "config" / "desktop_selector_profiles.json"
+# 覆写文件名（落在「活动 config 目录」下；打包态=可写 AITR_DATA_DIR/config，开发态=<repo>/config）。
+_OVERLAY_FILENAME = "desktop_selector_profiles.json"
+
+# 仅当无法解析活动 config 目录时的兜底：<repo>/config/desktop_selector_profiles.json。
+_DEFAULT_PATH = Path(__file__).resolve().parents[2] / "config" / _OVERLAY_FILENAME
+
+
+def selector_overlay_path(config_dir: Path | str | None = None) -> Path:
+    """解析覆写文件路径：优先「活动 config 目录」（与 config.yaml 同目录），否则回落仓库默认。
+
+    关键修复：打包态 config 落用户**可写** AITR_DATA_DIR/config，而旧 ``_DEFAULT_PATH`` 指向只读安装包
+    （``__file__`` 在 PyInstaller bundle 内），导致运营改的覆写文件永远不被读到、D1 热修在发布态失效。
+    """
+    if config_dir:
+        return Path(config_dir) / _OVERLAY_FILENAME
+    return _DEFAULT_PATH
+
+
+# 首次创建时写入的模板：空 profiles + 一段说明 + 一个被注释掉的示例（用 _example，sanitize 会忽略）。
+_OVERLAY_TEMPLATE: Dict[str, Any] = {
+    "_README": (
+        "桌面壳选择器覆写（D1 热更新）。官方网页改版导致注入失配时，在 profiles 里按平台填"
+        "覆写选择器即可热修，无需重发桌面端。仅白名单字段生效："
+        "bubble/bubbleText/composer/sendBtn/peerTitle/outFlag/outSelector/"
+        "mediaImg/mediaAudio/supported/canIngest/richInput。保存后桌面注入下次拉取即生效。"
+    ),
+    "_example": {
+        "telegram": {"composer": "div.input-message-input", "sendBtn": "button.send"},
+    },
+    "profiles": {},
+}
+
+
+def ensure_overlay_file(path: Path | str) -> bool:
+    """确保覆写文件存在（供运营「一键打开热修」有东西可编辑）；新建返回 True，已存在返回 False。
+
+    幂等：已存在则**绝不覆盖**（保护运营已填的覆写）。创建失败抛异常由调用方处理。
+    """
+    p = Path(path)
+    if p.exists():
+        return False
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(
+        json.dumps(_OVERLAY_TEMPLATE, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return True
 
 
 def _sanitize(raw: Any) -> Dict[str, Dict[str, Any]]:

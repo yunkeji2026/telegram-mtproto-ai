@@ -59,6 +59,19 @@
   .ws-notif-sub{font-size:11px;color:#6b7280;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .ws-notif-ts{font-size:10px;color:#94a3b8;white-space:nowrap;}
   .ws-notif-empty{padding:32px 16px;text-align:center;color:#9ca3af;font-size:13px;}
+  .ws-notif-item{border-left:3px solid transparent;}
+  .ws-notif-grp-hdr{display:flex;justify-content:space-between;align-items:center;padding:9px 14px;font-size:12px;font-weight:600;color:#475569;background:#f8fafc;border-top:1px solid #e5e7eb;cursor:pointer;user-select:none;}
+  .ws-notif-grp-hdr:hover{background:#f1f5f9;}
+  .ws-notif-grp-cv{color:#2563eb;font-weight:500;}
+  .ws-notif-grp-list{background:#fcfdff;}
+  .ws-notif-grp-list .ws-notif-item{padding-left:18px;}
+  .ws-notif-sec-tag{font-size:10px;color:#94a3b8;padding:6px 14px 2px;font-weight:600;letter-spacing:.04em;}
+  /* 通知偏好控件（告警设置弹窗内复用） */
+  .wp-sec{border-top:1px solid #eef2f7;margin:12px 0 6px;padding-top:10px;}
+  .wp-sec strong{font-size:13px;}
+  .wp-row{display:flex;justify-content:space-between;align-items:center;margin:8px 0;}
+  .wp-btn-ghost{padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;font-size:13px;}
+  .wp-btn-ghost:hover{background:#f3f4f6;}
 </style>
 {% block head %}{% endblock %}
 <script>
@@ -167,7 +180,7 @@
   <span class="ws-notif-btn" id="ws-notif-btn" title="通知中心">
     🔔<span class="ws-notif-badge" id="ws-notif-badge"></span>
   </span>
-  <span id="ws-prefs-btn" style="cursor:pointer;font-size:16px;padding:0 6px;" title="告警设置（SLA 阈值 / 免打扰）">⚙</span>
+  <span id="ws-prefs-btn" style="cursor:pointer;font-size:16px;padding:0 6px;" title="告警设置（SLA 阈值 / 免打扰 / 消息提示音 / 弹窗）">⚙</span>
   <span class="ws-review" id="ws-review" title="待裁决的合并候选" onclick="window.__wsReviews&&window.__wsReviews.open()"></span>
   <span class="ws-funnel" id="ws-funnel" title="今日 web 漏斗"></span>
   <span class="ws-agents" id="ws-agents-online" title="在线坐席"></span>
@@ -369,6 +382,12 @@ document.addEventListener('click',function(e){ var m=document.getElementById('ws
         +'<label style="display:flex;justify-content:space-between;align-items:center;margin:8px 0;">完全静音告警<input id="wp-mute" type="checkbox"></label>'
         +'<label style="display:flex;flex-direction:column;gap:4px;margin:8px 0;"><span>我会的语言（自动派单按语言匹配）</span><input id="wp-langs" type="text" placeholder="如 en,ja,zh（逗号分隔，留空=不限）" style="padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;"></label>'
         +'<div id="wp-hint" style="font-size:12px;color:#94a3b8;margin:6px 0 12px;"></div>'
+        +'<div class="wp-sec"><strong>🔔 消息通知（本机）</strong></div>'
+        +'<label class="wp-row">新私聊消息提示音<input id="wp-nsound" type="checkbox"></label>'
+        +'<label class="wp-row">提示音量<input id="wp-nvol" type="range" min="0" max="100" style="width:130px;"></label>'
+        +'<label style="display:flex;flex-direction:column;gap:4px;margin:8px 0;"><span>弹窗方式</span><select id="wp-npopup" style="padding:5px 6px;border:1px solid #d1d5db;border-radius:6px;"><option value="auto">自动（后台→系统通知 / 前台→应用内提示）</option><option value="desktop">系统桌面通知</option><option value="toast">应用内提示</option><option value="off">关闭弹窗</option></select></label>'
+        +'<label class="wp-row">群组消息也提示（默认关）<input id="wp-ngroups" type="checkbox"></label>'
+        +'<div style="margin:8px 0 12px;"><button id="wp-ntest" type="button" class="wp-btn-ghost">🔔 试听 / 测试弹窗</button></div>'
         +'<div style="display:flex;gap:8px;justify-content:flex-end;"><button id="wp-cancel" style="padding:6px 14px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;">取消</button><button id="wp-save" style="padding:6px 14px;border:0;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer;">保存</button></div>'
         +'</div>';
       document.body.appendChild(ov);
@@ -376,8 +395,31 @@ document.addEventListener('click',function(e){ var m=document.getElementById('ws
       ov.querySelector('#ws-prefs-x').addEventListener('click',function(){ ov.style.display='none'; });
       ov.querySelector('#wp-cancel').addEventListener('click',function(){ ov.style.display='none'; });
       ov.querySelector('#wp-save').addEventListener('click',savePrefs);
+      ov.querySelector('#wp-ntest').addEventListener('click',function(){
+        if(!window.__wsNotify) return;
+        var mode=ov.querySelector('#wp-npopup').value;
+        window.__wsNotify.set({
+          sound: ov.querySelector('#wp-nsound').checked,
+          volume: (parseInt(ov.querySelector('#wp-nvol').value,10)||0)/100,
+          popup: mode,
+          groups: ov.querySelector('#wp-ngroups').checked
+        });
+        window.__wsNotify.test(false);
+        if(mode==='desktop'||mode==='auto'){
+          window.__wsNotify.ensureDesktopPerm(function(ok){
+            CRMW.toast(ok?'✓ 桌面通知已就绪':'桌面通知未授权（可在浏览器/系统设置开启）', ok?'#16a34a':'#d97706');
+          });
+        } else if(mode==='toast'){ CRMW.toast('💬 这是一条应用内提示示例','#2563eb'); }
+      });
     }
     ov.style.display='flex';
+    if(window.__wsNotify){
+      var _np=window.__wsNotify.get();
+      ov.querySelector('#wp-nsound').checked = _np.sound!==false;
+      ov.querySelector('#wp-nvol').value = Math.round((_np.volume==null?0.6:_np.volume)*100);
+      ov.querySelector('#wp-npopup').value = _np.popup||'auto';
+      ov.querySelector('#wp-ngroups').checked = !!_np.groups;
+    }
     fetch('/api/workspace/prefs').then(function(r){return r.json();}).then(function(d){
       if(!d||!d.ok) return; var p=d.prefs||{};
       document.getElementById('wp-warn').value = p.warn_sec? Math.round(p.warn_sec/60):'';
@@ -390,6 +432,15 @@ document.addEventListener('click',function(e){ var m=document.getElementById('ws
     }).catch(function(){});
   }
   function savePrefs(){
+    // 消息通知偏好存本机 localStorage（与服务端 SLA 偏好分开，跨设备不同步）
+    if(window.__wsNotify){
+      window.__wsNotify.set({
+        sound: document.getElementById('wp-nsound').checked,
+        volume: (parseInt(document.getElementById('wp-nvol').value,10)||0)/100,
+        popup: document.getElementById('wp-npopup').value,
+        groups: document.getElementById('wp-ngroups').checked
+      });
+    }
     var warn=parseInt(document.getElementById('wp-warn').value,10);
     var crit=parseInt(document.getElementById('wp-crit').value,10);
     var _lgEl=document.getElementById('wp-langs');
@@ -544,9 +595,14 @@ document.addEventListener('click',function(e){ var m=document.getElementById('ws
           CRMW.toast('🔄 '+_raLabel+'（来自离线坐席 '+(_ra.from_agent||'?')+'）','#0f766e');
           try{ document.dispatchEvent(new CustomEvent('draft_reassigned',{detail:_ra})); }catch(_){}
         }
+      }
       // P24：通知中心 — 所有重要事件写入铃铛
       if(msg && ['inbox_message','draft_sla_breach','draft_reassigned','anomaly_alert','sla_alert','escalation','queue_alert','stage_advance','stage_advance_pending','stage_downgrade','stage_reunion','stage_sync','workflow_step','workflow_execution_completed','workflow_execution_failed','workflow_execution_cancelled'].indexOf(msg.type)>=0){
         if(window.__wsNotif) window.__wsNotif.add(msg);
+      }
+      // 私聊新消息：提示音 + 弹窗（群组改走「群组动态」，由引擎按本地偏好决定）
+      if(msg && msg.type==='inbox_message' && window.__wsNotify){
+        try{ window.__wsNotify.onInboxMessage(msg.data||{}); }catch(_){}
       }
       // P3：auto_assign 自动派单 → 仅「被分配到的坐席」收到 toast（可点开聚焦该会话）
       if(msg && msg.type==='conversation_claim' && msg.data && msg.data.action==='auto_claimed'){
@@ -675,14 +731,21 @@ document.addEventListener('click',function(e){ var m=document.getElementById('ws
 
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
+  var _grpOpen = false;
   var _TYPE_META = {
-    inbox_message:  { icon:'💬', bg:'#dbeafe', label:'新消息' },
-    draft_sla_breach:{ icon:'⏰', bg:'#fee2e2', label:'草稿超时' },
-    draft_reassigned:{ icon:'🔄', bg:'#d1fae5', label:'草稿转派' },
-    anomaly_alert:  { icon:'📊', bg:'#fef3c7', label:'异常告警' },
-    sla_alert:      { icon:'⚠️', bg:'#fee2e2', label:'SLA 告警' },
-    escalation:     { icon:'🔔', bg:'#ede9fe', label:'升级告警' },
+    inbox_message:  { icon:'💬', bg:'#dbeafe', label:'新消息',  accent:'#3b82f6' },
+    draft_sla_breach:{ icon:'⏰', bg:'#fee2e2', label:'草稿超时', accent:'#dc2626' },
+    draft_reassigned:{ icon:'🔄', bg:'#d1fae5', label:'草稿转派', accent:'#0f766e' },
+    anomaly_alert:  { icon:'📊', bg:'#fef3c7', label:'异常告警', accent:'#d97706' },
+    sla_alert:      { icon:'⚠️', bg:'#fee2e2', label:'SLA 告警', accent:'#dc2626' },
+    escalation:     { icon:'🔔', bg:'#ede9fe', label:'升级告警', accent:'#7c3aed' },
   };
+  // 群组动态：inbox_message 且会话类型为群组/频道 → 折叠展示、不计未读、不打扰
+  function _isGroup(n){
+    if(!n || n.type!=='inbox_message') return false;
+    var ct = String((n.data||{}).chat_type||'').toLowerCase();
+    return ct==='group' || ct==='channel';
+  }
 
   function _fmtTs(ts){
     if(!ts) return '';
@@ -695,45 +758,59 @@ document.addEventListener('click',function(e){ var m=document.getElementById('ws
     return d.getMonth()+1+'月'+d.getDate()+'日';
   }
 
+  function _renderItem(n){
+    var meta = _TYPE_META[n.type] || { icon:'📌', bg:'#f3f4f6', label:n.type||'通知', accent:'transparent' };
+    var ts = n._notif_ts || 0;
+    var unread = ts > _readAt;
+    var d = n.data || {};
+    var title = meta.label;
+    var sub = '';
+    if(n.type==='inbox_message'){
+      sub = (d.name||d.display_name||d.chat_key||'?') + '：' + (d.preview||d.text||'').slice(0,40);
+    } else if(n.type==='sla_alert'){
+      sub = '客户「'+(d.name||'?')+'」等待 '+(d.wait_min||Math.round((d.wait_sec||0)/60))+'分钟';
+    } else if(n.type==='anomaly_alert'){
+      sub = (d.metric||'指标')+' 异常：'+(d.message||d.desc||'').slice(0,40);
+    } else if(n.type==='escalation'){
+      sub = '客户「'+(d.name||'?')+'」升级';
+    } else if(n.type==='draft_sla_breach'){
+      sub = '草稿等待 '+(d.wait_min||'?')+'分钟未审批';
+    } else if(n.type==='draft_reassigned'){
+      sub = '转派给 '+(d.to_agent_name||d.to_agent||'?');
+    }
+    return '<div class="ws-notif-item'+(unread?' unread':'')+'" style="border-left-color:'+(meta.accent||'transparent')+';" onclick="window.__wsNotif.click(\''+esc(JSON.stringify(n).replace(/'/g,'\\'+"'"))+'\')">'
+      +'<div class="ws-notif-icon" style="background:'+meta.bg+'">'+meta.icon+'</div>'
+      +'<div class="ws-notif-body">'
+        +'<div class="ws-notif-title">'+esc(title)+'</div>'
+        +'<div class="ws-notif-sub">'+esc(sub)+'</div>'
+      +'</div>'
+      +'<div class="ws-notif-ts">'+_fmtTs(ts)+'</div>'
+      +'</div>';
+  }
+
   function _renderNotif(){
     if(!list) return;
-    if(!_notifications.length){
-      list.innerHTML = '<div class="ws-notif-empty">暂无通知</div>';
-      return;
+    var all = _notifications.slice().reverse();
+    var main = all.filter(function(n){ return !_isGroup(n); }).slice(0,50);
+    var groups = all.filter(_isGroup).slice(0,50);
+    var html = '';
+    html += main.length ? main.map(_renderItem).join('')
+                        : '<div class="ws-notif-empty">暂无通知</div>';
+    if(groups.length){
+      html += '<div class="ws-notif-grp-hdr" id="ws-notif-grp-hdr">'
+        +'<span>👥 群组动态 '+groups.length+'</span>'
+        +'<span class="ws-notif-grp-cv">'+(_grpOpen?'收起 ▲':'展开 ▼')+'</span></div>'
+        +'<div class="ws-notif-grp-list" style="display:'+(_grpOpen?'block':'none')+';">'
+        + groups.map(_renderItem).join('') + '</div>';
     }
-    list.innerHTML = _notifications.slice().reverse().slice(0,50).map(function(n){
-      var meta = _TYPE_META[n.type] || { icon:'📌', bg:'#f3f4f6', label:n.type||'通知' };
-      var ts = n._notif_ts || 0;
-      var unread = ts > _readAt;
-      var d = n.data || {};
-      var title = meta.label;
-      var sub = '';
-      if(n.type==='inbox_message'){
-        sub = (d.display_name||d.chat_key||'?') + '：' + (d.text||'').slice(0,40);
-      } else if(n.type==='sla_alert'){
-        sub = '客户「'+(d.name||'?')+'」等待 '+(d.wait_min||Math.round((d.wait_sec||0)/60))+'分钟';
-      } else if(n.type==='anomaly_alert'){
-        sub = (d.metric||'指标')+' 异常：'+(d.message||d.desc||'').slice(0,40);
-      } else if(n.type==='escalation'){
-        sub = '客户「'+(d.name||'?')+'」升级';
-      } else if(n.type==='draft_sla_breach'){
-        sub = '草稿等待 '+(d.wait_min||'?')+'分钟未审批';
-      } else if(n.type==='draft_reassigned'){
-        sub = '转派给 '+(d.to_agent_name||d.to_agent||'?');
-      }
-      return '<div class="ws-notif-item'+(unread?' unread':'')+'" onclick="window.__wsNotif.click(\''+esc(JSON.stringify(n).replace(/'/g,'\\'+"'"))+'\')">'
-        +'<div class="ws-notif-icon" style="background:'+meta.bg+'">'+meta.icon+'</div>'
-        +'<div class="ws-notif-body">'
-          +'<div class="ws-notif-title">'+esc(title)+'</div>'
-          +'<div class="ws-notif-sub">'+esc(sub)+'</div>'
-        +'</div>'
-        +'<div class="ws-notif-ts">'+_fmtTs(ts)+'</div>'
-        +'</div>';
-    }).join('');
+    list.innerHTML = html;
+    var gh = document.getElementById('ws-notif-grp-hdr');
+    if(gh) gh.addEventListener('click', function(){ _grpOpen=!_grpOpen; _renderNotif(); });
   }
 
   function _updateBadge(){
-    var unread = _notifications.filter(function(n){ return (n._notif_ts||0) > _readAt; }).length;
+    // 群组动态不计未读（被动展示，不打扰）
+    var unread = _notifications.filter(function(n){ return (n._notif_ts||0) > _readAt && !_isGroup(n); }).length;
     if(!badge) return;
     badge.textContent = unread > 99 ? '99+' : String(unread);
     badge.style.display = unread ? 'block' : 'none';
@@ -806,6 +883,102 @@ document.addEventListener('click',function(e){ var m=document.getElementById('ws
       _toggle();
     },
     reload: _loadNotifications,
+  };
+})();
+
+// 私聊新消息通知引擎：提示音（WebAudio 合成）+ 弹窗（系统通知/应用内提示）。
+// 偏好存 localStorage（本机级、跨设备不同步），群组默认不打扰（改走「群组动态」）。
+window.__wsNotify = (function(){
+  var LS_KEY='ws_notify_prefs_v1';
+  var DEF={sound:true, volume:0.6, popup:'auto', groups:false};
+  function load(){ try{ return Object.assign({},DEF,JSON.parse(localStorage.getItem(LS_KEY)||'{}')); }catch(_){ return Object.assign({},DEF); } }
+  function save(p){ try{ localStorage.setItem(LS_KEY, JSON.stringify(p)); }catch(_){ } }
+  var prefs=load();
+  var _ctx=null, _unlocked=false;
+  function _audioCtx(){ if(_ctx) return _ctx; try{ _ctx=new (window.AudioContext||window.webkitAudioContext)(); }catch(_){ _ctx=null; } return _ctx; }
+  // 浏览器自动播放策略：首次用户手势后才允许出声 → 监听一次交互解锁
+  function _unlock(){ if(_unlocked) return; var c=_audioCtx(); if(c){ try{ if(c.state==='suspended') c.resume(); }catch(_){} _unlocked=true; } }
+  document.addEventListener('click', _unlock);
+  document.addEventListener('keydown', _unlock);
+  function _beep(urgent){
+    if(prefs.sound===false) return;
+    var c=_audioCtx(); if(!c) return;
+    try{ if(c.state==='suspended') c.resume(); }catch(_){}
+    var vol=Math.max(0, Math.min(1, prefs.volume==null?0.6:prefs.volume));
+    if(vol<=0) return;
+    function tone(freq, start, dur){
+      try{
+        var o=c.createOscillator(), g=c.createGain();
+        o.type='sine'; o.frequency.value=freq;
+        o.connect(g); g.connect(c.destination);
+        var t0=c.currentTime+start;
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(vol*0.6, t0+0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+        o.start(t0); o.stop(t0+dur+0.02);
+      }catch(_){}
+    }
+    if(urgent){ tone(880,0,0.16); tone(660,0.18,0.24); }
+    else { tone(740,0,0.12); tone(988,0.10,0.18); }
+  }
+  // 系统/桌面通知：优先 Electron 壳原生（shell.notify），否则浏览器 Notification。
+  function _desktop(title, body, onclick){
+    try{
+      if(window.shell && typeof window.shell.notify==='function'){
+        window.shell.notify({title:title, body:body}); return true;
+      }
+    }catch(_){}
+    if(!('Notification' in window)) return false;
+    if(Notification.permission==='granted'){
+      try{
+        var n=new Notification(title,{body:String(body||''), tag:'ws-inbox', renotify:true});
+        n.onclick=function(){ try{ window.focus(); }catch(_){} if(onclick) onclick(); n.close(); };
+        return true;
+      }catch(_){ return false; }
+    }
+    if(Notification.permission!=='denied'){
+      Notification.requestPermission().then(function(p){ if(p==='granted') _desktop(title,body,onclick); });
+    }
+    return false;
+  }
+  function _toastGo(title, body, go){
+    var el=CRMW.toast('💬 '+title+'：'+String(body||'').slice(0,40), '#2563eb');
+    if(el && go){ el.style.cursor='pointer'; el.onclick=go; }
+  }
+  function onInboxMessage(d){
+    d=d||{};
+    if(String(d.direction||'in')==='out') return;
+    var ct=String(d.chat_type||'private').toLowerCase();
+    var isGroup=(ct==='group'||ct==='channel');
+    if(isGroup && !prefs.groups) return;           // 群组默认不打扰
+    // 正在查看的会话不打扰（unified_inbox 会维护 window.__wsActiveConvId）
+    if(window.__wsActiveConvId && d.conversation_id && String(window.__wsActiveConvId)===String(d.conversation_id)) return;
+    _beep(false);
+    var mode=prefs.popup||'auto';
+    if(mode==='off') return;
+    var title=String(d.name||d.display_name||d.chat_key||'新消息');
+    var body=String(d.preview||d.text||'');
+    var go=function(){ try{ sessionStorage.setItem('ws_focus_conv', d.conversation_id||''); }catch(_){} if(location.pathname.indexOf('/workspace')<0) location.href='/workspace'; };
+    if(mode==='toast'){ _toastGo(title, body, go); return; }
+    if(mode==='desktop'){ if(!_desktop('💬 '+title, body, go)) _toastGo(title, body, go); return; }
+    // auto：页面在后台 → 系统通知；前台 → 应用内提示
+    if(document.hidden){ if(!_desktop('💬 '+title, body, go)) _toastGo(title, body, go); }
+    else { _toastGo(title, body, go); }
+  }
+  return {
+    get:function(){ return Object.assign({},prefs); },
+    set:function(np){ prefs=Object.assign({},prefs,np||{}); save(prefs); return Object.assign({},prefs); },
+    test:function(urgent){ _unlock(); _beep(!!urgent); },
+    ensureDesktopPerm:function(cb){
+      try{
+        if(window.shell && typeof window.shell.notify==='function'){ cb&&cb(true); return; }
+        if(!('Notification' in window)){ cb&&cb(false); return; }
+        if(Notification.permission==='granted'){ cb&&cb(true); return; }
+        if(Notification.permission==='denied'){ cb&&cb(false); return; }
+        Notification.requestPermission().then(function(p){ cb&&cb(p==='granted'); });
+      }catch(_){ cb&&cb(false); }
+    },
+    onInboxMessage:onInboxMessage,
   };
 })();
 

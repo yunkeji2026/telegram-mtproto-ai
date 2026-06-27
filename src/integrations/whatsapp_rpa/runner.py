@@ -3410,9 +3410,15 @@ class WhatsAppRpaRunner:
                 )
             except Exception:
                 pass
-        logger.warning(
+        # no_adb_device 是无设备时的已知稳态，每个轮询周期都触发；连续相同则降到
+        # DEBUG，避免刷屏（首次出现/设备恢复后第一条仍按 WARNING 记，便于排障）。
+        _step = result.get("step")
+        _absent_repeat = (_step == "no_adb_device"
+                          and getattr(self, "_last_finish_step", "") == "no_adb_device")
+        self._last_finish_step = _step
+        (logger.debug if _absent_repeat else logger.warning)(
             "[wa_rpa] step=%s ok=%s chat=%s peer_len=%d took=%dms err=%s",
-            result.get("step"), result.get("ok"),
+            _step, result.get("ok"),
             result.get("chat_key", "")[:40],
             len(result.get("peer_text") or ""),
             result["total_ms"],

@@ -3,7 +3,15 @@
     "base_url": "http://127.0.0.1:18799",
     "token": "admin",
     "user": "",
-    "pass": ""
+    "pass": "",
+    "spawn": {
+      "enabled": true,
+      "_note": "桌面自动拉起后端（免手动起 Python）。拉起前先探活：后端已在跑则复用、不重复拉起（零回归）。enabled=false 则完全由用户自管。发布态优先用 resources/backend/backend(.exe) 自包含二进制；开发态回退系统 Python 跑仓库根 main.py。",
+      "command": "",
+      "args": [],
+      "cwd": "",
+      "python": ""
+    }
   },
   "translate": {
     "target_lang": "zh",

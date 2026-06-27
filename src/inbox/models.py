@@ -29,6 +29,7 @@ class InboxConversation:
     last_ts: float = 0.0
     unread: int = 0
     contact_id: str = ""
+    chat_type: str = "private"  # private / group / channel（群组不进升级告警）
 
 
 @dataclass

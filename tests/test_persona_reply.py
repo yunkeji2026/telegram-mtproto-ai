@@ -268,3 +268,78 @@ async def test_persona_reply_target_lang_used_as_body_lang_when_no_reply_lang():
     )
     assert out["reply_lang"] == "en"
     assert ai.last_ctx["reply_lang"] == "en"
+
+
+# ── 统一规则引擎接线（彻底对齐：优先 generate_inbox_draft）───────────────
+
+class _FakeSMUnified(_FakeSM):
+    """带统一引擎 + config 的 SM 替身。
+
+    记录是否调用统一引擎 / 是否走了直连记忆写回，验证：
+      - 默认走 generate_inbox_draft 并透传入参
+      - 统一引擎已写记忆 → 不再触发 persona_reply 文末的 _episodic_memory_extract_async
+    """
+
+    def __init__(self, ai, *, unified=True):
+        super().__init__(ai)
+        self.config = SimpleNamespace(config={
+            "inbox": {"auto_draft": {"unified_pipeline": unified}}
+        })
+        self.inbox_draft_calls = []
+        self.episodic_writeback_calls = []
+
+    async def generate_inbox_draft(self, *, text, chat_key, platform,
+                                   history=None, persona_id="", reply_lang=""):
+        self.inbox_draft_calls.append({
+            "text": text, "chat_key": chat_key, "platform": platform,
+            "persona_id": persona_id, "reply_lang": reply_lang,
+            "history_len": len(history or []),
+        })
+        return {"reply": f"[统一]{text}", "intent": "unified_intent"}
+
+    async def _episodic_memory_extract_async(self, *a, **k):
+        self.episodic_writeback_calls.append((a, k))
+
+
+@pytest.mark.asyncio
+async def test_persona_reply_prefers_unified_engine():
+    """SM 暴露 generate_inbox_draft 且 flag 开 → 走统一引擎，入参透传，记忆不双写。"""
+    ai = _FakeAI()
+    sm = _FakeSMUnified(ai)
+    app = _app(skill_manager=sm, ai_client=ai, kb_store=None,
+               telegram_client=None, translation_service=None)
+    history, last = normalize_history([{"direction": "in", "text": "我叫Jun，记得吗"}])
+    out = await generate_persona_reply(
+        app=app, platform="telegram", chat_key="7340576921",
+        last_inbound=last, history=history, persona_id="p1",
+    )
+    assert out["ok"] is True
+    assert out["reply"] == "[统一]我叫Jun，记得吗"
+    assert out["intent"] == "unified_intent"
+    assert len(sm.inbox_draft_calls) == 1
+    call = sm.inbox_draft_calls[0]
+    assert call["chat_key"] == "7340576921"
+    assert call["platform"] == "telegram"
+    assert call["persona_id"] == "p1"
+    # 统一引擎自带记忆写回 → persona_reply 不应再触发一次（避免双写）
+    assert sm.episodic_writeback_calls == []
+    # 统一引擎主路径不应回落到直连 ai_client
+    assert ai.last_ctx is None
+
+
+@pytest.mark.asyncio
+async def test_persona_reply_unified_flag_off_falls_back_to_direct():
+    """flag=false → 跳过统一引擎，回落直连产线（ai_client 被调用）。"""
+    ai = _FakeAI()
+    sm = _FakeSMUnified(ai, unified=False)
+    app = _app(skill_manager=sm, ai_client=ai, kb_store=None,
+               telegram_client=None, translation_service=None)
+    history, last = normalize_history([{"direction": "in", "text": "在吗"}])
+    out = await generate_persona_reply(
+        app=app, platform="telegram", chat_key="r10",
+        last_inbound=last, history=history,
+    )
+    assert out["ok"] is True
+    assert out["reply"] == "[人设]在吗"        # 直连路径产物
+    assert sm.inbox_draft_calls == []           # 未走统一引擎
+    assert ai.last_ctx is not None              # 直连 ai_client 被调用

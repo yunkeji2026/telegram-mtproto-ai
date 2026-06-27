@@ -218,6 +218,7 @@ web_chat:
 
 # Web 管理后台（显示名、侧边栏标题；LINE RPA 提示中的「系统」名称亦取此字段）
 web_admin:
+  enabled: true                  # 总开关：统一收件箱 / 翻译 / 桌面壳 D1/D4 路由均挂其下，关则后端不开 HTTP
   site_name: 华灵科技客户转化聊天系统
   host: 127.0.0.1
   port: 18787
@@ -1401,16 +1402,27 @@ workspace:
 inbox:
   enabled: true                      # 安全默认开；如需保守可设 false（全程走实时聚合）
   # db_path: config/inbox.db         # 可选：自定义 db 位置（相对路径基于 config_path）
-  # A1 读路径灰度：收件箱列表 /api/unified-inbox/chats 的数据源。
-  #   false（默认）= 实时聚合各平台（原行为）；
-  #   true         = 改从统一 store 读（跨平台/跨重启持久；仍会先跑实时聚合做旁路 ingest）。
-  # 注：thread/profile 端点仍走实时聚合；列表切 store 后历史survive 重启。store 不可用自动回落。
-  read_from_store: false
+  # A1 读路径：收件箱列表 /api/unified-inbox/chats 与会话 /api/unified-inbox/thread 的数据源。
+  #   true（默认，A1 已灰度转默认）= 从统一 store 读（跨平台/跨重启持久；
+  #     每次请求仍先跑实时聚合做旁路 ingest 再读 store，故对当前数据「行为等价」于实时聚合，
+  #     且额外解锁实时窗口外的历史会话/SLA）；列表 account_label 借 live 同源回填。
+  #   false = 全程实时聚合各平台（保守原行为）。
+  # store 不可用 / 该会话 store 无消息 → 自动回落实时聚合。代码缺省（无 config 时）仍为 false。
+  read_from_store: true
   # Phase 6-8 SLA 阈值（秒）：客户消息未回复时长分级。
   #   warn = 黄色警告（会话列表 ⏱ 变橙、计入"SLA 超时"）；
   #   crit = 红色严重（变红加粗、计入"严重超时"）；首响达标率以 warn 为准。
   sla_warn_sec: 1800                  # 默认 30 分钟
   sla_crit_sec: 7200                  # 默认 2 小时
+
+  # ── 告警分流：群组/频道不进升级 & SLA 告警 ──────────────────────
+  # 群组/频道消息不抢回复时效，若也走升级告警会把真正要抢的私聊客户淹没在噪声里。
+  # exclude_groups: true（默认）= 群组/频道从 SLA 徽标、升级队列、下钻清单中剔除，
+  #   改由前端「通知中心 → 群组动态」被动展示（不发声、不弹窗、不计未读）。
+  #   会话类型来自 conversations.chat_type（ingest 时按平台/source 自动判定，
+  #   Telegram 负数 chat_id 即群组）。设为 false 恢复旧行为（群组也告警）。
+  alerts:
+    exclude_groups: true
 
   # ── E2 自动草稿生成（Auto-Draft Pipeline）──────────────────────
   # 当新入站消息到达时，自动分析风险并生成 AI 回复草稿，供坐席审批。

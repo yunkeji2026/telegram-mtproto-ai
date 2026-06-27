@@ -663,6 +663,7 @@
 /* ===== Phase 14: 会话标签 ===== */
 .conv-tags-row{display:flex;flex-wrap:wrap;gap:3px;margin-top:3px;}
 .conv-tag-chip{display:inline-flex;align-items:center;gap:3px;padding:1px 6px;border-radius:10px;font-size:10px;font-weight:600;background:#e0f2fe;color:#0369a1;line-height:1.5;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.conv-group-tag{display:inline-block;padding:0 5px;border-radius:6px;font-size:9px;font-weight:700;background:#e5e7eb;color:#6b7280;vertical-align:middle;line-height:15px;margin-left:2px;}
 .conv-tag-chip.archived{background:var(--bg-soft);color:#64748b;}
 /* 自动派单：建议你接管（仅当 suggested_agent 指向当前坐席且未认领时显示）*/
 .conv-suggest-row{margin-top:3px;}
@@ -1699,6 +1700,8 @@ function _buildConvItemDom(c, isSel){
   const tags=c.conv_tags||[];
   const tagsHtml=tags.length?`<div class="conv-tags-row">${tags.slice(0,3).map(t=>`<span class="conv-tag-chip">${esc(t)}</span>`).join('')}${tags.length>3?`<span class="conv-tag-chip" style="opacity:.6;">+${tags.length-3}</span>`:''}</div>`:'';
   const archiveIcon=c.archived?'<span style="font-size:10px;color:#94a3b8;" title="已归档">📦</span>':'';
+  const _ctype=String(c.chat_type||'').toLowerCase();
+  const groupTag=(_ctype==='group'||_ctype==='channel')?`<span class="conv-group-tag" title="群组/频道消息不计入升级告警">${_ctype==='channel'?'频道':'群'}</span>`:'';
   const suggestHtml=_convSuggestMine(c)?`<div class="conv-suggest-row"><span class="conv-suggest-chip" title="系统建议你接管这条未认领会话">⚡ 建议你接管</span></div>`:'';
   // B-2：今日命中风控转人工的会话，列表挂琥珀风险 chip（点开即处理）
   const riskN=Number(c.risk_blocked||0);
@@ -1729,7 +1732,7 @@ function _buildConvItemDom(c, isSel){
       <div class="conv-avatar-badge" style="background:${clr};">${platIcon(c.platform)}</div>
     </div>
     <div class="conv-body">
-      <div class="conv-name">${esc(c.name||c.chat_key||'未知')} ${archiveIcon}</div>
+      <div class="conv-name">${esc(c.name||c.chat_key||'未知')} ${groupTag}${archiveIcon}</div>
       <div class="conv-preview">${_previewHtml(c)}</div>
       ${tagsHtml}
       ${suggestHtml}
@@ -2023,6 +2026,8 @@ function selectChat(key){
   const c=allChats.find(c=>convKey(c)===key);
   if(!c) return;
   selectedKey=key; selectedChat=c;
+  // 通知引擎据此跳过「正在查看的会话」的提示音/弹窗
+  try{ window.__wsActiveConvId = c.conversation_id || convKey(c); }catch(_){}
   threadMsgs=[];
   document.getElementById('chat-empty').style.display='none';
   const cc=document.getElementById('chat-content');
@@ -2410,6 +2415,7 @@ async function toggleArchive(){
     document.getElementById('chat-content').style.display='none';
     document.getElementById('chat-panel').classList.remove('mobile-open');
     selectedChat=null; selectedKey=null;
+    try{ window.__wsActiveConvId=null; }catch(_){}
   }
   applyFilters();
   if(!cid) return;
@@ -2429,6 +2435,7 @@ function closeMobileChat(){
   document.getElementById('chat-empty').style.display='';
   document.getElementById('chat-content').style.display='none';
   selectedChat=null; selectedKey=null;
+  try{ window.__wsActiveConvId=null; }catch(_){}
   applyFilters(); // 重新渲染以清除选中高亮
 }
 

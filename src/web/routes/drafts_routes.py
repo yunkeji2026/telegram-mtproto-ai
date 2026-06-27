@@ -142,6 +142,12 @@ def register_drafts_routes(app, *, api_auth):
             snap["voice"] = _vms()  # 全自动语音：sent/fallback/last_reason/last_duration_ms
         except Exception:
             pass
+        try:
+            # 统一草稿引擎规则栈生效观测（记忆/情感/陪伴/慢思考/守卫/重试命中）
+            from src.monitoring.metrics_store import get_metrics_store
+            snap["draft_pipeline"] = get_metrics_store().get_inbox_draft_metrics()
+        except Exception:
+            pass
         return {"ok": True, "worker": snap}
 
     @app.get("/api/drafts/audit")

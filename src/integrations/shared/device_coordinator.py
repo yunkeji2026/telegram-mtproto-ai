@@ -57,6 +57,7 @@ class PlatformRunner:
         self.account_id = account_id
         self.last_run_ts: float = 0.0
         self.last_result: Dict[str, Any] = {}
+        self.last_step: str = ""             # 上一轮 step（用于「设备缺失」稳态日志降噪）
         # 熔断与统计
         self.consecutive_fail: int = 0       # 连续失败次数
         self.skip_until: float = 0.0         # 熔断：在此时刻前跳过
@@ -278,7 +279,10 @@ class DeviceCoordinator:
                 if self._stop_evt.is_set():
                     break
                 badge_count = badges.get(pr.platform_type, 0)
-                logger.warning(
+                # 设备缺失（no_adb_device）是已知稳态：上一轮已是该 step 则降到 DEBUG，
+                # 避免无设备时每个轮询周期都刷 WARNING（首次/恢复仍按 WARNING 记）。
+                _absent_repeat = pr.last_step == "no_adb_device"
+                (logger.debug if _absent_repeat else logger.warning)(
                     "[DeviceCoordinator] %s → %s (badge=%d, fail_streak=%d)",
                     self._label, pr.platform_type, badge_count, pr.consecutive_fail,
                 )
@@ -339,11 +343,14 @@ class DeviceCoordinator:
                         pr.consecutive_fail += 1
                         self._maybe_trip_breaker(pr)
 
-                    logger.warning(
+                    # no_adb_device 稳态降噪：连续相同则 DEBUG，转入/恢复仍 WARNING
+                    _absent_repeat_post = (step == "no_adb_device" and _absent_repeat)
+                    (logger.debug if _absent_repeat_post else logger.warning)(
                         "[DeviceCoordinator] %s %s step=%s ok=%s replies=%d elapsed=%.1fs",
                         self._label, pr.platform_type, step, ok,
                         pr.total_replies, time.time() - t0,
                     )
+                    pr.last_step = step
                 except asyncio.TimeoutError:
                     pr.consecutive_fail += 1
                     self._maybe_trip_breaker(pr)
@@ -373,8 +380,11 @@ class DeviceCoordinator:
             now = time.time()
             backoff = min(300.0, 30.0 * (2 ** (pr.consecutive_fail - self._cb_threshold)))
             pr.skip_until = now + backoff
+            # 仅在「首次跳闸」记 WARNING；已处熔断态的重复跳闸降到 DEBUG（无设备时
+            # 每个 backoff 周期都会重新失败跳闸，否则照样刷屏）。健康告警另有冷却。
+            _first_trip = not pr.was_circuit_open
             pr.was_circuit_open = True
-            logger.warning(
+            (logger.warning if _first_trip else logger.debug)(
                 "[DeviceCoordinator] %s %s 熔断触发（连续失败 %d 次），%.0fs 后重试",
                 self._label, pr.platform_type, pr.consecutive_fail, backoff,
             )

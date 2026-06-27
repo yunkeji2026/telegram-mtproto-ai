@@ -86,7 +86,8 @@ def test_store_row_to_chat_shape():
         "last_text": "こんにちは", "last_ts": 100, "unread": 2,
         "risk_level": "low",
     }
-    chat = store_row_to_chat(row, automation_mode="auto_ai", message_count=3)
+    chat = store_row_to_chat(row, automation_mode="auto_ai", message_count=3,
+                             account_label="LINE-A")
     assert chat["platform"] == "line"
     assert chat["platform_name"] == "LINE"
     assert chat["name"] == "Line User"
@@ -97,6 +98,22 @@ def test_store_row_to_chat_shape():
     assert chat["risk"]["level"] == "low"
     assert chat["from_store"] is True
     assert chat["send_modes"] == ["manual", "review", "multi_choice", "auto_ai"]
+    # A1 等价硬化：account_label 用传入友好名（非账号 id）；last_message/messages 由末条重建
+    assert chat["account_label"] == "LINE-A"
+    assert chat["last_message"] is not None
+    assert chat["last_message"]["text"] == "こんにちは"
+    assert len(chat["messages"]) == 1 and chat["messages"][0]["text"] == "こんにちは"
+
+
+def test_store_row_to_chat_no_label_falls_back_account_id():
+    chat = store_row_to_chat({"platform": "line", "account_id": "acc7", "chat_key": "k"})
+    assert chat["account_label"] == "acc7"
+
+
+def test_store_row_to_chat_empty_last_text_no_messages():
+    chat = store_row_to_chat({"platform": "line", "account_id": "a", "chat_key": "k"})
+    assert chat["last_message"] is None
+    assert chat["messages"] == []
 
 
 def test_store_row_to_chat_bad_mode_defaults_review():
@@ -155,6 +172,43 @@ def test_shadow_read_consistency(tmp_path):
     # store 视图应覆盖实时聚合产生的全部会话（事实源已落库）
     assert live_ids, "live aggregation should produce conversations"
     assert live_ids <= stored_ids, f"store 缺失会话: {live_ids - stored_ids}"
+    store.close()
+
+
+def test_chats_live_store_equivalence(tmp_path):
+    """A1「灰度转默认」强等价：同一 fixture 下 flag off(live) 与 flag on(store) 对每个
+    会话的关键展示字段（name/last_msg/last_ts/account_label/last_message.text/language）一致。
+
+    比 shadow（仅 ID 覆盖）更强——验收要求「/chats 行为不变」。先跑 live 触发旁路 ingest，
+    再读 store；store 读路径借 live 派生 label 回填，应与 live 行逐字段相等。
+    """
+    store = InboxStore(tmp_path / "inbox.db")
+    c_live = _client(inbox_store=store, read_from_store=False)
+    live = c_live.get("/api/unified-inbox/chats?limit=20").json()["chats"]
+    c_store = _client(inbox_store=store, read_from_store=True)
+    stored = c_store.get("/api/unified-inbox/chats?limit=20").json()["chats"]
+
+    # 实时聚合对同一会话可能产出多行（如 Telegram 一条消息一行——历史窗口快照），
+    # store 收口为「每会话一行 + 末条」。取 live 每会话 last_ts 最大者作等价基准（= store 语义）。
+    live_by_id: dict = {}
+    for r in live:
+        cid = r["conversation_id"]
+        if cid not in live_by_id or (r.get("last_ts") or 0) >= (
+                live_by_id[cid].get("last_ts") or 0):
+            live_by_id[cid] = r
+    stored_by_id = {r["conversation_id"]: r for r in stored}
+    assert live_by_id, "live aggregation should produce conversations"
+
+    for cid, lr in live_by_id.items():
+        sr = stored_by_id.get(cid)
+        assert sr is not None, f"store 缺会话 {cid}"
+        for field in ("name", "last_msg", "last_ts", "account_label", "language"):
+            assert sr[field] == lr[field], (
+                f"{cid} 字段 {field} 不等: live={lr[field]!r} store={sr[field]!r}")
+        # last_message 末条文本两路径一致（store 由 last_text 重建）
+        ls = (lr.get("last_message") or {}).get("text", "")
+        ss = (sr.get("last_message") or {}).get("text", "")
+        assert ss == ls, f"{cid} last_message.text 不等: live={ls!r} store={ss!r}"
     store.close()
 
 

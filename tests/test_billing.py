@@ -72,6 +72,30 @@ def test_reconcile_flags_over_seats(tmp_path):
     store.close()
 
 
+def test_active_agents_excludes_system_actors(tmp_path):
+    """机器/系统 actor（autosend_worker / system）不应计入计费席位，否则
+    自动化跑量会把 active_agents 抬高触发 over_seats 误报。"""
+    store = InboxStore(tmp_path / "inbox.db")
+    since, _ = month_window(2026, 3)
+    ts = since + 100
+    store.record_draft_audit("d0", action="approved", agent_id="alice",
+                             conversation_id="c1", ts=ts)
+    store.record_draft_audit("d1", action="autosend", agent_id="autosend_worker",
+                             conversation_id="c1", ts=ts)
+    store.record_draft_audit("d2", action="autosend_failed", agent_id="system",
+                             conversation_id="c1", ts=ts)
+    stats = store.get_usage_stats(since, until_ts=since + 86400)
+    assert stats["active_agents"] == 1
+    assert stats["active_agent_ids"] == ["alice"]
+    # ai_calls 仍计全部处置行（含自动），只有席位口径排除机器 actor
+    assert stats["ai_calls"] == 3
+    stmt = compute_statement(store, 2026, 3,
+                             license_status={"plan": "basic", "seats": 2, "state": "active"})
+    assert stmt["reconcile"]["over_seats"] == 0
+    assert stmt["reconcile"]["within_quota"] is True
+    store.close()
+
+
 def test_reconcile_unlimited_seats(tmp_path):
     store = InboxStore(tmp_path / "inbox.db")
     since, _ = month_window(2026, 3)

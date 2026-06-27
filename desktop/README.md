@@ -51,7 +51,17 @@ rail 标签：
 
 ## 运行
 
-1. 先确保本仓库后端在跑：仓库根目录 `python main.py`（Web 在 `127.0.0.1:18787`）。
+> **后端自动拉起（P0）**：桌面启动时会自动拉起后端，**无需手动起 Python**。
+> 拉起前先探活——**若后端已在跑（你手动起的 / 上次残留）则复用，不重复拉起**（零回归）。
+> 发布态优先用随包二进制 `resources/backend/backend(.exe)`；开发态回退系统 Python 跑仓库根 `main.py`。
+> 后端日志落 `userData/logs/backend.log`。关闭自拉起：`config.json::backend.spawn.enabled=false`。
+>
+> **可写数据目录**：发布态后端的 config + dbs/logs 落 `userData/data/`（不写只读安装包）——
+> launcher 注入 `AITR_DATA_DIR`/`AITR_CONFIG_PATH` 并设 cwd，后端首次运行自播种 config。
+> 开发态行为不变（仍用仓库 `config/config.yaml`）。详见 [`build/README.md`](build/README.md)。
+> 首次启动会弹一次**设置向导**（界面语言 + 后台令牌），可跳过。
+
+1. （可选）也可手动先起后端：仓库根 `python main.py`。
 2. 配 `config.json`：`backend.base_url` / `backend.token`（默认与 `config.yaml::web_admin.auth_token` 一致，当前为 `admin`）。
 3. 装依赖并启动：
 
@@ -60,6 +70,12 @@ cd desktop
 npm install
 npm start        # 或 npm run dev 打开 DevTools
 ```
+
+## 打包分发（双击安装 / 自动更新）
+
+见 [`build/README.md`](build/README.md)：① `npm run build:backend`（PyInstaller 打后端 sidecar）
+→ ② `npm run dist:win` / `dist:mac`（electron-builder 出安装包，自动把后端二进制塞进 `resources/backend/`）。
+自动更新经 `electron-updater`（仅发布态，需把 `package.json::build.publish.url` 指向真实更新源）。
 
 4. 启动后默认停在 **📥 统一收件箱**（=后台 `/workspace`），WhatsApp/Messenger/LINE/Telegram
    聊天都在这里，和网页后台完全一致。后端未启动时会显示「重试连接」。

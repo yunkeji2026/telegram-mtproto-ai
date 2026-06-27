@@ -74,6 +74,38 @@ def _resolve_mobile_auto_openclaw_db(config, config_path) -> str:
     )
 
 
+def _telegram_configured(tg_cfg) -> bool:
+    """判断 Telegram 协议号是否「已真实配置」（区别于占位/缺省）。
+
+    打包/桌面自包含部署常用 config.example.yaml 自播种，其 telegram 为占位（YOUR_*）；
+    此时应跳过协议客户端初始化（否则用占位 api_id 连接会失败/挂起，挡住整个进程启动），
+    而统一收件箱 / 内嵌网页翻译 / RPA / QR 扫码登录协议号 均不依赖此 config 账号。
+    """
+    if not isinstance(tg_cfg, dict):
+        return False
+    api_id = str(tg_cfg.get("api_id") or "").strip()
+    api_hash = str(tg_cfg.get("api_hash") or "").strip()
+    phone = str(tg_cfg.get("phone_number") or "").strip()
+    if not api_id or not api_hash or not phone:
+        return False
+    # 占位值（example 模板）视为未配置
+    for v in (api_id, api_hash):
+        if v.upper().startswith("YOUR_"):
+            return False
+    return True
+
+
+def _is_desktop_mode(config_obj) -> bool:
+    """桌面/自包含模式开关：env ``AITR_DESKTOP_MODE`` 或 config ``app.desktop_mode``。
+
+    打开后强制跳过 config-Telegram 协议号初始化（即便填了真凭证），用于「纯桌面收件箱/翻译」形态。
+    """
+    if str(os.environ.get("AITR_DESKTOP_MODE") or "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    app_cfg = (config_obj or {}).get("app") if isinstance(config_obj, dict) else None
+    return bool(isinstance(app_cfg, dict) and app_cfg.get("desktop_mode", False))
+
+
 class AIChatAssistant:
     """AI聊天助手主类"""
     
@@ -253,41 +285,55 @@ class AIChatAssistant:
                 except Exception as _sync_ex:
                     self.logger.warning("[N5] 登录注册统一同步失败（忽略）: %s", _sync_ex)
 
-            _primary_ctx = None if _tg_registry is None else _tg_registry.primary()
-            _primary_cfg = _primary_ctx.account_cfg() if _primary_ctx else None
+            # ★ 桌面/自包含可启动：协议号未真实配置（占位 example）或显式桌面模式时，
+            #   跳过 config-Telegram 协议客户端初始化，让「纯收件箱/网页翻译」形态也能开机。
+            #   （QR 扫码登录协议号走 orchestrator，不依赖此 config 账号）
+            _tg_cfg = (self.config.config or {}).get("telegram", {})
+            _desktop_mode = _is_desktop_mode(self.config.config)
+            if _desktop_mode or not _telegram_configured(_tg_cfg):
+                self.telegram_client = None
+                self.telegram_clients = []
+                self.logger.info(
+                    "Telegram 协议号未配置%s，跳过协议客户端初始化；"
+                    "统一收件箱 / 内嵌网页翻译 / RPA / QR 登录不受影响",
+                    "（桌面模式）" if _desktop_mode else "",
+                )
+            else:
+                _primary_ctx = None if _tg_registry is None else _tg_registry.primary()
+                _primary_cfg = _primary_ctx.account_cfg() if _primary_ctx else None
 
-            self.telegram_client = TelegramClient(
-                config=self.config,
-                skill_manager=self.skill_manager,
-                ai_client=self.ai_client,
-                account_cfg=_primary_cfg,
-            )
-            await self.telegram_client.initialize()
-            self.telegram_clients = [self.telegram_client]
+                self.telegram_client = TelegramClient(
+                    config=self.config,
+                    skill_manager=self.skill_manager,
+                    ai_client=self.ai_client,
+                    account_cfg=_primary_cfg,
+                )
+                await self.telegram_client.initialize()
+                self.telegram_clients = [self.telegram_client]
 
-            if _tg_registry is not None and _tg_registry.is_multi_account():
-                for _ctx in _tg_registry.all_contexts()[1:]:
-                    try:
-                        _tc = TelegramClient(
-                            config=self.config,
-                            skill_manager=self.skill_manager,
-                            ai_client=self.ai_client,
-                            account_cfg=_ctx.account_cfg(),
-                        )
-                        await _tc.initialize()
-                        self.telegram_clients.append(_tc)
-                        self.logger.info(
-                            "Telegram 账号 [%s] 初始化成功", _ctx.account_id
-                        )
-                    except Exception as _tc_ex:
-                        self.logger.warning(
-                            "Telegram 账号 [%s] 初始化失败，跳过: %s",
-                            _ctx.account_id, _tc_ex,
-                        )
+                if _tg_registry is not None and _tg_registry.is_multi_account():
+                    for _ctx in _tg_registry.all_contexts()[1:]:
+                        try:
+                            _tc = TelegramClient(
+                                config=self.config,
+                                skill_manager=self.skill_manager,
+                                ai_client=self.ai_client,
+                                account_cfg=_ctx.account_cfg(),
+                            )
+                            await _tc.initialize()
+                            self.telegram_clients.append(_tc)
+                            self.logger.info(
+                                "Telegram 账号 [%s] 初始化成功", _ctx.account_id
+                            )
+                        except Exception as _tc_ex:
+                            self.logger.warning(
+                                "Telegram 账号 [%s] 初始化失败，跳过: %s",
+                                _ctx.account_id, _tc_ex,
+                            )
 
-            self.logger.info(
-                "Telegram 客户端初始化完成（%d 个账号）", len(self.telegram_clients)
-            )
+                self.logger.info(
+                    "Telegram 客户端初始化完成（%d 个账号）", len(self.telegram_clients)
+                )
             
             self.logger.info("✅ AI聊天助手初始化完成")
 
@@ -670,11 +716,15 @@ class AIChatAssistant:
                             )
                     except Exception:
                         self.logger.debug("配置告警写入审计跳过", exc_info=True)
-                    web_app = create_app(self.config, audit_store=audit,
-                                        boot_ts=self.telegram_client._boot_timestamp,
-                                        telegram_client=self.telegram_client,
-                                        event_tracker=self.telegram_client.event_tracker,
-                                        log_buffer=_log_buf)
+                    _tc_for_web = self.telegram_client
+                    web_app = create_app(
+                        self.config, audit_store=audit,
+                        boot_ts=(_tc_for_web._boot_timestamp
+                                 if _tc_for_web is not None else 0),
+                        telegram_client=_tc_for_web,
+                        event_tracker=(_tc_for_web.event_tracker
+                                       if _tc_for_web is not None else None),
+                        log_buffer=_log_buf)
                     self._web_app = web_app  # 供收件箱后台 ingest 轮询访问 state 上的各平台 service
                     # 翻译/意图等服务的兜底路径（inbox 未启用时）需要 ai_client，
                     # 否则 _get_translation_service 会建出无引擎的退化实例。
@@ -1517,27 +1567,34 @@ class AIChatAssistant:
                 # ★ 修复：telegram_client.start() 内部 await idle()，永不返回；
                 # 若直接 await 会阻塞后续 LINE/Messenger RPA 的 start()，
                 # 所以包装成后台 task，紧接着启动 RPA 服务，保持原日志语义不变。
-                self._telegram_task = asyncio.create_task(
-                    self.telegram_client.start(), name="telegram_client_start",
-                )
-                # 次要账号各自建独立 task
-                for _i, _tc in enumerate(self.telegram_clients[1:], 2):
-                    _t = asyncio.create_task(
-                        _tc.start(),
-                        name=f"telegram_client_start_{_tc.account_id}",
+                # 桌面/未配置协议号时 telegram_client 为 None，整段跳过。
+                if self.telegram_client is not None:
+                    self._telegram_task = asyncio.create_task(
+                        self.telegram_client.start(), name="telegram_client_start",
                     )
-                    self._secondary_tg_tasks.append(_t)
+                    # 次要账号各自建独立 task
+                    for _i, _tc in enumerate(self.telegram_clients[1:], 2):
+                        _t = asyncio.create_task(
+                            _tc.start(),
+                            name=f"telegram_client_start_{_tc.account_id}",
+                        )
+                        self._secondary_tg_tasks.append(_t)
+                        self.logger.info(
+                            "Telegram 账号 [%s] 已在后台启动", _tc.account_id
+                        )
+                    # 给主 telegram 几秒完成登录
+                    try:
+                        await asyncio.wait_for(
+                            self._wait_until_telegram_ready(), timeout=15.0
+                        )
+                    except asyncio.TimeoutError:
+                        self.logger.warning(
+                            "Telegram 客户端 15s 内未就绪，继续启动 RPA 服务（会在后台重试）"
+                        )
+                else:
                     self.logger.info(
-                        "Telegram 账号 [%s] 已在后台启动", _tc.account_id
-                    )
-                # 给主 telegram 几秒完成登录
-                try:
-                    await asyncio.wait_for(
-                        self._wait_until_telegram_ready(), timeout=15.0
-                    )
-                except asyncio.TimeoutError:
-                    self.logger.warning(
-                        "Telegram 客户端 15s 内未就绪，继续启动 RPA 服务（会在后台重试）"
+                        "无 Telegram 协议号（桌面/未配置），跳过 Telegram 启动；"
+                        "Web 后台 / 收件箱 / RPA 正常启动"
                     )
 
                 # 设置信号处理

@@ -296,7 +296,21 @@ class HealthWatchdog:
             self._last_billing_sig = sig
         else:
             if self._last_billing_sig:
+                # 本进程内 alert→green 的正常恢复：resolve + 外发恢复通知
                 self._emit_billing_recovery()
+            else:
+                # 进程刚起且当前无异常：静默 reconcile 掉上一进程遗留的 open 计费事件。
+                # （修复某计费异常后重启时，in-memory 签名为空，否则旧 red 事件会一直挂着，
+                #  既不在本进程内 emit 恢复，也无人关闭。）静默关闭，不外发恢复通知。
+                inbox = self._inbox()
+                if inbox is not None and hasattr(inbox, "resolve_open_incidents"):
+                    try:
+                        n = inbox.resolve_open_incidents(kind="billing") or 0
+                        if n:
+                            logger.info(
+                                "HealthWatchdog 启动 reconcile：关闭遗留计费事件 %d 条", n)
+                    except Exception:
+                        logger.debug("计费事件 reconcile 失败（已忽略）", exc_info=True)
             self._last_billing_sig = None
 
     def _compute_statement(self) -> Optional[Dict[str, Any]]:

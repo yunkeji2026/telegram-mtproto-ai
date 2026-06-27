@@ -32,6 +32,51 @@ def conv_id(platform: str, account_id: str, chat_key: str) -> str:
     return f"{platform}:{account_id}:{chat_key}"
 
 
+# 会话类型归一（私聊 / 群组 / 频道）。用于「群组不进升级告警、改走群组动态」分流。
+# 群/超级群/广播群统一归为 ``group``；频道单列 ``channel``；其余（含未知）回落 ``private``，
+# 因为告警侧对未知保守按私聊处理（宁可多提醒一个私聊，不可漏一个真客户）。
+_GROUP_SOURCE_TYPES = {"group", "supergroup", "gigagroup", "megagroup"}
+_PRIVATE_SOURCE_TYPES = {"private", "user", "bot", "dm", "direct"}
+
+
+def infer_chat_type(
+    platform: str, chat_key: str, source: Optional[Dict[str, Any]] = None
+) -> str:
+    """推断会话类型：返回 'private' | 'group' | 'channel'。
+
+    判定优先级（高→低）：
+    1. source 显式字段：``chat_type`` / ``is_group`` / ``peer_type``（各平台上游已带则直接信任）；
+    2. Telegram 启发式：群/超级群/频道的 chat_id 为**负数**（chat_key=str(chat_id)），
+       裸负号即判群组——覆盖 ``_recent_messages`` 不带类型字段的实况；
+    3. 默认 'private'（RPA 各平台收件箱基本为 1:1，且未知按私聊保守提醒）。
+    """
+    src = source if isinstance(source, dict) else {}
+    ct = str(src.get("chat_type") or "").strip().lower()
+    if ct:
+        if ct in _GROUP_SOURCE_TYPES:
+            return "group"
+        if ct == "channel":
+            return "channel"
+        if ct in _PRIVATE_SOURCE_TYPES:
+            return "private"
+    if "is_group" in src:
+        try:
+            if bool(src.get("is_group")):
+                return "group"
+        except Exception:  # noqa: BLE001
+            pass
+    pt = str(src.get("peer_type") or "").strip().lower()
+    if pt in _GROUP_SOURCE_TYPES:
+        return "group"
+    if pt == "channel":
+        return "channel"
+    if str(platform or "").lower() == "telegram":
+        ck = str(chat_key or "").strip()
+        if ck.startswith("-") and ck[1:].isdigit():
+            return "group"
+    return "private"
+
+
 # 各平台「可信消息 id」字段白名单（用于稳定去重）。
 # 刻意按平台精确取：例如 LINE 的 source 行常是**会话**行，其 `id` 是房间 id 而非
 # 消息 id，故 LINE 不取裸 `id`（避免把房间 id 误当消息 id 折叠整个会话）。
@@ -163,9 +208,16 @@ def normalize_chat(
     last_ts: Any = 0,
     unread: Any = 0,
     source: Optional[Dict[str, Any]] = None,
+    chat_type: str = "",
 ) -> Dict[str, Any]:
-    """把一条平台会话归一为统一 chat dict。"""
+    """把一条平台会话归一为统一 chat dict。
+
+    ``chat_type`` 留空则按平台/source 自动推断（private/group/channel），
+    供下游「群组不进升级告警、改走群组动态」分流。
+    """
     msg = message_obj(text=last_msg, ts=last_ts, direction="in", source=source)
+    ctype = (str(chat_type).strip().lower()
+             or infer_chat_type(platform, chat_key, source))
     return {
         "platform": platform,
         "platform_name": platform_name,
@@ -174,6 +226,7 @@ def normalize_chat(
         "chat_key": chat_key,
         "conversation_id": conv_id(platform, account_id, chat_key),
         "name": name,
+        "chat_type": ctype,
         "last_msg": last_msg,
         "last_ts": last_ts or 0,
         "unread": unread or 0,
@@ -194,12 +247,23 @@ def store_row_to_chat(
     *,
     automation_mode: str = "review",
     message_count: int = 0,
+    account_label: Optional[str] = None,
 ) -> Dict[str, Any]:
     """把 InboxStore.list_conversations 的一行映射回 unified_inbox 的 chat dict 形状。
 
     A1 读路径切换用：store 持久行 → 与实时聚合 `normalize_chat` 同形状的行，
-    使前端/下游零改动即可消费 store-backed 列表。store 不持久 source/messages，
-    故 source={} / messages=[]（线程与画像端点按需另取，列表视图不需要）。
+    使前端/下游零改动即可消费 store-backed 列表。
+
+    A1「灰度转默认」等价硬化：
+    - ``last_message`` / ``messages`` 由 ``last_text`` 重建（与 `normalize_chat` 同构：
+      ``[msg] if last_text else []``），使列表预览与实时聚合行为一致（前端读
+      ``last_message.text`` 的路径不再因 store 读为空而退化）；
+    - ``language`` 改为对 ``last_text`` 现场检测（与 live 的 ``msg["language"]`` 同源），
+      会话末条文本相同则两路径语言判定一致；store 持久 language 仅在无末条时兜底；
+    - ``account_label`` 由调用方按 (platform, account_id) 传入 live 同源 label（缺省回落
+      account_id），消除「列表显示账号 id 而非人设/标签名」的可视回归。
+    store 不持久 source（平台原始结构），故 source={}（列表视图不消费 source；
+    线程与画像端点按需另取）。
     """
     platform = str(row.get("platform") or "")
     account_id = str(row.get("account_id") or "default")
@@ -208,20 +272,29 @@ def store_row_to_chat(
     cid = str(row.get("conversation_id") or "") or conv_id(platform, account_id, chat_key)
     risk_level = str(row.get("risk_level") or "unknown")
     mode = automation_mode if automation_mode in SEND_MODES else "review"
+    # 与 normalize_chat 同构：有末条文本才建 last_message（direction 固定 in，对齐 live）
+    last_msg_obj = (
+        message_obj(text=last_text, ts=row.get("last_ts") or 0, direction="in")
+        if last_text else None
+    )
+    language = (last_msg_obj["language"] if last_msg_obj
+               else str(row.get("language") or "unknown"))
     return {
         "platform": platform,
         "platform_name": PLATFORM_DISPLAY.get(platform, platform.title() or platform),
         "account_id": account_id,
-        "account_label": account_id,
+        "account_label": str(account_label or account_id),
         "chat_key": chat_key,
         "conversation_id": cid,
         "name": str(row.get("display_name") or chat_key),
+        "chat_type": str(row.get("chat_type") or "")
+        or infer_chat_type(platform, chat_key),
         "last_msg": last_text,
         "last_ts": row.get("last_ts") or 0,
         "unread": int(row.get("unread") or 0),
-        "language": str(row.get("language") or "unknown"),
-        "last_message": None,
-        "messages": [],
+        "language": language,
+        "last_message": last_msg_obj,
+        "messages": [last_msg_obj] if last_msg_obj else [],
         "message_count": int(message_count or 0),
         "can_send": True,
         "send_modes": list(SEND_MODES),

@@ -4,15 +4,66 @@
   "private": true,
   "description": "桌面壳：嵌官方 web 客户端 + 注入点击翻译/智能回复（对接本仓库 FastAPI 后端）",
   "main": "main.js",
+  "author": "telegram-mtproto-ai",
   "scripts": {
     "copy-shared": "node copy-shared.js",
     "prestart": "node copy-shared.js",
     "predev": "node copy-shared.js",
     "start": "electron .",
     "dev": "electron . --dev",
-    "test": "node test/inject-status.test.js && node test/account-utils.test.js && node test/media-format.test.js && node test/webview-ua.test.js && node test/profiles.test.js && node test/fingerprint.test.js"
+    "build:backend": "python build/build_backend.py",
+    "predist": "node copy-shared.js",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "test": "node test/inject-status.test.js && node test/account-utils.test.js && node test/media-format.test.js && node test/webview-ua.test.js && node test/profiles.test.js && node test/fingerprint.test.js && node test/backend-launcher.test.js && node test/health-panel.test.js"
   },
   "devDependencies": {
-    "electron": "^31.0.0"
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
+  "build": {
+    "appId": "com.telegram-mtproto-ai.desktop",
+    "productName": "AI客服桌面端",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "**/*",
+      "!dist/**",
+      "!test/**",
+      "!build/**"
+    ],
+    "extraResources": [
+      {
+        "from": "build/backend-dist",
+        "to": "backend",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": ["nsis"],
+      "artifactName": "${productName}-${version}-setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
+    },
+    "mac": {
+      "target": ["dmg"],
+      "category": "public.app-category.business",
+      "artifactName": "${productName}-${version}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://example.com/updates/"
+      }
+    ]
   }
 }
