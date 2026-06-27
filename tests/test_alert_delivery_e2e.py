@@ -67,11 +67,14 @@ async def _run_notifier(events):
 
 
 async def _stop(notifier, task):
+    # 直接 cancel：中断 run() 里 wait_for(queue.get(), 2.0) 的阻塞（finally 仍会
+    # bus.unsubscribe），避免每例空等一个超时周期——把整文件耗时压到秒级。
     notifier.stop()
+    task.cancel()
     try:
-        await asyncio.wait_for(task, timeout=2.0)
-    except asyncio.TimeoutError:
-        task.cancel()
+        await task
+    except (asyncio.CancelledError, asyncio.TimeoutError):
+        pass
 
 
 # ── Level A：直接 publish 告警 → 投递 ─────────────────────────────────────────
@@ -114,6 +117,73 @@ async def test_all_alias_catches_new_alert_types(monkeypatch):
     titles = [json.loads(c["body"])["title"] for c in captured]
     assert any("草稿质量" in t for t in titles)
     assert any("记忆 key 漂移" in t for t in titles)
+
+
+# 代码里真正会 publish 的告警 → (订阅别名, event_type, 样本 payload)。
+# 来源（rg 'publish("...")' 发布点）：
+#   escalation       → unified_inbox_workflow_routes
+#   autoreply_alert  → protocol_autoreply
+#   draft_sla_breach → sla_watcher（别名 sla_breach）
+#   csat_alert/anomaly_alert/queue_alert → scheduled_reporter（anomaly_alert 别名 anomaly）
+#   billing_alert/draft_quality_alert/memory_key_drift_alert/health_alert → health_watchdog
+#   human_reply_risk → drafts（别名 reply_risk）
+# 新增发布点务必同步维护此表 + _EVENT_ALIASES + _build_message（守卫测试会兜底）。
+_EMITTED_ALERTS = [
+    ("escalation", "escalation",
+     {"name": "客户A", "wait_sec": 600, "reason": "无人认领"}),
+    ("autoreply_alert", "autoreply_alert",
+     {"kind": "circuit_open", "platform": "telegram", "account_id": "a1", "detail": "连续失败"}),
+    ("sla_breach", "draft_sla_breach",
+     {"autopilot_level": "L3", "wait_min": 30, "sla_hours": 4, "platform": "telegram"}),
+    ("csat_alert", "csat_alert",
+     {"condition": "low_csat", "message": "CSAT 跌破", "threshold": 3.0}),
+    ("anomaly", "anomaly_alert",
+     {"anomaly_count": 1, "anomalies": [{"label": "草稿量", "metric": "drafts",
+      "current_fmt": "5", "baseline_fmt": "50", "deviation_score": 3.2, "direction": "down"}]}),
+    ("queue_alert", "queue_alert",
+     {"display_name": "客户B", "platform": "whatsapp", "wait_min": 12.5,
+      "sla_level": "crit", "to_agent_id": "u9"}),
+    ("billing_alert", "billing_alert", {"anomalies": [{"message": "超席位"}]}),
+    ("health_alert", "health_alert",
+     {"light": "red", "problems": [{"name": "DB", "detail": "连接失败"}]}),
+    ("reply_risk", "human_reply_risk",
+     {"agent_id": "u1", "risk_level": "high", "risk_reasons": ["辱骂"], "text_preview": "..."}),
+]
+
+
+@pytest.mark.parametrize("alias,etype,payload", _EMITTED_ALERTS)
+async def test_each_emitted_alert_delivers(monkeypatch, alias, etype, payload):
+    """每一类「代码里真会发」的告警都能经 webhook 投递（整链，非 mock）。"""
+    bus = _reset_bus()
+    captured = _patch_http(monkeypatch)
+    notifier, task = await _run_notifier([alias])
+    try:
+        bus.publish(etype, payload)
+        await _drain_until(captured, 1)
+    finally:
+        await _stop(notifier, task)
+    assert captured, f"{etype} 应经 webhook 投递"
+    body = json.loads(captured[0]["body"])
+    # 不得落通用兜底「[etype] 事件」——那等于投出去一坨没人看得懂的 JSON。
+    assert body["title"] != f"[{etype}] 事件", f"{etype} 落了通用兜底，缺 _build_message 分支"
+
+
+def test_emitted_alerts_have_readable_messages():
+    """系统性守卫：凡真发布的告警，别名映射正确 + _build_message 有专属分支（不落通用兜底）。
+
+    与上面 e2e 互补——本测试纯同步、零网络，CI 快速失败定位「哪类告警没格式化/没接别名」。
+    """
+    from src.inbox.webhook_notifier import _build_message, _EVENT_ALIASES
+    missing = []
+    for alias, etype, payload in _EMITTED_ALERTS:
+        title, _ = _build_message(etype, payload)
+        if title == f"[{etype}] 事件":
+            missing.append(etype)
+        rule = _EVENT_ALIASES.get(alias)
+        assert rule is not None, f"别名 {alias} 不在 _EVENT_ALIASES"
+        assert rule["types"] is None or etype in rule["types"], \
+            f"别名 {alias} 未映射到 {etype}"
+    assert not missing, f"以下告警落通用兜底、缺 _build_message 分支: {missing}"
 
 
 async def test_unsubscribed_alert_not_delivered(monkeypatch):
