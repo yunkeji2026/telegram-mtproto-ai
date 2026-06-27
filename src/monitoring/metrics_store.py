@@ -316,9 +316,12 @@ class MetricsStore:
         # 便于一眼看比例：命中率（基于累计 generated）
         rates: Dict[str, float] = {}
         if gen > 0:
+            # fast_path/empty 也纳入比率：前者是「低风险快路占比」（风险分类是否过宽的
+            # 单一事实源，watchdog 用窗口率、本字段给累计率，校准脚本/仪表盘据此推阈值），
+            # 后者是「空草稿率」（生成失败信号）。漏列会让下游读到 None 误判为 0。
             for _k in ("memory_hit", "emotional_active", "companion_active",
                        "slow_think", "retry_applied", "persona_guard_intercept",
-                       "crisis_override"):
+                       "crisis_override", "fast_path", "empty"):
                 rates[_k] = round(int(out_total.get(_k, 0)) / gen, 4)
         return {
             "total": out_total,

@@ -431,6 +431,20 @@ def _build_message(event_type: str, data: Dict[str, Any]) -> tuple[str, str]:
             f"**原因**: {data.get('reason', '?')}"
         )
 
+    elif event_type == "queue_alert":
+        # P29/P32：队列等待超时 → 坐席告警（warn/crit）。
+        lvl = str(data.get("sla_level") or "")
+        icon = "🔴" if lvl == "crit" else "🟠"
+        who = data.get("to_agent_id") or "全体在线坐席"
+        title = f"{icon} 队列等待超时（{lvl or '警告'}）"
+        text = (
+            f"**客户**: {data.get('display_name', '?')}\n"
+            f"**平台**: {data.get('platform', '?')}\n"
+            f"**已等待**: {data.get('wait_min', '?')} 分钟\n"
+            f"**指派**: {who}\n"
+            "[📋 前往工作台](/workspace/unified-inbox)"
+        )
+
     else:
         title = f"[{event_type}] 事件"
         text = json.dumps(data, ensure_ascii=False)[:300]

@@ -150,6 +150,31 @@ def register_drafts_routes(app, *, api_auth):
             pass
         return {"ok": True, "worker": snap}
 
+    @app.get("/api/drafts/pipeline-metrics")
+    async def api_drafts_pipeline_metrics(
+        request: Request, window_sec: int = 3600, _=Depends(api_auth),
+    ):
+        """统一草稿引擎规则栈的**只读聚合指标**（命中率/分位延迟/规则触发计数）。
+
+        与 ``autosend-status`` 的区别：本端点**只需 API token、不强制主管会话**。
+        返回的全部是非 PII 聚合数（无消息内容、无用户标识，见
+        ``MetricsStore.get_inbox_draft_metrics``），故对持令牌的运营工具开放是安全的，
+        用于 ``scripts/suggest_draft_thresholds`` / CI 闭合阈值校准回路
+        （此前该脚本只能打主管会话端点，纯 token 拿不到指标）。
+
+        ``window_sec``（60–86400，默认 3600）控制返回的 ``window`` 滑窗大小——与
+        ``health_watchdog._check_draft_quality`` 评估告警所用窗口对齐，便于校准脚本按
+        「watchdog 视角」与「稳态累计」两个口径同时观测。
+        """
+        out: dict = {"ok": True}
+        try:
+            from src.monitoring.metrics_store import get_metrics_store
+            ws = max(60, min(86400, int(window_sec or 3600)))
+            out["draft_pipeline"] = get_metrics_store().get_inbox_draft_metrics(window_sec=ws)
+        except Exception:
+            out["draft_pipeline"] = {}
+        return out
+
     @app.get("/api/drafts/audit")
     async def api_drafts_audit(
         request: Request,
