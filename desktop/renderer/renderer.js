@@ -185,7 +185,7 @@ function resolveAccounts(cfg) {
     const ui = (cfg && cfg.unified_inbox) || {};
     if (ui.enabled === false) return false;
     const backend = (cfg && cfg.backend) || {};
-    const base = (backend.base_url || "http://127.0.0.1:18787").replace(/\/+$/, "");
+    const base = (backend.base_url || "http://127.0.0.1:18799").replace(/\/+$/, "");
     // navPath=用于路由判定的纯路径；navTarget=实际加载/登录回跳的相对地址（含 ?lang= 语言对齐）
     const navPath = ui.path || "/workspace";
     const lang = ui.lang || "";

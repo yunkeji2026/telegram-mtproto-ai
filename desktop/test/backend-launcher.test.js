@@ -3,7 +3,7 @@
 // 后端 sidecar 命令解析纯函数单测（无框架，node 直跑）：node test/backend-launcher.test.js
 const assert = require("assert");
 const path = require("path");
-const { resolveBackendSpawn, healthUrl, webEnvFromBackend } = require("../backend-launcher.js");
+const { resolveBackendSpawn, healthUrl, webEnvFromBackend, createBackendManager } = require("../backend-launcher.js");
 
 let pass = 0;
 function ok(name, cond) {
@@ -123,3 +123,64 @@ ok("healthUrl 默认", healthUrl({}) === "http://127.0.0.1:18799/login");
 ok("healthUrl 去尾斜杠", healthUrl({ backend: { base_url: "http://x:9/" } }) === "http://x:9/login");
 
 console.log(`backend-launcher.test.js: ${pass} passed`);
+
+// ── ⑦ 生命周期：探活复用 + 幂等防重复 spawn（双实例竞态防线）─────────────────
+//   双实例根治分两层：跨进程靠 main.js 的 Electron 单实例锁；同进程靠 start() 的
+//   幂等卫（本节验证）——防 probe→spawn 的 TOCTOU 窗口被并发 start() 重复利用。
+(async () => {
+  let lpass = 0;
+  function lok(name, cond) { assert.ok(cond, name); lpass++; }
+
+  function fakeChild() {
+    return { pid: 4242, stdout: { on() {} }, stderr: { on() {} }, on() {} };
+  }
+  const baseDeps = (over) => Object.assign({
+    app: { isPackaged: false, getPath: () => "/tmp" },
+    exec: () => {},
+    fs: {
+      existsSync: () => true,
+      mkdirSync() {},
+      createWriteStream: () => ({ write() {}, end() {} }),
+    },
+    log: () => {},
+    readyTries: 2, readyIntervalMs: 1, // 单测加速：不等 90s
+  }, over);
+  const CFG = { backend: { base_url: "http://127.0.0.1:18799" } };
+
+  // (a) 后端已可达 → running-external，绝不重复 spawn（零回归：复用既有/手动起的后端）
+  {
+    let spawned = 0;
+    const mgr = createBackendManager(baseDeps({
+      spawn: () => { spawned++; return fakeChild(); },
+      fetch: async () => ({ status: 200 }), // 探活成功=已有后端在跑
+    }));
+    await mgr.start(CFG);
+    lok("已有后端→不 spawn", spawned === 0);
+    lok("已有后端→状态 running-external", mgr.getStatus().status === "running-external");
+  }
+
+  // (b) 无既有后端 + 并发二次进入 start() → 幂等卫保证只 spawn 一次（核心：防竞态僵尸）
+  {
+    let spawned = 0;
+    const mgr = createBackendManager(baseDeps({
+      spawn: () => { spawned++; return fakeChild(); },
+      fetch: async () => { throw new Error("unreachable"); }, // 无既有后端→进入 spawn 路径
+    }));
+    await Promise.all([mgr.start(CFG), mgr.start(CFG)]);
+    lok("并发 start → 只 spawn 一次", spawned === 1);
+  }
+
+  // (c) 已有存活子进程后再调 start() → 跳过（不二次 spawn）
+  {
+    let spawned = 0;
+    const mgr = createBackendManager(baseDeps({
+      spawn: () => { spawned++; return fakeChild(); },
+      fetch: async () => { throw new Error("unreachable"); },
+    }));
+    await mgr.start(CFG);          // 第一次：spawn 一次（之后 child 存活）
+    await mgr.start(CFG);          // 第二次：child 非空 → 跳过
+    lok("child 存活→再次 start 不二次 spawn", spawned === 1);
+  }
+
+  console.log(`backend-launcher.test.js lifecycle: ${lpass} passed`);
+})().catch((e) => { console.error(e); process.exit(1); });

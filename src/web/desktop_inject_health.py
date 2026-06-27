@@ -40,6 +40,32 @@ def classify_inject_health(rec: Dict[str, Any]) -> str:
 # 失配类状态（运营需关注：很可能官方改版导致选择器失效）
 MISMATCH_STATUSES = ("mismatch_composer", "mismatch_bubble")
 
+# 逐选择器键的诊断顺序（输入框/发送按钮最关键 → 影响出站；置前便于运营优先校准）
+SELECTOR_KEYS = ("composer", "sendBtn", "bubble", "peerTitle")
+
+
+def selector_failure_breakdown(alerts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """聚合持续失配账号的「逐选择器缺失」计数（纯函数，便于单测）。
+
+    输入 ``persistent_mismatches()`` 返回的告警列表（每条含 ``selectors{key:bool}``）。
+    输出 ``[{key, missing}]``，仅含 ``missing>0`` 的键，按缺失账号数降序（同数按 SELECTOR_KEYS
+    固定序稳定）。让运营从「N 个账号失配」精准下钻到「**哪个 selector key 在最多账号上抓空**」，
+    优先热修该键，而非盲改整份覆写。
+
+    仅统计**明确为 False**（抓空）的键；缺字段/非 dict 一律跳过，避免误报。
+    """
+    counts = {k: 0 for k in SELECTOR_KEYS}
+    for a in (alerts or []):
+        sel = (a or {}).get("selectors") if isinstance(a, dict) else None
+        if not isinstance(sel, dict):
+            continue
+        for k in SELECTOR_KEYS:
+            if sel.get(k) is False:
+                counts[k] += 1
+    out = [{"key": k, "missing": counts[k]} for k in SELECTOR_KEYS if counts[k] > 0]
+    out.sort(key=lambda d: d["missing"], reverse=True)
+    return out
+
 # 「持续失配」默认阈值（秒）——失配连续超过此时长升级为持续告警（区别于一闪而过的抖动）
 DEFAULT_PERSIST_SEC = 300.0
 

@@ -37,9 +37,42 @@ _DEFAULT_DB = os.path.join("config", "desktop_outbound.db")
 _RECLAIM_AFTER_SEC = 180.0
 # 已终态（sent/failed）保留天数，enqueue 时顺手清理，防表无限增长
 _RETENTION_SEC = 7 * 86400.0
+# 人审纠正样本（AI 失误数据资产）保留更久——供 prompt/KB 离线调优，但仍设上限防无限增长
+_CORRECTION_RETENTION_SEC = 90 * 86400.0
 
 # 闸门类型：(platform, account_id, *, config, registry) -> (blocked, reason)
 GuardFn = Callable[..., Tuple[bool, str]]
+
+
+def corrections_to_export(
+    items: List[Dict[str, Any]], *, dedup: bool = True,
+) -> List[Dict[str, Any]]:
+    """纠正样本 → 偏好对导出形（纯函数，可单测）。
+
+    每条映射为 ``{kind, source, platform, rejected, chosen, ai_suggestion, reason, ts}``：
+    ``rejected``=原草稿(orig_text)、``chosen``=人定稿(new_text)——直接喂 DPO/偏好微调或 eval。
+    cancel 样本 chosen 为空（仅负例 + reason）。``dedup`` 时按 (kind,rejected,chosen,reason) 去重。
+    """
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    for it in items or []:
+        rec = {
+            "kind": str(it.get("kind") or ""),
+            "source": str(it.get("source") or ""),
+            "platform": str(it.get("platform") or ""),
+            "rejected": str(it.get("orig_text") or ""),
+            "chosen": str(it.get("new_text") or ""),
+            "ai_suggestion": str(it.get("ai_suggestion") or ""),
+            "reason": str(it.get("reason") or ""),
+            "ts": it.get("created_at"),
+        }
+        if dedup:
+            key = (rec["kind"], rec["rejected"], rec["chosen"], rec["reason"])
+            if key in seen:
+                continue
+            seen.add(key)
+        out.append(rec)
+    return out
 
 
 def _default_guard(platform: str, account_id: str, *, config=None, registry=None):
@@ -98,6 +131,33 @@ class DesktopOutboundQueue:
                 "CREATE INDEX IF NOT EXISTS idx_dob_claim "
                 "ON desktop_outbound(platform, account_id, status, id)"
             )
+            # 人审纠正留痕（P4.2）：append-only，每次「改写」记 before/after，「拦截+理由」记 reason。
+            # 这是「AI 失误样本集」——供离线 prompt/KB 调优，故与命令表分离、保留更久。
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS desktop_corrections (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    platform TEXT NOT NULL,
+                    account_id TEXT NOT NULL,
+                    chat_key TEXT DEFAULT '',
+                    kind TEXT NOT NULL,
+                    orig_text TEXT DEFAULT '',
+                    new_text TEXT DEFAULT '',
+                    reason TEXT DEFAULT '',
+                    ai_suggestion TEXT DEFAULT '',
+                    source TEXT DEFAULT '',
+                    created_at REAL
+                )
+                """
+            )
+            # P4.4：旧库（P4.2 schema）幂等补列——完整三元组(原草稿/AI候选/人定稿) + source 标注
+            for _col in ("ai_suggestion", "source"):
+                try:
+                    self._conn.execute(
+                        "ALTER TABLE desktop_corrections ADD COLUMN "
+                        + _col + " TEXT DEFAULT ''")
+                except Exception:
+                    pass  # 已存在 → 忽略
 
     # ── 写入：受控入队 ────────────────────────────────────────────────
     def enqueue(
@@ -113,11 +173,16 @@ class DesktopOutboundQueue:
         config: Optional[Dict[str, Any]] = None,
         registry: Any = None,
         guard: Optional[GuardFn] = None,
+        hold: bool = False,
         now: Optional[float] = None,
     ) -> Dict[str, Any]:
-        """受控入队：先过闸门，通过才落 pending。
+        """受控入队：先过闸门，通过才落库。
 
-        返回 ``{"enqueued": True, "id": <int>, "status": "pending"}``，或被拦截时
+        ``hold=False``（默认）→ 落 ``pending``（可被 pull 自动发）；
+        ``hold=True``（人审模式 review_mode）→ 落 ``held``（pull 不认领，等运营「放行」才转 pending）。
+        **闸门恒在入队前执行**（即便 hold）——held 命令也是已过 Kill-Switch/反封号的，放行=发送已审命令。
+
+        返回 ``{"enqueued": True, "id": <int>, "status": "pending"|"held"}``，或被拦截时
         ``{"enqueued": False, "blocked": "kill_switch:.../send_gate:..."}``。
         text 为空直接拒（``{"enqueued": False, "blocked": "empty_text"}``）。
         """
@@ -141,17 +206,18 @@ class DesktopOutboundQueue:
             return {"enqueued": False, "blocked": reason or "blocked"}
         ts = float(now if now is not None else time.time())
         self._prune(ts)
+        status = "held" if hold else "pending"
         with self._lock:
             cur = self._conn.execute(
                 "INSERT INTO desktop_outbound "
                 "(platform, account_id, chat_key, conversation_id, text, kind, "
                 " draft_id, status, attempts, created_at) "
-                "VALUES (?,?,?,?,?,?,?, 'pending', 0, ?)",
+                "VALUES (?,?,?,?,?,?,?, ?, 0, ?)",
                 (p, a, ck, str(conversation_id or ""), body, str(kind or "text"),
-                 str(draft_id or ""), ts),
+                 str(draft_id or ""), status, ts),
             )
             rid = int(cur.lastrowid or 0)
-        return {"enqueued": True, "id": rid, "status": "pending"}
+        return {"enqueued": True, "id": rid, "status": status}
 
     # ── 读取：认领待发命令（桌面壳/扩展轮询）────────────────────────────
     def pull(
@@ -229,6 +295,119 @@ class DesktopOutboundQueue:
             )
             return int(cur.rowcount or 0) > 0
 
+    # ── 人审介入（P2：拦截 / 改写 / 放行 / 暂停 / 重试）───────────────────
+    def _transition(
+        self, item_id: int, new_status: str, from_statuses: Tuple[str, ...],
+        *, set_acked: Optional[float] = None, clear_reason: bool = False,
+    ) -> bool:
+        """受控状态迁移：仅当当前状态 ∈ from_statuses 才改为 new_status；返回是否命中。"""
+        sets = "status=?"
+        args: List[Any] = [new_status]
+        if clear_reason:
+            sets += ", reason=''"
+        if set_acked is not None:
+            sets += ", acked_at=?"
+            args.append(float(set_acked))
+        args.append(int(item_id))
+        args.extend(from_statuses)
+        placeholders = ",".join("?" for _ in from_statuses)
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE desktop_outbound SET " + sets
+                + " WHERE id=? AND status IN (" + placeholders + ")",
+                tuple(args),
+            )
+            return int(cur.rowcount or 0) > 0
+
+    def hold(self, item_id: int) -> bool:
+        """暂停：pending→held（不再被 pull 自动发，等放行）。"""
+        return self._transition(item_id, "held", ("pending",))
+
+    def release(self, item_id: int) -> bool:
+        """放行：held→pending（重新进入自动发送）。"""
+        return self._transition(item_id, "pending", ("held",))
+
+    def cancel(
+        self, item_id: int, *, reason: str = "", now: Optional[float] = None,
+    ) -> bool:
+        """拦截：pending/held→cancelled（永不发送）。记 acked_at 供超龄清理。
+
+        给定 ``reason`` 时留一条 cancel 纠正样本（「这条 AI 回复因…被拦」）；批量无理由拦截
+        **不留样本**，避免用大量无理由 dismiss 污染失误数据集。
+        """
+        ts = float(now if now is not None else time.time())
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT text, platform, account_id, chat_key FROM desktop_outbound "
+                "WHERE id=? AND status IN ('pending','held')",
+                (int(item_id),),
+            ).fetchone()
+            if not row:
+                return False
+            self._conn.execute(
+                "UPDATE desktop_outbound SET status='cancelled', acked_at=? WHERE id=?",
+                (ts, int(item_id)),
+            )
+            rsn = str(reason or "").strip()
+            if rsn:
+                self._record_correction_locked(
+                    "cancel", row, orig=str(row["text"] or ""), new="", reason=rsn)
+        return True
+
+    def retry(self, item_id: int) -> bool:
+        """重试：failed→pending（清 reason，重新排队等 pull）。"""
+        return self._transition(
+            item_id, "pending", ("failed",), clear_reason=True)
+
+    def edit(
+        self, item_id: int, text: str,
+        *, ai_suggestion: str = "", source: str = "",
+    ) -> bool:
+        """改写：仅 pending/held 可改文本（claimed/已终态不可改，防改飞行中/已发）。空文本拒。
+
+        文本确有变化时自动留一条 edit 纠正样本——最强「AI 失误」标注信号，零额外 UI。
+        P4.4：``ai_suggestion`` 给定时记下 AI 候选，``source`` 标注定稿来源
+        （human / ai_adopted / ai_edited），凑成「原草稿→AI候选→人定稿」黄金三元组。
+        """
+        body = str(text or "").strip()
+        if not body:
+            return False
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT text, platform, account_id, chat_key FROM desktop_outbound "
+                "WHERE id=? AND status IN ('pending','held')",
+                (int(item_id),),
+            ).fetchone()
+            if not row:
+                return False
+            old = str(row["text"] or "")
+            self._conn.execute(
+                "UPDATE desktop_outbound SET text=? WHERE id=?", (body, int(item_id)))
+            if old != body:
+                self._record_correction_locked(
+                    "edit", row, orig=old, new=body, reason="",
+                    ai_suggestion=str(ai_suggestion or ""),
+                    source=str(source or "human"))
+        return True
+
+    def _record_correction_locked(
+        self, kind: str, row: sqlite3.Row, *, orig: str, new: str, reason: str,
+        ai_suggestion: str = "", source: str = "",
+    ) -> None:
+        """记一条纠正样本（调用方已持锁）。best-effort，不得因留痕失败影响主操作。"""
+        try:
+            self._conn.execute(
+                "INSERT INTO desktop_corrections "
+                "(platform, account_id, chat_key, kind, orig_text, new_text, reason, "
+                " ai_suggestion, source, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (row["platform"], row["account_id"], row["chat_key"] or "",
+                 str(kind), str(orig or ""), str(new or ""), str(reason or ""),
+                 str(ai_suggestion or ""), str(source or ""), time.time()),
+            )
+        except Exception:
+            logger.debug("[desktop_outbound] 纠正留痕失败（已忽略）", exc_info=True)
+
     # ── 可观测 ───────────────────────────────────────────────────────
     def pending_count(
         self, platform: Optional[str] = None, account_id: Optional[str] = None,
@@ -266,6 +445,127 @@ class DesktopOutboundQueue:
             ).fetchall()
         return [self._row_to_item(r) for r in rows]
 
+    def get(self, item_id: int) -> Optional[Dict[str, Any]]:
+        """取单条命令（含 platform/account_id/chat_key/text），找不到返回 None。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM desktop_outbound WHERE id=?", (int(item_id),)
+            ).fetchone()
+        return self._row_to_item(row) if row else None
+
+    def review_list(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """待审(held)命令，FIFO（id 升序）——人审队列按到达顺序处理。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM desktop_outbound WHERE status='held' "
+                "ORDER BY id ASC LIMIT ?",
+                (max(1, min(int(limit or 50), 200)),),
+            ).fetchall()
+        return [self._row_to_item(r) for r in rows]
+
+    def review_oldest_age(self, now: Optional[float] = None) -> float:
+        """最久待审(held)命令已等待秒数（无待审→0）。用于人审 SLA 超时告警。"""
+        ts = float(now if now is not None else time.time())
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT MIN(created_at) AS m FROM desktop_outbound WHERE status='held'"
+            ).fetchone()
+        m = row["m"] if row else None
+        if m is None:
+            return 0.0
+        return max(0.0, ts - float(m))
+
+    def intercept_rate(self) -> Tuple[float, int]:
+        """近期拦截率：cancelled / (sent+failed+cancelled)。返回 (rate, sample)。
+
+        分母为「已终结」命令数；held（待审）不计入。终态超 7 天会被 prune，故为**滚动近 7 日**窗口。
+        """
+        s = self.summary()
+        sent = int(s.get("sent", 0))
+        failed = int(s.get("failed", 0))
+        cancelled = int(s.get("cancelled", 0))
+        denom = sent + failed + cancelled
+        return ((cancelled / denom) if denom else 0.0), denom
+
+    def corrections(
+        self, limit: int = 100,
+        *, kind: Optional[str] = None, source: Optional[str] = None,
+        since: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
+        """近期人审纠正样本（最新在前）——AI 失误数据集，供离线调优/导出。
+
+        可按 ``kind``（edit/cancel）、``source``（human/ai_adopted/ai_edited）、
+        ``since``（created_at ≥ 秒级时间戳）过滤，用于增量/分类导出。
+        """
+        sql = "SELECT * FROM desktop_corrections"
+        where: List[str] = []
+        args: List[Any] = []
+        if kind:
+            where.append("kind=?")
+            args.append(str(kind))
+        if source:
+            where.append("source=?")
+            args.append(str(source))
+        if since is not None:
+            where.append("created_at >= ?")
+            args.append(float(since))
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY id DESC LIMIT ?"
+        args.append(max(1, min(int(limit or 100), 5000)))
+        with self._lock:
+            rows = self._conn.execute(sql, tuple(args)).fetchall()
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            out.append({
+                "id": int(r["id"]),
+                "platform": r["platform"],
+                "account_id": r["account_id"],
+                "chat_key": r["chat_key"] or "",
+                "kind": r["kind"],
+                "orig_text": r["orig_text"] or "",
+                "new_text": r["new_text"] or "",
+                "reason": r["reason"] or "",
+                "ai_suggestion": (r["ai_suggestion"] if "ai_suggestion" in r.keys() else "") or "",
+                "source": (r["source"] if "source" in r.keys() else "") or "",
+                "created_at": r["created_at"],
+            })
+        return out
+
+    def corrections_summary(self) -> Dict[str, int]:
+        """纠正样本计数（看板读数用）：{edit, cancel, total, ai_assisted}。
+
+        ``ai_assisted`` = source ∈ {ai_adopted, ai_edited} 的条数（AI 候选被采纳/微调）。
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT kind, source, COUNT(*) AS n FROM desktop_corrections "
+                "GROUP BY kind, source"
+            ).fetchall()
+        out: Dict[str, int] = {}
+        ai_assisted = 0
+        for r in rows:
+            n = int(r["n"])
+            out[str(r["kind"])] = out.get(str(r["kind"]), 0) + n
+            if str(r["source"] or "") in ("ai_adopted", "ai_edited"):
+                ai_assisted += n
+        out["total"] = sum(v for k, v in out.items())
+        out["ai_assisted"] = ai_assisted
+        return out
+
+    def corrections_reason_breakdown(self) -> Dict[str, int]:
+        """拦截理由聚类（P7）：按 reason 分组计 cancel 样本数（仅非空 reason）。
+
+        reason 由前端传结构化 code（off_topic/tone/factual/...）；这里 label-agnostic，
+        只按存储值分组——展示层负责 code→中文映射。供「AI 在哪类问题最常错」洞察。
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT reason, COUNT(*) AS n FROM desktop_corrections "
+                "WHERE kind='cancel' AND reason != '' GROUP BY reason"
+            ).fetchall()
+        return {str(r["reason"]): int(r["n"]) for r in rows}
+
     # ── 内部 ─────────────────────────────────────────────────────────
     @staticmethod
     def _row_to_item(r: sqlite3.Row) -> Dict[str, Any]:
@@ -289,9 +589,14 @@ class DesktopOutboundQueue:
             with self._lock:
                 self._conn.execute(
                     "DELETE FROM desktop_outbound "
-                    "WHERE status IN ('sent','failed') AND acked_at IS NOT NULL "
-                    "AND (? - acked_at) > ?",
+                    "WHERE status IN ('sent','failed','cancelled') "
+                    "AND acked_at IS NOT NULL AND (? - acked_at) > ?",
                     (now, _RETENTION_SEC),
+                )
+                self._conn.execute(
+                    "DELETE FROM desktop_corrections "
+                    "WHERE created_at IS NOT NULL AND (? - created_at) > ?",
+                    (now, _CORRECTION_RETENTION_SEC),
                 )
         except Exception:
             logger.debug("[desktop_outbound] prune 失败（已忽略）", exc_info=True)
@@ -299,6 +604,7 @@ class DesktopOutboundQueue:
     def clear(self) -> None:
         with self._lock:
             self._conn.execute("DELETE FROM desktop_outbound")
+            self._conn.execute("DELETE FROM desktop_corrections")
 
     def close(self) -> None:
         try:
@@ -340,4 +646,5 @@ __all__ = [
     "DesktopOutboundQueue",
     "get_desktop_outbound_queue",
     "reset_desktop_outbound_queue",
+    "corrections_to_export",
 ]

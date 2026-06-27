@@ -12,7 +12,38 @@ from src.web.desktop_inject_health import (
     InjectHealthStore,
     MISMATCH_STATUSES,
     classify_inject_health,
+    selector_failure_breakdown,
 )
+
+
+# ── P9 逐选择器失配诊断（selector_failure_breakdown）─────────────────────────────
+def test_selector_breakdown_empty():
+    assert selector_failure_breakdown([]) == []
+    assert selector_failure_breakdown(None) == []
+
+
+def test_selector_breakdown_counts_and_sorted():
+    alerts = [
+        {"selectors": {"composer": True, "sendBtn": False, "bubble": False, "peerTitle": True}},
+        {"selectors": {"composer": False, "sendBtn": False, "bubble": True, "peerTitle": True}},
+        {"selectors": {"composer": True, "sendBtn": False, "bubble": True, "peerTitle": True}},
+    ]
+    out = selector_failure_breakdown(alerts)
+    # sendBtn 抓空 3 次最多 → 置首；composer/bubble 各 1 次
+    assert out[0] == {"key": "sendBtn", "missing": 3}
+    keys = {d["key"]: d["missing"] for d in out}
+    assert keys == {"sendBtn": 3, "composer": 1, "bubble": 1}
+
+
+def test_selector_breakdown_ignores_missing_and_nondict():
+    # 缺字段（None）不计；非 dict 行跳过；只有明确 False 才算抓空
+    alerts = [
+        {"selectors": {"composer": False}},  # 仅 composer False
+        {"selectors": None},
+        "garbage",
+        {"no_selectors": 1},
+    ]
+    assert selector_failure_breakdown(alerts) == [{"key": "composer", "missing": 1}]
 
 
 def test_classify_ok():

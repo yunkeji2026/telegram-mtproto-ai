@@ -73,9 +73,19 @@ contextBridge.exposeInMainWorld("shell", {
   // 在对应 webview 的官方页 DOM 填入并发送，再回执。
   outboundPull: (args) => ipcRenderer.invoke("desktop:outbound-pull", args),
   outboundAck: (args) => ipcRenderer.invoke("desktop:outbound-ack", args),
+  // 受控出站人审介入：{id, action: cancel|hold|release|edit|retry, text?}
+  outboundAction: (args) => ipcRenderer.invoke("desktop:outbound-action", args),
+  // AI 重写助手：{id} → {ok, reply, original}
+  outboundRewrite: (args) => ipcRenderer.invoke("desktop:outbound-rewrite", args),
+  // 纠正样本导出：{source?, kind?} → {ok, path, count}
+  exportCorrections: (args) => ipcRenderer.invoke("desktop:export-corrections", args),
   // 🩺 自动化健康看板（壳层聚合读，复用后端既有 API）：全账号注入健康 + 受控出站队列概览。
   injectHealthList: (args) => ipcRenderer.invoke("desktop:inject-health-list", args),
   outboundStats: (args) => ipcRenderer.invoke("desktop:outbound-stats", args),
   // 注入「持续失配」告警流（红点预警 + 告警块）。
   injectAlerts: (args) => ipcRenderer.invoke("desktop:inject-alerts", args),
+  // D1 一键热修：打开覆写文件（系统默认编辑器）。
+  openSelectors: () => ipcRenderer.invoke("desktop:open-selectors"),
+  // D1 校验覆写文件（解析/被忽略字段反馈）。
+  validateSelectors: () => ipcRenderer.invoke("desktop:validate-selectors"),
 });

@@ -136,3 +136,45 @@ def selector_profiles_payload(path: Path | str | None = None) -> Dict[str, Any]:
     """端点响应体：``{ok, version, profiles}``。"""
     profiles = load_selector_overlay(path)
     return {"ok": True, "version": overlay_version(profiles), "profiles": profiles}
+
+
+def validate_overlay_file(path: Path | str) -> Dict[str, Any]:
+    """校验覆写文件，给运营**显式反馈**（手改 JSON 易出错；损坏现状是静默降级为空覆写）。
+
+    返回 ``{ok, exists, valid, profiles, platforms, dropped, error?}``：
+    - ``valid=False`` + ``error``：JSON 解析失败（如多余逗号）；
+    - ``dropped``：``platform.key`` 被忽略的字段（未知键/类型不符/空串）→ 运营据此修正；
+    - ``profiles``/``platforms``：实际生效的平台覆写数与名单。
+    以「文件不存在」为合法（无覆写=注入用内置档，常态）。
+    """
+    p = Path(path)
+    if not p.exists():
+        return {"ok": True, "exists": False, "valid": True,
+                "profiles": 0, "platforms": [], "dropped": []}
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return {"ok": True, "exists": True, "valid": False, "error": str(exc),
+                "profiles": 0, "platforms": [], "dropped": []}
+    clean = _sanitize(raw)
+    # 与 _sanitize 同口径解析 profiles 子树，逐字段比对算「被忽略」项（_ 开头为 meta，跳过）。
+    if isinstance(raw, dict) and isinstance(raw.get("profiles"), dict):
+        profiles_src = raw["profiles"]
+    elif isinstance(raw, dict):
+        profiles_src = raw
+    else:
+        profiles_src = {}
+    dropped = []
+    for platform, patch in profiles_src.items():
+        if not isinstance(platform, str) or platform.startswith("_"):
+            continue
+        if not isinstance(patch, dict):
+            dropped.append(str(platform))
+            continue
+        kept = clean.get(platform, {})
+        for key in patch:
+            if key not in kept:
+                dropped.append(platform + "." + str(key))
+    return {"ok": True, "exists": True, "valid": True,
+            "profiles": len(clean), "platforms": sorted(clean.keys()),
+            "dropped": dropped}

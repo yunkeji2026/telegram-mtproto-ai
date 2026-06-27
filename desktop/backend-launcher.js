@@ -136,6 +136,7 @@ function createBackendManager(deps) {
 
   let child = null;
   let quitting = false;
+  let starting = false; // 同进程重复/并发调用 start() 的幂等卫（防 TOCTOU 重复 spawn）
   let status = "idle"; // idle | probing | starting | ready | running-external | failed | disabled | stopped
   let lastError = "";
   let logStream = null;
@@ -182,6 +183,22 @@ function createBackendManager(deps) {
    * stdout/stderr 落 userData/logs/backend.log + 控制台镜像。
    */
   async function start(config) {
+    // 幂等卫：已在拉起（starting）或已有存活子进程（child）→ 跳过，防 probe→spawn 的
+    // TOCTOU 窗口被并发 start() 利用而重复 spawn（端口竞态→僵尸实例）。跨进程的重复
+    // （多开桌面壳）由 main.js 的 Electron 单实例锁拦截，二者一内一外形成双保险。
+    if (starting || child) {
+      log(`start() 复用既有状态[${status}]，跳过重复拉起`);
+      return;
+    }
+    starting = true;
+    try {
+      return await _doStart(config);
+    } finally {
+      starting = false;
+    }
+  }
+
+  async function _doStart(config) {
     // 发布态：可写数据根 = userData/data；config + dbs/json/logs 都落这里（避免写只读安装包）。
     let dataDir = "";
     if (app && app.isPackaged) {
@@ -262,7 +279,10 @@ function createBackendManager(deps) {
       void wasChild;
     });
 
-    const ok = await waitForReady(config, { tries: 90, intervalMs: 1000 });
+    const ok = await waitForReady(config, {
+      tries: deps.readyTries || 90,
+      intervalMs: deps.readyIntervalMs || 1000,
+    });
     if (ok) {
       status = "ready";
       log("后端就绪");

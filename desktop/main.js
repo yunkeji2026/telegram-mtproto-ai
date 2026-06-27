@@ -1,6 +1,6 @@
 "use strict";
 
-const { app, BrowserWindow, ipcMain, session, clipboard, Menu, Notification } = require("electron");
+const { app, BrowserWindow, ipcMain, session, clipboard, Menu, Notification, shell, dialog } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { spawn, exec } = require("child_process");
@@ -23,7 +23,7 @@ function loadConfig() {
     return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
   } catch (e) {
     return {
-      backend: { base_url: "http://127.0.0.1:18787", token: "admin" },
+      backend: { base_url: "http://127.0.0.1:18799", token: "admin" },
       translate: { target_lang: "zh", auto: false },
       platforms: [],
       accounts: [],
@@ -251,6 +251,31 @@ ipcMain.handle("desktop:inject-alerts", async (_e, args) => {
   }
 });
 
+// D1 一键热修：向后端取「覆写文件本地路径」（不存在则首次写模板），用系统默认编辑器打开。
+// 后端返回的路径与注入读取的 selector-profiles 同一文件（同 config 目录），避免「打开 A 却读 B」。
+ipcMain.handle("desktop:open-selectors", async () => {
+  try {
+    const r = await backendGet("/api/desktop/selector-profiles/path");
+    if (!r || !r.ok || !r.path) {
+      return { ok: false, error: (r && r.error) || "后端未返回路径" };
+    }
+    const err = await shell.openPath(r.path); // 成功返回 ""，失败返回错误串
+    if (err) return { ok: false, path: r.path, error: err };
+    return { ok: true, path: r.path, created: !!r.created };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
+// D1 校验：读覆写文件给运营显式反馈（解析失败/被忽略字段），与注入读取同一文件。
+ipcMain.handle("desktop:validate-selectors", async () => {
+  try {
+    return await backendGet("/api/desktop/selector-profiles/validate");
+  } catch (e) {
+    return { ok: false, valid: false, error: String(e), profiles: 0, platforms: [], dropped: [] };
+  }
+});
+
 // D4 受控出站桥：轮询「受控出站队列」取走发给本内嵌账号的全自动回复（已先过后端
 // send-gate/kill-switch 闸门），renderer 据此调 webview fill-composer 在官方页 DOM 发送，
 // 再回执。后端不可达静默忽略（autopilot 命令仍留在队列，下轮重取）。
@@ -267,6 +292,55 @@ ipcMain.handle("desktop:outbound-ack", async (_e, { id, ok, error }) => {
     return await backendPost("/api/desktop/outbound/ack", { id, ok: ok !== false, error: error || "" });
   } catch (e) {
     return { ok: false, error: String(e) };
+  }
+});
+
+// 受控出站「人审介入」（P2）：拦截/暂停/放行/改写/重试某条命令。
+ipcMain.handle("desktop:outbound-action", async (_e, { id, ids, action, text, reason, ai_suggestion, source }) => {
+  try {
+    return await backendPost("/api/desktop/outbound/action", {
+      id, ids, action, text: text || "", reason: reason || "",
+      ai_suggestion: ai_suggestion || "", source: source || "",
+    });
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
+// AI 重写助手（P4.1）：给一条命令生成更好的候选回复（不落库，供人审采纳）。
+ipcMain.handle("desktop:outbound-rewrite", async (_e, { id }) => {
+  try {
+    return await backendPost("/api/desktop/outbound/rewrite", { id });
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
+// 纠正样本导出（P5）：拉 JSONL（偏好对）→ 保存对话框写文件，供离线 fine-tune/eval。
+ipcMain.handle("desktop:export-corrections", async (_e, opts) => {
+  try {
+    const { base_url, token } = config.backend || {};
+    if (!base_url) return { ok: false, error: "no base_url" };
+    const q = new URLSearchParams({ format: "jsonl", limit: "5000" });
+    if (opts && opts.source) q.set("source", opts.source);
+    if (opts && opts.kind) q.set("kind", opts.kind);
+    const r = await fetch(`${base_url}/api/desktop/outbound/corrections?${q.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const text = await r.text();
+    const count = text ? text.split("\n").filter(Boolean).length : 0;
+    if (!count) return { ok: false, error: "无样本可导出" };
+    const win = BrowserWindow.getFocusedWindow();
+    const def = `desktop_corrections_${new Date().toISOString().slice(0, 10)}.jsonl`;
+    const res = await dialog.showSaveDialog(win, {
+      defaultPath: def,
+      filters: [{ name: "JSONL", extensions: ["jsonl"] }],
+    });
+    if (res.canceled || !res.filePath) return { ok: false, canceled: true };
+    fs.writeFileSync(res.filePath, text, "utf-8");
+    return { ok: true, path: res.filePath, count };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
   }
 });
 
@@ -908,13 +982,28 @@ function setupAutoUpdate() {
   }
 }
 
-app.whenReady().then(() => {
-  Menu.setApplicationMenu(buildChineseMenu());
-  // 后台自拉起（不阻塞开窗：renderer 已有「正在连接后台→自动重连」遮罩兜底）。
-  backendManager.start(config).catch((e) => console.log(`[backend] start error: ${e}`));
-  createWindow();
-  setupAutoUpdate();
-});
+// 单实例锁（双实例竞态根治）：多开桌面壳会各自 backendManager.start() → 各自探活后
+// 各自 spawn 后端，端口先到者赢、后到者绑定失败成僵尸实例（曾观测到双 python main.py）。
+// 第二个实例直接退出，并把已有窗口唤到前台（符合「再次启动=聚焦既有窗口」的预期）。
+const _gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!_gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    const w = BrowserWindow.getAllWindows()[0];
+    if (w) {
+      try { if (w.isMinimized()) w.restore(); w.show(); w.focus(); } catch (e) { /* ignore */ }
+    }
+  });
+
+  app.whenReady().then(() => {
+    Menu.setApplicationMenu(buildChineseMenu());
+    // 后台自拉起（不阻塞开窗：renderer 已有「正在连接后台→自动重连」遮罩兜底）。
+    backendManager.start(config).catch((e) => console.log(`[backend] start error: ${e}`));
+    createWindow();
+    setupAutoUpdate();
+  });
+}
 
 // 退出时回收后端进程，避免残留 Python/二进制占端口。
 let _backendStopped = false;

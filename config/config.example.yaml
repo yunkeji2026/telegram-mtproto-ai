@@ -1478,6 +1478,11 @@ inbox:
     # 被闸门拦截的命令根本不入队（记 autosend_failed，不误判已送达）。默认关 → 零行为变更。
     desktop_bridge:
       enabled: false          # true 才把 desktop 模式账号的全自动回复入受控出站队列
+      review_mode: false      # 人审介入（P2）：true → 全自动回复落 held 待审，不直接发；运营在桌面壳
+                              #   🩺 看板对每条命令「拦截/暂停/改写/放行」，放行才进 pending 自动发送。
+                              #   仍先过闸门（held 也是已过 Kill-Switch/反封号的命令）。默认关 → 行为不变。
+      review_sla_sec: 300     # 人审 SLA（P6）：最久待审超此秒数 → 🩺 红点 + 一次桌面通知（黄色提醒）
+      review_sla_urgent_sec: 900  # 超此秒数 → 红色强提醒（再发一次通知 + 红点高亮）；须 ≥ review_sla_sec
 
 # ── Phase C：意图分析 LLM 升级 ────────────────────────────────────
 # 规则版上叠 LLM：规则兜底、LLM 提升、风险只升不降；故障自动回落规则。
