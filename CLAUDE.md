@@ -35,6 +35,19 @@ python -m pytest tests/test_contacts_*.py tests/test_gateway_*.py \
 ```
 预期：全绿（contacts/handoff 主线子集，含 runner→真 hooks→store bridge 测试）。
 
+**桌面客服「受控出站 / 人审介入」主线**（P0–P7 闭环：桌面启动档 + 注入健康看板 + 选择器热修 +
+受控出站 hold/拦截/改写/放行 + AI 重写 + 纠正样本三元组/导出 + SLA 提醒 + 失误聚类）：
+```bash
+python -m pytest tests/test_desktop_*.py -q --tb=line
+```
+预期：全绿（出站队列状态机 + 人审介入 + 纠正样本/JSONL 导出 + SLA + 拦截聚类，
+含 boot-gate / selectors / inject-health / 路由契约）。
+桌面壳前端纯函数（Node 直跑，无框架）：
+```bash
+cd desktop && npm test
+```
+预期：全绿（health-panel 看板模型 / 出站行 / 待审 FIFO / 拦截 chips / SLA / fingerprint / launcher 等）。
+
 ### Feature flag 约定
 
 - 新子系统默认 `enabled: false`（见 `config/config.yaml::contacts.enabled`）

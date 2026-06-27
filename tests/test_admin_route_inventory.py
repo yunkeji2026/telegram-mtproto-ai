@@ -450,11 +450,16 @@ _BASELINE = """
 /api/desktop/guard-check	POST
 /api/desktop/ingest	POST
 /api/desktop/selector-profiles	GET
+/api/desktop/selector-profiles/path	GET
+/api/desktop/selector-profiles/validate	GET
 /api/desktop/inject-health	POST
 /api/desktop/inject-health	GET
 /api/desktop/inject-health/alerts	GET
 /api/desktop/outbound	GET
 /api/desktop/outbound/ack	POST
+/api/desktop/outbound/action	POST
+/api/desktop/outbound/corrections	GET
+/api/desktop/outbound/rewrite	POST
 /api/desktop/outbound/stats	GET
 /api/desktop/fingerprint	GET
 /api/telegram/log-tail	GET

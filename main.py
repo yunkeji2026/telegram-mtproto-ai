@@ -985,13 +985,20 @@ class AIChatAssistant:
                                                     from src.integrations.account_registry import (
                                                         get_account_registry as _gar2,
                                                     )
+                                                    # 人审模式（review_mode）：命令落 held 等运营放行，
+                                                    # 而非直接 pending 自动发。仍先过闸门（受控不变式）。
+                                                    _review = bool(_br.get("review_mode", False))
                                                     _res = _gdoq().enqueue(
                                                         platform, account_id, chat_key, text,
                                                         config=_cfg, registry=_gar2(),
+                                                        hold=_review,
                                                     )
                                                     if _res.get("enqueued"):
                                                         return {"ok": True,
-                                                                "delivered_as": "desktop_queued",
+                                                                "delivered_as": (
+                                                                    "desktop_review"
+                                                                    if _res.get("status") == "held"
+                                                                    else "desktop_queued"),
                                                                 "id": _res.get("id")}
                                                     return {"ok": False,
                                                             "error": "blocked:" + str(
