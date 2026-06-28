@@ -260,6 +260,33 @@ def _reset_intent_tags_edit_window():
         pass
 
 
+@pytest.fixture(autouse=True)
+def _reset_metrics_store_singleton():
+    """每个 test 前后重置全局 MetricsStore 单例，从根上隔离指标串测。
+
+    MetricsStore 是进程内单例（_instance）。「写指标」的测试（draft 事件 /
+    safe_skip / deferred 队列 / startup advisory 等）若不清理，会经 xdist 同
+    worker 泄漏到「读指标」的测试（HealthWatchdog._check_draft_quality、
+    ops incidents、Prometheus 导出等），表现为「本地 worker 分布恰好不串 →
+    绿，CI 分布串 → 红」的偶发 flaky（曾导致 #74 的 test_ops_incidents）。
+
+    集中在 conftest 做 autouse 重置后，所有读单例的测试对任何泄漏免疫，无需
+    再逐文件加隔离 fixture（与上方 _reset_intent_tags_edit_window 同模式）。
+    各测试若需取「干净的 store 引用」，仍可在用例内显式重置并 get_metrics_store()。
+    """
+    try:
+        from src.monitoring import metrics_store as _ms
+        _ms.MetricsStore._instance = None
+    except Exception:
+        pass
+    yield
+    try:
+        from src.monitoring import metrics_store as _ms
+        _ms.MetricsStore._instance = None
+    except Exception:
+        pass
+
+
 @pytest.fixture()
 def viewer_client(app, config_dir):
     """已认证为 viewer 角色的客户端"""
