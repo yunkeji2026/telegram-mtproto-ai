@@ -301,3 +301,25 @@ class TestRefreshStaleJourneys:
         # 单轮上限 2 → 先刷 2 个，剩 1 个下轮再刷
         assert eng.refresh_stale_journeys(now=now2, stale_after_s=3600, limit=2) == 2
         assert eng.refresh_stale_journeys(now=now2, stale_after_s=3600, limit=2) == 1
+
+    def test_count_stale_matches_refresh_filter(self, env):
+        store, gw, eng = env
+        start = 1_700_000_000
+        for i in range(3):
+            jid = self._active_journey(store, gw, f"fb_{i}", start=start)
+            eng.refresh_journey_intimacy(jid, now=start)
+        now2 = start + 30 * 86400
+        # gauge 不受 limit 截断、不写库：3 个全过期
+        assert eng.count_stale_journeys(now=now2, stale_after_s=3600) == 3
+        # 刷掉 2 个（limit=2）→ 积压降到 1
+        assert eng.refresh_stale_journeys(now=now2, stale_after_s=3600, limit=2) == 2
+        assert eng.count_stale_journeys(now=now2, stale_after_s=3600) == 1
+
+    def test_count_stale_excludes_fresh_and_zero(self, env):
+        store, gw, eng = env
+        start = 1_700_000_000
+        jid = self._active_journey(store, gw, "fb_fresh", start=start)
+        eng.refresh_journey_intimacy(jid, now=start)
+        gw.on_peer_seen(channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_zero")
+        # fresh 未过期 + zero 的 updated_at=0 → 积压 0
+        assert eng.count_stale_journeys(now=start + 10, stale_after_s=3600) == 0

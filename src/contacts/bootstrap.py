@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -55,6 +56,10 @@ class ContactsSubsystem:
     config_snapshot: Dict[str, Any] = None   # 启动时的配置，Web 可查
     # W4-定时：后台 asyncio 任务集合（start_background_tasks 后填充）
     _bg_tasks: list = field(default_factory=list)
+    # intimacy_refresh 循环活动快照（运营可经 health() 观测「在跑、刷了几个」）
+    _intimacy_refresh_stats: Dict[str, Any] = field(default_factory=lambda: {
+        "runs": 0, "last_run_ts": 0, "last_count": 0, "total_refreshed": 0,
+    })
 
     def close(self) -> None:
         self.stop_background_tasks()
@@ -324,6 +329,11 @@ class ContactsSubsystem:
                     stale_after_s=stale_after_s,
                     limit=limit,
                 )
+                st = self._intimacy_refresh_stats
+                st["runs"] += 1
+                st["last_run_ts"] = int(time.time())
+                st["last_count"] = int(count)
+                st["total_refreshed"] += int(count)
                 if count > 0:
                     logger.info(
                         "contacts intimacy_refresh 迭代完成：物化衰减 %d 个 journey",
@@ -352,9 +362,40 @@ class ContactsSubsystem:
                 "readiness_scorer": self.readiness_scorer is not None,
                 "reactivation": self.reactivation is not None,
             },
+            "intimacy_refresh": self._intimacy_refresh_health(),
             "config_snapshot": dict(self.config_snapshot or {}),
             "db_path": str(getattr(self.store, "_db_path", "")),
         }
+
+    def _intimacy_refresh_health(self) -> Dict[str, Any]:
+        """intimacy_refresh 物化循环可观测块：是否启用 + 运行快照 + 当前积压。
+
+        ``stale_backlog`` 用与循环同一 ``stale_hours`` 实时数 DB（不写库、不受 limit
+        截断）：若 ``enabled`` 且 backlog 长期 > ``limit``，说明单轮刷不完，应调大
+        ``intimacy_refresh_interval_minutes`` 或 ``intimacy_refresh_limit``。
+        """
+        cfg = self.config_snapshot or {}
+        try:
+            interval_min = int(cfg.get("intimacy_refresh_interval_minutes", 0) or 0)
+        except (TypeError, ValueError):
+            interval_min = 0
+        enabled = interval_min > 0 and self.intimacy_engine is not None
+        out: Dict[str, Any] = {
+            "enabled": enabled,
+            "interval_minutes": interval_min,
+            **dict(self._intimacy_refresh_stats),
+        }
+        if self.intimacy_engine is not None:
+            try:
+                stale_hours = float(cfg.get("intimacy_refresh_stale_hours", 24) or 24)
+            except (TypeError, ValueError):
+                stale_hours = 24.0
+            try:
+                out["stale_backlog"] = self.intimacy_engine.count_stale_journeys(
+                    stale_after_s=int(stale_hours * 3600))
+            except Exception:
+                out["stale_backlog"] = None
+        return out
 
 
 def bootstrap_contacts_subsystem(

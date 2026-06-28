@@ -236,9 +236,35 @@ class IntimacyEngine:
                 "ORDER BY intimacy_updated_at ASC LIMIT ?",
                 (cutoff, int(limit)),
             ).fetchall()
+        return self._refresh_journeys([r["journey_id"] for r in rows], now)
+
+    def count_stale_journeys(
+        self,
+        *,
+        now: Optional[int] = None,
+        stale_after_s: int = _STALE_INTIMACY_AFTER_S,
+    ) -> int:
+        """积压 gauge：当前有多少 journey 的 stored intimacy 已过期待物化。
+
+        与 ``refresh_stale_journeys`` 的筛选条件**完全一致**（同一 cutoff / 同一过滤），
+        但不写库、不受 ``limit`` 截断——供 health/看板观测「积压量」，判断
+        ``intimacy_refresh_interval_minutes`` / ``limit`` 是否够用（积压持续 > limit
+        说明单轮刷不完，需调大频率或上限）。
+        """
+        now = now if now is not None else int(time.time())
+        cutoff = now - int(stale_after_s)
+        with self._store._lock:  # noqa: SLF001
+            row = self._store._conn.execute(  # noqa: SLF001
+                "SELECT COUNT(*) AS n FROM journeys "
+                "WHERE intimacy_score > 0 AND intimacy_updated_at > 0 "
+                "  AND intimacy_updated_at < ?",
+                (cutoff,),
+            ).fetchone()
+        return int(row["n"]) if row else 0
+
+    def _refresh_journeys(self, journey_ids, now: int) -> int:
         refreshed = 0
-        for r in rows:
-            jid = r["journey_id"]
+        for jid in journey_ids:
             try:
                 self.refresh_journey_intimacy(jid, now=now)
                 refreshed += 1
