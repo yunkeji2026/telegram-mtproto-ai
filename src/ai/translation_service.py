@@ -155,6 +155,7 @@ class TranslationService:
         cost_tracking: bool = False,
         engines: Optional[list] = None,
         engine_router: Optional[Any] = None,
+        min_confidence: float = 0.0,
     ) -> None:
         self.ai_client = ai_client
         self.default_target_lang = normalize_lang(default_target_lang) or "zh"
@@ -176,9 +177,10 @@ class TranslationService:
         if engine_router is not None:
             self._router = engine_router
         elif engines:
-            self._router = EngineRouter(engines)
+            self._router = EngineRouter(engines, min_confidence=min_confidence)
         else:
-            self._router = EngineRouter([AIEngine(ai_client)])
+            self._router = EngineRouter(
+                [AIEngine(ai_client)], min_confidence=min_confidence)
 
     def detect_language(self, text: str) -> str:
         return detect_language(text)

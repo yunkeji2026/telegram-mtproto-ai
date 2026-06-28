@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 
 # 投递回调签名：async (platform, account_id, chat_key, text) -> dict
 SendCallback = Callable[[str, str, str, str], Awaitable[Dict[str, Any]]]
+# 出站翻译回调签名：async (to_deliver item dict) -> 应真正发出的文本（译文或回落原文）
+TranslateCallback = Callable[[Dict[str, Any]], Awaitable[str]]
 
 
 class AutosendWorker:
@@ -52,6 +54,7 @@ class AutosendWorker:
         draft_service: Any,
         config: Optional[Dict[str, Any]] = None,
         send_callback: Optional[SendCallback] = None,
+        translate_callback: Optional[TranslateCallback] = None,
         sleep: Optional[Callable[[float], Awaitable[Any]]] = None,
     ) -> None:
         cfg = config or {}
@@ -60,6 +63,9 @@ class AutosendWorker:
         # 真实投递回调（None=仅 DB 标记不发，保持旧行为；非 None=L2 草稿 resolve 后真投递）。
         # 由 main.py 在 inbox.l2_autosend.deliver=true 时注入，gating 在注入处。
         self._send_callback: Optional[SendCallback] = send_callback
+        # 出站翻译回调（None=投递原文，保持旧行为；非 None=投递前把 AI 中文译成客户语言）。
+        # 由 main.py 在 inbox.l2_autosend.translate.enabled=true 且 translation_service 可用时注入。
+        self._translate_callback: Optional[TranslateCallback] = translate_callback
         self._min_interval: float = float(cfg.get("min_interval_sec", 60))
         self._max_interval: float = float(cfg.get("max_interval_sec", 600))
         # 首次启动延迟（默认=min_interval 保持兼容）。可被新 L2 草稿事件提前唤醒，
@@ -109,6 +115,7 @@ class AutosendWorker:
         self.total_cleaned: int = 0   # H3：历史清理草稿总数
         self.total_delivered: int = 0       # 真正投递到平台的条数
         self.total_deliver_errors: int = 0  # 投递失败条数（已 resolve 但平台发送失败）
+        self.total_translated: int = 0      # 投递前出站翻译生效（译文≠原文）的条数
 
     # ── 生命周期 ──────────────────────────────────────────────
 
@@ -206,13 +213,27 @@ class AutosendWorker:
         if self._send_callback is not None and to_deliver:
             for item in to_deliver:
                 try:
+                    # 出站翻译：投递前把 AI 中文回复译成客户语言（补「全自动聊天翻译」闭环）。
+                    # 绝不阻塞投递——回调内部已保证异常/不可译时回落原文。
+                    send_text = str(item.get("text", ""))
+                    if self._translate_callback is not None:
+                        try:
+                            _tx = await self._translate_callback(item)
+                            if _tx:
+                                if _tx != send_text:
+                                    self.total_translated += 1
+                                send_text = _tx
+                        except Exception:
+                            logger.warning(
+                                "[AutosendWorker] 出站翻译异常，发原文 conv=%s",
+                                item.get("conversation_id", "?"), exc_info=True)
                     # Phase 4：投递前拟人延迟（模拟打字；只在确定要发时才等）
                     _delay = self._pick_deliver_delay()
                     if _delay > 0:
                         await self._sleep(_delay)
                     res = await self._send_callback(
                         item.get("platform", ""), item.get("account_id", "default"),
-                        item.get("chat_key", ""), item.get("text", ""),
+                        item.get("chat_key", ""), send_text,
                     )
                     # 投递失败判定：除显式 ok=False 外，编排器/出站闸门返回
                     # {delivered: False} 或 {blocked: ...}（如 kill-switch/send-gate 拦截、
@@ -306,6 +327,17 @@ class AutosendWorker:
             draft_id = d.get("draft_id", "")
             # 投递用文本优先取最终文本，回落草稿文本
             text = str(d.get("final_text") or d.get("draft_text") or "").strip()
+            # 投递模式下，空正文草稿绝不 resolve：否则会被标记 approved/已发，却因
+            # text 为空而被跳过投递（sent_at=0、客户收不到），形成「只标记不真发」的静默
+            # 丢失，且每会话幂等占位会阻断后续自动回复。留作 pending，等人设产线回填或
+            # 人工补全后下一轮再发；同时打 warning 让该异常可见。
+            if self._send_callback is not None and not text:
+                logger.warning(
+                    "[AutosendWorker] 跳过空正文 L2 草稿（不标记已发，待回填/人工补全）"
+                    "draft_id=%s conv=%s",
+                    draft_id, d.get("conversation_id", ""),
+                )
+                continue
             try:
                 result = self._svc.resolve_with_audit(draft_id, "autosend", by="autosend_worker")
                 if result.get("ok"):
@@ -378,4 +410,6 @@ class AutosendWorker:
             "deliver_enabled": self._send_callback is not None,  # 是否真正投递到平台
             "total_delivered": self.total_delivered,
             "total_deliver_errors": self.total_deliver_errors,
+            "translate_enabled": self._translate_callback is not None,  # 是否投递前出站翻译
+            "total_translated": self.total_translated,
         }

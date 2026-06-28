@@ -15,7 +15,8 @@ from typing import Any, Dict, Optional
 
 
 class TranslationEngineStats:
-    __slots__ = ("_lock", "_rows", "_started_at", "_last_ts", "_fallbacks", "_total")
+    __slots__ = ("_lock", "_rows", "_started_at", "_last_ts", "_fallbacks", "_total",
+                 "_low_conf", "_conf_switches")
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -24,6 +25,9 @@ class TranslationEngineStats:
         self._last_ts = 0.0
         self._fallbacks = 0
         self._total = 0
+        # K/M：置信度智能切换观测
+        self._low_conf = 0       # 一次译文被判低置信（< min_confidence）的累计次数
+        self._conf_switches = 0  # 因低置信实际切换到非主引擎结果的 translate() 调用数
 
     def record(self, engine: str, *, ok: bool, latency_ms: int = 0) -> None:
         engine = str(engine or "unknown")
@@ -43,6 +47,16 @@ class TranslationEngineStats:
         with self._lock:
             self._fallbacks += 1
 
+    def record_low_confidence(self) -> None:
+        """一条引擎译文被判低置信（< min_confidence）时 +1。"""
+        with self._lock:
+            self._low_conf += 1
+
+    def record_confidence_switch(self) -> None:
+        """因低置信实际切换、最终采用非主引擎结果的 translate() 调用 +1。"""
+        with self._lock:
+            self._conf_switches += 1
+
     def dump(self) -> Dict[str, Any]:
         with self._lock:
             rows = []
@@ -61,6 +75,8 @@ class TranslationEngineStats:
                 "last_record_ts": self._last_ts,
                 "total_attempts": self._total,
                 "fallbacks": self._fallbacks,
+                "low_confidence": self._low_conf,
+                "confidence_switches": self._conf_switches,
                 "rows": rows,
             }
 
@@ -72,9 +88,15 @@ class TranslationEngineStats:
             "# TYPE translation_engine_fail_total counter",
             "# HELP translation_engine_fallbacks_total Translation fallbacks (primary failed)",
             "# TYPE translation_engine_fallbacks_total counter",
+            "# HELP translation_engine_low_confidence_total Translations judged low-confidence",
+            "# TYPE translation_engine_low_confidence_total counter",
+            "# HELP translation_engine_confidence_switches_total Calls switched to non-primary by confidence",
+            "# TYPE translation_engine_confidence_switches_total counter",
         ]
         with self._lock:
             lines.append(f"translation_engine_fallbacks_total {self._fallbacks}")
+            lines.append(f"translation_engine_low_confidence_total {self._low_conf}")
+            lines.append(f"translation_engine_confidence_switches_total {self._conf_switches}")
             for name, v in self._rows.items():
                 lbl = f'engine="{_esc(name)}"'
                 lines.append(f'translation_engine_attempts_total{{{lbl}}} {int(v["calls"])}')
@@ -87,6 +109,8 @@ class TranslationEngineStats:
             self._fallbacks = 0
             self._total = 0
             self._last_ts = 0.0
+            self._low_conf = 0
+            self._conf_switches = 0
 
 
 def _esc(s: str) -> str:

@@ -269,10 +269,18 @@ class GoogleEngine:
 
 
 class EngineRouter:
-    """按顺序尝试引擎，首个「可用且非空」获胜；全失败返回 ok=False 带最后错误。"""
+    """按顺序尝试引擎，首个「可用且非空」获胜；全失败返回 ok=False 带最后错误。
 
-    def __init__(self, engines: Optional[List[Any]] = None) -> None:
+    ``min_confidence>0`` 时启用**置信度智能切换**：主引擎虽产出非空，但若译文置信度
+    （空/未翻译/错语种/长度异常的确定性评分）低于阈值，则继续尝试下一引擎，最终返回
+    达标的首个结果；都不达标则返回**置信度最高**的候选（degrade，不阻断）。默认 0 = 旧行为。
+    """
+
+    def __init__(
+        self, engines: Optional[List[Any]] = None, *, min_confidence: float = 0.0,
+    ) -> None:
         self._engines: List[Any] = [e for e in (engines or []) if e is not None]
+        self._min_confidence = max(0.0, float(min_confidence or 0.0))
 
     @property
     def primary_name(self) -> str:
@@ -380,8 +388,27 @@ class EngineRouter:
         except Exception:
             stats = None
 
+        # S：按日趋势落库（默认关 → no-op）。attempts 每次 translate 计一次，
+        # low_conf/switches 在下方与 stats 观测同点记入，供看板画 7 天 sparkline。
+        try:
+            from src.ai.translation_trend_store import record_translation_trend as _trend
+        except Exception:
+            _trend = None
+        if _trend is not None:
+            _trend(attempts=1)
+
+        conf_fn = None
+        if self._min_confidence > 0:
+            try:
+                from src.ai.translation_confidence import translation_confidence as conf_fn
+            except Exception:
+                conf_fn = None
+
         last_err = "no_engine"
         attempted_fail = False  # 是否有「已尝试的可用引擎」失败（区别于「不可用被跳过」）
+        best: Optional[EngineResult] = None       # 置信度切换：最高分候选（兜底）
+        best_conf = -1.0
+        saw_low_conf = False                       # 本次调用是否发生过低置信（→ 切换观测）
         for eng in self._engines:
             if not getattr(eng, "available", False):
                 last_err = f"{eng.name}:unavailable"
@@ -404,12 +431,42 @@ class EngineRouter:
             if stats:
                 stats.record(getattr(eng, "name", "?"), ok=won, latency_ms=lat)
             if won:
+                if conf_fn is not None:
+                    # 置信度智能切换：达标即返回；不达标记为候选，继续试下一引擎
+                    conf = conf_fn(text, res.text, target_lang)
+                    if conf >= self._min_confidence:
+                        if stats and attempted_fail:
+                            stats.record_fallback()
+                        if stats and saw_low_conf:
+                            stats.record_confidence_switch()  # 切换后采用了更优引擎
+                            if _trend is not None:
+                                _trend(switches=1)
+                        return res
+                    if conf > best_conf:
+                        best_conf, best = conf, res
+                    saw_low_conf = True
+                    if stats:
+                        stats.record_low_confidence()
+                    if _trend is not None:
+                        _trend(low_conf=1)
+                    attempted_fail = True
+                    last_err = f"{eng.name}:low_confidence({conf})"
+                    continue
                 # 仅当此前有「可用引擎实际失败」才算降级（不可用引擎被跳过不计）
                 if stats and attempted_fail:
                     stats.record_fallback()
                 return res
             attempted_fail = True
             last_err = f"{eng.name}:{res.error or 'empty'}"
+        # 置信度模式：无人达标 → 回退到最高分候选（绝不因「都不够好」而吐空）
+        if best is not None:
+            if stats:
+                stats.record_fallback()
+                if best.engine != self.primary_name:
+                    stats.record_confidence_switch()  # 兜底也用了非主引擎
+                    if _trend is not None:
+                        _trend(switches=1)
+            return best
         if stats and attempted_fail:
             stats.record_fallback()  # 有引擎尝试且全失败 → 记降级
         return EngineResult("", "none", False, last_err)
