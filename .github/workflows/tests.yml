@@ -16,13 +16,21 @@ jobs:
   regression:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      # 两版本互不熔断：一个挂也要看另一个结果，便于定位是否版本特异问题。
+      fail-fast: false
+      matrix:
+        # 3.12 = CI 主支持档；3.13 = 开发机实跑档（防本地能跑/CI 挂的漂移）。
+        # 矩阵会产出两个检查上下文：`regression (3.12)` / `regression (3.13)`，
+        # 二者均已设为分支保护必需检查。
+        python-version: ['3.12', '3.13']
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Python 3.12
+      - name: Setup Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python-version }}
           cache: 'pip'
           cache-dependency-path: requirements-ci.txt
 
