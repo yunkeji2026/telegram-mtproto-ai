@@ -938,7 +938,9 @@ class L3ContextProcessor:
     
     def get_smart_cooldown(self, chat_id: str, user_id: str) -> int:
         """基于上下文智能调整冷却时间"""
-        l3_config = self.trigger_config.get('l3_context_filter', {})
+        # self.config 已是 trigger_config['l3_context_filter']（见 __init__）；
+        # 此前误用 self.trigger_config（不存在）会在第一行就 AttributeError。
+        l3_config = self.config
         cooldown_config = l3_config.get('cooldown', {})
         smart_config = cooldown_config.get('smart_cooldown', {})
         default_cd = cooldown_config.get('default_cooldown', 90)
