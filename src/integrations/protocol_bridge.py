@@ -285,14 +285,22 @@ def make_message(
     *, platform: str, account_id: str, chat_key: str, text: str,
     name: str = "", ts: float = 0, msg_id: str = "", direction: str = "in",
     media_type: str = "", media_ref: str = "",
+    source: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """构造给 ``emit_incoming`` 的标准消息 dict。"""
-    return {
+    """构造给 ``emit_incoming`` 的标准消息 dict。
+
+    ``source``：上游平台原始字段（如 LINE 的 ``{"chat_type": "group"|"room"|"user"}``），
+    会透传给落库时的 ``infer_chat_type``，让群组/房间正确分流到「群组动态」而非 SLA 告警。
+    """
+    msg: Dict[str, Any] = {
         "platform": platform, "account_id": account_id, "chat_key": chat_key,
         "name": name, "text": text, "ts": ts or time.time(),
         "msg_id": msg_id, "direction": direction,
         "media_type": media_type, "media_ref": media_ref,
     }
+    if source:
+        msg["source"] = dict(source)
+    return msg
 
 
 def tg_message_payload(

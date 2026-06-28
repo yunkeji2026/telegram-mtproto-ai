@@ -52,6 +52,35 @@ def test_ingest_is_idempotent(tmp_path):
     store.close()
 
 
+def test_ingest_skips_store_backed_chats_no_hash_dup(tmp_path):
+    """from_store 会话不再 re-ingest：防同一消息被 hash 兜底键复制成 ``:h:`` 重复行。
+
+    复刻真实 bug：协议 worker 经带 platform_msg_id 的权威路径落库 ``:<pmid>`` 行；随后
+    聚合把 store 读出的同一会话（from_store=True、last_message 无 pmid）再写回——旧行为会
+    多出一条 ``:h:<hash>`` 重复行并重复触发 auto-draft。跳过后消息数恒为 1。
+    """
+    store = InboxStore(tmp_path / "inbox.db")
+    # 1) 权威路径：带 source.id（telegram msg_id）→ 落 ``:<pmid>`` 行
+    authoritative = _chat(
+        platform="telegram", account_id="8244899900", chat_key="555",
+        conversation_id="telegram:8244899900:555",
+        last_message={"text": "hi", "ts": 110, "direction": "in",
+                      "language": "en", "source": {"id": "778"}},
+    )
+    assert ingest_collected_chats(store, [authoritative]) == 1
+    assert store.count_messages("telegram:8244899900:555") == 1
+    # 2) 聚合 re-ingest store 读出的同一会话（from_store=True，last_message 丢了 pmid）
+    store_backed = _chat(
+        platform="telegram", account_id="8244899900", chat_key="555",
+        conversation_id="telegram:8244899900:555",
+        last_message={"text": "hi", "ts": 110, "direction": "in", "language": "en"},
+        from_store=True,
+    )
+    assert ingest_collected_chats(store, [store_backed]) == 0   # 被跳过，无新插入
+    assert store.count_messages("telegram:8244899900:555") == 1  # 仍只有 1 条（无 :h: 重复）
+    store.close()
+
+
 def test_ingest_thread_persists_history(tmp_path):
     store = InboxStore(tmp_path / "inbox.db")
     chat = _chat()

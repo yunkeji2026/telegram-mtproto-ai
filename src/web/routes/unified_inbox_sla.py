@@ -133,8 +133,32 @@ def _alerts_exclude_groups(request: Request) -> bool:
 
 
 def _is_non_alert_conv(conv: Dict[str, Any]) -> bool:
-    """该会话是否属于「不告警」类型（群组/频道）。"""
-    return str((conv or {}).get("chat_type") or "private").lower() in _NON_ALERT_CHAT_TYPES
+    """该会话是否属于「不告警」类型（群组/频道）。
+
+    主判据是 ``chat_type``；但历史会话可能在 chat_type 特性之前入库、被默认成
+    ``private``，导致 Telegram 群组/频道（chat_key 为负数 id，如 -100.../-5...）泄漏进
+    SLA「严重超时/待接管」。这里加一道按 chat_key 的兜底，负数 Telegram 会话一律按群组排除。
+    """
+    conv = conv or {}
+    if str(conv.get("chat_type") or "private").lower() in _NON_ALERT_CHAT_TYPES:
+        return True
+    plat = str(conv.get("platform") or "").lower()
+    chat_key = str(conv.get("chat_key") or "")
+    conv_id = str(conv.get("conversation_id") or "")
+    if plat == "telegram":
+        ck = chat_key
+        if not ck:
+            # 退而从 conversation_id（telegram:<account>:<chat_key>）尾段取
+            parts = conv_id.split(":")
+            ck = parts[-1] if parts else ""
+        if ck.startswith("-"):
+            return True
+    if plat == "line":
+        # LINE 官方会话 key 形如 line:group:<id> / line:room:<id>（群/房间皆非告警）
+        low = (chat_key + " " + conv_id).lower()
+        if ":group:" in low or ":room:" in low:
+            return True
+    return False
 
 
 def _archived_set(inbox, conv_ids: List[str]) -> set:

@@ -285,6 +285,38 @@ def test_unified_inbox_send_supports_four_platforms():
         assert resp.json()["ok"] is True
 
 
+def test_send_to_removed_account_blocked_409(monkeypatch):
+    """已移除账号会话只读：明确指向 removed 账号 id 的发送被服务端拒（409）。
+
+    实时 A 线用 account_id='default'（不在注册表）不受影响，仍可发送。
+    """
+    import src.web.routes.unified_inbox_send_routes as sr
+
+    class _Reg:
+        def get(self, platform, account_id):
+            if platform == "telegram" and account_id == "8118214990":
+                return {"status": "removed"}
+            return None
+
+    monkeypatch.setattr(
+        "src.integrations.account_registry.get_account_registry", lambda: _Reg())
+    c = _client()
+    # removed 账号 → 409
+    resp = c.post(
+        "/api/unified-inbox/send",
+        json={"platform": "telegram", "account_id": "8118214990",
+              "chat_key": "tg-room", "text": "hi"},
+    )
+    assert resp.status_code == 409, resp.text
+    # 实时 default 账号不受影响
+    ok = c.post(
+        "/api/unified-inbox/send",
+        json={"platform": "telegram", "account_id": "default",
+              "chat_key": "tg-room", "text": "hi"},
+    )
+    assert ok.status_code == 200, ok.text
+
+
 class _LangStore:
     """最小 inbox_store stub：仅实现 outbound 自动翻译需要的 get_conversation。"""
 
@@ -1982,6 +2014,30 @@ def test_desktop_routes_slice33_registers_contract():
         ("/api/desktop/ingest", "POST"),
     }
     assert expected <= live, f"桌面壳路由域端点缺失：{expected - live}"
+
+
+def test_desktop_ingest_dedups_unstable_synthetic_msg_id(tmp_path):
+    """桌面壳 DOM 抓取每轮赋不同合成 msg_id：路径丢弃该 id → 同会话同文本同 ts 的重扫
+    经 store hash 去重稳定折叠为一条，不再每轮刷屏式重复落库。"""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from src.inbox.store import InboxStore
+    from src.web.routes.unified_inbox_desktop_routes import register_desktop_routes
+
+    app = FastAPI()
+    register_desktop_routes(app, api_auth=lambda: None)
+    app.state.inbox_store = InboxStore(tmp_path / "inbox.db")
+    c = TestClient(app)
+    cid = "telegram:tg-desktop:-3142518418"
+    for synth in ("4294967299", "4294967300", "4294967310"):  # 同一条消息每轮不同合成 id
+        r = c.post("/api/desktop/ingest", json={
+            "platform": "telegram", "account_id": "tg-desktop",
+            "chat_key": "-3142518418", "text": "支付", "ts": 1780982816.0,
+            "msg_id": synth, "direction": "in",
+        })
+        assert r.status_code == 200, r.text
+    assert app.state.inbox_store.count_messages(cid) == 1  # 不随重扫次数增长
+    app.state.inbox_store.close()
 
 
 def test_analyze_routes_slice34_registers_contract():

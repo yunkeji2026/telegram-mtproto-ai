@@ -35,7 +35,7 @@ def conv_id(platform: str, account_id: str, chat_key: str) -> str:
 # 会话类型归一（私聊 / 群组 / 频道）。用于「群组不进升级告警、改走群组动态」分流。
 # 群/超级群/广播群统一归为 ``group``；频道单列 ``channel``；其余（含未知）回落 ``private``，
 # 因为告警侧对未知保守按私聊处理（宁可多提醒一个私聊，不可漏一个真客户）。
-_GROUP_SOURCE_TYPES = {"group", "supergroup", "gigagroup", "megagroup"}
+_GROUP_SOURCE_TYPES = {"group", "supergroup", "gigagroup", "megagroup", "room"}
 _PRIVATE_SOURCE_TYPES = {"private", "user", "bot", "dm", "direct"}
 
 
@@ -70,9 +70,16 @@ def infer_chat_type(
         return "group"
     if pt == "channel":
         return "channel"
-    if str(platform or "").lower() == "telegram":
-        ck = str(chat_key or "").strip()
+    plat = str(platform or "").lower()
+    ck = str(chat_key or "").strip()
+    if plat == "telegram":
         if ck.startswith("-") and ck[1:].isdigit():
+            return "group"
+    if plat == "line":
+        # 官方 webhook 路径的 chat_key 形如 ``line:group:<id>`` / ``line:room:<id>`` /
+        # ``line:user:<id>``——按其中的类型段判定（群/房间皆走「群组动态」，不刷 SLA）。
+        low = ck.lower()
+        if ":group:" in low or ":room:" in low or low.startswith(("line:group:", "line:room:")):
             return "group"
     return "private"
 
@@ -248,6 +255,8 @@ def store_row_to_chat(
     automation_mode: str = "review",
     message_count: int = 0,
     account_label: Optional[str] = None,
+    read_only: bool = False,
+    account_status: str = "",
 ) -> Dict[str, Any]:
     """把 InboxStore.list_conversations 的一行映射回 unified_inbox 的 chat dict 形状。
 
@@ -296,7 +305,10 @@ def store_row_to_chat(
         "last_message": last_msg_obj,
         "messages": [last_msg_obj] if last_msg_obj else [],
         "message_count": int(message_count or 0),
-        "can_send": True,
+        # read_only：账号已从注册表移除（如 status=removed），仅可查看历史、不可发送。
+        "can_send": not read_only,
+        "read_only": bool(read_only),
+        "account_status": str(account_status or ""),
         "send_modes": list(SEND_MODES),
         "automation_mode": mode,
         "risk": {"level": risk_level, "reasons": []},

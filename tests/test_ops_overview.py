@@ -3,6 +3,7 @@
 from src.utils.ops_overview import (
     assemble_ops_overview,
     billing_anomalies,
+    companion_config_light,
     worst_light,
 )
 
@@ -106,3 +107,39 @@ def test_assemble_handles_all_empty():
     assert ov["ok"] is True
     assert ov["overall_light"] == ""
     assert ov["billing_anomalies"] == []
+
+
+# ── 陪伴能力配置健康接入总览 ───────────────────────────────────────────────
+
+def test_companion_config_light_levels():
+    assert companion_config_light(None) == ""
+    assert companion_config_light({"summary": {"errors": 0, "warnings": 0}}) == "green"
+    assert companion_config_light({"summary": {"errors": 0, "warnings": 2}}) == "yellow"
+    assert companion_config_light({"summary": {"errors": 1, "warnings": 0}}) == "red"
+
+
+def test_assemble_companion_errors_escalate_overall_to_red():
+    ov = assemble_ops_overview(
+        health={"light": "green"}, reliability={"light": "green"},
+        companion={"summary": {"errors": 1, "warnings": 0},
+                   "consistency": [{"severity": "error", "message": "真发裸奔"}]},
+    )
+    assert ov["overall_light"] == "red"
+    assert ov["kpis"]["companion_config_light"] == "red"
+    assert ov["kpis"]["companion_config_errors"] == 1
+    assert ov["sections"]["companion"]["summary"]["errors"] == 1
+
+
+def test_assemble_companion_warnings_escalate_to_yellow_only():
+    ov = assemble_ops_overview(
+        health={"light": "green"}, reliability={"light": "green"},
+        companion={"summary": {"errors": 0, "warnings": 3}},
+    )
+    assert ov["overall_light"] == "yellow"
+    assert ov["kpis"]["companion_config_warnings"] == 3
+
+
+def test_assemble_companion_none_does_not_affect_overall():
+    ov = assemble_ops_overview(health={"light": "green"}, reliability={"light": "green"})
+    assert ov["overall_light"] == "green"
+    assert ov["kpis"]["companion_config_light"] == ""

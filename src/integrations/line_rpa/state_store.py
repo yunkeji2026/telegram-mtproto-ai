@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS line_rpa_chat_state (
     last_peer_hash      TEXT DEFAULT '',
     last_reply          TEXT DEFAULT '',
     last_screen_sha256  TEXT DEFAULT '',
+    is_group            INTEGER DEFAULT 0,
+    last_mentioned      INTEGER DEFAULT 0,
     updated_at          REAL NOT NULL
 );
 
@@ -240,6 +242,22 @@ class LineRpaStateStore:
                 )
             except Exception as e:
                 logger.debug("ALTER forced_lang 跳过: %s", e)
+        # 群组分流：是否群聊（detect_group_chat 实况落库，供统一收件箱按 chat_type 分流）
+        if "is_group" not in cs_cols:
+            try:
+                self._conn.execute(
+                    "ALTER TABLE line_rpa_chat_state ADD COLUMN is_group INTEGER DEFAULT 0"
+                )
+            except Exception as e:
+                logger.debug("ALTER is_group 跳过: %s", e)
+        # 群消息「@我」：最近一轮是否被点名（供「群组动态」@我 高亮/置顶）
+        if "last_mentioned" not in cs_cols:
+            try:
+                self._conn.execute(
+                    "ALTER TABLE line_rpa_chat_state ADD COLUMN last_mentioned INTEGER DEFAULT 0"
+                )
+            except Exception as e:
+                logger.debug("ALTER last_mentioned 跳过: %s", e)
         # P7-C: 对话层语言落库（runs）
         if "reply_lang" not in cols:
             try:
@@ -269,6 +287,8 @@ class LineRpaStateStore:
         last_peer_hash: Optional[str] = None,
         last_reply: Optional[str] = None,
         last_screen_sha256: Optional[str] = None,
+        is_group: Optional[bool] = None,
+        last_mentioned: Optional[bool] = None,
     ) -> None:
         now = time.time()
         with self._lock:
@@ -291,6 +311,12 @@ class LineRpaStateStore:
                 if last_screen_sha256 is not None:
                     sets.append("last_screen_sha256=?")
                     vals.append(last_screen_sha256[:64])
+                if is_group is not None:
+                    sets.append("is_group=?")
+                    vals.append(1 if is_group else 0)
+                if last_mentioned is not None:
+                    sets.append("last_mentioned=?")
+                    vals.append(1 if last_mentioned else 0)
                 vals.append(chat_key)
                 self._conn.execute(
                     f"UPDATE line_rpa_chat_state SET {', '.join(sets)} WHERE chat_key=?",
@@ -300,14 +326,16 @@ class LineRpaStateStore:
                 self._conn.execute(
                     "INSERT INTO line_rpa_chat_state"
                     "(chat_key,last_peer_text,last_peer_hash,last_reply,"
-                    " last_screen_sha256,updated_at)"
-                    " VALUES(?,?,?,?,?,?)",
+                    " last_screen_sha256,is_group,last_mentioned,updated_at)"
+                    " VALUES(?,?,?,?,?,?,?,?)",
                     (
                         chat_key,
                         (last_peer_text or "")[:4000],
                         (last_peer_hash or "")[:64],
                         (last_reply or "")[:4000],
                         (last_screen_sha256 or "")[:64],
+                        1 if is_group else 0,
+                        1 if last_mentioned else 0,
                         now,
                     ),
                 )

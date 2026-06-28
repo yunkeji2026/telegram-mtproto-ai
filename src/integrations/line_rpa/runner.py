@@ -1287,6 +1287,17 @@ class LineRpaRunner:
         out["group_debug"] = verdict.group_debug
         out["mentioned"] = verdict.mentioned
         out["mention_debug"] = verdict.mention_debug
+        # 群组分流：把群聊判定 + 是否被@点名落到 per-chat 状态（即使本轮不回复也要记），
+        # 统一收件箱据此把群组归到「群组动态」、不刷 SLA，并对「@我」群高亮置顶。
+        if self._state_store is not None and chat_key:
+            try:
+                self._state_store.update_chat_state(
+                    chat_key,
+                    is_group=bool(verdict.is_group),
+                    last_mentioned=bool(verdict.is_group and verdict.mentioned),
+                )
+            except Exception:
+                logger.debug("update_chat_state(is_group) 失败", exc_info=True)
         if not verdict.should_reply:
             out["ok"] = True
             out["step"] = verdict.skip_step or "group_skip"

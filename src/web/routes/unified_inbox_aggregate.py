@@ -116,6 +116,29 @@ def _is_protocol_account(request: Request, platform: str, account_id: str) -> bo
         return False
 
 
+def _removed_account_keys(request: Request) -> set:
+    """注册表里 status=removed 的 (platform, account_id) 集合（A1 直读路径只读标记用）。
+
+    与 ProtocolInboxAdapter 的实时聚合口径一致：``inbox.show_removed_history`` 关闭则返回
+    空集（直读路径仍会列出这些会话，但不打只读标记——与适配器隐藏行为略有差异，A1 直读
+    本就是「全量列出」的灰度路径，发送侧已有 409 兜底，视觉上保持可达即可）。查不到一律空集。
+    """
+    try:
+        cm = getattr(request.app.state, "config_manager", None)
+        cfg = (getattr(cm, "config", None) or {}) if cm is not None else {}
+        if not bool(((cfg.get("inbox") or {}) if isinstance(cfg, dict) else {})
+                    .get("show_removed_history", True)):
+            return set()
+        from src.integrations.account_registry import get_account_registry
+        rows = get_account_registry().list() or []
+        return {
+            (str(a.get("platform") or ""), str(a.get("account_id") or ""))
+            for a in rows if a.get("status") == "removed"
+        }
+    except Exception:
+        return set()
+
+
 def _read_from_store_enabled(request: Request) -> bool:
     """A1 读路径灰度开关：config.inbox.read_from_store（默认 false=实时聚合）。"""
     cm = getattr(request.app.state, "config_manager", None)
@@ -141,6 +164,7 @@ def _collect_chats_from_store(
     if store is None:
         return None  # type: ignore[return-value]
     lmap = label_map or {}
+    removed = _removed_account_keys(request)  # 与实时聚合一致：removed 账号会话只读展示
     convs = store.list_conversations(limit=min(200, max(1, limit * 4)))
     out: List[Dict[str, Any]] = []
     for c in convs:
@@ -151,9 +175,12 @@ def _collect_chats_from_store(
         except Exception:
             mc = 0
         key = (str(c.get("platform") or ""), str(c.get("account_id") or "default"))
+        is_ro = key in removed
         out.append(store_row_to_chat(
             c, automation_mode=mode, message_count=mc,
             account_label=lmap.get(key),
+            read_only=is_ro,
+            account_status="removed" if is_ro else "",
         ))
     return out
 

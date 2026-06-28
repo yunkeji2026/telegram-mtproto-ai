@@ -15,6 +15,7 @@ from src.inbox.channel_adapters import (
     LineInboxAdapter,
     WhatsAppInboxAdapter,
     MessengerInboxAdapter,
+    ProtocolInboxAdapter,
     TelegramInboxAdapter,
     WebInboxAdapter,
     collect_chats_via_adapters,
@@ -199,6 +200,87 @@ def test_telegram_send_awaits_coroutine():
     result = asyncio.run(send_via_adapters(req, "telegram", "default", "r", "hi",
                                            default_inbox_adapters()))
     assert result["ok_tg"] is True
+
+
+# ── 已移除账号：只读历史展示（看不到之前聊天记录的修复） ──────────────
+
+class _FakeRegistry:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def list(self):
+        return self._rows
+
+
+class _FakeProtoStore:
+    """按 platform 返回会话；两个账号各一条会话。"""
+
+    def __init__(self):
+        self._rows = {
+            "telegram": [
+                {"platform": "telegram", "account_id": "acc_on", "chat_key": "u1",
+                 "conversation_id": "telegram:acc_on:u1", "last_text": "在线对话",
+                 "last_ts": 100, "display_name": "Active"},
+                {"platform": "telegram", "account_id": "acc_off", "chat_key": "u2",
+                 "conversation_id": "telegram:acc_off:u2", "last_text": "历史对话",
+                 "last_ts": 50, "display_name": "Archived"},
+            ]
+        }
+
+    def list_conversations(self, limit, platform):
+        return list(self._rows.get(platform, []))
+
+    def get_automation_mode(self, cid):
+        return "review"
+
+    def count_messages(self, cid):
+        return 3
+
+
+def _proto_req(rows, *, show_removed=True):
+    store = _FakeProtoStore()
+    cm = SimpleNamespace(config={"inbox": {"show_removed_history": show_removed}})
+    return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
+        inbox_store=store, config_manager=cm)))
+
+
+def _patch_registry(monkeypatch, rows):
+    import src.integrations.account_registry as ar
+    monkeypatch.setattr(ar, "get_account_registry", lambda: _FakeRegistry(rows))
+
+
+def test_protocol_adapter_marks_removed_account_readonly(monkeypatch):
+    rows = [
+        {"platform": "telegram", "account_id": "acc_on",
+         "mode": "protocol", "status": "online"},
+        {"platform": "telegram", "account_id": "acc_off",
+         "mode": "protocol", "status": "removed"},
+    ]
+    _patch_registry(monkeypatch, rows)
+    chats = ProtocolInboxAdapter().collect_chats(_proto_req(rows), 20)
+    by_acc = {c["account_id"]: c for c in chats}
+    # 在线账号：可发送、非只读
+    assert by_acc["acc_on"]["can_send"] is True
+    assert by_acc["acc_on"]["read_only"] is False
+    assert by_acc["acc_on"]["account_status"] == ""
+    # 已移除账号：只读历史可见、禁止发送
+    assert by_acc["acc_off"]["read_only"] is True
+    assert by_acc["acc_off"]["can_send"] is False
+    assert by_acc["acc_off"]["account_status"] == "removed"
+
+
+def test_protocol_adapter_hides_removed_when_flag_off(monkeypatch):
+    rows = [
+        {"platform": "telegram", "account_id": "acc_on",
+         "mode": "protocol", "status": "online"},
+        {"platform": "telegram", "account_id": "acc_off",
+         "mode": "protocol", "status": "removed"},
+    ]
+    _patch_registry(monkeypatch, rows)
+    chats = ProtocolInboxAdapter().collect_chats(
+        _proto_req(rows, show_removed=False), 20)
+    accs = {c["account_id"] for c in chats}
+    assert accs == {"acc_on"}  # 关闭开关回到旧行为：removed 账号被隐藏
 
 
 def test_web_send_delivers_records_and_sets_manual():

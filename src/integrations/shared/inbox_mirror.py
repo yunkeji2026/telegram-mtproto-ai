@@ -31,16 +31,20 @@ def mirror_to_inbox(
     msg_id: str = "",
     media_type: str = "",
     media_ref: str = "",
+    chat_type: str = "",
 ) -> bool:
     """把一条官方渠道消息镜像进统一收件箱。返回是否成功投递到 sink。
 
     ``media_type``/``media_ref``：入站媒体（图片/语音/视频…）可见化用——坐席台据此显示
     「[图片]」等占位并知道有非文字内容到达（Phase I1）。
+    ``chat_type``：上游会话类型（如 LINE 的 ``group``/``room``/``user``）。带上则群组/房间
+    会被正确分流到「群组动态」，不再误刷 SLA「严重超时/待接管」。
     """
     if not chat_key:
         return False
     try:
         from src.integrations.protocol_bridge import emit_incoming, make_message
+        source = {"chat_type": str(chat_type).strip().lower()} if chat_type else None
         emit_incoming(make_message(
             platform=str(platform or ""),
             account_id=str(account_id or "default"),
@@ -51,6 +55,7 @@ def mirror_to_inbox(
             msg_id=str(msg_id or ""),
             media_type=str(media_type or ""),
             media_ref=str(media_ref or ""),
+            source=source,
         ))
         return True
     except Exception:

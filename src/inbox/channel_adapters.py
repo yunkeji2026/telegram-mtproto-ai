@@ -99,7 +99,7 @@ class LineInboxAdapter:
                 logger.debug("LINE list_chats [%s] 失败: %s", aid, ex)
                 chats = []
             for c in chats:
-                out.append(normalize_chat(
+                chat = normalize_chat(
                     platform="line", platform_name="LINE",
                     account_id=aid, account_label=label,
                     chat_key=c.get("chat_key") or c.get("name") or "",
@@ -108,7 +108,11 @@ class LineInboxAdapter:
                     last_ts=c.get("last_ts") or c.get("ts") or 0,
                     unread=c.get("unread_count") or 0,
                     source=c,
-                ))
+                )
+                # 群消息「@我」：live 视图透传（供「群组动态」高亮/置顶；store-backed 读路径不带，优雅降级）
+                if c.get("last_mentioned"):
+                    chat["mentioned"] = True
+                out.append(chat)
         return out
 
     def status(self, request: Any) -> Dict[str, Dict[str, Any]]:
@@ -409,30 +413,61 @@ class ProtocolInboxAdapter:
 
     platform = "protocol"  # 哨兵：不参与按平台的 send 路由
 
-    def _protocol_ids(self) -> Dict[str, set]:
+    def _protocol_ids(self) -> "tuple[Dict[str, set], Dict[str, set]]":
+        """返回 (active, removed) 两组 ``{platform: {account_id}}``。
+
+        active：mode∈(protocol,desktop) 且 status≠removed —— 参与发送/收信展示。
+        removed：mode∈(protocol,desktop) 且 status==removed —— 仅只读历史展示
+        （账号已移除但 store 里的历史会话仍在，供查看；不参与发送）。
+        """
         try:
             from src.integrations.account_registry import get_account_registry
             rows = get_account_registry().list() or []
         except Exception:
-            return {}
-        out: Dict[str, set] = {}
+            return {}, {}
+        active: Dict[str, set] = {}
+        removed: Dict[str, set] = {}
         for a in rows:
             # protocol=真 worker push 落库；desktop=桌面壳同步桥落库（均按 store 读出）
-            if a.get("mode") not in ("protocol", "desktop") or a.get("status") == "removed":
+            if a.get("mode") not in ("protocol", "desktop"):
                 continue
-            out.setdefault(str(a.get("platform") or ""), set()).add(
+            bucket = removed if a.get("status") == "removed" else active
+            bucket.setdefault(str(a.get("platform") or ""), set()).add(
                 str(a.get("account_id") or ""))
-        return out
+        return active, removed
+
+    @staticmethod
+    def _show_removed_history(request: Any) -> bool:
+        """是否在收件箱里只读展示「已移除账号」的历史会话（config 门控，默认开）。
+
+        ``inbox.show_removed_history``=false → 回到旧行为（彻底隐藏 removed 账号）。
+        """
+        try:
+            cm = getattr(request.app.state, "config_manager", None)
+            cfg = (getattr(cm, "config", None) or {}) if cm is not None else {}
+            ibx = (cfg.get("inbox") or {}) if isinstance(cfg, dict) else {}
+            return bool(ibx.get("show_removed_history", True))
+        except Exception:
+            return True
 
     def collect_chats(self, request: Any, limit: int) -> List[Dict[str, Any]]:
         store = getattr(request.app.state, "inbox_store", None)
         if store is None:
             return []
-        ids_by_plat = self._protocol_ids()
-        if not ids_by_plat:
+        active, removed = self._protocol_ids()
+        show_removed = self._show_removed_history(request)
+        # 账号 → 是否只读（removed 账号只读）。active 优先（同号若同时命中以 active 为准）。
+        readonly_ids: Dict[str, set] = removed if show_removed else {}
+        plats = set(active) | (set(readonly_ids) if show_removed else set())
+        if not plats:
             return []
         out: List[Dict[str, Any]] = []
-        for plat, ids in ids_by_plat.items():
+        for plat in plats:
+            active_ids = active.get(plat, set())
+            ro_ids = readonly_ids.get(plat, set()) if show_removed else set()
+            wanted = active_ids | ro_ids
+            if not wanted:
+                continue
             try:
                 rows = store.list_conversations(limit=limit * 4, platform=plat) or []
             except Exception:
@@ -440,8 +475,10 @@ class ProtocolInboxAdapter:
                              plat, exc_info=True)
                 continue
             for r in rows:
-                if str(r.get("account_id") or "") not in ids:
+                aid = str(r.get("account_id") or "")
+                if aid not in wanted:
                     continue
+                is_ro = aid in ro_ids and aid not in active_ids
                 mode = "review"
                 mcount = 0
                 cid = str(r.get("conversation_id") or "")
@@ -450,8 +487,11 @@ class ProtocolInboxAdapter:
                     mcount = store.count_messages(cid)
                 except Exception:
                     pass
-                out.append(store_row_to_chat(r, automation_mode=mode,
-                                             message_count=mcount))
+                out.append(store_row_to_chat(
+                    r, automation_mode=mode, message_count=mcount,
+                    read_only=is_ro,
+                    account_status="removed" if is_ro else "",
+                ))
         return out
 
     def status(self, request: Any) -> Dict[str, Dict[str, Any]]:

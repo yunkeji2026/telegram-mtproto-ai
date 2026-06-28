@@ -301,7 +301,8 @@ def register_line_routes(
                 from src.integrations.shared.inbox_mirror import mirror_to_inbox
                 mirror_to_inbox("line", line_account_id, chat_key, text,
                                 direction="in", name=line_uid,
-                                msg_id=str(msg.get("id") or ""))
+                                msg_id=str(msg.get("id") or ""),
+                                chat_type=str(src_type or ""))
             except Exception:
                 pass
 
