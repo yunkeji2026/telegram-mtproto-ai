@@ -166,6 +166,29 @@ class ContactsSubsystem:
         else:
             logger.info("contacts 后台任务：kpi_alert_interval_minutes=0，已禁用")
 
+        # 沉默衰减物化：周期性把 compute 的 live 衰减写回 stored intimacy_score，
+        # 让 reactivation 候选门槛（按 stored 列筛）不再被「冻结高分的死号」污染。
+        # 默认 0=关（遵循「新行为 opt-in」约定）；需有 intimacy_engine 才有意义。
+        try:
+            intim_min = int(cfg.get("intimacy_refresh_interval_minutes", 0) or 0)
+        except (TypeError, ValueError):
+            intim_min = 0
+        if intim_min > 0 and self.intimacy_engine is not None:
+            t3 = loop.create_task(
+                self._intimacy_refresh_loop(interval_sec=intim_min * 60),
+                name="contacts-intimacy-refresh",
+            )
+            self._bg_tasks.append(t3)
+            logger.info(
+                "contacts 后台任务：intimacy_refresh 每 %d 分钟跑一次", intim_min)
+        elif intim_min > 0:
+            logger.info(
+                "contacts 后台任务：intimacy_refresh_interval_minutes>0 但无 "
+                "intimacy_engine，已跳过")
+        else:
+            logger.info(
+                "contacts 后台任务：intimacy_refresh_interval_minutes=0，已禁用")
+
     def stop_background_tasks(self) -> None:
         for t in list(self._bg_tasks):
             if not t.done():
@@ -273,6 +296,45 @@ class ContactsSubsystem:
                 logger.warning(
                     "contacts silence_decay 异常（继续跑下一轮）",
                     exc_info=True)
+            try:
+                await asyncio.sleep(interval_sec)
+            except asyncio.CancelledError:
+                return
+
+    async def _intimacy_refresh_loop(self, *, interval_sec: int) -> None:
+        # 启动后延迟 90s 再跑（让 decay/首屏先过，且和 decay loop 错峰）
+        try:
+            await asyncio.sleep(min(90, interval_sec))
+        except asyncio.CancelledError:
+            return
+        cfg = self.config_snapshot or {}
+        try:
+            stale_hours = float(cfg.get("intimacy_refresh_stale_hours", 24) or 24)
+        except (TypeError, ValueError):
+            stale_hours = 24.0
+        try:
+            limit = int(cfg.get("intimacy_refresh_limit", 200) or 200)
+        except (TypeError, ValueError):
+            limit = 200
+        stale_after_s = int(stale_hours * 3600)
+        while True:
+            try:
+                count = await asyncio.to_thread(
+                    self.intimacy_engine.refresh_stale_journeys,
+                    stale_after_s=stale_after_s,
+                    limit=limit,
+                )
+                if count > 0:
+                    logger.info(
+                        "contacts intimacy_refresh 迭代完成：物化衰减 %d 个 journey",
+                        count)
+                else:
+                    logger.debug("contacts intimacy_refresh 空跑（0 个）")
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                logger.warning(
+                    "contacts intimacy_refresh 异常（继续跑下一轮）", exc_info=True)
             try:
                 await asyncio.sleep(interval_sec)
             except asyncio.CancelledError:

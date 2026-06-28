@@ -48,6 +48,11 @@ _RECENCY_HALFLIFE_S = 14 * 24 * 3600    # 2 周半衰期
 _SILENCE_DECAY_GRACE_DAYS = 7
 _SILENCE_DECAY_PER_WEEK = 0.95
 
+# 沉默衰减「物化」默认参数（refresh_stale_journeys 用）：
+# 衰减按周 5%，每天重算一次 stored 列即可把误差压到 <1%，故默认「过期」阈值 1 天。
+_STALE_INTIMACY_AFTER_S = 24 * 3600
+_STALE_REFRESH_LIMIT = 200
+
 
 @dataclass
 class IntimacyBreakdown:
@@ -196,6 +201,53 @@ class IntimacyEngine:
             intimacy_updated_at=now,
         )
         return bd
+
+    # ── 沉默衰减物化（把 compute 的 live 衰减写回 stored 列）────────
+    def refresh_stale_journeys(
+        self,
+        *,
+        now: Optional[int] = None,
+        stale_after_s: int = _STALE_INTIMACY_AFTER_S,
+        limit: int = _STALE_REFRESH_LIMIT,
+    ) -> int:
+        """周期性把「沉默衰减」物化进 stored ``intimacy_score`` 列。返回重算条数。
+
+        背景（修 journey_fsm W3-D2.4 GAP 的下游半截）：``compute_intimacy`` 读时已
+        按沉默天数算衰减（live 一致，handoff_readiness / 趋势 API 等即时重算的消费者
+        都对）。但 ``ReactivationScheduler.list_candidates`` 是按 **stored** ``journeys
+        .intimacy_score`` 列做候选门槛（``>= min_intimacy``）筛选——而 stored 列只在
+        ``gateway.on_message(msg_in)`` 时刷新。沉默 journey 恰恰没有 msg_in，stored
+        列就**冻结在最后一次活跃的高分**：早该衰减到阈值下的「死号」仍被反复捞进
+        reactivation 名单骚扰。
+
+        本方法只挑「stored 分 > 0 且 ``intimacy_updated_at`` 已过期」的 journey 重算
+        写回（``refresh_journey_intimacy`` 用 ``_touch=False``，不会把 journey 当成又
+        活跃）。活跃 journey 的 ``intimacy_updated_at`` 一直新鲜 → 被 cutoff 排除；重算
+        后 ``intimacy_updated_at`` 推到 now → 一个过期窗口内每个 journey 至多刷一次，
+        churn 有界。``limit`` 进一步给单轮设上限。
+        """
+        now = now if now is not None else int(time.time())
+        cutoff = now - int(stale_after_s)
+        with self._store._lock:  # noqa: SLF001 — 与 fsm/scheduler 同包内部协作
+            rows = self._store._conn.execute(  # noqa: SLF001
+                "SELECT journey_id FROM journeys "
+                "WHERE intimacy_score > 0 AND intimacy_updated_at > 0 "
+                "  AND intimacy_updated_at < ? "
+                "ORDER BY intimacy_updated_at ASC LIMIT ?",
+                (cutoff, int(limit)),
+            ).fetchall()
+        refreshed = 0
+        for r in rows:
+            jid = r["journey_id"]
+            try:
+                self.refresh_journey_intimacy(jid, now=now)
+                refreshed += 1
+            except Exception:
+                logger.debug(
+                    "refresh_stale_journeys: 重算失败 jid=%s（跳过继续）",
+                    jid, exc_info=True,
+                )
+        return refreshed
 
 
 def _to_day(ts: int) -> int:
