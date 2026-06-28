@@ -97,6 +97,72 @@ def resolve_voice_cfg(
         return {}
 
 
+def resolve_voice_cfg_for_contact(
+    persona_id: Optional[str],
+    full_config: Dict[str, Any],
+    *,
+    contact_key: Optional[str] = None,
+) -> Dict[str, Any]:
+    """便捷接缝：端用户 ``contact_key`` → 会员档 → 分层路由后的 ``voice_cfg``。
+
+    各平台合成前**一处调用**，避免在 sender / voice_autosend / messenger 等处
+    各自重复「``resolve_tier_for_contact`` → ``resolve_voice_cfg(tier=...)``」。
+
+    ``contact_key=None`` / monetization 未就绪 / 异常 → ``tier=None`` → 不路由
+    （零行为变更，与直接调 ``resolve_voice_cfg`` 等价）。
+    """
+    tier: Optional[str] = None
+    if contact_key:
+        try:
+            from src.ai.voice_routing import resolve_tier_for_contact
+            tier = resolve_tier_for_contact(contact_key)
+        except Exception:
+            tier = None
+    return resolve_voice_cfg(persona_id, full_config, tier=tier)
+
+
+def resolve_emotion_for_send(
+    voice_cfg: Dict[str, Any],
+    text: str,
+    *,
+    platform: str = "telegram",
+    account_id: Optional[str] = None,
+    chat_key: Optional[str] = None,
+    intent: Optional[str] = None,
+    csat: Optional[float] = None,
+) -> Any:
+    """P4：合成前的共享情感接缝（sender / voice_autosend / unified_inbox 共用）。
+
+    仅当 ``voice_cfg.emotion.enabled=true`` 才解析会话信号并派生 ``EmotionSpec``；
+    否则返回 ``None`` → 调用点传 ``emotion=None`` → 走 neutral（**零行为变更**）。
+
+    信号优先级（见 ``voice_emotion.derive_emotion``）：CSAT 极差 → intent → 文本线索
+    → 关系阶段微调。``rel_stage`` 经 ``companion_context.resolve_funnel_stage`` 取，
+    provider 未就绪 / 异常 → None（仍可用 text 线索派生，绝不抛给 TTS 主流程）。
+    """
+    try:
+        emo_cfg = voice_cfg.get("emotion") if isinstance(voice_cfg, dict) else None
+        if not isinstance(emo_cfg, dict) or not emo_cfg.get("enabled"):
+            return None
+        default = str(emo_cfg.get("default") or "warm").strip().lower()
+
+        rel_stage: Optional[str] = None
+        if chat_key:
+            try:
+                from src.utils.companion_context import resolve_funnel_stage
+                rel_stage = resolve_funnel_stage(
+                    account_id, chat_key, channel=platform or "telegram")
+            except Exception:
+                rel_stage = None
+
+        from src.ai.voice_emotion import derive_emotion
+        return derive_emotion(
+            intent=intent, rel_stage=rel_stage, csat=csat,
+            text=text, default=default)
+    except Exception:
+        return None
+
+
 def get_voice_profile_for_persona(
     persona_id: Optional[str],
     full_config: Dict[str, Any],

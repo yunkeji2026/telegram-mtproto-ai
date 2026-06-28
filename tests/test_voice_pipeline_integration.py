@@ -461,8 +461,8 @@ class TestVoiceUnifiedSendStack:
 
         # 出图/语音配置解析 + persona 解析确定化，避免触真单例/DB
         monkeypatch.setattr(
-            "src.ai.persona_voice.resolve_voice_cfg",
-            lambda pid, raw: {"enabled": True, "backend": "disabled"},
+            "src.ai.persona_voice.resolve_voice_cfg_for_contact",
+            lambda pid, raw, contact_key=None: {"enabled": True, "backend": "disabled"},
         )
         return _S()
 

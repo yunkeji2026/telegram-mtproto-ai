@@ -205,3 +205,73 @@ def test_tts_emotion_cache_key_differs(tmp_path, monkeypatch):
 
     asyncio.run(run())
     reset_tts_cache()
+
+
+# ── resolve_emotion_for_send 共享接缝（sender/autosend/收件箱 三入口共用）──────
+def test_resolve_emotion_for_send_disabled_returns_none():
+    from src.ai.persona_voice import resolve_emotion_for_send
+    # emotion 块缺失 → None（调用点传 emotion=None → neutral，零行为变更）
+    assert resolve_emotion_for_send({}, "你好呀") is None
+    # 显式关 → None
+    assert resolve_emotion_for_send(
+        {"emotion": {"enabled": False}}, "你好呀") is None
+
+
+def test_resolve_emotion_for_send_enabled_text_cue():
+    from src.ai.persona_voice import resolve_emotion_for_send
+    # 开启 + 无 provider → 仍可用文本线索派生（"哈哈" → playful）
+    spec = resolve_emotion_for_send(
+        {"emotion": {"enabled": True}}, "哈哈哈你太逗了")
+    assert spec is not None
+    assert spec.emotion == "playful"
+
+
+def test_resolve_emotion_for_send_uses_rel_stage():
+    from src.ai.persona_voice import resolve_emotion_for_send
+    from src.utils.companion_context import (
+        set_relationship_providers, reset_relationship_providers,
+    )
+
+    # funnel provider 返回 intimate → 无文本线索时派生 playful
+    set_relationship_providers(
+        funnel_lookup=lambda *, channel, account_id, external_id: "intimate")
+    try:
+        spec = resolve_emotion_for_send(
+            {"emotion": {"enabled": True}}, "在吗",
+            platform="telegram", account_id="a1", chat_key="u1")
+        assert spec is not None
+        assert spec.emotion == "playful"
+    finally:
+        reset_relationship_providers()
+
+
+def test_resolve_emotion_for_send_default_when_no_signal():
+    from src.ai.persona_voice import resolve_emotion_for_send
+    from src.utils.companion_context import reset_relationship_providers
+
+    reset_relationship_providers()
+    spec = resolve_emotion_for_send(
+        {"emotion": {"enabled": True, "default": "calm"}}, "随便一句话")
+    assert spec is not None
+    assert spec.emotion == "calm"     # 无信号 → 配置默认基调
+
+
+def test_resolve_emotion_for_send_provider_error_safe():
+    from src.ai.persona_voice import resolve_emotion_for_send
+    from src.utils.companion_context import (
+        set_relationship_providers, reset_relationship_providers,
+    )
+
+    def _boom(*, channel, account_id, external_id):
+        raise RuntimeError("funnel down")
+
+    set_relationship_providers(funnel_lookup=_boom)
+    try:
+        # provider 抛错 → 吞掉，仍用文本线索派生（不抛给 TTS 主流程）
+        spec = resolve_emotion_for_send(
+            {"emotion": {"enabled": True}}, "谢谢你帮我",
+            account_id="a1", chat_key="u1")
+        assert spec is not None
+        assert spec.emotion == "warm"   # "谢谢" 文本线索
+    finally:
+        reset_relationship_providers()

@@ -556,6 +556,10 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             self.running = True
             
             asyncio.create_task(self._message_processor())
+            # 轮询兜底：当实时 MTProto 推送通道失效（如某些 session/运行时收不到 updateNewMessage）时，
+            # 用 RPC（get_dialogs，正常可用）定时拉新进站私聊喂给同一条 _process_message，
+            # 保证全自动回复不因实时通道静默挂掉而失效。与实时 handler 共用去重，互不重复。
+            asyncio.create_task(self._poll_inbound_loop())
             self._register_reload_notifier()
             self._start_scheduler()
             # P2：情绪增强配置可观测（便于部署核对）
@@ -1031,6 +1035,128 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             self.logger.warning(f"拉取群内最近图片并 OCR 失败: {e}")
             return None
     
+    async def _poll_inbound_loop(self):
+        """轮询兜底主循环：定时拉取新进站私聊消息（补实时推送缺失）。
+
+        config-gated：``telegram.poll_fallback.enabled``（默认开，dedup 保护下对实时正常的
+        部署也安全——实时先处理、轮询命中去重即跳过）。``interval_seconds`` / ``dialogs_limit``
+        可调。任何异常不退出循环、不影响实时路径。
+        """
+        try:
+            tg_cfg = self.config.get_telegram_config()
+        except Exception:
+            tg_cfg = {}
+        pf = (tg_cfg.get("poll_fallback") or {}) if isinstance(tg_cfg, dict) else {}
+        if not pf.get("enabled", True):
+            self.logger.info("[轮询兜底] 已禁用（telegram.poll_fallback.enabled=false）")
+            return
+        interval = float(pf.get("interval_seconds", 12) or 12)
+        dlimit = int(pf.get("dialogs_limit", 30) or 30)
+        catchup = float(pf.get("catchup_seconds", 600) or 0)
+        self.logger.info(
+            "[轮询兜底] 已启动 interval=%.0fs dialogs=%d catchup=%.0fs"
+            "（RPC 拉新进站私聊，补实时推送缺失）",
+            interval, dlimit, catchup,
+        )
+        await asyncio.sleep(interval)  # 首轮延迟，避开启动风暴
+        _cycle = 0
+        while self.running:
+            try:
+                scanned = await self._poll_inbound_once(dlimit, catchup)
+                if _cycle == 0:
+                    # 首轮确认：证明 get_dialogs 在 app 内可正常完成（不挂起）
+                    self.logger.info("[轮询兜底] 首轮扫描完成 scanned=%d 会话", scanned)
+                elif _cycle % 25 == 0:  # 约每 5 分钟一次心跳，确认循环存活
+                    self.logger.info("[轮询兜底] 心跳 cycle=%d scanned=%d 会话", _cycle, scanned)
+            except Exception as e:
+                self.logger.warning("[轮询兜底] 本轮异常（已忽略，下轮继续）: %s", e)
+            _cycle += 1
+            await asyncio.sleep(interval)
+
+    async def _poll_inbound_once(self, dlimit: int, catchup: float = 0.0) -> int:
+        """单轮：扫描最近会话，挑出未处理过的新进站私聊消息并处理。返回扫描的会话数。
+
+        时间闸门：消息时间在 boot 之后**或**距今 ``catchup`` 秒内（覆盖宕机/重启期间到达的
+        未读消息），既能补回最近未读、又不回灌远古历史。已回复的会话 top_message 变 outgoing
+        会被跳过，故不会重复回复。
+        """
+        if not self.client:
+            return 0
+        try:
+            tg_cfg = self.config.get_telegram_config()
+        except Exception:
+            tg_cfg = {}
+        if not (tg_cfg.get("process_private", True) if isinstance(tg_cfg, dict) else True):
+            return 0
+        processed = 0
+        scanned = 0
+        async for dialog in self.client.get_dialogs(limit=dlimit):
+            scanned += 1
+            try:
+                chat = getattr(dialog, "chat", None)
+                if chat is None:
+                    continue
+                ctype = getattr(chat, "type", None)
+                ctype_name = (getattr(ctype, "name", None) or str(ctype or "")).upper()
+                if "PRIVATE" not in ctype_name:  # 兜底只覆盖私聊（群有四层触发，避免误回）
+                    continue
+                msg = getattr(dialog, "top_message", None)
+                if msg is None:
+                    continue
+                if getattr(msg, "outgoing", False):  # 我们自己发的（含已回复）→ 跳过
+                    continue
+                from_user = getattr(msg, "from_user", None)
+                if from_user and self.user_info and \
+                        getattr(from_user, "id", None) == self.user_info.id:
+                    continue
+                if getattr(from_user, "is_bot", False):
+                    continue
+                if not (getattr(msg, "text", None) or getattr(msg, "caption", None)
+                        or getattr(msg, "voice", None) or getattr(msg, "audio", None)
+                        or getattr(msg, "photo", None) or getattr(msg, "document", None)):
+                    continue
+                mdate = getattr(msg, "date", None)
+                mts = mdate.timestamp() if (mdate and hasattr(mdate, "timestamp")) else 0
+                if mts:
+                    after_boot = mts >= self._boot_timestamp - 5
+                    within_catchup = catchup > 0 and (time.time() - mts) <= catchup
+                    if not (after_boot or within_catchup):  # 远古历史，防重启回灌
+                        continue
+                mid = getattr(msg, "id", 0) or getattr(msg, "message_id", 0)
+                if mid and mid in self._processed_msg_ids:  # 与实时 handler 共用去重
+                    continue
+                uid = str(getattr(from_user, "id", 0))
+                if self._rate_limiter.enabled:
+                    if self._rate_limiter.is_banned(uid):
+                        continue
+                    allowed, _reason = self._rate_limiter.allow(uid, getattr(chat, "id", 0))
+                    if not allowed:
+                        continue
+                # 处理前先登记去重（防并发/下一轮在回复落地前重入造成重复回复）
+                if mid:
+                    now = time.time()
+                    self._processed_msg_ids[mid] = now
+                    self._processed_msg_ids.move_to_end(mid)
+                    while self._processed_msg_ids:
+                        _ok, _ov = next(iter(self._processed_msg_ids.items()))
+                        if now - _ov > self._dedup_ttl or \
+                                len(self._processed_msg_ids) > self._dedup_max_size:
+                            self._processed_msg_ids.popitem(last=False)
+                        else:
+                            break
+                self.logger.info(
+                    "[轮询兜底] 发现新进站私聊 chat=%s mid=%s text=%r",
+                    getattr(chat, "id", ""), mid,
+                    (getattr(msg, "text", None) or getattr(msg, "caption", None) or "")[:50],
+                )
+                await self._process_message(msg)
+                processed += 1
+            except Exception as e:
+                self.logger.debug("[轮询兜底] 单会话处理失败（已忽略）: %s", e, exc_info=True)
+        if processed:
+            self.logger.info("[轮询兜底] 本轮处理 %d 条新进站私聊", processed)
+        return scanned
+
     async def _process_message(self, message: Message):
         """处理接收到的消息"""
         try:

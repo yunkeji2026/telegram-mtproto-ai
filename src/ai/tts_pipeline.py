@@ -276,7 +276,7 @@ class TTSPipeline:
             if hit is not None:
                 cached = self._result_from_cache(hit, text_s)
                 if cached is not None:
-                    self._record_stats(cached, text_s, cache_hit=True)
+                    self._record_stats(cached, text_s, cache_hit=True, spec=spec)
                     return cached
         else:
             cache_key = ""
@@ -295,18 +295,24 @@ class TTSPipeline:
                         max_entries=self.cache_max_entries)
             except Exception:
                 pass
-        self._record_stats(rv, text_s, cache_hit=False)
+        self._record_stats(rv, text_s, cache_hit=False, spec=spec)
         return rv
 
-    def _record_stats(self, rv: "TTSResult", text: str, *, cache_hit: bool) -> None:
-        """记 TTS 用量到 provider_stats "tts" namespace（成功/失败/成本/缓存命中）。绝不抛。"""
+    def _record_stats(self, rv: "TTSResult", text: str, *, cache_hit: bool,
+                      spec: Any = None) -> None:
+        """记 TTS 用量到 provider_stats "tts" namespace（成功/失败/成本/缓存命中/情绪分布）。绝不抛。"""
         if not self.metrics_enabled:
             return
         try:
             from src.ai.provider_stats import get_provider_stats
+            from src.ai.tts_cost_store import record_tts_cost
             stats = get_provider_stats("tts", "tts")
+            # 情绪分布（非中性才记，避免 neutral 淹没分布）——反映实际投递的情感面貌。
+            if spec is not None and not spec.is_neutral():
+                stats.record_label(spec.emotion)
             if cache_hit:
                 stats.record_cache_hit()
+                record_tts_cost("", cache_hit=True)   # 旁路落库（默认关时 no-op）
                 return
             # 仅在该轮真正发生过合成（含失败）时记一次
             if not rv.text.strip():
@@ -316,10 +322,12 @@ class TTSPipeline:
                 from src.ai.voice_routing import estimate_tts_cost
                 cost = estimate_tts_cost(provider, len(text or ""), self.cost_rates)
                 stats.record(provider, ok=True, latency_ms=rv.latency_ms, cost_usd=cost)
+                record_tts_cost(provider, ok=True, cost_usd=cost)
                 if rv.extra.get("fallback_from"):
                     stats.record_fallback()
             elif rv.error not in ("pipeline_disabled", "empty_text"):
                 stats.record(provider, ok=False, latency_ms=rv.latency_ms)
+                record_tts_cost(provider, ok=False)
         except Exception:
             pass
 

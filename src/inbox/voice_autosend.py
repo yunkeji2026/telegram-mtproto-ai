@@ -110,11 +110,19 @@ def should_send_voice(
 
 
 async def _synth_ogg(config: Dict[str, Any], persona_id: str, text: str,
-                     *, out_dir: str) -> Optional[str]:
-    """合成 TTS → 转 OGG/Opus，返回本地音频路径；任何失败返回 None。"""
+                     *, out_dir: str, contact_key: Optional[str] = None,
+                     platform: str = "telegram",
+                     account_id: Optional[str] = None) -> Optional[str]:
+    """合成 TTS → 转 OGG/Opus，返回本地音频路径；任何失败返回 None。
+
+    P3：传入端用户 ``contact_key`` 时，按会员档分层路由 TTS 后端（VIP→旗舰，
+    免费→降级省成本）。monetization 未就绪 → tier=None → 不路由（零行为变更）。
+    P4：``platform``/``account_id`` 用于解析关系阶段，喂给情感层（默认关）。
+    """
     try:
-        from src.ai.persona_voice import resolve_voice_cfg
-        voice_cfg = resolve_voice_cfg(persona_id or None, config or {})
+        from src.ai.persona_voice import resolve_voice_cfg_for_contact
+        voice_cfg = resolve_voice_cfg_for_contact(
+            persona_id or None, config or {}, contact_key=contact_key)
     except Exception:
         logger.debug("[voice_autosend] resolve_voice_cfg 失败", exc_info=True)
         return None
@@ -122,8 +130,13 @@ async def _synth_ogg(config: Dict[str, Any], persona_id: str, text: str,
     voice_cfg["out_dir"] = out_dir
     try:
         from src.ai.tts_pipeline import TTSPipeline
+        from src.ai.persona_voice import resolve_emotion_for_send
         tts = TTSPipeline(voice_cfg)
-        result = await tts.synthesize(text, timeout_sec=45.0)
+        # P4：情感层（默认关）。开启后按关系阶段/文本线索派生情绪。
+        _emotion = resolve_emotion_for_send(
+            voice_cfg, text, platform=platform,
+            account_id=account_id, chat_key=contact_key)
+        result = await tts.synthesize(text, timeout_sec=45.0, emotion=_emotion)
     except Exception:
         logger.debug("[voice_autosend] TTS 合成异常", exc_info=True)
         return None
@@ -148,13 +161,17 @@ async def stage_voice_file(
     text: str,
     *,
     out_dir: Optional[str] = None,
+    contact_key: Optional[str] = None,
 ) -> Optional[Tuple[str, str]]:
     """合成语音并落到出站媒体目录，返回 ``(本地路径, /static URL)``；失败返回 None。
 
     调用方据此 ``orch.send_media(media_path=local, media_url=url, media_type="voice")``。
+    ``contact_key``（端用户身份）传入后按会员档分层路由 TTS 后端（默认 None=不路由）。
     """
     od = out_dir or str(Path(tempfile.gettempdir()) / "autosend_voice")
-    audio_path = await _synth_ogg(config, persona_id, text, out_dir=od)
+    audio_path = await _synth_ogg(
+        config, persona_id, text, out_dir=od, contact_key=contact_key,
+        platform=platform, account_id=account_id)
     if not audio_path:
         return None
     try:

@@ -106,8 +106,27 @@ def estimate_tts_cost(
     return round(rate * (float(char_count) / 1000.0), 6)
 
 
+def resolve_tier_for_contact(contact_key: Optional[str]) -> Optional[str]:
+    """端用户 ``contact_key`` → 会员档（``'free'/'vip'/'svip'`` …）。
+
+    可复用接缝：各平台合成前调用，把档位喂给 ``resolve_voice_cfg(..., tier=...)``。
+    约定 ``contact_key == 端用户 user_id``（见 companion_context）。
+    monetization 未就绪 / 空 key / 异常 → ``None`` → 调用方不路由（零行为变更）。
+    """
+    if not contact_key:
+        return None
+    try:
+        from src.utils.companion_context import resolve_entitlement
+        ent = resolve_entitlement(contact_key)
+    except Exception:
+        return None
+    if not isinstance(ent, dict):
+        return None
+    return str(ent.get("tier") or "free")
+
+
 __all__ = [
     "CLONE_BACKENDS", "DEFAULT_COST_PER_1K_CHARS",
     "resolve_voice_routing", "backend_for_tier", "route_voice_backend",
-    "estimate_tts_cost",
+    "estimate_tts_cost", "resolve_tier_for_contact",
 ]

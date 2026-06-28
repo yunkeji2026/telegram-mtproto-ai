@@ -93,7 +93,7 @@ class _FakeTTS:
     def __init__(self, cfg):
         self.cfg = cfg
 
-    async def synthesize(self, text, timeout_sec=45.0):
+    async def synthesize(self, text, timeout_sec=45.0, emotion=None):
         return _FakeResult(self._ok, self._audio_path)
 
 
@@ -105,7 +105,7 @@ async def test_stage_voice_file_success(monkeypatch):
     os.close(fd)
 
     monkeypatch.setattr("src.ai.persona_voice.resolve_voice_cfg",
-                        lambda pid, cfg: {"backend": "fake"})
+                        lambda pid, cfg, tier=None: {"backend": "fake"})
     _FakeTTS._audio_path = audio
     _FakeTTS._ok = True
     monkeypatch.setattr("src.ai.tts_pipeline.TTSPipeline", _FakeTTS)
@@ -156,7 +156,7 @@ def test_voice_metrics_ignores_nonpositive_duration():
 @pytest.mark.asyncio
 async def test_stage_voice_file_tts_failure_returns_none(monkeypatch):
     monkeypatch.setattr("src.ai.persona_voice.resolve_voice_cfg",
-                        lambda pid, cfg: {"backend": "fake"})
+                        lambda pid, cfg, tier=None: {"backend": "fake"})
     _FakeTTS._audio_path = ""
     _FakeTTS._ok = False
     monkeypatch.setattr("src.ai.tts_pipeline.TTSPipeline", _FakeTTS)

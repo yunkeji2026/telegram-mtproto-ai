@@ -596,7 +596,7 @@ class TelegramSenderMixin:
                 return False
 
             # ── Resolve persona → voice config (3-tier fallback) ──
-            from src.ai.persona_voice import resolve_voice_cfg
+            from src.ai.persona_voice import resolve_voice_cfg_for_contact
 
             persona_id: Optional[str] = None
             try:
@@ -619,7 +619,14 @@ class TelegramSenderMixin:
             except Exception:
                 pass
 
-            voice_cfg = resolve_voice_cfg(persona_id, raw_cfg)
+            # P3：端用户身份（私聊 chat.id 即对端 user_id）→ 会员档分层路由 TTS 后端
+            # （VIP→旗舰，免费→降级省成本）。monetization 未就绪 → tier=None → 不路由。
+            try:
+                _contact_key = str(original_message.chat.id)
+            except Exception:
+                _contact_key = None
+            voice_cfg = resolve_voice_cfg_for_contact(
+                persona_id, raw_cfg, contact_key=_contact_key)
             voice_cfg["enabled"] = True
 
             # ── Synthesize ──
@@ -627,7 +634,13 @@ class TelegramSenderMixin:
 
             tts = TTSPipeline(voice_cfg)
             timeout_sec = float(vr_cfg.get("timeout_sec", 30) or 30)
-            result = await tts.synthesize(clean_text, timeout_sec=timeout_sec)
+            # P4：情感层（默认关）。开启后按关系阶段/文本线索派生情绪喂给 TTS。
+            from src.ai.persona_voice import resolve_emotion_for_send
+            _emotion = resolve_emotion_for_send(
+                voice_cfg, clean_text, platform="telegram",
+                account_id=getattr(self, "account_id", None), chat_key=_contact_key)
+            result = await tts.synthesize(
+                clean_text, timeout_sec=timeout_sec, emotion=_emotion)
             if not result.ok:
                 self.logger.warning("[voice_reply] TTS failed: %s", result.error)
                 return False

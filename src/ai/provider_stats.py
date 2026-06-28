@@ -19,7 +19,7 @@ class ProviderStats:
     """按 provider 名聚合 调用/成功/失败/平均延迟 + 全局降级次数。"""
 
     __slots__ = ("_lock", "_rows", "_started_at", "_last_ts", "_fallbacks",
-                 "_total", "_prefix", "_cache_hits")
+                 "_total", "_prefix", "_cache_hits", "_labels")
 
     def __init__(self, metric_prefix: str = "provider") -> None:
         self._lock = threading.RLock()
@@ -29,6 +29,7 @@ class ProviderStats:
         self._fallbacks = 0
         self._total = 0
         self._cache_hits = 0
+        self._labels: Dict[str, int] = {}
         self._prefix = str(metric_prefix or "provider")
 
     def record(
@@ -59,6 +60,14 @@ class ProviderStats:
             self._cache_hits += 1
             self._last_ts = time.time()
 
+    def record_label(self, value: str) -> None:
+        """记一次「标签」分布（通用维度，如 TTS 情绪 / ASR 语言）。空值忽略。"""
+        v = str(value or "").strip()
+        if not v:
+            return
+        with self._lock:
+            self._labels[v] = self._labels.get(v, 0) + 1
+
     def dump(self) -> Dict[str, Any]:
         with self._lock:
             rows = []
@@ -86,6 +95,7 @@ class ProviderStats:
                 "cache_hits": self._cache_hits,
                 "cache_hit_rate": round(self._cache_hits / denom, 4) if denom else 0,
                 "total_cost_usd": round(total_cost, 4),
+                "labels": dict(sorted(self._labels.items(), key=lambda kv: -kv[1])),
                 "rows": rows,
             }
 
@@ -105,9 +115,15 @@ class ProviderStats:
             f"# HELP {p}_cost_usd_total {p} cumulative cost in USD by provider",
             f"# TYPE {p}_cost_usd_total counter",
         ]
+        lines += [
+            f"# HELP {p}_label_total {p} label distribution (e.g. TTS emotion)",
+            f"# TYPE {p}_label_total counter",
+        ]
         with self._lock:
             lines.append(f"{p}_fallbacks_total {self._fallbacks}")
             lines.append(f"{p}_cache_hits_total {self._cache_hits}")
+            for lv, cnt in self._labels.items():
+                lines.append(f'{p}_label_total{{label="{_esc(lv)}"}} {int(cnt)}')
             for name, v in self._rows.items():
                 lbl = f'provider="{_esc(name)}"'
                 lines.append(f'{p}_attempts_total{{{lbl}}} {int(v["calls"])}')
@@ -120,6 +136,7 @@ class ProviderStats:
     def reset(self) -> None:
         with self._lock:
             self._rows.clear()
+            self._labels.clear()
             self._fallbacks = 0
             self._total = 0
             self._cache_hits = 0
