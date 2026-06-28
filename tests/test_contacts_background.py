@@ -73,6 +73,23 @@ class TestStartStopIdempotent:
                 sub.close()
         asyncio.run(scenario())
 
+    def test_intimacy_refresh_starts_with_interval_and_engine(self, tmp_path):
+        """interval>0 且 intimacy_engine 就绪时启动 intimacy-refresh 后台任务。"""
+        async def scenario():
+            sub = bootstrap_contacts_subsystem(
+                _cfg(tmp_path / "c.db",
+                     decay_interval_minutes=0,
+                     kpi_alert_interval_minutes=0,
+                     intimacy_refresh_interval_minutes=5), CFG_DIR)
+            try:
+                assert sub.intimacy_engine is not None
+                sub.start_background_tasks()
+                names = {t.get_name() for t in sub._bg_tasks}
+                assert "contacts-intimacy-refresh" in names
+            finally:
+                sub.close()
+        asyncio.run(scenario())
+
     def test_start_without_running_loop_logs_and_skips(self, tmp_path):
         """没有 running loop 时（同步语境）start 应静默跳过，不抛。"""
         sub = bootstrap_contacts_subsystem(
