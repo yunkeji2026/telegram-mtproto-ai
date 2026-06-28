@@ -9,10 +9,62 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+import os
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .dataset import FaqSample, load_faq_samples
 from .metrics import resolve_rate
+
+# 默认 KB sqlite 候选路径（与 scripts/run_eval 一致；可被 AITR_KB_DB / 入参覆盖）
+_DEFAULT_KB_PATHS: Tuple[str, ...] = (
+    "config/knowledge_base.db", "data/knowledge_base.db",
+)
+
+
+def locate_kb_db(kb_db: str = "") -> Optional[str]:
+    """定位可用的 KB sqlite：入参 > 环境 ``AITR_KB_DB`` > 默认候选。找不到返回 None。"""
+    cands = [kb_db, os.environ.get("AITR_KB_DB", ""), *(_DEFAULT_KB_PATHS)]
+    for c in cands:
+        if c and os.path.exists(c):
+            return c
+    return None
+
+
+def build_kb_resolver(
+    kb_db: str = "", *, score_threshold: float = 1.0, lang: str = "zh",
+) -> Tuple[Optional[Callable[[str], bool]], Any]:
+    """定位 KB 并构造「解决判定器」。
+
+    返回 ``(resolver, store)``；KB 不存在/构造失败返回 ``(None, None)``——
+    供 CLI 与 CI 门禁共用同一套 KB 定位逻辑（单一事实源）。
+    """
+    path = locate_kb_db(kb_db)
+    if not path:
+        return None, None
+    try:
+        from pathlib import Path
+        from src.utils.kb_store import KnowledgeBaseStore
+        store = KnowledgeBaseStore(Path(path))
+        return kb_search_resolver(
+            store, score_threshold=score_threshold, lang=lang), store
+    except Exception:
+        return None, None
+
+
+def kb_enabled_count(store: Any) -> int:
+    """KB 已启用条目数（判 KB 是否「真备货」的信号）；取不到时保守返回 0。
+
+    ``KnowledgeBaseStore.stats()`` 用键 ``enabled_entries``；兼容 ``enabled`` 别名。
+    """
+    try:
+        s = store.stats() or {}
+    except Exception:
+        return 0
+    val = s.get("enabled_entries", s.get("enabled", 0))
+    try:
+        return int(val or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def kb_search_resolver(

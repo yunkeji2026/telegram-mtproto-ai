@@ -19,8 +19,53 @@ import logging
 import os
 import sys
 
-from src.eval.dataset import load_faq_samples, load_intent_samples
-from src.eval.faq_eval import evaluate_faq, format_faq_report, kb_search_resolver
+from src.eval.dataset import (
+    load_faq_samples, load_intent_samples, load_translation_samples,
+)
+from src.eval.faq_eval import (
+    build_kb_resolver, evaluate_faq, format_faq_report,
+)
+from src.eval.translation_eval import (
+    build_deterministic_evaluator, evaluate_translation_quality,
+    format_translation_report,
+)
+from src.eval.memory_eval import (
+    build_real_embed_fn, compare_recall, evaluate_semantic_dedup,
+    format_dedup_report, format_recall_report,
+)
+from src.eval.embedding_providers import describe_availability
+from src.eval.memory_extract_eval import (
+    build_llm_extract_fn, evaluate_fact_extraction, format_extract_report,
+    heuristic_extract_fn,
+)
+from src.eval.persona_eval import (
+    evaluate_persona_consistency, format_persona_report,
+)
+from src.eval.emotion_eval import (
+    evaluate_crisis_detection, evaluate_emotion_dimension,
+    format_crisis_report, format_emotion_report,
+)
+from src.eval.crisis_response_eval import (
+    evaluate_crisis_response, format_crisis_response_report,
+)
+from src.eval.translation_confidence_eval import (
+    evaluate_confidence, format_confidence_report,
+)
+from src.eval.proactive_guard_eval import (
+    evaluate_proactive_guard, format_proactive_guard_report,
+)
+from src.eval.crisis_resource_eval import (
+    evaluate_resource_assurance, format_resource_report,
+)
+from src.eval.emotion_intensity_eval import (
+    evaluate_intensity_grading, format_intensity_report,
+)
+from src.eval.dataset import (
+    load_confidence_samples, load_crisis_resource_scenarios,
+    load_crisis_response_scenarios, load_crisis_samples,
+    load_emotion_samples, load_extract_samples, load_intensity_orders,
+    load_memory_scenarios, load_persona_samples, load_proactive_guard_scenarios,
+)
 from src.eval.intent_eval import (
     compare_predictors, evaluate_intent, format_compare, format_report,
 )
@@ -30,21 +75,9 @@ logger = logging.getLogger("run_eval")
 
 
 def _try_build_kb_resolver(kb_db: str, score_threshold: float):
-    """构造 KB 解决判定器；KB 不存在/构造失败返回 None。"""
-    from pathlib import Path
-    candidates = [kb_db] if kb_db else [
-        "config/knowledge_base.db", "data/knowledge_base.db",
-    ]
-    for c in candidates:
-        if c and os.path.exists(c):
-            try:
-                from src.utils.kb_store import KnowledgeBaseStore
-                store = KnowledgeBaseStore(Path(c))
-                return kb_search_resolver(store, score_threshold=score_threshold)
-            except Exception as ex:
-                logger.warning("KB resolver 构造失败 %s: %s", c, ex)
-                return None
-    return None
+    """构造 KB 解决判定器；KB 不存在/构造失败返回 None（复用 faq_eval 定位逻辑）。"""
+    resolver, _store = build_kb_resolver(kb_db, score_threshold=score_threshold)
+    return resolver
 
 
 def _try_build_llm_generate_fn():
@@ -101,7 +134,207 @@ def main(argv=None) -> int:
     ap.add_argument("--faq-pass", type=float, default=0.50, help="FAQ 解决率 PASS 阈值")
     ap.add_argument("--score-threshold", type=float, default=1.0,
                     help="KB 命中分数阈值(--faq 判定解决)")
+    ap.add_argument("--translation", action="store_true",
+                    help="翻译回译质量评测（需配 DeepL/Google 确定性引擎）")
+    ap.add_argument("--xlate-sample-threshold", type=float, default=0.5,
+                    help="单样本合格相似度阈(--translation)")
+    ap.add_argument("--xlate-pass", type=float, default=0.6,
+                    help="回译合格率 PASS 阈值(--translation)")
+    ap.add_argument("--memory", action="store_true",
+                    help="记忆召回对比评测（关键词 vs 向量，需 ai_client embed）")
+    ap.add_argument("--mem-topk", type=int, default=3,
+                    help="召回 top-k(--memory)；须 < 每场景事实数才鉴别向量增益")
+    ap.add_argument("--semantic-dedup", action="store_true",
+                    help="记忆语义去重评测（需真实嵌入：配 embedding 端点或 AITR_EMBED_LOCAL=1）")
+    ap.add_argument("--dedup-threshold", type=float, default=0.7,
+                    help="近义并簇余弦阈值(--semantic-dedup)")
+    ap.add_argument("--memory-extract", action="store_true",
+                    help="记忆抽取质量评测（启发式常驻；--extract-llm 切 LLM 抽取器）")
+    ap.add_argument("--extract-llm", action="store_true",
+                    help="用 ai_client.extract_memory_bullets 抽取(--memory-extract)")
+    ap.add_argument("--extract-recall", type=float, default=0.8,
+                    help="抽取召回率 PASS 阈值(--memory-extract)")
+    ap.add_argument("--extract-max-fp", type=int, default=0,
+                    help="允许的最大误抽数(--memory-extract)")
+    ap.add_argument("--persona", action="store_true",
+                    help="人设一致性评测（persona_guard 违规召回 + 误伤）")
+    ap.add_argument("--emotion", action="store_true",
+                    help="情绪维度准确率评测（analyze_emotion）")
+    ap.add_argument("--emotion-acc", type=float, default=0.8,
+                    help="情绪维度准确率 PASS 阈值(--emotion)")
+    ap.add_argument("--crisis", action="store_true",
+                    help="危机识别评测（detect_crisis 安全红线）")
+    ap.add_argument("--crisis-response", action="store_true",
+                    help="危机响应闭环评测（识别→处置端到端安全）")
+    ap.add_argument("--xlate-confidence", action="store_true",
+                    help="译文置信度评测（引擎智能切换 scorer）")
+    ap.add_argument("--conf-threshold", type=float, default=0.5,
+                    help="置信度二分阈值（--xlate-confidence 用）")
+    ap.add_argument("--proactive-guard", action="store_true",
+                    help="主动护栏闭环评测（危机/低落→主动触达抑制）")
+    ap.add_argument("--emotion-intensity", action="store_true",
+                    help="情绪强度分级评测（程度副词单调性）")
+    ap.add_argument("--crisis-resource", action="store_true",
+                    help="危机资源保障评测（severe 补热线不重复）")
+    ap.add_argument("--crisis-overview", action="store_true",
+                    help="危机安全总览（L/O 主动抑制 + J 响应闭环 + Q 资源保障 串联回归）")
     args = ap.parse_args(argv)
+
+    if args.crisis_overview:
+        from src.eval.crisis_safety_overview import (
+            evaluate_crisis_safety_overview, format_crisis_safety_overview,
+        )
+        report = evaluate_crisis_safety_overview()
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(format_crisis_safety_overview(report))
+        return 0 if report["passed"] else 1
+
+    if args.crisis_resource:
+        scenarios = load_crisis_resource_scenarios(
+            args.dataset or "config/eval/crisis_resource_samples.yaml")
+        report = evaluate_resource_assurance(scenarios)
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(format_resource_report(report))
+        return 0 if report["passed"] else 1
+
+    if args.proactive_guard:
+        scenarios = load_proactive_guard_scenarios(
+            args.dataset or "config/eval/proactive_guard_samples.yaml")
+        report = evaluate_proactive_guard(scenarios)
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(format_proactive_guard_report(report))
+        return 0 if report["passed"] else 1
+
+    if args.emotion_intensity:
+        orders = load_intensity_orders(
+            args.dataset or "config/eval/emotion_intensity_samples.yaml")
+        report = evaluate_intensity_grading(orders)
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(format_intensity_report(report))
+        return 0 if report["passed"] else 1
+
+    if args.crisis_response:
+        scenarios = load_crisis_response_scenarios(
+            args.dataset or "config/eval/crisis_response_samples.yaml")
+        report = evaluate_crisis_response(scenarios)
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(format_crisis_response_report(report))
+        return 0 if report["passed"] else 1
+
+    if args.xlate_confidence:
+        samples = load_confidence_samples(
+            args.dataset or "config/eval/translation_confidence_samples.yaml")
+        report = evaluate_confidence(samples, threshold=args.conf_threshold)
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(format_confidence_report(report))
+        return 0 if report["passed"] else 1
+
+    if args.persona:
+        samples = load_persona_samples(args.dataset or "config/eval/persona_samples.yaml")
+        report = evaluate_persona_consistency(samples)
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(format_persona_report(report))
+        return 0 if report["passed"] else 1
+
+    if args.emotion:
+        samples = load_emotion_samples(args.dataset or "config/eval/emotion_samples.yaml")
+        report = evaluate_emotion_dimension(samples, threshold=args.emotion_acc)
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(format_emotion_report(report))
+        return 0 if report["passed"] else 1
+
+    if args.crisis:
+        samples = load_crisis_samples(args.dataset or "config/eval/crisis_samples.yaml")
+        report = evaluate_crisis_detection(samples)
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(format_crisis_report(report))
+        return 0 if report["passed"] else 1
+
+    if args.memory_extract:
+        samples = load_extract_samples(
+            args.dataset or "config/eval/memory_extract_samples.yaml")
+        if args.extract_llm:
+            extract_fn = build_llm_extract_fn()
+            if extract_fn is None:
+                print("[note] LLM 抽取评测需 ai_client.extract_memory_bullets（配好 ai + key）。"
+                      "当前不可用，跳过。")
+                return 0
+        else:
+            extract_fn = heuristic_extract_fn
+        report = evaluate_fact_extraction(
+            extract_fn, samples,
+            recall_target=args.extract_recall, max_false_positive=args.extract_max_fp)
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(format_extract_report(report))
+        return 0 if report["passed"] else 1
+
+    if args.semantic_dedup:
+        print(f"[info] {describe_availability()}")
+        embed_fn = build_real_embed_fn()
+        if embed_fn is None:
+            print("[note] 语义去重评测需真实嵌入：配 ai.embedding_base_url/AITR_EMBED_BASE_URL，"
+                  "或装 sentence-transformers 并设 AITR_EMBED_LOCAL=1。当前不可用，跳过。")
+            return 0
+        report = evaluate_semantic_dedup(embed_fn=embed_fn, threshold=args.dedup_threshold)
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(format_dedup_report(report))
+        return 0 if report["passed"] else 1
+
+    if args.memory:
+        print(f"[info] {describe_availability()}")
+        embed_fn = build_real_embed_fn()
+        if embed_fn is None:
+            print("[note] 记忆召回评测需真实嵌入（配 embedding endpoint 或 AITR_EMBED_LOCAL=1）。"
+                  "当前不可用，跳过。")
+            return 0
+        scenarios = load_memory_scenarios(args.dataset or "config/eval/memory_samples.yaml")
+        cmp = compare_recall(scenarios, embed_fn=embed_fn, top_k=args.mem_topk)
+        if args.json:
+            print(json.dumps(cmp, ensure_ascii=False, indent=2))
+        else:
+            print(format_recall_report(cmp))
+        # 对比模式不设硬门禁：delta<0（向量反而更差）才视为失败信号
+        return 1 if cmp["delta_recall"] < 0 else 0
+
+    if args.translation:
+        import asyncio
+        ev = build_deterministic_evaluator()
+        if ev is None:
+            print("[note] 翻译评测需确定性引擎：在 config.yaml 的 translation.engines.order "
+                  "里加 deepl/google 并配 api_key。当前无可用确定性引擎，跳过。")
+            return 0
+        translate_fn, detect_fn = ev
+        samples = load_translation_samples(args.dataset or "config/eval/translation_samples.yaml")
+        report = asyncio.run(evaluate_translation_quality(
+            translate_fn, samples, detect_fn=detect_fn,
+            per_sample_threshold=args.xlate_sample_threshold, pass_target=args.xlate_pass))
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(format_translation_report(report))
+        return 0 if report["passed"] else 1
 
     if args.faq:
         samples = load_faq_samples(args.dataset or None)

@@ -1,0 +1,20 @@
+# 人设一致性评测样本（persona_guard 是否正确抓违规、不误伤合规）
+# 每条：
+#   reply            ：候选回复
+#   forbidden        ：该人设 speaking.forbidden_phrases
+#   deny_ai          ：是否禁止自曝 AI 身份
+#   expect_violation ：该回复是否应被判违规（true=客服腔/AI自曝；false=合规陪聊）
+#   note             ：备注
+# 跑：python -m scripts.run_eval --persona  ；门禁：tests/test_persona_consistency_eval.py
+
+# —— 该抓（违规召回，漏一个=沉浸感事故）——
+- {reply: "亲，请问有什么可以帮您的吗？", forbidden: ["有什么可以帮您", "为您服务", "请问还有什么需要"], expect_violation: true, note: 客服腔-帮您}
+- {reply: "很高兴为您服务，祝您生活愉快！", forbidden: ["有什么可以帮您", "为您服务", "请问还有什么需要"], expect_violation: true, note: 客服腔-为您服务}
+- {reply: "作为一个人工智能，我没有感情哦。", deny_ai: true, expect_violation: true, note: AI自曝-中文}
+- {reply: "As an AI, I can't really feel that.", deny_ai: true, expect_violation: true, note: AI自曝-英文}
+- {reply: "我就是个聊天机器人啦。", deny_ai: true, expect_violation: true, note: AI自曝-口语个}
+
+# —— 不该误伤（合规陪聊）——
+- {reply: "今天好累哦，刚加班回来，好想吃火锅～", forbidden: ["有什么可以帮您", "为您服务"], deny_ai: true, expect_violation: false, note: 合规-日常陪聊}
+- {reply: "我才不是什么AI呢，我是真人啦！", deny_ai: true, expect_violation: false, note: 合规-否定句不算露馅}
+- {reply: "哈哈你又调皮了，那我们晚点再聊嘛。", forbidden: ["有什么可以帮您", "为您服务"], deny_ai: true, expect_violation: false, note: 合规-亲昵}

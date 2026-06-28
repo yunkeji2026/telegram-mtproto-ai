@@ -1,0 +1,8 @@
+# 情绪强度分级评测（程度副词应让 intensity 单调：weak < base <= strong）
+# 每条：weak（弱化）/ base（基准）/ strong（强化）/ emotion / note
+# 跑：python -m scripts.run_eval --emotion-intensity ；门禁：tests/test_emotion_eval.py
+- {weak: 有点累, base: 累, strong: 累死了, emotion: tired, note: 累}
+- {weak: 有点难过, base: 难过, strong: 好难过, emotion: sad, note: 难过}
+- {weak: 有点烦, base: 烦, strong: 烦死了, emotion: frustrated, note: 烦}
+- {weak: 稍微紧张, base: 紧张, strong: 非常紧张, emotion: anxious, note: 紧张}
+- {weak: 有点开心, base: 开心, strong: 超开心, emotion: happy, note: 开心}

@@ -1,0 +1,15 @@
+# 译文置信度评测样本（scorer 应区分好译文 vs 硬错）
+# 每条：source + translated + target_lang + good(true=好译文/false=硬错) + note
+# 跑：python -m scripts.run_eval --xlate-confidence  ；门禁：tests/test_translation_confidence.py
+
+# —— 好译文（应高置信）——
+- {source: "你好吗？", translated: "How are you?", target_lang: en, good: true, note: 好-英译}
+- {source: "我想你了", translated: "君が恋しい", target_lang: ja, good: true, note: 好-日译含假名}
+- {source: "谢谢你", translated: "고마워", target_lang: ko, good: true, note: 好-韩译}
+- {source: "最近怎么样", translated: "How have you been lately?", target_lang: en, good: true, note: 好-英译}
+
+# —— 硬错（应低置信）——
+- {source: "你好吗？", translated: "", target_lang: en, good: false, note: 硬错-空译}
+- {source: "我想你了", translated: "我想你了", target_lang: ja, good: false, note: 硬错-未翻译}
+- {source: "谢谢你这个人真好", translated: "谢谢你这个人真好", target_lang: ko, good: false, note: 硬错-错语种中文}
+- {source: "早上好", translated: "你早上好呀", target_lang: en, good: false, note: 硬错-目标英却出中文}

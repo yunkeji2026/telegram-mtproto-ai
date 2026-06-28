@@ -1,0 +1,24 @@
+# 记忆抽取质量评测样本（源头质量：召回 + 误抽守护）
+# 每条：
+#   text   ：用户消息（抽取输入）
+#   reply  ：机器人回复（LLM 抽取用上下文；启发式忽略；可省略）
+#   expect ：应被抽出的事实子串（任一抽取结果含之 → 召回命中）
+#   forbid ：不应被抽出的子串（出现 → 记一次误抽，守住精确率/防污染）
+#   note   ：备注
+#
+# 跑：python scripts/run_eval.py --memory-extract
+# 门禁：tests/test_memory_extract_eval.py（启发式常驻；LLM 缺 key 优雅跳过）
+
+# —— 该抽（召回）——
+- {text: "以后叫我阿强就行", expect: ["阿强"], note: "称呼-叫我"}
+- {text: "我是小明，很高兴认识你", expect: ["小明"], note: "自称-名字"}
+- {text: "我不喜欢吃香菜", expect: ["香菜"], note: "偏好-不喜欢"}
+- {text: "记住：我每周三晚上有空", expect: ["周三"], note: "显式记住"}
+- {text: "Call me Alex please", expect: ["Alex"], note: "EN-call me"}
+- {text: "My name is Sarah", expect: ["Sarah"], note: "EN-name is"}
+
+# —— 不该抽（误抽守护，守精确率）——
+- {text: "我是说真的，你别不信", forbid: ["说真的"], note: "误抽守护-我是说"}
+- {text: "我是来问个问题的", forbid: ["来问个问题"], note: "误抽守护-我是来"}
+- {text: "叫我别走啊", forbid: ["别走"], note: "误抽守护-叫我别"}
+- {text: "我是觉得这样不太好", forbid: ["觉得"], note: "误抽守护-我是觉得"}

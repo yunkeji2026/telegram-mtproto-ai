@@ -1,0 +1,19 @@
+# 情绪维度评测样本（analyze_emotion 归类是否准）
+# 每条：text + dimension（positive/negative/low_energy/curious/neutral）+ note
+# 跑：python -m scripts.run_eval --emotion  ；门禁：tests/test_emotion_eval.py
+# 注：当前为词典基线，样本含明确情绪信号；对抗/否定/歧义留作后续「情绪识别硬化」增量。
+
+- {text: "哈哈哈太好了，今天真开心！", dimension: positive, note: 开心}
+- {text: "谢谢你一直陪着我，好喜欢你～", dimension: positive, note: 感激/喜欢}
+- {text: "我好难过，刚刚哭了一场", dimension: negative, note: 难过}
+- {text: "烦死了，这事真让人生气", dimension: negative, note: 生气}
+- {text: "有点担心明天的面试，好焦虑", dimension: negative, note: 焦虑}
+- {text: "今天加班到现在，好累啊", dimension: low_energy, note: 疲惫}
+- {text: "一个人在家好无聊，有点孤独", dimension: low_energy, note: 无聊/孤独}
+- {text: "真的吗？然后呢然后呢", dimension: curious, note: 好奇}
+- {text: "嗯，我大概下午三点到公司", dimension: neutral, note: 中性陈述}
+- {text: "嗯，收到，我待会儿处理一下", dimension: neutral, note: 中性事务}
+# 否定硬化（I）：以下不应被误判为负面/低能量/思念
+- {text: "我今天一点都不难过，挺好的", dimension: neutral, note: 否定-不难过}
+- {text: "别担心，我没事的", dimension: neutral, note: 否定-别担心}
+- {text: "没那么累，还撑得住", dimension: neutral, note: 否定-没那么累}

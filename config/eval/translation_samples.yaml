@@ -1,0 +1,18 @@
+# 翻译回译质量评测样本（src→target→src，回译与原文相似度近似质量）。
+# 口径见 src/eval/translation_eval.py；门禁见 tests/test_translation_quality_gate.py。
+# 目标语建议限于所配确定性引擎（DeepL/Google）覆盖的语对；缺引擎时门禁自动跳过。
+# 维护建议：陪伴 + 电商两类各覆盖主要语对，回归看「回译相似度趋势」而非绝对值。
+
+# ── 陪伴日常 / 情感 ──
+- {text: "你今天过得怎么样？我有点想你了", target_lang: en, note: 陪伴-想念}
+- {text: "别太累着自己，记得按时吃饭哦", target_lang: en, note: 陪伴-关怀}
+- {text: "谢谢你一直陪着我，真的很开心", target_lang: ja, note: 陪伴-感谢}
+- {text: "上次你说的那个面试，后来顺利吗？", target_lang: ja, note: 回访-具体事}
+- {text: "最近天气转凉了，出门多穿点", target_lang: ko, note: 陪伴-叮嘱}
+- {text: "我们周末一起看场电影吧，你想看哪部？", target_lang: en, note: 陪伴-邀约}
+
+# ── 电商客服 ──
+- {text: "请问我的订单什么时候发货？", target_lang: en, note: 电商-物流}
+- {text: "这个产品支持七天无理由退货吗？", target_lang: ko, note: 电商-售后}
+- {text: "支持哪些支付方式？可以货到付款吗？", target_lang: ja, note: 电商-支付}
+- {text: "尺码偏大还是偏小？我该选哪个码？", target_lang: en, note: 电商-尺码}
