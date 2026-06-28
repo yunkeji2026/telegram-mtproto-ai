@@ -2,37 +2,38 @@
 {% block title %}经营 ROI 看板{% endblock %}
 {% block head %}
 <style>
-  .roi-wrap{height:100%;overflow-y:auto;background:#f7f8fa;padding:18px;}
+  /* 令牌驱动（继承 workspace_base 的 --tk-*），日/夜两版自动适配；AI=蓝/人工=橙 双色序列保留。 */
+  .roi-wrap{height:100%;overflow-y:auto;background:var(--tk-bg);padding:18px;}
   .roi-head{display:flex;justify-content:space-between;align-items:center;margin:6px 0 16px;}
-  .roi-head h2{margin:0;font-size:19px;}
+  .roi-head h2{margin:0;font-size:19px;color:var(--tk-text);}
   .roi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px;margin-bottom:18px;}
-  .roi-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:18px;}
-  .roi-card .v{font-size:30px;font-weight:800;color:#0f172a;line-height:1.1;}
-  .roi-card .v.good{color:#15803d;} .roi-card .v.warn{color:#b45309;} .roi-card .v.bad{color:#b91c1c;}
-  .roi-card .l{font-size:12px;color:#64748b;margin-top:6px;}
-  .roi-card .s{font-size:11px;color:#94a3b8;margin-top:2px;}
-  .roi-sec{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:18px;margin-bottom:14px;}
-  .roi-sec h3{margin:0 0 12px;font-size:14px;color:#374151;}
-  .roi-bar{height:10px;border-radius:6px;background:#e5e7eb;overflow:hidden;display:flex;}
+  .roi-card{background:var(--tk-surface);border:1px solid var(--tk-border);border-radius:var(--tk-radius-lg,14px);padding:18px;box-shadow:var(--tk-shadow);}
+  .roi-card .v{font-size:30px;font-weight:800;color:var(--tk-text);line-height:1.1;}
+  .roi-card .v.good{color:var(--tk-ok-ink);} .roi-card .v.warn{color:var(--tk-warn-ink);} .roi-card .v.bad{color:var(--tk-danger-ink);}
+  .roi-card .l{font-size:12px;color:var(--tk-text-muted);margin-top:6px;}
+  .roi-card .s{font-size:11px;color:var(--tk-text-muted);margin-top:2px;}
+  .roi-sec{background:var(--tk-surface);border:1px solid var(--tk-border);border-radius:var(--tk-radius-lg,14px);padding:18px;margin-bottom:14px;box-shadow:var(--tk-shadow);}
+  .roi-sec h3{margin:0 0 12px;font-size:14px;color:var(--tk-text);}
+  .roi-bar{height:10px;border-radius:6px;background:var(--tk-surface-2);overflow:hidden;display:flex;}
   .roi-bar i{display:block;height:100%;}
-  .roi-bar .ai{background:#2563eb;} .roi-bar .hu{background:#f59e0b;}
-  .roi-legend{display:flex;gap:16px;font-size:12px;color:#475569;margin-top:8px;}
+  .roi-bar .ai{background:var(--tk-brand);} .roi-bar .hu{background:var(--tk-amber);}
+  .roi-legend{display:flex;gap:16px;font-size:12px;color:var(--tk-text-muted);margin-top:8px;}
   .roi-dot{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:middle;}
-  .roi-back{font-size:12px;color:#2563eb;text-decoration:none;}
+  .roi-back{font-size:12px;color:var(--tk-brand);text-decoration:none;}
   .roi-delta{font-size:11px;margin-top:4px;font-weight:600;}
-  .roi-delta.up{color:#15803d;} .roi-delta.down{color:#b91c1c;} .roi-delta.flat{color:#94a3b8;}
+  .roi-delta.up{color:var(--tk-ok-ink);} .roi-delta.down{color:var(--tk-danger-ink);} .roi-delta.flat{color:var(--tk-text-muted);}
   .roi-spark{display:flex;align-items:flex-end;gap:3px;height:46px;margin-top:6px;}
   .roi-spark .col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:1px;min-width:3px;}
   .roi-spark .col i{display:block;border-radius:1px;}
-  .roi-spark .col .ai{background:#2563eb;} .roi-spark .col .hu{background:#f59e0b;}
-  .roi-pill{font-size:12px;padding:4px 10px;border:1px solid #d1d5db;border-radius:14px;background:#fff;cursor:pointer;}
-  .roi-pill.active{background:#2563eb;color:#fff;border-color:#2563eb;}
+  .roi-spark .col .ai{background:var(--tk-brand);} .roi-spark .col .hu{background:var(--tk-amber);}
+  .roi-pill{font-size:12px;padding:4px 10px;border:1px solid var(--tk-border);border-radius:14px;background:var(--tk-surface);color:var(--tk-text);cursor:pointer;}
+  .roi-pill.active{background:var(--tk-brand);color:#fff;border-color:var(--tk-brand);}
   .health{display:flex;align-items:center;gap:10px;}
   .health-badge{font-size:12px;font-weight:700;padding:4px 10px;border-radius:8px;}
-  .health-ok{background:#dcfce7;color:#15803d;} .health-warn{background:#fef3c7;color:#b45309;}
-  .health-error{background:#fee2e2;color:#b91c1c;}
-  .health-issue{font-size:12px;color:#475569;padding:5px 0;border-bottom:1px solid #f1f5f9;}
-  .health-issue b{color:#334155;}
+  .health-ok{background:rgba(16,185,129,.14);color:var(--tk-ok-ink);} .health-warn{background:rgba(245,158,11,.16);color:var(--tk-warn-ink);}
+  .health-error{background:rgba(225,29,72,.14);color:var(--tk-danger-ink);}
+  .health-issue{font-size:12px;color:var(--tk-text-muted);padding:5px 0;border-bottom:1px solid var(--tk-border);}
+  .health-issue b{color:var(--tk-text);}
 </style>
 {% endblock %}
 {% block content %}
@@ -52,12 +53,12 @@
     <h3>AI 自动应答 vs 人工接管</h3>
     <div class="roi-bar" id="roi-aibar"><i class="ai" style="width:0"></i><i class="hu" style="width:0"></i></div>
     <div class="roi-legend">
-      <span><span class="roi-dot" style="background:#2563eb"></span>AI 自动 <b id="roi-ai-n">0</b></span>
-      <span><span class="roi-dot" style="background:#f59e0b"></span>人工 <b id="roi-hu-n">0</b></span>
-      <span style="color:#94a3b8;">拦截未发 <b id="roi-sup-n">0</b></span>
+      <span><span class="roi-dot" style="background:var(--tk-brand)"></span>AI 自动 <b id="roi-ai-n">0</b></span>
+      <span><span class="roi-dot" style="background:var(--tk-amber)"></span>人工 <b id="roi-hu-n">0</b></span>
+      <span style="color:var(--tk-text-muted);">拦截未发 <b id="roi-sup-n">0</b></span>
     </div>
     <div class="roi-spark" id="roi-spark"></div>
-    <div style="font-size:11px;color:#94a3b8;margin-top:4px;">每日 AI（蓝）/ 人工（橙）发送量</div>
+    <div style="font-size:11px;color:var(--tk-text-muted);margin-top:4px;">每日 AI（蓝）/ 人工（橙）发送量</div>
   </div>
 
   <div class="roi-sec">
@@ -95,7 +96,7 @@ function card(v, label, sub, cls, deltaH){
 
 function renderSpark(trend){
   var el=document.getElementById('roi-spark');
-  if(!trend||!trend.length){ el.innerHTML='<span style="font-size:11px;color:#cbd5e1;">暂无数据</span>'; return; }
+  if(!trend||!trend.length){ el.innerHTML='<span style="font-size:11px;color:var(--tk-text-muted);">暂无数据</span>'; return; }
   var max=1;
   trend.forEach(function(t){ var s=(t.ai||0)+(t.human||0); if(s>max)max=s; });
   el.innerHTML=trend.map(function(t){
@@ -148,13 +149,13 @@ function loadRoi(){
     renderSpark(a.trend);
     // 配置健康度
     var hEl=document.getElementById('roi-health');
-    if(!h.available){ hEl.innerHTML='<span style="color:#94a3b8;">配置自检不可用</span>'; }
+    if(!h.available){ hEl.innerHTML='<span class="tk-load">配置自检不可用</span>'; }
     else {
       var st=h.status||'ok';
       var badge=st==='error'?'<span class="health-badge health-error">✗ '+h.errors+' 错误</span>'
         :(st==='warn'?'<span class="health-badge health-warn">! '+h.warnings+' 警告</span>'
         :'<span class="health-badge health-ok">✓ 配置正常</span>');
-      hEl.innerHTML=badge+'<span style="font-size:12px;color:#64748b;">'
+      hEl.innerHTML=badge+'<span style="font-size:12px;color:var(--tk-text-muted);">'
         +(st==='ok'?'未发现问题':'运行 <code>python main.py --check</code> 查看详情')+'</span>';
       var iss=(h.top_issues||[]).map(function(i){
         return '<div class="health-issue"><b>['+esc(i.severity)+']</b> '+esc(i.path)+'：'+esc(i.message)+'</div>';

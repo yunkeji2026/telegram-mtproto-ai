@@ -193,6 +193,11 @@ def register_desktop_routes(app, *, api_auth) -> None:
                            status="online")
         except Exception:
             logger.debug("[desktop] registry upsert 失败（已忽略）", exc_info=True)
+        # 桌面壳 DOM 抓取拿不到**稳定**消息 id：实测同一条消息每轮重扫被赋予不同的合成 id
+        # （如 2^32+递增），若把它当 platform_msg_id 去重，每轮都会凭空多出一行重复消息。
+        # 故桌面路径一律**丢弃客户端 msg_id**，让 store 回落 hash(text|ts) 内容去重——同会话同
+        # 文本同时间戳的重扫稳定折叠为一条（ts 跨扫实测稳定）。代价是「同秒同文」极端情况会被
+        # 并为一条，对 1:1 桌面客服可接受，远优于每轮刷屏式重复。
         from src.integrations.protocol_bridge import ingest_incoming
         cid = ingest_incoming(
             store,
@@ -202,7 +207,7 @@ def register_desktop_routes(app, *, api_auth) -> None:
             name=str((body or {}).get("name") or ""),
             text=str((body or {}).get("text") or ""),
             ts=float((body or {}).get("ts") or 0),
-            msg_id=str((body or {}).get("msg_id") or ""),
+            msg_id="",  # 见上：桌面合成 id 不稳定，强制走内容 hash 去重
             direction=str((body or {}).get("direction") or "in"),
             media_type=str((body or {}).get("media_type") or ""),
             media_ref=str((body or {}).get("media_ref") or ""),

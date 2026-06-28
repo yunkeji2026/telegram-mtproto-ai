@@ -42,6 +42,23 @@ from src.web.routes.unified_inbox_services import (
 logger = logging.getLogger(__name__)
 
 
+def _account_removed(platform: str, account_id: str) -> bool:
+    """该 (platform, account_id) 是否为注册表里 status=removed 的账号。
+
+    已移除账号在收件箱里只读展示历史（见 ProtocolInboxAdapter）；其会话禁止发送。
+    注意：实时 Telegram A 线用 account_id='default'（不在注册表），故不会被误拦；
+    仅明确指向 removed 账号 id（如 8118214990/tg-desktop）的发送被拒。查不到一律放行。
+    """
+    if not platform or not account_id or account_id == "default":
+        return False
+    try:
+        from src.integrations.account_registry import get_account_registry
+        row = get_account_registry().get(platform, account_id)
+        return bool(row and row.get("status") == "removed")
+    except Exception:
+        return False
+
+
 def register_send_routes(app, *, api_auth, page_auth) -> None:
     """挂载文本/媒体/语音发送 + 直发能力探测端点。"""
 
@@ -66,6 +83,8 @@ def register_send_routes(app, *, api_auth, page_auth) -> None:
         text = str(body.get("text") or "").strip()
         if not chat_key or not text:
             raise HTTPException(400, "chat_key 和 text 不能为空")
+        if _account_removed(platform, account_id):
+            raise HTTPException(409, "该账号已从系统移除，仅可查看历史记录，无法发送")
 
         # —— 发送前翻译（outbound 闭环）：默认关闭，显式 target_lang / "auto" 才触发 ——
         original_text = text
@@ -207,6 +226,8 @@ def register_send_routes(app, *, api_auth, page_auth) -> None:
         upload = form.get("file")
         if not chat_key or upload is None or not getattr(upload, "filename", ""):
             raise HTTPException(400, "file 和 chat_key 不能为空")
+        if _account_removed(platform, account_id):
+            raise HTTPException(409, "该账号已从系统移除，仅可查看历史记录，无法发送")
 
         from src.integrations.account_orchestrator import get_orchestrator
         orch = get_orchestrator()
@@ -261,6 +282,8 @@ def register_send_routes(app, *, api_auth, page_auth) -> None:
             raise HTTPException(400, "chat_key 和 text 不能为空")
         if len(text) > 1000:
             raise HTTPException(400, "文本过长（语音上限 1000 字）")
+        if _account_removed(platform, account_id):
+            raise HTTPException(409, "该账号已从系统移除，仅可查看历史记录，无法发送")
 
         from src.integrations.account_orchestrator import get_orchestrator
         orch = get_orchestrator()
@@ -270,8 +293,9 @@ def register_send_routes(app, *, api_auth, page_auth) -> None:
         # 解析语音配置（含声音克隆 voice_profile），允许调用方临时覆盖
         cm = getattr(request.app.state, "config_manager", None)
         raw_cfg = (getattr(cm, "config", None) or {}) if cm else {}
-        from src.ai.persona_voice import resolve_voice_cfg
-        voice_cfg = resolve_voice_cfg(persona_id, raw_cfg)
+        from src.ai.persona_voice import resolve_voice_cfg_for_contact
+        voice_cfg = resolve_voice_cfg_for_contact(
+            persona_id, raw_cfg, contact_key=chat_key or None)
         if isinstance(cfg_override, dict):
             voice_cfg.update({k: v for k, v in cfg_override.items() if v not in (None, "")})
         voice_cfg["enabled"] = True
@@ -282,9 +306,15 @@ def register_send_routes(app, *, api_auth, page_auth) -> None:
         out_dir = _Path(tempfile.gettempdir()) / "unified_voice_send"
         voice_cfg["out_dir"] = str(out_dir)
         from src.ai.tts_pipeline import TTSPipeline
+        from src.ai.persona_voice import resolve_emotion_for_send
         try:
             tts = TTSPipeline(voice_cfg)
-            result = await tts.synthesize(text, timeout_sec=45.0)
+            # P4：情感层（默认关）。开启后按关系阶段/文本线索派生情绪。
+            _emotion = resolve_emotion_for_send(
+                voice_cfg, text, platform=platform,
+                account_id=account_id, chat_key=chat_key or None)
+            result = await tts.synthesize(
+                text, timeout_sec=45.0, emotion=_emotion)
         except Exception as ex:  # noqa: BLE001
             raise HTTPException(502, f"语音合成失败: {ex}")
         if not result.ok or not result.audio_path:

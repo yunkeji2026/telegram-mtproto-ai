@@ -281,6 +281,29 @@
   <div id="ov-pp-sample-out" style="margin-top:.45rem"></div>
 </div>
 
+<!-- 陪伴能力就绪度看板（/api/companion/capabilities）：分阶段开启「看→校→开」第一步 -->
+<div id="ov-cap-card" style="margin-top:.6rem;background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:.6rem .85rem">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem">
+    <div style="font-weight:600;font-size:.82rem">🧩 陪伴能力就绪度 <span id="ov-cap-status" style="font-weight:400;color:var(--muted);font-size:.72rem"></span></div>
+    <button id="ov-cap-refresh" style="font-size:.72rem;padding:.18rem .6rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="陪伴能力的开/关/灰度/受阻状态，按风险分档=分阶段开启顺序">刷新</button>
+  </div>
+  <div style="margin-top:.4rem;display:flex;flex-wrap:wrap;gap:.3rem;align-items:center">
+    <span style="color:var(--muted);font-size:.7rem">一键档：</span>
+    <button class="ov-cap-preset" data-preset="safe_default" style="font-size:.7rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="急停：关全部对客外发，仅留安全栈">🛑 安全默认</button>
+    <button class="ov-cap-preset" data-preset="dry_run_trial" style="font-size:.7rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="观测/翻译/worker 开，主动触达 dry_run 不真发">🧪 灰度试运行</button>
+    <button class="ov-cap-preset" data-preset="full_auto" style="font-size:.7rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="全部开（真发仍受 auto_ai 护栏）">🚀 全量真发</button>
+    <span style="color:var(--bd2)">|</span>
+    <button id="ov-cap-rollback" style="font-size:.7rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="回滚到上一次一键切换前">↩ 回滚上次</button>
+    <button id="ov-cap-audit-btn" style="font-size:.7rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer">🕓 最近变更</button>
+    <button id="ov-cap-signals-btn" style="font-size:.7rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="把真实运营指标翻成「该不该往上爬一档」的建议">🧭 决策信号</button>
+    <button id="ov-cap-advice-btn" style="font-size:.7rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="能力档×信号联动建议 + 配置一致性体检（可一键执行）">🩺 体检/建议</button>
+  </div>
+  <div id="ov-cap-audit" style="display:none;margin-top:.4rem;font-size:.72rem;line-height:1.6;color:var(--muted)"></div>
+  <div id="ov-cap-signals" style="display:none;margin-top:.4rem;font-size:.72rem;line-height:1.6;color:var(--muted)"></div>
+  <div id="ov-cap-advice" style="display:none;margin-top:.4rem;font-size:.72rem;line-height:1.6;color:var(--muted)"></div>
+  <div id="ov-cap-body" style="margin-top:.45rem;font-size:.76rem;line-height:1.5;color:var(--muted)">载入中…</div>
+</div>
+
 <!-- D1c：桌面壳内嵌注入健康（逐选择器失配可观测，数据来自 /api/desktop/inject-health 信标）-->
 <div id="ov-desktop-health-card" style="margin-top:.6rem;background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:.6rem .85rem">
   <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem">
@@ -1228,6 +1251,209 @@ function ovScheduleRefresh(){
   if(sec>0){ _ovTimer = setInterval(ovRefresh, sec*1000); }
 }
 
+// 陪伴能力就绪度看板（只读）：分阶段开启「看→校→开」的"看"。
+function _ovCapEsc(s){ return (window.rpa&&rpa.esc)?rpa.esc(s):String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+function _ovCapBadge(stage){
+  var m={active:['#16a34a','运行'],dry_run:['#d97706','灰度'],blocked:['#dc2626','受阻'],off:['#9ca3af','关']};
+  var x=m[stage]||m.off;
+  return '<span style="display:inline-block;padding:.03rem .4rem;border-radius:5px;background:'+x[0]+';color:#fff;font-size:.66rem">'+x[1]+'</span>';
+}
+async function ovCapDeliveryCalibration(){
+  var el=document.getElementById('ov-cap-deliver'); if(!el){ return; }
+  try{
+    var d=await rpa.get('/api/companion/capabilities/delivery-calibration');
+    if(!d||!d.ok){ el.textContent=''; return; }
+    var v={effective:'🟢真发生效',misconfigured:'🔴开了但发不出',inactive:'⚪未真发(安全默认)'}[d.verdict]||d.verdict;
+    var am=d.automation_modes||{}, rec=d.recent||{}, sw=d.switches||{};
+    var line='全自动真发：'+v+' · auto_ai会话 '+(am.auto_ai||0)+' · 安全闸'+(sw.send_gate?'on':'off');
+    if(rec.autosend!=null){ line+=' · 近发'+rec.autosend+'/失败'+(rec.autosend_failed||0); }
+    if((d.warnings||[]).length){ line+='｜⚠ '+_ovCapEsc(d.warnings.join('；')); }
+    el.innerHTML='<span title="'+_ovCapEsc(d.recommendation||'')+'">'+line+'</span>';
+  }catch(e){ el.textContent=''; }
+}
+function ovCapCalibrate(url){
+  if(url && url.indexOf('delivery-calibration')>=0){
+    ovCapDeliveryCalibration();
+    var el=document.getElementById('ov-cap-deliver'); if(el){ el.scrollIntoView({block:'nearest'}); }
+    return;
+  }
+  if(url && url.indexOf('proactive')>=0){
+    if(typeof ovRefreshProactivePreview==='function'){ ovRefreshProactivePreview(); }
+    var c=document.getElementById('ov-proactive-card'); if(c){ c.scrollIntoView({behavior:'smooth',block:'center'}); }
+  }
+}
+// 一键预设档：按风险阶梯整档切换（服务端逐项过护栏，切前自动存快照）。
+async function ovCapPreset(name, label){
+  var WARN={safe_default:'将关闭全部对客外发，仅保留安全栈（急停）。',
+            dry_run_trial:'将开启观测/翻译/worker，主动触达走 dry_run（不真发）。',
+            full_auto:'⚠ 将开启全部能力，包括「全自动真发到客户」。'};
+  if(!confirm('一键切到「'+label+'」？\n'+(WARN[name]||'')+'\n（切换前自动存快照，可回滚）')) return;
+  try{
+    var r=await rpa.post('/api/companion/capabilities/preset', {name:name});
+    var d=await r.json();
+    if(!d || !d.ok){ alert((d&&d.message)||'切换失败'); return; }
+    var msg='已切到「'+(d.label||name)+'」：生效 '+((d.applied||[]).length)+' 项';
+    if((d.blocked||[]).length){ msg+='\n护栏拦下 '+d.blocked.length+' 项：\n'+d.blocked.map(function(b){return '· '+b.key+'：'+b.reason;}).join('\n'); }
+    if((d.warned||[]).length){ msg+='\n注意：'+d.warned.map(function(w){return w.warn;}).join('；'); }
+    alert(msg);
+    ovRefreshCapabilities();
+  }catch(e){ alert('请求失败'); }
+}
+async function ovCapRollback(){
+  if(!confirm('回滚到上一次一键切换前的状态？')) return;
+  try{
+    var r=await rpa.post('/api/companion/capabilities/rollback', {});
+    var d=await r.json();
+    if(!d || !d.ok){ alert((d&&d.message)||'回滚失败'); return; }
+    alert('已回滚（还原 '+((d.applied||[]).length)+' 项'+((d.blocked||[]).length?('，'+d.blocked.length+' 项被护栏拦下'):'')+'）');
+    ovRefreshCapabilities();
+  }catch(e){ alert('请求失败'); }
+}
+async function ovCapAudit(){
+  var el=document.getElementById('ov-cap-audit'); if(!el) return;
+  if(el.style.display!=='none'){ el.style.display='none'; return; }
+  el.style.display=''; el.textContent='加载中…';
+  try{
+    var d=await rpa.get('/api/companion/capabilities/toggle-audit?limit=20');
+    if(!d || !d.ok || !(d.entries||[]).length){ el.textContent='暂无变更记录'; return; }
+    el.innerHTML='<div style="font-weight:600;margin-bottom:.2rem">最近变更</div>'+d.entries.map(function(e){
+      var t=new Date((e.ts||0)*1000).toLocaleString();
+      return '<div>'+_ovCapEsc(t)+' · '+_ovCapEsc(e.actor||'')+' · '+_ovCapEsc(e.key||'')+'.'+_ovCapEsc(e.field||'')+'='+(e.value?'on':'off')
+        +(e.reason?(' <span style="opacity:.7">['+_ovCapEsc(e.reason)+']</span>'):'')+'</div>';
+    }).join('');
+  }catch(e){ el.textContent='加载失败'; }
+}
+// 决策信号：真实运营指标 → 该不该往上爬一档（近 7 天）。
+async function ovCapSignals(){
+  var el=document.getElementById('ov-cap-signals'); if(!el) return;
+  if(el.style.display!=='none'){ el.style.display='none'; return; }
+  el.style.display=''; el.textContent='加载中…';
+  var VC={healthy:['#16a34a','可推进'],caution:['#d97706','待改进'],failing:['#dc2626','出问题'],
+          insufficient:['#9ca3af','样本不足'],idle:['#9ca3af','无活动'],unknown:['#9ca3af','未知'],
+          unavailable:['#9ca3af','不可用']};
+  function badge(v){var x=VC[v]||VC.unknown;return '<span style="display:inline-block;padding:.03rem .4rem;border-radius:5px;background:'+x[0]+';color:#fff;font-size:.66rem">'+x[1]+'</span>';}
+  try{
+    var d=await rpa.get('/api/companion/capabilities/signals?window_hours=168');
+    if(!d || !d.ok || !(d.signals||[]).length){ el.textContent='暂无信号'; return; }
+    var h=d.headline||{};
+    var head='<div style="margin-bottom:.3rem">头条：'+badge(h.verdict)+' '+_ovCapEsc(h.advice||'')+'</div>';
+    var rows=d.signals.map(function(s){
+      return '<div style="border-top:1px solid var(--bd);padding:.2rem 0">'+badge(s.verdict)
+        +' <strong>'+_ovCapEsc(s.label)+'</strong>（档'+s.tier+'）：'+_ovCapEsc(s.advice)+'</div>';
+    }).join('');
+    el.innerHTML='<div style="font-weight:600;margin-bottom:.2rem">决策信号（近 7 天）</div>'+head+rows;
+  }catch(e){ el.textContent='加载失败'; }
+}
+// 体检/建议：能力档×信号联动建议 + 一致性体检，可一键执行。
+async function ovCapApplyTarget(rec){
+  var t=rec&&rec.target; if(!t||!t.key) return;
+  if(rec.action==='advance' && !confirm('转真发：「'+(rec.label||t.key)+'」将关闭灰度、开始真实发送。确定？')) return;
+  try{
+    var r=await rpa.post('/api/companion/capabilities/toggle', {key:t.key, field:t.field, value:t.value});
+    var d=await r.json();
+    if(!d || !d.ok){ alert((d&&d.message)||'执行失败'); return; }
+    if(d.warn){ alert('已生效，但请注意：\n'+d.warn); }
+    ovRefreshCapabilities(); ovCapAdvice(true);
+  }catch(e){ alert('请求失败'); }
+}
+async function ovCapAdvice(forceOpen){
+  var el=document.getElementById('ov-cap-advice'); if(!el) return;
+  if(!forceOpen && el.style.display!=='none'){ el.style.display='none'; return; }
+  el.style.display=''; el.textContent='加载中…';
+  var AC={advance:['#16a34a','转真发'],downgrade:['#dc2626','降档'],enable:['#2563eb','开启'],
+          fix:['#dc2626','修复'],watch:['#d97706','留意'],hold:['#9ca3af','保持']};
+  function ab(a){var x=AC[a]||['#9ca3af',a];return '<span style="display:inline-block;padding:.03rem .4rem;border-radius:5px;background:'+x[0]+';color:#fff;font-size:.66rem">'+x[1]+'</span>';}
+  try{
+    var d=await rpa.get('/api/companion/capabilities/advice?window_hours=168');
+    if(!d || !d.ok){ el.textContent=(d&&d.message)||'不可用'; return; }
+    var html='', iss=d.consistency||[];
+    html+='<div style="font-weight:600;margin-bottom:.2rem">⚙ 一致性体检</div>';
+    if(!iss.length){ html+='<div style="color:#16a34a">✓ 配置自洽，无冲突</div>'; }
+    else{ html+=iss.map(function(i){var c=i.severity==='error'?'#dc2626':'#d97706';return '<div style="color:'+c+'">'+(i.severity==='error'?'■ ':'▲ ')+_ovCapEsc(i.message)+'</div>';}).join(''); }
+    var recs=d.recommendations||[];
+    html+='<div style="font-weight:600;margin:.35rem 0 .2rem">建议动作（'+recs.length+'）</div>';
+    if(!recs.length){ html+='<div style="color:var(--muted)">暂无待办</div>'; }
+    else{
+      html+=recs.map(function(r,idx){
+        var btn=r.target?'<button class="ov-cap-do" data-idx="'+idx+'" style="font-size:.66rem;padding:.06rem .45rem;border:1px solid var(--bd);border-radius:5px;background:transparent;color:inherit;cursor:pointer">一键执行</button>':'';
+        return '<div style="border-top:1px solid var(--bd);padding:.2rem 0">'+ab(r.action)+' <strong>'+_ovCapEsc(r.label)+'</strong>（档'+r.tier+'）：'+_ovCapEsc(r.reason)+' '+btn+'</div>';
+      }).join('');
+    }
+    el.innerHTML=html;
+    Array.prototype.forEach.call(el.querySelectorAll('.ov-cap-do'),function(b){
+      b.addEventListener('click',function(){ ovCapApplyTarget(recs[parseInt(b.getAttribute('data-idx'),10)]); });
+    });
+  }catch(e){ el.textContent='加载失败'; }
+}
+// 分阶段开启「开」：带二次确认地开/关单个能力（护栏在服务端，这里只兜体验）。
+async function ovCapToggle(btn){
+  var key=btn.getAttribute('data-key'), field=btn.getAttribute('data-field');
+  var val=btn.getAttribute('data-val')==='1';
+  var label=btn.getAttribute('data-label')||key;
+  var crit=btn.getAttribute('data-crit')==='1', kind=btn.getAttribute('data-kind');
+  if(field==='enabled' && val && crit){
+    if(!confirm('⚠ 即将开启「全自动真发到客户」主开关。\n这会让 AI 真往「全自动(auto_ai)」会话的客户自动发消息。\n请先确认：出站安全闸已开、已用校准看过命中/拦截。\n\n确定开启？')) return;
+  }
+  if(field==='enabled' && !val && kind==='safeguard'){
+    if(!confirm('⚠ 即将关闭安全防护「'+label+'」，关闭后移除该护栏。\n确定关闭？')) return;
+  }
+  btn.disabled=true;
+  try{
+    var r=await rpa.post('/api/companion/capabilities/toggle', {key:key, field:field, value:val});
+    var d=await r.json();
+    if(!d || !d.ok){ alert((d&&d.message)||'操作失败'); btn.disabled=false; return; }
+    if(d.warn){ alert('已生效，但请注意：\n'+d.warn); }
+    ovRefreshCapabilities();
+  }catch(e){ alert('请求失败'); btn.disabled=false; }
+}
+async function ovRefreshCapabilities(){
+  var body=document.getElementById('ov-cap-body'), st=document.getElementById('ov-cap-status');
+  if(body){ body.textContent='加载中…'; }
+  try{
+    var d=await rpa.get('/api/companion/capabilities');
+    if(!d||!d.ok||d.available===false){ if(body){ body.textContent=(d&&d.message)||'看板不可用'; } return; }
+    var s=d.summary||{};
+    if(st){
+      st.textContent='真发主开关'+(s.master_delivery_on?'🟢已开':'⚪关')
+        +' · 安全栈待开'+((s.safeguards_off||[]).length)
+        +' · 灰度'+((s.dry_running||[]).length)
+        +' · 受阻'+((s.blocked||[]).length);
+    }
+    var _tb='font-size:.68rem;padding:.1rem .5rem;border:1px solid var(--bd);border-radius:5px;background:transparent;color:inherit;cursor:pointer';
+    var rows=(d.capabilities||[]).map(function(c){
+      var cal=c.calibration?'<a href="#" data-cal="'+_ovCapEsc(c.calibration)+'" class="ov-cap-cal" style="color:var(--p)">去校准</a>':'';
+      var en=!!c.enabled;
+      var act='<button class="ov-cap-tg" data-key="'+_ovCapEsc(c.key)+'" data-field="enabled" data-val="'+(en?'0':'1')
+        +'" data-crit="'+(c.critical?'1':'0')+'" data-kind="'+_ovCapEsc(c.kind)+'" data-label="'+_ovCapEsc(c.label)
+        +'" style="'+_tb+'">'+(en?'关闭':'开启')+'</button>';
+      if(c.dry_run_supported){
+        act+=' <button class="ov-cap-tg" data-key="'+_ovCapEsc(c.key)+'" data-field="dry_run" data-val="'+(c.dry_run?'0':'1')
+          +'" data-kind="'+_ovCapEsc(c.kind)+'" data-label="'+_ovCapEsc(c.label)
+          +'" style="'+_tb+'" title="灰度=只计划不真发">'+(c.dry_run?'转真发':'灰度')+'</button>';
+      }
+      return '<tr style="border-top:1px solid var(--bd)">'
+        +'<td style="color:var(--muted)">'+c.tier+'</td>'
+        +'<td>'+(c.critical?'⚠ ':'')+_ovCapEsc(c.label)+'</td>'
+        +'<td>'+_ovCapBadge(c.stage)+'</td>'
+        +'<td style="color:var(--muted)">'+_ovCapEsc(c.risk)+'</td>'
+        +'<td>'+_ovCapEsc(c.recommended)+' '+cal+'</td>'
+        +'<td style="white-space:nowrap">'+act+'</td>'
+        +'</tr>';
+    }).join('');
+    body.innerHTML='<table style="width:100%;border-collapse:collapse;font-size:.72rem">'
+      +'<thead><tr style="text-align:left;color:var(--muted)"><th>档</th><th>能力</th><th>状态</th><th>风险</th><th>建议 / 校准</th><th>操作</th></tr></thead>'
+      +'<tbody>'+rows+'</tbody></table>'
+      +'<div id="ov-cap-deliver" style="margin-top:.4rem;color:var(--muted)"></div>';
+    Array.prototype.forEach.call(document.querySelectorAll('#ov-cap-body .ov-cap-cal'),function(a){
+      a.addEventListener('click',function(ev){ ev.preventDefault(); ovCapCalibrate(a.getAttribute('data-cal')); });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('#ov-cap-body .ov-cap-tg'),function(b){
+      b.addEventListener('click',function(){ ovCapToggle(b); });
+    });
+    ovCapDeliveryCalibration();   // 最关键的主开关真发校准默认拉一次
+  }catch(e){ if(body){ body.textContent='看板请求失败'; } }
+}
+
 document.addEventListener('DOMContentLoaded', function(){
   rpa.restoreTabFromHash();
   document.getElementById('ov-interval').addEventListener('change', ovScheduleRefresh);
@@ -1254,6 +1480,22 @@ document.addEventListener('DOMContentLoaded', function(){
   var _ppAdv = document.getElementById('ov-pp-advice');
   if(_ppAdv){ _ppAdv.addEventListener('click', ovProactiveAdvice); }
   ovRefreshProactivePreview();
+  // 🧩 陪伴能力就绪度看板：首屏拉一次 + 按钮手动刷新（只读，不进主轮询）
+  var _capBtn = document.getElementById('ov-cap-refresh');
+  if(_capBtn){ _capBtn.addEventListener('click', ovRefreshCapabilities); }
+  // 一键档 / 回滚 / 最近变更（静态按钮，仅绑一次）
+  Array.prototype.forEach.call(document.querySelectorAll('#ov-cap-card .ov-cap-preset'), function(b){
+    b.addEventListener('click', function(){ ovCapPreset(b.getAttribute('data-preset'), b.textContent.trim()); });
+  });
+  var _craBtn = document.getElementById('ov-cap-rollback');
+  if(_craBtn){ _craBtn.addEventListener('click', ovCapRollback); }
+  var _cauBtn = document.getElementById('ov-cap-audit-btn');
+  if(_cauBtn){ _cauBtn.addEventListener('click', ovCapAudit); }
+  var _csgBtn = document.getElementById('ov-cap-signals-btn');
+  if(_csgBtn){ _csgBtn.addEventListener('click', ovCapSignals); }
+  var _cadBtn = document.getElementById('ov-cap-advice-btn');
+  if(_cadBtn){ _cadBtn.addEventListener('click', function(){ ovCapAdvice(false); }); }
+  ovRefreshCapabilities();
   // D1c：桌面注入健康（按钮手动刷新 + 随主循环 ovRefresh 自动刷新）
   var _dhBtn = document.getElementById('ov-dh-refresh');
   if(_dhBtn){ _dhBtn.addEventListener('click', ovRefreshDesktopHealth); }

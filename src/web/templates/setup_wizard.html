@@ -2,45 +2,46 @@
 {% block title %}渠道接入向导{% endblock %}
 {% block head %}
 <style>
-  .sw-wrap{height:100%;overflow-y:auto;background:#f7f8fa;padding:18px;max-width:920px;margin:0 auto;}
+  /* 令牌驱动（继承 workspace_base 的 --tk-*），日/夜两版自动适配。 */
+  .sw-wrap{height:100%;overflow-y:auto;background:var(--tk-bg);padding:18px;max-width:920px;margin:0 auto;}
   .sw-head{margin:6px 0 16px;}
-  .sw-head h2{margin:0 0 4px;font-size:19px;}
-  .sw-head p{margin:0;font-size:13px;color:#64748b;}
-  .sw-prog{display:flex;align-items:center;gap:8px;font-size:12px;color:#475569;margin:10px 0 18px;}
-  .sw-prog .bar{flex:1;height:8px;border-radius:5px;background:#e5e7eb;overflow:hidden;}
-  .sw-prog .bar i{display:block;height:100%;background:#16a34a;transition:width .3s;}
-  .sw-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;margin-bottom:14px;overflow:hidden;}
+  .sw-head h2{margin:0 0 4px;font-size:19px;color:var(--tk-text);}
+  .sw-head p{margin:0;font-size:13px;color:var(--tk-text-muted);}
+  .sw-prog{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--tk-text-muted);margin:10px 0 18px;}
+  .sw-prog .bar{flex:1;height:8px;border-radius:5px;background:var(--tk-surface-2);overflow:hidden;}
+  .sw-prog .bar i{display:block;height:100%;background:var(--tk-grad);transition:width .3s;}
+  .sw-card{background:var(--tk-surface);border:1px solid var(--tk-border);border-radius:var(--tk-radius-lg,14px);margin-bottom:14px;overflow:hidden;box-shadow:var(--tk-shadow);}
   .sw-ch-hd{display:flex;align-items:center;gap:10px;padding:14px 18px;cursor:pointer;}
-  .sw-ch-hd:hover{background:#f8fafc;}
-  .sw-ch-name{font-size:15px;font-weight:700;color:#0f172a;}
-  .sw-ch-intro{font-size:12px;color:#64748b;margin-top:2px;}
+  .sw-ch-hd:hover{background:var(--tk-surface-2);}
+  .sw-ch-name{font-size:15px;font-weight:700;color:var(--tk-text);}
+  .sw-ch-intro{font-size:12px;color:var(--tk-text-muted);margin-top:2px;}
   .sw-badge{font-size:11px;font-weight:700;padding:3px 9px;border-radius:8px;margin-left:auto;white-space:nowrap;}
-  .b-ready{background:#dcfce7;color:#15803d;} .b-conf{background:#dbeafe;color:#1d4ed8;}
-  .b-miss{background:#fef3c7;color:#b45309;}
-  .sw-body{display:none;padding:0 18px 18px;border-top:1px solid #f1f5f9;}
+  .b-ready{background:rgba(16,185,129,.14);color:var(--tk-ok-ink);} .b-conf{background:rgba(59,130,246,.14);color:var(--tk-brand);}
+  .b-miss{background:rgba(245,158,11,.16);color:var(--tk-warn-ink);}
+  .sw-body{display:none;padding:0 18px 18px;border-top:1px solid var(--tk-border);}
   .sw-body.open{display:block;}
   .sw-field{margin:14px 0;}
-  .sw-field label{display:block;font-size:13px;font-weight:600;color:#334155;margin-bottom:4px;}
-  .sw-field label .req{color:#dc2626;} .sw-field label .opt{color:#94a3b8;font-weight:400;}
-  .sw-field input{width:100%;height:38px;border:1px solid #d1d5db;border-radius:8px;padding:0 12px;font-size:14px;}
-  .sw-field input:focus{outline:none;border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.12);}
-  .sw-field .hint{font-size:11px;color:#94a3b8;margin-top:4px;}
-  .sw-field .cur{font-size:11px;color:#16a34a;margin-top:4px;}
+  .sw-field label{display:block;font-size:13px;font-weight:600;color:var(--tk-text);margin-bottom:4px;}
+  .sw-field label .req{color:var(--tk-danger);} .sw-field label .opt{color:var(--tk-text-muted);font-weight:400;}
+  .sw-field input{width:100%;height:38px;border:1px solid var(--tk-border);border-radius:8px;padding:0 12px;font-size:14px;background:var(--tk-surface);color:var(--tk-text);}
+  .sw-field input:focus{outline:none;border-color:var(--tk-brand);box-shadow:0 0 0 3px var(--tk-ring);}
+  .sw-field .hint{font-size:11px;color:var(--tk-text-muted);margin-top:4px;}
+  .sw-field .cur{font-size:11px;color:var(--tk-ok-ink);margin-top:4px;}
   .sw-actions{display:flex;gap:10px;align-items:center;margin-top:14px;}
   .sw-btn{border:0;border-radius:8px;padding:9px 18px;font-size:14px;font-weight:600;cursor:pointer;}
-  .sw-btn.primary{background:#2563eb;color:#fff;} .sw-btn.primary:hover{background:#1d4ed8;}
-  .sw-btn.ghost{background:#f1f5f9;color:#334155;text-decoration:none;display:inline-block;}
+  .sw-btn.primary{background:var(--tk-brand);color:#fff;} .sw-btn.primary:hover{filter:brightness(1.08);}
+  .sw-btn.ghost{background:var(--tk-surface-2);color:var(--tk-text);text-decoration:none;display:inline-block;}
   .sw-msg{font-size:12px;}
-  .sw-msg.ok{color:#15803d;} .sw-msg.err{color:#b91c1c;}
+  .sw-msg.ok{color:var(--tk-ok-ink);} .sw-msg.err{color:var(--tk-danger-ink);}
   .sw-issues{margin-top:10px;}
-  .sw-issue{font-size:12px;padding:6px 0;border-bottom:1px solid #f8fafc;color:#475569;}
-  .sw-issue b{color:#b45309;} .sw-issue.error b{color:#b91c1c;}
-  .sw-login{margin-top:12px;padding:12px;background:#eff6ff;border-radius:10px;font-size:13px;color:#1e40af;}
+  .sw-issue{font-size:12px;padding:6px 0;border-bottom:1px solid var(--tk-border);color:var(--tk-text-muted);}
+  .sw-issue b{color:var(--tk-warn-ink);} .sw-issue.error b{color:var(--tk-danger-ink);}
+  .sw-login{margin-top:12px;padding:12px;background:rgba(59,130,246,.1);border-radius:10px;font-size:13px;color:var(--tk-brand);}
 </style>
 {% endblock %}
 {% block content %}
 <div class="sw-wrap">
-  <a class="db-back" href="/workspace/dash" style="font-size:12px;color:#2563eb;text-decoration:none;">← 返回今日概览</a>
+  <a class="db-back" href="/workspace/dash" style="font-size:12px;color:var(--tk-brand);text-decoration:none;">← 返回今日概览</a>
   <div class="sw-head">
     <h2>渠道接入向导</h2>
     <p>选择渠道 → 填入凭证（即时校验）→ 保存生效。凭证写入 <code>config.local.yaml</code>，不改动主配置注释。</p>
@@ -50,8 +51,8 @@
     <div class="bar"><i id="sw-prog-bar" style="width:0"></i></div>
   </div>
   <div id="sw-list"></div>
-  <div style="margin-top:18px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:14px 16px;font-size:13px;color:#15803d;">
-    渠道接好后，别忘了给 AI 喂知识 → <a href="/workspace/kb-start" style="color:#15803d;font-weight:700;">知识库冷启动（一键播种起步话术）</a>
+  <div style="margin-top:18px;background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3);border-radius:12px;padding:14px 16px;font-size:13px;color:var(--tk-ok-ink);">
+    渠道接好后，别忘了给 AI 喂知识 → <a href="/workspace/kb-start" style="color:var(--tk-ok-ink);font-weight:700;">知识库冷启动（一键播种起步话术）</a>
   </div>
 </div>
 
@@ -82,7 +83,7 @@ function loginHint(ch){
 function bodyHtml(ch){
   var fields = (ch.fields||[]).map(function(f){return fieldHtml(ch,f);}).join('');
   if(!ch.fields||!ch.fields.length){
-    fields='<p style="font-size:13px;color:#64748b;margin:14px 0;">'+esc(ch.intro||'无需凭证，开启即用。')+'</p>';
+    fields='<p style="font-size:13px;color:var(--tk-text-muted);margin:14px 0;">'+esc(ch.intro||'无需凭证，开启即用。')+'</p>';
   }
   return fields
     +'<div class="sw-actions">'
