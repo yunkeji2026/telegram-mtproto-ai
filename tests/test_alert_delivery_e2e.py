@@ -24,15 +24,8 @@ from src.inbox.webhook_notifier import WebhookNotifier
 
 
 # ── 共享脚手架 ────────────────────────────────────────────────────────────────
-
-@pytest.fixture(autouse=True)
-def _isolate_draft_metrics():
-    """本文件会往全局 MetricsStore 单例灌 draft 指标（full_stack 用例）。前后各重置，
-    避免泄漏到同 xdist worker 的其它测试（曾污染 test_ops_incidents 的 incident 计数）。"""
-    from src.monitoring import metrics_store as _ms
-    _ms.MetricsStore._instance = None
-    yield
-    _ms.MetricsStore._instance = None
+# 注：本文件 full_stack 用例会往全局 MetricsStore 单例灌 draft 指标，其前后隔离
+# 已由 conftest 的 autouse _reset_metrics_store_singleton 统一兜底，无需本地 fixture。
 
 
 def _reset_bus():
