@@ -40,5 +40,5 @@ jobs:
         run: python -m pytest tests/ --collect-only -q
 
       - name: Run regression (parallel, file-level isolation)
-        # -n auto 让 xdist 按文件分 worker 并行，本地实测 ~9s 跑完 912 tests
+        # -n auto 让 xdist 按文件分 worker 并行；当前规模 ~6500 tests，CI(ubuntu) ~4min、本地 ~4min
         run: python -m pytest tests/ -n auto -q --tb=line

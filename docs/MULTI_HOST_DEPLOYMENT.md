@@ -29,7 +29,7 @@
 ### 1. 克隆代码到目标机器
 
 ```bash
-git clone https://github.com/victor2025PH/telegram-mtproto-ai.git
+git clone https://github.com/yunkeji2026/telegram-mtproto-ai.git
 cd telegram-mtproto-ai
 pip install -r requirements.txt
 ```

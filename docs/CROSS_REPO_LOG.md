@@ -46,7 +46,7 @@ A 或 B 在 `mobile-auto0423` 工作时，想看 TG 侧最新通讯：
 
 ```bash
 # 在 mobile-auto0423 的 clone 同级目录 clone 一份本 repo (一次)
-git clone https://github.com/victor2025PH/telegram-mtproto-ai.git ../telegram-mtproto-ai
+git clone https://github.com/yunkeji2026/telegram-mtproto-ai.git ../telegram-mtproto-ai
 
 # 后续每次只需 fetch 三个协同分支
 cd ../telegram-mtproto-ai
@@ -57,7 +57,7 @@ git checkout feat-sync-from-tgmtp-round3   # 看最新
 cat docs/FROM_TGMTP_ROUND3_COORDINATION_2026-04-25.md
 
 # 或 GitHub 网页直接打开:
-# https://github.com/victor2025PH/telegram-mtproto-ai/blob/feat-sync-from-tgmtp-round3/docs/FROM_TGMTP_ROUND3_COORDINATION_2026-04-25.md
+# https://github.com/yunkeji2026/telegram-mtproto-ai/blob/feat-sync-from-tgmtp-round3/docs/FROM_TGMTP_ROUND3_COORDINATION_2026-04-25.md
 ```
 
 ## 通信约定（本 repo 侧）
