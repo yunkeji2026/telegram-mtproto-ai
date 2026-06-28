@@ -129,6 +129,7 @@ def plan_proactive_sends(
                 stage=str(c.get("stage") or ""),
                 intimacy=float(c.get("intimacy") or 0.0),
                 last_emotion=str(c.get("last_emotion") or ""),
+                last_emotion_intensity=float(c.get("last_emotion_intensity") or -1.0),
                 contact_key=str(c.get("conversation_id") or ""),
             ) or {}
         except Exception:

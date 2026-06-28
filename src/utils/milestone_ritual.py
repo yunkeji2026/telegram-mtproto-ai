@@ -191,6 +191,7 @@ def plan_milestone_rituals(
             opener = opener_fn(
                 event_type=event["type"],
                 event_label=event["label"],
+                last_emotion_intensity=float(c.get("last_emotion_intensity") or -1.0),
                 days=event["days"],
                 memory_key=str(c.get("memory_key") or ""),
                 stage=str(c.get("stage") or ""),

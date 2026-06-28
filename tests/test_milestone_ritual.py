@@ -104,6 +104,20 @@ def test_plan_anniversary_fires():
     assert p["ritual_key"] == "telegram:default:1:ms:anniversary:100"
 
 
+def test_last_emotion_intensity_threaded_to_opener():
+    # R：conv 的 last_emotion_intensity 透传进 milestone opener_fn
+    seen = {}
+
+    def _cap(**kw):
+        seen["ei"] = kw.get("last_emotion_intensity")
+        return {"mode": "milestone_anniversary", "directive": "x", "fact": ""}
+
+    now = _at(2026, 4, 11, hour=10)
+    conv = _conv(first_seen_ts=now - 100 * 86400, last_emotion_intensity=0.8)
+    plan_milestone_rituals([conv], ritual_sent={}, opener_fn=_cap, now=now)
+    assert seen.get("ei") == 0.8
+
+
 def test_plan_holiday_fires():
     now = _at(2026, 12, 25, hour=10)
     plans = plan_milestone_rituals(

@@ -67,6 +67,64 @@ _EMOTION_DIMENSIONS = {
     "curious": {"curious"},
 }
 
+# 否定词（出现在情绪词紧邻前方 → 该处情绪反转，不应计入）。
+# 例：「不难过」「没那么累」「别担心」「不想你」——这些不是负面/低能量信号。
+_ZH_NEGATORS = ("不", "没", "别", "莫", "无须", "勿")
+
+
+def _occurrence_negated(text: str, idx: int) -> bool:
+    """情绪词出现在 ``idx`` 处，其紧邻前文是否构成否定（→ 该处情绪应被抑制）。
+
+    保守：只看紧邻前 ~3 字（中文）/ ~6 字（英文 not/no/n't）。覆盖
+    「不X」「没那么X」「别X」「太不X」，不误伤「好X」「很X」（无否定词）。
+    """
+    zh_win = text[max(0, idx - 3):idx]
+    if any(n in zh_win for n in _ZH_NEGATORS):
+        return True
+    en_win = text[max(0, idx - 6):idx]
+    return ("not " in en_win) or ("n't " in en_win) or ("no " in en_win)
+
+
+# 程度副词分级（N）：紧邻情绪词前的程度副词缩放强度（「有点累」<「累」<「非常累」），
+# 及情绪词后缀强化（「累死了」「烦透了」）。仅影响 intensity（→arousal/valence/salience），
+# 不改情绪标签，故维度/否定判定不受影响。
+_DEGREE_MILD = ("有点", "有些", "稍微", "略微", "一点", "些许", "一丝", "稍", "略")
+_DEGREE_STRONG = ("非常", "超级", "特别", "好生", "极其", "十分", "灰常", "实在",
+                  "超", "巨", "太", "贼", "好", "真")
+_DEGREE_SUFFIX_STRONG = ("死了", "极了", "坏了", "惨了", "透了", "爆了", "死我")
+_MULT_MILD = 0.65
+_MULT_STRONG = 1.3
+
+
+def _degree_multiplier(text: str, start: int, end: int) -> float:
+    """情绪词 [start,end) 的程度系数：弱化 0.65 / 基准 1.0 / 强化 1.3。"""
+    pre = text[max(0, start - 3):start]
+    mult = 1.0
+    if any(pre.endswith(d) for d in _DEGREE_MILD):
+        mult = _MULT_MILD
+    elif any(pre.endswith(d) for d in _DEGREE_STRONG):
+        mult = _MULT_STRONG
+    suf = text[end:end + 3]
+    if any(suf.startswith(d) for d in _DEGREE_SUFFIX_STRONG):
+        mult = max(mult, _MULT_STRONG)
+    return mult
+
+
+def _effective_intensity(text: str, keyword: str, base: float) -> Optional[float]:
+    """返回 ``keyword`` 首个**非否定**出现的有效强度（含程度缩放）；无命中→None。
+
+    全部出现都被否定（如「不开心」里的「开心」）→ None，交由更长显式词条/回落中性。
+    """
+    start = 0
+    while True:
+        i = text.find(keyword, start)
+        if i == -1:
+            return None
+        if not _occurrence_negated(text, i):
+            mult = _degree_multiplier(text, i, i + len(keyword))
+            return max(0.0, min(1.0, base * mult))
+        start = i + 1
+
 
 def analyze_emotion(text: str) -> Dict[str, Any]:
     """
@@ -84,8 +142,10 @@ def analyze_emotion(text: str) -> Dict[str, Any]:
     text_lower = text.lower()
 
     for keyword, (emotion, intensity) in _EMOTION_LEXICON.items():
-        if keyword in text_lower:
-            detected[emotion] = max(detected.get(emotion, 0), intensity)
+        # 否定硬化 + 程度分级：取首个非否定出现的有效强度（含程度副词缩放）
+        eff = _effective_intensity(text_lower, keyword, intensity)
+        if eff is not None:
+            detected[emotion] = max(detected.get(emotion, 0), eff)
 
     # 感叹号/问号密度提升 arousal
     excl_count = text.count("!") + text.count("！")

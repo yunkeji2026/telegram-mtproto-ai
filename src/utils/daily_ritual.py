@@ -204,6 +204,7 @@ def plan_daily_rituals(
                 stage=str(c.get("stage") or ""),
                 intimacy=intimacy,
                 last_emotion=str(c.get("last_emotion") or ""),
+                last_emotion_intensity=float(c.get("last_emotion_intensity") or -1.0),
                 contact_key=cid,
             ) or {}
         except Exception:

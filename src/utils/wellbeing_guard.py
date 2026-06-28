@@ -204,6 +204,8 @@ def proactive_emotion_gate(
     now: float,
     window_days: float = 14.0,
     last_emotion: str = "",
+    last_emotion_intensity: Optional[float] = None,
+    min_negative_intensity: float = 0.5,
 ) -> str:
     """主动开场情绪护栏（纯函数）：依「最近危机事件」+「末条情绪」决定主动推送抑制级别。
 
@@ -216,6 +218,11 @@ def proactive_emotion_gate(
 
     保守优先：危机仅在 ``window_days`` 内才计（窗口外视作已缓和，只看 ``last_emotion``）。
     任何异常都按「无抑制」处理由调用方兜底——护栏失效不应反而阻断正常关怀。
+
+    **强度分级（O，打通 N→L）**：``last_emotion_intensity`` 为末条负面情绪的强度
+    （来自 ``analyze_emotion`` 落库的 ``conversation_meta.last_emotion_intensity``）。负面情绪
+    仅在「强度未知（None/<0，保守按旧行为抑制）**或** 强度 ≥ ``min_negative_intensity``」时才 soft，
+    即「有点烦」（低强度）不抑制剧情邀约、「烦死了」（高强度）才抑制——危机分级**不受强度影响**。
     """
     try:
         win = max(0.0, float(window_days or 0)) * 86400.0
@@ -233,6 +240,9 @@ def proactive_emotion_gate(
             if level == "elevated":
                 return "soft"
     if str(last_emotion or "").strip().lower() in _NEGATIVE_EMOTIONS:
+        # 强度已知且低于阈值（轻度负面，如「有点烦」）→ 不抑制，避免过度沉默
+        if last_emotion_intensity is not None and 0 <= last_emotion_intensity < min_negative_intensity:
+            return ""
         return "soft"
     return ""
 

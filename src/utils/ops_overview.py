@@ -73,6 +73,18 @@ def billing_anomalies(billing: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]
     return out
 
 
+def companion_config_light(companion: Optional[Dict[str, Any]]) -> str:
+    """陪伴能力配置健康灯：体检 error→红、warn→黄、自洽→绿；无数据→""（不参与）。"""
+    if not companion:
+        return ""
+    summary = companion.get("summary") or {}
+    if int(summary.get("errors") or 0) > 0:
+        return "red"
+    if int(summary.get("warnings") or 0) > 0:
+        return "yellow"
+    return "green"
+
+
 def assemble_ops_overview(
     *,
     roi: Optional[Dict[str, Any]] = None,
@@ -81,6 +93,7 @@ def assemble_ops_overview(
     reliability: Optional[Dict[str, Any]] = None,
     auto_claim: Optional[Dict[str, Any]] = None,
     open_incidents: Optional[int] = None,
+    companion: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """把四路 payload 装配成总览。
 
@@ -113,6 +126,11 @@ def assemble_ops_overview(
     elif anomalies:
         overall = worst_light(overall, "yellow")
 
+    # 陪伴能力配置错配（如真发裸奔/真发开但 worker 关）也作为健康信号抬总览灯。
+    comp_light = companion_config_light(companion)
+    overall = worst_light(overall, comp_light)
+    comp_summary = (companion or {}).get("summary") or {}
+
     kpis = {
         "overall_light": overall,
         "health_light": health_light,
@@ -135,6 +153,10 @@ def assemble_ops_overview(
         "open_alerts": int(reliability.get("alert_count") or 0),
         "open_incidents": int(open_incidents or 0),
         "billing_anomaly_count": len(anomalies),
+        # 陪伴能力配置健康
+        "companion_config_light": comp_light,
+        "companion_config_errors": int(comp_summary.get("errors") or 0),
+        "companion_config_warnings": int(comp_summary.get("warnings") or 0),
     }
 
     return {
@@ -148,6 +170,7 @@ def assemble_ops_overview(
             "roi": roi,
             "billing": billing,
             "auto_claim": auto_claim or {},
+            "companion": companion or {},
         },
         "ts": time.time(),
     }

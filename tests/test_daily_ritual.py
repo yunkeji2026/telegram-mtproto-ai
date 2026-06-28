@@ -44,12 +44,29 @@ def _conv(cid, *, intimacy=40.0, last_ts=None, archived=False,
     }
 
 
-def _opener(*, slot, memory_key, stage, intimacy, last_emotion="", contact_key=""):
+def _opener(*, slot, memory_key, stage, intimacy, last_emotion="",
+            last_emotion_intensity=-1.0, contact_key=""):
     return {"mode": f"ritual_{slot}", "directive": f"{slot} 问候", "fact": ""}
 
 
 def _opener_block(**_kw):
     return {"mode": "", "directive": "", "blocked": "crisis_severe"}
+
+
+def test_last_emotion_intensity_threaded_to_opener():
+    # R：conv 的 last_emotion_intensity 透传进 opener_fn（供护栏强度分级）
+    seen = {}
+
+    def _cap(*, slot, memory_key, stage, intimacy, last_emotion="",
+             last_emotion_intensity=-9.0, contact_key=""):
+        seen["ei"] = last_emotion_intensity
+        return {"mode": f"ritual_{slot}", "directive": "x", "fact": ""}
+
+    now = _at(7)
+    conv = _conv("c1", now=now)
+    conv["last_emotion_intensity"] = 0.35
+    plan_daily_rituals([conv], ritual_sent={}, opener_fn=_cap, now=now)
+    assert seen.get("ei") == 0.35
 
 
 # ── window_hours ─────────────────────────────────────────────────────────────

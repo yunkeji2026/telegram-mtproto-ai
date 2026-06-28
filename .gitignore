@@ -166,6 +166,9 @@ src/web/static/protocol_media/
 config/config.yaml
 # P1-1 接入向导写入的凭证 overlay（含密钥，绝不入库）
 config/config.local.yaml
+# 陪伴能力分阶段开启的开关审计 + 回滚快照（运行时产物）
+config/companion_capability_audit.jsonl
+config/companion_capability_last_snapshot.json
 
 # C0-1 授权：客户授权码 + 厂商私钥（切勿入库）
 config/license.key

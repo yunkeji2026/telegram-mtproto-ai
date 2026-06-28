@@ -869,6 +869,18 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
 
         _log_cpp.getLogger("admin").warning("companion proactive 预览路由注册失败", exc_info=True)
 
+    # ── 陪伴能力就绪度看板 API（/api/companion/capabilities）──────────
+    try:
+        from src.web.routes.companion_capability_routes import (
+            register_companion_capability_routes,
+        )
+
+        register_companion_capability_routes(app, api_auth=_api_auth)
+    except Exception:
+        import logging as _log_ccap
+
+        _log_ccap.getLogger("admin").warning("companion capability 看板路由注册失败", exc_info=True)
+
     # 系统状态/指标/reactivation dry-run/审计热力图 已抽到 routes/monitoring_routes.py（批 G2-①）
     # （register_monitoring_routes 在 _admin_ctx + kb_store 就绪后调用，见下方 learner 注册附近）
 

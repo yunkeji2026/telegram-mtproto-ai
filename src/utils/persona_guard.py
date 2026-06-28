@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Tuple
 # 但 "我不是 AI" 不命中（否定句不算露馅）。
 _AI_SELF_ID_PATTERNS = [
     re.compile(r"作为(一个|一名)?\s*(AI|A\.?I\.?|人工智能|语言模型|大模型|聊天机器人|机器人|智能助手|虚拟助手)", re.I),
-    re.compile(r"我(是|就是)(一个|一名|你的)?\s*(AI|A\.?I\.?|人工智能|语言模型|大模型|聊天机器人|机器人|智能助手|虚拟助手)", re.I),
+    re.compile(r"我(是|就是)(一个|一名|个|你的)?\s*(AI|A\.?I\.?|人工智能|语言模型|大模型|聊天机器人|机器人|智能助手|虚拟助手)", re.I),
     re.compile(r"(身为|作为)[^。！？!?\n]{0,8}(语言模型|人工智能|大模型)", re.I),
     re.compile(r"\bas an? (ai|artificial intelligence|language model)\b", re.I),
     re.compile(r"\bi[' ]?a?m an? (ai|artificial intelligence|language model)\b", re.I),

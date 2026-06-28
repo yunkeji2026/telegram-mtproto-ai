@@ -3008,7 +3008,8 @@ class SkillManager(LoggerMixin):
             return 14.0
 
     def _proactive_emotion_gate(
-        self, memory_key: str, last_emotion: str = ""
+        self, memory_key: str, last_emotion: str = "",
+        last_emotion_intensity: float = -1.0,
     ) -> str:
         """主动开场前的情绪护栏档位：``"block"`` / ``"soft"`` / ``""``（见 wellbeing_guard）。
 
@@ -3024,10 +3025,14 @@ class SkillManager(LoggerMixin):
             if latest is None and not str(last_emotion or "").strip():
                 return ""
             from src.utils.wellbeing_guard import proactive_emotion_gate
+            _ei = (float(last_emotion_intensity)
+                   if last_emotion_intensity is not None and float(last_emotion_intensity) >= 0
+                   else None)
             return proactive_emotion_gate(
                 latest, now=time.time(),
                 window_days=self._proactive_crisis_window_days(),
                 last_emotion=last_emotion,
+                last_emotion_intensity=_ei,
             )
         except Exception:
             self.logger.debug("proactive emotion gate skipped", exc_info=True)
@@ -3181,6 +3186,7 @@ class SkillManager(LoggerMixin):
         intimacy: float = 0.0,
         min_silent_hours: float = 24.0,
         last_emotion: str = "",
+        last_emotion_intensity: float = -1.0,
         contact_key: str = "",
     ) -> Dict[str, Any]:
         """P1：为某用户挑一个"主动开场话题"（从其高置信记忆回访）。
@@ -3192,7 +3198,8 @@ class SkillManager(LoggerMixin):
         # Phase ④续⁷：情绪自适应护栏——近期危机/低落时抑制主动打扰，绝不在情绪低谷
         # 推「播放性」内容（如约会剧情邀约）。severe 近期危机 → 完全不主动；elevated/负面
         # → 仅抑制剧情邀约、保留温和问候。护栏失效不阻断正常关怀（异常→无抑制）。
-        _gate = self._proactive_emotion_gate(memory_key, last_emotion)
+        _gate = self._proactive_emotion_gate(
+            memory_key, last_emotion, last_emotion_intensity)
         if _gate == "block":
             # severe 近期危机：不静默放弃，而是带「危机关怀升级」信号交由派发层
             # 把该用户排进 care 队列（人工/关怀兜底）——把"静默"变"接住"。
@@ -3251,6 +3258,7 @@ class SkillManager(LoggerMixin):
         stage: str = "",
         intimacy: float = 0.0,
         last_emotion: str = "",
+        last_emotion_intensity: float = -1.0,
         contact_key: str = "",
     ) -> Dict[str, Any]:
         """每日仪式问候 directive（晨安 / 晚安）——含情绪护栏 + 可选记忆钩子。
@@ -3262,7 +3270,8 @@ class SkillManager(LoggerMixin):
         s = str(slot or "").strip().lower()
         if s not in ("morning", "night"):
             return {"mode": "", "directive": "", "fact": ""}
-        gate = self._proactive_emotion_gate(memory_key, last_emotion)
+        gate = self._proactive_emotion_gate(
+            memory_key, last_emotion, last_emotion_intensity)
         if gate == "block":
             # severe 危机：不道早晚安，带 blocked 信号交派发层升级 care（同 proactive_opener）
             return {"mode": "", "directive": "", "fact": "", "blocked": "crisis_severe"}
@@ -3305,6 +3314,7 @@ class SkillManager(LoggerMixin):
         stage: str = "",
         intimacy: float = 0.0,
         last_emotion: str = "",
+        last_emotion_intensity: float = -1.0,
         contact_key: str = "",
     ) -> Dict[str, Any]:
         """纪念日/节日仪式 directive（认识 N 天 / 节日）——含情绪护栏 + 可选记忆钩子。
@@ -3317,7 +3327,8 @@ class SkillManager(LoggerMixin):
         et = str(event_type or "").strip().lower()
         if et not in ("anniversary", "holiday", "birthday"):
             return {"mode": "", "directive": "", "fact": ""}
-        gate = self._proactive_emotion_gate(memory_key, last_emotion)
+        gate = self._proactive_emotion_gate(
+            memory_key, last_emotion, last_emotion_intensity)
         if gate == "block":
             return {"mode": "", "directive": "", "fact": "", "blocked": "crisis_severe"}
         fact = ""
@@ -3392,6 +3403,7 @@ class SkillManager(LoggerMixin):
         stage: str = "",
         intimacy: float = 0.0,
         last_emotion: str = "",
+        last_emotion_intensity: float = -1.0,
         contact_key: str = "",
     ) -> Dict[str, Any]:
         """主动采集某画像槽位（生日 / 称呼 / …）的开场 directive（Stage T 通用版）。
@@ -3405,7 +3417,8 @@ class SkillManager(LoggerMixin):
         directive = ask_directive(s, stage=stage)
         if not directive:  # 未登记的槽位
             return {"mode": "", "directive": "", "fact": ""}
-        gate = self._proactive_emotion_gate(memory_key, last_emotion)
+        gate = self._proactive_emotion_gate(
+            memory_key, last_emotion, last_emotion_intensity)
         if gate != "":  # block(危机) 或 soft(低落) 都不主动采集
             return {"mode": "", "directive": "", "fact": ""}
         return {"mode": f"ask_{s}", "directive": directive, "fact": "",
@@ -3418,12 +3431,14 @@ class SkillManager(LoggerMixin):
         stage: str = "",
         intimacy: float = 0.0,
         last_emotion: str = "",
+        last_emotion_intensity: float = -1.0,
         contact_key: str = "",
     ) -> Dict[str, Any]:
         """主动采集生日开场（Stage R）——Stage T 起为 build_profile_ask_opener('birthday') 的兼容入口。"""
         return self.build_profile_ask_opener(
             "birthday", memory_key=memory_key, stage=stage, intimacy=intimacy,
-            last_emotion=last_emotion, contact_key=contact_key)
+            last_emotion=last_emotion, last_emotion_intensity=last_emotion_intensity,
+            contact_key=contact_key)
 
     def resolve_preferred_name(self, memory_key: str):
         """从某用户 episodic 记忆里扫出 TA 希望的称呼/名字；扫不到 → None（Stage T）。
