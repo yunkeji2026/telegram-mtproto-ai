@@ -46,8 +46,10 @@ telegram:
     max_seconds: 60               # TTS 时长超限自动回退文字
     timeout_sec: 30               # TTS 合成超时（秒）
     send_text_summary: false      # true=语音发送后额外追加一条文字
-    # ── P1 情感层（默认关 → 不传 emotion 即 neutral，与升级前完全一致）──
-    # 开后：按文本线索/意图自动派生情绪，翻成各引擎可消费的控制信号——
+    # ── P1/P4 情感层（默认关 → 不传 emotion 即 neutral，与升级前完全一致）──
+    # 开后：按 关系阶段(funnel_stage)/意图/文本线索 派生情绪（见 persona_voice.
+    # resolve_emotion_for_send，sender / voice_autosend / 收件箱发语音三入口共用），
+    # 翻成各引擎可消费的控制信号——
     #   openai backend → instructions（"用温暖、略带笑意的语气说"）
     #   edge_tts       → rate/pitch 近似情绪
     #   elevenlabs     → 内联音频标签 [warmly]/[laughs] + voice_settings（已接入，见顶层 elevenlabs）
@@ -724,6 +726,11 @@ voice_routing:
   # 按你与 provider 的实际合同覆盖（ElevenLabs 价随档位浮动）。
   cost_per_1k_chars:
     elevenlabs: 0.30
+  # P4-B：成本按日落库（供 ops 看板 /admin/ops 画近 N 天花费/缓存命中曲线）。
+  # 默认关 → record_tts_cost 恒 no-op（无 voice 用量部署零 IO）；开后落 config/tts_cost.db。
+  cost_log:
+    enabled: false
+    retention_days: 90                    # 超过此天数的日聚合自动清理（读端点顺手 prune）
 
 # WhatsApp RPA（ADB + uiautomator；与 Telegram/LINE/Messenger 共用 Skill/AI）
 # 与 messenger_rpa 结构类似，accounts[] 下为每台手机一条
@@ -931,6 +938,18 @@ ai:
   channel_status_include_fee: false
   # 后台人设注入：full 完整 | compact 精简（减与域 system_prompt 重复）| none 不注入（仅用域提示）
   persona_block_detail: full
+
+  # ── 文本嵌入（embedding）provider —— 记忆向量召回 + 语义去重的真实向量源 ──
+  # 主对话 LLM（DeepSeek 等）多无 embedding 端点 → 需单独配嵌入源，否则 memory.vector /
+  # consolidation.semantic_dedup 无向量可用（降级为纯关键词 / 仅 hash 去重）。
+  # 任选其一（OpenAI 兼容端点，本地/云均可）：
+  #   - Ollama 本地：  embedding_base_url: http://127.0.0.1:11434  embedding_model: nomic-embed-text
+  #   - LM Studio：    embedding_base_url: http://127.0.0.1:1234   embedding_model: text-embedding-nomic-embed-text-v1.5
+  #   - OpenAI 云：    embedding_base_url: https://api.openai.com  embedding_model: text-embedding-3-small  embedding_api_key: sk-...
+  # 留空=不启用嵌入（召回退关键词、去重退 hash）。embedding_api_key 留空时复用上面的 api_key。
+  embedding_base_url: ""
+  embedding_model: ""
+  embedding_api_key: ""
 
   # 系统提示词
   system_prompt: |
@@ -1221,6 +1240,20 @@ companion:
 # 顶层 memory 块；多数子项（enabled / scope / vector / consolidation.* 如
 # inferred_min_hits / stable_min_hits 等）走代码默认，未列出即用默认值。
 memory:
+  # ── 向量召回（需上面 ai.embedding_* 配好真实嵌入源）──
+  # enabled=true 时：写回事实落 embedding，检索按「关键词∪向量融合」重排，
+  # 对「改写/语义近似」查询的召回显著优于纯关键词（实测见 run_eval --memory）。
+  # 默认 false（陪伴能力分阶段开启，走 capability 看板 memory_vector_recall 治理）；
+  # 嵌入不可用时自动退化为纯关键词，零阻断。
+  vector:
+    enabled: false
+    inject_fusion: true       # 注入 prompt 时是否用向量融合重排
+    vector_weight: 0.5        # 融合权重：向量
+    keyword_weight: 0.5       # 融合权重：关键词（BM25 归一）
+  # R5 近义去重巩固：把「同一件事的不同说法」按 embedding 余弦贪心并簇（需真实嵌入）。
+  # 与 vector.enabled 任一为真即会给事实落 embedding（覆盖率跟随需求）。
+  consolidation:
+    semantic_dedup: false     # 开启近义合并（阈值见代码默认 0.92，可按嵌入模型校准）
   # R19：AI 推断采纳率告警（仪表盘 /api/alert-status 的 memory_adoption 项）
   # 采纳率持续偏低 = AI 推断在产噪声、白占坐席精力 → warn 提示调高 inferred_min_hits。
   adoption_alert:
@@ -1503,6 +1536,17 @@ inbox:
     deliver_delay:            # Phase 4：投递前拟人打字延迟（降低秒回露馅/反封号）
       min_sec: 0              # 默认 0=不延迟（向后兼容）；拟人建议如 min 3 / max 12
       max_sec: 0
+    # ── 出站自动翻译（补「全自动聊天翻译」闭环最后一环）──────────────────
+    # 开后：全自动真发 **以及主动触达(care/reactivation 经 deferred 队列)** 投递前，把消息经统一
+    # TranslationService（术语表 + 翻译记忆 + 语检 + 多引擎 failover）译成**会话客户语言**再发，
+    # 并记录出向译文映射供 thread 双行展示。
+    # **自带检测护栏**：先检测文本真实语言，已是客户语言（如陪伴回复/reactivation 本就按客户语言
+    # 生成）→ 自动跳过不翻译，避免 garble；source_lang 仅作检测失败时的兜底假定。
+    # 任何异常/不可译/译文==原文 → 回落发原文，绝不阻塞投递。需 translation_service 已挂载。
+    translate:
+      enabled: false          # 默认关 → 全自动仍发原文（零行为变更）；true 才投递前翻译
+      source_lang: zh         # 检测失败时的兜底源语言（默认中文）；与客户语言相同则自动跳过
+      style: chat             # 翻译风格（chat/formal…），透传 TranslationService
     # ── 全自动语音（把「全自动聊天+翻译+语音」凑齐成闭环）──────────────
     # 开后：auto_ai 会话的 L2 回复在投递时先按策略转 TTS 语音发出（合成/投递失败自动回落文本）。
     # 一处生效全平台：Telegram / WhatsApp / Messenger / LINE / Instagram（经 orch.send_media）。
@@ -1559,6 +1603,17 @@ translation:
       pro: false                     # true=api.deepl.com（Pro），false=api-free.deepl.com
     google:
       api_key: ""                    # 填则启用 Google Translate v2（缺 key 自动跳过）
+  # K：引擎置信度智能切换（默认关 → 行为同旧：order 首个非空即返回）。
+  # 开后：主引擎虽产出非空，但若译文置信度（空/未翻译/错语种/长度异常的确定性评分）
+  # 低于 min_confidence，则自动切换 order 里的下一引擎择优；都不达标返回最高分候选（不阻断）。
+  # 仅在多引擎（order≥2）时有意义；会在主引擎低置信时增加一次后备引擎调用。
+  confidence_switch:
+    enabled: false
+    min_confidence: 0.5              # [0,1]，越高越爱切换（更稳但更费后备引擎调用）
+    # S：低置信率/切换率「按日落库」→ ops 看板画近 N 天 sparkline（默认关；开后每次
+    # translate 旁路 upsert 一行到 config/xlate_trend.db，仅元数据计数不存译文）。
+    trend_log: false
+    trend_retention_days: 90
 
 # ── P61 / C-2：媒体一键翻译（免上传）──────────────────────────────
 # base_dirs：解析平台落库 media_ref → 本进程可读本地文件的白名单根目录；

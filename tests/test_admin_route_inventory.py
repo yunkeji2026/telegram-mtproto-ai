@@ -33,6 +33,8 @@ _BASELINE = """
 /api/admin/health/recheck	POST
 /api/admin/ops-overview	GET
 /api/admin/ops-report	GET
+/api/admin/tts-cost-trend	GET
+/api/admin/translation-confidence-trend	GET
 /api/admin/workers/{worker_id}/reset-circuit	POST
 /api/admin/reliability	GET
 /api/admin/license	GET
@@ -588,6 +590,14 @@ _BASELINE = """
 /api/setup/checklist	GET
 /api/setup/companion-preflight	GET
 /api/companion/proactive/preview	GET
+/api/companion/capabilities	GET
+/api/companion/capabilities/delivery-calibration	GET
+/api/companion/capabilities/toggle	POST
+/api/companion/capabilities/toggle-audit	GET
+/api/companion/capabilities/preset	POST
+/api/companion/capabilities/rollback	POST
+/api/companion/capabilities/signals	GET
+/api/companion/capabilities/advice	GET
 /api/companion/quality-overview	GET
 /api/companion/quality-trend	GET
 /api/companion/proactive/sample	POST

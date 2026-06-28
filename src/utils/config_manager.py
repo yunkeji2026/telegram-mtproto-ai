@@ -291,6 +291,46 @@ class ConfigManager:
             return False, f"写入失败: {exc}"
         return True, "已保存"
 
+    def set_overlay_flag(self, path: str, value: Any) -> tuple:
+        """把单个开关写入 config.local.yaml overlay 并即时生效（陪伴能力分阶段开启用）。
+
+        走 overlay 而非改写 config.yaml：保住主配置注释/结构、与凭证/白标同机制，重启后
+        load() 再次深合并。``path`` 为点分隔嵌套键（如 ``companion.proactive_topic.enabled``）。
+        返回 (成功?, 说明)。调用方（看板路由）已用能力注册表白名单约束 path，避免任意键注入。
+        """
+        keys = [k for k in str(path or "").split(".") if k]
+        if not keys:
+            return False, "空配置路径"
+        p = self._overlay_path()
+        try:
+            overlay: Dict[str, Any] = {}
+            if p.exists():
+                with open(p, "r", encoding="utf-8") as f:
+                    overlay = yaml.safe_load(f) or {}
+            if not isinstance(overlay, dict):
+                overlay = {}
+            node = overlay
+            for k in keys[:-1]:
+                nxt = node.get(k)
+                if not isinstance(nxt, dict):
+                    nxt = {}
+                    node[k] = nxt
+                node = nxt
+            node[keys[-1]] = value
+            tmp = p.with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write("# 运营开关 overlay（深合并覆盖 config.yaml）。\n")
+                f.write("# 请勿提交到 git（应在 .gitignore）。\n")
+                yaml.dump(overlay, f, default_flow_style=False,
+                          allow_unicode=True, sort_keys=False)
+            tmp.replace(p)
+            self._deep_merge(self.config, overlay)
+        except Exception as exc:
+            self.logger.error("写入开关 overlay 失败: %s", exc)
+            return False, f"写入失败: {exc}"
+        self.logger.info("运营开关已更新: %s = %r", ".".join(keys), value)
+        return True, "已保存"
+
     def _run_startup_self_check(self) -> None:
         """启动时跑配置自检并把 error/warn 摘要写日志（永不抛、永不阻断启动）。"""
         try:

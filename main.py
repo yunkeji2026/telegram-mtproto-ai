@@ -897,8 +897,12 @@ class AIChatAssistant:
                                             except Exception:
                                                 _pid = ""
                                             # 至此策略已判定「该发语音」：合成/投递的成败计入指标。
+                                            # P3：传 chat_key（端用户身份）→ 按会员档分层路由 TTS
+                                            # 后端（VIP→旗舰，免费→降级省成本）；monetization 未就绪
+                                            # → tier=None → 不路由（零行为变更）。
                                             _staged = await stage_voice_file(
-                                                _cfg, platform, account_id, _pid, text)
+                                                _cfg, platform, account_id, _pid, text,
+                                                contact_key=str(chat_key))
                                             if not _staged:
                                                 record_voice_fallback("synth_failed")
                                                 _assistant_ref.logger.info(
@@ -1037,10 +1041,46 @@ class AIChatAssistant:
                                             return await _make_coro()
 
                                         _send_cb = _autosend_deliver
+                                    # 出站自动翻译回调：投递前把 AI 中文回复译成客户语言（补
+                                    # 「全自动聊天翻译」闭环）。translation_service 在本块之后才挂到
+                                    # web_app.state，故回调内**懒取**——worker 真正投递时早已就绪。
+                                    _translate_cb = None
+                                    try:
+                                        from src.inbox.outbound_translate import (
+                                            parse_outbound_translate_cfg as _parse_otx_cfg,
+                                        )
+                                        _otx_cfg = _parse_otx_cfg(self.config.config or {})
+                                        if _otx_cfg.get("enabled"):
+                                            _otx_src = _otx_cfg.get("source_lang") or "zh"
+                                            _otx_style = _otx_cfg.get("style") or "chat"
+
+                                            async def _autosend_translate(
+                                                item, _src=_otx_src, _style=_otx_style,
+                                            ):
+                                                from src.inbox.outbound_translate import (
+                                                    translate_outbound_text as _tot,
+                                                )
+                                                _ts = getattr(
+                                                    web_app.state, "translation_service", None)
+                                                if _ts is None:
+                                                    return str(item.get("text", ""))
+                                                return await _tot(
+                                                    item, translation_service=_ts,
+                                                    store=self.inbox_store,
+                                                    source_lang=_src, style=_style)
+
+                                            _translate_cb = _autosend_translate
+                                            self.logger.info(
+                                                "AutosendWorker 出站自动翻译已启用（src=%s）",
+                                                _otx_src)
+                                    except Exception:
+                                        self.logger.debug(
+                                            "出站自动翻译装配跳过", exc_info=True)
                                     _as_worker = AutosendWorker(
                                         draft_service=draft_svc,
                                         config=_merged_as_cfg,
                                         send_callback=_send_cb,
+                                        translate_callback=_translate_cb,
                                     )
                                     web_app.state.autosend_worker = _as_worker
                                     # C3：注册 L2 事件驱动钩子，新草稿落库时立即唤醒
@@ -1367,6 +1407,12 @@ class AIChatAssistant:
                                 _cfg_root, domain_files=_domain_files, overrides=_gloss_overrides,
                             )
                             _engines = build_engines(_tr_cfg, self.ai_client)
+                            # K：引擎置信度智能切换（默认关 → min_confidence=0 行为不变）
+                            _conf_sw = (_tr_cfg.get("engines") or {}).get("confidence_switch") or {}
+                            _min_conf = (
+                                float(_conf_sw.get("min_confidence", 0.5) or 0.5)
+                                if _conf_sw.get("enabled", False) else 0.0
+                            )
                             # 存重建上下文，供 /api/workspace/glossary 热更新复用
                             web_app.state.glossary_store = _gloss_store
                             web_app.state.glossary_config = _cfg_root
@@ -1380,6 +1426,7 @@ class AIChatAssistant:
                                 glossary_protect=_glossary.protect,
                                 cost_tracking=bool(_tr_cfg.get("cost_tracking", False)),
                                 engines=_engines,
+                                min_confidence=_min_conf,
                             )
                             self.logger.info(
                                 "Phase C/P56 服务已预置（意图LLM=%s, 翻译记忆=%s, 引擎=%s, 术语=%d, 保护词=%d）",
@@ -1714,6 +1761,12 @@ class AIChatAssistant:
                 # ★ 质量趋势持久化（周期落地 companion_quality_overview；默认关）
                 await self._maybe_start_quality_trend()
 
+                # ★ P4-B：TTS 成本按日落库（供 ops 看板画近 N 天花费曲线；默认关）
+                self._maybe_init_tts_cost_log()
+
+                # ★ S：翻译置信度低置信率/切换率按日落库（供看板画 7 天 sparkline；默认关）
+                self._maybe_init_translation_trend_log()
+
                 # ★ Q 延伸：ingest 回写 contact_id（默认关）
                 self._maybe_wire_ingest_contact_writeback()
 
@@ -1889,6 +1942,11 @@ class AIChatAssistant:
             store = DeferredOutboxStore(_cfg_dir / "deferred_outbox.db")
 
             async def _universal_send(account_id, chat_key, text, *, platform):
+                # 出站自动翻译（主动触达：care/reactivation 等经 deferred 队列的非 messenger 主动消息）。
+                # care 默认按 zh 生成 → 真译成客户语言；reactivation 本就按客户语言生成 → 检测护栏
+                # 自动跳过（no-op）。绝不阻塞投递（异常回落原文）。统一受 translate.enabled 开关控。
+                text = await self._maybe_translate_outbound(
+                    platform, account_id, chat_key, text)
                 # 1) 编排器受管 worker（telegram/whatsapp/line… 任一暴露 send 的）
                 try:
                     from src.integrations.account_orchestrator import get_orchestrator
@@ -1947,6 +2005,34 @@ class AIChatAssistant:
             self.logger.warning("多平台 deferred 队列初始化失败（非 messenger 主动消息将被丢弃）",
                                  exc_info=True)
             return None
+
+    async def _maybe_translate_outbound(self, platform, account_id, chat_key, text):
+        """deferred 主动触达投递前的出站自动翻译（best-effort，绝不阻塞投递）。
+
+        复用 L2 autosend 同一 ``translate_outbound_text``（含「已是客户语言则跳过」检测护栏）
+        与同一开关 ``inbox.l2_autosend.translate.enabled``。translation_service 懒取，
+        会话客户语言经 conversations.language 解析。任何缺失/异常 → 回落发原文。
+        """
+        try:
+            from src.inbox.outbound_translate import (
+                parse_outbound_translate_cfg, translate_outbound_text,
+            )
+            cfg = parse_outbound_translate_cfg(self.config.config or {})
+            if not cfg.get("enabled"):
+                return text
+            ts = getattr(self._web_app.state, "translation_service", None) \
+                if self._web_app is not None else None
+            if ts is None or self.inbox_store is None:
+                return text
+            from src.inbox.draft_models import _conv_id
+            item = {"conversation_id": _conv_id(str(platform), str(account_id), str(chat_key)),
+                    "text": str(text)}
+            return await translate_outbound_text(
+                item, translation_service=ts, store=self.inbox_store,
+                source_lang=cfg.get("source_lang") or "zh", style=cfg.get("style") or "chat")
+        except Exception:
+            self.logger.debug("[deferred_outbox] 出站翻译跳过", exc_info=True)
+            return text
 
     def _enqueue_deferred_outbox(self, channel, account_id, chat_name, reply,
                                  defer_until, reason, staleness_sec, extra) -> int:
@@ -2037,6 +2123,60 @@ class AIChatAssistant:
             self.logger.info("✅ 质量趋势快照循环已启动")
         except Exception:
             self.logger.warning("质量趋势持久化启动跳过", exc_info=True)
+
+    def _maybe_init_tts_cost_log(self) -> None:
+        """P4-B：按 ``voice_routing.cost_log.enabled`` 装配 TTS 成本日聚合落库（默认关）。
+
+        开启后 ``tts_pipeline._record_stats`` 旁路把每次合成写入 ``tts_cost.db``，
+        ops 看板经 ``/api/admin/tts-cost-trend`` 读近 N 天花费/缓存命中曲线。
+        关闭时 ``record_tts_cost`` 恒 no-op（无 voice 用量部署零 IO）。
+        """
+        try:
+            vr = (self.config.config.get("voice_routing") or {})
+            cl = (vr.get("cost_log") or {})
+            if not cl.get("enabled", False):
+                self.logger.info("TTS 成本落库未启用（voice_routing.cost_log.enabled=false）")
+                return
+            from src.ai.tts_cost_store import configure_tts_cost_store
+            _cfg_dir = Path(self.config.config_path).parent
+            store = configure_tts_cost_store(
+                enabled=True,
+                db_path=_cfg_dir / "tts_cost.db",
+                retention_days=float(cl.get("retention_days", 90)),
+            )
+            if store is not None:
+                self.logger.info(
+                    "✅ TTS 成本落库已就绪（retention=%sd）", cl.get("retention_days", 90))
+        except Exception:
+            self.logger.warning("TTS 成本落库初始化失败（已忽略）", exc_info=True)
+
+    def _maybe_init_translation_trend_log(self) -> None:
+        """S：按 ``translation.engines.confidence_switch.trend_log`` 装配翻译置信度日聚合落库（默认关）。
+
+        开启后 ``EngineRouter.translate`` 旁路把每次翻译的 {尝试/低置信/切换} 写入
+        ``xlate_trend.db``，ops 看板经 ``/api/admin/translation-confidence-trend``
+        读近 N 天低置信率/切换率 sparkline。关闭时 ``record_translation_trend`` 恒 no-op。
+        """
+        try:
+            _tr = (self.config.config.get("translation") or {})
+            _cs = ((_tr.get("engines") or {}).get("confidence_switch") or {})
+            if not _cs.get("trend_log", False):
+                self.logger.info(
+                    "翻译置信度趋势落库未启用（translation.engines.confidence_switch.trend_log=false）")
+                return
+            from src.ai.translation_trend_store import configure_translation_trend_store
+            _cfg_dir = Path(self.config.config_path).parent
+            store = configure_translation_trend_store(
+                enabled=True,
+                db_path=_cfg_dir / "xlate_trend.db",
+                retention_days=float(_cs.get("trend_retention_days", 90)),
+            )
+            if store is not None:
+                self.logger.info(
+                    "✅ 翻译置信度趋势落库已就绪（retention=%sd）",
+                    _cs.get("trend_retention_days", 90))
+        except Exception:
+            self.logger.warning("翻译置信度趋势落库初始化失败（已忽略）", exc_info=True)
 
     def _maybe_init_monetization(self, web_app=None) -> None:
         """Phase K2：C 端变现（默认关，monetization.enabled 开）。

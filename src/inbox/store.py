@@ -369,6 +369,8 @@ _MIGRATIONS = [
     "ALTER TABLE conversation_meta ADD COLUMN churn_risk TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE conversation_meta ADD COLUMN auto_archived_at REAL NOT NULL DEFAULT 0",
     "CREATE INDEX IF NOT EXISTS idx_conv_meta_last_ts ON conversation_meta(updated_at DESC)",
+    # O: 末条情绪强度（analyze_emotion primary_intensity；-1=未知），供主动护栏强度分级
+    "ALTER TABLE conversation_meta ADD COLUMN last_emotion_intensity REAL NOT NULL DEFAULT -1",
     # V1: 坐席协作注解（Phase 25）
     """CREATE TABLE IF NOT EXISTS conv_notes (
          note_id    TEXT PRIMARY KEY,
@@ -554,6 +556,12 @@ _MIGRATIONS = [
     # 存量行默认 'private'（保守按私聊照常告警），后续 ingest 会按实况回填。
     "ALTER TABLE conversations ADD COLUMN chat_type TEXT NOT NULL DEFAULT 'private'",
     "CREATE INDEX IF NOT EXISTS idx_conv_chat_type ON conversations(chat_type)",
+    # 群组分流·存量回填：chat_type 特性上线前入库的 Telegram 群组/频道（chat_key 为负数 id，
+    # 如 -100.../-5...）被默认成了 'private'，会错误地刷进 SLA「严重超时/待接管」。
+    # 这里按 chat_key 实况一次性回填为 'group'（幂等：回填后不再命中 chat_type='private'）。
+    """UPDATE conversations SET chat_type='group'
+         WHERE platform='telegram' AND chat_type='private'
+           AND (chat_key LIKE '-%' OR conversation_id LIKE 'telegram:%:-%')""",
 ]
 
 
@@ -759,6 +767,34 @@ class InboxStore:
             for msg in msgs or []:
                 if not msg.conversation_id:
                     continue
+                # 跨 ingest 路径去重护栏：同一条消息可能经「带 platform_msg_id 的权威路径」
+                # 与「无 id 的兜底路径」分别落库，二者主键不同（``:<pmid>`` vs ``:h:<hash>``）本会
+                # 凭空多出重复行并重复触发 new_inbound 回调（→ 重复 auto-draft）。按 direction 区分
+                # 两种到达顺序，把两种键收敛为一条，且**绝不丢消息**：
+                # - 入站：权威 pmid 先到（实时 handler）、hash 后到（聚合 re-ingest / thread 重放）→
+                #   插 hash 前若已有同 (conv,text,**精确 ts**,dir) 的 pmid 孪生即跳过；
+                # - 出站：乐观 hash 先到（_emit_inbox 用 send-time ts）、权威 pmid 后到（自身已发消息
+                #   被消息处理器回显，ts=message.date 与 send-time 有秒级漂移）→ pmid 落库时删掉早先
+                #   的 hash 孪生（按 dir+text 在时间窗内匹配，容忍 ts 漂移）。出站不做「跳过 hash」以免
+                #   回显缺失时丢发言；故 skip 仅用精确 ts（出站漂移天然不命中），零丢失。
+                _pmid = str(msg.platform_msg_id or "").strip()
+                _tsf = float(msg.ts or 0)
+                _win = 120.0 if msg.direction == "out" else 0.0
+                if not _pmid:
+                    _twin = self._conn.execute(
+                        "SELECT 1 FROM messages WHERE conversation_id=? AND text=? AND ts=? "
+                        "AND direction=? AND platform_msg_id != '' LIMIT 1",
+                        (msg.conversation_id, msg.text, _tsf, msg.direction),
+                    ).fetchone()
+                    if _twin is not None:
+                        continue
+                else:
+                    self._conn.execute(
+                        "DELETE FROM messages WHERE conversation_id=? AND text=? "
+                        "AND direction=? AND platform_msg_id = '' AND message_id LIKE '%:h:%' "
+                        "AND ABS(ts - ?) <= ?",
+                        (msg.conversation_id, msg.text, msg.direction, _tsf, _win),
+                    )
                 mid = _message_pk(msg.conversation_id, msg.platform_msg_id, msg.text, msg.ts)
                 cur = self._conn.execute(
                     """
@@ -3218,6 +3254,7 @@ class InboxStore:
         contact_id: str = "",
         workspace_id: str = "default",
         max_history: int = 10,
+        emotion_intensity: float = -1.0,
     ) -> None:
         """I1：每次新入站消息后，更新对话智能元数据。
 
@@ -3256,8 +3293,9 @@ class InboxStore:
             self._conn.execute(
                 """INSERT INTO conversation_meta
                    (conversation_id, platform, last_intent, last_emotion, last_risk,
-                    intent_history, emotion_history, msg_count, updated_at, contact_id, workspace_id, trace_id)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                    intent_history, emotion_history, msg_count, updated_at, contact_id, workspace_id, trace_id,
+                    last_emotion_intensity)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(conversation_id) DO UPDATE SET
                      platform       = excluded.platform,
                      last_intent    = CASE WHEN excluded.last_intent != ''
@@ -3274,13 +3312,17 @@ class InboxStore:
                      workspace_id   = CASE WHEN excluded.workspace_id != 'default'
                                       THEN excluded.workspace_id ELSE conversation_meta.workspace_id END,
                      trace_id       = CASE WHEN conversation_meta.trace_id = '' OR conversation_meta.trace_id IS NULL
-                                      THEN excluded.trace_id ELSE conversation_meta.trace_id END
+                                      THEN excluded.trace_id ELSE conversation_meta.trace_id END,
+                     last_emotion_intensity = CASE WHEN excluded.last_emotion_intensity >= 0
+                                      THEN excluded.last_emotion_intensity
+                                      ELSE conversation_meta.last_emotion_intensity END
                 """,
                 (cid, str(platform or ""), str(intent or ""), str(emotion or ""),
                  str(risk or "low"),
                  json.dumps(ih, ensure_ascii=False),
                  json.dumps(eh, ensure_ascii=False),
-                 mc, now, str(contact_id or ""), _wsid, trace_id_to_use),
+                 mc, now, str(contact_id or ""), _wsid, trace_id_to_use,
+                 float(emotion_intensity if emotion_intensity is not None else -1.0)),
             )
             self._conn.commit()
 
@@ -4339,7 +4381,7 @@ class InboxStore:
                 tags = []
             result[r["conversation_id"]] = {
                 "tags": tags,
-                "archived": bool(r.get("archived", 0)),
+                "archived": bool(r["archived"]),
             }
         return result
 

@@ -118,9 +118,19 @@ def register_ops_overview_routes(app, ctx) -> None:
             except Exception:
                 logger.debug("自动认领统计失败（已忽略）", exc_info=True)
 
+        companion = None
+        try:
+            from src.web.routes.companion_capability_routes import gather_companion_advice
+            cfg = getattr(config_manager, "config", None)
+            if isinstance(cfg, dict):
+                companion = gather_companion_advice(request.app.state, cfg)
+        except Exception:
+            logger.debug("陪伴能力配置体检聚合失败（已忽略）", exc_info=True)
+
         overview = assemble_ops_overview(
             roi=roi, billing=billing, health=health, reliability=reliability,
             auto_claim=auto_claim, open_incidents=open_incidents,
+            companion=companion,
         )
         # G2：趋势异动标注（AI 发送量 / 处置量）。
         from src.utils.ops_intel import detect_trend_anomaly
@@ -262,6 +272,52 @@ def register_ops_overview_routes(app, ctx) -> None:
             except Exception:
                 logger.debug("health_recheck 审计写入失败（已忽略）", exc_info=True)
         return {"ok": True, "light": health.get("light"), "summary": health.get("summary")}
+
+    @app.get("/api/admin/tts-cost-trend")
+    async def api_tts_cost_trend(request: Request, days: int = 7):
+        """P4-B：近 N 天 TTS 花费/缓存命中按日聚合（供看板画曲线）。
+
+        未开启成本落库（voice_routing.cost_log.enabled=false）→ 返回 enabled:false + 空序列，
+        前端据此隐藏曲线、仅显示当下快照。
+        """
+        api_auth(request)
+        try:
+            from src.ai.tts_cost_store import get_tts_cost_store
+            store = get_tts_cost_store()
+            if store is None:
+                return {"ok": True, "enabled": False, "days": []}
+            span = int(days or 7)
+            try:
+                store.prune()   # 顺手清理过期日聚合（主管低频访问，开销可忽略）
+            except Exception:
+                logger.debug("tts_cost prune 失败（已忽略）", exc_info=True)
+            return {"ok": True, "enabled": True, "days": store.daily(days=span)}
+        except Exception:
+            logger.debug("tts-cost-trend 读取失败（已忽略）", exc_info=True)
+            return {"ok": True, "enabled": False, "days": []}
+
+    @app.get("/api/admin/translation-confidence-trend")
+    async def api_translation_confidence_trend(request: Request, days: int = 7):
+        """S：近 N 天翻译低置信率/切换率按日聚合（供看板画 sparkline）。
+
+        未开启趋势落库（translation.engines.confidence_switch.trend_log=false）→
+        返回 enabled:false + 空序列，前端据此隐藏曲线、仅显示当下快照（M 的瞬时值）。
+        """
+        api_auth(request)
+        try:
+            from src.ai.translation_trend_store import get_translation_trend_store
+            store = get_translation_trend_store()
+            if store is None:
+                return {"ok": True, "enabled": False, "days": []}
+            span = int(days or 7)
+            try:
+                store.prune()
+            except Exception:
+                logger.debug("xlate_trend prune 失败（已忽略）", exc_info=True)
+            return {"ok": True, "enabled": True, "days": store.daily(days=span)}
+        except Exception:
+            logger.debug("translation-confidence-trend 读取失败（已忽略）", exc_info=True)
+            return {"ok": True, "enabled": False, "days": []}
 
     @app.get("/admin/ops", response_class=HTMLResponse)
     async def ops_overview_page(request: Request, _=Depends(page_auth)):

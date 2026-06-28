@@ -74,6 +74,20 @@
   </section>
 
   <section>
+    <h2>🔊 语音合成（TTS 成本 / 引擎 / 缓存）</h2>
+    <div class="grid" id="ttsKpis"></div>
+    <div id="ttsTrend" style="margin-bottom:12px;"></div>
+    <div id="ttsProviders"><div class="empty">加载中…</div></div>
+  </section>
+
+  <section>
+    <h2>🌐 翻译引擎（置信度 / 智能切换 / 降级）</h2>
+    <div class="grid" id="xlateKpis"></div>
+    <div id="xlateTrend" style="margin:10px 0;"></div>
+    <div id="xlateProviders"><div class="empty">加载中…</div></div>
+  </section>
+
+  <section>
     <h2>🚨 运维事件（health_alert 闭环）</h2>
     <div style="display:flex; gap:10px; margin-bottom:10px; align-items:center;">
       <select id="fltKind" onchange="loadIncidents()" style="background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:4px 8px;">
@@ -160,6 +174,10 @@ async function loadOverview(){
       ['超席位', '<span class="val">'+fmt(k.over_seats)+'</span>', '计费异常 '+fmt(k.billing_anomaly_count)+' 项'],
       ['未关闭事件', '<span class="val">'+fmt(k.open_incidents)+'</span>', '近期告警 '+fmt(k.open_alerts)],
     ];
+    if(k.companion_config_light){
+      cards.push(['陪伴配置体检', '<span class="val">'+dot(k.companion_config_light)+'</span>',
+                  '错配 '+fmt(k.companion_config_errors)+' · 警示 '+fmt(k.companion_config_warnings)]);
+    }
     document.getElementById('kpis').innerHTML = cards.map(function(c){
       return '<div class="kpi"><div class="label">'+c[0]+'</div><div class="val">'+c[1]+'</div><div class="sub">'+c[2]+'</div></div>';
     }).join('');
@@ -325,8 +343,172 @@ async function loadReport(){
   }
 }
 
+// 🔊 TTS 成本/引擎/缓存卡片：读 /api/workspace/metrics 的 providers.tts namespace。
+async function loadTTS(){
+  var kp = document.getElementById('ttsKpis');
+  var pv = document.getElementById('ttsProviders');
+  try{
+    const r = await fetch('/api/workspace/metrics', {credentials:'same-origin'});
+    if(r.status === 403){
+      kp.innerHTML = '';
+      pv.innerHTML = '<div class="empty">指标查看需要主管权限</div>';
+      return;
+    }
+    const d = await r.json();
+    var tts = (d.providers && d.providers.tts) || null;
+    if(!tts || !(tts.rows||[]).length){
+      kp.innerHTML = '';
+      pv.innerHTML = '<div class="empty">暂无语音合成数据（开启语音回复后累计）</div>';
+      return;
+    }
+    var hitPct = ((Number(tts.cache_hit_rate)||0)*100).toFixed(1);
+    var cost = (Number(tts.total_cost_usd)||0).toFixed(4);
+    var kpis = [
+      {label:'今日累计花费', value:'$'+cost},
+      {label:'合成次数', value:fmt(tts.total_attempts)},
+      {label:'缓存命中率', value:hitPct+'%'},
+      {label:'缓存命中次数', value:fmt(tts.cache_hits)},
+      {label:'兜底次数', value:fmt(tts.fallbacks)},
+    ];
+    kp.innerHTML = kpis.map(function(c){
+      return '<div class="kpi"><div class="muted" style="font-size:12px;">'+c.label+
+        '</div><div style="font-size:20px;font-weight:600;margin-top:4px;">'+c.value+'</div></div>';
+    }).join('');
+    var rows = (tts.rows||[]).map(function(row){
+      var sr = ((Number(row.success_rate)||0)*100).toFixed(1);
+      return '<tr><td>'+row.provider+'</td><td>'+row.calls+'</td><td>'+sr+'%</td><td>'+
+        row.avg_latency_ms+' ms</td><td>$'+(Number(row.cost_usd)||0).toFixed(4)+'</td></tr>';
+    }).join('');
+    var html = '<table><tr><th>引擎</th><th>调用</th><th>成功率</th><th>平均延迟</th>'+
+      '<th>成本</th></tr>'+rows+'</table>';
+    // 情绪分布 chips（非中性合成的情感面貌；空=情感层未开或仅 neutral）
+    var labels = tts.labels || {};
+    var emoKeys = Object.keys(labels);
+    if(emoKeys.length){
+      var totalEmo = emoKeys.reduce(function(s,k){ return s + (labels[k]||0); }, 0) || 1;
+      var chips = emoKeys.map(function(k){
+        var pct = ((labels[k]/totalEmo)*100).toFixed(0);
+        return '<span style="display:inline-block;background:var(--bg);border:1px solid '+
+          'var(--line);border-radius:12px;padding:2px 10px;margin:2px 4px 2px 0;font-size:12px;">'+
+          k+' · '+labels[k]+' ('+pct+'%)</span>';
+      }).join('');
+      html += '<div class="muted" style="font-size:12px;margin:10px 0 4px;">情绪分布'+
+        '（仅统计非中性合成）</div><div>'+chips+'</div>';
+    }
+    pv.innerHTML = html;
+  }catch(e){
+    document.getElementById('ttsProviders').innerHTML = '<div class="empty">加载失败：'+e+'</div>';
+  }
+}
+
+// 🔊 近 N 天 TTS 花费曲线：读 /api/admin/tts-cost-trend（需开启成本落库）。
+async function loadTTSTrend(){
+  var el = document.getElementById('ttsTrend');
+  if(!el) return;
+  try{
+    const r = await fetch('/api/admin/tts-cost-trend?days=7', {credentials:'same-origin'});
+    const d = await r.json();
+    if(!d.enabled){
+      el.innerHTML = '<div class="muted" style="font-size:12px;">'+
+        '近 7 天花费曲线未开启（voice_routing.cost_log.enabled=true 后累计）</div>';
+      return;
+    }
+    var days = d.days || [];
+    if(days.length < 2){
+      el.innerHTML = '<div class="muted" style="font-size:12px;">趋势数据累计中…</div>';
+      return;
+    }
+    var costs = days.map(function(x){ return Number(x.cost_usd)||0; });
+    var labels = days.map(function(x){
+      return (x.day||'')+'：$'+(Number(x.cost_usd)||0).toFixed(4)+
+        ' · '+(x.calls||0)+'次 · 缓存'+(x.cache_hits||0);
+    });
+    el.innerHTML = '<div class="muted" style="font-size:12px;margin-bottom:4px;">'+
+      '近 7 天每日花费（USD）</div>'+
+      sparkline(costs, {labels:labels, color:'#3fb950', w:300});
+  }catch(e){
+    el.innerHTML = '<div class="muted" style="font-size:12px;">趋势加载失败：'+e+'</div>';
+  }
+}
+
+// 🌐 S：近 7 天低置信率/切换率曲线：读 /api/admin/translation-confidence-trend（需开启趋势落库）。
+async function loadXlateTrend(){
+  var el = document.getElementById('xlateTrend');
+  if(!el) return;
+  try{
+    const r = await fetch('/api/admin/translation-confidence-trend?days=7', {credentials:'same-origin'});
+    const d = await r.json();
+    if(!d.enabled){
+      el.innerHTML = '<div class="muted" style="font-size:12px;">'+
+        '近 7 天低置信/切换趋势未开启（translation.engines.confidence_switch.trend_log=true 后累计）</div>';
+      return;
+    }
+    var days = d.days || [];
+    if(days.length < 2){
+      el.innerHTML = '<div class="muted" style="font-size:12px;">趋势数据累计中…</div>';
+      return;
+    }
+    var lowRate = days.map(function(x){ return (Number(x.low_conf_rate)||0)*100; });
+    var swRate = days.map(function(x){ return (Number(x.switch_rate)||0)*100; });
+    var labels = days.map(function(x){
+      return (x.day||'')+'：低置信 '+((Number(x.low_conf_rate)||0)*100).toFixed(1)+'%'+
+        ' · 切换 '+((Number(x.switch_rate)||0)*100).toFixed(1)+'%'+
+        ' · '+(x.attempts||0)+'次';
+    });
+    el.innerHTML = '<div class="muted" style="font-size:12px;margin-bottom:4px;">'+
+      '近 7 天低置信率（%，红）/ 切换率（%，蓝）</div>'+
+      sparkline(lowRate, {labels:labels, color:'#f85149', w:300})+
+      ' '+sparkline(swRate, {labels:labels, color:'#58a6ff', w:300});
+  }catch(e){
+    el.innerHTML = '<div class="muted" style="font-size:12px;">趋势加载失败：'+e+'</div>';
+  }
+}
+
+// 🌐 翻译引擎卡片：读 /api/workspace/metrics 的 translation_engines（M 置信度观测）。
+async function loadTranslationEngines(){
+  var kp = document.getElementById('xlateKpis');
+  var pv = document.getElementById('xlateProviders');
+  if(!kp || !pv) return;
+  try{
+    const r = await fetch('/api/workspace/metrics', {credentials:'same-origin'});
+    if(r.status === 403){ kp.innerHTML=''; pv.innerHTML='<div class="empty">指标查看需要主管权限</div>'; return; }
+    const d = await r.json();
+    var te = d.translation_engines || null;
+    if(!te || !(te.rows||[]).length){
+      kp.innerHTML=''; pv.innerHTML='<div class="empty">暂无翻译引擎数据（开启翻译后累计）</div>'; return;
+    }
+    var attempts = Number(te.total_attempts)||0;
+    var lowConf = Number(te.low_confidence)||0;
+    var switches = Number(te.confidence_switches)||0;
+    var fb = Number(te.fallbacks)||0;
+    // 低置信率以「尝试数」为分母（近似，attempts 含全部引擎调用）
+    var lowPct = attempts ? ((lowConf/attempts)*100).toFixed(1) : '0.0';
+    var kpis = [
+      {label:'翻译尝试', value:fmt(attempts)},
+      {label:'低置信译文', value:fmt(lowConf)+'（'+lowPct+'%）'},
+      {label:'智能切换次数', value:fmt(switches)},
+      {label:'降级次数', value:fmt(fb)},
+    ];
+    kp.innerHTML = kpis.map(function(c){
+      return '<div class="kpi"><div class="muted" style="font-size:12px;">'+c.label+
+        '</div><div style="font-size:20px;font-weight:600;margin-top:4px;">'+c.value+'</div></div>';
+    }).join('');
+    var rows = (te.rows||[]).map(function(row){
+      var sr = ((Number(row.success_rate)||0)*100).toFixed(1);
+      return '<tr><td>'+row.engine+'</td><td>'+row.calls+'</td><td>'+row.ok+'</td><td>'+
+        row.fail+'</td><td>'+sr+'%</td><td>'+row.avg_latency_ms+' ms</td></tr>';
+    }).join('');
+    pv.innerHTML = '<table><tr><th>引擎</th><th>调用</th><th>成功</th><th>失败</th>'+
+      '<th>成功率</th><th>平均延迟</th></tr>'+rows+'</table>'+
+      '<div class="muted" style="font-size:12px;margin-top:8px;">智能切换=主引擎低置信时自动改用更优引擎'+
+      '（需开 translation.engines.confidence_switch）；低置信率/切换率持续偏高 → 检查主引擎对该语对的质量。</div>';
+  }catch(e){
+    pv.innerHTML = '<div class="empty">加载失败：'+e+'</div>';
+  }
+}
+
 if(CAN_MANAGE_OPS){ var _rb=document.getElementById('recheckBtn'); if(_rb) _rb.style.display=''; }
-function refreshAll(){ loadOverview(); loadIncidents(); loadReport(); }
+function refreshAll(){ loadOverview(); loadIncidents(); loadReport(); loadTTS(); loadTTSTrend(); loadTranslationEngines(); loadXlateTrend(); }
 refreshAll();
 setInterval(refreshAll, 60000);
 </script>

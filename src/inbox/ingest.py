@@ -117,6 +117,14 @@ def ingest_collected_chats(
     """
     inserted = 0
     for chat in chats or []:
+        # store-backed 会话（ProtocolInboxAdapter/WebInboxAdapter 经 store_row_to_chat 读出，
+        # 带 from_store=True）已是事实源里的行，再写回毫无意义且有害：其 last_message 由
+        # last_text 重建、**不带 platform_msg_id**，会落到 hash(text|ts) 兜底键，与权威路径
+        # （protocol worker push 经 ingest_incoming 带真 msg_id）产出的 ``:<pmid>`` 行不同键，
+        # 凭空多出一条 ``:h:<hash>`` 重复行；更糟的是该“新插入”会再次触发 new_inbound 回调
+        # （auto-draft 等），造成重复草稿/重复处理。故 store 读出的会话一律跳过 re-ingest。
+        if chat.get("from_store"):
+            continue
         conv = _conv_from_chat(chat)
         if not conv.conversation_id or not conv.platform:
             continue
@@ -151,6 +159,16 @@ def ingest_collected_chats(
                 try:
                     from src.ai.chat_assistant_service import quick_analyze
                     _analysis = quick_analyze(msg_text)
+                    # O：用 analyze_emotion 的强度量级补齐情绪「有多强」（标签来自规则分类器，
+                    # 强度来自情感引擎，二者正交）；供主动护栏强度分级。失败回落 -1（未知）。
+                    _emo_intensity = -1.0
+                    try:
+                        from src.utils.emotional_context import analyze_emotion
+                        _emo = analyze_emotion(msg_text)
+                        if str(_emo.get("dimension") or "") != "neutral":
+                            _emo_intensity = float(_emo.get("primary_intensity") or -1.0)
+                    except Exception:
+                        logger.debug("analyze_emotion 强度计算失败", exc_info=True)
                     store.update_conv_meta(
                         conv.conversation_id,
                         platform=conv.platform,
@@ -158,6 +176,7 @@ def ingest_collected_chats(
                         emotion=str(_analysis.get("emotion") or ""),
                         risk=str(_analysis.get("risk_level") or "low"),
                         contact_id=contact_id,
+                        emotion_intensity=_emo_intensity,
                     )
                 except Exception:
                     logger.debug("update_conv_meta 失败", exc_info=True)
