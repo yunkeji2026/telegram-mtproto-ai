@@ -176,9 +176,12 @@ def _gather_readiness(state, window_hours):
 def gather_companion_advice(state, config, window_hours: float = 168):
     """组合 能力档 × 信号 → build_advice（advice 端点与 ops-overview 共用，单一事实源）。"""
     from src.companion.capability_advisor import build_advice
+    from src.companion.embedding_readiness import embedding_source_configured
     status = _collect_status(state, config)
     signals = _gather_readiness(state, window_hours)
-    return build_advice(status, signals, auto_ai=_auto_ai_count(state))
+    embed_ready = embedding_source_configured(config)
+    return build_advice(status, signals, auto_ai=_auto_ai_count(state),
+                        embed_ready=embed_ready)
 
 
 def register_companion_capability_routes(app, *, api_auth) -> None:

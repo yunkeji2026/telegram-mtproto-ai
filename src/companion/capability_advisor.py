@@ -75,14 +75,24 @@ def build_recommendations(
 
 def consistency_issues(
     caps: List[Dict[str, Any]], *, auto_ai: Optional[int] = None,
+    embed_ready: Optional[bool] = None,
 ) -> List[Dict[str, Any]]:
-    """配置自洽体检：开关之间互相矛盾 / 前置缺失。"""
+    """配置自洽体检：开关之间互相矛盾 / 前置缺失。
+
+    ``embed_ready``（可选）：嵌入源是否配齐（由 ``embedding_readiness`` 算出）。传 False 且
+    记忆向量召回已开 → 报 error（**静默退化关键词**，是「陪护开起来」最隐蔽的坑）。
+    """
     by = {c["key"]: c for c in caps}
 
     def en(key: str) -> bool:
         return bool(by.get(key, {}).get("enabled"))
 
     issues: List[Dict[str, Any]] = []
+    if embed_ready is False and en("memory_vector_recall"):
+        issues.append({"severity": "error", "keys": ["memory_vector_recall"],
+                       "message": "记忆向量召回已开但未配嵌入源 → embed() 返回空，召回静默退化为"
+                                  "纯关键词（看似开了实则没开）。配 ai.embedding_base_url/model "
+                                  "或关掉该能力（见 docs/COMPANION_TURN_ON.md）"})
     if en("l2_autosend_deliver"):
         if not en("l2_autosend_worker"):
             issues.append({"severity": "error", "keys": ["l2_autosend_deliver", "l2_autosend_worker"],
@@ -110,6 +120,7 @@ def consistency_issues(
 
 def build_advice(
     status: Dict[str, Any], signals: Dict[str, Any], *, auto_ai: Optional[int] = None,
+    embed_ready: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """合并：能力档 × 信号 → 建议 + 一致性体检 + 摘要。"""
     caps = (status or {}).get("capabilities", []) or []
@@ -117,7 +128,7 @@ def build_advice(
     signals_by_key = {s.get("key"): s for s in sig_list if isinstance(s, dict)}
 
     recs = build_recommendations(caps, signals_by_key)
-    issues = consistency_issues(caps, auto_ai=auto_ai)
+    issues = consistency_issues(caps, auto_ai=auto_ai, embed_ready=embed_ready)
     return {
         "recommendations": recs,
         "consistency": issues,
