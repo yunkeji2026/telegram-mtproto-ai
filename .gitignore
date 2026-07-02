@@ -243,6 +243,9 @@ _package_out/
 # 根目录一次性 RPA/ADB 调试残留（截图、UI dump、临时探针脚本）
 /tmp_*
 /_*.py
+# 根目录临时分析/转储产物（i18n 扫描 _html_*.json/_js_*.json、探针 dump、临时消息文件等）
+/_*.json
+/_*.txt
 /dbg_*.py
 /investigate_*.py
 /probe_*.py
