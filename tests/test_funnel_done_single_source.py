@@ -192,6 +192,39 @@ def test_no_backend_rehardcoded_won_or_done_sets():
     )
 
 
+def test_all_stages_classified_into_exactly_one_bucket():
+    """阶段完备性门禁（P5-2c 延伸）：每个 STAGE_* 必属且仅属一个语义桶。
+
+    四桶 = 成功桶(FUNNEL_DONE) / 进行中(IN_PROGRESS) / 流失(LOST) / 系统态(SPECIAL)，
+    须对全部 STAGE_* **无重无漏**。新增阶段忘归类 → 门禁点名，杜绝被 KPI/漏斗分析静默漏算。
+    （WON_STAGES 是 FUNNEL_DONE 的子分类，正交，不入本划分。）
+    """
+    all_stages = _all_stage_values()
+    buckets = {
+        "FUNNEL_DONE_STAGES": set(models.FUNNEL_DONE_STAGES),
+        "IN_PROGRESS_STAGES": set(models.IN_PROGRESS_STAGES),
+        "LOST_STAGES": set(models.LOST_STAGES),
+        "SPECIAL_STAGES": set(models.SPECIAL_STAGES),
+    }
+    union = set().union(*buckets.values())
+
+    unclassified = all_stages - union
+    assert not unclassified, (
+        f"新增 STAGE_* 未归类进任何语义桶（会被 KPI/漏斗分析静默漏算）：{unclassified}\n"
+        "请把它归入 models 的 FUNNEL_DONE_STAGES / IN_PROGRESS_STAGES / LOST_STAGES / SPECIAL_STAGES 之一"
+    )
+    extra = union - all_stages
+    assert not extra, f"分区桶含非法（非 STAGE_* 常量）阶段值：{extra}"
+
+    names = list(buckets)
+    for i in range(len(names)):
+        for j in range(i + 1, len(names)):
+            overlap = buckets[names[i]] & buckets[names[j]]
+            assert not overlap, (
+                f"阶段桶重叠——一个阶段只能属一个桶：{names[i]} ∩ {names[j]} = {overlap}"
+            )
+
+
 def _iter_eq_string_boolchains(tree):
     """产出 (node, frozenset[str]) —— `x=='A' or x=='B' ...` 这类全为 `==字符串常量` 的 Or 链。
 

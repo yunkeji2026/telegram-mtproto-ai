@@ -54,6 +54,30 @@ WON_STAGES = frozenset({
     STAGE_CONVERTED,
 })
 
+# ── 阶段完备性分区（每个 Journey 阶段必属且仅属一个桶）─────────────────────
+# 成功桶 = FUNNEL_DONE_STAGES（上方已定义，含 LINE 通过/互动/绑定/成交）。
+# 其余阶段按语义分三桶；四桶合起来对全部 STAGE_* 构成**无重无漏**划分，
+# 由 tests/test_funnel_done_single_source.py 的完备性门禁锁死——
+# 新增 STAGE_* 若漏归类会被门禁点名（防被 KPI/漏斗分析静默漏算）。
+# 注：WON_STAGES 是 FUNNEL_DONE_STAGES 的**子分类**（正交），不参与本划分。
+IN_PROGRESS_STAGES = frozenset({
+    STAGE_INITIAL,
+    STAGE_ENGAGED,
+    STAGE_WARMING,
+    STAGE_HANDOFF_READY,
+    STAGE_HANDOFF_SENT,
+    STAGE_LINE_ADDED,
+})
+# 流失桶（引流后失联 / 加 LINE 后长期沉默）
+LOST_STAGES = frozenset({
+    STAGE_LOST_HANDOFF,
+    STAGE_LOST_LINE_SILENT,
+})
+# 系统标记态（非漏斗位置：等待人工合并身份）
+SPECIAL_STAGES = frozenset({
+    STAGE_NEEDS_MANUAL_MERGE,
+})
+
 # ── 合并决策结果 ────────────────────────────────────────────────
 DECISION_AUTO_MERGE = "auto_merge"
 DECISION_MANUAL_REVIEW = "manual_review"
