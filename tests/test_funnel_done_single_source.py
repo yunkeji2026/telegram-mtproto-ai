@@ -190,3 +190,63 @@ def test_no_backend_rehardcoded_won_or_done_sets():
         + "\n".join(offenders)
         + "\n（若确为非判定用途的兜底，行尾加 `# stage-source-allow` 豁免）"
     )
+
+
+def _iter_eq_string_boolchains(tree):
+    """产出 (node, frozenset[str]) —— `x=='A' or x=='B' ...` 这类全为 `==字符串常量` 的 Or 链。
+
+    这是集合字面量之外的另一种绕过单一来源写法（把 {BONDED,CONVERTED} 拆成 == 或链）。
+    """
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or)):
+            continue
+        strs, ok = [], True
+        for v in node.values:
+            if not (isinstance(v, ast.Compare) and len(v.ops) == 1
+                    and isinstance(v.ops[0], ast.Eq)):
+                ok = False
+                break
+            operands = [v.left] + list(v.comparators)
+            const = [o.value for o in operands
+                     if isinstance(o, ast.Constant) and isinstance(o.value, str)]
+            if len(const) != 1:
+                ok = False
+                break
+            strs.append(const[0])
+        if ok and strs:
+            yield node, frozenset(strs)
+
+
+def test_no_backend_rehardcoded_won_or_done_bool_chains():
+    """P5-2c 收口：禁止用 `==` 或链把权威成交集合拆写一份（另一种漂移源）。
+
+    与集合字面量门禁同口径——只精确匹配**恰好等于**某权威集合的或链，自定义或链不误报。
+    """
+    offenders = []
+    for py in _SRC.rglob("*.py"):
+        if py.name == "models.py" and py.parent.name == "contacts":
+            continue
+        text = py.read_text(encoding="utf-8")
+        lines = text.splitlines()
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+        for node, elems in _iter_eq_string_boolchains(tree):
+            for name, aset in _AUTHORITY_STAGE_SETS.items():
+                if elems != aset:
+                    continue
+                ln = getattr(node, "lineno", 0)
+                line_txt = lines[ln - 1] if 0 < ln <= len(lines) else ""
+                if "stage-source-allow" in line_txt:
+                    continue
+                rel = py.relative_to(_ROOT).as_posix()
+                offenders.append(
+                    f"{rel}:{ln} 用 == 或链重复判定 {name}={sorted(elems)}"
+                    f"（应 `stage in models.{name}`）"
+                )
+    assert not offenders, (
+        "后端存在用 `==` 或链重复判定成交/完成阶段，绕过集合单一来源（P5-2c）：\n"
+        + "\n".join(offenders)
+        + "\n（改用 `stage in models.WON_STAGES / FUNNEL_DONE_STAGES`）"
+    )
