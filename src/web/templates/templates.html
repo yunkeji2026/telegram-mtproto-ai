@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}{% if ui_mode == 'simple' %}话术模板概览{% else %}话术模板{% endif %} · {{ site_name|default('华灵科技客户转化聊天系统') }}{% endblock %}
-{% block page_title %}{% if ui_mode == 'simple' %}话术模板概览{% else %}话术模板{% endif %}{% endblock %}
+{% block title %}{% if ui_mode == 'simple' %}{{ (i18n or {}).get('tp_s001', "话术模板概览") }}{% else %}{{ (i18n or {}).get('tp_s002', "话术模板") }}{% endif %} · {{ product_name|default((i18n or {}).get('brand.product', '智聊')) }}{% endblock %}
+{% block page_title %}{% if ui_mode == 'simple' %}{{ (i18n or {}).get('tp_s001', "话术模板概览") }}{% else %}{{ (i18n or {}).get('tp_s002', "话术模板") }}{% endif %}{% endblock %}
 {% block head %}
 <style>
 /* side panel */
@@ -48,57 +48,57 @@
 <div class="simple-guide" style="background:linear-gradient(135deg,rgba(91,124,246,.06),rgba(245,158,11,.06));border:1px solid rgba(91,124,246,.15);border-radius:10px;padding:.7rem 1rem;margin-bottom:.8rem;font-size:.82rem;color:var(--t2);display:flex;align-items:flex-start;gap:.6rem">
   <span style="font-size:1.1rem;flex-shrink:0;margin-top:.1rem">📝</span>
   <div>
-    <strong style="color:var(--t);font-size:.85rem">只读模式</strong>
-    <div style="margin-top:.25rem;line-height:1.6">简洁模式下可查看所有话术模板内容。编辑或批量操作请<a href="/set_ui_mode?mode=full&next=/templates" style="color:var(--p);font-weight:600">切换到完整模式</a>。</div>
-    <button onclick="this.closest('.simple-guide').style.display='none';localStorage.setItem('_guide_tpl','1')" style="background:none;border:none;color:var(--p);cursor:pointer;font-size:.78rem;font-weight:600;padding:0;margin-top:.3rem">知道了</button>
+    <strong style="color:var(--t);font-size:.85rem">{{ (i18n or {}).get('tp_s003', "只读模式") }}</strong>
+    <div style="margin-top:.25rem;line-height:1.6">{{ (i18n or {}).get('tp_s004', "简洁模式下可查看所有话术模板内容。编辑或批量操作请") }}<a href="/set_ui_mode?mode=full&next=/templates" style="color:var(--p);font-weight:600">{{ (i18n or {}).get('tp_s005', "切换到完整模式") }}</a>。</div>
+    <button onclick="this.closest('.simple-guide').style.display='none';localStorage.setItem('_guide_tpl','1')" style="background:none;border:none;color:var(--p);cursor:pointer;font-size:.78rem;font-weight:600;padding:0;margin-top:.3rem">{{ (i18n or {}).get('inbox.grp.hint_ok', "知道了") }}</button>
   </div>
 </div>
 <script>if(localStorage.getItem('_guide_tpl')==='1')document.querySelector('.simple-guide').style.display='none';</script>
 {% endif %}
 
 {% set name_map = {
-  'greeting': '问候语',
-  'order_query': '订单查询',
-  'order_query_with_number': '带单号查单',
-  'price_check': '价格咨询',
-  'status_check': '状态查询',
-  'channel_info': '通道信息',
-  'complaint': '投诉处理',
-  'small_talk': '闲聊',
-  'small_talk_short': '闲聊简短回复',
-  'test': '测试/自检',
-  'gxp_ask_intent': 'GXP 意图确认（单号问询）',
-  'gxp_ask_same_no': '单号已记录·选需求',
-  'gxp_need_order_no': '请先发单号',
-  'gxp_expired': '单号已过期',
-  'gxp_ask_what': '要查什么（功能菜单）',
-  'gxp_ask_what_with_order': '带单号·要查什么',
-  'success': '成功提示',
-  'failure': '失败提示',
-  'farewell': '告别语',
-  'error': '错误提示',
-  'confirmation': '确认消息',
-  'help': '帮助信息',
-  'order_confirm': '订单确认',
-  'payment_remind': '付款提醒',
-  'deposit_success': '充值成功',
-  'withdraw_apply': '提现申请',
-  'withdraw_success': '提现成功',
-  'withdraw_fail': '提现失败',
-  'rate_update': '费率更新',
-  'channel_disable': '通道暂停',
-  'channel_enable': '通道开启',
-  'rate_query': '费率查询',
-  'status_query': '状态查询',
-  'daily_report': '日报',
-  'alert': '告警通知',
-  'maintenance': '维护通知',
-  'welcome': '欢迎语'
+  'greeting': (i18n or {}).get('tp_nm_greeting', '问候语'),
+  'order_query': (i18n or {}).get('tp_nm_order_query', '订单查询'),
+  'order_query_with_number': (i18n or {}).get('tp_nm_order_query_with_number', '带单号查单'),
+  'price_check': (i18n or {}).get('tp_nm_price_check', '价格咨询'),
+  'status_check': (i18n or {}).get('tp_nm_status_check', '状态查询'),
+  'channel_info': (i18n or {}).get('tp_nm_channel_info', '通道信息'),
+  'complaint': (i18n or {}).get('tp_nm_complaint', '投诉处理'),
+  'small_talk': (i18n or {}).get('tp_nm_small_talk', '闲聊'),
+  'small_talk_short': (i18n or {}).get('tp_nm_small_talk_short', '闲聊简短回复'),
+  'test': (i18n or {}).get('tp_nm_test', '测试/自检'),
+  'gxp_ask_intent': (i18n or {}).get('tp_nm_gxp_ask_intent', 'GXP 意图确认（单号问询）'),
+  'gxp_ask_same_no': (i18n or {}).get('tp_nm_gxp_ask_same_no', '单号已记录·选需求'),
+  'gxp_need_order_no': (i18n or {}).get('tp_nm_gxp_need_order_no', '请先发单号'),
+  'gxp_expired': (i18n or {}).get('tp_nm_gxp_expired', '单号已过期'),
+  'gxp_ask_what': (i18n or {}).get('tp_nm_gxp_ask_what', '要查什么（功能菜单）'),
+  'gxp_ask_what_with_order': (i18n or {}).get('tp_nm_gxp_ask_what_with_order', '带单号·要查什么'),
+  'success': (i18n or {}).get('tp_nm_success', '成功提示'),
+  'failure': (i18n or {}).get('tp_nm_failure', '失败提示'),
+  'farewell': (i18n or {}).get('tp_nm_farewell', '告别语'),
+  'error': (i18n or {}).get('tp_nm_error', '错误提示'),
+  'confirmation': (i18n or {}).get('tp_nm_confirmation', '确认消息'),
+  'help': (i18n or {}).get('tp_nm_help', '帮助信息'),
+  'order_confirm': (i18n or {}).get('tp_nm_order_confirm', '订单确认'),
+  'payment_remind': (i18n or {}).get('tp_nm_payment_remind', '付款提醒'),
+  'deposit_success': (i18n or {}).get('tp_nm_deposit_success', '充值成功'),
+  'withdraw_apply': (i18n or {}).get('tp_nm_withdraw_apply', '提现申请'),
+  'withdraw_success': (i18n or {}).get('tp_nm_withdraw_success', '提现成功'),
+  'withdraw_fail': (i18n or {}).get('tp_nm_withdraw_fail', '提现失败'),
+  'rate_update': (i18n or {}).get('tp_nm_rate_update', '费率更新'),
+  'channel_disable': (i18n or {}).get('tp_nm_channel_disable', '通道暂停'),
+  'channel_enable': (i18n or {}).get('tp_nm_channel_enable', '通道开启'),
+  'rate_query': (i18n or {}).get('tp_nm_rate_query', '费率查询'),
+  'status_query': (i18n or {}).get('tp_nm_status_query', '状态查询'),
+  'daily_report': (i18n or {}).get('tp_nm_daily_report', '日报'),
+  'alert': (i18n or {}).get('tp_nm_alert', '告警通知'),
+  'maintenance': (i18n or {}).get('tp_nm_maintenance', '维护通知'),
+  'welcome': (i18n or {}).get('tp_nm_welcome', '欢迎语')
 } %}
 
 {% if msg %}
-<div class="msg {{ 'msg-ok' if '成功' in msg or 'ok' in msg.lower() else 'msg-err' }}">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">{% if '成功' in msg or 'ok' in msg.lower() %}<polyline points="20 6 9 17 4 12"/>{% else %}<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>{% endif %}</svg>
+<div class="msg {{ 'msg-ok' if msg_ok|default(false) else 'msg-err' }}">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">{% if msg_ok|default(false) %}<polyline points="20 6 9 17 4 12"/>{% else %}<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>{% endif %}</svg>
   {{ msg }}
 </div>
 {% endif %}
@@ -106,9 +106,9 @@
 <div class="card fa">
   <h2>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-    话术模板管理
+    {{ (i18n or {}).get('tp_s006', "话术模板管理") }}
     <div class="actions" style="font-size:.78rem;color:var(--t3);font-weight:400">
-      共 {{ templates|length }} 个模板 &nbsp;·&nbsp; 点击编辑按钮打开侧栏
+      {{ (i18n or {}).get('wa_js_019', "共") }} {{ templates|length }} {{ (i18n or {}).get('tp_s007', "个模板") }} &nbsp;·&nbsp; {{ (i18n or {}).get('tp_s008', "点击编辑按钮打开侧栏") }}
     </div>
   </h2>
   {% if templates %}
@@ -117,13 +117,13 @@
       <thead>
         <tr>
           <th style="width:36px" class="pro-only">
-            <input type="checkbox" id="tpl-select-all" onchange="tplToggleAll(this)" style="width:15px;height:15px;accent-color:var(--p)" title="全选">
+            <input type="checkbox" id="tpl-select-all" onchange="tplToggleAll(this)" style="width:15px;height:15px;accent-color:var(--p)" title="{{ (i18n or {}).get('ov_select_all', '全选') }}">
           </th>
-          <th>模板名称</th>
-          <th>内容预览</th>
-          <th>类型</th>
-          <th>条数</th>
-          <th style="width:80px" class="pro-only">操作</th>
+          <th>{{ (i18n or {}).get('tp_s009', "模板名称") }}</th>
+          <th>{{ (i18n or {}).get('tp_s010', "内容预览") }}</th>
+          <th>{{ (i18n or {}).get('msg_js_1042', "类型") }}</th>
+          <th>{{ (i18n or {}).get('em_s014', "条数") }}</th>
+          <th style="width:80px" class="pro-only">{{ (i18n or {}).get('ov_js_th_action', "操作") }}</th>
         </tr>
       </thead>
       <tbody>
@@ -142,10 +142,10 @@
             {% else %}{{ val }}{% endif %}
           </td>
           <td class="type-cell">
-            {% if val is string %}<span class="badge b-p">字符串</span>
-            {% elif val is mapping %}<span class="badge b-u">字典</span>
-            {% elif val is iterable %}<span class="badge b-g">列表</span>
-            {% else %}<span class="badge b-n">其他</span>{% endif %}
+            {% if val is string %}<span class="badge b-p">{{ (i18n or {}).get('tp_s011', "字符串") }}</span>
+            {% elif val is mapping %}<span class="badge b-u">{{ (i18n or {}).get('tp_s012', "字典") }}</span>
+            {% elif val is iterable %}<span class="badge b-g">{{ (i18n or {}).get('ln_js_008', "列表") }}</span>
+            {% else %}<span class="badge b-n">{{ (i18n or {}).get('kb_js_005', "其他") }}</span>{% endif %}
           </td>
           <td style="font-weight:600;color:var(--p)">
             {% if val is string %}1
@@ -156,7 +156,7 @@
           <td class="pro-only">
             <button class="btn btn-p btn-xs" onclick="openEdit('{{ key }}')">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-              编辑
+              {{ (i18n or {}).get('edit', "编辑") }}
             </button>
           </td>
         </tr>
@@ -167,19 +167,19 @@
   {% else %}
   <div class="empty">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-    <p>暂无话术模板数据</p>
+    <p>{{ (i18n or {}).get('tp_s013', "暂无话术模板数据") }}</p>
   </div>
   {% endif %}
 </div>
 
 <!-- Template batch bar -->
 <div class="tpl-batch-bar pro-only" id="tpl-batch-bar">
-  <span>已选 <strong class="tpl-batch-cnt" id="tpl-batch-cnt">0</strong> 个模板</span>
+  <span>{{ (i18n or {}).get('tp_s014', "已选") }} <strong class="tpl-batch-cnt" id="tpl-batch-cnt">0</strong> {{ (i18n or {}).get('tp_s007', "个模板") }}</span>
   <button class="btn btn-d btn-sm" onclick="tplBatchDelete()">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
-    批量删除
+    {{ (i18n or {}).get('tp_s015', "批量删除") }}
   </button>
-  <button class="btn btn-s btn-sm" onclick="tplClearBatch()">取消</button>
+  <button class="btn btn-s btn-sm" onclick="tplClearBatch()">{{ (i18n or {}).get('ov_js_cancel', "取消") }}</button>
 </div>
 
 <!-- Side edit panel -->
@@ -187,47 +187,47 @@
 <div class="panel" id="tpl-panel">
   <div class="panel-hd">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18" style="color:var(--p)"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-    <h3 id="panel-title">编辑模板</h3>
+    <h3 id="panel-title">{{ (i18n or {}).get('tp_s016', "编辑模板") }}</h3>
     <button class="panel-close" onclick="closeEdit()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
   </div>
   <div class="panel-body">
     <!-- Telegram bubble preview -->
     <div class="tg-preview">
-      <div class="tg-preview-lbl">实时预览</div>
+      <div class="tg-preview-lbl">{{ (i18n or {}).get('tp_s017', "实时预览") }}</div>
       <div class="tg-bubble-wrap">
         <div class="tg-bubble">
-          <div id="preview-text">（空）</div>
+          <div id="preview-text">({{ (i18n or {}).get('tp_s018', "空)") }}</div>
           <div class="tg-time">12:00 ✓✓</div>
         </div>
       </div>
     </div>
     <!-- Detected variables -->
     <div id="var-row-wrap" style="margin-bottom:.8rem;display:none">
-      <div style="font-size:.77rem;font-weight:600;color:var(--t3);margin-bottom:.35rem">检测到的变量（点击插入）</div>
+      <div style="font-size:.77rem;font-weight:600;color:var(--t3);margin-bottom:.35rem">{{ (i18n or {}).get('tp_s019', "检测到的变量（点击插入）") }}</div>
       <div class="var-row" id="var-row"></div>
     </div>
     <!-- Edit form -->
     <form method="post" action="/templates/update" id="edit-form">
       <input type="hidden" name="key" id="edit-key">
       <div class="f-grp">
-        <label class="f-lbl" id="edit-label">内容</label>
+        <label class="f-lbl" id="edit-label">{{ (i18n or {}).get('em_s017', "内容") }}</label>
         <div style="position:relative">
           <textarea id="edit-ta" name="value" rows="8" oninput="onTaChange(this)"></textarea>
         </div>
-        <div class="char-count"><span id="char-cnt">0</span> 字符</div>
+        <div class="char-count"><span id="char-cnt">0</span> {{ (i18n or {}).get('tp_s020', "字符") }}</div>
       </div>
       <div class="f-grp" id="type-hint" style="font-size:.8rem;color:var(--t2);background:var(--input);padding:.65rem .9rem;border-radius:8px;border:1px solid var(--bd)">
-        提示：列表类型每行写一条；字典类型格式为 <code>键名: 内容</code>，每行写一条
+        {{ (i18n or {}).get('tp_s021', "提示：列表类型每行写一条；字典类型格式为") }} <code>{{ (i18n or {}).get('tp_s022', "键名") }}: {{ (i18n or {}).get('em_s017', "内容") }}</code>，{{ (i18n or {}).get('tp_s023', "每行写一条") }}
       </div>
     </form>
   </div>
   <div class="panel-foot">
     <button type="button" class="btn btn-p" id="save-btn" onclick="saveTemplate()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-      保存 <span style="font-size:.73rem;opacity:.7">Ctrl+S</span>
+      {{ (i18n or {}).get('save', "保存") }} <span style="font-size:.73rem;opacity:.7">Ctrl+S</span>
     </button>
     <button type="button" class="btn btn-s" onclick="closeEdit()">
-      取消 <span style="font-size:.73rem;opacity:.7">Esc</span>
+      {{ (i18n or {}).get('ov_js_cancel', "取消") }} <span style="font-size:.73rem;opacity:.7">Esc</span>
     </button>
   </div>
 </div>
@@ -240,7 +240,7 @@ function openEdit(key) {
   const val = tplData[key];
   const panel = document.getElementById('tpl-panel');
   document.getElementById('edit-key').value = key;
-  document.getElementById('panel-title').textContent = '编辑：' + (nameMap[key] || key);
+  document.getElementById('panel-title').textContent = window.T('tp_js001') + (nameMap[key] || key);
   document.getElementById('edit-label').textContent = nameMap[key] || key;
   // fill textarea
   let txt = '';
@@ -274,7 +274,7 @@ function onTaChange(ta) {
   const txt = ta.value;
   document.getElementById('char-cnt').textContent = txt.length;
   // update preview - show first non-empty line
-  const first = txt.split('\n').find(l => l.trim()) || '（空）';
+    const first = txt.split('\n').find(l => l.trim()) || '('+window.T('tp_js002');
   document.getElementById('preview-text').textContent = first.length > 150 ? first.slice(0,150)+'…' : first;
   // detect variables {varname}
   const vars = [...new Set((txt.match(/\{(\w+)\}/g) || []))];
@@ -304,13 +304,13 @@ async function _doSaveTemplate(fd){
     var r=await fetch('/templates/update',{method:'POST',body:fd,headers:{'Accept':'application/json'}});
     var d=await r.json();
     if(d.ok){
-      showToast(d.msg||'已保存','ok');
+      showToast(d.msg||window.T('wa_js_053'),'ok');
       var key=fd.get('key'),val=fd.get('value');
       var lines=val.split('\n').filter(function(l){return l.trim()});
       tplData[key]=lines.length>1?lines:(lines[0]||'');
       closeEdit();
-    }else showToast(d.msg||'保存失败','err');
-  }catch(e){showToast('网络错误','err')}
+    }else showToast(d.msg||window.T('ov_js_save_fail'),'err');
+  }catch(e){showToast(window.T('draft.net_err'),'err')}
   finally{btnLoading(btn,false)}
 }
 
@@ -325,10 +325,10 @@ function saveTemplate(){
   else if(cur&&typeof cur==='object') oldVal=Object.entries(cur).map(([k,v])=>k+': '+v).join('\n');
   /* 如有变化，显示 diff 预览 */
   if(newVal.trim()===oldVal.trim()){
-    showToast('内容未变更','info');return;
+    showToast(window.T('tp_js003'),'info');return;
   }
   var nameLabel=nameMap[key]||key;
-  showDiffPreview('变更预览：'+nameLabel, oldVal, newVal, ()=>_doSaveTemplate(fd));
+  showDiffPreview(window.T('tp_js004')+nameLabel, oldVal, newVal, ()=>_doSaveTemplate(fd));
 }
 document.addEventListener('keydown', e => {
   if ((e.ctrlKey||e.metaKey) && e.key==='s') {
@@ -359,8 +359,8 @@ function tplBatchDelete(){
   const keys=[...document.querySelectorAll('.tpl-cb:checked')].map(c=>c.dataset.key);
   if(!keys.length)return;
   showConfirm(
-    '批量删除模板',
-    `确认删除选中的 <strong>${keys.length}</strong> 个模板？此操作不可撤销。`,
+    window.T('tp_js005'),
+    `${window.T('tp_js006')} <strong>${keys.length}</strong> ${window.T('tp_js007')}`,
     async ()=>{
       try{
         const r=await fetch('/api/batch-templates',{
@@ -370,7 +370,7 @@ function tplBatchDelete(){
         });
         const d=await r.json();
         if(r.ok&&d.ok){
-          showToast(`已删除 ${d.removed.length} 个模板`,'ok');
+          showToast(window.Tf('tp_deleted_n', {n: d.removed.length}),'ok');
           // 从表格中移除对应行
           d.removed.forEach(k=>{
             const cb=document.querySelector(`.tpl-cb[data-key="${k}"]`);
@@ -380,9 +380,9 @@ function tplBatchDelete(){
           tplClearBatch();
           // 更新计数显示
           const countEl=document.querySelector('.actions');
-          if(countEl)countEl.textContent=`共 ${Object.keys(tplData).length} 个模板 · 点击编辑按钮打开侧栏`;
-        }else{showToast(d.detail||'删除失败','err');}
-      }catch(e){showToast('网络错误','err');}
+          if(countEl)countEl.textContent=window.Tf('tp_count_hint', {n: Object.keys(tplData).length});
+        }else{showToast(d.detail||window.T('inbox.toast.del_fail'),'err');}
+      }catch(e){showToast(window.T('draft.net_err'),'err');}
     }
   );
 }

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}危机审计 · {{ site_name|default('华灵科技客户转化聊天系统') }}{% endblock %}
-{% block page_title %}危机审计{% endblock %}
+{% block title %}{{ (i18n or {}).get('ca_s001', "危机审计") }} · {{ product_name|default((i18n or {}).get('brand.product', '智聊')) }}{% endblock %}
+{% block page_title %}{{ (i18n or {}).get('ca_s001', "危机审计") }}{% endblock %}
 {% block head %}
 <style>
 .ca-filters{display:flex;flex-wrap:wrap;gap:.6rem;align-items:flex-end;margin-bottom:1rem}
@@ -40,24 +40,24 @@
 <div class="card fa">
   <h2>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-    危机事件审计
-    <span style="font-size:.75rem;font-weight:400;color:var(--t2);margin-left:.4rem">R4→R6→R8 安全链留痕 · 需开启 companion.wellbeing.crisis_audit</span>
+    {{ (i18n or {}).get('ca_s002', "危机事件审计") }}
+    <span style="font-size:.75rem;font-weight:400;color:var(--t2);margin-left:.4rem">R4→R6→R8 {{ (i18n or {}).get('ca_s003', "安全链留痕 · 需开启") }} companion.wellbeing.crisis_audit</span>
   </h2>
   <div class="ca-summary" id="ca-summary"></div>
   <div class="ca-filters">
     <div class="f-grp">
-      <label class="f-lb">筛选用户 ID</label>
-      <input type="text" id="ca-prefix" placeholder="user_id 前缀" class="f-input">
+      <label class="f-lb">{{ (i18n or {}).get('ca_s004', "筛选用户") }} ID</label>
+      <input type="text" id="ca-prefix" placeholder="user_id {{ (i18n or {}).get('ca_s005', '前缀') }}" class="f-input">
     </div>
     <div class="f-grp">
-      <label class="f-lb">条数</label>
+      <label class="f-lb">{{ (i18n or {}).get('em_s014', "条数") }}</label>
       <input type="number" id="ca-limit" value="50" min="1" max="500" class="f-input" style="width:90px">
     </div>
     <label class="f-grp" style="display:flex;align-items:center;gap:.35rem;padding-bottom:.35rem">
       <input type="checkbox" id="ca-only-unhandled" checked>
-      <span style="font-size:.82rem;color:var(--t2)">仅未处理</span>
+      <span style="font-size:.82rem;color:var(--t2)">{{ (i18n or {}).get('ca_s006', "仅未处理") }}</span>
     </label>
-    <button type="button" class="btn btn-p" onclick="caLoad()">加载</button>
+    <button type="button" class="btn btn-p" onclick="caLoad()">{{ (i18n or {}).get('db_s027', "加载") }}</button>
   </div>
   <p id="ca-status" style="font-size:.8rem;color:var(--t2);margin-bottom:.6rem"></p>
   <div class="table-wrap">
@@ -65,29 +65,29 @@
       <thead>
         <tr>
           <th style="width:56px">ID</th>
-          <th style="min-width:120px">用户</th>
-          <th style="width:72px">等级</th>
-          <th style="width:90px">类别</th>
-          <th>摘要</th>
-          <th style="width:56px">连击</th>
-          <th style="width:120px">标记</th>
-          <th style="width:150px">时间</th>
-          <th style="width:88px">操作</th>
+          <th style="min-width:120px">{{ (i18n or {}).get('cases_user', "用户") }}</th>
+          <th style="width:72px">{{ (i18n or {}).get('ap_s023', "等级") }}</th>
+          <th style="width:90px">{{ (i18n or {}).get('wa_s053', "类别") }}</th>
+          <th>{{ (i18n or {}).get('rpa_js_summary', "摘要") }}</th>
+          <th style="width:56px">{{ (i18n or {}).get('ca_s007', "连击") }}</th>
+          <th style="width:120px">{{ (i18n or {}).get('ca_s008', "标记") }}</th>
+          <th style="width:150px">{{ (i18n or {}).get('time', "时间") }}</th>
+          <th style="width:88px">{{ (i18n or {}).get('ov_js_th_action', "操作") }}</th>
         </tr>
       </thead>
-      <tbody id="ca-body"><tr><td colspan="9" style="padding:2rem;color:var(--t3)">加载中…</td></tr></tbody>
+      <tbody id="ca-body"><tr><td colspan="9" style="padding:2rem;color:var(--t3)">{{ (i18n or {}).get('dash.loading', "加载中…") }}</td></tr></tbody>
     </table>
   </div>
 </div>
 
 <div class="ca-modal-bg" id="ca-modal-bg" onclick="if(event.target===this)caCloseModal()">
   <div class="ca-modal" role="dialog" aria-labelledby="ca-modal-title">
-    <h3 id="ca-modal-title">标记已处理</h3>
+    <h3 id="ca-modal-title">{{ (i18n or {}).get('ca_s009', "标记已处理") }}</h3>
     <p id="ca-modal-hint" style="font-size:.82rem;color:var(--t2);margin:0 0 .6rem"></p>
-    <textarea id="ca-modal-note" placeholder="处置备注（可选）：已电话联系 / 已转人工 / …"></textarea>
+    <textarea id="ca-modal-note" placeholder="{{ (i18n or {}).get('ca_s010', '处置备注（可选）：已电话联系 / 已转人工 / …') }}"></textarea>
     <div class="ca-modal-actions">
-      <button type="button" class="btn" onclick="caCloseModal()">取消</button>
-      <button type="button" class="btn btn-p" id="ca-modal-confirm" onclick="caConfirmHandle()">确认处置</button>
+      <button type="button" class="btn" onclick="caCloseModal()">{{ (i18n or {}).get('ov_js_cancel', "取消") }}</button>
+      <button type="button" class="btn btn-p" id="ca-modal-confirm" onclick="caConfirmHandle()">{{ (i18n or {}).get('ca_s011', "确认处置") }}</button>
     </div>
   </div>
 </div>
@@ -116,39 +116,39 @@ async function caLoad() {
   const st = document.getElementById('ca-status');
   const body = document.getElementById('ca-body');
   const summary = document.getElementById('ca-summary');
-  st.textContent = '加载中…';
+  st.textContent = window.T('dash.loading');
   body.innerHTML = '<tr><td colspan="9" style="padding:2rem">…</td></tr>';
   try {
     const q = new URLSearchParams({ limit: String(limit) });
     if (prefix) q.set('prefix', prefix);
     if (onlyUnhandled) q.set('only_unhandled', 'true');
     const res = await fetch('/api/crisis-events?' + q.toString());
-    if (!res.ok) { st.textContent = '错误 ' + res.status; return; }
+    if (!res.ok) { st.textContent = window.T('ln_js_036')+' ' + res.status; return; }
     const d = await res.json();
     const items = d.items || [];
     const unhandled = d.unhandled_total || 0;
     summary.innerHTML =
-      '<div class="ca-pill">本页 <strong>' + (d.count || items.length) + '</strong> 条</div>' +
-      '<div class="ca-pill' + (unhandled > 0 ? ' warn' : '') + '">未处理合计 <strong>' + unhandled + '</strong></div>';
-    st.textContent = '最近危机事件（按时间倒序）';
+      '<div class="ca-pill">'+window.T('ca_js001')+' <strong>' + (d.count || items.length) + '</strong> '+window.T('dash.items')+'</div>' +
+      '<div class="ca-pill' + (unhandled > 0 ? ' warn' : '') + '">'+window.T('ca_js002')+' <strong>' + unhandled + '</strong></div>';
+    st.textContent = window.T('ca_js003');
     if (!items.length) {
-      body.innerHTML = '<tr><td colspan="9" style="padding:2rem;color:var(--t3)">无记录</td></tr>';
+      body.innerHTML = '<tr><td colspan="9" style="padding:2rem;color:var(--t3)">'+window.T('em_js001')+'</td></tr>';
       return;
     }
     body.innerHTML = items.map(function(it) {
-      var ts = it.created_at ? new Date(it.created_at * 1000).toLocaleString() : '—';
-      var flags = flagBadge(it.escalated, '已升级', '未升级') +
-        flagBadge(it.safety_override, '兜底', '—');
+      var ts = it.created_at ? window.wsFmtDateTime(it.created_at) : '—';
+      var flags = flagBadge(it.escalated, window.T('ca_js006'), window.T('ca_js004')) +
+        flagBadge(it.safety_override, window.T('db_js_090'), '—');
       var handledInfo = it.handled
         ? esc(it.handled_by || '—') + (it.note ? '<br><span style="color:var(--t3);font-size:.72rem">' + esc(it.note) + '</span>' : '')
-        : '<span style="color:var(--amber);font-weight:600">待处理</span>';
+        : '<span style="color:var(--amber);font-weight:600">'+window.T('base.pill.sla_normal')+'</span>';
       var op = '';
       if (!it.handled && caCanHandle) {
-        op = '<button type="button" class="btn-handle" data-id="' + it.id + '" data-user="' + esc(it.user_id) + '" onclick="caOpenModal(this)">处置</button>';
+        op = '<button type="button" class="btn-handle" data-id="' + it.id + '" data-user="' + esc(it.user_id) + '" onclick="caOpenModal(this)">'+window.T('db_js_021')+'</button>';
       } else if (it.handled) {
-        op = '<span style="color:var(--t3);font-size:.75rem">已结案</span>';
+        op = '<span style="color:var(--t3);font-size:.75rem">'+window.T('cases_closed')+'</span>';
       } else {
-        op = '<span style="color:var(--t3);font-size:.75rem">只读</span>';
+        op = '<span style="color:var(--t3);font-size:.75rem">'+window.T('viewer_badge')+'</span>';
       }
       return '<tr class="' + (it.handled ? 'row-handled' : '') + '" data-id="' + it.id + '">' +
         '<td>' + it.id + '</td>' +
@@ -171,14 +171,14 @@ async function caLoad() {
       }
     });
   } catch (e) {
-    st.textContent = '请求失败: ' + e;
+    st.textContent = window.T('ov_js_req_fail')+': ' + e;
   }
 }
 
 function caOpenModal(el) {
   _caPendingId = parseInt(el.getAttribute('data-id'), 10);
   var userId = el.getAttribute('data-user') || '';
-  document.getElementById('ca-modal-hint').textContent = '事件 #' + _caPendingId + ' · 用户 ' + userId;
+  document.getElementById('ca-modal-hint').textContent = window.Tf('ca_tf_evt_user', {id: _caPendingId, user: userId});
   document.getElementById('ca-modal-note').value = '';
   document.getElementById('ca-modal-bg').classList.add('open');
 }
@@ -197,7 +197,7 @@ async function caConfirmHandle() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note: note })
     });
-    if (!res.ok) { alert('处置失败 ' + res.status); return; }
+    if (!res.ok) { alert(window.T('ca_js005')+' ' + res.status); return; }
     caCloseModal();
     caLoad();
   } catch (e) { alert(e); }

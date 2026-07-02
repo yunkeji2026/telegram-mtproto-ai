@@ -335,6 +335,54 @@ def test_thread_flag_on_reads_from_store(tmp_path):
     app.state.inbox_store.close()
 
 
+def test_thread_before_ts_reads_older_page(tmp_path):
+    app = _thread_client(read_from_store=True)
+    app.state.inbox_store = InboxStore(tmp_path / "i.db")
+    c = TestClient(app)
+    first = c.get(
+        "/api/unified-inbox/thread?platform=telegram&chat_key=tg-room&limit=2"
+    ).json()
+    assert [m["text"] for m in first["messages"]] == ["你好", "在吗"]
+
+    older = c.get(
+        "/api/unified-inbox/thread?platform=telegram&chat_key=tg-room"
+        "&limit=2&before_ts=131"
+    ).json()
+    assert [m["text"] for m in older["messages"]] == ["你好"]
+    assert older["oldest_ts"] == 130
+    app.state.inbox_store.close()
+
+
+def test_thread_from_store_does_not_reingest_preview(tmp_path):
+    """store-backed 会话打开线程时，不应把 last_message 预览重写成 :h: 入站假消息。"""
+    store = InboxStore(tmp_path / "i.db")
+    cid = "line:line-a:room"
+    chat = {
+        "conversation_id": cid, "platform": "line", "account_id": "line-a",
+        "chat_key": "room", "name": "Old User", "last_msg": "我方回复", "last_ts": 50,
+    }
+    ingest_thread(store, chat, [{
+        "text": "我方回复", "ts": 50, "direction": "out",
+        "source": {"message_id": "L-out-1"},
+    }])
+    app = FastAPI()
+    register_unified_inbox_routes(app, page_auth=lambda r: True,
+                                  api_auth=lambda r: True, templates=_Templates())
+    app.state.config_manager = _Cfg(True)
+    app.state.inbox_store = store
+    c = TestClient(app)
+
+    data = c.get(
+        "/api/unified-inbox/thread?platform=line&account_id=line-a&chat_key=room"
+    ).json()
+    assert data["ok"] is True
+    rows = store.list_recent_messages(cid, limit=10)
+    assert len(rows) == 1
+    assert rows[0]["direction"] == "out"
+    assert rows[0]["platform_msg_id"] == "L-out-1"
+    store.close()
+
+
 def test_thread_served_from_store_when_not_live(tmp_path):
     """会话已不在实时聚合窗口，但 store 有持久档 → 仍能从 store 读出历史 + header。"""
     store = InboxStore(tmp_path / "i.db")

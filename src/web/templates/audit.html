@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}操作记录 · {{ site_name|default('华灵科技客户转化聊天系统') }}{% endblock %}
-{% block page_title %}操作记录{% endblock %}
+{% block title %}{{ (i18n or {}).get('au_s001', "操作记录") }} · {{ product_name|default((i18n or {}).get('brand.product', '智聊')) }}{% endblock %}
+{% block page_title %}{{ (i18n or {}).get('au_s001', "操作记录") }}{% endblock %}
 {% block head %}
 <style>
 /* filter form */
@@ -57,16 +57,16 @@
 <div class="card fa pro-only" style="margin-bottom:.9rem">
   <h2>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-    操作活动热力图
-    <span style="font-size:.75rem;font-weight:400;color:var(--t2);margin-left:.4rem">最近 84 天</span>
+    {{ (i18n or {}).get('au_s002', "操作活动热力图") }}
+    <span style="font-size:.75rem;font-weight:400;color:var(--t2);margin-left:.4rem">{{ (i18n or {}).get('au_s003', "最近 84 天") }}</span>
   </h2>
-  <div id="hm-loading" style="font-size:.82rem;color:var(--t2)">加载中…</div>
+  <div id="hm-loading" style="font-size:.82rem;color:var(--t2)">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
   <div id="hm-content" style="display:none">
-    <div style="font-size:.75rem;color:var(--t2);margin-bottom:.6rem">每格代表一天，颜色越深表示操作次数越多</div>
+    <div style="font-size:.75rem;color:var(--t2);margin-bottom:.6rem">{{ (i18n or {}).get('au_s004', "每格代表一天，颜色越深表示操作次数越多") }}</div>
     <div class="hm-layout">
       <div class="hm-day-labels" id="hm-day-labels">
-        <span>日</span><span>一</span><span>二</span><span>三</span>
-        <span>四</span><span>五</span><span>六</span>
+        <span>{{ (i18n or {}).get('inbox.xls.ja', "日") }}</span><span>{{ (i18n or {}).get('au_s005', "一") }}</span><span>{{ (i18n or {}).get('au_s006', "二") }}</span><span>{{ (i18n or {}).get('au_s007', "三") }}</span>
+        <span>{{ (i18n or {}).get('au_s008', "四") }}</span><span>{{ (i18n or {}).get('au_s009', "五") }}</span><span>{{ (i18n or {}).get('au_s010', "六") }}</span>
       </div>
       <div style="flex:1;min-width:0">
         <div class="hm-month-labels" id="hm-month-labels"></div>
@@ -82,23 +82,23 @@
 
 <!-- P27-C: 快捷筛选预设（安全 / intent_tags 编辑栈相关 action） -->
 {% set _presets = [
-  ('web_body_oversize_rejected', '🛡 大 body 攻击 (413)', 'danger'),
-  ('rpa_intent_tags_rate_limited', '⚡ 限流命中 (429)', 'warn'),
-  ('rpa_intent_tags_write',  '📝 字典写入', 'info'),
-  ('rpa_intent_tags_restore', '↺ 字典恢复', 'info'),
-  ('rpa_intent_tags_reload', '🔄 字典 reload', 'info'),
+  ('web_body_oversize_rejected', (i18n or {}).get('au_preset_1', '🛡 大 body 攻击 (413)'), 'danger'),
+  ('rpa_intent_tags_rate_limited', (i18n or {}).get('au_preset_2', '⚡ 限流命中 (429)'), 'warn'),
+  ('rpa_intent_tags_write',  (i18n or {}).get('au_preset_3', '📝 字典写入'), 'info'),
+  ('rpa_intent_tags_restore', (i18n or {}).get('au_preset_4', '↺ 字典恢复'), 'info'),
+  ('rpa_intent_tags_reload', (i18n or {}).get('au_preset_5', '🔄 字典 reload'), 'info'),
 ] %}
 <div class="card fa" style="margin-bottom:.6rem">
   <h2 style="margin-bottom:.6rem">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9c2.05 0 3.94.68 5.46 1.83"/></svg>
-    快捷筛选
-    <span style="font-size:.72rem;font-weight:400;color:var(--t3);margin-left:.3rem">点击一次过滤；再点 [清除] 复位</span>
+    {{ (i18n or {}).get('au_s011', "快捷筛选") }}
+    <span style="font-size:.72rem;font-weight:400;color:var(--t3);margin-left:.3rem">{{ (i18n or {}).get('au_s012', "点击一次过滤；再点") }} [{{ (i18n or {}).get('inbox.dlm.clear', "清除") }}] {{ (i18n or {}).get('au_s013', "复位") }}</span>
   </h2>
   <div style="display:flex;flex-wrap:wrap;gap:.4rem">
     {% for a, label, kind in _presets %}
     <a href="/audit?action={{ a }}"
        class="btn btn-xs {% if filters and filters.action == a %}btn-p{% else %}btn-s{% endif %}"
-       title="筛选 action={{ a }}">{{ label }}</a>
+       title="{{ (i18n or {}).get('em_s010', '筛选') }} action={{ a }}">{{ label }}</a>
     {% endfor %}
   </div>
 </div>
@@ -107,7 +107,7 @@
 <div class="card fa">
   <h2>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
-    筛选条件
+    {{ (i18n or {}).get('au_s014', "筛选条件") }}
     <div class="actions">
       {% set export_qs = [] %}
       {% if filters %}
@@ -119,56 +119,56 @@
       {% endif %}
       <a href="/audit/export{% if export_qs %}?{{ export_qs|join('&') }}{% endif %}"
          class="btn btn-s btn-xs pro-only"
-         title="{% if export_qs %}导出当前筛选结果为 CSV{% else %}导出全部记录为 CSV{% endif %}">
+         title="{% if export_qs %}{{ (i18n or {}).get('au_s015', '导出当前筛选结果为') }} CSV{% else %}{{ (i18n or {}).get('au_s016', '导出全部记录为') }} CSV{% endif %}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        {% if export_qs %}导出筛选结果{% else %}导出全部{% endif %}
+        {% if export_qs %}{{ (i18n or {}).get('au_s017', "导出筛选结果") }}{% else %}{{ (i18n or {}).get('au_s018', "导出全部") }}{% endif %}
       </a>
     </div>
   </h2>
   <form method="get" action="/audit">
     <div class="filter-row">
       <div class="f-grp">
-        <label class="f-lbl">操作类型 <span class="tip" data-tip="intent" style="cursor:help;opacity:.5;font-size:.6rem;background:var(--bd2);width:13px;height:13px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center">?</span></label>
+        <label class="f-lbl">{{ (i18n or {}).get('au_s019', "操作类型") }} <span class="tip" data-tip="intent" style="cursor:help;opacity:.5;font-size:.6rem;background:var(--bd2);width:13px;height:13px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center">?</span></label>
         <select name="action">
-          <option value="">全部</option>
+          <option value="">{{ (i18n or {}).get('rpa_all', "全部") }}</option>
           {% for a in all_actions|default([]) %}
           <option value="{{ a }}" {% if filters and filters.action == a %}selected{% endif %}>{{ a }}</option>
           {% endfor %}
         </select>
       </div>
       <div class="f-grp">
-        <label class="f-lbl">操作人</label>
+        <label class="f-lbl">{{ (i18n or {}).get('operator', "操作人") }}</label>
         <select name="operator">
-          <option value="">全部</option>
+          <option value="">{{ (i18n or {}).get('rpa_all', "全部") }}</option>
           {% for op in all_operators|default([]) %}
           <option value="{{ op }}" {% if filters and filters.operator == op %}selected{% endif %}>{{ op }}</option>
           {% endfor %}
         </select>
       </div>
       <div class="f-grp">
-        <label class="f-lbl">目标 / 关键词</label>
-        <input type="text" name="channel" value="{{ filters.channel if filters else '' }}" placeholder="通道名 / 模板名 / 关键词">
+        <label class="f-lbl">{{ (i18n or {}).get('au_s020', "目标 / 关键词") }}</label>
+        <input type="text" name="channel" value="{{ filters.channel if filters else '' }}" placeholder="{{ (i18n or {}).get('au_s021', '通道名 / 模板名 / 关键词') }}">
       </div>
       <div class="f-grp">
-        <label class="f-lbl">起始日期</label>
+        <label class="f-lbl">{{ (i18n or {}).get('au_s022', "起始日期") }}</label>
         <input type="date" name="date_from" value="{{ filters.date_from if filters else '' }}">
       </div>
       <div class="f-grp">
-        <label class="f-lbl">结束日期</label>
+        <label class="f-lbl">{{ (i18n or {}).get('au_s023', "结束日期") }}</label>
         <input type="date" name="date_to" value="{{ filters.date_to if filters else '' }}">
       </div>
       <div class="f-grp" style="min-width:100px;flex:0">
         <label class="f-lbl">&nbsp;</label>
         <button type="submit" class="btn btn-p btn-sm" style="width:100%">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          搜索
+          {{ (i18n or {}).get('search', "搜索") }}
         </button>
       </div>
       {% set has_filter = filters and (filters.action or filters.operator or filters.channel or filters.date_from or filters.date_to) %}
       {% if has_filter %}
       <div class="f-grp" style="min-width:80px;flex:0">
         <label class="f-lbl">&nbsp;</label>
-        <a href="/audit" class="btn btn-s btn-sm" style="width:100%;justify-content:center">清除</a>
+        <a href="/audit" class="btn btn-s btn-sm" style="width:100%;justify-content:center">{{ (i18n or {}).get('inbox.dlm.clear', "清除") }}</a>
       </div>
       {% endif %}
     </div>
@@ -179,8 +179,8 @@
 <div class="card fa fa2">
   <h2>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-    操作时间轴
-    {% if total is defined %}<span style="font-weight:400;font-size:.8rem;color:var(--t3);margin-left:.3rem">共 {{ total }} 条</span>{% endif %}
+    {{ (i18n or {}).get('au_s024', "操作时间轴") }}
+    {% if total is defined %}<span style="font-weight:400;font-size:.8rem;color:var(--t3);margin-left:.3rem">{{ (i18n or {}).get('wa_js_019', "共") }} {{ total }} {{ (i18n or {}).get('dash.items', "条") }}</span>{% endif %}
   </h2>
   {% if records %}
   <div class="tl">
@@ -207,13 +207,13 @@
         </div>
         {% if r.old_val or r.new_val or r.snapshot_id %}
         <div class="tl-meta">
-          {% if r.snapshot_id %}<span style="font-size:.72rem;color:var(--t3)">快照: {{ r.snapshot_id }}</span>{% endif %}
+          {% if r.snapshot_id %}<span style="font-size:.72rem;color:var(--t3)">{{ (i18n or {}).get('au_s025', "快照") }}: {{ r.snapshot_id }}</span>{% endif %}
         </div>
         {% if r.old_val or r.new_val %}
-        <button class="tl-expand" onclick="toggleDiff(this)">▶ 查看变更</button>
+        <button class="tl-expand" onclick="toggleDiff(this)">▶ {{ (i18n or {}).get('au_s026', "查看变更") }}</button>
         <div class="tl-diff">
-          {% if r.old_val %}<div>旧值：<span class="rm">{{ r.old_val }}</span></div>{% endif %}
-          {% if r.new_val %}<div>新值：<span class="add">{{ r.new_val }}</span></div>{% endif %}
+          {% if r.old_val %}<div>{{ (i18n or {}).get('au_s027', "旧值：") }}<span class="rm">{{ r.old_val }}</span></div>{% endif %}
+          {% if r.new_val %}<div>{{ (i18n or {}).get('au_s028', "新值：") }}<span class="add">{{ r.new_val }}</span></div>{% endif %}
         </div>
         {% endif %}
         {% endif %}
@@ -236,7 +236,7 @@
   {% else %}
   <div class="empty">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-    <p>暂无操作记录</p>
+    <p>{{ (i18n or {}).get('db_s048', "暂无操作记录") }}</p>
   </div>
   {% endif %}
 </div>
@@ -245,7 +245,7 @@
 function toggleDiff(btn) {
   const d = btn.nextElementSibling;
   d.classList.toggle('show');
-  btn.textContent = d.classList.contains('show') ? '▼ 收起变更' : '▶ 查看变更';
+  btn.textContent = d.classList.contains('show') ? '▼ '+window.T('au_js001') : '▶ '+window.T('au_s026');
 }
 
 /* ── 活动热力图 ─────────────────────────────────────────── */
@@ -303,10 +303,10 @@ function toggleDiff(btn) {
       }
       const cell = document.createElement('div');
       cell.className = 'hm-cell' + (level ? ' l'+level : '');
-      cell.title = key + ': ' + cnt + ' 次操作';
+      cell.title = key + ': ' + cnt + ' '+window.T('au_js002');
       cell.addEventListener('mouseenter', evt => {
         tooltip.style.display = 'block';
-        tooltip.innerHTML = `<b>${key}</b><br>${cnt} 次操作`;
+        tooltip.innerHTML = `<b>${key}</b><br>${cnt} ${window.T('au_js002')}`;
       });
       cell.addEventListener('mousemove', evt => {
         tooltip.style.left = (evt.clientX + 12) + 'px';
@@ -318,7 +318,7 @@ function toggleDiff(btn) {
     cells.forEach(c => grid.appendChild(c));
 
     // Month labels above the grid
-    const monthNames = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+    const monthNames = ['1'+window.T('mo_js053'),'2'+window.T('mo_js053'),'3'+window.T('mo_js053'),'4'+window.T('mo_js053'),'5'+window.T('mo_js053'),'6'+window.T('mo_js053'),'7'+window.T('mo_js053'),'8'+window.T('mo_js053'),'9'+window.T('mo_js053'),'10'+window.T('mo_js053'),'11'+window.T('mo_js053'),'12'+window.T('mo_js053')];
     let prevMonth = -1, prevLeft = 0;
     const mlSpans = [];
     dates.forEach((d, i) => {
@@ -342,11 +342,11 @@ function toggleDiff(btn) {
 
     // Stats row
     statsEl.innerHTML =
-      `<span><strong>${totalOps}</strong> 次操作</span>` +
-      `<span><strong>${activeDays}</strong> 个活跃日</span>` +
-      `<span>最高单日 <strong>${maxDay}</strong> 次</span>`;
+      `<span><strong>${totalOps}</strong> ${window.T('au_js002')}</span>` +
+      `<span><strong>${activeDays}</strong> ${window.T('au_js004')}</span>` +
+      `<span>${window.T('au_js005')} <strong>${maxDay}</strong> ${window.T('au_js002')}</span>`;
 
-  }catch(e){ document.getElementById('hm-loading').textContent = '热力图加载失败'; }
+  }catch(e){ document.getElementById('hm-loading').textContent = window.T('au_js003'); }
 })();
 </script>
 {% endblock %}

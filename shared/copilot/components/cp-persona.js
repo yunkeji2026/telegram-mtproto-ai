@@ -21,9 +21,9 @@
         if (s && !s.disabled) this._onSelect(s.value);
       });
     }
-    emptyText() { return "选中会话后加载人设绑定…"; }
-    emptyDataText() { return "暂无人设可绑定"; }
-    errText() { return "人设绑定加载失败"; }
+    emptyText() { return this.t("cp.persona.empty"); }
+    emptyDataText() { return this.t("cp.persona.no_data"); }
+    errText() { return this.t("cp.persona.err"); }
     styles() {
       return `
       .lbl { font-size:var(--cp-fs-tiny,11px); color:var(--cp-text-dim,#64748b); margin-bottom:var(--cp-gap-xs,4px); }
@@ -56,16 +56,16 @@
       const esc = (s) => this.esc(s);
       const summary = Array.isArray(d.summary) ? d.summary : [];
       const boundId = d.boundId || "";
-      const opts = ['<option value="">未绑定（用账号/域默认）</option>']
+      const opts = [`<option value="">${esc(this.t("cp.persona.unbound_opt"))}</option>`]
         .concat(summary.map((p) => {
-          const label = p.role ? `${p.name}（${p.role}）` : (p.name || p.id);
+          const label = p.role ? `${p.name} (${p.role})` : (p.name || p.id);
           const sel = p.id === boundId ? " selected" : "";
           return `<option value="${esc(p.id)}"${sel}>${esc(label)}</option>`;
         }));
       const src = boundId
-        ? `<div class="src bound">已绑定：${esc(d.boundName || boundId)} · 全端（含 RPA）生效</div>`
-        : `<div class="src unbound">未绑定 · 跟随账号 / 域默认人设</div>`;
-      return `<div class="lbl">后台人设绑定（按会话，全端权威）</div>` +
+        ? `<div class="src bound">${esc(this.t("cp.persona.bound", { name: d.boundName || boundId }))}</div>`
+        : `<div class="src unbound">${esc(this.t("cp.persona.unbound"))}</div>`;
+      return `<div class="lbl">${esc(this.t("cp.persona.label"))}</div>` +
         `<select data-role="persona">${opts.join("")}</select>` + src;
     }
 

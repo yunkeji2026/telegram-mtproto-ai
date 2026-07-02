@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}{% if ui_mode == 'simple' %}AI 与转接设置{% else %}系统设置{% endif %} · {{ site_name|default('华灵科技客户转化聊天系统') }}{% endblock %}
-{% block page_title %}{% if ui_mode == 'simple' %}AI 与转接设置{% else %}系统设置{% endif %}{% endblock %}
+{% block title %}{% if ui_mode == 'simple' %}AI {{ (i18n or {}).get('set_s001', "与转接设置") }}{% else %}{{ (i18n or {}).get('system_settings', "系统设置") }}{% endif %} · {{ product_name|default((i18n or {}).get('brand.product', '智聊')) }}{% endblock %}
+{% block page_title %}{% if ui_mode == 'simple' %}AI {{ (i18n or {}).get('set_s001', "与转接设置") }}{% else %}{{ (i18n or {}).get('system_settings', "系统设置") }}{% endif %}{% endblock %}
 {% block head %}
 <style>
 /* ── 设置页专属样式 ──────────────────────────────── */
@@ -108,16 +108,16 @@ textarea.f-inp.he-json-area{font-family:ui-monospace,SFMono-Regular,Consolas,mon
 <div class="simple-guide" style="background:linear-gradient(135deg,rgba(91,124,246,.06),rgba(16,185,129,.06));border:1px solid rgba(91,124,246,.15);border-radius:10px;padding:.7rem 1rem;margin-bottom:.8rem;font-size:.82rem;color:var(--t2);display:flex;align-items:flex-start;gap:.6rem;max-width:min(920px,96vw)">
   <span style="font-size:1.1rem;flex-shrink:0;margin-top:.1rem">⚙️</span>
   <div>
-    <strong style="color:var(--t);font-size:.85rem">简洁模式</strong>
-    <div style="margin-top:.25rem;line-height:1.6">只显示 <strong>AI 提示词</strong>和<strong>人工转接</strong>设置。API Key、安全、Bot 行为等底层配置已移至<a href="/developer" style="color:var(--p);font-weight:600">开发者工具</a>（需密码）。</div>
-    <button onclick="this.closest('.simple-guide').style.display='none';localStorage.setItem('_guide_settings','1')" style="background:none;border:none;color:var(--p);cursor:pointer;font-size:.78rem;font-weight:600;padding:0;margin-top:.3rem">知道了，不再显示</button>
+    <strong style="color:var(--t);font-size:.85rem">{{ (i18n or {}).get('mode_simple', "简洁模式") }}</strong>
+    <div style="margin-top:.25rem;line-height:1.6">{{ (i18n or {}).get('set_s002', "只显示") }} <strong>AI {{ (i18n or {}).get('set_s003', "提示词") }}</strong>{{ (i18n or {}).get('set_s004', "和") }}<strong>{{ (i18n or {}).get('escalation', "人工转接") }}</strong>{{ (i18n or {}).get('set_s005', "设置。API Key、安全、Bot 行为等底层配置已移至") }}<a href="/developer" style="color:var(--p);font-weight:600">{{ (i18n or {}).get('developer', "开发者工具") }}</a>（{{ (i18n or {}).get('set_s006', "需密码）。") }}</div>
+    <button onclick="this.closest('.simple-guide').style.display='none';localStorage.setItem('_guide_settings','1')" style="background:none;border:none;color:var(--p);cursor:pointer;font-size:.78rem;font-weight:600;padding:0;margin-top:.3rem">{{ (i18n or {}).get('cases_guide_dismiss', "知道了，不再显示") }}</button>
   </div>
 </div>
 <script>if(localStorage.getItem('_guide_settings')==='1')document.querySelector('.simple-guide').style.display='none';</script>
 {% endif %}
 
 <p class="settings-tg-hint" style="font-size:.8rem;color:var(--t2);margin:0 0 .85rem;line-height:1.55;max-width:min(920px,96vw)">
-  <strong style="color:var(--t)">私聊</strong>不在本页。请打开侧边栏 <a href="/developer" style="color:var(--p);font-weight:600">开发者工具</a>（需开发者密码）→ 展开「<strong>Bot 行为配置</strong>」→ 勾选「<strong>私聊消息</strong>」并点「保存 Bot 配置」。勾选后才会像群聊一样处理私聊；取消勾选则只对私聊自动回复引导语。
+  <strong style="color:var(--t)">{{ (i18n or {}).get('set_s007', "私聊") }}</strong>{{ (i18n or {}).get('set_s008', "不在本页。请打开侧边栏") }} <a href="/developer" style="color:var(--p);font-weight:600">{{ (i18n or {}).get('developer', "开发者工具") }}</a>（{{ (i18n or {}).get('set_s009', "需开发者密码）") }}→ {{ (i18n or {}).get('wa_js_016', "展开") }}「<strong>Bot {{ (i18n or {}).get('set_s010', "行为配置") }}</strong>」→ {{ (i18n or {}).get('set_s011', "勾选") }}「<strong>{{ (i18n or {}).get('set_s012', "私聊消息") }}</strong>」{{ (i18n or {}).get('set_s013', "并点") }}「{{ (i18n or {}).get('set_s014', "保存 Bot 配置」") }}。{{ (i18n or {}).get('set_s015', "勾选后才会像群聊一样处理私聊；取消勾选则只对私聊自动回复引导语。") }}
 </p>
 
 <div class="settings-grid">
@@ -129,45 +129,58 @@ textarea.f-inp.he-json-area{font-family:ui-monospace,SFMono-Regular,Consolas,mon
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 7.4H22l-6 4.6 2.3 7.4-6.3-4.6L5.7 21l2.3-7.4-6-4.6h7.6z"/></svg>
       </div>
       <div>
-        <div class="acc-title">品牌 / 白标 <span id="br-plan-tag" style="font-size:.68rem;padding:.12rem .45rem;border-radius:5px;background:rgba(139,92,246,.14);color:#7c3aed;font-weight:600;vertical-align:middle;margin-left:.4rem"></span></div>
-        <div class="acc-sub">自定义系统名称 / 主题色 / Logo / 登录文案；去除厂商署名为旗舰版功能</div>
+        <div class="acc-title">{{ (i18n or {}).get('set_s016', "品牌 / 白标") }} <span id="br-plan-tag" style="font-size:.68rem;padding:.12rem .45rem;border-radius:5px;background:rgba(139,92,246,.14);color:#7c3aed;font-weight:600;vertical-align:middle;margin-left:.4rem"></span></div>
+        <div class="acc-sub">{{ (i18n or {}).get('set_s017', "自定义系统名称 / 主题色 / Logo / 登录文案；去除厂商署名为旗舰版功能") }}</div>
       </div>
       <svg class="acc-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
     </div>
     <div class="acc-body" id="body-brand">
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1rem;">
         <div>
-          <label class="f-lbl">系统名称</label>
-          <input class="f-inp" type="text" id="br-site_name" placeholder="如：星辰客户转化系统">
+          <label class="f-lbl">{{ (i18n or {}).get('set_s296', "公司名称") }}</label>
+          <input class="f-inp" type="text" id="br-company_name" placeholder="{{ (i18n or {}).get('set_s297', '如：无界科技') }}">
         </div>
         <div>
-          <label class="f-lbl">简称（顶栏/气泡标题）</label>
-          <input class="f-inp" type="text" id="br-site_name_short" placeholder="如：星辰科技">
+          <label class="f-lbl">{{ (i18n or {}).get('set_s298', "产品名称") }}</label>
+          <input class="f-inp" type="text" id="br-product_name" placeholder="{{ (i18n or {}).get('set_s299', '如：智聊') }}">
         </div>
         <div>
-          <label class="f-lbl">主题色</label>
+          <label class="f-lbl">{{ (i18n or {}).get('set_s018', "系统名称") }}</label>
+          <input class="f-inp" type="text" id="br-site_name" placeholder="{{ (i18n or {}).get('set_s019', '如：无界 · 智聊') }}">
+        </div>
+        <div>
+          <label class="f-lbl">{{ (i18n or {}).get('set_s020', "公司简称") }}</label>
+          <input class="f-inp" type="text" id="br-site_name_short" placeholder="{{ (i18n or {}).get('set_s021', '如：无界科技') }}">
+        </div>
+        <div>
+          <label class="f-lbl">{{ (i18n or {}).get('set_s022', "主题色") }}</label>
           <input class="f-inp" type="text" id="br-primary_color" placeholder="#2563eb">
         </div>
         <div>
-          <label class="f-lbl">Logo 链接（URL）</label>
+          <label class="f-lbl">Logo {{ (i18n or {}).get('set_s023', "链接（URL）") }}</label>
           <input class="f-inp" type="text" id="br-logo_url" placeholder="https://…/logo.png">
         </div>
+        <div>
+          <label class="f-lbl">{{ (i18n or {}).get('set_s301', "官网 / 产品族链接") }}</label>
+          <input class="f-inp" type="text" id="br-website_url" placeholder="https://…">
+        </div>
         <div style="grid-column:1/-1;">
-          <label class="f-lbl">登录页副标题</label>
-          <input class="f-inp" type="text" id="br-login_subtitle" placeholder="如：让每一次对话都成交">
+          <label class="f-lbl">{{ (i18n or {}).get('set_s024', "登录页场景后缀") }}</label>
+          <input class="f-inp" type="text" id="br-login_subtitle" placeholder="{{ (i18n or {}).get('set_s025', '如：管理控制台') }}">
+          <p style="font-size:.72rem;color:var(--t3);margin-top:.35rem;">{{ (i18n or {}).get('set_s300', "登录页显示为「产品名 · 此后缀」，默认：管理控制台") }}</p>
         </div>
       </div>
       <label style="display:flex;align-items:center;gap:.5rem;margin-top:1rem;font-size:.85rem;" id="br-hide-wrap">
         <input type="checkbox" id="br-hide_powered_by">
-        <span>去除「Powered by」厂商署名</span>
-        <span id="br-hide-lock" style="font-size:.72rem;color:#b45309;display:none;">（旗舰版功能，当前套餐不可用）</span>
+        <span>{{ (i18n or {}).get('set_s026', "去除") }}「Powered by」{{ (i18n or {}).get('set_s027', "厂商署名") }}</span>
+        <span id="br-hide-lock" style="font-size:.72rem;color:#b45309;display:none;">（{{ (i18n or {}).get('set_s028', "旗舰版功能，当前套餐不可用）") }}</span>
       </label>
       <div style="margin-top:1rem;display:flex;align-items:center;gap:.8rem;">
-        <button class="btn-primary" onclick="brSave()" style="padding:.5rem 1.2rem;border:0;border-radius:8px;background:var(--p);color:#fff;font-weight:600;cursor:pointer;">保存品牌</button>
+        <button class="btn-primary" onclick="brSave()" style="padding:.5rem 1.2rem;border:0;border-radius:8px;background:var(--p);color:#fff;font-weight:600;cursor:pointer;">{{ (i18n or {}).get('set_s029', "保存品牌") }}</button>
         <span class="save-result" id="br-res" style="font-size:.82rem;"></span>
       </div>
       <p style="font-size:.76rem;color:var(--t3);margin-top:.8rem;line-height:1.6;">
-        保存即写入 <code>config.local.yaml</code> 并即时生效（部分页面需刷新）。品牌文件不入库，安全隔离。
+        {{ (i18n or {}).get('set_s030', "保存即写入") }} <code>config.local.yaml</code> {{ (i18n or {}).get('set_s031', "并即时生效（部分页面需刷新）。品牌文件不入库，安全隔离。") }}
       </p>
     </div>
   </div>
@@ -177,13 +190,16 @@ textarea.f-inp.he-json-area{font-family:ui-monospace,SFMono-Regular,Consolas,mon
     function load(){
       fetch('/api/admin/branding').then(function(r){return r.json();}).then(function(d){
         if(!d||!d.ok) return;
+        g('br-company_name').value=d.company_name||'';
+        g('br-product_name').value=d.product_name||'';
         g('br-site_name').value=d.site_name||'';
         g('br-site_name_short').value=d.site_name_short||'';
         g('br-primary_color').value=d.primary_color||'';
         g('br-logo_url').value=d.logo_url||'';
+        g('br-website_url').value=d.website_url||'';
         g('br-login_subtitle').value=d.login_subtitle||'';
         g('br-hide_powered_by').checked=!!d.hide_powered_by;
-        var tag=g('br-plan-tag'); if(tag) tag.textContent=(d.white_label?'白标可用':'基础品牌');
+        var tag=g('br-plan-tag'); if(tag) tag.textContent=(d.white_label?window.T('set_js_001'):window.T('set_js_002'));
         if(!d.white_label){
           g('br-hide_powered_by').disabled=true;
           g('br-hide-lock').style.display='inline';
@@ -191,18 +207,20 @@ textarea.f-inp.he-json-area{font-family:ui-monospace,SFMono-Regular,Consolas,mon
       }).catch(function(){});
     }
     window.brSave=function(){
-      var res=g('br-res'); res.textContent='保存中…'; res.style.color='var(--t3)';
+      var res=g('br-res'); res.textContent=window.T('ov_js_saving'); res.style.color='var(--t3)';
       var values={
+        company_name:g('br-company_name').value, product_name:g('br-product_name').value,
         site_name:g('br-site_name').value, site_name_short:g('br-site_name_short').value,
         primary_color:g('br-primary_color').value, logo_url:g('br-logo_url').value,
+        website_url:g('br-website_url').value,
         login_subtitle:g('br-login_subtitle').value,
         hide_powered_by:g('br-hide_powered_by').checked
       };
       fetch('/api/admin/branding',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({values:values})})
         .then(function(r){return r.json();}).then(function(d){
-          if(d&&d.ok){ res.textContent='✓ 已保存（刷新后全面生效）'; res.style.color='#16a34a'; }
-          else { res.textContent='保存失败：'+((d&&d.detail)||'未知错误'); res.style.color='#dc2626'; }
-        }).catch(function(){ res.textContent='保存失败（网络错误）'; res.style.color='#dc2626'; });
+          if(d&&d.ok){ res.textContent='✓ '+window.T('set_js_003'); res.style.color='#16a34a'; }
+          else { res.textContent=window.T('ov_js_save_fail_e')+((d&&d.detail)||window.T('inbox.voice.unknown_err')); res.style.color='#dc2626'; }
+        }).catch(function(){ res.textContent=window.T('set_js_004'); res.style.color='#dc2626'; });
     };
     load();
   })();
@@ -215,19 +233,19 @@ textarea.f-inp.he-json-area{font-family:ui-monospace,SFMono-Regular,Consolas,mon
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
       </div>
       <div>
-        <div class="acc-title">试用 / 演示数据 <span id="demo-tag" style="font-size:.68rem;padding:.12rem .45rem;border-radius:5px;background:rgba(6,182,212,.14);color:#0891b2;font-weight:600;vertical-align:middle;margin-left:.4rem"></span></div>
-        <div class="acc-sub">一键铺示例会话/草稿/坐席数据，让 ROI/质量/用量看板当场有效果；可一键清空</div>
+        <div class="acc-title">{{ (i18n or {}).get('set_s032', "试用 / 演示数据") }} <span id="demo-tag" style="font-size:.68rem;padding:.12rem .45rem;border-radius:5px;background:rgba(6,182,212,.14);color:#0891b2;font-weight:600;vertical-align:middle;margin-left:.4rem"></span></div>
+        <div class="acc-sub">{{ (i18n or {}).get('set_s033', "一键铺示例会话/草稿/坐席数据，让 ROI/质量/用量看板当场有效果；可一键清空") }}</div>
       </div>
       <svg class="acc-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
     </div>
     <div class="acc-body" id="body-demo">
       <div style="padding:.8rem 1rem;background:rgba(124,58,237,.06);border:1px solid rgba(124,58,237,.2);border-radius:10px;font-size:.82rem;color:var(--t2);line-height:1.6;margin-bottom:1rem;">
-        示例数据全部写在 <code>demo:</code> 命名空间，<strong>一键可整体清空，绝不污染真实数据</strong>。适合销售演示 / 上线前体验看板效果。
+        {{ (i18n or {}).get('set_s034', "示例数据全部写在") }} <code>demo:</code> {{ (i18n or {}).get('set_s035', "命名空间，") }}<strong>{{ (i18n or {}).get('set_s036', "一键可整体清空，绝不污染真实数据") }}</strong>。{{ (i18n or {}).get('set_s037', "适合销售演示 / 上线前体验看板效果。") }}
       </div>
-      <div id="demo-status" style="font-size:.85rem;color:var(--t2);margin-bottom:1rem;">加载中…</div>
+      <div id="demo-status" style="font-size:.85rem;color:var(--t2);margin-bottom:1rem;">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
       <div style="display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;">
-        <button onclick="demoSeed()" id="demo-seed-btn" style="padding:.5rem 1.2rem;border:0;border-radius:8px;background:#7c3aed;color:#fff;font-weight:600;cursor:pointer;">铺示例数据</button>
-        <button onclick="demoClear()" id="demo-clear-btn" style="padding:.5rem 1.2rem;border:1px solid #d1d5db;border-radius:8px;background:#fff;color:#374151;font-weight:600;cursor:pointer;">清空演示数据</button>
+        <button onclick="demoSeed()" id="demo-seed-btn" style="padding:.5rem 1.2rem;border:0;border-radius:8px;background:#7c3aed;color:#fff;font-weight:600;cursor:pointer;">{{ (i18n or {}).get('set_s038', "铺示例数据") }}</button>
+        <button onclick="demoClear()" id="demo-clear-btn" style="padding:.5rem 1.2rem;border:1px solid #d1d5db;border-radius:8px;background:#fff;color:#374151;font-weight:600;cursor:pointer;">{{ (i18n or {}).get('set_s039', "清空演示数据") }}</button>
         <span class="save-result" id="demo-res" style="font-size:.82rem;"></span>
       </div>
     </div>
@@ -235,35 +253,35 @@ textarea.f-inp.he-json-area{font-family:ui-monospace,SFMono-Regular,Consolas,mon
   <script>
   (function(){
     function g(id){return document.getElementById(id);}
-    function fmt(c){c=c||{};return '会话 '+(c.conversations||0)+' · 消息 '+(c.messages||0)+' · 草稿处置 '+(c.draft_audits||0);}
+    function fmt(c){c=c||{};return window.T('dash.ws.col_convs')+' '+(c.conversations||0)+' · '+window.T('set_js_005')+' '+(c.messages||0)+' · '+window.T('set_js_006')+' '+(c.draft_audits||0);}
     function refresh(){
       fetch('/api/admin/demo').then(function(r){return r.json();}).then(function(d){
-        if(!d||!d.ok){ g('demo-status').textContent='状态读取失败'; return; }
+        if(!d||!d.ok){ g('demo-status').textContent=window.T('msg_js_010'); return; }
         var tag=g('demo-tag');
-        if(d.present){ g('demo-status').textContent='当前已有演示数据：'+fmt(d.counts); if(tag) tag.textContent='演示中'; }
-        else { g('demo-status').textContent='当前无演示数据。'; if(tag) tag.textContent=''; }
-      }).catch(function(){ g('demo-status').textContent='状态读取失败'; });
+        if(d.present){ g('demo-status').textContent=window.T('set_js_007')+fmt(d.counts); if(tag) tag.textContent=window.T('set_js_008'); }
+        else { g('demo-status').textContent=window.T('set_js_009'); if(tag) tag.textContent=''; }
+      }).catch(function(){ g('demo-status').textContent=window.T('msg_js_010'); });
     }
     window.demoSeed=function(){
-      var res=g('demo-res'); res.textContent='铺设中…'; res.style.color='var(--t3)';
+      var res=g('demo-res'); res.textContent=window.T('set_js_010'); res.style.color='var(--t3)';
       g('demo-seed-btn').disabled=true;
       fetch('/api/admin/demo/seed',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
         .then(function(r){return r.json();}).then(function(d){
           g('demo-seed-btn').disabled=false;
-          if(d&&d.ok){ res.textContent='✓ 已铺设（会话 '+d.conversations+' · 消息 '+d.messages+' · 处置 '+d.draft_audits+'）'; res.style.color='#16a34a'; refresh(); }
-          else { res.textContent='铺设失败：'+((d&&d.detail)||'未知'); res.style.color='#dc2626'; }
-        }).catch(function(){ g('demo-seed-btn').disabled=false; res.textContent='铺设失败（网络错误）'; res.style.color='#dc2626'; });
+          if(d&&d.ok){ res.textContent='✓ '+window.T('set_js_011')+' '+d.conversations+' · '+window.T('set_js_005')+' '+d.messages+' · '+window.T('db_js_021')+' '+d.draft_audits+'）'; res.style.color='#16a34a'; refresh(); }
+          else { res.textContent=window.T('set_js_012')+((d&&d.detail)||window.T('rpa_unknown')); res.style.color='#dc2626'; }
+        }).catch(function(){ g('demo-seed-btn').disabled=false; res.textContent=window.T('set_js_013'); res.style.color='#dc2626'; });
     };
     window.demoClear=function(){
-      if(!confirm('确认清空所有演示数据？（仅删 demo: 命名空间，不影响真实数据）')) return;
-      var res=g('demo-res'); res.textContent='清空中…'; res.style.color='var(--t3)';
+      if(!confirm(window.T('set_js_014')+' demo: '+window.T('set_js_015'))) return;
+      var res=g('demo-res'); res.textContent=window.T('set_js_016'); res.style.color='var(--t3)';
       g('demo-clear-btn').disabled=true;
       fetch('/api/admin/demo/clear',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
         .then(function(r){return r.json();}).then(function(d){
           g('demo-clear-btn').disabled=false;
-          if(d&&d.ok){ res.textContent='✓ 已清空'; res.style.color='#16a34a'; refresh(); }
-          else { res.textContent='清空失败：'+((d&&d.detail)||'未知'); res.style.color='#dc2626'; }
-        }).catch(function(){ g('demo-clear-btn').disabled=false; res.textContent='清空失败（网络错误）'; res.style.color='#dc2626'; });
+          if(d&&d.ok){ res.textContent='✓ '+window.T('set_js_017'); res.style.color='#16a34a'; refresh(); }
+          else { res.textContent=window.T('set_js_018')+((d&&d.detail)||window.T('rpa_unknown')); res.style.color='#dc2626'; }
+        }).catch(function(){ g('demo-clear-btn').disabled=false; res.textContent=window.T('set_js_019'); res.style.color='#dc2626'; });
     };
     refresh();
   })();
@@ -276,8 +294,8 @@ textarea.f-inp.he-json-area{font-family:ui-monospace,SFMono-Regular,Consolas,mon
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
       </div>
       <div>
-        <div class="acc-title">AI 提示词 & 行为配置 <span style="font-size:.68rem;padding:.12rem .45rem;border-radius:5px;background:rgba(59,130,246,.12);color:#2563eb;font-weight:600;vertical-align:middle;margin-left:.4rem">Telegram 专用</span></div>
-        <div class="acc-sub">控制 Telegram 端 AI 的人格、回复风格、SOP 规则 — 三端 RPA 使用独立人设</div>
+        <div class="acc-title">AI {{ (i18n or {}).get('set_s003', "提示词") }} & {{ (i18n or {}).get('set_s010', "行为配置") }} <span style="font-size:.68rem;padding:.12rem .45rem;border-radius:5px;background:rgba(59,130,246,.12);color:#2563eb;font-weight:600;vertical-align:middle;margin-left:.4rem">Telegram {{ (i18n or {}).get('set_s040', "专用") }}</span></div>
+        <div class="acc-sub">{{ (i18n or {}).get('set_s041', "控制 Telegram 端 AI 的人格、回复风格、SOP 规则") }} — {{ (i18n or {}).get('set_s042', "三端 RPA 使用独立人设") }}</div>
       </div>
       <svg class="acc-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
     </div>
@@ -286,67 +304,67 @@ textarea.f-inp.he-json-area{font-family:ui-monospace,SFMono-Regular,Consolas,mon
       <div style="margin-bottom:1rem;padding:.7rem 1rem;background:linear-gradient(135deg,rgba(251,191,36,.08),rgba(245,158,11,.12));border:1px solid rgba(245,158,11,.35);border-radius:10px;line-height:1.7;font-size:.82rem;display:flex;align-items:flex-start;gap:.7rem">
         <span style="font-size:1.2rem;flex-shrink:0;margin-top:.1rem">⚠️</span>
         <div>
-          <strong style="color:#b45309;font-size:.84rem">作用域：仅 Telegram</strong><br>
-          以下 AI 名称、回复风格、系统提示词<strong>仅影响 Telegram 端</strong>。<br>
-          三端 RPA（Messenger / LINE / WhatsApp）使用独立人设系统，请前往各自设置页配置：
+          <strong style="color:#b45309;font-size:.84rem">{{ (i18n or {}).get('set_s043', "作用域：仅") }} Telegram</strong><br>
+          {{ (i18n or {}).get('set_s044', "以下 AI 名称、回复风格、系统提示词") }}<strong>{{ (i18n or {}).get('set_s045', "仅影响 Telegram 端") }}</strong>。<br>
+          {{ (i18n or {}).get('set_s046', "三端 RPA（Messenger / LINE / WhatsApp）使用独立人设系统，请前往各自设置页配置：") }}
           <div style="margin-top:.4rem;display:flex;flex-wrap:wrap;gap:.35rem">
-            <a href="/messenger-rpa" style="display:inline-flex;align-items:center;gap:.25rem;padding:.15rem .55rem;border-radius:6px;background:rgba(59,130,246,.1);color:#2563eb;font-weight:600;font-size:.74rem;text-decoration:none;border:1px solid rgba(59,130,246,.2)">🔵 Messenger</a>
-            <a href="/line-rpa" style="display:inline-flex;align-items:center;gap:.25rem;padding:.15rem .55rem;border-radius:6px;background:rgba(34,197,94,.1);color:#16a34a;font-weight:600;font-size:.74rem;text-decoration:none;border:1px solid rgba(34,197,94,.2)">🟢 LINE</a>
-            <a href="/whatsapp-rpa" style="display:inline-flex;align-items:center;gap:.25rem;padding:.15rem .55rem;border-radius:6px;background:rgba(37,211,102,.1);color:#15803d;font-weight:600;font-size:.74rem;text-decoration:none;border:1px solid rgba(37,211,102,.2)">🟠 WhatsApp</a>
+            <a href="/messenger-rpa" style="display:inline-flex;align-items:center;gap:.25rem;padding:.15rem .55rem;border-radius:6px;background:rgba(59,130,246,.1);color:#2563eb;font-weight:600;font-size:.74rem;text-decoration:none;border:1px solid rgba(59,130,246,.2)"><i data-platform-icon="messenger" data-size="15" style="display:inline-flex;line-height:0"></i> Messenger</a>
+            <a href="/line-rpa" style="display:inline-flex;align-items:center;gap:.25rem;padding:.15rem .55rem;border-radius:6px;background:rgba(34,197,94,.1);color:#16a34a;font-weight:600;font-size:.74rem;text-decoration:none;border:1px solid rgba(34,197,94,.2)"><i data-platform-icon="line" data-size="15" style="display:inline-flex;line-height:0"></i> LINE</a>
+            <a href="/whatsapp-rpa" style="display:inline-flex;align-items:center;gap:.25rem;padding:.15rem .55rem;border-radius:6px;background:rgba(37,211,102,.1);color:#15803d;font-weight:600;font-size:.74rem;text-decoration:none;border:1px solid rgba(37,211,102,.2)"><i data-platform-icon="whatsapp" data-size="15" style="display:inline-flex;line-height:0"></i> WhatsApp</a>
           </div>
         </div>
       </div>
       <div class="f-hint" style="margin-bottom:1rem;padding:.6rem .8rem;background:var(--ps);border-radius:8px;border:1px solid var(--p);line-height:1.6">
-        <strong>这里控制 Telegram AI 的「大脑」</strong> — 修改后保存即刻生效，无需重启。<br>
-        通道话术模板请在 <a href="/knowledge" style="color:var(--p);font-weight:600">知识库</a> 中编辑，这里控制 Telegram AI 的总体人格和回复规则。
+        <strong>{{ (i18n or {}).get('set_s047', "这里控制 Telegram AI 的") }}「{{ (i18n or {}).get('set_s048', "大脑」") }}</strong> — {{ (i18n or {}).get('set_s049', "修改后保存即刻生效，无需重启。") }}<br>
+        {{ (i18n or {}).get('set_s050', "通道话术模板请在") }} <a href="/knowledge" style="color:var(--p);font-weight:600">{{ (i18n or {}).get('knowledge', "知识库") }}</a> {{ (i18n or {}).get('set_s051', "中编辑，这里控制 Telegram AI 的总体人格和回复规则。") }}
       </div>
 
       <!-- 快速设置 -->
       <div class="f-grid" style="margin-bottom:.75rem">
         <div class="f-row">
-          <label class="f-lbl">AI 客服名称</label>
+          <label class="f-lbl">AI {{ (i18n or {}).get('set_s052', "客服名称") }}</label>
           <input class="f-inp" type="text" id="prompt-ai_name"
             value="{{ ai.get('ai_name', '') }}"
-            placeholder="客服小灵（留空则使用提示词中的名字）">
-          <div class="f-hint">修改后 AI 会以此名字自称。留空则由下方系统提示词决定。</div>
+            placeholder="{{ (i18n or {}).get('set_s053', '客服小灵（留空则使用提示词中的名字）') }}">
+          <div class="f-hint">{{ (i18n or {}).get('set_s054', "修改后 AI 会以此名字自称。留空则由下方系统提示词决定。") }}</div>
         </div>
         <div class="f-row">
-          <label class="f-lbl">回复风格</label>
+          <label class="f-lbl">{{ (i18n or {}).get('psn_js_174', "回复风格") }}</label>
           <select class="f-inp" id="prompt-reply_style" style="cursor:pointer">
-            <option value="">使用提示词默认风格</option>
-            <option value="concise" {{ 'selected' if ai.get('reply_style')=='concise' else '' }}>简洁干练</option>
-            <option value="warm" {{ 'selected' if ai.get('reply_style')=='warm' else '' }}>温暖亲切</option>
-            <option value="professional" {{ 'selected' if ai.get('reply_style')=='professional' else '' }}>正式专业</option>
+            <option value="">{{ (i18n or {}).get('set_s055', "使用提示词默认风格") }}</option>
+            <option value="concise" {{ 'selected' if ai.get('reply_style')=='concise' else '' }}>{{ (i18n or {}).get('set_s056', "简洁干练") }}</option>
+            <option value="warm" {{ 'selected' if ai.get('reply_style')=='warm' else '' }}>{{ (i18n or {}).get('set_s057', "温暖亲切") }}</option>
+            <option value="professional" {{ 'selected' if ai.get('reply_style')=='professional' else '' }}>{{ (i18n or {}).get('set_s058', "正式专业") }}</option>
           </select>
-          <div class="f-hint">快速切换 AI 的整体语气风格，会叠加在系统提示词之上。</div>
+          <div class="f-hint">{{ (i18n or {}).get('set_s059', "快速切换 AI 的整体语气风格，会叠加在系统提示词之上。") }}</div>
         </div>
       </div>
 
       <!-- 区段导航 -->
       <div class="f-row">
-        <label class="f-lbl" data-help="system_prompt">系统提示词（System Prompt）</label>
+        <label class="f-lbl" data-help="system_prompt">{{ (i18n or {}).get('set_s060', "系统提示词（System Prompt）") }}</label>
         <div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-bottom:.4rem">
-          <button class="btn btn-s" style="font-size:.7rem;padding:.15rem .55rem;border-radius:6px" onclick="jumpToSection('角色')">角色</button>
-          <button class="btn btn-s" style="font-size:.7rem;padding:.15rem .55rem;border-radius:6px" onclick="jumpToSection('多语言')">多语言</button>
-          <button class="btn btn-s" style="font-size:.7rem;padding:.15rem .55rem;border-radius:6px" onclick="jumpToSection('回复原则')">回复原则</button>
-          <button class="btn btn-s" style="font-size:.7rem;padding:.15rem .55rem;border-radius:6px" onclick="jumpToSection('言简意赅')">言简意赅</button>
-          <button class="btn btn-s" style="font-size:.7rem;padding:.15rem .55rem;border-radius:6px" onclick="jumpToSection('人设与风格')">人设风格</button>
-          <button class="btn btn-s" style="font-size:.7rem;padding:.15rem .55rem;border-radius:6px" onclick="jumpToSection('订单状态')">订单规则</button>
+          <button class="btn btn-s" style="font-size:.7rem;padding:.15rem .55rem;border-radius:6px" onclick="jumpToSection('{{ (i18n or {}).get('psn_th_role', "角色") }}')">{{ (i18n or {}).get('psn_th_role', "角色") }}</button>
+          <button class="btn btn-s" style="font-size:.7rem;padding:.15rem .55rem;border-radius:6px" onclick="jumpToSection('{{ (i18n or {}).get('set_s061', "多语言") }}')">{{ (i18n or {}).get('set_s061', "多语言") }}</button>
+          <button class="btn btn-s" style="font-size:.7rem;padding:.15rem .55rem;border-radius:6px" onclick="jumpToSection('{{ (i18n or {}).get('set_s062', "回复原则") }}')">{{ (i18n or {}).get('set_s062', "回复原则") }}</button>
+          <button class="btn btn-s" style="font-size:.7rem;padding:.15rem .55rem;border-radius:6px" onclick="jumpToSection('{{ (i18n or {}).get('set_s063', "言简意赅") }}')">{{ (i18n or {}).get('set_s063', "言简意赅") }}</button>
+          <button class="btn btn-s" style="font-size:.7rem;padding:.15rem .55rem;border-radius:6px" onclick="jumpToSection('{{ (i18n or {}).get('set_s064', "人设与风格") }}')">{{ (i18n or {}).get('set_s065', "人设风格") }}</button>
+          <button class="btn btn-s" style="font-size:.7rem;padding:.15rem .55rem;border-radius:6px" onclick="jumpToSection('{{ (i18n or {}).get('set_s066', "订单状态") }}')">{{ (i18n or {}).get('set_s067', "订单规则") }}</button>
         </div>
         <textarea class="f-inp" id="prompt-system_prompt" rows="18"
           style="resize:vertical;font-family:'Cascadia Code','Consolas','Courier New',monospace;font-size:.82rem;min-height:360px;line-height:1.6;white-space:pre-wrap"
-          placeholder="你是客服1号，负责客户订单查询服务的客服...">{{ ai.get('system_prompt','') }}</textarea>
+          placeholder="{{ (i18n or {}).get('set_s068', '你是客服1号，负责客户订单查询服务的客服') }}...">{{ ai.get('system_prompt','') }}</textarea>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-top:.3rem">
           <div class="f-hint">
-            改动较大时建议先在 <a href="/knowledge" style="color:var(--p)">知识库沙盒</a> 测试效果。
+            {{ (i18n or {}).get('set_s069', "改动较大时建议先在") }} <a href="/knowledge" style="color:var(--p)">{{ (i18n or {}).get('set_s070', "知识库沙盒") }}</a> {{ (i18n or {}).get('set_s071', "测试效果。") }}
           </div>
           <span id="prompt-char-count" style="font-size:.72rem;color:var(--t3);white-space:nowrap;margin-left:1rem"></span>
         </div>
       </div>
       <div class="save-bar">
         <span class="save-result" id="save-res-prompt"></span>
-        <button class="btn btn-s btn-sm" onclick="resetPrompt()">还原</button>
-        <button class="btn btn-p btn-sm" onclick="savePrompt()">保存提示词</button>
+        <button class="btn btn-s btn-sm" onclick="resetPrompt()">{{ (i18n or {}).get('wa_s066', "还原") }}</button>
+        <button class="btn btn-p btn-sm" onclick="savePrompt()">{{ (i18n or {}).get('set_s072', "保存提示词") }}</button>
       </div>
     </div>
   </div>
@@ -358,136 +376,136 @@ textarea.f-inp.he-json-area{font-family:ui-monospace,SFMono-Regular,Consolas,mon
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
       </div>
       <div>
-        <div class="acc-title">人工客服转接</div>
-        <div class="acc-sub">同问多次 @ 人工 · 默认三步完成</div>
+        <div class="acc-title">{{ (i18n or {}).get('set_s073', "人工客服转接") }}</div>
+        <div class="acc-sub">{{ (i18n or {}).get('set_s074', "同问多次") }} @ {{ (i18n or {}).get('set_s075', "人工 · 默认三步完成") }}</div>
       </div>
       <svg class="acc-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
     </div>
     <div class="acc-body he-view-simple" id="body-he">
       {% set he_rw_sec = he.get('repeat_window_sec', 600)|int %}
       {% set he_cd_sec = he.get('cooldown_sec', 300)|int %}
-      <p class="he-banner-hint"><strong>三步：</strong>启用 → 填<strong>客服用户名</strong> → 点<strong>保存转接配置</strong>。统计窗口与冷却用<strong>分钟</strong>即可。需要<strong>多名客服 / 分组 / 排班 JSON</strong>时切到顶部「完整」。</p>
+      <p class="he-banner-hint"><strong>{{ (i18n or {}).get('set_s076', "三步：") }}</strong>{{ (i18n or {}).get('enable', "启用") }} → {{ (i18n or {}).get('set_s077', "填") }}<strong>{{ (i18n or {}).get('set_s078', "客服用户名") }}</strong> → {{ (i18n or {}).get('set_s079', "点") }}<strong>{{ (i18n or {}).get('set_s080', "保存转接配置") }}</strong>。{{ (i18n or {}).get('set_s081', "统计窗口与冷却用") }}<strong>{{ (i18n or {}).get('msg_js_008', "分钟") }}</strong>{{ (i18n or {}).get('set_s082', "即可。需要") }}<strong>{{ (i18n or {}).get('set_s083', "多名客服 / 分组 / 排班") }} JSON</strong>{{ (i18n or {}).get('set_s084', "时切到顶部") }}「{{ (i18n or {}).get('set_s085', "完整」") }}。</p>
 
-      <div class="he-view-controls" role="region" aria-label="人工转接显示模式">
+      <div class="he-view-controls" role="region" aria-label="{{ (i18n or {}).get('set_s086', '人工转接显示模式') }}">
         <div class="he-view-toggle">
           <label class="he-view-toggle-label" for="he-view-simple">
             <input type="radio" name="he-view-mode" id="he-view-simple" value="simple" checked>
-            精简（推荐）
+            {{ (i18n or {}).get('set_s087', "精简（推荐）") }}
           </label>
           <label class="he-view-toggle-label" for="he-view-full">
             <input type="radio" name="he-view-mode" id="he-view-full" value="full">
-            完整（多人表 · 分组 · 排班 · JSON）
+            {{ (i18n or {}).get('set_s088', "完整（多人表 · 分组 · 排班 · JSON）") }}
           </label>
         </div>
-        <p class="he-view-hint">精简下隐藏客服<strong>表格</strong>与 ④～⑧；值班与快速场景收在折叠里。URL 加 <code>?he=full</code> 可直达完整。选项会记在浏览器。</p>
+        <p class="he-view-hint">{{ (i18n or {}).get('set_s089', "精简下隐藏客服") }}<strong>{{ (i18n or {}).get('set_s090', "表格") }}</strong>{{ (i18n or {}).get('set_s091', "与") }} ④～⑧；{{ (i18n or {}).get('set_s092', "值班与快速场景收在折叠里。URL 加") }} <code>?he=full</code> {{ (i18n or {}).get('set_s093', "可直达完整。选项会记在浏览器。") }}</p>
       </div>
 
       <div class="he-subcard he-minimal-path">
-        <h3 class="he-subcard-title">人工转接（简版）</h3>
-        <p class="he-subcard-intro">多数场景只需这里。保存前会自动把「分钟」换算成后台用的秒，并把<strong>一名客服</strong>写进列表（精简模式下）。</p>
+        <h3 class="he-subcard-title">{{ (i18n or {}).get('set_s094', "人工转接（简版）") }}</h3>
+        <p class="he-subcard-intro">{{ (i18n or {}).get('set_s095', "多数场景只需这里。保存前会自动把") }}「{{ (i18n or {}).get('set_s096', "分钟」") }}{{ (i18n or {}).get('set_s097', "换算成后台用的秒，并把") }}<strong>{{ (i18n or {}).get('set_s098', "一名客服") }}</strong>{{ (i18n or {}).get('set_s099', "写进列表（精简模式下）。") }}</p>
         <div class="he-scenario-btns" style="margin-bottom:.65rem">
-          <button type="button" class="btn btn-p btn-sm" onclick="heApplyMinimalDefaults()">一键常用默认值</button>
-          <span class="f-hint" style="display:inline;margin-left:.5rem">启用、3 次 / 10 分钟 / 冷却 5 分钟、始终可 @</span>
+          <button type="button" class="btn btn-p btn-sm" onclick="heApplyMinimalDefaults()">{{ (i18n or {}).get('set_s100', "一键常用默认值") }}</button>
+          <span class="f-hint" style="display:inline;margin-left:.5rem">{{ (i18n or {}).get('set_s101', "启用、3 次 / 10 分钟 / 冷却 5 分钟、始终可") }} @</span>
         </div>
 
         <input type="hidden" id="he-repeat_window_sec" value="{{ he_rw_sec }}">
         <input type="hidden" id="he-cooldown_sec" value="{{ he_cd_sec }}">
 
-        <h4 class="he-step-h4">① 开关与触发</h4>
+        <h4 class="he-step-h4">① {{ (i18n or {}).get('set_s102', "开关与触发") }}</h4>
         <div class="f-check-row" style="margin-bottom:10px">
           <input type="checkbox" id="he-enabled"
             {% if he.get('enabled') %}checked{% endif %}>
-          <label for="he-enabled">启用「同问多次」转人工</label>
+          <label for="he-enabled">{{ (i18n or {}).get('enable', "启用") }}「{{ (i18n or {}).get('set_s103', "同问多次」") }}{{ (i18n or {}).get('msg_js_518', "转人工") }}</label>
         </div>
         <div class="f-grid">
           <div class="f-row">
-            <label class="f-lbl">同一问题连发几次触发</label>
+            <label class="f-lbl">{{ (i18n or {}).get('set_s104', "同一问题连发几次触发") }}</label>
             <input class="f-inp" type="number" id="he-repeat_threshold" min="2" max="20"
               value="{{ he.get('repeat_threshold', 3) }}">
-            <div class="f-hint">在下方统计窗口内计次</div>
+            <div class="f-hint">{{ (i18n or {}).get('set_s105', "在下方统计窗口内计次") }}</div>
           </div>
           <div class="f-row">
-            <label class="f-lbl">统计窗口（分钟）</label>
+            <label class="f-lbl">{{ (i18n or {}).get('set_s106', "统计窗口（分钟）") }}</label>
             <input class="f-inp" type="number" id="hui-repeat-window-min" min="1" max="1440" step="1"
               value="{{ (he_rw_sec + 59) // 60 }}">
-            <div class="f-hint">后台按秒保存；此处填分钟更直观</div>
+            <div class="f-hint">{{ (i18n or {}).get('set_s107', "后台按秒保存；此处填分钟更直观") }}</div>
           </div>
           <div class="f-row">
-            <label class="f-lbl">最短问句长度</label>
+            <label class="f-lbl">{{ (i18n or {}).get('set_s108', "最短问句长度") }}</label>
             <input class="f-inp" type="number" id="he-min_message_len" min="1" max="500"
               value="{{ he.get('min_message_len', 6) }}">
           </div>
           <div class="f-row">
-            <label class="f-lbl">触发后冷却（分钟）</label>
+            <label class="f-lbl">{{ (i18n or {}).get('set_s109', "触发后冷却（分钟）") }}</label>
             <input class="f-inp" type="number" id="hui-cooldown-min" min="0" max="10080" step="1"
               value="{{ ((he_cd_sec + 59) // 60) if he_cd_sec else 0 }}">
-            <div class="f-hint">同一用户再次触发转人工的最短间隔</div>
+            <div class="f-hint">{{ (i18n or {}).get('set_s110', "同一用户再次触发转人工的最短间隔") }}</div>
           </div>
         </div>
 
         <details class="he-he-details">
-          <summary>值班 / 排班（可选）</summary>
-          <p class="f-hint" style="margin:0 0 .5rem">默认「始终可 @」即可；要按时间段或手动开关再展开此项。</p>
+          <summary>{{ (i18n or {}).get('set_s111', "值班 / 排班（可选）") }}</summary>
+          <p class="f-hint" style="margin:0 0 .5rem">{{ (i18n or {}).get('psn_js_050', "默认") }}「{{ (i18n or {}).get('set_s112', "始终可") }} @」{{ (i18n or {}).get('set_s113', "即可；要按时间段或手动开关再展开此项。") }}</p>
           <div class="f-grid">
             <div class="f-row">
-              <label class="f-lbl">值班模式</label>
+              <label class="f-lbl">{{ (i18n or {}).get('set_s114', "值班模式") }}</label>
               <select class="f-inp" id="he-duty_mode" style="font-family:inherit">
-                <option value="always" {% if he.get('duty_mode', 'always')=='always' %}selected{% endif %}>始终可 @</option>
-                <option value="manual" {% if he.get('duty_mode')=='manual' %}selected{% endif %}>仅手动值班（SQLite）</option>
-                <option value="schedule" {% if he.get('duty_mode')=='schedule' %}selected{% endif %}>仅工作时间段（周模板 JSON）</option>
-                <option value="schedule_or_manual" {% if he.get('duty_mode')=='schedule_or_manual' %}selected{% endif %}>时间段 或 手动</option>
-                <option value="schedule_and_manual" {% if he.get('duty_mode')=='schedule_and_manual' %}selected{% endif %}>时间段 且 手动</option>
+                <option value="always" {% if he.get('duty_mode', 'always')=='always' %}selected{% endif %}>{{ (i18n or {}).get('set_s112', "始终可") }} @</option>
+                <option value="manual" {% if he.get('duty_mode')=='manual' %}selected{% endif %}>{{ (i18n or {}).get('set_s115', "仅手动值班（SQLite）") }}</option>
+                <option value="schedule" {% if he.get('duty_mode')=='schedule' %}selected{% endif %}>{{ (i18n or {}).get('set_s116', "仅工作时间段（周模板 JSON）") }}</option>
+                <option value="schedule_or_manual" {% if he.get('duty_mode')=='schedule_or_manual' %}selected{% endif %}>{{ (i18n or {}).get('set_s117', "时间段 或 手动") }}</option>
+                <option value="schedule_and_manual" {% if he.get('duty_mode')=='schedule_and_manual' %}selected{% endif %}>{{ (i18n or {}).get('set_s118', "时间段 且 手动") }}</option>
               </select>
             </div>
             <div class="f-row">
-              <label class="f-lbl">时区（IANA）</label>
+              <label class="f-lbl">{{ (i18n or {}).get('set_s119', "时区（IANA）") }}</label>
               <input class="f-inp" type="text" id="he-timezone" placeholder="Asia/Shanghai"
                 value="{{ he.get('timezone', 'Asia/Shanghai') }}">
             </div>
           </div>
-          <div class="he-scenario-panel" role="region" aria-label="快速场景预设">
-            <div class="he-scenario-title">快速场景（只改值班/排班；不删客服）</div>
+          <div class="he-scenario-panel" role="region" aria-label="{{ (i18n or {}).get('set_s120', '快速场景预设') }}">
+            <div class="he-scenario-title">{{ (i18n or {}).get('set_s121', "快速场景（只改值班/排班；不删客服）") }}</div>
             <div class="he-scenario-btns">
-              <button type="button" class="btn btn-s btn-sm" onclick="heApplyScenario('always')" title="duty_mode=always">始终可 @</button>
-              <button type="button" class="btn btn-s btn-sm" onclick="heApplyScenario('manual')" title="duty_mode=manual，依赖 SQLite 值班开关">仅手动值班（SQLite）</button>
-              <button type="button" class="btn btn-s btn-sm" onclick="heApplyScenario('schedule')" title="duty_mode=schedule + 工作日周模板">仅按周排班</button>
-              <button type="button" class="btn btn-s btn-sm" onclick="heApplyScenario('schedule_or_manual')" title="duty_mode=schedule_or_manual + 周模板">排班或手动（常用）</button>
-              <button type="button" class="btn btn-s btn-sm" onclick="heApplyScenario('schedule_and_manual')" title="duty_mode=schedule_and_manual + 周模板">排班且手动（更严）</button>
+              <button type="button" class="btn btn-s btn-sm" onclick="heApplyScenario('always')" title="duty_mode=always">{{ (i18n or {}).get('set_s112', "始终可") }} @</button>
+              <button type="button" class="btn btn-s btn-sm" onclick="heApplyScenario('manual')" title="duty_mode=manual，{{ (i18n or {}).get('set_s122', '依赖 SQLite 值班开关') }}">{{ (i18n or {}).get('set_s115', "仅手动值班（SQLite）") }}</button>
+              <button type="button" class="btn btn-s btn-sm" onclick="heApplyScenario('schedule')" title="duty_mode=schedule + {{ (i18n or {}).get('set_s123', '工作日周模板') }}">{{ (i18n or {}).get('set_s124', "仅按周排班") }}</button>
+              <button type="button" class="btn btn-s btn-sm" onclick="heApplyScenario('schedule_or_manual')" title="duty_mode=schedule_or_manual + {{ (i18n or {}).get('set_s125', '周模板') }}">{{ (i18n or {}).get('set_s126', "排班或手动（常用）") }}</button>
+              <button type="button" class="btn btn-s btn-sm" onclick="heApplyScenario('schedule_and_manual')" title="duty_mode=schedule_and_manual + {{ (i18n or {}).get('set_s125', '周模板') }}">{{ (i18n or {}).get('set_s127', "排班且手动（更严）") }}</button>
             </div>
-            <p class="f-hint" style="margin:0">后三项会写入<strong>⑥ 周模板</strong>为「工作日 09:00–18:00」（若当前周模板非空将先确认）；并自动切到<strong>完整</strong>视图。仍需点<strong>保存转接配置</strong>。</p>
+            <p class="f-hint" style="margin:0">{{ (i18n or {}).get('set_s128', "后三项会写入") }}<strong>⑥ {{ (i18n or {}).get('set_s125', "周模板") }}</strong>{{ (i18n or {}).get('set_s129', "为") }}「{{ (i18n or {}).get('set_s130', "工作日") }} 09:00–18:00」（{{ (i18n or {}).get('set_s131', "若当前周模板非空将先确认）；并自动切到") }}<strong>{{ (i18n or {}).get('mode_full_short', "完整") }}</strong>{{ (i18n or {}).get('set_s132', "视图。仍需点") }}<strong>{{ (i18n or {}).get('set_s080', "保存转接配置") }}</strong>。</p>
             <span id="he-scenario-status" class="he-json-status muted" style="margin-top:.35rem" aria-live="polite"></span>
           </div>
         </details>
 
-        <h4 class="he-step-h4">② 人工客服</h4>
-        <p class="f-hint" style="margin:-.2rem 0 .5rem">填 Telegram 用户名，<strong>不要带 @</strong>。需要多名客服请到「完整」视图编辑表格。</p>
+        <h4 class="he-step-h4">② {{ (i18n or {}).get('msg_js_1630', "人工客服") }}</h4>
+        <p class="f-hint" style="margin:-.2rem 0 .5rem">{{ (i18n or {}).get('set_s133', "填 Telegram 用户名，") }}<strong>{{ (i18n or {}).get('set_s134', "不要带") }} @</strong>。{{ (i18n or {}).get('set_s135', "需要多名客服请到") }}「{{ (i18n or {}).get('set_s085', "完整」") }}{{ (i18n or {}).get('set_s136', "视图编辑表格。") }}</p>
         <div class="f-row he-staff-hero">
-          <label class="f-lbl">客服用户名</label>
-          <input class="f-inp" type="text" id="he-human_username" placeholder="例如 support_bot（无 @）"
+          <label class="f-lbl">{{ (i18n or {}).get('set_s078', "客服用户名") }}</label>
+          <input class="f-inp" type="text" id="he-human_username" placeholder="{{ (i18n or {}).get('set_s137', '例如') }} support_bot（{{ (i18n or {}).get('dash.none', '无') }} @）"
             value="{{ he.get('human_username', '') }}">
         </div>
         <div class="f-grid">
           <div class="f-row">
-            <label class="f-lbl">客服 user_id（可选）</label>
-            <input class="f-inp" type="number" id="he-human_user_id" min="0" placeholder="纯数字，可空"
+            <label class="f-lbl">{{ (i18n or {}).get('psn_js_263', "客服") }} user_id（{{ (i18n or {}).get('set_s138', "可选）") }}</label>
+            <input class="f-inp" type="number" id="he-human_user_id" min="0" placeholder="{{ (i18n or {}).get('set_s139', '纯数字，可空') }}"
               value="{{ he.get('human_user_id', 0) }}">
-            <div class="f-hint">有 user_id 时 @ 链接更稳；只填用户名也可以</div>
+            <div class="f-hint">{{ (i18n or {}).get('set_s140', "有") }} user_id {{ (i18n or {}).get('db_js_093', "时") }} @ {{ (i18n or {}).get('set_s141', "链接更稳；只填用户名也可以") }}</div>
           </div>
         </div>
         <p id="he-multi-agents-hint" class="he-multi-agents-hint" style="display:none" role="status"></p>
         <div class="he-fallback-toolbar">
-          <button type="button" class="btn btn-s btn-sm" onclick="heValidateHeFallbackCompat()">检查用户名 / user_id</button>
+          <button type="button" class="btn btn-s btn-sm" onclick="heValidateHeFallbackCompat()">{{ (i18n or {}).get('set_s142', "检查用户名") }} / user_id</button>
           <span id="he-status-fallback" class="he-json-status muted"></span>
         </div>
 
-        <h4 class="he-step-h4 he-inline-advanced">③ 多名客服（表格）</h4>
-        <p class="f-hint he-inline-advanced" style="margin:-.2rem 0 .5rem">至少一行有效：<strong>user_id</strong> 或 <strong>username</strong>。保存前会同步到 JSON。</p>
+        <h4 class="he-step-h4 he-inline-advanced">③ {{ (i18n or {}).get('set_s143', "多名客服（表格）") }}</h4>
+        <p class="f-hint he-inline-advanced" style="margin:-.2rem 0 .5rem">{{ (i18n or {}).get('set_s144', "至少一行有效：") }}<strong>user_id</strong> {{ (i18n or {}).get('set_s145', "或") }} <strong>username</strong>。{{ (i18n or {}).get('set_s146', "保存前会同步到 JSON。") }}</p>
         <div class="he-agents-wrap">
           <table class="he-agents-table" id="he-agents-table">
             <thead>
               <tr>
                 <th style="width:28%">user_id</th>
-                <th style="width:28%">username（可无 @）</th>
+                <th style="width:28%">username（{{ (i18n or {}).get('set_s147', "可无") }} @）</th>
                 <th style="width:36%">display_name</th>
                 <th style="width:8%"></th>
               </tr>
@@ -495,240 +513,240 @@ textarea.f-inp.he-json-area{font-family:ui-monospace,SFMono-Regular,Consolas,mon
             <tbody id="he-agents-tbody"></tbody>
           </table>
           <div class="he-agents-actions">
-            <button type="button" class="btn btn-s btn-sm" onclick="heAgentsAddRow()">＋ 添加一行</button>
-            <button type="button" class="btn btn-s btn-sm" onclick="heAgentsSyncToTextarea()">写入下方 JSON</button>
-            <button type="button" class="btn btn-s btn-sm" onclick="heAgentsLoadFromTextarea()">从 JSON 读取</button>
+            <button type="button" class="btn btn-s btn-sm" onclick="heAgentsAddRow()">＋ {{ (i18n or {}).get('set_s148', "添加一行") }}</button>
+            <button type="button" class="btn btn-s btn-sm" onclick="heAgentsSyncToTextarea()">{{ (i18n or {}).get('set_s149', "写入下方") }} JSON</button>
+            <button type="button" class="btn btn-s btn-sm" onclick="heAgentsLoadFromTextarea()">{{ (i18n or {}).get('set_s150', "从 JSON 读取") }}</button>
           </div>
         </div>
         <div class="he-inline-advanced">
-        <label class="f-lbl" style="margin-top:.5rem">直接编辑 agents JSON</label>
+        <label class="f-lbl" style="margin-top:.5rem">{{ (i18n or {}).get('set_s151', "直接编辑") }} agents JSON</label>
         <div class="he-json-toolbar">
-          <button type="button" class="btn btn-s btn-sm" onclick="heValidateAgentsJson()">检查 JSON</button>
+          <button type="button" class="btn btn-s btn-sm" onclick="heValidateAgentsJson()">{{ (i18n or {}).get('msg_js_1055', "检查") }} JSON</button>
         </div>
         <textarea class="f-inp he-json-area" id="he-agents_json" rows="6" style="resize:vertical"
-          placeholder='[{"user_id":123,"username":"","display_name":"小王"},{"user_id":0,"username":"alice","display_name":"小李"}]'>{{ he_agents_json }}</textarea>
-        <span id="he-status-agents" class="he-json-status muted">点击「检查 JSON」验证格式</span>
-        <span class="f-hint" style="display:block;margin-top:.45rem">每项至少填 user_id 或 username；有 user_id 时显示可点击 @；display_name 为链接文字。</span>
+          placeholder='[{"user_id":123,"username":"","display_name":"{{ (i18n or {}).get('set_s152', "小王") }}"},{"user_id":0,"username":"alice","display_name":"{{ (i18n or {}).get('set_s153', "小李") }}"}]'>{{ he_agents_json }}</textarea>
+        <span id="he-status-agents" class="he-json-status muted">{{ (i18n or {}).get('dash.q.clicked', "点击") }}「{{ (i18n or {}).get('set_s154', "检查 JSON」") }}{{ (i18n or {}).get('set_s155', "验证格式") }}</span>
+        <span class="f-hint" style="display:block;margin-top:.45rem">{{ (i18n or {}).get('set_s156', "每项至少填") }} user_id {{ (i18n or {}).get('set_s157', "或 username；有") }} user_id {{ (i18n or {}).get('set_s158', "时显示可点击") }} @；display_name {{ (i18n or {}).get('set_s159', "为链接文字。") }}</span>
         </div>
 
         <details class="he-he-details">
-          <summary>转接话术与非值班提示（可选）</summary>
+          <summary>{{ (i18n or {}).get('set_s160', "转接话术与非值班提示（可选）") }}</summary>
           <div class="f-check-row" style="margin:8px 0">
             <input type="checkbox" id="he-only_when_shift_online"
               {% if he.get('only_when_shift_online') %}checked{% endif %}>
-            <label for="he-only_when_shift_online">仅值班时才追加 @；非值班时改为下方话术（若填写）</label>
+            <label for="he-only_when_shift_online">{{ (i18n or {}).get('set_s161', "仅值班时才追加") }} @；{{ (i18n or {}).get('set_s162', "非值班时改为下方话术（若填写）") }}</label>
           </div>
-          <p class="f-hint" style="margin:4px 0 10px">与 duty_mode 配合；不懂可先不勾。</p>
+          <p class="f-hint" style="margin:4px 0 10px">{{ (i18n or {}).get('set_s091', "与") }} duty_mode {{ (i18n or {}).get('set_s163', "配合；不懂可先不勾。") }}</p>
           <div class="f-check-row" style="margin:8px 0">
             <input type="checkbox" id="he-forward_user_message_to_agents"
               {% if he.get('forward_user_message_to_agents', True) %}checked{% endif %}>
-            <label for="he-forward_user_message_to_agents">触发转接后，把用户该条群消息转发到客服私聊（便于点进原群/原话；默认开）</label>
+            <label for="he-forward_user_message_to_agents">{{ (i18n or {}).get('set_s164', "触发转接后，把用户该条群消息转发到客服私聊（便于点进原群/原话；默认开）") }}</label>
           </div>
           <div class="f-check-row" style="margin:8px 0">
             <input type="checkbox" id="he-forward_private_jump_hint"
               {% if he.get('forward_private_jump_hint', True) %}checked{% endif %}>
-            <label for="he-forward_private_jump_hint">转发后再发一条私聊：内联按钮 + 直达链接（解决转发条点不进群；默认开）</label>
+            <label for="he-forward_private_jump_hint">{{ (i18n or {}).get('set_s165', "转发后再发一条私聊：内联按钮") }} + {{ (i18n or {}).get('set_s166', "直达链接（解决转发条点不进群；默认开）") }}</label>
           </div>
 
           <hr style="border:0;border-top:1px solid var(--border);margin:12px 0;opacity:.5">
-          <div style="font-weight:700;font-size:.84rem;margin-bottom:.5rem">转发到客服群</div>
+          <div style="font-weight:700;font-size:.84rem;margin-bottom:.5rem">{{ (i18n or {}).get('set_s167', "转发到客服群") }}</div>
           {% set ftg = he.get('forward_to_group', {}) if he.get('forward_to_group') is mapping else {} %}
           <div class="f-check-row" style="margin:8px 0">
             <input type="checkbox" id="he-forward_to_group_enabled"
               {% if ftg.get('enabled') %}checked{% endif %}>
-            <label for="he-forward_to_group_enabled">触发转接后，同时转发用户消息到客服群</label>
+            <label for="he-forward_to_group_enabled">{{ (i18n or {}).get('set_s168', "触发转接后，同时转发用户消息到客服群") }}</label>
           </div>
           <div class="f-row">
-            <label class="f-lbl">客服群 ID</label>
+            <label class="f-lbl">{{ (i18n or {}).get('set_s169', "客服群") }} ID</label>
             <input class="f-inp" id="he-forward_to_group_id" value="{{ ftg.get('group_id', '') }}"
-              placeholder="例如 -1001234567890" style="max-width:300px">
-            <p class="f-hint">填群的 chat_id（负数）。如不知道可在群内发 /id 获取。</p>
+              placeholder="{{ (i18n or {}).get('set_s137', '例如') }} -1001234567890" style="max-width:300px">
+            <p class="f-hint">{{ (i18n or {}).get('set_s170', "填群的") }} chat_id（{{ (i18n or {}).get('set_s171', "负数）。如不知道可在群内发 /id 获取。") }}</p>
           </div>
           <div class="f-row">
-            <label class="f-lbl">客服群链接</label>
+            <label class="f-lbl">{{ (i18n or {}).get('set_s172', "客服群链接") }}</label>
             <input class="f-inp" id="he-forward_to_group_link" value="{{ ftg.get('group_link', '') }}"
-              placeholder="例如 https://t.me/+xxxxx" style="max-width:300px">
-            <p class="f-hint">备选：填 t.me 邀请链接（优先使用群 ID）。</p>
+              placeholder="{{ (i18n or {}).get('set_s137', '例如') }} https://t.me/+xxxxx" style="max-width:300px">
+            <p class="f-hint">{{ (i18n or {}).get('set_s173', "备选：填 t.me 邀请链接（优先使用群 ID）。") }}</p>
           </div>
           <hr style="border:0;border-top:1px solid var(--border);margin:12px 0;opacity:.5">
 
           <div class="f-row">
-            <label class="f-lbl">非值班提示</label>
+            <label class="f-lbl">{{ (i18n or {}).get('set_s174', "非值班提示") }}</label>
             <textarea class="f-inp" id="he-message_off_shift" rows="2" style="resize:vertical;font-family:inherit;font-size:.83rem"
-              placeholder="例如：当前非值班时间，请稍后再试。">{{ he.get('message_off_shift', '') }}</textarea>
+              placeholder="{{ (i18n or {}).get('set_s175', '例如：当前非值班时间，请稍后再试。') }}">{{ he.get('message_off_shift', '') }}</textarea>
           </div>
           <div class="f-row">
-            <label class="f-lbl">@ 前说明文案</label>
+            <label class="f-lbl">@ {{ (i18n or {}).get('set_s176', "前说明文案") }}</label>
             <textarea class="f-inp" id="he-escalation_line" rows="2" style="resize:vertical;font-family:inherit;font-size:.83rem"
-              placeholder="默认：已多次询问同类问题，请人工客服协助：">{{ he.get('escalation_line', '已多次询问同类问题，请人工客服协助：') }}</textarea>
+              placeholder="{{ (i18n or {}).get('set_s177', '默认：已多次询问同类问题，请人工客服协助：') }}">{{ he.get('escalation_line', (i18n or {}).get('set_s295', '已多次询问同类问题，请人工客服协助：')) }}</textarea>
           </div>
         </details>
       </div>
 
       <div class="he-subcard he-advanced">
-        <h3 class="he-subcard-title">④ 分组 agent_teams</h3>
-        <p class="f-hint" style="margin:-.25rem 0 .5rem">非空则按组分排班；无人命中可回退全局 agents（见下方开关）。结构为 JSON 数组。</p>
+        <h3 class="he-subcard-title">④ {{ (i18n or {}).get('set_s178', "分组") }} agent_teams</h3>
+        <p class="f-hint" style="margin:-.25rem 0 .5rem">{{ (i18n or {}).get('set_s179', "非空则按组分排班；无人命中可回退全局 agents（见下方开关）。结构为 JSON 数组。") }}</p>
         <div class="he-json-toolbar">
-          <button type="button" class="btn btn-s btn-sm" onclick="heValidateAgentTeamsJson()">检查 JSON</button>
+          <button type="button" class="btn btn-s btn-sm" onclick="heValidateAgentTeamsJson()">{{ (i18n or {}).get('msg_js_1055', "检查") }} JSON</button>
         </div>
         <textarea class="f-inp he-json-area" id="he-agent_teams_json" rows="7" style="resize:vertical"
-          placeholder='[{"id":"day","name":"白班","agents":[{"user_id":1,"display_name":"A"}],"work_hours":{"mon":[["09:00","18:00"]]}}]'>{{ he_agent_teams_json }}</textarea>
-        <span id="he-status-teams" class="he-json-status muted">点击「检查 JSON」验证格式</span>
-        <span class="f-hint" style="display:block;margin-top:.4rem">每队可含 <code>work_hours</code> / <code>work_exceptions</code>；缺省继承全局。<code>id</code>/<code>name</code> 供状态展示。</span>
+          placeholder='[{"id":"day","name":"{{ (i18n or {}).get('set_s180', "白班") }}","agents":[{"user_id":1,"display_name":"A"}],"work_hours":{"mon":[["09:00","18:00"]]}}]'>{{ he_agent_teams_json }}</textarea>
+        <span id="he-status-teams" class="he-json-status muted">{{ (i18n or {}).get('dash.q.clicked', "点击") }}「{{ (i18n or {}).get('set_s154', "检查 JSON」") }}{{ (i18n or {}).get('set_s155', "验证格式") }}</span>
+        <span class="f-hint" style="display:block;margin-top:.4rem">{{ (i18n or {}).get('set_s181', "每队可含") }} <code>work_hours</code> / <code>work_exceptions</code>；{{ (i18n or {}).get('set_s182', "缺省继承全局。") }}<code>id</code>/<code>name</code> {{ (i18n or {}).get('set_s183', "供状态展示。") }}</span>
       </div>
       <div class="he-subcard he-advanced">
-        <h3 class="he-subcard-title">⑤ 分队策略与排班估计</h3>
-        <p class="he-subcard-intro">多分组命中时如何合并、以及「排班自检 / 下一开收工时间」的估算参数。与下方周模板、例外日配合使用。</p>
+        <h3 class="he-subcard-title">⑤ {{ (i18n or {}).get('set_s184', "分队策略与排班估计") }}</h3>
+        <p class="he-subcard-intro">{{ (i18n or {}).get('set_s185', "多分组命中时如何合并、以及") }}「{{ (i18n or {}).get('set_s186', "排班自检 / 下一开收工时间」") }}{{ (i18n or {}).get('set_s187', "的估算参数。与下方周模板、例外日配合使用。") }}</p>
         <div class="he-help-callout">
-          <strong>使用说明</strong>
+          <strong>{{ (i18n or {}).get('set_s188', "使用说明") }}</strong>
           <ul>
-            <li><strong>分队策略</strong>：多队同时命中时，<em>合并</em>会去重客服；<em>仅第一支</em>只用最先匹配的那一队。</li>
-            <li><strong>轮询范围</strong>：在「每次只 @ 一名」时，<em>全局</em>共用一个计数，<em>按会话</em>则每个群单独轮询。</li>
-            <li><strong>粗估步长 / 细扫</strong>：数字越大越省 CPU；细扫为 0 表示只做粗网格（适合粗略展示）。</li>
-            <li><strong>API 缓存</strong>：减轻 <code>/schedule-status</code> 压力；手动值班开关仍会即时影响是否 @。</li>
+            <li><strong>{{ (i18n or {}).get('set_s189', "分队策略") }}</strong>：{{ (i18n or {}).get('set_s190', "多队同时命中时，") }}<em>{{ (i18n or {}).get('set_s191', "合并") }}</em>{{ (i18n or {}).get('set_s192', "会去重客服；") }}<em>{{ (i18n or {}).get('set_s193', "仅第一支") }}</em>{{ (i18n or {}).get('set_s194', "只用最先匹配的那一队。") }}</li>
+            <li><strong>{{ (i18n or {}).get('set_s195', "轮询范围") }}</strong>：{{ (i18n or {}).get('msg_js_1052', "在") }}「{{ (i18n or {}).get('set_s196', "每次只") }} @ {{ (i18n or {}).get('set_s197', "一名」") }}{{ (i18n or {}).get('set_s198', "时，") }}<em>{{ (i18n or {}).get('inbox.xl.scope_global', "全局") }}</em>{{ (i18n or {}).get('set_s199', "共用一个计数，") }}<em>{{ (i18n or {}).get('set_s200', "按会话") }}</em>{{ (i18n or {}).get('set_s201', "则每个群单独轮询。") }}</li>
+            <li><strong>{{ (i18n or {}).get('set_s202', "粗估步长 / 细扫") }}</strong>：{{ (i18n or {}).get('set_s203', "数字越大越省 CPU；细扫为 0 表示只做粗网格（适合粗略展示）。") }}</li>
+            <li><strong>API {{ (i18n or {}).get('inbox.xl.cached', "缓存") }}</strong>：{{ (i18n or {}).get('set_s204', "减轻") }} <code>/schedule-status</code> {{ (i18n or {}).get('set_s205', "压力；手动值班开关仍会即时影响是否") }} @。</li>
           </ul>
         </div>
         <div class="f-check-row" style="margin-bottom:10px">
           <input type="checkbox" id="he-team_fallback_to_global"
             {% if he.get('team_fallback_to_global', True) %}checked{% endif %}>
-          <label for="he-team_fallback_to_global">分组无人在线时回退到上方全局 agents（关闭则此时不 @）</label>
+          <label for="he-team_fallback_to_global">{{ (i18n or {}).get('set_s206', "分组无人在线时回退到上方全局 agents（关闭则此时不") }} @）</label>
         </div>
         <div class="f-grid">
           <div class="f-row">
-            <label class="f-lbl">分队策略 team_pick_mode</label>
+            <label class="f-lbl">{{ (i18n or {}).get('set_s189', "分队策略") }} team_pick_mode</label>
             <select class="f-inp" id="he-team_pick_mode" style="font-family:inherit">
-              <option value="union" {% if he.get('team_pick_mode','union')=='union' %}selected{% endif %}>合并（多队命中则去重合并）</option>
-              <option value="first_match" {% if he.get('team_pick_mode')=='first_match' %}selected{% endif %}>仅第一支命中队伍</option>
+              <option value="union" {% if he.get('team_pick_mode','union')=='union' %}selected{% endif %}>{{ (i18n or {}).get('set_s207', "合并（多队命中则去重合并）") }}</option>
+              <option value="first_match" {% if he.get('team_pick_mode')=='first_match' %}selected{% endif %}>{{ (i18n or {}).get('set_s208', "仅第一支命中队伍") }}</option>
             </select>
           </div>
           <div class="f-row">
-            <label class="f-lbl">轮询范围 mention_round_robin_scope</label>
+            <label class="f-lbl">{{ (i18n or {}).get('set_s195', "轮询范围") }} mention_round_robin_scope</label>
             <select class="f-inp" id="he-mention_round_robin_scope" style="font-family:inherit">
-              <option value="global" {% if he.get('mention_round_robin_scope','global')=='global' %}selected{% endif %}>全局一条（默认）</option>
-              <option value="per_chat" {% if he.get('mention_round_robin_scope')=='per_chat' %}selected{% endif %}>按群/会话独立</option>
+              <option value="global" {% if he.get('mention_round_robin_scope','global')=='global' %}selected{% endif %}>{{ (i18n or {}).get('set_s209', "全局一条（默认）") }}</option>
+              <option value="per_chat" {% if he.get('mention_round_robin_scope')=='per_chat' %}selected{% endif %}>{{ (i18n or {}).get('set_s210', "按群/会话独立") }}</option>
             </select>
           </div>
           <div class="f-row">
-            <label class="f-lbl">排班粗估步长 (分钟)</label>
+            <label class="f-lbl">{{ (i18n or {}).get('set_s211', "排班粗估步长 (分钟") }})</label>
             <input class="f-inp" type="number" id="he-schedule_estimate_step_minutes" min="1" max="60"
               value="{{ he.get('schedule_estimate_step_minutes', 15) }}">
-            <div class="f-hint">估算「下一开/收工」时的步进；一般 15 即可。</div>
+            <div class="f-hint">{{ (i18n or {}).get('set_s212', "估算") }}「{{ (i18n or {}).get('set_s213', "下一开/收工」") }}{{ (i18n or {}).get('set_s214', "时的步进；一般 15 即可。") }}</div>
           </div>
           <div class="f-row">
-            <label class="f-lbl">细扫近端 (小时)</label>
+            <label class="f-lbl">{{ (i18n or {}).get('set_s215', "细扫近端 (小时") }})</label>
             <input class="f-inp" type="number" id="he-schedule_estimate_fine_horizon_hours" min="0" max="168"
-              title="0=仅粗步进；&gt;0 时先按分钟扫此窗口内再粗步进"
+              title="0={{ (i18n or {}).get('set_s216', '仅粗步进；') }}&gt;0 {{ (i18n or {}).get('set_s217', '时先按分钟扫此窗口内再粗步进') }}"
               value="{{ he.get('schedule_estimate_fine_horizon_hours', 24) }}">
-            <div class="f-hint">0 = 不做分钟级细扫，仅粗网格 + 回扫。</div>
+            <div class="f-hint">0 = {{ (i18n or {}).get('set_s218', "不做分钟级细扫，仅粗网格") }} + {{ (i18n or {}).get('set_s219', "回扫。") }}</div>
           </div>
           <div class="f-row he-span-2">
-            <label class="f-lbl">排班自检 API 缓存 (秒)</label>
+            <label class="f-lbl">{{ (i18n or {}).get('set_s220', "排班自检 API 缓存 (秒") }})</label>
             <input class="f-inp" type="number" id="he-schedule_status_cache_ttl_sec" min="0" max="300"
-              title="0=关闭；减轻 schedule-status 重复计算"
+              title="0={{ (i18n or {}).get('set_s221', '关闭；减轻 schedule-status 重复计算') }}"
               value="{{ he.get('schedule_status_cache_ttl_sec', 30) }}">
-            <div class="f-hint">仅缓存排班估算结果；手动值班等仍会实时参与逻辑。</div>
+            <div class="f-hint">{{ (i18n or {}).get('set_s222', "仅缓存排班估算结果；手动值班等仍会实时参与逻辑。") }}</div>
           </div>
         </div>
       </div>
 
       <div class="he-subcard he-advanced">
-        <h3 class="he-subcard-title">⑥ 周模板 work_hours</h3>
-        <p class="he-subcard-intro">按周一…周日定义「通常」营业时间；与 <strong>⑦ 按日例外</strong> 叠加时，例外日优先。</p>
+        <h3 class="he-subcard-title">⑥ {{ (i18n or {}).get('set_s125', "周模板") }} work_hours</h3>
+        <p class="he-subcard-intro">{{ (i18n or {}).get('set_s223', "按周一…周日定义") }}「{{ (i18n or {}).get('set_s224', "通常」") }}{{ (i18n or {}).get('set_s225', "营业时间；与") }} <strong>⑦ {{ (i18n or {}).get('set_s226', "按日例外") }}</strong> {{ (i18n or {}).get('set_s227', "叠加时，例外日优先。") }}</p>
         <div class="he-help-callout">
-          <strong>使用说明</strong>
+          <strong>{{ (i18n or {}).get('set_s188', "使用说明") }}</strong>
           <ul>
-            <li>键为 <code>mon</code> … <code>sun</code>；值为时段数组，例如两段表示午休。</li>
-            <li>快捷按钮会<strong>写入并覆盖</strong>下方 JSON；手改后务必点「检查 JSON」或底部保存。</li>
-            <li>空对象 <code>{}</code> 表示没有周模板窗口（是否 @ 仍由 <strong>duty_mode</strong> 决定）。</li>
+            <li>{{ (i18n or {}).get('set_s228', "键为") }} <code>mon</code> … <code>sun</code>；{{ (i18n or {}).get('set_s229', "值为时段数组，例如两段表示午休。") }}</li>
+            <li>{{ (i18n or {}).get('set_s230', "快捷按钮会") }}<strong>{{ (i18n or {}).get('set_s231', "写入并覆盖") }}</strong>{{ (i18n or {}).get('set_s232', "下方 JSON；手改后务必点") }}「{{ (i18n or {}).get('set_s154', "检查 JSON」") }}{{ (i18n or {}).get('set_s233', "或底部保存。") }}</li>
+            <li>{{ (i18n or {}).get('set_s234', "空对象") }} <code>{}</code> {{ (i18n or {}).get('set_s235', "表示没有周模板窗口（是否") }} @ {{ (i18n or {}).get('set_s236', "仍由") }} <strong>duty_mode</strong> {{ (i18n or {}).get('set_s237', "决定）。") }}</li>
           </ul>
         </div>
         <div class="he-preset-panel">
-          <label class="f-lbl">快速生成（写入下方 JSON）</label>
+          <label class="f-lbl">{{ (i18n or {}).get('set_s238', "快速生成（写入下方 JSON）") }}</label>
           <div class="he-preset-row">
-            <span class="he-preset-label">工作日一段</span>
+            <span class="he-preset-label">{{ (i18n or {}).get('set_s239', "工作日一段") }}</span>
             <input type="time" id="he-preset-wd-start" value="09:00" class="f-inp" style="max-width:7rem">
             <span>—</span>
             <input type="time" id="he-preset-wd-end" value="18:00" class="f-inp" style="max-width:7rem">
-            <button type="button" class="btn btn-s btn-sm" onclick="heApplyWorkHoursPreset('weekday')">工作日 mon–fri</button>
+            <button type="button" class="btn btn-s btn-sm" onclick="heApplyWorkHoursPreset('weekday')">{{ (i18n or {}).get('set_s130', "工作日") }} mon–fri</button>
           </div>
           <div class="he-preset-row">
-            <span class="he-preset-label">午休</span>
+            <span class="he-preset-label">{{ (i18n or {}).get('set_s240', "午休") }}</span>
             <input type="time" id="he-preset-am-start" value="09:00" class="f-inp" style="max-width:7rem">
             <input type="time" id="he-preset-am-end" value="12:00" class="f-inp" style="max-width:7rem">
             <input type="time" id="he-preset-pm-start" value="13:00" class="f-inp" style="max-width:7rem">
             <input type="time" id="he-preset-pm-end" value="18:00" class="f-inp" style="max-width:7rem">
-            <button type="button" class="btn btn-s btn-sm" onclick="heApplyWorkHoursPreset('lunch')">工作日+午休</button>
-            <button type="button" class="btn btn-s btn-sm" onclick="heApplyWorkHoursPreset('clear')">清空</button>
+            <button type="button" class="btn btn-s btn-sm" onclick="heApplyWorkHoursPreset('lunch')">{{ (i18n or {}).get('set_s130', "工作日") }}+{{ (i18n or {}).get('set_s240', "午休") }}</button>
+            <button type="button" class="btn btn-s btn-sm" onclick="heApplyWorkHoursPreset('clear')">{{ (i18n or {}).get('logs_clear', "清空") }}</button>
           </div>
         </div>
-        <label class="f-lbl" style="margin-top:.65rem">工作时间段 JSON（键 mon…sun）</label>
+        <label class="f-lbl" style="margin-top:.65rem">{{ (i18n or {}).get('set_s241', "工作时间段 JSON（键 mon…sun）") }}</label>
         <div class="he-json-toolbar">
-          <button type="button" class="btn btn-s btn-sm" onclick="heValidateWorkHoursJson()">检查 JSON</button>
+          <button type="button" class="btn btn-s btn-sm" onclick="heValidateWorkHoursJson()">{{ (i18n or {}).get('msg_js_1055', "检查") }} JSON</button>
         </div>
         <textarea class="f-inp he-json-area" id="he-work_hours_json" rows="7" style="resize:vertical"
           placeholder='{"mon":[["09:00","12:00"],["13:00","18:00"]],"sat":[]}' >{{ he_work_hours_json }}</textarea>
-        <span id="he-status-wh" class="he-json-status muted">点击「检查 JSON」验证格式</span>
-        <span class="f-hint" style="display:block;margin-top:.45rem">空对象表示无排班窗口。跨午夜示例：<code>["22:00","06:00"]</code>。</span>
+        <span id="he-status-wh" class="he-json-status muted">{{ (i18n or {}).get('dash.q.clicked', "点击") }}「{{ (i18n or {}).get('set_s154', "检查 JSON」") }}{{ (i18n or {}).get('set_s155', "验证格式") }}</span>
+        <span class="f-hint" style="display:block;margin-top:.45rem">{{ (i18n or {}).get('set_s242', "空对象表示无排班窗口。跨午夜示例：") }}<code>["22:00","06:00"]</code>。</span>
       </div>
 
       <div class="he-subcard he-advanced">
-        <h3 class="he-subcard-title">⑦ 按日例外 work_exceptions</h3>
-        <p class="he-subcard-intro">按<strong>本地日历日</strong>覆盖周模板：节假日全天休息、或临时只上半天。</p>
+        <h3 class="he-subcard-title">⑦ {{ (i18n or {}).get('set_s226', "按日例外") }} work_exceptions</h3>
+        <p class="he-subcard-intro">{{ (i18n or {}).get('set_s243', "按") }}<strong>{{ (i18n or {}).get('set_s244', "本地日历日") }}</strong>{{ (i18n or {}).get('set_s245', "覆盖周模板：节假日全天休息、或临时只上半天。") }}</p>
         <div class="he-help-callout">
-          <strong>使用说明</strong>
+          <strong>{{ (i18n or {}).get('set_s188', "使用说明") }}</strong>
           <ul>
-            <li>键为 <code>YYYY-MM-DD</code>（与上方时区一致）。</li>
-            <li><code>[]</code> = 该日<strong>全天休息</strong>（覆盖周模板）。</li>
-            <li>非空数组 = 该日<strong>仅</strong>在这些时段生效（不再按周模板拆段）。</li>
-            <li>改完 JSON 或点过快捷按钮后，请点<strong>「检查 JSON」</strong>确认状态行与内容一致。</li>
+            <li>{{ (i18n or {}).get('set_s228', "键为") }} <code>YYYY-MM-DD</code>（{{ (i18n or {}).get('set_s246', "与上方时区一致）。") }}</li>
+            <li><code>[]</code> = {{ (i18n or {}).get('set_s247', "该日") }}<strong>{{ (i18n or {}).get('set_s248', "全天休息") }}</strong>（{{ (i18n or {}).get('set_s249', "覆盖周模板）。") }}</li>
+            <li>{{ (i18n or {}).get('set_s250', "非空数组") }} = {{ (i18n or {}).get('set_s247', "该日") }}<strong>{{ (i18n or {}).get('set_s251', "仅") }}</strong>{{ (i18n or {}).get('set_s252', "在这些时段生效（不再按周模板拆段）。") }}</li>
+            <li>{{ (i18n or {}).get('set_s253', "改完 JSON 或点过快捷按钮后，请点") }}<strong>「{{ (i18n or {}).get('set_s154', "检查 JSON」") }}</strong>{{ (i18n or {}).get('set_s254', "确认状态行与内容一致。") }}</li>
           </ul>
         </div>
         <div class="he-preset-panel">
-          <label class="f-lbl">快捷操作（合并进下方 JSON）</label>
+          <label class="f-lbl">{{ (i18n or {}).get('set_s255', "快捷操作（合并进下方 JSON）") }}</label>
           <div class="he-preset-row">
-            <input type="date" id="he-work_exception_day" class="f-inp" style="max-width:11rem" title="先选日期">
-            <button type="button" class="btn btn-s btn-sm" onclick="heAddWorkExceptionClosedDay()">选中日 → 全天休息（[]）</button>
+            <input type="date" id="he-work_exception_day" class="f-inp" style="max-width:11rem" title="{{ (i18n or {}).get('set_s256', '先选日期') }}">
+            <button type="button" class="btn btn-s btn-sm" onclick="heAddWorkExceptionClosedDay()">{{ (i18n or {}).get('set_s257', "选中日") }} → {{ (i18n or {}).get('set_s248', "全天休息") }}（[]）</button>
           </div>
           <div class="he-preset-row">
-            <span class="he-preset-label">当日时段</span>
+            <span class="he-preset-label">{{ (i18n or {}).get('set_s258', "当日时段") }}</span>
             <input type="time" id="he-exception-interval-start" class="f-inp" style="max-width:7rem" value="09:00">
             <span>—</span>
             <input type="time" id="he-exception-interval-end" class="f-inp" style="max-width:7rem" value="18:00">
-            <button type="button" class="btn btn-s btn-sm" onclick="heAddWorkExceptionInterval()">添加时段到选中日</button>
+            <button type="button" class="btn btn-s btn-sm" onclick="heAddWorkExceptionInterval()">{{ (i18n or {}).get('set_s259', "添加时段到选中日") }}</button>
           </div>
         </div>
         <div class="he-json-toolbar">
-          <button type="button" class="btn btn-s btn-sm" onclick="heValidateWorkExceptionsJson()">检查 JSON</button>
+          <button type="button" class="btn btn-s btn-sm" onclick="heValidateWorkExceptionsJson()">{{ (i18n or {}).get('msg_js_1055', "检查") }} JSON</button>
         </div>
         <textarea class="f-inp he-json-area" id="he-work_exceptions_json" rows="5" style="resize:vertical"
           placeholder='{"2026-01-01": [], "2026-03-21": [["10:00","14:00"]]}'>{{ he_work_exceptions_json }}</textarea>
-        <span id="he-status-wex" class="he-json-status muted">点击「检查 JSON」验证格式</span>
-        <span class="f-hint" style="display:block;margin-top:.45rem"><code>[]</code> 表示全天休息；非空数组为该日仅生效的时段。</span>
+        <span id="he-status-wex" class="he-json-status muted">{{ (i18n or {}).get('dash.q.clicked', "点击") }}「{{ (i18n or {}).get('set_s154', "检查 JSON」") }}{{ (i18n or {}).get('set_s155', "验证格式") }}</span>
+        <span class="f-hint" style="display:block;margin-top:.45rem"><code>[]</code> {{ (i18n or {}).get('set_s260', "表示全天休息；非空数组为该日仅生效的时段。") }}</span>
       </div>
 
       <div class="he-subcard he-advanced">
-        <h3 class="he-subcard-title">⑧ @ 与展示</h3>
-        <p class="he-subcard-intro">控制「转人工」一条消息里如何 @ 多名客服，以及是否只打扰一名。</p>
+        <h3 class="he-subcard-title">⑧ @ {{ (i18n or {}).get('set_s261', "与展示") }}</h3>
+        <p class="he-subcard-intro">{{ (i18n or {}).get('msg_js_1634', "控制") }}「{{ (i18n or {}).get('set_s262', "转人工」") }}{{ (i18n or {}).get('set_s263', "一条消息里如何") }} @ {{ (i18n or {}).get('set_s264', "多名客服，以及是否只打扰一名。") }}</p>
         <div class="he-help-callout">
-          <strong>使用说明</strong>
+          <strong>{{ (i18n or {}).get('set_s188', "使用说明") }}</strong>
           <ul>
-            <li><strong>分隔</strong>：多名客服之间插入的字符（常见为空格或换行）。</li>
-            <li><strong>全部 @</strong>：每位客服都带链接；<strong>单名</strong> 时配合 ⑤ 轮询范围与 SQLite 状态。</li>
+            <li><strong>{{ (i18n or {}).get('set_s265', "分隔") }}</strong>：{{ (i18n or {}).get('set_s266', "多名客服之间插入的字符（常见为空格或换行）。") }}</li>
+            <li><strong>{{ (i18n or {}).get('rpa_all', "全部") }} @</strong>：{{ (i18n or {}).get('set_s267', "每位客服都带链接；") }}<strong>{{ (i18n or {}).get('set_s268', "单名") }}</strong> {{ (i18n or {}).get('set_s269', "时配合") }} ⑤ {{ (i18n or {}).get('set_s270', "轮询范围与 SQLite 状态。") }}</li>
           </ul>
         </div>
         <div class="f-grid">
           <div class="f-row">
-            <label class="f-lbl">多名客服之间分隔</label>
-            <input class="f-inp" type="text" id="he-mention_joiner" maxlength="8" placeholder="空格"
+            <label class="f-lbl">{{ (i18n or {}).get('set_s271', "多名客服之间分隔") }}</label>
+            <input class="f-inp" type="text" id="he-mention_joiner" maxlength="8" placeholder="{{ (i18n or {}).get('wa_s039', '空格') }}"
               value="{{ he.get('mention_joiner', ' ') }}">
-            <div class="f-hint">示例：一个空格；若需换行可粘贴换行符（慎用长度）。</div>
+            <div class="f-hint">{{ (i18n or {}).get('set_s272', "示例：一个空格；若需换行可粘贴换行符（慎用长度）。") }}</div>
           </div>
           <div class="f-row">
-            <label class="f-lbl">@ 展示方式 mention_mode</label>
+            <label class="f-lbl">@ {{ (i18n or {}).get('set_s273', "展示方式") }} mention_mode</label>
             <select class="f-inp" id="he-mention_mode" style="font-family:inherit">
-              <option value="all" {% if he.get('mention_mode','all')=='all' %}selected{% endif %}>全部 @（默认）</option>
-              <option value="single_round_robin" {% if he.get('mention_mode')=='single_round_robin' %}selected{% endif %}>每次只 @ 一名（轮询）</option>
-              <option value="single_random" {% if he.get('mention_mode')=='single_random' %}selected{% endif %}>每次只 @ 一名（随机）</option>
+              <option value="all" {% if he.get('mention_mode','all')=='all' %}selected{% endif %}>{{ (i18n or {}).get('rpa_all', "全部") }} @（{{ (i18n or {}).get('set_s274', "默认）") }}</option>
+              <option value="single_round_robin" {% if he.get('mention_mode')=='single_round_robin' %}selected{% endif %}>{{ (i18n or {}).get('set_s196', "每次只") }} @ {{ (i18n or {}).get('set_s275', "一名（轮询）") }}</option>
+              <option value="single_random" {% if he.get('mention_mode')=='single_random' %}selected{% endif %}>{{ (i18n or {}).get('set_s196', "每次只") }} @ {{ (i18n or {}).get('set_s276', "一名（随机）") }}</option>
             </select>
           </div>
         </div>
@@ -736,28 +754,28 @@ textarea.f-inp.he-json-area{font-family:ui-monospace,SFMono-Regular,Consolas,mon
 
       <div class="save-bar he-save-sticky">
         <span class="save-result" id="save-res-he"></span>
-        <span style="font-size:.75rem;color:var(--t3)">保存前自动换算分钟→秒并同步客服表；热更新无需重启</span>
-        <button class="btn btn-p btn-sm" onclick="saveSection('human_escalation')">保存转接配置</button>
+        <span style="font-size:.75rem;color:var(--t3)">{{ (i18n or {}).get('set_s277', "保存前自动换算分钟") }}→{{ (i18n or {}).get('set_s278', "秒并同步客服表；热更新无需重启") }}</span>
+        <button class="btn btn-p btn-sm" onclick="saveSection('human_escalation')">{{ (i18n or {}).get('set_s080', "保存转接配置") }}</button>
       </div>
 
       <div class="he-subcard">
-        <h3 class="he-subcard-title">⑨ 保存后：验证与排班自检（只读）</h3>
-        <p class="he-subcard-intro">不写入配置。保存后点<strong>验证配置已加载</strong>确认 Bot 已读到客服与人数；排班相关需「完整」视图并填周模板。</p>
+        <h3 class="he-subcard-title">⑨ {{ (i18n or {}).get('set_s279', "保存后：验证与排班自检（只读）") }}</h3>
+        <p class="he-subcard-intro">{{ (i18n or {}).get('set_s280', "不写入配置。保存后点") }}<strong>{{ (i18n or {}).get('set_s281', "验证配置已加载") }}</strong>{{ (i18n or {}).get('set_s282', "确认 Bot 已读到客服与人数；排班相关需") }}「{{ (i18n or {}).get('set_s085', "完整」") }}{{ (i18n or {}).get('set_s283', "视图并填周模板。") }}</p>
         <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start">
-          <button type="button" class="btn btn-s btn-sm" onclick="loadHeVerify()">验证配置已加载</button>
-          <button type="button" class="btn btn-s btn-sm" onclick="loadHeScheduleStatus()">刷新状态</button>
-          <button type="button" class="btn btn-s btn-sm" onclick="loadHeRoundRobinSnapshot()">轮询快照</button>
+          <button type="button" class="btn btn-s btn-sm" onclick="loadHeVerify()">{{ (i18n or {}).get('set_s281', "验证配置已加载") }}</button>
+          <button type="button" class="btn btn-s btn-sm" onclick="loadHeScheduleStatus()">{{ (i18n or {}).get('wa_s017', "刷新状态") }}</button>
+          <button type="button" class="btn btn-s btn-sm" onclick="loadHeRoundRobinSnapshot()">{{ (i18n or {}).get('set_s284', "轮询快照") }}</button>
         </div>
-        <pre id="he-verify-out" style="margin:.5rem 0 0;font-size:.72rem;white-space:pre-wrap;max-width:100%;color:var(--t2);padding:.5rem;background:var(--input);border-radius:8px;border:1px solid var(--bd)">点击「验证配置已加载」→ <code>/api/human-escalation/verify</code>（helper / 存储是否就绪 + 当前 effective 摘要）</pre>
-        <pre id="he-schedule-status" style="margin:.5rem 0 0;font-size:.72rem;white-space:pre-wrap;max-width:100%;color:var(--t2);padding:.5rem;background:var(--input);border-radius:8px;border:1px solid var(--bd)">点击「刷新状态」从 <code>/api/human-escalation/schedule-status</code> 拉取</pre>
-        <pre id="he-rr-snapshot" style="margin:.5rem 0 0;font-size:.7rem;white-space:pre-wrap;max-width:100%;color:var(--t3);padding:.5rem;background:var(--input);border-radius:8px;border:1px solid var(--bd)">「轮询快照」→ <code>/api/human-escalation/mention-round-robin</code></pre>
+        <pre id="he-verify-out" style="margin:.5rem 0 0;font-size:.72rem;white-space:pre-wrap;max-width:100%;color:var(--t2);padding:.5rem;background:var(--input);border-radius:8px;border:1px solid var(--bd)">{{ (i18n or {}).get('dash.q.clicked', "点击") }}「{{ (i18n or {}).get('set_s285', "验证配置已加载」") }}→ <code>/api/human-escalation/verify</code>（helper / {{ (i18n or {}).get('set_s286', "存储是否就绪") }} + {{ (i18n or {}).get('set_s287', "当前 effective 摘要）") }}</pre>
+        <pre id="he-schedule-status" style="margin:.5rem 0 0;font-size:.72rem;white-space:pre-wrap;max-width:100%;color:var(--t2);padding:.5rem;background:var(--input);border-radius:8px;border:1px solid var(--bd)">{{ (i18n or {}).get('dash.q.clicked', "点击") }}「{{ (i18n or {}).get('set_s288', "刷新状态」") }}{{ (i18n or {}).get('set_s289', "从") }} <code>/api/human-escalation/schedule-status</code> {{ (i18n or {}).get('set_s290', "拉取") }}</pre>
+        <pre id="he-rr-snapshot" style="margin:.5rem 0 0;font-size:.7rem;white-space:pre-wrap;max-width:100%;color:var(--t3);padding:.5rem;background:var(--input);border-radius:8px;border:1px solid var(--bd)">「{{ (i18n or {}).get('set_s291', "轮询快照」") }}→ <code>/api/human-escalation/mention-round-robin</code></pre>
       </div>
       <hr style="border:0;border-top:1px solid var(--border);margin:14px 0;opacity:.6">
       <div class="f-row">
-        <label class="f-lbl">值班开关</label>
+        <label class="f-lbl">{{ (i18n or {}).get('set_s292', "值班开关") }}</label>
         <div class="f-check-row">
           <input type="checkbox" id="human-shift-on-duty" onchange="saveShiftDuty()">
-          <label for="human-shift-on-duty">手动值班（duty_mode 含 manual 时生效）</label>
+          <label for="human-shift-on-duty">{{ (i18n or {}).get('set_s293', "手动值班") }}（duty_mode {{ (i18n or {}).get('set_s294', "含 manual 时生效）") }}</label>
         </div>
         <span class="save-result" id="save-res-he-shift" style="margin-left:8px"></span>
       </div>
@@ -791,7 +809,7 @@ async function saveSection(section){
                : section === 'telegram' ? 'tg'
                : section === 'human_escalation' ? 'he' : 'ai';
   const resEl = document.getElementById(`save-res-${prefix}`);
-  resEl.textContent = '保存中…'; resEl.className = 'save-result';
+  resEl.textContent = window.T('ov_js_saving'); resEl.className = 'save-result';
   try{
     if(section === 'human_escalation' && typeof hePrepareHumanEscalationSave === 'function'){
       hePrepareHumanEscalationSave();
@@ -806,14 +824,14 @@ async function saveSection(section){
       body: JSON.stringify({section, fields}),
     });
     const d = await r.json();
-    if(!r.ok){ resEl.textContent = '保存失败：'+(d.detail||'未知错误'); resEl.className='save-result err'; return; }
-    resEl.textContent = `✓ 已保存（${d.updated.length} 项）`; resEl.className='save-result ok';
+    if(!r.ok){ resEl.textContent = window.T('ov_js_save_fail_e')+(d.detail||window.T('inbox.voice.unknown_err')); resEl.className='save-result err'; return; }
+    resEl.textContent = window.Tf('set_js_p01', {n: d.updated.length}); resEl.className='save-result ok';
     if(section === 'human_escalation' && typeof heRunAllHeJsonChecks === 'function'){
       heRunAllHeJsonChecks();
     }
     setTimeout(()=>{ resEl.textContent=''; }, 4000);
   }catch(e){
-    resEl.textContent = '请求失败：'+e.message; resEl.className='save-result err';
+    resEl.textContent = window.T('tg_js_011')+e.message; resEl.className='save-result err';
   }
 }
 
@@ -824,14 +842,14 @@ let   _originalPrompt = _promptEl ? _promptEl.value : '';
 function _updateCharCount(){
   if(!_promptEl||!_charEl) return;
   const n = _promptEl.value.length;
-  _charEl.textContent = n + ' 字';
+  _charEl.textContent = n + ' '+window.T('db_js_089');
   _charEl.style.color = n > 8000 ? 'var(--red)' : 'var(--t3)';
 }
 if(_promptEl){ _promptEl.addEventListener('input', _updateCharCount); _updateCharCount(); }
 
 async function savePrompt(){
   const resEl = document.getElementById('save-res-prompt');
-  resEl.textContent = '保存中…'; resEl.className = 'save-result';
+  resEl.textContent = window.T('ov_js_saving'); resEl.className = 'save-result';
   try{
     const fields = { system_prompt: _promptEl.value };
     const nameEl = document.getElementById('prompt-ai_name');
@@ -843,11 +861,11 @@ async function savePrompt(){
       body: JSON.stringify({section:'ai', fields}),
     });
     const d = await r.json();
-    if(!r.ok){ resEl.textContent = '保存失败：'+(d.detail||'未知错误'); resEl.className='save-result err'; return; }
+    if(!r.ok){ resEl.textContent = window.T('ov_js_save_fail_e')+(d.detail||window.T('inbox.voice.unknown_err')); resEl.className='save-result err'; return; }
     _originalPrompt = _promptEl.value;
-    resEl.textContent = '✓ 已保存并生效（' + d.updated.length + ' 项）'; resEl.className='save-result ok';
+    resEl.textContent = '✓ '+window.T('set_js_020')+'（' + d.updated.length + ' '+window.T('set_js_021'); resEl.className='save-result ok';
     setTimeout(()=>{ resEl.textContent=''; }, 5000);
-  }catch(e){ resEl.textContent = '请求失败：'+e.message; resEl.className='save-result err'; }
+  }catch(e){ resEl.textContent = window.T('tg_js_011')+e.message; resEl.className='save-result err'; }
 }
 
 function jumpToSection(keyword){
@@ -864,7 +882,7 @@ function jumpToSection(keyword){
 
 function resetPrompt(){
   if(!_promptEl) return;
-  if(confirm('确定还原到上次保存的版本？未保存的修改将丢失。')){
+  if(confirm(window.T('set_js_022'))){
     _promptEl.value = _originalPrompt;
     _updateCharCount();
   }
@@ -919,7 +937,7 @@ function heSimpleSyncAgentsFromPrimaryFields(){
   var uid = idRaw === '' ? 0 : (parseInt(idRaw, 10) || 0);
   tbody.innerHTML = '';
   if(un || uid){
-    heAgentsAppendRow({user_id: uid, username: un, display_name: '人工客服'});
+    heAgentsAppendRow({user_id: uid, username: un, display_name: window.T('msg_js_1630')});
   }
 }
 function heSyncPrimaryFromAgentsAndHint(){
@@ -938,7 +956,7 @@ function heSyncPrimaryFromAgentsAndHint(){
   if(hint){
     if(list.length > 1){
       hint.style.display = '';
-      hint.textContent = '当前已配置 '+list.length+' 名客服（请用「完整」视图改表格）。精简模式下保存不会用上方单用户名覆盖该列表。';
+      hint.textContent = window.T('set_js_023')+' '+list.length+' '+window.T('set_js_024')+'「'+window.T('set_s085')+window.T('set_js_025');
     } else {
       hint.style.display = 'none';
       hint.textContent = '';
@@ -1021,7 +1039,7 @@ function heApplyMinimalDefaults(){
   if(huic) huic.value = 5;
   var st = document.getElementById('he-scenario-status');
   if(st){
-    st.textContent = '✓ 已启用、3 次/10 分钟、冷却 5 分钟、始终可 @；请填写客服用户名并点「保存转接配置」。';
+    st.textContent = '✓ '+window.T('set_js_026')+' @；'+window.T('set_js_027')+'「'+window.T('set_js_028')+'。';
     st.className = 'he-json-status ok';
     clearTimeout(window._heScenarioToastTimer);
     window._heScenarioToastTimer = setTimeout(function(){
@@ -1050,10 +1068,10 @@ function heApplyScenario(key){
   if(!dm) return;
   const needWh = key === 'schedule' || key === 'schedule_or_manual' || key === 'schedule_and_manual';
   if(needWh && _heWorkHoursLooksNonEmpty()){
-    if(!window.confirm('将用「工作日 mon–fri 09:00–18:00」覆盖当前 ⑥ 周模板 JSON，是否继续？')){
+    if(!window.confirm(window.T('set_js_029')+'「'+window.T('set_s130')+' mon–fri 09:00–18:00」'+window.T('set_js_030')+' ⑥ '+window.T('set_js_031'))){
       var st = document.getElementById('he-scenario-status');
       if(st){
-        st.textContent = '已取消';
+        st.textContent = window.T('rpa_js_st_cancelled');
         st.className = 'he-json-status err';
         setTimeout(function(){
           st.textContent = '';
@@ -1094,17 +1112,17 @@ function heApplyScenario(key){
   } else if(key === 'schedule'){
     dm.value = 'schedule';
     if(ow) ow.checked = false;
-    _afterSchedulePreset('✓ 已设为「仅按周排班」并写入周模板；请保存转接配置。');
+    _afterSchedulePreset('✓ '+window.T('set_js_032')+'「'+window.T('set_js_033')+window.T('set_js_034'));
     return;
   } else if(key === 'schedule_or_manual'){
     dm.value = 'schedule_or_manual';
     if(ow) ow.checked = false;
-    _afterSchedulePreset('✓ 已设为「排班或手动」并写入周模板；请保存转接配置。');
+    _afterSchedulePreset('✓ '+window.T('set_js_032')+'「'+window.T('set_js_035')+window.T('set_js_034'));
     return;
   } else if(key === 'schedule_and_manual'){
     dm.value = 'schedule_and_manual';
     if(ow) ow.checked = false;
-    _afterSchedulePreset('✓ 已设为「排班且手动」并写入周模板；须在排班内且手动值班。请保存。');
+    _afterSchedulePreset('✓ '+window.T('set_js_032')+'「'+window.T('set_js_036')+window.T('set_js_037'));
     return;
   } else {
     return;
@@ -1112,8 +1130,8 @@ function heApplyScenario(key){
   var el2 = document.getElementById('he-scenario-status');
   if(el2){
     var m = key === 'always'
-      ? '✓ 已设为「始终可 @」；请保存转接配置。'
-      : '✓ 已设为「仅手动值班」；请结合 SQLite 值班开关。请保存转接配置。';
+      ? '✓ '+window.T('set_js_032')+'「'+window.T('set_s112')+' @」；'+window.T('set_js_038')
+      : '✓ '+window.T('set_js_032')+'「'+window.T('set_js_039')+'；'+window.T('set_js_040');
     el2.textContent = m;
     el2.className = 'he-json-status ok';
     clearTimeout(window._heScenarioToastTimer);
@@ -1137,19 +1155,19 @@ function heValidateAgentsJson(){
   try{
     const raw = ta.value.trim();
     if(!raw){
-      _heSetStatus('he-status-agents', true, '✓ 空：将依赖下方「单客服」或留空');
+      _heSetStatus('he-status-agents', true, '✓ '+window.T('set_js_041')+'「'+window.T('set_js_042')+window.T('set_js_043'));
       return;
     }
     const arr = JSON.parse(raw);
-    if(!Array.isArray(arr)) throw new Error('应为 JSON 数组');
+    if(!Array.isArray(arr)) throw new Error(window.T('set_js_044'));
     for(let i=0;i<arr.length;i++){
       const a = arr[i];
-      if(!a || typeof a !== 'object') throw new Error('第 '+(i+1)+' 项须为对象');
+      if(!a || typeof a !== 'object') throw new Error(window.T('set_js_045')+' '+(i+1)+' '+window.T('set_js_046'));
       const uid = Number(a.user_id != null ? a.user_id : 0);
       const un = String(a.username||'').trim();
-      if(!uid && !un) throw new Error('第 '+(i+1)+' 项须填写 user_id 或 username');
+      if(!uid && !un) throw new Error(window.T('set_js_045')+' '+(i+1)+' '+window.T('set_js_047')+' user_id '+window.T('set_s145')+' username');
     }
-    _heSetStatus('he-status-agents', true, '✓ 格式正确，共 '+arr.length+' 名客服');
+    _heSetStatus('he-status-agents', true, '✓ '+window.T('set_js_048')+' '+arr.length+' '+window.T('set_js_049'));
   }catch(e){
     _heSetStatus('he-status-agents', false, '✗ '+(e.message||String(e)));
   }
@@ -1160,17 +1178,17 @@ function heValidateAgentTeamsJson(){
   try{
     const raw = ta.value.trim();
     if(!raw || raw === '[]'){
-      _heSetStatus('he-status-teams', true, '✓ 空：未启用分组，使用全局 agents');
+      _heSetStatus('he-status-teams', true, '✓ '+window.T('set_js_050')+' agents');
       return;
     }
     const arr = JSON.parse(raw);
-    if(!Array.isArray(arr)) throw new Error('应为 JSON 数组');
+    if(!Array.isArray(arr)) throw new Error(window.T('set_js_044'));
     for(let i=0;i<arr.length;i++){
       const t = arr[i];
-      if(!t || typeof t !== 'object') throw new Error('第 '+(i+1)+' 组须为对象');
-      if(!Array.isArray(t.agents)) throw new Error('第 '+(i+1)+' 组缺少 agents 数组');
+      if(!t || typeof t !== 'object') throw new Error(window.T('set_js_045')+' '+(i+1)+' '+window.T('set_js_051'));
+      if(!Array.isArray(t.agents)) throw new Error(window.T('set_js_045')+' '+(i+1)+' '+window.T('set_js_052'));
     }
-    _heSetStatus('he-status-teams', true, '✓ 格式正确，共 '+arr.length+' 个分组');
+    _heSetStatus('he-status-teams', true, '✓ '+window.T('set_js_048')+' '+arr.length+' '+window.T('set_js_053'));
   }catch(e){
     _heSetStatus('he-status-teams', false, '✗ '+(e.message||String(e)));
   }
@@ -1182,24 +1200,24 @@ function heValidateWorkHoursJson(){
   try{
     const raw = ta.value.trim();
     if(!raw){
-      _heSetStatus('he-status-wh', true, '✓ 空对象：无周模板');
+      _heSetStatus('he-status-wh', true, '✓ '+window.T('set_js_054'));
       return;
     }
     const o = JSON.parse(raw);
-    if(typeof o !== 'object' || o === null || Array.isArray(o)) throw new Error('应为 JSON 对象');
+    if(typeof o !== 'object' || o === null || Array.isArray(o)) throw new Error(window.T('set_js_055'));
     const hhmm = /^([01]\d|2[0-3]):[0-5]\d$/;
     for(const k of Object.keys(o)){
       const kl = k.toLowerCase();
-      if(!_HE_DAYS.includes(kl)) throw new Error('未知 weekday 键: '+k);
+      if(!_HE_DAYS.includes(kl)) throw new Error(window.T('set_js_056')+': '+k);
       const v = o[k];
-      if(!Array.isArray(v)) throw new Error(k+' 应为数组');
+      if(!Array.isArray(v)) throw new Error(k+' '+window.T('set_js_057'));
       for(let i=0;i<v.length;i++){
         const p = v[i];
-        if(!Array.isArray(p) || p.length !== 2) throw new Error(k+' 第'+(i+1)+'段应为 ["HH:MM","HH:MM"]');
-        if(!hhmm.test(String(p[0]).trim()) || !hhmm.test(String(p[1]).trim())) throw new Error('时间须为 HH:MM（24h）');
+        if(!Array.isArray(p) || p.length !== 2) throw new Error(k+' '+window.T('set_js_045')+(i+1)+window.T('set_js_058')+' ["HH:MM","HH:MM"]');
+        if(!hhmm.test(String(p[0]).trim()) || !hhmm.test(String(p[1]).trim())) throw new Error(window.T('set_js_059')+' HH:MM（24h）');
       }
     }
-    _heSetStatus('he-status-wh', true, '✓ 周模板解析成功');
+    _heSetStatus('he-status-wh', true, '✓ '+window.T('set_js_060'));
   }catch(e){
     _heSetStatus('he-status-wh', false, '✗ '+(e.message||String(e)));
   }
@@ -1210,14 +1228,14 @@ function heValidateWorkExceptionsJson(){
   try{
     const raw = ta.value.trim();
     if(!raw){
-      _heSetStatus('he-status-wex', true, '✓ 未填写：等同无例外日（保存后仅靠周模板）');
+      _heSetStatus('he-status-wex', true, '✓ '+window.T('set_js_061'));
       return;
     }
     const o = JSON.parse(raw);
-    if(typeof o !== 'object' || o === null || Array.isArray(o)) throw new Error('应为 JSON 对象');
+    if(typeof o !== 'object' || o === null || Array.isArray(o)) throw new Error(window.T('set_js_055'));
     const keys = Object.keys(o);
     if(keys.length === 0){
-      _heSetStatus('he-status-wex', true, '✓ 空对象 {}：无例外日');
+      _heSetStatus('he-status-wex', true, '✓ '+window.T('set_s234')+' {}：'+window.T('set_js_062'));
       return;
     }
     const dateRe = /^\d{4}-\d{2}-\d{2}$/;
@@ -1225,25 +1243,25 @@ function heValidateWorkExceptionsJson(){
     let offDays = 0;
     let slotDays = 0;
     for(const k of keys){
-      if(!dateRe.test(k)) throw new Error('日期键须为 YYYY-MM-DD: '+k);
+      if(!dateRe.test(k)) throw new Error(window.T('set_js_063')+' YYYY-MM-DD: '+k);
       const v = o[k];
-      if(v === null) throw new Error(k+' 不能为 null');
+      if(v === null) throw new Error(k+' '+window.T('set_js_064')+' null');
       if(Array.isArray(v) && v.length === 0){
         offDays++;
         continue;
       }
-      if(!Array.isArray(v)) throw new Error(k+' 应为数组');
+      if(!Array.isArray(v)) throw new Error(k+' '+window.T('set_js_057'));
       slotDays++;
       for(let i=0;i<v.length;i++){
         const p = v[i];
-        if(!Array.isArray(p) || p.length !== 2) throw new Error(k+' 第'+(i+1)+'段格式错误');
-        if(!hhmm.test(String(p[0]).trim()) || !hhmm.test(String(p[1]).trim())) throw new Error('时间须为 HH:MM');
+        if(!Array.isArray(p) || p.length !== 2) throw new Error(k+' '+window.T('set_js_045')+(i+1)+window.T('set_js_065'));
+        if(!hhmm.test(String(p[0]).trim()) || !hhmm.test(String(p[1]).trim())) throw new Error(window.T('set_js_059')+' HH:MM');
       }
     }
     const parts = [];
-    if(offDays) parts.push(offDays+' 天休息');
-    if(slotDays) parts.push(slotDays+' 天自定义时段');
-    _heSetStatus('he-status-wex', true, '✓ 格式正确：共 '+keys.length+' 个日期（'+parts.join('，')+'）');
+    if(offDays) parts.push(offDays+' '+window.T('set_js_066'));
+    if(slotDays) parts.push(slotDays+' '+window.T('set_js_067'));
+    _heSetStatus('he-status-wex', true, '✓ '+window.T('set_js_068')+' '+keys.length+' '+window.T('set_js_069')+'（'+parts.join('，')+'）');
   }catch(e){
     _heSetStatus('he-status-wex', false, '✗ '+(e.message||String(e)));
   }
@@ -1258,25 +1276,25 @@ function heValidateHeFallbackCompat(){
   const hasUser = !!u;
   const hasId = !isNaN(id) && id > 0;
   if(!hasUser && !hasId){
-    _heSetStatus('he-status-fallback', true, '✓ 未填单客服兜底：将完全依赖上方 agents / 分组');
+    _heSetStatus('he-status-fallback', true, '✓ '+window.T('set_js_070'));
     return;
   }
   if(u.startsWith('@')){
-    _heSetStatus('he-status-fallback', false, '✗ 用户名请勿带 @（发送时会自动处理）');
+    _heSetStatus('he-status-fallback', false, '✗ '+window.T('set_js_071')+' @（'+window.T('set_js_072'));
     return;
   }
   if(/\s/.test(u)){
-    _heSetStatus('he-status-fallback', false, '✗ 用户名不应含空格');
+    _heSetStatus('he-status-fallback', false, '✗ '+window.T('set_js_073'));
     return;
   }
   if(idRaw !== '' && (isNaN(id) || id < 0)){
-    _heSetStatus('he-status-fallback', false, '✗ user_id 须为非负整数（留空表示不用）');
+    _heSetStatus('he-status-fallback', false, '✗ user_id '+window.T('set_js_074'));
     return;
   }
   const bits = [];
-  if(hasUser) bits.push('用户名');
+  if(hasUser) bits.push(window.T('set_js_075'));
   if(hasId) bits.push('user_id');
-  _heSetStatus('he-status-fallback', true, '✓ 单客服兜底可用（'+bits.join(' + ')+'）');
+  _heSetStatus('he-status-fallback', true, '✓ '+window.T('set_js_076')+'（'+bits.join(' + ')+'）');
 }
 function heRunAllHeJsonChecks(){
   heValidateAgentsJson();
@@ -1298,14 +1316,14 @@ function heAgentsAppendRow(init){
   uname.className = 'f-inp'; uname.type = 'text'; uname.placeholder = 'alice_bot';
   uname.setAttribute('data-f','uname'); uname.value = init.username != null ? String(init.username) : '';
   const dname = document.createElement('input');
-  dname.className = 'f-inp'; dname.type = 'text'; dname.placeholder = '显示名';
+  dname.className = 'f-inp'; dname.type = 'text'; dname.placeholder = window.T('set_js_077');
   dname.setAttribute('data-f','dname'); dname.value = init.display_name != null ? String(init.display_name) : '';
   const td0 = document.createElement('td'); td0.appendChild(uid);
   const td1 = document.createElement('td'); td1.appendChild(uname);
   const td2 = document.createElement('td'); td2.appendChild(dname);
   const td3 = document.createElement('td');
   const btn = document.createElement('button');
-  btn.type = 'button'; btn.className = 'btn btn-s btn-sm'; btn.textContent = '删除';
+  btn.type = 'button'; btn.className = 'btn btn-s btn-sm'; btn.textContent = window.T('delete');
   btn.onclick = function(){ tr.remove(); };
   td3.appendChild(btn);
   tr.appendChild(td0); tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
@@ -1345,11 +1363,11 @@ function heAgentsLoadFromTextarea(){
   try{
     arr = JSON.parse(ta.value && String(ta.value).trim() ? ta.value : '[]');
   }catch(err){
-    alert('agents JSON 无法解析，请先修正');
+    alert('agents JSON '+window.T('set_js_078'));
     return;
   }
   if(!Array.isArray(arr)){
-    alert('agents 必须是 JSON 数组');
+    alert('agents '+window.T('set_js_079'));
     return;
   }
   tbody.innerHTML = '';
@@ -1429,18 +1447,18 @@ function heAddWorkExceptionClosedDay(){
   if(!inp || !ta) return;
   const day = String(inp.value || '').trim();
   if(!/^\d{4}-\d{2}-\d{2}$/.test(day)){
-    alert('请选择有效日期（YYYY-MM-DD）');
+    alert(window.T('set_js_080'));
     return;
   }
   let o = {};
   try{
     o = JSON.parse(ta.value && String(ta.value).trim() ? ta.value : '{}');
   }catch(e){
-    alert('work_exceptions JSON 无法解析，请先修正');
+    alert('work_exceptions JSON '+window.T('set_js_078'));
     return;
   }
   if(typeof o !== 'object' || o === null || Array.isArray(o)){
-    alert('work_exceptions 必须是 JSON 对象');
+    alert('work_exceptions '+window.T('set_js_081'));
     return;
   }
   o[day] = [];
@@ -1456,24 +1474,24 @@ function heAddWorkExceptionInterval(){
   if(!dayEl || !ta || !sEl || !eEl) return;
   const day = String(dayEl.value || '').trim();
   if(!/^\d{4}-\d{2}-\d{2}$/.test(day)){
-    alert('请先选择例外日期');
+    alert(window.T('set_js_082'));
     return;
   }
   const s = String(sEl.value || '').trim();
   const e = String(eEl.value || '').trim();
   if(!s || !e){
-    alert('请选择开始与结束时间');
+    alert(window.T('set_js_083'));
     return;
   }
   let o = {};
   try{
     o = JSON.parse(ta.value && String(ta.value).trim() ? ta.value : '{}');
   }catch(err){
-    alert('work_exceptions JSON 无法解析，请先修正');
+    alert('work_exceptions JSON '+window.T('set_js_078'));
     return;
   }
   if(typeof o !== 'object' || o === null || Array.isArray(o)){
-    alert('work_exceptions 必须是 JSON 对象');
+    alert('work_exceptions '+window.T('set_js_081'));
     return;
   }
   const prev = o[day];
@@ -1495,54 +1513,54 @@ function heAddWorkExceptionInterval(){
 async function loadHeRoundRobinSnapshot(){
   const el = document.getElementById('he-rr-snapshot');
   if(!el) return;
-  el.textContent = '加载中…';
+  el.textContent = window.T('dash.loading');
   try{
     const r = await fetch('/api/human-escalation/mention-round-robin');
     const d = await r.json();
     if(!d.ok){
-      el.textContent = '无法获取：' + (d.msg || '');
+      el.textContent = window.T('set_js_084') + (d.msg || '');
       return;
     }
     const lines = [
       'global_idx: ' + (d.global_idx ?? ''),
-      'per_chat (最近更新):',
+      'per_chat ('+window.T('set_js_085')+'):',
       JSON.stringify(d.per_chat || [], null, 2),
     ];
     el.textContent = lines.join('\n');
   }catch(e){
-    el.textContent = '请求失败：' + e.message;
+    el.textContent = window.T('tg_js_011') + e.message;
   }
 }
 
 async function loadHeVerify(){
   const el = document.getElementById('he-verify-out');
   if(!el) return;
-  el.textContent = '加载中…';
+  el.textContent = window.T('dash.loading');
   try{
     const r = await fetch('/api/human-escalation/verify');
     const d = await r.json();
     el.textContent = JSON.stringify(d, null, 2);
   }catch(e){
-    el.textContent = '请求失败：' + e.message;
+    el.textContent = window.T('tg_js_011') + e.message;
   }
 }
 
 async function loadHeScheduleStatus(){
   const el = document.getElementById('he-schedule-status');
   if(!el) return;
-  el.textContent = '加载中…';
+  el.textContent = window.T('dash.loading');
   try{
     const r = await fetch('/api/human-escalation/schedule-status');
     const d = await r.json();
-    if(!d.ok){ el.textContent = '无法获取'; return; }
+    if(!d.ok){ el.textContent = window.T('set_js_086'); return; }
     const lines = [
-      '本地时间: ' + (d.local_time || '-'),
+      window.T('set_js_087')+': ' + (d.local_time || '-'),
       'duty_mode: ' + d.duty_mode,
-      'in_schedule(周模板+例外): ' + d.in_schedule,
+      'in_schedule('+window.T('set_s125')+'+'+window.T('set_js_088')+'): ' + d.in_schedule,
       'manual_shift: ' + d.manual_shift,
-      'duty_effective(转接是否放行): ' + d.duty_effective,
-      '约 ' + (d.minutes_until_next_open == null ? '-' : d.minutes_until_next_open) + ' min 后进入排班',
-      '约 ' + (d.minutes_until_next_close == null ? '-' : d.minutes_until_next_close) + ' min 后离开排班',
+      'duty_effective('+window.T('set_js_089')+'): ' + d.duty_effective,
+      window.T('set_js_090')+' ' + (d.minutes_until_next_open == null ? '-' : d.minutes_until_next_open) + ' min '+window.T('set_js_091'),
+      window.T('set_js_090')+' ' + (d.minutes_until_next_close == null ? '-' : d.minutes_until_next_close) + ' min '+window.T('set_js_092'),
       'team_fallback_to_global: ' + d.team_fallback_to_global,
       'team_pick_mode: ' + (d.team_pick_mode || ''),
       'mention_round_robin_scope: ' + (d.mention_round_robin_scope || ''),
@@ -1552,11 +1570,11 @@ async function loadHeScheduleStatus(){
       'estimates_cached: ' + (d.schedule_estimates_cached ?? ''),
     ];
     if(d.active_teams && d.active_teams.length){
-      lines.push('分组: ' + JSON.stringify(d.active_teams));
+      lines.push(window.T('set_s178')+': ' + JSON.stringify(d.active_teams));
     }
     el.textContent = lines.join('\n');
   }catch(e){
-    el.textContent = '请求失败：' + e.message;
+    el.textContent = window.T('tg_js_011') + e.message;
   }
 }
 
@@ -1572,7 +1590,7 @@ async function saveShiftDuty(){
   const cb = document.getElementById('human-shift-on-duty');
   const resEl = document.getElementById('save-res-he-shift');
   if(!cb) return;
-  resEl.textContent = '保存中…'; resEl.className = 'save-result';
+  resEl.textContent = window.T('ov_js_saving'); resEl.className = 'save-result';
   try{
     const r = await fetch('/api/human-escalation/shift',{
       method:'POST',
@@ -1581,13 +1599,13 @@ async function saveShiftDuty(){
     });
     const d = await r.json();
     if(r.ok && d.ok){
-      resEl.textContent = '✓ 值班状态已保存'; resEl.className = 'save-result ok';
+      resEl.textContent = '✓ '+window.T('set_js_093'); resEl.className = 'save-result ok';
     }else{
-      resEl.textContent = '保存失败'; resEl.className = 'save-result err';
+      resEl.textContent = window.T('ov_js_save_fail'); resEl.className = 'save-result err';
     }
     setTimeout(()=>{ resEl.textContent=''; }, 3500);
   }catch(e){
-    resEl.textContent = '请求失败：'+e.message; resEl.className = 'save-result err';
+    resEl.textContent = window.T('tg_js_011')+e.message; resEl.className = 'save-result err';
   }
 }
 loadShiftDuty();

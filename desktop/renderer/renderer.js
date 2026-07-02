@@ -2,6 +2,14 @@
 
 const ICONS = { telegram: "✈️", whatsapp: "🟢", line: "💬", messenger: "💠", instagram: "📷", x: "𝕏", zalo: "💙", signal: "🔵" };
 
+// 平台图标：优先真实品牌原生图标(platform-icons.js)，缺库时回落 emoji。
+// inlineDefs 使渐变自包含，跨 shadow / 独立场景均可渲染。
+function platIconHtml(p, size) {
+  return window.platformIconSVG
+    ? window.platformIconSVG(p, { size: size || 20, inlineDefs: true })
+    : (ICONS[p] || "💬");
+}
+
 // 统一收件箱标签页的固定 id（区别于 config.accounts[] 的真实账号）
 const INBOX_ID = "__inbox__";
 
@@ -201,7 +209,7 @@ function resolveAccounts(cfg) {
     const item = document.createElement("div");
     item.className = "rail-item active";
     item.dataset.id = INBOX_ID;
-    item.title = "统一收件箱（与后台同源：Telegram / WhatsApp / Messenger / LINE）";
+    item.title = "智聊 · 统一收件箱";
     item.innerHTML = `<span class="ic">📥</span><span>${ui.label || "统一收件箱"}</span>`;
     item.addEventListener("click", () => activate(INBOX_ID));
     rail.appendChild(item);
@@ -319,6 +327,13 @@ function resolveAccounts(cfg) {
     });
     wv.addEventListener("dom-ready", () => { try { onNav(wv.getURL()); } catch (e) {} });
     wv.addEventListener("did-navigate", (e) => onNav(e.url));
+    wv.addEventListener("page-title-updated", (e) => {
+      const t = String(e.title || "").trim();
+      if (!t || !window.shell || !window.shell.setWindowTitle) return;
+      // 嵌入页 title 已由后端按生效品牌渲染（白标可改），直接透传到 OS 窗口标题——
+      // 不再硬编码「智聊」，否则白标客户会被强改回默认品牌。
+      window.shell.setWindowTitle(t);
+    });
     wv.addEventListener("did-fail-load", (e) => {
       if (!e.isMainFrame) return;
       if (e.errorCode === -3) return; // ERR_ABORTED：重定向/replace 的正常中断，忽略
@@ -361,7 +376,7 @@ function resolveAccounts(cfg) {
     item.title = `${a.label}（${a.platform}:${a.id}）`;
     // 运行时新增的账号(_auto)带「✕」可就地移除；config.json 定义的账号不可在此删（交配置管理）
     const rmHtml = a._auto ? '<span class="rm" title="移除该内嵌标签">✕</span>' : "";
-    item.innerHTML = `<span class="ic">${ICONS[a.platform] || "💬"}</span><span>${a.label}</span>${rmHtml}`;
+    item.innerHTML = `<span class="ic">${platIconHtml(a.platform)}</span><span>${a.label}</span>${rmHtml}`;
     item.addEventListener("click", (e) => {
       if (e.target && e.target.classList && e.target.classList.contains("rm")) {
         e.stopPropagation();
@@ -408,7 +423,7 @@ function resolveAccounts(cfg) {
     ri.className = "rail-item via-inbox";
     ri.dataset.id = "viainbox:" + a.id;
     ri.title = `${a.label}（${a.platform}）无官方网页版聊天，请在「统一收件箱」中使用`;
-    ri.innerHTML = `<span class="ic">${ICONS[a.platform] || "💬"}</span><span>${a.label}</span><span class="via-tag">↪收件箱</span>`;
+    ri.innerHTML = `<span class="ic">${platIconHtml(a.platform)}</span><span>${a.label}</span><span class="via-tag">↪收件箱</span>`;
     ri.addEventListener("click", () => {
       activate(INBOX_ID);
       flash(`${a.label} 无官方网页版，已切到统一收件箱`);
@@ -442,7 +457,7 @@ function resolveAccounts(cfg) {
     menu.className = "rail-add-menu";
     const embeddables = Object.keys(EMBEDDABLE).filter((p) => EMBEDDABLE[p]);
     menu.innerHTML = embeddables
-      .map((p) => `<button data-plat="${p}"><span class="ic">${ICONS[p] || "💬"}</span>${(TEMPLATES[p] && TEMPLATES[p].name) || p}</button>`)
+      .map((p) => `<button data-plat="${p}"><span class="ic">${platIconHtml(p, 16)}</span>${(TEMPLATES[p] && TEMPLATES[p].name) || p}</button>`)
       .join("");
     menu.addEventListener("click", (e) => {
       const b = e.target.closest("[data-plat]");

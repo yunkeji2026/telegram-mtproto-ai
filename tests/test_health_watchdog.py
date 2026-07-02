@@ -474,3 +474,203 @@ def test_memory_key_drift_event_alias_and_message():
     assert "裸 key" in text
     t2, _ = _build_message("memory_key_drift_alert", {"recovered": True})
     assert "恢复" in t2
+
+
+# ─── F1：AI 回复质量退化告警（复用 ops_incidents 闭环，默认关）─────────────
+
+def _ai_quality_cm(**over):
+    aq = {"enabled": True, "window_days": 7, "min_samples": 10}
+    aq.update(over)
+    return _CM({"ai": {"provider": "openai", "api_key": "sk-real-123"},
+                "inbox": {"ai_quality_alert": aq}})
+
+
+class _AiQualityInbox:
+    """可控 ai_safety_summary 的假 inbox + 事件闭环桩（until_ts 非空=上一窗口 prev）。"""
+
+    def __init__(self, cur, prev=None):
+        self._cur, self._prev = cur, (prev or {})
+        self.opened, self.resolved = [], []
+
+    def ai_safety_summary(self, since_ts=0.0, until_ts=None, include_trend=False):
+        return dict(self._prev) if until_ts is not None else dict(self._cur)
+
+    def open_or_update_incident(self, **kw):
+        self.opened.append(kw)
+        return len(self.opened)
+
+    def resolve_open_incidents(self, *, kind="", ts=None):
+        self.resolved.append(kind)
+        return 1
+
+
+def test_ai_quality_alert_dedup_then_recover(monkeypatch):
+    published = []
+    _bus(monkeypatch, published)
+    inbox = _AiQualityInbox(cur={"reviewed": 50, "adopt_rate": 0.10,
+                                 "reject_rate": 0.0, "high_risk": 0})
+    app = types.SimpleNamespace(state=types.SimpleNamespace(inbox_store=inbox))
+    wd = HealthWatchdog(app=app, config_manager=_ai_quality_cm(), interval_sec=60)
+
+    wd._check_ai_quality()   # adopt 0.10 < severe 0.20 → fail(red) 告警
+    wd._check_ai_quality()   # 签名不变 → 不重发
+    assert wd.total_ai_quality_alerts == 1
+    assert inbox.opened and inbox.opened[-1]["kind"] == "ai_quality"
+    assert inbox.opened[0]["light"] == "red"
+    assert [t for t, _ in published].count("ai_quality_alert") == 1
+    assert published[0][1]["recovered"] is False
+
+    inbox._cur = {"reviewed": 50, "adopt_rate": 0.85, "reject_rate": 0.0, "high_risk": 0}
+    wd._check_ai_quality()   # 采纳率回健康 → resolve
+    assert inbox.resolved == ["ai_quality"]
+    assert published[-1][1]["recovered"] is True
+    assert wd._last_ai_quality_sig is None
+
+
+def test_ai_quality_disabled_by_default(monkeypatch):
+    published = []
+    _bus(monkeypatch, published)
+    inbox = _AiQualityInbox(cur={"reviewed": 50, "adopt_rate": 0.0,
+                                 "reject_rate": 1.0, "high_risk": 0})
+    app = types.SimpleNamespace(state=types.SimpleNamespace(inbox_store=inbox))
+    # 未配置 ai_quality_alert → 默认关，不评不发不落表
+    wd = HealthWatchdog(app=app,
+                        config_manager=_CM({"ai": {"provider": "openai", "api_key": "x"}}),
+                        interval_sec=60)
+    wd._check_ai_quality()
+    assert published == [] and inbox.opened == []
+
+
+def test_ai_quality_event_alias_and_message():
+    from src.inbox.webhook_notifier import _EVENT_ALIASES, _build_message
+    assert "ai_quality" in _EVENT_ALIASES
+    title, text = _build_message("ai_quality_alert", {
+        "light": "red",
+        "problems": [{"name": "草稿采纳率", "detail": "采纳率 10% < 阈值 40%"}]})
+    assert "AI 质量" in title
+    assert "采纳率" in text
+    t2, _ = _build_message("ai_quality_alert", {"recovered": True})
+    assert "恢复" in t2
+
+
+# ─── B 线：实时语音退化告警（复用 ops_incidents 闭环，默认关）────────────────
+
+def _rtv_cm(**over):
+    alert = {"enabled": True}
+    alert.update(over.pop("alert", {}))
+    rtv = {"enabled": True, "alert": alert}
+    rtv.update(over)
+    return _CM({"realtime_voice": rtv,
+                "ai": {"provider": "openai", "api_key": "sk-real-123"}})
+
+
+class _RtvInbox:
+    def __init__(self):
+        self.opened, self.resolved = [], []
+
+    def open_or_update_incident(self, **kw):
+        self.opened.append(kw)
+        return len(self.opened)
+
+    def resolve_open_incidents(self, *, kind="", ts=None):
+        self.resolved.append(kind)
+        return 1
+
+
+def _seed_bad_rtv_stats():
+    from src.ai.realtime_voice_stats import get_realtime_voice_stats
+    s = get_realtime_voice_stats()
+    s.reset()
+    for _ in range(5):
+        s.attempt()
+        s.ended("host_unreachable")
+    for _ in range(5):
+        s.health_probe(False)
+    return s
+
+
+def _seed_good_rtv_stats():
+    from src.ai.realtime_voice_stats import get_realtime_voice_stats
+    s = get_realtime_voice_stats()
+    s.reset()
+    for _ in range(5):
+        s.attempt()
+        s.connected()
+        s.ended("normal", was_connected=True, duration_sec=12.0)
+    for _ in range(5):
+        s.health_probe(True)
+    return s
+
+
+def test_realtime_voice_alert_dedup_then_recover(monkeypatch):
+    _seed_bad_rtv_stats()
+    published = []
+    _bus(monkeypatch, published)
+    inbox = _RtvInbox()
+    app = types.SimpleNamespace(state=types.SimpleNamespace(inbox_store=inbox))
+    wd = HealthWatchdog(app=app, config_manager=_rtv_cm(), interval_sec=60)
+
+    wd._check_realtime_voice()
+    wd._check_realtime_voice()
+    assert wd.total_realtime_voice_alerts == 1
+    assert inbox.opened and inbox.opened[-1]["kind"] == "realtime_voice"
+    assert [t for t, _ in published].count("realtime_voice_alert") == 1
+    assert published[0][1]["recovered"] is False
+
+    _seed_good_rtv_stats()
+    wd._check_realtime_voice()
+    assert inbox.resolved == ["realtime_voice"]
+    assert published[-1][1]["recovered"] is True
+    assert wd._last_realtime_voice_sig is None
+
+
+def test_realtime_voice_disabled_by_default(monkeypatch):
+    _seed_bad_rtv_stats()
+    published = []
+    _bus(monkeypatch, published)
+    inbox = _RtvInbox()
+    app = types.SimpleNamespace(state=types.SimpleNamespace(inbox_store=inbox))
+    wd = HealthWatchdog(app=app,
+                        config_manager=_CM({"ai": {"provider": "openai", "api_key": "x"}}),
+                        interval_sec=60)
+    wd._check_realtime_voice()
+    assert published == [] and inbox.opened == []
+
+
+def test_realtime_voice_feature_off_skips_alert(monkeypatch):
+    _seed_bad_rtv_stats()
+    published = []
+    _bus(monkeypatch, published)
+    inbox = _RtvInbox()
+    app = types.SimpleNamespace(state=types.SimpleNamespace(inbox_store=inbox))
+    wd = HealthWatchdog(app=app,
+                        config_manager=_rtv_cm(enabled=False),
+                        interval_sec=60)
+    wd._check_realtime_voice()
+    assert published == [] and inbox.opened == []
+
+
+def test_realtime_voice_event_alias_and_message():
+    from src.inbox.webhook_notifier import _EVENT_ALIASES, _build_message
+    assert "realtime_voice" in _EVENT_ALIASES
+    title, text = _build_message("realtime_voice_alert", {
+        "light": "red",
+        "problems": [{"name": "语音主机健康率", "detail": "主机健康率 20% < 阈值 80%"}]})
+    assert "实时语音" in title
+    assert "语音主机" in text
+    t2, _ = _build_message("realtime_voice_alert", {"recovered": True})
+    assert "恢复" in t2
+
+
+def test_realtime_voice_reconciles_stale_incident_on_startup(monkeypatch):
+    """重启后 stats 已恢复、内存签名为空，但 DB 仍挂 open 事件 → 首次巡检静默 resolve。"""
+    from src.ai.realtime_voice_stats import get_realtime_voice_stats
+    get_realtime_voice_stats().reset()
+    published = []
+    _bus(monkeypatch, published)
+    inbox = _RtvInbox()
+    app = types.SimpleNamespace(state=types.SimpleNamespace(inbox_store=inbox))
+    wd = HealthWatchdog(app=app, config_manager=_rtv_cm(), interval_sec=60)
+    wd._check_realtime_voice()
+    assert inbox.resolved == ["realtime_voice"]
+    assert all(t != "realtime_voice_alert" for t, _ in published)

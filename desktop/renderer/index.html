@@ -4,7 +4,8 @@
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
     content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-src 'self' http://127.0.0.1:* http://localhost:*;" />
-  <title>AI 客服桌面客户端（多平台）</title>
+  <link rel="icon" href="brand/boundless-mark-256.png" type="image/png">
+  <title>智聊 · 桌面工作台</title>
   <link rel="stylesheet" href="shared/copilot/tokens.css" />
   <link rel="stylesheet" href="shared/copilot/theme-dark.css" />
   <link rel="stylesheet" href="style.css" />
@@ -111,6 +112,11 @@
       </div>
     </aside>
   </div>
+  <!-- Copilot 组件 i18n（须在组件前加载，否则组件取不到 CopilotShared.t 会显示原始 key）。
+       桌面壳为中文/深色专属：无 CP_LANG/?lang= 时按 <html lang="zh"> 回退中文，保持原行为。 -->
+  <!-- 平台原生图标库(与网页端同一份，桌面壳本地副本)：window.platformIconSVG -->
+  <script src="platform-icons.js"></script>
+  <script src="shared/copilot/i18n/cp-i18n.js"></script>
   <script src="shared/copilot/client/copilot-client.js"></script>
   <script src="shared/copilot/components/cp-panel-base.js"></script>
   <script src="shared/copilot/components/cp-draft.js"></script>

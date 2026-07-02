@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -264,10 +265,12 @@ def register_web_chat_routes(app, *, config_manager=None) -> None:
                         prechat = {**prechat, "enabled": False}
                 except Exception:
                     logger.debug("[web_chat] prechat 状态检查失败", exc_info=True)
+        _b = _brand(request)
         return JSONResponse({
             "ok": True, "visitor_id": vid, "token": new_token,
             "greeting": service.greeting if not history else "",
-            "title": service.title, "theme_color": service.theme_color,
+            "title": _effective_title(service, _b),
+            "theme_color": _effective_theme(service, _b),
             "history": history, "prechat": prechat,
         })
 
@@ -428,7 +431,11 @@ def register_web_chat_routes(app, *, config_manager=None) -> None:
     # ── 页面 / 嵌入脚本 ──────────────────────────────────────
     def _csp_headers() -> Dict[str, str]:
         # frame-ancestors 控制「哪些站点能把本 widget 嵌进 iframe」（嵌入级白名单）
-        return {"Content-Security-Policy": service.frame_ancestors_csp()}
+        # no-cache：品牌（色/标题/图标）改动后，客户端每次加载都重新校验、不吃陈旧缓存
+        return {
+            "Content-Security-Policy": service.frame_ancestors_csp(),
+            "Cache-Control": "no-cache",
+        }
 
     def _brand(request: Request) -> dict:
         """C1-1：取生效品牌（widget 用作主题色/标题回退 + Powered by 控制）。"""
@@ -457,7 +464,10 @@ def register_web_chat_routes(app, *, config_manager=None) -> None:
 
     @app.get("/chat/embed.js")
     async def chat_embed(request: Request):
-        return PlainTextResponse(_embed_js(service), media_type="application/javascript")
+        # no-cache：品牌改动（主题色/图标）后，嵌入脚本随客户站点每次加载重新校验取新
+        return PlainTextResponse(_embed_js(service, brand=_brand(request)),
+                                 media_type="application/javascript",
+                                 headers={"Cache-Control": "no-cache"})
 
     logger.info("✅ 网页聊天 Widget 路由已注册（/chat，account=%s mode=%s）",
                 service.account_id, service.default_mode)
@@ -470,15 +480,62 @@ def _html_escape(s: str) -> str:
     return _html.escape(str(s or ""), quote=True)
 
 
+# 主题色白名单：#hex（3/4/6/8 位）/ rgb(a)/hsl(a) 函数式 / 纯字母命名色。
+# 挡掉含 ; } < " ' 等可越出 CSS/JS 上下文的注入串（theme 会同时进 CSS 与 JS）。
+_SAFE_COLOR_RE = re.compile(
+    r"^#[0-9a-fA-F]{3,8}$"
+    r"|^(?:rgb|rgba|hsl|hsla)\([0-9.,%\s/]+\)$"
+    r"|^[a-zA-Z]{1,20}$"
+)
+_DEFAULT_THEME = "#2563eb"
+
+
+def _safe_color(value: str, default: str = _DEFAULT_THEME) -> str:
+    """校验颜色值：不匹配安全白名单（可能是注入串）→ 回落默认，绝不原样吐出。"""
+    v = str(value or "").strip()
+    return v if _SAFE_COLOR_RE.match(v) else default
+
+
+def _effective_theme(service: WebChatService, brand: dict = None) -> str:
+    """widget + embed 共用的主题色解析：web_chat 显式 theme 优先；
+    为默认蓝/空时回退全局品牌主色——保证悬浮气泡与聊天窗同色（白标一致）。
+    出口统一过安全白名单（theme 同时注入 CSS 背景与 JS 变量）。"""
+    brand = brand or {}
+    theme = service.theme_color
+    if theme in ("", "#2563eb") and brand.get("primary_color"):
+        theme = str(brand["primary_color"])
+    return _safe_color(theme)
+
+
+def _effective_title(service: WebChatService, brand: dict = None) -> str:
+    """widget + session API 共用的标题解析：web_chat 显式标题优先；
+    为默认/空时回退品牌产品名 / 公司简称。"""
+    brand = brand or {}
+    title = service.title
+    if title in ("", "在线客服"):
+        title = brand.get("product_name") or brand.get("site_name_short") or title
+    return title
+
+
+def _effective_icon(brand: dict = None) -> str:
+    """widget 头部 + 悬浮气泡共用的图标解析：白标自定义 logo 优先，
+    否则回落产品图标（chatx）——让客户面（聊天窗 + 气泡）都显示客户自己的 logo。"""
+    brand = brand or {}
+    return str(
+        brand.get("logo_url") or brand.get("product_icon_url") or "/static/brand/chatx.png"
+    ).strip()
+
+
 def _widget_html(service: WebChatService, *, standalone: bool, brand: dict = None) -> str:
     brand = brand or {}
     # 品牌回退：web_chat 显式配置优先；为默认值时回退到全局品牌
-    theme = service.theme_color
-    if theme in ("", "#2563eb") and brand.get("primary_color"):
-        theme = brand["primary_color"]
-    title = service.title
-    if title in ("", "在线客服") and brand.get("site_name_short"):
-        title = brand["site_name_short"]
+    theme = _effective_theme(service, brand)
+    title = _effective_title(service, brand)
+    icon_url = _effective_icon(brand)
+    icon_html = (
+        f'<img class="wc-icon" src="{_html_escape(icon_url)}" alt="" width="22" height="22">'
+        if icon_url else ""
+    )
     powered = ""
     if brand.get("show_powered_by"):
         powered = (
@@ -493,6 +550,7 @@ def _widget_html(service: WebChatService, *, standalone: bool, brand: dict = Non
 *{box-sizing:border-box}html,body{margin:0;height:100%;font-family:system-ui,'PingFang SC','Microsoft YaHei',sans-serif;background:#f3f4f6}
 .wc-wrap{display:flex;flex-direction:column;height:100vh;background:#f7f8fa}
 .wc-head{background:__THEME__;color:#fff;padding:12px 16px;font-weight:600;font-size:15px;flex:0 0 auto;display:flex;align-items:center;gap:8px}
+.wc-icon{border-radius:6px;object-fit:contain;flex-shrink:0;background:rgba(255,255,255,.12)}
 .wc-status{font-size:11px;font-weight:400;opacity:.85;margin-left:auto}
 .wc-msgs{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
 .wc-row{display:flex}.wc-row.me{justify-content:flex-end}
@@ -517,7 +575,7 @@ def _widget_html(service: WebChatService, *, standalone: bool, brand: dict = Non
 .wc-powered{flex:0 0 auto;text-align:center;font-size:11px;color:#9ca3af;padding:5px 0 7px;background:#fff}
 </style></head><body>
 <div class="wc-wrap" style="position:relative">
-  <div class="wc-head"><span>__TITLE__</span><span class="wc-status" id="wcStatus">连接中…</span></div>
+  <div class="wc-head">__ICON__<span>__TITLE__</span><span class="wc-status" id="wcStatus">连接中…</span></div>
   <div class="wc-msgs" id="wcMsgs"></div>
   <div class="wc-typing" id="wcTyping" style="display:none">对方正在输入…</div>
   <div class="wc-input">
@@ -601,23 +659,34 @@ def _widget_html(service: WebChatService, *, standalone: bool, brand: dict = Non
   start();
 })();
 </script></body></html>""".replace("__TITLE__", _html_escape(title))
+            .replace("__ICON__", icon_html)
             .replace("__THEME__", theme)
             .replace("__POWERED__", powered))
 
 
-def _embed_js(service: WebChatService) -> str:
-    theme = service.theme_color
+def _embed_js(service: WebChatService, brand: dict = None) -> str:
+    # 悬浮气泡颜色 + 图标与聊天窗口同源解析（白标客户设了品牌主色/logo 时气泡也跟着变）
+    theme = _effective_theme(service, brand)
+    icon = _effective_icon(brand)
     return """(function(){
   if(window.__wcLoaded)return;window.__wcLoaded=true;
   var origin=(document.currentScript&&document.currentScript.src)?new URL(document.currentScript.src).origin:'';
-  var THEME='__THEME__';
+  var THEME=__THEME__,ICON=__ICON__;
+  var SVG='<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
   var btn=document.createElement('div');
-  btn.style.cssText='position:fixed;right:20px;bottom:20px;width:56px;height:56px;border-radius:50%;background:'+THEME+';box-shadow:0 6px 20px rgba(0,0,0,.25);cursor:pointer;z-index:2147483000;display:flex;align-items:center;justify-content:center';
-  btn.innerHTML='<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+  btn.style.cssText='position:fixed;right:20px;bottom:20px;width:56px;height:56px;border-radius:50%;background:'+THEME+';box-shadow:0 6px 20px rgba(0,0,0,.25);cursor:pointer;z-index:2147483000;display:flex;align-items:center;justify-content:center;overflow:hidden';
+  if(ICON){
+    var iconSrc=(/^https?:/i.test(ICON)?ICON:(origin+ICON));
+    var im=document.createElement('img');
+    im.src=iconSrc;im.alt='';im.width=30;im.height=30;
+    im.style.cssText='border-radius:8px;object-fit:contain;pointer-events:none';
+    im.onerror=function(){btn.innerHTML=SVG};
+    btn.appendChild(im);
+  }else{btn.innerHTML=SVG}
   var frame=document.createElement('iframe');
   frame.src=origin+'/chat/widget';
   frame.style.cssText='position:fixed;right:20px;bottom:88px;width:360px;height:520px;max-width:92vw;max-height:80vh;border:0;border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.28);z-index:2147483000;display:none;background:#fff';
   var open=false;
   btn.onclick=function(){open=!open;frame.style.display=open?'block':'none'};
   document.body.appendChild(frame);document.body.appendChild(btn);
-})();""".replace("__THEME__", theme)
+})();""".replace("__THEME__", json.dumps(theme)).replace("__ICON__", json.dumps(icon))

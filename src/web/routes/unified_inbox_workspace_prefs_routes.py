@@ -30,6 +30,7 @@ from src.web.routes.unified_inbox_sla import (
     _sla_cfg,
     _sla_detail,
 )
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +138,7 @@ def register_workspace_prefs_routes(app, *, api_auth) -> None:
                 platform = platform or parts[0]
                 chat_key = chat_key or ":".join(parts[2:])
         if not platform or not chat_key:
-            raise HTTPException(400, "缺少 platform/chat_key 或 conversation_id")
+            raise HTTPException(400, tr(request, "err.ws.missing_platform_or_conv"))
         cmap = store.resolve_contacts_by_external([(platform, chat_key)])
         contact_id = cmap.get((platform, chat_key))
         if not contact_id:

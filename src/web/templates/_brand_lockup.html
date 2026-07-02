@@ -1,0 +1,42 @@
+{# Boundless · ChatX brand lockup — variant: login | sidebar | setup | workspace #}
+{% set _v = variant|default('sidebar') %}
+{% set _mark = brand_mark_url|default('/static/brand/boundless-mark-256.png') %}
+{% set _prod_icon = product_icon_url|default('/static/brand/chatx.png') %}
+{% if _v == 'workspace' %}
+<div class="brand-lockup brand-lockup--workspace">
+  <img class="brand-mark brand-mark--product" src="{{ _prod_icon }}" alt="{{ product_name|default((i18n or {}).get('brand.product', '智聊')) }}" width="24" height="24" draggable="false">
+  <span class="brand-lockup__line">
+    <span class="brand-lockup__product" data-i18n="brand.product">{{ product_name|default((i18n or {}).get('brand.product', '智聊')) }}</span><span class="brand-lockup__sep"> · </span><span class="brand-lockup__surface" data-i18n="base.workspace_label">{{ (i18n or {}).get('base.workspace_label', '坐席工作台') }}</span>
+  </span>
+</div>
+{% elif _v == 'setup' %}
+<div class="brand-lockup brand-lockup--card brand-lockup--setup">
+  <span class="brand-mark-wrap brand-mark-wrap--card">
+    <img class="brand-mark" src="{{ _mark }}" alt="{{ company_name|default((i18n or {}).get('brand.company', '无界科技')) }}" width="40" height="40" draggable="false">
+  </span>
+  <span class="brand-lockup__line brand-lockup__line--single">
+    {{ (i18n or {}).get('brand.setup_line', product_name|default((i18n or {}).get('brand.product', '智聊')) ~ ' · 初始化向导') }}
+  </span>
+</div>
+{% elif _v == 'login' %}
+<div class="brand-lockup brand-lockup--card">
+  <span class="brand-mark-wrap brand-mark-wrap--card">
+    <img class="brand-mark" src="{{ _mark }}" alt="{{ company_name|default((i18n or {}).get('brand.company', '无界科技')) }}" width="40" height="40" draggable="false">
+  </span>
+  <span class="brand-lockup__line brand-lockup__line--single">
+    {% set _login_sub_def = (i18n or {}).get('brand.login_subtitle_default', '管理控制台') %}
+    {% if brand_login_subtitle and brand_login_subtitle != _login_sub_def %}
+    {{ brand_login_line|default((i18n or {}).get('brand.login_line', '智聊 · 管理控制台')) }}
+    {% else %}
+    {{ (i18n or {}).get('brand.login_line', '智聊 · 管理控制台') }}
+    {% endif %}
+  </span>
+</div>
+{% else %}
+<div class="brand-lockup brand-lockup--sidebar">
+  <span class="brand-mark-wrap brand-mark-wrap--sidebar">
+    <img class="brand-mark" src="{{ _mark }}" alt="{{ company_name|default((i18n or {}).get('brand.company', '无界科技')) }}" width="28" height="28" draggable="false">
+  </span>
+  <span class="brand-lockup__line brand-lockup__line--single sb-name">{{ sidebar_name|default((i18n or {}).get('brand.sidebar', '无界 · 智聊')) }}</span>
+</div>
+{% endif %}

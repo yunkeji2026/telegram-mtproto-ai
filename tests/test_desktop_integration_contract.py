@@ -45,10 +45,14 @@ def test_deeplink_entrypoint_present(auth_client):
 
 
 def test_language_alignment_honors_lang_query(auth_client):
-    """语言对齐：?lang= 应被 i18n 中间件采纳并体现在 <html lang=..>。"""
+    """语言对齐：?lang= 应被 i18n 中间件采纳并体现在合法的 <html lang=..>。
+
+    en → ``lang="en"``（③-S1 前曾错渲成非法的 ``en-CN``，现已修正为标准 BCP-47）；zh → ``zh-CN``。
+    """
     en = auth_client.get("/workspace?lang=en", follow_redirects=False)
     assert en.status_code == 200
-    assert 'lang="en-CN"' in en.text, "?lang=en 未生效（语言对齐回归）"
+    assert 'lang="en"' in en.text, "?lang=en 未生效（语言对齐回归）"
+    assert 'lang="en-CN"' not in en.text, "en 不应再渲成非法 en-CN（③-S1 lang 修复回归）"
 
     zh = auth_client.get("/workspace?lang=zh", follow_redirects=False)
     assert zh.status_code == 200

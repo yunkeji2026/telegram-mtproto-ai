@@ -1,5 +1,5 @@
 {% extends "workspace_base.html" %}
-{% block title %}AI 回复质量{% endblock %}
+{% block title %}{{ (i18n or {}).get('aq_s001', "AI 回复质量") }}{% endblock %}
 {% block head %}
 <style>
   /* 令牌驱动（继承 workspace_base 的 --tk-*），日/夜两版自动适配；处置构成多色序列见 JS SEG。 */
@@ -33,36 +33,36 @@
 {% endblock %}
 {% block content %}
 <div class="aq-wrap">
-  <a class="aq-back" href="/workspace/dash">← 返回今日概览</a>
+  <a class="aq-back" href="/workspace/dash">← {{ (i18n or {}).get('wr_s002', "返回今日概览") }}</a>
   <div class="aq-head">
-    <h2>AI 回复质量</h2>
+    <h2>AI {{ (i18n or {}).get('aq_s002', "回复质量") }}</h2>
     <div style="display:flex;gap:8px;">
-      <span class="aq-pill active" data-days="7" onclick="aqDays(7,this)">近 7 天</span>
-      <span class="aq-pill" data-days="30" onclick="aqDays(30,this)">近 30 天</span>
+      <span class="aq-pill active" data-days="7" onclick="aqDays(7,this)">{{ (i18n or {}).get('analytics_period_7d', "近 7 天") }}</span>
+      <span class="aq-pill" data-days="30" onclick="aqDays(30,this)">{{ (i18n or {}).get('analytics_period_30d', "近 30 天") }}</span>
     </div>
   </div>
 
   <div id="aq-empty" style="display:none;color:var(--tk-text-muted);font-size:14px;padding:40px;text-align:center;">
-    暂无 AI 草稿处置数据（接入渠道 + 开启 AI 自动应答后将逐步积累）。
+    {{ (i18n or {}).get('aq_s003', "暂无 AI 草稿处置数据（接入渠道") }} + {{ (i18n or {}).get('aq_s004', "开启 AI 自动应答后将逐步积累）。") }}
   </div>
 
   <div id="aq-body" style="display:none;">
     <div id="aq-hints"></div>
     <div class="aq-grid" id="aq-cards"></div>
     <div class="aq-sec">
-      <h3>处置构成（窗口内全部 AI 草稿）</h3>
+      <h3>{{ (i18n or {}).get('aq_s005', "处置构成（窗口内全部 AI 草稿）") }}</h3>
       <div class="aq-bar" id="aq-bar"></div>
       <div class="aq-legend" id="aq-legend"></div>
     </div>
     <div class="aq-sec">
-      <h3>自动通过率趋势</h3>
+      <h3>{{ (i18n or {}).get('aq_s006', "自动通过率趋势") }}</h3>
       <div class="aq-spark" id="aq-spark"></div>
-      <div style="font-size:11px;color:var(--tk-text-muted);margin-top:4px;">每日 autosend / 当日处置总数</div>
+      <div style="font-size:11px;color:var(--tk-text-muted);margin-top:4px;">{{ (i18n or {}).get('aq_s007', "每日 autosend / 当日处置总数") }}</div>
     </div>
     <div class="aq-sec">
-      <h3>📥 知识库改进候选（AI 答错被改写/拒绝的会话）</h3>
-      <div style="font-size:12px;color:var(--tk-text-muted);margin-bottom:10px;">把这些「人工纠正过」的问答一键沉淀为知识，AI 下次就会了。</div>
-      <div id="aq-improve"><span class="tk-load">加载中…</span></div>
+      <h3>📥 {{ (i18n or {}).get('aq_s008', "知识库改进候选（AI 答错被改写/拒绝的会话）") }}</h3>
+      <div style="font-size:12px;color:var(--tk-text-muted);margin-bottom:10px;">{{ (i18n or {}).get('aq_s009', "把这些「人工纠正过」的问答一键沉淀为知识，AI 下次就会了。") }}</div>
+      <div id="aq-improve"><span class="tk-load">{{ (i18n or {}).get('dash.loading', "加载中…") }}</span></div>
     </div>
   </div>
 </div>
@@ -86,11 +86,11 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return
 function aqDays(d,el){ AQ_DAYS=d; document.querySelectorAll('.aq-pill').forEach(function(p){p.classList.remove('active');}); if(el)el.classList.add('active'); load(); }
 
 function delta(dp, goodWhenDown){
-  if(dp==null) return '<div class="d flat">环比 —</div>';
+  if(dp==null) return '<div class="d flat">'+window.T('as_js039')+' —</div>';
   var improving = goodWhenDown ? dp<0 : dp>0;
   var cls = dp===0?'flat':(improving?'down':'up');
   var arrow = dp>0?'▲':(dp<0?'▼':'■');
-  return '<div class="d '+cls+'">环比 '+arrow+' '+Math.abs(dp)+'pp</div>';
+  return '<div class="d '+cls+'">'+window.T('as_js039')+' '+arrow+' '+Math.abs(dp)+'pp</div>';
 }
 
 function card(v, label, cls, deltaH){
@@ -98,24 +98,24 @@ function card(v, label, cls, deltaH){
     +'<div class="l">'+esc(label)+'</div>'+(deltaH||'')+'</div>';
 }
 
-var SEG=[['autosend','var(--tk-brand)','AI 自动发'],['approved','var(--tk-emerald)','批准发'],
-         ['edit_send','var(--tk-amber)','改写后发'],['force_override','var(--tk-violet)','强制放行'],
-         ['rejected','var(--tk-text-muted)','拒绝'],['blocked','var(--tk-danger)','拦截']];
+var SEG=[['autosend','var(--tk-brand)','AI '+window.T('dash.m.lbl_autosend')],['approved','var(--tk-emerald)',window.T('aq_js001')],
+         ['edit_send','var(--tk-amber)',window.T('aq_js002')],['force_override','var(--tk-violet)',window.T('aq_js003')],
+         ['rejected','var(--tk-text-muted)',window.T('rpa_js_act_reject')],['blocked','var(--tk-danger)',window.T('aq_js004')]];
 
 function renderBar(counts){
   var total=0; SEG.forEach(function(s){total+=counts[s[0]]||0;});
   var bar=document.getElementById('aq-bar'), leg=document.getElementById('aq-legend');
-  if(!total){ bar.innerHTML='<i style="width:100%;background:var(--tk-surface-2);"></i>'; leg.innerHTML='<span class="tk-load">暂无处置</span>'; return; }
+  if(!total){ bar.innerHTML='<i style="width:100%;background:var(--tk-surface-2);"></i>'; leg.innerHTML='<span class="tk-load">'+window.T('aq_js005')+'</span>'; return; }
   bar.innerHTML=SEG.map(function(s){var n=counts[s[0]]||0; var w=n/total*100; return w>0?'<i style="width:'+w+'%;background:'+s[1]+';" title="'+s[2]+' '+n+'"></i>':'';}).join('');
   leg.innerHTML=SEG.map(function(s){var n=counts[s[0]]||0; return '<span><span class="aq-dot" style="background:'+s[1]+'"></span>'+s[2]+' '+n+'</span>';}).join('');
 }
 
 function renderSpark(trend){
   var el=document.getElementById('aq-spark');
-  if(!trend||!trend.length){ el.innerHTML='<span style="font-size:11px;color:var(--tk-text-muted);">暂无数据</span>'; return; }
+  if(!trend||!trend.length){ el.innerHTML='<span style="font-size:11px;color:var(--tk-text-muted);">'+window.T('rpa_js_no_data')+'</span>'; return; }
   el.innerHTML=trend.map(function(t){
     var rate=t.total?Math.round((t.autosend||0)/t.total*100):0;
-    return '<div class="col" title="'+esc(t.day)+'：'+rate+'%（'+(t.autosend||0)+'/'+(t.total||0)+'）"><i style="height:'+rate+'%"></i></div>';
+    return '<div class="col" title="'+esc(window.Tf('aq_tf_spark', {day: t.day, rate: rate, a: t.autosend||0, t: t.total||0}))+'"><i style="height:'+rate+'%"></i></div>';
   }).join('');
 }
 
@@ -137,11 +137,11 @@ function loadQ(){
     document.getElementById('aq-body').style.display='block';
     var m=d.metrics||{}, c=d.compare||{};
     var cards='';
-    cards+=card(m.auto_pass_rate+'%','自动通过率', m.auto_pass_rate>=60?'good':'', delta(c.auto_pass_delta_pp,false));
-    cards+=card(m.edit_rate+'%','人工改写率', m.edit_rate>=40?'bad':(m.edit_rate>=20?'warn':'good'), delta(c.edit_delta_pp,true));
-    cards+=card(m.reject_rate+'%','拒绝率', m.reject_rate>=20?'bad':(m.reject_rate>=10?'warn':'good'), delta(c.reject_delta_pp,true));
-    cards+=card(m.high_risk_rate+'%','高风险占比', m.high_risk_rate>=30?'bad':(m.high_risk_rate>=15?'warn':'good'),'');
-    cards+=card(d.total||0,'总处置数','');
+    cards+=card(m.auto_pass_rate+'%',window.T('aq_js006'), m.auto_pass_rate>=60?'good':'', delta(c.auto_pass_delta_pp,false));
+    cards+=card(m.edit_rate+'%',window.T('aq_js007'), m.edit_rate>=40?'bad':(m.edit_rate>=20?'warn':'good'), delta(c.edit_delta_pp,true));
+    cards+=card(m.reject_rate+'%',window.T('aq_js008'), m.reject_rate>=20?'bad':(m.reject_rate>=10?'warn':'good'), delta(c.reject_delta_pp,true));
+    cards+=card(m.high_risk_rate+'%',window.T('aq_js009'), m.high_risk_rate>=30?'bad':(m.high_risk_rate>=15?'warn':'good'),'');
+    cards+=card(d.total||0,window.T('aq_js010'),'');
     document.getElementById('aq-cards').innerHTML=cards;
     renderHints(d.hints);
     renderBar(d.counts||{});
@@ -153,36 +153,36 @@ function loadImprovements(){
   var el=document.getElementById('aq-improve');
   if(!el) return;
   fetch('/api/kb/improvements?days='+AQ_DAYS).then(function(r){return r.json();}).then(function(d){
-    if(!d||!d.ok){ el.innerHTML='<span class="tk-fail">加载失败</span>'; return; }
+    if(!d||!d.ok){ el.innerHTML='<span class="tk-fail">'+window.T('rpa_load_failed')+'</span>'; return; }
     var cs=d.candidates||[];
-    if(!cs.length){ el.innerHTML='<span class="tk-load">暂无候选（近期无被改写/拒绝的草稿）。</span>'; return; }
+    if(!cs.length){ el.innerHTML='<span class="tk-load">'+window.T('aq_js011')+'</span>'; return; }
     el.innerHTML=cs.map(function(c,i){
-      var tag=c.action==='edit_send'?'<span class="imp-tag edit">改写后发</span>':'<span class="imp-tag reject">已拒绝</span>';
+      var tag=c.action==='edit_send'?'<span class="imp-tag edit">'+window.T('aq_js002')+'</span>':'<span class="imp-tag reject">'+window.T('draft.tab.rejected')+'</span>';
       var reply=c.suggested_reply
-        ? '<div class="imp-r">✏ 坐席答案：'+esc(c.suggested_reply)+'</div>'
-        : '<div class="imp-r empty">无改写答案（转入后由 AI 自动填充初稿，再人工校对）</div>';
+        ? '<div class="imp-r">✏ '+window.T('aq_js012')+esc(c.suggested_reply)+'</div>'
+        : '<div class="imp-r empty">'+window.T('aq_js013')+'</div>';
       return '<div class="imp-item" id="imp-'+i+'">'
         +'<div class="imp-q">'+esc(c.question)+tag+'</div>'+reply
-        +'<div class="imp-act"><button onclick="convertImp('+i+')">转为知识条目</button>'
+        +'<div class="imp-act"><button onclick="convertImp('+i+')">'+window.T('aq_js014')+'</button>'
         +'<span class="imp-msg" id="imp-msg-'+i+'"></span></div></div>';
     }).join('');
     window.__impCands=cs;
-  }).catch(function(){ el.innerHTML='<span class="tk-fail">加载失败</span>'; });
+  }).catch(function(){ el.innerHTML='<span class="tk-fail">'+window.T('rpa_load_failed')+'</span>'; });
 }
 
 function convertImp(i){
   var c=(window.__impCands||[])[i]; if(!c) return;
   var msg=document.getElementById('imp-msg-'+i);
   var btn=document.querySelector('#imp-'+i+' button');
-  btn.disabled=true; msg.className='imp-msg'; msg.textContent='转入中…';
+  btn.disabled=true; msg.className='imp-msg'; msg.textContent=window.T('aq_js015');
   fetch('/api/kb/improvements/convert',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({question:c.question, suggested_reply:c.suggested_reply, category:'其他'})})
+    body:JSON.stringify({question:c.question, suggested_reply:c.suggested_reply, category:window.T('kb_js_005')})})
     .then(function(r){return r.json();}).then(function(d){
-      if(!d||!d.ok){ btn.disabled=false; msg.className='imp-msg err'; msg.textContent='失败'; return; }
+      if(!d||!d.ok){ btn.disabled=false; msg.className='imp-msg err'; msg.textContent=window.T('rpa_js_st_failed'); return; }
       msg.className='imp-msg ok';
-      msg.textContent='✓ 已建条目'+(d.ai_filled?'（AI 正在填充初稿）':'');
-      btn.textContent='已转入';
-    }).catch(function(){ btn.disabled=false; msg.className='imp-msg err'; msg.textContent='网络错误'; });
+      msg.textContent='✓ '+window.T('aq_js016')+(d.ai_filled?window.T('aq_js017'):'');
+      btn.textContent=window.T('aq_js018');
+    }).catch(function(){ btn.disabled=false; msg.className='imp-msg err'; msg.textContent=window.T('draft.net_err'); });
 }
 
 function load(){ loadQ(); loadImprovements(); }

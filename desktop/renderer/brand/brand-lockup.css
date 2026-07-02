@@ -1,0 +1,21 @@
+/* 无界科技 · 智聊 — 共享品牌 lockup（login / 侧栏 / 工作台顶栏） */
+.brand-lockup{display:flex;align-items:center;gap:10px;min-width:0}
+.brand-lockup__line{display:flex;align-items:baseline;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.brand-lockup__line--single{font-weight:800;font-size:1.05rem;line-height:1.2;color:inherit}
+.brand-lockup--sidebar .brand-lockup__line--single{font-weight:700;font-size:.92rem;color:#fff}
+.brand-lockup--workspace .brand-lockup__line{font-weight:700;font-size:15px;color:#fff}
+.brand-lockup__product{font-weight:700}
+.brand-lockup__surface{font-weight:400;color:#aeb8d4}
+.brand-lockup__sep{font-weight:400;opacity:.85}
+.brand-mark{object-fit:contain;display:block;flex-shrink:0}
+.brand-mark-wrap{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;background:#05060f;border-radius:22%;padding:5px;box-shadow:0 4px 14px rgba(91,124,246,.25)}
+.brand-mark-wrap--card{padding:6px;border-radius:13px;animation:brand-breathe 3s ease-in-out infinite}
+.brand-mark-wrap--sidebar{padding:4px;border-radius:10px;box-shadow:0 2px 10px rgba(91,124,246,.2)}
+@keyframes brand-breathe{0%,100%{box-shadow:0 4px 14px rgba(91,124,246,.25)}50%{box-shadow:0 6px 22px rgba(91,124,246,.45)}}
+.brand-lockup--card{margin-bottom:1.8rem}
+.brand-lockup--card .brand-lockup__line--single{font-size:1.12rem}
+.brand-lockup--setup{margin-bottom:2rem}
+.brand-lockup--setup .brand-lockup__line--single{font-size:1.08rem}
+.sidebar.collapsed .brand-lockup--sidebar .brand-lockup__line{display:none}
+.sidebar.collapsed .brand-lockup--sidebar{justify-content:center;width:100%}
+.sidebar.collapsed .brand-lockup--sidebar .brand-mark-wrap--sidebar{margin:0 auto}

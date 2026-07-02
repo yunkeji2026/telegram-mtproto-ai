@@ -17,8 +17,8 @@
   };
 
   class CpNextActions extends Base {
-    emptyText() { return "选中会话后加载建议操作…"; }
-    emptyDataText() { return "暂无推荐"; }
+    emptyText() { return this.t("cp.nba.empty"); }
+    emptyDataText() { return this.t("cp.nba.no_data"); }
     styles() {
       return `
       .card.escalate { border-left-color:var(--cp-danger,#dc2626); }
@@ -29,25 +29,25 @@
     }
     renderData(d) {
       const acts = Array.isArray(d.actions) ? d.actions : [];
-      if (!acts.length) return `<div class="empty">${this.emptyDataText()}</div>`;
+      if (!acts.length) return `<div class="empty">${this.esc(this.emptyDataText())}</div>`;
       const esc = (s) => this.esc(s);
       return acts.map((a, i) => {
         const t = a.action_type;
         const cls = t === "escalate" ? "card escalate" : t === "template" ? "card template" : "card";
         const btns = [];
         if (t === "template" && a.config && a.config.template_text) {
-          btns.push(`<button data-act="fill" data-idx="${i}">📤 使用话术</button>`);
+          btns.push(`<button data-act="fill" data-idx="${i}">${esc(this.t("cp.nba.use_template"))}</button>`);
         }
-        if (t === "task") btns.push(`<button data-act="exec" data-idx="${i}" data-kind="task">📅 创建任务</button>`);
+        if (t === "task") btns.push(`<button data-act="exec" data-idx="${i}" data-kind="task">${esc(this.t("cp.nba.create_task"))}</button>`);
         if (t === "tag" && a.config && (a.config.tag || a.config.tag_options)) {
           const opts = (a.config.tag_options || [a.config.tag]).filter(Boolean);
           opts.forEach((tag) => {
             btns.push(`<button data-act="exec" data-idx="${i}" data-kind="tag" data-tag="${esc(tag)}">🏷 ${esc(tag)}</button>`);
           });
         }
-        if (t === "escalate") btns.push(`<button class="danger" data-act="exec" data-idx="${i}" data-kind="escalate">🔴 立即升级</button>`);
-        if (t === "note") btns.push(`<button data-act="exec" data-idx="${i}" data-kind="note">📝 添加备注</button>`);
-        if (t === "chain") btns.push(`<button data-act="exec" data-idx="${i}" data-kind="chain">⚡ 启动工作链</button>`);
+        if (t === "escalate") btns.push(`<button class="danger" data-act="exec" data-idx="${i}" data-kind="escalate">${esc(this.t("cp.nba.escalate"))}</button>`);
+        if (t === "note") btns.push(`<button data-act="exec" data-idx="${i}" data-kind="note">${esc(this.t("cp.nba.add_note"))}</button>`);
+        if (t === "chain") btns.push(`<button data-act="exec" data-idx="${i}" data-kind="chain">${esc(this.t("cp.nba.start_chain"))}</button>`);
         return `<div class="${cls}">` +
           `<div class="title">${esc(a.icon || "💡")} ${esc(a.name || "")}</div>` +
           (a.reason ? `<div class="reason">${esc(a.reason)}</div>` : "") +
@@ -69,7 +69,7 @@
         let config = Object.assign({}, a.config || {});
         if (kind === "tag") config = { tag: el.getAttribute("data-tag") || config.tag };
         if (kind === "note") {
-          const body = (typeof prompt === "function") ? prompt("输入内部备注内容：") : "";
+          const body = (typeof prompt === "function") ? prompt(this.t("cp.nba.note_prompt")) : "";
           if (!body || !body.trim()) return;
           config = { note_body: body.trim() };
         }

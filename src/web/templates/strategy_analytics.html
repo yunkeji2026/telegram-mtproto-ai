@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}策略效果 · {{ site_name|default('华灵科技客户转化聊天系统') }}{% endblock %}
-{% block page_title %}策略 A/B 效果追踪{% endblock %}
+{% block title %}{{ (i18n or {}).get('sa_s001', "策略效果 ·") }} {{ product_name|default((i18n or {}).get('brand.product', '智聊')) }}{% endblock %}
+{% block page_title %}{{ (i18n or {}).get('sa_s002', "策略 A/B 效果追踪") }}{% endblock %}
 {% block head %}
 <style>
 .sa-filter{display:flex;align-items:center;gap:.7rem;margin-bottom:1.4rem;flex-wrap:wrap}
@@ -139,13 +139,13 @@
 {% if ui_mode == 'simple' %}
 <div style="background:linear-gradient(135deg,rgba(245,158,11,.08),rgba(91,124,246,.06));border:1px solid rgba(245,158,11,.2);border-radius:10px;padding:.7rem 1rem;margin-bottom:.8rem;font-size:.82rem;color:var(--t2);display:flex;align-items:center;gap:.6rem">
   <span style="font-size:1.1rem;flex-shrink:0">📊</span>
-  <div><strong style="color:var(--t)">高级分析</strong> — 策略效果追踪供管理员调优使用。<a href="/cases" style="color:var(--p);font-weight:600">返回案例</a></div>
+  <div><strong style="color:var(--t)">{{ (i18n or {}).get('sa_s003', "高级分析") }}</strong> — {{ (i18n or {}).get('sa_s004', "策略效果追踪供管理员调优使用。") }}<a href="/cases" style="color:var(--p);font-weight:600">{{ (i18n or {}).get('logs_back_cases', "返回案例") }}</a></div>
 </div>
 {% endif %}
 
 <!-- 顶栏 -->
 <div class="sa-filter">
-  <label>时间范围</label>
+  <label>{{ (i18n or {}).get('sa_s005', "时间范围") }}</label>
   <select id="sa-hours" onchange="location.href='/strategy-analytics?hours='+this.value">
     <option value="6" {% if hours==6 %}selected{% endif %}>6h</option>
     <option value="24" {% if hours==24 %}selected{% endif %}>24h</option>
@@ -153,17 +153,17 @@
     <option value="168" {% if hours==168 %}selected{% endif %}>7d</option>
     <option value="720" {% if hours==720 %}selected{% endif %}>30d</option>
   </select>
-  <a class="export-btn" data-help="CSV" href="/api/export-strategy-events?fmt=csv&hours={{ hours }}">导出 CSV</a>
-  <a class="export-btn" data-help="JSON" href="/api/export-strategy-events?fmt=json&hours={{ hours }}" style="background:var(--g)">导出 JSON</a>
-  <button onclick="doPurge()" class="purge-btn" data-tip="清理过期追踪数据">清理旧数据</button>
-  <button onclick="toggleCompare()" class="compare-btn" id="btn-compare">对比上一时段</button>
-  <span class="sa-total">共 <strong>{{ total }}</strong> 条事件</span>
+  <a class="export-btn" data-help="CSV" href="/api/export-strategy-events?fmt=csv&hours={{ hours }}">{{ (i18n or {}).get('export', "导出") }} CSV</a>
+  <a class="export-btn" data-help="JSON" href="/api/export-strategy-events?fmt=json&hours={{ hours }}" style="background:var(--g)">{{ (i18n or {}).get('export', "导出") }} JSON</a>
+  <button onclick="doPurge()" class="purge-btn" data-tip="{{ (i18n or {}).get('sa_s006', '清理过期追踪数据') }}">{{ (i18n or {}).get('sa_s007', "清理旧数据") }}</button>
+  <button onclick="toggleCompare()" class="compare-btn" id="btn-compare">{{ (i18n or {}).get('sa_s008', "对比上一时段") }}</button>
+  <span class="sa-total">{{ (i18n or {}).get('wa_js_019', "共") }} <strong>{{ total }}</strong> {{ (i18n or {}).get('sa_s009', "条事件") }}</span>
 </div>
 
 <!-- B2: Period comparison panel -->
 <div id="compare-panel" style="display:none" class="sa-compare-panel">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.6rem">
-    <h4 style="margin:0;font-size:.88rem;font-weight:700">时段对比 · 当前 {{ hours }}h vs 上一 {{ hours }}h</h4>
+    <h4 style="margin:0;font-size:.88rem;font-weight:700">{{ (i18n or {}).get('sa_s010', "时段对比 · 当前") }} {{ hours }}h vs {{ (i18n or {}).get('sa_s011', "上一") }} {{ hours }}h</h4>
     <button onclick="document.getElementById('compare-panel').style.display='none'" style="background:none;border:none;font-size:1.1rem;cursor:pointer;color:var(--t3)">&times;</button>
   </div>
   <div id="compare-grid" class="sa-cmp-grid"></div>
@@ -173,12 +173,12 @@
 <div class="ap-bar">
   <span class="ap-dot {% if autopilot.enabled|default(false) %}on{% else %}off{% endif %}"></span>
   <span>Auto-Pilot</span>
-  <span style="color:var(--t3)">{% if autopilot.enabled|default(false) %}运行中 · 每 {{ autopilot.check_interval_messages|default(100) }} 条消息检查{% else %}未启用{% endif %}</span>
-  <button class="ap-toggle" onclick="toggleAP()" data-tip="启用后系统将自动把持续低效策略降级为更优策略">{% if autopilot.enabled|default(false) %}关闭{% else %}启用{% endif %}</button>
+  <span style="color:var(--t3)">{% if autopilot.enabled|default(false) %}{{ (i18n or {}).get('sa_s012', "运行中 · 每") }} {{ autopilot.check_interval_messages|default(100) }} {{ (i18n or {}).get('sa_s013', "条消息检查") }}{% else %}{{ (i18n or {}).get('ov_js_not_enabled', "未启用") }}{% endif %}</span>
+  <button class="ap-toggle" onclick="toggleAP()" data-tip="{{ (i18n or {}).get('sa_s014', '启用后系统将自动把持续低效策略降级为更优策略') }}">{% if autopilot.enabled|default(false) %}{{ (i18n or {}).get('ov_js_disable', "关闭") }}{% else %}{{ (i18n or {}).get('enable', "启用") }}{% endif %}</button>
 </div>
 
 {% if not summary %}
-<div class="sa-empty">暂无策略追踪数据。当 AI 回复用户后将自动采集。</div>
+<div class="sa-empty">{{ (i18n or {}).get('sa_s015', "暂无策略追踪数据。当 AI 回复用户后将自动采集。") }}</div>
 {% else %}
 
 <!-- 会话概览 -->
@@ -186,17 +186,17 @@
 <div class="sa-section">
   <h3>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
-    会话统计
+    {{ (i18n or {}).get('sa_s016', "会话统计") }}
   </h3>
   <div class="sess-row">
-    <div class="sess-kv" data-tip="同一用户在 30 分钟内的连续交互归为一个会话"><strong>{{ session_stats.total_sessions }}</strong> 个会话</div>
-    <div class="sess-kv" data-tip="平均每个会话中机器人回复的次数">平均 <strong>{{ session_stats.avg_turns }}</strong> 轮</div>
-    <div class="sess-kv" data-tip="会话中最后一条回复后用户未追问的比例">解决率 <strong style="color:{% if session_stats.resolve_rate >= 60 %}var(--green){% elif session_stats.resolve_rate >= 40 %}var(--amber){% else %}var(--red){% endif %}">{{ session_stats.resolve_rate }}%</strong></div>
+    <div class="sess-kv" data-tip="{{ (i18n or {}).get('sa_s017', '同一用户在 30 分钟内的连续交互归为一个会话') }}"><strong>{{ session_stats.total_sessions }}</strong> {{ (i18n or {}).get('wa_js_017', "个会话") }}</div>
+    <div class="sess-kv" data-tip="{{ (i18n or {}).get('sa_s018', '平均每个会话中机器人回复的次数') }}">{{ (i18n or {}).get('analytics_avg', "平均") }} <strong>{{ session_stats.avg_turns }}</strong> {{ (i18n or {}).get('rpa_js_turns_unit', "轮") }}</div>
+    <div class="sess-kv" data-tip="{{ (i18n or {}).get('sa_s019', '会话中最后一条回复后用户未追问的比例') }}">{{ (i18n or {}).get('ap_s025', "解决率") }} <strong style="color:{% if session_stats.resolve_rate >= 60 %}var(--green){% elif session_stats.resolve_rate >= 40 %}var(--amber){% else %}var(--red){% endif %}">{{ session_stats.resolve_rate }}%</strong></div>
   </div>
   {% if session_stats.by_strategy %}
   <div class="sa-table-wrap" style="margin-top:.5rem">
     <table class="sa-table">
-      <thead><tr><th>策略</th><th>会话数</th><th>平均轮次</th><th>解决率</th></tr></thead>
+      <thead><tr><th>{{ (i18n or {}).get('sa_s020', "策略") }}</th><th>{{ (i18n or {}).get('sa_s021', "会话数") }}</th><th>{{ (i18n or {}).get('sa_s022', "平均轮次") }}</th><th>{{ (i18n or {}).get('ap_s025', "解决率") }}</th></tr></thead>
       <tbody>
         {% for sid, d in session_stats.by_strategy.items() %}
         <tr>
@@ -218,21 +218,21 @@
 <div class="sa-section">
   <h3>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
-    <span data-tip="model_ab">模型效果对比</span>
+    <span data-tip="model_ab">{{ (i18n or {}).get('sa_s023', "模型效果对比") }}</span>
   </h3>
   <div class="model-grid">
     {% for m in model_summary %}
     <div class="model-card">
       <div class="model-name" data-tip="model_id">
-        {{ (m.model_id or '') | display_model or '(默认)' }}
-        <span class="badge">{{ m.total }} 次</span>
-        <span class="badge">{{ m.strategies_count }} 个策略</span>
+        {{ (m.model_id or '') | display_model or (i18n or {}).get('sa_default', '(默认)') }}
+        <span class="badge">{{ m.total }} {{ (i18n or {}).get('kb_js_174', "次") }}</span>
+        <span class="badge">{{ m.strategies_count }} {{ (i18n or {}).get('sa_s024', "个策略") }}</span>
       </div>
       <div class="model-metrics">
-        <div class="sa-m"><span class="sa-m-label">平均响应</span><span class="sa-m-val {% if m.avg_ms < 1500 %}good{% elif m.avg_ms < 3000 %}warn{% else %}bad{% endif %}">{{ m.avg_ms }}ms</span></div>
-        <div class="sa-m"><span class="sa-m-label" data-help="follow_up_rate">追问率</span><span class="sa-m-val {% if m.follow_up_rate > 60 %}bad{% elif m.follow_up_rate > 40 %}warn{% else %}good{% endif %}">{{ m.follow_up_rate }}%</span></div>
-        <div class="sa-m"><span class="sa-m-label" data-help="same_intent_rate">同意图追问</span><span class="sa-m-val {% if m.same_intent_rate > 50 %}bad{% elif m.same_intent_rate > 30 %}warn{% else %}good{% endif %}">{{ m.same_intent_rate }}%</span></div>
-        <div class="sa-m"><span class="sa-m-label" data-help="silence_rate">静默率</span><span class="sa-m-val {% if m.silence_rate > 60 %}good{% elif m.silence_rate > 40 %}neutral{% else %}warn{% endif %}">{{ m.silence_rate }}%</span></div>
+        <div class="sa-m"><span class="sa-m-label">{{ (i18n or {}).get('db_s021', "平均响应") }}</span><span class="sa-m-val {% if m.avg_ms < 1500 %}good{% elif m.avg_ms < 3000 %}warn{% else %}bad{% endif %}">{{ m.avg_ms }}ms</span></div>
+        <div class="sa-m"><span class="sa-m-label" data-help="follow_up_rate">{{ (i18n or {}).get('sa_s025', "追问率") }}</span><span class="sa-m-val {% if m.follow_up_rate > 60 %}bad{% elif m.follow_up_rate > 40 %}warn{% else %}good{% endif %}">{{ m.follow_up_rate }}%</span></div>
+        <div class="sa-m"><span class="sa-m-label" data-help="same_intent_rate">{{ (i18n or {}).get('sa_s026', "同意图追问") }}</span><span class="sa-m-val {% if m.same_intent_rate > 50 %}bad{% elif m.same_intent_rate > 30 %}warn{% else %}good{% endif %}">{{ m.same_intent_rate }}%</span></div>
+        <div class="sa-m"><span class="sa-m-label" data-help="silence_rate">{{ (i18n or {}).get('sa_s027', "静默率") }}</span><span class="sa-m-val {% if m.silence_rate > 60 %}good{% elif m.silence_rate > 40 %}neutral{% else %}warn{% endif %}">{{ m.silence_rate }}%</span></div>
       </div>
     </div>
     {% endfor %}
@@ -240,11 +240,11 @@
   {% if model_matrix %}
   <div class="sa-table-wrap">
     <table class="sa-table">
-      <thead><tr><th data-tip="model_id">模型</th><th>策略</th><th>次数</th><th>平均响应</th><th>追问率</th><th>静默率</th></tr></thead>
+      <thead><tr><th data-tip="model_id">{{ (i18n or {}).get('msg_js_1218', "模型") }}</th><th>{{ (i18n or {}).get('sa_s020', "策略") }}</th><th>{{ (i18n or {}).get('mo_s044', "次数") }}</th><th>{{ (i18n or {}).get('db_s021', "平均响应") }}</th><th>{{ (i18n or {}).get('sa_s025', "追问率") }}</th><th>{{ (i18n or {}).get('sa_s027', "静默率") }}</th></tr></thead>
       <tbody>
         {% for m in model_matrix %}
         <tr>
-          <td><strong>{{ (m.model_id or '') | display_model or '(默认)' }}</strong></td>
+          <td><strong>{{ (m.model_id or '') | display_model or (i18n or {}).get('sa_default', '(默认)') }}</strong></td>
           <td>{{ m.strategy_id }}</td>
           <td>{{ m.count }}</td>
           <td>{{ m.avg_ms }}ms</td>
@@ -264,10 +264,10 @@
 <div class="sa-section">
   <h3>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
-    <span data-tip="user_segment">用户分群分析</span>
+    <span data-tip="user_segment">{{ (i18n or {}).get('sa_s028', "用户分群分析") }}</span>
   </h3>
   <div class="seg-grid">
-    {% set seg_meta = {'heavy': {'icon': '🔥', 'label': '高频用户', 'tip': 'heavy'}, 'moderate': {'icon': '⚡', 'label': '中频用户', 'tip': 'moderate'}, 'light': {'icon': '🌱', 'label': '低频用户', 'tip': 'light'}} %}
+    {% set seg_meta = {'heavy': {'icon': '🔥', 'label': (i18n or {}).get('sa_seg_heavy', '高频用户'), 'tip': 'heavy'}, 'moderate': {'icon': '⚡', 'label': (i18n or {}).get('sa_seg_moderate', '中频用户'), 'tip': 'moderate'}, 'light': {'icon': '🌱', 'label': (i18n or {}).get('sa_seg_light', '低频用户'), 'tip': 'light'}} %}
     {% for seg_key in ['heavy', 'moderate', 'light'] %}
     {% set info = seg_meta[seg_key] %}
     {% set seg = user_segments.get(seg_key, {}) %}
@@ -276,14 +276,14 @@
         <span class="seg-icon">{{ info.icon }}</span> {{ info.label }}
       </div>
       <div class="seg-stats">
-        <div><span style="color:var(--t3)">用户数</span><br><strong>{{ seg.users|default(0) }}</strong></div>
-        <div><span style="color:var(--t3)">事件数</span><br><strong>{{ seg.events|default(0) }}</strong></div>
-        <div><span style="color:var(--t3)">平均响应</span><br><strong>{{ seg.avg_ms|default(0) }}ms</strong></div>
-        <div><span style="color:var(--t3)">追问率</span><br><strong style="color:{% if (seg.follow_up_rate|default(0)) > 60 %}var(--red){% elif (seg.follow_up_rate|default(0)) > 40 %}var(--amber){% else %}var(--green){% endif %}">{{ seg.follow_up_rate|default(0) }}%</strong></div>
+        <div><span style="color:var(--t3)">{{ (i18n or {}).get('sa_s029', "用户数") }}</span><br><strong>{{ seg.users|default(0) }}</strong></div>
+        <div><span style="color:var(--t3)">{{ (i18n or {}).get('sa_s030', "事件数") }}</span><br><strong>{{ seg.events|default(0) }}</strong></div>
+        <div><span style="color:var(--t3)">{{ (i18n or {}).get('db_s021', "平均响应") }}</span><br><strong>{{ seg.avg_ms|default(0) }}ms</strong></div>
+        <div><span style="color:var(--t3)">{{ (i18n or {}).get('sa_s025', "追问率") }}</span><br><strong style="color:{% if (seg.follow_up_rate|default(0)) > 60 %}var(--red){% elif (seg.follow_up_rate|default(0)) > 40 %}var(--amber){% else %}var(--green){% endif %}">{{ seg.follow_up_rate|default(0) }}%</strong></div>
       </div>
       {% if seg.top_strategies %}
       <div class="seg-strats">
-        偏好策略:
+        {{ (i18n or {}).get('sa_s031', "偏好策略") }}:
         {% for sid, cnt in seg.top_strategies.items() %}<code>{{ sid }}</code>({{ cnt }}){% endfor %}
       </div>
       {% endif %}
@@ -298,7 +298,7 @@
 <div class="sa-section">
   <h3>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-    智能诊断
+    {{ (i18n or {}).get('sa_s032', "智能诊断") }}
   </h3>
   <div class="sa-alerts">
     {% for a in advisor.advisories %}
@@ -319,7 +319,7 @@
 <div class="sa-section">
   <h3>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15V3m0 12l-4-4m4 4l4-4"/><path d="M2 17l.621 2.485A2 2 0 004.561 21h14.878a2 2 0 001.94-1.515L22 17"/></svg>
-    参数微调建议
+    {{ (i18n or {}).get('sa_s033', "参数微调建议") }}
   </h3>
   {% for sg in param_suggestions %}
   <div class="sug-card">
@@ -328,7 +328,7 @@
       {{ sg.current }} <span class="sug-arrow">&rarr;</span> {{ sg.suggested }}
       <div style="color:var(--t3);font-size:.76rem;margin-top:.15rem">{{ sg.reason }}</div>
     </div>
-    <button class="sug-btn" onclick="applySuggestion('{{ sg.strategy_id }}','{{ sg.param }}',{{ sg.suggested }})">一键应用</button>
+    <button class="sug-btn" onclick="applySuggestion('{{ sg.strategy_id }}','{{ sg.param }}',{{ sg.suggested }})">{{ (i18n or {}).get('sa_s034', "一键应用") }}</button>
   </div>
   {% endfor %}
 </div>
@@ -338,7 +338,7 @@
 <div class="sa-section">
   <h3>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-    趋势 & 质量评分
+    {{ (i18n or {}).get('db_js_062', "趋势") }} & {{ (i18n or {}).get('sa_s035', "质量评分") }}
   </h3>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:.5rem">
     <div class="card" style="padding:1rem;margin:0"><canvas id="score-chart" height="200"></canvas></div>
@@ -350,7 +350,7 @@
 <div class="sa-section">
   <h3>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>
-    策略概览
+    {{ (i18n or {}).get('sa_s036', "策略概览") }}
   </h3>
   <div class="sa-grid">
     {% for s in summary %}
@@ -358,26 +358,26 @@
       <div class="sa-sid">
         {{ s.strategy_id|replace('_',' ') }}
         {% if s.model_id %}<span style="font-size:.68rem;color:var(--t3);font-weight:400">({{ s.model_id | display_model }})</span>{% endif %}
-        {% if advisor and advisor.best == s.strategy_id %}<span class="sa-badge best">最优</span>{% endif %}
-        {% if advisor and advisor.worst == s.strategy_id and advisor.worst != advisor.best %}<span class="sa-badge worst">待优化</span>{% endif %}
+        {% if advisor and advisor.best == s.strategy_id %}<span class="sa-badge best">{{ (i18n or {}).get('sa_s037', "最优") }}</span>{% endif %}
+        {% if advisor and advisor.worst == s.strategy_id and advisor.worst != advisor.best %}<span class="sa-badge worst">{{ (i18n or {}).get('sa_s038', "待优化") }}</span>{% endif %}
       </div>
       {% set qs = s.quality_score|default(0) %}
       {% set bd = s.score_breakdown|default({}) %}
       <div class="sa-score sa-score-clickable" style="color:{% if qs >= 70 %}var(--green){% elif qs >= 40 %}var(--amber){% else %}var(--red){% endif %}" onclick="this.nextElementSibling.nextElementSibling.classList.toggle('show')">{{ qs }}</div>
-      <div class="sa-score-label" data-tip="综合质量评分 0-100 · 点击展开分项">质量评分 ▾</div>
+      <div class="sa-score-label" data-tip="{{ (i18n or {}).get('sa_s039', '综合质量评分 0-100 · 点击展开分项') }}">{{ (i18n or {}).get('sa_s035', "质量评分") }} ▾</div>
       <div class="sa-breakdown">
-        <div class="sa-bd-row"><span>响应速度</span><div class="sa-bd-bar"><div style="width:{{ bd.response|default(0) }}%;background:var(--green)"></div></div><span class="sa-bd-val">{{ bd.response_raw|default(0) }}<small>/20</small></span></div>
-        <div class="sa-bd-row"><span>一次解决</span><div class="sa-bd-bar"><div style="width:{{ bd.silence|default(0) }}%;background:var(--p)"></div></div><span class="sa-bd-val">{{ bd.silence_raw|default(0) }}<small>/35</small></span></div>
-        <div class="sa-bd-row"><span>追问控制</span><div class="sa-bd-bar"><div style="width:{{ bd.same_intent|default(0) }}%;background:var(--amber)"></div></div><span class="sa-bd-val">{{ bd.same_intent_raw|default(0) }}<small>/30</small></span></div>
-        <div class="sa-bd-row"><span>模板效率</span><div class="sa-bd-bar"><div style="width:{{ bd.template|default(0) }}%;background:var(--cyan,#06b6d4)"></div></div><span class="sa-bd-val">{{ bd.template_raw|default(0) }}<small>/15</small></span></div>
+        <div class="sa-bd-row"><span>{{ (i18n or {}).get('ap_s024', "响应速度") }}</span><div class="sa-bd-bar"><div style="width:{{ bd.response|default(0) }}%;background:var(--green)"></div></div><span class="sa-bd-val">{{ bd.response_raw|default(0) }}<small>/20</small></span></div>
+        <div class="sa-bd-row"><span>{{ (i18n or {}).get('sa_s040', "一次解决") }}</span><div class="sa-bd-bar"><div style="width:{{ bd.silence|default(0) }}%;background:var(--p)"></div></div><span class="sa-bd-val">{{ bd.silence_raw|default(0) }}<small>/35</small></span></div>
+        <div class="sa-bd-row"><span>{{ (i18n or {}).get('sa_s041', "追问控制") }}</span><div class="sa-bd-bar"><div style="width:{{ bd.same_intent|default(0) }}%;background:var(--amber)"></div></div><span class="sa-bd-val">{{ bd.same_intent_raw|default(0) }}<small>/30</small></span></div>
+        <div class="sa-bd-row"><span>{{ (i18n or {}).get('sa_s042', "模板效率") }}</span><div class="sa-bd-bar"><div style="width:{{ bd.template|default(0) }}%;background:var(--cyan,#06b6d4)"></div></div><span class="sa-bd-val">{{ bd.template_raw|default(0) }}<small>/15</small></span></div>
       </div>
       <div class="sa-metrics">
-        <div class="sa-m"><span class="sa-m-label">回复数</span><span class="sa-m-val neutral">{{ s.total }}</span></div>
-        <div class="sa-m"><span class="sa-m-label">平均响应</span><span class="sa-m-val {% if s.avg_ms < 1500 %}good{% elif s.avg_ms < 3000 %}warn{% else %}bad{% endif %}">{{ s.avg_ms }}ms</span></div>
-        <div class="sa-m"><span class="sa-m-label" data-tip="用户在收到回复后 5 分钟内再次发消息的比例">追问率</span><span class="sa-m-val {% if s.follow_up_rate > 60 %}bad{% elif s.follow_up_rate > 40 %}warn{% else %}good{% endif %}">{{ s.follow_up_rate }}%</span></div>
-        <div class="sa-m"><span class="sa-m-label" data-tip="追问中与原始意图相同的比例">同意图追问</span><span class="sa-m-val {% if s.same_intent_rate > 50 %}bad{% elif s.same_intent_rate > 30 %}warn{% else %}good{% endif %}">{{ s.same_intent_rate }}%</span></div>
-        <div class="sa-m"><span class="sa-m-label" data-tip="回复后无追问的比例">静默率</span><span class="sa-m-val {% if s.silence_rate > 60 %}good{% elif s.silence_rate > 40 %}neutral{% else %}warn{% endif %}">{{ s.silence_rate }}%</span></div>
-        <div class="sa-m"><span class="sa-m-label" data-tip="模板直接回复">模板命中</span><span class="sa-m-val neutral">{{ s.template_hit_rate }}%</span></div>
+        <div class="sa-m"><span class="sa-m-label">{{ (i18n or {}).get('wa_s055', "回复数") }}</span><span class="sa-m-val neutral">{{ s.total }}</span></div>
+        <div class="sa-m"><span class="sa-m-label">{{ (i18n or {}).get('db_s021', "平均响应") }}</span><span class="sa-m-val {% if s.avg_ms < 1500 %}good{% elif s.avg_ms < 3000 %}warn{% else %}bad{% endif %}">{{ s.avg_ms }}ms</span></div>
+        <div class="sa-m"><span class="sa-m-label" data-tip="{{ (i18n or {}).get('sa_s043', '用户在收到回复后 5 分钟内再次发消息的比例') }}">{{ (i18n or {}).get('sa_s025', "追问率") }}</span><span class="sa-m-val {% if s.follow_up_rate > 60 %}bad{% elif s.follow_up_rate > 40 %}warn{% else %}good{% endif %}">{{ s.follow_up_rate }}%</span></div>
+        <div class="sa-m"><span class="sa-m-label" data-tip="{{ (i18n or {}).get('sa_s044', '追问中与原始意图相同的比例') }}">{{ (i18n or {}).get('sa_s026', "同意图追问") }}</span><span class="sa-m-val {% if s.same_intent_rate > 50 %}bad{% elif s.same_intent_rate > 30 %}warn{% else %}good{% endif %}">{{ s.same_intent_rate }}%</span></div>
+        <div class="sa-m"><span class="sa-m-label" data-tip="{{ (i18n or {}).get('sa_s045', '回复后无追问的比例') }}">{{ (i18n or {}).get('sa_s027', "静默率") }}</span><span class="sa-m-val {% if s.silence_rate > 60 %}good{% elif s.silence_rate > 40 %}neutral{% else %}warn{% endif %}">{{ s.silence_rate }}%</span></div>
+        <div class="sa-m"><span class="sa-m-label" data-tip="{{ (i18n or {}).get('sa_s046', '模板直接回复') }}">{{ (i18n or {}).get('sa_s047', "模板命中") }}</span><span class="sa-m-val neutral">{{ s.template_hit_rate }}%</span></div>
       </div>
     </div>
     {% endfor %}
@@ -388,17 +388,17 @@
 <div class="sa-section">
   <h3>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 3h5v5"/><path d="M8 3H3v5"/><path d="M12 22v-8.3a4 4 0 00-1.172-2.828L3 3"/><path d="m15 9 6-6"/></svg>
-    A/B 灰度测试
+    A/B {{ (i18n or {}).get('sa_s048', "灰度测试") }}
   </h3>
   {% if ab_tests %}
     {% for intent, ab in ab_tests.items() %}{% if ab and ab.variants is defined %}
     <div class="ab-card">
-      <div class="ab-hd"><span class="ab-intent">{{ intent }}</span><span class="ab-tag {% if ab.enabled %}on{% else %}off{% endif %}">{% if ab.enabled %}运行中{% else %}已停止{% endif %}</span></div>
+      <div class="ab-hd"><span class="ab-intent">{{ intent }}</span><span class="ab-tag {% if ab.enabled %}on{% else %}off{% endif %}">{% if ab.enabled %}{{ (i18n or {}).get('ov_js_running', "运行中") }}{% else %}{{ (i18n or {}).get('ov_js_stopped', "已停止") }}{% endif %}</span></div>
       <div class="ab-variants">{% for v in ab.variants %}<div class="ab-var"><strong>{{ v.strategy_id }}</strong> · {{ v.weight }}%</div>{% endfor %}</div>
     </div>
     {% endif %}{% endfor %}
   {% else %}
-    <div style="font-size:.82rem;color:var(--t3);padding:.3rem 0">暂无 A/B 测试。在 <code>reply_strategies.yaml</code> 中配置 <code>ab_tests</code>。</div>
+    <div style="font-size:.82rem;color:var(--t3);padding:.3rem 0">{{ (i18n or {}).get('sa_s049', "暂无 A/B 测试。在") }} <code>reply_strategies.yaml</code> {{ (i18n or {}).get('sa_s050', "中配置") }} <code>ab_tests</code>。</div>
   {% endif %}
 </div>
 
@@ -407,11 +407,11 @@
 <div class="sa-section">
   <h3>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-    意图 × 策略矩阵
+    {{ (i18n or {}).get('inbox.ai.intent', "意图") }} × {{ (i18n or {}).get('sa_s051', "策略矩阵") }}
   </h3>
   <div class="sa-table-wrap">
     <table class="sa-table">
-      <thead><tr><th>意图</th><th>策略</th><th>次数</th><th>平均响应</th><th>追问数</th><th>占比</th></tr></thead>
+      <thead><tr><th>{{ (i18n or {}).get('inbox.ai.intent', "意图") }}</th><th>{{ (i18n or {}).get('sa_s020', "策略") }}</th><th>{{ (i18n or {}).get('mo_s044', "次数") }}</th><th>{{ (i18n or {}).get('db_s021', "平均响应") }}</th><th>{{ (i18n or {}).get('sa_s052', "追问数") }}</th><th>{{ (i18n or {}).get('ap_s009', "占比") }}</th></tr></thead>
       <tbody>
         {% set max_cnt = namespace(v=1) %}{% for m in matrix %}{% if m.count > max_cnt.v %}{% set max_cnt.v = m.count %}{% endif %}{% endfor %}
         {% for m in matrix %}
@@ -437,7 +437,7 @@
   var scores=[{% for s in summary %}{{ s.quality_score|default(0) }}{% if not loop.last %},{% endif %}{% endfor %}];
   var colors=scores.map(function(v){return v>=70?'rgba(16,185,129,.7)':v>=40?'rgba(245,158,11,.7)':'rgba(239,68,68,.7)'});
   var ctx=document.getElementById('score-chart');
-  if(ctx&&labels.length){new Chart(ctx,{type:'bar',data:{labels:labels,datasets:[{label:'质量评分',data:scores,backgroundColor:colors,borderRadius:6,maxBarThickness:40}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return '评分: '+c.raw+'/100'}}}},scales:{x:{min:0,max:100,grid:{color:'rgba(0,0,0,.05)'}},y:{grid:{display:false}}}}})}
+  if(ctx&&labels.length){new Chart(ctx,{type:'bar',data:{labels:labels,datasets:[{label:window.T('sa_s035'),data:scores,backgroundColor:colors,borderRadius:6,maxBarThickness:40}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return window.T('sa_js001')+': '+c.raw+'/100'}}}},scales:{x:{min:0,max:100,grid:{color:'rgba(0,0,0,.05)'}},y:{grid:{display:false}}}}})}
 })();
 /* Hourly trend line chart */
 (function(){
@@ -458,24 +458,24 @@
 })();
 
 async function doPurge(){
-  if(!await confirmAction('确认清理过期追踪数据？',{okText:'清理'}))return;
+  if(!await confirmAction(window.T('sa_js002'),{okText:window.T('sa_js003')}))return;
   const r=await fetch('/api/data-purge',{method:'POST',headers:{'Content-Type':'application/json'}});
   const d=await r.json();
-  if(d.ok) showToast('清理完成: 策略 '+d.strategy_events_deleted+' 条, 通用 '+d.general_events_deleted+' 条','ok');
-  else showToast('清理失败','err');
+  if(d.ok) showToast(window.Tf('sa_cleanup_done',{s:d.strategy_events_deleted,g:d.general_events_deleted}),'ok');
+  else showToast(window.T('sa_js005'),'err');
 }
 async function toggleAP(){
   const on={% if autopilot.enabled|default(false) %}true{% else %}false{% endif %};
   const r=await fetch('/api/autopilot',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})});
-  if((await r.json()).ok){showToast(on?'Auto-Pilot 已关闭':'Auto-Pilot 已开启','ok');setTimeout(()=>location.reload(),800)}
-  else showToast('操作失败','err');
+  if((await r.json()).ok){showToast('Auto-Pilot '+(on?window.T('sa_js006'):window.T('sa_js007')),'ok');setTimeout(()=>location.reload(),800)}
+  else showToast(window.T('ov_js_op_fail'),'err');
 }
 async function applySuggestion(sid,param,val){
-  if(!await confirmAction('应用参数调整: '+sid+'.'+param+' → '+val+'？',{okText:'应用',danger:false}))return;
+  if(!await confirmAction(window.T('sa_js008')+': '+sid+'.'+param+' → '+val+'?',{okText:window.T('sa_js012'),danger:false}))return;
   const r=await fetch('/api/apply-param-suggestion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({strategy_id:sid,param:param,value:val})});
   const d=await r.json();
-  if(d.ok){showToast('已应用: '+sid+'.'+param+' = '+val,'ok');setTimeout(()=>location.reload(),800)}
-  else showToast('应用失败: '+(d.detail||''),'err');
+  if(d.ok){showToast(window.T('sa_js013')+': '+sid+'.'+param+' = '+val,'ok');setTimeout(()=>location.reload(),800)}
+  else showToast(window.T('sa_js009')+': '+(d.detail||''),'err');
 }
 
 // ── B2: Period comparison ──────────────────────────────────
@@ -487,13 +487,13 @@ async function toggleCompare(){
   panel.style.display='block';btn.classList.add('active');
   if(_cmpLoaded)return;
   var grid=document.getElementById('compare-grid');
-  grid.innerHTML='<div style="text-align:center;color:var(--t3);padding:1rem">加载对比数据...</div>';
+  grid.innerHTML='<div style="text-align:center;color:var(--t3);padding:1rem">'+window.T('sa_js010')+'...</div>';
   try{
     var hours=document.getElementById('sa-hours').value;
     var r=await fetch('/api/strategy-analytics/compare?hours='+hours);
     var d=await r.json();
     var cur=d.current||[],prev=d.previous||[],ch=d.changes||{};
-    if(!cur.length){grid.innerHTML='<div style="color:var(--t3);padding:1rem">当前时段无数据</div>';return}
+    if(!cur.length){grid.innerHTML='<div style="color:var(--t3);padding:1rem">'+window.T('sa_js011')+'</div>';return}
     var prevMap={};prev.forEach(function(p){prevMap[p.strategy_id]=p});
     var html='';
     cur.forEach(function(s){
@@ -504,15 +504,15 @@ async function toggleCompare(){
         return '<span class="sa-cmp-delta '+cls+'">'+(v>0?'+':'')+v+(unit||'')+'</span>';
       }
       html+='<div class="sa-cmp-card"><div class="sa-cmp-sid">'+sid.replace(/_/g,' ')+'</div>';
-      html+='<div class="sa-cmp-row"><span>质量评分</span><span class="sa-cmp-cur">'+(s.quality_score||0)+'</span><span class="sa-cmp-prev">'+(p.quality_score||'—')+'</span>'+delta(c.score_delta)+'</div>';
-      html+='<div class="sa-cmp-row"><span>回复数</span><span class="sa-cmp-cur">'+s.total+'</span><span class="sa-cmp-prev">'+(p.total||'—')+'</span>'+delta(c.total_delta)+'</div>';
-      html+='<div class="sa-cmp-row"><span>平均响应</span><span class="sa-cmp-cur">'+s.avg_ms+'ms</span><span class="sa-cmp-prev">'+(p.avg_ms!==undefined?p.avg_ms+'ms':'—')+'</span>'+delta(c.avg_ms_delta,'ms',true)+'</div>';
-      html+='<div class="sa-cmp-row"><span>追问率</span><span class="sa-cmp-cur">'+s.follow_up_rate+'%</span><span class="sa-cmp-prev">'+(p.follow_up_rate!==undefined?p.follow_up_rate+'%':'—')+'</span>'+delta(c.follow_up_delta,'%',true)+'</div>';
-      html+='<div class="sa-cmp-row"><span>静默率</span><span class="sa-cmp-cur">'+s.silence_rate+'%</span><span class="sa-cmp-prev">'+(p.silence_rate!==undefined?p.silence_rate+'%':'—')+'</span>'+delta(c.silence_delta,'%')+'</div>';
+      html+='<div class="sa-cmp-row"><span>'+window.T('sa_s035')+'</span><span class="sa-cmp-cur">'+(s.quality_score||0)+'</span><span class="sa-cmp-prev">'+(p.quality_score||'—')+'</span>'+delta(c.score_delta)+'</div>';
+      html+='<div class="sa-cmp-row"><span>'+window.T('sa_js014')+'</span><span class="sa-cmp-cur">'+s.total+'</span><span class="sa-cmp-prev">'+(p.total||'—')+'</span>'+delta(c.total_delta)+'</div>';
+      html+='<div class="sa-cmp-row"><span>'+window.T('sa_js015')+'</span><span class="sa-cmp-cur">'+s.avg_ms+'ms</span><span class="sa-cmp-prev">'+(p.avg_ms!==undefined?p.avg_ms+'ms':'—')+'</span>'+delta(c.avg_ms_delta,'ms',true)+'</div>';
+      html+='<div class="sa-cmp-row"><span>'+window.T('sa_s025')+'</span><span class="sa-cmp-cur">'+s.follow_up_rate+'%</span><span class="sa-cmp-prev">'+(p.follow_up_rate!==undefined?p.follow_up_rate+'%':'—')+'</span>'+delta(c.follow_up_delta,'%',true)+'</div>';
+      html+='<div class="sa-cmp-row"><span>'+window.T('sa_s027')+'</span><span class="sa-cmp-cur">'+s.silence_rate+'%</span><span class="sa-cmp-prev">'+(p.silence_rate!==undefined?p.silence_rate+'%':'—')+'</span>'+delta(c.silence_delta,'%')+'</div>';
       html+='</div>';
     });
     grid.innerHTML=html;_cmpLoaded=true;
-  }catch(e){grid.innerHTML='<div style="color:var(--red);padding:1rem">加载失败</div>'}
+  }catch(e){grid.innerHTML='<div style="color:var(--red);padding:1rem">'+window.T('rpa_load_failed')+'</div>'}
 }
 </script>
 {% endblock %}

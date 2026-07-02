@@ -21,6 +21,7 @@ from fastapi import Depends, Request
 
 from src.web.routes.unified_inbox_auth import _session_agent
 from src.web.routes.unified_inbox_services import _inbox_store
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -41,10 +42,10 @@ def register_batch_notif_routes(app, *, api_auth) -> None:
         cids = [str(x) for x in (body.get("conversation_ids") or []) if x]
         archived = bool(body.get("archived", True))
         if not cids:
-            return {"ok": False, "error": "conversation_ids 不能为空"}
+            return {"ok": False, "error": tr(request, "err.ws.field_required", field="conversation_ids")}
         store = _inbox_store(request)
         if store is None:
-            return {"ok": False, "error": "inbox_store 不可用"}
+            return {"ok": False, "error": tr(request, "err.svc.inbox_not_ready")}
         updated = 0
         for cid in cids[:200]:  # 单次上限 200 条
             try:
@@ -73,10 +74,10 @@ def register_batch_notif_routes(app, *, api_auth) -> None:
         if mode not in ("set", "add", "remove"):
             mode = "add"
         if not cids:
-            return {"ok": False, "error": "conversation_ids 不能为空"}
+            return {"ok": False, "error": tr(request, "err.ws.field_required", field="conversation_ids")}
         store = _inbox_store(request)
         if store is None:
-            return {"ok": False, "error": "inbox_store 不可用"}
+            return {"ok": False, "error": tr(request, "err.svc.inbox_not_ready")}
         import json as _json
         updated = 0
         for cid in cids[:200]:
@@ -107,10 +108,10 @@ def register_batch_notif_routes(app, *, api_auth) -> None:
         cids = [str(x) for x in (body.get("conversation_ids") or []) if x]
         agent_id = str(body.get("agent_id") or "").strip()
         if not cids or not agent_id:
-            return {"ok": False, "error": "conversation_ids / agent_id 不能为空"}
+            return {"ok": False, "error": tr(request, "err.ws.field_required", field="conversation_ids / agent_id")}
         store = _inbox_store(request)
         if store is None:
-            return {"ok": False, "error": "inbox_store 不可用"}
+            return {"ok": False, "error": tr(request, "err.svc.inbox_not_ready")}
         updated = 0
         for cid in cids[:200]:
             try:

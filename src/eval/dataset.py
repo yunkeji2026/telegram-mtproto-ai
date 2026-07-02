@@ -132,6 +132,20 @@ class ConfidenceSample:
 
 
 @dataclass
+class VoiceLangSample:
+    """语音合成语言一致性样本：合成语言应随**待合成文本的实际语种**（防「中文声纹念英文」）。
+
+    - text：将被送去克隆合成的回复正文（可能已被出站翻译改写成客户语言）。
+    - expect_lang：期望送给克隆主机的合成 language（=文本实际语种；无法判定时=default_lang）。
+    - default_lang：该账号配置的默认合成语言（``minicpm_clone.language``），无法判定时回落。
+    """
+    text: str
+    expect_lang: str
+    default_lang: str = "zh"
+    note: str = ""
+
+
+@dataclass
 class ExtractSample:
     """记忆抽取质量评测样本（事实抽取的源头质量）。
 
@@ -576,6 +590,53 @@ _SEED_CONFIDENCE_SAMPLES: List["ConfidenceSample"] = [
     ConfidenceSample("我想你了", "我想你了", "ja", False, "硬错-未翻译"),
     ConfidenceSample("谢谢你这个人真好", "谢谢你这个人真好", "ko", False, "硬错-错语种(中)"),
     ConfidenceSample("早上好", "你早上好呀", "en", False, "硬错-目标英却出中文"),
+]
+
+
+def load_voice_lang_samples(path: Optional[str] = None) -> List["VoiceLangSample"]:
+    """加载语音合成语言一致性样本（YAML/JSONL）；path 为空则返回内置种子集。"""
+    if not path:
+        return list(_SEED_VOICE_LANG_SAMPLES)
+    if not os.path.exists(path):
+        raise FileNotFoundError(path)
+
+    def _mk(d: dict) -> "VoiceLangSample":
+        return VoiceLangSample(
+            text=str(d.get("text", "")),
+            expect_lang=str(d.get("expect_lang", "")),
+            default_lang=str(d.get("default_lang", "zh") or "zh"),
+            note=str(d.get("note", "")))
+
+    if path.endswith(".jsonl"):
+        out: List[VoiceLangSample] = []
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    out.append(_mk(json.loads(line)))
+        return out
+    import yaml
+    with open(path, "r", encoding="utf-8") as f:
+        rows = yaml.safe_load(f) or []
+    return [_mk(r) for r in rows if isinstance(r, dict) and r.get("expect_lang")]
+
+
+# 语音合成语言种子：合成语言须随文本实际语种（中文回复仍 zh=行为不变；他语纠正防 garble；
+# 无法判定/纯符号 → 回落该账号默认 language）。expect_lang 已按确定性 detect_language 实测锚定。
+_SEED_VOICE_LANG_SAMPLES: List["VoiceLangSample"] = [
+    VoiceLangSample("嗯嗯我在的呀，今天上班累不累，想我了没有", "zh", "zh", "中文回复→zh(行为不变)"),
+    VoiceLangSample("Aww I miss you too, how was your day at work today?", "en", "zh",
+                    "英文回复→由zh纠正为en(防中文音系念英文)"),
+    VoiceLangSample("今日はとても疲れたよ、会いたかったな", "ja", "zh", "日文回复→ja"),
+    VoiceLangSample("오늘 정말 보고 싶었어, 밥은 먹었어?", "ko", "zh", "韩文回复→ko"),
+    VoiceLangSample("Anh nhớ em nhiều lắm, hôm nay em thế nào?", "vi", "zh", "越南文回复→vi"),
+    VoiceLangSample("Buenos días, ¿cómo estás? Te extraño mucho.", "es", "zh", "西语回复→es"),
+    VoiceLangSample("Estou com muitas saudades de você, meu coração.", "pt", "zh", "葡语回复→pt"),
+    VoiceLangSample("嗯嗯好的呀", "zh", "zh", "短中文→zh(CJK主导)"),
+    VoiceLangSample("哈哈ok啦", "zh", "zh", "中英混排CJK主导→zh(不误切)"),
+    VoiceLangSample("😊😊😊", "zh", "zh", "纯表情无法判定→回落默认zh"),
+    VoiceLangSample("", "vi", "vi", "空文本→回落该账号默认(此处vi)"),
+    VoiceLangSample("Hello, how are you?", "en", "vi", "英文回复→en(即便账号默认vi也随文本)"),
 ]
 
 

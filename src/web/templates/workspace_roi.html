@@ -1,5 +1,5 @@
 {% extends "workspace_base.html" %}
-{% block title %}经营 ROI 看板{% endblock %}
+{% block title %}{{ (i18n or {}).get('wr_s001', "经营 ROI 看板") }}{% endblock %}
 {% block head %}
 <style>
   /* 令牌驱动（继承 workspace_base 的 --tk-*），日/夜两版自动适配；AI=蓝/人工=橙 双色序列保留。 */
@@ -38,32 +38,32 @@
 {% endblock %}
 {% block content %}
 <div class="roi-wrap">
-  <a class="roi-back" href="/workspace/dash">← 返回今日概览</a>
+  <a class="roi-back" href="/workspace/dash">← {{ (i18n or {}).get('wr_s002', "返回今日概览") }}</a>
   <div class="roi-head">
-    <h2>经营 ROI 看板</h2>
+    <h2>{{ (i18n or {}).get('wr_s001', "经营 ROI 看板") }}</h2>
     <div style="display:flex;gap:8px;">
-      <span class="roi-pill active" data-days="7" onclick="roiSetDays(7,this)">近 7 天</span>
-      <span class="roi-pill" data-days="30" onclick="roiSetDays(30,this)">近 30 天</span>
+      <span class="roi-pill active" data-days="7" onclick="roiSetDays(7,this)">{{ (i18n or {}).get('analytics_period_7d', "近 7 天") }}</span>
+      <span class="roi-pill" data-days="30" onclick="roiSetDays(30,this)">{{ (i18n or {}).get('analytics_period_30d', "近 30 天") }}</span>
     </div>
   </div>
 
   <div class="roi-grid" id="roi-cards"></div>
 
   <div class="roi-sec">
-    <h3>AI 自动应答 vs 人工接管</h3>
+    <h3>AI {{ (i18n or {}).get('wr_s003', "自动应答 vs 人工接管") }}</h3>
     <div class="roi-bar" id="roi-aibar"><i class="ai" style="width:0"></i><i class="hu" style="width:0"></i></div>
     <div class="roi-legend">
-      <span><span class="roi-dot" style="background:var(--tk-brand)"></span>AI 自动 <b id="roi-ai-n">0</b></span>
-      <span><span class="roi-dot" style="background:var(--tk-amber)"></span>人工 <b id="roi-hu-n">0</b></span>
-      <span style="color:var(--tk-text-muted);">拦截未发 <b id="roi-sup-n">0</b></span>
+      <span><span class="roi-dot" style="background:var(--tk-brand)"></span>AI {{ (i18n or {}).get('dash.lb.auto', "自动") }} <b id="roi-ai-n">0</b></span>
+      <span><span class="roi-dot" style="background:var(--tk-amber)"></span>{{ (i18n or {}).get('msg_js_1951', "人工") }} <b id="roi-hu-n">0</b></span>
+      <span style="color:var(--tk-text-muted);">{{ (i18n or {}).get('wr_s004', "拦截未发") }} <b id="roi-sup-n">0</b></span>
     </div>
     <div class="roi-spark" id="roi-spark"></div>
-    <div style="font-size:11px;color:var(--tk-text-muted);margin-top:4px;">每日 AI（蓝）/ 人工（橙）发送量</div>
+    <div style="font-size:11px;color:var(--tk-text-muted);margin-top:4px;">{{ (i18n or {}).get('wr_s005', "每日 AI（蓝）/ 人工（橙）发送量") }}</div>
   </div>
 
   <div class="roi-sec">
-    <h3>配置健康度</h3>
-    <div class="health" id="roi-health">加载中…</div>
+    <h3>{{ (i18n or {}).get('wr_s006', "配置健康度") }}</h3>
+    <div class="health" id="roi-health">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
     <div id="roi-health-issues" style="margin-top:10px;"></div>
   </div>
 </div>
@@ -81,10 +81,10 @@ function roiSetDays(d, el){
 
 function deltaHtml(dp, unit){
   // dp: 环比数值（百分点或百分比）；null=无基数
-  if(dp==null) return '<div class="roi-delta flat">环比 —</div>';
+  if(dp==null) return '<div class="roi-delta flat">'+window.T('as_js039')+' —</div>';
   var cls = dp>0?'up':(dp<0?'down':'flat');
   var arrow = dp>0?'▲':(dp<0?'▼':'■');
-  return '<div class="roi-delta '+cls+'">环比 '+arrow+' '+Math.abs(dp)+(unit||'%')+'</div>';
+  return '<div class="roi-delta '+cls+'">'+window.T('as_js039')+' '+arrow+' '+Math.abs(dp)+(unit||'%')+'</div>';
 }
 
 function card(v, label, sub, cls, deltaH){
@@ -96,13 +96,13 @@ function card(v, label, sub, cls, deltaH){
 
 function renderSpark(trend){
   var el=document.getElementById('roi-spark');
-  if(!trend||!trend.length){ el.innerHTML='<span style="font-size:11px;color:var(--tk-text-muted);">暂无数据</span>'; return; }
+  if(!trend||!trend.length){ el.innerHTML='<span style="font-size:11px;color:var(--tk-text-muted);">'+window.T('rpa_js_no_data')+'</span>'; return; }
   var max=1;
   trend.forEach(function(t){ var s=(t.ai||0)+(t.human||0); if(s>max)max=s; });
   el.innerHTML=trend.map(function(t){
     var ai=t.ai||0, hu=t.human||0;
     var aih=Math.round(ai/max*44), huh=Math.round(hu/max*44);
-    return '<div class="col" title="'+esc(t.day)+'：AI '+ai+' / 人工 '+hu+'">'
+    return '<div class="col" title="'+esc(window.Tf('wr_tf_spark', {day: t.day, ai: ai, hu: hu}))+'">'
       +'<i class="hu" style="height:'+huh+'px"></i>'
       +'<i class="ai" style="height:'+aih+'px"></i></div>';
   }).join('');
@@ -115,27 +115,27 @@ function loadRoi(){
     // KPI 卡
     var cards='';
     if(rel.active_relationships>0){
-      cards+=card(rel.active_relationships,'活跃关系','期内有用户互动的关系数','good');
-      cards+=card(rel.sticky_rate_pct+'%','关系黏性',
-        rel.sticky_relationships+' 个跨天回访（越高越好）',
+      cards+=card(rel.active_relationships,window.T('wr_js001'),window.T('wr_js002'),'good');
+      cards+=card(rel.sticky_rate_pct+'%',window.T('wr_js003'),
+        window.Tf('wr_tf_sticky_n', {n: rel.sticky_relationships}),
         rel.sticky_rate_pct>=40?'good':(rel.sticky_rate_pct>=20?'warn':'bad'));
-      cards+=card(rel.avg_turns,'人均往来轮次','关系深度（越高越深）',
+      cards+=card(rel.avg_turns,window.T('wr_js004'),window.T('wr_js005'),
         rel.avg_turns>=10?'good':(rel.avg_turns>=4?'warn':'bad'));
-      cards+=card(rel.retention_d7_pct+'%','D7 留存',
-        '新关系 '+(rel.cohort_size||0)+' 个的 7 日回访',
+      cards+=card(rel.retention_d7_pct+'%','D7 '+window.T('wr_js006'),
+        window.Tf('wr_tf_cohort', {n: rel.cohort_size||0}),
         rel.retention_d7_pct>=30?'good':(rel.retention_d7_pct>=15?'warn':'bad'));
     }
-    cards+=card(a.ai_share_pct!=null?a.ai_share_pct+'%':'—','AI 自动应答占比','共 '+(a.total_sent||0)+' 条回复',
+    cards+=card(a.ai_share_pct!=null?a.ai_share_pct+'%':'—','AI '+window.T('wr_js007'),window.Tf('wr_tf_total_replies', {n: a.total_sent||0}),
       a.ai_share_pct>=50?'good':'', deltaHtml(cmp.ai_share_delta_pp,'pp'));
-    cards+=card(a.saved_hours!=null?a.saved_hours:'—','节省人力（人时）','按每条 '+(a.sec_per_reply||180)+'s 估算',
+    cards+=card(a.saved_hours!=null?a.saved_hours:'—',window.T('wr_js008'),window.Tf('wr_tf_est_per', {n: a.sec_per_reply||180}),
       'good', deltaHtml(cmp.saved_hours_delta_pct));
     if(a.cost_per_hour>0){
-      cards+=card('¥'+(a.saved_money||0),'节省金额','按 ¥'+a.cost_per_hour+'/人时','good', deltaHtml(cmp.saved_hours_delta_pct));
+      cards+=card('¥'+(a.saved_money||0),window.T('ov2_js010'),window.Tf('wr_tf_hour_cost', {n: a.cost_per_hour}),'good', deltaHtml(cmp.saved_hours_delta_pct));
     }
-    cards+=card(a.human_sent||0,'人工接管','坐席处置后发送');
-    cards+=card(b.conversions||0,'引流成功','转化率 '+(b.conversion_rate||0)+'%','good');
-    cards+=card((b.frt_attain_rate||0)+'%','首响达标率','已响应 '+(b.frt_responded||0)+' 会话', b.frt_attain_rate>=80?'good':(b.frt_attain_rate>=50?'warn':'bad'));
-    cards+=card(b.new_contacts||0,'新增客户','留资率 '+(b.lead_rate||0)+'%');
+    cards+=card(a.human_sent||0,window.T('wr_js009'),window.T('wr_js010'));
+    cards+=card(b.conversions||0,window.T('wr_js011'),window.Tf('wr_tf_conv_rate', {n: b.conversion_rate||0}),'good');
+    cards+=card((b.frt_attain_rate||0)+'%',window.T('wr_js012'),window.Tf('wr_tf_responded', {n: b.frt_responded||0}), b.frt_attain_rate>=80?'good':(b.frt_attain_rate>=50?'warn':'bad'));
+    cards+=card(b.new_contacts||0,window.T('wr_js013'),window.Tf('wr_tf_lead_rate', {n: b.lead_rate||0}));
     document.getElementById('roi-cards').innerHTML=cards;
     // AI/人工 条
     var ai=a.ai_sent||0, hu=a.human_sent||0, tot=ai+hu;
@@ -149,16 +149,16 @@ function loadRoi(){
     renderSpark(a.trend);
     // 配置健康度
     var hEl=document.getElementById('roi-health');
-    if(!h.available){ hEl.innerHTML='<span class="tk-load">配置自检不可用</span>'; }
+    if(!h.available){ hEl.innerHTML='<span class="tk-load">'+window.T('wr_js014')+'</span>'; }
     else {
       var st=h.status||'ok';
-      var badge=st==='error'?'<span class="health-badge health-error">✗ '+h.errors+' 错误</span>'
-        :(st==='warn'?'<span class="health-badge health-warn">! '+h.warnings+' 警告</span>'
-        :'<span class="health-badge health-ok">✓ 配置正常</span>');
+      var badge=st==='error'?'<span class="health-badge health-error">✗ '+h.errors+' '+window.T('ln_js_036')+'</span>'
+        :(st==='warn'?'<span class="health-badge health-warn">! '+h.warnings+' '+window.T('wr_js015')+'</span>'
+        :'<span class="health-badge health-ok">✓ '+window.T('wr_js016')+'</span>');
       hEl.innerHTML=badge+'<span style="font-size:12px;color:var(--tk-text-muted);">'
-        +(st==='ok'?'未发现问题':'运行 <code>python main.py --check</code> 查看详情')+'</span>';
+        +(st==='ok'?window.T('wr_js017'):window.T('ov_js_stage_active')+' <code>python main.py --check</code> '+window.T('wr_js018'))+'</span>';
       var iss=(h.top_issues||[]).map(function(i){
-        return '<div class="health-issue"><b>['+esc(i.severity)+']</b> '+esc(i.path)+'：'+esc(i.message)+'</div>';
+        return '<div class="health-issue"><b>['+esc(i.severity)+']</b> '+esc(i.path)+': '+esc(i.message)+'</div>';
       }).join('');
       document.getElementById('roi-health-issues').innerHTML=iss;
     }

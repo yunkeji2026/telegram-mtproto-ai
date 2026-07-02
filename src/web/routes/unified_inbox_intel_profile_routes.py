@@ -26,6 +26,7 @@ from src.web.routes.unified_inbox_services import (
     _inbox_store,
     _skill_manager,
 )
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ def register_intel_profile_routes(app, *, api_auth) -> None:
         store = _inbox_store(request)
         cid = str(conversation_id or "").strip()
         if not cid:
-            raise HTTPException(400, "conversation_id 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="conversation_id"))
         if store is None:
             return {"ok": True, "found": False, "conversation_id": cid, "meta": None}
         meta = store.get_conv_meta(cid)
@@ -75,7 +76,7 @@ def register_intel_profile_routes(app, *, api_auth) -> None:
         """
         cid = str(conversation_id or "").strip()
         if not cid:
-            raise HTTPException(400, "conversation_id 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="conversation_id"))
 
         store = _inbox_store(request)
         result: Dict[str, Any] = {

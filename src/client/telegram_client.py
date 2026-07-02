@@ -553,6 +553,15 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             if self.user_info is None:
                 self.user_info = await self.client.get_me()
                 self.logger.info(f"登录用户: {self.user_info.first_name} (@{self.user_info.username})")
+            # P1 身份化：把本账号自身昵称/用户名（可选头像）富集进注册表 meta.self_*，
+            # 供连接中心/切换条显示真实身份。best-effort + flag 默认关 + 后台任务不阻塞启动。
+            try:
+                from src.integrations.account_self_profile import enrich_from_user
+                asyncio.create_task(enrich_from_user(
+                    "telegram", getattr(self, "account_id", "default"),
+                    self.user_info, config=self.config, client=self.client))
+            except Exception:
+                self.logger.debug("[self_profile] 富集调度失败（忽略）", exc_info=True)
             self.running = True
             
             asyncio.create_task(self._message_processor())
@@ -1278,6 +1287,12 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                 else:
                     self.logger.info(f"收到图片消息 [{chat_title}/{username}]（Vision/OCR 均未启用）")
                     text = "[图片消息 - 识别功能未启用]"
+
+            # 贴纸 / 动态表情（无文本，此前会被整条忽略）
+            if not text and getattr(message, "sticker", None):
+                text = "[贴纸]"
+            elif not text and getattr(message, "animation", None):
+                text = "[动态表情]"
             
             if text:
                 self.logger.info(f"收到消息 [{chat_title}/{username}]: {self._log_safe_text(text)}")
@@ -1391,10 +1406,49 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             chat_id = message_data['chat_id']
 
             # N4b：入站镜像（companion 模式才生效）→ 坐席台/统一收件箱可见用户原话
+            _media_type = ""
+            _media_ref = ""
+            _ocr = str(message_data.get("image_ocr_text") or "").strip()
+            if getattr(message, "sticker", None):
+                _media_type = "sticker"
+            elif getattr(message, "animation", None):
+                _media_type = "gif"
+            elif getattr(message, "photo", None) or (
+                getattr(message, "document", None)
+                and getattr(getattr(message, "document", None), "mime_type", "")
+                and str(message.document.mime_type).startswith("image/")
+            ):
+                _media_type = "image"
+                try:
+                    from src.integrations.protocol_bridge import download_tg_media
+                    _mt, _mr = await download_tg_media(
+                        message, getattr(self, "account_id", "default"),
+                    )
+                    if _mt:
+                        _media_type = _mt
+                    if _mr:
+                        _media_ref = _mr
+                except Exception:
+                    pass
+                if not _ocr and _media_ref:
+                    try:
+                        from src.integrations.protocol_bridge import static_media_ref_to_path
+                        _img_path = static_media_ref_to_path(_media_ref)
+                        if _img_path:
+                            _desc = await self._get_image_content(_img_path)
+                            if _desc:
+                                _ocr = _normalize_message_text(_desc)
+                                image_ocr_text = _ocr
+                    except Exception:
+                        pass
+            if _ocr and _media_type == "image" and "[图片内容]" not in (text or ""):
+                text = f"[图片内容] {_ocr}"
             self._emit_inbox(
                 chat_id=chat_id, text=text, direction="in",
                 name=str(message_data.get('username') or ''),
                 msg_id=str(getattr(message, 'id', '') or ''),
+                media_type=_media_type,
+                media_ref=_media_ref,
             )
 
             _es_cnt, _es_key = 0, ""
@@ -1451,7 +1505,9 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             
             # 群内：拉取近期机器人/通知消息，与 OCR 一起供 AI 使用（群聊 id 为负）
             recent_bot_messages = []
-            image_ocr_text = message_data.get('image_ocr_text')
+            # `_ocr` may be filled above by downloading the mirrored media ref. Do not
+            # overwrite it with the original queue payload, which can still be empty.
+            image_ocr_text = _ocr or message_data.get('image_ocr_text')
             if isinstance(chat_id, (int, float)) and int(chat_id) < 0:
                 recent_bot_messages = await self._get_recent_bot_messages(int(chat_id))
                 # 当前消息无图但与订单/查单相关时，拉取群内最近一张图作为查单依据（SOP：有凭证即按凭证确认）
@@ -1532,6 +1588,11 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                 '_event_tracker': self.event_tracker,
                 'user_id': user_id,
                 'user_msg_id': getattr(message, 'id', 0),
+                'channel': 'telegram',
+                'media_type': _media_type,
+                'media_ref': _media_ref,
+                'media_desc': image_ocr_text or "",
+                '_current_user_message_for_lang': ai_text,
                 # N 线 核心1：复用共享 companion_context.route_persona_id（A/B 同一套 3-tier 路由）
                 'account_persona_id': _route_persona_id(
                     getattr(self, 'account_persona_ids', None), _chat_type_str

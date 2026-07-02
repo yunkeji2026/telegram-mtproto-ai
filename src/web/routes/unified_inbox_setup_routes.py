@@ -20,6 +20,7 @@ from fastapi import Request
 
 from src.web.routes.unified_inbox_auth import _require_supervisor
 from src.web.routes.unified_inbox_services import _inbox_store
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +110,7 @@ def register_setup_routes(app, *, api_auth, config_manager=None) -> None:
         api_auth(request)
         _require_supervisor(request)
         if config_manager is None:
-            return {"ok": False, "detail": "config_manager 不可用"}
+            return {"ok": False, "detail": tr(request, "err.svc.config_manager_not_ready")}
         # C0-3：套餐渠道 gating —— enforce 开且该渠道不在授权范围时拒绝接入
         try:
             from src.licensing import channel_allowed, get_license_manager
@@ -119,7 +120,7 @@ def register_setup_routes(app, *, api_auth, config_manager=None) -> None:
                 return {
                     "ok": False,
                     "error": "channel_not_licensed",
-                    "detail": f"当前套餐（{_lic.plan}）未包含「{channel}」渠道，请升级套餐。",
+                    "detail": tr(request, "err.ws.plan_channel_not_included", plan=_lic.plan, channel=channel),
                 }
         except Exception:
             logger.debug("渠道 gating 检查跳过（已忽略）", exc_info=True)

@@ -25,6 +25,7 @@ def test_safe_default_kills_outbound_keeps_safeguards():
     plan = build_preset_plan("safe_default")
     assert _find(plan, "l2_autosend_deliver", "enabled")["value"] is False
     assert _find(plan, "voice_autosend", "enabled")["value"] is False
+    assert _find(plan, "realtime_voice", "enabled")["value"] is False
     assert _find(plan, "proactive_topic", "enabled")["value"] is False
     # 安全栈开
     assert _find(plan, "persona_guard", "enabled")["value"] is True
@@ -44,6 +45,7 @@ def test_full_auto_enables_everything_real():
     assert _find(plan, "l2_autosend_deliver", "enabled")["value"] is True
     assert _find(plan, "proactive_topic", "dry_run")["value"] is False      # 真发
     assert _find(plan, "voice_autosend", "enabled")["value"] is True
+    assert _find(plan, "realtime_voice", "enabled")["value"] is False       # 实时通话仍独立 opt-in
 
 
 def test_full_auto_order_gate_and_worker_before_deliver():

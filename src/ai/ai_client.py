@@ -44,6 +44,10 @@ class AIClient(LoggerMixin):
         self.client = None  # genai.Client
         self._oa_client = None  # AsyncOpenAI（Ollama / OpenAI 兼容）
         self._oa_embed_client = None  # 可选：仅用于 embedding（如 DeepSeek 对话 + Ollama 向量）
+        # Embedding 熔断：向量端点（如本地 Ollama）宕机时，避免每条消息都徒劳连接+刷 WARNING。
+        # 连续失败达阈值 → 冷却窗口内直接静默降级到关键词召回（记忆/语义检索零阻断）。
+        self._embed_fail_streak = 0
+        self._embed_unreachable_until = 0.0
         self._use_openai_compat = False
         self._oa_extra_body: Dict[str, Any] = {}  # 透传给 create() 的额外字段（如 think:false）
         self._ollama_native_base: Optional[str] = None  # 非 None 时走原生 /api/chat（绕过 /v1/ think 问题）
@@ -1316,7 +1320,7 @@ class AIClient(LoggerMixin):
                 f"【语音消息】对方发来语音{_vdur_txt}（已转文字）。"
                 "你的回复应更口语化、简短自然，像在对讲一样回应，避免书面长段。"
             )
-        # WhatsApp 媒体消息提示（图片/视频/贴纸/GIF/文件）
+        # 入站媒体（WhatsApp / Telegram 收件箱 / Messenger 等多端共用）
         if context.get("_peer_message_is_media"):
             _mkind = context.get("_media_kind") or "media"
             _mdesc = (context.get("_media_desc") or "").strip()
@@ -1328,17 +1332,26 @@ class AIClient(LoggerMixin):
                 "gif":              "GIF 动图",
                 "file":             "文件",
             }.get(_mkind, "媒体消息")
+            _plat = str(
+                context.get("platform") or context.get("channel") or "chat"
+            ).strip().lower()
+            _plat_label = {
+                "telegram": "Telegram", "whatsapp": "WhatsApp",
+                "whatsapp_rpa": "WhatsApp", "messenger": "Messenger",
+                "messenger_rpa": "Messenger", "line": "LINE", "inbox": "收件箱",
+            }.get(_plat, "聊天")
             if _mdesc:
                 prompt_parts.append(
-                    f"【WhatsApp 媒体消息·{_kind_hint}】系统已识别对方发来的媒体内容如下：\n"
+                    f"【{_plat_label} 媒体消息·{_kind_hint}】系统已识别对方发来的媒体内容如下：\n"
                     f"{_mdesc}\n"
                     "回复要求：像真人一样自然回应这条媒体消息，不要说「我无法查看图片」；"
                     "若识别内容不清楚可温和追问；视频仅基于缩略图内容回应，不要假装看完整个视频。"
                 )
             else:
                 prompt_parts.append(
-                    f"【WhatsApp 媒体消息·{_kind_hint}】对方发来了一条{_kind_hint}消息，"
-                    "内容暂无法识别。请自然承认收到了，并温和追问对方想表达或想了解什么。"
+                    f"【{_plat_label} 媒体消息·{_kind_hint}】对方发来了一条{_kind_hint}消息，"
+                    "内容暂无法识别。请自然承认收到了，并温和追问对方想表达或想了解什么；"
+                    "贴纸/表情宜轻松口语，一两句即可。"
                 )
         # 关键信息锚定：置顶，避免长对话截断后丢失（陪聊域不注入通道/订单锚点）
         key_anchor = []
@@ -1357,10 +1370,17 @@ class AIClient(LoggerMixin):
         lang_hint = self._detect_message_language(_um)
         if lang_hint:
             lang_name = self._LANG_NAMES.get(lang_hint, lang_hint) or "中文"
-            if _is_companion:
+            _channel = str(context.get("channel") or context.get("platform") or "").strip().lower()
+            _chat_type = str(context.get("chat_type") or "").strip().lower()
+            _strict_current_lang = (
+                _is_companion
+                or (_channel == "telegram" and _chat_type in ("", "private"))
+            )
+            if _strict_current_lang:
                 prompt_parts.append(
                     f"【输出语言】用户当前消息语言为「{lang_name}」，你必须用该语言回复全部内容。"
                     f"即使系统提供的模板或知识库内容是中文，你也必须翻译为「{lang_name}」后再输出。"
+                    "不要在同一条回复里混用其他语言；除非用户明确要求翻译或双语解释。"
                 )
             else:
                 if lang_hint != "zh":
@@ -1443,7 +1463,11 @@ class AIClient(LoggerMixin):
         
         topic_switch = context.get('_topic_switch_hint')
         if topic_switch:
-            prompt_parts.append(f"【话题切换——注意】\n{topic_switch}")
+            prompt_parts.append(f"【话题/语境切换——注意】\n{topic_switch}")
+
+        _short_in = (context.get("_inbound_short_hint") or "").strip()
+        if _short_in and _is_companion:
+            prompt_parts.append(_short_in)
 
         if context.get("_channel_followup_brief") and not _is_companion:
             prompt_parts.append(
@@ -2424,6 +2448,27 @@ class AIClient(LoggerMixin):
             "provider": self._provider,
         }
     
+    _EMBED_FAIL_THRESHOLD = 3      # 连续失败达此数 → 熔断
+    _EMBED_COOLDOWN_SEC = 120.0    # 熔断冷却窗口（窗口内不再连接，静默降级）
+
+    def _note_embed_success(self) -> None:
+        """一次成功即复位熔断状态（端点恢复 → 立刻回到向量召回）。"""
+        if self._embed_fail_streak or self._embed_unreachable_until:
+            self._embed_fail_streak = 0
+            self._embed_unreachable_until = 0.0
+
+    def _note_embed_failure(self, exc: Exception) -> None:
+        """记一次失败；达阈值则开熔断窗口并**只此时**打一条 WARNING（避免每条消息刷屏）。"""
+        self._embed_fail_streak += 1
+        if self._embed_fail_streak >= self._EMBED_FAIL_THRESHOLD:
+            self._embed_unreachable_until = time.time() + self._EMBED_COOLDOWN_SEC
+            self.logger.warning(
+                "Embedding 连续失败 %d 次，熔断 %.0fs（期间降级关键词召回，零阻断）: %s",
+                self._embed_fail_streak, self._EMBED_COOLDOWN_SEC, exc)
+        else:
+            self.logger.debug(
+                "Embedding API 调用失败(第%d次): %s", self._embed_fail_streak, exc)
+
     async def embed(self, texts: List[str]) -> List[List[float]]:
         """
         调用 Gemini Embedding API 获取文本向量。
@@ -2431,6 +2476,9 @@ class AIClient(LoggerMixin):
         失败时返回空列表，调用方应做降级处理。
         """
         if not texts:
+            return []
+        # 熔断窗口内：直接静默返回空（调用方降级关键词召回），不再徒劳连接/刷日志。
+        if self._embed_unreachable_until and time.time() < self._embed_unreachable_until:
             return []
         if self._use_openai_compat:
             # 未配置独立 embedding 端点且未指定模型时，跳过（避免向仅支持 chat 的 API 误请求 embeddings）
@@ -2445,11 +2493,12 @@ class AIClient(LoggerMixin):
                     model=self._embedding_model,
                     input=texts,
                 )
+                self._note_embed_success()
                 if result and result.data:
                     return [list(d.embedding) for d in result.data]
                 return []
             except Exception as _e:
-                self.logger.warning("Embedding API 调用失败: %s", _e)
+                self._note_embed_failure(_e)
                 return []
         if not self.client:
             return []
@@ -2458,11 +2507,12 @@ class AIClient(LoggerMixin):
                 model=self._embedding_model,
                 contents=texts,
             )
+            self._note_embed_success()
             if result and result.embeddings:
                 return [emb.values for emb in result.embeddings]
             return []
         except Exception as _e:
-            self.logger.warning("Embedding API 调用失败: %s", _e)
+            self._note_embed_failure(_e)
             return []
 
     async def embed_with_fallback(self, texts: List[str]) -> List[List[float]]:

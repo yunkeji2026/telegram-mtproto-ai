@@ -19,6 +19,7 @@ from fastapi import Depends, HTTPException, Request
 from src.inbox.normalizer import conv_id
 from src.web.routes.unified_inbox_auth import _session_agent
 from src.workspace.agent_coordinator import AgentCoordinator, web_funnel_snapshot
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ def register_workspace_presence_routes(app, *, api_auth, config_manager=None) ->
         if status == "online" and _seat_block(request, agent["agent_id"]):
             raise HTTPException(
                 status_code=403,
-                detail="seat_limit:活跃坐席已达授权席位上限，请升级套餐或让其他坐席下线",
+                detail="seat_limit:" + tr(request, "err.ws.seat_limit_reached"),
             )
         row = coord.set_presence(
             agent["agent_id"],
@@ -112,7 +113,7 @@ def register_workspace_presence_routes(app, *, api_auth, config_manager=None) ->
         conversation_id = str(body.get("conversation_id") or "").strip()
         if not conversation_id:
             if not platform or not chat_key:
-                raise HTTPException(400, "conversation_id 或 platform+chat_key 必填")
+                raise HTTPException(400, tr(request, "err.ws.conv_or_platform_required"))
             conversation_id = conv_id(platform, account_id, chat_key)
         force = bool(body.get("force"))
         agent = _session_agent(request)
@@ -136,7 +137,7 @@ def register_workspace_presence_routes(app, *, api_auth, config_manager=None) ->
             chat_key = str(body.get("chat_key") or "")
             account_id = str(body.get("account_id") or "default")
             if not platform or not chat_key:
-                raise HTTPException(400, "conversation_id 或 platform+chat_key 必填")
+                raise HTTPException(400, tr(request, "err.ws.conv_or_platform_required"))
             conversation_id = conv_id(platform, account_id, chat_key)
         agent = _session_agent(request)
         coord = AgentCoordinator.from_request(request, config_manager)
@@ -151,7 +152,7 @@ def register_workspace_presence_routes(app, *, api_auth, config_manager=None) ->
             chat_key = str(body.get("chat_key") or "")
             account_id = str(body.get("account_id") or "default")
             if not platform or not chat_key:
-                raise HTTPException(400, "conversation_id 或 platform+chat_key 必填")
+                raise HTTPException(400, tr(request, "err.ws.conv_or_platform_required"))
             conversation_id = conv_id(platform, account_id, chat_key)
         force = bool(body.get("force"))
         agent = _session_agent(request)

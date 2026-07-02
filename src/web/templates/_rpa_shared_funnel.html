@@ -79,40 +79,40 @@
 <div class="rpa-funnel-wrap" id="rpa-funnel-wrap">
   <div class="rpa-funnel-head">
     <div class="rpa-funnel-title">
-      📊 运营漏斗
-      <span class="rpa-funnel-sub" id="rpa-funnel-total">载入中…</span>
+      📊 {{ (i18n or {}).get('rpa_fn_title','运营漏斗') }}
+      <span class="rpa-funnel-sub" id="rpa-funnel-total">{{ (i18n or {}).get('rpa_loading','载入中…') }}</span>
     </div>
     <div class="rpa-funnel-rates" id="rpa-funnel-rates"></div>
   </div>
-  <div class="rpa-funnel-chips" id="rpa-funnel-chips" role="tablist" aria-label="按平台筛选漏斗">
+  <div class="rpa-funnel-chips" id="rpa-funnel-chips" role="tablist" aria-label="{{ (i18n or {}).get('rpa_fn_filter_aria','按平台筛选漏斗') }}">
     {# chip 由 JS 渲染（要根据 by_channel 显示数字） #}
   </div>
   <div class="rpa-funnel-bars" id="rpa-funnel-bars">
-    <div class="rpa-funnel-empty">载入中…</div>
+    <div class="rpa-funnel-empty">{{ (i18n or {}).get('rpa_loading','载入中…') }}</div>
   </div>
   {# B1: 时序折线图（独立 section，复用 scope/channel + chip 状态） #}
   <div class="rpa-funnel-ts" id="rpa-funnel-ts">
     <div class="rpa-funnel-ts-head">
-      <div class="rpa-funnel-ts-title">📈 转化时序</div>
-      <div class="rpa-funnel-ts-days" id="rpa-funnel-ts-days" role="tablist" aria-label="时序窗口">
-        <button type="button" class="rpa-funnel-ts-day-btn" data-days="7" role="tab">7 天</button>
-        <button type="button" class="rpa-funnel-ts-day-btn active" data-days="30" role="tab">30 天</button>
+      <div class="rpa-funnel-ts-title">📈 {{ (i18n or {}).get('rpa_fn_ts_title','转化时序') }}</div>
+      <div class="rpa-funnel-ts-days" id="rpa-funnel-ts-days" role="tablist" aria-label="{{ (i18n or {}).get('rpa_fn_ts_aria','时序窗口') }}">
+        <button type="button" class="rpa-funnel-ts-day-btn" data-days="7" role="tab">{{ (i18n or {}).get('rpa_fn_days7','7 天') }}</button>
+        <button type="button" class="rpa-funnel-ts-day-btn active" data-days="30" role="tab">{{ (i18n or {}).get('rpa_fn_days30','30 天') }}</button>
       </div>
     </div>
     <div id="rpa-funnel-ts-body">
-      <div class="rpa-funnel-ts-empty">载入中…</div>
+      <div class="rpa-funnel-ts-empty">{{ (i18n or {}).get('rpa_loading','载入中…') }}</div>
     </div>
   </div>
   {# B2: KPI 告警横幅（滚动渲染，首次加载及漏斗刷新时联动） #}
   <div class="rpa-kpi-alerts" id="rpa-kpi-alerts">
     <div class="rpa-kpi-alerts-head">
-      <span class="rpa-kpi-alerts-title">🔔 KPI 告警</span>
+      <span class="rpa-kpi-alerts-title">🔔 {{ (i18n or {}).get('rpa_fn_alerts_title','KPI 告警') }}</span>
       <span class="rpa-kpi-alerts-badge" id="rpa-kpi-alerts-badge" style="display:none"></span>
       <button type="button" class="rpa-kpi-alerts-ack-all" id="rpa-kpi-alerts-ack-all"
-              style="display:none" title="确认所有未读告警">全部已读</button>
+              style="display:none" title="{{ (i18n or {}).get('rpa_fn_ack_all_title','确认所有未读告警') }}">{{ (i18n or {}).get('rpa_fn_ack_all','全部已读') }}</button>
     </div>
     <div id="rpa-kpi-alerts-body">
-      <div class="rpa-kpi-alerts-empty">载入中…</div>
+      <div class="rpa-kpi-alerts-empty">{{ (i18n or {}).get('rpa_loading','载入中…') }}</div>
     </div>
   </div>
 </div>
@@ -122,7 +122,7 @@
 'use strict';
 if(!window.rpa){
   // 必须先 include _rpa_shared_scripts.html
-  console.warn('[rpa-funnel] window.rpa 未初始化，请先 include _rpa_shared_scripts.html');
+  console.warn('[rpa-funnel] window.rpa not initialized; include _rpa_shared_scripts.html first');
   return;
 }
 if(window.rpa.funnel) return; // 防止重复加载（单页面多次 include 仍只取第一次）
@@ -134,16 +134,16 @@ F._scope = 'all';
 
 // Q4: chip 定义（顺序固定，与 VALID_CHANNELS 对齐；mobile 来自 mobile-auto0423）
 const CHIPS = [
-  ['all',       '全部',      ''],
+  ['all',       window.T('rpa_all'),      ''],
   ['messenger', 'Messenger', ''],
   ['line',      'LINE',      ''],
   ['telegram',  'Telegram',  ''],
-  ['mobile',    'Mobile',    'mobile-auto0423 流入'],
+  ['mobile',    'Mobile',    window.T('rpa_fn_mobile_hint')],
 ];
 
 // Q4: scope label —— 在 render 里被引用，所以必须在 render 之前声明
 const SCOPE_LABEL = {
-  'all':       '全平台',
+  'all':       window.T('rpa_fn_scope_all'),
   'messenger': 'Messenger',
   'line':      'LINE',
   'telegram':  'Telegram',
@@ -152,16 +152,16 @@ const SCOPE_LABEL = {
 
 // 10 阶段（与 contacts.JourneyStage 对齐；loss 标记走红色渐变）
 const STAGES = [
-  ['INITIAL',        '初始接触',   ''],
-  ['ENGAGED',        '深入互动',   ''],
-  ['HANDOFF_READY',  '引流就绪',   ''],
-  ['HANDOFF_SENT',   '话术已发',   ''],
-  ['LINE_ADDED',     '加好友',     ''],
-  ['LINE_ACCEPTED',  '通过验证',   ''],
-  ['LINE_ENGAGED',   '二次互动',   ''],
-  ['BONDED',         '成交',       ''],
-  ['LOST_HANDOFF',   '流失-引流',  'loss'],
-  ['LOST_LINE_SILENT','流失-LINE', 'loss'],
+  ['INITIAL',        window.T('rpa_fn_stage_initial'),   ''],
+  ['ENGAGED',        window.T('rpa_fn_stage_engaged'),   ''],
+  ['HANDOFF_READY',  window.T('rpa_fn_stage_handoff_ready'),   ''],
+  ['HANDOFF_SENT',   window.T('rpa_fn_stage_handoff_sent'),   ''],
+  ['LINE_ADDED',     window.T('rpa_fn_stage_line_added'),     ''],
+  ['LINE_ACCEPTED',  window.T('rpa_fn_stage_line_accepted'),   ''],
+  ['LINE_ENGAGED',   window.T('rpa_fn_stage_line_engaged'),   ''],
+  ['BONDED',         window.T('rpa_fn_stage_bonded'),       ''],
+  ['LOST_HANDOFF',   window.T('rpa_fn_stage_lost_handoff'),  'loss'],
+  ['LOST_LINE_SILENT',window.T('rpa_fn_stage_lost_line'), 'loss'],
 ];
 
 // 保底显示的阶段（即使为 0 也画一行，避免空白看不出漏斗形状）
@@ -206,13 +206,13 @@ F.render = function(data){
   if(!bars || !total || !rates) return;
 
   if(data && data.error){
-    bars.innerHTML = '<div class="rpa-funnel-empty" style="color:#dc2626">加载失败 <button class="btn-sec" type="button" style="margin-left:.4rem;font-size:.75rem" onclick="window.rpa&&rpa.funnel&&rpa.funnel.refresh()">重试</button></div>';
+    bars.innerHTML = '<div class="rpa-funnel-empty" style="color:#dc2626">' + window.T('rpa_load_failed') + ' <button class="btn-sec" type="button" style="margin-left:.4rem;font-size:.75rem" onclick="window.rpa&&rpa.funnel&&rpa.funnel.refresh()">' + window.T('rpa_retry') + '</button></div>';
     total.textContent = '';
     rates.innerHTML = '';
     return;
   }
   if(!data || data.disabled){
-    bars.innerHTML = '<div class="rpa-funnel-disabled">contacts 子系统<b>未启用</b>，请在 <code>config.yaml</code> 中开启 <code>contacts.enabled</code> 后重启进程。</div>';
+    bars.innerHTML = '<div class="rpa-funnel-disabled">' + window.T('rpa_fn_disabled') + '</div>';
     total.textContent = '';
     rates.innerHTML = '';
     // chip 行清空（避免 disabled 时点 chip 误以为可用）
@@ -232,8 +232,8 @@ F.render = function(data){
   const maxVal = Math.max(1, ...STAGES.map(s=>Number(stages[s[0]])||0));
 
   // Q4: scope ≠ 'all' 时显式标注范围，避免运营误判"这是全平台数据"
-  const scopeTag = (F._scope === 'all') ? '' : ` · 范围：${SCOPE_LABEL[F._scope] || F._scope}`;
-  total.textContent = `共 ${flowTotal} 条旅程 · 联系人 ${data.total_contacts||0} 位${scopeTag}`;
+  const scopeTag = (F._scope === 'all') ? '' : ' · ' + window.T('rpa_fn_scope_prefix') + (SCOPE_LABEL[F._scope] || F._scope);
+  total.textContent = window.Tf('rpa_fn_total', {n: flowTotal, c: (data.total_contacts||0)}) + scopeTag;
 
   const html = STAGES
     .filter(s => (Number(stages[s[0]])||0) > 0 || ALWAYS_VISIBLE.includes(s[0]))
@@ -246,7 +246,7 @@ F.render = function(data){
         <div class="rpa-funnel-val">${v}</div>
       </div>`;
     }).join('');
-  bars.innerHTML = html || '<div class="rpa-funnel-empty">暂无 Journey 数据</div>';
+  bars.innerHTML = html || '<div class="rpa-funnel-empty">' + window.T('rpa_fn_no_journey') + '</div>';
 
   // 转化率
   const eng = F._pct(stages.ENGAGED, stages.INITIAL);
@@ -254,14 +254,14 @@ F.render = function(data){
   const add = F._pct(stages.LINE_ADDED, stages.HANDOFF_SENT);
   const bnd = F._pct(stages.BONDED, flowTotal);
   const rateList = [
-    {label:'互动率',  val: eng},
-    {label:'引流率',  val: hnd},
-    {label:'加友率',  val: add},
-    {label:'综合成交', val: bnd},
+    {label:window.T('rpa_fn_rate_engaged'),  val: eng},
+    {label:window.T('rpa_fn_rate_handoff'),  val: hnd},
+    {label:window.T('rpa_fn_rate_add'),  val: add},
+    {label:window.T('rpa_fn_rate_overall'), val: bnd},
   ].filter(r => r.val != null);
 
   rates.innerHTML = rateList.length === 0
-    ? '<span class="rpa-funnel-rate muted">暂无转化数据</span>'
+    ? '<span class="rpa-funnel-rate muted">' + window.T('rpa_fn_no_conv') + '</span>'
     : rateList.map(r =>
         `<span class="rpa-funnel-rate">${rpa.esc(r.label)} ${rpa.esc(r.val)}</span>`
       ).join('');
@@ -295,10 +295,10 @@ F._tsLineVisible = { engaged_rate: true, handoff_rate: true, line_add_rate: true
 
 // 4 条折线的视觉定义 —— SVG 颜色 + 中文 label
 const TS_LINES = [
-  { key: 'engaged_rate',  label: '互动率',  color: '#16a34a' },
-  { key: 'handoff_rate',  label: '引流率',  color: '#2563eb' },
-  { key: 'line_add_rate', label: '加友率',  color: '#9333ea' },
-  { key: 'bonded_rate',   label: '成交率',  color: '#ea580c' },
+  { key: 'engaged_rate',  label: window.T('rpa_fn_rate_engaged'),  color: '#16a34a' },
+  { key: 'handoff_rate',  label: window.T('rpa_fn_rate_handoff'),  color: '#2563eb' },
+  { key: 'line_add_rate', label: window.T('rpa_fn_rate_add'),  color: '#9333ea' },
+  { key: 'bonded_rate',   label: window.T('rpa_fn_rate_bonded'),  color: '#ea580c' },
 ];
 
 F._refreshTimeseries = function(){
@@ -326,11 +326,11 @@ F._renderTimeseries = function(data){
   const body = document.getElementById('rpa-funnel-ts-body');
   if(!body) return;
   if(data && data.error){
-    body.innerHTML = '<div class="rpa-funnel-ts-empty" style="color:#dc2626">加载失败 <button class="btn-sec" type="button" style="margin-left:.35rem;font-size:.72rem" onclick="window.rpa&&rpa.funnel&&rpa.funnel._refreshTimeseries()">重试</button></div>';
+    body.innerHTML = '<div class="rpa-funnel-ts-empty" style="color:#dc2626">' + window.T('rpa_load_failed') + ' <button class="btn-sec" type="button" style="margin-left:.35rem;font-size:.72rem" onclick="window.rpa&&rpa.funnel&&rpa.funnel._refreshTimeseries()">' + window.T('rpa_retry') + '</button></div>';
     return;
   }
   if(!data || !Array.isArray(data.series) || data.series.length === 0){
-    body.innerHTML = '<div class="rpa-funnel-ts-empty">暂无时序数据（journey_events 表为空或 contacts 未启用）</div>';
+    body.innerHTML = '<div class="rpa-funnel-ts-empty">' + window.T('rpa_fn_no_ts') + '</div>';
     return;
   }
   // SVG 坐标系：viewBox 600×200，留 36px 左 / 12px 右 / 8px 上 / 22px 下 padding
@@ -458,13 +458,13 @@ F._renderAlerts = function(data){
   const ackAllBtn = document.getElementById('rpa-kpi-alerts-ack-all');
   if(!body) return;
   if(data && data.error){
-    body.innerHTML = '<div class="rpa-kpi-alerts-empty" style="color:#dc2626">加载失败 <button class="btn-sec" type="button" style="margin-left:.35rem;font-size:.72rem" onclick="window.rpa&&rpa.funnel&&rpa.funnel._refreshAlerts()">重试</button></div>';
+    body.innerHTML = '<div class="rpa-kpi-alerts-empty" style="color:#dc2626">' + window.T('rpa_load_failed') + ' <button class="btn-sec" type="button" style="margin-left:.35rem;font-size:.72rem" onclick="window.rpa&&rpa.funnel&&rpa.funnel._refreshAlerts()">' + window.T('rpa_retry') + '</button></div>';
     if(badge) badge.style.display = 'none';
     if(ackAllBtn) ackAllBtn.style.display = 'none';
     return;
   }
   if(!data || !Array.isArray(data.items)){
-    body.innerHTML = '<div class="rpa-kpi-alerts-empty">暂无告警数据</div>';
+    body.innerHTML = '<div class="rpa-kpi-alerts-empty">' + window.T('rpa_fn_no_alerts_data') + '</div>';
     if(badge) badge.style.display = 'none';
     if(ackAllBtn) ackAllBtn.style.display = 'none';
     return;
@@ -476,7 +476,7 @@ F._renderAlerts = function(data){
   }
   if(ackAllBtn) ackAllBtn.style.display = unacked > 0 ? '' : 'none';
   if(data.items.length === 0){
-    body.innerHTML = '<div class="rpa-kpi-alerts-empty">✅ 暂无 KPI 告警</div>';
+    body.innerHTML = '<div class="rpa-kpi-alerts-empty">✅ ' + window.T('rpa_fn_no_alerts') + '</div>';
     return;
   }
   const now = Date.now() / 1000;
@@ -486,8 +486,8 @@ F._renderAlerts = function(data){
     const ackedCls = a.acked ? ' acked' : '';
     const ago = _fmtAgo(now - (a.ts || 0));
     const ackHtml = a.acked
-      ? '<span style="font-size:.68rem;color:var(--t3)">已确认</span>'
-      : '<button type="button" class="rpa-kpi-alert-ack-btn" data-aid="' + a.id + '">确认</button>';
+      ? '<span style="font-size:.68rem;color:var(--t3)">' + window.T('rpa_acked') + '</span>'
+      : '<button type="button" class="rpa-kpi-alert-ack-btn" data-aid="' + a.id + '">' + window.T('rpa_fn_ack') + '</button>';
     return '<div class="rpa-kpi-alert-item ' + sevCls + ackedCls + '">'
       + '<span class="rpa-kpi-alert-icon">' + icon + '</span>'
       + '<div class="rpa-kpi-alert-body">'
@@ -512,10 +512,10 @@ F._renderAlerts = function(data){
 
 function _fmtAgo(sec){
   sec = Math.max(0, Math.round(sec));
-  if(sec < 60) return sec + ' 秒前';
-  if(sec < 3600) return Math.round(sec/60) + ' 分钟前';
-  if(sec < 86400) return Math.round(sec/3600) + ' 小时前';
-  return Math.round(sec/86400) + ' 天前';
+  if(sec < 60) return window.Tf('rpa_ago_sec', {n: sec});
+  if(sec < 3600) return window.Tf('rpa_ago_min', {n: Math.round(sec/60)});
+  if(sec < 86400) return window.Tf('rpa_ago_hr', {n: Math.round(sec/3600)});
+  return window.Tf('rpa_ago_day', {n: Math.round(sec/86400)});
 }
 
 F._bindAckAll = function(){

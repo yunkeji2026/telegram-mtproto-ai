@@ -15,6 +15,7 @@ import json
 import time
 
 from fastapi import HTTPException, Request
+from src.web.web_i18n import tr
 
 
 def register_copilot_routes(app, ctx) -> None:
@@ -37,7 +38,7 @@ def register_copilot_routes(app, ctx) -> None:
         correct_reply = (data.get("correct_reply") or "").strip()
         category = data.get("category", "其他")
         if not user_message or not correct_reply:
-            raise HTTPException(400, "user_message 和 correct_reply 不能为空")
+            raise HTTPException(400, tr(request, "err.cp.user_msg_reply_required"))
 
         actor = request.session.get("username", "web_admin")
 
@@ -87,7 +88,7 @@ def register_copilot_routes(app, ctx) -> None:
         data = await request.json()
         question = (data.get("question") or "").strip()
         if not question:
-            raise HTTPException(400, "question 不能为空")
+            raise HTTPException(400, tr(request, "err.kb.question_empty"))
 
         t0 = time.time()
         gathered = {}

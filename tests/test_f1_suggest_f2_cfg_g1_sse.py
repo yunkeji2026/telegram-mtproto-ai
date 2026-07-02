@@ -268,15 +268,16 @@ class TestG1DraftCreatedSSE:
         assert did is not None  # 不受 bus 异常影响
 
     def test_skipped_draft_no_event_published(self, tmp_store):
-        """跳过（会话已有 pending）时不发布 draft_created 事件。"""
+        """跳过（会话已有 pending 且 peer_text 未变）时不发布 draft_created 事件。"""
         svc = self._make_svc(tmp_store)
         conv = self._conv("u4")
+        peer = "同一条客户消息"
         mock_bus = MagicMock()
         with patch(self._BUS_PATCH, return_value=mock_bus):
-            svc.auto_generate_draft(conv, "第一条消息", automation_mode="auto_ai")
+            svc.auto_generate_draft(conv, peer, automation_mode="auto_ai")
         first_call_count = mock_bus.publish.call_count
         with patch(self._BUS_PATCH, return_value=mock_bus):
-            result = svc.auto_generate_draft(conv, "第二条消息", automation_mode="auto_ai")
+            result = svc.auto_generate_draft(conv, peer, automation_mode="auto_ai")
         assert result is None
         assert mock_bus.publish.call_count == first_call_count
 

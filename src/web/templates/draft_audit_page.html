@@ -1,5 +1,5 @@
 {% extends "workspace_base.html" %}
-{% block title %}草稿审计日志{% endblock %}
+{% block title %}{{ (i18n or {}).get('da_s001', "草稿审计日志") }}{% endblock %}
 {% block head %}
 <style>
   .da-wrap{height:100%;overflow-y:auto;background:#f7f8fa;padding:18px;}
@@ -28,42 +28,42 @@
 {% block content %}
 <div class="da-wrap">
   <div class="da-header">
-    <h2 style="margin:0;font-size:18px;">🔍 草稿审计日志</h2>
-    <a href="/workspace/drafts" style="font-size:13px;color:#2563eb;text-decoration:none;">← 返回草稿工作台</a>
+    <h2 style="margin:0;font-size:18px;">🔍 {{ (i18n or {}).get('da_s001', "草稿审计日志") }}</h2>
+    <a href="/workspace/drafts" style="font-size:13px;color:#2563eb;text-decoration:none;">← {{ (i18n or {}).get('da_s002', "返回草稿工作台") }}</a>
   </div>
   <div class="da-filters">
     <select id="f-days" onchange="load()">
-      <option value="7">近 7 天</option>
-      <option value="30">近 30 天</option>
-      <option value="90">近 90 天</option>
+      <option value="7">{{ (i18n or {}).get('analytics_period_7d', "近 7 天") }}</option>
+      <option value="30">{{ (i18n or {}).get('analytics_period_30d', "近 30 天") }}</option>
+      <option value="90">{{ (i18n or {}).get('ap_s020', "近 90 天") }}</option>
     </select>
-    <input id="f-draft" placeholder="草稿 ID（可选）" style="width:220px;" oninput="debounce()">
-    <input id="f-agent" placeholder="坐席 ID（可选）" style="width:180px;" oninput="debounce()">
+    <input id="f-draft" placeholder="{{ (i18n or {}).get('da_s003', '草稿 ID（可选）') }}" style="width:220px;" oninput="debounce()">
+    <input id="f-agent" placeholder="{{ (i18n or {}).get('da_s004', '坐席 ID（可选）') }}" style="width:180px;" oninput="debounce()">
     <select id="f-action" onchange="load()">
-      <option value="">全部动作</option>
-      <option value="blocked">blocked（拦截）</option>
-      <option value="force_override">force_override（强制放行）</option>
-      <option value="autosend">autosend（自动发送）</option>
-      <option value="approved">approved（批准）</option>
-      <option value="rejected">rejected（拒绝）</option>
+      <option value="">{{ (i18n or {}).get('da_o_all', "全部动作") }}</option>
+      <option value="blocked">{{ (i18n or {}).get('da_o_blocked', "blocked（拦截）") }}</option>
+      <option value="force_override">{{ (i18n or {}).get('da_o_force', "force_override（强制放行）") }}</option>
+      <option value="autosend">{{ (i18n or {}).get('da_o_autosend', "autosend（自动发送）") }}</option>
+      <option value="approved">{{ (i18n or {}).get('da_o_approved', "approved（批准）") }}</option>
+      <option value="rejected">{{ (i18n or {}).get('da_o_rejected', "rejected（拒绝）") }}</option>
     </select>
     <span id="da-count" style="font-size:12px;color:#94a3b8;"></span>
   </div>
   <table class="da-table">
     <thead>
       <tr>
-        <th style="width:110px;">时间</th>
-        <th style="width:80px;">动作</th>
-        <th style="width:60px;">等级</th>
-        <th style="width:100px;">坐席</th>
-        <th>草稿 ID</th>
-        <th>会话</th>
-        <th>风险等级</th>
-        <th>原因</th>
+        <th style="width:110px;">{{ (i18n or {}).get('time', "时间") }}</th>
+        <th style="width:80px;">{{ (i18n or {}).get('da_s005', "动作") }}</th>
+        <th style="width:60px;">{{ (i18n or {}).get('ap_s023', "等级") }}</th>
+        <th style="width:100px;">{{ (i18n or {}).get('dash.col.agent', "坐席") }}</th>
+        <th>{{ (i18n or {}).get('draft.sse.draft_word', "草稿") }} ID</th>
+        <th>{{ (i18n or {}).get('dash.ws.col_convs', "会话") }}</th>
+        <th>{{ (i18n or {}).get('ap_s087', "风险等级") }}</th>
+        <th>{{ (i18n or {}).get('da_s006', "原因") }}</th>
       </tr>
     </thead>
     <tbody id="da-body">
-      <tr><td colspan="8" class="da-loading">加载中…</td></tr>
+      <tr><td colspan="8" class="da-loading">{{ (i18n or {}).get('dash.loading', "加载中…") }}</td></tr>
     </tbody>
   </table>
 </div>
@@ -74,9 +74,8 @@ function debounce(){ clearTimeout(_timer); _timer=setTimeout(load, 400); }
 window.debounce=debounce;
 function fmtTs(ts){
   if(!ts) return '';
-  var d=new Date(ts*1000);
-  return d.toLocaleDateString('zh-CN',{month:'2-digit',day:'2-digit'})
-    +' '+d.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'});
+  return window.wsFmtDate(ts,{month:'2-digit',day:'2-digit'})
+    +' '+window.wsFmtTime(ts,{hour:'2-digit',minute:'2-digit'});
 }
 function esc(t){ var d=document.createElement('div'); d.textContent=String(t||''); return d.innerHTML; }
 var ACT_CLS={
@@ -84,9 +83,9 @@ var ACT_CLS={
   autosend:'act-autosend', approved:'act-approved', rejected:'act-rejected',
 };
 var ACT_LABEL={
-  blocked:'⛔ 拦截', force_override:'🔓 强制放行', autosend:'⚡ 自动发送',
-  approved:'✓ 批准', rejected:'✗ 拒绝', edit_send:'✏ 编辑发送',
-  cancel:'↩ 取消',
+  blocked:'⛔ '+window.T('aq_js004'), force_override:'🔓 '+window.T('aq_js003'), autosend:'⚡ '+window.T('inbox.autolog.autosend'),
+  approved:'✓ '+window.T('dash.mp.approved'), rejected:'✗ '+window.T('dash.mp.rejected'), edit_send:'✏ '+window.T('ap_s007'),
+  cancel:'↩ '+window.T('inbox.autolog.cancelled'),
 };
 function load(){
   var days=document.getElementById('f-days').value||'7';
@@ -96,19 +95,19 @@ function load(){
   var url='/api/drafts/audit?days='+encodeURIComponent(days)+'&limit=300';
   if(draft) url+='&draft_id='+encodeURIComponent(draft);
   if(agent) url+='&agent_id='+encodeURIComponent(agent);
-  document.getElementById('da-body').innerHTML='<tr><td colspan="8" class="da-loading">加载中…</td></tr>';
+  document.getElementById('da-body').innerHTML='<tr><td colspan="8" class="da-loading">'+window.T('dash.loading')+'</td></tr>';
   fetch(url).then(function(r){return r.json();}).then(function(d){
     if(!d||!d.ok){
-      document.getElementById('da-body').innerHTML='<tr><td colspan="8" class="da-empty">加载失败（需要主管权限）</td></tr>';
+      document.getElementById('da-body').innerHTML='<tr><td colspan="8" class="da-empty">'+window.T('ap_js_006')+'</td></tr>';
       return;
     }
     var items=(d.items||[]).filter(function(it){
       if(!action) return true;
       return (it.action||'')==action;
     });
-    document.getElementById('da-count').textContent='共 '+items.length+' 条记录';
+    document.getElementById('da-count').textContent=window.Tf('da_tf_count',{n:items.length});
     if(!items.length){
-      document.getElementById('da-body').innerHTML='<tr><td colspan="8" class="da-empty">暂无记录</td></tr>';
+      document.getElementById('da-body').innerHTML='<tr><td colspan="8" class="da-empty">'+window.T('ln_js_039')+'</td></tr>';
       return;
     }
     document.getElementById('da-body').innerHTML=items.map(function(it){
@@ -128,7 +127,7 @@ function load(){
         +'</tr>';
     }).join('');
   }).catch(function(){
-    document.getElementById('da-body').innerHTML='<tr><td colspan="8" class="da-empty">网络错误</td></tr>';
+    document.getElementById('da-body').innerHTML='<tr><td colspan="8" class="da-empty">'+window.T('draft.net_err')+'</td></tr>';
   });
 }
 window.load=load;

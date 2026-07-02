@@ -1,5 +1,5 @@
 {% extends "workspace_base.html" %}
-{% block title %}渠道接入向导{% endblock %}
+{% block title %}{{ (i18n or {}).get('sw_s001', "渠道接入向导") }}{% endblock %}
 {% block head %}
 <style>
   /* 令牌驱动（继承 workspace_base 的 --tk-*），日/夜两版自动适配。 */
@@ -41,18 +41,18 @@
 {% endblock %}
 {% block content %}
 <div class="sw-wrap">
-  <a class="db-back" href="/workspace/dash" style="font-size:12px;color:var(--tk-brand);text-decoration:none;">← 返回今日概览</a>
+  <a class="db-back" href="/workspace/dash" style="font-size:12px;color:var(--tk-brand);text-decoration:none;">← {{ (i18n or {}).get('wr_s002', "返回今日概览") }}</a>
   <div class="sw-head">
-    <h2>渠道接入向导</h2>
-    <p>选择渠道 → 填入凭证（即时校验）→ 保存生效。凭证写入 <code>config.local.yaml</code>，不改动主配置注释。</p>
+    <h2>{{ (i18n or {}).get('sw_s001', "渠道接入向导") }}</h2>
+    <p>{{ (i18n or {}).get('sw_s002', "选择渠道 → 填入凭证（即时校验）→ 保存生效。凭证写入") }} <code>config.local.yaml</code>{{ (i18n or {}).get('sw_s003', "，不改动主配置注释。") }}</p>
   </div>
   <div class="sw-prog">
-    <span id="sw-prog-text">已就绪 0 / 0</span>
+    <span id="sw-prog-text">{{ (i18n or {}).get('sw_s006', "已就绪") }} 0 / 0</span>
     <div class="bar"><i id="sw-prog-bar" style="width:0"></i></div>
   </div>
   <div id="sw-list"></div>
   <div style="margin-top:18px;background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3);border-radius:12px;padding:14px 16px;font-size:13px;color:var(--tk-ok-ink);">
-    渠道接好后，别忘了给 AI 喂知识 → <a href="/workspace/kb-start" style="color:var(--tk-ok-ink);font-weight:700;">知识库冷启动（一键播种起步话术）</a>
+    {{ (i18n or {}).get('sw_s007', "渠道接好后，别忘了给 AI 喂知识") }} → <a href="/workspace/kb-start" style="color:var(--tk-ok-ink);font-weight:700;">{{ (i18n or {}).get('sw_s008', "知识库冷启动（一键播种起步话术）") }}</a>
   </div>
 </div>
 
@@ -60,16 +60,16 @@
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
 
 function badge(c){
-  if(c.ready) return '<span class="sw-badge b-ready">✓ 已就绪</span>';
-  if(c.configured) return '<span class="sw-badge b-conf">已填，待启用/登录</span>';
-  if(c.missing&&c.missing.length) return '<span class="sw-badge b-miss">缺 '+c.missing.length+' 项</span>';
-  return '<span class="sw-badge b-miss">未配置</span>';
+  if(c.ready) return '<span class="sw-badge b-ready">✓ '+window.T('sw_js_001')+'</span>';
+  if(c.configured) return '<span class="sw-badge b-conf">'+window.T('sw_js_002')+'</span>';
+  if(c.missing&&c.missing.length) return '<span class="sw-badge b-miss">'+window.Tf('sw_tf_miss',{n:c.missing.length})+'</span>';
+  return '<span class="sw-badge b-miss">'+window.T('dash.m.not_configured')+'</span>';
 }
 
 function fieldHtml(ch, f){
-  var req = f.required ? '<span class="req">*</span>' : '<span class="opt">（可选）</span>';
-  var cur = f.filled ? '<div class="cur">当前：'+esc(f.display)+'（留空则不变）</div>' : '';
-  var ph = f.filled ? '已填，留空保持不变' : (f.help||'');
+  var req = f.required ? '<span class="req">*</span>' : '<span class="opt">'+window.T('sw_js_opt')+'</span>';
+  var cur = f.filled ? '<div class="cur">'+window.Tf('sw_tf_cur',{v:esc(f.display)})+'</div>' : '';
+  var ph = f.filled ? window.T('sw_js_003') : (f.help||'');
   return '<div class="sw-field"><label>'+esc(f.label)+' '+req+'</label>'
     +'<input data-key="'+esc(f.key.split('.').pop())+'" type="'+(f.secret?'password':'text')+'" placeholder="'+esc(ph)+'">'
     +(f.help?'<div class="hint">'+esc(f.help)+'</div>':'')+cur+'</div>';
@@ -77,17 +77,17 @@ function fieldHtml(ch, f){
 
 function loginHint(ch){
   if(!ch.login_required) return '';
-  return '<div class="sw-login">填好凭证保存后，前往 <a href="/workspace">账号管理</a> 扫码 / 验证码登录该平台账号。</div>';
+  return '<div class="sw-login">'+window.T('sw_js_004')+' <a href="/workspace">'+window.T('inbox.nav.acct')+'</a> '+window.T('sw_js_005')+'</div>';
 }
 
 function bodyHtml(ch){
   var fields = (ch.fields||[]).map(function(f){return fieldHtml(ch,f);}).join('');
   if(!ch.fields||!ch.fields.length){
-    fields='<p style="font-size:13px;color:var(--tk-text-muted);margin:14px 0;">'+esc(ch.intro||'无需凭证，开启即用。')+'</p>';
+    fields='<p style="font-size:13px;color:var(--tk-text-muted);margin:14px 0;">'+esc(ch.intro||window.T('sw_js_006'))+'</p>';
   }
   return fields
     +'<div class="sw-actions">'
-    +'<button class="sw-btn primary" onclick="swSave(\''+ch.id+'\',this)">保存并启用</button>'
+    +'<button class="sw-btn primary" onclick="swSave(\''+ch.id+'\',this)">'+window.T('sw_js_007')+'</button>'
     +'<span class="sw-msg" id="sw-msg-'+ch.id+'"></span></div>'
     +'<div class="sw-issues" id="sw-iss-'+ch.id+'"></div>'
     +loginHint(ch);
@@ -104,7 +104,7 @@ function render(data){
       +'<div class="sw-body" id="sw-body-'+ch.id+'">'+bodyHtml(ch)+'</div></div>';
   }).join('');
   var r=data.ready_count||0, t=data.total||0;
-  document.getElementById('sw-prog-text').textContent='已就绪 '+r+' / '+t;
+  document.getElementById('sw-prog-text').textContent=window.Tf('sw_tf_ready',{r:r,t:t});
   document.getElementById('sw-prog-bar').style.width=(t?Math.round(r/t*100):0)+'%';
 }
 
@@ -120,18 +120,18 @@ function swSave(id, btn){
     if(i.value.trim()) vals[i.getAttribute('data-key')]=i.value.trim();
   });
   var msg=document.getElementById('sw-msg-'+id);
-  btn.disabled=true; msg.className='sw-msg'; msg.textContent='保存中…';
+  btn.disabled=true; msg.className='sw-msg'; msg.textContent=window.T('ov_js_saving');
   fetch('/api/setup/channels/'+id,{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({values:vals})}).then(function(r){return r.json();}).then(function(d){
     btn.disabled=false;
-    if(!d.ok){ msg.className='sw-msg err'; msg.textContent=d.detail||'保存失败'; return; }
-    msg.className='sw-msg ok'; msg.textContent='已保存生效';
+    if(!d.ok){ msg.className='sw-msg err'; msg.textContent=d.detail||window.T('ov_js_save_fail'); return; }
+    msg.className='sw-msg ok'; msg.textContent=window.T('sw_js_008');
     var iss=document.getElementById('sw-iss-'+id);
     iss.innerHTML=(d.issues||[]).map(function(i){
       return '<div class="sw-issue '+(i.severity==='error'?'error':'')+'"><b>['+esc(i.severity)+']</b> '+esc(i.message)+'</div>';
     }).join('');
     load(true);  // 刷新徽章/进度
-  }).catch(function(){ btn.disabled=false; msg.className='sw-msg err'; msg.textContent='网络错误'; });
+  }).catch(function(){ btn.disabled=false; msg.className='sw-msg err'; msg.textContent=window.T('draft.net_err'); });
 }
 
 function load(keepOpen){

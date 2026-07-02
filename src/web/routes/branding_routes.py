@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import Request
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ def register_branding_routes(app, *, api_auth, config_manager=None) -> None:
     async def api_admin_branding_save(request: Request):
         api_auth(request)
         if config_manager is None:
-            return {"ok": False, "detail": "config_manager 不可用"}
+            return {"ok": False, "detail": tr(request, "err.svc.config_manager_not_ready")}
         try:
             body = await request.json()
         except Exception:

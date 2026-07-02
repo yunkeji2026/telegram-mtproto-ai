@@ -38,6 +38,7 @@ from src.web.routes.unified_inbox_services import (
     _resolve_conv_engine,
     _resolve_conv_language,
 )
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -82,9 +83,9 @@ def register_send_routes(app, *, api_auth, page_auth) -> None:
         chat_key = str(body.get("chat_key") or "")
         text = str(body.get("text") or "").strip()
         if not chat_key or not text:
-            raise HTTPException(400, "chat_key 和 text 不能为空")
+            raise HTTPException(400, tr(request, "err.inbox.chat_text_empty"))
         if _account_removed(platform, account_id):
-            raise HTTPException(409, "该账号已从系统移除，仅可查看历史记录，无法发送")
+            raise HTTPException(409, tr(request, "err.inbox.account_removed"))
 
         # —— 发送前翻译（outbound 闭环）：默认关闭，显式 target_lang / "auto" 才触发 ——
         original_text = text
@@ -225,20 +226,20 @@ def register_send_routes(app, *, api_auth, page_auth) -> None:
         caption = str(form.get("caption") or "")
         upload = form.get("file")
         if not chat_key or upload is None or not getattr(upload, "filename", ""):
-            raise HTTPException(400, "file 和 chat_key 不能为空")
+            raise HTTPException(400, tr(request, "err.inbox.file_chat_empty"))
         if _account_removed(platform, account_id):
-            raise HTTPException(409, "该账号已从系统移除，仅可查看历史记录，无法发送")
+            raise HTTPException(409, tr(request, "err.inbox.account_removed"))
 
         from src.integrations.account_orchestrator import get_orchestrator
         orch = get_orchestrator()
         if not orch.owns_media(platform, account_id):
-            raise HTTPException(501, "该账号不支持从收件箱发送媒体（需 protocol 多开且在线）")
+            raise HTTPException(501, tr(request, "err.inbox.media_unsupported"))
 
         data = await upload.read()
         if not data:
-            raise HTTPException(400, "空文件")
+            raise HTTPException(400, tr(request, "err.inbox.empty_file"))
         if len(data) > 25 * 1024 * 1024:
-            raise HTTPException(413, "文件过大（上限 25MB）")
+            raise HTTPException(413, tr(request, "err.inbox.file_too_large"))
 
         from src.integrations.protocol_bridge import save_outbound_media
         local, url, mtype = save_outbound_media(
@@ -249,7 +250,7 @@ def register_send_routes(app, *, api_auth, page_auth) -> None:
                 platform, account_id, chat_key,
                 media_path=local, media_url=url, media_type=mtype, caption=caption)
         except Exception as ex:  # noqa: BLE001
-            raise HTTPException(502, f"媒体发送失败: {ex}")
+            raise HTTPException(502, tr(request, "err.inbox.media_send_failed", err=ex))
         cid = _conv_id(platform, account_id, chat_key)
         try:
             ibx = _inbox_store(request)
@@ -279,23 +280,26 @@ def register_send_routes(app, *, api_auth, page_auth) -> None:
         caption = str(body.get("caption") or "")
         cfg_override = body.get("voice_cfg_override")
         if not chat_key or not text:
-            raise HTTPException(400, "chat_key 和 text 不能为空")
+            raise HTTPException(400, tr(request, "err.inbox.chat_text_empty"))
         if len(text) > 1000:
-            raise HTTPException(400, "文本过长（语音上限 1000 字）")
+            raise HTTPException(400, tr(request, "err.inbox.text_too_long_voice"))
         if _account_removed(platform, account_id):
-            raise HTTPException(409, "该账号已从系统移除，仅可查看历史记录，无法发送")
+            raise HTTPException(409, tr(request, "err.inbox.account_removed"))
 
         from src.integrations.account_orchestrator import get_orchestrator
         orch = get_orchestrator()
         if not orch.owns_media(platform, account_id):
-            raise HTTPException(501, "该账号不支持从收件箱发送语音（需 protocol 多开且在线）")
+            raise HTTPException(501, tr(request, "err.inbox.voice_unsupported"))
 
         # 解析语音配置（含声音克隆 voice_profile），允许调用方临时覆盖
         cm = getattr(request.app.state, "config_manager", None)
         raw_cfg = (getattr(cm, "config", None) or {}) if cm else {}
-        from src.ai.persona_voice import resolve_voice_cfg_for_contact
-        voice_cfg = resolve_voice_cfg_for_contact(
-            persona_id, raw_cfg, contact_key=chat_key or None)
+        from src.ai.persona_voice import resolve_effective_voice_context
+        voice_ctx = resolve_effective_voice_context(
+            raw_cfg, persona_id=persona_id, chat_key=chat_key or None,
+            contact_key=chat_key or None, platform=platform,
+            account_id=account_id, text=text)
+        voice_cfg = voice_ctx.get("voice_cfg") or {}
         if isinstance(cfg_override, dict):
             voice_cfg.update({k: v for k, v in cfg_override.items() if v not in (None, "")})
         voice_cfg["enabled"] = True
@@ -306,20 +310,16 @@ def register_send_routes(app, *, api_auth, page_auth) -> None:
         out_dir = _Path(tempfile.gettempdir()) / "unified_voice_send"
         voice_cfg["out_dir"] = str(out_dir)
         from src.ai.tts_pipeline import TTSPipeline
-        from src.ai.persona_voice import resolve_emotion_for_send
         try:
             tts = TTSPipeline(voice_cfg)
-            # P4：情感层（默认关）。开启后按关系阶段/文本线索派生情绪。
-            _emotion = resolve_emotion_for_send(
-                voice_cfg, text, platform=platform,
-                account_id=account_id, chat_key=chat_key or None)
             result = await tts.synthesize(
-                text, timeout_sec=45.0, emotion=_emotion)
+                text, timeout_sec=45.0, emotion=voice_ctx.get("emotion"))
         except Exception as ex:  # noqa: BLE001
-            raise HTTPException(502, f"语音合成失败: {ex}")
+            raise HTTPException(502, tr(request, "err.inbox.tts_failed", err=ex))
         if not result.ok or not result.audio_path:
             return {"ok": False, "reason": result.error or "tts_failed",
-                    "message": f"语音合成失败：{result.error or 'unknown'}"}
+                    "message": tr(request, "err.inbox.tts_failed",
+                                  err=result.error or "unknown")}
 
         # 转 OGG/Opus，使其在 Telegram/WhatsApp 呈现为"语音消息"（ffmpeg 缺失则原样发）
         audio_path = result.audio_path
@@ -339,7 +339,7 @@ def register_send_routes(app, *, api_auth, page_auth) -> None:
             local, url, _mt = save_outbound_media(
                 platform, account_id, os.path.basename(audio_path), data)
         except Exception as ex:  # noqa: BLE001
-            raise HTTPException(502, f"语音落盘失败: {ex}")
+            raise HTTPException(502, tr(request, "err.inbox.voice_save_failed", err=ex))
         finally:
             try:
                 os.remove(audio_path)
@@ -353,7 +353,7 @@ def register_send_routes(app, *, api_auth, page_auth) -> None:
                 media_path=local, media_url=url, media_type="voice", caption=caption,
                 inbox_text=text)
         except Exception as ex:  # noqa: BLE001
-            raise HTTPException(502, f"语音发送失败: {ex}")
+            raise HTTPException(502, tr(request, "err.inbox.voice_send_failed", err=ex))
         cid = _conv_id(platform, account_id, chat_key)
         try:
             ibx = _inbox_store(request)
@@ -363,11 +363,21 @@ def register_send_routes(app, *, api_auth, page_auth) -> None:
                     agent_name=_send_agent.get("display_name", ""))
         except Exception:
             logger.debug("record_agent_send(voice) 失败", exc_info=True)
+        _emotion = voice_ctx.get("emotion")
+        voice_meta = {
+            "persona_id": voice_ctx.get("persona_id") or "",
+            "persona_source": voice_ctx.get("persona_source") or "",
+            "provider": getattr(result, "provider", ""),
+            "voice": getattr(result, "voice", ""),
+            "emotion": getattr(_emotion, "emotion", "") if _emotion else "",
+            "fallback_from": (getattr(result, "extra", {}) or {}).get("fallback_from", ""),
+        }
         return {
             "ok": True, "result": res, "media_ref": url, "media_type": "voice",
             "duration_sec": getattr(result, "duration_sec", -1.0),
             "provider": getattr(result, "provider", ""),
             "voice": getattr(result, "voice", ""),
+            "voice_meta": voice_meta,
         }
 
     @app.get("/api/unified-inbox/send-caps")

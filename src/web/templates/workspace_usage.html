@@ -1,5 +1,5 @@
 {% extends "workspace_base.html" %}
-{% block title %}用量计量{% endblock %}
+{% block title %}{{ (i18n or {}).get('wu_s001', "用量计量") }}{% endblock %}
 {% block head %}
 <style>
   .ug-wrap{height:100%;overflow-y:auto;background:#f7f8fa;padding:18px;max-width:900px;margin:0 auto;}
@@ -32,12 +32,12 @@
 {% endblock %}
 {% block content %}
 <div class="ug-wrap">
-  <a class="ug-back" href="/workspace/dash">← 返回今日概览</a>
+  <a class="ug-back" href="/workspace/dash">← {{ (i18n or {}).get('wr_s002', "返回今日概览") }}</a>
   <div class="ug-head">
-    <h2>用量计量</h2>
+    <h2>{{ (i18n or {}).get('wu_s001', "用量计量") }}</h2>
     <div style="display:flex;gap:8px;">
-      <span class="ug-pill" data-days="7" onclick="ugDays(7,this)">近 7 天</span>
-      <span class="ug-pill active" data-days="30" onclick="ugDays(30,this)">近 30 天</span>
+      <span class="ug-pill" data-days="7" onclick="ugDays(7,this)">{{ (i18n or {}).get('analytics_period_7d', "近 7 天") }}</span>
+      <span class="ug-pill active" data-days="30" onclick="ugDays(30,this)">{{ (i18n or {}).get('analytics_period_30d', "近 30 天") }}</span>
     </div>
   </div>
 
@@ -51,54 +51,54 @@
   </div>
 
   <div id="ug-empty" style="display:none;color:#94a3b8;font-size:14px;padding:40px;text-align:center;">
-    暂无用量数据（接入渠道并开始收发消息后将逐步积累）。
+    {{ (i18n or {}).get('wu_s002', "暂无用量数据（接入渠道并开始收发消息后将逐步积累）。") }}
   </div>
 
   <div id="ug-body" style="display:none;">
     <div class="ug-grid" id="ug-cards"></div>
     <div class="ug-sec">
-      <h3>每日用量趋势</h3>
+      <h3>{{ (i18n or {}).get('wu_s003', "每日用量趋势") }}</h3>
       <div class="ug-spark" id="ug-spark"></div>
       <div class="ug-legend">
-        <span><span class="ug-dot" style="background:#93c5fd;"></span>消息量</span>
-        <span><span class="ug-dot" style="background:#2563eb;"></span>AI 调用数</span>
+        <span><span class="ug-dot" style="background:#93c5fd;"></span>{{ (i18n or {}).get('wu_s004', "消息量") }}</span>
+        <span><span class="ug-dot" style="background:#2563eb;"></span>AI {{ (i18n or {}).get('wu_s005', "调用数") }}</span>
       </div>
     </div>
     <div style="font-size:11px;color:#94a3b8;text-align:center;">
-      口径：消息量=收发消息条数；AI 调用数=生成的 AI 草稿数；活跃坐席=窗口内有处置记录的去重坐席数。
+      {{ (i18n or {}).get('wu_s006', "口径：消息量") }}={{ (i18n or {}).get('wu_s007', "收发消息条数；AI 调用数") }}={{ (i18n or {}).get('wu_s008', "生成的 AI 草稿数；活跃坐席") }}={{ (i18n or {}).get('wu_s009', "窗口内有处置记录的去重坐席数。") }}
     </div>
   </div>
 
   <!-- C2-1 计费对账 -->
   <div class="ug-sec" style="margin-top:18px;">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
-      <h3 style="margin:0;">计费对账单</h3>
+      <h3 style="margin:0;">{{ (i18n or {}).get('wu_s010', "计费对账单") }}</h3>
       <div style="display:flex;align-items:center;gap:8px;">
         <input type="month" id="bl-month" style="font-size:13px;padding:4px 8px;border:1px solid #d1d5db;border-radius:8px;">
-        <button class="ug-pill" onclick="blLoad()">生成</button>
-        <button class="ug-pill" onclick="blCsv()" style="background:#2563eb;color:#fff;border-color:#2563eb;">导出 CSV</button>
+        <button class="ug-pill" onclick="blLoad()">{{ (i18n or {}).get('as_js046', "生成") }}</button>
+        <button class="ug-pill" onclick="blCsv()" style="background:#2563eb;color:#fff;border-color:#2563eb;">{{ (i18n or {}).get('export', "导出") }} CSV</button>
       </div>
     </div>
     <div id="bl-meta" style="font-size:12px;color:#64748b;margin-bottom:10px;"></div>
     <table id="bl-table" style="width:100%;border-collapse:collapse;font-size:13px;display:none;">
       <thead><tr style="text-align:left;color:#64748b;border-bottom:1px solid #e5e7eb;">
-        <th style="padding:6px 4px;">项目</th><th style="padding:6px 4px;text-align:right;">数量</th></tr></thead>
+        <th style="padding:6px 4px;">{{ (i18n or {}).get('mo_s009', "项目") }}</th><th style="padding:6px 4px;text-align:right;">{{ (i18n or {}).get('wu_s011', "数量") }}</th></tr></thead>
       <tbody id="bl-rows"></tbody>
     </table>
     <div id="bl-charges" style="margin-top:14px;display:none;">
-      <div style="font-size:13px;color:#374151;font-weight:700;margin-bottom:6px;">应收金额</div>
+      <div style="font-size:13px;color:#374151;font-weight:700;margin-bottom:6px;">{{ (i18n or {}).get('wu_s012', "应收金额") }}</div>
       <table style="width:100%;border-collapse:collapse;font-size:13px;">
         <tbody id="bl-charge-rows"></tbody>
       </table>
       <div id="bl-total" style="text-align:right;font-size:16px;font-weight:800;color:#0f172a;margin-top:8px;"></div>
     </div>
-    <div id="bl-empty" style="color:#94a3b8;font-size:13px;padding:14px 4px;display:none;">该账期暂无用量数据。</div>
+    <div id="bl-empty" style="color:#94a3b8;font-size:13px;padding:14px 4px;display:none;">{{ (i18n or {}).get('wu_s013', "该账期暂无用量数据。") }}</div>
   </div>
 </div>
 <script>
 var UG_DAYS=30;
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-function planName(p){return {community:'社区版',basic:'基础版',pro:'专业版',flagship:'旗舰版'}[p]||p||'—';}
+function planName(p){return {community:window.T('db_js_007'),basic:window.T('db_js_008'),pro:window.T('db_js_009'),flagship:window.T('db_js_010')}[p]||p||'—';}
 
 function ugDays(d,el){
   UG_DAYS=d;
@@ -109,10 +109,10 @@ function ugDays(d,el){
 }
 
 function deltaHtml(v,suffix){
-  if(v==null) return '<span class="d flat">— 无环比</span>';
+  if(v==null) return '<span class="d flat">— '+window.T('wu_js001')+'</span>';
   var cls=v>0?'up':(v<0?'down':'flat');
   var arrow=v>0?'▲':(v<0?'▼':'—');
-  return '<span class="d '+cls+'">'+arrow+' '+Math.abs(v)+(suffix||'%')+' 环比</span>';
+  return '<span class="d '+cls+'">'+arrow+' '+Math.abs(v)+(suffix||'%')+' '+window.T('as_js039')+'</span>';
 }
 
 function renderLicense(lic,quota){
@@ -120,23 +120,23 @@ function renderLicense(lic,quota){
   el.style.display='flex';
   var lvl=(quota&&quota.level)||'ok';
   el.className='ug-lic '+(lvl==='over'?'over':(lvl==='warn'?'warn':'ok'));
-  document.getElementById('ug-lic-title').textContent=planName(lic.plan)+(lic.state==='unlicensed'?'（社区模式）':'');
+  document.getElementById('ug-lic-title').textContent=planName(lic.plan)+(lic.state==='unlicensed'?window.T('wu_js002'):'');
   document.getElementById('ug-lic-sub').textContent=(quota&&quota.text)||'';
   var b=document.getElementById('ug-lic-badge');
-  b.textContent=lvl==='over'?'超额':(lvl==='warn'?'接近上限':'正常');
+  b.textContent=lvl==='over'?window.T('wu_js003'):(lvl==='warn'?window.T('mo_js027'):window.T('db_js_020'));
 }
 
 function renderCards(u,cmp,mq){
   var cards=[
-    {v:u.messages_total, l:'消息总量', d:deltaHtml(cmp.messages_delta_pct)},
-    {v:u.ai_calls, l:'AI 调用数', d:deltaHtml(cmp.ai_calls_delta_pct)},
-    {v:u.ai_sent, l:'AI 自动发送', d:''},
-    {v:u.active_agents, l:'活跃坐席', d:''}
+    {v:u.messages_total, l:window.T('wu_js004'), d:deltaHtml(cmp.messages_delta_pct)},
+    {v:u.ai_calls, l:'AI '+window.T('wu_s005'), d:deltaHtml(cmp.ai_calls_delta_pct)},
+    {v:u.ai_sent, l:'AI '+window.T('inbox.autolog.autosend'), d:''},
+    {v:u.active_agents, l:window.T('ap_s004'), d:''}
   ];
   // K：月度消息配额卡片（included>0 才显示；按 level 上色）
   if(mq && mq.included>0){
     var c=mq.level==='over'?'#dc2626':(mq.level==='warn'?'#d97706':'#16a34a');
-    cards.push({v:mq.used+'/'+mq.included, l:'本月消息配额',
+    cards.push({v:mq.used+'/'+mq.included, l:window.T('wu_js005'),
       d:'<div style="font-size:11px;color:'+c+';">'+esc(mq.text||'')+'</div>'});
   }
   document.getElementById('ug-cards').innerHTML=cards.map(function(c){
@@ -146,13 +146,13 @@ function renderCards(u,cmp,mq){
 
 function renderSpark(trend){
   var el=document.getElementById('ug-spark'); if(!el) return;
-  if(!trend||!trend.length){ el.innerHTML='<span style="color:#94a3b8;font-size:12px;">暂无趋势</span>'; return; }
+  if(!trend||!trend.length){ el.innerHTML='<span style="color:#94a3b8;font-size:12px;">'+window.T('wu_js006')+'</span>'; return; }
   var max=1;
   trend.forEach(function(t){ max=Math.max(max,t.messages||0,t.ai_calls||0); });
   el.innerHTML=trend.map(function(t){
     var mh=Math.round((t.messages||0)/max*80);
     var ah=Math.round((t.ai_calls||0)/max*80);
-    return '<div class="col" title="'+esc(t.day)+'：消息 '+(t.messages||0)+' / AI '+(t.ai_calls||0)+'">'
+    return '<div class="col" title="'+esc(window.Tf('wu_tf_spark', {day: t.day, m: t.messages||0, ai: t.ai_calls||0}))+'">'
       +'<i class="m" style="height:'+mh+'px;"></i><i class="a" style="height:'+ah+'px;"></i></div>';
   }).join('');
 }
@@ -182,10 +182,10 @@ function blLoad(){
   fetch('/api/workspace/billing?month='+encodeURIComponent(m)).then(function(r){return r.json();}).then(function(d){
     if(!d||!d.ok) return;
     var rec=d.reconcile||{};
-    var meta='账期 '+esc(d.period)+' · 套餐 '+planName(d.plan)
-      +(d.customer?(' · 客户 '+esc(d.customer)):'')
-      +' · 席位 '+(d.seats||0)+'（活跃 '+(rec.active_agents||0)+'）';
-    if(rec.over_seats>0) meta+=' · ⚠ 超额 '+rec.over_seats;
+    var meta=window.Tf('wu_tf_meta1', {period: d.period, plan: planName(d.plan)})
+      +(d.customer?window.Tf('wu_tf_meta_cust', {c: d.customer}):'')
+      +window.Tf('wu_tf_meta_seats', {seats: d.seats||0, active: rec.active_agents||0});
+    if(rec.over_seats>0) meta+=window.Tf('wu_tf_meta_over', {n: rec.over_seats});
     document.getElementById('bl-meta').textContent=meta;
     var items=(d.available&&d.line_items)||[];
     var ch=d.charges||null;
@@ -207,7 +207,7 @@ function blLoad(){
         return '<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px 4px;color:#475569;">'+esc(ln.label)
           +'</td><td style="padding:6px 4px;text-align:right;">'+esc(ch.currency)+' '+(ln.amount||0)+'</td></tr>';
       }).join('');
-      document.getElementById('bl-total').textContent='合计 '+esc(ch.currency)+' '+(ch.total||0);
+      document.getElementById('bl-total').textContent=window.Tf('wu_tf_total', {cur: ch.currency, n: ch.total||0});
     } else {
       document.getElementById('bl-charges').style.display='none';
     }

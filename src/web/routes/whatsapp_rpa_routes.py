@@ -30,6 +30,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Response
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -192,7 +193,7 @@ def register_whatsapp_rpa_routes(
         if svc is None:
             return {"available": False, "history": [], "total": 0}
         if not chat_key:
-            raise HTTPException(400, "chat_key 不能为空")
+            raise HTTPException(400, tr(request, "err.rpa.chat_key_required"))
         history = svc.chat_history(chat_key=chat_key, limit=min(limit, 50), offset=offset)
         total = svc.total_turns_for_chat(chat_key=chat_key)
         return {
@@ -269,15 +270,15 @@ def register_whatsapp_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "WhatsApp RPA 服务未初始化")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_initialized", platform="WhatsApp"))
         body = await request.json()
         chat_key = (body.get("chat_key") or "").strip()
         peer_name = (body.get("peer_name") or "").strip()
         text = (body.get("text") or "").strip()
         if not chat_key or not peer_name or not text:
-            raise HTTPException(400, "chat_key / peer_name / text 均不能为空")
+            raise HTTPException(400, tr(request, "err.rpa.chat_peer_text_required"))
         if len(text) > 2000:
-            raise HTTPException(400, "消息过长（最大 2000 字）")
+            raise HTTPException(400, tr(request, "err.rpa.message_too_long"))
         item_id = svc.enqueue_send(chat_key=chat_key, peer_name=peer_name, text=text)
         return {"ok": True, "item_id": item_id, "status": "queued"}
 
@@ -322,7 +323,7 @@ def register_whatsapp_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "WhatsApp RPA 服务未初始化")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_initialized", platform="WhatsApp"))
         svc.cancel_send_queue_item(item_id)
         return {"ok": True, "item_id": item_id}
 
@@ -349,7 +350,7 @@ def register_whatsapp_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "WhatsApp RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="WhatsApp"))
         actor = getattr(request.state, "user", {}).get("username", "web")
         res = svc.ack_alert(alert_id, by=actor)
         if res is None:
@@ -361,7 +362,7 @@ def register_whatsapp_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "WhatsApp RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="WhatsApp"))
         actor = getattr(request.state, "user", {}).get("username", "web")
         n = svc.ack_all_alerts(by=actor)
         return {"ok": True, "acked": n}
@@ -447,11 +448,11 @@ def register_whatsapp_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "WhatsApp RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="WhatsApp"))
         body = await request.json()
         action = str(body.get("action", "reject"))
         if action not in {"approve", "reject", "send"}:
-            raise HTTPException(400, "action 需为 approve/reject/send")
+            raise HTTPException(400, tr(request, "err.rpa.action_invalid"))
         actor = getattr(request.state, "user", {}).get("username", "web")
         res = svc.resolve_pending(pending_id, action, by=actor)
         if res is None:
@@ -482,7 +483,7 @@ def register_whatsapp_rpa_routes(
         api_auth(request)
         svcs = _get_services(request)
         if not svcs:
-            raise HTTPException(503, "WhatsApp RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="WhatsApp"))
         body = {}
         try:
             body = await request.json()
@@ -501,7 +502,7 @@ def register_whatsapp_rpa_routes(
         api_auth(request)
         svcs = _get_services(request)
         if not svcs:
-            raise HTTPException(503, "WhatsApp RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="WhatsApp"))
         for svc in svcs:
             svc.resume()
         actor = getattr(request.state, "user", {}).get("username", "web")
@@ -514,7 +515,7 @@ def register_whatsapp_rpa_routes(
         api_auth(request)
         svcs = _get_services(request)
         if not svcs:
-            raise HTTPException(503, "WhatsApp RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="WhatsApp"))
         any_started = False
         for svc in svcs:
             if hasattr(svc, "is_running") and not svc.is_running:
@@ -532,7 +533,7 @@ def register_whatsapp_rpa_routes(
         api_auth(request)
         dc_svc = getattr(request.app.state, "device_coordinator_service", None)
         if dc_svc is None:
-            raise HTTPException(503, "DeviceCoordinatorService 未启动")
+            raise HTTPException(503, tr(request, "err.rpa.device_coordinator_not_started"))
         body = {}
         try:
             body = await request.json()
@@ -549,7 +550,7 @@ def register_whatsapp_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "WhatsApp RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="WhatsApp"))
         try:
             res = await svc._runner.maybe_auto_accept_contacts(max_accept=10)
         except Exception as e:
@@ -562,18 +563,18 @@ def register_whatsapp_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "WhatsApp RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="WhatsApp"))
         runner = svc._runner
         serial = runner._serial
         if not serial:
-            raise HTTPException(503, "未找到 ADB 设备（serial 未设置）")
+            raise HTTPException(503, tr(request, "err.rpa.no_adb_device"))
         try:
             from src.integrations.line_rpa import screen_ocr, adb_helpers as _adb
             png = await asyncio.to_thread(screen_ocr.capture_screen_png, serial, _adb)
         except Exception as e:
-            raise HTTPException(500, f"截屏失败: {e}")
+            raise HTTPException(500, tr(request, "err.rpa.screenshot_failed", err=e))
         if not png:
-            raise HTTPException(503, "截屏返回空（ADB 设备未就绪）")
+            raise HTTPException(503, tr(request, "err.rpa.screenshot_empty"))
         return Response(content=png, media_type="image/png")
 
     # ── 配置 ─────────────────────────────────────────────────────────────
@@ -613,7 +614,7 @@ def register_whatsapp_rpa_routes(
         }
         bad = [k for k in body.keys() if k not in ALLOWED]
         if bad:
-            raise HTTPException(400, f"不允许的字段: {bad}")
+            raise HTTPException(400, tr(request, "err.rpa.disallowed_fields", bad=bad))
 
         cfg = config_manager.config or {}
         wa = cfg.get("whatsapp_rpa") or {}
@@ -629,7 +630,7 @@ def register_whatsapp_rpa_routes(
         try:
             config_manager.save()
         except Exception as e:
-            raise HTTPException(500, f"配置保存失败: {e}")
+            raise HTTPException(500, tr(request, "err.set.save_config_failed", err=e))
 
         svc = _get_service(request)
         if svc:
@@ -645,11 +646,11 @@ def register_whatsapp_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "WhatsApp RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="WhatsApp"))
         try:
             return {"ok": True, **svc.proactive_status()}
         except Exception as e:
-            raise HTTPException(500, f"proactive_stats 失败: {e}")
+            raise HTTPException(500, tr(request, "err.rpa.op_failed", op="proactive_stats", err=e))
 
     @app.get("/api/whatsapp-rpa/proactive-metrics")
     async def api_wa_proactive_metrics(request: Request):
@@ -657,7 +658,7 @@ def register_whatsapp_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "WhatsApp RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="WhatsApp"))
         try:
             data = svc.proactive_status()
             return {
@@ -667,7 +668,7 @@ def register_whatsapp_rpa_routes(
                 "proactive_sent_today": data.get("sent_today", 0),
             }
         except Exception as e:
-            raise HTTPException(500, f"proactive_metrics 失败: {e}")
+            raise HTTPException(500, tr(request, "err.rpa.op_failed", op="proactive_metrics", err=e))
 
     # ── P15-c: 防骚扰/静默控制 ────────────────────────────────────────────
 
@@ -676,7 +677,7 @@ def register_whatsapp_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "WhatsApp RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="WhatsApp"))
         try:
             body = await request.json()
         except Exception:
@@ -688,7 +689,7 @@ def register_whatsapp_rpa_routes(
         try:
             svc.set_chat_quiet(chat_key, minutes)
         except Exception as e:
-            raise HTTPException(500, f"set_chat_quiet 失败: {e}")
+            raise HTTPException(500, tr(request, "err.rpa.op_failed", op="set_chat_quiet", err=e))
         return {"ok": True, "chat_key": chat_key, "minutes": minutes}
 
     @app.post("/api/whatsapp-rpa/chat-blacklist")
@@ -696,7 +697,7 @@ def register_whatsapp_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "WhatsApp RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="WhatsApp"))
         try:
             body = await request.json()
         except Exception:
@@ -709,7 +710,7 @@ def register_whatsapp_rpa_routes(
         try:
             svc.set_chat_blacklist(chat_key, flag)
         except Exception as e:
-            raise HTTPException(500, f"set_chat_blacklist 失败: {e}")
+            raise HTTPException(500, tr(request, "err.rpa.op_failed", op="set_chat_blacklist", err=e))
         return {"ok": True, "chat_key": chat_key, "blacklist": flag}
 
     # ── P4-A: 对话语言锁定 ────────────────────────────────────────────────
@@ -725,7 +726,7 @@ def register_whatsapp_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "WhatsApp RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="WhatsApp"))
         try:
             body = await request.json()
         except Exception:
@@ -738,17 +739,17 @@ def register_whatsapp_rpa_routes(
 
         from src.integrations.whatsapp_rpa.lang_detect import XTTS_SUPPORTED
         if lang and lang not in XTTS_SUPPORTED:
-            raise HTTPException(400, f"不支持的语言代码: {lang}。支持: {sorted(XTTS_SUPPORTED)}")
+            raise HTTPException(400, tr(request, "err.rpa.lang_unsupported", lang=lang, langs=sorted(XTTS_SUPPORTED)))
 
         store = getattr(svc, "_state_store", None) or getattr(
             getattr(svc, "_runner", None), "_state_store", None
         )
         if store is None:
-            raise HTTPException(503, "state_store 不可用")
+            raise HTTPException(503, tr(request, "err.rpa.state_store_unavailable"))
         try:
             store.upsert_chat_state(chat_key, forced_lang=lang or None)
         except Exception as e:
-            raise HTTPException(500, f"写入失败: {e}")
+            raise HTTPException(500, tr(request, "err.rpa.write_failed", err=e))
         # P10-D: 语言已变更—立即让 lang-dist 缓存失效
         try:
             from src.web.routes.rpa_overview_routes import invalidate_lang_dist_cache

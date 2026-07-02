@@ -35,6 +35,29 @@ SendCallback = Callable[[str, str, str, str], Awaitable[Dict[str, Any]]]
 # 出站翻译回调签名：async (to_deliver item dict) -> 应真正发出的文本（译文或回落原文）
 TranslateCallback = Callable[[Dict[str, Any]], Awaitable[str]]
 
+# 「永久性」发送错误标记：命中即判定该会话短期内无法投递（无群发言权/被拉黑/会话失效），
+# 会话进封禁冷却——避免每条新入站都再拟稿→resolve→投递→失败→刷 WARNING 的空转。
+# 仅收窄到确定性的平台硬错误（不含网络超时/限流等瞬时错误，那些应照常重试）。
+_PERMANENT_SEND_ERROR_MARKERS = (
+    "CHAT_WRITE_FORBIDDEN",       # 群/频道无发言权
+    "USER_IS_BLOCKED",           # 被对方拉黑
+    "INPUT_USER_DEACTIVATED",    # 对方账号注销
+    "USER_DEACTIVATED",
+    "PEER_ID_INVALID",           # 会话/对端失效
+    "CHAT_ADMIN_REQUIRED",
+    "CHANNEL_PRIVATE",
+    "USER_BANNED_IN_CHANNEL",
+    "HAVE RIGHTS TO SEND",       # "You don't have rights to send messages in this chat"
+)
+
+
+def _is_permanent_send_error(err: str) -> bool:
+    """判定投递错误是否为「短期内无法恢复」的平台硬错误（→ 会话封禁冷却）。"""
+    if not err:
+        return False
+    up = err.upper()
+    return any(marker in up for marker in _PERMANENT_SEND_ERROR_MARKERS)
+
 
 class AutosendWorker:
     """L2 草稿定时自动发后台任务。
@@ -85,6 +108,16 @@ class AutosendWorker:
         # 可注入 sleep（测试用）；生产用 asyncio.sleep
         self._sleep: Callable[[float], Awaitable[Any]] = sleep or asyncio.sleep
 
+        # 会话级发送封禁：投递遇「永久性」错误（群聊无发言权/被拉黑/会话失效）时，把该
+        # 会话列入冷却黑名单——冷却窗口内的 pending 草稿直接取消（不 resolve/投递/刷屏），
+        # 冷却到期自动重探（权限恢复即回正常）。0=关闭该机制（旧行为）。
+        try:
+            self._send_block_cooldown_sec: float = float(
+                cfg.get("send_block_cooldown_sec", 21600) or 0)  # 默认 6h
+        except (TypeError, ValueError):
+            self._send_block_cooldown_sec = 21600.0
+        self._blocked_conv_until: Dict[str, float] = {}
+
         # 运行时状态
         self._running = False
         self._current_interval = self._min_interval
@@ -116,11 +149,24 @@ class AutosendWorker:
         self.total_delivered: int = 0       # 真正投递到平台的条数
         self.total_deliver_errors: int = 0  # 投递失败条数（已 resolve 但平台发送失败）
         self.total_translated: int = 0      # 投递前出站翻译生效（译文≠原文）的条数
+        self.total_skipped_blocked: int = 0  # 因会话发送封禁而跳过取消的草稿数
 
     # ── 生命周期 ──────────────────────────────────────────────
 
     def stop(self) -> None:
         self._running = False
+
+    def _conv_send_blocked(self, conv: str) -> bool:
+        """该会话是否处于发送封禁冷却窗口内（到期自动清理并允许重探）。"""
+        if not conv or self._send_block_cooldown_sec <= 0:
+            return False
+        until = self._blocked_conv_until.get(conv, 0.0)
+        if until <= 0:
+            return False
+        if time.time() >= until:
+            self._blocked_conv_until.pop(conv, None)
+            return False
+        return True
 
     def _pick_deliver_delay(self) -> float:
         """按 deliver_delay 配置取随机拟人延迟（秒）。未配置/非法 → 0。"""
@@ -249,10 +295,29 @@ class AutosendWorker:
                 except Exception as exc:  # noqa: BLE001
                     self.total_deliver_errors += 1
                     self.last_error = f"deliver: {exc}"
-                    logger.warning(
-                        "[AutosendWorker] 投递失败 conv=%s platform=%s: %s",
-                        item.get("conversation_id", "?"), item.get("platform", "?"), exc,
-                    )
+                    _conv = str(item.get("conversation_id", "") or "?")
+                    _plat = item.get("platform", "?")
+                    # 永久性错误（无发言权/被拉黑/会话失效）→ 会话进封禁冷却；仅「首次进入
+                    # 封禁」打一条 WARNING，冷却窗口内的后续同类失败降级 debug（防刷屏）。
+                    if (self._send_block_cooldown_sec > 0
+                            and _conv != "?"
+                            and _is_permanent_send_error(str(exc))):
+                        _already = self._conv_send_blocked(_conv)
+                        self._blocked_conv_until[_conv] = (
+                            time.time() + self._send_block_cooldown_sec)
+                        if _already:
+                            logger.debug(
+                                "[AutosendWorker] 会话仍处发送封禁 conv=%s: %s", _conv, exc)
+                        else:
+                            logger.warning(
+                                "[AutosendWorker] 投递永久失败，暂停会话自动发 %.0fs "
+                                "conv=%s platform=%s: %s",
+                                self._send_block_cooldown_sec, _conv, _plat, exc)
+                    else:
+                        logger.warning(
+                            "[AutosendWorker] 投递失败 conv=%s platform=%s: %s",
+                            _conv, _plat, exc,
+                        )
                     # 写 autosend_failed 审计，让安全条/记录弹窗看见「自动发了但没送达」
                     try:
                         rec = getattr(self._svc, "record_autosend_failure", None)
@@ -325,6 +390,21 @@ class AutosendWorker:
         to_deliver: List[Dict[str, Any]] = []
         for d in l2:
             draft_id = d.get("draft_id", "")
+            _conv = str(d.get("conversation_id") or "")
+            # 会话处于发送封禁冷却 → 不 resolve/投递，直接取消该 pending 草稿（防堆积）。
+            # 冷却到期后新草稿会重新尝试（权限恢复即自动回正常）。
+            if self._send_callback is not None and self._conv_send_blocked(_conv):
+                try:
+                    _store = getattr(self._svc, "_store", None)
+                    if _store is not None and hasattr(_store, "update_draft_status"):
+                        _store.update_draft_status(
+                            draft_id, status="cancelled", decided_by="send_blocked")
+                except Exception:
+                    logger.debug(
+                        "[AutosendWorker] 取消封禁会话草稿失败 draft_id=%s", draft_id,
+                        exc_info=True)
+                self.total_skipped_blocked += 1
+                continue
             # 投递用文本优先取最终文本，回落草稿文本
             text = str(d.get("final_text") or d.get("draft_text") or "").strip()
             # 投递模式下，空正文草稿绝不 resolve：否则会被标记 approved/已发，却因
@@ -412,4 +492,8 @@ class AutosendWorker:
             "total_deliver_errors": self.total_deliver_errors,
             "translate_enabled": self._translate_callback is not None,  # 是否投递前出站翻译
             "total_translated": self.total_translated,
+            "total_skipped_blocked": self.total_skipped_blocked,  # 因会话发送封禁跳过取消数
+            "blocked_conversations": sum(
+                1 for c in list(self._blocked_conv_until) if self._conv_send_blocked(c)
+            ),  # 当前处于发送封禁冷却的会话数
         }

@@ -11,6 +11,7 @@ logger = logging.getLogger("ContextStore")
 
 _PERSIST_KEYS = frozenset({
     "user_id", "last_message", "last_reply", "last_reply_time",
+    "recent_replies",
     "reply_count", "stage", "topic", "current_intent",
     "gxp_pending_order_no", "gxp_pending_time", "gxp_pending_chat_id",
     "gxp_last_ask", "chat_id", "chat_title",

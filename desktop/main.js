@@ -1,12 +1,13 @@
 "use strict";
 
-const { app, BrowserWindow, ipcMain, session, clipboard, Menu, Notification, shell, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, session, clipboard, Menu, Notification, shell, dialog, nativeImage } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { spawn, exec } = require("child_process");
 const { chromeLikeUserAgent, isWhatsappUrl, needsChromeUa, urlNeedsChromeUa } = require("./webview-ua.js");
 const { fingerprintArg, accountIdFromPartition } = require("./inject/fingerprint.js");
 const { createBackendManager } = require("./backend-launcher.js");
+const brandUtil = require("./brand-util.js");
 
 // D3：每账号确定性指纹缓存（account_id → fingerprint）。启动/运行时新增账号前拉取，
 // 供 session UA / Accept-Language / webview additionalArguments 注入，使多号内嵌互不关联。
@@ -32,6 +33,93 @@ function loadConfig() {
 }
 
 let config = loadConfig();
+
+// 内置默认品牌图标（copy-shared 落地）。窗口创建时用它作原生图标兜底，
+// 白标改回默认时也还原到它。
+const DEFAULT_BRAND_ICON = path.join(__dirname, "renderer", "brand", "boundless-mark-256.png");
+
+// 品牌信息统一形状：{ product, company, website, mark }（纯逻辑见 brand-util.js）。
+// 离线兜底：config.brand → copy-shared 落地的 renderer/brand/brand.json → 硬编码默认。
+function brandInfoLocal() {
+  let brandJson = null;
+  try {
+    brandJson = JSON.parse(
+      fs.readFileSync(path.join(__dirname, "renderer", "brand", "brand.json"), "utf-8"));
+  } catch (e) { /* 无 brand.json → 走硬编码兜底 */ }
+  return brandUtil.pickBrandLocal((config && config.brand) || {}, brandJson);
+}
+
+// 运行期白标：向后端拉实时生效品牌（settings 页改了即时反映到桌面壳），
+// 2s 超时 + 任何异常回落本地——绝不阻断桌面壳。
+async function fetchLiveBrand() {
+  const { base_url, token } = config.backend || {};
+  if (!base_url) return null;
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 2000);
+  try {
+    const r = await fetch(`${base_url}/api/admin/branding`, {
+      headers: { Authorization: `Bearer ${token || ""}` },
+      signal: ctl.signal,
+    });
+    if (!r.ok) return null;
+    return brandUtil.normalizeLiveBrand(await r.json());
+  } catch (e) {
+    return null; // 后端未起 / 超时 / 无授权 → 用本地兜底
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// 实时优先、本地兜底的统一入口（关于弹窗 / 图标用）。
+async function resolveBrand() {
+  return (await fetchLiveBrand()) || brandInfoLocal();
+}
+
+// macOS dock 图标运行期热替换（Win/Linux 无 app.dock，静默跳过）。
+function _setDockIcon(img) {
+  try {
+    if (process.platform === "darwin" && app.dock && img && !img.isEmpty()) {
+      app.dock.setIcon(img);
+    }
+  } catch (e) { /* dock 图标设置失败不影响使用 */ }
+}
+
+// 运行期把生效品牌 logo 同步成原生窗口/任务栏图标——settings 页改了 logo，
+// 桌面壳窗口 focus 时（节流后）重取并热替换，无需重开窗口即时生效。
+//   custom  : 白标自定义 logo（且与上次不同）→ 下载 + setIcon
+//   default : 白标改回默认（上次是自定义）→ 还原内置图标
+//   none    : 无变化 → 不动，避免无谓下载/闪烁
+// 默认无界 mark 在窗口创建时已用本地文件设过；任何失败都保留现图标、不阻断。
+async function applyLiveWindowBranding(win, { force = false } = {}) {
+  try {
+    if (!win || win.isDestroyed()) return;
+    const now = Date.now();
+    if (!force && !brandUtil.shouldCheckBrand(now, win._brandLastCheck)) return;
+    win._brandLastCheck = now;
+    const bi = await fetchLiveBrand();
+    if (!bi) return;
+    const act = brandUtil.resolveIconAction(bi.mark, win._brandMark);
+    if (act.action === "custom") {
+      const url = brandUtil.resolveBackendUrl((config.backend || {}).base_url, act.mark);
+      if (!url) return;
+      const r = await fetch(url);
+      if (!r.ok) return;
+      const img = nativeImage.createFromBuffer(Buffer.from(await r.arrayBuffer()));
+      if (!img.isEmpty() && !win.isDestroyed()) {
+        win.setIcon(img);
+        _setDockIcon(img);
+        win._brandMark = act.mark;
+      }
+    } else if (act.action === "default") {
+      if (fs.existsSync(DEFAULT_BRAND_ICON) && !win.isDestroyed()) {
+        const img = nativeImage.createFromPath(DEFAULT_BRAND_ICON);
+        win.setIcon(img);
+        _setDockIcon(img);
+        win._brandMark = null;
+      }
+    }
+  } catch (e) { /* 图标热替换失败不影响使用 */ }
+}
 
 // 后端 sidecar 生命周期：免手动起 Python。拉起前先探活（已在跑→复用），退出回收。
 const backendManager = createBackendManager({ app, spawn, exec, fs, fetch: global.fetch });
@@ -859,16 +947,26 @@ function bindWhatsappWebviewUa(wc) {
   wc.on("will-navigate", (_e, url) => maybeSet(url));
 }
 
+ipcMain.handle("desktop:set-title", (_e, title) => {
+  const w = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+  if (w && title) {
+    try { w.setTitle(String(title)); } catch (e) { /* ignore */ }
+  }
+  return { ok: true };
+});
+
 async function createWindow() {
   for (const acc of config.accounts || []) {
     await applyProxyForAccount(acc);
     await applyWhatsappSessionUa(acc);
   }
 
-  const win = new BrowserWindow({
+  // 原生窗口/任务栏图标兜底：内嵌 webview 报告的 page-favicon 不会传染给外层窗口，
+  // 故显式用 copy-shared 落地的品牌 mark，保证桌面壳始终是无界图标（缺文件则回落 Electron 默认）。
+  const winOpts = {
     width: 1280,
     height: 820,
-    title: "AI 客服桌面客户端（多平台）",
+    title: "智聊 · 桌面工作台",
     webPreferences: {
       preload: path.join(__dirname, "shell-preload.js"),
       contextIsolation: true,
@@ -876,9 +974,18 @@ async function createWindow() {
       sandbox: false,
       webviewTag: true,
     },
-  });
+  };
+  try {
+    if (fs.existsSync(DEFAULT_BRAND_ICON)) winOpts.icon = DEFAULT_BRAND_ICON;
+  } catch (e) { /* 图标缺失不阻断启动 */ }
+  const win = new BrowserWindow(winOpts);
 
-  win.webContents.on("did-finish-load", () => console.log("[diag] renderer loaded ok"));
+  win.webContents.on("did-finish-load", () => {
+    console.log("[diag] renderer loaded ok");
+    applyLiveWindowBranding(win, { force: true });
+  });
+  // 运行中改了 logo 无需重开窗口：切回桌面壳时（节流后）重取品牌热替换图标。
+  win.on("focus", () => applyLiveWindowBranding(win));
   win.webContents.on("did-fail-load", (_e, code, desc) =>
     console.log(`[diag] renderer load FAILED ${code} ${desc}`));
   win.webContents.on("render-process-gone", (_e, d) =>
@@ -954,17 +1061,83 @@ function buildChineseMenu() {
       submenu: [
         {
           label: "关于",
-          click: () => {
+          click: async () => {
             const w = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
-            if (w) w.webContents.executeJavaScript(
-              "alert('AI 客服桌面客户端（多平台）\\nTelegram / WhatsApp / Messenger / LINE · 统一收件箱 + 统一业务面板')"
-            );
+            const bi = await resolveBrand();
+            const ver = app.getVersion();
+            const detail =
+              `Telegram / WhatsApp / Messenger / LINE · 统一收件箱 + 业务助手\n\n` +
+              `版本 v${ver}  ·  Electron ${process.versions.electron}  ·  Chromium ${process.versions.chrome}\n` +
+              `${bi.company} · ${bi.website}`;
+            const res = await dialog.showMessageBox(w, {
+              type: "info",
+              title: `关于 ${bi.product}`,
+              message: `${bi.product} · 桌面工作台`,
+              detail,
+              buttons: ["访问官网", "关闭"],
+              defaultId: 1,
+              cancelId: 1,
+              noLink: true,
+            });
+            if (res.response === 0 && bi.website) {
+              shell.openExternal(bi.website).catch(() => {});
+            }
           },
+        },
+        {
+          label: "检查更新",
+          click: () => checkForUpdatesManual(
+            BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]),
         },
       ],
     },
   ];
   return Menu.buildFromTemplate(template);
+}
+
+/** 手动「检查更新」：dev 说明不检查；发布态调 electron-updater 并给出可读反馈。
+ *  与后台自动更新共用 autoDownload=true——发现新版即后台下载、下次重启生效。 */
+async function checkForUpdatesManual(win) {
+  const ver = app.getVersion();
+  if (!app.isPackaged) {
+    await dialog.showMessageBox(win, {
+      type: "info", title: "检查更新",
+      message: "当前为开发版", detail: `版本 v${ver}（开发模式不检查更新）`,
+      buttons: ["好的"], noLink: true,
+    });
+    return;
+  }
+  let autoUpdater;
+  try {
+    ({ autoUpdater } = require("electron-updater"));
+  } catch (e) {
+    await dialog.showMessageBox(win, {
+      type: "error", title: "检查更新", message: "更新组件不可用",
+      detail: String((e && e.message) || e), buttons: ["好的"], noLink: true,
+    });
+    return;
+  }
+  try {
+    autoUpdater.autoDownload = true;
+    const r = await autoUpdater.checkForUpdates();
+    const latest = r && r.updateInfo && r.updateInfo.version;
+    if (latest && latest !== ver) {
+      await dialog.showMessageBox(win, {
+        type: "info", title: "检查更新", message: `发现新版本 v${latest}`,
+        detail: "更新正在后台下载，下次重启自动生效。", buttons: ["好的"], noLink: true,
+      });
+    } else {
+      await dialog.showMessageBox(win, {
+        type: "info", title: "检查更新", message: "已是最新版本",
+        detail: `当前 v${ver}`, buttons: ["好的"], noLink: true,
+      });
+    }
+  } catch (e) {
+    await dialog.showMessageBox(win, {
+      type: "error", title: "检查更新", message: "检查更新失败",
+      detail: String((e && e.message) || e), buttons: ["好的"], noLink: true,
+    });
+  }
 }
 
 /** 自动更新（仅发布态；dev 跳过。失败不阻断启动）。需 package.json::build.publish 指向真实更新源。 */

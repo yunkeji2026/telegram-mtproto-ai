@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}导入 / 导出 · {{ site_name|default('华灵科技客户转化聊天系统') }}{% endblock %}
-{% block page_title %}导入 / 导出配置{% endblock %}
+{% block title %}{{ (i18n or {}).get('im_s001', "导入 / 导出") }} · {{ product_name|default((i18n or {}).get('brand.product', '智聊')) }}{% endblock %}
+{% block page_title %}{{ (i18n or {}).get('im_s002', "导入 / 导出配置") }}{% endblock %}
 {% block head %}
 <style>
 .dropzone{border:2px dashed var(--bd2);border-radius:var(--r-lg);padding:3rem 2rem;text-align:center;cursor:pointer;transition:all .25s;background:var(--input);position:relative;overflow:hidden}
@@ -57,13 +57,13 @@
 {% if ui_mode == 'simple' %}
 <div style="background:linear-gradient(135deg,rgba(245,158,11,.08),rgba(239,68,68,.06));border:1px solid rgba(245,158,11,.2);border-radius:10px;padding:.7rem 1rem;margin-bottom:.8rem;font-size:.82rem;color:var(--t2);display:flex;align-items:center;gap:.6rem">
   <span style="font-size:1.1rem;flex-shrink:0">🔒</span>
-  <div><strong style="color:var(--t)">管理员页面</strong> — 导入/导出为高级管理功能。<a href="/set_ui_mode?mode=full&next=/import" style="color:var(--p);font-weight:600">切换到完整模式</a>获得完整体验，或<a href="/cases" style="color:var(--p);font-weight:600">返回案例</a>。</div>
+  <div><strong style="color:var(--t)">{{ (i18n or {}).get('im_s003', "管理员页面") }}</strong> — {{ (i18n or {}).get('im_s004', "导入/导出为高级管理功能。") }}<a href="/set_ui_mode?mode=full&next=/import" style="color:var(--p);font-weight:600">{{ (i18n or {}).get('tp_s005', "切换到完整模式") }}</a>{{ (i18n or {}).get('im_s005', "获得完整体验，或") }}<a href="/cases" style="color:var(--p);font-weight:600">{{ (i18n or {}).get('logs_back_cases', "返回案例") }}</a>。</div>
 </div>
 {% endif %}
 
 {% if msg %}
-<div class="msg {{ 'msg-ok' if '成功' in msg or 'ok' in msg.lower() else 'msg-err' }} fa">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">{% if '成功' in msg or 'ok' in msg.lower() %}<polyline points="20 6 9 17 4 12"/>{% else %}<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>{% endif %}</svg>
+<div class="msg {{ 'msg-ok' if msg_ok|default(false) else 'msg-err' }} fa">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">{% if msg_ok|default(false) %}<polyline points="20 6 9 17 4 12"/>{% else %}<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>{% endif %}</svg>
   {{ msg }}
 </div>
 {% endif %}
@@ -72,35 +72,35 @@
 <div class="card fa">
   <h2>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-    导入配置
+    {{ (i18n or {}).get('import_page', "导入配置") }}
   </h2>
   <form method="post" action="/import" enctype="multipart/form-data" id="import-form">
     <!-- 导入模式选择 -->
-    <div style="font-size:.82rem;font-weight:700;color:var(--t2);margin-bottom:.5rem">导入模式</div>
+    <div style="font-size:.82rem;font-weight:700;color:var(--t2);margin-bottom:.5rem">{{ (i18n or {}).get('psn_import_mode', "导入模式") }}</div>
     <div class="mode-sel">
       <label class="mode-opt active" id="mode-overwrite-lbl" onclick="setMode('overwrite')">
         <input type="radio" name="mode" value="overwrite" checked>
         <div class="m-icon" style="background:linear-gradient(135deg,#ef4444,#dc2626)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M9 6V4h6v2"/></svg>
         </div>
-        <div class="m-title">覆盖模式</div>
-        <div class="m-desc">完全替换当前配置，导入文件内容取代一切。适合全量恢复。</div>
+        <div class="m-title">{{ (i18n or {}).get('im_s006', "覆盖模式") }}</div>
+        <div class="m-desc">{{ (i18n or {}).get('im_s007', "完全替换当前配置，导入文件内容取代一切。适合全量恢复。") }}</div>
       </label>
       <label class="mode-opt" id="mode-merge-lbl" onclick="setMode('merge')">
         <input type="radio" name="mode" value="merge">
         <div class="m-icon" style="background:linear-gradient(135deg,#10b981,#059669)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 009 9"/></svg>
         </div>
-        <div class="m-title">增量合并</div>
-        <div class="m-desc">只更新导入文件中存在的键，保留当前独有配置。适合部分更新。</div>
+        <div class="m-title">{{ (i18n or {}).get('im_s008', "增量合并") }}</div>
+        <div class="m-desc">{{ (i18n or {}).get('im_s009', "只更新导入文件中存在的键，保留当前独有配置。适合部分更新。") }}</div>
       </label>
     </div>
 
     <div class="dropzone" id="dropzone" onclick="document.getElementById('file-input').click()">
       <input type="file" id="file-input" name="file" accept=".zip" onchange="onFileSelect(this.files[0])">
       <div class="dz-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div>
-      <div class="dz-title">拖拽 ZIP 文件到此处，或点击选择</div>
-      <div class="dz-sub">支持通过「导出配置」生成的 .zip 打包文件</div>
+      <div class="dz-title">{{ (i18n or {}).get('im_s010', "拖拽 ZIP 文件到此处，或点击选择") }}</div>
+      <div class="dz-sub">{{ (i18n or {}).get('im_s011', "支持通过") }} "{{ (i18n or {}).get('im_s012', "导出配置") }}" {{ (i18n or {}).get('im_s013', "生成的 .zip 打包文件") }}</div>
     </div>
     <div class="file-preview" id="file-preview">
       <div class="file-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
@@ -112,15 +112,15 @@
     </div>
     <div class="progress-wrap" id="progress-wrap">
       <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
-      <div class="progress-txt" id="progress-txt">上传中…</div>
+      <div class="progress-txt" id="progress-txt">{{ (i18n or {}).get('tg_js_022', "上传中…") }}</div>
     </div>
     <div style="margin-top:1rem;display:flex;gap:.6rem;align-items:center">
       <button type="submit" class="btn btn-p" id="upload-btn" disabled>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-        <span id="import-btn-lbl">覆盖导入</span>
+        <span id="import-btn-lbl">{{ (i18n or {}).get('im_s014', "覆盖导入") }}</span>
       </button>
-      <button type="button" class="btn btn-s" onclick="clearFile()">取消</button>
-      <span style="font-size:.75rem;color:var(--t3);margin-left:.3rem">导入前系统自动创建备份快照</span>
+      <button type="button" class="btn btn-s" onclick="clearFile()">{{ (i18n or {}).get('ov_js_cancel', "取消") }}</button>
+      <span style="font-size:.75rem;color:var(--t3);margin-left:.3rem">{{ (i18n or {}).get('im_s015', "导入前系统自动创建备份快照") }}</span>
     </div>
   </form>
 </div>
@@ -129,7 +129,7 @@
 <div class="card fa fa2">
   <h2>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-    导出配置
+    {{ (i18n or {}).get('export_config', "导出配置") }}
   </h2>
   <div class="export-options">
     <form method="post" action="/export" style="contents">
@@ -137,8 +137,8 @@
         <div class="opt-icon" style="background:linear-gradient(135deg,#5b7cf6,#8b5cf6)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
         </div>
-        <div class="opt-name" data-help="YAML">YAML 格式</div>
-        <div class="opt-desc">完整配置文件，可直接部署</div>
+        <div class="opt-name" data-help="YAML">YAML {{ (i18n or {}).get('im_s016', "格式") }}</div>
+        <div class="opt-desc">{{ (i18n or {}).get('im_s017', "完整配置文件，可直接部署") }}</div>
       </button>
     </form>
     <form method="post" action="/export" style="contents">
@@ -146,8 +146,8 @@
         <div class="opt-icon" style="background:linear-gradient(135deg,#10b981,#059669)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8m-4-4v4"/><path d="M12 7l-2 4h4l-2 4"/></svg>
         </div>
-        <div class="opt-name" data-help="ZIP">ZIP 打包</div>
-        <div class="opt-desc">配置 + 话术模板全量打包</div>
+        <div class="opt-name" data-help="ZIP">ZIP {{ (i18n or {}).get('im_s018', "打包") }}</div>
+        <div class="opt-desc">{{ (i18n or {}).get('msg_js_1056', "配置") }} + {{ (i18n or {}).get('im_s019', "话术模板全量打包") }}</div>
       </button>
     </form>
     <form method="post" action="/export" style="contents">
@@ -155,8 +155,8 @@
         <div class="opt-icon" style="background:linear-gradient(135deg,#f59e0b,#d97706)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
         </div>
-        <div class="opt-name" data-help="JSON">JSON 格式</div>
-        <div class="opt-desc">结构化数据，便于程序处理</div>
+        <div class="opt-name" data-help="JSON">JSON {{ (i18n or {}).get('im_s016', "格式") }}</div>
+        <div class="opt-desc">{{ (i18n or {}).get('im_s020', "结构化数据，便于程序处理") }}</div>
       </button>
     </form>
   </div>
@@ -166,47 +166,47 @@
 <div class="card fa fa3">
   <h2>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8h1a4 4 0 010 8h-1"/><path d="M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
-    <span data-help="webhook">Webhook 变更通知</span>
+    <span data-help="webhook">Webhook {{ (i18n or {}).get('im_s021', "变更通知") }}</span>
   </h2>
-  <div id="wh-load" style="color:var(--t3);font-size:.83rem">加载中…</div>
+  <div id="wh-load" style="color:var(--t3);font-size:.83rem">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
   <div id="wh-form" style="display:none">
     <div class="f-grp" style="margin-bottom:.8rem">
-      <label class="f-lbl">推送地址（URL）</label>
+      <label class="f-lbl">{{ (i18n or {}).get('im_s022', "推送地址（URL）") }}</label>
       <input type="url" id="wh-url" placeholder="https://your-server.com/webhook" style="width:100%">
     </div>
     <div class="f-grp" style="margin-bottom:.8rem">
-      <label class="f-lbl" data-help="HMAC">签名密钥（可选，用于 HMAC-SHA256 验签）</label>
-      <input type="password" id="wh-secret" placeholder="留空则不签名">
+      <label class="f-lbl" data-help="HMAC">{{ (i18n or {}).get('im_s023', "签名密钥（可选，用于 HMAC-SHA256 验签）") }}</label>
+      <input type="password" id="wh-secret" placeholder="{{ (i18n or {}).get('im_s024', '留空则不签名') }}">
     </div>
     <div class="f-grp" style="margin-bottom:.8rem">
-      <label class="f-lbl">监听事件</label>
+      <label class="f-lbl">{{ (i18n or {}).get('im_s025', "监听事件") }}</label>
       <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.4rem">
         <label style="display:flex;align-items:center;gap:.35rem;font-size:.83rem;cursor:pointer">
-          <input type="checkbox" id="ev-config_change" value="config_change" checked style="accent-color:var(--p)"> 配置变更
+          <input type="checkbox" id="ev-config_change" value="config_change" checked style="accent-color:var(--p)"> {{ (i18n or {}).get('im_s026', "配置变更") }}
         </label>
         <label style="display:flex;align-items:center;gap:.35rem;font-size:.83rem;cursor:pointer">
-          <input type="checkbox" id="ev-rollback" value="rollback" style="accent-color:var(--p)"> 回滚操作
+          <input type="checkbox" id="ev-rollback" value="rollback" style="accent-color:var(--p)"> {{ (i18n or {}).get('im_s027', "回滚操作") }}
         </label>
         <label style="display:flex;align-items:center;gap:.35rem;font-size:.83rem;cursor:pointer">
-          <input type="checkbox" id="ev-import" value="import" style="accent-color:var(--p)"> 导入配置
+          <input type="checkbox" id="ev-import" value="import" style="accent-color:var(--p)"> {{ (i18n or {}).get('import_page', "导入配置") }}
         </label>
         <label style="display:flex;align-items:center;gap:.35rem;font-size:.83rem;cursor:pointer">
-          <input type="checkbox" id="ev-test" value="test" checked style="accent-color:var(--p)"> 测试推送
+          <input type="checkbox" id="ev-test" value="test" checked style="accent-color:var(--p)"> {{ (i18n or {}).get('im_s028', "测试推送") }}
         </label>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:.8rem;margin-bottom:.5rem">
       <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;font-size:.83rem">
-        <input type="checkbox" id="wh-enabled" style="width:16px;height:16px;accent-color:var(--p)"> 启用 Webhook
+        <input type="checkbox" id="wh-enabled" style="width:16px;height:16px;accent-color:var(--p)"> {{ (i18n or {}).get('enable', "启用") }} Webhook
       </label>
     </div>
     <div style="display:flex;gap:.6rem;flex-wrap:wrap">
-      <button class="btn btn-p btn-sm" data-help="btn_save" onclick="saveWebhook()">保存设置</button>
-      <button class="btn btn-s btn-sm" data-help="btn_test" onclick="testWebhook()">发送测试</button>
+      <button class="btn btn-p btn-sm" data-help="btn_save" onclick="saveWebhook()">{{ (i18n or {}).get('im_s029', "保存设置") }}</button>
+      <button class="btn btn-s btn-sm" data-help="btn_test" onclick="testWebhook()">{{ (i18n or {}).get('im_s030', "发送测试") }}</button>
     </div>
     <div style="margin-top:.7rem;font-size:.76rem;color:var(--t3);background:var(--input);padding:.6rem .8rem;border-radius:8px;line-height:1.5">
-      💡 Webhook 推送 JSON payload，包含 <code>event</code>、<code>actor</code>、<code>target</code>、<code>summary</code>、<code>ts</code> 字段。
-      有 secret 时，请求头携带 <code>X-Hub-Signature-256</code> 签名。
+      💡 Webhook {{ (i18n or {}).get('im_s031', "推送 JSON payload，包含") }} <code>event</code>, <code>actor</code>, <code>target</code>, <code>summary</code>, <code>ts</code> {{ (i18n or {}).get('im_s032', "字段。") }}
+      {{ (i18n or {}).get('im_s033', "有 secret 时，请求头携带") }} <code>X-Hub-Signature-256</code> {{ (i18n or {}).get('im_s034', "签名。") }}
     </div>
   </div>
 </div>
@@ -219,7 +219,7 @@ function setMode(mode) {
   document.getElementById('mode-overwrite-lbl').classList.toggle('active', mode === 'overwrite');
   document.getElementById('mode-merge-lbl').classList.toggle('active', mode === 'merge');
   document.querySelector(`input[name=mode][value=${mode}]`).checked = true;
-  document.getElementById('import-btn-lbl').textContent = mode === 'merge' ? '增量合并导入' : '覆盖导入';
+  document.getElementById('import-btn-lbl').textContent = mode === 'merge' ? window.T('im_js001') : window.T('im_s014');
 }
 
 const dz = document.getElementById('dropzone');
@@ -259,10 +259,10 @@ document.getElementById('import-form').addEventListener('submit', e => {
   const pf = document.getElementById('progress-fill');
   const pt = document.getElementById('progress-txt');
   pw.classList.add('show');
-  pt.textContent = _importMode === 'merge' ? '合并中…' : '上传中…';
+  pt.textContent = _importMode === 'merge' ? window.T('im_js002') : window.T('tg_js_022');
   let w = 0;
   const iv = setInterval(() => { w = Math.min(w + Math.random()*15, 85); pf.style.width = w + '%'; }, 200);
-  setTimeout(() => { clearInterval(iv); pf.style.width = '100%'; pt.textContent = '处理中…'; }, 2000);
+  setTimeout(() => { clearInterval(iv); pf.style.width = '100%'; pt.textContent = window.T('ov_js_processing'); }, 2000);
 });
 
 /* ── Webhook Settings ──────────────────────────── */
@@ -281,7 +281,7 @@ async function loadWebhook() {
     document.getElementById('wh-load').style.display = 'none';
     document.getElementById('wh-form').style.display = '';
   } catch(e) {
-    document.getElementById('wh-load').textContent = '加载失败（需要管理员权限）';
+    document.getElementById('wh-load').textContent = window.T('im_js003');
   }
 }
 
@@ -299,15 +299,15 @@ async function saveWebhook() {
     method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
   });
   const d = await r.json();
-  if (d.ok) showToast('Webhook 设置已保存', 'ok');
-  else showToast('保存失败: ' + (d.detail || '未知错误'), 'err');
+  if (d.ok) showToast('Webhook '+window.T('im_js004'), 'ok');
+  else showToast(window.T('ov_js_save_fail')+': ' + (d.detail || window.T('inbox.voice.unknown_err')), 'err');
 }
 
 async function testWebhook() {
   const r = await fetch('/api/webhook-test', { method: 'POST' });
   const d = await r.json();
-  if (d.ok) showToast(d.msg || '测试通知已发送', 'ok');
-  else showToast('发送失败: ' + (d.detail || '未知错误'), 'err');
+  if (d.ok) showToast(d.msg || window.T('im_js005'), 'ok');
+  else showToast(window.T('inbox.autolog.autosend_failed')+': ' + (d.detail || window.T('inbox.voice.unknown_err')), 'err');
 }
 
 loadWebhook();

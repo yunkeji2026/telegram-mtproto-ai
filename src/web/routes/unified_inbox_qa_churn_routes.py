@@ -19,6 +19,7 @@ import logging
 from fastapi import Request
 
 from src.web.routes.unified_inbox_services import _inbox_store
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ def register_qa_churn_routes(app, *, api_auth) -> None:
         api_auth(request)
         store = _inbox_store(request)
         if store is None:
-            return {"ok": False, "error": "inbox_store 不可用"}
+            return {"ok": False, "error": tr(request, "err.svc.inbox_not_ready")}
         result = store.get_qa_score(conversation_id)
         if result is None:
             return {"ok": True, "conversation_id": conversation_id, "qa": None, "computed": False}
@@ -46,7 +47,7 @@ def register_qa_churn_routes(app, *, api_auth) -> None:
         api_auth(request)
         store = _inbox_store(request)
         if store is None:
-            return {"ok": False, "error": "inbox_store 不可用"}
+            return {"ok": False, "error": tr(request, "err.svc.inbox_not_ready")}
         result = store.compute_and_store_qa_score(conversation_id)
         return {"ok": True, "conversation_id": conversation_id, "qa": result}
 
@@ -126,7 +127,7 @@ def register_qa_churn_routes(app, *, api_auth) -> None:
         api_auth(request)
         store = _inbox_store(request)
         if store is None:
-            return {"ok": False, "error": "inbox_store 不可用"}
+            return {"ok": False, "error": tr(request, "err.svc.inbox_not_ready")}
         days = max(1, min(365, int(days or 30)))
         data = store.activity_heatmap(days=days, platform=str(platform or ""), direction=str(direction or "inbound"))
         return {"ok": True, **data}

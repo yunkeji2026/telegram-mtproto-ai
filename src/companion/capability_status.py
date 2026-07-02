@@ -119,11 +119,17 @@ CAPABILITIES: List[Capability] = [
         runtime_dep="deferred_outbox_store",
         desc="care/reactivation 的非 messenger 主动消息发送闭环。关则非 messenger 约定被丢弃。"),
 
-    # Tier 4 —— 全自动语音（高风险：真发语音消息）
+    # Tier 4 —— 全自动语音（高风险：真发语音消息 / 实时全双工通话）
     Capability(
         "voice_autosend", "全自动语音", 4, "high", "feature",
         "inbox.l2_autosend.voice.enabled", runtime_dep="autosend_worker",
         desc="把「全自动聊天+翻译+语音」凑齐成闭环：自动回复转语音/克隆音发出。"),
+    Capability(
+        "realtime_voice", "实时共情语音通话", 4, "high", "feature",
+        "realtime_voice.enabled",
+        calibration="/api/companion/capabilities/realtime-voice-calibration",
+        desc="浏览器全双工实时语音（MiniCPM-o WS 网关）。开前确认主机可达、GPU 模型已载入、"
+             "公网部署配 access_token；与全自动语音消息独立。"),
 ]
 
 

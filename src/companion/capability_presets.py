@@ -31,6 +31,7 @@ PRESETS: Dict[str, Dict[str, Any]] = {
             "l2_autosend_worker": "off", "l2_autosend_deliver": "off",
             "proactive_topic": "off", "proactive_care": "off",
             "multiplatform_deferred": "off", "voice_autosend": "off",
+            "realtime_voice": "off",
         },
     },
     "dry_run_trial": {
@@ -42,6 +43,7 @@ PRESETS: Dict[str, Dict[str, Any]] = {
             "l2_autosend_worker": "on", "l2_autosend_deliver": "off",
             "proactive_topic": "dry_run", "proactive_care": "dry_run",
             "multiplatform_deferred": "on", "voice_autosend": "off",
+            "realtime_voice": "off",
         },
     },
     "full_auto": {
@@ -53,6 +55,7 @@ PRESETS: Dict[str, Dict[str, Any]] = {
             "l2_autosend_worker": "on", "l2_autosend_deliver": "on",
             "proactive_topic": "on", "proactive_care": "on",
             "multiplatform_deferred": "on", "voice_autosend": "on",
+            "realtime_voice": "off",
         },
     },
 }

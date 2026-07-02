@@ -178,11 +178,111 @@ class TestResolveVoiceCfg:
         assert result["backend"] == "openai"
         assert result["voice"] == "nova"
 
+    def test_runtime_persona_voice_profile_overrides_config(self):
+        """Web 声纹登记写入 PersonaManager/profiles_runtime 后，TTS 必须读到该音色。"""
+        from src.ai.persona_voice import resolve_voice_cfg
+        from src.utils.persona_manager import PersonaManager
+
+        PersonaManager.reset()
+        pm = PersonaManager.get_instance()
+        pm.upsert_profile("rt_voice", {
+            "id": "rt_voice",
+            "name": "Runtime Voice",
+            "voice_profile": {
+                "enabled": True,
+                "owner_consent": True,
+                "backend": "voice_clone_command",
+                "voice": "runtime_voice_id",
+                "speaker_id": "runtime_speaker",
+                "reference_audio_path": "/tmp/ref.wav",
+            },
+        })
+        cfg = {"telegram": {"voice_reply": {"backend": "edge_tts", "voice": "default_voice"}}}
+
+        result = resolve_voice_cfg("rt_voice", cfg)
+
+        assert result["backend"] == "voice_clone_command"
+        assert result["voice"] == "runtime_voice_id"
+        assert result["voice_profile"]["speaker_id"] == "runtime_speaker"
+        PersonaManager.reset()
+
     def test_unknown_persona_falls_back(self):
         from src.ai.persona_voice import resolve_voice_cfg
         cfg = {"telegram": {"voice_reply": {"backend": "edge_tts", "voice": "default_voice"}}}
         result = resolve_voice_cfg("no_such_persona", cfg)
         assert result["backend"] == "edge_tts"
+
+    def test_public_voice_persona_does_not_inherit_global_clone_ref(self):
+        """人设选公共神经音色（edge_tts）时，绝不能继承全局克隆的 my_voice 参考音。
+
+        否则每个人设都用同一把克隆声音 = 「目标人设换了脸却没换嗓子」。
+        """
+        from src.ai.persona_voice import resolve_voice_cfg
+        from src.utils.persona_manager import PersonaManager
+
+        PersonaManager.reset()
+        pm = PersonaManager.get_instance()
+        pm.upsert_profile("pub_voice", {
+            "id": "pub_voice",
+            "name": "Public Voice",
+            "voice_profile": {
+                "backend": "edge_tts",
+                "voice": "zh-CN-XiaoyiNeural",
+                "format": "mp3",
+                "emotion": "playful",
+            },
+        })
+        cfg = {
+            "telegram": {"voice_reply": {
+                "backend": "coqui_http",
+                "voice": "female_01",
+                "voice_profile": {
+                    "enabled": True,
+                    "owner_consent": True,
+                    "backend": "coqui_http",
+                    "reference_audio_path": "D:/voice_samples/my_voice.wav",
+                    "command_args": ["python", "wrapper.py"],
+                },
+            }},
+        }
+        result = resolve_voice_cfg("pub_voice", cfg)
+        assert result["backend"] == "edge_tts"
+        assert result["voice"] == "zh-CN-XiaoyiNeural"
+        vp = result["voice_profile"]
+        assert "reference_audio_path" not in vp  # clone ref must NOT bleed
+        assert "command_args" not in vp
+        assert not vp.get("enabled")             # public backend → no clone gating
+        assert not vp.get("owner_consent")
+        PersonaManager.reset()
+
+    def test_effective_voice_context_resolves_persona_voice_and_pinned_emotion(self):
+        """resolve_effective_voice_context：显式 persona_id → 该人设音色 + 钉死情绪基调。"""
+        from src.ai.persona_voice import resolve_effective_voice_context
+        from src.utils.persona_manager import PersonaManager
+
+        PersonaManager.reset()
+        pm = PersonaManager.get_instance()
+        pm.upsert_profile("nurse", {
+            "id": "nurse",
+            "name": "佳欣",
+            "personality": {"traits": ["活泼开朗"]},  # 会推断 playful
+            "voice_profile": {
+                "backend": "edge_tts",
+                "voice": "en-US-AvaMultilingualNeural",
+                "format": "mp3",
+                "emotion": "warm",  # 钉死 warm，必须压过 playful 推断
+            },
+        })
+        cfg = {"telegram": {"voice_reply": {
+            "backend": "edge_tts", "voice": "x",
+            "emotion": {"enabled": True, "default": "neutral"},
+        }}}
+        ctx = resolve_effective_voice_context(cfg, persona_id="nurse", text="在忙吗")
+        assert ctx["persona_id"] == "nurse"
+        assert ctx["voice_cfg"]["voice"] == "en-US-AvaMultilingualNeural"
+        assert ctx["emotion"] is not None
+        assert ctx["emotion"].emotion == "warm"
+        PersonaManager.reset()
 
     def test_exception_returns_empty_dict(self):
         from src.ai.persona_voice import resolve_voice_cfg
@@ -532,7 +632,9 @@ class TestVoiceUnifiedSendStack:
         assert sent_calls["chat"] == 7
         assert paced.get("hit") is True       # 发前节流（共用墙钟）
         assert counted.get("hit") is True     # 发后计数（语音计入今日外发量）
-        assert emitted == {"chat_id": 7, "text": "[语音]", "direction": "out"}
+        assert emitted["chat_id"] == 7
+        assert emitted["text"] == "[语音]"
+        assert emitted["direction"] == "out"
         assert recorded == {"dir": "out", "prev": "[语音]"}
 
     @pytest.mark.asyncio

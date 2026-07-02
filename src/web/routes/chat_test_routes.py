@@ -14,6 +14,7 @@ import uuid
 from typing import Dict
 
 from fastapi import HTTPException, Request
+from src.web.web_i18n import tr
 
 
 def register_chat_test_routes(app, ctx) -> None:
@@ -57,7 +58,7 @@ def register_chat_test_routes(app, ctx) -> None:
         user_emotion = data.get("user_emotion", "")
         session_id = data.get("session_id", "")
         if not message:
-            raise HTTPException(400, "message 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="message"))
 
         # F3: 获取/创建测试会话
         sess = _get_test_session(session_id)
@@ -79,7 +80,7 @@ def register_chat_test_routes(app, ctx) -> None:
         if telegram_client:
             sm = getattr(telegram_client, "skill_manager", None)
         if not sm:
-            return {"ok": False, "error": "SkillManager 未初始化（Bot 未运行）"}
+            return {"ok": False, "error": tr(request, "err.svc.skill_manager_not_ready")}
 
         intent = sm._recognize_intent(message)
         strategy, strategy_id = sm.get_strategy_for_intent(intent, user_id)

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}WhatsApp 自动聊天{% endblock %}
+{% block title %}WhatsApp {{ (i18n or {}).get('wa_s001', "自动聊天") }}{% endblock %}
 {% block content %}
 {# 统一组件库（4 平台共用） ───────────────────────────────────────── #}
 {% include "_rpa_shared_styles.html" %}
@@ -195,46 +195,46 @@
   <div class="rpa-hero-info">
     <div class="rpa-hero-name">
       <span class="rpa-status-dot neutral" id="wa-dot"></span>
-      <span>WhatsApp 自动聊天</span>
+      <span>WhatsApp {{ (i18n or {}).get('wa_s001', "自动聊天") }}</span>
     </div>
-    <div class="rpa-hero-sub" id="wa-hero-sub">加载中…</div>
+    <div class="rpa-hero-sub" id="wa-hero-sub">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
   </div>
   <div class="rpa-kpi-row">
-    <div class="rpa-kpi"><span class="rpa-kpi-n" id="wa-kpi-conv">—</span><span class="rpa-kpi-l">今日对话</span></div>
-    <div class="rpa-kpi"><span class="rpa-kpi-n" id="wa-kpi-sent">—</span><span class="rpa-kpi-l">今日回复</span></div>
-    <div class="rpa-kpi"><span class="rpa-kpi-n green" id="wa-kpi-rate">—</span><span class="rpa-kpi-l">回复率</span></div>
-    <div class="rpa-kpi"><span class="rpa-kpi-n" id="wa-kpi-avg">—</span><span class="rpa-kpi-l">平均耗时</span></div>
+    <div class="rpa-kpi"><span class="rpa-kpi-n" id="wa-kpi-conv">—</span><span class="rpa-kpi-l">{{ (i18n or {}).get('wa_s002', "今日对话") }}</span></div>
+    <div class="rpa-kpi"><span class="rpa-kpi-n" id="wa-kpi-sent">—</span><span class="rpa-kpi-l">{{ (i18n or {}).get('wa_s003', "今日回复") }}</span></div>
+    <div class="rpa-kpi"><span class="rpa-kpi-n green" id="wa-kpi-rate">—</span><span class="rpa-kpi-l">{{ (i18n or {}).get('wa_s004', "回复率") }}</span></div>
+    <div class="rpa-kpi"><span class="rpa-kpi-n" id="wa-kpi-avg">—</span><span class="rpa-kpi-l">{{ (i18n or {}).get('wa_s005', "平均耗时") }}</span></div>
     <div class="rpa-kpi" id="wa-kpi-cap-box" style="display:none">
       <span class="rpa-kpi-n" id="wa-kpi-cap">0/0</span>
-      <span class="rpa-kpi-l">今日上限</span>
+      <span class="rpa-kpi-l">{{ (i18n or {}).get('wa_s006', "今日上限") }}</span>
       <div class="rpa-cap-bar" style="width:100%"><div class="rpa-cap-fill" id="wa-cap-fill" style="width:0%"></div></div>
     </div>
   </div>
   <div class="rpa-hero-actions">
     <div class="preset-wrap">
-      <button class="btn-sec" id="wa-preset-toggle" onclick="rpa.togglePreset(event,'wa-preset-pop')" style="font-size:.78rem;padding:.38rem .7rem">📋 预设</button>
+      <button class="btn-sec" id="wa-preset-toggle" onclick="rpa.togglePreset(event,'wa-preset-pop')" style="font-size:.78rem;padding:.38rem .7rem">📋 {{ (i18n or {}).get('wa_s007', "预设") }}</button>
       <div class="preset-pop" id="wa-preset-pop">
-        <div class="preset-lbl">应用场景预设（不会立即保存）</div>
+        <div class="preset-lbl">{{ (i18n or {}).get('wa_s008', "应用场景预设（不会立即保存）") }}</div>
         <div class="preset-divider"></div>
         <button class="preset-btn-item" onclick="waApplyPreset('companion')">
           <span class="pi">🤝</span>
-          <div class="pt"><div class="pt-title">陪伴模式</div><div class="pt-desc">慢节奏 · 拟人停顿 · 适合 1-1 聊天</div></div>
+          <div class="pt"><div class="pt-title">{{ (i18n or {}).get('wa_s009', "陪伴模式") }}</div><div class="pt-desc">{{ (i18n or {}).get('wa_s010', "慢节奏 · 拟人停顿 · 适合 1-1 聊天") }}</div></div>
         </button>
         <button class="preset-btn-item" onclick="waApplyPreset('service')">
           <span class="pi">💼</span>
-          <div class="pt"><div class="pt-title">客服模式</div><div class="pt-desc">10s 轮询 · 短停顿 · 高响应</div></div>
+          <div class="pt"><div class="pt-title">{{ (i18n or {}).get('wa_s011', "客服模式") }}</div><div class="pt-desc">10s {{ (i18n or {}).get('wa_s012', "轮询 · 短停顿 · 高响应") }}</div></div>
         </button>
         <button class="preset-btn-item" onclick="waApplyPreset('fast')">
           <span class="pi">⚡</span>
-          <div class="pt"><div class="pt-title">快速轮询</div><div class="pt-desc">5s 轮询 · 关闭节奏 · 实时</div></div>
+          <div class="pt"><div class="pt-title">{{ (i18n or {}).get('wa_s013', "快速轮询") }}</div><div class="pt-desc">5s {{ (i18n or {}).get('wa_s014', "轮询 · 关闭节奏 · 实时") }}</div></div>
         </button>
         <button class="preset-btn-item" onclick="waApplyPreset('gentle')">
           <span class="pi">🌙</span>
-          <div class="pt"><div class="pt-title">温柔轮询</div><div class="pt-desc">30s 轮询 · 拟人节奏 · 省电</div></div>
+          <div class="pt"><div class="pt-title">{{ (i18n or {}).get('wa_s015', "温柔轮询") }}</div><div class="pt-desc">30s {{ (i18n or {}).get('wa_s016', "轮询 · 拟人节奏 · 省电") }}</div></div>
         </button>
       </div>
     </div>
-    <button class="rpa-hero-btn" onclick="waRefreshAll()" title="刷新状态">↻</button>
+    <button class="rpa-hero-btn" onclick="waRefreshAll()" title="{{ (i18n or {}).get('wa_s017', '刷新状态') }}">↻</button>
   </div>
 </div>
 
@@ -244,10 +244,10 @@
 <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:1.1rem;flex-wrap:wrap">
   <button class="btn-p" id="wa-btn-trigger">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-    立即触发
+    {{ (i18n or {}).get('wa_s018', "立即触发") }}
   </button>
-  <button class="btn-sec" id="wa-btn-pause">暂停 5 分钟</button>
-  <button class="btn-sec" id="wa-btn-resume">恢复</button>
+  <button class="btn-sec" id="wa-btn-pause">{{ (i18n or {}).get('ov_ctrl_pause_title', "暂停 5 分钟") }}</button>
+  <button class="btn-sec" id="wa-btn-resume">{{ (i18n or {}).get('ov_ctrl_resume', "恢复") }}</button>
   <span id="wa-ctrl-msg" style="font-size:.8rem;color:var(--t3)"></span>
 </div>
 
@@ -255,11 +255,11 @@
 {# Tab Bar                                                              #}
 {# ══════════════════════════════════════════════════════════════════ #}
 <div class="st-bar">
-  <button class="st-tab active" data-pane="pane-wa-monitor" onclick="rpa.switchTab(this)"> 对话</button>
-  <button class="st-tab" data-pane="pane-wa-pending" onclick="rpa.switchTab(this)" id="wa-tab-pending">✅ 待审<span class="tab-dot"></span></button>
-  <button class="st-tab" data-pane="pane-wa-templates" onclick="rpa.switchTab(this)">📊 模板分析</button>
-  <button class="st-tab" data-pane="pane-wa-settings" onclick="rpa.switchTab(this)" id="wa-tab-settings">⚙️ 配置<span class="tab-dot"></span></button>
-  <button class="st-tab" data-pane="pane-wa-ops" onclick="rpa.switchTab(this)">🔧 运维</button>
+  <button class="st-tab active" data-pane="pane-wa-monitor" onclick="rpa.switchTab(this)"> {{ (i18n or {}).get('wa_s019', "对话") }}</button>
+  <button class="st-tab" data-pane="pane-wa-pending" onclick="rpa.switchTab(this)" id="wa-tab-pending">✅ {{ (i18n or {}).get('ov_kpi_pending', "待审") }}<span class="tab-dot"></span></button>
+  <button class="st-tab" data-pane="pane-wa-templates" onclick="rpa.switchTab(this)">📊 {{ (i18n or {}).get('wa_s020', "模板分析") }}</button>
+  <button class="st-tab" data-pane="pane-wa-settings" onclick="rpa.switchTab(this)" id="wa-tab-settings">⚙️ {{ (i18n or {}).get('msg_js_1056', "配置") }}<span class="tab-dot"></span></button>
+  <button class="st-tab" data-pane="pane-wa-ops" onclick="rpa.switchTab(this)">🔧 {{ (i18n or {}).get('wa_s021', "运维") }}</button>
 </div>
 
 {# ══════════════════════════════════════════════════════════════════ #}
@@ -272,16 +272,16 @@
     <div class="hb-item error">
       <svg class="hb-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
       <div style="flex:1">
-        <strong>未处理告警：</strong><span id="wa-alert-count"></span>
+        <strong>{{ (i18n or {}).get('wa_s022', "未处理告警：") }}</strong><span id="wa-alert-count"></span>
       </div>
-      <button class="btn-sec" style="font-size:.72rem;padding:.3rem .6rem" onclick="waAckAll()">全部确认</button>
+      <button class="btn-sec" style="font-size:.72rem;padding:.3rem .6rem" onclick="waAckAll()">{{ (i18n or {}).get('wa_s023', "全部确认") }}</button>
     </div>
   </div>
 
   {# 视图切换分段控件 #}
   <div class="wa-view-seg">
-    <button class="wa-vseg-btn active" id="wa-vseg-conv" onclick="waSetViewMode('conv')">💬 对话视图</button>
-    <button class="wa-vseg-btn" id="wa-vseg-log" onclick="waSetViewMode('log')">📋 运行日志</button>
+    <button class="wa-vseg-btn active" id="wa-vseg-conv" onclick="waSetViewMode('conv')">💬 {{ (i18n or {}).get('wa_s024', "对话视图") }}</button>
+    <button class="wa-vseg-btn" id="wa-vseg-log" onclick="waSetViewMode('log')">📋 {{ (i18n or {}).get('wa_s025', "运行日志") }}</button>
   </div>
 
   {# 对话视图（默认） #}
@@ -289,40 +289,40 @@
     <div class="rpa-card">
       <div class="rpa-card-head">
         <div class="rpa-card-icon blue">�</div>
-        <div class="rpa-card-title">活跃对话 <span style="font-size:.75rem;color:var(--t3);font-weight:400">· 48h 内</span></div>
-        <button class="rpa-hero-btn" style="margin-left:auto" onclick="waLoadConversations()" title="刷新">↻</button>
+        <div class="rpa-card-title">{{ (i18n or {}).get('wa_s026', "活跃对话") }} <span style="font-size:.75rem;color:var(--t3);font-weight:400">· 48h {{ (i18n or {}).get('wa_s027', "内") }}</span></div>
+        <button class="rpa-hero-btn" style="margin-left:auto" onclick="waLoadConversations()" title="{{ (i18n or {}).get('dash.refresh', '刷新') }}">↻</button>
       </div>
       <div class="wa-conv-searchbar">
-        <input type="text" id="wa-conv-search" class="wa-search-inp" placeholder="搜索联系人、人设…" oninput="waRenderConversations()">
+        <input type="text" id="wa-conv-search" class="wa-search-inp" placeholder="{{ (i18n or {}).get('wa_s028', '搜索联系人、人设…') }}" oninput="waRenderConversations()">
         <div class="wa-filter-chips">
-          <button class="wa-chip active" id="wa-filter-all" onclick="waFilterConv('all')">全部</button>
-          <button class="wa-chip" id="wa-filter-ok" onclick="waFilterConv('ok')">✓ 成功</button>
-          <button class="wa-chip" id="wa-filter-err" onclick="waFilterConv('err')">⚠ 失败</button>
+          <button class="wa-chip active" id="wa-filter-all" onclick="waFilterConv('all')">{{ (i18n or {}).get('rpa_all', "全部") }}</button>
+          <button class="wa-chip" id="wa-filter-ok" onclick="waFilterConv('ok')">✓ {{ (i18n or {}).get('ov_js_succ_label', "成功") }}</button>
+          <button class="wa-chip" id="wa-filter-err" onclick="waFilterConv('err')">⚠ {{ (i18n or {}).get('rpa_js_st_failed', "失败") }}</button>
         </div>
         <span class="wa-conv-count" id="wa-conv-count"></span>
         <div class="wa-filter-chips">
-          <button class="wa-sort-chip wa-chip active" data-s="time" onclick="waSetConvSort('time')">⏱ 时间</button>
-          <button class="wa-sort-chip wa-chip" data-s="engage" onclick="waSetConvSort('engage')">🔥 热度</button>
-          <button class="wa-sort-chip wa-chip" data-s="unanswered" onclick="waSetConvSort('unanswered')">⏳ 待回复首</button>
+          <button class="wa-sort-chip wa-chip active" data-s="time" onclick="waSetConvSort('time')">⏱ {{ (i18n or {}).get('time', "时间") }}</button>
+          <button class="wa-sort-chip wa-chip" data-s="engage" onclick="waSetConvSort('engage')">🔥 {{ (i18n or {}).get('wa_s029', "热度") }}</button>
+          <button class="wa-sort-chip wa-chip" data-s="unanswered" onclick="waSetConvSort('unanswered')">⏳ {{ (i18n or {}).get('wa_s030', "待回复首") }}</button>
         </div>
       </div>
       {# P7-A: 历史检索行 #}
       <div class="wa-search-bar" id="wa-hist-searchbar">
-        <input type="text" id="wa-hist-q" class="wa-search-inp" placeholder="🔍 全文检索历史消息…" oninput="waHistSearch(this.value)">
+        <input type="text" id="wa-hist-q" class="wa-search-inp" placeholder="🔍 {{ (i18n or {}).get('wa_s031', '全文检索历史消息…') }}" oninput="waHistSearch(this.value)">
         <select id="wa-hist-intent" class="wa-search-sel" onchange="waHistSearch($('wa-hist-q').value)">
-          <option value="">全部意图</option>
-          <option value="purchase">购买</option>
-          <option value="support">售后</option>
-          <option value="inquiry">咨询</option>
-          <option value="greeting">问候</option>
-          <option value="general">通用</option>
+          <option value="">{{ (i18n or {}).get('ov_all_intents', "全部意图") }}</option>
+          <option value="purchase">{{ (i18n or {}).get('rpa_intent_purchase', "购买") }}</option>
+          <option value="support">{{ (i18n or {}).get('rpa_intent_support', "售后") }}</option>
+          <option value="inquiry">{{ (i18n or {}).get('rpa_intent_inquiry', "咨询") }}</option>
+          <option value="greeting">{{ (i18n or {}).get('rpa_intent_greeting', "问候") }}</option>
+          <option value="general">{{ (i18n or {}).get('rpa_intent_general', "通用") }}</option>
         </select>
       </div>
       <div id="wa-hist-results" style="display:none"></div>
       <div id="wa-conv-list">
         <div class="wa-conv-empty">
           <div class="wa-conv-empty-icon">💬</div>
-          <div class="wa-conv-empty-title">加载中…</div>
+          <div class="wa-conv-empty-title">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
         </div>
       </div>
     </div>
@@ -333,13 +333,13 @@
     <div class="rpa-card">
       <div class="rpa-card-head">
         <div class="rpa-card-icon blue">�</div>
-        <div class="rpa-card-title">运行日志</div>
+        <div class="rpa-card-title">{{ (i18n or {}).get('wa_s025', "运行日志") }}</div>
         <label style="margin-left:auto;font-size:.78rem;display:flex;align-items:center;gap:.3rem;font-weight:500;color:var(--t2)">
-          <input type="checkbox" id="wa-only-peer"> 仅含对方消息
+          <input type="checkbox" id="wa-only-peer"> {{ (i18n or {}).get('wa_s032', "仅含对方消息") }}
         </label>
       </div>
       <div class="rpa-stream" id="wa-stream">
-        <div class="wa-stream-empty">加载中…</div>
+        <div class="wa-stream-empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
       </div>
     </div>
   </div>
@@ -354,36 +354,36 @@
   <div class="rpa-card">
     <div class="rpa-card-head">
       <div class="rpa-card-icon amber">⏳</div>
-      <div class="rpa-card-title">待审批回复 <span class="cfg-badge" id="wa-pending-badge" style="display:none"></span></div>
-      <button class="rpa-hero-btn" style="margin-left:auto" onclick="waLoadPending()" title="刷新">↻</button>
-      <button class="rpa-hero-btn" style="color:#dc2626" onclick="waCancelAllPending()" title="清空全部待审">✕ 清空</button>
+      <div class="rpa-card-title">{{ (i18n or {}).get('wa_s033', "待审批回复") }} <span class="cfg-badge" id="wa-pending-badge" style="display:none"></span></div>
+      <button class="rpa-hero-btn" style="margin-left:auto" onclick="waLoadPending()" title="{{ (i18n or {}).get('dash.refresh', '刷新') }}">↻</button>
+      <button class="rpa-hero-btn" style="color:#dc2626" onclick="waCancelAllPending()" title="{{ (i18n or {}).get('wa_s034', '清空全部待审') }}">✕ {{ (i18n or {}).get('logs_clear', "清空") }}</button>
     </div>
     {# Q1+Q2: 批量审批 + 键盘快捷键工具栏 #}
     <div class="rpa-bulk-toolbar">
-      <button type="button" class="btn" onclick="rpa.bulk.selectAll()">全选</button>
-      <button type="button" class="btn" onclick="rpa.bulk.clearSelection()">清空</button>
+      <button type="button" class="btn" onclick="rpa.bulk.selectAll()">{{ (i18n or {}).get('ov_select_all', "全选") }}</button>
+      <button type="button" class="btn" onclick="rpa.bulk.clearSelection()">{{ (i18n or {}).get('logs_clear', "清空") }}</button>
       <button type="button" class="btn btn-primary" id="wa-bulk-approve" disabled
-              onclick="rpa.bulk.approveSelected()">批量批准 (0)</button>
+              onclick="rpa.bulk.approveSelected()">{{ (i18n or {}).get('draft.bulk.approve', "批量批准") }} (0)</button>
       <button type="button" class="btn btn-danger" id="wa-bulk-reject" disabled
-              onclick="rpa.bulk.rejectSelected()">批量拒绝 (0)</button>
-      <span class="rpa-bulk-count" id="wa-bulk-count">已选 0 项</span>
-      <span class="rpa-bulk-hint">⌨ 快捷键
+              onclick="rpa.bulk.rejectSelected()">{{ (i18n or {}).get('draft.bulk.reject', "批量拒绝") }} (0)</button>
+      <span class="rpa-bulk-count" id="wa-bulk-count">{{ (i18n or {}).get('wa_s035', "已选 0 项") }}</span>
+      <span class="rpa-bulk-hint">⌨ {{ (i18n or {}).get('wa_s036', "快捷键") }}
         <span class="rpa-bulk-hint-pop" id="wa-shortcuts-pop">
-          <div><kbd>j</kbd>/<kbd>↓</kbd> 下一条　<kbd>k</kbd>/<kbd>↑</kbd> 上一条</div>
-          <div><kbd>x</kbd>/<kbd>空格</kbd> 勾选当前</div>
-          <div><kbd>a</kbd> 批准焦点　<kbd>r</kbd> 拒绝焦点</div>
-          <div><kbd>Ctrl</kbd>+<kbd>Enter</kbd> 批量批准</div>
-          <div><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> 批量拒绝</div>
-          <div><kbd>Esc</kbd> 取消选中</div>
+          <div><kbd>j</kbd>/<kbd>↓</kbd> {{ (i18n or {}).get('wa_s037', "下一条") }}　<kbd>k</kbd>/<kbd>↑</kbd> {{ (i18n or {}).get('wa_s038', "上一条") }}</div>
+          <div><kbd>x</kbd>/<kbd>{{ (i18n or {}).get('wa_s039', "空格") }}</kbd> {{ (i18n or {}).get('wa_s040', "勾选当前") }}</div>
+          <div><kbd>a</kbd> {{ (i18n or {}).get('wa_s041', "批准焦点") }}　<kbd>r</kbd> {{ (i18n or {}).get('wa_s042', "拒绝焦点") }}</div>
+          <div><kbd>Ctrl</kbd>+<kbd>Enter</kbd> {{ (i18n or {}).get('draft.bulk.approve', "批量批准") }}</div>
+          <div><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> {{ (i18n or {}).get('draft.bulk.reject', "批量拒绝") }}</div>
+          <div><kbd>Esc</kbd> {{ (i18n or {}).get('wa_s043', "取消选中") }}</div>
         </span>
       </span>
-      <button type="button" class="btn" style="margin-left:auto;font-size:.75rem;padding:.2rem .5rem" onclick="document.getElementById('wa-shortcuts-pop').classList.toggle('show')" title="快捷键帮助">?</button>
+      <button type="button" class="btn" style="margin-left:auto;font-size:.75rem;padding:.2rem .5rem" onclick="document.getElementById('wa-shortcuts-pop').classList.toggle('show')" title="{{ (i18n or {}).get('wa_s044', '快捷键帮助') }}">?</button>
     </div>
     <div id="wa-pending-list">
       <div class="rpa-empty">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-        <div>暂无待审批回复</div>
-        <div style="font-size:.75rem;margin-top:.25rem">当回复模式为 approve 时，所有 AI 草稿会先来这里等审核</div>
+        <div>{{ (i18n or {}).get('wa_s045', "暂无待审批回复") }}</div>
+        <div style="font-size:.75rem;margin-top:.25rem">{{ (i18n or {}).get('wa_s046', "当回复模式为 approve 时，所有 AI 草稿会先来这里等审核") }}</div>
       </div>
     </div>
   </div>
@@ -396,79 +396,79 @@
 <div id="pane-wa-templates" class="st-pane">
   <div class="rpa-card">
     <div class="rpa-card-head" style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
-      <span>📊 主动续聊模板效果分析</span>
+      <span>📊 {{ (i18n or {}).get('wa_s047', "主动续聊模板效果分析") }}</span>
       <span class="wa-persona-bar-links" style="margin-left:auto">
-        <a href="#" onclick="waLoadTemplateAnalytics();return false">🔄 刷新</a>
+        <a href="#" onclick="waLoadTemplateAnalytics();return false">🔄 {{ (i18n or {}).get('dash.refresh', "刷新") }}</a>
       </span>
     </div>
 
     {# 配置信息 #}
     <div class="wa-persona-bar" id="wa-tpl-config-bar" style="margin:.6rem 0">
-      <span class="wa-persona-bar-lbl">⚙️ 当前策略</span>
-      <span id="wa-tpl-config-text" style="font-size:.78rem;color:var(--t3)">加载中…</span>
+      <span class="wa-persona-bar-lbl">⚙️ {{ (i18n or {}).get('wa_s048', "当前策略") }}</span>
+      <span id="wa-tpl-config-text" style="font-size:.78rem;color:var(--t3)">{{ (i18n or {}).get('dash.loading', "加载中…") }}</span>
     </div>
 
     {# KPI 卡片 #}
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.6rem;margin:.6rem 0 1rem">
       <div class="rpa-kpi" style="background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.2);border-radius:8px;padding:.6rem">
         <span class="rpa-kpi-n" id="wa-tpl-sent">—</span>
-        <span class="rpa-kpi-l">模板发送</span>
+        <span class="rpa-kpi-l">{{ (i18n or {}).get('wa_s049', "模板发送") }}</span>
       </div>
       <div class="rpa-kpi" style="background:rgba(74,222,128,.08);border:1px solid rgba(74,222,128,.2);border-radius:8px;padding:.6rem">
         <span class="rpa-kpi-n green" id="wa-tpl-replied">—</span>
-        <span class="rpa-kpi-l">用户回复</span>
+        <span class="rpa-kpi-l">{{ (i18n or {}).get('wa_s050', "用户回复") }}</span>
       </div>
       <div class="rpa-kpi" style="background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.2);border-radius:8px;padding:.6rem">
         <span class="rpa-kpi-n" id="wa-tpl-rate" style="color:#f59e0b">—</span>
-        <span class="rpa-kpi-l">回复率</span>
+        <span class="rpa-kpi-l">{{ (i18n or {}).get('wa_s004', "回复率") }}</span>
       </div>
       <div class="rpa-kpi" style="background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.2);border-radius:8px;padding:.6rem">
         <span class="rpa-kpi-n" id="wa-tpl-categories" style="color:#8b5cf6">—</span>
-        <span class="rpa-kpi-l">模板类别</span>
+        <span class="rpa-kpi-l">{{ (i18n or {}).get('wa_s051', "模板类别") }}</span>
       </div>
     </div>
 
     {# 类别表现表格 #}
     <div style="margin:1rem 0">
-      <div style="font-size:.85rem;font-weight:600;color:var(--t1);margin-bottom:.5rem">类别表现详情</div>
+      <div style="font-size:.85rem;font-weight:600;color:var(--t1);margin-bottom:.5rem">{{ (i18n or {}).get('wa_s052', "类别表现详情") }}</div>
       <table class="wa-table" id="wa-tpl-category-table">
         <thead>
           <tr>
-            <th>类别</th>
-            <th>发送数</th>
-            <th>回复数</th>
-            <th>回复率</th>
-            <th>效果</th>
+            <th>{{ (i18n or {}).get('wa_s053', "类别") }}</th>
+            <th>{{ (i18n or {}).get('wa_s054', "发送数") }}</th>
+            <th>{{ (i18n or {}).get('wa_s055', "回复数") }}</th>
+            <th>{{ (i18n or {}).get('wa_s004', "回复率") }}</th>
+            <th>{{ (i18n or {}).get('wa_s056', "效果") }}</th>
           </tr>
         </thead>
         <tbody id="wa-tpl-category-body">
-          <tr><td colspan="5" style="text-align:center;color:var(--t3)">加载中…</td></tr>
+          <tr><td colspan="5" style="text-align:center;color:var(--t3)">{{ (i18n or {}).get('dash.loading', "加载中…") }}</td></tr>
         </tbody>
       </table>
     </div>
 
     {# 模板详情 #}
     <div style="margin:1rem 0">
-      <div style="font-size:.85rem;font-weight:600;color:var(--t1);margin-bottom:.5rem">模板使用分布</div>
+      <div style="font-size:.85rem;font-weight:600;color:var(--t1);margin-bottom:.5rem">{{ (i18n or {}).get('wa_s057', "模板使用分布") }}</div>
       <div id="wa-tpl-detail-list" style="max-height:300px;overflow-y:auto">
-        <div style="padding:1rem;text-align:center;color:var(--t3)">加载中…</div>
+        <div style="padding:1rem;text-align:center;color:var(--t3)">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
       </div>
     </div>
 
     {# 策略切换 #}
     <div style="margin:1rem 0;padding:.8rem;background:rgba(255,255,255,.03);border:1px solid var(--bd);border-radius:8px">
-      <div style="font-size:.85rem;font-weight:600;color:var(--t1);margin-bottom:.5rem">轮换策略设置</div>
+      <div style="font-size:.85rem;font-weight:600;color:var(--t1);margin-bottom:.5rem">{{ (i18n or {}).get('wa_s058', "轮换策略设置") }}</div>
       <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
         <select id="wa-tpl-strategy-select" class="wa-search-sel" style="padding:.35rem .6rem">
-          <option value="weighted">加权选择 (推荐)</option>
-          <option value="round_robin">轮询</option>
-          <option value="random">随机</option>
+          <option value="weighted">{{ (i18n or {}).get('wa_s059', "加权选择 (推荐") }})</option>
+          <option value="round_robin">{{ (i18n or {}).get('wa_s060', "轮询") }}</option>
+          <option value="random">{{ (i18n or {}).get('wa_s061', "随机") }}</option>
         </select>
-        <button class="btn-sec" onclick="waSaveTemplateStrategy()" style="font-size:.78rem;padding:.35rem .7rem">保存策略</button>
+        <button class="btn-sec" onclick="waSaveTemplateStrategy()" style="font-size:.78rem;padding:.35rem .7rem">{{ (i18n or {}).get('wa_s062', "保存策略") }}</button>
         <span id="wa-tpl-strategy-msg" style="font-size:.75rem;color:var(--t3)"></span>
       </div>
       <div style="font-size:.7rem;color:var(--t3);margin-top:.4rem">
-        💡 加权选择：使用次数越多的模板权重越高，形成正反馈优化
+        💡 {{ (i18n or {}).get('wa_s063', "加权选择：使用次数越多的模板权重越高，形成正反馈优化") }}
       </div>
     </div>
   </div>
@@ -482,42 +482,42 @@
   <div class="wa-health-bar" id="wa-health-bar" style="display:none"></div>
 
   <div class="wa-persona-bar" id="wa-persona-bar">
-    <span class="wa-persona-bar-lbl">🎭 账号人设</span>
-    <span style="font-size:.78rem;color:var(--t3)">加载中…</span>
+    <span class="wa-persona-bar-lbl">🎭 {{ (i18n or {}).get('wa_s064', "账号人设") }}</span>
+    <span style="font-size:.78rem;color:var(--t3)">{{ (i18n or {}).get('dash.loading', "加载中…") }}</span>
   </div>
 
   <div class="wa-unsaved-banner" id="wa-unsaved-banner">
-    ⚠ 有未保存的更改
+    ⚠ {{ (i18n or {}).get('wa_s065', "有未保存的更改") }}
     <div class="wa-unsaved-actions">
-      <button class="btn-sec" style="font-size:.72rem;padding:.2rem .55rem" onclick="waLoadCfg()">还原</button>
-      <button class="btn-p" style="font-size:.72rem;padding:.2rem .55rem" onclick="$('wa-cfg-save').click()">立即保存</button>
+      <button class="btn-sec" style="font-size:.72rem;padding:.2rem .55rem" onclick="waLoadCfg()">{{ (i18n or {}).get('wa_s066', "还原") }}</button>
+      <button class="btn-p" style="font-size:.72rem;padding:.2rem .55rem" onclick="$('wa-cfg-save').click()">{{ (i18n or {}).get('wa_s067', "立即保存") }}</button>
     </div>
   </div>
 
   <div class="rpa-card">
     <div class="rpa-card-head">
       <div class="rpa-card-icon green">⚙️</div>
-      <div class="rpa-card-title">服务轮询</div>
-      <div class="rpa-card-desc">控制 RPA 后台扫描频率</div>
+      <div class="rpa-card-title">{{ (i18n or {}).get('wa_s068', "服务轮询") }}</div>
+      <div class="rpa-card-desc">{{ (i18n or {}).get('wa_s069', "控制 RPA 后台扫描频率") }}</div>
     </div>
     <div class="f-grid2">
       <div class="f-row">
-        <label class="f-lbl">基准轮询间隔（秒）<span class="f-dur" id="cfg-wa-interval-dur"></span></label>
+        <label class="f-lbl">{{ (i18n or {}).get('wa_s070', "基准轮询间隔（秒）") }}<span class="f-dur" id="cfg-wa-interval-dur"></span></label>
         <input class="f-inp" type="number" id="cfg-wa-interval" min="1" step="1" value="15" oninput="rpa.markDirty('wa-tab-settings');updateDur('cfg-wa-interval','cfg-wa-interval-dur')">
-        <span class="f-hint">空闲时默认轮询间隔</span>
+        <span class="f-hint">{{ (i18n or {}).get('wa_s071', "空闲时默认轮询间隔") }}</span>
       </div>
       <div class="f-row">
-        <label class="f-lbl">快轮询间隔（秒）<span class="f-dur" id="cfg-wa-fast-dur"></span></label>
+        <label class="f-lbl">{{ (i18n or {}).get('wa_s072', "快轮询间隔（秒）") }}<span class="f-dur" id="cfg-wa-fast-dur"></span></label>
         <input class="f-inp" type="number" id="cfg-wa-fast" min="1" step="1" value="4" oninput="rpa.markDirty('wa-tab-settings');updateDur('cfg-wa-fast','cfg-wa-fast-dur')">
-        <span class="f-hint">有未读时切到此速度</span>
+        <span class="f-hint">{{ (i18n or {}).get('wa_s073', "有未读时切到此速度") }}</span>
       </div>
       <div class="f-row">
-        <label class="f-lbl">慢轮询间隔（秒）<span class="f-dur" id="cfg-wa-slow-dur"></span></label>
+        <label class="f-lbl">{{ (i18n or {}).get('wa_s074', "慢轮询间隔（秒）") }}<span class="f-dur" id="cfg-wa-slow-dur"></span></label>
         <input class="f-inp" type="number" id="cfg-wa-slow" min="1" step="1" value="30" oninput="rpa.markDirty('wa-tab-settings');updateDur('cfg-wa-slow','cfg-wa-slow-dur')">
-        <span class="f-hint">连续空轮后降速到此</span>
+        <span class="f-hint">{{ (i18n or {}).get('wa_s075', "连续空轮后降速到此") }}</span>
       </div>
       <div class="f-row">
-        <label class="f-lbl">空轮 N 次后进入慢轮询</label>
+        <label class="f-lbl">{{ (i18n or {}).get('wa_s076', "空轮 N 次后进入慢轮询") }}</label>
         <input class="f-inp" type="number" id="cfg-wa-slow-after" min="1" step="1" value="6" oninput="rpa.markDirty('wa-tab-settings')">
       </div>
     </div>
@@ -526,41 +526,41 @@
   <div class="rpa-card">
     <div class="rpa-card-head">
       <div class="rpa-card-icon purple">💬</div>
-      <div class="rpa-card-title">回复策略</div>
+      <div class="rpa-card-title">{{ (i18n or {}).get('wa_s077', "回复策略") }}</div>
     </div>
     <div class="f-row">
-      <label class="f-lbl">回复模式</label>
+      <label class="f-lbl">{{ (i18n or {}).get('wa_s078', "回复模式") }}</label>
       <div class="tr-cards" id="wa-reply-mode-cards">
         <div class="tr-card" data-val="auto" onclick="selectReplyMode(this)">
-          <div class="tr-card-top">⚡ 自动发送</div>
-          <div class="tr-card-sub">AI 草稿生成即发，无人工介入</div>
+          <div class="tr-card-top">⚡ {{ (i18n or {}).get('inbox.autolog.autosend', "自动发送") }}</div>
+          <div class="tr-card-sub">AI {{ (i18n or {}).get('wa_s079', "草稿生成即发，无人工介入") }}</div>
         </div>
         <div class="tr-card" data-val="approve" onclick="selectReplyMode(this)">
-          <div class="tr-card-top">✅ 人工审核</div>
-          <div class="tr-card-sub">草稿入待审队列，确认后发</div>
+          <div class="tr-card-top">✅ {{ (i18n or {}).get('wa_s080', "人工审核") }}</div>
+          <div class="tr-card-sub">{{ (i18n or {}).get('wa_s081', "草稿入待审队列，确认后发") }}</div>
         </div>
         <div class="tr-card" data-val="off" onclick="selectReplyMode(this)">
-          <div class="tr-card-top">🚫 关闭</div>
-          <div class="tr-card-sub">仅记录消息，不生成回复</div>
+          <div class="tr-card-top">🚫 {{ (i18n or {}).get('ov_js_disable', "关闭") }}</div>
+          <div class="tr-card-sub">{{ (i18n or {}).get('wa_s082', "仅记录消息，不生成回复") }}</div>
         </div>
       </div>
       <input type="hidden" id="cfg-wa-reply-mode" value="auto">
     </div>
     <div class="f-grid2">
       <div class="f-row">
-        <label class="f-lbl">默认回复语言</label>
+        <label class="f-lbl">{{ (i18n or {}).get('wa_s083', "默认回复语言") }}</label>
         <input class="f-inp" type="text" id="cfg-wa-lang" placeholder="zh / en / ja" value="zh" oninput="rpa.markDirty('wa-tab-settings')">
-        <span class="f-hint">用户语言识别失败时使用此默认值</span>
+        <span class="f-hint">{{ (i18n or {}).get('wa_s084', "用户语言识别失败时使用此默认值") }}</span>
       </div>
       <div class="f-row">
-        <label class="f-lbl">每日发送上限</label>
+        <label class="f-lbl">{{ (i18n or {}).get('wa_s085', "每日发送上限") }}</label>
         <input class="f-inp" type="number" id="cfg-wa-daily-cap" min="0" step="1" value="0" oninput="rpa.markDirty('wa-tab-settings')">
-        <span class="f-hint">0 = 不限；达到后自动暂停到次日</span>
+        <span class="f-hint">0 = {{ (i18n or {}).get('wa_s086', "不限；达到后自动暂停到次日") }}</span>
         <div style="margin-top:.25rem;display:flex;gap:.35rem;flex-wrap:wrap;font-size:.78rem">
-          <span style="color:var(--t3)">快捷：</span>
+          <span style="color:var(--t3)">{{ (i18n or {}).get('wa_s087', "快捷：") }}</span>
           <button type="button" class="btn-chip" onclick="waSetDailyCap(5000)">5k</button>
-          <button type="button" class="btn-chip" onclick="waSetDailyCap(10000)">1万</button>
-          <button type="button" class="btn-chip" onclick="waSetDailyCap(0)">不限</button>
+          <button type="button" class="btn-chip" onclick="waSetDailyCap(10000)">1{{ (i18n or {}).get('wa_s088', "万") }}</button>
+          <button type="button" class="btn-chip" onclick="waSetDailyCap(0)">{{ (i18n or {}).get('rpa_unlimited', "不限") }}</button>
         </div>
       </div>
     </div>
@@ -569,7 +569,7 @@
   <div class="rpa-card">
     <div class="rpa-card-head">
       <div class="rpa-card-icon blue">🧑</div>
-      <div class="rpa-card-title">拟人节奏（防风控）</div>
+      <div class="rpa-card-title">{{ (i18n or {}).get('wa_s089', "拟人节奏（防风控）") }}</div>
       <label class="rpa-toggle" style="margin-left:auto">
         <input type="checkbox" id="cfg-wa-pacing-on" onchange="rpa.markDirty('wa-tab-settings')">
         <span class="rpa-toggle-sw"></span>
@@ -577,30 +577,30 @@
     </div>
     <div class="f-grid2">
       <div class="f-row">
-        <label class="f-lbl">分条策略</label>
+        <label class="f-lbl">{{ (i18n or {}).get('wa_s090', "分条策略") }}</label>
         <select class="f-inp" id="cfg-wa-split" onchange="rpa.markDirty('wa-tab-settings')">
-          <option value="sentence">按句子</option>
-          <option value="length">按长度</option>
-          <option value="none">不分条</option>
+          <option value="sentence">{{ (i18n or {}).get('wa_s091', "按句子") }}</option>
+          <option value="length">{{ (i18n or {}).get('wa_s092', "按长度") }}</option>
+          <option value="none">{{ (i18n or {}).get('wa_s093', "不分条") }}</option>
         </select>
       </div>
       <div class="f-row">
-        <label class="f-lbl">单条最大字符</label>
+        <label class="f-lbl">{{ (i18n or {}).get('wa_s094', "单条最大字符") }}</label>
         <input class="f-inp" type="number" id="cfg-wa-split-chars" min="20" step="10" value="80" oninput="rpa.markDirty('wa-tab-settings')">
       </div>
       <div class="f-row">
-        <label class="f-lbl">最多分成几条</label>
+        <label class="f-lbl">{{ (i18n or {}).get('wa_s095', "最多分成几条") }}</label>
         <input class="f-inp" type="number" id="cfg-wa-split-parts" min="1" step="1" value="3" oninput="rpa.markDirty('wa-tab-settings')">
       </div>
       <div class="f-row">
-        <label class="f-lbl">读停顿 ms（低-高）</label>
+        <label class="f-lbl">{{ (i18n or {}).get('wa_s096', "读停顿 ms（低-高）") }}</label>
         <div style="display:flex;gap:.4rem">
           <input class="f-inp" type="number" id="cfg-wa-read-lo" min="0" step="100" value="800" oninput="rpa.markDirty('wa-tab-settings')">
           <input class="f-inp" type="number" id="cfg-wa-read-hi" min="0" step="100" value="2000" oninput="rpa.markDirty('wa-tab-settings')">
         </div>
       </div>
       <div class="f-row">
-        <label class="f-lbl">条间隔 ms（低-高）</label>
+        <label class="f-lbl">{{ (i18n or {}).get('wa_s097', "条间隔 ms（低-高）") }}</label>
         <div style="display:flex;gap:.4rem">
           <input class="f-inp" type="number" id="cfg-wa-inter-lo" min="0" step="100" value="700" oninput="rpa.markDirty('wa-tab-settings')">
           <input class="f-inp" type="number" id="cfg-wa-inter-hi" min="0" step="100" value="1800" oninput="rpa.markDirty('wa-tab-settings')">
@@ -612,52 +612,52 @@
   <div class="rpa-card">
     <div class="rpa-card-head">
       <div class="rpa-card-icon" style="background:rgba(16,185,129,.12)">🎤</div>
-      <div class="rpa-card-title">语音功能</div>
-      <div class="rpa-card-desc">语音识别（STT）+ 语音回复（TTS）</div>
+      <div class="rpa-card-title">{{ (i18n or {}).get('wa_s098', "语音功能") }}</div>
+      <div class="rpa-card-desc">{{ (i18n or {}).get('wa_s099', "语音识别（STT）") }}+ {{ (i18n or {}).get('wa_s100', "语音回复（TTS）") }}</div>
     </div>
     <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:.7rem">
       <label class="rpa-toggle">
         <input type="checkbox" id="cfg-wa-voice-in" onchange="rpa.markDirty('wa-tab-settings')">
-        <span class="rpa-toggle-sw"></span><span class="rpa-toggle-lbl">语音识别（接收语音→转文字）</span>
+        <span class="rpa-toggle-sw"></span><span class="rpa-toggle-lbl">{{ (i18n or {}).get('wa_s101', "语音识别（接收语音") }}→{{ (i18n or {}).get('wa_s102', "转文字）") }}</span>
       </label>
       <label class="rpa-toggle">
         <input type="checkbox" id="cfg-wa-voice-out" onchange="rpa.markDirty('wa-tab-settings')">
-        <span class="rpa-toggle-sw"></span><span class="rpa-toggle-lbl">语音回复（TTS 生成语音）</span>
+        <span class="rpa-toggle-sw"></span><span class="rpa-toggle-lbl">{{ (i18n or {}).get('wa_s103', "语音回复（TTS 生成语音）") }}</span>
       </label>
     </div>
     <div class="f-grid2" id="wa-voice-out-opts" style="display:none">
       <div class="f-row">
-        <label class="f-lbl">发送模式</label>
+        <label class="f-lbl">{{ (i18n or {}).get('wa_s104', "发送模式") }}</label>
         <select class="f-inp" id="cfg-wa-voice-mode" onchange="rpa.markDirty('wa-tab-settings')">
-          <option value="approval_only">仅生成（审核后手动发）</option>
-          <option value="auto_voice">自动发送语音</option>
+          <option value="approval_only">{{ (i18n or {}).get('wa_s105', "仅生成（审核后手动发）") }}</option>
+          <option value="auto_voice">{{ (i18n or {}).get('wa_s106', "自动发送语音") }}</option>
         </select>
       </div>
       <div class="f-row">
-        <label class="f-lbl">触发条件</label>
+        <label class="f-lbl">{{ (i18n or {}).get('wa_s107', "触发条件") }}</label>
         <select class="f-inp" id="cfg-wa-voice-trigger" onchange="rpa.markDirty('wa-tab-settings')">
-          <option value="when_peer_voice">对方发语音时</option>
-          <option value="always">每条回复</option>
-          <option value="random">随机概率</option>
+          <option value="when_peer_voice">{{ (i18n or {}).get('wa_s108', "对方发语音时") }}</option>
+          <option value="always">{{ (i18n or {}).get('wa_s109', "每条回复") }}</option>
+          <option value="random">{{ (i18n or {}).get('wa_s110', "随机概率") }}</option>
         </select>
       </div>
       <div class="f-row">
-        <label class="f-lbl">TTS 最大文字长度</label>
+        <label class="f-lbl">TTS {{ (i18n or {}).get('wa_s111', "最大文字长度") }}</label>
         <input class="f-inp" type="number" id="cfg-wa-voice-maxchars" min="50" step="10" value="220" oninput="rpa.markDirty('wa-tab-settings')">
       </div>
       <div class="f-row">
-        <label class="f-lbl">音频最长秒数</label>
+        <label class="f-lbl">{{ (i18n or {}).get('wa_s112', "音频最长秒数") }}</label>
         <input class="f-inp" type="number" id="cfg-wa-voice-maxsec" min="5" step="5" value="20" oninput="rpa.markDirty('wa-tab-settings')">
       </div>
       <div class="f-row" style="grid-column:1/-1">
-        <label class="f-lbl">TTS 快速试听</label>
+        <label class="f-lbl">TTS {{ (i18n or {}).get('wa_s113', "快速试听") }}</label>
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;flex:1">
           <select id="cfg-wa-tts-test-lang" style="font-size:12px;padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;background:#fff">
-            <option value="">— 配置默认语言 —</option>
-            <option value="zh-cn">🇨🇳 zh-cn 中文</option>
+            <option value="">— {{ (i18n or {}).get('wa_s114', "配置默认语言") }} —</option>
+            <option value="zh-cn">🇨🇳 zh-cn {{ (i18n or {}).get('dash.lang.zh', "中文") }}</option>
             <option value="en">🇺🇸 en English</option>
             <option value="de">🇩🇪 de Deutsch</option>
-            <option value="ja">🇯🇵 ja 日本語</option>
+            <option value="ja">🇯🇵 ja {{ (i18n or {}).get('draft.tpl.lang_ja', "日本語") }}</option>
             <option value="ko">🇰🇷 ko 한국어</option>
             <option value="fr">🇫🇷 fr Français</option>
             <option value="es">🇪🇸 es Español</option>
@@ -668,69 +668,69 @@
             <option value="pt">🇧🇷 pt Português</option>
             <option value="tr">🇹🇷 tr Türkçe</option>
           </select>
-          <input type="text" id="cfg-wa-tts-test-text" placeholder="输入测试文字…" maxlength="200"
+          <input type="text" id="cfg-wa-tts-test-text" placeholder="{{ (i18n or {}).get('wa_s115', '输入测试文字…') }}" maxlength="200"
             style="flex:1;min-width:120px;font-size:12px;padding:4px 8px;border:1px solid #d1d5db;border-radius:6px">
           <button onclick="waSettingsTtsTest()" id="cfg-wa-tts-test-btn"
             style="font-size:12px;padding:4px 12px;border-radius:6px;background:#0ea5e9;color:#fff;border:none;cursor:pointer">
-            ▶ 试听
+            ▶ {{ (i18n or {}).get('wa_s116', "试听") }}
           </button>
         </div>
       </div>
       <div id="cfg-wa-tts-test-result" style="grid-column:1/-1;margin-top:2px;font-size:12px;display:flex;align-items:center;gap:8px;min-height:18px"></div>
     </div>
     <div id="wa-voice-metrics" style="margin-top:.6rem;padding:.5rem .7rem;background:rgba(16,185,129,.06);border-radius:6px;font-size:.82rem;color:#6b7280;display:none">
-      <b>语音统计</b>（本次启动）：<span id="wa-vm-txt">加载中...</span>
+      <b>{{ (i18n or {}).get('wa_s117', "语音统计") }}</b>（{{ (i18n or {}).get('wa_s118', "本次启动）：") }}<span id="wa-vm-txt">{{ (i18n or {}).get('msg_js_1047', "加载中") }}...</span>
     </div>
   </div>
 
   <div class="rpa-card">
     <div class="rpa-card-head">
       <div class="rpa-card-icon" style="background:rgba(139,92,246,.12)">🖼️</div>
-      <div class="rpa-card-title">多模态媒体理解</div>
+      <div class="rpa-card-title">{{ (i18n or {}).get('wa_s119', "多模态媒体理解") }}</div>
     </div>
-    <div class="rpa-desc">识别对方发来的图片/视频/贴纸/GIF/文件，让 AI 自然回应（需配置 Vision 后端）。</div>
+    <div class="rpa-desc">{{ (i18n or {}).get('wa_s120', "识别对方发来的图片/视频/贴纸/GIF/文件，让 AI 自然回应（需配置 Vision 后端）。") }}</div>
     <div class="f-row" style="margin-top:.4rem">
       <label class="rpa-toggle">
         <input type="checkbox" id="cfg-wa-media-enabled" onchange="rpa.markDirty('wa-tab-settings')">
-        <span class="rpa-toggle-sw"></span><span class="rpa-toggle-lbl">启用媒体理解</span>
+        <span class="rpa-toggle-sw"></span><span class="rpa-toggle-lbl">{{ (i18n or {}).get('wa_s121', "启用媒体理解") }}</span>
       </label>
     </div>
     <div class="f-row">
       <label class="rpa-toggle">
         <input type="checkbox" id="cfg-wa-media-vision" checked onchange="rpa.markDirty('wa-tab-settings')">
-        <span class="rpa-toggle-sw"></span><span class="rpa-toggle-lbl">使用 Vision 描述内容（否则仅 placeholder）</span>
+        <span class="rpa-toggle-sw"></span><span class="rpa-toggle-lbl">{{ (i18n or {}).get('wa_s122', "使用 Vision 描述内容（否则仅 placeholder）") }}</span>
       </label>
     </div>
     <div class="f-row">
-      <label class="f-lbl">裁剪边距 (px)</label>
+      <label class="f-lbl">{{ (i18n or {}).get('wa_s123', "裁剪边距") }} (px)</label>
       <input class="f-inp" type="number" id="cfg-wa-media-padding" min="0" max="80" step="4" value="24" oninput="rpa.markDirty('wa-tab-settings')">
     </div>
     <div class="f-row">
-      <label class="f-lbl">Vision 超时 (秒)</label>
+      <label class="f-lbl">Vision {{ (i18n or {}).get('wa_s124', "超时 (秒") }})</label>
       <input class="f-inp" type="number" id="cfg-wa-media-timeout" min="5" max="120" step="5" value="30" oninput="rpa.markDirty('wa-tab-settings')">
     </div>
     <div id="wa-media-metrics" style="margin-top:.6rem;padding:.5rem .7rem;background:rgba(139,92,246,.06);border-radius:6px;font-size:.82rem;color:#6b7280;display:none">
-      <b>媒体统计</b>（本次启动）：<span id="wa-mm-txt">加载中...</span>
+      <b>{{ (i18n or {}).get('wa_s125', "媒体统计") }}</b>（{{ (i18n or {}).get('wa_s118', "本次启动）：") }}<span id="wa-mm-txt">{{ (i18n or {}).get('msg_js_1047', "加载中") }}...</span>
     </div>
   </div>
 
   <div class="rpa-card">
     <div class="rpa-card-head">
       <div class="rpa-card-icon" style="background:rgba(99,102,241,.12)">🔌</div>
-      <div class="rpa-card-title">全局开关</div>
+      <div class="rpa-card-title">{{ (i18n or {}).get('wa_s126', "全局开关") }}</div>
     </div>
     <div style="display:flex;gap:1.5rem;flex-wrap:wrap">
       <label class="rpa-toggle">
         <input type="checkbox" id="cfg-wa-enabled" onchange="rpa.markDirty('wa-tab-settings')">
-        <span class="rpa-toggle-sw"></span><span class="rpa-toggle-lbl">启用 WhatsApp RPA（总开关）</span>
+        <span class="rpa-toggle-sw"></span><span class="rpa-toggle-lbl">{{ (i18n or {}).get('wa_s127', "启用 WhatsApp RPA（总开关）") }}</span>
       </label>
       <label class="rpa-toggle">
         <input type="checkbox" id="cfg-wa-biz" onchange="rpa.markDirty('wa-tab-settings')">
-        <span class="rpa-toggle-sw"></span><span class="rpa-toggle-lbl">使用 WhatsApp Business 版</span>
+        <span class="rpa-toggle-sw"></span><span class="rpa-toggle-lbl">{{ (i18n or {}).get('wa_s128', "使用 WhatsApp Business 版") }}</span>
       </label>
       <label class="rpa-toggle">
         <input type="checkbox" id="cfg-wa-auto-accept" onchange="rpa.markDirty('wa-tab-settings')">
-        <span class="rpa-toggle-sw"></span><span class="rpa-toggle-lbl">自动接受联系人申请</span>
+        <span class="rpa-toggle-sw"></span><span class="rpa-toggle-lbl">{{ (i18n or {}).get('wa_s129', "自动接受联系人申请") }}</span>
       </label>
     </div>
   </div>
@@ -739,7 +739,7 @@
   <div class="rpa-card">
     <div class="rpa-card-head">
       <div class="rpa-card-icon" style="background:rgba(251,191,36,.12);color:#f59e0b">😊</div>
-      <div class="rpa-card-title">表情回复控制</div>
+      <div class="rpa-card-title">{{ (i18n or {}).get('wa_s130', "表情回复控制") }}</div>
       <label class="rpa-toggle" style="margin-left:auto">
         <input type="checkbox" id="cfg-wa-emoticons-enabled" onchange="rpa.markDirty('wa-tab-settings')">
         <span class="rpa-toggle-sw"></span>
@@ -747,26 +747,26 @@
     </div>
     <div class="f-grid2">
       <div class="f-row">
-        <label class="f-lbl">跳过表情概率（%）</label>
+        <label class="f-lbl">{{ (i18n or {}).get('wa_s131', "跳过表情概率（%）") }}</label>
         <input class="f-inp" type="number" id="cfg-wa-emoticons-skip" min="0" max="100" step="5" value="32" oninput="rpa.markDirty('wa-tab-settings')">
-        <span class="f-hint">0 = 总是加表情，100 = 从不加表情</span>
+        <span class="f-hint">0 = {{ (i18n or {}).get('wa_s132', "总是加表情，") }}100 = {{ (i18n or {}).get('wa_s133', "从不加表情") }}</span>
       </div>
       <div class="f-row">
-        <label class="f-lbl">最大连续带表情条数</label>
+        <label class="f-lbl">{{ (i18n or {}).get('wa_s134', "最大连续带表情条数") }}</label>
         <input class="f-inp" type="number" id="cfg-wa-emoticons-max-consec" min="0" max="10" step="1" value="2" oninput="rpa.markDirty('wa-tab-settings')">
-        <span class="f-hint">超过此数后强制跳过表情（防刷屏）</span>
+        <span class="f-hint">{{ (i18n or {}).get('wa_s135', "超过此数后强制跳过表情（防刷屏）") }}</span>
       </div>
     </div>
     <div style="margin-top:.6rem;padding:.5rem .7rem;background:rgba(251,191,36,.06);border-radius:6px;font-size:.78rem;color:#6b7280">
-      💡 <b>减少表情建议</b>：将"跳过概率"提高到 70-85%，"最大连续"设为 1
+      💡 <b>{{ (i18n or {}).get('wa_s136', "减少表情建议") }}</b>：{{ (i18n or {}).get('wa_s137', "将") }}"{{ (i18n or {}).get('wa_s138', "跳过概率") }}"{{ (i18n or {}).get('wa_s139', "提高到 70-85%，") }}"{{ (i18n or {}).get('wa_s140', "最大连续") }}"{{ (i18n or {}).get('wa_s141', "设为") }} 1
     </div>
   </div>
 
   <div class="save-bar">
     <span class="save-res" id="wa-cfg-msg"></span>
-    <span style="font-size:.75rem;color:var(--t3);margin-right:auto">大部分字段实时生效；总开关需重启主进程</span>
-    <button class="btn-sec" onclick="waLoadCfg()">重置</button>
-    <button class="btn-p" id="wa-cfg-save">保存配置</button>
+    <span style="font-size:.75rem;color:var(--t3);margin-right:auto">{{ (i18n or {}).get('wa_s142', "大部分字段实时生效；总开关需重启主进程") }}</span>
+    <button class="btn-sec" onclick="waLoadCfg()">{{ (i18n or {}).get('psn_reset', "重置") }}</button>
+    <button class="btn-p" id="wa-cfg-save">{{ (i18n or {}).get('msg_s183', "保存配置") }}</button>
   </div>
 
 </div>
@@ -780,19 +780,19 @@
   <div class="rpa-card">
     <div class="rpa-card-head">
       <div class="rpa-card-icon" style="background:rgba(99,102,241,.12);color:#6366f1">🔍</div>
-      <div class="rpa-card-title">历史聊天检索</div>
-      <span class="rpa-card-sub" style="margin-left:auto;font-size:.72rem;color:var(--t3)">30 天内全文 + 意图过滤</span>
+      <div class="rpa-card-title">{{ (i18n or {}).get('wa_s143', "历史聊天检索") }}</div>
+      <span class="rpa-card-sub" style="margin-left:auto;font-size:.72rem;color:var(--t3)">30 {{ (i18n or {}).get('wa_s144', "天内全文") }} + {{ (i18n or {}).get('wa_s145', "意图过滤") }}</span>
     </div>
     <div style="display:flex;gap:.55rem;align-items:center;flex-wrap:wrap;padding:.2rem 0 .5rem">
-      <input id="wa-hist-q" type="text" placeholder="🔍 检索聊天关键词…"
+      <input id="wa-hist-q" type="text" placeholder="🔍 {{ (i18n or {}).get('wa_s146', '检索聊天关键词…') }}"
              style="flex:1;min-width:220px;padding:.5rem .75rem;background:var(--input);border:1px solid var(--bd2);border-radius:7px;font-size:.85rem;color:var(--t)">
       <select id="wa-hist-q-intent" style="padding:.5rem .65rem;background:var(--input);border:1px solid var(--bd2);border-radius:7px;font-size:.8rem;color:var(--t2)">
-        <option value="">全部意图</option>
-        <option value="purchase">购买</option>
-        <option value="support">售后</option>
-        <option value="inquiry">咨询</option>
-        <option value="greeting">问候</option>
-        <option value="general">通用</option>
+        <option value="">{{ (i18n or {}).get('ov_all_intents', "全部意图") }}</option>
+        <option value="purchase">{{ (i18n or {}).get('rpa_intent_purchase', "购买") }}</option>
+        <option value="support">{{ (i18n or {}).get('rpa_intent_support', "售后") }}</option>
+        <option value="inquiry">{{ (i18n or {}).get('rpa_intent_inquiry', "咨询") }}</option>
+        <option value="greeting">{{ (i18n or {}).get('rpa_intent_greeting', "问候") }}</option>
+        <option value="general">{{ (i18n or {}).get('rpa_intent_general', "通用") }}</option>
       </select>
     </div>
     <div id="wa-hist-results" style="display:none;max-height:360px;overflow-y:auto;border-top:1px solid var(--bd)"></div>
@@ -802,51 +802,51 @@
   <div class="rpa-card">
     <div class="rpa-card-head">
       <div class="rpa-card-icon" style="background:rgba(59,130,246,.12);color:#3b82f6">📊</div>
-      <div class="rpa-card-title">意图分布</div>
+      <div class="rpa-card-title">{{ (i18n or {}).get('wa_s147', "意图分布") }}</div>
       <div class="actions" style="display:flex;gap:.3rem;margin-left:auto">
         <button class="rpa-hero-btn rpa-win-btn" data-h="24">24h</button>
         <button class="rpa-hero-btn rpa-win-btn active" data-h="168">7d</button>
         <button class="rpa-hero-btn rpa-win-btn" data-h="720">30d</button>
       </div>
     </div>
-    <div id="wa-intent-body" style="padding:.4rem 0">加载中…</div>
+    <div id="wa-intent-body" style="padding:.4rem 0">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
   </div>
 
   <div class="rpa-card">
     <div class="rpa-card-head">
       <div class="rpa-card-icon" style="background:rgba(168,85,247,.12);color:#9333ea">📜</div>
-      <div class="rpa-card-title">运行日志</div>
+      <div class="rpa-card-title">{{ (i18n or {}).get('wa_s025', "运行日志") }}</div>
       <div class="log-toolbar" style="margin-left:auto;margin-bottom:0">
         <span class="log-live-dot" id="wa-log-live-dot" style="display:none"></span>
-        <button class="rpa-hero-btn" onclick="waLoadLogTail()">↻ 刷新</button>
+        <button class="rpa-hero-btn" onclick="waLoadLogTail()">↻ {{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
       </div>
     </div>
     <div class="log-wrap" id="wa-log-tail">
-      <div class="log-empty">点击刷新加载…</div>
+      <div class="log-empty">{{ (i18n or {}).get('wa_s148', "点击刷新加载…") }}</div>
     </div>
   </div>
 
   <div class="rpa-card">
     <div class="rpa-card-head">
       <div class="rpa-card-icon blue">📱</div>
-      <div class="rpa-card-title">设备快捷操作</div>
+      <div class="rpa-card-title">{{ (i18n or {}).get('wa_s149', "设备快捷操作") }}</div>
     </div>
     <div style="display:flex;gap:.65rem;flex-wrap:wrap;margin-bottom:.85rem">
       <button class="btn-sec" id="wa-btn-accept">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
-        立即接受联系人申请
+        {{ (i18n or {}).get('wa_s150', "立即接受联系人申请") }}
       </button>
       <button class="btn-sec" id="wa-btn-screenshot">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-        获取当前截屏
+        {{ (i18n or {}).get('wa_s151', "获取当前截屏") }}
       </button>
     </div>
     <div id="wa-device-msg" style="font-size:.78rem;color:var(--t2);margin-bottom:.5rem"></div>
     <div id="wa-screenshot-wrap" style="display:none;margin-top:.5rem">
-      <img id="wa-screenshot-img" src="" alt="设备截屏"
+      <img id="wa-screenshot-img" src="" alt="{{ (i18n or {}).get('wa_s152', '设备截屏') }}"
            style="max-width:100%;border-radius:8px;border:1px solid var(--bd);cursor:zoom-in"
            onclick="this.style.maxWidth=this.style.maxWidth==='100%'?'none':'100%'">
-      <div style="font-size:.72rem;color:var(--t3);margin-top:.25rem">点击放大/缩小</div>
+      <div style="font-size:.72rem;color:var(--t3);margin-top:.25rem">{{ (i18n or {}).get('wa_s153', "点击放大/缩小") }}</div>
     </div>
   </div>
 
@@ -854,16 +854,16 @@
   <div class="rpa-card" id="wa-ops-stats-card" style="margin-bottom:.7rem">
     <div class="rpa-card-head">
       <div class="rpa-card-icon blue">📊</div>
-      <div class="rpa-card-title">24h 统计</div>
+      <div class="rpa-card-title">24h {{ (i18n or {}).get('wa_s154', "统计") }}</div>
       <div class="rpa-card-desc" id="wa-ops-mode-lbl"></div>
     </div>
     <div class="wa-ops-stat-grid">
-      <div class="wa-ops-stat"><div class="wa-ops-stat-n" id="wa-ops-conv">—</div><div class="wa-ops-stat-l">独立对话</div></div>
-      <div class="wa-ops-stat"><div class="wa-ops-stat-n" id="wa-ops-sent">—</div><div class="wa-ops-stat-l">回复成功</div></div>
-      <div class="wa-ops-stat"><div class="wa-ops-stat-n" id="wa-ops-rate">—</div><div class="wa-ops-stat-l">回复率</div></div>
-      <div class="wa-ops-stat"><div class="wa-ops-stat-n" id="wa-ops-avg">—</div><div class="wa-ops-stat-l">平均耗时</div></div>
-      <div class="wa-ops-stat"><div class="wa-ops-stat-n" id="wa-ops-total">—</div><div class="wa-ops-stat-l">总巡检次</div></div>
-      <div class="wa-ops-stat"><div class="wa-ops-stat-n" id="wa-ops-pending">—</div><div class="wa-ops-stat-l">待审批</div></div>
+      <div class="wa-ops-stat"><div class="wa-ops-stat-n" id="wa-ops-conv">—</div><div class="wa-ops-stat-l">{{ (i18n or {}).get('wa_s155', "独立对话") }}</div></div>
+      <div class="wa-ops-stat"><div class="wa-ops-stat-n" id="wa-ops-sent">—</div><div class="wa-ops-stat-l">{{ (i18n or {}).get('wa_s156', "回复成功") }}</div></div>
+      <div class="wa-ops-stat"><div class="wa-ops-stat-n" id="wa-ops-rate">—</div><div class="wa-ops-stat-l">{{ (i18n or {}).get('wa_s004', "回复率") }}</div></div>
+      <div class="wa-ops-stat"><div class="wa-ops-stat-n" id="wa-ops-avg">—</div><div class="wa-ops-stat-l">{{ (i18n or {}).get('wa_s005', "平均耗时") }}</div></div>
+      <div class="wa-ops-stat"><div class="wa-ops-stat-n" id="wa-ops-total">—</div><div class="wa-ops-stat-l">{{ (i18n or {}).get('wa_s157', "总巡检次") }}</div></div>
+      <div class="wa-ops-stat"><div class="wa-ops-stat-n" id="wa-ops-pending">—</div><div class="wa-ops-stat-l">{{ (i18n or {}).get('msg_s140', "待审批") }}</div></div>
     </div>
   </div>
 
@@ -871,24 +871,24 @@
   <div class="rpa-card" id="wa-send-queue-card" style="margin-bottom:.7rem">
     <div class="rpa-card-head">
       <div class="rpa-card-icon purple">📤</div>
-      <div class="rpa-card-title">手动发送队列</div>
-      <button class="rpa-hero-btn" style="margin-left:auto;font-size:.7rem" onclick="waLoadSendQueue()" title="刷新">↻</button>
+      <div class="rpa-card-title">{{ (i18n or {}).get('msg_s457', "手动发送队列") }}</div>
+      <button class="rpa-hero-btn" style="margin-left:auto;font-size:.7rem" onclick="waLoadSendQueue()" title="{{ (i18n or {}).get('dash.refresh', '刷新') }}">↻</button>
     </div>
-    <div id="wa-send-queue-list"><div style="padding:.55rem 1rem;font-size:.78rem;color:var(--t3)">加载中…</div></div>
+    <div id="wa-send-queue-list"><div style="padding:.55rem 1rem;font-size:.78rem;color:var(--t3)">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
   </div>
 
   {# P7-D: 意图分布统计卡 #}
   <div class="rpa-card" id="wa-intent-stats-card" style="margin-bottom:.7rem">
     <div class="rpa-card-head">
       <div class="rpa-card-icon" style="background:rgba(245,158,11,.1);color:#f59e0b">🏷️</div>
-      <div class="rpa-card-title">意图分布</div>
+      <div class="rpa-card-title">{{ (i18n or {}).get('wa_s147', "意图分布") }}</div>
       <div class="wa-intent-chart-win" style="margin-left:auto;margin-bottom:0">
-        <button class="wa-chart-win-btn active" onclick="waLoadIntentStats(this,168)" data-h="168">7天</button>
-        <button class="wa-chart-win-btn" onclick="waLoadIntentStats(this,720)" data-h="720">30天</button>
+        <button class="wa-chart-win-btn active" onclick="waLoadIntentStats(this,168)" data-h="168">7{{ (i18n or {}).get('wa_s158', "天") }}</button>
+        <button class="wa-chart-win-btn" onclick="waLoadIntentStats(this,720)" data-h="720">30{{ (i18n or {}).get('wa_s158', "天") }}</button>
         <button class="wa-chart-win-btn" onclick="waLoadIntentStats(this,24)" data-h="24">24h</button>
       </div>
     </div>
-    <div id="wa-intent-chart-body" class="wa-intent-chart"><div style="font-size:.75rem;color:var(--t3)">加载中…</div></div>
+    <div id="wa-intent-chart-body" class="wa-intent-chart"><div style="font-size:.75rem;color:var(--t3)">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
   </div>
 
   {# 运营漏斗（合并到运维 tab）#}
@@ -946,20 +946,20 @@ function waRenderHealthBar(){
   if(!bar || !_waLastStatus) return;
   const s = _waLastStatus;
   const issues=[], warns=[];
-  if(!s.available){ issues.push('服务未初始化'); }
-  else if(!s.enabled){ warns.push('服务已禁用'); }
-  else if(!s.running){ issues.push('后台轮询未运行'); }
-  if(s.paused) warns.push('已暂停 '+rpa.fmtDur(s.pause_remaining_sec||0));
+  if(!s.available){ issues.push(window.T('wa_js_001')); }
+  else if(!s.enabled){ warns.push(window.T('wa_js_002')); }
+  else if(!s.running){ issues.push(window.T('wa_js_003')); }
+  if(s.paused) warns.push(window.T('ov_js_paused')+' '+rpa.fmtDur(s.pause_remaining_sec||0));
   const cap=Number(s.daily_cap||0), sent=Number(s.daily_sent||0);
-  if(cap>0 && sent>=cap) issues.push('今日上限已满 '+sent+'/'+cap);
-  else if(cap>0 && sent>=cap*.8) warns.push('接近每日上限 '+sent+'/'+cap);
-  if((s.unacked_alerts||0)>0) warns.push(s.unacked_alerts+' 条未确认告警');
+  if(cap>0 && sent>=cap) issues.push(window.T('wa_js_004')+' '+sent+'/'+cap);
+  else if(cap>0 && sent>=cap*.8) warns.push(window.T('wa_js_005')+' '+sent+'/'+cap);
+  if((s.unacked_alerts||0)>0) warns.push(s.unacked_alerts+' '+window.T('wa_js_006'));
   const lr=s.last_run||{};
-  if(lr.ok===false||lr.ok===0) warns.push('上次运行失败: '+(lr.step||'?'));
+  if(lr.ok===false||lr.ok===0) warns.push(window.T('wa_js_007')+': '+(lr.step||'?'));
   let state,icon,label;
-  if(issues.length){ state='err'; icon='🔴'; label='异常'; }
-  else if(warns.length){ state='warn'; icon='🟡'; label='注意'; }
-  else{ state='ok'; icon='🟢'; label='运行正常'; }
+  if(issues.length){ state='err'; icon='🔴'; label=window.T('msg_js_1245'); }
+  else if(warns.length){ state='warn'; icon='🟡'; label=window.T('wa_js_008'); }
+  else{ state='ok'; icon='🟢'; label=window.T('wa_js_009'); }
   const chips=[...issues,...warns].map(x=>`<span class="wa-health-issue">${rpa.esc(x)}</span>`).join('');
   bar.className='wa-health-bar '+state;
   bar.style.display='';
@@ -978,7 +978,7 @@ function waUpdateOpsStats(s){
   $('wa-ops-total').textContent = rs.total ?? '—';
   $('wa-ops-pending').textContent = s.pending_count ?? '—';
   const modeEl=$('wa-ops-mode-lbl');
-  if(modeEl) modeEl.textContent='回复模式：'+(s.reply_mode||'auto');
+  if(modeEl) modeEl.textContent=window.T('wa_s078')+'：'+(s.reply_mode||'auto');
 }
 
 /* ── Status ─────────────────────────────────────────────── */
@@ -994,11 +994,11 @@ async function waLoadStatus(){
     else { dot.className='rpa-status-dot warn'; }
     // subtitle
     let sub='';
-    if(!d.available) sub='服务未初始化';
-    else if(!d.enabled) sub='已禁用';
-    else if(d.paused) sub='已暂停（剩 '+rpa.fmtDur(d.pause_remaining_sec||0)+'）';
-    else if(d.running) sub='运行中 · 回复模式：'+(d.reply_mode||'auto');
-    else sub='未运行';
+    if(!d.available) sub=window.T('wa_js_001');
+    else if(!d.enabled) sub=window.T('psn_disabled');
+    else if(d.paused) sub=window.T('wa_js_010')+' '+rpa.fmtDur(d.pause_remaining_sec||0)+'）';
+    else if(d.running) sub=window.T('wa_js_011')+'：'+(d.reply_mode||'auto');
+    else sub=window.T('wa_js_012');
     $('wa-hero-sub').textContent = sub;
     // KPI（基于真实对话统计，过滤心跳空转）
     const cs24 = d.conv_stats_24h||{};
@@ -1023,7 +1023,7 @@ async function waLoadStatus(){
     const banner = $('wa-alert-banner');
     if(unacked>0){
       banner.classList.add('show');
-      $('wa-alert-count').textContent = unacked+' 条';
+      $('wa-alert-count').textContent = unacked+' '+window.T('dash.items');
     } else { banner.classList.remove('show'); }
     // pending tab badge
     const pendCnt = d.pending_count||0;
@@ -1037,7 +1037,7 @@ async function waLoadStatus(){
       rpa.markDirty('wa-tab-pending', false);
     }
     // Q3: 浏览器 title 角标
-    if(window.rpa && window.rpa.notify) window.rpa.notify.setBadge(pendCnt, 'WA 待审');
+    if(window.rpa && window.rpa.notify) window.rpa.notify.setBadge(pendCnt, 'WA '+window.T('ov_kpi_pending'));
     // P2-A: 健康检查 + P2-E: 运维统计
     waRenderHealthBar();
     waUpdateOpsStats(d);
@@ -1117,14 +1117,14 @@ async function waLoadConversations(){
     // P2-D: 新对话 Toast
     if(_waPrevConvKeys.size > 0){
       const novel = incoming.filter(c=>c.chat_key && !_waPrevConvKeys.has(c.chat_key));
-      if(novel.length) rpa.toast('✨ '+novel.length+' 个新对话', 'ok');
+      if(novel.length) rpa.toast('✨ '+novel.length+' '+window.T('wa_js_013'), 'ok');
     }
     _waPrevConvKeys = new Set(incoming.map(c=>c.chat_key).filter(Boolean));
     _waConvData = incoming;
     waRenderConversations({restoreExpand:true});
   }catch(e){
     const list=$('wa-conv-list');
-    if(list) list.innerHTML='<div class="wa-conv-empty"><div class="wa-conv-empty-title" style="color:#f87171">加载失败</div><div class="wa-conv-empty-sub">'+rpa.esc(String(e))+'</div></div>';
+    if(list) list.innerHTML='<div class="wa-conv-empty"><div class="wa-conv-empty-title" style="color:#f87171">'+window.T('rpa_load_failed')+'</div><div class="wa-conv-empty-sub">'+rpa.esc(String(e))+'</div></div>';
     console.warn('wa conversations fail',e);
   }
 }
@@ -1166,29 +1166,29 @@ window.waRenderConversations = function(opts){
   if(countEl) countEl.textContent=(query||_waConvFilter!=='all')?filtered.length+'/'+_waConvData.length:'';
   if(!filtered.length){
     list.innerHTML = _waConvData.length
-      ? `<div class="wa-conv-empty"><div class="wa-conv-empty-icon">🔍</div><div class="wa-conv-empty-title">无匹配对话</div><div class="wa-conv-empty-sub">尝试清空搜索词或切换过滤</div></div>`
-      : `<div class="wa-conv-empty"><div class="wa-conv-empty-icon">💬</div><div class="wa-conv-empty-title">48 小时内无对话</div><div class="wa-conv-empty-sub">WhatsApp RPA 运行中，等待第一条消息</div></div>`;
+      ? `<div class="wa-conv-empty"><div class="wa-conv-empty-icon">🔍</div><div class="wa-conv-empty-title">${window.T('wa_js_077')}</div><div class="wa-conv-empty-sub">${window.T('wa_js_078')}</div></div>`
+      : `<div class="wa-conv-empty"><div class="wa-conv-empty-icon">💬</div><div class="wa-conv-empty-title">48 ${window.T('wa_js_079')}</div><div class="wa-conv-empty-sub">WhatsApp RPA ${window.T('wa_js_080')}</div></div>`;
     return;
   }
   list.innerHTML = filtered.map(conv=>{
-    const name = conv.peer_name||conv.chat_key||'未知';
+    const name = conv.peer_name||conv.chat_key||window.T('rpa_unknown');
     const engLvl = waEngagementLevel(conv);
-    const engDot = `<span class="wa-eng-dot wa-eng-${engLvl}" title="互动热度：${engLvl}"></span>`;
+    const engDot = `<span class="wa-eng-dot wa-eng-${engLvl}" title="${window.T('wa_js_081')}：${engLvl}"></span>`;
     const personaChip = conv.persona_name?`<span class="wa-conv-persona-chip">🎭 ${rpa.esc(conv.persona_name)}</span>`:'';
     // P3-A: 待回复检测（优先用时间比较：last_peer_ts > last_reply_ts，降级为文本比较）
     const lpt = Number(conv.state_last_peer_ts)||0;
     const lrt = Number(conv.state_last_reply_ts)||0;
     const unanswered = lpt>0 ? lpt>lrt : (conv.state_last_peer && !conv.state_last_reply);
-    const unansweredChip = unanswered?'<span class="wa-conv-unanswered">⏳ 待回复</span>':'';
+    const unansweredChip = unanswered?'<span class="wa-conv-unanswered">⏳ '+window.T('dash.scope.waiting')+'</span>':'';
     const timeStr = rpa.ago(conv.last_peer_ts||conv.ts);
-    const peer = (conv.peer_text||'').slice(0,90)||'（无预览）';
+    const peer = (conv.peer_text||'').slice(0,90)||'（'+window.T('wa_js_014')+'）';
     const replyRow = conv.reply_text?`<div class="wa-conv-reply">${rpa.esc((conv.reply_text||'').slice(0,90))}</div>`:'';
-    const errChip = !conv.ok?`<span class="wa-conv-err-chip">⚠ 上次失败</span>`:'';
+    const errChip = !conv.ok?`<span class="wa-conv-err-chip">⚠ ${window.T('wa_js_082')}</span>`:'';
     const turns = Number(conv.total_turns)||0;
     // P4-A: 亲密度进度条
     const intimacy = conv.state_intimacy != null ? Number(conv.state_intimacy) : null;
     const intBar = intimacy != null
-      ? `<div class="wa-intimacy-bar" title="亲密度 ${Math.round(intimacy)}">
+      ? `<div class="wa-intimacy-bar" title="${window.T('wa_js_083')} ${Math.round(intimacy)}">
            <div class="wa-intimacy-fill ${intimacy>=70?'hi':intimacy>=35?'mid':'lo'}" style="width:${Math.min(100,intimacy)}%"></div>
          </div>` : '';
     // P3-A/P4-A: 语言徽章（锁定优先）
@@ -1198,8 +1198,8 @@ window.waRenderConversations = function(opts){
     const _fl = conv.state_forced_lang;
     const _dl = conv.state_detected_lang;
     const langBadge = _fl
-      ? `<span class="wa-lang-badge wa-lang-locked" title="语言已锁定: ${_fl}（运营手动设置）">🔒 ${_langMap[_fl]||'🌐'} ${_fl}</span>`
-      : (_dl ? `<span class="wa-lang-badge" title="检测到的语言: ${_dl}">${_langMap[_dl]||'🌐'} ${_dl}</span>` : '');
+      ? `<span class="wa-lang-badge wa-lang-locked" title="${window.T('wa_js_084')}: ${_fl}（${window.T('wa_js_085')}）">🔒 ${_langMap[_fl]||'🌐'} ${_fl}</span>`
+      : (_dl ? `<span class="wa-lang-badge" title="${window.T('wa_js_086')}: ${_dl}">${_langMap[_dl]||'🌐'} ${_dl}</span>` : '');
     const ck = rpa.esc(conv.chat_key||'');
     return `<div class="wa-conv-card" data-chat-key="${ck}">
       <div class="wa-conv-avatar" style="background:${_avatarBg(name)}">${rpa.esc(_initials(name))}</div>
@@ -1215,10 +1215,10 @@ window.waRenderConversations = function(opts){
         <div class="wa-conv-msg">${rpa.esc(peer)}</div>
         ${replyRow}
         <div class="wa-conv-footer">
-          <span class="wa-conv-turns">💬 ${turns} 轮</span>
+          <span class="wa-conv-turns">💬 ${turns} ${window.T('rpa_js_turns_unit')}</span>
           ${langBadge}
           ${errChip}
-          <span class="wa-conv-expand-hint">▸ 展开</span>
+          <span class="wa-conv-expand-hint">▸ ${window.T('wa_js_016')}</span>
         </div>
       </div>
     </div>`;
@@ -1232,7 +1232,7 @@ window.waRenderConversations = function(opts){
       if(card.dataset.chatKey === _waExpandedKey){
         card.classList.add('expanded');
         const hint=card.querySelector('.wa-conv-expand-hint');
-        if(hint) hint.textContent='▾ 收起';
+        if(hint) hint.textContent='▾ '+window.T('inbox.collapse');
         waToggleChatDetail(card, true);
       }
     });
@@ -1246,7 +1246,7 @@ window.waCopyMsg = function(btn, encoded){
     btn.textContent='✓';
     btn.classList.add('copied');
     setTimeout(()=>{ btn.textContent='copy'; btn.classList.remove('copied'); }, 1500);
-  }).catch(()=>rpa.toast('复制失败','err'));
+  }).catch(()=>rpa.toast(window.T('wa_js_015'),'err'));
 };
 
 /* P1-B + P2-D + P6-C: 手风琴展开详情（noToggle=true 用于自动恢复） */
@@ -1256,12 +1256,12 @@ async function waToggleChatDetail(card, noToggle){
   if(!noToggle && next?.classList.contains('wa-conv-detail')){
     next.remove();
     const hint = card.querySelector('.wa-conv-expand-hint');
-    if(hint) hint.textContent='▸ 展开';
+    if(hint) hint.textContent='▸ '+window.T('wa_js_016');
     _waExpandedKey = null;
     return;
   }
   const hint = card.querySelector('.wa-conv-expand-hint');
-  if(hint) hint.textContent='▾ 收起';
+  if(hint) hint.textContent='▾ '+window.T('inbox.collapse');
   const chatKey = card.dataset.chatKey;
   if(!chatKey) return;
   _waExpandedKey = chatKey;
@@ -1279,22 +1279,22 @@ async function waToggleChatDetail(card, noToggle){
   // Tabs
   const tabs = document.createElement('div');
   tabs.className='wa-detail-tabs';
-  tabs.innerHTML=`<button class="wa-detail-tab active" onclick="waDetailMode(this,'summary')">📋 摘要</button>
-    <button class="wa-detail-tab" onclick="waDetailMode(this,'full')">💬 全量</button>
+  tabs.innerHTML=`<button class="wa-detail-tab active" onclick="waDetailMode(this,'summary')">📋 ${window.T('rpa_js_summary')}</button>
+    <button class="wa-detail-tab" onclick="waDetailMode(this,'full')">💬 ${window.T('rpa_js_full')}</button>
     <span class="wa-detail-total" id="wa-dt-total-${chatKey.replace(/[^a-z0-9]/gi,'_')}"></span>`;
   detail.appendChild(tabs);
 
   // Content pane
   const pane = document.createElement('div');
   pane.className='wa-detail-pane';
-  pane.innerHTML='<div class="wa-detail-empty">加载中…</div>';
+  pane.innerHTML='<div class="wa-detail-empty">'+window.T('msg_js_1047')+'…</div>';
   detail.appendChild(pane);
 
   // Send bar
   const sendBar = document.createElement('div');
   sendBar.className='wa-send-bar';
-  sendBar.innerHTML=`<textarea class="wa-send-inp" placeholder="手动发送消息到 ${rpa.esc(pName)}…" rows="1"></textarea>
-    <button class="wa-send-btn" onclick="waSendManual(this,'${rpa.esc(chatKey)}','${rpa.esc(pName)}')">&#9654; 入队</button>`;
+  sendBar.innerHTML=`<textarea class="wa-send-inp" placeholder="${window.T('wa_js_087')} ${rpa.esc(pName)}…" rows="1"></textarea>
+    <button class="wa-send-btn" onclick="waSendManual(this,'${rpa.esc(chatKey)}','${rpa.esc(pName)}')">&#9654; ${window.T('wa_js_088')}</button>`;
   detail.appendChild(sendBar);
 
   // P3-D + P4-A: TTS 语言测试面板（含锁定/解锁）
@@ -1308,16 +1308,16 @@ async function waToggleChatDetail(card, noToggle){
   ttsBar.dataset.chatKey = chatKey;
   const _mkOpt = (v,lbl) => `<option value="${v}"${activeLang===v?' selected':''}>${lbl}</option>`;
   ttsBar.innerHTML = `
-    <div class="wa-tts-test-header">🔊 TTS 语言测试
-      ${forcedLang ? `<span class="wa-lang-locked-pill">🔒 已锁定 ${forcedLang}</span>` : ''}
+    <div class="wa-tts-test-header">🔊 TTS ${window.T('wa_js_092')}
+      ${forcedLang ? `<span class="wa-lang-locked-pill">🔒 ${window.T('wa_js_089')} ${forcedLang}</span>` : ''}
     </div>
     <div class="wa-tts-test-row">
-      <select class="wa-tts-lang-sel" title="选择 TTS 语言">
-        <option value="">— 使用配置默认 —</option>
-        ${_mkOpt('zh-cn','🇨🇳 zh-cn 中文')}
+      <select class="wa-tts-lang-sel" title="${window.T('wa_js_093')}">
+        <option value="">— ${window.T('wa_js_094')} —</option>
+        ${_mkOpt('zh-cn','🇨🇳 zh-cn '+window.T('dash.lang.zh'))}
         ${_mkOpt('en','🇺🇸 en English')}
         ${_mkOpt('de','🇩🇪 de Deutsch')}
-        ${_mkOpt('ja','🇯🇵 ja 日本語')}
+        ${_mkOpt('ja','🇯🇵 ja '+window.T('draft.tpl.lang_ja'))}
         ${_mkOpt('ko','🇰🇷 ko 한국어')}
         ${_mkOpt('fr','🇫🇷 fr Français')}
         ${_mkOpt('es','🇪🇸 es Español')}
@@ -1328,10 +1328,10 @@ async function waToggleChatDetail(card, noToggle){
         ${_mkOpt('pt','🇧🇷 pt Português')}
         ${_mkOpt('tr','🇹🇷 tr Türkçe')}
       </select>
-      <input type="text" class="wa-tts-text-inp" value="${rpa.esc(lastPeerText)}" placeholder="输入测试文字…" maxlength="400">
-      <button class="wa-tts-test-btn" onclick="waTtsTest(this)">▶ 试听</button>
-      <button class="wa-tts-lock-btn" onclick="waLangLock(this)" title="将选中语言锁定为此对话的固定语言">🔒 锁定</button>
-      ${forcedLang ? `<button class="wa-tts-unlock-btn" onclick="waLangUnlock(this)" title="恢复自动检测语言">🔓 解锁</button>` : ''}
+      <input type="text" class="wa-tts-text-inp" value="${rpa.esc(lastPeerText)}" placeholder="${window.T('wa_js_095')}…" maxlength="400">
+      <button class="wa-tts-test-btn" onclick="waTtsTest(this)">▶ ${window.T('wa_s116')}</button>
+      <button class="wa-tts-lock-btn" onclick="waLangLock(this)" title="${window.T('wa_js_096')}">🔒 ${window.T('wa_js_097')}</button>
+      ${forcedLang ? `<button class="wa-tts-unlock-btn" onclick="waLangUnlock(this)" title="${window.T('wa_js_090')}">🔓 ${window.T('wa_js_091')}</button>` : ''}
     </div>
     <div class="wa-tts-test-result"></div>`;
   detail.appendChild(ttsBar);
@@ -1347,9 +1347,9 @@ async function waDetailLoadSummary(detail, pane){
     const sessions = d.sessions||[];
     const totalEl = document.getElementById('wa-dt-total-'+chatKey.replace(/[^a-z0-9]/gi,'_'));
     if(sessions.length===0){
-      pane.innerHTML='<div class="wa-detail-empty">暂无历史会话记录</div>'; return;
+      pane.innerHTML='<div class="wa-detail-empty">'+window.T('rpa_js_no_sessions')+'</div>'; return;
     }
-    if(totalEl) totalEl.textContent=sessions.length+'个会话';
+    if(totalEl) totalEl.textContent=sessions.length+window.T('wa_js_017');
     pane.innerHTML=sessions.map(s=>{
       const d1=rpa.fmtDate(s.start_ts), d2=rpa.fmtDate(s.end_ts);
       const dateStr = d1===d2?d1:`${d1} — ${d2}`;
@@ -1357,14 +1357,14 @@ async function waDetailLoadSummary(detail, pane){
         <div class="wa-session-head">
           <span class="wa-session-date">${dateStr}</span>
           ${_intentBadge(s.dominant_intent)}
-          <span class="wa-session-stat">${s.turn_count}轮 · ${s.ok_count}成功</span>
+          <span class="wa-session-stat">${s.turn_count}${window.T('rpa_js_turns_unit')} · ${s.ok_count}${window.T('ov_js_succ_label')}</span>
         </div>
         <div class="wa-session-msg">👤 ${rpa.esc(s.first_msg||'')}</div>
         ${s.first_reply?`<div class="wa-session-reply">🤖 ${rpa.esc(s.first_reply)}</div>`:''}
       </div>`;
     }).join('');
   }catch(e){
-    pane.innerHTML='<div class="wa-detail-empty" style="color:#f87171">摘要加载失败</div>';
+    pane.innerHTML='<div class="wa-detail-empty" style="color:#f87171">'+window.T('wa_js_018')+'</div>';
   }
 }
 
@@ -1379,14 +1379,14 @@ async function waDetailLoadFull(detail, pane, append){
     detail.dataset.total = String(total);
     detail.dataset.offset = String(offset + hist.length);
     const totalEl = document.getElementById('wa-dt-total-'+chatKey.replace(/[^a-z0-9]/gi,'_'));
-    if(totalEl) totalEl.textContent='共'+total+'条';
+    if(totalEl) totalEl.textContent=window.T('wa_js_019')+total+window.T('dash.items');
     if(!append) pane.innerHTML='';
     else { const lb=pane.querySelector('.wa-load-more'); if(lb) lb.remove(); }
     if(!hist.length && !append){
-      pane.innerHTML='<div class="wa-detail-empty">暂无历史消息记录</div>'; return;
+      pane.innerHTML='<div class="wa-detail-empty">'+window.T('wa_js_020')+'</div>'; return;
     }
     const frag = hist.map(r=>{
-      const copyAi=r.reply_text?`<button class="wa-copy-btn" title="复制" onclick="waCopyMsg(this,'${encodeURIComponent(r.reply_text||'')}')">copy</button>`:'';
+      const copyAi=r.reply_text?`<button class="wa-copy-btn" title="${window.T('wa_js_098')}" onclick="waCopyMsg(this,'${encodeURIComponent(r.reply_text||'')}')">copy</button>`:'';
       const badge=r.intent_tag&&r.intent_tag!=='general'?_intentBadge(r.intent_tag):'';
       return `<div class="wa-detail-row">
         ${r.peer_text?`<div><span class="wa-detail-bubble peer">${rpa.esc(r.peer_text.slice(0,300))}</span>${badge}</div>`:''}
@@ -1399,12 +1399,12 @@ async function waDetailLoadFull(detail, pane, append){
     if(newOffset < total){
       const lb=document.createElement('button');
       lb.className='wa-load-more';
-      lb.textContent='加载更多（'+(total-newOffset)+'条未显示）';
+      lb.textContent=window.T('wa_js_021')+'（'+(total-newOffset)+window.T('wa_js_022')+'）';
       lb.onclick=()=>waDetailLoadFull(detail, pane, true);
       pane.appendChild(lb);
     }
   }catch(e){
-    if(!append) pane.innerHTML='<div class="wa-detail-empty" style="color:#f87171">历史记录加载失败</div>';
+    if(!append) pane.innerHTML='<div class="wa-detail-empty" style="color:#f87171">'+window.T('wa_js_023')+'</div>';
   }
 }
 
@@ -1415,7 +1415,7 @@ window.waDetailMode = async function(btn, mode){
   detail.dataset.mode = mode;
   const pane = detail.querySelector('.wa-detail-pane');
   if(!pane) return;
-  pane.innerHTML='<div class="wa-detail-empty">加载中…</div>';
+  pane.innerHTML='<div class="wa-detail-empty">'+window.T('msg_js_1047')+'…</div>';
   if(mode==='summary') await waDetailLoadSummary(detail, pane);
   else { detail.dataset.offset='0'; await waDetailLoadFull(detail, pane, false); }
 };
@@ -1427,7 +1427,7 @@ window.waCopyMsg = function(btn, encoded){
     btn.textContent='✓';
     btn.classList.add('copied');
     setTimeout(()=>{ btn.textContent='copy'; btn.classList.remove('copied'); }, 1500);
-  }).catch(()=>rpa.toast('复制失败','err'));
+  }).catch(()=>rpa.toast(window.T('wa_js_015'),'err'));
 };
 
 window.waFilterConv = function(f){
@@ -1441,18 +1441,18 @@ window.waSendManual = async function(btn, chatKey, peerName){
   const bar = btn.closest('.wa-send-bar');
   const inp = bar?.querySelector('.wa-send-inp');
   const text = (inp?.value||'').trim();
-  if(!text){ rpa.toast('请输入消息内容','warn'); return; }
+  if(!text){ rpa.toast(window.T('wa_js_024'),'warn'); return; }
   btn.disabled = true;
   try{
     const r = await rpa.post('/api/whatsapp-rpa/send-manual',{chat_key:chatKey,peer_name:peerName,text});
     if(r.ok){
-      rpa.toast('✅ 已入队，RPA 下轮将优先发送');
+      rpa.toast('✅ '+window.T('wa_js_025'));
       inp.value='';
     } else {
-      rpa.toast('入队失败: '+(r.error||JSON.stringify(r)),'err');
+      rpa.toast(window.T('wa_js_026')+': '+(r.error||JSON.stringify(r)),'err');
     }
   }catch(ex){
-    rpa.toast('请求失败: '+String(ex),'err');
+    rpa.toast(window.T('ov_js_req_fail')+': '+String(ex),'err');
   } finally { btn.disabled=false; }
 };
 
@@ -1464,19 +1464,19 @@ async function waLoadPersonaBar(){
     const d = await rpa.get('/api/personas/status');
     const accts = d.wa_accounts || [];
     if(!accts.length){
-      bar.innerHTML = '<span class="wa-persona-bar-lbl">🎭 账号人设</span>'
-        + '<span style="font-size:.78rem;color:var(--t3)">未配置（前往'
-        + ' <a href="/personas" style="color:var(--p)">人设工作室</a> 绑定）</span>';
+      bar.innerHTML = '<span class="wa-persona-bar-lbl">🎭 '+window.T('wa_s064')+'</span>'
+        + '<span style="font-size:.78rem;color:var(--t3)">'+window.T('wa_js_027')
+        + ' <a href="/personas" style="color:var(--p)">'+window.T('personas')+'</a> '+window.T('psn_bind')+'）</span>';
       return;
     }
     const chips = accts.map(a=>{
-      const pname = a.persona_name || (a.persona_ids||[])[0] || '未绑定';
+      const pname = a.persona_name || (a.persona_ids||[])[0] || window.T('psn_sf_unbound');
       return `<span class="wa-persona-acct"><strong>${rpa.esc(a.label||a.account_id)}</strong>`
            + ` → ${rpa.esc(pname)}</span>`;
     }).join('');
-    bar.innerHTML = `<span class="wa-persona-bar-lbl">🎭 账号人设</span>${chips}`
+    bar.innerHTML = `<span class="wa-persona-bar-lbl">🎭 ${window.T('wa_s064')}</span>${chips}`
       + `<div class="wa-persona-bar-links">`
-      + `<a href="/personas#${(accts[0]?.persona_ids||[])[0]||''}">切换人设</a>`
+      + `<a href="/personas#${(accts[0]?.persona_ids||[])[0]||''}">${window.T('wa_js_099')}</a>`
       + `<a href="/ai-studio">AI Studio</a></div>`;
   }catch(e){ /* silent */ }
 }
@@ -1489,7 +1489,7 @@ async function waLoadRecent(){
     const stream = $('wa-stream');
     const rows = d.runs||[];
     if(!rows.length){
-      stream.innerHTML = '<div class="wa-stream-empty">暂无运行记录</div>';
+      stream.innerHTML = '<div class="wa-stream-empty">'+window.T('msg_js_874')+'</div>';
       return;
     }
     stream.innerHTML = rows.map(run=>{
@@ -1534,7 +1534,7 @@ async function waLoadPending(){
     if(!items.length){
       list.innerHTML = `<div class="rpa-empty">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-        <div>暂无待审批回复</div>
+        <div>${window.T('wa_s045')}</div>
       </div>`;
       return;
     }
@@ -1543,30 +1543,30 @@ async function waLoadPending(){
       // P20-A: TTS error type display
       const _ttsErr = p.tts_path && p.tts_path.startsWith('ERROR') ? p.tts_path : '';
       const _errMap = {
-        'ERROR:timeout': {icon:'⏱', text:'TTS 超时'},
-        'ERROR:disk': {icon:'💾', text:'磁盘错误'},
-        'ERROR:model': {icon:'🤖', text:'模型错误'},
-        'ERROR:unknown': {icon:'⚠️', text:'TTS 生成失败'},
-        'ERROR': {icon:'⚠️', text:'TTS 生成失败'}
+        'ERROR:timeout': {icon:'⏱', text:'TTS '+window.T('dash.scope.breaching')},
+        'ERROR:disk': {icon:'💾', text:window.T('wa_js_028')},
+        'ERROR:model': {icon:'🤖', text:window.T('wa_js_029')},
+        'ERROR:unknown': {icon:'⚠️', text:'TTS '+window.T('dash.task_fail_generic')},
+        'ERROR': {icon:'⚠️', text:'TTS '+window.T('dash.task_fail_generic')}
       };
       const _errInfo = _errMap[_ttsErr] || _errMap['ERROR'];
       const ttsHtml = _ttsErr
-        ? `<div id="${ttsSlotId}" style="margin:.3rem 0;font-size:.7rem;color:#dc2626;font-weight:600">${_errInfo.icon} ${_errInfo.text} <button onclick="waRetryTts(${p.id})" style="margin-left:.4rem;font-size:.68rem;padding:.1rem .35rem;cursor:pointer">↻ 重试</button></div>`
+        ? `<div id="${ttsSlotId}" style="margin:.3rem 0;font-size:.7rem;color:#dc2626;font-weight:600">${_errInfo.icon} ${_errInfo.text} <button onclick="waRetryTts(${p.id})" style="margin-left:.4rem;font-size:.68rem;padding:.1rem .35rem;cursor:pointer">↻ ${window.T('rpa_retry')}</button></div>`
         : p.tts_path
-          ? `<div id="${ttsSlotId}" style="margin:.3rem 0"><span style="font-size:.7rem;color:var(--t3)">🎤 TTS 预览</span> <audio controls preload="none" style="height:26px;vertical-align:middle;max-width:200px" src="${rpa.esc(p.tts_path)}"></audio></div>`
-          : `<div id="${ttsSlotId}" style="margin:.3rem 0;font-size:.7rem;color:var(--t2)">⏳ TTS 生成中…</div>`;
+          ? `<div id="${ttsSlotId}" style="margin:.3rem 0"><span style="font-size:.7rem;color:var(--t3)">🎤 TTS ${window.T('psn_dtab_preview')}</span> <audio controls preload="none" style="height:26px;vertical-align:middle;max-width:200px" src="${rpa.esc(p.tts_path)}"></audio></div>`
+          : `<div id="${ttsSlotId}" style="margin:.3rem 0;font-size:.7rem;color:var(--t2)">⏳ TTS ${window.T('msg_js_301')}…</div>`;
       return `<div class="rpa-pend" data-pid="${p.id}">
         <div class="rpa-pend-head">
-          <input type="checkbox" class="rpa-bulk-pick" data-pid="${p.id}" title="勾选用于批量审批">
+          <input type="checkbox" class="rpa-bulk-pick" data-pid="${p.id}" title="${window.T('wa_js_100')}">
           <div class="rpa-pend-name">${rpa.esc(p.peer_name || p.chat_key)}</div>
-          <span class="rpa-pend-status pending">待审 · ${rpa.ago(p.ts)}</span>
+          <span class="rpa-pend-status pending">${window.T('ov_kpi_pending')} · ${rpa.ago(p.ts)}</span>
         </div>
         <div class="rpa-pend-peer">${rpa.esc(p.peer_text||'')}</div>
         ${ttsHtml}
-        <div style="position:relative"><textarea class="rpa-pend-editor" id="wa-pend-edit-${p.id}" placeholder="可编辑后再发送" oninput="waSaveDraft(${p.id})" onblur="waSaveDraft(${p.id})">${rpa.esc(waLoadDraft(p.id)||p.proposed_reply||'')}</textarea><span id="wa-draft-ind-${p.id}" style="position:absolute;right:4px;bottom:4px;width:6px;height:6px;border-radius:50%;background:#22c55e;opacity:0;transition:opacity .2s" title="已自动保存"></span></div>
+        <div style="position:relative"><textarea class="rpa-pend-editor" id="wa-pend-edit-${p.id}" placeholder="${window.T('wa_js_101')}" oninput="waSaveDraft(${p.id})" onblur="waSaveDraft(${p.id})">${rpa.esc(waLoadDraft(p.id)||p.proposed_reply||'')}</textarea><span id="wa-draft-ind-${p.id}" style="position:absolute;right:4px;bottom:4px;width:6px;height:6px;border-radius:50%;background:#22c55e;opacity:0;transition:opacity .2s" title="${window.T('wa_js_102')}"></span></div>
         <div class="rpa-pend-actions">
-          <button class="btn-p" style="font-size:.75rem;padding:.35rem .8rem" onclick="waResolvePending(${p.id},'approve')">✓ 发送</button>
-          <button class="btn-sec" style="font-size:.75rem;padding:.35rem .8rem" onclick="waResolvePending(${p.id},'reject')">✗ 拒绝</button>
+          <button class="btn-p" style="font-size:.75rem;padding:.35rem .8rem" onclick="waResolvePending(${p.id},'approve')">✓ ${window.T('rpa_js_send')}</button>
+          <button class="btn-sec" style="font-size:.75rem;padding:.35rem .8rem" onclick="waResolvePending(${p.id},'reject')">✗ ${window.T('rpa_js_act_reject')}</button>
         </div>
       </div>`;
     }).join('');
@@ -1591,8 +1591,8 @@ function _waStartTtsPoll(items) {
     const elapsed = Math.floor((Date.now() - _waPollStartTs)/1000);
     missing.forEach(pid => {
       const el = document.getElementById(`wa-tts-slot-${pid}`);
-      if (el && el.innerHTML.includes('TTS 生成中')) {
-        el.innerHTML = `<span style="font-size:.7rem;color:var(--t2)">⏳ TTS 生成中… (${elapsed}s)</span>`;
+      if (el && el.innerHTML.includes('TTS '+window.T('msg_js_301'))) {
+        el.innerHTML = `<span style="font-size:.7rem;color:var(--t2)">⏳ TTS ${window.T('msg_js_301')}… (${elapsed}s)</span>`;
       }
     });
   }
@@ -1600,7 +1600,7 @@ function _waStartTtsPoll(items) {
     _waTtsPollTimer = null;
     const stillMissing = missing.filter(pid => {
       const el = document.getElementById(`wa-tts-slot-${pid}`);
-      return el && !el.innerHTML.includes('TTS 预览') && !el.innerHTML.includes('生成失败');
+      return el && !el.innerHTML.includes('TTS '+window.T('psn_dtab_preview')) && !el.innerHTML.includes(window.T('dash.task_fail_generic'));
     });
     if (!stillMissing.length || rounds >= MAX_ROUNDS) return;
     rounds++;
@@ -1612,20 +1612,20 @@ function _waStartTtsPoll(items) {
       Object.entries(d.paths||{}).forEach(([pid, ttsPath]) => {
         if (!ttsPath) return;
         const el = document.getElementById(`wa-tts-slot-${pid}`);
-        if (el && !el.innerHTML.includes('TTS 预览')) {
+        if (el && !el.innerHTML.includes('TTS '+window.T('psn_dtab_preview'))) {
           // P20-A: handle ERROR:type format
           if (ttsPath === 'ERROR' || (typeof ttsPath === 'string' && ttsPath.startsWith('ERROR'))) {
-            const errMap = {'ERROR:timeout':'⏱ TTS 超时','ERROR:disk':'💾 磁盘错误','ERROR:model':'🤖 模型错误','ERROR:unknown':'⚠️ TTS 失败','ERROR':'⚠️ TTS 失败'};
-            const errText = errMap[ttsPath] || '⚠️ TTS 失败';
-            el.innerHTML = `<span style="font-size:.7rem;color:#dc2626;font-weight:600">${errText}</span> <button onclick="waRetryTts(${pid})" style="font-size:.68rem;padding:.1rem .35rem;cursor:pointer">↻ 重试</button>`;
+            const errMap = {'ERROR:timeout':'⏱ TTS '+window.T('dash.scope.breaching'),'ERROR:disk':'💾 '+window.T('wa_js_028'),'ERROR:model':'🤖 '+window.T('wa_js_029'),'ERROR:unknown':'⚠️ TTS '+window.T('rpa_js_st_failed'),'ERROR':'⚠️ TTS '+window.T('rpa_js_st_failed')};
+            const errText = errMap[ttsPath] || '⚠️ TTS '+window.T('rpa_js_st_failed');
+            el.innerHTML = `<span style="font-size:.7rem;color:#dc2626;font-weight:600">${errText}</span> <button onclick="waRetryTts(${pid})" style="font-size:.68rem;padding:.1rem .35rem;cursor:pointer">↻ ${window.T('rpa_retry')}</button>`;
           } else {
-            el.innerHTML = `<span style="font-size:.7rem;color:var(--t3)">🎤 TTS 预览</span> <audio controls preload="none" style="height:26px;vertical-align:middle;max-width:200px" src="${ttsPath}"></audio>`;
+            el.innerHTML = `<span style="font-size:.7rem;color:var(--t3)">🎤 TTS ${window.T('psn_dtab_preview')}</span> <audio controls preload="none" style="height:26px;vertical-align:middle;max-width:200px" src="${ttsPath}"></audio>`;
           }
         }
       });
     } catch(_){}
     delay = Math.min(delay * 2, 30000);
-    const remaining = missing.filter(pid => { const el = document.getElementById(`wa-tts-slot-${pid}`); return el && !el.innerHTML.includes('TTS 预览') && !el.innerHTML.includes('生成失败'); });
+    const remaining = missing.filter(pid => { const el = document.getElementById(`wa-tts-slot-${pid}`); return el && !el.innerHTML.includes('TTS '+window.T('psn_dtab_preview')) && !el.innerHTML.includes(window.T('dash.task_fail_generic')); });
     if (remaining.length && rounds < MAX_ROUNDS) _waTtsPollTimer = setTimeout(poll, delay);
   }
   _waTtsPollTimer = setTimeout(poll, delay);
@@ -1636,31 +1636,31 @@ window.waRetryTts = async function(pid) {
   const r = await rpa.post(`/api/whatsapp-rpa/pending/${pid}/retry-tts`, {});
   if (r.ok) {
     const el = document.getElementById(`wa-tts-slot-${pid}`);
-    if (el) el.innerHTML = '<span style="font-size:.7rem;color:var(--t2)">已重置，等待下一轮生成…</span>';
+    if (el) el.innerHTML = '<span style="font-size:.7rem;color:var(--t2)">'+window.T('wa_js_030')+'…</span>';
     setTimeout(waLoadPending, 8000);
-  } else { rpa.toast('TTS 重试失败: '+(r.error||''), 'err'); }
+  } else { rpa.toast('TTS '+window.T('wa_js_031')+': '+(r.error||''), 'err'); }
 };
 
 window.waResolvePending = async function(id, action){
   const editor = $('wa-pend-edit-'+id);
   const body = action==='approve' && editor ? {action, text: editor.value} : {action};
   const r = await rpa.post('/api/whatsapp-rpa/pending/'+id+'/resolve', body);
-  if(r.ok){ rpa.toast(action==='approve'?'已发送':'已拒绝', 'ok'); waCleanupDrafts([id]); }
-  else { rpa.toast('操作失败', 'err'); }
+  if(r.ok){ rpa.toast(action==='approve'?window.T('rpa_js_st_sent'):window.T('draft.tab.rejected'), 'ok'); waCleanupDrafts([id]); }
+  else { rpa.toast(window.T('ov_js_op_fail'), 'err'); }
   waLoadPending(); waLoadStatus();
 };
 
 window.waCancelAllPending = async function(){
-  if (!confirm('确认清空所有待审批条目？此操作不可撤销。')) return;
+  if (!confirm(window.T('wa_js_032')+'。')) return;
   const r = await rpa.post('/api/whatsapp-rpa/pending/cancel-all', {});
-  if (r.ok) rpa.toast(`已取消 ${r.cancelled||0} 条待审`, 'ok');
-  else rpa.toast('操作失败', 'err');
+  if (r.ok) rpa.toast(window.Tf('wa_js_p01', {n: r.cancelled||0}), 'ok');
+  else rpa.toast(window.T('ov_js_op_fail'), 'err');
   waLoadPending(); waLoadStatus();
 };
 
 window.waAckAll = async function(){
   const r = await rpa.post('/api/whatsapp-rpa/alerts/ack_all', {});
-  rpa.toast(r.ok?'告警已确认':'确认失败', r.ok?'ok':'err');
+  rpa.toast(r.ok?window.T('wa_js_033'):window.T('inbox.rel.confirm_fail'), r.ok?'ok':'err');
   waLoadStatus();
 };
 
@@ -1672,7 +1672,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Enter') {
     if (e.shiftKey) {
       e.preventDefault();
-      if(confirm(`确认批量拒绝 ${sel.length} 条?`)) window.rpa.bulk.rejectSelected();
+      if(confirm(window.Tf('wa_js_p02', {n: sel.length}))) window.rpa.bulk.rejectSelected();
     } else {
       e.preventDefault();
       window.rpa.bulk.approveSelected();
@@ -1683,45 +1683,45 @@ document.addEventListener('keydown', e => {
 /* ── 控制按钮 ──────────────────────────────────────────── */
 $('wa-btn-trigger').onclick = async ()=>{
   const r = await rpa.post('/api/whatsapp-rpa/trigger', {});
-  rpa.toast(r.ok ? '已触发' : '触发失败', r.ok?'ok':'err');
+  rpa.toast(r.ok ? window.T('wa_js_034') : window.T('wa_js_035'), r.ok?'ok':'err');
   setTimeout(waLoadStatus, 500);
 };
 $('wa-btn-pause').onclick = async ()=>{
   const r = await rpa.post('/api/whatsapp-rpa/pause', {seconds: 300});
-  rpa.toast(r.ok ? '已暂停 5 分钟' : '暂停失败', r.ok?'ok':'err');
+  rpa.toast(r.ok ? window.T('msg_js_1990') : window.T('wa_js_036'), r.ok?'ok':'err');
   waLoadStatus();
 };
 $('wa-btn-resume').onclick = async ()=>{
   const r = await rpa.post('/api/whatsapp-rpa/resume', {});
-  rpa.toast(r.ok ? '已恢复' : '恢复失败', r.ok?'ok':'err');
+  rpa.toast(r.ok ? window.T('wa_js_037') : window.T('wa_js_038'), r.ok?'ok':'err');
   waLoadStatus();
 };
 
 /* ── 设备快捷操作 ──────────────────────────────────────── */
 $('wa-btn-accept').addEventListener('click', async ()=>{
   const btn = $('wa-btn-accept'), msg = $('wa-device-msg');
-  btn.disabled = true; msg.textContent = '正在查找联系人申请按钮…'; msg.style.color = 'var(--t2)';
+  btn.disabled = true; msg.textContent = window.T('wa_js_039')+'…'; msg.style.color = 'var(--t2)';
   try{
     const r = await rpa.post('/api/whatsapp-rpa/accept-contacts', {});
     const d = await r.json(); const res = d.result||{};
-    if(res.skipped){ msg.textContent = '未找到接受按钮（'+res.reason+'）'; msg.style.color = 'var(--t3)'; }
-    else if(res.error){ msg.textContent = '出错：'+res.error; msg.style.color = '#dc2626'; }
-    else { msg.textContent = '✓ 已点击 '+res.tapped+' 个接受按钮'; msg.style.color = '#16a34a'; }
-  }catch(e){ msg.textContent = '请求失败：'+e; msg.style.color = '#dc2626'; }
+    if(res.skipped){ msg.textContent = window.T('wa_js_040')+'（'+res.reason+'）'; msg.style.color = 'var(--t3)'; }
+    else if(res.error){ msg.textContent = window.T('wa_js_041')+'：'+res.error; msg.style.color = '#dc2626'; }
+    else { msg.textContent = '✓ '+window.T('wa_js_042')+' '+res.tapped+' '+window.T('wa_js_043'); msg.style.color = '#16a34a'; }
+  }catch(e){ msg.textContent = window.T('ov_js_req_fail')+'：'+e; msg.style.color = '#dc2626'; }
   btn.disabled = false;
 });
 
 $('wa-btn-screenshot').addEventListener('click', async ()=>{
   const btn = $('wa-btn-screenshot'), msg = $('wa-device-msg'), wrap = $('wa-screenshot-wrap'), img = $('wa-screenshot-img');
-  btn.disabled = true; wrap.style.display = 'none'; msg.textContent = '截屏中…'; msg.style.color = 'var(--t2)';
+  btn.disabled = true; wrap.style.display = 'none'; msg.textContent = window.T('wa_js_044')+'…'; msg.style.color = 'var(--t2)';
   try{
     const r = await fetch('/api/whatsapp-rpa/device-screenshot?_='+Date.now());
     if(!r.ok) throw new Error(await r.text());
     img.src = URL.createObjectURL(await r.blob());
     img.style.maxWidth = '100%'; wrap.style.display = '';
-    msg.textContent = '✓ 截屏成功（'+new Date().toLocaleTimeString()+'）'; msg.style.color = '#16a34a';
+    msg.textContent = '✓ '+window.T('wa_js_045')+'（'+window.wsFmtTime(null)+'）'; msg.style.color = '#16a34a';
   }catch(e){
-    msg.innerHTML = '截屏失败：'+rpa.esc(e)+' <button class="btn-sec" type="button" style="margin-left:.35rem;font-size:.75rem" onclick="document.getElementById(\'wa-btn-screenshot\').click()">重试</button>';
+    msg.innerHTML = window.T('wa_js_046')+'：'+rpa.esc(e)+' <button class="btn-sec" type="button" style="margin-left:.35rem;font-size:.75rem" onclick="document.getElementById(\'wa-btn-screenshot\').click()">'+window.T('rpa_retry')+'</button>';
     msg.style.color = '#dc2626';
   }
   btn.disabled = false;
@@ -1739,10 +1739,10 @@ window.waApplyPreset = async function(name){
   const p = WA_PRESETS[name]; if(!p) return;
   const r = await rpa.put('/api/whatsapp-rpa/config', p);
   if(r.ok){
-    rpa.toast('预设「'+name+'」已应用', 'ok');
+    rpa.toast(window.T('wa_s007')+'「'+name+'」'+window.T('wa_js_047'), 'ok');
     waLoadCfg();
   } else {
-    rpa.toast('应用预设失败', 'err');
+    rpa.toast(window.T('wa_js_048'), 'err');
   }
 };
 
@@ -1819,14 +1819,14 @@ async function waLoadCfg(){
 /* ── 配置保存 ───────────────────────────────────────────── */
 $('wa-cfg-save').addEventListener('click', async ()=>{
   const msg = $('wa-cfg-msg');
-  msg.textContent = '保存中…'; msg.className = 'save-res';
+  msg.textContent = window.T('wa_js_049')+'…'; msg.className = 'save-res';
   // 前置校验
   const capVal = Number($('cfg-wa-daily-cap').value)||0;
   const skipVal = Number($('cfg-wa-emoticons-skip').value)||0;
   const consecVal = Number($('cfg-wa-emoticons-max-consec').value)||0;
-  if(capVal < 0){ msg.textContent='日上限需>=0'; msg.className='save-res err'; rpa.toast('日上限需>=0','err'); return; }
-  if(skipVal < 0 || skipVal > 100){ msg.textContent='表情跳过概率需 0-100'; msg.className='save-res err'; rpa.toast('表情跳过概率需 0-100','err'); return; }
-  if(consecVal < 1){ msg.textContent='最大连续表情需>=1'; msg.className='save-res err'; rpa.toast('最大连续表情需>=1','err'); return; }
+  if(capVal < 0){ msg.textContent=window.T('wa_js_050')+'>=0'; msg.className='save-res err'; rpa.toast(window.T('wa_js_050')+'>=0','err'); return; }
+  if(skipVal < 0 || skipVal > 100){ msg.textContent=window.T('wa_js_051')+' 0-100'; msg.className='save-res err'; rpa.toast(window.T('wa_js_051')+' 0-100','err'); return; }
+  if(consecVal < 1){ msg.textContent=window.T('wa_js_052')+'>=1'; msg.className='save-res err'; rpa.toast(window.T('wa_js_052')+'>=1','err'); return; }
   const payload = {
     enabled: $('cfg-wa-enabled').checked,
     use_business_app: $('cfg-wa-biz').checked,
@@ -1873,26 +1873,26 @@ $('wa-cfg-save').addEventListener('click', async ()=>{
   try{
     const r = await rpa.put('/api/whatsapp-rpa/config', payload);
     if(!r.ok){
-      let err='未知错误';
+      let err=window.T('inbox.voice.unknown_err');
       try{
         const data = await r.json();
         err = data.error || data.msg || data.detail || ('HTTP '+r.status);
       }catch(_){
         try{ err = await r.text(); }catch(__){ err = 'HTTP '+r.status; }
       }
-      msg.textContent = '保存失败：'+err;
+      msg.textContent = window.T('ov_js_save_fail')+'：'+err;
       msg.className = 'save-res err';
       rpa.toast(err,'err');
       return;
     }
-    msg.textContent = '✓ 已保存';
+    msg.textContent = '✓ '+window.T('wa_js_053');
     msg.className = 'save-res ok';
-    rpa.toast('配置已保存', 'ok');
+    rpa.toast(window.T('wa_js_054'), 'ok');
     waMarkSettingsDirty(false);
     waLoadStatus(); waLoadCfg();
     setTimeout(()=>{ msg.textContent=''; msg.className='save-res'; }, 3000);
   }catch(e){
-    msg.textContent = '保存失败：'+e.message;
+    msg.textContent = window.T('ov_js_save_fail')+'：'+e.message;
     msg.className = 'save-res err';
   }
 });
@@ -1915,14 +1915,14 @@ window.waLoadVoiceMetrics = async function(){
     const wrap = $('wa-voice-metrics');
     wrap.style.display = '';
     const parts = [];
-    if(m.stt_attempts) parts.push(`STT: ${m.stt_ok}/${m.stt_attempts} 成功`);
-    if(m.stt_fallback_used) parts.push(`备用ASR: ${m.stt_fallback_used}`);
-    if(m.stt_placeholder) parts.push(`占位: ${m.stt_placeholder}`);
-    if(m.stt_batch_multi) parts.push(`多条批量: ${m.stt_batch_multi}`);
-    if(m.tts_attempts) parts.push(`TTS: ${m.tts_ok}/${m.tts_attempts} 成功`);
-    if(m.tts_sent) parts.push(`已发送: ${m.tts_sent}`);
-    if(m.tts_send_fail) parts.push(`发送失败: ${m.tts_send_fail}`);
-    $('wa-vm-txt').textContent = parts.join(' · ') || '暂无';
+    if(m.stt_attempts) parts.push(window.Tf('wa_js_p03', {ok: m.stt_ok, n: m.stt_attempts}));
+    if(m.stt_fallback_used) parts.push(window.Tf('wa_js_p04', {n: m.stt_fallback_used}));
+    if(m.stt_placeholder) parts.push(window.Tf('wa_js_p05', {n: m.stt_placeholder}));
+    if(m.stt_batch_multi) parts.push(window.Tf('wa_js_p06', {n: m.stt_batch_multi}));
+    if(m.tts_attempts) parts.push(window.Tf('wa_js_p07', {ok: m.tts_ok, n: m.tts_attempts}));
+    if(m.tts_sent) parts.push(window.Tf('wa_js_p08', {n: m.tts_sent}));
+    if(m.tts_send_fail) parts.push(window.Tf('wa_js_p09', {n: m.tts_send_fail}));
+    $('wa-vm-txt').textContent = parts.join(' · ') || window.T('wa_js_055');
   }catch(e){ /* silent */ }
 };
 
@@ -1938,10 +1938,10 @@ window.waLoadMediaMetrics = async function(){
     const wrap = $('wa-media-metrics');
     wrap.style.display = '';
     const parts = [];
-    if(m.visions) parts.push(`Vision 成功: ${m.visions}`);
-    if(m.visions_fail) parts.push(`Vision 失败: ${m.visions_fail}`);
-    if(m.placeholders) parts.push(`占位描述: ${m.placeholders}`);
-    $('wa-mm-txt').textContent = parts.join(' · ') || '暂无';
+    if(m.visions) parts.push(window.Tf('wa_js_p10', {n: m.visions}));
+    if(m.visions_fail) parts.push(window.Tf('wa_js_p11', {n: m.visions_fail}));
+    if(m.placeholders) parts.push(window.Tf('wa_js_p12', {n: m.placeholders}));
+    $('wa-mm-txt').textContent = parts.join(' · ') || window.T('wa_js_055');
   }catch(e){ /* silent */ }
 };
 
@@ -1954,7 +1954,7 @@ window.waLoadLogTail = async function(){
     const r = await fetch('/api/whatsapp-rpa/log-tail?n=80');
     const txt = await r.text();
     if(!txt.trim()){
-      wrap.innerHTML = '<div class="log-empty">暂无 WhatsApp RPA 日志</div>';
+      wrap.innerHTML = '<div class="log-empty">'+window.T('wa_js_056')+'</div>';
       return;
     }
     wrap.innerHTML = txt.split('\n').filter(Boolean).map(l=>{
@@ -1971,7 +1971,7 @@ window.waLoadLogTail = async function(){
     }).join('');
     wrap.scrollTop = wrap.scrollHeight;
   }catch(e){
-    wrap.innerHTML = '<div class="log-empty" style="color:#dc2626">日志加载失败 <button class="btn-sec" onclick="waLoadLogTail()" style="margin-left:.4rem;font-size:.75rem">重试</button></div>';
+    wrap.innerHTML = '<div class="log-empty" style="color:#dc2626">'+window.T('wa_js_057')+' <button class="btn-sec" onclick="waLoadLogTail()" style="margin-left:.4rem;font-size:.75rem">'+window.T('rpa_retry')+'</button></div>';
   } finally {
     $('wa-log-live-dot').style.display = 'none';
   }
@@ -1979,8 +1979,8 @@ window.waLoadLogTail = async function(){
 
 /* ── P5-2: 手动发送队列面板 ─────────────────────────────────── */
 const _SQ_STATUS_LABELS = {
-  queued:'⏳ 排队', processing:'⚙️ 处理中',
-  sent:'✅ 已发', failed:'❌ 失败', cancelled:'🚫 已取消',
+  queued:'⏳ '+window.T('msg_js_1377'), processing:'⚙️ '+window.T('wa_js_058'),
+  sent:'✅ '+window.T('ov_js_dob_sent'), failed:'❌ '+window.T('rpa_js_st_failed'), cancelled:'🚫 '+window.T('rpa_js_st_cancelled'),
 };
 async function waLoadSendQueue(){
   const list = $('wa-send-queue-list');
@@ -1989,12 +1989,12 @@ async function waLoadSendQueue(){
     const d = await rpa.get('/api/whatsapp-rpa/send-queue?include_done=1&limit=20');
     const items = d.queue||[];
     if(!items.length){
-      list.innerHTML='<div style="padding:.55rem 1rem;font-size:.78rem;color:var(--t3)">暂无队列记录</div>';
+      list.innerHTML='<div style="padding:.55rem 1rem;font-size:.78rem;color:var(--t3)">'+window.T('wa_js_059')+'</div>';
       return;
     }
     list.innerHTML='<div class="wa-sq-list">'+items.map(it=>{
       const lbl = _SQ_STATUS_LABELS[it.status]||it.status;
-      const cancelBtn = it.status==='queued'?`<button class="wa-sq-cancel" onclick="waCancelSendQueue(${it.id})">取消</button>`:'<span></span>';
+      const cancelBtn = it.status==='queued'?`<button class="wa-sq-cancel" onclick="waCancelSendQueue(${it.id})">${window.T('ov_js_cancel')}</button>`:'<span></span>';
       return `<div class="wa-sq-row">
         <span class="wa-sq-status wa-sq-${it.status}">${lbl}</span>
         <span class="wa-sq-peer">${rpa.esc(it.peer_name||it.chat_key||'')}</span>
@@ -2005,16 +2005,16 @@ async function waLoadSendQueue(){
       </div>`;
     }).join('')+'</div>';
   }catch(e){
-    list.innerHTML='<div style="padding:.55rem 1rem;font-size:.78rem;color:#f87171">加载失败 <button class="btn-sec" type="button" style="margin-left:.35rem;font-size:.75rem" onclick="waLoadSendQueue()">重试</button></div>';
+    list.innerHTML='<div style="padding:.55rem 1rem;font-size:.78rem;color:#f87171">'+window.T('rpa_load_failed')+' <button class="btn-sec" type="button" style="margin-left:.35rem;font-size:.75rem" onclick="waLoadSendQueue()">'+window.T('rpa_retry')+'</button></div>';
   }
 }
 
 window.waCancelSendQueue = async function(id){
   try{
     await rpa.post('/api/whatsapp-rpa/send-queue/'+id+'/cancel',{});
-    rpa.toast('已取消发送任务');
+    rpa.toast(window.T('wa_js_060'));
     waLoadSendQueue();
-  }catch(e){ rpa.toast('取消失败','err'); }
+  }catch(e){ rpa.toast(window.T('msg_js_2058'),'err'); }
 };
 
 /* ── P7-B: 客户画像条注入（在 waToggleChatDetail 里调用） ── */
@@ -2032,11 +2032,11 @@ async function waInjectProfile(detail){
     const scoreBar = score!=null
       ? `<span class="wa-profile-score" style="--w:${score}%"><span style="display:block;width:${score}%;height:100%;background:#818cf8;border-radius:2px"></span></span>`
       : '';
-    strip.innerHTML=`<span class="wa-profile-stat">📊 <strong>${p.total_turns}</strong>轮对话</span>
-      <span class="wa-profile-stat">✅ <strong>${p.reply_rate}%</strong>成功率</span>
-      <span class="wa-profile-stat">📅 首次 <strong>${firstDate}</strong></span>
-      <span class="wa-profile-stat">🔁 最近 <strong>${lastDate}</strong></span>
-      ${score!=null?`<span class="wa-profile-stat">💜 亲密 <strong>${score}</strong>${scoreBar}</span>`:''}
+    strip.innerHTML=`<span class="wa-profile-stat">📊 <strong>${p.total_turns}</strong>${window.T('wa_js_103')}</span>
+      <span class="wa-profile-stat">✅ <strong>${p.reply_rate}%</strong>${window.T('ov_kpi_rate')}</span>
+      <span class="wa-profile-stat">📅 ${window.T('wa_js_104')} <strong>${firstDate}</strong></span>
+      <span class="wa-profile-stat">🔁 ${window.T('msg_js_1206')} <strong>${lastDate}</strong></span>
+      ${score!=null?`<span class="wa-profile-stat">💜 ${window.T('rpa_js_intimacy')} <strong>${score}</strong>${scoreBar}</span>`:''}
       ${_intentBadge(p.dominant_intent)}`;
     detail.insertBefore(strip, detail.firstChild);
   }catch(_){}
@@ -2071,8 +2071,8 @@ window.waOpenChatByKey = function(chatKey, peerName){
   phantom.innerHTML=`<div class="wa-conv-avatar" style="background:#6366f1;color:#fff">${rpa.esc(initials)}</div>
     <div class="wa-conv-body">
       <div class="wa-conv-top"><span class="wa-conv-name">${rpa.esc(peerName||chatKey)}</span>
-        <span class="wa-conv-time" style="margin-left:auto;color:var(--t3);font-size:.7rem">历史记录</span></div>
-      <div class="wa-conv-footer"><span class="wa-conv-expand-hint">▸ 展开</span></div>
+        <span class="wa-conv-time" style="margin-left:auto;color:var(--t3);font-size:.7rem">${window.T('wa_js_105')}</span></div>
+      <div class="wa-conv-footer"><span class="wa-conv-expand-hint">▸ ${window.T('wa_js_016')}</span></div>
     </div>`;
   convList.prepend(phantom);
   phantom.addEventListener('click', ()=>waToggleChatDetail(phantom));
@@ -2092,14 +2092,14 @@ window.waHistSearch = function(q){
     return;
   }
   if(convList) convList.style.display='none';
-  if(results){ results.style.display=''; results.innerHTML='<div style="padding:.5rem 1rem;font-size:.75rem;color:var(--t3)">检索中…</div>'; }
+  if(results){ results.style.display=''; results.innerHTML='<div style="padding:.5rem 1rem;font-size:.75rem;color:var(--t3)">'+window.T('wa_js_061')+'…</div>'; }
   _waHistTimer = setTimeout(async ()=>{
     const intent = $('wa-hist-intent')?.value||'';
     try{
       const d = await rpa.get('/api/whatsapp-rpa/search?q='+encodeURIComponent(q)+'&intent='+encodeURIComponent(intent)+'&days=90&limit=20');
       const rs = d.results||[];
       if(!rs.length){
-        results.innerHTML='<div class="wa-search-results"><div style="padding:.55rem 1rem 3.5rem;font-size:.78rem;color:var(--t3)">无匹配记录</div></div>';
+        results.innerHTML='<div class="wa-search-results"><div style="padding:.55rem 1rem 3.5rem;font-size:.78rem;color:var(--t3)">'+window.T('rpa_js_no_match')+'</div></div>';
         return;
       }
       const esc = rpa.esc.bind(rpa);
@@ -2110,13 +2110,13 @@ window.waHistSearch = function(q){
       results.innerHTML='<div class="wa-search-results">'+rs.map(r=>{
         const ck = r.chat_key||'';
         const safeKey = ck.replace(/'/g,"\\'");
-        return `<div class="wa-search-result-row" onclick="waOpenChatByKey('${safeKey}','${safeKey}')" title="点击展开对话">
+        return `<div class="wa-search-result-row" onclick="waOpenChatByKey('${safeKey}','${safeKey}')" title="${window.T('wa_js_106')}">
           <div class="wa-search-result-key">${esc(ck)} · ${rpa.ago(r.ts)}${r.intent_tag&&r.intent_tag!=='general'?' '+_intentBadge(r.intent_tag):''}</div>
           ${r.peer_text?`<div class="wa-search-result-msg">👤 ${hilite(r.peer_text)}</div>`:''}
           ${r.reply_text?`<div class="wa-search-result-msg" style="color:var(--t3)">🤖 ${esc(r.reply_text.slice(0,120))}</div>`:''}
         </div>`;}).join('')+'</div>';
     }catch(e){
-      results.innerHTML='<div class="wa-search-results"><div style="padding:.5rem 1rem;color:#f87171;font-size:.75rem">检索失败</div></div>';
+      results.innerHTML='<div class="wa-search-results"><div style="padding:.5rem 1rem;color:#f87171;font-size:.75rem">'+window.T('rpa_js_search_failed')+'</div></div>';
     }
   }, 380);
 };
@@ -2132,15 +2132,15 @@ window.waLoadIntentStats = async function(btn, hours){
   const body=$('wa-intent-chart-body');
   if(!body) return;
   _waIntentHours = hours || _waIntentHours || 168;
-  const retryBtn = `<button class="btn-sec" style="margin-left:.4rem;font-size:.75rem" onclick="waLoadIntentStats(document.querySelector('.wa-chart-win-btn.active'), ${_waIntentHours})">重试</button>`;
-  body.innerHTML='<div style="font-size:.75rem;color:var(--t3)">加载中…</div>';
+  const retryBtn = `<button class="btn-sec" style="margin-left:.4rem;font-size:.75rem" onclick="waLoadIntentStats(document.querySelector('.wa-chart-win-btn.active'), ${_waIntentHours})">${window.T('rpa_retry')}</button>`;
+  body.innerHTML='<div style="font-size:.75rem;color:var(--t3)">'+window.T('msg_js_1047')+'…</div>';
   try{
     const d=await rpa.get('/api/whatsapp-rpa/intent-stats?hours='+_waIntentHours);
     const dist=d.distribution||{}; const total=d.total_turns||0;
-    if(!total){ body.innerHTML='<div style="font-size:.75rem;color:var(--t3)">暂无数据</div>'; return; }
-    const _LABELS={purchase:'购买',support:'售后',inquiry:'咨询',greeting:'问候',general:'通用'};
+    if(!total){ body.innerHTML='<div style="font-size:.75rem;color:var(--t3)">'+window.T('rpa_js_no_data')+'</div>'; return; }
+    const _LABELS={purchase:window.T('rpa_intent_purchase'),support:window.T('rpa_intent_support'),inquiry:window.T('rpa_intent_inquiry'),greeting:window.T('rpa_intent_greeting'),general:window.T('rpa_intent_general')};
     const entries=Object.entries(dist).sort((a,b)=>b[1]-a[1]);
-    body.innerHTML=`<div style="font-size:.7rem;color:var(--t3);margin-bottom:.35rem">共 ${total} 条消息</div>`+
+    body.innerHTML=`<div style="font-size:.7rem;color:var(--t3);margin-bottom:.35rem">${window.T('wa_js_019')} ${total} ${window.T('wa_js_107')}</div>`+
       entries.map(([tag,cnt])=>{
         const pct=Math.round(cnt/total*100);
         const color=_INTENT_COLORS[tag]||'#94a3b8';
@@ -2151,7 +2151,7 @@ window.waLoadIntentStats = async function(btn, hours){
         </div>`;
       }).join('');
   }catch(e){
-    body.innerHTML=`<div style="font-size:.75rem;color:#f87171">加载失败</div>${retryBtn}`;
+    body.innerHTML=`<div style="font-size:.75rem;color:#f87171">${window.T('rpa_load_failed')}</div>${retryBtn}`;
   }
 };
 
@@ -2270,10 +2270,10 @@ document.addEventListener('visibilitychange', ()=>{
 async function waSettingsTtsTest(){
   const lang = ($('cfg-wa-tts-test-lang')?.value||'').trim();
   const text = ($('cfg-wa-tts-test-text')?.value||'').trim();
-  if(!text){ rpa.toast('请输入测试文字', 'warn'); return; }
+  if(!text){ rpa.toast(window.T('wa_js_062'), 'warn'); return; }
   const btn = $('cfg-wa-tts-test-btn');
   const res = $('cfg-wa-tts-test-result');
-  if(btn){ btn.disabled=true; btn.textContent='⏳ 合成中…'; }
+  if(btn){ btn.disabled=true; btn.textContent='⏳ '+window.T('wa_js_063')+'…'; }
   if(res) res.innerHTML='';
   try{
     const r = await fetch('/api/whatsapp-rpa/tts-test',{
@@ -2283,13 +2283,13 @@ async function waSettingsTtsTest(){
     });
     const d = await r.json();
     if(res){
-      if(!d.ok){ res.innerHTML=`<span style="color:#dc2626">❌ ${rpa.esc(d.error||'失败')}</span>`; return; }
+      if(!d.ok){ res.innerHTML=`<span style="color:#dc2626">❌ ${rpa.esc(d.error||window.T('rpa_js_st_failed'))}</span>`; return; }
       const dur = d.duration_sec>0?` · ${d.duration_sec}s`:'';
       res.innerHTML=`<audio controls src="${rpa.esc(d.url)}" style="height:30px;vertical-align:middle"></audio>
         <span style="color:#64748b;font-size:11px">${rpa.esc(d.language||'')}${dur} · ${rpa.esc(d.provider||'')}</span>`;
     }
   }catch(e){ if(res) res.innerHTML=`<span style="color:#dc2626">❌ ${e}</span>`; }
-  finally{ if(btn){ btn.disabled=false; btn.textContent='▶ 试听'; } }
+  finally{ if(btn){ btn.disabled=false; btn.textContent='▶ '+window.T('wa_s116'); } }
 }
 
 /* P4-A: 语言锁定 / 解锁 */
@@ -2298,7 +2298,7 @@ async function waLangLock(btn){
   if(!bar) return;
   const chatKey = bar.dataset.chatKey;
   const lang = bar.querySelector('.wa-tts-lang-sel')?.value || '';
-  if(!lang){ rpa.toast('请先选择一个语言再锁定', 'warn'); return; }
+  if(!lang){ rpa.toast(window.T('wa_js_064'), 'warn'); return; }
   btn.disabled = true;
   try{
     const r = await fetch('/api/whatsapp-rpa/chat-lang-lock',{
@@ -2307,13 +2307,13 @@ async function waLangLock(btn){
       body: JSON.stringify({chat_key:chatKey, lang}),
     });
     const d = await r.json();
-    if(!d.ok) throw new Error(d.detail||d.error||'失败');
-    rpa.toast(`🔒 已锁定为 ${lang}`, 'ok');
+    if(!d.ok) throw new Error(d.detail||d.error||window.T('rpa_js_st_failed'));
+    rpa.toast(window.Tf('wa_js_p13', {lang: lang}), 'ok');
     // 更新本地数据 + 刷新卡片
     const cv = _waConvData.find(c=>c.chat_key===chatKey);
     if(cv) cv.state_forced_lang = lang;
     waRenderConversations({restoreExpand:true});
-  }catch(e){ rpa.toast('锁定失败: '+e, 'err'); }
+  }catch(e){ rpa.toast(window.T('wa_js_065')+': '+e, 'err'); }
   finally{ btn.disabled=false; }
 }
 async function waLangUnlock(btn){
@@ -2328,12 +2328,12 @@ async function waLangUnlock(btn){
       body: JSON.stringify({chat_key:chatKey, lang:null}),
     });
     const d = await r.json();
-    if(!d.ok) throw new Error(d.detail||d.error||'失败');
-    rpa.toast('🔓 已解除语言锁定，恢复自动检测', 'ok');
+    if(!d.ok) throw new Error(d.detail||d.error||window.T('rpa_js_st_failed'));
+    rpa.toast('🔓 '+window.T('wa_js_066'), 'ok');
     const cv = _waConvData.find(c=>c.chat_key===chatKey);
     if(cv) cv.state_forced_lang = null;
     waRenderConversations({restoreExpand:true});
-  }catch(e){ rpa.toast('解锁失败: '+e, 'err'); }
+  }catch(e){ rpa.toast(window.T('wa_js_067')+': '+e, 'err'); }
   finally{ btn.disabled=false; }
 }
 
@@ -2343,9 +2343,9 @@ async function waTtsTest(btn){
   if(!bar) return;
   const lang = bar.querySelector('.wa-tts-lang-sel')?.value || '';
   const text = (bar.querySelector('.wa-tts-text-inp')?.value || '').trim();
-  if(!text){ alert('请输入测试文字'); return; }
+  if(!text){ alert(window.T('wa_js_062')); return; }
   const res = bar.querySelector('.wa-tts-test-result');
-  btn.disabled = true; btn.textContent = '⏳ 合成中…';
+  btn.disabled = true; btn.textContent = '⏳ '+window.T('wa_js_063')+'…';
   res.innerHTML = '';
   try {
     const r = await fetch('/api/whatsapp-rpa/tts-test', {
@@ -2354,27 +2354,27 @@ async function waTtsTest(btn){
       body: JSON.stringify({text, language: lang||undefined}),
     });
     const d = await r.json();
-    if(!d.ok){ res.innerHTML=`<span class="wa-tts-err">❌ ${rpa.esc(d.error||'失败')}</span>`; return; }
+    if(!d.ok){ res.innerHTML=`<span class="wa-tts-err">❌ ${rpa.esc(d.error||window.T('rpa_js_st_failed'))}</span>`; return; }
     const dur = d.duration_sec > 0 ? ` · ${d.duration_sec}s` : '';
     res.innerHTML=`<audio controls src="${rpa.esc(d.url)}" style="height:32px;vertical-align:middle"></audio>
       <span class="wa-tts-meta">${rpa.esc(d.language||'')}${dur} · ${rpa.esc(d.provider||'')}</span>`;
   } catch(e){ res.innerHTML=`<span class="wa-tts-err">❌ ${e}</span>`; }
-  finally{ btn.disabled=false; btn.textContent='▶ 试听'; }
+  finally{ btn.disabled=false; btn.textContent='▶ '+window.T('wa_s116'); }
 }
 
 /* P15-i: 模板分析功能 */
-const _waCatNames = {care: '关怀型', interest: '兴趣型', question: '提问型'};
+const _waCatNames = {care: window.T('wa_js_068'), interest: window.T('wa_js_069'), question: window.T('wa_js_070')};
 
 async function waLoadTemplateAnalytics(){
   const msgEl = document.getElementById('wa-tpl-strategy-msg');
-  if(msgEl) msgEl.textContent = '加载中…';
+  if(msgEl) msgEl.textContent = window.T('msg_js_1047')+'…';
 
   try{
     const r = await fetch('/api/whatsapp-rpa/template-analytics?hours=168');
     const d = await r.json();
 
     if(!d.ok){
-      if(msgEl) msgEl.textContent = '加载失败: ' + (d.error || '未知错误');
+      if(msgEl) msgEl.textContent = window.T('rpa_load_failed')+': ' + (d.error || window.T('inbox.voice.unknown_err'));
       return;
     }
 
@@ -2382,8 +2382,8 @@ async function waLoadTemplateAnalytics(){
     const configText = document.getElementById('wa-tpl-config-text');
     if(configText){
       const strategy = d.config?.rotation_strategy || 'unknown';
-      const strategyMap = {weighted: '加权选择', round_robin: '轮询', random: '随机'};
-      configText.innerHTML = `<span style="color:var(--t1)">${strategyMap[strategy] || strategy}</span> <span style="color:var(--t3)">· A/B测试 ${d.config?.ab_test_enabled ? '开启' : '关闭'}</span>`;
+      const strategyMap = {weighted: window.T('wa_js_071'), round_robin: window.T('wa_s060'), random: window.T('wa_s061')};
+      configText.innerHTML = `<span style="color:var(--t1)">${strategyMap[strategy] || strategy}</span> <span style="color:var(--t3)">· A/B${window.T('wa_js_108')} ${d.config?.ab_test_enabled ? window.T('ov_js_enable') : window.T('ov_js_disable')}</span>`;
     }
 
     // 计算总发送数和回复数
@@ -2413,11 +2413,11 @@ async function waLoadTemplateAnalytics(){
     if(tbody){
       const catPerf = d.category_performance || {};
       if(Object.keys(catPerf).length === 0){
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--t3)">暂无数据</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--t3)">'+window.T('rpa_js_no_data')+'</td></tr>';
       } else {
         tbody.innerHTML = Object.entries(catPerf).map(([cat, perf]) => {
           const rate = Math.round((perf.reply_rate || 0) * 100);
-          let effectBadge = rate >= 30 ? '<span style="color:#22c55e">优秀</span>' : rate >= 15 ? '<span style="color:#f59e0b">良好</span>' : '<span style="color:#ef4444">需优化</span>';
+          let effectBadge = rate >= 30 ? '<span style="color:#22c55e">'+window.T('wa_js_072')+'</span>' : rate >= 15 ? '<span style="color:#f59e0b">'+window.T('wa_js_073')+'</span>' : '<span style="color:#ef4444">'+window.T('wa_js_074')+'</span>';
           return `<tr>
             <td>${_waCatNames[cat] || cat}</td>
             <td>${perf.sent || 0}</td>
@@ -2433,14 +2433,14 @@ async function waLoadTemplateAnalytics(){
     const detailList = document.getElementById('wa-tpl-detail-list');
     if(detailList){
       if(Object.keys(tplStats).length === 0){
-        detailList.innerHTML = '<div style="padding:1rem;text-align:center;color:var(--t3)">暂无模板使用数据</div>';
+        detailList.innerHTML = '<div style="padding:1rem;text-align:center;color:var(--t3)">'+window.T('wa_js_075')+'</div>';
       } else {
         detailList.innerHTML = Object.entries(tplStats).map(([cat, stat]) => {
           const templates = stat.templates || {};
           const sorted = Object.entries(templates).sort((a, b) => b[1] - a[1]);
           return `<div style="margin-bottom:.8rem;padding:.6rem;background:rgba(255,255,255,.03);border:1px solid var(--bd);border-radius:6px">
             <div style="font-size:.8rem;font-weight:600;color:var(--t1);margin-bottom:.3rem">${_waCatNames[cat] || cat}</div>
-            <div style="font-size:.7rem;color:var(--t3)">模板分布 (使用次数):</div>
+            <div style="font-size:.7rem;color:var(--t3)">${window.T('wa_js_109')}):</div>
             <div style="display:flex;flex-wrap:wrap;gap:.2rem;margin-top:.3rem">
               ${sorted.map(([idx, count]) => `<span style="font-size:.7rem;padding:.15rem .35rem;background:rgba(99,102,241,.15);color:#a5b4fc;border-radius:4px">#${idx}: ${count}</span>`).join('')}
             </div>
@@ -2455,11 +2455,11 @@ async function waLoadTemplateAnalytics(){
       strategySel.value = d.config.rotation_strategy;
     }
 
-    if(msgEl) msgEl.textContent = '✅ 已更新';
+    if(msgEl) msgEl.textContent = '✅ '+window.T('wa_js_076');
     setTimeout(() => { if(msgEl) msgEl.textContent = ''; }, 2000);
 
   } catch(e){
-    if(msgEl) msgEl.textContent = '加载失败: ' + e;
+    if(msgEl) msgEl.textContent = window.T('rpa_load_failed')+': ' + e;
   }
 }
 
@@ -2469,7 +2469,7 @@ async function waSaveTemplateStrategy(){
   if(!sel) return;
 
   const strategy = sel.value;
-  if(msgEl) msgEl.textContent = '保存中…';
+  if(msgEl) msgEl.textContent = window.T('wa_js_049')+'…';
 
   try{
     const r = await fetch('/api/whatsapp-rpa/config', {
@@ -2479,14 +2479,14 @@ async function waSaveTemplateStrategy(){
     });
     const d = await r.json();
     if(d.ok){
-      if(msgEl) msgEl.textContent = '✅ 已保存';
+      if(msgEl) msgEl.textContent = '✅ '+window.T('wa_js_053');
       setTimeout(() => { if(msgEl) msgEl.textContent = ''; }, 2000);
       waLoadTemplateAnalytics(); // 刷新显示
     } else {
-      if(msgEl) msgEl.textContent = '保存失败: ' + (d.error || d.detail || '未知错误');
+      if(msgEl) msgEl.textContent = window.T('ov_js_save_fail')+': ' + (d.error || d.detail || window.T('inbox.voice.unknown_err'));
     }
   } catch(e){
-    if(msgEl) msgEl.textContent = '保存失败: ' + e;
+    if(msgEl) msgEl.textContent = window.T('ov_js_save_fail')+': ' + e;
   }
 }
 
@@ -2496,6 +2496,16 @@ setTimeout(() => {
     waLoadTemplateAnalytics();
   }
 }, 1000);
+
+/* 全局暴露：本块整体在 IIFE 内，内联 on*="fn()" 在全局作用域求值，未暴露即抛 ReferenceError（哑按钮）。
+   以下函数/辅助被内联 handler 引用却是 IIFE 内裸 function（与既有 window.waXxx= 惯例并存漏挂）；
+   集中挂到 window。常驻门禁见 tests/test_rpa_inline_handlers_exposed.py。 */
+window.$ = $;
+Object.assign(window, {
+  waLoadConversations, waLoadPending, waSaveDraft,
+  waLoadCfg, waLoadSendQueue, waSettingsTtsTest, waTtsTest,
+  waLangLock, waLangUnlock, waLoadTemplateAnalytics, waSaveTemplateStrategy,
+});
 
 })();
 </script>

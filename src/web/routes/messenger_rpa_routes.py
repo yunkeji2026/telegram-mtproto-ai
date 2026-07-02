@@ -3464,6 +3464,12 @@ def register_messenger_rpa_routes(
             body += get_translation_engine_stats().dump_prom()
         except Exception:
             pass
+        # ★ V：附上语音克隆合成的语言纠正用量（total/corrected/by-lang）
+        try:
+            from src.ai.voice_synth_stats import get_voice_synth_stats
+            body += get_voice_synth_stats().dump_prom()
+        except Exception:
+            pass
         # ★ P58：附上通用 provider 用量（OCR/ASR 等）
         try:
             from src.ai.provider_stats import all_provider_prom

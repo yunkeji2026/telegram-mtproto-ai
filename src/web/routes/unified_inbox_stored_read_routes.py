@@ -30,6 +30,7 @@ from src.web.routes.unified_inbox_aggregate import (
 )
 from src.web.routes.unified_inbox_helpers import AUTOMATION_MODES
 from src.web.routes.unified_inbox_services import _inbox_store
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ def register_stored_read_routes(app, *, api_auth) -> None:
         api_auth(request)
         store = _inbox_store(request)
         if store is None:
-            raise HTTPException(503, "统一收件箱持久层未启用")
+            raise HTTPException(503, tr(request, "err.ws.inbox_persistence_disabled"))
         limit = max(1, min(200, int(limit or 50)))
         convs = store.list_conversations(limit=limit, platform=str(platform or ""))
         for c in convs:
@@ -67,10 +68,10 @@ def register_stored_read_routes(app, *, api_auth) -> None:
         api_auth(request)
         store = _inbox_store(request)
         if store is None:
-            raise HTTPException(503, "统一收件箱持久层未启用")
+            raise HTTPException(503, tr(request, "err.ws.inbox_persistence_disabled"))
         cid = str(conversation_id or "").strip()
         if not cid:
-            raise HTTPException(400, "conversation_id 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="conversation_id"))
         limit = max(1, min(200, int(limit or 50)))
         conv = store.get_conversation(cid)
         if conv is None:
@@ -115,9 +116,9 @@ def register_stored_read_routes(app, *, api_auth) -> None:
         chat_key = str(body.get("chat_key") or "")
         mode = str(body.get("mode") or "review")
         if not platform or not chat_key:
-            raise HTTPException(400, "platform 和 chat_key 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.platform_chatkey_required"))
         if mode not in AUTOMATION_MODES:
-            raise HTTPException(400, f"不支持的自动化模式: {mode}")
+            raise HTTPException(400, tr(request, "err.ws.unsupported_automation_mode", mode=mode))
         cid = _conv_id(platform, account_id, chat_key)
         _write_automation_mode(request, cid, mode)
         return {"ok": True, "conversation_id": cid, "mode": mode}
@@ -134,7 +135,7 @@ def register_stored_read_routes(app, *, api_auth) -> None:
         api_auth(request)
         store = _inbox_store(request)
         if store is None:
-            raise HTTPException(503, "统一收件箱持久层未启用")
+            raise HTTPException(503, tr(request, "err.ws.inbox_persistence_disabled"))
         cid = _conv_id(str(platform or "").lower(), str(account_id or "default"), str(chat_key or ""))
         now = datetime.now()
         since_ts = datetime(now.year, now.month, now.day).timestamp()

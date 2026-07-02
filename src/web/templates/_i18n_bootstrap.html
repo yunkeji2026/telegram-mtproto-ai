@@ -1,0 +1,44 @@
+<script>
+/* 工作台 / 管理后台「共享」i18n + 日期 locale 引导（P1 i18n step③-S：抽成单一真源 partial）。
+   被 workspace_base.html 与 base.html 同时 include，杜绝两套外壳脚本漂移。
+   注意：Jinja 会解析本文件里的 双花括号 / 花括号-百分号 定界符（即便在 JS 注释内），故此处不写这些定界符字面量。
+   复用 admin.py inject_i18n 中间件注入的 i18n 整包 + ui_lang（语言源 = ui_lang cookie / set_lang / lang 查询参数）。
+   提供：window.T / Tf（文案）、wsFmtDate/Time/DateTime + wsDateLocale（日期本地化）、wsApplyI18n（data-i18n 静态替换）。 */
+window.WS_I18N = {{ i18n|default({})|tojson }};
+window.WS_LANG = "{{ ui_lang|default('zh') }}";
+window.WS_LOCALE = "{{ 'zh-CN' if (ui_lang|default('zh')) == 'zh' else 'en-US' }}";
+window.wsDateLocale = function(){ return window.WS_LOCALE || (window.WS_LANG==='en'?'en-US':'zh-CN'); };
+window.wsFmtDate = function(ts, opts){
+  if(ts==null||ts==='') return '';
+  var d=new Date(ts<1e12?ts*1000:ts);
+  return d.toLocaleDateString(window.wsDateLocale(), opts);
+};
+window.wsFmtTime = function(ts, opts){
+  var d=(ts==null||ts==='')?new Date():new Date(ts<1e12?ts*1000:ts);
+  return d.toLocaleTimeString(window.wsDateLocale(), opts);
+};
+window.wsFmtDateTime = function(ts, opts){
+  if(ts==null||ts==='') return '';
+  var d=new Date(ts<1e12?ts*1000:ts);
+  return d.toLocaleString(window.wsDateLocale(), opts);
+};
+window.T = function(k, fb){ var v = window.WS_I18N && window.WS_I18N[k]; return (v===undefined||v===null||v==='') ? (fb!==undefined?fb:k) : v; };
+/* Tf：带占位符插值的 T —— Tf(key,{tag}) 把译文里的 {tag} 全替为值。
+   用 split/join 全局替换（免正则转义），各语言只存一句含 {x} 的完整文案，杜绝字符串拼接。 */
+window.Tf = function(k, vars){ var s = window.T(k); if(vars){ for(var p in vars){ if(Object.prototype.hasOwnProperty.call(vars,p)){ s = s.split('{'+p+'}').join(String(vars[p])); } } } return s; };
+window.wsToggleLang = function(){ var n=(window.WS_LANG==='en')?'zh':'en'; location.href='/set_lang?lang='+n; };
+(function(){
+  function apply(root){
+    root=root||document;
+    var ns=root.querySelectorAll('[data-i18n]');
+    for(var i=0;i<ns.length;i++){ var el=ns[i],k=el.getAttribute('data-i18n'); if(k){ var v=window.T(k,null); if(v!==null&&v!==undefined) el.textContent=v; } }
+    var ps=root.querySelectorAll('[data-i18n-placeholder]');
+    for(var j=0;j<ps.length;j++){ var pe=ps[j],pk=pe.getAttribute('data-i18n-placeholder'); if(pk){ var pv=window.T(pk,null); if(pv!==null&&pv!==undefined) pe.setAttribute('placeholder',pv); } }
+    var ts=root.querySelectorAll('[data-i18n-title]');
+    for(var m=0;m<ts.length;m++){ var te=ts[m],tk=te.getAttribute('data-i18n-title'); if(tk){ var tv=window.T(tk,null); if(tv!==null&&tv!==undefined) te.setAttribute('title',tv); } }
+  }
+  window.wsApplyI18n=apply;
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', function(){ apply(); });
+  else apply();
+})();
+</script>

@@ -1,0 +1,55 @@
+{
+  "company": {
+    "zh": "无界科技",
+    "en": "BOUNDLESS"
+  },
+  "product": {
+    "zh": "智聊",
+    "en": "ChatX"
+  },
+  "site_name": "无界科技 · 智聊",
+  "tagline": {
+    "zh": "让沟通，无界",
+    "en": "Communication, Boundless."
+  },
+  "assets": {
+    "mark": "/static/brand/boundless-mark-256.png",
+    "product_icon": "/static/brand/chatx.png"
+  },
+  "links": {
+    "website": "https://usdt2026.cc",
+    "brand_path": "/brand"
+  },
+  "products": [
+    {
+      "key": "facex",
+      "zh": "幻颜",
+      "en": "FaceX",
+      "emoji": "🎭"
+    },
+    {
+      "key": "voicex",
+      "zh": "幻声",
+      "en": "VoiceX",
+      "emoji": "🎙"
+    },
+    {
+      "key": "livex",
+      "zh": "幻影",
+      "en": "LiveX",
+      "emoji": "🎬"
+    },
+    {
+      "key": "lingox",
+      "zh": "通译",
+      "en": "LingoX",
+      "emoji": "🌐"
+    },
+    {
+      "key": "chatx",
+      "zh": "智聊",
+      "en": "ChatX",
+      "emoji": "💬"
+    }
+  ]
+}

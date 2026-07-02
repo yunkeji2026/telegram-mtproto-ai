@@ -1,0 +1,5 @@
+<div class="nav">
+  <a href="/ops/contacts"{% if active == '/ops/contacts' %} class="active"{% endif %}>{{ (i18n or {}).get('ops.nav.contacts', '联系人') }}</a>
+  <a href="/ops/merge-reviews"{% if active == '/ops/merge-reviews' %} class="active"{% endif %}>{{ (i18n or {}).get('ops.nav.merge', '合并审核') }}</a>
+  <a href="/ops/mobile-handoffs"{% if active == '/ops/mobile-handoffs' %} class="active"{% endif %}>{{ (i18n or {}).get('ops.nav.mobile', 'Mobile 交接单') }}</a>
+</div>

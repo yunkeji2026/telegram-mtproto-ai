@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}LINE 自动聊天 · {{ site_name|default('华灵科技客户转化聊天系统') }}{% endblock %}
-{% block page_title %}LINE 自动聊天{% endblock %}
+{% block title %}LINE {{ (i18n or {}).get('ln_s001', "自动聊天 ·") }} {{ product_name|default((i18n or {}).get('brand.product', '智聊')) }}{% endblock %}
+{% block page_title %}LINE {{ (i18n or {}).get('wa_s001', "自动聊天") }}{% endblock %}
 {% block head %}
 <style>
 /* ── LINE RPA 卡片式布局 ─────────────────────────────── */
@@ -45,9 +45,9 @@
 .lr-row.err .lr-meta .lr-step{color:var(--red);background:var(--rs)}
 .lr-row .lr-time{margin-left:auto}
 .lr-row .lr-peer{font-size:.88rem;color:var(--t);white-space:pre-wrap;word-break:break-word}
-.lr-row .lr-peer::before{content:'对方:';color:var(--p);font-weight:700;margin-right:.35rem;font-size:.8rem}
+.lr-row .lr-peer::before{content:'{{ (i18n or {}).get('ln_s069', "对方:") }}';color:var(--p);font-weight:700;margin-right:.35rem;font-size:.8rem}
 .lr-row .lr-reply{margin-top:.4rem;padding:.55rem .7rem;background:var(--ps);border-radius:8px;font-size:.84rem;color:var(--t);white-space:pre-wrap;word-break:break-word}
-.lr-row .lr-reply::before{content:'AI 回复:';color:var(--p);font-weight:700;margin-right:.35rem;font-size:.78rem}
+.lr-row .lr-reply::before{content:'{{ (i18n or {}).get('ln_s070', "AI 回复:") }}';color:var(--p);font-weight:700;margin-right:.35rem;font-size:.78rem}
 .lr-row .lr-err{margin-top:.3rem;color:var(--red);font-size:.78rem}
 .lr-row .lr-shot{margin-top:.5rem}
 .lr-row .lr-shot a{display:inline-flex;align-items:center;gap:.5rem;font-size:.78rem;color:var(--p);text-decoration:none;padding:.3rem .55rem;border:1px dashed var(--b);border-radius:8px;background:var(--bg2,rgba(0,0,0,.02));transition:all .15s}
@@ -116,11 +116,11 @@
 <div id="lr-alert-banner" style="display:none;background:#fef2f2;border:1px solid #fca5a5;border-radius:10px;padding:.75rem 1rem;margin-bottom:1rem;color:#7f1d1d">
   <div style="display:flex;align-items:center;gap:.8rem">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-    <strong id="lr-alert-banner-title" style="font-size:.9rem">有未处理告警</strong>
+    <strong id="lr-alert-banner-title" style="font-size:.9rem">{{ (i18n or {}).get('ln_s002', "有未处理告警") }}</strong>
     <span id="lr-alert-banner-detail" style="font-size:.8rem;opacity:.85"></span>
     <div style="margin-left:auto;display:flex;gap:.4rem">
-      <button class="btn btn-xs" id="lr-alert-banner-expand">查看</button>
-      <button class="btn btn-xs" id="lr-alert-banner-ackall">全部确认</button>
+      <button class="btn btn-xs" id="lr-alert-banner-expand">{{ (i18n or {}).get('msg_js_2042', "查看") }}</button>
+      <button class="btn btn-xs" id="lr-alert-banner-ackall">{{ (i18n or {}).get('wa_s023', "全部确认") }}</button>
     </div>
   </div>
   <div id="lr-alert-banner-list" style="display:none;margin-top:.6rem;font-size:.78rem"></div>
@@ -134,9 +134,9 @@
   <div class="rpa-hero-info">
     <div class="rpa-hero-name">
       <span class="rpa-status-dot neutral" id="lr-status-dot"></span>
-      <span id="lr-status-title">LINE 自动聊天</span>
+      <span id="lr-status-title">LINE {{ (i18n or {}).get('wa_s001', "自动聊天") }}</span>
     </div>
-    <div class="rpa-hero-sub" id="lr-status-sub">加载中…</div>
+    <div class="rpa-hero-sub" id="lr-status-sub">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
     <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.4rem">
       <span class="lr-badge-pill" id="lr-badge-mode" style="display:none"></span>
       <span class="lr-badge-pill" id="lr-badge-vision" style="display:none" title=""></span>
@@ -145,41 +145,41 @@
     </div>
   </div>
   <div class="rpa-kpi-row">
-    <div class="rpa-kpi"><span class="rpa-kpi-n" id="lr-kpi-sent">0</span><span class="rpa-kpi-l">24h 已回复</span></div>
-    <div class="rpa-kpi"><span class="rpa-kpi-n green" id="lr-kpi-ok">0%</span><span class="rpa-kpi-l">24h 成功率</span></div>
-    <div class="rpa-kpi"><span class="rpa-kpi-n" id="lr-kpi-avg">0</span><span class="rpa-kpi-l">平均 ms</span></div>
-    <div class="rpa-kpi"><span class="rpa-kpi-n amber" id="lr-kpi-1h">0</span><span class="rpa-kpi-l">1h 运行</span></div>
+    <div class="rpa-kpi"><span class="rpa-kpi-n" id="lr-kpi-sent">0</span><span class="rpa-kpi-l">24h {{ (i18n or {}).get('ln_s003', "已回复") }}</span></div>
+    <div class="rpa-kpi"><span class="rpa-kpi-n green" id="lr-kpi-ok">0%</span><span class="rpa-kpi-l">24h {{ (i18n or {}).get('ov_kpi_rate', "成功率") }}</span></div>
+    <div class="rpa-kpi"><span class="rpa-kpi-n" id="lr-kpi-avg">0</span><span class="rpa-kpi-l">{{ (i18n or {}).get('analytics_avg', "平均") }} ms</span></div>
+    <div class="rpa-kpi"><span class="rpa-kpi-n amber" id="lr-kpi-1h">0</span><span class="rpa-kpi-l">1h {{ (i18n or {}).get('ov_js_stage_active', "运行") }}</span></div>
     <div class="rpa-kpi" id="lr-kpi-cap-box" style="display:none">
       <span class="rpa-kpi-n" id="lr-kpi-cap">0/0</span>
-      <span class="rpa-kpi-l">今日上限</span>
+      <span class="rpa-kpi-l">{{ (i18n or {}).get('wa_s006', "今日上限") }}</span>
       <div class="rpa-cap-bar" style="width:100%"><div class="rpa-cap-fill" id="lr-cap-fill" style="width:0%"></div></div>
     </div>
   </div>
   <div class="rpa-hero-actions">
     <div class="preset-wrap">
-      <button class="btn-sec" id="lr-preset-toggle" onclick="rpa.togglePreset(event,'lr-preset-pop')" style="font-size:.78rem;padding:.38rem .7rem">📋 预设</button>
+      <button class="btn-sec" id="lr-preset-toggle" onclick="rpa.togglePreset(event,'lr-preset-pop')" style="font-size:.78rem;padding:.38rem .7rem">📋 {{ (i18n or {}).get('wa_s007', "预设") }}</button>
       <div class="preset-pop" id="lr-preset-pop">
-        <div class="preset-lbl">应用场景预设（不会立即保存）</div>
+        <div class="preset-lbl">{{ (i18n or {}).get('wa_s008', "应用场景预设（不会立即保存）") }}</div>
         <div class="preset-divider"></div>
         <button class="preset-btn-item" onclick="applyPreset('companion')">
           <span class="pi">🤝</span>
-          <div class="pt"><div class="pt-title">陪伴模式</div><div class="pt-desc">慢节奏 · 拟人停顿 · 适合 1-1 聊天</div></div>
+          <div class="pt"><div class="pt-title">{{ (i18n or {}).get('wa_s009', "陪伴模式") }}</div><div class="pt-desc">{{ (i18n or {}).get('wa_s010', "慢节奏 · 拟人停顿 · 适合 1-1 聊天") }}</div></div>
         </button>
         <button class="preset-btn-item" onclick="applyPreset('service')">
           <span class="pi">💼</span>
-          <div class="pt"><div class="pt-title">客服模式</div><div class="pt-desc">10s 轮询 · 短停顿 · 高响应</div></div>
+          <div class="pt"><div class="pt-title">{{ (i18n or {}).get('wa_s011', "客服模式") }}</div><div class="pt-desc">10s {{ (i18n or {}).get('wa_s012', "轮询 · 短停顿 · 高响应") }}</div></div>
         </button>
         <button class="preset-btn-item" onclick="applyPreset('fast')">
           <span class="pi">⚡</span>
-          <div class="pt"><div class="pt-title">快速轮询</div><div class="pt-desc">5s 轮询 · 关闭节奏 · 实时</div></div>
+          <div class="pt"><div class="pt-title">{{ (i18n or {}).get('wa_s013', "快速轮询") }}</div><div class="pt-desc">5s {{ (i18n or {}).get('wa_s014', "轮询 · 关闭节奏 · 实时") }}</div></div>
         </button>
         <button class="preset-btn-item" onclick="applyPreset('gentle')">
           <span class="pi">🌙</span>
-          <div class="pt"><div class="pt-title">温柔轮询</div><div class="pt-desc">30s 轮询 · 拟人节奏 · 省电</div></div>
+          <div class="pt"><div class="pt-title">{{ (i18n or {}).get('wa_s015', "温柔轮询") }}</div><div class="pt-desc">30s {{ (i18n or {}).get('wa_s016', "轮询 · 拟人节奏 · 省电") }}</div></div>
         </button>
       </div>
     </div>
-    <button class="rpa-hero-btn" onclick="loadLineRpa()" title="刷新状态">↻</button>
+    <button class="rpa-hero-btn" onclick="loadLineRpa()" title="{{ (i18n or {}).get('wa_s017', '刷新状态') }}">↻</button>
   </div>
 </div>
 
@@ -187,44 +187,44 @@
 <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:1.1rem;flex-wrap:wrap">
   <button class="btn-p" id="lr-btn-trigger">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-    立即触发一轮
+    {{ (i18n or {}).get('ln_s004', "立即触发一轮") }}
   </button>
   <select id="lr-pause-select" class="f-inp" style="width:auto;padding:.45rem .7rem;font-size:.82rem">
-    <option value="300">暂停 5 分钟</option>
-    <option value="900">暂停 15 分钟</option>
-    <option value="1800">暂停 30 分钟</option>
-    <option value="3600">暂停 1 小时</option>
-    <option value="10800">暂停 3 小时</option>
+    <option value="300">{{ (i18n or {}).get('ov_ctrl_pause_title', "暂停 5 分钟") }}</option>
+    <option value="900">{{ (i18n or {}).get('ln_s005', "暂停 15 分钟") }}</option>
+    <option value="1800">{{ (i18n or {}).get('ln_s006', "暂停 30 分钟") }}</option>
+    <option value="3600">{{ (i18n or {}).get('ln_s007', "暂停 1 小时") }}</option>
+    <option value="10800">{{ (i18n or {}).get('ln_s008', "暂停 3 小时") }}</option>
   </select>
-  <button class="btn-sec" id="lr-btn-pause">⏸ 暂停</button>
-  <button class="btn-sec" id="lr-btn-resume" style="display:none">▶ 立即恢复</button>
-  <button class="btn-sec" id="lr-btn-send-manual" title="主动给指定会话发送一条消息（入队，runner 自动处理）" onclick="lrOpenSendManual()">✉ 手动发送</button>
+  <button class="btn-sec" id="lr-btn-pause">⏸ {{ (i18n or {}).get('ov_ctrl_pause', "暂停") }}</button>
+  <button class="btn-sec" id="lr-btn-resume" style="display:none">▶ {{ (i18n or {}).get('ov_ctrl_resume_title', "立即恢复") }}</button>
+  <button class="btn-sec" id="lr-btn-send-manual" title="{{ (i18n or {}).get('msg_s013', '主动给指定会话发送一条消息（入队，runner 自动处理）') }}" onclick="lrOpenSendManual()">✉ {{ (i18n or {}).get('ln_s009', "手动发送") }}</button>
 </div>
 
 <!-- P28: 手动发送模态框 -->
 <div id="lr-send-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;align-items:center;justify-content:center">
   <div style="background:var(--card);border:1px solid var(--bd2);border-radius:14px;padding:1.4rem 1.6rem;width:min(460px,92vw);box-shadow:0 12px 40px rgba(0,0,0,.3)">
     <div style="display:flex;align-items:center;gap:.7rem;margin-bottom:1rem">
-      <strong style="font-size:1rem">手动发送消息</strong>
+      <strong style="font-size:1rem">{{ (i18n or {}).get('msg_s014', "手动发送消息") }}</strong>
       <button onclick="lrCloseSendManual()" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:1.2rem;color:var(--t3)">✕</button>
     </div>
     <div style="display:flex;flex-direction:column;gap:.6rem">
       <label style="font-size:.8rem;color:var(--t2);display:flex;flex-direction:column;gap:.25rem">
-        Chat Key <span style="font-size:.72rem;color:var(--t3)">(必填，例：line_rpa:name:Alice)</span>
+        Chat Key <span style="font-size:.72rem;color:var(--t3)">({{ (i18n or {}).get('ln_s010', "必填，例：") }}line_rpa:name:Alice)</span>
         <input id="lr-sm-chat-key" class="f-inp" type="text" placeholder="line_rpa:name:Alice">
       </label>
       <label style="font-size:.8rem;color:var(--t2);display:flex;flex-direction:column;gap:.25rem">
-        对方显示名 <span style="font-size:.72rem;color:var(--t3)">(可选，便于查询)</span>
+        {{ (i18n or {}).get('msg_s461', "对方显示名") }} <span style="font-size:.72rem;color:var(--t3)">({{ (i18n or {}).get('ln_s011', "可选，便于查询") }})</span>
         <input id="lr-sm-peer-name" class="f-inp" type="text" placeholder="Alice">
       </label>
       <label style="font-size:.8rem;color:var(--t2);display:flex;flex-direction:column;gap:.25rem">
-        消息内容 <span style="font-size:.72rem;color:var(--t3)">(必填)</span>
-        <textarea id="lr-sm-text" class="f-inp" rows="3" style="resize:vertical" placeholder="你好，这是一条手动发送的消息"></textarea>
+        {{ (i18n or {}).get('msg_s462', "消息内容") }} <span style="font-size:.72rem;color:var(--t3)">({{ (i18n or {}).get('msg_js_2059', "必填") }})</span>
+        <textarea id="lr-sm-text" class="f-inp" rows="3" style="resize:vertical" placeholder="{{ (i18n or {}).get('msg_s018', '你好，这是一条手动发送的消息') }}"></textarea>
       </label>
       <div id="lr-sm-msg" style="font-size:.78rem;min-height:1.2em"></div>
       <div style="display:flex;gap:.5rem;justify-content:flex-end">
-        <button class="btn-sec btn-sm" onclick="lrCloseSendManual()">取消</button>
-        <button class="btn-p btn-sm" id="lr-sm-submit" onclick="lrSubmitSendManual()">入队发送</button>
+        <button class="btn-sec btn-sm" onclick="lrCloseSendManual()">{{ (i18n or {}).get('ov_js_cancel', "取消") }}</button>
+        <button class="btn-p btn-sm" id="lr-sm-submit" onclick="lrSubmitSendManual()">{{ (i18n or {}).get('msg_s019', "入队发送") }}</button>
       </div>
     </div>
   </div>
@@ -233,14 +233,14 @@
 {# ══ 1h 运行节奏 sparkline + 多会话摘要（LINE 特有）══ #}
 <div class="rpa-card" style="padding:.85rem 1rem">
   <div style="display:flex;align-items:center;font-size:.78rem;color:var(--t2);margin-bottom:.25rem">
-    <span>📈 1h 运行节奏</span>
+    <span>📈 1h {{ (i18n or {}).get('ln_s012', "运行节奏") }}</span>
     <span id="lr-tick-hint" style="margin-left:auto;font-weight:600">—</span>
   </div>
   <div class="lr-sparkline" id="lr-sparkline"></div>
   <!-- 上一轮多会话摘要（仅 navigation.enabled 时有内容） -->
   <div id="lr-last-tick" style="margin-top:.7rem;display:none;border-top:1px dashed var(--bd);padding-top:.55rem">
     <div style="font-size:.75rem;color:var(--t3);margin-bottom:.4rem;display:flex;justify-content:space-between">
-      <span>上一轮多会话处理</span>
+      <span>{{ (i18n or {}).get('ln_s013', "上一轮多会话处理") }}</span>
       <span id="lr-last-tick-summary" style="font-weight:600;color:var(--t2)">—</span>
     </div>
     <div id="lr-last-tick-list" style="display:flex;flex-wrap:wrap;gap:.35rem"></div>
@@ -249,10 +249,10 @@
 
 <!-- Sub-tab 导航 -->
 <div class="st-bar">
-  <button class="st-tab active" data-pane="pane-monitor" onclick="lrSwitchTab(this)">监控</button>
-  <button class="st-tab" data-pane="pane-settings" onclick="lrSwitchTab(this)">设置<span class="tab-dot"></span></button>
-  <button class="st-tab" data-pane="pane-ops" onclick="lrSwitchTab(this)">运维</button>
-  <button class="st-tab" data-pane="pane-funnel" onclick="lrSwitchTab(this)">运营漏斗</button>
+  <button class="st-tab active" data-pane="pane-monitor" onclick="lrSwitchTab(this)">{{ (i18n or {}).get('ln_s014', "监控") }}</button>
+  <button class="st-tab" data-pane="pane-settings" onclick="lrSwitchTab(this)">{{ (i18n or {}).get('ln_s015', "设置") }}<span class="tab-dot"></span></button>
+  <button class="st-tab" data-pane="pane-ops" onclick="lrSwitchTab(this)">{{ (i18n or {}).get('wa_s021', "运维") }}</button>
+  <button class="st-tab" data-pane="pane-funnel" onclick="lrSwitchTab(this)">{{ (i18n or {}).get('rpa_fn_title', "运营漏斗") }}</button>
 </div>
 
 <!-- ▸ Tab: 监控 -->
@@ -262,42 +262,42 @@
   <div class="card">
     <h2>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
-      会话流（最近 {{ '{{runs_count}}' }}）
+      {{ (i18n or {}).get('ln_s016', "会话流（最近") }} {{ '{{runs_count}}' }}）
       <div class="actions">
         <label style="font-size:.75rem;color:var(--t3);display:flex;align-items:center;gap:.3rem">
           <input type="checkbox" id="lr-only-peer" checked style="margin:0">
-          仅显示有对方消息
+          {{ (i18n or {}).get('ln_s017', "仅显示有对方消息") }}
         </label>
-        <button class="btn btn-s btn-xs" onclick="loadLineRpaRecent()">刷新</button>
+        <button class="btn btn-s btn-xs" onclick="loadLineRpaRecent()">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
       </div>
     </h2>
     <div class="lr-stream" id="lr-stream">
-      <div class="lr-empty">加载中…</div>
+      <div class="lr-empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
     </div>
   </div>
 
   <div class="card">
     <h2>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-      最近活跃会话
-      <span style="font-size:.7rem;color:var(--t3);margin-left:.5rem;font-weight:400">含历史检索</span>
+      {{ (i18n or {}).get('ln_s018', "最近活跃会话") }}
+      <span style="font-size:.7rem;color:var(--t3);margin-left:.5rem;font-weight:400">{{ (i18n or {}).get('ln_s019', "含历史检索") }}</span>
     </h2>
     <!-- P9-B: 历史全文检索 -->
     <div style="padding:.4rem 0 .6rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-      <input id="lr-hist-q" type="text" placeholder="🔍 在历史聊天里检索关键词…"
+      <input id="lr-hist-q" type="text" placeholder="🔍 {{ (i18n or {}).get('ln_s020', '在历史聊天里检索关键词…') }}"
              style="flex:1;min-width:160px;padding:.42rem .7rem;background:var(--card,#1e293b);border:1px solid var(--bd);border-radius:7px;font-size:.78rem;color:var(--t1)">
       <select id="lr-hist-q-intent" style="padding:.42rem .55rem;background:var(--card,#1e293b);border:1px solid var(--bd);border-radius:7px;font-size:.75rem;color:var(--t2)">
-        <option value="">全部意图</option>
-        <option value="purchase">购买</option>
-        <option value="support">售后</option>
-        <option value="inquiry">咨询</option>
-        <option value="greeting">问候</option>
-        <option value="general">通用</option>
+        <option value="">{{ (i18n or {}).get('ov_all_intents', "全部意图") }}</option>
+        <option value="purchase">{{ (i18n or {}).get('rpa_intent_purchase', "购买") }}</option>
+        <option value="support">{{ (i18n or {}).get('rpa_intent_support', "售后") }}</option>
+        <option value="inquiry">{{ (i18n or {}).get('rpa_intent_inquiry', "咨询") }}</option>
+        <option value="greeting">{{ (i18n or {}).get('rpa_intent_greeting', "问候") }}</option>
+        <option value="general">{{ (i18n or {}).get('rpa_intent_general', "通用") }}</option>
       </select>
     </div>
     <div id="lr-hist-results" style="display:none;max-height:300px;overflow-y:auto;border-top:1px solid var(--bd);margin-bottom:.4rem"></div>
     <div class="lr-chats" id="lr-chats">
-      <div class="lr-empty" style="padding:1rem">加载中…</div>
+      <div class="lr-empty" style="padding:1rem">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
     </div>
   </div>
 
@@ -311,47 +311,47 @@
   <div class="card">
     <h2>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><rect x="7" y="13" width="3" height="5"/><rect x="12" y="9" width="3" height="9"/><rect x="17" y="5" width="3" height="13"/></svg>
-      意图分布
+      {{ (i18n or {}).get('wa_s147', "意图分布") }}
       <div class="actions" style="display:flex;gap:.25rem">
         <button class="btn btn-xs rpa-win-btn" data-h="24">24h</button>
         <button class="btn btn-xs rpa-win-btn active" data-h="168">7d</button>
         <button class="btn btn-xs rpa-win-btn" data-h="720">30d</button>
       </div>
     </h2>
-    <div id="lr-intent-body" style="padding:.4rem 0">加载中…</div>
+    <div id="lr-intent-body" style="padding:.4rem 0">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
   </div>
 
   <!-- P3-1：通知栏双校验 -->
   <div class="card">
     <h2>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
-      通知栏健康对账
+      {{ (i18n or {}).get('ln_s021', "通知栏健康对账") }}
       <div class="actions">
-        <button class="btn btn-xs" id="lr-notif-refresh">刷新</button>
+        <button class="btn btn-xs" id="lr-notif-refresh">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
       </div>
     </h2>
-    <div id="lr-notif-verdict" style="font-size:.82rem;margin-bottom:.5rem;color:var(--t2)">未扫描</div>
-    <div id="lr-notif-body" style="font-size:.78rem;color:var(--t3)">点击"刷新"从 LINE 系统通知栏读取当前 LINE 条目。</div>
+    <div id="lr-notif-verdict" style="font-size:.82rem;margin-bottom:.5rem;color:var(--t2)">{{ (i18n or {}).get('ln_s022', "未扫描") }}</div>
+    <div id="lr-notif-body" style="font-size:.78rem;color:var(--t3)">{{ (i18n or {}).get('dash.q.clicked', "点击") }}"{{ (i18n or {}).get('dash.refresh', "刷新") }}"{{ (i18n or {}).get('ln_s023', "从 LINE 系统通知栏读取当前 LINE 条目。") }}</div>
   </div>
 
   <!-- P5-3：活动时间轴（runs/pending/alerts 三源合并） -->
   <div class="card" id="lr-timeline-card">
     <h2>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
-      活动时间轴
-      <span id="lr-timeline-sub" style="font-size:.72rem;color:var(--t3);margin-left:.5rem">最近 60 分钟</span>
+      {{ (i18n or {}).get('ln_s024', "活动时间轴") }}
+      <span id="lr-timeline-sub" style="font-size:.72rem;color:var(--t3);margin-left:.5rem">{{ (i18n or {}).get('ln_s025', "最近 60 分钟") }}</span>
       <div class="actions">
         <select id="lr-timeline-window" class="btn btn-xs" style="padding:.2rem .4rem">
-          <option value="15">15 分钟</option>
-          <option value="60" selected>60 分钟</option>
-          <option value="240">4 小时</option>
-          <option value="720">12 小时</option>
+          <option value="15">15 {{ (i18n or {}).get('msg_js_008', "分钟") }}</option>
+          <option value="60" selected>60 {{ (i18n or {}).get('msg_js_008', "分钟") }}</option>
+          <option value="240">4 {{ (i18n or {}).get('msg_js_009', "小时") }}</option>
+          <option value="720">12 {{ (i18n or {}).get('msg_js_009', "小时") }}</option>
         </select>
-        <button class="btn btn-xs" id="lr-timeline-refresh">刷新</button>
+        <button class="btn btn-xs" id="lr-timeline-refresh">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
       </div>
     </h2>
     <div id="lr-timeline-body" style="font-size:.8rem;max-height:320px;overflow:auto">
-      <div class="lr-empty" style="padding:1rem">加载中…</div>
+      <div class="lr-empty" style="padding:1rem">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
     </div>
   </div>
 
@@ -359,19 +359,19 @@
   <div class="card" id="lr-audit-card">
     <h2>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-      审计日志
-      <span id="lr-audit-sub" style="font-size:.72rem;color:var(--t3);margin-left:.5rem">最近 100 条</span>
+      {{ (i18n or {}).get('ln_s026', "审计日志") }}
+      <span id="lr-audit-sub" style="font-size:.72rem;color:var(--t3);margin-left:.5rem">{{ (i18n or {}).get('ln_s027', "最近 100 条") }}</span>
       <div class="actions">
         <select id="lr-audit-filter" class="btn btn-xs" style="padding:.2rem .4rem">
-          <option value="">全部</option>
-          <option value="pending">审批</option>
-          <option value="alert">告警</option>
+          <option value="">{{ (i18n or {}).get('rpa_all', "全部") }}</option>
+          <option value="pending">{{ (i18n or {}).get('ln_s028', "审批") }}</option>
+          <option value="alert">{{ (i18n or {}).get('ov_kpi_alerts', "告警") }}</option>
         </select>
-        <button class="btn btn-xs" id="lr-audit-refresh">刷新</button>
+        <button class="btn btn-xs" id="lr-audit-refresh">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
       </div>
     </h2>
     <div id="lr-audit-body" style="font-size:.78rem;max-height:260px;overflow:auto">
-      <div class="lr-empty" style="padding:1rem">加载中…</div>
+      <div class="lr-empty" style="padding:1rem">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
     </div>
   </div>
 
@@ -379,75 +379,75 @@
   <div class="card" id="lr-pending-card">
     <h2>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>
-      审核队列
+      {{ (i18n or {}).get('ln_s029', "审核队列") }}
       <span id="lr-pending-stats" style="font-size:.72rem;color:var(--t3);margin-left:.5rem"></span>
       <div class="actions">
         <label style="font-size:.75rem;margin-right:.4rem">
-          <input type="checkbox" id="lr-pending-only-open" checked /> 只看待处理
+          <input type="checkbox" id="lr-pending-only-open" checked /> {{ (i18n or {}).get('ln_s030', "只看待处理") }}
         </label>
-        <button class="btn btn-xs" id="lr-pending-refresh">刷新</button>
-        <button class="btn btn-xs" id="lr-pending-cancel-all" style="color:#dc2626" title="取消所有未处理项">清空</button>
+        <button class="btn btn-xs" id="lr-pending-refresh">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
+        <button class="btn btn-xs" id="lr-pending-cancel-all" style="color:#dc2626" title="{{ (i18n or {}).get('ln_s031', '取消所有未处理项') }}">{{ (i18n or {}).get('logs_clear', "清空") }}</button>
       </div>
     </h2>
     {# Q1+Q2: 批量审批 + 键盘快捷键工具栏 #}
     <div class="rpa-bulk-toolbar">
-      <button type="button" class="btn" onclick="rpa.bulk.selectAll()">全选</button>
-      <button type="button" class="btn" onclick="rpa.bulk.clearSelection()">清空</button>
+      <button type="button" class="btn" onclick="rpa.bulk.selectAll()">{{ (i18n or {}).get('ov_select_all', "全选") }}</button>
+      <button type="button" class="btn" onclick="rpa.bulk.clearSelection()">{{ (i18n or {}).get('logs_clear', "清空") }}</button>
       <button type="button" class="btn btn-primary" id="lr-bulk-approve" disabled
-              onclick="rpa.bulk.approveSelected()">批量批准 (0)</button>
+              onclick="rpa.bulk.approveSelected()">{{ (i18n or {}).get('draft.bulk.approve', "批量批准") }} (0)</button>
       <button type="button" class="btn btn-danger" id="lr-bulk-reject" disabled
-              onclick="rpa.bulk.rejectSelected()">批量拒绝 (0)</button>
-      <span class="rpa-bulk-count" id="lr-bulk-count">已选 0 项</span>
-      <span class="rpa-bulk-hint">⌨ 快捷键
+              onclick="rpa.bulk.rejectSelected()">{{ (i18n or {}).get('draft.bulk.reject', "批量拒绝") }} (0)</button>
+      <span class="rpa-bulk-count" id="lr-bulk-count">{{ (i18n or {}).get('wa_s035', "已选 0 项") }}</span>
+      <span class="rpa-bulk-hint">⌨ {{ (i18n or {}).get('wa_s036', "快捷键") }}
         <span class="rpa-bulk-hint-pop" id="lr-shortcuts-pop">
-          <div><kbd>j</kbd>/<kbd>↓</kbd> 下一条　<kbd>k</kbd>/<kbd>↑</kbd> 上一条</div>
-          <div><kbd>x</kbd>/<kbd>空格</kbd> 勾选当前</div>
-          <div><kbd>a</kbd> 批准焦点　<kbd>r</kbd> 拒绝焦点</div>
-          <div><kbd>Ctrl</kbd>+<kbd>Enter</kbd> 批量批准</div>
-          <div><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> 批量拒绝</div>
-          <div><kbd>Esc</kbd> 取消选中</div>
+          <div><kbd>j</kbd>/<kbd>↓</kbd> {{ (i18n or {}).get('wa_s037', "下一条") }}　<kbd>k</kbd>/<kbd>↑</kbd> {{ (i18n or {}).get('wa_s038', "上一条") }}</div>
+          <div><kbd>x</kbd>/<kbd>{{ (i18n or {}).get('wa_s039', "空格") }}</kbd> {{ (i18n or {}).get('wa_s040', "勾选当前") }}</div>
+          <div><kbd>a</kbd> {{ (i18n or {}).get('wa_s041', "批准焦点") }}　<kbd>r</kbd> {{ (i18n or {}).get('wa_s042', "拒绝焦点") }}</div>
+          <div><kbd>Ctrl</kbd>+<kbd>Enter</kbd> {{ (i18n or {}).get('draft.bulk.approve', "批量批准") }}</div>
+          <div><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> {{ (i18n or {}).get('draft.bulk.reject', "批量拒绝") }}</div>
+          <div><kbd>Esc</kbd> {{ (i18n or {}).get('wa_s043', "取消选中") }}</div>
         </span>
       </span>
-      <button type="button" class="btn" style="margin-left:auto;font-size:.75rem;padding:.2rem .5rem" onclick="document.getElementById('lr-shortcuts-pop').classList.toggle('show')" title="快捷键帮助">?</button>
+      <button type="button" class="btn" style="margin-left:auto;font-size:.75rem;padding:.2rem .5rem" onclick="document.getElementById('lr-shortcuts-pop').classList.toggle('show')" title="{{ (i18n or {}).get('wa_s044', '快捷键帮助') }}">?</button>
     </div>
     <div id="lr-pending-body" style="font-size:.82rem">
-      <div class="lr-empty" style="padding:1rem">加载中…</div>
+      <div class="lr-empty" style="padding:1rem">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
     </div>
   </div>
   <!-- 实时日志 -->
   <div class="card">
     <h2>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-      实时日志（LINE RPA）
+      {{ (i18n or {}).get('ln_s032', "实时日志（LINE RPA）") }}
       <div class="actions">
-        <button class="btn btn-xs" id="lr-log-refresh" onclick="loadLrLogTail()">刷新</button>
+        <button class="btn btn-xs" id="lr-log-refresh" onclick="loadLrLogTail()">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
       </div>
     </h2>
-    <div class="lr-log-wrap" id="lr-log-tail"><span style="color:var(--t3)">点击刷新加载…</span></div>
+    <div class="lr-log-wrap" id="lr-log-tail"><span style="color:var(--t3)">{{ (i18n or {}).get('wa_s148', "点击刷新加载…") }}</span></div>
   </div>
 
   <!-- 设备快捷操作 -->
   <div class="card">
     <h2>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
-      设备快捷操作
+      {{ (i18n or {}).get('wa_s149', "设备快捷操作") }}
     </h2>
     <div style="display:flex;gap:.65rem;flex-wrap:wrap;margin-bottom:.85rem">
       <button class="btn btn-s btn-sm" id="lr-btn-accept-friends">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
-        立即接受好友申请
+        {{ (i18n or {}).get('ln_s033', "立即接受好友申请") }}
       </button>
       <button class="btn btn-s btn-sm" id="lr-btn-screenshot">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-        获取当前截屏
+        {{ (i18n or {}).get('wa_s151', "获取当前截屏") }}
       </button>
     </div>
     <div id="lr-device-msg" style="font-size:.78rem;color:var(--t2);margin-bottom:.5rem"></div>
     <div id="lr-screenshot-wrap" style="display:none;margin-top:.5rem">
-      <img id="lr-screenshot-img" src="" alt="设备截屏"
+      <img id="lr-screenshot-img" src="" alt="{{ (i18n or {}).get('wa_s152', '设备截屏') }}"
            style="max-width:100%;border-radius:8px;border:1px solid var(--bd);cursor:zoom-in"
            onclick="this.style.maxWidth=this.style.maxWidth==='100%'?'none':'100%'">
-      <div style="font-size:.72rem;color:var(--t3);margin-top:.25rem">点击图片放大/缩小</div>
+      <div style="font-size:.72rem;color:var(--t3);margin-top:.25rem">{{ (i18n or {}).get('ln_s034', "点击图片放大/缩小") }}</div>
     </div>
   </div>
 
@@ -455,18 +455,18 @@
   <div class="card" id="lr-sendq-card">
     <h2>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-      手动发送队列
+      {{ (i18n or {}).get('msg_s457', "手动发送队列") }}
       <span id="lr-sendq-count" style="font-size:.72rem;color:var(--t3);margin-left:.5rem"></span>
       <div class="actions">
         <label style="font-size:.75rem;margin-right:.4rem">
-          <input type="checkbox" id="lr-sendq-include-done" onchange="loadLrSendQueue()"> 含已完成
+          <input type="checkbox" id="lr-sendq-include-done" onchange="loadLrSendQueue()"> {{ (i18n or {}).get('msg_s458', "含已完成") }}
         </label>
-        <button class="btn btn-xs" onclick="loadLrSendQueue()">刷新</button>
-        <button class="btn btn-xs btn-primary" onclick="lrOpenSendManual()">+ 新建</button>
+        <button class="btn btn-xs" onclick="loadLrSendQueue()">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
+        <button class="btn btn-xs btn-primary" onclick="lrOpenSendManual()">+ {{ (i18n or {}).get('ln_s035', "新建") }}</button>
       </div>
     </h2>
     <div id="lr-sendq-body" style="font-size:.82rem">
-      <div class="lr-empty" style="padding:1rem">加载中…</div>
+      <div class="lr-empty" style="padding:1rem">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
     </div>
   </div>
 
@@ -520,79 +520,79 @@
 <div class="card">
   <h2>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33"/></svg>
-    节奏与服务配置
+    {{ (i18n or {}).get('ln_s036', "节奏与服务配置") }}
     <div class="actions">
-      <button class="btn btn-p btn-xs" id="lr-cfg-save">保存并生效</button>
+      <button class="btn btn-p btn-xs" id="lr-cfg-save">{{ (i18n or {}).get('ln_s037', "保存并生效") }}</button>
     </div>
   </h2>
   <div id="lr-cfg-msg" style="font-size:.78rem;color:var(--t2);margin-bottom:.6rem"></div>
   <div class="lr-cfg" id="lr-cfg">
     <!-- ── 服务轮询 ───────────────────────── -->
-    <div class="row2" style="font-size:.72rem;font-weight:700;color:var(--t3);padding:.1rem 0 .3rem;letter-spacing:.04em;text-transform:uppercase">服务轮询</div>
-    <label><span>基准轮询间隔（秒）</span><input type="number" id="cfg-interval" min="1" step="1" value="15"></label>
-    <label><span>快轮询间隔（秒）</span><input type="number" id="cfg-fast" min="1" step="1" value="4"></label>
-    <label><span>慢轮询间隔（秒）</span><input type="number" id="cfg-slow" min="1" step="1" value="30"></label>
-    <label><span>空轮 N 次后进入慢轮询</span><input type="number" id="cfg-slow-after" min="1" step="1" value="6"></label>
+    <div class="row2" style="font-size:.72rem;font-weight:700;color:var(--t3);padding:.1rem 0 .3rem;letter-spacing:.04em;text-transform:uppercase">{{ (i18n or {}).get('wa_s068', "服务轮询") }}</div>
+    <label><span>{{ (i18n or {}).get('wa_s070', "基准轮询间隔（秒）") }}</span><input type="number" id="cfg-interval" min="1" step="1" value="15"></label>
+    <label><span>{{ (i18n or {}).get('wa_s072', "快轮询间隔（秒）") }}</span><input type="number" id="cfg-fast" min="1" step="1" value="4"></label>
+    <label><span>{{ (i18n or {}).get('wa_s074', "慢轮询间隔（秒）") }}</span><input type="number" id="cfg-slow" min="1" step="1" value="30"></label>
+    <label><span>{{ (i18n or {}).get('wa_s076', "空轮 N 次后进入慢轮询") }}</span><input type="number" id="cfg-slow-after" min="1" step="1" value="6"></label>
     <!-- ── 拟人节奏 ───────────────────────── -->
-    <div class="row2" style="font-size:.72rem;font-weight:700;color:var(--t3);padding:.6rem 0 .3rem;letter-spacing:.04em;text-transform:uppercase;border-top:1px dashed var(--bd);margin-top:.35rem">拟人节奏</div>
-    <label><span>分条策略</span>
+    <div class="row2" style="font-size:.72rem;font-weight:700;color:var(--t3);padding:.6rem 0 .3rem;letter-spacing:.04em;text-transform:uppercase;border-top:1px dashed var(--bd);margin-top:.35rem">{{ (i18n or {}).get('ln_s038', "拟人节奏") }}</div>
+    <label><span>{{ (i18n or {}).get('wa_s090', "分条策略") }}</span>
       <select id="cfg-split">
-        <option value="sentence">按句子</option>
-        <option value="length">按长度</option>
-        <option value="none">不分条</option>
+        <option value="sentence">{{ (i18n or {}).get('wa_s091', "按句子") }}</option>
+        <option value="length">{{ (i18n or {}).get('wa_s092', "按长度") }}</option>
+        <option value="none">{{ (i18n or {}).get('wa_s093', "不分条") }}</option>
       </select>
     </label>
-    <label><span>单条最大字符</span><input type="number" id="cfg-split-chars" min="20" step="10" value="80"></label>
-    <label><span>最多分成几条</span><input type="number" id="cfg-split-parts" min="1" step="1" value="3"></label>
-    <label><span>默认回复语言</span><input type="text" id="cfg-lang" placeholder="zh / zh-Hans / en / ja" value="zh"></label>
-    <label><span>读停顿 ms（最低）</span><input type="number" id="cfg-read-lo" min="0" step="100" value="800"></label>
-    <label><span>读停顿 ms（最高）</span><input type="number" id="cfg-read-hi" min="0" step="100" value="2000"></label>
-    <label><span>条间隔 ms（最低）</span><input type="number" id="cfg-inter-lo" min="0" step="100" value="700"></label>
-    <label><span>条间隔 ms（最高）</span><input type="number" id="cfg-inter-hi" min="0" step="100" value="1800"></label>
+    <label><span>{{ (i18n or {}).get('wa_s094', "单条最大字符") }}</span><input type="number" id="cfg-split-chars" min="20" step="10" value="80"></label>
+    <label><span>{{ (i18n or {}).get('wa_s095', "最多分成几条") }}</span><input type="number" id="cfg-split-parts" min="1" step="1" value="3"></label>
+    <label><span>{{ (i18n or {}).get('wa_s083', "默认回复语言") }}</span><input type="text" id="cfg-lang" placeholder="zh / zh-Hans / en / ja" value="zh"></label>
+    <label><span>{{ (i18n or {}).get('ln_s039', "读停顿 ms（最低）") }}</span><input type="number" id="cfg-read-lo" min="0" step="100" value="800"></label>
+    <label><span>{{ (i18n or {}).get('ln_s040', "读停顿 ms（最高）") }}</span><input type="number" id="cfg-read-hi" min="0" step="100" value="2000"></label>
+    <label><span>{{ (i18n or {}).get('ln_s041', "条间隔 ms（最低）") }}</span><input type="number" id="cfg-inter-lo" min="0" step="100" value="700"></label>
+    <label><span>{{ (i18n or {}).get('ln_s042', "条间隔 ms（最高）") }}</span><input type="number" id="cfg-inter-hi" min="0" step="100" value="1800"></label>
     <!-- ── 限制与安全 ──────────────────────── -->
-    <div class="row2" style="font-size:.72rem;font-weight:700;color:var(--t3);padding:.6rem 0 .3rem;letter-spacing:.04em;text-transform:uppercase;border-top:1px dashed var(--bd);margin-top:.35rem">限制与安全</div>
-    <label><span>每日发送上限（0=不限）</span><input type="number" id="cfg-daily-cap" min="0" step="1" value="0"></label>
-    <label><span>回复模式</span>
+    <div class="row2" style="font-size:.72rem;font-weight:700;color:var(--t3);padding:.6rem 0 .3rem;letter-spacing:.04em;text-transform:uppercase;border-top:1px dashed var(--bd);margin-top:.35rem">{{ (i18n or {}).get('ln_s043', "限制与安全") }}</div>
+    <label><span>{{ (i18n or {}).get('wa_s085', "每日发送上限") }}（0={{ (i18n or {}).get('ln_s044', "不限）") }}</span><input type="number" id="cfg-daily-cap" min="0" step="1" value="0"></label>
+    <label><span>{{ (i18n or {}).get('wa_s078', "回复模式") }}</span>
       <select id="cfg-reply-mode">
-        <option value="auto">auto — 自动发送</option>
-        <option value="approve">approve — 人工审核后发</option>
-        <option value="off">off — 永不回复</option>
+        <option value="auto">auto — {{ (i18n or {}).get('inbox.autolog.autosend', "自动发送") }}</option>
+        <option value="approve">approve — {{ (i18n or {}).get('ln_s045', "人工审核后发") }}</option>
+        <option value="off">off — {{ (i18n or {}).get('ln_s046', "永不回复") }}</option>
       </select>
     </label>
     <!-- ── 开关 ──────────────────────────── -->
-    <div class="row2" style="font-size:.72rem;font-weight:700;color:var(--t3);padding:.6rem 0 .3rem;letter-spacing:.04em;text-transform:uppercase;border-top:1px dashed var(--bd);margin-top:.35rem">全局开关</div>
+    <div class="row2" style="font-size:.72rem;font-weight:700;color:var(--t3);padding:.6rem 0 .3rem;letter-spacing:.04em;text-transform:uppercase;border-top:1px dashed var(--bd);margin-top:.35rem">{{ (i18n or {}).get('wa_s126', "全局开关") }}</div>
     <div class="row2" style="display:flex;gap:1.2rem;flex-wrap:wrap">
-      <label class="switch"><input type="checkbox" id="cfg-pacing-on"> 启用拟人节奏</label>
-      <label class="switch"><input type="checkbox" id="cfg-enabled"> 启用 LINE RPA（总开关）</label>
-      <label class="switch"><input type="checkbox" id="cfg-nav-on"> 启用多会话导航（扫未读→自动进入→回复→返回）</label>
-      <label class="switch"><input type="checkbox" id="cfg-auto-accept"> 自动接受好友申请（下轮运行时处理）</label>
+      <label class="switch"><input type="checkbox" id="cfg-pacing-on"> {{ (i18n or {}).get('ln_s047', "启用拟人节奏") }}</label>
+      <label class="switch"><input type="checkbox" id="cfg-enabled"> {{ (i18n or {}).get('ln_s048', "启用 LINE RPA（总开关）") }}</label>
+      <label class="switch"><input type="checkbox" id="cfg-nav-on"> {{ (i18n or {}).get('ln_s049', "启用多会话导航（扫未读") }}→{{ (i18n or {}).get('ln_s050', "自动进入") }}→{{ (i18n or {}).get('ov_js_replies_unit', "回复") }}→{{ (i18n or {}).get('ln_s051', "返回）") }}</label>
+      <label class="switch"><input type="checkbox" id="cfg-auto-accept"> {{ (i18n or {}).get('ln_s052', "自动接受好友申请（下轮运行时处理）") }}</label>
     </div>
     <div class="row2" style="border-top:1px dashed var(--bd);padding-top:.75rem;margin-top:.35rem">
-      <div style="font-size:.74rem;color:var(--t3);font-weight:600;margin-bottom:.4rem">多会话导航</div>
+      <div style="font-size:.74rem;color:var(--t3);font-weight:600;margin-bottom:.4rem">{{ (i18n or {}).get('ln_s053', "多会话导航") }}</div>
       <div class="lr-cfg" style="margin:0">
-        <label><span>单轮最多处理（未读数）</span>
+        <label><span>{{ (i18n or {}).get('ln_s054', "单轮最多处理（未读数）") }}</span>
           <input type="number" id="cfg-nav-max" min="1" step="1" value="3">
         </label>
-        <label><span>扫描前 N 行</span>
+        <label><span>{{ (i18n or {}).get('ln_s055', "扫描前 N 行") }}</span>
           <input type="number" id="cfg-nav-scan" min="1" step="1" value="10">
         </label>
-        <label><span>单轮预算（秒）</span>
+        <label><span>{{ (i18n or {}).get('ln_s056', "单轮预算（秒）") }}</span>
           <input type="number" id="cfg-nav-budget" min="10" step="5" value="60">
         </label>
-        <label><span>'聊天' Tab 坐标 x,y（可空）</span>
-          <input type="text" id="cfg-nav-tab" placeholder="例 150,2360">
+        <label><span>'{{ (i18n or {}).get('ln_s057', "聊天") }}' Tab {{ (i18n or {}).get('ln_s058', "坐标") }} x,y（{{ (i18n or {}).get('ln_s059', "可空）") }}</span>
+          <input type="text" id="cfg-nav-tab" placeholder="{{ (i18n or {}).get('ln_s060', '例') }} 150,2360">
         </label>
-        <label class="row2"><span>白名单（逗号分隔对方名子串；为空=不限）</span>
-          <input type="text" id="cfg-nav-allow" placeholder="例 小王,测试群">
+        <label class="row2"><span>{{ (i18n or {}).get('ln_s061', "白名单（逗号分隔对方名子串；为空") }}={{ (i18n or {}).get('ln_s044', "不限）") }}</span>
+          <input type="text" id="cfg-nav-allow" placeholder="{{ (i18n or {}).get('ln_s062', '例 小王') }},{{ (i18n or {}).get('ln_s063', '测试群') }}">
         </label>
-        <label class="row2"><span>黑名单（逗号分隔对方名子串）</span>
-          <input type="text" id="cfg-nav-deny" placeholder="例 官方号,通知">
+        <label class="row2"><span>{{ (i18n or {}).get('ln_s064', "黑名单（逗号分隔对方名子串）") }}</span>
+          <input type="text" id="cfg-nav-deny" placeholder="{{ (i18n or {}).get('ln_s065', '例 官方号') }},{{ (i18n or {}).get('notifications', '通知') }}">
         </label>
       </div>
     </div>
   </div>
   <div style="margin-top:.75rem;font-size:.72rem;color:var(--t3)">
-    * 大部分字段会实时生效；修改「启用 LINE RPA」总开关后需重启主进程。多会话导航开关实时生效。
+    * {{ (i18n or {}).get('ln_s066', "大部分字段会实时生效；修改") }}「{{ (i18n or {}).get('ln_s067', "启用 LINE RPA」") }}{{ (i18n or {}).get('ln_s068', "总开关后需重启主进程。多会话导航开关实时生效。") }}
   </div>
 </div>
 
@@ -610,16 +610,15 @@ const _OV_LANG_FLAGS = {
 function _relTime(ts){
   if(!ts) return '—';
   const d=Date.now()/1000-Number(ts);
-  if(d<1) return '刚刚';
-  if(d<60) return Math.floor(d)+'秒前';
-  if(d<3600) return Math.floor(d/60)+'分前';
-  if(d<86400) return Math.floor(d/3600)+'小时前';
-  return Math.floor(d/86400)+'天前';
+  if(d<1) return window.T('rpa_just_now');
+  if(d<60) return Math.floor(d)+window.T('msg_js_285');
+  if(d<3600) return Math.floor(d/60)+window.T('ln_js_001');
+  if(d<86400) return Math.floor(d/3600)+window.T('dash.ago.hour');
+  return Math.floor(d/86400)+window.T('ln_js_002');
 }
 function _fmtTs(ts){
   if(!ts) return '';
-  const d=new Date(ts*1000);
-  return d.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  return window.wsFmtTime(ts,{hour:'2-digit',minute:'2-digit',second:'2-digit'});
 }
 function _esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
 
@@ -637,8 +636,8 @@ async function loadLineRpa(){
 
     if(!d.available){
       dot.className='rpa-status-dot err';
-      title.textContent='LINE 自动聊天（未启动）';
-      sub.textContent=d.hint||'服务未构建';
+      title.textContent='LINE '+window.T('ln_js_003');
+      sub.textContent=d.hint||window.T('ln_js_004');
       badgeCfg.textContent=d.enabled_cfg?'config: enabled':'config: disabled';
       badgeCfg.className='lr-badge-pill '+(d.enabled_cfg?'warn':'err');
       return;
@@ -654,15 +653,15 @@ async function loadLineRpa(){
       badgeMode.className='lr-badge-pill warn';
       const ps=d.pending_stats||{};
       const pendN=Number(ps.pending||0);
-      badgeMode.textContent='审核模式'+(pendN? (' · 待审 '+pendN):'');
+      badgeMode.textContent=window.T('ln_js_005')+(pendN? (' · '+window.T('ov_kpi_pending')+' '+pendN):'');
     } else if(mode==='off'){
       badgeMode.style.display='';
       badgeMode.className='lr-badge-pill err';
-      badgeMode.textContent='不回复(off)';
+      badgeMode.textContent=window.T('ln_js_006')+'(off)';
     } else {
       badgeMode.style.display='';
       badgeMode.className='lr-badge-pill ok';
-      badgeMode.textContent='自动模式';
+      badgeMode.textContent=window.T('ln_js_007');
     }
 
     // P7-2：列表 Vision 开关 + 末次扫描；IME 未确认告警数
@@ -676,9 +675,9 @@ async function loadLineRpa(){
     if(vReady||vLast||imeN>0){
       badgeVision.style.display='';
       let parts=[];
-      parts.push('列表Vision '+(vReady?'开':(vRead||vList?'部分':'关')));
+      parts.push(window.T('ln_js_008')+'Vision '+(vReady?window.T('msg_js_p13'):(vRead||vList?window.T('ln_js_009'):window.T('ov_js_stage_off'))));
       if(vLast&&vLast.ts) parts.push(_relTime(vLast.ts));
-      if(imeN>0) parts.push('IME告警 '+imeN);
+      if(imeN>0) parts.push('IME'+window.T('ov_kpi_alerts')+' '+imeN);
       badgeVision.textContent=parts.join(' · ');
       badgeVision.className='lr-badge-pill '+(imeN>0?'err':(vReady?'ok':'warn'));
       badgeVision.title=(vLast&&vLast.dbg)||'';
@@ -689,31 +688,31 @@ async function loadLineRpa(){
 
     if(d.paused){
       dot.className='rpa-status-dot paused';
-      title.textContent='LINE 自动聊天 · 暂停中';
+      title.textContent='LINE '+window.T('ln_js_010');
       badgePause.style.display='';
       badgePause.className='lr-badge-pill warn';
-      badgePause.textContent='暂停剩余 '+Math.ceil(d.pause_remaining_sec/60)+' 分';
+      badgePause.textContent=window.T('ln_js_011')+' '+Math.ceil(d.pause_remaining_sec/60)+' '+window.T('msg_js_1982');
       btnResume.style.display='';
       btnPause.style.display='none';
     }else if(d.running){
       dot.className='rpa-status-dot';
-      title.textContent='LINE 自动聊天 · 运行中';
+      title.textContent='LINE '+window.T('ln_js_012');
       badgePause.style.display='none';
       btnResume.style.display='none';
       btnPause.style.display='';
     }else{
       dot.className='rpa-status-dot offline';
-      title.textContent='LINE 自动聊天 · 未运行';
+      title.textContent='LINE '+window.T('ln_js_013');
       badgePause.style.display='none';
     }
 
     const lastRun=d.last_run||{};
     const lastTs=d.last_tick_ts||0;
-    sub.textContent='上轮: '+(lastRun.step||'n/a')+' · '+_relTime(lastTs)+(d.consecutive_fail?' · 连续失败'+d.consecutive_fail:'');
+    sub.textContent=window.T('ln_js_014')+': '+(lastRun.step||'n/a')+' · '+_relTime(lastTs)+(d.consecutive_fail?' · '+window.T('ln_js_015')+d.consecutive_fail:'');
 
     const s24=d.stats_24h||{}, s1=d.stats_1h||{};
     document.getElementById('lr-kpi-sent').textContent=s24.sent||0;
-    document.getElementById('lr-kpi-sent-foot').textContent='总运行 '+(s24.total||0)+' 次';
+    document.getElementById('lr-kpi-sent-foot').textContent=window.T('ln_js_016')+' '+(s24.total||0)+' '+window.T('ov_js_times_unit');
     const okEl=document.getElementById('lr-kpi-ok');
     okEl.textContent=(s24.ok_rate||0)+'%';
     okEl.classList.remove('green','amber','red');
@@ -721,10 +720,10 @@ async function loadLineRpa(){
     document.getElementById('lr-kpi-ok-foot').textContent=(s24.ok||0)+'/'+(s24.total||0);
     document.getElementById('lr-kpi-avg').textContent=Math.round(s24.avg_send_ms||0);
     document.getElementById('lr-kpi-1h').textContent=s1.total||0;
-    document.getElementById('lr-kpi-1h-foot').textContent=(s1.sent||0)+' 已回复';
+    document.getElementById('lr-kpi-1h-foot').textContent=(s1.sent||0)+' '+window.T('ln_s003');
 
     document.getElementById('lr-tick-hint').textContent=
-      '当前步数: '+((s1.steps||[]).map(s=>s.step+'×'+s.count).slice(0,3).join(' · ')||'空闲');
+      window.T('ln_js_017')+': '+((s1.steps||[]).map(s=>s.step+'×'+s.count).slice(0,3).join(' · ')||window.T('msg_js_1232'));
 
     // 多会话摘要
     const navOn=(d.navigation||{}).enabled;
@@ -737,7 +736,7 @@ async function loadLineRpa(){
       const processed=Number(lte.chats_processed||0);
       const unread=Number(lte.unread_count||0);
       const navState=lte.nav_state||'—';
-      sumEl.textContent=`未读 ${unread} · 已处理 ${processed} · nav=${navState}`;
+      sumEl.textContent=window.Tf('ln_js_p01', {unread: unread, processed: processed, nav: navState});
       const items=lte.per_chat_results||[];
       listEl.innerHTML=items.length? items.map(p=>{
         const step=p.step||'';
@@ -745,7 +744,7 @@ async function loadLineRpa(){
         if(step==='sent'||step==='dry_run_done') cls='ok';
         else if((p.error||'')||step==='open_fail'||step==='multi_all_failed') cls='err';
         return `<span class="lr-badge-pill ${cls}" title="${_esc(step)} · ${_esc(p.reason||p.error||'')}">${_esc(p.name||'?')} · ${_esc(step)}</span>`;
-      }).join('') : '<span class="lr-badge-pill">本轮无未读</span>';
+      }).join('') : '<span class="lr-badge-pill">'+window.T('ln_js_018')+'</span>';
     }else{
       box.style.display='none';
     }
@@ -773,7 +772,7 @@ async function loadLineRpaRecent(){
     if(!rows.length){
       stream.innerHTML='<div class="lr-empty">'
         +'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>'
-        +'<div>暂无会话记录，等待 LINE 收到第一条消息…</div></div>';
+        +'<div>'+window.T('ln_js_019')+'</div></div>';
       return;
     }
     let spark=Array(24).fill(0);
@@ -789,7 +788,7 @@ async function loadLineRpaRecent(){
       // P10-E: 语言徽章（仅在有 reply_lang 且步骤为发送成功时显示）
       const _rl = r.reply_lang||'';
       const langBadge = (_rl && (r.step==='sent'||r.step==='dry_run_done'||r.step==='awaiting_approval'))
-        ? `<span class="lr-lang-badge" style="font-size:.68rem;padding:.1rem .35rem;vertical-align:middle" title="本次回复语言">${_OV_LANG_FLAGS[_rl]||'🌐'} ${_esc(_rl)}</span>`
+        ? `<span class="lr-lang-badge" style="font-size:.68rem;padding:.1rem .35rem;vertical-align:middle" title="${window.T('ln_js_065')}">${_OV_LANG_FLAGS[_rl]||'🌐'} ${_esc(_rl)}</span>`
         : '';
       const head=`<div class="lr-meta">
           <span class="lr-step">${_esc(r.step||'?')}</span>
@@ -801,7 +800,7 @@ async function loadLineRpaRecent(){
       const peer=r.peer_text?`<div class="lr-peer">${_esc(r.peer_text)}</div>`:'';
       const reply=r.reply_text?`<div class="lr-reply">${_esc(r.reply_text)}</div>`:'';
       const err=r.error?`<div class="lr-err">⚠ ${_esc(r.error)}</div>`:'';
-      const shot=r.screenshot_path?`<div class="lr-shot"><a href="/api/line-rpa/screenshot/${encodeURIComponent(r.screenshot_path)}" target="_blank" rel="noopener" title="查看失败现场截图"><img src="/api/line-rpa/screenshot/${encodeURIComponent(r.screenshot_path)}" loading="lazy" alt="shot"/> 查看失败截图</a></div>`:'';
+      const shot=r.screenshot_path?`<div class="lr-shot"><a href="/api/line-rpa/screenshot/${encodeURIComponent(r.screenshot_path)}" target="_blank" rel="noopener" title="${window.T('ln_js_066')}"><img src="/api/line-rpa/screenshot/${encodeURIComponent(r.screenshot_path)}" loading="lazy" alt="shot"/> ${window.T('ln_js_067')}</a></div>`:'';
       return `<div class="lr-row ${cls}">${head}${peer}${reply}${err}${shot}</div>`;
     }).join('');
     // 简易火花图
@@ -820,15 +819,15 @@ async function loadLineRpaChats(){
     const el=document.getElementById('lr-chats');
     const rows=d.chats||[];
     if(!rows.length){
-      el.innerHTML='<div class="lr-empty" style="padding:1rem">还没有活跃会话</div>';
+      el.innerHTML='<div class="lr-empty" style="padding:1rem">'+window.T('ln_js_020')+'</div>';
       return;
     }
     el.innerHTML=rows.map(c=>{
       const txt=c.last_peer_text||'—';
       const _fl=c.forced_lang||'';
       const _badge=_fl
-        ? `<span class="lr-lang-badge locked" style="cursor:pointer" title="已锁定语言 ${_fl}，点击解锁" onclick="event.stopPropagation();lineLangUnlock(event,'${_esc(c.chat_key||'')}')">🔒 ${_esc(_fl)}</span>`
-        : `<span class="lr-lang-badge" style="cursor:pointer" title="自动检测语言，点击锁定" onclick="event.stopPropagation();lineLangLockPrompt(event,'${_esc(c.chat_key||'')}')">🌐 auto</span>`;
+        ? `<span class="lr-lang-badge locked" style="cursor:pointer" title="${window.T('ln_js_068')} ${_fl}，${window.T('ln_js_069')}" onclick="event.stopPropagation();lineLangUnlock(event,'${_esc(c.chat_key||'')}')">🔒 ${_esc(_fl)}</span>`
+        : `<span class="lr-lang-badge" style="cursor:pointer" title="${window.T('msg_js_1917')}" onclick="event.stopPropagation();lineLangLockPrompt(event,'${_esc(c.chat_key||'')}')">🌐 auto</span>`;
       return `<div class="lr-chat">
         <div style="flex:1;min-width:0;overflow:hidden">
           <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
@@ -844,22 +843,22 @@ async function loadLineRpaChats(){
 }
 
 const LR_VERDICT_TEXT={
-  ok:{label:'✅ 一致',color:'var(--green,#16a34a)'},
-  covered_with_room:{label:'✅ 覆盖充分',color:'var(--green,#16a34a)'},
-  possibly_missed:{label:'⚠ 疑似漏读 — 主循环没看到通知栏里的未读',color:'var(--red,#ef4444)'},
-  inconsistent:{label:'⚠ 不一致 — 通知栏比主循环多',color:'#f59e0b'},
-  unknown:{label:'❔ 未知 — 尚未有主循环数据',color:'var(--t3)'},
+  ok:{label:'✅ '+window.T('ln_js_021'),color:'var(--green,#16a34a)'},
+  covered_with_room:{label:'✅ '+window.T('ln_js_022'),color:'var(--green,#16a34a)'},
+  possibly_missed:{label:'⚠ '+window.T('ln_js_023')+' — '+window.T('ln_js_024'),color:'var(--red,#ef4444)'},
+  inconsistent:{label:'⚠ '+window.T('ln_js_025')+' — '+window.T('ln_js_026'),color:'#f59e0b'},
+  unknown:{label:'❔ '+window.T('rpa_unknown')+' — '+window.T('ln_js_027'),color:'var(--t3)'},
 };
 async function loadLineRpaNotif(){
   const verdictEl=document.getElementById('lr-notif-verdict');
   const bodyEl=document.getElementById('lr-notif-body');
-  verdictEl.textContent='扫描中…';
+  verdictEl.textContent=window.T('ln_js_028');
   bodyEl.innerHTML='';
   try{
     const r=await fetch('/api/line-rpa/notifications');
     const d=await r.json();
     if(!d.available){
-      verdictEl.textContent='服务未启动或不可用';
+      verdictEl.textContent=window.T('ln_js_029');
       bodyEl.textContent=d.reason||'';
       return;
     }
@@ -867,14 +866,14 @@ async function loadLineRpaNotif(){
     const verdict=d.verdict||'unknown';
     const v=LR_VERDICT_TEXT[verdict]||LR_VERDICT_TEXT.unknown;
     verdictEl.innerHTML=`<span style="color:${v.color};font-weight:600">${v.label}</span>
-      <span style="margin-left:.6rem">通知栏: ${snap.count||0} 条 · 主循环未读: ${d.main_unread<0?'—':d.main_unread}</span>`;
+      <span style="margin-left:.6rem">${window.T('ln_js_070')}: ${snap.count||0} ${window.T('ln_js_071')}: ${d.main_unread<0?'—':d.main_unread}</span>`;
     const items=(snap.items||[]);
     if(!items.length){
-      bodyEl.innerHTML='<div class="lr-empty" style="padding:.5rem">通知栏中没有 LINE 条目</div>';
+      bodyEl.innerHTML='<div class="lr-empty" style="padding:.5rem">'+window.T('ln_js_030')+'</div>';
       return;
     }
     bodyEl.innerHTML=items.map(it=>{
-      const title=_esc(it.title||'(无标题)');
+      const title=_esc(it.title||'('+window.T('draft.untitled')+')');
       const text=_esc(it.text||'');
       return `<div style="padding:.45rem .55rem;border-bottom:1px solid var(--bd);">
         <div style="font-weight:600;color:var(--t)">${title}</div>
@@ -882,7 +881,7 @@ async function loadLineRpaNotif(){
       </div>`;
     }).join('');
   }catch(e){
-    verdictEl.textContent='扫描失败';
+    verdictEl.textContent=window.T('ln_js_031');
     bodyEl.textContent=String(e);
   }
 }
@@ -899,14 +898,14 @@ async function loadLineRpaAlerts(){
     const items=d.items||[];
     if(!items.length){ banner.style.display='none'; return; }
     banner.style.display='block';
-    title.textContent=`未处理告警 · ${items.length} 条`;
+    title.textContent=window.Tf('ln_js_p02', {n: items.length});
     const latest=items[0];
-    detail.textContent=`最新：${latest.message||latest.kind}`;
+    detail.textContent=window.Tf('ln_js_p03', {x: latest.message||latest.kind});
     listEl.innerHTML=items.map(a=>{
-      const t=new Date((a.ts||0)*1000).toLocaleString();
+      const t=window.wsFmtDateTime(a.ts||0);
       return `<div style="padding:.3rem 0;border-top:1px solid #fecaca;display:flex;gap:.5rem;align-items:center">
         <span style="flex:1"><strong>[${_esc(a.kind)}]</strong> ${_esc(a.message||'')} <span style="opacity:.6;font-size:.72rem">${t}</span></span>
-        <button class="btn btn-xs" data-ackid="${a.id}">确认</button>
+        <button class="btn btn-xs" data-ackid="${a.id}">${window.T('rpa_fn_ack')}</button>
       </div>`;
     }).join('');
     listEl.querySelectorAll('button[data-ackid]').forEach(btn=>{
@@ -932,12 +931,12 @@ async function loadLineRpaTimeline(){
   const winSel=document.getElementById('lr-timeline-window');
   const minutes=Number(winSel?.value||60);
   const subEl=document.getElementById('lr-timeline-sub');
-  if(subEl) subEl.textContent=`最近 ${minutes} 分钟`;
+  if(subEl) subEl.textContent=window.Tf('ln_js_p04', {n: minutes});
   try{
     const r=await fetch('/api/line-rpa/timeline?minutes='+encodeURIComponent(minutes)+'&limit=300');
     const d=await r.json();
     const items=d.items||[];
-    if(!items.length){ body.innerHTML='<div class="lr-empty" style="padding:1rem">窗口内无活动</div>'; return; }
+    if(!items.length){ body.innerHTML='<div class="lr-empty" style="padding:1rem">'+window.T('ln_js_032')+'</div>'; return; }
     body.innerHTML=items.map(it=>{
       let cls='run';
       if(it.type==='alert') cls='alert';
@@ -958,7 +957,7 @@ async function loadLineRpaTimeline(){
       </div>`;
     }).join('');
   }catch(e){
-    body.textContent='加载失败：'+String(e);
+    body.textContent=window.T('ln_js_033')+String(e);
   }
 }
 
@@ -973,9 +972,9 @@ async function loadLineRpaAudit(){
     const r=await fetch(url);
     const d=await r.json();
     const items=d.items||[];
-    if(!items.length){ body.innerHTML='<div class="lr-empty" style="padding:1rem">暂无审计记录</div>'; return; }
+    if(!items.length){ body.innerHTML='<div class="lr-empty" style="padding:1rem">'+window.T('ln_js_034')+'</div>'; return; }
     body.innerHTML=items.map(it=>{
-      const when=new Date((it.ts||0)*1000).toLocaleString();
+      const when=window.wsFmtDateTime(it.ts||0);
       const actor=_esc(it.actor||'(anon)');
       const tgt=`${_esc(it.target_type)}#${it.target_id}`;
       const status=(it.before_status||'') + ' → ' + (it.after_status||'');
@@ -988,7 +987,7 @@ async function loadLineRpaAudit(){
         <span style="color:var(--t3);font-size:.72rem">${actor}</span>
       </div>`;
     }).join('');
-  }catch(e){ body.textContent='加载失败: '+String(e); }
+  }catch(e){ body.textContent=window.T('rpa_load_failed')+': '+String(e); }
 }
 (function(){
   const btn=document.getElementById('lr-audit-refresh');
@@ -999,13 +998,12 @@ async function loadLineRpaAudit(){
 
 // ── P4-3：审核队列 ──────────────────────────────
 const LR_PEND_STATUS_LABEL={
-  pending:'待审',approved:'已批准(待发)',rejected:'已拒绝',
-  sent:'已发送',cancelled:'已取消',error:'错误',
+  pending:window.T('ov_kpi_pending'),approved:window.T('ln_js_035')+')',rejected:window.T('draft.tab.rejected'),
+  sent:window.T('rpa_js_st_sent'),cancelled:window.T('rpa_js_st_cancelled'),error:window.T('ln_js_036'),
 };
 function _pendTime(ts){
   if(!ts) return '';
-  const d=new Date(ts*1000);
-  return d.toLocaleString();
+  return window.wsFmtDateTime(ts);
 }
 // P16-B: localStorage draft helpers
 function _lrDraftKey(id){ return 'lr-pend-draft-'+id; }
@@ -1035,17 +1033,17 @@ async function loadLineRpaPending(){
     const r=await fetch('/api/line-rpa/pending'+q);
     const d=await r.json();
     if(!d.available){
-      body.innerHTML='<div class="lr-empty" style="padding:1rem">服务未启动</div>';
+      body.innerHTML='<div class="lr-empty" style="padding:1rem">'+window.T('ln_js_037')+'</div>';
       stats.textContent='';
       return;
     }
     const s=d.stats||{};
-    stats.textContent=`待审 ${s.pending||0} · 已批 ${s.approved||0} · 已发 ${s.sent||0} · 拒/错 ${(s.rejected||0)+(s.error||0)}`;
+    stats.textContent=window.Tf('ln_js_p05', {pending: s.pending||0, approved: s.approved||0, sent: s.sent||0, rejerr: (s.rejected||0)+(s.error||0)});
     // Q3: 浏览器 title 角标 — 待审 N 条，无则清
-    if(window.rpa && window.rpa.notify) window.rpa.notify.setBadge(s.pending||0, 'LINE 待审');
+    if(window.rpa && window.rpa.notify) window.rpa.notify.setBadge(s.pending||0, 'LINE '+window.T('ov_kpi_pending'));
     const items=d.items||[];
     if(!items.length){
-      body.innerHTML=`<div class="lr-empty" style="padding:1rem">${onlyOpen?'暂无待审回复':'暂无记录'}</div>`;
+      body.innerHTML=`<div class="lr-empty" style="padding:1rem">${onlyOpen?window.T('ln_js_038'):window.T('ln_js_039')}</div>`;
       return;
     }
     body.innerHTML=items.map(it=>{
@@ -1055,7 +1053,7 @@ async function loadLineRpaPending(){
       const canAct=st==='pending';
       const canCancel=st==='approved';
       // Q1+Q2: 仅 pending 才显示批量勾选 checkbox
-      const pickBox = canAct ? `<input type="checkbox" class="rpa-bulk-pick" data-pid="${it.id}" title="勾选用于批量审批">` : '';
+      const pickBox = canAct ? `<input type="checkbox" class="rpa-bulk-pick" data-pid="${it.id}" title="${window.T('wa_js_100')}">` : '';
       const _fl = it.forced_lang || '';
       const _langBadge = _fl
         ? `<span class="lr-lang-badge locked" title="\u8bed\u8a00\u5df2\u9501\u5b9a\uff0c\u70b9\u51fb\u89e3\u9501" onclick="lineLangUnlock(event,'${_esc(it.chat_key)}')">\uD83D\uDD12 ${_esc(_fl)}</span>`
@@ -1067,34 +1065,34 @@ async function loadLineRpaPending(){
           <span class="lr-pend-status ${st}">${label}</span>
           ${_langBadge}
         </div>
-        <div class="lr-pend-peer" title="对方消息">${_esc(it.peer_text||'—')}</div>
+        <div class="lr-pend-peer" title="${window.T('msg_js_1035')}">${_esc(it.peer_text||'—')}</div>
         ${canAct ?
-          `<div style="position:relative"><textarea class="lr-pend-editor" id="lr-pend-edit-${it.id}" oninput="lrSaveDraft(${it.id})" onblur="lrSaveDraft(${it.id})">${_esc(lrLoadDraft(it.id)||it.final_reply||it.draft_reply||'')}</textarea><span id="lr-draft-ind-${it.id}" style="position:absolute;right:4px;bottom:4px;width:6px;height:6px;border-radius:50%;background:#22c55e;opacity:0;transition:opacity .2s" title="已自动保存"></span></div>` :
+          `<div style="position:relative"><textarea class="lr-pend-editor" id="lr-pend-edit-${it.id}" oninput="lrSaveDraft(${it.id})" onblur="lrSaveDraft(${it.id})">${_esc(lrLoadDraft(it.id)||it.final_reply||it.draft_reply||'')}</textarea><span id="lr-draft-ind-${it.id}" style="position:absolute;right:4px;bottom:4px;width:6px;height:6px;border-radius:50%;background:#22c55e;opacity:0;transition:opacity .2s" title="${window.T('wa_js_102')}"></span></div>` :
           `<div class="lr-pend-draft">${_esc(it.final_reply||it.draft_reply||'')}</div>`
         }
         <div class="lr-tts-preview-slot" data-pid="${_pid}">${
           // P20-A: TTS error type display
           (it.tts_path && it.tts_path.startsWith('ERROR'))
             ? (() => {
-                const errMap = {'ERROR:timeout':{icon:'⏱',text:'TTS 超时'},'ERROR:disk':{icon:'💾',text:'磁盘错误'},'ERROR:model':{icon:'🤖',text:'模型错误'},'ERROR:unknown':{icon:'⚠️',text:'TTS 失败'},'ERROR':{icon:'⚠️',text:'TTS 失败'}};
+                const errMap = {'ERROR:timeout':{icon:'⏱',text:'TTS '+window.T('dash.scope.breaching')},'ERROR:disk':{icon:'💾',text:window.T('wa_js_028')},'ERROR:model':{icon:'🤖',text:window.T('wa_js_029')},'ERROR:unknown':{icon:'⚠️',text:'TTS '+window.T('rpa_js_st_failed')},'ERROR':{icon:'⚠️',text:'TTS '+window.T('rpa_js_st_failed')}};
                 const e = errMap[it.tts_path] || errMap['ERROR'];
                 return `<span style="font-size:.7rem;color:#dc2626;font-weight:600">${e.icon} ${e.text}</span>
-               <button class="btn btn-xs" style="margin-left:.4rem;font-size:.68rem" data-retry-tts="${_pid}" title="清除 ERROR 并重新触发 TTS 生成">↻ 重试</button>`;
+               <button class="btn btn-xs" style="margin-left:.4rem;font-size:.68rem" data-retry-tts="${_pid}" title="${window.T('ln_js_072')}">↻ ${window.T('rpa_retry')}</button>`;
               })()
             : it.tts_path
-              ? `<span style="font-size:.7rem;color:var(--t3)">🎤 TTS 预览</span><audio controls preload="none" style="height:28px;vertical-align:middle;max-width:220px" src="${_esc(it.tts_path)}"></audio>`
-              : `<span style="font-size:.7rem;color:var(--t2)">⏳ TTS 生成中…</span>`
+              ? `<span style="font-size:.7rem;color:var(--t3)">🎤 TTS ${window.T('psn_dtab_preview')}</span><audio controls preload="none" style="height:28px;vertical-align:middle;max-width:220px" src="${_esc(it.tts_path)}"></audio>`
+              : `<span style="font-size:.7rem;color:var(--t2)">⏳ TTS ${window.T('ov_js_generating')}</span>`
         }</div>
         <div class="lr-pend-actions">
           ${canAct ? `
-            <button class="btn btn-p btn-xs" data-act="approve" data-id="${it.id}">批准并发送</button>
-            <button class="btn btn-xs" data-act="edit_approve" data-id="${it.id}">编辑后批准</button>
-            <button class="btn btn-xs" data-act="reject" data-id="${it.id}">拒绝</button>
+            <button class="btn btn-p btn-xs" data-act="approve" data-id="${it.id}">${window.T('msg_js_707')}</button>
+            <button class="btn btn-xs" data-act="edit_approve" data-id="${it.id}">${window.T('ln_js_073')}</button>
+            <button class="btn btn-xs" data-act="reject" data-id="${it.id}">${window.T('rpa_js_act_reject')}</button>
           ` : ''}
-          ${canCancel ? `<button class="btn btn-xs" data-act="cancel" data-id="${it.id}">撤回(未发送时)</button>` : ''}
+          ${canCancel ? `<button class="btn btn-xs" data-act="cancel" data-id="${it.id}">${window.T('ln_js_074')})</button>` : ''}
           ${(it.last_error)?`<span style="color:#dc2626;font-size:.72rem">${_esc(it.last_error)}</span>`:''}
         </div>
-        <div class="lr-pend-meta">#${it.id} · 创建 ${_pendTime(it.ts)}${it.resolved_at? ' · 处理 '+_pendTime(it.resolved_at):''}${it.resolved_by? ' by '+_esc(it.resolved_by):''} · 发送尝试 ${it.send_attempts||0}</div>
+        <div class="lr-pend-meta">#${it.id} · ${window.T('dash.btn.create')} ${_pendTime(it.ts)}${it.resolved_at? ' · '+window.T('dash.lb.handled')+' '+_pendTime(it.resolved_at):''}${it.resolved_by? ' by '+_esc(it.resolved_by):''} · ${window.T('ln_js_075')} ${it.send_attempts||0}</div>
       </div>`;
     }).join('');
     body.querySelectorAll('button[data-act]').forEach(btn=>{
@@ -1121,7 +1119,7 @@ async function loadLineRpaPending(){
           await loadLineRpaPending();
         }catch(e){
           btn.disabled=false;
-          alert('操作失败: '+e);
+          alert(window.T('ov_js_op_fail')+': '+e);
         }
       });
     });
@@ -1129,17 +1127,17 @@ async function loadLineRpaPending(){
     body.querySelectorAll('button[data-retry-tts]').forEach(btn=>{
       btn.addEventListener('click',async()=>{
         const pid=btn.getAttribute('data-retry-tts');
-        if(!confirm('确认重新生成 TTS？')) return;
+        if(!confirm(window.T('ln_js_040'))) return;
         btn.disabled=true; btn.textContent='…';
         try{
           const r=await fetch(`/api/line-rpa/pending/${pid}/retry-tts`,{method:'POST',headers:{'Content-Type':'application/json'}});
           const j=await r.json();
           if(!j.ok) throw new Error(j.error||'failed');
-          btn.closest('.lr-tts-preview-slot').innerHTML='<span style="font-size:.7rem;color:var(--t2)">已重置，等待下一轮生成…</span>';
+          btn.closest('.lr-tts-preview-slot').innerHTML='<span style="font-size:.7rem;color:var(--t2)">'+window.T('ln_js_041')+'</span>';
           setTimeout(()=>loadLineRpaPending(),8000); // 8s 后刷新看是否有新音频
         }catch(e){
-          btn.disabled=false; btn.textContent='↻ 重试';
-          alert('TTS 重试失败: '+e);
+          btn.disabled=false; btn.textContent='↻ '+window.T('rpa_retry');
+          alert('TTS '+window.T('wa_js_031')+': '+e);
         }
       });
     });
@@ -1148,18 +1146,18 @@ async function loadLineRpaPending(){
     // P7-A: 对还没有 TTS 音频的 pending 项启动智能退避轮询
     _lrStartTtsPoll(items);
   }catch(e){
-    body.innerHTML='<div class="lr-empty" style="padding:1rem;color:#dc2626">加载失败</div>';
+    body.innerHTML='<div class="lr-empty" style="padding:1rem;color:#dc2626">'+window.T('rpa_load_failed')+'</div>';
   }
 }
 
 // ── P8-A: LINE 对话语言锁定 ──────────────────────────────────────────────
 const _LINE_LANG_OPTIONS = [
-  {code:'zh',label:'🇨🇳 中文'},{code:'en',label:'🇺🇸 英文'},
-  {code:'ja',label:'🇯🇵 日文'},{code:'ko',label:'🇰🇷 韩文'},
-  {code:'de',label:'🇩🇪 德文'},{code:'fr',label:'🇫🇷 法文'},
-  {code:'es',label:'🇪🇸 西班牙文'},{code:'ar',label:'🇸🇦 阿拉伯文'},
-  {code:'ru',label:'🇷🇺 俄文'},{code:'hi',label:'🇮🇳 印地文'},
-  {code:'pt',label:'🇧🇷 葡萄牙文'},{code:'it',label:'🇮🇹 意大利文'},
+  {code:'zh',label:'🇨🇳 '+window.T('dash.lang.zh')},{code:'en',label:'🇺🇸 '+window.T('ln_js_042')},
+  {code:'ja',label:'🇯🇵 '+window.T('ln_js_043')},{code:'ko',label:'🇰🇷 '+window.T('ln_js_044')},
+  {code:'de',label:'🇩🇪 '+window.T('ln_js_045')},{code:'fr',label:'🇫🇷 '+window.T('ln_js_046')},
+  {code:'es',label:'🇪🇸 '+window.T('ln_js_047')},{code:'ar',label:'🇸🇦 '+window.T('ln_js_048')},
+  {code:'ru',label:'🇷🇺 '+window.T('ln_js_049')},{code:'hi',label:'🇮🇳 '+window.T('ln_js_050')},
+  {code:'pt',label:'🇧🇷 '+window.T('ln_js_051')},{code:'it',label:'🇮🇹 '+window.T('ln_js_052')},
 ];
 function _lrRemoveLangPopover() {
   document.querySelectorAll('.lr-lang-popover').forEach(el => el.remove());
@@ -1197,9 +1195,9 @@ async function _lineSetLang(chatKey, lang) {
       body: JSON.stringify({chat_key: chatKey, lang: lang || null}),
     });
     const d = await r.json();
-    if (!d.ok) { alert('语言设置失败: ' + (d.detail||'')); return; }
+    if (!d.ok) { alert(window.T('ln_js_053')+': ' + (d.detail||'')); return; }
     await loadLineRpaPending();
-  } catch(e) { alert('语言设置异常: ' + e); }
+  } catch(e) { alert(window.T('ln_js_054')+': ' + e); }
 }
 document.addEventListener('keydown', e => { if(e.key==='Escape') _lrRemoveLangPopover(); });
 // P17-B/P18-B: Ctrl+Enter 批量批准, Ctrl+Shift+Enter 批量拒绝
@@ -1210,7 +1208,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Enter') {
     if (e.shiftKey) {
       e.preventDefault();
-      if(confirm(`确认批量拒绝 ${sel.length} 条?`)) window.rpa.bulk.rejectSelected();
+      if(confirm(window.Tf('wa_js_p02', {n: sel.length}))) window.rpa.bulk.rejectSelected();
     } else {
       e.preventDefault();
       window.rpa.bulk.approveSelected();
@@ -1233,8 +1231,8 @@ function _lrStartTtsPoll(items) {
     const elapsed = Math.floor((Date.now() - _lrPollStartTs)/1000);
     missing.forEach(pid => {
       const slot = document.querySelector(`.lr-tts-preview-slot[data-pid="${pid}"]`);
-      if (slot && slot.innerHTML.includes('TTS 生成中')) {
-        slot.innerHTML = `<span style="font-size:.7rem;color:var(--t2)">⏳ TTS 生成中… (${elapsed}s)</span>`;
+      if (slot && slot.innerHTML.includes('TTS '+window.T('msg_js_301'))) {
+        slot.innerHTML = `<span style="font-size:.7rem;color:var(--t2)">⏳ TTS ${window.T('ov_js_generating')} (${elapsed}s)</span>`;
       }
     });
   }
@@ -1242,7 +1240,7 @@ function _lrStartTtsPoll(items) {
     _lrTtsPollTimer = null;
     const stillMissing = missing.filter(pid => {
       const slot = document.querySelector(`.lr-tts-preview-slot[data-pid="${pid}"]`);
-      return slot && !slot.innerHTML.includes('TTS 预览') && !slot.innerHTML.includes('生成失败');
+      return slot && !slot.innerHTML.includes('TTS '+window.T('psn_dtab_preview')) && !slot.innerHTML.includes(window.T('dash.task_fail_generic'));
     });
     if (!stillMissing.length || rounds >= MAX_ROUNDS) return;
     rounds++;
@@ -1255,15 +1253,15 @@ function _lrStartTtsPoll(items) {
       Object.entries(d.paths || {}).forEach(([pid, ttsPath]) => {
         if (!ttsPath) return;
         const slot = document.querySelector(`.lr-tts-preview-slot[data-pid="${pid}"]`);
-        if (slot && !slot.innerHTML.includes('TTS 预览')) {
+        if (slot && !slot.innerHTML.includes('TTS '+window.T('psn_dtab_preview'))) {
           // P20-A: handle ERROR:type format
           if (ttsPath === 'ERROR' || (typeof ttsPath === 'string' && ttsPath.startsWith('ERROR'))) {
-            const errMap = {'ERROR:timeout':'⏱ TTS 超时','ERROR:disk':'💾 磁盘错误','ERROR:model':'🤖 模型错误','ERROR:unknown':'⚠️ TTS 失败','ERROR':'⚠️ TTS 失败'};
-            const errText = errMap[ttsPath] || '⚠️ TTS 失败';
+            const errMap = {'ERROR:timeout':'⏱ TTS '+window.T('dash.scope.breaching'),'ERROR:disk':'💾 '+window.T('wa_js_028'),'ERROR:model':'🤖 '+window.T('wa_js_029'),'ERROR:unknown':'⚠️ TTS '+window.T('rpa_js_st_failed'),'ERROR':'⚠️ TTS '+window.T('rpa_js_st_failed')};
+            const errText = errMap[ttsPath] || '⚠️ TTS '+window.T('rpa_js_st_failed');
             slot.innerHTML = `<span style="font-size:.7rem;color:#dc2626;font-weight:600">${errText}</span>
-               <button class="btn btn-xs" style="margin-left:.4rem;font-size:.68rem" data-retry-tts="${pid}" title="清除 ERROR 并重新触发 TTS 生成">↻ 重试</button>`;
+               <button class="btn btn-xs" style="margin-left:.4rem;font-size:.68rem" data-retry-tts="${pid}" title="${window.T('ln_js_072')}">↻ ${window.T('rpa_retry')}</button>`;
           } else {
-            slot.innerHTML = `<span style="font-size:.7rem;color:var(--t3)">🎤 TTS 预览</span>`
+            slot.innerHTML = `<span style="font-size:.7rem;color:var(--t3)">🎤 TTS ${window.T('psn_dtab_preview')}</span>`
               + `<audio controls preload="none" style="height:28px;vertical-align:middle;max-width:220px" src="${ttsPath}"></audio>`;
           }
         }
@@ -1272,7 +1270,7 @@ function _lrStartTtsPoll(items) {
     delay = Math.min(delay * 2, 30000);
     const remaining = stillMissing.filter(pid => {
       const slot = document.querySelector(`.lr-tts-preview-slot[data-pid="${pid}"]`);
-      return slot && !slot.innerHTML.includes('TTS 预览') && !slot.innerHTML.includes('生成失败');
+      return slot && !slot.innerHTML.includes('TTS '+window.T('psn_dtab_preview')) && !slot.innerHTML.includes(window.T('dash.task_fail_generic'));
     });
     if (remaining.length && rounds < MAX_ROUNDS) _lrTtsPollTimer = setTimeout(poll, delay);
   }
@@ -1350,7 +1348,7 @@ async function loadLineRpaCfg(){
 
 async function saveLineRpaCfg(){
   const msg=document.getElementById('lr-cfg-msg');
-  msg.textContent='保存中…'; msg.style.color='var(--t2)';
+  msg.textContent=window.T('ov_js_saving'); msg.style.color='var(--t2)';
   const payload={
     enabled: document.getElementById('cfg-enabled').checked,
     default_reply_lang: document.getElementById('cfg-lang').value.trim()||'zh',
@@ -1406,15 +1404,15 @@ async function saveLineRpaCfg(){
     });
     if(!r.ok){
       const t=await r.text();
-      msg.textContent='保存失败: '+t; msg.style.color='var(--red)';
+      msg.textContent=window.T('ov_js_save_fail')+': '+t; msg.style.color='var(--red)';
       return;
     }
-    msg.textContent='✓ 已保存（大部分字段已实时生效；总开关需要重启主进程）';
+    msg.textContent='✓ '+window.T('ln_js_055');
     msg.style.color='var(--green)';
     lrClearDirty();
     loadLineRpa(); loadLineRpaCfg();
   }catch(e){
-    msg.textContent='保存失败: '+e.message; msg.style.color='var(--red)';
+    msg.textContent=window.T('ov_js_save_fail')+': '+e.message; msg.style.color='var(--red)';
   }
 }
 
@@ -1447,18 +1445,18 @@ document.getElementById('lr-notif-refresh').addEventListener('click',loadLineRpa
 document.getElementById('lr-pending-refresh').addEventListener('click',loadLineRpaPending);
 document.getElementById('lr-pending-only-open').addEventListener('change',loadLineRpaPending);
 document.getElementById('lr-pending-cancel-all').addEventListener('click', async ()=>{
-  if(!confirm('确认取消所有未处理的审核项？此操作不可撤销。')) return;
+  if(!confirm(window.T('ln_js_056'))) return;
   const r = await fetch('/api/line-rpa/pending/cancel-all', {method:'POST', headers:{'Content-Type':'application/json'}});
   const j = await r.json();
-  if(j.ok){ rpa.toast(`已取消 ${j.cancelled} 条`, 'ok'); loadLineRpaPending(); }
-  else { rpa.toast('操作失败: '+(j.error||''), 'err'); }
+  if(j.ok){ rpa.toast(window.Tf('ln_js_p06', {n: j.cancelled}), 'ok'); loadLineRpaPending(); }
+  else { rpa.toast(window.T('ov_js_op_fail')+': '+(j.error||''), 'err'); }
 });
 document.getElementById('lr-alert-banner-expand').addEventListener('click',()=>{
   const el=document.getElementById('lr-alert-banner-list');
   el.style.display = (el.style.display==='none' || !el.style.display) ? 'block' : 'none';
 });
 document.getElementById('lr-alert-banner-ackall').addEventListener('click',async ()=>{
-  if(!confirm('确认全部未处理告警？')) return;
+  if(!confirm(window.T('ln_js_057'))) return;
   try{ await fetch('/api/line-rpa/alerts/ack_all',{method:'POST'}); }catch{}
   loadLineRpaAlerts();
 });
@@ -1497,19 +1495,19 @@ document.addEventListener('visibilitychange',()=>{
 document.getElementById('lr-btn-accept-friends').addEventListener('click', async ()=>{
   const btn=document.getElementById('lr-btn-accept-friends');
   const msg=document.getElementById('lr-device-msg');
-  btn.disabled=true; msg.textContent='正在查找好友申请按钮…'; msg.style.color='var(--t2)';
+  btn.disabled=true; msg.textContent=window.T('ln_js_058'); msg.style.color='var(--t2)';
   try{
     const r=await lrPost('/api/line-rpa/accept-friends',{});
     const d=await r.json();
     const res=d.result||{};
     if(res.skipped){
-      msg.textContent='未找到好友申请按钮（'+res.reason+'）'; msg.style.color='var(--t3)';
+      msg.textContent=window.T('ln_js_059')+'（'+res.reason+'）'; msg.style.color='var(--t3)';
     }else if(res.error){
-      msg.textContent='出错: '+res.error; msg.style.color='var(--red)';
+      msg.textContent=window.T('wa_js_041')+': '+res.error; msg.style.color='var(--red)';
     }else{
-      msg.textContent='✓ 已点击 '+res.tapped+' 个同意按钮'; msg.style.color='var(--green)';
+      msg.textContent='✓ '+window.T('wa_js_042')+' '+res.tapped+' '+window.T('ln_js_060'); msg.style.color='var(--green)';
     }
-  }catch(e){ msg.textContent='请求失败: '+e; msg.style.color='var(--red)'; }
+  }catch(e){ msg.textContent=window.T('ov_js_req_fail')+': '+e; msg.style.color='var(--red)'; }
   btn.disabled=false;
 });
 
@@ -1518,7 +1516,7 @@ document.getElementById('lr-btn-screenshot').addEventListener('click', async ()=
   const msg=document.getElementById('lr-device-msg');
   const wrap=document.getElementById('lr-screenshot-wrap');
   const img=document.getElementById('lr-screenshot-img');
-  btn.disabled=true; wrap.style.display='none'; msg.textContent='截屏中…'; msg.style.color='var(--t2)';
+  btn.disabled=true; wrap.style.display='none'; msg.textContent=window.T('ln_js_061'); msg.style.color='var(--t2)';
   try{
     const ts=Date.now();
     const url='/api/line-rpa/device-screenshot?_='+ts;
@@ -1529,8 +1527,8 @@ document.getElementById('lr-btn-screenshot').addEventListener('click', async ()=
     img.src=objUrl;
     img.style.maxWidth='100%';
     wrap.style.display='';
-    msg.textContent='✓ 截屏成功（'+new Date().toLocaleTimeString()+'）'; msg.style.color='var(--green)';
-  }catch(e){ msg.textContent='截屏失败: '+e; msg.style.color='var(--red)'; }
+    msg.textContent='✓ '+window.T('wa_js_045')+'（'+window.wsFmtTime(null)+'）'; msg.style.color='var(--green)';
+  }catch(e){ msg.textContent=window.T('wa_js_046')+': '+e; msg.style.color='var(--red)'; }
   btn.disabled=false;
 });
 
@@ -1576,7 +1574,7 @@ function applyPreset(name){
   if(hp.inter_msg_ms){ document.getElementById('cfg-inter-lo').value=hp.inter_msg_ms[0]; document.getElementById('cfg-inter-hi').value=hp.inter_msg_ms[1]; }
   if(p.default_reply_lang) document.getElementById('cfg-lang').value=p.default_reply_lang;
   lrMarkDirty();
-  document.getElementById('lr-cfg-msg').textContent='已套用预设：'+{companion:'陪伴模式',service:'客服模式',fast:'快速轮询',gentle:'温柔轮询'}[name];
+  document.getElementById('lr-cfg-msg').textContent=window.T('ln_js_062')+{companion:window.T('wa_s009'),service:window.T('wa_s011'),fast:window.T('wa_s013'),gentle:window.T('wa_s015')}[name];
   document.getElementById('lr-cfg-msg').style.color='var(--amber)';
   // 自动跳到设置 Tab
   document.querySelectorAll('.st-tab').forEach(b=>{ if(b.dataset.pane==='pane-settings') lrSwitchTab(b); });
@@ -1594,7 +1592,7 @@ document.querySelectorAll('#lr-cfg input,#lr-cfg select').forEach(el=>{
 });
 
 // ── P28: 手动发送队列 ────────────────────────────────────
-const _SQ_STATUS_LABEL={queued:'待发',processing:'发送中',sent:'已发',failed:'失败',cancelled:'已取消'};
+const _SQ_STATUS_LABEL={queued:window.T('ov_js_dob_pending'),processing:window.T('msg_js_2055'),sent:window.T('ov_js_dob_sent'),failed:window.T('rpa_js_st_failed'),cancelled:window.T('rpa_js_st_cancelled')};
 const _SQ_STATUS_COLOR={queued:'#92400e',processing:'#1e3a8a',sent:'#166534',failed:'#7f1d1d',cancelled:'#374151'};
 const _SQ_STATUS_BG={queued:'#fde68a',processing:'#bfdbfe',sent:'#bbf7d0',failed:'#fecaca',cancelled:'#e5e7eb'};
 
@@ -1607,11 +1605,11 @@ async function loadLrSendQueue(){
     const r=await fetch('/api/line-rpa/send-queue?limit=50&include_done='+done);
     const d=await r.json();
     if(!d.items||!d.items.length){
-      body.innerHTML='<div class="lr-empty" style="padding:1rem">队列为空</div>';
+      body.innerHTML='<div class="lr-empty" style="padding:1rem">'+window.T('msg_js_2056')+'</div>';
       countEl.textContent='';
       return;
     }
-    countEl.textContent='（'+d.count+' 条）';
+    countEl.textContent='（'+d.count+' '+window.T('ln_js_063');
     body.innerHTML=d.items.map(it=>{
       const st=it.status||'queued';
       const lab=_SQ_STATUS_LABEL[st]||st;
@@ -1626,20 +1624,20 @@ async function loadLrSendQueue(){
         <div style="font-size:.76rem;color:var(--t2);margin-bottom:.3rem;white-space:pre-wrap">${_esc(it.text)}</div>
         <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
           <span style="font-size:.68rem;color:var(--t3)">#${it.id} · ${_fmtTs(it.ts)}${it.error?' · <span style="color:#ef4444">'+_esc(it.error)+'</span>':''}</span>
-          ${canCancel?`<button class="btn btn-xs" style="margin-left:auto" onclick="lrCancelSendItem(${it.id})">取消</button>`:''}
+          ${canCancel?`<button class="btn btn-xs" style="margin-left:auto" onclick="lrCancelSendItem(${it.id})">${window.T('ov_js_cancel')}</button>`:''}
         </div>
       </div>`;
     }).join('');
-  }catch(e){ body.innerHTML='<div style="color:var(--red);font-size:.78rem">加载失败: '+_esc(String(e))+'</div>'; }
+  }catch(e){ body.innerHTML='<div style="color:var(--red);font-size:.78rem">'+window.T('rpa_load_failed')+': '+_esc(String(e))+'</div>'; }
 }
 
 async function lrCancelSendItem(id){
-  if(!confirm('确认取消发送任务 #'+id+'？')) return;
+  if(!confirm(window.T('msg_js_2057')+' #'+id+'？')) return;
   try{
     const r=await fetch('/api/line-rpa/send-queue/'+id+'/cancel',{method:'POST'});
-    if(!r.ok){ const t=await r.json(); alert('取消失败: '+(t.detail||r.status)); return; }
+    if(!r.ok){ const t=await r.json(); alert(window.T('msg_js_2058')+': '+(t.detail||r.status)); return; }
     loadLrSendQueue();
-  }catch(e){ alert('请求失败: '+e); }
+  }catch(e){ alert(window.T('ov_js_req_fail')+': '+e); }
 }
 
 function lrOpenSendManual(){
@@ -1661,18 +1659,18 @@ async function lrSubmitSendManual(){
   const text=document.getElementById('lr-sm-text').value.trim();
   const msgEl=document.getElementById('lr-sm-msg');
   const btn=document.getElementById('lr-sm-submit');
-  if(!chatKey){ msgEl.textContent='chat_key 必填'; msgEl.style.color='var(--red)'; return; }
-  if(!text){ msgEl.textContent='消息内容不能为空'; msgEl.style.color='var(--red)'; return; }
-  btn.disabled=true; msgEl.textContent='入队中…'; msgEl.style.color='var(--t2)';
+  if(!chatKey){ msgEl.textContent='chat_key '+window.T('msg_js_2059'); msgEl.style.color='var(--red)'; return; }
+  if(!text){ msgEl.textContent=window.T('msg_js_2060'); msgEl.style.color='var(--red)'; return; }
+  btn.disabled=true; msgEl.textContent=window.T('rpa_js_enqueuing'); msgEl.style.color='var(--t2)';
   try{
     const r=await fetch('/api/line-rpa/send-manual',{method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({chat_key:chatKey,peer_name:peerName,text})});
     const d=await r.json();
-    if(!r.ok){ msgEl.textContent='失败: '+(d.detail||r.status); msgEl.style.color='var(--red)'; btn.disabled=false; return; }
-    msgEl.textContent='已入队 #'+d.item_id; msgEl.style.color='var(--green)';
+    if(!r.ok){ msgEl.textContent=window.T('rpa_js_st_failed')+': '+(d.detail||r.status); msgEl.style.color='var(--red)'; btn.disabled=false; return; }
+    msgEl.textContent=window.T('msg_js_2062')+' #'+d.item_id; msgEl.style.color='var(--green)';
     setTimeout(()=>{ lrCloseSendManual(); loadLrSendQueue(); }, 900);
-  }catch(e){ msgEl.textContent='请求异常: '+e; msgEl.style.color='var(--red)'; }
+  }catch(e){ msgEl.textContent=window.T('msg_js_2063')+': '+e; msgEl.style.color='var(--red)'; }
   btn.disabled=false;
 }
 // 点击遮罩关闭模态
@@ -1687,7 +1685,7 @@ async function loadLrLogTail(){
   try{
     const r=await fetch('/api/line-rpa/log-tail?n=80');
     const txt=await r.text();
-    if(!txt.trim()){ wrap.innerHTML='<span style="color:var(--t3)">暂无 LINE RPA 日志</span>'; return; }
+    if(!txt.trim()){ wrap.innerHTML='<span style="color:var(--t3)">'+window.T('ln_js_064')+'</span>'; return; }
     wrap.innerHTML=txt.split('\n').map(l=>{
       const e=l.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
       if(/error|exception|fail|traceback/i.test(l)) return `<span class="ll-err">${e}</span>`;
@@ -1696,7 +1694,7 @@ async function loadLrLogTail(){
       return e;
     }).join('\n');
     wrap.scrollTop=wrap.scrollHeight;
-  }catch(e){ wrap.textContent='加载失败: '+e; }
+  }catch(e){ wrap.textContent=window.T('rpa_load_failed')+': '+e; }
 }
 </script>
 {% endblock %}

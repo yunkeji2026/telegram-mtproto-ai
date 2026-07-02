@@ -95,6 +95,51 @@ def test_sync_clears_proxy_when_config_drops_it(registry):
     assert registry.get("telegram", "acc_b")["proxy_id"] == ""
 
 
+# ── P3 数据侧自愈：单数 persona_id 同步（供直接读 meta.persona_id 的消费方）──
+
+def _tg_cfg_personas(pids):
+    return {"accounts": [
+        {"id": "acc_a", "label": "号A", "api_id": 1, "api_hash": "h",
+         "phone_number": "+8613800000000", "session_name": "cam_a",
+         "persona_ids": list(pids), "proxy_id": "p1", "enabled": True},
+    ]}
+
+
+def test_sync_writes_singular_persona_id(registry):
+    # 复数 persona_ids 同步时，自动补首个为单数 meta.persona_id（带 auto 标记）
+    tg = TelegramAccountRegistry.from_config(
+        _tg_cfg_personas(["lin_xiaoyu", "warm"]))
+    tg.sync_to_account_registry(registry)
+    m = registry.get("telegram", "acc_a")["meta"]
+    assert m["persona_ids"] == ["lin_xiaoyu", "warm"]
+    assert m["persona_id"] == "lin_xiaoyu"  # 首个
+    assert m["persona_id_auto"] is True
+
+
+def test_sync_singular_persona_id_tracks_config_first(registry):
+    # config 改首个人设 → 自动补的单数随之刷新（防陈旧单数压过刷新后的复数）
+    TelegramAccountRegistry.from_config(
+        _tg_cfg_personas(["lin_xiaoyu"])).sync_to_account_registry(registry)
+    TelegramAccountRegistry.from_config(
+        _tg_cfg_personas(["mia"])).sync_to_account_registry(registry)
+    m = registry.get("telegram", "acc_a")["meta"]
+    assert m["persona_id"] == "mia"
+    assert m["persona_id_auto"] is True
+
+
+def test_sync_does_not_clobber_explicit_persona_id(registry):
+    # 人工/QR 显式绑定单数（无 auto 标记）→ 同步绝不覆盖，复数仍按 config 刷新
+    registry.upsert(
+        "telegram", "acc_a",
+        meta={"persona_id": "hand_picked", "session_string": "S"})
+    TelegramAccountRegistry.from_config(
+        _tg_cfg_personas(["lin_xiaoyu"])).sync_to_account_registry(registry)
+    m = registry.get("telegram", "acc_a")["meta"]
+    assert m["persona_id"] == "hand_picked"      # 显式绑定保住
+    assert m["persona_ids"] == ["lin_xiaoyu"]    # 复数仍刷新
+    assert not m.get("persona_id_auto")          # 未打自动标记
+
+
 # ── default 取舍 + 兜底 ─────────────────────────────────────────────────
 
 def test_sync_include_default_toggle(registry):

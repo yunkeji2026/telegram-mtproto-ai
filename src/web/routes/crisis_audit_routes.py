@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from fastapi import HTTPException, Request
+from src.web.web_i18n import tr
 
 
 def register_crisis_audit_routes(app, ctx) -> None:
@@ -16,10 +17,10 @@ def register_crisis_audit_routes(app, ctx) -> None:
     _api_auth = ctx.api_auth
     _api_write = ctx.api_write
 
-    def _sm():
+    def _sm(request):
         sm = getattr(telegram_client, "skill_manager", None) if telegram_client else None
         if not sm:
-            raise HTTPException(status_code=503, detail="Bot 未就绪或未注入 SkillManager")
+            raise HTTPException(status_code=503, detail=tr(request, "err.epi.bot_not_ready_sm"))
         return sm
 
     @app.get("/api/crisis-events")
@@ -31,7 +32,7 @@ def register_crisis_audit_routes(app, ctx) -> None:
     ):
         """危机事件列表（默认按时间倒序；only_unhandled=true 仅看未处理）。"""
         _api_auth(request)
-        sm = _sm()
+        sm = _sm(request)
         lim = max(1, min(int(limit or 50), 500))
         items = sm.crisis_list_for_admin(
             limit=lim, only_unhandled=bool(only_unhandled), user_prefix=prefix[:120],
@@ -47,7 +48,7 @@ def register_crisis_audit_routes(app, ctx) -> None:
     async def api_crisis_event_handle(event_id: int, request: Request):
         """标记某危机事件为已人工处理（记录处理人 + 备注）。需 manage_ops 权限。"""
         _api_write("manage_ops")(request)
-        sm = _sm()
+        sm = _sm(request)
         body = {}
         try:
             body = await request.json()
@@ -63,5 +64,5 @@ def register_crisis_audit_routes(app, ctx) -> None:
             int(event_id), handled_by=handled_by, note=note,
         )
         if not ok:
-            raise HTTPException(status_code=404, detail="事件不存在或危机审计未启用")
+            raise HTTPException(status_code=404, detail=tr(request, "err.ca.event_not_found"))
         return {"ok": True, "handled": int(event_id)}

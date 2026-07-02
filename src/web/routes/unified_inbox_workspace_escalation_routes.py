@@ -24,6 +24,7 @@ from src.web.routes.unified_inbox_auth import (
 )
 from src.web.routes.unified_inbox_services import _inbox_store
 from src.web.routes.unified_inbox_sla import _escalation_snapshot, _sla_alert_snapshot
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -105,14 +106,14 @@ def register_workspace_escalation_routes(app, *, api_auth) -> None:
         _require_supervisor(request)
         inbox = _inbox_store(request)
         if inbox is None:
-            raise HTTPException(503, "inbox 存储不可用")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
         body = await request.json()
         target = str(body.get("agent_id") or "").strip()
         if not target:
-            raise HTTPException(400, "agent_id 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="agent_id"))
         ok = inbox.set_escalation_assigned(esc_id, target)
         if not ok:
-            raise HTTPException(404, f"升级记录 {esc_id} 不存在")
+            raise HTTPException(404, tr(request, "err.ws.escalation_not_found", esc_id=esc_id))
         return {"ok": True, "esc_id": esc_id, "assigned_to": target}
 
     @app.get("/api/workspace/handoff-brief")
@@ -128,7 +129,7 @@ def register_workspace_escalation_routes(app, *, api_auth) -> None:
         from src.utils.handoff_brief import build_handoff_brief
         cid = str(conversation_id or "").strip()
         if not cid:
-            raise HTTPException(400, "conversation_id 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="conversation_id"))
         inbox = _inbox_store(request)
         meta = None
         recent: List[Dict[str, Any]] = []
@@ -186,3 +187,64 @@ def register_workspace_escalation_routes(app, *, api_auth) -> None:
             "avg_takeover_sec": int(dly_sum / taken_n) if taken_n else 0,
             "reasons": reasons,
         }}
+
+    # ── P0-companion：会话搁置（snooze）——「稍后再看」从待接管/超时队列临时移出 ─────
+    @app.post("/api/workspace/conversation/{conversation_id}/snooze")
+    async def api_workspace_conversation_snooze(
+        request: Request, conversation_id: str,
+    ):
+        """把会话搁置 N 分钟（或到指定 until_ts）——从「待接管/超时告警」队列临时移出。
+
+        Body JSON: ``{"minutes": 120}`` 或 ``{"until_ts": <epoch 秒>}``。
+        到点自动重浮；客户期间再来消息则立即重浮。任何已认证坐席可操作自己在看的会话。
+        """
+        api_auth(request)
+        inbox = _inbox_store(request)
+        if inbox is None:
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="conversation_id"))
+        body = await request.json()
+        if body.get("until_ts") is not None:
+            try:
+                until_ts = float(body.get("until_ts"))
+            except (TypeError, ValueError):
+                raise HTTPException(400, tr(request, "err.ws.until_ts_invalid"))
+        else:
+            try:
+                minutes = float(body.get("minutes") or 0)
+            except (TypeError, ValueError):
+                raise HTTPException(400, tr(request, "err.ws.minutes_invalid"))
+            if minutes <= 0:
+                raise HTTPException(400, tr(request, "err.ws.minutes_must_be_positive"))
+            until_ts = time.time() + minutes * 60.0
+        by = _session_agent(request)["agent_id"]
+        snoozed = inbox.set_snooze(cid, until_ts, by=by)
+        return {"ok": True, "conversation_id": cid, "snoozed": snoozed,
+                "snooze_until": until_ts if snoozed else 0}
+
+    @app.post("/api/workspace/conversation/{conversation_id}/unsnooze")
+    async def api_workspace_conversation_unsnooze(
+        request: Request, conversation_id: str,
+    ):
+        """立即取消搁置，会话回到「待接管/超时告警」队列。"""
+        api_auth(request)
+        inbox = _inbox_store(request)
+        if inbox is None:
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="conversation_id"))
+        inbox.clear_snooze(cid)
+        return {"ok": True, "conversation_id": cid, "snoozed": False}
+
+    @app.get("/api/workspace/snoozed")
+    async def api_workspace_snoozed(request: Request):
+        """当前搁置中的会话清单（含剩余秒），供「搁置中」视图。任何已认证坐席可读。"""
+        api_auth(request)
+        inbox = _inbox_store(request)
+        if inbox is None:
+            return {"ok": True, "items": [], "total": 0}
+        items = inbox.list_snoozed(limit=200)
+        return {"ok": True, "items": items, "total": len(items)}

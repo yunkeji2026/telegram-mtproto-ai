@@ -301,17 +301,22 @@ class TelegramSenderMixin:
         except Exception:
             pass
 
-    def _postsend_mirror_and_record(self, chat_id: Any, preview: str) -> None:
+    def _postsend_mirror_and_record(self, chat_id: Any, preview: str,
+                                    msg_id: Any = "") -> None:
         """发送成功后：出站镜像到坐席台（N4b）+ 记入 contacts 的外发互动（Q3）。
 
         文本回复与富媒体（照片/语音）共用——富媒体传带标记的 preview（如「[图片] 配文」/「[语音]」），
         让坐席台**看见** AI 发了富媒体、IntimacyEngine 也**计入**一次外发（否则只见入站、mutuality 偏低）。
         两步各自 best-effort，绝不阻断发送。
+
+        ``msg_id``：发送 API 返回的真实 message.id（治本幂等键）。带上它后乐观出站镜像行与
+        「自身已发消息被回显」共用同一 platform_msg_id → 主键级精确去重，不再依赖时间窗近似。
         """
         try:
             _emit = getattr(self, "_emit_inbox", None)
             if _emit is not None:
-                _emit(chat_id=chat_id, text=preview, direction="out")
+                _emit(chat_id=chat_id, text=preview, direction="out",
+                      msg_id=str(msg_id or ""))
         except Exception:
             pass
         try:
@@ -345,12 +350,15 @@ class TelegramSenderMixin:
                 send_kw["reply_to_message_id"] = _rt
             if parse_mode is not None:
                 send_kw["parse_mode"] = parse_mode
-            await self.client.send_message(**send_kw)
+            _sent = await self.client.send_message(**send_kw)
             # 统一发送后记账（与 send_photo 共用）：刷新墙钟 + 记入共用发送计数器
             # （喂反封号闸门 + 机群健康灯今日外发量，best-effort 绝不阻断发送）。
             self._postsend_record_count()
             # N4b 出站镜像（坐席台）+ Q3 contacts 外发互动（mutuality）——与富媒体共用一处。
-            self._postsend_mirror_and_record(original_message.chat.id, _out_text)
+            # 带回真实 message.id 作幂等键，乐观镜像行与回显共用主键 → 精确去重。
+            self._postsend_mirror_and_record(
+                original_message.chat.id, _out_text,
+                msg_id=getattr(_sent, "id", "") or "")
             if getattr(original_message, 'from_user', None) and getattr(original_message.from_user, 'id', None):
                 self._record_session_reply(original_message.chat.id, original_message.from_user.id)
                 if getattr(self, 'four_layer_trigger', None):
@@ -415,13 +423,14 @@ class TelegramSenderMixin:
                 return False
             # 统一节流：与文本共用墙钟，图文混发也排队（不瞬时双发触发反垃圾）。
             await self._presend_pace()
-            await self.client.send_photo(chat_id, photo_path, caption=caption or "")
+            _sent = await self.client.send_photo(chat_id, photo_path, caption=caption or "")
             # 统一记账：刷新墙钟 + 记入共用计数器（照片也计入今日外发量，反封号不漏算）。
             self._postsend_record_count()
             # 出站镜像 + contacts 记账：坐席台看见「AI 发了图」、亲密度计入这次外发。
             _cap = (caption or "").strip()
             self._postsend_mirror_and_record(
-                chat_id, f"[图片] {_cap}".strip() if _cap else "[图片]")
+                chat_id, f"[图片] {_cap}".strip() if _cap else "[图片]",
+                msg_id=getattr(_sent, "id", "") or "")
             self.logger.info("已发送照片到 %s（%s）", chat_id, photo_path)
             return True
         except Exception as e:
@@ -560,6 +569,7 @@ class TelegramSenderMixin:
         - ``when_peer_voice`` — only when the incoming message was a voice note
         - ``always``          — every reply
         - ``random``          — with configurable probability
+        - ``smart``           — context-aware fitness scoring (shared ai.voice_fitness)
         - ``never``           — effectively disables (same as ``enabled: false``)
         """
         try:
@@ -580,6 +590,21 @@ class TelegramSenderMixin:
                 prob = float(vr_cfg.get("probability", 0.3) or 0.3)
                 if random.random() >= prob:
                     return False
+            if trigger == "smart":
+                # 与 System Z autosend 同源的上下文感知评分（消除重复决策逻辑）。原生 TG
+                # 路径暂只喂「回复情绪 + 对等」信号（频率/客户情绪可后续接入）；内容/长度
+                # 硬否决与 autosend 完全一致。低分/不达标 → 回落文本。
+                from src.ai.voice_fitness import voice_fitness
+                _smart = vr_cfg.get("smart") if isinstance(vr_cfg.get("smart"), dict) else {}
+                _merged = {
+                    "max_chars": int(vr_cfg.get("max_text_chars", 220) or 220), **_smart}
+                _dec = voice_fitness(
+                    (reply_text or "").strip(),
+                    peer_sent_voice=is_peer_voice, cfg=_merged)
+                if not _dec.send_voice:
+                    self.logger.debug(
+                        "[voice_reply] skip: smart fitness=%s (%s)", _dec.score, _dec.reason)
+                    return False
 
             max_chars = int(vr_cfg.get("max_text_chars", 220) or 220)
             clean_text = (reply_text or "").strip()
@@ -595,38 +620,23 @@ class TelegramSenderMixin:
                 self.logger.info("[voice_reply] skip: 发送前护栏拦截（kill-switch/反封号闸门）")
                 return False
 
-            # ── Resolve persona → voice config (3-tier fallback) ──
-            from src.ai.persona_voice import resolve_voice_cfg_for_contact
-
-            persona_id: Optional[str] = None
-            try:
-                from src.utils.persona_manager import PersonaManager
-
-                pm = PersonaManager.get_instance()
-                _acc_pid = (
-                    self.account_persona_ids[0]
-                    if getattr(self, "account_persona_ids", None)
-                    else ""
-                )
-                pid_dict = pm.get_persona(
-                    str(original_message.chat.id), _acc_pid
-                )
-                persona_id = (
-                    pid_dict.get("id")
-                    if isinstance(pid_dict, dict)
-                    else None
-                ) or _acc_pid or None
-            except Exception:
-                pass
-
             # P3：端用户身份（私聊 chat.id 即对端 user_id）→ 会员档分层路由 TTS 后端
             # （VIP→旗舰，免费→降级省成本）。monetization 未就绪 → tier=None → 不路由。
             try:
                 _contact_key = str(original_message.chat.id)
             except Exception:
                 _contact_key = None
-            voice_cfg = resolve_voice_cfg_for_contact(
-                persona_id, raw_cfg, contact_key=_contact_key)
+            _acc_pid = (
+                self.account_persona_ids[0]
+                if getattr(self, "account_persona_ids", None)
+                else ""
+            )
+            from src.ai.persona_voice import resolve_effective_voice_context
+            voice_ctx = resolve_effective_voice_context(
+                raw_cfg, chat_key=_contact_key, account_persona_id=_acc_pid,
+                contact_key=_contact_key, platform="telegram",
+                account_id=getattr(self, "account_id", None), text=clean_text)
+            voice_cfg = voice_ctx.get("voice_cfg") or {}
             voice_cfg["enabled"] = True
 
             # ── Synthesize ──
@@ -634,13 +644,9 @@ class TelegramSenderMixin:
 
             tts = TTSPipeline(voice_cfg)
             timeout_sec = float(vr_cfg.get("timeout_sec", 30) or 30)
-            # P4：情感层（默认关）。开启后按关系阶段/文本线索派生情绪喂给 TTS。
-            from src.ai.persona_voice import resolve_emotion_for_send
-            _emotion = resolve_emotion_for_send(
-                voice_cfg, clean_text, platform="telegram",
-                account_id=getattr(self, "account_id", None), chat_key=_contact_key)
             result = await tts.synthesize(
-                clean_text, timeout_sec=timeout_sec, emotion=_emotion)
+                clean_text, timeout_sec=timeout_sec,
+                emotion=voice_ctx.get("emotion"))
             if not result.ok:
                 self.logger.warning("[voice_reply] TTS failed: %s", result.error)
                 return False
@@ -681,7 +687,9 @@ class TelegramSenderMixin:
             if sent:
                 self.logger.info(
                     "[voice_reply] voice sent chat=%s persona=%s dur=%s",
-                    original_message.chat.id, persona_id, dur_int,
+                    original_message.chat.id,
+                    voice_ctx.get("persona_id") or "",
+                    dur_int,
                 )
                 # 统一记账：语音也刷墙钟 + 计入今日外发量（反封号/健康灯不漏算语音条）。
                 self._postsend_record_count()

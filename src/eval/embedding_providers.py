@@ -35,6 +35,25 @@ def _truthy(v: Optional[str]) -> bool:
     return str(v or "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, "") or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _probe_timeout():
+    """embedding 端点超时：连接快失败（不可达秒级 skip），读取给足（真实嵌入需算）。
+    可用 env 覆写；httpx 不可用（理论上 openai 必带）则回落纯 float。"""
+    connect = _env_float("AITR_EMBED_CONNECT_TIMEOUT", 3.0)
+    read = _env_float("AITR_EMBED_READ_TIMEOUT", 30.0)
+    try:
+        import httpx
+        return httpx.Timeout(read, connect=connect)
+    except Exception:  # noqa: BLE001
+        return connect
+
+
 def _load_config_if_none(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if config is not None:
         return config
@@ -64,7 +83,13 @@ def _from_openai_compatible(config: Optional[Dict[str, Any]]) -> Optional[EmbedF
         key = "noauth"  # 本地端点（Ollama/LM Studio）常不校验 key
     try:
         from openai import OpenAI
-        client = OpenAI(api_key=key, base_url=base, timeout=30.0)
+        # 短连接超时 + 不重试：配了但**不可达**的端点（防火墙丢包/端点没起）应在数秒内
+        # 探针失败→优雅 skip，而非默认 max_retries=2 × 30s 叠加把全量回归拖到 pytest 超时。
+        # read 仍给足（真实嵌入需算），连接失败才是要 fail-fast 的场景。
+        client = OpenAI(
+            api_key=key, base_url=base,
+            timeout=_probe_timeout(), max_retries=0,
+        )
         probe = client.embeddings.create(model=model, input=["测试嵌入可用性"])
         if not (probe and probe.data and probe.data[0].embedding):
             return None

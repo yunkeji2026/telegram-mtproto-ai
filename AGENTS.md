@@ -58,6 +58,21 @@ cd desktop && npm test
 ```
 预期：全绿（health-panel 看板模型 / 出站行 / 待审 FIFO / 拦截 chips / SLA / fingerprint / launcher 等）。
 
+**前端「哑按钮」门禁**（内联 `on*="fn()"` 引用的函数必须①有定义 ②全局作用域可达；防 `setMode`/`saveConfig`
+那类「定义了但在 IIFE 内没挂 window」→ 点了抛 ReferenceError 静默无反应）：
+```bash
+python -m pytest tests/test_inbox_inline_handlers_exported.py tests/test_rpa_inline_handlers_exposed.py -q --tb=line
+```
+预期：全绿。扫描/作用域分析共享核心在 `tests/_inline_handler_scan.py`——会**跳过字符串/模板字面量/注释/正则**
+的掩码器算括号深度，可靠区分「IIFE 内定义（不可达除非挂 window）」vs「顶层全局定义（可达）」，任意架构零假阳性；
+**已扩到 `src/web/templates/**.html` 全站模板**（glob 全扫；子模板 `{% extends %}`/`{% include %}` 的跨文件全局
+经 `ambient_globals`＝base+`_*.html` partial 汇入防误报）。首轮全扫已修 `agent_perf`/`workspace_dashboard`/`draft_review`
+共 24 个 IIFE 内漏挂 window 的哑按钮；`personas` 的「导出/导入 JSON」按钮引用**根本不存在**的
+`exportProfiles`/`importProfiles`（遗留重复卡，真面板是 `#import-panel`）已直接删除。`_PENDING_ORPHANS`（记录
+「引用了未定义函数」这类需产品决策的真 bug，CI 保绿+债务可见）当前为空；`test_pending_orphans_are_still_broken` 防其过期。运行时另有兜底守卫（`unified_inbox` 内 `_wireDeadClickGuard`
++ `_rpa_shared_scripts.html` 覆盖 4 个 RPA 页）捕获 ReferenceError 弹红条（附函数名便于上报），
+补静态门禁扫不到的「运行时才由 innerHTML 拼出的 handler」盲区。
+
 **陪伴能力「分阶段开启」主线**（看→校→开→观测→纠偏 闭环；纯函数 core 在 `src/companion/`，
 路由 `src/web/routes/companion_capability_routes.py` 挂 `/api/companion/capabilities*`，
 看板卡片在 `rpa_overview.html`，配置体检接进 `ops-overview`）：
@@ -85,7 +100,7 @@ python -m pytest tests/test_faq_resolution_gate.py tests/test_translation_qualit
  tests/test_persona_consistency_eval.py tests/test_emotion_eval.py \
  tests/test_crisis_response_eval.py tests/test_translation_confidence.py \
  tests/test_proactive_guard_eval.py tests/test_crisis_resource_eval.py \
- tests/test_crisis_safety_overview.py -q --tb=line
+ tests/test_crisis_safety_overview.py tests/test_voice_language_eval.py -q --tb=line
 ```
 - FAQ 自解决率：KB 备货(≥`AITR_FAQ_MIN_ENTRIES`)时强制 ≥`AITR_FAQ_RESOLVE_TARGET`；缺库/夹生库 skip。
 - 翻译回译质量：src→tgt→src 回译相似度近似质量；仅用**确定性引擎(DeepL/Google)**评（可复现、零 LLM 成本），
@@ -151,6 +166,11 @@ python -m pytest tests/test_faq_resolution_gate.py tests/test_translation_qualit
   且误抽≤`AITR_EXTRACT_MAX_FP`)；LLM 抽取(`ai_client.extract_memory_bullets`)缺 key → skip。
   CLI：`python -m scripts.run_eval --memory-extract [--extract-llm] [--json]`。
   （启发式自称/称呼正则已加动词/虚词护栏，防「我是说真的」类句子片段被误归名字污染长期记忆。）
+- **语音合成语言一致性**（U，防「中文声纹念英文」）：`src/eval/voice_language_eval.py` 复刻发声路径共用的
+  `voice_clone_client.effective_clone_language`——克隆合成送主机的 `language` 须随**待合成文本实际语种**
+  （中文回复仍 zh=行为不变；英文/他语回复由默认 zh 纠正，防按中文音系发音 garble；无法判定/空→回落账号默认）。
+  覆盖 autosend / 原生 voice_reply / 手动坐席三条链路同一瓶颈。纯函数常驻门禁 `tests/test_voice_language_eval.py`。
+  CLI：`python -m scripts.run_eval --voice-language [--json]`。阈值 `AITR_VOICE_LANG_ACC_TARGET`(默认 1.0)。
 
 ### Feature flag 约定
 

@@ -32,6 +32,7 @@ from pathlib import Path
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Response
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -421,7 +422,7 @@ def register_line_rpa_routes(app, *, page_auth, api_auth, templates, config_mana
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "LINE RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="LINE"))
         try:
             body = await request.json()
         except Exception:
@@ -442,7 +443,7 @@ def register_line_rpa_routes(app, *, page_auth, api_auth, templates, config_mana
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "LINE RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="LINE"))
         svc.resume()
         if audit_store:
             actor = request.session.get("username", "web_admin")
@@ -454,7 +455,7 @@ def register_line_rpa_routes(app, *, page_auth, api_auth, templates, config_mana
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "LINE RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="LINE"))
         auto_started = False
         if hasattr(svc, "is_running") and not svc.is_running:
             if hasattr(svc, "force_start"):
@@ -468,7 +469,7 @@ def register_line_rpa_routes(app, *, page_auth, api_auth, templates, config_mana
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "LINE RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="LINE"))
         try:
             res = await svc._runner.maybe_auto_accept_friends(max_accept=10)
         except Exception as e:
@@ -481,18 +482,18 @@ def register_line_rpa_routes(app, *, page_auth, api_auth, templates, config_mana
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "LINE RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="LINE"))
         runner = svc._runner
         serial = runner._serial
         if not serial:
-            raise HTTPException(503, "未找到 ADB 设备（serial 未设置）")
+            raise HTTPException(503, tr(request, "err.rpa.no_adb_device"))
         try:
             from src.integrations.line_rpa import screen_ocr, adb_helpers as _adb
             png = await asyncio.to_thread(screen_ocr.capture_screen_png, serial, _adb)
         except Exception as e:
-            raise HTTPException(500, f"截屏失败: {e}")
+            raise HTTPException(500, tr(request, "err.rpa.screenshot_failed", err=e))
         if not png:
-            raise HTTPException(503, "截屏返回空（ADB 设备可能未就绪）")
+            raise HTTPException(503, tr(request, "err.rpa.screenshot_empty"))
         return Response(content=png, media_type="image/png")
 
     @app.get("/api/line-rpa/config")
@@ -517,7 +518,7 @@ def register_line_rpa_routes(app, *, page_auth, api_auth, templates, config_mana
         except Exception:
             raise HTTPException(400, "invalid json body")
         if not isinstance(body, dict):
-            raise HTTPException(400, "body 必须是对象")
+            raise HTTPException(400, tr(request, "err.rpa.body_must_be_object"))
         # 只允许更新白名单字段，避免误写入破坏式配置
         ALLOWED = {
             "enabled", "adb_serial", "prefer_line_device",
@@ -536,7 +537,7 @@ def register_line_rpa_routes(app, *, page_auth, api_auth, templates, config_mana
         }
         bad = [k for k in body.keys() if k not in ALLOWED]
         if bad:
-            raise HTTPException(400, f"不允许的字段: {bad}")
+            raise HTTPException(400, tr(request, "err.rpa.disallowed_fields", bad=bad))
         cfg = config_manager.config or {}
         lr = cfg.get("line_rpa") or {}
         if not isinstance(lr, dict):
@@ -552,7 +553,7 @@ def register_line_rpa_routes(app, *, page_auth, api_auth, templates, config_mana
         try:
             config_manager.save()
         except Exception as e:
-            raise HTTPException(500, f"保存配置失败: {e}")
+            raise HTTPException(500, tr(request, "err.set.save_config_failed", err=e))
         # 热更新 service
         svc = _get_service(request)
         if svc is not None:
@@ -577,7 +578,7 @@ def register_line_rpa_routes(app, *, page_auth, api_auth, templates, config_mana
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "LINE RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="LINE"))
         try:
             body = await request.json()
         except Exception:
@@ -586,9 +587,9 @@ def register_line_rpa_routes(app, *, page_auth, api_auth, templates, config_mana
         peer_name = (body.get("peer_name") or "").strip()
         text = (body.get("text") or "").strip()
         if not chat_key:
-            raise HTTPException(400, "chat_key 必填")
+            raise HTTPException(400, tr(request, "err.rpa.chat_key_required"))
         if not text:
-            raise HTTPException(400, "text 不能为空")
+            raise HTTPException(400, tr(request, "err.set.text_required"))
         try:
             actor = request.session.get("username", "web_admin")
         except Exception:
@@ -610,12 +611,12 @@ def register_line_rpa_routes(app, *, page_auth, api_auth, templates, config_mana
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "LINE RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="LINE"))
         try:
             limit = int(request.query_params.get("limit", 30))
             include_done = request.query_params.get("include_done", "0") not in ("0", "false", "")
         except ValueError:
-            raise HTTPException(400, "limit 必须为整数")
+            raise HTTPException(400, tr(request, "err.rpa.limit_must_be_int"))
         items = svc.list_send_queue(limit=limit, include_done=include_done)
         return {"items": items, "count": len(items)}
 
@@ -625,10 +626,10 @@ def register_line_rpa_routes(app, *, page_auth, api_auth, templates, config_mana
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "LINE RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="LINE"))
         item = svc.get_send_queue_item(item_id)
         if item is None:
-            raise HTTPException(404, f"send_queue item {item_id} 不存在")
+            raise HTTPException(404, tr(request, "err.rpa.queue_item_not_found", item_id=item_id))
         return item
 
     @app.post("/api/line-rpa/send-queue/{item_id}/cancel")
@@ -637,10 +638,10 @@ def register_line_rpa_routes(app, *, page_auth, api_auth, templates, config_mana
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "LINE RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="LINE"))
         ok = svc.cancel_send_queue_item(item_id)
         if not ok:
-            raise HTTPException(409, f"item {item_id} 不可取消（不存在或已非 queued 状态）")
+            raise HTTPException(409, tr(request, "err.rpa.queue_item_not_cancelable", item_id=item_id))
         try:
             actor = request.session.get("username", "web_admin")
         except Exception:
@@ -660,7 +661,7 @@ def register_line_rpa_routes(app, *, page_auth, api_auth, templates, config_mana
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "LINE RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="LINE"))
         try:
             body = await request.json()
         except Exception:
@@ -675,16 +676,16 @@ def register_line_rpa_routes(app, *, page_auth, api_auth, templates, config_mana
             "hi", "it", "pt", "nl", "pl", "tr", "cs", "hu",
         }
         if lang and lang not in _VALID_LANGS:
-            raise HTTPException(400, f"不支持的语言代码: {lang}。支持: {sorted(_VALID_LANGS)}")
+            raise HTTPException(400, tr(request, "err.rpa.lang_unsupported", lang=lang, langs=sorted(_VALID_LANGS)))
         ss = getattr(svc, "_state_store", None) or getattr(
             getattr(svc, "_runner", None), "_state_store", None
         )
         if ss is None:
-            raise HTTPException(503, "state_store 不可用")
+            raise HTTPException(503, tr(request, "err.rpa.state_store_unavailable"))
         try:
             ss.set_forced_lang(chat_key, lang or None)
         except Exception as e:
-            raise HTTPException(500, f"写入失败: {e}")
+            raise HTTPException(500, tr(request, "err.rpa.write_failed", err=e))
         # P10-D: 语言已变更—立即让 lang-dist 缓存失效
         try:
             from src.web.routes.rpa_overview_routes import invalidate_lang_dist_cache

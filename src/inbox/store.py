@@ -371,6 +371,11 @@ _MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS idx_conv_meta_last_ts ON conversation_meta(updated_at DESC)",
     # O: 末条情绪强度（analyze_emotion primary_intensity；-1=未知），供主动护栏强度分级
     "ALTER TABLE conversation_meta ADD COLUMN last_emotion_intensity REAL NOT NULL DEFAULT -1",
+    # P0-companion（陪伴接管）：会话搁置 snooze。真人接管后「稍后再看」——到点自动重浮，
+    # 客户再次来消息立即重浮（ingest 侧 clear_snooze）。与 automation_mode（谁来答）正交：
+    # snooze 只控「何时从待接管/超时告警队列重新浮出」。0=未搁置；>0=重浮的 epoch 秒。
+    "ALTER TABLE conversation_meta ADD COLUMN snooze_until REAL NOT NULL DEFAULT 0",
+    "CREATE INDEX IF NOT EXISTS idx_conv_meta_snooze ON conversation_meta(snooze_until)",
     # V1: 坐席协作注解（Phase 25）
     """CREATE TABLE IF NOT EXISTS conv_notes (
          note_id    TEXT PRIMARY KEY,
@@ -562,6 +567,16 @@ _MIGRATIONS = [
     """UPDATE conversations SET chat_type='group'
          WHERE platform='telegram' AND chat_type='private'
            AND (chat_key LIKE '-%' OR conversation_id LIKE 'telegram:%:-%')""",
+    # E3: 轻量 UI 遥测事件（如 AI 安全看板「风控拦截」下钻点击），观测「看板有没有人真去用」。
+    # 极简 append-only 计数表；不含 PII 正文，只留 event/source/conversation_id/ts。
+    """CREATE TABLE IF NOT EXISTS ui_event_log (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        event           TEXT NOT NULL DEFAULT '',
+        source          TEXT NOT NULL DEFAULT '',
+        conversation_id TEXT NOT NULL DEFAULT '',
+        ts              REAL NOT NULL DEFAULT 0
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_ui_event ON ui_event_log(event, source, ts)",
 ]
 
 
@@ -593,6 +608,8 @@ class InboxStore:
         self._new_inbound_cbs: List[Any] = []
         # Q 延伸：ingest 热路径 contact_id 反查（contacts_store → contact_id）
         self._contact_resolver: Any = None
+        # 去重护栏命中计数（可观测）：量化跨路径重复被收敛多少，判断是否需更精确的发送侧幂等键
+        self._dedup_counts: Dict[str, int] = {"skipped_hash": 0, "deleted_hash": 0}
         with self._lock:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA busy_timeout=5000")
@@ -663,6 +680,16 @@ class InboxStore:
                 self._conn.close()
             except Exception:
                 pass
+
+    def dedup_stats(self) -> Dict[str, int]:
+        """去重护栏命中累计（进程生命周期内）：
+
+        - ``skipped_hash``：插 hash 兜底行时发现精确-ts pmid 孪生 → 跳过（多为入站 re-ingest 重复）；
+        - ``deleted_hash``：权威 pmid 行落库时删掉早先 hash 孪生（多为出站乐观镜像 vs 回显）。
+
+        供 /api/workspace/metrics 观测，判断各路径重复量、是否需把幂等键上提到更多发送侧。
+        """
+        return dict(self._dedup_counts)
 
     @staticmethod
     def _now() -> float:
@@ -787,14 +814,17 @@ class InboxStore:
                         (msg.conversation_id, msg.text, _tsf, msg.direction),
                     ).fetchone()
                     if _twin is not None:
+                        self._dedup_counts["skipped_hash"] += 1
                         continue
                 else:
-                    self._conn.execute(
+                    _cur = self._conn.execute(
                         "DELETE FROM messages WHERE conversation_id=? AND text=? "
                         "AND direction=? AND platform_msg_id = '' AND message_id LIKE '%:h:%' "
                         "AND ABS(ts - ?) <= ?",
                         (msg.conversation_id, msg.text, msg.direction, _tsf, _win),
                     )
+                    if (_cur.rowcount or 0) > 0:
+                        self._dedup_counts["deleted_hash"] += int(_cur.rowcount)
                 mid = _message_pk(msg.conversation_id, msg.platform_msg_id, msg.text, msg.ts)
                 cur = self._conn.execute(
                     """
@@ -1199,6 +1229,53 @@ class InboxStore:
             self._conn.commit()
             return int(cur.rowcount or 0) > 0
 
+    def update_message_text(
+        self,
+        conversation_id: str,
+        *,
+        text: str,
+        message_id: str = "",
+        media_ref: str = "",
+        only_if_empty: bool = True,
+    ) -> bool:
+        """回写消息正文（如语音转录补全），让坐席台/时间线看到真实内容而非占位。
+
+        定位优先 ``message_id``（精确），否则按 ``(conversation_id, media_ref)``
+        （唯一定位那条媒体消息）。``only_if_empty=True`` 时仅在原 text 为空/媒体
+        占位（``[语音]``/``[媒体]`` 等）时覆盖，绝不踩掉已有真实内容（幂等、防竞态）。
+        同步刷新 ``original_text``（原为空时）。命中 FTS 触发器保持全文检索一致。
+        返回是否真的更新了行。
+        """
+        new_text = str(text or "").strip()
+        if not new_text:
+            return False
+        mid = str(message_id or "").strip()
+        ref = str(media_ref or "").strip()
+        cid = str(conversation_id or "").strip()
+        if not mid and not (cid and ref):
+            return False
+        where = "message_id = ?" if mid else "conversation_id = ? AND media_ref = ?"
+        params: List[Any] = [mid] if mid else [cid, ref]
+        if only_if_empty:
+            # 占位/空白才覆盖：'', 纯空白, 或 [xxx] 单一媒体占位（无其他正文）
+            where += (
+                " AND (COALESCE(TRIM(text), '') = '' "
+                "OR (text LIKE '[%]' AND text NOT LIKE '% %'))"
+            )
+        with self._lock:
+            cur = self._conn.execute(
+                f"""
+                UPDATE messages SET
+                    text = ?,
+                    original_text = CASE WHEN COALESCE(TRIM(original_text), '') = ''
+                        OR original_text LIKE '[%]' THEN ? ELSE original_text END
+                WHERE {where}
+                """,
+                tuple([new_text, new_text] + params),
+            )
+            self._conn.commit()
+            return int(cur.rowcount or 0) > 0
+
     @staticmethod
     def _sent_hash(sent_text: str) -> str:
         return hashlib.sha256(str(sent_text or "").encode("utf-8")).hexdigest()[:16]
@@ -1539,18 +1616,25 @@ class InboxStore:
 
     # ── automation_mode 持久化（替换进程内 dict）────────────────
 
-    def get_automation_mode(self, conversation_id: str) -> str:
+    def get_automation_mode_if_set(self, conversation_id: str) -> Optional[str]:
+        """仅当坐席/UI 显式写过档位时返回；无记录 → None（调用方回落全局默认）。"""
         if not conversation_id:
-            return _DEFAULT_AUTOMATION_MODE
+            return None
         with self._lock:
             row = self._conn.execute(
                 "SELECT automation_mode FROM conversation_settings WHERE conversation_id = ?",
                 (conversation_id,),
             ).fetchone()
         if not row:
-            return _DEFAULT_AUTOMATION_MODE
+            return None
         mode = str(row["automation_mode"] or _DEFAULT_AUTOMATION_MODE)
         return mode if mode in AUTOMATION_MODES else _DEFAULT_AUTOMATION_MODE
+
+    def get_automation_mode(self, conversation_id: str) -> str:
+        if not conversation_id:
+            return _DEFAULT_AUTOMATION_MODE
+        explicit = self.get_automation_mode_if_set(conversation_id)
+        return explicit if explicit is not None else _DEFAULT_AUTOMATION_MODE
 
     def set_automation_mode(self, conversation_id: str, mode: str) -> None:
         if not conversation_id:
@@ -1644,6 +1728,12 @@ class InboxStore:
                      created_at, updated_at, trace_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(source_kind, source_id) DO UPDATE SET
+                    peer_text = CASE WHEN excluded.peer_text != ''
+                        THEN excluded.peer_text ELSE reply_drafts.peer_text END,
+                    draft_text = CASE WHEN excluded.draft_text != ''
+                        THEN excluded.draft_text ELSE reply_drafts.draft_text END,
+                    draft_lang = CASE WHEN excluded.draft_lang != ''
+                        THEN excluded.draft_lang ELSE reply_drafts.draft_lang END,
                     risk_level = excluded.risk_level,
                     risk_reasons_json = excluded.risk_reasons_json,
                     autopilot_level = excluded.autopilot_level,
@@ -1728,13 +1818,21 @@ class InboxStore:
         仅在草稿仍处于 ``enriching`` 时更新（幂等 + 防与人工处置竞态）。置为 L2 + pending
         后**锁外**补发 L2 回调，唤醒 AutosendWorker 用「人设正文」投递（而非占位模板）。
         返回是否真的更新了记录。
+
+        ★ 防「复读」根因修复：草稿是**每会话单行复用**（draft_id=inbox:平台:账号:会话），
+        每来一条新消息就重生本行的 ``draft_text``。但历史上一轮送出时 ``final_text`` 被写死
+        且此处从不清它，而 autosend 投递取 ``final_text or draft_text``（final 优先）→ 于是
+        每一轮都把上一轮的旧 ``final_text`` 反复送出（表现为「语音一直是同一句」），且绕过防复读
+        （比对只看重生的 draft_text）。重生即代表「本轮新内容」，故这里**必须清空 final_text**，
+        让 autosend 回落到刚生成的 draft_text（人工 edit_send 走 resolve/update_draft_status，
+        不经本方法，语义不受影响）。
         """
         did = str(draft_id or "").strip()
         if not did:
             return False
         now = self._now()
-        sets = ["draft_text=?", "status=?", "updated_at=?"]
-        params: List[Any] = [str(draft_text or ""), str(status or "pending"), now]
+        sets = ["draft_text=?", "final_text=?", "status=?", "updated_at=?"]
+        params: List[Any] = [str(draft_text or ""), "", str(status or "pending"), now]
         if autopilot_level:
             sets.append("autopilot_level=?")
             params.append(str(autopilot_level))
@@ -1850,6 +1948,103 @@ class InboxStore:
             logger.info("cleanup_old_drafts: 删除 %d 条超龄草稿（age>%dd statuses=%s）",
                         count, max_age_days, safe_statuses)
         return count
+
+    def expire_stale_pending_drafts(
+        self,
+        *,
+        max_age_hours: float = 168.0,
+        levels: Optional[List[str]] = None,
+        groups_only: bool = False,
+        agent_id: str = "system",
+        dry_run: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """治理化开关：把长期无人处置的 pending 草稿判定为「过期作废」。
+
+        与 ``cleanup_old_drafts`` 的关键区别：那个是删除**已处置**的历史行防表膨胀、
+        **绝不碰 pending**；本方法专治 pending 积压——一条搁置很久的草稿其上下文早已
+        陈旧，此刻再发出去比不发更糟，故转入 ``cancelled`` 终态并写审计（action=
+        ``auto_expired``），**不删行**（保留可追溯），从而让 SLA 看板与铃铛不再对它反复告警。
+
+        安全不变量：
+          - 仅作用于 ``status='pending'`` 的草稿；
+          - 默认关（调用方以 feature flag / age>0 控制），本方法本身不做开关判断；
+          - ``dry_run=True`` 只返回将被作废的草稿列表，不写库（供预演/CLI 核对）。
+
+        参数：
+          max_age_hours: 超过此时长仍 pending 即作废（默认 168h=7 天）。
+          levels: 仅作用于这些 autopilot 等级（如 ['L3','L4']）；None=全部等级。
+          groups_only: True=仅作用于群/频道会话（is_group_conversation 判定），防误伤
+                       1:1 私聊的合法待审草稿（UI 一键清理默认应开）。
+          agent_id: 审计里的处置人（默认 'system'）。
+        返回：被作废（或 dry_run 命中）的草稿摘要列表 [{draft_id, autopilot_level,
+              conversation_id, age_hours}]。
+        """
+        cutoff_ts = self._now() - max(0.0, float(max_age_hours)) * 3600.0
+        clauses = ["status = 'pending'", "created_at > 0", "created_at < ?"]
+        params: List[Any] = [cutoff_ts]
+        norm_levels = [str(x) for x in (levels or []) if str(x)]
+        if norm_levels:
+            clauses.append(
+                "autopilot_level IN (%s)" % ",".join("?" for _ in norm_levels)
+            )
+            params.extend(norm_levels)
+        sql = (
+            "SELECT draft_id, autopilot_level, risk_level, conversation_id, "
+            "platform, chat_key, created_at "
+            "FROM reply_drafts WHERE " + " AND ".join(clauses) + " ORDER BY created_at ASC"
+        )
+        now = self._now()
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        if groups_only:
+            from .ingest import is_group_conversation
+            rows = [
+                r for r in rows
+                if is_group_conversation({
+                    "platform": r["platform"],
+                    "conversation_id": r["conversation_id"],
+                    "chat_key": r["chat_key"],
+                })
+            ]
+        victims = [
+            {
+                "draft_id": str(r["draft_id"]),
+                "autopilot_level": str(r["autopilot_level"] or ""),
+                "risk_level": str(r["risk_level"] or ""),
+                "conversation_id": str(r["conversation_id"] or ""),
+                "age_hours": round((now - float(r["created_at"] or now)) / 3600.0, 1),
+            }
+            for r in rows
+        ]
+        if dry_run or not victims:
+            return victims
+
+        for v in victims:
+            try:
+                with self._lock:
+                    self._conn.execute(
+                        "UPDATE reply_drafts SET status='cancelled', decided_by=?, "
+                        "decided_at=?, updated_at=? WHERE draft_id=? AND status='pending'",
+                        (str(agent_id or "system"), now, now, v["draft_id"]),
+                    )
+                    self._conn.commit()
+                self.record_draft_audit(
+                    v["draft_id"],
+                    autopilot_level=v["autopilot_level"],
+                    action="auto_expired",
+                    agent_id=str(agent_id or "system"),
+                    risk_level=v["risk_level"],
+                    conversation_id=v["conversation_id"],
+                    reason=f"pending 搁置 {v['age_hours']:.1f}h > {max_age_hours:.0f}h，自动作废",
+                    ts=now,
+                )
+            except Exception:
+                logger.debug("expire_stale_pending_drafts: 单条作废失败（已忽略）", exc_info=True)
+        logger.info(
+            "expire_stale_pending_drafts: 作废 %d 条积压 pending 草稿（age>%.0fh levels=%s）",
+            len(victims), max_age_hours, norm_levels or "all",
+        )
+        return victims
 
     def cleanup_outbound_translations(self, *, max_age_days: int = 30) -> int:
         """P3：删除超龄出向译文旁路记录，防 outbound_translations 表无限膨胀。
@@ -2262,6 +2457,257 @@ class InboxStore:
             "total_sent": total_sent,
             "ai_share": round(ai_sent / total_sent, 3) if total_sent else 0.0,
             "trend": trend,
+        }
+
+    def ai_safety_summary(
+        self,
+        since_ts: float = 0.0,
+        until_ts: Optional[float] = None,
+        *,
+        include_trend: bool = False,
+    ) -> Dict[str, Any]:
+        """AI 安全/质量总览：聚合 ``draft_audit_log`` 处置动作 + 风险分级，回答管理者两问——
+        「AI 自动发的靠不靠谱」（采纳/改写/弃用率 + 拦截）+「风险边缘量」（高危事件）。
+
+        ``include_trend=True`` 追加按日 ``trend``（供看板画 sparkline）；环比上一窗口时
+        第二次调用用默认 False 免重复日聚合。
+
+        **纯读、零新存储**——复用 L2/审核链早已在写的 draft_audit_log（action 枚举见
+        :meth:`record_draft_audit`：autosend / blocked / force_override / approved /
+        rejected / edit_send / cancelled）。质量口径：
+
+        - ``adopt_rate``  = approved / reviewed（坐席原样采纳 AI 初稿 = 信任度）
+        - ``edit_rate``   = edit_send / reviewed（改写后才发 = AI 初稿差多少）
+        - ``reject_rate`` = rejected / reviewed（弃用）
+        - ``reviewed``    = approved + edit_send + rejected（人工审过的草稿总数）
+        - ``autosend`` / ``blocked`` = AI 自动发 / 风控拦截转人工（安全网命中量）
+        - ``high_risk``   = 审计行 risk_level 命中高危分级的事件量（风险边缘规模）
+
+        ``until_ts`` 给定时只统计 ``[since_ts, until_ts)`` 半开区间（用于环比）。
+        """
+        clause = "ts >= ?"
+        params: List[Any] = [float(since_ts)]
+        if until_ts is not None:
+            clause += " AND ts < ?"
+            params.append(float(until_ts))
+        with self._lock:
+            act_rows = self._conn.execute(
+                f"SELECT action, COUNT(*) FROM draft_audit_log WHERE {clause} GROUP BY action",
+                params,
+            ).fetchall()
+            risk_rows = self._conn.execute(
+                f"SELECT risk_level, COUNT(*) FROM draft_audit_log WHERE {clause} GROUP BY risk_level",
+                params,
+            ).fetchall()
+        counts: Dict[str, int] = {str(r[0] or ""): int(r[1] or 0) for r in act_rows}
+        risk: Dict[str, int] = {str(r[0] or ""): int(r[1] or 0) for r in risk_rows}
+        approved = counts.get("approved", 0)
+        edited = counts.get("edit_send", 0)
+        rejected = counts.get("rejected", 0)
+        autosend = counts.get("autosend", 0)
+        blocked = counts.get("blocked", 0)
+        override = counts.get("force_override", 0)
+        reviewed = approved + edited + rejected
+
+        def _hot(level: str) -> bool:
+            lv = level.lower()
+            return lv not in ("", "none", "low", "normal", "safe", "ok")
+
+        high_risk = sum(n for k, n in risk.items() if _hot(k))
+
+        def _rate(n: int, d: int) -> float:
+            return round(n / d, 3) if d else 0.0
+
+        out = {
+            "window_since": float(since_ts),
+            "autosend": autosend,
+            "blocked": blocked,
+            "override": override,
+            "reviewed": reviewed,
+            "approved": approved,
+            "edited": edited,
+            "rejected": rejected,
+            "adopt_rate": _rate(approved, reviewed),
+            "edit_rate": _rate(edited, reviewed),
+            "reject_rate": _rate(rejected, reviewed),
+            "high_risk": high_risk,
+            "risk_dist": {k: v for k, v in risk.items() if k},
+        }
+        if include_trend:
+            with self._lock:
+                day_rows = self._conn.execute(
+                    f"SELECT action, ts FROM draft_audit_log WHERE {clause}", params,
+                ).fetchall()
+            per_day: Dict[str, Dict[str, int]] = {}
+            for action, ts in day_rows:
+                act = str(action or "")
+                day = time.strftime("%Y-%m-%d", time.localtime(float(ts)))
+                b = per_day.setdefault(
+                    day, {"approved": 0, "edited": 0, "rejected": 0, "autosend": 0, "blocked": 0},
+                )
+                if act == "approved":
+                    b["approved"] += 1
+                elif act == "edit_send":
+                    b["edited"] += 1
+                elif act == "rejected":
+                    b["rejected"] += 1
+                elif act == "autosend":
+                    b["autosend"] += 1
+                elif act == "blocked":
+                    b["blocked"] += 1
+            trend = []
+            for d in sorted(per_day):
+                b = per_day[d]
+                rev = b["approved"] + b["edited"] + b["rejected"]
+                trend.append({
+                    "day": d[5:],
+                    "autosend": b["autosend"],
+                    "blocked": b["blocked"],
+                    "reviewed": rev,
+                    "adopt_rate": _rate(b["approved"], rev),
+                })
+            out["trend"] = trend
+        return out
+
+    def ai_quality_daily_series(self, days: int = 30) -> List[Dict[str, Any]]:
+        """按日聚合 ``draft_audit_log`` 处置动作 + 高危量（F2b 阈值校准回放数据源）。
+
+        返回近 ``days`` 天、每天一条**原始计数**（升序）：
+        ``{day, reviewed, approved, edited, rejected, autosend, blocked, high_risk}``。
+        口径与 :meth:`ai_safety_summary` 完全一致（reviewed=approved+edit_send+rejected；
+        high_risk=risk_level 命中非低危分级），供 ``calibrate_ai_quality`` 滚动窗口重算率、
+        复刻 watchdog 评估——用真实历史反推「按某阈值会告警几次/分布如何」，上线前定阈值。
+        """
+        days = max(1, min(120, int(days or 30)))
+        since = time.time() - days * 86400
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT action, risk_level, ts FROM draft_audit_log WHERE ts >= ?",
+                (float(since),),
+            ).fetchall()
+
+        def _hot(level: str) -> bool:
+            lv = str(level or "").lower()
+            return lv not in ("", "none", "low", "normal", "safe", "ok")
+
+        per_day: Dict[str, Dict[str, int]] = {}
+        for action, risk_level, ts in rows:
+            day = time.strftime("%Y-%m-%d", time.localtime(float(ts)))
+            b = per_day.setdefault(day, {
+                "approved": 0, "edited": 0, "rejected": 0,
+                "autosend": 0, "blocked": 0, "high_risk": 0,
+            })
+            act = str(action or "")
+            if act == "approved":
+                b["approved"] += 1
+            elif act == "edit_send":
+                b["edited"] += 1
+            elif act == "rejected":
+                b["rejected"] += 1
+            elif act == "autosend":
+                b["autosend"] += 1
+            elif act == "blocked":
+                b["blocked"] += 1
+            if _hot(risk_level):
+                b["high_risk"] += 1
+        out: List[Dict[str, Any]] = []
+        for d in sorted(per_day):
+            b = per_day[d]
+            out.append({
+                "day": d,
+                "reviewed": b["approved"] + b["edited"] + b["rejected"],
+                "approved": b["approved"], "edited": b["edited"], "rejected": b["rejected"],
+                "autosend": b["autosend"], "blocked": b["blocked"], "high_risk": b["high_risk"],
+            })
+        return out
+
+    def top_blocked_conversations(
+        self, since_ts: float = 0.0, *, limit: int = 8,
+    ) -> List[Dict[str, Any]]:
+        """近窗口内被风控拦截（action='blocked'）最多的会话 Top-N，供 AI 安全看板下钻。
+
+        回填会话名/平台 + 最近拦截时间与原因（取最近一条 blocked 的 reason，供坐席不进会话
+        即知因何被拦）。纯读，复用 draft_audit_log + conversations；按拦截次数降序、同数按最近。
+        """
+        lim = int(max(1, min(50, limit)))
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT conversation_id, COUNT(*) AS n, MAX(ts) AS last_ts "
+                "FROM draft_audit_log WHERE action='blocked' AND ts>=? AND conversation_id<>'' "
+                "GROUP BY conversation_id ORDER BY n DESC, last_ts DESC LIMIT ?",
+                (float(since_ts), lim),
+            ).fetchall()
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            cid = str(r["conversation_id"])
+            conv = self.get_conversation(cid) or {}
+            with self._lock:
+                rr = self._conn.execute(
+                    "SELECT reason FROM draft_audit_log WHERE conversation_id=? AND action='blocked' "
+                    "ORDER BY ts DESC LIMIT 1",
+                    (cid,),
+                ).fetchone()
+            out.append({
+                "conversation_id": cid,
+                "count": int(r["n"] or 0),
+                "last_ts": float(r["last_ts"] or 0),
+                "name": conv.get("display_name") or conv.get("chat_key") or cid,
+                "platform": conv.get("platform") or "",
+                "reason": (str(rr["reason"]) if rr and rr["reason"] else ""),
+            })
+        return out
+
+    def record_ui_event(
+        self, event: str, *, source: str = "", conversation_id: str = "",
+        ts: Optional[float] = None,
+    ) -> None:
+        """记一条轻量 UI 遥测事件（E3）。append-only，best-effort（空 event 忽略）。
+
+        用于观测看板下钻等「功能有没有人真用」，不落 PII 正文。
+        """
+        ev = str(event or "").strip()
+        if not ev:
+            return
+        now = float(ts if ts is not None else self._now())
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO ui_event_log (event, source, conversation_id, ts) VALUES (?,?,?,?)",
+                (ev, str(source or ""), str(conversation_id or ""), now),
+            )
+            self._conn.commit()
+
+    def deep_link_stats(
+        self, source: str = "ai_safety", since_ts: float = 0.0,
+    ) -> Dict[str, int]:
+        """AI 安全看板下钻观测（E3）：窗口内下钻点击数 / 命中去重会话数 /
+        「点后确有人工处置」的去重会话数（下钻→处理转化，自证价值）。
+
+        processed 判定：下钻会话在**首次下钻时刻之后**出现过人工处置
+        （approved/edit_send/rejected/force_override）——诚实反映「点进去后动手了吗」。
+        纯读，复用 ui_event_log + draft_audit_log。
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS opens, COUNT(DISTINCT conversation_id) AS convs "
+                "FROM ui_event_log WHERE event='deep_link_opened' AND source=? AND ts>=?",
+                (str(source or ""), float(since_ts)),
+            ).fetchone()
+            processed_row = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM ("
+                "  SELECT conversation_id, MIN(ts) AS first_ts FROM ui_event_log "
+                "  WHERE event='deep_link_opened' AND source=? AND ts>=? AND conversation_id<>'' "
+                "  GROUP BY conversation_id"
+                ") q WHERE EXISTS ("
+                "  SELECT 1 FROM draft_audit_log d WHERE d.conversation_id=q.conversation_id "
+                "    AND d.action IN ('approved','edit_send','rejected','force_override') "
+                "    AND d.ts>=q.first_ts"
+                ")",
+                (str(source or ""), float(since_ts)),
+            ).fetchone()
+        return {
+            "opens": int((row["opens"] if row else 0) or 0),
+            "convs": int((row["convs"] if row else 0) or 0),
+            "processed": int((processed_row["n"] if processed_row else 0) or 0),
         }
 
     def get_engagement_stats(
@@ -4360,16 +4806,18 @@ class InboxStore:
         return result
 
     def list_conv_tags_map(self, conversation_ids: List[str]) -> Dict[str, Dict[str, Any]]:
-        """T1：批量获取会话标签+归档状态（用于列表渲染）。
+        """T1：批量获取会话标签+归档状态+搁置到点（用于列表渲染）。
 
-        返回 {conv_id: {"tags": [...], "archived": bool}}。
+        返回 {conv_id: {"tags": [...], "archived": bool, "snooze_until": float}}。
+        ``snooze_until`` 为重浮的 epoch 秒（0=未搁置）；前端据此在「超时/待接管」视图
+        隐藏已搁置会话并渲染 header 搁置态（读时不做「是否已到点」判定，交前端按 now 比较）。
         """
         if not conversation_ids:
             return {}
         placeholders = ",".join("?" * len(conversation_ids))
         with self._lock:
             rows = self._conn.execute(
-                f"SELECT conversation_id, conv_tags, archived FROM conversation_meta"
+                f"SELECT conversation_id, conv_tags, archived, snooze_until FROM conversation_meta"
                 f" WHERE conversation_id IN ({placeholders})",
                 conversation_ids,
             ).fetchall()
@@ -4382,6 +4830,7 @@ class InboxStore:
             result[r["conversation_id"]] = {
                 "tags": tags,
                 "archived": bool(r["archived"]),
+                "snooze_until": float(r["snooze_until"] or 0),
             }
         return result
 
@@ -5095,7 +5544,7 @@ class InboxStore:
 
     _META_PATCH_COLUMNS = frozenset({
         "rel_stage_cached", "rel_stage_pending", "rel_stage_pending_ts",
-        "rel_reunion_ack_ts", "qa_score", "churn_risk",
+        "rel_reunion_ack_ts", "qa_score", "churn_risk", "snooze_until",
     })
 
     def _ensure_conv_meta_row(self, conversation_id: str) -> None:
@@ -5129,6 +5578,96 @@ class InboxStore:
                 vals,
             )
             self._conn.commit()
+
+    # ── P0-companion：会话搁置（snooze）——「稍后再看」不删会话地移出待接管队列 ──────
+    def set_snooze(
+        self, conversation_id: str, until_ts: float, *, by: str = "",
+    ) -> bool:
+        """把会话搁置到 ``until_ts``（epoch 秒）。``until_ts<=now`` 视为取消搁置。
+
+        返回是否处于搁置态。与 automation_mode（谁来答）正交——只影响「待接管/超时告警」
+        队列的可见性（读侧 ``_snoozed_set`` 排除）；到点由 ``snoozed_ids`` 的 now 过滤
+        自动重浮，客户再来消息由 ingest 侧 ``clear_snooze`` 立即重浮。``by`` 暂仅审计留痕用。
+        """
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            return False
+        try:
+            until = float(until_ts or 0)
+        except (TypeError, ValueError):
+            until = 0.0
+        if until <= self._now():
+            self.clear_snooze(cid)
+            return False
+        self.patch_conv_meta(cid, {"snooze_until": until})
+        return True
+
+    def clear_snooze(self, conversation_id: str) -> None:
+        """取消搁置（客户回复 / 坐席手动 / 到点）。
+
+        入站消息路径会对每条新入站调用本方法，故先只读判定：无 meta 行或本就未搁置
+        → 直接返回、**不写、不凭空建 meta 行**（避免每条消息空转 + 污染 meta）。
+        """
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            return
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT snooze_until FROM conversation_meta WHERE conversation_id=?",
+                (cid,),
+            ).fetchone()
+            if row is None or float(row["snooze_until"] or 0) <= 0:
+                return
+            self._conn.execute(
+                "UPDATE conversation_meta SET snooze_until=0, updated_at=? "
+                "WHERE conversation_id=?",
+                (self._now(), cid),
+            )
+            self._conn.commit()
+
+    def snoozed_ids(self, now: Optional[float] = None) -> set:
+        """仍在搁置窗口内（``snooze_until > now``）的会话 id 集合。
+
+        到点后自然不再包含 = 自动重浮（无需扫表/定时任务，读时按 now 过滤即可）。
+        """
+        ts = float(now if now is not None else self._now())
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT conversation_id FROM conversation_meta WHERE snooze_until > ?",
+                (ts,),
+            ).fetchall()
+        return {str(r["conversation_id"]) for r in rows}
+
+    def list_snoozed(
+        self, *, now: Optional[float] = None, limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        """搁置中会话清单（含剩余秒 + 展示字段），供「搁置中」视图/API。按到点先后排序。"""
+        ts = float(now if now is not None else self._now())
+        lim = max(1, min(500, int(limit or 200)))
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT m.conversation_id AS conversation_id, m.snooze_until AS snooze_until, "
+                "c.platform AS platform, c.account_id AS account_id, "
+                "c.chat_key AS chat_key, c.display_name AS display_name "
+                "FROM conversation_meta m "
+                "LEFT JOIN conversations c ON c.conversation_id = m.conversation_id "
+                "WHERE m.snooze_until > ? ORDER BY m.snooze_until ASC LIMIT ?",
+                (ts, lim),
+            ).fetchall()
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            cid = str(r["conversation_id"])
+            until = float(r["snooze_until"] or 0)
+            out.append({
+                "conversation_id": cid,
+                "platform": str(r["platform"] or ""),
+                "account_id": str(r["account_id"] or "default"),
+                "chat_key": str(r["chat_key"] or ""),
+                "name": str(r["display_name"] or r["chat_key"] or cid),
+                "snooze_until": until,
+                "remaining_sec": int(max(0, until - ts)),
+            })
+        return out
 
     def get_rel_stage_cached(self, conversation_id: str) -> str:
         meta = self.get_rel_stage_meta(conversation_id)

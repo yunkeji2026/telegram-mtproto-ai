@@ -12,9 +12,9 @@
   if (!Base) { console.error("cp-chain-exec: CpPanelBase 未加载"); return; }
 
   class CpChainExec extends Base {
-    emptyText() { return "选中会话后加载工作链执行…"; }
-    emptyDataText() { return "暂无工作链执行"; }
-    errText() { return "工作链执行加载失败"; }
+    emptyText() { return this.t("cp.chain.empty"); }
+    emptyDataText() { return this.t("cp.chain.no_data"); }
+    errText() { return this.t("cp.chain.err"); }
     styles() {
       return `
       .exec { border:1px solid var(--cp-border,#e2e8f0); border-radius:var(--cp-radius-sm,6px);
@@ -37,7 +37,7 @@
     renderData(d) {
       const esc = (s) => this.esc(s);
       const execs = Array.isArray(d.executions) ? d.executions : [];
-      if (!execs.length) return `<div class="empty">${this.emptyDataText()}</div>`;
+      if (!execs.length) return `<div class="empty">${this.esc(this.emptyDataText())}</div>`;
       return execs.map((ex) => {
         const cls = "exec" + (ex.status === "failed" ? " failed" : "");
         const dots = (ex.steps_preview || []).map((s) => {
@@ -48,10 +48,10 @@
         const last = (ex.last_result && ex.last_result.text)
           ? `<div class="last">${esc((ex.last_result.text || "").slice(0, 50))}</div>` : "";
         const cancel = ex.status === "running"
-          ? `<div class="acts"><button data-act="cancel" data-id="${esc(ex.exec_id)}">取消</button></div>` : "";
+          ? `<div class="acts"><button data-act="cancel" data-id="${esc(ex.exec_id)}">${esc(this.t("cp.common.cancel"))}</button></div>` : "";
         return `<div class="${cls}">` +
           `<div class="name">${esc(ex.chain_name || "")} <span class="st">${esc(ex.status_label || "")}${cd}</span></div>` +
-          `<div class="step">步骤 ${esc(ex.current_step_display)}/${esc(ex.total_steps)}` +
+          `<div class="step">${esc(this.t("cp.chain.step", { cur: ex.current_step_display, total: ex.total_steps }))}` +
           (ex.current_step_label ? ` · ${esc(ex.current_step_label)}` : "") + `</div>` +
           `<div class="dots">${dots}</div>` + last + cancel +
           `</div>`;
@@ -62,7 +62,7 @@
       if (act !== "cancel") return;
       const execId = el.getAttribute("data-id");
       if (!execId) return;
-      if (typeof confirm === "function" && !confirm("确认取消此工作链？")) return;
+      if (typeof confirm === "function" && !confirm(this.t("cp.chain.cancel_confirm"))) return;
       el.disabled = true;
       let ok = false;
       try {

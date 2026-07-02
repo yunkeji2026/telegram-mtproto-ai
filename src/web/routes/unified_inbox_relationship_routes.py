@@ -23,6 +23,7 @@ from src.web.routes.unified_inbox_context import (
     _build_relationship_stage_payload,
 )
 from src.web.routes.unified_inbox_services import _inbox_store
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -49,16 +50,16 @@ def register_relationship_stage_routes(app, *, api_auth) -> None:
         """P46：坐席确认关系进阶。"""
         store = _inbox_store(request)
         if store is None:
-            raise HTTPException(503, "inbox_store 不可用")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
         body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
         payload = _build_relationship_stage_payload(request, conversation_id, store)
         confirmed = str(payload.get("confirmed_stage") or payload.get("stage") or "")
         target = str(body.get("stage") or payload.get("pending_stage") or payload.get("computed_stage") or "")
         from src.utils.companion_relationship import STAGE_ORDER
         if target not in STAGE_ORDER:
-            raise HTTPException(422, "无效目标阶段")
+            raise HTTPException(422, tr(request, "err.ws.invalid_target_stage"))
         if confirmed and STAGE_ORDER.index(target) <= STAGE_ORDER.index(confirmed):
-            raise HTTPException(422, "目标阶段必须高于当前确认阶段")
+            raise HTTPException(422, tr(request, "err.ws.stage_must_be_higher"))
         prev_label = payload.get("confirmed_stage_label") or payload.get("stage_label")
         contact_id = str((payload.get("context") or {}).get("contact_id") or "")
         agent_id, agent_name = _agent_from_request(request)
@@ -102,20 +103,20 @@ def register_relationship_stage_routes(app, *, api_auth) -> None:
         """P46：坐席手动降级关系阶段（附原因）。"""
         store = _inbox_store(request)
         if store is None:
-            raise HTTPException(503, "inbox_store 不可用")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
         body = await request.json()
         reason = str(body.get("reason") or "").strip()
         if not reason:
-            raise HTTPException(422, "reason 不能为空")
+            raise HTTPException(422, tr(request, "err.ws.field_required", field="reason"))
         from src.inbox.relationship_stage import downgrade_stage_one_level
         from src.utils.companion_relationship import STAGE_ORDER, STAGE_LABEL_ZH
         payload = _build_relationship_stage_payload(request, conversation_id, store)
         confirmed = str(payload.get("confirmed_stage") or payload.get("stage") or "initial")
         target = str(body.get("stage") or downgrade_stage_one_level(confirmed))
         if target not in STAGE_ORDER:
-            raise HTTPException(422, "无效目标阶段")
+            raise HTTPException(422, tr(request, "err.ws.invalid_target_stage"))
         if STAGE_ORDER.index(target) >= STAGE_ORDER.index(confirmed):
-            raise HTTPException(422, "目标阶段必须低于当前确认阶段")
+            raise HTTPException(422, tr(request, "err.ws.stage_must_be_lower"))
         prev_label = payload.get("confirmed_stage_label") or payload.get("stage_label")
         contact_id = str((payload.get("context") or {}).get("contact_id") or "")
         agent_id, agent_name = _agent_from_request(request)
@@ -159,12 +160,12 @@ def register_relationship_stage_routes(app, *, api_auth) -> None:
         """P46：确认久别重逢 — 将确认阶段同步至亲密度阶段并推荐回暖话题。"""
         store = _inbox_store(request)
         if store is None:
-            raise HTTPException(503, "inbox_store 不可用")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
         body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
         from src.utils.companion_relationship import derive_stage_from_intimacy, STAGE_LABEL_ZH
         payload = _build_relationship_stage_payload(request, conversation_id, store)
         if not payload.get("reunion"):
-            raise HTTPException(422, "当前会话未检测到久别重逢信号")
+            raise HTTPException(422, tr(request, "err.ws.no_reunion_signal"))
         ctx = payload.get("context") or {}
         intim = ctx.get("intimacy_score")
         target = derive_stage_from_intimacy(float(intim)) if intim is not None else str(payload.get("computed_stage") or "initial")
@@ -227,7 +228,7 @@ def register_relationship_stage_routes(app, *, api_auth) -> None:
         """P50：一键对齐多会话阶段（to_contact | to_highest）。"""
         store = _inbox_store(request)
         if store is None:
-            raise HTTPException(503, "inbox_store 不可用")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
         body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
         mode = str(body.get("mode") or "to_contact").strip()
         from src.inbox.contact_rel_stage import highest_stage
@@ -241,7 +242,7 @@ def register_relationship_stage_routes(app, *, api_auth) -> None:
         else:
             target = contact_stage or highest_stage([s for s in conv_stages.values() if s])
         if not target or target not in STAGE_ORDER:
-            raise HTTPException(422, "无可对齐的目标阶段")
+            raise HTTPException(422, tr(request, "err.ws.no_alignable_stage"))
         agent_id, _ = _agent_from_request(request)
         if not contact_stage:
             store.set_contact_rel_stage(contact_id, target, updated_by=agent_id)
@@ -279,7 +280,7 @@ def register_relationship_stage_routes(app, *, api_auth) -> None:
         api_auth(request)
         store = _inbox_store(request)
         if store is None:
-            return {"ok": False, "error": "inbox_store 不可用"}
+            return {"ok": False, "error": tr(request, "err.svc.inbox_not_ready")}
         from src.inbox.stage_timeline import (
             build_contact_stage_summary,
             enrich_stage_audit_row,

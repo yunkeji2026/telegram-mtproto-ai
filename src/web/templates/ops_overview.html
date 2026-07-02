@@ -1,9 +1,10 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="{{ 'zh-CN' if (ui_lang|default('zh')) == 'zh' else 'en' }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>运营总览 · Ops Overview</title>
+  <title>{{ (i18n or {}).get('ov2_s001', "运营总览 · Ops Overview") }}</title>
+  {% include "_i18n_bootstrap.html" %}
   <style>
     :root { --bg:#0f1419; --card:#1a2029; --line:#2a323d; --fg:#e6edf3; --mut:#8b98a5;
             --green:#2ea043; --yellow:#d29922; --red:#da3633; --accent:#388bfd; }
@@ -32,6 +33,9 @@
     .badge.acked{background:rgba(210,153,34,.18); color:#e3b341;}
     .badge.resolved{background:rgba(46,160,67,.18); color:#56d364;}
     button { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:5px 12px; cursor:pointer; font-size:12px; }
+    .win-seg { display:inline-flex; gap:4px; margin-left:10px; vertical-align:middle; }
+    .win-seg button { background:var(--bg); color:var(--mut); border:1px solid var(--line); padding:2px 9px; font-size:11px; }
+    .win-seg button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
     button:disabled { opacity:.5; cursor:default; }
     .empty { color:var(--mut); padding:10px; }
     .refresh { margin-left:auto; }
@@ -42,72 +46,123 @@
 <div class="wrap">
   <header>
     <span id="overallDot" class="light-dot unknown"></span>
-    <h1>运营总览</h1>
+    <h1>{{ (i18n or {}).get('db_s005', "运营总览") }}</h1>
     <span class="muted" id="updatedAt"></span>
-    <a class="refresh" href="/" >← 返回仪表盘</a>
+    <a class="refresh" href="/" >← {{ (i18n or {}).get('ov2_s002', "返回仪表盘") }}</a>
   </header>
 
   <div class="grid" id="kpis"></div>
 
   <section>
-    <h2>📈 趋势</h2>
+    <h2>📈 {{ (i18n or {}).get('db_js_062', "趋势") }}</h2>
     <div style="display:flex; gap:24px; flex-wrap:wrap;">
       <div>
-        <div class="muted" style="font-size:12px; margin-bottom:4px;">AI 发送量（按日）<span id="anomAI"></span></div>
+        <div class="muted" style="font-size:12px; margin-bottom:4px;">AI {{ (i18n or {}).get('ov2_s003', "发送量（按日）") }}<span id="anomAI"></span></div>
         <div id="sparkAI"></div>
       </div>
       <div>
-        <div class="muted" style="font-size:12px; margin-bottom:4px;">处置量（按时段）<span id="anomRel"></span></div>
+        <div class="muted" style="font-size:12px; margin-bottom:4px;">{{ (i18n or {}).get('ov2_s004', "处置量（按时段）") }}<span id="anomRel"></span></div>
         <div id="sparkRel"></div>
       </div>
     </div>
   </section>
 
   <section>
-    <h2>📰 运营周报（近 7 天）</h2>
-    <div id="opsReport"><div class="empty">加载中…</div></div>
+    <h2>📰 {{ (i18n or {}).get('ov2_s005', "运营周报（近 7 天）") }}</h2>
+    <div id="opsReport"><div class="empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
   </section>
 
   <section>
-    <h2>💸 计费异常</h2>
-    <div id="billingAnomalies"><div class="empty">加载中…</div></div>
+    <h2>💸 {{ (i18n or {}).get('ov2_s006', "计费异常") }}</h2>
+    <div id="billingAnomalies"><div class="empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
   </section>
 
   <section>
-    <h2>🔊 语音合成（TTS 成本 / 引擎 / 缓存）</h2>
+    <h2>🔊 {{ (i18n or {}).get('ov2_s007', "语音合成（TTS 成本 / 引擎 / 缓存）") }}</h2>
     <div class="grid" id="ttsKpis"></div>
     <div id="ttsTrend" style="margin-bottom:12px;"></div>
-    <div id="ttsProviders"><div class="empty">加载中…</div></div>
+    <div id="ttsProviders"><div class="empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
   </section>
 
   <section>
-    <h2>🌐 翻译引擎（置信度 / 智能切换 / 降级）</h2>
+    <h2>🛡️ {{ (i18n or {}).get('ov2_s_safe_title', "AI 安全 / 质量（草稿采纳 · 风控拦截）") }}<span class="win-seg" id="aiSafetyWin"><button data-d="1" onclick="setAiSafetyDays(1)">1d</button><button data-d="7" class="active" onclick="setAiSafetyDays(7)">7d</button><button data-d="30" onclick="setAiSafetyDays(30)">30d</button></span><span id="aiSafetyAlert" onclick="jumpToAiQualityIncidents()" title="{{ (i18n or {}).get('ov2_s_safe_alert_hint', '跳到事件流处理') }}" style="display:none;margin-left:10px;font-size:12px;cursor:pointer;"></span></h2>
+    <div class="grid" id="aiSafetyKpis"></div>
+    <div id="aiSafetyTrend" style="margin:10px 0;"></div>
+    <div id="aiSafetyBlocked" style="display:none;margin:6px 0;"></div>
+    <div id="aiSafetyNote"><div class="empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
+    <div style="margin-top:8px;">
+      <button onclick="loadAiQualityCalibrate()" style="font-size:11px;padding:3px 10px;">🎚️ {{ (i18n or {}).get('ov2_s_safe_cal_btn', "按真实数据校准阈值") }}</button>
+    </div>
+    <div id="aiSafetyCal" style="display:none;margin-top:6px;"></div>
+  </section>
+
+  <section>
+    <h2>📥 {{ (i18n or {}).get('ov2_s_backlog', "草稿积压治理（SLA 越线 / 陈旧静默 / 自动作废）") }}</h2>
+    <div class="grid" id="slaBacklogKpis"></div>
+    <div id="slaBacklogDetail"><div class="empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
+    <div style="margin-top:8px;">
+      <button id="slaBacklogCleanBtn" onclick="cleanStaleBacklog()" style="font-size:11px;padding:3px 10px;">🧹 {{ (i18n or {}).get('ov2_js_bk_clean_btn', "清理陈旧群积压") }}</button>
+      <span id="slaBacklogCleanMsg" class="muted" style="font-size:12px;margin-left:8px;"></span>
+    </div>
+  </section>
+
+  <section>
+    <h2>🌐 {{ (i18n or {}).get('ov2_s008', "翻译引擎（置信度 / 智能切换 / 降级）") }}</h2>
     <div class="grid" id="xlateKpis"></div>
     <div id="xlateTrend" style="margin:10px 0;"></div>
-    <div id="xlateProviders"><div class="empty">加载中…</div></div>
+    <div id="xlateProviders"><div class="empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
   </section>
 
   <section>
-    <h2>🚨 运维事件（health_alert 闭环）</h2>
+    <h2>🎙️ {{ (i18n or {}).get('ov2_s009', "语音合成语言（合成语言随文本纠正 · 防中文声纹念英文）") }}</h2>
+    <div class="grid" id="voiceLangKpis"></div>
+    <div id="voiceLangByLang"><div class="empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
+  </section>
+
+  <section>
+    <h2>🧬 {{ (i18n or {}).get('ov2_s_localtts', "本机情感克隆 IndexTTS2（随主程序启停）") }}</h2>
+    <div class="grid" id="localTtsKpis"></div>
+    <div id="localTtsDetail" style="margin-top:8px;">
+      <label class="f-check-row" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+        <input type="checkbox" id="localTtsEnabled" onchange="toggleLocalTts(this.checked)">
+        {{ (i18n or {}).get('ov2_s_localtts_toggle', "随主程序自动拉起/关闭 IndexTTS2（coupled 模式）") }}
+      </label>
+      <div class="muted" id="localTtsHint" style="font-size:12px;margin-top:6px;">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>📞 {{ (i18n or {}).get('ov2_s_rtvoice', "实时语音通话（接通率 / 时长 / 挂断原因 / 主机健康）") }}<span id="rtVoiceAlert" onclick="jumpToRealtimeVoiceIncidents()" title="{{ (i18n or {}).get('ov2_rtv_alert_hint', '跳到事件流处理') }}" style="display:none;margin-left:10px;font-size:12px;cursor:pointer;"></span></h2>
+    <div class="grid" id="rtVoiceKpis"></div>
+    <div id="rtVoiceDetail"><div class="empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
+    <div id="rtVoiceEngine" style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line);"></div>
+    <div id="rtVoiceCal" style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line);display:none;"></div>
+    <div id="rtVoiceTrend" style="margin-top:8px;"></div>
+  </section>
+
+  <section id="incidentsSection">
+    <h2>🚨 {{ (i18n or {}).get('ov2_s010', "运维事件") }} (health_alert {{ (i18n or {}).get('ov2_s011', "闭环)") }}</h2>
     <div style="display:flex; gap:10px; margin-bottom:10px; align-items:center;">
       <select id="fltKind" onchange="loadIncidents()" style="background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:4px 8px;">
-        <option value="">全部类型</option>
-        <option value="health">🩺 健康</option>
-        <option value="billing">💸 计费</option>
-        <option value="draft_quality">📉 草稿质量</option>
-        <option value="memory_key_drift">🧭 记忆漂移</option>
+        <option value="">{{ (i18n or {}).get('ov2_s012', "全部类型") }}</option>
+        <option value="health">🩺 {{ (i18n or {}).get('db_js_018', "健康") }}</option>
+        <option value="billing">💸 {{ (i18n or {}).get('ov2_s013', "计费") }}</option>
+        <option value="draft_quality">📉 {{ (i18n or {}).get('ov2_s014', "草稿质量") }}</option>
+        <option value="ai_quality">🛡️ {{ (i18n or {}).get('ov2_s_ai_quality', "AI 质量") }}</option>
+        <option value="realtime_voice">📞 {{ (i18n or {}).get('ov2_s_rtvoice_alert', "实时语音") }}</option>
+        <option value="memory_key_drift">🧭 {{ (i18n or {}).get('ov2_s015', "记忆漂移") }}</option>
       </select>
       <select id="fltStatus" onchange="loadIncidents()" style="background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:4px 8px;">
-        <option value="">全部状态</option>
+        <option value="">{{ (i18n or {}).get('psn_all_status', "全部状态") }}</option>
         <option value="open">open</option>
         <option value="acked">acked</option>
         <option value="resolved">resolved</option>
       </select>
-      <button id="recheckBtn" style="display:none;margin-left:auto;" onclick="recheckHealth()">🔄 立即重新巡检</button>
+      <button id="recheckBtn" style="display:none;margin-left:auto;" onclick="recheckHealth()">🔄 {{ (i18n or {}).get('ov2_s016', "立即重新巡检") }}</button>
     </div>
-    <div id="incidents"><div class="empty">加载中…</div></div>
+    <div id="incidents"><div class="empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
     <div style="margin-top:10px;">
-      <button id="loadMoreBtn" style="display:none;" onclick="loadMoreIncidents()">加载更多历史</button>
+      <button id="loadMoreBtn" style="display:none;" onclick="loadMoreIncidents()">{{ (i18n or {}).get('ov2_s017', "加载更多历史") }}</button>
     </div>
   </section>
 </div>
@@ -116,15 +171,15 @@
 var CAN_MANAGE_OPS = {{ 'true' if can_manage_ops else 'false' }};
 function fmt(v, suffix){ if(v===null||v===undefined||v==='') return '—'; return v + (suffix||''); }
 function dot(light){ var c=({green:'green',yellow:'yellow',red:'red'})[light]||'unknown'; return '<span class="light-dot '+c+'"></span>'; }
-function tsfmt(ts){ if(!ts) return '—'; try{ return new Date(ts*1000).toLocaleString(); }catch(e){ return '—'; } }
+function tsfmt(ts){ if(!ts) return '—'; try{ return window.wsFmtDateTime(ts); }catch(e){ return '—'; } }
 
 // 趋势异动徽章：up=橙、down=蓝。
 function anomBadge(a){
   if(!a) return '';
   var up = a.direction === 'up';
-  var pct = (a.delta_pct === null || a.delta_pct === undefined) ? '新增' : (Math.abs(a.delta_pct)+'%');
+  var pct = (a.delta_pct === null || a.delta_pct === undefined) ? window.T('kb_js_162') : (Math.abs(a.delta_pct)+'%');
   var color = up ? 'var(--yellow)' : 'var(--accent)';
-  return ' <span style="color:'+color+'; font-weight:600;">'+(up?'↑':'↓')+' '+pct+' 异动</span>';
+  return ' <span style="color:'+color+'; font-weight:600;">'+(up?'↑':'↓')+' '+pct+' '+window.T('ov2_js001')+'</span>';
 }
 
 // 纯 SVG 迷你折线（无依赖）。values: number[]; opts.labels: 各点标签（hover 提示）。
@@ -133,7 +188,7 @@ function sparkline(values, opts){
   var w = opts.w || 220, h = opts.h || 44, pad = 4, color = opts.color || '#388bfd';
   var labels = opts.labels || [];
   var vals = (values || []).map(function(v){ return Number(v) || 0; });
-  if(vals.length < 2){ return '<div class="muted" style="font-size:12px;">数据不足</div>'; }
+  if(vals.length < 2){ return '<div class="muted" style="font-size:12px;">'+window.T('ov2_js002')+'</div>'; }
   var max = Math.max.apply(null, vals), min = Math.min.apply(null, vals);
   var span = (max - min) || 1;
   var n = vals.length;
@@ -145,7 +200,7 @@ function sparkline(values, opts){
   var poly = xy.map(function(p){ return p[0].toFixed(1)+','+p[1].toFixed(1); }).join(' ');
   // 逐点透明 hover 圆 + <title>：鼠标悬停显示「标签: 数值」。
   var hovers = xy.map(function(p, i){
-    var lbl = labels[i] != null ? (labels[i] + '：') : '';
+    var lbl = labels[i] != null ? (labels[i] + ': ') : '';
     return '<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="6" '+
       'fill="transparent" style="cursor:pointer;"><title>'+lbl+vals[i]+'</title></circle>';
   }).join('');
@@ -154,7 +209,7 @@ function sparkline(values, opts){
     '<polyline fill="none" stroke="'+color+'" stroke-width="1.8" points="'+poly+'"/>' +
     '<circle cx="'+last[0].toFixed(1)+'" cy="'+last[1].toFixed(1)+'" r="2.6" fill="'+color+'"/>' +
     hovers +
-    '</svg> <span class="muted" style="font-size:12px;">峰 '+max+'</span>';
+    '</svg> <span class="muted" style="font-size:12px;">'+window.T('ov2_js003')+' '+max+'</span>';
 }
 
 async function loadOverview(){
@@ -163,20 +218,20 @@ async function loadOverview(){
     const d = await r.json();
     const k = d.kpis || {};
     document.getElementById('overallDot').className = 'light-dot ' + (({green:'green',yellow:'yellow',red:'red'})[d.overall_light]||'unknown');
-    document.getElementById('updatedAt').textContent = '更新于 ' + tsfmt(d.ts);
+    document.getElementById('updatedAt').textContent = window.T('db_js_079')+' ' + tsfmt(d.ts);
 
     const cards = [
-      ['总体健康', '<span class="val">'+dot(k.health_light)+'</span>', '可靠性 '+dot(k.reliability_light)+' 评分 '+fmt(k.reliability_score)],
-      ['转化数', '<span class="val">'+fmt(k.conversions)+'</span>', '线索 '+fmt(k.leads)+' · 转化率 '+fmt(k.conversion_rate)],
-      ['AI 占比', '<span class="val">'+fmt(k.ai_share_pct,'%')+'</span>', '节省 '+fmt(k.saved_hours)+' 小时'],
-      ['节省金额', '<span class="val">'+fmt(k.saved_money)+'</span>', '自动化价值'],
-      ['本期计费', '<span class="val">'+fmt(k.billing_total)+'</span>', fmt(k.billing_currency,'')+' · 套餐 '+fmt(k.plan)],
-      ['超席位', '<span class="val">'+fmt(k.over_seats)+'</span>', '计费异常 '+fmt(k.billing_anomaly_count)+' 项'],
-      ['未关闭事件', '<span class="val">'+fmt(k.open_incidents)+'</span>', '近期告警 '+fmt(k.open_alerts)],
+      [window.T('ov2_js004'), '<span class="val">'+dot(k.health_light)+'</span>', window.T('ov2_js005')+' '+dot(k.reliability_light)+' '+window.T('ov2_js006')+' '+fmt(k.reliability_score)],
+      [window.T('ov2_js007'), '<span class="val">'+fmt(k.conversions)+'</span>', window.T('ov2_js008')+' '+fmt(k.leads)+' · '+window.T('mo_s027')+' '+fmt(k.conversion_rate)],
+      ['AI '+window.T('ap_s009'), '<span class="val">'+fmt(k.ai_share_pct,'%')+'</span>', window.T('ov2_js009')+' '+fmt(k.saved_hours)+' '+window.T('msg_js_009')],
+      [window.T('ov2_js010'), '<span class="val">'+fmt(k.saved_money)+'</span>', window.T('ov2_js011')],
+      [window.T('ov2_js012'), '<span class="val">'+fmt(k.billing_total)+'</span>', fmt(k.billing_currency,'')+' · '+window.T('ov2_js013')+' '+fmt(k.plan)],
+      [window.T('ov2_js014'), '<span class="val">'+fmt(k.over_seats)+'</span>', window.T('ov2_s006')+' '+fmt(k.billing_anomaly_count)+' '+window.T('msg_js_296')],
+      [window.T('ov2_js015'), '<span class="val">'+fmt(k.open_incidents)+'</span>', window.T('db_js_024')+' '+fmt(k.open_alerts)],
     ];
     if(k.companion_config_light){
-      cards.push(['陪伴配置体检', '<span class="val">'+dot(k.companion_config_light)+'</span>',
-                  '错配 '+fmt(k.companion_config_errors)+' · 警示 '+fmt(k.companion_config_warnings)]);
+      cards.push([window.T('ov2_js016'), '<span class="val">'+dot(k.companion_config_light)+'</span>',
+                  window.T('ov2_js017')+' '+fmt(k.companion_config_errors)+' · '+window.T('ov2_js018')+' '+fmt(k.companion_config_warnings)]);
     }
     document.getElementById('kpis').innerHTML = cards.map(function(c){
       return '<div class="kpi"><div class="label">'+c[0]+'</div><div class="val">'+c[1]+'</div><div class="sub">'+c[2]+'</div></div>';
@@ -191,7 +246,7 @@ async function loadOverview(){
     document.getElementById('sparkRel').innerHTML = sparkline(
       relTrend.map(function(p){ return p.total; }),
       {color:'#388bfd', labels: relTrend.map(function(p){
-        try{ return new Date(p.ts*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); }catch(e){ return ''; }
+        try{ return window.wsFmtTime(p.ts, {hour:'2-digit',minute:'2-digit'}); }catch(e){ return ''; }
       })});
     var anom = d.anomalies || {};
     document.getElementById('anomAI').innerHTML = anomBadge(anom.ai_sent);
@@ -199,12 +254,12 @@ async function loadOverview(){
 
     const an = d.billing_anomalies || [];
     document.getElementById('billingAnomalies').innerHTML = an.length ? (
-      '<table><tr><th>级别</th><th>说明</th></tr>' + an.map(function(a){
+      '<table><tr><th>'+window.T('ov2_js019')+'</th><th>'+window.T('ov2_js020')+'</th></tr>' + an.map(function(a){
         return '<tr><td><span class="badge '+a.severity+'">'+a.severity+'</span></td><td>'+a.message+'</td></tr>';
       }).join('') + '</table>'
-    ) : '<div class="empty">无计费异常 ✓</div>';
+    ) : '<div class="empty">'+window.T('ov2_js021')+' ✓</div>';
   }catch(e){
-    document.getElementById('kpis').innerHTML = '<div class="empty">加载失败：'+e+'</div>';
+    document.getElementById('kpis').innerHTML = '<div class="empty">'+window.T('ln_js_033')+e+'</div>';
   }
 }
 
@@ -213,16 +268,16 @@ var _incCursor = null;
 var _incPageSize = 30;
 
 function incidentRow(it){
-  var problems = (it.problems||[]).map(function(p){return (p.name||p.id)+'：'+(p.detail||'');}).join('；') || '—';
+    var problems = (it.problems||[]).map(function(p){return (p.name||p.id)+': '+(p.detail||'');}).join('; ') || '—';
   var adviceHtml = (it.advice||[]).map(function(a){
-    var link = a.link ? ' <a href="'+a.link+'" target="_blank">去处理 →</a>' : '';
+    var link = a.link ? ' <a href="'+a.link+'" target="_blank">'+window.T('dash.ob.go')+' →</a>' : '';
     var fix = (a.fix && CAN_MANAGE_OPS)
       ? ' <button style="padding:2px 8px;" onclick="runFix(\''+a.fix.key+'\',\''+a.fix.target+'\')">'+a.fix.label+'</button>'
       : '';
     return '<div class="muted" style="font-size:12px;margin-top:3px;">💡 '+a.action+link+fix+'</div>';
   }).join('');
   var canAck = it.status !== 'resolved' && CAN_MANAGE_OPS;
-  var kindLabel = ({billing:'💸 计费', draft_quality:'📉 草稿质量', memory_key_drift:'🧭 记忆漂移', health:'🩺 健康'})[it.kind] || '🩺 健康';
+  var kindLabel = ({billing:'💸 '+window.T('ov2_s013'), draft_quality:'📉 '+window.T('ov2_s014'), ai_quality:'🛡️ '+window.T('ov2_s_ai_quality'), realtime_voice:'📞 '+window.T('ov2_s_rtvoice_alert'), memory_key_drift:'🧭 '+window.T('ov2_s015'), health:'🩺 '+window.T('db_js_018')})[it.kind] || '🩺 '+window.T('db_js_018');
   return '<tr>'+
     '<td>'+kindLabel+'</td>'+
     '<td><span class="badge '+it.status+'">'+it.status+'</span></td>'+
@@ -230,7 +285,7 @@ function incidentRow(it){
     '<td>'+problems+adviceHtml+'</td>'+
     '<td class="muted">'+tsfmt(it.opened_ts)+'</td>'+
     '<td>'+(it.assigned_to||'—')+'</td>'+
-    '<td>'+(canAck?'<button onclick="ackIncident('+it.id+')">确认</button>':'')+'</td>'+
+    '<td>'+(canAck?'<button onclick="ackIncident('+it.id+')">'+window.T('rpa_fn_ack')+'</button>':'')+'</td>'+
   '</tr>';
 }
 
@@ -252,13 +307,13 @@ async function loadIncidents(){
     _suggestedAssignee = (sug && sug.agent_id) ? String(sug.agent_id) : '';
     _incCursor = d.next_cursor || null;
     const items = d.incidents || [];
-    if(!items.length){ document.getElementById('incidents').innerHTML = '<div class="empty">无运维事件 ✓</div>'; updateMoreBtn(); return; }
+    if(!items.length){ document.getElementById('incidents').innerHTML = '<div class="empty">'+window.T('ov2_js022')+' ✓</div>'; updateMoreBtn(); return; }
     document.getElementById('incidents').innerHTML =
-      '<table id="incTable"><tr><th>类型</th><th>状态</th><th>灯</th><th>问题</th><th>开始</th><th>处理人</th><th></th></tr>' +
+      '<table id="incTable"><tr><th>'+window.T('msg_js_1042')+'</th><th>'+window.T('ov_js_th_status')+'</th><th>'+window.T('ov2_js023')+'</th><th>'+window.T('ov2_js024')+'</th><th>'+window.T('ov2_js025')+'</th><th>'+window.T('ov2_js026')+'</th><th></th></tr>' +
       items.map(incidentRow).join('') + '</table>';
     updateMoreBtn();
   }catch(e){
-    document.getElementById('incidents').innerHTML = '<div class="empty">加载失败：'+e+'</div>';
+    document.getElementById('incidents').innerHTML = '<div class="empty">'+window.T('ln_js_033')+e+'</div>';
   }
 }
 
@@ -285,37 +340,37 @@ function fixEndpoint(key, target){
 }
 
 async function runFix(key, target){
-  if(!confirm('确认对「'+target+'」执行一键动作：'+key+'？')) return;
+  if(!confirm(window.T('ov2_js027')+' "'+target+'" '+window.T('ov2_js028')+key+'?')) return;
   try{
     var r = await fetch(fixEndpoint(key, target), {
       method:'POST', credentials:'same-origin',
       headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken()},
     });
     var d = await r.json();
-    if(!d.ok){ alert('动作失败：'+(d.error||'未知')); return; }
+    if(!d.ok){ alert(window.T('ov2_js029')+(d.error||window.T('rpa_unknown'))); return; }
     if(key === 'migrate_memory_keys'){
-      alert('已并入 canonical：' + (d.merged_keys||0) + ' 个 key、' + (d.moved_rows||0) + ' 条事实');
+      alert(window.T('ov2_js030') + (d.merged_keys||0) + ' '+window.T('ov2_js031') + (d.moved_rows||0) + ' '+window.T('ov2_js032'));
     }
     // 动作后立即重巡，让相关事件自动恢复。
     await recheckHealth();
-  }catch(e){ alert('动作失败：'+e); }
+  }catch(e){ alert(window.T('ov2_js029')+e); }
 }
 
 async function recheckHealth(){
   var btn = document.getElementById('recheckBtn');
-  if(btn){ btn.disabled = true; btn.textContent = '巡检中…'; }
+  if(btn){ btn.disabled = true; btn.textContent = window.T('ov2_js033'); }
   try{
     await fetch('/api/admin/health/recheck', {
       method:'POST', credentials:'same-origin',
       headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken()},
     });
   }catch(e){ /* 静默 */ }
-  if(btn){ btn.disabled = false; btn.textContent = '🔄 立即重新巡检'; }
+  if(btn){ btn.disabled = false; btn.textContent = '🔄 '+window.T('ov2_s016'); }
   loadOverview(); loadIncidents();
 }
 
 async function ackIncident(id){
-  var who = prompt('指派给（坐席/主管 ID，可留空仅确认）：', _suggestedAssignee) || '';
+  var who = prompt(window.T('ov2_js034'), _suggestedAssignee) || '';
   var csrf=(document.cookie.match(/csrf_token=([^;]+)/)||[])[1]||'';
   try{
     await fetch('/api/admin/incidents/'+id+'/ack', {
@@ -324,7 +379,7 @@ async function ackIncident(id){
       body: JSON.stringify({assigned_to: who}),
     });
     loadIncidents(); loadOverview();
-  }catch(e){ alert('操作失败：'+e); }
+  }catch(e){ alert(window.T('ov_js_op_fail_e')+e); }
 }
 
 async function loadReport(){
@@ -333,13 +388,13 @@ async function loadReport(){
     const d = await r.json();
     var lines = (d.headline||[]).map(function(s){ return '<li>'+s+'</li>'; }).join('');
     var inc = d.incidents||{};
-    var byKind = Object.keys(inc.by_kind||{}).map(function(k){ return k+': '+inc.by_kind[k]; }).join('，') || '无';
+    var byKind = Object.keys(inc.by_kind||{}).map(function(k){ return k+': '+inc.by_kind[k]; }).join(', ') || window.T('dash.none');
     document.getElementById('opsReport').innerHTML =
       (lines ? '<ul style="margin:0 0 10px 18px;">'+lines+'</ul>' : '') +
-      '<div class="muted" style="font-size:13px;">事件分布：'+byKind+
-      ' · 平均解决：'+(inc.mttr_hours!=null?inc.mttr_hours+'h':'—')+'</div>';
+      '<div class="muted" style="font-size:13px;">'+window.T('ov2_js035')+byKind+
+      ' · '+window.T('ov2_js036')+(inc.mttr_hours!=null?inc.mttr_hours+'h':'—')+'</div>';
   }catch(e){
-    document.getElementById('opsReport').innerHTML = '<div class="empty">加载失败：'+e+'</div>';
+    document.getElementById('opsReport').innerHTML = '<div class="empty">'+window.T('ln_js_033')+e+'</div>';
   }
 }
 
@@ -351,24 +406,24 @@ async function loadTTS(){
     const r = await fetch('/api/workspace/metrics', {credentials:'same-origin'});
     if(r.status === 403){
       kp.innerHTML = '';
-      pv.innerHTML = '<div class="empty">指标查看需要主管权限</div>';
+      pv.innerHTML = '<div class="empty">'+window.T('ov2_js037')+'</div>';
       return;
     }
     const d = await r.json();
     var tts = (d.providers && d.providers.tts) || null;
     if(!tts || !(tts.rows||[]).length){
       kp.innerHTML = '';
-      pv.innerHTML = '<div class="empty">暂无语音合成数据（开启语音回复后累计）</div>';
+      pv.innerHTML = '<div class="empty">'+window.T('ov2_js038')+'</div>';
       return;
     }
     var hitPct = ((Number(tts.cache_hit_rate)||0)*100).toFixed(1);
     var cost = (Number(tts.total_cost_usd)||0).toFixed(4);
     var kpis = [
-      {label:'今日累计花费', value:'$'+cost},
-      {label:'合成次数', value:fmt(tts.total_attempts)},
-      {label:'缓存命中率', value:hitPct+'%'},
-      {label:'缓存命中次数', value:fmt(tts.cache_hits)},
-      {label:'兜底次数', value:fmt(tts.fallbacks)},
+      {label:window.T('ov2_js039'), value:'$'+cost},
+      {label:window.T('ov2_js040'), value:fmt(tts.total_attempts)},
+      {label:window.T('ov2_js041'), value:hitPct+'%'},
+      {label:window.T('ov2_js042'), value:fmt(tts.cache_hits)},
+      {label:window.T('ov2_js043'), value:fmt(tts.fallbacks)},
     ];
     kp.innerHTML = kpis.map(function(c){
       return '<div class="kpi"><div class="muted" style="font-size:12px;">'+c.label+
@@ -379,8 +434,8 @@ async function loadTTS(){
       return '<tr><td>'+row.provider+'</td><td>'+row.calls+'</td><td>'+sr+'%</td><td>'+
         row.avg_latency_ms+' ms</td><td>$'+(Number(row.cost_usd)||0).toFixed(4)+'</td></tr>';
     }).join('');
-    var html = '<table><tr><th>引擎</th><th>调用</th><th>成功率</th><th>平均延迟</th>'+
-      '<th>成本</th></tr>'+rows+'</table>';
+    var html = '<table><tr><th>'+window.T('tg_s067')+'</th><th>'+window.T('kb_js_120')+'</th><th>'+window.T('ov_kpi_rate')+'</th><th>'+window.T('ap_s042')+'</th>'+
+      '<th>'+window.T('msg_js_1220')+'</th></tr>'+rows+'</table>';
     // 情绪分布 chips（非中性合成的情感面貌；空=情感层未开或仅 neutral）
     var labels = tts.labels || {};
     var emoKeys = Object.keys(labels);
@@ -392,12 +447,12 @@ async function loadTTS(){
           'var(--line);border-radius:12px;padding:2px 10px;margin:2px 4px 2px 0;font-size:12px;">'+
           k+' · '+labels[k]+' ('+pct+'%)</span>';
       }).join('');
-      html += '<div class="muted" style="font-size:12px;margin:10px 0 4px;">情绪分布'+
-        '（仅统计非中性合成）</div><div>'+chips+'</div>';
+      html += '<div class="muted" style="font-size:12px;margin:10px 0 4px;">'+window.T('ov2_js044')+
+        ' ('+window.T('ov2_js045')+'</div><div>'+chips+'</div>';
     }
     pv.innerHTML = html;
   }catch(e){
-    document.getElementById('ttsProviders').innerHTML = '<div class="empty">加载失败：'+e+'</div>';
+    document.getElementById('ttsProviders').innerHTML = '<div class="empty">'+window.T('ln_js_033')+e+'</div>';
   }
 }
 
@@ -410,24 +465,24 @@ async function loadTTSTrend(){
     const d = await r.json();
     if(!d.enabled){
       el.innerHTML = '<div class="muted" style="font-size:12px;">'+
-        '近 7 天花费曲线未开启（voice_routing.cost_log.enabled=true 后累计）</div>';
+        window.T('ov2_js046')+' (voice_routing.cost_log.enabled=true '+window.T('ov2_js047')+'</div>';
       return;
     }
     var days = d.days || [];
     if(days.length < 2){
-      el.innerHTML = '<div class="muted" style="font-size:12px;">趋势数据累计中…</div>';
+      el.innerHTML = '<div class="muted" style="font-size:12px;">'+window.T('ov2_js048')+'</div>';
       return;
     }
     var costs = days.map(function(x){ return Number(x.cost_usd)||0; });
     var labels = days.map(function(x){
-      return (x.day||'')+'：$'+(Number(x.cost_usd)||0).toFixed(4)+
-        ' · '+(x.calls||0)+'次 · 缓存'+(x.cache_hits||0);
+      return (x.day||'')+': $'+(Number(x.cost_usd)||0).toFixed(4)+
+        ' · '+(x.calls||0)+window.T('ov2_js049')+(x.cache_hits||0);
     });
     el.innerHTML = '<div class="muted" style="font-size:12px;margin-bottom:4px;">'+
-      '近 7 天每日花费（USD）</div>'+
+      window.T('ov2_js050')+'</div>'+
       sparkline(costs, {labels:labels, color:'#3fb950', w:300});
   }catch(e){
-    el.innerHTML = '<div class="muted" style="font-size:12px;">趋势加载失败：'+e+'</div>';
+    el.innerHTML = '<div class="muted" style="font-size:12px;">'+window.T('ov2_js051')+e+'</div>';
   }
 }
 
@@ -440,27 +495,390 @@ async function loadXlateTrend(){
     const d = await r.json();
     if(!d.enabled){
       el.innerHTML = '<div class="muted" style="font-size:12px;">'+
-        '近 7 天低置信/切换趋势未开启（translation.engines.confidence_switch.trend_log=true 后累计）</div>';
+        window.T('ov2_js052')+' (translation.engines.confidence_switch.trend_log=true '+window.T('ov2_js047')+'</div>';
       return;
     }
     var days = d.days || [];
     if(days.length < 2){
-      el.innerHTML = '<div class="muted" style="font-size:12px;">趋势数据累计中…</div>';
+      el.innerHTML = '<div class="muted" style="font-size:12px;">'+window.T('ov2_js048')+'</div>';
       return;
     }
     var lowRate = days.map(function(x){ return (Number(x.low_conf_rate)||0)*100; });
     var swRate = days.map(function(x){ return (Number(x.switch_rate)||0)*100; });
     var labels = days.map(function(x){
-      return (x.day||'')+'：低置信 '+((Number(x.low_conf_rate)||0)*100).toFixed(1)+'%'+
-        ' · 切换 '+((Number(x.switch_rate)||0)*100).toFixed(1)+'%'+
-        ' · '+(x.attempts||0)+'次';
+      return (x.day||'')+': '+window.T('ov2_js053')+' '+((Number(x.low_conf_rate)||0)*100).toFixed(1)+'%'+
+        ' · '+window.T('ov2_js054')+' '+((Number(x.switch_rate)||0)*100).toFixed(1)+'%'+
+        ' · '+(x.attempts||0)+window.T('kb_js_174');
     });
     el.innerHTML = '<div class="muted" style="font-size:12px;margin-bottom:4px;">'+
-      '近 7 天低置信率（%，红）/ 切换率（%，蓝）</div>'+
+      window.T('ov2_js055')+'</div>'+
       sparkline(lowRate, {labels:labels, color:'#f85149', w:300})+
       ' '+sparkline(swRate, {labels:labels, color:'#58a6ff', w:300});
   }catch(e){
-    el.innerHTML = '<div class="muted" style="font-size:12px;">趋势加载失败：'+e+'</div>';
+    el.innerHTML = '<div class="muted" style="font-size:12px;">'+window.T('ov2_js051')+e+'</div>';
+  }
+}
+
+// 轻量 HTML 转义（本卡渲染客户会话名/拦截原因等用户可控串，防 XSS）。
+function _esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+// 「风控拦截」明细展开/收起。
+function _toggleBlockedDetail(){
+  var el=document.getElementById('aiSafetyBlocked'); if(!el) return;
+  el.style.display = (el.style.display==='none'||!el.style.display) ? 'block' : 'none';
+}
+// E3：下钻点击遥测（best-effort，不阻断新开工作台；keepalive 保证新标签打开后仍送达）。
+function _logDrill(el){
+  try{
+    var cid=(el && el.dataset) ? (el.dataset.cid||'') : '';
+    fetch('/api/admin/ui-event', {method:'POST', credentials:'same-origin', keepalive:true,
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({event:'deep_link_opened', source:'ai_safety', conversation_id:cid})});
+  }catch(_){}
+}
+
+// 🛡️ AI 安全/质量卡片：读 /api/admin/ai-safety-overview（复用 draft_audit_log 处置聚合）。
+// 含环比上一周期（delta chip 绿=向好/红=变差）+ 采纳率健康灯 + 时间窗内趋势 sparkline +
+// 「风控拦截」明细可点开下钻到工作台（?conv= 深链）。时间窗 1d/7d/30d 可切（后端 days 参数）。
+var _aiSafetyDays = 7;
+function setAiSafetyDays(n){
+  _aiSafetyDays = Number(n)||7;
+  var seg=document.getElementById('aiSafetyWin');
+  if(seg){ Array.prototype.forEach.call(seg.querySelectorAll('button'), function(b){ b.classList.toggle('active', Number(b.dataset.d)===_aiSafetyDays); }); }
+  loadAiSafety();
+}
+async function loadAiSafety(){
+  var kp = document.getElementById('aiSafetyKpis');
+  var tr = document.getElementById('aiSafetyTrend');
+  var nt = document.getElementById('aiSafetyNote');
+  if(!kp || !nt) return;
+  refreshAiQualityAlertBadge();  // F2a：卡头一眼看有无未处理 AI 质量告警（独立于本卡启用状态）
+  try{
+    const r = await fetch('/api/admin/ai-safety-overview?days='+_aiSafetyDays, {credentials:'same-origin'});
+    if(r.status === 403){ kp.innerHTML=''; if(tr) tr.innerHTML=''; nt.innerHTML='<div class="empty">'+window.T('ov2_js037')+'</div>'; return; }
+    const d = await r.json();
+    if(!d || !d.ok || d.enabled===false){ kp.innerHTML=''; if(tr) tr.innerHTML=''; nt.innerHTML='<div class="empty">'+window.T('ov2_js_safe_empty')+'</div>'; return; }
+    var reviewed = Number(d.reviewed)||0;
+    var dl = d.delta || {};
+    var pct = function(x){ return (Math.round((Number(x)||0)*1000)/10).toFixed(1)+'%'; };
+    var wow = window.T('ov2_js_safe_wow');
+    // 环比 chip：dfmt=pp(百分点/rate) 或 int(计数)；dir=up(涨为好)/down(跌为好)/neutral。
+    function chip(v, dfmt, dir){
+      var n = Number(v)||0;
+      if(Math.abs(n) < (dfmt==='pp'?0.001:0.5)) return '';
+      var disp = dfmt==='pp' ? (Math.abs(n)*100).toFixed(1)+'pp' : fmt(Math.round(Math.abs(n)));
+      var up = n > 0, good = dir==='neutral' ? null : ((dir==='up') ? up : !up);
+      var col = good===null ? '' : (good ? '#3fb950' : '#f85149');
+      return '<span title="'+wow+'" style="font-size:11px;margin-left:6px;'+(col?'color:'+col+';':'')+'">'+(up?'▲':'▼')+disp+'</span>';
+    }
+    // 采纳率健康灯：≥60% 绿 / 40–60% 黄 / <40% 红 / 无样本 灰。
+    var ar = Number(d.adopt_rate)||0;
+    var lightCol = reviewed<=0 ? '#8b949e' : (ar>=0.6?'#3fb950':(ar>=0.4?'#d29922':'#f85149'));
+    var dot = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+lightCol+';margin-right:5px;"></span>';
+    var bt = d.blocked_top || [];
+    var kpis = [
+      {label:window.T('ov2_js_safe_autosend'), val:fmt(Number(d.autosend)||0), chip:chip(dl.autosend,'int','neutral')},
+      {label:window.T('ov2_js_safe_adopt'), val:dot+pct(d.adopt_rate), chip:chip(dl.adopt_rate,'pp','up')},
+      {label:window.T('ov2_js_safe_edit'), val:pct(d.edit_rate), chip:chip(dl.edit_rate,'pp','down')},
+      {label:window.T('ov2_js_safe_reject'), val:pct(d.reject_rate), chip:chip(dl.reject_rate,'pp','down')},
+      {label:window.T('ov2_js_safe_blocked'), val:fmt(Number(d.blocked)||0)+(bt.length?' ▸':''), chip:chip(dl.blocked,'int','down'),
+       click:bt.length?'_toggleBlockedDetail()':'', tip:bt.length?window.T('ov2_js_safe_blocked_more'):''},
+      {label:window.T('ov2_js_safe_reviewed'), val:fmt(reviewed), chip:chip(dl.reviewed,'int','neutral')},
+    ];
+    kp.innerHTML = kpis.map(function(c){
+      var attr = c.click ? (' onclick="'+c.click+'" title="'+c.tip+'" style="cursor:pointer;"') : '';
+      return '<div class="kpi"'+attr+'><div class="muted" style="font-size:12px;">'+c.label+
+        '</div><div style="font-size:20px;font-weight:600;margin-top:4px;">'+c.val+c.chip+'</div></div>';
+    }).join('');
+    // 「风控拦截」明细：Top-N 被拦会话 → 深链 /workspace?conv=<id> 直达处理（默认折叠，点数字展开）。
+    var bd = document.getElementById('aiSafetyBlocked');
+    if(bd){
+      if(bt.length){
+        bd.innerHTML = '<div class="muted" style="font-size:12px;margin:2px 0 4px;">'+window.T('ov2_js_safe_blocked_list')+'</div>'+
+          '<table>'+bt.map(function(x){
+            var when = tsfmt(x.last_ts);
+            var reason = x.reason ? (' · '+_esc(x.reason)) : '';
+            return '<tr><td><a href="/workspace?conv='+encodeURIComponent(x.conversation_id)+'&flag=blocked" target="_blank" rel="noopener" data-cid="'+_esc(x.conversation_id)+'" onclick="_logDrill(this)">'+
+              _esc(x.name||x.conversation_id)+'</a></td><td>'+_esc(x.platform||'')+'</td><td>'+fmt(x.count||0)+
+              '</td><td class="muted">'+_esc(when)+reason+'</td></tr>';
+          }).join('')+'</table>';
+      } else { bd.innerHTML=''; }
+      bd.style.display='none';
+    }
+    if(tr){
+      var t = d.trend || [];
+      if(t.length >= 2){
+        var labels = t.map(function(x){ return x.day; });
+        var adoptSeries = t.map(function(x){ return Math.round((Number(x.adopt_rate)||0)*1000)/10; });
+        var autoSeries = t.map(function(x){ return Number(x.autosend)||0; });
+        tr.innerHTML =
+          '<div class="muted" style="font-size:12px;margin-bottom:2px;">'+window.T('ov2_js_safe_trend_adopt')+'</div>'+
+          sparkline(adoptSeries, {labels:labels, color:'#3fb950', w:300})+
+          '<div class="muted" style="font-size:12px;margin:6px 0 2px;">'+window.T('ov2_js_safe_trend_autosend')+'</div>'+
+          sparkline(autoSeries, {labels:labels, color:'#58a6ff', w:300});
+      } else { tr.innerHTML=''; }
+    }
+    var dd = d.drilldown || {};
+    var ddOpens = Number(dd.opens)||0;
+    var ddLine = ddOpens>0 ? '<div class="muted" style="font-size:12px;margin-top:6px;">'+
+      window.Tf('ov2_js_safe_drill', {n:ddOpens, c:Number(dd.convs)||0, m:Number(dd.processed)||0})+'</div>' : '';
+    nt.innerHTML = ddLine + '<div class="muted" style="font-size:12px;margin-top:8px;">'+window.T('ov2_js_safe_hint')+'</div>';
+  }catch(e){
+    nt.innerHTML = '<div class="empty">'+window.T('ln_js_033')+e+'</div>';
+  }
+}
+
+// 🛡️ F2a 一眼闭环：卡头读「当前有无 open 的 ai_quality incident」，有则挂灯 +「未处理告警 →」。
+async function refreshAiQualityAlertBadge(){
+  var el = document.getElementById('aiSafetyAlert');
+  if(!el) return;
+  try{
+    var r = await fetch('/api/admin/incidents?status=open&kind=ai_quality&limit=20', {credentials:'same-origin'});
+    if(!r.ok){ el.style.display='none'; return; }
+    var d = await r.json();
+    var items = (d.incidents||[]).filter(function(it){ return it.kind==='ai_quality' && it.status==='open'; });
+    if(!items.length){ el.style.display='none'; el.innerHTML=''; return; }
+    var worst = items.some(function(it){ return it.light==='red'; }) ? 'red' : 'yellow';
+    el.innerHTML = dot(worst)+'<span style="text-decoration:underline;">⚠ '+
+      window.Tf('ov2_js_safe_alert_open', {n:items.length})+' →</span>';
+    el.style.display = '';
+  }catch(e){ el.style.display='none'; }
+}
+
+// 点卡头告警 → 事件流筛到 ai_quality / open 并滚动过去，一步到处理位。
+function jumpToAiQualityIncidents(){
+  var k=document.getElementById('fltKind'), s=document.getElementById('fltStatus');
+  if(k) k.value='ai_quality';
+  if(s) s.value='open';
+  loadIncidents();
+  var sec=document.getElementById('incidentsSection');
+  if(sec && sec.scrollIntoView) sec.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+// 📞 B 线：卡头读 open realtime_voice incident，挂灯 + 跳到事件流。
+async function refreshRealtimeVoiceAlertBadge(){
+  var el = document.getElementById('rtVoiceAlert');
+  if(!el) return;
+  try{
+    var r = await fetch('/api/admin/incidents?status=open&kind=realtime_voice&limit=20', {credentials:'same-origin'});
+    if(!r.ok){ el.style.display='none'; return; }
+    var d = await r.json();
+    var items = (d.incidents||[]).filter(function(it){ return it.kind==='realtime_voice' && it.status==='open'; });
+    if(!items.length){ el.style.display='none'; el.innerHTML=''; return; }
+    var worst = items.some(function(it){ return it.light==='red'; }) ? 'red' : 'yellow';
+    el.innerHTML = dot(worst)+'<span style="text-decoration:underline;">⚠ '+
+      window.Tf('ov2_rtv_alert_open', {n:items.length})+' →</span>';
+    el.style.display = '';
+  }catch(e){ el.style.display='none'; }
+}
+
+function jumpToRealtimeVoiceIncidents(){
+  var k=document.getElementById('fltKind'), s=document.getElementById('fltStatus');
+  if(k) k.value='realtime_voice';
+  if(s) s.value='open';
+  loadIncidents();
+  var sec=document.getElementById('incidentsSection');
+  if(sec && sec.scrollIntoView) sec.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+// 🎚️ F2b 阈值校准：用真实近 30 天历史回放 AI 质量告警，反推「按此阈值会报几次 + 分布」。
+// F2b+：卡上 what-if 调参——改阈值→重新校准→即时重放，满意的值直接填 config（endpoint 支持 query 覆盖）。
+var _CAL_KEYS = [['adopt_min','0.01'],['adopt_severe','0.01'],['reject_max','0.01'],
+  ['reject_severe','0.01'],['high_risk_min','1'],['high_risk_spike','1'],['min_samples','1']];
+
+function _calControlsHtml(th, cfgEnabled){
+  th = th || {};
+  var inputs = _CAL_KEYS.map(function(kv){
+    var k = kv[0], step = kv[1], v = (th[k] != null ? th[k] : '');
+    return '<label style="font-size:11px;margin:0 10px 4px 0;white-space:nowrap;">'+k+
+      ' <input id="cal_'+k+'" type="number" step="'+step+'" value="'+v+
+      '" style="width:62px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:2px 4px;"></label>';
+  }).join('');
+  // 一键落地（需 manage_ops）：写 config.local.yaml overlay。哨兵已开则只留「应用阈值」。
+  var apply = '';
+  if(CAN_MANAGE_OPS){
+    apply = ' <button onclick="applyAiQualityThresholds(false)" style="font-size:11px;padding:3px 10px;">'+window.T('ov2_js_safe_apply')+'</button>';
+    if(!cfgEnabled){
+      apply += ' <button onclick="applyAiQualityThresholds(true)" style="font-size:11px;padding:3px 10px;">'+window.T('ov2_js_safe_apply_on')+'</button>';
+    }
+  }
+  return '<div class="muted" style="font-size:11px;margin:4px 0;">'+window.T('ov2_js_safe_cal_tune')+'</div>'+
+    '<div style="display:flex;flex-wrap:wrap;">'+inputs+'</div>'+
+    '<div style="margin:2px 0 6px;">'+
+      '<button onclick="loadAiQualityCalibrate(true)" style="font-size:11px;padding:3px 10px;">'+window.T('ov2_js_safe_cal_rerun')+'</button> '+
+      '<button onclick="loadAiQualityCalibrate(false)" style="font-size:11px;padding:3px 10px;">'+window.T('ov2_js_safe_cal_reset')+'</button>'+
+      apply+
+      ' <span id="aiSafetyCalStatus" class="muted" style="font-size:11px;margin-left:6px;"></span>'+
+    '</div>';
+}
+
+// 一键把当前 what-if 阈值写进 config.local.yaml overlay（可选同时开启哨兵，写前 confirm）。
+async function applyAiQualityThresholds(enable){
+  var th = {};
+  _CAL_KEYS.forEach(function(kv){ var el=document.getElementById('cal_'+kv[0]);
+    if(el && el.value!==''){ var v=Number(el.value); if(!isNaN(v)) th[kv[0]]=v; } });
+  if(enable && !confirm(window.T('ov2_js_safe_apply_confirm'))) return;
+  var st = document.getElementById('aiSafetyCalStatus');
+  if(st) st.textContent = window.T('dash.loading');
+  var body = {thresholds: th}; if(enable) body.enable = true;
+  try{
+    var r = await fetch('/api/admin/ai-quality-thresholds', {method:'POST', credentials:'same-origin',
+      headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken()}, body: JSON.stringify(body)});
+    var d = await r.json();
+    if(!d || !d.ok){ if(st) st.textContent = (d && d.message) || window.T('ov2_js_safe_apply_err'); return; }
+    await loadAiQualityCalibrate(false);  // 按新 config 生效值重校准：刷新输入 + off note + 控件
+    var st2 = document.getElementById('aiSafetyCalStatus');
+    if(st2) st2.textContent = window.Tf('ov2_js_safe_apply_ok', {n:(d.applied||[]).length});
+    refreshAiQualityAlertBadge();
+  }catch(e){ if(st) st.textContent = String(e); }
+}
+
+function _calOverrideQS(){
+  var qs = '';
+  _CAL_KEYS.forEach(function(kv){
+    var el = document.getElementById('cal_'+kv[0]);
+    if(el && el.value !== ''){ var v = Number(el.value); if(!isNaN(v)) qs += '&'+kv[0]+'='+encodeURIComponent(v); }
+  });
+  return qs;
+}
+
+function _calResultHtml(d){
+  var pctf = function(x){ return (Math.round((Number(x)||0)*1000)/10).toFixed(1)+'%'; };
+  var dist = d.distribution || {}, ar = dist.adopt_rate||{}, rr = dist.reject_rate||{}, hr = dist.high_risk||{};
+  var bs = d.by_signal || {};
+  var sum = window.Tf('ov2_js_safe_cal_sum', {d:d.days, w:d.window_days,
+    a:Number(d.alerts)||0, da:Number(d.days_in_alert)||0});
+  var distLine = window.Tf('ov2_js_safe_cal_dist', {am:pctf(ar.median), amin:pctf(ar.min),
+    amax:pctf(ar.max), rm:pctf(rr.median), hm:(Number(hr.median)||0)});
+  var sig = window.Tf('ov2_js_safe_cal_sig', {x:Number(bs.adopt_rate_low)||0,
+    y:Number(bs.reject_rate_high)||0, z:Number(bs.high_risk_spike)||0});
+  var offNote = d.configured_enabled ? '' :
+    ('<div class="muted" style="font-size:11px;margin-top:2px;">'+window.T('ov2_js_safe_cal_off')+'</div>');
+  // 逐窗告警时间条：每评估窗口一格（灰=无告警 / 黄=warn / 红=fail），悬停看该窗指标+命中信号，
+  // 一眼看出告警是聚集还是零星——判断阈值吵不吵的关键（补齐 F2b「都是哪些窗」）。
+  var pts = d.points || [], tl = '';
+  if(pts.length){
+    var colorOf = {green:'#8b949e', yellow:'#d29922', red:'#f85149'};
+    var cells = pts.map(function(p){
+      var c = colorOf[p.light] || '#8b949e';
+      var s = (p.problem_ids && p.problem_ids.length) ? (' ['+p.problem_ids.join(',')+']') : '';
+      var tip = window.Tf('ov2_js_safe_cal_cell', {day:p.day||'', a:pctf(p.adopt_rate),
+        r:pctf(p.reject_rate), h:(Number(p.high_risk)||0)}) + s;
+      return '<span title="'+_esc(tip)+'" style="display:inline-block;width:9px;height:14px;margin:1px;border-radius:2px;background:'+c+';"></span>';
+    }).join('');
+    tl = '<div class="muted" style="font-size:11px;margin-top:6px;">'+window.T('ov2_js_safe_cal_timeline')+'</div>'+
+      '<div style="margin-top:2px;line-height:1;">'+cells+'</div>';
+  }
+  return '<div style="font-size:12px;margin-top:2px;">'+sum+'</div>'+
+    '<div class="muted" style="font-size:11px;margin-top:2px;">'+distLine+'</div>'+
+    '<div class="muted" style="font-size:11px;margin-top:2px;">'+sig+'</div>'+offNote+tl;
+}
+
+async function loadAiQualityCalibrate(useOverrides){
+  var box = document.getElementById('aiSafetyCal');
+  if(!box) return;
+  box.style.display = 'block';
+  if(!document.getElementById('aiSafetyCalOut')){
+    box.innerHTML = '<div id="aiSafetyCalCtl"></div><div id="aiSafetyCalOut"></div>';
+  }
+  var ctl = document.getElementById('aiSafetyCalCtl');
+  var out = document.getElementById('aiSafetyCalOut');
+  out.innerHTML = '<span class="muted" style="font-size:11px;">'+window.T('dash.loading')+'</span>';
+  var qs = 'days=30' + (useOverrides ? _calOverrideQS() : '');
+  try{
+    var r = await fetch('/api/admin/ai-quality-calibrate?'+qs, {credentials:'same-origin'});
+    if(r.status === 403){ out.innerHTML = '<div class="empty">'+window.T('ov2_js037')+'</div>'; return; }
+    var d = await r.json();
+    if(!d || !d.ok || d.enabled === false){
+      if(ctl) ctl.innerHTML = '';
+      out.innerHTML = '<div class="muted" style="font-size:11px;">'+window.T('ov2_js_safe_cal_empty')+'</div>'; return;
+    }
+    // 初始/重置（无覆盖）：用 config 生效阈值(重新)填充控件；调参重放：保留用户输入不动。
+    if(!useOverrides && ctl){ ctl.innerHTML = _calControlsHtml(d.thresholds, d.configured_enabled); }
+    out.innerHTML = _calResultHtml(d);
+  }catch(e){ out.innerHTML = '<div class="empty">'+window.T('ln_js_033')+e+'</div>'; }
+}
+
+// 📥 草稿积压治理卡片：读 /api/workspace/metrics 的 sla_watcher + drafts。
+// 让「越线/静默/自动作废」与「当前 L3/L4 积压」可视，配合 skip_group_chats 源头止血观测。
+async function loadSlaBacklog(){
+  var kp = document.getElementById('slaBacklogKpis');
+  var dt = document.getElementById('slaBacklogDetail');
+  if(!kp || !dt) return;
+  try{
+    const r = await fetch('/api/workspace/metrics', {credentials:'same-origin'});
+    if(r.status === 403){ kp.innerHTML=''; dt.innerHTML='<div class="empty">'+window.T('ov2_js037')+'</div>'; return; }
+    const d = await r.json();
+    var sw = d.sla_watcher || {};
+    var dr = d.drafts || {};
+    var byLv = dr.by_level || {};
+    var pendingHi = (Number(byLv.L3)||0) + (Number(byLv.L4)||0);
+    var runOk = !!sw.running;
+    var kpis = [
+      {label:window.T('ov2_js_bk_mon'), value: runOk ? window.T('ov2_js_bk_running') : window.T('ov2_js_bk_stopped'), color: runOk ? 'var(--tk-emerald)' : 'var(--tk-text-muted)'},
+      {label:window.T('ov2_js_bk_pending'), value: fmt(pendingHi), color: pendingHi>0 ? 'var(--tk-warn-ink)' : 'var(--tk-text)'},
+      {label:window.T('ov2_js_bk_breach'), value: fmt(Number(sw.total_breach_events)||0)},
+      {label:window.T('ov2_js_bk_quiesced'), value: fmt(Number(sw.quiesced_count)||0)},
+      {label:window.T('ov2_js_bk_expired'), value: fmt(Number(sw.total_expired)||0)},
+    ];
+    kp.innerHTML = kpis.map(function(c){
+      var col = c.color || 'var(--tk-text)';
+      return '<div class="kpi"><div class="muted" style="font-size:12px;">'+c.label+
+        '</div><div style="font-size:20px;font-weight:600;margin-top:4px;color:'+col+';">'+c.value+'</div></div>';
+    }).join('');
+    if(!runOk){
+      dt.innerHTML = '<div class="empty">'+window.T('ov2_js_bk_not_running')+'</div>';
+      return;
+    }
+    function _h(sec){ sec=Number(sec)||0; return sec>=3600 ? (sec/3600).toFixed(sec%3600?1:0)+'h' : Math.round(sec/60)+'m'; }
+    var reAlert = window.Tf('ov2_tf_bk_realert', {base:_h(sw.realert_base_sec), backoff:(Number(sw.realert_backoff)||1), max:_h(sw.realert_max_sec)});
+    var stale = (Number(sw.stale_hours)||0) > 0 ? window.Tf('ov2_tf_bk_stale', {h:Number(sw.stale_hours)}) : window.T('ov2_js_bk_off');
+    var expire = (Number(sw.auto_expire_hours)||0) > 0 ? window.Tf('ov2_tf_bk_expire', {h:Number(sw.auto_expire_hours)}) : window.T('ov2_js_bk_off');
+    var lvRows = ['L1','L2','L3','L4'].filter(function(k){ return byLv[k]; })
+      .map(function(k){ return '<td>'+k+': '+fmt(byLv[k])+'</td>'; }).join('') || '<td>'+window.T('ov2_js_bk_no_pending')+'</td>';
+    dt.innerHTML =
+      '<table><tr><th>'+window.T('ov2_js_bk_cur_pending')+'</th></tr><tr>'+lvRows+'</tr></table>'+
+      '<div class="muted" style="font-size:12px;margin-top:8px;line-height:1.7;">'+
+      window.Tf('ov2_tf_bk_sla_line', {sla:(Number(sw.sla_hours)||0), realert:reAlert})+'<br>'+
+      window.Tf('ov2_tf_bk_stale_line', {stale:stale, expire:expire})+
+      '</div>';
+  }catch(e){
+    dt.innerHTML = '<div class="empty">'+window.T('ln_js_033')+e+'</div>';
+  }
+}
+
+// 一键清理陈旧群积压：调 /api/drafts/expire-stale（groups_only + 7d），审计留痕、免脚本/免重启。
+// 先 dry_run 预览命中数 → 0 直接提示、>0 带真实数字二次确认 → 再真正作废，避免空操作误确认。
+async function cleanStaleBacklog(){
+  var btn = document.getElementById('slaBacklogCleanBtn');
+  var msg = document.getElementById('slaBacklogCleanMsg');
+  if(!btn) return;
+  var body = {max_age_hours:168, levels:['L3','L4'], groups_only:true};
+  async function _call(dry){
+    const r = await fetch('/api/drafts/expire-stale', {
+      method:'POST', credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(Object.assign({}, body, {dry_run:dry})),
+    });
+    if(r.status === 403){ return {forbidden:true}; }
+    return await r.json();
+  }
+  btn.disabled = true;
+  if(msg) msg.textContent = window.T('ov2_js_bk_clean_checking');
+  try{
+    var pre = await _call(true);
+    if(pre.forbidden){ if(msg) msg.textContent = window.T('ov2_js037'); return; }
+    var n = Number(pre.count)||0;
+    if(n === 0){ if(msg) msg.textContent = window.T('ov2_js_bk_clean_none'); return; }
+    if(msg) msg.textContent = '';
+    if(!confirm(window.Tf('ov2_tf_bk_clean_preview', {n:n}))) return;
+    var res = await _call(false);
+    if(res.forbidden){ if(msg) msg.textContent = window.T('ov2_js037'); return; }
+    if(msg) msg.textContent = window.Tf('ov2_tf_bk_clean_done', {n:(Number(res.count)||0)});
+    loadSlaBacklog();
+  }catch(e){
+    if(msg) msg.textContent = window.T('ov2_js_bk_clean_fail')+e;
+  }finally{
+    btn.disabled = false;
   }
 }
 
@@ -471,11 +889,11 @@ async function loadTranslationEngines(){
   if(!kp || !pv) return;
   try{
     const r = await fetch('/api/workspace/metrics', {credentials:'same-origin'});
-    if(r.status === 403){ kp.innerHTML=''; pv.innerHTML='<div class="empty">指标查看需要主管权限</div>'; return; }
+    if(r.status === 403){ kp.innerHTML=''; pv.innerHTML='<div class="empty">'+window.T('ov2_js037')+'</div>'; return; }
     const d = await r.json();
     var te = d.translation_engines || null;
     if(!te || !(te.rows||[]).length){
-      kp.innerHTML=''; pv.innerHTML='<div class="empty">暂无翻译引擎数据（开启翻译后累计）</div>'; return;
+      kp.innerHTML=''; pv.innerHTML='<div class="empty">'+window.T('ov2_js056')+'</div>'; return;
     }
     var attempts = Number(te.total_attempts)||0;
     var lowConf = Number(te.low_confidence)||0;
@@ -484,10 +902,10 @@ async function loadTranslationEngines(){
     // 低置信率以「尝试数」为分母（近似，attempts 含全部引擎调用）
     var lowPct = attempts ? ((lowConf/attempts)*100).toFixed(1) : '0.0';
     var kpis = [
-      {label:'翻译尝试', value:fmt(attempts)},
-      {label:'低置信译文', value:fmt(lowConf)+'（'+lowPct+'%）'},
-      {label:'智能切换次数', value:fmt(switches)},
-      {label:'降级次数', value:fmt(fb)},
+      {label:window.T('ov2_js057'), value:fmt(attempts)},
+      {label:window.T('ov2_js058'), value:fmt(lowConf)+' ('+lowPct+'%)'},
+      {label:window.T('ov2_js059'), value:fmt(switches)},
+      {label:window.T('ov2_js060'), value:fmt(fb)},
     ];
     kp.innerHTML = kpis.map(function(c){
       return '<div class="kpi"><div class="muted" style="font-size:12px;">'+c.label+
@@ -498,17 +916,503 @@ async function loadTranslationEngines(){
       return '<tr><td>'+row.engine+'</td><td>'+row.calls+'</td><td>'+row.ok+'</td><td>'+
         row.fail+'</td><td>'+sr+'%</td><td>'+row.avg_latency_ms+' ms</td></tr>';
     }).join('');
-    pv.innerHTML = '<table><tr><th>引擎</th><th>调用</th><th>成功</th><th>失败</th>'+
-      '<th>成功率</th><th>平均延迟</th></tr>'+rows+'</table>'+
-      '<div class="muted" style="font-size:12px;margin-top:8px;">智能切换=主引擎低置信时自动改用更优引擎'+
-      '（需开 translation.engines.confidence_switch）；低置信率/切换率持续偏高 → 检查主引擎对该语对的质量。</div>';
+    pv.innerHTML = '<table><tr><th>'+window.T('tg_s067')+'</th><th>'+window.T('kb_js_120')+'</th><th>'+window.T('ov_js_succ_label')+'</th><th>'+window.T('rpa_js_st_failed')+'</th>'+
+      '<th>'+window.T('ov_kpi_rate')+'</th><th>'+window.T('ap_s042')+'</th></tr>'+rows+'</table>'+
+      '<div class="muted" style="font-size:12px;margin-top:8px;">'+window.T('ov2_js061')+'='+window.T('ov2_js062')+
+      ' ('+window.T('mo_js013')+' translation.engines.confidence_switch); '+window.T('ov2_js063')+' → '+window.T('ov2_js064')+'</div>';
   }catch(e){
-    pv.innerHTML = '<div class="empty">加载失败：'+e+'</div>';
+    pv.innerHTML = '<div class="empty">'+window.T('ln_js_033')+e+'</div>';
+  }
+}
+
+// 🎙️ 语音合成语言卡片：读 /api/workspace/metrics 的 voice_synth_language（V 语种纠正观测）。
+async function loadVoiceSynthLang(){
+  var kp = document.getElementById('voiceLangKpis');
+  var bl = document.getElementById('voiceLangByLang');
+  if(!kp || !bl) return;
+  try{
+    const r = await fetch('/api/workspace/metrics', {credentials:'same-origin'});
+    if(r.status === 403){ kp.innerHTML=''; bl.innerHTML='<div class="empty">'+window.T('ov2_js037')+'</div>'; return; }
+    const d = await r.json();
+    var vs = d.voice_synth_language || null;
+    if(!vs || !(Number(vs.total_synth)||0)){
+      kp.innerHTML=''; bl.innerHTML='<div class="empty">'+window.T('ov2_js065')+'</div>'; return;
+    }
+    var total = Number(vs.total_synth)||0;
+    var corrected = Number(vs.corrected)||0;
+    var pct = ((Number(vs.corrected_rate)||0)*100).toFixed(1);
+    var kpis = [
+      {label:window.T('ov2_js066'), value:fmt(total)},
+      {label:window.T('ov2_js067'), value:fmt(corrected)+' ('+pct+'%)'},
+    ];
+    kp.innerHTML = kpis.map(function(c){
+      return '<div class="kpi"><div class="muted" style="font-size:12px;">'+c.label+
+        '</div><div style="font-size:20px;font-weight:600;margin-top:4px;">'+c.value+'</div></div>';
+    }).join('');
+    var byLang = vs.by_lang || {};
+    var langs = Object.keys(byLang);
+    if(langs.length){
+      var rows = langs.map(function(k){
+        return '<tr><td>'+k+'</td><td>'+byLang[k]+'</td></tr>';
+      }).join('');
+      bl.innerHTML = '<table><tr><th>'+window.T('ov2_js068')+'</th><th>'+window.T('mo_s044')+'</th></tr>'+rows+'</table>'+
+        '<div class="muted" style="font-size:12px;margin-top:8px;">'+window.T('ov2_js069')+
+        ' ('+window.T('ov2_js070')+' → '+window.T('ov2_js071')+'</div>';
+    }else{
+      bl.innerHTML = '<div class="muted" style="font-size:12px;">'+window.T('ov2_js072')+'</div>';
+    }
+  }catch(e){
+    bl.innerHTML = '<div class="empty">'+window.T('ln_js_033')+e+'</div>';
+  }
+}
+
+// 📞 实时语音通话卡片：metrics（通话观测）+ engine/status（显存生命周期）合一。
+var _rtvPending = null;   // null | "load" | "unload"
+
+function _rtvDot(on){
+  return '<span style="color:'+(on?'#22c55e':'#ef4444')+'">●</span> ';
+}
+function _rtvTokenVal(){
+  var el = document.getElementById('rtvToken');
+  if(el && el.value) return el.value;
+  try{ return localStorage.getItem('voice.token')||''; }catch(_){ return ''; }
+}
+function _rtvEnginePhase(st){
+  if(!st || st.enabled === false) return 'disabled';
+  if(st.error && !st.model_loaded && st.worker_running !== true && st.loading !== true) return 'unreachable';
+  if(st.model_loaded) return 'ready';
+  if(st.loading || st.worker_running) return 'loading';
+  return 'idle';
+}
+function _rtvRenderEngine(st, rv, sig, ready){
+  var box = document.getElementById('rtVoiceEngine');
+  if(!box) return;
+  if(!st || st.enabled === false){
+    box.innerHTML = '<div class="muted" style="font-size:12px;">'+window.T('ov2_rtv_disabled')+'</div>';
+    return;
+  }
+  var phase = _rtvEnginePhase(st);
+  var phaseLabels = {
+    ready:window.T('ov2_localtts_ready'), idle:window.T('ov2_rtv_engine_idle'),
+    loading:window.T('ov2_localtts_loading'), unreachable:window.T('ov2_rtv_engine_unreachable'),
+    disabled:window.T('ov2_rtv_disabled')
+  };
+  var hostOk = (phase !== 'unreachable' && phase !== 'disabled');
+  var eLoad = rv ? (Number(rv.engine_load)||0) : 0;
+  var eUnload = rv ? (Number(rv.engine_unload)||0) : 0;
+  var kpis = [
+    {label:window.T('ov2_rtv_engine_host'), value:_rtvDot(hostOk)+(hostOk?window.T('yes'):window.T('no'))},
+    {label:window.T('ov2_rtv_engine_model'), value:_rtvDot(phase==='ready')+(phaseLabels[phase]||phase)},
+    {label:window.T('ov2_rtv_gpu'), value:window.T('ov2_rtv_load')+' '+fmt(eLoad)+' · '+window.T('ov2_rtv_unload')+' '+fmt(eUnload)},
+  ];
+  var kpiHtml = '<div class="grid">'+kpis.map(function(c){
+    return '<div class="kpi"><div class="muted" style="font-size:12px;">'+c.label+
+      '</div><div style="font-size:20px;font-weight:600;margin-top:4px;">'+c.value+'</div></div>';
+  }).join('')+'</div>';
+  var tokenHtml = '';
+  if(st.auth_required){
+    tokenHtml = '<label style="font-size:11px;margin-right:8px;">'+window.T('ov2_rtv_engine_token')+
+      ' <input id="rtvToken" type="password" value="'+_esc(_rtvTokenVal())+
+      '" style="width:140px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:2px 6px;"'+
+      ' oninput="try{localStorage.setItem(\'voice.token\',this.value);}catch(_){}"></label>';
+  }
+  var canAct = CAN_MANAGE_OPS && !_rtvPending;
+  var showLoad = canAct && (phase==='idle' || phase==='loading' || phase==='unreachable');
+  var showUnload = canAct && phase==='ready';
+  var btnHtml = '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px;">'+
+    (showLoad?('<button id="rtvBtnLoad" onclick="rtvEngineAction(\'load\')" style="background:var(--accent);">🚀 '+window.T('ov2_rtv_load')+'</button>'):'')+
+    (showUnload?('<button id="rtvBtnUnload" onclick="rtvEngineAction(\'unload\')" style="background:#ff8a5b;">⏏ '+window.T('ov2_rtv_unload')+'</button>'):'')+
+    tokenHtml+
+    '</div>';
+  var hint = '';
+  if(_rtvPending){
+    hint = window.T(_rtvPending==='load'?'ov2_rtv_engine_loading_action':'ov2_rtv_engine_unloading_action');
+  }else if(!CAN_MANAGE_OPS){
+    hint = window.T('ov2_rtv_engine_readonly');
+  }else if(st.auth_required && !_rtvTokenVal()){
+    hint = window.T('ov2_rtv_engine_token_hint');
+  }
+  var refs = (ready && ready.refs) ? ready.refs : null;
+  var chain = (ready && ready.chain) ? ready.chain : null;
+  var refLine = '';
+  if(refs && (Number(refs.persona_count)||0) > 0){
+    var wg = String(refs.worst_grade||'none');
+    var gcol = {green:'#22c55e', yellow:'#eab308', red:'#ef4444', none:'#94a3b8', unknown:'#94a3b8'}[wg]||'var(--mut)';
+    refLine = window.T('ov2_rtv_ref_line')
+      .replace('{with}', fmt(Number(refs.with_reference)||0))
+      .replace('{total}', fmt(Number(refs.persona_count)||0))
+      .replace('{grade}', window.T('ov2_rtv_ref_'+wg) || wg);
+    refLine = '<div class="muted" style="font-size:12px;margin-top:6px;"><span style="color:'+gcol+'">●</span> '+refLine+'</div>';
+  }
+  var chainHtml = '';
+  if(chain){
+    var ck = function(on, lbl){ return _rtvDot(!!on)+lbl; };
+    chainHtml = '<div class="muted" style="font-size:12px;margin-top:6px;">'+window.T('ov2_rtv_chain')+
+      '：'+ck(chain.opener_enabled, window.T('ov2_rtv_chain_opener'))+' · '+
+      ck(chain.subtitle_enabled, window.T('ov2_rtv_chain_sub'))+' · '+
+      ck(chain.memory_store, window.T('ov2_rtv_chain_mem'))+'</div>';
+  }
+  var trialHtml = '';
+  if(phase === 'ready'){
+    var url = (ready && ready.trial_url) ? ready.trial_url : '/ops/voice-call';
+    trialHtml = '<div style="margin-top:8px;"><a href="'+url+'" style="color:var(--accent);font-size:13px;font-weight:600;">🎧 '+window.T('ov2_rtv_trial_cta')+'</a>'+
+      (ready && ready.recommendation ? ('<div class="muted" style="font-size:11px;margin-top:4px;">'+_esc(ready.recommendation)+'</div>') : '')+
+      '</div>';
+  }else if(ready && ready.verdict === 'warming'){
+    trialHtml = '<div class="muted" style="font-size:12px;margin-top:8px;">'+window.T('ov2_rtv_trial_warming')+'</div>';
+  }
+  box.innerHTML = kpiHtml + btnHtml + refLine + chainHtml + trialHtml +
+    _rtvSignalHtml(sig) +
+    (hint?('<div class="muted" id="rtVoiceEngineHint" style="font-size:12px;margin-top:6px;">'+hint+'</div>'):'');
+}
+function _rtvSignalHtml(sig){
+  if(!sig || !sig.verdict) return '';
+  var vk = 'ov2_rtv_signal_'+String(sig.verdict);
+  var label = window.T(vk);
+  if(label === vk) label = String(sig.verdict);
+  var colors = {healthy:'#22c55e', caution:'#eab308', failing:'#ef4444',
+    insufficient:'#94a3b8', unavailable:'#94a3b8', idle:'#94a3b8', unknown:'#94a3b8'};
+  var col = colors[sig.verdict] || 'var(--mut)';
+  return '<div style="font-size:12px;margin-top:8px;padding:6px 8px;border-radius:6px;background:var(--bg);border:1px solid var(--line);">'+
+    '<span style="color:'+col+';font-weight:600;">'+label+'</span> · '+_esc(sig.advice||'')+'</div>';
+}
+function _rtvRenderMetrics(rv){
+  var kp = document.getElementById('rtVoiceKpis');
+  var dt = document.getElementById('rtVoiceDetail');
+  if(!kp || !dt) return;
+  var attempts = rv ? (Number(rv.attempts)||0) : 0;
+  var eLoad = rv ? (Number(rv.engine_load)||0) : 0;
+  var eUnload = rv ? (Number(rv.engine_unload)||0) : 0;
+  var hOk = rv ? (Number(rv.health_ok)||0) : 0;
+  var hFail = rv ? (Number(rv.health_fail)||0) : 0;
+  var hasCalls = rv && (attempts || hOk || hFail);
+  if(!hasCalls){
+    kp.innerHTML = '';
+    dt.innerHTML = '<div class="muted" style="font-size:12px;">'+window.T('ov2_rtv_no_calls')+'</div>';
+    return;
+  }
+  var connected = Number(rv.connected)||0;
+  var connPct = ((Number(rv.connect_rate)||0)*100).toFixed(1);
+  var healthPct = ((Number(rv.health_ok_rate)||0)*100).toFixed(1);
+  var kpis = [
+    {label:window.T('ov2_rtv_connected'), value:fmt(connected)+'/'+fmt(attempts)+' ('+connPct+'%)'},
+    {label:window.T('ov2_rtv_active'), value:fmt(Number(rv.active)||0)+' / '+fmt(Number(rv.peak_active)||0)},
+    {label:window.T('ov2_rtv_avgdur'), value:_rtvDur(rv.avg_duration_sec)},
+    {label:window.T('ov2_rtv_health'), value:healthPct+'% ('+fmt(hOk)+'/'+fmt(hOk+hFail)+')'},
+  ];
+  kp.innerHTML = kpis.map(function(c){
+    return '<div class="kpi"><div class="muted" style="font-size:12px;">'+c.label+
+      '</div><div style="font-size:20px;font-weight:600;margin-top:4px;">'+c.value+'</div></div>';
+  }).join('');
+  var reasonLabels = {
+    normal:window.T('ov2_rtv_r_normal'), relay_error:window.T('ov2_rtv_r_relay_error'),
+    unauthorized:window.T('ov2_rtv_r_unauthorized'), host_unreachable:window.T('ov2_rtv_r_host_unreachable'),
+    connect_failed:window.T('ov2_rtv_r_connect_failed'), hello_error:window.T('ov2_rtv_r_hello_error'),
+    other:window.T('ov2_rtv_r_other')
+  };
+  var byReason = rv.by_end_reason || {};
+  var rk = Object.keys(byReason);
+  var reasonHtml = rk.length ? ('<table><tr><th>'+window.T('ov2_rtv_reason')+'</th><th>'+window.T('ov2_rtv_count')+'</th></tr>'+
+    rk.map(function(k){ return '<tr><td>'+(reasonLabels[k]||k)+'</td><td>'+byReason[k]+'</td></tr>'; }).join('')+'</table>')
+    : ('<div class="muted" style="font-size:12px;">'+window.T('ov2_rtv_no_reason')+'</div>');
+  dt.innerHTML = reasonHtml;
+}
+function _rtvDur(sec){
+  var s = Math.max(0, Math.round(Number(sec)||0));
+  if(s < 60) return s+'s';
+  var m = Math.floor(s/60); var r = s%60;
+  return m+'m'+(r?(' '+r+'s'):'');
+}
+async function loadRealtimeVoice(){
+  var kp = document.getElementById('rtVoiceKpis');
+  var dt = document.getElementById('rtVoiceDetail');
+  var eng = document.getElementById('rtVoiceEngine');
+  if(!kp || !dt || !eng) return;
+  try{
+    var mP = fetch('/api/workspace/metrics', {credentials:'same-origin'}).then(function(r){ return r; });
+    var eP = fetch('/api/voice/engine/status', {credentials:'same-origin'}).then(function(r){ return r; });
+    var sP = fetch('/api/companion/capabilities/signals?window_hours=168', {credentials:'same-origin'})
+      .then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; });
+    var rP = fetch('/api/voice/live/readiness', {credentials:'same-origin'})
+      .then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; });
+    var mR = await mP, eR = await eP, sigPack = await sP, readyPack = await rP;
+    var rv = null, st = {}, rtvSig = null, ready = null;
+    if(sigPack && sigPack.signals){
+      for(var si=0; si<sigPack.signals.length; si++){
+        if(sigPack.signals[si].key === 'realtime_voice'){ rtvSig = sigPack.signals[si]; break; }
+      }
+    }
+    if(mR.status === 403){
+      kp.innerHTML=''; dt.innerHTML='<div class="empty">'+window.T('ov2_js037')+'</div>';
+    }else if(mR.ok){
+      var md = await mR.json();
+      rv = md.realtime_voice || null;
+      _rtvRenderMetrics(rv);
+    }
+    if(eR.ok){ st = await eR.json(); }
+    else{ st = {enabled:false, error:'engine_status_'+eR.status}; }
+    if(readyPack && readyPack.ok){ ready = readyPack; }
+    _rtvRenderEngine(st, rv, rtvSig, ready);
+    loadRtvAlertCalibrate(false);
+  }catch(e){
+    if(dt) dt.innerHTML = '<div class="empty">'+window.T('ln_js_033')+e+'</div>';
+    if(eng) eng.innerHTML = '';
+  }
+}
+async function rtvEngineAction(which){
+  if(!CAN_MANAGE_OPS || _rtvPending) return;
+  if(which==='unload' && !confirm(window.T('ov2_rtv_engine_unload_confirm'))) return;
+  _rtvPending = which;
+  await loadRealtimeVoice();
+  var hintEl = document.getElementById('rtVoiceEngineHint');
+  if(!hintEl){
+    var eng = document.getElementById('rtVoiceEngine');
+    if(eng) eng.insertAdjacentHTML('beforeend',
+      '<div class="muted" id="rtVoiceEngineHint" style="font-size:12px;margin-top:6px;"></div>');
+    hintEl = document.getElementById('rtVoiceEngineHint');
+  }
+  if(hintEl) hintEl.textContent = window.T(which==='load'?'ov2_rtv_engine_loading_action':'ov2_rtv_engine_unloading_action');
+  var tok = encodeURIComponent(_rtvTokenVal());
+  var ms = which==='load' ? 135000 : 65000;
+  try{
+    var ctrl = new AbortController();
+    var tmr = setTimeout(function(){ ctrl.abort(); }, ms);
+    var r = await fetch('/api/voice/engine/'+which+'?token='+tok, {method:'POST', credentials:'same-origin', signal:ctrl.signal});
+    clearTimeout(tmr);
+    var d = await r.json();
+    if(!r.ok || d.error){
+      if(hintEl) hintEl.textContent = (d.error||window.T('ov2_rtv_engine_err'))+' ('+r.status+')';
+      _rtvPending = null;
+      await loadRealtimeVoice();
+      return;
+    }
+    _rtvPending = null;
+    if(hintEl) hintEl.textContent = window.T(which==='load'?'ov2_rtv_engine_load_ok':'ov2_rtv_engine_unload_ok');
+    await loadRealtimeVoice();
+    refreshRealtimeVoiceAlertBadge();
+  }catch(e){
+    if(hintEl) hintEl.textContent = window.T('ov2_rtv_engine_err')+': '+e;
+    _rtvPending = null;
+    await loadRealtimeVoice();
+  }
+}
+
+// 📞 D 线：实时语音告警阈值 what-if（进程 stats 单点回放 + 一键写 config overlay）
+var _RTV_CAL_KEYS = [['min_attempts','1'],['min_health_probes','1'],
+  ['health_ok_rate_warn','0.01'],['health_ok_rate_fail','0.01'],
+  ['connect_rate_warn','0.01'],['connect_rate_fail','0.01']];
+
+function _rtvCalControlsHtml(th, cfgEnabled){
+  th = th || {};
+  var inputs = _RTV_CAL_KEYS.map(function(kv){
+    var k = kv[0], step = kv[1], v = (th[k] != null ? th[k] : '');
+    return '<label style="font-size:11px;margin:0 10px 4px 0;white-space:nowrap;">'+k+
+      ' <input id="rtvCal_'+k+'" type="number" step="'+step+'" value="'+v+
+      '" style="width:62px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:2px 4px;"></label>';
+  }).join('');
+  var apply = '';
+  if(CAN_MANAGE_OPS){
+    apply = ' <button onclick="applyRtvAlertThresholds(false)" style="font-size:11px;padding:3px 10px;">'+window.T('ov2_js_safe_apply')+'</button>';
+    if(!cfgEnabled){
+      apply += ' <button onclick="applyRtvAlertThresholds(true)" style="font-size:11px;padding:3px 10px;">'+window.T('ov2_js_safe_apply_on')+'</button>';
+    }
+  }
+  return '<div class="muted" style="font-size:11px;margin:4px 0;">'+window.T('ov2_rtv_cal_tune')+'</div>'+
+    '<div style="display:flex;flex-wrap:wrap;">'+inputs+'</div>'+
+    '<div style="margin:2px 0 6px;">'+
+      '<button onclick="loadRtvAlertCalibrate(true)" style="font-size:11px;padding:3px 10px;">'+window.T('ov2_js_safe_cal_rerun')+'</button> '+
+      '<button onclick="loadRtvAlertCalibrate(false)" style="font-size:11px;padding:3px 10px;">'+window.T('ov2_js_safe_cal_reset')+'</button>'+
+      apply+
+      ' <span id="rtVoiceCalStatus" class="muted" style="font-size:11px;margin-left:6px;"></span>'+
+    '</div>';
+}
+
+function _rtvCalOverrideQS(){
+  var qs = '';
+  _RTV_CAL_KEYS.forEach(function(kv){
+    var el = document.getElementById('rtvCal_'+kv[0]);
+    if(el && el.value !== ''){ var v = Number(el.value); if(!isNaN(v)) qs += '&'+kv[0]+'='+encodeURIComponent(v); }
+  });
+  return qs;
+}
+
+function _rtvCalResultHtml(d){
+  var pctf = function(x){ return (Math.round((Number(x)||0)*1000)/10).toFixed(1)+'%'; };
+  var m = d.metrics || {};
+  var bs = d.by_signal || {};
+  var light = d.current_light || d.worst_light || 'green';
+  var sum = window.Tf('ov2_rtv_cal_sum', {
+    light: light, n: (d.current_problems||[]).length,
+    a: Number(d.alerts)||0, w: Number(d.evaluated_windows)||0});
+  var met = window.Tf('ov2_rtv_cal_metrics', {
+    c: pctf(m.connect_rate), h: pctf(m.health_ok_rate),
+    u: Number(m.host_unreachable)||0, att: Number(m.attempts)||0});
+  var sig = window.Tf('ov2_rtv_cal_sig', {
+    x: Number(bs.health_ok_rate_low)||0, y: Number(bs.connect_rate_low)||0,
+    z: Number(bs.host_unreachable_spike)||0});
+  var offNote = d.configured_enabled ? '' :
+    ('<div class="muted" style="font-size:11px;margin-top:2px;">'+window.T('ov2_rtv_cal_off')+'</div>');
+  var insNote = d.insufficient_samples ?
+    ('<div class="muted" style="font-size:11px;margin-top:2px;">'+window.T('ov2_rtv_cal_insufficient')+'</div>') : '';
+  var probs = d.current_problems || [];
+  var probLines = probs.length ? probs.map(function(p){
+    return '<div class="muted" style="font-size:11px;">• '+_esc(p.name||'')+'：'+_esc(p.detail||'')+'</div>';
+  }).join('') : '';
+  var tl = '';
+  var pts = d.points || [];
+  if(pts.length > 1){
+    var colorOf = {green:'#8b949e', yellow:'#d29922', red:'#f85149'};
+    var cells = pts.map(function(p){
+      var c = colorOf[p.light] || '#8b949e';
+      var s = (p.problem_ids && p.problem_ids.length) ? (' ['+p.problem_ids.join(',')+']') : '';
+      var tip = window.Tf('ov2_rtv_cal_cell', {day:p.day||'',
+        c:((Number(p.connect_rate)||0)*100).toFixed(1),
+        h:((Number(p.health_ok_rate)||0)*100).toFixed(1),
+        u:Number(p.host_unreachable)||0, att:Number(p.attempts)||0}) + s;
+      return '<span title="'+_esc(tip)+'" style="display:inline-block;width:9px;height:14px;margin:1px;border-radius:2px;background:'+c+';"></span>';
+    }).join('');
+    tl = '<div class="muted" style="font-size:11px;margin-top:6px;">'+window.T('ov2_rtv_cal_timeline')+'</div>'+
+      '<div style="margin-top:2px;line-height:1;">'+cells+'</div>';
+  }
+  var trendNote = d.trend_enabled ? '' :
+    ('<div class="muted" style="font-size:11px;margin-top:2px;">'+window.T('ov2_rtv_trend_off')+'</div>');
+  return '<div style="font-size:12px;margin-top:2px;">'+sum+'</div>'+
+    '<div class="muted" style="font-size:11px;margin-top:2px;">'+met+'</div>'+
+    '<div class="muted" style="font-size:11px;margin-top:2px;">'+sig+'</div>'+
+    probLines + offNote + insNote + trendNote + tl;
+}
+
+async function applyRtvAlertThresholds(enable){
+  var th = {};
+  _RTV_CAL_KEYS.forEach(function(kv){ var el=document.getElementById('rtvCal_'+kv[0]);
+    if(el && el.value!==''){ var v=Number(el.value); if(!isNaN(v)) th[kv[0]]=v; } });
+  if(enable && !confirm(window.T('ov2_rtv_cal_apply_confirm'))) return;
+  var st = document.getElementById('rtVoiceCalStatus');
+  if(st) st.textContent = window.T('dash.loading');
+  var body = {thresholds: th}; if(enable) body.enable = true;
+  try{
+    var r = await fetch('/api/admin/realtime-voice-alert-thresholds', {method:'POST', credentials:'same-origin',
+      headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken()}, body: JSON.stringify(body)});
+    var d = await r.json();
+    if(!d || !d.ok){ if(st) st.textContent = (d && d.message) || window.T('ov2_js_safe_apply_err'); return; }
+    await loadRtvAlertCalibrate(false);
+    if(st) st.textContent = window.Tf('ov2_js_safe_apply_ok', {n:(d.applied||[]).length});
+    refreshRealtimeVoiceAlertBadge();
+  }catch(e){ if(st) st.textContent = String(e); }
+}
+
+async function loadRtvAlertCalibrate(useOverrides){
+  var box = document.getElementById('rtVoiceCal');
+  if(!box) return;
+  box.style.display = 'block';
+  if(!document.getElementById('rtVoiceCalOut')){
+    box.innerHTML = '<div id="rtVoiceCalCtl"></div><div id="rtVoiceCalOut"></div>';
+  }
+  var ctl = document.getElementById('rtVoiceCalCtl');
+  var out = document.getElementById('rtVoiceCalOut');
+  out.innerHTML = '<span class="muted" style="font-size:11px;">'+window.T('dash.loading')+'</span>';
+  var qs = useOverrides ? _rtvCalOverrideQS() : '';
+  try{
+    var r = await fetch('/api/admin/realtime-voice-alert-calibrate?'+qs, {credentials:'same-origin'});
+    if(r.status === 403){ box.style.display='none'; return; }
+    var d = await r.json();
+    if(!d || !d.ok || d.enabled === false){
+      if(ctl) ctl.innerHTML = '';
+      out.innerHTML = '<div class="muted" style="font-size:11px;">'+window.T('ov2_rtv_cal_empty')+'</div>';
+      if(d && d.reason === 'feature_disabled') box.style.display = 'none';
+      return;
+    }
+    if(!useOverrides && ctl){ ctl.innerHTML = _rtvCalControlsHtml(d.thresholds, d.configured_enabled); }
+    out.innerHTML = _rtvCalResultHtml(d);
+  }catch(e){
+    out.innerHTML = '<div class="empty">'+window.T('ln_js_033')+e+'</div>';
+  }
+}
+
+async function loadRtvTrend(){
+  var el = document.getElementById('rtVoiceTrend');
+  if(!el) return;
+  try{
+    var r = await fetch('/api/admin/realtime-voice-trend?days=7', {credentials:'same-origin'});
+    var d = await r.json();
+    if(!d.enabled){
+      el.innerHTML = '<div class="muted" style="font-size:12px;">'+window.T('ov2_rtv_trend_off')+'</div>';
+      return;
+    }
+    var days = d.days || [];
+    if(days.length < 2){
+      el.innerHTML = '<div class="muted" style="font-size:12px;">'+window.T('ov2_js048')+'</div>';
+      return;
+    }
+    var conn = days.map(function(x){ return (Number(x.connect_rate)||0)*100; });
+    var health = days.map(function(x){ return (Number(x.health_ok_rate)||0)*100; });
+    var labels = days.map(function(x){
+      return (x.day||'')+': '+window.T('ov2_rtv_connected')+' '+((Number(x.connect_rate)||0)*100).toFixed(1)+'%'+
+        ' · '+window.T('ov2_rtv_health')+' '+((Number(x.health_ok_rate)||0)*100).toFixed(1)+'%'+
+        ' · '+(x.attempts||0)+window.T('kb_js_174');
+    });
+    el.innerHTML = '<div class="muted" style="font-size:12px;margin-bottom:4px;">'+window.T('ov2_rtv_trend_title')+'</div>'+
+      sparkline(conn, {labels:labels, color:'#58a6ff', w:300})+
+      ' '+sparkline(health, {labels:labels, color:'#3fb950', w:300});
+  }catch(e){
+    el.innerHTML = '<div class="muted" style="font-size:12px;">'+window.T('ov2_js051')+e+'</div>';
+  }
+}
+
+// 🧬 本机 IndexTTS2 coupled 托管：/api/voice/local-tts/*
+async function loadLocalTts(){
+  var kp = document.getElementById('localTtsKpis');
+  var hint = document.getElementById('localTtsHint');
+  var cb = document.getElementById('localTtsEnabled');
+  if(!kp || !hint) return;
+  try{
+    const r = await fetch('/api/voice/local-tts/status', {credentials:'same-origin'});
+    if(r.status === 403){ kp.innerHTML=''; hint.textContent=window.T('ov2_js037'); return; }
+    const d = await r.json();
+    if(cb) cb.checked = !!d.configured_enabled;
+    if(cb && !CAN_MANAGE_OPS) cb.disabled = true;
+    var dot = function(on){ return '<span style="color:'+(on?'#22c55e':'#ef4444')+'">●</span> '; };
+    var kpis = [
+      {label:window.T('ov2_localtts_mode'), value:(d.mode||'off')},
+      {label:window.T('ov2_localtts_reachable'), value:dot(!!d.reachable)+(d.reachable?window.T('yes'):window.T('no'))},
+      {label:window.T('ov2_localtts_model'), value:dot(!!d.model_loaded)+(d.model_loaded?window.T('ov2_localtts_ready'):window.T('ov2_localtts_loading'))},
+      {label:'PID', value:d.pid?String(d.pid):(d.attached?window.T('ov2_localtts_ext'):'—')},
+    ];
+    kp.innerHTML = kpis.map(function(c){
+      return '<div class="kpi"><div class="muted" style="font-size:12px;">'+c.label+
+        '</div><div style="font-size:20px;font-weight:600;margin-top:4px;">'+c.value+'</div></div>';
+    }).join('');
+    hint.textContent = (d.base_url||'') + (d.stop_with_app?' · '+window.T('ov2_localtts_stop_with_app'):'');
+  }catch(e){
+    hint.textContent = window.T('ln_js_033')+e;
+  }
+}
+async function toggleLocalTts(on){
+  var hint = document.getElementById('localTtsHint');
+  if(hint) hint.textContent = window.T('ov2_localtts_saving');
+  try{
+    const r = await fetch('/api/voice/local-tts/toggle', {
+      method:'POST', credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({enabled: !!on}),
+    });
+    const d = await r.json();
+    if(!d.ok){ if(hint) hint.textContent = d.error||window.T('ov_js_save_fail'); return; }
+    await loadLocalTts();
+  }catch(e){
+    if(hint) hint.textContent = window.T('ln_js_033')+e;
   }
 }
 
 if(CAN_MANAGE_OPS){ var _rb=document.getElementById('recheckBtn'); if(_rb) _rb.style.display=''; }
-function refreshAll(){ loadOverview(); loadIncidents(); loadReport(); loadTTS(); loadTTSTrend(); loadTranslationEngines(); loadXlateTrend(); }
+function refreshAll(){ loadOverview(); loadIncidents(); loadReport(); loadTTS(); loadTTSTrend(); loadAiSafety(); loadSlaBacklog(); loadTranslationEngines(); loadXlateTrend(); loadVoiceSynthLang(); loadLocalTts(); loadRealtimeVoice(); loadRtvTrend(); refreshRealtimeVoiceAlertBadge(); }
+function _onRtvOpsRefresh(){
+  loadRealtimeVoice(); loadRtvTrend(); loadRtvAlertCalibrate(false); refreshRealtimeVoiceAlertBadge();
+}
+window.addEventListener("storage", function(e){
+  if(e && e.key === "rtv.ops_refresh") _onRtvOpsRefresh();
+});
+window.addEventListener("rtv-ops-refresh", _onRtvOpsRefresh);
 refreshAll();
 setInterval(refreshAll, 60000);
 </script>

@@ -1,5 +1,5 @@
 {% extends "workspace_base.html" %}
-{% block title %}上线自检{% endblock %}
+{% block title %}{{ (i18n or {}).get('base.nav.golive', "上线自检") }}{% endblock %}
 {% block head %}
 <style>
   .gl-wrap{height:100%;overflow-y:auto;background:var(--tk-bg);padding:18px;max-width:760px;margin:0 auto;}
@@ -25,14 +25,14 @@
 {% endblock %}
 {% block content %}
 <div class="gl-wrap">
-  <a class="gl-back" href="/workspace/setup">← 返回接入向导</a>
+  <a class="gl-back" href="/workspace/setup">← {{ (i18n or {}).get('ks_s002', "返回接入向导") }}</a>
   <div class="gl-light" id="gl-light">
     <div class="gl-dot" id="gl-dot"></div>
-    <div><h2 id="gl-title">检测中…</h2><p id="gl-sub"></p></div>
+    <div><h2 id="gl-title">{{ (i18n or {}).get('kb_js_105', "检测中…") }}</h2><p id="gl-sub"></p></div>
     <div class="gl-sum" id="gl-sum"></div>
   </div>
   <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
-    <span class="gl-refresh" onclick="load()">↻ 重新检测</span>
+    <span class="gl-refresh" onclick="load()">↻ {{ (i18n or {}).get('db_s050', "重新检测") }}</span>
   </div>
   <div id="gl-list"></div>
 </div>
@@ -40,9 +40,9 @@
 <script>
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
 
-var LIGHT={green:{t:'✅ 可以上线',s:'所有硬性条件已满足，开张吧！'},
-           yellow:{t:'⚠ 可上线，但有建议项',s:'硬性条件已满足，黄色项建议尽快完善。'},
-           red:{t:'⛔ 暂不可上线',s:'存在必须修复的硬性问题，见下方红色项。'}};
+var LIGHT={green:{t:'✅ '+window.T('gl_js_001'),s:window.T('gl_js_002')},
+           yellow:{t:'⚠ '+window.T('gl_js_003'),s:window.T('gl_js_004')},
+           red:{t:'⛔ '+window.T('gl_js_005'),s:window.T('gl_js_006')}};
 
 function icon(st){ return st==='ok'?'<div class="gl-ico ok">✓</div>'
   :(st==='warn'?'<div class="gl-ico warn">!</div>':'<div class="gl-ico fail">✕</div>'); }
@@ -53,11 +53,9 @@ function render(d){
   document.getElementById('gl-title').textContent=meta.t;
   document.getElementById('gl-sub').textContent=meta.s;
   var s=d.summary||{};
-  document.getElementById('gl-sum').innerHTML='<b style="color:var(--tk-ok-ink);">'+(s.ok||0)+'</b> 通过　'
-    +'<b style="color:var(--tk-warn-ink);">'+(s.warn||0)+'</b> 建议　'
-    +'<b style="color:var(--tk-danger-ink);">'+(s.fail||0)+'</b> 待修';
+  document.getElementById('gl-sum').innerHTML=window.Tf('gl_tf_sum',{ok:s.ok||0,warn:s.warn||0,fail:s.fail||0});
   document.getElementById('gl-list').innerHTML=(d.checks||[]).map(function(c){
-    var act=c.action_url?'<a class="gl-act" href="'+esc(c.action_url)+'">'+esc(c.action_label||'处理')+'</a>':'';
+    var act=c.action_url?'<a class="gl-act" href="'+esc(c.action_url)+'">'+esc(c.action_label||window.T('gl_js_action'))+'</a>':'';
     return '<div class="gl-item">'+icon(c.status)
       +'<div class="gl-body"><div class="gl-name">'+esc(c.name)+'</div>'
       +'<div class="gl-detail">'+esc(c.detail)+'</div></div>'+act+'</div>';

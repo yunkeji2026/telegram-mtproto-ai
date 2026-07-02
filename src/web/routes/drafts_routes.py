@@ -24,6 +24,7 @@ import logging
 import time
 
 from fastapi import Depends, HTTPException, Request
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ def _intent_to_scene(intent: str) -> str:
 def _get_draft_service(request: Request):
     svc = getattr(request.app.state, "draft_service", None)
     if svc is None:
-        raise HTTPException(503, "草稿服务未启用")
+        raise HTTPException(503, tr(request, "err.svc.draft_service_disabled"))
     return svc
 
 
@@ -132,10 +133,10 @@ def register_drafts_routes(app, *, api_auth):
     async def api_drafts_autosend_status(request: Request, _=Depends(api_auth)):
         """AutosendWorker 运行时指标（主管专属）。"""
         if not _is_supervisor(request):
-            raise HTTPException(403, "需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
         worker = getattr(request.app.state, "autosend_worker", None)
         if worker is None:
-            return {"ok": True, "worker": None, "note": "AutosendWorker 未启用"}
+            return {"ok": True, "worker": None, "note": tr(request, "err.draft.autosend_worker_off")}
         snap = worker.status_snapshot()
         try:
             from src.inbox.voice_autosend import metrics_snapshot as _vms
@@ -161,7 +162,7 @@ def register_drafts_routes(app, *, api_auth):
     ):
         """草稿处置审计日志（主管专属）。可按 draft_id / agent_id / 天数过滤。"""
         if not _is_supervisor(request):
-            raise HTTPException(403, "需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
         svc = _get_draft_service(request)
         since_ts = time.time() - max(1, min(90, int(days or 7))) * 86400
         items = svc.list_audit(
@@ -310,7 +311,7 @@ def register_drafts_routes(app, *, api_auth):
         用于顶栏 SLA 角标 + 草稿审批页 SLA 徽章。
         """
         if not _is_supervisor(request):
-            raise HTTPException(403, "需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
         svc = _get_draft_service(request)
         threshold_ts = time.time() - max(1, min(72, int(hours or 4))) * 3600
         drafts = svc.list_drafts(status="pending", limit=200)
@@ -340,12 +341,12 @@ def register_drafts_routes(app, *, api_auth):
         svc = _get_draft_service(request)
         draft = svc.get_draft(draft_id)
         if draft is None:
-            raise HTTPException(404, "草稿不存在")
+            raise HTTPException(404, tr(request, "err.draft.not_found"))
 
         draft_text = str(draft.get("draft_text") or "")
         peer_text = str(draft.get("peer_text") or "")
         if not draft_text.strip():
-            return {"ok": False, "error": "草稿文本为空，无需翻译", "draft_id": draft_id}
+            return {"ok": False, "error": tr(request, "err.draft.text_empty_no_translate"), "draft_id": draft_id}
 
         # 推断语言：source=中文（草稿），target=客户语言（从 peer_text 检测）
         from src.ai.chat_assistant_service import detect_language
@@ -399,16 +400,16 @@ def register_drafts_routes(app, *, api_auth):
         返回：{ok, total, succeeded, failed, errors: [...]}
         """
         if not _is_supervisor(request):
-            raise HTTPException(403, "批量处置需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
         svc = _get_draft_service(request)
         body = {}
         try:
             body = await request.json()
         except Exception:
-            raise HTTPException(400, "请求体解析失败")
+            raise HTTPException(400, tr(request, "err.req.bad_body"))
         action = str(body.get("action") or "").strip().lower()
         if action not in {"approve", "reject"}:
-            raise HTTPException(400, "action 须为 approve 或 reject")
+            raise HTTPException(400, tr(request, "err.draft.bad_action"))
         draft_ids = list(body.get("draft_ids") or [])
         if not draft_ids:
             return {"ok": True, "total": 0, "succeeded": 0, "failed": 0, "errors": []}
@@ -441,7 +442,7 @@ def register_drafts_routes(app, *, api_auth):
         svc = _get_draft_service(request)
         draft = svc.get_draft(draft_id)
         if draft is None:
-            raise HTTPException(404, "草稿不存在")
+            raise HTTPException(404, tr(request, "err.draft.not_found"))
         return {"ok": True, "draft": draft}
 
     @app.post("/api/drafts/{draft_id}/resolve")
@@ -471,7 +472,7 @@ def register_drafts_routes(app, *, api_auth):
         Body: {action?, text?, reason?}
         """
         if not _is_supervisor(request):
-            raise HTTPException(403, "需要主管权限才能强制放行 L4 草稿")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_force_l4"))
         svc = _get_draft_service(request)
         body = await request.json()
         action = str(body.get("action") or "approve").strip().lower()
@@ -510,6 +511,51 @@ def register_drafts_routes(app, *, api_auth):
                 errors += 1
         return {"ok": True, "sent": sent, "errors": errors}
 
+    @app.post("/api/drafts/expire-stale")
+    async def api_drafts_expire_stale(request: Request, _=Depends(api_auth)):
+        """治理：作废搁置过久的 pending 草稿（转 cancelled + 审计，不删行）。主管专属。
+
+        Body（均可选）：
+          max_age_hours: int=168   超此时长仍 pending 即作废
+          levels: list=["L3","L4"] 仅这些等级；[] = 全部
+          groups_only: bool=true   仅群/频道会话（防误伤 1:1 私聊待审）
+          dry_run: bool=false      true = 只预览命中数与清单，不写库
+        返回 {ok, dry_run, count, drafts:[{draft_id,autopilot_level,conversation_id,age_hours}]}。
+        """
+        if not _is_supervisor(request):
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
+        store = getattr(request.app.state, "inbox_store", None)
+        if store is None or not hasattr(store, "expire_stale_pending_drafts"):
+            raise HTTPException(503, tr(request, "err.svc.draft_service_disabled"))
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        try:
+            max_age = float(body.get("max_age_hours", 168) or 168)
+        except (TypeError, ValueError):
+            max_age = 168.0
+        levels = body.get("levels")
+        if levels is None:
+            levels = ["L3", "L4"]
+        levels = [str(x) for x in (levels or []) if str(x)]
+        groups_only = bool(body.get("groups_only", True))
+        dry_run = bool(body.get("dry_run", False))
+        by = _session_agent_id(request) or "system"
+        victims = store.expire_stale_pending_drafts(
+            max_age_hours=max_age,
+            levels=levels or None,
+            groups_only=groups_only,
+            agent_id=by,
+            dry_run=dry_run,
+        )
+        return {
+            "ok": True,
+            "dry_run": dry_run,
+            "count": len(victims),
+            "drafts": victims,
+        }
+
 
 
 # ── J3：数据导出 API（独立注册函数，由 admin.py + main.py 共同调用）──────────
@@ -531,7 +577,7 @@ def register_metrics_route(app, *, api_auth):
         _=Depends(api_auth),
     ):
         if not _is_supervisor(request):
-            raise HTTPException(403, "指标查看需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
 
         # ── 聚合各子系统指标 ──────────────────────────────────────
         metrics: dict = {"ts": time.time()}
@@ -586,6 +632,10 @@ def register_metrics_route(app, *, api_auth):
         try:
             inbox = getattr(request.app.state, "inbox_store", None)
             if inbox is not None:
+                try:
+                    metrics["inbox_dedup"] = inbox.dedup_stats()
+                except Exception:
+                    pass
                 svc = getattr(request.app.state, "draft_service", None)
                 if svc is not None:
                     all_drafts = svc.list_drafts(status="pending", limit=1000)
@@ -620,6 +670,20 @@ def register_metrics_route(app, *, api_auth):
         try:
             from src.ai.outbound_translation_stats import get_outbound_translation_stats
             metrics["outbound_translation"] = get_outbound_translation_stats().dump()
+        except Exception:
+            pass
+
+        # V：语音克隆合成的「语言纠正」观测（合成语言随文本语种，防中文声纹念英文；纠正率/按语种分布）
+        try:
+            from src.ai.voice_synth_stats import get_voice_synth_stats
+            metrics["voice_synth_language"] = get_voice_synth_stats().dump()
+        except Exception:
+            pass
+
+        # 实时语音通话观测（发起/接通率/时长/挂断原因/主机健康/显存生命周期）
+        try:
+            from src.ai.realtime_voice_stats import get_realtime_voice_stats
+            metrics["realtime_voice"] = get_realtime_voice_stats().dump()
         except Exception:
             pass
 
@@ -666,6 +730,12 @@ def register_metrics_route(app, *, api_auth):
             _gauge("ws_sla_reassigned_total",
                    metrics["sla_watcher"].get("total_reassigned", 0),
                    "Total drafts auto-reassigned")
+            _gauge("ws_sla_expired_total",
+                   metrics["sla_watcher"].get("total_expired", 0),
+                   "Total stale pending drafts auto-expired")
+            _gauge("ws_sla_quiesced_total",
+                   metrics["sla_watcher"].get("quiesced_count", 0),
+                   "Total drafts quiesced (stale, alert suppressed)")
 
             ac = metrics.get("auto_claim", {})
             _gauge("ws_auto_claim_running",
@@ -703,6 +773,13 @@ def register_metrics_route(app, *, api_auth):
             try:
                 from src.ai.outbound_translation_stats import get_outbound_translation_stats
                 buf.write(get_outbound_translation_stats().dump_prom())
+            except Exception:
+                pass
+
+            # 实时语音通话观测（发起/接通/时长/主机健康/显存生命周期）
+            try:
+                from src.ai.realtime_voice_stats import get_realtime_voice_stats
+                buf.write(get_realtime_voice_stats().dump_prom())
             except Exception:
                 pass
 
@@ -815,7 +892,7 @@ def register_glossary_route(app, *, api_auth):
     @app.get("/api/workspace/glossary")
     async def api_workspace_glossary_get(request: Request, format: str = "json", _=Depends(api_auth)):
         if not _is_supervisor(request):
-            raise HTTPException(403, "术语库管理需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
         if str(format or "").lower() == "csv":
             from fastapi.responses import PlainTextResponse
             return PlainTextResponse(
@@ -828,7 +905,7 @@ def register_glossary_route(app, *, api_auth):
     @app.post("/api/workspace/glossary")
     async def api_workspace_glossary_edit(request: Request, _=Depends(api_auth)):
         if not _is_supervisor(request):
-            raise HTTPException(403, "术语库管理需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
         store = getattr(request.app.state, "glossary_store", None)
         if store is None:
             return {"ok": False, "message": "术语库未初始化（翻译服务未启用）"}
@@ -877,11 +954,11 @@ def register_trend_route(app, *, api_auth):
         delta 包含本周期 vs 上期 CSAT 均值变化量。
         """
         if not _is_supervisor(request):
-            raise HTTPException(403, "趋势数据需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
 
         inbox = getattr(request.app.state, "inbox_store", None)
         if inbox is None:
-            raise HTTPException(503, "inbox_store 未就绪")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
 
         days = max(1, min(90, int(days)))
         bucket_sec = 604800 if bucket == "week" else 86400
@@ -935,10 +1012,10 @@ def register_ab_testing_route(app, *, api_auth):
     ):
         """S1：列出所有 A/B 测试（主管专属）。"""
         if not _is_supervisor(request):
-            raise HTTPException(403, "A/B 测试管理需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
         inbox = getattr(request.app.state, "inbox_store", None)
         if inbox is None:
-            raise HTTPException(503, "inbox_store 未就绪")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
         from src.inbox.ab_testing import ABTestingStore
         ab = ABTestingStore(inbox)
         tests = ab.list_tests(status=status)
@@ -954,20 +1031,20 @@ def register_ab_testing_route(app, *, api_auth):
         Body: {name, intent_filter, template_a_id, template_b_id, description?, min_sample?}
         """
         if not _is_supervisor(request):
-            raise HTTPException(403, "A/B 测试管理需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
         try:
             body = await request.json()
         except Exception:
-            raise HTTPException(400, "请求体解析失败")
+            raise HTTPException(400, tr(request, "err.req.bad_body"))
         name = str(body.get("name") or "").strip()
         intent_filter = str(body.get("intent_filter") or "").strip()
         tpl_a = str(body.get("template_a_id") or "").strip()
         tpl_b = str(body.get("template_b_id") or "").strip()
         if not name or not tpl_a or not tpl_b:
-            raise HTTPException(400, "name / template_a_id / template_b_id 不能为空")
+            raise HTTPException(400, tr(request, "err.draft.ab_fields_required"))
         inbox = getattr(request.app.state, "inbox_store", None)
         if inbox is None:
-            raise HTTPException(503, "inbox_store 未就绪")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
         from src.inbox.ab_testing import ABTestingStore
         ab = ABTestingStore(inbox)
         test_id = ab.create_test(
@@ -989,10 +1066,10 @@ def register_ab_testing_route(app, *, api_auth):
     ):
         """S1：获取 A/B 测试详细结果（含显著性检验，主管专属）。"""
         if not _is_supervisor(request):
-            raise HTTPException(403, "A/B 测试管理需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
         inbox = getattr(request.app.state, "inbox_store", None)
         if inbox is None:
-            raise HTTPException(503, "inbox_store 未就绪")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
         from src.inbox.ab_testing import ABTestingStore
         ab = ABTestingStore(inbox)
         results = ab.get_results(test_id)
@@ -1008,15 +1085,15 @@ def register_ab_testing_route(app, *, api_auth):
     ):
         """S1：手动停止 A/B 测试（主管专属）。"""
         if not _is_supervisor(request):
-            raise HTTPException(403, "A/B 测试管理需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
         inbox = getattr(request.app.state, "inbox_store", None)
         if inbox is None:
-            raise HTTPException(503, "inbox_store 未就绪")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
         from src.inbox.ab_testing import ABTestingStore
         ab = ABTestingStore(inbox)
         ok = ab.stop_test(test_id, reason="manual_api")
         if not ok:
-            raise HTTPException(404, f"测试 {test_id} 不存在或已结束")
+            raise HTTPException(404, tr(request, "err.draft.test_not_found", id=test_id))
         return {"ok": True, "test_id": test_id, "status": "stopped"}
 
 
@@ -1037,12 +1114,12 @@ def register_trace_route(app, *, api_auth):
         """
         inbox = getattr(request.app.state, "inbox_store", None)
         if inbox is None:
-            raise HTTPException(503, "inbox_store 未就绪")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
         from src.inbox.tracer import TraceTimeline
         tl = TraceTimeline(inbox)
         result = tl.build(trace_id)
         if not result.get("found"):
-            raise HTTPException(404, f"trace_id={trace_id} 未找到")
+            raise HTTPException(404, tr(request, "err.draft.trace_not_found", id=trace_id))
         return {"ok": True, **result}
 
     @app.get("/api/workspace/trace")
@@ -1057,10 +1134,10 @@ def register_trace_route(app, *, api_auth):
         返回最近 limit 条对话的 trace_id + 基本信息，便于主管选取追踪。
         """
         if not _is_supervisor(request):
-            raise HTTPException(403, "trace 列表需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
         inbox = getattr(request.app.state, "inbox_store", None)
         if inbox is None:
-            raise HTTPException(503, "inbox_store 未就绪")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
         try:
             with inbox._lock:
                 q = """SELECT conversation_id, trace_id, platform, msg_count, updated_at,
@@ -1097,10 +1174,10 @@ def register_anomaly_route(app, *, api_auth):
         不触发告警；仅返回当前检测结果供主管查看。
         """
         if not _is_supervisor(request):
-            raise HTTPException(403, "异常检测查看需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
         inbox = getattr(request.app.state, "inbox_store", None)
         if inbox is None:
-            raise HTTPException(503, "inbox_store 未就绪")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
 
         from src.inbox.anomaly import AnomalyDetector
         cfg = getattr(request.app.state, "cfg", {}) or {}
@@ -1137,10 +1214,10 @@ def register_workload_route(app, *, api_auth):
         不带参数 → 所有在线坐席负荷列表（用于仪表板均衡视图）
         """
         if not _is_supervisor(request):
-            raise HTTPException(403, "工作负荷查看需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
         inbox = getattr(request.app.state, "inbox_store", None)
         if inbox is None:
-            raise HTTPException(503, "inbox_store 未就绪")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
 
         cfg = getattr(request.app.state, "cfg", {}) or {}
         max_cap = int((cfg.get("workspace") or {}).get("max_concurrent_convs") or 0)
@@ -1178,10 +1255,10 @@ def register_kb_stats_route(app, *, api_auth):
         Query: ?days=7（过去 N 天，默认 7 天）
         """
         if not _is_supervisor(request):
-            raise HTTPException(403, "KB 统计需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
         inbox = getattr(request.app.state, "inbox_store", None)
         if inbox is None:
-            raise HTTPException(503, "inbox_store 未就绪")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
         _days = max(1, min(90, int(days or 7)))
         since_ts = time.time() - _days * 86400
         stats = inbox.get_kb_hit_stats(since_ts=since_ts, top_n=30)
@@ -1209,13 +1286,13 @@ def register_kb_stats_route(app, *, api_auth):
         try:
             body = await request.json()
         except Exception:
-            raise HTTPException(400, "请求体解析失败")
+            raise HTTPException(400, tr(request, "err.req.bad_body"))
         rec_id = str(body.get("rec_id") or "").strip()
         if not rec_id:
-            raise HTTPException(400, "rec_id 不能为空")
+            raise HTTPException(400, tr(request, "err.draft.rec_id_required"))
         inbox = getattr(request.app.state, "inbox_store", None)
         if inbox is None:
-            raise HTTPException(503, "inbox_store 未就绪")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
         inbox.click_kb_recommendation(
             rec_id=rec_id,
             used_in_draft=bool(body.get("used_in_draft")),
@@ -1231,10 +1308,10 @@ def register_kb_stats_route(app, *, api_auth):
     ):
         """Q2：草稿质量分分布统计（主管专属）。"""
         if not _is_supervisor(request):
-            raise HTTPException(403, "质量统计需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
         inbox = getattr(request.app.state, "inbox_store", None)
         if inbox is None:
-            raise HTTPException(503, "inbox_store 未就绪")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
         _days = max(1, min(90, int(days or 7)))
         since_ts = time.time() - _days * 86400
         stats = inbox.list_draft_quality_stats(since_ts=since_ts)
@@ -1249,10 +1326,10 @@ def register_workspace_route(app, *, api_auth):
     async def api_list_workspaces(request: Request, _=Depends(api_auth)):
         """P3：列出所有工作区（主管专属）。"""
         if not _is_supervisor(request):
-            raise HTTPException(403, "工作区管理需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
         inbox = getattr(request.app.state, "inbox_store", None)
         if inbox is None:
-            raise HTTPException(503, "inbox_store 未就绪")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
         workspaces = inbox.list_workspaces()
         # 为每个工作区追加统计
         for ws in workspaces:
@@ -1274,17 +1351,17 @@ def register_workspace_route(app, *, api_auth):
         Body: {workspace_id, display_name, config}
         """
         if not _is_supervisor(request):
-            raise HTTPException(403, "工作区管理需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
         try:
             body = await request.json()
         except Exception:
-            raise HTTPException(400, "请求体 JSON 解析失败")
+            raise HTTPException(400, tr(request, "err.req.bad_body"))
         ws_id = str(body.get("workspace_id") or "").strip()
         if not ws_id:
-            raise HTTPException(400, "workspace_id 不能为空")
+            raise HTTPException(400, tr(request, "err.draft.workspace_id_required"))
         inbox = getattr(request.app.state, "inbox_store", None)
         if inbox is None:
-            raise HTTPException(503, "inbox_store 未就绪")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
         inbox.upsert_workspace(
             ws_id,
             display_name=str(body.get("display_name") or ""),
@@ -1297,10 +1374,10 @@ def register_workspace_route(app, *, api_auth):
     async def api_workspace_stats(request: Request, workspace_id: str, _=Depends(api_auth)):
         """P3：返回指定工作区统计（主管专属）。"""
         if not _is_supervisor(request):
-            raise HTTPException(403, "工作区管理需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
         inbox = getattr(request.app.state, "inbox_store", None)
         if inbox is None:
-            raise HTTPException(503, "inbox_store 未就绪")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
         return {"ok": True, **inbox.get_workspace_stats(workspace_id)}
 
 
@@ -1327,21 +1404,21 @@ def register_kb_archive_route(app, *, api_auth):
         主管专属；坐席可"推荐归档"，触发主管审核（future）。
         """
         if not _is_supervisor(request):
-            raise HTTPException(403, "知识库归档需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
 
         try:
             body = await request.json()
         except Exception:
-            raise HTTPException(400, "请求体 JSON 解析失败")
+            raise HTTPException(400, tr(request, "err.req.bad_body"))
 
         draft_id = str(body.get("draft_id") or "").strip()
         title = str(body.get("title") or "").strip()
         if not title:
-            raise HTTPException(400, "title 不能为空")
+            raise HTTPException(400, tr(request, "err.draft.title_required"))
 
         kb = getattr(request.app.state, "kb_store", None)
         if kb is None:
-            raise HTTPException(503, "kb_store 未就绪")
+            raise HTTPException(503, tr(request, "err.svc.kb_not_ready"))
 
         # 获取草稿内容（final_text 优先，回退到 draft_text）
         draft_text = ""
@@ -1394,7 +1471,7 @@ def register_kb_archive_route(app, *, api_auth):
         try:
             entry_id = kb.add_entry(entry_data)
         except Exception as e:
-            raise HTTPException(500, f"KB 写入失败: {e}")
+            raise HTTPException(500, tr(request, "err.draft.kb_write_failed", err=e))
 
         # 写审计（便于溯源）
         if inbox is not None and draft_id:
@@ -1439,7 +1516,7 @@ def register_my_perf_route(app, *, api_auth):
         """
         inbox = getattr(request.app.state, "inbox_store", None)
         if inbox is None:
-            raise HTTPException(503, "inbox_store 未就绪")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
 
         days = max(1, min(90, int(days)))
         now = _time.time()
@@ -1454,7 +1531,7 @@ def register_my_perf_route(app, *, api_auth):
         if not target_id:
             target_id = current_uid
         elif not is_sup and target_id != current_uid:
-            raise HTTPException(403, "坐席只能查看自己的绩效数据")
+            raise HTTPException(403, tr(request, "err.perm.agent_self_only"))
 
         # 个人绩效
         perf_list = inbox.get_agent_perf(since_ts=since_ts, agent_id=target_id)
@@ -1519,11 +1596,11 @@ def register_leaderboard_route(app, *, api_auth):
         返回按 avg_csat DESC, total DESC 排序的坐席列表，含排名 + 徽章。
         """
         if not _is_supervisor(request):
-            raise HTTPException(403, "排行榜查看需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
 
         inbox = getattr(request.app.state, "inbox_store", None)
         if inbox is None:
-            raise HTTPException(503, "inbox_store 未就绪")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
 
         import time as _time
         period_days = {"daily": 1, "weekly": 7, "monthly": 30}.get(str(period), 7)
@@ -1574,20 +1651,20 @@ def register_broadcast_route(app, *, api_auth):
     ):
         """M2：广播任意事件到 EventBus（主管专属，用于简报推送等）。"""
         if not _is_supervisor(request):
-            raise HTTPException(403, "广播需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
         try:
             body = await request.json()
         except Exception:
-            raise HTTPException(400, "请求体 JSON 解析失败")
+            raise HTTPException(400, tr(request, "err.req.bad_body"))
         event_type = str(body.get("type") or "").strip()
         if not event_type:
-            raise HTTPException(400, "type 字段不能为空")
+            raise HTTPException(400, tr(request, "err.draft.type_required"))
         data = body.get("data") or {}
         try:
             from src.integrations.shared.event_bus import get_event_bus
             get_event_bus().publish(event_type, data)
         except Exception as e:
-            raise HTTPException(500, f"EventBus 发布失败: {e}")
+            raise HTTPException(500, tr(request, "err.draft.eventbus_failed", err=e))
         return {"ok": True, "type": event_type}
 
 
@@ -1609,11 +1686,11 @@ def register_report_route(app, *, api_auth):
         format: json（默认）| text（Webhook 推送格式）| html（仪表盘嵌入）
         """
         if not _is_supervisor(request):
-            raise HTTPException(403, "简报查看需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
 
         inbox = getattr(request.app.state, "inbox_store", None)
         if inbox is None:
-            raise HTTPException(503, "inbox_store 未就绪")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
 
         from src.inbox.report_generator import ReportGenerator
         gen = ReportGenerator(
@@ -1659,7 +1736,7 @@ def register_export_route(app, *, api_auth):
         返回 CSV 文件流（BOM-UTF8，兼容 Excel）。
         """
         if not _is_supervisor(request):
-            raise HTTPException(403, "数据导出需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
 
         days_int = max(1, min(90, int(days or 7)))
         cutoff_ts = time.time() - days_int * 86400
@@ -1746,7 +1823,7 @@ def register_agent_perf_routes(app, *, api_auth, page_auth, templates, config_ma
         store = getattr(request.app.state, "inbox_store", None)
         if store is None:
             from fastapi import HTTPException
-            raise HTTPException(503, "InboxStore 未挂载")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
         return store
 
     def _ctx(request) -> dict:
@@ -1777,7 +1854,7 @@ def register_agent_perf_routes(app, *, api_auth, page_auth, templates, config_ma
         """每坐席草稿处置聚合绩效（主管专属）。"""
         if not _is_supervisor(request):
             from fastapi import HTTPException
-            raise HTTPException(403, "需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
         store = _get_store(request)
         since = _time.time() - max(1, min(90, int(days or 30))) * 86400
         rows = store.get_agent_perf(since_ts=since, agent_id=agent_id or "")
@@ -1793,7 +1870,7 @@ def register_agent_perf_routes(app, *, api_auth, page_auth, templates, config_ma
         """坐席绩效趋势（按天分桶；主管专属）。"""
         if not _is_supervisor(request):
             from fastapi import HTTPException
-            raise HTTPException(403, "需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
         store = _get_store(request)
         since = _time.time() - max(1, min(90, int(days or 14))) * 86400
         timeline = store.get_agent_perf_timeline(since_ts=since, agent_id=agent_id or "")
@@ -1809,7 +1886,7 @@ def register_agent_perf_routes(app, *, api_auth, page_auth, templates, config_ma
         """P54：Copilot 采纳率与质量回放（主管专属）。"""
         if not _is_supervisor(request):
             from fastapi import HTTPException
-            raise HTTPException(403, "需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
         store = _get_store(request)
         since = _time.time() - max(1, min(90, int(days or 14))) * 86400
         stats = store.get_copilot_stats(since_ts=since, agent_id=agent_id or "")

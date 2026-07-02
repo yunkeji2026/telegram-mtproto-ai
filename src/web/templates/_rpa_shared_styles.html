@@ -210,9 +210,9 @@ select.f-inp{cursor:pointer}
 .rpa-stream-row.err .rpa-stream-step{color:#dc2626;background:rgba(239,68,68,.1)}
 .rpa-stream-time{margin-left:auto}
 .rpa-stream-peer{font-size:.88rem;color:var(--t);white-space:pre-wrap;word-break:break-word}
-.rpa-stream-peer::before{content:'对方:';color:var(--p);font-weight:700;margin-right:.35rem;font-size:.8rem}
+.rpa-stream-peer::before{content:'{{ (i18n or {}).get("rpa_css_peer","对方:") }}';color:var(--p);font-weight:700;margin-right:.35rem;font-size:.8rem}
 .rpa-stream-reply{margin-top:.4rem;padding:.55rem .7rem;background:var(--ps);border-radius:8px;font-size:.84rem;color:var(--t);white-space:pre-wrap;word-break:break-word}
-.rpa-stream-reply::before{content:'AI 回复:';color:var(--p);font-weight:700;margin-right:.35rem;font-size:.78rem}
+.rpa-stream-reply::before{content:'{{ (i18n or {}).get("rpa_css_ai_reply","AI 回复:") }}';color:var(--p);font-weight:700;margin-right:.35rem;font-size:.78rem}
 .rpa-stream-err{margin-top:.3rem;color:#dc2626;font-size:.78rem}
 
 /* ─── Empty / loading ────────────────────────────────────────────── */

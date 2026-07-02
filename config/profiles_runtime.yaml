@@ -47,6 +47,14 @@ profiles:
       escalation_phrases:
       - 我要找你负责人
       - 投诉
+    voice_profile:
+      enabled: true
+      owner_consent: true
+      backend: minicpm_clone
+      reference_audio_path: config/voice_refs/lin_xiaoyu.wav
+      voice: zh-CN-XiaoyiNeural
+      format: mp3
+      emotion: playful
   chen_meiling:
     id: chen_meiling
     name: 陈美玲
@@ -96,6 +104,11 @@ profiles:
       - 退款
       - 投诉
       - 法律纠纷
+    voice_profile:
+      backend: edge_tts
+      voice: zh-CN-XiaoxiaoNeural
+      format: mp3
+      emotion: serious
   haruko_traveler:
     id: haruko_traveler
     name: 晴子
@@ -146,6 +159,11 @@ profiles:
       - 退款
       - 投诉
       - 威胁
+    voice_profile:
+      backend: edge_tts
+      voice: en-US-EmmaMultilingualNeural
+      format: mp3
+      emotion: calm
   marcus_wei:
     id: marcus_wei
     name: Marcus Wei（韦明远）
@@ -199,6 +217,11 @@ profiles:
       - 诈骗
       - 律师信
       - 监管举报
+    voice_profile:
+      backend: edge_tts
+      voice: en-US-AndrewMultilingualNeural
+      format: mp3
+      emotion: serious
   zhao_laoshi:
     id: zhao_laoshi
     name: 赵老师
@@ -249,6 +272,11 @@ profiles:
       - 退款
       - 投诉
       - 威胁
+    voice_profile:
+      backend: edge_tts
+      voice: zh-CN-YunyangNeural
+      format: mp3
+      emotion: warm
   zhang_jingguang:
     name: 张景光
     role: 高级电气工程师 / 技术总监，42岁，美籍华裔，长居加州，拥有香港资产
@@ -306,8 +334,10 @@ profiles:
       deny_ai: true
       claim_human: true
     voice_profile:
-      backend: ''
-      voice: ''
+      backend: edge_tts
+      voice: zh-CN-YunjianNeural
+      format: mp3
+      emotion: calm
   lin_jiaxin:
     id: lin_jiaxin
     name: 林佳欣
@@ -428,6 +458,11 @@ profiles:
       - 投诉
       - 威胁
       - 骚扰
+    voice_profile:
+      backend: edge_tts
+      voice: en-US-AvaMultilingualNeural
+      format: mp3
+      emotion: warm
 _history:
   zhang_jingguang:
   - ts: '2026-05-21T08:38:20Z'

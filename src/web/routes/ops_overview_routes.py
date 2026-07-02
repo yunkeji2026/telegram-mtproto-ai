@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Optional
 
 from fastapi import Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -318,6 +319,282 @@ def register_ops_overview_routes(app, ctx) -> None:
         except Exception:
             logger.debug("translation-confidence-trend 读取失败（已忽略）", exc_info=True)
             return {"ok": True, "enabled": False, "days": []}
+
+    @app.get("/api/admin/realtime-voice-trend")
+    async def api_realtime_voice_trend(request: Request, days: int = 7):
+        """E 线：近 N 天实时语音接通率/健康率按日聚合（供看板 sparkline）。
+
+        未开启 ``realtime_voice.trend_log`` → enabled:false + 空序列。
+        """
+        api_auth(request)
+        cfg = getattr(config_manager, "config", None) or {}
+        rtv = (cfg.get("realtime_voice") or {}) if isinstance(cfg, dict) else {}
+        if not rtv.get("enabled", False):
+            return {"ok": True, "enabled": False, "days": []}
+        try:
+            from src.ai.realtime_voice_trend_store import get_realtime_voice_trend_store
+            store = get_realtime_voice_trend_store()
+            if store is None:
+                return {"ok": True, "enabled": False, "days": []}
+            span = int(days or 7)
+            try:
+                store.prune()
+            except Exception:
+                logger.debug("rtv_trend prune 失败（已忽略）", exc_info=True)
+            return {"ok": True, "enabled": True, "days": store.daily(days=span)}
+        except Exception:
+            logger.debug("realtime-voice-trend 读取失败（已忽略）", exc_info=True)
+            return {"ok": True, "enabled": False, "days": []}
+
+    @app.get("/api/admin/ai-safety-overview")
+    async def api_ai_safety_overview(request: Request, days: int = 7):
+        """AI 安全/质量总览：复用 draft_audit_log 聚合草稿处置动作 + 风险分级，回答
+        「AI 自动发的靠不靠谱（采纳/改写/弃用率 + 拦截）」+「风险边缘量」。纯读、无新存储。
+
+        无 inbox_store / 无 ai_safety_summary → enabled:false（前端隐藏卡）。
+        """
+        api_auth(request)
+        inbox = getattr(request.app.state, "inbox_store", None)
+        if inbox is None or not hasattr(inbox, "ai_safety_summary"):
+            return {"ok": True, "enabled": False}
+        try:
+            span = int(days or 7)
+            now = time.time()
+            window = span * 86400
+            cur = inbox.ai_safety_summary(since_ts=now - window, include_trend=True)
+            # 环比：上一个等长窗口 [now-2w, now-w)（半开区间，不重叠）。
+            prev = inbox.ai_safety_summary(since_ts=now - 2 * window, until_ts=now - window)
+            delta = {
+                k: round((cur.get(k, 0) or 0) - (prev.get(k, 0) or 0), 3)
+                for k in ("adopt_rate", "edit_rate", "reject_rate", "autosend", "blocked", "reviewed")
+            }
+            blocked_top = []
+            if hasattr(inbox, "top_blocked_conversations"):
+                try:
+                    blocked_top = inbox.top_blocked_conversations(since_ts=now - window, limit=8)
+                except Exception:
+                    logger.debug("top_blocked_conversations 读取失败（已忽略）", exc_info=True)
+            drilldown = {}
+            if hasattr(inbox, "deep_link_stats"):
+                try:
+                    drilldown = inbox.deep_link_stats(source="ai_safety", since_ts=now - window)
+                except Exception:
+                    logger.debug("deep_link_stats 读取失败（已忽略）", exc_info=True)
+            return {"ok": True, "enabled": True, "days": span,
+                    "prev": prev, "delta": delta, "blocked_top": blocked_top,
+                    "drilldown": drilldown, **cur}
+        except Exception:
+            logger.debug("ai-safety-overview 读取失败（已忽略）", exc_info=True)
+            return {"ok": True, "enabled": False}
+
+    # E3：AI 安全看板下钻等轻量 UI 遥测事件的落点（观测「看板有没有人真去用」）。
+    # 同源会话鉴权即可（低风险计数写）；event 白名单防表被任意写入撑大。
+    _UI_EVENTS = {"deep_link_opened"}
+
+    @app.post("/api/admin/ui-event")
+    async def api_ui_event(request: Request):
+        api_auth(request)
+        inbox = getattr(request.app.state, "inbox_store", None)
+        if inbox is None or not hasattr(inbox, "record_ui_event"):
+            return {"ok": False, "enabled": False}
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        event = str((body or {}).get("event") or "")
+        if event not in _UI_EVENTS:
+            return {"ok": False, "error": "unknown_event"}
+        try:
+            inbox.record_ui_event(
+                event,
+                source=str((body or {}).get("source") or ""),
+                conversation_id=str((body or {}).get("conversation_id") or ""),
+            )
+        except Exception:
+            logger.debug("record_ui_event 失败（已忽略）", exc_info=True)
+        return {"ok": True}
+
+    @app.get("/api/admin/ai-quality-calibrate")
+    async def api_ai_quality_calibrate(
+        request: Request, days: int = 30,
+        adopt_min: Optional[float] = None, adopt_severe: Optional[float] = None,
+        reject_max: Optional[float] = None, reject_severe: Optional[float] = None,
+        high_risk_min: Optional[int] = None, high_risk_spike: Optional[int] = None,
+        min_samples: Optional[int] = None,
+    ):
+        """F2b 阈值校准：用真实近 ``days`` 天历史滚动 window_days 窗口，复刻 AI 质量告警评估，
+        反推「按当前（或 query what-if 覆盖）阈值会告警几次 / 分布如何」——上线前定阈值再开哨兵。
+
+        阈值：配置 ``inbox.ai_quality_alert`` 打底，query 参数（adopt_min/reject_max/… 任选）
+        覆盖做 what-if。纯读，缺 store/方法 → enabled:false。
+        """
+        api_auth(request)
+        inbox = getattr(request.app.state, "inbox_store", None)
+        if inbox is None or not hasattr(inbox, "ai_quality_daily_series"):
+            return {"ok": True, "enabled": False}
+        from src.utils.ai_quality_alert import (
+            DEFAULT_AI_QUALITY_THRESHOLDS, calibrate_ai_quality,
+        )
+        cfg = getattr(config_manager, "config", None) or {}
+        aq = ((((cfg.get("inbox") or {}).get("ai_quality_alert")) or {})
+              if isinstance(cfg, dict) else {})
+        # 配置阈值打底 + query what-if 覆盖（None 忽略）。
+        thresholds = {k: aq[k] for k in DEFAULT_AI_QUALITY_THRESHOLDS
+                      if k in aq and aq[k] is not None}
+        for key, val in (("adopt_min", adopt_min), ("adopt_severe", adopt_severe),
+                         ("reject_max", reject_max), ("reject_severe", reject_severe),
+                         ("high_risk_min", high_risk_min), ("high_risk_spike", high_risk_spike),
+                         ("min_samples", min_samples)):
+            if val is not None:
+                thresholds[key] = val
+        window_days = int(aq.get("window_days", 7) or 7)
+        try:
+            series = inbox.ai_quality_daily_series(days=int(days or 30))
+            report = calibrate_ai_quality(series, thresholds, window_days=window_days)
+        except Exception:
+            logger.debug("ai-quality-calibrate 计算失败（已忽略）", exc_info=True)
+            return {"ok": True, "enabled": False}
+        return {"ok": True, "enabled": True, "days": int(days or 30),
+                "configured_enabled": bool(aq.get("enabled", False)),
+                "thresholds": {**DEFAULT_AI_QUALITY_THRESHOLDS, **thresholds},
+                **report}
+
+    @app.post("/api/admin/ai-quality-thresholds")
+    async def api_ai_quality_thresholds(request: Request,
+                                        _=Depends(api_write("manage_ops"))):
+        """F2b++：把 what-if 校准满意的阈值一键写入 ``config.local.yaml`` overlay（治理化、
+        保主配置注释、可回滚、即时生效），补上「定完阈值还得手动抄进配置」的手工缝。
+
+        body: ``{thresholds:{adopt_min,…}, enable?:bool}``。阈值经
+        :func:`sanitize_ai_quality_thresholds` 白名单+强制类型+越界丢弃（防注入任意键）；
+        逐键过 ``ConfigManager.set_overlay_flag``（与能力开关同机制）。``enable`` 给定时同步
+        开/关哨兵主开关。返回 ``{ok, applied:[{key,value}], enabled}``。
+        """
+        if not hasattr(config_manager, "set_overlay_flag"):
+            return {"ok": False, "message": "配置写入能力不可用（请升级 ConfigManager）"}
+        from src.utils.ai_quality_alert import sanitize_ai_quality_thresholds
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        body = body if isinstance(body, dict) else {}
+        clean = sanitize_ai_quality_thresholds(body.get("thresholds"))
+        applied = []
+        for key, val in clean.items():
+            ok, _msg = config_manager.set_overlay_flag(
+                f"inbox.ai_quality_alert.{key}", val)
+            if ok:
+                applied.append({"key": key, "value": val})
+        enabled = None
+        if "enable" in body:
+            enabled = bool(body.get("enable"))
+            config_manager.set_overlay_flag("inbox.ai_quality_alert.enabled", enabled)
+        if audit_store is not None:
+            try:
+                actor = request.session.get("username", "api")
+                audit_store.log(actor, "ai_quality_thresholds", "ops", "",
+                                f"applied={len(applied)} enable={enabled}")
+            except Exception:
+                logger.debug("ai_quality_thresholds 审计写入失败（已忽略）", exc_info=True)
+        return {"ok": True, "applied": applied, "enabled": enabled}
+
+    @app.get("/api/admin/realtime-voice-alert-calibrate")
+    async def api_realtime_voice_alert_calibrate(
+        request: Request,
+        min_attempts: Optional[int] = None,
+        min_health_probes: Optional[int] = None,
+        health_ok_rate_warn: Optional[float] = None,
+        health_ok_rate_fail: Optional[float] = None,
+        connect_rate_warn: Optional[float] = None,
+        connect_rate_fail: Optional[float] = None,
+    ):
+        """D 线：实时语音告警阈值 what-if——读进程 ``RealtimeVoiceStats`` + 配置阈值，
+        复刻 watchdog 评估，看「按此阈值现在/历史会告警吗」。纯读；功能未开 → enabled:false。
+        """
+        api_auth(request)
+        cfg = getattr(config_manager, "config", None) or {}
+        rtv = (cfg.get("realtime_voice") or {}) if isinstance(cfg, dict) else {}
+        if not rtv.get("enabled", False):
+            return {"ok": True, "enabled": False, "reason": "feature_disabled"}
+        from src.ai.realtime_voice_stats import get_realtime_voice_stats
+        from src.utils.realtime_voice_alert import (
+            DEFAULT_REALTIME_VOICE_ALERT_THRESHOLDS,
+            calibrate_realtime_voice_alert,
+        )
+        alert_cfg = (rtv.get("alert") or {}) if isinstance(rtv, dict) else {}
+        thresholds = {k: alert_cfg[k] for k in DEFAULT_REALTIME_VOICE_ALERT_THRESHOLDS
+                        if k in alert_cfg and alert_cfg[k] is not None}
+        for key, val in (
+            ("min_attempts", min_attempts),
+            ("min_health_probes", min_health_probes),
+            ("health_ok_rate_warn", health_ok_rate_warn),
+            ("health_ok_rate_fail", health_ok_rate_fail),
+            ("connect_rate_warn", connect_rate_warn),
+            ("connect_rate_fail", connect_rate_fail),
+        ):
+            if val is not None:
+                thresholds[key] = val
+        try:
+            stats = get_realtime_voice_stats().dump()
+            daily = None
+            trend_enabled = False
+            try:
+                from src.ai.realtime_voice_trend_store import get_realtime_voice_trend_store
+                trend_store = get_realtime_voice_trend_store()
+                if trend_store is not None:
+                    trend_enabled = True
+                    try:
+                        trend_store.prune()
+                    except Exception:
+                        pass
+                    daily = trend_store.daily_for_calibrate(days=7)
+            except Exception:
+                pass
+            report = calibrate_realtime_voice_alert(
+                stats, thresholds, daily=daily if daily else None)
+        except Exception:
+            logger.debug("realtime-voice-alert-calibrate 计算失败（已忽略）", exc_info=True)
+            return {"ok": True, "enabled": False}
+        return {
+            "ok": True,
+            "enabled": True,
+            "configured_enabled": bool(alert_cfg.get("enabled", False)),
+            "trend_enabled": trend_enabled,
+            "thresholds": {**DEFAULT_REALTIME_VOICE_ALERT_THRESHOLDS, **thresholds},
+            **report,
+        }
+
+    @app.post("/api/admin/realtime-voice-alert-thresholds")
+    async def api_realtime_voice_alert_thresholds(request: Request,
+                                                  _=Depends(api_write("manage_ops"))):
+        """D 线++：what-if 满意后一键写入 ``config.local.yaml`` overlay（``realtime_voice.alert.*``）。"""
+        if not hasattr(config_manager, "set_overlay_flag"):
+            return {"ok": False, "message": "配置写入能力不可用（请升级 ConfigManager）"}
+        from src.utils.realtime_voice_alert import sanitize_realtime_voice_alert_thresholds
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        body = body if isinstance(body, dict) else {}
+        clean = sanitize_realtime_voice_alert_thresholds(body.get("thresholds"))
+        applied = []
+        for key, val in clean.items():
+            ok, _msg = config_manager.set_overlay_flag(
+                f"realtime_voice.alert.{key}", val)
+            if ok:
+                applied.append({"key": key, "value": val})
+        enabled = None
+        if "enable" in body:
+            enabled = bool(body.get("enable"))
+            config_manager.set_overlay_flag("realtime_voice.alert.enabled", enabled)
+        if audit_store is not None:
+            try:
+                actor = request.session.get("username", "api")
+                audit_store.log(actor, "realtime_voice_alert_thresholds", "ops", "",
+                                f"applied={len(applied)} enable={enabled}")
+            except Exception:
+                logger.debug("realtime_voice_alert_thresholds 审计写入失败（已忽略）", exc_info=True)
+        return {"ok": True, "applied": applied, "enabled": enabled}
 
     @app.get("/admin/ops", response_class=HTMLResponse)
     async def ops_overview_page(request: Request, _=Depends(page_auth)):

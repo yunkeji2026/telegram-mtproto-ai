@@ -1,5 +1,5 @@
 {% extends "workspace_base.html" %}
-{% block title %}模板库管理{% endblock %}
+{% block title %}{{ (i18n or {}).get('tm_s001', "模板库管理") }}{% endblock %}
 {% block content %}
 <style>
 .tm-wrap{max-width:900px;margin:0 auto;padding:20px 16px;}
@@ -38,64 +38,64 @@
 </style>
 <div class="tm-wrap">
   <div class="tm-header">
-    <div class="tm-title">📚 回复模板库</div>
-    <button class="tm-btn" style="background:#3b82f6;color:#fff;padding:7px 16px;font-size:13px;" onclick="openModal()">+ 新建模板</button>
+    <div class="tm-title">📚 {{ (i18n or {}).get('base.nav.templates_t', "回复模板库") }}</div>
+    <button class="tm-btn" style="background:#3b82f6;color:#fff;padding:7px 16px;font-size:13px;" onclick="openModal()">+ {{ (i18n or {}).get('tm_s002', "新建模板") }}</button>
   </div>
   <div class="tm-filters">
-    <input class="tm-search" id="tm-search" placeholder="搜索模板标题或内容…" oninput="debounceLoad()">
-    <span class="tm-filter active" onclick="setLang('',this)">全部语言</span>
-    <span class="tm-filter" onclick="setLang('zh',this)">中文</span>
+    <input class="tm-search" id="tm-search" placeholder="{{ (i18n or {}).get('tm_s003', '搜索模板标题或内容…') }}" oninput="debounceLoad()">
+    <span class="tm-filter active" onclick="setLang('',this)">{{ (i18n or {}).get('kb_s065', "全部语言") }}</span>
+    <span class="tm-filter" onclick="setLang('zh',this)">{{ (i18n or {}).get('dash.lang.zh', "中文") }}</span>
     <span class="tm-filter" onclick="setLang('en',this)">EN</span>
-    <span class="tm-filter" onclick="setLang('ja',this)">日本語</span>
-    <span class="tm-filter" onclick="setScene('',this)" style="margin-left:8px;">全部场景</span>
-    <span class="tm-filter" onclick="setScene('greeting',this)">开场白</span>
-    <span class="tm-filter" onclick="setScene('order_inquiry',this)">订单</span>
-    <span class="tm-filter" onclick="setScene('shipping',this)">物流</span>
-    <span class="tm-filter" onclick="setScene('refund',this)">退款</span>
-    <span class="tm-filter" onclick="setScene('complaint',this)">投诉</span>
-    <span class="tm-filter" onclick="setScene('closing',this)">结束语</span>
+    <span class="tm-filter" onclick="setLang('ja',this)">{{ (i18n or {}).get('draft.tpl.lang_ja', "日本語") }}</span>
+    <span class="tm-filter" onclick="setScene('',this)" style="margin-left:8px;">{{ (i18n or {}).get('tm_s004', "全部场景") }}</span>
+    <span class="tm-filter" onclick="setScene('greeting',this)">{{ (i18n or {}).get('psn_js_177', "开场白") }}</span>
+    <span class="tm-filter" onclick="setScene('order_inquiry',this)">{{ (i18n or {}).get('tm_s005', "订单") }}</span>
+    <span class="tm-filter" onclick="setScene('shipping',this)">{{ (i18n or {}).get('tm_s006', "物流") }}</span>
+    <span class="tm-filter" onclick="setScene('refund',this)">{{ (i18n or {}).get('tm_s007', "退款") }}</span>
+    <span class="tm-filter" onclick="setScene('complaint',this)">{{ (i18n or {}).get('tm_s008', "投诉") }}</span>
+    <span class="tm-filter" onclick="setScene('closing',this)">{{ (i18n or {}).get('tm_s009', "结束语") }}</span>
   </div>
   <div id="tm-stat" class="tm-stat"></div>
   <table class="tm-table" id="tm-table">
     <thead><tr>
-      <th>标题</th><th>语言</th><th>场景</th><th>内容预览</th><th>使用次数</th><th>操作</th>
+      <th>{{ (i18n or {}).get('kb_s106', "标题") }}</th><th>{{ (i18n or {}).get('draft.q.lang_match', "语言") }}</th><th>{{ (i18n or {}).get('kb_js_072', "场景") }}</th><th>{{ (i18n or {}).get('tp_s010', "内容预览") }}</th><th>{{ (i18n or {}).get('tm_s010', "使用次数") }}</th><th>{{ (i18n or {}).get('ov_js_th_action', "操作") }}</th>
     </tr></thead>
-    <tbody id="tm-body"><tr><td colspan="6" class="tm-empty">加载中…</td></tr></tbody>
+    <tbody id="tm-body"><tr><td colspan="6" class="tm-empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</td></tr></tbody>
   </table>
 </div>
 
 <!-- 新建/编辑 Modal -->
 <div class="tm-modal" id="tm-modal">
   <div class="tm-dialog">
-    <h3 id="modal-title">新建模板</h3>
+    <h3 id="modal-title">{{ (i18n or {}).get('tm_s002', "新建模板") }}</h3>
     <input type="hidden" id="modal-id">
-    <div class="tm-field"><label>标题 *</label><input id="modal-ttl" placeholder="简短描述（如：中文订单确认）"></div>
-    <div class="tm-field"><label>内容 *</label><textarea id="modal-content" placeholder="模板正文。使用 {变量} 标记占位符，如 {订单号}"></textarea></div>
+    <div class="tm-field"><label>{{ (i18n or {}).get('kb_s106', "标题") }} *</label><input id="modal-ttl" placeholder="{{ (i18n or {}).get('tm_s011', '简短描述（如：中文订单确认）') }}"></div>
+    <div class="tm-field"><label>{{ (i18n or {}).get('em_s017', "内容") }} *</label><textarea id="modal-content" placeholder="{{ (i18n or {}).get('tm_s012', '模板正文。使用') }} {{ (i18n or {}).get('tm_s013', '{变量}') }} {{ (i18n or {}).get('tm_s014', '标记占位符，如') }} {{ (i18n or {}).get('tm_s015', '{订单号}') }}"></textarea></div>
     <div style="display:flex;gap:12px;">
-      <div class="tm-field" style="flex:1;"><label>语言</label>
+      <div class="tm-field" style="flex:1;"><label>{{ (i18n or {}).get('draft.q.lang_match', "语言") }}</label>
         <select id="modal-lang">
-          <option value="zh">中文 (zh)</option>
+          <option value="zh">{{ (i18n or {}).get('dash.lang.zh', "中文") }} (zh)</option>
           <option value="en">English (en)</option>
-          <option value="ja">日本語 (ja)</option>
+          <option value="ja">{{ (i18n or {}).get('draft.tpl.lang_ja', "日本語") }} (ja)</option>
           <option value="ko">한국어 (ko)</option>
           <option value="th">ไทย (th)</option>
         </select>
       </div>
-      <div class="tm-field" style="flex:1;"><label>场景</label>
+      <div class="tm-field" style="flex:1;"><label>{{ (i18n or {}).get('kb_js_072', "场景") }}</label>
         <select id="modal-scene">
-          <option value="">通用</option>
-          <option value="greeting">开场白</option>
-          <option value="order_inquiry">订单查询</option>
-          <option value="shipping">物流查询</option>
-          <option value="refund">退款</option>
-          <option value="product_info">产品咨询</option>
-          <option value="complaint">投诉处理</option>
-          <option value="closing">结束语</option>
+          <option value="">{{ (i18n or {}).get('rpa_intent_general', "通用") }}</option>
+          <option value="greeting">{{ (i18n or {}).get('psn_js_177', "开场白") }}</option>
+          <option value="order_inquiry">{{ (i18n or {}).get('kb_s111', "订单查询") }}</option>
+          <option value="shipping">{{ (i18n or {}).get('tm_s016', "物流查询") }}</option>
+          <option value="refund">{{ (i18n or {}).get('tm_s007', "退款") }}</option>
+          <option value="product_info">{{ (i18n or {}).get('tm_s017', "产品咨询") }}</option>
+          <option value="complaint">{{ (i18n or {}).get('tp_nm_complaint', "投诉处理") }}</option>
+          <option value="closing">{{ (i18n or {}).get('tm_s009', "结束语") }}</option>
         </select>
       </div>
-      <div class="tm-field" style="flex:1;"><label>平台（留空=全平台）</label>
+      <div class="tm-field" style="flex:1;"><label>{{ (i18n or {}).get('tm_s018', "平台（留空") }}={{ (i18n or {}).get('tm_s019', "全平台）") }}</label>
         <select id="modal-plat">
-          <option value="">全平台</option>
+          <option value="">{{ (i18n or {}).get('rpa_fn_scope_all', "全平台") }}</option>
           <option value="line">LINE</option>
           <option value="whatsapp">WhatsApp</option>
           <option value="messenger">Messenger</option>
@@ -104,8 +104,8 @@
       </div>
     </div>
     <div class="tm-dialog-btns">
-      <button class="tm-btn" style="background:#f1f5f9;color:#475569;" onclick="closeModal()">取消</button>
-      <button class="tm-btn" style="background:#3b82f6;color:#fff;padding:6px 18px;" onclick="saveModal()">保存</button>
+      <button class="tm-btn" style="background:#f1f5f9;color:#475569;" onclick="closeModal()">{{ (i18n or {}).get('ov_js_cancel', "取消") }}</button>
+      <button class="tm-btn" style="background:#3b82f6;color:#fff;padding:6px 18px;" onclick="saveModal()">{{ (i18n or {}).get('save', "保存") }}</button>
     </div>
   </div>
 </div>
@@ -122,13 +122,13 @@ function load(){
   fetch(url).then(function(r){return r.json();}).then(function(d){
     _tmplates=d.templates||[];
     var stat=document.getElementById('tm-stat');
-    if(stat) stat.textContent='共 '+_tmplates.length+' 条模板';
+    if(stat) stat.textContent=window.T('wa_js_019')+' '+_tmplates.length+' '+window.T('tm_js001');
     var body=document.getElementById('tm-body');
     if(!_tmplates.length){
-      body.innerHTML='<tr><td colspan="6" class="tm-empty">暂无模板</td></tr>';
+      body.innerHTML='<tr><td colspan="6" class="tm-empty">'+window.T('draft.tpl.no_tpl')+'</td></tr>';
       return;
     }
-    var sceneNames={greeting:'开场白',order_inquiry:'订单',shipping:'物流',refund:'退款',product_info:'产品',complaint:'投诉',closing:'结束语'};
+    var sceneNames={greeting:window.T('psn_js_177'),order_inquiry:window.T('tm_s005'),shipping:window.T('tm_s006'),refund:window.T('tm_s007'),product_info:window.T('tm_js002'),complaint:window.T('tm_s008'),closing:window.T('tm_s009')};
     body.innerHTML=_tmplates.map(function(t){
       var lc=t.language||'zh';
       var langBadge='<span class="tm-badge '+lc+'">'+esc(lc.toUpperCase())+'</span>';
@@ -139,12 +139,12 @@ function load(){
         +'<td>'+sceneBadge+'</td>'
         +'<td class="tm-content-cell" title="'+esc(t.content)+'">'+esc(t.content)+'</td>'
         +'<td style="text-align:center;color:#94a3b8;">'+esc(t.used_count||0)+'</td>'
-        +'<td><button class="tm-btn tm-btn-edit" onclick="editTpl(\''+esc(t.id)+'\')">编辑</button> '
-        +'<button class="tm-btn tm-btn-del" onclick="delTpl(\''+esc(t.id)+'\',\''+esc(t.title)+'\')">删除</button></td>'
+        +'<td><button class="tm-btn tm-btn-edit" onclick="editTpl(\''+esc(t.id)+'\')">'+window.T('edit')+'</button> '
+        +'<button class="tm-btn tm-btn-del" onclick="delTpl(\''+esc(t.id)+'\',\''+esc(t.title)+'\')">'+window.T('delete')+'</button></td>'
         +'</tr>';
     }).join('');
   }).catch(function(){
-    document.getElementById('tm-body').innerHTML='<tr><td colspan="6" class="tm-empty">加载失败</td></tr>';
+    document.getElementById('tm-body').innerHTML='<tr><td colspan="6" class="tm-empty">'+window.T('rpa_load_failed')+'</td></tr>';
   });
 }
 var _dt;
@@ -152,7 +152,7 @@ function debounceLoad(){ clearTimeout(_dt); _dt=setTimeout(load, 300); }
 function setLang(lang, el){
   _lang=lang;
   document.querySelectorAll('.tm-filters .tm-filter').forEach(function(f){
-    if(['全部语言','中文','EN','日本語'].includes(f.textContent)) f.classList.remove('active');
+    if([window.T('kb_s065'),window.T('dash.lang.zh'),'EN',window.T('draft.tpl.lang_ja')].includes(f.textContent)) f.classList.remove('active');
   });
   if(el) el.classList.add('active');
   load();
@@ -160,7 +160,7 @@ function setLang(lang, el){
 function setScene(scene, el){
   _scene=scene;
   document.querySelectorAll('.tm-filters .tm-filter').forEach(function(f){
-    if(!['全部语言','中文','EN','日本語'].includes(f.textContent)) f.classList.remove('active');
+    if(![window.T('kb_s065'),window.T('dash.lang.zh'),'EN',window.T('draft.tpl.lang_ja')].includes(f.textContent)) f.classList.remove('active');
   });
   if(el) el.classList.add('active');
   load();
@@ -169,7 +169,7 @@ function openModal(){ document.getElementById('tm-modal').classList.add('open');
 function closeModal(){ document.getElementById('tm-modal').classList.remove('open'); _resetModal(); }
 function _resetModal(){
   document.getElementById('modal-id').value='';
-  document.getElementById('modal-title').textContent='新建模板';
+  document.getElementById('modal-title').textContent=window.T('tm_s002');
   document.getElementById('modal-ttl').value='';
   document.getElementById('modal-content').value='';
   document.getElementById('modal-lang').value='zh';
@@ -180,7 +180,7 @@ function editTpl(tid){
   var t=_tmplates.find(function(x){return x.id===tid;});
   if(!t) return;
   document.getElementById('modal-id').value=t.id;
-  document.getElementById('modal-title').textContent='编辑模板';
+  document.getElementById('modal-title').textContent=window.T('tp_s016');
   document.getElementById('modal-ttl').value=t.title||'';
   document.getElementById('modal-content').value=t.content||'';
   document.getElementById('modal-lang').value=t.language||'zh';
@@ -192,7 +192,7 @@ function saveModal(){
   var tid=document.getElementById('modal-id').value.trim();
   var title=document.getElementById('modal-ttl').value.trim();
   var content=document.getElementById('modal-content').value.trim();
-  if(!title||!content){ alert('标题和内容不能为空'); return; }
+  if(!title||!content){ alert(window.T('tm_js003')); return; }
   var body={title:title,content:content,language:document.getElementById('modal-lang').value,
     scene:document.getElementById('modal-scene').value,platform:document.getElementById('modal-plat').value};
   var url,method;
@@ -201,16 +201,16 @@ function saveModal(){
   fetch(url,{method:method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
     .then(function(r){return r.json();}).then(function(d){
       if(d&&d.ok){ closeModal(); load(); }
-      else { alert((d&&d.detail)||'保存失败'); }
-    }).catch(function(){ alert('网络错误'); });
+      else { alert((d&&d.detail)||window.T('ov_js_save_fail')); }
+    }).catch(function(){ alert(window.T('draft.net_err')); });
 }
 function delTpl(tid, title){
-  if(!confirm('确定删除模板「'+title+'」？此操作不可恢复。')) return;
+  if(!confirm(window.T('tm_js004')+' "'+title+'"? '+window.T('tm_js005'))) return;
   fetch('/api/reply-templates/'+encodeURIComponent(tid),{method:'DELETE'})
     .then(function(r){return r.json();}).then(function(d){
       if(d&&d.ok){ load(); }
-      else { alert((d&&d.detail)||'删除失败（可能需要主管权限）'); }
-    }).catch(function(){ alert('网络错误'); });
+      else { alert((d&&d.detail)||window.T('tm_js006')); }
+    }).catch(function(){ alert(window.T('draft.net_err')); });
 }
 document.getElementById('tm-modal').addEventListener('click', function(e){
   if(e.target===this) closeModal();

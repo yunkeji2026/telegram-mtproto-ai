@@ -40,6 +40,7 @@ from src.integrations.rpa_shared import (
     count_runs_for_chat_name,
     extract_chat_name,
 )
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -1177,7 +1178,7 @@ def register_rpa_overview_routes(
 
         valid_actions = {"start", "stop", "pause", "resume", "trigger"}
         if action not in valid_actions:
-            raise HTTPException(400, f"action 须为 {'/'.join(sorted(valid_actions))}，收到: {action}")
+            raise HTTPException(400, tr(request, "err.rpa.action_must_be", actions='/'.join(sorted(valid_actions)), got=action))
 
         # 查找目标 service
         svc = None
@@ -1188,12 +1189,12 @@ def register_rpa_overview_routes(
         elif platform == "whatsapp":
             svc = _get_whatsapp_service(request)
         elif platform == "telegram":
-            raise HTTPException(400, "Telegram 走 MTProto 直连，不支持控制")
+            raise HTTPException(400, tr(request, "err.rpa.telegram_no_control"))
         else:
-            raise HTTPException(400, f"未知平台: {platform}")
+            raise HTTPException(400, tr(request, "err.rpa.unknown_platform", platform=platform))
 
         if svc is None:
-            raise HTTPException(503, f"{platform} RPA 服务未构建或未启用")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_built", platform=platform))
 
         result: Dict[str, Any] = {"ok": True, "platform": platform, "action": action}
 
@@ -1287,7 +1288,7 @@ def register_rpa_overview_routes(
         body = await request.json()
         serial = (body.get("serial") or "").strip()
         if not serial:
-            raise HTTPException(400, "serial 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="serial"))
         from src.shared.device_registry import get_device_registry
         reg = get_device_registry()
         fields: Dict[str, Any] = {}
@@ -1329,7 +1330,7 @@ def register_rpa_overview_routes(
         reg = get_device_registry()
         dev_info = reg.get(serial)
         if not dev_info:
-            raise HTTPException(404, f"设备 {serial} 未注册")
+            raise HTTPException(404, tr(request, "err.rpa.device_not_registered", serial=serial))
 
         label = (
             (dev_info.get("label") or serial[:8])
@@ -1339,7 +1340,7 @@ def register_rpa_overview_routes(
         try:
             installed = await asyncio.to_thread(detect_installed_chat_apps, serial)
         except Exception as exc:
-            raise HTTPException(500, f"ADB 检测失败: {exc}")
+            raise HTTPException(500, tr(request, "err.rpa.adb_check_failed", err=exc))
 
         if not any(installed.values()):
             return {"ok": True, "detected": {}, "message": "未检测到已安装的聊天 app（确认设备已连接且 ADB 授权）"}
@@ -1422,9 +1423,9 @@ def register_rpa_overview_routes(
         serials = body.get("serials") or []
         fields = body.get("fields") or {}
         if not serials:
-            raise HTTPException(400, "serials 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="serials"))
         if not fields:
-            raise HTTPException(400, "fields 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="fields"))
 
         # 过滤允许的字段
         allowed = {"label", "group_name", "number", "wifi_ip",
@@ -1432,7 +1433,7 @@ def register_rpa_overview_routes(
                    "persona_messenger", "persona_line", "persona_whatsapp"}
         clean_fields = {k: v for k, v in fields.items() if k in allowed}
         if not clean_fields:
-            raise HTTPException(400, "无有效字段")
+            raise HTTPException(400, tr(request, "err.rpa.no_valid_fields"))
 
         from src.shared.device_registry import get_device_registry
         reg = get_device_registry()
@@ -1523,7 +1524,7 @@ def register_rpa_overview_routes(
         fields = body.get("fields") or {}
 
         if not serials:
-            raise HTTPException(400, "serials 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="serials"))
 
         # 从模板名查找配置
         if template_name and not fields:
@@ -1532,11 +1533,11 @@ def register_rpa_overview_routes(
             templates = cfg.get("device_templates", []) or []
             tpl = next((t for t in templates if t.get("name") == template_name), None)
             if not tpl:
-                raise HTTPException(404, f"模板 '{template_name}' 不存在")
+                raise HTTPException(404, tr(request, "err.rpa.template_not_found", template_name=template_name))
             fields = tpl.get("fields", {})
 
         if not fields:
-            raise HTTPException(400, "fields 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="fields"))
 
         # 过滤允许的字段
         allowed = {"label", "group_name", "number", "wifi_ip",
@@ -1544,7 +1545,7 @@ def register_rpa_overview_routes(
                    "persona_messenger", "persona_line", "persona_whatsapp"}
         clean_fields = {k: v for k, v in fields.items() if k in allowed}
         if not clean_fields:
-            raise HTTPException(400, "无有效字段")
+            raise HTTPException(400, tr(request, "err.rpa.no_valid_fields"))
 
         from src.shared.device_registry import get_device_registry
         reg = get_device_registry()

@@ -212,6 +212,289 @@ class TestK1SLABreachDetection:
 
 
 # ─────────────────────────────────────
+# K1+: 再告警指数退避 + 陈旧封顶 + pending 自动作废
+# ─────────────────────────────────────
+
+class TestK1RealertBackoff:
+    def test_no_realert_within_backoff_window(self):
+        """同一草稿在退避窗口内多次 tick 不重复告警（对旧版每小时全清风暴的修复）"""
+        store = _make_store()
+        svc = _make_svc(store)
+        watcher = SLAWatcher(
+            draft_service=svc, inbox_store=store,
+            config={"sla_hours": 0.001, "realert_base_sec": 3600},
+        )
+        _insert_pending_draft(store, "d-bk1", "conv-bk1", "L3", created_ago_sec=600)
+
+        published = []
+        with patch("src.integrations.shared.event_bus.get_event_bus") as mock_bus:
+            mock_bus.return_value.publish = lambda etype, data: published.append((etype, data))
+            watcher._check_sla_breach()
+            watcher._check_sla_breach()
+            watcher._check_sla_breach()
+
+        assert len([e for e in published if e[0] == "draft_sla_breach"]) == 1
+
+    def test_realert_after_backoff_elapsed(self):
+        """退避到点后允许再次告警，且 alert_count 递增"""
+        store = _make_store()
+        svc = _make_svc(store)
+        watcher = SLAWatcher(
+            draft_service=svc, inbox_store=store,
+            config={"sla_hours": 0.001, "realert_base_sec": 3600},
+        )
+        _insert_pending_draft(store, "d-bk2", "conv-bk2", "L3", created_ago_sec=600)
+
+        published = []
+        with patch("src.integrations.shared.event_bus.get_event_bus") as mock_bus:
+            mock_bus.return_value.publish = lambda etype, data: published.append((etype, data))
+            watcher._check_sla_breach()
+            # 模拟退避窗口已过
+            watcher._alert_state["d-bk2"]["next_ts"] = time.time() - 1
+            watcher._check_sla_breach()
+
+        breaches = [e[1] for e in published if e[0] == "draft_sla_breach"]
+        assert len(breaches) == 2
+        assert breaches[0]["alert_count"] == 1
+        assert breaches[1]["alert_count"] == 2
+
+    def test_backoff_interval_grows_and_caps(self):
+        """指数退避：下次告警间隔随次数翻倍，并被 realert_max_sec 封顶"""
+        store = _make_store()
+        svc = _make_svc(store)
+        watcher = SLAWatcher(
+            draft_service=svc, inbox_store=store,
+            config={"sla_hours": 0.001, "realert_base_sec": 100,
+                    "realert_backoff": 2.0, "realert_max_sec": 250},
+        )
+        _insert_pending_draft(store, "d-bk3", "conv-bk3", "L4", created_ago_sec=600)
+
+        gaps = []
+        with patch("src.integrations.shared.event_bus.get_event_bus") as mock_bus:
+            mock_bus.return_value.publish = MagicMock()
+            for _ in range(4):
+                now = time.time()
+                watcher._check_sla_breach()
+                gaps.append(round(watcher._alert_state["d-bk3"]["next_ts"] - now))
+                watcher._alert_state["d-bk3"]["next_ts"] = time.time() - 1
+
+        # 100 → 200 → 250(capped) → 250(capped)
+        assert gaps[0] == 100
+        assert gaps[1] == 200
+        assert gaps[2] == 250
+        assert gaps[3] == 250
+
+    def test_stale_hours_quiesces_after_first_alert(self):
+        """stale_hours>0：陈旧草稿首告警后静默，后续即便到点也不再告警"""
+        store = _make_store()
+        svc = _make_svc(store)
+        watcher = SLAWatcher(
+            draft_service=svc, inbox_store=store,
+            config={"sla_hours": 0.001, "realert_base_sec": 100, "stale_hours": 1},
+        )
+        # 草稿 2 小时前建 → 超过 stale_hours=1h
+        _insert_pending_draft(store, "d-stale", "conv-stale", "L3", created_ago_sec=7200)
+
+        published = []
+        with patch("src.integrations.shared.event_bus.get_event_bus") as mock_bus:
+            mock_bus.return_value.publish = lambda etype, data: published.append((etype, data))
+            watcher._check_sla_breach()
+            assert watcher._alert_state["d-stale"]["quiesced"] is True
+            # 即便强制到点也不再发
+            watcher._alert_state["d-stale"]["next_ts"] = time.time() - 1
+            watcher._check_sla_breach()
+
+        assert len([e for e in published if e[0] == "draft_sla_breach"]) == 1
+        assert watcher.quiesced_count == 1
+
+    def test_snapshot_has_new_fields(self):
+        store = _make_store()
+        svc = _make_svc(store)
+        watcher = SLAWatcher(draft_service=svc, inbox_store=store)
+        snap = watcher.status_snapshot()
+        for k in ("realert_base_sec", "realert_backoff", "realert_max_sec",
+                  "stale_hours", "auto_expire_hours", "total_expired", "quiesced_count",
+                  "backlog_summary", "total_summary_events"):
+            assert k in snap
+
+
+class TestK1BacklogSummary:
+    def _run(self, watcher):
+        published = []
+        with patch("src.integrations.shared.event_bus.get_event_bus") as mock_bus:
+            mock_bus.return_value.publish = lambda etype, data: published.append((etype, data))
+            watcher._check_sla_breach()
+        return published
+
+    def test_off_by_default_no_summary(self):
+        """默认关：不发 draft_backlog_summary（旧行为不变）"""
+        store = _make_store()
+        svc = _make_svc(store)
+        watcher = SLAWatcher(draft_service=svc, inbox_store=store, config={"sla_hours": 0.001})
+        _insert_pending_draft(store, "d-bs0", "conv-bs0", "L3", created_ago_sec=600)
+        published = self._run(watcher)
+        assert not any(e[0] == "draft_backlog_summary" for e in published)
+
+    def test_emits_aggregate_count_and_levels(self):
+        """开启后：发一条汇总，count/l3/l4 与实际越线数一致"""
+        store = _make_store()
+        svc = _make_svc(store)
+        watcher = SLAWatcher(
+            draft_service=svc, inbox_store=store,
+            config={"sla_hours": 0.001, "backlog_summary": True},
+        )
+        _insert_pending_draft(store, "d-bs1", "conv-bs1", "L3", created_ago_sec=600)
+        _insert_pending_draft(store, "d-bs2", "conv-bs2", "L4", created_ago_sec=600)
+        _insert_pending_draft(store, "d-bs3", "conv-bs3", "L4", created_ago_sec=600)
+        published = self._run(watcher)
+        summaries = [e[1] for e in published if e[0] == "draft_backlog_summary"]
+        assert len(summaries) == 1
+        assert summaries[0]["count"] == 3
+        assert summaries[0]["l3"] == 1
+        assert summaries[0]["l4"] == 2
+        assert watcher.total_summary_events == 1
+
+    def test_not_reemitted_when_count_unchanged_within_interval(self):
+        """数量不变且未到重发间隔 → 不重复发（避免每 tick 刷屏）"""
+        store = _make_store()
+        svc = _make_svc(store)
+        watcher = SLAWatcher(
+            draft_service=svc, inbox_store=store,
+            config={"sla_hours": 0.001, "backlog_summary": True,
+                    "backlog_summary_interval_sec": 3600},
+        )
+        _insert_pending_draft(store, "d-bs4", "conv-bs4", "L3", created_ago_sec=600)
+        published = []
+        with patch("src.integrations.shared.event_bus.get_event_bus") as mock_bus:
+            mock_bus.return_value.publish = lambda etype, data: published.append((etype, data))
+            watcher._check_sla_breach()
+            watcher._check_sla_breach()
+            watcher._check_sla_breach()
+        assert len([e for e in published if e[0] == "draft_backlog_summary"]) == 1
+
+    def test_reemits_when_count_changes(self):
+        """数量变化 → 立即重发一条新汇总"""
+        store = _make_store()
+        svc = _make_svc(store)
+        watcher = SLAWatcher(
+            draft_service=svc, inbox_store=store,
+            config={"sla_hours": 0.001, "backlog_summary": True,
+                    "backlog_summary_interval_sec": 3600},
+        )
+        _insert_pending_draft(store, "d-bs5", "conv-bs5", "L3", created_ago_sec=600)
+        published = []
+        with patch("src.integrations.shared.event_bus.get_event_bus") as mock_bus:
+            mock_bus.return_value.publish = lambda etype, data: published.append((etype, data))
+            watcher._check_sla_breach()
+            _insert_pending_draft(store, "d-bs6", "conv-bs6", "L4", created_ago_sec=600)
+            watcher._check_sla_breach()
+        summaries = [e[1] for e in published if e[0] == "draft_backlog_summary"]
+        assert len(summaries) == 2
+        assert summaries[0]["count"] == 1
+        assert summaries[1]["count"] == 2
+
+    def test_min_threshold_suppresses_small_backlog(self):
+        """backlog_summary_min：越线数低于阈值不发汇总"""
+        store = _make_store()
+        svc = _make_svc(store)
+        watcher = SLAWatcher(
+            draft_service=svc, inbox_store=store,
+            config={"sla_hours": 0.001, "backlog_summary": True,
+                    "backlog_summary_min": 3},
+        )
+        _insert_pending_draft(store, "d-bs7", "conv-bs7", "L3", created_ago_sec=600)
+        published = self._run(watcher)
+        assert not any(e[0] == "draft_backlog_summary" for e in published)
+
+
+class TestExpireStalePendingDrafts:
+    def test_dry_run_lists_without_mutating(self):
+        store = _make_store()
+        _insert_pending_draft(store, "d-ex1", "conv-ex1", "L3", created_ago_sec=8 * 86400)
+        victims = store.expire_stale_pending_drafts(max_age_hours=168, dry_run=True)
+        assert [v["draft_id"] for v in victims] == ["d-ex1"]
+        # 未变更
+        rows = store.list_drafts(status="pending")
+        assert any(r["draft_id"] == "d-ex1" for r in rows)
+
+    def test_expires_old_pending_and_audits(self):
+        store = _make_store()
+        _insert_pending_draft(store, "d-ex2", "conv-ex2", "L4", created_ago_sec=10 * 86400)
+        victims = store.expire_stale_pending_drafts(max_age_hours=168)
+        assert [v["draft_id"] for v in victims] == ["d-ex2"]
+        # 已转 cancelled，不再 pending
+        assert not any(r["draft_id"] == "d-ex2" for r in store.list_drafts(status="pending"))
+        assert any(r["draft_id"] == "d-ex2" for r in store.list_drafts(status="cancelled"))
+        # 审计留痕
+        audit = store.list_draft_audit(draft_id="d-ex2")
+        assert any(a["action"] == "auto_expired" for a in audit)
+
+    def test_fresh_pending_untouched(self):
+        store = _make_store()
+        _insert_pending_draft(store, "d-ex3", "conv-ex3", "L3", created_ago_sec=3600)
+        victims = store.expire_stale_pending_drafts(max_age_hours=168)
+        assert victims == []
+        assert any(r["draft_id"] == "d-ex3" for r in store.list_drafts(status="pending"))
+
+    def test_level_filter(self):
+        store = _make_store()
+        _insert_pending_draft(store, "d-ex-l1", "conv-l1", "L1", created_ago_sec=10 * 86400)
+        _insert_pending_draft(store, "d-ex-l3", "conv-l3", "L3", created_ago_sec=10 * 86400)
+        victims = store.expire_stale_pending_drafts(max_age_hours=168, levels=["L3", "L4"])
+        ids = [v["draft_id"] for v in victims]
+        assert "d-ex-l3" in ids
+        assert "d-ex-l1" not in ids
+
+    def test_groups_only_spares_private_chats(self):
+        """groups_only=True 只作废群/频道会话，1:1 私聊待审草稿不误伤。"""
+        store = _make_store()
+        # 群会话（Telegram 负 peer id）
+        with store._lock:
+            store._conn.execute(
+                "INSERT OR REPLACE INTO reply_drafts "
+                "(draft_id,conversation_id,platform,account_id,chat_key,source_kind,"
+                "source_id,autopilot_level,risk_level,draft_text,peer_text,status,"
+                "risk_reasons_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                ("d-grp", "telegram:acc:-1001560025690", "telegram", "acc",
+                 "-1001560025690", "inbox", "telegram:acc:-1001560025690", "L4",
+                 "high", "x", "y", "pending", "[]",
+                 time.time() - 10 * 86400, time.time() - 10 * 86400),
+            )
+            # 私聊会话（正 peer id）
+            store._conn.execute(
+                "INSERT OR REPLACE INTO reply_drafts "
+                "(draft_id,conversation_id,platform,account_id,chat_key,source_kind,"
+                "source_id,autopilot_level,risk_level,draft_text,peer_text,status,"
+                "risk_reasons_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                ("d-dm", "telegram:acc:8142915241", "telegram", "acc",
+                 "8142915241", "inbox", "telegram:acc:8142915241", "L4",
+                 "high", "x", "y", "pending", "[]",
+                 time.time() - 10 * 86400, time.time() - 10 * 86400),
+            )
+            store._conn.commit()
+        victims = store.expire_stale_pending_drafts(
+            max_age_hours=168, levels=["L3", "L4"], groups_only=True)
+        ids = [v["draft_id"] for v in victims]
+        assert "d-grp" in ids
+        assert "d-dm" not in ids
+        # 私聊仍 pending
+        assert any(r["draft_id"] == "d-dm" for r in store.list_drafts(status="pending"))
+
+    def test_watcher_auto_expire_wires_store(self):
+        """SLAWatcher 开 auto_expire_hours 后，_expire_stale 调 store 并清告警态"""
+        store = _make_store()
+        svc = _make_svc(store)
+        _insert_pending_draft(store, "d-ex4", "conv-ex4", "L4", created_ago_sec=10 * 86400)
+        watcher = SLAWatcher(
+            draft_service=svc, inbox_store=store,
+            config={"auto_expire_hours": 168, "auto_expire_levels": ["L3", "L4"]},
+        )
+        watcher._expire_stale()
+        assert watcher.total_expired == 1
+        assert not any(r["draft_id"] == "d-ex4" for r in store.list_drafts(status="pending"))
+
+
+# ─────────────────────────────────────
 # K2: 自动再分配
 # ─────────────────────────────────────
 

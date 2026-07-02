@@ -36,13 +36,18 @@ _inbox_store_getter: Optional[Callable[[], Any]] = None
 _STATIC_MEDIA_SUBDIR = "protocol_media"
 
 _MEDIA_PLACEHOLDER = {
-    "image": "[图片]", "voice": "[语音]", "video": "[视频]",
+    "image": "[图片]", "sticker": "[贴纸]", "voice": "[语音]", "video": "[视频]",
     "document": "[文件]", "file": "[文件]",
 }
 
 
-def _media_placeholder(media_type: str) -> str:
+def media_placeholder(media_type: str) -> str:
+    """入站媒体无正文时用于 auto-draft / 会话预览的占位文案（公开，供 ingest 等复用）。"""
     return _MEDIA_PLACEHOLDER.get(str(media_type or "").lower(), "[媒体]")
+
+
+def _media_placeholder(media_type: str) -> str:
+    return media_placeholder(media_type)
 
 
 def protocol_media_root() -> Path:
@@ -124,7 +129,7 @@ def tg_media_meta(message: Any) -> Optional[Tuple[str, str]]:
     if getattr(message, "animation", None):
         return "video", ".mp4"
     if getattr(message, "sticker", None):
-        return "image", ".webp"
+        return "sticker", ".webp"
     doc = getattr(message, "document", None)
     if doc is not None:
         fn = getattr(doc, "file_name", "") or ""

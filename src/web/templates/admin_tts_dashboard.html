@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="{{ 'zh-CN' if (ui_lang|default('zh'))=='zh' else 'en-US' }}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TTS 仪表盘 — Admin</title>
+  <title>{{ (i18n or {}).get('atd_s000', "TTS 预览文件仪表盘") }} — Admin</title>
   <link rel="stylesheet" href="/static/rpa_shared.css">
   <style>
     :root{ --bg:#0f172a; --card:#1e293b; --t1:#e2e8f0; --t2:#94a3b8; --t3:#64748b; --bd:#334155; --accent:#38bdf8; --green:#22c55e; --red:#ef4444; --amber:#f59e0b; }
@@ -33,26 +33,27 @@
     #log{ margin-top:1rem; padding:.75rem; background:rgba(0,0,0,.2); border-radius:6px; font-size:.75rem; color:var(--t3); max-height:120px; overflow-y:auto; }
     .empty-state{ text-align:center; padding:2rem; color:var(--t3); }
   </style>
+  {% include '_i18n_bootstrap.html' %}
 </head>
 <body>
   <h1>
     <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-    TTS 预览文件仪表盘
-    <span class="refresh-hint">自动刷新: 30s | <a href="/" style="color:var(--accent)">返回首页</a></span>
+    TTS {{ (i18n or {}).get('atd_s_h1', "预览文件仪表盘") }}
+    <span class="refresh-hint">{{ (i18n or {}).get('atd_s014', "自动刷新: 30s |") }} <a href="/" style="color:var(--accent)">{{ (i18n or {}).get('atd_s_back', "返回首页") }}</a></span>
   </h1>
 
   <div class="grid">
     <div class="card">
-      <h2>📊 总体统计</h2>
+      <h2>📊 {{ (i18n or {}).get('atd_s001', "总体统计") }}</h2>
       <div class="stat">
         <span class="stat-value" id="total-files">—</span>
-        <span class="stat-label">文件数</span>
+        <span class="stat-label">{{ (i18n or {}).get('atd_s002', "文件数") }}</span>
       </div>
       <div class="stat">
         <span class="stat-value" id="total-size">—</span>
-        <span class="stat-label">总大小</span>
+        <span class="stat-label">{{ (i18n or {}).get('atd_s003', "总大小") }}</span>
       </div>
-      <div class="bar-wrap" title="磁盘占用估算 (假设 1GB 阈值)">
+      <div class="bar-wrap" title="{{ (i18n or {}).get('atd_s_disk', '磁盘占用估算 (假设 1GB 阈值)') }}">
         <div class="bar bar-amber" id="disk-bar" style="width:0%"></div>
       </div>
       <div style="display:flex;justify-content:space-between;font-size:.75rem;color:var(--t3)">
@@ -63,36 +64,36 @@
     </div>
 
     <div class="card">
-      <h2>⏱ 文件时效</h2>
+      <h2>⏱ {{ (i18n or {}).get('atd_s004', "文件时效") }}</h2>
       <div class="stat">
         <span class="stat-value" id="oldest-age">—</span>
-        <span class="stat-label">最早文件</span>
+        <span class="stat-label">{{ (i18n or {}).get('atd_s005', "最早文件") }}</span>
       </div>
       <div class="stat">
         <span class="stat-value" id="newest-age">—</span>
-        <span class="stat-label">最新文件</span>
+        <span class="stat-label">{{ (i18n or {}).get('atd_s006', "最新文件") }}</span>
       </div>
       <div style="margin-top:.75rem;font-size:.75rem;color:var(--t3)">
-        超过 24h 的文件建议清理
+        {{ (i18n or {}).get('atd_s007', "超过 24h 的文件建议清理") }}
       </div>
     </div>
 
     <div class="card">
-      <h2>🏷 前缀分布</h2>
+      <h2>🏷 {{ (i18n or {}).get('atd_s008', "前缀分布") }}</h2>
       <div id="prefix-list" class="prefix-list">
-        <span class="empty-state">加载中…</span>
+        <span class="empty-state">{{ (i18n or {}).get('dash.loading', "加载中…") }}</span>
       </div>
       <div style="margin-top:.75rem;font-size:.75rem;color:var(--t3)">
-        tts-*: 通用 | line-tts-*: LINE | wa-tts-*: WhatsApp
+        {{ (i18n or {}).get('atd_s015', "tts-*: 通用 | line-tts-*: LINE | wa-tts-*: WhatsApp") }}
       </div>
     </div>
 
     <div class="card">
-      <h2>🛠 运维操作</h2>
+      <h2>🛠 {{ (i18n or {}).get('atd_s009', "运维操作") }}</h2>
       <div class="actions">
-        <button class="btn btn-primary" onclick="cleanup(3600)">清理 >1h</button>
-        <button class="btn" onclick="cleanup(86400)">清理 >24h</button>
-        <button class="btn" onclick="cleanup(604800)">清理 >7d</button>
+        <button class="btn btn-primary" onclick="cleanup(3600)">{{ (i18n or {}).get('atd_s016', "清理 >1h") }}</button>
+        <button class="btn" onclick="cleanup(86400)">{{ (i18n or {}).get('atd_s017', "清理 >24h") }}</button>
+        <button class="btn" onclick="cleanup(604800)">{{ (i18n or {}).get('atd_s018', "清理 >7d") }}</button>
       </div>
       <div id="log"></div>
     </div>
@@ -134,7 +135,7 @@
         const byPrefix = r.by_prefix || {};
         const entries = Object.entries(byPrefix).sort((a,b) => b[1]-a[1]);
         if (entries.length === 0) {
-          list.innerHTML = '<span class="empty-state">暂无文件</span>';
+          list.innerHTML = '<span class="empty-state">'+window.T('atd_js_001')+'</span>';
         } else {
           list.innerHTML = entries.map(([k,v]) => `<span class="prefix-tag">${k}: <b>${v}</b></span>`).join('');
         }
@@ -145,14 +146,14 @@
 
     async function cleanup(maxAgeSec) {
       const log = document.getElementById('log');
-      log.innerHTML = '<span style="color:var(--t2)">清理中…</span>';
+      log.innerHTML = '<span style="color:var(--t2)">'+window.T('atd_js_002')+'</span>';
       try {
         const r = await rpa.post('/api/admin/tts-cleanup?max_age_sec=' + maxAgeSec);
         if (r.ok) {
-          log.innerHTML = `<span style="color:var(--green)">✓ 已清理 ${r.removed} 个文件</span>`;
+          log.innerHTML = `<span style="color:var(--green)">✓ ${window.Tf('atd_tf_cleaned',{n:r.removed})}</span>`;
           loadStats();
         } else {
-          log.innerHTML = `<span style="color:var(--red)">✗ ${r.error || '清理失败'}</span>`;
+          log.innerHTML = `<span style="color:var(--red)">✗ ${r.error || window.T('atd_js_003')}</span>`;
         }
       } catch(e) {
         log.innerHTML = `<span style="color:var(--red)">✗ ${e.message}</span>`;

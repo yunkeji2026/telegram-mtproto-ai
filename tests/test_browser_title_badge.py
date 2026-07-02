@@ -68,31 +68,41 @@ def test_visibility_listener_stops_flash(shared_scripts_text: str):
 # ════════════════════════════════════════════════════════════════════════
 
 
-# (template, expected_label_or_marker)
+# (template, platform_prefix, pending_i18n_key)
+# i18n（③-S9b/c/d）后 badge 标签不再是硬编码中文，而是「平台前缀 + 客户端 window.T(待审键)」——
+# 随语言切换（zh '待审' / en 'Pending'）。平台前缀（LINE/WA/FB）保留为字面量：它是多 tab 下区分
+# "哪个平台来的提醒"的线索，非文案，无需翻译。overview 用跨平台键、无平台前缀。
 INTEGRATIONS = [
-    ("line_rpa.html",     "LINE 待审"),
-    ("whatsapp_rpa.html", "WA 待审"),
-    ("messenger_rpa.html", "FB 待审"),
-    ("rpa_overview.html", "跨平台待审"),
+    ("line_rpa.html",      "LINE ", "ov_kpi_pending"),
+    ("whatsapp_rpa.html",  "WA ",   "ov_kpi_pending"),
+    ("messenger_rpa.html", "FB ",   "ov_kpi_pending"),
+    ("rpa_overview.html",  "",      "ov_tab_pending"),
 ]
 
 
-@pytest.mark.parametrize("template,label", INTEGRATIONS)
-def test_template_calls_setBadge_with_label(template: str, label: str):
+@pytest.mark.parametrize("template,prefix,pending_key", INTEGRATIONS)
+def test_template_calls_setBadge_with_label(template: str, prefix: str, pending_key: str):
     """每个目标页都必须调 setBadge 且带平台标签。
 
     标签 ≠ 装饰：当用户同时打开多个 RPA tab，title 角标的标签是用户区
-    分"哪个平台来的提醒"的唯一线索。
+    分"哪个平台来的提醒"的唯一线索。i18n 后校验落到 setBadge 调用行本身：
+    「待审」文案经 window.T(待审键) 本地化，平台前缀（若有）保留字面量以区分来源。
     """
     text = (TEMPLATES_DIR / template).read_text(encoding="utf-8")
-    assert "rpa.notify.setBadge" in text, (
-        f"{template} 必须调 rpa.notify.setBadge"
+    call_lines = [ln for ln in text.splitlines() if "rpa.notify.setBadge" in ln]
+    assert call_lines, f"{template} 必须调 rpa.notify.setBadge"
+    line = call_lines[0]
+    assert f"window.T('{pending_key}')" in line, (
+        f"{template} setBadge 标签须经 window.T('{pending_key}') 本地化（随语言切换）"
     )
-    assert label in text, f"{template} 必须传 label='{label}'"
+    if prefix:
+        assert prefix in line, (
+            f"{template} setBadge 标签须含平台前缀 {prefix!r}（多 tab 区分来源）"
+        )
 
 
-@pytest.mark.parametrize("template,_label", INTEGRATIONS)
-def test_setBadge_guards_against_missing_rpa(template: str, _label: str):
+@pytest.mark.parametrize("template,_prefix,_pending_key", INTEGRATIONS)
+def test_setBadge_guards_against_missing_rpa(template: str, _prefix: str, _pending_key: str):
     """加载顺序保险：`if(window.rpa && window.rpa.notify)` 防御。
 
     理由：partial 渲染顺序变化（比如 _rpa_shared_scripts 被某次重构搬到

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from src.companion.readiness_signals import (
     DEFAULTS, delivery_signal, proactive_signal, readiness_signals,
-    text_autosend_signal,
+    realtime_voice_signal, text_autosend_signal,
 )
 
 TH = dict(DEFAULTS)
@@ -85,6 +85,37 @@ def test_delivery_failing():
     assert s["verdict"] == "failing" and "失败率" in s["advice"]
 
 
+# ── 实时语音 ───────────────────────────────────────────────────────────────
+
+def test_rtv_insufficient_no_samples():
+    s = realtime_voice_signal({"attempts": 0, "health_ok": 0, "health_fail": 0}, TH)
+    assert s["verdict"] == "insufficient" and "试拨" in s["advice"]
+
+
+def test_rtv_healthy():
+    s = realtime_voice_signal(
+        {"attempts": 10, "connected": 8, "connect_rate": 0.8,
+         "health_ok": 10, "health_fail": 1, "health_ok_rate": 0.909,
+         "by_end_reason": {"normal": 7}}, TH)
+    assert s["verdict"] == "healthy" and "小流量试点" in s["advice"]
+
+
+def test_rtv_failing_low_health():
+    s = realtime_voice_signal(
+        {"attempts": 5, "connected": 3, "connect_rate": 0.6,
+         "health_ok": 1, "health_fail": 4, "health_ok_rate": 0.2,
+         "by_end_reason": {}}, TH)
+    assert s["verdict"] == "failing" and "主机健康率" in s["advice"]
+
+
+def test_rtv_ref_overlay_no_reference():
+    s = realtime_voice_signal(
+        {"attempts": 0, "health_ok": 0, "health_fail": 0}, TH,
+        ref_summary={"persona_count": 2, "with_reference": 0, "worst_grade": "none"})
+    assert s["verdict"] == "insufficient" and "参考音" in s["advice"]
+    assert s["metric"]["ref_with"] == 0
+
+
 # ── 聚合 + 头条 ────────────────────────────────────────────────────────────
 
 def test_readiness_headline_picks_worst():
@@ -94,7 +125,7 @@ def test_readiness_headline_picks_worst():
         proactive_quality={"care": {"feedback": {"like": 1, "dislike": 9}},
                            "reactivation": {"feedback": {"like": 0, "dislike": 1}}},  # caution
         delivery={"autosend": 80, "autosend_failed": 20})            # failing
-    assert len(rep["signals"]) == 3
+    assert len(rep["signals"]) == 4
     # failing 优先级最高 → 头条
     assert rep["headline"]["verdict"] == "failing"
     assert rep["headline"]["key"] == "delivery_health"

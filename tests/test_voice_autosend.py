@@ -78,6 +78,125 @@ def test_default_trigger_is_when_peer_voice():
     assert va.should_send_voice(vb, "hello", peer_sent_voice=False) is False
 
 
+# ── trigger=smart（委托 voice_fitness 上下文评分）──────────────────────
+
+def test_smart_trigger_peer_voice_sends():
+    vb = {"enabled": True, "trigger": "smart", "max_chars": 120}
+    assert va.should_send_voice(vb, "好的呀", peer_sent_voice=True) is True
+
+
+def test_smart_trigger_neutral_filler_falls_back_to_text():
+    vb = {"enabled": True, "trigger": "smart", "max_chars": 120}
+    # 中性短句 + 无对等 + 无额外信号 → 低分 → 文字
+    assert va.should_send_voice(vb, "嗯嗯好的") is False
+
+
+def test_smart_trigger_respects_length_guard():
+    vb = {"enabled": True, "trigger": "smart", "max_chars": 10}
+    # 超 max_chars → 通用长度护栏先拦（不进评分）
+    assert va.should_send_voice(
+        vb, "这是一句超过十个字的很长回复内容", peer_sent_voice=True) is False
+
+
+def test_smart_trigger_url_is_text():
+    vb = {"enabled": True, "trigger": "smart", "max_chars": 120}
+    # 含网址 → voice_fitness 硬否决（即便客户发了语音）
+    assert va.should_send_voice(vb, "看这个 https://x.com", peer_sent_voice=True) is False
+
+
+# ── decide_voice（带 reason 的统一决策入口）──────────────────────────
+
+def test_decide_voice_disabled_reason():
+    d = va.decide_voice({}, "hi")
+    assert d.send_voice is False and d.reason == "disabled"
+
+
+def test_decide_voice_empty_reason():
+    assert va.decide_voice({"enabled": True}, "  ").reason == "empty"
+
+
+def test_decide_voice_when_peer_voice_reasons():
+    vb = {"enabled": True, "trigger": "when_peer_voice"}
+    assert va.decide_voice(vb, "hi", peer_sent_voice=True).reason == "peer_voice"
+    assert va.decide_voice(vb, "hi", peer_sent_voice=False).reason == "no_peer_voice"
+
+
+def test_decide_voice_always_and_never_reasons():
+    assert va.decide_voice(
+        {"enabled": True, "trigger": "always"}, "hi").reason == "trigger_always"
+    assert va.decide_voice(
+        {"enabled": True, "trigger": "never"}, "hi").reason == "trigger_never"
+
+
+def test_decide_voice_too_long_reason():
+    vb = {"enabled": True, "trigger": "always", "max_chars": 5}
+    d = va.decide_voice(vb, "123456")
+    assert d.send_voice is False and d.reason == "too_long"
+
+
+def test_decide_voice_smart_url_reason():
+    vb = {"enabled": True, "trigger": "smart", "max_chars": 120}
+    d = va.decide_voice(vb, "看这个 https://x.com", peer_sent_voice=True)
+    assert d.send_voice is False and d.reason == "unspeakable"
+
+
+def test_should_send_voice_is_decide_voice_projection():
+    vb = {"enabled": True, "trigger": "when_peer_voice"}
+    assert va.should_send_voice(vb, "hi", peer_sent_voice=True) is \
+        va.decide_voice(vb, "hi", peer_sent_voice=True).send_voice
+
+
+# ── record_voice_decision（观测计数）─────────────────────────────────
+
+def test_record_voice_decision_counts():
+    before = va.metrics_snapshot()
+    va.record_voice_decision(True, "peer_voice")
+    va.record_voice_decision(False, "low_fitness")
+    after = va.metrics_snapshot()
+    assert after["voice_chosen"] == before["voice_chosen"] + 1
+    assert after["text_chosen"] == before["text_chosen"] + 1
+    assert after["decision_reasons"].get("low_fitness", 0) == \
+        before["decision_reasons"].get("low_fitness", 0) + 1
+    assert after["last_decision"] == "text:low_fitness"
+
+
+# ── persona_allowed_for_voice（Phase2 人设级灰度白名单）─────────────────
+
+def test_persona_allowlist_absent_allows_all():
+    # 无 persona_allowlist key → 不限制（向后兼容：所有人设按各自 voice_profile 发声）
+    assert va.persona_allowed_for_voice({"enabled": True}, "anyone") is True
+    assert va.persona_allowed_for_voice({"enabled": True}, "") is True
+
+
+def test_persona_allowlist_empty_allows_all():
+    assert va.persona_allowed_for_voice({"persona_allowlist": []}, "anyone") is True
+    assert va.persona_allowed_for_voice({"persona_allowlist": None}, "anyone") is True
+
+
+def test_persona_allowlist_hit_allows_voice():
+    vb = {"persona_allowlist": ["lin_xiaoyu"]}
+    assert va.persona_allowed_for_voice(vb, "lin_xiaoyu") is True
+
+
+def test_persona_allowlist_miss_falls_back_to_text():
+    vb = {"persona_allowlist": ["lin_xiaoyu"]}
+    assert va.persona_allowed_for_voice(vb, "chen_meiling") is False
+
+
+def test_persona_allowlist_empty_pid_blocked_when_restricted():
+    # 名单非空但真实人设未解析出（空 pid）→ 保守不放行（回落文本，绝不误发）
+    vb = {"persona_allowlist": ["lin_xiaoyu"]}
+    assert va.persona_allowed_for_voice(vb, "") is False
+    assert va.persona_allowed_for_voice(vb, None) is False
+
+
+def test_persona_allowlist_strips_and_dedups():
+    vb = {"persona_allowlist": [" lin_xiaoyu ", "", "lin_xiaoyu"]}
+    assert va.persona_allowed_for_voice(vb, " lin_xiaoyu ") is True
+    assert va.persona_allowed_for_voice(vb, "lin_xiaoyu") is True
+    assert va.persona_allowed_for_voice(vb, "other") is False
+
+
 # ── stage_voice_file 全链 ───────────────────────────────────────────
 
 class _FakeResult:

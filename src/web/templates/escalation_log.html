@@ -1,5 +1,5 @@
 {% extends "workspace_base.html" %}
-{% block title %}升级历史{% endblock %}
+{% block title %}{{ (i18n or {}).get('el_s001', "升级历史") }}{% endblock %}
 {% block head %}
 <style>
   /* 令牌驱动（继承 workspace_base 的 --tk-*），日/夜两版自动适配。 */
@@ -24,53 +24,53 @@
 {% block content %}
 <div class="el-wrap">
   <div class="el-bar">
-    <a class="back" href="/workspace/dash">← 概览</a>
-    <span style="font-weight:600;">升级历史 / 接管时延</span>
+    <a class="back" href="/workspace/dash">← {{ (i18n or {}).get('base.nav.overview', "概览") }}</a>
+    <span style="font-weight:600;">{{ (i18n or {}).get('el_s002', "升级历史 / 接管时延") }}</span>
     <select class="el-sel" id="el-days" onchange="EL.load()">
-      <option value="7">近 7 日</option>
-      <option value="30">近 30 日</option>
+      <option value="7">{{ (i18n or {}).get('dash.range.7d', "近 7 日") }}</option>
+      <option value="30">{{ (i18n or {}).get('dash.range.30d', "近 30 日") }}</option>
     </select>
   </div>
   <div class="el-stats" id="el-stats"></div>
-  <div class="el-list" id="el-list"><span class="tk-load">加载中…</span></div>
+  <div class="el-list" id="el-list"><span class="tk-load">{{ (i18n or {}).get('dash.loading', "加载中…") }}</span></div>
 </div>
 <script>
 (function(){
-  var RZ={unclaimed:'无人认领',holder_offline:'坐席离线',holder_quiet:'坐席静音/免打扰'};
+  var RZ={unclaimed:window.T('el_js_001'),holder_offline:window.T('el_js_002'),holder_quiet:window.T('el_js_003')};
   function esc(s){return CRMW.esc(s);}
   function fmtDur(s){return CRMW.fmtDur(s);}
-  function fmtTs(ts){ if(!ts) return '—'; var d=new Date(ts*1000); return d.toLocaleDateString()+' '+d.toLocaleTimeString().slice(0,5); }
+  function fmtTs(ts){ if(!ts) return '—'; return window.wsFmtDate(ts)+' '+window.wsFmtTime(ts,{hour:'2-digit',minute:'2-digit'}); }
   function card(num,lbl){ return '<div class="el-card"><div class="el-num">'+num+'</div><div class="el-lbl">'+esc(lbl)+'</div></div>'; }
   function render(d){
     var s=d.stats||{};
     document.getElementById('el-stats').innerHTML=
-      card(s.total||0,'升级总数')
-      +card((s.taken||0)+' ('+(s.taken_rate||0)+'%)','已接管')
-      +card(s.taken? fmtDur(s.avg_takeover_sec):'—','平均接管时延');
+      card(s.total||0,window.T('el_js_004'))
+      +card((s.taken||0)+' ('+(s.taken_rate||0)+'%)',window.T('el_js_005'))
+      +card(s.taken? fmtDur(s.avg_takeover_sec):'—',window.T('el_js_006'));
     var its=d.items||[];
     var box=document.getElementById('el-list');
-    if(!its.length){ box.innerHTML='<span class="tk-load">该窗口暂无升级记录</span>'; return; }
+    if(!its.length){ box.innerHTML='<span class="tk-load">'+window.T('el_js_007')+'</span>'; return; }
     box.innerHTML=its.map(function(it){
       var rz=RZ[it.reason]||it.reason;
       var taken = it.takeover_sec!=null
-        ? '<span class="el-taken">接管 '+fmtDur(it.takeover_sec)+'</span>'
-        : '<span class="el-pending">未接管</span>';
+        ? '<span class="el-taken">'+window.Tf('el_tf_taken',{d:fmtDur(it.takeover_sec)})+'</span>'
+        : '<span class="el-pending">'+window.T('el_js_008')+'</span>';
       var holder = it.agent_name||it.agent_id;
       return '<div class="el-row">'
         +'<div><div class="el-name" onclick="EL.go(\''+esc(it.conversation_id)+'\')">'+esc(it.name)+' <span class="tk-load" style="font-size:11px;">'+esc(it.platform)+'</span></div>'
-        +'<div class="el-meta"><span class="el-rz">'+esc(rz)+'</span> · 等待 '+fmtDur(it.wait_sec)+(holder?(' · 原认领 '+esc(holder)):'')+' · '+fmtTs(it.ts)+'</div></div>'
+        +'<div class="el-meta"><span class="el-rz">'+esc(rz)+'</span> · '+window.Tf('el_tf_wait',{d:fmtDur(it.wait_sec)})+(holder?(' · '+window.Tf('el_tf_holder',{h:esc(holder)})):'')+' · '+fmtTs(it.ts)+'</div></div>'
         +'<div class="el-right">'+taken+(it.taken_by?('<div class="el-meta">by '+esc(it.taken_by)+'</div>'):'')+'</div>'
         +'</div>';
     }).join('');
   }
   window.EL={
     load:function(){
-      document.getElementById('el-list').innerHTML='<span class="tk-load">加载中…</span>';
+      document.getElementById('el-list').innerHTML='<span class="tk-load">'+window.T('dash.loading')+'</span>';
       var days=document.getElementById('el-days').value;
       fetch('/api/workspace/escalation-log?days='+days).then(function(r){return r.json();}).then(function(d){
-        if(!d.ok){ document.getElementById('el-list').innerHTML='<span class="tk-load">收件箱未启用</span>'; return; }
+        if(!d.ok){ document.getElementById('el-list').innerHTML='<span class="tk-load">'+window.T('el_js_009')+'</span>'; return; }
         render(d);
-      }).catch(function(){ document.getElementById('el-list').innerHTML='<span class="tk-fail">加载失败</span>'; });
+      }).catch(function(){ document.getElementById('el-list').innerHTML='<span class="tk-fail">'+window.T('rpa_load_failed')+'</span>'; });
     },
     go:function(cid){ try{ sessionStorage.setItem('ws_focus_conv', cid); }catch(_){ } location.href='/workspace'; }
   };

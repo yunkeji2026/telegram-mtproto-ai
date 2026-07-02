@@ -141,6 +141,8 @@ class AIChatAssistant:
         self._web_thread = None
         self._web_loop = None
         self._web_server = None
+        # 本机 IndexTTS2 情感克隆服务的进程托管（随主程序启停；见 local_autostart 开关）
+        self.local_tts = None
         # W2-D4: 主动唤醒循环引用（关程序时 stop）
         self._reactivation_loop = None
         # Phase O: 主动关怀派发器引用（关程序时 stop）
@@ -167,6 +169,17 @@ class AIChatAssistant:
             self.config = ConfigManager()
             await self.config.load()
             self.logger.info("配置加载成功")
+
+            # 2b. 本机情感克隆(IndexTTS2)进程托管：随主程序一起启停（默认关，见
+            #     minicpm_clone.local_autostart）。尽早拉起，让 ~60-90s 的 eager 载入
+            #     与后续初始化/登录并行；非阻塞，失败只回落 edge，绝不挡启动。
+            try:
+                from src.integrations.local_tts_supervisor import LocalTTSSupervisor
+                self.local_tts = LocalTTSSupervisor(
+                    self.config.config.get("minicpm_clone") or {})
+                await self.local_tts.start()
+            except Exception as ex:
+                self.logger.warning("本机 TTS 托管启动异常（忽略，语音走回落）: %s", ex)
             
             # 3. 根据配置重新配置日志记录器
             log_config = self.config.config.get("logging", {})
@@ -742,6 +755,8 @@ class AIChatAssistant:
                         web_app.state.device_coordinator_service = self.device_coordinator_service
                     if self.hotplug_watcher is not None:
                         web_app.state.hotplug_watcher = self.hotplug_watcher
+                    if self.local_tts is not None:
+                        web_app.state.local_tts_supervisor = self.local_tts
 
                     # ── G1 全局 Kill-Switch：初始化单例（回填持久化的冻结态，重启不丢）──
                     try:
@@ -849,8 +864,10 @@ class AIChatAssistant:
                                             _cfg = _assistant_ref.config.config or {}
                                             from src.inbox.voice_autosend import (
                                                 resolve_voice_autosend_cfg,
-                                                should_send_voice, stage_voice_file,
+                                                decide_voice, stage_voice_file,
                                                 record_voice_sent, record_voice_fallback,
+                                                record_voice_decision,
+                                                persona_allowed_for_voice,
                                             )
                                             _vb = resolve_voice_autosend_cfg(_cfg)
                                             if not _vb.get("enabled"):
@@ -865,43 +882,127 @@ class AIChatAssistant:
                                             _orch = _go(_cfg)
                                             if not _orch.owns_media(platform, account_id):
                                                 return False
-                                            # trigger=when_peer_voice：查客户上一条入站是否语音
+                                            # 上下文信号采集：when_peer_voice 用 peer_voice;
+                                            # smart 档额外用「频率 + 客户此刻情绪 + 危机 + 亲密度」做情境评分。
+                                            # 一次 list_recent_messages 复用算 peer_voice + 频率 + 客户末条文本。
                                             _peer_voice = False
+                                            _peer_text = ""
+                                            _voice_ratio = 0.0
+                                            _peer_emo = ""
+                                            _peer_emo_int = -1.0
+                                            _intimacy = 0.0
+                                            _crisis_block = False
                                             try:
                                                 from src.inbox.normalizer import conv_id as _cidf
                                                 _st = getattr(_assistant_ref, "inbox_store", None)
                                                 if _st is not None:
                                                     _cid = _cidf(platform, account_id, chat_key)
-                                                    for _m in reversed(
-                                                        _st.list_recent_messages(_cid, limit=6) or []
-                                                    ):
+                                                    try:
+                                                        _win = int(
+                                                            ((_vb.get("smart") or {}).get("recent_window"))
+                                                            or 6)
+                                                    except Exception:
+                                                        _win = 6
+                                                    _recent = _st.list_recent_messages(
+                                                        _cid, limit=max(_win, 6)) or []
+                                                    # peer_voice + 客户末条入站文本（危机判定用）
+                                                    for _m in reversed(_recent):
                                                         if str(_m.get("direction") or "in") == "in":
                                                             _peer_voice = str(
                                                                 _m.get("media_type") or ""
                                                             ).lower() in ("voice", "audio")
+                                                            _peer_text = str(_m.get("text") or "")
                                                             break
+                                                    # recent_voice_ratio：近窗口 outbound 语音占比（频率刹车，保证"克制"）
+                                                    _outs = [
+                                                        _m for _m in _recent
+                                                        if str(_m.get("direction") or "") == "out"][-_win:]
+                                                    if _outs:
+                                                        _vc = sum(
+                                                            1 for _m in _outs
+                                                            if str(_m.get("media_type") or "").lower()
+                                                            in ("voice", "audio"))
+                                                        _voice_ratio = _vc / float(len(_outs))
+                                                    # 客户此刻情绪 + 亲密度代理（conversation_meta 落库）
+                                                    try:
+                                                        _cm = _st.get_conv_meta(_cid) or {}
+                                                        _peer_emo = str(_cm.get("last_emotion") or "")
+                                                        _peer_emo_int = float(
+                                                            _cm.get("last_emotion_intensity", -1.0))
+                                                        # 亲密度弱代理：聊得越多越熟（真 intimacy 在 contacts
+                                                        # 子系统/可能未启用 → msg_count 归一近似，0~1）。
+                                                        _mc = float(_cm.get("msg_count") or 0)
+                                                        _intimacy = max(0.0, min(1.0, _mc / 50.0))
+                                                    except Exception:
+                                                        pass
+                                                    # 危机：对客户末条入站文本跑权威 detect_crisis（severe/
+                                                    # elevated → 不机械发语音，走安全网；比 last_risk 落库更准）。
+                                                    try:
+                                                        if _peer_text:
+                                                            from src.utils.wellbeing_guard import (
+                                                                detect_crisis as _dc,
+                                                            )
+                                                            _crisis_block = str(
+                                                                (_dc(_peer_text) or {}).get("level")
+                                                                or "none").lower() in (
+                                                                "severe", "elevated")
+                                                    except Exception:
+                                                        _crisis_block = False
                                             except Exception:
                                                 _peer_voice = False
-                                            if not should_send_voice(
-                                                _vb, text, peer_sent_voice=_peer_voice
-                                            ):
+                                            _vdec = decide_voice(
+                                                _vb, text, peer_sent_voice=_peer_voice,
+                                                recent_voice_ratio=_voice_ratio,
+                                                peer_emotion=_peer_emo,
+                                                peer_emotion_intensity=_peer_emo_int,
+                                                intimacy=_intimacy,
+                                                crisis_block=_crisis_block,
+                                            )
+                                            record_voice_decision(
+                                                _vdec.send_voice, _vdec.reason)
+                                            if not _vdec.send_voice:
                                                 return False
-                                            # 账号级人设（声音克隆 voice_profile 来源）
-                                            _pid = ""
+                                            # 账号级人设（声音克隆 voice_profile 来源）。编排器
+                                            # Telegram 协议号 meta 常无 persona_id（_pid 空）→ 用
+                                            # 共享解析器按 meta.persona_id → meta.persona_ids[0] →
+                                            # config[platform].persona_ids[0] 统一回退（根治复数/单数
+                                            # 命名不匹配：sync 写 persona_ids 而旧代码读 persona_id →
+                                            # 空 _real_pid → 灰度白名单误拦真声、回落纯文本的根因）。
+                                            from src.ai.persona_voice import (
+                                                resolve_account_persona_id as _rapi,
+                                            )
+                                            _pid = _rapi(_cfg, platform, account_id)
+                                            # 解析真实人设（_pid 空时按 chat_key 绑定/默认回退），与
+                                            # stage_voice_file 内部同口径（同 chat_key/account）。
+                                            _real_pid = _pid
                                             try:
-                                                from src.integrations.account_registry import (
-                                                    get_account_registry as _gar,
+                                                from src.ai.persona_voice import (
+                                                    resolve_effective_voice_context as _revc,
                                                 )
-                                                _row = _gar().get(platform, account_id) or {}
-                                                _pid = str((_row.get("meta") or {}).get("persona_id") or "")
+                                                _ctx0 = _revc(
+                                                    _cfg, persona_id=_pid or None,
+                                                    account_persona_id=_pid or None,
+                                                    chat_key=str(chat_key),
+                                                    contact_key=str(chat_key),
+                                                    platform=platform, account_id=account_id)
+                                                _real_pid = str(
+                                                    _ctx0.get("persona_id") or _pid or "")
                                             except Exception:
-                                                _pid = ""
+                                                _real_pid = _pid
+                                            # Phase2 人设级灰度白名单：名单非空时仅放行名单内人设发
+                                            # 语音，名单外回落纯文本（正常回落，不计 fallback——未合成）。
+                                            if not persona_allowed_for_voice(_vb, _real_pid):
+                                                _assistant_ref.logger.info(
+                                                    "[autosend voice] 人设 %s 不在灰度白名单 → 回落"
+                                                    "文本 platform=%s acct=%s", _real_pid or "?",
+                                                    platform, account_id)
+                                                return False
                                             # 至此策略已判定「该发语音」：合成/投递的成败计入指标。
                                             # P3：传 chat_key（端用户身份）→ 按会员档分层路由 TTS
                                             # 后端（VIP→旗舰，免费→降级省成本）；monetization 未就绪
                                             # → tier=None → 不路由（零行为变更）。
                                             _staged = await stage_voice_file(
-                                                _cfg, platform, account_id, _pid, text,
+                                                _cfg, platform, account_id, _real_pid, text,
                                                 contact_key=str(chat_key))
                                             if not _staged:
                                                 record_voice_fallback("synth_failed")
@@ -1224,8 +1325,12 @@ class AIChatAssistant:
                             ).get("auto_draft", {}) or {}
                             if _ad_cfg.get("enabled", True):
                                 _ad_mode = str(_ad_cfg.get("automation_mode", "auto_ai"))
-                                _ad_min_len = int(_ad_cfg.get("min_text_len", 3))
+                                _ad_min_len = int(_ad_cfg.get("min_text_len", 0))
                                 _ad_skip = set(_ad_cfg.get("skip_platforms", []) or [])
+                                # 源头止血：群/频道会话默认不入人审草稿队列（默认关=旧行为）。
+                                # 群消息本非 1:1 客服场景，生成 L3/L4 待审草稿只会长期无人处置、
+                                # 反复触发 SLA 铃铛，故提供开关从源头跳过。
+                                _ad_skip_groups = bool(_ad_cfg.get("skip_group_chats", False))
                                 # Phase 2：自动草稿正文走人设产线（与手动「生成草稿」同源）。
                                 # 默认开；关闭则回落旧规则模板（向后兼容）。
                                 _ad_enrich = bool(_ad_cfg.get("persona_enrich", True))
@@ -1252,25 +1357,156 @@ class AIChatAssistant:
                                         chat_key = str(conv.get("chat_key") or "")
                                         account_id = str(conv.get("account_id") or "default")
                                         msgs = []
+                                        _peer_media_type = ""
+                                        _peer_media_ref = ""
+                                        _peer_media_desc = ""
+                                        _peer_msg_id = ""  # 语音转录回写目标行
                                         try:
                                             for r in _ad_store.list_recent_messages(cid, limit=30):
                                                 msgs.append({
                                                     "direction": r.get("direction") or "in",
                                                     "text": r.get("text") or "",
+                                                    "media_type": r.get("media_type") or "",
+                                                    "media_ref": r.get("media_ref") or "",
+                                                    "message_id": r.get("message_id") or "",
                                                 })
+                                            for r in reversed(msgs):
+                                                if str(r.get("direction") or "") == "in":
+                                                    _peer_media_type = str(
+                                                        r.get("media_type") or ""
+                                                    )
+                                                    _peer_media_ref = str(
+                                                        r.get("media_ref") or ""
+                                                    )
+                                                    _peer_msg_id = str(
+                                                        r.get("message_id") or ""
+                                                    )
+                                                    _lt = str(r.get("text") or "")
+                                                    if _lt.startswith("[图片内容]"):
+                                                        _peer_media_desc = _lt.replace(
+                                                            "[图片内容]", "", 1
+                                                        ).strip()
+                                                    break
                                         except Exception:
                                             msgs = []
                                         history, last = normalize_history(msgs)
                                         if not last:
                                             last = str(text or "")
-                                        # 账号级人设（registry meta.persona_id），best-effort
+                                        if (
+                                            _peer_media_type in ("image", "photo", "sticker")
+                                            and _peer_media_ref
+                                            and not _peer_media_desc
+                                        ):
+                                            try:
+                                                from src.integrations.protocol_bridge import (
+                                                    static_media_ref_to_path,
+                                                )
+                                                _img_path = static_media_ref_to_path(
+                                                    _peer_media_ref
+                                                )
+                                                _tc = getattr(
+                                                    getattr(_ad_app, "state", None),
+                                                    "telegram_client",
+                                                    None,
+                                                )
+                                                if _img_path and _tc is not None and hasattr(
+                                                    _tc, "_get_image_content"
+                                                ):
+                                                    _desc = await _tc._get_image_content(
+                                                        _img_path
+                                                    )
+                                                    if _desc:
+                                                        _peer_media_desc = str(_desc).strip()
+                                            except Exception:
+                                                self.logger.debug(
+                                                    "[AutoDraft] 图片识别补全失败",
+                                                    exc_info=True,
+                                                )
+                                        elif (
+                                            _peer_media_type in ("voice", "audio")
+                                            and _peer_media_ref
+                                            and not _peer_media_desc
+                                        ):
+                                            # 语音转录补全（与图片 Vision 描述对等）：入站语音
+                                            # 转成文本喂人设产线。缺这步 AI 只见「[语音]」占位，
+                                            # 会搪塞「我听不了语音」而非接住内容。
+                                            try:
+                                                from src.integrations.protocol_bridge import (
+                                                    static_media_ref_to_path,
+                                                )
+                                                _voice_path = static_media_ref_to_path(
+                                                    _peer_media_ref
+                                                )
+                                                _tc = getattr(
+                                                    getattr(_ad_app, "state", None),
+                                                    "telegram_client",
+                                                    None,
+                                                )
+                                                _vtr = getattr(
+                                                    _tc, "voice_transcriber", None,
+                                                ) if _tc is not None else None
+                                                if _voice_path and _vtr is not None:
+                                                    _vlang = str(
+                                                        (self.config.get(
+                                                            "voice_recognition", {},
+                                                        ) or {}).get("language", "auto")
+                                                    ) or "auto"
+                                                    _vtxt = await _vtr.transcribe_voice_message(
+                                                        str(_voice_path), _vlang,
+                                                    )
+                                                    if _vtxt and str(_vtxt).strip():
+                                                        _peer_media_desc = str(_vtxt).strip()
+                                                        # 转录文本即「对方说的话」→ 直接作为待回复
+                                                        # 文本（替换 [语音] 占位），让意图/语言/
+                                                        # 回复都基于真实内容（含回对语言）。
+                                                        if last.strip() in (
+                                                            "[语音]", "[媒体]", "",
+                                                        ):
+                                                            last = _peer_media_desc
+                                                        self.logger.info(
+                                                            "[AutoDraft] 语音转录补全: %s",
+                                                            _peer_media_desc[:80],
+                                                        )
+                                                        # 转录回写入站消息行：坐席台/时间线即时看到
+                                                        # 「对方说了什么」而非空白/[语音]占位（转录已在
+                                                        # 此异步路径完成，回写零额外成本、不阻塞主循环、
+                                                        # 不重复转录）。only_if_empty 防踩已有内容。
+                                                        try:
+                                                            _ad_store.update_message_text(
+                                                                cid,
+                                                                message_id=_peer_msg_id,
+                                                                media_ref=_peer_media_ref,
+                                                                text=_peer_media_desc,
+                                                                only_if_empty=True,
+                                                            )
+                                                        except Exception:
+                                                            self.logger.debug(
+                                                                "[AutoDraft] 转录回写消息失败",
+                                                                exc_info=True,
+                                                            )
+                                                    else:
+                                                        self.logger.warning(
+                                                            "[AutoDraft] 语音转录空结果 ref=%s",
+                                                            _peer_media_ref,
+                                                        )
+                                            except Exception:
+                                                self.logger.warning(
+                                                    "[AutoDraft] 语音转录补全失败 ref=%s",
+                                                    _peer_media_ref,
+                                                    exc_info=True,
+                                                )
+                                        # 账号级人设（单一事实源，与 autosend voice 同口径）：
+                                        # meta.persona_id → meta.persona_ids[0] → config 默认，
+                                        # 根治复数/单数不匹配导致的空 persona。
                                         _persona_id = ""
                                         try:
-                                            from src.integrations.account_registry import (
-                                                get_account_registry,
+                                            from src.ai.persona_voice import (
+                                                resolve_account_persona_id as _rapi2,
                                             )
-                                            _row = get_account_registry().get(platform, account_id) or {}
-                                            _persona_id = str((_row.get("meta") or {}).get("persona_id") or "")
+                                            _persona_id = _rapi2(
+                                                self.config.config or {},
+                                                platform, account_id,
+                                            )
                                         except Exception:
                                             _persona_id = ""
                                         # 风险分档（单一事实源）：草稿创建时已算好 risk_level，
@@ -1289,6 +1525,9 @@ class AIChatAssistant:
                                             last_inbound=last, history=history,
                                             persona_id=_persona_id,
                                             risk_level=_risk_level,
+                                            media_type=_peer_media_type,
+                                            media_ref=_peer_media_ref,
+                                            media_desc=_peer_media_desc,
                                         )
                                         if out.get("ok") and out.get("reply"):
                                             done = draft_svc.enrich_draft(
@@ -1312,7 +1551,14 @@ class AIChatAssistant:
                                 def _auto_draft_cb(conv: dict, text: str) -> None:
                                     if conv.get("platform", "") in _ad_skip:
                                         return
-                                    if len(str(text or "").strip()) < _ad_min_len:
+                                    if _ad_skip_groups:
+                                        try:
+                                            from src.inbox.ingest import is_group_conversation
+                                            if is_group_conversation(conv):
+                                                return
+                                        except Exception:
+                                            pass
+                                    if _ad_min_len > 0 and len(str(text or "").strip()) < _ad_min_len:
                                         return
                                     # 每会话档位优先：UI 把会话设为 全自动(auto_ai) 才走自动；
                                     # manual 跳过不生成；未显式设置回落全局默认 _ad_mode。
@@ -1322,9 +1568,9 @@ class AIChatAssistant:
                                     try:
                                         cid = str(conv.get("conversation_id") or "")
                                         if cid and _ad_store is not None:
-                                            cm = _ad_store.get_automation_mode(cid)
-                                            if cm:
-                                                mode = cm
+                                            explicit = _ad_store.get_automation_mode_if_set(cid)
+                                            if explicit is not None:
+                                                mode = explicit
                                     except Exception:
                                         pass
                                     if mode == "manual":
@@ -1351,8 +1597,8 @@ class AIChatAssistant:
                                 self.inbox_store.register_new_inbound_cb(_auto_draft_cb)
                                 self.logger.info(
                                     "AutoDraft 已启用（per-conv 优先, 全局默认 mode=%s min_len=%s "
-                                    "persona_enrich=%s skip=%s）",
-                                    _ad_mode, _ad_min_len, _ad_enrich, _ad_skip,
+                                    "persona_enrich=%s skip=%s skip_groups=%s）",
+                                    _ad_mode, _ad_min_len, _ad_enrich, _ad_skip, _ad_skip_groups,
                                 )
                             else:
                                 self.logger.info("AutoDraft 已禁用（auto_draft.enabled=false）")
@@ -1766,6 +2012,7 @@ class AIChatAssistant:
 
                 # ★ S：翻译置信度低置信率/切换率按日落库（供看板画 7 天 sparkline；默认关）
                 self._maybe_init_translation_trend_log()
+                self._maybe_init_realtime_voice_trend_log()
 
                 # ★ Q 延伸：ingest 回写 contact_id（默认关）
                 self._maybe_wire_ingest_contact_writeback()
@@ -2177,6 +2424,32 @@ class AIChatAssistant:
                     _cs.get("trend_retention_days", 90))
         except Exception:
             self.logger.warning("翻译置信度趋势落库初始化失败（已忽略）", exc_info=True)
+
+    def _maybe_init_realtime_voice_trend_log(self) -> None:
+        """E 线：按 ``realtime_voice.trend_log`` 装配实时语音按日聚合落库（默认关）。
+
+        开启后 stats 热路旁路 upsert ``config/rtv_trend.db``，ops 经
+        ``/api/admin/realtime-voice-trend`` 画 sparkline，告警校准可读近 N 天回放。
+        """
+        try:
+            rtv = (self.config.config.get("realtime_voice") or {})
+            if not rtv.get("trend_log", False):
+                self.logger.info(
+                    "实时语音趋势落库未启用（realtime_voice.trend_log=false）")
+                return
+            from src.ai.realtime_voice_trend_store import configure_realtime_voice_trend_store
+            _cfg_dir = Path(self.config.config_path).parent
+            store = configure_realtime_voice_trend_store(
+                enabled=True,
+                db_path=_cfg_dir / "rtv_trend.db",
+                retention_days=float(rtv.get("trend_retention_days", 90)),
+            )
+            if store is not None:
+                self.logger.info(
+                    "✅ 实时语音趋势落库已就绪（retention=%sd）",
+                    rtv.get("trend_retention_days", 90))
+        except Exception:
+            self.logger.warning("实时语音趋势落库初始化失败（已忽略）", exc_info=True)
 
     def _maybe_init_monetization(self, web_app=None) -> None:
         """Phase K2：C 端变现（默认关，monetization.enabled 开）。
@@ -3277,6 +3550,13 @@ class AIChatAssistant:
         if self.running:
             self.logger.info("正在停止AI聊天助手...")
             self.running = False
+
+            # 本机 IndexTTS2 随主程序退出而关闭（仅当由本进程托管拉起且 stop_with_app）
+            if self.local_tts is not None:
+                try:
+                    await self.local_tts.stop()
+                except Exception as ex:
+                    self.logger.warning("本机 TTS 关闭异常: %s", ex)
 
             # 排空消息队列（graceful drain）
             if self.telegram_client and hasattr(self.telegram_client, 'message_queue'):

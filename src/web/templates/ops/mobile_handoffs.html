@@ -1,6 +1,7 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8">
-<title>Mobile 交接单 · Ops</title>
+<html lang="{{ 'zh-CN' if (ui_lang|default('zh')) == 'zh' else 'en' }}"><head><meta charset="utf-8">
+<title>{{ (i18n or {}).get('ops.nav.mobile', 'Mobile 交接单') }} · Ops</title>
+{% include "_i18n_bootstrap.html" %}
 <style>
 *{box-sizing:border-box}
 body{font-family:-apple-system,Segoe UI,sans-serif;max-width:1260px;margin:20px auto;padding:0 20px;background:#f8fafc;color:#222}
@@ -83,45 +84,45 @@ a:hover{text-decoration:underline}
 </style></head>
 <body>
 
-<!-- NAV_INJECT -->
+{% include "ops/_ops_nav.html" %}
 
-<h1>Mobile 交接单</h1>
-<p class="sub">来源：mobile-auto0423 / openclaw.db &nbsp;·&nbsp; 每 15s 自动刷新</p>
+<h1>{{ (i18n or {}).get('ops.nav.mobile', 'Mobile 交接单') }}</h1>
+<p class="sub">{{ (i18n or {}).get('ops.mh.sub_src', '来源：mobile-auto0423 / openclaw.db') }} &nbsp;·&nbsp; {{ (i18n or {}).get('ops.mh.sub_refresh', '每 15s 自动刷新') }}</p>
 
 <!-- Dead Letter 管理区块 -->
 <div id="dl-section" style="display:none;margin-bottom:14px;background:#fff5f5;border:1px solid #fecaca;border-radius:6px;padding:10px 14px">
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-    <span style="font-size:13px;font-weight:700;color:#991b1b">⚠️ Dead Letter 队列（彻底失败，需人工介入）</span>
-    <button style="margin-left:auto;padding:3px 10px;font-size:11px;border:1px solid #fca5a5;border-radius:4px;background:#fee2e2;color:#991b1b;cursor:pointer" onclick="loadDeadLetters()">&#8635; 刷新</button>
+    <span style="font-size:13px;font-weight:700;color:#991b1b">⚠️ {{ (i18n or {}).get('ops.mh.dl_title', 'Dead Letter 队列（彻底失败，需人工介入）') }}</span>
+    <button style="margin-left:auto;padding:3px 10px;font-size:11px;border:1px solid #fca5a5;border-radius:4px;background:#fee2e2;color:#991b1b;cursor:pointer" onclick="loadDeadLetters()">&#8635; {{ (i18n or {}).get('ops.mh.refresh', '刷新') }}</button>
   </div>
   <table style="width:100%;font-size:12px;border-collapse:collapse" id="dl-table">
     <thead><tr style="background:#fef2f2">
       <th style="padding:5px 8px;text-align:left">ID</th>
       <th style="padding:5px 8px;text-align:left">Handoff ID</th>
-      <th style="padding:5px 8px;text-align:left">操作</th>
-      <th style="padding:5px 8px;text-align:left">操作人</th>
-      <th style="padding:5px 8px;text-align:left">失败次数</th>
-      <th style="padding:5px 8px;text-align:left">最后错误</th>
-      <th style="padding:5px 8px;text-align:left">强制重试</th>
+      <th style="padding:5px 8px;text-align:left">{{ (i18n or {}).get('ops.mh.col_action', '操作') }}</th>
+      <th style="padding:5px 8px;text-align:left">{{ (i18n or {}).get('ops.mh.col_operator', '操作人') }}</th>
+      <th style="padding:5px 8px;text-align:left">{{ (i18n or {}).get('ops.mh.col_failures', '失败次数') }}</th>
+      <th style="padding:5px 8px;text-align:left">{{ (i18n or {}).get('ops.mh.col_last_error', '最后错误') }}</th>
+      <th style="padding:5px 8px;text-align:left">{{ (i18n or {}).get('ops.mh.col_force_retry', '强制重试') }}</th>
     </tr></thead>
-    <tbody id="dl-tbody"><tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:10px">加载中…</td></tr></tbody>
+    <tbody id="dl-tbody"><tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:10px">{{ (i18n or {}).get('dash.loading', '加载中…') }}</td></tr></tbody>
   </table>
 </div>
 
 <div id="health-bar" class="health-bar warn">
   <div class="health-dot"></div>
-  <span id="health-text">正在加载 Bridge 状态…</span>
+  <span id="health-text">{{ (i18n or {}).get('ops.mh.loading_health', '正在加载 Bridge 状态…') }}</span>
   <span class="hstat" id="health-stat"></span>
 </div>
 
 <div class="tabs" id="tabs">
-  <button class="tab active" data-state="" onclick="switchTab(this,'')">全部 <span class="badge" id="cnt-all">-</span></button>
-  <button class="tab" data-state="pending"    onclick="switchTab(this,'pending')">待确认 <span class="badge" id="cnt-pending">-</span></button>
-  <button class="tab" data-state="acknowledged" onclick="switchTab(this,'acknowledged')">已确认 <span class="badge" id="cnt-acknowledged">-</span></button>
-  <button class="tab" data-state="completed"  onclick="switchTab(this,'completed')">已完成 <span class="badge" id="cnt-completed">-</span></button>
-  <button class="tab" data-state="rejected"   onclick="switchTab(this,'rejected')">已拒绝 <span class="badge" id="cnt-rejected">-</span></button>
-  <button class="tab" data-state="expired"    onclick="switchTab(this,'expired')">已过期 <span class="badge" id="cnt-expired">-</span></button>
-  <span class="refresh-info">最后刷新：<span id="last-refresh">-</span></span>
+  <button class="tab active" data-state="" onclick="switchTab(this,'')">{{ (i18n or {}).get('ops.mh.tab_all', '全部') }} <span class="badge" id="cnt-all">-</span></button>
+  <button class="tab" data-state="pending"    onclick="switchTab(this,'pending')">{{ (i18n or {}).get('ops.ct.st_pending', '待确认') }} <span class="badge" id="cnt-pending">-</span></button>
+  <button class="tab" data-state="acknowledged" onclick="switchTab(this,'acknowledged')">{{ (i18n or {}).get('ops.ct.st_acked', '已确认') }} <span class="badge" id="cnt-acknowledged">-</span></button>
+  <button class="tab" data-state="completed"  onclick="switchTab(this,'completed')">{{ (i18n or {}).get('ops.ct.st_completed', '已完成') }} <span class="badge" id="cnt-completed">-</span></button>
+  <button class="tab" data-state="rejected"   onclick="switchTab(this,'rejected')">{{ (i18n or {}).get('ops.ct.st_rejected', '已拒绝') }} <span class="badge" id="cnt-rejected">-</span></button>
+  <button class="tab" data-state="expired"    onclick="switchTab(this,'expired')">{{ (i18n or {}).get('ops.ct.st_expired', '已过期') }} <span class="badge" id="cnt-expired">-</span></button>
+  <span class="refresh-info">{{ (i18n or {}).get('ops.mh.last_refresh', '最后刷新') }}: <span id="last-refresh">-</span></span>
 </div>
 
 <table id="tbl">
@@ -129,19 +130,19 @@ a:hover{text-decoration:underline}
     <tr>
       <th>Handoff ID</th>
       <th>Canonical ID</th>
-      <th>状态</th>
-      <th>渠道</th>
-      <th>来源 Agent</th>
-      <th>引流话术</th>
-      <th>创建时间</th>
-      <th>状态更新</th>
-      <th>操作</th>
+      <th>{{ (i18n or {}).get('ops.ct.tl_state', '状态') }}</th>
+      <th>{{ (i18n or {}).get('ops.ct.tl_channel', '渠道') }}</th>
+      <th>{{ (i18n or {}).get('ops.mh.col_source_agent', '来源 Agent') }}</th>
+      <th>{{ (i18n or {}).get('ops.mh.col_pitch', '引流话术') }}</th>
+      <th>{{ (i18n or {}).get('ops.mh.col_created', '创建时间') }}</th>
+      <th>{{ (i18n or {}).get('ops.mh.col_state_updated', '状态更新') }}</th>
+      <th>{{ (i18n or {}).get('ops.mh.col_action', '操作') }}</th>
     </tr>
   </thead>
   <tbody id="tbody"></tbody>
 </table>
-<div id="empty" class="empty" style="display:none">暂无交接单</div>
-<button id="load-more" class="load-more" style="display:none" onclick="loadMore()">加载更多</button>
+<div id="empty" class="empty" style="display:none">{{ (i18n or {}).get('ops.mh.empty', '暂无交接单') }}</div>
+<button id="load-more" class="load-more" style="display:none" onclick="loadMore()">{{ (i18n or {}).get('ops.mh.load_more', '加载更多') }}</button>
 
 <div id="toast"></div>
 
@@ -152,15 +153,15 @@ function fmtTs(s){if(!s)return '-';try{return s.replace('T',' ').replace('Z','')
 function ago(s){
   if(!s)return '';
   const d=new Date(s.replace(' ','T')+'Z').getTime(), now=Date.now(), diff=Math.floor((now-d)/1000);
-  if(diff<60)return diff+'s前';
-  if(diff<3600)return Math.floor(diff/60)+'m前';
-  if(diff<86400)return Math.floor(diff/3600)+'h前';
-  return Math.floor(diff/86400)+'d前';
+  if(diff<60)return window.Tf('ops.mh.ago_s',{n:diff});
+  if(diff<3600)return window.Tf('ops.mh.ago_m',{n:Math.floor(diff/60)});
+  if(diff<86400)return window.Tf('ops.mh.ago_h',{n:Math.floor(diff/3600)});
+  return window.Tf('ops.mh.ago_d',{n:Math.floor(diff/86400)});
 }
 
 const STATE_LABELS = {
-  pending:'待确认', acknowledged:'已确认', completed:'已完成',
-  rejected:'已拒绝', expired:'已过期', duplicate_blocked:'去重屏蔽',
+  pending:window.T('ops.ct.st_pending'), acknowledged:window.T('ops.ct.st_acked'), completed:window.T('ops.ct.st_completed'),
+  rejected:window.T('ops.ct.st_rejected'), expired:window.T('ops.ct.st_expired'), duplicate_blocked:window.T('ops.ct.st_dedup'),
 };
 
 /* ── 全局状态 ── */
@@ -197,29 +198,29 @@ async function loadHealth(){
     const deadLetter = d.writeback_dead_letter||0;
     if(!dbOk){
       bar.className='health-bar err';
-      txt.textContent='openclaw.db 不存在，请检查 mobile-auto0423 路径配置';
+      txt.textContent=window.T('ops.mh.err_nodb');
     } else if(hasErr){
       bar.className='health-bar err';
-      txt.textContent='Bridge 错误: '+esc(d.last_error);
+      txt.textContent=window.T('ops.mh.err_bridge')+esc(d.last_error);
     } else if(deadLetter > 0){
       bar.className='health-bar err';
-      txt.textContent=`⚠️ ${deadLetter} 条 writeback 已彻底失败（dead_letter），需人工介入`;
+      txt.textContent=window.Tf('ops.mh.dl_banner',{n:deadLetter});
       document.getElementById('dl-section').style.display='';
       loadDeadLetters();
     } else if(sinceLastSync > 60){
       bar.className='health-bar warn';
-      txt.textContent='Bridge 运行中（距上次同步 '+sinceLastSync+'s，可能尚未启动）';
+      txt.textContent=window.Tf('ops.mh.health_starting',{s:sinceLastSync});
     } else {
       bar.className='health-bar ok';
-      txt.textContent='Bridge 运行正常';
+      txt.textContent=window.T('ops.mh.health_ok');
     }
     const wbPending = d.writeback_pending||0;
-    const wbInfo = wbPending>0 ? `  ⏳ 待重试 writeback: ${wbPending}` : '';
-    stat.textContent = `同步 ok=${d.sync_ok} fail=${d.sync_fail}  wb_ok=${d.writeback_ok||0}${wbInfo}  wm: ${wm.slice(0,19)}`;
+    const wbInfo = wbPending>0 ? '  '+window.Tf('ops.mh.wb_pending',{n:wbPending}) : '';
+    stat.textContent = `${window.T('ops.mh.sync')} ok=${d.sync_ok} fail=${d.sync_fail}  wb_ok=${d.writeback_ok||0}${wbInfo}  wm: ${wm.slice(0,19)}`;
   }catch(e){
     const bar=document.getElementById('health-bar');
     bar.className='health-bar err';
-    document.getElementById('health-text').textContent='Bridge 状态不可用：'+e.message;
+    document.getElementById('health-text').textContent=window.T('ops.mh.err_unavail')+e.message;
   }
 }
 
@@ -254,7 +255,7 @@ async function loadData(reset=false){
     currentOffset += items.length;
     renderTable();
   }catch(e){
-    showToast('加载失败: '+e.message, false);
+    showToast(window.T('dash.load_fail')+': '+e.message, false);
   }
 }
 
@@ -283,9 +284,9 @@ function renderTable(){
     const canRej  = state==='pending'||state==='acknowledged';
     const actions = `
       <div class="act-gap">
-        <button class="btn btn-ack"    ${canAck ?'':'disabled'} onclick="doAction('${esc(h.handoff_id)}','acknowledge',this)">确认</button>
-        <button class="btn btn-done"   ${canDone?'':'disabled'} onclick="doAction('${esc(h.handoff_id)}','complete',this)">完成</button>
-        <button class="btn btn-reject" ${canRej ?'':'disabled'} onclick="doAction('${esc(h.handoff_id)}','reject',this)">拒绝</button>
+        <button class="btn btn-ack"    ${canAck ?'':'disabled'} onclick="doAction('${esc(h.handoff_id)}','acknowledge',this)">${window.T('ops.mh.act_ack')}</button>
+        <button class="btn btn-done"   ${canDone?'':'disabled'} onclick="doAction('${esc(h.handoff_id)}','complete',this)">${window.T('ops.mh.act_done')}</button>
+        <button class="btn btn-reject" ${canRej ?'':'disabled'} onclick="doAction('${esc(h.handoff_id)}','reject',this)">${window.T('ops.mh.act_reject')}</button>
       </div>`;
     return `<tr id="row-${esc(h.handoff_id)}">
       <td><span class="cid" title="${esc(h.handoff_id)}">${esc(sid)}</span></td>
@@ -304,29 +305,29 @@ function renderTable(){
 function loadMore(){loadData(false);}
 
 /* ── 操作按钮 ── */
-const ACTION_LABELS = {acknowledge:'确认',complete:'完成',reject:'拒绝'};
+const ACTION_LABELS = {acknowledge:window.T('ops.mh.act_ack'),complete:window.T('ops.mh.act_done'),reject:window.T('ops.mh.act_reject')};
 async function doAction(handoffId, action, btn){
   const label = ACTION_LABELS[action]||action;
-  if(!confirm(`确认对此交接单执行「${label}」操作？`)) return;
+  if(!confirm(window.Tf('ops.mh.confirm_action',{label:label}))) return;
   btn.disabled=true;
   try{
     const r = await fetch(`/api/mobile-handoffs/${encodeURIComponent(handoffId)}/${action}`,{method:'POST'});
     const d = await r.json().catch(()=>({}));
     if(r.status===202){
       // mobile 暂时不可达，已入队自动重试
-      showToast(`⏳ mobile 不可达，已入队自动重试（id=${d.retry_id||'?'}）`, 'queue');
+      showToast(window.Tf('ops.mh.queued',{id:d.retry_id||'?'}), 'queue');
       btn.disabled=false;
       return;
     }
     if(!r.ok){
       throw new Error(d.detail||'HTTP '+r.status);
     }
-    showToast(`「${label}」操作成功`, 'ok');
+    showToast(window.Tf('ops.mh.action_ok',{label:label}), 'ok');
     // 延迟 800ms 刷新，让 mobile 有时间更新状态
     setTimeout(()=>{loadData(true);loadSummary();}, 800);
   }catch(e){
     btn.disabled=false;
-    showToast(`操作失败: ${e.message}`, 'err');
+    showToast(window.T('ops.mr.op_fail')+': '+e.message, 'err');
   }
 }
 
@@ -363,33 +364,33 @@ async function loadDeadLetters(){
         <td style="padding:4px 8px;color:#dc2626;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${err}">${err}</td>
         <td style="padding:4px 8px">
           <button style="padding:2px 8px;font-size:11px;border:1px solid #d1d5db;border-radius:3px;cursor:pointer;background:#fff"
-            onclick="retryDeadLetter(${row.id},this)">\u25b6 \u91cd\u8bd5</button>
+            onclick="retryDeadLetter(${row.id},this)">\u25b6 ${window.T('ops.mh.retry')}</button>
         </td>
       </tr>`;
     }).join('');
   }catch(e){
-    tbody.innerHTML=`<tr><td colspan="7" style="color:#dc2626;padding:8px">\u52a0\u8f7d\u5931\u8d25: ${e}</td></tr>`;
+    tbody.innerHTML=`<tr><td colspan="7" style="color:#dc2626;padding:8px">${window.T('dash.load_fail')}: ${e}</td></tr>`;
   }
 }
 
 async function retryDeadLetter(itemId, btn){
   btn.disabled=true;
-  btn.textContent='\u5904\u7406\u4e2d\u2026';
+  btn.textContent=window.T('ops.mh.processing');
   try{
     const r = await fetch(`/api/mobile-bridge/writeback-queue/${itemId}/retry`,{method:'POST'});
     if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||'HTTP '+r.status); }
-    showToast(`\u6761\u76ee ${itemId} \u5df2\u91cd\u7f6e\u4e3a pending\uff0c\u4e0b\u6b21\u8f6e\u8be2\u5c06\u81ea\u52a8\u91cd\u8bd5`, 'ok');
+    showToast(window.Tf('ops.mh.retry_ok',{id:itemId}), 'ok');
     setTimeout(()=>{ loadHealth(); loadDeadLetters(); }, 800);
   }catch(e){
     btn.disabled=false;
-    btn.textContent='\u25b6 \u91cd\u8bd5';
-    showToast('\u91cd\u8bd5\u5931\u8d25: '+e.message, 'err');
+    btn.textContent='\u25b6 '+window.T('ops.mh.retry');
+    showToast(window.T('ops.mh.retry_fail')+e.message, 'err');
   }
 }
 
 /* ── 刷新计时器 ── */
 function updateRefreshLabel(){
-  document.getElementById('last-refresh').textContent=new Date().toLocaleTimeString('zh-CN',{hour12:false});
+  document.getElementById('last-refresh').textContent=window.wsFmtTime(null,{hour12:false});
 }
 function refresh(){
   loadHealth();

@@ -1,0 +1,40 @@
+---
+description: 工作台前端主题令牌与配色约定（--tk-*、ink、toast、SVG）
+globs: src/web/templates/**/*.html,src/web/static/**/*.js
+alwaysApply: false
+---
+
+# 工作台前端主题约定
+
+单一事实来源：`src/web/templates/workspace_base.html` 内 `:root` / `[data-cp-theme="dark"]` 的 `--tk-*` 令牌。
+
+## 颜色使用
+
+| 场景 | 用法 | 禁止 |
+|------|------|------|
+| 正文/标题 | `var(--tk-text)` | 裸 `#0f172a` / `#94a3b8` |
+| 次要文字 | `var(--tk-text-muted)` | 硬编码 slate 灰 |
+| 语义**文字**（状态、错误、警告） | `var(--tk-*-ink)` | 直接用 `--tk-amber` / `--tk-emerald` 作文字色（亮底对比不足） |
+| 语义**填充/圆点/描边** | `var(--tk-brand/emerald/amber/danger/violet)` 或 `rgba(...,.12–.18)` 半透明底 | 浅色实心底 `#eff6ff` / `#fef3c7`（暗色会发白块） |
+| 结构（底/面/边） | `var(--tk-bg/surface/surface-2/border)` | 各页自建平行色板 |
+
+## JS 动态渲染
+
+- 优先用已有工具类：`.tk-load` `.tk-fail` `.tk-c-ok` `.tk-chip.*` 等。
+- 内联 `style` 里可用 `var(--tk-*)`；**禁止**在 JS 字符串里写 `#94a3b8` 等裸 hex（muted 除外：状态圆点、平台品牌色）。
+- Toast：`CRMW.toast(msg)` 默认 info 蓝；成功 `#16a34a`、失败 `#dc2626`、警告 `#d97706`、低调 `#64748b`——由 `crm-widgets.js` 映射到 `.tk-toast.*`。
+
+## SVG / 折线图
+
+- 不用 `fill="#..."` / `stroke="#..."` 属性传主题色。
+- 改用 `style="fill:var(--tk-brand)"` / `style="stroke:..."`，以便吃 CSS 变量。
+
+## 日夜模式
+
+- 切换：`data-cp-theme` + `localStorage('cp_theme')`。
+- 新组件**不要**再写 `[data-cp-theme="dark"]` 成对覆盖；用 `--tk-*` 自适配。
+- 例外：顶栏渐变、出站消息气泡、平台品牌色（Telegram/LINE 等）可保留固定色。
+
+## 聊天页并存体系
+
+`unified_inbox.html` 保留 `--accent/--bg-*` 别名，已对齐 `--tk-brand/emerald/danger/amber`。新样式优先 `--tk-*`，`--accent` 仅作局部别名。

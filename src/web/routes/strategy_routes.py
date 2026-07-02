@@ -17,6 +17,7 @@ from __future__ import annotations
 import yaml
 from fastapi import Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
+from src.web.web_i18n import tr
 
 
 def register_strategy_routes(app, ctx):
@@ -264,7 +265,7 @@ def register_strategy_routes(app, ctx):
         _api_auth(request)
         tracker = _get_strategy_tracker()
         if not tracker:
-            return {"results": [], "error": "策略追踪器未就绪"}
+            return {"results": [], "error": tr(request, "err.svc.strategy_tracker_not_ready")}
         tracker.mark_no_follow_up()
         summary = tracker.strategy_summary(min(hours, 168))
         rs = config_manager.get_strategies_config()

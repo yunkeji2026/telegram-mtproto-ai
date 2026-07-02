@@ -26,6 +26,7 @@ from src.web.routes.unified_inbox_context import (
     _build_relationship_stage_payload,
 )
 from src.web.routes.unified_inbox_services import _contacts_store, _inbox_store
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ def register_collab_context_routes(app, *, api_auth) -> None:
         api_auth(request)
         store = _inbox_store(request)
         if store is None:
-            return {"ok": False, "error": "inbox_store 不可用"}
+            return {"ok": False, "error": tr(request, "err.svc.inbox_not_ready")}
         limit = max(1, min(500, int(limit or 100)))
         events = store.get_contact_timeline(contact_id, limit=limit)
         return {"ok": True, "contact_id": contact_id, "events": events, "count": len(events)}

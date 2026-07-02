@@ -14,12 +14,13 @@ from __future__ import annotations
 from fastapi import Depends, HTTPException, Request
 
 from domains.ecommerce.hooks import extract_order_no, extract_tracking_no
+from src.web.web_i18n import tr
 
 
 def _get_tools(request: Request):
     svc = getattr(request.app.state, "ecommerce_tools", None)
     if svc is None:
-        raise HTTPException(503, "电商工具未启用")
+        raise HTTPException(503, tr(request, "err.ec.tools_disabled"))
     return svc
 
 
@@ -29,7 +30,7 @@ def register_ecommerce_tools_routes(app, *, api_auth):
         svc = _get_tools(request)
         q = (order_no or "").strip() or extract_order_no(text)
         if not q:
-            raise HTTPException(400, "缺少 order_no 或可识别的订单号")
+            raise HTTPException(400, tr(request, "err.ec.no_order_no"))
         res = await svc.lookup_order(q)
         out = res.to_dict()
         out["facts"] = res.to_context_facts()
@@ -40,7 +41,7 @@ def register_ecommerce_tools_routes(app, *, api_auth):
         svc = _get_tools(request)
         q = (tracking_no or "").strip() or extract_tracking_no(text)
         if not q:
-            raise HTTPException(400, "缺少 tracking_no 或可识别的物流单号")
+            raise HTTPException(400, tr(request, "err.ec.no_tracking_no"))
         res = await svc.track_shipment(q)
         out = res.to_dict()
         out["facts"] = res.to_context_facts()
@@ -66,7 +67,7 @@ def register_ecommerce_tools_routes(app, *, api_auth):
             d["facts"] = r.to_context_facts()
             results.append(d)
         if not results:
-            raise HTTPException(400, "未能从文本识别订单号或物流单号")
+            raise HTTPException(400, tr(request, "err.ec.no_id_recognized"))
         return {"ok": True, "count": len(results), "results": results}
 
     @app.get("/api/tools/ecommerce/cache_stats")

@@ -31,7 +31,7 @@
       this._persona = "";
       this._enrollOpen = false;
       this._lastReconcile = null;
-      this.shadowRoot.innerHTML = `<style>${this._css()}</style><div class="wrap empty">选中会话后可使用语音克隆</div>`;
+      this.shadowRoot.innerHTML = `<style>${this._css()}</style><div class="wrap empty">${this._t("cp.voice.empty")}</div>`;
       this.shadowRoot.addEventListener("click", (e) => this._onClick(e));
       this.shadowRoot.addEventListener("change", (e) => this._onChange(e));
       this.addEventListener("cp-fill", (e) => {
@@ -99,6 +99,23 @@
       return String(s == null ? "" : s).replace(/[&<>"]/g, (c) =>
         ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
     }
+    _t(key, vars) {
+      const f = root.CopilotShared && root.CopilotShared.t;
+      return f ? f(key, vars) : key;
+    }
+
+    _metaLine(d) {
+      const m = (d && d.voice_meta) || {};
+      const parts = [];
+      if (m.persona_id) parts.push(`${this._t("cp.voice.m_persona")} ${m.persona_id}`);
+      if (m.provider) parts.push(`${this._t("cp.voice.m_provider")} ${m.provider}`);
+      if (m.voice) parts.push(`${this._t("cp.voice.m_voice")} ${m.voice}`);
+      if (m.emotion) parts.push(`${this._t("cp.voice.m_emotion")} ${m.emotion}`);
+      if (m.fallback_from) parts.push(this._t("cp.voice.m_fallback", { from: m.fallback_from }));
+      return parts.length
+        ? `<div class="hint">${this._t("cp.voice.m_actual", { parts: this._esc(parts.join(" · ")) })}</div>`
+        : "";
+    }
 
     async _loadProfiles() {
       if (!this._client || !this._client.voiceProfiles) return;
@@ -108,9 +125,9 @@
         this._profiles = d.profiles || [];
         const sel = this.shadowRoot.querySelector('[data-role="persona"]');
         if (!sel) return;
-        let html = '<option value="">默认音色</option>';
+        let html = `<option value="">${this._t("cp.voice.default_voice")}</option>`;
         const dft = d.default || {};
-        if (dft.is_clone) html = '<option value="">默认音色（🎤克隆）</option>';
+        if (dft.is_clone) html = `<option value="">${this._t("cp.voice.default_voice_clone")}</option>`;
         this._profiles.forEach((p) => {
           const tag = p.is_clone ? (p.ready ? " 🎤" : " 🎤⚠") : "";
           const dis = p.is_clone && !p.ready ? " disabled" : "";
@@ -126,19 +143,19 @@
       const w = this.shadowRoot.querySelector(".wrap");
       if (!this._ctx || !this._ctx.chatKey) {
         w.className = "wrap empty";
-        w.textContent = "选中会话后可使用语音克隆";
+        w.textContent = this._t("cp.voice.empty");
         return;
       }
       w.className = "wrap";
       w.innerHTML =
         `<div class="row">
-          <button class="primary" data-act="tts">🎙️ 语音</button>
-          <select data-role="persona" title="语音音色"></select>
-          <button data-act="unbind" title="解绑音色">🗑</button>
-          <button data-act="toggle-enroll" title="登记克隆音色">🎚️ 录入</button>
+          <button class="primary" data-act="tts">${this._t("cp.voice.tts_btn")}</button>
+          <select data-role="persona" title="${this._esc(this._t("cp.voice.persona_title"))}"></select>
+          <button data-act="unbind" title="${this._esc(this._t("cp.voice.unbind_title"))}">🗑</button>
+          <button data-act="toggle-enroll" title="${this._esc(this._t("cp.voice.enroll_title"))}">${this._t("cp.voice.enroll_btn")}</button>
         </div>
-        <textarea data-role="text" placeholder="要转成语音的文字（可用上方草稿填入）"></textarea>
-        <div class="hint">与统一收件箱同源：试听 → 发送语音。协议多开账号在线时可直发。</div>
+        <textarea data-role="text" placeholder="${this._esc(this._t("cp.voice.text_ph"))}"></textarea>
+        <div class="hint">${this._t("cp.voice.hint")}</div>
         <div data-role="preview" class="preview" hidden></div>
         <div data-role="enroll" class="panel" hidden>${this._enrollHtml()}</div>`;
       if (this._enrollOpen) {
@@ -149,33 +166,33 @@
     }
 
     _enrollHtml() {
-      return `<h5>🎚️ 登记克隆音色</h5>
+      return `<h5>${this._t("cp.voice.enroll_h")}</h5>
         <div class="row">
           <input type="file" data-role="efile" accept="audio/*,.wav,.mp3,.m4a" />
-          <input type="text" data-role="ename" placeholder="音色名" />
-          <select data-role="epersona"><option value="">目标人设…</option></select>
-          <select data-role="elang"><option value="Japanese">日语</option><option value="Chinese">中文</option><option value="English">英语</option></select>
-          <button data-act="enroll-submit">登记</button>
+          <input type="text" data-role="ename" placeholder="${this._esc(this._t("cp.voice.ename_ph"))}" />
+          <select data-role="epersona"><option value="">${this._t("cp.voice.target_persona_opt")}</option></select>
+          <select data-role="elang"><option value="Japanese">${this._t("cp.lang.ja")}</option><option value="Chinese">${this._t("cp.lang.zh")}</option><option value="English">${this._t("cp.lang.en")}</option></select>
+          <button data-act="enroll-submit">${this._t("cp.voice.enroll_submit")}</button>
         </div>
         <div class="row">
-          <input type="text" data-role="ereftext" placeholder="参考音频原文（选填，填了克隆更像）" style="flex:1;" />
+          <input type="text" data-role="ereftext" placeholder="${this._esc(this._t("cp.voice.reftext_ph"))}" style="flex:1;" />
         </div>
-        <div data-role="ehint" class="hint">仅登记本人或已授权声音 · 参考音频建议 10~30 秒清晰人声</div>
+        <div data-role="ehint" class="hint">${this._t("cp.voice.enroll_hint")}</div>
         <div data-role="audition"></div>
         <div class="panel">
-          <h5>🔁 复用已有音色</h5>
+          <h5>${this._t("cp.voice.reuse_h")}</h5>
           <div class="row">
-            <select data-role="rfrom"><option value="">源人设</option></select>
+            <select data-role="rfrom"><option value="">${this._t("cp.voice.src_persona_opt")}</option></select>
             <span>→</span>
-            <select data-role="rto"><option value="">目标人设</option></select>
-            <button data-act="rebind">复制</button>
+            <select data-role="rto"><option value="">${this._t("cp.voice.dst_persona_opt")}</option></select>
+            <button data-act="rebind">${this._t("cp.voice.copy_btn")}</button>
           </div>
         </div>
         <div class="panel">
-          <h5>📊 声纹对账</h5>
+          <h5>${this._t("cp.voice.recon_h")}</h5>
           <div class="row">
-            <button data-act="reconcile">刷新对账</button>
-            <button data-act="purge-orphans">♻ 回收孤儿</button>
+            <button data-act="reconcile">${this._t("cp.voice.recon_btn")}</button>
+            <button data-act="purge-orphans">${this._t("cp.voice.purge_btn")}</button>
           </div>
           <div data-role="recon" class="recon"></div>
         </div>`;
@@ -189,8 +206,8 @@
         const fill = (sel, filterVoice) => {
           if (!sel) return;
           let h = sel === this.shadowRoot.querySelector('[data-role="epersona"]')
-            ? '<option value="">目标人设…</option>'
-            : (sel.getAttribute("data-role") === "rfrom" ? '<option value="">源人设</option>' : '<option value="">目标人设</option>');
+            ? `<option value="">${this._t("cp.voice.target_persona_opt")}</option>`
+            : (sel.getAttribute("data-role") === "rfrom" ? `<option value="">${this._t("cp.voice.src_persona_opt")}</option>` : `<option value="">${this._t("cp.voice.dst_persona_opt")}</option>`);
           list.filter((s) => !filterVoice || s.has_voice).forEach((s) => {
             h += `<option value="${this._esc(s.id)}">${this._esc(s.name || s.id)}${s.has_voice ? " 🎤" : ""}</option>`;
           });
@@ -244,25 +261,26 @@
 
     async _genTts() {
       const text = this._text();
-      if (!text) { this._hint("请先输入文字"); return; }
+      if (!text) { this._hint(this._t("cp.voice.need_text")); return; }
       const box = this.shadowRoot.querySelector('[data-role="preview"]');
       if (!box) return;
       box.hidden = false;
-      box.innerHTML = "生成试听…";
+      box.textContent = this._t("cp.voice.gen_audition");
       try {
         const d = await this._client.voiceTts({ text, persona_id: this._persona || undefined });
         const url = d.dataUrl || d.audio_url ||
           (d.filename ? `/api/voice/tts-file/${encodeURIComponent(d.filename)}` : "");
         if (!url && !d.ok) {
-          box.innerHTML = `<span class="err">生成失败：${this._esc(d.message || d.error || "TTS 不可用")}</span>`;
+          box.innerHTML = `<span class="err">${this._esc(this._t("cp.voice.gen_fail", { msg: d.message || d.error || this._t("cp.voice.tts_unavailable") }))}</span>`;
           return;
         }
         box.innerHTML =
-          `🎙️ 语音预览<br><audio controls src="${url}"></audio>` +
+          `${this._t("cp.voice.preview")}<br><audio controls src="${url}"></audio>` +
+          this._metaLine(d) +
           `<div class="row" style="justify-content:flex-end;margin-top:6px;">` +
-          `<button class="primary" data-act="send">📨 发送语音给对方</button></div>`;
+          `<button class="primary" data-act="send">${this._t("cp.voice.send_btn")}</button></div>`;
       } catch (e) {
-        box.innerHTML = `<span class="err">请求失败</span>`;
+        box.innerHTML = `<span class="err">${this._esc(this._t("cp.voice.req_fail"))}</span>`;
       }
     }
 
@@ -279,25 +297,29 @@
           persona_id: this._persona || undefined,
         });
         if (d && d.ok) {
-          this._hint("语音已发送 🎙️", true);
+          const m = d.voice_meta || {};
+          this._hint(
+            this._t("cp.voice.sent")
+              + (m.provider ? ` (${m.provider}${m.emotion ? " / " + m.emotion : ""})` : ""),
+            true);
           this.dispatchEvent(new CustomEvent("cp-voice-sent", { bubbles: true, composed: true }));
         } else {
-          this._hint("发送失败：" + (d.message || d.detail || d.reason || "需协议多开在线账号"), false);
+          this._hint(this._t("cp.voice.send_fail", { msg: d.message || d.detail || d.reason || this._t("cp.voice.need_online") }), false);
         }
-      } catch (e) { this._hint("发送请求失败", false); }
+      } catch (e) { this._hint(this._t("cp.voice.send_req_fail"), false); }
     }
 
     async _unbind() {
-      if (!this._persona) { this._hint("请先选择要解绑的人设音色"); return; }
-      if (!confirm("解绑该人设的克隆音色？（默认保留云端声纹）")) return;
-      const purge = confirm("同时永久删除云端声纹？（不可恢复）");
+      if (!this._persona) { this._hint(this._t("cp.voice.need_pick_unbind")); return; }
+      if (!confirm(this._t("cp.voice.unbind_confirm"))) return;
+      const purge = confirm(this._t("cp.voice.purge_cloud_confirm"));
       try {
         const d = await this._client.voiceUnbind({ persona_id: this._persona, purge_cloud: purge });
         if (d && d.ok) {
-          this._hint("已解绑");
+          this._hint(this._t("cp.voice.unbound"));
           await this._loadProfiles();
-        } else this._hint(d.message || "解绑失败");
-      } catch (e) { this._hint("解绑失败"); }
+        } else this._hint(d.message || this._t("cp.voice.unbind_fail"));
+      } catch (e) { this._hint(this._t("cp.voice.unbind_fail")); }
     }
 
     async _enroll() {
@@ -308,9 +330,9 @@
       const refEl = this.shadowRoot.querySelector('[data-role="ereftext"]');
       const refText = ((refEl && refEl.value) || "").trim();
       const hint = this.shadowRoot.querySelector('[data-role="ehint"]');
-      if (!file || !file.files || !file.files[0]) { hint.textContent = "请选择参考音频"; return; }
-      if (!name || !persona) { hint.textContent = "请填写音色名并选择人设"; return; }
-      hint.textContent = "登记中…";
+      if (!file || !file.files || !file.files[0]) { hint.textContent = this._t("cp.voice.need_file"); return; }
+      if (!name || !persona) { hint.textContent = this._t("cp.voice.need_name_persona"); return; }
+      hint.textContent = this._t("cp.voice.enrolling");
       try {
         let d;
         if (root.shell && root.shell.voiceEnroll) {
@@ -327,26 +349,28 @@
           });
         }
         if (d && d.ok) {
-          hint.textContent = "✅ 登记成功";
+          hint.textContent = this._t("cp.voice.enroll_ok");
           this._persona = persona;
           this._savePersona(persona);
           await this._loadProfiles();
           const sel = this.shadowRoot.querySelector('[data-role="persona"]');
           if (sel) sel.value = persona;
           await this._audition(persona);
-        } else hint.textContent = "❌ " + (d.message || d.reason || "登记失败");
-      } catch (e) { hint.textContent = "❌ 请求失败"; }
+        } else hint.textContent = "❌ " + (d.message || d.reason || this._t("cp.voice.enroll_failed"));
+      } catch (e) { hint.textContent = "❌ " + this._t("cp.voice.req_fail"); }
     }
 
     async _audition(persona_id) {
       const box = this.shadowRoot.querySelector('[data-role="audition"]');
       if (!box) return;
-      box.textContent = "生成试听…";
+      box.textContent = this._t("cp.voice.gen_audition");
       try {
-        const d = await this._client.voiceTts({ text: "你好，这是音色试听样音。", persona_id });
+        const d = await this._client.voiceTts({ text: this._t("cp.voice.audition_sample"), persona_id });
         const url = d.dataUrl || d.audio_url || "";
-        box.innerHTML = url ? `🔊 <audio controls src="${url}" style="max-width:100%;"></audio>` : "试听失败";
-      } catch (e) { box.textContent = "试听不可用"; }
+        box.innerHTML = url
+          ? `🔊 <audio controls src="${url}" style="max-width:100%;"></audio>${this._metaLine(d)}`
+          : this._t("cp.voice.audition_fail");
+      } catch (e) { box.textContent = this._t("cp.voice.audition_unavailable"); }
     }
 
     async _rebind() {
@@ -360,19 +384,21 @@
     async _reconcile() {
       const box = this.shadowRoot.querySelector('[data-role="recon"]');
       if (!box) return;
-      box.textContent = "对账中…";
+      box.textContent = this._t("cp.voice.reconciling");
       try {
         const d = await this._client.voiceReconcile();
         this._lastReconcile = d;
         const s = d.summary || {};
-        let html = `云端 ${s.cloud_total || 0} · 本地 ${s.local_voice_ids || 0} · 孤儿 ${s.orphan_count || 0}`;
-        if (!(d.orphans || []).length && !(d.dangling || []).length) html += ' <span class="ok">✅ 对齐良好</span>';
+        let html = this._esc(this._t("cp.voice.recon_summary", {
+          cloud: s.cloud_total || 0, local: s.local_voice_ids || 0, orphan: s.orphan_count || 0,
+        }));
+        if (!(d.orphans || []).length && !(d.dangling || []).length) html += ` <span class="ok">${this._t("cp.voice.recon_ok")}</span>`;
         box.innerHTML = html;
-      } catch (e) { box.textContent = "对账失败"; }
+      } catch (e) { box.textContent = this._t("cp.voice.recon_fail"); }
     }
 
     async _purgeOrphans() {
-      if (!confirm("回收无人引用的孤儿声纹？（不可恢复）")) return;
+      if (!confirm(this._t("cp.voice.purge_orphans_confirm"))) return;
       await this._client.voicePurgeOrphans();
       await this._reconcile();
     }

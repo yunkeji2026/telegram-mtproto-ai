@@ -1,9 +1,12 @@
 <!DOCTYPE html>
-<html lang="{{ ui_lang|default('zh') }}-CN" data-theme="light">
+<html lang="{{ 'zh-CN' if (ui_lang|default('zh')) == 'zh' else 'en' }}" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{% block title %}坐席工作台{% endblock %} · {{ site_name|default('华灵科技客户转化聊天系统') }}</title>
+<title>{% block title %}{{ i18n.get('base.page_title', '坐席工作台') }}{% endblock %} · {{ product_name|default((i18n or {}).get('brand.product', '智聊')) }}</title>
+{% include "_brand_head.html" %}
+<link rel="stylesheet" href="/static/brand/brand-lockup.css">
+{% include "_i18n_bootstrap.html" %}
 <script>
 /* 主题应用提升到 base：让「所有」工作台页面（概览/客户/草稿…）都支持日/夜双模式，
    而非仅收件箱。与 localStorage('cp_theme') 同源；收件箱页另有更完整脚本会再覆写（含组件 css）。
@@ -15,7 +18,7 @@
   function sysDark(){ try{ return window.matchMedia&&window.matchMedia('(prefers-color-scheme:dark)').matches; }catch(_){ return false; } }
   function eff(){ var p=pref(); return p==='auto'?(sysDark()?'dark':'light'):p; }
   window.cpApplyTheme=window.cpApplyTheme||function(){ document.documentElement.setAttribute('data-cp-theme', eff()); };
-  window.cpCycleTheme=window.cpCycleTheme||function(){ var o=['auto','light','dark'],p=pref(),i=o.indexOf(p); try{ localStorage.setItem(KEY,o[(i+1)%3]); }catch(_){} window.cpApplyTheme(); var lb=document.getElementById('ws-theme-lbl'); if(lb){ var np=pref(); lb.textContent=(np==='auto'?'跟随系统':(np==='dark'?'暗色':'亮色')); } };
+  window.cpCycleTheme=window.cpCycleTheme||function(){ var o=['auto','light','dark'],p=pref(),i=o.indexOf(p); try{ localStorage.setItem(KEY,o[(i+1)%3]); }catch(_){} window.cpApplyTheme(); var lb=document.getElementById('ws-theme-lbl'); if(lb){ var np=pref(); lb.textContent=(np==='auto'?window.T('base.theme.auto'):(np==='dark'?window.T('base.theme.dark'):window.T('base.theme.light'))); } };
   window.cpApplyTheme();
   try{ if(window.matchMedia){ window.matchMedia('(prefers-color-scheme:dark)').addEventListener('change',function(){ if(pref()==='auto') window.cpApplyTheme(); }); } }catch(_){}
 })();
@@ -119,21 +122,24 @@
   .tk-chip.ok{background:rgba(16,185,129,.14);color:var(--tk-ok-ink);border-color:transparent;}
   .tk-chip.warn{background:rgba(245,158,11,.16);color:var(--tk-warn-ink);border-color:transparent;}
   .tk-chip.vio{background:rgba(168,85,247,.14);color:var(--tk-vio-ink);border-color:transparent;}
+  .ui-ic{display:inline-block;vertical-align:middle;flex:0 0 auto;}
+  .db-sec h3,.db-sec h3>span:first-child{display:inline-flex;align-items:center;}
   .tk-modal-ov{position:fixed;inset:0;background:rgba(8,12,22,.55);backdrop-filter:blur(2px);z-index:9998;display:flex;align-items:center;justify-content:center;}
   .tk-modal{background:var(--tk-surface);color:var(--tk-text);border:1px solid var(--tk-border);border-radius:14px;box-shadow:var(--tk-shadow-md);padding:18px 20px;max-width:90vw;}
   /* Toast 语义色（CRMW.toast 驱动；无第二参数默认 info 蓝，不再误用红底）*/
   @keyframes tkToastIn{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:none}}
   .tk-toast-wrap{position:fixed;right:16px;bottom:16px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;}
-  .tk-toast{pointer-events:auto;padding:10px 14px;border-radius:var(--tk-radius-sm);font-size:13px;color:#fff;box-shadow:var(--tk-shadow-md);max-width:300px;cursor:pointer;animation:tkToastIn .18s ease;}
+  .tk-toast{pointer-events:auto;padding:10px 14px;border-radius:var(--tk-radius-sm);font-size:13px;color:#fff;box-shadow:var(--tk-shadow-md);max-width:300px;cursor:pointer;animation:tkToastIn .18s ease;line-height:1.45;}
+  .tk-toast .ui-ic{flex:0 0 auto;margin-top:1px;opacity:.95;}
   .tk-toast.ok{background:rgba(16,185,129,.93);}.tk-toast.err{background:rgba(225,29,72,.93);}
   .tk-toast.warn{background:rgba(245,158,11,.93);}.tk-toast.info{background:rgba(37,99,235,.93);}
   .tk-toast.muted{background:rgba(91,107,133,.92);}.tk-toast.vio{background:rgba(139,92,246,.93);}
   .ws-top{height:52px;display:flex;align-items:center;gap:10px;padding:0 16px;color:#fff;flex-wrap:nowrap;overflow:visible;
     background:linear-gradient(100deg,#141a30 0%,#1b2748 55%,#1e3a5f 100%);
     box-shadow:inset 0 -1px 0 rgba(34,211,238,.28),0 1px 12px rgba(0,0,0,.25);}
-  .ws-brand{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px;white-space:nowrap;flex-shrink:0;}
-  .ws-brand svg{width:20px;height:20px;}
-  .ws-brand .ws-brand-sub{font-weight:400;color:#aeb8d4;}
+  .ws-brand{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px;white-space:nowrap;flex-shrink:0;min-width:0}
+  .ws-brand .brand-lockup{gap:8px}
+  .ws-brand .brand-mark--product{width:22px;height:22px;filter:drop-shadow(0 1px 4px rgba(0,0,0,.25))}
   .ws-spacer{flex:1;}
   .ws-user{font-size:13px;color:#cbd5e1;white-space:nowrap;flex-shrink:0;}
   .ws-presence{border:1px solid rgba(255,255,255,.25);border-radius:7px;padding:3px 8px;font-size:12px;background:rgba(255,255,255,.08);color:#fff;white-space:nowrap;flex-shrink:0;}
@@ -152,6 +158,7 @@
   .ws-more-menu.show{display:block;}
   .ws-more-menu a{display:block;color:#374151;text-decoration:none;font-size:13px;padding:7px 10px;border-radius:7px;white-space:nowrap;}
   .ws-more-menu a:hover{background:#f3f4f6;}
+  .ws-more-grp{font-size:11px;color:#9ca3af;font-weight:600;padding:8px 10px 3px;margin-top:4px;border-top:1px solid #f1f1f4;letter-spacing:.02em;}
   /* 用户菜单：头像+名字下拉，收纳 状态/今日/设置/退出 */
   .ws-user-wrap{position:relative;flex-shrink:0;}
   .ws-user-btn{display:flex;align-items:center;gap:7px;cursor:pointer;padding:4px 8px;border-radius:8px;border:1px solid rgba(255,255,255,.18);user-select:none;white-space:nowrap;}
@@ -169,7 +176,7 @@
   .ws-um-item:hover{background:#f3f4f6;}
   .ws-um-danger{color:#b91c1c;}
   .ws-um-danger:hover{background:#fee2e2;}
-  @media (max-width:1280px){ .ws-brand .ws-brand-sub{display:none;} .ws-funnel,.ws-agents{display:none;} }
+  @media (max-width:1280px){ .ws-brand .brand-lockup__surface{display:none;} .ws-brand .brand-lockup__sep{display:none;} .ws-funnel,.ws-agents{display:none;} }
   .ws-body{height:calc(100vh - 52px);overflow:hidden;}
   .ws-review{display:none;cursor:pointer;font-size:12px;background:#f59e0b;color:#1b2038;font-weight:600;border-radius:7px;padding:3px 9px;}
   /* 顶栏告警药丸：固定形状、永不换行、永不被压扁（图标+标签+数字气泡）。顶栏恒深色，单套配色。 */
@@ -183,31 +190,19 @@
   .ws-pill .ws-pill-lb{font-size:12px;font-weight:600;letter-spacing:.01em;}
   .ws-pill .ws-pill-n{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:17px;
     padding:0 6px;border-radius:999px;font-size:12px;font-weight:800;color:#0b1020;}
-  .ws-pill .ws-pill-sub{display:inline-flex;align-items:center;height:17px;margin-left:2px;padding:0 8px;
-    border-radius:999px;font-size:12px;font-weight:700;}
-  /* 方案A：待接管做成与「严重超时」对等的实心数字胶囊（青色语义=需指派/可行动，区别于橙色时效）*/
-  .ws-pill .ws-pill-div{width:1px;height:13px;background:rgba(255,255,255,.22);margin:0 4px;flex-shrink:0;}
-  .ws-pill .ws-pill-ic2{font-size:11px;line-height:1;}
-  .ws-pill .ws-pill-lb2{font-size:12px;font-weight:600;letter-spacing:.01em;}
-  .ws-pill .ws-pill-n2{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:17px;
-    padding:0 6px;border-radius:999px;font-size:12px;font-weight:800;color:#04222b;
-    background:linear-gradient(135deg,#67e8f9,#22d3ee);box-shadow:0 0 9px rgba(34,211,238,.5);}
-  /* 严重超时：亮橙（高饱和、发光，醒目但非血红）*/
-  .ws-pill.sev{background:rgba(249,115,22,.16);color:#fdba74;border-color:rgba(249,115,22,.5);box-shadow:0 0 0 1px rgba(249,115,22,.12);}
-  .ws-pill.sev .ws-pill-ic{color:#fb923c;}
-  .ws-pill.sev .ws-pill-ic2{color:#22d3ee;}
-  .ws-pill.sev .ws-pill-lb2{color:#a5f3fc;}
-  .ws-pill.sev .ws-pill-n{background:linear-gradient(135deg,#fdba74,#f97316);box-shadow:0 0 10px rgba(249,115,22,.55);}
-  .ws-pill.sev .ws-pill-sub{background:rgba(249,115,22,.26);color:#fed7aa;}
-  /* 超时预警：青柠黄（同为时效，更轻一档）*/
-  .ws-pill.warn{background:rgba(250,204,21,.14);color:#fde68a;border-color:rgba(250,204,21,.42);}
-  .ws-pill.warn .ws-pill-ic{color:#facc15;}
-  .ws-pill.warn .ws-pill-n{background:linear-gradient(135deg,#fde047,#facc15);box-shadow:0 0 8px rgba(250,204,21,.45);}
-  /* 高风险待审：亮紫（科技紫，风控语义，区别于时效橙）*/
-  .ws-pill.review-l4{background:rgba(168,85,247,.16);color:#d8b4fe;border-color:rgba(168,85,247,.5);box-shadow:0 0 0 1px rgba(168,85,247,.12);}
-  .ws-pill.review-l4 .ws-pill-ic{color:#c084fc;}
-  .ws-pill.review-l4 .ws-pill-n{background:linear-gradient(135deg,#d8b4fe,#a855f7);box-shadow:0 0 10px rgba(168,85,247,.5);}
-  /* 待跟进：亮青(info)，呼应整体科技青 */
+  /* 紧急度单轴 · 第1档「急需处理」（严重超时）：红 = 最高，与下钻面板「🔴 还没人接」同族 */
+  .ws-pill.sev{background:rgba(225,29,72,.18);color:#fda4af;border-color:rgba(225,29,72,.55);box-shadow:0 0 0 1px rgba(225,29,72,.14);}
+  .ws-pill.sev .ws-pill-ic{color:#fb7185;}
+  .ws-pill.sev .ws-pill-n{background:linear-gradient(135deg,#fda4af,#e11d48);box-shadow:0 0 10px rgba(225,29,72,.55);}
+  /* 同轴 · 「待处理」（超时预警）：浅红 = 同属时效、强度轻一档（不再用易与琥珀混淆的黄）*/
+  .ws-pill.warn{background:rgba(244,63,94,.12);color:#fecdd3;border-color:rgba(244,63,94,.42);}
+  .ws-pill.warn .ws-pill-ic{color:#fb7185;}
+  .ws-pill.warn .ws-pill-n{background:linear-gradient(135deg,#fecaca,#fb7185);box-shadow:0 0 8px rgba(244,63,94,.45);}
+  /* 紧急度单轴 · 第2档「发前确认」（AI 回复待你确认）：琥珀 = 次级，看一眼再发 */
+  .ws-pill.review-l4{background:rgba(245,158,11,.16);color:#fcd34d;border-color:rgba(245,158,11,.5);box-shadow:0 0 0 1px rgba(245,158,11,.12);}
+  .ws-pill.review-l4 .ws-pill-ic{color:#fbbf24;}
+  .ws-pill.review-l4 .ws-pill-n{background:linear-gradient(135deg,#fcd34d,#f59e0b);box-shadow:0 0 10px rgba(245,158,11,.5);}
+  /* 紧急度单轴 · 第3档「待跟进」：青蓝 = 最低（计划性任务，可稍后）*/
   .ws-pill.task{background:rgba(34,211,238,.12);color:#a5f3fc;border-color:rgba(34,211,238,.4);}
   .ws-pill.task .ws-pill-ic{color:#22d3ee;}
   .ws-pill.task .ws-pill-n{background:linear-gradient(135deg,#67e8f9,#22d3ee);box-shadow:0 0 8px rgba(34,211,238,.4);}
@@ -269,10 +264,10 @@
   .ws-drill-allbtn:hover{background:#fff7ed;color:#c2410c;border-color:#fed7aa;}
   .ws-drill-allbtn[disabled]{opacity:.6;cursor:default;}
   .ws-drill-empty{padding:28px 16px;text-align:center;color:#9ca3af;font-size:13px;}
-  /* 方案A：下钻面板分段标题（待接管 / 已接管·仍超时）*/
+  /* 下钻面板分段标题（🔴 还没人接 = danger / 🟠 有人在跟·还没回 = amber）*/
   .ws-drill-sec{font-size:11px;font-weight:700;letter-spacing:.03em;padding:9px 14px 5px;
     background:var(--tk-surface-2);color:var(--tk-text-muted);position:sticky;top:0;z-index:1;}
-  .ws-drill-sec.sec-wait{color:var(--tk-brand);box-shadow:inset 3px 0 0 var(--tk-cyan);}
+  .ws-drill-sec.sec-wait{color:var(--tk-danger-ink);box-shadow:inset 3px 0 0 var(--tk-danger);}
   .ws-drill-sec.sec-handled{color:var(--tk-warn-ink);box-shadow:inset 3px 0 0 var(--tk-amber);}
   /* 夜间 */
   [data-cp-theme="dark"] .ws-drill-panel{background:#1e293b;box-shadow:0 8px 32px rgba(0,0,0,.6);}
@@ -343,6 +338,10 @@
   .wp-btn-ghost{padding:6px 12px;border:1px solid var(--tk-border);border-radius:var(--tk-radius-sm);background:var(--tk-surface);color:var(--tk-text-muted);cursor:pointer;font-size:13px;}
   .wp-btn-ghost:hover{background:var(--tk-surface-2);border-color:var(--tk-text-muted);}
 </style>
+<!-- 平台原生图标库(单一事实来源)：window.platformIconSVG / platformBrandColor -->
+<script src="/static/platform_icons.js?v=20260701"></script>
+<!-- 通用线性图标库(单一事实来源)：window.uiIcon / data-ui-icon 声明式 enhance -->
+<script src="/static/ui_icons.js?v=20260702d"></script>
 {% block head %}{% endblock %}
 <script>
 (function(){
@@ -362,16 +361,25 @@
   };
 })();
 </script>
-<script src="/static/workspace/crm-widgets.js?v=20260628a"></script>
+<script src="/static/workspace/crm-widgets.js?v=20260702a"></script>
 <!-- PWA（Phase 1）：把工作台做成可安装的原生官网（独立窗口 + 离线壳）。-->
 <link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#1b2038">
-<link rel="apple-touch-icon" href="/static/pwa/icon.svg">
 <script>
 (function(){
   if('serviceWorker' in navigator){
+    // 自愈兜底：记录首帧是否已被旧 worker 接管，仅在「版本更新」(而非首次安装) 时
+    // 自动刷新一次，杜绝「卡在旧 worker / 旧缓存」(配合 sw.js 的 skipWaiting+清旧缓存)。
+    var _hadController = !!navigator.serviceWorker.controller;
+    var _swReloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', function(){
+      if(_swReloaded || !_hadController) return;
+      _swReloaded = true;
+      location.reload();
+    });
     window.addEventListener('load', function(){
-      navigator.serviceWorker.register('/sw.js', {scope:'/'}).catch(function(){});
+      navigator.serviceWorker.register('/sw.js', {scope:'/'}).then(function(reg){
+        try{ reg.update(); }catch(_){ }  // 每次进页面主动查新版本
+      }).catch(function(){});
     });
   }
   // 安装：捕获 beforeinstallprompt → 浮一个「安装App」按钮（自包含，不改顶栏结构）
@@ -381,7 +389,7 @@
     btn=document.createElement('button');
     btn.id='ws-pwa-install';
     btn.type='button';
-    btn.textContent='⬇ 安装App';
+    btn.textContent=window.T('base.pwa.install');
     btn.style.cssText='position:fixed;right:16px;bottom:16px;z-index:9999;'+
       'background:#3b82f6;color:#fff;border:0;border-radius:10px;padding:9px 16px;'+
       'font-size:13px;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.22);';
@@ -405,36 +413,42 @@
 <body>
 <header class="ws-top">
   <span class="ws-brand">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M4 4h16v16H4z"/><path d="M4 9l8 5 8-5"/></svg>
-    {{ site_name|default('华灵科技客户转化聊天系统') }}<span class="ws-brand-sub"> · 坐席工作台</span>
+    {% with variant='workspace' %}{% include "_brand_lockup.html" %}{% endwith %}
   </span>
   <nav class="ws-nav">
-    <a href="/workspace" id="nav-inbox">💬 聊天</a>
-    <a href="/workspace/contacts">客户</a>
-    <a href="/workspace/dash">概览</a>
+    <a href="/workspace" id="nav-inbox" style="display:inline-flex;align-items:center;gap:5px;"><span data-ui-icon="chat" data-size="13"></span><span data-i18n="base.nav.chat">聊天</span></a>
+    <a href="/workspace/contacts" data-i18n="base.nav.contacts">客户</a>
+    <a href="/workspace/dash" data-i18n="base.nav.overview">概览</a>
     <div class="ws-more-wrap">
-      <span class="ws-more-btn" id="ws-more-btn" onclick="_wsToggleMore(event)">更多 ▾</span>
+      <span class="ws-more-btn" id="ws-more-btn" onclick="_wsToggleMore(event)" data-i18n="base.nav.more">更多 ▾</span>
       <div class="ws-more-menu" id="ws-more-menu">
-        <a href="/workspace/tasks">待办</a>
-        <a href="/workspace/drafts" id="ws-drafts-link" title="L3/L4 待审草稿">草稿审批</a>
-        <a href="/workspace/templates" title="回复模板库">模板库</a>
-        <a href="/workspace/golive" id="ws-golive-link" style="display:none;" title="上线自检清单（主管）">上线自检</a>
-        <a href="/workspace/setup" id="ws-setup-link" style="display:none;" title="渠道接入向导（主管）">接入向导</a>
-        <a href="/workspace/kb-start" id="ws-kbstart-link" style="display:none;" title="知识库冷启动（主管）">知识库起步</a>
-        <a href="/workspace/roi" id="ws-roi-link" style="display:none;" title="经营 ROI 看板（老板/主管）">ROI 看板</a>
-        <a href="/workspace/ai-quality" id="ws-aiq-link" style="display:none;" title="AI 回复质量看板（主管）">AI 质量</a>
-        <a href="/workspace/usage" id="ws-usage-link" style="display:none;" title="用量计量看板（老板/主管）">用量</a>
-        <a href="/workspace/agent-perf" id="ws-perf-link" style="display:none;" title="坐席绩效看板（主管）">绩效</a>
-        <a href="/workspace/queue" id="ws-queue-link" style="display:none;" title="实时运营队列看板（主管）">队列</a>
-        <a href="/workspace/workflows" id="ws-workflow-link" style="display:none;" title="工作流 / 路由规则配置">工作流</a>
+        <a href="/workspace/tasks" data-i18n="base.nav.tasks">待办</a>
+        <a href="/workspace/drafts" id="ws-drafts-link" data-i18n="base.nav.drafts" data-i18n-title="base.nav.drafts_t" title="待你审核的 AI 回复草稿">草稿审批</a>
+        <a href="/workspace/templates" data-i18n="base.nav.templates" data-i18n-title="base.nav.templates_t" title="回复模板库">模板库</a>
+        <div class="ws-more-grp" id="ws-grp-ops" style="display:none;" data-i18n="base.grp.ops">运营监控</div>
+        <a href="/workspace/queue" id="ws-queue-link" style="display:none;" data-i18n="base.nav.queue" data-i18n-title="base.nav.queue_t" title="实时运营队列看板（主管）">队列</a>
+        <a href="/workspace/agent-perf" id="ws-perf-link" style="display:none;" data-i18n="base.nav.perf" data-i18n-title="base.nav.perf_t" title="坐席绩效看板（主管）">绩效</a>
+        <div class="ws-more-grp" id="ws-grp-quality" style="display:none;" data-i18n="base.grp.quality">质量</div>
+        <a href="/workspace/ai-quality" id="ws-aiq-link" style="display:none;" data-i18n="base.nav.aiq" data-i18n-title="base.nav.aiq_t" title="AI 回复质量看板（主管）">AI 质量</a>
+        <div class="ws-more-grp" id="ws-grp-biz" style="display:none;" data-i18n="base.grp.biz">经营</div>
+        <a href="/workspace/roi" id="ws-roi-link" style="display:none;" data-i18n="base.nav.roi" data-i18n-title="base.nav.roi_t" title="经营 ROI 看板（老板/主管）">ROI 看板</a>
+        <a href="/workspace/usage" id="ws-usage-link" style="display:none;" data-i18n="base.nav.usage" data-i18n-title="base.nav.usage_t" title="用量计量看板（老板/主管）">用量</a>
+        <div class="ws-more-grp" data-i18n="base.grp.boundless">无界产品族</div>
+        <a href="{{ brand_hub_url|default('https://usdt2026.cc/brand') }}" target="_blank" rel="noopener noreferrer" data-i18n="base.nav.brand_hub">了解更多产品 ↗</a>
+        <div class="ws-more-grp" id="ws-grp-config" style="display:none;" data-i18n="base.grp.config">配置与上线</div>
+        <a href="/workspace/setup" id="ws-setup-link" style="display:none;" data-i18n="base.nav.setup" data-i18n-title="base.nav.setup_t" title="渠道接入向导（主管）">接入向导</a>
+        <a href="/workspace/kb-start" id="ws-kbstart-link" style="display:none;" data-i18n="base.nav.kbstart" data-i18n-title="base.nav.kbstart_t" title="知识库冷启动（主管）">知识库起步</a>
+        <a href="/workspace/workflows" id="ws-workflow-link" style="display:none;" data-i18n="base.nav.workflows" data-i18n-title="base.nav.workflows_t" title="工作流 / 路由规则配置">工作流</a>
+        <a href="/workspace/golive" id="ws-golive-link" style="display:none;" data-i18n="base.nav.golive" data-i18n-title="base.nav.golive_t" title="上线自检清单（主管）">上线自检</a>
       </div>
     </div>
   </nav>
   <!-- P39: 全局搜索 -->
   <div id="gs-wrap" style="position:relative;display:flex;align-items:center;">
-    <input id="gs-input" placeholder="🔍 全局搜索…" style="
+    <span data-ui-icon="search" data-size="14" style="position:absolute;left:9px;opacity:.55;pointer-events:none;"></span>
+    <input id="gs-input" placeholder="全局搜索…" data-i18n-placeholder="base.search_ph" style="
       width:180px;height:26px;border:1px solid rgba(255,255,255,.25);border-radius:13px;
-      background:rgba(255,255,255,.12);color:#fff;font-size:12px;padding:0 10px 0 10px;
+      background:rgba(255,255,255,.12);color:#fff;font-size:12px;padding:0 10px 0 28px;
       outline:none;transition:width .2s;" onfocus="this.style.width='240px'" onblur="if(!this.value)this.style.width='180px'"
       oninput="_gsOnInput(this.value)" onkeydown="_gsKey(event)">
     <div id="gs-panel" style="display:none;position:absolute;top:32px;left:0;width:340px;background:#fff;
@@ -443,16 +457,24 @@
   </div>
   <span class="ws-spacer"></span>
   <!-- 「升级/无人接管」数据并入下方「严重超时」药丸：此元素仅留作数据载体，不再单独展示 -->
-  <a id="ws-esc" style="display:none;" title="无人接管的严重超时会话"></a>
+  <a id="ws-esc" style="display:none;" data-i18n-title="base.pill.esc_t" title="无人接管的严重超时会话"></a>
   <!-- 行动告警药丸：固定形状、永不换行，点击直接下钻处理 -->
-  <a class="ws-pill sev" id="ws-sla" title="严重 / 超时未回复会话"></a>
-  <a class="ws-pill review-l4" id="ws-l4-badge" href="/workspace/dash" title="高风险草稿待审批（需主管放行）"></a>
-  <a class="ws-pill task" id="ws-followup" href="/workspace/tasks" title="到期待跟进任务"></a>
+  <a class="ws-pill sev" id="ws-sla" data-i18n-title="base.pill.sla_t" title="需要处理的会话（超时未回复 / 还没人接）"></a>
+  <a class="ws-pill review-l4" id="ws-l4-badge" href="/workspace/dash" data-i18n-title="base.pill.l4_t" title="AI 写好的回复，发出前需要你确认（主管放行）"></a>
+  <a class="ws-pill task" id="ws-followup" href="/workspace/tasks" data-i18n-title="base.pill.followup_t" title="到期待跟进任务"></a>
   <!-- P24: 通知铃铛（事件流 / 回溯，不与上方告警药丸重复堆数字） -->
-  <span class="ws-notif-btn" id="ws-notif-btn" title="通知中心">
-    🔔<span class="ws-notif-badge" id="ws-notif-badge"></span>
+  <span class="ws-notif-btn" id="ws-notif-btn" data-i18n-title="base.notif_t" title="通知中心" style="display:inline-flex;align-items:center;">
+    <span data-ui-icon="bell" data-size="16"></span><span class="ws-notif-badge" id="ws-notif-badge"></span>
   </span>
-  <span class="ws-review" id="ws-review" title="待裁决的合并候选" onclick="window.__wsReviews&&window.__wsReviews.open()"></span>
+  <span class="ws-review" id="ws-review" data-i18n-title="base.review_t" title="待裁决的合并候选" onclick="window.__wsReviews&&window.__wsReviews.open()"></span>
+  <!-- 语言切换：顶栏常驻可见按钮（此前仅藏于用户菜单，不易发现）。点击整页切 中⇄英（/set_lang），全站含 copilot 组件随之重渲。 -->
+  <a class="ws-lang-pill" id="ws-lang-pill" onclick="window.wsToggleLang&&window.wsToggleLang()"
+     data-i18n-title="base.um.lang_t" title="切换语言 / Switch language"
+     style="display:inline-flex;align-items:center;gap:4px;height:26px;padding:0 10px;border-radius:13px;
+            border:1px solid rgba(255,255,255,.28);background:rgba(255,255,255,.14);color:#fff;
+            font-size:12px;cursor:pointer;white-space:nowrap;user-select:none;margin-right:2px;">
+    <span data-ui-icon="globe" data-size="13"></span><span data-i18n="lang_toggle">English</span>
+  </a>
   <!-- 用户菜单：状态 / 今日概览 / 设置 / 退出 收纳，降低顶栏密度 -->
   <div class="ws-user-wrap" id="ws-user-wrap">
     <span class="ws-user-btn" id="ws-user-btn" onclick="_wsToggleUser(event)">
@@ -461,28 +483,30 @@
       <span class="ws-user-caret">▾</span>
     </span>
     <div class="ws-user-menu" id="ws-user-menu">
-      <div class="ws-um-sec">我的状态</div>
-      <select class="ws-presence" id="ws-presence" title="我的状态">
-        <option value="online">🟢 在线</option>
-        <option value="busy">🟡 忙碌</option>
-        <option value="offline">⚫ 离线</option>
+      <div class="ws-um-sec" data-i18n="base.um.status">我的状态</div>
+      <select class="ws-presence" id="ws-presence" data-i18n-title="base.um.status" title="我的状态">
+        <option value="online" data-i18n="base.presence.online">🟢 在线</option>
+        <option value="busy" data-i18n="base.presence.busy">🟡 忙碌</option>
+        <option value="offline" data-i18n="base.presence.offline">⚫ 离线</option>
       </select>
-      <div class="ws-um-sec">今日概览</div>
-      <div class="ws-um-info" id="ws-funnel" title="今日 web 漏斗">—</div>
-      <div class="ws-um-info" id="ws-agents-online" title="在线坐席">—</div>
+      <div class="ws-um-sec" data-i18n="base.um.today">今日概览</div>
+      <div class="ws-um-info" id="ws-funnel" data-i18n-title="base.um.funnel_t" title="今日 web 漏斗">—</div>
+      <div class="ws-um-info" id="ws-agents-online" data-i18n-title="base.um.agents_t" title="在线坐席">—</div>
       <div class="ws-um-div"></div>
-      <a class="ws-um-item" id="ws-theme-toggle" title="日间 / 夜间 / 跟随系统 三态切换"
-         onclick="window.cpCycleTheme&&window.cpCycleTheme()">🎨 主题配色：<span id="ws-theme-lbl"></span></a>
-      <a class="ws-um-item" id="ws-prefs-btn" title="告警阈值 / 免打扰 / 消息提示音 / 弹窗"
-         onclick="document.getElementById('ws-user-menu').classList.remove('show')">⚙ 告警 / 通知设置</a>
-      <a class="ws-um-item ws-um-danger" href="/logout">退出登录</a>
+      <a class="ws-um-item" id="ws-theme-toggle" data-i18n-title="base.um.theme_t" title="日间 / 夜间 / 跟随系统 三态切换"
+         onclick="window.cpCycleTheme&&window.cpCycleTheme()">🎨 <span data-i18n="base.um.theme">主题配色：</span><span id="ws-theme-lbl"></span></a>
+      <a class="ws-um-item" id="ws-prefs-btn" data-i18n="base.um.prefs" data-i18n-title="base.um.prefs_t" title="告警阈值 / 免打扰 / 消息提示音 / 弹窗"
+         onclick="document.getElementById('ws-user-menu').classList.remove('show')" style="display:flex;align-items:center;gap:6px;"><span data-ui-icon="gear" data-size="14"></span><span data-i18n="base.um.prefs">告警 / 通知设置</span></a>
+      <a class="ws-um-item" id="ws-lang-toggle" onclick="window.wsToggleLang&&window.wsToggleLang()" data-i18n-title="base.um.lang_t" title="切换语言 / Switch language" style="display:flex;align-items:center;gap:6px;"><span data-ui-icon="globe" data-size="14"></span><span data-i18n="lang_toggle">English</span></a>
+      <a class="ws-um-item" id="ws-admin-link" href="/" style="display:none;" data-i18n="base.um.admin" data-i18n-title="base.um.admin_t" title="渠道 / 系统 / 配置（系统管理）">🛠 管理后台</a>
+      <a class="ws-um-item ws-um-danger" href="/logout" data-i18n="base.um.logout">退出登录</a>
     </div>
   </div>
 </header>
 <script>
 function _wsToggleMore(e){ e.stopPropagation(); var m=document.getElementById('ws-more-menu'); if(m) m.classList.toggle('show'); }
 function _wsToggleUser(e){ e.stopPropagation(); var m=document.getElementById('ws-user-menu'); if(m) m.classList.toggle('show'); }
-document.addEventListener('DOMContentLoaded',function(){ try{ var lb=document.getElementById('ws-theme-lbl'); if(lb){ var p=(localStorage.getItem('cp_theme')||'auto'); lb.textContent=(p==='auto'?'跟随系统':(p==='dark'?'暗色':'亮色')); } }catch(_){} });
+document.addEventListener('DOMContentLoaded',function(){ try{ var lb=document.getElementById('ws-theme-lbl'); if(lb){ var p=(localStorage.getItem('cp_theme')||'auto'); lb.textContent=(p==='auto'?window.T('base.theme.auto'):(p==='dark'?window.T('base.theme.dark'):window.T('base.theme.light'))); } }catch(_){} });
 document.addEventListener('click',function(e){
   var m=document.getElementById('ws-more-menu'); if(m && !e.target.closest('.ws-more-wrap')) m.classList.remove('show');
   var u=document.getElementById('ws-user-menu'); if(u && !e.target.closest('.ws-user-wrap')) u.classList.remove('show');
@@ -493,6 +517,8 @@ document.addEventListener('click',function(e){
   var AGENT_ID = {{ (user_name or '')|tojson }};
   var AGENT_NAME = {{ (user_display_name or user_name or '')|tojson }};
   window.__wsAgent = { id: String(AGENT_ID||'agent'), name: String(AGENT_NAME||AGENT_ID||'agent') };
+  function _ui(name,size){ return (typeof uiIcon==='function')?uiIcon(name,size||13):''; }
+  function _pillIc(name){ return '<span class="ws-pill-ic">'+_ui(name,12)+'</span>'; }
 
   function setPresence(st){
     fetch('/api/workspace/presence',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -509,7 +535,7 @@ document.addEventListener('click',function(e){
       var el=document.getElementById('ws-funnel');
       if(!el) return;
       var sess=m.web_sessions||0, inbound=m.web_inbound||0, ho=m.handoff_sent||0, cv=m.line_converted||0;
-      el.textContent = 'Web 今日 '+sess+'会话 · '+inbound+'入站 · 引流'+ho+' · 转化'+cv;
+      el.textContent = window.Tf('base.um.funnel',{sess:sess,inbound:inbound,ho:ho,cv:cv});
     }).catch(function(){});
   }
   function loadAgents(){
@@ -518,10 +544,10 @@ document.addEventListener('click',function(e){
       if(!el) return;
       var agents=(d&&d.agents)||[];
       if(!agents.length){ el.textContent=''; return; }
-      el.textContent = '在线 '+agents.map(function(a){
+      el.textContent = window.Tf('base.um.agents_online',{list:agents.map(function(a){
         var dot=a.status==='busy'?'🟡':(a.status==='online'?'🟢':'⚫');
         return dot+(a.display_name||a.agent_id);
-      }).join(' · ');
+      }).join(' · ')});
     }).catch(function(){});
   }
   // P5：头像描边随在线状态变色（在线绿 / 忙碌黄 / 离线灰），不必展开菜单即可自检状态
@@ -547,7 +573,7 @@ document.addEventListener('click',function(e){
 <div class="ws-modal" id="ws-review-modal">
   <div class="ws-modal-box">
     <span class="ws-modal-close" onclick="window.__wsReviews&&window.__wsReviews.close()">×</span>
-    <h3>待裁决的合并候选</h3>
+    <h3 data-i18n="base.review_t">待裁决的合并候选</h3>
     <div id="ws-review-list"></div>
   </div>
 </div>
@@ -557,27 +583,27 @@ document.addEventListener('click',function(e){
   var badge=document.getElementById('ws-review');
   var modal=document.getElementById('ws-review-modal');
   var list=document.getElementById('ws-review-list');
-  function ov(o){ if(!o) return '—'; return esc(o.primary_name||'未命名')+' · '+((o.channels||[]).map(esc).join('/')||'无渠道'); }
+  function ov(o){ if(!o) return '—'; return esc(o.primary_name||window.T('base.review.no_name'))+' · '+((o.channels||[]).map(esc).join('/')||window.T('base.review.no_channel')); }
   function refresh(){
     fetch('/api/workspace/merge-reviews').then(function(r){return r.json();}).then(function(d){
       if(!d||!d.ok){ if(badge) badge.style.display='none'; return; }
       var n=(d.reviews||[]).length;
-      if(badge){ badge.style.display=n?'inline-block':'none'; badge.textContent='待审合并 '+n; }
+      if(badge){ badge.style.display=n?'inline-block':'none'; badge.textContent=window.Tf('base.review.badge',{n:n}); }
       window.__wsReviewData=d.reviews||[];
       if(modal.style.display==='flex') render();
     }).catch(function(){});
   }
   function render(){
     var rv=window.__wsReviewData||[];
-    if(!rv.length){ list.innerHTML='<div style="color:#6b7280;font-size:13px;">暂无待审项</div>'; return; }
+    if(!rv.length){ list.innerHTML='<div style="color:#6b7280;font-size:13px;">'+window.T('base.review.empty')+'</div>'; return; }
     list.innerHTML=rv.map(function(r){
       return '<div class="ws-rv-item">'
-        +'<div>置信度 '+(Number(r.confidence||0).toFixed(2))+' · 渠道 '+esc(r.candidate_channel||'')+'</div>'
-        +'<div class="ws-rv-cmp"><div class="ws-rv-col"><b>候选</b><br>'+ov(r.candidate)+'</div>'
-        +'<div class="ws-rv-col"><b>并入</b><br>'+ov(r.target)+'</div></div>'
+        +'<div>'+window.Tf('base.review.row_meta',{conf:(Number(r.confidence||0).toFixed(2)),ch:esc(r.candidate_channel||'')})+'</div>'
+        +'<div class="ws-rv-cmp"><div class="ws-rv-col"><b>'+window.T('base.review.candidate')+'</b><br>'+ov(r.candidate)+'</div>'
+        +'<div class="ws-rv-col"><b>'+window.T('base.review.target')+'</b><br>'+ov(r.target)+'</div></div>'
         +'<div class="ws-rv-acts">'
-        +'<button class="ws-rv-yes" onclick="window.__wsReviews.resolve(\''+esc(r.review_id)+'\',\'approve\')">通过合并</button>'
-        +'<button class="ws-rv-no" onclick="window.__wsReviews.resolve(\''+esc(r.review_id)+'\',\'reject\')">拒绝</button>'
+        +'<button class="ws-rv-yes" onclick="window.__wsReviews.resolve(\''+esc(r.review_id)+'\',\'approve\')">'+window.T('base.review.approve')+'</button>'
+        +'<button class="ws-rv-no" onclick="window.__wsReviews.resolve(\''+esc(r.review_id)+'\',\'reject\')">'+window.T('base.review.reject')+'</button>'
         +'</div></div>';
     }).join('');
   }
@@ -604,7 +630,7 @@ document.addEventListener('click',function(e){
       if(fuBadge){
         fuBadge.style.display=show?'inline-flex':'none';
         var _fn = mine ? (mine+(all>mine?(' / '+all):'')) : String(all);
-        fuBadge.innerHTML='<span class="ws-pill-ic">📌</span><span class="ws-pill-lb">待跟进</span><span class="ws-pill-n">'+_fn+'</span>';
+        fuBadge.innerHTML=_pillIc('pin')+'<span class="ws-pill-lb">'+window.T('base.pill.followup')+'</span><span class="ws-pill-n">'+_fn+'</span>';
       }
     }).catch(function(){});
   }
@@ -625,21 +651,22 @@ document.addEventListener('click',function(e){
     slaBadge.className='ws-pill '+(sev?'sev':'warn');
     slaBadge.style.display='inline-flex';
     var escN=(_escItems&&_escItems.length)||0;
-    // 方案A：待接管=超时的子集（且无人有效处理），做成对等实心青色数字胶囊
-    var sub=(sev && escN>0)?('<span class="ws-pill-div"></span><span class="ws-pill-ic2">🙋</span>'+
-      '<span class="ws-pill-lb2">待接管</span><span class="ws-pill-n2">'+escN+'</span>'):'';
-    slaBadge.innerHTML='<span class="ws-pill-ic">⏰</span><span class="ws-pill-lb">'+(sev?'严重超时':'超时预警')+'</span>'+
-      '<span class="ws-pill-n">'+n+'</span>'+sub;
+    // 单一数字：超时是「待接管」的父集，二者在无人认领时恒等，并排两个数字=同义重复、徒增困惑。
+    // 这里只出一个「需要处理」数字（紧急度由橙/黄底色承载），「还没人接」降级进 tooltip。
+    slaBadge.innerHTML=_pillIc('clock')+
+      '<span class="ws-pill-lb">'+(sev?window.T('base.pill.sla_urgent'):window.T('base.pill.sla_normal'))+'</span>'+
+      '<span class="ws-pill-n">'+n+'</span>';
     var _sp=_slaPanelEl(); if(_sp && _sp.style.display==='flex') _renderSlaPanel();
-    // tooltip：列出会话，对「无人接管」项加 ⚠ 标记（交叉引用升级清单）
+    // tooltip：先给一句汇总（共 N 条、其中几条还没人接），再列会话；「还没人接」项加 ⚠ 标记
     var escIds={}; (_escItems||[]).forEach(function(it){ if(it&&it.conversation_id) escIds[it.conversation_id]=it.reason||'unclaimed'; });
-    var rz={unclaimed:'无人接管',holder_offline:'坐席离线',holder_quiet:'坐席静音'};
+    var rz={unclaimed:window.T('base.reason.unclaimed'),holder_offline:window.T('base.reason.holder_offline'),holder_quiet:window.T('base.reason.holder_quiet')};
     if(sev){
-      slaBadge.title=(_slaItems||[]).slice(0,8).map(function(it){
-        var m=escIds[it.conversation_id]?('  ⚠'+(rz[escIds[it.conversation_id]]||'待接管')):'';
+      var head=(escN>0?(window.Tf('base.sla.tip_head_esc',{n:n,esc:escN})+'\n'):(window.Tf('base.sla.tip_head',{n:n})+'\n'));
+      slaBadge.title=head+(_slaItems||[]).slice(0,8).map(function(it){
+        var m=escIds[it.conversation_id]?('  '+_ui('alert',10)+(rz[escIds[it.conversation_id]]||window.T('base.reason.unclaimed'))):'';
         return it.name+'（'+fmtWaitMin(it.wait_sec)+'）'+m;
       }).join('\n');
-    } else { slaBadge.title='有 '+brk+' 个会话超过警告阈值'; }
+    } else { slaBadge.title=window.Tf('base.sla.tip_brk',{n:brk}); }
   }
   function refreshSla(){
     fetch('/api/workspace/sla-alerts').then(function(r){return r.json();}).then(function(d){
@@ -655,11 +682,12 @@ document.addEventListener('click',function(e){
     function _e(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
     return new Promise(function(resolve){
       var ov=document.createElement('div'); ov.className='ws-cfm-ov';
+      var icHtml=(opts.iconName&&typeof uiIcon==='function')?_ui(opts.iconName,18):_e(opts.icon||'?');
       ov.innerHTML='<div class="ws-cfm-card"><div class="ws-cfm-top"></div>'
-        +'<div class="ws-cfm-body"><div class="ws-cfm-title"><span class="ws-cfm-ic">'+_e(opts.icon||'❓')+'</span>'+_e(opts.title||'确认操作')+'</div>'
+        +'<div class="ws-cfm-body"><div class="ws-cfm-title"><span class="ws-cfm-ic">'+icHtml+'</span>'+_e(opts.title||window.T('base.cfm.title'))+'</div>'
         +'<div class="ws-cfm-msg">'+_e(opts.message||'')+'</div></div>'
-        +'<div class="ws-cfm-foot"><button class="ws-cfm-btn ws-cfm-cancel">'+_e(opts.cancelText||'取消')+'</button>'
-        +'<button class="ws-cfm-btn ws-cfm-ok">'+_e(opts.okText||'确定')+'</button></div></div>';
+        +'<div class="ws-cfm-foot"><button class="ws-cfm-btn ws-cfm-cancel">'+_e(opts.cancelText||window.T('base.cfm.cancel'))+'</button>'
+        +'<button class="ws-cfm-btn ws-cfm-ok">'+_e(opts.okText||window.T('base.cfm.ok'))+'</button></div></div>';
       document.body.appendChild(ov);
       function done(v){ document.removeEventListener('keydown',onKey); try{ document.body.removeChild(ov); }catch(_){ } resolve(v); }
       function onKey(e){ if(e.key==='Escape') done(false); else if(e.key==='Enter') done(true); }
@@ -681,28 +709,28 @@ document.addEventListener('click',function(e){
   function _renderSlaPanel(){
     var _sl=_slaListEl(); if(!_sl) return;
     var escMap={}; (_escItems||[]).forEach(function(it){ if(it&&it.conversation_id) escMap[it.conversation_id]=it; });
-    var rz={unclaimed:'无人接管',holder_offline:'坐席离线',holder_quiet:'坐席静音'};
-    // 合并两口径（以严重超时为主，补入仅在升级清单里的会话），再按是否「待接管」分两段
+    var rz={unclaimed:window.T('base.reason.unclaimed'),holder_offline:window.T('base.reason.holder_offline'),holder_quiet:window.T('base.reason.holder_quiet')};
+    // 合并两口径（以严重超时为主，补入仅在升级清单里的会话），再按是否「还没人接」分两段
     var seen={}, all=[];
     (_slaItems||[]).forEach(function(it){ if(it&&it.conversation_id){ seen[it.conversation_id]=1; all.push(it); } });
     (_escItems||[]).forEach(function(it){ if(it&&it.conversation_id && !seen[it.conversation_id]){ all.push(it); } });
-    if(!all.length){ _sl.innerHTML='<div class="ws-drill-empty">暂无超时/待接管会话 🎉</div>'; return; }
+    if(!all.length){ _sl.innerHTML='<div class="ws-drill-empty">'+window.T('base.drill.empty')+'</div>'; return; }
     var waitGrp=[], handledGrp=[];
     all.forEach(function(it){ (escMap[it.conversation_id]?waitGrp:handledGrp).push(it); });
     function _row(it){
       var er=escMap[it.conversation_id];
-      var mk=er?('<span class="ws-drill-mark">⚠'+(rz[er.reason]||'待接管')+'</span> '):'';
+      var mk=er?('<span class="ws-drill-mark" style="display:inline-flex;align-items:center;gap:3px;">'+_ui('alert',10)+(rz[er.reason]||window.T('base.reason.unclaimed'))+'</span> '):'';
       return '<div class="ws-drill-item" data-cid="'+_escd(it.conversation_id||'')+'">'
         +'<div class="ws-drill-main"><div class="ws-drill-name">'+_escd(it.name||it.conversation_id||'?')+'</div>'
-        +'<div class="ws-drill-sub">'+mk+'等待 '+fmtWaitMin(it.wait_sec)+'</div></div>'
-        +'<button class="ws-drill-btn ws-drill-claim" data-act="claim" title="认领给我（消除“待接管”）">接管</button>'
-        +'<button class="ws-drill-btn ws-drill-open" data-act="open" title="打开会话去回复（消除“严重超时”）">打开</button>'
-        +'<button class="ws-drill-btn ws-drill-ignore" data-act="ignore" title="归档=已处理/忽略，从所有告警里移除">忽略</button>'
+        +'<div class="ws-drill-sub">'+mk+window.T('base.drill.wait')+fmtWaitMin(it.wait_sec)+'</div></div>'
+        +'<button class="ws-drill-btn ws-drill-claim" data-act="claim" title="'+window.T('base.drill.claim_t')+'">'+window.T('base.drill.claim')+'</button>'
+        +'<button class="ws-drill-btn ws-drill-open" data-act="open" title="'+window.T('base.drill.open_t')+'">'+window.T('base.drill.open')+'</button>'
+        +'<button class="ws-drill-btn ws-drill-ignore" data-act="ignore" title="'+window.T('base.drill.ignore_t')+'">'+window.T('base.drill.ignore')+'</button>'
         +'</div>';
     }
     var html='';
-    if(waitGrp.length){ html+='<div class="ws-drill-sec sec-wait">🙋 待接管 · 先认领（'+waitGrp.length+'）</div>'+waitGrp.slice(0,30).map(_row).join(''); }
-    if(handledGrp.length){ html+='<div class="ws-drill-sec sec-handled">⏰ 已接管 · 仍超时，去回复（'+handledGrp.length+'）</div>'+handledGrp.slice(0,30).map(_row).join(''); }
+    if(waitGrp.length){ html+='<div class="ws-drill-sec sec-wait">'+window.Tf('base.drill.sec_wait',{n:waitGrp.length})+'</div>'+waitGrp.slice(0,30).map(_row).join(''); }
+    if(handledGrp.length){ html+='<div class="ws-drill-sec sec-handled">'+window.Tf('base.drill.sec_handled',{n:handledGrp.length})+'</div>'+handledGrp.slice(0,30).map(_row).join(''); }
     _sl.innerHTML=html;
   }
   function _toggleSlaPanel(show){
@@ -727,24 +755,24 @@ document.addEventListener('click',function(e){
       (_slaItems||[]).forEach(function(it){ if(it&&it.conversation_id) _idset[it.conversation_id]=1; });
       (_escItems||[]).forEach(function(it){ if(it&&it.conversation_id) _idset[it.conversation_id]=1; });
       var ids=Object.keys(_idset);
-      if(!ids.length){ CRMW.toast('当前没有可忽略的会话','#64748b'); return; }
+      if(!ids.length){ CRMW.toast(window.T('base.drill.none_ignorable'),'#64748b'); return; }
       var ab=e.target;
-      _wsConfirm({icon:'🗂',title:'全部忽略',okText:'全部忽略',
-        message:'确定把当前 '+ids.length+' 个超时/待接管会话全部忽略（归档）吗？\n归档=标记已处理，从所有告警里移除（不影响会话本身）。'}).then(function(ok){
+      _wsConfirm({iconName:'folder',title:window.T('base.drill.ignore_all'),okText:window.T('base.drill.ignore_all'),
+        message:window.Tf('base.drill.ignore_all_q',{n:ids.length})+'\n'+window.T('base.drill.ignore_all_note')}).then(function(ok){
         if(!ok) return;
-        ab.disabled=true; ab.textContent='处理中…';
+        ab.disabled=true; ab.textContent=window.T('base.common.processing');
         fetch('/api/workspace/batch/archive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_ids:ids,archived:true})})
           .then(function(r){return r.json();}).then(function(d){
             if(d&&d.ok){
-              CRMW.toast('🗂 已忽略 '+(d.updated||ids.length)+' 个会话','#16a34a');
+              CRMW.toast(window.Tf('base.drill.ignored_n',{n:(d.updated||ids.length)}),'#16a34a','folder');
               // 乐观清零：立即把两口径与药丸计数归零并收起面板，再由后端刷新校正
               _slaItems=[]; _escItems=[]; _slaState.crit=0; _slaState.brk=0;
               _renderSlaPill(); _toggleSlaPanel(false);
               refreshSla(); refreshEsc();
             }
-            else { CRMW.toast('批量忽略失败','#dc2626'); }
-            ab.disabled=false; ab.textContent='全部忽略';
-          }).catch(function(){ CRMW.toast('批量忽略失败','#dc2626'); ab.disabled=false; ab.textContent='全部忽略'; });
+            else { CRMW.toast(window.T('base.drill.ignore_fail'),'#dc2626'); }
+            ab.disabled=false; ab.textContent=window.T('base.drill.ignore_all');
+          }).catch(function(){ CRMW.toast(window.T('base.drill.ignore_fail'),'#dc2626'); ab.disabled=false; ab.textContent=window.T('base.drill.ignore_all'); });
       });
       return;
     }
@@ -758,21 +786,21 @@ document.addEventListener('click',function(e){
         btn.disabled=true; btn.textContent='…';
         fetch('/api/workspace/claim',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:cid})})
           .then(function(r){return r.json();}).then(function(d){
-            if(d&&d.ok){ CRMW.toast('✅ 已接管该会话','#16a34a'); refreshSla(); refreshEsc(); }
-            else { CRMW.toast('接管失败：'+((d&&(d.error||d.reason))||'可能已被他人占用'),'#dc2626'); }
-            btn.disabled=false; btn.textContent='接管';
-          }).catch(function(){ CRMW.toast('接管失败','#dc2626'); btn.disabled=false; btn.textContent='接管'; });
+            if(d&&d.ok){ CRMW.toast(window.T('base.drill.claimed'),'#16a34a','check'); refreshSla(); refreshEsc(); }
+            else { CRMW.toast(window.Tf('base.drill.claim_fail',{err:((d&&(d.error||d.reason))||window.T('base.drill.claim_taken'))}),'#dc2626'); }
+            btn.disabled=false; btn.textContent=window.T('base.drill.claim');
+          }).catch(function(){ CRMW.toast(window.T('base.drill.claim_fail_plain'),'#dc2626'); btn.disabled=false; btn.textContent=window.T('base.drill.claim'); });
         return;
       }
       if(act==='ignore'){
         btn.disabled=true; btn.textContent='…';
         fetch('/api/workspace/batch/archive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_ids:[cid],archived:true})})
           .then(function(r){return r.json();}).then(function(d){
-            if(d&&d.ok&&d.updated){ CRMW.toast('🗂 已忽略并归档（已从告警移除）','#64748b'); if(row) row.remove();
+            if(d&&d.ok&&d.updated){ CRMW.toast(window.T('base.drill.ignored_one'),'#64748b','folder'); if(row) row.remove();
               for(var i=(_slaItems||[]).length-1;i>=0;i--){ if(_slaItems[i].conversation_id===cid) _slaItems.splice(i,1); }
               refreshSla(); refreshEsc(); }
-            else { CRMW.toast('忽略失败','#dc2626'); btn.disabled=false; btn.textContent='忽略'; }
-          }).catch(function(){ CRMW.toast('忽略失败','#dc2626'); btn.disabled=false; btn.textContent='忽略'; });
+            else { CRMW.toast(window.T('base.drill.ignore_one_fail'),'#dc2626'); btn.disabled=false; btn.textContent=window.T('base.drill.ignore'); }
+          }).catch(function(){ CRMW.toast(window.T('base.drill.ignore_one_fail'),'#dc2626'); btn.disabled=false; btn.textContent=window.T('base.drill.ignore'); });
         return;
       }
     }
@@ -813,21 +841,21 @@ document.addEventListener('click',function(e){
       ov=document.createElement('div'); ov.id='ws-prefs-modal';
       ov.style.display='none';
       ov.innerHTML='<div>'
-        +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;"><strong>告警设置</strong><span id="ws-prefs-x" style="cursor:pointer;font-size:18px;">✕</span></div>'
-        +'<label style="display:flex;justify-content:space-between;align-items:center;margin:8px 0;">警告阈值（分钟，空=全局）<input id="wp-warn" type="number" min="0" style="width:90px;padding:4px 6px;"></label>'
-        +'<label style="display:flex;justify-content:space-between;align-items:center;margin:8px 0;">严重阈值（分钟，空=全局）<input id="wp-crit" type="number" min="0" style="width:90px;padding:4px 6px;"></label>'
-        +'<label style="display:flex;justify-content:space-between;align-items:center;margin:8px 0;">免打扰 起<input id="wp-dnds" type="time" style="padding:4px 6px;"></label>'
-        +'<label style="display:flex;justify-content:space-between;align-items:center;margin:8px 0;">免打扰 止<input id="wp-dnde" type="time" style="padding:4px 6px;"></label>'
-        +'<label style="display:flex;justify-content:space-between;align-items:center;margin:8px 0;">完全静音告警<input id="wp-mute" type="checkbox"></label>'
-        +'<label style="display:flex;flex-direction:column;gap:4px;margin:8px 0;"><span>我会的语言（自动派单按语言匹配）</span><input id="wp-langs" type="text" placeholder="如 en,ja,zh（逗号分隔，留空=不限）" style="padding:4px 6px;"></label>'
+        +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;"><strong>'+window.T('base.prefs.title')+'</strong><span id="ws-prefs-x" style="cursor:pointer;font-size:18px;">✕</span></div>'
+        +'<label style="display:flex;justify-content:space-between;align-items:center;margin:8px 0;">'+window.T('base.prefs.warn_label')+'<input id="wp-warn" type="number" min="0" style="width:90px;padding:4px 6px;"></label>'
+        +'<label style="display:flex;justify-content:space-between;align-items:center;margin:8px 0;">'+window.T('base.prefs.crit_label')+'<input id="wp-crit" type="number" min="0" style="width:90px;padding:4px 6px;"></label>'
+        +'<label style="display:flex;justify-content:space-between;align-items:center;margin:8px 0;">'+window.T('base.prefs.dnd_start')+'<input id="wp-dnds" type="time" style="padding:4px 6px;"></label>'
+        +'<label style="display:flex;justify-content:space-between;align-items:center;margin:8px 0;">'+window.T('base.prefs.dnd_end')+'<input id="wp-dnde" type="time" style="padding:4px 6px;"></label>'
+        +'<label style="display:flex;justify-content:space-between;align-items:center;margin:8px 0;">'+window.T('base.prefs.mute')+'<input id="wp-mute" type="checkbox"></label>'
+        +'<label style="display:flex;flex-direction:column;gap:4px;margin:8px 0;"><span>'+window.T('base.prefs.langs_label')+'</span><input id="wp-langs" type="text" placeholder="'+window.T('base.prefs.langs_ph')+'" style="padding:4px 6px;"></label>'
         +'<div id="wp-hint" style="font-size:12px;margin:6px 0 12px;"></div>'
-        +'<div class="wp-sec"><strong>🔔 消息通知（本机）</strong></div>'
-        +'<label class="wp-row">新私聊消息提示音<input id="wp-nsound" type="checkbox"></label>'
-        +'<label class="wp-row">提示音量<input id="wp-nvol" type="range" min="0" max="100" style="width:130px;"></label>'
-        +'<label style="display:flex;flex-direction:column;gap:4px;margin:8px 0;"><span>弹窗方式</span><select id="wp-npopup" style="padding:5px 6px;"><option value="auto">自动（后台→系统通知 / 前台→应用内提示）</option><option value="desktop">系统桌面通知</option><option value="toast">应用内提示</option><option value="off">关闭弹窗</option></select></label>'
-        +'<label class="wp-row">群组消息也提示（默认关）<input id="wp-ngroups" type="checkbox"></label>'
-        +'<div style="margin:8px 0 12px;"><button id="wp-ntest" type="button" class="wp-btn-ghost">🔔 试听 / 测试弹窗</button></div>'
-        +'<div style="display:flex;gap:8px;justify-content:flex-end;"><button id="wp-cancel" style="padding:6px 14px;border-radius:6px;cursor:pointer;">取消</button><button id="wp-save" style="padding:6px 14px;border-radius:6px;cursor:pointer;">保存</button></div>'
+        +'<div class="wp-sec"><strong>'+window.T('base.prefs.notif_sec')+'</strong></div>'
+        +'<label class="wp-row">'+window.T('base.prefs.nsound')+'<input id="wp-nsound" type="checkbox"></label>'
+        +'<label class="wp-row">'+window.T('base.prefs.nvol')+'<input id="wp-nvol" type="range" min="0" max="100" style="width:130px;"></label>'
+        +'<label style="display:flex;flex-direction:column;gap:4px;margin:8px 0;"><span>'+window.T('base.prefs.npopup')+'</span><select id="wp-npopup" style="padding:5px 6px;"><option value="auto">'+window.T('base.prefs.npopup_auto')+'</option><option value="desktop">'+window.T('base.prefs.npopup_desktop')+'</option><option value="toast">'+window.T('base.prefs.npopup_toast')+'</option><option value="off">'+window.T('base.prefs.npopup_off')+'</option></select></label>'
+        +'<label class="wp-row">'+window.T('base.prefs.ngroups')+'<input id="wp-ngroups" type="checkbox"></label>'
+        +'<div style="margin:8px 0 12px;"><button id="wp-ntest" type="button" class="wp-btn-ghost">'+window.T('base.prefs.ntest')+'</button></div>'
+        +'<div style="display:flex;gap:8px;justify-content:flex-end;"><button id="wp-cancel" style="padding:6px 14px;border-radius:6px;cursor:pointer;">'+window.T('base.cfm.cancel')+'</button><button id="wp-save" style="padding:6px 14px;border-radius:6px;cursor:pointer;">'+window.T('base.common.save')+'</button></div>'
         +'</div>';
       document.body.appendChild(ov);
       ov.addEventListener('click',function(e){ if(e.target===ov) ov.style.display='none'; });
@@ -846,9 +874,9 @@ document.addEventListener('click',function(e){
         window.__wsNotify.test(false);
         if(mode==='desktop'||mode==='auto'){
           window.__wsNotify.ensureDesktopPerm(function(ok){
-            CRMW.toast(ok?'✓ 桌面通知已就绪':'桌面通知未授权（可在浏览器/系统设置开启）', ok?'#16a34a':'#d97706');
+            CRMW.toast(ok?window.T('base.prefs.desktop_ready'):window.T('base.prefs.desktop_denied'), ok?'#16a34a':'#d97706');
           });
-        } else if(mode==='toast'){ CRMW.toast('💬 这是一条应用内提示示例','#2563eb'); }
+        } else if(mode==='toast'){ CRMW.toast(window.T('base.prefs.toast_demo'),'#2563eb'); }
       });
     }
     ov.style.display='flex';
@@ -867,7 +895,7 @@ document.addEventListener('click',function(e){
       document.getElementById('wp-dnde').value = _hm(p.dnd_end);
       document.getElementById('wp-mute').checked = !!p.muted;
       var _lg=document.getElementById('wp-langs'); if(_lg) _lg.value = p.languages||'';
-      document.getElementById('wp-hint').textContent = '全局默认：警告 '+Math.round(d.global_warn_sec/60)+' 分 / 严重 '+Math.round(d.global_crit_sec/60)+' 分';
+      document.getElementById('wp-hint').textContent = window.Tf('base.prefs.hint',{warn:Math.round(d.global_warn_sec/60),crit:Math.round(d.global_crit_sec/60)});
     }).catch(function(){});
   }
   function savePrefs(){
@@ -890,9 +918,9 @@ document.addEventListener('click',function(e){
       languages: _lgEl? _lgEl.value : '' };
     fetch('/api/workspace/prefs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
       .then(function(r){return r.json();}).then(function(d){
-        if(d&&d.ok){ document.getElementById('ws-prefs-modal').style.display='none'; CRMW.toast('告警设置已保存','#16a34a'); refreshSla(); }
-        else { CRMW.toast('保存失败','#dc2626'); }
-      }).catch(function(){ CRMW.toast('保存失败','#dc2626'); });
+        if(d&&d.ok){ document.getElementById('ws-prefs-modal').style.display='none'; CRMW.toast(window.T('base.prefs.saved'),'#16a34a'); refreshSla(); }
+        else { CRMW.toast(window.T('base.common.save_fail'),'#dc2626'); }
+      }).catch(function(){ CRMW.toast(window.T('base.common.save_fail'),'#dc2626'); });
   }
   var prefsBtn=document.getElementById('ws-prefs-btn');
   if(prefsBtn){ prefsBtn.addEventListener('click',openPrefs); }
@@ -900,7 +928,7 @@ document.addEventListener('click',function(e){
   window.__wsOpenPrefs = openPrefs;
 
   // 轻量 toast（SLA 实时告警）— 委托共享组件
-  function wsToast(text){ CRMW.toast(text); }
+  function wsToast(text, icon){ CRMW.toast(text, null, icon); }
 
   // 当前坐席身份（Phase 6-24：定向升级 toast 需知道 MY_AGENT_ID）
   var MY_AGENT_ID='', MY_IS_SUP=false;
@@ -913,7 +941,7 @@ document.addEventListener('click',function(e){
         dbar=document.createElement('div'); dbar.id='ws-demo-banner';
         dbar.style.cssText='background:#7c3aed;color:#fff;text-align:center;font-size:12px;'
           +'padding:5px 12px;font-weight:600;';
-        dbar.textContent='🎬 演示模式：当前含示例数据，可在「设置 → 试用/演示」一键清空';
+        dbar.textContent=window.T('base.demo.banner');
         var body=document.querySelector('.ws-body');
         if(body&&body.parentNode){ body.parentNode.insertBefore(dbar, body); }
       }
@@ -925,7 +953,7 @@ document.addEventListener('click',function(e){
         bar=document.createElement('div'); bar.id='ws-lic-readonly';
         bar.style.cssText='background:#b91c1c;color:#fff;text-align:center;font-size:13px;'
           +'padding:7px 12px;font-weight:600;';
-        bar.textContent='⛔ '+(m.license.message||'授权已失效，系统处于只读模式，请联系厂商续费。');
+        bar.textContent='⛔ '+(m.license.message||window.T('base.license.expired'));
         var body=document.querySelector('.ws-body');
         if(body&&body.parentNode){ body.parentNode.insertBefore(bar, body); }
       }
@@ -950,12 +978,14 @@ document.addEventListener('click',function(e){
       if(_ql) _ql.style.display='block';  // P29: 队列看板仅主管可见
       var _wfl=document.getElementById('ws-workflow-link');
       if(_wfl) _wfl.style.display='block';  // P37: 工作流配置仅主管可见
+      ['ws-grp-ops','ws-grp-quality','ws-grp-biz','ws-grp-config'].forEach(function(gid){ var ge=document.getElementById(gid); if(ge) ge.style.display='block'; });
+      var _adm=document.getElementById('ws-admin-link'); if(_adm) _adm.style.display='block';  // P1.3：主管可从工作台回管理后台
     }
   }).catch(function(){});
 
   // B2：L4 高风险草稿 badge + 顶栏告警（主管专属）
   var _l4Badge=document.getElementById('ws-l4-badge');
-  var _l4Prev=0, _slaPrev=0;
+  var _l4Prev=0, _slaPrev=0, _l4Inited=false;  // _l4Inited：首次加载只建基线、不弹，避免开页即把历史积压一次性弹出
   function refreshL4(){
     if(!MY_IS_SUP) return;
     fetch('/api/drafts/risk-summary').then(function(r){return r.json();}).then(function(d){
@@ -966,23 +996,28 @@ document.addEventListener('click',function(e){
       var sla=(d.sla_overdue&&d.sla_overdue>0)?d.sla_overdue:0;
       if(_l4Badge){
         _l4Badge.style.display=l4?'inline-flex':'none';
-        if(l4) _l4Badge.innerHTML='<span class="ws-pill-ic">🛡️</span><span class="ws-pill-lb">高风险待审</span><span class="ws-pill-n">'+l4+'</span>';
+        if(l4) _l4Badge.innerHTML=_pillIc('shield')+'<span class="ws-pill-lb">'+window.T('base.pill.l4')+'</span><span class="ws-pill-n">'+l4+'</span>';
       }
       // 草稿审批链接显示待审总数 + SLA 告警
       var _dl=document.getElementById('ws-drafts-link');
       if(_dl){
-        var label='草稿审批';
+        var label=window.T('base.nav.drafts');
         if(high) label+='('+high+')';
-        if(sla) label+=' ⏰'+sla;
-        _dl.textContent=label;
+        if(sla) _dl.innerHTML=label+' <span style="display:inline-flex;align-items:center;gap:2px;vertical-align:middle;">'+_ui('clock',11)+sla+'</span>';
+        else _dl.textContent=label;
       }
-      // 新出现 L4 → loud toast（仅主管，仅增量触发）
-      if(l4>_l4Prev){
-        CRMW.toast('🚨 新增 L4 高风险草稿待审：共 '+l4+' 条（需主管放行）','#991b1b');
-      }
-      // D1：新出现 SLA 超时 → loud toast
-      if(sla>_slaPrev&&_slaPrev>=0){
-        CRMW.toast('⏰ SLA 告警：'+sla+' 条 L3/L4 草稿超过 4 小时未审批','#9d174d');
+      // 首次加载只同步基线 + 已在上面更新顶栏角标，不弹 toast（避免开页即把历史积压一次性弹出）；
+      // 之后仅当计数「真正新增」时才 loud toast（仅主管，增量触发）。
+      if(!_l4Inited){
+        _l4Inited=true;
+      }else{
+        if(l4>_l4Prev){
+          CRMW.toast(window.Tf('base.l4.toast_new',{n:l4}),'#991b1b','alert');
+        }
+        // D1：新出现 SLA 超时 → loud toast
+        if(sla>_slaPrev&&_slaPrev>=0){
+          CRMW.toast(window.Tf('base.l4.toast_sla',{n:sla}),'#9d174d','clock');
+        }
       }
       _l4Prev=l4; _slaPrev=sla;
     }).catch(function(){});
@@ -1026,15 +1061,15 @@ document.addEventListener('click',function(e){
         refreshFu();
         if(window.TK && typeof window.TK.load==='function') window.TK.load();
       } else if(msg && msg.type==='sla_alert' && msg.data){
-        if(!_sseSettling()) wsToast('⚠ 客户「'+(msg.data.name||'?')+'」已等待 '+fmtWaitMin(msg.data.wait_sec)+'未回复');
+        if(!_sseSettling()) wsToast(window.Tf('base.sse.sla_alert',{name:(msg.data.name||'?'),wait:fmtWaitMin(msg.data.wait_sec)}),'alert');
         refreshSla();
       } else if(msg && msg.type==='draft_created' && msg.data){
         // G1：新自动草稿生成 → toast 通知 + 转发 CustomEvent 给草稿审批页
         var _dc=msg.data;
         var _lvlColor={'L2':'#16a34a','L3':'#d97706','L4':'#dc2626'}[_dc.autopilot_level]||'#2563eb';
         var _toastEl=CRMW.toast(
-          '📋 新草稿 ['+(_dc.autopilot_level||'?')+'] '+(_dc.chat_name||_dc.platform||'?')+'：'+(_dc.peer_text||'').slice(0,30),
-          _lvlColor);
+          window.Tf('base.sse.draft_created',{lvl:(_dc.autopilot_level||'?'),chat:(_dc.chat_name||_dc.platform||'?'),text:(_dc.peer_text||'').slice(0,30)}),
+          _lvlColor,'clipboard');
         if(_toastEl && _dc.autopilot_level!=='L2'){
           // 非 L2 需要人工审批 → 点击 toast 跳转草稿审批页
           _toastEl.style.cursor='pointer';
@@ -1050,9 +1085,8 @@ document.addEventListener('click',function(e){
           var _br=msg.data;
           if(!_sseSettling()){
             var _brEl=CRMW.toast(
-              '⏰ 草稿 SLA 超时：'+(_br.peer_text_preview||_br.draft_id||'').slice(0,40)
-                +' 已等待 '+(_br.wait_min||'?')+'分钟（'+(_br.autopilot_level||'')+'）',
-              '#b91c1c');
+              window.Tf('base.sse.draft_sla',{text:(_br.peer_text_preview||_br.draft_id||'').slice(0,40),min:(_br.wait_min||'?'),lvl:(_br.autopilot_level||'')}),
+              '#b91c1c','clock');
             if(_brEl){ _brEl.style.cursor='pointer'; _brEl.onclick=function(){ location.href='/workspace/drafts'; }; }
           }
           try{ document.dispatchEvent(new CustomEvent('draft_sla_breach',{detail:_br})); }catch(_){}
@@ -1062,13 +1096,25 @@ document.addEventListener('click',function(e){
         // K2：草稿自动再分配 → 被分配人 toast + 转发 CustomEvent
         var _ra=msg.data;
         if(MY_IS_SUP || (_ra.to_agent&&_ra.to_agent===MY_AGENT_ID)){
-          var _raLabel=(_ra.to_agent===MY_AGENT_ID)?'草稿已转派给您':'草稿已自动转派给 '+(_ra.to_agent_name||_ra.to_agent||'?');
-          CRMW.toast('🔄 '+_raLabel+'（来自离线坐席 '+(_ra.from_agent||'?')+'）','#0f766e');
+          var _raLabel=(_ra.to_agent===MY_AGENT_ID)?window.T('base.sse.draft_reassigned_you'):window.Tf('base.sse.draft_reassigned_to',{name:(_ra.to_agent_name||_ra.to_agent||'?')});
+          CRMW.toast(window.Tf('base.sse.draft_reassigned_wrap',{label:_raLabel,from:(_ra.from_agent||'?')}),'#0f766e','refresh');
           try{ document.dispatchEvent(new CustomEvent('draft_reassigned',{detail:_ra})); }catch(_){}
+        }
+      } else if(msg && msg.type==='draft_backlog_summary' && msg.data){
+        // 积压聚合汇总：主管 toast（点击进审批页）+ 转发 CustomEvent；铃铛按 type 单键合并成一条
+        if(MY_IS_SUP){
+          var _bs=msg.data;
+          if(!_sseSettling()){
+            var _bsEl=CRMW.toast(
+              window.Tf('base.sse.draft_backlog',{n:(_bs.count!=null?_bs.count:'?')}),
+              '#b45309','inbox');
+            if(_bsEl){ _bsEl.style.cursor='pointer'; _bsEl.onclick=function(){ location.href='/workspace/drafts'; }; }
+          }
+          try{ document.dispatchEvent(new CustomEvent('draft_backlog_summary',{detail:_bs})); }catch(_){}
         }
       }
       // P24：通知中心 — 所有重要事件写入铃铛
-      if(msg && ['inbox_message','draft_sla_breach','draft_reassigned','anomaly_alert','sla_alert','escalation','queue_alert','stage_advance','stage_advance_pending','stage_downgrade','stage_reunion','stage_sync','workflow_step','workflow_execution_completed','workflow_execution_failed','workflow_execution_cancelled'].indexOf(msg.type)>=0){
+      if(msg && ['inbox_message','draft_sla_breach','draft_backlog_summary','draft_reassigned','anomaly_alert','sla_alert','escalation','queue_alert','stage_advance','stage_advance_pending','stage_downgrade','stage_reunion','stage_sync','workflow_step','workflow_execution_completed','workflow_execution_failed','workflow_execution_cancelled'].indexOf(msg.type)>=0){
         if(window.__wsNotif) window.__wsNotif.add(msg);
       }
       // 私聊新消息：提示音 + 弹窗（群组改走「群组动态」，由引擎按本地偏好决定）
@@ -1080,8 +1126,8 @@ document.addEventListener('click',function(e){
       if(msg && msg.type==='conversation_claim' && msg.data && msg.data.action==='auto_claimed'){
         var _ac=msg.data, _acClaim=_ac.claim||{};
         if(_acClaim.agent_id && _acClaim.agent_id===MY_AGENT_ID){
-          var _acMsg=_ac.matched_language?'🌐 系统已按语言把一位客户分给你':'📥 系统已把一位客户自动分给你';
-          var _acEl=CRMW.toast(_acMsg+'（可在工作台查看 / 释放）','#0f766e');
+          var _acMsg=_ac.matched_language?window.T('base.sse.auto_claim_lang'):window.T('base.sse.auto_claim');
+          var _acEl=CRMW.toast(window.Tf('base.sse.auto_claim_wrap',{msg:_acMsg}),'#0f766e',_ac.matched_language?'globe':'inbox');
           if(_acEl && _ac.conversation_id){
             _acEl.style.cursor='pointer';
             _acEl.onclick=function(){
@@ -1094,7 +1140,7 @@ document.addEventListener('click',function(e){
       // P46：待确认进阶
       if(msg && msg.type==='stage_advance_pending' && msg.data){
         var _sap=msg.data;
-        var _sapEl=CRMW.toast('⏳ 待确认进阶：'+(_sap.confirmed_stage_label||'?')+' → '+(_sap.pending_stage_label||'?'),'#b45309');
+        var _sapEl=CRMW.toast(window.Tf('base.sse.stage_pending',{from:(_sap.confirmed_stage_label||'?'),to:(_sap.pending_stage_label||'?')}),'#b45309','clock');
         if(_sapEl && _sap.conversation_id){
           _sapEl.style.cursor='pointer';
           _sapEl.onclick=function(){
@@ -1106,22 +1152,22 @@ document.addEventListener('click',function(e){
       // P43/P46：关系阶段确认进阶
       if(msg && msg.type==='stage_advance' && msg.data){
         var _sa=msg.data;
-        CRMW.toast('🎉 关系进阶：'+(_sa.previous_stage_label||'?')+' → '+(_sa.stage_label||'?'),'#7c3aed');
+        CRMW.toast(window.Tf('base.sse.stage_advance',{from:(_sa.previous_stage_label||'?'),to:(_sa.stage_label||'?')}),'#7c3aed','star');
       }
       if(msg && msg.type==='stage_downgrade' && msg.data){
-        CRMW.toast('↓ 关系降级至 '+(msg.data.stage_label||'?'),'#b45309');
+        CRMW.toast(window.Tf('base.sse.stage_downgrade',{stage:(msg.data.stage_label||'?')}),'#b45309','trend-down');
       }
       if(msg && msg.type==='stage_reunion' && msg.data){
-        CRMW.toast('🌸 确认回暖 · '+(msg.data.stage_label||''),'#be185d');
+        CRMW.toast(window.Tf('base.sse.stage_reunion',{stage:(msg.data.stage_label||'')}),'#be185d','heart');
       }
       // P47：工作链终态通知
       if(msg && msg.type==='workflow_execution_failed' && msg.data){
-        CRMW.toast('❌ 工作链失败：'+(msg.data.chain_name||''),'#ef4444');
+        CRMW.toast(window.Tf('base.sse.wf_failed',{name:(msg.data.chain_name||'')}),'#ef4444','x');
       }
       // P44：工作链步骤通知
       if(msg && msg.type==='workflow_step' && msg.data){
         var _ws=msg.data;
-        var _wsEl=CRMW.toast('⚡ 工作链步骤：'+(_ws.suggested_text||'').slice(0,40),'#0f766e');
+        var _wsEl=CRMW.toast(window.Tf('base.sse.wf_step',{text:(_ws.suggested_text||'').slice(0,40)}),'#0f766e','zap');
         if(_wsEl && _ws.conversation_id){
           _wsEl.style.cursor='pointer';
           _wsEl.onclick=function(){
@@ -1139,10 +1185,10 @@ document.addEventListener('click',function(e){
         var _isBroadcast=!_qaToAgent;
         if((_isMe || _isBroadcast) && !_sseSettling() && _alertToastOnce('qa:'+(_qa.conversation_id||'')+':'+(_qa.sla_level||''), 600000)){
           var _qaColor=_qa.sla_level==='crit'?'#dc2626':'#d97706';
-          var _qaPrefix=_qa.sla_level==='crit'?'🚨 严重超时':'⚠ 响应超时';
+          var _qaPrefix=_qa.sla_level==='crit'?window.T('base.sse.qa_crit'):window.T('base.sse.qa_warn');
           var _qaEl=CRMW.toast(
-            _qaPrefix+'：客户「'+(_qa.display_name||'?')+'」已等待 '+(_qa.wait_min||'?')+'分钟未回复',
-            _qaColor);
+            window.Tf('base.sse.qa_body',{prefix:_qaPrefix,name:(_qa.display_name||'?'),min:(_qa.wait_min||'?')}),
+            _qaColor,'alert');
           if(_qaEl && _qa.conversation_id){
             _qaEl.style.cursor='pointer';
             _qaEl.onclick=function(){
@@ -1155,15 +1201,15 @@ document.addEventListener('click',function(e){
       }
       if(msg && msg.type==='escalation' && msg.data){
         var _d=msg.data;
-        var _rz={unclaimed:'无人认领',holder_offline:'坐席离线',holder_quiet:'坐席静音'}[_d.reason]||_d.reason;
+        var _rz=({unclaimed:window.T('base.reason.unclaimed'),holder_offline:window.T('base.reason.holder_offline'),holder_quiet:window.T('base.reason.holder_quiet')})[_d.reason]||_d.reason;
         var _assigned=String(_d.assigned_to||'');
         var _isMe=MY_AGENT_ID&&(_assigned===MY_AGENT_ID);
         if(_isMe){
           // 指派给我 → loud 紫色 toast（10min 冷却，避免重连重弹；点击跳转对应会话）
           if(!_sseSettling() && _alertToastOnce('esc:'+(_d.conversation_id||''), 600000)){
             var _toastEl=CRMW.toast(
-              '🔔 升级已指派给您：客户「'+(_d.name||'?')+'」'+fmtWaitMin(_d.wait_sec)+'未回复（'+_rz+'）',
-              '#7c3aed');
+              window.Tf('base.sse.esc_assigned',{name:(_d.name||'?'),wait:fmtWaitMin(_d.wait_sec),reason:_rz}),
+              '#7c3aed','bell');
             if(_toastEl && _d.conversation_id){
               _toastEl.style.cursor='pointer';
               _toastEl.onclick=function(){
@@ -1175,7 +1221,7 @@ document.addEventListener('click',function(e){
         } else if(MY_IS_SUP && !_isMe){
           // 主管但不是我的单 → 低调灰色 toast（30min 冷却，知情不刷屏）
           if(!_sseSettling() && _alertToastOnce('escsup:'+(_d.conversation_id||''), 1800000)){
-            CRMW.toast('📋 升级（指派给 '+(_assigned||'未指定')+'）：客户「'+(_d.name||'?')+'」','#64748b');
+            CRMW.toast(window.Tf('base.sse.esc_sup',{to:(_assigned||window.T('base.sse.unassigned')),name:(_d.name||'?')}),'#64748b','clipboard');
           }
         }
         // 普通坐席不收升级 toast（仅徽标更新）
@@ -1189,10 +1235,10 @@ document.addEventListener('click',function(e){
 <!-- P24: 通知中心面板 -->
 <div id="ws-notif-panel" class="ws-notif-panel">
   <div class="ws-notif-hdr">
-    <strong>通知中心</strong>
+    <strong data-i18n="base.notif.title">通知中心</strong>
     <span style="display:flex;align-items:center;gap:12px;">
-      <span class="ws-notif-read" id="ws-notif-prefs" title="消息提示音 / 弹窗设置" style="font-size:13px;">⚙ 提示设置</span>
-      <span class="ws-notif-read" id="ws-notif-read">全部已读</span>
+      <span class="ws-notif-read" id="ws-notif-prefs" data-i18n="base.notif.prefs_link" data-i18n-title="base.notif.prefs_link_t" title="消息提示音 / 弹窗设置" style="font-size:13px;display:inline-flex;align-items:center;gap:4px;"><span data-ui-icon="gear" data-size="13"></span><span data-i18n="base.notif.prefs_link">提示设置</span></span>
+      <span class="ws-notif-read" id="ws-notif-read" data-i18n="base.notif.read_all">全部已读</span>
     </span>
   </div>
   <div class="ws-notif-list" id="ws-notif-list"></div>
@@ -1200,9 +1246,9 @@ document.addEventListener('click',function(e){
 <!-- P6: 严重超时下钻面板 -->
 <div id="ws-sla-panel" class="ws-drill-panel">
   <div class="ws-drill-hdr">
-    <span>⏰ 严重超时会话</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;"><span data-ui-icon="clipboard" data-size="15"></span><span data-i18n="base.drill.title">需要处理的会话</span></span>
     <span style="display:flex;align-items:center;gap:10px;">
-      <button class="ws-drill-allbtn" id="ws-sla-all" title="把当前列表里的会话全部归档=已处理/忽略，从所有告警里移除">全部忽略</button>
+      <button class="ws-drill-allbtn" id="ws-sla-all" data-i18n="base.drill.ignore_all" data-i18n-title="base.drill.ignore_all_t" title="把当前列表里的会话全部归档=已处理/忽略，从所有告警里移除">全部忽略</button>
       <span class="ws-drill-x" id="ws-sla-x">✕</span>
     </span>
   </div>
@@ -1213,7 +1259,7 @@ document.addEventListener('click',function(e){
   var _notifications = [];
   // 复发型告警（升级/会话SLA/草稿SLA/队列/异常）会被反复推送（轮询+重连重发）。
   // 这些按「类型+会话」合并：同一会话只保留最新一条，避免铃铛堆几十条同义告警。
-  var _COALESCE_TYPES={ escalation:1, sla_alert:1, draft_sla_breach:1, queue_alert:1, anomaly_alert:1 };
+  var _COALESCE_TYPES={ escalation:1, sla_alert:1, draft_sla_breach:1, draft_backlog_summary:1, queue_alert:1, anomaly_alert:1 };
   function _coalesceKey(n){
     if(!n||!_COALESCE_TYPES[n.type]) return null;
     var d=n.data||{};
@@ -1233,12 +1279,13 @@ document.addEventListener('click',function(e){
 
   var _grpOpen = false;
   var _TYPE_META = {
-    inbox_message:  { icon:'💬', bg:'#dbeafe', label:'新消息',  accent:'#3b82f6' },
-    draft_sla_breach:{ icon:'⏰', bg:'#fee2e2', label:'草稿超时', accent:'#dc2626' },
-    draft_reassigned:{ icon:'🔄', bg:'#d1fae5', label:'草稿转派', accent:'#0f766e' },
-    anomaly_alert:  { icon:'📊', bg:'#fef3c7', label:'异常告警', accent:'#d97706' },
-    sla_alert:      { icon:'⚠️', bg:'#fee2e2', label:'SLA 告警', accent:'#dc2626' },
-    escalation:     { icon:'🔔', bg:'#ede9fe', label:'升级告警', accent:'#7c3aed' },
+    inbox_message:  { iconName:'chat', bg:'#dbeafe', label:window.T('base.notif.type_inbox_message'),  accent:'#3b82f6' },
+    draft_sla_breach:{ iconName:'clock', bg:'#fee2e2', label:window.T('base.notif.type_draft_sla_breach'), accent:'#dc2626' },
+    draft_backlog_summary:{ iconName:'inbox', bg:'#fef3c7', label:window.T('base.notif.type_draft_backlog_summary'), accent:'#b45309' },
+    draft_reassigned:{ iconName:'refresh', bg:'#d1fae5', label:window.T('base.notif.type_draft_reassigned'), accent:'#0f766e' },
+    anomaly_alert:  { iconName:'chart', bg:'#fef3c7', label:window.T('base.notif.type_anomaly_alert'), accent:'#d97706' },
+    sla_alert:      { iconName:'alert', bg:'#fee2e2', label:window.T('base.notif.type_sla_alert'), accent:'#dc2626' },
+    escalation:     { iconName:'bell', bg:'#ede9fe', label:window.T('base.notif.type_escalation'), accent:'#7c3aed' },
   };
   // 群组动态：inbox_message 且会话类型为群组/频道 → 折叠展示、不计未读、不打扰
   function _isGroup(n){
@@ -1252,34 +1299,36 @@ document.addEventListener('click',function(e){
     var d = new Date(ts);
     var now = Date.now();
     var diff = now - ts;
-    if(diff < 60000) return '刚刚';
-    if(diff < 3600000) return Math.floor(diff/60000)+'分钟前';
-    if(diff < 86400000) return Math.floor(diff/3600000)+'小时前';
-    return d.getMonth()+1+'月'+d.getDate()+'日';
+    if(diff < 60000) return window.T('base.notif.just_now');
+    if(diff < 3600000) return window.Tf('base.notif.min_ago',{n:Math.floor(diff/60000)});
+    if(diff < 86400000) return window.Tf('base.notif.hour_ago',{n:Math.floor(diff/3600000)});
+    return window.wsFmtDate(ts,{month:'numeric',day:'numeric'});
   }
 
   function _renderItem(n){
-    var meta = _TYPE_META[n.type] || { icon:'📌', bg:'#f3f4f6', label:n.type||'通知', accent:'transparent' };
+    var meta = _TYPE_META[n.type] || { iconName:'pin', bg:'#f3f4f6', label:n.type||window.T('base.notif.type_default'), accent:'transparent' };
     var ts = n._notif_ts || 0;
     var unread = ts > _readAt;
     var d = n.data || {};
     var title = meta.label;
     var sub = '';
     if(n.type==='inbox_message'){
-      sub = (d.name||d.display_name||d.chat_key||'?') + '：' + (d.preview||d.text||'').slice(0,40);
+      sub = window.Tf('base.notif.msg_sub',{name:(d.name||d.display_name||d.chat_key||'?'),text:(d.preview||d.text||'').slice(0,40)});
     } else if(n.type==='sla_alert'){
-      sub = '客户「'+(d.name||'?')+'」等待 '+(d.wait_min||Math.round((d.wait_sec||0)/60))+'分钟';
+      sub = window.Tf('base.notif.sla_sub',{name:(d.name||'?'),min:(d.wait_min||Math.round((d.wait_sec||0)/60))});
     } else if(n.type==='anomaly_alert'){
-      sub = (d.metric||'指标')+' 异常：'+(d.message||d.desc||'').slice(0,40);
+      sub = window.Tf('base.notif.anomaly_sub',{metric:(d.metric||window.T('base.notif.metric')),msg:(d.message||d.desc||'').slice(0,40)});
     } else if(n.type==='escalation'){
-      sub = '客户「'+(d.name||'?')+'」升级';
+      sub = window.Tf('base.notif.esc_sub',{name:(d.name||'?')});
     } else if(n.type==='draft_sla_breach'){
-      sub = '草稿等待 '+(d.wait_min||'?')+'分钟未审批';
+      sub = window.Tf('base.notif.draft_sla_sub',{min:(d.wait_min||'?')});
+    } else if(n.type==='draft_backlog_summary'){
+      sub = window.Tf('base.notif.backlog_sub',{n:(d.count!=null?d.count:'?'),l3:(d.l3!=null?d.l3:'?'),l4:(d.l4!=null?d.l4:'?')});
     } else if(n.type==='draft_reassigned'){
-      sub = '转派给 '+(d.to_agent_name||d.to_agent||'?');
+      sub = window.Tf('base.notif.reassigned_sub',{name:(d.to_agent_name||d.to_agent||'?')});
     }
     return '<div class="ws-notif-item'+(unread?' unread':'')+'" style="border-left-color:'+(meta.accent||'transparent')+';" onclick="window.__wsNotif.click(\''+esc(JSON.stringify(n).replace(/'/g,'\\'+"'"))+'\')">'
-      +'<div class="ws-notif-icon" style="background:'+meta.bg+'">'+meta.icon+'</div>'
+      +'<div class="ws-notif-icon" style="background:'+meta.bg+'">'+(typeof uiIcon==='function'?uiIcon(meta.iconName||'pin',14):'')+'</div>'
       +'<div class="ws-notif-body">'
         +'<div class="ws-notif-title">'+esc(title)+'</div>'
         +'<div class="ws-notif-sub">'+esc(sub)+'</div>'
@@ -1295,11 +1344,11 @@ document.addEventListener('click',function(e){
     var groups = all.filter(_isGroup).slice(0,50);
     var html = '';
     html += main.length ? main.map(_renderItem).join('')
-                        : '<div class="ws-notif-empty">暂无通知</div>';
+                        : '<div class="ws-notif-empty">'+window.T('base.notif.empty')+'</div>';
     if(groups.length){
       html += '<div class="ws-notif-grp-hdr" id="ws-notif-grp-hdr">'
-        +'<span>👥 群组动态 '+groups.length+'</span>'
-        +'<span class="ws-notif-grp-cv">'+(_grpOpen?'收起 ▲':'展开 ▼')+'</span></div>'
+        +'<span>'+window.Tf('base.notif.grp_hdr',{n:groups.length})+'</span>'
+        +'<span class="ws-notif-grp-cv">'+(_grpOpen?window.T('base.notif.collapse'):window.T('base.notif.expand'))+'</span></div>'
         +'<div class="ws-notif-grp-list" style="display:'+(_grpOpen?'block':'none')+';">'
         + groups.map(_renderItem).join('') + '</div>';
     }
@@ -1402,7 +1451,7 @@ document.addEventListener('click',function(e){
           if(typeof window.__wsFocusConv==='function'){ window.__wsFocusConv(d.conversation_id); _toggle(); return; }
           try{ sessionStorage.setItem('ws_focus_conv', d.conversation_id); }catch(_){}
           location.href='/workspace';
-        } else if(n.type==='draft_sla_breach'||n.type==='draft_reassigned'){
+        } else if(n.type==='draft_sla_breach'||n.type==='draft_backlog_summary'||n.type==='draft_reassigned'){
           location.href='/workspace/drafts';
         } else if(n.type==='sla_alert'){
           location.href='/workspace';
@@ -1476,7 +1525,7 @@ window.__wsNotify = (function(){
     return false;
   }
   function _toastGo(title, body, go){
-    var el=CRMW.toast('💬 '+title+'：'+String(body||'').slice(0,40), '#2563eb');
+    var el=CRMW.toast(window.Tf('base.notify.dm_toast',{title:title,body:String(body||'').slice(0,40)}), '#2563eb', 'chat');
     if(el && go){ el.style.cursor='pointer'; el.onclick=function(){ try{ go(); }catch(_){} try{ el.remove(); }catch(_){} }; }
   }
   function onInboxMessage(d){
@@ -1490,7 +1539,7 @@ window.__wsNotify = (function(){
     _beep(false);
     var mode=prefs.popup||'auto';
     if(mode==='off') return;
-    var title=String(d.name||d.display_name||d.chat_key||'新消息');
+    var title=String(d.name||d.display_name||d.chat_key||window.T('base.notif.type_inbox_message'));
     var body=String(d.preview||d.text||'');
     var go=function(){
       var cid=d.conversation_id||'';
@@ -1528,7 +1577,7 @@ window.__wsNotify = (function(){
   var _TYPE_ICON={message:'💬',contact:'👤',note:'📝'};
   var _TYPE_COLOR={message:'#2563eb',contact:'#7c3aed',note:'#0f766e'};
   function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-  function fmtTs(ts){if(!ts)return '';var d=new Date(ts<1e12?ts*1000:ts);return d.toLocaleDateString();}
+  function fmtTs(ts){if(!ts)return '';return window.wsFmtDate(ts);}
 
   window._gsOnInput=function(val){
     clearTimeout(_timer);
@@ -1546,11 +1595,11 @@ window.__wsNotify = (function(){
     _panel=document.getElementById('gs-panel');
     if(!_panel) return;
     _panel.style.display='block';
-    _panel.innerHTML='<div style="padding:10px;font-size:12px;color:#94a3b8;">搜索中…</div>';
+    _panel.innerHTML='<div style="padding:10px;font-size:12px;color:#94a3b8;">'+window.T('base.gs.searching')+'</div>';
     fetch('/api/workspace/search?'+new URLSearchParams({q:q,limit:'15'}))
       .then(function(r){return r.json();}).then(function(d){
         if(!d.ok||!d.results||!d.results.length){
-          _panel.innerHTML='<div style="padding:12px;font-size:12px;color:#94a3b8;text-align:center;">无结果</div>';
+          _panel.innerHTML='<div style="padding:12px;font-size:12px;color:#94a3b8;text-align:center;">'+window.T('base.gs.no_results')+'</div>';
           return;
         }
         _panel.innerHTML=d.results.map(function(r){
@@ -1567,9 +1616,9 @@ window.__wsNotify = (function(){
             +'<div style="font-size:9px;background:'+color+'22;color:'+color+';border-radius:4px;padding:1px 5px;flex:0 0 auto;">'+esc(r.type)+'</div>'
             +'</a>';
         }).join('')
-        +'<div style="padding:6px;text-align:center;font-size:11px;color:#94a3b8;">共 '+d.total+' 条结果</div>';
+        +'<div style="padding:6px;text-align:center;font-size:11px;color:#94a3b8;">'+window.Tf('base.gs.total',{n:d.total})+'</div>';
       }).catch(function(){
-        if(_panel)_panel.innerHTML='<div style="padding:10px;font-size:12px;color:#ef4444;">搜索失败</div>';
+        if(_panel)_panel.innerHTML='<div style="padding:10px;font-size:12px;color:#ef4444;">'+window.T('base.gs.search_fail')+'</div>';
       });
   }
   // 点击外部关闭

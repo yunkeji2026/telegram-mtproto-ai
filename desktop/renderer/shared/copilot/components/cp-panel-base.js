@@ -48,11 +48,17 @@
       });
     }
 
+    // —— i18n（共享词典，回退 key）——
+    t(key, vars) {
+      const f = root.CopilotShared && root.CopilotShared.t;
+      return f ? f(key, vars) : key;
+    }
+
     // —— 子类可覆写 ——
     styles() { return ""; }
-    emptyText() { return "选中会话后加载…"; }
-    emptyDataText() { return "暂无数据"; }
-    errText() { return "加载失败"; }
+    emptyText() { return this.t("cp.base.empty"); }
+    emptyDataText() { return this.t("cp.base.no_data"); }
+    errText() { return this.t("cp.base.err"); }
     async fetchData(_ctx) { throw new Error("fetchData not implemented"); }
     renderData(_d) { return ""; }
     onAction(_act, _el) {}
@@ -83,7 +89,7 @@
         this._render(`<div class="empty">${this._escStatic(this.emptyText())}</div>`);
         return;
       }
-      this._render('<div class="empty">加载中…</div>');
+      this._render(`<div class="empty">${this._escStatic(this.t("cp.common.loading"))}</div>`);
       const token = ++this._reqToken;
       let d;
       try {

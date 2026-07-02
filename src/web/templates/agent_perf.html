@@ -1,5 +1,5 @@
 {% extends "workspace_base.html" %}
-{% block title %}坐席绩效看板{% endblock %}
+{% block title %}{{ (i18n or {}).get('ap_s001', "坐席绩效看板") }}{% endblock %}
 {% block head %}
 <style>
   .ap-wrap{height:100%;overflow-y:auto;background:#f7f8fa;padding:18px;}
@@ -55,33 +55,33 @@
 {% block content %}
 <div class="ap-wrap">
   <div class="ap-header">
-    <h2 style="margin:0;font-size:18px;">📊 坐席绩效看板</h2>
+    <h2 style="margin:0;font-size:18px;">📊 {{ (i18n or {}).get('ap_s001', "坐席绩效看板") }}</h2>
     <span id="ap-update" style="font-size:12px;color:#94a3b8;"></span>
   </div>
   <div class="ap-filters">
     <select id="f-days" onchange="load()">
-      <option value="7">近 7 天</option>
-      <option value="14" selected>近 14 天</option>
-      <option value="30">近 30 天</option>
+      <option value="7">{{ (i18n or {}).get('analytics_period_7d', "近 7 天") }}</option>
+      <option value="14" selected>{{ (i18n or {}).get('ap_s002', "近 14 天") }}</option>
+      <option value="30">{{ (i18n or {}).get('analytics_period_30d', "近 30 天") }}</option>
     </select>
-    <input id="f-agent" placeholder="坐席 ID 过滤（可选）" style="width:200px;" oninput="debounce()">
-    <button onclick="load()" style="padding:5px 12px;border:1px solid #2563eb;border-radius:6px;background:#fff;color:#2563eb;font-size:13px;cursor:pointer;">刷新</button>
+    <input id="f-agent" placeholder="{{ (i18n or {}).get('ap_s003', '坐席 ID 过滤（可选）') }}" style="width:200px;" oninput="debounce()">
+    <button onclick="load()" style="padding:5px 12px;border:1px solid #2563eb;border-radius:6px;background:#fff;color:#2563eb;font-size:13px;cursor:pointer;">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
   </div>
 
   <!-- 汇总 KPI -->
   <div class="ap-summary" id="ap-kpis">
-    <div class="ap-kpi"><div class="val" id="kpi-agents">—</div><div class="lbl">活跃坐席</div></div>
-    <div class="ap-kpi"><div class="val" id="kpi-total">—</div><div class="lbl">总处置</div></div>
-    <div class="ap-kpi"><div class="val" id="kpi-approved">—</div><div class="lbl">批准</div></div>
-    <div class="ap-kpi"><div class="val" id="kpi-rejected">—</div><div class="lbl">拒绝</div></div>
-    <div class="ap-kpi"><div class="val" id="kpi-auto">—</div><div class="lbl">L2 自动发</div></div>
-    <div class="ap-kpi"><div class="val" id="kpi-override">—</div><div class="lbl">主管放行</div></div>
+    <div class="ap-kpi"><div class="val" id="kpi-agents">—</div><div class="lbl">{{ (i18n or {}).get('ap_s004', "活跃坐席") }}</div></div>
+    <div class="ap-kpi"><div class="val" id="kpi-total">—</div><div class="lbl">{{ (i18n or {}).get('ap_s005', "总处置") }}</div></div>
+    <div class="ap-kpi"><div class="val" id="kpi-approved">—</div><div class="lbl">{{ (i18n or {}).get('dash.mp.approved', "批准") }}</div></div>
+    <div class="ap-kpi"><div class="val" id="kpi-rejected">—</div><div class="lbl">{{ (i18n or {}).get('dash.mp.rejected', "拒绝") }}</div></div>
+    <div class="ap-kpi"><div class="val" id="kpi-auto">—</div><div class="lbl">L2 {{ (i18n or {}).get('dash.m.lbl_autosend', "自动发") }}</div></div>
+    <div class="ap-kpi"><div class="val" id="kpi-override">—</div><div class="lbl">{{ (i18n or {}).get('inbox.autolog.force_override', "主管放行") }}</div></div>
   </div>
 
   <!-- 趋势图（按天）-->
   <div class="ap-trend">
-    <h3>每日处置趋势</h3>
-    <div class="ap-chart" id="ap-chart"><div class="ap-loading" style="height:auto;">加载中…</div></div>
+    <h3>{{ (i18n or {}).get('ap_s006', "每日处置趋势") }}</h3>
+    <div class="ap-chart" id="ap-chart"><div class="ap-loading" style="height:auto;">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
   </div>
 
   <!-- 坐席明细表 -->
@@ -89,113 +89,113 @@
     <table class="ap-table">
       <thead>
         <tr>
-          <th>坐席</th>
-          <th>总处置</th>
-          <th>批准</th>
-          <th>拒绝</th>
-          <th>编辑发送</th>
-          <th>L2 自动</th>
-          <th>主管放行</th>
-          <th>批准率</th>
-          <th>占比</th>
-          <th>最后操作</th>
+          <th>{{ (i18n or {}).get('dash.col.agent', "坐席") }}</th>
+          <th>{{ (i18n or {}).get('ap_s005', "总处置") }}</th>
+          <th>{{ (i18n or {}).get('dash.mp.approved', "批准") }}</th>
+          <th>{{ (i18n or {}).get('dash.mp.rejected', "拒绝") }}</th>
+          <th>{{ (i18n or {}).get('ap_s007', "编辑发送") }}</th>
+          <th>L2 {{ (i18n or {}).get('dash.lb.auto', "自动") }}</th>
+          <th>{{ (i18n or {}).get('inbox.autolog.force_override', "主管放行") }}</th>
+          <th>{{ (i18n or {}).get('ap_s008', "批准率") }}</th>
+          <th>{{ (i18n or {}).get('ap_s009', "占比") }}</th>
+          <th>{{ (i18n or {}).get('ap_s010', "最后操作") }}</th>
         </tr>
       </thead>
       <tbody id="ap-body">
-        <tr><td colspan="10" class="ap-loading">加载中…</td></tr>
+        <tr><td colspan="10" class="ap-loading">{{ (i18n or {}).get('dash.loading', "加载中…") }}</td></tr>
       </tbody>
     </table>
   </div>
 
   <!-- Phase 20: SLA / 首响绩效表 -->
   <div class="ap-trend" id="sla-section">
-    <h3>📡 SLA &amp; 首响绩效（坐席维度）</h3>
+    <h3>📡 SLA &amp; {{ (i18n or {}).get('ap_s011', "首响绩效（坐席维度）") }}</h3>
     <div class="ap-table-wrap" style="margin:0;">
       <table class="ap-table">
         <thead>
           <tr>
-            <th>坐席</th>
-            <th>首响次数</th>
-            <th>平均首响</th>
-            <th>SLA 达标率</th>
-            <th>表现</th>
+            <th>{{ (i18n or {}).get('dash.col.agent', "坐席") }}</th>
+            <th>{{ (i18n or {}).get('ap_s012', "首响次数") }}</th>
+            <th>{{ (i18n or {}).get('ap_s013', "平均首响") }}</th>
+            <th>SLA {{ (i18n or {}).get('dash.af.attain', "达标率") }}</th>
+            <th>{{ (i18n or {}).get('ap_s014', "表现") }}</th>
           </tr>
         </thead>
         <tbody id="sla-body">
-          <tr><td colspan="5" class="ap-loading">加载中…</td></tr>
+          <tr><td colspan="5" class="ap-loading">{{ (i18n or {}).get('dash.loading', "加载中…") }}</td></tr>
         </tbody>
       </table>
     </div>
-    <div style="margin-top:8px;font-size:11px;color:#94a3b8;">* 首响 = 会话首条入站→首次坐席回复；SLA 达标 = 首响 ≤ warn 阈值</div>
+    <div style="margin-top:8px;font-size:11px;color:#94a3b8;">* {{ (i18n or {}).get('ap_s015', "首响") }} = {{ (i18n or {}).get('ap_s016', "会话首条入站") }}→{{ (i18n or {}).get('ap_s017', "首次坐席回复；SLA 达标") }} = {{ (i18n or {}).get('ap_s015', "首响") }} ≤ warn {{ (i18n or {}).get('ap_s018', "阈值") }}</div>
   </div>
 
   <!-- Phase 34: QA 质检评分看板 -->
   <div class="ap-trend" id="qa-section">
     <h3 style="display:flex;align-items:center;gap:10px;">
-      🏆 坐席质检评分（QA Scoring）
+      🏆 {{ (i18n or {}).get('ap_s019', "坐席质检评分（QA Scoring）") }}
       <select id="qa-days" style="font-size:12px;padding:2px 6px;border:1px solid #d1d5db;border-radius:5px;" onchange="loadQA()">
-        <option value="14">近 14 天</option>
-        <option value="30" selected>近 30 天</option>
-        <option value="90">近 90 天</option>
+        <option value="14">{{ (i18n or {}).get('ap_s002', "近 14 天") }}</option>
+        <option value="30" selected>{{ (i18n or {}).get('analytics_period_30d', "近 30 天") }}</option>
+        <option value="90">{{ (i18n or {}).get('ap_s020', "近 90 天") }}</option>
       </select>
-      <button onclick="loadQA()" style="font-size:12px;padding:3px 9px;border:1px solid #d1d5db;border-radius:5px;background:#fff;cursor:pointer;">刷新</button>
+      <button onclick="loadQA()" style="font-size:12px;padding:3px 9px;border:1px solid #d1d5db;border-radius:5px;background:#fff;cursor:pointer;">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
     </h3>
     <div class="ap-table-wrap" style="margin:0;">
       <table class="ap-table">
         <thead>
           <tr>
-            <th>坐席</th>
-            <th>已评分会话</th>
-            <th>平均分</th>
-            <th>等级</th>
-            <th>响应速度</th>
-            <th>解决率</th>
-            <th>消息质量</th>
-            <th>风险管控</th>
+            <th>{{ (i18n or {}).get('dash.col.agent', "坐席") }}</th>
+            <th>{{ (i18n or {}).get('ap_s021', "已评分会话") }}</th>
+            <th>{{ (i18n or {}).get('ap_s022', "平均分") }}</th>
+            <th>{{ (i18n or {}).get('ap_s023', "等级") }}</th>
+            <th>{{ (i18n or {}).get('ap_s024', "响应速度") }}</th>
+            <th>{{ (i18n or {}).get('ap_s025', "解决率") }}</th>
+            <th>{{ (i18n or {}).get('ap_s026', "消息质量") }}</th>
+            <th>{{ (i18n or {}).get('ap_s027', "风险管控") }}</th>
           </tr>
         </thead>
         <tbody id="qa-body">
-          <tr><td colspan="8" class="ap-loading">加载中…</td></tr>
+          <tr><td colspan="8" class="ap-loading">{{ (i18n or {}).get('dash.loading', "加载中…") }}</td></tr>
         </tbody>
       </table>
     </div>
     <div style="margin-top:6px;font-size:11px;color:#94a3b8;">
-      * 评分仅统计有归档记录的会话；按「归档/关闭会话」触发或手动 POST /api/workspace/conv/{id}/qa-score 计算
+      * {{ (i18n or {}).get('ap_s028', "评分仅统计有归档记录的会话；按") }}「{{ (i18n or {}).get('ap_s029', "归档/关闭会话」") }}{{ (i18n or {}).get('ap_s030', "触发或手动") }} POST /api/workspace/conv/{id}/qa-score {{ (i18n or {}).get('ap_s031', "计算") }}
     </div>
   </div>
 
   <!-- P54: Copilot 采纳率 -->
   <div class="ap-trend" id="copilot-section">
     <h3 style="display:flex;align-items:center;gap:10px;">
-      ✨ AI 副驾采纳率
+      ✨ AI {{ (i18n or {}).get('ap_s032', "副驾采纳率") }}
       <select id="cp-days" style="font-size:12px;padding:2px 6px;border:1px solid #d1d5db;border-radius:5px;" onchange="loadCopilot()">
-        <option value="7">近 7 天</option>
-        <option value="14" selected>近 14 天</option>
-        <option value="30">近 30 天</option>
+        <option value="7">{{ (i18n or {}).get('analytics_period_7d', "近 7 天") }}</option>
+        <option value="14" selected>{{ (i18n or {}).get('ap_s002', "近 14 天") }}</option>
+        <option value="30">{{ (i18n or {}).get('analytics_period_30d', "近 30 天") }}</option>
       </select>
-      <button onclick="loadCopilot()" style="font-size:12px;padding:3px 9px;border:1px solid #d1d5db;border-radius:5px;background:#fff;cursor:pointer;">刷新</button>
+      <button onclick="loadCopilot()" style="font-size:12px;padding:3px 9px;border:1px solid #d1d5db;border-radius:5px;background:#fff;cursor:pointer;">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
       <span id="cp-summary" style="font-size:12px;color:#94a3b8;"></span>
     </h3>
     <div class="ap-summary" id="cp-kpis" style="margin-bottom:12px;">
-      <div class="ap-kpi"><div class="val" id="cp-imp">—</div><div class="lbl">曝光次数</div></div>
-      <div class="ap-kpi"><div class="val" id="cp-adopt">—</div><div class="lbl">采纳次数</div></div>
-      <div class="ap-kpi"><div class="val" id="cp-rate">—</div><div class="lbl">采纳率</div></div>
+      <div class="ap-kpi"><div class="val" id="cp-imp">—</div><div class="lbl">{{ (i18n or {}).get('ap_s033', "曝光次数") }}</div></div>
+      <div class="ap-kpi"><div class="val" id="cp-adopt">—</div><div class="lbl">{{ (i18n or {}).get('ap_s034', "采纳次数") }}</div></div>
+      <div class="ap-kpi"><div class="val" id="cp-rate">—</div><div class="lbl">{{ (i18n or {}).get('ap_s035', "采纳率") }}</div></div>
     </div>
     <div class="ap-table-wrap" style="margin-bottom:12px;">
       <table class="ap-table">
         <thead><tr>
-          <th>坐席</th><th>曝光</th><th>采纳</th><th>采纳率</th><th>严格采纳率</th><th>润色采纳</th>
+          <th>{{ (i18n or {}).get('dash.col.agent', "坐席") }}</th><th>{{ (i18n or {}).get('ap_s036', "曝光") }}</th><th>{{ (i18n or {}).get('kb_js_159', "采纳") }}</th><th>{{ (i18n or {}).get('ap_s035', "采纳率") }}</th><th>{{ (i18n or {}).get('ap_s037', "严格采纳率") }}</th><th>{{ (i18n or {}).get('ap_s038', "润色采纳") }}</th>
         </tr></thead>
-        <tbody id="cp-body"><tr><td colspan="6" class="ap-loading">加载中…</td></tr></tbody>
+        <tbody id="cp-body"><tr><td colspan="6" class="ap-loading">{{ (i18n or {}).get('dash.loading', "加载中…") }}</td></tr></tbody>
       </table>
     </div>
-    <h4 style="font-size:13px;color:#475569;margin:0 0 8px;">近期采纳回放</h4>
+    <h4 style="font-size:13px;color:#475569;margin:0 0 8px;">{{ (i18n or {}).get('ap_s039', "近期采纳回放") }}</h4>
     <div class="ap-table-wrap" style="margin:0;">
       <table class="ap-table">
         <thead><tr>
-          <th>时间</th><th>坐席</th><th>触发</th><th>来源</th><th>匹配</th><th>建议 → 发送</th>
+          <th>{{ (i18n or {}).get('time', "时间") }}</th><th>{{ (i18n or {}).get('dash.col.agent', "坐席") }}</th><th>{{ (i18n or {}).get('ov_js_trigger', "触发") }}</th><th>{{ (i18n or {}).get('psn_js_120', "来源") }}</th><th>{{ (i18n or {}).get('msg_js_499', "匹配") }}</th><th>{{ (i18n or {}).get('kb_js_081', "建议") }} → {{ (i18n or {}).get('rpa_js_st_sent', "发送") }}</th>
         </tr></thead>
-        <tbody id="cp-replay"><tr><td colspan="6" class="ap-loading">加载中…</td></tr></tbody>
+        <tbody id="cp-replay"><tr><td colspan="6" class="ap-loading">{{ (i18n or {}).get('dash.loading', "加载中…") }}</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -203,144 +203,144 @@
   <!-- P57: 翻译引擎健康 -->
   <div class="ap-trend" id="xlate-engine-section">
     <h3 style="display:flex;align-items:center;gap:10px;">
-      🌐 翻译引擎健康（多引擎用量）
-      <button onclick="loadXlateEngines()" style="font-size:12px;padding:3px 9px;border:1px solid #d1d5db;border-radius:5px;background:#fff;cursor:pointer;">刷新</button>
+      🌐 {{ (i18n or {}).get('ap_s040', "翻译引擎健康（多引擎用量）") }}
+      <button onclick="loadXlateEngines()" style="font-size:12px;padding:3px 9px;border:1px solid #d1d5db;border-radius:5px;background:#fff;cursor:pointer;">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
       <span id="xe-summary" style="font-size:12px;color:#94a3b8;"></span>
     </h3>
     <div class="ap-table-wrap" style="margin:0;">
       <table class="ap-table">
         <thead><tr>
-          <th>引擎</th><th>调用次数</th><th>成功</th><th>失败</th><th>成功率</th><th>平均延迟</th>
+          <th>{{ (i18n or {}).get('tg_s067', "引擎") }}</th><th>{{ (i18n or {}).get('ap_s041', "调用次数") }}</th><th>{{ (i18n or {}).get('ov_js_succ_label', "成功") }}</th><th>{{ (i18n or {}).get('rpa_js_st_failed', "失败") }}</th><th>{{ (i18n or {}).get('ov_kpi_rate', "成功率") }}</th><th>{{ (i18n or {}).get('ap_s042', "平均延迟") }}</th>
         </tr></thead>
-        <tbody id="xe-body"><tr><td colspan="6" class="ap-loading">加载中…</td></tr></tbody>
+        <tbody id="xe-body"><tr><td colspan="6" class="ap-loading">{{ (i18n or {}).get('dash.loading', "加载中…") }}</td></tr></tbody>
       </table>
     </div>
     <div style="margin-top:6px;font-size:11px;color:#94a3b8;">
-      * 自进程启动累计；降级 = 主引擎失败转兜底引擎。引擎顺序见 config.translation.engines.order
+      * {{ (i18n or {}).get('ap_s043', "自进程启动累计；降级") }} = {{ (i18n or {}).get('ap_s044', "主引擎失败转兜底引擎。引擎顺序见") }} config.translation.engines.order
     </div>
-    <h4 style="font-size:13px;color:#475569;margin:14px 0 8px;">多模态识别后端（OCR / ASR）</h4>
+    <h4 style="font-size:13px;color:#475569;margin:14px 0 8px;">{{ (i18n or {}).get('ap_s045', "多模态识别后端（OCR / ASR）") }}</h4>
     <div class="ap-table-wrap" style="margin:0;">
       <table class="ap-table">
         <thead><tr>
-          <th>能力</th><th>后端</th><th>调用次数</th><th>成功</th><th>失败</th><th>成功率</th><th>平均延迟</th>
+          <th>{{ (i18n or {}).get('ov_js_th_cap', "能力") }}</th><th>{{ (i18n or {}).get('inbox.voice.meta_backend', "后端") }}</th><th>{{ (i18n or {}).get('ap_s041', "调用次数") }}</th><th>{{ (i18n or {}).get('ov_js_succ_label', "成功") }}</th><th>{{ (i18n or {}).get('rpa_js_st_failed', "失败") }}</th><th>{{ (i18n or {}).get('ov_kpi_rate', "成功率") }}</th><th>{{ (i18n or {}).get('ap_s042', "平均延迟") }}</th>
         </tr></thead>
-        <tbody id="mm-body"><tr><td colspan="7" class="ap-loading">加载中…</td></tr></tbody>
+        <tbody id="mm-body"><tr><td colspan="7" class="ap-loading">{{ (i18n or {}).get('dash.loading', "加载中…") }}</td></tr></tbody>
       </table>
     </div>
     <div style="margin-top:6px;font-size:11px;color:#94a3b8;">
-      * OCR=图片识别（vision 栈），ASR=语音转写（whisper）；同媒体重复识别命中缓存不计调用。
+      * OCR={{ (i18n or {}).get('ap_s046', "图片识别（vision 栈），") }}ASR={{ (i18n or {}).get('ap_s047', "语音转写（whisper）；同媒体重复识别命中缓存不计调用。") }}
     </div>
   </div>
 
   <!-- P59: 术语库管理 -->
   <div class="ap-trend" id="glossary-section">
     <h3 style="display:flex;align-items:center;gap:10px;">
-      🔤 术语库管理（统一译法 + 品牌保护）
-      <button onclick="loadGlossary()" style="font-size:12px;padding:3px 9px;border:1px solid #d1d5db;border-radius:5px;background:#fff;cursor:pointer;">刷新</button>
-      <a href="/api/workspace/glossary?format=csv" style="font-size:12px;padding:3px 9px;border:1px solid #d1d5db;border-radius:5px;background:#fff;cursor:pointer;text-decoration:none;color:#374151;">导出 CSV</a>
-      <button onclick="document.getElementById('gl-csv-file').click()" style="font-size:12px;padding:3px 9px;border:1px solid #d1d5db;border-radius:5px;background:#fff;cursor:pointer;">导入 CSV</button>
+      🔤 {{ (i18n or {}).get('ap_s048', "术语库管理（统一译法") }} + {{ (i18n or {}).get('ap_s049', "品牌保护）") }}
+      <button onclick="loadGlossary()" style="font-size:12px;padding:3px 9px;border:1px solid #d1d5db;border-radius:5px;background:#fff;cursor:pointer;">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
+      <a href="/api/workspace/glossary?format=csv" style="font-size:12px;padding:3px 9px;border:1px solid #d1d5db;border-radius:5px;background:#fff;cursor:pointer;text-decoration:none;color:#374151;">{{ (i18n or {}).get('export', "导出") }} CSV</a>
+      <button onclick="document.getElementById('gl-csv-file').click()" style="font-size:12px;padding:3px 9px;border:1px solid #d1d5db;border-radius:5px;background:#fff;cursor:pointer;">{{ (i18n or {}).get('import', "导入") }} CSV</button>
       <input type="file" id="gl-csv-file" accept=".csv,text/csv" style="display:none;" onchange="glImportCsv(this)">
       <span id="gl-summary" style="font-size:12px;color:#94a3b8;"></span>
     </h3>
     <div style="display:flex;gap:18px;flex-wrap:wrap;">
       <div style="flex:1;min-width:320px;">
         <div style="display:flex;gap:6px;margin-bottom:8px;">
-          <input id="gl-term" placeholder="原词（如 size）" style="flex:1;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
-          <input id="gl-trans" placeholder="偏好译法（如 尺码）" style="flex:1;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
-          <button onclick="glAddTerm()" style="padding:5px 12px;border:1px solid #2563eb;border-radius:6px;background:#2563eb;color:#fff;font-size:13px;cursor:pointer;">＋术语</button>
+          <input id="gl-term" placeholder="{{ (i18n or {}).get('ap_s050', '原词（如 size）') }}" style="flex:1;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+          <input id="gl-trans" placeholder="{{ (i18n or {}).get('ap_s051', '偏好译法（如 尺码）') }}" style="flex:1;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+          <button onclick="glAddTerm()" style="padding:5px 12px;border:1px solid #2563eb;border-radius:6px;background:#2563eb;color:#fff;font-size:13px;cursor:pointer;">＋{{ (i18n or {}).get('ap_s052', "术语") }}</button>
         </div>
         <div class="ap-table-wrap" style="margin:0;max-height:240px;overflow-y:auto;">
           <table class="ap-table">
-            <thead><tr><th>原词</th><th>偏好译法</th><th>来源</th><th>命中</th><th></th></tr></thead>
-            <tbody id="gl-terms-body"><tr><td colspan="5" class="ap-loading">加载中…</td></tr></tbody>
+            <thead><tr><th>{{ (i18n or {}).get('ap_s053', "原词") }}</th><th>{{ (i18n or {}).get('ap_s054', "偏好译法") }}</th><th>{{ (i18n or {}).get('psn_js_120', "来源") }}</th><th>{{ (i18n or {}).get('db_js_094', "命中") }}</th><th></th></tr></thead>
+            <tbody id="gl-terms-body"><tr><td colspan="5" class="ap-loading">{{ (i18n or {}).get('dash.loading', "加载中…") }}</td></tr></tbody>
           </table>
         </div>
       </div>
       <div style="flex:1;min-width:280px;">
         <div style="display:flex;gap:6px;margin-bottom:8px;">
-          <input id="gl-protect" placeholder="品牌/不译保护词（如 LINE Pay）" style="flex:1;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
-          <button onclick="glAddProtect()" style="padding:5px 12px;border:1px solid #7c3aed;border-radius:6px;background:#7c3aed;color:#fff;font-size:13px;cursor:pointer;">＋保护词</button>
+          <input id="gl-protect" placeholder="{{ (i18n or {}).get('ap_s055', '品牌/不译保护词（如 LINE Pay）') }}" style="flex:1;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+          <button onclick="glAddProtect()" style="padding:5px 12px;border:1px solid #7c3aed;border-radius:6px;background:#7c3aed;color:#fff;font-size:13px;cursor:pointer;">＋{{ (i18n or {}).get('ap_s056', "保护词") }}</button>
         </div>
         <div class="ap-table-wrap" style="margin:0;max-height:240px;overflow-y:auto;">
           <table class="ap-table">
-            <thead><tr><th>保护词（逐字保留）</th><th>来源</th><th>命中</th><th></th></tr></thead>
-            <tbody id="gl-protect-body"><tr><td colspan="4" class="ap-loading">加载中…</td></tr></tbody>
+            <thead><tr><th>{{ (i18n or {}).get('ap_s057', "保护词（逐字保留）") }}</th><th>{{ (i18n or {}).get('psn_js_120', "来源") }}</th><th>{{ (i18n or {}).get('db_js_094', "命中") }}</th><th></th></tr></thead>
+            <tbody id="gl-protect-body"><tr><td colspan="4" class="ap-loading">{{ (i18n or {}).get('dash.loading', "加载中…") }}</td></tr></tbody>
           </table>
         </div>
       </div>
     </div>
     <div style="margin-top:6px;font-size:11px;color:#94a3b8;">
-      * 术语对 AI/DeepL/Google 及图/音翻译全部强制生效，改动即时热更新；「控制台」来源可删除，「基线」来自配置/域包（只读）。
+      * {{ (i18n or {}).get('ap_s058', "术语对 AI/DeepL/Google 及图/音翻译全部强制生效，改动即时热更新；") }}「{{ (i18n or {}).get('ap_s059', "控制台」") }}{{ (i18n or {}).get('ap_s060', "来源可删除，") }}「{{ (i18n or {}).get('ap_s061', "基线」") }}{{ (i18n or {}).get('ap_s062', "来自配置/域包（只读）。") }}
     </div>
   </div>
 
   <!-- P61-3: 分组批量触达（再激活）dry-run 预览 -->
   <div class="ap-trend" id="outreach-section">
     <h3 style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-      📣 分组批量触达预览（再激活 · 仅预览不发送）
-      <button onclick="loadOutreachPreview()" style="font-size:12px;padding:3px 9px;border:1px solid #2563eb;border-radius:5px;background:#2563eb;color:#fff;cursor:pointer;">生成预览</button>
+      📣 {{ (i18n or {}).get('ap_s063', "分组批量触达预览（再激活 · 仅预览不发送）") }}
+      <button onclick="loadOutreachPreview()" style="font-size:12px;padding:3px 9px;border:1px solid #2563eb;border-radius:5px;background:#2563eb;color:#fff;cursor:pointer;">{{ (i18n or {}).get('ap_s064', "生成预览") }}</button>
       <span id="ob-summary" style="font-size:12px;color:#94a3b8;"></span>
     </h3>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;font-size:13px;">
-      <input id="ob-platform" placeholder="平台(空=全部)" style="width:130px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;">
-      <input id="ob-tags" placeholder="标签(逗号分隔,任一命中)" style="flex:1;min-width:180px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;">
-      <input id="ob-rel" placeholder="关系阶段(逗号分隔)" style="width:170px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;">
-      <label style="display:flex;align-items:center;gap:3px;color:#64748b;">沉默≥<input id="ob-min" type="number" value="3" style="width:54px;padding:5px;border:1px solid #d1d5db;border-radius:6px;">天</label>
-      <label style="display:flex;align-items:center;gap:3px;color:#64748b;">≤<input id="ob-max" type="number" value="0" style="width:54px;padding:5px;border:1px solid #d1d5db;border-radius:6px;">天(0=不限)</label>
+      <input id="ob-platform" placeholder="{{ (i18n or {}).get('ap_s065', '平台(空') }}={{ (i18n or {}).get('rpa_all', '全部') }})" style="width:130px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;">
+      <input id="ob-tags" placeholder="{{ (i18n or {}).get('ap_s066', '标签(逗号分隔') }},{{ (i18n or {}).get('ap_s067', '任一命中') }})" style="flex:1;min-width:180px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;">
+      <input id="ob-rel" placeholder="{{ (i18n or {}).get('ap_s068', '关系阶段(逗号分隔') }})" style="width:170px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;">
+      <label style="display:flex;align-items:center;gap:3px;color:#64748b;">{{ (i18n or {}).get('ov_js_th_silent', "沉默") }}≥<input id="ob-min" type="number" value="3" style="width:54px;padding:5px;border:1px solid #d1d5db;border-radius:6px;">{{ (i18n or {}).get('wa_s158', "天") }}</label>
+      <label style="display:flex;align-items:center;gap:3px;color:#64748b;">≤<input id="ob-max" type="number" value="0" style="width:54px;padding:5px;border:1px solid #d1d5db;border-radius:6px;">{{ (i18n or {}).get('wa_s158', "天") }}(0={{ (i18n or {}).get('rpa_unlimited', "不限") }})</label>
     </div>
     <div id="ob-stats" style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#475569;margin-bottom:6px;"></div>
     <div class="ap-table-wrap" style="margin:0;max-height:260px;overflow-y:auto;">
       <table class="ap-table">
-        <thead><tr><th>会话</th><th>平台</th><th>账号</th><th>沉默(天)</th><th>关系</th><th>标签</th></tr></thead>
-        <tbody id="ob-body"><tr><td colspan="6" class="ap-loading">点「生成预览」按筛选条件预估今日可触达名单</td></tr></tbody>
+        <thead><tr><th>{{ (i18n or {}).get('dash.ws.col_convs', "会话") }}</th><th>{{ (i18n or {}).get('inbox.info.platform', "平台") }}</th><th>{{ (i18n or {}).get('ov_js_th_account', "账号") }}</th><th>{{ (i18n or {}).get('ap_s069', "沉默(天") }})</th><th>{{ (i18n or {}).get('ap_s070', "关系") }}</th><th>{{ (i18n or {}).get('psn_js_118', "标签") }}</th></tr></thead>
+        <tbody id="ob-body"><tr><td colspan="6" class="ap-loading">{{ (i18n or {}).get('set_s079', "点") }}「{{ (i18n or {}).get('ap_s071', "生成预览」") }}{{ (i18n or {}).get('ap_s072', "按筛选条件预估今日可触达名单") }}</td></tr></tbody>
       </table>
     </div>
     <div style="margin-top:10px;border-top:1px dashed #e2e8f0;padding-top:8px;">
       <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;">
-        <textarea id="ob-template" rows="2" placeholder="消息模板，支持占位符 {name} {silent_days} {platform}，如：{name}你好，好久没聊啦～" style="flex:1;min-width:300px;padding:6px 9px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;resize:vertical;"></textarea>
-        <label style="display:flex;align-items:center;gap:3px;color:#64748b;font-size:13px;">本批上限<input id="ob-maxsend" type="number" value="20" style="width:60px;padding:5px;border:1px solid #d1d5db;border-radius:6px;"></label>
-        <button onclick="runOutreachExecute()" style="font-size:13px;padding:7px 16px;border:1px solid #dc2626;border-radius:6px;background:#dc2626;color:#fff;cursor:pointer;">执行发送…</button>
+        <textarea id="ob-template" rows="2" placeholder="{{ (i18n or {}).get('ap_s073', '消息模板，支持占位符') }} {name} {silent_days} {platform}，{{ (i18n or {}).get('ap_s074', '如：') }}{name}{{ (i18n or {}).get('ap_s075', '你好，好久没聊啦') }}～" style="flex:1;min-width:300px;padding:6px 9px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;resize:vertical;"></textarea>
+        <label style="display:flex;align-items:center;gap:3px;color:#64748b;font-size:13px;">{{ (i18n or {}).get('ap_s076', "本批上限") }}<input id="ob-maxsend" type="number" value="20" style="width:60px;padding:5px;border:1px solid #d1d5db;border-radius:6px;"></label>
+        <button onclick="runOutreachExecute()" style="font-size:13px;padding:7px 16px;border:1px solid #dc2626;border-radius:6px;background:#dc2626;color:#fff;cursor:pointer;">{{ (i18n or {}).get('ap_s077', "执行发送…") }}</button>
       </div>
       <div id="ob-exec-result" style="margin-top:6px;font-size:12px;"></div>
       <div style="display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap;">
-        <input id="ob-batch-id" placeholder="批次 ID（查回执 + 回复率）" style="width:200px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
-        <label style="display:flex;align-items:center;gap:3px;color:#64748b;font-size:13px;">回复窗口<input id="ob-win" type="number" value="7" style="width:48px;padding:5px;border:1px solid #d1d5db;border-radius:6px;">天</label>
-        <button onclick="loadOutreachBatch()" style="font-size:13px;padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;">查回执</button>
+        <input id="ob-batch-id" placeholder="{{ (i18n or {}).get('ap_s078', '批次 ID（查回执') }} + {{ (i18n or {}).get('ap_s079', '回复率）') }}" style="width:200px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+        <label style="display:flex;align-items:center;gap:3px;color:#64748b;font-size:13px;">{{ (i18n or {}).get('ap_s080', "回复窗口") }}<input id="ob-win" type="number" value="7" style="width:48px;padding:5px;border:1px solid #d1d5db;border-radius:6px;">{{ (i18n or {}).get('wa_s158', "天") }}</label>
+        <button onclick="loadOutreachBatch()" style="font-size:13px;padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;">{{ (i18n or {}).get('ap_s081', "查回执") }}</button>
         <span id="ob-batch-result" style="font-size:12px;"></span>
       </div>
     </div>
     <div style="margin-top:6px;font-size:11px;color:#94a3b8;">
-      * 叠加账号级日配额 + cooldown 防骚扰。预览为 dry-run（不发送/不计配额/不写日志）；执行发送需 config.outreach.enabled，并按 max_batch 硬上限保护、二次确认。
+      * {{ (i18n or {}).get('ap_s082', "叠加账号级日配额") }} + cooldown {{ (i18n or {}).get('ap_s083', "防骚扰。预览为 dry-run（不发送/不计配额/不写日志）；执行发送需 config.outreach.enabled，并按") }} max_batch {{ (i18n or {}).get('ap_s084', "硬上限保护、二次确认。") }}
     </div>
   </div>
 
   <!-- Phase 35: 流失风险预警 -->
   <div class="ap-trend" id="churn-section">
     <h3 style="display:flex;align-items:center;gap:10px;">
-      🚨 客户流失风险预警
+      🚨 {{ (i18n or {}).get('ap_s085', "客户流失风险预警") }}
       <select id="churn-days" style="font-size:12px;padding:2px 6px;border:1px solid #d1d5db;border-radius:5px;" onchange="loadChurn()">
-        <option value="3">≥ 3 天沉默</option>
-        <option value="7" selected>≥ 7 天沉默</option>
-        <option value="14">≥ 14 天沉默</option>
+        <option value="3">≥ 3 {{ (i18n or {}).get('ap_s086', "天沉默") }}</option>
+        <option value="7" selected>≥ 7 {{ (i18n or {}).get('ap_s086', "天沉默") }}</option>
+        <option value="14">≥ 14 {{ (i18n or {}).get('ap_s086', "天沉默") }}</option>
       </select>
-      <button onclick="loadChurn()" style="font-size:12px;padding:3px 9px;border:1px solid #d1d5db;border-radius:5px;background:#fff;cursor:pointer;">刷新</button>
+      <button onclick="loadChurn()" style="font-size:12px;padding:3px 9px;border:1px solid #d1d5db;border-radius:5px;background:#fff;cursor:pointer;">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
       <span id="churn-summary" style="font-size:12px;color:#94a3b8;"></span>
     </h3>
     <div class="ap-table-wrap" style="margin:0;">
       <table class="ap-table">
         <thead>
           <tr>
-            <th>客户</th>
-            <th>平台</th>
-            <th>风险等级</th>
-            <th>风险分</th>
-            <th>预警原因</th>
-            <th>负责坐席</th>
-            <th>操作</th>
+            <th>{{ (i18n or {}).get('base.nav.contacts', "客户") }}</th>
+            <th>{{ (i18n or {}).get('inbox.info.platform', "平台") }}</th>
+            <th>{{ (i18n or {}).get('ap_s087', "风险等级") }}</th>
+            <th>{{ (i18n or {}).get('ap_s088', "风险分") }}</th>
+            <th>{{ (i18n or {}).get('ap_s089', "预警原因") }}</th>
+            <th>{{ (i18n or {}).get('ap_s090', "负责坐席") }}</th>
+            <th>{{ (i18n or {}).get('ov_js_th_action', "操作") }}</th>
           </tr>
         </thead>
         <tbody id="churn-body">
-          <tr><td colspan="7" class="ap-loading">加载中…</td></tr>
+          <tr><td colspan="7" class="ap-loading">{{ (i18n or {}).get('dash.loading', "加载中…") }}</td></tr>
         </tbody>
       </table>
     </div>
@@ -349,14 +349,14 @@
   <!-- Phase 27: 客户活跃时段热力图 -->
   <div class="ap-trend" id="heatmap-section">
     <h3 style="display:flex;align-items:center;gap:8px;">
-      🔥 客户消息热力时段图
+      🔥 {{ (i18n or {}).get('ap_s091', "客户消息热力时段图") }}
       <select id="hm-days" style="font-size:12px;padding:2px 6px;border:1px solid #d1d5db;border-radius:5px;" onchange="loadHeatmap()">
-        <option value="7">近 7 天</option>
-        <option value="30" selected>近 30 天</option>
-        <option value="90">近 90 天</option>
+        <option value="7">{{ (i18n or {}).get('analytics_period_7d', "近 7 天") }}</option>
+        <option value="30" selected>{{ (i18n or {}).get('analytics_period_30d', "近 30 天") }}</option>
+        <option value="90">{{ (i18n or {}).get('ap_s020', "近 90 天") }}</option>
       </select>
       <select id="hm-plat" style="font-size:12px;padding:2px 6px;border:1px solid #d1d5db;border-radius:5px;" onchange="loadHeatmap()">
-        <option value="">全平台</option>
+        <option value="">{{ (i18n or {}).get('rpa_fn_scope_all', "全平台") }}</option>
         <option value="whatsapp">WhatsApp</option>
         <option value="line">LINE</option>
         <option value="telegram">Telegram</option>
@@ -365,9 +365,9 @@
       <span id="hm-peak" style="font-size:12px;color:#6366f1;font-weight:600;margin-left:8px;"></span>
     </h3>
     <div id="heatmap-grid" style="overflow-x:auto;">
-      <div class="ap-loading">加载中…</div>
+      <div class="ap-loading">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
     </div>
-    <div style="margin-top:8px;font-size:11px;color:#94a3b8;">* 颜色深浅代表该时段入站消息量；本地时区；0=周一，6=周日</div>
+    <div style="margin-top:8px;font-size:11px;color:#94a3b8;">* {{ (i18n or {}).get('ap_s092', "颜色深浅代表该时段入站消息量；本地时区；") }}0={{ (i18n or {}).get('ap_s093', "周一，") }}6={{ (i18n or {}).get('ap_s094', "周日") }}</div>
   </div>
 </div>
 
@@ -379,8 +379,7 @@ window.debounce=debounce;
 
 function fmtTs(ts){
   if(!ts) return '—';
-  var d=new Date(ts*1000);
-  return d.toLocaleDateString('zh-CN',{month:'2-digit',day:'2-digit'})+' '+d.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'});
+  return window.wsFmtDate(ts,{month:'2-digit',day:'2-digit'})+' '+window.wsFmtTime(ts,{hour:'2-digit',minute:'2-digit'});
 }
 function fmtDay(ts){
   var d=new Date(ts*1000);
@@ -405,7 +404,7 @@ function renderKPIs(agents){
 
 function renderTable(agents){
   if(!agents.length){
-    document.getElementById('ap-body').innerHTML='<tr><td colspan="10" class="ap-empty">该时段暂无处置记录</td></tr>';
+    document.getElementById('ap-body').innerHTML='<tr><td colspan="10" class="ap-empty">'+window.T('ap_js_001')+'</td></tr>';
     return;
   }
   var maxTotal=Math.max.apply(null, agents.map(function(a){return a.total||1;}));
@@ -432,7 +431,7 @@ function renderTable(agents){
 
 function renderTimeline(timeline){
   if(!timeline.length){
-    document.getElementById('ap-chart').innerHTML='<div class="ap-empty" style="height:auto;">无趋势数据</div>';
+    document.getElementById('ap-chart').innerHTML='<div class="ap-empty" style="height:auto;">'+window.T('ap_js_002')+'</div>';
     return;
   }
   // 收集所有日期桶
@@ -453,7 +452,7 @@ function renderTimeline(timeline){
     var ha=maxTotal>0?Math.round((b.approved/maxTotal)*maxH):0;
     var hr=maxTotal>0?Math.round((b.rejected/maxTotal)*maxH):0;
     var ho=Math.max(0,h-ha-hr);
-    return '<div class="ap-bar-col" title="'+fmtDay(k)+' 总:'+b.total+' 批:'+b.approved+' 拒:'+b.rejected+'">'
+    return '<div class="ap-bar-col" title="'+fmtDay(k)+' '+window.Tf('ap_js_p09',{t:b.total,a:b.approved,r:b.rejected})+'">'
       +'<div class="ap-bar-stk" style="height:'+ha+'px;background:#16a34a;"></div>'
       +'<div class="ap-bar-stk" style="height:'+hr+'px;background:#dc2626;"></div>'
       +(ho>0?'<div class="ap-bar-stk" style="height:'+ho+'px;background:#e5e7eb;"></div>':'')
@@ -469,7 +468,7 @@ async function loadSla(){
     var d=await r.json();
     if(!d||!d.ok) return;
     renderSla(d.agent_frt||[], d.sla||{});
-  }catch(e){ document.getElementById('sla-body').innerHTML='<tr><td colspan="5" class="ap-empty">加载失败</td></tr>'; }
+  }catch(e){ document.getElementById('sla-body').innerHTML='<tr><td colspan="5" class="ap-empty">'+window.T('rpa_load_failed')+'</td></tr>'; }
 }
 
 function fmtSec(sec){
@@ -481,7 +480,7 @@ function fmtSec(sec){
 
 function renderSla(agents, sla){
   if(!agents.length){
-    document.getElementById('sla-body').innerHTML='<tr><td colspan="5" class="ap-empty">该时段暂无首响记录</td></tr>';
+    document.getElementById('sla-body').innerHTML='<tr><td colspan="5" class="ap-empty">'+window.T('ap_js_003')+'</td></tr>';
     return;
   }
   var warnSec=sla.warn_sec||300;
@@ -499,7 +498,7 @@ function renderSla(agents, sla){
           +'<span style="font-size:11px;width:36px;text-align:right;">'+rate+'%</span>'
         +'</div>'
       +'</td>'
-      +'<td><span class="badge-eff '+cls+'">'+( rate>=90?'优秀':rate>=70?'达标':'待改善')+'</span></td>'
+      +'<td><span class="badge-eff '+cls+'">'+( rate>=90?window.T('wa_js_072'):rate>=70?window.T('ap_js_004'):window.T('ap_js_005'))+'</span></td>'
       +'</tr>';
   }).join('');
 }
@@ -513,15 +512,15 @@ window.load=function(){
   Promise.all([fetch(url1).then(function(r){return r.json();}), fetch(url2).then(function(r){return r.json();})]).then(function(results){
     var d=results[0], tl=results[1];
     if(!d||!d.ok){
-      document.getElementById('ap-body').innerHTML='<tr><td colspan="10" class="ap-empty">加载失败（需要主管权限）</td></tr>';
+      document.getElementById('ap-body').innerHTML='<tr><td colspan="10" class="ap-empty">'+window.T('ap_js_006')+'</td></tr>';
       return;
     }
     renderKPIs(d.agents||[]);
     renderTable(d.agents||[]);
     if(tl&&tl.ok) renderTimeline(tl.timeline||[]);
-    document.getElementById('ap-update').textContent='更新于 '+new Date().toLocaleTimeString('zh-CN');
+    document.getElementById('ap-update').textContent=window.T('db_js_079')+' '+window.wsFmtTime(null);
   }).catch(function(){
-    document.getElementById('ap-body').innerHTML='<tr><td colspan="10" class="ap-empty">网络错误</td></tr>';
+    document.getElementById('ap-body').innerHTML='<tr><td colspan="10" class="ap-empty">'+window.T('draft.net_err')+'</td></tr>';
   });
   loadSla(); // Phase 20: SLA 数据独立加载
 };
@@ -535,18 +534,18 @@ window.loadHeatmap = function(){
   var plat = document.getElementById('hm-plat').value || '';
   var url = '/api/workspace/activity-heatmap?days='+days+'&direction=inbound'+(plat?'&platform='+encodeURIComponent(plat):'');
   var el = document.getElementById('heatmap-grid');
-  if(el) el.innerHTML = '<div class="ap-loading">加载中…</div>';
+  if(el) el.innerHTML = '<div class="ap-loading">'+window.T('dash.loading')+'</div>';
   fetch(url).then(function(r){return r.json();}).then(function(d){
-    if(!d||!d.ok){ if(el) el.innerHTML='<div class="ap-empty">加载失败</div>'; return; }
+    if(!d||!d.ok){ if(el) el.innerHTML='<div class="ap-empty">'+window.T('rpa_load_failed')+'</div>'; return; }
     renderHeatmap(d);
-  }).catch(function(){ if(el) el.innerHTML='<div class="ap-empty">网络错误</div>'; });
+  }).catch(function(){ if(el) el.innerHTML='<div class="ap-empty">'+window.T('draft.net_err')+'</div>'; });
 };
 
 function renderHeatmap(d){
   var el = document.getElementById('heatmap-grid');
   if(!el) return;
   var matrix = d.matrix; // 7×24
-  var WD_NAMES = ['周一','周二','周三','周四','周五','周六','周日'];
+  var WD_NAMES = [window.T('ap_js_007'),window.T('ap_js_008'),window.T('ap_js_009'),window.T('ap_js_010'),window.T('ap_js_011'),window.T('ap_js_012'),window.T('ap_s094')];
 
   // 计算最大值（用于颜色归一化）
   var maxVal = 0;
@@ -577,7 +576,7 @@ function renderHeatmap(d){
     html += '<div style="display:flex;gap:2px;margin-bottom:2px;align-items:center;">';
     html += '<div class="hm-label" style="width:26px;justify-content:flex-end;padding-right:4px;">'+WD_NAMES[wd]+'</div>';
     row.forEach(function(v, hr){
-      var tooltip = WD_NAMES[wd]+' '+String(hr).padStart(2,'0')+':00  消息数：'+v;
+      var tooltip = window.Tf('ap_js_p11',{day:WD_NAMES[wd],hr:String(hr).padStart(2,'0'),v:v});
       var color = cellColor(v);
       var textColor = v/maxVal > 0.5 ? 'rgba(255,255,255,.9)' : '#94a3b8';
       html += '<div class="hm-cell" style="background:'+color+';color:'+textColor+';" title="'+tooltip+'">'+(v||'')+'</div>';
@@ -586,21 +585,20 @@ function renderHeatmap(d){
   });
 
   // 图例
-  html += '<div class="hm-legend"><span>低</span><div class="hm-legend-bar">';
+  html += '<div class="hm-legend"><span>'+window.T('msg_js_1932')+'</span><div class="hm-legend-bar">';
   [0,.2,.4,.6,.8,1].forEach(function(t){
     var r=Math.round(239-t*180), g=Math.round(246-t*200), b=Math.round(255-t*80);
     var c = t===0 ? '#f3f4f6' : 'rgb('+r+','+g+','+b+')';
     html += '<div class="hm-lg-cell" style="background:'+c+';"></div>';
   });
-  html += '</div><span>高</span></div>';
+  html += '</div><span>'+window.T('msg_js_1931')+'</span></div>';
 
   el.innerHTML = html;
 
   // 峰值标注
   var peakEl = document.getElementById('hm-peak');
   if(peakEl && d.peak_weekday!=null){
-    peakEl.textContent = '峰值：'+WD_NAMES[d.peak_weekday]+' '+d.peak_hour+':00'
-      +' · 总计 '+d.total+' 条消息';
+    peakEl.textContent = window.Tf('ap_js_p01',{day:WD_NAMES[d.peak_weekday],hr:d.peak_hour,n:d.total});
   }
 }
 loadHeatmap();
@@ -609,11 +607,11 @@ loadHeatmap();
 function loadQA(){
   var days=document.getElementById('qa-days').value||'30';
   var tbody=document.getElementById('qa-body');
-  tbody.innerHTML='<tr><td colspan="8" class="ap-loading">加载中…</td></tr>';
+  tbody.innerHTML='<tr><td colspan="8" class="ap-loading">'+window.T('dash.loading')+'</td></tr>';
   fetch('/api/workspace/agent-qa-stats?days='+days)
     .then(function(r){return r.json();}).then(function(d){
       if(!d.ok||!d.agents||!d.agents.length){
-        tbody.innerHTML='<tr><td colspan="8" class="ap-empty">暂无质检数据（需要先计算会话评分）</td></tr>';
+        tbody.innerHTML='<tr><td colspan="8" class="ap-empty">'+window.T('ap_js_013')+'</td></tr>';
         return;
       }
       tbody.innerHTML=d.agents.map(function(a){
@@ -640,7 +638,7 @@ function loadQA(){
           +'<td>'+dim(bd.risk_control)+'</td>'
           +'</tr>';
       }).join('');
-    }).catch(function(){tbody.innerHTML='<tr><td colspan="8" class="ap-empty">加载失败</td></tr>';});
+    }).catch(function(){tbody.innerHTML='<tr><td colspan="8" class="ap-empty">'+window.T('rpa_load_failed')+'</td></tr>';});
 }
 loadQA();
 
@@ -651,21 +649,21 @@ function loadCopilot(){
   var qs='days='+days+(agent?'&agent_id='+encodeURIComponent(agent):'');
   var tbody=document.getElementById('cp-body');
   var replay=document.getElementById('cp-replay');
-  tbody.innerHTML='<tr><td colspan="6" class="ap-loading">加载中…</td></tr>';
-  replay.innerHTML='<tr><td colspan="6" class="ap-loading">加载中…</td></tr>';
+  tbody.innerHTML='<tr><td colspan="6" class="ap-loading">'+window.T('dash.loading')+'</td></tr>';
+  replay.innerHTML='<tr><td colspan="6" class="ap-loading">'+window.T('dash.loading')+'</td></tr>';
   fetch('/api/workspace/agent-copilot-stats?'+qs)
     .then(function(r){return r.json();}).then(function(d){
       if(!d.ok){
-        tbody.innerHTML='<tr><td colspan="6" class="ap-empty">加载失败</td></tr>';
+        tbody.innerHTML='<tr><td colspan="6" class="ap-empty">'+window.T('rpa_load_failed')+'</td></tr>';
         return;
       }
       document.getElementById('cp-imp').textContent=d.total_impressions||0;
       document.getElementById('cp-adopt').textContent=d.total_adoptions||0;
       document.getElementById('cp-rate').textContent=(d.overall_rate||0)+'%';
-      document.getElementById('cp-summary').textContent='整体采纳率 '+(d.overall_rate||0)+'%';
+      document.getElementById('cp-summary').textContent=window.T('ap_js_014')+' '+(d.overall_rate||0)+'%';
       var agents=d.agents||[];
       if(!agents.length){
-        tbody.innerHTML='<tr><td colspan="6" class="ap-empty">暂无 Copilot 数据（需坐席使用 AI 副驾预填并发送）</td></tr>';
+        tbody.innerHTML='<tr><td colspan="6" class="ap-empty">'+window.T('ap_js_015')+'</td></tr>';
       } else {
         tbody.innerHTML=agents.map(function(a){
           return '<tr>'
@@ -680,16 +678,16 @@ function loadCopilot(){
       }
       var reps=d.replays||[];
       if(!reps.length){
-        replay.innerHTML='<tr><td colspan="6" class="ap-empty">暂无采纳回放</td></tr>';
+        replay.innerHTML='<tr><td colspan="6" class="ap-empty">'+window.T('ap_js_016')+'</td></tr>';
       } else {
         replay.innerHTML=reps.slice(0,20).map(function(r){
-          function fmtTs(ts){ if(!ts) return '—'; var dt=new Date((ts<1e12?ts*1000:ts)); return dt.toLocaleString(); }
-          var matchLbl={exact:'✓ 完全',partial:'≈ 部分',edit:'✎ 改写'}[r.match]||r.match;
+          function fmtTs(ts){ if(!ts) return '—'; return window.wsFmtDateTime(ts); }
+          var matchLbl={exact:'✓ '+window.T('ap_js_017'),partial:'≈ '+window.T('ln_js_009'),edit:'✎ '+window.T('ap_js_018')}[r.match]||r.match;
           return '<tr>'
             +'<td style="font-size:11px;">'+fmtTs(r.ts)+'</td>'
             +'<td>'+esc(r.agent_id)+'</td>'
             +'<td style="font-size:11px;">'+esc(r.trigger||'')+'</td>'
-            +'<td style="font-size:11px;">'+esc(r.source||'')+(r.polished?' <span style="color:#7c3aed;">润色</span>':'')+'</td>'
+            +'<td style="font-size:11px;">'+esc(r.source||'')+(r.polished?' <span style="color:#7c3aed;">'+window.T('ap_js_019')+'</span>':'')+'</td>'
             +'<td style="font-size:11px;">'+matchLbl+'</td>'
             +'<td style="font-size:11px;max-width:280px;word-break:break-word;color:#64748b;">'
               +esc(r.suggested||'')+' → '+esc(r.sent||'')+'</td>'
@@ -697,7 +695,7 @@ function loadCopilot(){
         }).join('');
       }
     }).catch(function(){
-      tbody.innerHTML='<tr><td colspan="6" class="ap-empty">加载失败</td></tr>';
+      tbody.innerHTML='<tr><td colspan="6" class="ap-empty">'+window.T('rpa_load_failed')+'</td></tr>';
     });
 }
 loadCopilot();
@@ -707,19 +705,19 @@ function loadChurn(){
   var days=document.getElementById('churn-days').value||'7';
   var tbody=document.getElementById('churn-body');
   var sumEl=document.getElementById('churn-summary');
-  tbody.innerHTML='<tr><td colspan="7" class="ap-loading">加载中…</td></tr>';
+  tbody.innerHTML='<tr><td colspan="7" class="ap-loading">'+window.T('dash.loading')+'</td></tr>';
   fetch('/api/workspace/churn-risks?silence_days='+days+'&limit=50')
     .then(function(r){return r.json();}).then(function(d){
       if(!d.ok||!d.items||!d.items.length){
-        tbody.innerHTML='<tr><td colspan="7" class="ap-empty">暂无流失风险会话 — 沉默 '+esc(days)+' 天以内均已回复</td></tr>';
+        tbody.innerHTML='<tr><td colspan="7" class="ap-empty">'+window.Tf('ap_js_p02',{days:esc(days)})+'</td></tr>';
         sumEl.textContent='';
         return;
       }
-      sumEl.textContent='高风险 '+d.high_count+' 条，中风险 '+d.medium_count+' 条';
-      function fmtTs(ts){ if(!ts) return '—'; var d=new Date((ts<1e12?ts*1000:ts)); return d.toLocaleDateString(); }
+      sumEl.textContent=window.Tf('ap_js_p03',{h:d.high_count,m:d.medium_count});
+      function fmtTs(ts){ if(!ts) return '—'; return window.wsFmtDate(ts); }
       tbody.innerHTML=d.items.map(function(r){
         var lvlCls=r.risk_level==='high'?'churn-high':'churn-medium';
-        var lvlLabel=r.risk_level==='high'?'🔴 高':'🟡 中';
+        var lvlLabel=r.risk_level==='high'?'🔴 '+window.T('msg_js_1931'):'🟡 '+window.T('db_js_099');
         var reasons=(r.reasons||[]).join(' / ');
         return '<tr>'
           +'<td><a href="/workspace/contact/'+esc(r.contact_id||'')+'" style="color:#2563eb;text-decoration:none;">'+esc(r.display_name||'—')+'</a></td>'
@@ -727,11 +725,11 @@ function loadChurn(){
           +'<td class="'+lvlCls+'">'+lvlLabel+'</td>'
           +'<td>'+r.risk_score+'</td>'
           +'<td style="font-size:12px;color:#64748b;max-width:220px;word-break:break-word;">'+esc(reasons)+'</td>'
-          +'<td style="font-size:12px;">'+esc(r.claimed_by||'未分配')+'</td>'
-          +'<td><a href="/workspace?focus='+esc(r.conversation_id)+'" style="font-size:12px;color:#2563eb;">跟进 →</a></td>'
+          +'<td style="font-size:12px;">'+esc(r.claimed_by||window.T('msg_js_1856'))+'</td>'
+          +'<td><a href="/workspace?focus='+esc(r.conversation_id)+'" style="font-size:12px;color:#2563eb;">'+window.T('msg_js_517')+' →</a></td>'
           +'</tr>';
       }).join('');
-    }).catch(function(){tbody.innerHTML='<tr><td colspan="7" class="ap-empty">加载失败</td></tr>';});
+    }).catch(function(){tbody.innerHTML='<tr><td colspan="7" class="ap-empty">'+window.T('rpa_load_failed')+'</td></tr>';});
 }
 loadChurn();
 
@@ -739,17 +737,17 @@ loadChurn();
 window.loadXlateEngines=function(){
   var tbody=document.getElementById('xe-body');
   var sumEl=document.getElementById('xe-summary');
-  tbody.innerHTML='<tr><td colspan="6" class="ap-loading">加载中…</td></tr>';
+  tbody.innerHTML='<tr><td colspan="6" class="ap-loading">'+window.T('dash.loading')+'</td></tr>';
   fetch('/api/workspace/metrics').then(function(r){return r.json();}).then(function(d){
     var te=(d&&d.translation_engines)||{};
     var rows=te.rows||[];
     if(!rows.length){
-      tbody.innerHTML='<tr><td colspan="6" class="ap-empty">暂无翻译调用记录</td></tr>';
+      tbody.innerHTML='<tr><td colspan="6" class="ap-empty">'+window.T('ap_js_020')+'</td></tr>';
       sumEl.textContent='';
       return;
     }
-    sumEl.textContent='累计 '+(te.total_attempts||0)+' 次 · 降级 '+(te.fallbacks||0)+' 次';
-    var lbl={ai:'AI引擎',deepl:'DeepL',google:'Google'};
+    sumEl.textContent=window.Tf('ap_js_p04',{n:te.total_attempts||0,m:te.fallbacks||0});
+    var lbl={ai:'AI'+window.T('tg_s067'),deepl:'DeepL',google:'Google'};
     tbody.innerHTML=rows.map(function(r){
       var sr=Math.round((r.success_rate||0)*100);
       var srColor=sr>=95?'#16a34a':sr>=80?'#d97706':'#dc2626';
@@ -764,7 +762,7 @@ window.loadXlateEngines=function(){
     }).join('');
     _renderMultimodal((d&&d.providers)||{});
   }).catch(function(){
-    tbody.innerHTML='<tr><td colspan="6" class="ap-empty">加载失败（需要主管权限）</td></tr>';
+    tbody.innerHTML='<tr><td colspan="6" class="ap-empty">'+window.T('ap_js_006')+'</td></tr>';
     sumEl.textContent='';
     _renderMultimodal({});
   });
@@ -772,7 +770,7 @@ window.loadXlateEngines=function(){
 function _renderMultimodal(providers){
   var mm=document.getElementById('mm-body');
   if(!mm) return;
-  var capLbl={ocr:'OCR 图片',asr:'ASR 语音'};
+  var capLbl={ocr:'OCR '+window.T('inbox.media.img_alt'),asr:'ASR '+window.T('psn_dtab_voice')};
   var rows=[];
   ['ocr','asr'].forEach(function(cap){
     var blk=providers[cap];
@@ -791,7 +789,7 @@ function _renderMultimodal(providers){
         +'</tr>');
     });
   });
-  mm.innerHTML=rows.length?rows.join(''):'<tr><td colspan="7" class="ap-empty">暂无 OCR/ASR 调用记录</td></tr>';
+  mm.innerHTML=rows.length?rows.join(''):'<tr><td colspan="7" class="ap-empty">'+window.T('ap_js_021')+'</td></tr>';
 }
 loadXlateEngines();
 
@@ -801,27 +799,27 @@ window.loadGlossary=function(){
   var pb=document.getElementById('gl-protect-body');
   fetch('/api/workspace/glossary').then(function(r){return r.json();}).then(function(d){
     if(!d.ok){
-      tb.innerHTML='<tr><td colspan="5" class="ap-empty">'+esc(d.message||'加载失败（需主管权限）')+'</td></tr>';
+      tb.innerHTML='<tr><td colspan="5" class="ap-empty">'+esc(d.message||window.T('ap_js_022'))+'</td></tr>';
       pb.innerHTML='<tr><td colspan="4" class="ap-empty">—</td></tr>';
       return;
     }
     var c=d.counts||{};
-    document.getElementById('gl-summary').textContent='术语 '+(c.terms||0)+'（控制台 '+(c.console_terms||0)+'，命中 '+(c.term_hits||0)+'） · 保护词 '+(c.protect||0)+'（命中 '+(c.protect_hits||0)+'） · 版本 '+(d.version||'');
+    document.getElementById('gl-summary').textContent=window.Tf('ap_js_p10',{t:c.terms||0,ct:c.console_terms||0,th:c.term_hits||0,p:c.protect||0,ph:c.protect_hits||0,v:d.version||''});
     function hitCell(n){ n=n||0; return '<td><span style="color:'+(n>0?'#16a34a':'#cbd5e1')+';font-weight:'+(n>0?'600':'400')+';">'+n+'</span></td>'; }
     var terms=d.terms||[];
     tb.innerHTML=terms.length?terms.map(function(t){
-      var del=t.editable?'<button class="tiny-btn" onclick="glDelTerm('+JSON.stringify(t.term).replace(/"/g,'&quot;')+')">删</button>':'';
-      var src=t.source==='console'?'<span style="color:#2563eb;">控制台</span>':'<span style="color:#94a3b8;">基线</span>';
+      var del=t.editable?'<button class="tiny-btn" onclick="glDelTerm('+JSON.stringify(t.term).replace(/"/g,'&quot;')+')">'+window.T('inbox.voice.btn_del')+'</button>':'';
+      var src=t.source==='console'?'<span style="color:#2563eb;">'+window.T('ap_js_023')+'</span>':'<span style="color:#94a3b8;">'+window.T('db_js_035')+'</span>';
       return '<tr><td><strong>'+esc(t.term)+'</strong></td><td>'+esc(t.translation)+'</td><td style="font-size:11px;">'+src+'</td>'+hitCell(t.hits)+'<td>'+del+'</td></tr>';
-    }).join(''):'<tr><td colspan="5" class="ap-empty">暂无术语</td></tr>';
+    }).join(''):'<tr><td colspan="5" class="ap-empty">'+window.T('ap_js_024')+'</td></tr>';
     var protect=d.protect||[];
     pb.innerHTML=protect.length?protect.map(function(p){
-      var del=p.editable?'<button class="tiny-btn" onclick="glDelProtect('+JSON.stringify(p.word).replace(/"/g,'&quot;')+')">删</button>':'';
-      var src=p.source==='console'?'<span style="color:#7c3aed;">控制台</span>':'<span style="color:#94a3b8;">基线</span>';
+      var del=p.editable?'<button class="tiny-btn" onclick="glDelProtect('+JSON.stringify(p.word).replace(/"/g,'&quot;')+')">'+window.T('inbox.voice.btn_del')+'</button>':'';
+      var src=p.source==='console'?'<span style="color:#7c3aed;">'+window.T('ap_js_023')+'</span>':'<span style="color:#94a3b8;">'+window.T('db_js_035')+'</span>';
       return '<tr><td><strong>'+esc(p.word)+'</strong></td><td style="font-size:11px;">'+src+'</td>'+hitCell(p.hits)+'<td>'+del+'</td></tr>';
-    }).join(''):'<tr><td colspan="4" class="ap-empty">暂无保护词</td></tr>';
+    }).join(''):'<tr><td colspan="4" class="ap-empty">'+window.T('ap_js_025')+'</td></tr>';
   }).catch(function(){
-    tb.innerHTML='<tr><td colspan="5" class="ap-empty">加载失败</td></tr>';
+    tb.innerHTML='<tr><td colspan="5" class="ap-empty">'+window.T('rpa_load_failed')+'</td></tr>';
   });
 };
 window.glImportCsv=function(input){
@@ -837,19 +835,19 @@ window.glImportCsv=function(input){
 function _glPost(payload){
   return fetch('/api/workspace/glossary',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify(payload)}).then(function(r){return r.json();}).then(function(d){
-      if(!d.ok){ alert(d.message||'操作失败'); }
+      if(!d.ok){ alert(d.message||window.T('ov_js_op_fail')); }
       loadGlossary();
-    }).catch(function(){ alert('网络错误'); });
+    }).catch(function(){ alert(window.T('draft.net_err')); });
 }
 window.glAddTerm=function(){
   var t=document.getElementById('gl-term'),v=document.getElementById('gl-trans');
-  if(!t.value.trim()||!v.value.trim()){ alert('原词与译法均需填写'); return; }
+  if(!t.value.trim()||!v.value.trim()){ alert(window.T('ap_js_026')); return; }
   _glPost({op:'upsert_term',term:t.value.trim(),translation:v.value.trim()}).then(function(){ t.value='';v.value=''; });
 };
 window.glDelTerm=function(term){ _glPost({op:'remove_term',term:term}); };
 window.glAddProtect=function(){
   var w=document.getElementById('gl-protect');
-  if(!w.value.trim()){ alert('请填写保护词'); return; }
+  if(!w.value.trim()){ alert(window.T('ap_js_027')); return; }
   _glPost({op:'add_protect',word:w.value.trim()}).then(function(){ w.value=''; });
 };
 window.glDelProtect=function(word){ _glPost({op:'remove_protect',word:word}); };
@@ -872,69 +870,73 @@ window.loadOutreachPreview=function(){
   var body=document.getElementById('ob-body');
   var sum=document.getElementById('ob-summary');
   var stats=document.getElementById('ob-stats');
-  body.innerHTML='<tr><td colspan="6" class="ap-loading">预估中…</td></tr>';
+  body.innerHTML='<tr><td colspan="6" class="ap-loading">'+window.T('ap_js_028')+'</td></tr>';
   sum.textContent='';stats.innerHTML='';
   var payload=_obReadFilters();
   _obLastFilters=payload;
   fetch('/api/unified-inbox/outreach/preview',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify(payload)}).then(function(r){return r.json();}).then(function(d){
-      if(!d||!d.ok){ body.innerHTML='<tr><td colspan="6" class="ap-loading">'+_esc((d&&d.message)||'预览失败')+'</td></tr>'; return; }
+      if(!d||!d.ok){ body.innerHTML='<tr><td colspan="6" class="ap-loading">'+_esc((d&&d.message)||window.T('ap_js_029'))+'</td></tr>'; return; }
       var mins=Math.round((d.estimated_seconds||0)/6)/10;
-      sum.textContent='命中 '+d.total_matched+' · 可触达 '+d.eligible_count+' · 跳过 '+d.skipped_count;
+      sum.textContent=window.Tf('ap_js_p12',{m:d.total_matched,e:d.eligible_count,s:d.skipped_count});
       var skipCool=(d.skipped||[]).filter(function(s){return s.reason==='cooldown';}).length;
       var skipCap=(d.skipped||[]).filter(function(s){return s.reason==='account_cap';}).length;
       var chips=[];
-      chips.push('<span style="background:#ecfdf5;color:#065f46;padding:2px 8px;border-radius:10px;">可触达 '+d.eligible_count+'</span>');
-      if(skipCool)chips.push('<span style="background:#fef9c3;color:#854d0e;padding:2px 8px;border-radius:10px;">cooldown 跳过 '+skipCool+'</span>');
-      if(skipCap)chips.push('<span style="background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:10px;">超配额跳过 '+skipCap+'</span>');
-      chips.push('<span style="background:#eff6ff;color:#1e40af;padding:2px 8px;border-radius:10px;">预计 ~'+mins+' 分钟</span>');
+      chips.push('<span style="background:#ecfdf5;color:#065f46;padding:2px 8px;border-radius:10px;">'+window.T('ap_js_030')+' '+d.eligible_count+'</span>');
+      if(skipCool)chips.push('<span style="background:#fef9c3;color:#854d0e;padding:2px 8px;border-radius:10px;">cooldown '+window.T('db_js_034')+' '+skipCool+'</span>');
+      if(skipCap)chips.push('<span style="background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:10px;">'+window.T('ap_js_031')+' '+skipCap+'</span>');
+      chips.push('<span style="background:#eff6ff;color:#1e40af;padding:2px 8px;border-radius:10px;">'+window.T('ap_js_032')+' ~'+mins+' '+window.T('msg_js_008')+'</span>');
       Object.keys(d.per_account||{}).forEach(function(a){
         var pa=d.per_account[a];
-        chips.push('<span style="background:#f1f5f9;color:#334155;padding:2px 8px;border-radius:10px;">账号 '+_esc(a)+'：'+pa.assigned+'/'+pa.cap+'</span>');
+        chips.push('<span style="background:#f1f5f9;color:#334155;padding:2px 8px;border-radius:10px;">'+window.Tf('ap_js_p13',{a:_esc(a),x:pa.assigned,y:pa.cap})+'</span>');
       });
       stats.innerHTML=chips.join('');
       var rows=(d.eligible||[]).map(function(t){
         return '<tr><td>'+_esc(t.display_name||t.conversation_id)+'</td><td>'+_esc(t.platform)+'</td><td>'+_esc(t.account_id)+'</td><td>'+t.silent_days+'</td><td>'+_esc(t.rel_stage)+'</td><td>'+_esc((t.tags||[]).join(', '))+'</td></tr>';
       });
-      body.innerHTML=rows.length?rows.join(''):'<tr><td colspan="6" class="ap-loading">无可触达对象（可放宽筛选或检查配额/cooldown）</td></tr>';
-    }).catch(function(){ body.innerHTML='<tr><td colspan="6" class="ap-loading">网络错误</td></tr>'; });
+      body.innerHTML=rows.length?rows.join(''):'<tr><td colspan="6" class="ap-loading">'+window.T('ap_js_033')+'</td></tr>';
+    }).catch(function(){ body.innerHTML='<tr><td colspan="6" class="ap-loading">'+window.T('draft.net_err')+'</td></tr>'; });
 };
 
 window.runOutreachExecute=function(){
   var tpl=document.getElementById('ob-template').value.trim();
   var res=document.getElementById('ob-exec-result');
-  if(!tpl){ alert('请填写消息模板'); return; }
+  if(!tpl){ alert(window.T('ap_js_034')); return; }
   var filters=_obLastFilters||_obReadFilters();
   var maxSend=parseInt(document.getElementById('ob-maxsend').value,10)||20;
-  if(!confirm('确认按当前筛选条件向最多 '+maxSend+' 个会话真实发送消息？\n\n模板：'+tpl+'\n\n此操作会真实发送并占用账号日配额，不可撤销。')) return;
-  res.innerHTML='<span style="color:#64748b">发送中…</span>';
+  if(!confirm(window.Tf('ap_js_p05',{n:maxSend,tpl:tpl}))) return;
+  res.innerHTML='<span style="color:#64748b">'+window.T('rpa_js_st_sending')+'</span>';
   fetch('/api/unified-inbox/outreach/execute',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({filters:filters,template:tpl,max_send:maxSend,confirm:true})})
     .then(function(r){return r.json();}).then(function(d){
-      if(!d||!d.ok){ res.innerHTML='<span style="color:#dc2626">'+_esc((d&&d.message)||'执行失败')+'</span>'; return; }
-      res.innerHTML='<span style="background:#ecfdf5;color:#065f46;padding:3px 10px;border-radius:10px;">批次 '+_esc(d.batch_id)+'：成功 '+d.sent+' · 失败 '+d.failed+' · 跳过 '+d.skipped+'（计划可触达 '+d.planned_eligible+'）</span>';
+      if(!d||!d.ok){ res.innerHTML='<span style="color:#dc2626">'+_esc((d&&d.message)||window.T('ov_js_exec_fail'))+'</span>'; return; }
+      res.innerHTML='<span style="background:#ecfdf5;color:#065f46;padding:3px 10px;border-radius:10px;">'+window.Tf('ap_js_p06',{id:_esc(d.batch_id),s:d.sent,f:d.failed,sk:d.skipped,pe:d.planned_eligible})+'</span>';
       var bi=document.getElementById('ob-batch-id'); if(bi)bi.value=d.batch_id;
       loadOutreachPreview();
-    }).catch(function(){ res.innerHTML='<span style="color:#dc2626">网络错误</span>'; });
+    }).catch(function(){ res.innerHTML='<span style="color:#dc2626">'+window.T('draft.net_err')+'</span>'; });
 };
 
 window.loadOutreachBatch=function(){
   var bid=document.getElementById('ob-batch-id').value.trim();
   var out=document.getElementById('ob-batch-result');
-  if(!bid){ alert('请填写批次 ID'); return; }
+  if(!bid){ alert(window.T('ap_js_035')+' ID'); return; }
   var win=parseInt(document.getElementById('ob-win').value,10)||7;
-  out.textContent='查询中…';
+  out.textContent=window.T('ap_js_036');
   fetch('/api/unified-inbox/outreach/batch?batch_id='+encodeURIComponent(bid)+'&response_window_days='+win)
     .then(function(r){return r.json();}).then(function(d){
-      if(!d||!d.ok){ out.innerHTML='<span style="color:#dc2626">查询失败</span>'; return; }
+      if(!d||!d.ok){ out.innerHTML='<span style="color:#dc2626">'+window.T('ap_js_037')+'</span>'; return; }
       var bs=d.by_status||{}, rp=d.response||{};
       var ratePct=Math.round((rp.response_rate||0)*1000)/10;
       out.innerHTML='<span style="background:#f1f5f9;color:#334155;padding:3px 10px;border-radius:10px;">'
-        +'成功 '+(bs.sent||0)+' · 失败 '+(bs.failed||0)
-        +' · 回复 '+(rp.responded||0)+'/'+(rp.sent||0)+'（'+ratePct+'%）'
-        +(rp.avg_response_minutes?' · 均回复 '+rp.avg_response_minutes+' 分钟':'')+'</span>';
-    }).catch(function(){ out.innerHTML='<span style="color:#dc2626">网络错误</span>'; });
+        +window.Tf('ap_js_p07',{s:bs.sent||0,f:bs.failed||0,r:rp.responded||0,t:rp.sent||0,p:ratePct})
+        +(rp.avg_response_minutes?' · '+window.Tf('ap_js_p08',{avg:rp.avg_response_minutes}):'')+'</span>';
+    }).catch(function(){ out.innerHTML='<span style="color:#dc2626">'+window.T('draft.net_err')+'</span>'; });
 };
+
+/* 全局暴露：本块整体在 IIFE 内，内联 on*="fn()" 在全局作用域求值，未暴露即抛 ReferenceError（哑按钮）。
+   loadQA/loadCopilot/loadChurn 被子标签刷新按钮内联 onclick 调用却是 IIFE 内裸 function。
+   常驻门禁见 tests/test_rpa_inline_handlers_exposed.py。 */
+Object.assign(window, { loadQA, loadCopilot, loadChurn });
 
 })();
 </script>

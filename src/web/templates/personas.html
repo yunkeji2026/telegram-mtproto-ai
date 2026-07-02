@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}人设工作室{% endblock %}
+{% block title %}{{ (i18n or {}).get('psn_studio_title','人设工作室') }}{% endblock %}
 {% block content %}
 <style>
 .ps-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.2rem;align-items:start}
@@ -157,7 +157,9 @@
 .stat-card.s-blue .stat-val{color:var(--p)}
 /* ── Bindings tab platform pills ────────────────────────────────────────── */
 .plat-pills{display:flex;gap:.38rem;margin-bottom:.7rem;flex-wrap:wrap}
-.plat-pill{padding:.2rem .6rem;border-radius:20px;border:1px solid var(--bd);font-size:.72rem;cursor:pointer;background:var(--bg2);color:var(--t2);transition:all .13s;user-select:none;line-height:1.5}
+.plat-pill{padding:.2rem .6rem;border-radius:20px;border:1px solid var(--bd);font-size:.72rem;cursor:pointer;background:var(--bg2);color:var(--t2);transition:all .13s;user-select:none;line-height:1.5;display:inline-flex;align-items:center;gap:4px}
+.pp-ic{display:inline-flex;align-items:center;line-height:0}
+.gr-plat-chip svg,.gr-plat-label svg{vertical-align:middle}
 .plat-pill.active,.plat-pill:hover{background:rgba(91,124,246,.12);border-color:var(--p);color:var(--p)}
 /* ── Bind preview expand box ────────────────────────────────────────────── */
 .bind-preview-box{background:var(--bg2);border:1px solid var(--bd);border-radius:7px;padding:.5rem .7rem;font-size:.76rem;max-height:180px;overflow-y:auto;margin-top:.45rem;display:none}
@@ -476,13 +478,13 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
   <div class="topbar-l">
     <span class="page-ttl">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18" style="vertical-align:-.2em;margin-right:.35rem"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-      人设工作室
+      {{ (i18n or {}).get('psn_studio_title','人设工作室') }}
     </span>
   </div>
   <div class="topbar-r">
     <span id="save-status" class="tts-status" style="margin-right:.45rem"></span>
-    <button class="btn btn-sm btn-primary" onclick="openNewProfile()">＋ 新建人设</button>
-      <button class="btn btn-sm" id="kbd-help-btn" onclick="_toggleKbdHelp()" title="快捷键速查" style="font-size:.8rem;font-weight:700;width:1.75rem;padding:0;text-align:center">?</button>
+    <button class="btn btn-sm btn-primary" onclick="openNewProfile()">＋ {{ (i18n or {}).get('psn_new_profile','新建人设') }}</button>
+      <button class="btn btn-sm" id="kbd-help-btn" onclick="_toggleKbdHelp()" title="{{ (i18n or {}).get('psn_kbd_help_t','快捷键速查') }}" style="font-size:.8rem;font-weight:700;width:1.75rem;padding:0;text-align:center">?</button>
   </div>
 </div>
 
@@ -490,37 +492,37 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
 <div class="studio-nav">
   <button class="st-tab active" id="tabn-dashboard" onclick="switchTab('dashboard')">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-    概览
+    {{ (i18n or {}).get('psn_tab_dashboard','概览') }}
   </button>
   <button class="st-tab" id="tabn-profiles" onclick="switchTab('profiles')">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-    人设池
+    {{ (i18n or {}).get('psn_tab_profiles','人设池') }}
     <span class="tb-dot" id="td-profiles"></span>
     <span class="tb-cnt" id="tb-profiles-cnt"></span>
   </button>
   <button class="st-tab" id="tabn-bindings" onclick="switchTab('bindings')">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
-    会话绑定
+    {{ (i18n or {}).get('psn_tab_bindings','会话绑定') }}
     <span class="tb-cnt" id="tb-bindings-cnt"></span>
   </button>
   <button class="st-tab" id="tabn-rules" onclick="switchTab('rules')">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-    全局规则
+    {{ (i18n or {}).get('psn_tab_rules','全局规则') }}
     <span class="tb-cnt" id="tb-rules-cnt"></span>
   </button>
   <button class="st-tab" id="tabn-default" onclick="switchTab('default')">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-    默认人设
+    {{ (i18n or {}).get('psn_tab_default','默认人设') }}
   </button>
 </div>
 
 <!-- ══ Tab 1: Dashboard ═══════════════════════════════════════════════════ -->
 <div class="st-pane active" id="tab-dashboard">
   <div class="hero-row">
-    <div class="hero-stat"><div class="hero-stat-val" id="hs-profiles">—</div><div class="hero-stat-lbl">人设 Profiles</div></div>
-    <div class="hero-stat"><div class="hero-stat-val" id="hs-bindings">—</div><div class="hero-stat-lbl">会话绑定</div></div>
-    <div class="hero-stat"><div class="hero-stat-val" id="hs-platforms">—</div><div class="hero-stat-lbl">接入平台</div></div>
-    <div class="hero-stat"><div class="hero-stat-val" id="hs-unsynced" style="font-size:.95rem;padding-top:.18rem">—</div><div class="hero-stat-lbl">未同步草稿</div></div>
+    <div class="hero-stat"><div class="hero-stat-val" id="hs-profiles">—</div><div class="hero-stat-lbl">{{ (i18n or {}).get('psn_hs_profiles','人设 Profiles') }}</div></div>
+    <div class="hero-stat"><div class="hero-stat-val" id="hs-bindings">—</div><div class="hero-stat-lbl">{{ (i18n or {}).get('psn_tab_bindings','会话绑定') }}</div></div>
+    <div class="hero-stat"><div class="hero-stat-val" id="hs-platforms">—</div><div class="hero-stat-lbl">{{ (i18n or {}).get('psn_hs_platforms','接入平台') }}</div></div>
+    <div class="hero-stat"><div class="hero-stat-val" id="hs-unsynced" style="font-size:.95rem;padding-top:.18rem">—</div><div class="hero-stat-lbl">{{ (i18n or {}).get('psn_hs_unsynced','未同步草稿') }}</div></div>
   </div>
 
   <!-- P19-2: Current active persona bar -->
@@ -532,7 +534,7 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
   <!-- ── P10-2 Binding usage rank chart ── -->
   <div id="usage-chart" class="usage-chart" style="display:none">
     <div class="usage-chart-hd">
-      🔗 人设绑定排行
+      🔗 {{ (i18n or {}).get('psn_usage_rank','人设绑定排行') }}
       <span id="usage-chart-sub"></span>
     </div>
     <div id="usage-bars"></div>
@@ -541,46 +543,46 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
   <div class="unsync-banner" id="unsync-banner">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
     <span id="unsync-text" style="flex:1"></span>
-    <button class="btn btn-sm" style="background:rgba(245,158,11,.15);border-color:rgba(245,158,11,.4);color:#d97706;font-size:.75rem" onclick="syncToConfig()">立即同步 yaml</button>
+    <button class="btn btn-sm" style="background:rgba(245,158,11,.15);border-color:rgba(245,158,11,.4);color:#d97706;font-size:.75rem" onclick="syncToConfig()">{{ (i18n or {}).get('psn_sync_now_yaml','立即同步 yaml') }}</button>
   </div>
   <div style="display:flex;justify-content:flex-end;gap:.5rem;margin-bottom:.8rem">
-    <button class="btn btn-sm" id="dash-refresh-btn" onclick="_dashRefresh()" title="刷新概览">
+    <button class="btn btn-sm" id="dash-refresh-btn" onclick="_dashRefresh()" title="{{ (i18n or {}).get('psn_refresh_dash_t','刷新概览') }}">
       <span id="dash-refresh-icon">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
       </span>
-      刷新<span id="dash-freshness" class="fresh-badge" title="上次刷新时间"></span>
+      {{ (i18n or {}).get('psn_refresh','刷新') }}<span id="dash-freshness" class="fresh-badge" title="{{ (i18n or {}).get('psn_last_refresh_t','上次刷新时间') }}"></span>
     </button>
-    <button class="btn btn-sm btn-primary" onclick="switchTab('profiles');setTimeout(openNewProfile,120)" title="新建人设">
+    <button class="btn btn-sm btn-primary" onclick="switchTab('profiles');setTimeout(openNewProfile,120)" title="{{ (i18n or {}).get('psn_new_profile','新建人设') }}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-      新建人设
+      {{ (i18n or {}).get('psn_new_profile','新建人设') }}
     </button>
   </div>
-  <div id="dashboard-platforms"><div style="color:var(--t2);font-size:.84rem;padding:2.2rem 0;text-align:center">加载中…</div></div>
+  <div id="dashboard-platforms"><div style="color:var(--t2);font-size:.84rem;padding:2.2rem 0;text-align:center">{{ (i18n or {}).get('psn_loading','加载中…') }}</div></div>
   <!-- P7-4 Onboarding guide (shown when 0 profiles) -->
   <div id="onboarding-guide">
     <div class="ob-banner">
       <div class="ob-hd">
-        <span class="ob-title">🎉 欢迎使用人设工作室 — 3 步快速上手</span>
-        <button class="ob-dismiss" onclick="_dismissOnboarding()" title="不再提示">✕ 关闭</button>
+        <span class="ob-title">🎉 {{ (i18n or {}).get('psn_ob_title','欢迎使用人设工作室 — 3 步快速上手') }}</span>
+        <button class="ob-dismiss" onclick="_dismissOnboarding()" title="{{ (i18n or {}).get('psn_ob_dismiss_t','不再提示') }}">✕ {{ (i18n or {}).get('psn_close','关闭') }}</button>
       </div>
       <div class="ob-steps">
         <div class="ob-step">
           <div class="ob-step-num">1</div>
-          <div class="ob-step-title">创建第一个人设</div>
-          <div class="ob-step-desc">定义 AI 的名字、角色定位和性格风格，让每个对话都有独特个性。</div>
-          <button class="btn btn-sm ob-step-btn btn-primary" onclick="switchTab('profiles');setTimeout(openNewProfile,120)">＋ 新建人设</button>
+          <div class="ob-step-title">{{ (i18n or {}).get('psn_ob_s1_title','创建第一个人设') }}</div>
+          <div class="ob-step-desc">{{ (i18n or {}).get('psn_ob_s1_desc','定义 AI 的名字、角色定位和性格风格，让每个对话都有独特个性。') }}</div>
+          <button class="btn btn-sm ob-step-btn btn-primary" onclick="switchTab('profiles');setTimeout(openNewProfile,120)">＋ {{ (i18n or {}).get('psn_new_profile','新建人设') }}</button>
         </div>
         <div class="ob-step">
           <div class="ob-step-num">2</div>
-          <div class="ob-step-title">分配到账号</div>
-          <div class="ob-step-desc">将人设指定给 Telegram / WhatsApp / Messenger 账号，统一账号的回复风格。</div>
-          <button class="btn btn-sm ob-step-btn" onclick="switchTab('dashboard')">查看账号</button>
+          <div class="ob-step-title">{{ (i18n or {}).get('psn_ob_s2_title','分配到账号') }}</div>
+          <div class="ob-step-desc">{{ (i18n or {}).get('psn_ob_s2_desc','将人设指定给 Telegram / WhatsApp / Messenger 账号，统一账号的回复风格。') }}</div>
+          <button class="btn btn-sm ob-step-btn" onclick="switchTab('dashboard')">{{ (i18n or {}).get('psn_ob_s2_btn','查看账号') }}</button>
         </div>
         <div class="ob-step">
           <div class="ob-step-num">3</div>
-          <div class="ob-step-title">绑定到特定会话</div>
-          <div class="ob-step-desc">为 VIP 用户或特殊群组单独指定人设，精准差异化运营。</div>
-          <button class="btn btn-sm ob-step-btn" onclick="switchTab('bindings')">前往绑定</button>
+          <div class="ob-step-title">{{ (i18n or {}).get('psn_ob_s3_title','绑定到特定会话') }}</div>
+          <div class="ob-step-desc">{{ (i18n or {}).get('psn_ob_s3_desc','为 VIP 用户或特殊群组单独指定人设，精准差异化运营。') }}</div>
+          <button class="btn btn-sm ob-step-btn" onclick="switchTab('bindings')">{{ (i18n or {}).get('psn_ob_s3_btn','前往绑定') }}</button>
         </div>
       </div>
     </div>
@@ -596,107 +598,107 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
   <div class="pp-header">
     <div class="pp-search-wrap">
       <svg class="pp-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <input id="profile-search" type="search" class="pp-search" placeholder="搜索名称 / 角色 / 标签 / ID…  (按 / 聚焦)" oninput="_onSearchInput()" onfocus="_showSearchHistory()" onblur="_hideSearchHistoryDelayed()" onkeydown="_onSearchKeydown(event)">
-      <div id="search-hist-panel" class="search-hist-panel" style="display:none"><div class="sh-header">最近搜索 <span class="sh-clear" onmousedown="_clearSearchHistory()">清除</span></div><div id="search-hist-items"></div></div>
+      <input id="profile-search" type="search" class="pp-search" placeholder="{{ (i18n or {}).get('psn_search_ph','搜索名称 / 角色 / 标签 / ID…  (按 / 聚焦)') }}" oninput="_onSearchInput()" onfocus="_showSearchHistory()" onblur="_hideSearchHistoryDelayed()" onkeydown="_onSearchKeydown(event)">
+      <div id="search-hist-panel" class="search-hist-panel" style="display:none"><div class="sh-header">{{ (i18n or {}).get('psn_recent_search','最近搜索') }} <span class="sh-clear" onmousedown="_clearSearchHistory()">{{ (i18n or {}).get('psn_clear','清除') }}</span></div><div id="search-hist-items"></div></div>
     </div>
-    <select id="profile-sort" class="sort-sel" onchange="_applyFilter()" title="排序方式">
-      <option value="default">默认排序</option>
-      <option value="custom" id="sort-custom-opt" style="display:none">🔧 自定义排序</option>
-      <option value="name">名称 A→Z</option>
-      <option value="bindings">绑定数↓</option>
-      <option value="source">按来源</option>
+    <select id="profile-sort" class="sort-sel" onchange="_applyFilter()" title="{{ (i18n or {}).get('psn_sort_by_t','排序方式') }}">
+      <option value="default">{{ (i18n or {}).get('psn_sort_default','默认排序') }}</option>
+      <option value="custom" id="sort-custom-opt" style="display:none">🔧 {{ (i18n or {}).get('psn_sort_custom','自定义排序') }}</option>
+      <option value="name">{{ (i18n or {}).get('psn_sort_name','名称 A→Z') }}</option>
+      <option value="bindings">{{ (i18n or {}).get('psn_sort_bindings','绑定数↓') }}</option>
+      <option value="source">{{ (i18n or {}).get('psn_sort_source','按来源') }}</option>
     </select>
-    <button id="sort-reset-btn" class="btn btn-sm" onclick="_resetCardOrder()" title="重置自定义排序，恢复默认" style="display:none;font-size:.72rem;padding:.18rem .45rem">↺</button>
-    <span id="health-filter-badge" style="display:none" title="点击清除健康筛选"></span>
+    <button id="sort-reset-btn" class="btn btn-sm" onclick="_resetCardOrder()" title="{{ (i18n or {}).get('psn_sort_reset_t','重置自定义排序，恢复默认') }}" style="display:none;font-size:.72rem;padding:.18rem .45rem">↺</button>
+    <span id="health-filter-badge" style="display:none" title="{{ (i18n or {}).get('psn_clear_health_filter_t','点击清除健康筛选') }}"></span>
     <span id="profile-count" class="pp-count"></span>
     <div style="display:flex;gap:.45rem;margin-left:auto">
-      <button class="btn btn-sm" onclick="reloadProfiles()" title="重载人设列表">
+      <button class="btn btn-sm" onclick="reloadProfiles()" title="{{ (i18n or {}).get('psn_reload_list_t','重载人设列表') }}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
-        重载
+        {{ (i18n or {}).get('psn_reload','重载') }}
       </button>
-      <button class="btn btn-sm" onclick="_toggleImportPanel()" id="import-toggle-btn" title="批量 JSON 导入">
+      <button class="btn btn-sm" onclick="_toggleImportPanel()" id="import-toggle-btn" title="{{ (i18n or {}).get('psn_bulk_import_t','批量 JSON 导入') }}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><polyline points="16 7 12 3 8 7"/><line x1="12" y1="3" x2="12" y2="15"/><path d="M20 21H4"/></svg>
-        导入
+        {{ (i18n or {}).get('psn_import','导入') }}
       </button>
-      <button class="btn btn-sm" onclick="_exportFilteredCSV()" title="导出当前筛选结果为 CSV">
+      <button class="btn btn-sm" onclick="_exportFilteredCSV()" title="{{ (i18n or {}).get('psn_export_csv_t','导出当前筛选结果为 CSV') }}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><polyline points="8 17 12 21 16 17"/><line x1="12" y1="21" x2="12" y2="9"/><path d="M20 3H4"/></svg>
-        导出
+        {{ (i18n or {}).get('psn_export','导出') }}
       </button>
-      <button class="btn btn-sm" id="bulk-toggle-btn" onclick="_toggleBulkMode()" title="批量选择人设进行操作">☐ 多选</button>
+      <button class="btn btn-sm" id="bulk-toggle-btn" onclick="_toggleBulkMode()" title="{{ (i18n or {}).get('psn_multiselect_t','批量选择人设进行操作') }}">☐ {{ (i18n or {}).get('psn_multiselect','多选') }}</button>
       <button class="btn btn-sm btn-primary" onclick="openNewProfile()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        新建人设
+        {{ (i18n or {}).get('psn_new_profile','新建人设') }}
       </button>
     </div>
   </div>
 
   <!-- P8-3 Floating bulk action bar -->
   <div id="bulk-bar" class="bulk-bar">
-    <span class="bulk-cnt" id="bulk-cnt">0 个已选</span>
+    <span class="bulk-cnt" id="bulk-cnt">{{ (i18n or {}).get('psn_bulk_selected','0 个已选') }}</span>
     <span id="bulk-progress" style="display:none"></span>
     <div class="bulk-sep"></div>
-    <button class="btn btn-sm btn-danger" onclick="_bulkDelete()">删除选中</button>
+    <button class="btn btn-sm btn-danger" onclick="_bulkDelete()">{{ (i18n or {}).get('psn_bulk_delete','删除选中') }}</button>
     <button class="btn btn-sm" onclick="_bulkExport()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><polyline points="8 17 12 21 16 17"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
-      导出 JSON
+      {{ (i18n or {}).get('psn_export_json','导出 JSON') }}
     </button>
-    <button class="btn btn-sm" onclick="_openBulkTagEdit('add')" title="为所有选中人设添加同一标签">
+    <button class="btn btn-sm" onclick="_openBulkTagEdit('add')" title="{{ (i18n or {}).get('psn_bulk_addtag_t','为所有选中人设添加同一标签') }}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
-      + 标签
+      + {{ (i18n or {}).get('psn_tag','标签') }}
     </button>
-    <button class="btn btn-sm" onclick="_openBulkTagEdit('remove')" title="从所有选中人设移除同一标签">
+    <button class="btn btn-sm" onclick="_openBulkTagEdit('remove')" title="{{ (i18n or {}).get('psn_bulk_rmtag_t','从所有选中人设移除同一标签') }}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
-      - 标签
+      - {{ (i18n or {}).get('psn_tag','标签') }}
     </button>
     <div class="bulk-sep"></div>
-    <button class="btn btn-sm" onclick="_toggleBulkMode()" style="font-size:.73rem;color:var(--t2)">✕ 退出</button>
+    <button class="btn btn-sm" onclick="_toggleBulkMode()" style="font-size:.73rem;color:var(--t2)">✕ {{ (i18n or {}).get('psn_exit','退出') }}</button>
   </div>
   <!-- ── P15-1 Bulk tag editor panel ── -->
   <div id="bulk-tag-row" class="bulk-tag-row" style="display:none">
     <span id="bulk-tag-label" style="font-size:.75rem;font-weight:600;color:var(--t2);white-space:nowrap"></span>
     <div id="bulk-tag-chips" style="display:flex;flex-wrap:wrap;gap:.25rem;flex:1"></div>
-    <input id="bulk-tag-input" type="text" class="pp-search" style="max-width:140px;font-size:.77rem;padding:.22rem .5rem" placeholder="输入标签名…" onkeydown="if(event.key==='Enter')_applyBulkTagEdit()">
-    <button class="btn btn-sm btn-primary" onclick="_applyBulkTagEdit()">确认</button>
-    <button class="btn btn-sm" onclick="_closeBulkTagEdit()">取消</button>
+    <input id="bulk-tag-input" type="text" class="pp-search" style="max-width:140px;font-size:.77rem;padding:.22rem .5rem" placeholder="{{ (i18n or {}).get('psn_tag_input_ph','输入标签名…') }}" onkeydown="if(event.key==='Enter')_applyBulkTagEdit()">
+    <button class="btn btn-sm btn-primary" onclick="_applyBulkTagEdit()">{{ (i18n or {}).get('psn_confirm','确认') }}</button>
+    <button class="btn btn-sm" onclick="_closeBulkTagEdit()">{{ (i18n or {}).get('psn_cancel','取消') }}</button>
   </div>
 
   <!-- ── Tag cloud ── -->
   <div id="tag-cloud" class="tag-cloud" style="margin-bottom:.85rem"></div>
   <!-- P19-4: Source/platform filter -->
   <div id="sf-row" class="sf-row">
-    <span class="sf-chip active" data-sf="" data-lbl="全部" onclick="_setSfFilter('')">全部</span>
-    <span class="sf-chip" data-sf="bound" data-lbl="已绑定" onclick="_setSfFilter('bound')">已绑定</span>
-    <span class="sf-chip" data-sf="unbound" data-lbl="未绑定" onclick="_setSfFilter('unbound')">未绑定</span>
+    <span class="sf-chip active" data-sf="" data-lbl="{{ (i18n or {}).get('psn_sf_all','全部') }}" onclick="_setSfFilter('')">{{ (i18n or {}).get('psn_sf_all','全部') }}</span>
+    <span class="sf-chip" data-sf="bound" data-lbl="{{ (i18n or {}).get('psn_sf_bound','已绑定') }}" onclick="_setSfFilter('bound')">{{ (i18n or {}).get('psn_sf_bound','已绑定') }}</span>
+    <span class="sf-chip" data-sf="unbound" data-lbl="{{ (i18n or {}).get('psn_sf_unbound','未绑定') }}" onclick="_setSfFilter('unbound')">{{ (i18n or {}).get('psn_sf_unbound','未绑定') }}</span>
     <span class="sf-sep"></span>
     <span class="sf-chip" data-sf="TG" data-lbl="TG" onclick="_setSfFilter('TG')">TG</span>
     <span class="sf-chip" data-sf="FB" data-lbl="Messenger" onclick="_setSfFilter('FB')">Messenger</span>
     <span class="sf-chip" data-sf="WA" data-lbl="WhatsApp" onclick="_setSfFilter('WA')">WhatsApp</span>
     <span class="sf-chip" data-sf="LINE" data-lbl="LINE" onclick="_setSfFilter('LINE')">LINE</span>
     <span class="sf-sep"></span>
-    <span class="sf-chip" data-sf="studio" data-lbl="已编辑" onclick="_setSfFilter('studio')">已编辑</span>
-    <span class="sf-chip" data-sf="voice" data-lbl="已配音" onclick="_setSfFilter('voice')">已配音</span>
+    <span class="sf-chip" data-sf="studio" data-lbl="{{ (i18n or {}).get('psn_sf_edited','已编辑') }}" onclick="_setSfFilter('studio')">{{ (i18n or {}).get('psn_sf_edited','已编辑') }}</span>
+    <span class="sf-chip" data-sf="voice" data-lbl="{{ (i18n or {}).get('psn_sf_voiced','已配音') }}" onclick="_setSfFilter('voice')">{{ (i18n or {}).get('psn_sf_voiced','已配音') }}</span>
   </div>
 
   <!-- ── P10-3 Bulk import panel ── -->
   <div id="import-panel" class="import-panel">
     <div style="display:flex;align-items:center;gap:.65rem;margin-bottom:.7rem">
-      <span style="font-size:.84rem;font-weight:700">批量导入人设</span>
+      <span style="font-size:.84rem;font-weight:700">{{ (i18n or {}).get('psn_bulk_import_title','批量导入人设') }}</span>
       <label class="btn btn-sm" style="cursor:pointer;font-size:.73rem">
         <input type="file" accept=".json" id="import-file-input" onchange="_onImportFile(this)" style="display:none">
-        📂 从文件
+        📂 {{ (i18n or {}).get('psn_from_file','从文件') }}
       </label>
-      <button class="btn btn-sm" onclick="_closeImportPanel()" style="margin-left:auto;font-size:.72rem;color:var(--t2)">✕ 关闭</button>
+      <button class="btn btn-sm" onclick="_closeImportPanel()" style="margin-left:auto;font-size:.72rem;color:var(--t2)">✕ {{ (i18n or {}).get('psn_close','关闭') }}</button>
     </div>
-    <textarea id="import-json" rows="5" style="width:100%;font-family:monospace;font-size:.73rem;resize:vertical;box-sizing:border-box;background:var(--bg);border:1px solid var(--bd);border-radius:7px;padding:.5rem .65rem;color:var(--t1)" placeholder='粘贴 JSON 数组，格式：[{"id":"xxx","name":"xxx","role":"xxx",...}, ...]'></textarea>
+    <textarea id="import-json" rows="5" style="width:100%;font-family:monospace;font-size:.73rem;resize:vertical;box-sizing:border-box;background:var(--bg);border:1px solid var(--bd);border-radius:7px;padding:.5rem .65rem;color:var(--t1)" placeholder='{{ (i18n or {}).get('psn_import_json_ph','粘贴 JSON 数组，格式：[{"id":"xxx","name":"xxx","role":"xxx",...}, ...]') }}'></textarea>
     <div style="margin-top:.5rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-      <button class="btn btn-sm btn-primary" onclick="_parseImport()">🔍 解析预览</button>
-      <button class="btn btn-sm btn-danger" id="import-confirm-btn" style="display:none" onclick="_executeImport()">▶ 开始导入</button>
-      <button class="btn btn-sm" id="import-clear-btn" style="display:none" onclick="_resetImport()">重置</button>
+      <button class="btn btn-sm btn-primary" onclick="_parseImport()">🔍 {{ (i18n or {}).get('psn_parse_preview','解析预览') }}</button>
+      <button class="btn btn-sm btn-danger" id="import-confirm-btn" style="display:none" onclick="_executeImport()">▶ {{ (i18n or {}).get('psn_start_import','开始导入') }}</button>
+      <button class="btn btn-sm" id="import-clear-btn" style="display:none" onclick="_resetImport()">{{ (i18n or {}).get('psn_reset','重置') }}</button>
       <span id="import-status" style="font-size:.75rem;color:var(--t2)"></span>
     </div>
     <div id="import-preview" style="display:none;max-height:220px;overflow-y:auto;margin-top:.55rem;border:1px solid var(--bd);border-radius:8px">
       <table class="import-preview-table">
-        <thead><tr><th>ID</th><th>名称</th><th>角色</th><th style="width:60px">状态</th></tr></thead>
+        <thead><tr><th>ID</th><th>{{ (i18n or {}).get('psn_th_name','名称') }}</th><th>{{ (i18n or {}).get('psn_th_role','角色') }}</th><th style="width:60px">{{ (i18n or {}).get('psn_th_status','状态') }}</th></tr></thead>
         <tbody id="import-preview-body"></tbody>
       </table>
     </div>
@@ -717,28 +719,28 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
   <details class="ps-card" id="export-import-card" style="margin-top:1.6rem">
     <summary class="export-summary">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><polyline points="8 17 12 21 16 17"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
-      导出 / 导入 Profiles
-      <span class="summary-hint">（主帐号专属）</span>
+      {{ (i18n or {}).get('psn_export_import_profiles','导出 / 导入 Profiles') }}
+      <span class="summary-hint">{{ (i18n or {}).get('psn_master_only','（主帐号专属）') }}</span>
     </summary>
     <div style="margin-top:.9rem">
       <div class="ps-row" style="align-items:flex-end">
         <div class="field-row" style="flex:1">
-          <label>导入模式</label>
+          <label>{{ (i18n or {}).get('psn_import_mode','导入模式') }}</label>
           <select id="import-mode">
-            <option value="merge">Merge — 合并（保留现有，新增/覆盖）</option>
-            <option value="replace">Replace — 全量替换（先清空）</option>
+            <option value="merge">{{ (i18n or {}).get('psn_merge_opt','Merge — 合并（保留现有，新增/覆盖）') }}</option>
+            <option value="replace">{{ (i18n or {}).get('psn_replace_opt','Replace — 全量替换（先清空）') }}</option>
           </select>
         </div>
         <div style="display:flex;gap:.45rem;margin-bottom:.9rem;flex-wrap:wrap">
-          <button class="btn btn-sm" onclick="exportProfiles()">导出 JSON</button>
-          <button class="btn btn-sm btn-primary" onclick="importProfiles()">导入 JSON</button>
+          {# exportProfiles()/importProfiles() 从未定义（哑按钮，点击抛 ReferenceError）→ 移除。
+             真正可用的「批量导入人设」在上方 #import-panel（_parseImport/_executeImport）。 #}
           <button class="btn btn-sm" id="sync-config-btn" onclick="syncToConfig()"
-            title="将当前运营人设推送到 personas.yaml（可 git 追踪）"
-            style="background:rgba(59,130,246,.1);border-color:rgba(59,130,246,.3);color:#3b82f6">⭐ 同步到 personas.yaml</button>
+            title="{{ (i18n or {}).get('psn_sync_to_yaml_t','将当前运营人设推送到 personas.yaml（可 git 追踪）') }}"
+            style="background:rgba(59,130,246,.1);border-color:rgba(59,130,246,.3);color:#3b82f6">⭐ {{ (i18n or {}).get('psn_sync_to_yaml','同步到 personas.yaml') }}</button>
         </div>
       </div>
       <div class="field-row">
-        <label>JSON 数据（粘贴后点导入，或点导出后自动填充）</label>
+        <label>{{ (i18n or {}).get('psn_json_data_lbl','JSON 数据（粘贴后点导入，或点导出后自动填充）') }}</label>
         <textarea id="import-json" rows="4" style="font-family:monospace;font-size:.78rem"
           placeholder='[{"id":"my_profile","name":"Alice","role":"..."}]'></textarea>
       </div>
@@ -759,63 +761,63 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
       <div class="ps-card">
         <div class="card-hd">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
-          已绑定会话<span id="bindings-cnt-badge" style="font-size:.78rem;font-weight:400;color:var(--t2);margin-left:.4rem"></span>
+          {{ (i18n or {}).get('psn_bound_chats','已绑定会话') }}<span id="bindings-cnt-badge" style="font-size:.78rem;font-weight:400;color:var(--t2);margin-left:.4rem"></span>
         </div>
         <!-- Platform filter pills -->
         <div class="plat-pills" id="bind-plat-pills">
-          <span class="plat-pill active" data-plat="all" onclick="_filterBindPlat(this)">全部</span>
-          <span class="plat-pill" data-plat="tg" onclick="_filterBindPlat(this)">🔵 Telegram</span>
-          <span class="plat-pill" data-plat="mrpa" onclick="_filterBindPlat(this)">📦 Messenger</span>
-          <span class="plat-pill" data-plat="wa" onclick="_filterBindPlat(this)">💬 WhatsApp</span>
-          <span class="plat-pill" data-plat="line" onclick="_filterBindPlat(this)">🟢 LINE</span>
+          <span class="plat-pill active" data-plat="all" onclick="_filterBindPlat(this)">{{ (i18n or {}).get('psn_sf_all','全部') }}</span>
+          <span class="plat-pill" data-plat="tg" onclick="_filterBindPlat(this)"><i class="pp-ic" data-platform-icon="telegram" data-size="15"></i>Telegram</span>
+          <span class="plat-pill" data-plat="mrpa" onclick="_filterBindPlat(this)"><i class="pp-ic" data-platform-icon="messenger" data-size="15"></i>Messenger</span>
+          <span class="plat-pill" data-plat="wa" onclick="_filterBindPlat(this)"><i class="pp-ic" data-platform-icon="whatsapp" data-size="15"></i>WhatsApp</span>
+          <span class="plat-pill" data-plat="line" onclick="_filterBindPlat(this)"><i class="pp-ic" data-platform-icon="line" data-size="15"></i>LINE</span>
         </div>
         <!-- ── P12-2 Batch platform switch toolbar ── -->
         <div id="bulk-switch-toolbar" class="bulk-switch-bar" style="display:none">
-          <span style="font-size:.75rem;color:var(--t2)">批量切换为</span>
-          <select id="bulk-switch-pid" class="bind-switch" style="max-width:160px" onfocus="_populateSwitchSelect(this)"><option value="">选择人设…</option></select>
-          <button class="btn btn-sm btn-primary" onclick="_bulkSwitchPlatform()" style="font-size:.73rem">切换当前平台全部</button>
+          <span style="font-size:.75rem;color:var(--t2)">{{ (i18n or {}).get('psn_bulk_switch_to','批量切换为') }}</span>
+          <select id="bulk-switch-pid" class="bind-switch" style="max-width:160px" onfocus="_populateSwitchSelect(this)"><option value="">{{ (i18n or {}).get('psn_select_persona_opt','选择人设…') }}</option></select>
+          <button class="btn btn-sm btn-primary" onclick="_bulkSwitchPlatform()" style="font-size:.73rem">{{ (i18n or {}).get('psn_switch_all_plat','切换当前平台全部') }}</button>
         </div>
-        <div id="bindings-list-body"><div style="color:var(--t2);font-size:.82rem;text-align:center;padding:1rem 0">加载中…</div></div>
+        <div id="bindings-list-body"><div style="color:var(--t2);font-size:.82rem;text-align:center;padding:1rem 0">{{ (i18n or {}).get('psn_loading','加载中…') }}</div></div>
       </div>
       <!-- Right: Add binding + bulk switch -->
       <div style="display:flex;flex-direction:column;gap:.9rem">
         <div class="ps-card" id="bind-panel-b">
           <div class="card-hd">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
-            新增 / 更新绑定
+            {{ (i18n or {}).get('psn_add_update_binding','新增 / 更新绑定') }}
           </div>
-          <div class="card-sub">输入 Chat ID 并选择人设，建立精准绑定关系</div>
+          <div class="card-sub">{{ (i18n or {}).get('psn_bind_sub','输入 Chat ID 并选择人设，建立精准绑定关系') }}</div>
           <div class="field-row">
             <label>Chat ID</label>
-            <input id="bind-chat-id-b" type="text" list="known-chats" placeholder="-100123456789 或 line_rpa:12345" autocomplete="off">
+            <input id="bind-chat-id-b" type="text" list="known-chats" placeholder="{{ (i18n or {}).get('psn_chat_id_ph','-100123456789 或 line_rpa:12345') }}" autocomplete="off">
             <datalist id="known-chats"></datalist>
           </div>
           <div id="qpick-wrap" class="qpick-wrap">
             <button class="qpick-toggle" type="button" onclick="_toggleQuickPick()">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
-              <span id="qpick-lbl">已绑定会话快速选择</span>
+              <span id="qpick-lbl">{{ (i18n or {}).get('psn_quick_pick_bound','已绑定会话快速选择') }}</span>
             </button>
             <div id="qpick-list" class="qpick-list" style="display:none"></div>
           </div>
-          <div class="field-row"><label>选择 Profile</label><select id="bind-profile-id-b"><option value="">（使用默认人设）</option></select></div>
+          <div class="field-row"><label>{{ (i18n or {}).get('psn_select_profile_lbl','选择 Profile') }}</label><select id="bind-profile-id-b"><option value="">{{ (i18n or {}).get('psn_use_default','（使用默认人设）') }}</option></select></div>
           <div class="ps-action-bar" style="margin-top:.4rem">
-            <button class="btn btn-primary btn-sm" onclick="bindProfileToChatB()">绑定</button>
+            <button class="btn btn-primary btn-sm" onclick="bindProfileToChatB()">{{ (i18n or {}).get('psn_bind','绑定') }}</button>
           </div>
           <div id="bind-status-b" class="tts-status"></div>
         </div>
         <div class="ps-card">
           <div class="card-hd">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
-            批量切换绑定
+            {{ (i18n or {}).get('psn_bulk_switch_binding','批量切换绑定') }}
           </div>
-          <div class="card-sub">将已绑定的会话批量切换到另一个人设</div>
+          <div class="card-sub">{{ (i18n or {}).get('psn_bulk_switch_sub','将已绑定的会话批量切换到另一个人设') }}</div>
           <div class="ps-row" style="align-items:flex-end">
-            <div class="field-row" style="flex:1.4"><label>切换为 Profile</label><select id="bulk-profile-id-b"><option value="">（选择目标 profile）</option></select></div>
-            <div class="field-row" style="flex:1"><label>范围</label><select id="bulk-scope-b"><option value="all_bindings">全部已绑定会话</option></select></div>
+            <div class="field-row" style="flex:1.4"><label>{{ (i18n or {}).get('psn_switch_to_profile','切换为 Profile') }}</label><select id="bulk-profile-id-b"><option value="">{{ (i18n or {}).get('psn_select_target_profile','（选择目标 profile）') }}</option></select></div>
+            <div class="field-row" style="flex:1"><label>{{ (i18n or {}).get('psn_scope','范围') }}</label><select id="bulk-scope-b"><option value="all_bindings">{{ (i18n or {}).get('psn_all_bound_chats','全部已绑定会话') }}</option></select></div>
           </div>
           <div class="ps-action-bar" style="margin-top:.4rem">
-            <button class="btn btn-sm" onclick="bulkBindB(true)">预览影响</button>
-            <button class="btn btn-sm btn-primary" onclick="bulkBindB(false)">立即切换</button>
+            <button class="btn btn-sm" onclick="bulkBindB(true)">{{ (i18n or {}).get('psn_preview_impact','预览影响') }}</button>
+            <button class="btn btn-sm btn-primary" onclick="bulkBindB(false)">{{ (i18n or {}).get('psn_switch_now','立即切换') }}</button>
           </div>
           <div id="bulk-status-b" class="tts-status"></div>
           <div id="bulk-preview-box" class="bind-preview-box"></div>
@@ -830,21 +832,21 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
   <div style="padding:1.4rem 1.8rem;max-width:960px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:.5rem">
       <div>
-        <h3 style="margin:0;font-size:1rem;font-weight:700">跨平台 AI 回复硬约束</h3>
-        <p style="font-size:.76rem;color:var(--t3);margin:.15rem 0 0">所有人设自动套用这些规则，修改即时生效。影响 Telegram / Messenger / LINE / WhatsApp 四端。</p>
+        <h3 style="margin:0;font-size:1rem;font-weight:700">{{ (i18n or {}).get('psn_rules_title','跨平台 AI 回复硬约束') }}</h3>
+        <p style="font-size:.76rem;color:var(--t3);margin:.15rem 0 0">{{ (i18n or {}).get('psn_rules_desc','所有人设自动套用这些规则，修改即时生效。影响 Telegram / Messenger / LINE / WhatsApp 四端。') }}</p>
       </div>
       <div style="display:flex;gap:.4rem;flex-wrap:wrap">
-        <button class="btn btn-sm" id="gr-reload-btn" onclick="grLoadRules()" title="重新加载">↻ 重新加载</button>
-        <button class="btn btn-sm" onclick="_grExport()" title="导出规则为 JSON">📥 导出</button>
-        <label class="btn btn-sm" style="cursor:pointer" title="从 JSON 文件导入规则">📤 导入<input type="file" accept=".json" onchange="_grImport(event)" style="display:none"></label>
-        <button class="btn btn-primary btn-sm" id="gr-save-btn" onclick="_grValidateAndSave()" style="display:none">保存更改<span class="kbd-hint" title="Ctrl+S">^S</span></button>
+        <button class="btn btn-sm" id="gr-reload-btn" onclick="grLoadRules()" title="{{ (i18n or {}).get('psn_reload_full','重新加载') }}">↻ {{ (i18n or {}).get('psn_reload_full','重新加载') }}</button>
+        <button class="btn btn-sm" onclick="_grExport()" title="{{ (i18n or {}).get('psn_export_rules_t','导出规则为 JSON') }}">📥 {{ (i18n or {}).get('psn_export','导出') }}</button>
+        <label class="btn btn-sm" style="cursor:pointer" title="{{ (i18n or {}).get('psn_import_rules_t','从 JSON 文件导入规则') }}">📤 {{ (i18n or {}).get('psn_import','导入') }}<input type="file" accept=".json" onchange="_grImport(event)" style="display:none"></label>
+        <button class="btn btn-primary btn-sm" id="gr-save-btn" onclick="_grValidateAndSave()" style="display:none">{{ (i18n or {}).get('psn_save_changes','保存更改') }}<span class="kbd-hint" title="Ctrl+S">^S</span></button>
       </div>
     </div>
     <div id="gr-status" style="font-size:.78rem;margin-bottom:.6rem;min-height:1.1em"></div>
 
     <!-- 版本备份栏 -->
     <div class="gr-backup-bar" id="gr-backup-bar" style="display:none">
-      <span style="font-weight:700;color:var(--t2)">&#128190; 备份</span>
+      <span style="font-weight:700;color:var(--t2)">&#128190; {{ (i18n or {}).get('psn_backup','备份') }}</span>
       <div id="gr-backup-pills" style="display:flex;gap:.3rem;flex-wrap:wrap"></div>
       <span class="gr-enabled-stats" id="gr-enabled-stats"></span>
     </div>
@@ -852,40 +854,40 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
     <!-- P6-a: 搜索筛选栏 -->
     <div class="gr-filter-bar" id="gr-filter-bar">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13" style="flex-shrink:0;color:var(--t3)"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <input class="gr-filter-input" id="gr-filter-q" type="text" placeholder="搜索规则标题或内容…" oninput="_grApplyFilter()">
+      <input class="gr-filter-input" id="gr-filter-q" type="text" placeholder="{{ (i18n or {}).get('psn_rule_search_ph','搜索规则标题或内容…') }}" oninput="_grApplyFilter()">
       <select class="gr-filter-select" id="gr-filter-status" onchange="_grApplyFilter()">
-        <option value="all">全部状态</option>
-        <option value="enabled">已启用</option>
-        <option value="disabled">已禁用</option>
+        <option value="all">{{ (i18n or {}).get('psn_all_status','全部状态') }}</option>
+        <option value="enabled">{{ (i18n or {}).get('psn_enabled','已启用') }}</option>
+        <option value="disabled">{{ (i18n or {}).get('psn_disabled','已禁用') }}</option>
       </select>
       <select class="gr-filter-select" id="gr-filter-plat" onchange="_grApplyFilter()">
-        <option value="">全部平台</option>
+        <option value="">{{ (i18n or {}).get('psn_all_platforms','全部平台') }}</option>
         <option value="telegram">🔵 Telegram</option>
         <option value="messenger">📦 Messenger</option>
         <option value="whatsapp">💬 WhatsApp</option>
         <option value="line">🟢 LINE</option>
       </select>
-      <button class="btn btn-sm" onclick="_grToggleCollapseAll()" id="gr-collapse-all-btn" title="折叠/展开全部" style="font-size:.68rem;padding:.15rem .35rem">▼ 折叠</button>
+      <button class="btn btn-sm" onclick="_grToggleCollapseAll()" id="gr-collapse-all-btn" title="{{ (i18n or {}).get('psn_collapse_all_t','折叠/展开全部') }}" style="font-size:.68rem;padding:.15rem .35rem">▼ {{ (i18n or {}).get('psn_collapse','折叠') }}</button>
       <span class="gr-filter-count" id="gr-filter-count"></span>
     </div>
 
     <!-- 回复约束列表 -->
     <div id="gr-constraints-list" style="display:flex;flex-direction:column;gap:.65rem">
-      <div style="text-align:center;padding:2rem;color:var(--t3);font-size:.82rem">加载中…</div>
+      <div style="text-align:center;padding:2rem;color:var(--t3);font-size:.82rem">{{ (i18n or {}).get('psn_loading','加载中…') }}</div>
     </div>
     <button class="btn btn-sm" onclick="_grAddRule()" style="margin-top:.5rem;display:flex;align-items:center;gap:.25rem" id="gr-add-btn">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-      新增约束规则
+      {{ (i18n or {}).get('psn_add_constraint','新增约束规则') }}
     </button>
 
     <!-- 平台专用规则 -->
     <details style="margin-top:1.2rem">
       <summary style="font-size:.84rem;font-weight:700;cursor:pointer;user-select:none;color:var(--t2);display:flex;align-items:center;gap:.35rem">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-        平台专用约束
+        {{ (i18n or {}).get('psn_platform_constraints','平台专用约束') }}
       </summary>
       <div id="gr-platform-rules" style="margin-top:.6rem;display:flex;flex-direction:column;gap:.5rem">
-        <div style="color:var(--t3);font-size:.78rem;padding:.5rem">加载中…</div>
+        <div style="color:var(--t3);font-size:.78rem;padding:.5rem">{{ (i18n or {}).get('psn_loading','加载中…') }}</div>
       </div>
     </details>
 
@@ -893,10 +895,10 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
     <details style="margin-top:.9rem">
       <summary style="font-size:.84rem;font-weight:700;cursor:pointer;user-select:none;color:var(--t2);display:flex;align-items:center;gap:.35rem">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-        漏斗阶段语调
+        {{ (i18n or {}).get('psn_funnel_tone','漏斗阶段语调') }}
       </summary>
       <div id="gr-funnel-rules" style="margin-top:.6rem;display:flex;flex-direction:column;gap:.5rem">
-        <div style="color:var(--t3);font-size:.78rem;padding:.5rem">加载中…</div>
+        <div style="color:var(--t3);font-size:.78rem;padding:.5rem">{{ (i18n or {}).get('psn_loading','加载中…') }}</div>
       </div>
     </details>
 
@@ -904,13 +906,13 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
     <details style="margin-top:1.2rem" id="gr-preview-section">
       <summary style="font-size:.84rem;font-weight:700;cursor:pointer;user-select:none;color:var(--t2);display:flex;align-items:center;gap:.35rem">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-        规则生效预览（LLM 实际接收的文本）
+        {{ (i18n or {}).get('psn_rule_preview','规则生效预览（LLM 实际接收的文本）') }}
       </summary>
       <div style="margin-top:.6rem;position:relative">
         <div style="display:flex;gap:.4rem;margin-bottom:.4rem;align-items:center;flex-wrap:wrap">
-          <button class="btn btn-sm" onclick="_grRefreshPreview()" title="刷新预览">↻ 刷新</button>
+          <button class="btn btn-sm" onclick="_grRefreshPreview()" title="{{ (i18n or {}).get('psn_refresh_preview_t','刷新预览') }}">↻ {{ (i18n or {}).get('psn_refresh','刷新') }}</button>
           <select id="gr-preview-plat" style="font-size:.72rem;padding:.15rem .3rem;border:1px solid var(--bd);border-radius:5px;background:var(--bg2);color:var(--t2)">
-            <option value="">全平台</option>
+            <option value="">{{ (i18n or {}).get('psn_all_plats_short','全平台') }}</option>
             <option value="telegram">🔵 Telegram</option>
             <option value="messenger">📦 Messenger</option>
             <option value="whatsapp">💬 WhatsApp</option>
@@ -918,7 +920,7 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
           </select>
           <span id="gr-preview-chars" style="font-size:.7rem;color:var(--t3)"></span>
         </div>
-        <pre id="gr-preview-box" style="background:var(--bg2);border:1px solid var(--bd);border-radius:8px;padding:.7rem .9rem;font-size:.76rem;color:var(--t2);white-space:pre-wrap;word-break:break-word;min-height:60px;max-height:320px;overflow-y:auto;line-height:1.55;font-family:inherit;margin:0">点击"刷新"查看当前规则组装效果…</pre>
+        <pre id="gr-preview-box" style="background:var(--bg2);border:1px solid var(--bd);border-radius:8px;padding:.7rem .9rem;font-size:.76rem;color:var(--t2);white-space:pre-wrap;word-break:break-word;min-height:60px;max-height:320px;overflow-y:auto;line-height:1.55;font-family:inherit;margin:0">{{ (i18n or {}).get('psn_preview_placeholder','点击"刷新"查看当前规则组装效果…') }}</pre>
       </div>
     </details>
 
@@ -926,13 +928,13 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
     <div style="margin-top:1.2rem;padding:.65rem .85rem;background:var(--card);border:1px solid var(--bd);border-radius:10px">
       <div style="font-size:.82rem;font-weight:700;color:var(--t1);margin-bottom:.45rem;display:flex;align-items:center;gap:.35rem">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-        快捷预设
+        {{ (i18n or {}).get('psn_quick_preset','快捷预设') }}
       </div>
       <div style="display:flex;gap:.4rem;flex-wrap:wrap" id="gr-preset-bar">
-        <button class="btn btn-sm" onclick="_grPreset('all')" title="启用全部规则">✅ 全部启用</button>
-        <button class="btn btn-sm" onclick="_grPreset('strict')" title="严格模式：启用全部约束">🔒 严格模式</button>
-        <button class="btn btn-sm" onclick="_grPreset('casual')" title="轻松模式：仅保留核心规则">💬 轻松模式</button>
-        <button class="btn btn-sm" onclick="_grPreset('minimal')" title="最小模式：只保留 3 条核心">⚡ 最小模式</button>
+        <button class="btn btn-sm" onclick="_grPreset('all')" title="{{ (i18n or {}).get('psn_preset_all_t','启用全部规则') }}">✅ {{ (i18n or {}).get('psn_preset_all','全部启用') }}</button>
+        <button class="btn btn-sm" onclick="_grPreset('strict')" title="{{ (i18n or {}).get('psn_preset_strict_t','严格模式：启用全部约束') }}">🔒 {{ (i18n or {}).get('psn_preset_strict','严格模式') }}</button>
+        <button class="btn btn-sm" onclick="_grPreset('casual')" title="{{ (i18n or {}).get('psn_preset_casual_t','轻松模式：仅保留核心规则') }}">💬 {{ (i18n or {}).get('psn_preset_casual','轻松模式') }}</button>
+        <button class="btn btn-sm" onclick="_grPreset('minimal')" title="{{ (i18n or {}).get('psn_preset_minimal_t','最小模式：只保留 3 条核心') }}">⚡ {{ (i18n or {}).get('psn_preset_minimal','最小模式') }}</button>
       </div>
       <div id="gr-preset-status" style="font-size:.72rem;color:var(--t3);margin-top:.3rem;min-height:1em"></div>
     </div>
@@ -941,10 +943,10 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
     <details style="margin-top:1.2rem">
       <summary style="font-size:.84rem;font-weight:700;cursor:pointer;user-select:none;color:var(--t2);display:flex;align-items:center;gap:.35rem" onclick="setTimeout(_grLoadAudit,50)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-        操作记录
+        {{ (i18n or {}).get('psn_audit_log','操作记录') }}
       </summary>
       <div id="gr-audit-list" style="margin-top:.5rem;max-height:200px;overflow-y:auto">
-        <span style="color:var(--t3);font-size:.74rem">点击展开加载…</span>
+        <span style="color:var(--t3);font-size:.74rem">{{ (i18n or {}).get('psn_expand_to_load','点击展开加载…') }}</span>
       </div>
     </details>
   </div>
@@ -954,79 +956,79 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
 <div class="drawer-ov" id="drawer-ov" onclick="_ovClick(event)"></div>
 <div class="drawer" id="profile-drawer">
   <div class="drawer-hd">
-    <div class="drawer-title" id="drawer-title">人设编辑器</div>
-    <button id="drawer-back-btn" class="drawer-back" onclick="_drawerGoBack()" title="返回上一个人设">
+    <div class="drawer-title" id="drawer-title">{{ (i18n or {}).get('psn_profile_editor','人设编辑器') }}</div>
+    <button id="drawer-back-btn" class="drawer-back" onclick="_drawerGoBack()" title="{{ (i18n or {}).get('psn_drawer_back_t','返回上一个人设') }}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><polyline points="15 18 9 12 15 6"/></svg>
-      返回
+      {{ (i18n or {}).get('psn_back','返回') }}
     </button>
-    <button class="drawer-close" onclick="closeProfileEditor()" title="关闭">
+    <button class="drawer-close" onclick="closeProfileEditor()" title="{{ (i18n or {}).get('psn_close','关闭') }}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
     </button>
   </div>
   <div class="drawer-tabs">
-    <button class="dtab active" data-dtab="basic" onclick="switchDTab('basic')">基础<span class="ddot" id="ddot-basic"></span></button>
-    <button class="dtab" data-dtab="style" onclick="switchDTab('style')">风格<span class="ddot" id="ddot-style"></span></button>
-    <button class="dtab" data-dtab="voice" onclick="switchDTab('voice')">语音<span class="ddot" id="ddot-voice"></span></button>
-    <button class="dtab" data-dtab="preview" onclick="switchDTab('preview')">预览<span class="ddot" id="ddot-preview"></span><span class="diff-cnt" id="pe-diff-cnt"></span></button>
+    <button class="dtab active" data-dtab="basic" onclick="switchDTab('basic')">{{ (i18n or {}).get('psn_dtab_basic','基础') }}<span class="ddot" id="ddot-basic"></span></button>
+    <button class="dtab" data-dtab="style" onclick="switchDTab('style')">{{ (i18n or {}).get('psn_dtab_style','风格') }}<span class="ddot" id="ddot-style"></span></button>
+    <button class="dtab" data-dtab="voice" onclick="switchDTab('voice')">{{ (i18n or {}).get('psn_dtab_voice','语音') }}<span class="ddot" id="ddot-voice"></span></button>
+    <button class="dtab" data-dtab="preview" onclick="switchDTab('preview')">{{ (i18n or {}).get('psn_dtab_preview','预览') }}<span class="ddot" id="ddot-preview"></span><span class="diff-cnt" id="pe-diff-cnt"></span></button>
   </div>
   <!-- Pane: Basic -->
   <div class="dpane active" id="dpane-basic">
     <!-- ── P16-3 Template picker (new profile mode only) ── -->
     <div id="pe-template-row" style="display:none;margin-bottom:.6rem;padding:.48rem .6rem;background:rgba(91,124,246,.04);border-radius:8px;border:1px dashed rgba(91,124,246,.28)">
-      <div style="font-size:.68rem;color:var(--t2);font-weight:600;margin-bottom:.3rem;letter-spacing:.02em">从模板快速创建</div>
+      <div style="font-size:.68rem;color:var(--t2);font-weight:600;margin-bottom:.3rem;letter-spacing:.02em">{{ (i18n or {}).get('psn_quick_create_template','从模板快速创建') }}</div>
       <div style="display:flex;gap:.3rem;flex-wrap:wrap">
-        <button class="btn btn-sm" onclick="_applyTemplate('companion')">👤 陪伴型</button>
-        <button class="btn btn-sm" onclick="_applyTemplate('service')">🎯 客服型</button>
-        <button class="btn btn-sm" onclick="_applyTemplate('sales')">💼 销售型</button>
-        <button class="btn btn-sm" onclick="_applyTemplate('consultant')">📋 咨询师型</button>
+        <button class="btn btn-sm" onclick="_applyTemplate('companion')">👤 {{ (i18n or {}).get('psn_tpl_companion','陪伴型') }}</button>
+        <button class="btn btn-sm" onclick="_applyTemplate('service')">🎯 {{ (i18n or {}).get('psn_tpl_service','客服型') }}</button>
+        <button class="btn btn-sm" onclick="_applyTemplate('sales')">💼 {{ (i18n or {}).get('psn_tpl_sales','销售型') }}</button>
+        <button class="btn btn-sm" onclick="_applyTemplate('consultant')">📋 {{ (i18n or {}).get('psn_tpl_consultant','咨询师型') }}</button>
       </div>
     </div>
     <div id="pe-wizard" class="pe-wizard" style="display:none"></div>
     <div id="pe-draft-banner" class="draft-banner"></div>
     <div id="pe-canonical-banner" class="diff-banner" style="margin-top:.1rem"></div>
-    <div class="field-row"><label>Profile ID</label><input id="pe-id" type="text" placeholder="warm_companion_2024" style="font-family:monospace"><span id="pe-id-warn" style="display:none;font-size:.72rem;color:#ef4444;margin-top:.2rem">⚠ 该 ID 已存在，保存将覆盖现有人设</span></div>
+    <div class="field-row"><label>Profile ID</label><input id="pe-id" type="text" placeholder="warm_companion_2024" style="font-family:monospace"><span id="pe-id-warn" style="display:none;font-size:.72rem;color:#ef4444;margin-top:.2rem">⚠ {{ (i18n or {}).get('psn_id_exists_warn','该 ID 已存在，保存将覆盖现有人设') }}</span></div>
     <div class="ps-row">
-      <div class="field-row"><label>名称</label><input id="pe-name" type="text" placeholder="小灵"></div>
-      <div class="field-row"><label>角色</label><input id="pe-role" type="text" placeholder="亲密的私聊对象"></div>
+      <div class="field-row"><label>{{ (i18n or {}).get('psn_th_name','名称') }}</label><input id="pe-name" type="text" placeholder="{{ (i18n or {}).get('psn_name_ph','小灵') }}"></div>
+      <div class="field-row"><label>{{ (i18n or {}).get('psn_th_role','角色') }}</label><input id="pe-role" type="text" placeholder="{{ (i18n or {}).get('psn_role_ph','亲密的私聊对象') }}"></div>
     </div>
-    <div class="field-row"><label>性格 / 风格</label><textarea id="pe-personality" rows="5" placeholder="温柔体贴，喜欢用撒娇语气…"></textarea><span id="pe-pers-notice" class="pers-notice">✓ 已将结构化格式转换为可读文本</span></div>
-    <div class="field-row"><label>标签 <span style="font-size:.7rem;color:var(--t2)">（逗号分隔）</span></label><input id="pe-tags" type="text" placeholder="holiday, vip, companion"></div>
+    <div class="field-row"><label>{{ (i18n or {}).get('psn_personality_style','性格 / 风格') }}</label><textarea id="pe-personality" rows="5" placeholder="{{ (i18n or {}).get('psn_personality_ph','温柔体贴，喜欢用撒娇语气…') }}"></textarea><span id="pe-pers-notice" class="pers-notice">✓ {{ (i18n or {}).get('psn_pers_notice','已将结构化格式转换为可读文本') }}</span></div>
+    <div class="field-row"><label>{{ (i18n or {}).get('psn_tag','标签') }} <span style="font-size:.7rem;color:var(--t2)">{{ (i18n or {}).get('psn_comma_sep','（逗号分隔）') }}</span></label><input id="pe-tags" type="text" placeholder="holiday, vip, companion"></div>
     <details class="json-import-wrap">
-      <summary>&#128203; 从 JSON 导入字段…</summary>
+      <summary>&#128203; {{ (i18n or {}).get('psn_json_import_field','从 JSON 导入字段…') }}</summary>
       <div class="field-row" style="margin-top:.5rem">
-        <label>粘贴 profile JSON</label>
+        <label>{{ (i18n or {}).get('psn_paste_profile_json','粘贴 profile JSON') }}</label>
         <textarea id="pe-json-import" rows="4" placeholder='{"name":"...","role":"...","personality":"...","tags":["vip"]}'></textarea>
       </div>
-      <button class="btn btn-sm" onclick="_importFromJson()" style="margin-top:.28rem">解析并填充</button>
+      <button class="btn btn-sm" onclick="_importFromJson()" style="margin-top:.28rem">{{ (i18n or {}).get('psn_parse_fill','解析并填充') }}</button>
     </details>
   </div>
   <!-- Pane: Style -->
   <div class="dpane" id="dpane-style">
     <div class="field-row">
-      <label>回复长度</label>
+      <label>{{ (i18n or {}).get('psn_reply_length','回复长度') }}</label>
       <div class="opt-cards" id="rl-cards">
-        <div class="opt-card" data-val="concise" onclick="_selOpt(this,'pe-reply-length','rl-cards')"><span class="oc-ico">💬</span><span class="oc-lbl">简洁</span></div>
-        <div class="opt-card" data-val="normal" onclick="_selOpt(this,'pe-reply-length','rl-cards')"><span class="oc-ico">📝</span><span class="oc-lbl">均衡</span></div>
-        <div class="opt-card" data-val="detailed" onclick="_selOpt(this,'pe-reply-length','rl-cards')"><span class="oc-ico">📄</span><span class="oc-lbl">详细</span></div>
+        <div class="opt-card" data-val="concise" onclick="_selOpt(this,'pe-reply-length','rl-cards')"><span class="oc-ico">💬</span><span class="oc-lbl">{{ (i18n or {}).get('psn_rl_concise','简洁') }}</span></div>
+        <div class="opt-card" data-val="normal" onclick="_selOpt(this,'pe-reply-length','rl-cards')"><span class="oc-ico">📝</span><span class="oc-lbl">{{ (i18n or {}).get('psn_rl_normal','均衡') }}</span></div>
+        <div class="opt-card" data-val="detailed" onclick="_selOpt(this,'pe-reply-length','rl-cards')"><span class="oc-ico">📄</span><span class="oc-lbl">{{ (i18n or {}).get('psn_rl_detailed','详细') }}</span></div>
       </div>
       <input type="hidden" id="pe-reply-length" value="concise">
     </div>
     <div class="field-row">
-      <label>Emoji 频率</label>
+      <label>{{ (i18n or {}).get('psn_emoji_freq','Emoji 频率') }}</label>
       <div class="opt-cards" id="el-cards">
-        <div class="opt-card" data-val="none" onclick="_selOpt(this,'pe-emoji-level','el-cards')"><span class="oc-ico">🚫</span><span class="oc-lbl">不用</span></div>
-        <div class="opt-card" data-val="minimal" onclick="_selOpt(this,'pe-emoji-level','el-cards')"><span class="oc-ico">🌱</span><span class="oc-lbl">极少</span></div>
-        <div class="opt-card sel" data-val="moderate" onclick="_selOpt(this,'pe-emoji-level','el-cards')"><span class="oc-ico">😊</span><span class="oc-lbl">适中</span></div>
-        <div class="opt-card" data-val="rich" onclick="_selOpt(this,'pe-emoji-level','el-cards')"><span class="oc-ico">🎉</span><span class="oc-lbl">丰富</span></div>
+        <div class="opt-card" data-val="none" onclick="_selOpt(this,'pe-emoji-level','el-cards')"><span class="oc-ico">🚫</span><span class="oc-lbl">{{ (i18n or {}).get('psn_emoji_none','不用') }}</span></div>
+        <div class="opt-card" data-val="minimal" onclick="_selOpt(this,'pe-emoji-level','el-cards')"><span class="oc-ico">🌱</span><span class="oc-lbl">{{ (i18n or {}).get('psn_emoji_minimal','极少') }}</span></div>
+        <div class="opt-card sel" data-val="moderate" onclick="_selOpt(this,'pe-emoji-level','el-cards')"><span class="oc-ico">😊</span><span class="oc-lbl">{{ (i18n or {}).get('psn_emoji_moderate','适中') }}</span></div>
+        <div class="opt-card" data-val="rich" onclick="_selOpt(this,'pe-emoji-level','el-cards')"><span class="oc-ico">🎉</span><span class="oc-lbl">{{ (i18n or {}).get('psn_emoji_rich','丰富') }}</span></div>
       </div>
       <input type="hidden" id="pe-emoji-level" value="moderate">
     </div>
-    <div class="field-row"><label>禁用表述 <span style="font-size:.7rem;color:var(--t2)">（逗号分隔）</span></label><input id="pe-forbidden-phrases" type="text" placeholder="亲爱的用户，好的，有什么可以帮您"></div>
-    <div class="field-row"><label>开头语池 <span style="font-size:.7rem;color:var(--t2)">（逗号分隔）</span></label><input id="pe-openers" type="text" placeholder="哈哈，嗯嗯，哦对，诶"></div>
+    <div class="field-row"><label>{{ (i18n or {}).get('psn_forbidden_phrases','禁用表述') }} <span style="font-size:.7rem;color:var(--t2)">{{ (i18n or {}).get('psn_comma_sep','（逗号分隔）') }}</span></label><input id="pe-forbidden-phrases" type="text" placeholder="{{ (i18n or {}).get('psn_forbidden_ph','亲爱的用户，好的，有什么可以帮您') }}"></div>
+    <div class="field-row"><label>{{ (i18n or {}).get('psn_openers','开头语池') }} <span style="font-size:.7rem;color:var(--t2)">{{ (i18n or {}).get('psn_comma_sep','（逗号分隔）') }}</span></label><input id="pe-openers" type="text" placeholder="{{ (i18n or {}).get('psn_openers_ph','哈哈，嗯嗯，哦对，诶') }}"></div>
     <div style="border-top:1px solid var(--bd);padding-top:.78rem;margin-top:.1rem">
-      <div style="font-size:.72rem;font-weight:600;color:var(--t2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.65rem">身份设定</div>
-      <div class="tgl-row"><label class="tgl"><input type="checkbox" id="pe-deny-ai"><span class="tgl-sl"></span></label><span class="tgl-lbl">被问及时否认是 AI</span></div>
-      <div class="tgl-row"><label class="tgl"><input type="checkbox" id="pe-claim-human"><span class="tgl-sl"></span></label><span class="tgl-lbl">主动声称自己是真人</span></div>
+      <div style="font-size:.72rem;font-weight:600;color:var(--t2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.65rem">{{ (i18n or {}).get('psn_identity','身份设定') }}</div>
+      <div class="tgl-row"><label class="tgl"><input type="checkbox" id="pe-deny-ai"><span class="tgl-sl"></span></label><span class="tgl-lbl">{{ (i18n or {}).get('psn_deny_ai','被问及时否认是 AI') }}</span></div>
+      <div class="tgl-row"><label class="tgl"><input type="checkbox" id="pe-claim-human"><span class="tgl-sl"></span></label><span class="tgl-lbl">{{ (i18n or {}).get('psn_claim_human','主动声称自己是真人') }}</span></div>
     </div>
   </div>
   <!-- Pane: Voice -->
@@ -1034,20 +1036,20 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
     <div class="voice-panel" style="margin-top:.1rem">
       <div class="voice-panel-hd">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-        语音配置（voice_profile）
+        {{ (i18n or {}).get('psn_voice_config','语音配置（voice_profile）') }}
       </div>
       <div class="ps-row">
-        <div class="field-row"><label>语音 backend</label>
+        <div class="field-row"><label>{{ (i18n or {}).get('psn_voice_backend','语音 backend') }}</label>
           <select id="pe-vp-backend">
-            <option value="">继承全局</option>
-            <option value="edge_tts">Edge TTS（免费）</option>
+            <option value="">{{ (i18n or {}).get('psn_inherit_global','继承全局') }}</option>
+            <option value="edge_tts">{{ (i18n or {}).get('psn_edge_tts_free','Edge TTS（免费）') }}</option>
             <option value="openai">OpenAI TTS</option>
-            <option value="voice_clone_command">声音克隆（命令）</option>
+            <option value="voice_clone_command">{{ (i18n or {}).get('psn_voice_clone_cmd','声音克隆（命令）') }}</option>
           </select>
         </div>
-        <div class="field-row"><label>音色 / Voice ID</label><input id="pe-vp-voice" type="text" placeholder="ja-JP-NanamiNeural"></div>
+        <div class="field-row"><label>{{ (i18n or {}).get('psn_voice_id','音色 / Voice ID') }}</label><input id="pe-vp-voice" type="text" placeholder="ja-JP-NanamiNeural"></div>
       </div>
-      <div style="font-size:.74rem;color:var(--t2);margin-top:.5rem;line-height:1.5">💡 留空则继承域级默认人设的语音设置</div>
+      <div style="font-size:.74rem;color:var(--t2);margin-top:.5rem;line-height:1.5">💡 {{ (i18n or {}).get('psn_voice_hint','留空则继承域级默认人设的语音设置') }}</div>
     </div>
   </div>
   <!-- Pane: Preview -->
@@ -1055,32 +1057,32 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
     <details class="pe-panel" id="pe-bindings-panel" onToggle="_onBindingsToggle(this)">
       <summary>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
-        已绑定会话 <span id="pe-bindings-badge" style="font-size:.66rem;font-weight:400;color:var(--t2);margin-left:.15rem"></span>
+        {{ (i18n or {}).get('psn_bound_chats','已绑定会话') }} <span id="pe-bindings-badge" style="font-size:.66rem;font-weight:400;color:var(--t2);margin-left:.15rem"></span>
       </summary>
-      <div class="pe-panel-body" id="pe-bindings-body">点击展开加载…</div>
+      <div class="pe-panel-body" id="pe-bindings-body">{{ (i18n or {}).get('psn_expand_to_load','点击展开加载…') }}</div>
     </details>
     <details class="pe-panel" id="pe-prompt-panel" style="margin-top:.42rem" onToggle="_onPromptToggle(this)">
       <summary>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-        Prompt 预览 <span style="font-size:.66rem;font-weight:400;color:var(--t2);margin-left:.15rem">（AI 实际收到的人设指令块）</span>
+        {{ (i18n or {}).get('psn_prompt_preview','Prompt 预览') }} <span style="font-size:.66rem;font-weight:400;color:var(--t2);margin-left:.15rem">{{ (i18n or {}).get('psn_prompt_preview_sub','（AI 实际收到的人设指令块）') }}</span>
       </summary>
-      <div class="pe-panel-body" id="pe-prompt-body">点击展开加载…</div>
+      <div class="pe-panel-body" id="pe-prompt-body">{{ (i18n or {}).get('psn_expand_to_load','点击展开加载…') }}</div>
     </details>
     <details class="pe-panel" id="pe-diff-panel" style="margin-top:.42rem" onToggle="_onDiffToggle(this)">
       <summary>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-        字段变更对比 <span style="font-size:.66rem;font-weight:400;color:var(--t2);margin-left:.15rem">（草稿 vs 已保存）</span>
+        {{ (i18n or {}).get('psn_field_diff','字段变更对比') }} <span style="font-size:.66rem;font-weight:400;color:var(--t2);margin-left:.15rem">{{ (i18n or {}).get('psn_field_diff_sub','（草稿 vs 已保存）') }}</span>
       </summary>
-      <div class="pe-panel-body" id="pe-diff-body" style="padding:.5rem 0">点击展开…</div>
+      <div class="pe-panel-body" id="pe-diff-body" style="padding:.5rem 0">{{ (i18n or {}).get('psn_expand','点击展开…') }}</div>
     </details>
   </div>
   <!-- Drawer footer -->
   <div class="drawer-foot">
-    <div class="drawer-dirty" id="drawer-dirty">● 有未保存的修改</div>
-    <button class="btn btn-sm btn-danger" id="pe-delete-btn" onclick="deleteCurrentProfile()" style="display:none">删除</button>
-    <button class="btn btn-sm" id="pe-undo-btn" onclick="undoProfile()" style="display:none" title="恢复上一版本">撤销</button>
-    <button class="btn btn-sm" onclick="closeProfileEditor()">取消</button>
-    <button class="btn btn-primary btn-sm" id="pe-save-btn" onclick="saveProfile()">保存<span class="kbd-hint" title="Ctrl+S">^S</span></button>
+    <div class="drawer-dirty" id="drawer-dirty">● {{ (i18n or {}).get('psn_unsaved_changes','有未保存的修改') }}</div>
+    <button class="btn btn-sm btn-danger" id="pe-delete-btn" onclick="deleteCurrentProfile()" style="display:none">{{ (i18n or {}).get('psn_delete','删除') }}</button>
+    <button class="btn btn-sm" id="pe-undo-btn" onclick="undoProfile()" style="display:none" title="{{ (i18n or {}).get('psn_undo_t','恢复上一版本') }}">{{ (i18n or {}).get('psn_undo','撤销') }}</button>
+    <button class="btn btn-sm" onclick="closeProfileEditor()">{{ (i18n or {}).get('psn_cancel','取消') }}</button>
+    <button class="btn btn-primary btn-sm" id="pe-save-btn" onclick="saveProfile()">{{ (i18n or {}).get('psn_save','保存') }}<span class="kbd-hint" title="Ctrl+S">^S</span></button>
   </div>
   <div id="pe-status" class="tts-status" style="padding:0 1.28rem .48rem;flex-shrink:0;min-height:1.1em"></div>
 </div>
@@ -1089,53 +1091,49 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
 <div class="st-pane" id="tab-default">
   <div style="padding:1.4rem 1.8rem;max-width:760px">
     <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem">
-      <h2 style="margin:0;font-size:1.05rem">默认人设</h2>
+      <h2 style="margin:0;font-size:1.05rem">{{ (i18n or {}).get('psn_tab_default','默认人设') }}</h2>
       <span id="dp-source" style="font-size:.72rem;color:var(--t2)"></span>
     </div>
-    <p style="font-size:.8rem;color:var(--t2);line-height:1.6;margin:.2rem 0 1rem">
-      未单独绑定画像的会话（含桌面端 Telegram）都使用这套人设。保存后写入
-      <code>persona_runtime.yaml</code> 并立即生效（无需重启后端）。
-      <br>客户问"你叫什么"时，AI 会用下面的<strong>名字</strong>回答——填一个像真人的名字（如「小雨」），别用角色定位。
-    </p>
+    <p style="font-size:.8rem;color:var(--t2);line-height:1.6;margin:.2rem 0 1rem">{{ (i18n or {}).get('psn_default_desc','未单独绑定画像的会话（含桌面端 Telegram）都使用这套人设。保存后写入 <code>persona_runtime.yaml</code> 并立即生效（无需重启后端）。<br>客户问"你叫什么"时，AI 会用下面的<strong>名字</strong>回答——填一个像真人的名字（如「小雨」），别用角色定位。')|safe }}</p>
 
     <div class="field-row" style="margin-bottom:.85rem">
-      <label style="display:block;font-size:.8rem;font-weight:600;margin-bottom:.3rem">名字（AI 的身份名）</label>
-      <input id="p-name" type="text" placeholder="如：小雨" style="width:100%;padding:.5rem .65rem;border:1px solid var(--bd);border-radius:7px;background:var(--bg);color:var(--t1);font-size:.85rem">
+      <label style="display:block;font-size:.8rem;font-weight:600;margin-bottom:.3rem">{{ (i18n or {}).get('psn_name_identity','名字（AI 的身份名）') }}</label>
+      <input id="p-name" type="text" placeholder="{{ (i18n or {}).get('psn_name_eg_ph','如：小雨') }}" style="width:100%;padding:.5rem .65rem;border:1px solid var(--bd);border-radius:7px;background:var(--bg);color:var(--t1);font-size:.85rem">
     </div>
 
     <div class="field-row" style="margin-bottom:.85rem">
-      <label style="display:block;font-size:.8rem;font-weight:600;margin-bottom:.3rem">角色定位 role</label>
-      <input id="p-role" type="text" placeholder="如：情感向线上陪伴，像朋友一样自然接话" style="width:100%;padding:.5rem .65rem;border:1px solid var(--bd);border-radius:7px;background:var(--bg);color:var(--t1);font-size:.85rem">
+      <label style="display:block;font-size:.8rem;font-weight:600;margin-bottom:.3rem">{{ (i18n or {}).get('psn_role_position','角色定位 role') }}</label>
+      <input id="p-role" type="text" placeholder="{{ (i18n or {}).get('psn_role_eg_ph','如：情感向线上陪伴，像朋友一样自然接话') }}" style="width:100%;padding:.5rem .65rem;border:1px solid var(--bd);border-radius:7px;background:var(--bg);color:var(--t1);font-size:.85rem">
     </div>
 
     <div class="field-row" style="margin-bottom:.85rem">
-      <label style="display:block;font-size:.8rem;font-weight:600;margin-bottom:.3rem">性格 / 说话风格</label>
-      <textarea id="p-personality" rows="3" placeholder="如：口语像私聊微信；短消息就短回；不套客服模板" style="width:100%;padding:.5rem .65rem;border:1px solid var(--bd);border-radius:7px;background:var(--bg);color:var(--t1);font-size:.85rem;resize:vertical"></textarea>
+      <label style="display:block;font-size:.8rem;font-weight:600;margin-bottom:.3rem">{{ (i18n or {}).get('psn_personality_speech','性格 / 说话风格') }}</label>
+      <textarea id="p-personality" rows="3" placeholder="{{ (i18n or {}).get('psn_personality_eg_ph','如：口语像私聊微信；短消息就短回；不套客服模板') }}" style="width:100%;padding:.5rem .65rem;border:1px solid var(--bd);border-radius:7px;background:var(--bg);color:var(--t1);font-size:.85rem;resize:vertical"></textarea>
     </div>
 
     <div style="display:flex;gap:.85rem;margin-bottom:1rem;flex-wrap:wrap">
       <div class="field-row" style="flex:1;min-width:160px">
-        <label style="display:block;font-size:.8rem;font-weight:600;margin-bottom:.3rem">回复语言</label>
+        <label style="display:block;font-size:.8rem;font-weight:600;margin-bottom:.3rem">{{ (i18n or {}).get('psn_reply_language','回复语言') }}</label>
         <select id="p-language" style="width:100%;padding:.5rem .65rem;border:1px solid var(--bd);border-radius:7px;background:var(--bg);color:var(--t1);font-size:.85rem">
-          <option value="">跟随对方语言</option>
-          <option value="zh">中文</option>
+          <option value="">{{ (i18n or {}).get('psn_follow_lang','跟随对方语言') }}</option>
+          <option value="zh">{{ (i18n or {}).get('psn_lang_zh','中文') }}</option>
           <option value="en">English</option>
           <option value="th">ไทย</option>
         </select>
       </div>
       <div class="field-row" style="flex:1;min-width:160px">
-        <label style="display:block;font-size:.8rem;font-weight:600;margin-bottom:.3rem">回复长度</label>
+        <label style="display:block;font-size:.8rem;font-weight:600;margin-bottom:.3rem">{{ (i18n or {}).get('psn_reply_length','回复长度') }}</label>
         <select id="p-reply-length" style="width:100%;padding:.5rem .65rem;border:1px solid var(--bd);border-radius:7px;background:var(--bg);color:var(--t1);font-size:.85rem">
-          <option value="short">简短</option>
-          <option value="balanced">均衡</option>
-          <option value="detailed">详细</option>
+          <option value="short">{{ (i18n or {}).get('psn_rl_short','简短') }}</option>
+          <option value="balanced">{{ (i18n or {}).get('psn_rl_normal','均衡') }}</option>
+          <option value="detailed">{{ (i18n or {}).get('psn_rl_detailed','详细') }}</option>
         </select>
       </div>
     </div>
 
     <div style="display:flex;align-items:center;gap:.6rem">
-      <button class="btn btn-primary btn-sm" onclick="saveDefaultPersona()">保存默认人设</button>
-      <button class="btn btn-sm" onclick="previewPrompt()">预览 AI 实际收到的提示词</button>
+      <button class="btn btn-primary btn-sm" onclick="saveDefaultPersona()">{{ (i18n or {}).get('psn_save_default','保存默认人设') }}</button>
+      <button class="btn btn-sm" onclick="previewPrompt()">{{ (i18n or {}).get('psn_preview_prompt','预览 AI 实际收到的提示词') }}</button>
     </div>
     <pre id="prompt-preview" style="display:none;margin-top:.9rem;padding:.75rem;background:var(--bg);border:1px solid var(--bd);border-radius:8px;font-size:.76rem;line-height:1.5;white-space:pre-wrap;max-height:360px;overflow:auto;color:var(--t1)"></pre>
   </div>
@@ -1146,18 +1144,18 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
   <div class="pp-modal">
     <div class="pp-modal-hd">
       <div>
-        <div class="pp-modal-ttl">选择人设</div>
+        <div class="pp-modal-ttl">{{ (i18n or {}).get('psn_select_persona','选择人设') }}</div>
         <div class="pp-modal-sub" id="pp-modal-sub"></div>
       </div>
-      <button class="pp-modal-x" onclick="closePersonaPicker()" title="关闭">✕</button>
+      <button class="pp-modal-x" onclick="closePersonaPicker()" title="{{ (i18n or {}).get('psn_close','关闭') }}">✕</button>
     </div>
     <div class="pp-modal-search">
-      <input id="pp-modal-search" type="search" placeholder="搜索名字 / 角色 / 标签 / ID…" oninput="_ppRenderList()" autocomplete="off">
+      <input id="pp-modal-search" type="search" placeholder="{{ (i18n or {}).get('psn_modal_search_ph','搜索名字 / 角色 / 标签 / ID…') }}" oninput="_ppRenderList()" autocomplete="off">
     </div>
     <div id="pp-modal-list" class="pp-modal-list"></div>
     <div class="pp-modal-foot">
-      <button class="btn btn-sm btn-danger" id="pp-modal-clear" onclick="_ppPick('')">清除绑定（回默认人设）</button>
-      <button class="btn btn-sm" onclick="closePersonaPicker()">取消</button>
+      <button class="btn btn-sm btn-danger" id="pp-modal-clear" onclick="_ppPick('')">{{ (i18n or {}).get('psn_clear_binding','清除绑定（回默认人设）') }}</button>
+      <button class="btn btn-sm" onclick="closePersonaPicker()">{{ (i18n or {}).get('psn_cancel','取消') }}</button>
     </div>
   </div>
 </div>
@@ -1167,8 +1165,8 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
 <!-- P19-3: Inline tag editor -->
 <div id="inline-tag-editor">
   <div class="ite-chips" id="ite-chips"></div>
-  <input class="ite-input" id="ite-input" placeholder="输入标签，Enter 确认…" autocomplete="off">
-  <div class="ite-hint">Enter 添加 · Esc 关闭 · × 删除</div>
+  <input class="ite-input" id="ite-input" placeholder="{{ (i18n or {}).get('psn_ite_ph','输入标签，Enter 确认…') }}" autocomplete="off">
+  <div class="ite-hint">{{ (i18n or {}).get('psn_ite_hint','Enter 添加 · Esc 关闭 · × 删除') }}</div>
 </div>
 
 <script>
@@ -1187,7 +1185,7 @@ function switchTab(id) {
 
 // ── Drawer helpers ────────────────────────────────────────────────────────────
 function _openDrawer(title) {
-  document.getElementById('drawer-title').textContent = title || '编辑人设';
+  document.getElementById('drawer-title').textContent = title || window.T('psn_js_001');
   document.getElementById('drawer-ov').classList.add('open');
   document.getElementById('profile-drawer').classList.add('open');
   switchDTab('basic');
@@ -1205,7 +1203,7 @@ function _openDrawer(title) {
 function _closeDrawer() {
   var dirty = document.getElementById('drawer-dirty');
   if (dirty && dirty.classList.contains('show')) {
-    if (!confirm('有未保存的修改，确认丢弃？')) return false;
+    if (!confirm(window.T('psn_js_002'))) return false;
   }
   document.getElementById('drawer-ov').classList.remove('open');
   document.getElementById('profile-drawer').classList.remove('open');
@@ -1261,11 +1259,11 @@ function _profileInitial(name) { return (name || '?')[0].toUpperCase(); }
 
 // ── Source badge map ──────────────────────────────────────────────────────────
 const _SRC = {
-  mrpa:      ['src-mrpa',      '📦 已导入'],
-  config:    ['src-config',    '📄 基础层'],
-  canonical: ['src-canonical', '✅ 已上线'],
-  runtime:   ['src-runtime',   '🔄 运行时'],
-  studio:    ['src-studio',    '✏️ 草稿'],
+  mrpa:      ['src-mrpa',      window.T('psn_js_003')],
+  config:    ['src-config',    window.T('psn_js_004')],
+  canonical: ['src-canonical', window.T('psn_js_005')],
+  runtime:   ['src-runtime',   window.T('psn_js_006')],
+  studio:    ['src-studio',    window.T('psn_js_007')],
 };
 
 // ── Toast system ──────────────────────────────────────────────────────────────
@@ -1303,7 +1301,7 @@ function _renderDashboard(d) {
   if (_platEl) {
     _platEl.innerHTML = (platCount || '—')
       + (_allAccArr.length ? '<span style="display:block;font-size:.56em;font-weight:400;margin-top:2px;opacity:.8">'
-        + _onlineAccCnt + '/' + _allAccArr.length + '&nbsp;账号在线</span>' : '');
+        + _onlineAccCnt + '/' + _allAccArr.length + window.T('psn_js_008') : '');
   }
   // Semantic color classes on hero-stat cards
   var _semMap = [
@@ -1324,10 +1322,10 @@ function _renderDashboard(d) {
   const unsyncEl = document.getElementById('unsync-banner');
   const utextEl  = document.getElementById('unsync-text');
   const u = pf.unsynced || 0;
-  const lastSync = d.last_sync_at ? new Date(d.last_sync_at * 1000).toLocaleString() : '从未';
+  const lastSync = d.last_sync_at ? window.wsFmtDateTime(d.last_sync_at) : window.T('psn_js_009');
   if (u > 0 && unsyncEl) {
     unsyncEl.classList.add('show');
-    if (utextEl) utextEl.textContent = u + ' 个 profile 已修改但未同步到 personas.yaml（上次同步：' + lastSync + '）';
+    if (utextEl) utextEl.textContent = u + window.T('psn_js_010') + lastSync + '）';
   } else if (unsyncEl) { unsyncEl.classList.remove('show'); }
 
   // P20-1: Build platform binding index
@@ -1356,9 +1354,9 @@ function _renderDashboard(d) {
   if (_apsBar) {
     if (_apsItems.length) {
       _apsBar.className = 'aps-bar show';
-      _apsBar.innerHTML = '<span class="aps-lbl">当前激活</span>'
+      _apsBar.innerHTML = window.T('psn_js_011')
         + _apsItems.map(function(it) {
-            return '<span class="aps-item" onclick="' + (it.pid ? 'editProfile(\'' + it.pid.replace(/'/g,"\\'") + '\')' : 'void 0') + '" title="' + it.name + '—点击编辑">'
+            return '<span class="aps-item" onclick="' + (it.pid ? 'editProfile(\'' + it.pid.replace(/'/g,"\\'") + '\')' : 'void 0') + '" title="' + it.name + window.T('psn_js_012')
               + '<span class="aps-plat">' + it.plat + '</span>'
               + '<span class="aps-name">' + it.name + '</span>'
               + '</span>';
@@ -1385,7 +1383,7 @@ function _renderDashboard(d) {
       var initials = (a.label || a.account_id || '?').slice(0,2).toUpperCase();
       var curPid = (a.persona_ids && a.persona_ids[0]) || '';
       var assignBtn = platform
-        ? '<button class="btn btn-sm" style="font-size:.67rem;padding:.15rem .42rem' + (!hasP ? ';background:rgba(59,130,246,.1);border-color:rgba(59,130,246,.3);color:#3b82f6' : '') + '" onclick="openPersonaPicker(\'' + platform + '\',\'' + String(a.account_id).replace(/'/g,"\\'") + '\',\'' + String(curPid).replace(/'/g,"\\'") + '\')">' + (hasP ? '更换' : '指定人设') + '</button>'
+        ? '<button class="btn btn-sm" style="font-size:.67rem;padding:.15rem .42rem' + (!hasP ? ';background:rgba(59,130,246,.1);border-color:rgba(59,130,246,.3);color:#3b82f6' : '') + '" onclick="openPersonaPicker(\'' + platform + '\',\'' + String(a.account_id).replace(/'/g,"\\'") + '\',\'' + String(curPid).replace(/'/g,"\\'") + '\')">' + (hasP ? window.T('psn_js_013') : window.T('psn_js_014')) + '</button>'
         : '';
       var statusClass = a.status === 'active' ? 'online' : (a.status === 'error' ? 'error' : 'offline');
       h += '<div class="acc-card' + (!hasP ? ' no-pf' : '') + '">';
@@ -1395,7 +1393,7 @@ function _renderDashboard(d) {
       h += '<span class="acc-sdot ' + statusClass + '" title="' + (a.status || 'unknown') + '"></span>';
       h += '</div>';
       h += '<div class="acc-bottom">';
-      h += hasP ? '<span class="tag tag-green acc-p-name" style="font-size:.69rem">' + pname + '</span>' : '<span class="acc-no-p">⚠ 未分配人设</span>';
+      h += hasP ? '<span class="tag tag-green acc-p-name" style="font-size:.69rem">' + pname + '</span>' : window.T('psn_js_015');
       h += assignBtn;
       h += '</div></div>';
     });
@@ -1403,13 +1401,13 @@ function _renderDashboard(d) {
     return h;
   }
 
-  html += _renderAccSection(d.tg_accounts,   '🔵 Telegram 账号',     '#2CA5E0', 'tg');
-  html += _renderAccSection(d.mrpa_accounts, '📦 Messenger RPA 账号', '#0866FF', 'mrpa');
-  html += _renderAccSection(d.wa_accounts,   '💬 WhatsApp RPA 账号',  '#25D366', 'wa');
-  html += _renderAccSection(d.line_rpa,      '🟢 LINE RPA 账号',      '#00C300', '');
+  html += _renderAccSection(d.tg_accounts,   window.T('psn_js_016'),     '#2CA5E0', 'tg');
+  html += _renderAccSection(d.mrpa_accounts, window.T('psn_js_017'), '#0866FF', 'mrpa');
+  html += _renderAccSection(d.wa_accounts,   window.T('psn_js_018'),  '#25D366', 'wa');
+  html += _renderAccSection(d.line_rpa,      window.T('psn_js_019'),      '#00C300', '');
 
   if (!html) {
-    html = '<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="42" height="42"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><h4>暂无接入平台</h4><p>请在 config.yaml 中配置账号后重启</p></div>';
+    html = window.T('psn_js_020');
   }
   wrap.innerHTML = html;
 }
@@ -1422,7 +1420,7 @@ function _populateBindingsTabSelects() {
     var sel = document.getElementById(selId);
     if (!sel) return;
     var prev = sel.value;
-    sel.innerHTML = '<option value="">' + (selId.indexOf('bulk') >= 0 ? '（选择目标 profile）' : '（使用默认人设）') + '</option>';
+    sel.innerHTML = '<option value="">' + (selId.indexOf('bulk') >= 0 ? window.T('psn_js_021') : window.T('psn_js_022')) + '</option>';
     _allProfiles.forEach(function(p) {
       var opt = document.createElement('option');
       opt.value = p.id;
@@ -1434,8 +1432,8 @@ function _populateBindingsTabSelects() {
   var scopeSel = document.getElementById('bulk-scope-b');
   if (scopeSel) {
     var allTags = [...new Set(_allProfiles.flatMap(function(p){ return p.tags || []; }))].sort();
-    scopeSel.innerHTML = '<option value="all_bindings">全部已绑定会话</option>' +
-      allTags.map(function(t){ return '<option value="tag:' + t + '">已绑定且标签为「' + t + '」的会话</option>'; }).join('');
+    scopeSel.innerHTML = window.T('psn_js_023') +
+      allTags.map(function(t){ return '<option value="tag:' + t + window.T('psn_js_024') + t + window.T('psn_js_025'); }).join('');
   }
 }
 
@@ -1444,33 +1442,33 @@ async function bindProfileToChatB() {
   const profileId = (document.getElementById('bind-profile-id-b') || {}).value || '';
   const cid = chatId.trim();
   const st = document.getElementById('bind-status-b');
-  if (!cid) { if(st){st.textContent='Chat ID 不能为空';st.className='tts-status err';} return; }
+  if (!cid) { if(st){st.textContent=window.T('psn_js_026');st.className='tts-status err';} return; }
   let personaData = {};
   if (profileId) {
     try { const r = await fetch('/api/personas/profiles/' + encodeURIComponent(profileId)); const d = await r.json(); personaData = d.persona || {}; }
-    catch(e) { if(st){st.textContent='加载 profile 失败';st.className='tts-status err';} return; }
+    catch(e) { if(st){st.textContent=window.T('psn_js_027');st.className='tts-status err';} return; }
   }
-  if(st){st.textContent='绑定中…';st.className='tts-status';}
+  if(st){st.textContent=window.T('psn_js_028');st.className='tts-status';}
   try {
     const r = await fetch('/api/persona/bind', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:cid,persona:personaData})});
     const d = await r.json();
-    if(d.ok){ _toast('已绑定 ' + cid,'ok'); if(st){st.textContent='';} _reloadBindingsList(); loadProfileList(); refreshStatus(); }
-    else { if(st){st.textContent='绑定失败';st.className='tts-status err';} }
-  } catch(e){ if(st){st.textContent='请求失败: '+e;st.className='tts-status err';} }
+    if(d.ok){ _toast(window.T('psn_js_029') + cid,'ok'); if(st){st.textContent='';} _reloadBindingsList(); loadProfileList(); refreshStatus(); }
+    else { if(st){st.textContent=window.T('psn_js_030');st.className='tts-status err';} }
+  } catch(e){ if(st){st.textContent=window.T('psn_js_031')+e;st.className='tts-status err';} }
 }
 
 async function bulkBindB(dryRun) {
   const pid = (document.getElementById('bulk-profile-id-b')||{}).value;
   const scope = (document.getElementById('bulk-scope-b')||{}).value || 'all_bindings';
   const st = document.getElementById('bulk-status-b');
-  if(!pid){ if(st){st.textContent='请先选择目标 profile';st.className='tts-status err';} return; }
-  if(st){st.textContent=dryRun?'预览中…':'切换中…';st.className='tts-status';}
+  if(!pid){ if(st){st.textContent=window.T('psn_js_032');st.className='tts-status err';} return; }
+  if(st){st.textContent=dryRun?window.T('psn_js_033'):window.T('psn_js_034');st.className='tts-status';}
   try {
     const r = await fetch('/api/personas/bulk-bind',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile_id:pid,scope,dry_run:dryRun})});
     const d = await r.json();
     if(d.ok){
       if(dryRun){
-      if(st) st.textContent='预览：将影响 ' + d.affected + ' 个会话绑定';
+      if(st) st.textContent=window.T('psn_js_035') + d.affected + window.T('psn_js_036');
       var box = document.getElementById('bulk-preview-box');
       if (box && d.preview && d.preview.length) {
         box.innerHTML = d.preview.map(function(item) {
@@ -1482,9 +1480,9 @@ async function bulkBindB(dryRun) {
         box.classList.add('show');
       }
     }
-      else{ _toast('已批量切换 '+d.affected+' 个会话绑定','ok'); if(st){st.textContent='';} _reloadBindingsList(); refreshStatus(); }
-    } else { if(st){st.textContent='切换失败';st.className='tts-status err';} }
-  } catch(e){ if(st){st.textContent='请求失败: '+e;st.className='tts-status err';} }
+      else{ _toast(window.T('psn_js_037')+d.affected+window.T('psn_js_036'),'ok'); if(st){st.textContent='';} _reloadBindingsList(); refreshStatus(); }
+    } else { if(st){st.textContent=window.T('psn_js_038');st.className='tts-status err';} }
+  } catch(e){ if(st){st.textContent=window.T('psn_js_031')+e;st.className='tts-status err';} }
 }
 
 // ── P14: Card quick actions ──────────────────────────────────────────────────
@@ -1492,24 +1490,24 @@ function _copyProfileId(pid) {
   var fallback = function() {
     var el = document.createElement('input'); el.value = pid;
     document.body.appendChild(el); el.select(); document.execCommand('copy'); el.remove();
-    _toast('已复制 ID: ' + pid, 'ok');
+    _toast(window.T('psn_js_039') + pid, 'ok');
   };
   if (navigator.clipboard) {
-    navigator.clipboard.writeText(pid).then(function(){ _toast('已复制 ID: ' + pid, 'ok'); }).catch(fallback);
+    navigator.clipboard.writeText(pid).then(function(){ _toast(window.T('psn_js_039') + pid, 'ok'); }).catch(fallback);
   } else { fallback(); }
 }
 
 async function _cloneProfile(pid) {
   try {
     const r = await fetch('/api/personas/profiles/' + encodeURIComponent(pid));
-    if (!r.ok) { _toast('加载失败', 'err'); return; }
+    if (!r.ok) { _toast(window.T('psn_js_040'), 'err'); return; }
     const d = await r.json();
     const p = d.persona || {};
     // Reset to new-profile mode
     _editingProfileId = null;
     var idEl = document.getElementById('pe-id');
     if (idEl) { idEl.value = ''; idEl.readOnly = false; }
-    document.getElementById('pe-name').value = (p.name || '') + ' (副本)';
+    document.getElementById('pe-name').value = (p.name || '') + window.T('psn_js_041');
     document.getElementById('pe-role').value = p.role || '';
     document.getElementById('pe-personality').value = typeof p.personality === 'object' ? (p.personality.style || JSON.stringify(p.personality)) : (p.personality || '');
     document.getElementById('pe-tags').value = (p.tags || []).join(', ');
@@ -1526,10 +1524,10 @@ async function _cloneProfile(pid) {
     document.getElementById('pe-delete-btn').style.display = 'none';
     document.getElementById('pe-undo-btn').style.display = 'none';
     document.getElementById('pe-status').textContent = '';
-    _openDrawer('克隆人设 — 请设置新 ID');
+    _openDrawer(window.T('psn_js_042'));
     _markDrawerDirty({target: document.getElementById('pe-name')});
     if (idEl) idEl.focus();
-  } catch(e) { _toast('克隆失败: ' + e, 'err'); }
+  } catch(e) { _toast(window.T('psn_js_043') + e, 'err'); }
 }
 
 // ── P14: Freshness timer ──────────────────────────────────────────────────────
@@ -1540,7 +1538,7 @@ function _startFreshnessTimer() {
     var el = document.getElementById('dash-freshness');
     if (!el) return;
     var sec = Math.round((Date.now() - _lastRefreshAt) / 1000);
-    el.textContent = sec < 60 ? sec + 's 前' : Math.floor(sec / 60) + 'min 前';
+    el.textContent = sec < 60 ? sec + window.T('psn_js_044') : Math.floor(sec / 60) + window.T('psn_js_045');
   }, 2000);
 }
 
@@ -1552,7 +1550,7 @@ function _detectPlatform(cid) {
   if (c.indexOf('wa:')===0 || c.indexOf('whatsapp:')===0) return 'wa';
   try { return parseInt(cid, 10) < 0 ? 'tg-group' : 'tg'; } catch(e) { return 'other'; }
 }
-const _PLAT_LABEL = {'tg':'🔵 TG私聊','tg-group':'🔵 TG群组','line':'🟢 LINE','mrpa':'📦 Messenger','wa':'💬 WhatsApp','other':'● 其他'};
+const _PLAT_LABEL = {'tg':window.T('psn_js_046'),'tg-group':window.T('psn_js_047'),'line':'🟢 LINE','mrpa':'📦 Messenger','wa':'💬 WhatsApp','other':window.T('psn_js_048')};
 
 function _renderBindingsList(bindings) {
   var el = document.getElementById('bindings-list-body');
@@ -1560,7 +1558,7 @@ function _renderBindingsList(bindings) {
   if (!el) return;
   var entries = Object.entries(bindings || {});
   if (!entries.length) {
-    el.innerHTML = '<div style="color:var(--t2);font-size:.82rem;text-align:center;padding:1rem 0">暂无会话级绑定，全部使用默认人设</div>';
+    el.innerHTML = window.T('psn_js_049');
     if (badge) badge.textContent = '';
     return;
   }
@@ -1569,7 +1567,7 @@ function _renderBindingsList(bindings) {
   (_allProfiles || []).forEach(function(p){ pmap[p.id] = p.name || p.id; });
   el.innerHTML = entries.map(function(pair) {
     var cid = pair[0], pid = pair[1];
-    var pname = typeof pid === 'object' ? (pid.name || pid.id || '?') : (pmap[pid] || pid || '默认');
+    var pname = typeof pid === 'object' ? (pid.name || pid.id || '?') : (pmap[pid] || pid || window.T('psn_js_050'));
     var pidStr = typeof pid === 'object' ? (pid.id || '') : pid;
     var plat = _detectPlatform(cid);
     var platLabel = _PLAT_LABEL[plat] || plat;
@@ -1580,8 +1578,8 @@ function _renderBindingsList(bindings) {
       + '<div style="font-size:.82rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + pname + '</div>'
       + '<div style="font-size:.71rem;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + cid + (pidStr ? ' · ' + pidStr : '') + '</div>'
       + '</div>'
-      + '<select class="bind-switch" title="切换此会话的人设" data-cid="' + cidEsc + '" data-curr="' + pidStr.replace(/"/g,'&quot;') + '" onfocus="_populateSwitchSelect(this)" onchange="_switchBinding(this)"><option value="">切换人设…</option></select>'
-      + '<button class="bind-del" data-cid="' + cidEsc + '" onclick="_unbindInline(this)">解绑</button>'
+      + window.T('psn_js_051') + cidEsc + '" data-curr="' + pidStr.replace(/"/g,'&quot;') + window.T('psn_js_052')
+      + '<button class="bind-del" data-cid="' + cidEsc + window.T('psn_js_053')
       + '</div>';
   }).join('');
 }
@@ -1620,19 +1618,19 @@ function _unbindInline(btn) {
   var conf = document.createElement('div');
   conf.className = 'bind-confirm-row';
   var cidDisp = cid.length > 24 ? cid.slice(0,24)+'…' : cid;
-  conf.innerHTML = '确认解绑 <code style="background:var(--bg2);padding:.05rem .3rem;border-radius:3px;font-size:.72rem">' + cidDisp + '</code>？'
-    + '<button class="btn btn-sm btn-danger" style="font-size:.7rem;padding:.14rem .42rem" onclick="_doUnbind(\'' + cid.replace(/'/g,"\\'") + '\',this)">确认</button>'
-    + '<button class="btn btn-sm" style="font-size:.7rem;padding:.14rem .42rem" onclick="this.closest(\'.bind-confirm-row\').remove()">取消</button>';
+  conf.innerHTML = window.T('psn_js_054') + cidDisp + '</code>？'
+    + '<button class="btn btn-sm btn-danger" style="font-size:.7rem;padding:.14rem .42rem" onclick="_doUnbind(\'' + cid.replace(/'/g,"\\'") + '\',this)">' + window.T('psn_js_058') + '</button>'
+    + '<button class="btn btn-sm" style="font-size:.7rem;padding:.14rem .42rem" onclick="this.closest(\'.bind-confirm-row\').remove()">' + window.T('psn_js_354') + '</button>';
   row.after(conf);
 }
 
 async function _doUnbind(cid, btn) {
-  btn.disabled = true; btn.textContent = '解绑中…';
+  btn.disabled = true; btn.textContent = window.T('psn_js_055');
   try {
     await fetch('/api/persona/unbind', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:cid})});
-    _toast('已解绑 ' + cid, 'info');
+    _toast(window.T('psn_js_056') + cid, 'info');
     _reloadBindingsList(); loadProfileList(); refreshStatus();
-  } catch(e) { _toast('解绑失败: ' + e, 'err'); btn.disabled = false; btn.textContent = '确认'; }
+  } catch(e) { _toast(window.T('psn_js_057') + e, 'err'); btn.disabled = false; btn.textContent = window.T('psn_js_058'); }
 }
 
 // ── P12: Dashboard refresh with spin ─────────────────────────────────────────
@@ -1693,15 +1691,15 @@ async function loadDefaultPersonaForm() {
     _dpSet('p-language', p.language || '');
     _dpSet('p-reply-length', p.reply_length || (p.speaking && p.speaking.reply_length) || 'balanced');
     var src = document.getElementById('dp-source');
-    if (src) src.textContent = p.name ? ('当前：' + p.name) : '';
+    if (src) src.textContent = p.name ? (window.T('psn_js_059') + p.name) : '';
   } catch (e) {
-    _toast('加载默认人设失败: ' + e, 'err');
+    _toast(window.T('psn_js_060') + e, 'err');
   }
 }
 
 async function saveDefaultPersona() {
   const st = document.getElementById('save-status');
-  st.textContent = '保存中…'; st.className = 'tts-status';
+  st.textContent = window.T('psn_js_061'); st.className = 'tts-status';
   try {
     const r = await fetch('/api/persona/update-default', {
       method: 'POST',
@@ -1710,12 +1708,12 @@ async function saveDefaultPersona() {
     });
     const d = await r.json();
     if (d.ok) {
-      _toast('已保存默认人设', 'ok'); st.textContent = '✓ 已保存'; st.className = 'tts-status ok';
+      _toast(window.T('psn_js_062'), 'ok'); st.textContent = window.T('psn_js_063'); st.className = 'tts-status ok';
       loadDefaultPersonaForm();
     }
-    else { st.textContent = '保存失败: ' + (d.detail || ''); st.className = 'tts-status err'; }
+    else { st.textContent = window.T('psn_js_064') + (d.detail || ''); st.className = 'tts-status err'; }
   } catch(e) {
-    st.textContent = '请求失败: ' + e; st.className = 'tts-status err';
+    st.textContent = window.T('psn_js_031') + e; st.className = 'tts-status err';
   }
   setTimeout(() => { st.textContent = ''; }, 3500);
 }
@@ -1723,34 +1721,34 @@ async function saveDefaultPersona() {
 async function previewPrompt() {
   const box = document.getElementById('prompt-preview');
   box.style.display = 'block';
-  box.textContent = '生成中…';
+  box.textContent = window.T('psn_js_065');
   try {
     const r = await fetch('/api/persona/preview-prompt');
     const d = await r.json();
-    box.textContent = d.prompt || '(空)';
-  } catch(e) { box.textContent = '请求失败: ' + e; }
+    box.textContent = d.prompt || window.T('psn_js_066');
+  } catch(e) { box.textContent = window.T('psn_js_031') + e; }
 }
 
 async function unbindChat(chatId) {
-  if (!confirm('确认解绑 chat ' + chatId + ' 的人设？')) return;
+  if (!confirm(window.T('psn_js_067') + chatId + window.T('psn_js_068'))) return;
   try {
     await fetch('/api/persona/unbind', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:chatId})});
-    _toast('已解绑 ' + chatId, 'info');
+    _toast(window.T('psn_js_056') + chatId, 'info');
     _reloadBindingsList(); loadProfileList(); refreshStatus();
-  } catch(e) { _toast('解绑失败: ' + e, 'err'); }
+  } catch(e) { _toast(window.T('psn_js_057') + e, 'err'); }
 }
 
 // ── Live status panel ────────────────────────────────────────
 async function refreshStatus() {
   const body = document.getElementById('status-body');
-  if (body) body.textContent = '刷新中…';
+  if (body) body.textContent = window.T('psn_js_069');
   _lastRefreshAt = Date.now();
   try {
     const r = await fetch('/api/personas/status');
     if (!r.ok) {
-      if (body) body.textContent = '加载失败 ' + r.status;
+      if (body) body.textContent = window.T('psn_js_070') + r.status;
       var _dpErr = document.getElementById('dashboard-platforms');
-      if (_dpErr) _dpErr.innerHTML = '<div style="color:#ef4444;font-size:.82rem;padding:1.5rem 0;text-align:center">⚠ 状态加载失败 (HTTP ' + r.status + ')&nbsp;&nbsp;<button class="btn btn-sm" onclick="refreshStatus()" style="font-size:.72rem">重试</button></div>';
+      if (_dpErr) _dpErr.innerHTML = window.T('psn_js_071') + r.status + window.T('psn_js_072');
       _renderDashboard({profiles:{count:0,unsynced:0},bindings:{count:0},tg_accounts:[],mrpa_accounts:[],wa_accounts:[],line_rpa:[]});
       return;
     }
@@ -1762,7 +1760,7 @@ async function refreshStatus() {
     // P7-D: source breakdown bar
     const sb = d.source_breakdown || {};
     const sbOrder = ['canonical','studio','config','runtime','mrpa'];
-    const sbLabels = {canonical:'⭐ canonical',studio:'✏️ 已编辑',config:'📄 config',runtime:'🔄 runtime',mrpa:'📦 Messenger'};
+    const sbLabels = {canonical:'⭐ canonical',studio:window.T('psn_js_073'),config:'📄 config',runtime:'🔄 runtime',mrpa:'📦 Messenger'};
     const sbClass  = {canonical:'src-canonical',studio:'src-studio',config:'src-config',runtime:'src-runtime',mrpa:'src-mrpa'};
     let sbHtml = sbOrder.filter(k => sb[k] > 0).map(k =>
       `<span class="src-badge ${sbClass[k]}">${sbLabels[k]} <strong>${sb[k]}</strong></span>`
@@ -1774,26 +1772,26 @@ async function refreshStatus() {
     if (unsyncN > 0) {
       const syncTs = d.canonical_last_sync_ts || 0;
       const syncLabel = d.canonical_last_sync
-        ? '上次同步: ' + d.canonical_last_sync
-        : '从未同步到 personas.yaml';
+        ? window.T('psn_js_074') + d.canonical_last_sync
+        : window.T('psn_js_075');
       unsyncHtml = `<div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.5rem;padding:.4rem .7rem;border-radius:7px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.28)">
-        <span style="font-size:.78rem;color:#d97706">⚠️ <strong>${unsyncN}</strong> 个运营人设未同步到 personas.yaml — ${syncLabel}</span>
-        <button class="btn btn-sm" style="font-size:.7rem;padding:.18rem .55rem;background:rgba(59,130,246,.1);border-color:rgba(59,130,246,.3);color:#3b82f6;flex-shrink:0" onclick="syncToConfig()">立即同步</button>
+        <span style="font-size:.78rem;color:#d97706">⚠️ <strong>${unsyncN}</strong> ${window.T('psn_js_342')} — ${syncLabel}</span>
+        <button class="btn btn-sm" style="font-size:.7rem;padding:.18rem .55rem;background:rgba(59,130,246,.1);border-color:rgba(59,130,246,.3);color:#3b82f6;flex-shrink:0" onclick="syncToConfig()">${window.T('psn_js_343')}</button>
       </div>`;
     } else if (d.canonical_last_sync) {
-      unsyncHtml = `<div style="font-size:.74rem;color:var(--t2);margin-bottom:.4rem">✓ personas.yaml 已同步 — ${d.canonical_last_sync}</div>`;
+      unsyncHtml = `<div style="font-size:.74rem;color:var(--t2);margin-bottom:.4rem">✓ personas.yaml ${window.T('psn_js_344')} — ${d.canonical_last_sync}</div>`;
     }
 
     let html = `<div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:.4rem">
-      <span><strong>${d.total_profiles}</strong> 个 profiles</span>
-      <span><strong>${d.total_bindings}</strong> 个会话绑定</span>
-      <span>域默认：<strong>${d.domain_persona_name || '（未设置）'}</strong></span>
+      <span><strong>${d.total_profiles}</strong> ${window.T('psn_js_345')}</span>
+      <span><strong>${d.total_bindings}</strong> ${window.T('psn_js_346')}</span>
+      <span>${window.T('psn_js_347')}<strong>${d.domain_persona_name || window.T('psn_js_348')}</strong></span>
     </div>`;
     if (sbHtml) html += `<div style="display:flex;flex-wrap:wrap;gap:.3rem;margin-bottom:.5rem">${sbHtml}</div>`;
     html += unsyncHtml;
 
     if (d.profiles_in_use && d.profiles_in_use.length) {
-      html += `<div style="margin-bottom:.5rem">活跃 profiles：`;
+      html += `<div style="margin-bottom:.5rem">${window.T('psn_js_349')}`;
       d.profiles_in_use.forEach(pid => {
         html += `<span class="tag tag-green" style="margin-right:.3rem">${pid}</span>`;
       });
@@ -1804,7 +1802,7 @@ async function refreshStatus() {
       if (!accs || !accs.length) return '';
       let s = `<div style="margin-top:.5rem"><strong>${label}</strong></div>`;
       accs.forEach(a => {
-        const pname = a.active_profile ? a.active_profile.name : '（无 profile）';
+        const pname = a.active_profile ? a.active_profile.name : window.T('psn_js_076');
         const pids = (a.persona_ids || []).join(', ') || '—';
         s += `<div class="account-row" style="padding:.35rem 0">
           <div style="flex:1">
@@ -1817,16 +1815,16 @@ async function refreshStatus() {
       });
       return s;
     };
-    html += renderAccounts(d.tg_accounts, 'Telegram 账号');
-    html += renderAccounts(d.mrpa_accounts, 'Messenger RPA 账号');
+    html += renderAccounts(d.tg_accounts, window.T('psn_js_077'));
+    html += renderAccounts(d.mrpa_accounts, window.T('psn_js_078'));
 
     // P10-B: WA accounts with inline assign-profile button
     if (d.wa_accounts && d.wa_accounts.length) {
-      html += `<div style="margin-top:.5rem"><strong>WhatsApp RPA 账号</strong></div>`;
+      html += `<div style="margin-top:.5rem"><strong>${window.T('psn_js_350')}</strong></div>`;
       d.wa_accounts.forEach(a => {
         const hasProfile = !!a.active_profile;
-        const pname = hasProfile ? a.active_profile.name : '无 profile';
-        const btnHtml = `<button class="btn btn-sm" style="font-size:.68rem;padding:.15rem .45rem;background:rgba(59,130,246,.1);border-color:rgba(59,130,246,.3);color:#3b82f6;flex-shrink:0" onclick="_assignWaProfile('${a.account_id}')" title="为该 WA 账号指定人设 profile">${hasProfile ? '更换' : '指定人设'}</button>`;
+        const pname = hasProfile ? a.active_profile.name : window.T('psn_js_079');
+        const btnHtml = `<button class="btn btn-sm" style="font-size:.68rem;padding:.15rem .45rem;background:rgba(59,130,246,.1);border-color:rgba(59,130,246,.3);color:#3b82f6;flex-shrink:0" onclick="_assignWaProfile('${a.account_id}')" title="${window.T('psn_js_351')}">${hasProfile ? window.T('psn_js_013') : window.T('psn_js_014')}</button>`;
         html += `<div class="account-row" style="padding:.35rem 0">
           <div style="flex:1">
             <span style="font-weight:600">${a.label}</span>
@@ -1845,14 +1843,14 @@ async function refreshStatus() {
       html += `<div style="margin-top:.6rem;padding:.5rem .7rem;border-radius:8px;background:${allOk ? 'rgba(16,185,129,.06)' : 'rgba(245,158,11,.06)'};border:1px solid ${allOk ? 'rgba(16,185,129,.2)' : 'rgba(245,158,11,.2)'}">
         <div style="font-size:.78rem;font-weight:600;margin-bottom:.3rem">
           🎭 Messenger reply_profiles → PersonaManager&nbsp;
-          <span class="tag ${allOk ? 'tag-green' : 'tag-gray'}">${imp}/${total} 已导入</span>
+          <span class="tag ${allOk ? 'tag-green' : 'tag-gray'}">${imp}/${total} ${window.T('psn_js_352')}</span>
         </div>`;
       d.mrpa_reply_profiles.forEach(rp => {
         html += `<div style="display:flex;align-items:center;gap:.5rem;font-size:.76rem;padding:.18rem 0">
-          <span class="tag ${rp.imported ? 'tag-green' : 'tag-gray'}" style="font-size:.65rem">${rp.imported ? '✓ 已导入' : '⏳ 未导入'}</span>
+          <span class="tag ${rp.imported ? 'tag-green' : 'tag-gray'}" style="font-size:.65rem">${rp.imported ? window.T('psn_js_082') : window.T('psn_js_083')}</span>
           <span style="font-weight:600">${rp.name}</span>
           <span style="color:var(--t2)">${rp.id}</span>
-          ${rp.imported ? '<span style="color:var(--t3);font-size:.7rem">可在此页编辑</span>' : ''}
+          ${rp.imported ? window.T('psn_js_353') : ''}
         </div>`;
       });
       html += `</div>`;
@@ -1863,7 +1861,7 @@ async function refreshStatus() {
     const dot = document.getElementById('td-profiles');
     if (dot) dot.style.display = (d.unsynced_studio_count > 0) ? 'inline-block' : 'none';
   } catch(e) {
-    if (body) body.textContent = '请求失败: ' + e;
+    if (body) body.textContent = window.T('psn_js_031') + e;
   }
 }
 
@@ -1871,12 +1869,12 @@ async function refreshStatus() {
 let _bindingsLoaded = false;
 
 const _PLATFORM_LABEL = {
-  tg_private: '🔵 Telegram 私聊',
-  tg_group:   '🔷 Telegram 群组',
+  tg_private: window.T('psn_js_080'),
+  tg_group:   window.T('psn_js_081'),
   line:       '🟢 LINE',
   mrpa:       '📦 Messenger',
   wa:         '💬 WhatsApp',
-  other:      '❓ 其他',
+  other:      window.T('psn_js_082'),
 };
 
 async function _onBindingsToggle(el) {
@@ -1885,18 +1883,18 @@ async function _onBindingsToggle(el) {
   const body = document.getElementById('pe-bindings-body');
   const pid = _editingProfileId || document.getElementById('pe-id').value.trim();
   if (!pid || !body) return;
-  body.textContent = '加载中…';
+  body.textContent = window.T('psn_js_083');
   try {
     const r = await fetch('/api/personas/profiles/' + encodeURIComponent(pid) + '/bindings');
-    if (!r.ok) { body.textContent = '加载失败 ' + r.status; return; }
+    if (!r.ok) { body.textContent = window.T('psn_js_070') + r.status; return; }
     const d = await r.json();
 
     // Update badge in summary
     const badge = document.getElementById('pe-bindings-badge');
-    if (badge) badge.textContent = d.total > 0 ? '(' + d.total + ')' : '(无绑定)';
+    if (badge) badge.textContent = d.total > 0 ? '(' + d.total + ')' : window.T('psn_js_084');
 
     if (d.total === 0) {
-      body.innerHTML = '<span style="color:var(--t2)">该 profile 未绑定任何会话</span>';
+      body.innerHTML = window.T('psn_js_085');
       return;
     }
 
@@ -1918,25 +1916,25 @@ async function _onBindingsToggle(el) {
         const cidEsc = b.chat_id.replace(/'/g, "\\'");
         html += `<div class="pbind-row">`
           + `<span class="tag" style="font-size:.7rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${b.chat_id}">${cidDisplay}${typeTag}</span>`
-          + `<button class="pbind-del" onclick="_unbindFromPreview('${cidEsc}',this)">解绑</button>`
+          + `<button class="pbind-del" onclick="_unbindFromPreview('${cidEsc}',this)">${window.T('psn_js_086')}</button>`
           + `</div>`;
       });
       html += '</div>';
     });
     body.innerHTML = html;
-  } catch(e) { body.textContent = '请求失败: ' + e; }
+  } catch(e) { body.textContent = window.T('psn_js_031') + e; }
 }
 
 async function _unbindFromPreview(cid, btn) {
-  if (btn) { btn.disabled = true; btn.textContent = '解绑中…'; }
+  if (btn) { btn.disabled = true; btn.textContent = window.T('psn_js_055'); }
   try {
     await fetch('/api/persona/unbind', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:cid})});
-    _toast('已解绑 ' + cid, 'info');
+    _toast(window.T('psn_js_056') + cid, 'info');
     _bindingsLoaded = false;
     const panel = document.getElementById('pe-bindings-panel');
     if (panel && panel.open) _onBindingsToggle(panel);
     _reloadBindingsList(); loadProfileList(); refreshStatus();
-  } catch(e) { _toast('解绑失败: ' + e, 'err'); if (btn) { btn.disabled = false; btn.textContent = '解绑'; } }
+  } catch(e) { _toast(window.T('psn_js_057') + e, 'err'); if (btn) { btn.disabled = false; btn.textContent = window.T('psn_js_086'); } }
 }
 
 // ── P9-C: Prompt preview accordion (lazy) ──────────────────────────────────
@@ -1948,20 +1946,20 @@ async function _onPromptToggle(el) {
   const body = document.getElementById('pe-prompt-body');
   const pid = _editingProfileId || document.getElementById('pe-id').value.trim();
   if (!pid || !body) return;
-  body.innerHTML = '加载中…';
+  body.innerHTML = window.T('psn_js_083');
   try {
     const r = await fetch('/api/personas/profiles/' + encodeURIComponent(pid) + '/prompt-preview?detail=both');
-    if (!r.ok) { body.textContent = '加载失败 ' + r.status; return; }
+    if (!r.ok) { body.textContent = window.T('psn_js_070') + r.status; return; }
     const d = await r.json();
     const esc = s => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     body.innerHTML =
       '<div style="display:flex;gap:.5rem;margin-bottom:.5rem;align-items:center">'
-      + '<button class="btn btn-sm" style="font-size:.7rem;padding:.18rem .5rem" id="pp-tab-full" onclick="_ppTab(&apos;full&apos;)">全量</button>'
-      + '<button class="btn btn-sm" style="font-size:.7rem;padding:.18rem .5rem" id="pp-tab-compact" onclick="_ppTab(&apos;compact&apos;)">简洁</button>'
+      + window.T('psn_js_087')
+      + window.T('psn_js_088')
       + '</div>'
       + '<div id="pp-full"><pre style="white-space:pre-wrap;font-size:.73rem;background:var(--bg2);padding:.5rem;border-radius:6px;margin:0;max-height:240px;overflow-y:auto;line-height:1.55">' + esc(d.full) + '</pre></div>'
       + '<div id="pp-compact" style="display:none"><pre style="white-space:pre-wrap;font-size:.73rem;background:var(--bg2);padding:.5rem;border-radius:6px;margin:0;max-height:240px;overflow-y:auto;line-height:1.55">' + esc(d.compact) + '</pre></div>';
-  } catch(e) { body.textContent = '请求失败: ' + e; }
+  } catch(e) { body.textContent = window.T('psn_js_031') + e; }
 }
 
 function _ppTab(which) {
@@ -1975,25 +1973,25 @@ function _resetEditorExtras() {
   _promptLoaded = false;
   const bp = document.getElementById('pe-bindings-panel');
   const pp = document.getElementById('pe-prompt-panel');
-  if (bp) { bp.removeAttribute('open'); document.getElementById('pe-bindings-body').textContent = '点击展开加载…'; document.getElementById('pe-bindings-badge').textContent = ''; }
-  if (pp) { pp.removeAttribute('open'); document.getElementById('pe-prompt-body').textContent = '点击展开加载…'; }
+  if (bp) { bp.removeAttribute('open'); document.getElementById('pe-bindings-body').textContent = window.T('psn_js_089'); document.getElementById('pe-bindings-badge').textContent = ''; }
+  if (pp) { pp.removeAttribute('open'); document.getElementById('pe-prompt-body').textContent = window.T('psn_js_089'); }
 }
 
 // ── P7-E: Promote mrpa-imported profile to operator-owned ────
 async function promoteProfile(pid) {
   if (!pid) return;
-  if (!confirm('将「' + pid + '」从 Messenger 自动导入升格为运营人设？\n\n升格后：\n• 不再被重启时的自动导入覆盖\n• 纳入持久化（profiles_runtime.yaml）\n• 可同步到 personas.yaml（⭐ 规范层）')) return;
+  if (!confirm(window.Tf('psn_js_361', {pid: pid}))) return;
   try {
     const r = await fetch('/api/personas/profiles/' + encodeURIComponent(pid) + '/promote', { method: 'POST' });
-    if (r.status === 403) { alert('仅主帐号可升格 profile'); return; }
+    if (r.status === 403) { alert(window.T('psn_js_091')); return; }
     const d = await r.json();
     if (d.ok) {
       loadProfileList();
       refreshStatus();
     } else {
-      alert('升格失败: ' + (d.detail || JSON.stringify(d)));
+      alert(window.T('psn_js_092') + (d.detail || JSON.stringify(d)));
     }
-  } catch(e) { alert('请求失败: ' + e); }
+  } catch(e) { alert(window.T('psn_js_031') + e); }
 }
 
 // ── P6-D: Sync operator profiles to personas.yaml ────────────
@@ -2001,26 +1999,26 @@ async function syncToConfig() {
   const st = document.getElementById('sync-config-status');
   const btn = document.getElementById('sync-config-btn');
   if (!st) return;
-  if (!confirm('将当前所有运营人设（⭐ canonical / ✏️ 已编辑）推送到 config/personas.yaml？\n该文件可 git 追踪，重启后自动加载（第2层）。\n\n注意：📦 Messenger 自动导入的人设不会被写入。')) return;
-  st.textContent = '推送中…'; st.className = 'tts-status';
+  if (!confirm(window.T('psn_js_360'))) return;
+  st.textContent = window.T('psn_js_093'); st.className = 'tts-status';
   if (btn) btn.disabled = true;
   try {
     const r = await fetch('/api/personas/sync-to-config', { method: 'POST' });
     if (r.status === 403) {
-      st.textContent = '仅主帐号可执行此操作'; st.className = 'tts-status err';
+      st.textContent = window.T('psn_js_094'); st.className = 'tts-status err';
       return;
     }
     const d = await r.json();
     if (d.ok) {
-      st.textContent = '✓ ' + d.message + ' — 重启后第2层自动加载'; st.className = 'tts-status ok';
+      st.textContent = '✓ ' + d.message + window.T('psn_js_095'); st.className = 'tts-status ok';
       loadProfileList();   // refresh source badges (studio→canonical)
       refreshStatus();     // P7-D: clear unsync warning
       setTimeout(() => { st.textContent = ''; }, 4000);
     } else {
-      st.textContent = '推送失败: ' + (d.detail || ''); st.className = 'tts-status err';
+      st.textContent = window.T('psn_js_096') + (d.detail || ''); st.className = 'tts-status err';
     }
   } catch(e) {
-    st.textContent = '请求失败: ' + e; st.className = 'tts-status err';
+    st.textContent = window.T('psn_js_031') + e; st.className = 'tts-status err';
   } finally {
     if (btn) btn.disabled = false;
   }
@@ -2030,8 +2028,8 @@ async function previewTTS() {
   const st = document.getElementById('tts-status');
   const player = document.getElementById('tts-player');
   const text = document.getElementById('vp-preview-text').value.trim();
-  if (!text) { st.textContent = '请先输入试听文本'; st.className = 'tts-status err'; return; }
-  st.textContent = '合成中，请稍候…'; st.className = 'tts-status';
+  if (!text) { st.textContent = window.T('psn_js_097'); st.className = 'tts-status err'; return; }
+  st.textContent = window.T('psn_js_098'); st.className = 'tts-status';
   player.style.display = 'none';
   try {
     const r = await fetch('/api/voice/tts-test', {
@@ -2045,17 +2043,17 @@ async function previewTTS() {
     });
     const d = await r.json();
     if (d.ok) {
-      st.textContent = '✓ 合成成功（' + (d.duration_sec ? d.duration_sec.toFixed(1) + 's' : '') + '，' + d.provider + '）';
+      st.textContent = window.T('psn_js_099') + (d.duration_sec ? d.duration_sec.toFixed(1) + 's' : '') + '，' + d.provider + '）';
       st.className = 'tts-status ok';
       player.src = d.url;
       player.style.display = 'block';
       player.play().catch(() => {});
     } else {
-      st.textContent = '合成失败: ' + (d.error || '未知错误');
+      st.textContent = window.T('psn_js_100') + (d.error || window.T('psn_js_101'));
       st.className = 'tts-status err';
     }
   } catch(e) {
-    st.textContent = '请求失败: ' + e; st.className = 'tts-status err';
+    st.textContent = window.T('psn_js_031') + e; st.className = 'tts-status err';
   }
 }
 
@@ -2104,7 +2102,7 @@ function renderProfileList(profiles) {
   var list = document.getElementById('profile-list');
   if (!list) return;
   var cnt = document.getElementById('profile-count');
-  if (cnt) cnt.textContent = profiles.length + ' 个';
+  if (cnt) cnt.textContent = profiles.length + window.T('psn_js_102');
   var _tpc = document.getElementById('tb-profiles-cnt');
   if (_tpc) _tpc.textContent = _allProfiles.length || '';
   var hs = document.getElementById('hs-profiles');
@@ -2116,10 +2114,10 @@ function renderProfileList(profiles) {
     var srcInfo = _SRC[p.source] || ['src-config', p.source || '?'];
     var srcBadge = '<span class="src-badge ' + srcInfo[0] + '">' + srcInfo[1] + '</span>';
     var bindBadge = p.binding_count > 0
-      ? '<span class="tag tag-green" style="font-size:.62rem" title="' + p.binding_count + '个绑定">● ' + p.binding_count + '</span>' : '';
+      ? '<span class="tag tag-green" style="font-size:.62rem" title="' + p.binding_count + window.T('psn_js_103') + p.binding_count + '</span>' : '';
     var voiceBadge = p.has_voice ? '<span class="tag" style="font-size:.61rem">🔊</span>' : '';
     var promoteBtn = p.is_mrpa_source
-      ? '<button class="btn btn-sm" data-pid="' + p.id + '" onclick="event.stopPropagation();promoteProfile(this.dataset.pid)" style="font-size:.65rem;padding:.12rem .4rem;background:rgba(245,158,11,.1);border-color:rgba(245,158,11,.3);color:#d97706">升格</button>' : '';
+      ? '<button class="btn btn-sm" data-pid="' + p.id + window.T('psn_js_104') : '';
     var dName = _q ? _hl(p.name || p.id, _q) : (p.name || p.id);
     var dRole = _q ? _hl(p.role || '', _q) : (p.role || '');
     var pidSafe = p.id.replace(/'/g, "\\'");
@@ -2137,7 +2135,7 @@ function renderProfileList(profiles) {
     }
     var tipAttr = tipText ? ' data-tip="' + tipText.replace(/"/g,'&quot;').replace(/\n/g,' ') + '"' : '';
     var compScore = _profileCompleteness(p);
-    var progBar = '<div class="pcard-progress" title="完整度 ' + compScore + '%"><div class="pcard-progress-fill" style="width:' + compScore + '%;background:' + _completenessColor(compScore) + '"></div></div>';
+    var progBar = window.T('psn_js_105') + compScore + '%"><div class="pcard-progress-fill" style="width:' + compScore + '%;background:' + _completenessColor(compScore) + '"></div></div>';
     return '<div class="pcard' + (_q ? ' search-match' : '') + (_selectedProfiles && _selectedProfiles.has(p.id) ? ' selected' : '') + '"' + tipAttr
       + ' draggable="true" data-pid="' + pidSafe + '"'
       + ' ondragstart="_onCardDragStart(event,\'' + pidSafe + '\')"'
@@ -2149,9 +2147,9 @@ function renderProfileList(profiles) {
       + ' onclick="_bulkMode ? _toggleCardSelect(\'' + pidSafe + '\', this) : editProfile(\'' + pidSafe + '\')">'
       + '<div class="pcard-check" onclick="event.stopPropagation();_toggleCardSelect(\'' + pidSafe + '\', this.closest(\'.pcard\'))"></div>'
       + '<div class="pcard-menu">'
-      + '<button onclick="event.stopPropagation();editProfile(\'' + pidSafe + '\')">编辑</button>'
-      + '<button class="btn-copy" onclick="event.stopPropagation();_copyProfileId(\'' + pidSafe + '\')" title="复制 ID">ID</button>'
-      + '<button class="btn-clone" onclick="event.stopPropagation();_cloneProfile(\'' + pidSafe + '\')" title="克隆为新人设">克隆</button>'
+      + '<button onclick="event.stopPropagation();editProfile(\'' + pidSafe + '\')">' + window.T('psn_js_355') + '</button>'
+      + '<button class="btn-copy" onclick="event.stopPropagation();_copyProfileId(\'' + pidSafe + '\')" title="' + window.T('psn_js_356') + '">ID</button>'
+      + '<button class="btn-clone" onclick="event.stopPropagation();_cloneProfile(\'' + pidSafe + '\')" title="' + window.T('psn_js_357') + '">' + window.T('psn_js_358') + '</button>'
       + promoteBtn + '</div>'
       + '<div class="pcard-av" style="background:' + color + '">' + initial + '</div>'
       + '<div class="pcard-name">' + dName + '</div>'
@@ -2161,7 +2159,7 @@ function renderProfileList(profiles) {
       + progBar
       + '</div>';
   }).join('') + '<button class="pcard-add" onclick="openNewProfile()">'
-    + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>新建人设</button>';
+    + window.T('psn_js_106');
 }
 
 // ── Search & filter ───────────────────────────────────────────────────────────
@@ -2229,7 +2227,7 @@ function _applyFilter() {
   var _hfBadge = document.getElementById('health-filter-badge');
   if (_hfBadge) {
     if (_healthTierFilter !== null) {
-      var _hfMeta = [{c:'#ef4444',l:'需要完善'},{c:'#f59e0b',l:'基础完整'},{c:'#84cc16',l:'较完整'},{c:'#10b981',l:'画像完整'}][_healthTierFilter];
+      var _hfMeta = [{c:'#ef4444',l:window.T('psn_js_107')},{c:'#f59e0b',l:window.T('psn_js_108')},{c:'#84cc16',l:window.T('psn_js_109')},{c:'#10b981',l:window.T('psn_js_110')}][_healthTierFilter];
       _hfBadge.style.cssText = 'display:inline-flex;align-items:center;gap:.22rem;font-size:.7rem;padding:.14rem .42rem;border-radius:20px;background:'+_hfMeta.c+'1a;color:'+_hfMeta.c+';border:1px solid '+_hfMeta.c+'55;cursor:pointer;font-weight:600';
       _hfBadge.innerHTML = '&#9679;&nbsp;' + _hfMeta.l + '&nbsp;<b style="font-size:.85em">&#xD7;</b>';
       _hfBadge.onclick = function(){ _healthTierFilter=null; _renderHealthOverview(); _applyFilter(); };
@@ -2252,7 +2250,7 @@ async function loadProfileList() {
     const r = await fetch('/api/personas/profiles');
     if (!r.ok) {
       var list = document.getElementById('profile-list');
-      if (list) list.innerHTML = '<div style="color:#ef4444;font-size:.82rem;padding:1rem 0;text-align:center">⚠ 加载失败 (HTTP ' + r.status + ')&nbsp;&nbsp;<button class="btn btn-sm" onclick="loadProfileList()" style="font-size:.72rem">重试</button></div>';
+      if (list) list.innerHTML = window.T('psn_js_111') + r.status + window.T('psn_js_112');
       _renderDashboard({profiles:{count:0,unsynced:0},bindings:{count:0},tg_accounts:[],mrpa_accounts:[],wa_accounts:[],line_rpa:[]});
       return;
     }
@@ -2268,7 +2266,7 @@ async function loadProfileList() {
     _renderHealthOverview();
   } catch(e) {
     var list = document.getElementById('profile-list');
-    if (list) list.innerHTML = '<div style="color:#ef4444;font-size:.82rem;padding:1rem 0;text-align:center">⚠ 加载失败: ' + e + '&nbsp;&nbsp;<button class="btn btn-sm" onclick="loadProfileList()" style="font-size:.72rem">重试</button></div>';
+    if (list) list.innerHTML = window.T('psn_js_113') + e + window.T('psn_js_114');
     _renderDashboard({profiles:{count:0,unsynced:0},bindings:{count:0},tg_accounts:[],mrpa_accounts:[],wa_accounts:[],line_rpa:[]});
   }
 }
@@ -2276,8 +2274,8 @@ async function loadProfileList() {
 // ── P20-2: CSV export ────────────────────────────────────────────────────
 function _exportFilteredCSV() {
   var profiles = _filteredProfiles.length ? _filteredProfiles : _allProfiles;
-  if (!profiles.length) { _toast('无可导出的 profile', 'err'); return; }
-  var headers = ['ID','名称','角色','标签','绑定数','来源','TG绑定','Messenger绑定','WhatsApp绑定','LINE绑定','已配音'];
+  if (!profiles.length) { _toast(window.T('psn_js_115'), 'err'); return; }
+  var headers = ['ID',window.T('psn_js_116'),window.T('psn_js_117'),window.T('psn_js_118'),window.T('psn_js_119'),window.T('psn_js_120'),window.T('psn_js_121'),window.T('psn_js_122'),window.T('psn_js_123'),window.T('psn_js_124'),window.T('psn_js_125')];
   function _esc(v) {
     var s = v == null ? '' : String(v);
     return s.includes(',') || s.includes('"') || s.includes('\n') ? '"' + s.replace(/"/g,'""') + '"' : s;
@@ -2291,11 +2289,11 @@ function _exportFilteredCSV() {
       _esc((p.tags || []).join('; ')),
       _esc(p.binding_count || 0),
       _esc(p.source || ''),
-      _esc(_platBindMap.TG.has(p.id) ? '是' : ''),
-      _esc(_platBindMap.FB.has(p.id) ? '是' : ''),
-      _esc(_platBindMap.WA.has(p.id) ? '是' : ''),
-      _esc(_platBindMap.LINE.has(p.id) ? '是' : ''),
-      _esc(p.has_voice ? '是' : ''),
+      _esc(_platBindMap.TG.has(p.id) ? window.T('psn_js_126') : ''),
+      _esc(_platBindMap.FB.has(p.id) ? window.T('psn_js_126') : ''),
+      _esc(_platBindMap.WA.has(p.id) ? window.T('psn_js_126') : ''),
+      _esc(_platBindMap.LINE.has(p.id) ? window.T('psn_js_126') : ''),
+      _esc(p.has_voice ? window.T('psn_js_126') : ''),
     ].join(','));
   });
   var blob = new Blob(['\uFEFF' + rows.join('\n')], {type: 'text/csv;charset=utf-8'});
@@ -2305,7 +2303,7 @@ function _exportFilteredCSV() {
   a.download = 'personas_' + new Date().toISOString().slice(0,10) + '.csv';
   a.click();
   URL.revokeObjectURL(url);
-  _toast('已导出 ' + profiles.length + ' 个 profile', 'ok');
+  _toast(window.T('psn_js_127') + profiles.length + window.T('psn_js_128'), 'ok');
 }
 
 function reloadProfiles() { loadProfileList(); }
@@ -2316,7 +2314,7 @@ function populateBindProfileSelect() {
     var sel = document.getElementById(selId);
     if (!sel) return;
     var prev = sel.value;
-    sel.innerHTML = '<option value="">（使用默认人设）</option>';
+    sel.innerHTML = window.T('psn_js_129');
     _allProfiles.forEach(function(p) {
       var opt = document.createElement('option');
       opt.value = p.id;
@@ -2331,7 +2329,7 @@ function _populateBulkSelect() {
   var sel = document.getElementById('bulk-profile-id-b');
   if (!sel) return;
   var prev = sel.value;
-  sel.innerHTML = '<option value="">（选择目标 profile）</option>';
+  sel.innerHTML = window.T('psn_js_130');
   _allProfiles.forEach(function(p) {
     var opt = document.createElement('option');
     opt.value = p.id;
@@ -2342,8 +2340,8 @@ function _populateBulkSelect() {
   var scopeSel = document.getElementById('bulk-scope-b');
   if (scopeSel) {
     var allTags = [...new Set(_allProfiles.flatMap(function(p){ return p.tags || []; }))].sort();
-    scopeSel.innerHTML = '<option value="all_bindings">全部已绑定会话</option>'
-      + allTags.map(function(t){ return '<option value="tag:' + t + '">已绑定且标签为「' + t + '」的会话</option>'; }).join('');
+    scopeSel.innerHTML = window.T('psn_js_023')
+      + allTags.map(function(t){ return '<option value="tag:' + t + window.T('psn_js_024') + t + window.T('psn_js_025'); }).join('');
   }
 }
 
@@ -2372,9 +2370,9 @@ function _normalizePersonality(raw) {
 function _flattenPersonalityObj(obj) {
   var parts = [];
   if (obj.style) parts.push(obj.style);
-  if (Array.isArray(obj.traits) && obj.traits.length) parts.push('特征：' + obj.traits.join('、'));
-  if (obj.emoji_level) parts.push('表情使用：' + obj.emoji_level);
-  if (obj.tone) parts.push('语气：' + obj.tone);
+  if (Array.isArray(obj.traits) && obj.traits.length) parts.push(window.T('psn_js_131') + obj.traits.join('、'));
+  if (obj.emoji_level) parts.push(window.T('psn_js_132') + obj.emoji_level);
+  if (obj.tone) parts.push(window.T('psn_js_133') + obj.tone);
   return parts.join('\n') || JSON.stringify(obj, null, 2);
 }
 function _fillDrawerFields(p) {
@@ -2415,7 +2413,7 @@ function openNewProfile() {
   var b = document.getElementById('pe-canonical-banner');
   if (b) { b.style.display = 'none'; b.innerHTML = ''; }
   _resetEditorExtras();
-  _openDrawer('新建人设');
+  _openDrawer(window.T('psn_js_134'));
   _checkDraft();
 }
 
@@ -2423,7 +2421,7 @@ async function editProfile(pid) {
   var _prevPid = _editingProfileId;
   try {
     const r = await fetch('/api/personas/profiles/' + encodeURIComponent(pid));
-    if (!r.ok) { _toast('加载失败 ' + r.status, 'err'); return; }
+    if (!r.ok) { _toast(window.T('psn_js_070') + r.status, 'err'); return; }
     const d = await r.json();
     const p = d.persona || {};
     _editingProfileId = pid;
@@ -2449,7 +2447,7 @@ async function editProfile(pid) {
     _checkUndoAvailable(pid);
     _loadCanonicalBanner(pid);
     _checkDraft();
-  } catch(e) { _toast('加载失败: ' + e, 'err'); }
+  } catch(e) { _toast(window.T('psn_js_135') + e, 'err'); }
 }
 
 function closeProfileEditor() {
@@ -2472,16 +2470,16 @@ async function saveProfile() {
   if (!pid) {
     var idEl = document.getElementById('pe-id');
     if (idEl) { idEl.style.outline = '2px solid #ef4444'; idEl.focus(); setTimeout(function(){ idEl.style.outline = ''; }, 1800); }
-    _toast('Profile ID 不能为空', 'err'); return;
+    _toast(window.T('psn_js_136'), 'err'); return;
   }
   var nameVal = (document.getElementById('pe-name') || {}).value || '';
   if (!nameVal.trim()) {
     var nEl = document.getElementById('pe-name');
     if (nEl) { nEl.style.outline = '2px solid #ef4444'; nEl.focus(); setTimeout(function(){ nEl.style.outline = ''; }, 1800); }
-    _toast('名称不能为空', 'err'); return;
+    _toast(window.T('psn_js_137'), 'err'); return;
   }
   var saveBtn = document.getElementById('pe-save-btn');
-  if (saveBtn) { saveBtn.classList.add('saving'); saveBtn.innerHTML = '<span class="spin" style="margin-right:.25rem">↻</span>保存中…'; }
+  if (saveBtn) { saveBtn.classList.add('saving'); saveBtn.innerHTML = window.T('psn_js_138'); }
   var st = document.getElementById('pe-status');
   if (_loadedProfile) _undoStack = [JSON.parse(JSON.stringify(_loadedProfile))];
 
@@ -2490,10 +2488,10 @@ async function saveProfile() {
     saveBtn.classList.remove('saving');
     if (ok) {
       saveBtn.classList.add('saved');
-      saveBtn.innerHTML = '✓ 已保存';
-      setTimeout(function(){ saveBtn.classList.remove('saved'); saveBtn.innerHTML = '保存<span class="kbd-hint" title="Ctrl+S">^S</span>'; }, 1600);
+      saveBtn.innerHTML = window.T('psn_js_063');
+      setTimeout(function(){ saveBtn.classList.remove('saved'); saveBtn.innerHTML = window.T('psn_js_139'); }, 1600);
     } else {
-      saveBtn.innerHTML = '保存<span class="kbd-hint" title="Ctrl+S">^S</span>';
+      saveBtn.innerHTML = window.T('psn_js_139');
     }
   }
 
@@ -2528,7 +2526,7 @@ async function saveProfile() {
     });
     const d = await r.json();
     if (d.ok) {
-      _toast('人设「' + (payload.persona.name || pid) + '」已保存', 'ok');
+      _toast(window.T('psn_js_140') + (payload.persona.name || pid) + window.T('psn_js_141'), 'ok');
       _restoreBtn(true); _clearDrawerDirty(); _clearDraft();
       _editingProfileId = pid;
       var idEl = document.getElementById('pe-id');
@@ -2539,11 +2537,11 @@ async function saveProfile() {
       _checkUndoAvailable(pid);
       _loadCanonicalBanner(pid);
     } else {
-      if (st) { st.textContent = '保存失败: ' + (d.detail || ''); st.className = 'tts-status err'; }
+      if (st) { st.textContent = window.T('psn_js_064') + (d.detail || ''); st.className = 'tts-status err'; }
       _restoreBtn(false);
     }
   } catch(e) {
-    if (st) { st.textContent = '请求失败: ' + e; st.className = 'tts-status err'; }
+    if (st) { st.textContent = window.T('psn_js_031') + e; st.className = 'tts-status err'; }
     _restoreBtn(false);
   }
 }
@@ -2552,28 +2550,28 @@ async function saveProfile() {
 async function deleteCurrentProfile() {
   var pid = _editingProfileId;
   if (!pid) return;
-  if (!confirm('确认删除人设「' + pid + '」？此操作不可撤销。')) return;
+  if (!confirm(window.T('psn_js_142') + pid + window.T('psn_js_143'))) return;
   try {
     const r = await fetch('/api/personas/profiles/' + encodeURIComponent(pid), { method: 'DELETE' });
     const d = await r.json();
     if (d.ok) {
-      _toast('已删除 ' + pid, 'ok');
+      _toast(window.T('psn_js_144') + pid, 'ok');
       if (_closeDrawer()) _editingProfileId = null;
       loadProfileList(); refreshStatus();
-    } else { _toast('删除失败: ' + (d.detail || ''), 'err'); }
-  } catch(e) { _toast('请求失败: ' + e, 'err'); }
+    } else { _toast(window.T('psn_js_145') + (d.detail || ''), 'err'); }
+  } catch(e) { _toast(window.T('psn_js_031') + e, 'err'); }
 }
 
 async function undoProfile() {
   var pid = _editingProfileId;
   if (!pid) return;
-  if (!confirm('恢复上一版本？当前未保存的修改将丢失。')) return;
+  if (!confirm(window.T('psn_js_146'))) return;
   try {
     const r = await fetch('/api/personas/profiles/' + encodeURIComponent(pid) + '/undo', { method: 'POST' });
     const d = await r.json();
-    if (d.ok) { _toast('已恢复上一版本', 'ok'); editProfile(pid); }
-    else { _toast('撤销失败: ' + (d.detail || ''), 'err'); }
-  } catch(e) { _toast('请求失败: ' + e, 'err'); }
+    if (d.ok) { _toast(window.T('psn_js_147'), 'ok'); editProfile(pid); }
+    else { _toast(window.T('psn_js_148') + (d.detail || ''), 'err'); }
+  } catch(e) { _toast(window.T('psn_js_031') + e, 'err'); }
 }
 
 async function _checkUndoAvailable(pid) {
@@ -2597,14 +2595,14 @@ async function _loadCanonicalBanner(pid) {
     if (!d.has_canonical) return;
     if (!d.has_diff) {
       banner.className = 'diff-banner no-diff';
-      banner.innerHTML = '✓ 与 canonical（⭐ 上线层）完全一致';
+      banner.innerHTML = window.T('psn_js_149');
       banner.style.display = 'block'; return;
     }
     banner.className = 'diff-banner has-diff';
     var rows = (d.diffs || []).map(function(df) {
       return '<tr class="diff-' + df.type + '"><td>' + df.field + '</td><td>' + (df.canonical ?? '—') + '</td><td>' + (df.studio ?? '—') + '</td></tr>';
     }).join('');
-    banner.innerHTML = '⚠️ 与 canonical 层存在差异 <table class="diff-table"><tr><th>字段</th><th>canonical</th><th>当前</th></tr>' + rows + '</table>';
+    banner.innerHTML = window.T('psn_js_150') + rows + '</table>';
     banner.style.display = 'block';
   } catch(e) {}
 }
@@ -2659,11 +2657,11 @@ function _checkDraft() {
   if (!draft.name && !draft.personality) { _clearDraft(key); return; }
   if (!b) return;
   var ago = Math.round((Date.now() - draft._ts) / 1000);
-  var timeStr = ago < 60 ? ago + 's 前' : Math.floor(ago / 60) + 'min 前';
+  var timeStr = ago < 60 ? ago + window.T('psn_js_044') : Math.floor(ago / 60) + window.T('psn_js_045');
   b.style.display = 'flex';
-  b.innerHTML = '💾 发现未保存草稿（' + timeStr + '）'
-    + '<button class="btn btn-sm" style="font-size:.68rem;padding:.12rem .35rem;margin-left:auto" onclick="_applyDraft()">恢复</button>'
-    + '<button class="btn btn-sm" style="font-size:.68rem;padding:.12rem .35rem;margin-left:.28rem;color:var(--t2)" onclick="_dismissDraft()">忽略</button>';
+  b.innerHTML = window.T('psn_js_151') + timeStr + '）'
+    + window.T('psn_js_152')
+    + window.T('psn_js_153');
 }
 function _applyDraft() {
   var key = _draftKey();
@@ -2688,7 +2686,7 @@ function _applyDraft() {
   var chEl = document.getElementById('pe-claim-human'); if (chEl) chEl.checked = !!draft.claim_human;
   var b = document.getElementById('pe-draft-banner'); if (b) b.style.display = 'none';
   _markDrawerDirty({target: document.getElementById('pe-name')});
-  _toast('草稿已恢复', 'ok');
+  _toast(window.T('psn_js_154'), 'ok');
 }
 function _dismissDraft() {
   _clearDraft();
@@ -2699,7 +2697,7 @@ function _dismissDraft() {
 function _importFromJson() {
   var ta = document.getElementById('pe-json-import');
   var raw = ta ? ta.value.trim() : '';
-  if (!raw) { _toast('请先粘贴 JSON', 'err'); return; }
+  if (!raw) { _toast(window.T('psn_js_155'), 'err'); return; }
   try {
     var p = JSON.parse(raw);
     if (p.persona) p = p.persona;
@@ -2708,8 +2706,8 @@ function _importFromJson() {
     if (idEl && !idEl.readOnly && p.id) idEl.value = p.id;
     if (ta) ta.value = '';
     _markDrawerDirty({target: document.getElementById('pe-name')});
-    _toast('JSON 已解析并填充', 'ok');
-  } catch(e) { _toast('JSON 解析失败: ' + e.message, 'err'); }
+    _toast(window.T('psn_js_156'), 'ok');
+  } catch(e) { _toast(window.T('psn_js_157') + e.message, 'err'); }
 }
 
 // ── Auto-refresh ───────────────────────────────────────────────────
@@ -2737,8 +2735,8 @@ var PLAT_ENDPOINT = {
 };
 
 function openPersonaPicker(platform, accountId, currentPid) {
-  if (!_allProfiles.length) { _toast('人设池还在加载，请稍候…', 'err'); return; }
-  if (!PLAT_ENDPOINT[platform]) { _toast('该平台暂不支持在此指定人设', 'err'); return; }
+  if (!_allProfiles.length) { _toast(window.T('psn_js_158'), 'err'); return; }
+  if (!PLAT_ENDPOINT[platform]) { _toast(window.T('psn_js_159'), 'err'); return; }
   _ppCtx = { platform: platform, accountId: accountId, currentPid: currentPid || '' };
   var sub = document.getElementById('pp-modal-sub');
   if (sub) sub.textContent = (PLAT_LABEL[platform] || platform) + ' · ' + accountId;
@@ -2767,7 +2765,7 @@ function _ppRenderList() {
     var hay = [(p.id||''), (p.name||''), (p.role||''), (p.tags||[]).join(' ')].join(' ').toLowerCase();
     return hay.indexOf(q) >= 0;
   });
-  if (!list.length) { box.innerHTML = '<div class="pp-modal-empty">没有匹配的人设</div>'; return; }
+  if (!list.length) { box.innerHTML = window.T('psn_js_160'); return; }
   box.innerHTML = list.map(function(p) {
     var nm = p.name || p.id;
     var av = (nm || '?').slice(0, 2).toUpperCase();
@@ -2776,7 +2774,7 @@ function _ppRenderList() {
       + '<div class="pp-item-av">' + av + '</div>'
       + '<div class="pp-item-main"><div class="pp-item-name">' + nm + '</div>'
       + '<div class="pp-item-role">' + (p.role || p.id) + '</div></div>'
-      + (isCur ? '<span class="pp-item-cur">当前 ✓</span>' : '')
+      + (isCur ? window.T('psn_js_161') : '')
       + '</div>';
   }).join('');
 }
@@ -2793,12 +2791,12 @@ async function _ppPick(profileId) {
     });
     const d = await r.json();
     if (r.ok && d.ok) {
-      _toast(profileId ? ('已指定人设：' + profileId) : '已清除人设（回默认）', 'ok');
+      _toast(profileId ? (window.T('psn_js_162') + profileId) : window.T('psn_js_163'), 'ok');
       refreshStatus();
     } else {
-      _toast('指定失败: ' + (d.detail || ('HTTP ' + r.status)), 'err');
+      _toast(window.T('psn_js_164') + (d.detail || ('HTTP ' + r.status)), 'err');
     }
-  } catch(e) { _toast('请求失败: ' + e, 'err'); }
+  } catch(e) { _toast(window.T('psn_js_031') + e, 'err'); }
 }
 
 // 兼容旧调用名
@@ -2821,7 +2819,7 @@ function _filterBindPlat(pill) {
   var _bst = document.getElementById('bulk-switch-toolbar');
   if (_bst) _bst.style.display = _bindPlatFilter === 'all' ? 'none' : 'flex';
   var _bsp = document.getElementById('bulk-switch-pid');
-  if (_bsp) { _bsp.value = ''; _bsp.removeAttribute('data-populated'); _bsp.innerHTML = '<option value="">选择人设…</option>'; }
+  if (_bsp) { _bsp.value = ''; _bsp.removeAttribute('data-populated'); _bsp.innerHTML = window.T('psn_js_165'); }
 }
 // ── Global pcard tooltip div
 (function(){
@@ -2878,14 +2876,14 @@ function _toggleQuickPick() {
   if (!list) return;
   var open = list.style.display !== 'none';
   list.style.display = open ? 'none' : 'block';
-  if (lbl) lbl.textContent = open ? '已绑定会话快速选择' : '收起';
+  if (lbl) lbl.textContent = open ? window.T('psn_js_166') : window.T('psn_js_167');
 }
 function _refreshQuickPick() {
   var list = document.getElementById('qpick-list');
   if (!list) return;
   var entries = Object.entries(_bindingCache);
   if (!entries.length) {
-    list.innerHTML = '<div style="padding:.5rem .7rem;font-size:.73rem;color:var(--t2)">暂无绑定记录</div>';
+    list.innerHTML = window.T('psn_js_168');
     return;
   }
   var groups = {};
@@ -2907,11 +2905,11 @@ function _refreshQuickPick() {
       html += '<div class="qpick-item" onclick="_fillBindForm(\''
         + cid.replace(/'/g, "\\'") + "','" + (info.profile_id||'').replace(/'/g, "\\'") + '\')">'
         + '<span class="qpick-cid">' + cidDisp + '</span>'
-        + '<span class="qpick-pname">' + (info.profile_name || '默认人设') + '</span>'
+        + '<span class="qpick-pname">' + (info.profile_name || window.T('psn_js_169')) + '</span>'
         + '</div>';
     });
   });
-  list.innerHTML = html || '<div style="padding:.5rem .7rem;font-size:.73rem;color:var(--t2)">暂无绑定记录</div>';
+  list.innerHTML = html || window.T('psn_js_168');
 }
 function _fillBindForm(chatId, profileId) {
   var cidEl = document.getElementById('bind-chat-id-b');
@@ -2920,9 +2918,9 @@ function _fillBindForm(chatId, profileId) {
   if (pidEl && profileId) { pidEl.value = profileId; if (!pidEl.value) pidEl.value = ''; }
   var list = document.getElementById('qpick-list');
   if (list) list.style.display = 'none';
-  var lbl = document.getElementById('qpick-lbl'); if (lbl) lbl.textContent = '已绑定会话快速选择';
+  var lbl = document.getElementById('qpick-lbl'); if (lbl) lbl.textContent = window.T('psn_js_166');
   var st = document.getElementById('bind-status-b');
-  if (st) { st.textContent = '已选择 ' + chatId; st.className = 'tts-status ok'; setTimeout(function(){ st.textContent=''; }, 1800); }
+  if (st) { st.textContent = window.T('psn_js_170') + chatId; st.className = 'tts-status ok'; setTimeout(function(){ st.textContent=''; }, 1800); }
 }
 
 // ── P7-4: Onboarding ─────────────────────────────────────────────────────────
@@ -2966,7 +2964,7 @@ function _renderFieldDiff() {
   var body = document.getElementById('pe-diff-body');
   if (!body) return;
   if (!_loadedProfile) {
-    body.innerHTML = '<div style="padding:.35rem .45rem;font-size:.77rem;color:var(--t2)">新建模式 — 无对比基准</div>';
+    body.innerHTML = window.T('psn_js_171');
     return;
   }
   var curr = _getCurrentFormValues();
@@ -2990,9 +2988,9 @@ function _renderFieldDiff() {
     deny_ai:    !!(id.deny_ai || _loadedProfile.deny_ai),
     claim_human: !!(id.claim_human || _loadedProfile.claim_human),
   };
-  var labels = {name:'名称',role:'角色',personality:'性格',tags:'标签',language:'语言',
-    reply_length:'回复风格',emoji_level:'表情',forbidden_phrases:'禁用词',openers:'开场白',
-    vp_backend:'TTS引擎',vp_voice:'音色',deny_ai:'否认AI',claim_human:'自称人类'};
+  var labels = {name:window.T('psn_js_116'),role:window.T('psn_js_117'),personality:window.T('psn_js_172'),tags:window.T('psn_js_118'),language:window.T('psn_js_173'),
+    reply_length:window.T('psn_js_174'),emoji_level:window.T('psn_js_175'),forbidden_phrases:window.T('psn_js_176'),openers:window.T('psn_js_177'),
+    vp_backend:window.T('psn_js_178'),vp_voice:window.T('psn_js_179'),deny_ai:window.T('psn_js_180'),claim_human:window.T('psn_js_181')};
   var changed = [], unchanged = 0;
   Object.keys(labels).forEach(function(k) {
     var s = Array.isArray(saved[k]) ? saved[k].join(', ') : String(saved[k] || '');
@@ -3002,21 +3000,21 @@ function _renderFieldDiff() {
     } else { unchanged++; }
   });
   if (!changed.length) {
-    body.innerHTML = '<div class="fdiff-nochange">✓ 无字段变更 (' + unchanged + ' 个字段与已保存一致)</div>';
+    body.innerHTML = window.T('psn_js_182') + unchanged + window.T('psn_js_183');
     return;
   }
   var rows = changed.map(function(f) {
     var sDisp = f.saved.length > 60 ? f.saved.slice(0,60)+'…' : f.saved;
     var cDisp = f.curr.length > 60 ? f.curr.slice(0,60)+'…' : f.curr;
     return '<tr class="changed"><td>' + f.label + '</td>'
-      + '<td><span class="fdiff-val-old">' + (sDisp||'<em>空</em>') + '</span>'
-      + '<span class="fdiff-val-new">' + (cDisp||'<em>空</em>') + '</span></td></tr>';
+      + '<td><span class="fdiff-val-old">' + (sDisp||window.T('psn_js_184')) + '</span>'
+      + '<span class="fdiff-val-new">' + (cDisp||window.T('psn_js_184')) + '</span></td></tr>';
   }).join('');
   body.innerHTML = '<table class="fdiff-table">'
-    + '<tr><th>字段</th><th>已保存 → 当前草稿</th></tr>'
+    + window.T('psn_js_185')
     + rows + '</table>'
     + '<div style="font-size:.68rem;color:var(--t2);padding:.3rem .45rem">'
-    + changed.length + ' 个字段已修改，' + unchanged + ' 个未变</div>';
+    + changed.length + window.T('psn_js_186') + unchanged + window.T('psn_js_187');
 }
 // ── P8-3: Bulk profile selection ─────────────────────────────────────────────
 var _bulkMode = false;
@@ -3028,7 +3026,7 @@ function _toggleBulkMode() {
   var grid = document.getElementById('profile-list');
   var btn = document.getElementById('bulk-toggle-btn');
   if (grid) grid.classList.toggle('bulk-mode', _bulkMode);
-  if (btn) { btn.textContent = _bulkMode ? '退出多选' : '☐ 多选'; btn.classList.toggle('btn-primary', _bulkMode); }
+  if (btn) { btn.textContent = _bulkMode ? window.T('psn_js_188') : window.T('psn_js_189'); btn.classList.toggle('btn-primary', _bulkMode); }
   _updateBulkBar();
   if (!_bulkMode) { document.querySelectorAll('.pcard.selected').forEach(function(c){ c.classList.remove('selected'); }); }
 }
@@ -3044,12 +3042,12 @@ function _updateBulkBar() {
   if (!bar) return;
   var n = _selectedProfiles.size;
   bar.classList.toggle('show', _bulkMode && n > 0);
-  if (cnt) cnt.textContent = n + ' 个已选';
+  if (cnt) cnt.textContent = n + window.T('psn_js_190');
 }
 async function _bulkDelete() {
   var pids = Array.from(_selectedProfiles);
   if (!pids.length) return;
-  if (!confirm('确认删除选中的 ' + pids.length + ' 个人设？\n\n' + pids.join('\n') + '\n\n此操作不可撤销。')) return;
+  if (!confirm(window.Tf('psn_js_362', {n: pids.length, list: pids.join('\n')}))) return;
   var ok = 0, fail = 0;
   _bulkProgressStart(pids.length);
   for (var i = 0; i < pids.length; i++) {
@@ -3060,28 +3058,28 @@ async function _bulkDelete() {
     } catch(e) { fail++; } finally { _bulkProgressTick(); }
   }
   _bulkProgressEnd();
-  _toast('已删除 ' + ok + ' 个' + (fail ? '，' + fail + ' 个失败' : ''), ok ? 'ok' : 'err');
+  _toast(window.T('psn_js_144') + ok + window.T('psn_js_102') + (fail ? '，' + fail + window.T('psn_js_192') : ''), ok ? 'ok' : 'err');
   _toggleBulkMode();
   loadProfileList();
 }
 async function _bulkExport() {
   var pids = Array.from(_selectedProfiles);
   if (!pids.length) return;
-  _toast('导出中，请稍候…', 'ok');
+  _toast(window.T('psn_js_193'), 'ok');
   var personas = (await Promise.all(pids.map(async function(pid) {
     try {
       var r = await fetch('/api/personas/profiles/' + encodeURIComponent(pid));
       return r.ok ? ((await r.json()).persona || null) : null;
     } catch(e) { return null; }
   }))).filter(Boolean);
-  if (!personas.length) { _toast('导出失败', 'err'); return; }
+  if (!personas.length) { _toast(window.T('psn_js_194'), 'err'); return; }
   var blob = new Blob([JSON.stringify(personas, null, 2)], {type: 'application/json'});
   var a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = 'personas_full_' + personas.length + '_' + new Date().toISOString().slice(0,10) + '.json';
   a.click();
   URL.revokeObjectURL(a.href);
-  _toast('已导出 ' + personas.length + ' 个完整人设（可直接用于导入）', 'ok');
+  _toast(window.T('psn_js_127') + personas.length + window.T('psn_js_195'), 'ok');
 }
 // ── P9-3: URL hash deep-link helper ─────────────────────────────────────────
 function _processHashProfile() {
@@ -3130,10 +3128,10 @@ function _updateDiffBadge() {
 async function _bulkAddTag() {
   var pids = Array.from(_selectedProfiles);
   if (!pids.length) return;
-  var tag = window.prompt('输入要批量添加的标签（单个标签名称）:', '');
+  var tag = window.prompt(window.T('psn_js_196'), '');
   if (!tag || !tag.trim()) return;
   tag = tag.trim();
-  _toast('正在处理 ' + pids.length + ' 个人设…', 'ok');
+  _toast(window.T('psn_js_197') + pids.length + window.T('psn_js_198'), 'ok');
   var results = await Promise.all(pids.map(async function(pid) {
     try {
       var r1 = await fetch('/api/personas/profiles/' + encodeURIComponent(pid));
@@ -3153,7 +3151,7 @@ async function _bulkAddTag() {
     } catch(e) { return false; }
   }));
   var ok = results.filter(Boolean).length, fail = results.length - ok;
-  _toast('标签「' + tag + '」已添加到 ' + ok + ' 个人设' + (fail ? '，' + fail + ' 个失败' : ''), ok ? 'ok' : 'err');
+  _toast(window.T('psn_js_199') + tag + window.T('psn_js_200') + ok + window.T('psn_js_201') + (fail ? '，' + fail + window.T('psn_js_192') : ''), ok ? 'ok' : 'err');
   _toggleBulkMode();
   loadProfileList();
 }
@@ -3165,11 +3163,11 @@ async function _bulkRemoveTag() {
   var tagSet = new Set();
   (_allProfiles || []).filter(function(p){ return _selectedProfiles.has(p.id); })
     .forEach(function(p){ (p.tags || []).forEach(function(t){ tagSet.add(t); }); });
-  if (!tagSet.size) { _toast('选中的人设无标签可删', 'err'); return; }
-  var tag = window.prompt('从选中 ' + pids.length + ' 个人设中移除标签\n可用标签: ' + Array.from(tagSet).join(', '), '');
+  if (!tagSet.size) { _toast(window.T('psn_js_202'), 'err'); return; }
+  var tag = window.prompt(window.Tf('psn_js_363', {n: pids.length, tags: Array.from(tagSet).join(', ')}), '');
   if (!tag || !tag.trim()) return;
   tag = tag.trim();
-  _toast('移除标签「' + tag + '」中…', 'ok');
+  _toast(window.T('psn_js_204') + tag + window.T('psn_js_205'), 'ok');
   var ok = 0, skip = 0, fail = 0;
   await Promise.all(pids.map(async function(pid) {
     try {
@@ -3187,7 +3185,7 @@ async function _bulkRemoveTag() {
       if ((await r2.json()).ok) ok++; else fail++;
     } catch(e) { fail++; }
   }));
-  _toast('移除「' + tag + '」: ' + ok + '个成功' + (skip?' / '+skip+'无此标签':'') + (fail?' / '+fail+'失败':''), ok?'ok':'err');
+  _toast(window.T('psn_js_206') + tag + '」: ' + ok + window.T('psn_js_207') + (skip?' / '+skip+window.T('psn_js_208'):'') + (fail?' / '+fail+window.T('psn_js_209'):''), ok?'ok':'err');
   _toggleBulkMode(); loadProfileList();
 }
 // ── P10-1: Open new profile with pre-filled ID from search query ─────────────
@@ -3213,7 +3211,7 @@ function _renderUsageChart() {
   section.style.display = 'block';
   var sorted = profWithBindings.slice().sort(function(a, b){ return (b.binding_count||0) - (a.binding_count||0); }).slice(0, 8);
   var maxCount = sorted[0].binding_count || 1;
-  if (sub) sub.textContent = '共 ' + profWithBindings.length + ' 个已绑定';
+  if (sub) sub.textContent = window.T('psn_js_210') + profWithBindings.length + window.T('psn_js_211');
   wrap.innerHTML = sorted.map(function(p) {
     var pct = Math.max(4, Math.round((p.binding_count / maxCount) * 100));
     var color = _profileColor(p.id);
@@ -3271,12 +3269,12 @@ function _parseImport() {
   var pb = document.getElementById('import-preview-body');
   if (!ta || !pb) return;
   var raw = ta.value.trim();
-  if (!raw) { if (st) { st.textContent = '请先粘贴 JSON'; st.style.color = '#ef4444'; } return; }
+  if (!raw) { if (st) { st.textContent = window.T('psn_js_155'); st.style.color = '#ef4444'; } return; }
   var parsed;
   try {
     parsed = JSON.parse(raw);
   } catch(e) {
-    if (st) { st.textContent = 'JSON 格式错误: ' + e.message; st.style.color = '#ef4444'; }
+    if (st) { st.textContent = window.T('psn_js_212') + e.message; st.style.color = '#ef4444'; }
     return;
   }
   // Normalise: single object, {persona:...} wrapper, or array
@@ -3291,7 +3289,7 @@ function _parseImport() {
     if (!p.id && p.name) p.id = p.name.trim().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_\-\u4e00-\u9fff]/g, '').toLowerCase();
   });
   if (!_importData.length) {
-    if (st) { st.textContent = '未找到有效人设数据（需要含 id 或 name 字段）'; st.style.color = '#ef4444'; }
+    if (st) { st.textContent = window.T('psn_js_213'); st.style.color = '#ef4444'; }
     return;
   }
   var existingIds = new Set((_allProfiles || []).map(function(p){ return p.id; }));
@@ -3302,10 +3300,10 @@ function _parseImport() {
       + '<td>' + (p.name || p.id || '—') + '</td>'
       + '<td style="color:var(--t2)">' + (p.role || '') + '</td>'
       + '<td style="font-size:.68rem;color:' + (conflict ? '#d97706' : '#10b981') + '">'
-      + (conflict ? '⚠ 将覆盖' : '✓ 新建') + '</td></tr>';
+      + (conflict ? window.T('psn_js_214') : window.T('psn_js_215')) + '</td></tr>';
   }).join('');
   if (pv) pv.style.display = 'block';
-  if (st) { st.textContent = '解析到 ' + _importData.length + ' 个人设，其中 ' + (_importData.filter(function(p){ return existingIds.has(p.id); }).length) + ' 个将覆盖已有'; st.style.color = 'var(--t2)'; }
+  if (st) { st.textContent = window.T('psn_js_216') + _importData.length + window.T('psn_js_217') + (_importData.filter(function(p){ return existingIds.has(p.id); }).length) + window.T('psn_js_218'); st.style.color = 'var(--t2)'; }
   if (cb) cb.style.display = 'inline-flex';
   if (rb) rb.style.display = 'inline-flex';
 }
@@ -3314,7 +3312,7 @@ async function _executeImport() {
   var cb = document.getElementById('import-confirm-btn');
   var st = document.getElementById('import-status');
   var pb = document.getElementById('import-preview-body');
-  if (cb) { cb.disabled = true; cb.textContent = '导入中…'; }
+  if (cb) { cb.disabled = true; cb.textContent = window.T('psn_js_219'); }
   var rows = pb ? pb.querySelectorAll('tr') : [];
   var ok = 0, fail = 0;
   for (var i = 0; i < _importData.length; i++) {
@@ -3328,18 +3326,18 @@ async function _executeImport() {
       var d = await r.json();
       if (d.ok) {
         ok++;
-        if (rows[i]) { rows[i].className = 'ok'; var tc = rows[i].cells[3]; if (tc) tc.textContent = '✓ 完成'; }
+        if (rows[i]) { rows[i].className = 'ok'; var tc = rows[i].cells[3]; if (tc) tc.textContent = window.T('psn_js_220'); }
       } else {
         fail++;
-        if (rows[i]) { rows[i].className = 'err'; var tc2 = rows[i].cells[3]; if (tc2) tc2.textContent = '✗ 失败'; }
+        if (rows[i]) { rows[i].className = 'err'; var tc2 = rows[i].cells[3]; if (tc2) tc2.textContent = window.T('psn_js_221'); }
       }
     } catch(e) {
       fail++;
-      if (rows[i]) { rows[i].className = 'err'; var tc3 = rows[i].cells[3]; if (tc3) tc3.textContent = '✗ 错误'; }
+      if (rows[i]) { rows[i].className = 'err'; var tc3 = rows[i].cells[3]; if (tc3) tc3.textContent = window.T('psn_js_222'); }
     }
   }
-  if (st) { st.textContent = '完成：' + ok + ' 个成功' + (fail ? '，' + fail + ' 个失败' : ''); st.style.color = ok ? '#10b981' : '#ef4444'; }
-  if (cb) { cb.disabled = false; cb.textContent = '▶ 开始导入'; cb.style.display = 'none'; }
+  if (st) { st.textContent = window.T('psn_js_223') + ok + window.T('psn_js_224') + (fail ? '，' + fail + window.T('psn_js_192') : ''); st.style.color = ok ? '#10b981' : '#ef4444'; }
+  if (cb) { cb.disabled = false; cb.textContent = window.T('psn_js_225'); cb.style.display = 'none'; }
   _importData = [];
   if (ok > 0) { setTimeout(function(){ loadProfileList(); _renderUsageChart(); }, 500); }
 }
@@ -3377,7 +3375,7 @@ async function _switchBinding(sel) {
     sel.dataset.curr = newPid;
     _reloadBindingsList(); loadProfileList();
   } catch(e) {
-    _toast('切换失败: ' + e, 'err');
+    _toast(window.T('psn_js_226') + e, 'err');
     sel.value = origVal || '';
     sel.disabled = false;
   }
@@ -3430,12 +3428,12 @@ function _resetCardOrder() {
   var sortEl = document.getElementById('profile-sort');
   if (sortEl) sortEl.value = 'default';
   _applyFilter();
-  _toast('排序已重置', 'ok');
+  _toast(window.T('psn_js_227'), 'ok');
 }
 // ── P12-2: Batch platform binding switch ─────────────────────────────────────
 async function _bulkSwitchPlatform() {
   var newPid = (document.getElementById('bulk-switch-pid') || {}).value;
-  if (!newPid) { _toast('请先选择目标人设', 'err'); return; }
+  if (!newPid) { _toast(window.T('psn_js_228'), 'err'); return; }
   var plat = _bindPlatFilter || 'all';
   var body = document.getElementById('bindings-list-body');
   if (!body) return;
@@ -3445,11 +3443,11 @@ async function _bulkSwitchPlatform() {
     var sw = row.querySelector('.bind-switch[data-cid]');
     if (sw) matchingCids.push(sw.dataset.cid);
   });
-  if (!matchingCids.length) { _toast('当前筛选无绑定', 'err'); return; }
+  if (!matchingCids.length) { _toast(window.T('psn_js_229'), 'err'); return; }
   var platLbl = _PLAT_LABEL[plat] || plat;
-  if (!confirm('将 ' + matchingCids.length + ' 个「' + platLbl + '」绑定全部切换为「' + newPid + '」？')) return;
+  if (!confirm(window.T('psn_js_230') + matchingCids.length + window.T('psn_js_231') + platLbl + window.T('psn_js_232') + newPid + '」？')) return;
   var confirmBtn = document.querySelector('#bulk-switch-toolbar .btn-primary');
-  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = '切换中…'; }
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = window.T('psn_js_034'); }
   try {
     var r1 = await fetch('/api/personas/profiles/' + encodeURIComponent(newPid));
     if (!r1.ok) throw new Error('profile ' + r1.status);
@@ -3465,10 +3463,10 @@ async function _bulkSwitchPlatform() {
         if ((await r.json()).ok) ok++; else fail++;
       } catch(e) { fail++; }
     }));
-    _toast('已将 ' + ok + ' 个' + platLbl + '绑定切换为「' + personaRef.name + '」' + (fail ? '，' + fail + '个失败' : ''), ok ? 'ok' : 'err');
+    _toast(window.T('psn_js_233') + ok + window.T('psn_js_102') + platLbl + window.T('psn_js_234') + personaRef.name + '」' + (fail ? '，' + fail + window.T('psn_js_235') : ''), ok ? 'ok' : 'err');
     _reloadBindingsList(); loadProfileList(); refreshStatus();
-  } catch(e) { _toast('批量切换失败: ' + e, 'err'); }
-  finally { if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = '切换当前平台全部'; } }
+  } catch(e) { _toast(window.T('psn_js_236') + e, 'err'); }
+  finally { if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = window.T('psn_js_237'); } }
 }
 // ── P12-3: Profile completeness score ────────────────────────────────────────
 function _profileCompleteness(p) {
@@ -3518,11 +3516,11 @@ function _navigateCards(dir) {
 }
 function _deleteProfileById(pid) {
   if (!pid) return;
-  if (!confirm('确认删除人设「' + pid + '」？')) return;
+  if (!confirm(window.T('psn_js_142') + pid + '」？')) return;
   fetch('/api/personas/profiles/' + encodeURIComponent(pid), { method: 'DELETE' })
     .then(function(r){ return r.json(); })
-    .then(function(d){ if (d.ok) { _toast('已删除 ' + pid, 'ok'); _focusedProfileId = null; loadProfileList(); } })
-    .catch(function(e){ _toast('删除失败: ' + e, 'err'); });
+    .then(function(d){ if (d.ok) { _toast(window.T('psn_js_144') + pid, 'ok'); _focusedProfileId = null; loadProfileList(); } })
+    .catch(function(e){ _toast(window.T('psn_js_145') + e, 'err'); });
 }
 // ── P13-2: Dashboard persona health overview ─────────────────────────────────
 var _healthTierFilter = null;
@@ -3540,10 +3538,10 @@ function _renderHealthOverview() {
     else tiers[0]++;
   });
   var meta = [
-    {clr: '#ef4444', label: '需要完善',  range: '0–49%'},
-    {clr: '#f59e0b', label: '基础完整',  range: '50–74%'},
-    {clr: '#84cc16', label: '较完整',    range: '75–89%'},
-    {clr: '#10b981', label: '画像完整',  range: '90–100%'},
+    {clr: '#ef4444', label: window.T('psn_js_107'),  range: '0–49%'},
+    {clr: '#f59e0b', label: window.T('psn_js_108'),  range: '50–74%'},
+    {clr: '#84cc16', label: window.T('psn_js_109'),    range: '75–89%'},
+    {clr: '#10b981', label: window.T('psn_js_110'),  range: '90–100%'},
   ];
   grid.style.display = 'grid';
   grid.innerHTML = tiers.map(function(cnt, i) {
@@ -3551,7 +3549,7 @@ function _renderHealthOverview() {
     var active = _healthTierFilter === i;
     return '<div class="health-card' + (active ? ' hc-active' : '') + '"'
       + ' onclick="_filterByHealth(' + i + ')"'
-      + ' title="' + m.range + ' 点击筛选' + (active ? '，再次点击取消' : '') + '"'
+      + ' title="' + m.range + window.T('psn_js_238') + (active ? window.T('psn_js_239') : '') + '"'
       + ' style="border-color:' + (cnt > 0 || active ? m.clr + '66' : 'var(--bd)') + '">'
       + '<div class="hc-count" style="color:' + m.clr + '">' + cnt + '</div>'
       + '<div class="hc-label">' + m.label + '</div>'
@@ -3682,8 +3680,8 @@ function _openBulkTagEdit(mode) {
     var tagMap = {};
     (_allProfiles || []).filter(function(p){ return _selectedProfiles.has(p.id); })
       .forEach(function(p){ (p.tags || []).forEach(function(t){ tagMap[t] = (tagMap[t]||0)+1; }); });
-    if (!Object.keys(tagMap).length) { _toast('选中的人设无标签', 'err'); return; }
-    label.textContent = '点击选择要移除的标签:';
+    if (!Object.keys(tagMap).length) { _toast(window.T('psn_js_240'), 'err'); return; }
+    label.textContent = window.T('psn_js_241');
     chips.innerHTML = Object.entries(tagMap).sort(function(a,b){ return b[1]-a[1]; }).map(function(e) {
       var t = e[0], cnt = e[1], ts = t.replace(/'/g, "\\'");
       return '<span class="btchip" onclick="_toggleBulkTagChip(this,\'' + ts + '\')">'
@@ -3691,7 +3689,7 @@ function _openBulkTagEdit(mode) {
     }).join('');
     if (inp) inp.style.display = 'none';
   } else {
-    label.textContent = '新标签名:';
+    label.textContent = window.T('psn_js_242');
     chips.innerHTML = '';
     if (inp) { inp.style.display = ''; inp.value = ''; }
   }
@@ -3710,9 +3708,9 @@ async function _applyBulkTagEdit() {
   if (_bulkTagMode === 'add') {
     var inp = document.getElementById('bulk-tag-input');
     var tag = inp ? inp.value.trim() : '';
-    if (!tag) { _toast('请输入标签名', 'err'); if (inp) inp.focus(); return; }
+    if (!tag) { _toast(window.T('psn_js_243'), 'err'); if (inp) inp.focus(); return; }
     _closeBulkTagEdit();
-    _toast('添加标签「' + tag + '」中…', 'ok');
+    _toast(window.T('psn_js_244') + tag + window.T('psn_js_205'), 'ok');
     var ok = 0, fail = 0; _bulkProgressStart(pids.length);
     await Promise.all(pids.map(async function(pid) {
       try {
@@ -3731,12 +3729,12 @@ async function _applyBulkTagEdit() {
       } catch(e) { fail++; } finally { _bulkProgressTick(); }
     }));
     _bulkProgressEnd();
-    _toast('标签「' + tag + '」已添加到 ' + ok + ' 个人设' + (fail?' / '+fail+'失败':''), ok?'ok':'err');
+    _toast(window.T('psn_js_199') + tag + window.T('psn_js_200') + ok + window.T('psn_js_201') + (fail?' / '+fail+window.T('psn_js_209'):''), ok?'ok':'err');
   } else {
-    if (!_bulkTagSelected.size) { _toast('请先点击选择要移除的标签', 'err'); return; }
+    if (!_bulkTagSelected.size) { _toast(window.T('psn_js_245'), 'err'); return; }
     var tagArr = Array.from(_bulkTagSelected);
     _closeBulkTagEdit();
-    _toast('移除 ' + tagArr.length + ' 个标签中…', 'ok');
+    _toast(window.T('psn_js_246') + tagArr.length + window.T('psn_js_247'), 'ok');
     var ok = 0, fail = 0; _bulkProgressStart(pids.length);
     var selected = _bulkTagSelected; // capture
     await Promise.all(pids.map(async function(pid) {
@@ -3754,7 +3752,7 @@ async function _applyBulkTagEdit() {
       } catch(e) { fail++; } finally { _bulkProgressTick(); }
     }));
     _bulkProgressEnd();
-    _toast('已从 ' + ok + ' 个人设移除' + tagArr.length + '个标签' + (fail?' / '+fail+'失败':''), ok?'ok':'err');
+    _toast(window.T('psn_js_248') + ok + window.T('psn_js_249') + tagArr.length + window.T('psn_js_250') + (fail?' / '+fail+window.T('psn_js_209'):''), ok?'ok':'err');
   }
   _toggleBulkMode(); loadProfileList();
 }
@@ -3827,11 +3825,11 @@ function _onPcardCtx(event, pid) {
   var menu = document.getElementById('pcard-ctx');
   if (!menu) return;
   menu.innerHTML = [
-    '<div class="ctx-item" data-act="edit" data-pid="' + pid + '">✏️ 编辑</div>',
-    '<div class="ctx-item" data-act="clone" data-pid="' + pid + '">📋 克隆</div>',
-    '<div class="ctx-item" data-act="copyid" data-pid="' + pid + '">🔗 复制 ID</div>',
+    '<div class="ctx-item" data-act="edit" data-pid="' + pid + window.T('psn_js_251'),
+    '<div class="ctx-item" data-act="clone" data-pid="' + pid + window.T('psn_js_252'),
+    '<div class="ctx-item" data-act="copyid" data-pid="' + pid + window.T('psn_js_253'),
     '<div class="ctx-sep"></div>',
-    '<div class="ctx-item" style="color:var(--red)" data-act="delete" data-pid="' + pid + '">🗑️ 删除</div>',
+    '<div class="ctx-item" style="color:var(--red)" data-act="delete" data-pid="' + pid + window.T('psn_js_254'),
   ].join('');
   var x = Math.min(event.clientX + 2, window.innerWidth - 150);
   var y = Math.min(event.clientY + 2, window.innerHeight - 180);
@@ -3851,11 +3849,11 @@ function _pctxAct(action, pid) {
   if (action === 'clone')  { _cloneProfile(pid); return; }
   if (action === 'copyid') { _copyProfileId(pid); return; }
   if (action === 'delete') {
-    if (!confirm('确认删除人设「' + pid + '」？')) return;
+    if (!confirm(window.T('psn_js_142') + pid + '」？')) return;
     fetch('/api/personas/profiles/' + encodeURIComponent(pid), {method:'DELETE'})
       .then(function(r){ return r.json(); })
-      .then(function(d){ if (d.ok) { _toast('已删除 ' + pid, 'ok'); if (_focusedProfileId === pid) _focusedProfileId = null; loadProfileList(); } })
-      .catch(function(e){ _toast('删除失败: ' + e, 'err'); });
+      .then(function(d){ if (d.ok) { _toast(window.T('psn_js_144') + pid, 'ok'); if (_focusedProfileId === pid) _focusedProfileId = null; loadProfileList(); } })
+      .catch(function(e){ _toast(window.T('psn_js_145') + e, 'err'); });
   }
 }
 // ── P16-2: Drawer profile history navigation ─────────────────────────────────
@@ -3869,27 +3867,27 @@ function _drawerGoBack() {
 // ── P16-3: Persona template library ──────────────────────────────────────────
 var PERSONA_TEMPLATES = {
   companion: {
-    name: '陪伴助理', role: '情感陪伴与日常对话',
-    personality: '温柔关怀、善于倾听，会主动关心用户的心情与日常生活，让人感到被理解和陪伴',
-    tags: ['陪伴', '情感'],
+    name: window.T('psn_js_255'), role: window.T('psn_js_256'),
+    personality: window.T('psn_js_257'),
+    tags: [window.T('psn_js_258'), window.T('psn_js_259')],
     speaking: {reply_length: 'moderate', emoji_level: 'moderate'}
   },
   service: {
-    name: '客服专员', role: '产品咨询与售后服务',
-    personality: '专业耐心、礼貌周到，以解决用户问题为首要目标，确保用户满意',
-    tags: ['客服', '专业'],
+    name: window.T('psn_js_260'), role: window.T('psn_js_261'),
+    personality: window.T('psn_js_262'),
+    tags: [window.T('psn_js_263'), window.T('psn_js_264')],
     speaking: {reply_length: 'concise', emoji_level: 'minimal'}
   },
   sales: {
-    name: '销售顾问', role: '产品推荐与转化',
-    personality: '热情积极、善于挖掘需求，适时推荐最合适的产品，促进购买决策',
-    tags: ['销售', '转化'],
+    name: window.T('psn_js_265'), role: window.T('psn_js_266'),
+    personality: window.T('psn_js_267'),
+    tags: [window.T('psn_js_268'), window.T('psn_js_269')],
     speaking: {reply_length: 'moderate', emoji_level: 'moderate'}
   },
   consultant: {
-    name: '专业咨询师', role: '行业知识与深度咨询',
-    personality: '博学严谨、条理清晰，能够提供专业准确的建议和深度分析，引导用户做出明智决策',
-    tags: ['咨询', '专业', '知识'],
+    name: window.T('psn_js_270'), role: window.T('psn_js_271'),
+    personality: window.T('psn_js_272'),
+    tags: [window.T('psn_js_273'), window.T('psn_js_264'), window.T('psn_js_274')],
     speaking: {reply_length: 'detailed', emoji_level: 'minimal'}
   }
 };
@@ -3911,7 +3909,7 @@ function _applyTemplate(key) {
   var tplRow = document.getElementById('pe-template-row'); if (tplRow) tplRow.style.display = 'none';
   _markDrawerDirty({target: nameEl});
   if (nameEl) nameEl.focus(); else { var idEl = document.getElementById('pe-id'); if (idEl) idEl.focus(); }
-  _toast('已应用「' + t.name + '」模板，请设置 Profile ID 后保存', 'ok');
+  _toast(window.T('psn_js_275') + t.name + window.T('psn_js_276'), 'ok');
 }
 // ── P17-4: Keyboard shortcuts help panel ─────────────────────────────────────
 var _kbdHelpOpen = false;
@@ -3927,17 +3925,17 @@ function _toggleKbdHelp() {
     panel = document.createElement('div');
     panel.id = 'kbd-help-panel'; panel.className = 'kbd-help-panel';
     var shortcuts = [
-      ['/',              '聚焦搜索框'],
-      ['Esc',            '清空搜索 / 关闭浮层'],
-      ['↑ ↓ ← →',       '键盘导航 Profile 卡片'],
-      ['Enter',          '打开高亮卡片 / 搜索记录'],
-      ['Delete',         '删除聚焦的 Profile'],
-      ['Ctrl+S',         '保存当前 Drawer 人设'],
-      ['Ctrl+Z',         '撤销上次保存 (Drawer 内)'],
-      ['Ctrl+1 ~ 4',     'Drawer Tab: 基础/风格/语音/预览'],
-      ['右键单击卡片',   '上下文菜单: 编辑/克隆/删除'],
+      ['/',              window.T('psn_js_277')],
+      ['Esc',            window.T('psn_js_278')],
+      ['↑ ↓ ← →',       window.T('psn_js_279')],
+      ['Enter',          window.T('psn_js_280')],
+      ['Delete',         window.T('psn_js_281')],
+      ['Ctrl+S',         window.T('psn_js_282')],
+      ['Ctrl+Z',         window.T('psn_js_283')],
+      ['Ctrl+1 ~ 4',     window.T('psn_js_284')],
+      [window.T('psn_js_285'),   window.T('psn_js_286')],
     ];
-    panel.innerHTML = '<div class="kbd-help-title">⌨️ 键盘快捷键 <span onclick="_toggleKbdHelp()" style="cursor:pointer;font-size:1rem;opacity:.6">×</span></div>'
+    panel.innerHTML = window.T('psn_js_287')
       + '<table class="kbd-table"><tbody>'
       + shortcuts.map(function(r){ return '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>'; }).join('')
       + '</tbody></table>';
@@ -3955,19 +3953,19 @@ function _updateCompletionWizard(p) {
   if (score >= 75) { wiz.style.display = 'none'; return; }
   var items = [];
   if (!p.role || !String(p.role).trim())
-    items.push({label: '填写角色定位', field: 'pe-role', score: 20});
+    items.push({label: window.T('psn_js_288'), field: 'pe-role', score: 20});
   var pers = p.personality;
   if (!pers || (typeof pers === 'string' ? !pers.trim() : !Object.keys(pers||{}).length))
-    items.push({label: '填写人设个性', field: 'pe-personality', score: 20});
+    items.push({label: window.T('psn_js_289'), field: 'pe-personality', score: 20});
   if (!p.tags || !p.tags.length)
-    items.push({label: '添加标签分类', field: 'pe-tags', score: 15});
+    items.push({label: window.T('psn_js_290'), field: 'pe-tags', score: 15});
   if (!p.has_voice)
-    items.push({label: '配置 TTS 语音', field: null, tab: 'voice', score: 10});
+    items.push({label: window.T('psn_js_291'), field: null, tab: 'voice', score: 10});
   if (!(p.binding_count > 0))
-    items.push({label: '绑定至少一个会话', field: null, tab: 'preview', score: 10});
+    items.push({label: window.T('psn_js_292'), field: null, tab: 'preview', score: 10});
   if (!items.length) { wiz.style.display = 'none'; return; }
   wiz.style.display = '';
-  wiz.innerHTML = '<div class="wiz-hd">📋 完整度 ' + score + '% — 建议补充以下字段</div>'
+  wiz.innerHTML = window.T('psn_js_293') + score + window.T('psn_js_294')
     + items.map(function(it) {
         var act = it.field
           ? 'document.getElementById(\'' + it.field + '\').focus()'
@@ -4019,7 +4017,7 @@ document.addEventListener('DOMContentLoaded', function() {
         _loadedProfile = _undoData;
         _fillDrawerFields(_undoData);
         _markDrawerDirty({target: document.getElementById('pe-name')});
-        _toast('↺ 已撤销到上次保存前（Ctrl+S 重新保存）', 'ok');
+        _toast(window.T('psn_js_295'), 'ok');
         return;
       }
     }
@@ -4095,7 +4093,7 @@ var _grOrigJson = '';
 
 function grLoadRules() {
   fetch('/api/persona/global-rules').then(r => r.json()).then(d => {
-    if (!d.ok) { _grStatus('加载失败', true); return; }
+    if (!d.ok) { _grStatus(window.T('psn_js_040'), true); return; }
     _grData = d.rules || {};
     _grOrigJson = JSON.stringify(_grData);
     _grDirty = false;
@@ -4104,7 +4102,7 @@ function grLoadRules() {
     _grUpdateStats();
     _grLoadBackups();
     _grStatus('');
-  }).catch(e => _grStatus('加载失败: ' + e, true));
+  }).catch(e => _grStatus(window.T('psn_js_135') + e, true));
 }
 
 function _grStatus(msg, isErr) {
@@ -4140,33 +4138,33 @@ function _grUpdateStats() {
   var budgetWarn = tokens > 800 ? ' ⚠️' : '';
   var budgetColor = tokens > 800 ? 'color:#d97706' : '';
   var st = document.getElementById('gr-enabled-stats');
-  if (st) st.innerHTML = enabled + '/' + total + ' 条启用 · <span style="' + budgetColor + '">' + tokens + ' tok' + budgetWarn + '</span>';
+  if (st) st.innerHTML = enabled + '/' + total + window.T('psn_js_296') + budgetColor + '">' + tokens + ' tok' + budgetWarn + '</span>';
 }
 
 function grSaveRules() {
   if (!_grData) return;
   _grCollectFromUI();
   var btn = document.getElementById('gr-save-btn');
-  if (btn) { btn.disabled = true; btn.textContent = '保存中…'; }
+  if (btn) { btn.disabled = true; btn.textContent = window.T('psn_js_061'); }
   fetch('/api/persona/global-rules', {
     method: 'PUT',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({ rules: _grData })
   }).then(r => r.json()).then(d => {
-    if (btn) { btn.disabled = false; btn.textContent = '保存更改'; }
+    if (btn) { btn.disabled = false; btn.textContent = window.T('psn_js_297'); }
     if (d.ok) {
       _grOrigJson = JSON.stringify(_grData);
       _grDirty = false;
       _grUpdateSaveBtn();
-      _grStatus('✓ 已保存（自动备份已创建）', false);
+      _grStatus(window.T('psn_js_298'), false);
       _grLoadBackups();
       setTimeout(function() { _grStatus(''); }, 3000);
     } else {
-      _grStatus('保存失败: ' + (d.detail || ''), true);
+      _grStatus(window.T('psn_js_064') + (d.detail || ''), true);
     }
   }).catch(e => {
-    if (btn) { btn.disabled = false; btn.textContent = '保存更改'; }
-    _grStatus('保存失败: ' + e, true);
+    if (btn) { btn.disabled = false; btn.textContent = window.T('psn_js_297'); }
+    _grStatus(window.T('psn_js_064') + e, true);
   });
 }
 
@@ -4226,7 +4224,7 @@ function _grLoadBackups() {
     if (!baks.length) { bar.style.display = 'none'; return; }
     bar.style.display = 'flex';
     pills.innerHTML = baks.map(function(b) {
-      return '<span class="gr-backup-pill" onclick="_grRestore(' + b.slot + ')" title="点击恢复到此版本">'
+      return '<span class="gr-backup-pill" onclick="_grRestore(' + b.slot + window.T('psn_js_299')
         + '🕐 #' + b.slot + ' ' + b.mtime_iso.replace('T', ' ')
         + '</span>';
     }).join('');
@@ -4234,7 +4232,7 @@ function _grLoadBackups() {
 }
 
 function _grRestore(slot) {
-  if (!confirm('确定要恢复备份 #' + slot + '？当前未保存的修改将丢失。')) return;
+  if (!confirm(window.T('psn_js_300') + slot + window.T('psn_js_301'))) return;
   fetch('/api/persona/global-rules/restore/' + slot, { method: 'POST' })
     .then(r => r.json()).then(d => {
       if (d.ok) {
@@ -4245,12 +4243,12 @@ function _grRestore(slot) {
         _grUpdateSaveBtn();
         _grUpdateStats();
         _grLoadBackups();
-        _grStatus('✓ 已恢复备份 #' + slot, false);
+        _grStatus(window.T('psn_js_302') + slot, false);
         setTimeout(function() { _grStatus(''); }, 3000);
       } else {
-        _grStatus('恢复失败: ' + (d.detail || ''), true);
+        _grStatus(window.T('psn_js_303') + (d.detail || ''), true);
       }
-    }).catch(e => _grStatus('恢复失败: ' + e, true));
+    }).catch(e => _grStatus(window.T('psn_js_303') + e, true));
 }
 
 function _grRenderAll() {
@@ -4263,24 +4261,24 @@ function _grRenderConstraints() {
   var wrap = document.getElementById('gr-constraints-list');
   if (!wrap || !_grData) return;
   var list = _grData.reply_constraints || [];
-  if (!list.length) { wrap.innerHTML = '<div style="color:var(--t3);font-size:.82rem;text-align:center;padding:1.5rem">暂无约束规则，点击下方按钮新增</div>'; return; }
+  if (!list.length) { wrap.innerHTML = window.T('psn_js_304'); return; }
   var html = '';
   var len = list.length;
   list.forEach(function(c, i) {
     var en = c.enabled !== false;
     html += '<div class="gr-card' + (en ? '' : ' disabled') + '" data-idx="' + i + '">'
       + '<div class="gr-card-hd">'
-      + '<button class="gr-collapse-btn open" onclick="_grToggleCard(this)" title="折叠/展开">▶</button>'
+      + window.T('psn_js_305')
       + '<span class="gr-card-num">' + (i+1) + '</span>'
-      + '<label class="gr-toggle" title="' + (en ? '已启用' : '已禁用') + '"><input type="checkbox" ' + (en ? 'checked' : '') + ' onchange="_grToggle(' + i + ')"><span class="slider"></span></label>'
+      + '<label class="gr-toggle" title="' + (en ? window.T('psn_js_306') : window.T('psn_js_307')) + '"><input type="checkbox" ' + (en ? 'checked' : '') + ' onchange="_grToggle(' + i + ')"><span class="slider"></span></label>'
       + '<input id="gr-ct-' + i + '" class="gr-card-title" value="' + _escAttr(c.title || '') + '" oninput="_grOnInput()" style="border:none;background:transparent;font-weight:700;font-size:.84rem;color:var(--t1);padding:0;outline:none;width:100%">'
       + '<span class="gr-card-id">' + _escHtml(c.id || '') + '</span>'
-      + '<button class="gr-move-btn" onclick="_grMove(' + i + ',-1)" title="上移"' + (i===0?' disabled':'') + '>▲</button>'
-      + '<button class="gr-move-btn" onclick="_grMove(' + i + ',1)" title="下移"' + (i===len-1?' disabled':'') + '>▼</button>'
-      + '<button class="gr-del-btn" onclick="_grDeleteRule(' + i + ')" title="删除此规则">✕</button>'
+      + '<button class="gr-move-btn" onclick="_grMove(' + i + window.T('psn_js_308') + (i===0?' disabled':'') + '>▲</button>'
+      + '<button class="gr-move-btn" onclick="_grMove(' + i + window.T('psn_js_309') + (i===len-1?' disabled':'') + '>▼</button>'
+      + '<button class="gr-del-btn" onclick="_grDeleteRule(' + i + window.T('psn_js_310')
       + '</div>'
       + '<div class="gr-card-body"><textarea id="gr-c-' + i + '" oninput="_grOnInput()" rows="2">' + _escHtml(c.rule || '') + '</textarea></div>'
-      + '<div class="gr-plat-row"><span class="gr-plat-label">平台:</span>'
+      + window.T('psn_js_311')
       + _grPlatChips(i, c.platforms || [])
       + '</div>'
       + '</div>';
@@ -4297,7 +4295,7 @@ function _grAddRule() {
   var list = _grData.reply_constraints || [];
   var idx = list.length + 1;
   var newId = 'custom_rule_' + Date.now().toString(36);
-  list.push({ id: newId, enabled: true, title: '新规则 ' + idx, rule: '' });
+  list.push({ id: newId, enabled: true, title: window.T('psn_js_312') + idx, rule: '' });
   _grData.reply_constraints = list;
   _grMarkDirty();
   _grRenderConstraints();
@@ -4314,8 +4312,8 @@ function _grDeleteRule(idx) {
   _grCollectFromUI();
   var list = _grData.reply_constraints || [];
   if (idx < 0 || idx >= list.length) return;
-  var name = list[idx].title || list[idx].id || '规则 ' + (idx + 1);
-  if (!confirm('确定删除「' + name + '」？')) return;
+  var name = list[idx].title || list[idx].id || window.T('psn_js_313') + (idx + 1);
+  if (!confirm(window.T('psn_js_314') + name + '」？')) return;
   list.splice(idx, 1);
   _grMarkDirty();
   _grRenderConstraints();
@@ -4326,13 +4324,13 @@ function _grRenderPlatform() {
   if (!wrap || !_grData) return;
   var pr = _grData.platform_rules || {};
   var keys = Object.keys(pr);
-  if (!keys.length) { wrap.innerHTML = '<div style="color:var(--t3);font-size:.78rem;padding:.5rem">暂无平台专用约束</div>'; return; }
+  if (!keys.length) { wrap.innerHTML = window.T('psn_js_315'); return; }
   var icons = { whatsapp: '💬', line: '🟢', messenger: '📦', telegram: '🔵' };
   var html = '';
   keys.forEach(function(k) {
     var entry = pr[k];
     html += '<div class="gr-plat-card">'
-      + '<div class="gr-plat-label">' + (icons[k] || '📱') + ' ' + _escHtml(entry.label || k) + '</div>'
+      + '<div class="gr-plat-label">' + (window.platformIconSVG ? window.platformIconSVG(k, {size:16}) : (icons[k] || '📱')) + ' ' + _escHtml(entry.label || k) + '</div>'
       + '<div class="gr-plat-body"><textarea id="gr-pr-' + k + '" oninput="_grOnInput()" rows="2">' + _escHtml(entry.rule || '') + '</textarea></div>'
       + '</div>';
   });
@@ -4345,7 +4343,7 @@ function _grRenderFunnel() {
   if (!wrap || !_grData) return;
   var ft = _grData.funnel_tone || {};
   var keys = Object.keys(ft);
-  if (!keys.length) { wrap.innerHTML = '<div style="color:var(--t3);font-size:.78rem;padding:.5rem">暂无漏斗语调配置</div>'; return; }
+  if (!keys.length) { wrap.innerHTML = window.T('psn_js_316'); return; }
   var stageIcons = { cold: '🧊', warm: '🌤️', hot: '🔥' };
   var html = '';
   keys.forEach(function(k) {
@@ -4397,7 +4395,7 @@ function _grApplyFilter() {
     if (match) shown++;
   });
   var cnt = document.getElementById('gr-filter-count');
-  if (cnt) cnt.textContent = shown + '/' + cards.length + ' 条';
+  if (cnt) cnt.textContent = shown + '/' + cards.length + window.T('psn_js_317');
 }
 
 // ── P6-b: Collapse / expand ─────────────────────────────────────────────────
@@ -4418,7 +4416,7 @@ function _grToggleCollapseAll() {
     if (btn) btn.classList.toggle('open', !_grAllCollapsed);
   });
   var ab = document.getElementById('gr-collapse-all-btn');
-  if (ab) ab.textContent = _grAllCollapsed ? '▶ 展开' : '▼ 折叠';
+  if (ab) ab.textContent = _grAllCollapsed ? window.T('psn_js_318') : window.T('psn_js_319');
 }
 
 // ── P6-c: Keyboard shortcut (Ctrl+S) + validation ──────────────────────────
@@ -4442,12 +4440,12 @@ function _grValidateAndSave() {
     var title = (c.title || '').trim();
     var rule = (c.rule || '').trim();
     var id = (c.id || '').trim();
-    if (!rule) errors.push('规则 #' + (i+1) + ' (' + (title || id) + ') 内容为空');
-    if (id && idSet[id]) errors.push('规则 #' + (i+1) + ' ID "' + id + '" 与 #' + idSet[id] + ' 重复');
+    if (!rule) errors.push(window.T('psn_js_320') + (i+1) + ' (' + (title || id) + window.T('psn_js_321'));
+    if (id && idSet[id]) errors.push(window.T('psn_js_320') + (i+1) + ' ID "' + id + window.T('psn_js_322') + idSet[id] + window.T('psn_js_323'));
     if (id) idSet[id] = i + 1;
   });
   if (errors.length) {
-    _grStatus('⚠️ 验证问题：' + errors.join('；'), true);
+    _grStatus(window.T('psn_js_324') + errors.join('；'), true);
     // highlight first empty rule
     var firstEmpty = list.findIndex(function(c) { return !(c.rule || '').trim(); });
     if (firstEmpty !== -1) {
@@ -4466,10 +4464,10 @@ var _GR_PLAT_ICONS = { telegram: '🔵', messenger: '📦', whatsapp: '💬', li
 function _grPlatChips(idx, active) {
   var act = (active || []).map(function(p) { return p.toLowerCase(); });
   var allMode = !act.length;
-  var html = '<span class="gr-plat-chip' + (allMode ? ' active' : '') + '" onclick="_grTogglePlat(' + idx + ',\'all\')">全部</span>';
+  var html = '<span class="gr-plat-chip' + (allMode ? ' active' : '') + '" onclick="_grTogglePlat(' + idx + ',\'all\')">' + window.T('psn_js_359') + '</span>';
   _GR_PLATFORMS.forEach(function(p) {
     var on = act.indexOf(p) !== -1;
-    html += '<span class="gr-plat-chip' + (on ? ' active' : '') + '" onclick="_grTogglePlat(' + idx + ',\'' + p + '\')">' + (_GR_PLAT_ICONS[p]||'') + ' ' + p + '</span>';
+    html += '<span class="gr-plat-chip' + (on ? ' active' : '') + '" onclick="_grTogglePlat(' + idx + ',\'' + p + '\')">' + (window.platformIconSVG ? window.platformIconSVG(p, {size:14}) : (_GR_PLAT_ICONS[p]||'')) + ' ' + p + '</span>';
   });
   return html;
 }
@@ -4504,7 +4502,7 @@ function _grRefreshPreview() {
   _grCollectFromUI();
   var box = document.getElementById('gr-preview-box');
   var chars = document.getElementById('gr-preview-chars');
-  if (box) box.textContent = '加载中…';
+  if (box) box.textContent = window.T('psn_js_083');
   var platSel = document.getElementById('gr-preview-plat');
   var plat = platSel ? platSel.value : '';
   fetch('/api/persona/global-rules/preview', {
@@ -4513,11 +4511,11 @@ function _grRefreshPreview() {
     body: JSON.stringify({ rules: _grData, platform: plat })
   }).then(function(r) { return r.json(); }).then(function(d) {
     if (d.ok && box) {
-      box.textContent = d.text || '（无启用规则）';
-      if (chars) chars.textContent = (d.text || '').length + ' 字符';
+      box.textContent = d.text || window.T('psn_js_325');
+      if (chars) chars.textContent = (d.text || '').length + window.T('psn_js_326');
     }
   }).catch(function(e) {
-    if (box) box.textContent = '预览失败: ' + e;
+    if (box) box.textContent = window.T('psn_js_327') + e;
   });
 }
 
@@ -4550,11 +4548,11 @@ function _grPreset(mode) {
   });
   _grMarkDirty();
   _grRenderConstraints();
-  var labels = { all: '全部启用', strict: '严格模式', casual: '轻松模式', minimal: '最小模式' };
+  var labels = { all: window.T('psn_js_328'), strict: window.T('psn_js_329'), casual: window.T('psn_js_330'), minimal: window.T('psn_js_331') };
   var st = document.getElementById('gr-preset-status');
   if (st) {
     var enabled = list.filter(function(c) { return c.enabled !== false; }).length;
-    st.textContent = '已应用「' + (labels[mode] || mode) + '」— ' + enabled + '/' + list.length + ' 条启用，' + changed + ' 条变更';
+    st.textContent = window.T('psn_js_275') + (labels[mode] || mode) + '」— ' + enabled + '/' + list.length + window.T('psn_js_332') + changed + window.T('psn_js_333');
     setTimeout(function() { if (st) st.textContent = ''; }, 4000);
   }
 }
@@ -4569,7 +4567,7 @@ function _grExport() {
   a.download = 'global_rules_' + new Date().toISOString().slice(0, 10) + '.json';
   a.click();
   URL.revokeObjectURL(a.href);
-  _grStatus('✓ 已导出', false);
+  _grStatus(window.T('psn_js_334'), false);
   setTimeout(function() { _grStatus(''); }, 2000);
 }
 
@@ -4582,19 +4580,19 @@ function _grImport(ev) {
     try {
       var data = JSON.parse(e.target.result);
       if (!data.reply_constraints || !Array.isArray(data.reply_constraints)) {
-        _grStatus('导入失败：JSON 缺少 reply_constraints 数组', true);
+        _grStatus(window.T('psn_js_335'), true);
         return;
       }
       var cnt = data.reply_constraints.length;
-      if (!confirm('将导入 ' + cnt + ' 条约束规则，覆盖当前所有规则。确定？')) return;
+      if (!confirm(window.T('psn_js_336') + cnt + window.T('psn_js_337'))) return;
       _grData = data;
       _grOrigJson = ''; // force dirty
       _grMarkDirty();
       _grRenderAll();
       _grUpdateStats();
-      _grStatus('✓ 已导入 ' + cnt + ' 条规则（需点击保存生效）', false);
+      _grStatus(window.T('psn_js_338') + cnt + window.T('psn_js_339'), false);
     } catch (ex) {
-      _grStatus('导入失败：JSON 解析错误 — ' + ex.message, true);
+      _grStatus(window.T('psn_js_340') + ex.message, true);
     }
   };
   reader.readAsText(file);
@@ -4605,7 +4603,7 @@ function _grLoadAudit() {
   fetch('/api/audit?action=global_rules&limit=10').then(function(r) { return r.json(); }).then(function(entries) {
     var wrap = document.getElementById('gr-audit-list');
     if (!wrap) return;
-    if (!entries || !entries.length) { wrap.innerHTML = '<span style="color:var(--t3);font-size:.74rem">暂无操作记录</span>'; return; }
+    if (!entries || !entries.length) { wrap.innerHTML = window.T('psn_js_341'); return; }
     wrap.innerHTML = entries.map(function(e) {
       var ts = (e.ts || '').replace('T', ' ').slice(0, 19);
       var icon = (e.action || '').indexOf('restore') !== -1 ? '🔄' : '💾';

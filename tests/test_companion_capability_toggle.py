@@ -79,6 +79,19 @@ def test_enable_tier0_safeguard_when_parent_on():
     assert r["allowed"] is True and r["warn"] is False
 
 
+def test_enable_realtime_voice_blocked_without_base_url():
+    r = check_toggle({"realtime_voice": {"enabled": False, "base_url": ""}},
+                     {}, "realtime_voice", "enabled", True)
+    assert r["allowed"] is False and "base_url" in r["reason"]
+
+
+def test_enable_realtime_voice_warns_without_access_token():
+    r = check_toggle({"realtime_voice": {"enabled": False,
+                                         "base_url": "http://127.0.0.1:7860"}},
+                     {}, "realtime_voice", "enabled", True)
+    assert r["allowed"] is True and r["warn"] is True and "access_token" in r["reason"]
+
+
 # ── overlay 写入：set_overlay_flag 落 config.local.yaml 且即时生效 ──────────
 
 def test_set_overlay_flag_writes_and_merges(tmp_path):

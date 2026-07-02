@@ -33,6 +33,27 @@ STAGE_LOST_HANDOFF = "LOST_HANDOFF"
 STAGE_LOST_LINE_SILENT = "LOST_LINE_SILENT"
 STAGE_NEEDS_MANUAL_MERGE = "NEEDS_MANUAL_MERGE"
 
+# ── 「成交/完成」阶段集合（单一来源） ────────────────────────────────
+# 收件箱 done 筛选 + 「已成交」KPI + 经营看板「已成交」卡片 共用此口径，
+# 避免前后端各写一份漂移（P5-2）。经 _page_ctx 注入模板（{{ funnel_done_stages|tojson }}），
+# 后端指标直接引用本常量。
+# 口径说明：沿用收件箱既有「已完成引流并互动」的成功桶（含 LINE 通过/二次互动），
+# 保持既有 KPI 与筛选行为不变；狭义「实际成交」为 {BONDED, CONVERTED}。
+FUNNEL_DONE_STAGES = frozenset({
+    STAGE_LINE_ACCEPTED,
+    STAGE_LINE_ENGAGED,
+    STAGE_BONDED,
+    STAGE_CONVERTED,
+})
+
+# 狭义「实际成交」阶段（人工闭环成交徽标 / 标记转化按钮判定用）。
+# 与广义 FUNNEL_DONE_STAGES 区分：done = 成功桶（含 LINE 通过/互动），won = 真正成交。
+# 收件箱 `_isDone`（是否已成交、是否还显示「标记成交」按钮）走此狭义集合，单一来源注入前端。
+WON_STAGES = frozenset({
+    STAGE_BONDED,
+    STAGE_CONVERTED,
+})
+
 # ── 合并决策结果 ────────────────────────────────────────────────
 DECISION_AUTO_MERGE = "auto_merge"
 DECISION_MANUAL_REVIEW = "manual_review"

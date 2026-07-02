@@ -49,9 +49,8 @@ _STAGE_BUILDING = frozenset({
     "LINE_ACCEPTED", "LINE_ENGAGED",
 })
 
-_STAGE_BONDED = frozenset({
-    "BONDED", "CONVERTED",
-})
+# 单一来源：狭义「已成交」阶段集合 = models.WON_STAGES（P5-2c，避免与收件箱/看板口径漂移）
+from src.contacts.models import WON_STAGES as _STAGE_BONDED
 
 _STAGE_LOST = frozenset({
     "LOST_HANDOFF", "LOST_LINE_SILENT",

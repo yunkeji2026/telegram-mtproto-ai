@@ -98,6 +98,19 @@ def test_telegram_adapter_maps_recent():
     assert len(chats) == 1 and chats[0]["chat_key"] == "99"
 
 
+def test_telegram_adapter_preserves_outbound_direction():
+    class _Tg:
+        _recent_messages = [{
+            "chat_id": 99, "user_name": "Dave", "text": "sent by me",
+            "ts": 41, "direction": "out", "id": 123,
+        }]
+
+    chats = TelegramInboxAdapter().collect_chats(_req(telegram_client=_Tg()), 20)
+
+    assert chats[0]["unread"] == 0
+    assert chats[0]["last_message"]["direction"] == "out"
+
+
 def test_missing_services_yield_empty():
     req = _req()  # 无任何平台 service
     for a in default_inbox_adapters():

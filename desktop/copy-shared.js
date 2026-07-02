@@ -6,6 +6,8 @@ const path = require("path");
 
 const SRC = path.resolve(__dirname, "..", "shared", "copilot");
 const DST = path.join(__dirname, "renderer", "shared", "copilot");
+const BRAND_SRC = path.resolve(__dirname, "..", "src", "web", "static", "brand");
+const BRAND_DST = path.join(__dirname, "renderer", "brand");
 
 function copyDir(src, dst) {
   fs.mkdirSync(dst, { recursive: true });
@@ -24,6 +26,10 @@ try {
   }
   copyDir(SRC, DST);
   console.log(`[copy-shared] ok: ${SRC} → ${DST}`);
+  if (fs.existsSync(BRAND_SRC)) {
+    copyDir(BRAND_SRC, BRAND_DST);
+    console.log(`[copy-shared] ok: ${BRAND_SRC} → ${BRAND_DST}`);
+  }
 } catch (e) {
   console.error(`[copy-shared] 失败: ${e}`);
   process.exit(0); // 不阻断启动

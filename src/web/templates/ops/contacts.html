@@ -1,6 +1,7 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8">
+<html lang="{{ 'zh-CN' if (ui_lang|default('zh')) == 'zh' else 'en' }}"><head><meta charset="utf-8">
 <title>Contacts · Ops</title>
+{% include "_i18n_bootstrap.html" %}
 <style>
 body{font-family:-apple-system,Segoe UI,sans-serif;max-width:1100px;margin:20px auto;padding:0 20px;background:#fafafa;color:#222}
 h1{font-size:20px;margin-bottom:4px}
@@ -64,33 +65,33 @@ tr.clickable:hover td{background:#eff6ff;cursor:pointer}
 .nav a.active{font-weight:700;color:#1e3a8a;border-bottom:2px solid #2563eb;padding-bottom:2px}
 </style></head>
 <body>
-<!-- NAV_INJECT -->
+{% include "ops/_ops_nav.html" %}
 <h1>Contacts <span id="result-badge" class="result-badge" style="display:none"></span></h1>
 <div class="search-bar">
-  <input id="search-input" type="search" placeholder="搜索联系人名称 / Canonical ID / Contact ID…" oninput="onSearchInput(this.value)" onkeydown="if(event.key==='Enter')doSearch()">
+  <input id="search-input" type="search" placeholder="{{ (i18n or {}).get('ops.ct.search_ph', '搜索联系人名称 / Canonical ID / Contact ID…') }}" oninput="onSearchInput(this.value)" onkeydown="if(event.key==='Enter')doSearch()">
   <span class="search-hint" id="search-hint"></span>
 </div>
 <div class="stats" id="stats"></div>
 <div class="funnel-wrap" id="funnel-wrap" style="display:none">
-  <h3>漏斗阶段分布（快照）</h3>
+  <h3>{{ (i18n or {}).get('ops.ct.funnel_title', '漏斗阶段分布（快照）') }}</h3>
   <div id="funnel-forward"></div>
-  <div id="funnel-lost-sep" style="margin:10px 0 6px;font-size:11px;color:#888;display:none">流失</div>
+  <div id="funnel-lost-sep" style="margin:10px 0 6px;font-size:11px;color:#888;display:none">{{ (i18n or {}).get('dash.stage.LOST', '流失') }}</div>
   <div id="funnel-lost"></div>
 </div>
 <!-- 时间线 Drawer -->
 <div id="drawer-overlay" onclick="closeDrawer()"></div>
 <div id="drawer">
   <div class="drawer-head">
-    <h2 id="drawer-title">联系人时间线</h2>
+    <h2 id="drawer-title">{{ (i18n or {}).get('ops.ct.drawer_title', '联系人时间线') }}</h2>
     <button class="drawer-close" onclick="closeDrawer()">✕</button>
   </div>
-  <div class="drawer-body" id="drawer-body"><p class="tl-empty">加载中…</p></div>
+  <div class="drawer-body" id="drawer-body"><p class="tl-empty">{{ (i18n or {}).get('dash.loading', '加载中…') }}</p></div>
 </div>
 
 <table id="tbl"><thead>
-  <tr><th>ID</th><th>名称</th><th>语言</th><th>阶段</th><th>Intimacy</th><th>最后活跃</th></tr>
+  <tr><th>ID</th><th>{{ (i18n or {}).get('dash.ws.col_name', '名称') }}</th><th>{{ (i18n or {}).get('ops.ct.col_lang', '语言') }}</th><th>{{ (i18n or {}).get('ops.ct.col_stage', '阶段') }}</th><th>Intimacy</th><th>{{ (i18n or {}).get('ops.ct.col_last', '最后活跃') }}</th></tr>
 </thead><tbody></tbody></table>
-<div id="empty" class="empty" style="display:none">暂无联系人</div>
+<div id="empty" class="empty" style="display:none">{{ (i18n or {}).get('ops.ct.empty', '暂无联系人') }}</div>
 <script>
 function escapeHtml(s){return (s+'').replace(/[&<>"']/g,c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
@@ -175,9 +176,9 @@ async function renderContacts(q){
   const badge = document.getElementById('result-badge');
   const hint = document.getElementById('search-hint');
   if(q){
-    badge.textContent=`${list.total} 条结果`;
+    badge.textContent=window.Tf('ops.ct.n_results',{n:list.total});
     badge.style.display='';
-    hint.textContent=`"​${q}​" 的搜索结果`;
+    hint.textContent=window.Tf('ops.ct.search_for',{q:q});
   } else {
     badge.style.display='none';
     hint.textContent='';
@@ -186,7 +187,7 @@ async function renderContacts(q){
   if(!list.items||list.items.length===0){
     document.getElementById('tbl').style.display='none';
     document.getElementById('empty').style.display='block';
-    document.getElementById('empty').textContent = q ? `没有匹配「${q}」的联系人` : '暂无联系人';
+    document.getElementById('empty').textContent = q ? window.Tf('ops.ct.no_match',{q:q}) : window.T('ops.ct.empty');
     return;
   }
   document.getElementById('tbl').style.display='';
@@ -194,7 +195,7 @@ async function renderContacts(q){
   tbody.innerHTML = list.items.map(c=>{
     const stage = c.funnel_stage||'INITIAL';
     const intim = (c.intimacy_score||0).toFixed(1);
-    const last = c.last_active_at ? new Date(c.last_active_at*1000).toLocaleString('zh-CN') : '-';
+    const last = c.last_active_at ? window.wsFmtDateTime(c.last_active_at) : '-';
     return `<tr class="clickable" onclick="openDrawer('${c.contact_id}','${escapeHtml(c.primary_name||c.contact_id.slice(0,8))}')">
       <td><code style="font-size:11px">${c.contact_id.slice(0,8)}</code></td>
       <td>${escapeHtml(c.primary_name||'-')}</td>
@@ -214,7 +215,7 @@ async function load(){
     fetch('/api/funnel/stats').then(r=>r.json()),
   ]);
   const s=document.getElementById('stats');
-  s.innerHTML = `<div class="pill">总联系人 <strong>${stats.total_contacts}</strong></div>`
+  s.innerHTML = `<div class="pill">${window.T('ops.ct.total')} <strong>${stats.total_contacts}</strong></div>`
     + Object.entries(stats.by_stage||{}).map(([k,v])=>
         `<div class="pill">${escapeHtml(k)} <strong>${v}</strong></div>`).join('')
     + Object.entries(stats.by_channel||{}).map(([k,v])=>
@@ -222,17 +223,17 @@ async function load(){
   renderFunnel(stats.by_stage);
   await renderContacts(initQ);
 }
-load().catch(e=>{document.body.innerHTML+='<p style="color:red">加载失败: '+e+'</p>';});
+load().catch(e=>{document.body.innerHTML+='<p style="color:red">'+window.T('dash.load_fail')+': '+e+'</p>';});
 
 /* ── 时间线 Drawer ── */
 const MOBILE_HANDOFF_STATES = {
-  pending:'待确认',acknowledged:'已确认',completed:'已完成',
-  rejected:'已拒绝',expired:'已过期',duplicate_blocked:'去重屏蔽',
+  pending:window.T('ops.ct.st_pending'),acknowledged:window.T('ops.ct.st_acked'),completed:window.T('ops.ct.st_completed'),
+  rejected:window.T('ops.ct.st_rejected'),expired:window.T('ops.ct.st_expired'),duplicate_blocked:window.T('ops.ct.st_dedup'),
 };
 
 function fmtTs(ts){
   if(!ts)return '';
-  try{return new Date(typeof ts==='number'?ts*1000:ts).toLocaleString('zh-CN',{hour12:false});}
+  try{return window.wsFmtDateTime(typeof ts==='number'?ts*1000:ts,{hour12:false});}
   catch{return String(ts);}
 }
 
@@ -247,9 +248,9 @@ function renderEvent(ev){
     const p = ev.payload||{};
     const stateLabel = MOBILE_HANDOFF_STATES[p.state||''] || p.state || '';
     const parts = [];
-    if(p.source_agent) parts.push(`来源: ${escapeHtml(p.source_agent)}`);
-    if(p.channel)      parts.push(`渠道: ${escapeHtml(p.channel)}`);
-    if(stateLabel)     parts.push(`状态: <strong>${escapeHtml(stateLabel)}</strong>`);
+    if(p.source_agent) parts.push(`${window.T('ops.ct.tl_source')}: ${escapeHtml(p.source_agent)}`);
+    if(p.channel)      parts.push(`${window.T('ops.ct.tl_channel')}: ${escapeHtml(p.channel)}`);
+    if(stateLabel)     parts.push(`${window.T('ops.ct.tl_state')}: <strong>${escapeHtml(stateLabel)}</strong>`);
     if(p.snippet_sent) detail += `<div class="tl-snip">"${escapeHtml(p.snippet_sent.slice(0,80))}${p.snippet_sent.length>80?'…':''}"</div>`;
     if(parts.length)   detail += `<div class="tl-payload">${parts.join(' · ')}</div>`;
   } else {
@@ -262,7 +263,7 @@ function renderEvent(ev){
   }
 
   const typeLabel = isMobile
-    ? `📱 ${escapeHtml((ev.event_type||'').replace('mobile_handoff_','交接·'))}`
+    ? `📱 ${escapeHtml((ev.event_type||'').replace('mobile_handoff_',window.T('ops.ct.handoff_prefix')))}`
     : escapeHtml(ev.event_type||'event');
 
   return `<div class="tl-item">
@@ -276,22 +277,22 @@ function renderEvent(ev){
 }
 
 async function openDrawer(contactId, name){
-  document.getElementById('drawer-title').textContent = name + ' 时间线';
-  document.getElementById('drawer-body').innerHTML = '<p class="tl-empty">加载中…</p>';
+  document.getElementById('drawer-title').textContent = name + ' ' + window.T('ops.ct.timeline');
+  document.getElementById('drawer-body').innerHTML = '<p class="tl-empty">'+window.T('dash.loading')+'</p>';
   document.getElementById('drawer-overlay').style.display='block';
   document.getElementById('drawer').classList.add('open');
   try{
     const d = await fetch(`/api/contacts/${contactId}/timeline?limit=80`).then(r=>r.json());
     const events = d.events||[];
     if(!events.length){
-      document.getElementById('drawer-body').innerHTML='<p class="tl-empty">暂无事件记录</p>';
+      document.getElementById('drawer-body').innerHTML='<p class="tl-empty">'+window.T('ops.ct.no_events')+'</p>';
       return;
     }
     document.getElementById('drawer-body').innerHTML =
-      `<p style="font-size:11px;color:#9ca3af;margin:0 0 12px">共 ${events.length} 条 · 阶段: <strong>${d.funnel_stage||'-'}</strong></p>`
+      `<p style="font-size:11px;color:#9ca3af;margin:0 0 12px">${window.Tf('ops.ct.tl_summary',{n:events.length})}<strong>${d.funnel_stage||'-'}</strong></p>`
       + events.map(renderEvent).join('');
   }catch(e){
-    document.getElementById('drawer-body').innerHTML=`<p class="tl-empty" style="color:#dc2626">加载失败: ${e}</p>`;
+    document.getElementById('drawer-body').innerHTML=`<p class="tl-empty" style="color:#dc2626">${window.T('dash.load_fail')}: ${e}</p>`;
   }
 }
 

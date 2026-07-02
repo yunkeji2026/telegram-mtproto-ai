@@ -19,6 +19,7 @@ _SIGNAL_FOR = {
     "l2_autosend_deliver": "l2_autosend_deliver",
     "proactive_topic": "proactive_topic",
     "proactive_care": "proactive_topic",
+    "realtime_voice": "realtime_voice",
 }
 
 # 建议动作优先级（越小越先处理）
@@ -76,6 +77,8 @@ def build_recommendations(
 def consistency_issues(
     caps: List[Dict[str, Any]], *, auto_ai: Optional[int] = None,
     embed_ready: Optional[bool] = None,
+    rtv_configured: Optional[bool] = None,
+    rtv_ref_summary: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """配置自洽体检：开关之间互相矛盾 / 前置缺失。
 
@@ -93,6 +96,18 @@ def consistency_issues(
                        "message": "记忆向量召回已开但未配嵌入源 → embed() 返回空，召回静默退化为"
                                   "纯关键词（看似开了实则没开）。配 ai.embedding_base_url/model "
                                   "或关掉该能力（见 docs/COMPANION_TURN_ON.md）"})
+    if rtv_configured is False and en("realtime_voice"):
+        issues.append({"severity": "error", "keys": ["realtime_voice"],
+                       "message": "实时语音已开但 realtime_voice.base_url 未配 → 网关连不上主机"})
+    refs = rtv_ref_summary or {}
+    if en("realtime_voice") and int(refs.get("persona_count") or 0) > 0:
+        if int(refs.get("with_reference") or 0) == 0:
+            issues.append({"severity": "warn", "keys": ["realtime_voice"],
+                           "message": "实时语音已开但无人设参考音 → 通话降级内置音色，试拨页上传真人声"})
+        elif str(refs.get("worst_grade") or "") == "red":
+            iss = (refs.get("sample_issues") or ["质量不佳"])[0]
+            issues.append({"severity": "warn", "keys": ["realtime_voice"],
+                           "message": f"参考音体检红灯（{iss}）→ 重录后再做克隆试拨"})
     if en("l2_autosend_deliver"):
         if not en("l2_autosend_worker"):
             issues.append({"severity": "error", "keys": ["l2_autosend_deliver", "l2_autosend_worker"],
@@ -121,6 +136,8 @@ def consistency_issues(
 def build_advice(
     status: Dict[str, Any], signals: Dict[str, Any], *, auto_ai: Optional[int] = None,
     embed_ready: Optional[bool] = None,
+    rtv_configured: Optional[bool] = None,
+    rtv_ref_summary: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """合并：能力档 × 信号 → 建议 + 一致性体检 + 摘要。"""
     caps = (status or {}).get("capabilities", []) or []
@@ -128,7 +145,9 @@ def build_advice(
     signals_by_key = {s.get("key"): s for s in sig_list if isinstance(s, dict)}
 
     recs = build_recommendations(caps, signals_by_key)
-    issues = consistency_issues(caps, auto_ai=auto_ai, embed_ready=embed_ready)
+    issues = consistency_issues(caps, auto_ai=auto_ai, embed_ready=embed_ready,
+                                rtv_configured=rtv_configured,
+                                rtv_ref_summary=rtv_ref_summary)
     return {
         "recommendations": recs,
         "consistency": issues,

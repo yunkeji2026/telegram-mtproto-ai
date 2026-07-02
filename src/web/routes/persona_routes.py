@@ -11,6 +11,7 @@ Endpoints:
 """
 
 from fastapi import Depends, HTTPException, Request
+from src.web.web_i18n import tr
 
 _ROLE_VIEWER = "viewer"
 _ROLE_MASTER = "master"
@@ -24,20 +25,44 @@ def register_persona_routes(app, auth_dep, audit_store=None, config_manager=None
     # 2. personas.yaml                   — 规范运营定义（git 可追蹤，新层）
     # 3. profiles_runtime.yaml           — 会话运行时覆盖（最高优先）
     # 4. bindings_runtime.yaml           — 聊天绑定
+    import logging as _logging
+    _plog = _logging.getLogger("ai_chat_assistant.persona_routes")
     try:
         from pathlib import Path as _Path
         from src.utils.persona_manager import PersonaManager as _PM
         _pm_init = _PM.get_instance()
         _cfg = getattr(config_manager, "config", None) or {}
-        _pm_init.load_profiles_from_config(_cfg)               # layer 1: config base
+        _n1 = _pm_init.load_profiles_from_config(_cfg)             # layer 1: config base
+        _n2 = 0
         if config_manager:
-            _pm_init.load_personas_canonical(config_manager)  # layer 2: canonical yaml
+            _n2 = _pm_init.load_personas_canonical(config_manager)  # layer 2: canonical yaml
         _cp = getattr(config_manager, "config_path", None)
+        _n3 = 0
         if _cp:
-            _pm_init.load_profiles_runtime(_Path(_cp), _cfg)       # layer 3: session overrides
-            _pm_init.load_chat_bindings_runtime(_Path(_cp), _cfg)   # layer 4: bindings
-    except Exception:
-        pass
+            _n3 = _pm_init.load_profiles_runtime(_Path(_cp), _cfg)    # layer 3: session overrides
+            _pm_init.load_chat_bindings_runtime(_Path(_cp), _cfg)     # layer 4: bindings
+        # 可观测：人设加载结果 + 语音 backend 体检。历史隐性事故——加载静默失败时
+        # resolve 会回落默认 TTS、发出非克隆机器音（"声音太假"），过去无任何日志。
+        # 这里把"加载了几个 / 几个配了真声克隆 backend"打到日志，便于排障。
+        try:
+            _all = _pm_init._profile_personas or {}
+            _CLONE_BACKENDS = ("minicpm_clone", "fish_speech", "coqui_http", "elevenlabs", "xtts")
+            _clone = sum(
+                1 for _p in _all.values()
+                if str(((_p or {}).get("voice_profile") or {}).get("backend") or "").strip().lower()
+                in _CLONE_BACKENDS
+            )
+            _plog.info(
+                "人设加载完成: config=%d canonical=%d runtime=%d；共 %d 个人设，%d 个配了克隆/真声 backend",
+                _n1, _n2, _n3, len(_all), _clone,
+            )
+        except Exception:
+            pass
+    except Exception as _e:
+        _plog.warning(
+            "人设运行时加载失败（resolve 将回落默认 TTS，可能发出非克隆机器音）: %s",
+            _e, exc_info=True,
+        )
 
     @app.get("/api/persona")
     async def api_persona_get(request: Request, chat_id: str = "",
@@ -64,7 +89,7 @@ def register_persona_routes(app, auth_dep, audit_store=None, config_manager=None
         except Exception:
             role = ""
         if role == _ROLE_VIEWER:
-            raise HTTPException(403, "只读账号无法修改人设配置")
+            raise HTTPException(403, tr(request, "err.persona.readonly_no_edit"))
 
     def _check_master_role(request: Request):
         """Raises 403 unless session role is master."""
@@ -73,7 +98,7 @@ def register_persona_routes(app, auth_dep, audit_store=None, config_manager=None
         except Exception:
             role = ""
         if role and role != _ROLE_MASTER:
-            raise HTTPException(403, "该操作仅主帐号可执行")
+            raise HTTPException(403, tr(request, "err.perm.master_only"))
 
     @app.post("/api/persona/bind")
     async def api_persona_bind(request: Request, _=Depends(auth_dep)):
@@ -356,7 +381,7 @@ def register_persona_routes(app, auth_dep, audit_store=None, config_manager=None
         pm = PersonaManager.get_instance()
         cm = getattr(request.app.state, "config_manager", None) or config_manager
         if not cm or not hasattr(cm, "save_personas"):
-            raise HTTPException(503, "ConfigManager.save_personas 不可用")
+            raise HTTPException(503, tr(request, "err.persona.save_unavailable"))
         operator_profiles = {
             pid: dict(p)
             for pid, p in pm._profile_personas.items()
@@ -656,7 +681,7 @@ def register_persona_routes(app, auth_dep, audit_store=None, config_manager=None
 
         cm = getattr(request.app.state, "config_manager", None) or config_manager
         if not cm:
-            raise HTTPException(503, "config_manager 不可用")
+            raise HTTPException(503, tr(request, "err.svc.config_manager_not_ready"))
         tg_cfg: dict = (getattr(cm, "config", None) or {}).get("telegram") or {}
         pids = [profile_id] if profile_id else []
 
@@ -703,7 +728,7 @@ def register_persona_routes(app, auth_dep, audit_store=None, config_manager=None
 
         cm = getattr(request.app.state, "config_manager", None) or config_manager
         if not cm:
-            raise HTTPException(503, "config_manager 不可用")
+            raise HTTPException(503, tr(request, "err.svc.config_manager_not_ready"))
         mrpa_cfg: dict = (getattr(cm, "config", None) or {}).get("messenger_rpa") or {}
         pids = [profile_id] if profile_id else []
 

@@ -109,6 +109,7 @@ def derive_emotion(
     csat: Optional[float] = None,
     text: Optional[str] = None,
     default: str = "warm",
+    persona: Optional[Dict[str, Any]] = None,
 ) -> EmotionSpec:
     """从会话上下文派生情绪。任何脏输入都安全退化。
 
@@ -148,6 +149,10 @@ def derive_emotion(
         elif rs in ("new", "stranger", "陌生", "lead"):
             emo = "warm"
 
+    # 5) 人设默认声线基调：让「目标人设」不仅换音色，也影响语气。
+    if emo is None:
+        emo = persona_default_emotion(persona)
+
     if emo is None:
         emo = default if default in EMOTIONS else "warm"
 
@@ -156,6 +161,54 @@ def derive_emotion(
     if rs in ("intimate", "close", "亲密", "lover"):
         intensity = 0.75
     return EmotionSpec(emo, intensity=intensity)
+
+
+def persona_default_emotion(persona: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Infer a stable TTS baseline from persona traits/style/tags.
+
+    This is deliberately conservative: explicit conversation signals still win.
+    The goal is to make cloned voices sound like the selected character even when
+    the current reply text has no obvious emotion cue.
+    """
+    if not isinstance(persona, dict) or not persona:
+        return None
+    # Operator-pinned baseline wins (set via persona ``voice_profile.emotion``
+    # or a top-level ``voice_emotion``). Makes "voice asset" assignment
+    # deterministic instead of relying on keyword inference over free text.
+    vp = persona.get("voice_profile")
+    explicit = ""
+    if isinstance(vp, dict):
+        explicit = str(vp.get("emotion") or "").strip().lower()
+    if not explicit:
+        explicit = str(persona.get("voice_emotion") or "").strip().lower()
+    if explicit in EMOTIONS and explicit != "neutral":
+        return explicit
+    parts = []
+    for key in ("role", "background"):
+        if persona.get(key):
+            parts.append(str(persona.get(key)))
+    for t in persona.get("tags") or []:
+        parts.append(str(t))
+    p = persona.get("personality") or {}
+    if isinstance(p, dict):
+        parts.extend(str(x) for x in (p.get("traits") or []))
+        for key in ("style", "quirks"):
+            if p.get(key):
+                parts.append(str(p.get(key)))
+    blob = " ".join(parts).lower()
+    if not blob:
+        return None
+    if any(k in blob for k in ("活泼", "俏皮", "调皮", "爱笑", "热情", "外放", "playful")):
+        return "playful"
+    if any(k in blob for k in ("开心", "快乐", "乐观", "阳光", "happy")):
+        return "happy"
+    if any(k in blob for k in ("温暖", "体贴", "亲切", "温柔", "护士", "共情", "empathy")):
+        return "warm"
+    if any(k in blob for k in ("感性", "细腻", "文艺", "浪漫", "慢热")):
+        return "calm"
+    if any(k in blob for k in ("严谨", "专业", "金融", "顾问", "冷静", "克制", "成熟", "serious")):
+        return "serious"
+    return None
 
 
 # ── 情绪 → 引擎控制映射 ───────────────────────────────────────────────────────
@@ -195,6 +248,66 @@ def to_openai_instructions(spec: EmotionSpec, *, base: str = "") -> str:
         parts.append(pace_cn)
     instr = "；".join(parts)
     return f"{base}。{instr}" if base else instr
+
+
+def emotion_tone_descriptor(spec: EmotionSpec) -> str:
+    """情绪 → 中文语气**描述词**（如「俏皮、活泼、带点调侃」）；neutral/未知 → ""。
+
+    供「文本系统提示」里描述人设语气基调（实时通话开场锚定）——与 ``to_*_instructions``
+    的「指令句」不同，这里只给**形容词组**，由调用方包成完整句子。
+    """
+    if spec.is_neutral():
+        return ""
+    return str(_EMOTION_PROFILE.get(spec.emotion, {}).get("tone", "") or "")
+
+
+def to_qwen_instructions(spec: EmotionSpec, *, base: str = "") -> str:
+    """Qwen3-TTS / DashScope ``instructions`` 自然语言声音指令。
+
+    Qwen3-TTS 与 OpenAI 一样消费自然语言「声音指令」——这是 **API 字段**，模型据此
+    调整语气/语速，**绝不会被读出来**（零 garble 风险，故可默认开启）。复用同一套
+    措辞逻辑。neutral → 原样返回 base（无新增）。
+    """
+    return to_openai_instructions(spec, base=base)
+
+
+# 情绪 → fish_speech 内联情感标记（S2 Pro 文档词表，括号风格）。
+# 仅取官方词表里的词，降低「不识别即读出」风险；仍建议 opt-in
+# （见 voice_clone_lan.emotion_inline_tags），因不同 server build 支持度不一。
+_FISH_MARKER: Dict[str, str] = {
+    "neutral":    "",
+    "warm":       "(comforting)",
+    "happy":      "(joyful)",
+    "excited":    "(excited)",
+    "playful":    "(amused)",
+    "empathetic": "(empathetic)",
+    "apologetic": "(guilty)",
+    "calm":       "(relaxed)",
+    "sad":        "(sad)",
+    "serious":    "(serious)",
+}
+
+
+def fish_marker(spec: EmotionSpec) -> str:
+    """情绪 → fish_speech 内联标记（如 ``(joyful)``）；neutral/未知 → 空串。"""
+    if spec.is_neutral():
+        return ""
+    return _FISH_MARKER.get(spec.emotion, "")
+
+
+def to_fish_text(text: str, spec: EmotionSpec) -> str:
+    """在文本前注入 fish_speech 情感标记（如 ``(joyful) 你好``）。
+
+    neutral / 未知情绪 / 空文本 → 原文不变。标记被 S2 Pro 当情感提示消费；
+    若 server 不支持该词，最坏情况是读出括号内容，故调用方应 opt-in。
+    """
+    t = str(text or "")
+    if not t.strip():
+        return t
+    marker = fish_marker(spec)
+    if not marker:
+        return t
+    return f"{marker} {t}"
 
 
 def to_elevenlabs_text(text: str, spec: EmotionSpec) -> str:
@@ -273,7 +386,10 @@ def edge_prosody(spec: EmotionSpec) -> Dict[str, str]:
 
 __all__ = [
     "EmotionSpec", "NEUTRAL", "EMOTIONS",
-    "derive_emotion", "coerce_emotion",
-    "to_openai_instructions", "to_elevenlabs_text", "elevenlabs_voice_settings",
+    "derive_emotion", "coerce_emotion", "persona_default_emotion",
+    "emotion_tone_descriptor",
+    "to_openai_instructions", "to_qwen_instructions",
+    "to_elevenlabs_text", "elevenlabs_voice_settings",
+    "fish_marker", "to_fish_text",
     "edge_prosody",
 ]

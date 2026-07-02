@@ -1,5 +1,5 @@
 {% extends "workspace_base.html" %}
-{% block title %}草稿审批工作台{% endblock %}
+{% block title %}{{ i18n.get('draft.page_title', '草稿审批工作台') }}{% endblock %}
 {% block head %}
 <style>
   .dr-wrap{height:100%;overflow-y:auto;background:#f7f8fa;padding:18px;}
@@ -112,45 +112,54 @@
   .dr-bubble-wrap.in .dr-bubble{background:#e0f2fe;color:#0c4a6e;border-radius:10px 10px 10px 2px;}
   .dr-bubble-wrap.out .dr-bubble{background:#d1fae5;color:#064e3b;border-radius:10px 10px 2px 10px;}
   .dr-bubble-ts{font-size:10px;color:#94a3b8;margin-top:2px;text-align:right;}
+  .ui-ic{display:inline-block;vertical-align:middle;flex:0 0 auto;}
+  .dr-hdr-ic{display:inline-flex;align-items:center;gap:5px;}
 </style>
 {% endblock %}
 {% block content %}
 <div class="dr-wrap">
   <div class="dr-header">
-    <h2 style="margin:0;font-size:18px;">📋 草稿审批工作台</h2>
+    <h2 style="margin:0;font-size:18px;display:inline-flex;align-items:center;"><span data-ui-icon="clipboard" data-size="17" style="margin-right:7px;"></span><span data-i18n="draft.title">草稿审批工作台</span></h2>
     <div style="display:flex;gap:10px;align-items:center;">
-      <button onclick="triggerBulkAutosend()" id="btn-bulk" style="padding:5px 12px;border:1px solid #16a34a;border-radius:6px;background:#fff;color:#16a34a;font-size:13px;cursor:pointer;">⚡ 一键发所有 L2</button>
-      <a href="/workspace/draft-audit" id="audit-link" style="font-size:13px;color:#2563eb;text-decoration:none;display:none;">查看审计日志 →</a>
+      <button onclick="triggerBulkAutosend()" id="btn-bulk" style="padding:5px 12px;border:1px solid #16a34a;border-radius:6px;background:#fff;color:#16a34a;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;"><span data-ui-icon="zap" data-size="13" style="margin-right:5px;"></span><span data-i18n="draft.bulk_l2">一键发所有 L2</span></button>
+      <a href="/workspace/draft-audit" id="audit-link" style="font-size:13px;color:#2563eb;text-decoration:none;display:none;" data-i18n="draft.audit_link">查看审计日志 →</a>
     </div>
   </div>
   <div class="dr-tabs">
-    <button class="dr-tab active" onclick="setFilter('pending','','')">全部待审</button>
-    <button class="dr-tab" onclick="setFilter('pending','','L3')">L3 待审批</button>
-    <button class="dr-tab" onclick="setFilter('pending','','L4')">⛔ L4 拦截</button>
-    <button class="dr-tab" onclick="setFilter('pending','','L2')">L2 自动</button>
-    <button class="dr-tab" onclick="setFilter('approved','','')">已批准</button>
-    <button class="dr-tab" onclick="setFilter('rejected','','')">已拒绝</button>
+    <button class="dr-tab active" onclick="setFilter('pending','','')" data-i18n="draft.tab.all">全部待审</button>
+    <button class="dr-tab" onclick="setFilter('pending','','L3')" data-i18n="draft.tab.l3">L3 待审批</button>
+    <button class="dr-tab" onclick="setFilter('pending','','L4')"><span data-ui-icon="ban" data-size="13" style="margin-right:5px;vertical-align:-2px;"></span><span data-i18n="draft.tab.l4">L4 拦截</span></button>
+    <button class="dr-tab" onclick="setFilter('pending','','L2')" data-i18n="draft.tab.l2">L2 自动</button>
+    <button class="dr-tab" onclick="setFilter('approved','','')" data-i18n="draft.tab.approved">已批准</button>
+    <button class="dr-tab" onclick="setFilter('rejected','','')" data-i18n="draft.tab.rejected">已拒绝</button>
   </div>
   <!-- H2 批量操作栏 -->
   <div id="dr-select-bar" class="dr-select-bar">
-    <span id="dr-select-count">已选 0 条</span>
+    <span id="dr-select-count"></span>
     <div style="display:flex;gap:8px;">
-      <button class="dr-select-btn" style="background:#16a34a;" onclick="bulkAct('approve')">✓ 批量批准</button>
-      <button class="dr-select-btn" style="background:#dc2626;" onclick="bulkAct('reject')">✗ 批量拒绝</button>
-      <button class="dr-select-btn" style="background:#475569;" onclick="clearSel()">取消选择</button>
+      <button class="dr-select-btn" style="background:#16a34a;display:inline-flex;align-items:center;" onclick="bulkAct('approve')"><span data-ui-icon="check" data-size="13" style="margin-right:5px;"></span><span data-i18n="draft.sel.approve">批量批准</span></button>
+      <button class="dr-select-btn" style="background:#dc2626;display:inline-flex;align-items:center;" onclick="bulkAct('reject')"><span data-ui-icon="x" data-size="13" style="margin-right:5px;"></span><span data-i18n="draft.sel.reject">批量拒绝</span></button>
+      <button class="dr-select-btn" style="background:#475569;" onclick="clearSel()" data-i18n="draft.sel.clear">取消选择</button>
     </div>
   </div>
-  <div id="dr-list"><div class="dr-loading">加载中…</div></div>
+  <div id="dr-list"><div class="dr-loading" data-i18n="dash.loading">加载中…</div></div>
 </div>
-<div class="dr-kb-hint">? = 快捷键说明</div>
+<div class="dr-kb-hint" data-i18n="draft.kb_hint">? = 快捷键说明</div>
 <script>
 (function(){
 var _status='pending', _platform='', _level='';
 var _isSup=false;
 var COLORS={L0:'l0',L1:'l1',L2:'l2',L3:'l3',L4:'l4'};
 var BADGES={L0:'badge-l0',L1:'badge-l1',L2:'badge-l2',L3:'badge-l3',L4:'badge-l4'};
-var LABELS={L0:'L0 手动',L1:'L1 待审',L2:'L2 自动放行',L3:'L3 需审批',L4:'L4 拦截'};
-var PLATICONS={line:'🟢',whatsapp:'📱',messenger:'💬',telegram:'✈️',web:'🌐',inbox:'📥'};
+function LABEL(lv){ return window.T('draft.lvl.'+lv, lv); }
+function _drHdr(icon,key){
+  return '<span class="dr-hdr-ic">'+(typeof uiIcon==='function'?uiIcon(icon,13):'')+'<span>'+window.T(key)+'</span></span>';
+}
+function _platIcon(plat){
+  if(typeof platformIconSVG==='function') return platformIconSVG(plat,{size:15});
+  if(typeof uiIcon==='function') return uiIcon('inbox',15);
+  return '';
+}
 
 fetch('/api/workspace/me').then(function(r){return r.json();}).then(function(m){
   if(m&&m.ok){ _isSup=!!(m.is_supervisor); }
@@ -168,11 +177,11 @@ function setFilter(s,p,l){
 function esc(t){ var d=document.createElement('div'); d.textContent=t||''; return d.innerHTML; }
 
 // K1/K2 toast（复用 workspace_base CRMW；降级为原生 alert 兜底）
-function _drToast(msg, style, dur){
+function _drToast(msg, style, dur, icon){
   style = style||'info';
   try{
     var color={'warn':'#b91c1c','info':'#0f766e','success':'#16a34a'}[style]||'#2563eb';
-    if(window.CRMW&&CRMW.toast){ CRMW.toast(msg, color); return; }
+    if(window.CRMW&&CRMW.toast){ CRMW.toast(msg, color, icon); return; }
   }catch(_){}
   var el=document.createElement('div');
   el.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;padding:10px 18px;'
@@ -182,26 +191,26 @@ function _drToast(msg, style, dur){
   setTimeout(function(){el.remove();}, dur||4000);
   el.onclick=function(){el.remove();};
 }
-function fmtTs(ts){ if(!ts) return ''; var d=new Date(ts*1000); return d.toLocaleDateString('zh-CN',{month:'2-digit',day:'2-digit'})+' '+d.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}); }
+function fmtTs(ts){ if(!ts) return ''; return window.wsFmtDate(ts,{month:'2-digit',day:'2-digit'})+' '+window.wsFmtTime(ts,{hour:'2-digit',minute:'2-digit'}); }
 
 function load(){
   var url='/api/drafts?status='+encodeURIComponent(_status)+'&limit=100';
   if(_platform) url+='&platform='+encodeURIComponent(_platform);
-  document.getElementById('dr-list').innerHTML='<div class="dr-loading">加载中…</div>';
+  document.getElementById('dr-list').innerHTML='<div class="dr-loading">'+window.T('dash.loading')+'</div>';
   fetch(url).then(function(r){return r.json();}).then(function(d){
-    if(!d||!d.ok){ document.getElementById('dr-list').innerHTML='<div class="dr-empty">加载失败或草稿服务未启用</div>'; return; }
+    if(!d||!d.ok){ document.getElementById('dr-list').innerHTML='<div class="dr-empty">'+window.T('draft.empty.svc')+'</div>'; return; }
     var drafts=(d.drafts||[]).filter(function(dr){
       if(!_level) return true;
       return (dr.autopilot_level||'L1')===_level;
     });
-    if(!drafts.length){ document.getElementById('dr-list').innerHTML='<div class="dr-empty">暂无草稿</div>'; return; }
+    if(!drafts.length){ document.getElementById('dr-list').innerHTML='<div class="dr-empty">'+window.T('draft.empty.none')+'</div>'; return; }
     document.getElementById('dr-list').innerHTML=drafts.map(function(dr,ix){
       var lv=dr.autopilot_level||'L1';
       var cls=COLORS[lv]||'l1';
       var badgeCls=BADGES[lv]||'badge-l1';
-      var lbl=LABELS[lv]||lv;
+      var lbl=LABEL(lv);
       var plat=dr.platform||'inbox';
-      var platIcon=PLATICONS[plat]||'📨';
+      var platIcon=_platIcon(plat);
       var isL4=lv==='L4';
       var isL2=lv==='L2';
       var isL3=lv==='L3';
@@ -211,28 +220,28 @@ function load(){
       var createdTs=parseFloat(dr.created_ts||0);
       var slaTimeout=4*3600;
       var isSlaOverdue=(isL3||isL4)&&createdTs>0&&(Date.now()/1000-createdTs)>slaTimeout;
-      var warnHtml=isL4?'<div class="dr-warn">⛔ L4 高风险草稿：此回复被系统拦截，须主管通过「主管放行」按钮才能发出。</div>':'';
+      var warnHtml=isL4?'<div class="dr-warn">'+window.T('draft.l4_warn')+'</div>':'';
       var editBoxId='edit-'+ix;
       var actHtml='';
       if(isPending){
         if(isL2){
-          actHtml+='<button class="dr-btn btn-autosend" onclick="resolve(\''+esc(dr.draft_id)+'\',\'autosend\',\'\',this)">⚡ 自动发送</button>';
+          actHtml+='<button class="dr-btn btn-autosend" onclick="resolve(\''+esc(dr.draft_id)+'\',\'autosend\',\'\',this)">'+window.T('draft.act.autosend')+'</button>';
         }
         if(!isL4){
-          actHtml+='<button class="dr-btn btn-approve" onclick="resolve(\''+esc(dr.draft_id)+'\',\'approve\',\'\',this)">✓ 批准发送</button>';
-          actHtml+='<button class="dr-btn btn-edit" onclick="toggleEdit(\''+editBoxId+'\',this)">✏ 编辑后发</button>';
+          actHtml+='<button class="dr-btn btn-approve" onclick="resolve(\''+esc(dr.draft_id)+'\',\'approve\',\'\',this)">'+window.T('draft.act.approve')+'</button>';
+          actHtml+='<button class="dr-btn btn-edit" onclick="toggleEdit(\''+editBoxId+'\',this)">'+window.T('draft.act.edit')+'</button>';
         }
-        actHtml+='<button class="dr-btn btn-reject" onclick="resolve(\''+esc(dr.draft_id)+'\',\'reject\',\'\',this)">✗ 拒绝</button>';
+        actHtml+='<button class="dr-btn btn-reject" onclick="resolve(\''+esc(dr.draft_id)+'\',\'reject\',\'\',this)">'+window.T('draft.act.reject')+'</button>';
         if(isL4 && _isSup){
-          actHtml+='<button class="dr-btn btn-override" onclick="forceOverride(\''+esc(dr.draft_id)+'\',this)">🔓 主管放行</button>';
+          actHtml+='<button class="dr-btn btn-override" onclick="forceOverride(\''+esc(dr.draft_id)+'\',this)">'+window.T('draft.act.override')+'</button>';
         }
         // P2: KB 归档按钮（主管，回复文本存在时显示）
         if(_isSup && (dr.draft_text||dr.final_text)){
           actHtml+='<button class="dr-btn" style="border:1px solid #7c3aed;color:#7c3aed;background:#faf5ff;" '
-            +'onclick="kbArchive(\''+esc(dr.draft_id)+'\',this)">📚 存 KB</button>';
+            +'onclick="kbArchive(\''+esc(dr.draft_id)+'\',this)">'+window.T('draft.act.kb')+'</button>';
         }
       }
-      var slaHtml=isSlaOverdue?'<span class="badge-sla">⏰ SLA 超时</span> ':'';
+      var slaHtml=isSlaOverdue?'<span class="badge-sla">'+window.T('draft.sla_overdue')+'</span> ':'';
       // C2 Copilot 面板（懒加载，点击展开）
       var copilotId='copilot-'+ix;
       var peerEncoded=encodeURIComponent(dr.peer_text||'');
@@ -240,8 +249,8 @@ function load(){
       if(dr.peer_text){
         copilotHtml='<div class="dr-copilot">'
           +'<div class="dr-copilot-header" onclick="toggleCopilot(\''+copilotId+'\',\''+peerEncoded+'\',this)">'
-          +'<span>🤖 AI 洞察</span><span style="font-size:11px;color:#6b7280;">点击展开 ▼</span></div>'
-          +'<div class="dr-copilot-body" id="'+copilotId+'"><span class="dr-copilot-loading">加载中…</span></div>'
+          +_drHdr('bot','draft.cp.title')+'<span style="font-size:11px;color:#6b7280;">'+window.T('draft.expand')+'</span></div>'
+          +'<div class="dr-copilot-body" id="'+copilotId+'"><span class="dr-copilot-loading">'+window.T('dash.loading')+'</span></div>'
           +'</div>';
       }
       // E1 对话历史上下文（有 conversation_id 才渲染）
@@ -251,7 +260,7 @@ function load(){
         var convEnc=encodeURIComponent(dr.conversation_id);
         ctxHtml='<div class="dr-ctx">'
           +'<div class="dr-ctx-header" onclick="toggleCtx(\''+ctxId+'\',\''+convEnc+'\',this)">'
-          +'<span>📜 对话上下文</span><span style="font-size:11px;">点击展开 ▼</span></div>'
+          +_drHdr('scroll','draft.ctx.title')+'<span style="font-size:11px;">'+window.T('draft.expand')+'</span></div>'
           +'<div class="dr-ctx-body" id="'+ctxId+'"></div>'
           +'</div>';
       }
@@ -261,7 +270,7 @@ function load(){
       if(dr.conversation_id){
         profileHtml='<div class="dr-profile">'
           +'<div class="dr-profile-header" onclick="toggleProfile(\''+profileId+'\',\''+encodeURIComponent(dr.conversation_id)+'\',this)">'
-          +'<span>👤 客户画像</span><span style="font-size:11px;color:#7c3aed;">点击展开 ▼</span></div>'
+          +_drHdr('user','draft.profile.title')+'<span style="font-size:11px;color:#7c3aed;">'+window.T('draft.expand')+'</span></div>'
           +'<div class="dr-profile-body" id="'+profileId+'"></div>'
           +'</div>';
       }
@@ -271,7 +280,7 @@ function load(){
       if(isPending){
         tplHtml='<div class="dr-tpl">'
           +'<div class="dr-tpl-header" onclick="toggleTpl(\''+tplId+'\',\''+esc(dr.draft_id)+'\',this)">'
-          +'<span>📚 模板库</span><span style="font-size:11px;color:#475569;">点击展开 ▼</span></div>'
+          +_drHdr('book','draft.tpl.title')+'<span style="font-size:11px;color:#475569;">'+window.T('draft.expand')+'</span></div>'
           +'<div class="dr-tpl-body" id="'+tplId+'"></div>'
           +'</div>';
       }
@@ -279,7 +288,7 @@ function load(){
       var intelId='intel-'+ix;
       var intelHtml='<div class="dr-intel" id="'+intelId+'">';
       if(dr.conversation_id){
-        intelHtml+='<span style="font-size:11px;color:#94a3b8;">⏳ 加载对话洞察…</span>';
+        intelHtml+='<span style="font-size:11px;color:#94a3b8;">'+window.T('draft.intel.loading')+'</span>';
       }
       intelHtml+='</div>';
       // H1 翻译面板
@@ -288,19 +297,19 @@ function load(){
       if(dr.draft_text&&isPending){
         transHtml='<div class="dr-trans">'
           +'<div class="dr-trans-header" onclick="toggleTrans(\''+transId+'\',\''+esc(dr.draft_id)+'\',this)">'
-          +'<span>🌐 翻译为客户语言</span><span style="font-size:11px;color:#0369a1;">点击展开 ▼</span></div>'
+          +_drHdr('globe','draft.trans.title')+'<span style="font-size:11px;color:#0369a1;">'+window.T('draft.expand')+'</span></div>'
           +'<div class="dr-trans-body" id="'+transId+'"></div>'
           +'</div>';
       }
       // H2 checkboxes（用 data 属性标记 draft_id + level 以便批量操作）
       var chkHtml=isPending?('<input type="checkbox" class="dr-chk" data-id="'+esc(dr.draft_id)+'" data-lv="'+esc(lv)+'" '
-        +'onchange="updateSelectBar()" style="margin-right:6px;cursor:pointer;" title="选择此草稿">'):' ';
+        +'onchange="updateSelectBar()" style="margin-right:6px;cursor:pointer;" title="'+window.T('draft.chk_title')+'">'):' ';
       return '<div class="dr-card '+cls+'" id="card-'+ix+'" tabindex="0" '
         +'data-draft-id="'+esc(dr.draft_id)+'" data-lv="'+esc(lv)+'" data-pending="'+isPending+'" '
         +'data-conv-id="'+esc(dr.conversation_id||'')+'" '
         +'onkeydown="cardKeydown(event,this)">'
         +'<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:6px;">'
-        +'<div style="font-size:13px;font-weight:600;">'+chkHtml+platIcon+' '+esc(dr.chat_name||dr.chat_key||'未知')+'<span class="dr-platform"> · '+esc(plat)+(dr.account_label?' · '+esc(dr.account_label):'')+'</span></div>'
+        +'<div style="font-size:13px;font-weight:600;">'+chkHtml+platIcon+' '+esc(dr.chat_name||dr.chat_key||window.T('dash.unknown'))+'<span class="dr-platform"> · '+esc(plat)+(dr.account_label?' · '+esc(dr.account_label):'')+'</span></div>'
         +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'
         +slaHtml
         +'<span class="dr-badge '+badgeCls+'">'+esc(lbl)+'</span>'
@@ -308,34 +317,34 @@ function load(){
         +'<span style="font-size:11px;color:#94a3b8;">'+fmtTs(dr.created_ts)+'</span>'
         +'</div></div>'
         +warnHtml
-        +(dr.peer_text?'<div class="dr-peer">💬 <strong>客户：</strong>'+esc(dr.peer_text)+'</div>':'')
-        +(dr.draft_text?'<div class="dr-draft">🤖 <strong>AI 草稿：</strong>'+esc(dr.draft_text)+'</div>':'')
-        +(reasons?'<div class="dr-reasons">⚠ 风险原因：'+esc(reasons)+'</div>':'')
+        +(dr.peer_text?'<div class="dr-peer">'+uiIcon('chat',13)+' <strong>'+window.T('draft.f.customer')+'</strong>'+esc(dr.peer_text)+'</div>':'')
+        +(dr.draft_text?'<div class="dr-draft">'+uiIcon('bot',13)+' <strong>'+window.T('draft.ai_draft')+'</strong>'+esc(dr.draft_text)+'</div>':'')
+        +(reasons?'<div class="dr-reasons">'+uiIcon('alert',12)+' '+window.T('draft.risk_reasons')+esc(reasons)+'</div>':'')
         +intelHtml
         +profileHtml
         +copilotHtml
         +tplHtml
         +transHtml
         +ctxHtml
-        +(isPending?'<textarea id="'+editBoxId+'" class="dr-edit-box" placeholder="编辑后发送…">'+esc(dr.draft_text)+'</textarea>':'')
+        +(isPending?'<textarea id="'+editBoxId+'" class="dr-edit-box" placeholder="'+window.T('draft.edit_ph')+'">'+esc(dr.draft_text)+'</textarea>':'')
         +'<div class="dr-actions">'+actHtml+'</div>'
         +'</div>';
     }).join('');
     // I1：渲染后异步加载每张卡片的对话智能洞察
     setTimeout(afterRender, 50);
-  }).catch(function(){ document.getElementById('dr-list').innerHTML='<div class="dr-empty">加载失败</div>'; });
+  }).catch(function(){ document.getElementById('dr-list').innerHTML='<div class="dr-empty">'+window.T('draft.empty.fail')+'</div>'; });
 }
 
 function toggleEdit(boxId, btn){
   var box=document.getElementById(boxId);
   if(!box) return;
   if(box.style.display==='none'||!box.style.display){
-    box.style.display='block'; btn.textContent='取消编辑';
+    box.style.display='block'; btn.textContent=window.T('draft.cancel_edit');
     // 在编辑框旁加一个发送按钮
     if(!box.nextSibling||!box.nextSibling.classList||!box.nextSibling.classList.contains('send-edited')){
       var sendBtn=document.createElement('button');
       sendBtn.className='dr-btn btn-approve send-edited';
-      sendBtn.textContent='✓ 确认发送';
+      sendBtn.textContent=window.T('draft.confirm_send');
       sendBtn.onclick=function(){
         var did=box.getAttribute('data-did');
         if(!did){ did=boxId; }
@@ -347,7 +356,7 @@ function toggleEdit(boxId, btn){
       box.parentNode.insertBefore(sendBtn, box.nextSibling);
     }
   } else {
-    box.style.display='none'; btn.textContent='✏ 编辑后发';
+    box.style.display='none'; btn.textContent=window.T('draft.act.edit');
     var next=box.nextSibling;
     if(next&&next.classList&&next.classList.contains('send-edited')) next.remove();
   }
@@ -360,36 +369,36 @@ function resolve(draftId, action, text, btn){
     body:JSON.stringify({action:action, text:text||''})
   }).then(function(r){return r.json();}).then(function(d){
     if(d&&d.ok){
-      if(btn){ btn.textContent='✓ 完成'; btn.style.opacity='0.6'; }
+      if(btn){ btn.textContent=window.T('draft.done'); btn.style.opacity='0.6'; }
       setTimeout(load, 600);
     } else {
-      if(btn){ btn.disabled=false; btn.textContent='重试'; }
-      var msg=(d&&d.detail)||(d&&d.error)||'操作失败';
-      alert('操作失败：'+msg);
+      if(btn){ btn.disabled=false; btn.textContent=window.T('draft.retry'); }
+      var msg=(d&&d.detail)||(d&&d.error)||window.T('draft.op_fail');
+      alert(window.Tf('draft.op_fail_msg',{msg:msg}));
     }
   }).catch(function(){
-    if(btn){ btn.disabled=false; btn.textContent='重试'; }
-    alert('网络错误，请重试');
+    if(btn){ btn.disabled=false; btn.textContent=window.T('draft.retry'); }
+    alert(window.T('draft.net_err_retry'));
   });
 }
 
 function forceOverride(draftId, btn){
-  if(!confirm('确认以主管权限强制放行此 L4 草稿？操作将记入审计日志。')) return;
+  if(!confirm(window.T('draft.override_confirm'))) return;
   if(btn){ btn.disabled=true; btn.textContent='…'; }
   fetch('/api/drafts/'+encodeURIComponent(draftId)+'/force-override',{
     method:'POST', headers:{'Content-Type':'application/json'},
     body:JSON.stringify({action:'approve'})
   }).then(function(r){return r.json();}).then(function(d){
     if(d&&d.ok){
-      if(btn){ btn.textContent='✓ 已放行'; btn.style.opacity='0.6'; }
+      if(btn){ btn.textContent=window.T('draft.released'); btn.style.opacity='0.6'; }
       setTimeout(load, 600);
     } else {
-      if(btn){ btn.disabled=false; btn.textContent='🔓 主管放行'; }
-      alert('放行失败：'+((d&&d.detail)||(d&&d.error)||'未知'));
+      if(btn){ btn.disabled=false; btn.textContent=window.T('draft.act.override'); }
+      alert(window.Tf('draft.release_fail',{msg:((d&&d.detail)||(d&&d.error)||window.T('dash.unknown'))}));
     }
   }).catch(function(){
-    if(btn){ btn.disabled=false; btn.textContent='🔓 主管放行'; }
-    alert('网络错误');
+    if(btn){ btn.disabled=false; btn.textContent=window.T('draft.act.override'); }
+    alert(window.T('draft.net_err'));
   });
 }
 
@@ -398,11 +407,11 @@ function toggleCopilot(bodyId, peerEncoded, headerEl){
   if(!body) return;
   if(body.classList.contains('open')){
     body.classList.remove('open');
-    headerEl.lastChild.textContent='点击展开 ▼';
+    headerEl.lastChild.textContent=window.T('draft.expand');
     return;
   }
   body.classList.add('open');
-  headerEl.lastChild.textContent='收起 ▲';
+  headerEl.lastChild.textContent=window.T('draft.collapse');
   // 已加载过则不重复请求
   if(body.getAttribute('data-loaded')) return;
   body.setAttribute('data-loaded','1');
@@ -410,26 +419,26 @@ function toggleCopilot(bodyId, peerEncoded, headerEl){
   // editBoxId 从 copilotId 推断：copilot-N → edit-N（F1 快捷填入）
   var editBoxIdx=bodyId.replace('copilot-','');
   fetch('/api/workspace/copilot?text='+encodeURIComponent(text)).then(function(r){return r.json();}).then(function(d){
-    if(!d||!d.ok){ body.innerHTML='<span class="dr-copilot-loading">分析失败</span>'; return; }
+    if(!d||!d.ok){ body.innerHTML='<span class="dr-copilot-loading">'+window.T('draft.cp.fail')+'</span>'; return; }
     var riskCls='dr-copilot-risk-'+(d.risk_level||'low').toLowerCase();
     var kbHtml='';
     if(d.kb_matches&&d.kb_matches.length){
-      kbHtml='<div style="margin-top:6px;font-size:11px;color:#374151;font-weight:600;">📚 KB 匹配</div>'
+      kbHtml='<div style="margin-top:6px;font-size:11px;color:#374151;font-weight:600;">'+window.T('draft.cp.kb_match')+'</div>'
         +d.kb_matches.map(function(kb){
-          return '<div class="dr-copilot-kb"><strong>'+esc(kb.title||'无标题')+'</strong>'
+          return '<div class="dr-copilot-kb"><strong>'+esc(kb.title||window.T('draft.untitled'))+'</strong>'
             +(kb.summary?'<br><span style="color:#64748b;">'+esc(kb.summary)+'</span>':'')
             +'</div>';
         }).join('');
     } else {
-      kbHtml='<div style="font-size:11px;color:#94a3b8;margin-top:4px;">暂无 KB 匹配</div>';
+      kbHtml='<div style="font-size:11px;color:#94a3b8;margin-top:4px;">'+window.T('draft.cp.no_kb')+'</div>';
     }
     // Q3: KB 条目加入点击追踪
     if(d.kb_matches&&d.kb_matches.length){
-      kbHtml='<div style="margin-top:6px;font-size:11px;color:#374151;font-weight:600;">📚 KB 匹配</div>'
+      kbHtml='<div style="margin-top:6px;font-size:11px;color:#374151;font-weight:600;">'+window.T('draft.cp.kb_match')+'</div>'
         +d.kb_matches.map(function(kb){
           var recId=kb._rec_id||'';
           return '<div class="dr-copilot-kb" style="cursor:pointer;" onclick="_trackKbClick(\''+esc(recId)+'\',false,\'\')">'
-            +'<strong>'+esc(kb.title||'无标题')+'</strong>'
+            +'<strong>'+esc(kb.title||window.T('draft.untitled'))+'</strong>'
             +(kb.summary?'<br><span style="color:#64748b;">'+esc(kb.summary)+'</span>':'')
             +'</div>';
         }).join('');
@@ -442,7 +451,7 @@ function toggleCopilot(bodyId, peerEncoded, headerEl){
     // F1：快捷回复建议按钮（点击填入草稿框 / 展开编辑框）
     var suggestHtml='';
     if(d.suggestions&&d.suggestions.length){
-      suggestHtml='<div class="dr-suggest"><div class="dr-suggest-lbl">⚡ 快捷回复（点击填入）</div>'
+      suggestHtml='<div class="dr-suggest"><div class="dr-suggest-lbl">'+window.T('draft.cp.suggest')+'</div>'
         +'<div class="dr-suggest-btns">'
         +d.suggestions.map(function(s){
           return '<button class="dr-suggest-btn" title="'+esc(s.title||'')+'" '
@@ -451,20 +460,20 @@ function toggleCopilot(bodyId, peerEncoded, headerEl){
         +'</div></div>';
     }
     body.innerHTML='<div class="dr-copilot-row">'
-      +'<span class="dr-copilot-tag">意图：'+esc(d.intent||'—')+'</span>'
-      +'<span class="dr-copilot-tag">情绪：'+esc(d.emotion||'—')+'</span>'
-      +'<span class="dr-copilot-tag '+riskCls+'">风险：'+esc(d.risk_level||'—')+'</span>'
-      +'<span class="dr-copilot-tag" style="background:#f3f4f6;color:#374151;">语言：'+esc(d.language||'—')+'</span>'
+      +'<span class="dr-copilot-tag">'+window.T('draft.f.intent')+esc(d.intent||'—')+'</span>'
+      +'<span class="dr-copilot-tag">'+window.T('draft.f.emotion')+esc(d.emotion||'—')+'</span>'
+      +'<span class="dr-copilot-tag '+riskCls+'">'+window.T('draft.f.risk')+esc(d.risk_level||'—')+'</span>'
+      +'<span class="dr-copilot-tag" style="background:#f3f4f6;color:#374151;">'+window.T('draft.f.language')+esc(d.language||'—')+'</span>'
       +'</div>'
-      +(d.risk_reasons&&d.risk_reasons.length?'<div style="font-size:11px;color:#dc2626;margin:2px 0;">⚠ '+esc(d.risk_reasons.join('、'))+'</div>':'')
-      +(d.next_step?'<div style="font-size:11px;color:#374151;margin:2px 0;">💡 建议：'+esc(d.next_step)+'</div>':'')
+      +(d.risk_reasons&&d.risk_reasons.length?'<div style="font-size:11px;color:#dc2626;margin:2px 0;">'+uiIcon('alert',12)+' '+esc(d.risk_reasons.join('、'))+'</div>':'')
+      +(d.next_step?'<div style="font-size:11px;color:#374151;margin:2px 0;">'+window.T('draft.cp.suggestion')+esc(d.next_step)+'</div>':'')
       +suggestHtml
       +kbHtml
       // J2：模板智能推荐（来自 reply_templates DB + intent→scene 匹配）
       +(function(){
         if(!d.template_suggestions||!d.template_suggestions.length) return '';
         return '<div class="dr-suggest" style="border-top-color:#bfdbfe;">'
-          +'<div class="dr-suggest-lbl" style="color:#1d4ed8;">📚 推荐模板（按意图匹配）</div>'
+          +'<div class="dr-suggest-lbl" style="color:#1d4ed8;">'+window.T('draft.cp.tpl_rec')+'</div>'
           +'<div class="dr-suggest-btns">'
           +d.template_suggestions.map(function(t){
             return '<button class="dr-suggest-btn" style="border-color:#3b82f6;color:#1d4ed8;" '
@@ -476,7 +485,7 @@ function toggleCopilot(bodyId, peerEncoded, headerEl){
           +'</div></div>';
       })();
   }).catch(function(){
-    body.innerHTML='<span class="dr-copilot-loading">网络错误</span>';
+    body.innerHTML='<span class="dr-copilot-loading">'+window.T('draft.net_err')+'</span>';
     body.removeAttribute('data-loaded');
   });
 }
@@ -486,23 +495,23 @@ function toggleCtx(bodyId, convEnc, headerEl){
   if(!body) return;
   if(body.classList.contains('open')){
     body.classList.remove('open');
-    headerEl.lastChild.textContent='点击展开 ▼';
+    headerEl.lastChild.textContent=window.T('draft.expand');
     return;
   }
   body.classList.add('open');
-  headerEl.lastChild.textContent='收起 ▲';
+  headerEl.lastChild.textContent=window.T('draft.collapse');
   if(body.getAttribute('data-loaded')) return;
   body.setAttribute('data-loaded','1');
-  body.innerHTML='<span style="color:#94a3b8;font-size:11px;">加载中…</span>';
+  body.innerHTML='<span style="color:#94a3b8;font-size:11px;">'+window.T('dash.loading')+'</span>';
   var cid=decodeURIComponent(convEnc);
   fetch('/api/unified-inbox/history?conversation_id='+encodeURIComponent(cid)+'&limit=10')
     .then(function(r){return r.json();}).then(function(d){
       var msgs=(d&&d.messages)||[];
-      if(!msgs.length){ body.innerHTML='<span style="color:#94a3b8;font-size:11px;">暂无历史记录</span>'; return; }
+      if(!msgs.length){ body.innerHTML='<span style="color:#94a3b8;font-size:11px;">'+window.T('draft.ctx.no_history')+'</span>'; return; }
       body.innerHTML=msgs.map(function(m){
         var dir=(m.direction||'in')==='out'?'out':'in';
         var txt=m.text||m.original_text||'';
-        var ts=m.ts?new Date(m.ts*1000).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}):'';
+        var ts=m.ts?window.wsFmtTime(m.ts,{hour:'2-digit',minute:'2-digit'}):'';
         return '<div class="dr-bubble-wrap '+dir+'">'
           +'<div><div class="dr-bubble">'+esc(txt)+'</div>'
           +(ts?'<div class="dr-bubble-ts">'+ts+'</div>':'')
@@ -511,7 +520,7 @@ function toggleCtx(bodyId, convEnc, headerEl){
       // 滚到底部（最新消息）
       body.scrollTop=body.scrollHeight;
     }).catch(function(){
-      body.innerHTML='<span style="color:#ef4444;font-size:11px;">加载失败</span>';
+      body.innerHTML='<span style="color:#ef4444;font-size:11px;">'+window.T('dash.load_fail')+'</span>';
       body.removeAttribute('data-loaded');
     });
 }
@@ -526,13 +535,13 @@ function fillDraft(editBoxId, text){
     box.style.display='block';
     // 找到同卡片的「编辑后发」按钮并更新
     var editBtn=box.previousSibling;
-    if(editBtn&&editBtn.textContent&&editBtn.textContent.indexOf('编辑')>=0){
-      editBtn.textContent='取消编辑';
+    if(editBtn&&editBtn.classList&&editBtn.classList.contains('btn-edit')){
+      editBtn.textContent=window.T('draft.cancel_edit');
       // 如果还没有「确认发送」按钮则插入
       if(!box.nextSibling||!box.nextSibling.classList||!box.nextSibling.classList.contains('send-edited')){
         var sendBtn=document.createElement('button');
         sendBtn.className='dr-btn btn-approve send-edited';
-        sendBtn.textContent='✓ 确认发送';
+        sendBtn.textContent=window.T('draft.confirm_send');
         sendBtn.onclick=function(){
           var did=box.getAttribute('data-did');
           resolve(did,'edit_send',box.value,sendBtn);
@@ -551,14 +560,14 @@ function triggerBulkAutosend(){
   fetch('/api/drafts/bulk-autosend',{
     method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'
   }).then(function(r){return r.json();}).then(function(d){
-    if(btn){ btn.disabled=false; btn.textContent='⚡ 一键发所有 L2'; }
+    if(btn){ btn.disabled=false; btn.textContent=window.T('draft.bulk_l2'); }
     if(d&&d.ok){
-      alert('完成：发送 '+d.sent+' 条，失败 '+d.errors+' 条');
+      alert(window.Tf('draft.bulk.done',{sent:d.sent,errors:d.errors}));
       load();
-    } else { alert('批量发送失败'); }
+    } else { alert(window.T('draft.bulk.fail')); }
   }).catch(function(){
-    if(btn){ btn.disabled=false; btn.textContent='⚡ 一键发所有 L2'; }
-    alert('网络错误');
+    if(btn){ btn.disabled=false; btn.textContent=window.T('draft.bulk_l2'); }
+    alert(window.T('draft.net_err'));
   });
 }
 
@@ -568,37 +577,37 @@ function toggleTrans(bodyId, draftId, headerEl){
   if(!body) return;
   if(body.classList.contains('open')){
     body.classList.remove('open');
-    headerEl.lastChild.textContent='点击展开 ▼';
+    headerEl.lastChild.textContent=window.T('draft.expand');
     return;
   }
   body.classList.add('open');
-  headerEl.lastChild.textContent='收起 ▲';
+  headerEl.lastChild.textContent=window.T('draft.collapse');
   if(body.getAttribute('data-loaded')) return;
   body.setAttribute('data-loaded','1');
-  body.innerHTML='<span style="color:#94a3b8;font-size:11px;">翻译中…</span>';
+  body.innerHTML='<span style="color:#94a3b8;font-size:11px;">'+window.T('draft.trans.translating')+'</span>';
   fetch('/api/drafts/'+encodeURIComponent(draftId)+'/translate',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
     .then(function(r){return r.json();}).then(function(d){
       if(!d||!d.ok||!d.translated){
-        body.innerHTML='<span style="color:#ef4444;font-size:11px;">'+(d&&d.error||'翻译失败')+'</span>';
+        body.innerHTML='<span style="color:#ef4444;font-size:11px;">'+(d&&d.error||window.T('draft.trans.fail'))+'</span>';
         body.removeAttribute('data-loaded');
         return;
       }
       body.innerHTML='<div><span class="dr-trans-tag">'+esc(d.source_lang||'zh')+'</span>'
         +'<span style="font-size:11px;color:#64748b;">→</span>'
         +'<span class="dr-trans-tag">'+esc(d.target_lang||'en')+'</span>'
-        +(d.fallback?'<span style="font-size:10px;color:#d97706;margin-left:4px;">原文（翻译不可用）</span>':'')
+        +(d.fallback?'<span style="font-size:10px;color:#d97706;margin-left:4px;">'+window.T('draft.trans.original')+'</span>':'')
         +'</div>'
         +'<div class="dr-trans-text">'+esc(d.translated)+'</div>'
         +'<button class="dr-btn btn-approve" style="font-size:12px;padding:4px 12px;" '
-        +'onclick="resolveWithTranslation(\''+esc(draftId)+'\','+JSON.stringify(d.translated)+',this)">✈ 发送翻译版</button>';
+        +'onclick="resolveWithTranslation(\''+esc(draftId)+'\','+JSON.stringify(d.translated)+',this)">'+window.T('draft.trans.send')+'</button>';
     }).catch(function(){
-      body.innerHTML='<span style="color:#ef4444;font-size:11px;">翻译请求失败</span>';
+      body.innerHTML='<span style="color:#ef4444;font-size:11px;">'+window.T('draft.trans.req_fail')+'</span>';
       body.removeAttribute('data-loaded');
     });
 }
 
 function resolveWithTranslation(draftId, text, btn){
-  if(btn){ btn.disabled=true; btn.textContent='发送中…'; }
+  if(btn){ btn.disabled=true; btn.textContent=window.T('draft.sending'); }
   resolve(draftId,'edit_send',text,btn);
 }
 
@@ -614,7 +623,7 @@ function updateSelectBar(){
   var cnt=document.getElementById('dr-select-count');
   if(ids.length>0){
     bar.classList.add('visible');
-    if(cnt) cnt.textContent='已选 '+ids.length+' 条';
+    if(cnt) cnt.textContent=window.Tf('draft.sel.count',{n:ids.length});
   } else {
     bar.classList.remove('visible');
   }
@@ -626,17 +635,17 @@ function clearSel(){
 function bulkAct(action){
   var ids=getSelectedIds();
   if(!ids.length) return;
-  var label=action==='approve'?'批量批准':'批量拒绝';
-  if(!confirm(label+' 选中的 '+ids.length+' 条草稿？')) return;
+  var label=action==='approve'?window.T('draft.bulk.approve'):window.T('draft.bulk.reject');
+  if(!confirm(window.Tf('draft.bulk.confirm',{label:label,n:ids.length}))) return;
   fetch('/api/drafts/bulk-resolve',{
     method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({action:action,draft_ids:ids})
   }).then(function(r){return r.json();}).then(function(d){
     if(d&&d.ok){
-      alert(label+' 完成：成功 '+d.succeeded+' 条，失败 '+d.failed+' 条');
+      alert(window.Tf('draft.bulk.done2',{label:label,ok:d.succeeded,fail:d.failed}));
       clearSel(); load();
-    } else { alert((d&&d.detail)||(d&&d.error)||label+'失败'); }
-  }).catch(function(){ alert('网络错误'); });
+    } else { alert((d&&d.detail)||(d&&d.error)||window.Tf('draft.bulk.fail2',{label:label})); }
+  }).catch(function(){ alert(window.T('draft.net_err')); });
 }
 
 // H2 键盘快捷键（card 级导航）
@@ -665,7 +674,7 @@ function cardKeydown(ev, cardEl){
     var prev=cardEl.previousElementSibling;
     if(prev&&prev.classList&&prev.classList.contains('dr-card')) prev.focus();
   } else if(ev.key==='?'){
-    alert('键盘快捷键：\nA = 批准当前草稿\nR = 拒绝当前草稿\n↑/K = 上一张\n↓/J = 下一张\nSpace = 选择（批量）');
+    alert(window.T('draft.kb_alert'));
   }
 }
 
@@ -691,14 +700,14 @@ function loadIntel(intelId, convId){
 function _renderIntel(el, meta){
   if(!el||!meta) return;
   var trend=meta.emotion_trend||'stable';
-  var trendIcon={'rising':'📈','falling':'📉','stable':'📊'}[trend]||'📊';
+  var trendIcon={'rising':uiIcon('trend-up',12),'falling':uiIcon('trend-down',12),'stable':uiIcon('chart',12)}[trend]||uiIcon('chart',12);
   var trendCls=trend==='rising'?'rising':trend==='falling'?'falling':'';
   var riskCls=meta.last_risk==='high'?'dr-intel-risk-high':meta.last_risk==='medium'?'dr-intel-risk-medium':'';
-  var html='<span class="dr-intel-trend" title="情绪趋势">'+trendIcon+'</span>';
-  if(meta.last_intent) html+='<span class="dr-intel-badge dr-intel-intent" title="最近意图">'+esc(meta.last_intent)+'</span>';
-  if(meta.last_emotion) html+='<span class="dr-intel-badge dr-intel-emotion '+trendCls+'" title="最近情绪">'+esc(meta.last_emotion)+'</span>';
-  if(meta.last_risk&&meta.last_risk!=='low') html+='<span class="dr-intel-badge '+riskCls+'" title="风险">⚠ '+esc(meta.last_risk)+'</span>';
-  if(meta.msg_count) html+='<span style="font-size:10px;color:#94a3b8;">共 '+meta.msg_count+' 条</span>';
+  var html='<span class="dr-intel-trend" title="'+window.T('draft.intel.trend_t')+'">'+trendIcon+'</span>';
+  if(meta.last_intent) html+='<span class="dr-intel-badge dr-intel-intent" title="'+window.T('draft.intel.intent_t')+'">'+esc(meta.last_intent)+'</span>';
+  if(meta.last_emotion) html+='<span class="dr-intel-badge dr-intel-emotion '+trendCls+'" title="'+window.T('draft.intel.emotion_t')+'">'+esc(meta.last_emotion)+'</span>';
+  if(meta.last_risk&&meta.last_risk!=='low') html+='<span class="dr-intel-badge '+riskCls+'" title="'+window.T('draft.intel.risk_t')+'">'+uiIcon('alert',12)+' '+esc(meta.last_risk)+'</span>';
+  if(meta.msg_count) html+='<span style="font-size:10px;color:#94a3b8;">'+window.Tf('draft.intel.msg_count',{n:meta.msg_count})+'</span>';
   el.innerHTML=html;
 }
 
@@ -711,20 +720,20 @@ function toggleProfile(bodyId, convEnc, headerEl){
   if(!body) return;
   if(body.style.display==='block'){
     body.style.display='none';
-    headerEl.lastChild.textContent='点击展开 ▼';
+    headerEl.lastChild.textContent=window.T('draft.expand');
     return;
   }
   body.style.display='block';
-  headerEl.lastChild.textContent='收起 ▲';
+  headerEl.lastChild.textContent=window.T('draft.collapse');
   if(body.getAttribute('data-loaded')) return;
   body.setAttribute('data-loaded','1');
-  body.innerHTML='<span style="color:#94a3b8;font-size:12px;">加载中…</span>';
+  body.innerHTML='<span style="color:#94a3b8;font-size:12px;">'+window.T('dash.loading')+'</span>';
   var cid=decodeURIComponent(convEnc);
   body.setAttribute('data-cid',cid);
   fetch('/api/unified-inbox/contact-profile?conversation_id='+encodeURIComponent(cid))
     .then(function(r){return r.json();})
     .then(function(d){ _renderProfile(body, d); })
-    .catch(function(){ body.innerHTML='<span style="color:#94a3b8;font-size:12px;">加载失败</span>'; });
+    .catch(function(){ body.innerHTML='<span style="color:#94a3b8;font-size:12px;">'+window.T('dash.load_fail')+'</span>'; });
 }
 function _renderProfile(body, d){
   var html='';
@@ -734,67 +743,67 @@ function _renderProfile(body, d){
     var lt=cr.latest||{};
     var sev=lt.level==='severe';
     var bg=sev?'#fee2e2':'#fef3c7', fg=sev?'#991b1b':'#92400e';
-    var when=lt.created_at?new Date(lt.created_at*1000).toLocaleString():'';
+    var when=lt.created_at?window.wsFmtDateTime(lt.created_at):'';
     html+='<div style="background:'+bg+';color:'+fg+';border-radius:8px;padding:8px 10px;margin-bottom:8px;">';
-    html+='<div style="font-weight:700;font-size:12px;margin-bottom:3px;">⚠️ 危机记录 · 最近 '+cr.total+' 条'
-      +(cr.unhandled>0?(' · <span style="text-decoration:underline;">未处理 '+cr.unhandled+'</span>'):' · 均已处置')+'</div>';
-    html+='<div style="font-size:11px;">最新：'+esc(lt.level||'')+(lt.category?('／'+esc(lt.category)):'')
-      +(lt.escalated?' · 已升级':'')+(when?(' · '+when):'')+'</div>';
-    html+='<a href="/crisis-audit?only_unhandled=1" target="_blank" style="display:inline-block;margin-top:4px;font-size:11px;color:'+fg+';font-weight:600;">前往危机审计 →</a>';
+    html+='<div style="font-weight:700;font-size:12px;margin-bottom:3px;">'+window.Tf('draft.pf.crisis',{n:cr.total})
+      +(cr.unhandled>0?(' · <span style="text-decoration:underline;">'+window.Tf('draft.pf.unhandled',{n:cr.unhandled})+'</span>'):' · '+window.T('draft.pf.all_handled'))+'</div>';
+    html+='<div style="font-size:11px;">'+window.T('draft.pf.latest')+esc(lt.level||'')+(lt.category?('／'+esc(lt.category)):'')
+      +(lt.escalated?' · '+window.T('draft.pf.escalated'):'')+(when?(' · '+when):'')+'</div>';
+    html+='<a href="/crisis-audit?only_unhandled=1" target="_blank" style="display:inline-block;margin-top:4px;font-size:11px;color:'+fg+';font-weight:600;">'+window.T('draft.pf.go_crisis')+'</a>';
     html+='</div>';
   }
   var m=d.conv_meta||{};
   // 对话智能
   if(m&&(m.last_intent||m.last_emotion||m.msg_count)){
-    html+='<div style="font-weight:600;font-size:11px;color:#5b21b6;margin-bottom:4px;">对话智能</div>';
+    html+='<div style="font-weight:600;font-size:11px;color:#5b21b6;margin-bottom:4px;">'+window.T('draft.pf.conv_intel')+'</div>';
     html+='<div class="dr-profile-row">';
-    if(m.last_intent) html+='<span class="dr-profile-tag">意图：'+esc(m.last_intent)+'</span>';
-    if(m.last_emotion) html+='<span class="dr-profile-tag">情绪：'+esc(m.last_emotion)+'</span>';
+    if(m.last_intent) html+='<span class="dr-profile-tag">'+window.T('draft.f.intent')+esc(m.last_intent)+'</span>';
+    if(m.last_emotion) html+='<span class="dr-profile-tag">'+window.T('draft.f.emotion')+esc(m.last_emotion)+'</span>';
     if(m.emotion_trend){
-      var trendIcon={'rising':'📈','falling':'📉','stable':'📊'}[m.emotion_trend]||'';
-      html+='<span class="dr-profile-tag">趋势：'+trendIcon+esc(m.emotion_trend)+'</span>';
+      var trendIcon={'rising':uiIcon('trend-up',12),'falling':uiIcon('trend-down',12),'stable':uiIcon('chart',12)}[m.emotion_trend]||'';
+      html+='<span class="dr-profile-tag">'+window.T('draft.pf.trend')+trendIcon+esc(m.emotion_trend)+'</span>';
     }
-    if(m.last_risk) html+='<span class="dr-profile-tag">风险：'+esc(m.last_risk)+'</span>';
-    if(m.msg_count) html+='<span class="dr-profile-tag">消息：'+esc(String(m.msg_count))+'条</span>';
+    if(m.last_risk) html+='<span class="dr-profile-tag">'+window.T('draft.f.risk')+esc(m.last_risk)+'</span>';
+    if(m.msg_count) html+='<span class="dr-profile-tag">'+window.Tf('draft.pf.msg_n',{n:m.msg_count})+'</span>';
     html+='</div>';
     // 意图历史气泡
     if(m.intent_history&&m.intent_history.length){
-      html+='<div style="font-size:11px;color:#6b7280;margin-bottom:4px;">近期意图：'+m.intent_history.slice(-5).map(function(i){ return '<span style="padding:1px 5px;background:#ede9fe;border-radius:6px;margin-right:3px;">'+esc(i)+'</span>'; }).join('')+'</div>';
+      html+='<div style="font-size:11px;color:#6b7280;margin-bottom:4px;">'+window.T('draft.pf.recent_intents')+m.intent_history.slice(-5).map(function(i){ return '<span style="padding:1px 5px;background:#ede9fe;border-radius:6px;margin-right:3px;">'+esc(i)+'</span>'; }).join('')+'</div>';
     }
   }
   // CRM 档案
   var c=d.contact||{};
   if(c&&(c.name||c.funnel_stage||c.tags)){
-    html+='<div style="font-weight:600;font-size:11px;color:#5b21b6;margin:6px 0 4px;">CRM 档案</div>';
+    html+='<div style="font-weight:600;font-size:11px;color:#5b21b6;margin:6px 0 4px;">'+window.T('draft.pf.crm')+'</div>';
     html+='<div class="dr-profile-row">';
-    if(c.name) html+='<span class="dr-profile-tag">客户：'+esc(c.name)+'</span>';
-    if(c.funnel_stage) html+='<span class="dr-profile-tag">漏斗：'+esc(c.funnel_stage)+'</span>';
-    if(c.follow_up_overdue) html+='<span class="dr-profile-tag" style="background:#fee2e2;color:#991b1b;">跟进逾期</span>';
+    if(c.name) html+='<span class="dr-profile-tag">'+window.T('draft.f.customer')+esc(c.name)+'</span>';
+    if(c.funnel_stage) html+='<span class="dr-profile-tag">'+window.T('draft.pf.funnel')+esc(c.funnel_stage)+'</span>';
+    if(c.follow_up_overdue) html+='<span class="dr-profile-tag" style="background:#fee2e2;color:#991b1b;">'+window.T('draft.pf.followup_overdue')+'</span>';
     (c.tags||[]).slice(0,5).forEach(function(t){ html+='<span class="dr-profile-tag">'+esc(t)+'</span>'; });
     html+='</div>';
-    if(c.note) html+='<div style="font-size:11px;color:#374151;margin-top:2px;">备注：'+esc(c.note)+'</div>';
+    if(c.note) html+='<div style="font-size:11px;color:#374151;margin-top:2px;">'+window.T('draft.pf.note')+esc(c.note)+'</div>';
   }
   // R14 记忆画像聚合（确切知道什么 vs AI 待确认）
   var mp=d.memory_profile;
   if(mp&&mp.total){
-    html+='<div style="font-weight:600;font-size:11px;color:#5b21b6;margin:6px 0 4px;">记忆画像</div>';
+    html+='<div style="font-weight:600;font-size:11px;color:#5b21b6;margin:6px 0 4px;">'+window.T('draft.pf.memory')+'</div>';
     html+='<div class="dr-profile-row">';
-    html+='<span class="dr-profile-tag" style="background:#dbeafe;color:#1e40af;">稳定 '+mp.stable+'</span>';
-    html+='<span class="dr-profile-tag">原始 '+mp.raw+'</span>';
-    html+='<span class="dr-profile-tag" style="background:#dcfce7;color:#166534;">用户明说 '+mp.user_stated+'</span>';
-    if(mp.ai_inferred>0) html+='<span class="dr-profile-tag" style="background:#fef3c7;color:#92400e;">AI 推断 '+mp.ai_inferred+'</span>';
+    html+='<span class="dr-profile-tag" style="background:#dbeafe;color:#1e40af;">'+window.Tf('draft.pf.stable',{n:mp.stable})+'</span>';
+    html+='<span class="dr-profile-tag">'+window.Tf('draft.pf.raw',{n:mp.raw})+'</span>';
+    html+='<span class="dr-profile-tag" style="background:#dcfce7;color:#166534;">'+window.Tf('draft.pf.user_stated',{n:mp.user_stated})+'</span>';
+    if(mp.ai_inferred>0) html+='<span class="dr-profile-tag" style="background:#fef3c7;color:#92400e;">'+window.Tf('draft.pf.ai_inferred',{n:mp.ai_inferred})+'</span>';
     html+='</div>';
     if(mp.top_stable&&mp.top_stable.length){
-      html+='<div style="font-size:11px;color:#374151;margin-top:2px;">核心：'
+      html+='<div style="font-size:11px;color:#374151;margin-top:2px;">'+window.T('draft.pf.core')
         +mp.top_stable.map(function(t){ return '<span style="padding:1px 5px;background:#eff6ff;border-radius:6px;margin-right:3px;">'+esc(t)+'</span>'; }).join('')+'</div>';
     }
     // R15 待确认推断：坐席一键转明说
     if(mp.pending_inferred&&mp.pending_inferred.length){
-      html+='<div style="font-size:11px;color:#92400e;margin-top:5px;">待确认推断（确认后转为已知稳定事实）：</div>';
+      html+='<div style="font-size:11px;color:#92400e;margin-top:5px;">'+window.T('draft.pf.pending_inferred')+'</div>';
       mp.pending_inferred.forEach(function(p){
         html+='<div style="display:flex;align-items:center;gap:6px;margin-top:3px;">'
           +'<span style="flex:1;font-size:11px;background:#fef3c7;color:#92400e;border-radius:6px;padding:2px 6px;">'+esc(p.content)+'</span>'
-          +'<button onclick="_confirmFact(this,'+p.id+')" style="font-size:11px;border:none;background:#16a34a;color:#fff;border-radius:6px;padding:2px 8px;cursor:pointer;">确认</button>'
+          +'<button onclick="_confirmFact(this,'+p.id+')" style="font-size:11px;border:none;background:#16a34a;color:#fff;border-radius:6px;padding:2px 8px;cursor:pointer;">'+window.T('draft.pf.confirm')+'</button>'
           +'</div>';
       });
     }
@@ -802,16 +811,16 @@ function _renderProfile(body, d){
   // 近期草稿决策
   var decs=d.recent_decisions||[];
   if(decs.length){
-    html+='<div style="font-weight:600;font-size:11px;color:#5b21b6;margin:6px 0 4px;">近期决策</div>';
-    var _acn={'approved':'✅批准','rejected':'❌拒绝','autosend':'🤖自动发','force_override':'🔓强制放行','auto_reassigned':'🔄再分配'};
+    html+='<div style="font-weight:600;font-size:11px;color:#5b21b6;margin:6px 0 4px;">'+window.T('draft.pf.recent_dec')+'</div>';
+    var _acn={'approved':window.T('draft.acn.approved'),'rejected':window.T('draft.acn.rejected'),'autosend':window.T('draft.acn.autosend'),'force_override':window.T('draft.acn.force_override'),'auto_reassigned':window.T('draft.acn.auto_reassigned')};
     decs.forEach(function(r){
-      var ts=r.ts>0?new Date(r.ts*1000).toLocaleDateString():'';
+      var ts=r.ts>0?window.wsFmtDate(r.ts):'';
       html+='<div class="dr-profile-dec">'+(_acn[r.action]||esc(r.action))+' '
         +(r.risk_level?'<span style="color:#94a3b8;">['+esc(r.risk_level)+']</span> ':'')+esc(r.agent_id||'')
         +(ts?' <span style="color:#94a3b8;float:right;">'+ts+'</span>':'')+'</div>';
     });
   }
-  if(!html) html='<span style="color:#94a3b8;font-size:12px;">暂无客户画像数据</span>';
+  if(!html) html='<span style="color:#94a3b8;font-size:12px;">'+window.T('draft.pf.no_data')+'</span>';
   body.innerHTML=html;
 }
 
@@ -824,11 +833,11 @@ function _confirmFact(btn, id){
     .then(function(){
       if(holder){
         var cid=holder.getAttribute('data-cid');
-        holder.innerHTML='<span style="color:#94a3b8;font-size:12px;">刷新中…</span>';
+        holder.innerHTML='<span style="color:#94a3b8;font-size:12px;">'+window.T('draft.pf.refreshing')+'</span>';
         fetch('/api/unified-inbox/contact-profile?conversation_id='+encodeURIComponent(cid))
           .then(function(r){return r.json();})
           .then(function(d){ _renderProfile(holder, d); })
-          .catch(function(){ holder.innerHTML='<span style="color:#94a3b8;font-size:12px;">刷新失败</span>'; });
+          .catch(function(){ holder.innerHTML='<span style="color:#94a3b8;font-size:12px;">'+window.T('draft.pf.refresh_fail')+'</span>'; });
       }
     })
     .catch(function(){ btn.disabled=false; btn.textContent=old; });
@@ -839,29 +848,29 @@ function toggleTpl(bodyId, draftId, headerEl){
   if(!body) return;
   if(body.classList.contains('open')){
     body.classList.remove('open');
-    headerEl.lastChild.textContent='点击展开 ▼';
+    headerEl.lastChild.textContent=window.T('draft.expand');
     return;
   }
   body.classList.add('open');
-  headerEl.lastChild.textContent='收起 ▲';
+  headerEl.lastChild.textContent=window.T('draft.collapse');
   _renderTplBody(body, draftId, '');
 }
 function _renderTplBody(body, draftId, search){
-  body.innerHTML='<input class="dr-tpl-search" placeholder="搜索模板…" oninput="tplSearch(this,\''+bodyId(body)+'\',\''+esc(draftId)+'\')" value="'+esc(search)+'">'
+  body.innerHTML='<input class="dr-tpl-search" placeholder="'+window.T('draft.tpl_search_ph')+'" oninput="tplSearch(this,\''+bodyId(body)+'\',\''+esc(draftId)+'\')" value="'+esc(search)+'">'
     +'<div class="dr-tpl-filters" id="tplf-'+bodyId(body)+'">'
-    +'<span class="dr-tpl-filter '+((!_tplLang)?' active':'')+'" onclick="tplLang(this,\'\',\''+bodyId(body)+'\',\''+esc(draftId)+'\')">全部</span>'
-    +'<span class="dr-tpl-filter '+((_tplLang==='zh')?' active':'')+'" onclick="tplLang(this,\'zh\',\''+bodyId(body)+'\',\''+esc(draftId)+'\')">中文</span>'
+    +'<span class="dr-tpl-filter '+((!_tplLang)?' active':'')+'" onclick="tplLang(this,\'\',\''+bodyId(body)+'\',\''+esc(draftId)+'\')">'+window.T('draft.tpl.all')+'</span>'
+    +'<span class="dr-tpl-filter '+((_tplLang==='zh')?' active':'')+'" onclick="tplLang(this,\'zh\',\''+bodyId(body)+'\',\''+esc(draftId)+'\')">'+window.T('draft.tpl.lang_zh')+'</span>'
     +'<span class="dr-tpl-filter '+((_tplLang==='en')?' active':'')+'" onclick="tplLang(this,\'en\',\''+bodyId(body)+'\',\''+esc(draftId)+'\')">EN</span>'
-    +'<span class="dr-tpl-filter '+((_tplLang==='ja')?' active':'')+'" onclick="tplLang(this,\'ja\',\''+bodyId(body)+'\',\''+esc(draftId)+'\')">日本語</span>'
+    +'<span class="dr-tpl-filter '+((_tplLang==='ja')?' active':'')+'" onclick="tplLang(this,\'ja\',\''+bodyId(body)+'\',\''+esc(draftId)+'\')">'+window.T('draft.tpl.lang_ja')+'</span>'
     +'</div>'
-    +'<div id="tpll-'+bodyId(body)+'"><span style="color:#94a3b8;font-size:11px;">加载中…</span></div>';
+    +'<div id="tpll-'+bodyId(body)+'"><span style="color:#94a3b8;font-size:11px;">'+window.T('dash.loading')+'</span></div>';
   _loadTplList(bodyId(body), draftId, search);
 }
 function bodyId(el){ return el.id||''; }
 function tplSearch(input, bid, draftId){
   var search=input.value.trim();
   var listEl=document.getElementById('tpll-'+bid);
-  if(listEl) listEl.innerHTML='<span style="color:#94a3b8;font-size:11px;">搜索中…</span>';
+  if(listEl) listEl.innerHTML='<span style="color:#94a3b8;font-size:11px;">'+window.T('base.gs.searching')+'</span>';
   clearTimeout(input._st);
   input._st=setTimeout(function(){ _loadTplList(bid, draftId, search); }, 300);
 }
@@ -880,17 +889,17 @@ function _loadTplList(bid, draftId, search){
   if(search) url+='&search='+encodeURIComponent(search);
   fetch(url).then(function(r){return r.json();}).then(function(d){
     if(!d||!d.templates||!d.templates.length){
-      listEl.innerHTML='<span style="color:#94a3b8;font-size:11px;">暂无模板</span>';
+      listEl.innerHTML='<span style="color:#94a3b8;font-size:11px;">'+window.T('draft.tpl.no_tpl')+'</span>';
       return;
     }
     listEl.innerHTML=d.templates.map(function(t){
-      return '<div class="dr-tpl-item" onclick="applyTpl(\''+esc(t.id)+'\','+JSON.stringify(t.content)+',\''+esc(draftId)+'\')" title="点击套用模板">'
+      return '<div class="dr-tpl-item" onclick="applyTpl(\''+esc(t.id)+'\','+JSON.stringify(t.content)+',\''+esc(draftId)+'\')" title="'+window.T('draft.tpl.apply_t')+'">'
         +'<div class="dr-tpl-item-title">'+esc(t.title)+'</div>'
         +'<div class="dr-tpl-item-content">'+esc(t.content)+'</div>'
         +'</div>';
     }).join('');
   }).catch(function(){
-    listEl.innerHTML='<span style="color:#ef4444;font-size:11px;">加载失败</span>';
+    listEl.innerHTML='<span style="color:#ef4444;font-size:11px;">'+window.T('dash.load_fail')+'</span>';
   });
 }
 function applyTpl(tplId, content, draftId){
@@ -923,9 +932,8 @@ document.addEventListener('draft_created', function(e){
 // K1：监听 draft_sla_breach — 主管视图弹 toast + 角标闪烁
 document.addEventListener('draft_sla_breach', function(e){
   var d=e.detail||{};
-  var msg='⏰ SLA 超时：'+esc(d.peer_text_preview||d.draft_id||'草稿')
-    +' 已等待 '+(d.wait_min||'?')+'分钟（'+esc(d.autopilot_level||'')+'）';
-  _drToast(msg, 'warn', 6000);
+  var msg=window.Tf('draft.sse.sla',{peer:esc(d.peer_text_preview||d.draft_id||window.T('draft.sse.draft_word')),min:(d.wait_min||'?'),lvl:esc(d.autopilot_level||'')});
+  _drToast(msg, 'warn', 6000, 'clock');
   // 高亮对应草稿卡片（如可见）
   var card=document.querySelector('[data-draft-id="'+esc(d.draft_id||'')+'"]');
   if(card){ card.style.outline='2px solid #dc2626'; }
@@ -936,24 +944,24 @@ document.addEventListener('draft_reassigned', function(e){
   var d=e.detail||{};
   var myId=(typeof MY_AGENT_ID!=='undefined')?MY_AGENT_ID:'';
   if(d.to_agent && d.to_agent===myId){
-    _drToast('📋 草稿已转派给您（来自 '+esc(d.from_agent||'离线坐席')+'）', 'info', 5000);
+    _drToast(window.Tf('draft.sse.reassigned_me',{from:esc(d.from_agent||window.T('draft.sse.offline_agent'))}), 'info', 5000, 'clipboard');
     setTimeout(load, 500);
   } else if(d.to_agent){
-    _drToast('🔄 草稿已自动转派给 '+esc(d.to_agent_name||d.to_agent), 'info', 4000);
+    _drToast(window.Tf('draft.sse.reassigned',{to:esc(d.to_agent_name||d.to_agent)}), 'info', 4000, 'refresh');
   }
 });
 
 // L3：快捷键面板（? 键弹出）
 (function(){
   var _shortcuts=[
-    {key:'A', desc:'批准选中草稿（Approve）'},
-    {key:'R', desc:'拒绝选中草稿（Reject）'},
-    {key:'E', desc:'展开/收起草稿编辑框'},
-    {key:'T', desc:'打开模板库'},
-    {key:'C', desc:'打开 AI Copilot 面板'},
-    {key:'P', desc:'打开客户画像'},
-    {key:'?', desc:'显示/隐藏快捷键帮助'},
-    {key:'Esc', desc:'清除全部选中'},
+    {key:'A', desc:window.T('draft.sc.approve')},
+    {key:'R', desc:window.T('draft.sc.reject')},
+    {key:'E', desc:window.T('draft.sc.edit')},
+    {key:'T', desc:window.T('draft.sc.tpl')},
+    {key:'C', desc:window.T('draft.sc.copilot')},
+    {key:'P', desc:window.T('draft.sc.profile')},
+    {key:'?', desc:window.T('draft.sc.help')},
+    {key:'Esc', desc:window.T('draft.sc.esc')},
   ];
   var _helpEl=null;
   function _makeHelp(){
@@ -962,8 +970,8 @@ document.addEventListener('draft_reassigned', function(e){
     d.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99999;display:flex;align-items:center;justify-content:center;';
     d.innerHTML='<div style="background:#fff;border-radius:12px;padding:24px 32px;min-width:320px;max-width:480px;">'
       +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">'
-      +'<strong style="font-size:15px;">⌨ 快捷键一览</strong>'
-      +'<span style="cursor:pointer;font-size:20px;color:#94a3b8;" onclick="document.getElementById(\'dr-help-overlay\').remove()">✕</span>'
+      +'<strong style="font-size:15px;">'+window.T('draft.sc.title')+'</strong>'
+      +'<span style="cursor:pointer;color:#94a3b8;display:inline-flex;" onclick="document.getElementById(\'dr-help-overlay\').remove()">'+uiIcon('x',18)+'</span>'
       +'</div>'
       +_shortcuts.map(function(s){
         return '<div style="display:flex;gap:12px;align-items:center;padding:5px 0;border-bottom:1px solid #f1f5f9;">'
@@ -971,7 +979,7 @@ document.addEventListener('draft_reassigned', function(e){
           +'<span style="font-size:13px;color:#374151;">'+s.desc+'</span>'
           +'</div>';
       }).join('')
-      +'<div style="margin-top:12px;font-size:11px;color:#94a3b8;text-align:right;">再按 ? 或点击背景关闭</div>'
+      +'<div style="margin-top:12px;font-size:11px;color:#94a3b8;text-align:right;">'+window.T('draft.sc.close_hint')+'</div>'
       +'</div>';
     d.addEventListener('click',function(e){ if(e.target===d) d.remove(); });
     return d;
@@ -999,11 +1007,11 @@ function _showQualityBadge(copilotData, cardEl){
   var bdHtml = '';
   if(Object.keys(breakdown).length){
     var tips = [];
-    if(breakdown.length!=null) tips.push('长度:'+breakdown.length);
-    if(breakdown.politeness!=null) tips.push('礼貌:'+breakdown.politeness);
-    if(breakdown.completeness!=null) tips.push('完整:'+breakdown.completeness);
-    if(breakdown.lang_match!=null) tips.push('语言:'+breakdown.lang_match);
-    if(breakdown.risk_match!=null) tips.push('风险:'+breakdown.risk_match);
+    if(breakdown.length!=null) tips.push(window.T('draft.q.length')+':'+breakdown.length);
+    if(breakdown.politeness!=null) tips.push(window.T('draft.q.politeness')+':'+breakdown.politeness);
+    if(breakdown.completeness!=null) tips.push(window.T('draft.q.completeness')+':'+breakdown.completeness);
+    if(breakdown.lang_match!=null) tips.push(window.T('draft.q.lang_match')+':'+breakdown.lang_match);
+    if(breakdown.risk_match!=null) tips.push(window.T('draft.q.risk_match')+':'+breakdown.risk_match);
     bdHtml = ' <span style="font-size:10px;color:#94a3b8;">('+tips.join(' ')+')</span>';
   }
   var el = document.createElement('span');
@@ -1026,11 +1034,11 @@ function _trackKbClick(recId, usedInDraft, draftId){
 
 // P2: 知识库归档
 window.kbArchive = function(draftId, btn){
-  var title = prompt('请输入知识库条目标题（用于日后检索）：');
+  var title = prompt(window.T('draft.kb.prompt'));
   if(!title || !title.trim()) return;
   var origText = btn.textContent;
   btn.disabled = true;
-  btn.textContent = '归档中…';
+  btn.textContent = window.T('draft.kb.archiving');
   fetch('/api/workspace/kb-archive', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -1039,12 +1047,12 @@ window.kbArchive = function(draftId, btn){
   .then(function(r){ return r.json(); })
   .then(function(d){
     if(d.ok){
-      btn.textContent = '✅ 已入库';
+      btn.textContent = window.T('draft.kb.archived');
       btn.style.background = '#f0fdf4';
       btn.style.color = '#16a34a';
       btn.style.borderColor = '#16a34a';
     } else {
-      btn.textContent = '❌ 失败';
+      btn.textContent = window.T('draft.kb.fail');
       btn.disabled = false;
       setTimeout(function(){ btn.textContent = origText; btn.disabled = false; }, 2000);
     }
@@ -1054,6 +1062,15 @@ window.kbArchive = function(draftId, btn){
     btn.disabled = false;
   });
 };
+
+/* 全局暴露：本块整体在 IIFE 内，内联 on*="fn()" 在全局作用域求值，未暴露即抛 ReferenceError（哑按钮）。
+   以下均为被内联 handler 引用的 IIFE 内裸 function（此前整页内联控件基本失效）。
+   （bodyId 是拼 HTML 时用的生成期辅助，一并挂出无害。）常驻门禁见 tests/test_rpa_inline_handlers_exposed.py。 */
+Object.assign(window, {
+  setFilter, toggleEdit, resolve, resolveWithTranslation, bulkAct, clearSel,
+  forceOverride, applyTpl, tplSearch, tplLang, toggleTpl, toggleCtx, toggleTrans,
+  toggleCopilot, toggleProfile, triggerBulkAutosend, _confirmFact, _trackKbClick, bodyId,
+});
 })();
 </script>
 {% endblock %}

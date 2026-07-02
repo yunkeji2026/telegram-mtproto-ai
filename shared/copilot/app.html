@@ -60,6 +60,7 @@
     .cp-cust-row .k { color: var(--cp-text-dim, #64748b); }
     .cp-cust-row .v { color: var(--cp-text, #1e293b); text-align: right; word-break: break-all; }
   </style>
+  <script src="/copilot/i18n/cp-i18n.js"></script>
   <script src="/copilot/client/copilot-client.js"></script>
   <script src="/copilot/components/cp-panel-base.js"></script>
   <script src="/copilot/components/cp-rel-stage.js"></script>
@@ -74,60 +75,66 @@
 </head>
 <body>
   <div class="cp-tabs" id="cp-tabs" hidden>
-    <button type="button" class="cp-tab active" data-tab="reply">💬 回复</button>
-    <button type="button" class="cp-tab" data-tab="insight">🧠 洞察</button>
-    <button type="button" class="cp-tab" data-tab="customer">👤 客户</button>
+    <button type="button" class="cp-tab active" data-tab="reply" data-cp-i18n="cp.app.tab_reply">💬 回复</button>
+    <button type="button" class="cp-tab" data-tab="insight" data-cp-i18n="cp.app.tab_insight">🧠 洞察</button>
+    <button type="button" class="cp-tab" data-tab="customer" data-cp-i18n="cp.app.tab_customer">👤 客户</button>
   </div>
   <div class="cp-app" id="cp-app">
-    <h4>👥 账号管理</h4>
+    <h4 data-cp-i18n="cp.app.h_accounts">👥 账号管理</h4>
     <cp-accounts id="accounts"></cp-accounts>
-    <div class="cp-app-empty" id="cp-app-empty">等待会话上下文…</div>
+    <div class="cp-app-empty" id="cp-app-empty" data-cp-i18n="cp.app.empty">等待会话上下文…</div>
 
     <!-- 💬 回复 -->
     <div class="cp-sec" data-tab="reply" id="sec-reply">
       <div class="cp-auto-bar" id="autopilot-bar" hidden>
-        <label title="开启后：当前会话收到客户消息会自动生成并发送回复（低风险才自动发，命中风控转人工）">
+        <label data-cp-i18n-title="cp.app.auto_title" title="开启后：当前会话收到客户消息会自动生成并发送回复（低风险才自动发，命中风控转人工）">
           <input type="checkbox" id="autopilot-toggle" />
-          <span>全自动托管</span>
+          <span data-cp-i18n="cp.app.auto_label">全自动托管</span>
         </label>
-        <span class="cp-auto-status" id="autopilot-status">已关闭</span>
+        <span class="cp-auto-status" id="autopilot-status" data-cp-i18n="cp.app.auto_off">已关闭</span>
       </div>
-      <h4>✨ 回复草稿</h4>
+      <h4 data-cp-i18n="cp.app.h_draft">✨ 回复草稿</h4>
       <cp-draft id="draft" persona contrast pin></cp-draft>
-      <h4>🎙️ 语音克隆</h4>
+      <h4 data-cp-i18n="cp.app.h_voice">🎙️ 语音克隆</h4>
       <cp-voice id="voice"></cp-voice>
-      <h4>🎭 人设绑定</h4>
+      <h4 data-cp-i18n="cp.app.h_persona">🎭 人设绑定</h4>
       <cp-persona id="persona"></cp-persona>
-      <h4>🎬 剧本话题</h4>
+      <h4 data-cp-i18n="cp.app.h_script">🎬 剧本话题</h4>
       <cp-script id="script"></cp-script>
     </div>
 
     <!-- 🧠 洞察 -->
     <div class="cp-sec" data-tab="insight" id="sec-insight">
-      <h4>💞 关系阶段</h4>
+      <h4 data-cp-i18n="cp.app.h_rel">💞 关系阶段</h4>
       <cp-rel-stage id="relstage"></cp-rel-stage>
-      <h4>🤝 协作上下文</h4>
+      <h4 data-cp-i18n="cp.app.h_collab">🤝 协作上下文</h4>
       <cp-collab id="collab"></cp-collab>
-      <h4>⚡ 下一步建议</h4>
+      <h4 data-cp-i18n="cp.app.h_nba">⚡ 下一步建议</h4>
       <cp-next-actions id="nba"></cp-next-actions>
-      <h4>🔗 工作链执行</h4>
+      <h4 data-cp-i18n="cp.app.h_chain">🔗 工作链执行</h4>
       <cp-chain-exec id="chain"></cp-chain-exec>
-      <h4>🧠 AI 对话分析</h4>
+      <h4 data-cp-i18n="cp.app.h_analyze">🧠 AI 对话分析</h4>
       <div>
-        <button type="button" class="cp-analyze-btn" id="analyze-btn">分析当前对话</button>
+        <button type="button" class="cp-analyze-btn" id="analyze-btn" data-cp-i18n="cp.app.analyze_btn">分析当前对话</button>
         <div class="cp-analyze-box" id="analyze-box" style="margin-top:6px;"></div>
       </div>
     </div>
 
     <!-- 👤 客户 -->
     <div class="cp-sec" data-tab="customer" id="sec-customer">
-      <h4>👤 客户档案</h4>
+      <h4 data-cp-i18n="cp.app.h_customer">👤 客户档案</h4>
       <div id="customer-box" class="cp-analyze-box"></div>
     </div>
   </div>
   <script>
     (function () {
       var qs = new URLSearchParams(location.search);
+      // i18n：cp-i18n.js 已按 ?lang= / <html lang> / cookie 解析语言；同步 <html lang> 并替换静态文案
+      var CPS = window.CopilotShared || {};
+      var LANG = CPS.lang || "zh";
+      function T(k, vars) { return CPS.t ? CPS.t(k, vars) : k; }
+      try { document.documentElement.setAttribute("lang", LANG === "en" ? "en" : "zh-CN"); } catch (_) {}
+      if (CPS.applyI18n) CPS.applyI18n(document);
       // 主题
       var theme = qs.get("theme") === "dark" ? "dark" : "light";
       document.documentElement.setAttribute("data-cp-theme", theme);
@@ -217,7 +224,7 @@
       function setAutoUi(on) {
         if (autoToggle) autoToggle.checked = !!on;
         if (autoStatus) {
-          autoStatus.textContent = on ? "待命中（收到客户消息将自动回复）" : "已关闭";
+          autoStatus.textContent = on ? T("cp.app.auto_on") : T("cp.app.auto_off");
           autoStatus.classList.toggle("on", !!on);
         }
       }
@@ -235,7 +242,7 @@
         if (!CURRENT || !client || _analyzing) return;
         _analyzing = true;
         if (analyzeBtn) analyzeBtn.disabled = true;
-        analyzeBox.innerHTML = '<div style="color:var(--cp-text-tiny,#94a3b8);">分析中…</div>';
+        analyzeBox.innerHTML = '<div style="color:var(--cp-text-tiny,#94a3b8);">' + esc(T("cp.app.analyzing")) + '</div>';
         try {
           var hist = await client.getHistory({ conversationId: CURRENT.conversationId, limit: 30 });
           var msgs = (hist && hist.messages) || [];
@@ -244,16 +251,16 @@
             var d = msgs[i] && (msgs[i].direction || msgs[i].dir);
             if ((d === "in" || d === "inbound") && msgs[i].text) { lastIn = msgs[i]; break; }
           }
-          if (!lastIn) { analyzeBox.innerHTML = '<div style="color:var(--cp-text-tiny,#94a3b8);">暂无入站消息</div>'; return; }
+          if (!lastIn) { analyzeBox.innerHTML = '<div style="color:var(--cp-text-tiny,#94a3b8);">' + esc(T("cp.app.no_inbound")) + '</div>'; return; }
           var res = await client.analyze({
             text: lastIn.text,
             messages: msgs.slice(-10),
             chat: { platform: CURRENT.platform, chat_key: CURRENT.chatKey, account_id: CURRENT.accountId },
           });
-          if (!res || !res.ok) { analyzeBox.innerHTML = '<div style="color:var(--cp-text-tiny,#94a3b8);">分析失败</div>'; return; }
+          if (!res || !res.ok) { analyzeBox.innerHTML = '<div style="color:var(--cp-text-tiny,#94a3b8);">' + esc(T("cp.app.analyze_fail")) + '</div>'; return; }
           renderAnalysis(res.analysis || {});
         } catch (e) {
-          analyzeBox.innerHTML = '<div style="color:var(--cp-text-tiny,#94a3b8);">分析失败</div>';
+          analyzeBox.innerHTML = '<div style="color:var(--cp-text-tiny,#94a3b8);">' + esc(T("cp.app.analyze_fail")) + '</div>';
         } finally {
           _analyzing = false;
           if (analyzeBtn) analyzeBtn.disabled = false;
@@ -261,9 +268,9 @@
       }
       function renderAnalysis(a) {
         var chips = [];
-        if (a.intent) chips.push('<span class="cp-chip">意图：' + esc(a.intent) + '</span>');
-        if (a.sentiment) chips.push('<span class="cp-chip">情绪：' + esc(a.sentiment) + '</span>');
-        if (a.detected_lang) chips.push('<span class="cp-chip">语种：' + esc(a.detected_lang) + '</span>');
+        if (a.intent) chips.push('<span class="cp-chip">' + esc(T("cp.app.intent")) + esc(a.intent) + '</span>');
+        if (a.sentiment) chips.push('<span class="cp-chip">' + esc(T("cp.app.sentiment")) + esc(a.sentiment) + '</span>');
+        if (a.detected_lang) chips.push('<span class="cp-chip">' + esc(T("cp.app.lang")) + esc(a.detected_lang) + '</span>');
         (a.risk_signals || []).forEach(function (r) {
           var label = typeof r === "string" ? r : (r.type || r.label || "");
           if (label) chips.push('<span class="cp-chip danger">⚠ ' + esc(label) + '</span>');
@@ -284,9 +291,9 @@
           item.innerHTML = (meta ? '<div class="it-meta">' + esc(meta) + "</div>" : "") + "<div>" + esc(txt) + "</div>";
           var acts = document.createElement("div");
           acts.className = "cp-rep-acts";
-          var fill = document.createElement("button"); fill.textContent = "填入";
+          var fill = document.createElement("button"); fill.textContent = T("cp.app.fill");
           fill.addEventListener("click", function () { post("cp-fill", { text: txt }); });
-          var send = document.createElement("button"); send.textContent = "填入并发送";
+          var send = document.createElement("button"); send.textContent = T("cp.app.fill_send");
           send.addEventListener("click", function () { post("cp-send", { text: txt, which: "analyze" }); });
           acts.appendChild(fill); acts.appendChild(send);
           item.appendChild(acts);
@@ -300,11 +307,11 @@
         if (!box || !CURRENT) return;
         var cu = CURRENT.customer || {};
         var rows = [
-          ["平台", cu.platform || CURRENT.platform || "-"],
-          ["账号", cu.account_label || cu.account_id || CURRENT.accountId || "-"],
-          ["标识", cu.chat_key || CURRENT.chatKey || "-"],
+          [T("cp.app.c_platform"), cu.platform || CURRENT.platform || "-"],
+          [T("cp.app.c_account"), cu.account_label || cu.account_id || CURRENT.accountId || "-"],
+          [T("cp.app.c_id"), cu.chat_key || CURRENT.chatKey || "-"],
         ];
-        if (cu.funnel_stage) rows.push(["旅程阶段", cu.funnel_stage]);
+        if (cu.funnel_stage) rows.push([T("cp.app.c_funnel"), cu.funnel_stage]);
         if (cu.contact_id) rows.push(["CRM", cu.contact_id]);
         var html = rows.map(function (r) {
           return '<div class="cp-cust-row"><span class="k">' + esc(r[0]) + '</span><span class="v">' + esc(r[1]) + "</span></div>";

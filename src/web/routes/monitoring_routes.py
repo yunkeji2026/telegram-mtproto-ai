@@ -156,6 +156,7 @@ def register_monitoring_routes(app, ctx):
                 "reactivation":      snap.get("reactivation", {}),
                 "pacing":            snap.get("pacing", {}),
                 "peer_typing_prefetch": snap.get("peer_typing_prefetch", {}),
+                "anti_repeat":       snap.get("anti_repeat", {}),
                 "startup_advisories": snap.get("startup_advisories", {}),
                 "ai_healthy":        ms.ai_healthy(),
                 "ai_errors":         ms._ai_consecutive_errors,
@@ -164,6 +165,26 @@ def register_monitoring_routes(app, ctx):
             }
         except Exception:
             return {"error": "metrics unavailable"}
+
+    @app.get("/api/admin/anti-repeat-advice")
+    async def api_anti_repeat_advice(request: Request):
+        """防复读运行时调参建议：读累计指标 → 纯函数给「缓存扩缩 / 语义层开关」建议。
+
+        样本不足时 ``sample_ok=false`` 且 ``suggestions=[]``（不给噪音）。只读，不改配置。
+        """
+        _api_auth(request)
+        try:
+            from src.monitoring.metrics_store import get_metrics_store
+            from src.utils.anti_repeat_advisor import evaluate_anti_repeat_tuning
+            ar = get_metrics_store().snapshot().get("anti_repeat", {})
+            cfg = getattr(config_manager, "config", None) or {}
+            _sem = (((((cfg.get("inbox") or {}).get("auto_draft") or {})
+                      .get("anti_repeat") or {}).get("semantic")) or {}) if isinstance(cfg, dict) else {}
+            cur_max = int(_sem.get("embed_cache_max", 0) or 0) or 512
+            return {"ok": True, **evaluate_anti_repeat_tuning(
+                ar, cfg, current_cache_max=cur_max)}
+        except Exception as ex:
+            return {"ok": False, "error": f"{type(ex).__name__}:{ex}"}
 
     # ★ W2-D5.1：reactivation dry_run 样本审核端点
     @app.get("/api/reactivation/dry-run-samples")

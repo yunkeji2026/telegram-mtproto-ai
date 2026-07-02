@@ -61,6 +61,10 @@ telegram:
     tts_cache:
       enabled: true
       max_entries: 128
+      # TTL（秒）：0=不过期（旧行为）。>0 时超龄缓存视为未命中并重合成——防「隔久了
+      # 还复用同一段音频」。会话式 L2 autosend 语音已默认关字节缓存（见
+      # src/inbox/voice_autosend.py），此 TTL 主要护问候/FAQ 等复用型语音。
+      ttl_sec: 0
     # 人设级音色覆盖（优先于此处；见 personas.profiles[].voice_profile）
     voice_profile:
       enabled: false
@@ -234,8 +238,17 @@ web_chat:
 # Web 管理后台（显示名、侧边栏标题；LINE RPA 提示中的「系统」名称亦取此字段）
 web_admin:
   enabled: true                  # 总开关：统一收件箱 / 翻译 / 桌面壳 D1/D4 路由均挂其下，关则后端不开 HTTP
-  site_name: 华灵科技客户转化聊天系统
+  site_name: 无界科技 · 智聊
   host: 127.0.0.1
+
+# 白标 / 品牌（设置页写入 config.local.yaml overlay；未配置时用无界 · 智聊 默认）
+# brand:
+#   company_name: 无界科技
+#   product_name: 智聊
+#   site_name: 无界科技 · 智聊
+#   site_name_short: 无界科技
+#   sidebar_name: 无界 · 智聊
+#   login_subtitle: 管理控制台
   port: 18787
   auth_token: YOUR_ADMIN_TOKEN
   secret_key: YOUR_FLASK_SECRET_KEY
@@ -694,6 +707,47 @@ voice_clone_lan:
   language: zh                            # 默认合成语种（zh/en/ja...）
   api_key: ""                            # 主机需鉴权时填（Bearer）
   cloud_fallback: true                   # 局域网不可用/失败 → 回落云端 Qwen
+  # P-RT：克隆主机若支持自然语言情感指令（如 MiniCPM-o），情绪经结构化 instructions
+  # 字段下发（不会被读出，零 garble，默认开）；fish_speech 内联标记仍 opt-in：
+  emotion_inline_tags: false             # 仅 fish_speech S2 这类「内联标记」主机才开
+
+# ── 实时共情语音通话（P-RT，新产品面）：浏览器麦克风 ⇄ 网关 ⇄ MiniCPM-o 4.5 全双工 ──
+# 「最佳声音感情」+ 新产品面：MiniCPM-o 4.5 自托管 speech-language 模型——中英母语、
+# 全双工实时（边听边说/可打断/主动开口）、情感表达 SOTA、短参考音即克隆，亲密内容不出本地。
+# 主力中文走它；英/日等高级语种可另接 Hume EVI4-mini（不支持中文，故非主力）。
+# 部署参考服务端：tools/minicpm_o_server.py（实现 /health + /v1/realtime + /v1/tts/clone）。
+# 默认 **关**；开了才挂 /api/voice/live(WS) 与 /ops/voice-call(试拨页)。
+realtime_voice:
+  enabled: false                         # 总开关（新子系统默认关）
+  base_url: http://192.168.1.49:7860     # MiniCPM-o 语音主机（实测 RTX 5090 32GB / WLAN）
+  ws_path: /v1/realtime                  # 全双工实时 WebSocket
+  health_path: /health                   # 健康探测（含 model_loaded）
+  oneshot_path: /v1/tts/clone            # 一次性克隆合成（消息渠道情感语音条复用）
+  load_path: /v1/model/load              # 显存按需：看板「启动引擎」→ 主机载入模型
+  unload_path: /v1/model/unload          # 显存按需：看板「释放显存」→ 主机卸载、还回 ~21GB
+  model: minicpm-o-4_5
+  default_voice: ""                      # 无参考音时用的主机内置音色名
+  default_language: zh                    # zh | en
+  sample_rate: 16000                      # 上行 PCM16 采样率
+  health_timeout_sec: 1.5
+  health_cache_sec: 30
+  session_idle_timeout_sec: 90            # 静默多久判定挂断
+  max_session_sec: 1800                   # 单次通话上限（仿 EVI 30 分钟）
+  api_key: ""                            # 主机需鉴权时填（Bearer）
+  access_token: ""                       # 浏览器握手口令（公网暴露务必设；空=开发放行）
+  guidance: ""                           # 覆盖默认「实时语音共情守则」（留空用内置）
+  # B 线：实时语音退化告警（health_watchdog → ops_incidents + webhook，默认关）
+  alert:
+    enabled: false                       # true = 周期巡检并落 kind=realtime_voice 事件
+    min_attempts: 3                      # 接通率判定最少通话尝试；不足静默
+    min_health_probes: 2                 # 主机健康判定最少探测；不足静默
+    health_ok_rate_warn: 0.80            # 健康率 < 此 → warn(yellow)
+    health_ok_rate_fail: 0.50            # 健康率 < 此 → fail(red)
+    connect_rate_warn: 0.50              # 接通率 < 此 → warn(yellow)
+    connect_rate_fail: 0.30              # 接通率 < 此 → fail(red)
+  # E 线：按日落库 → ops 看板 sparkline + 告警校准历史回放（默认关；开后 stats 旁路 upsert）
+  trend_log: false
+  trend_retention_days: 90
 
 # ── ElevenLabs v3 付费情感旗舰档（P2-Cloud）────────────────────────────────────
 # 「真人感情」语音：v3 通过内联音频标签 + voice_settings（stability 调低更听情绪、
@@ -1507,19 +1561,63 @@ inbox:
   # 草稿风险映射：low→L2（自动发送）/ medium→L3（需审批）/ high→L4（拦截）。
   auto_draft:
     enabled: true             # false = 禁用自动草稿生成
-    min_text_len: 3           # 少于此字符数的消息不生成草稿（过滤表情/贴图）
+    min_text_len: 0            # 0=任意长度都回复（含 Hi/表情）；>0 时过滤更短消息
     automation_mode: auto_ai  # review | auto_ai — 决定 L2/L3 分界
                               # review:   low→L1, medium→L3, high→L4（无 L2 自动发）
                               # auto_ai:  low→L2, medium→L3, high→L4（L2 由 AutosendWorker 自动发）
     skip_platforms: []        # 跳过指定平台不生成草稿，如: [line, messenger]
+    skip_group_chats: false   # ⭐ true = 群/频道会话不生成人审草稿（源头止血）。群消息非 1:1 客服，
+                              #   生成 L3/L4 待审草稿会长期无人处置、反复触发 SLA 铃铛。识别双判据：
+                              #   chat_type∈{group/supergroup/channel…} 或 Telegram peer 为负 id。
+                              #   默认 false=旧行为（群也生成）。仅服务 1:1 私聊时建议开。
     persona_enrich: true      # ⭐ true（默认）= 自动草稿正文走「人设产线」（与手动「生成草稿」同源：
                               #   SkillManager 意图→策略→KB→人设 LLM + 会话历史 + 客户语言），
                               #   先停泊(enriching)再补全翻 pending；生成正文二次风控只升不降。
                               #   false = 回落规则模板（干瘪、无人设、无上下文，仅兜底场景用）。
     cleanup_age_days: 7       # 已处理草稿（approved/rejected/cancelled）超龄删除天数（0=禁用）
     cleanup_enabled: true     # false = 禁用自动清理（AutosendWorker 每日执行一次）
+    # ⭐ 防复读：草稿/回复与「最近 N 条已发回复」相似度 >threshold → 换角度重生一次。
+    #   旧逻辑仅比上一条（深度=1），中间隔一条就漏判「跟昨天同一句」；改为窗口比对。
+    #   同时作用于 generate_inbox_draft(8b) 与原生 process_message(5b)，per 会话持久化。
+    anti_repeat:
+      window: 6               # 回溯比对最近几条已发回复（越大越严，代价=多点比对/偶发重试）
+      threshold: 0.65         # 字符 Jaccard 相似度阈；> 此值判定复读并重生（0~1）
+      # 语义层（可选）：字符 Jaccard 抓不住「换词不换意」的改写复读，用嵌入余弦兜底。
+      # 需 ai.embedding_* 可用；任何嵌入失败自动回落纯字符层（零阻断）。默认关。
+      # ⚠ 阈值/前缀随嵌入模型而异：nomic-embed-text 基线偏高、需 ~0.91 且建议
+      #   query_prefix: "clustering: "；bge-m3 可原文、阈值可更低（如 0.85）。
+      semantic:
+        enabled: false
+        threshold: 0.90        # 嵌入余弦阈；> 此值判定语义复读（模型相关，务必按模型校准）
+        query_prefix: ""       # 送嵌入前给两侧文本加的前缀（nomic 建议 "clustering: "）
+        embed_cache_max: 512   # 嵌入向量进程内 LRU 上限（0=用默认 512）；稳态每轮只嵌
+                               #   当前候选（历史池命中缓存），命中率见 /api/bot-metrics.anti_repeat
+      # 运行时调参顾问（只读建议，永不自动改配置）：据累计指标给「缓存扩缩 / 语义层开关」
+      # 建议，读 GET /api/admin/anti-repeat-advice。样本不足静默（不给噪音）。
+      advisor:
+        min_samples: 200            # 缓存建议所需最少嵌入次数（hit+miss）
+        cache_hit_high_pct: 98.0    # 命中率 ≥ 此值且容量>floor → 建议下调省内存
+        cache_hit_low_pct: 70.0     # 命中率 < 此值 → 建议上调（复用不足在重复嵌入）
+        cache_max_floor: 64         # 下调建议不会低于此容量
+        semantic_min_checks: 200    # 语义层开关建议所需最少判定次数
+        semantic_value_share_pct: 20.0  # 语义占比 ≥ 此值 → 明确其价值、建议保留
     # 注：会话档位优先——AutoDraft 实际用每会话 automation_mode（收件箱「🚀全自动」开关），
     #     未显式设置的会话回落上面的全局 automation_mode；manual 档跳过不生成草稿。
+
+  # AI 回复质量退化告警（F1）：HealthWatchdog 周期性据 draft_audit_log 处置结果口径
+  # （草稿采纳/弃用率 + 高危量环比）评估「AI 发得靠不靠谱」，退化即落 ops_incidents
+  # (kind=ai_quality)，在 ops 总览与 health/billing/草稿质量事件同一条闭环（可 ack/指派/自动恢复）。
+  # ⚠ 默认关：阈值须按你的真实分布校准后再开（否则易误报/漏报）。样本不足(reviewed<min_samples)静默。
+  ai_quality_alert:
+    enabled: false            # true = 开启周期巡检并落事件
+    window_days: 7            # 评估窗口（并与上一等长窗口做环比）
+    min_samples: 20           # 人工审过样本下限；不足不评（防薄数据抖动误报）
+    adopt_min: 0.40           # 采纳率 < 此 → warn(yellow)
+    adopt_severe: 0.20        # 采纳率 < 此 → fail(red)
+    reject_max: 0.35          # 弃用率 > 此 → warn(yellow)
+    reject_severe: 0.60       # 弃用率 > 此 → fail(red)
+    high_risk_min: 5          # 高危量绝对下限（低于此不看环比）
+    high_risk_spike: 5        # 高危量环比增量 ≥ 此 → warn(yellow)
 
   # L2 草稿自动发送 worker（全自动回复的「发送」环节）。
   l2_autosend:
@@ -1533,6 +1631,11 @@ inbox:
                               # 故全自动首条回复实际≈草稿落库瞬间；可调小（如 5）让冷启动更跟手。
     circuit_threshold: 5      # 连续 resolve 错误次数触发熔断
     cooldown_sec: 300         # 熔断冷却时间
+    # 会话级发送封禁：投递遇「永久性」硬错误（群聊无发言权 CHAT_WRITE_FORBIDDEN / 被拉黑 /
+    # 会话失效）时，把该会话冷却此秒数——期间新 L2 草稿直接取消，不再拟稿→投递→失败→刷屏；
+    # 到期自动重探（权限恢复即回正常）。0=关闭（旧行为，每条都试都记）。可观测：
+    # /api/drafts/autosend-status 的 total_skipped_blocked / blocked_conversations。
+    send_block_cooldown_sec: 21600   # 默认 6h；瞬时错误（超时/限流）不受影响，照常重试
     deliver_delay:            # Phase 4：投递前拟人打字延迟（降低秒回露馅/反封号）
       min_sec: 0              # 默认 0=不延迟（向后兼容）；拟人建议如 min 3 / max 12
       max_sec: 0
@@ -1682,6 +1785,19 @@ mobile_bridge:
 # ── 协议多开登录 / 账号池编排器 / 统一运行时（N 线）──────────────────────
 # 让"扫码/手机登录的个人号"被纳管、7×24 在线、并跑 A 线"有灵魂"的陪聊 client。
 # 全部默认关；需用测试号验证后再逐项开启（涉及 pyrogram DC 迁移等底层，无法无真号联调）。
+# 账号身份化（P1）：登录成功后把账号「自己」的昵称/用户名（可选头像）富集进
+# account_registry.meta.self_*，供「连接中心 / 账号切换条」显示真实身份而非裸手机号/占位头像。
+# 全程 best-effort，任何异常都不影响登录/收消息；缺失即回落占位（渐变字首）头像。
+accounts:
+  self_profile:
+    # 采集自身昵称/用户名（轻量，登录时随 get_me 一次性写入）。默认关（遵"新子系统默认关"）。
+    enabled: false
+    # 额外下载自身头像存本地静态目录（较重、需真账号联调）。仅 enabled=true 时生效。
+    avatar: false
+    # 连接中心/切换条里账号手机号是否脱敏显示（前3+****+后3）。默认 true（防截图外泄）；
+    # 关 → 原样显示完整号（内网可信/排障场景）。与是否采集 self_profile 无关，独立生效。
+    mask_phone: true
+
 platform_login:
   # 账号池编排器：进程启动后读 account_registry，按账号 (platform, mode) 用对应 worker
   # 拉起并持续健康监督（失败指数退避重启）。关 → 不持有任何协议连接。

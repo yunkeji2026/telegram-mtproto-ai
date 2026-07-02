@@ -90,6 +90,8 @@ class TelegramQrLogin:
         self.detail = ""
         # N2：扫码成功时导出的 session_string（in-memory 启动用，比文件 session 抗 DC 迁移）
         self.session_string = ""
+        # P1 身份化：扫码成功时从授权返回的 user 抽取自身昵称/用户名（写入注册表 meta.self_*）
+        self.self_profile: Dict[str, str] = {}
 
     def result(self) -> Dict[str, Any]:
         return {
@@ -178,6 +180,12 @@ class TelegramQrLogin:
             user = success.authorization.user
             self.account_id = str(getattr(user, "id", "") or "")
             self.phone = str(getattr(user, "phone_number", "") or "")
+            # P1：从授权返回的 user 抽取自身昵称/用户名（纯函数，无副作用；flag 在写入时判定）
+            try:
+                from src.integrations.account_self_profile import extract_self_profile
+                self.self_profile = extract_self_profile(user)
+            except Exception:  # noqa: BLE001
+                self.self_profile = {}
             await self.client.storage.user_id(user.id)
             await self.client.storage.is_bot(False)
             self.status = "authorized"
@@ -249,6 +257,16 @@ def make_provider(config: Dict[str, Any], sessions_dir: str = _DEFAULT_SESSIONS_
                     # N2：有 session_string 则一并存（A 线优先 in-memory 启动；见 telegram_client）
                     if getattr(login, "session_string", ""):
                         _meta["session_string"] = login.session_string
+                    # P1 身份化：flag 开启则把自身昵称/用户名一并落 meta.self_*（头像待该号
+                    # 后续被 telegram_client 拉起时补齐，见 account_self_profile.enrich_from_user）
+                    try:
+                        from src.integrations.account_self_profile import (
+                            self_profile_enabled,
+                        )
+                        if self_profile_enabled(config) and getattr(login, "self_profile", None):
+                            _meta.update(login.self_profile)
+                    except Exception:  # noqa: BLE001
+                        logger.debug("[tg_protocol_login] self_profile 合并失败（忽略）", exc_info=True)
                     get_account_registry().upsert(
                         "telegram", res["account_id"], mode="protocol",
                         status="online", meta=_meta,

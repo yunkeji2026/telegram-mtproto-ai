@@ -27,6 +27,7 @@ from src.web.routes.unified_inbox_helpers import (
     FUNNEL_STAGE_LABELS,
 )
 from src.web.routes.unified_inbox_services import _contacts_gateway, _contacts_store
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,7 @@ def register_workspace_contacts_routes(
         ci_id = str(body.get("ci_id") or "").strip()
         target = str(body.get("target_contact_id") or "").strip()
         if not ci_id or not target:
-            raise HTTPException(400, "ci_id 和 target_contact_id 必填")
+            raise HTTPException(400, tr(request, "err.ws.ci_target_required"))
         gw = _contacts_gateway(request)
         if gw is None:
             return {"ok": False, "error": "contacts_disabled"}
@@ -88,7 +89,7 @@ def register_workspace_contacts_routes(
         source = str(body.get("source_contact_id") or "").strip()
         target = str(body.get("target_contact_id") or "").strip()
         if not source or not target:
-            raise HTTPException(400, "source_contact_id 和 target_contact_id 必填")
+            raise HTTPException(400, tr(request, "err.ws.source_target_required"))
         gw = _contacts_gateway(request)
         if gw is None:
             return {"ok": False, "error": "contacts_disabled"}
@@ -103,7 +104,7 @@ def register_workspace_contacts_routes(
         body = await request.json()
         ci_id = str(body.get("ci_id") or "").strip()
         if not ci_id:
-            raise HTTPException(400, "ci_id 必填")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="ci_id"))
         gw = _contacts_gateway(request)
         if gw is None:
             return {"ok": False, "error": "contacts_disabled"}
@@ -142,7 +143,7 @@ def register_workspace_contacts_routes(
         body = await request.json()
         action = str(body.get("action") or "").lower()
         if action not in ("approve", "reject"):
-            raise HTTPException(400, "action 必须是 approve / reject")
+            raise HTTPException(400, tr(request, "err.ws.action_approve_reject"))
         gw = _contacts_gateway(request)
         if gw is None:
             return {"ok": False, "error": "contacts_disabled"}
@@ -186,7 +187,7 @@ def register_workspace_contacts_routes(
             return {"ok": False, "error": "contacts_disabled"}
         overview = gw.contact_overview(contact_id)
         if overview is None:
-            raise HTTPException(404, "contact 不存在")
+            raise HTTPException(404, tr(request, "err.ws.contact_not_found"))
         msg_limit = max(10, min(200, int(msg_limit or 60)))
         cursor = float(before_ts) if before_ts and before_ts > 0 else None
         timeline = _build_contact_timeline(
@@ -305,14 +306,14 @@ def register_workspace_contacts_routes(
         note = body.get("note")
         tags = body.get("tags")
         if tags is not None and not isinstance(tags, list):
-            raise HTTPException(400, "tags 必须是数组")
+            raise HTTPException(400, tr(request, "err.ws.tags_must_be_array"))
         fu = body.get("follow_up_at")
         follow_up_at = None
         if fu is not None:
             try:
                 follow_up_at = int(fu)
             except (TypeError, ValueError):
-                raise HTTPException(400, "follow_up_at 必须是时间戳整数")
+                raise HTTPException(400, tr(request, "err.ws.follow_up_at_int"))
         agent = _session_agent(request)
         return gw.update_contact_crm(
             contact_id, note=note, tags=tags, follow_up_at=follow_up_at,
@@ -354,9 +355,9 @@ def register_workspace_contacts_routes(
         try:
             due_at = int(body.get("due_at") or 0)
         except (TypeError, ValueError):
-            raise HTTPException(400, "due_at 必须是时间戳整数")
+            raise HTTPException(400, tr(request, "err.ws.due_at_int"))
         if due_at <= 0:
-            raise HTTPException(400, "due_at 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="due_at"))
         agent = _session_agent(request)
         assignee = str(body.get("assignee") or "").strip() or agent["agent_id"]
         out = gw.add_follow_up_task(
@@ -393,7 +394,7 @@ def register_workspace_contacts_routes(
             return {"ok": False, "error": "contacts_disabled"}
         assignee = str(body.get("assignee") or "").strip()
         if not assignee:
-            raise HTTPException(400, "assignee 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="assignee"))
         agent = _session_agent(request)
         out = gw.reassign_follow_up_task(
             task_id, assignee=assignee, operator=agent["agent_id"])
@@ -415,9 +416,9 @@ def register_workspace_contacts_routes(
             days = int(body.get("days") or 0)
             due_at = int(body.get("due_at") or 0)
         except (TypeError, ValueError):
-            raise HTTPException(400, "days/due_at 必须是整数")
+            raise HTTPException(400, tr(request, "err.ws.days_due_at_int"))
         if days <= 0 and due_at <= 0:
-            raise HTTPException(400, "需提供 days 或 due_at")
+            raise HTTPException(400, tr(request, "err.ws.days_or_due_at_required"))
         agent = _session_agent(request)
         out = gw.snooze_follow_up_task(
             task_id, days=days, due_at=due_at, operator=agent["agent_id"])
@@ -484,7 +485,7 @@ def register_workspace_contacts_routes(
         api_auth(request)
         store = _contacts_store(request)
         if store is None:
-            raise HTTPException(503, "contacts 未启用")
+            raise HTTPException(503, tr(request, "err.ws.contacts_disabled"))
         lead_filter: Optional[bool] = None
         if has_lead in ("1", "true", "yes"):
             lead_filter = True

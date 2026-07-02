@@ -624,12 +624,16 @@ def test_dashboard_exposes_auto_claim_window(tmp_path):
 
 
 def test_workspace_dashboard_template_contains_auto_claim_panel():
-    """P3：看板模板含自动派单面板段（命中率 + 语言分布 + 趋势）。"""
+    """P3：看板模板含自动派单面板段（命中率 + 语言分布 + 趋势）。
+
+    注：看板已做 i18n（③-K），面板文案改走 ``T('dash.xl.*')`` key——故锚定稳定的
+    i18n key 与 JS 数据引用，而非随 locale 变化的展示串（后者一旦切英文即不在模板内）。
+    """
     path = Path(__file__).resolve().parent.parent / "src" / "web" / "templates" / "workspace_dashboard.html"
     html = path.read_text(encoding="utf-8")
     assert "d.auto_claim" in html
-    assert "自动派单（按语言路由）" in html
-    assert "按语言命中率" in html
+    assert "dash.xl.autoclaim" in html  # 面板标题「自动派单（按语言路由）」
+    assert "dash.xl.ac_hit" in html  # 命中率行「按语言命中率」
     assert "acs.trend" in html
 
 
@@ -2379,4 +2383,5 @@ def test_unified_inbox_template_contains_send_caps_gating():
     assert "_loadSendCaps" in html
     assert "_applySendCaps" in html
     assert "send-caps" in html
-    assert "暂不支持收件箱直发媒体" in html
+    # 文案已收口到 i18n（step③-M7）：断言稳定的 key 而非本地化后的中文串
+    assert "inbox.caps.no_media" in html

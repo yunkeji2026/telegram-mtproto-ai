@@ -23,32 +23,16 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 _OPS_TPL_DIR = Path(__file__).resolve().parent.parent / "templates" / "ops"
 
-_NAV_LINKS = [
-    ("/ops/contacts", "联系人"),
-    ("/ops/merge-reviews", "合并审核"),
-    ("/ops/mobile-handoffs", "Mobile 交接单"),
-]
+def _render_ops_page(request, name: str, active: str = ""):
+    """渲染 templates/ops/ 下的运营页（③-S9k：由「读原始 HTML + 字符串注入导航」升级为 Jinja 渲染）。
 
-
-def _make_nav_html(active: str = "") -> str:
-    links = "".join(
-        f'<a href="{h}" {"class=\"active\"" if h == active else ""}>'
-        f"{label}</a>"
-        for h, label in _NAV_LINKS
-    )
-    return f'<div class="nav">{links}</div>'
-
-
-def _load_ops_html(name: str, active: str = "") -> str:
-    """从 templates/ops/ 加载静态 HTML。
-    active 为当前页 href，注入统一导航栏（替换 <!-- NAV_INJECT --> 占位符）。
-    """
-    p = _OPS_TPL_DIR / name
-    try:
-        html = p.read_text(encoding="utf-8")
-        return html.replace("<!-- NAV_INJECT -->", _make_nav_html(active), 1)
-    except FileNotFoundError:
-        return f"<h1>Ops UI missing: {name}</h1>"
+    改走 admin.templates（经 create_app 打补丁的 i18n_render），自动注入 i18n/ui_lang/身份等上下文，
+    与 ops_overview.html 同款：页面 {% include "_i18n_bootstrap.html" %} 拿 window.T/Tf + wsFmt*，
+    静态文案走 (i18n or {}).get()、JS 走 window.T，导航由 {% include "ops/_ops_nav.html" %} 出（i18n +
+    active 高亮）。``active`` 显式传入（ops 路径不在 _PATH_TO_ACTIVE 表里，_enrich_context 的 setdefault
+    不会覆盖本值）。lazy import 规避 contacts_routes ↔ admin 的循环依赖。"""
+    from src.web.admin import templates
+    return templates.TemplateResponse(request, f"ops/{name}", {"active": active})
 
 from src.contacts.merge import MergeService
 from src.contacts.reunion_prompts import (
@@ -2086,14 +2070,14 @@ def register_contacts_routes(
                 "details": r.details,
             }
 
-    # ── 最小 Ops UI（纯静态 HTML + fetch，不走 Jinja2） ───
+    # ── Ops UI（③-S9k：Jinja 渲染 + i18n，见 _render_ops_page） ───
     @app.get("/ops/contacts", response_class=HTMLResponse)
-    async def ops_contacts_page(_=Depends(api_auth)):
-        return HTMLResponse(_load_ops_html("contacts.html", active="/ops/contacts"))
+    async def ops_contacts_page(request: Request, _=Depends(api_auth)):
+        return _render_ops_page(request, "contacts.html", active="/ops/contacts")
 
     @app.get("/ops/merge-reviews", response_class=HTMLResponse)
-    async def ops_merge_reviews_page(_=Depends(api_auth)):
-        return HTMLResponse(_load_ops_html("merge_reviews.html", active="/ops/merge-reviews"))
+    async def ops_merge_reviews_page(request: Request, _=Depends(api_auth)):
+        return _render_ops_page(request, "merge_reviews.html", active="/ops/merge-reviews")
 
     # ── Mobile Bridge 路由（仅 mobile_bridge 注入时挂载） ────────────
     if mobile_bridge is not None:
@@ -2207,8 +2191,8 @@ def register_contacts_routes(
                 })
 
         @app.get("/ops/mobile-handoffs", response_class=HTMLResponse)
-        async def ops_mobile_handoffs_page(_=Depends(api_auth)):
-            return HTMLResponse(_load_ops_html("mobile_handoffs.html", active="/ops/mobile-handoffs"))
+        async def ops_mobile_handoffs_page(request: Request, _=Depends(api_auth)):
+            return _render_ops_page(request, "mobile_handoffs.html", active="/ops/mobile-handoffs")
 
         @app.get("/api/mobile-bridge/writeback-queue")
         async def list_writeback_queue(

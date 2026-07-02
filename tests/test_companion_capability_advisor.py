@@ -111,6 +111,27 @@ def test_consistency_voice_without_deliver_warns():
     assert any("语音真发" in i["message"] for i in issues)
 
 
+def test_consistency_rtv_enabled_without_host_errors():
+    caps = [_cap("realtime_voice", "active", enabled=True)]
+    issues = consistency_issues(caps, rtv_configured=False)
+    assert any(i["severity"] == "error" and "base_url" in i["message"] for i in issues)
+
+
+def test_consistency_rtv_no_reference_warns():
+    caps = [_cap("realtime_voice", "active", enabled=True)]
+    issues = consistency_issues(caps, rtv_ref_summary={
+        "persona_count": 2, "with_reference": 0, "worst_grade": "none"})
+    assert any("参考音" in i["message"] for i in issues)
+
+
+def test_active_rtv_failing_suggests_downgrade():
+    caps = [_cap("realtime_voice", "active", dry_run_supported=False, tier=4)]
+    sigs = {"realtime_voice": _sig("realtime_voice", "failing", "主机不可达")}
+    recs = build_recommendations(caps, sigs)
+    assert recs[0]["action"] == "downgrade"
+    assert recs[0]["target"]["field"] == "enabled" and recs[0]["target"]["value"] is False
+
+
 def test_consistency_blocked_surfaced():
     caps = [_cap("proactive_topic", "blocked", enabled=True, recommended="子系统未挂")]
     issues = consistency_issues(caps)

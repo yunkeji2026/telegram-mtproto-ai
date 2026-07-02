@@ -108,6 +108,7 @@ class WebUserStore:
         pw_hash BLOB NOT NULL,
         role TEXT NOT NULL DEFAULT 'viewer',
         display_name TEXT NOT NULL DEFAULT '',
+        lang TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL,
         last_login TEXT,
         enabled INTEGER NOT NULL DEFAULT 1
@@ -131,6 +132,13 @@ class WebUserStore:
         self._conn.row_factory = sqlite3.Row
         self._lock = threading.Lock()
         self._conn.executescript(self._DDL)
+        # 迁移：为既有库补 lang 列（语言跟人走；CREATE IF NOT EXISTS 不会给旧表补列）
+        try:
+            self._conn.execute(
+                "ALTER TABLE web_users ADD COLUMN lang TEXT NOT NULL DEFAULT ''"
+            )
+        except sqlite3.OperationalError:
+            pass  # 列已存在（新库由 _DDL 建好 / 旧库已迁过）
         self._conn.commit()
 
     # ── Session 管理 ──────────────────────────────────────────
@@ -309,6 +317,17 @@ class WebUserStore:
         params.append(user_id)
         with self._lock:
             self._conn.execute(f"UPDATE web_users SET {','.join(sets)} WHERE id=?", params)
+            self._conn.commit()
+        return True
+
+    def set_lang(self, username: str, lang: str) -> bool:
+        """持久化坐席 UI 语言偏好（语言跟人走）。仅接受 zh/en，其它一律拒绝。"""
+        if lang not in ("zh", "en"):
+            return False
+        with self._lock:
+            self._conn.execute(
+                "UPDATE web_users SET lang=? WHERE username=?", (lang, username)
+            )
             self._conn.commit()
         return True
 

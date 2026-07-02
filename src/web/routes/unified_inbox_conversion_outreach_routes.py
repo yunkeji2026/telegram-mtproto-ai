@@ -26,6 +26,7 @@ from fastapi import Depends, Request
 from src.inbox.channel_adapters import send_via_adapters
 from src.web.routes.unified_inbox_aggregate import _INBOX_ADAPTERS
 from src.web.routes.unified_inbox_auth import _agent_from_request
+from src.contacts.models import WON_STAGES  # 单一来源：狭义「已成交」阶段（P5-2c）
 from src.web.routes.unified_inbox_helpers import FUNNEL_STAGE_LABELS
 from src.web.routes.unified_inbox_services import _contacts_store, _inbox_store
 
@@ -59,7 +60,7 @@ def register_conversion_outreach_routes(app, *, api_auth) -> None:
         conversation_id = str(body.get("conversation_id") or "")
         target = str(body.get("stage") or "BONDED").strip().upper()
         note = str(body.get("note") or "")
-        if target not in ("BONDED", "CONVERTED"):
+        if target not in WON_STAGES:
             return {"ok": False, "reason": "bad_stage",
                     "message": "stage 仅支持 BONDED(成交) 或 CONVERTED(已转化)"}
 

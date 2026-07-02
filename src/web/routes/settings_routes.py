@@ -18,6 +18,7 @@ from pathlib import Path
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -71,11 +72,11 @@ def register_settings_routes(app, ctx):
         section = body.get("section", "")
         fields  = body.get("fields", {})
         if not section or not fields:
-            raise HTTPException(400, "section 和 fields 不能为空")
+            raise HTTPException(400, tr(request, "err.set.section_fields_required"))
 
         allowed_sections = {"ai", "voice_ai", "web_admin", "telegram", "notifications", "human_escalation"}
         if section not in allowed_sections:
-            raise HTTPException(400, f"不允许修改 section: {section}")
+            raise HTTPException(400, tr(request, "err.set.section_forbidden", section=section))
 
         cfg = config_manager.config
         if cfg is None:
@@ -171,9 +172,9 @@ def register_settings_routes(app, ctx):
                 try:
                     parsed = json.loads(raw) if (raw and str(raw).strip()) else []
                 except json.JSONDecodeError as e:
-                    raise HTTPException(400, f"agents_json 格式错误: {e}")
+                    raise HTTPException(400, tr(request, "err.set.json_parse_error", field="agents_json", err=e))
                 if not isinstance(parsed, list):
-                    raise HTTPException(400, "agents_json 必须是 JSON 数组")
+                    raise HTTPException(400, tr(request, "err.set.json_must_be_array", field="agents_json"))
                 cfg[section]["agents"] = parsed
                 updated.append("agents")
             if "work_hours_json" in fields:
@@ -181,9 +182,9 @@ def register_settings_routes(app, ctx):
                 try:
                     parsed = json.loads(raw) if (raw and str(raw).strip()) else {}
                 except json.JSONDecodeError as e:
-                    raise HTTPException(400, f"work_hours_json 格式错误: {e}")
+                    raise HTTPException(400, tr(request, "err.set.json_parse_error", field="work_hours_json", err=e))
                 if not isinstance(parsed, dict):
-                    raise HTTPException(400, "work_hours_json 必须是 JSON 对象")
+                    raise HTTPException(400, tr(request, "err.set.json_must_be_object", field="work_hours_json"))
                 cfg[section]["work_hours"] = parsed
                 updated.append("work_hours")
             if "work_exceptions_json" in fields:
@@ -191,9 +192,9 @@ def register_settings_routes(app, ctx):
                 try:
                     parsed = json.loads(raw) if (raw and str(raw).strip()) else {}
                 except json.JSONDecodeError as e:
-                    raise HTTPException(400, f"work_exceptions_json 格式错误: {e}")
+                    raise HTTPException(400, tr(request, "err.set.json_parse_error", field="work_exceptions_json", err=e))
                 if not isinstance(parsed, dict):
-                    raise HTTPException(400, "work_exceptions_json 必须是 JSON 对象")
+                    raise HTTPException(400, tr(request, "err.set.json_must_be_object", field="work_exceptions_json"))
                 cfg[section]["work_exceptions"] = parsed
                 updated.append("work_exceptions")
             if "agent_teams_json" in fields:
@@ -201,9 +202,9 @@ def register_settings_routes(app, ctx):
                 try:
                     parsed = json.loads(raw) if (raw and str(raw).strip()) else []
                 except json.JSONDecodeError as e:
-                    raise HTTPException(400, f"agent_teams_json 格式错误: {e}")
+                    raise HTTPException(400, tr(request, "err.set.json_parse_error", field="agent_teams_json", err=e))
                 if not isinstance(parsed, list):
-                    raise HTTPException(400, "agent_teams_json 必须是 JSON 数组")
+                    raise HTTPException(400, tr(request, "err.set.json_must_be_array", field="agent_teams_json"))
                 cfg[section]["agent_teams"] = parsed
                 updated.append("agent_teams")
 
@@ -254,7 +255,7 @@ def register_settings_routes(app, ctx):
         try:
             config_manager.save()
         except Exception as e:
-            raise HTTPException(500, f"配置保存失败: {e}")
+            raise HTTPException(500, tr(request, "err.set.save_config_failed", err=e))
 
         actor = request.session.get("username", "web_admin")
         if audit_store:
@@ -420,7 +421,7 @@ def register_settings_routes(app, ctx):
         try:
             config_manager.save()
         except Exception as e:
-            raise HTTPException(500, f"配置保存失败: {e}")
+            raise HTTPException(500, tr(request, "err.set.save_config_failed", err=e))
 
         actor = request.session.get("username", "web_admin")
         if audit_store:
@@ -446,7 +447,7 @@ def register_settings_routes(app, ctx):
         body = await request.json()
         new_kw = body.get("keywords")
         if not isinstance(new_kw, dict):
-            raise HTTPException(400, "keywords 必须是 {intent: [kw1, kw2, ...]} 格式")
+            raise HTTPException(400, tr(request, "err.set.keywords_format"))
 
         cfg = config_manager.config
         if "intent" not in cfg:
@@ -455,7 +456,7 @@ def register_settings_routes(app, ctx):
         try:
             config_manager.save()
         except Exception as e:
-            raise HTTPException(500, f"保存失败: {e}")
+            raise HTTPException(500, tr(request, "err.set.save_failed", err=e))
 
         # 热更新 SkillManager
         if telegram_client:
@@ -475,7 +476,7 @@ def register_settings_routes(app, ctx):
         body = await request.json()
         text = (body.get("text") or "").strip()
         if not text:
-            raise HTTPException(400, "text 不能为空")
+            raise HTTPException(400, tr(request, "err.set.text_required"))
         result = {"text": text, "intent": "direct_chat", "matched_by": "none"}
         if telegram_client:
             sm = getattr(telegram_client, "skill_manager", None)
@@ -504,7 +505,7 @@ def register_settings_routes(app, ctx):
         cfg = config_manager.config or {}
         url = cfg.get("notifications", {}).get("webhook_url", "")
         if not url:
-            raise HTTPException(400, "未配置 Webhook URL")
+            raise HTTPException(400, tr(request, "err.set.no_webhook_url"))
         try:
             import httpx as _httpx
             async with _httpx.AsyncClient(timeout=10) as c:

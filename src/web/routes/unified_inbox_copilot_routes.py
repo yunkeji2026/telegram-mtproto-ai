@@ -28,6 +28,7 @@ from src.web.routes.unified_inbox_context import (
     _record_copilot_impression_if_prefill,
 )
 from src.web.routes.unified_inbox_services import _contacts_store, _inbox_store
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +110,7 @@ def register_copilot_routes(app, *, api_auth) -> None:
         body = await request.json()
         store = _inbox_store(request)
         if store is None:
-            return {"ok": False, "error": "inbox_store 不可用"}
+            return {"ok": False, "error": tr(request, "err.svc.inbox_not_ready")}
         topic_id = store.upsert_script_topic(body)
         return {"ok": True, "topic_id": topic_id}
 
@@ -170,7 +171,7 @@ def register_copilot_routes(app, *, api_auth) -> None:
         """CC1:重新计算并存储互动积分。"""
         store = _inbox_store(request)
         if store is None:
-            return {"ok": False, "error": "inbox_store 不可用"}
+            return {"ok": False, "error": tr(request, "err.svc.inbox_not_ready")}
         result = store.compute_and_store_engagement(contact_id)
         return {"ok": True, "contact_id": contact_id, "engagement": result}
 

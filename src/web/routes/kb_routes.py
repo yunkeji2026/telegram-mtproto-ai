@@ -28,6 +28,7 @@ from fastapi.responses import HTMLResponse, Response, StreamingResponse
 
 from src.utils.kb_store import KB_CATEGORIES
 from src.web.kb_ai_helpers import ai_translate_entry, auto_fill_entry
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -371,7 +372,7 @@ def register_kb_routes(app, ctx):
         category  = data.get("category", "其他")
         lang      = data.get("lang", "zh")
         if not user_msg or not ai_reply:
-            raise HTTPException(400, "user_message 和 ai_reply 不能为空")
+            raise HTTPException(400, tr(request, "err.kb.msg_reply_empty"))
         ex_id = _kb_store.add_example({
             "category": category,
             "user_message": user_msg,
@@ -437,7 +438,7 @@ def register_kb_routes(app, ctx):
         mode = body.get("mode", "skip")
         # 安全检查：必须含 entries/error_codes/rules 键之一
         if not any(k in data for k in ("entries", "error_codes", "rules", "version")):
-            raise HTTPException(status_code=400, detail="无效的导入格式")
+            raise HTTPException(status_code=400, detail=tr(request, "err.kb.import_bad_format"))
         result = _kb_store.import_from_data(data, mode=mode)
         actor = request.session.get("username", "web_admin")
         if audit_store:
@@ -469,7 +470,7 @@ def register_kb_routes(app, ctx):
         csv_text = body.get("csv", "")
         mode     = body.get("mode", "skip")
         if not csv_text:
-            raise HTTPException(status_code=400, detail="CSV 内容为空")
+            raise HTTPException(status_code=400, detail=tr(request, "err.kb.csv_empty"))
         result = _kb_store.import_from_csv(csv_text, mode=mode)
         actor = request.session.get("username", "web_admin")
         if audit_store:
@@ -534,14 +535,14 @@ def register_kb_routes(app, ctx):
         data   = await request.json()
         ids    = data.get("ids", [])
         if not ids:
-            raise HTTPException(status_code=400, detail="ids 不能为空")
+            raise HTTPException(status_code=400, detail=tr(request, "err.kb.ids_empty"))
         updates: dict = {}
         if "enabled" in data:
             updates["enabled"] = int(bool(data["enabled"]))
         if "category" in data and data["category"]:
             updates["category"] = str(data["category"])
         if not updates:
-            raise HTTPException(status_code=400, detail="未提供可更新的字段")
+            raise HTTPException(status_code=400, detail=tr(request, "err.kb.no_update_fields"))
         count = 0
         with _kb_store._conn() as c:
             set_clause = ", ".join(f"{k}=?" for k in updates)
@@ -605,7 +606,7 @@ def register_kb_routes(app, ctx):
                 "uptime_s":      uptime_s,
             }
         except ImportError:
-            return {"error": "skill_manager 未加载，请确认 bot 正在运行"}
+            return {"error": tr(request, "err.kb.skill_mgr_unloaded")}
 
     @app.post("/api/kb/implicit-feedback")
     async def api_kb_implicit_feedback(request: Request):
@@ -704,10 +705,10 @@ def register_kb_routes(app, ctx):
     async def api_kb_embed_all(request: Request, background_tasks: BackgroundTasks):
         _api_auth(request)
         if _embed_progress.get("running"):
-            return {"ok": False, "msg": "向量化任务正在运行中"}
+            return {"ok": False, "msg": tr(request, "err.kb.vec_running")}
         pending_cnt = len(_kb_store.get_entries_without_embedding())
         if not pending_cnt:
-            return {"ok": False, "msg": "所有条目已完成向量化，无需重新处理"}
+            return {"ok": False, "msg": tr(request, "err.kb.vec_all_done")}
         background_tasks.add_task(_run_embed_all)
         return {"ok": True, "pending": pending_cnt}
 
@@ -726,7 +727,7 @@ def register_kb_routes(app, ctx):
         text = _build_embed_text(entry)
         vecs = await _call_embed_api([text])
         if not vecs:
-            return {"ok": False, "msg": "Embedding API 调用失败"}
+            return {"ok": False, "msg": tr(request, "err.kb.embed_api_fail")}
         _kb_store.set_single_embedding(entry_id, vecs[0])
         return {"ok": True}
 
@@ -906,7 +907,7 @@ def register_kb_routes(app, ctx):
             _kb_store.upsert_translation(row["entry_id"], row["lang"],
                                          results[row["lang"]], auto=True)
             return {"ok": True, "result": results[row["lang"]]}
-        return {"ok": False, "msg": "翻译API无返回"}
+        return {"ok": False, "msg": tr(request, "err.kb.translate_no_result")}
 
     @app.post("/api/kb/miss-to-entry")
     async def api_kb_miss_to_entry(request: Request):
@@ -914,7 +915,7 @@ def register_kb_routes(app, ctx):
         data = await request.json()
         query = (data.get("query") or "").strip()
         if not query:
-            raise HTTPException(status_code=400, detail="query 不能为空")
+            raise HTTPException(status_code=400, detail=tr(request, "err.kb.query_empty"))
         _title = data.get("title", query[:50])
         _cat = data.get("category", "其他")
         entry_id = _kb_store.add_entry({
@@ -964,7 +965,7 @@ def register_kb_routes(app, ctx):
         data = await request.json()
         question = (data.get("question") or "").strip()
         if not question:
-            raise HTTPException(status_code=400, detail="question 不能为空")
+            raise HTTPException(status_code=400, detail=tr(request, "err.kb.question_empty"))
         _title = (data.get("title") or question[:50]).strip()
         _cat = data.get("category", "其他")
         reply = (data.get("suggested_reply") or "").strip()
@@ -1134,10 +1135,10 @@ def register_kb_routes(app, ctx):
         _api_auth(request)
         allowed_types = {"image/jpeg", "image/png", "image/gif", "image/webp"}
         if file.content_type not in allowed_types:
-            raise HTTPException(400, "仅支持 JPEG/PNG/GIF/WEBP 图片")
+            raise HTTPException(400, tr(request, "err.kb.img_type"))
         data = await file.read()
         if len(data) > 5 * 1024 * 1024:
-            raise HTTPException(400, "图片大小不能超过 5 MB")
+            raise HTTPException(400, tr(request, "err.kb.img_size"))
         # 确保存储目录存在
         from pathlib import Path as _P
         img_dir = _P(config_manager.config_path).parent / "kb_images"
@@ -1168,7 +1169,7 @@ def register_kb_routes(app, ctx):
         _api_auth(request)
         filename = _kb_store.delete_entry_image(img_id)
         if not filename:
-            raise HTTPException(404, "图片不存在")
+            raise HTTPException(404, tr(request, "err.kb.img_not_found"))
         from pathlib import Path as _P
         img_file = _P(config_manager.config_path).parent / "kb_images" / filename
         try:
@@ -1228,9 +1229,9 @@ def register_kb_routes(app, ctx):
         filepath = img_dir / filename
         # 防路径穿越
         if not filepath.resolve().is_relative_to(img_dir.resolve()):
-            raise HTTPException(403, "访问被拒绝")
+            raise HTTPException(403, tr(request, "err.kb.access_denied"))
         if not filepath.exists():
-            raise HTTPException(404, "图片不存在")
+            raise HTTPException(404, tr(request, "err.kb.img_not_found"))
         mime = _mt.guess_type(str(filepath))[0] or "image/jpeg"
         return Response(
             filepath.read_bytes(),
@@ -1252,14 +1253,14 @@ def register_kb_routes(app, ctx):
         category = data.get("category", "其他")
         hint     = data.get("hint", "")
         if not topic:
-            raise HTTPException(400, "topic 不能为空")
+            raise HTTPException(400, tr(request, "err.kb.topic_empty"))
 
         ai_cfg   = config_manager.config.get("ai", {})
         api_key  = ai_cfg.get("api_key", "")
         base_url = (ai_cfg.get("base_url", "https://api.deepseek.com")).rstrip("/")
         model    = ai_cfg.get("model", "deepseek-chat")
         if not api_key:
-            raise HTTPException(400, "AI 未配置，请先在设置页面填入 API Key")
+            raise HTTPException(400, tr(request, "err.kb.ai_not_configured"))
 
         sys_prompt = (
             "你是一位资深客服话术专家，专注于电商、SaaS、金融支付领域的客户服务。"
@@ -1296,7 +1297,7 @@ def register_kb_routes(app, ctx):
             result = resp.json()
             raw    = result["choices"][0]["message"]["content"]
         except Exception as _e:
-            return {"ok": False, "error": f"AI 调用失败: {_e}"}
+            return {"ok": False, "error": tr(request, "err.kb.ai_call_failed", err=_e)}
 
         # 解析 JSON（尝试直接解析，失败则提取代码块中的 JSON）
         entry = {}
@@ -1308,7 +1309,7 @@ def register_kb_routes(app, ctx):
                 try:
                     entry = json.loads(m.group())
                 except Exception:
-                    return {"ok": False, "error": "AI 返回了无法解析的格式", "raw": raw[:500]}
+                    return {"ok": False, "error": tr(request, "err.kb.ai_bad_format"), "raw": raw[:500]}
 
         # 规范化字段
         if "triggers" in entry and isinstance(entry["triggers"], list):

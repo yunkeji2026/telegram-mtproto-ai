@@ -32,44 +32,41 @@ rpa.esc = function(s){
 // ─── 时间格式化 ─────────────────────────────────────────────────────────
 rpa.fmtTs = function(t){
   if(!t) return '—';
-  const d = new Date(Number(t)*1000);
-  return d.toLocaleString('zh-CN',{hour12:false});
+  return window.wsFmtDateTime(Number(t),{hour12:false});
 };
 rpa.fmtTime = function(t){
   if(!t) return '';
-  const d = new Date(Number(t)*1000);
-  return d.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+  return window.wsFmtTime(Number(t),{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
 };
 rpa.fmtDate = function(t){
   if(!t) return '—';
-  const d = new Date(Number(t)*1000);
-  return d.toLocaleDateString('zh-CN',{month:'2-digit',day:'2-digit'});
+  return window.wsFmtDate(Number(t),{month:'2-digit',day:'2-digit'});
 };
 rpa.ago = function(t){
   if(!t) return '';
   const s = Math.round(Date.now()/1000 - Number(t));
-  if(s<1) return '刚刚';
-  if(s<60) return s+' 秒前';
-  if(s<3600) return Math.round(s/60)+' 分前';
-  if(s<86400) return Math.round(s/3600)+' 小时前';
-  return Math.round(s/86400)+' 天前';
+  if(s<1) return window.T('rpa_just_now');
+  if(s<60) return window.Tf('rpa_ago_sec', {n: s});
+  if(s<3600) return window.Tf('rpa_ago_min', {n: Math.round(s/60)});
+  if(s<86400) return window.Tf('rpa_ago_hr', {n: Math.round(s/3600)});
+  return window.Tf('rpa_ago_day', {n: Math.round(s/86400)});
 };
 
 // ─── 时长（秒）→ 人类可读 ───────────────────────────────────────────────
 rpa.fmtDur = function(sec){
   sec = Math.max(0, Math.round(Number(sec)||0));
-  if(sec === 0) return '不限';
-  if(sec < 60) return sec + ' 秒';
+  if(sec === 0) return window.T('rpa_unlimited');
+  if(sec < 60) return window.Tf('rpa_dur_sec', {n: sec});
   if(sec < 3600){
     const m = Math.floor(sec/60), s = sec%60;
-    return s ? `${m} 分 ${s} 秒` : `${m} 分钟`;
+    return s ? window.Tf('rpa_dur_min_sec', {m: m, s: s}) : window.Tf('rpa_dur_min', {m: m});
   }
   if(sec < 86400){
     const h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60);
-    return m ? `${h} 时 ${m} 分` : `${h} 小时`;
+    return m ? window.Tf('rpa_dur_hr_min', {h: h, m: m}) : window.Tf('rpa_dur_hr', {h: h});
   }
   const d = Math.floor(sec/86400), h = Math.floor((sec%86400)/3600);
-  return h ? `${d} 天 ${h} 时` : `${d} 天`;
+  return h ? window.Tf('rpa_dur_day_hr', {d: d, h: h}) : window.Tf('rpa_dur_day', {d: d});
 };
 
 // ─── Fetch 包装：GET / POST / PUT，自动带 CSRF + JSON ────────────────────
@@ -274,9 +271,9 @@ rpa.bulk = (function(){
     const btnA = document.getElementById(_spec.approveBtnId);
     const btnR = document.getElementById(_spec.rejectBtnId);
     const cnt  = document.getElementById(_spec.countId);
-    if(btnA){ btnA.disabled = (n === 0); btnA.textContent = `批量批准 (${n})`; }
-    if(btnR){ btnR.disabled = (n === 0); btnR.textContent = `批量拒绝 (${n})`; }
-    if(cnt){  cnt.textContent = `已选 ${n} 项`; }
+    if(btnA){ btnA.disabled = (n === 0); btnA.textContent = window.Tf('rpa_js_bulk_approve_n', {n: n}); }
+    if(btnR){ btnR.disabled = (n === 0); btnR.textContent = window.Tf('rpa_js_bulk_reject_n', {n: n}); }
+    if(cnt){  cnt.textContent = window.Tf('rpa_js_selected_n', {n: n}); }
   }
   function _applyFocus(){
     const c = _container();
@@ -329,7 +326,7 @@ rpa.bulk = (function(){
   }
   // 并发执行 + toast 汇总 + P19-B: 淡出动画 + 滚动保持
   async function _runBatch(ids, fn, actionLabel){
-    if(!ids.length){ rpa.toast('未选中任何项', 'warn'); return; }
+    if(!ids.length){ rpa.toast(window.T('rpa_js_none_selected'), 'warn'); return; }
     // P19-B: 保存滚动位置
     const c = _container();
     const scrollTop = c ? c.scrollTop : 0;
@@ -338,19 +335,19 @@ rpa.bulk = (function(){
       const row = _rowByPid(pid);
       if(row){ row.style.transition = 'opacity .4s'; row.style.opacity = '0.3'; }
     });
-    rpa.toast(`正在${actionLabel} ${ids.length} 条…`);
+    rpa.toast(window.Tf('rpa_js_processing_n', {action: actionLabel, n: ids.length}));
     const results = await Promise.allSettled(ids.map(id => fn(id)));
     const ok = results.filter(r => r.status === 'fulfilled' && !(r.value && r.value._failed)).length;
     const failed = results.length - ok;
     if(failed === 0){
-      rpa.toast(`${actionLabel}成功：${ok} 条`, 'ok');
+      rpa.toast(window.Tf('rpa_js_batch_ok', {action: actionLabel, n: ok}), 'ok');
     } else {
-      rpa.toast(`${actionLabel}完成：${ok} 成功 / ${failed} 失败`, failed === results.length ? 'err' : 'warn');
+      rpa.toast(window.Tf('rpa_js_batch_partial', {action: actionLabel, ok: ok, failed: failed}), failed === results.length ? 'err' : 'warn');
       results.forEach((r, i) => {
         if(r.status === 'rejected'){
-          console.warn('[rpa.bulk] 失败', ids[i], r.reason);
+          console.warn('[rpa.bulk] failed', ids[i], r.reason);
         } else if(r.value && r.value._failed){
-          console.warn('[rpa.bulk] 业务失败', ids[i], r.value);
+          console.warn('[rpa.bulk] biz-failed', ids[i], r.value);
         }
       });
     }
@@ -362,19 +359,19 @@ rpa.bulk = (function(){
   }
   async function approveSelected(){
     if(!_spec || !_spec.approve) return;
-    await _runBatch(getSelectedIds(), _spec.approve, '批准');
+    await _runBatch(getSelectedIds(), _spec.approve, window.T('rpa_js_act_approve'));
   }
   async function rejectSelected(reason){
     if(!_spec || !_spec.reject) return;
-    await _runBatch(getSelectedIds(), (id) => _spec.reject(id, reason), '拒绝');
+    await _runBatch(getSelectedIds(), (id) => _spec.reject(id, reason), window.T('rpa_js_act_reject'));
   }
   async function approveFocused(){
     if(!_spec || !_spec.approve || _focusedPid == null) return;
-    await _runBatch([_focusedPid], _spec.approve, '批准');
+    await _runBatch([_focusedPid], _spec.approve, window.T('rpa_js_act_approve'));
   }
   async function rejectFocused(reason){
     if(!_spec || !_spec.reject || _focusedPid == null) return;
-    await _runBatch([_focusedPid], (id) => _spec.reject(id, reason), '拒绝');
+    await _runBatch([_focusedPid], (id) => _spec.reject(id, reason), window.T('rpa_js_act_reject'));
   }
   function _bindKeymap(){
     if(_keymapBound) return;
@@ -475,7 +472,7 @@ rpa.bulk = (function(){
 //   rpa.analytics.intentChart({bodyId, apiBase, defaultHours?, btnSel?})
 //     - 渲染意图分布水平条形图，绑定窗口切换按钮（class=btnSel, data-h=小时数）
 const _INTENT_COLORS = {purchase:'#6ee7b7',support:'#f87171',inquiry:'#93c5fd',greeting:'#94a3b8',general:'rgba(148,163,184,.5)'};
-const _INTENT_LABELS = {purchase:'购买',support:'售后',inquiry:'咨询',greeting:'问候',general:'通用'};
+const _INTENT_LABELS = {purchase:window.T('rpa_intent_purchase'),support:window.T('rpa_intent_support'),inquiry:window.T('rpa_intent_inquiry'),greeting:window.T('rpa_intent_greeting'),general:window.T('rpa_intent_general')};
 
 rpa.analytics = {
   initSearch: function(opts){
@@ -497,7 +494,7 @@ rpa.analytics = {
       }
       if(list) list.style.display='none';
       results.style.display='';
-      results.innerHTML='<div style="padding:.55rem 1rem;font-size:.78rem;color:var(--t3,#94a3b8)">检索中…</div>';
+      results.innerHTML='<div style="padding:.55rem 1rem;font-size:.78rem;color:var(--t3,#94a3b8)">' + window.T('rpa_js_searching') + '</div>';
       const intent = (document.getElementById(opts.inputId+'-intent')?.value || '');
       rpa.get(apiBase + '/search?q=' + encodeURIComponent(q)
                 + '&intent=' + encodeURIComponent(intent)
@@ -505,7 +502,7 @@ rpa.analytics = {
         .then(function(d){
           const rs = (d && d.results) || [];
           if(!rs.length){
-            results.innerHTML='<div style="padding:.55rem 1rem;font-size:.78rem;color:var(--t3,#94a3b8)">无匹配记录</div>';
+            results.innerHTML='<div style="padding:.55rem 1rem;font-size:.78rem;color:var(--t3,#94a3b8)">' + window.T('rpa_js_no_match') + '</div>';
             return;
           }
           const hi = function(txt){
@@ -533,7 +530,7 @@ rpa.analytics = {
           }).join('') + '</div>';
         })
         .catch(function(){
-          results.innerHTML='<div style="padding:.55rem 1rem;color:#f87171;font-size:.78rem">检索失败 <button class="btn-sec" type="button" style="margin-left:.35rem;font-size:.75rem">重试</button></div>';
+          results.innerHTML='<div style="padding:.55rem 1rem;color:#f87171;font-size:.78rem">' + window.T('rpa_js_search_failed') + ' <button class="btn-sec" type="button" style="margin-left:.35rem;font-size:.75rem">' + window.T('rpa_retry') + '</button></div>';
           const btn = results.querySelector('.btn-sec');
           if(btn){ btn.addEventListener('click', doSearch); }
         });
@@ -563,16 +560,16 @@ rpa.analytics = {
     drawer.innerHTML = '<div style="padding:1rem 1.2rem;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:.6rem;position:sticky;top:0;background:var(--bg,#0f172a);z-index:2">'
       + '<strong style="font-size:.95rem;color:var(--t1)">💬 '+rpa.esc(peerName)+'</strong>'
       + '<span style="font-size:.7rem;color:var(--t3);font-family:monospace">'+rpa.esc(chatKey)+'</span>'
-      + '<button id="rpa-detail-close" style="margin-left:auto;background:transparent;border:0;color:var(--t2);font-size:1.3rem;cursor:pointer;padding:0 .3rem" title="关闭 (Esc)">×</button>'
+      + '<button id="rpa-detail-close" style="margin-left:auto;background:transparent;border:0;color:var(--t2);font-size:1.3rem;cursor:pointer;padding:0 .3rem" title="' + window.T('rpa_js_detail_close') + '">×</button>'
       + '</div>'
       + '<div id="rpa-detail-profile" style="padding:.6rem 1.2rem;border-bottom:1px dashed var(--bd);font-size:.78rem"></div>'
       + '<div id="rpa-detail-xprofile" style="display:none;padding:.5rem 1.2rem;border-bottom:1px dashed var(--bd);font-size:.75rem;background:rgba(99,102,241,.05)"></div>'
       + '<div style="display:flex;gap:.5rem;padding:.55rem 1.2rem;border-bottom:1px solid var(--bd);background:rgba(148,163,184,.04)">'
-      +   '<button class="rpa-dt-tab" data-mode="summary" style="background:transparent;border:0;color:var(--t1);font-weight:600;font-size:.82rem;cursor:pointer;border-bottom:2px solid #6366f1;padding:.3rem 0">📋 摘要</button>'
-      +   '<button class="rpa-dt-tab" data-mode="full" style="background:transparent;border:0;color:var(--t3);font-size:.82rem;cursor:pointer;border-bottom:2px solid transparent;padding:.3rem 0">💬 全量</button>'
+      +   '<button class="rpa-dt-tab" data-mode="summary" style="background:transparent;border:0;color:var(--t1);font-weight:600;font-size:.82rem;cursor:pointer;border-bottom:2px solid #6366f1;padding:.3rem 0">📋 ' + window.T('rpa_js_summary') + '</button>'
+      +   '<button class="rpa-dt-tab" data-mode="full" style="background:transparent;border:0;color:var(--t3);font-size:.82rem;cursor:pointer;border-bottom:2px solid transparent;padding:.3rem 0">💬 ' + window.T('rpa_js_full') + '</button>'
       +   '<span id="rpa-detail-total" style="margin-left:auto;font-size:.7rem;color:var(--t3);align-self:center"></span>'
       + '</div>'
-      + '<div id="rpa-detail-pane" style="padding:1rem 1.2rem">加载中…</div>';
+      + '<div id="rpa-detail-pane" style="padding:1rem 1.2rem">' + window.T('rpa_loading') + '</div>';
     mask.appendChild(drawer);
     document.body.appendChild(mask);
     mask.addEventListener('click', function(e){ if(e.target === mask) mask.remove(); });
@@ -585,7 +582,7 @@ rpa.analytics = {
       .then(function(d){
         const p = (d && d.profile) || {};
         const stripEl = drawer.querySelector('#rpa-detail-profile');
-        if(!p.total_turns){ stripEl.innerHTML = '<span style="color:var(--t3)">暂无历史数据</span>'; return; }
+        if(!p.total_turns){ stripEl.innerHTML = '<span style="color:var(--t3)">' + window.T('rpa_js_no_history') + '</span>'; return; }
         const firstDate = p.first_ts ? rpa.fmtDate(p.first_ts) : '—';
         const lastDate  = p.last_ts  ? rpa.fmtDate(p.last_ts)  : '—';
         const dom = p.dominant_intent || 'general';
@@ -593,10 +590,10 @@ rpa.analytics = {
           ? '<span style="margin-left:auto;font-size:.7rem;padding:2px 8px;border-radius:8px;background:'+(_INTENT_COLORS[dom]||'#94a3b8')+';color:#0f172a;font-weight:600">'+(_INTENT_LABELS[dom]||dom)+'</span>'
           : '';
         stripEl.innerHTML = '<div style="display:flex;gap:.8rem;flex-wrap:wrap;align-items:center">'
-          + '<span style="color:var(--t2)">📊 <strong style="color:var(--t1)">'+p.total_turns+'</strong> 轮</span>'
+          + '<span style="color:var(--t2)">📊 <strong style="color:var(--t1)">'+p.total_turns+'</strong> ' + window.T('rpa_js_turns_unit') + '</span>'
           + '<span style="color:var(--t2)">✅ <strong style="color:var(--t1)">'+(p.reply_rate||0)+'%</strong></span>'
           + '<span style="color:var(--t2)">📅 '+firstDate+' → '+lastDate+'</span>'
-          + (p.intimacy_score != null ? '<span style="color:var(--t2)">💜 亲密 <strong style="color:var(--t1)">'+Math.round(p.intimacy_score)+'</strong></span>' : '')
+          + (p.intimacy_score != null ? '<span style="color:var(--t2)">💜 ' + window.T('rpa_js_intimacy') + ' <strong style="color:var(--t1)">'+Math.round(p.intimacy_score)+'</strong></span>' : '')
           + intentBadge
           + '</div>';
       })
@@ -644,14 +641,14 @@ rpa.analytics = {
           const click = ck && ab ? `onclick="(window.__rpaXOpen)('${ab}','${ck}')"` : '';
           // 最近活跃时间作为 title
           const recent = info.last_ts ? rpa.fmtDate(info.last_ts) : '—';
-          const tip = '最近活跃: ' + recent + (click ? '\n点击打开该平台的会话详情' : '');
+          const tip = window.T('rpa_js_recent_active') + recent + (click ? '\n' + window.T('rpa_js_click_open_detail') : '');
           return '<span ' + click + ' title="'+rpa.esc(tip)+'" style="cursor:' + (click?'pointer':'default') + ';display:inline-flex;align-items:center;gap:.3rem;padding:.18rem .55rem;border-radius:6px;background:' + m.color + '22;color:' + m.color + ';font-weight:600">'
-            + m.icon + ' ' + m.label + ' <strong>' + info.total_turns + '轮</strong></span>';
+            + (window.platformIconSVG?window.platformIconSVG(k,{size:14}):m.icon) + ' ' + m.label + ' <strong>' + info.total_turns + window.T('rpa_js_turns_unit') + '</strong></span>';
         }).join(' ');
         // P13-2: 头部加 ⓘ tooltip 警示同名不等于同一人
-        const warnTip = '⚠️ 仅按显示名 "' + d.name + '" 后缀匹配，不保证是同一人';
+        const warnTip = window.Tf('rpa_js_samename_warn', {name: d.name});
         xpEl.innerHTML = '<div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">'
-          + '<span style="color:var(--t3)">🔗 同名 "<strong style="color:var(--t1)">' + rpa.esc(d.name) + '</strong>" 在其他平台共 <strong style="color:var(--t1)">' + totalOther + '</strong> 轮'
+          + '<span style="color:var(--t3)">🔗 ' + window.T('rpa_js_samename_a') + ' "<strong style="color:var(--t1)">' + rpa.esc(d.name) + '</strong>" ' + window.T('rpa_js_samename_b') + ' <strong style="color:var(--t1)">' + totalOther + '</strong> ' + window.T('rpa_js_turns_unit') + ''
           + ' <span title="'+rpa.esc(warnTip)+'" style="cursor:help;color:var(--t3);font-size:.7rem;border:1px solid var(--bd);border-radius:50%;width:14px;height:14px;display:inline-flex;align-items:center;justify-content:center;margin-left:.15rem">ⓘ</span>：</span>'
           + badges
           + '</div>';
@@ -670,11 +667,11 @@ rpa.analytics = {
     if(apiBase && apiBase.indexOf('whatsapp') >= 0){
       const reply = document.createElement('div');
       reply.style.cssText = 'border-top:1px solid var(--bd);padding:.7rem 1.2rem;background:rgba(148,163,184,.04);position:sticky;bottom:0;background:var(--bg,#0f172a)';
-      reply.innerHTML = '<div style="font-size:.75rem;color:var(--t2);margin-bottom:.35rem;display:flex;align-items:center;gap:.4rem"><span>✉️ 快速回复</span><span style="font-size:.65rem;color:var(--t3)">(WhatsApp send-manual 队列)</span></div>'
-        + '<textarea id="rpa-qr-text" rows="2" placeholder="输入要发送的消息…" style="width:100%;padding:.45rem .6rem;background:var(--card,#1e293b);border:1px solid var(--bd);border-radius:6px;color:var(--t1);font-size:.82rem;resize:vertical;font-family:inherit"></textarea>'
+      reply.innerHTML = '<div style="font-size:.75rem;color:var(--t2);margin-bottom:.35rem;display:flex;align-items:center;gap:.4rem"><span>✉️ ' + window.T('rpa_js_quick_reply') + '</span><span style="font-size:.65rem;color:var(--t3)">(WhatsApp send-manual ' + window.T('rpa_js_queue_word') + ')</span></div>'
+        + '<textarea id="rpa-qr-text" rows="2" placeholder="' + window.T('rpa_js_qr_placeholder') + '" style="width:100%;padding:.45rem .6rem;background:var(--card,#1e293b);border:1px solid var(--bd);border-radius:6px;color:var(--t1);font-size:.82rem;resize:vertical;font-family:inherit"></textarea>'
         + '<div style="display:flex;gap:.4rem;margin-top:.4rem;align-items:center">'
         + '  <span id="rpa-qr-msg" style="flex:1;font-size:.72rem;color:var(--t3)"></span>'
-        + '  <button id="rpa-qr-send" class="btn btn-xs" style="padding:.35rem 1rem;background:#25d366;color:#fff;border:0;border-radius:6px;cursor:pointer;font-weight:600">发送</button>'
+        + '  <button id="rpa-qr-send" class="btn btn-xs" style="padding:.35rem 1rem;background:#25d366;color:#fff;border:0;border-radius:6px;cursor:pointer;font-weight:600">' + window.T('rpa_js_send') + '</button>'
         + '</div>';
       drawer.appendChild(reply);
       const txt = reply.querySelector('#rpa-qr-text');
@@ -682,36 +679,36 @@ rpa.analytics = {
       const msg = reply.querySelector('#rpa-qr-msg');
       btn.addEventListener('click', function(){
         const t = (txt.value || '').trim();
-        if(!t){ msg.textContent = '请先输入内容'; msg.style.color = '#f87171'; return; }
+        if(!t){ msg.textContent = window.T('rpa_js_enter_content'); msg.style.color = '#f87171'; return; }
         // 从 chat_key 解析 peer_name（WA: wa:{acc}:{name}）
         const parts = chatKey.split(':');
         const peerName = parts.length >= 2 ? parts[parts.length-1] : chatKey;
-        btn.disabled = true; msg.textContent = '入队中…'; msg.style.color = 'var(--t3)';
+        btn.disabled = true; msg.textContent = window.T('rpa_js_enqueuing'); msg.style.color = 'var(--t3)';
         fetch(apiBase + '/send-manual', {
           method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({chat_key: chatKey, peer_name: peerName, text: t})
         }).then(function(r){ return r.json(); }).then(function(d){
           if(d && d.ok){
             const itemId = d.item_id || 0;
-            msg.textContent = '✓ 已入队 #' + (itemId || '?'); msg.style.color = '#22c55e';
+            msg.textContent = window.T('rpa_js_enqueued') + (itemId || '?'); msg.style.color = '#22c55e';
             // P13-4 + P14-C: 乐观更新 ghost row + 轮询真实状态
             const pane2 = drawer.querySelector('#rpa-detail-pane');
             if(pane2 && pane2.firstChild){
               const ghost = document.createElement('div');
               ghost.style.cssText = 'margin-bottom:.6rem;padding:.4rem .6rem;background:rgba(34,197,94,.08);border:1px dashed rgba(34,197,94,.3);border-radius:6px;animation:rpaFadeIn .3s ease-out;transition:background .3s,border-color .3s';
               const STATUS_LABEL = {
-                'queued':'待发送','pending':'待发送','sending':'发送中…',
-                'sent':'已发送','done':'已发送','ok':'已发送',
-                'failed':'失败','error':'失败','cancelled':'已取消'
+                'queued':window.T('rpa_js_st_queued'),'pending':window.T('rpa_js_st_queued'),'sending':window.T('rpa_js_st_sending'),
+                'sent':window.T('rpa_js_st_sent'),'done':window.T('rpa_js_st_sent'),'ok':window.T('rpa_js_st_sent'),
+                'failed':window.T('rpa_js_st_failed'),'error':window.T('rpa_js_st_failed'),'cancelled':window.T('rpa_js_st_cancelled')
               };
               const renderGhost = function(statusKey){
-                const lbl = STATUS_LABEL[statusKey] || statusKey || '待发送';
+                const lbl = STATUS_LABEL[statusKey] || statusKey || window.T('rpa_js_st_queued');
                 const isDone = (statusKey === 'sent' || statusKey === 'done' || statusKey === 'ok');
                 const isFail = (statusKey === 'failed' || statusKey === 'error' || statusKey === 'cancelled');
                 if(isDone){ ghost.style.background = 'rgba(34,197,94,.18)'; ghost.style.borderStyle='solid'; }
                 else if(isFail){ ghost.style.background = 'rgba(239,68,68,.12)'; ghost.style.borderColor = 'rgba(239,68,68,.4)'; }
                 ghost.innerHTML = '<div style="font-size:.68rem;color:' + (isFail?'#f87171':'#22c55e') + ';margin-bottom:.2rem">'
-                  + '刚刚 · ' + lbl + (itemId ? '（队列 #' + itemId + '）' : '') + '</div>'
+                  + window.T('rpa_just_now') + ' · ' + lbl + (itemId ? window.Tf('rpa_js_queue_n', {id: itemId}) : '') + '</div>'
                   + '<div style="font-size:.78rem;color:var(--t2)">🤖 ' + rpa.esc(t) + '</div>';
                 return isDone || isFail;
               };
@@ -748,10 +745,10 @@ rpa.analytics = {
             }
             txt.value = '';
           } else {
-            msg.textContent = '失败：' + (d && d.detail || '未知'); msg.style.color = '#f87171';
+            msg.textContent = window.T('rpa_js_fail_colon') + (d && d.detail || window.T('rpa_unknown')); msg.style.color = '#f87171';
           }
         }).catch(function(e){
-          msg.textContent = '失败：' + e; msg.style.color = '#f87171';
+          msg.textContent = window.T('rpa_js_fail_colon') + e; msg.style.color = '#f87171';
         }).finally(function(){
           btn.disabled = false;
           setTimeout(function(){ if(msg.textContent.startsWith('✓')) msg.textContent = ''; }, 4000);
@@ -765,12 +762,12 @@ rpa.analytics = {
     let mode = 'summary';
     let offset = 0;
     const loadSummary = function(){
-      pane.innerHTML = '<div style="color:var(--t3);font-size:.78rem">加载中…</div>';
+      pane.innerHTML = '<div style="color:var(--t3);font-size:.78rem">' + window.T('rpa_loading') + '</div>';
       rpa.get(apiBase + '/sessions/' + encodeURIComponent(chatKey))
         .then(function(d){
           const ss = (d && d.sessions) || [];
-          totalEl.textContent = ss.length + ' 个会话';
-          if(!ss.length){ pane.innerHTML = '<div style="color:var(--t3);font-size:.78rem">暂无历史会话记录</div>'; return; }
+          totalEl.textContent = window.Tf('rpa_js_n_sessions', {n: ss.length});
+          if(!ss.length){ pane.innerHTML = '<div style="color:var(--t3);font-size:.78rem">' + window.T('rpa_js_no_sessions') + '</div>'; return; }
           pane.innerHTML = ss.map(function(s){
             const d1 = rpa.fmtDate(s.start_ts), d2 = rpa.fmtDate(s.end_ts);
             const dateStr = (d1 === d2) ? d1 : (d1 + ' — ' + d2);
@@ -783,7 +780,7 @@ rpa.analytics = {
               + '<div style="display:flex;gap:.5rem;align-items:center;font-size:.75rem;color:var(--t2);margin-bottom:.3rem">'
               +   '<strong style="color:var(--t1)">#'+s.session_num+'</strong>'
               +   '<span>'+dateStr+'</span>'
-              +   '<span style="color:var(--t3)">'+s.turn_count+'轮 / '+okPct+'%</span>'
+              +   '<span style="color:var(--t3)">'+s.turn_count+window.T('rpa_js_turns_unit') + ' / '+okPct+'%</span>'
               +   intentBadge
               + '</div>'
               + (s.first_msg ? '<div style="font-size:.78rem;color:var(--t2)">👤 '+rpa.esc(s.first_msg)+'</div>' : '')
@@ -791,16 +788,16 @@ rpa.analytics = {
               + '</div>';
           }).join('');
         })
-        .catch(function(){ pane.innerHTML = '<div style="color:#f87171;font-size:.78rem">加载失败</div>'; });
+        .catch(function(){ pane.innerHTML = '<div style="color:#f87171;font-size:.78rem">' + window.T('rpa_load_failed') + '</div>'; });
     };
     const loadFull = function(append){
-      if(!append){ offset = 0; pane.innerHTML = '<div style="color:var(--t3);font-size:.78rem">加载中…</div>'; }
+      if(!append){ offset = 0; pane.innerHTML = '<div style="color:var(--t3);font-size:.78rem">' + window.T('rpa_loading') + '</div>'; }
       else { const lb = pane.querySelector('.rpa-load-more'); if(lb) lb.remove(); }
       rpa.get(apiBase + '/chat-history/' + encodeURIComponent(chatKey) + '?limit=10&offset=' + offset)
         .then(function(d){
           const msgs = (d && (d.messages || d.history)) || [];
           const total = (d && d.total) || 0;
-          totalEl.textContent = '共 ' + total + ' 条';
+          totalEl.textContent = window.Tf('rpa_js_total_n', {n: total});
           if(!append) pane.innerHTML = '';
           msgs.forEach(function(m){
             const dom = m.intent_tag || 'general';
@@ -818,15 +815,15 @@ rpa.analytics = {
           if(offset < total){
             const more = document.createElement('button');
             more.className = 'rpa-load-more';
-            more.textContent = '加载更多（剩 '+(total-offset)+' 条）';
+            more.textContent = window.Tf('rpa_js_load_more_n', {n: (total-offset)});
             more.style.cssText = 'display:block;margin:.6rem auto;padding:.4rem 1rem;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.3);border-radius:6px;color:#a5b4fc;cursor:pointer;font-size:.78rem';
             more.addEventListener('click', function(){ loadFull(true); });
             pane.appendChild(more);
           } else if(msgs.length === 0 && !append){
-            pane.innerHTML = '<div style="color:var(--t3);font-size:.78rem">暂无消息记录</div>';
+            pane.innerHTML = '<div style="color:var(--t3);font-size:.78rem">' + window.T('rpa_js_no_messages') + '</div>';
           }
         })
-        .catch(function(){ if(!append) pane.innerHTML = '<div style="color:#f87171;font-size:.78rem">加载失败</div>'; });
+        .catch(function(){ if(!append) pane.innerHTML = '<div style="color:#f87171;font-size:.78rem">' + window.T('rpa_load_failed') + '</div>'; });
     };
     drawer.querySelectorAll('.rpa-dt-tab').forEach(function(b){
       b.addEventListener('click', function(){
@@ -852,14 +849,14 @@ rpa.analytics = {
     const btnSel = opts.btnSel || '.rpa-win-btn';
     const card = body.closest('.rpa-card') || body.closest('.card') || body.closest('.mr-panel') || body.parentElement;
     const load = function(hours){
-      body.innerHTML = '<div style="padding:.5rem 0;font-size:.78rem;color:var(--t3,#94a3b8)">加载中…</div>';
+      body.innerHTML = '<div style="padding:.5rem 0;font-size:.78rem;color:var(--t3,#94a3b8)">' + window.T('rpa_loading') + '</div>';
       rpa.get(apiBase + '/intent-stats?hours=' + hours)
         .then(function(d){
           const dist = (d && d.distribution) || {};
           const total = (d && d.total_turns) || 0;
-          if(!total){ body.innerHTML='<div style="padding:.5rem 0;font-size:.78rem;color:var(--t3,#94a3b8)">暂无数据</div>'; return; }
+          if(!total){ body.innerHTML='<div style="padding:.5rem 0;font-size:.78rem;color:var(--t3,#94a3b8)">' + window.T('rpa_js_no_data') + '</div>'; return; }
           const entries = Object.entries(dist).sort(function(a,b){ return b[1]-a[1]; });
-          body.innerHTML = '<div style="font-size:.7rem;color:var(--t3,#94a3b8);margin-bottom:.4rem">共 '+total+' 条消息</div>'
+          body.innerHTML = '<div style="font-size:.7rem;color:var(--t3,#94a3b8);margin-bottom:.4rem">' + window.Tf('rpa_js_total_msgs_n', {n: total}) + '</div>'
             + entries.map(function(kv){
                 const tag = kv[0], cnt = kv[1];
                 const pct = Math.round(cnt/total*100);
@@ -872,7 +869,7 @@ rpa.analytics = {
                   + '</div>';
               }).join('');
         })
-        .catch(function(){ body.innerHTML='<div style="padding:.5rem 0;font-size:.78rem;color:#f87171">加载失败</div>'; });
+        .catch(function(){ body.innerHTML='<div style="padding:.5rem 0;font-size:.78rem;color:#f87171">' + window.T('rpa_load_failed') + '</div>'; });
     };
     if(card){
       card.querySelectorAll(btnSel).forEach(function(btn){
@@ -903,6 +900,26 @@ rpa.renderHero = function(spec){
     }
   }
 };
+
+// ─── 哑按钮运行时兜底守卫（与 unified_inbox 同源，覆盖 4 个 RPA 页）──────────
+// 内联 on*="fn()" 若引用未挂 window 的函数（IIFE 内漏挂 / 拼写错），点击抛 ReferenceError，
+// 静默无反应。静态门禁（tests/test_rpa_inline_handlers_exposed.py）挡「入库前」，但运行时才
+// 由 innerHTML 动态拼出的 handler 扫不到 → 这里运行时兜底：捕获该类错误给明确红条（附函数名
+// 便于上报），节流 3s 防刷屏。
+(function(){
+  let _lastDeadToast = 0;
+  window.addEventListener('error', function(e){
+    const err = e && e.error;
+    const msg = String((e && e.message) || '');
+    if(!((err instanceof ReferenceError) || /is not defined/.test(msg))) return;
+    const now = Date.now();
+    if(now - _lastDeadToast < 3000) return;
+    _lastDeadToast = now;
+    const m = msg.match(/([A-Za-z_$][\w$]*)\s+is not defined/);
+    const fn = m ? '（' + m[1] + '）' : '';
+    try{ rpa.toast(window.T('inbox.fallback.unavailable') + fn, 'err'); }catch(_){}
+  });
+})();
 
 })();
 </script>

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}数据分析 · {{ site_name|default('华灵科技客户转化聊天系统') }}{% endblock %}
-{% block page_title %}数据分析{% endblock %}
+{% block title %}{{ (i18n or {}).get('analytics','数据分析') }} · {{ product_name|default((i18n or {}).get('brand.product', '智聊')) }}{% endblock %}
+{% block page_title %}{{ (i18n or {}).get('analytics','数据分析') }}{% endblock %}
 {% block head %}
 <script src="/static/js/chart.umd.min.js"></script>
 <style>
@@ -37,18 +37,18 @@
     <circle id="cd-ring" cx="11" cy="11" r="9" fill="none" stroke="var(--p)" stroke-width="2.5"
       stroke-dasharray="56.55" stroke-dashoffset="0" style="transform:rotate(-90deg);transform-origin:center"/>
   </svg>
-  <span>自动刷新：<strong id="cd-num">30</strong> 秒</span>
-  <button class="btn btn-s btn-xs" data-help="btn_refresh" onclick="location.reload()">立即刷新</button>
-  <button class="btn btn-xs" id="pause-btn" data-help="btn_pause" style="background:var(--as);color:var(--amber);border:none" onclick="togglePause()">暂停</button>
-  <span style="margin-left:auto;color:var(--t3)">统计范围：最近 {{ hours }} 小时 · 共 <strong style="color:var(--p)">{{ total }}</strong> 条事件</span>
+  <span>{{ (i18n or {}).get('analytics_refresh_label','自动刷新：') }}<strong id="cd-num">30</strong>{{ (i18n or {}).get('analytics_sec_suffix',' 秒') }}</span>
+  <button class="btn btn-s btn-xs" data-help="btn_refresh" onclick="location.reload()">{{ (i18n or {}).get('analytics_refresh_now','立即刷新') }}</button>
+  <button class="btn btn-xs" id="pause-btn" data-help="btn_pause" style="background:var(--as);color:var(--amber);border:none" onclick="togglePause()">{{ (i18n or {}).get('analytics_pause','暂停') }}</button>
+  <span style="margin-left:auto;color:var(--t3)">{{ (i18n or {}).get('analytics_range','统计范围：最近 {h} 小时 · 共 <strong style="color:var(--p)">{t}</strong> 条事件').format(h=hours, t=total)|safe }}</span>
 </div>
 
 <!-- period selector -->
 <div class="period-btns fa fa1 pro-only">
-  <a href="/analytics?hours=24" class="period-btn {{ 'active' if hours==24 else '' }}">近 24 小时</a>
-  <a href="/analytics?hours=72" class="period-btn {{ 'active' if hours==72 else '' }}">近 3 天</a>
-  <a href="/analytics?hours=168" class="period-btn {{ 'active' if hours==168 else '' }}">近 7 天</a>
-  <a href="/analytics?hours=720" class="period-btn {{ 'active' if hours==720 else '' }}">近 30 天</a>
+  <a href="/analytics?hours=24" class="period-btn {{ 'active' if hours==24 else '' }}">{{ (i18n or {}).get('analytics_period_24h','近 24 小时') }}</a>
+  <a href="/analytics?hours=72" class="period-btn {{ 'active' if hours==72 else '' }}">{{ (i18n or {}).get('analytics_period_3d','近 3 天') }}</a>
+  <a href="/analytics?hours=168" class="period-btn {{ 'active' if hours==168 else '' }}">{{ (i18n or {}).get('analytics_period_7d','近 7 天') }}</a>
+  <a href="/analytics?hours=720" class="period-btn {{ 'active' if hours==720 else '' }}">{{ (i18n or {}).get('analytics_period_30d','近 30 天') }}</a>
 </div>
 
 <!-- stat cards -->
@@ -56,22 +56,22 @@
   <div class="card stat-card">
     <div class="s-icon ico-p"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></div>
     <div class="s-num" data-count="{{ total }}">0</div>
-    <div class="s-lbl">事件总数</div>
+    <div class="s-lbl">{{ (i18n or {}).get('analytics_total_events','事件总数') }}</div>
   </div>
   <div class="card stat-card">
     <div class="s-icon ico-g"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg></div>
     <div class="s-num" data-count="{{ top_users|length }}">0</div>
-    <div class="s-lbl">活跃用户</div>
+    <div class="s-lbl">{{ (i18n or {}).get('analytics_active_users','活跃用户') }}</div>
   </div>
   <div class="card stat-card">
     <div class="s-icon ico-a"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
     <div class="s-num" style="font-size:1.3rem">{{ resp_dist.avg if resp_dist else 0 }}ms</div>
-    <div class="s-lbl">平均响应时间</div>
+    <div class="s-lbl">{{ (i18n or {}).get('analytics_avg_resp','平均响应时间') }}</div>
   </div>
   <div class="card stat-card">
     <div class="s-icon ico-b" style="background:linear-gradient(135deg,#8b5cf6,#7c3aed)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></div>
     <div class="s-num" data-count="{{ cmd_stats|length }}">0</div>
-    <div class="s-lbl">指令种类</div>
+    <div class="s-lbl">{{ (i18n or {}).get('analytics_cmd_types','指令种类') }}</div>
   </div>
 </div>
 
@@ -81,14 +81,14 @@
   <div class="card">
     <h2>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg>
-      消息趋势
+      {{ (i18n or {}).get('analytics_msg_trend','消息趋势') }}
     </h2>
     {% if hourly %}
     <div class="chart-wrap"><canvas id="trend-chart"></canvas></div>
     {% else %}
     <div class="empty" style="padding:2rem">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg>
-      <p>暂无趋势数据</p>
+      <p>{{ (i18n or {}).get('analytics_no_trend','暂无趋势数据') }}</p>
     </div>
     {% endif %}
   </div>
@@ -96,20 +96,20 @@
   <div class="card">
     <h2>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-      响应时间分布
+      {{ (i18n or {}).get('analytics_resp_dist','响应时间分布') }}
     </h2>
     {% if resp_dist and resp_dist.count > 0 %}
     <div class="resp-pills" style="margin-bottom:1rem">
-      <div class="r-pill" data-help="P50"><div class="r-pill-val">{{ resp_dist.p50 }}ms</div><div class="r-pill-lbl">P50 中位</div></div>
+      <div class="r-pill" data-help="P50"><div class="r-pill-val">{{ resp_dist.p50 }}ms</div><div class="r-pill-lbl">{{ (i18n or {}).get('analytics_p50_median','P50 中位') }}</div></div>
       <div class="r-pill" data-help="P90"><div class="r-pill-val">{{ resp_dist.p90 }}ms</div><div class="r-pill-lbl">P90</div></div>
       <div class="r-pill" data-help="P99"><div class="r-pill-val">{{ resp_dist.p99 }}ms</div><div class="r-pill-lbl">P99</div></div>
-      <div class="r-pill"><div class="r-pill-val">{{ resp_dist.avg }}ms</div><div class="r-pill-lbl">平均</div></div>
+      <div class="r-pill"><div class="r-pill-val">{{ resp_dist.avg }}ms</div><div class="r-pill-lbl">{{ (i18n or {}).get('analytics_avg','平均') }}</div></div>
     </div>
     <div class="chart-wrap" style="height:160px"><canvas id="resp-chart"></canvas></div>
     {% else %}
     <div class="empty" style="padding:2rem">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-      <p>暂无响应时间数据</p>
+      <p>{{ (i18n or {}).get('analytics_no_resp','暂无响应时间数据') }}</p>
     </div>
     {% endif %}
   </div>
@@ -120,7 +120,7 @@
   <div class="card">
     <h2>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-      热门指令 TOP 10
+      {{ (i18n or {}).get('analytics_top_cmds','热门指令 TOP 10') }}
     </h2>
     {% if cmd_stats %}
     {% set max_cnt = cmd_stats[0].count %}
@@ -134,14 +134,14 @@
     {% else %}
     <div class="empty" style="padding:2rem">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-      <p>暂无指令统计数据</p>
+      <p>{{ (i18n or {}).get('analytics_no_cmds','暂无指令统计数据') }}</p>
     </div>
     {% endif %}
   </div>
   <div class="card">
     <h2>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-      活跃用户 TOP 10
+      {{ (i18n or {}).get('analytics_top_users','活跃用户 TOP 10') }}
     </h2>
     {% if top_users %}
     {% set max_u = top_users[0].count %}
@@ -155,7 +155,7 @@
     {% else %}
     <div class="empty" style="padding:2rem">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-      <p>暂无用户统计数据</p>
+      <p>{{ (i18n or {}).get('analytics_no_users','暂无用户统计数据') }}</p>
     </div>
     {% endif %}
   </div>
@@ -165,22 +165,22 @@
 <div class="card" style="margin-top:1.2rem">
   <h2 class="card-title" style="display:flex;align-items:center;gap:.5rem">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="18" height="18"><path d="M12 2a10 10 0 1 0 4 19.1"/><path d="M12 8v4l3 3"/></svg>
-    运营 Copilot
-    <span style="font-size:.72rem;font-weight:400;color:var(--t3);margin-left:.4rem">用自然语言查询数据</span>
+    {{ (i18n or {}).get('analytics_copilot_title','运营 Copilot') }}
+    <span style="font-size:.72rem;font-weight:400;color:var(--t3);margin-left:.4rem">{{ (i18n or {}).get('analytics_copilot_sub','用自然语言查询数据') }}</span>
   </h2>
   <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.7rem">
-    <button class="btn btn-xs" style="font-size:.72rem" data-help="copilot" onclick="copilotQuick('今天整体运营情况如何？')">📊 今日概况</button>
-    <button class="btn btn-xs" style="font-size:.72rem" data-help="at_risk" onclick="copilotQuick('有哪些高风险用户？')">⚠ 风险用户</button>
-    <button class="btn btn-xs" style="font-size:.72rem" data-help="hit_rate" onclick="copilotQuick('知识库命中率和弱命中情况')">📚 KB 健康</button>
-    <button class="btn btn-xs" style="font-size:.72rem" data-help="strategy" onclick="copilotQuick('当前策略参数配置')">⚙ 策略参数</button>
-    <button class="btn btn-xs" style="font-size:.72rem" data-help="kb_feedback" onclick="copilotQuick('最近用户反馈和评分分布')">💬 用户反馈</button>
+    <button class="btn btn-xs" style="font-size:.72rem" data-help="copilot" onclick="copilotQuick('{{ (i18n or {}).get('analytics_cpq_overview','今天整体运营情况如何？') }}')">📊 {{ (i18n or {}).get('analytics_cp_overview','今日概况') }}</button>
+    <button class="btn btn-xs" style="font-size:.72rem" data-help="at_risk" onclick="copilotQuick('{{ (i18n or {}).get('analytics_cpq_risk','有哪些高风险用户？') }}')">⚠ {{ (i18n or {}).get('analytics_cp_risk','风险用户') }}</button>
+    <button class="btn btn-xs" style="font-size:.72rem" data-help="hit_rate" onclick="copilotQuick('{{ (i18n or {}).get('analytics_cpq_kb','知识库命中率和弱命中情况') }}')">📚 {{ (i18n or {}).get('analytics_cp_kb','KB 健康') }}</button>
+    <button class="btn btn-xs" style="font-size:.72rem" data-help="strategy" onclick="copilotQuick('{{ (i18n or {}).get('analytics_cpq_strategy','当前策略参数配置') }}')">⚙ {{ (i18n or {}).get('analytics_cp_strategy','策略参数') }}</button>
+    <button class="btn btn-xs" style="font-size:.72rem" data-help="kb_feedback" onclick="copilotQuick('{{ (i18n or {}).get('analytics_cpq_feedback','最近用户反馈和评分分布') }}')">💬 {{ (i18n or {}).get('analytics_cp_feedback','用户反馈') }}</button>
   </div>
   <div style="display:flex;gap:.6rem;align-items:flex-start">
     <input id="copilot-input" type="text" class="input"
-      placeholder="输入问题，如：今天知识库命中率如何？有哪些高风险用户？"
+      placeholder="{{ (i18n or {}).get('analytics_copilot_ph','输入问题，如：今天知识库命中率如何？有哪些高风险用户？') }}"
       style="flex:1;height:40px" />
     <button id="copilot-btn" class="btn btn-s" onclick="copilotAsk()"
-      style="height:40px;white-space:nowrap">查询</button>
+      style="height:40px;white-space:nowrap">{{ (i18n or {}).get('analytics_copilot_query_btn','查询') }}</button>
   </div>
   <div id="copilot-answer" style="margin-top:.9rem;padding:.85rem 1rem;background:var(--input);border-radius:9px;font-size:.85rem;line-height:1.6;color:var(--t1);min-height:2.5rem;white-space:pre-wrap;display:none"></div>
   <div id="copilot-meta" style="margin-top:.4rem;font-size:.7rem;color:var(--t3);display:none"></div>
@@ -218,7 +218,7 @@ if (hourlyData.length > 0) {
     data: {
       labels,
       datasets: [{
-        label: '事件量', data: counts,
+        label: window.T('analytics_event_vol','事件量'), data: counts,
         borderColor: '#5b7cf6', backgroundColor: 'rgba(91,124,246,.12)',
         tension: .4, fill: true, pointRadius: 3, borderWidth: 2
       }]
@@ -241,7 +241,7 @@ if (respDist && respDist.count > 0) {
   const rc = new Chart(document.getElementById('resp-chart'), {
     type: 'bar',
     data: {
-      labels: ['P50', 'P90', 'P99', '平均'],
+      labels: ['P50', 'P90', 'P99', window.T('analytics_avg','平均')],
       datasets: [{
         label: 'ms', data: [respDist.p50, respDist.p90, respDist.p99, respDist.avg],
         backgroundColor: ['rgba(91,124,246,.7)','rgba(139,92,246,.7)','rgba(239,68,68,.7)','rgba(16,185,129,.7)'],
@@ -266,7 +266,7 @@ function updateCd() {
 function togglePause() {
   paused = !paused;
   const b = document.getElementById('pause-btn');
-  b.textContent = paused ? '继续' : '暂停';
+  b.textContent = paused ? window.T('analytics_resume','继续') : window.T('analytics_pause','暂停');
   b.style.background = paused ? 'var(--rs)' : 'var(--as)';
   b.style.color = paused ? 'var(--red)' : 'var(--amber)';
 }
@@ -290,7 +290,7 @@ async function copilotAsk() {
   const btn = document.getElementById('copilot-btn');
   ansEl.style.display = 'block';
   metaEl.style.display = 'none';
-  ansEl.textContent = '正在查询…';
+  ansEl.textContent = window.T('analytics_cp_querying','正在查询…');
   btn.disabled = true;
   try {
     const res = await fetch('/api/copilot/query', {
@@ -300,14 +300,14 @@ async function copilotAsk() {
     });
     const d = await res.json();
     if (d.ok) {
-      ansEl.textContent = d.answer || '（无回答）';
+      ansEl.textContent = d.answer || window.T('analytics_cp_no_answer','（无回答）');
       metaEl.style.display = 'block';
-      metaEl.textContent = '数据源: ' + (d.data_sources||[]).join(', ') + ' · 耗时 ' + d.total_ms + 'ms';
+      metaEl.textContent = window.Tf('analytics_cp_meta', { src: (d.data_sources||[]).join(', '), ms: d.total_ms });
     } else {
-      ansEl.textContent = '查询失败: ' + (d.error || JSON.stringify(d));
+      ansEl.textContent = window.Tf('analytics_cp_failed', { err: (d.error || JSON.stringify(d)) });
     }
   } catch(e) {
-    ansEl.textContent = '请求出错: ' + e;
+    ansEl.textContent = window.Tf('analytics_cp_error', { err: e });
   }
   btn.disabled = false;
 }

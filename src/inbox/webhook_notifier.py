@@ -66,6 +66,7 @@ _EVENT_ALIASES: Dict[str, Dict[str, Any]] = {
     "L4_created": {"types": {"draft_created"}, "levels": {"L4"}},
     "draft_created": {"types": {"draft_created"}, "levels": None},
     "sla_breach": {"types": {"draft_sla_breach"}, "levels": None},
+    "backlog_summary": {"types": {"draft_backlog_summary"}, "levels": None},  # 积压聚合汇总
     "reassigned": {"types": {"draft_reassigned"}, "levels": None},
     "escalation": {"types": {"escalation"}, "levels": None},
     "reply_risk": {"types": {"human_reply_risk"}, "levels": None},  # M3
@@ -85,6 +86,10 @@ _EVENT_ALIASES: Dict[str, Dict[str, Any]] = {
     "ops_report":    {"types": {"ops_report"}, "levels": None},       # H1 运营周报自动外发
     # 统一草稿引擎质量告警（记忆命中率/p95 延迟/风险分类回检）
     "draft_quality": {"types": {"draft_quality_alert"}, "levels": None},
+    # AI 回复质量退化告警（草稿采纳/弃用率 + 高危量环比，基于处置结果口径）
+    "ai_quality": {"types": {"ai_quality_alert"}, "levels": None},
+    # 实时语音通话退化告警（主机健康/接通率/不可达，基于 RealtimeVoiceStats）
+    "realtime_voice": {"types": {"realtime_voice_alert"}, "levels": None},
     # 记忆 key 漂移告警（裸 key 复发 → 记忆对引擎不可见）
     "memory_key_drift": {"types": {"memory_key_drift_alert"}, "levels": None},
 }
@@ -259,6 +264,15 @@ def _build_message(event_type: str, data: Dict[str, Any]) -> tuple[str, str]:
             "[📋 前往审批](/workspace/drafts)"
         )
 
+    elif event_type == "draft_backlog_summary":
+        cnt = data.get("count", "?")
+        title = f"📥 草稿积压汇总：{cnt} 条待处理"
+        text = (
+            f"**待处理**: {cnt} 条（L3={data.get('l3', '?')} · L4={data.get('l4', '?')}）\n"
+            f"**SLA**: {data.get('sla_hours', '?')}h\n"
+            "[📋 前往审批](/workspace/drafts)"
+        )
+
     elif event_type == "draft_reassigned":
         title = "🔄 草稿已自动再分配"
         text = (
@@ -399,6 +413,42 @@ def _build_message(event_type: str, data: Dict[str, Any]) -> tuple[str, str]:
             lines = [f"- {p.get('name','?')}：{p.get('detail','')}" for p in probs[:8]]
             icon = {"red": "🔴", "yellow": "🟡"}.get(str(data.get("light") or ""), "📉")
             title = f"{icon} 草稿质量告警（{data.get('light') or '异常'}）"
+            text = (
+                f"**异常**: {len(probs)} 项\n"
+                + "\n".join(lines) + "\n"
+                "[📊 查看运营总览](/admin/ops)"
+            )
+
+    elif event_type == "ai_quality_alert":
+        if data.get("recovered"):
+            title = "✅ AI 质量已恢复"
+            text = (
+                "**状态**: 草稿采纳/弃用率与高危量均回到阈值内\n"
+                "[📊 查看运营总览](/admin/ops)"
+            )
+        else:
+            probs = data.get("problems") or []
+            lines = [f"- {p.get('name','?')}：{p.get('detail','')}" for p in probs[:5]]
+            icon = {"red": "🔴", "yellow": "🟡"}.get(str(data.get("light") or ""), "🛡️")
+            title = f"{icon} AI 质量告警（{data.get('light') or '异常'}）"
+            text = (
+                f"**异常**: {len(probs)} 项\n"
+                + "\n".join(lines) + "\n"
+                "[📊 查看运营总览](/admin/ops)"
+            )
+
+    elif event_type == "realtime_voice_alert":
+        if data.get("recovered"):
+            title = "✅ 实时语音已恢复"
+            text = (
+                "**状态**: 主机健康/接通率均回到阈值内\n"
+                "[📊 查看运营总览](/admin/ops)"
+            )
+        else:
+            probs = data.get("problems") or []
+            lines = [f"- {p.get('name','?')}：{p.get('detail','')}" for p in probs[:5]]
+            icon = {"red": "🔴", "yellow": "🟡"}.get(str(data.get("light") or ""), "📞")
+            title = f"{icon} 实时语音告警（{data.get('light') or '异常'}）"
             text = (
                 f"**异常**: {len(probs)} 项\n"
                 + "\n".join(lines) + "\n"

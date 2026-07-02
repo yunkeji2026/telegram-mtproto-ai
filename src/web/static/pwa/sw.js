@@ -8,7 +8,7 @@
  */
 "use strict";
 
-const VERSION = "v1-2026-06-26";
+const VERSION = "v3-2026-07-02";
 const SHELL_CACHE = "ws-shell-" + VERSION;
 const ASSET_CACHE = "ws-assets-" + VERSION;
 const OFFLINE_URL = "/static/pwa/offline.html";
@@ -62,6 +62,10 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // Range 请求（<audio>/<video> 拖动/续播）直连网络：让浏览器拿到正确的 206，
+  // 媒体 seek 才正常；也避免把 206 塞进 Cache（Cache.put 不支持 206 → 会抛 TypeError）。
+  if (req.headers.has("range")) return;
+
   // 页面导航：network-first，断网回落离线壳（不缓存 HTML）
   if (req.mode === "navigate") {
     event.respondWith(
@@ -85,10 +89,13 @@ self.addEventListener("fetch", (event) => {
         const cached = await cache.match(req);
         const network = fetch(req)
           .then((res) => {
-            if (res && res.ok) cache.put(req, res.clone());
+            // 仅缓存完整的 200（排除 206/分块、opaque、错误）；put 失败(配额等)静默降级不阻断
+            if (res && res.status === 200) {
+              cache.put(req, res.clone()).catch(() => {});
+            }
             return res;
           })
-          .catch(() => cached);
+          .catch(() => cached || Response.error());
         return cached || network;
       })()
     );

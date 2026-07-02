@@ -1,9 +1,12 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="light">
+<html lang="{{ 'zh-CN' if (ui_lang|default('zh'))=='zh' else 'en-US' }}" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>初始化设置 · {{ site_name|default('华灵科技客户转化聊天系统') }}</title>
+<title>{{ (i18n or {}).get('su_s000', "初始化设置") }} · {{ product_name|default((i18n or {}).get('brand.product', '智聊')) }}</title>
+{% include "_brand_head.html" %}
+<link rel="stylesheet" href="/static/brand/brand-lockup.css">
+<link rel="stylesheet" href="/static/brand/auth-surface.css">
 <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"></noscript>
@@ -34,13 +37,8 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
   box-shadow:0 20px 60px rgba(0,0,0,.12);animation:up .5s cubic-bezier(.4,0,.2,1)}
 [data-theme="dark"] .setup-card{backdrop-filter:blur(20px);background:rgba(14,20,35,.88);box-shadow:0 24px 64px rgba(0,0,0,.7)}
 @keyframes up{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
-/* logo */
-.logo{display:flex;align-items:center;gap:.75rem;margin-bottom:2rem}
-.logo-icon{width:44px;height:44px;background:var(--g);border-radius:13px;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 18px rgba(91,124,246,.4);animation:breathe 3s ease-in-out infinite;flex-shrink:0}
-@keyframes breathe{0%,100%{box-shadow:0 6px 18px rgba(91,124,246,.4)}50%{box-shadow:0 8px 28px rgba(91,124,246,.65)}}
-.logo-icon svg{width:22px;height:22px;color:#fff}
-.logo-text h1{font-size:1.1rem;font-weight:800;line-height:1.2}
-.logo-text p{font-size:.78rem;color:var(--t2);margin-top:.15rem}
+/* logo — see /static/brand/brand-lockup.css */
+.logo{margin-bottom:0}
 /* step indicator */
 .steps{display:flex;gap:0;margin-bottom:2rem;position:relative}
 .steps::before{content:'';position:absolute;top:14px;left:14px;right:14px;height:2px;background:var(--bd);z-index:0}
@@ -102,6 +100,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .th-link{background:none;border:none;cursor:pointer;font-size:.78rem;color:var(--t2);font-family:inherit;transition:.2s;padding:.3rem .5rem;border-radius:6px}
 .th-link:hover{color:var(--p);background:var(--ps)}
 </style>
+{% include '_i18n_bootstrap.html' %}
 </head>
 <body>
 <div class="orb orb1"></div>
@@ -110,28 +109,22 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 <div class="setup-card" id="setup-card">
   <!-- Logo -->
   <div class="logo">
-    <div class="logo-icon">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-    </div>
-    <div class="logo-text">
-      <h1>{{ site_name|default('华灵科技客户转化聊天系统') }}</h1>
-      <p>首次使用 · 初始化向导</p>
-    </div>
+    {% with variant='setup' %}{% include "_brand_lockup.html" %}{% endwith %}
   </div>
 
   <!-- Step indicator -->
   <div class="steps">
     <div class="step active" id="step1">
       <div class="step-dot">1</div>
-      <div class="step-lbl">账户</div>
+      <div class="step-lbl">{{ (i18n or {}).get('su_s002', "账户") }}</div>
     </div>
     <div class="step" id="step2">
       <div class="step-dot">2</div>
-      <div class="step-lbl">AI 配置</div>
+      <div class="step-lbl">AI {{ (i18n or {}).get('msg_js_1056', "配置") }}</div>
     </div>
     <div class="step" id="step3">
       <div class="step-dot">3</div>
-      <div class="step-lbl">完成</div>
+      <div class="step-lbl">{{ (i18n or {}).get('tour_done', "完成") }}</div>
     </div>
   </div>
 
@@ -145,24 +138,24 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
     <div class="section" id="sec1">
       <div class="section-hd">
         <div class="section-num">1</div>
-        <div class="section-title">创建管理员账户</div>
+        <div class="section-title">{{ (i18n or {}).get('su_s003', "创建管理员账户") }}</div>
       </div>
 
       <div class="f-grp">
-        <label class="f-lbl">用户名</label>
+        <label class="f-lbl">{{ (i18n or {}).get('set_js_075', "用户名") }}</label>
         <input class="f-inp" type="text" id="f-username" placeholder="admin" autocomplete="username" required>
       </div>
 
       <div class="f-row">
         <div class="f-grp">
-          <label class="f-lbl">密码</label>
-          <input class="f-inp" type="password" id="f-password" placeholder="至少 6 位"
+          <label class="f-lbl">{{ (i18n or {}).get('us_s012', "密码") }}</label>
+          <input class="f-inp" type="password" id="f-password" placeholder="{{ (i18n or {}).get('us_s013', '至少 6 位') }}"
                  autocomplete="new-password" oninput="checkPwStrength()">
           <div class="pw-strength"><div class="pw-strength-bar" id="pw-bar"></div></div>
         </div>
         <div class="f-grp">
-          <label class="f-lbl">确认密码</label>
-          <input class="f-inp" type="password" id="f-confirm" placeholder="再次输入"
+          <label class="f-lbl">{{ (i18n or {}).get('su_s004', "确认密码") }}</label>
+          <input class="f-inp" type="password" id="f-confirm" placeholder="{{ (i18n or {}).get('su_s005', '再次输入') }}"
                  autocomplete="new-password">
         </div>
       </div>
@@ -172,11 +165,11 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
     <div class="section" id="sec2">
       <div class="section-hd">
         <div class="section-num">2</div>
-        <div class="section-title">AI 接口配置</div>
-        <span class="section-sub opt-badge">可选</span>
+        <div class="section-title">AI {{ (i18n or {}).get('dv_s009', "接口配置") }}</div>
+        <span class="section-sub opt-badge">{{ (i18n or {}).get('msg_s416', "可选") }}</span>
       </div>
       <div style="font-size:.78rem;color:var(--t2);margin-bottom:.85rem;line-height:1.5">
-        配置 AI API 后，知识库语义搜索和自动翻译功能将自动启用。稍后也可在配置文件中修改。
+        {{ (i18n or {}).get('su_s006', "配置 AI API 后，知识库语义搜索和自动翻译功能将自动启用。稍后也可在配置文件中修改。") }}
       </div>
 
       <div class="f-grp">
@@ -194,7 +187,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
                  value="{{ ai_cfg.get('base_url','') if ai_cfg else '' }}">
         </div>
         <div class="f-grp">
-          <label class="f-lbl">模型</label>
+          <label class="f-lbl">{{ (i18n or {}).get('msg_js_1218', "模型") }}</label>
           <input class="f-inp" type="text" id="f-model"
                  placeholder="deepseek-chat"
                  value="{{ ai_cfg.get('model','') if ai_cfg else '' }}">
@@ -203,24 +196,25 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 
       <button type="button" class="test-btn" onclick="testApi()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12" style="margin-right:.3rem"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-        测试连接
+        {{ (i18n or {}).get('dv_s034', "测试连接") }}
       </button>
       <div class="test-result" id="test-result"></div>
     </div>
 
-    <button type="submit" class="btn-submit" id="submit-btn">完成初始化</button>
+    <button type="submit" class="btn-submit" id="submit-btn">{{ (i18n or {}).get('su_s007', "完成初始化") }}</button>
   </form>
 
   <!-- 成功界面 -->
   <div id="done-screen">
     <div class="done-icon">&#x2705;</div>
-    <div class="done-title">初始化完成！</div>
-    <div class="done-sub" id="done-msg">账户已创建，正在跳转到登录页…</div>
-    <a href="/login" class="btn-submit" style="text-decoration:none;display:block;text-align:center;margin-top:.5rem">前往登录</a>
+    <div class="done-title">{{ (i18n or {}).get('su_s008', "初始化完成！") }}</div>
+    <div class="done-sub" id="done-msg">{{ (i18n or {}).get('su_s009', "账户已创建，正在跳转到登录页…") }}</div>
+    <a href="/login" class="btn-submit" style="text-decoration:none;display:block;text-align:center;margin-top:.5rem">{{ (i18n or {}).get('su_s010', "前往登录") }}</a>
   </div>
 
   <div class="setup-foot">
-    <button class="th-link" onclick="toggleTheme()">🌓 深色 / 浅色</button>
+    <button class="th-link" onclick="toggleTheme()">🌓 {{ (i18n or {}).get('su_s011', "深色 / 浅色") }}</button>
+    <a class="th-link" style="text-decoration:none" href="/set_lang?lang={{ 'en' if (ui_lang|default('zh'))=='zh' else 'zh' }}">🌐 {{ (i18n or {}).get('lang_switch_label', '切换语言') }} ({{ 'EN' if (ui_lang|default('zh'))=='zh' else 'ZH' }})</a>
   </div>
 </div>
 
@@ -259,8 +253,8 @@ async function testApi(){
   const base   = document.getElementById('f-baseurl').value.trim();
   const model  = document.getElementById('f-model').value.trim();
   const resEl  = document.getElementById('test-result');
-  if(!key){ resEl.className='test-result err'; resEl.style.display=''; resEl.textContent='请先填写 API Key'; return; }
-  resEl.className='test-result'; resEl.style.display=''; resEl.textContent='测试中…';
+  if(!key){ resEl.className='test-result err'; resEl.style.display=''; resEl.textContent=window.T('su_js_001')+' API Key'; return; }
+  resEl.className='test-result'; resEl.style.display=''; resEl.textContent=window.T('dv_js006');
   try{
     const r = await fetch('/api/setup/test-ai', {
       method:'POST',
@@ -272,7 +266,7 @@ async function testApi(){
     resEl.textContent = (d.ok ? '✓ ' : '✗ ') + d.msg;
     setStep(d.ok ? 2 : 1);
   } catch(e){
-    resEl.className='test-result err'; resEl.textContent='请求失败：'+e.message;
+    resEl.className='test-result err'; resEl.textContent=window.T('su_js_reqfail')+e.message;
   }
 }
 
@@ -287,12 +281,12 @@ async function doSetup(evt){
   const password = document.getElementById('f-password').value;
   const confirm  = document.getElementById('f-confirm').value;
 
-  if(!username){ showAlert('请填写用户名'); return; }
-  if(password.length < 6){ showAlert('密码至少 6 位'); return; }
-  if(password !== confirm){ showAlert('两次输入的密码不一致'); return; }
+  if(!username){ showAlert(window.T('su_js_002')); return; }
+  if(password.length < 6){ showAlert(window.T('su_js_003')); return; }
+  if(password !== confirm){ showAlert(window.T('su_js_004')); return; }
 
   btn.disabled = true;
-  btn.textContent = '初始化中…';
+  btn.textContent = window.T('su_js_005');
 
   try{
     const r = await fetch('/api/setup',{
@@ -308,17 +302,17 @@ async function doSetup(evt){
       }),
     });
     const d = await r.json();
-    if(!r.ok){ showAlert(d.detail || '初始化失败'); btn.disabled=false; btn.textContent='完成初始化'; return; }
+    if(!r.ok){ showAlert(d.detail || window.T('su_js_006')); btn.disabled=false; btn.textContent=window.T('su_s007'); return; }
     // Success
     setStep(3);
     document.getElementById('setup-form').style.display='none';
     document.getElementById('done-screen').style.display='block';
-    document.getElementById('done-msg').textContent = `账户「${d.username}」已创建，3 秒后跳转…`;
+    document.getElementById('done-msg').textContent = window.Tf('su_tf_created', {u: d.username});
     setTimeout(()=>{ location.href='/login'; }, 3000);
   } catch(e){
-    showAlert('请求失败：'+e.message);
+    showAlert(window.T('su_js_reqfail')+e.message);
     btn.disabled = false;
-    btn.textContent = '完成初始化';
+    btn.textContent = window.T('su_s007');
   }
 }
 

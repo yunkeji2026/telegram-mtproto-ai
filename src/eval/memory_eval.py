@@ -273,13 +273,21 @@ def build_real_embed_fn(config: Optional[Dict[str, Any]] = None) -> Optional[Emb
 
         client = AIClient(_Cfg())
 
+        # 探测预算：配了但**不可达**的嵌入端点应在数秒内超时→门禁优雅跳过，
+        # 而非无界挂起把全量回归拖到 pytest 超时（ai_client.embed 走异步 I/O，
+        # asyncio.wait_for 可确切中断）。可用 env 覆写。
+        try:
+            budget = float(os.environ.get("AITR_EMBED_PROBE_BUDGET", "") or 8.0)
+        except (TypeError, ValueError):
+            budget = 8.0
+
         async def _probe():
             if hasattr(client, "initialize"):
                 try:
-                    await client.initialize()
+                    await asyncio.wait_for(client.initialize(), timeout=budget)
                 except Exception:
                     pass
-            return await client.embed(["测试嵌入可用性"])
+            return await asyncio.wait_for(client.embed(["测试嵌入可用性"]), timeout=budget)
 
         v = asyncio.run(_probe())
         if not v or not v[0]:
@@ -287,7 +295,9 @@ def build_real_embed_fn(config: Optional[Dict[str, Any]] = None) -> Optional[Emb
 
         def _embed(text: str) -> Optional[List[float]]:
             try:
-                vv = asyncio.run(client.embed([text]))
+                async def _one():
+                    return await asyncio.wait_for(client.embed([text]), timeout=budget)
+                vv = asyncio.run(_one())
                 return vv[0] if vv and vv[0] else None
             except Exception:
                 return None

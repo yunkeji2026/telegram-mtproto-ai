@@ -11,6 +11,7 @@ import time
 from typing import Any, Dict
 
 from fastapi import HTTPException, Request
+from src.web.web_i18n import tr
 
 
 def build_correction_stats(
@@ -104,7 +105,7 @@ def register_episodic_identity_routes(app, ctx) -> None:
         """
         _api_auth(request)
         if not telegram_client or not getattr(telegram_client, "skill_manager", None):
-            raise HTTPException(status_code=503, detail="Bot 未就绪或未注入 SkillManager")
+            raise HTTPException(status_code=503, detail=tr(request, "err.epi.bot_not_ready_sm"))
         sm = telegram_client.skill_manager
         lim = max(1, min(int(limit or 100), 500))
         src = source if source in ("user_stated", "ai_inferred") else ""
@@ -115,10 +116,10 @@ def register_episodic_identity_routes(app, ctx) -> None:
     async def api_episodic_memory_delete(request: Request, row_id: int):
         _api_write("episodic_memory")(request)
         if not telegram_client or not getattr(telegram_client, "skill_manager", None):
-            raise HTTPException(status_code=503, detail="Bot 未就绪")
+            raise HTTPException(status_code=503, detail=tr(request, "err.epi.bot_not_ready"))
         ok = telegram_client.skill_manager.episodic_delete_for_admin(int(row_id))
         if not ok:
-            raise HTTPException(status_code=404, detail="记录不存在或记忆未启用")
+            raise HTTPException(status_code=404, detail=tr(request, "err.epi.record_not_found"))
         return {"ok": True, "deleted": int(row_id)}
 
     @app.get("/api/episodic-memory/key-health")
@@ -131,7 +132,7 @@ def register_episodic_identity_routes(app, ctx) -> None:
         _api_auth(request)
         sm = getattr(telegram_client, "skill_manager", None) if telegram_client else None
         if not sm or not hasattr(sm, "episodic_key_health"):
-            raise HTTPException(status_code=503, detail="Bot 未就绪或未注入 SkillManager")
+            raise HTTPException(status_code=503, detail=tr(request, "err.epi.bot_not_ready_sm"))
         return {"ok": True, **sm.episodic_key_health(sample=max(0, min(int(sample or 10), 100)))}
 
     @app.get("/api/episodic-memory/key-migrate/plan")
@@ -140,10 +141,10 @@ def register_episodic_identity_routes(app, ctx) -> None:
         _api_auth(request)
         sm = getattr(telegram_client, "skill_manager", None) if telegram_client else None
         if not sm or not hasattr(sm, "episodic_plan_key_migration"):
-            raise HTTPException(status_code=503, detail="Bot 未就绪或未注入 SkillManager")
+            raise HTTPException(status_code=503, detail=tr(request, "err.epi.bot_not_ready_sm"))
         plat = (platform or "telegram").strip()[:32]
         if not plat:
-            raise HTTPException(status_code=400, detail="需要 platform")
+            raise HTTPException(status_code=400, detail=tr(request, "err.epi.need_platform"))
         return {"ok": True, **sm.episodic_plan_key_migration(plat)}
 
     @app.post("/api/episodic-memory/key-migrate")
@@ -152,10 +153,10 @@ def register_episodic_identity_routes(app, ctx) -> None:
         _api_write("episodic_memory")(request)
         sm = getattr(telegram_client, "skill_manager", None) if telegram_client else None
         if not sm or not hasattr(sm, "episodic_apply_key_migration"):
-            raise HTTPException(status_code=503, detail="Bot 未就绪或未注入 SkillManager")
+            raise HTTPException(status_code=503, detail=tr(request, "err.epi.bot_not_ready_sm"))
         plat = (platform or "telegram").strip()[:32]
         if not plat:
-            raise HTTPException(status_code=400, detail="需要 platform")
+            raise HTTPException(status_code=400, detail=tr(request, "err.epi.need_platform"))
         rep = sm.episodic_apply_key_migration(plat)
         # 落审计：谁在何时把哪个平台的裸 key 并入 canonical
         audit = getattr(ctx, "audit_store", None)
@@ -191,10 +192,10 @@ def register_episodic_identity_routes(app, ctx) -> None:
         """R15/R16：确认一条 AI 推断为属实——升格 user_stated 且置 stable，并落审计。"""
         _api_write("episodic_memory")(request)
         if not telegram_client or not getattr(telegram_client, "skill_manager", None):
-            raise HTTPException(status_code=503, detail="Bot 未就绪")
+            raise HTTPException(status_code=503, detail=tr(request, "err.epi.bot_not_ready"))
         content = telegram_client.skill_manager.episodic_confirm_for_admin(int(row_id))
         if not content:
-            raise HTTPException(status_code=404, detail="记录不存在、非 AI 推断或记忆未启用")
+            raise HTTPException(status_code=404, detail=tr(request, "err.epi.record_not_ai_inferred"))
         # R16：谁在何时把哪条 AI 推断确认成事实——与危机处置审计对称，便于回溯校正质量
         audit = getattr(ctx, "audit_store", None)
         if audit:
@@ -221,7 +222,7 @@ def register_episodic_identity_routes(app, ctx) -> None:
         """为缺失向量的情景记忆行补全 embedding（限流：单次最多 100 条；可选 prefix 筛选 memory_key）。"""
         _api_write("episodic_memory")(request)
         if not telegram_client or not getattr(telegram_client, "skill_manager", None):
-            raise HTTPException(status_code=503, detail="Bot 未就绪")
+            raise HTTPException(status_code=503, detail=tr(request, "err.epi.bot_not_ready"))
         sm = telegram_client.skill_manager
         lim = max(1, min(int(limit or 20), 100))
         pre = (prefix or "")[:120]
@@ -230,16 +231,16 @@ def register_episodic_identity_routes(app, ctx) -> None:
             err = str(out.get("error") or "")
             if err == "vector_disabled":
                 raise HTTPException(
-                    status_code=400, detail="情景记忆向量功能未启用（memory.vector.enabled）"
+                    status_code=400, detail=tr(request, "err.epi.vector_disabled")
                 )
             if err == "daily_embed_budget_exceeded":
                 raise HTTPException(
                     status_code=429,
-                    detail="本日情景记忆补全嵌入预算已用尽（memory.vector.daily_embed_budget）",
+                    detail=tr(request, "err.epi.embed_budget_exhausted"),
                 )
             if err == "no_store":
                 raise HTTPException(
-                    status_code=503, detail="情景记忆或 AI 客户端不可用"
+                    status_code=503, detail=tr(request, "err.epi.memory_or_ai_unavailable")
                 )
             raise HTTPException(status_code=400, detail=err or "backfill_failed")
         return out
@@ -257,7 +258,7 @@ def register_episodic_identity_routes(app, ctx) -> None:
         _api_auth(request)
         cpi = _get_cpi()
         if not cpi:
-            raise HTTPException(status_code=503, detail="CrossPlatformIdentity 未就绪")
+            raise HTTPException(status_code=503, detail=tr(request, "err.epi.identity_not_ready"))
         rows = cpi.list_all(limit=min(int(limit), 500))
         return {"ok": True, "items": [
             {"platform": r[0], "platform_uid": r[1], "canonical_id": r[2], "created_at": r[3]}
@@ -271,12 +272,12 @@ def register_episodic_identity_routes(app, ctx) -> None:
         _api_write("identity")(request)
         cpi = _get_cpi()
         if not cpi:
-            raise HTTPException(status_code=503, detail="CrossPlatformIdentity 未就绪")
+            raise HTTPException(status_code=503, detail=tr(request, "err.epi.identity_not_ready"))
         body = await request.json()
         pa, ua = str(body.get("platform_a", "")), str(body.get("uid_a", ""))
         pb, ub = str(body.get("platform_b", "")), str(body.get("uid_b", ""))
         if not all([pa, ua, pb, ub]):
-            raise HTTPException(status_code=400, detail="需要 platform_a/uid_a/platform_b/uid_b")
+            raise HTTPException(status_code=400, detail=tr(request, "err.epi.need_ab_pairs"))
         canon = cpi.link(pa, ua, pb, ub)
         return {"ok": True, "canonical_id": canon}
 
@@ -287,10 +288,10 @@ def register_episodic_identity_routes(app, ctx) -> None:
         _api_write("identity")(request)
         cpi = _get_cpi()
         if not cpi:
-            raise HTTPException(status_code=503, detail="CrossPlatformIdentity 未就绪")
+            raise HTTPException(status_code=503, detail=tr(request, "err.epi.identity_not_ready"))
         body = await request.json()
         plat, uid = str(body.get("platform", "")), str(body.get("uid", ""))
         if not plat or not uid:
-            raise HTTPException(status_code=400, detail="需要 platform 和 uid")
+            raise HTTPException(status_code=400, detail=tr(request, "err.epi.need_platform_uid"))
         new_canon = cpi.unlink(plat, uid)
         return {"ok": True, "canonical_id": new_canon}

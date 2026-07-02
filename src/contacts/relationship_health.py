@@ -27,8 +27,8 @@ _W_MUTUALITY = 0.15    # 对话对称性（单向唱独角戏 = 风险）
 _VALUE_INTIMACY = 50.0
 _VALUE_SILENT_DAYS = 7.0   # 高价值关系沉默超此天数 → value_at_risk
 
-# 漏斗中代表「已建立关系」的阶段（沉默更值得警觉）
-_BONDED_STAGES = {"LINE_ACCEPTED", "LINE_ENGAGED", "BONDED", "CONVERTED"}
+# 漏斗中代表「已建立关系」的阶段（沉默更值得警觉）——单一来源见 models.FUNNEL_DONE_STAGES（P5-2c）
+from src.contacts.models import FUNNEL_DONE_STAGES as _BONDED_STAGES
 
 
 @dataclass

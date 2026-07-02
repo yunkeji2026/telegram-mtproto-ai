@@ -1,9 +1,12 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="light">
+<html lang="{{ 'zh-CN' if (ui_lang|default('zh'))=='zh' else 'en-US' }}" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>登录 · {{ site_name|default('华灵科技客户转化聊天系统') }}</title>
+<title>{{ (i18n or {}).get('lg_s000', "登录") }} · {{ product_name|default((i18n or {}).get('brand.product', '智聊')) }}</title>
+{% include "_brand_head.html" %}
+<link rel="stylesheet" href="/static/brand/brand-lockup.css">
+<link rel="stylesheet" href="/static/brand/auth-surface.css">
 <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"></noscript>
@@ -30,13 +33,8 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .login-card{position:relative;z-index:10;background:var(--card);border:1px solid var(--bd);border-radius:20px;padding:2.6rem 2.4rem 2.4rem;width:380px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.15),0 0 0 1px var(--bd);animation:up .5s cubic-bezier(.4,0,.2,1)}
 [data-theme="dark"] .login-card{backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);background:rgba(14,20,35,.88);box-shadow:0 24px 64px rgba(0,0,0,.7)}
 @keyframes up{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
-/* logo */
-.logo{display:flex;align-items:center;gap:.75rem;margin-bottom:1.8rem}
-.logo-icon{width:44px;height:44px;background:var(--g);border-radius:13px;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 18px rgba(91,124,246,.4);animation:breathe 3s ease-in-out infinite}
-@keyframes breathe{0%,100%{box-shadow:0 6px 18px rgba(91,124,246,.4)}50%{box-shadow:0 8px 28px rgba(91,124,246,.65)}}
-.logo-icon svg{width:22px;height:22px;color:#fff}
-.logo-text h1{font-size:1.2rem;font-weight:800;line-height:1.15}
-.logo-text p{font-size:.78rem;color:var(--t2)}
+/* logo — see /static/brand/brand-lockup.css */
+.logo{margin-bottom:0}
 /* form */
 .f-lbl{display:block;font-size:.8rem;font-weight:600;color:var(--t2);margin-bottom:.45rem}
 .f-inp-wrap{position:relative;margin-bottom:1.3rem}
@@ -64,8 +62,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 
 <div class="login-card">
   <div class="logo">
-    <div class="logo-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div>
-    <div class="logo-text"><h1>{{ site_name|default('华灵科技客户转化聊天系统') }}</h1><p>管理控制台</p></div>
+    {% with variant='login' %}{% include "_brand_lockup.html" %}{% endwith %}
   </div>
   {% if error %}
   <div class="err">
@@ -77,46 +74,47 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
   <!-- Multi-user login -->
   <form method="post" action="/login" id="form-user">
     <div class="f-inp-wrap" style="margin-bottom:.9rem">
-      <label class="f-lbl">用户名</label>
-      <input class="f-inp" type="text" name="username" placeholder="用户名" required autofocus autocomplete="username">
+      <label class="f-lbl">{{ (i18n or {}).get('set_js_075', "用户名") }}</label>
+      <input class="f-inp" type="text" name="username" placeholder="{{ (i18n or {}).get('set_js_075', '用户名') }}" required autofocus autocomplete="username">
     </div>
     <div class="f-inp-wrap">
-      <label class="f-lbl">密码</label>
-      <input class="f-inp" type="password" id="pwd-inp" name="password" placeholder="密码" required autocomplete="current-password">
+      <label class="f-lbl">{{ (i18n or {}).get('us_s012', "密码") }}</label>
+      <input class="f-inp" type="password" id="pwd-inp" name="password" placeholder="{{ (i18n or {}).get('us_s012', '密码') }}" required autocomplete="current-password">
       <button type="button" class="eye-btn" onclick="togglePwd()">
         <svg id="eye-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
       </button>
     </div>
-    <button type="submit" class="btn-login">{{ i18n.login_btn if i18n else '登 录' }}</button>
+    <button type="submit" class="btn-login">{{ (i18n or {}).get('login_btn', '登 录') }}</button>
     <div style="text-align:center;margin-top:.8rem">
-      <button type="button" class="th-link" onclick="toggleLoginMode()" style="font-size:.75rem">使用 Token 登录</button>
+      <button type="button" class="th-link" onclick="toggleLoginMode()" style="font-size:.75rem">{{ (i18n or {}).get('lg_s002', "使用 Token 登录") }}</button>
     </div>
   </form>
   <!-- Token login (hidden by default) -->
   <form method="post" action="/login" id="form-token" style="display:none">
-    <label class="f-lbl">{{ i18n.login_title if i18n else '管理密码' }}</label>
+    <label class="f-lbl">{{ (i18n or {}).get('lg_s006', '管理密码') }}</label>
     <div class="f-inp-wrap">
-      <input class="f-inp" type="password" id="pwd-inp2" name="auth_token" placeholder="请输入访问令牌" autocomplete="current-password">
+      <input class="f-inp" type="password" id="pwd-inp2" name="auth_token" placeholder="{{ (i18n or {}).get('lg_s003', '请输入访问令牌') }}" autocomplete="current-password">
     </div>
-    <button type="submit" class="btn-login">{{ i18n.login_btn if i18n else '登 录' }}</button>
+    <button type="submit" class="btn-login">{{ (i18n or {}).get('login_btn', '登 录') }}</button>
     <div style="text-align:center;margin-top:.8rem">
-      <button type="button" class="th-link" onclick="toggleLoginMode()" style="font-size:.75rem">使用帐号密码登录</button>
+      <button type="button" class="th-link" onclick="toggleLoginMode()" style="font-size:.75rem">{{ (i18n or {}).get('lg_s004', "使用帐号密码登录") }}</button>
     </div>
   </form>
   {% else %}
   <form method="post" action="/login">
-    <label class="f-lbl">{{ i18n.login_title if i18n else '管理密码' }}</label>
+    <label class="f-lbl">{{ (i18n or {}).get('lg_s006', '管理密码') }}</label>
     <div class="f-inp-wrap">
-      <input class="f-inp" type="password" id="pwd-inp" name="auth_token" placeholder="请输入访问令牌" required autofocus autocomplete="current-password">
+      <input class="f-inp" type="password" id="pwd-inp" name="auth_token" placeholder="{{ (i18n or {}).get('lg_s003', '请输入访问令牌') }}" required autofocus autocomplete="current-password">
       <button type="button" class="eye-btn" onclick="togglePwd()">
         <svg id="eye-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
       </button>
     </div>
-    <button type="submit" class="btn-login">{{ i18n.login_btn if i18n else '登 录' }}</button>
+    <button type="submit" class="btn-login">{{ (i18n or {}).get('login_btn', '登 录') }}</button>
   </form>
   {% endif %}
   <div class="login-foot">
-    <button class="th-link" onclick="toggleTheme()">🌓 切换深色 / 浅色</button>
+    <button class="th-link" onclick="toggleTheme()">🌓 {{ (i18n or {}).get('lg_s005', "切换深色 / 浅色") }}</button>
+    <a class="th-link" style="text-decoration:none" href="/set_lang?lang={{ 'en' if (ui_lang|default('zh'))=='zh' else 'zh' }}">🌐 {{ (i18n or {}).get('lang_switch_label', '切换语言') }} ({{ 'EN' if (ui_lang|default('zh'))=='zh' else 'ZH' }})</a>
   </div>
 </div>
 

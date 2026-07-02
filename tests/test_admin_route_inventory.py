@@ -35,6 +35,14 @@ _BASELINE = """
 /api/admin/ops-report	GET
 /api/admin/tts-cost-trend	GET
 /api/admin/translation-confidence-trend	GET
+/api/admin/anti-repeat-advice	GET
+/api/admin/ai-safety-overview	GET
+/api/admin/ui-event	POST
+/api/admin/ai-quality-calibrate	GET
+/api/admin/ai-quality-thresholds	POST
+/api/admin/realtime-voice-alert-calibrate	GET
+/api/admin/realtime-voice-alert-thresholds	POST
+/api/admin/realtime-voice-trend	GET
 /api/admin/workers/{worker_id}/reset-circuit	POST
 /api/admin/reliability	GET
 /api/admin/license	GET
@@ -592,6 +600,7 @@ _BASELINE = """
 /api/companion/proactive/preview	GET
 /api/companion/capabilities	GET
 /api/companion/capabilities/delivery-calibration	GET
+/api/companion/capabilities/realtime-voice-calibration	GET
 /api/companion/capabilities/toggle	POST
 /api/companion/capabilities/toggle-audit	GET
 /api/companion/capabilities/preset	POST
@@ -612,6 +621,9 @@ _BASELINE = """
 /api/workspace/escalations	GET
 /api/workspace/escalations/mine	GET
 /api/workspace/handoff-brief	GET
+/api/workspace/conversation/{conversation_id}/snooze	POST
+/api/workspace/conversation/{conversation_id}/unsnooze	POST
+/api/workspace/snoozed	GET
 /api/workspace/follow-up/{task_id}/assign	POST
 /api/workspace/follow-up/{task_id}/done	POST
 /api/workspace/follow-up/{task_id}/snooze	POST
@@ -658,6 +670,7 @@ _BASELINE = """
 /api/vision-stats	GET
 /api/voice/cloned	GET
 /api/voice/enroll	POST
+/api/voice/persona-audit	GET
 /api/voice/profiles	GET
 /api/voice/profiles/{persona_id}	DELETE
 /api/voice/purge	POST
@@ -805,6 +818,18 @@ _BASELINE = """
 /api/workspace/anomaly	GET
 /api/workspace/trace	GET
 /api/workspace/trace/{trace_id}	GET
+/ops/voice-call	GET
+/api/voice/engine/status	GET
+/api/voice/engine/load	POST
+/api/voice/engine/unload	POST
+/api/voice/local-tts/status	GET
+/api/voice/local-tts/toggle	POST
+/api/voice/live/readiness	GET
+/api/voice/personas	GET
+/api/voice/conversations	GET
+/api/voice/preview	POST
+/api/voice/persona-voice	POST
+/api/voice/persona-voice	DELETE
 """
 
 

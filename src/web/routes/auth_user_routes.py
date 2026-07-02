@@ -16,7 +16,8 @@ from __future__ import annotations
 from fastapi import Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from src.utils.web_user_store import ROLE_MASTER, ROLE_LABELS
+from src.utils.web_user_store import ROLE_ADMIN, ROLE_AGENT, ROLE_MASTER, ROLE_LABELS
+from src.web.web_i18n import tr
 
 
 def register_auth_user_routes(
@@ -55,11 +56,22 @@ def register_auth_user_routes(
                 request.session["role"] = user["role"]
                 request.session["display_name"] = user.get("display_name", username)
                 request.session["jti"] = jti
-                # 坐席角色登录后直达独立工作台，不进后台
-                _dest = "/workspace" if user["role"] == "agent" else "/"
-                return RedirectResponse(_dest, status_code=303)
+                # 角色化落地：坐席→收件箱工作台；管理员(主管)→数据看板；系统主/只读→管理后台
+                _role = user["role"]
+                if _role == ROLE_AGENT:
+                    _dest = "/workspace"
+                elif _role == ROLE_ADMIN:
+                    _dest = "/workspace/dash"
+                else:
+                    _dest = "/"
+                resp = RedirectResponse(_dest, status_code=303)
+                # 语言跟人走：登录即套用该用户保存的 UI 语言（无偏好则不动，沿用 cookie/默认）
+                _lang = (user.get("lang") or "").strip().lower()
+                if _lang in ("zh", "en"):
+                    resp.set_cookie("ui_lang", _lang, max_age=365 * 86400)
+                return resp
             return templates.TemplateResponse(request, "login.html", {
-                "error": "用户名或密码错误", "has_users": True
+                "error": tr(request, "err.auth.bad_credentials"), "has_users": True
             })
         # legacy token login
         if auth_token and auth_token == token:
@@ -70,7 +82,7 @@ def register_auth_user_routes(
             request.session["jti"] = jti
             return RedirectResponse("/", status_code=303)
         return templates.TemplateResponse(request, "login.html", {
-            "error": "Token 错误",
+            "error": tr(request, "token_error"),
             "has_users": user_store.user_count() > 0
         })
 
@@ -96,7 +108,7 @@ def register_auth_user_routes(
     async def setup_submit(request: Request):
         """初始化第一个管理员账户（仅在无用户时可调用）"""
         if user_store.user_count() > 0:
-            raise HTTPException(400, "系统已初始化，请通过用户管理页面操作")
+            raise HTTPException(400, tr(request, "err.auth.already_initialized"))
         body = await request.json()
         username = (body.get("username") or "").strip()
         password = body.get("password", "")
@@ -106,17 +118,17 @@ def register_auth_user_routes(
         model    = (body.get("model") or "").strip()
 
         if not username or not password:
-            raise HTTPException(400, "用户名和密码不能为空")
+            raise HTTPException(400, tr(request, "err.auth.user_pass_required"))
         if len(password) < 6:
-            raise HTTPException(400, "密码至少 6 位")
+            raise HTTPException(400, tr(request, "su_js_003"))
         if password != confirm:
-            raise HTTPException(400, "两次密码不一致")
+            raise HTTPException(400, tr(request, "err.auth.pwd_mismatch_signup"))
 
         # 创建 master 账户
         result = user_store.create_user(username, password, ROLE_MASTER,
                                         display_name=username)
         if not result:
-            raise HTTPException(500, "账户创建失败")
+            raise HTTPException(500, tr(request, "err.auth.create_failed"))
 
         # 保存 AI 配置（如果提供了）
         if api_key:
@@ -150,9 +162,9 @@ def register_auth_user_routes(
         if api_key == "_keep_":
             api_key = _ai_cfg.get("api_key", "")
         if not api_key:
-            raise HTTPException(400, "API Key 不能为空")
+            raise HTTPException(400, tr(request, "err.auth.api_key_required"))
         if not base_url:
-            raise HTTPException(400, "Base URL 不能为空")
+            raise HTTPException(400, tr(request, "err.auth.base_url_required"))
         try:
             import httpx as _httpx
             async with _httpx.AsyncClient(timeout=15) as client:
@@ -183,15 +195,15 @@ def register_auth_user_routes(
         old_pw = body.get("old_password", "")
         new_pw = body.get("new_password", "")
         if not old_pw or not new_pw:
-            raise HTTPException(400, "请输入旧密码和新密码")
+            raise HTTPException(400, tr(request, "err.auth.old_new_pwd_required"))
         if len(new_pw) < 6:
-            raise HTTPException(400, "新密码至少 6 位")
+            raise HTTPException(400, tr(request, "base.shell.pwd_min_len"))
         uname = request.session.get("username", "")
         if not uname:
-            raise HTTPException(400, "无法确定当前用户")
+            raise HTTPException(400, tr(request, "err.auth.unknown_user"))
         user = user_store.verify(uname, old_pw)
         if not user:
-            raise HTTPException(400, "当前密码错误")
+            raise HTTPException(400, tr(request, "err.auth.wrong_current_pwd"))
         user_store.update_user(user["id"], password=new_pw)
         if audit_store:
             audit_store.log(uname, "change_password", uname)
@@ -214,20 +226,20 @@ def register_auth_user_routes(
         ajax = "application/json" in request.headers.get("accept", "")
         if len(password) < 6:
             if ajax:
-                return {"ok": False, "detail": "密码至少 6 位"}
+                return {"ok": False, "detail": tr(request, "su_js_003")}
             users = user_store.list_users()
             return templates.TemplateResponse(request, "users.html", {
                 "users": users, "role_labels": ROLE_LABELS,
-                "msg": "密码至少 6 位"
+                "msg": "密码至少 6 位", "msg_ok": False
             })
         result = user_store.create_user(username, password, role, display_name)
         if not result:
             if ajax:
-                return {"ok": False, "detail": f"用户名 '{username}' 已存在或角色无效"}
+                return {"ok": False, "detail": tr(request, "err.auth.user_exists_or_bad_role", username=username)}
             users = user_store.list_users()
             return templates.TemplateResponse(request, "users.html", {
                 "users": users, "role_labels": ROLE_LABELS,
-                "msg": f"创建失败：用户名 '{username}' 已存在或角色无效"
+                "msg": f"创建失败：用户名 '{username}' 已存在或角色无效", "msg_ok": False
             })
         if audit_store:
             audit_store.log(request.session.get("username", ""), "create_user", username)
@@ -287,7 +299,7 @@ def register_auth_user_routes(
         require_role(request, "users")
         current_jti = request.session.get("jti", "")
         if jti == current_jti:
-            raise HTTPException(400, "不能踢出自己的当前会话")
+            raise HTTPException(400, tr(request, "err.auth.cannot_kick_self"))
         user_store.revoke_session(jti)
         actor = request.session.get("username", "")
         if audit_store:

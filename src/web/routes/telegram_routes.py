@@ -18,6 +18,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, Response
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -44,10 +45,10 @@ def _asr_cfg(config_manager: Any) -> Dict[str, Any]:
     return dict(cfg.get("voice_recognition") or {})
 
 
-def _save_cfg(config_manager: Any) -> None:
+def _save_cfg(config_manager: Any, request) -> None:
     ok = config_manager.save()
     if ok is False:
-        raise HTTPException(500, "保存配置失败")
+        raise HTTPException(500, tr(request, "err.tg.save_config_failed"))
 
 
 def _check_wav_quality(path: str) -> Dict[str, Any]:
@@ -399,7 +400,7 @@ def register_telegram_routes(
                     oai[k] = v
                     updated.append("openai_tts.api_key")
 
-        _save_cfg(config_manager)
+        _save_cfg(config_manager, request)
         _save_snapshot(config_manager, label="voice_reply")
         logger.info("[telegram_routes] voice_reply saved: %s", updated)
         return {"ok": True, "updated": updated}
@@ -442,7 +443,7 @@ def register_telegram_routes(
                     fw[k] = v
                     updated.append(f"faster_whisper.{k}")
 
-        _save_cfg(config_manager)
+        _save_cfg(config_manager, request)
         _save_snapshot(config_manager, label="voice_asr")
         logger.info("[telegram_routes] voice_asr saved: %s", updated)
         return {"ok": True, "updated": updated}
@@ -472,7 +473,7 @@ def register_telegram_routes(
                     rl[k] = v
                     updated.append(f"reply_logic.{k}")
 
-        _save_cfg(config_manager)
+        _save_cfg(config_manager, request)
         _save_snapshot(config_manager, label="reply_logic")
 
         # 热更新运行时 TelegramClient
@@ -564,10 +565,10 @@ def register_telegram_routes(
         request: Request, file: UploadFile = File(...), _=Depends(api_auth)
     ):
         if not file.filename or not file.filename.lower().endswith(".wav"):
-            raise HTTPException(400, "只支持 .wav 格式")
+            raise HTTPException(400, tr(request, "tg_js_021"))
         content = await file.read()
         if len(content) > 20 * 1024 * 1024:  # 20 MB
-            raise HTTPException(400, "文件过大（最大 20MB）")
+            raise HTTPException(400, tr(request, "err.tg.file_too_large_20mb"))
         dest_dir = Path("voice_samples")
         dest_dir.mkdir(exist_ok=True)
         dest = dest_dir / file.filename
@@ -737,6 +738,6 @@ def register_telegram_routes(
         _save_snapshot(config_manager, label="pre_restore")
         root = getattr(config_manager, "config", None) or {}
         root["telegram"] = restored_tg
-        _save_cfg(config_manager)
+        _save_cfg(config_manager, request)
         logger.info("[telegram_routes] config restored from snapshot: %s", filename)
         return {"ok": True, "restored": filename}

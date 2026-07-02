@@ -20,6 +20,7 @@ from typing import Any, Dict, Optional
 # 克隆类后端：路由到这些时保留 voice_profile（克隆音色）。其余视为「通用音色」降级档。
 CLONE_BACKENDS = frozenset({
     "elevenlabs", "voice_clone_command", "voice_clone_lan", "coqui_http",
+    "minicpm_clone",
 })
 
 

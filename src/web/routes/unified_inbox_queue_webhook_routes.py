@@ -22,6 +22,7 @@ from fastapi import Depends, HTTPException, Request
 from src.web.routes.unified_inbox_auth import _is_supervisor
 from src.web.routes.unified_inbox_services import _inbox_store
 from src.web.routes.unified_inbox_sla import _presence_stale_sec
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ def register_queue_webhook_routes(app, *, api_auth) -> None:
         api_auth(request)
         store = _inbox_store(request)
         if store is None:
-            return {"ok": False, "error": "inbox_store 不可用"}
+            return {"ok": False, "error": tr(request, "err.svc.inbox_not_ready")}
 
         import time as _t
         now = _t.time()
@@ -166,7 +167,7 @@ def register_queue_webhook_routes(app, *, api_auth) -> None:
     async def api_webhook_outbound_test(request: Request, _=Depends(api_auth)):
         """P28：向所有已配置 Webhook 发送测试事件（ping）。"""
         if not _is_supervisor(request):
-            raise HTTPException(403, "需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
         import time as _t
         try:
             from src.integrations.shared.event_bus import get_event_bus
@@ -187,15 +188,15 @@ def register_queue_webhook_routes(app, *, api_auth) -> None:
         Body: {conversation_id: str, to_agent_id: str}
         """
         if not _is_supervisor(request):
-            raise HTTPException(403, "需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
         body = await request.json()
         cid = str(body.get("conversation_id") or "").strip()
         to_agent = str(body.get("to_agent_id") or "").strip()
         if not cid or not to_agent:
-            raise HTTPException(422, "conversation_id / to_agent_id 不能为空")
+            raise HTTPException(422, tr(request, "err.ws.field_required", field="conversation_id / to_agent_id"))
         store = _inbox_store(request)
         if store is None:
-            raise HTTPException(503, "inbox_store 不可用")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
         store.update_conv_meta(cid, {"claimed_by": to_agent})
         # 事件总线广播（通知目标坐席）
         try:

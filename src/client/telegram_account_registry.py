@@ -260,6 +260,16 @@ class TelegramAccountRegistry:
                 meta["phone_number"] = ctx.phone_number
             if ctx.persona_ids:
                 meta["persona_ids"] = list(ctx.persona_ids)
+                # 数据侧自愈：同写单数 meta.persona_id（=首个），让直接读 persona_id
+                # 的消费方（protocol_autoreply 生成 / voice 灰度解析等）无需各自懂
+                # 复数→单数回退。用 persona_id_auto 标记区分「本同步自动补的」与
+                # 「人工/QR 显式绑定的」：前者随 config 首个刷新，后者绝不覆盖——
+                # 否则陈旧单数会压过刷新后的复数（resolver 单数优先）造成回退。
+                _first_pid = str(ctx.persona_ids[0] or "").strip()
+                _cur_pid = str(meta.get("persona_id") or "").strip()
+                if _first_pid and (not _cur_pid or meta.get("persona_id_auto")):
+                    meta["persona_id"] = _first_pid
+                    meta["persona_id_auto"] = True
             meta["config_synced"] = True  # 标记来源含 config 同步
             if existing:
                 # 既有账号：保留 mode/status/会话凭据，仅刷新 config 拥有的静态属性

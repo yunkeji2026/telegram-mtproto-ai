@@ -9,29 +9,35 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
+  function _unit(key, n) {
+    n = n == null ? '' : String(n);
+    if (typeof window.Tf === 'function') return window.Tf(key, {n: n});
+    return n;
+  }
+
   // 带一位小数的时长（秒/分/时）——用于"平均首响"等聚合展示
   function fmtDur(sec) {
     sec = sec | 0;
-    if (sec < 60) return sec + '秒';
-    if (sec < 3600) return (sec / 60).toFixed(1) + '分';
-    return (sec / 3600).toFixed(1) + '时';
+    if (sec < 60) return _unit('crmw.unit.sec', sec);
+    if (sec < 3600) return _unit('crmw.unit.min_dec', (sec / 60).toFixed(1));
+    return _unit('crmw.unit.hour_dec', (sec / 3600).toFixed(1));
   }
 
   // 整数粒度等待时长（秒/分/时/天）——会话列表 ⏱
   function fmtWait(sec) {
     sec = sec | 0;
-    if (sec < 60) return sec + '秒';
-    if (sec < 3600) return Math.floor(sec / 60) + '分';
-    if (sec < 86400) return Math.floor(sec / 3600) + '时';
-    return Math.floor(sec / 86400) + '天';
+    if (sec < 60) return _unit('crmw.unit.sec', sec);
+    if (sec < 3600) return _unit('crmw.unit.min', Math.floor(sec / 60));
+    if (sec < 86400) return _unit('crmw.unit.hour', Math.floor(sec / 3600));
+    return _unit('crmw.unit.day', Math.floor(sec / 86400));
   }
 
   // 分钟起步粒度（分/时/天）——顶栏 SLA 徽标/告警
   function fmtWaitMin(sec) {
     sec = sec | 0;
-    if (sec < 3600) return Math.floor(sec / 60) + '分';
-    if (sec < 86400) return Math.floor(sec / 3600) + '时';
-    return Math.floor(sec / 86400) + '天';
+    if (sec < 3600) return _unit('crmw.unit.min', Math.floor(sec / 60));
+    if (sec < 86400) return _unit('crmw.unit.hour', Math.floor(sec / 3600));
+    return _unit('crmw.unit.day', Math.floor(sec / 86400));
   }
 
   // 自适应纵轴折线（rows:[{day,...}]，key 取值字段）
@@ -100,7 +106,7 @@
     return null;
   }
 
-  function toast(text, color) {
+  function toast(text, color, icon) {
     var box = document.getElementById('ws-toast-box');
     if (!box) {
       box = document.createElement('div');
@@ -118,7 +124,15 @@
     } else {
       t.className = 'tk-toast info';
     }
-    t.textContent = text;
+    if (icon && typeof window.uiIcon === 'function') {
+      t.style.display = 'inline-flex';
+      t.style.alignItems = 'flex-start';
+      t.style.gap = '7px';
+      t.innerHTML = window.uiIcon(icon, 14) +
+        '<span style="flex:1;min-width:0;">' + esc(text) + '</span>';
+    } else {
+      t.textContent = text;
+    }
     t.onclick = function () { try { box.removeChild(t); } catch (_) { } };
     box.appendChild(t);
     setTimeout(function () { try { box.removeChild(t); } catch (_) { } }, 8000);

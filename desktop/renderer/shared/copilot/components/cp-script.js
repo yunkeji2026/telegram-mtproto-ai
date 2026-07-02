@@ -12,8 +12,8 @@
   if (!Base) { console.error("cp-script: CpPanelBase 未加载"); return; }
 
   class CpScript extends Base {
-    emptyText() { return "选中会话后加载话题建议…"; }
-    emptyDataText() { return "暂无话题建议"; }
+    emptyText() { return this.t("cp.script.empty"); }
+    emptyDataText() { return this.t("cp.script.no_data"); }
     styles() {
       return `
       .card { border-left-color:var(--cp-accent,#7c8cff); background:var(--cp-accent-weak,rgba(124,140,255,.16)); }
@@ -26,13 +26,13 @@
       const topics = Array.isArray(d.topics) ? d.topics : [];
       const esc = (s) => this.esc(s);
       const badge = (d.stage_label || d.stage)
-        ? `<div class="stage-badge">当前阶段：${esc(d.stage_label || d.stage)}` +
-          (d.next_stage_label ? ` → 下一阶 ${esc(d.next_stage_label)}` : "") + `</div>`
+        ? `<div class="stage-badge">${esc(this.t("cp.script.stage", { stage: d.stage_label || d.stage }))}` +
+          (d.next_stage_label ? esc(this.t("cp.script.next_stage", { stage: d.next_stage_label })) : "") + `</div>`
         : "";
-      if (!topics.length) return badge + `<div class="empty">${this.emptyDataText()}</div>`;
+      if (!topics.length) return badge + `<div class="empty">${this.esc(this.emptyDataText())}</div>`;
       return badge + topics.map((t, i) => {
-        const btns = [`<button data-act="fill" data-idx="${i}">使用</button>`];
-        if (t.chain_id) btns.push(`<button data-act="chain" data-idx="${i}">⚡ 工作链</button>`);
+        const btns = [`<button data-act="fill" data-idx="${i}">${esc(this.t("cp.script.use"))}</button>`];
+        if (t.chain_id) btns.push(`<button data-act="chain" data-idx="${i}">${esc(this.t("cp.script.chain"))}</button>`);
         return `<div class="card">` +
           `<div class="title">${esc(t.title || "")}</div>` +
           (t.hint ? `<div class="hint">${esc(t.hint)}</div>` : "") +

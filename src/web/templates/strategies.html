@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}{% if ui_mode == 'simple' %}AI 策略概览{% else %}AI 策略{% endif %} · {{ site_name|default('华灵科技客户转化聊天系统') }}{% endblock %}
-{% block page_title %}{% if ui_mode == 'simple' %}AI 策略概览{% else %}AI 回复策略{% endif %}{% endblock %}
+{% block title %}{% if ui_mode == 'simple' %}{{ (i18n or {}).get('st_s001', "AI 策略概览") }}{% else %}{{ (i18n or {}).get('st_s002', "AI 策略") }}{% endif %} · {{ product_name|default((i18n or {}).get('brand.product', '智聊')) }}{% endblock %}
+{% block page_title %}{% if ui_mode == 'simple' %}{{ (i18n or {}).get('st_s001', "AI 策略概览") }}{% else %}{{ (i18n or {}).get('st_s003', "AI 回复策略") }}{% endif %}{% endblock %}
 {% block head %}
 <style>
 .st-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:1.2rem;margin-bottom:1.5rem}
@@ -50,9 +50,9 @@
 <div class="simple-guide" style="background:linear-gradient(135deg,rgba(91,124,246,.06),rgba(245,158,11,.06));border:1px solid rgba(91,124,246,.15);border-radius:10px;padding:.7rem 1rem;margin-bottom:.8rem;font-size:.82rem;color:var(--t2);display:flex;align-items:flex-start;gap:.6rem">
   <span style="font-size:1.1rem;flex-shrink:0;margin-top:.1rem">🔍</span>
   <div>
-    <strong style="color:var(--t);font-size:.85rem">只读概览</strong>
-    <div style="margin-top:.25rem;line-height:1.6">简洁模式下仅显示策略状态，编辑参数请<a href="/set_ui_mode?mode=full&next=/strategies" style="color:var(--p);font-weight:600">切换到完整模式</a>。</div>
-    <button onclick="this.closest('.simple-guide').style.display='none';localStorage.setItem('_guide_strategies','1')" style="background:none;border:none;color:var(--p);cursor:pointer;font-size:.78rem;font-weight:600;padding:0;margin-top:.3rem">知道了</button>
+    <strong style="color:var(--t);font-size:.85rem">{{ (i18n or {}).get('st_s004', "只读概览") }}</strong>
+    <div style="margin-top:.25rem;line-height:1.6">{{ (i18n or {}).get('st_s005', "简洁模式下仅显示策略状态，编辑参数请") }}<a href="/set_ui_mode?mode=full&next=/strategies" style="color:var(--p);font-weight:600">{{ (i18n or {}).get('tp_s005', "切换到完整模式") }}</a>.</div>
+    <button onclick="this.closest('.simple-guide').style.display='none';localStorage.setItem('_guide_strategies','1')" style="background:none;border:none;color:var(--p);cursor:pointer;font-size:.78rem;font-weight:600;padding:0;margin-top:.3rem">{{ (i18n or {}).get('inbox.grp.hint_ok', "知道了") }}</button>
   </div>
 </div>
 <script>if(localStorage.getItem('_guide_strategies')==='1')document.querySelector('.simple-guide').style.display='none';</script>
@@ -62,20 +62,20 @@
 <div style="margin-bottom:1rem;padding:.65rem 1rem;background:linear-gradient(135deg,rgba(34,197,94,.06),rgba(59,130,246,.08));border:1px solid rgba(34,197,94,.25);border-radius:10px;font-size:.82rem;display:flex;align-items:flex-start;gap:.65rem;line-height:1.6">
   <span style="font-size:1.1rem;flex-shrink:0;margin-top:.1rem">🌐</span>
   <div>
-    <strong style="color:#15803d;font-size:.84rem">作用域：所有平台</strong><br>
-    策略参数（Temperature / Max Tokens / 上下文轮数）对 <strong>Telegram、Messenger、LINE、WhatsApp</strong> 四端共同生效。
-    <span style="color:var(--t3)">意图路由中部分客服意图仅在 Telegram 触发，已在下方标注。</span>
+    <strong style="color:#15803d;font-size:.84rem">{{ (i18n or {}).get('st_s006', "作用域：所有平台") }}</strong><br>
+    {{ (i18n or {}).get('st_s007', "策略参数（Temperature / Max Tokens / 上下文轮数）对") }} <strong>Telegram, Messenger, LINE, WhatsApp</strong> {{ (i18n or {}).get('st_s008', "四端共同生效。") }}
+    <span style="color:var(--t3)">{{ (i18n or {}).get('st_s009', "意图路由中部分客服意图仅在 Telegram 触发，已在下方标注。") }}</span>
   </div>
 </div>
 
 <div class="p-head fa">
   <div>
-    <h1>{% if ui_mode == 'simple' %}AI 策略概览{% else %}AI 回复策略{% endif %}</h1>
-    <p style="font-size:.82rem;color:var(--t3);margin-top:.2rem">不同场景使用不同 AI 参数，实时生效无需重启 · 影响所有平台</p>
+    <h1>{% if ui_mode == 'simple' %}AI {{ (i18n or {}).get('sa_s036', "策略概览") }}{% else %}AI {{ (i18n or {}).get('wa_s077', "回复策略") }}{% endif %}</h1>
+    <p style="font-size:.82rem;color:var(--t3);margin-top:.2rem">{{ (i18n or {}).get('st_s010', "不同场景使用不同 AI 参数，实时生效无需重启 · 影响所有平台") }}</p>
   </div>
   <div style="display:flex;gap:.6rem;align-items:center" class="pro-only">
     <label style="display:flex;align-items:center;gap:.5rem;font-size:.83rem;color:var(--t2);cursor:pointer">
-      <input type="checkbox" id="st-select-all" onchange="stToggleAll(this)" style="width:15px;height:15px;accent-color:var(--p)"> 全选
+      <input type="checkbox" id="st-select-all" onchange="stToggleAll(this)" style="width:15px;height:15px;accent-color:var(--p)"> {{ (i18n or {}).get('ov_select_all', "全选") }}
     </label>
   </div>
 </div>
@@ -89,7 +89,7 @@
            style="width:15px;height:15px;accent-color:var(--p)" onchange="stUpdateBatch()">
   </div>
   <div class="st-hd">
-    <span class="st-name">{{ s.name or sid }}{% if sid == 'S5_silent_observe' %}<span class="st-scope st-scope-tg">TG 群聊</span>{% else %}<span class="st-scope st-scope-all">全平台</span>{% endif %}</span>
+    <span class="st-name">{{ s.name or sid }}{% if sid == 'S5_silent_observe' %}<span class="st-scope st-scope-tg">TG {{ (i18n or {}).get('st_s011', "群聊") }}</span>{% else %}<span class="st-scope st-scope-all">{{ (i18n or {}).get('rpa_fn_scope_all', "全平台") }}</span>{% endif %}</span>
     <div class="tog-wrap">
       <label class="tog">
         <input type="checkbox" {% if s.enabled is not defined or s.enabled %}checked{% endif %}
@@ -103,31 +103,31 @@
   <div class="st-params pro-only">
     {% if not s.skip_ai %}
     <div class="st-p">
-      <div class="st-p-lbl">Temperature <span class="tip" title="控制回复随机性。0=最确定，1=最多样。业务场景建议 0.3-0.5">?</span></div>
+      <div class="st-p-lbl">Temperature <span class="tip" title="{{ (i18n or {}).get('st_s012', '控制回复随机性。') }}0={{ (i18n or {}).get('st_s013', '最确定，') }}1={{ (i18n or {}).get('st_s014', '最多样。业务场景建议') }} 0.3-0.5">?</span></div>
       <input type="range" min="0" max="1" step="0.1" value="{{ s.temperature|default(0.7) }}"
              oninput="this.nextElementSibling.textContent=this.value;markDirty('{{ sid }}')" data-key="temperature">
       <span class="st-p-val">{{ s.temperature|default(0.7) }}</span>
     </div>
     <div class="st-p">
-      <div class="st-p-lbl">Max Tokens <span class="tip" title="AI 单次回复最大 token 数。1 token ≈ 1.5 个中文字。256=简短，512=正常，1024=详细">?</span></div>
+      <div class="st-p-lbl">Max Tokens <span class="tip" title="AI {{ (i18n or {}).get('st_s015', '单次回复最大 token 数。') }}1 token ≈ 1.5 {{ (i18n or {}).get('st_s016', '个中文字。') }}256={{ (i18n or {}).get('st_s017', '简短，') }}512={{ (i18n or {}).get('st_s018', '正常，') }}1024={{ (i18n or {}).get('psn_rl_detailed', '详细') }}">?</span></div>
       <input type="number" min="64" max="2048" step="64" value="{{ s.max_tokens|default(512) }}"
              oninput="markDirty('{{ sid }}')" data-key="max_tokens">
     </div>
     <div class="st-p">
-      <div class="st-p-lbl">上下文轮数 <span class="tip" title="传入 AI 的历史对话轮数。轮数越多上下文越丰富，但也越慢越贵">?</span></div>
+      <div class="st-p-lbl">{{ (i18n or {}).get('st_s019', "上下文轮数") }} <span class="tip" title="{{ (i18n or {}).get('st_s020', '传入 AI 的历史对话轮数。轮数越多上下文越丰富，但也越慢越贵') }}">?</span></div>
       <input type="number" min="0" max="20" step="1" value="{{ s.context_rounds|default(5) }}"
              oninput="markDirty('{{ sid }}')" data-key="context_rounds">
     </div>
     {% else %}
     <div class="st-p" style="grid-column:span 2">
-      <div class="st-p-lbl">跳过 AI <span class="tip" title="启用后直接使用模板回复，不调用 AI 接口，响应极快">?</span></div>
-      <span class="st-p-val" style="color:var(--green)">已启用 — 直接模板回复</span>
+      <div class="st-p-lbl">{{ (i18n or {}).get('db_js_034', "跳过") }} AI <span class="tip" title="{{ (i18n or {}).get('st_s021', '启用后直接使用模板回复，不调用 AI 接口，响应极快') }}">?</span></div>
+      <span class="st-p-val" style="color:var(--green)">{{ (i18n or {}).get('ov_js_enabled', "已启用") }} — {{ (i18n or {}).get('st_s022', "直接模板回复") }}</span>
     </div>
     {% endif %}
 
     {% if s.reply_probability is defined and s.reply_probability < 1.0 %}
     <div class="st-p" style="grid-column:span 2">
-      <div class="st-p-lbl">回复概率 <span class="tip" title="收到此类消息时实际回复的概率。0.1 = 只有10%的消息会回复，其余静默">?</span></div>
+      <div class="st-p-lbl">{{ (i18n or {}).get('st_s023', "回复概率") }} <span class="tip" title="{{ (i18n or {}).get('st_s024', '收到此类消息时实际回复的概率。') }}0.1 = {{ (i18n or {}).get('st_s025', '只有10%的消息会回复，其余静默') }}">?</span></div>
       <input type="range" min="0" max="1" step="0.05" value="{{ s.reply_probability }}"
              oninput="this.nextElementSibling.textContent=(this.value*100).toFixed(0)+'%';markDirty('{{ sid }}')" data-key="reply_probability">
       <span class="st-p-val">{{ (s.reply_probability * 100)|int }}%</span>
@@ -135,7 +135,7 @@
     {% endif %}
   </div>
 
-  <div class="st-p-lbl">关联意图</div>
+  <div class="st-p-lbl">{{ (i18n or {}).get('st_s026', "关联意图") }}</div>
   <div class="st-intents">
     {% for intent, mapped_sid in intent_map.items() %}
       {% if mapped_sid == sid %}
@@ -147,13 +147,13 @@
   <div class="st-foot">
     <span style="font-size:.75rem;color:var(--t3)">{{ sid }}</span>
     <div style="display:flex;gap:.4rem" class="pro-only">
-      <button class="btn btn-s btn-xs" onclick="openStrategyHistory('{{ sid }}')" title="查看该策略的参数变更历史">
+      <button class="btn btn-s btn-xs" onclick="openStrategyHistory('{{ sid }}')" title="{{ (i18n or {}).get('st_s027', '查看该策略的参数变更历史') }}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-        历史
+        {{ (i18n or {}).get('kb_s146', "历史") }}
       </button>
       <button class="btn btn-p btn-sm st-save" data-help="btn_save" onclick="saveStrategy('{{ sid }}')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg>
-        保存
+        {{ (i18n or {}).get('save', "保存") }}
       </button>
     </div>
   </div>
@@ -163,16 +163,16 @@
 
 <!-- Strategy batch bar -->
 <div class="st-batch-bar pro-only" id="st-batch-bar">
-  <span>已选 <strong id="st-batch-cnt">0</strong> 个策略</span>
+  <span>{{ (i18n or {}).get('tp_s014', "已选") }} <strong id="st-batch-cnt">0</strong> {{ (i18n or {}).get('sa_s024', "个策略") }}</span>
   <button class="btn btn-p btn-sm" onclick="stBatch(true)">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><polyline points="20 6 9 17 4 12"/></svg>
-    批量启用
+    {{ (i18n or {}).get('kb_s035', "批量启用") }}
   </button>
   <button class="btn btn-d btn-sm" onclick="stBatch(false)">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><line x1="5" y1="12" x2="19" y2="12"/></svg>
-    批量禁用
+    {{ (i18n or {}).get('st_s028', "批量禁用") }}
   </button>
-  <button class="btn btn-s btn-sm" onclick="stClearBatch()">取消</button>
+  <button class="btn btn-s btn-sm" onclick="stClearBatch()">{{ (i18n or {}).get('ov_js_cancel', "取消") }}</button>
 </div>
 
 <!-- Strategy History Modal -->
@@ -182,13 +182,13 @@
     <div style="padding:1rem 1.3rem;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:.7rem">
       <svg viewBox="0 0 24 24" fill="none" stroke="var(--p)" stroke-width="2" width="16" height="16"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
       <div>
-        <div style="font-weight:700;font-size:.95rem" id="sh-title">策略变更历史</div>
-        <div style="font-size:.75rem;color:var(--t3)">最近 20 次参数变更记录</div>
+        <div style="font-weight:700;font-size:.95rem" id="sh-title">{{ (i18n or {}).get('st_s029', "策略变更历史") }}</div>
+        <div style="font-size:.75rem;color:var(--t3)">{{ (i18n or {}).get('st_s030', "最近 20 次参数变更记录") }}</div>
       </div>
       <button class="btn btn-s btn-sm" style="margin-left:auto" onclick="closeStrategyHistory()">✕</button>
     </div>
     <div id="sh-body" style="padding:.8rem 1rem 1.2rem;max-height:55vh;overflow-y:auto">
-      <div style="text-align:center;padding:2rem;color:var(--t3)">加载中…</div>
+      <div style="text-align:center;padding:2rem;color:var(--t3)">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
     </div>
   </div>
 </div>
@@ -196,15 +196,15 @@
 <div class="map-card card fa pro-only">
   <h2>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 3h5v5"/><path d="M4 20L21 3"/><path d="M21 16v5h-5"/><path d="M15 15l6 6"/><path d="M4 4l5 5"/></svg>
-    意图 → 策略映射
-    <span style="margin-left:auto;font-size:.78rem;color:var(--t3);font-weight:400">修改后即时生效</span>
+    {{ (i18n or {}).get('inbox.ai.intent', "意图") }} → {{ (i18n or {}).get('st_s031', "策略映射") }}
+    <span style="margin-left:auto;font-size:.78rem;color:var(--t3);font-weight:400">{{ (i18n or {}).get('st_s032', "修改后即时生效") }}</span>
   </h2>
 
   <!-- 跨平台常用意图 -->
   <div style="margin-top:.6rem;margin-bottom:.3rem;font-size:.76rem;font-weight:600;color:var(--t2);display:flex;align-items:center;gap:.4rem">
     <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e"></span>
-    跨平台活跃意图
-    <span style="font-weight:400;color:var(--t3)">— 四端均可触发</span>
+    {{ (i18n or {}).get('st_s033', "跨平台活跃意图") }}
+    <span style="font-weight:400;color:var(--t3)">— {{ (i18n or {}).get('st_s034', "四端均可触发") }}</span>
   </div>
   <div class="map-grid">
     {% set cross_platform_intents = ['greeting', 'small_talk', 'direct_chat', 'complaint', 'test'] %}
@@ -226,8 +226,8 @@
   <details style="margin-top:.8rem">
     <summary style="font-size:.76rem;font-weight:600;color:var(--t3);cursor:pointer;display:flex;align-items:center;gap:.4rem;user-select:none;padding:.3rem 0">
       <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:rgba(59,130,246,.5)"></span>
-      Telegram 客服专用意图
-      <span style="font-weight:400">— 仅 Telegram 客服场景触发（点击展开）</span>
+      Telegram {{ (i18n or {}).get('st_s035', "客服专用意图") }}
+      <span style="font-weight:400">— {{ (i18n or {}).get('st_s036', "仅 Telegram 客服场景触发（点击展开）") }}</span>
     </summary>
     <div class="map-grid" style="margin-top:.5rem">
       {% for intent, mapped_sid in intent_map.items() %}
@@ -267,9 +267,9 @@ function saveStrategy(sid){
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify(data)
   }).then(r=>r.json()).then(d=>{
-    if(d.ok){showToast('已保存 '+sid,'ok');card.classList.remove('dirty')}
-    else showToast('保存失败: '+(d.detail||''),'err');
-  }).catch(()=>showToast('请求失败','err'));
+    if(d.ok){showToast(window.T('wa_js_053')+' '+sid,'ok');card.classList.remove('dirty')}
+    else showToast(window.T('ov_js_save_fail')+': '+(d.detail||''),'err');
+  }).catch(()=>showToast(window.T('ov_js_req_fail'),'err'));
 }
 function updateMapping(intent,sid){
   fetch('/api/strategies/mapping',{
@@ -278,22 +278,22 @@ function updateMapping(intent,sid){
     body:JSON.stringify({intent:intent,strategy_id:sid})
   }).then(r=>r.json()).then(d=>{
     if(d.ok)showToast(intent+' → '+sid,'ok');
-    else showToast('更新失败','err');
-  }).catch(()=>showToast('请求失败','err'));
+    else showToast(window.T('inbox.toast.update_fail'),'err');
+  }).catch(()=>showToast(window.T('ov_js_req_fail'),'err'));
 }
 
 /* ── 策略变更历史 ─────────────────────────── */
 async function openStrategyHistory(sid){
-  document.getElementById('sh-title').textContent='变更历史：'+sid;
+  document.getElementById('sh-title').textContent=window.T('st_js001')+sid;
   document.getElementById('sh-overlay').style.display='flex';
-  document.getElementById('sh-body').innerHTML='<div style="text-align:center;padding:2rem;color:var(--t3)">加载中…</div>';
+  document.getElementById('sh-body').innerHTML='<div style="text-align:center;padding:2rem;color:var(--t3)">'+window.T('dash.loading')+'</div>';
   try{
     const r=await fetch('/api/strategy-history/'+sid);
     const d=await r.json();
     const history=d.history||[];
     if(!history.length){
       document.getElementById('sh-body').innerHTML=
-        '<div style="text-align:center;padding:2rem;color:var(--t3)">暂无该策略的变更记录</div>';
+        '<div style="text-align:center;padding:2rem;color:var(--t3)">'+window.T('st_js002')+'</div>';
       return;
     }
     document.getElementById('sh-body').innerHTML=`
@@ -310,14 +310,14 @@ ${history.map(e=>{
         <span style="font-weight:700;font-size:.82rem;color:var(--t)">${act}</span>
         <span style="font-size:.72rem;color:var(--t3);margin-left:auto;font-family:Consolas,monospace">${(e.ts||'').slice(0,16)}</span>
       </div>
-      <div style="font-size:.76rem;color:var(--t2)">操作人：${e.user_id||'system'}</div>
+      <div style="font-size:.76rem;color:var(--t2)">${window.T('st_js003')}${e.user_id||'system'}</div>
       ${e.new_val?`<div style="font-size:.73rem;color:var(--t3);margin-top:.2rem;font-family:Consolas,monospace">${e.new_val.slice(0,120)}</div>`:''}
     </div>
   </div>`;
 }).join('')}
 </div>`;
   }catch(e){
-    document.getElementById('sh-body').innerHTML='<div style="text-align:center;padding:2rem;color:var(--red)">加载失败</div>';
+    document.getElementById('sh-body').innerHTML='<div style="text-align:center;padding:2rem;color:var(--red)">'+window.T('rpa_load_failed')+'</div>';
   }
 }
 function closeStrategyHistory(){document.getElementById('sh-overlay').style.display='none'}
@@ -345,10 +345,10 @@ function stClearBatch(){
 function stBatch(enabled){
   const ids=[...document.querySelectorAll('.st-cb:checked')].map(c=>c.dataset.sid);
   if(!ids.length)return;
-  const label=enabled?'启用':'禁用';
+  const label=enabled?window.T('enable'):window.T('disable');
   showConfirm(
-    `批量${label}策略`,
-    `确认将选中的 <strong>${ids.length}</strong> 个策略批量${label}？`,
+    window.Tf('st_batch_title', {label}),
+    window.Tf('st_batch_confirm', {n: ids.length, label}),
     async()=>{
       try{
         const r=await fetch('/api/batch-strategies',{
@@ -358,7 +358,7 @@ function stBatch(enabled){
         });
         const d=await r.json();
         if(r.ok&&d.ok){
-          showToast(`已批量${label} ${d.updated.length} 个策略`,'ok');
+          showToast(window.Tf('st_batch_done', {label, n: d.updated.length}),'ok');
           /* 同步更新 UI toggle */
           d.updated.forEach(sid=>{
             const card=document.getElementById('card-'+sid);
@@ -369,10 +369,10 @@ function stBatch(enabled){
             }
           });
           stClearBatch();
-        }else showToast(d.detail||'操作失败','err');
-      }catch(e){showToast('网络错误','err');}
+        }else showToast(d.detail||window.T('ov_js_op_fail'),'err');
+      }catch(e){showToast(window.T('draft.net_err'),'err');}
     },
-    {danger:!enabled,okLabel:`确认${label}`}
+    {danger:!enabled,okLabel:window.Tf('st_confirm_do', {label})}
   );
 }
 </script>

@@ -738,6 +738,9 @@ class SkillManager(LoggerMixin):
                 "_is_repeated_message", "_prev_reply_for_repeat",
                 # 语音消息标记（对方发的是语音，AI 回复应更口语化）
                 "_peer_message_is_voice", "_voice_duration",
+                # 入站媒体 / 短消息 / 语言切换提示（Telegram 收件箱与 RPA 共用）
+                "_peer_message_is_media", "_media_kind", "_media_desc", "_media_ref",
+                "_inbox_peer_kind", "_inbound_short_hint", "_topic_switch_hint",
             )
             for _mk in _line_merge_keys:
                 if _mk in context and context[_mk] is not None:
@@ -1148,6 +1151,33 @@ class SkillManager(LoggerMixin):
             elif _total_rounds > _KEEP_VERBATIM:
                 _conv_hist = _conv_hist[-_KEEP_VERBATIM * 2:]
             user_context['_conversation_history'] = _conv_hist
+
+            # 3b. 入站媒体 / 短消息 / 多语言切换补全。
+            # 原生 Telegram 直接回复与收件箱 auto-draft 都在这里对齐到同一套
+            # “真人感”上下文：贴纸/图片别当空文本，短消息短回，语言切换可自然点出来。
+            try:
+                from src.inbox.inbound_enrich import apply_inbound_enrichments
+                apply_inbound_enrichments(
+                    user_context,
+                    text=text,
+                    history=_conv_hist,
+                    reply_lang=str(user_context.get("reply_lang") or ""),
+                    media_type=str(
+                        context.get("media_type") or context.get("_media_kind") or ""
+                    ),
+                    media_ref=str(
+                        context.get("media_ref") or context.get("_media_ref") or ""
+                    ),
+                    media_desc=str(
+                        context.get("media_desc")
+                        or context.get("_media_desc")
+                        or context.get("image_ocr_text")
+                        or ""
+                    ),
+                    platform=str(context.get("platform") or ""),
+                )
+            except Exception:
+                self.logger.debug("%s入站上下文补全跳过", log_prefix, exc_info=True)
 
             # 追问回填 �?用户新消���达，回溯标�前一条策略事�?
             _chat_id = _safe_int_chat_id(context.get("chat_id", 0))
@@ -1652,9 +1682,11 @@ class SkillManager(LoggerMixin):
 
             # 5b. 相似度�测：如果回�与上条重复度 >65%，强指令重试
             # 无论用户消息是否相似，只要 bot 即将重复自己的上条回复就应重试
-            if reply and _prev_reply:
-                _sim = self._reply_similarity(_prev_reply, reply)
-                if _sim > 0.65:
+            if reply:
+                _win, _thr = self._anti_repeat_params()
+                _combined, _is_rep, _sim, _ssim = await self._anti_repeat_score(
+                    reply, user_context)
+                if _is_rep:
                     self.logger.info(
                         f"{log_prefix}回�相似�?{_sim:.0%}，强制重试换角度")
                     user_context["_anti_repeat_hint"] = (
@@ -1666,14 +1698,25 @@ class SkillManager(LoggerMixin):
                     so["temperature"] = min(float(so.get("temperature", 0.85)) + 0.15, 1.0)
                     user_context["_reply_strategy"] = so
                     try:
+                        from src.monitoring.metrics_store import get_metrics_store
+                        get_metrics_store().record_anti_repeat_rewrite_attempt()
+                    except Exception:
+                        pass
+                    try:
                         retry_reply = await asyncio.wait_for(
                             skill.execute(text, user_id_str, user_context),
                             timeout=30.0
                         )
                         if retry_reply:
-                            _sim2 = self._reply_similarity(_prev_reply, retry_reply)
-                            if _sim2 < _sim:
+                            _rc, _, _sim2, _ = await self._anti_repeat_score(
+                                retry_reply, user_context, record=False)
+                            if _rc < _combined:
                                 reply = retry_reply
+                                try:
+                                    from src.monitoring.metrics_store import get_metrics_store
+                                    get_metrics_store().record_anti_repeat_rewrite_adopted()
+                                except Exception:
+                                    pass
                                 self.logger.info(
                                     f"{log_prefix}重试成功: 新相似度 {_sim2:.0%}")
                             else:
@@ -1812,6 +1855,9 @@ class SkillManager(LoggerMixin):
         reply_lang: str = "",
         channel: str = "inbox",
         risk_level: str = "",
+        media_type: str = "",
+        media_ref: str = "",
+        media_desc: str = "",
     ) -> Optional[Dict[str, Any]]:
         """收件箱草稿生成的「统一规则引擎」（单一事实源）。
 
@@ -1994,6 +2040,22 @@ class SkillManager(LoggerMixin):
             except Exception:
                 self.logger.debug("%s陪伴关系跳过", log_prefix, exc_info=True)
 
+            # 3b. 入站媒体 / 短消息 / 多语言切换（Telegram 收件箱与 RPA 对齐）
+            try:
+                from src.inbox.inbound_enrich import apply_inbound_enrichments
+                apply_inbound_enrichments(
+                    user_context,
+                    text=text,
+                    history=_hist,
+                    reply_lang=str(reply_lang or user_context.get("reply_lang") or ""),
+                    media_type=media_type,
+                    media_ref=media_ref,
+                    media_desc=media_desc,
+                    platform=platform,
+                )
+            except Exception:
+                self.logger.debug("%s入站 enrich 跳过", log_prefix, exc_info=True)
+
             # 4. 意图识别（草稿模式不做意图继承/链跟踪，保持无状态纯净）
             intent = self._recognize_intent(text)
             user_context["current_intent"] = intent
@@ -2050,37 +2112,55 @@ class SkillManager(LoggerMixin):
                 _metric("empty")
                 return None
 
-            # 8b. 相似度重试（与 process_message 5b 同思路）：与上条回复重复度 >65%
-            #     → 注入「换角度」指令 + 抬温度重生一次；更优才采纳，否则保留原回复。
-            _prev_reply = (user_context.get("last_reply") or "").strip()
-            if _prev_reply:
+            # 8b. 相似度重试（与 process_message 5b 同思路）：与「最近 N 条」回复重复
+            #     → 换角度 + 抬温度重生一次；综合评分更低才采纳，否则保留。深度=N（默认 6）
+            #     且叠加**语义层**（可选，需嵌入）抓「换词不换意」的改写复读。
+            _combined, _is_rep, _csim, _ssim = await self._anti_repeat_score(
+                reply, user_context)
+            if _is_rep:
+                self.logger.info(
+                    "%s回复复读 char=%.0f%% sem=%.0f%% combined=%.2f，换角度重生一次",
+                    log_prefix, _csim * 100, _ssim * 100, _combined)
+                _metric("repeat_detected")
+                user_context["_anti_repeat_hint"] = (
+                    "1. 换一个完全不同的开头（禁止用上次的前5个字）\n"
+                    "2. 换一个不同的重点（上次说了什么，这次说别的）\n"
+                    "3. 风格要有明显区别，就像换了个心情在聊"
+                )
+                _so2 = dict(_so)
+                _so2["temperature"] = min(
+                    float(_so2.get("temperature", 0.85)) + 0.15, 1.0
+                )
                 try:
-                    _sim = self._reply_similarity(_prev_reply, reply)
+                    from src.monitoring.metrics_store import get_metrics_store
+                    get_metrics_store().record_anti_repeat_rewrite_attempt()
                 except Exception:
-                    _sim = 0.0
-                if _sim > 0.65:
-                    user_context["_anti_repeat_hint"] = (
-                        "1. 换一个完全不同的开头（禁止用上次的前5个字）\n"
-                        "2. 换一个不同的重点（上次说了什么，这次说别的）\n"
-                        "3. 风格要有明显区别，就像换了个心情在聊"
+                    pass
+                try:
+                    _retry = await self.ai_client.generate_reply_with_intent(
+                        user_message=text, intent=intent,
+                        user_context=user_context,
+                        strategy_overrides=_so2 or None,
                     )
-                    _so2 = dict(_so)
-                    _so2["temperature"] = min(
-                        float(_so2.get("temperature", 0.85)) + 0.15, 1.0
-                    )
-                    try:
-                        _retry = await self.ai_client.generate_reply_with_intent(
-                            user_message=text, intent=intent,
-                            user_context=user_context,
-                            strategy_overrides=_so2 or None,
-                        )
-                        _retry = (_retry or "").strip()
-                        if _retry and self._reply_similarity(_prev_reply, _retry) < _sim:
+                    _retry = (_retry or "").strip()
+                    _retry_ok = False
+                    if _retry:
+                        _rc, _, _, _ = await self._anti_repeat_score(
+                            _retry, user_context, record=False)
+                        if _rc < _combined:
                             reply = _retry
                             _metric("retry_applied")
-                    except Exception:
-                        self.logger.debug("%s重试跳过", log_prefix, exc_info=True)
-                    user_context.pop("_anti_repeat_hint", None)
+                            try:
+                                from src.monitoring.metrics_store import get_metrics_store
+                                get_metrics_store().record_anti_repeat_rewrite_adopted()
+                            except Exception:
+                                pass
+                            _retry_ok = True
+                    if not _retry_ok:
+                        _metric("repeat_persisted")
+                except Exception:
+                    self.logger.debug("%s重试跳过", log_prefix, exc_info=True)
+                user_context.pop("_anti_repeat_hint", None)
 
             # 9. 人设一致性守卫 + 危机事后兜底（与 process_message 5c/5d 同）
             _before_guard = reply
@@ -2402,6 +2482,236 @@ class SkillManager(LoggerMixin):
         if not ba or not bb:
             return 0.0
         return len(ba & bb) / len(ba | bb)
+
+    # ── 防复读（anti-repeat）：从「只比上一条」升级到「比最近 N 条」──────────────
+    #   语音复读事故的根因是文字复读：旧逻辑仅拿 last_reply（深度=1）比对，
+    #   中间隔一条不同回复就漏判「跟前天/昨天一样」。改为窗口化比对（默认 6 条，
+    #   可经 inbox.auto_draft.anti_repeat.{window,threshold} 调），命中 → 换角度重生。
+    _ANTI_REPEAT_WINDOW_DEFAULT = 6
+    _ANTI_REPEAT_THRESHOLD_DEFAULT = 0.65
+
+    def _anti_repeat_params(self) -> Tuple[int, float]:
+        """读取防复读窗口/阈值（config inbox.auto_draft.anti_repeat.*，含安全默认）。"""
+        window = self._ANTI_REPEAT_WINDOW_DEFAULT
+        threshold = self._ANTI_REPEAT_THRESHOLD_DEFAULT
+        try:
+            _cfg = self.config.config if hasattr(self.config, "config") else {}
+            if isinstance(_cfg, dict):
+                _ar = (((_cfg.get("inbox") or {}).get("auto_draft") or {})
+                       .get("anti_repeat") or {})
+                window = int(_ar.get("window", window) or window)
+                threshold = float(_ar.get("threshold", threshold) or threshold)
+        except Exception:
+            pass
+        return max(1, window), min(max(threshold, 0.0), 1.0)
+
+    def _recent_reply_pool(self, user_context: Dict[str, Any], window: int) -> List[str]:
+        """本会话最近 window 条已发回复（含 last_reply 兜底），供防复读比对。"""
+        pool: List[str] = []
+        _rr = user_context.get("recent_replies")
+        if isinstance(_rr, list):
+            for _r in _rr:
+                if isinstance(_r, str) and _r.strip():
+                    pool.append(_r.strip())
+        _lr = (user_context.get("last_reply") or "").strip()
+        if _lr and _lr not in pool:
+            pool.append(_lr)
+        return pool[-window:] if window > 0 else pool
+
+    def _reply_repeat_max_sim(self, reply: str, user_context: Dict[str, Any],
+                              window: int) -> float:
+        """reply 与最近 window 条历史回复的最大 Jaccard 相似度（0=无历史/不重复）。"""
+        reply = (reply or "").strip()
+        if not reply:
+            return 0.0
+        best = 0.0
+        for _r in self._recent_reply_pool(user_context, window):
+            try:
+                _s = self._reply_similarity(_r, reply)
+            except Exception:
+                _s = 0.0
+            if _s > best:
+                best = _s
+                if best >= 1.0:
+                    break
+        return best
+
+    # ── 语义层防复读（可选）：字符 Jaccard 抓不住「换词不换意」的改写复读，用嵌入
+    #   余弦兜底。绝对值/阈值随嵌入模型而异（如 nomic-embed-text 基线偏高、需高阈~0.91
+    #   且建议加 query_prefix；bge-m3 可原文低阈），故阈值/前缀走配置。嵌入不可用/失败
+    #   一律回落纯字符层（零阻断）。默认关，走 inbox.auto_draft.anti_repeat.semantic.* 开。
+    _ANTI_REPEAT_SEM_THRESHOLD_DEFAULT = 0.90
+
+    def _anti_repeat_semantic_cfg(self) -> Tuple[bool, float, str]:
+        """(enabled, threshold, query_prefix)——语义层配置（含安全默认，默认关）。"""
+        enabled, threshold, prefix = False, self._ANTI_REPEAT_SEM_THRESHOLD_DEFAULT, ""
+        try:
+            _cfg = self.config.config if hasattr(self.config, "config") else {}
+            if isinstance(_cfg, dict):
+                _s = (((((_cfg.get("inbox") or {}).get("auto_draft") or {})
+                        .get("anti_repeat") or {}).get("semantic")) or {})
+                enabled = bool(_s.get("enabled", enabled))
+                threshold = float(_s.get("threshold", threshold) or threshold)
+                prefix = str(_s.get("query_prefix", prefix) or "")
+        except Exception:
+            pass
+        return enabled, min(max(threshold, 0.0), 1.0), prefix
+
+    def _embed_cache_max(self) -> int:
+        """防复读嵌入缓存 LRU 上限（config ...semantic.embed_cache_max，默认类常量 512）。
+
+        配置化后可由 anti_repeat_advisor 依实测命中率给出「上调/下调」的可落地建议。
+        """
+        try:
+            _cfg = self.config.config if hasattr(self.config, "config") else {}
+            if isinstance(_cfg, dict):
+                _s = (((((_cfg.get("inbox") or {}).get("auto_draft") or {})
+                        .get("anti_repeat") or {}).get("semantic")) or {})
+                v = int(_s.get("embed_cache_max", 0) or 0)
+                if v > 0:
+                    return v
+        except Exception:
+            pass
+        return self._EMBED_VEC_CACHE_MAX
+
+    @staticmethod
+    def _cosine_sim(a: List[float], b: List[float]) -> float:
+        if not a or not b:
+            return 0.0
+        n = min(len(a), len(b))
+        if n == 0:
+            return 0.0
+        dot = na = nb = 0.0
+        for i in range(n):
+            x = a[i]; y = b[i]
+            dot += x * y; na += x * x; nb += y * y
+        if na <= 0 or nb <= 0:
+            return 0.0
+        return dot / ((na ** 0.5) * (nb ** 0.5))
+
+    _EMBED_VEC_CACHE_MAX = 512
+
+    async def _embed_cached(self, texts: List[str]) -> List[List[float]]:
+        """带进程内 LRU 的批量嵌入：只对**未命中**的文本发一次批量请求，命中直接复用。
+
+        向量对 (文本 + 模型) 确定 → 跨轮次/跨用户可安全共享。防复读里「最近 N 条」在
+        上一轮作为候选时已被嵌入过 → 本轮命中缓存，稳态每轮只需嵌「当前候选」1 条
+        （由 O(N) 次嵌入降到 O(1)）。任何失败该位置回 []（不缓存失败）；绝不抛。
+        """
+        import hashlib
+        from collections import OrderedDict as _OD
+        if not hasattr(self, "_embed_vec_cache"):
+            self._embed_vec_cache = _OD()  # type: ignore[attr-defined]
+        cache = self._embed_vec_cache
+        keys = [hashlib.sha1(t.encode("utf-8")).hexdigest() for t in texts]
+        out: List[Optional[List[float]]] = [None] * len(texts)
+        miss_idx: List[int] = []
+        for i, k in enumerate(keys):
+            v = cache.get(k)
+            if v is not None:
+                cache.move_to_end(k)
+                out[i] = v
+            else:
+                miss_idx.append(i)
+        if miss_idx:
+            ai = self.ai_client
+            try:
+                miss_vecs = await ai.embed_with_fallback([texts[i] for i in miss_idx])
+            except Exception:
+                miss_vecs = []
+            for j, i in enumerate(miss_idx):
+                v = miss_vecs[j] if (miss_vecs and j < len(miss_vecs)) else []
+                out[i] = v
+                if v:  # 只缓存成功向量（失败位下轮重试）
+                    cache[keys[i]] = v
+                    cache.move_to_end(keys[i])
+            _cap = self._embed_cache_max()
+            while len(cache) > _cap:
+                cache.popitem(last=False)
+        try:
+            from src.monitoring.metrics_store import get_metrics_store
+            get_metrics_store().record_embed_cache(
+                hits=len(texts) - len(miss_idx), misses=len(miss_idx))
+        except Exception:
+            pass
+        return [v if v else [] for v in out]
+
+    async def _semantic_repeat_max_sim(
+        self, reply: str, user_context: Dict[str, Any], window: int, prefix: str,
+    ) -> float:
+        """reply 与最近 window 条历史回复的最大嵌入余弦（嵌入不可用/失败→0.0）。"""
+        reply = (reply or "").strip()
+        ai = self.ai_client
+        if not reply or ai is None or not hasattr(ai, "embed_with_fallback"):
+            return 0.0
+        pool = self._recent_reply_pool(user_context, window)
+        if not pool:
+            return 0.0
+        try:
+            texts = [prefix + reply] + [prefix + p for p in pool]
+            vecs = await self._embed_cached(texts)
+        except Exception:
+            return 0.0
+        if not vecs or len(vecs) != len(pool) + 1 or not vecs[0]:
+            return 0.0
+        rv = vecs[0]
+        best = 0.0
+        for v in vecs[1:]:
+            s = self._cosine_sim(rv, v)
+            if s > best:
+                best = s
+        return best
+
+    async def _anti_repeat_score(
+        self, reply: str, user_context: Dict[str, Any], *, record: bool = True,
+    ) -> Tuple[float, bool, float, float]:
+        """复读综合评分 → (combined, is_repeat, char_sim, sem_sim)。
+
+        combined = max(char_sim/char_thr, sem_sim/sem_thr)；>1 判定复读。
+        字符层已触发即跳过嵌入（省调用）；语义层仅在开启且字符未触发时算，任何
+        嵌入失败自动回落纯字符层（零阻断）。可跨 5b/8b 复用（含重试后再评分）。
+
+        record=False 用于重试候选的复评（不计入观测的「主判定」，避免触发率虚高）。
+        """
+        _win, _thr = self._anti_repeat_params()
+        char_sim = self._reply_repeat_max_sim(reply, user_context, _win)
+        char_trig = (_thr > 0 and char_sim / _thr > 1.0)
+        combined = (char_sim / _thr) if _thr > 0 else 0.0
+        sem_sim = 0.0
+        if combined <= 1.0:
+            sem_on, sem_thr, prefix = self._anti_repeat_semantic_cfg()
+            if sem_on and sem_thr > 0:
+                sem_sim = await self._semantic_repeat_max_sim(
+                    reply, user_context, _win, prefix)
+                if sem_sim > 0:
+                    combined = max(combined, sem_sim / sem_thr)
+        is_rep = combined > 1.0
+        if record:
+            _layer = "char" if char_trig else ("semantic" if is_rep else "none")
+            try:
+                from src.monitoring.metrics_store import get_metrics_store
+                get_metrics_store().record_anti_repeat_check(_layer)
+            except Exception:
+                pass
+        return combined, is_rep, char_sim, sem_sim
+
+    def _push_recent_reply(self, user_context: Dict[str, Any], reply: str) -> None:
+        """把刚发出的回复压入环形缓冲（略大于窗口留冗余），供后续轮次防复读。"""
+        reply = (reply or "").strip()
+        if not reply:
+            return
+        try:
+            _win, _ = self._anti_repeat_params()
+        except Exception:
+            _win = self._ANTI_REPEAT_WINDOW_DEFAULT
+        _rr = user_context.get("recent_replies")
+        if not isinstance(_rr, list):
+            _rr = []
+        _rr.append(reply[:500])
+        _keep = max(1, _win) + 2
+        if len(_rr) > _keep:
+            _rr = _rr[-_keep:]
+        user_context["recent_replies"] = _rr
 
     def _hash_content(self, text: str, chat_id: str = "") -> str:
         """生成内�哈希（含 chat_id，不同群的相同文���互相阻断�?"""
@@ -4512,6 +4822,11 @@ class SkillManager(LoggerMixin):
             'last_reply_time': current_time,
             'reply_count': user_context.get('reply_count', 0) + 1
         })
+        # 防复读窗口：维护最近 N 条已发回复环形缓冲（供 5b/8b 深度比对，持久化）
+        try:
+            self._push_recent_reply(user_context, _clean_reply)
+        except Exception:
+            pass
 
         try:
             _cfg0 = self.config.config if hasattr(self.config, "config") else {}

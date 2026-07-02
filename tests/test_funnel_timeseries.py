@@ -364,8 +364,12 @@ class TestFunnelTimeseriesPartial:
         assert 'data-days="30"' in partial_text
 
     def test_handles_empty_series_gracefully(self, partial_text: str):
-        """series=[] 时必须显示"暂无时序数据"而不是抛 JS 错误。"""
-        assert "暂无时序数据" in partial_text
+        """series=[] 时必须显示本地化的"暂无时序数据"空态（window.T('rpa_fn_no_ts')）而非抛 JS 错误。
+
+        i18n 后空态文案不再硬编码中文，改经客户端 window.T 随语言切换（zh '暂无时序数据…' /
+        en 'No timeline data…'）；此处校验落到该 i18n 键的调用。
+        """
+        assert "window.T('rpa_fn_no_ts')" in partial_text
 
     def test_null_rate_creates_path_break(self, partial_text: str):
         """rates[key]=null 时折线必须断点（segStart 重置），不要画"飞过去"的假数据线。"""

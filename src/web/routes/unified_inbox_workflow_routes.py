@@ -25,6 +25,7 @@ from fastapi import Depends, HTTPException, Request
 
 from src.web.routes.unified_inbox_auth import _agent_from_request
 from src.web.routes.unified_inbox_services import _contacts_store, _inbox_store
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -233,7 +234,7 @@ def register_workflow_routes(app, *, api_auth) -> None:
         body = await request.json()
         store = _inbox_store(request)
         if store is None:
-            return {"ok": False, "error": "inbox_store 不可用"}
+            return {"ok": False, "error": tr(request, "err.svc.inbox_not_ready")}
         action_id = store.upsert_workflow_action(body)
         return {"ok": True, "action_id": action_id}
 
@@ -243,7 +244,7 @@ def register_workflow_routes(app, *, api_auth) -> None:
         body["action_id"] = action_id
         store = _inbox_store(request)
         if store is None:
-            return {"ok": False, "error": "inbox_store 不可用"}
+            return {"ok": False, "error": tr(request, "err.svc.inbox_not_ready")}
         store.upsert_workflow_action(body)
         return {"ok": True, "action_id": action_id}
 
@@ -282,7 +283,7 @@ def register_workflow_routes(app, *, api_auth) -> None:
         body = await request.json()
         store = _inbox_store(request)
         if store is None:
-            return {"ok": False, "error": "inbox_store 不可用"}
+            return {"ok": False, "error": tr(request, "err.svc.inbox_not_ready")}
         chain_id = store.upsert_workflow_chain(body)
         return {"ok": True, "chain_id": chain_id}
 
@@ -358,12 +359,12 @@ def register_workflow_routes(app, *, api_auth) -> None:
         """P47：取消运行中的工作链执行。"""
         store = _inbox_store(request)
         if store is None:
-            raise HTTPException(503, "inbox_store 不可用")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
         ex = store.get_workflow_execution(exec_id)
         if not ex:
-            raise HTTPException(404, "执行记录不存在")
+            raise HTTPException(404, tr(request, "err.ws.exec_record_not_found"))
         if ex.get("status") != "running":
-            raise HTTPException(422, "仅可取消运行中的工作链")
+            raise HTTPException(422, tr(request, "err.ws.only_cancel_running_chain"))
         body = {}
         if request.headers.get("content-type", "").startswith("application/json"):
             try:
@@ -374,7 +375,7 @@ def register_workflow_routes(app, *, api_auth) -> None:
         agent_id, agent_name = _agent_from_request(request)
         ok = store.cancel_workflow_execution(exec_id)
         if not ok:
-            raise HTTPException(422, "取消失败")
+            raise HTTPException(422, tr(request, "msg_js_2058"))
         try:
             from src.integrations.shared.event_bus import get_event_bus
             import time as _t
@@ -405,9 +406,9 @@ def register_workflow_routes(app, *, api_auth) -> None:
         chain_id = str(body.get("chain_id") or "")
         store = _inbox_store(request)
         if not chain_id or store is None:
-            return {"ok": False, "error": "缺少 chain_id"}
+            return {"ok": False, "error": tr(request, "err.ws.missing_chain_id")}
         if store.has_running_chain(conversation_id, chain_id):
-            return {"ok": False, "error": "该会话已有同链运行中"}
+            return {"ok": False, "error": tr(request, "err.ws.chain_already_running")}
         exec_id = store.start_chain_execution(
             chain_id, conversation_id,
             {"agent": request.session.get("username") or ""},

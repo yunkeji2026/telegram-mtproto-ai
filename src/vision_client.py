@@ -61,9 +61,22 @@ def has_any_vision_backend(merged: dict, global_vision: dict) -> bool:
     return _zhipu_credentials(gv, merged) is not None
 
 
-def _image_to_data_url(image_path: str, max_dim: Optional[int] = None) -> Optional[str]:
+def _image_to_data_url(
+    image_path: str,
+    max_dim: Optional[int] = None,
+    force_jpeg: bool = False,
+) -> Optional[str]:
     """将本地图片转为 data URL（base64），供多模态 API 使用。
-    max_dim: 若非 None，将图片缩放使最长边 ≤ max_dim，并以 JPEG 输出（减少本地 VLM 内存压力）。
+
+    max_dim: 若非 None，将图片最长边缩放至 ≤ max_dim（降低本地 VLM 显存压力）。
+    force_jpeg: 强制经 PIL 重编码为 JPEG，**绕过 LM Studio 对 webp data URI 的已知
+        bug**（lmstudio-ai/lmstudio-bug-tracker#1752/#1839：webp 前缀被拒、报
+        "'url' field must be a base64 encoded image"；jpeg/png 正常）。
+
+    只要 max_dim 或 force_jpeg 任一开启即走 PIL 重编码为 JPEG（**无论是否需要缩放**），
+    确保发往本地 VLM 的图片统一是 jpeg —— 修复「小尺寸 webp（最长边 ≤ max_dim）跳过转码、
+    以原始 webp 前缀发出触发上述 bug」的回归。PIL 不可用/解码失败时回落原始编码，
+    并将 webp 标成 png 前缀（社区验证可被 LM Studio 正确解码）作为最后兜底。
     """
     path = Path(image_path)
     if not path.exists() or not path.is_file():
@@ -72,29 +85,31 @@ def _image_to_data_url(image_path: str, max_dim: Optional[int] = None) -> Option
         raw = path.read_bytes()
         if len(raw) > 10 * 1024 * 1024:  # 10MB hard limit
             return None
-        if max_dim is not None:
+        suffix = path.suffix.lower()
+        if max_dim is not None or force_jpeg:
             try:
                 import io
                 from PIL import Image as _PILImage
                 img = _PILImage.open(io.BytesIO(raw)).convert("RGB")
-                w, h = img.size
-                if max(w, h) > max_dim:
-                    scale = max_dim / max(w, h)
-                    img = img.resize((int(w * scale), int(h * scale)), _PILImage.LANCZOS)
+                if max_dim is not None:
+                    w, h = img.size
+                    if max(w, h) > max_dim:
+                        scale = max_dim / max(w, h)
+                        img = img.resize((int(w * scale), int(h * scale)), _PILImage.LANCZOS)
                 buf = io.BytesIO()
                 img.save(buf, format="JPEG", quality=85)
-                raw = buf.getvalue()
-                b64 = base64.b64encode(raw).decode("ascii")
+                b64 = base64.b64encode(buf.getvalue()).decode("ascii")
                 return f"data:image/jpeg;base64,{b64}"
             except Exception:
-                pass  # fall through to original encoding
+                pass  # PIL 不可用/解码失败 → 回落下方原始编码（含 webp→png 兜底）
         b64 = base64.b64encode(raw).decode("ascii")
-        suffix = path.suffix.lower()
         mime = "image/jpeg"
         if suffix in (".png",):
             mime = "image/png"
         elif suffix in (".gif",):
             mime = "image/gif"
+        elif suffix in (".webp",):
+            mime = "image/png"  # LM Studio webp bug 兜底：webp 数据用 png 前缀发出
         return f"data:{mime};base64,{b64}"
     except Exception:
         return None
@@ -181,7 +196,7 @@ class VisionClient:
         max_dim = self.config.get("max_image_dim")
         if max_dim is None:
             max_dim = 800  # default: resize to 800px max for local VLMs
-        data_url = _image_to_data_url(image_path, max_dim=int(max_dim))
+        data_url = _image_to_data_url(image_path, max_dim=int(max_dim), force_jpeg=True)
         if not data_url:
             self.logger.warning("图片转 base64 失败或文件过大")
             return None
@@ -219,7 +234,7 @@ class VisionClient:
         client = self._get_zhipu()
         if not client:
             return None
-        data_url = _image_to_data_url(image_path)
+        data_url = _image_to_data_url(image_path, force_jpeg=True)
         if not data_url:
             self.logger.warning("图片转 base64 失败或文件过大")
             return None

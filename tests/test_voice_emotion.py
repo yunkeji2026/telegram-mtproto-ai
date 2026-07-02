@@ -9,9 +9,21 @@ from src.ai.voice_emotion import (
     coerce_emotion,
     derive_emotion,
     edge_prosody,
+    emotion_tone_descriptor,
+    fish_marker,
+    persona_default_emotion,
     to_elevenlabs_text,
+    to_fish_text,
     to_openai_instructions,
+    to_qwen_instructions,
 )
+
+
+def test_emotion_tone_descriptor_words_and_neutral():
+    assert emotion_tone_descriptor(EmotionSpec("playful")) == "俏皮、活泼、带点调侃"
+    assert emotion_tone_descriptor(EmotionSpec("warm")).startswith("温暖")
+    assert emotion_tone_descriptor(NEUTRAL) == ""               # 中性 → 空（不加基调）
+    assert emotion_tone_descriptor(EmotionSpec("不存在啦")) == ""  # 脏输入 → 归 neutral → 空
 
 
 # ── EmotionSpec 规整 ─────────────────────────────────────────────────────────
@@ -59,6 +71,59 @@ def test_derive_emotion_relationship_stage_and_default():
     assert derive_emotion(default="calm").emotion == "calm"
 
 
+def test_persona_default_emotion_from_character_traits():
+    assert persona_default_emotion({
+        "name": "小雨",
+        "personality": {"traits": ["活泼可爱", "爱笑"], "style": "情绪外放"},
+    }) == "playful"
+    assert persona_default_emotion({
+        "name": "Marcus",
+        "role": "资深金融顾问",
+        "personality": {"traits": ["理性冷静", "严谨务实"]},
+    }) == "serious"
+    assert persona_default_emotion({
+        "name": "Fiona",
+        "personality": {"traits": ["温暖体贴", "极强同理心"]},
+    }) == "warm"
+
+
+def test_derive_emotion_uses_persona_when_no_other_signal():
+    spec = derive_emotion(
+        text="我刚到家",
+        persona={"personality": {"traits": ["活泼可爱", "爱笑"]}},
+        default="calm",
+    )
+    assert spec.emotion == "playful"
+
+
+def test_persona_explicit_emotion_overrides_trait_inference():
+    """运营在 voice_profile 上钉死的情绪基调应胜过自由文本关键词推断。"""
+    # traits 含「热情」会被推断成 playful，但显式钉 calm 必须赢。
+    persona = {
+        "name": "张景光",
+        "personality": {"traits": ["沉稳内敛"], "style": "情绪高涨时热情浮现"},
+        "voice_profile": {"backend": "edge_tts", "emotion": "calm"},
+    }
+    assert persona_default_emotion(persona) == "calm"
+    # 顶层 voice_emotion 同样可钉。
+    assert persona_default_emotion(
+        {"voice_emotion": "serious", "personality": {"traits": ["活泼"]}}
+    ) == "serious"
+    # 非法值忽略 → 回落 trait 推断。
+    assert persona_default_emotion(
+        {"voice_profile": {"emotion": "bogus"}, "personality": {"traits": ["活泼可爱"]}}
+    ) == "playful"
+
+
+def test_derive_emotion_pinned_persona_baseline_but_text_still_wins():
+    """钉死基调只做兜底——本条消息有明确情绪线索时仍按线索走。"""
+    persona = {"voice_profile": {"emotion": "serious"}}
+    # 无线索 → 用钉死基调
+    assert derive_emotion(text="嗯，我看下", persona=persona).emotion == "serious"
+    # 有文本线索 → 线索优先（serious 基调不该压制当下的开心）
+    assert derive_emotion(text="哈哈哈太好笑了", persona=persona).emotion == "playful"
+
+
 # ── 引擎映射 ─────────────────────────────────────────────────────────────────
 def test_openai_instructions_neutral_is_passthrough():
     assert to_openai_instructions(NEUTRAL, base="保持简洁") == "保持简洁"
@@ -87,6 +152,33 @@ def test_edge_prosody_neutral_empty_else_has_rate():
     p = edge_prosody(EmotionSpec("excited", intensity=1.0))
     assert "rate" in p and p["rate"].endswith("%")
     assert "pitch" in p and p["pitch"].endswith("Hz")
+
+
+# ── Qwen instructions（自然语言声音指令，API 字段，不会被读出）───────────────────
+def test_qwen_instructions_matches_openai_nl_direction():
+    spec = EmotionSpec("warm", intensity=0.6)
+    assert to_qwen_instructions(spec, base="保持简洁") == to_openai_instructions(
+        spec, base="保持简洁")
+
+
+def test_qwen_instructions_neutral_is_passthrough():
+    assert to_qwen_instructions(NEUTRAL, base="温柔点") == "温柔点"
+    assert to_qwen_instructions(NEUTRAL) == ""
+
+
+# ── Fish 内联情感标记 ─────────────────────────────────────────────────────────
+def test_fish_marker_from_vocab_else_empty():
+    assert fish_marker(NEUTRAL) == ""
+    assert fish_marker(EmotionSpec("happy")) == "(joyful)"
+    assert fish_marker(EmotionSpec("calm")) == "(relaxed)"
+
+
+def test_to_fish_text_prepends_marker_for_emotion():
+    assert to_fish_text("你好", NEUTRAL) == "你好"
+    assert to_fish_text("你好", EmotionSpec("happy")) == "(joyful) 你好"
+    # 空文本 / 仅空白 → 原样（不注入悬空标记）
+    assert to_fish_text("", EmotionSpec("happy")) == ""
+    assert to_fish_text("   ", EmotionSpec("happy")) == "   "
 
 
 def test_coerce_emotion_variants():

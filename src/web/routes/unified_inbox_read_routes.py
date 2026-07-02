@@ -46,6 +46,7 @@ from src.web.routes.unified_inbox_services import (
     _inbox_store,
 )
 from src.web.routes.unified_inbox_sla import _sla_cfg
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -66,13 +67,22 @@ def _merge_orchestrator_status(
         # 取一份 label 映射，既给新并入条目命名，也回填既有条目的空 label，
         # 让前端账号切换条 / 会话角标显示用户起的人格名而非裸 account_id。
         label_map: Dict[str, str] = {}
+        # P1 身份化：同一趟 registry.list() 里顺手收集自身资料（self_*），末尾注入 platform_status
+        profile_map: Dict[str, Dict[str, str]] = {}
         try:
+            from src.integrations.account_self_profile import (
+                read_self_profile_from_meta,
+            )
             for row in get_account_registry().list():
+                key = f"{row.get('platform')}:{row.get('account_id')}"
                 lbl = str(row.get("label") or "")
                 if lbl:
-                    label_map[f"{row.get('platform')}:{row.get('account_id')}"] = lbl
+                    label_map[key] = lbl
+                prof = read_self_profile_from_meta(row.get("meta") or {})
+                if prof:
+                    profile_map[key] = prof
         except Exception:
-            logger.debug("[chats] 读取注册表 label 失败", exc_info=True)
+            logger.debug("[chats] 读取注册表 label/self_profile 失败", exc_info=True)
 
         cfg = (config_manager.config if config_manager is not None else {}) or {}
         for oa in (get_orchestrator(cfg).status().get("accounts") or []):
@@ -105,8 +115,13 @@ def _merge_orchestrator_status(
         # 收尾：对所有 platform_status 条目（含未经编排器的 A 线 default）统一用
         # 注册表 label 覆盖，确保改名对每个号都即时反映到对话栏 / 切换条。
         for k, v in platform_status.items():
-            if isinstance(v, dict) and label_map.get(k):
+            if not isinstance(v, dict):
+                continue
+            if label_map.get(k):
                 v["label"] = label_map[k]
+            if profile_map.get(k):
+                for _sk, _sv in profile_map[k].items():
+                    v[_sk] = _sv
     except Exception:
         logger.debug("[chats] 并入编排器账号状态失败", exc_info=True)
 
@@ -163,6 +178,8 @@ def _enrich_chat_list(request: Request, chats: List[Dict[str, Any]], *, config_m
                 meta2 = tags_map.get(cid2, {})
                 c["conv_tags"] = meta2.get("tags", [])
                 c["archived"] = meta2.get("archived", False)
+                # P0-companion：搁置到点（epoch 秒，0=未搁置）→ 前端「超时/待接管」视图隐藏 + header 搁置态
+                c["snooze_until"] = meta2.get("snooze_until", 0)
     except Exception:
         logger.debug("会话列表 tags 加载失败（已忽略）", exc_info=True)
 
@@ -228,14 +245,16 @@ def register_read_routes(app, *, api_auth, config_manager=None) -> None:
         account_id: str = "default",
         chat_key: str = "",
         limit: int = 50,
+        before_ts: float = 0,
     ):
         api_auth(request)
         platform = str(platform or "").lower()
         account_id = str(account_id or "default")
         chat_key = str(chat_key or "")
         if not platform or not chat_key:
-            raise HTTPException(400, "platform 和 chat_key 不能为空")
-        limit = max(1, min(100, int(limit or 50)))
+            raise HTTPException(400, tr(request, "err.ws.platform_chatkey_required"))
+        limit = max(1, min(500, int(limit or 50)))
+        before = float(before_ts or 0) or None
 
         chats = _collect_all_chats(request, limit=100)
         target = next(
@@ -249,7 +268,7 @@ def register_read_routes(app, *, api_auth, config_manager=None) -> None:
         )
 
         messages: List[Dict[str, Any]] = []
-        if platform == "telegram":
+        if platform == "telegram" and before is None:
             client = _get_telegram_client(request)
             recent = getattr(client, "_recent_messages", None) if client is not None else []
             for idx, m in enumerate(list(recent or [])[-limit:]):
@@ -272,13 +291,20 @@ def register_read_routes(app, *, api_auth, config_manager=None) -> None:
 
         cid = conv_id(platform, account_id, chat_key)
         out_msgs = messages[-limit:]
-        if _read_from_store_enabled(request):
-            stored_msgs = _thread_messages_from_store(request, cid, limit=limit)
+        store_preferred = (
+            _read_from_store_enabled(request)
+            or bool(target and target.get("from_store"))
+            or _is_protocol_account(request, platform, account_id)
+        )
+        if store_preferred:
+            stored_msgs = _thread_messages_from_store(
+                request, cid, limit=limit, before_ts=before,
+            )
             if stored_msgs:
                 out_msgs = stored_msgs
             if target is None:
                 target = _store_conv_as_chat(request, cid)
-        elif not out_msgs and _is_protocol_account(request, platform, account_id):
+        elif not out_msgs:
             stored_msgs = _thread_messages_from_store(request, cid, limit=limit)
             if stored_msgs:
                 out_msgs = stored_msgs
@@ -305,5 +331,7 @@ def register_read_routes(app, *, api_auth, config_manager=None) -> None:
             "chat": target,
             "messages": out_msgs,
             "count": len(out_msgs),
+            "has_more": len(out_msgs) >= limit,
+            "oldest_ts": out_msgs[0].get("ts") if out_msgs else None,
             "auto_translate": translate_stats,
         }

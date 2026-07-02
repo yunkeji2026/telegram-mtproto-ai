@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}实时日志 · {{ site_name|default('华灵科技客户转化聊天系统') }}{% endblock %}
-{% block page_title %}实时日志{% endblock %}
+{% block title %}{{ (i18n or {}).get('logs','实时日志') }} · {{ product_name|default((i18n or {}).get('brand.product', '智聊')) }}{% endblock %}
+{% block page_title %}{{ (i18n or {}).get('logs','实时日志') }}{% endblock %}
 {% block head %}
 <style>
 /* toolbar */
@@ -55,7 +55,7 @@
 {% if ui_mode == 'simple' %}
 <div style="background:linear-gradient(135deg,rgba(245,158,11,.08),rgba(91,124,246,.06));border:1px solid rgba(245,158,11,.2);border-radius:10px;padding:.7rem 1rem;margin-bottom:.8rem;font-size:.82rem;color:var(--t2);display:flex;align-items:center;gap:.6rem">
   <span style="font-size:1.1rem;flex-shrink:0">📋</span>
-  <div><strong style="color:var(--t)">高级功能</strong> — 实时日志供技术排查使用。<a href="/cases" style="color:var(--p);font-weight:600">返回案例</a></div>
+  <div><strong style="color:var(--t)">{{ (i18n or {}).get('logs_adv_title','高级功能') }}</strong> — {{ (i18n or {}).get('logs_adv_desc','实时日志供技术排查使用。') }} <a href="/cases" style="color:var(--p);font-weight:600">{{ (i18n or {}).get('logs_back_cases','返回案例') }}</a></div>
 </div>
 {% endif %}
 
@@ -63,7 +63,7 @@
 <div class="log-toolbar fa">
   <div class="log-search-wrap">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-    <input type="search" id="log-search" placeholder="关键词过滤…" oninput="applyFilter()" style="width:100%">
+    <input type="search" id="log-search" placeholder="{{ (i18n or {}).get('logs_search_ph','关键词过滤…') }}" oninput="applyFilter()" style="width:100%">
   </div>
   <div class="level-filters" id="lf-wrap">
     <button class="lf-btn on-DEBUG" data-level="DEBUG" data-help="DEBUG" onclick="toggleLevel(this)">DEBUG</button>
@@ -74,7 +74,7 @@
   </div>
   <button class="btn btn-s btn-sm" onclick="clearSearch()">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-    清除过滤
+    {{ (i18n or {}).get('logs_clear_filter','清除过滤') }}
   </button>
 </div>
 
@@ -89,30 +89,30 @@
       </div>
       <div class="live-indicator">
         <div class="live-dot" id="live-dot"></div>
-        <span id="live-label">实时流</span>
+        <span id="live-label">{{ (i18n or {}).get('logs_live','实时流') }}</span>
       </div>
       <div class="term-btns">
-        <span id="log-count">0 行</span>
+        <span id="log-count">{{ (i18n or {}).get('logs_count_init','0 行') }}</span>
         <button class="term-btn" onclick="togglePause()" id="pause-btn" data-help="btn_pause">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-          暂停
+          {{ (i18n or {}).get('logs_pause','暂停') }}
         </button>
-        <button class="term-btn" onclick="clearLogs()" title="清空当前显示的日志（不影响服务器日志文件）">
+        <button class="term-btn" onclick="clearLogs()" title="{{ (i18n or {}).get('logs_clear_title','清空当前显示的日志（不影响服务器日志文件）') }}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
-          清空
+          {{ (i18n or {}).get('logs_clear','清空') }}
         </button>
         <button class="term-btn" onclick="downloadLogs()" data-help="btn_export">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          下载
+          {{ (i18n or {}).get('logs_download','下载') }}
         </button>
         <button class="term-btn" id="scroll-btn" onclick="toggleScroll()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/></svg>
-          跟随
+          {{ (i18n or {}).get('logs_follow','跟随') }}
         </button>
       </div>
     </div>
     <div id="log-box">
-      <div id="no-match">无匹配日志</div>
+      <div id="no-match">{{ (i18n or {}).get('logs_no_match','无匹配日志') }}</div>
     </div>
   </div>
 </div>
@@ -165,7 +165,7 @@ function addLine(raw) {
 
 function updateCount() {
   const visible = document.querySelectorAll('#log-box .log-line:not([style*="display:none"])').length;
-  document.getElementById('log-count').textContent = visible + ' 行';
+  document.getElementById('log-count').textContent = window.Tf('logs_line_count', {n: visible});
   document.getElementById('no-match').style.display = visible === 0 && allLines.length > 0 ? 'block' : 'none';
 }
 
@@ -207,10 +207,10 @@ function togglePause() {
   const btn = document.getElementById('pause-btn');
   const dot = document.getElementById('live-dot');
   const lbl = document.getElementById('live-label');
-  btn.querySelector('span') && (btn.querySelector('span').textContent = paused ? '继续' : '暂停');
-  btn.lastChild.textContent = paused ? ' 继续' : ' 暂停';
+  btn.querySelector('span') && (btn.querySelector('span').textContent = paused ? window.T('logs_resume','继续') : window.T('logs_pause','暂停'));
+  btn.lastChild.textContent = ' ' + (paused ? window.T('logs_resume','继续') : window.T('logs_pause','暂停'));
   dot.classList.toggle('paused', paused);
-  lbl.textContent = paused ? '已暂停' : '实时流';
+  lbl.textContent = paused ? window.T('logs_paused','已暂停') : window.T('logs_live','实时流');
 }
 
 function clearLogs() {
@@ -245,7 +245,7 @@ function connect() {
   es.onopen = () => {
     _retryDelay = 2000; _retryCount = 0;
     document.getElementById('live-dot').classList.remove('paused');
-    document.getElementById('live-label').textContent = '实时流';
+    document.getElementById('live-label').textContent = window.T('logs_live','实时流');
   };
   es.onmessage = e => {
     if (e.data === 'ping') return; // heartbeat, ignore
@@ -254,7 +254,7 @@ function connect() {
   es.onerror = () => {
     if (es) { try{es.close()}catch(e){} es = null; }
     _retryCount++;
-    const label = `重连中… (第${_retryCount}次 / ${(_retryDelay/1000).toFixed(0)}s)`;
+    const label = window.Tf('logs_reconnect', {n: _retryCount, s: (_retryDelay/1000).toFixed(0)});
     document.getElementById('live-dot').classList.add('paused');
     document.getElementById('live-label').textContent = label;
     _retryTimer = setTimeout(() => {

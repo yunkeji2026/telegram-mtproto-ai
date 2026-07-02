@@ -14,6 +14,7 @@ from __future__ import annotations
 import time
 
 from fastapi import HTTPException, Request
+from src.web.web_i18n import tr
 
 
 def register_cases_routes(app, ctx) -> None:
@@ -74,7 +75,7 @@ def register_cases_routes(app, ctx) -> None:
         note = (data.get("note") or "").strip()
         ctx_store = _get_ctx_store()
         if not ctx_store:
-            raise HTTPException(404, "上下文存储不可用")
+            raise HTTPException(404, tr(request, "err.svc.context_store_not_ready"))
         for uid, c in ctx_store._cache.items():
             if c.get("_case_id") == case_id:
                 c["_case_note"] = note[:500]
@@ -82,7 +83,7 @@ def register_cases_routes(app, ctx) -> None:
                 if audit_store:
                     audit_store.log(actor, "case_note", case_id, uid, note[:80])
                 return {"ok": True, "case_id": case_id}
-        raise HTTPException(404, f"Case {case_id} 不存在")
+        raise HTTPException(404, tr(request, "err.case.not_found", case_id=case_id))
 
     @app.post("/api/cases/{case_id}/close")
     async def api_case_close(request: Request, case_id: str):
@@ -92,7 +93,7 @@ def register_cases_routes(app, ctx) -> None:
         resolution = (data.get("resolution") or "").strip()
         ctx_store = _get_ctx_store()
         if not ctx_store:
-            raise HTTPException(404, "上下文存储不可用")
+            raise HTTPException(404, tr(request, "err.svc.context_store_not_ready"))
         for uid, c in ctx_store._cache.items():
             if c.get("_case_id") == case_id:
                 c["_case_closed"] = True
@@ -102,4 +103,4 @@ def register_cases_routes(app, ctx) -> None:
                 if audit_store:
                     audit_store.log(actor, "case_close", case_id, uid, resolution[:80])
                 return {"ok": True, "case_id": case_id}
-        raise HTTPException(404, f"Case {case_id} 不存在")
+        raise HTTPException(404, tr(request, "err.case.not_found", case_id=case_id))

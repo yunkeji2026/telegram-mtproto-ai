@@ -88,4 +88,5 @@ contextBridge.exposeInMainWorld("shell", {
   openSelectors: () => ipcRenderer.invoke("desktop:open-selectors"),
   // D1 校验覆写文件（解析/被忽略字段反馈）。
   validateSelectors: () => ipcRenderer.invoke("desktop:validate-selectors"),
+  setWindowTitle: (title) => ipcRenderer.invoke("desktop:set-title", title),
 });

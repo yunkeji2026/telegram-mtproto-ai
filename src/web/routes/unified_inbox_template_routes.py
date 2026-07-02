@@ -19,6 +19,7 @@ import logging
 from fastapi import HTTPException, Request
 
 from src.web.routes.unified_inbox_services import _inbox_store
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ def _template_store(request: Request):
     """取 inbox_store 作模板库后端；未启用则 503。"""
     s = _inbox_store(request)
     if s is None:
-        raise HTTPException(503, "模板库未启用（需 inbox_store）")
+        raise HTTPException(503, tr(request, "err.ws.template_lib_disabled"))
     return s
 
 
@@ -62,11 +63,11 @@ def register_template_routes(app, *, api_auth) -> None:
         try:
             body = await request.json()
         except Exception:
-            raise HTTPException(400, "请求体解析失败")
+            raise HTTPException(400, tr(request, "err.req.bad_body"))
         title = str(body.get("title") or "").strip()
         content = str(body.get("content") or "").strip()
         if not title or not content:
-            raise HTTPException(400, "title 和 content 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.title_content_required"))
         tid = ts.create_template(
             title=title,
             content=content,
@@ -85,7 +86,7 @@ def register_template_routes(app, *, api_auth) -> None:
         try:
             body = await request.json()
         except Exception:
-            raise HTTPException(400, "请求体解析失败")
+            raise HTTPException(400, tr(request, "err.req.bad_body"))
         updated = ts.update_template(
             template_id,
             title=body.get("title"),
@@ -96,7 +97,7 @@ def register_template_routes(app, *, api_auth) -> None:
             is_active=body.get("is_active"),
         )
         if not updated:
-            raise HTTPException(404, "模板不存在")
+            raise HTTPException(404, tr(request, "err.ws.template_not_found"))
         return {"ok": True, "id": template_id}
 
     @app.delete("/api/reply-templates/{template_id}")
@@ -111,11 +112,11 @@ def register_template_routes(app, *, api_auth) -> None:
             except Exception:
                 role = ""
         if role not in {"master", "admin"}:
-            raise HTTPException(403, "删除模板需要主管权限")
+            raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
         ts = _template_store(request)
         deleted = ts.delete_template(template_id)
         if not deleted:
-            raise HTTPException(404, "模板不存在")
+            raise HTTPException(404, tr(request, "err.ws.template_not_found"))
         return {"ok": True, "id": template_id, "deleted": True}
 
     @app.post("/api/reply-templates/{template_id}/use")

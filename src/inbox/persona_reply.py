@@ -44,6 +44,12 @@ def normalize_history(
         if not isinstance(m, dict):
             continue
         t = str(m.get("text") or "").strip()
+        if not t and (m.get("media_type") or m.get("media_ref")):
+            try:
+                from src.integrations.protocol_bridge import media_placeholder
+                t = media_placeholder(str(m.get("media_type") or ""))
+            except Exception:
+                t = "[媒体]"
         if not t:
             continue
         is_in = m.get("direction") in ("in", "inbound")
@@ -150,6 +156,9 @@ async def generate_persona_reply(
     target_lang: str = "",
     reply_lang: str = "",
     risk_level: str = "",
+    media_type: str = "",
+    media_ref: str = "",
+    media_desc: str = "",
 ) -> Dict[str, Any]:
     """人设化智能回复（单一事实源）。
 
@@ -222,6 +231,9 @@ async def generate_persona_reply(
                     persona_id=persona_id,
                     reply_lang=resolved_lang,
                     risk_level=risk_level,
+                    media_type=media_type,
+                    media_ref=media_ref,
+                    media_desc=media_desc,
                 )
                 if _res and (_res.get("reply") or "").strip():
                     reply = _res["reply"]

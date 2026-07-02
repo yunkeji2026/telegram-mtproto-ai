@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}AI 工作室{% endblock %}
+{% block title %}AI {{ (i18n or {}).get('as_s001', "工作室") }}{% endblock %}
 {% block content %}
 <style>
 .as-hero{display:grid;grid-template-columns:repeat(4,1fr);gap:.9rem;margin-bottom:1.2rem}
@@ -102,6 +102,7 @@
 .as-plat-card{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:.9rem 1rem}
 .as-plat-hd{display:flex;align-items:center;gap:.5rem;margin-bottom:.65rem;padding-bottom:.5rem;border-bottom:1px solid var(--bd)}
 .as-plat-badge{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:6px;font-size:.72rem;font-weight:800;color:#fff;flex-shrink:0}
+.ch-badge.ci,.as-plat-badge.ci{background:transparent;overflow:hidden;line-height:0}
 .as-plat-name{font-weight:700;font-size:.87rem}
 .as-plat-cnt{margin-left:auto;font-size:.7rem;color:var(--t3)}
 .as-acc-row{display:flex;align-items:center;gap:.45rem;padding:.28rem .4rem;border-radius:6px;background:var(--input);margin-bottom:.25rem;font-size:.79rem;cursor:pointer;transition:background .13s}
@@ -116,35 +117,35 @@
 <div class="p-head">
     <h1>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" style="vertical-align:-.18em;margin-right:.3rem;color:var(--p)"><path d="M12 2a10 10 0 0110 10 10 10 0 01-10 10A10 10 0 012 12 10 10 0 0112 2z"/><path d="M12 8v8M8 12h8"/></svg>
-      AI 工作室
+      AI {{ (i18n or {}).get('as_s001', "工作室") }}
     </h1>
     <div style="display:flex;gap:.4rem;align-items:center">
       <span id="as-hub-status" style="font-size:.78rem;color:var(--t3)"></span>
-      <button class="btn btn-s btn-sm" onclick="asRefreshSummary()">刷新统计</button>
+      <button class="btn btn-s btn-sm" onclick="asRefreshSummary()">{{ (i18n or {}).get('as_s002', "刷新统计") }}</button>
     </div>
   </div>
 
   {# 统计 hero #}
   <div class="as-hero">
     <div class="as-stat">
-      <span class="lbl">人设池 Personas</span>
+      <span class="lbl">{{ (i18n or {}).get('psn_tab_profiles', "人设池") }} Personas</span>
       <span class="num" id="as-stat-personas">—</span>
       <span class="sub" id="as-stat-personas-sub">profiles · bindings</span>
     </div>
     <div class="as-stat">
-      <span class="lbl">情景记忆</span>
+      <span class="lbl">{{ (i18n or {}).get('episodic', "情景记忆") }}</span>
       <span class="num" id="as-stat-memory">—</span>
-      <span class="sub" id="as-stat-memory-sub">条用户事实</span>
+      <span class="sub" id="as-stat-memory-sub">{{ (i18n or {}).get('as_s003', "条用户事实") }}</span>
     </div>
     <div class="as-stat">
-      <span class="lbl">学习审核</span>
+      <span class="lbl">{{ (i18n or {}).get('db_s006', "学习审核") }}</span>
       <span class="num" id="as-stat-drafts">—</span>
-      <span class="sub" id="as-stat-drafts-sub">条待审 / 已通过</span>
+      <span class="sub" id="as-stat-drafts-sub">{{ (i18n or {}).get('as_s004', "条待审 / 已通过") }}</span>
     </div>
     <div class="as-stat">
-      <span class="lbl">关系档案</span>
+      <span class="lbl">{{ (i18n or {}).get('as_s005', "关系档案") }}</span>
       <span class="num" id="as-stat-rel">—</span>
-      <span class="sub" id="as-stat-rel-sub">个亲密档案</span>
+      <span class="sub" id="as-stat-rel-sub">{{ (i18n or {}).get('as_s006', "个亲密档案") }}</span>
     </div>
   </div>
 
@@ -152,12 +153,12 @@
   <div class="as-banner hide" id="as-mr-banner">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
     <div style="flex:1">
-      <strong>检测到 Messenger RPA 维护着独立的 <code>reply_profiles</code> 人设池</strong>
-      （<span id="as-mr-count">0</span> 个），与全局人设池并存。
-      建议在 Phase 2 迁移到统一 PersonaManager。
-      <a href="/messenger-rpa#st-conversion" target="_blank">查看 →</a>
+      <strong>{{ (i18n or {}).get('as_s007', "检测到 Messenger RPA 维护着独立的") }} <code>reply_profiles</code> {{ (i18n or {}).get('psn_tab_profiles', "人设池") }}</strong>
+      (<span id="as-mr-count">0</span> {{ (i18n or {}).get('as_s008', "个），与全局人设池并存。") }}
+      {{ (i18n or {}).get('as_s009', "建议在 Phase 2 迁移到统一 PersonaManager。") }}
+      <a href="/messenger-rpa#st-conversion" target="_blank">{{ (i18n or {}).get('msg_js_2042', "查看") }} →</a>
     </div>
-    <button onclick="_asDismissMrBanner()" title="不再提醒" style="background:transparent;border:none;color:inherit;opacity:.55;cursor:pointer;font-size:1.1rem;padding:.1rem .3rem;line-height:1;flex-shrink:0">✕</button>
+    <button onclick="_asDismissMrBanner()" title="{{ (i18n or {}).get('as_s010', '不再提醒') }}" style="background:transparent;border:none;color:inherit;opacity:.55;cursor:pointer;font-size:1.1rem;padding:.1rem .3rem;line-height:1;flex-shrink:0">✕</button>
   </div>
 
   {# P21-2: Action notification strip #}
@@ -167,36 +168,36 @@
   <div class="as-tabs" role="tablist">
     <button class="as-tab active" data-tab="personas" onclick="asSwitchTab('personas')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-      人设
+      {{ (i18n or {}).get('inbox.voice.meta_persona', "人设") }}
     </button>
     <button class="as-tab" data-tab="memory" onclick="asSwitchTab('memory')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/><line x1="8" y1="7" x2="16" y2="7"/></svg>
-      记忆
+      {{ (i18n or {}).get('inbox.msg.mem_badge', "记忆") }}
     </button>
     <button class="as-tab" data-tab="learner" onclick="asSwitchTab('learner')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
-      知识审核
+      {{ (i18n or {}).get('as_s011', "知识审核") }}
       <span class="count" id="as-tab-drafts-count" style="display:none">0</span>
     </button>
     <button class="as-tab" data-tab="relations" onclick="asSwitchTab('relations')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
-      关系
+      {{ (i18n or {}).get('ap_s070', "关系") }}
     </button>
     <button class="as-tab" data-tab="identity" onclick="asSwitchTab('identity')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="9" r="3"/><path d="M12 12v6M9 18h6"/><path d="M5 5l4 4M19 5l-4 4"/></svg>
-      身份绑定
+      {{ (i18n or {}).get('as_s012', "身份绑定") }}
     </button>
   </div>
 
   {# Pane: 人设 — P21-1: Platform Persona Command Center #}
   <div class="as-pane active" id="as-pane-personas">
-    <div id="as-personas-cmd"><div class="rel-loading">加载中…</div></div>
+    <div id="as-personas-cmd"><div class="rel-loading">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
     <div style="text-align:right;margin-top:.5rem">
       <a href="/personas" class="btn btn-sm" style="font-size:.78rem">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-        完整人设工作室 →
+        {{ (i18n or {}).get('as_s013', "完整人设工作室") }} →
       </a>
-      <button class="btn btn-sm" onclick="_asPccLoaded=false;asLoadPersonasPane()" style="font-size:.75rem;margin-left:.4rem">🔄 刷新</button>
+      <button class="btn btn-sm" onclick="_asPccLoaded=false;asLoadPersonasPane()" style="font-size:.75rem;margin-left:.4rem">🔄 {{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
     </div>
   </div>
 
@@ -204,10 +205,10 @@
   <div class="as-pane" id="as-pane-memory">
     <div class="as-iframe-wrap">
       <div class="as-frame-toolbar">
-        <span style="flex-shrink:0">来自 <code>/episodic-memory</code></span>
-        <input type="text" id="as-mem-q" placeholder="搜索 user_id…" style="flex:1;max-width:180px;padding:.2rem .45rem;border:1px solid var(--bd);border-radius:5px;background:var(--card);color:var(--t);font-size:.74rem" onkeydown="if(event.key==='Enter')_asMemSearch()">
-        <button class="btn btn-sm" onclick="_asMemSearch()" style="font-size:.72rem;padding:.18rem .5rem;flex-shrink:0">搜索</button>
-        <a href="/episodic-memory" target="_blank">新标签页 ↗</a>
+        <span style="flex-shrink:0">{{ (i18n or {}).get('as_s014', "来自") }} <code>/episodic-memory</code></span>
+        <input type="text" id="as-mem-q" placeholder="{{ (i18n or {}).get('search', '搜索') }} user_id…" style="flex:1;max-width:180px;padding:.2rem .45rem;border:1px solid var(--bd);border-radius:5px;background:var(--card);color:var(--t);font-size:.74rem" onkeydown="if(event.key==='Enter')_asMemSearch()">
+        <button class="btn btn-sm" onclick="_asMemSearch()" style="font-size:.72rem;padding:.18rem .5rem;flex-shrink:0">{{ (i18n or {}).get('search', "搜索") }}</button>
+        <a href="/episodic-memory" target="_blank">{{ (i18n or {}).get('as_s015', "新标签页") }} ↗</a>
       </div>
       <iframe id="as-iframe-memory" data-src="/episodic-memory?embedded=1" loading="lazy"></iframe>
     </div>
@@ -217,45 +218,45 @@
   <div class="as-pane" id="as-pane-learner">
     <div class="as-iframe-wrap">
       <div class="as-frame-toolbar">
-        <span>来自 <code>/learner</code></span>
-        <a href="/learner" target="_blank">在新标签页打开 ↗</a>
+        <span>{{ (i18n or {}).get('as_s014', "来自") }} <code>/learner</code></span>
+        <a href="/learner" target="_blank">{{ (i18n or {}).get('as_s016', "在新标签页打开") }} ↗</a>
       </div>
       <iframe id="as-iframe-learner" data-src="/learner?embedded=1" loading="lazy"></iframe>
     </div>
   </div>
 
-  {# Pane: 关系（新建，内联） #}
+  {# Pane: 关系(新建，内联) #}
   <div class="as-pane" id="as-pane-relations">
     <div class="rel-grid">
       <div class="rel-card">
         <h3>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-          关系阶段分布
+          {{ (i18n or {}).get('as_s017', "关系阶段分布") }}
         </h3>
         <div class="rel-stage-list" id="rel-stage-list">
-          <div class="rel-loading">加载中…</div>
+          <div class="rel-loading">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
         </div>
         <div style="font-size:.72rem;color:var(--t3);margin-top:.8rem;line-height:1.55">
-          <strong>阶段判定</strong>：陌生 0-25 · 朋友 25-55 · 亲密 55-80 · 灵魂 80-100<br>
-          基于 <code>IntimacyEngine</code>: 互动轮数 + 互动对称性 + 7天活跃天 + 近期度（沉默衰减 5%/周）
+          <strong>{{ (i18n or {}).get('as_s018', "阶段判定") }}</strong>：{{ (i18n or {}).get('as_s019', "陌生 0-25 · 朋友 25-55 · 亲密 55-80 · 灵魂") }} 80-100<br>
+          {{ (i18n or {}).get('as_s020', "基于") }} <code>IntimacyEngine</code>: {{ (i18n or {}).get('as_s021', "互动轮数") }} + {{ (i18n or {}).get('as_s022', "互动对称性") }} + 7{{ (i18n or {}).get('as_s023', "天活跃天") }} + {{ (i18n or {}).get('as_s024', "近期度（沉默衰减 5%/周）") }}
         </div>
       </div>
       <div class="rel-card">
         <h3>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-          总览
+          {{ (i18n or {}).get('as_s025', "总览") }}
         </h3>
         <div id="rel-overview" style="font-size:.85rem;line-height:1.8;color:var(--t2)">
-          <div class="rel-loading">加载中…</div>
+          <div class="rel-loading">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
         </div>
-        {# W3-3A.4: 重逢候选告警 — 一眼看到「曾深度互动但已沉默衰减」的运营机会 #}
+        {# W3-3A.4: 重逢候选告警 — 一眼看到"曾深度互动但已沉默衰减"的运营机会 #}
         <div id="rel-reunion-banner" class="reunion-banner hide" onclick="document.getElementById('rel-stage-filter').value='reunion';loadRelations();">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
           <div>
-            <strong id="rel-reunion-count">0</strong> 位用户曾深度互动，但已沉默衰减回陌生区间——
-            <span style="color:var(--p);font-weight:600">点击查看重逢候选</span>
+            <strong id="rel-reunion-count">0</strong> {{ (i18n or {}).get('as_s026', "位用户曾深度互动，但已沉默衰减回陌生区间") }}——
+            <span style="color:var(--p);font-weight:600">{{ (i18n or {}).get('as_s027', "点击查看重逢候选") }}</span>
             <div style="font-size:.72rem;color:var(--t3);margin-top:.15rem">
-              这些是重激活的优先目标；下次回话时 AI 会自动用「久违重逢」语气
+              {{ (i18n or {}).get('as_s028', "这些是重激活的优先目标；下次回话时 AI 会自动用") }}"{{ (i18n or {}).get('as_s029', "久违重逢」") }}{{ (i18n or {}).get('as_s030', "语气") }}
             </div>
           </div>
         </div>
@@ -263,11 +264,11 @@
         <div id="merge-banner" class="merge-banner hide" onclick="loadMergeCandidates();document.getElementById('merge-card').scrollIntoView({behavior:'smooth'});">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="9" r="3"/><path d="M12 12v6M9 18h6"/><path d="M5 5l4 4M19 5l-4 4"/></svg>
           <div>
-            <strong id="merge-pending-count">0</strong> 个跨平台身份合并待审核
-            <span id="merge-high-conf-extra" style="display:none">（其中 <strong class="high" id="merge-high-conf-count">0</strong> 个高置信优先）</span>——
-            <span style="color:var(--p);font-weight:600">点击查看候选清单</span>
+            <strong id="merge-pending-count">0</strong> {{ (i18n or {}).get('as_s031', "个跨平台身份合并待审核") }}
+            <span id="merge-high-conf-extra" style="display:none">({{ (i18n or {}).get('as_s032', "其中") }} <strong class="high" id="merge-high-conf-count">0</strong> {{ (i18n or {}).get('as_s033', "个高置信优先）") }}</span>——
+            <span style="color:var(--p);font-weight:600">{{ (i18n or {}).get('as_s034', "点击查看候选清单") }}</span>
             <div style="font-size:.72rem;color:var(--t3);margin-top:.15rem">
-              系统通过名字/语言/时区/时序信号自动识别跨渠道同一人，运营审核保护人设
+              {{ (i18n or {}).get('as_s035', "系统通过名字/语言/时区/时序信号自动识别跨渠道同一人，运营审核保护人设") }}
             </div>
           </div>
         </div>
@@ -278,34 +279,34 @@
       <h3 style="justify-content:space-between;display:flex">
         <span style="display:flex;align-items:center;gap:.5rem">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-          高亲密用户 Top 50
+          {{ (i18n or {}).get('as_s036', "高亲密用户") }} Top 50
         </span>
         <div style="display:flex;gap:.4rem;align-items:center">
           <select id="rel-stage-filter" onchange="loadRelations()" style="padding:.3rem .55rem;border:1px solid var(--bd);border-radius:6px;background:var(--input);color:var(--t);font-size:.78rem">
-            <option value="">全部阶段</option>
-            <option value="soulmate">灵魂 (80+)</option>
-            <option value="close">亲密 (55-80)</option>
-            <option value="friend">朋友 (25-55)</option>
-            <option value="stranger">陌生 (0-25)</option>
-            <option value="reunion">🕒 重逢候选（曾深度互动→沉默衰减）</option>
+            <option value="">{{ (i18n or {}).get('as_s037', "全部阶段") }}</option>
+            <option value="soulmate">{{ (i18n or {}).get('as_s038', "灵魂") }} (80+)</option>
+            <option value="close">{{ (i18n or {}).get('rpa_js_intimacy', "亲密") }} (55-80)</option>
+            <option value="friend">{{ (i18n or {}).get('as_s039', "朋友") }} (25-55)</option>
+            <option value="stranger">{{ (i18n or {}).get('as_s040', "陌生") }} (0-25)</option>
+            <option value="reunion">🕒 {{ (i18n or {}).get('as_s041', "重逢候选（曾深度互动") }}→{{ (i18n or {}).get('as_s042', "沉默衰减）") }}</option>
           </select>
-          <button class="btn btn-s btn-sm" onclick="loadRelations()">刷新</button>
+          <button class="btn btn-s btn-sm" onclick="loadRelations()">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
         </div>
       </h3>
       <div style="overflow-x:auto">
         <table class="rel-table">
           <thead>
             <tr>
-              <th>联系人</th>
-              <th>阶段</th>
-              <th>分数</th>
-              <th>漏斗</th>
-              <th>沉默</th>
-              <th>更新</th>
+              <th>{{ (i18n or {}).get('msg_js_1034', "联系人") }}</th>
+              <th>{{ (i18n or {}).get('msg_js_1039', "阶段") }}</th>
+              <th>{{ (i18n or {}).get('kb_js_156', "分数") }}</th>
+              <th>{{ (i18n or {}).get('as_s043', "漏斗") }}</th>
+              <th>{{ (i18n or {}).get('ov_js_th_silent', "沉默") }}</th>
+              <th>{{ (i18n or {}).get('db_js_050', "更新") }}</th>
             </tr>
           </thead>
           <tbody id="rel-tbody">
-            <tr><td colspan="6" class="rel-loading">加载中…</td></tr>
+            <tr><td colspan="6" class="rel-loading">{{ (i18n or {}).get('dash.loading', "加载中…") }}</td></tr>
           </tbody>
         </table>
       </div>
@@ -316,20 +317,20 @@
       <h3 style="justify-content:space-between;display:flex">
         <span style="display:flex;align-items:center;gap:.5rem">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#06b6d4"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-          关系亲密度趋势
-          <span style="font-size:.7rem;font-weight:400;color:var(--t3)">（近 30 天全域日均）</span>
+          {{ (i18n or {}).get('as_s044', "关系亲密度趋势") }}
+          <span style="font-size:.7rem;font-weight:400;color:var(--t3)">({{ (i18n or {}).get('as_s045', "近 30 天全域日均）") }}</span>
         </span>
         <div id="trend-summary" style="font-size:.78rem;color:var(--t2)"></div>
       </h3>
-      <div id="trend-chart" style="min-height:160px;display:flex;align-items:center;justify-content:center;color:var(--t3);font-size:.85rem">加载中…</div>
+      <div id="trend-chart" style="min-height:160px;display:flex;align-items:center;justify-content:center;color:var(--t3);font-size:.85rem">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
     </div>
 
     {# P22-1: 平台 × 关系效果卡片 #}
     <div id="plat-rel-card" class="rel-card" style="display:none">
       <h3 style="display:flex;align-items:center;gap:.5rem">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--p)"><rect x="2" y="3" width="6" height="18" rx="1"/><rect x="9" y="8" width="6" height="13" rx="1"/><rect x="16" y="13" width="6" height="8" rx="1"/></svg>
-        平台 × 关系效果
-        <span style="font-size:.7rem;font-weight:400;color:var(--t3)">（各平台用户亲密度分布）</span>
+        {{ (i18n or {}).get('inbox.info.platform', "平台") }} × {{ (i18n or {}).get('as_s046', "关系效果") }}
+        <span style="font-size:.7rem;font-weight:400;color:var(--t3)">({{ (i18n or {}).get('as_s047', "各平台用户亲密度分布）") }}</span>
       </h3>
       <div id="plat-rel-body"></div>
     </div>
@@ -338,8 +339,8 @@
     <div id="persona-effect-card" class="rel-card" style="display:none">
       <h3 style="display:flex;align-items:center;gap:.5rem">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--p)"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-        人设 × 关系效果
-        <span style="font-size:.7rem;font-weight:400;color:var(--t3)">（各人设服务用户的亲密度分布）</span>
+        {{ (i18n or {}).get('inbox.voice.meta_persona', "人设") }} × {{ (i18n or {}).get('as_s046', "关系效果") }}
+        <span style="font-size:.7rem;font-weight:400;color:var(--t3)">({{ (i18n or {}).get('as_s048', "各人设服务用户的亲密度分布）") }}</span>
       </h3>
       <div id="persona-effect-body"></div>
     </div>
@@ -349,18 +350,18 @@
       <h3 style="justify-content:space-between;display:flex">
         <span style="display:flex;align-items:center;gap:.5rem">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#7c3aed"><circle cx="12" cy="9" r="3"/><path d="M12 12v6M9 18h6"/><path d="M5 5l4 4M19 5l-4 4"/></svg>
-          跨平台身份合并候选
-          <span style="font-size:.7rem;font-weight:400;color:var(--t3)">（messenger × LINE 跨渠道匹配）</span>
+          {{ (i18n or {}).get('as_s049', "跨平台身份合并候选") }}
+          <span style="font-size:.7rem;font-weight:400;color:var(--t3)">(messenger × LINE {{ (i18n or {}).get('as_s050', "跨渠道匹配）") }}</span>
         </span>
         <div style="display:flex;gap:.4rem;align-items:center">
-          <button class="btn btn-s btn-sm" onclick="batchApproveSelected()" id="merge-batch-btn" disabled title="批量审核选中候选（默认仅处理 ≥0.85 高置信，安全护栏）">⚡ 批量合并</button>
-          <button class="btn btn-s btn-sm" onclick="toggleSelectHighConf()" title="一键勾选所有高置信候选（≥0.85）">☑ 选高置信</button>
-          <button class="btn btn-s btn-sm" onclick="scanMergeCandidates()" title="主动扫描历史孤立 LINE 用户，弥补被动触发的盲区">🔍 扫描</button>
-          <button class="btn btn-s btn-sm" onclick="loadMergeCandidates()">刷新</button>
+          <button class="btn btn-s btn-sm" onclick="batchApproveSelected()" id="merge-batch-btn" disabled title="{{ (i18n or {}).get('as_s051', '批量审核选中候选（默认仅处理') }} ≥0.85 {{ (i18n or {}).get('as_s052', '高置信，安全护栏）') }}">⚡ {{ (i18n or {}).get('as_s053', "批量合并") }}</button>
+          <button class="btn btn-s btn-sm" onclick="toggleSelectHighConf()" title="{{ (i18n or {}).get('as_s054', '一键勾选所有高置信候选') }}(≥0.85)">☑ {{ (i18n or {}).get('as_s055', "选高置信") }}</button>
+          <button class="btn btn-s btn-sm" onclick="scanMergeCandidates()" title="{{ (i18n or {}).get('as_s056', '主动扫描历史孤立 LINE 用户，弥补被动触发的盲区') }}">🔍 {{ (i18n or {}).get('as_s057', "扫描") }}</button>
+          <button class="btn btn-s btn-sm" onclick="loadMergeCandidates()">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
         </div>
       </h3>
       <div id="merge-list">
-        <div class="rel-empty">点击「刷新」加载待审核合并候选</div>
+        <div class="rel-empty">{{ (i18n or {}).get('dash.q.clicked', "点击") }}"{{ (i18n or {}).get('as_s058', "刷新」") }}{{ (i18n or {}).get('as_s059', "加载待审核合并候选") }}</div>
       </div>
     </div>
 
@@ -369,14 +370,14 @@
       <h3 style="justify-content:space-between;display:flex">
         <span style="display:flex;align-items:center;gap:.5rem">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#0ea5e9"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
-          沉默唤醒候选
-          <span style="font-size:.7rem;font-weight:400;color:var(--t3)">（曾深度互动后沉默，AI 起草久违重逢消息）</span>
+          {{ (i18n or {}).get('as_s060', "沉默唤醒候选") }}
+          <span style="font-size:.7rem;font-weight:400;color:var(--t3)">({{ (i18n or {}).get('as_s061', "曾深度互动后沉默，AI 起草久违重逢消息）") }}</span>
         </span>
-        <button class="btn btn-s btn-sm" onclick="loadReactivationCands()">刷新</button>
+        <button class="btn btn-s btn-sm" onclick="loadReactivationCands()">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
       </h3>
       <div id="reactivation-quality" style="padding:.5rem .8rem;background:var(--input);border-bottom:1px solid var(--bd);font-size:.78rem;color:var(--t2);display:none"></div>
       <div id="reactivation-list">
-        <div class="rel-empty">点击「刷新」加载唤醒候选</div>
+        <div class="rel-empty">{{ (i18n or {}).get('dash.q.clicked', "点击") }}"{{ (i18n or {}).get('as_s058', "刷新」") }}{{ (i18n or {}).get('as_s062', "加载唤醒候选") }}</div>
       </div>
     </div>
 
@@ -385,36 +386,36 @@
       <h3 style="justify-content:space-between;display:flex">
         <span style="display:flex;align-items:center;gap:.5rem">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#8b5cf6"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
-          Prompt A/B 效果
-          <span style="font-size:.7rem;font-weight:400;color:var(--t3)" id="prompt-ab-days-label">（最近 7 天）</span>
+          Prompt A/B {{ (i18n or {}).get('wa_s056', "效果") }}
+          <span style="font-size:.7rem;font-weight:400;color:var(--t3)" id="prompt-ab-days-label">({{ (i18n or {}).get('as_s063', "最近 7 天）") }}</span>
         </span>
         <div style="display:flex;gap:.4rem">
           <select id="prompt-ab-days" class="btn btn-s btn-sm" onchange="loadPromptAB()" style="padding:.25rem .5rem">
-            <option value="7">7 天</option>
-            <option value="14">14 天</option>
-            <option value="30">30 天</option>
+            <option value="7">7 {{ (i18n or {}).get('wa_s158', "天") }}</option>
+            <option value="14">14 {{ (i18n or {}).get('wa_s158', "天") }}</option>
+            <option value="30">30 {{ (i18n or {}).get('wa_s158', "天") }}</option>
           </select>
-          <button class="btn btn-s btn-sm" onclick="loadPromptAB()">刷新</button>
+          <button class="btn btn-s btn-sm" onclick="loadPromptAB()">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
         </div>
       </h3>
       <div id="prompt-ab-winner-banner" style="display:none;margin:.4rem .6rem;padding:.5rem .8rem;border-radius:7px;background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.35);font-size:.82rem;color:#059669;display:flex;align-items:center;gap:.5rem"></div>
       <div id="prompt-ab-body" style="padding:.4rem .6rem">
-        <div class="rel-empty">点击「刷新」加载 prompt 效果数据</div>
+        <div class="rel-empty">{{ (i18n or {}).get('dash.q.clicked', "点击") }}"{{ (i18n or {}).get('as_s058', "刷新」") }}{{ (i18n or {}).get('as_s064', "加载 prompt 效果数据") }}</div>
       </div>
       <div id="prompt-ab-eval-status" style="padding:.2rem .8rem .5rem;font-size:.72rem;color:var(--t3)"></div>
     </div>
   </div>
 
-  {# S6: 身份绑定（CrossPlatformIdentity） Pane #}
+  {# S6: 身份绑定(CrossPlatformIdentity) Pane #}
   <div class="as-pane" id="as-pane-identity">
     <div class="rel-card" style="margin-bottom:.8rem">
       <h3>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" style="color:var(--p)"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
-        手动连接两个平台账号分享同一记忆
+        {{ (i18n or {}).get('as_s065', "手动连接两个平台账号分享同一记忆") }}
       </h3>
       <div style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:flex-end;font-size:.83rem">
         <div style="display:flex;flex-direction:column;gap:.2rem">
-          <label style="font-size:.72rem;color:var(--t3);font-weight:600">平台 A</label>
+          <label style="font-size:.72rem;color:var(--t3);font-weight:600">{{ (i18n or {}).get('inbox.info.platform', "平台") }} A</label>
           <select id="id-pa" style="padding:.3rem .5rem;border:1px solid var(--bd);border-radius:6px;background:var(--input);color:var(--t);font-size:.8rem">
             <option value="telegram">Telegram</option>
             <option value="messenger_rpa">Messenger</option>
@@ -428,7 +429,7 @@
         </div>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" style="flex-shrink:0;margin-bottom:.4rem;color:var(--t3)"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
         <div style="display:flex;flex-direction:column;gap:.2rem">
-          <label style="font-size:.72rem;color:var(--t3);font-weight:600">平台 B</label>
+          <label style="font-size:.72rem;color:var(--t3);font-weight:600">{{ (i18n or {}).get('inbox.info.platform', "平台") }} B</label>
           <select id="id-pb" style="padding:.3rem .5rem;border:1px solid var(--bd);border-radius:6px;background:var(--input);color:var(--t);font-size:.8rem">
             <option value="telegram">Telegram</option>
             <option value="messenger_rpa">Messenger</option>
@@ -440,16 +441,16 @@
           <label style="font-size:.72rem;color:var(--t3);font-weight:600">UID B</label>
           <input id="id-ub" type="text" placeholder="e.g. Uabc123..." style="padding:.3rem .5rem;border:1px solid var(--bd);border-radius:6px;background:var(--input);color:var(--t);font-size:.8rem;width:160px">
         </div>
-        <button class="btn btn-sm" onclick="idLink()" style="flex-shrink:0">✨ 连接</button>
+        <button class="btn btn-sm" onclick="idLink()" style="flex-shrink:0">✨ {{ (i18n or {}).get('as_s066', "连接") }}</button>
         <span id="id-link-msg" style="font-size:.78rem;color:var(--t2)"></span>
       </div>
     </div>
     <div class="rel-card">
       <h3 style="justify-content:space-between;display:flex">
-        <span>身份映射表 <span style="font-size:.72rem;font-weight:400;color:var(--t3)">(user_identity_map)</span></span>
-        <button class="btn btn-s btn-sm" onclick="idLoad()">&#8635; 刷新</button>
+        <span>{{ (i18n or {}).get('as_s067', "身份映射表") }} <span style="font-size:.72rem;font-weight:400;color:var(--t3)">(user_identity_map)</span></span>
+        <button class="btn btn-s btn-sm" onclick="idLoad()">&#8635; {{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
       </h3>
-      <div id="id-list"><div class="rel-loading">单击「刷新」加载</div></div>
+      <div id="id-list"><div class="rel-loading">{{ (i18n or {}).get('as_s068', "单击") }}"{{ (i18n or {}).get('as_s058', "刷新」") }}{{ (i18n or {}).get('db_s027', "加载") }}</div></div>
     </div>
   </div>
 
@@ -457,16 +458,16 @@
   <div id="draft-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;align-items:center;justify-content:center" onclick="if(event.target===this)closeDraftModal()">
     <div style="background:var(--card);border-radius:10px;max-width:520px;width:90%;padding:1.5rem;box-shadow:0 8px 32px rgba(0,0,0,.2)">
       <h3 style="margin:0 0 .8rem 0;display:flex;align-items:center;gap:.5rem;font-size:1rem">
-        <span>✍ AI 起草久违重逢消息</span>
+        <span>✍ AI {{ (i18n or {}).get('as_s069', "起草久违重逢消息") }}</span>
         <span id="draft-lang-pill" style="font-size:.7rem;padding:.1rem .45rem;border-radius:5px;background:var(--input);color:var(--t2)"></span>
       </h3>
       <div id="draft-meta" style="font-size:.8rem;color:var(--t3);margin-bottom:.6rem"></div>
-      <textarea id="draft-text" rows="4" style="width:100%;padding:.7rem;border:1px solid var(--bd);border-radius:6px;font-family:inherit;font-size:.95rem;line-height:1.5;background:var(--input);color:var(--t1)" placeholder="草稿将出现在这里…"></textarea>
+      <textarea id="draft-text" rows="4" style="width:100%;padding:.7rem;border:1px solid var(--bd);border-radius:6px;font-family:inherit;font-size:.95rem;line-height:1.5;background:var(--input);color:var(--t1)" placeholder="{{ (i18n or {}).get('as_s070', '草稿将出现在这里…') }}"></textarea>
       <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:.8rem">
-        <button class="btn btn-s btn-sm" onclick="regenDraft()">🔄 重新生成</button>
-        <button class="btn btn-s btn-sm" onclick="copyDraft()">📋 复制</button>
-        <button class="btn btn-s btn-sm" onclick="markDraftSent()" style="background:#10b981;color:#fff;border-color:#10b981">✓ 标记已发</button>
-        <button class="btn btn-s btn-sm" onclick="closeDraftModal()">关闭</button>
+        <button class="btn btn-s btn-sm" onclick="regenDraft()">🔄 {{ (i18n or {}).get('msg_js_872', "重新生成") }}</button>
+        <button class="btn btn-s btn-sm" onclick="copyDraft()">📋 {{ (i18n or {}).get('wa_js_098', "复制") }}</button>
+        <button class="btn btn-s btn-sm" onclick="markDraftSent()" style="background:#10b981;color:#fff;border-color:#10b981">✓ {{ (i18n or {}).get('as_s071', "标记已发") }}</button>
+        <button class="btn btn-s btn-sm" onclick="closeDraftModal()">{{ (i18n or {}).get('close', "关闭") }}</button>
       </div>
     </div>
   </div>
@@ -517,10 +518,10 @@ function _scoreClass(s) {
   return 's-low';
 }
 function _scoreToStage(s) {
-  if (!s || s < 25) return {key:'stranger', label:'陌生'};
-  if (s < 55) return {key:'friend', label:'朋友'};
-  if (s < 80) return {key:'close', label:'亲密'};
-  return {key:'soulmate', label:'灵魂'};
+  if (!s || s < 25) return {key:'stranger', label:window.T('as_s040')};
+  if (s < 55) return {key:'friend', label:window.T('as_s039')};
+  if (s < 80) return {key:'close', label:window.T('rpa_js_intimacy')};
+  return {key:'soulmate', label:window.T('as_s038')};
 }
 // W3-3A.4：与后端 SQL 同步的 reunion 判定 —
 //   intimacy_score < 25 AND funnel_stage 已离开 INITIAL 且非终态丢失
@@ -542,7 +543,7 @@ function _asDismissMrBanner() {
 
 async function asRefreshSummary() {
   const el = document.getElementById('as-hub-status');
-  if (el) el.textContent = '加载…';
+  if (el) el.textContent = window.T('as_js001');
   try {
     const r = await fetch('/api/ai-studio/summary');
     if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -550,16 +551,16 @@ async function asRefreshSummary() {
 
     document.getElementById('as-stat-personas').textContent = d.personas?.profile_count ?? 0;
     document.getElementById('as-stat-personas-sub').textContent =
-      `${d.personas?.profile_count ?? 0} profiles · ${d.personas?.binding_count ?? 0} 绑定`;
+      window.Tf('as_ps_sub', {p: d.personas?.profile_count ?? 0, b: d.personas?.binding_count ?? 0});
 
     document.getElementById('as-stat-memory').textContent = d.memory?.total_facts ?? 0;
     document.getElementById('as-stat-memory-sub').textContent =
-      `${d.memory?.unique_users ?? 0} 用户 · 向量 ${d.memory?.with_embedding ?? 0}`;
+      window.Tf('as_mem_sub', {u: d.memory?.unique_users ?? 0, v: d.memory?.with_embedding ?? 0});
 
     const dr = d.drafts || {};
     document.getElementById('as-stat-drafts').textContent = dr.pending ?? 0;
     document.getElementById('as-stat-drafts-sub').textContent =
-      `待审 ${dr.pending ?? 0} · 已通过 ${dr.approved ?? 0}`;
+      window.Tf('as_dr_sub', {p: dr.pending ?? 0, a: dr.approved ?? 0});
     const tabBadge = document.getElementById('as-tab-drafts-count');
     if (tabBadge) {
       tabBadge.textContent = dr.pending ?? 0;
@@ -569,7 +570,7 @@ async function asRefreshSummary() {
     const rel = d.relations || {};
     document.getElementById('as-stat-rel').textContent = rel.intimate_count ?? 0;
     document.getElementById('as-stat-rel-sub').textContent =
-      `共 ${rel.total ?? 0} · 亲密+ ${rel.intimate_count ?? 0}`;
+      window.Tf('as_rel_sub', {t: rel.total ?? 0, i: rel.intimate_count ?? 0});
 
     // W3-3A.4：重逢候选告警 — 后端 SQL 已计算好，前端只显示
     const rcCount = rel.reunion_candidates ?? 0;
@@ -612,22 +613,22 @@ async function asRefreshSummary() {
     if (strip) {
       const chips = [];
       if ((dr.pending || 0) > 0)
-        chips.push(`<span class="as-ac warn" onclick="asSwitchTab('learner')" title="待审知识草稿">📚 ${dr.pending} 条待审知识</span>`);
+        chips.push(`<span class="as-ac warn" onclick="asSwitchTab('learner')" title="${window.T('as_js025')}">📚 ${dr.pending} ${window.T('as_js026')}</span>`);
       if ((rel.reunion_candidates || 0) > 0)
-        chips.push(`<span class="as-ac warn" onclick="asSwitchTab('relations');document.getElementById('rel-stage-filter').value='reunion';loadRelations()" title="曾深度互动但已沉默">🕒 ${rel.reunion_candidates} 位重逢候选</span>`);
+        chips.push(`<span class="as-ac warn" onclick="asSwitchTab('relations');document.getElementById('rel-stage-filter').value='reunion';loadRelations()" title="${window.T('as_js027')}">🕒 ${rel.reunion_candidates} ${window.T('as_js028')}</span>`);
       if ((rel.merge_reviews_pending || 0) > 0)
-        chips.push(`<span class="as-ac alert" onclick="asSwitchTab('relations');loadMergeCandidates()" title="跨平台身份合并">🔗 ${rel.merge_reviews_pending} 个合并待审</span>`);
+        chips.push(`<span class="as-ac alert" onclick="asSwitchTab('relations');loadMergeCandidates()" title="${window.T('as_js029')}">🔗 ${rel.merge_reviews_pending} ${window.T('as_js030')}</span>`);
       if (chips.length) {
         strip.className = 'as-action-strip show';
-        strip.innerHTML = '<span class="as-action-lbl">待处理</span>' + chips.join('');
+        strip.innerHTML = '<span class="as-action-lbl">'+window.T('base.pill.sla_normal')+'</span>' + chips.join('');
       } else {
         strip.className = 'as-action-strip';
       }
     }
 
-    if (el) el.textContent = '已更新 ' + new Date().toLocaleTimeString();
+    if (el) el.textContent = window.T('wa_js_076')+' ' + window.wsFmtTime(null);
   } catch (e) {
-    if (el) el.textContent = '加载失败: ' + e.message;
+    if (el) el.textContent = window.T('rpa_load_failed')+': ' + e.message;
   }
 }
 
@@ -636,7 +637,7 @@ async function loadRelations() {
   const tbody = document.getElementById('rel-tbody');
   const stageList = document.getElementById('rel-stage-list');
   const overview = document.getElementById('rel-overview');
-  if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="rel-loading">加载中…</td></tr>';
+  if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="rel-loading">'+window.T('dash.loading')+'</td></tr>';
 
   try {
     await _ensurePersonaMap();
@@ -654,10 +655,10 @@ async function loadRelations() {
     });
     const total = all.length || 1;
     const stages = [
-      ['stranger', '陌生 0-25'],
-      ['friend', '朋友 25-55'],
-      ['close', '亲密 55-80'],
-      ['soulmate', '灵魂 80+'],
+      ['stranger', window.T('as_s040')+' 0-25'],
+      ['friend', window.T('as_s039')+' 25-55'],
+      ['close', window.T('rpa_js_intimacy')+' 55-80'],
+      ['soulmate', window.T('as_s038')+' 80+'],
     ];
     if (stageList) {
       stageList.innerHTML = stages.map(([k, lbl]) => {
@@ -677,12 +678,12 @@ async function loadRelations() {
       const top = [...all].sort((a, b) => (b.intimacy_score || 0) - (a.intimacy_score || 0)).slice(0, 3);
       const multiPlatformCount = all.filter(c => (c.channels || []).length >= 2).length;
       const multiPlatformHtml = multiPlatformCount
-        ? `<div>· 跨平台: <strong>${multiPlatformCount}</strong> 位用户覆盖 2+ 平台</div>`
+        ? `<div>· ${window.T('as_js031')}: <strong>${multiPlatformCount}</strong> ${window.T('as_js032')} 2+ ${window.T('inbox.info.platform')}</div>`
         : '';
       overview.innerHTML = `
-        <div>· <strong>${all.length}</strong> 个含关系档案的联系人</div>
-        <div>· 平均亲密度 <strong>${avg}</strong> / 100</div>${multiPlatformHtml}
-        <div>· 灵魂阶段 <strong>${buckets.soulmate || 0}</strong> · 亲密阶段 <strong>${buckets.close || 0}</strong></div>
+        <div>· <strong>${all.length}</strong> ${window.T('as_js033')}</div>
+        <div>· ${window.T('as_js034')} <strong>${avg}</strong> / 100</div>${multiPlatformHtml}
+        <div>· ${window.T('as_js035')} <strong>${buckets.soulmate || 0}</strong> · ${window.T('as_js036')} <strong>${buckets.close || 0}</strong></div>
         ${top.length ? '<div style="margin-top:.5rem;font-size:.78rem;color:var(--t3)">Top 3: ' +
           top.map(c => `<span style="color:var(--t1)">${c.primary_name || c.contact_id?.slice(0, 8)}</span> (${(c.intimacy_score || 0).toFixed(1)})`).join(' · ') + '</div>' : ''}
       `;
@@ -703,25 +704,28 @@ async function loadRelations() {
     filtered = filtered.slice(0, 50);
 
     if (!filtered.length) {
-      tbody.innerHTML = '<tr><td colspan="6" class="rel-empty">暂无符合条件的关系档案</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="rel-empty">'+window.T('as_js002')+'</td></tr>';
       return;
     }
     tbody.innerHTML = filtered.map(c => {
       const stage = _scoreToStage(c.intimacy_score);
       const score = (c.intimacy_score || 0).toFixed(1);
-      const upd = c.intimacy_updated_at ? new Date(c.intimacy_updated_at * 1000).toLocaleDateString() : '-';
+      const upd = c.intimacy_updated_at ? window.wsFmtDate(c.intimacy_updated_at) : '-';
       const last = c.last_active_at ? new Date(c.last_active_at * 1000) : null;
       const silent = last ? Math.floor((Date.now() - last.getTime()) / 86400000) + 'd' : '-';
       const name = (c.primary_name || c.contact_id || '').toString();
       const cid = (c.contact_id || '').slice(0, 8);
       // W3-3A.4：每行按 reunion 判定追加 🕒 久违 标记，让运营在全量列表中也能识别
       const reunionTag = _isReunionCandidate(c)
-        ? '<span class="reunion-tag" title="曾深度互动但已沉默衰减回陌生区间——AI 会自动用「久违重逢」语气">🕒 久违</span>'
+        ? '<span class="reunion-tag" title="'+window.T('as_js003')+'——AI '+window.T('as_js004')+'「'+window.T('as_s029')+window.T('as_s030')+'">🕒 '+window.T('as_js005')+'</span>'
         : '';
       // W3-3L.4：平台徽章
       const _CH_ICON = { messenger: 'M', line: 'L', telegram: 'T', mobile: '📱' };
       const _CH_COLOR = { messenger: '#0084ff', line: '#00b900', telegram: '#2aabee', mobile: '#888' };
       const channelBadges = (c.channels || []).map(ch => {
+        if (window.PlatformIcons && window.PlatformIcons.has(ch)) {
+          return `<span class="ch-badge ci" title="${escapeHtml(ch)}">${window.platformIconSVG(ch,{size:16})}</span>`;
+        }
         const icon = _CH_ICON[ch] || ch.slice(0,1).toUpperCase();
         const color = _CH_COLOR[ch] || '#888';
         return `<span class="ch-badge" style="background:${color}" title="${escapeHtml(ch)}">${icon}</span>`;
@@ -738,7 +742,7 @@ async function loadRelations() {
     _renderPlatRelCard(all);
     _renderPersonaEffectCard(all);
   } catch (e) {
-    if (tbody) tbody.innerHTML = `<tr><td colspan="6" class="rel-empty">加载失败: ${escapeHtml(e.message)}</td></tr>`;
+    if (tbody) tbody.innerHTML = `<tr><td colspan="6" class="rel-empty">${window.T('rpa_load_failed')}: ${escapeHtml(e.message)}</td></tr>`;
   }
 }
 
@@ -752,7 +756,7 @@ function escapeHtml(s) {
 function _renderTrendSvg(series) {
   // series: [{day, ts, avg_intimacy, active_count}]
   const W = 720, H = 160, P = 28;  // viewBox 尺寸 + padding
-  if (!series.length) return '<div style="color:var(--t3)">暂无数据</div>';
+  if (!series.length) return '<div style="color:var(--t3)">'+window.T('rpa_js_no_data')+'</div>';
   const xs = series.length;
   const dx = (W - 2*P) / Math.max(1, xs - 1);
   // 强制 Y 轴 0-100（intimacy_score 域）
@@ -774,7 +778,7 @@ function _renderTrendSvg(series) {
   const dots = series.map((p, i) => {
     const cx = P + i*dx, cy = ySc(p.avg_intimacy);
     return `<circle cx="${cx}" cy="${cy}" r="2" fill="#06b6d4">` +
-           `<title>${escapeHtml(p.day)}: 日均 ${p.avg_intimacy} (${p.active_count} 活跃)</title>` +
+           `<title>${escapeHtml(p.day)}: ${window.T('as_js037')} ${p.avg_intimacy} (${p.active_count} ${window.T('cases_stat_active')})</title>` +
            `</circle>`;
   }).join('');
   return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:160px">
@@ -806,12 +810,12 @@ async function loadIntimacyTrend() {
       const delta = avgPrev > 0 ? ((avg7 - avgPrev) / avgPrev * 100) : 0;
       const arrow = delta > 1 ? '📈' : (delta < -1 ? '📉' : '➡️');
       const sign = delta >= 0 ? '+' : '';
-      summary.innerHTML = `近 7 天均值 <strong>${avg7.toFixed(1)}</strong> ${arrow} 环比 <strong>${sign}${delta.toFixed(1)}%</strong> · 样本 ${d.sample_size} 人`;
+      summary.innerHTML = `${window.T('as_js038')} <strong>${avg7.toFixed(1)}</strong> ${arrow} ${window.T('as_js039')} <strong>${sign}${delta.toFixed(1)}%</strong> · ${window.T('db_js_049')} ${d.sample_size} ${window.T('dash.mp.people')}`;
     } else if (summary) {
-      summary.textContent = `样本 ${d.sample_size} 人`;
+      summary.textContent = window.Tf('as_sample_ppl', {n: d.sample_size});
     }
   } catch (e) {
-    chart.innerHTML = `<div style="color:var(--t3)">加载失败: ${escapeHtml(e.message)}</div>`;
+    chart.innerHTML = `<div style="color:var(--t3)">${window.T('rpa_load_failed')}: ${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -829,21 +833,21 @@ function _renderSignals(signalsHuman) {
     .filter(it => it.contrib > 0)
     .map(it => {
       const cls = 'signal-chip' + (top.has(it.key) ? ' top' : '');
-      return `<span class="${cls}" title="权重 ${it.weight} × 信号 ${it.raw_pct}%">${it.icon} ${escapeHtml(it.label)} ${it.raw_pct}%</span>`;
+      return `<span class="${cls}" title="${window.T('as_js040')} ${it.weight} × ${window.T('as_js041')} ${it.raw_pct}%">${it.icon} ${escapeHtml(window.T('as_sig_' + it.key))} ${it.raw_pct}%</span>`;
     }).join('') + '</div>';
 }
 
 async function loadMergeCandidates() {
   const list = document.getElementById('merge-list');
   if (!list) return;
-  list.innerHTML = '<div class="rel-loading">加载中…</div>';
+  list.innerHTML = '<div class="rel-loading">'+window.T('dash.loading')+'</div>';
   try {
     const r = await fetch('/api/merge-reviews?limit=50');
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const d = await r.json();
     const items = d.items || [];
     if (!items.length) {
-      list.innerHTML = '<div class="rel-empty">当前无待审核合并候选 ✓</div>';
+      list.innerHTML = '<div class="rel-empty">'+window.T('as_js006')+' ✓</div>';
       return;
     }
     list.innerHTML = items.map(it => {
@@ -852,16 +856,16 @@ async function loadMergeCandidates() {
       const tj = it.target_journey || {};
       const conf = (it.confidence || 0).toFixed(2);
       const confCls = _confClass(it.confidence || 0);
-      const lineName = ci.display_name || '(无昵称)';
+      const lineName = ci.display_name || '('+window.T('as_js007')+')';
       const lineId = (ci.external_id || '').slice(0, 12);
-      const msgName = tgt.primary_name || '(无昵称)';
+      const msgName = tgt.primary_name || '('+window.T('as_js007')+')';
       const msgId = (tgt.contact_id || '').slice(0, 8);
       const stageLabel = tj.funnel_stage || '-';
-      const intim = tj.intimacy_score != null ? ` · 亲密 ${tj.intimacy_score}` : '';
+      const intim = tj.intimacy_score != null ? window.Tf('as_intim_inline', {n: tj.intimacy_score}) : '';
       const signalsHtml = _renderSignals(it.signals_human);
       return `<div class="merge-card-row" data-rid="${escapeHtml(it.review_id)}" data-conf="${(it.confidence || 0).toFixed(3)}">
-        <input type="checkbox" class="merge-check" onchange="_updateBatchBtn()" title="选中以批量处理">
-        <span class="conf-pill ${confCls}" title="合并置信度">${conf}</span>
+        <input type="checkbox" class="merge-check" onchange="_updateBatchBtn()" title="${window.T('as_js042')}">
+        <span class="conf-pill ${confCls}" title="${window.T('as_js043')}">${conf}</span>
         <div class="pair">
           <div class="pair-row">
             <span class="pair-side">📱 LINE</span>
@@ -876,19 +880,19 @@ async function loadMergeCandidates() {
           ${signalsHtml}
         </div>
         <div class="actions">
-          <button class="btn-mini btn-approve" onclick="resolveMerge('${escapeHtml(it.review_id)}','approve')">✓ 合并</button>
-          <button class="btn-mini btn-reject"  onclick="resolveMerge('${escapeHtml(it.review_id)}','reject')">✕ 拒绝</button>
+          <button class="btn-mini btn-approve" onclick="resolveMerge('${escapeHtml(it.review_id)}','approve')">✓ ${window.T('set_s191')}</button>
+          <button class="btn-mini btn-reject"  onclick="resolveMerge('${escapeHtml(it.review_id)}','reject')">✕ ${window.T('rpa_js_act_reject')}</button>
         </div>
       </div>`;
     }).join('');
   } catch (e) {
-    list.innerHTML = `<div class="rel-empty">加载失败: ${escapeHtml(e.message)}</div>`;
+    list.innerHTML = `<div class="rel-empty">${window.T('rpa_load_failed')}: ${escapeHtml(e.message)}</div>`;
   }
 }
 
 async function resolveMerge(reviewId, action) {
-  const verb = action === 'approve' ? '合并' : '拒绝';
-  if (!confirm(`确定要${verb}这对身份吗？合并不可逆。`)) return;
+  const verb = action === 'approve' ? window.T('set_s191') : window.T('rpa_js_act_reject');
+  if (!confirm(window.Tf('as_confirm_resolve', {verb: verb}))) return;
   try {
     const r = await fetch(`/api/merge-reviews/${encodeURIComponent(reviewId)}/${action}`, {
       method: 'POST',
@@ -902,7 +906,7 @@ async function resolveMerge(reviewId, action) {
     if (row) row.remove();
     asRefreshSummary();
   } catch (e) {
-    alert(`${verb}失败: ${e.message}`);
+    alert(window.Tf('as_action_fail', {verb: verb, msg: e.message}));
   }
 }
 
@@ -912,7 +916,7 @@ function _updateBatchBtn() {
   if (!btn) return;
   const n = document.querySelectorAll('.merge-check:checked').length;
   btn.disabled = n === 0;
-  btn.textContent = n > 0 ? `⚡ 批量合并 (${n})` : '⚡ 批量合并';
+  btn.textContent = n > 0 ? `⚡ ${window.T('as_s053')} (${n})` : '⚡ '+window.T('as_s053');
 }
 
 function toggleSelectHighConf() {
@@ -920,7 +924,7 @@ function toggleSelectHighConf() {
   const rows = document.querySelectorAll('.merge-card-row[data-conf]');
   const highRows = [...rows].filter(r => parseFloat(r.dataset.conf) >= 0.85);
   if (!highRows.length) {
-    alert('当前列表无 ≥0.85 高置信候选');
+    alert(window.T('as_js008')+' ≥0.85 '+window.T('as_js009'));
     return;
   }
   const allChecked = highRows.every(r => r.querySelector('.merge-check')?.checked);
@@ -936,7 +940,7 @@ async function batchApproveSelected() {
   if (!checks.length) return;
   const ids = checks.map(cb => cb.closest('.merge-card-row')?.dataset.rid).filter(Boolean);
   if (!ids.length) return;
-  if (!confirm(`确定批量合并 ${ids.length} 条候选？\n护栏：仅 ≥0.85 高置信会被处理，低于阈值的会被自动跳过。\n合并不可逆。`)) return;
+  if (!confirm(window.Tf('as_confirm_batch', {n: ids.length}))) return;
   try {
     const r = await fetch('/api/merge-reviews/batch-approve', {
       method: 'POST',
@@ -949,26 +953,26 @@ async function batchApproveSelected() {
     }
     const d = await r.json();
     const parts = [
-      `成功合并 ${d.approved.length} 条`,
+      window.Tf('as_merged_ok', {n: d.approved.length}),
     ];
     if (d.skipped_low_conf?.length) {
-      parts.push(`跳过 ${d.skipped_low_conf.length} 条（置信 <${d.min_confidence}）`);
+      parts.push(window.Tf('as_skipped_lc', {n: d.skipped_low_conf.length, c: d.min_confidence}));
     }
     if (d.failed?.length) {
-      parts.push(`失败 ${d.failed.length} 条`);
+      parts.push(window.Tf('as_failed_n', {n: d.failed.length}));
     }
-    alert(parts.join('，'));
+    alert(parts.join('; '));
     loadMergeCandidates();
     asRefreshSummary();
   } catch (e) {
-    alert(`批量合并失败: ${e.message}`);
+    alert(window.Tf('as_batch_fail', {msg: e.message}));
   }
 }
 
 async function scanMergeCandidates() {
-  if (!confirm('主动扫描会遍历未合并的 LINE 用户对照所有 messenger 候选，可能产生大量待审核条目。继续？')) return;
+  if (!confirm(window.T('as_js010'))) return;
   const list = document.getElementById('merge-list');
-  if (list) list.innerHTML = '<div class="rel-loading">扫描中…</div>';
+  if (list) list.innerHTML = '<div class="rel-loading">'+window.T('ln_js_028')+'</div>';
   try {
     const r = await fetch('/api/merge-reviews/scan', { method: 'POST' });
     if (!r.ok) {
@@ -976,11 +980,11 @@ async function scanMergeCandidates() {
       throw new Error(`HTTP ${r.status} ${txt}`);
     }
     const d = await r.json();
-    alert(`扫描完成：检查 ${d.scanned} 个 LINE 用户，新增 ${d.enqueued} 条待审核（其中 ${d.auto_eligible} 个达到 auto 阈值但仍走人工保护）`);
+    alert(window.Tf('as_scan_done', {scanned: d.scanned, enq: d.enqueued, auto: d.auto_eligible}));
     loadMergeCandidates();
     asRefreshSummary();
   } catch (e) {
-    if (list) list.innerHTML = `<div class="rel-empty">扫描失败: ${escapeHtml(e.message)}</div>`;
+    if (list) list.innerHTML = `<div class="rel-empty">${window.T('ln_js_031')}: ${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -1020,20 +1024,20 @@ function _renderPlatRelCard(contacts) {
   if (!entries.length) { card.style.display = 'none'; return; }
   card.style.display = '';
   const _STAGE_COLORS = { stranger:'#94a3b8', friend:'#60a5fa', close:'#a78bfa', soulmate:'#fb7185' };
-  const _STAGE_LBL    = { stranger:'陌生', friend:'朋友', close:'亲密', soulmate:'灵魂' };
+  const _STAGE_LBL    = { stranger:window.T('as_s040'), friend:window.T('as_s039'), close:window.T('rpa_js_intimacy'), soulmate:window.T('as_s038') };
   body.innerHTML = entries.map(e => {
     const total = e.count || 1;
     const avgStage = _scoreToStage(e.avg);
     const segs = ['stranger','friend','close','soulmate'].map(k => {
       const pct = (e.s[k] / total * 100).toFixed(1);
-      return `<div style="width:${pct}%;background:${_STAGE_COLORS[k]};height:100%" title="${_STAGE_LBL[k]}: ${e.s[k]}人 (${pct}%)"></div>`;
+      return `<div style="width:${pct}%;background:${_STAGE_COLORS[k]};height:100%" title="${_STAGE_LBL[k]}: ${e.s[k]}${window.T('dash.mp.people')} (${pct}%)"></div>`;
     }).join('');
     return `<div style="margin-bottom:.65rem">
       <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.25rem">
         <span style="width:78px;font-size:.82rem;font-weight:700;color:${e.cfg.color}">${escapeHtml(e.cfg.label)}</span>
         <span class="score-pill ${_scoreClass(e.avg)}" style="font-size:.7rem">avg ${e.avg.toFixed(1)}</span>
         <span class="stage-tag t-${avgStage.key}" style="font-size:.67rem">${avgStage.label}</span>
-        <span style="font-size:.69rem;color:var(--t3);margin-left:auto">${e.count} 人</span>
+        <span style="font-size:.69rem;color:var(--t3);margin-left:auto">${e.count} ${window.T('dash.mp.people')}</span>
       </div>
       <div style="height:9px;border-radius:5px;overflow:hidden;display:flex;background:var(--input)">${segs}</div>
     </div>`;
@@ -1078,13 +1082,13 @@ function _renderPersonaEffectCard(contacts) {
   if (!entries.length) { card.style.display = 'none'; return; }
   card.style.display = '';
   const _SC = { stranger:'#94a3b8', friend:'#60a5fa', close:'#a78bfa', soulmate:'#fb7185' };
-  const _SL = { stranger:'陌生', friend:'朋友', close:'亲密', soulmate:'灵魂' };
+  const _SL = { stranger:window.T('as_s040'), friend:window.T('as_s039'), close:window.T('rpa_js_intimacy'), soulmate:window.T('as_s038') };
   body.innerHTML = entries.map(e => {
     const total = e.count || 1;
     const avgStage = _scoreToStage(e.avg);
     const segs = ['stranger','friend','close','soulmate'].map(k => {
       const pct = (e.s[k] / total * 100).toFixed(1);
-      return `<div style="width:${pct}%;background:${_SC[k]};height:100%" title="${_SL[k]}: ${e.s[k]}人 (${pct}%)"></div>`;
+      return `<div style="width:${pct}%;background:${_SC[k]};height:100%" title="${_SL[k]}: ${e.s[k]}${window.T('dash.mp.people')} (${pct}%)"></div>`;
     }).join('');
     return `<div style="margin-bottom:.65rem">
       <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.25rem">
@@ -1092,7 +1096,7 @@ function _renderPersonaEffectCard(contacts) {
         ${e.role ? `<span style="font-size:.68rem;color:var(--t3);flex-shrink:0">${escapeHtml(e.role.slice(0,10))}</span>` : ''}
         <span class="score-pill ${_scoreClass(e.avg)}" style="font-size:.7rem;margin-left:auto">avg ${e.avg.toFixed(1)}</span>
         <span class="stage-tag t-${avgStage.key}" style="font-size:.67rem">${avgStage.label}</span>
-        <span style="font-size:.69rem;color:var(--t3);flex-shrink:0">${e.count} 人</span>
+        <span style="font-size:.69rem;color:var(--t3);flex-shrink:0">${e.count} ${window.T('dash.mp.people')}</span>
       </div>
       <div style="height:9px;border-radius:5px;overflow:hidden;display:flex;background:var(--input)">${segs}</div>
     </div>`;
@@ -1124,7 +1128,7 @@ async function _loadDraftQuality() {
     const d = await r.json();
     if (!d.sent) { box.style.display = 'none'; return; }
     const ratePct = d.success_rate != null ? Math.round(d.success_rate * 100) : null;
-    const rateStr = ratePct != null ? ratePct + '%' : '评估中';
+    const rateStr = ratePct != null ? ratePct + '%' : window.T('as_js011');
     const rateColor = ratePct == null ? 'var(--t3)' : ratePct >= 60 ? '#10b981' : ratePct >= 30 ? '#f59e0b' : '#ef4444';
     const langRows = Object.entries(d.by_lang || {}).map(([lang, b]) => {
       const lr = b.success_rate != null ? Math.round(b.success_rate * 100) : null;
@@ -1140,11 +1144,11 @@ async function _loadDraftQuality() {
       <div style="display:flex;align-items:flex-start;gap:.9rem">
         <div style="flex-shrink:0;text-align:center;min-width:50px">
           <div style="font-size:1.3rem;font-weight:800;color:${rateColor};line-height:1">${rateStr}</div>
-          <div style="font-size:.63rem;color:var(--t3);margin-top:.1rem">7天成功率</div>
+          <div style="font-size:.63rem;color:var(--t3);margin-top:.1rem">7${window.T('as_js045')}</div>
         </div>
         <div style="flex:1;min-width:0">
           ${_rateBar(ratePct, rateColor)}
-          <div style="font-size:.72rem;color:var(--t2);margin-top:.28rem">生成 ${d.generated} · 已发 ${d.sent} · 已评估 ${d.evaluated}</div>
+          <div style="font-size:.72rem;color:var(--t2);margin-top:.28rem">${window.T('as_js046')} ${d.generated} · ${window.T('ov_js_dob_sent')} ${d.sent} · ${window.T('as_js047')} ${d.evaluated}</div>
           ${langRows}
         </div>
       </div>`;
@@ -1156,41 +1160,41 @@ async function loadReactivationCands() {
   const list = document.getElementById('reactivation-list');
   if (!list) return;
   _loadDraftQuality();
-  list.innerHTML = '<div class="rel-loading">加载中…</div>';
+  list.innerHTML = '<div class="rel-loading">'+window.T('dash.loading')+'</div>';
   try {
     const r = await fetch('/api/reactivation/candidates');
     if (!r.ok) {
-      list.innerHTML = `<div class="rel-empty">加载失败 (${r.status})</div>`;
+      list.innerHTML = `<div class="rel-empty">${window.T('rpa_load_failed')} (${r.status})</div>`;
       return;
     }
     const d = await r.json();
     const items = d.items || [];
     if (!items.length) {
-      list.innerHTML = '<div class="rel-empty">当前无沉默唤醒候选 ✨</div>';
+      list.innerHTML = '<div class="rel-empty">'+window.T('as_js012')+' ✨</div>';
       return;
     }
     list.innerHTML = items.map(it => {
       const intim = (it.intimacy_score || 0).toFixed(0);
       const lastSent = it.last_reactivation_ts
-        ? `<span style="color:var(--t3);font-size:.7rem">上次唤醒 ${new Date(it.last_reactivation_ts * 1000).toLocaleDateString()}</span>`
+        ? `<span style="color:var(--t3);font-size:.7rem">${window.T('as_js048')} ${window.wsFmtDate(it.last_reactivation_ts)}</span>`
         : '';
       return `<div class="merge-card-row" data-jid="${escapeHtml(it.journey_id)}">
-        <span class="conf-pill cf-mid" title="近期亲密度">${intim}</span>
+        <span class="conf-pill cf-mid" title="${window.T('as_js049')}">${intim}</span>
         <div class="pair">
           <div class="pair-row">
             <span class="pair-side">${escapeHtml(it.funnel_stage || '-')}</span>
-            <span style="color:var(--t3)">沉默 <strong>${it.silent_days}</strong> 天</span>
+            <span style="color:var(--t3)">${window.T('ov_js_th_silent')} <strong>${it.silent_days}</strong> ${window.T('wa_s158')}</span>
             ${lastSent}
           </div>
           <div style="font-size:.72rem;color:var(--t3);font-family:monospace">${escapeHtml((it.contact_id || '').slice(0, 12))}</div>
         </div>
         <div class="actions">
-          <button class="btn-mini btn-approve" onclick="openDraftModal('${escapeHtml(it.journey_id)}')">✍ 生成草稿</button>
+          <button class="btn-mini btn-approve" onclick="openDraftModal('${escapeHtml(it.journey_id)}')">✍ ${window.T('as_js050')}</button>
         </div>
       </div>`;
     }).join('');
   } catch (e) {
-    list.innerHTML = `<div class="rel-empty">异常: ${escapeHtml(e.message)}</div>`;
+    list.innerHTML = `<div class="rel-empty">${window.T('msg_js_1245')}: ${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -1198,7 +1202,7 @@ async function openDraftModal(jid) {
   _currentDraftJid = jid;
   document.getElementById('draft-modal').style.display = 'flex';
   document.getElementById('draft-text').value = '';
-  document.getElementById('draft-meta').textContent = '正在调 AI 生成草稿…';
+  document.getElementById('draft-meta').textContent = window.T('as_js013');
   document.getElementById('draft-lang-pill').textContent = '';
   await _generateDraft(jid);
 }
@@ -1208,22 +1212,23 @@ async function _generateDraft(jid) {
   const meta = document.getElementById('draft-meta');
   const pill = document.getElementById('draft-lang-pill');
   ta.value = '';
-  meta.textContent = '正在调 AI 生成草稿…';
+  meta.textContent = window.T('as_js013');
   try {
     const r = await fetch(`/api/reactivation/${encodeURIComponent(jid)}/draft-reunion`, {
       method: 'POST',
     });
     if (!r.ok) {
       const txt = await r.text().catch(() => '');
-      meta.textContent = `生成失败 (${r.status}): ${txt}`;
+      meta.textContent = window.Tf('as_gen_fail', {s: r.status, txt: txt});
       return;
     }
     const d = await r.json();
     ta.value = d.draft_text || '';
     pill.textContent = (d.draft_lang || 'zh').toUpperCase();
-    meta.textContent = `沉默 ${d.silent_days} 天 · 亲密度 ${(d.intimacy_score || 0).toFixed(0)}/100 · 阶段 ${d.funnel_stage} · 上次消息${d.prompt_signals?.has_last_inbound ? '已注入' : '无'}`;
+    const _inj = d.prompt_signals?.has_last_inbound ? window.T('as_injected') : window.T('as_none');
+    meta.textContent = window.Tf('as_draft_meta', {days: d.silent_days, intim: (d.intimacy_score || 0).toFixed(0), stage: d.funnel_stage, inj: _inj});
   } catch (e) {
-    meta.textContent = `异常: ${e.message}`;
+    meta.textContent = window.Tf('as_exc', {msg: e.message});
   }
 }
 
@@ -1238,26 +1243,26 @@ function copyDraft() {
   navigator.clipboard.writeText(ta.value).then(() => {
     const meta = document.getElementById('draft-meta');
     const orig = meta.textContent;
-    meta.textContent = '✓ 已复制到剪贴板';
+    meta.textContent = '✓ '+window.T('as_js014');
     setTimeout(() => { meta.textContent = orig; }, 1500);
   });
 }
 
 async function markDraftSent() {
   if (!_currentDraftJid) return;
-  if (!confirm('确认已通过外部渠道发出该消息？这会更新唤醒冷却时间。')) return;
+  if (!confirm(window.T('as_js015'))) return;
   try {
     const r = await fetch(`/api/reactivation/${encodeURIComponent(_currentDraftJid)}/mark-sent`, {
       method: 'POST',
     });
     if (!r.ok) {
-      alert(`标记失败: ${r.status}`);
+      alert(window.Tf('as_mark_fail', {s: r.status}));
       return;
     }
     closeDraftModal();
     loadReactivationCands();  // 列表刷新（应该看到该候选消失或 last_reactivation_ts 更新）
   } catch (e) {
-    alert(`异常: ${e.message}`);
+    alert(window.Tf('as_exc', {msg: e.message}));
   }
 }
 
@@ -1277,15 +1282,15 @@ async function _loadEvalSchedulerStatus() {
     if (!s.available) { el.textContent = ''; return; }
     const ago = s.last_run_ago_secs;
     const nextIn = s.next_run_in_secs;
-    const agoStr = ago == null ? '未运行'
-      : ago < 120 ? `${ago}秒前`
-      : ago < 7200 ? `${Math.round(ago/60)}分钟前`
-      : `${Math.round(ago/3600)}小时前`;
-    const nextStr = nextIn == null ? '' : `，下次 ${Math.round(nextIn/60)}分钟后`;
+    const agoStr = ago == null ? window.T('wa_js_012')
+      : ago < 120 ? window.Tf('as_secs_ago', {n: ago})
+      : ago < 7200 ? window.Tf('as_mins_ago', {n: Math.round(ago/60)})
+      : window.Tf('as_hours_ago', {n: Math.round(ago/3600)});
+    const nextStr = nextIn == null ? '' : window.Tf('as_next_in', {n: Math.round(nextIn/60)});
     const res = s.last_result;
-    const resStr = res ? `（评估 ${res.evaluated}，成功 ${res.success}）` : '';
-    el.textContent = `自动评估: ${agoStr}${resStr}${nextStr}`;
-    el.title = `总运行 ${s.total_runs} 次，当前间隔 ${Math.round(s.current_interval_secs/60)}分钟`;
+    const resStr = res ? window.Tf('as_eval_res', {e: res.evaluated, s: res.success}) : '';
+    el.textContent = window.Tf('as_auto_eval', {a: agoStr, r: resStr, n: nextStr});
+    el.title = window.Tf('as_total_runs', {n: s.total_runs, m: Math.round(s.current_interval_secs/60)});
   } catch(e) {}
 }
 
@@ -1293,20 +1298,20 @@ async function loadPromptAB() {
   const body   = document.getElementById('prompt-ab-body');
   const banner = document.getElementById('prompt-ab-winner-banner');
   const days   = parseInt(document.getElementById('prompt-ab-days')?.value || '7', 10);
-  document.getElementById('prompt-ab-days-label').textContent = `（最近 ${days} 天）`;
+  document.getElementById('prompt-ab-days-label').textContent = window.Tf('as_last_days', {n: days});
   if (!body) return;
-  body.innerHTML = '<div class="rel-empty">加载中…</div>';
+  body.innerHTML = '<div class="rel-empty">'+window.T('dash.loading')+'</div>';
   if (banner) banner.style.display = 'none';
   _loadEvalSchedulerStatus();
   try {
     const r = await fetch(`/api/drafts/quality?days=${days}`, {credentials:'same-origin'});
-    if (!r.ok) { body.innerHTML = '<div class="rel-empty">加载失败</div>'; return; }
+    if (!r.ok) { body.innerHTML = '<div class="rel-empty">'+window.T('rpa_load_failed')+'</div>'; return; }
     const q = await r.json();
     const bv = q.by_variant || {};
     const winner = q.winning_variant;
     const variants = Object.keys(bv);
     if (!variants.length) {
-      body.innerHTML = '<div class="rel-empty">暂无草稿数据（窗口期内没有 sent 草稿）</div>';
+      body.innerHTML = '<div class="rel-empty">'+window.T('as_js016')+'</div>';
       return;
     }
     // 渲染 winner banner
@@ -1317,12 +1322,12 @@ async function loadPromptAB() {
           <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
         </svg>
         <span>
-          <strong>${winner.winner}</strong> 显著优于 <strong>${winner.runner_up}</strong>：
+          <strong>${winner.winner}</strong> ${window.T('as_js051')} <strong>${winner.runner_up}</strong>:
           ${Math.round(winner.winner_rate*100)}% vs ${Math.round(winner.runner_up_rate*100)}%
-          (+${winner.gap_pct}pct，样本 ${winner.winner_evaluated}/${winner.runner_up_evaluated})
+          (+${winner.gap_pct}pct, ${window.T('db_js_049')} ${winner.winner_evaluated}/${winner.runner_up_evaluated})
           &nbsp;
           <button onclick="promoteVariant('${winner.winner}')" style="font-size:.75rem;padding:.1rem .5rem;border-radius:4px;border:1px solid #10b981;background:transparent;color:#059669;cursor:pointer">
-            ↑ 设为默认
+            ↑ ${window.T('inbox.xl.set_default')}
           </button>
         </span>`;
     }
@@ -1331,8 +1336,8 @@ async function loadPromptAB() {
       const b = bv[vid];
       const isWinner = winner && winner.winner === vid;
       const isLoser  = winner && winner.runner_up === vid;
-      const badge = isWinner ? ' <span style="font-size:.65rem;padding:.1rem .35rem;border-radius:4px;background:#d1fae5;color:#065f46;font-weight:700">🏆 当前优胜</span>'
-                  : isLoser  ? ' <span style="font-size:.65rem;padding:.1rem .35rem;border-radius:4px;background:#fee2e2;color:#991b1b">劣势</span>'
+      const badge = isWinner ? ' <span style="font-size:.65rem;padding:.1rem .35rem;border-radius:4px;background:#d1fae5;color:#065f46;font-weight:700">🏆 '+window.T('as_js017')+'</span>'
+                  : isLoser  ? ' <span style="font-size:.65rem;padding:.1rem .35rem;border-radius:4px;background:#fee2e2;color:#991b1b">'+window.T('as_js018')+'</span>'
                   : '';
       const rateStr = b.success_rate != null ? `${Math.round(b.success_rate*100)}%` : '-';
       const lowerStr = b.success_rate_lower != null ? `≥${Math.round(b.success_rate_lower*100)}%` : '-';
@@ -1349,25 +1354,25 @@ async function loadPromptAB() {
         <thead>
           <tr style="color:var(--t3);font-size:.75rem;border-bottom:1px solid var(--bd)">
             <th style="padding:.3rem .6rem;text-align:left">Variant</th>
-            <th style="padding:.3rem .6rem;text-align:center">已发</th>
-            <th style="padding:.3rem .6rem;text-align:center">已评估</th>
-            <th style="padding:.3rem .6rem;text-align:center">成功率</th>
-            <th style="padding:.3rem .6rem;text-align:center">CI 下界</th>
+            <th style="padding:.3rem .6rem;text-align:center">${window.T('ov_js_dob_sent')}</th>
+            <th style="padding:.3rem .6rem;text-align:center">${window.T('as_js047')}</th>
+            <th style="padding:.3rem .6rem;text-align:center">${window.T('ov_kpi_rate')}</th>
+            <th style="padding:.3rem .6rem;text-align:center">CI ${window.T('as_js052')}</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
       </table>
       <div style="font-size:.73rem;color:var(--t3);margin-top:.4rem;padding:.2rem .6rem">
-        全局：生成 ${q.generated} / 已发 ${q.sent} / 评估 ${q.evaluated} /
-        成功率 ${q.success_rate != null ? Math.round(q.success_rate*100)+'%' : '-'}
+        ${window.T('as_js053')} ${q.generated} / ${window.T('ov_js_dob_sent')} ${q.sent} / ${window.T('as_js054')} ${q.evaluated} /
+        ${window.T('ov_kpi_rate')} ${q.success_rate != null ? Math.round(q.success_rate*100)+'%' : '-'}
       </div>`;
   } catch(e) {
-    body.innerHTML = `<div class="rel-empty">加载失败: ${e.message}</div>`;
+    body.innerHTML = `<div class="rel-empty">${window.T('rpa_load_failed')}: ${e.message}</div>`;
   }
 }
 
 async function promoteVariant(variantId) {
-  if (!confirm(`确认把「${variantId}」设为 default_variant 并写入 yaml？此操作立即生效，无法通过 UI 撤销。`)) return;
+  if (!confirm(window.Tf('as_confirm_promote', {v: variantId}))) return;
   try {
     const r = await fetch('/api/reunion-prompts/set-default', {
       method: 'POST', credentials: 'same-origin',
@@ -1376,20 +1381,20 @@ async function promoteVariant(variantId) {
     });
     const d = await r.json();
     if (r.ok) {
-      alert(`✓ 已设置 default_variant = ${d.default_variant}`);
+      alert(window.Tf('as_set_default_ok', {v: d.default_variant}));
       loadPromptAB();
     } else {
-      alert(`✗ 失败: ${d.detail || JSON.stringify(d)}`);
+      alert(window.Tf('as_fail_detail', {d: d.detail || JSON.stringify(d)}));
     }
-  } catch(e) { alert(`✗ 请求失败: ${e.message}`); }
+  } catch(e) { alert(window.Tf('as_req_fail', {msg: e.message})); }
 }
 
 // ── P21-1: Platform Persona Command Center ──────────────────────────────────
 const _AS_PLAT_CFG = [
-  { label: 'Telegram',  color: '#2aabee', icon: 'TG', field: 'tg_accounts',   idKey: 'username'    },
-  { label: 'Messenger', color: '#0084ff', icon: 'M',  field: 'mrpa_accounts', idKey: 'account_id'  },
-  { label: 'WhatsApp',  color: '#25d366', icon: 'WA', field: 'wa_accounts',   idKey: 'account_id'  },
-  { label: 'LINE',      color: '#00b900', icon: 'L',  field: 'line_rpa',      idKey: 'account_id'  },
+  { label: 'Telegram',  color: '#2aabee', icon: 'TG', plat: 'telegram',  field: 'tg_accounts',   idKey: 'username'    },
+  { label: 'Messenger', color: '#0084ff', icon: 'M',  plat: 'messenger', field: 'mrpa_accounts', idKey: 'account_id'  },
+  { label: 'WhatsApp',  color: '#25d366', icon: 'WA', plat: 'whatsapp',  field: 'wa_accounts',   idKey: 'account_id'  },
+  { label: 'LINE',      color: '#00b900', icon: 'L',  plat: 'line',      field: 'line_rpa',      idKey: 'account_id'  },
 ];
 let _asPccLoaded = false;
 
@@ -1407,7 +1412,7 @@ async function asLoadPersonasPane() {
       if (!accs.length) return '';
       const rows = accs.slice(0, 10).map(a => {
         const pid = (a.persona_ids || [])[0] || '';
-        const pname = (a.active_profile && a.active_profile.name) || pid || '无人设';
+        const pname = (a.active_profile && a.active_profile.name) || pid || window.T('as_js019');
         const prole = (a.active_profile && a.active_profile.role) || '';
         const accId = (a[pc.idKey] || a.username || a.id || '').toString();
         const href = pid ? `/personas#profile=${encodeURIComponent(pid)}` : '/personas';
@@ -1421,22 +1426,22 @@ async function asLoadPersonasPane() {
       }).join('');
       return `<div class="as-plat-card">
         <div class="as-plat-hd">
-          <span class="as-plat-badge" style="background:${pc.color}">${pc.icon}</span>
+          <span class="as-plat-badge ci" title="${pc.label}">${window.platformIconSVG?window.platformIconSVG(pc.plat,{size:24}):pc.icon}</span>
           <span class="as-plat-name">${pc.label}</span>
-          <span class="as-plat-cnt">${accs.length} 账号</span>
+          <span class="as-plat-cnt">${accs.length} ${window.T('ov_js_th_account')}</span>
         </div>
-        ${rows || '<div style="font-size:.78rem;color:var(--t3);padding:.2rem 0">暂无绑定人设</div>'}
+        ${rows || '<div style="font-size:.78rem;color:var(--t3);padding:.2rem 0">'+window.T('as_js020')+'</div>'}
       </div>`;
     }).filter(Boolean);
 
     if (!cards.length) {
-      cmd.innerHTML = '<div class="rel-empty">暂无活跃账号，请先在各平台设置页绑定人设</div>';
+      cmd.innerHTML = '<div class="rel-empty">'+window.T('as_js021')+'</div>';
     } else {
       cmd.innerHTML = `<div class="as-pcc-grid">${cards.join('')}</div>`;
     }
     _asPccLoaded = true;
   } catch (e) {
-    cmd.innerHTML = `<div class="rel-empty">加载失败: ${escapeHtml(e.message)} &nbsp; <button class="btn btn-sm" onclick="_asPccLoaded=false;asLoadPersonasPane()">重试</button></div>`;
+    cmd.innerHTML = `<div class="rel-empty">${window.T('rpa_load_failed')}: ${escapeHtml(e.message)} &nbsp; <button class="btn btn-sm" onclick="_asPccLoaded=false;asLoadPersonasPane()">${window.T('rpa_retry')}</button></div>`;
   }
 }
 
@@ -1444,13 +1449,13 @@ async function asLoadPersonasPane() {
 async function idLoad() {
   const el = document.getElementById('id-list');
   if (!el) return;
-  el.innerHTML = '<div class="rel-loading">加载中…</div>';
+  el.innerHTML = '<div class="rel-loading">'+window.T('dash.loading')+'</div>';
   try {
     const r = await fetch('/api/identity?limit=300');
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const d = await r.json();
     if (!d.items || !d.items.length) {
-      el.innerHTML = '<div class="rel-empty">暂无身份映射记录，正常使用后自动新建</div>';
+      el.innerHTML = '<div class="rel-empty">'+window.T('as_js022')+'</div>';
       return;
     }
     // Group by canonical_id
@@ -1467,20 +1472,20 @@ async function idLoad() {
           </td>
           <td style="padding:.4rem .6rem;font-family:monospace;font-size:.78rem;max-width:200px;overflow:hidden;text-overflow:ellipsis">${escapeHtml(m.platform_uid)}</td>
           <td style="padding:.4rem .6rem;font-family:monospace;font-size:.72rem;color:var(--t3);max-width:200px;overflow:hidden;text-overflow:ellipsis">${escapeHtml(m.canonical_id)}</td>
-          <td style="padding:.4rem .6rem">${isLinked ? `<button class="btn btn-s btn-sm" style="font-size:.7rem;padding:.15rem .5rem" onclick="idUnlink('${escapeHtml(m.platform)}','${escapeHtml(m.platform_uid)}')">✂ 解除</button>` : '<span style="color:var(--t3);font-size:.73rem">独立</span>'}</td>
+          <td style="padding:.4rem .6rem">${isLinked ? `<button class="btn btn-s btn-sm" style="font-size:.7rem;padding:.15rem .5rem" onclick="idUnlink('${escapeHtml(m.platform)}','${escapeHtml(m.platform_uid)}')">✂ ${window.T('msg_js_2047')}</button>` : '<span style="color:var(--t3);font-size:.73rem">'+window.T('as_js023')+'</span>'}</td>
         </tr>`).join('');
       return `<tbody style="border-bottom:2px solid var(--bd)">${mbHtml}</tbody>`;
     }).join('');
     el.innerHTML = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.82rem">
       <thead><tr>
-        <th style="padding:.4rem .6rem;font-size:.7rem;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.05em;text-align:left;border-bottom:1px solid var(--bd)">平台</th>
+        <th style="padding:.4rem .6rem;font-size:.7rem;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.05em;text-align:left;border-bottom:1px solid var(--bd)">${window.T('inbox.info.platform')}</th>
         <th style="padding:.4rem .6rem;font-size:.7rem;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.05em;text-align:left;border-bottom:1px solid var(--bd)">Platform UID</th>
         <th style="padding:.4rem .6rem;font-size:.7rem;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.05em;text-align:left;border-bottom:1px solid var(--bd)">Canonical ID</th>
-        <th style="padding:.4rem .6rem;font-size:.7rem;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.05em;text-align:left;border-bottom:1px solid var(--bd)">操作</th>
+        <th style="padding:.4rem .6rem;font-size:.7rem;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.05em;text-align:left;border-bottom:1px solid var(--bd)">${window.T('ov_js_th_action')}</th>
       </tr></thead>${rows}
     </table></div>`;
   } catch (e) {
-    el.innerHTML = `<div class="rel-empty">加载失败: ${escapeHtml(e.message)}</div>`;
+    el.innerHTML = `<div class="rel-empty">${window.T('rpa_load_failed')}: ${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -1490,30 +1495,30 @@ async function idLink() {
   const pb = document.getElementById('id-pb')?.value;
   const ub = document.getElementById('id-ub')?.value?.trim();
   const msg = document.getElementById('id-link-msg');
-  if (!ua || !ub) { if (msg) msg.textContent = '请填写两个 UID'; return; }
-  if (msg) msg.textContent = '处理中…';
+  if (!ua || !ub) { if (msg) msg.textContent = window.T('as_js024')+' UID'; return; }
+  if (msg) msg.textContent = window.T('ov_js_processing');
   try {
     const r = await fetch('/api/identity/link', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({platform_a: pa, uid_a: ua, platform_b: pb, uid_b: ub})
     });
     const d = await r.json();
-    if (msg) msg.textContent = r.ok ? `✓ 已连接 → ${d.canonical_id}` : `✗ ${d.detail}`;
+    if (msg) msg.textContent = r.ok ? window.Tf('as_linked_ok', {c: d.canonical_id}) : `✗ ${d.detail}`;
     if (r.ok) { document.getElementById('id-ua').value = ''; document.getElementById('id-ub').value = ''; idLoad(); }
-  } catch (e) { if (msg) msg.textContent = '错误: ' + e.message; }
+  } catch (e) { if (msg) msg.textContent = window.T('ln_js_036')+': ' + e.message; }
 }
 
 async function idUnlink(platform, uid) {
-  if (!confirm(`解除 ${_platLabel(platform)}:${uid} 的跨平台绑定?`)) return;
+  if (!confirm(window.Tf('as_confirm_unlink', {p: _platLabel(platform), uid: uid}))) return;
   try {
     const r = await fetch('/api/identity/unlink', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({platform, uid})
     });
     const d = await r.json();
-    if (!r.ok) alert('失败: ' + d.detail);
+    if (!r.ok) alert(window.T('rpa_js_st_failed')+': ' + d.detail);
     idLoad();
-  } catch (e) { alert('错误: ' + e.message); }
+  } catch (e) { alert(window.T('ln_js_036')+': ' + e.message); }
 }
 
 // Init

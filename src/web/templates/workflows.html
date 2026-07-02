@@ -1,5 +1,5 @@
 {% extends "workspace_base.html" %}
-{% block title %}工作流管理{% endblock %}
+{% block title %}{{ (i18n or {}).get('wf_s001', "工作流管理") }}{% endblock %}
 {% block head %}
 <style>
   .wf-wrap{height:100%;overflow-y:auto;background:#f7f8fa;padding:18px;}
@@ -49,101 +49,101 @@
 {% endblock %}
 {% block content %}
 <div class="wf-wrap">
-  <h2 style="margin:0 0 16px;font-size:18px;">⚡ 工作流管理</h2>
+  <h2 style="margin:0 0 16px;font-size:18px;">⚡ {{ (i18n or {}).get('wf_s001', "工作流管理") }}</h2>
 
   <div class="wf-tabs">
-    <div class="wf-tab active" onclick="WF.tab('actions')">💡 自定义动作</div>
-    <div class="wf-tab" onclick="WF.tab('chains')">🔗 工作链</div>
-    <div class="wf-tab" onclick="WF.tab('routing')">🔀 分流路由</div>
-    <div class="wf-tab" onclick="WF.tab('scripts')">🎭 剧本话题</div>
-    <div class="wf-tab" onclick="WF.tab('monitor')">📊 执行监控</div>
+    <div class="wf-tab active" onclick="WF.tab('actions')">💡 {{ (i18n or {}).get('wf_s002', "自定义动作") }}</div>
+    <div class="wf-tab" onclick="WF.tab('chains')">🔗 {{ (i18n or {}).get('wf_s003', "工作链") }}</div>
+    <div class="wf-tab" onclick="WF.tab('routing')">🔀 {{ (i18n or {}).get('wf_s004', "分流路由") }}</div>
+    <div class="wf-tab" onclick="WF.tab('scripts')">🎭 {{ (i18n or {}).get('wf_s005', "剧本话题") }}</div>
+    <div class="wf-tab" onclick="WF.tab('monitor')">📊 {{ (i18n or {}).get('wf_s006', "执行监控") }}</div>
   </div>
 
   <!-- ── 自定义动作 ── -->
   <div id="panel-actions" class="wf-panel active">
     <div class="wf-section">
-      <h3>💡 自定义动作库
-        <button class="btn-sm btn-primary" onclick="WF.showActionForm()">+ 新建动作</button>
+      <h3>💡 {{ (i18n or {}).get('wf_s007', "自定义动作库") }}
+        <button class="btn-sm btn-primary" onclick="WF.showActionForm()">+ {{ (i18n or {}).get('wf_s008', "新建动作") }}</button>
       </h3>
       <table class="wf-table">
         <thead>
-          <tr><th>图标</th><th>名称</th><th>类型</th><th>触发条件</th><th>排序</th><th>启用</th><th>操作</th></tr>
+          <tr><th>{{ (i18n or {}).get('wf_s009', "图标") }}</th><th>{{ (i18n or {}).get('dash.ws.col_name', "名称") }}</th><th>{{ (i18n or {}).get('msg_js_1042', "类型") }}</th><th>{{ (i18n or {}).get('wa_s107', "触发条件") }}</th><th>{{ (i18n or {}).get('lr_s013', "排序") }}</th><th>{{ (i18n or {}).get('enable', "启用") }}</th><th>{{ (i18n or {}).get('ov_js_th_action', "操作") }}</th></tr>
         </thead>
         <tbody id="actions-tbody">
-          <tr><td colspan="7" class="wf-empty">加载中…</td></tr>
+          <tr><td colspan="7" class="wf-empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</td></tr>
         </tbody>
       </table>
     </div>
 
     <!-- 动作表单 -->
     <div class="wf-section" id="action-form-wrap" style="display:none;">
-      <h3 id="action-form-title">新建动作</h3>
+      <h3 id="action-form-title">{{ (i18n or {}).get('wf_s008', "新建动作") }}</h3>
       <div class="form-row">
-        <div class="form-col" style="flex:0 0 60px;"><label>图标</label><input id="af-icon" value="💡" style="text-align:center;font-size:18px;"></div>
-        <div class="form-col"><label>动作名称 *</label><input id="af-name" placeholder="例：情感安抚话术"></div>
+        <div class="form-col" style="flex:0 0 60px;"><label>{{ (i18n or {}).get('wf_s009', "图标") }}</label><input id="af-icon" value="💡" style="text-align:center;font-size:18px;"></div>
+        <div class="form-col"><label>{{ (i18n or {}).get('wf_s010', "动作名称") }} *</label><input id="af-name" placeholder="{{ (i18n or {}).get('wf_s011', '例：情感安抚话术') }}"></div>
         <div class="form-col" style="flex:0 0 140px;">
-          <label>动作类型</label>
+          <label>{{ (i18n or {}).get('wf_s012', "动作类型") }}</label>
           <select id="af-type" onchange="WF.onTypeChange()">
-            <option value="template">话术模板</option>
-            <option value="task">创建任务</option>
-            <option value="tag">添加标签</option>
-            <option value="note">内部备注</option>
-            <option value="escalate">升级人工</option>
-            <option value="chain">触发工作链</option>
+            <option value="template">{{ (i18n or {}).get('templates', "话术模板") }}</option>
+            <option value="task">{{ (i18n or {}).get('wf_s013', "创建任务") }}</option>
+            <option value="tag">{{ (i18n or {}).get('wf_s014', "添加标签") }}</option>
+            <option value="note">{{ (i18n or {}).get('wf_s015', "内部备注") }}</option>
+            <option value="escalate">{{ (i18n or {}).get('wf_s016', "升级人工") }}</option>
+            <option value="chain">{{ (i18n or {}).get('wf_s017', "触发工作链") }}</option>
           </select>
         </div>
-        <div class="form-col" style="flex:0 0 80px;"><label>排序（小在前）</label><input id="af-order" type="number" value="0" min="0"></div>
+        <div class="form-col" style="flex:0 0 80px;"><label>{{ (i18n or {}).get('wf_s018', "排序（小在前）") }}</label><input id="af-order" type="number" value="0" min="0"></div>
       </div>
       <!-- 类型相关配置 -->
       <div id="af-config-template" class="form-row">
         <div class="form-col" style="flex:1;">
-          <label>话术内容（发送时直接填入输入框）</label>
-          <textarea id="af-tpl-text" rows="3" placeholder="输入话术内容…"></textarea>
+          <label>{{ (i18n or {}).get('wf_s019', "话术内容（发送时直接填入输入框）") }}</label>
+          <textarea id="af-tpl-text" rows="3" placeholder="{{ (i18n or {}).get('wf_s020', '输入话术内容…') }}"></textarea>
         </div>
         <div class="form-col">
-          <label>操作提示（仅坐席可见）</label>
-          <input id="af-hint" placeholder="例：情绪低落时使用">
+          <label>{{ (i18n or {}).get('wf_s021', "操作提示（仅坐席可见）") }}</label>
+          <input id="af-hint" placeholder="{{ (i18n or {}).get('wf_s022', '例：情绪低落时使用') }}">
         </div>
       </div>
       <div id="af-config-task" class="form-row" style="display:none;">
-        <div class="form-col"><label>任务说明</label><input id="af-task-note" placeholder="跟进事项描述"></div>
-        <div class="form-col" style="flex:0 0 130px;"><label>到期时长（小时）</label><input id="af-task-due" type="number" value="72" min="1"></div>
+        <div class="form-col"><label>{{ (i18n or {}).get('wf_s023', "任务说明") }}</label><input id="af-task-note" placeholder="{{ (i18n or {}).get('wf_s024', '跟进事项描述') }}"></div>
+        <div class="form-col" style="flex:0 0 130px;"><label>{{ (i18n or {}).get('wf_s025', "到期时长（小时）") }}</label><input id="af-task-due" type="number" value="72" min="1"></div>
       </div>
       <div id="af-config-tag" class="form-row" style="display:none;">
-        <div class="form-col"><label>标签选项（英文逗号分隔，多个让坐席选）</label><input id="af-tag-opts" placeholder="情绪低落,需要关注,积极开朗"></div>
+        <div class="form-col"><label>{{ (i18n or {}).get('wf_s026', "标签选项（英文逗号分隔，多个让坐席选）") }}</label><input id="af-tag-opts" placeholder="{{ (i18n or {}).get('wf_s027', '情绪低落') }},{{ (i18n or {}).get('wf_s028', '需要关注') }},{{ (i18n or {}).get('wf_s029', '积极开朗') }}"></div>
       </div>
       <div id="af-config-note" class="form-row" style="display:none;">
-        <div class="form-col"><label>备注提示</label><input id="af-note-hint" placeholder="提示坐席填写内容"></div>
+        <div class="form-col"><label>{{ (i18n or {}).get('wf_s030', "备注提示") }}</label><input id="af-note-hint" placeholder="{{ (i18n or {}).get('wf_s031', '提示坐席填写内容') }}"></div>
       </div>
       <div id="af-config-escalate" class="form-row" style="display:none;">
-        <div class="form-col"><label>升级原因（内部记录）</label><input id="af-esc-reason" placeholder="例：高风险情绪干预"></div>
+        <div class="form-col"><label>{{ (i18n or {}).get('wf_s032', "升级原因（内部记录）") }}</label><input id="af-esc-reason" placeholder="{{ (i18n or {}).get('wf_s033', '例：高风险情绪干预') }}"></div>
       </div>
       <div id="af-config-chain" class="form-row" style="display:none;">
-        <div class="form-col"><label>工作链 ID（从「工作链」面板复制）</label><input id="af-chain-id" placeholder="chain_id"></div>
+        <div class="form-col"><label>{{ (i18n or {}).get('wf_s034', "工作链 ID（从") }} "{{ (i18n or {}).get('wf_s035', "工作链") }}" {{ (i18n or {}).get('wf_s036', "面板复制）") }}</label><input id="af-chain-id" placeholder="chain_id"></div>
       </div>
       <div class="form-row">
         <div class="form-col">
-          <label>触发信号（多选，决定 AI 是否推荐此动作）</label>
+          <label>{{ (i18n or {}).get('wf_s037', "触发信号（多选，决定 AI 是否推荐此动作）") }}</label>
           <div id="af-triggers" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;">
-            <label class="cond-tag"><input type="checkbox" value="any" checked> 任意场景</label>
-            <label class="cond-tag"><input type="checkbox" value="sentiment_negative"> 情绪负面</label>
-            <label class="cond-tag"><input type="checkbox" value="silent_3d"> 沉默3天</label>
-            <label class="cond-tag"><input type="checkbox" value="silent_7d"> 沉默7天</label>
-            <label class="cond-tag"><input type="checkbox" value="complaint"> 投诉</label>
-            <label class="cond-tag"><input type="checkbox" value="churn_intent"> 流失风险</label>
-            <label class="cond-tag"><input type="checkbox" value="churn_intent_high"> 高流失</label>
-            <label class="cond-tag"><input type="checkbox" value="crisis_signal"> 危机信号</label>
-            <label class="cond-tag"><input type="checkbox" value="long_conversation"> 长对话</label>
-            <label class="cond-tag"><input type="checkbox" value="high_engagement"> 活跃互动</label>
-            <label class="cond-tag"><input type="checkbox" value="intimacy_growing"> 亲密度成长</label>
-            <label class="cond-tag"><input type="checkbox" value="conversation_closing"> 即将结束</label>
+            <label class="cond-tag"><input type="checkbox" value="any" checked> {{ (i18n or {}).get('wf_s038', "任意场景") }}</label>
+            <label class="cond-tag"><input type="checkbox" value="sentiment_negative"> {{ (i18n or {}).get('wf_s039', "情绪负面") }}</label>
+            <label class="cond-tag"><input type="checkbox" value="silent_3d"> {{ (i18n or {}).get('wf_s040', "沉默3天") }}</label>
+            <label class="cond-tag"><input type="checkbox" value="silent_7d"> {{ (i18n or {}).get('wf_s041', "沉默7天") }}</label>
+            <label class="cond-tag"><input type="checkbox" value="complaint"> {{ (i18n or {}).get('tm_s008', "投诉") }}</label>
+            <label class="cond-tag"><input type="checkbox" value="churn_intent"> {{ (i18n or {}).get('rh_js022', "流失风险") }}</label>
+            <label class="cond-tag"><input type="checkbox" value="churn_intent_high"> {{ (i18n or {}).get('wf_s042', "高流失") }}</label>
+            <label class="cond-tag"><input type="checkbox" value="crisis_signal"> {{ (i18n or {}).get('wf_s043', "危机信号") }}</label>
+            <label class="cond-tag"><input type="checkbox" value="long_conversation"> {{ (i18n or {}).get('wf_s044', "长对话") }}</label>
+            <label class="cond-tag"><input type="checkbox" value="high_engagement"> {{ (i18n or {}).get('wf_s045', "活跃互动") }}</label>
+            <label class="cond-tag"><input type="checkbox" value="intimacy_growing"> {{ (i18n or {}).get('wf_s046', "亲密度成长") }}</label>
+            <label class="cond-tag"><input type="checkbox" value="conversation_closing"> {{ (i18n or {}).get('wf_s047', "即将结束") }}</label>
           </div>
         </div>
       </div>
       <input type="hidden" id="af-id">
       <div style="display:flex;gap:8px;margin-top:8px;">
-        <button class="btn-sm btn-primary" onclick="WF.saveAction()">保存动作</button>
-        <button class="btn-sm" onclick="WF.cancelForm()">取消</button>
+        <button class="btn-sm btn-primary" onclick="WF.saveAction()">{{ (i18n or {}).get('wf_s048', "保存动作") }}</button>
+        <button class="btn-sm" onclick="WF.cancelForm()">{{ (i18n or {}).get('ov_js_cancel', "取消") }}</button>
         <span id="af-msg" style="font-size:12px;margin-left:8px;align-self:center;"></span>
       </div>
     </div>
@@ -152,38 +152,38 @@
   <!-- ── 工作链 ── -->
   <div id="panel-chains" class="wf-panel">
     <div class="wf-section">
-      <h3>🔗 工作链配置
-        <button class="btn-sm btn-primary" onclick="WF.showChainForm()">+ 新建工作链</button>
+      <h3>🔗 {{ (i18n or {}).get('wf_s049', "工作链配置") }}
+        <button class="btn-sm btn-primary" onclick="WF.showChainForm()">+ {{ (i18n or {}).get('wf_s050', "新建工作链") }}</button>
       </h3>
-      <div id="chains-list"><div class="wf-empty">加载中…</div></div>
+      <div id="chains-list"><div class="wf-empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
     </div>
     <div class="wf-section" id="chain-form-wrap" style="display:none;">
-      <h3 id="chain-form-title">新建工作链</h3>
+      <h3 id="chain-form-title">{{ (i18n or {}).get('wf_s050', "新建工作链") }}</h3>
       <div class="form-row">
-        <div class="form-col"><label>工作链名称 *</label><input id="cf-name" placeholder="例：沉默客户挽回流程"></div>
+        <div class="form-col"><label>{{ (i18n or {}).get('wf_s051', "工作链名称") }} *</label><input id="cf-name" placeholder="{{ (i18n or {}).get('wf_s052', '例：沉默客户挽回流程') }}"></div>
       </div>
       <div class="form-row" style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:12px;">
         <div class="form-col" style="flex:0 0 160px;">
-          <label>自动触发 · 沉默天数</label>
-          <input id="cf-silence-days" type="number" min="0" value="0" placeholder="0=不自动触发">
+          <label>{{ (i18n or {}).get('wf_s053', "自动触发 · 沉默天数") }}</label>
+          <input id="cf-silence-days" type="number" min="0" value="0" placeholder="0={{ (i18n or {}).get('wf_s054', '不自动触发') }}">
         </div>
         <div class="form-col" style="flex:0 0 auto;align-self:flex-end;padding-bottom:4px;">
           <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
             <input id="cf-churn-high" type="checkbox" style="width:auto;">
-            仅高流失风险客户
+            {{ (i18n or {}).get('wf_s055', "仅高流失风险客户") }}
           </label>
         </div>
         <div class="form-col" style="font-size:11px;color:#64748b;align-self:center;">
-          P44：后台定时扫描，满足条件时自动启动本链（防重：同会话同链仅一条 running）
+          P44: {{ (i18n or {}).get('wf_s056', "后台定时扫描，满足条件时自动启动本链（防重：同会话同链仅一条 running）") }}
         </div>
       </div>
-      <div style="font-size:13px;font-weight:600;color:#374151;margin-bottom:8px;">工作步骤（按序执行）</div>
+      <div style="font-size:13px;font-weight:600;color:#374151;margin-bottom:8px;">{{ (i18n or {}).get('wf_s057', "工作步骤（按序执行）") }}</div>
       <div id="cf-steps"></div>
-      <button class="btn-sm" style="margin-bottom:10px;" onclick="WF.addStep()">+ 添加步骤</button>
+      <button class="btn-sm" style="margin-bottom:10px;" onclick="WF.addStep()">+ {{ (i18n or {}).get('wf_s058', "添加步骤") }}</button>
       <input type="hidden" id="cf-id">
       <div style="display:flex;gap:8px;">
-        <button class="btn-sm btn-primary" onclick="WF.saveChain()">保存工作链</button>
-        <button class="btn-sm" onclick="WF.cancelChainForm()">取消</button>
+        <button class="btn-sm btn-primary" onclick="WF.saveChain()">{{ (i18n or {}).get('wf_s059', "保存工作链") }}</button>
+        <button class="btn-sm" onclick="WF.cancelChainForm()">{{ (i18n or {}).get('ov_js_cancel', "取消") }}</button>
         <span id="cf-msg" style="font-size:12px;margin-left:8px;align-self:center;"></span>
       </div>
     </div>
@@ -192,30 +192,30 @@
   <!-- ── 分流路由 ── -->
   <div id="panel-routing" class="wf-panel">
     <div class="wf-section">
-      <h3>🔀 分流路由规则
-        <button class="btn-sm btn-primary" onclick="WF.showRoutingForm()">+ 新建规则</button>
+      <h3>🔀 {{ (i18n or {}).get('wf_s060', "分流路由规则") }}
+        <button class="btn-sm btn-primary" onclick="WF.showRoutingForm()">+ {{ (i18n or {}).get('wf_s061', "新建规则") }}</button>
       </h3>
-      <p style="font-size:12px;color:#64748b;margin:0 0 10px;">根据平台、关键词等条件自动将新会话分配给指定坐席。规则按优先级（数值大优先）依次匹配，取最高优先级命中规则。</p>
+      <p style="font-size:12px;color:#64748b;margin:0 0 10px;">{{ (i18n or {}).get('wf_s062', "根据平台、关键词等条件自动将新会话分配给指定坐席。规则按优先级（数值大优先）依次匹配，取最高优先级命中规则。") }}</p>
       <table class="wf-table">
         <thead>
-          <tr><th>名称</th><th>条件</th><th>分配给</th><th>优先级</th><th>启用</th><th>操作</th></tr>
+          <tr><th>{{ (i18n or {}).get('dash.ws.col_name', "名称") }}</th><th>{{ (i18n or {}).get('wf_s063', "条件") }}</th><th>{{ (i18n or {}).get('wf_s064', "分配给") }}</th><th>{{ (i18n or {}).get('msg_js_2014', "优先级") }}</th><th>{{ (i18n or {}).get('enable', "启用") }}</th><th>{{ (i18n or {}).get('ov_js_th_action', "操作") }}</th></tr>
         </thead>
         <tbody id="routing-tbody">
-          <tr><td colspan="6" class="wf-empty">加载中…</td></tr>
+          <tr><td colspan="6" class="wf-empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</td></tr>
         </tbody>
       </table>
     </div>
     <div class="wf-section" id="routing-form-wrap" style="display:none;">
-      <h3 id="routing-form-title">新建路由规则</h3>
+      <h3 id="routing-form-title">{{ (i18n or {}).get('wf_s065', "新建路由规则") }}</h3>
       <div class="form-row">
-        <div class="form-col"><label>规则名称 *</label><input id="rf-name" placeholder="例：WhatsApp 客户 → 坐席A"></div>
-        <div class="form-col" style="flex:0 0 130px;"><label>分配给（坐席ID）</label><input id="rf-to" placeholder="agent_001"></div>
-        <div class="form-col" style="flex:0 0 100px;"><label>优先级（越大越优先）</label><input id="rf-priority" type="number" value="0"></div>
+        <div class="form-col"><label>{{ (i18n or {}).get('wf_s066', "规则名称") }} *</label><input id="rf-name" placeholder="{{ (i18n or {}).get('wf_s067', '例：WhatsApp 客户') }} → {{ (i18n or {}).get('dash.col.agent', '坐席') }}A"></div>
+        <div class="form-col" style="flex:0 0 130px;"><label>{{ (i18n or {}).get('wf_s068', "分配给（坐席ID）") }}</label><input id="rf-to" placeholder="agent_001"></div>
+        <div class="form-col" style="flex:0 0 100px;"><label>{{ (i18n or {}).get('wf_s069', "优先级（越大越优先）") }}</label><input id="rf-priority" type="number" value="0"></div>
       </div>
       <div class="form-row" style="margin-top:4px;">
-        <div class="form-col" style="flex:0 0 160px;"><label>平台（留空=全部）</label>
+        <div class="form-col" style="flex:0 0 160px;"><label>{{ (i18n or {}).get('tm_s018', "平台（留空") }}={{ (i18n or {}).get('wf_s070', "全部）") }}</label>
           <select id="rf-platform">
-            <option value="">全部平台</option>
+            <option value="">{{ (i18n or {}).get('psn_all_platforms', "全部平台") }}</option>
             <option value="whatsapp">WhatsApp</option>
             <option value="line">LINE</option>
             <option value="telegram">Telegram</option>
@@ -223,21 +223,21 @@
             <option value="web">Web Chat</option>
           </select>
         </div>
-        <div class="form-col"><label>关键词（消息含该词时命中，留空=忽略）</label><input id="rf-keyword" placeholder="例：你好 或 hello"></div>
+        <div class="form-col"><label>{{ (i18n or {}).get('wf_s071', "关键词（消息含该词时命中，留空") }}={{ (i18n or {}).get('wf_s072', "忽略）") }}</label><input id="rf-keyword" placeholder="{{ (i18n or {}).get('wf_s073', '例：你好 或') }} hello"></div>
       </div>
       <input type="hidden" id="rf-id">
       <div style="display:flex;gap:8px;margin-top:8px;">
-        <button class="btn-sm btn-primary" onclick="WF.saveRouting()">保存规则</button>
-        <button class="btn-sm" onclick="WF.cancelRoutingForm()">取消</button>
+        <button class="btn-sm btn-primary" onclick="WF.saveRouting()">{{ (i18n or {}).get('wf_s074', "保存规则") }}</button>
+        <button class="btn-sm" onclick="WF.cancelRoutingForm()">{{ (i18n or {}).get('ov_js_cancel', "取消") }}</button>
         <span id="rf-msg" style="font-size:12px;margin-left:8px;align-self:center;"></span>
       </div>
     </div>
 
     <!-- 路由测试器 -->
     <div class="wf-section" id="routing-tester">
-      <h3>🧪 规则测试器</h3>
+      <h3>🧪 {{ (i18n or {}).get('wf_s075', "规则测试器") }}</h3>
       <div class="form-row">
-        <div class="form-col" style="flex:0 0 140px;"><label>平台</label>
+        <div class="form-col" style="flex:0 0 140px;"><label>{{ (i18n or {}).get('inbox.info.platform', "平台") }}</label>
           <select id="rt-platform">
             <option value="">—</option>
             <option value="whatsapp">WhatsApp</option>
@@ -245,9 +245,9 @@
             <option value="telegram">Telegram</option>
           </select>
         </div>
-        <div class="form-col"><label>消息内容</label><input id="rt-text" placeholder="模拟客户消息…"></div>
+        <div class="form-col"><label>{{ (i18n or {}).get('msg_s462', "消息内容") }}</label><input id="rt-text" placeholder="{{ (i18n or {}).get('wf_s076', '模拟客户消息…') }}"></div>
         <div class="form-col" style="flex:0 0 auto;align-self:flex-end;">
-          <button class="btn-sm btn-primary" onclick="WF.testRouting()">测试</button>
+          <button class="btn-sm btn-primary" onclick="WF.testRouting()">{{ (i18n or {}).get('wa_js_108', "测试") }}</button>
         </div>
       </div>
       <div id="rt-result" style="font-size:13px;color:#374151;margin-top:8px;"></div>
@@ -257,59 +257,59 @@
   <!-- ── 执行监控（P47） ── -->
   <div id="panel-monitor" class="wf-panel">
     <div class="wf-section">
-      <h3>📊 工作链执行监控
+      <h3>📊 {{ (i18n or {}).get('wf_s077', "工作链执行监控") }}
         <span id="mon-running-badge" style="font-size:12px;font-weight:500;color:#1e40af;"></span>
-        <button class="btn-sm" onclick="WF.loadMonitor()" style="margin-left:8px;">刷新</button>
+        <button class="btn-sm" onclick="WF.loadMonitor()" style="margin-left:8px;">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
       </h3>
-      <p style="font-size:12px;color:#64748b;margin:0 0 10px;">实时查看运行中 / 最近完成 / 失败的工作链。后台 ScheduledReporter 每 tick 推进到期步骤。</p>
+      <p style="font-size:12px;color:#64748b;margin:0 0 10px;">{{ (i18n or {}).get('wf_s078', "实时查看运行中 / 最近完成 / 失败的工作链。后台 ScheduledReporter 每 tick 推进到期步骤。") }}</p>
       <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
         <select id="mon-filter" onchange="WF.loadMonitor()" style="font-size:12px;padding:4px 8px;border:1px solid #d1d5db;border-radius:6px;">
-          <option value="">全部状态</option>
-          <option value="running">运行中</option>
-          <option value="completed">已完成</option>
-          <option value="failed">失败</option>
-          <option value="cancelled">已取消</option>
+          <option value="">{{ (i18n or {}).get('psn_all_status', "全部状态") }}</option>
+          <option value="running">{{ (i18n or {}).get('ov_js_running', "运行中") }}</option>
+          <option value="completed">{{ (i18n or {}).get('ops.ct.st_completed', "已完成") }}</option>
+          <option value="failed">{{ (i18n or {}).get('rpa_js_st_failed', "失败") }}</option>
+          <option value="cancelled">{{ (i18n or {}).get('rpa_js_st_cancelled', "已取消") }}</option>
         </select>
       </div>
-      <div id="monitor-list"><div class="wf-empty">加载中…</div></div>
+      <div id="monitor-list"><div class="wf-empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
     </div>
   </div>
 
   <!-- ── 剧本话题（P40） ── -->
   <div id="panel-scripts" class="wf-panel">
     <div class="wf-section">
-      <h3>🎭 剧本话题库（按关系阶段）
-        <button class="btn-sm btn-primary" onclick="WF.showScriptForm()">+ 新建话题</button>
+      <h3>🎭 {{ (i18n or {}).get('wf_s079', "剧本话题库（按关系阶段）") }}
+        <button class="btn-sm btn-primary" onclick="WF.showScriptForm()">+ {{ (i18n or {}).get('wf_s080', "新建话题") }}</button>
       </h3>
-      <p style="font-size:12px;color:#64748b;margin:0 0 10px;">阶段与 companion_relationship 对齐：initial 初识 → warming 熟悉 → intimate 深入 → steady 亲密</p>
+      <p style="font-size:12px;color:#64748b;margin:0 0 10px;">{{ (i18n or {}).get('wf_s081', "阶段与关系亲密度对齐") }} (companion_relationship): initial={{ (i18n or {}).get('wf_s082', "初识") }} → warming={{ (i18n or {}).get('wf_s083', "熟悉") }} → intimate={{ (i18n or {}).get('wf_s084', "深入") }} → steady={{ (i18n or {}).get('rpa_js_intimacy', "亲密") }}</p>
       <table class="wf-table">
-        <thead><tr><th>阶段</th><th>标题</th><th>开场话术</th><th>标签</th><th>操作</th></tr></thead>
-        <tbody id="scripts-tbody"><tr><td colspan="5" class="wf-empty">加载中…</td></tr></tbody>
+        <thead><tr><th>{{ (i18n or {}).get('msg_js_1039', "阶段") }}</th><th>{{ (i18n or {}).get('kb_s106', "标题") }}</th><th>{{ (i18n or {}).get('wf_s085', "开场话术") }}</th><th>{{ (i18n or {}).get('psn_tag', "标签") }}</th><th>{{ (i18n or {}).get('ov_js_th_action', "操作") }}</th></tr></thead>
+        <tbody id="scripts-tbody"><tr><td colspan="5" class="wf-empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</td></tr></tbody>
       </table>
     </div>
     <div class="wf-section" id="script-form-wrap" style="display:none;">
-      <h3 id="script-form-title">新建剧本话题</h3>
+      <h3 id="script-form-title">{{ (i18n or {}).get('wf_s086', "新建剧本话题") }}</h3>
       <div class="form-row">
-        <div class="form-col" style="flex:0 0 130px;"><label>关系阶段</label>
+        <div class="form-col" style="flex:0 0 130px;"><label>{{ (i18n or {}).get('msg_js_1948', "关系阶段") }}</label>
           <select id="sf-stage">
-            <option value="initial">初识 initial</option>
-            <option value="warming">熟悉 warming</option>
-            <option value="intimate">深入 intimate</option>
-            <option value="steady">亲密 steady</option>
+            <option value="initial">{{ (i18n or {}).get('c3_js028', "初识") }} initial</option>
+            <option value="warming">{{ (i18n or {}).get('wf_s083', "熟悉") }} warming</option>
+            <option value="intimate">{{ (i18n or {}).get('wf_s084', "深入") }} intimate</option>
+            <option value="steady">{{ (i18n or {}).get('rpa_js_intimacy', "亲密") }} steady</option>
           </select>
         </div>
-        <div class="form-col"><label>话题标题 *</label><input id="sf-title" placeholder="例：深夜心事"></div>
+        <div class="form-col"><label>{{ (i18n or {}).get('wf_s087', "话题标题") }} *</label><input id="sf-title" placeholder="{{ (i18n or {}).get('wf_s088', '例：深夜心事') }}"></div>
       </div>
-      <div class="form-row"><div class="form-col"><label>开场话术 *</label><textarea id="sf-opener" rows="3" placeholder="坐席可直接使用的话题切入点…"></textarea></div></div>
+      <div class="form-row"><div class="form-col"><label>{{ (i18n or {}).get('wf_s085', "开场话术") }} *</label><textarea id="sf-opener" rows="3" placeholder="{{ (i18n or {}).get('wf_s089', '坐席可直接使用的话题切入点…') }}"></textarea></div></div>
       <div class="form-row">
-        <div class="form-col"><label>使用提示</label><input id="sf-hint" placeholder="什么场景下推荐使用"></div>
-        <div class="form-col"><label>标签（逗号分隔）</label><input id="sf-tags" placeholder="情绪,倾听,reunion"></div>
-        <div class="form-col"><label>关联工作链 ID</label><input id="sf-chain" placeholder="可选"></div>
+        <div class="form-col"><label>{{ (i18n or {}).get('wf_s090', "使用提示") }}</label><input id="sf-hint" placeholder="{{ (i18n or {}).get('wf_s091', '什么场景下推荐使用') }}"></div>
+        <div class="form-col"><label>{{ (i18n or {}).get('wf_s092', "标签（逗号分隔）") }}</label><input id="sf-tags" placeholder="{{ (i18n or {}).get('inbox.ai.sentiment', '情绪') }},{{ (i18n or {}).get('wf_s093', '倾听') }},reunion"></div>
+        <div class="form-col"><label>{{ (i18n or {}).get('wf_s094', "关联工作链") }} ID</label><input id="sf-chain" placeholder="{{ (i18n or {}).get('msg_s416', '可选') }}"></div>
       </div>
       <input type="hidden" id="sf-id">
       <div style="display:flex;gap:8px;margin-top:8px;">
-        <button class="btn-sm btn-primary" onclick="WF.saveScript()">保存</button>
-        <button class="btn-sm" onclick="WF.cancelScriptForm()">取消</button>
+        <button class="btn-sm btn-primary" onclick="WF.saveScript()">{{ (i18n or {}).get('save', "保存") }}</button>
+        <button class="btn-sm" onclick="WF.cancelScriptForm()">{{ (i18n or {}).get('ov_js_cancel', "取消") }}</button>
       </div>
     </div>
   </div>
@@ -341,14 +341,14 @@ window.WF={
 
 // ── 自定义动作 ──────────────────────────────────────────────────────────────
 var _editingActionId=null;
-var _TYPE_LABELS={template:'话术模板',task:'创建任务',tag:'添加标签',note:'内部备注',escalate:'升级人工',chain:'触发工作链'};
+var _TYPE_LABELS={template:window.T('templates'),task:window.T('wf_s013'),tag:window.T('wf_s014'),note:window.T('wf_s015'),escalate:window.T('wf_s016'),chain:window.T('wf_s017')};
 var _TYPE_BADGE={template:'badge-template',task:'badge-task',tag:'badge-tag',note:'badge-note',escalate:'badge-escalate',chain:'badge-chain'};
 
 WF.loadActions=function(){
   fetch('/api/workspace/workflow-actions').then(function(r){return r.json();}).then(function(d){
     var tbody=document.getElementById('actions-tbody');
     var acts=d.actions||[];
-    if(!acts.length){tbody.innerHTML='<tr><td colspan="7" class="wf-empty">暂无自定义动作 — 点击「新建动作」开始配置</td></tr>';return;}
+    if(!acts.length){tbody.innerHTML='<tr><td colspan="7" class="wf-empty">'+window.T('wf_js001')+' — '+window.T('dash.q.clicked')+' "'+window.T('wf_js002')+'" '+window.T('wf_js003')+'</td></tr>';return;}
     tbody.innerHTML=acts.map(function(a){
       var conds=[];try{conds=JSON.parse(a.trigger_conditions||'[]');}catch(_){}
       return '<tr>'
@@ -359,15 +359,15 @@ WF.loadActions=function(){
         +'<td>'+a.sort_order+'</td>'
         +'<td><label class="toggle-sw"><input type="checkbox"'+(a.enabled?'checked':'')
           +' onchange="WF.toggleAction(\''+esc(a.action_id)+'\',this.checked)"><span class="toggle-slider"></span></label></td>'
-        +'<td><button class="btn-sm" onclick="WF.editAction(\''+esc(a.action_id)+'\')">编辑</button> '
-          +'<button class="btn-sm btn-danger" onclick="WF.delAction(\''+esc(a.action_id)+'\')">删除</button></td>'
+        +'<td><button class="btn-sm" onclick="WF.editAction(\''+esc(a.action_id)+'\')">'+window.T('edit')+'</button> '
+          +'<button class="btn-sm btn-danger" onclick="WF.delAction(\''+esc(a.action_id)+'\')">'+window.T('delete')+'</button></td>'
         +'</tr>';
     }).join('');
   }).catch(function(){});
 };
 WF.showActionForm=function(act){
   _editingActionId=act?act.action_id:null;
-  document.getElementById('action-form-title').textContent=act?'编辑动作':'新建动作';
+  document.getElementById('action-form-title').textContent=act?window.T('wf_js004'):window.T('wf_s008');
   document.getElementById('af-id').value=act?act.action_id:'';
   document.getElementById('af-icon').value=act?act.icon:'💡';
   document.getElementById('af-name').value=act?act.name:'';
@@ -421,13 +421,13 @@ WF.saveAction=function(){
     enabled:1,
     trigger_conditions:JSON.stringify(conds.length?conds:['any']),
   };
-  if(!data.name){document.getElementById('af-msg').textContent='名称不能为空';document.getElementById('af-msg').style.color='#ef4444';return;}
+  if(!data.name){document.getElementById('af-msg').textContent=window.T('psn_js_137');document.getElementById('af-msg').style.color='#ef4444';return;}
   var url=data.action_id?'/api/workspace/workflow-actions/'+encodeURIComponent(data.action_id):'/api/workspace/workflow-actions';
   var method=data.action_id?'PUT':'POST';
   fetch(url,{method:method,headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})
     .then(function(r){return r.json();}).then(function(d){
-      if(d.ok){document.getElementById('af-msg').textContent='已保存';document.getElementById('af-msg').style.color='#10b981';WF.loadActions();setTimeout(function(){WF.cancelForm();},1000);}
-      else{document.getElementById('af-msg').textContent='保存失败';document.getElementById('af-msg').style.color='#ef4444';}
+      if(d.ok){document.getElementById('af-msg').textContent=window.T('wa_js_053');document.getElementById('af-msg').style.color='#10b981';WF.loadActions();setTimeout(function(){WF.cancelForm();},1000);}
+      else{document.getElementById('af-msg').textContent=window.T('ov_js_save_fail');document.getElementById('af-msg').style.color='#ef4444';}
     });
 };
 WF.toggleAction=function(id,enabled){
@@ -435,7 +435,7 @@ WF.toggleAction=function(id,enabled){
     headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:enabled?1:0})});
 };
 WF.delAction=function(id){
-  if(!confirm('确认删除该动作？'))return;
+  if(!confirm(window.T('wf_js005')))return;
   fetch('/api/workspace/workflow-actions/'+encodeURIComponent(id),{method:'DELETE'})
     .then(function(){WF.loadActions();});
 };
@@ -446,21 +446,21 @@ WF.loadChains=function(){
   fetch('/api/workspace/workflow-chains').then(function(r){return r.json();}).then(function(d){
     var box=document.getElementById('chains-list');
     var chains=d.chains||[];
-    if(!chains.length){box.innerHTML='<div class="wf-empty">暂无工作链 — 工作链可将多个动作串联为自动化流程</div>';return;}
+    if(!chains.length){box.innerHTML='<div class="wf-empty">'+window.T('wf_js006')+' — '+window.T('wf_js007')+'</div>';return;}
     box.innerHTML=chains.map(function(c){
       var steps=c.steps||[];
       return '<div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;margin-bottom:10px;">'
         +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
           +'<strong style="font-size:14px;">🔗 '+esc(c.name)+'</strong>'
-          +'<div><button class="btn-sm" onclick="WF.editChain(\''+esc(c.chain_id)+'\')">编辑</button> '
-            +'<button class="btn-sm btn-danger" onclick="WF.delChain(\''+esc(c.chain_id)+'\')">删除</button></div>'
+          +'<div><button class="btn-sm" onclick="WF.editChain(\''+esc(c.chain_id)+'\')">'+window.T('edit')+'</button> '
+            +'<button class="btn-sm btn-danger" onclick="WF.delChain(\''+esc(c.chain_id)+'\')">'+window.T('delete')+'</button></div>'
         +'</div>'
         +'<div style="font-size:11px;color:#94a3b8;margin-bottom:6px;">ID: '+esc(c.chain_id)+'</div>'
         +(function(){
           var tc=c.trigger_conditions||{};
           var tags=[];
-          if(tc.silence_days)tags.push('沉默≥'+tc.silence_days+'天');
-          if(tc.churn_risk_high)tags.push('高流失风险');
+          if(tc.silence_days)tags.push(window.T('ov_js_th_silent')+'≥'+tc.silence_days+window.T('wa_s158'));
+          if(tc.churn_risk_high)tags.push(window.T('wf_js008'));
           return tags.length?'<div style="margin-bottom:6px;">'+tags.map(function(t){return '<span class="cond-tag">⚡ '+t+'</span>';}).join('')+'</div>':'';
         })()
         +'<div>'
@@ -468,8 +468,8 @@ WF.loadChains=function(){
             return '<div class="step-card">'
               +'<div class="step-num">'+(i+1)+'</div>'
               +'<div style="flex:1;font-size:12px;">'
-                +'<strong>'+esc(_TYPE_LABELS[s.action_type]||s.action_type||'未知')+'</strong>'
-                +(s.delay_hours?'<span style="color:#94a3b8;margin-left:8px;">延迟 '+s.delay_hours+' 小时</span>':'')
+                +'<strong>'+esc(_TYPE_LABELS[s.action_type]||s.action_type||window.T('rpa_unknown'))+'</strong>'
+                +(s.delay_hours?'<span style="color:#94a3b8;margin-left:8px;">'+window.T('wf_js009')+' '+s.delay_hours+' '+window.T('msg_js_009')+'</span>':'')
                 +(s.note?'<div style="color:#64748b;margin-top:2px;">'+esc(s.note)+'</div>':'')
               +'</div></div>';
           }).join('')
@@ -485,14 +485,14 @@ WF.showChainForm=function(chain){
   var tc=chain?(chain.trigger_conditions||{}):{};
   document.getElementById('cf-silence-days').value=tc.silence_days||0;
   document.getElementById('cf-churn-high').checked=!!tc.churn_risk_high;
-  document.getElementById('chain-form-title').textContent=chain?'编辑工作链':'新建工作链';
+  document.getElementById('chain-form-title').textContent=chain?window.T('wf_js010'):window.T('wf_s050');
   WF.renderSteps();
   document.getElementById('chain-form-wrap').style.display='block';
   document.getElementById('chain-form-wrap').scrollIntoView({behavior:'smooth'});
 };
 WF.renderSteps=function(){
   var box=document.getElementById('cf-steps');
-  if(!_chainSteps.length){box.innerHTML='<div class="wf-empty" style="padding:10px;">暂无步骤，点击「添加步骤」</div>';return;}
+  if(!_chainSteps.length){box.innerHTML='<div class="wf-empty" style="padding:10px;">'+window.T('wf_js011')+' "'+window.T('wf_js012')+'"</div>';return;}
   box.innerHTML=_chainSteps.map(function(s,i){
     return '<div class="step-card">'
       +'<div class="step-num">'+(i+1)+'</div>'
@@ -501,9 +501,9 @@ WF.renderSteps=function(){
           +Object.keys(_TYPE_LABELS).map(function(t){return '<option value="'+t+'"'+(s.action_type===t?' selected':'')+'>'+_TYPE_LABELS[t]+'</option>';}).join('')
         +'</select>'
         +'<input style="font-size:12px;width:180px;padding:3px 7px;border:1px solid #d1d5db;border-radius:5px;" '
-          +'placeholder="内容/话术/标签/备注…" value="'+esc(s.note||'')+'" oninput="_stepField('+i+',\'note\',this.value)">'
+          +'placeholder="'+window.T('wf_js013')+'" value="'+esc(s.note||'')+'" oninput="_stepField('+i+',\'note\',this.value)">'
         +'<input style="font-size:12px;width:90px;padding:3px 7px;border:1px solid #d1d5db;border-radius:5px;" '
-          +'type="number" min="0" placeholder="延迟(h)" value="'+(s.delay_hours||0)+'" oninput="_stepField('+i+',\'delay_hours\',Number(this.value))">'
+          +'type="number" min="0" placeholder="'+window.T('wf_js009')+'(h)" value="'+(s.delay_hours||0)+'" oninput="_stepField('+i+',\'delay_hours\',Number(this.value))">'
         +'<button class="btn-sm btn-danger" onclick="_delStep('+i+')">×</button>'
       +'</div></div>';
   }).join('');
@@ -520,7 +520,7 @@ WF.editChain=function(id){
 WF.cancelChainForm=function(){document.getElementById('chain-form-wrap').style.display='none';};
 WF.saveChain=function(){
   var name=document.getElementById('cf-name').value.trim();
-  if(!name){document.getElementById('cf-msg').textContent='名称不能为空';return;}
+  if(!name){document.getElementById('cf-msg').textContent=window.T('psn_js_137');return;}
   var silenceDays=Number(document.getElementById('cf-silence-days').value)||0;
   var churnHigh=document.getElementById('cf-churn-high').checked;
   var trigger={};
@@ -530,11 +530,11 @@ WF.saveChain=function(){
   var url=data.chain_id?'/api/workspace/workflow-chains/'+encodeURIComponent(data.chain_id):'/api/workspace/workflow-chains';
   fetch(url,{method:data.chain_id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})
     .then(function(r){return r.json();}).then(function(d){
-      if(d.ok){document.getElementById('cf-msg').textContent='已保存';document.getElementById('cf-msg').style.color='#10b981';WF.loadChains();setTimeout(function(){WF.cancelChainForm();},1000);}
+      if(d.ok){document.getElementById('cf-msg').textContent=window.T('wa_js_053');document.getElementById('cf-msg').style.color='#10b981';WF.loadChains();setTimeout(function(){WF.cancelChainForm();},1000);}
     });
 };
 WF.delChain=function(id){
-  if(!confirm('确认删除此工作链？'))return;
+  if(!confirm(window.T('wf_js014')))return;
   fetch('/api/workspace/workflow-chains/'+encodeURIComponent(id),{method:'DELETE'}).then(function(){WF.loadChains();});
 };
 
@@ -543,10 +543,10 @@ WF.loadRouting=function(){
   fetch('/api/workspace/routing-rules').then(function(r){return r.json();}).then(function(d){
     var tbody=document.getElementById('routing-tbody');
     var rules=d.rules||[];
-    if(!rules.length){tbody.innerHTML='<tr><td colspan="6" class="wf-empty">暂无路由规则</td></tr>';return;}
+    if(!rules.length){tbody.innerHTML='<tr><td colspan="6" class="wf-empty">'+window.T('wf_js015')+'</td></tr>';return;}
     tbody.innerHTML=rules.map(function(r){
       var conds=r.conditions||{};
-      var condStr=[conds.platform?'平台='+conds.platform:'',conds.keyword?'含词='+conds.keyword:''].filter(Boolean).join('；')||'通配';
+      var condStr=[conds.platform?window.T('inbox.info.platform')+'='+conds.platform:'',conds.keyword?window.T('wf_js016')+'='+conds.keyword:''].filter(Boolean).join('; ')||window.T('wf_js017');
       return '<tr>'
         +'<td><strong>'+esc(r.name)+'</strong></td>'
         +'<td style="font-size:12px;color:#64748b;">'+esc(condStr)+'</td>'
@@ -554,8 +554,8 @@ WF.loadRouting=function(){
         +'<td>'+r.priority+'</td>'
         +'<td><label class="toggle-sw"><input type="checkbox"'+(r.enabled?'checked':'')
           +' onchange="WF.toggleRule(\''+esc(r.rule_id)+'\',this.checked)"><span class="toggle-slider"></span></label></td>'
-        +'<td><button class="btn-sm" onclick="WF.editRule(\''+esc(r.rule_id)+'\')">编辑</button> '
-          +'<button class="btn-sm btn-danger" onclick="WF.delRule(\''+esc(r.rule_id)+'\')">删除</button></td>'
+        +'<td><button class="btn-sm" onclick="WF.editRule(\''+esc(r.rule_id)+'\')">'+window.T('edit')+'</button> '
+          +'<button class="btn-sm btn-danger" onclick="WF.delRule(\''+esc(r.rule_id)+'\')">'+window.T('delete')+'</button></td>'
         +'</tr>';
     }).join('');
   });
@@ -568,7 +568,7 @@ WF.showRoutingForm=function(rule){
   var conds=rule?rule.conditions:{};
   document.getElementById('rf-platform').value=conds.platform||'';
   document.getElementById('rf-keyword').value=conds.keyword||'';
-  document.getElementById('routing-form-title').textContent=rule?'编辑规则':'新建路由规则';
+  document.getElementById('routing-form-title').textContent=rule?window.T('wf_js018'):window.T('wf_s065');
   document.getElementById('routing-form-wrap').style.display='block';
   document.getElementById('routing-form-wrap').scrollIntoView({behavior:'smooth'});
 };
@@ -581,7 +581,7 @@ WF.editRule=function(id){
 WF.cancelRoutingForm=function(){document.getElementById('routing-form-wrap').style.display='none';};
 WF.saveRouting=function(){
   var name=document.getElementById('rf-name').value.trim();
-  if(!name){document.getElementById('rf-msg').textContent='名称不能为空';return;}
+  if(!name){document.getElementById('rf-msg').textContent=window.T('psn_js_137');return;}
   var conds={};
   var plat=document.getElementById('rf-platform').value;if(plat)conds.platform=plat;
   var kw=document.getElementById('rf-keyword').value.trim();if(kw)conds.keyword=kw;
@@ -592,7 +592,7 @@ WF.saveRouting=function(){
   var url=data.rule_id?'/api/workspace/routing-rules/'+encodeURIComponent(data.rule_id):'/api/workspace/routing-rules';
   fetch(url,{method:data.rule_id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})
     .then(function(r){return r.json();}).then(function(d){
-      if(d.ok){document.getElementById('rf-msg').textContent='已保存';document.getElementById('rf-msg').style.color='#10b981';WF.loadRouting();setTimeout(function(){WF.cancelRoutingForm();},1000);}
+      if(d.ok){document.getElementById('rf-msg').textContent=window.T('wa_js_053');document.getElementById('rf-msg').style.color='#10b981';WF.loadRouting();setTimeout(function(){WF.cancelRoutingForm();},1000);}
     });
 };
 WF.toggleRule=function(id,enabled){
@@ -600,7 +600,7 @@ WF.toggleRule=function(id,enabled){
     headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:enabled?1:0})});
 };
 WF.delRule=function(id){
-  if(!confirm('确认删除此规则？'))return;
+  if(!confirm(window.T('wf_js019')))return;
   fetch('/api/workspace/routing-rules/'+encodeURIComponent(id),{method:'DELETE'}).then(function(){WF.loadRouting();});
 };
 WF.testRouting=function(){
@@ -608,26 +608,26 @@ WF.testRouting=function(){
   fetch('/api/workspace/routing-rules/evaluate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation:conv})})
     .then(function(r){return r.json();}).then(function(d){
       var el=document.getElementById('rt-result');
-      if(!d.matched||!d.matched.length){el.textContent='无匹配规则';el.style.color='#94a3b8';return;}
+      if(!d.matched||!d.matched.length){el.textContent=window.T('wf_js020');el.style.color='#94a3b8';return;}
       var best=d.best_match;
-      el.innerHTML='命中 '+d.matched.length+' 条规则，最高优先级：<strong>'+esc(best.name)+'</strong> → 分配给 <strong>'+esc(best.assign_to||'—')+'</strong>';
+      el.innerHTML=window.T('db_js_094')+' '+d.matched.length+' '+window.T('wf_js021')+'<strong>'+esc(best.name)+'</strong> → '+window.T('wf_s064')+' <strong>'+esc(best.assign_to||'—')+'</strong>';
       el.style.color='#10b981';
     });
 };
 
 // ── 剧本话题（P40） ──────────────────────────────────────────────────────
-var _STAGE_ZH={initial:'初识',warming:'熟悉',intimate:'深入',steady:'亲密'};
+var _STAGE_ZH={initial:window.T('c3_js028'),warming:window.T('wf_s083'),intimate:window.T('wf_s084'),steady:window.T('rpa_js_intimacy')};
 WF.loadScripts=function(){
   fetch('/api/workspace/script-topics').then(function(r){return r.json();}).then(function(d){
     var tbody=document.getElementById('scripts-tbody');
     var topics=d.topics||[];
-    if(!topics.length){tbody.innerHTML='<tr><td colspan="5" class="wf-empty">暂无自定义话题（内置话题在侧栏自动展示）</td></tr>';return;}
+    if(!topics.length){tbody.innerHTML='<tr><td colspan="5" class="wf-empty">'+window.T('wf_js022')+'</td></tr>';return;}
     tbody.innerHTML=topics.map(function(t){
       return '<tr><td>'+esc(_STAGE_ZH[t.stage]||t.stage)+'</td><td><strong>'+esc(t.title)+'</strong></td>'
         +'<td style="font-size:12px;max-width:280px;">'+esc((t.opener||'').slice(0,80))+'</td>'
         +'<td style="font-size:11px;">'+(t.tags||[]).map(function(x){return '<span class="cond-tag">'+esc(x)+'</span>';}).join('')+'</td>'
-        +'<td><button class="btn-sm" onclick="WF.editScript(\''+esc(t.topic_id)+'\')">编辑</button> '
-        +'<button class="btn-sm btn-danger" onclick="WF.delScript(\''+esc(t.topic_id)+'\')">删除</button></td></tr>';
+        +'<td><button class="btn-sm" onclick="WF.editScript(\''+esc(t.topic_id)+'\')">'+window.T('edit')+'</button> '
+        +'<button class="btn-sm btn-danger" onclick="WF.delScript(\''+esc(t.topic_id)+'\')">'+window.T('delete')+'</button></td></tr>';
     }).join('');
   });
 };
@@ -639,7 +639,7 @@ WF.showScriptForm=function(t){
   document.getElementById('sf-hint').value=t?t.hint:'';
   document.getElementById('sf-tags').value=(t&&t.tags)?t.tags.join(','):'';
   document.getElementById('sf-chain').value=t?t.chain_id:'';
-  document.getElementById('script-form-title').textContent=t?'编辑话题':'新建剧本话题';
+  document.getElementById('script-form-title').textContent=t?window.T('wf_js023'):window.T('wf_s086');
   document.getElementById('script-form-wrap').style.display='block';
 };
 WF.editScript=function(id){
@@ -659,7 +659,7 @@ WF.saveScript=function(){
     tags:document.getElementById('sf-tags').value.split(',').map(function(x){return x.trim();}).filter(Boolean),
     chain_id:document.getElementById('sf-chain').value.trim(),
   };
-  if(!data.title||!data.opener){alert('标题和开场话术必填');return;}
+  if(!data.title||!data.opener){alert(window.T('wf_js024'));return;}
   var url=data.topic_id?'/api/workspace/script-topics/'+encodeURIComponent(data.topic_id):'/api/workspace/script-topics';
   fetch(url,{method:data.topic_id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})
     .then(function(r){return r.json();}).then(function(d){
@@ -667,7 +667,7 @@ WF.saveScript=function(){
     });
 };
 WF.delScript=function(id){
-  if(!confirm('确认删除？'))return;
+  if(!confirm(window.T('kb_js_047')))return;
   fetch('/api/workspace/script-topics/'+encodeURIComponent(id),{method:'DELETE'}).then(function(){WF.loadScripts();});
 };
 
@@ -678,9 +678,9 @@ WF.loadMonitor=function(){
   fetch(url).then(function(r){return r.json();}).then(function(d){
     var box=document.getElementById('monitor-list');
     var badge=document.getElementById('mon-running-badge');
-    if(badge) badge.textContent=d.running_count?(' · '+d.running_count+' 条运行中'):'';
+    if(badge) badge.textContent=d.running_count?(' · '+d.running_count+' '+window.T('wf_js025')):'';
     var items=d.executions||[];
-    if(!items.length){box.innerHTML='<div class="wf-empty">暂无执行记录</div>';return;}
+    if(!items.length){box.innerHTML='<div class="wf-empty">'+window.T('wf_js026')+'</div>';return;}
     var _badgeCls={running:'badge-running',completed:'badge-completed',failed:'badge-failed',cancelled:'badge-cancelled'};
     box.innerHTML=items.map(function(ex){
       var dots=(ex.steps_preview||[]).map(function(s){
@@ -689,31 +689,31 @@ WF.loadMonitor=function(){
         return '<div class="'+c+'" title="'+(s.action_label||'')+'"></div>';
       }).join('');
       var cd=ex.countdown_sec>0?('<span style="color:#b45309;">⏱ '+ex.countdown_sec+'s</span>'):'';
-      var lr=ex.last_result&&ex.last_result.text?('<div style="font-size:11px;color:#64748b;margin-top:3px;">最近：'+esc(ex.last_result.text).slice(0,60)+'</div>'):'';
+      var lr=ex.last_result&&ex.last_result.text?('<div style="font-size:11px;color:#64748b;margin-top:3px;">'+window.T('wf_js027')+esc(ex.last_result.text).slice(0,60)+'</div>'):'';
       return '<div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:8px;">'
         +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">'
           +'<div style="flex:1;">'
             +'<div style="font-size:13px;font-weight:600;">'+esc(ex.chain_name||ex.chain_id)+'</div>'
             +'<div style="font-size:11px;color:#94a3b8;margin-top:2px;">'
-              +esc(ex.display_name||ex.conversation_id||'')+' · 步骤 '+ex.current_step_display+'/'+ex.total_steps
+              +esc(ex.display_name||ex.conversation_id||'')+' · '+window.T('tour_step')+' '+ex.current_step_display+'/'+ex.total_steps
               +(ex.current_step_label?' · '+esc(ex.current_step_label):'')+'</div>'
             +'<div class="exec-step-mini">'+dots+'</div>'+lr
           +'</div>'
           +'<div style="text-align:right;flex:0 0 auto;">'
             +'<span class="badge '+(_badgeCls[ex.status]||'')+'">'+esc(ex.status_label||ex.status)+'</span>'
             +'<div style="font-size:10px;color:#94a3b8;margin-top:4px;">'+cd+'</div>'
-            +(ex.status==='running'?'<button class="btn-sm btn-danger" style="margin-top:6px;" onclick="WF.cancelExec(\''+esc(ex.exec_id)+'\')">取消</button>':'')
+            +(ex.status==='running'?'<button class="btn-sm btn-danger" style="margin-top:6px;" onclick="WF.cancelExec(\''+esc(ex.exec_id)+'\')">'+window.T('ov_js_cancel')+'</button>':'')
           +'</div>'
         +'</div></div>';
     }).join('');
   });
 };
 WF.cancelExec=function(id){
-  if(!confirm('确认取消此工作链执行？'))return;
+  if(!confirm(window.T('wf_js028')))return;
   fetch('/api/workspace/chain-executions/'+encodeURIComponent(id)+'/cancel',{
-    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({reason:'管理页手动取消'})
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({reason:window.T('wf_js029')})
   }).then(function(r){return r.json();}).then(function(d){
-    if(d.ok) WF.loadMonitor(); else alert('取消失败');
+    if(d.ok) WF.loadMonitor(); else alert(window.T('msg_js_2058'));
   });
 };
 // ── 初始加载 ─────────────────────────────────────────────────────────────────

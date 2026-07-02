@@ -1,9 +1,12 @@
 <!DOCTYPE html>
-<html lang="{{ ui_lang|default('zh') }}-CN" data-theme="light" data-ui-mode="{{ ui_mode|default('simple') }}"{% if embedded %} data-embedded="1"{% endif %}>
+<html lang="{{ 'zh-CN' if (ui_lang|default('zh')) == 'zh' else 'en' }}" data-theme="light" data-ui-mode="{{ ui_mode|default('simple') }}"{% if embedded %} data-embedded="1"{% endif %}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{% block title %}{{ site_name|default('华灵科技客户转化聊天系统') }}{% endblock %}</title>
+<title>{% block title %}{{ site_name|default((i18n or {}).get('brand', '无界科技 · 智聊')) }}{% endblock %}</title>
+{% include "_brand_head.html" %}
+<link rel="stylesheet" href="/static/brand/brand-lockup.css">
+{% include "_i18n_bootstrap.html" %}
 <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
@@ -55,10 +58,8 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 /* ── Sidebar ─────────────────────────────────── */
 .sidebar{width:var(--sw);position:fixed;top:0;left:0;bottom:0;background:var(--nav);display:flex;flex-direction:column;z-index:100;border-right:1px solid var(--bd);transition:transform .3s cubic-bezier(.4,0,.2,1)}
 [data-theme="dark"] .sidebar{backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);background:rgba(13,17,23,.98);border-right:1px solid rgba(240,246,252,.08)}
-.sb-brand{padding:1.15rem 1.2rem;display:flex;align-items:center;gap:.6rem;border-bottom:1px solid rgba(255,255,255,.06)}
-.sb-icon{width:32px;height:32px;background:var(--g);border-radius:10px;display:flex;align-items:center;justify-content:center;box-shadow:var(--sp);flex-shrink:0}
-.sb-icon svg{width:17px;height:17px;color:#fff}
-.sb-name{font-weight:700;font-size:.95rem;color:#fff}
+.sb-brand{padding:1.15rem 1.2rem;display:flex;align-items:center;gap:.35rem;border-bottom:1px solid rgba(255,255,255,.06)}
+.sb-brand .brand-lockup{flex:1;min-width:0}
 .sb-nav{flex:1;padding:.6rem .55rem;overflow-y:auto}
 .sb-sec{font-size:.68rem;font-weight:700;color:rgba(255,255,255,.28);padding:.75rem .75rem .3rem;letter-spacing:.08em;text-transform:uppercase;cursor:default;user-select:none;pointer-events:none;border-top:1px solid rgba(255,255,255,.06);margin-top:.6rem;padding-top:.85rem}
 .sb-sec:first-child{border-top:none;margin-top:0;padding-top:.75rem}
@@ -99,7 +100,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .sb-collapse svg{width:16px;height:16px;transition:transform .3s}
 /* Collapsed state */
 .sidebar.collapsed{width:60px}
-.sidebar.collapsed .sb-name{display:none}
+.sidebar.collapsed .sb-brand .brand-lockup__line{display:none}
 .sidebar.collapsed .sb-nav a span,.sidebar.collapsed .sb-nav a .uname{display:none}
 .sidebar.collapsed .sb-sec{font-size:0;padding:.5rem 0 .2rem;text-align:center;border-top-color:rgba(255,255,255,.04)}
 .sidebar.collapsed .sb-sec::after{content:'·';font-size:.7rem;color:rgba(255,255,255,.2)}
@@ -406,6 +407,8 @@ code{background:var(--input);padding:.15rem .45rem;border-radius:5px;font-size:.
 @keyframes spin{to{transform:rotate(360deg)}}
 .btn .spinner{width:15px;height:15px;animation:spin .6s linear infinite;flex-shrink:0}
 </style>
+<!-- 平台原生图标库(单一事实来源)：window.platformIconSVG / platformBrandColor -->
+<script src="/static/platform_icons.js?v=20260701"></script>
 {% block head %}{% endblock %}
 <script>
 (function(){
@@ -430,8 +433,7 @@ code{background:var(--input);padding:.15rem .45rem;border-radius:5px;font-size:.
 <div class="sb-overlay" id="sb-overlay" onclick="closeSidebar()"></div>
 <aside class="sidebar" id="sidebar">
   <div class="sb-brand">
-    <div class="sb-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div>
-    <span class="sb-name">{{ i18n.brand if i18n else site_name|default('华灵科技客户转化聊天系统') }}</span>
+    {% with variant='sidebar' %}{% include "_brand_lockup.html" %}{% endwith %}
     <button class="sb-collapse" onclick="toggleCollapse()" title="{{ (i18n or {}).get('sidebar_toggle','折叠/展开侧栏') }}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>
     </button>
@@ -468,28 +470,28 @@ code{background:var(--input);padding:.15rem .45rem;border-radius:5px;font-size:.
     </a>
     <a href="/personas" {% if active=="personas" %}class="active"{% endif %} data-help="nav_personas">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/><circle cx="18.5" cy="7" r="2.5" fill="currentColor" opacity=".45"/></svg>
-      <span>人设工作室</span>
+      <span>{{ (i18n or {}).get('personas', '人设工作室') }}</span>
     </a>
     <a href="/workspace" target="_blank" data-help="nav_unified_inbox">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M4 9l8 5 8-5"/></svg>
-      <span>坐席工作台 ↗</span>
+      <span>{{ (i18n or {}).get('workspace_inbox', '坐席工作台') }} ↗</span>
     </a>
     <a href="/rpa-overview" {% if active=="rpa_overview" %}class="active"{% endif %} data-help="nav_rpa_overview">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-      <span>RPA 跨平台总览</span>
+      <span>{{ (i18n or {}).get('rpa_overview', 'RPA 跨平台总览') }}</span>
       <span class="sb-badge" id="badge-rpa-ov-compact"></span>
     </a>
     <a href="/telegram" {% if active=="telegram" %}class="active"{% endif %}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22 11 13 2 9l20-7z"/></svg>
-      <span>Telegram 设置</span>
+      <span>{{ (i18n or {}).get('telegram_settings', 'Telegram 设置') }}</span>
     </a>
     <a href="/line-rpa" {% if active=="line_rpa" %}class="active"{% endif %} data-help="nav_line_rpa">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/><circle cx="9" cy="10" r="1" fill="currentColor"/><circle cx="13" cy="10" r="1" fill="currentColor"/><circle cx="17" cy="10" r="1" fill="currentColor"/></svg>
-      <span>LINE 自动聊天</span>
+      <span>{{ (i18n or {}).get('line_rpa', 'LINE 自动聊天') }}</span>
     </a>
     <a href="/messenger-rpa" {% if active=="messenger_rpa" %}class="active"{% endif %} data-help="nav_messenger_rpa">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12.5L10.5 15 16 9"/></svg>
-      <span>Messenger RPA</span>
+      <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 2C6.477 2 2 6.145 2 11.259c0 2.913 1.454 5.512 3.726 7.21V22l3.405-1.869c.91.252 1.872.388 2.869.388 5.523 0 10-4.145 10-9.259S17.523 2 12 2zm.997 12.467l-2.546-2.715-4.97 2.715 5.467-5.804 2.61 2.715 4.905-2.715-5.466 5.804z"/></svg>
+      <span>{{ (i18n or {}).get('messenger_rpa', 'Messenger RPA') }}</span>
     </a>
     {% if user_role == 'master' %}
     <a href="/settings" {% if active=="settings" %}class="active"{% endif %} data-help="nav_escalation">
@@ -517,24 +519,24 @@ code{background:var(--input);padding:.15rem .45rem;border-radius:5px;font-size:.
       </a>
       <a href="/episodic-memory" {% if active=="episodic" %}class="active"{% endif %} data-help="nav_episodic">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/><line x1="8" y1="7" x2="16" y2="7"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
-        <span>情景记忆</span>
+        <span>{{ (i18n or {}).get('episodic', '情景记忆') }}</span>
       </a>
       <a href="/crisis-audit" {% if active=="crisis_audit" %}class="active"{% endif %} data-help="nav_crisis_audit">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-        <span>危机审计</span>
+        <span>{{ (i18n or {}).get('crisis_audit', '危机审计') }}</span>
         <span class="sb-badge" id="badge-crisis"></span>
       </a>
       <a href="/care-schedule" {% if active=="care" %}class="active"{% endif %} data-help="nav_care">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
-        <span>主动关怀</span>
+        <span>{{ (i18n or {}).get('care', '主动关怀') }}</span>
       </a>
       <a href="/relations-health" {% if active=="relations_health" %}class="active"{% endif %} data-help="nav_relations_health">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-        <span>流失预警</span>
+        <span>{{ (i18n or {}).get('relations_health', '流失预警') }}</span>
       </a>
       <a href="/monetization" {% if active=="monetization" %}class="active"{% endif %} data-help="nav_monetization">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
-        <span>变现营收</span>
+        <span>{{ (i18n or {}).get('monetization', '变现营收') }}</span>
       </a>
       <a href="/help" {% if active=="help" %}class="active"{% endif %} data-help="nav_help">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
@@ -560,28 +562,28 @@ code{background:var(--input);padding:.15rem .45rem;border-radius:5px;font-size:.
     </a>
     <a href="/workspace" target="_blank" data-help="nav_unified_inbox">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M4 9l8 5 8-5"/></svg>
-      <span>坐席工作台 ↗</span>
+      <span>{{ (i18n or {}).get('workspace_inbox', '坐席工作台') }} ↗</span>
     </a>
     <a href="/rpa-overview" {% if active=="rpa_overview" %}class="active"{% endif %} data-help="nav_rpa_overview">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-      <span>RPA 跨平台总览</span>
+      <span>{{ (i18n or {}).get('rpa_overview', 'RPA 跨平台总览') }}</span>
       <span class="sb-badge" id="badge-rpa-ov"></span>
     </a>
     <a href="/telegram" {% if active=="telegram" %}class="active"{% endif %}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22 11 13 2 9l20-7z"/></svg>
-      <span>Telegram 设置</span>
+      <span>{{ (i18n or {}).get('telegram_settings', 'Telegram 设置') }}</span>
     </a>
     <a href="/line-rpa" {% if active=="line_rpa" %}class="active"{% endif %} data-help="nav_line_rpa">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/><circle cx="9" cy="10" r="1" fill="currentColor"/><circle cx="13" cy="10" r="1" fill="currentColor"/><circle cx="17" cy="10" r="1" fill="currentColor"/></svg>
-      <span>LINE 自动聊天</span>
+      <span>{{ (i18n or {}).get('line_rpa', 'LINE 自动聊天') }}</span>
     </a>
     <a href="/messenger-rpa" {% if active=="messenger_rpa" %}class="active"{% endif %} data-help="nav_messenger_rpa">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12.5L10.5 15 16 9"/></svg>
-      <span>Messenger RPA</span>
+      <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 2C6.477 2 2 6.145 2 11.259c0 2.913 1.454 5.512 3.726 7.21V22l3.405-1.869c.91.252 1.872.388 2.869.388 5.523 0 10-4.145 10-9.259S17.523 2 12 2zm.997 12.467l-2.546-2.715-4.97 2.715 5.467-5.804 2.61 2.715 4.905-2.715-5.466 5.804z"/></svg>
+      <span>{{ (i18n or {}).get('messenger_rpa', 'Messenger RPA') }}</span>
     </a>
     <a href="/whatsapp-rpa" {% if active=="whatsapp_rpa" %}class="active"{% endif %} data-help="nav_whatsapp_rpa">
       <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884"/></svg>
-      <span>WhatsApp 自动聊天</span>
+      <span>{{ (i18n or {}).get('whatsapp_rpa', 'WhatsApp 自动聊天') }}</span>
     </a>
     {% for dp in domain_web_pages if dp.get('section') == 'ops' %}
     <a href="{{ dp.path }}" {% if active==dp.key %}class="active"{% endif %}>
@@ -599,7 +601,7 @@ code{background:var(--input);padding:.15rem .45rem;border-radius:5px;font-size:.
     <div class="sb-sec">{{ (i18n or {}).get('section_ai', 'AI 与策略') }}</div>
     <a href="/ai-studio" {% if active=="ai_studio" or active=="personas" %}class="active"{% endif %} data-help="nav_ai_studio" style="background:linear-gradient(135deg,rgba(91,124,246,.12),rgba(139,92,246,.08))">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 0110 10 10 10 0 01-10 10A10 10 0 012 12 10 10 0 0112 2z"/><path d="M12 8v8M8 12h8"/></svg>
-      <span><strong>AI 工作室</strong></span>
+      <span><strong>{{ (i18n or {}).get('ai_studio', 'AI 工作室') }}</strong></span>
     </a>
     <a href="/strategies" {% if active=="strategies" %}class="active"{% endif %} data-help="nav_strategies">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
@@ -625,24 +627,24 @@ code{background:var(--input);padding:.15rem .45rem;border-radius:5px;font-size:.
     </a>
     <a href="/episodic-memory" {% if active=="episodic" %}class="active"{% endif %} data-help="nav_episodic">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/><line x1="8" y1="7" x2="16" y2="7"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
-      <span>情景记忆</span>
+      <span>{{ (i18n or {}).get('episodic', '情景记忆') }}</span>
     </a>
     <a href="/crisis-audit" {% if active=="crisis_audit" %}class="active"{% endif %} data-help="nav_crisis_audit">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-      <span>危机审计</span>
+      <span>{{ (i18n or {}).get('crisis_audit', '危机审计') }}</span>
       <span class="sb-badge" id="badge-crisis"></span>
     </a>
     <a href="/care-schedule" {% if active=="care" %}class="active"{% endif %} data-help="nav_care">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
-      <span>主动关怀</span>
+      <span>{{ (i18n or {}).get('care', '主动关怀') }}</span>
     </a>
     <a href="/relations-health" {% if active=="relations_health" %}class="active"{% endif %} data-help="nav_relations_health">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-      <span>流失预警</span>
+      <span>{{ (i18n or {}).get('relations_health', '流失预警') }}</span>
     </a>
     <a href="/monetization" {% if active=="monetization" %}class="active"{% endif %} data-help="nav_monetization">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
-      <span>变现营收</span>
+      <span>{{ (i18n or {}).get('monetization', '变现营收') }}</span>
     </a>
     <a href="/logs" {% if active=="logs" %}class="active"{% endif %} data-help="nav_logs">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
@@ -701,7 +703,7 @@ code{background:var(--input);padding:.15rem .45rem;border-radius:5px;font-size:.
         <span style="opacity:.6" id="cmd-trigger-txt">{{ (i18n or {}).get('search','搜索') }}...</span>
         <kbd style="font-size:.65rem;background:var(--card);border:1px solid var(--bd);padding:0 .3rem;border-radius:3px;margin-left:.3rem;line-height:1.5">⌘K</kbd>
       </button>
-      {% if user_role == 'viewer' %}<span style="display:inline-flex;align-items:center;gap:.3rem;padding:.18rem .6rem;border-radius:6px;font-size:.72rem;font-weight:700;background:rgba(245,158,11,.12);color:var(--amber);border:1px solid rgba(245,158,11,.25)" title="当前账号为只读观察员，无法修改配置"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="12" height="12"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>只读</span>{% endif %}
+      {% if user_role == 'viewer' %}<span style="display:inline-flex;align-items:center;gap:.3rem;padding:.18rem .6rem;border-radius:6px;font-size:.72rem;font-weight:700;background:rgba(245,158,11,.12);color:var(--amber);border:1px solid rgba(245,158,11,.25)" title="{{ (i18n or {}).get('viewer_badge_title','当前账号为只读观察员，无法修改配置') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="12" height="12"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>{{ (i18n or {}).get('viewer_badge','只读') }}</span>{% endif %}
       <div class="notif-wrap" id="notif-wrap">
         <button class="notif-btn" onclick="toggleNotif(event)" title="{{ (i18n or {}).get('notifications','通知') }}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
@@ -801,22 +803,22 @@ code{background:var(--input);padding:.15rem .45rem;border-radius:5px;font-size:.
     </h3>
     <div class="sc-group">
       <div class="sc-group-title">{{ (i18n or {}).get('shortcuts_nav','导航') }}</div>
-      <div class="sc-row"><span class="sc-desc">数据概览</span><span class="sc-keys"><kbd class="sc-key">G</kbd><kbd class="sc-key">D</kbd></span></div>
-      <div class="sc-row"><span class="sc-desc">话术模板</span><span class="sc-keys"><kbd class="sc-key">G</kbd><kbd class="sc-key">T</kbd></span></div>
-      <div class="sc-row"><span class="sc-desc">通道管理</span><span class="sc-keys"><kbd class="sc-key">G</kbd><kbd class="sc-key">C</kbd></span></div>
-      <div class="sc-row"><span class="sc-desc">策略效果</span><span class="sc-keys"><kbd class="sc-key">G</kbd><kbd class="sc-key">S</kbd></span></div>
-      <div class="sc-row"><span class="sc-desc">操作记录</span><span class="sc-keys"><kbd class="sc-key">G</kbd><kbd class="sc-key">A</kbd></span></div>
-      <div class="sc-row"><span class="sc-desc">实时日志</span><span class="sc-keys"><kbd class="sc-key">G</kbd><kbd class="sc-key">L</kbd></span></div>
-      <div class="sc-row"><span class="sc-desc">版本对比</span><span class="sc-keys"><kbd class="sc-key">G</kbd><kbd class="sc-key">V</kbd></span></div>
+      <div class="sc-row"><span class="sc-desc">{{ (i18n or {}).get('dashboard','数据概览') }}</span><span class="sc-keys"><kbd class="sc-key">G</kbd><kbd class="sc-key">D</kbd></span></div>
+      <div class="sc-row"><span class="sc-desc">{{ (i18n or {}).get('templates','话术模板') }}</span><span class="sc-keys"><kbd class="sc-key">G</kbd><kbd class="sc-key">T</kbd></span></div>
+      <div class="sc-row"><span class="sc-desc">{{ (i18n or {}).get('channels','通道管理') }}</span><span class="sc-keys"><kbd class="sc-key">G</kbd><kbd class="sc-key">C</kbd></span></div>
+      <div class="sc-row"><span class="sc-desc">{{ (i18n or {}).get('strategy_analytics','策略效果') }}</span><span class="sc-keys"><kbd class="sc-key">G</kbd><kbd class="sc-key">S</kbd></span></div>
+      <div class="sc-row"><span class="sc-desc">{{ (i18n or {}).get('audit','操作记录') }}</span><span class="sc-keys"><kbd class="sc-key">G</kbd><kbd class="sc-key">A</kbd></span></div>
+      <div class="sc-row"><span class="sc-desc">{{ (i18n or {}).get('logs','实时日志') }}</span><span class="sc-keys"><kbd class="sc-key">G</kbd><kbd class="sc-key">L</kbd></span></div>
+      <div class="sc-row"><span class="sc-desc">{{ (i18n or {}).get('diff','版本对比') }}</span><span class="sc-keys"><kbd class="sc-key">G</kbd><kbd class="sc-key">V</kbd></span></div>
     </div>
     <div class="sc-group">
       <div class="sc-group-title">{{ (i18n or {}).get('shortcuts_actions','操作') }}</div>
-      <div class="sc-row"><span class="sc-desc">命令面板</span><span class="sc-keys"><kbd class="sc-key">Ctrl</kbd><kbd class="sc-key">K</kbd></span></div>
-      <div class="sc-row"><span class="sc-desc">保存（模板页）</span><span class="sc-keys"><kbd class="sc-key">Ctrl</kbd><kbd class="sc-key">S</kbd></span></div>
-      <div class="sc-row"><span class="sc-desc">关闭弹窗</span><span class="sc-keys"><kbd class="sc-key">Esc</kbd></span></div>
-      <div class="sc-row"><span class="sc-desc">折叠/展开侧栏</span><span class="sc-keys"><kbd class="sc-key">[</kbd></span></div>
-      <div class="sc-row"><span class="sc-desc">切换主题</span><span class="sc-keys"><kbd class="sc-key">Ctrl</kbd><kbd class="sc-key">Shift</kbd><kbd class="sc-key">L</kbd></span></div>
-      <div class="sc-row"><span class="sc-desc">显示快捷键帮助</span><span class="sc-keys"><kbd class="sc-key">?</kbd></span></div>
+      <div class="sc-row"><span class="sc-desc">{{ (i18n or {}).get('cmd_palette','命令面板') }}</span><span class="sc-keys"><kbd class="sc-key">Ctrl</kbd><kbd class="sc-key">K</kbd></span></div>
+      <div class="sc-row"><span class="sc-desc">{{ (i18n or {}).get('sc_save','保存（模板页）') }}</span><span class="sc-keys"><kbd class="sc-key">Ctrl</kbd><kbd class="sc-key">S</kbd></span></div>
+      <div class="sc-row"><span class="sc-desc">{{ (i18n or {}).get('sc_close_modal','关闭弹窗') }}</span><span class="sc-keys"><kbd class="sc-key">Esc</kbd></span></div>
+      <div class="sc-row"><span class="sc-desc">{{ (i18n or {}).get('sidebar_toggle','折叠/展开侧栏') }}</span><span class="sc-keys"><kbd class="sc-key">[</kbd></span></div>
+      <div class="sc-row"><span class="sc-desc">{{ (i18n or {}).get('switch_theme','切换主题') }}</span><span class="sc-keys"><kbd class="sc-key">Ctrl</kbd><kbd class="sc-key">Shift</kbd><kbd class="sc-key">L</kbd></span></div>
+      <div class="sc-row"><span class="sc-desc">{{ (i18n or {}).get('sc_show_help','显示快捷键帮助') }}</span><span class="sc-keys"><kbd class="sc-key">?</kbd></span></div>
     </div>
     <div style="text-align:right;margin-top:.8rem">
       <button class="btn btn-s btn-sm" onclick="closeShortcuts()">{{ (i18n or {}).get('close','关闭') }}</button>
@@ -837,31 +839,31 @@ var _uiMode='{{ ui_mode|default("simple") }}';
 var _domainName='{{ domain_name|default("general") }}';
 /* Command Palette */
 var _cmdPagesAll=[
-  {name:'待处理案例',url:'/cases',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',keys:'cases 案例 待处理 case',simple:true},
-  {name:'知识库',url:'/knowledge',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>',keys:'knowledge 知识库 话术',simple:true},
+  {name:{{ (i18n or {}).get("cases","待处理案例")|tojson }},url:'/cases',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',keys:'cases 案例 待处理 case',simple:true},
+  {name:{{ (i18n or {}).get("knowledge","知识库")|tojson }},url:'/knowledge',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>',keys:'knowledge 知识库 话术',simple:true},
   {% for dp in domain_web_pages %}{name:'{{ dp.get("label_simple") or dp.get("label","") }}',url:'{{ dp.path }}',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/></svg>',keys:'{{ dp.get("cmd_keys","") }}',simple:{{ 'true' if dp.get('show_in_simple') else 'false' }}},
   {% endfor %}
-  {name:'AI 学习审核',url:'/learner',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>',keys:'learner 学习 审核 AI',simple:true},
-  {name:'坐席工作台',url:'/workspace',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M4 9l8 5 8-5"/></svg>',keys:'unified inbox 统一 收件箱 消息 聊天 多平台 坐席 工作台 workspace',simple:true},
-  {name:'RPA 跨平台总览',url:'/rpa-overview',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>',keys:'rpa overview 总览 跨平台 telegram line messenger whatsapp',simple:true},
-  {name:'数据概览',url:'/',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>',keys:'dashboard home 首页 概览 仪表盘',simple:true},
-  {name:'运营分析',url:'/analytics',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',keys:'analytics 运营 分析 数据',simple:true},
-  {name:'操作记录',url:'/audit',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',keys:'audit 审计 记录 操作',simple:true},
-  {name:'人工转接',url:'/settings',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 16.92z"/></svg>',keys:'escalation 人工 转接 客服 handoff',simple:true},
-  {name:'帮助中心',url:'/help',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/></svg>',keys:'help 帮助',simple:true},
-  {name:'策略配置',url:'/strategies',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/></svg>',keys:'strategies 策略 配置',simple:false},
-  {name:'策略效果',url:'/strategy-analytics',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>',keys:'strategy analytics 策略 效果',simple:false},
-  {name:'话术模板',url:'/templates',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',keys:'templates 模板 话术',simple:false},
-  {name:'实时日志',url:'/logs',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>',keys:'logs 日志 终端',simple:false},
-  {name:'版本对比',url:'/diff',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 009 9"/></svg>',keys:'diff 对比 版本',simple:false},
-  {name:'导入配置',url:'/import',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',keys:'import 导入',simple:false},
-  {name:'用户管理',url:'/users',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>',keys:'users 用户',simple:false},
-  {name:'开发者工具',url:'/developer',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',keys:'developer 开发者 API key 密钥 接口 私聊 process_private',simple:false},
-  {name:'刷新当前页面',url:'#reload',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>',keys:'refresh reload 刷新 更新',simple:true},
-  {name:'切换模式',url:'#mode',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16"/><path d="M4 12h10"/><path d="M4 18h7"/></svg>',keys:'mode 模式 简洁 完整 切换',simple:true},
-  {name:'切换主题',url:'#theme',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/></svg>',keys:'theme 主题 暗色 亮色',simple:true},
-  {name:'修改密码',url:'#password',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>',keys:'password 密码',simple:true},
-  {name:'退出登录',url:'#logout',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',keys:'logout 退出',simple:true}
+  {name:{{ (i18n or {}).get("learner","AI 学习审核")|tojson }},url:'/learner',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>',keys:'learner 学习 审核 AI',simple:true},
+  {name:{{ (i18n or {}).get("workspace_inbox","坐席工作台")|tojson }},url:'/workspace',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M4 9l8 5 8-5"/></svg>',keys:'unified inbox 统一 收件箱 消息 聊天 多平台 坐席 工作台 workspace',simple:true},
+  {name:{{ (i18n or {}).get("rpa_overview","RPA 跨平台总览")|tojson }},url:'/rpa-overview',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>',keys:'rpa overview 总览 跨平台 telegram line messenger whatsapp',simple:true},
+  {name:{{ (i18n or {}).get("dashboard","数据概览")|tojson }},url:'/',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>',keys:'dashboard home 首页 概览 仪表盘',simple:true},
+  {name:{{ (i18n or {}).get("analytics","运营分析")|tojson }},url:'/analytics',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',keys:'analytics 运营 分析 数据',simple:true},
+  {name:{{ (i18n or {}).get("audit","操作记录")|tojson }},url:'/audit',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',keys:'audit 审计 记录 操作',simple:true},
+  {name:{{ (i18n or {}).get("escalation","人工转接")|tojson }},url:'/settings',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 16.92z"/></svg>',keys:'escalation 人工 转接 客服 handoff',simple:true},
+  {name:{{ (i18n or {}).get("help_center","帮助中心")|tojson }},url:'/help',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/></svg>',keys:'help 帮助',simple:true},
+  {name:{{ (i18n or {}).get("strategies","策略配置")|tojson }},url:'/strategies',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/></svg>',keys:'strategies 策略 配置',simple:false},
+  {name:{{ (i18n or {}).get("strategy_analytics","策略效果")|tojson }},url:'/strategy-analytics',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>',keys:'strategy analytics 策略 效果',simple:false},
+  {name:{{ (i18n or {}).get("templates","话术模板")|tojson }},url:'/templates',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',keys:'templates 模板 话术',simple:false},
+  {name:{{ (i18n or {}).get("logs","实时日志")|tojson }},url:'/logs',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>',keys:'logs 日志 终端',simple:false},
+  {name:{{ (i18n or {}).get("diff","版本对比")|tojson }},url:'/diff',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 009 9"/></svg>',keys:'diff 对比 版本',simple:false},
+  {name:{{ (i18n or {}).get("import_page","导入配置")|tojson }},url:'/import',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',keys:'import 导入',simple:false},
+  {name:{{ (i18n or {}).get("users","用户管理")|tojson }},url:'/users',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>',keys:'users 用户',simple:false},
+  {name:{{ (i18n or {}).get("developer","开发者工具")|tojson }},url:'/developer',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',keys:'developer 开发者 API key 密钥 接口 私聊 process_private',simple:false},
+  {name:{{ (i18n or {}).get("cmd_reload","刷新当前页面")|tojson }},url:'#reload',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>',keys:'refresh reload 刷新 更新',simple:true},
+  {name:{{ (i18n or {}).get("switch_mode","切换模式")|tojson }},url:'#mode',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16"/><path d="M4 12h10"/><path d="M4 18h7"/></svg>',keys:'mode 模式 简洁 完整 切换',simple:true},
+  {name:{{ (i18n or {}).get("switch_theme","切换主题")|tojson }},url:'#theme',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/></svg>',keys:'theme 主题 暗色 亮色',simple:true},
+  {name:{{ (i18n or {}).get("change_pwd","修改密码")|tojson }},url:'#password',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>',keys:'password 密码',simple:true},
+  {name:{{ (i18n or {}).get("logout_full","退出登录")|tojson }},url:'#logout',icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',keys:'logout 退出',simple:true}
 ];
 var _cmdPages=_cmdPagesAll.filter(function(p){
   return _uiMode==='simple'?p.simple:true;
@@ -876,7 +878,7 @@ function renderCmdList(q){
     var ql=q.toLowerCase();
     return p.name.toLowerCase().indexOf(ql)>=0||p.keys.toLowerCase().indexOf(ql)>=0;
   });
-  if(!items.length){list.innerHTML='<div class="cmd-empty">没有匹配的结果</div>';return}
+  if(!items.length){list.innerHTML='<div class="cmd-empty">'+window.T('cmd_no_match','没有匹配的结果')+'</div>';return}
   list.innerHTML=items.map(function(p,i){
     return '<div class="cmd-item'+(i===_cmdIdx?' active':'')+'" data-url="'+p.url+'" onmouseenter="_cmdIdx='+i+';highlightCmd()" onclick="execCmd(\''+p.url+'\')">'+p.icon+'<span>'+p.name+'</span></div>';
   }).join('');
@@ -1003,7 +1005,7 @@ async function loadNotifs(){
     _notifLoaded=true;
     renderNotifs();
     if(d.unread>0){var b=document.getElementById('notif-badge');if(b)b.classList.add('show')}
-  }catch(e){document.getElementById('notif-list').innerHTML='<div class="notif-empty">加载失败</div>'}
+  }catch(e){document.getElementById('notif-list').innerHTML='<div class="notif-empty">'+window.T('dash.load_fail')+'</div>'}
 }
 function renderNotifs(){
   var list=document.getElementById('notif-list');
@@ -1028,16 +1030,16 @@ function closePwdModal(){document.getElementById('pwd-overlay').classList.remove
 async function submitPwdChange(){
   var old_pw=document.getElementById('pwd-old').value,new_pw=document.getElementById('pwd-new').value,cfm=document.getElementById('pwd-confirm').value;
   var errEl=document.getElementById('pwd-err');errEl.style.display='none';
-  if(!old_pw){errEl.textContent='请输入当前密码';errEl.style.display='block';return}
-  if(new_pw.length<6){errEl.textContent='新密码至少 6 位';errEl.style.display='block';return}
-  if(new_pw!==cfm){errEl.textContent='两次输入的新密码不一致';errEl.style.display='block';return}
-  var btn=document.getElementById('pwd-submit-btn');btn.disabled=true;btn.textContent='提交中…';
+  if(!old_pw){errEl.textContent=window.T('base.shell.pwd_need_old');errEl.style.display='block';return}
+  if(new_pw.length<6){errEl.textContent=window.T('base.shell.pwd_min_len');errEl.style.display='block';return}
+  if(new_pw!==cfm){errEl.textContent=window.T('base.shell.pwd_mismatch');errEl.style.display='block';return}
+  var btn=document.getElementById('pwd-submit-btn');btn.disabled=true;btn.textContent=window.T('base.shell.pwd_submitting');
   try{var r=await fetch('/api/change-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({old_password:old_pw,new_password:new_pw})});
     var d=await r.json();
-    if(r.ok&&d.ok){closePwdModal();showToast('密码修改成功','ok')}
-    else{errEl.textContent=d.detail||'修改失败';errEl.style.display='block'}
-  }catch(e){errEl.textContent='网络错误';errEl.style.display='block'}
-  finally{btn.disabled=false;btn.textContent='确认修改'}
+    if(r.ok&&d.ok){closePwdModal();showToast(window.T('base.shell.pwd_ok'),'ok')}
+    else{errEl.textContent=d.detail||window.T('base.shell.pwd_fail');errEl.style.display='block'}
+  }catch(e){errEl.textContent=window.T('base.shell.net_err');errEl.style.display='block'}
+  finally{btn.disabled=false;btn.textContent=window.T('pwd_submit')}
 }
 /* Confirm dialog */
 function confirmAction(msg,opts){
@@ -1045,7 +1047,7 @@ function confirmAction(msg,opts){
   return new Promise(function(resolve){
     document.getElementById('confirm-msg').textContent=msg;
     var ok=document.getElementById('confirm-ok');
-    ok.textContent=opts.okText||'确认';
+    ok.textContent=opts.okText||window.T('confirm');
     ok.className='btn '+(opts.danger!==false?'btn-d':'btn-p');
     document.getElementById('confirm-overlay').classList.add('open');
     ok.onclick=function(){document.getElementById('confirm-overlay').classList.remove('open');resolve(true)};
@@ -1055,11 +1057,11 @@ function confirmAction(msg,opts){
 /* Button loading */
 function btnLoading(btn,on){
   if(on){btn._origHTML=btn.innerHTML;btn._origW=btn.style.minWidth;btn.style.minWidth=btn.offsetWidth+'px';btn.disabled=true;
-    btn.innerHTML='<svg class="spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2a10 10 0 019.95 9"/></svg> 处理中…'}
+    btn.innerHTML='<svg class="spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2a10 10 0 019.95 9"/></svg> '+window.T('base.common.processing')}
   else{btn.disabled=false;if(btn._origHTML)btn.innerHTML=btn._origHTML;btn.style.minWidth=btn._origW||''}
 }
 /* Logout */
-async function doLogout(e){e.preventDefault();if(await confirmAction('确定退出登录？',{okText:'退出',danger:true}))window.location.href='/logout'}
+async function doLogout(e){e.preventDefault();if(await confirmAction(window.T('base.shell.logout_confirm'),{okText:window.T('logout'),danger:true}))window.location.href='/logout'}
 /* Ripple */
 document.addEventListener('click',function(e){
   const b=e.target.closest('.btn');if(!b||b.classList.contains('btn-s'))return;
@@ -1077,12 +1079,14 @@ function showToast(msg,type='ok',dur=3500){
   setTimeout(()=>{t.classList.remove('show');setTimeout(()=>t.remove(),350)},dur);
 }
 /* ── Onboarding Tour ───────────────────────────────── */
+/* 引导步骤双语：title/body 为中文，title_en/body_en 为英文；showTourStep 按 WS_LANG 取，缺则回落中文。 */
 var _tourSteps=[
-  {sel:'#sidebar .sb-brand',title:'欢迎使用 {{ site_name|default("华灵科技客户转化聊天系统") }}',body:'这里是您的管理中心。左侧导航菜单可访问所有功能模块。',pos:'right'},
-  {sel:'a[href="/cases"]',title:'待处理案例',body:'这是您最常用的页面 — 查看和处理客户案例，关注高风险用户，添加备注或结案。',pos:'right'},
-  {sel:'a[href="/knowledge"]',title:'知识库',body:'所有 AI 回复话术、知识条目均在此管理。在"系统话术"分类下编辑即可。',pos:'right'},
-  {sel:'#cmd-trigger',title:'命令面板（Ctrl+K）',body:'随时按 Ctrl+K 唤起命令面板，快速跳转任意页面或执行操作，无需鼠标。',pos:'bottom'},
+  {sel:'#sidebar .sb-brand',title:'欢迎使用 {{ product_name|default((i18n or {}).get("brand.product", "智聊")) }}',title_en:'Welcome to {{ product_name|default((i18n or {}).get("brand.product", "ChatX")) }}',body:'这里是您的管理中心。左侧导航菜单可访问所有功能模块。',body_en:'This is your control center. Use the left-hand navigation to reach every feature module.',pos:'right'},
+  {sel:'a[href="/cases"]',title:'待处理案例',title_en:'Pending Cases',body:'这是您最常用的页面 — 查看和处理客户案例，关注高风险用户，添加备注或结案。',body_en:'Your most-used page — review and handle customer cases, watch high-risk users, add notes or close cases.',pos:'right'},
+  {sel:'a[href="/knowledge"]',title:'知识库',title_en:'Knowledge Base',body:'所有 AI 回复话术、知识条目均在此管理。在"系统话术"分类下编辑即可。',body_en:'Manage all AI reply scripts and knowledge entries here. Edit them under the "System Scripts" category.',pos:'right'},
+  {sel:'#cmd-trigger',title:'命令面板（Ctrl+K）',title_en:'Command Palette (Ctrl+K)',body:'随时按 Ctrl+K 唤起命令面板，快速跳转任意页面或执行操作，无需鼠标。',body_en:'Press Ctrl+K anytime to open the command palette and jump to any page or run an action — no mouse needed.',pos:'bottom'},
 ];
+var _TOUR_EN = (window.WS_LANG === 'en');
 var _tourIdx=0,_tourEl=null,_tourBg=null;
 function startTour(){
   if(localStorage.getItem('tour_done')==='1')return;
@@ -1102,7 +1106,9 @@ function showTourStep(){
   var rect=anchor.getBoundingClientRect();
   var pop=document.createElement('div');
   pop.id='tour-popup';
-  pop.innerHTML='<div style="font-weight:700;font-size:.9rem;margin-bottom:.4rem">'+step.title+'</div><div style="font-size:.82rem;color:var(--t2);line-height:1.5;margin-bottom:.9rem">'+step.body+'</div><div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem"><span style="font-size:.72rem;color:var(--t3)">{{ (i18n or {}).get("tour_step","步骤") }} '+(_tourIdx+1)+' {{ (i18n or {}).get("tour_of","/") }} '+_tourSteps.length+'</span><div style="display:flex;gap:.4rem">'+(_tourIdx>0?'<button class="btn btn-s" style="font-size:.78rem;padding:.25rem .55rem" onclick="prevTourStep()">{{ (i18n or {}).get("tour_prev","上一步") }}</button>':'')+(_tourIdx<_tourSteps.length-1?'<button class="btn btn-p" style="font-size:.78rem;padding:.25rem .7rem" onclick="nextTourStep()">{{ (i18n or {}).get("tour_next","下一步") }}</button>':'<button class="btn btn-p" style="font-size:.78rem;padding:.25rem .7rem" onclick="endTour()">{{ (i18n or {}).get("tour_done","完成") }}</button>')+'<button class="btn btn-s" style="font-size:.72rem;padding:.2rem .45rem;color:var(--t3)" onclick="endTour()">{{ (i18n or {}).get("tour_skip","跳过") }}</button></div></div>';
+  var _tTitle=(_TOUR_EN&&step.title_en)?step.title_en:step.title;
+  var _tBody=(_TOUR_EN&&step.body_en)?step.body_en:step.body;
+  pop.innerHTML='<div style="font-weight:700;font-size:.9rem;margin-bottom:.4rem">'+_tTitle+'</div><div style="font-size:.82rem;color:var(--t2);line-height:1.5;margin-bottom:.9rem">'+_tBody+'</div><div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem"><span style="font-size:.72rem;color:var(--t3)">{{ (i18n or {}).get("tour_step","步骤") }} '+(_tourIdx+1)+' {{ (i18n or {}).get("tour_of","/") }} '+_tourSteps.length+'</span><div style="display:flex;gap:.4rem">'+(_tourIdx>0?'<button class="btn btn-s" style="font-size:.78rem;padding:.25rem .55rem" onclick="prevTourStep()">{{ (i18n or {}).get("tour_prev","上一步") }}</button>':'')+(_tourIdx<_tourSteps.length-1?'<button class="btn btn-p" style="font-size:.78rem;padding:.25rem .7rem" onclick="nextTourStep()">{{ (i18n or {}).get("tour_next","下一步") }}</button>':'<button class="btn btn-p" style="font-size:.78rem;padding:.25rem .7rem" onclick="endTour()">{{ (i18n or {}).get("tour_done","完成") }}</button>')+'<button class="btn btn-s" style="font-size:.72rem;padding:.2rem .45rem;color:var(--t3)" onclick="endTour()">{{ (i18n or {}).get("tour_skip","跳过") }}</button></div></div>';
   pop.style.cssText='position:fixed;background:var(--card);border:1px solid var(--bd);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.18);padding:1.1rem 1.2rem;width:280px;z-index:401;animation:fadeUp .2s ease';
   document.body.appendChild(pop);
   var pw=280,ph=160;
@@ -1157,142 +1163,142 @@ function closePanel(id){const p=document.getElementById(id);if(p){p.classList.re
 /* ── Global Tooltip Engine ─────────────── */
 const TERM_DICT={
   /* ── 导航页面 ─── */
-  "nav_dashboard":{"zh":"仪表盘","desc":"系统总览页面，展示 Bot 运行状态、通道健康度、最近操作等关键指标","usage":"打开即可查看全局状态，点击各卡片的快捷链接可跳转到对应功能模块"},
-  "nav_templates":{"zh":"话术模板（已迁移）","desc":"话术模板已统一迁移到知识库的「系统话术」分类，可在知识库页面进行编辑","usage":"打开知识库 → 筛选「系统话术」分类 → 编辑对应的话术条目"},
-  "nav_channels":{"zh":"通道管理","desc":"配置支付通道的费率、金额限制、状态开关，实时监控成功率","usage":"点击通道卡片展开详情 → 调整参数 → 保存。可切换状态为 启用/维护中/波动"},
-  "nav_strategies":{"zh":"策略管理","desc":"为不同用户意图配置 AI 回复参数（温度、长度、上下文轮数），支持 A/B 灰度测试","usage":"选择策略 → 调整 Temperature/Max Tokens 等参数 → 保存 → 在意图映射中绑定"},
-  "nav_strategy_analytics":{"zh":"策略效果","desc":"追踪各策略的质量评分、追问率、响应时间等指标，自动识别最优策略","usage":"选择时间范围查看趋势图，点击策略卡片查看详细指标"},
-  "nav_knowledge":{"zh":"知识库","desc":"管理 AI 的知识条目、触发词、错误码字典，支持 BM25 + 语义搜索","usage":"搜索/浏览条目 → 编辑内容和触发词 → 用沙盒测试验证效果"},
-  "nav_users":{"zh":"用户管理","desc":"添加/管理后台管理员账户，设置角色权限（主帐号/管理员/观察员）","usage":"点击「创建子帐号」→ 填写信息 → 分配角色。可随时禁用/删除账户"},
-  "nav_settings":{"zh":"系统设置","desc":"配置 AI 提示词和人工转接设置","usage":"编辑提示词 → 保存。底层 API/安全配置请进入开发者工具"},
-  "nav_developer":{"zh":"开发者工具","desc":"API 密钥、底层参数、安全令牌、Bot 行为（含是否处理私聊）、回复逻辑、意图路由等高级配置（需密码）","usage":"输入开发者密码进入 → 「Bot 行为配置」中勾选「私聊消息」可允许私聊 → 保存"},
-  "nav_audit":{"zh":"操作记录","desc":"查看所有后台操作的审计日志，支持按操作人/类型/时间筛选","usage":"使用顶部筛选条件缩小范围 → 点击导出按钮下载 CSV"},
-  "nav_diff":{"zh":"版本对比","desc":"对比配置的不同版本快照，查看变更详情，支持一键回滚","usage":"选择两个版本 → 查看差异 → 确认后可回滚到旧版本"},
-  "nav_logs":{"zh":"实时日志","desc":"实时查看系统运行日志流，支持按级别过滤（DEBUG/INFO/WARN/ERROR）和关键词搜索","usage":"选择日志级别按钮过滤 → 输入关键词进一步筛选 → 点击暂停冻结画面"},
-  "nav_analytics":{"zh":"数据分析","desc":"查看运营数据图表、KB 命中率、响应时间趋势，内置 AI Copilot 自然语言查询","usage":"切换时间范围查看趋势 → 在 Copilot 输入框用中文提问查询数据"},
-  "nav_cases":{"zh":"Case 管理","desc":"追踪用户意图链产生的案例（如咨询→投诉→退款），监控满意度，支持添加备注和结案","usage":"查看活跃 Case 列表 → 关注高风险标记 → 添加备注或结案"},
-  "nav_escalation":{"zh":"人工转接","desc":"配置客服用户名、转接触发规则、排班与话术，让 AI 在需要时自动 @ 人工客服","usage":"启用 → 填写客服用户名 → 设置触发次数和冷却时间 → 保存"},
-  "nav_help":{"zh":"帮助","desc":"查看所有可用的 Bot 指令和操作说明，支持关键词搜索","usage":"输入关键词搜索 → 点击展开查看指令详情和用法"},
-  "nav_import":{"zh":"导入/导出","desc":"导入/导出配置文件（YAML/JSON/ZIP），管理 Webhook 变更通知","usage":"拖拽文件到上传区 → 选择覆盖或合并模式 → 确认导入"},
+  "nav_dashboard":{"zh":"仪表盘","en":"Dashboard","desc":"系统总览页面，展示 Bot 运行状态、通道健康度、最近操作等关键指标","desc_en":"System overview page showing bot status, channel health, recent activity and other key metrics","usage":"打开即可查看全局状态，点击各卡片的快捷链接可跳转到对应功能模块","usage_en":"Open it to see global status; click a card's quick link to jump to the matching module"},
+  "nav_templates":{"zh":"话术模板（已迁移）","en":"Reply Templates (moved)","desc":"话术模板已统一迁移到知识库的「系统话术」分类，可在知识库页面进行编辑","desc_en":"Reply templates have moved to the Knowledge Base's \"System Scripts\" category and are edited there","usage":"打开知识库 → 筛选「系统话术」分类 → 编辑对应的话术条目","usage_en":"Open Knowledge Base → filter the \"System Scripts\" category → edit the matching entry"},
+  "nav_channels":{"zh":"通道管理","en":"Channel Management","desc":"配置支付通道的费率、金额限制、状态开关，实时监控成功率","desc_en":"Configure payment-channel rates, amount limits and status toggles, and monitor success rate in real time","usage":"点击通道卡片展开详情 → 调整参数 → 保存。可切换状态为 启用/维护中/波动","usage_en":"Click a channel card to expand → adjust parameters → save. Status can be set to Enabled / Maintenance / Fluctuating"},
+  "nav_strategies":{"zh":"策略管理","en":"Strategy Management","desc":"为不同用户意图配置 AI 回复参数（温度、长度、上下文轮数），支持 A/B 灰度测试","desc_en":"Configure AI reply parameters (temperature, length, context rounds) per user intent, with A/B testing","usage":"选择策略 → 调整 Temperature/Max Tokens 等参数 → 保存 → 在意图映射中绑定","usage_en":"Pick a strategy → adjust Temperature/Max Tokens → save → bind it in the intent mapping"},
+  "nav_strategy_analytics":{"zh":"策略效果","en":"Strategy Performance","desc":"追踪各策略的质量评分、追问率、响应时间等指标，自动识别最优策略","desc_en":"Track each strategy's quality score, follow-up rate, response time and more, auto-spotting the best one","usage":"选择时间范围查看趋势图，点击策略卡片查看详细指标","usage_en":"Pick a time range to view trends; click a strategy card for detailed metrics"},
+  "nav_knowledge":{"zh":"知识库","en":"Knowledge Base","desc":"管理 AI 的知识条目、触发词、错误码字典，支持 BM25 + 语义搜索","desc_en":"Manage the AI's knowledge entries, trigger words and error-code dictionary, with BM25 + semantic search","usage":"搜索/浏览条目 → 编辑内容和触发词 → 用沙盒测试验证效果","usage_en":"Search/browse entries → edit content and triggers → verify with the sandbox test"},
+  "nav_users":{"zh":"用户管理","en":"User Management","desc":"添加/管理后台管理员账户，设置角色权限（主帐号/管理员/观察员）","desc_en":"Add and manage admin accounts and assign role permissions (Master / Admin / Viewer)","usage":"点击「创建子帐号」→ 填写信息 → 分配角色。可随时禁用/删除账户","usage_en":"Click \"Create sub-account\" → fill in details → assign a role. Accounts can be disabled/deleted anytime"},
+  "nav_settings":{"zh":"系统设置","en":"System Settings","desc":"配置 AI 提示词和人工转接设置","desc_en":"Configure the AI system prompt and human-handoff settings","usage":"编辑提示词 → 保存。底层 API/安全配置请进入开发者工具","usage_en":"Edit the prompt → save. For low-level API/security config, use Developer Tools"},
+  "nav_developer":{"zh":"开发者工具","en":"Developer Tools","desc":"API 密钥、底层参数、安全令牌、Bot 行为（含是否处理私聊）、回复逻辑、意图路由等高级配置（需密码）","desc_en":"Advanced config — API keys, low-level params, security tokens, bot behavior (incl. private chats), reply logic, intent routing (password required)","usage":"输入开发者密码进入 → 「Bot 行为配置」中勾选「私聊消息」可允许私聊 → 保存","usage_en":"Enter the developer password → tick \"Private messages\" under Bot Behavior to allow DMs → save"},
+  "nav_audit":{"zh":"操作记录","en":"Activity Log","desc":"查看所有后台操作的审计日志，支持按操作人/类型/时间筛选","desc_en":"View the audit log of all admin actions, filterable by operator / type / time","usage":"使用顶部筛选条件缩小范围 → 点击导出按钮下载 CSV","usage_en":"Use the top filters to narrow down → click Export to download CSV"},
+  "nav_diff":{"zh":"版本对比","en":"Version Diff","desc":"对比配置的不同版本快照，查看变更详情，支持一键回滚","desc_en":"Compare configuration version snapshots, inspect change details, and roll back in one click","usage":"选择两个版本 → 查看差异 → 确认后可回滚到旧版本","usage_en":"Pick two versions → review the diff → confirm to roll back to the older one"},
+  "nav_logs":{"zh":"实时日志","en":"Live Logs","desc":"实时查看系统运行日志流，支持按级别过滤（DEBUG/INFO/WARN/ERROR）和关键词搜索","desc_en":"Stream system logs in real time, filterable by level (DEBUG/INFO/WARN/ERROR) and keyword","usage":"选择日志级别按钮过滤 → 输入关键词进一步筛选 → 点击暂停冻结画面","usage_en":"Pick a level button to filter → type a keyword to narrow further → click Pause to freeze the view"},
+  "nav_analytics":{"zh":"数据分析","en":"Analytics","desc":"查看运营数据图表、KB 命中率、响应时间趋势，内置 AI Copilot 自然语言查询","desc_en":"View operations charts, KB hit rate and response-time trends, with a built-in AI Copilot for natural-language queries","usage":"切换时间范围查看趋势 → 在 Copilot 输入框用中文提问查询数据","usage_en":"Switch the time range to view trends → ask the Copilot a plain-language question to query data"},
+  "nav_cases":{"zh":"Case 管理","en":"Case Management","desc":"追踪用户意图链产生的案例（如咨询→投诉→退款），监控满意度，支持添加备注和结案","desc_en":"Track cases formed by user intent chains (e.g. inquiry → complaint → refund), monitor satisfaction, add notes and close cases","usage":"查看活跃 Case 列表 → 关注高风险标记 → 添加备注或结案","usage_en":"Review the active case list → watch high-risk flags → add notes or close the case"},
+  "nav_escalation":{"zh":"人工转接","en":"Agent Handoff","desc":"配置客服用户名、转接触发规则、排班与话术，让 AI 在需要时自动 @ 人工客服","desc_en":"Configure agent usernames, handoff trigger rules, schedules and scripts so the AI auto-@s a human agent when needed","usage":"启用 → 填写客服用户名 → 设置触发次数和冷却时间 → 保存","usage_en":"Enable → fill in agent usernames → set trigger count and cooldown → save"},
+  "nav_help":{"zh":"帮助","en":"Help","desc":"查看所有可用的 Bot 指令和操作说明，支持关键词搜索","desc_en":"Browse all available bot commands and how-to guides, with keyword search","usage":"输入关键词搜索 → 点击展开查看指令详情和用法","usage_en":"Type a keyword to search → expand an item to see command details and usage"},
+  "nav_import":{"zh":"导入/导出","en":"Import / Export","desc":"导入/导出配置文件（YAML/JSON/ZIP），管理 Webhook 变更通知","desc_en":"Import/export configuration files (YAML/JSON/ZIP) and manage Webhook change notifications","usage":"拖拽文件到上传区 → 选择覆盖或合并模式 → 确认导入","usage_en":"Drag a file onto the upload area → choose Overwrite or Merge mode → confirm the import"},
   /* ── 通用术语 ─── */
-  "buy_rate":{"zh":"买入费率","desc":"用户向该通道充值时平台收取的费率百分比"},
-  "sell_rate":{"zh":"卖出费率","desc":"用户从该通道提现时的费率"},
-  "fee_rate":{"zh":"手续费率","desc":"该通道的交易手续费百分比。例如 0.5% 表示每笔扣除 0.5%"},
-  "circuit_breaker":{"zh":"熔断器","desc":"当 AI 接口连续失败超过阈值时自动停止调用一段时间，防止雪崩"},
-  "cooldown":{"zh":"冷却时间","desc":"两次回复之间的最小间隔（秒），防止刷屏"},
-  "temperature":{"zh":"回复温度（Temperature）","desc":"控制 AI 回复的随机性。0=最确定稳定，1=最多样创意。业务场景建议 0.3-0.5","usage":"拖动滑块调整，保存后对该策略下所有新回复生效"},
-  "max_tokens":{"zh":"最大字数（Max Tokens）","desc":"AI 单次回复的最大 token 数。1 token ≈ 1.5 个中文字。256=简短，512=正常，1024=详细","usage":"输入数值后保存。值越大回复越长，但速度变慢、费用增加"},
-  "context_rounds":{"zh":"上下文轮数","desc":"传入 AI 的历史对话轮数。轮数越多上下文越丰富，但速度更慢费用更高","usage":"通常 3-5 轮即可。复杂业务场景可增至 8-10 轮"},
-  "split_send":{"zh":"分条发送","desc":"长回复自动拆成多条消息发送，模拟真人打字节奏"},
-  "reply_probability":{"zh":"回复概率","desc":"收到此类消息时实际回复的概率。0.1=只有10%的消息会回复","usage":"设为 1.0 表示 100% 回复。水群场景可调低避免刷屏"},
-  "skip_ai":{"zh":"跳过 AI","desc":"启用后直接使用模板回复，不调用 AI 接口，响应极快（<1秒）","usage":"适用于固定话术场景（如问候语），开启后节省 API 费用"},
-  "success_rate":{"zh":"成功率","desc":"该通道交易成功的比例。低于 80% 建议排查或暂停"},
-  "alert_threshold":{"zh":"告警阈值","desc":"成功率低于此值时通道卡片显示红色告警"},
-  "P50":{"zh":"响应中位数（P50）","desc":"50% 的请求在此时间内完成。反映典型用户体验"},
-  "P90":{"zh":"响应 P90","desc":"90% 的请求在此时间内完成。反映大多数用户的最慢体验"},
-  "P99":{"zh":"响应 P99","desc":"99% 的请求在此时间内完成。用于发现极端慢请求"},
-  "SSE":{"zh":"服务端推送（SSE）","desc":"Server-Sent Events，服务器实时推送日志到浏览器，无需手动刷新"},
-  "minimum_amount":{"zh":"最小金额","desc":"该通道允许的单笔最小交易金额"},
-  "maximum_amount":{"zh":"最大金额","desc":"该通道允许的单笔最大交易金额"},
-  "processing_time":{"zh":"处理时间","desc":"从提交到完成的平均处理耗时"},
-  "per_user":{"zh":"用户冷却","desc":"同一用户两次触发回复的最小间隔"},
-  "per_content":{"zh":"内容冷却","desc":"相同内容重复发送时的冷却时间"},
-  "global":{"zh":"全局冷却","desc":"所有回复之间的最小间隔"},
-  "by_intent":{"zh":"意图冷却","desc":"按意图类型分别设置的冷却时间"},
-  "enabled":{"zh":"已启用","desc":"此功能/通道当前处于开启状态"},
-  "rate_limit":{"zh":"限流","desc":"防止短时间内过多请求的保护机制，基于令牌桶算法"},
-  "webhook":{"zh":"Webhook 推送通知","desc":"配置变更时自动推送通知到外部系统（Slack/微信/Telegram）","usage":"填写推送地址 → 选择监听事件 → 保存 → 发送测试验证"},
-  "intent":{"zh":"意图","desc":"用户消息被 AI 识别为的类型，如 greeting（问候）、order_query（查单）、complaint（投诉）等"},
-  "strategy":{"zh":"回复策略","desc":"根据消息意图选择的 AI 参数组合（温度、输出长度、上下文轮数等）"},
-  "follow_up_rate":{"zh":"追问率","desc":"用户在收到 AI 回复后 5 分钟内再次发送消息的比例；高追问率可能表示回复质量不足"},
-  "same_intent_rate":{"zh":"同意图追问率","desc":"追问消息与原始消息具有相同意图的比例；越高说明 AI 可能没解决用户问题"},
-  "silence_rate":{"zh":"静默率","desc":"回复后用户无追问的比例；高静默率通常表示一次解决"},
-  "template_hit_rate":{"zh":"模板命中率","desc":"使用预设模板直接回复（未调用 AI API）的比例；可节省 API 调用"},
-  "backfill":{"zh":"回填","desc":"当用户新消息到达时，系统回溯标记前一条 AI 回复的追问状态"},
-  "strategy_event":{"zh":"策略事件","desc":"每次 AI 通过某个策略回复用户时记录的一条追踪数据"},
-  "quality_score":{"zh":"质量评分","desc":"综合评分 0-100，融合响应速度(20%)、一次解决率(35%)、同意图追问惩罚(30%)、API 效率(15%)"},
-  "ab_test":{"zh":"A/B 灰度测试","desc":"对同一意图分流多个策略，用一致性哈希保证同一用户始终进入同一分桶，实现对照实验","usage":"创建两个策略 → 在意图映射中同时绑定 → 系统自动分流 → 查看策略效果对比"},
-  "data_retention":{"zh":"数据保留","desc":"策略追踪事件和通用事件的自动清理周期（天数），防止数据库无限膨胀"},
-  "advisor":{"zh":"智能诊断","desc":"系统自动分析策略指标，检测异常（高追问率、慢响应等）并给出参数调整建议"},
-  "purge":{"zh":"数据清理","desc":"删除超过保留期限的旧追踪数据并回收磁盘空间（VACUUM）"},
-  "autopilot":{"zh":"自动驾驶（Auto-Pilot）","desc":"系统持续监测策略质量评分，当某策略评分低于阈值时自动将其映射的意图切换到更优策略"},
-  "session":{"zh":"会话","desc":"同一用户在 30 分钟内的连续交互归为一个会话，用于追踪整体对话解决率"},
-  "resolve_rate":{"zh":"解决率","desc":"会话中最后一条回复后用户未再追问的比例；高解决率意味着问题一次性解决"},
-  "param_suggestion":{"zh":"参数微调建议","desc":"系统根据策略指标异常自动生成具体参数调整建议（如增加 context_rounds），可一键应用"},
-  "model_id":{"zh":"模型 ID","desc":"当前策略使用的 AI 模型名称，可在策略中配置以实现模型级 A/B 测试"},
-  "model_ab":{"zh":"模型 A/B 对比","desc":"将相同策略配置不同模型，通过 A/B 灰度分流对比模型效果差异"},
-  "user_segment":{"zh":"用户分群","desc":"按活跃度分群：高频(≥10条)、中频(3-9条)、低频(1-2条)，分析各群体对策略的响应差异"},
-  "heavy":{"zh":"高频用户","desc":"分析窗口内产生 ≥10 条交互的用户群体，通常是核心用户"},
-  "moderate":{"zh":"中频用户","desc":"分析窗口内产生 3-9 条交互的用户群体"},
-  "light":{"zh":"低频用户","desc":"分析窗口内仅 1-2 条交互的用户群体，可能是新用户或偶尔使用者"},
+  "buy_rate":{"zh":"买入费率","en":"Buy-in Rate","desc":"用户向该通道充值时平台收取的费率百分比","desc_en":"The percentage fee the platform charges when a user tops up via this channel"},
+  "sell_rate":{"zh":"卖出费率","en":"Sell-out Rate","desc":"用户从该通道提现时的费率","desc_en":"The fee charged when a user withdraws from this channel"},
+  "fee_rate":{"zh":"手续费率","en":"Fee Rate","desc":"该通道的交易手续费百分比。例如 0.5% 表示每笔扣除 0.5%","desc_en":"The channel's transaction fee percentage. E.g. 0.5% deducts 0.5% per transaction"},
+  "circuit_breaker":{"zh":"熔断器","en":"Circuit Breaker","desc":"当 AI 接口连续失败超过阈值时自动停止调用一段时间，防止雪崩","desc_en":"Automatically halts calls for a while when the AI API fails consecutively beyond a threshold, preventing cascading failures"},
+  "cooldown":{"zh":"冷却时间","en":"Cooldown","desc":"两次回复之间的最小间隔（秒），防止刷屏","desc_en":"Minimum interval (seconds) between two replies, to prevent flooding"},
+  "temperature":{"zh":"回复温度（Temperature）","en":"Reply Temperature","desc":"控制 AI 回复的随机性。0=最确定稳定，1=最多样创意。业务场景建议 0.3-0.5","desc_en":"Controls how random the AI's replies are. 0 = most deterministic, 1 = most creative. 0.3-0.5 recommended for business","usage":"拖动滑块调整，保存后对该策略下所有新回复生效","usage_en":"Drag the slider; saving applies it to all new replies under this strategy"},
+  "max_tokens":{"zh":"最大字数（Max Tokens）","en":"Max Tokens","desc":"AI 单次回复的最大 token 数。1 token ≈ 1.5 个中文字。256=简短，512=正常，1024=详细","desc_en":"Max tokens per AI reply. 1 token ≈ 1.5 Chinese characters. 256 = short, 512 = normal, 1024 = detailed","usage":"输入数值后保存。值越大回复越长，但速度变慢、费用增加","usage_en":"Enter a value and save. Larger = longer replies, but slower and pricier"},
+  "context_rounds":{"zh":"上下文轮数","en":"Context Rounds","desc":"传入 AI 的历史对话轮数。轮数越多上下文越丰富，但速度更慢费用更高","desc_en":"Number of past dialogue rounds fed to the AI. More rounds = richer context but slower and pricier","usage":"通常 3-5 轮即可。复杂业务场景可增至 8-10 轮","usage_en":"3-5 rounds is usually enough; raise to 8-10 for complex scenarios"},
+  "split_send":{"zh":"分条发送","en":"Split Send","desc":"长回复自动拆成多条消息发送，模拟真人打字节奏","desc_en":"Long replies are auto-split into several messages, mimicking a human typing rhythm"},
+  "reply_probability":{"zh":"回复概率","en":"Reply Probability","desc":"收到此类消息时实际回复的概率。0.1=只有10%的消息会回复","desc_en":"Probability of actually replying to such a message. 0.1 = only 10% of messages get a reply","usage":"设为 1.0 表示 100% 回复。水群场景可调低避免刷屏","usage_en":"Set 1.0 for a 100% reply rate. Lower it in busy group chats to avoid flooding"},
+  "skip_ai":{"zh":"跳过 AI","en":"Skip AI","desc":"启用后直接使用模板回复，不调用 AI 接口，响应极快（<1秒）","desc_en":"When enabled, replies straight from templates without calling the AI API — extremely fast (<1s)","usage":"适用于固定话术场景（如问候语），开启后节省 API 费用","usage_en":"Good for fixed scripts (e.g. greetings); saves API cost"},
+  "success_rate":{"zh":"成功率","en":"Success Rate","desc":"该通道交易成功的比例。低于 80% 建议排查或暂停","desc_en":"Share of successful transactions on this channel. Below 80% warrants investigation or pausing"},
+  "alert_threshold":{"zh":"告警阈值","en":"Alert Threshold","desc":"成功率低于此值时通道卡片显示红色告警","desc_en":"When the success rate drops below this, the channel card shows a red alert"},
+  "P50":{"zh":"响应中位数（P50）","en":"Response Median (P50)","desc":"50% 的请求在此时间内完成。反映典型用户体验","desc_en":"50% of requests finish within this time. Reflects typical user experience"},
+  "P90":{"zh":"响应 P90","en":"Response P90","desc":"90% 的请求在此时间内完成。反映大多数用户的最慢体验","desc_en":"90% of requests finish within this time. Reflects most users' slowest experience"},
+  "P99":{"zh":"响应 P99","en":"Response P99","desc":"99% 的请求在此时间内完成。用于发现极端慢请求","desc_en":"99% of requests finish within this time. Used to surface extreme slow requests"},
+  "SSE":{"zh":"服务端推送（SSE）","en":"Server-Sent Events (SSE)","desc":"Server-Sent Events，服务器实时推送日志到浏览器，无需手动刷新","desc_en":"Server-Sent Events: the server pushes logs to the browser in real time, no manual refresh needed"},
+  "minimum_amount":{"zh":"最小金额","en":"Minimum Amount","desc":"该通道允许的单笔最小交易金额","desc_en":"The smallest single-transaction amount this channel allows"},
+  "maximum_amount":{"zh":"最大金额","en":"Maximum Amount","desc":"该通道允许的单笔最大交易金额","desc_en":"The largest single-transaction amount this channel allows"},
+  "processing_time":{"zh":"处理时间","en":"Processing Time","desc":"从提交到完成的平均处理耗时","desc_en":"Average time from submission to completion"},
+  "per_user":{"zh":"用户冷却","en":"Per-User Cooldown","desc":"同一用户两次触发回复的最小间隔","desc_en":"Minimum interval between two reply triggers from the same user"},
+  "per_content":{"zh":"内容冷却","en":"Per-Content Cooldown","desc":"相同内容重复发送时的冷却时间","desc_en":"Cooldown applied when identical content is sent repeatedly"},
+  "global":{"zh":"全局冷却","en":"Global Cooldown","desc":"所有回复之间的最小间隔","desc_en":"Minimum interval between all replies"},
+  "by_intent":{"zh":"意图冷却","en":"Per-Intent Cooldown","desc":"按意图类型分别设置的冷却时间","desc_en":"Cooldown configured separately by intent type"},
+  "enabled":{"zh":"已启用","en":"Enabled","desc":"此功能/通道当前处于开启状态","desc_en":"This feature/channel is currently switched on"},
+  "rate_limit":{"zh":"限流","en":"Rate Limiting","desc":"防止短时间内过多请求的保护机制，基于令牌桶算法","desc_en":"A protection mechanism preventing too many requests in a short time, based on the token-bucket algorithm"},
+  "webhook":{"zh":"Webhook 推送通知","en":"Webhook Notifications","desc":"配置变更时自动推送通知到外部系统（Slack/微信/Telegram）","desc_en":"Auto-push notifications to external systems (Slack/WeChat/Telegram) when config changes","usage":"填写推送地址 → 选择监听事件 → 保存 → 发送测试验证","usage_en":"Enter the push URL → choose events to watch → save → send a test to verify"},
+  "intent":{"zh":"意图","en":"Intent","desc":"用户消息被 AI 识别为的类型，如 greeting（问候）、order_query（查单）、complaint（投诉）等","desc_en":"The type the AI classifies a user message as, e.g. greeting, order_query, complaint, etc."},
+  "strategy":{"zh":"回复策略","en":"Reply Strategy","desc":"根据消息意图选择的 AI 参数组合（温度、输出长度、上下文轮数等）","desc_en":"The AI parameter set (temperature, output length, context rounds, etc.) chosen by message intent"},
+  "follow_up_rate":{"zh":"追问率","en":"Follow-up Rate","desc":"用户在收到 AI 回复后 5 分钟内再次发送消息的比例；高追问率可能表示回复质量不足","desc_en":"Share of users who message again within 5 minutes of an AI reply; a high rate may signal insufficient reply quality"},
+  "same_intent_rate":{"zh":"同意图追问率","en":"Same-Intent Follow-up Rate","desc":"追问消息与原始消息具有相同意图的比例；越高说明 AI 可能没解决用户问题","desc_en":"Share of follow-ups carrying the same intent as the original; higher means the AI likely didn't solve the problem"},
+  "silence_rate":{"zh":"静默率","en":"Silence Rate","desc":"回复后用户无追问的比例；高静默率通常表示一次解决","desc_en":"Share of replies with no follow-up; a high rate usually means one-shot resolution"},
+  "template_hit_rate":{"zh":"模板命中率","en":"Template Hit Rate","desc":"使用预设模板直接回复（未调用 AI API）的比例；可节省 API 调用","desc_en":"Share of replies served directly from preset templates (no AI API call); saves API calls"},
+  "backfill":{"zh":"回填","en":"Backfill","desc":"当用户新消息到达时，系统回溯标记前一条 AI 回复的追问状态","desc_en":"When a new user message arrives, the system retroactively marks the previous AI reply's follow-up status"},
+  "strategy_event":{"zh":"策略事件","en":"Strategy Event","desc":"每次 AI 通过某个策略回复用户时记录的一条追踪数据","desc_en":"A tracking record logged each time the AI replies via a given strategy"},
+  "quality_score":{"zh":"质量评分","en":"Quality Score","desc":"综合评分 0-100，融合响应速度(20%)、一次解决率(35%)、同意图追问惩罚(30%)、API 效率(15%)","desc_en":"Composite score 0-100, blending response speed (20%), one-shot resolution (35%), same-intent follow-up penalty (30%) and API efficiency (15%)"},
+  "ab_test":{"zh":"A/B 灰度测试","en":"A/B Test","desc":"对同一意图分流多个策略，用一致性哈希保证同一用户始终进入同一分桶，实现对照实验","desc_en":"Splits one intent across multiple strategies, using consistent hashing so a user always lands in the same bucket — a controlled experiment","usage":"创建两个策略 → 在意图映射中同时绑定 → 系统自动分流 → 查看策略效果对比","usage_en":"Create two strategies → bind both in the intent mapping → the system auto-splits → compare in Strategy Performance"},
+  "data_retention":{"zh":"数据保留","en":"Data Retention","desc":"策略追踪事件和通用事件的自动清理周期（天数），防止数据库无限膨胀","desc_en":"Auto-cleanup period (days) for strategy-tracking and generic events, preventing unbounded database growth"},
+  "advisor":{"zh":"智能诊断","en":"Smart Diagnostics","desc":"系统自动分析策略指标，检测异常（高追问率、慢响应等）并给出参数调整建议","desc_en":"Auto-analyzes strategy metrics, detects anomalies (high follow-up rate, slow response, etc.) and suggests parameter tweaks"},
+  "purge":{"zh":"数据清理","en":"Data Purge","desc":"删除超过保留期限的旧追踪数据并回收磁盘空间（VACUUM）","desc_en":"Deletes tracking data past its retention period and reclaims disk space (VACUUM)"},
+  "autopilot":{"zh":"自动驾驶（Auto-Pilot）","en":"Auto-Pilot","desc":"系统持续监测策略质量评分，当某策略评分低于阈值时自动将其映射的意图切换到更优策略","desc_en":"Continuously monitors strategy quality scores and auto-switches an intent's mapping to a better strategy when a score drops below threshold"},
+  "session":{"zh":"会话","en":"Session","desc":"同一用户在 30 分钟内的连续交互归为一个会话，用于追踪整体对话解决率","desc_en":"A user's continuous interactions within 30 minutes count as one session, used to track overall resolution"},
+  "resolve_rate":{"zh":"解决率","en":"Resolution Rate","desc":"会话中最后一条回复后用户未再追问的比例；高解决率意味着问题一次性解决","desc_en":"Share of sessions with no follow-up after the last reply; high means problems were solved in one go"},
+  "param_suggestion":{"zh":"参数微调建议","en":"Parameter Tuning Suggestion","desc":"系统根据策略指标异常自动生成具体参数调整建议（如增加 context_rounds），可一键应用","desc_en":"Concrete parameter-adjustment suggestions auto-generated from metric anomalies (e.g. raise context_rounds), applicable in one click"},
+  "model_id":{"zh":"模型 ID","en":"Model ID","desc":"当前策略使用的 AI 模型名称，可在策略中配置以实现模型级 A/B 测试","desc_en":"The AI model name used by the current strategy; configurable per strategy for model-level A/B testing"},
+  "model_ab":{"zh":"模型 A/B 对比","en":"Model A/B Comparison","desc":"将相同策略配置不同模型，通过 A/B 灰度分流对比模型效果差异","desc_en":"Configure different models for the same strategy and compare their effect via A/B traffic splitting"},
+  "user_segment":{"zh":"用户分群","en":"User Segments","desc":"按活跃度分群：高频(≥10条)、中频(3-9条)、低频(1-2条)，分析各群体对策略的响应差异","desc_en":"Segments by activity: heavy (≥10 msgs), moderate (3-9), light (1-2), to analyze how each group responds to strategies"},
+  "heavy":{"zh":"高频用户","en":"Heavy Users","desc":"分析窗口内产生 ≥10 条交互的用户群体，通常是核心用户","desc_en":"Users with ≥10 interactions in the analysis window — usually core users"},
+  "moderate":{"zh":"中频用户","en":"Moderate Users","desc":"分析窗口内产生 3-9 条交互的用户群体","desc_en":"Users with 3-9 interactions in the analysis window"},
+  "light":{"zh":"低频用户","en":"Light Users","desc":"分析窗口内仅 1-2 条交互的用户群体，可能是新用户或偶尔使用者","desc_en":"Users with only 1-2 interactions in the analysis window — possibly new or occasional users"},
   /* ── AI / 配置术语 ─── */
-  "api_key":{"zh":"API 密钥（API Key）","desc":"调用 AI 服务的身份验证密钥，类似密码，请妥善保管不要泄露","usage":"从 AI 服务商后台复制密钥 → 粘贴到此处 → 点击测试连接验证"},
-  "base_url":{"zh":"接口地址（Base URL）","desc":"AI 服务的 API 访问地址。不同服务商地址不同","usage":"填写完整 URL（含 https://），如 https://generativelanguage.googleapis.com"},
-  "embedding_model":{"zh":"向量模型（Embedding）","desc":"将文本转换为数学向量的模型，用于知识库语义搜索（理解意思而非精确匹配）","usage":"通常使用默认模型即可。如需更换，确保模型支持中文"},
-  "system_prompt":{"zh":"系统提示词（System Prompt）","desc":"AI 的核心指令，定义 AI 的角色、风格、回复规则。所有回复都受此约束","usage":"编辑提示词 → 保存即生效。可用右侧快捷按钮跳转到不同段落"},
-  "thinking_budget":{"zh":"思考预算（Thinking Budget）","desc":"AI 深度推理的 token 预算，越高推理越深入但速度越慢、费用更高","usage":"简单问答设 0（关闭推理），复杂业务场景设 1024-4096"},
-  "session_key":{"zh":"会话密钥（Session Key）","desc":"Web 管理面板的登录会话加密密钥，用于保护 Cookie 安全","usage":"初始化时自动生成，无需手动修改。如需重置登录状态可更换"},
+  "api_key":{"zh":"API 密钥（API Key）","en":"API Key","desc":"调用 AI 服务的身份验证密钥，类似密码，请妥善保管不要泄露","desc_en":"Authentication key for calling the AI service, like a password — keep it safe and never leak it","usage":"从 AI 服务商后台复制密钥 → 粘贴到此处 → 点击测试连接验证","usage_en":"Copy the key from your AI provider's console → paste it here → click Test Connection to verify"},
+  "base_url":{"zh":"接口地址（Base URL）","en":"Base URL","desc":"AI 服务的 API 访问地址。不同服务商地址不同","desc_en":"The AI service's API endpoint. It differs by provider","usage":"填写完整 URL（含 https://），如 https://generativelanguage.googleapis.com","usage_en":"Enter the full URL (incl. https://), e.g. https://generativelanguage.googleapis.com"},
+  "embedding_model":{"zh":"向量模型（Embedding）","en":"Embedding Model","desc":"将文本转换为数学向量的模型，用于知识库语义搜索（理解意思而非精确匹配）","desc_en":"A model that turns text into mathematical vectors, used for Knowledge Base semantic search (understanding meaning, not exact matching)","usage":"通常使用默认模型即可。如需更换，确保模型支持中文","usage_en":"The default model is usually fine. If you change it, make sure it supports Chinese"},
+  "system_prompt":{"zh":"系统提示词（System Prompt）","en":"System Prompt","desc":"AI 的核心指令，定义 AI 的角色、风格、回复规则。所有回复都受此约束","desc_en":"The AI's core instruction, defining its role, style and reply rules. Every reply is bound by it","usage":"编辑提示词 → 保存即生效。可用右侧快捷按钮跳转到不同段落","usage_en":"Edit the prompt → save to apply. Use the side buttons to jump between sections"},
+  "thinking_budget":{"zh":"思考预算（Thinking Budget）","en":"Thinking Budget","desc":"AI 深度推理的 token 预算，越高推理越深入但速度越慢、费用更高","desc_en":"Token budget for the AI's deep reasoning; higher = deeper reasoning but slower and pricier","usage":"简单问答设 0（关闭推理），复杂业务场景设 1024-4096","usage_en":"Set 0 for simple Q&A (reasoning off); 1024-4096 for complex scenarios"},
+  "session_key":{"zh":"会话密钥（Session Key）","en":"Session Key","desc":"Web 管理面板的登录会话加密密钥，用于保护 Cookie 安全","desc_en":"Encryption key for the web admin login session, protecting cookie security","usage":"初始化时自动生成，无需手动修改。如需重置登录状态可更换","usage_en":"Auto-generated at init; no manual change needed. Rotate it to reset all login states"},
   /* ── 知识库术语 ─── */
-  "kb_entry":{"zh":"知识条目","desc":"知识库中的一条记录，包含标题、触发词、处理步骤、示例回复等字段","usage":"创建条目 → 设置触发词 → 用沙盒测试命中效果"},
-  "triggers":{"zh":"触发词","desc":"用户消息匹配这些关键词时会命中对应的知识条目。支持多个词，用逗号分隔","usage":"添加常见的用户提问关键词，如「查单」「订单号」「到账」"},
-  "sandbox":{"zh":"沙盒测试","desc":"在安全环境中测试 KB 搜索和 AI 回复效果，不影响真实用户","usage":"输入模拟用户消息 → 查看命中的条目和 AI 生成的回复"},
-  "vectorize":{"zh":"向量化","desc":"将所有知识条目转为数学向量，启用语义搜索（理解含义而非仅关键词匹配）","usage":"点击后等待处理完成。新增条目后建议重新向量化"},
-  "batch_translate":{"zh":"批量翻译","desc":"将所有未翻译的 KB 条目自动翻译为英语/乌尔都语/葡萄牙语/阿拉伯语","usage":"点击后自动翻译，翻译结果可在「翻译审核」标签页中审核"},
-  "hit_rate":{"zh":"命中率","desc":"用户消息能匹配到 KB 知识条目的比例。命中率越高，AI 回复质量越好","usage":"命中率低于 60% 时建议扩充知识库或优化触发词"},
-  "miss_log":{"zh":"未命中记录","desc":"用户消息没有匹配到任何 KB 条目时的记录，用于发现知识盲区","usage":"定期查看未命中记录 → 为高频未命中创建新的知识条目"},
-  "kb_feedback":{"zh":"效果反馈","desc":"对 AI 回复的评价记录（好评/差评），用于持续优化知识库内容"},
-  "bm25":{"zh":"BM25 搜索","desc":"基于关键词频率的传统搜索算法，速度快但无法理解语义"},
-  "semantic_search":{"zh":"语义搜索","desc":"基于向量的搜索，能理解同义词和相似表达（如「退钱」=「退款」）"},
+  "kb_entry":{"zh":"知识条目","en":"Knowledge Entry","desc":"知识库中的一条记录，包含标题、触发词、处理步骤、示例回复等字段","desc_en":"A Knowledge Base record with fields like title, triggers, handling steps and a sample reply","usage":"创建条目 → 设置触发词 → 用沙盒测试命中效果","usage_en":"Create an entry → set triggers → verify hits with the sandbox test"},
+  "triggers":{"zh":"触发词","en":"Trigger Words","desc":"用户消息匹配这些关键词时会命中对应的知识条目。支持多个词，用逗号分隔","desc_en":"When a user message matches these keywords, the matching entry is hit. Multiple words allowed, comma-separated","usage":"添加常见的用户提问关键词，如「查单」「订单号」「到账」","usage_en":"Add common user-question keywords, e.g. \"track order\", \"order number\", \"received\""},
+  "sandbox":{"zh":"沙盒测试","en":"Sandbox Test","desc":"在安全环境中测试 KB 搜索和 AI 回复效果，不影响真实用户","desc_en":"Test KB search and AI replies in a safe environment without affecting real users","usage":"输入模拟用户消息 → 查看命中的条目和 AI 生成的回复","usage_en":"Enter a simulated user message → see the matched entry and the AI-generated reply"},
+  "vectorize":{"zh":"向量化","en":"Vectorize","desc":"将所有知识条目转为数学向量，启用语义搜索（理解含义而非仅关键词匹配）","desc_en":"Convert all knowledge entries into vectors to enable semantic search (meaning, not just keyword matching)","usage":"点击后等待处理完成。新增条目后建议重新向量化","usage_en":"Click and wait for processing. Re-vectorize after adding new entries"},
+  "batch_translate":{"zh":"批量翻译","en":"Batch Translate","desc":"将所有未翻译的 KB 条目自动翻译为英语/乌尔都语/葡萄牙语/阿拉伯语","desc_en":"Auto-translate all untranslated KB entries into English/Urdu/Portuguese/Arabic","usage":"点击后自动翻译，翻译结果可在「翻译审核」标签页中审核","usage_en":"Click to auto-translate; review the results in the \"Translation Review\" tab"},
+  "hit_rate":{"zh":"命中率","en":"Hit Rate","desc":"用户消息能匹配到 KB 知识条目的比例。命中率越高，AI 回复质量越好","desc_en":"Share of user messages that match a KB entry. Higher hit rate = better AI reply quality","usage":"命中率低于 60% 时建议扩充知识库或优化触发词","usage_en":"Below 60%, consider expanding the KB or refining triggers"},
+  "miss_log":{"zh":"未命中记录","en":"Miss Log","desc":"用户消息没有匹配到任何 KB 条目时的记录，用于发现知识盲区","desc_en":"Records of user messages that matched no KB entry, used to find knowledge gaps","usage":"定期查看未命中记录 → 为高频未命中创建新的知识条目","usage_en":"Review misses regularly → create new entries for frequent misses"},
+  "kb_feedback":{"zh":"效果反馈","en":"Feedback","desc":"对 AI 回复的评价记录（好评/差评），用于持续优化知识库内容","desc_en":"Records of ratings (thumbs up/down) on AI replies, used to continuously improve KB content"},
+  "bm25":{"zh":"BM25 搜索","en":"BM25 Search","desc":"基于关键词频率的传统搜索算法，速度快但无法理解语义","desc_en":"A traditional keyword-frequency search algorithm — fast but unable to understand semantics"},
+  "semantic_search":{"zh":"语义搜索","en":"Semantic Search","desc":"基于向量的搜索，能理解同义词和相似表达（如「退钱」=「退款」）","desc_en":"Vector-based search that understands synonyms and similar phrasing (e.g. \"give my money back\" = \"refund\")"},
   /* ── 日志级别 ─── */
-  "DEBUG":{"zh":"调试日志（DEBUG）","desc":"最详细的日志级别，包含开发调试信息。通常仅开发人员使用","usage":"选中此按钮可查看所有级别的日志，信息量最大"},
-  "INFO":{"zh":"信息日志（INFO）","desc":"常规运行信息，如消息收发、回复生成、KB 查询等正常操作","usage":"日常监控推荐使用此级别"},
-  "WARNING":{"zh":"警告日志（WARNING）","desc":"潜在问题警告，如成功率下降、KB 未命中、接口超时等","usage":"重点关注此级别，可提前发现问题"},
-  "ERROR":{"zh":"错误日志（ERROR）","desc":"运行错误，需要关注但系统仍可运行。如 API 调用失败、数据异常等","usage":"出现 ERROR 时应检查原因并尽快修复"},
-  "CRITICAL":{"zh":"严重错误（CRITICAL）","desc":"系统级故障，如数据库连接断开、服务崩溃等，需要立即处理","usage":"CRITICAL 日志出现时应立即排查，可能影响所有用户"},
+  "DEBUG":{"zh":"调试日志（DEBUG）","en":"Debug Log (DEBUG)","desc":"最详细的日志级别，包含开发调试信息。通常仅开发人员使用","desc_en":"The most detailed log level, including dev-debug info. Usually for developers only","usage":"选中此按钮可查看所有级别的日志，信息量最大","usage_en":"Select this to see logs of all levels — the most verbose"},
+  "INFO":{"zh":"信息日志（INFO）","en":"Info Log (INFO)","desc":"常规运行信息，如消息收发、回复生成、KB 查询等正常操作","desc_en":"Routine runtime info such as message send/receive, reply generation and KB queries — normal operations","usage":"日常监控推荐使用此级别","usage_en":"Recommended for day-to-day monitoring"},
+  "WARNING":{"zh":"警告日志（WARNING）","en":"Warning Log (WARNING)","desc":"潜在问题警告，如成功率下降、KB 未命中、接口超时等","desc_en":"Warnings of potential issues, e.g. dropping success rate, KB misses, API timeouts","usage":"重点关注此级别，可提前发现问题","usage_en":"Watch this level closely to catch problems early"},
+  "ERROR":{"zh":"错误日志（ERROR）","en":"Error Log (ERROR)","desc":"运行错误，需要关注但系统仍可运行。如 API 调用失败、数据异常等","desc_en":"Runtime errors needing attention while the system still runs, e.g. API call failures, data anomalies","usage":"出现 ERROR 时应检查原因并尽快修复","usage_en":"On ERROR, investigate the cause and fix it promptly"},
+  "CRITICAL":{"zh":"严重错误（CRITICAL）","en":"Critical Error (CRITICAL)","desc":"系统级故障，如数据库连接断开、服务崩溃等，需要立即处理","desc_en":"System-level failures such as a dropped database connection or a crashed service — handle immediately","usage":"CRITICAL 日志出现时应立即排查，可能影响所有用户","usage_en":"When CRITICAL appears, investigate at once; it may affect all users"},
   /* ── Case / 意图链 ─── */
-  "case_id":{"zh":"案例 ID","desc":"系统自动为识别到的意图链模式分配的唯一追踪编号"},
-  "intent_chain":{"zh":"意图链","desc":"用户在对话中的意图变化轨迹，如「查单 → 投诉 → 退款」","usage":"通过意图链可判断用户问题是否在升级，及时干预"},
-  "satisfaction":{"zh":"满意度","desc":"基于用户行为（追问、投诉、催促等）实时计算的满意度评分，范围 0-100","usage":"低于 40 分标记为高风险，建议人工介入"},
-  "at_risk":{"zh":"高风险","desc":"满意度评分低于阈值的用户，可能即将流失或投诉","usage":"在 Case 列表中带红色标记的即为高风险用户"},
-  "escalation":{"zh":"人工升级","desc":"AI 判断无法解决用户问题时，自动标记为需要人工客服介入"},
-  "close_case":{"zh":"结案","desc":"标记案例为已解决，并记录解决方案","usage":"点击结案按钮 → 输入解决说明 → 确认"},
+  "case_id":{"zh":"案例 ID","en":"Case ID","desc":"系统自动为识别到的意图链模式分配的唯一追踪编号","desc_en":"A unique tracking number the system assigns to each detected intent-chain pattern"},
+  "intent_chain":{"zh":"意图链","en":"Intent Chain","desc":"用户在对话中的意图变化轨迹，如「查单 → 投诉 → 退款」","desc_en":"The trajectory of a user's intent changes in a conversation, e.g. \"track order → complaint → refund\"","usage":"通过意图链可判断用户问题是否在升级，及时干预","usage_en":"An intent chain shows whether a user's issue is escalating, so you can step in early"},
+  "satisfaction":{"zh":"满意度","en":"Satisfaction","desc":"基于用户行为（追问、投诉、催促等）实时计算的满意度评分，范围 0-100","desc_en":"A real-time satisfaction score (0-100) computed from user behavior (follow-ups, complaints, prompting, etc.)","usage":"低于 40 分标记为高风险，建议人工介入","usage_en":"Below 40 is flagged high-risk; human intervention is advised"},
+  "at_risk":{"zh":"高风险","en":"At Risk","desc":"满意度评分低于阈值的用户，可能即将流失或投诉","desc_en":"Users whose satisfaction score is below threshold, who may churn or complain soon","usage":"在 Case 列表中带红色标记的即为高风险用户","usage_en":"Users flagged red in the case list are high-risk"},
+  "escalation":{"zh":"人工升级","en":"Escalation","desc":"AI 判断无法解决用户问题时，自动标记为需要人工客服介入","desc_en":"When the AI judges it can't solve the issue, it auto-flags the case for a human agent"},
+  "close_case":{"zh":"结案","en":"Close Case","desc":"标记案例为已解决，并记录解决方案","desc_en":"Mark a case as resolved and record the solution","usage":"点击结案按钮 → 输入解决说明 → 确认","usage_en":"Click Close → enter the resolution note → confirm"},
   /* ── 数据分析 ─── */
-  "copilot":{"zh":"运营 Copilot","desc":"AI 助手，用自然语言查询内部运营数据。支持问「今天知识库命中率多少？」等问题","usage":"在输入框输入中文问题 → 按回车 → 等待 AI 分析并返回结果"},
+  "copilot":{"zh":"运营 Copilot","en":"Operations Copilot","desc":"AI 助手，用自然语言查询内部运营数据。支持问「今天知识库命中率多少？」等问题","desc_en":"An AI assistant for querying internal operations data in natural language. Ask things like \"What's today's KB hit rate?\"","usage":"在输入框输入中文问题 → 按回车 → 等待 AI 分析并返回结果","usage_en":"Type a question in the box → press Enter → wait for the AI to analyze and return results"},
   /* ── 按钮操作 ─── */
-  "btn_refresh":{"zh":"刷新","desc":"重新从服务器加载最新数据","usage":"点击后等待数据更新。页面数据通常每 30 秒自动刷新"},
-  "btn_save":{"zh":"保存","desc":"将当前修改保存到服务器，立即生效","usage":"修改完成后点击保存。也可使用快捷键 Ctrl+S"},
-  "btn_export":{"zh":"导出","desc":"将当前数据导出为文件（CSV/JSON/YAML）下载到本地","usage":"点击后浏览器自动下载文件"},
-  "btn_import":{"zh":"导入","desc":"从本地文件导入数据到系统","usage":"选择文件 → 确认导入模式（覆盖/合并） → 确认"},
-  "btn_test":{"zh":"测试","desc":"验证当前配置是否能正常工作","usage":"点击后等待测试结果，成功会显示绿色提示"},
-  "btn_delete":{"zh":"删除","desc":"永久删除此项，操作不可恢复","usage":"点击后需要二次确认才会执行"},
-  "btn_pause":{"zh":"暂停/继续","desc":"暂停实时数据流，方便查看当前内容","usage":"暂停后数据不再滚动，再次点击恢复"},
+  "btn_refresh":{"zh":"刷新","en":"Refresh","desc":"重新从服务器加载最新数据","desc_en":"Reload the latest data from the server","usage":"点击后等待数据更新。页面数据通常每 30 秒自动刷新","usage_en":"Click and wait for the update. Page data usually auto-refreshes every 30s"},
+  "btn_save":{"zh":"保存","en":"Save","desc":"将当前修改保存到服务器，立即生效","desc_en":"Save the current changes to the server, effective immediately","usage":"修改完成后点击保存。也可使用快捷键 Ctrl+S","usage_en":"Click Save when done. You can also use the Ctrl+S shortcut"},
+  "btn_export":{"zh":"导出","en":"Export","desc":"将当前数据导出为文件（CSV/JSON/YAML）下载到本地","desc_en":"Export the current data as a file (CSV/JSON/YAML) to download locally","usage":"点击后浏览器自动下载文件","usage_en":"Click and the browser downloads the file automatically"},
+  "btn_import":{"zh":"导入","en":"Import","desc":"从本地文件导入数据到系统","desc_en":"Import data into the system from a local file","usage":"选择文件 → 确认导入模式（覆盖/合并） → 确认","usage_en":"Choose a file → confirm the import mode (overwrite/merge) → confirm"},
+  "btn_test":{"zh":"测试","en":"Test","desc":"验证当前配置是否能正常工作","desc_en":"Verify whether the current configuration works","usage":"点击后等待测试结果，成功会显示绿色提示","usage_en":"Click and wait for the result; success shows a green prompt"},
+  "btn_delete":{"zh":"删除","en":"Delete","desc":"永久删除此项，操作不可恢复","desc_en":"Permanently delete this item; the action cannot be undone","usage":"点击后需要二次确认才会执行","usage_en":"A second confirmation is required before it executes"},
+  "btn_pause":{"zh":"暂停/继续","en":"Pause / Resume","desc":"暂停实时数据流，方便查看当前内容","desc_en":"Pause the live data stream to inspect current content","usage":"暂停后数据不再滚动，再次点击恢复","usage_en":"When paused, data stops scrolling; click again to resume"},
   /* ── 导入/导出格式 ─── */
-  "JSON":{"zh":"JSON 格式","desc":"通用数据格式，结构化存储，适合程序处理和 API 传输"},
-  "CSV":{"zh":"CSV 格式","desc":"逗号分隔表格格式，可直接用 Excel/WPS 打开编辑"},
-  "YAML":{"zh":"YAML 格式","desc":"人类友好的配置文件格式，层级清晰易读"},
-  "ZIP":{"zh":"ZIP 压缩包","desc":"将多个文件打包压缩为一个文件，方便传输和备份"},
-  "HMAC":{"zh":"HMAC-SHA256 签名","desc":"消息认证码算法，用于验证 Webhook 推送消息的真实性，防止伪造"},
+  "JSON":{"zh":"JSON 格式","en":"JSON Format","desc":"通用数据格式，结构化存储，适合程序处理和 API 传输","desc_en":"A universal, structured data format suited to programmatic processing and API transport"},
+  "CSV":{"zh":"CSV 格式","en":"CSV Format","desc":"逗号分隔表格格式，可直接用 Excel/WPS 打开编辑","desc_en":"Comma-separated tabular format, openable and editable directly in Excel/WPS"},
+  "YAML":{"zh":"YAML 格式","en":"YAML Format","desc":"人类友好的配置文件格式，层级清晰易读","desc_en":"A human-friendly config file format with a clear, readable hierarchy"},
+  "ZIP":{"zh":"ZIP 压缩包","en":"ZIP Archive","desc":"将多个文件打包压缩为一个文件，方便传输和备份","desc_en":"Bundles multiple files into one compressed file for easy transfer and backup"},
+  "HMAC":{"zh":"HMAC-SHA256 签名","en":"HMAC-SHA256 Signature","desc":"消息认证码算法，用于验证 Webhook 推送消息的真实性，防止伪造","desc_en":"A message-authentication-code algorithm used to verify the authenticity of Webhook push messages and prevent forgery"},
   /* ── 通道状态 ─── */
-  "ch_enabled":{"zh":"启用","desc":"通道正常运行中，可以处理交易"},
-  "ch_maintenance":{"zh":"维护中","desc":"通道暂停服务，正在维护。AI 会告知用户通道维护状态"},
-  "ch_fluctuation":{"zh":"波动","desc":"通道成功率不稳定，可能影响交易。AI 会提醒用户注意风险"},
+  "ch_enabled":{"zh":"启用","en":"Enabled","desc":"通道正常运行中，可以处理交易","desc_en":"The channel is running normally and can process transactions"},
+  "ch_maintenance":{"zh":"维护中","en":"Under Maintenance","desc":"通道暂停服务，正在维护。AI 会告知用户通道维护状态","desc_en":"The channel is paused for maintenance. The AI will tell users about the maintenance status"},
+  "ch_fluctuation":{"zh":"波动","en":"Fluctuating","desc":"通道成功率不稳定，可能影响交易。AI 会提醒用户注意风险","desc_en":"The channel's success rate is unstable and may affect transactions. The AI will warn users of the risk"},
   /* ── 用户角色 ─── */
-  "role_master":{"zh":"主帐号","desc":"拥有全部权限，可管理其他用户、修改系统设置、查看所有数据"},
-  "role_admin":{"zh":"管理员","desc":"拥有编辑权限，可管理模板、通道、知识库，但不能管理用户和系统设置"},
-  "role_viewer":{"zh":"观察员","desc":"只读权限，可查看所有数据但不能修改任何配置"},
-  /* ── {{ site_name|default('华灵科技客户转化聊天系统') }} ─── */
-  "bot_admin":{"zh":"{{ site_name|default('华灵科技客户转化聊天系统') }}","desc":"面向 Telegram 等渠道的 AI 客服与人工协同后台，用于知识库、案例、转接与监控"},
+  "role_master":{"zh":"主帐号","en":"Master","desc":"拥有全部权限，可管理其他用户、修改系统设置、查看所有数据","desc_en":"Has full permissions: manage other users, change system settings, and view all data"},
+  "role_admin":{"zh":"管理员","en":"Admin","desc":"拥有编辑权限，可管理模板、通道、知识库，但不能管理用户和系统设置","desc_en":"Has edit permissions: manage templates, channels and the knowledge base, but not users or system settings"},
+  "role_viewer":{"zh":"观察员","en":"Viewer","desc":"只读权限，可查看所有数据但不能修改任何配置","desc_en":"Read-only: can view all data but cannot modify any configuration"},
+  /* ── brand / site_name ─── */
+  "bot_admin":{"zh":"{{ site_name|default((i18n or {}).get('brand', '无界科技 · 智聊')) }}","en":"{{ site_name|default((i18n or {}).get('brand', 'Boundless · ChatX')) }}","desc":"面向 Telegram 等渠道的 AI 客服与人工协同后台，用于知识库、案例、转接与监控","desc_en":"An AI customer-service and human-collaboration backend for channels like Telegram, covering knowledge base, cases, handoff and monitoring"},
   /* ── 其他 ─── */
-  "token":{"zh":"Token（令牌）","desc":"AI 处理文本的基本单位。1 个 token 约等于 1.5 个中文字或 0.75 个英文单词"},
-  "Bot":{"zh":"Bot（机器人）","desc":"Telegram 上的 AI 客服机器人，自动接收并回复用户消息"},
-  "Case":{"zh":"Case（案例/工单）","desc":"由系统自动识别的用户对话升级事件，需要运营关注和跟进"}
+  "token":{"zh":"Token（令牌）","en":"Token","desc":"AI 处理文本的基本单位。1 个 token 约等于 1.5 个中文字或 0.75 个英文单词","desc_en":"The basic unit the AI processes text in. 1 token ≈ 1.5 Chinese characters or 0.75 English words"},
+  "Bot":{"zh":"Bot（机器人）","en":"Bot","desc":"Telegram 上的 AI 客服机器人，自动接收并回复用户消息","desc_en":"The AI customer-service bot on Telegram that automatically receives and replies to user messages"},
+  "Case":{"zh":"Case（案例/工单）","en":"Case","desc":"由系统自动识别的用户对话升级事件，需要运营关注和跟进","desc_en":"A user-conversation escalation event auto-detected by the system, needing ops attention and follow-up"}
 };
 let tipEl=null,tipOn=localStorage.getItem('tipOn')!=='0';
 function initTooltip(){
   tipEl=document.createElement('div');tipEl.className='g-tip';
   tipEl.innerHTML='<div class="g-tip-name"></div><div class="g-tip-desc"></div><div class="g-tip-usage"></div>';
   document.body.appendChild(tipEl);
-  const tog=document.createElement('button');tog.className='tip-toggle'+(tipOn?' active':'');tog.innerHTML='?';tog.title='左键=开关术语提示 · 右键=隐藏按钮 · 可拖动';
+  const tog=document.createElement('button');tog.className='tip-toggle'+(tipOn?' active':'');tog.innerHTML='?';tog.title={{ (i18n or {}).get('tip_toggle_title','左键=开关术语提示 · 右键=隐藏按钮 · 可拖动')|tojson }};
   tog.onclick=(e)=>{
     if(tog._dragged)return;
     tipOn=!tipOn;
@@ -1312,7 +1318,7 @@ function initTooltip(){
   document.addEventListener('touchmove',e=>{if(_dragging){const t=e.touches[0];_onDragMove(t.clientX,t.clientY)}});
   document.addEventListener('touchend',()=>_onDragEnd());
   // right-click = hide
-  tog.addEventListener('contextmenu',e=>{e.preventDefault();tog.style.display='none';localStorage.setItem('tipTogHidden','1');rpa&&rpa.toast?rpa.toast('术语按钮已隐藏（刷新页面恢复）','ok'):0});
+  tog.addEventListener('contextmenu',e=>{e.preventDefault();tog.style.display='none';localStorage.setItem('tipTogHidden','1');rpa&&rpa.toast?rpa.toast({{ (i18n or {}).get('tip_hidden_toast','术语按钮已隐藏（刷新页面恢复）')|tojson }},'ok'):0});
   // restore position
   try{const sp=JSON.parse(localStorage.getItem('tipTogPos')||'{}');if(sp.l){tog.style.left=sp.l;tog.style.top=sp.t;tog.style.bottom='auto';tog.style.right='auto'}}catch(e){}
   if(localStorage.getItem('tipTogHidden')==='1') tog.style.display='none';
@@ -1321,10 +1327,12 @@ function initTooltip(){
   function showTip(target,key){
     const d=TERM_DICT[key];if(!d)return;
     clearTimeout(_tipHideTimer);
-    tipEl.querySelector('.g-tip-name').textContent=d.zh;
-    tipEl.querySelector('.g-tip-desc').textContent=d.desc;
+    var _EN=window.WS_LANG==='en';  /* 英文取 *_en，缺则回落中文，渐进翻译不空窗 */
+    tipEl.querySelector('.g-tip-name').textContent=(_EN&&d.en)?d.en:d.zh;
+    tipEl.querySelector('.g-tip-desc').textContent=(_EN&&d.desc_en)?d.desc_en:d.desc;
     const usageEl=tipEl.querySelector('.g-tip-usage');
-    if(d.usage){usageEl.textContent='💡 '+d.usage;usageEl.style.display='block'}
+    var _usage=(_EN&&d.usage_en)?d.usage_en:d.usage;
+    if(_usage){usageEl.textContent='💡 '+_usage;usageEl.style.display='block'}
     else{usageEl.style.display='none'}
     const r=target.getBoundingClientRect();
     let left=Math.min(r.left,window.innerWidth-330);
@@ -1352,7 +1360,8 @@ function matchTerm(el){
   if(!el||!el.textContent)return null;
   const txt=el.textContent.trim().toLowerCase().replace(/[\s_-]+/g,'_');
   for(const k of Object.keys(TERM_DICT)){
-    if(txt===k.toLowerCase()||txt===TERM_DICT[k].zh){el._tipKey=k;return el}
+    const _d=TERM_DICT[k];
+    if(txt===k.toLowerCase()||txt===_d.zh||(_d.en&&txt===_d.en.toLowerCase())){el._tipKey=k;return el}
   }
   return null;
 }
@@ -1371,8 +1380,8 @@ document.addEventListener('DOMContentLoaded',()=>{localStorage.removeItem('tipTo
   </div>
   <div id="confirm-body" style="font-size:.875rem;color:var(--t2);line-height:1.6;margin-bottom:1.3rem"></div>
   <div style="display:flex;gap:.6rem;justify-content:flex-end">
-    <button id="confirm-cancel" class="btn btn-s" onclick="window.__confirmResolve(false)">取消</button>
-    <button id="confirm-ok" class="btn btn-d" onclick="window.__confirmResolve(true)">确认</button>
+    <button id="confirm-cancel" class="btn btn-s" onclick="window.__confirmResolve(false)">{{ (i18n or {}).get('cancel','取消') }}</button>
+    <button id="confirm-ok" class="btn btn-d" onclick="window.__confirmResolve(true)">{{ (i18n or {}).get('confirm','确认') }}</button>
   </div>
 </div>`;
   document.body.appendChild(overlay);
@@ -1380,7 +1389,11 @@ document.addEventListener('DOMContentLoaded',()=>{localStorage.removeItem('tipTo
   window.__confirmResolve=function(){};
 })();
 
-function showConfirm(title, bodyHtml, onConfirm, {danger=true,okLabel='确认',cancelLabel='取消'}={}){
+function showConfirm(title, bodyHtml, onConfirm, opts){
+  opts=opts||{};
+  var danger=opts.danger!==false;
+  var okLabel=opts.okLabel!=null?opts.okLabel:window.T('confirm');
+  var cancelLabel=opts.cancelLabel!=null?opts.cancelLabel:window.T('cancel');
   const ov=document.getElementById('confirm-overlay');
   document.getElementById('confirm-title').textContent=title;
   document.getElementById('confirm-body').innerHTML=bodyHtml;
@@ -1515,7 +1528,7 @@ function _diffLines(oldL, newL){
   function connect(){
     es=new EventSource('/api/events');
     es.addEventListener('config_reload',function(e){
-      showToast('配置已更新，页面即将刷新…','info',2000);
+      showToast(window.T('base.shell.config_reload'),'info',2000);
       setTimeout(function(){location.reload()},2200);
     });
     es.onopen=function(){retry=1000};
@@ -1528,20 +1541,20 @@ function _diffLines(oldL, newL){
 <div id="onboard-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);backdrop-filter:blur(4px);align-items:center;justify-content:center">
   <div style="background:var(--card);border-radius:16px;box-shadow:0 8px 40px rgba(0,0,0,.25);max-width:440px;width:92vw;padding:2rem;text-align:center;animation:fadeUp .3s ease">
     <div style="font-size:2.5rem;margin-bottom:.8rem">👋</div>
-    <h2 style="font-size:1.2rem;font-weight:700;margin-bottom:.5rem">欢迎使用简洁模式</h2>
+    <h2 style="font-size:1.2rem;font-weight:700;margin-bottom:.5rem">{{ (i18n or {}).get('onb_welcome_title','欢迎使用简洁模式') }}</h2>
     <p style="font-size:.88rem;color:var(--t2);line-height:1.6;margin-bottom:1.2rem">
-      系统已为你精简了操作界面，专注于最常用的功能：
+      {{ (i18n or {}).get('onb_welcome_desc','系统已为你精简了操作界面，专注于最常用的功能：') }}
     </p>
     <div style="display:flex;flex-direction:column;gap:.5rem;text-align:left;margin-bottom:1.5rem;padding:0 .5rem">
-      <div style="display:flex;align-items:center;gap:.6rem;font-size:.88rem"><span style="font-size:1.1rem">📋</span> <b>待处理案例</b> — 查看和处理客户案例</div>
-      <div style="display:flex;align-items:center;gap:.6rem;font-size:.88rem"><span style="font-size:1.1rem">📚</span> <b>知识库</b> — 浏览和搜索知识条目</div>
+      <div style="display:flex;align-items:center;gap:.6rem;font-size:.88rem"><span style="font-size:1.1rem">📋</span> <b>{{ (i18n or {}).get('onb_cases_label','待处理案例') }}</b> — {{ (i18n or {}).get('onb_cases_desc','查看和处理客户案例') }}</div>
+      <div style="display:flex;align-items:center;gap:.6rem;font-size:.88rem"><span style="font-size:1.1rem">📚</span> <b>{{ (i18n or {}).get('onb_kb_label','知识库') }}</b> — {{ (i18n or {}).get('onb_kb_desc','浏览和搜索知识条目') }}</div>
       {% for dp in domain_web_pages if dp.get('show_in_simple') %}
       <div style="display:flex;align-items:center;gap:.6rem;font-size:.88rem"><span style="font-size:1.1rem">🌐</span> <b>{{ dp.get('label_simple') or dp.get('label','') }}</b></div>
       {% endfor %}
-      <div style="display:flex;align-items:center;gap:.6rem;font-size:.88rem"><span style="font-size:1.1rem">🧠</span> <b>AI 学习审核</b> — 审核 AI 生成的草稿</div>
+      <div style="display:flex;align-items:center;gap:.6rem;font-size:.88rem"><span style="font-size:1.1rem">🧠</span> <b>{{ (i18n or {}).get('onb_review_label','AI 学习审核') }}</b> — {{ (i18n or {}).get('onb_review_desc','审核 AI 生成的草稿') }}</div>
     </div>
-    <p style="font-size:.78rem;color:var(--t3);margin-bottom:1rem">你随时可以在侧边栏底部切换到完整模式</p>
-    <button onclick="dismissOnboard()" style="background:var(--p);color:#fff;border:none;border-radius:10px;padding:.65rem 2rem;font-size:.92rem;font-weight:600;cursor:pointer;transition:.15s">开始使用</button>
+    <p style="font-size:.78rem;color:var(--t3);margin-bottom:1rem">{{ (i18n or {}).get('onb_footer','你随时可以在侧边栏底部切换到完整模式') }}</p>
+    <button onclick="dismissOnboard()" style="background:var(--p);color:#fff;border:none;border-radius:10px;padding:.65rem 2rem;font-size:.92rem;font-weight:600;cursor:pointer;transition:.15s">{{ (i18n or {}).get('onb_start','开始使用') }}</button>
   </div>
 </div>
 <script>

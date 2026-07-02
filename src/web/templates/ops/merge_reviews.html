@@ -1,6 +1,7 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8">
+<html lang="{{ 'zh-CN' if (ui_lang|default('zh')) == 'zh' else 'en' }}"><head><meta charset="utf-8">
 <title>Merge Reviews · Ops</title>
+{% include "_i18n_bootstrap.html" %}
 <style>
 body{font-family:-apple-system,Segoe UI,sans-serif;max-width:1100px;margin:20px auto;padding:0 20px;background:#fafafa;color:#222}
 h1{font-size:20px;margin-bottom:4px}
@@ -18,8 +19,8 @@ button{padding:6px 14px;margin-right:8px;border:1px solid #ccc;border-radius:5px
 .nav a.active{font-weight:700;color:#1e3a8a;border-bottom:2px solid #2563eb;padding-bottom:2px}
 </style></head>
 <body>
-<!-- NAV_INJECT -->
-<h1>合并审核队列</h1>
+{% include "ops/_ops_nav.html" %}
+<h1>{{ (i18n or {}).get('ops.mr.title', '合并审核队列') }}</h1>
 <div id="list"></div>
 <script>
 function escapeHtml(s){return (s+'').replace(/[&<>"']/g,c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
@@ -27,20 +28,20 @@ async function load(){
   const data = await fetch('/api/merge-reviews').then(r=>r.json());
   const list = document.getElementById('list');
   if(!data.items||data.items.length===0){
-    list.innerHTML='<div class="empty">没有待审核项</div>';return;
+    list.innerHTML='<div class="empty">'+window.T('ops.mr.empty')+'</div>';return;
   }
   list.innerHTML = data.items.map(it=>{
     const cand = it.candidate_ci||{};
     const tgt = it.target_contact||{};
     const bd = Object.entries(it.breakdown||{}).map(([k,v])=>`<span>${escapeHtml(k)}: ${v}</span>`).join('');
     return `<div class="card" id="card-${it.review_id}">
-      <div><b>候选</b>：${escapeHtml(cand.display_name||'-')} 在 <b>${escapeHtml(cand.channel||'-')}</b> (${escapeHtml(cand.external_id||'-')})</div>
-      <div><b>目标</b>：${escapeHtml(tgt.primary_name||'-')} (lang=${escapeHtml(tgt.language_hint||'-')} tz=${escapeHtml(tgt.timezone_hint||'-')})</div>
-      <div>置信度 <span class="conf">${(it.confidence*100).toFixed(1)}%</span></div>
+      <div><b>${window.T('ops.mr.candidate')}</b>${window.Tf('ops.mr.cand_rest',{name:escapeHtml(cand.display_name||'-'),ch:'<b>'+escapeHtml(cand.channel||'-')+'</b>',id:escapeHtml(cand.external_id||'-')})}</div>
+      <div><b>${window.T('ops.mr.target')}</b>${window.Tf('ops.mr.tgt_rest',{name:escapeHtml(tgt.primary_name||'-'),lang:escapeHtml(tgt.language_hint||'-'),tz:escapeHtml(tgt.timezone_hint||'-')})}</div>
+      <div>${window.T('ops.mr.confidence')} <span class="conf">${(it.confidence*100).toFixed(1)}%</span></div>
       <div class="breakdown">${bd}</div>
       <div class="actions">
-        <button class="btn-ok" onclick="act('${it.review_id}','approve')">通过合并</button>
-        <button class="btn-reject" onclick="act('${it.review_id}','reject')">拒绝</button>
+        <button class="btn-ok" onclick="act('${it.review_id}','approve')">${window.T('ops.mr.approve')}</button>
+        <button class="btn-reject" onclick="act('${it.review_id}','reject')">${window.T('ops.mr.reject')}</button>
       </div>
     </div>`;
   }).join('');
@@ -51,9 +52,9 @@ async function act(rid, kind){
     document.getElementById(`card-${rid}`).style.opacity='0.4';
     setTimeout(load, 500);
   } else {
-    alert('操作失败 status='+r.status);
+    alert(window.T('ops.mr.op_fail')+' status='+r.status);
   }
 }
-load().catch(e=>document.body.innerHTML+='<p style="color:red">加载失败: '+e+'</p>');
+load().catch(e=>document.body.innerHTML+='<p style="color:red">'+window.T('ops.mr.load_fail')+': '+e+'</p>');
 </script>
 </body></html>

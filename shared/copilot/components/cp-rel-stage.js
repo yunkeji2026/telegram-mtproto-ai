@@ -12,9 +12,9 @@
   if (!Base) { console.error("cp-rel-stage: CpPanelBase 未加载"); return; }
 
   class CpRelStage extends Base {
-    emptyText() { return "选中会话后加载关系阶段…"; }
-    emptyDataText() { return "关系阶段暂不可用"; }
-    errText() { return "关系阶段加载失败"; }
+    emptyText() { return this.t("cp.rel.empty"); }
+    emptyDataText() { return this.t("cp.rel.no_data"); }
+    errText() { return this.t("cp.rel.err"); }
     styles() {
       return `
       .stage { font-weight:var(--cp-fw-bold,700); font-size:var(--cp-fs-lg,15px); color:var(--cp-accent,#4f46e5); }
@@ -51,42 +51,43 @@
       const steps = (Array.isArray(d.stages) ? d.stages : [])
         .map((s) => {
           const cls = s.pending ? "step pending" : s.done ? "step done" : s.active ? "step active" : "step";
-          return `<div class="${cls}" title="${esc(s.label)}${s.pending ? "（待确认）" : ""}"></div>`;
+          return `<div class="${cls}" title="${esc(s.label)}${s.pending ? esc(this.t("cp.rel.pending_suffix")) : ""}"></div>`;
         }).join("");
-      const intim = d.intimacy_score != null ? `亲密度 ${Math.round(d.intimacy_score)}/100` : "亲密度 —";
+      const intim = d.intimacy_score != null
+        ? this.t("cp.rel.intimacy", { n: Math.round(d.intimacy_score) }) : this.t("cp.rel.intimacy_na");
 
       let contactHint = "";
       if (d.contact_stage_label) {
-        contactHint = `<div class="hint contact">客户级 · ${esc(d.contact_stage_label)}` +
-          (d.contact_updated_by ? ` · 由 ${esc(d.contact_updated_by)} 更新` : "") + `</div>`;
+        contactHint = `<div class="hint contact">${esc(this.t("cp.rel.contact_level", { label: d.contact_stage_label }))}` +
+          (d.contact_updated_by ? esc(this.t("cp.rel.updated_by", { by: d.contact_updated_by })) : "") + `</div>`;
       }
       const algoHint = (d.needs_confirmation && d.computed_stage_label)
-        ? `<div class="hint algo">算法建议 → ${esc(d.computed_stage_label)}</div>` : "";
+        ? `<div class="hint algo">${esc(this.t("cp.rel.algo_suggest", { label: d.computed_stage_label }))}</div>` : "";
 
       let conflict = "";
       const acts = [];
       if (d.stage_conflict) {
         const detail = d.stage_conflict_detail || {};
-        const reasons = (detail.reasons || []).join("；") || "多会话阶段不一致";
+        const reasons = (detail.reasons || []).join(this.t("cp.common.list_sep")) || this.t("cp.rel.multi_conflict");
         conflict = `<div class="rbadge warn">⚠ ${esc(reasons)}</div>`;
         const contactId = (d.context && d.context.contact_id) || "";
         if (contactId) {
           if (detail.show_to_contact !== false && detail.contact_stage) {
-            acts.push(`<button data-act="sync_contact">↔ 对齐至客户阶段</button>`);
+            acts.push(`<button data-act="sync_contact">${esc(this.t("cp.rel.sync_contact"))}</button>`);
           }
           if (detail.show_to_highest) {
-            const hLbl = detail.highest_stage_label || detail.highest_stage || "最高";
-            acts.push(`<button class="primary" data-act="sync_highest">⬆ 升至 ${esc(hLbl)}</button>`);
+            const hLbl = detail.highest_stage_label || detail.highest_stage || this.t("cp.rel.highest");
+            acts.push(`<button class="primary" data-act="sync_highest">${esc(this.t("cp.rel.sync_highest", { label: hLbl }))}</button>`);
           }
           if (!detail.show_to_highest && !(detail.show_to_contact !== false && detail.contact_stage)) {
-            acts.push(`<button data-act="sync_contact">↔ 一键对齐</button>`);
+            acts.push(`<button data-act="sync_contact">${esc(this.t("cp.rel.sync_one"))}</button>`);
           }
         }
       }
-      if (d.needs_confirmation) acts.push(`<button class="primary" data-act="confirm">✓ 确认进阶</button>`);
-      if (d.reunion) acts.push(`<button data-act="reunion">🌸 确认回暖</button>`);
+      if (d.needs_confirmation) acts.push(`<button class="primary" data-act="confirm">${esc(this.t("cp.rel.confirm"))}</button>`);
+      if (d.reunion) acts.push(`<button data-act="reunion">${esc(this.t("cp.rel.reunion"))}</button>`);
       if (d.confirmed_stage && d.confirmed_stage !== "initial") {
-        acts.push(`<button class="warn" data-act="downgrade">↓ 手动降级</button>`);
+        acts.push(`<button class="warn" data-act="downgrade">${esc(this.t("cp.rel.downgrade"))}</button>`);
       }
 
       return (
@@ -94,13 +95,13 @@
         contactHint + conflict +
         `<div class="track"><div class="bar" style="width:${pct}%"></div></div>` +
         (steps ? `<div class="steps">${steps}</div>` : "") +
-        `<div class="meta"><span>进度 ${pct}%</span><span>轮次 ~${d.exchange_count || 0}</span></div>` +
-        `<div class="meta"><span>${intim}</span>` +
+        `<div class="meta"><span>${esc(this.t("cp.rel.progress", { pct }))}</span><span>${esc(this.t("cp.rel.rounds", { n: d.exchange_count || 0 }))}</span></div>` +
+        `<div class="meta"><span>${esc(intim)}</span>` +
         (d.next_stage_label ? `<span>→ ${esc(d.next_stage_label)}</span>` : "") + `</div>` +
         algoHint +
-        (d.pending_advancement ? `<div class="rbadge warn">⏳ 待确认进阶 → ${esc(d.pending_stage_label || "")}</div>` : "") +
-        (d.advancement_ready ? `<div class="rbadge">✨ 即将可进阶</div>` : "") +
-        (d.reunion ? `<div class="rbadge danger">久别重逢 · 先自然问候</div>` : "") +
+        (d.pending_advancement ? `<div class="rbadge warn">${esc(this.t("cp.rel.pending_adv", { label: d.pending_stage_label || "" }))}</div>` : "") +
+        (d.advancement_ready ? `<div class="rbadge">${esc(this.t("cp.rel.adv_ready"))}</div>` : "") +
+        (d.reunion ? `<div class="rbadge danger">${esc(this.t("cp.rel.reunion_badge"))}</div>` : "") +
         (acts.length ? `<div class="acts">${acts.join("")}</div>` : "")
       );
     }
@@ -116,7 +117,7 @@
         } else if (action === "reunion") {
           await this._client.reunionStage({ conversationId: cid });
         } else if (action === "downgrade") {
-          const reason = (typeof prompt === "function") ? prompt("请输入降级原因（必填）：") : "";
+          const reason = (typeof prompt === "function") ? prompt(this.t("cp.rel.downgrade_prompt")) : "";
           if (!reason || !reason.trim()) {
             this.shadowRoot.querySelectorAll("button[data-act]").forEach((b) => (b.disabled = false));
             return;

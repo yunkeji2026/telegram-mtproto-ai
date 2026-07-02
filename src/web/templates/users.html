@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}用户管理 · {{ site_name|default('华灵科技客户转化聊天系统') }}{% endblock %}
-{% block page_title %}用户管理{% endblock %}
+{% block title %}{{ (i18n or {}).get('us_s001', "用户管理") }} · {{ product_name|default((i18n or {}).get('brand.product', '智聊')) }}{% endblock %}
+{% block page_title %}{{ (i18n or {}).get('us_s001', "用户管理") }}{% endblock %}
 {% block head %}
 <style>
 .u-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:1.1rem;margin-bottom:1.5rem}
@@ -34,18 +34,18 @@
 {% if ui_mode == 'simple' %}
 <div style="background:linear-gradient(135deg,rgba(245,158,11,.08),rgba(239,68,68,.06));border:1px solid rgba(245,158,11,.2);border-radius:10px;padding:.7rem 1rem;margin-bottom:.8rem;font-size:.82rem;color:var(--t2);display:flex;align-items:center;gap:.6rem">
   <span style="font-size:1.1rem;flex-shrink:0">🔒</span>
-  <div><strong style="color:var(--t)">管理员页面</strong> — 此页面为高级管理功能。<a href="/set_ui_mode?mode=full&next=/users" style="color:var(--p);font-weight:600">切换到完整模式</a>获得完整体验，或<a href="/cases" style="color:var(--p);font-weight:600">返回案例</a>。</div>
+  <div><strong style="color:var(--t)">{{ (i18n or {}).get('im_s003', "管理员页面") }}</strong> — {{ (i18n or {}).get('us_s002', "此页面为高级管理功能。") }}<a href="/set_ui_mode?mode=full&next=/users" style="color:var(--p);font-weight:600">{{ (i18n or {}).get('tp_s005', "切换到完整模式") }}</a>{{ (i18n or {}).get('im_s005', "获得完整体验，或") }}<a href="/cases" style="color:var(--p);font-weight:600">{{ (i18n or {}).get('logs_back_cases', "返回案例") }}</a>.</div>
 </div>
 {% endif %}
 
 {% if msg %}
-<div class="msg {{ 'msg-err' if '失败' in msg or '错误' in msg else 'msg-info' }}">{{ msg }}</div>
+<div class="msg {{ 'msg-info' if msg_ok|default(true) else 'msg-err' }}">{{ msg }}</div>
 {% endif %}
 
 <div class="p-head fa">
   <div>
-    <h1>用户管理</h1>
-    <p style="font-size:.82rem;color:var(--t3);margin-top:.2rem">管理后台帐号、角色与权限</p>
+    <h1>{{ (i18n or {}).get('users', "用户管理") }}</h1>
+    <p style="font-size:.82rem;color:var(--t3);margin-top:.2rem">{{ (i18n or {}).get('us_s003', "管理后台帐号、角色与权限") }}</p>
   </div>
 </div>
 
@@ -56,25 +56,25 @@
       <div class="u-avatar {{ u.role }}">{{ (u.display_name or u.username)[0]|upper }}</div>
       <div>
         <div class="u-name">{{ u.display_name or u.username }}</div>
-        <div class="u-sub">@{{ u.username }} · <span class="role-label">{{ role_labels.get(u.role, u.role) }}</span></div>
+        <div class="u-sub">@{{ u.username }} · <span class="role-label">{{ (i18n or {}).get('role_' ~ u.role, role_labels.get(u.role, u.role)) }}</span></div>
       </div>
-      {% if not u.enabled %}<span class="badge b-r dis-badge" style="margin-left:auto">已禁用</span>{% endif %}
+      {% if not u.enabled %}<span class="badge b-r dis-badge" style="margin-left:auto">{{ (i18n or {}).get('psn_disabled', "已禁用") }}</span>{% endif %}
     </div>
     <div class="u-meta">
-      <span>创建: {{ u.created_at[:10] if u.created_at else '-' }}</span>
-      <span>登录: {{ u.last_login[:10] if u.last_login else '从未' }}</span>
+      <span>{{ (i18n or {}).get('dash.btn.create', "创建") }}: {{ u.created_at[:10] if u.created_at else '-' }}</span>
+      <span>{{ (i18n or {}).get('login_btn', "登录") }}: {{ u.last_login[:10] if u.last_login else '从未' }}</span>
     </div>
     {% if u.role != 'master' %}
     <div class="u-actions">
       <select onchange="updateRole({{ u.id }},this)" style="padding:.25rem .5rem;font-size:.78rem;border:1px solid var(--bd);border-radius:6px;background:var(--card);color:var(--t);cursor:pointer">
-        <option value="admin" {{ 'selected' if u.role=='admin' }} data-help="role_admin">管理员</option>
-        <option value="viewer" {{ 'selected' if u.role=='viewer' }} data-help="role_viewer">观察员</option>
+        <option value="admin" {{ 'selected' if u.role=='admin' }} data-help="role_admin">{{ (i18n or {}).get('db_js_076', "管理员") }}</option>
+        <option value="viewer" {{ 'selected' if u.role=='viewer' }} data-help="role_viewer">{{ (i18n or {}).get('us_s004', "观察员") }}</option>
       </select>
-      <button class="btn btn-s btn-xs toggle-btn" onclick="toggleEnabled({{ u.id }},{{ 'false' if u.enabled else 'true' }},this)">{{ '禁用' if u.enabled else '启用' }}</button>
-      <button class="btn btn-d btn-xs" data-help="btn_delete" onclick="deleteUser({{ u.id }},'{{ u.username }}')">删除</button>
+      <button class="btn btn-s btn-xs toggle-btn" onclick="toggleEnabled({{ u.id }},{{ 'false' if u.enabled else 'true' }},this)">{{ (i18n or {}).get('disable', '禁用') if u.enabled else (i18n or {}).get('enable', '启用') }}</button>
+      <button class="btn btn-d btn-xs" data-help="btn_delete" onclick="deleteUser({{ u.id }},'{{ u.username }}')">{{ (i18n or {}).get('delete', "删除") }}</button>
     </div>
     {% else %}
-    <div style="font-size:.78rem;color:var(--t3)">主帐号不可删除或降级</div>
+    <div style="font-size:.78rem;color:var(--t3)">{{ (i18n or {}).get('us_s005', "主帐号不可删除或降级") }}</div>
     {% endif %}
   </div>
   {% endfor %}
@@ -82,7 +82,7 @@
   <!-- Create new user -->
   <div class="u-card create-card fa" onclick="document.getElementById('create-modal').classList.add('show')">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-    <span>添加子帐号</span>
+    <span>{{ (i18n or {}).get('us_s006', "添加子帐号") }}</span>
   </div>
 </div>
 
@@ -90,94 +90,94 @@
 <div style="margin-top:2rem">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
     <div>
-      <h2 style="font-size:1rem;font-weight:700;margin-bottom:.15rem">🖥 活跃会话</h2>
-      <p style="font-size:.78rem;color:var(--t3)">当前登录中的所有设备，可踢出指定会话</p>
+      <h2 style="font-size:1rem;font-weight:700;margin-bottom:.15rem">🖥 {{ (i18n or {}).get('dash.wl.active_convs', "活跃会话") }}</h2>
+      <p style="font-size:.78rem;color:var(--t3)">{{ (i18n or {}).get('us_s007', "当前登录中的所有设备，可踢出指定会话") }}</p>
     </div>
     <div style="display:flex;gap:.5rem">
-      <button class="btn btn-s btn-sm" onclick="loadSessions()">刷新</button>
-      <button class="btn btn-d btn-sm" onclick="revokeAllSessions()" id="btn-revoke-all">踢出所有其他设备</button>
+      <button class="btn btn-s btn-sm" onclick="loadSessions()">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
+      <button class="btn btn-d btn-sm" onclick="revokeAllSessions()" id="btn-revoke-all">{{ (i18n or {}).get('us_s008', "踢出所有其他设备") }}</button>
     </div>
   </div>
   <div id="sessions-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:.75rem">
-    <div style="color:var(--t3);font-size:.85rem">加载中…</div>
+    <div style="color:var(--t3);font-size:.85rem">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
   </div>
 </div>
 
 <!-- Create modal -->
 <div class="modal-bg" id="create-modal" onclick="if(event.target===this)this.classList.remove('show')">
   <div class="modal">
-    <h3>创建子帐号</h3>
+    <h3>{{ (i18n or {}).get('us_s009', "创建子帐号") }}</h3>
     <form id="create-form" onsubmit="createUser(event)">
       <div class="f-grp">
-        <label class="f-lbl">用户名</label>
-        <input type="text" name="username" required placeholder="英文字母+数字" pattern="[a-zA-Z0-9_]{3,20}">
+        <label class="f-lbl">{{ (i18n or {}).get('set_js_075', "用户名") }}</label>
+        <input type="text" name="username" required placeholder="{{ (i18n or {}).get('us_s010', '英文字母') }}+{{ (i18n or {}).get('us_s011', '数字') }}" pattern="[a-zA-Z0-9_]{3,20}">
       </div>
       <div class="f-grp">
-        <label class="f-lbl">显示名称</label>
-        <input type="text" name="display_name" placeholder="可选">
+        <label class="f-lbl">{{ (i18n or {}).get('dash.ws.name_ph', "显示名称") }}</label>
+        <input type="text" name="display_name" placeholder="{{ (i18n or {}).get('msg_s416', '可选') }}">
       </div>
       <div class="f-grp">
-        <label class="f-lbl">密码</label>
-        <input type="password" name="password" required minlength="6" placeholder="至少 6 位">
+        <label class="f-lbl">{{ (i18n or {}).get('us_s012', "密码") }}</label>
+        <input type="password" name="password" required minlength="6" placeholder="{{ (i18n or {}).get('us_s013', '至少 6 位') }}">
       </div>
       <div class="f-grp">
-        <label class="f-lbl">角色</label>
+        <label class="f-lbl">{{ (i18n or {}).get('psn_th_role', "角色") }}</label>
         <select name="role">
-          <option value="admin">管理员（编辑权限）</option>
-          <option value="viewer">只读观察员</option>
+          <option value="admin">{{ (i18n or {}).get('role_admin', "管理员（编辑权限）") }}</option>
+          <option value="viewer">{{ (i18n or {}).get('us_s014', "只读观察员") }}</option>
         </select>
       </div>
       <div style="display:flex;gap:.5rem;margin-top:1rem">
-        <button type="submit" class="btn btn-p">创建</button>
-        <button type="button" class="btn btn-s" onclick="document.getElementById('create-modal').classList.remove('show')">取消</button>
+        <button type="submit" class="btn btn-p">{{ (i18n or {}).get('dash.btn.create', "创建") }}</button>
+        <button type="button" class="btn btn-s" onclick="document.getElementById('create-modal').classList.remove('show')">{{ (i18n or {}).get('ov_js_cancel', "取消") }}</button>
       </div>
     </form>
   </div>
 </div>
 
 <script>
-const ROLE_MAP={admin:'管理员（编辑权限）',viewer:'只读观察员'};
+const ROLE_MAP={admin:window.T('role_admin'),viewer:window.T('us_s014')};
 async function updateRole(uid,sel){
   var fd=new FormData();fd.append('role',sel.value);
   try{var r=await fetch('/users/update/'+uid,{method:'POST',body:fd,headers:{'Accept':'application/json'}});
     var d=await r.json();
-    if(d.ok){showToast('角色已更新','ok');var c=document.getElementById('user-'+uid);if(c){var lb=c.querySelector('.role-label');if(lb)lb.textContent=ROLE_MAP[sel.value]||sel.value}}
-    else showToast(d.detail||'更新失败','err');
-  }catch(e){showToast('网络错误','err')}
+    if(d.ok){showToast(window.T('us_js001'),'ok');var c=document.getElementById('user-'+uid);if(c){var lb=c.querySelector('.role-label');if(lb)lb.textContent=ROLE_MAP[sel.value]||sel.value}}
+    else showToast(d.detail||window.T('inbox.toast.update_fail'),'err');
+  }catch(e){showToast(window.T('draft.net_err'),'err')}
 }
 async function toggleEnabled(uid,enable,btn){
   var fd=new FormData();fd.append('enabled',enable?'1':'0');
   btnLoading(btn,true);
   try{var r=await fetch('/users/update/'+uid,{method:'POST',body:fd,headers:{'Accept':'application/json'}});
     var d=await r.json();
-    if(d.ok){showToast(enable?'已启用':'已禁用','ok');
+    if(d.ok){showToast(enable?window.T('ov_js_enabled'):window.T('psn_disabled'),'ok');
       var c=document.getElementById('user-'+uid);
       if(c){c.classList.toggle('disabled',!enable);
         var db=c.querySelector('.dis-badge');
         if(enable&&db)db.remove();
-        else if(!enable&&!db){var s=document.createElement('span');s.className='badge b-r dis-badge';s.style.marginLeft='auto';s.textContent='已禁用';c.querySelector('.u-hd').appendChild(s)}
+        else if(!enable&&!db){var s=document.createElement('span');s.className='badge b-r dis-badge';s.style.marginLeft='auto';s.textContent=window.T('psn_disabled');c.querySelector('.u-hd').appendChild(s)}
       }
-      btn.textContent=enable?'禁用':'启用';btn.onclick=function(){toggleEnabled(uid,!enable,btn)};
-    }else showToast(d.detail||'操作失败','err');
-  }catch(e){showToast('网络错误','err')}
+      btn.textContent=enable?window.T('disable'):window.T('enable');btn.onclick=function(){toggleEnabled(uid,!enable,btn)};
+    }else showToast(d.detail||window.T('ov_js_op_fail'),'err');
+  }catch(e){showToast(window.T('draft.net_err'),'err')}
   finally{btnLoading(btn,false)}
 }
 async function deleteUser(uid,uname){
-  if(!await confirmAction('确认删除用户 '+uname+'？',{okText:'删除'}))return;
+  if(!await confirmAction(window.T('us_js002')+' '+uname+'?',{okText:window.T('delete')}))return;
   try{var r=await fetch('/users/delete/'+uid,{method:'POST',body:new FormData(),headers:{'Accept':'application/json'}});
     var d=await r.json();
-    if(d.ok){showToast('已删除 '+uname,'ok');var c=document.getElementById('user-'+uid);if(c){c.style.transition='all .3s';c.style.opacity='0';c.style.transform='scale(.9)';setTimeout(function(){c.remove()},300)}}
-    else showToast(d.detail||'删除失败','err');
-  }catch(e){showToast('网络错误','err')}
+    if(d.ok){showToast(window.T('kb_js_041')+' '+uname,'ok');var c=document.getElementById('user-'+uid);if(c){c.style.transition='all .3s';c.style.opacity='0';c.style.transform='scale(.9)';setTimeout(function(){c.remove()},300)}}
+    else showToast(d.detail||window.T('inbox.toast.del_fail'),'err');
+  }catch(e){showToast(window.T('draft.net_err'),'err')}
 }
 async function createUser(e){
   e.preventDefault();var form=e.target,fd=new FormData(form);
   var btn=form.querySelector('.btn-p');btnLoading(btn,true);
   try{var r=await fetch('/users/create',{method:'POST',body:fd,headers:{'Accept':'application/json'}});
     var d=await r.json();
-    if(d.ok){showToast('用户已创建','ok');document.getElementById('create-modal').classList.remove('show');setTimeout(function(){location.reload()},600)}
-    else showToast(d.detail||'创建失败','err');
-  }catch(e){showToast('网络错误','err')}
+    if(d.ok){showToast(window.T('us_js003'),'ok');document.getElementById('create-modal').classList.remove('show');setTimeout(function(){location.reload()},600)}
+    else showToast(d.detail||window.T('kb_js_086'),'err');
+  }catch(e){showToast(window.T('draft.net_err'),'err')}
   finally{btnLoading(btn,false)}
 }
 
@@ -188,43 +188,43 @@ async function loadSessions(){
     const r=await fetch('/api/sessions',{headers:{'Accept':'application/json'}});
     const d=await r.json();
     const sessions=d.sessions||[];
-    if(!sessions.length){el.innerHTML='<div style="color:var(--t3);font-size:.85rem;grid-column:1/-1">暂无活跃会话</div>';return;}
+    if(!sessions.length){el.innerHTML='<div style="color:var(--t3);font-size:.85rem;grid-column:1/-1">'+window.T('us_js004')+'</div>';return;}
     el.innerHTML=sessions.map(s=>{
       const ua=s.user_agent||'';
-      const device=ua.includes('Mobile')||ua.includes('Android')?'📱 移动设备':ua.includes('Chrome')?'🖥 Chrome':ua.includes('Firefox')?'🦊 Firefox':ua.includes('Safari')?'🍎 Safari':'💻 浏览器';
+      const device=ua.includes('Mobile')||ua.includes('Android')?'📱 '+window.T('us_js005'):ua.includes('Chrome')?'🖥 Chrome':ua.includes('Firefox')?'🦊 Firefox':ua.includes('Safari')?'🍎 Safari':'💻 '+window.T('us_js006');
       const isCurrent=s.is_current;
       const lastSeen=s.last_seen||s.created_at||'';
       return `<div style="background:var(--card);border:${isCurrent?'2px solid var(--p)':'1px solid var(--bd)'};border-radius:var(--r);padding:.9rem 1rem">
         <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem">
           <span style="font-size:.85rem;font-weight:700">${device}</span>
-          ${isCurrent?'<span style="font-size:.68rem;padding:.1rem .45rem;background:var(--ps);color:var(--p);border-radius:20px;font-weight:600">当前</span>':''}
+          ${isCurrent?'<span style="font-size:.68rem;padding:.1rem .45rem;background:var(--ps);color:var(--p);border-radius:20px;font-weight:600">'+window.T('msg_js_265')+'</span>':''}
         </div>
-        <div style="font-size:.75rem;color:var(--t2);margin-bottom:.3rem">用户：<b>${s.username}</b> · ${s.role||''}</div>
-        <div style="font-size:.72rem;color:var(--t3);margin-bottom:.3rem">IP：${s.ip||'—'}</div>
-        <div style="font-size:.72rem;color:var(--t3);margin-bottom:.5rem">最后活跃：${lastSeen.slice(0,16)}</div>
-        ${!isCurrent?`<button class="btn btn-d" style="font-size:.72rem;padding:.25rem .6rem" onclick="revokeSession('${s.jti}',this)">踢出</button>`:''}
+        <div style="font-size:.75rem;color:var(--t2);margin-bottom:.3rem">${window.T('kb_js_148')}<b>${s.username}</b> · ${s.role||''}</div>
+        <div style="font-size:.72rem;color:var(--t3);margin-bottom:.3rem">IP: ${s.ip||'—'}</div>
+        <div style="font-size:.72rem;color:var(--t3);margin-bottom:.5rem">${window.T('us_js010')}${lastSeen.slice(0,16)}</div>
+        ${!isCurrent?`<button class="btn btn-d" style="font-size:.72rem;padding:.25rem .6rem" onclick="revokeSession('${s.jti}',this)">${window.T('us_js009')}</button>`:''}
       </div>`;
     }).join('');
-  }catch(ex){el.innerHTML='<div style="color:var(--red);font-size:.85rem">加载失败</div>';}
+  }catch(ex){el.innerHTML='<div style="color:var(--red);font-size:.85rem">'+window.T('rpa_load_failed')+'</div>';}
 }
 async function revokeSession(jti,btn){
   btnLoading(btn,true);
   try{
     const r=await fetch('/api/sessions/'+jti+'/revoke',{method:'POST',headers:{'Accept':'application/json'}});
     const d=await r.json();
-    if(d.ok){showToast('已踢出该设备','ok');loadSessions();}
-    else showToast(d.detail||'操作失败','err');
-  }catch(ex){showToast('网络错误','err');}
+    if(d.ok){showToast(window.T('us_js007'),'ok');loadSessions();}
+    else showToast(d.detail||window.T('ov_js_op_fail'),'err');
+  }catch(ex){showToast(window.T('draft.net_err'),'err');}
   finally{btnLoading(btn,false);}
 }
 async function revokeAllSessions(){
-  if(!confirm('确认踢出所有其他设备？'))return;
+  if(!confirm(window.T('us_js008')))return;
   try{
     const r=await fetch('/api/sessions/revoke-all',{method:'POST',headers:{'Accept':'application/json'}});
     const d=await r.json();
-    showToast(`已踢出 ${d.revoked||0} 个设备`,'ok');
+        showToast(window.Tf('us_kicked_n', {n: d.revoked||0}),'ok');
     loadSessions();
-  }catch(ex){showToast('操作失败','err');}
+  }catch(ex){showToast(window.T('ov_js_op_fail'),'err');}
 }
 document.addEventListener('DOMContentLoaded',loadSessions);
 </script>

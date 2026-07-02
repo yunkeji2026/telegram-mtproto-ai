@@ -258,8 +258,9 @@ class ConfigManager:
         进 self.config 让本进程立即可见。返回 (成功?, 说明)。
         """
         allowed = {
-            "site_name", "site_name_short", "primary_color",
-            "logo_url", "login_subtitle", "hide_powered_by",
+            "site_name", "site_name_short", "company_name", "product_name",
+            "sidebar_name", "website_url", "primary_color", "logo_url",
+            "login_subtitle", "hide_powered_by",
         }
         clean: Dict[str, Any] = {}
         for k, v in (values or {}).items():

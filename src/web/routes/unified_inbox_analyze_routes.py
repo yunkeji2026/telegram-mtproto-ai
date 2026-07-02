@@ -36,6 +36,7 @@ from src.web.routes.unified_inbox_services import (
     _get_chat_assistant_service,
     _get_telegram_client,
 )
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ def register_analyze_routes(app, *, api_auth) -> None:
         account_id = str(account_id or "default")
         chat_key = str(chat_key or "")
         if not platform or not chat_key:
-            raise HTTPException(400, "platform 和 chat_key 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.platform_chatkey_required"))
         chats = _collect_all_chats(request, limit=100)
         chat = next(
             (

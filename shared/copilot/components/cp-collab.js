@@ -12,9 +12,9 @@
   if (!Base) { console.error("cp-collab: CpPanelBase 未加载"); return; }
 
   class CpCollab extends Base {
-    emptyText() { return "选中会话后加载协作上下文…"; }
-    emptyDataText() { return "暂无协作数据"; }
-    errText() { return "协作上下文加载失败"; }
+    emptyText() { return this.t("cp.collab.empty"); }
+    emptyDataText() { return this.t("cp.collab.no_data"); }
+    errText() { return this.t("cp.collab.err"); }
     styles() {
       return `
       .chips { display:flex; gap:var(--cp-gap-xs,4px); flex-wrap:wrap; }
@@ -37,21 +37,21 @@
       const stageLbl = d.contact_stage_label || rel.display_stage_label || rel.stage_label || "";
       const chains = (d.active_chains || []).length;
       const eng = d.engagement || {};
-      const pts = eng.points != null ? `积分 ${esc(eng.points)} · ${esc(eng.level_name || "")}` : "";
+      const pts = eng.points != null ? this.t("cp.collab.points", { pts: esc(eng.points), level: esc(eng.level_name || "") }) : "";
       const topics = (d.suggested_topics || []).slice(0, 2);
       const notes = (d.recent_notes || []).length;
 
       const chips =
-        (stageLbl ? `<span class="chip">阶段 ${esc(stageLbl)}</span>` : "") +
-        (d.stage_conflict ? `<span class="chip warn">⚠ 阶段不一致</span>` : "") +
+        (stageLbl ? `<span class="chip">${esc(this.t("cp.collab.stage", { stage: stageLbl }))}</span>` : "") +
+        (d.stage_conflict ? `<span class="chip warn">${esc(this.t("cp.collab.stage_conflict"))}</span>` : "") +
         (pts ? `<span class="chip">${pts}</span>` : "") +
-        (chains ? `<span class="chip">⚡ ${chains} 条工作链运行中</span>` : "");
+        (chains ? `<span class="chip">${esc(this.t("cp.collab.chains", { n: chains }))}</span>` : "");
 
       const topicsHtml = topics.length
-        ? `<div class="topics">推荐：` + topics.map((t, i) =>
+        ? `<div class="topics">${esc(this.t("cp.collab.recommend"))}` + topics.map((t, i) =>
             `<span class="topic" data-act="fill" data-idx="${i}">${esc(t.title || "")}</span>`).join(" · ") + `</div>`
         : "";
-      const notesHtml = notes ? `<div class="notes">同事注解 ${notes} 条（跨会话）</div>` : "";
+      const notesHtml = notes ? `<div class="notes">${esc(this.t("cp.collab.notes", { n: notes }))}</div>` : "";
       this._topics = topics;
       return `<div class="chips">${chips || '<span class="chip">—</span>'}</div>` + topicsHtml + notesHtml;
     }

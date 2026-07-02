@@ -1,5 +1,5 @@
 {% extends "workspace_base.html" %}
-{% block title %}实时队列看板{% endblock %}
+{% block title %}{{ (i18n or {}).get('qm_s001', "实时队列看板") }}{% endblock %}
 {% block head %}
 <style>
   .qm-wrap{height:100%;overflow-y:auto;background:#0f172a;padding:18px;color:#e2e8f0;}
@@ -63,33 +63,33 @@
 {% block content %}
 <div class="qm-wrap">
   <div class="qm-header">
-    <h2><span class="refresh-dot"></span>实时运营队列看板</h2>
+    <h2><span class="refresh-dot"></span>{{ (i18n or {}).get('qm_s002', "实时运营队列看板") }}</h2>
     <div style="display:flex;align-items:center;gap:12px;">
-      <span class="qm-ts" id="qm-ts">加载中…</span>
-      <button onclick="loadQM()" style="padding:5px 12px;border:1px solid #475569;border-radius:7px;background:transparent;color:#94a3b8;font-size:12px;cursor:pointer;">手动刷新</button>
+      <span class="qm-ts" id="qm-ts">{{ (i18n or {}).get('dash.loading', "加载中…") }}</span>
+      <button onclick="loadQM()" style="padding:5px 12px;border:1px solid #475569;border-radius:7px;background:transparent;color:#94a3b8;font-size:12px;cursor:pointer;">{{ (i18n or {}).get('qm_s003', "手动刷新") }}</button>
     </div>
   </div>
 
   <!-- 全局 KPI -->
   <div class="qm-kpis" id="qm-kpis">
-    <div class="qm-kpi"><div class="val" id="kpi-open">—</div><div class="lbl">待处理会话</div></div>
-    <div class="qm-kpi"><div class="val" id="kpi-unread">—</div><div class="lbl">未读消息</div></div>
-    <div class="qm-kpi"><div class="val" id="kpi-unassigned">—</div><div class="lbl">未认领</div></div>
-    <div class="qm-kpi"><div class="val" id="kpi-crit">—</div><div class="lbl">严重超时</div></div>
-    <div class="qm-kpi"><div class="val" id="kpi-avgwait">—</div><div class="lbl">平均等待</div></div>
-    <div class="qm-kpi"><div class="val" id="kpi-agents">—</div><div class="lbl">在线坐席</div></div>
+    <div class="qm-kpi"><div class="val" id="kpi-open">—</div><div class="lbl">{{ (i18n or {}).get('qm_s004', "待处理会话") }}</div></div>
+    <div class="qm-kpi"><div class="val" id="kpi-unread">—</div><div class="lbl">{{ (i18n or {}).get('qm_s005', "未读消息") }}</div></div>
+    <div class="qm-kpi"><div class="val" id="kpi-unassigned">—</div><div class="lbl">{{ (i18n or {}).get('dash.unassigned', "未认领") }}</div></div>
+    <div class="qm-kpi"><div class="val" id="kpi-crit">—</div><div class="lbl">{{ (i18n or {}).get('qm_s006', "严重超时") }}</div></div>
+    <div class="qm-kpi"><div class="val" id="kpi-avgwait">—</div><div class="lbl">{{ (i18n or {}).get('qm_s007', "平均等待") }}</div></div>
+    <div class="qm-kpi"><div class="val" id="kpi-agents">—</div><div class="lbl">{{ (i18n or {}).get('base.um.agents_t', "在线坐席") }}</div></div>
   </div>
 
   <!-- 视图切换 -->
   <div style="display:flex;gap:8px;margin-bottom:14px;">
-    <button class="qm-btn qm-btn-view" id="view-card-btn" onclick="setView('card')">卡片视图</button>
-    <button class="qm-btn qm-btn-reassign" id="view-table-btn" onclick="setView('table')">表格视图</button>
+    <button class="qm-btn qm-btn-view" id="view-card-btn" onclick="setView('card')">{{ (i18n or {}).get('qm_s008', "卡片视图") }}</button>
+    <button class="qm-btn qm-btn-reassign" id="view-table-btn" onclick="setView('table')">{{ (i18n or {}).get('qm_s009', "表格视图") }}</button>
   </div>
 
   <!-- 卡片视图 -->
   <div id="view-card">
     <div class="qm-agents" id="qm-agents">
-      <div class="qm-empty" style="grid-column:1/-1;">加载中…</div>
+      <div class="qm-empty" style="grid-column:1/-1;">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
     </div>
   </div>
 
@@ -99,18 +99,18 @@
       <table class="qm-table">
         <thead>
           <tr>
-            <th>坐席</th>
-            <th>状态</th>
-            <th>待处理</th>
-            <th>未读</th>
-            <th>平均等待</th>
-            <th>最长等待</th>
-            <th>负载</th>
-            <th>操作</th>
+            <th>{{ (i18n or {}).get('dash.col.agent', "坐席") }}</th>
+            <th>{{ (i18n or {}).get('ov_js_th_status', "状态") }}</th>
+            <th>{{ (i18n or {}).get('base.pill.sla_normal', "待处理") }}</th>
+            <th>{{ (i18n or {}).get('inbox.filter.unread', "未读") }}</th>
+            <th>{{ (i18n or {}).get('qm_s007', "平均等待") }}</th>
+            <th>{{ (i18n or {}).get('qm_s010', "最长等待") }}</th>
+            <th>{{ (i18n or {}).get('qm_s011', "负载") }}</th>
+            <th>{{ (i18n or {}).get('ov_js_th_action', "操作") }}</th>
           </tr>
         </thead>
         <tbody id="qm-table-body">
-          <tr><td colspan="8" class="qm-empty">加载中…</td></tr>
+          <tr><td colspan="8" class="qm-empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</td></tr>
         </tbody>
       </table>
     </div>
@@ -120,15 +120,15 @@
 <!-- 分配浮层 -->
 <div class="reassign-modal" id="reassign-modal">
   <div class="reassign-box">
-    <h3>重新分配会话</h3>
+    <h3>{{ (i18n or {}).get('qm_s012', "重新分配会话") }}</h3>
     <div style="font-size:13px;color:#94a3b8;margin-bottom:12px;">
-      将 <strong id="ra-agent-from" style="color:#f1f5f9;"></strong> 的会话分配给：
+      {{ (i18n or {}).get('qm_s015', "将") }} <strong id="ra-agent-from" style="color:#f1f5f9;"></strong> {{ (i18n or {}).get('qm_s013', "的会话分配给：") }}
     </div>
     <select class="reassign-select" id="ra-agent-to"></select>
     <div style="font-size:12px;color:#64748b;margin-bottom:12px;" id="ra-conv-count"></div>
     <div class="reassign-acts">
-      <button class="reassign-cancel" onclick="closeReassign()">取消</button>
-      <button class="reassign-confirm" onclick="confirmReassign()">确认分配</button>
+      <button class="reassign-cancel" onclick="closeReassign()">{{ (i18n or {}).get('ov_js_cancel', "取消") }}</button>
+      <button class="reassign-confirm" onclick="confirmReassign()">{{ (i18n or {}).get('qm_s014', "确认分配") }}</button>
     </div>
   </div>
 </div>
@@ -142,9 +142,9 @@ var _raConvIds = [];   // 要分配的 conversation_id 列表
 
 function fmtSec(sec){
   if(!sec||sec<0) return '—';
-  if(sec<60) return sec+'秒';
-  if(sec<3600) return Math.round(sec/60)+'分';
-  return Math.round(sec/3600)+'小时';
+  if(sec<60) return sec+window.T('msg_js_007');
+  if(sec<3600) return Math.round(sec/60)+window.T('qm_js_min');
+  return Math.round(sec/3600)+window.T('msg_js_009');
 }
 function esc(s){ var d=document.createElement('div'); d.textContent=String(s||''); return d.innerHTML; }
 
@@ -180,11 +180,11 @@ function renderKPIs(d){
 
 function renderCards(agents){
   var el=document.getElementById('qm-agents');
-  if(!agents||!agents.length){ el.innerHTML='<div class="qm-empty" style="grid-column:1/-1;">暂无坐席在线</div>'; return; }
+  if(!agents||!agents.length){ el.innerHTML='<div class="qm-empty" style="grid-column:1/-1;">'+window.T('qm_js001')+'</div>'; return; }
   el.innerHTML=agents.map(function(a){
     var init=(a.agent_name||a.agent_id||'?').charAt(0).toUpperCase();
     var statusClass='status-'+(a.status||'offline');
-    var statusText={online:'在线',busy:'忙碌',offline:'离线',virtual:'未认领'}[a.status]||a.status;
+    var statusText={online:window.T('dash.pr.online'),busy:window.T('dash.pr.busy'),offline:window.T('dash.pr.offline'),virtual:window.T('dash.unassigned')}[a.status]||a.status;
     var loadColor_=loadColor(a.load_pct||0);
     var isVirtual=a.agent_id==='__unassigned__';
     return '<div class="qm-agent">'
@@ -194,14 +194,14 @@ function renderCards(agents){
           +'<div class="qm-agent-status '+statusClass+'">● '+statusText+'</div></div>'
       +'</div>'
       +'<div class="qm-agent-stats">'
-        +'<div class="qm-stat"><div class="sv">'+esc(a.open_convs||0)+'</div><div class="sk">待处理</div></div>'
-        +'<div class="qm-stat"><div class="sv">'+esc(a.unread_total||0)+'</div><div class="sk">未读</div></div>'
-        +'<div class="qm-stat"><div class="sv">'+fmtSec(a.avg_wait_sec||0)+'</div><div class="sk">均等待</div></div>'
+        +'<div class="qm-stat"><div class="sv">'+esc(a.open_convs||0)+'</div><div class="sk">'+window.T('base.pill.sla_normal')+'</div></div>'
+        +'<div class="qm-stat"><div class="sv">'+esc(a.unread_total||0)+'</div><div class="sk">'+window.T('inbox.filter.unread')+'</div></div>'
+        +'<div class="qm-stat"><div class="sv">'+fmtSec(a.avg_wait_sec||0)+'</div><div class="sk">'+window.T('qm_js002')+'</div></div>'
       +'</div>'
       +'<div class="qm-load-bar"><div class="qm-load-fill" style="width:'+Math.min(100,a.load_pct||0)+'%;background:'+loadColor_+';"></div></div>'
       +'<div class="qm-agent-acts">'
-        +(isVirtual?'':'<button class="qm-btn qm-btn-view" onclick="viewAgentConvs(\''+esc(a.agent_id)+'\')">查看会话</button>')
-        +(a.open_convs>0&&!isVirtual?'<button class="qm-btn qm-btn-reassign" onclick="openReassign(\''+esc(a.agent_id)+'\','+a.open_convs+')">重新分配</button>':'')
+        +(isVirtual?'':'<button class="qm-btn qm-btn-view" onclick="viewAgentConvs(\''+esc(a.agent_id)+'\')">'+window.T('inbox.acct.view_chats')+'</button>')
+        +(a.open_convs>0&&!isVirtual?'<button class="qm-btn qm-btn-reassign" onclick="openReassign(\''+esc(a.agent_id)+'\','+a.open_convs+')">'+window.T('qm_js003')+'</button>':'')
       +'</div>'
     +'</div>';
   }).join('');
@@ -209,10 +209,10 @@ function renderCards(agents){
 
 function renderTable(agents){
   var el=document.getElementById('qm-table-body');
-  if(!agents||!agents.length){ el.innerHTML='<tr><td colspan="8" class="qm-empty">暂无数据</td></tr>'; return; }
+  if(!agents||!agents.length){ el.innerHTML='<tr><td colspan="8" class="qm-empty">'+window.T('rpa_js_no_data')+'</td></tr>'; return; }
   el.innerHTML=agents.map(function(a){
     var statusClass='status-'+(a.status||'offline');
-    var statusText={online:'在线',busy:'忙碌',offline:'离线',virtual:'未认领'}[a.status]||a.status;
+    var statusText={online:window.T('dash.pr.online'),busy:window.T('dash.pr.busy'),offline:window.T('dash.pr.offline'),virtual:window.T('dash.unassigned')}[a.status]||a.status;
     var pct=Math.min(100,a.load_pct||0);
     var clr=loadColor(pct);
     var isVirtual=a.agent_id==='__unassigned__';
@@ -228,8 +228,8 @@ function renderTable(agents){
           +'<div style="width:'+pct+'%;height:100%;background:'+clr+';border-radius:3px;"></div></div>'
         +'<span style="font-size:11px;color:'+clr+';">'+pct+'%</span></div></td>'
       +'<td>'
-        +(isVirtual?'':('<button class="qm-btn qm-btn-view" style="padding:3px 8px;" onclick="viewAgentConvs(\''+esc(a.agent_id)+'\')">查看</button> '
-          +(a.open_convs>0?'<button class="qm-btn qm-btn-reassign" style="padding:3px 8px;" onclick="openReassign(\''+esc(a.agent_id)+'\','+a.open_convs+')">分配</button>':'')))
+        +(isVirtual?'':('<button class="qm-btn qm-btn-view" style="padding:3px 8px;" onclick="viewAgentConvs(\''+esc(a.agent_id)+'\')">'+window.T('msg_js_2042')+'</button> '
+          +(a.open_convs>0?'<button class="qm-btn qm-btn-reassign" style="padding:3px 8px;" onclick="openReassign(\''+esc(a.agent_id)+'\','+a.open_convs+')">'+window.T('inbox.bab.assign')+'</button>':'')))
       +'</td>'
     +'</tr>';
   }).join('');
@@ -243,9 +243,9 @@ window.loadQM = function(){
     renderCards(d.agents||[]);
     renderTable(d.agents||[]);
     var ts=new Date(d.ts*1000);
-    document.getElementById('qm-ts').textContent='更新于 '+ts.toLocaleTimeString('zh-CN');
+    document.getElementById('qm-ts').textContent=window.T('db_js_079')+' '+window.wsFmtTime(ts);
   }).catch(function(){
-    document.getElementById('qm-ts').textContent='加载失败';
+    document.getElementById('qm-ts').textContent=window.T('rpa_load_failed');
   });
 };
 
@@ -258,15 +258,15 @@ window.openReassign = function(fromAgentId, convCount){
   if(!_data) return;
   _raFrom=fromAgentId;
   document.getElementById('ra-agent-from').textContent=fromAgentId;
-  document.getElementById('ra-conv-count').textContent='将分配 '+convCount+' 个会话';
+  document.getElementById('ra-conv-count').textContent=window.Tf('qm_tf_will_assign', {n: convCount});
   // 填充目标坐席下拉（排除自身和虚拟桶）
   var sel=document.getElementById('ra-agent-to');
   sel.innerHTML=(_data.agents||[]).filter(function(a){
     return a.agent_id!==fromAgentId && a.agent_id!=='__unassigned__' && a.status!=='offline';
   }).map(function(a){
-    return '<option value="'+esc(a.agent_id)+'">'+esc(a.agent_name||a.agent_id)+' ('+a.open_convs+'个待处理)</option>';
+    return '<option value="'+esc(a.agent_id)+'">'+esc(a.agent_name||a.agent_id)+window.Tf('qm_tf_pending_opt', {n: a.open_convs})+'</option>';
   }).join('');
-  if(!sel.options.length){ alert('暂无其他在线坐席可分配'); return; }
+  if(!sel.options.length){ alert(window.T('qm_js004')); return; }
   document.getElementById('reassign-modal').classList.add('show');
 };
 
@@ -282,7 +282,7 @@ window.confirmReassign = function(){
   // 简化：使用 batch/assign API，先查会话列表再批量分配
   fetch('/api/unified-inbox/chats?limit=500').then(function(r){return r.json();}).then(function(d){
     var convs=(d.chats||[]).filter(function(c){ return c.claimed_by===_raFrom; });
-    if(!convs.length){ closeReassign(); alert('没有找到可分配的会话'); return; }
+    if(!convs.length){ closeReassign(); alert(window.T('qm_js005')); return; }
     var cids=convs.map(function(c){return c.conversation_id;}).filter(Boolean);
     return fetch('/api/workspace/batch/assign',{
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -291,10 +291,10 @@ window.confirmReassign = function(){
       if(r2&&r2.ok){
         closeReassign();
         setTimeout(loadQM, 500);
-        alert('已分配 '+r2.updated+' 个会话给 '+toAgent);
+        alert(window.Tf('qm_tf_assigned_to', {n: r2.updated, agent: toAgent}));
       }
     });
-  }).catch(function(e){ alert('分配失败：'+e); });
+  }).catch(function(e){ alert(window.T('qm_js006')+e); });
 };
 
 // 初始加载 + 自动刷新（10s）

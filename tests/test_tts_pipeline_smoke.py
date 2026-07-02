@@ -182,6 +182,121 @@ def test_tts_voice_clone_command_injects_dashscope_env(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
+def _qwen_pipeline(tmp_path, command_args):
+    from src.ai.tts_pipeline import TTSPipeline
+
+    ref = tmp_path / "me.wav"
+    ref.write_bytes(b"wav")
+    return TTSPipeline({
+        "enabled": True,
+        "backend": "voice_clone_command",
+        "format": "wav",
+        "out_dir": str(tmp_path),
+        "voice_profile": {
+            "enabled": True,
+            "owner_consent": True,
+            "speaker_id": "my_voice",
+            "reference_audio_path": str(ref),
+            "backend": "voice_clone_command",
+            "command_args": command_args,
+        },
+    })
+
+
+def test_tts_voice_clone_command_fills_instructions_placeholder(tmp_path, monkeypatch):
+    """{instructions} 占位：非中性情感→填自然语言声音指令；neutral→填空串（包装器跳过）。"""
+    import asyncio
+    from subprocess import CompletedProcess
+
+    calls = []
+
+    def fake_run(cmd, shell, capture_output, text, timeout, env=None):
+        calls.append(cmd)
+        out_arg = cmd[cmd.index("--out") + 1]
+        with open(out_arg, "wb") as f:
+            f.write(b"audio")
+        return CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("src.ai.tts_pipeline.subprocess.run", fake_run)
+
+    async def run():
+        p = _qwen_pipeline(tmp_path, [
+            "python", "tools/qwen_tts_wrapper.py",
+            "--text", "{text}", "--out", "{out}",
+            "--instructions", "{instructions}",
+        ])
+        rv = await p.synthesize("好开心", emotion="excited")
+        assert rv.ok is True
+        cmd = calls[0]
+        instr = cmd[cmd.index("--instructions") + 1]
+        assert instr and "语气" in instr      # 非空、含语气措辞
+        assert "{instructions}" not in instr  # 占位已被替换
+
+        rv2 = await p.synthesize("普通一句", emotion="neutral")
+        assert rv2.ok is True
+        cmd2 = calls[1]
+        assert cmd2[cmd2.index("--instructions") + 1] == ""  # neutral → 空串
+
+    asyncio.run(run())
+
+
+def test_tts_voice_clone_command_auto_injects_instructions_for_qwen(tmp_path, monkeypatch):
+    """未用占位、但 args 指向 qwen_tts_wrapper：非中性情感→针对性自动补 --instructions。"""
+    import asyncio
+    from subprocess import CompletedProcess
+
+    calls = []
+
+    def fake_run(cmd, shell, capture_output, text, timeout, env=None):
+        calls.append(cmd)
+        out_arg = cmd[cmd.index("--out") + 1]
+        with open(out_arg, "wb") as f:
+            f.write(b"audio")
+        return CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("src.ai.tts_pipeline.subprocess.run", fake_run)
+
+    async def run():
+        p = _qwen_pipeline(tmp_path, [
+            "python", "tools/qwen_tts_wrapper.py",
+            "--text", "{text}", "--out", "{out}",
+        ])
+        rv = await p.synthesize("好开心", emotion="excited")
+        assert rv.ok is True
+        cmd = calls[0]
+        assert "--instructions" in cmd
+        assert cmd[cmd.index("--instructions") + 1]  # 非空指令
+
+    asyncio.run(run())
+
+
+def test_tts_voice_clone_command_no_inject_for_non_qwen_wrapper(tmp_path, monkeypatch):
+    """非 qwen 包装器且未用占位：不应被偷偷塞 --instructions（不触碰第三方克隆脚本）。"""
+    import asyncio
+    from subprocess import CompletedProcess
+
+    calls = []
+
+    def fake_run(cmd, shell, capture_output, text, timeout, env=None):
+        calls.append(cmd)
+        out_arg = cmd[cmd.index("--out") + 1]
+        with open(out_arg, "wb") as f:
+            f.write(b"audio")
+        return CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("src.ai.tts_pipeline.subprocess.run", fake_run)
+
+    async def run():
+        p = _qwen_pipeline(tmp_path, [
+            "clone", "--text", "{text}", "--out", "{out}",
+        ])
+        rv = await p.synthesize("好开心", emotion="excited")
+        assert rv.ok is True
+        assert "--instructions" not in calls[0]
+
+    asyncio.run(run())
+
+
 def test_tts_falls_back_to_edge_when_network_backend_fails(tmp_path, monkeypatch):
     """coqui_http 等网络后端连不上时（如 LAN 主机离线 / WinError 10060），
     应自动回落到 edge_tts 出声，而不是把 URLError 硬抛给用户。"""

@@ -1,5 +1,5 @@
 {% extends "workspace_base.html" %}
-{% block title %}知识库冷启动{% endblock %}
+{% block title %}{{ (i18n or {}).get('ks_s001', "知识库冷启动") }}{% endblock %}
 {% block head %}
 <style>
   .ks-wrap{height:100%;overflow-y:auto;background:var(--tk-bg);padding:18px;max-width:880px;margin:0 auto;}
@@ -28,23 +28,24 @@
 {% endblock %}
 {% block content %}
 <div class="ks-wrap">
-  <a class="ks-back" href="/workspace/setup">← 返回接入向导</a>
+  <a class="ks-back" href="/workspace/setup">← {{ (i18n or {}).get('ks_s002', "返回接入向导") }}</a>
   <div class="ks-head">
-    <h2>知识库冷启动</h2>
-    <p>渠道接好了，但 AI 还没有可答的私域知识。选一个场景一键播种起步话术，随后到知识库微调。</p>
+    <h2>{{ (i18n or {}).get('ks_s001', "知识库冷启动") }}</h2>
+    <p>{{ (i18n or {}).get('ks_s003', "渠道接好了，但 AI 还没有可答的私域知识。选一个场景一键播种起步话术，随后到知识库微调。") }}</p>
   </div>
 
   <div class="ks-status" id="ks-status">
-    <div><div class="big" id="ks-count">—</div><div class="lbl">已启用知识条目</div></div>
-    <div><div class="big" id="ks-cat">—</div><div class="lbl">覆盖分类</div></div>
-    <span class="ks-flag" id="ks-flag">检测中…</span>
+    <div><div class="big" id="ks-count">—</div><div class="lbl">{{ (i18n or {}).get('ks_s004', "已启用知识条目") }}</div></div>
+    <div><div class="big" id="ks-cat">—</div><div class="lbl">{{ (i18n or {}).get('ks_s005', "覆盖分类") }}</div></div>
+    <span class="ks-flag" id="ks-flag">{{ (i18n or {}).get('kb_js_105', "检测中…") }}</span>
   </div>
 
   <div class="ks-packs" id="ks-packs"></div>
 
   <div class="ks-next">
-    播种后建议：① 到 <a href="/knowledge">知识库管理</a> 按自家业务修改话术；
-    ② 用 <a href="/knowledge">沙盒测试</a> 输入客户问法，确认 AI 能命中作答。
+    {{ (i18n or {}).get('ks_s006', "播种后建议：") }}
+    {{ (i18n or {}).get('ks_s010', "① 到") }} <a href="/knowledge">{{ (i18n or {}).get('kb_s007', "知识库管理") }}</a> {{ (i18n or {}).get('ks_s008', "按自家业务修改话术；") }}
+    {{ (i18n or {}).get('ks_s011', "② 用") }} <a href="/knowledge">{{ (i18n or {}).get('kb_s014', "沙盒测试") }}</a> {{ (i18n or {}).get('ks_s009', "输入客户问法，确认 AI 能命中作答。") }}
   </div>
 </div>
 
@@ -55,33 +56,33 @@ function renderStatus(r){
   document.getElementById('ks-count').textContent=r.enabled_entries!=null?r.enabled_entries:'—';
   document.getElementById('ks-cat').textContent=r.category_count!=null?r.category_count:'—';
   var flag=document.getElementById('ks-flag');
-  if(!r.available){ flag.className='ks-flag cold'; flag.textContent='知识库不可用'; return; }
-  if(r.is_cold){ flag.className='ks-flag cold'; flag.textContent='❄ 偏冷，建议播种'; }
-  else { flag.className='ks-flag warm'; flag.textContent='✓ 已有知识'; }
+  if(!r.available){ flag.className='ks-flag cold'; flag.textContent=window.T('ks_js_001'); return; }
+  if(r.is_cold){ flag.className='ks-flag cold'; flag.textContent='❄ '+window.T('ks_js_002'); }
+  else { flag.className='ks-flag warm'; flag.textContent='✓ '+window.T('ks_js_003'); }
 }
 
 function renderPacks(packs){
   document.getElementById('ks-packs').innerHTML=(packs||[]).map(function(p){
     return '<div class="ks-pack"><h3>'+esc(p.name)+'</h3>'
       +'<div class="d">'+esc(p.desc)+'</div>'
-      +'<div class="c">'+p.count+' 条起步话术</div>'
-      +'<button onclick="seed(\''+p.id+'\',this)">一键播种</button>'
+      +'<div class="c">'+window.Tf('ks_tf_packcount',{n:p.count})+'</div>'
+      +'<button onclick="seed(\''+p.id+'\',this)">'+window.T('ks_js_004')+'</button>'
       +'<div class="ks-msg" id="ks-msg-'+p.id+'"></div></div>';
   }).join('');
 }
 
 function seed(domain, btn){
   var msg=document.getElementById('ks-msg-'+domain);
-  btn.disabled=true; msg.className='ks-msg'; msg.textContent='播种中…';
+  btn.disabled=true; msg.className='ks-msg'; msg.textContent=window.T('ks_js_005');
   fetch('/api/kb/seed-pack',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({domain:domain})}).then(function(r){return r.json();}).then(function(d){
-    if(!d.ok){ btn.disabled=false; msg.className='ks-msg err'; msg.textContent=d.detail||'播种失败'; return; }
+    if(!d.ok){ btn.disabled=false; msg.className='ks-msg err'; msg.textContent=d.detail||window.T('ks_js_006'); return; }
     msg.className='ks-msg ok';
-    msg.textContent='新增 '+d.added+' 条'+(d.skipped?'，跳过 '+d.skipped+' 条已存在':'');
-    btn.textContent='再次播种';
+    msg.textContent=d.skipped?window.Tf('ks_tf_added_skip',{added:d.added,skipped:d.skipped}):window.Tf('ks_tf_added',{added:d.added});
+    btn.textContent=window.T('ks_js_007');
     btn.disabled=false;
     if(d.readiness) renderStatus(d.readiness);
-  }).catch(function(){ btn.disabled=false; msg.className='ks-msg err'; msg.textContent='网络错误'; });
+  }).catch(function(){ btn.disabled=false; msg.className='ks-msg err'; msg.textContent=window.T('draft.net_err'); });
 }
 
 function load(){

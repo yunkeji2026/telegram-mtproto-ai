@@ -100,16 +100,27 @@ def _assert_http_reachable(base_url: str, timeout: float = 3.0) -> None:
 _TTS_CACHE_LOCK = threading.Lock()
 _TTS_CACHE: "OrderedDict[str, Tuple[bytes, str, str, str]]" = OrderedDict()
 # value = (audio_bytes, fmt, provider, voice)
+_TTS_CACHE_TS: Dict[str, float] = {}  # key -> 写入时刻（供 TTL 过期判定）
 _TTS_CACHE_MAX = 128
 
 
-def _tts_cache_get(key: str) -> Optional[Tuple[bytes, str, str, str]]:
+def _tts_cache_get(
+    key: str, *, ttl_sec: float = 0.0,
+) -> Optional[Tuple[bytes, str, str, str]]:
+    """取缓存字节。``ttl_sec>0`` 时超龄条目视为未命中并顺手清理——防「昨天合成的
+    同一句今天/隔久了还复用同一段音频」（复读语音事故的防线之一）。"""
     if not key:
         return None
     with _TTS_CACHE_LOCK:
         item = _TTS_CACHE.get(key)
         if item is None:
             return None
+        if ttl_sec and ttl_sec > 0:
+            ts = _TTS_CACHE_TS.get(key, 0.0)
+            if ts <= 0 or (time.time() - ts) > ttl_sec:
+                _TTS_CACHE.pop(key, None)
+                _TTS_CACHE_TS.pop(key, None)
+                return None
         _TTS_CACHE.move_to_end(key)
         return item
 
@@ -119,16 +130,19 @@ def _tts_cache_put(key: str, value: Tuple[bytes, str, str, str], *, max_entries:
         return
     with _TTS_CACHE_LOCK:
         _TTS_CACHE[key] = value
+        _TTS_CACHE_TS[key] = time.time()
         _TTS_CACHE.move_to_end(key)
         cap = max(1, int(max_entries))
         while len(_TTS_CACHE) > cap:
-            _TTS_CACHE.popitem(last=False)
+            _old, _ = _TTS_CACHE.popitem(last=False)
+            _TTS_CACHE_TS.pop(_old, None)
 
 
 def reset_tts_cache() -> None:
     """清空 TTS 输出缓存（测试用 / 音色变更后强制重合成）。"""
     with _TTS_CACHE_LOCK:
         _TTS_CACHE.clear()
+        _TTS_CACHE_TS.clear()
 
 
 def _reference_fingerprint(voice_profile: Dict[str, Any]) -> str:
@@ -165,7 +179,7 @@ class TTSPipeline:
 
     Config:
         enabled: true/false
-        backend: edge_tts | pyttsx3 | openai | elevenlabs | voice_clone_command | coqui_http | disabled
+        backend: edge_tts | pyttsx3 | openai | elevenlabs | voice_clone_command | coqui_http | minicpm_clone | disabled
         voice: provider-specific voice id
         model: online model name, defaults to gpt-4o-mini-tts
         format: mp3 | wav | opus
@@ -206,6 +220,14 @@ class TTSPipeline:
             if isinstance(cfg.get("voice_clone_lan"), dict)
             else {}
         )
+        # MiniCPM-o 情感克隆主机（与 fish_speech 共用 /v1/tts/clone 契约，独立 base_url）；
+        # 由 resolve_voice_cfg 注入。作 backend=minicpm_clone 时的远程情感克隆主机（产 WAV）。
+        # 慢于实时（~0.5–0.7x）→ 仅用于**异步语音消息**（可等待），不用于实时通话。
+        self.minicpm_clone = (
+            cfg.get("minicpm_clone")
+            if isinstance(cfg.get("minicpm_clone"), dict)
+            else {}
+        )
         # ── 后端不可达/失败时的兜底合成 ──────────────────────────────────────
         # 主后端（如 coqui_http / voice_clone_command 指向的局域网/云主机）连不上时，
         # 回落到免额外基建的在线 edge_tts，避免「生成失败 + WinError 10060」直接抛给用户。
@@ -217,6 +239,12 @@ class TTSPipeline:
         cache_cfg = cfg.get("tts_cache") if isinstance(cfg.get("tts_cache"), dict) else {}
         self.cache_enabled = bool(cache_cfg.get("enabled", True))
         self.cache_max_entries = int(cache_cfg.get("max_entries", _TTS_CACHE_MAX) or _TTS_CACHE_MAX)
+        # TTL（秒）：0=不过期（旧行为）。>0 时超龄缓存视为未命中并重合成——防复读语音
+        # 「隔久了还复用同一段音频」。会话语音（autosend）可按需传短 TTL / 关缓存。
+        try:
+            self.cache_ttl_sec = float(cache_cfg.get("ttl_sec", 0) or 0)
+        except (TypeError, ValueError):
+            self.cache_ttl_sec = 0.0
         # ── P1：情感层（默认关 → 不传 emotion 即 neutral，零行为变更）──
         emo_cfg = cfg.get("emotion") if isinstance(cfg.get("emotion"), dict) else {}
         self.emotion_enabled = bool(emo_cfg.get("enabled", False))
@@ -272,7 +300,7 @@ class TTSPipeline:
             eff_backend = self._effective_backend()
             eff_voice = voice or self._effective_voice()
             cache_key = self._cache_key(text_s, eff_voice, eff_backend, spec)
-            hit = _tts_cache_get(cache_key)
+            hit = _tts_cache_get(cache_key, ttl_sec=self.cache_ttl_sec)
             if hit is not None:
                 cached = self._result_from_cache(hit, text_s)
                 if cached is not None:
@@ -334,7 +362,7 @@ class TTSPipeline:
     def _cache_key(self, text: str, voice: str, backend: str, spec: Any) -> str:
         """TTS 缓存键：克隆类后端额外并入参考音频指纹（换音频自动失效）。"""
         ref_fp = ""
-        if backend in ("voice_clone_lan", "voice_clone_command", "coqui_http"):
+        if backend in ("voice_clone_lan", "voice_clone_command", "coqui_http", "minicpm_clone"):
             ref_fp = _reference_fingerprint(self.voice_profile)
         emo = spec.cache_key() if spec is not None else ""
         base = "|".join([
@@ -396,18 +424,27 @@ class TTSPipeline:
         t0 = time.monotonic()
         # ── 局域网克隆优先：在线则走 LAN 零样本克隆；不可用/失败按配置回落云端 ──
         if self._should_try_lan():
-            lan_rv = await self._try_lan_clone(rv, out, t0)
+            lan_rv = await self._try_lan_clone(rv, out, t0, spec=spec)
             if lan_rv is not None:
                 return lan_rv  # LAN 成功 或 硬失败(未开兜底)；None = 回落云端
 
         # ── 主后端合成 ──
         primary_backend = self._effective_backend()
-        err = await self._run_backend(
-            rv, rv.text, out, rv.voice, primary_backend, rv.format, timeout_sec,
-            spec=spec)
-        if err is None:
-            rv.latency_ms = int((time.monotonic() - t0) * 1000)
-            return rv
+        # minicpm_clone：与 fish 同 /v1/tts/clone 契约的远程情感克隆主机（产 WAV），作为
+        # 可显式选择的克隆后端（异步语音消息专用，慢于实时但不阻塞）。成功直接定稿；
+        # 失败且允许兜底 → 落到下方 edge 回落（绝不卡死出站）。
+        if primary_backend == "minicpm_clone":
+            mc_rv = await self._try_minicpm_clone(rv, out, t0, spec=spec)
+            if mc_rv is not None:
+                return mc_rv
+            err = "minicpm_clone_unreachable"
+        else:
+            err = await self._run_backend(
+                rv, rv.text, out, rv.voice, primary_backend, rv.format, timeout_sec,
+                spec=spec)
+            if err is None:
+                rv.latency_ms = int((time.monotonic() - t0) * 1000)
+                return rv
 
         # ── 主后端失败 → 回落到免基建的在线 edge_tts（避免硬失败 / WinError 10060）──
         # 仅对「传输/运行时」失败兜底；配置/授权类错误（缺同意、缺参考音频等）应直接
@@ -498,7 +535,7 @@ class TTSPipeline:
         return bool(ref) and Path(ref).is_file()
 
     async def _try_lan_clone(
-        self, rv: "TTSResult", out: Path, t0: float,
+        self, rv: "TTSResult", out: Path, t0: float, *, spec: Any = None,
     ) -> Optional["TTSResult"]:
         """尝试局域网零样本克隆。
 
@@ -514,6 +551,23 @@ class TTSPipeline:
         # fish_speech 返回 WAV：用 .wav 产物并据此标记格式/测时长
         lan_out = out.with_suffix(".wav")
 
+        # P5：情感 → 克隆主机。两条互补通道：
+        #  (a) instructions：结构化自然语言语气指令（不会被读出，零 garble），MiniCPM-o
+        #      等支持的主机据此带情绪；不支持的主机忽略 → **默认开**（情感非中性即带）。
+        #  (b) 内联标记（如 "(joyful) 你好"）：fish_speech S2 专用，未支持会被读出，故
+        #      **opt-in**（voice_clone_lan.emotion_inline_tags），默认关。
+        lan_text = rv.text
+        lan_instructions = ""
+        try:
+            if spec is not None and not getattr(spec, "is_neutral", lambda: True)():
+                from src.ai.voice_emotion import to_fish_text, to_qwen_instructions
+                lan_instructions = to_qwen_instructions(spec, base=self.instructions)
+                if bool((self.voice_clone_lan or {}).get("emotion_inline_tags", False)):
+                    lan_text = to_fish_text(rv.text, spec)
+        except Exception:
+            lan_text = rv.text
+            lan_instructions = ""
+
         def _finalize_err(msg: str) -> "TTSResult":
             rv.error = msg
             rv.latency_ms = int((time.monotonic() - t0) * 1000)
@@ -527,7 +581,9 @@ class TTSPipeline:
             return _finalize_err("voice_clone_lan_unreachable")
 
         def _do_clone() -> None:
-            lan.synthesize_clone(rv.text, ref, lan_out, reference_text=ref_text)
+            lan.synthesize_clone(
+                lan_text, ref, lan_out, reference_text=ref_text,
+                instructions=lan_instructions)
 
         try:
             await asyncio.wait_for(
@@ -565,6 +621,112 @@ class TTSPipeline:
         if lan.cloud_fallback:
             return None
         return _finalize_err("voice_clone_lan_empty")
+
+    async def _try_minicpm_clone(
+        self, rv: "TTSResult", out: Path, t0: float, *, spec: Any = None,
+    ) -> Optional["TTSResult"]:
+        """MiniCPM-o 情感克隆（与 fish_speech 共用 /v1/tts/clone 契约，复用 VoiceCloneClient）。
+
+        用人设 ``voice_profile.reference_audio_path`` 作参考音克隆音色；情感经
+        ``to_qwen_instructions`` 作结构化语气指令（系统侧风格，**绝不读出** → 零 garble）。
+        输出 **WAV**（与 fish 同）。MiniCPM-o 慢于实时（~0.5–0.7x），仅用于**异步语音消息**
+        （可接受等待），绝不用于实时通话。
+
+        返回值语义（与 ``_try_lan_clone`` 一致）：
+          - ``TTSResult``：成功，或**配置类硬失败**（缺同意/参考音，应暴露而非用通用音色掩盖）
+          - ``None``：主机不可达 / 传输失败且 ``cloud_fallback`` → 调用方回落（edge）
+        """
+        from src.ai.voice_clone_client import VoiceCloneClient
+
+        def _finalize_err(msg: str) -> "TTSResult":
+            rv.error = msg
+            rv.latency_ms = int((time.monotonic() - t0) * 1000)
+            return rv
+
+        # 克隆必须有同意 + 参考音文件：缺则配置类硬失败（暴露，不绕过 owner_consent）
+        vp = self.voice_profile or {}
+        ref = str(vp.get("reference_audio_path") or "").strip()
+        if not bool(vp.get("owner_consent", False)):
+            return _finalize_err("voice_profile_requires_owner_consent")
+        if not ref:
+            return _finalize_err("voice_profile_missing_reference_audio_path")
+        if not Path(ref).is_file():
+            return _finalize_err(f"voice_profile_reference_audio_missing:{ref}")
+
+        cfg = dict(self.minicpm_clone or {})
+        cfg["enabled"] = True
+        cloud_fallback = bool(cfg.get("cloud_fallback", True))
+        client = VoiceCloneClient(cfg)
+        ref_text = str(vp.get("reference_text") or "").strip()
+
+        # 情感 → instructions（结构化语气，绝不读出）；neutral 则用运营基线 instructions
+        instr = self.instructions
+        if spec is not None and not getattr(spec, "is_neutral", lambda: True)():
+            try:
+                from src.ai.voice_emotion import to_qwen_instructions
+                instr = to_qwen_instructions(spec, base=self.instructions)
+            except Exception:
+                instr = self.instructions
+
+        mc_out = out.with_suffix(".wav")
+
+        # 健康探测（短超时 + 进程缓存）；不可达且允许兜底 → 回落
+        if not await asyncio.to_thread(client.health_ok):
+            # 区分「可达但模型未载入」(惰性主机常见：supervisor 常驻但 worker 未起) 与「彻底不可达」：
+            # 前者后台触发一次载入自愈（本条仍回落 edge，约 20–30s 后自动恢复克隆声，无需人工干预）。
+            if client.auto_load:
+                try:
+                    detail = await asyncio.to_thread(client.probe_health_detail)
+                    if (detail.get("reachable") and detail.get("model_loaded") is False
+                            and not detail.get("loading")):
+                        if await asyncio.to_thread(client.request_model_load_async):
+                            logger.warning(
+                                "[tts] minicpm_clone 模型未载入，已触发后台载入"
+                                "（本条回落 edge，约 20–30s 后自动恢复克隆声）")
+                except Exception:
+                    pass
+            if cloud_fallback:
+                logger.info("[tts] minicpm_clone unreachable → 回落兜底")
+                return None
+            return _finalize_err("minicpm_clone_unreachable")
+
+        def _do_clone() -> None:
+            client.synthesize_clone(
+                rv.text, ref, mc_out, reference_text=ref_text, instructions=instr)
+
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(_do_clone), timeout=client.synth_timeout_sec)
+        except Exception as ex:
+            try:
+                mc_out.unlink(missing_ok=True)  # type: ignore[call-arg]
+            except Exception:
+                pass
+            if cloud_fallback:
+                logger.warning("[tts] minicpm_clone failed (%s) → 回落兜底", ex)
+                return None
+            return _finalize_err(f"minicpm_clone_failed:{str(ex)[:200]}")
+
+        if mc_out.exists() and mc_out.stat().st_size > 0:
+            rv.ok = True
+            rv.provider = "minicpm_clone"
+            rv.format = "wav"
+            rv.audio_path = str(mc_out)
+            rv.extra["bytes"] = mc_out.stat().st_size
+            rv.extra["minicpm_base_url"] = client.base_url
+            try:
+                dur, src = compute_audio_duration_sec(str(mc_out), "wav")
+                rv.duration_sec = float(dur)
+                rv.duration_source = str(src)
+            except Exception:
+                rv.duration_sec = -1.0
+                rv.duration_source = "unknown"
+            rv.latency_ms = int((time.monotonic() - t0) * 1000)
+            return rv
+
+        if cloud_fallback:
+            return None
+        return _finalize_err("minicpm_clone_empty")
 
     def _validate_voice_profile(self) -> None:
         if not bool(self.voice_profile.get("enabled", False)):
@@ -630,7 +792,7 @@ class TTSPipeline:
                 out.write_bytes(data)
             return
         if backend == "voice_clone_command":
-            self._synthesize_voice_clone_command(text, out)
+            self._synthesize_voice_clone_command(text, out, spec)
             return
         if backend == "coqui_http":
             self._synthesize_coqui_http(text, out)
@@ -642,7 +804,9 @@ class TTSPipeline:
             raise RuntimeError("backend disabled")
         raise RuntimeError(f"unknown backend {backend}")
 
-    def _synthesize_voice_clone_command(self, text: str, out: Path) -> None:
+    def _synthesize_voice_clone_command(
+        self, text: str, out: Path, spec: Any = None,
+    ) -> None:
         self._validate_voice_profile()
         tpl = str(self.voice_profile.get("command_template") or "").strip()
         raw_args = self.voice_profile.get("command_args")
@@ -650,16 +814,33 @@ class TTSPipeline:
             raise RuntimeError("voice_profile_missing_command")
         ref = str(self.voice_profile.get("reference_audio_path") or "").strip()
         speaker = str(self.voice_profile.get("speaker_id") or "my_voice").strip()
+        # P5：情感 → Qwen ``instructions`` 自然语言声音指令（DashScope API 字段，
+        # 不会被读出 → 零 garble，可常开）。在运营已配置的 instructions 后追加，不覆盖。
+        instr = self.instructions
+        if spec is not None and not getattr(spec, "is_neutral", lambda: True)():
+            try:
+                from src.ai.voice_emotion import to_qwen_instructions
+                instr = to_qwen_instructions(spec, base=self.instructions)
+            except Exception:
+                instr = self.instructions
         raw_values = {
             "text": text,
             "out": str(out),
             "reference_audio": ref,
             "speaker": speaker,
             "model": str(self.voice_profile.get("model") or self.model),
+            "instructions": instr or "",
         }
         timeout = float(self.voice_profile.get("command_timeout_sec", 120) or 120)
         if isinstance(raw_args, list):
             cmd_args = [str(x).format(**raw_values) for x in raw_args]
+            # 操作员未显式用 {instructions} 占位、但用的是自带 --instructions 的 qwen
+            # 包装器，且本轮有情感指令 → 针对性自动补一段（不触碰其它克隆脚本）。
+            joined = " ".join(str(x) for x in raw_args)
+            if (instr and "{instructions}" not in joined
+                    and "--instructions" not in cmd_args
+                    and "qwen_tts_wrapper" in joined.lower()):
+                cmd_args += ["--instructions", instr]
             env = os.environ.copy()
             if self.dashscope_api_key:
                 env["DASHSCOPE_API_KEY"] = self.dashscope_api_key

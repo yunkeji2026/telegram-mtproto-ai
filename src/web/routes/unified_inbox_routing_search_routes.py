@@ -20,6 +20,7 @@ from typing import Any, Dict, List
 from fastapi import Depends, Request
 
 from src.web.routes.unified_inbox_services import _contacts_store, _inbox_store
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ def register_routing_search_routes(app, *, api_auth) -> None:
         body = await request.json()
         store = _inbox_store(request)
         if store is None:
-            return {"ok": False, "error": "inbox_store 不可用"}
+            return {"ok": False, "error": tr(request, "err.svc.inbox_not_ready")}
         rule_id = store.upsert_routing_rule(body)
         return {"ok": True, "rule_id": rule_id}
 

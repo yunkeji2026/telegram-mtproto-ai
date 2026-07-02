@@ -107,6 +107,10 @@ class TestL2EventAliases:
         rule = _EVENT_ALIASES["reassigned"]
         assert "draft_reassigned" in rule["types"]
 
+    def test_backlog_summary_alias(self):
+        rule = _EVENT_ALIASES["backlog_summary"]
+        assert "draft_backlog_summary" in rule["types"]
+
 
 class TestL2BuildMessage:
     def test_draft_created_l4(self):
@@ -132,6 +136,13 @@ class TestL2BuildMessage:
         })
         assert "再分配" in title
         assert "alice" in text
+
+    def test_backlog_summary(self):
+        title, text = _build_message("draft_backlog_summary", {
+            "count": 7, "l3": 3, "l4": 4, "sla_hours": 4,
+        })
+        assert "7" in title
+        assert "L3=3" in text and "L4=4" in text
 
     def test_unknown_event(self):
         title, text = _build_message("some_new_event", {"foo": "bar"})

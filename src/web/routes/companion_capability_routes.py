@@ -135,7 +135,7 @@ def _auto_ai_count(state):
         return None
 
 
-def _gather_readiness(state, window_hours):
+def _gather_readiness(state, window_hours, *, ref_summary=None):
     """从各运营数据源 best-effort 取数 → readiness_signals（signals/advice 共用）。"""
     from src.companion.readiness_signals import readiness_signals
 
@@ -170,18 +170,57 @@ def _gather_readiness(state, window_hours):
 
     return readiness_signals(
         text_quality=text_quality, proactive_quality=proactive_quality,
-        delivery={"autosend": sent, "autosend_failed": failed})
+        delivery={"autosend": sent, "autosend_failed": failed},
+        realtime_voice=_realtime_voice_stats_dump(),
+        voice_ref_summary=ref_summary)
+
+
+def _realtime_voice_stats_dump():
+    try:
+        from src.ai.realtime_voice_stats import get_realtime_voice_stats
+        return get_realtime_voice_stats().dump()
+    except Exception:
+        logger.debug("realtime_voice stats 读取失败", exc_info=True)
+        return None
+
+
+def _voice_ref_summary():
+    try:
+        from src.web.routes.voice_live_routes import collect_voice_ref_readiness_summary
+        return collect_voice_ref_readiness_summary()
+    except Exception:
+        logger.debug("voice ref summary 失败", exc_info=True)
+        return None
+
+
+def _memory_store_available(state) -> Optional[bool]:
+    store = getattr(state, "inbox_store", None)
+    if store is None:
+        return None
+    try:
+        sm = getattr(state, "skill_manager", None)
+        if sm is not None and getattr(sm, "_episodic_store", None) is not None:
+            return True
+        if getattr(state, "episodic_memory", None) is not None:
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def gather_companion_advice(state, config, window_hours: float = 168):
     """组合 能力档 × 信号 → build_advice（advice 端点与 ops-overview 共用，单一事实源）。"""
     from src.companion.capability_advisor import build_advice
     from src.companion.embedding_readiness import embedding_source_configured
+    from src.companion.realtime_voice_readiness import realtime_voice_host_configured
     status = _collect_status(state, config)
-    signals = _gather_readiness(state, window_hours)
+    ref_summary = _voice_ref_summary()
+    signals = _gather_readiness(state, window_hours, ref_summary=ref_summary)
     embed_ready = embedding_source_configured(config)
+    rtv_configured = realtime_voice_host_configured(config)
     return build_advice(status, signals, auto_ai=_auto_ai_count(state),
-                        embed_ready=embed_ready)
+                        embed_ready=embed_ready, rtv_configured=rtv_configured,
+                        rtv_ref_summary=ref_summary)
 
 
 def register_companion_capability_routes(app, *, api_auth) -> None:
@@ -249,6 +288,40 @@ def register_companion_capability_routes(app, *, api_auth) -> None:
             logger.warning("delivery calibration 计算失败", exc_info=True)
             return {"ok": False, "available": True, "message": "校准计算失败"}
         return {"ok": True, "available": True, "window_hours": window_hours, **data}
+
+    @app.get("/api/companion/capabilities/realtime-voice-calibration")
+    async def api_companion_realtime_voice_calibration(request: Request, _=Depends(api_auth)):
+        """实时语音开闸前校准：host 配置 + 参考音体检 + opener/字幕/记忆链 + 引擎载入。"""
+        from src.ai.realtime_voice import RealtimeVoiceConfig
+        from src.ai.realtime_voice_client import RealtimeVoiceClient
+        from src.companion.realtime_voice_calibration import realtime_voice_calibration
+        from src.web.routes.voice_live_routes import collect_voice_ref_readiness_summary
+
+        state = request.app.state
+        cm = getattr(state, "config_manager", None)
+        config = getattr(cm, "config", None) if cm is not None else None
+        if not isinstance(config, dict):
+            return {"ok": False, "available": False, "message": "config 未就绪"}
+        rvc = RealtimeVoiceConfig.from_config(config)
+        ref_summary = collect_voice_ref_readiness_summary()
+        engine_loaded = None
+        if rvc.enabled:
+            try:
+                import asyncio
+                st = await asyncio.to_thread(RealtimeVoiceClient(rvc).model_status)
+                engine_loaded = bool(st.get("model_loaded"))
+            except Exception:
+                logger.debug("realtime voice engine status 失败", exc_info=True)
+                engine_loaded = False
+        mem = _memory_store_available(state)
+        try:
+            data = realtime_voice_calibration(
+                config, ref_summary=ref_summary, engine_loaded=engine_loaded,
+                memory_store=mem if mem is not None else None)
+        except Exception:
+            logger.warning("realtime voice calibration 计算失败", exc_info=True)
+            return {"ok": False, "available": True, "message": "校准计算失败"}
+        return {"ok": True, "available": True, **data}
 
     @app.post("/api/companion/capabilities/toggle")
     async def api_companion_capability_toggle(request: Request, _=Depends(api_auth)):

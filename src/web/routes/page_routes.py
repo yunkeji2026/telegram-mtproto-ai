@@ -18,6 +18,7 @@ from pathlib import Path
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
+from src.web.web_i18n import tr
 
 # docs/training/... 相对仓库根：本文件位于 src/web/routes/ → parents[3] 为仓库根
 _TRAINING_SLIDES_PATH = (
@@ -34,13 +35,18 @@ def register_page_routes(app, ctx) -> None:
 
     @app.get("/help", response_class=HTMLResponse)
     async def help_page(request: Request, _=Depends(_page_auth)):
-        return templates.TemplateResponse(request, "help.html", {"request": request})
+        from src.web.help_commands import get_help_sections
+
+        return templates.TemplateResponse(request, "help.html", {
+            "request": request,
+            "help_sections": get_help_sections(),
+        })
 
     @app.get("/training", response_class=HTMLResponse)
     async def training_slides_page(request: Request, _=Depends(_page_auth)):
         """客服培训用全屏 HTML 幻灯片（需登录）。"""
         if not _TRAINING_SLIDES_PATH.is_file():
-            raise HTTPException(status_code=404, detail="培训演示文件未找到，请联系管理员部署 docs/training/")
+            raise HTTPException(status_code=404, detail=tr(request, "err.page.training_not_found"))
         html = _TRAINING_SLIDES_PATH.read_text(encoding="utf-8")
         return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 

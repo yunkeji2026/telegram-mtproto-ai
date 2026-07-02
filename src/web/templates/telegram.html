@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Telegram 设置{% endblock %}
+{% block title %}Telegram {{ (i18n or {}).get('ln_s015', "设置") }}{% endblock %}
 {% block content %}
 {# ══════════════════════════════════════════════════════════════════ #}
 {# 统一 RPA 组件库（4 平台共用）—— Telegram 是视觉基线                  #}
@@ -214,45 +214,45 @@ select.f-inp{cursor:pointer}
   <div class="tg-hero-info">
     <div class="tg-hero-name">
       <span class="tg-online-dot offline" id="h-dot"></span>
-      <span id="h-name">加载中…</span>
+      <span id="h-name">{{ (i18n or {}).get('dash.loading', "加载中…") }}</span>
     </div>
-    <div class="tg-hero-sub" id="h-sub">正在连接…</div>
+    <div class="tg-hero-sub" id="h-sub">{{ (i18n or {}).get('tg_s001', "正在连接…") }}</div>
   </div>
   <div class="tg-stats">
-    <div class="tg-stat"><span class="tg-stat-n" id="st-msg">—</span><span class="tg-stat-l">今日消息</span></div>
-    <div class="tg-stat"><span class="tg-stat-n" id="st-vin">—</span><span class="tg-stat-l">语音接收</span></div>
-    <div class="tg-stat"><span class="tg-stat-n" id="st-tts">—</span><span class="tg-stat-l">TTS 发送</span></div>
+    <div class="tg-stat"><span class="tg-stat-n" id="st-msg">—</span><span class="tg-stat-l">{{ (i18n or {}).get('tg_s002', "今日消息") }}</span></div>
+    <div class="tg-stat"><span class="tg-stat-n" id="st-vin">—</span><span class="tg-stat-l">{{ (i18n or {}).get('tg_s003', "语音接收") }}</span></div>
+    <div class="tg-stat"><span class="tg-stat-n" id="st-tts">—</span><span class="tg-stat-l">TTS {{ (i18n or {}).get('rpa_js_send', "发送") }}</span></div>
   </div>
-  <button class="tg-hero-refresh" onclick="loadAccountInfo()" title="刷新状态">↻</button>
+  <button class="tg-hero-refresh" onclick="loadAccountInfo()" title="{{ (i18n or {}).get('wa_s017', '刷新状态') }}">↻</button>
   <div class="preset-wrap">
     <button class="btn-sec" id="preset-toggle" onclick="togglePresets(event)" style="font-size:.78rem;padding:.38rem .7rem">
-      📋 预设
+      📋 {{ (i18n or {}).get('wa_s007', "预设") }}
     </button>
     <div class="preset-pop" id="preset-pop">
-      <div class="preset-lbl">应用场景预设（不保存，需手动点保存）</div>
+      <div class="preset-lbl">{{ (i18n or {}).get('tg_s004', "应用场景预设（不保存，需手动点保存）") }}</div>
       <div class="preset-divider"></div>
       <button class="preset-btn-item" onclick="applyPreset('companion')">
         <span class="pi">🤗</span><div>
-          <div style="font-weight:700">陈伴型对话</div>
-          <div style="font-size:.7rem;color:var(--t3)">克隆声音·仅语音触发·冷却 60s</div>
+          <div style="font-weight:700">{{ (i18n or {}).get('tg_s005', "陈伴型对话") }}</div>
+          <div style="font-size:.7rem;color:var(--t3)">{{ (i18n or {}).get('tg_s006', "克隆声音·仅语音触发·冷却") }} 60s</div>
         </div>
       </button>
       <button class="preset-btn-item" onclick="applyPreset('service')">
         <span class="pi">💬</span><div>
-          <div style="font-weight:700">高效客服型</div>
-          <div style="font-size:.7rem;color:var(--t3)">纯文字·本地 ASR·冷却 10s</div>
+          <div style="font-weight:700">{{ (i18n or {}).get('tg_s007', "高效客服型") }}</div>
+          <div style="font-size:.7rem;color:var(--t3)">{{ (i18n or {}).get('tg_s008', "纯文字·本地 ASR·冷却") }} 10s</div>
         </div>
       </button>
       <button class="preset-btn-item" onclick="applyPreset('voice_all')">
         <span class="pi">🎤</span><div>
-          <div style="font-weight:700">全语音互动</div>
-          <div style="font-size:.7rem;color:var(--t3)">Edge TTS·始终语音·冷却 5s</div>
+          <div style="font-weight:700">{{ (i18n or {}).get('tg_s009', "全语音互动") }}</div>
+          <div style="font-size:.7rem;color:var(--t3)">Edge TTS·{{ (i18n or {}).get('tg_s010', "始终语音·冷却") }} 5s</div>
         </div>
       </button>
       <button class="preset-btn-item" onclick="applyPreset('text_only')">
         <span class="pi">📝</span><div>
-          <div style="font-weight:700">纯文字模式</div>
-          <div style="font-size:.7rem;color:var(--t3)">关闭 TTS·保留 ASR 识别</div>
+          <div style="font-weight:700">{{ (i18n or {}).get('tg_s011', "纯文字模式") }}</div>
+          <div style="font-size:.7rem;color:var(--t3)">{{ (i18n or {}).get('tg_s012', "关闭 TTS·保留 ASR 识别") }}</div>
         </div>
       </button>
     </div>
@@ -262,16 +262,16 @@ select.f-inp{cursor:pointer}
 <!-- ══ TABS ═══════════════════════════════════════════════════════════════ -->
 <div class="st-bar">
   <button class="st-tab active" id="tab-reply" onclick="switchTab('reply')">
-    💬 消息处理<span class="tab-dot"></span>
+    💬 {{ (i18n or {}).get('tg_s013', "消息处理") }}<span class="tab-dot"></span>
   </button>
   <button class="st-tab" id="tab-voice" onclick="switchTab('voice')">
-    🎙️ 语音功能<span class="tab-dot"></span>
+    🎙️ {{ (i18n or {}).get('wa_s098', "语音功能") }}<span class="tab-dot"></span>
   </button>
   <button class="st-tab" id="tab-account" onclick="switchTab('account')">
-    👤 账号<span class="tab-dot"></span>
+    👤 {{ (i18n or {}).get('ov_js_th_account', "账号") }}<span class="tab-dot"></span>
   </button>
   <button class="st-tab" id="tab-funnel" onclick="switchTab('funnel')">
-    📈 运营漏斗
+    📈 {{ (i18n or {}).get('rpa_fn_title', "运营漏斗") }}
   </button>
 </div>
 
@@ -282,17 +282,17 @@ select.f-inp{cursor:pointer}
     <div class="tg-card-header">
       <div class="tg-card-icon blue">📨</div>
       <div>
-        <div class="tg-card-title">接收范围</div>
+        <div class="tg-card-title">{{ (i18n or {}).get('tg_s014', "接收范围") }}</div>
       </div>
     </div>
     <div style="display:flex;gap:2rem;flex-wrap:wrap">
       <label class="tg-toggle">
         <input type="checkbox" id="rl-process_private" onchange="markDirty('reply')">
-        <span class="tg-sw"></span><span class="tg-toggle-lbl">处理私聊</span>
+        <span class="tg-sw"></span><span class="tg-toggle-lbl">{{ (i18n or {}).get('tg_s015', "处理私聊") }}</span>
       </label>
       <label class="tg-toggle">
         <input type="checkbox" id="rl-process_groups" onchange="markDirty('reply')">
-        <span class="tg-sw"></span><span class="tg-toggle-lbl">处理群组消息</span>
+        <span class="tg-sw"></span><span class="tg-toggle-lbl">{{ (i18n or {}).get('tg_s016', "处理群组消息") }}</span>
       </label>
     </div>
   </div>
@@ -300,33 +300,33 @@ select.f-inp{cursor:pointer}
   <div class="tg-card">
     <div class="tg-card-header">
       <div class="tg-card-icon green">⚙️</div>
-      <div><div class="tg-card-title">回复逻辑</div></div>
+      <div><div class="tg-card-title">{{ (i18n or {}).get('tg_s017', "回复逻辑") }}</div></div>
     </div>
     <div class="f-grid2">
       <div class="f-row">
         <label class="f-lbl">
-          冷却时间（秒）
+          {{ (i18n or {}).get('tg_s018', "冷却时间（秒）") }}
           <span class="f-dur" id="rl-cooldown-dur"></span>
         </label>
         <input class="f-inp" type="number" id="rl-cooldown_seconds" min="0" max="86400"
           placeholder="60" oninput="updateDur('rl-cooldown_seconds','rl-cooldown-dur');markDirty('reply')">
-        <span class="f-hint">同一用户两次回复的最小间隔，0 = 不限制</span>
+        <span class="f-hint">{{ (i18n or {}).get('tg_s019', "同一用户两次回复的最小间隔，") }}0 = {{ (i18n or {}).get('tg_s020', "不限制") }}</span>
       </div>
       <div class="f-row">
-        <label class="f-lbl">最大连续回复次数</label>
+        <label class="f-lbl">{{ (i18n or {}).get('tg_s021', "最大连续回复次数") }}</label>
         <input class="f-inp" type="number" id="rl-max_consecutive_replies" min="1" max="999"
           placeholder="10" onchange="markDirty('reply')">
-        <span class="f-hint">超过后暂停自动回复</span>
+        <span class="f-hint">{{ (i18n or {}).get('tg_s022', "超过后暂停自动回复") }}</span>
       </div>
     </div>
     <div style="display:flex;gap:2rem;flex-wrap:wrap;margin-top:.3rem">
       <label class="tg-toggle">
         <input type="checkbox" id="rl-reply_to_user_message" onchange="markDirty('reply')">
-        <span class="tg-sw"></span><span class="tg-toggle-lbl">回复时引用原消息</span>
+        <span class="tg-sw"></span><span class="tg-toggle-lbl">{{ (i18n or {}).get('tg_s023', "回复时引用原消息") }}</span>
       </label>
       <label class="tg-toggle">
         <input type="checkbox" id="rl-ignore_edited" onchange="markDirty('reply')">
-        <span class="tg-sw"></span><span class="tg-toggle-lbl">忽略编辑过的消息</span>
+        <span class="tg-sw"></span><span class="tg-toggle-lbl">{{ (i18n or {}).get('tg_s024', "忽略编辑过的消息") }}</span>
       </label>
     </div>
   </div>
@@ -334,21 +334,21 @@ select.f-inp{cursor:pointer}
   <div class="tg-card">
     <div class="tg-card-header">
       <div class="tg-card-icon purple">🚫</div>
-      <div><div class="tg-card-title">屏蔽名单</div></div>
+      <div><div class="tg-card-title">{{ (i18n or {}).get('tg_s025', "屏蔽名单") }}</div></div>
     </div>
     <div class="f-row">
-      <label class="f-lbl">不自动回复的用户名（每行一个，不含 @）</label>
+      <label class="f-lbl">{{ (i18n or {}).get('tg_s026', "不自动回复的用户名（每行一个，不含") }} @）</label>
       <textarea class="f-inp" id="rl-no_reply_usernames" rows="4"
         placeholder="bot_name&#10;spam_user" style="resize:vertical;font-family:monospace;font-size:.82rem"
         oninput="markDirty('reply')"></textarea>
-      <span class="f-hint">命中此列表的用户名不会触发 AI 自动回复</span>
+      <span class="f-hint">{{ (i18n or {}).get('tg_s027', "命中此列表的用户名不会触发 AI 自动回复") }}</span>
       <div style="margin-top:.5rem">
         <button class="btn-sec" style="font-size:.75rem;padding:.3rem .6rem" onclick="toggleRecentContacts()">
-          📄 从最近联系人添加 <span id="contact-toggle-icon">▾</span>
+          📄 {{ (i18n or {}).get('tg_s028', "从最近联系人添加") }} <span id="contact-toggle-icon">▾</span>
         </button>
         <div class="contact-pane" id="contact-pane">
-          <div style="font-size:.75rem;color:var(--t3);margin-bottom:.2rem">灰色=已屏蔽，点 + 可将用户名加入上方返回列表</div>
-          <div class="contact-chips" id="contact-chips"><span class="contact-loading">加载中…</span></div>
+          <div style="font-size:.75rem;color:var(--t3);margin-bottom:.2rem">{{ (i18n or {}).get('tg_s029', "灰色") }}={{ (i18n or {}).get('tg_s030', "已屏蔽，点") }} + {{ (i18n or {}).get('tg_s031', "可将用户名加入上方返回列表") }}</div>
+          <div class="contact-chips" id="contact-chips"><span class="contact-loading">{{ (i18n or {}).get('dash.loading', "加载中…") }}</span></div>
         </div>
       </div>
     </div>
@@ -356,11 +356,11 @@ select.f-inp{cursor:pointer}
 
   <div class="save-bar">
     <span class="save-res" id="save-res-rl"></span>
-    <span style="font-size:.75rem;color:var(--t3)">保存即热更新，无需重启</span>
-    <button class="btn-sec" onclick="resetReplyLogic()">重置</button>
+    <span style="font-size:.75rem;color:var(--t3)">{{ (i18n or {}).get('tg_s032', "保存即热更新，无需重启") }}</span>
+    <button class="btn-sec" onclick="resetReplyLogic()">{{ (i18n or {}).get('psn_reset', "重置") }}</button>
     <button class="btn-p" onclick="saveReplyLogic()">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-      保存消息配置
+      {{ (i18n or {}).get('tg_s033', "保存消息配置") }}
     </button>
   </div>
 </div>
@@ -376,8 +376,8 @@ select.f-inp{cursor:pointer}
     <div class="tg-card-header">
       <div class="tg-card-icon blue">📥</div>
       <div>
-        <div class="tg-card-title">语音识别（接收用户语音）</div>
-        <div style="font-size:.75rem;color:var(--t3);margin-top:.1rem">将用户发来的语音消息转为文字，再由 AI 理解回复</div>
+        <div class="tg-card-title">{{ (i18n or {}).get('tg_s034', "语音识别（接收用户语音）") }}</div>
+        <div style="font-size:.75rem;color:var(--t3);margin-top:.1rem">{{ (i18n or {}).get('tg_s035', "将用户发来的语音消息转为文字，再由 AI 理解回复") }}</div>
       </div>
       <label class="tg-toggle" style="margin-left:auto">
         <input type="checkbox" id="asr-enabled" onchange="markDirty('voice')">
@@ -385,47 +385,47 @@ select.f-inp{cursor:pointer}
       </label>
     </div>
 
-    <div class="sub-hd">识别引擎</div>
+    <div class="sub-hd">{{ (i18n or {}).get('tg_s036', "识别引擎") }}</div>
     <div class="be-cards" id="asr-be-cards">
       <div class="be-card" data-val="faster_whisper" onclick="selectAsrProvider(this)">
         <div class="be-card-icon">⚡</div>
-        <div class="be-card-name">本地快速</div>
-        <div class="be-card-desc">faster-whisper<br>无需 API，速度快</div>
+        <div class="be-card-name">{{ (i18n or {}).get('tg_s037', "本地快速") }}</div>
+        <div class="be-card-desc">faster-whisper<br>{{ (i18n or {}).get('tg_s038', "无需 API，速度快") }}</div>
       </div>
       <div class="be-card" data-val="whisper_local" onclick="selectAsrProvider(this)">
         <div class="be-card-icon">🔬</div>
-        <div class="be-card-name">本地精准</div>
-        <div class="be-card-desc">OpenAI Whisper<br>精度更高，较慢</div>
+        <div class="be-card-name">{{ (i18n or {}).get('tg_s039', "本地精准") }}</div>
+        <div class="be-card-desc">OpenAI Whisper<br>{{ (i18n or {}).get('tg_s040', "精度更高，较慢") }}</div>
       </div>
       <div class="be-card" data-val="openai" onclick="selectAsrProvider(this)">
         <div class="be-card-icon">☁️</div>
-        <div class="be-card-name">云端 API</div>
-        <div class="be-card-desc">Groq / SiliconFlow<br>极速，需 API Key</div>
+        <div class="be-card-name">{{ (i18n or {}).get('tg_s041', "云端") }} API</div>
+        <div class="be-card-desc">Groq / SiliconFlow<br>{{ (i18n or {}).get('tg_s042', "极速，需") }} API Key</div>
       </div>
     </div>
     <input type="hidden" id="asr-provider" value="faster_whisper">
 
     <div class="f-row">
-      <label class="f-lbl">识别语言</label>
+      <label class="f-lbl">{{ (i18n or {}).get('tg_s043', "识别语言") }}</label>
       <select class="f-inp" id="asr-language" onchange="markDirty('voice')" style="max-width:220px">
-        <option value="auto">🌐 自动检测</option>
-        <option value="zh">🇨🇳 中文</option>
-        <option value="ja">🇯🇵 日语</option>
-        <option value="en">🇺🇸 英语</option>
-        <option value="ko">🇰🇷 韩语</option>
+        <option value="auto">🌐 {{ (i18n or {}).get('tg_s044', "自动检测") }}</option>
+        <option value="zh">🇨🇳 {{ (i18n or {}).get('dash.lang.zh', "中文") }}</option>
+        <option value="ja">🇯🇵 {{ (i18n or {}).get('dash.lang.ja', "日语") }}</option>
+        <option value="en">🇺🇸 {{ (i18n or {}).get('dash.lang.en', "英语") }}</option>
+        <option value="ko">🇰🇷 {{ (i18n or {}).get('dash.lang.ko', "韩语") }}</option>
       </select>
     </div>
 
     <!-- 云端 API 配置 -->
     <div id="asr-cloud-fields" style="display:none">
-      <div class="sub-hd">云端 API 配置</div>
+      <div class="sub-hd">{{ (i18n or {}).get('tg_s045', "云端 API 配置") }}</div>
       <div class="f-row">
         <label class="f-lbl">
           API Key
-          <span class="key-badge" id="asr-key-badge" style="display:none">🔑 已配置</span>
+          <span class="key-badge" id="asr-key-badge" style="display:none">🔑 {{ (i18n or {}).get('tg_s046', "已配置") }}</span>
         </label>
         <input class="f-inp" type="password" id="asr-api_key" placeholder="sk-..." onchange="markDirty('voice')">
-        <span class="f-hint">保存时留空则保留原密钥；填入新值则覆盖</span>
+        <span class="f-hint">{{ (i18n or {}).get('tg_s047', "保存时留空则保留原密钥；填入新值则覆盖") }}</span>
       </div>
       <div class="f-grid2">
         <div class="f-row">
@@ -434,7 +434,7 @@ select.f-inp{cursor:pointer}
           <span class="f-hint"><a href="https://console.groq.com" target="_blank">Groq</a> · <a href="https://siliconflow.cn" target="_blank">SiliconFlow</a></span>
         </div>
         <div class="f-row">
-          <label class="f-lbl">模型名</label>
+          <label class="f-lbl">{{ (i18n or {}).get('tg_s048', "模型名") }}</label>
           <input class="f-inp" type="text" id="asr-model" placeholder="whisper-large-v3-turbo" onchange="markDirty('voice')">
           <span class="f-hint">SiliconFlow: FunAudioLLM/SenseVoiceSmall</span>
         </div>
@@ -443,22 +443,22 @@ select.f-inp{cursor:pointer}
 
     <!-- 本地模型配置 -->
     <div id="asr-local-fields">
-      <div class="sub-hd">本地模型配置</div>
+      <div class="sub-hd">{{ (i18n or {}).get('tg_s049', "本地模型配置") }}</div>
       <div class="f-grid2">
         <div class="f-row">
-          <label class="f-lbl">模型大小</label>
+          <label class="f-lbl">{{ (i18n or {}).get('tg_s050', "模型大小") }}</label>
           <select class="f-inp" id="asr-model_size" onchange="markDirty('voice')">
-            <option value="tiny">tiny — 最快，精度低</option>
-            <option value="base">base — 均衡（推荐）</option>
+            <option value="tiny">tiny — {{ (i18n or {}).get('tg_s051', "最快，精度低") }}</option>
+            <option value="base">base — {{ (i18n or {}).get('tg_s052', "均衡（推荐）") }}</option>
             <option value="small">small</option>
             <option value="medium">medium</option>
-            <option value="large-v3">large-v3 — 最精准</option>
+            <option value="large-v3">large-v3 — {{ (i18n or {}).get('tg_s053', "最精准") }}</option>
           </select>
         </div>
         <div class="f-row">
-          <label class="f-lbl">推理设备</label>
+          <label class="f-lbl">{{ (i18n or {}).get('tg_s054', "推理设备") }}</label>
           <select class="f-inp" id="asr-device" onchange="markDirty('voice')">
-            <option value="cpu">CPU（通用）</option>
+            <option value="cpu">CPU（{{ (i18n or {}).get('tg_s055', "通用）") }}</option>
             <option value="cuda">CUDA（NVIDIA GPU）</option>
           </select>
         </div>
@@ -471,8 +471,8 @@ select.f-inp{cursor:pointer}
     <div class="tg-card-header">
       <div class="tg-card-icon green">📤</div>
       <div>
-        <div class="tg-card-title">语音回复（向用户发语音）</div>
-        <div style="font-size:.75rem;color:var(--t3);margin-top:.1rem">AI 回复通过 TTS 合成语音后发送，替代纯文字</div>
+        <div class="tg-card-title">{{ (i18n or {}).get('tg_s056', "语音回复（向用户发语音）") }}</div>
+        <div style="font-size:.75rem;color:var(--t3);margin-top:.1rem">AI {{ (i18n or {}).get('tg_s057', "回复通过 TTS 合成语音后发送，替代纯文字") }}</div>
       </div>
       <label class="tg-toggle" style="margin-left:auto">
         <input type="checkbox" id="vr-enabled" onchange="markDirty('voice')">
@@ -480,29 +480,29 @@ select.f-inp{cursor:pointer}
       </label>
     </div>
 
-    <div class="sub-hd">触发方式</div>
+    <div class="sub-hd">{{ (i18n or {}).get('tg_s058', "触发方式") }}</div>
     <div class="tr-cards" id="vr-trigger-cards">
       <div class="tr-card" data-val="when_peer_voice" onclick="selectTrigger(this)">
-        <div class="tr-card-top">🎤 仅收到语音时</div>
-        <div class="tr-card-sub">对方发语音 → 我也语音回</div>
+        <div class="tr-card-top">🎤 {{ (i18n or {}).get('tg_s059', "仅收到语音时") }}</div>
+        <div class="tr-card-sub">{{ (i18n or {}).get('tg_s060', "对方发语音") }} → {{ (i18n or {}).get('tg_s061', "我也语音回") }}</div>
       </div>
       <div class="tr-card" data-val="always" onclick="selectTrigger(this)">
-        <div class="tr-card-top">🔊 始终回语音</div>
-        <div class="tr-card-sub">所有消息都用语音</div>
+        <div class="tr-card-top">🔊 {{ (i18n or {}).get('tg_s062', "始终回语音") }}</div>
+        <div class="tr-card-sub">{{ (i18n or {}).get('tg_s063', "所有消息都用语音") }}</div>
       </div>
       <div class="tr-card" data-val="random" onclick="selectTrigger(this)">
-        <div class="tr-card-top">🎲 随机概率</div>
-        <div class="tr-card-sub">按概率随机触发</div>
+        <div class="tr-card-top">🎲 {{ (i18n or {}).get('wa_s110', "随机概率") }}</div>
+        <div class="tr-card-sub">{{ (i18n or {}).get('tg_s064', "按概率随机触发") }}</div>
       </div>
       <div class="tr-card" data-val="never" onclick="selectTrigger(this)">
-        <div class="tr-card-top">🔇 关闭</div>
-        <div class="tr-card-sub">只发文字</div>
+        <div class="tr-card-top">🔇 {{ (i18n or {}).get('ov_js_disable', "关闭") }}</div>
+        <div class="tr-card-sub">{{ (i18n or {}).get('tg_s065', "只发文字") }}</div>
       </div>
     </div>
     <input type="hidden" id="vr-trigger" value="when_peer_voice">
 
     <div id="vr-prob-row" class="f-row" style="display:none;margin-top:.5rem">
-      <label class="f-lbl">随机触发概率</label>
+      <label class="f-lbl">{{ (i18n or {}).get('tg_s066', "随机触发概率") }}</label>
       <div class="prob-row">
         <input type="range" id="vr-probability" min="0" max="100" value="30"
           oninput="document.getElementById('vr-prob-val').textContent=this.value+'%';markDirty('voice')">
@@ -510,51 +510,51 @@ select.f-inp{cursor:pointer}
       </div>
     </div>
 
-    <div class="sub-hd" style="margin-top:1.1rem">TTS 引擎</div>
+    <div class="sub-hd" style="margin-top:1.1rem">TTS {{ (i18n or {}).get('tg_s067', "引擎") }}</div>
     <div class="be-cards" id="vr-be-cards">
       <div class="be-card" data-val="voice_clone_command" onclick="selectTtsBackend(this)">
         <div class="be-card-icon">🤖</div>
-        <div class="be-card-name">克隆声音</div>
-        <div class="be-card-desc">Qwen TTS<br>最自然，需参考音频</div>
+        <div class="be-card-name">{{ (i18n or {}).get('tg_s068', "克隆声音") }}</div>
+        <div class="be-card-desc">Qwen TTS<br>{{ (i18n or {}).get('tg_s069', "最自然，需参考音频") }}</div>
       </div>
       <div class="be-card" data-val="edge_tts" onclick="selectTtsBackend(this)">
         <div class="be-card-icon">🔵</div>
-        <div class="be-card-name">微软 Edge</div>
-        <div class="be-card-desc">多语言，完全免费<br>延迟低</div>
+        <div class="be-card-name">{{ (i18n or {}).get('tg_s070', "微软") }} Edge</div>
+        <div class="be-card-desc">{{ (i18n or {}).get('tg_s071', "多语言，完全免费") }}<br>{{ (i18n or {}).get('tg_s072', "延迟低") }}</div>
       </div>
       <div class="be-card" data-val="openai" onclick="selectTtsBackend(this)">
         <div class="be-card-icon">🟢</div>
         <div class="be-card-name">OpenAI TTS</div>
-        <div class="be-card-desc">高质量音色<br>需 API Key</div>
+        <div class="be-card-desc">{{ (i18n or {}).get('tg_s073', "高质量音色") }}<br>{{ (i18n or {}).get('tg_s074', "需") }} API Key</div>
       </div>
     </div>
     <input type="hidden" id="vr-backend" value="voice_clone_command">
 
     <!-- 克隆声音配置 -->
     <div id="vr-clone-fields">
-      <div class="sub-hd">克隆声音配置</div>
+      <div class="sub-hd">{{ (i18n or {}).get('tg_s075', "克隆声音配置") }}</div>
       <div class="f-row">
-        <label class="f-lbl">参考音频文件路径 <span style="color:var(--red)">*</span></label>
+        <label class="f-lbl">{{ (i18n or {}).get('tg_s076', "参考音频文件路径") }} <span style="color:var(--red)">*</span></label>
         <div style="display:flex;gap:.4rem;align-items:center">
           <input class="f-inp" type="text" id="vr-reference_audio_path" style="flex:1"
             placeholder="D:/workspace/voice_samples/my_voice.wav"
             onchange="markDirty('voice')" oninput="checkRefAudio()">
-          <button class="btn-sec" onclick="openVoicePicker()" title="浏览语音文件" style="flex-shrink:0;white-space:nowrap;padding:.38rem .6rem">
-            📂 选择
+          <button class="btn-sec" onclick="openVoicePicker()" title="{{ (i18n or {}).get('tg_s077', '浏览语音文件') }}" style="flex-shrink:0;white-space:nowrap;padding:.38rem .6rem">
+            📂 {{ (i18n or {}).get('tg_s078', "选择") }}
           </button>
         </div>
-        <span class="f-hint" id="vr-ref-hint">WAV 格式，10–30 秒干净人声，用于声音克隆</span>
+        <span class="f-hint" id="vr-ref-hint">WAV {{ (i18n or {}).get('tg_s079', "格式，") }}10–30 {{ (i18n or {}).get('tg_s080', "秒干净人声，用于声音克隆") }}</span>
       </div>
       <div class="f-row">
-        <label class="f-lbl">声音配置文件路径（可选）</label>
+        <label class="f-lbl">{{ (i18n or {}).get('tg_s081', "声音配置文件路径（可选）") }}</label>
         <input class="f-inp" type="text" id="vr-voice_profile_path"
           placeholder="D:/workspace/telegram-mtproto-ai/voice_samples/qwen_my_voice.json"
           onchange="markDirty('voice')">
-        <span class="f-hint">qwen_tts_wrapper.py 生成的 JSON 文件</span>
+        <span class="f-hint">qwen_tts_wrapper.py {{ (i18n or {}).get('tg_s082', "生成的 JSON 文件") }}</span>
       </div>
       <div class="f-grid2">
         <div class="f-row">
-          <label class="f-lbl">克隆命令超时（秒）</label>
+          <label class="f-lbl">{{ (i18n or {}).get('tg_s083', "克隆命令超时（秒）") }}</label>
           <input class="f-inp" type="number" id="vr-cmd_timeout" min="30" max="600" placeholder="120" onchange="markDirty('voice')">
         </div>
       </div>
@@ -562,52 +562,52 @@ select.f-inp{cursor:pointer}
 
     <!-- 微软 Edge TTS 配置 -->
     <div id="vr-edge-fields" style="display:none">
-      <div class="sub-hd">微软 Edge TTS 配置</div>
+      <div class="sub-hd">{{ (i18n or {}).get('tg_s084', "微软 Edge TTS 配置") }}</div>
       <div class="f-row">
-        <label class="f-lbl">声线</label>
+        <label class="f-lbl">{{ (i18n or {}).get('tg_s085', "声线") }}</label>
         <input class="f-inp" type="text" id="vr-voice" list="edge-voice-list"
           placeholder="ja-JP-NanamiNeural" onchange="markDirty('voice')">
         <datalist id="edge-voice-list">
-          <option value="zh-CN-XiaoxiaoNeural">小晓 — 中文女声（推荐）</option>
-          <option value="zh-CN-YunxiNeural">云希 — 中文男声</option>
-          <option value="zh-CN-XiaoyiNeural">晓伊 — 中文女声（活泼）</option>
-          <option value="zh-TW-HsiaoChenNeural">曉臻 — 台湾中文女声</option>
-          <option value="ja-JP-NanamiNeural">七海 — 日语女声</option>
-          <option value="ja-JP-KeitaNeural">慶太 — 日语男声</option>
-          <option value="en-US-JennyNeural">Jenny — 英语女声</option>
-          <option value="ko-KR-SunHiNeural">선희 — 韩语女声</option>
+          <option value="zh-CN-XiaoxiaoNeural">{{ (i18n or {}).get('tg_s086', "小晓") }} — {{ (i18n or {}).get('tg_s087', "中文女声（推荐）") }}</option>
+          <option value="zh-CN-YunxiNeural">{{ (i18n or {}).get('tg_s088', "云希") }} — {{ (i18n or {}).get('tg_s089', "中文男声") }}</option>
+          <option value="zh-CN-XiaoyiNeural">{{ (i18n or {}).get('tg_s090', "晓伊") }} — {{ (i18n or {}).get('tg_s091', "中文女声（活泼）") }}</option>
+          <option value="zh-TW-HsiaoChenNeural">{{ (i18n or {}).get('tg_s092', "曉臻") }} — {{ (i18n or {}).get('tg_s093', "台湾中文女声") }}</option>
+          <option value="ja-JP-NanamiNeural">{{ (i18n or {}).get('tg_s094', "七海") }} — {{ (i18n or {}).get('tg_s095', "日语女声") }}</option>
+          <option value="ja-JP-KeitaNeural">{{ (i18n or {}).get('tg_s096', "慶太") }} — {{ (i18n or {}).get('tg_s097', "日语男声") }}</option>
+          <option value="en-US-JennyNeural">Jenny — {{ (i18n or {}).get('tg_s098', "英语女声") }}</option>
+          <option value="ko-KR-SunHiNeural">선희 — {{ (i18n or {}).get('tg_s099', "韩语女声") }}</option>
         </datalist>
-        <span class="f-hint">从下拉选择或手动填入 Edge TTS 声线名</span>
+        <span class="f-hint">{{ (i18n or {}).get('tg_s100', "从下拉选择或手动填入 Edge TTS 声线名") }}</span>
       </div>
     </div>
 
     <!-- OpenAI TTS 配置 -->
     <div id="vr-oai-fields" style="display:none">
-      <div class="sub-hd">OpenAI TTS 配置</div>
+      <div class="sub-hd">OpenAI TTS {{ (i18n or {}).get('msg_js_1056', "配置") }}</div>
       <div class="f-row">
         <label class="f-lbl">
           API Key
-          <span class="key-badge" id="vr-oai-key-badge" style="display:none">🔑 已配置</span>
+          <span class="key-badge" id="vr-oai-key-badge" style="display:none">🔑 {{ (i18n or {}).get('tg_s046', "已配置") }}</span>
         </label>
         <input class="f-inp" type="password" id="vr-oai_api_key" placeholder="sk-..." onchange="markDirty('voice')">
       </div>
       <div class="f-grid2">
         <div class="f-row">
-          <label class="f-lbl">声线</label>
+          <label class="f-lbl">{{ (i18n or {}).get('tg_s085', "声线") }}</label>
           <select class="f-inp" id="vr-oai_voice" onchange="markDirty('voice')">
-            <option value="alloy">alloy — 中性</option>
-            <option value="echo">echo — 男声</option>
-            <option value="fable">fable — 英式男声</option>
-            <option value="onyx">onyx — 深沉男声</option>
-            <option value="nova">nova — 活泼女声</option>
-            <option value="shimmer">shimmer — 柔和女声</option>
+            <option value="alloy">alloy — {{ (i18n or {}).get('tg_s101', "中性") }}</option>
+            <option value="echo">echo — {{ (i18n or {}).get('tg_s102', "男声") }}</option>
+            <option value="fable">fable — {{ (i18n or {}).get('tg_s103', "英式男声") }}</option>
+            <option value="onyx">onyx — {{ (i18n or {}).get('tg_s104', "深沉男声") }}</option>
+            <option value="nova">nova — {{ (i18n or {}).get('tg_s105', "活泼女声") }}</option>
+            <option value="shimmer">shimmer — {{ (i18n or {}).get('tg_s106', "柔和女声") }}</option>
           </select>
         </div>
         <div class="f-row">
-          <label class="f-lbl">模型</label>
+          <label class="f-lbl">{{ (i18n or {}).get('msg_js_1218', "模型") }}</label>
           <select class="f-inp" id="vr-oai_model" onchange="markDirty('voice')">
-            <option value="tts-1">tts-1（速度快）</option>
-            <option value="tts-1-hd">tts-1-hd（质量高）</option>
+            <option value="tts-1">tts-1（{{ (i18n or {}).get('tg_s107', "速度快）") }}</option>
+            <option value="tts-1-hd">tts-1-hd（{{ (i18n or {}).get('tg_s108', "质量高）") }}</option>
           </select>
         </div>
       </div>
@@ -618,14 +618,14 @@ select.f-inp{cursor:pointer}
     <div class="f-grid2">
       <div class="f-row">
         <label class="f-lbl">
-          最大字符数
-          <span class="f-hint" style="margin:0;font-size:.7rem">（超出则发文字）</span>
+          {{ (i18n or {}).get('tg_s109', "最大字符数") }}
+          <span class="f-hint" style="margin:0;font-size:.7rem">（{{ (i18n or {}).get('tg_s110', "超出则发文字）") }}</span>
         </label>
         <input class="f-inp" type="number" id="vr-max_text_chars" min="10" max="1000" placeholder="200" onchange="markDirty('voice')">
       </div>
       <div class="f-row">
         <label class="f-lbl">
-          合成超时（秒）
+          {{ (i18n or {}).get('tg_s111', "合成超时（秒）") }}
           <span class="f-dur" id="vr-timeout-dur"></span>
         </label>
         <input class="f-inp" type="number" id="vr-timeout_sec" min="10" max="300" placeholder="60"
@@ -635,16 +635,16 @@ select.f-inp{cursor:pointer}
     <label class="tg-toggle">
       <input type="checkbox" id="vr-send_text_summary" onchange="markDirty('voice')">
       <span class="tg-sw"></span>
-      <span class="tg-toggle-lbl">同时发送文字摘要</span>
+      <span class="tg-toggle-lbl">{{ (i18n or {}).get('tg_s112', "同时发送文字摘要") }}</span>
     </label>
 
     <!-- TTS 试听 -->
     <div class="tg-sect-div"></div>
-    <div class="sub-hd">试听</div>
+    <div class="sub-hd">{{ (i18n or {}).get('wa_s116', "试听") }}</div>
     <div class="preview-row">
-      <input class="f-inp" type="text" id="preview-text" placeholder="输入测试文字，点击试听…" maxlength="100">
+      <input class="f-inp" type="text" id="preview-text" placeholder="{{ (i18n or {}).get('tg_s113', '输入测试文字，点击试听…') }}" maxlength="100">
       <button class="btn-p" id="preview-btn" onclick="testTts()" style="flex-shrink:0">
-        ▶ 试听
+        ▶ {{ (i18n or {}).get('wa_s116', "试听") }}
       </button>
     </div>
     <div id="preview-result" style="font-size:.78rem;color:var(--t3);margin-top:.4rem"></div>
@@ -653,11 +653,11 @@ select.f-inp{cursor:pointer}
 
   <div class="save-bar">
     <span class="save-res" id="save-res-voice"></span>
-    <span style="font-size:.75rem;color:var(--t3)">ASR 模型切换需重启生效</span>
-    <button class="btn-sec" onclick="resetVoice()">重置</button>
+    <span style="font-size:.75rem;color:var(--t3)">ASR {{ (i18n or {}).get('tg_s114', "模型切换需重启生效") }}</span>
+    <button class="btn-sec" onclick="resetVoice()">{{ (i18n or {}).get('psn_reset', "重置") }}</button>
     <button class="btn-p" onclick="saveVoice()">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-      保存语音配置
+      {{ (i18n or {}).get('tg_s115', "保存语音配置") }}
     </button>
   </div>
 </div>
@@ -666,7 +666,7 @@ select.f-inp{cursor:pointer}
 <div class="modal-ov" id="voice-picker-modal" onclick="closeVoicePicker(event)">
   <div class="modal-box">
     <div class="modal-hdr">
-      <span class="modal-title">📂 选择参考音频文件</span>
+      <span class="modal-title">📂 {{ (i18n or {}).get('tg_s116', "选择参考音频文件") }}</span>
       <button class="modal-cls" onclick="closeVoicePicker()">✕</button>
     </div>
     <div class="modal-body">
@@ -676,14 +676,14 @@ select.f-inp{cursor:pointer}
         ondragleave="this.classList.remove('drag-over')"
         ondrop="handleVoiceDrop(event)">
         <span class="ua-icon">📤</span>
-        点击上传 .wav 文件，或拖放到此处
-        <div class="ua-hint">推荐 10–30 秒干净人声 · 最大 20MB · WAV 格式</div>
+        {{ (i18n or {}).get('tg_s117', "点击上传 .wav 文件，或拖放到此处") }}
+        <div class="ua-hint">{{ (i18n or {}).get('dash.q.recommended', "推荐") }} 10–30 {{ (i18n or {}).get('tg_s118', "秒干净人声 · 最大 20MB · WAV 格式") }}</div>
       </div>
       <input type="file" id="voice-file-input" accept=".wav" style="display:none" onchange="handleVoiceFileSelect(event)">
       <div class="upload-status" id="upload-status"></div>
       <div id="upload-quality"></div>
-      <div class="sub-hd">📁 voice_samples/ 中的文件</div>
-      <div id="vf-list-wrap"><div class="vf-empty">加载中…</div></div>
+      <div class="sub-hd">📁 voice_samples/ {{ (i18n or {}).get('tg_s119', "中的文件") }}</div>
+      <div id="vf-list-wrap"><div class="vf-empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
       <audio id="picker-audio" style="display:none"></audio>
     </div>
   </div>
@@ -694,8 +694,8 @@ select.f-inp{cursor:pointer}
   <div class="tg-card">
     <div class="tg-card-header">
       <div class="tg-card-icon blue">👤</div>
-      <div><div class="tg-card-title">当前账号</div></div>
-      <button class="tg-hero-refresh" onclick="loadAccountInfo()" style="margin-left:auto">↻ 刷新</button>
+      <div><div class="tg-card-title">{{ (i18n or {}).get('tg_s120', "当前账号") }}</div></div>
+      <button class="tg-hero-refresh" onclick="loadAccountInfo()" style="margin-left:auto">↻ {{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
     </div>
     <div style="display:flex;align-items:center;gap:1rem;background:var(--input);border-radius:12px;border:1px solid var(--bd);padding:1rem 1.2rem;margin-bottom:.9rem;flex-wrap:wrap">
       <div style="width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,#229ed9,#1a7abf);display:flex;align-items:center;justify-content:center;flex-shrink:0">
@@ -707,21 +707,21 @@ select.f-inp{cursor:pointer}
         <div style="font-size:.78rem;color:var(--t3)" id="acc-phone"></div>
       </div>
       <div id="acc-status" style="display:flex;align-items:center;gap:.4rem;font-size:.8rem;font-weight:600">
-        <span class="tg-online-dot offline" id="acc-dot"></span><span id="acc-status-txt">检测中</span>
+        <span class="tg-online-dot offline" id="acc-dot"></span><span id="acc-status-txt">{{ (i18n or {}).get('tg_s121', "检测中") }}</span>
       </div>
     </div>
-    <p style="font-size:.75rem;color:var(--t3)">会话文件：<code id="acc-session">—</code></p>
+    <p style="font-size:.75rem;color:var(--t3)">{{ (i18n or {}).get('tg_s122', "会话文件：") }}<code id="acc-session">—</code></p>
   </div>
 
   <div class="tg-card">
     <div class="tg-card-header">
       <div class="tg-card-icon purple">📊</div>
-      <div><div class="tg-card-title">今日统计</div></div>
+      <div><div class="tg-card-title">{{ (i18n or {}).get('tg_s123', "今日统计") }}</div></div>
     </div>
     <div style="display:flex;gap:1rem;flex-wrap:wrap">
-      <div class="tg-stat" style="flex:1"><span class="tg-stat-n" id="acc-st-msg">—</span><span class="tg-stat-l">文字消息</span></div>
-      <div class="tg-stat" style="flex:1"><span class="tg-stat-n" id="acc-st-vin">—</span><span class="tg-stat-l">收到语音</span></div>
-      <div class="tg-stat" style="flex:1"><span class="tg-stat-n" id="acc-st-tts">—</span><span class="tg-stat-l">TTS 发送</span></div>
+      <div class="tg-stat" style="flex:1"><span class="tg-stat-n" id="acc-st-msg">—</span><span class="tg-stat-l">{{ (i18n or {}).get('tg_s124', "文字消息") }}</span></div>
+      <div class="tg-stat" style="flex:1"><span class="tg-stat-n" id="acc-st-vin">—</span><span class="tg-stat-l">{{ (i18n or {}).get('tg_s125', "收到语音") }}</span></div>
+      <div class="tg-stat" style="flex:1"><span class="tg-stat-n" id="acc-st-tts">—</span><span class="tg-stat-l">TTS {{ (i18n or {}).get('rpa_js_send', "发送") }}</span></div>
     </div>
   </div>
 
@@ -729,24 +729,24 @@ select.f-inp{cursor:pointer}
   <div class="tg-card">
     <div class="tg-card-header">
       <div class="tg-card-icon blue">📜</div>
-      <div><div class="tg-card-title">运行日志</div></div>
+      <div><div class="tg-card-title">{{ (i18n or {}).get('wa_s025', "运行日志") }}</div></div>
       <div class="log-toolbar" style="margin-left:auto;margin-bottom:0">
         <span class="log-live-dot" id="log-live-dot" style="display:none"></span>
         <span style="font-size:.72rem;color:var(--t3)" id="log-last-updated"></span>
-        <button class="tg-hero-refresh" onclick="refreshLogTail()">↻ 刷新</button>
+        <button class="tg-hero-refresh" onclick="refreshLogTail()">↻ {{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
       </div>
     </div>
     <div class="log-wrap" id="log-tail">
-      <div class="log-empty">点击刺新加载日志…</div>
+      <div class="log-empty">{{ (i18n or {}).get('tg_s126', "点击刺新加载日志…") }}</div>
     </div>
   </div>
 
   <div class="tg-card">
     <div class="tg-card-header">
       <div class="tg-card-icon green">✅</div>
-      <div><div class="tg-card-title">配置摘要</div></div>
-      <button class="btn-sec" onclick="exportConfig()" style="margin-left:auto;font-size:.75rem;padding:.3rem .6rem" title="导出 Telegram 配置为 JSON">
-        ⬇️ 导出
+      <div><div class="tg-card-title">{{ (i18n or {}).get('tg_s127', "配置摘要") }}</div></div>
+      <button class="btn-sec" onclick="exportConfig()" style="margin-left:auto;font-size:.75rem;padding:.3rem .6rem" title="{{ (i18n or {}).get('tg_s128', '导出 Telegram 配置为') }} JSON">
+        ⬇️ {{ (i18n or {}).get('export', "导出") }}
       </button>
     </div>
     <div id="acc-badges" style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.8rem"></div>
@@ -757,10 +757,10 @@ select.f-inp{cursor:pointer}
   <div class="tg-card">
     <div class="tg-card-header">
       <div class="tg-card-icon" style="background:rgba(168,85,247,.12);color:#9333ea">🗂️</div>
-      <div><div class="tg-card-title">版本历史（自动快照）</div><div style="font-size:.72rem;color:var(--t3)">每次保存配置时自动建立快照，支持一键恢复</div></div>
+      <div><div class="tg-card-title">{{ (i18n or {}).get('tg_s129', "版本历史（自动快照）") }}</div><div style="font-size:.72rem;color:var(--t3)">{{ (i18n or {}).get('tg_s130', "每次保存配置时自动建立快照，支持一键恢复") }}</div></div>
       <button class="tg-hero-refresh" onclick="loadSnapshots()" style="margin-left:auto">↻</button>
     </div>
-    <div id="snap-list"><div class="snap-empty">点击刷新加载…</div></div>
+    <div id="snap-list"><div class="snap-empty">{{ (i18n or {}).get('wa_s148', "点击刷新加载…") }}</div></div>
   </div>
 </div>
 
@@ -813,9 +813,9 @@ function show(id,vis){ const el=document.getElementById(id); if(el) el.style.dis
 function humanDur(sec){
   const s=parseInt(sec)||0;
   if(!s) return '';
-  if(s<60) return `${s}秒`;
-  if(s<3600) return `${Math.round(s/60)}分钟`;
-  return `${(s/3600).toFixed(1)}小时`;
+  if(s<60) return window.Tf('tg_js_p01', {s: s});
+  if(s<3600) return window.Tf('tg_js_p02', {n: Math.round(s/60)});
+  return window.Tf('tg_js_p03', {n: (s/3600).toFixed(1)});
 }
 function updateDur(inputId, labelId){
   const el=document.getElementById(labelId);
@@ -834,7 +834,7 @@ async function apiFetch(url,method='GET',body=null){
   if(body) opt.body=JSON.stringify(body);
   const r=await fetch(url,opt);
   const d=await r.json();
-  if(!r.ok) throw new Error(d.detail||'请求失败');
+  if(!r.ok) throw new Error(d.detail||window.T('ov_js_req_fail'));
   return d;
 }
 
@@ -882,11 +882,11 @@ function checkRefAudio(){
   const v=$v('vr-reference_audio_path').trim();
   const el=document.getElementById('vr-ref-hint');
   if(!el) return;
-  if(!v){ el.textContent='WAV 格式，10–30 秒干净人声，用于声音克隆'; el.style.color=''; return; }
+  if(!v){ el.textContent='WAV '+window.T('tg_s079')+'10–30 '+window.T('tg_s080'); el.style.color=''; return; }
   if(!v.toLowerCase().endsWith('.wav')){
-    el.textContent='⚠️ 建议使用 .wav 格式'; el.style.color='var(--red)';
+    el.textContent='⚠️ '+window.T('tg_js_001'); el.style.color='var(--red)';
   } else {
-    el.textContent='✓ 路径格式正确'; el.style.color='var(--green)';
+    el.textContent='✓ '+window.T('tg_js_002'); el.style.color='var(--green)';
   }
 }
 
@@ -997,7 +997,7 @@ function resetVoice(){
 
 /* ─── Save reply logic ──────────────────────────────────────── */
 async function saveReplyLogic(){
-  setRes('save-res-rl','保存中…');
+  setRes('save-res-rl',window.T('ov_js_saving'));
   try{
     const nu=document.getElementById('rl-no_reply_usernames').value
       .split('\n').map(s=>s.trim()).filter(Boolean);
@@ -1014,14 +1014,14 @@ async function saveReplyLogic(){
     };
     const d=await apiFetch('/api/telegram/settings/reply-logic','PUT',body);
     _origSettings = null; // force re-fetch on next reset
-    setRes('save-res-rl',`✓ 已保存（${d.updated.length} 项，热更新中）`,'ok');
+    setRes('save-res-rl',window.Tf('tg_js_p04', {n: d.updated.length}),'ok');
     clearDirty('reply');
-  } catch(e){ setRes('save-res-rl','保存失败：'+e.message,'err'); }
+  } catch(e){ setRes('save-res-rl',window.T('ov_js_save_fail_e')+e.message,'err'); }
 }
 
 /* ─── Save voice ────────────────────────────────────────────── */
 async function saveVoice(){
-  setRes('save-res-voice','保存中…');
+  setRes('save-res-voice',window.T('ov_js_saving'));
   try{
     const prob=parseInt($v('vr-probability')||30)/100;
     const backend=$v('vr-backend');
@@ -1063,11 +1063,11 @@ async function saveVoice(){
     };
     const d2=await apiFetch('/api/telegram/settings/voice-asr','PUT',asrBody);
     const total=d1.updated.length+d2.updated.length;
-    setRes('save-res-voice',`✓ 已保存（${total} 项）`,'ok');
+    setRes('save-res-voice',window.Tf('tg_js_p05', {n: total}),'ok');
     clearDirty('voice');
     await loadSettings();
     loadHealth();
-  } catch(e){ setRes('save-res-voice','保存失败：'+e.message,'err'); }
+  } catch(e){ setRes('save-res-voice',window.T('ov_js_save_fail_e')+e.message,'err'); }
 }
 
 /* ─── Health Check ─────────────────────────────────────────────── */
@@ -1078,7 +1078,7 @@ async function loadHealth(){
     if(!banner) return;
     const issues=d.issues||[];
     if(issues.length===0){
-      banner.innerHTML=`<div class="hb-item ok"><span class="hb-icon">✅</span>语音配置正常，无异常</div>`;
+      banner.innerHTML=`<div class="hb-item ok"><span class="hb-icon">✅</span>${window.T('tg_js_031')}</div>`;
     } else {
       banner.innerHTML=issues.map(i=>{
         const icon = i.level==='error'?'❌': i.level==='warning'?'⚠️':'ℹ️';
@@ -1155,8 +1155,8 @@ function applyPreset(name){
 
   // Switch to voice tab so user sees the changes
   switchTab('voice');
-  const labels={companion:'🤗 陈伴型', service:'💬 客服型', voice_all:'🎤 全语音', text_only:'📝 纯文字'};
-  setRes('save-res-voice',`已应用「${labels[name]||name}」预设，请检查后点保存`,'');
+  const labels={companion:'🤗 '+window.T('tg_js_003'), service:'💬 '+window.T('psn_tpl_service'), voice_all:'🎤 '+window.T('tg_js_004'), text_only:'📝 '+window.T('tg_js_005')};
+  setRes('save-res-voice',window.Tf('tg_js_p06', {name: labels[name]||name}),'');
 }
 
 /* ─── Log Stream (SSE) ──────────────────────────────────────────── */
@@ -1183,12 +1183,12 @@ function startLogStream(){
   if(_logSse) return;
   const dot=document.getElementById('log-live-dot');
   const wrap=document.getElementById('log-tail');
-  if(wrap && !wrap.querySelector('.log-line')) wrap.innerHTML='<div class="log-empty">连接中…</div>';
+  if(wrap && !wrap.querySelector('.log-line')) wrap.innerHTML='<div class="log-empty">'+window.T('ov_connecting')+'</div>';
   _logSse=new EventSource('/api/telegram/log-stream');
   _logSse.onopen=()=>{
     if(dot) dot.style.display='';
     const ph=document.querySelector('#log-tail .log-empty');
-    if(ph) ph.textContent='监听中，等待新日志…';
+    if(ph) ph.textContent=window.T('tg_js_006');
   };
   _logSse.onmessage=(e)=>{
     try{ const d=JSON.parse(e.data); _appendLogLine(d); }catch(ex){}
@@ -1212,7 +1212,7 @@ async function refreshLogTail(){
     const d=await apiFetch('/api/telegram/log-tail?n=40');
     const lines=d.lines||[];
     if(!lines.length){
-      wrap.innerHTML='<div class="log-empty">暂无相关日志</div>';
+      wrap.innerHTML='<div class="log-empty">'+window.T('tg_js_007')+'</div>';
       return;
     }
     wrap.innerHTML=lines.map(l=>{
@@ -1223,10 +1223,10 @@ async function refreshLogTail(){
     }).join('');
     wrap.scrollTop=wrap.scrollHeight;
     const upd=document.getElementById('log-last-updated');
-    if(upd) upd.textContent=new Date().toLocaleTimeString();
+    if(upd) upd.textContent=window.wsFmtTime(null);
     document.getElementById('log-live-dot').style.display='inline-block';
   } catch(e){
-    if(wrap) wrap.innerHTML='<div class="log-empty">加载失败: '+e.message+'</div>';
+    if(wrap) wrap.innerHTML='<div class="log-empty">'+window.T('rpa_load_failed')+': '+e.message+'</div>';
   }
 }
 
@@ -1234,10 +1234,10 @@ async function refreshLogTail(){
 function renderQuality(q, container){
   if(!q||!container) return;
   const icons={ok:'✓',warning:'⚠️',error:'✘'};
-  const grades={ok:'✓ 质量合格',warning:'⚠️ 有优化建议',error:'✘ 读取失败'};
+  const grades={ok:'✓ '+window.T('tg_js_008'),warning:'⚠️ '+window.T('tg_js_009'),error:'✘ '+window.T('msg_js_1925')};
   const info=q.info||{};
   const infoStr=info.duration_sec!=null
-    ?`时长 ${info.duration_sec}s · ${info.sample_rate} Hz · ${info.channels===1?'单声道':'双声道'}` : '';
+    ?window.Tf('tg_js_p07', {d: info.duration_sec, sr: info.sample_rate, ch: info.channels===1?window.T('tg_js_034'):window.T('tg_js_035')}) : '';
   container.innerHTML=`
     <div class="qc-wrap ${q.grade}">
       <div class="qc-title">${grades[q.grade]||q.grade}${infoStr?` <span style="font-weight:400;opacity:.7;font-size:.74rem">· ${infoStr}</span>`:''}</div>
@@ -1248,9 +1248,9 @@ function renderQuality(q, container){
 /* ─── TTS Preview (uses current UI settings via override) ───────── */
 async function testTts(){
   const text=$v('preview-text').trim();
-  if(!text){ document.getElementById('preview-result').textContent='请输入测试文字'; return; }
+  if(!text){ document.getElementById('preview-result').textContent=window.T('wa_js_062'); return; }
   const btn=document.getElementById('preview-btn');
-  btn.disabled=true; btn.textContent='合成中…';
+  btn.disabled=true; btn.textContent=window.T('tg_js_010');
   document.getElementById('preview-result').textContent='';
 
   // Build override from current UI — preview uses live settings even before save
@@ -1280,9 +1280,9 @@ async function testTts(){
       document.getElementById('preview-result').textContent='⚠️ '+d.error;
     }
   } catch(e){
-    document.getElementById('preview-result').textContent='请求失败：'+e.message;
+    document.getElementById('preview-result').textContent=window.T('tg_js_011')+e.message;
   } finally{
-    btn.disabled=false; btn.textContent='▶ 试听';
+    btn.disabled=false; btn.textContent='▶ '+window.T('wa_s116');
   }
 }
 
@@ -1292,9 +1292,9 @@ async function loadAccountInfo(){
     const d=await apiFetch('/api/telegram/account-info');
 
     // hero
-    document.getElementById('h-name').textContent=d.display_name||d.username||'未登录';
+    document.getElementById('h-name').textContent=d.display_name||d.username||window.T('tg_js_012');
     document.getElementById('h-sub').textContent=
-      [d.username, d.phone].filter(Boolean).join(' · ')||'Telegram 账号';
+      [d.username, d.phone].filter(Boolean).join(' · ')||'Telegram '+window.T('ov_js_th_account');
     const online=d.online;
     ['h-dot'].forEach(id=>{
       const el=document.getElementById(id);
@@ -1311,7 +1311,7 @@ async function loadAccountInfo(){
     document.getElementById('acc-session').textContent=d.session_name||'default';
     const dot=document.getElementById('acc-dot');
     if(dot) dot.classList.toggle('offline',!online);
-    document.getElementById('acc-status-txt').textContent=online?'在线':'离线';
+    document.getElementById('acc-status-txt').textContent=online?window.T('dash.pr.online'):window.T('dash.pr.offline');
 
     // stats
     document.getElementById('acc-st-msg').textContent=d.stats?.messages??0;
@@ -1331,10 +1331,10 @@ function _renderAccountSummary(){
   const bdg=document.getElementById('acc-badges');
   if(bdg){
     const items=[
-      [vr.enabled,'语音回复'],
-      [asr.enabled!==false,'语音识别'],
-      [_cfg.process_private!==false,'处理私聊'],
-      [_cfg.process_groups,'处理群组'],
+      [vr.enabled,window.T('msg_js_280')],
+      [asr.enabled!==false,window.T('tg_js_013')],
+      [_cfg.process_private!==false,window.T('tg_s015')],
+      [_cfg.process_groups,window.T('tg_js_014')],
     ];
     bdg.innerHTML=items.map(([on,lbl])=>
       `<span class="cfg-badge ${on?'on':'off'}">${on?'✓':'✗'} ${lbl}</span>`
@@ -1344,11 +1344,11 @@ function _renderAccountSummary(){
   const tbl=document.getElementById('acc-config-table');
   if(!tbl) return;
   const rows=[
-    ['触发方式', vr.trigger||'—'],
-    ['TTS 引擎', ({voice_clone_command:'克隆声音',edge_tts:'微软Edge',openai:'OpenAI'}[vr.backend])||vr.backend||'—'],
-    ['ASR 引擎', ({faster_whisper:'本地快速',whisper_local:'本地精准',openai:'云端API'}[asr.provider])||asr.provider||'—'],
-    ['识别语言', asr.language||'auto'],
-    ['参考音频', (vr.voice_profile||{}).reference_audio_path||'未设置'],
+    [window.T('tg_s058'), vr.trigger||'—'],
+    ['TTS '+window.T('tg_s067'), ({voice_clone_command:window.T('tg_s068'),edge_tts:window.T('tg_s070')+'Edge',openai:'OpenAI'}[vr.backend])||vr.backend||'—'],
+    ['ASR '+window.T('tg_s067'), ({faster_whisper:window.T('tg_s037'),whisper_local:window.T('tg_s039'),openai:window.T('tg_s041')+'API'}[asr.provider])||asr.provider||'—'],
+    [window.T('tg_s043'), asr.language||'auto'],
+    [window.T('tg_js_015'), (vr.voice_profile||{}).reference_audio_path||window.T('msg_js_497')],
   ];
   tbl.innerHTML=rows.map(([k,v])=>`<tr>
     <td style="padding:.42rem .6rem;color:var(--t2);font-weight:600;white-space:nowrap;border-bottom:1px solid var(--bd);width:110px">${k}</td>
@@ -1369,12 +1369,12 @@ function closeVoicePicker(e){
 async function loadVoiceFiles(){
   const wrap=document.getElementById('vf-list-wrap');
   if(!wrap) return;
-  wrap.innerHTML='<div class="vf-empty">扫描中…</div>';
+  wrap.innerHTML='<div class="vf-empty">'+window.T('ln_js_028')+'</div>';
   try{
     const d=await apiFetch('/api/telegram/voice-files');
     const files=d.files||[];
     if(!files.length){
-      wrap.innerHTML='<div class="vf-empty">voice_samples/ 目录为空—上传一个 .wav 文件开始</div>';
+      wrap.innerHTML='<div class="vf-empty">voice_samples/ '+window.T('tg_js_016')+'—'+window.T('tg_js_017')+'</div>';
       return;
     }
     wrap.innerHTML='<div class="vf-list">'+files.map(f=>`
@@ -1383,12 +1383,12 @@ async function loadVoiceFiles(){
         <span class="vf-name">${f.name}</span>
         <span class="vf-sz">${f.size_kb} KB</span>
         <div class="vf-acts">
-          <button class="btn-sec" style="padding:.25rem .45rem;font-size:.72rem" onclick="playPickerAudio('${f.url}')" title="试听">▶</button>
-          <button class="btn-p" style="padding:.25rem .55rem;font-size:.72rem" onclick="selectVoiceFile('${f.path}','${f.name}')">✓ 使用</button>
+          <button class="btn-sec" style="padding:.25rem .45rem;font-size:.72rem" onclick="playPickerAudio('${f.url}')" title="${window.T('wa_s116')}">▶</button>
+          <button class="btn-p" style="padding:.25rem .55rem;font-size:.72rem" onclick="selectVoiceFile('${f.path}','${f.name}')">✓ ${window.T('inbox.ai.use')}</button>
         </div>
       </div>`).join('')+'</div>';
   } catch(e){
-    wrap.innerHTML='<div class="vf-empty">加载失败: '+e.message+'</div>';
+    wrap.innerHTML='<div class="vf-empty">'+window.T('rpa_load_failed')+': '+e.message+'</div>';
   }
 }
 
@@ -1406,7 +1406,7 @@ function selectVoiceFile(path, name){
   document.getElementById('voice-picker-modal').classList.remove('open');
   // Hint user to test
   const hint=document.getElementById('vr-ref-hint');
-  if(hint) hint.textContent='✓ 已选择：'+name+'，点下方》试听《验证效果';
+  if(hint) hint.textContent='✓ '+window.T('tg_js_018')+name+'，'+window.T('tg_js_019')+'》'+window.T('wa_s116')+'《'+window.T('tg_js_020');
 }
 
 function handleVoiceFileSelect(e){
@@ -1423,18 +1423,18 @@ function handleVoiceDrop(e){
 
 async function doUploadVoice(file){
   if(!file.name.toLowerCase().endsWith('.wav')){
-    document.getElementById('upload-status').textContent='⚠️ 只支持 .wav 格式';
+    document.getElementById('upload-status').textContent='⚠️ '+window.T('tg_js_021');
     return;
   }
   const st=document.getElementById('upload-status');
-  st.textContent='上传中… '+file.name;
+  st.textContent=window.T('tg_js_022')+' '+file.name;
   const form=new FormData();
   form.append('file', file);
   try{
     const resp=await fetch('/api/telegram/upload-voice',{method:'POST',body:form});
     const d=await resp.json();
     if(d.ok){
-      st.textContent='✓ 上传成功：'+d.name+' ('+d.size_kb+' KB)';
+      st.textContent='✓ '+window.T('tg_js_023')+d.name+' ('+d.size_kb+' KB)';
       // Render quality check results
       renderQuality(d.quality, document.getElementById('upload-quality'));
       // Auto-select the uploaded file
@@ -1442,10 +1442,10 @@ async function doUploadVoice(file){
       // Refresh list
       loadVoiceFiles();
     } else {
-      st.textContent='⚠️ 上传失败：'+(d.detail||d.error||'未知错误');
+      st.textContent='⚠️ '+window.T('tg_js_024')+(d.detail||d.error||window.T('inbox.voice.unknown_err'));
     }
   } catch(err){
-    st.textContent='上传异常：'+err.message;
+    st.textContent=window.T('tg_js_025')+err.message;
   }
 }
 
@@ -1467,20 +1467,20 @@ async function loadRecentContacts(){
     const contacts=d.contacts||[];
     _contactsLoaded=true;
     if(!contacts.length){
-      chips.innerHTML='<span class="contact-loading">暂无近期私聊记录</span>';
+      chips.innerHTML='<span class="contact-loading">'+window.T('tg_js_026')+'</span>';
       return;
     }
     chips.innerHTML=contacts.map(c=>{
       const blocked=c.blocked;
       const display=c.username+(c.last_ts?` <span style="font-weight:400;opacity:.6">${c.last_ts}</span>`:'');
       return blocked
-        ? `<span class="chip blocked" title="已屏蔽">@${c.username} ⛔</span>`
+        ? `<span class="chip blocked" title="${window.T('tg_js_032')}">@${c.username} ⛔</span>`
         : `<span class="chip">@${c.username}
-            <button class="chip-add" onclick="addToBlocklist('${c.username}')" title="加入屏蔽名单">️➕</button>
+            <button class="chip-add" onclick="addToBlocklist('${c.username}')" title="${window.T('tg_js_033')}">️➕</button>
            </span>`;
     }).join('');
   } catch(e){
-    if(chips) chips.innerHTML='<span class="contact-loading">加载失败</span>';
+    if(chips) chips.innerHTML='<span class="contact-loading">'+window.T('rpa_load_failed')+'</span>';
   }
 }
 
@@ -1502,29 +1502,29 @@ function addToBlocklist(username){
 async function loadSnapshots(){
   const wrap=document.getElementById('snap-list');
   if(!wrap) return;
-  wrap.innerHTML='<div class="snap-empty">加载中…</div>';
+  wrap.innerHTML='<div class="snap-empty">'+window.T('dash.loading')+'</div>';
   try{
     const d=await apiFetch('/api/telegram/config-snapshots');
     const snaps=d.snapshots||[];
     if(!snaps.length){
-      wrap.innerHTML='<div class="snap-empty">暂无快照（保存配置后自动生成）</div>';
+      wrap.innerHTML='<div class="snap-empty">'+window.T('tg_js_027')+'</div>';
       return;
     }
-    const lblMap={voice_reply:'语音回复',voice_asr:'语音识别',reply_logic:'消息配置',pre_restore:'恢复前备份'};
+    const lblMap={voice_reply:window.T('msg_js_280'),voice_asr:window.T('tg_js_013'),reply_logic:window.T('tg_js_028'),pre_restore:window.T('tg_js_029')};
     wrap.innerHTML=snaps.map(s=>`
       <div class="snap-row">
-        <span class="snap-ts">${s.ts.replace('_',' ').replace(/(小時)(分)(秒)/,'$1:$2:$3').replace(/(\d{4})(\d{2})(\d{2}) (\d{2})(\d{2})(\d{2})/,'$1-$2-$3 $4:$5:$6')}</span>
+        <span class="snap-ts">${s.ts.replace('_',' ').replace(/(\u5c0f\u6642)(\u5206)(\u79d2)/,'$1:$2:$3').replace(/(\d{4})(\d{2})(\d{2}) (\d{2})(\d{2})(\d{2})/,'$1-$2-$3 $4:$5:$6')}</span>
         ${s.label?`<span class="snap-lbl">${lblMap[s.label]||s.label}</span>`:''}
         <span style="font-size:.7rem;color:var(--t3)">${s.size_kb}KB</span>
-        <button class="btn-sec" style="padding:.2rem .5rem;font-size:.72rem" onclick="restoreSnapshot('${s.filename}')”>恢复</button>
+        <button class="btn-sec" style="padding:.2rem .5rem;font-size:.72rem" onclick="restoreSnapshot('${s.filename}')”>${window.T('ov_ctrl_resume')}</button>
       </div>`).join('');
   } catch(e){
-    wrap.innerHTML='<div class="snap-empty">加载失败</div>';
+    wrap.innerHTML='<div class="snap-empty">'+window.T('rpa_load_failed')+'</div>';
   }
 }
 
 async function restoreSnapshot(filename){
-  if(!confirm(`确认从快照 ${filename} 恢复配置？\n当前配置将先自动备份为新快照。`)) return;
+  if(!confirm(window.Tf('tg_js_p08', {f: filename}))) return;
   try{
     const d=await apiFetch('/api/telegram/config-restore',{
       method:'POST',
@@ -1532,12 +1532,12 @@ async function restoreSnapshot(filename){
       body:JSON.stringify({filename})
     });
     if(d.ok){
-      alert('恢复成功！即将重新加载配置…');
+      alert(window.T('tg_js_030'));
       await loadSettings();
       loadSnapshots();
     }
   } catch(e){
-    alert('恢复失败：'+e.message);
+    alert(window.T('ov_js_restore_fail_pre')+e.message);
   }
 }
 

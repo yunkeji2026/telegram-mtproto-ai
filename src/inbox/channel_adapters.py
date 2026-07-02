@@ -271,14 +271,20 @@ class TelegramInboxAdapter:
         try:
             recent = getattr(client, "_recent_messages", None) or []
             for m in list(recent)[-limit:]:
-                out.append(normalize_chat(
+                direction = str(m.get("direction") or "").lower()
+                is_self = direction == "out" or bool(
+                    m.get("is_self") or m.get("outgoing")
+                )
+                chat = normalize_chat(
                     platform="telegram", platform_name="Telegram",
                     account_id="default", account_label="Telegram",
                     chat_key=str(m.get("chat_id") or ""),
                     name=m.get("user_name") or m.get("chat_name") or str(m.get("chat_id", "")),
                     last_msg=m.get("text") or "",
-                    last_ts=m.get("ts") or 0, unread=1, source=m,
-                ))
+                    last_ts=m.get("ts") or 0, unread=0 if is_self else 1, source=m,
+                )
+                chat["last_message"]["direction"] = "out" if is_self else "in"
+                out.append(chat)
         except Exception:
             pass
         return out

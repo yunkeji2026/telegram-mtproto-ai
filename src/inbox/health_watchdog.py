@@ -173,6 +173,10 @@ class HealthWatchdog:
         self._last_billing_sig: Optional[str] = None
         # 草稿质量告警去抖（记忆命中率/p95 延迟/风险分类回检）
         self._last_draft_quality_sig: Optional[str] = None
+        # AI 回复质量退化告警去抖（采纳/弃用率 + 高危量环比，基于 ai_safety_summary）
+        self._last_ai_quality_sig: Optional[str] = None
+        # 实时语音通话退化告警去抖（主机健康/接通率/不可达，基于 RealtimeVoiceStats）
+        self._last_realtime_voice_sig: Optional[str] = None
         # 记忆 key 漂移巡检（裸 key 复发）——结构性数据，独立稀疏节流 + 去抖
         self._last_drift_check_ts: float = 0.0
         self._last_drift_sig: Optional[str] = None
@@ -180,6 +184,8 @@ class HealthWatchdog:
         self.total_recoveries: int = 0
         self.total_billing_alerts: int = 0
         self.total_draft_quality_alerts: int = 0
+        self.total_ai_quality_alerts: int = 0
+        self.total_realtime_voice_alerts: int = 0
         self.total_memory_key_drift_alerts: int = 0
         self.last_check_ts: float = 0.0
         self.last_light: str = "green"
@@ -259,6 +265,24 @@ class HealthWatchdog:
             self._check_draft_quality()
         except Exception:
             logger.debug("草稿质量巡检异常（已忽略）", exc_info=True)
+
+        # AI 回复质量退化巡检（采纳/弃用率 + 高危量环比），默认关、独立去抖。
+        try:
+            self._check_ai_quality()
+        except Exception:
+            logger.debug("AI 质量巡检异常（已忽略）", exc_info=True)
+
+        # 实时语音通话退化巡检（主机健康/接通率/不可达），默认关、独立去抖。
+        try:
+            self._check_realtime_voice()
+        except Exception:
+            logger.debug("实时语音告警巡检异常（已忽略）", exc_info=True)
+
+        # 实时语音趋势落库兜底 sync（旁路漏记时补写当日增量）。
+        try:
+            self._sync_realtime_voice_trend()
+        except Exception:
+            logger.debug("实时语音趋势 sync 异常（已忽略）", exc_info=True)
 
         # 记忆 key 漂移巡检（裸 key 复发 → 记忆对引擎不可见），稀疏节流 + 独立去抖。
         try:
@@ -512,6 +536,181 @@ class HealthWatchdog:
         except Exception:
             logger.debug("draft_quality recovery 发布失败（已忽略）", exc_info=True)
 
+    def _check_ai_quality(self, *, now: Optional[float] = None) -> None:
+        """AI 回复质量退化巡检（F1）：基于 ``ai_safety_summary`` 处置结果口径评估采纳/弃用率
+        与高危量环比，退化即落 ``ops_incidents(kind=ai_quality)`` 供值班 ack/指派，恢复自动
+        resolve。**默认关**（阈值须按真实分布校准后再开）；样本不足静默；去抖同其余巡检。
+        """
+        cfg = getattr(self._config_manager, "config", None) or {}
+        aq = ((((cfg.get("inbox") or {}).get("ai_quality_alert")) or {})
+              if isinstance(cfg, dict) else {})
+        if not aq.get("enabled", False):
+            return
+        inbox = self._inbox()
+        if inbox is None or not hasattr(inbox, "ai_safety_summary"):
+            return
+        now = float(now if now is not None else time.time())
+        window = max(1, int(aq.get("window_days", 7) or 7)) * 86400
+        try:
+            cur = inbox.ai_safety_summary(since_ts=now - window)
+            prev = inbox.ai_safety_summary(since_ts=now - 2 * window, until_ts=now - window)
+        except Exception:
+            return  # 读失败静默，不改变既有告警/恢复态
+        from src.utils.ai_quality_alert import evaluate_ai_quality
+        res = evaluate_ai_quality(cur, prev, aq)
+        problems = res.get("problems") or []
+        light = res.get("light") or "green"
+        # 签名带 status：warn→fail 升级会改签名 → 重发一条（值班能感知升级）。
+        sig = "|".join(sorted(f"{p['id']}:{p['status']}" for p in problems))
+        if problems:
+            if sig != self._last_ai_quality_sig:
+                self._emit_ai_quality_alert(problems, light)
+                self.total_ai_quality_alerts += 1
+            self._last_ai_quality_sig = sig
+        else:
+            if self._last_ai_quality_sig:
+                self._emit_ai_quality_recovery()
+            self._last_ai_quality_sig = None
+
+    def _emit_ai_quality_alert(
+        self, problems: List[Dict[str, Any]], light: str = "yellow",
+    ) -> None:
+        try:
+            inbox = self._inbox()
+            if inbox is not None and hasattr(inbox, "open_or_update_incident"):
+                inbox.open_or_update_incident(
+                    kind="ai_quality",
+                    signature="|".join(sorted(p["id"] for p in problems)),
+                    light=light,
+                    summary={"problems": len(problems)},
+                    problems=problems,
+                )
+        except Exception:
+            logger.debug("AI 质量事件落表失败（已忽略）", exc_info=True)
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            get_event_bus().publish("ai_quality_alert", {
+                "light": light, "problems": problems, "recovered": False,
+            })
+            logger.warning("HealthWatchdog 发出 AI 质量告警：light=%s %d 项",
+                           light, len(problems))
+        except Exception:
+            logger.debug("ai_quality_alert 发布失败（已忽略）", exc_info=True)
+
+    def _emit_ai_quality_recovery(self) -> None:
+        try:
+            inbox = self._inbox()
+            if inbox is not None and hasattr(inbox, "resolve_open_incidents"):
+                inbox.resolve_open_incidents(kind="ai_quality")
+        except Exception:
+            logger.debug("AI 质量事件 resolve 失败（已忽略）", exc_info=True)
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            get_event_bus().publish("ai_quality_alert", {
+                "problems": [], "recovered": True,
+            })
+            logger.info("HealthWatchdog 发出 AI 质量恢复通知")
+        except Exception:
+            logger.debug("ai_quality recovery 发布失败（已忽略）", exc_info=True)
+
+    def _check_realtime_voice(self) -> None:
+        """实时语音通话退化巡检（B 线）：基于 ``RealtimeVoiceStats`` 评估主机健康/接通率/
+        主机不可达，退化即落 ``ops_incidents(kind=realtime_voice)``。**默认关**；功能未启用
+        或样本不足静默；去抖同其余巡检。
+        """
+        cfg = getattr(self._config_manager, "config", None) or {}
+        rtv = (cfg.get("realtime_voice") or {}) if isinstance(cfg, dict) else {}
+        if not rtv.get("enabled", False):
+            return
+        alert_cfg = (rtv.get("alert") or {}) if isinstance(rtv, dict) else {}
+        if not alert_cfg.get("enabled", False):
+            return
+        try:
+            from src.ai.realtime_voice_stats import get_realtime_voice_stats
+            from src.utils.realtime_voice_alert import evaluate_realtime_voice_alert
+            stats = get_realtime_voice_stats().dump()
+            res = evaluate_realtime_voice_alert(stats, alert_cfg)
+        except Exception:
+            return
+        problems = res.get("problems") or []
+        light = res.get("light") or "green"
+        sig = "|".join(sorted(f"{p['id']}:{p['status']}" for p in problems))
+        if problems:
+            if sig != self._last_realtime_voice_sig:
+                self._emit_realtime_voice_alert(problems, light)
+                self.total_realtime_voice_alerts += 1
+            self._last_realtime_voice_sig = sig
+        else:
+            if self._last_realtime_voice_sig:
+                self._emit_realtime_voice_recovery()
+            else:
+                # 进程刚起且当前无异常：静默 reconcile 遗留 open 事件（重启后 stats 归零，
+                # 内存签名空，否则旧 red 事件会一直挂着且不会 emit 恢复）。
+                inbox = self._inbox()
+                if inbox is not None and hasattr(inbox, "resolve_open_incidents"):
+                    try:
+                        n = inbox.resolve_open_incidents(kind="realtime_voice") or 0
+                        if n:
+                            logger.info(
+                                "HealthWatchdog 启动 reconcile：关闭遗留实时语音事件 %d 条", n)
+                    except Exception:
+                        logger.debug("实时语音事件 reconcile 失败（已忽略）", exc_info=True)
+            self._last_realtime_voice_sig = None
+
+    def _sync_realtime_voice_trend(self) -> None:
+        """E 线兜底：watchdog tick 把进程 stats 与上次同步快照 diff 写入趋势库（旁路漏记时补）。"""
+        cfg = getattr(self._config_manager, "config", None) or {}
+        rtv = (cfg.get("realtime_voice") or {}) if isinstance(cfg, dict) else {}
+        if not rtv.get("enabled", False) or not rtv.get("trend_log", False):
+            return
+        try:
+            from src.ai.realtime_voice_stats import get_realtime_voice_stats
+            from src.ai.realtime_voice_trend_store import sync_realtime_voice_trend_from_stats
+            sync_realtime_voice_trend_from_stats(get_realtime_voice_stats().dump())
+        except Exception:
+            logger.debug("实时语音趋势 sync 失败（已忽略）", exc_info=True)
+
+    def _emit_realtime_voice_alert(
+        self, problems: List[Dict[str, Any]], light: str = "yellow",
+    ) -> None:
+        try:
+            inbox = self._inbox()
+            if inbox is not None and hasattr(inbox, "open_or_update_incident"):
+                inbox.open_or_update_incident(
+                    kind="realtime_voice",
+                    signature="|".join(sorted(p["id"] for p in problems)),
+                    light=light,
+                    summary={"problems": len(problems)},
+                    problems=problems,
+                )
+        except Exception:
+            logger.debug("实时语音事件落表失败（已忽略）", exc_info=True)
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            get_event_bus().publish("realtime_voice_alert", {
+                "light": light, "problems": problems, "recovered": False,
+            })
+            logger.warning("HealthWatchdog 发出实时语音告警：light=%s %d 项",
+                           light, len(problems))
+        except Exception:
+            logger.debug("realtime_voice_alert 发布失败（已忽略）", exc_info=True)
+
+    def _emit_realtime_voice_recovery(self) -> None:
+        try:
+            inbox = self._inbox()
+            if inbox is not None and hasattr(inbox, "resolve_open_incidents"):
+                inbox.resolve_open_incidents(kind="realtime_voice")
+        except Exception:
+            logger.debug("实时语音事件 resolve 失败（已忽略）", exc_info=True)
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            get_event_bus().publish("realtime_voice_alert", {
+                "problems": [], "recovered": True,
+            })
+            logger.info("HealthWatchdog 发出实时语音恢复通知")
+        except Exception:
+            logger.debug("realtime_voice recovery 发布失败（已忽略）", exc_info=True)
+
     def _skill_manager(self):
         return getattr(getattr(self._app, "state", self._app), "skill_manager", None)
 
@@ -761,6 +960,8 @@ class HealthWatchdog:
             "total_recoveries": self.total_recoveries,
             "total_billing_alerts": self.total_billing_alerts,
             "total_draft_quality_alerts": self.total_draft_quality_alerts,
+            "total_ai_quality_alerts": self.total_ai_quality_alerts,
+            "total_realtime_voice_alerts": self.total_realtime_voice_alerts,
             "total_memory_key_drift_alerts": self.total_memory_key_drift_alerts,
             "total_weekly_reports": self.total_weekly_reports,
             "last_check_ts": self.last_check_ts,

@@ -542,7 +542,7 @@ class DraftService:
 
         安全不变量：
           1. 若该会话已有 pending/enriching 草稿，跳过（幂等保护，避免洪泛）。
-          2. 消息极短（< 3 字符）或已是 out 方向，跳过。
+          2. 空文本跳过（媒体无文由 ingest 侧填占位符后再进入）。
           3. high → L4 拦截草稿；medium → L3 必审；low → L2 自动放行。
           4. 草稿文本取规则建议首条（<1ms，不调 LLM）。
 
@@ -557,7 +557,7 @@ class DraftService:
         if self._store is None:
             return None
         t = str(text or "").strip()
-        if len(t) < 3:
+        if not t:
             return None
 
         conv_id = str(conv.get("conversation_id") or "")
@@ -570,15 +570,31 @@ class DraftService:
             return None
 
         try:
-            # 幂等保护：同一会话已有 pending 或 enriching（停泊待补全）草稿则跳过，
-            # 避免洪泛与补全窗口内的重复生成。
+            # 幂等保护：同一会话已有 pending/enriching 草稿则跳过——但若 peer_text
+            # 与本次入站不同，说明是陈旧草稿（客户又发了新消息），作废后重生成。
             _existing = self._store.list_drafts(
                 source_kind="inbox", conversation_id=conv_id, limit=20
             )
-            if any(str(d.get("status") or "") in ("pending", "enriching")
-                   for d in _existing):
-                logger.debug("auto_generate_draft 跳过（已有 pending/enriching）: %s", conv_id)
-                return None
+            _active = [d for d in (_existing or [])
+                       if str(d.get("status") or "") in ("pending", "enriching")]
+            if _active:
+                _stale = [d for d in _active
+                          if str(d.get("peer_text") or "").strip() != t]
+                if _stale:
+                    for d in _stale:
+                        try:
+                            self._store.update_draft_status(
+                                str(d.get("draft_id") or ""),
+                                status="cancelled",
+                                decided_by="stale_peer",
+                            )
+                        except Exception:
+                            logger.debug("作废陈旧草稿失败", exc_info=True)
+                    _active = [d for d in _active if d not in _stale]
+                if _active:
+                    logger.debug(
+                        "auto_generate_draft 跳过（已有 pending/enriching）: %s", conv_id)
+                    return None
         except Exception:
             pass
 

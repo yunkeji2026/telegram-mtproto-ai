@@ -126,6 +126,15 @@ class MetricsStore:
         self._inbox_draft_recent: deque = deque(maxlen=2000)  # (ts, name)
         # 草稿生成延迟（端到端 ms）：算 p50/p95，做延迟预算告警
         self._inbox_draft_latency_ms: deque = deque(maxlen=500)
+        # ★ 防复读观测：字符层 vs 语义层触发占比 + 重写采纳率 + 嵌入缓存命中率。
+        # 让运营量化「语义层值不值 / 换角度重生是否真降重 / 嵌入缓存省了多少调用」。
+        self._ar_checks: int = 0            # 主判定次数（不含重试后的复评）
+        self._ar_char_trig: int = 0         # 由字符 Jaccard 触发的复读
+        self._ar_sem_trig: int = 0          # 由语义嵌入触发（字符没抓到）的复读
+        self._ar_rewrite_attempt: int = 0   # 触发复读后发起换角度重生的次数
+        self._ar_rewrite_adopted: int = 0   # 重生结果更优被采纳的次数
+        self._embed_cache_hit: int = 0      # 防复读嵌入缓存命中（复用向量）
+        self._embed_cache_miss: int = 0     # 未命中（真正发嵌入请求）
 
     @classmethod
     def get_instance(cls) -> "MetricsStore":
@@ -278,6 +287,38 @@ class MetricsStore:
             self._inbox_draft_metrics[name] += c
             for _ in range(min(c, 50)):  # 时序仅记前 50，避免单次爆量挤掉历史
                 self._inbox_draft_recent.append((now, name))
+
+    def record_anti_repeat_check(self, layer: str = "none") -> None:
+        """记录一次防复读主判定；layer ∈ {'none','char','semantic'}。
+
+        只在 5b/8b 的**首判**调用（重试后的复评传 record=False，不计入），
+        避免把「候选 + 重生候选」重复计数导致触发率虚高。
+        """
+        with self._lock:
+            self._ar_checks += 1
+            if layer == "char":
+                self._ar_char_trig += 1
+            elif layer == "semantic":
+                self._ar_sem_trig += 1
+
+    def record_anti_repeat_rewrite_attempt(self) -> None:
+        """记录一次「换角度重生」尝试（进入重试即计一次）。"""
+        with self._lock:
+            self._ar_rewrite_attempt += 1
+
+    def record_anti_repeat_rewrite_adopted(self) -> None:
+        """记录一次重生结果更优被采纳（attempt 的子集）。"""
+        with self._lock:
+            self._ar_rewrite_adopted += 1
+
+    def record_embed_cache(self, hits: int = 0, misses: int = 0) -> None:
+        """记录防复读嵌入缓存一批的命中/未命中（稳态命中率应 ≈ N/(N+1)）。"""
+        h, m = max(0, int(hits)), max(0, int(misses))
+        if h == 0 and m == 0:
+            return
+        with self._lock:
+            self._embed_cache_hit += h
+            self._embed_cache_miss += m
 
     def record_inbox_draft_latency(self, ms: float) -> None:
         """记录单条草稿端到端生成延迟（ms）。"""
@@ -703,6 +744,13 @@ class MetricsStore:
             re_dry = list(self._reactivation_dry_run_recent)
             re_last_ts = self._reactivation_last_run_ts
             re_last_cands = self._reactivation_last_candidates
+            ar_checks = self._ar_checks
+            ar_char = self._ar_char_trig
+            ar_sem = self._ar_sem_trig
+            ar_rw_att = self._ar_rewrite_attempt
+            ar_rw_ad = self._ar_rewrite_adopted
+            ec_hit = self._embed_cache_hit
+            ec_miss = self._embed_cache_miss
         lr_ms = list(self._line_rpa_total_ms)
         lr_avg = round(sum(lr_ms) / len(lr_ms), 2) if lr_ms else 0.0
         times = list(self._response_times)
@@ -812,6 +860,22 @@ class MetricsStore:
                 "sparkline_1h": self._bucket_counts(
                     [(ts, o) for ts, o in list(self._search_chat_recent) if o != "skip"]
                 ),
+            },
+            # ★ 防复读观测：触发分层 + 重写采纳 + 嵌入缓存命中
+            "anti_repeat": {
+                "checks": ar_checks,
+                "char_triggered": ar_char,
+                "semantic_triggered": ar_sem,
+                "trigger_rate_pct": round((ar_char + ar_sem) / ar_checks * 100, 1) if ar_checks else 0.0,
+                "semantic_share_pct": round(ar_sem / (ar_char + ar_sem) * 100, 1) if (ar_char + ar_sem) else 0.0,
+                "rewrite_attempted": ar_rw_att,
+                "rewrite_adopted": ar_rw_ad,
+                "rewrite_adopt_rate_pct": round(ar_rw_ad / ar_rw_att * 100, 1) if ar_rw_att else 0.0,
+                "embed_cache": {
+                    "hit": ec_hit,
+                    "miss": ec_miss,
+                    "hit_rate_pct": round(ec_hit / (ec_hit + ec_miss) * 100, 1) if (ec_hit + ec_miss) else 0.0,
+                },
             },
             # ★ W2-D6.3：pacing 延迟分布
             "pacing": self._pacing_delay_stats(),

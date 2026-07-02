@@ -77,6 +77,15 @@ def check_toggle(
                     "reason": "真发将开启但出站安全闸 companion_send_gate 未开（内容/频率裸奔），"
                               "强烈建议同时开启"}
 
+    if cap.key == "realtime_voice" and field == "enabled":
+        from src.companion.realtime_voice_readiness import realtime_voice_host_configured, _rtv_cfg
+        if not realtime_voice_host_configured(config):
+            return {"allowed": False, "warn": False, "flag_path": path,
+                    "reason": "请先配置 realtime_voice.base_url（MiniCPM-o 语音主机）"}
+        if not str(_rtv_cfg(config).get("access_token") or "").strip():
+            return {"allowed": True, "warn": True, "flag_path": path,
+                    "reason": "未配置 access_token → 试拨/引擎 API 无口令保护（公网暴露前务必设置）"}
+
     return {"allowed": True, "warn": False, "flag_path": path, "reason": ""}
 
 

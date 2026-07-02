@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+from src.companion.realtime_voice_ref_readiness import apply_ref_to_rtv_verdict
+
 # 默认阈值（可被 thresholds 覆盖；运营/CI 可调）
 DEFAULTS = {
     "text_min_n": 20,         # 文本质量判定所需最少处置样本
@@ -23,6 +25,10 @@ DEFAULTS = {
     "proactive_min_fb": 8,     # 主动触达判定所需最少人工反馈
     "proactive_like_target": 0.75,
     "delivery_fail_warn": 0.10,  # 真发失败率告警线
+    "rtv_min_attempts": 3,        # 实时语音接通率判定最少通话尝试
+    "rtv_min_health_probes": 2,   # 主机健康判定最少探测次数
+    "rtv_connect_target": 0.50,   # 接通率达标线
+    "rtv_health_target": 0.80,    # 主机健康率达标线
 }
 
 
@@ -91,6 +97,57 @@ def proactive_signal(qo: Optional[Dict[str, Any]], th: Dict[str, Any]) -> Dict[s
             "advice": f"好评率 {_pct(rate)}% 偏低，继续 dry_run 调参（看 skip 原因/dislike 黑名单）"}
 
 
+def realtime_voice_signal(
+    stats: Optional[Dict[str, Any]],
+    th: Dict[str, Any],
+    *,
+    ref_summary: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Tier4 实时语音：从 RealtimeVoiceStats 判主机/接通是否可扩量。"""
+    base = {"tier": 4, "key": "realtime_voice", "label": "实时语音通话健康"}
+    if not isinstance(stats, dict):
+        return {**base, "verdict": "unavailable", "advice": "实时语音观测不可用", "metric": {}}
+    attempts = int(stats.get("attempts") or 0)
+    connect_rate = float(stats.get("connect_rate") or 0.0)
+    h_ok = int(stats.get("health_ok") or 0)
+    h_fail = int(stats.get("health_fail") or 0)
+    h_total = h_ok + h_fail
+    health_rate = float(stats.get("health_ok_rate") or 0.0)
+    by_reason = stats.get("by_end_reason") or {}
+    host_unreachable = int(by_reason.get("host_unreachable") or 0)
+    metric = {
+        "attempts": attempts,
+        "connected": int(stats.get("connected") or 0),
+        "connect_rate": connect_rate,
+        "health_ok": h_ok,
+        "health_fail": h_fail,
+        "health_ok_rate": health_rate,
+        "host_unreachable": host_unreachable,
+    }
+    min_att = int(th.get("rtv_min_attempts") or 3)
+    min_hp = int(th.get("rtv_min_health_probes") or 2)
+
+    def _done(verdict: str, advice: str) -> Dict[str, Any]:
+        m = dict(metric)
+        if ref_summary:
+            m["ref_with"] = int(ref_summary.get("with_reference") or 0)
+            m["ref_worst"] = str(ref_summary.get("worst_grade") or "none")
+        v, a = apply_ref_to_rtv_verdict(verdict, advice, ref_summary)
+        return {**base, "verdict": v, "advice": a, "metric": m}
+
+    if h_total >= min_hp and health_rate < th.get("rtv_health_target", 0.80):
+        return _done("failing", f"主机健康率 {_pct(health_rate)}% 偏低，先查 GPU 主机/网络再扩量")
+    if attempts < min_att:
+        if h_total < min_hp:
+            return _done("insufficient", "尚无足够通话/健康探测样本，先用试拨页验证链路")
+        return _done("insufficient", f"通话样本不足（{attempts}/{min_att}），继续试拨积累再判断")
+    if host_unreachable > 0 and host_unreachable >= max(1, attempts // 2):
+        return _done("failing", "多次主机不可达，先修复 GPU 主机再开给坐席")
+    if connect_rate < th.get("rtv_connect_target", 0.50):
+        return _done("caution", f"接通率 {_pct(connect_rate)}% 偏低，查 host_unreachable/connect_failed")
+    return _done("healthy", f"接通率 {_pct(connect_rate)}%、主机健康 {_pct(health_rate)}% 正常 → 可小流量试点")
+
+
 def delivery_signal(delivery: Optional[Dict[str, Any]], th: Dict[str, Any]) -> Dict[str, Any]:
     """真发投递健康：近窗口失败率。"""
     base = {"tier": 2, "key": "delivery_health", "label": "真发投递健康"}
@@ -123,9 +180,11 @@ def readiness_signals(
     text_quality: Optional[Dict[str, Any]] = None,
     proactive_quality: Optional[Dict[str, Any]] = None,
     delivery: Optional[Dict[str, Any]] = None,
+    realtime_voice: Optional[Dict[str, Any]] = None,
+    voice_ref_summary: Optional[Dict[str, Any]] = None,
     thresholds: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """聚合三路信号 + 头条建议（最该处理的那条）。"""
+    """聚合运营信号 + 头条建议（最该处理的那条）。"""
     th = dict(DEFAULTS)
     if thresholds:
         th.update({k: v for k, v in thresholds.items() if v is not None})
@@ -133,6 +192,7 @@ def readiness_signals(
         text_autosend_signal(text_quality, th),
         delivery_signal(delivery, th),
         proactive_signal(proactive_quality, th),
+        realtime_voice_signal(realtime_voice, th, ref_summary=voice_ref_summary),
     ]
     headline = min(signals, key=lambda s: _VERDICT_RANK.get(s["verdict"], 9))
     return {
@@ -145,5 +205,5 @@ def readiness_signals(
 
 __all__ = [
     "DEFAULTS", "text_autosend_signal", "proactive_signal",
-    "delivery_signal", "readiness_signals",
+    "delivery_signal", "realtime_voice_signal", "readiness_signals",
 ]

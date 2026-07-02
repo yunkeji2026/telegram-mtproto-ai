@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}版本对比 · {{ site_name|default('华灵科技客户转化聊天系统') }}{% endblock %}
-{% block page_title %}版本对比{% endblock %}
+{% block title %}{{ (i18n or {}).get('diff', "版本对比") }} · {{ product_name|default((i18n or {}).get('brand.product', '智聊')) }}{% endblock %}
+{% block page_title %}{{ (i18n or {}).get('diff', "版本对比") }}{% endblock %}
 {% block head %}
 <style>
 /* ── Layout ── */
@@ -72,7 +72,7 @@
 {% if ui_mode == 'simple' %}
 <div style="background:linear-gradient(135deg,rgba(245,158,11,.08),rgba(91,124,246,.06));border:1px solid rgba(245,158,11,.2);border-radius:10px;padding:.7rem 1rem;margin-bottom:.8rem;font-size:.82rem;color:var(--t2);display:flex;align-items:center;gap:.6rem">
   <span style="font-size:1.1rem;flex-shrink:0">🔍</span>
-  <div><strong style="color:var(--t)">高级功能</strong> — 版本对比供管理员追溯配置变更。<a href="/cases" style="color:var(--p);font-weight:600">返回案例</a></div>
+  <div><strong style="color:var(--t)">{{ (i18n or {}).get('logs_adv_title', "高级功能") }}</strong> — {{ (i18n or {}).get('diff_s001', "版本对比供管理员追溯配置变更。") }}<a href="/cases" style="color:var(--p);font-weight:600">{{ (i18n or {}).get('logs_back_cases', "返回案例") }}</a></div>
 </div>
 {% endif %}
 
@@ -83,29 +83,29 @@
   <div class="snap-panel-hd">
     <h3>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" style="vertical-align:-2px;color:var(--p)"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-      快照时间轴
+      {{ (i18n or {}).get('diff_s002', "快照时间轴") }}
     </h3>
-    <button class="btn btn-s btn-xs" onclick="loadSnapshots()" title="刷新">
+    <button class="btn btn-s btn-xs" onclick="loadSnapshots()" title="{{ (i18n or {}).get('dash.refresh', '刷新') }}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="12" height="12"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
     </button>
   </div>
   <div class="snap-tabs" id="snap-tabs">
-    <button class="snap-tab active" data-prefix="" onclick="filterSnaps(this,'')">全部</button>
-    <button class="snap-tab" data-prefix="templates" onclick="filterSnaps(this,'templates')">模板</button>
-    <button class="snap-tab" data-prefix="exchange_rates" onclick="filterSnaps(this,'exchange_rates')">通道</button>
-    <button class="snap-tab" data-prefix="reply_strategies" onclick="filterSnaps(this,'reply_strategies')">策略</button>
+    <button class="snap-tab active" data-prefix="" onclick="filterSnaps(this,'')">{{ (i18n or {}).get('rpa_all', "全部") }}</button>
+    <button class="snap-tab" data-prefix="templates" onclick="filterSnaps(this,'templates')">{{ (i18n or {}).get('inbox.tpl_default', "模板") }}</button>
+    <button class="snap-tab" data-prefix="exchange_rates" onclick="filterSnaps(this,'exchange_rates')">{{ (i18n or {}).get('db_s047', "通道") }}</button>
+    <button class="snap-tab" data-prefix="reply_strategies" onclick="filterSnaps(this,'reply_strategies')">{{ (i18n or {}).get('sa_s020', "策略") }}</button>
   </div>
   <div class="snap-list" id="snap-list">
-    <div class="snap-empty">加载中…</div>
+    <div class="snap-empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
   </div>
   <div style="padding:.7rem .8rem;border-top:1px solid var(--bd);display:flex;gap:.4rem;font-size:.72rem;color:var(--t3)">
     <span style="display:inline-flex;align-items:center;gap:.3rem">
-      <span style="width:10px;height:10px;border-radius:50%;background:var(--red);display:inline-block"></span> 旧版本(A)
+      <span style="width:10px;height:10px;border-radius:50%;background:var(--red);display:inline-block"></span> {{ (i18n or {}).get('diff_s003', "旧版本") }}(A)
     </span>
     <span style="display:inline-flex;align-items:center;gap:.3rem">
-      <span style="width:10px;height:10px;border-radius:50%;background:var(--green);display:inline-block"></span> 新版本(B)
+      <span style="width:10px;height:10px;border-radius:50%;background:var(--green);display:inline-block"></span> {{ (i18n or {}).get('diff_s004', "新版本") }}(B)
     </span>
-    <span style="margin-left:auto;font-style:italic">点击选择</span>
+    <span style="margin-left:auto;font-style:italic">{{ (i18n or {}).get('diff_s005', "点击选择") }}</span>
   </div>
 </div>
 
@@ -114,12 +114,12 @@
   <div class="card fa">
     <h2>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-      版本对比
+      {{ (i18n or {}).get('diff', "版本对比") }}
     </h2>
 
     <!-- Quick compare shortcuts -->
     <div class="quick-compare" id="quick-compare" style="display:none">
-      <span style="font-size:.72rem;color:var(--t3);align-self:center">快速对比：</span>
+      <span style="font-size:.72rem;color:var(--t3);align-self:center">{{ (i18n or {}).get('diff_s006', "快速对比：") }}</span>
     </div>
 
     <form method="get" action="/diff" id="diff-form">
@@ -127,10 +127,10 @@
         <div class="f-grp" style="margin-bottom:0">
           <label class="f-lbl" style="color:var(--red);font-weight:700">
             <span style="width:10px;height:10px;border-radius:50%;background:var(--red);display:inline-block;vertical-align:-1px;margin-right:.3rem"></span>
-            旧版本（A — Before）
+            {{ (i18n or {}).get('diff_s_lblA', "旧版本（A — Before）") }}
           </label>
           <select name="a" id="sel-a" onchange="onSelChange()">
-            <option value="">-- 选择快照 --</option>
+            <option value="">-- {{ (i18n or {}).get('diff_s007', "选择快照") }} --</option>
             {% for s in snapshots %}
             <option value="{{ s.id }}" {{ 'selected' if selected_a == s.id|string else '' }}>{{ s.label }}</option>
             {% endfor %}
@@ -139,11 +139,11 @@
         <div class="f-grp" style="margin-bottom:0">
           <label class="f-lbl" style="color:var(--green);font-weight:700">
             <span style="width:10px;height:10px;border-radius:50%;background:var(--green);display:inline-block;vertical-align:-1px;margin-right:.3rem"></span>
-            新版本（B — After）
+            {{ (i18n or {}).get('diff_s_lblB', "新版本（B — After）") }}
           </label>
           <select name="b" id="sel-b" onchange="onSelChange()">
-            <option value="__current__">── 当前配置 ──</option>
-            <option value="">-- 选择快照 --</option>
+            <option value="__current__">── {{ (i18n or {}).get('diff_s008', "当前配置") }} ──</option>
+            <option value="">-- {{ (i18n or {}).get('diff_s007', "选择快照") }} --</option>
             {% for s in snapshots %}
             <option value="{{ s.id }}" {{ 'selected' if selected_b == s.id|string else '' }}>{{ s.label }}</option>
             {% endfor %}
@@ -153,16 +153,16 @@
       <div style="margin-top:.8rem;display:flex;gap:.5rem;flex-wrap:wrap">
         <button type="submit" class="btn btn-p btn-sm">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-          对比
+          {{ (i18n or {}).get('diff_s009', "对比") }}
         </button>
         {% if selected_a %}
         <button type="button" class="btn btn-d btn-sm" onclick="doRollback('{{ selected_a }}')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 109-9"/><polyline points="3 3 3 12 12 12"/></svg>
-          回滚到旧版本
+          {{ (i18n or {}).get('diff_s010', "回滚到旧版本") }}
         </button>
         {% endif %}
         <button type="button" class="btn btn-s btn-sm" onclick="clearSelections()" style="margin-left:auto">
-          清除选择
+          {{ (i18n or {}).get('diff_s011', "清除选择") }}
         </button>
       </div>
     </form>
@@ -172,11 +172,11 @@
   <div class="card fa fa2">
     <h2>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-      对比结果
+      {{ (i18n or {}).get('diff_s012', "对比结果") }}
       {% if add_count is defined or rm_count is defined %}
       <div class="actions">
-        <span class="stat-add">+{{ add_count|default(0) }} 新增</span>
-        <span class="stat-rm">-{{ rm_count|default(0) }} 删除</span>
+        <span class="stat-add">+{{ add_count|default(0) }} {{ (i18n or {}).get('kb_js_162', "新增") }}</span>
+        <span class="stat-rm">-{{ rm_count|default(0) }} {{ (i18n or {}).get('delete', "删除") }}</span>
       </div>
       {% endif %}
     </h2>
@@ -184,23 +184,23 @@
     {% if add_count|default(0) == 0 and rm_count|default(0) == 0 %}
     <div class="diff-same">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="36" height="36" style="margin-bottom:.5rem;opacity:.3"><polyline points="20 6 9 17 4 12"/></svg>
-      <p>两个版本内容完全相同，无差异</p>
+      <p>{{ (i18n or {}).get('diff_s013', "两个版本内容完全相同，无差异") }}</p>
     </div>
     {% else %}
     <div class="diff-stats">
       <span>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" style="vertical-align:-2px;color:var(--green)"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        <span class="stat-add">{{ add_count|default(0) }} 行新增</span>
+        <span class="stat-add">{{ add_count|default(0) }} {{ (i18n or {}).get('diff_s014', "行新增") }}</span>
       </span>
       <span>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" style="vertical-align:-2px;color:var(--red)"><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        <span class="stat-rm">{{ rm_count|default(0) }} 行删除</span>
+        <span class="stat-rm">{{ rm_count|default(0) }} {{ (i18n or {}).get('diff_s015', "行删除") }}</span>
       </span>
     </div>
     <div class="diff-view">
       <div class="diff-hd">
         <div class="diff-hd-col">#</div>
-        <div class="diff-hd-col">内容</div>
+        <div class="diff-hd-col">{{ (i18n or {}).get('em_s017', "内容") }}</div>
       </div>
       {% set ln = namespace(n=0) %}
       {% for line in diff_lines %}
@@ -221,7 +221,7 @@
     {% else %}
     <div class="empty">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-      <p>请选择两个快照版本进行对比</p>
+      <p>{{ (i18n or {}).get('diff_s016', "请选择两个快照版本进行对比") }}</p>
     </div>
     {% endif %}
   </div>
@@ -237,10 +237,10 @@ let _selA = '{{ selected_a }}';
 let _selB = '{{ selected_b }}';
 
 const PREFIX_LABELS = {
-  'templates': '模板',
-  'exchange_rates': '通道',
-  'reply_strategies': '策略',
-  'quota': '配额'
+  'templates': window.T('inbox.tpl_default'),
+  'exchange_rates': window.T('db_s047'),
+  'reply_strategies': window.T('sa_s020'),
+  'quota': window.T('diff_js_001')
 };
 
 async function loadSnapshots() {
@@ -252,7 +252,7 @@ async function loadSnapshots() {
     buildQuickCompare();
   } catch(e) {
     document.getElementById('snap-list').innerHTML =
-      '<div class="snap-empty">加载失败，请刷新</div>';
+      '<div class="snap-empty">'+window.T('diff_js_002')+'</div>';
   }
 }
 
@@ -269,14 +269,14 @@ function renderSnapList() {
     : _allSnaps;
 
   if (!snaps.length) {
-    list.innerHTML = '<div class="snap-empty">暂无快照</div>';
+    list.innerHTML = '<div class="snap-empty">'+window.T('diff_js_003')+'</div>';
     return;
   }
 
   /* Group by date */
   const byDate = {};
   snaps.forEach(s => {
-    const date = s.ts ? s.ts.slice(0, 8) : '未知';
+    const date = s.ts ? s.ts.slice(0, 8) : window.T('rpa_unknown');
     (byDate[date] = byDate[date] || []).push(s);
   });
 
@@ -297,7 +297,7 @@ function renderSnapList() {
   ${abLabel}
   <div class="snap-name">
     ${prefixLabel || s.id.split('_')[0]}
-    <span class="snap-tag ${isAutoSnap ? '' : 'manual'}">${isAutoSnap ? '自动' : '手动'}</span>
+    <span class="snap-tag ${isAutoSnap ? '' : 'manual'}">${isAutoSnap ? window.T('dash.lb.auto') : window.T('ov_manual')}</span>
   </div>
   <div class="snap-ts">${timeStr}</div>
   <div class="snap-actor">${s.actor ? '👤 ' + s.actor : ''}</div>
@@ -346,24 +346,24 @@ function buildQuickCompare() {
     if (items.length >= 2) {
       const label = PREFIX_LABELS[p] || p;
       btns += `<button class="qc-btn" onclick="quickCompare('${p}')">
-        ${label}：最新两版本
+        ${window.Tf('diff_tf_latest2',{label:label})}
       </button>`;
     }
     if (items.length >= 1) {
       btns += `<button class="qc-btn" onclick="quickCompareLatestCurrent('${p}')">
-        ${label}：最新 vs 当前
+        ${window.Tf('diff_tf_latestcur',{label:label})}
       </button>`;
     }
   });
   if (btns) {
     container.style.display = 'flex';
-    container.innerHTML = '<span style="font-size:.72rem;color:var(--t3);align-self:center">快速对比：</span>' + btns;
+    container.innerHTML = '<span style="font-size:.72rem;color:var(--t3);align-self:center">'+window.T('diff_js_004')+'</span>' + btns;
   }
 }
 
 function quickCompare(prefix) {
   const items = _allSnaps.filter(s => s.prefix === prefix);
-  if (items.length < 2) { showToast('该配置文件快照不足两个', 'info'); return; }
+  if (items.length < 2) { showToast(window.T('diff_js_005'), 'info'); return; }
   document.getElementById('sel-a').value = items[1].id;
   document.getElementById('sel-b').value = items[0].id;
   document.getElementById('diff-form').submit();
@@ -371,7 +371,7 @@ function quickCompare(prefix) {
 
 function quickCompareLatestCurrent(prefix) {
   const items = _allSnaps.filter(s => s.prefix === prefix);
-  if (!items.length) { showToast('暂无该配置快照', 'info'); return; }
+  if (!items.length) { showToast(window.T('diff_js_006'), 'info'); return; }
   document.getElementById('sel-a').value = items[0].id;
   document.getElementById('sel-b').value = '__current__';
   document.getElementById('diff-form').submit();
@@ -380,8 +380,8 @@ function quickCompareLatestCurrent(prefix) {
 /* Rollback */
 async function doRollback(snapId) {
   showConfirm(
-    '回滚确认',
-    `确定回滚到快照「<strong>${snapId}</strong>」？<br>当前配置将被覆盖（系统已自动备份）。`,
+    window.T('diff_js_rollback_confirm'),
+    window.Tf('diff_tf_rollback_q',{id:'<strong>'+snapId+'</strong>'}),
     async () => {
       try {
         const r = await fetch('/api/rollback', {
@@ -391,12 +391,12 @@ async function doRollback(snapId) {
         });
         const d = await r.json();
         if (r.ok && d.ok) {
-          showToast('已回滚: ' + d.restored + ' ← ' + d.snapshot, 'ok');
+          showToast(window.T('diff_js_rolledback') + d.restored + ' ← ' + d.snapshot, 'ok');
           setTimeout(() => location.reload(), 1000);
-        } else showToast(d.detail || '回滚失败', 'err');
-      } catch(e) { showToast('网络错误', 'err'); }
+        } else showToast(d.detail || window.T('ov_js_rollback_fail'), 'err');
+      } catch(e) { showToast(window.T('draft.net_err'), 'err'); }
     },
-    {danger: true, okLabel: '确认回滚'}
+    {danger: true, okLabel: window.T('diff_js_007')}
   );
 }
 

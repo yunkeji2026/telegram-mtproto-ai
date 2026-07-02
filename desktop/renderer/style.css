@@ -17,7 +17,7 @@ body { font-family: "Segoe UI", system-ui, sans-serif; background: #17212b; colo
 }
 .rail-item:hover { background: #1c2733; }
 .rail-item.active { background: #2b5278; color: #fff; }
-.rail-item .ic { font-size: 20px; }
+.rail-item .ic { font-size: 20px; display: inline-flex; align-items: center; justify-content: center; line-height: 0; }
 .rail-item.disabled { opacity: .4; cursor: not-allowed; }
 /* 无网页版聊天的平台（Messenger/LINE）：dim 显示 + 「↪收件箱」标记，点了切到统一收件箱 */
 .rail-item.via-inbox { opacity: .6; }
@@ -46,7 +46,7 @@ body { font-family: "Segoe UI", system-ui, sans-serif; background: #17212b; colo
   background: transparent; color: #cdd9e5; border: 0; border-radius: 7px;
 }
 .rail-add-menu button:hover { background: #2b5278; color: #fff; }
-.rail-add-menu button .ic { font-size: 16px; }
+.rail-add-menu button .ic { font-size: 16px; display: inline-flex; align-items: center; line-height: 0; }
 
 #stage { flex: 1; position: relative; }
 #webviews { position: absolute; inset: 0; }

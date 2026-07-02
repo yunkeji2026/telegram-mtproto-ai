@@ -35,6 +35,7 @@ from src.web.routes.unified_inbox_sla import (
     _presence_stale_sec,
     _sla_alert_snapshot,
 )
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -292,7 +293,7 @@ def register_realtime_routes(app, *, api_auth) -> None:
         body = await request.json()
         conversation_id = str(body.get("conversation_id") or "").strip()
         if not conversation_id:
-            raise HTTPException(400, "conversation_id 必填")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="conversation_id"))
         agent = _session_agent(request)
         try:
             get_event_bus().publish("typing", {

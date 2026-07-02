@@ -65,3 +65,16 @@ def test_portrait_block_appears_before_other_channel_hints():
     line_pos = out.find(line_hint)
     assert portrait_pos != -1 and line_pos != -1
     assert portrait_pos < line_pos
+
+
+def test_telegram_private_chinese_message_enforces_single_language():
+    """Telegram 私聊当前消息是中文时，也要强制全段中文，避免被日文历史带偏。"""
+    client = AIClient(_Cfg())
+    out = client._build_context_prompt({
+        "channel": "telegram",
+        "platform": "telegram",
+        "chat_type": "private",
+        "_current_user_message_for_lang": "我被咬了？",
+    })
+    assert "用户当前消息语言为「中文」" in out
+    assert "不要在同一条回复里混用其他语言" in out

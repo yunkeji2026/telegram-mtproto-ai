@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 
 from fastapi import Depends, HTTPException, Request
+from src.web.web_i18n import tr
 
 
 def register_human_escalation_routes(
@@ -52,7 +53,7 @@ def register_human_escalation_routes(
         on = bool(body.get("on_duty"))
         st = getattr(telegram_client, "_human_escalation_store", None) if telegram_client else None
         if not st:
-            raise HTTPException(503, "人工转接存储未初始化")
+            raise HTTPException(503, tr(request, "err.svc.handoff_store_not_ready"))
         st.set_shift_on_duty(on)
         actor = request.session.get("username", "web_admin")
         if audit_store:

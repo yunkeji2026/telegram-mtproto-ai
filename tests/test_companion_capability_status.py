@@ -150,5 +150,7 @@ def test_calibration_deeplinks():
     # 主动触达复用 proactive preview
     assert _status(rep, "proactive_topic")["calibration"] == \
         "/api/companion/proactive/preview"
+    assert _status(rep, "realtime_voice")["calibration"] == \
+        "/api/companion/capabilities/realtime-voice-calibration"
     # 无专属校准的能力为空串
     assert _status(rep, "persona_guard")["calibration"] == ""

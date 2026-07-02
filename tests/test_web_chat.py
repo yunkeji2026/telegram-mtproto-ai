@@ -185,6 +185,12 @@ class TestChatEndpoints:
         js = c.get("/chat/embed.js")
         assert js.status_code == 200 and "iframe" in js.text
 
+    def test_embed_and_widget_no_cache(self, chat_app):
+        """品牌改动可及时传播：embed.js 与 widget 均带 no-cache（不吃陈旧缓存）。"""
+        c = TestClient(chat_app)
+        assert "no-cache" in c.get("/chat/embed.js").headers.get("cache-control", "")
+        assert "no-cache" in c.get("/chat/widget").headers.get("cache-control", "")
+
 
 # ── Phase 3-1：漏斗打通（contacts/Journey）────────────────────────────────────
 

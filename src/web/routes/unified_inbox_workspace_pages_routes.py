@@ -28,17 +28,39 @@ def register_workspace_pages_routes(
 ) -> None:
     """挂载工作台 HTML 页面（主入口 + 子页面壳）。"""
 
+    # P5-2：「成交/完成」阶段单一来源 → 注入工作台各页 JS（收件箱 done 筛选 / KPI /
+    # 看板已成交卡片同口径，防前后端漂移）。排序保证 tojson 输出稳定、测试可断言。
+    try:
+        from src.contacts.models import (
+            FUNNEL_DONE_STAGES as _FUNNEL_DONE_STAGES,
+            WON_STAGES as _WON_STAGES,
+        )
+        _funnel_done_sorted = sorted(_FUNNEL_DONE_STAGES)
+        _won_sorted = sorted(_WON_STAGES)
+    except Exception:  # 极端 import 失败也不阻断页面渲染
+        # stage-source-allow: 仅为 models import 失败时的兜底默认，非成交判定逻辑（P5-2c 扫描门禁豁免）
+        _funnel_done_sorted = ["BONDED", "CONVERTED", "LINE_ACCEPTED", "LINE_ENGAGED"]  # stage-source-allow
+        _won_sorted = ["BONDED", "CONVERTED"]  # stage-source-allow
+
     def _page_ctx(request: Request) -> Dict[str, Any]:
         ctx: Dict[str, Any] = {
             "user_name": request.session.get("username") or "",
             "user_display_name": request.session.get("display_name")
             or request.session.get("username") or "",
+            "funnel_done_stages": _funnel_done_sorted,
+            "won_stages": _won_sorted,
         }
+        # P3：账号手机号显示脱敏开关（治理化，默认脱敏=True；演示/隐私可控）
+        ctx["mask_account_phone"] = True
         try:
             if config_manager is not None:
-                _wa = (config_manager.config or {}).get("web_admin", {}) or {}
+                _cfg = config_manager.config or {}
+                _wa = _cfg.get("web_admin", {}) or {}
                 if _wa.get("site_name"):
                     ctx["site_name"] = _wa.get("site_name")
+                _sp = (_cfg.get("accounts", {}) or {}).get("self_profile", {}) or {}
+                if "mask_phone" in _sp:
+                    ctx["mask_account_phone"] = bool(_sp.get("mask_phone"))
         except Exception:
             pass
         return ctx

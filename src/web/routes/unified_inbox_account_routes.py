@@ -32,6 +32,7 @@ from src.integrations.account_orchestrator import (
 from src.integrations.account_registry import get_account_registry
 from src.web.routes.unified_inbox_aggregate import _INBOX_ADAPTERS
 from src.web.routes.unified_inbox_auth import _session_agent
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -88,12 +89,12 @@ def register_account_routes(app, *, api_auth, config_manager=None) -> None:
             body = {}
         store = getattr(request.app.state, "inbox_store", None)
         if store is None:
-            raise HTTPException(503, "inbox store 未就绪")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
         from src.integrations.protocol_bridge import (
             ingest_incoming, make_message, maybe_auto_reply,
         )
         if not str((body or {}).get("chat_key") or ""):
-            raise HTTPException(400, "chat_key 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="chat_key"))
         direction = str((body or {}).get("direction") or "in")
         cid = ingest_incoming(
             store,
@@ -191,6 +192,11 @@ def register_account_routes(app, *, api_auth, config_manager=None) -> None:
                 meta = row.get("meta") or {}
                 r["auto_reply"] = bool(meta.get("auto_reply"))
                 r["auto_reply_override"] = dict(meta.get("autoreply_override") or {})
+                # P1 身份化：透出自身昵称/用户名/头像（缺失即空串，前端回落占位头像）
+                for _sk in ("self_name", "self_username", "self_avatar"):
+                    _sv = str(meta.get(_sk) or "").strip()
+                    if _sv:
+                        r[_sk] = _sv
                 if "registry" not in r["sources"]:
                     r["sources"].append("registry")
         except Exception:
@@ -296,6 +302,12 @@ def register_account_routes(app, *, api_auth, config_manager=None) -> None:
         overview = fleet_overview(
             accounts, registry=reg, limiter=lim, config=cfg
         )
+        # P2：身份采集可观测——把 self_profile 富集计数并入机群健康，便于核对真号环境是否生效
+        try:
+            from src.integrations.account_self_profile import get_self_profile_stats
+            overview["self_profile"] = get_self_profile_stats()
+        except Exception:
+            logger.debug("[accounts] self_profile 计数读取失败", exc_info=True)
         return {"ok": True, **overview}
 
     @app.get("/api/accounts/protocol/readiness")
@@ -378,7 +390,7 @@ def register_account_routes(app, *, api_auth, config_manager=None) -> None:
         reg = get_account_registry()
         row = reg.get(platform, account_id)
         if row is None:
-            raise HTTPException(404, "账号不存在")
+            raise HTTPException(404, tr(request, "err.ws.account_not_found"))
         meta = dict(row.get("meta") or {})
         was = bool(meta.get("auto_reply"))
         meta["auto_reply"] = enabled
@@ -419,7 +431,7 @@ def register_account_routes(app, *, api_auth, config_manager=None) -> None:
         reg = get_account_registry()
         row = reg.get(platform, account_id)
         if row is None:
-            raise HTTPException(404, "账号不存在")
+            raise HTTPException(404, tr(request, "err.ws.account_not_found"))
         from src.integrations.protocol_autoreply_settings import (
             deep_merge, diff_settings, sanitize_override,
         )
@@ -683,7 +695,7 @@ def register_account_routes(app, *, api_auth, config_manager=None) -> None:
             if 0 <= idx < len(items):
                 wh = items[idx]
         if not wh:
-            raise HTTPException(400, "未指定有效的 webhook（index 或 webhook）")
+            raise HTTPException(400, tr(request, "err.ws.no_valid_webhook"))
 
         notifier = getattr(app.state, "webhook_notifier", None)
         if notifier is None:

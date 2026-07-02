@@ -159,6 +159,19 @@ def test_companion_send_paths_are_guarded():
         assert ALLOWLIST[k][0] == GUARDED, f"关键陪伴发送入口必须 guarded：{k}"
 
 
+def test_postsend_mirror_forwards_real_msg_id():
+    """治本幂等键：_postsend_mirror_and_record 把发送 API 返回的真实 message.id 透传给
+    出站镜像 _emit_inbox（→ platform_msg_id），乐观镜像行与回显共用主键精确去重。"""
+    from src.client.sender import TelegramSenderMixin
+
+    obj = TelegramSenderMixin.__new__(TelegramSenderMixin)
+    captured = {}
+    obj._emit_inbox = lambda **kw: captured.update(kw)  # type: ignore[attr-defined]
+    obj._postsend_mirror_and_record(12345, "hello", msg_id=778)
+    assert captured.get("direction") == "out"
+    assert captured.get("msg_id") == "778"   # 真实 id 被字符串化透传
+
+
 def test_scanner_detects_synthetic_raw_send(tmp_path):
     """元测试：扫描器确实能抓到裸 .client.send_*（否则审计形同虚设）。"""
     code = (

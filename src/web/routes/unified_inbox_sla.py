@@ -84,6 +84,7 @@ def _sla_alert_snapshot(request: Request) -> Dict[str, Any]:
     cmap = {str(c.get("conversation_id") or ""): c for c in convs}
     dirs = inbox.last_message_dirs(list(cmap))
     archived = _archived_set(inbox, list(cmap))
+    snoozed = _snoozed_set(inbox, list(cmap))
     now = time.time()
     waiting = breaching = 0
     items: List[Dict[str, Any]] = []
@@ -92,6 +93,8 @@ def _sla_alert_snapshot(request: Request) -> Dict[str, Any]:
             continue
         if cid in archived:
             continue  # 已归档=已处理/已忽略，不再计入告警（前端「忽略」即清零）
+        if cid in snoozed:
+            continue  # 已搁置=坐席「稍后再看」，到点/客户回复前不计入告警
         if exclude_groups and _is_non_alert_conv(cmap.get(cid) or {}):
             continue  # 群组/频道不计入 SLA 告警，改走「群组动态」
         waiting += 1
@@ -178,6 +181,22 @@ def _archived_set(inbox, conv_ids: List[str]) -> set:
         return set()
 
 
+def _snoozed_set(inbox, conv_ids: List[str]) -> set:
+    """搁置中的会话 id 集合（conversation_meta.snooze_until>now）。
+
+    搁置=坐席「稍后再看」：到点/客户回复前不刷 SLA/升级告警——给「待接管」队列一个
+    不删会话也能暂时移出视线的杠杆（到点由 snoozed_ids 的 now 过滤自动重浮；客户再来
+    消息由 ingest 侧 clear_snooze 立即重浮）。与「忽略/归档」互补：搁置是临时、会自动回来。
+    """
+    if inbox is None or not conv_ids:
+        return set()
+    try:
+        return inbox.snoozed_ids() & set(conv_ids)
+    except Exception:
+        logger.debug("读取搁置状态失败（已忽略）", exc_info=True)
+        return set()
+
+
 def _presence_stale_sec(request: Request) -> float:
     """在线判定窗口（秒）：config.workspace.presence_stale_sec，默认 120。"""
     cm = getattr(request.app.state, "config_manager", None)
@@ -208,6 +227,7 @@ def _escalation_snapshot(request: Request) -> Dict[str, Any]:
     cmap = {str(c.get("conversation_id") or ""): c for c in convs}
     dirs = inbox.last_message_dirs(list(cmap))
     archived = _archived_set(inbox, list(cmap))
+    snoozed = _snoozed_set(inbox, list(cmap))
     claim_map: Dict[str, Dict[str, str]] = {}
     try:
         for cl in inbox.list_conversation_claims():
@@ -230,6 +250,8 @@ def _escalation_snapshot(request: Request) -> Dict[str, Any]:
             continue
         if cid in archived:
             continue  # 已归档=已处理/已忽略，不再进升级告警
+        if cid in snoozed:
+            continue  # 已搁置=坐席「稍后再看」，到点/客户回复前不进升级告警
         if exclude_groups and _is_non_alert_conv(cmap.get(cid) or {}):
             continue  # 群组/频道不进升级告警
         wait = now - (info.get("ts") or now)

@@ -23,6 +23,7 @@ from fastapi import Request
 
 from src.web.routes.unified_inbox_context import _collect_quick_templates
 from src.web.routes.unified_inbox_services import _inbox_store
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +108,7 @@ def register_aux_read_routes(app, *, api_auth, config_manager=None) -> None:
         limit = max(1, min(50, int(limit or 20)))
         store = _inbox_store(request)
         if store is None:
-            return {"ok": False, "results": [], "error": "inbox_store 不可用"}
+            return {"ok": False, "results": [], "error": tr(request, "err.svc.inbox_not_ready")}
         try:
             hits = store.search_messages(query, limit=limit, platform=str(platform or ""))
         except Exception:

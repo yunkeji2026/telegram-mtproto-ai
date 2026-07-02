@@ -1,0 +1,21 @@
+# 语音合成语言一致性评测样本（合成 language 应随文本实际语种，防「中文声纹念英文」）
+# 每条：text(待合成回复) + expect_lang(期望合成语言) + default_lang(账号默认,无法判定时回落) + note
+# 跑：python -m scripts.run_eval --voice-language  ；门禁：tests/test_voice_language_eval.py
+
+# —— 中文回复：判 zh，与旧行为一致（不改）——
+- {text: "嗯嗯我在的呀，今天上班累不累，想我了没有", expect_lang: zh, default_lang: zh, note: 中文回复→zh}
+- {text: "嗯嗯好的呀", expect_lang: zh, default_lang: zh, note: 短中文→zh(CJK主导)}
+- {text: "哈哈ok啦", expect_lang: zh, default_lang: zh, note: 中英混排CJK主导→zh(不误切)}
+
+# —— 他语回复：由默认 zh 纠正为文本语种（防 garble）——
+- {text: "Aww I miss you too, how was your day at work today?", expect_lang: en, default_lang: zh, note: 英文→en}
+- {text: "今日はとても疲れたよ、会いたかったな", expect_lang: ja, default_lang: zh, note: 日文→ja}
+- {text: "오늘 정말 보고 싶었어, 밥은 먹었어?", expect_lang: ko, default_lang: zh, note: 韩文→ko}
+- {text: "Anh nhớ em nhiều lắm, hôm nay em thế nào?", expect_lang: vi, default_lang: zh, note: 越南文→vi}
+- {text: "Buenos días, ¿cómo estás? Te extraño mucho.", expect_lang: es, default_lang: zh, note: 西语→es}
+- {text: "Estou com muitas saudades de você, meu coração.", expect_lang: pt, default_lang: zh, note: 葡语→pt}
+
+# —— 无法判定 / 空 → 回落该账号默认 language（保守，绝不比现状更糟）——
+- {text: "😊😊😊", expect_lang: zh, default_lang: zh, note: 纯表情→回落默认zh}
+- {text: "", expect_lang: vi, default_lang: vi, note: 空文本→回落账号默认vi}
+- {text: "Hello, how are you?", expect_lang: en, default_lang: vi, note: 英文→en(账号默认vi也随文本)}

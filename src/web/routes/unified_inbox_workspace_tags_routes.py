@@ -22,6 +22,7 @@ from src.web.routes.unified_inbox_services import (
     _get_chat_assistant_service,
     _inbox_store,
 )
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ def register_workspace_tags_routes(app, *, api_auth) -> None:
             return {"ok": False, "error": "contacts_disabled"}
         tag = str(body.get("tag") or "").strip()
         if not tag:
-            raise HTTPException(400, "tag 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="tag"))
         ok = gw.upsert_tag_library(
             tag, color=str(body.get("color") or ""),
             sort_order=int(body.get("sort_order") or 0),
@@ -100,7 +101,7 @@ def register_workspace_tags_routes(app, *, api_auth) -> None:
         """
         store = _inbox_store(request)
         if store is None:
-            return {"ok": False, "error": "inbox_store 不可用"}
+            return {"ok": False, "error": tr(request, "err.svc.inbox_not_ready")}
         msgs = store.list_recent_messages(conversation_id, limit=30)
         if not msgs:
             return {"ok": True, "summary": ""}
@@ -140,7 +141,7 @@ def register_workspace_tags_routes(app, *, api_auth) -> None:
         tags = [str(t) for t in (body.get("tags") or []) if str(t).strip()]
         store = _inbox_store(request)
         if store is None:
-            return {"ok": False, "error": "inbox_store 不可用"}
+            return {"ok": False, "error": tr(request, "err.svc.inbox_not_ready")}
         ok = store.set_conv_tags(conversation_id, tags)
         # P28：广播标签变更事件
         if ok:
@@ -165,7 +166,7 @@ def register_workspace_tags_routes(app, *, api_auth) -> None:
         archived = bool(body.get("archived", True))
         store = _inbox_store(request)
         if store is None:
-            return {"ok": False, "error": "inbox_store 不可用"}
+            return {"ok": False, "error": tr(request, "err.svc.inbox_not_ready")}
         ok = store.set_conv_archived(conversation_id, archived)
         if ok:
             # P34：归档时自动触发 QA 评分计算（异步非阻塞）

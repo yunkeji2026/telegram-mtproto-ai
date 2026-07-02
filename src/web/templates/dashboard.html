@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}{% if ui_mode == 'simple' %}数据概览{% else %}仪表盘{% endif %} · {{ site_name|default('华灵科技客户转化聊天系统') }}{% endblock %}
-{% block page_title %}{% if ui_mode == 'simple' %}数据概览{% else %}仪表盘{% endif %}{% endblock %}
+{% block title %}{% if ui_mode == 'simple' %}{{ (i18n or {}).get('dashboard', "数据概览") }}{% else %}{{ (i18n or {}).get('db_s001', "仪表盘") }}{% endif %} · {{ product_name|default((i18n or {}).get('brand.product', '智聊')) }}{% endblock %}
+{% block page_title %}{% if ui_mode == 'simple' %}{{ (i18n or {}).get('dashboard', "数据概览") }}{% else %}{{ (i18n or {}).get('db_s001', "仪表盘") }}{% endif %}{% endblock %}
 {% block head %}
 <style>
 /* ── Alert Banner ────────────────────────────── */
@@ -118,10 +118,10 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
 <!-- 系统状态条（JS 动态填充） -->
 <div id="sys-bar" class="pro-only">
   <div class="sys-pills" id="sys-pills">
-    <span class="sys-pill"><span class="dot"></span>加载中…</span>
+    <span class="sys-pill"><span class="dot"></span>{{ (i18n or {}).get('dash.loading', "加载中…") }}</span>
   </div>
   <span class="sys-upd" id="sys-upd-time"></span>
-  <button class="sys-refresh" onclick="loadSysBar()" title="刷新状态">↻</button>
+  <button class="sys-refresh" onclick="loadSysBar()" title="{{ (i18n or {}).get('wa_s017', '刷新状态') }}">↻</button>
 </div>
 
 <!-- C0-1 授权状态卡（JS 动态填充） -->
@@ -139,14 +139,14 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
 <script>
 (function(){
   var META={
-    active:   {bg:'var(--gs)',  fg:'var(--green)', icon:'🔑', label:'已授权'},
-    grace:    {bg:'var(--as)',  fg:'var(--amber)', icon:'⏳', label:'宽限期'},
-    expired:  {bg:'var(--rs)',  fg:'var(--red)',   icon:'⛔', label:'已过期'},
-    unlicensed:{bg:'var(--input)',fg:'var(--t2)',  icon:'🌱', label:'社区模式'},
-    invalid:  {bg:'var(--rs)',  fg:'var(--red)',   icon:'⚠️', label:'授权无效'},
-    unavailable:{bg:'var(--input)',fg:'var(--t2)', icon:'❓', label:'无法校验'}
+    active:   {bg:'var(--gs)',  fg:'var(--green)', icon:'🔑', label:window.T('db_js_001')},
+    grace:    {bg:'var(--as)',  fg:'var(--amber)', icon:'⏳', label:window.T('db_js_002')},
+    expired:  {bg:'var(--rs)',  fg:'var(--red)',   icon:'⛔', label:window.T('db_js_003')},
+    unlicensed:{bg:'var(--input)',fg:'var(--t2)',  icon:'🌱', label:window.T('db_js_004')},
+    invalid:  {bg:'var(--rs)',  fg:'var(--red)',   icon:'⚠️', label:window.T('db_js_005')},
+    unavailable:{bg:'var(--input)',fg:'var(--t2)', icon:'❓', label:window.T('db_js_006')}
   };
-  function planName(p){return {community:'社区版',basic:'基础版',pro:'专业版',flagship:'旗舰版'}[p]||p||'—';}
+  function planName(p){return {community:window.T('db_js_007'),basic:window.T('db_js_008'),pro:window.T('db_js_009'),flagship:window.T('db_js_010')}[p]||p||'—';}
   fetch('/api/admin/license').then(function(r){return r.json();}).then(function(d){
     if(!d||!d.ok) return;
     var card=document.getElementById('lic-card'); if(!card) return;
@@ -156,12 +156,12 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
     document.getElementById('lic-icon').textContent=m.icon;
     var title=planName(d.plan);
     if(d.customer) title+=' · '+d.customer;
-    if(d.days_left!=null && d.state!=='unlicensed') title+=(d.days_left>=0?'（剩 '+d.days_left+' 天）':'（已逾期 '+(-d.days_left)+' 天）');
+    if(d.days_left!=null && d.state!=='unlicensed') title+=(d.days_left>=0?'（'+window.T('db_js_011')+' '+d.days_left+' '+window.T('db_js_012'):'（'+window.T('db_js_013')+' '+(-d.days_left)+' '+window.T('db_js_012'));
     document.getElementById('lic-title').textContent=title;
     var sub=(d.messages&&d.messages.length)?d.messages.join('；'):'';
-    if(!sub && d.state==='active') sub='授权正常'+(d.expires_at? '':' · 永久授权');
-    if(d.seats) sub+=(sub?' · ':'')+'席位 '+d.seats;
-    if(d.channels&&d.channels.length) sub+=(sub?' · ':'')+'渠道 '+d.channels.join('/');
+    if(!sub && d.state==='active') sub=window.T('db_js_014')+(d.expires_at? '':' · '+window.T('db_js_015'));
+    if(d.seats) sub+=(sub?' · ':'')+window.T('db_js_016')+' '+d.seats;
+    if(d.channels&&d.channels.length) sub+=(sub?' · ':'')+window.T('db_js_017')+' '+d.channels.join('/');
     document.getElementById('lic-sub').textContent=sub;
     var b=document.getElementById('lic-badge');
     b.textContent=m.label; b.style.background=m.bg; b.style.color=m.fg;
@@ -186,9 +186,9 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
 <script>
 (function(){
   var LMETA={
-    green:{bg:'var(--gs)',fg:'var(--green)',icon:'🟢',label:'健康'},
-    yellow:{bg:'var(--as)',fg:'var(--amber)',icon:'🟡',label:'注意'},
-    red:{bg:'var(--rs)',fg:'var(--red)',icon:'🔴',label:'异常'}
+    green:{bg:'var(--gs)',fg:'var(--green)',icon:'🟢',label:window.T('db_js_018')},
+    yellow:{bg:'var(--as)',fg:'var(--amber)',icon:'🟡',label:window.T('wa_js_008')},
+    red:{bg:'var(--rs)',fg:'var(--red)',icon:'🔴',label:window.T('msg_js_1245')}
   };
   var SMETA={ok:'var(--green)',warn:'var(--amber)',fail:'var(--red)'};
   function render(){
@@ -198,10 +198,10 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
       var m=LMETA[d.light]||LMETA.yellow;
       card.style.display='block'; card.style.borderLeft='4px solid '+m.fg;
       document.getElementById('health-icon').textContent=m.icon;
-      document.getElementById('health-title').textContent='系统运行状态';
+      document.getElementById('health-title').textContent=window.T('db_js_019');
       var s=d.summary||{};
       document.getElementById('health-sub').textContent=
-        '正常 '+(s.ok||0)+' · 注意 '+(s.warn||0)+' · 异常 '+(s.fail||0);
+        window.T('db_js_020')+' '+(s.ok||0)+' · '+window.T('wa_js_008')+' '+(s.warn||0)+' · '+window.T('msg_js_1245')+' '+(s.fail||0);
       var b=document.getElementById('health-badge');
       b.textContent=m.label; b.style.background=m.bg; b.style.color=m.fg;
       document.getElementById('health-comps').innerHTML=(d.components||[]).map(function(c){
@@ -224,7 +224,7 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
   <div style="display:flex;align-items:center;gap:.9rem;">
     <span id="rel-icon" style="font-size:1.3rem;flex-shrink:0;">📈</span>
     <div style="flex:1;min-width:0;">
-      <div style="font-weight:700;color:var(--t);">运维可靠性（近 24h）</div>
+      <div style="font-weight:700;color:var(--t);">{{ (i18n or {}).get('db_s002', "运维可靠性（近 24h）") }}</div>
       <div id="rel-sub" style="color:var(--t2);font-size:.76rem;margin-top:.12rem;"></div>
     </div>
     <span id="rel-score" style="flex-shrink:0;padding:.22rem .7rem;border-radius:20px;
@@ -235,9 +235,9 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
 </div>
 <script>
 (function(){
-  var LM={green:{fg:'var(--green)',icon:'📈',label:'良好'},
-    yellow:{fg:'var(--amber)',icon:'📉',label:'注意'},
-    red:{fg:'var(--red)',icon:'⚠️',label:'异常'}};
+  var LM={green:{fg:'var(--green)',icon:'📈',label:window.T('wa_js_073')},
+    yellow:{fg:'var(--amber)',icon:'📉',label:window.T('wa_js_008')},
+    red:{fg:'var(--red)',icon:'⚠️',label:window.T('msg_js_1245')}};
   var SM={ok:'var(--green)',warn:'var(--amber)',fail:'var(--red)'};
   function render(){
     fetch('/api/admin/reliability?hours=24').then(function(r){return r.json();}).then(function(d){
@@ -248,15 +248,15 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
       document.getElementById('rel-icon').textContent=m.icon;
       var t=d.totals||{};
       document.getElementById('rel-sub').textContent=
-        '处置 '+(t.dispositions||0)+' · 拦截率 '+Math.round((t.block_rate||0)*100)+'%'
-        +' · 弃用率 '+Math.round((t.reject_rate||0)*100)+'% · 近期告警 '+(d.alert_count||0);
+        window.T('db_js_021')+' '+(t.dispositions||0)+' · '+window.T('db_js_022')+' '+Math.round((t.block_rate||0)*100)+'%'
+        +' · '+window.T('db_js_023')+' '+Math.round((t.reject_rate||0)*100)+'% · '+window.T('db_js_024')+' '+(d.alert_count||0);
       var b=document.getElementById('rel-score');
       b.textContent=m.label+' '+(d.score||0); b.style.color=m.fg;
       b.style.background='color-mix(in srgb,'+m.fg+' 14%,transparent)';
       document.getElementById('rel-workers').innerHTML=(d.workers||[]).map(function(w){
         var col=SM[w.status]||'var(--t2)';
         var er=Math.round((w.error_rate||0)*100);
-        return '<span title="发送 '+(w.total_sent||0)+' / 错误 '+(w.total_errors||0)+'" '
+        return '<span title="'+window.T('rpa_js_send')+' '+(w.total_sent||0)+' / '+window.T('ln_js_036')+' '+(w.total_errors||0)+'" '
           +'style="display:inline-flex;align-items:center;gap:.3rem;padding:.18rem .55rem;'
           +'border:1px solid var(--bd);border-radius:14px;font-size:.72rem;color:var(--t2);">'
           +'<i style="width:7px;height:7px;border-radius:50%;background:'+col+';display:inline-block;"></i>'
@@ -267,7 +267,7 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
         var h=Math.round((x.total||0)/max*38);
         var bad=(x.blocked||0)+(x.rejected||0);
         var bg=bad>0?'var(--amber)':'#93c5fd';
-        return '<i title="处置 '+(x.total||0)+'，拦截/弃用 '+bad+'" style="flex:1;min-width:2px;'
+        return '<i title="'+window.T('db_js_021')+' '+(x.total||0)+'，'+window.T('db_js_025')+' '+bad+'" style="flex:1;min-width:2px;'
           +'height:'+Math.max(2,h)+'px;background:'+bg+';border-radius:1px;display:inline-block;"></i>';
       }).join('');
     }).catch(function(){});
@@ -281,9 +281,9 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
   <div class="alert-banner-header">
     <span class="alert-banner-title" id="alert-banner-title">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-      <span id="alert-banner-label">系统告警</span>
+      <span id="alert-banner-label">{{ (i18n or {}).get('db_s003', "系统告警") }}</span>
     </span>
-    <button class="alert-collapse-btn" id="alert-collapse-btn" onclick="toggleAlertBanner()">收起</button>
+    <button class="alert-collapse-btn" id="alert-collapse-btn" onclick="toggleAlertBanner()">{{ (i18n or {}).get('inbox.collapse', "收起") }}</button>
   </div>
   <div class="alert-wrap" id="alert-wrap"></div>
 </div>
@@ -292,20 +292,20 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
 <div class="card" style="margin-bottom:1rem;padding:1.2rem">
   <h2 style="font-size:1rem;font-weight:700;margin-bottom:.8rem;display:flex;align-items:center;gap:.5rem">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93A10 10 0 0015 3.05V1h-6v2.05A10 10 0 004.93 4.93L3.46 3.46 1 5.93l1.46 1.46A10 10 0 001.05 11H-1v2h2.05A10 10 0 003.46 17.07l-1.46 1.47L4.93 21l1.47-1.46A10 10 0 0011 20.95V23h2v-2.05a10 10 0 005.07-2.49L19.54 21 22 18.54l-1.47-1.47A10 10 0 0021.95 13H24v-2h-2.05A10 10 0 0019.07 4.93z"/></svg>
-    快捷入口
+    {{ (i18n or {}).get('db_s004', "快捷入口") }}
   </h2>
   <div style="display:flex;gap:.7rem;flex-wrap:wrap">
-    <a href="/cases" class="btn btn-p btn-sm" style="padding:.6rem 1.2rem;border-radius:10px;font-size:.9rem">📋 待处理案例</a>
-    <a href="/admin/ops" class="btn btn-s btn-sm" style="padding:.6rem 1.2rem;border-radius:10px;font-size:.9rem">📊 运营总览</a>
-    <a href="/knowledge" class="btn btn-s btn-sm" style="padding:.6rem 1.2rem;border-radius:10px;font-size:.9rem">📚 知识库</a>
-    <a href="/learner" class="btn btn-s btn-sm" style="padding:.6rem 1.2rem;border-radius:10px;font-size:.9rem">🧠 学习审核</a>
-    <a href="/help" class="btn btn-s btn-sm" style="padding:.6rem 1.2rem;border-radius:10px;font-size:.9rem">❓ 帮助</a>
+    <a href="/cases" class="btn btn-p btn-sm" style="padding:.6rem 1.2rem;border-radius:10px;font-size:.9rem">📋 {{ (i18n or {}).get('cases', "待处理案例") }}</a>
+    <a href="/admin/ops" class="btn btn-s btn-sm" style="padding:.6rem 1.2rem;border-radius:10px;font-size:.9rem">📊 {{ (i18n or {}).get('db_s005', "运营总览") }}</a>
+    <a href="/knowledge" class="btn btn-s btn-sm" style="padding:.6rem 1.2rem;border-radius:10px;font-size:.9rem">📚 {{ (i18n or {}).get('knowledge', "知识库") }}</a>
+    <a href="/learner" class="btn btn-s btn-sm" style="padding:.6rem 1.2rem;border-radius:10px;font-size:.9rem">🧠 {{ (i18n or {}).get('db_s006', "学习审核") }}</a>
+    <a href="/help" class="btn btn-s btn-sm" style="padding:.6rem 1.2rem;border-radius:10px;font-size:.9rem">❓ {{ (i18n or {}).get('help', "帮助") }}</a>
   </div>
 </div>
 {% endif %}
 
 {% if msg %}
-<div class="msg {{ 'msg-ok' if 'ok' in msg.lower() or '成功' in msg else 'msg-err' }}">
+<div class="msg {{ 'msg-ok' if 'ok' in msg.lower() or '\u6210\u529f' in msg else 'msg-err' }}">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
   {{ msg }}
 </div>
@@ -316,31 +316,31 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
   <a href="/logs" class="card stat-card fa fa1">
     <div class="s-icon ico-p"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
     <div class="s-num" data-count="{{ uptime_hours|default(0) }}">0</div>
-    <div class="s-lbl">运行时长（小时）</div>
+    <div class="s-lbl">{{ (i18n or {}).get('uptime', "运行时长（小时）") }}</div>
   </a>
   <a href="/templates" class="card stat-card fa fa2">
     <div class="s-icon ico-g"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
     <div class="s-num" data-count="{{ template_count|default(0) }}">0</div>
-    <div class="s-lbl">话术模板</div>
+    <div class="s-lbl">{{ (i18n or {}).get('templates', "话术模板") }}</div>
   </a>
   {% set _has_channels = domain_web_pages|selectattr('key','equalto','ch')|list|length > 0 %}
   {% if _has_channels %}
   <a href="/channels" class="card stat-card fa fa3">
     <div class="s-icon ico-a"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg></div>
     <div class="s-num" data-count="{{ channel_count|default(0) }}">0</div>
-    <div class="s-lbl">通道数量</div>
+    <div class="s-lbl">{{ (i18n or {}).get('channel_count', "通道数量") }}</div>
   </a>
   {% else %}
   <a href="/knowledge" class="card stat-card fa fa3">
     <div class="s-icon ico-a"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg></div>
     <div class="s-num" id="kb-entry-count" data-count="0">0</div>
-    <div class="s-lbl">知识库条目</div>
+    <div class="s-lbl">{{ (i18n or {}).get('db_s007', "知识库条目") }}</div>
   </a>
   {% endif %}
   <a href="/strategy-analytics" class="card stat-card fa fa4">
     <div class="s-icon ico-b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
-    <div class="s-num" style="font-size:1.3rem">{{ status|default('运行中') }}</div>
-    <div class="s-lbl">系统状态</div>
+    <div class="s-num" style="font-size:1.3rem">{{ status|default((i18n or {}).get('status_running', '运行中')) }}</div>
+    <div class="s-lbl">{{ (i18n or {}).get('sys_status', "系统状态") }}</div>
   </a>
 </div>
 
@@ -349,17 +349,17 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
   <h2 style="font-size:.95rem;margin:0 0 .4rem;display:flex;align-items:center;justify-content:space-between;gap:.4rem;flex-wrap:wrap">
     <span style="display:flex;align-items:center;gap:.4rem">
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
-      首次部署检查
+      {{ (i18n or {}).get('db_s008', "首次部署检查") }}
     </span>
-    <button type="button" class="btn btn-s btn-xs" id="dash-first-deploy-dismiss" title="不再显示此提示">已了解</button>
+    <button type="button" class="btn btn-s btn-xs" id="dash-first-deploy-dismiss" title="{{ (i18n or {}).get('db_s009', '不再显示此提示') }}">{{ (i18n or {}).get('db_s010', "已了解") }}</button>
   </h2>
   <ol style="font-size:.8rem;color:var(--t2);line-height:1.55;margin:.35rem 0 0 1.1rem;padding:0">
-    <li>确认 AI 与 <a href="/settings">模型 / API</a> 可用</li>
-    <li>维护 <a href="/knowledge">知识库</a> 条目（空库时检索无命中）</li>
-    <li>检查 <a href="/strategies">回复策略</a> 已启用</li>
-    <li>私聊发一条测试消息，查看 <a href="/logs">日志</a></li>
+    <li>{{ (i18n or {}).get('db_s011', "确认 AI 与") }} <a href="/settings">{{ (i18n or {}).get('msg_js_1218', "模型") }} / API</a> {{ (i18n or {}).get('msg_js_278', "可用") }}</li>
+    <li>{{ (i18n or {}).get('db_s012', "维护") }} <a href="/knowledge">{{ (i18n or {}).get('knowledge', "知识库") }}</a> {{ (i18n or {}).get('db_s013', "条目（空库时检索无命中）") }}</li>
+    <li>{{ (i18n or {}).get('msg_js_1055', "检查") }} <a href="/strategies">{{ (i18n or {}).get('wa_s077', "回复策略") }}</a> {{ (i18n or {}).get('ov_js_enabled', "已启用") }}</li>
+    <li>{{ (i18n or {}).get('db_s014', "私聊发一条测试消息，查看") }} <a href="/logs">{{ (i18n or {}).get('db_s015', "日志") }}</a></li>
   </ol>
-  <p style="font-size:.72rem;color:var(--t3);margin:.55rem 0 0">备份：在项目根执行 <code style="font-size:.68rem">python scripts/backup_sqlite_dbs.py</code> · 详见 <code style="font-size:.68rem">docs/PRODUCTION_BASELINE.md</code></p>
+  <p style="font-size:.72rem;color:var(--t3);margin:.55rem 0 0">{{ (i18n or {}).get('db_s016', "备份：在项目根执行") }} <code style="font-size:.68rem">python scripts/backup_sqlite_dbs.py</code> · {{ (i18n or {}).get('db_s017', "详见") }} <code style="font-size:.68rem">docs/PRODUCTION_BASELINE.md</code></p>
 </div>
 <script>
 (function () {
@@ -389,26 +389,26 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
 <div class="card fa fa2 pro-only" id="bot-metrics-card">
   <h2>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-    Bot 实时性能
+    Bot {{ (i18n or {}).get('db_s018', "实时性能") }}
     <div class="actions">
       <span id="metrics-ts" style="font-size:.7rem;color:var(--t3)"></span>
-      <button class="btn btn-s btn-xs" onclick="loadBotMetrics()">刷新</button>
+      <button class="btn btn-s btn-xs" onclick="loadBotMetrics()">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
     </div>
   </h2>
-  <div id="bm-loading" style="text-align:center;padding:1rem;color:var(--t3);font-size:.82rem">加载中…</div>
+  <div id="bm-loading" style="text-align:center;padding:1rem;color:var(--t3);font-size:.82rem">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
   <div id="bm-content" style="display:none">
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:.55rem;margin-bottom:.8rem">
       <div style="background:var(--input);border-radius:var(--r-sm);padding:.5rem .6rem;text-align:center">
         <div style="font-size:1.3rem;font-weight:700;color:var(--p)" id="bm-received">0</div>
-        <div style="font-size:.68rem;color:var(--t3)">消息接收</div>
+        <div style="font-size:.68rem;color:var(--t3)">{{ (i18n or {}).get('db_s019', "消息接收") }}</div>
       </div>
       <div style="background:var(--input);border-radius:var(--r-sm);padding:.5rem .6rem;text-align:center">
         <div style="font-size:1.3rem;font-weight:700;color:var(--green)" id="bm-replied">0</div>
-        <div style="font-size:.68rem;color:var(--t3)">消息回复</div>
+        <div style="font-size:.68rem;color:var(--t3)">{{ (i18n or {}).get('db_s020', "消息回复") }}</div>
       </div>
       <div style="background:var(--input);border-radius:var(--r-sm);padding:.5rem .6rem;text-align:center">
         <div style="font-size:1.3rem;font-weight:700" id="bm-avg-rt">0</div>
-        <div style="font-size:.68rem;color:var(--t3)">平均响应(ms)</div>
+        <div style="font-size:.68rem;color:var(--t3)">{{ (i18n or {}).get('db_s021', "平均响应") }}(ms)</div>
       </div>
       <div style="background:var(--input);border-radius:var(--r-sm);padding:.5rem .6rem;text-align:center">
         <div style="font-size:1.3rem;font-weight:700" id="bm-p99-rt">0</div>
@@ -416,64 +416,66 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
       </div>
       <div style="background:var(--input);border-radius:var(--r-sm);padding:.5rem .6rem;text-align:center">
         <div style="font-size:1.3rem;font-weight:700" id="bm-concurrency">0</div>
-        <div style="font-size:.68rem;color:var(--t3)">并发/上限</div>
+        <div style="font-size:.68rem;color:var(--t3)">{{ (i18n or {}).get('db_s022', "并发/上限") }}</div>
       </div>
       <div style="background:var(--input);border-radius:var(--r-sm);padding:.5rem .6rem;text-align:center">
         <div style="font-size:1.3rem;font-weight:700" id="bm-queue">0</div>
-        <div style="font-size:.68rem;color:var(--t3)">队列/丢弃</div>
+        <div style="font-size:.68rem;color:var(--t3)">{{ (i18n or {}).get('db_s023', "队列/丢弃") }}</div>
       </div>
       <div style="background:var(--input);border-radius:var(--r-sm);padding:.5rem .6rem;text-align:center">
         <div style="font-size:1.3rem;font-weight:700" id="bm-errors">0</div>
-        <div style="font-size:.68rem;color:var(--t3)">错误总数</div>
+        <div style="font-size:.68rem;color:var(--t3)">{{ (i18n or {}).get('db_s024', "错误总数") }}</div>
       </div>
       <div style="background:var(--input);border-radius:var(--r-sm);padding:.5rem .6rem;text-align:center">
         <div style="font-size:1.3rem;font-weight:700" id="bm-ai-status">—</div>
-        <div style="font-size:.68rem;color:var(--t3)">AI 状态</div>
+        <div style="font-size:.68rem;color:var(--t3)">AI {{ (i18n or {}).get('ov_js_th_status', "状态") }}</div>
       </div>
     </div>
     <div style="display:flex;gap:.5rem;flex-wrap:wrap;font-size:.75rem" id="bm-trigger-layers"></div>
     <div style="display:flex;gap:.7rem;flex-wrap:wrap;font-size:.73rem;color:var(--t2);margin-top:.4rem" id="bm-quality"></div>
     <div id="bm-memory" style="font-size:.73rem;color:var(--t2);margin-top:.35rem;line-height:1.45"></div>
+    <!-- ★ 防复读观测：字符/语义触发分层 + 重生采纳率 + 嵌入缓存命中率 -->
+    <div id="bm-anti-repeat" style="display:none;font-size:.73rem;color:var(--t2);margin-top:.35rem;line-height:1.5"></div>
     <!-- ★ W2-D5.6：陪护模式三层 metrics 卡片 -->
     <div id="bm-companion" style="display:none;margin-top:.6rem;padding:.55rem .65rem;background:var(--input);border-radius:8px;border-left:3px solid var(--p);font-size:.73rem;line-height:1.55"></div>
     <!-- ★ W3-D1.3：reactivation dry_run 样本审核面板 -->
     <details id="bm-dry-samples" style="margin-top:.5rem;font-size:.73rem">
       <summary style="cursor:pointer;color:var(--t2);user-select:none">
-        待审核话术 <span id="bm-dry-count" style="color:var(--t3)">(–)</span>
-        <button class="btn btn-s btn-xs" style="margin-left:.6rem;padding:.1rem .5rem;font-size:.65rem" onclick="event.preventDefault();loadDrySamples(true)">刷新</button>
+        {{ (i18n or {}).get('db_s025', "待审核话术") }} <span id="bm-dry-count" style="color:var(--t3)">(–)</span>
+        <button class="btn btn-s btn-xs" style="margin-left:.6rem;padding:.1rem .5rem;font-size:.65rem" onclick="event.preventDefault();loadDrySamples(true)">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
       </summary>
       <div id="bm-dry-list" style="margin-top:.5rem;display:flex;flex-direction:column;gap:.4rem">
-        <div style="color:var(--t3)">点开后按"刷新"加载</div>
+        <div style="color:var(--t3)">{{ (i18n or {}).get('db_s026', "点开后按") }}"{{ (i18n or {}).get('dash.refresh', "刷新") }}"{{ (i18n or {}).get('db_s027', "加载") }}</div>
       </div>
     </details>
     <!-- ★ Phase O 质量闭环：care dry_run 关怀话术审核面板 -->
     <details id="bm-care-dry-samples" style="margin-top:.5rem;font-size:.73rem">
       <summary style="cursor:pointer;color:var(--t2);user-select:none">
-        待审核关怀话术 <span id="bm-care-dry-count" style="color:var(--t3)">(–)</span>
-        <button class="btn btn-s btn-xs" style="margin-left:.6rem;padding:.1rem .5rem;font-size:.65rem" onclick="event.preventDefault();loadCareDry(true)">刷新</button>
+        {{ (i18n or {}).get('db_s028', "待审核关怀话术") }} <span id="bm-care-dry-count" style="color:var(--t3)">(–)</span>
+        <button class="btn btn-s btn-xs" style="margin-left:.6rem;padding:.1rem .5rem;font-size:.65rem" onclick="event.preventDefault();loadCareDry(true)">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
       </summary>
       <div id="bm-care-dry-list" style="margin-top:.5rem;display:flex;flex-direction:column;gap:.4rem">
-        <div style="color:var(--t3)">点开后按"刷新"加载</div>
+        <div style="color:var(--t3)">{{ (i18n or {}).get('db_s026', "点开后按") }}"{{ (i18n or {}).get('dash.refresh', "刷新") }}"{{ (i18n or {}).get('db_s027', "加载") }}</div>
       </div>
     </details>
     <!-- ★ O·P 联动质量看板 -->
     <details id="bm-quality" style="margin-top:.5rem;font-size:.73rem">
       <summary style="cursor:pointer;color:var(--t2);user-select:none">
-        主动消息质量（care + 唤醒） <span id="bm-q-rate" style="color:var(--t3)">(–)</span>
-        <button class="btn btn-s btn-xs" style="margin-left:.6rem;padding:.1rem .5rem;font-size:.65rem" onclick="event.preventDefault();loadQualityOverview()">刷新</button>
+        {{ (i18n or {}).get('db_s029', "主动消息质量") }}（care + {{ (i18n or {}).get('db_s030', "唤醒）") }} <span id="bm-q-rate" style="color:var(--t3)">(–)</span>
+        <button class="btn btn-s btn-xs" style="margin-left:.6rem;padding:.1rem .5rem;font-size:.65rem" onclick="event.preventDefault();loadQualityOverview()">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
       </summary>
       <div id="bm-q-body" style="margin-top:.5rem">
-        <div style="color:var(--t3)">点开后按"刷新"加载</div>
+        <div style="color:var(--t3)">{{ (i18n or {}).get('db_s026', "点开后按") }}"{{ (i18n or {}).get('dash.refresh', "刷新") }}"{{ (i18n or {}).get('db_s027', "加载") }}</div>
       </div>
     </details>
     <!-- ★ 多平台 deferred 队列 · 运营可观测 -->
     <details id="bm-deferred-outbox" style="margin-top:.5rem;font-size:.73rem">
       <summary style="cursor:pointer;color:var(--t2);user-select:none">
-        多平台 deferred 队列 <span id="bm-dob-count" style="color:var(--t3)">(–)</span>
-        <button class="btn btn-s btn-xs" style="margin-left:.6rem;padding:.1rem .5rem;font-size:.65rem" onclick="event.preventDefault();loadDeferredOutbox()">刷新</button>
+        {{ (i18n or {}).get('db_s031', "多平台 deferred 队列") }} <span id="bm-dob-count" style="color:var(--t3)">(–)</span>
+        <button class="btn btn-s btn-xs" style="margin-left:.6rem;padding:.1rem .5rem;font-size:.65rem" onclick="event.preventDefault();loadDeferredOutbox()">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
       </summary>
       <div id="bm-dob-body" style="margin-top:.5rem">
-        <div style="color:var(--t3)">点开后按"刷新"加载</div>
+        <div style="color:var(--t3)">{{ (i18n or {}).get('db_s026', "点开后按") }}"{{ (i18n or {}).get('dash.refresh', "刷新") }}"{{ (i18n or {}).get('db_s027', "加载") }}</div>
       </div>
     </details>
   </div>
@@ -483,51 +485,51 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
 <div class="card fa fa2 pro-only" id="trigger-decisions-card">
   <h2>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-    触发器决策（最近）
+    {{ (i18n or {}).get('db_s032', "触发器决策（最近）") }}
     <div class="actions">
-      <button class="btn btn-s btn-xs" onclick="loadTriggerDecisions()">刷新</button>
+      <button class="btn btn-s btn-xs" onclick="loadTriggerDecisions()">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
     </div>
   </h2>
-  <div id="td-loading" style="text-align:center;padding:.8rem;color:var(--t3);font-size:.82rem">加载中…</div>
+  <div id="td-loading" style="text-align:center;padding:.8rem;color:var(--t3);font-size:.82rem">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
   <div id="td-content" style="display:none;max-height:280px;overflow-y:auto">
     <div id="td-list" class="tl"></div>
   </div>
-  <div id="td-empty" style="display:none;text-align:center;padding:1rem;color:var(--t3);font-size:.82rem">暂无决策记录</div>
+  <div id="td-empty" style="display:none;text-align:center;padding:1rem;color:var(--t3);font-size:.82rem">{{ (i18n or {}).get('db_s033', "暂无决策记录") }}</div>
 </div>
 
 <!-- Quick actions -->
 <div class="card fa fa2 pro-only">
   <h2>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93A10 10 0 0015 3.05V1h-6v2.05A10 10 0 004.93 4.93L3.46 3.46 1 5.93l1.46 1.46A10 10 0 001.05 11H-1v2h2.05A10 10 0 003.46 17.07l-1.46 1.47L4.93 21l1.47-1.46A10 10 0 0011 20.95V23h2v-2.05a10 10 0 005.07-2.49L19.54 21 22 18.54l-1.47-1.47A10 10 0 0021.95 13H24v-2h-2.05A10 10 0 0019.07 4.93z"/></svg>
-    快速操作
+    {{ (i18n or {}).get('quick_actions', "快速操作") }}
   </h2>
   <div class="qa-row">
     <form method="post" action="/export" style="display:inline">
       <button type="submit" class="btn btn-p btn-sm">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        导出配置
+        {{ (i18n or {}).get('export_config', "导出配置") }}
       </button>
     </form>
     <a href="/import" class="btn btn-s btn-sm" data-help="nav_import">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-      导入配置
+      {{ (i18n or {}).get('import_page', "导入配置") }}
     </a>
     <a href="/audit" class="btn btn-s btn-sm" data-help="nav_audit">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-      操作记录
+      {{ (i18n or {}).get('audit', "操作记录") }}
     </a>
     <a href="/diff" class="btn btn-s btn-sm" data-help="nav_diff">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-      版本对比
+      {{ (i18n or {}).get('diff', "版本对比") }}
     </a>
     <a href="/analytics" class="btn btn-s btn-sm" data-help="nav_analytics">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-      数据分析
+      {{ (i18n or {}).get('section_data', "数据分析") }}
     </a>
     <button class="btn btn-sm" style="background:var(--gs);color:var(--green);border:1px solid var(--green)"
             onclick="openHealthCheck()" id="hc-btn">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-      系统诊断
+      {{ (i18n or {}).get('db_s034', "系统诊断") }}
     </button>
   </div>
 </div>
@@ -536,17 +538,17 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
 <div class="card fa fa3 pro-only" id="activity-card">
   <h2>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
-    今日活动
+    {{ (i18n or {}).get('db_s035', "今日活动") }}
     <div class="actions" style="display:flex;gap:.4rem;align-items:center">
       <span id="act-total-badge" style="font-size:.75rem;color:var(--t3)"></span>
-      <a href="/audit" class="btn btn-s btn-xs">查看记录</a>
+      <a href="/audit" class="btn btn-s btn-xs">{{ (i18n or {}).get('db_s036', "查看记录") }}</a>
     </div>
   </h2>
-  <div id="act-loading" style="text-align:center;padding:1rem;color:var(--t3);font-size:.82rem">加载中…</div>
+  <div id="act-loading" style="text-align:center;padding:1rem;color:var(--t3);font-size:.82rem">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
   <div id="act-content" style="display:none">
     <div class="act-chart-wrap">
       <div>
-        <div style="font-size:.72rem;color:var(--t3);margin-bottom:.4rem">过去 24 小时操作趋势</div>
+        <div style="font-size:.72rem;color:var(--t3);margin-bottom:.4rem">{{ (i18n or {}).get('db_s037', "过去 24 小时操作趋势") }}</div>
         <div class="act-bars" id="act-bars"></div>
         <div style="display:flex;justify-content:space-between;font-size:.65rem;color:var(--t3);margin-top:.2rem">
           <span id="act-h-start"></span>
@@ -558,7 +560,7 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
           <canvas id="act-donut" width="90" height="90"></canvas>
           <div class="act-donut-center">
             <span class="act-total" id="act-total-num">0</span>
-            <span class="act-total-lbl">操作</span>
+            <span class="act-total-lbl">{{ (i18n or {}).get('ov_js_th_action', "操作") }}</span>
           </div>
         </div>
         <div class="act-legend" id="act-legend"></div>
@@ -579,51 +581,51 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
 <div class="card fa fa3" id="kb-health-card">
   <h2>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
-    知识库状态
-    <div class="actions"><a href="/knowledge" class="btn btn-s btn-xs">管理</a></div>
+    {{ (i18n or {}).get('db_s038', "知识库状态") }}
+    <div class="actions"><a href="/knowledge" class="btn btn-s btn-xs">{{ (i18n or {}).get('inbox.xl.manage', "管理") }}</a></div>
   </h2>
-  <div id="kb-loading" style="text-align:center;padding:1rem;color:var(--t3);font-size:.82rem">加载中…</div>
+  <div id="kb-loading" style="text-align:center;padding:1rem;color:var(--t3);font-size:.82rem">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
   <div id="kb-content" style="display:none">
     <!-- 核心指标：4宫格 -->
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-bottom:.8rem">
       <div style="background:var(--input);border-radius:var(--r-sm);padding:.55rem .7rem;text-align:center">
         <div style="font-size:1.4rem;font-weight:700;color:var(--p)" id="kb-d-entries">0</div>
-        <div style="font-size:.7rem;color:var(--t3)">知识条目</div>
+        <div style="font-size:.7rem;color:var(--t3)">{{ (i18n or {}).get('inbox.kb.entry_default', "知识条目") }}</div>
       </div>
       <div style="background:var(--input);border-radius:var(--r-sm);padding:.55rem .7rem;text-align:center">
         <div style="font-size:1.4rem;font-weight:700;color:var(--green)" id="kb-d-sat">—</div>
-        <div style="font-size:.7rem;color:var(--t3)">7日满意率</div>
+        <div style="font-size:.7rem;color:var(--t3)">7{{ (i18n or {}).get('db_s039', "日满意率") }}</div>
       </div>
       <div style="background:var(--input);border-radius:var(--r-sm);padding:.55rem .7rem;text-align:center">
         <div style="font-size:1.4rem;font-weight:700" id="kb-d-hitrate">—</div>
-        <div style="font-size:.7rem;color:var(--t3)">今日命中率</div>
+        <div style="font-size:.7rem;color:var(--t3)">{{ (i18n or {}).get('db_s040', "今日命中率") }}</div>
       </div>
       <div style="background:var(--input);border-radius:var(--r-sm);padding:.55rem .7rem;text-align:center">
         <div style="font-size:1.4rem;font-weight:700;color:var(--t2)" id="kb-d-queries">—</div>
-        <div style="font-size:.7rem;color:var(--t3)">今日查询次数</div>
+        <div style="font-size:.7rem;color:var(--t3)">{{ (i18n or {}).get('db_s041', "今日查询次数") }}</div>
       </div>
     </div>
     <!-- 今日命中率迷你趋势图 -->
-    <div style="font-size:.75rem;color:var(--t3);margin-bottom:.3rem;font-weight:600">今日命中率趋势（每小时）</div>
+    <div style="font-size:.75rem;color:var(--t3);margin-bottom:.3rem;font-weight:600">{{ (i18n or {}).get('db_s042', "今日命中率趋势（每小时）") }}</div>
     <div id="kb-sparkline" style="height:44px;display:flex;align-items:flex-end;gap:2px;background:var(--input);border-radius:var(--r-sm);padding:.4rem .5rem;margin-bottom:.7rem"></div>
     <!-- 检索模式 -->
     <div id="kb-search-mode-badge" style="margin-bottom:.6rem"></div>
     <!-- 向量化进度 -->
-    <div style="font-size:.75rem;color:var(--t3);margin-bottom:.3rem;font-weight:600">向量化覆盖率</div>
+    <div style="font-size:.75rem;color:var(--t3);margin-bottom:.3rem;font-weight:600">{{ (i18n or {}).get('db_s043', "向量化覆盖率") }}</div>
     <div style="height:7px;background:var(--bd2);border-radius:10px;overflow:hidden;margin-bottom:.2rem">
       <div id="kb-vec-bar" style="height:100%;width:0%;background:var(--p);border-radius:10px;transition:width .6s"></div>
     </div>
     <div style="font-size:.72rem;color:var(--t3);margin-bottom:.75rem" id="kb-vec-detail">—</div>
     <!-- 翻译覆盖进度 -->
-    <div style="font-size:.75rem;color:var(--t3);margin-bottom:.3rem;font-weight:600">多语言翻译覆盖</div>
+    <div style="font-size:.75rem;color:var(--t3);margin-bottom:.3rem;font-weight:600">{{ (i18n or {}).get('db_s044', "多语言翻译覆盖") }}</div>
     <div id="kb-trans-bars" style="display:flex;flex-direction:column;gap:.3rem;margin-bottom:.8rem"></div>
     <!-- 高频未命中 -->
-    <div style="font-size:.75rem;color:var(--t3);margin-bottom:.3rem;font-weight:600">知识盲区（高频未命中）</div>
+    <div style="font-size:.75rem;color:var(--t3);margin-bottom:.3rem;font-weight:600">{{ (i18n or {}).get('db_s045', "知识盲区（高频未命中）") }}</div>
     <div id="kb-miss-list" style="font-size:.78rem"></div>
     <!-- 回复质量追踪 -->
     <div style="margin-top:.8rem">
-      <div style="font-size:.75rem;color:var(--t3);margin-bottom:.3rem;font-weight:600">回复质量追踪（7日）</div>
-      <div id="kb-quality-stats" style="font-size:.78rem">加载中…</div>
+      <div style="font-size:.75rem;color:var(--t3);margin-bottom:.3rem;font-weight:600">{{ (i18n or {}).get('db_s046', "回复质量追踪（7日）") }}</div>
+      <div id="kb-quality-stats" style="font-size:.78rem">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div>
     </div>
   </div>
 </div>
@@ -632,8 +634,8 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
 <div class="card fa fa4 pro-only">
   <h2>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-    最近操作
-    <div class="actions"><a href="/audit" class="btn btn-s btn-xs">查看全部</a></div>
+    {{ (i18n or {}).get('recent_ops', "最近操作") }}
+    <div class="actions"><a href="/audit" class="btn btn-s btn-xs">{{ (i18n or {}).get('view_all', "查看全部") }}</a></div>
   </h2>
   {% if recent_ops %}
   <div class="tl">
@@ -651,7 +653,7 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
         <div class="tl-action">{{ op.action }}</div>
         <div class="tl-meta">
           {% if op.operator %}<span>{{ op.operator }}</span>{% endif %}
-          {% if op.channel %}<span>通道: {{ op.channel }}</span>{% endif %}
+          {% if op.channel %}<span>{{ (i18n or {}).get('db_s047', "通道") }}: {{ op.channel }}</span>{% endif %}
         </div>
       </div>
       <div class="tl-time">{{ op.ts if op.ts else '' }}</div>
@@ -661,7 +663,7 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
   {% else %}
   <div class="empty">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-    <p>暂无操作记录</p>
+    <p>{{ (i18n or {}).get('db_s048', "暂无操作记录") }}</p>
   </div>
   {% endif %}
 </div>
@@ -679,17 +681,17 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
         <div class="hc-score-num" id="hc-score-num">…</div>
       </div>
       <div style="flex:1">
-        <div style="font-weight:700;font-size:1rem" id="hc-title">系统诊断</div>
-        <div style="font-size:.78rem;color:var(--t3)" id="hc-subtitle">正在检查…</div>
+        <div style="font-weight:700;font-size:1rem" id="hc-title">{{ (i18n or {}).get('db_s034', "系统诊断") }}</div>
+        <div style="font-size:.78rem;color:var(--t3)" id="hc-subtitle">{{ (i18n or {}).get('db_s049', "正在检查…") }}</div>
       </div>
       <button class="btn btn-s btn-sm" onclick="runHealthCheck()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
-        重新检测
+        {{ (i18n or {}).get('db_s050', "重新检测") }}
       </button>
       <button class="btn btn-s btn-sm" onclick="closeHealthCheck()">✕</button>
     </div>
     <div class="hc-body" id="hc-body">
-      <div style="text-align:center;padding:2rem;color:var(--t3)">正在检查系统状态…</div>
+      <div style="text-align:center;padding:2rem;color:var(--t3)">{{ (i18n or {}).get('db_s051', "正在检查系统状态…") }}</div>
     </div>
   </div>
 </div>
@@ -709,7 +711,7 @@ async function loadAlerts(){
     var wrap=document.getElementById('alert-wrap');
     var titleEl=document.getElementById('alert-banner-title');
     var label=document.getElementById('alert-banner-label');
-    label.textContent=d.alert_count+' 条系统告警';
+    label.textContent=d.alert_count+' '+window.T('db_js_026');
     titleEl.className='alert-banner-title '+d.highest_level;
     wrap.innerHTML=d.alerts.map(function(a){
       return '<div class="alert-bar '+a.level+'">'+
@@ -719,7 +721,7 @@ async function loadAlerts(){
         '</div>';
     }).join('');
     banner.style.display='block';
-    if(_alertCollapsed){wrap.style.display='none';document.getElementById('alert-collapse-btn').textContent='展开';}
+    if(_alertCollapsed){wrap.style.display='none';document.getElementById('alert-collapse-btn').textContent=window.T('wa_js_016');}
   }catch(e){}
 }
 function toggleAlertBanner(){
@@ -727,7 +729,7 @@ function toggleAlertBanner(){
   var btn=document.getElementById('alert-collapse-btn');
   var collapsed=wrap.style.display==='none';
   wrap.style.display=collapsed?'':'none';
-  btn.textContent=collapsed?'收起':'展开';
+  btn.textContent=collapsed?window.T('inbox.collapse'):window.T('wa_js_016');
   _alertCollapsed=!collapsed;
   localStorage.setItem('dash_alert_collapsed',_alertCollapsed?'1':'0');
 }
@@ -751,7 +753,7 @@ async function loadActivityStats(){
     const maxV=Math.max(1,...hourly.map(h=>h.count));
     bars.innerHTML=hourly.map(h=>{
       const h100=Math.max(4,Math.round(h.count/maxV*100));
-      return `<div class="act-bar${h.count===0?' zero':''}" style="height:${h100}%" title="${h.label}: ${h.count}次"></div>`;
+      return `<div class="act-bar${h.count===0?' zero':''}" style="height:${h100}%" title="${h.label}: ${h.count}${window.T('ov_js_times_unit')}"></div>`;
     }).join('');
     const labels=hourly.map(h=>h.label);
     if(labels.length){
@@ -761,7 +763,7 @@ async function loadActivityStats(){
 
     /* Donut chart (pure canvas, no lib) */
     document.getElementById('act-total-num').textContent=d.total||0;
-    document.getElementById('act-total-badge').textContent=`今日 ${d.total||0} 次操作`;
+    document.getElementById('act-total-badge').textContent=window.Tf('db_js_p01', {n: d.total||0});
     const byAction=d.by_action||{};
     const entries=Object.entries(byAction).sort((a,b)=>b[1]-a[1]);
     const canvas=document.getElementById('act-donut');
@@ -792,7 +794,7 @@ async function loadActivityStats(){
     /* Top operators */
     const topOps=document.getElementById('act-top-ops');
     topOps.innerHTML=(d.top_operators||[]).map(op=>
-      `<div class="act-op"><span class="act-op-name">${op.name}</span><span>${op.count} 次</span></div>`
+      `<div class="act-op"><span class="act-op-name">${op.name}</span><span>${op.count} ${window.T('ov_js_times_unit')}</span></div>`
     ).join('');
   }catch(e){}
 }
@@ -807,7 +809,7 @@ function closeHealthCheck(){
 }
 
 async function runHealthCheck(){
-  document.getElementById('hc-body').innerHTML='<div style="text-align:center;padding:2rem;color:var(--t3)">正在检查系统状态…</div>';
+  document.getElementById('hc-body').innerHTML='<div style="text-align:center;padding:2rem;color:var(--t3)">'+window.T('db_s051')+'</div>';
   document.getElementById('hc-score-num').textContent='…';
   document.getElementById('hc-ring-fg').setAttribute('stroke-dasharray','0 100');
   try{
@@ -821,7 +823,7 @@ async function runHealthCheck(){
     document.getElementById('hc-score-num').textContent=score;
     document.getElementById('hc-score-num').style.color=scoreColor;
     const ls=d.level_summary||{};
-    const subtitle=d.status==='ok'?'系统健康，无问题发现':`发现 ${ls.critical||0} 严重 / ${ls.warn||0} 警告 / ${ls.info||0} 提示`;
+    const subtitle=d.status==='ok'?window.T('db_js_027'):window.Tf('db_js_p02', {c: ls.critical||0, w: ls.warn||0, i: ls.info||0});
     document.getElementById('hc-subtitle').textContent=subtitle;
 
     /* Issues list */
@@ -830,7 +832,7 @@ async function runHealthCheck(){
       document.getElementById('hc-body').innerHTML=`
 <div class="hc-issue ok">
   <div class="hc-icon">✅</div>
-  <div class="hc-content"><div class="hc-title">所有检查项均正常</div><div class="hc-detail">系统配置完整，无需处理</div></div>
+  <div class="hc-content"><div class="hc-title">${window.T('db_js_086')}</div><div class="hc-detail">${window.T('db_js_087')}</div></div>
 </div>`;
     }else{
       const ICONS={critical:'🚨',warn:'⚠️',info:'ℹ️'};
@@ -845,7 +847,7 @@ async function runHealthCheck(){
 </div>`).join('');
     }
   }catch(e){
-    document.getElementById('hc-body').innerHTML='<div style="text-align:center;padding:2rem;color:var(--red)">检查失败，请稍后重试</div>';
+    document.getElementById('hc-body').innerHTML='<div style="text-align:center;padding:2rem;color:var(--red)">'+window.T('db_js_028')+'</div>';
   }
 }
 
@@ -867,14 +869,14 @@ async function loadBotMetrics(){
     errEl.textContent=d.errors_count||0;
     errEl.style.color=(d.errors_count>0)?'var(--red)':'var(--t)';
     const aiEl=document.getElementById('bm-ai-status');
-    if(d.ai_healthy){aiEl.textContent='正常';aiEl.style.color='var(--green)';}
-    else{aiEl.textContent='异常('+d.ai_errors+')';aiEl.style.color='var(--red)';}
+    if(d.ai_healthy){aiEl.textContent=window.T('db_js_020');aiEl.style.color='var(--green)';}
+    else{aiEl.textContent=window.T('msg_js_1245')+'('+d.ai_errors+')';aiEl.style.color='var(--red)';}
     const cb=d.circuit_breaker||{};
-    if(cb.state==='open'){aiEl.textContent='熔断中';aiEl.style.color='var(--red)';}
+    if(cb.state==='open'){aiEl.textContent=window.T('db_js_029');aiEl.style.color='var(--red)';}
     // trigger layers
     const tl=d.trigger_layers||{};
     const tlEl=document.getElementById('bm-trigger-layers');
-    const LAYER_NAMES={l1:'L1规则',l2:'L2语义',l3_filtered:'L3过滤',l4_silenced:'L4静默',skipped:'跳过'};
+    const LAYER_NAMES={l1:'L1'+window.T('db_js_030'),l2:'L2'+window.T('db_js_031'),l3_filtered:'L3'+window.T('db_js_032'),l4_silenced:'L4'+window.T('db_js_033'),skipped:window.T('db_js_034')};
     const LAYER_COLORS={l1:'var(--green)',l2:'var(--p)',l3_filtered:'var(--amber)',l4_silenced:'var(--t3)',skipped:'var(--red)'};
     tlEl.innerHTML=Object.entries(tl).map(([k,v])=>
       `<span style="background:var(--input);padding:.2rem .5rem;border-radius:12px;border-left:3px solid ${LAYER_COLORS[k]||'var(--t3)'}">${LAYER_NAMES[k]||k} <b>${v}</b></span>`
@@ -883,9 +885,9 @@ async function loadBotMetrics(){
     const rq=d.reply_quality||{};
     const qEl=document.getElementById('bm-quality');
     qEl.innerHTML=[
-      rq.avg_reply_length?`平均回复 <b>${rq.avg_reply_length}</b> 字`:'',
-      rq.fallback_count?`兜底 <b style="color:var(--amber)">${rq.fallback_count}</b> (${rq.fallback_rate_pct}%)`:'',
-      rq.truncated_count?`截断 <b style="color:var(--red)">${rq.truncated_count}</b> (${rq.truncated_rate_pct}%)`:'',
+      rq.avg_reply_length?`${window.T('db_js_088')} <b>${rq.avg_reply_length}</b> ${window.T('db_js_089')}`:'',
+      rq.fallback_count?`${window.T('db_js_090')} <b style="color:var(--amber)">${rq.fallback_count}</b> (${rq.fallback_rate_pct}%)`:'',
+      rq.truncated_count?`${window.T('db_js_091')} <b style="color:var(--red)">${rq.truncated_count}</b> (${rq.truncated_rate_pct}%)`:'',
     ].filter(Boolean).join(' · ');
     const mem=d.memory;
     const mEl=document.getElementById('bm-memory');
@@ -898,9 +900,29 @@ async function loadBotMetrics(){
       const sat=sa.total!=null?sa.total:0;
       const saw=sa.warnings!=null?sa.warnings:0;
       const sal=sa.audit_logged_warnings;
-      const saStr=(sat>0||saw>0||sal!=null)?(' · 基线 <b>'+sat+'</b>/<b style="color:'+(saw>0?'var(--amber)':'inherit')+'">'+saw+'</b> · 审计 <b>'+(sal==null?'—':sal)+'</b>'):'';
-      mEl.innerHTML='记忆 · 慢思考 <b>'+st+'</b> · 注入 <b>'+ej+'</b> · 嵌入失败 <b style="color:'+(ef>0?'var(--amber)':'inherit')+'">'+ef+'</b> · 补全 <b>'+bf+'</b> · <a href="/episodic-memory" style="color:var(--p)">情景记忆</a>'+saStr;
+      const saStr=(sat>0||saw>0||sal!=null)?(' · '+window.T('db_js_035')+' <b>'+sat+'</b>/<b style="color:'+(saw>0?'var(--amber)':'inherit')+'">'+saw+'</b> · '+window.T('dash.ws.col_audit')+' <b>'+(sal==null?'—':sal)+'</b>'):'';
+      mEl.innerHTML=window.T('db_js_036')+' <b>'+st+'</b> · '+window.T('db_js_037')+' <b>'+ej+'</b> · '+window.T('db_js_038')+' <b style="color:'+(ef>0?'var(--amber)':'inherit')+'">'+ef+'</b> · '+window.T('db_js_039')+' <b>'+bf+'</b> · <a href="/episodic-memory" style="color:var(--p)">'+window.T('episodic')+'</a>'+saStr;
     }
+    // ★ 防复读观测：字符/语义触发分层 + 重生采纳率 + 嵌入缓存命中率
+    try{
+      const ar=d.anti_repeat||{};
+      const arEl=document.getElementById('bm-anti-repeat');
+      if(arEl){
+        if((ar.checks||0)<=0){ arEl.style.display='none'; }
+        else{
+          arEl.style.display='';
+          const semShare=ar.semantic_share_pct||0;
+          const semColor=semShare>0?'var(--p)':'var(--t3)';
+          const ec=ar.embed_cache||{};
+          const ecTotal=(ec.hit||0)+(ec.miss||0);
+          const hitColor=(ec.hit_rate_pct||0)>=80?'var(--green)':((ec.hit_rate_pct||0)>=50?'var(--amber)':'var(--t3)');
+          const cacheStr=ecTotal>0
+            ? ' · '+window.T('db_js_ar04')+' <b style="color:'+hitColor+'">'+ec.hit_rate_pct+'%</b> ('+(ec.hit||0)+'/'+ecTotal+')'
+            : '';
+          arEl.innerHTML='<b>'+window.T('db_js_ar00')+'</b> · '+window.T('db_js_ar01')+' <b>'+(ar.checks||0)+'</b> · '+window.T('db_js_ar02')+' <b style="color:var(--amber)">'+(ar.trigger_rate_pct||0)+'%</b>（'+window.T('db_js_ar05')+' '+(ar.char_triggered||0)+' / '+window.T('db_js_ar06')+' <b style="color:'+semColor+'">'+(ar.semantic_triggered||0)+'</b>，'+window.T('db_js_ar07')+' '+semShare+'%）· '+window.T('db_js_ar03')+' <b>'+(ar.rewrite_adopt_rate_pct||0)+'%</b> ('+(ar.rewrite_adopted||0)+'/'+(ar.rewrite_attempted||0)+')'+cacheStr;
+        }
+      }
+    }catch(_e){}
     // ★ W2-D5.6 + D6.5：companion 三层 metrics + sparkline 趋势
     try{
       const css=d.companion_safe_skip||{};
@@ -919,7 +941,7 @@ async function loadBotMetrics(){
           // i=0 是最早的桶（60 min 前），i=n-1 是当前
           const minAgo=(n-1-i)*bucketMin;
           const minAgoEnd=minAgo+bucketMin;
-          const tip=`${minAgoEnd}~${minAgo} min 前: ${v} 条`;
+          const tip=window.Tf('db_js_p03', {a: minAgoEnd, b: minAgo, v: v});
           return `<rect x="${(i*bw).toFixed(1)}" y="${h-bh}" width="${(bw-0.6).toFixed(1)}" height="${bh}" fill="${color}"><title>${tip}</title></rect>`;
         }).join('');
         return `<svg width="${w}" height="${h}" style="vertical-align:middle;margin-left:.4rem">${bars}</svg>`;
@@ -932,40 +954,40 @@ async function loadBotMetrics(){
           const cssRate=css.rate_1h||0;
           const cssColor=cssRate>10?'var(--red)':(cssRate>3?'var(--amber)':'var(--green)');
           const cssTopReason=Object.entries(css.by_reason||{}).sort((a,b)=>b[1]-a[1])[0];
-          const cssReasonStr=cssTopReason?(' · 主因 '+cssTopReason[0]+' ×'+cssTopReason[1]):'';
+          const cssReasonStr=cssTopReason?(' · '+window.T('db_js_040')+' '+cssTopReason[0]+' ×'+cssTopReason[1]):'';
           const dqAccPairs=Object.entries(dq.by_account||{});
           const dqByAcc=dqAccPairs.length?(' ('+dqAccPairs.map(([k,v])=>k+':'+v).join(',')+')'):'';
-          const reLast=re.last_run_ts?new Date(re.last_run_ts*1000).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}):'—';
+          const reLast=re.last_run_ts?window.wsFmtTime(re.last_run_ts,{hour:'2-digit',minute:'2-digit'}):'—';
           // reactivation 回复率（D6-1）+ intimacy 分桶（D7-2）
           const rs=re.response_stats||{};
           let rsStr='';
           if(rs.sent>0){
-            rsStr=' · 24h 回复率 <b>'+rs.response_rate_pct+'%</b> ('+rs.responded+'/'+rs.sent+')';
+            rsStr=' · 24h '+window.T('wa_s004')+' <b>'+rs.response_rate_pct+'%</b> ('+rs.responded+'/'+rs.sent+')';
             const byI=rs.by_intimacy||{};
             const tiers=[];
-            for(const [k,label] of [['high','高'],['mid','中'],['low','低']]){
+            for(const [k,label] of [['high',window.T('msg_js_1931')],['mid',window.T('db_js_099')],['low',window.T('msg_js_1932')]]){
               const t=byI[k]||{};
               if((t.sent||0)>0) tiers.push(label+' '+t.rate_pct+'% ('+t.responded+'/'+t.sent+')');
             }
-            if(tiers.length) rsStr+=' · 分层 '+tiers.join(' / ');
+            if(tiers.length) rsStr+=' · '+window.T('db_js_041')+' '+tiers.join(' / ');
           }
           // feedback (D6-2)
           const fb=re.feedback_1h||{};
-          const fbStr=(fb.like||fb.dislike)?(' · 反馈 👍'+fb.like+' 👎'+fb.dislike):'';
+          const fbStr=(fb.like||fb.dislike)?(' · '+window.T('db_js_042')+' 👍'+fb.like+' 👎'+fb.dislike):'';
           cEl.innerHTML=
-            '<div><b>陪护 safe_skip</b> · 累计 '+(css.total||0)+' · 1h 速率 <b style="color:'+cssColor+'">'+cssRate+'</b>'+cssReasonStr+spark(css.sparkline_1h,'var(--amber)')+'</div>'+
-            '<div style="margin-top:.25rem"><b>延迟队列</b> · 当前 '+(dq.total||0)+' 条'+dqByAcc+' · 1h 已发 <b>'+(dq.drained_1h||0)+'</b> · 失败 <b style="color:'+((dq.failed_1h||0)>0?'var(--amber)':'inherit')+'">'+(dq.failed_1h||0)+'</b>'+spark(dq.drained_sparkline_1h,'var(--green)')+'</div>'+
-            '<div style="margin-top:.25rem"><b>主动唤醒</b> · 1h <b>'+(re.scheduled_1h||0)+'</b> · 24h <b>'+(re.scheduled_24h||0)+'</b> · dry_run <b style="color:var(--amber)">'+(re.dry_run_1h||0)+'</b>'+rsStr+fbStr+' · 上次 '+reLast+spark(re.sparkline_1h,'var(--p)')+'</div>'+
+            '<div><b>'+window.T('db_js_043')+' safe_skip</b> · '+window.T('msg_js_1043')+' '+(css.total||0)+' · 1h '+window.T('db_js_044')+' <b style="color:'+cssColor+'">'+cssRate+'</b>'+cssReasonStr+spark(css.sparkline_1h,'var(--amber)')+'</div>'+
+            '<div style="margin-top:.25rem"><b>'+window.T('db_js_045')+'</b> · '+window.T('msg_js_265')+' '+(dq.total||0)+' '+window.T('dash.items')+dqByAcc+' · 1h '+window.T('ov_js_dob_sent')+' <b>'+(dq.drained_1h||0)+'</b> · '+window.T('rpa_js_st_failed')+' <b style="color:'+((dq.failed_1h||0)>0?'var(--amber)':'inherit')+'">'+(dq.failed_1h||0)+'</b>'+spark(dq.drained_sparkline_1h,'var(--green)')+'</div>'+
+            '<div style="margin-top:.25rem"><b>'+window.T('db_js_046')+'</b> · 1h <b>'+(re.scheduled_1h||0)+'</b> · 24h <b>'+(re.scheduled_24h||0)+'</b> · dry_run <b style="color:var(--amber)">'+(re.dry_run_1h||0)+'</b>'+rsStr+fbStr+' · '+window.T('db_js_047')+' '+reLast+spark(re.sparkline_1h,'var(--p)')+'</div>'+
             ((pa.count||0)>0?(()=>{
               const b=pa.buckets||{};
               const distStr=Object.entries(b).filter(([_k,v])=>v>0).map(([k,v])=>`${k}:${v}`).join(' / ');
-              const distHtml=distStr?(' · 分布 '+distStr):'';
-              return '<div style="margin-top:.25rem;color:var(--t3)"><b>pacing</b> · 样本 '+pa.count+' · 平均 '+pa.avg_sec+'s · P50 '+pa.p50_sec+'s · P95 '+pa.p95_sec+'s'+distHtml+'</div>';
+              const distHtml=distStr?(' · '+window.T('db_js_048')+' '+distStr):'';
+              return '<div style="margin-top:.25rem;color:var(--t3)"><b>pacing</b> · '+window.T('db_js_049')+' '+pa.count+' · '+window.T('analytics_avg')+' '+pa.avg_sec+'s · P50 '+pa.p50_sec+'s · P95 '+pa.p95_sec+'s'+distHtml+'</div>';
             })():'');
         }
       }
     }catch(_e){}
-    document.getElementById('metrics-ts').textContent='更新: '+new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    document.getElementById('metrics-ts').textContent=window.T('db_js_050')+': '+window.wsFmtTime(null,{hour:'2-digit',minute:'2-digit',second:'2-digit'});
   }catch(e){}
 }
 // ★ W3-D1.3 + D2.3 + D3.5：dry_run 样本审核（增量加载，避免每次重拉）
@@ -976,13 +998,13 @@ function _esc(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&
 
 function _renderSample(s){
   const ts=s.ts||0;
-  const tsLabel=s.ts_iso?new Date(ts*1000).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-';
+  const tsLabel=s.ts_iso?window.wsFmtDateTime(ts,{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-';
   return `<div data-ts="${ts}" style="padding:.5rem .55rem;background:var(--input);border-radius:6px;border-left:3px solid var(--t3)">
     <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;font-size:.7rem;color:var(--t3)">
       <span><b style="color:var(--t)">${_esc(s.chat_name||'?')}</b></span>
       <span>· ${tsLabel}</span>
-      <span>· 沉默 ${(s.silent_days||0).toFixed(1)}d</span>
-      <span>· 亲密 ${Math.round(s.intimacy||0)}</span>
+      <span>· ${window.T('ov_js_th_silent')} ${(s.silent_days||0).toFixed(1)}d</span>
+      <span>· ${window.T('rpa_js_intimacy')} ${Math.round(s.intimacy||0)}</span>
       <span>· ${_esc(s.lang||'')}</span>
       <span style="margin-left:auto" class="dry-fb-btns">
         <button class="btn btn-s btn-xs" data-v="like" onclick="submitDryFb(this,${ts},'like')" style="padding:.15rem .5rem">👍</button>
@@ -999,11 +1021,11 @@ function _renderList(){
   if(!list)return;
   if(cnt)cnt.textContent='('+_dryShown.length+')';
   if(!_dryShown.length){
-    list.innerHTML='<div style="color:var(--t3)">还没有 dry_run 样本（reactivation.enabled=true && dry_run=true 后等几分钟）</div>';
+    list.innerHTML='<div style="color:var(--t3)">'+window.T('db_js_051')+' dry_run '+window.T('db_js_049')+'（reactivation.enabled=true && dry_run=true '+window.T('db_js_052')+'</div>';
     return;
   }
   const items=_dryShown.map(_renderSample).join('');
-  const more=`<button class="btn btn-s btn-xs" style="margin-top:.3rem;padding:.2rem .8rem" onclick="event.preventDefault();loadMoreDry()">加载更早 (+${_dryPageSize})</button>`;
+  const more=`<button class="btn btn-s btn-xs" style="margin-top:.3rem;padding:.2rem .8rem" onclick="event.preventDefault();loadMoreDry()">${window.T('db_js_092')} (+${_dryPageSize})</button>`;
   list.innerHTML=items+more;
 }
 
@@ -1012,11 +1034,11 @@ async function loadDrySamples(reset){
   if(!list)return;
   if(reset){
     _dryShown=[];
-    list.innerHTML='<div style="color:var(--t3)">加载中...</div>';
+    list.innerHTML='<div style="color:var(--t3)">'+window.T('msg_js_1047')+'...</div>';
   }
   try{
     const r=await fetch('/api/reactivation/dry-run-samples?limit='+_dryPageSize,{credentials:'same-origin'});
-    if(!r.ok){list.innerHTML='<div style="color:var(--red)">加载失败</div>';return;}
+    if(!r.ok){list.innerHTML='<div style="color:var(--red)">'+window.T('rpa_load_failed')+'</div>';return;}
     const d=await r.json();
     _dryShown=d.samples||[];
     _renderList();
@@ -1039,7 +1061,7 @@ async function loadMoreDry(){
       const list=document.getElementById('bm-dry-list');
       if(list){
         const btn=list.querySelector('button.btn');
-        if(btn) btn.outerHTML='<div style="color:var(--t3);font-size:.7rem;margin-top:.3rem">已加载全部</div>';
+        if(btn) btn.outerHTML='<div style="color:var(--t3);font-size:.7rem;margin-top:.3rem">'+window.T('db_js_053')+'</div>';
       }
       return;
     }
@@ -1064,8 +1086,8 @@ async function submitDryFb(btn,ts,verdict){
       if(btns){
         // ★ W3-D2.3：dislike 时显示"已加入黑名单（重启后清空）"
         const tip=verdict==='dislike'
-          ? '已反馈 👎 · 已加入内存黑名单（下次类似话术会重生成；重启后清空）'
-          : '已反馈 👍';
+          ? window.T('db_js_054')+' 👎 · '+window.T('db_js_055')
+          : window.T('db_js_054')+' 👍';
         btns.innerHTML='<span style="color:'+(verdict==='like'?'var(--green)':'var(--amber)')+';font-size:.65rem">'+tip+'</span>';
       }
       if(wrap){
@@ -1085,7 +1107,7 @@ async function submitDryFb(btn,ts,verdict){
 let _careDryShown=[];
 function _renderCareSample(s){
   const ts=s.ts||0;
-  const tsLabel=s.ts_iso?new Date(ts*1000).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-';
+  const tsLabel=s.ts_iso?window.wsFmtDateTime(ts,{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-';
   return `<div data-ts="${ts}" style="padding:.5rem .55rem;background:var(--input);border-radius:6px;border-left:3px solid var(--t3)">
     <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;font-size:.7rem;color:var(--t3)">
       <span><b style="color:var(--t)">${_esc(s.topic||'?')}</b></span>
@@ -1107,20 +1129,20 @@ function _renderCareList(){
   if(!list)return;
   if(cnt)cnt.textContent='('+_careDryShown.length+')';
   if(!_careDryShown.length){
-    list.innerHTML='<div style="color:var(--t3)">还没有 care dry_run 样本（proactive_care.enabled=true && dry_run=true 后等几分钟）</div>';
+    list.innerHTML='<div style="color:var(--t3)">'+window.T('db_js_051')+' care dry_run '+window.T('db_js_049')+'（proactive_care.enabled=true && dry_run=true '+window.T('db_js_052')+'</div>';
     return;
   }
   const items=_careDryShown.map(_renderCareSample).join('');
-  const more=`<button class="btn btn-s btn-xs" style="margin-top:.3rem;padding:.2rem .8rem" onclick="event.preventDefault();loadMoreCareDry()">加载更早 (+20)</button>`;
+  const more=`<button class="btn btn-s btn-xs" style="margin-top:.3rem;padding:.2rem .8rem" onclick="event.preventDefault();loadMoreCareDry()">${window.T('db_js_092')} (+20)</button>`;
   list.innerHTML=items+more;
 }
 async function loadCareDry(reset){
   const list=document.getElementById('bm-care-dry-list');
   if(!list)return;
-  if(reset){_careDryShown=[];list.innerHTML='<div style="color:var(--t3)">加载中...</div>';}
+  if(reset){_careDryShown=[];list.innerHTML='<div style="color:var(--t3)">'+window.T('msg_js_1047')+'...</div>';}
   try{
     const r=await fetch('/api/care/dry-run-samples?limit=20',{credentials:'same-origin'});
-    if(!r.ok){list.innerHTML='<div style="color:var(--red)">加载失败</div>';return;}
+    if(!r.ok){list.innerHTML='<div style="color:var(--red)">'+window.T('rpa_load_failed')+'</div>';return;}
     const d=await r.json();
     _careDryShown=d.samples||[];
     _renderCareList();
@@ -1136,7 +1158,7 @@ async function loadMoreCareDry(){
     const more=d.samples||[];
     if(!more.length){
       const list=document.getElementById('bm-care-dry-list');
-      if(list){const btn=list.querySelector('button.btn');if(btn)btn.outerHTML='<div style="color:var(--t3);font-size:.7rem;margin-top:.3rem">已加载全部</div>';}
+      if(list){const btn=list.querySelector('button.btn');if(btn)btn.outerHTML='<div style="color:var(--t3);font-size:.7rem;margin-top:.3rem">'+window.T('db_js_053')+'</div>';}
       return;
     }
     _careDryShown=_careDryShown.concat(more);
@@ -1158,8 +1180,8 @@ async function submitCareDryFb(btn,ts,verdict){
     if(r.ok){
       if(btns){
         const tip=verdict==='dislike'
-          ? '已反馈 👎 · 已加入内存黑名单（care/唤醒都会规避；重启后清空）'
-          : '已反馈 👍';
+          ? window.T('db_js_054')+' 👎 · '+window.T('db_js_056')
+          : window.T('db_js_054')+' 👍';
         btns.innerHTML='<span style="color:'+(verdict==='like'?'var(--green)':'var(--amber)')+';font-size:.65rem">'+tip+'</span>';
       }
       if(wrap){wrap.style.opacity='.55';wrap.style.borderLeftColor=verdict==='dislike'?'var(--amber)':'var(--green)';}
@@ -1178,7 +1200,7 @@ function _qLine(name, b){
   const reasons=Object.entries(b.skip_reasons||{}).sort((a,c)=>c[1]-a[1])
     .map(([k,v])=>_esc(k)+' <b>'+v+'</b>').join(' · ')||'—';
   return '<div style="padding:.4rem .55rem;background:var(--input);border-radius:6px;margin-top:.3rem">'+
-    '<div><b style="color:var(--t)">'+name+'</b> · 👍 <b>'+(fb.like||0)+'</b> / 👎 <b>'+(fb.dislike||0)+'</b> · 赞率 <b>'+rate+'</b> · dry_run <b>'+(b.dry_run||0)+'</b></div>'+
+    '<div><b style="color:var(--t)">'+name+'</b> · 👍 <b>'+(fb.like||0)+'</b> / 👎 <b>'+(fb.dislike||0)+'</b> · '+window.T('db_js_057')+' <b>'+rate+'</b> · dry_run <b>'+(b.dry_run||0)+'</b></div>'+
     '<div style="margin-top:.2rem;color:var(--t3)">skip('+(b.skipped||0)+')：'+reasons+'</div>'+
     '</div>';
 }
@@ -1186,19 +1208,19 @@ async function loadQualityOverview(){
   const body=document.getElementById('bm-q-body');
   const rate=document.getElementById('bm-q-rate');
   if(!body)return;
-  body.innerHTML='<div style="color:var(--t3)">加载中...</div>';
+  body.innerHTML='<div style="color:var(--t3)">'+window.T('msg_js_1047')+'...</div>';
   try{
     const r=await fetch('/api/companion/quality-overview?window_hours=24',{credentials:'same-origin'});
-    if(!r.ok){body.innerHTML='<div style="color:var(--red)">加载失败</div>';return;}
+    if(!r.ok){body.innerHTML='<div style="color:var(--red)">'+window.T('rpa_load_failed')+'</div>';return;}
     const d=await r.json();
     if(!d.ok){body.innerHTML='<div style="color:var(--red)">'+_esc(d.error||'error')+'</div>';return;}
     const ca=d.care||{}, re=d.reactivation||{};
     const totLike=((ca.feedback||{}).like||0)+((re.feedback||{}).like||0);
     const totDis=((ca.feedback||{}).dislike||0)+((re.feedback||{}).dislike||0);
     if(rate)rate.textContent='(👍'+totLike+'/👎'+totDis+')';
-    let html='<div style="font-size:.72rem">24h 窗口 · 共享黑名单 <b>'+(d.disliked_blacklist_size||0)+'</b> 条</div>';
-    html+=_qLine('主动关怀 care', ca);
-    html+=_qLine('主动唤醒 reactivation', re);
+    let html='<div style="font-size:.72rem">24h '+window.T('db_js_058')+' <b>'+(d.disliked_blacklist_size||0)+'</b> '+window.T('dash.items')+'</div>';
+    html+=_qLine(window.T('care')+' care', ca);
+    html+=_qLine(window.T('db_js_046')+' reactivation', re);
     html+='<div id="bm-q-trend" style="margin-top:.5rem"></div>';
     body.innerHTML=html;
     loadQualityTrend();
@@ -1220,14 +1242,14 @@ async function loadQualityTrend(){
     const r=await fetch('/api/companion/quality-trend?hours=24',{credentials:'same-origin'});
     if(!r.ok)return;
     const d=await r.json();
-    if(!d.enabled){el.innerHTML='<div style="color:var(--t3);font-size:.68rem">趋势持久化未启用（companion.quality_trend.enabled=false）</div>';return;}
+    if(!d.enabled){el.innerHTML='<div style="color:var(--t3);font-size:.68rem">'+window.T('db_js_059')+'（companion.quality_trend.enabled=false）</div>';return;}
     const pts=d.points||[];
-    if(pts.length<2){el.innerHTML='<div style="color:var(--t3);font-size:.68rem">趋势：样本累积中（'+pts.length+' 点）</div>';return;}
+    if(pts.length<2){el.innerHTML='<div style="color:var(--t3);font-size:.68rem">'+window.T('db_js_060')+'（'+pts.length+' '+window.T('db_js_061')+'</div>';return;}
     const careLike=pts.map(p=>(p.care_like||0)+(p.re_like||0));
     const skipped=pts.map(p=>(p.care_skipped||0)+(p.re_skipped||0));
     const dry=pts.map(p=>(p.care_dry||0)+(p.re_dry||0));
     el.innerHTML='<div style="font-size:.68rem;color:var(--t3);line-height:1.9">'+
-      '<div>趋势（'+pts.length+' 点 / 24h）</div>'+
+      '<div>'+window.T('db_js_062')+'（'+pts.length+' '+window.T('db_js_063')+'</div>'+
       '<div>👍 like '+_spark(careLike,'var(--green)')+'</div>'+
       '<div>skip '+_spark(skipped,'var(--amber)')+'</div>'+
       '<div>dry_run '+_spark(dry,'var(--p)')+'</div>'+
@@ -1246,35 +1268,35 @@ async function loadDeferredOutbox(){
   const body=document.getElementById('bm-dob-body');
   const cnt=document.getElementById('bm-dob-count');
   if(!body)return;
-  body.innerHTML='<div style="color:var(--t3)">加载中...</div>';
+  body.innerHTML='<div style="color:var(--t3)">'+window.T('msg_js_1047')+'...</div>';
   try{
     const r=await fetch('/api/deferred-outbox/status?limit=30',{credentials:'same-origin'});
-    if(!r.ok){body.innerHTML='<div style="color:var(--red)">加载失败</div>';return;}
+    if(!r.ok){body.innerHTML='<div style="color:var(--red)">'+window.T('rpa_load_failed')+'</div>';return;}
     const d=await r.json();
     if(!d.enabled){
-      if(cnt)cnt.textContent='(关)';
-      body.innerHTML='<div style="color:var(--t3)">'+_esc(d.message||'未启用')+'</div>';
+      if(cnt)cnt.textContent='('+window.T('ov_js_stage_off')+')';
+      body.innerHTML='<div style="color:var(--t3)">'+_esc(d.message||window.T('ov_js_not_enabled'))+'</div>';
       return;
     }
     const st=d.stats||{};
     const by=st.by_status||{};
     if(cnt)cnt.textContent='('+(st.total||0)+')';
     let html='<div style="font-size:.72rem;line-height:1.6">';
-    html+=_kvRow('状态', by);
-    html+=_kvRow('pending·平台', st.pending_by_platform);
-    html+=_kvRow('pending·卡在护栏', st.pending_by_reason);  // 可观测性核心
-    html+='<div style="margin-top:.25rem">已注册 sender：'+
-      ((d.senders||[]).map(_esc).join(', ')||'<span style="color:var(--amber)">无</span>')+'</div>';
+    html+=_kvRow(window.T('ov_js_th_status'), by);
+    html+=_kvRow('pending·'+window.T('inbox.info.platform'), st.pending_by_platform);
+    html+=_kvRow('pending·'+window.T('db_js_064'), st.pending_by_reason);  // 可观测性核心
+    html+='<div style="margin-top:.25rem">'+window.T('db_js_065')+
+      ((d.senders||[]).map(_esc).join(', ')||'<span style="color:var(--amber)">'+window.T('dash.none')+'</span>')+'</div>';
     const paused=d.paused||[];
-    html+='<div style="margin-top:.25rem">已暂停：'+
-      (paused.length?paused.map(_esc).join(', '):'<span style="color:var(--t3)">无</span>')+'</div>';
+    html+='<div style="margin-top:.25rem">'+window.T('db_js_066')+
+      (paused.length?paused.map(_esc).join(', '):'<span style="color:var(--t3)">'+window.T('dash.none')+'</span>')+'</div>';
     html+='</div>';
     // 运营动作：重试失败 / 清积压（卡在某护栏）/ 暂停·恢复平台
     html+='<div style="margin-top:.5rem;display:flex;gap:.35rem;flex-wrap:wrap">'+
-      '<button class="btn btn-s btn-xs" style="padding:.12rem .5rem;font-size:.65rem" onclick="event.preventDefault();_dobRetryFailed()">重试 failed</button>'+
-      '<button class="btn btn-s btn-xs" style="padding:.12rem .5rem;font-size:.65rem" onclick="event.preventDefault();_dobCancelReason()">清某护栏积压</button>'+
-      '<button class="btn btn-s btn-xs" style="padding:.12rem .5rem;font-size:.65rem" onclick="event.preventDefault();_dobPause()">暂停平台</button>'+
-      '<button class="btn btn-s btn-xs" style="padding:.12rem .5rem;font-size:.65rem" onclick="event.preventDefault();_dobResume()">恢复平台</button>'+
+      '<button class="btn btn-s btn-xs" style="padding:.12rem .5rem;font-size:.65rem" onclick="event.preventDefault();_dobRetryFailed()">'+window.T('rpa_retry')+' failed</button>'+
+      '<button class="btn btn-s btn-xs" style="padding:.12rem .5rem;font-size:.65rem" onclick="event.preventDefault();_dobCancelReason()">'+window.T('db_js_067')+'</button>'+
+      '<button class="btn btn-s btn-xs" style="padding:.12rem .5rem;font-size:.65rem" onclick="event.preventDefault();_dobPause()">'+window.T('db_js_068')+'</button>'+
+      '<button class="btn btn-s btn-xs" style="padding:.12rem .5rem;font-size:.65rem" onclick="event.preventDefault();_dobResume()">'+window.T('db_js_069')+'</button>'+
       '</div>';
     const recent=d.recent||[];
     if(recent.length){
@@ -1299,15 +1321,15 @@ async function _dobPost(path,payload){
     const r=await fetch(path,{method:'POST',credentials:'same-origin',
       headers:{'Content-Type':'application/json'},body:JSON.stringify(payload||{})});
     const d=await r.json();
-    if(!d.ok){alert('操作失败：'+(d.error||'未知'));}
+    if(!d.ok){alert(window.T('ov_js_op_fail_e')+(d.error||window.T('rpa_unknown')));}
     loadDeferredOutbox();
     return d;
-  }catch(e){alert('操作异常：'+String(e));}
+  }catch(e){alert(window.T('db_js_070')+String(e));}
 }
-function _dobRetryFailed(){if(confirm('把所有 failed 消息重新入队？'))_dobPost('/api/deferred-outbox/retry',{status:'failed'});}
-function _dobCancelReason(){const r=prompt('取消卡在哪道护栏的 pending 积压？填 reason（如 no_sender / quiet_hours / pacing_min_gap）：');if(r)_dobPost('/api/deferred-outbox/cancel',{reason:r.trim()});}
-function _dobPause(){const p=prompt('暂停哪个平台投递？（如 line / whatsapp）：');if(p)_dobPost('/api/deferred-outbox/pause',{platform:p.trim()});}
-function _dobResume(){const p=prompt('恢复哪个平台投递？：');if(p)_dobPost('/api/deferred-outbox/resume',{platform:p.trim()});}
+function _dobRetryFailed(){if(confirm(window.T('db_js_071')))_dobPost('/api/deferred-outbox/retry',{status:'failed'});}
+function _dobCancelReason(){const r=prompt(window.T('db_js_072')+' no_sender / quiet_hours / pacing_min_gap）：');if(r)_dobPost('/api/deferred-outbox/cancel',{reason:r.trim()});}
+function _dobPause(){const p=prompt(window.T('db_js_073'));if(p)_dobPost('/api/deferred-outbox/pause',{platform:p.trim()});}
+function _dobResume(){const p=prompt(window.T('db_js_074'));if(p)_dobPost('/api/deferred-outbox/resume',{platform:p.trim()});}
 
 const _isSimple=document.documentElement.getAttribute('data-ui-mode')==='simple';
 if(!_isSimple){loadBotMetrics();}
@@ -1332,7 +1354,7 @@ async function loadTriggerDecisions(){
     }
     document.getElementById('td-content').style.display='';
     document.getElementById('td-empty').style.display='none';
-    const LAYER_MAP={l1:{icon:'🎯',color:'var(--green)',label:'L1规则'},l2:{icon:'🧠',color:'var(--p)',label:'L2语义'},l3_filtered:{icon:'🔇',color:'var(--amber)',label:'L3过滤'},l4_silenced:{icon:'💤',color:'var(--t3)',label:'L4静默'},skipped:{icon:'⏭️',color:'var(--red)',label:'跳过'}};
+    const LAYER_MAP={l1:{icon:'🎯',color:'var(--green)',label:'L1'+window.T('db_js_030')},l2:{icon:'🧠',color:'var(--p)',label:'L2'+window.T('db_js_031')},l3_filtered:{icon:'🔇',color:'var(--amber)',label:'L3'+window.T('db_js_032')},l4_silenced:{icon:'💤',color:'var(--t3)',label:'L4'+window.T('db_js_033')},skipped:{icon:'⏭️',color:'var(--red)',label:window.T('db_js_034')}};
     document.getElementById('td-list').innerHTML=list.map(function(d){
       var lyr=d.layer||d.result||'?';
       var info=LAYER_MAP[lyr]||{icon:'❓',color:'var(--t2)',label:lyr};
@@ -1381,27 +1403,27 @@ async function loadSysBar(){
     };
     const _mem = mb => mb!=null ? mb+'MB' : '—';
     const _ago = ts => {
-      if(!ts) return '从未';
+      if(!ts) return window.T('psn_js_009');
       const diff = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
-      if(diff<60) return diff+'秒前';
-      if(diff<3600) return Math.floor(diff/60)+'分钟前';
-      if(diff<86400) return Math.floor(diff/3600)+'小时前';
-      return Math.floor(diff/86400)+'天前';
+      if(diff<60) return diff+window.T('msg_js_285');
+      if(diff<3600) return Math.floor(diff/60)+window.T('dash.ago.min');
+      if(diff<86400) return Math.floor(diff/3600)+window.T('dash.ago.hour');
+      return Math.floor(diff/86400)+window.T('ln_js_002');
     };
 
     const items = [
-      {cls: d.bot_online?'ok':'err', icon: d.bot_online?'●':'●', label: d.bot_online?'Bot 在线':'Bot 离线'},
-      {cls: 'ok', icon: '📚', label: (d.kb_entries||0)+' 条知识'},
+      {cls: d.bot_online?'ok':'err', icon: d.bot_online?'●':'●', label: d.bot_online?'Bot '+window.T('dash.pr.online'):'Bot '+window.T('dash.pr.offline')},
+      {cls: 'ok', icon: '📚', label: (d.kb_entries||0)+' '+window.T('db_js_075')},
       d.memory_mb ? {cls:'', icon:'💾', label: _mem(d.memory_mb)} : null,
-      {cls: '', icon: '⏱', label: '运行 '+_fmt(d.uptime_s)},
-      {cls: '', icon: '👥', label: (d.admin_users||0)+' 管理员'},
-      d.embedding_ok ? {cls:'ok', icon:'🔮', label:'向量化已开启'} : {cls:'warn', icon:'🔮', label:'向量化未配置'},
+      {cls: '', icon: '⏱', label: window.T('ov_js_stage_active')+' '+_fmt(d.uptime_s)},
+      {cls: '', icon: '👥', label: (d.admin_users||0)+' '+window.T('db_js_076')},
+      d.embedding_ok ? {cls:'ok', icon:'🔮', label:window.T('db_js_077')} : {cls:'warn', icon:'🔮', label:window.T('db_js_078')},
     ].filter(Boolean);
 
     pills.innerHTML = items.map(it=>
       `<span class="sys-pill ${it.cls}"><span class="dot" style="display:${it.icon==='●'?'block':'none'}"></span>${it.icon !== '●' ? it.icon+' ' : ''}${it.label}</span>`
     ).join('');
-    upd.textContent = '更新于 '+new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    upd.textContent = window.T('db_js_079')+' '+window.wsFmtTime(null,{hour:'2-digit',minute:'2-digit',second:'2-digit'});
     bar.classList.add('show');
   } catch(e){}
 }
@@ -1460,10 +1482,10 @@ async function loadKbHealth(){
           const hitPct=total>0?h.hits/total:0;
           const barH=Math.max(Math.round(32*(total/maxV)),2);
           const col=hitPct>=0.7?'var(--green)':hitPct>=0.4?'var(--amber)':'var(--red)';
-          return `<div style="flex:1;height:${barH}px;background:${total>0?col:'var(--bd2)'};border-radius:2px;transition:height .4s" title="${h.hour}时: ${h.hits}命中/${total}次"></div>`;
+          return `<div style="flex:1;height:${barH}px;background:${total>0?col:'var(--bd2)'};border-radius:2px;transition:height .4s" title="${h.hour}${window.T('db_js_093')}: ${h.hits}${window.T('db_js_094')}/${total}${window.T('ov_js_times_unit')}"></div>`;
         }).join('');
       } else if(sl){
-        sl.innerHTML='<div style="color:var(--t3);font-size:.73rem;align-self:center;width:100%;text-align:center">暂无查询数据</div>';
+        sl.innerHTML='<div style="color:var(--t3);font-size:.73rem;align-self:center;width:100%;text-align:center">'+window.T('db_js_080')+'</div>';
       }
     }
 
@@ -1473,12 +1495,12 @@ async function loadKbHealth(){
       const pct=cov.pct||0;
       document.getElementById('kb-vec-bar').style.width=pct+'%';
       document.getElementById('kb-vec-detail').textContent=
-        `${cov.done||0}/${cov.total||0} 条已向量化  ·  ${pct}%`;
+        window.Tf('db_js_p04', {done: cov.done||0, total: cov.total||0, pct: pct});
       const modeEl=document.getElementById('kb-search-mode-badge');
       if(cov.mode&&cov.mode.includes('hybrid')){
-        modeEl.innerHTML='<span style="background:#d4edda;color:#155724;padding:.15rem .6rem;border-radius:99px;font-size:.72rem">✅ 混合检索（BM25 + 向量 RRF）</span>';
+        modeEl.innerHTML='<span style="background:#d4edda;color:#155724;padding:.15rem .6rem;border-radius:99px;font-size:.72rem">✅ '+window.T('db_js_081')+'（BM25 + '+window.T('db_js_082')+'</span>';
       } else {
-        modeEl.innerHTML='<span style="background:#fff3cd;color:#856404;padding:.15rem .6rem;border-radius:99px;font-size:.72rem">⚠️ 纯 BM25 · 向量化后可提升同义词匹配</span>';
+        modeEl.innerHTML='<span style="background:#fff3cd;color:#856404;padding:.15rem .6rem;border-radius:99px;font-size:.72rem">⚠️ '+window.T('db_js_083')+'</span>';
       }
     }
 
@@ -1504,7 +1526,7 @@ async function loadKbHealth(){
         <span style="color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px">${m.query}</span>
         <span style="color:var(--red);font-size:.72rem;flex-shrink:0">×${m.cnt}</span>
       </div>`).join('')
-      :'<span style="color:var(--t3)">暂无未命中记录</span>';
+      :'<span style="color:var(--t3)">'+window.T('db_js_084')+'</span>';
 
     // 回复质量统计
     try{
@@ -1515,15 +1537,15 @@ async function loadKbHealth(){
         const satColor=qd.satisfaction>=80?'var(--green)':qd.satisfaction>=50?'var(--amber)':'var(--red)';
         qEl.innerHTML=`
           <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.3rem">
-            <span>满意度 <b style="color:${satColor}">${qd.satisfaction}%</b></span>
-            <span>正面 <b style="color:var(--green)">${qd.positive}</b></span>
-            <span>负面 <b style="color:var(--red)">${qd.negative}</b></span>
+            <span>${window.T('cases_satisfaction')} <b style="color:${satColor}">${qd.satisfaction}%</b></span>
+            <span>${window.T('db_js_095')} <b style="color:var(--green)">${qd.positive}</b></span>
+            <span>${window.T('db_js_096')} <b style="color:var(--red)">${qd.negative}</b></span>
           </div>
           <div style="font-size:.72rem;color:var(--t3)">
-            重复追问 ${qd.by_source?.auto_repeat||0} · 情绪检测 ${qd.by_source?.auto_detect||0} · 人工 ${qd.by_source?.manual||0}
+            ${window.T('db_js_097')} ${qd.by_source?.auto_repeat||0} · ${window.T('db_js_098')} ${qd.by_source?.auto_detect||0} · ${window.T('msg_js_1951')} ${qd.by_source?.manual||0}
           </div>`;
       }else{
-        qEl.innerHTML='<span style="color:var(--t3)">暂无反馈数据</span>';
+        qEl.innerHTML='<span style="color:var(--t3)">'+window.T('db_js_085')+'</span>';
       }
     }catch(e){}
   }catch(e){}

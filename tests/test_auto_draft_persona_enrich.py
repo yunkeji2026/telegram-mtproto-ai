@@ -4,7 +4,7 @@
   - enrich=True 草稿落库为 status='enriching'（不入 pending 队列、不触发 autosend）
   - enrich_draft 写回人设正文 + 重算 autopilot（生成正文二次风控只升不降）
   - release_enriching_draft 兜底放行（保留规则模板占位，降级旧行为）
-  - 幂等：enriching 草稿存在时新入站跳过
+  - 幂等：enriching 草稿存在且 peer_text 未变时新入站跳过
   - 向后兼容：enrich=False 行为与旧版完全一致（直接 pending）
 """
 
@@ -122,11 +122,82 @@ def test_release_enriching_draft_falls_back_to_placeholder(store):
 # ── 幂等 ──────────────────────────────────────────────────────
 
 def test_idempotent_skips_existing_enriching(store):
-    """enriching 草稿存在时，新入站消息跳过（不重复生成/不重复补全）。"""
+    """enriching 草稿存在且 peer_text 相同时，新入站跳过（不重复生成/不重复补全）。"""
+    svc = _svc(store)
+    peer = "你好，请问怎么下单？"
+    first = svc.auto_generate_draft(_conv(), peer,
+                                    automation_mode="auto_ai", enrich=True)
+    assert first is not None
+    second = svc.auto_generate_draft(_conv(), peer,
+                                     automation_mode="auto_ai", enrich=True)
+    assert second is None
+
+
+def test_stale_enriching_cancelled_on_new_peer_text(store):
+    """客户又发新消息（peer_text 变）→ 作废陈旧 enriching 并 upsert 新草稿（同 draft_id）。"""
     svc = _svc(store)
     first = svc.auto_generate_draft(_conv(), "你好，请问怎么下单？",
                                     automation_mode="auto_ai", enrich=True)
     assert first is not None
     second = svc.auto_generate_draft(_conv(), "再问一句在吗？",
                                      automation_mode="auto_ai", enrich=True)
-    assert second is None
+    assert second == first  # 每会话固定 draft_id
+    draft = store.get_draft(second)
+    assert draft["status"] == "enriching"
+    assert draft["peer_text"] == "再问一句在吗？"
+
+
+# ── 防「复读」根因回归：重生清空陈旧 final_text ────────────────────────
+
+def test_regeneration_clears_stale_final_text(store):
+    """每会话单行草稿复用：上一轮送出写死的 final_text 必须在本轮重生时被清空。
+
+    复现线上「语音一直是同一句」的根因——draft_text 每轮重生，但 autosend 取
+    ``final_text or draft_text``（final 优先），旧 final_text 从不清 → 反复送旧句。
+    """
+    svc = _svc(store)
+    # 第一轮：生成并「送出」，模拟旧 final_text 被写死
+    did = svc.auto_generate_draft(_conv(), "在吗？", automation_mode="auto_ai", enrich=True)
+    svc.enrich_draft(did, reply_text="旧回复：我在听呢", reply_lang="zh",
+                     automation_mode="auto_ai")
+    store.update_draft_status(did, status="approved", final_text="旧回复：我在听呢")
+    assert store.get_draft(did)["final_text"] == "旧回复：我在听呢"
+
+    # 第二轮：客户发新消息 → 同 draft_id 重生（approved 不再拦幂等）→ enrich 收尾
+    again = svc.auto_generate_draft(_conv(), "你在忙什么呀？",
+                                    automation_mode="auto_ai", enrich=True)
+    assert again == did
+    ok = svc.enrich_draft(did, reply_text="新回复：我在陪你聊天呀", reply_lang="zh",
+                          automation_mode="auto_ai")
+    assert ok is True
+    draft = store.get_draft(did)
+    assert draft["draft_text"] == "新回复：我在陪你聊天呀"
+    # 关键断言：旧 final_text 已被清空，不再泄漏到本轮投递
+    assert draft["final_text"] == ""
+
+
+def test_autosend_text_selection_uses_fresh_after_regeneration(store):
+    """autosend 投递取 ``final_text or draft_text``——重生后应取到新 draft_text。"""
+    svc = _svc(store)
+    did = svc.auto_generate_draft(_conv(), "在吗？", automation_mode="auto_ai", enrich=True)
+    svc.enrich_draft(did, reply_text="旧句", reply_lang="zh", automation_mode="auto_ai")
+    store.update_draft_status(did, status="approved", final_text="旧句")
+
+    svc.auto_generate_draft(_conv(), "换个话题聊聊？", automation_mode="auto_ai", enrich=True)
+    svc.enrich_draft(did, reply_text="新句", reply_lang="zh", automation_mode="auto_ai")
+
+    d = store.get_draft(did)
+    sent_text = (str(d.get("final_text") or "") or str(d.get("draft_text") or "")).strip()
+    assert sent_text == "新句"
+
+
+def test_release_enriching_also_clears_stale_final_text(store):
+    """生成失败兜底 release 同样清空陈旧 final_text（同属本轮收尾，旧句不得泄漏）。"""
+    svc = _svc(store)
+    did = svc.auto_generate_draft(_conv(), "在吗？", automation_mode="auto_ai", enrich=True)
+    svc.enrich_draft(did, reply_text="旧句", reply_lang="zh", automation_mode="auto_ai")
+    store.update_draft_status(did, status="approved", final_text="旧句")
+
+    svc.auto_generate_draft(_conv(), "在忙吗？", automation_mode="auto_ai", enrich=True)
+    assert svc.release_enriching_draft(did) is True
+    assert store.get_draft(did)["final_text"] == ""

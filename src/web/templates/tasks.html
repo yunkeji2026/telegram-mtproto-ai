@@ -1,5 +1,5 @@
 {% extends "workspace_base.html" %}
-{% block title %}我的待办{% endblock %}
+{% block title %}{{ (i18n or {}).get('tk_s001', "我的待办") }}{% endblock %}
 {% block head %}
 <style>
   /* 令牌驱动（继承 workspace_base 的 --tk-*），日/夜两版自动适配；渠道品牌色保留。 */
@@ -29,27 +29,27 @@
 {% block content %}
 <div class="tk-wrap">
   <div class="tk-bar">
-    <a class="back" href="/workspace">← 工作台</a>
-    <span style="font-weight:600;">跟进待办</span>
+    <a class="back" href="/workspace">← {{ (i18n or {}).get('tk_s002', "工作台") }}</a>
+    <span style="font-weight:600;">{{ (i18n or {}).get('tk_s003', "跟进待办") }}</span>
     <select class="tk-sel" id="tk-scope" onchange="TK.load()">
-      <option value="mine">我的</option>
-      <option value="all">全部坐席</option>
+      <option value="mine">{{ (i18n or {}).get('inbox.filter.claimed', "我的") }}</option>
+      <option value="all">{{ (i18n or {}).get('tk_s004', "全部坐席") }}</option>
     </select>
     <select class="tk-sel" id="tk-due" onchange="TK.load()">
-      <option value="today">今天及逾期</option>
-      <option value="overdue">仅逾期</option>
-      <option value="all">全部未完成</option>
+      <option value="today">{{ (i18n or {}).get('tk_s005', "今天及逾期") }}</option>
+      <option value="overdue">{{ (i18n or {}).get('tk_s006', "仅逾期") }}</option>
+      <option value="all">{{ (i18n or {}).get('tk_s007', "全部未完成") }}</option>
     </select>
     <span id="tk-count" style="font-size:12px;color:var(--tk-text-muted);"></span>
   </div>
-  <div class="tk-list" id="tk-list"><span class="tk-load">加载中…</span></div>
+  <div class="tk-list" id="tk-list"><span class="tk-load">{{ (i18n or {}).get('dash.loading', "加载中…") }}</span></div>
 </div>
 <script>
 (function(){
   var agents=[];
   function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
   function chCls(c){return ({line:'ch-line',whatsapp:'ch-whatsapp',messenger:'ch-messenger',telegram:'ch-telegram',web:'ch-web'})[c]||'ch-default';}
-  function fmtTs(ts){ if(!ts) return '无期限'; var d=new Date((ts<1e12?ts*1000:ts)); return d.toLocaleDateString()+' '+d.toLocaleTimeString().slice(0,5); }
+  function fmtTs(ts){ if(!ts) return window.T('tk_js_001'); return window.wsFmtDate(ts)+' '+window.wsFmtTime(ts,{hour:'2-digit',minute:'2-digit'}); }
   function loadAgents(){
     fetch('/api/workspace/presence').then(function(r){return r.json();}).then(function(d){
       agents=(d.agents||[]).map(function(a){return {id:a.agent_id||a.id, name:a.display_name||a.agent_id||a.id};});
@@ -58,51 +58,51 @@
   function assignSelect(tid, cur){
     var opts=agents.map(function(a){return '<option value="'+esc(a.id)+'"'+(a.id===cur?' selected':'')+'>'+esc(a.name)+'</option>';}).join('');
     if(!agents.length) return '';
-    return '<select class="tk-btn" onchange="TK.assign(\''+esc(tid)+'\',this.value)"><option value="">改派…</option>'+opts+'</select>';
+    return '<select class="tk-btn" onchange="TK.assign(\''+esc(tid)+'\',this.value)"><option value="">'+window.T('c3_js009')+'</option>'+opts+'</select>';
   }
   function render(tasks){
     var box=document.getElementById('tk-list');
-    if(!tasks.length){ box.innerHTML='<span class="tk-load">没有待办任务 🎉</span>'; return; }
+    if(!tasks.length){ box.innerHTML='<span class="tk-load">'+window.T('tk_js_002')+' 🎉</span>'; return; }
     box.innerHTML=tasks.map(function(t){
       var chans=(t.channels||[]).map(function(ch,i){return '<span class="tk-chan '+chCls(ch)+'">'+esc((t.channel_labels||[])[i]||ch)+'</span>';}).join('');
-      var due='<div class="tk-due '+(t.overdue?'over':'fut')+'">'+(t.overdue?'⏰ 逾期 ':'到期 ')+fmtTs(t.due_at)+'</div>';
+      var due='<div class="tk-due '+(t.overdue?'over':'fut')+'">'+(t.overdue?'⏰ '+window.T('tk_js_003')+' ':window.T('cs_s011')+' ')+fmtTs(t.due_at)+'</div>';
       var asg=t.assignee?('<span class="tk-asg">@'+esc(t.assignee.slice(0,10))+'</span>'):'';
       return '<div class="tk-card'+(t.overdue?' overdue':'')+'">'
-        +'<div><div class="tk-name" onclick="location.href=\'/workspace/contact/'+encodeURIComponent(t.contact_id)+'\'">'+esc(t.name||'未命名客户')+'</div>'
+        +'<div><div class="tk-name" onclick="location.href=\'/workspace/contact/'+encodeURIComponent(t.contact_id)+'\'">'+esc(t.name||window.T('c3_js002'))+'</div>'
         +'<div class="tk-meta">'+chans+(t.note?(' · '+esc(t.note)):'')+'</div>'+due+'</div>'
         +'<div class="tk-right">'+asg
-        +'<button class="tk-btn" onclick="TK.snooze(\''+esc(t.task_id)+'\',1)">+1天</button>'
-        +'<button class="tk-btn" onclick="TK.snooze(\''+esc(t.task_id)+'\',3)">+3天</button>'
-        +'<button class="tk-btn" onclick="TK.snooze(\''+esc(t.task_id)+'\',7)">+1周</button>'
+        +'<button class="tk-btn" onclick="TK.snooze(\''+esc(t.task_id)+'\',1)">'+window.T('tk_tf_snooze1')+'</button>'
+        +'<button class="tk-btn" onclick="TK.snooze(\''+esc(t.task_id)+'\',3)">'+window.T('tk_tf_snooze3')+'</button>'
+        +'<button class="tk-btn" onclick="TK.snooze(\''+esc(t.task_id)+'\',7)">'+window.T('tk_tf_snooze7')+'</button>'
         +assignSelect(t.task_id, t.assignee)
-        +'<button class="tk-btn done" onclick="TK.done(\''+esc(t.task_id)+'\')">完成</button>'
+        +'<button class="tk-btn done" onclick="TK.done(\''+esc(t.task_id)+'\')">'+window.T('tour_done')+'</button>'
         +'</div></div>';
     }).join('');
   }
   window.TK={
     load:function(){
-      document.getElementById('tk-list').innerHTML='<span class="tk-load">加载中…</span>';
+      document.getElementById('tk-list').innerHTML='<span class="tk-load">'+window.T('dash.loading')+'</span>';
       var scope=document.getElementById('tk-scope').value, due=document.getElementById('tk-due').value;
       fetch('/api/workspace/my-tasks?scope='+scope+'&due='+due).then(function(r){return r.json();}).then(function(d){
-        if(!d.ok){ document.getElementById('tk-list').innerHTML='<span class="tk-load">联系人子系统未启用</span>'; return; }
-        document.getElementById('tk-count').textContent='共 '+(d.tasks||[]).length+' 条 · 到期(我的/全部) '+(d.due_tasks_mine||0)+'/'+(d.due_tasks||0);
+        if(!d.ok){ document.getElementById('tk-list').innerHTML='<span class="tk-load">'+window.T('tk_js_004')+'</span>'; return; }
+        document.getElementById('tk-count').textContent=window.Tf('tk_tf_count',{n:(d.tasks||[]).length,mine:d.due_tasks_mine||0,all:d.due_tasks||0});
         render(d.tasks||[]);
-      }).catch(function(){ document.getElementById('tk-list').innerHTML='<span class="tk-fail">加载失败</span>'; });
+      }).catch(function(){ document.getElementById('tk-list').innerHTML='<span class="tk-fail">'+window.T('rpa_load_failed')+'</span>'; });
     },
     done:function(tid){
       fetch('/api/workspace/follow-up/'+encodeURIComponent(tid)+'/done',{method:'POST'})
-        .then(function(r){return r.json();}).then(function(){ TK.load(); }).catch(function(){ alert('网络错误'); });
+        .then(function(r){return r.json();}).then(function(){ TK.load(); }).catch(function(){ alert(window.T('draft.net_err')); });
     },
     snooze:function(tid, days){
       fetch('/api/workspace/follow-up/'+encodeURIComponent(tid)+'/snooze',{method:'POST',
         headers:{'Content-Type':'application/json'}, body:JSON.stringify({days:days})})
-        .then(function(r){return r.json();}).then(function(){ TK.load(); }).catch(function(){ alert('网络错误'); });
+        .then(function(r){return r.json();}).then(function(){ TK.load(); }).catch(function(){ alert(window.T('draft.net_err')); });
     },
     assign:function(tid, who){
       if(!who) return;
       fetch('/api/workspace/follow-up/'+encodeURIComponent(tid)+'/assign',{method:'POST',
         headers:{'Content-Type':'application/json'}, body:JSON.stringify({assignee:who})})
-        .then(function(r){return r.json();}).then(function(d){ if(d.ok) TK.load(); else alert('改派失败'); }).catch(function(){ alert('网络错误'); });
+        .then(function(r){return r.json();}).then(function(d){ if(d.ok) TK.load(); else alert(window.T('c3_js016')); }).catch(function(){ alert(window.T('draft.net_err')); });
     }
   };
   loadAgents(); TK.load(); setInterval(TK.load, 60000);

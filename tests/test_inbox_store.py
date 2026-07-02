@@ -116,6 +116,27 @@ def test_outbound_repeated_text_not_lost_when_echo_present(tmp_path):
     store.close()
 
 
+def test_dedup_stats_counts_collapsed_twins(tmp_path):
+    """去重护栏可观测：skipped_hash（入站 hash 撞 pmid 跳过）/ deleted_hash（出站 pmid 删 hash）累计。"""
+    store = InboxStore(tmp_path / "inbox.db")
+    conv = _conv(cid="telegram:acc:c", platform="telegram",
+                 account_id="acc", chat_key="c")
+    # 入站：pmid 先、hash 后（精确 ts）→ skipped_hash
+    store.ingest_batch(conv, [InboxMessage(conversation_id="telegram:acc:c",
+        platform_msg_id="778", text="hi", ts=100, direction="in")])
+    store.ingest_batch(conv, [InboxMessage(conversation_id="telegram:acc:c",
+        platform_msg_id="", text="hi", ts=100, direction="in")])
+    # 出站：hash 先、pmid 后（漂移 ts，窗内）→ deleted_hash
+    store.ingest_batch(conv, [InboxMessage(conversation_id="telegram:acc:c",
+        platform_msg_id="", text="yo", ts=200.3, direction="out")])
+    store.ingest_batch(conv, [InboxMessage(conversation_id="telegram:acc:c",
+        platform_msg_id="901", text="yo", ts=200.0, direction="out")])
+    s = store.dedup_stats()
+    assert s["skipped_hash"] == 1
+    assert s["deleted_hash"] == 1
+    store.close()
+
+
 def test_message_pk_distinct_for_empty_platform_id():
     # 无 platform_msg_id 时不应折叠成 (conv, '')，靠 hash 区分
     a = _message_pk("c1", "", "hello", 1)
@@ -151,7 +172,9 @@ def test_automation_mode_persists_across_restart(tmp_path):
     db = tmp_path / "inbox.db"
     store = InboxStore(db)
     assert store.get_automation_mode("line:a:room1") == "review"  # 默认
+    assert store.get_automation_mode_if_set("line:a:room1") is None  # 未显式设置
     store.set_automation_mode("line:a:room1", "auto_ai")
+    assert store.get_automation_mode_if_set("line:a:room1") == "auto_ai"
     store.close()
 
     # 模拟重启：新实例指向同一 db
@@ -187,4 +210,77 @@ def test_migration_idempotent_reopen(tmp_path):
     # 二次打开不应报错（CREATE TABLE IF NOT EXISTS 幂等）
     store = InboxStore(db)
     assert store.list_conversations() == []
+    store.close()
+
+
+def test_update_message_text_writeback_voice_transcript_by_media_ref(tmp_path):
+    """优化①：入站语音行 text='' → 转录回写按 (conv, media_ref) 命中，坐席台可见内容。"""
+    store = InboxStore(tmp_path / "inbox.db")
+    conv = _conv(cid="telegram:acc:c", platform="telegram",
+                 account_id="acc", chat_key="c")
+    voice = InboxMessage(
+        conversation_id="telegram:acc:c", platform_msg_id="920",
+        text="", media_type="voice",
+        media_ref="/static/protocol_media/telegram/920.ogg", ts=100, direction="in")
+    assert store.ingest_batch(conv, [voice]) == 1
+    ok = store.update_message_text(
+        "telegram:acc:c",
+        media_ref="/static/protocol_media/telegram/920.ogg",
+        text="嗯我在的，今天挺好的",
+        only_if_empty=True)
+    assert ok is True
+    rows = store.list_messages("telegram:acc:c")
+    assert rows[0]["text"] == "嗯我在的，今天挺好的"
+    assert rows[0]["original_text"] == "嗯我在的，今天挺好的"
+    store.close()
+
+
+def test_update_message_text_by_message_id(tmp_path):
+    """按 message_id 精确定位回写（enrich 首选路径）。"""
+    store = InboxStore(tmp_path / "inbox.db")
+    conv = _conv(cid="telegram:acc:c", platform="telegram",
+                 account_id="acc", chat_key="c")
+    voice = InboxMessage(
+        conversation_id="telegram:acc:c", platform_msg_id="921",
+        text="", media_type="voice", media_ref="/x/921.ogg", ts=101, direction="in")
+    store.ingest_batch(conv, [voice])
+    mid = store.list_messages("telegram:acc:c")[0]["message_id"]
+    assert store.update_message_text(
+        "telegram:acc:c", message_id=mid, text="你好呀") is True
+    assert store.list_messages("telegram:acc:c")[0]["text"] == "你好呀"
+    store.close()
+
+
+def test_update_message_text_only_if_empty_guards_existing(tmp_path):
+    """only_if_empty=True 时不踩已有真实正文（幂等/防竞态安全不变量）。"""
+    store = InboxStore(tmp_path / "inbox.db")
+    conv = _conv(cid="telegram:acc:c", platform="telegram",
+                 account_id="acc", chat_key="c")
+    msg = InboxMessage(
+        conversation_id="telegram:acc:c", platform_msg_id="m1",
+        text="用户原话已在", media_type="", media_ref="", ts=100, direction="in")
+    store.ingest_batch(conv, [msg])
+    mid = store.list_messages("telegram:acc:c")[0]["message_id"]
+    # only_if_empty=True → 不覆盖
+    assert store.update_message_text(
+        "telegram:acc:c", message_id=mid, text="不该覆盖", only_if_empty=True) is False
+    assert store.list_messages("telegram:acc:c")[0]["text"] == "用户原话已在"
+    # only_if_empty=False → 强制覆盖
+    assert store.update_message_text(
+        "telegram:acc:c", message_id=mid, text="强制改", only_if_empty=False) is True
+    assert store.list_messages("telegram:acc:c")[0]["text"] == "强制改"
+    store.close()
+
+
+def test_update_message_text_empty_transcript_noop(tmp_path):
+    """空转录不写（防把占位刷成空），无定位键也不写。"""
+    store = InboxStore(tmp_path / "inbox.db")
+    conv = _conv(cid="telegram:acc:c", platform="telegram",
+                 account_id="acc", chat_key="c")
+    store.ingest_batch(conv, [InboxMessage(
+        conversation_id="telegram:acc:c", platform_msg_id="m1",
+        text="", media_type="voice", media_ref="/x/1.ogg", ts=100, direction="in")])
+    assert store.update_message_text(
+        "telegram:acc:c", media_ref="/x/1.ogg", text="   ") is False
+    assert store.update_message_text("telegram:acc:c", text="有内容但无定位键") is False
     store.close()

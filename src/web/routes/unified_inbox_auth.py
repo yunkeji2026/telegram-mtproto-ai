@@ -14,6 +14,7 @@ import logging
 from typing import Any, Dict, Tuple
 
 from fastapi import HTTPException, Request
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ def _is_supervisor(request: Request) -> bool:
 def _require_supervisor(request: Request) -> None:
     """主管专属端点守卫；非主管抛 403。"""
     if not _is_supervisor(request):
-        raise HTTPException(403, "需要主管权限")
+        raise HTTPException(403, tr(request, "err.perm.supervisor_required"))
 
 
 def _publish_follow_up(action: str, *, contact_id: str = "", task_id: str = "",

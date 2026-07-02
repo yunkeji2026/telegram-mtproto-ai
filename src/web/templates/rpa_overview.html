@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}RPA 跨平台总览 · {{ site_name|default('华灵科技客户转化聊天系统') }}{% endblock %}
-{% block page_title %}RPA 跨平台总览{% endblock %}
+{% block title %}{{ (i18n or {}).get('ov_title','RPA 跨平台总览') }} · {{ product_name|default((i18n or {}).get('brand.product', '智聊')) }}{% endblock %}
+{% block page_title %}{{ (i18n or {}).get('ov_title','RPA 跨平台总览') }}{% endblock %}
 {% block head %}
 <style>
 /* ── /rpa-overview 专属布局 ────────────────────────────── */
@@ -187,25 +187,25 @@
 <!-- P10-B: 全平台聊天历史检索 -->
 <div style="background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:.9rem 1.1rem;margin-bottom:1rem">
   <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.5rem">
-    <strong style="font-size:.92rem;color:var(--t)">🌐 跨平台聊天检索</strong>
-    <span style="font-size:.7rem;color:var(--t3)">同时检索 LINE / Messenger / WhatsApp 历史</span>
+    <strong style="font-size:.92rem;color:var(--t)">🌐 {{ (i18n or {}).get('ov_search_title','跨平台聊天检索') }}</strong>
+    <span style="font-size:.7rem;color:var(--t3)">{{ (i18n or {}).get('ov_search_sub','同时检索 LINE / Messenger / WhatsApp 历史') }}</span>
   </div>
   <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-    <input id="ov-global-q" type="text" placeholder="🔍 在所有平台历史聊天中检索关键词…"
+    <input id="ov-global-q" type="text" placeholder="{{ (i18n or {}).get('ov_search_ph','🔍 在所有平台历史聊天中检索关键词…') }}"
            style="flex:1;min-width:240px;padding:.5rem .75rem;background:var(--input);border:1px solid var(--bd2);border-radius:7px;font-size:.85rem;color:var(--t)">
     <select id="ov-global-q-intent" style="padding:.5rem .65rem;background:var(--input);border:1px solid var(--bd2);border-radius:7px;font-size:.8rem;color:var(--t2)">
-      <option value="">全部意图</option>
-      <option value="purchase">购买</option>
-      <option value="support">售后</option>
-      <option value="inquiry">咨询</option>
-      <option value="greeting">问候</option>
-      <option value="general">通用</option>
+      <option value="">{{ (i18n or {}).get('ov_all_intents','全部意图') }}</option>
+      <option value="purchase">{{ (i18n or {}).get('rpa_intent_purchase','购买') }}</option>
+      <option value="support">{{ (i18n or {}).get('rpa_intent_support','售后') }}</option>
+      <option value="inquiry">{{ (i18n or {}).get('rpa_intent_inquiry','咨询') }}</option>
+      <option value="greeting">{{ (i18n or {}).get('rpa_intent_greeting','问候') }}</option>
+      <option value="general">{{ (i18n or {}).get('rpa_intent_general','通用') }}</option>
     </select>
     <select id="ov-global-platforms" style="padding:.5rem .65rem;background:var(--input);border:1px solid var(--bd2);border-radius:7px;font-size:.8rem;color:var(--t2)">
-      <option value="">全平台</option>
-      <option value="line">仅 LINE</option>
-      <option value="messenger">仅 Messenger</option>
-      <option value="whatsapp">仅 WhatsApp</option>
+      <option value="">{{ (i18n or {}).get('rpa_fn_scope_all','全平台') }}</option>
+      <option value="line">{{ (i18n or {}).get('ov_only_line','仅 LINE') }}</option>
+      <option value="messenger">{{ (i18n or {}).get('ov_only_messenger','仅 Messenger') }}</option>
+      <option value="whatsapp">{{ (i18n or {}).get('ov_only_whatsapp','仅 WhatsApp') }}</option>
     </select>
   </div>
   <div id="ov-global-results" style="display:none;max-height:420px;overflow-y:auto;border-top:1px solid var(--bd);margin-top:.6rem;padding-top:.4rem"></div>
@@ -214,34 +214,34 @@
 <!-- 顶部聚合 KPI -->
 <div class="ov-refresh-bar">
   <span class="ov-refresh-dot"></span>
-  <span>实时聚合 · 上次更新 <strong id="ov-last">—</strong></span>
+  <span>{{ (i18n or {}).get('ov_realtime_agg','实时聚合 · 上次更新') }} <strong id="ov-last">—</strong></span>
   <span class="ov-spacer"></span>
-  <label>刷新间隔
+  <label>{{ (i18n or {}).get('ov_refresh_interval','刷新间隔') }}
     <select id="ov-interval">
-      <option value="10">10 秒</option>
-      <option value="30" selected>30 秒</option>
-      <option value="60">60 秒</option>
-      <option value="0">手动</option>
+      <option value="10">{{ (i18n or {}).get('ov_sec10','10 秒') }}</option>
+      <option value="30" selected>{{ (i18n or {}).get('ov_sec30','30 秒') }}</option>
+      <option value="60">{{ (i18n or {}).get('ov_sec60','60 秒') }}</option>
+      <option value="0">{{ (i18n or {}).get('ov_manual','手动') }}</option>
     </select>
   </label>
-  <button class="btn-sec" type="button" onclick="ovRefresh()">立即刷新</button>
+  <button class="btn-sec" type="button" onclick="ovRefresh()">{{ (i18n or {}).get('ov_refresh_now','立即刷新') }}</button>
 </div>
 
 <!-- P16-A: 意图关键词字典 — 内联编辑器（可折叠） -->
 <details id="ov-intent-admin" style="background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:.5rem 1rem;margin-bottom:1rem">
   <summary style="cursor:pointer;font-size:.88rem;color:var(--t);display:flex;align-items:center;gap:.5rem;padding:.3rem 0">
-    <strong>🏷️ 意图关键词字典</strong>
-    <span style="font-size:.7rem;color:var(--t3)" id="ov-it-summary">点击展开 · 编辑 config/intent_tags.yaml</span>
+    <strong>🏷️ {{ (i18n or {}).get('ov_it_title','意图关键词字典') }}</strong>
+    <span style="font-size:.7rem;color:var(--t3)" id="ov-it-summary">{{ (i18n or {}).get('ov_it_summary','点击展开 · 编辑 config/intent_tags.yaml') }}</span>
   </summary>
   <div style="padding:.6rem 0">
     <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.5rem;flex-wrap:wrap">
-      <span style="font-size:.7rem;color:var(--t3)" id="ov-it-meta">载入中…</span>
+      <span style="font-size:.7rem;color:var(--t3)" id="ov-it-meta">{{ (i18n or {}).get('rpa_loading','载入中…') }}</span>
       <span style="flex:1"></span>
-      <button class="btn-sec" type="button" id="ov-it-load" style="font-size:.75rem;padding:.3rem .65rem">↻ 重新加载文件</button>
-      <button class="btn-sec" type="button" id="ov-it-reload" style="font-size:.75rem;padding:.3rem .65rem" title="不写文件，仅重读硬盘上现有 yaml">⚡ 仅 reload</button>
-      <button class="btn-sec" type="button" id="ov-it-restore" style="font-size:.75rem;padding:.3rem .65rem" title="查看备份并选择恢复">⏪ 恢复备份</button>
-      <button class="btn-sec" type="button" id="ov-it-diff" style="font-size:.75rem;padding:.3rem .65rem" title="保存前预览将增加/删除的关键词">👁 预览改动</button>
-      <button class="btn" type="button" id="ov-it-save" style="font-size:.75rem;padding:.3rem .85rem;background:var(--p);color:#fff;border:0;border-radius:6px;cursor:pointer">💾 保存并 reload</button>
+      <button class="btn-sec" type="button" id="ov-it-load" style="font-size:.75rem;padding:.3rem .65rem">↻ {{ (i18n or {}).get('ov_it_reload_file','重新加载文件') }}</button>
+      <button class="btn-sec" type="button" id="ov-it-reload" style="font-size:.75rem;padding:.3rem .65rem" title="{{ (i18n or {}).get('ov_it_reload_title','不写文件，仅重读硬盘上现有 yaml') }}">⚡ {{ (i18n or {}).get('ov_it_reload_only','仅 reload') }}</button>
+      <button class="btn-sec" type="button" id="ov-it-restore" style="font-size:.75rem;padding:.3rem .65rem" title="{{ (i18n or {}).get('ov_it_restore_title','查看备份并选择恢复') }}">⏪ {{ (i18n or {}).get('ov_it_restore','恢复备份') }}</button>
+      <button class="btn-sec" type="button" id="ov-it-diff" style="font-size:.75rem;padding:.3rem .65rem" title="{{ (i18n or {}).get('ov_it_diff_title','保存前预览将增加/删除的关键词') }}">👁 {{ (i18n or {}).get('ov_it_diff','预览改动') }}</button>
+      <button class="btn" type="button" id="ov-it-save" style="font-size:.75rem;padding:.3rem .85rem;background:var(--p);color:#fff;border:0;border-radius:6px;cursor:pointer">💾 {{ (i18n or {}).get('ov_it_save','保存并 reload') }}</button>
     </div>
     <textarea id="ov-it-yaml" rows="14" spellcheck="false"
       style="width:100%;font-family:'SF Mono',Consolas,monospace;font-size:.78rem;padding:.6rem .8rem;background:var(--input);border:1px solid var(--bd2);border-radius:6px;color:var(--t);resize:vertical;line-height:1.45"></textarea>
@@ -252,74 +252,75 @@
 </details>
 
 <div class="ov-summary">
-  <div class="rpa-kpi"><div class="rpa-kpi-n green" id="ov-agg-running">—</div><div class="rpa-kpi-l">运行中平台</div></div>
-  <div class="rpa-kpi"><div class="rpa-kpi-n" id="ov-agg-sent">—</div><div class="rpa-kpi-l">24h 总发送</div></div>
-  <div class="rpa-kpi"><div class="rpa-kpi-n amber" id="ov-agg-pending">—</div><div class="rpa-kpi-l">待审总数</div></div>
-  <div class="rpa-kpi"><div class="rpa-kpi-n red" id="ov-agg-alerts">—</div><div class="rpa-kpi-l">未确认告警</div></div>
+  <div class="rpa-kpi"><div class="rpa-kpi-n green" id="ov-agg-running">—</div><div class="rpa-kpi-l">{{ (i18n or {}).get('ov_kpi_running','运行中平台') }}</div></div>
+  <div class="rpa-kpi"><div class="rpa-kpi-n" id="ov-agg-sent">—</div><div class="rpa-kpi-l">{{ (i18n or {}).get('ov_kpi_total_sent','24h 总发送') }}</div></div>
+  <div class="rpa-kpi"><div class="rpa-kpi-n amber" id="ov-agg-pending">—</div><div class="rpa-kpi-l">{{ (i18n or {}).get('ov_kpi_total_pending','待审总数') }}</div></div>
+  <div class="rpa-kpi"><div class="rpa-kpi-n red" id="ov-agg-alerts">—</div><div class="rpa-kpi-l">{{ (i18n or {}).get('ov_kpi_unacked','未确认告警') }}</div></div>
 </div>
 
 <!-- N 线 N6：账号反封号机群健康（统一信号源：注册表天龄/代理 + 限额今日发送 → M7 健康灯） -->
-<div class="ov-summary" id="ov-fleet" style="margin-top:.6rem" title="协议号反封号机群健康：总体灯色取最差账号；按生命周期统计">
-  <div class="rpa-kpi"><div class="rpa-kpi-n" id="ov-fleet-light">—</div><div class="rpa-kpi-l">机群健康灯</div></div>
-  <div class="rpa-kpi"><div class="rpa-kpi-n green" id="ov-fleet-active">—</div><div class="rpa-kpi-l">活跃号</div></div>
-  <div class="rpa-kpi"><div class="rpa-kpi-n amber" id="ov-fleet-warming">—</div><div class="rpa-kpi-l">预热中</div></div>
-  <div class="rpa-kpi"><div class="rpa-kpi-n red" id="ov-fleet-risk">—</div><div class="rpa-kpi-l">受限/封禁</div></div>
-  <div class="rpa-kpi" id="ov-preflight-cell" title="真号扫码陪聊上线前自检：开关一致性 + 反封号护栏就绪（点查看明细）" style="cursor:pointer"><div class="rpa-kpi-n" id="ov-preflight-light">—</div><div class="rpa-kpi-l">扫码陪聊就绪</div></div>
+<div class="ov-summary" id="ov-fleet" style="margin-top:.6rem" title="{{ (i18n or {}).get('ov_fleet_title','协议号反封号机群健康：总体灯色取最差账号；按生命周期统计') }}">
+  <div class="rpa-kpi"><div class="rpa-kpi-n" id="ov-fleet-light">—</div><div class="rpa-kpi-l">{{ (i18n or {}).get('ov_fleet_light','机群健康灯') }}</div></div>
+  <div class="rpa-kpi"><div class="rpa-kpi-n green" id="ov-fleet-active">—</div><div class="rpa-kpi-l">{{ (i18n or {}).get('ov_fleet_active','活跃号') }}</div></div>
+  <div class="rpa-kpi"><div class="rpa-kpi-n amber" id="ov-fleet-warming">—</div><div class="rpa-kpi-l">{{ (i18n or {}).get('ov_fleet_warming','预热中') }}</div></div>
+  <div class="rpa-kpi"><div class="rpa-kpi-n red" id="ov-fleet-risk">—</div><div class="rpa-kpi-l">{{ (i18n or {}).get('ov_fleet_risk','受限/封禁') }}</div></div>
+  <div class="rpa-kpi" id="ov-fleet-selfprof-cell" style="display:none;cursor:help"><div class="rpa-kpi-n" id="ov-fleet-selfprof">—</div><div class="rpa-kpi-l">{{ (i18n or {}).get('ov_fleet_selfprof','身份采集') }}</div></div>
+  <div class="rpa-kpi" id="ov-preflight-cell" title="{{ (i18n or {}).get('ov_preflight_title','真号扫码陪聊上线前自检：开关一致性 + 反封号护栏就绪（点查看明细）') }}" style="cursor:pointer"><div class="rpa-kpi-n" id="ov-preflight-light">—</div><div class="rpa-kpi-l">{{ (i18n or {}).get('ov_preflight_label','扫码陪聊就绪') }}</div></div>
 </div>
 <div id="ov-preflight-detail" style="display:none;margin-top:.4rem;background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:.5rem .85rem;font-size:.76rem;line-height:1.6"></div>
 
 <!-- 主动话题预览（dry-run 可观测：本轮会主动联系谁、引用哪条记忆、是否被关怀去重让路；只读不发送） -->
 <div id="ov-proactive-card" style="margin-top:.6rem;background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:.6rem .85rem">
   <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem">
-    <div style="font-weight:600;font-size:.82rem">💬 主动话题预览 <span id="ov-pp-status" style="font-weight:400;color:var(--muted);font-size:.72rem"></span></div>
+    <div style="font-weight:600;font-size:.82rem">💬 {{ (i18n or {}).get('ov_pp_title','主动话题预览') }} <span id="ov-pp-status" style="font-weight:400;color:var(--muted);font-size:.72rem"></span></div>
     <span>
-      <button id="ov-pp-advice" style="font-size:.72rem;padding:.18rem .6rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="基于采样评分给调参建议（只读，不改配置）">调参建议</button>
-      <button id="ov-pp-refresh" style="font-size:.72rem;padding:.18rem .6rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer">刷新预览</button>
+      <button id="ov-pp-advice" style="font-size:.72rem;padding:.18rem .6rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="{{ (i18n or {}).get('ov_pp_advice_title','基于采样评分给调参建议（只读，不改配置）') }}">{{ (i18n or {}).get('ov_pp_advice','调参建议') }}</button>
+      <button id="ov-pp-refresh" style="font-size:.72rem;padding:.18rem .6rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer">{{ (i18n or {}).get('ov_pp_refresh','刷新预览') }}</button>
     </span>
   </div>
-  <div id="ov-pp-body" style="margin-top:.45rem;font-size:.76rem;line-height:1.5;color:var(--muted)">点「刷新预览」查看本轮候选（沉默/冷却/安静时段/关怀去重过滤后，不发送）。</div>
+  <div id="ov-pp-body" style="margin-top:.45rem;font-size:.76rem;line-height:1.5;color:var(--muted)">{{ (i18n or {}).get('ov_pp_body','点「刷新预览」查看本轮候选（沉默/冷却/安静时段/关怀去重过滤后，不发送）。') }}</div>
   <div id="ov-pp-sample-out" style="margin-top:.45rem"></div>
 </div>
 
 <!-- 陪伴能力就绪度看板（/api/companion/capabilities）：分阶段开启「看→校→开」第一步 -->
 <div id="ov-cap-card" style="margin-top:.6rem;background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:.6rem .85rem">
   <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem">
-    <div style="font-weight:600;font-size:.82rem">🧩 陪伴能力就绪度 <span id="ov-cap-status" style="font-weight:400;color:var(--muted);font-size:.72rem"></span></div>
-    <button id="ov-cap-refresh" style="font-size:.72rem;padding:.18rem .6rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="陪伴能力的开/关/灰度/受阻状态，按风险分档=分阶段开启顺序">刷新</button>
+    <div style="font-weight:600;font-size:.82rem">🧩 {{ (i18n or {}).get('ov_cap_title','陪伴能力就绪度') }} <span id="ov-cap-status" style="font-weight:400;color:var(--muted);font-size:.72rem"></span></div>
+    <button id="ov-cap-refresh" style="font-size:.72rem;padding:.18rem .6rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="{{ (i18n or {}).get('ov_cap_refresh_title','陪伴能力的开/关/灰度/受阻状态，按风险分档=分阶段开启顺序') }}">{{ (i18n or {}).get('refresh','刷新') }}</button>
   </div>
   <div style="margin-top:.4rem;display:flex;flex-wrap:wrap;gap:.3rem;align-items:center">
-    <span style="color:var(--muted);font-size:.7rem">一键档：</span>
-    <button class="ov-cap-preset" data-preset="safe_default" style="font-size:.7rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="急停：关全部对客外发，仅留安全栈">🛑 安全默认</button>
-    <button class="ov-cap-preset" data-preset="dry_run_trial" style="font-size:.7rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="观测/翻译/worker 开，主动触达 dry_run 不真发">🧪 灰度试运行</button>
-    <button class="ov-cap-preset" data-preset="full_auto" style="font-size:.7rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="全部开（真发仍受 auto_ai 护栏）">🚀 全量真发</button>
+    <span style="color:var(--muted);font-size:.7rem">{{ (i18n or {}).get('ov_cap_preset_label','一键档：') }}</span>
+    <button class="ov-cap-preset" data-preset="safe_default" style="font-size:.7rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="{{ (i18n or {}).get('ov_cap_preset_safe_title','急停：关全部对客外发，仅留安全栈') }}">🛑 {{ (i18n or {}).get('ov_cap_preset_safe','安全默认') }}</button>
+    <button class="ov-cap-preset" data-preset="dry_run_trial" style="font-size:.7rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="{{ (i18n or {}).get('ov_cap_preset_dry_title','观测/翻译/worker 开，主动触达 dry_run 不真发') }}">🧪 {{ (i18n or {}).get('ov_cap_preset_dry','灰度试运行') }}</button>
+    <button class="ov-cap-preset" data-preset="full_auto" style="font-size:.7rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="{{ (i18n or {}).get('ov_cap_preset_full_title','全部开（真发仍受 auto_ai 护栏）') }}">🚀 {{ (i18n or {}).get('ov_cap_preset_full','全量真发') }}</button>
     <span style="color:var(--bd2)">|</span>
-    <button id="ov-cap-rollback" style="font-size:.7rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="回滚到上一次一键切换前">↩ 回滚上次</button>
-    <button id="ov-cap-audit-btn" style="font-size:.7rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer">🕓 最近变更</button>
-    <button id="ov-cap-signals-btn" style="font-size:.7rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="把真实运营指标翻成「该不该往上爬一档」的建议">🧭 决策信号</button>
-    <button id="ov-cap-advice-btn" style="font-size:.7rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="能力档×信号联动建议 + 配置一致性体检（可一键执行）">🩺 体检/建议</button>
+    <button id="ov-cap-rollback" style="font-size:.7rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="{{ (i18n or {}).get('ov_cap_rollback_title','回滚到上一次一键切换前') }}">↩ {{ (i18n or {}).get('ov_cap_rollback','回滚上次') }}</button>
+    <button id="ov-cap-audit-btn" style="font-size:.7rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer">🕓 {{ (i18n or {}).get('ov_cap_audit','最近变更') }}</button>
+    <button id="ov-cap-signals-btn" style="font-size:.7rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="{{ (i18n or {}).get('ov_cap_signals_title','把真实运营指标翻成「该不该往上爬一档」的建议') }}">🧭 {{ (i18n or {}).get('ov_cap_signals','决策信号') }}</button>
+    <button id="ov-cap-advice-btn" style="font-size:.7rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="{{ (i18n or {}).get('ov_cap_advice_title','能力档×信号联动建议 + 配置一致性体检（可一键执行）') }}">🩺 {{ (i18n or {}).get('ov_cap_advice','体检/建议') }}</button>
   </div>
   <div id="ov-cap-audit" style="display:none;margin-top:.4rem;font-size:.72rem;line-height:1.6;color:var(--muted)"></div>
   <div id="ov-cap-signals" style="display:none;margin-top:.4rem;font-size:.72rem;line-height:1.6;color:var(--muted)"></div>
   <div id="ov-cap-advice" style="display:none;margin-top:.4rem;font-size:.72rem;line-height:1.6;color:var(--muted)"></div>
-  <div id="ov-cap-body" style="margin-top:.45rem;font-size:.76rem;line-height:1.5;color:var(--muted)">载入中…</div>
+  <div id="ov-cap-body" style="margin-top:.45rem;font-size:.76rem;line-height:1.5;color:var(--muted)">{{ (i18n or {}).get('rpa_loading','载入中…') }}</div>
 </div>
 
 <!-- D1c：桌面壳内嵌注入健康（逐选择器失配可观测，数据来自 /api/desktop/inject-health 信标）-->
 <div id="ov-desktop-health-card" style="margin-top:.6rem;background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:.6rem .85rem">
   <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem">
-    <div style="font-weight:600;font-size:.82rem">🖥 桌面注入健康 <span id="ov-dh-summary" style="font-weight:400;color:var(--muted);font-size:.72rem"></span></div>
-    <button id="ov-dh-refresh" style="font-size:.72rem;padding:.18rem .6rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="内嵌平台注入逐选择器命中；失配多为官方网页改版，可改 config/desktop_selector_profiles.json 热修">刷新</button>
+    <div style="font-weight:600;font-size:.82rem">🖥 {{ (i18n or {}).get('ov_dh_title','桌面注入健康') }} <span id="ov-dh-summary" style="font-weight:400;color:var(--muted);font-size:.72rem"></span></div>
+    <button id="ov-dh-refresh" style="font-size:.72rem;padding:.18rem .6rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="{{ (i18n or {}).get('ov_dh_refresh_title','内嵌平台注入逐选择器命中；失配多为官方网页改版，可改 config/desktop_selector_profiles.json 热修') }}">{{ (i18n or {}).get('refresh','刷新') }}</button>
   </div>
-  <div id="ov-dh-body" style="margin-top:.45rem;font-size:.76rem;line-height:1.5;color:var(--muted)">载入中…</div>
+  <div id="ov-dh-body" style="margin-top:.45rem;font-size:.76rem;line-height:1.5;color:var(--muted)">{{ (i18n or {}).get('rpa_loading','载入中…') }}</div>
 </div>
 
 <!-- D4b：受控桌面出站队列（autopilot 发给内嵌账号的回复，已过 send-gate/kill-switch 闸门）-->
 <div id="ov-desktop-outbound-card" style="margin-top:.6rem;background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:.6rem .85rem">
   <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem">
-    <div style="font-weight:600;font-size:.82rem">📤 桌面出站队列 <span id="ov-dob-summary" style="font-weight:400;color:var(--muted);font-size:.72rem"></span></div>
-    <button id="ov-dob-refresh" style="font-size:.72rem;padding:.18rem .6rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="全自动回复发给内嵌(桌面/扩展)账号前已过 send-gate/kill-switch 闸门；命令入队后由桌面壳/扩展轮询 DOM 发送。默认关，需 inbox.l2_autosend.desktop_bridge.enabled">刷新</button>
+    <div style="font-weight:600;font-size:.82rem">📤 {{ (i18n or {}).get('ov_dob_title','桌面出站队列') }} <span id="ov-dob-summary" style="font-weight:400;color:var(--muted);font-size:.72rem"></span></div>
+    <button id="ov-dob-refresh" style="font-size:.72rem;padding:.18rem .6rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="{{ (i18n or {}).get('ov_dob_refresh_title','全自动回复发给内嵌(桌面/扩展)账号前已过 send-gate/kill-switch 闸门；命令入队后由桌面壳/扩展轮询 DOM 发送。默认关，需 inbox.l2_autosend.desktop_bridge.enabled') }}">{{ (i18n or {}).get('refresh','刷新') }}</button>
   </div>
-  <div id="ov-dob-body" style="margin-top:.45rem;font-size:.76rem;line-height:1.5;color:var(--muted)">载入中…</div>
+  <div id="ov-dob-body" style="margin-top:.45rem;font-size:.76rem;line-height:1.5;color:var(--muted)">{{ (i18n or {}).get('rpa_loading','载入中…') }}</div>
 </div>
 
 <!-- 4 平台卡片 -->
@@ -332,15 +333,15 @@
       </div>
       <div class="ov-card-title">
         <div class="ov-card-name">Telegram <span class="rpa-status-dot neutral" id="ov-dot-telegram"></span></div>
-        <div class="ov-card-sub" id="ov-sub-telegram">载入中…</div>
+        <div class="ov-card-sub" id="ov-sub-telegram">{{ (i18n or {}).get('rpa_loading','载入中…') }}</div>
       </div>
-      <a class="ov-card-link" href="/telegram">设置 ›</a>
+      <a class="ov-card-link" href="/telegram">{{ (i18n or {}).get('ov_settings','设置 ›') }}</a>
     </div>
     <div class="ov-kpis">
-      <div class="ov-kpi"><div class="ov-kpi-n" id="ov-telegram-sent">—</div><div class="ov-kpi-l">24h 发送</div></div>
-      <div class="ov-kpi"><div class="ov-kpi-n muted" id="ov-telegram-pending">—</div><div class="ov-kpi-l">待审</div></div>
-      <div class="ov-kpi"><div class="ov-kpi-n red" id="ov-telegram-alerts">—</div><div class="ov-kpi-l">告警</div></div>
-      <div class="ov-kpi"><div class="ov-kpi-n muted" id="ov-telegram-rate">—</div><div class="ov-kpi-l">成功率</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n" id="ov-telegram-sent">—</div><div class="ov-kpi-l">{{ (i18n or {}).get('ov_kpi_24h_sent','24h 发送') }}</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n muted" id="ov-telegram-pending">—</div><div class="ov-kpi-l">{{ (i18n or {}).get('ov_kpi_pending','待审') }}</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n red" id="ov-telegram-alerts">—</div><div class="ov-kpi-l">{{ (i18n or {}).get('ov_kpi_alerts','告警') }}</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n muted" id="ov-telegram-rate">—</div><div class="ov-kpi-l">{{ (i18n or {}).get('ov_kpi_rate','成功率') }}</div></div>
     </div>
     <div class="ov-foot">
       <span><span class="ov-mode" id="ov-telegram-mode">—</span></span>
@@ -356,22 +357,22 @@
       </div>
       <div class="ov-card-title">
         <div class="ov-card-name">LINE <span class="rpa-status-dot neutral" id="ov-dot-line"></span></div>
-        <div class="ov-card-sub" id="ov-sub-line">载入中…</div>
+        <div class="ov-card-sub" id="ov-sub-line">{{ (i18n or {}).get('rpa_loading','载入中…') }}</div>
       </div>
       <div class="ov-ctrl" id="ov-ctrl-line">
-        <button class="ov-ctrl-btn ok ov-start-btn" title="启动服务" onclick="ovControl('line','start')">▶ 启动</button>
-        <button class="ov-ctrl-btn danger ov-stop-btn" title="停止服务" onclick="ovControl('line','stop')" style="display:none">■ 停止</button>
-        <button class="ov-ctrl-btn warn ov-pause-btn" title="暂停 5 分钟" onclick="ovControl('line','pause',300)" style="display:none">⏸ 暂停</button>
-        <button class="ov-ctrl-btn ok ov-resume-btn" title="立即恢复" onclick="ovControl('line','resume')" style="display:none">⏵ 恢复</button>
-        <button class="ov-ctrl-btn ov-trigger-btn" title="立即触发一次扫描" onclick="ovControl('line','trigger')">⚡</button>
+        <button class="ov-ctrl-btn ok ov-start-btn" title="{{ (i18n or {}).get('ov_ctrl_start_title','启动服务') }}" onclick="ovControl('line','start')">▶ {{ (i18n or {}).get('ov_ctrl_start','启动') }}</button>
+        <button class="ov-ctrl-btn danger ov-stop-btn" title="{{ (i18n or {}).get('ov_ctrl_stop_title','停止服务') }}" onclick="ovControl('line','stop')" style="display:none">■ {{ (i18n or {}).get('ov_ctrl_stop','停止') }}</button>
+        <button class="ov-ctrl-btn warn ov-pause-btn" title="{{ (i18n or {}).get('ov_ctrl_pause_title','暂停 5 分钟') }}" onclick="ovControl('line','pause',300)" style="display:none">⏸ {{ (i18n or {}).get('ov_ctrl_pause','暂停') }}</button>
+        <button class="ov-ctrl-btn ok ov-resume-btn" title="{{ (i18n or {}).get('ov_ctrl_resume_title','立即恢复') }}" onclick="ovControl('line','resume')" style="display:none">⏵ {{ (i18n or {}).get('ov_ctrl_resume','恢复') }}</button>
+        <button class="ov-ctrl-btn ov-trigger-btn" title="{{ (i18n or {}).get('ov_ctrl_trigger_title','立即触发一次扫描') }}" onclick="ovControl('line','trigger')">⚡</button>
       </div>
-      <a class="ov-card-link" href="/line-rpa">设置 ›</a>
+      <a class="ov-card-link" href="/line-rpa">{{ (i18n or {}).get('ov_settings','设置 ›') }}</a>
     </div>
     <div class="ov-kpis">
-      <div class="ov-kpi"><div class="ov-kpi-n" id="ov-line-sent">—</div><div class="ov-kpi-l">24h 发送</div></div>
-      <div class="ov-kpi"><div class="ov-kpi-n amber" id="ov-line-pending">—</div><div class="ov-kpi-l">待审</div></div>
-      <div class="ov-kpi"><div class="ov-kpi-n red" id="ov-line-alerts">—</div><div class="ov-kpi-l">告警</div></div>
-      <div class="ov-kpi"><div class="ov-kpi-n muted" id="ov-line-rate">—</div><div class="ov-kpi-l">成功率</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n" id="ov-line-sent">—</div><div class="ov-kpi-l">{{ (i18n or {}).get('ov_kpi_24h_sent','24h 发送') }}</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n amber" id="ov-line-pending">—</div><div class="ov-kpi-l">{{ (i18n or {}).get('ov_kpi_pending','待审') }}</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n red" id="ov-line-alerts">—</div><div class="ov-kpi-l">{{ (i18n or {}).get('ov_kpi_alerts','告警') }}</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n muted" id="ov-line-rate">—</div><div class="ov-kpi-l">{{ (i18n or {}).get('ov_kpi_rate','成功率') }}</div></div>
     </div>
     <div class="ov-foot">
       <span><span class="ov-mode" id="ov-line-mode">—</span></span>
@@ -384,26 +385,26 @@
   <div class="ov-card" id="ov-card-messenger">
     <div class="ov-card-head">
       <div class="ov-card-icon theme-messenger">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8 12.5L10.5 15 16 9"/></svg>
+        <svg viewBox="0 0 24 24" fill="#fff" stroke="none"><path d="M12 2C6.477 2 2 6.145 2 11.259c0 2.913 1.454 5.512 3.726 7.21V22l3.405-1.869c.91.252 1.872.388 2.869.388 5.523 0 10-4.145 10-9.259S17.523 2 12 2zm.997 12.467l-2.546-2.715-4.97 2.715 5.467-5.804 2.61 2.715 4.905-2.715-5.466 5.804z"/></svg>
       </div>
       <div class="ov-card-title">
         <div class="ov-card-name">Messenger <span class="rpa-status-dot neutral" id="ov-dot-messenger"></span></div>
-        <div class="ov-card-sub" id="ov-sub-messenger">载入中…</div>
+        <div class="ov-card-sub" id="ov-sub-messenger">{{ (i18n or {}).get('rpa_loading','载入中…') }}</div>
       </div>
       <div class="ov-ctrl" id="ov-ctrl-messenger">
-        <button class="ov-ctrl-btn ok ov-start-btn" title="启动服务" onclick="ovControl('messenger','start')">▶ 启动</button>
-        <button class="ov-ctrl-btn danger ov-stop-btn" title="停止服务" onclick="ovControl('messenger','stop')" style="display:none">■ 停止</button>
-        <button class="ov-ctrl-btn warn ov-pause-btn" title="暂停 5 分钟" onclick="ovControl('messenger','pause',300)" style="display:none">⏸ 暂停</button>
-        <button class="ov-ctrl-btn ok ov-resume-btn" title="立即恢复" onclick="ovControl('messenger','resume')" style="display:none">⏵ 恢复</button>
-        <button class="ov-ctrl-btn ov-trigger-btn" title="立即触发一次扫描" onclick="ovControl('messenger','trigger')">⚡</button>
+        <button class="ov-ctrl-btn ok ov-start-btn" title="{{ (i18n or {}).get('ov_ctrl_start_title','启动服务') }}" onclick="ovControl('messenger','start')">▶ {{ (i18n or {}).get('ov_ctrl_start','启动') }}</button>
+        <button class="ov-ctrl-btn danger ov-stop-btn" title="{{ (i18n or {}).get('ov_ctrl_stop_title','停止服务') }}" onclick="ovControl('messenger','stop')" style="display:none">■ {{ (i18n or {}).get('ov_ctrl_stop','停止') }}</button>
+        <button class="ov-ctrl-btn warn ov-pause-btn" title="{{ (i18n or {}).get('ov_ctrl_pause_title','暂停 5 分钟') }}" onclick="ovControl('messenger','pause',300)" style="display:none">⏸ {{ (i18n or {}).get('ov_ctrl_pause','暂停') }}</button>
+        <button class="ov-ctrl-btn ok ov-resume-btn" title="{{ (i18n or {}).get('ov_ctrl_resume_title','立即恢复') }}" onclick="ovControl('messenger','resume')" style="display:none">⏵ {{ (i18n or {}).get('ov_ctrl_resume','恢复') }}</button>
+        <button class="ov-ctrl-btn ov-trigger-btn" title="{{ (i18n or {}).get('ov_ctrl_trigger_title','立即触发一次扫描') }}" onclick="ovControl('messenger','trigger')">⚡</button>
       </div>
-      <a class="ov-card-link" href="/messenger-rpa">设置 ›</a>
+      <a class="ov-card-link" href="/messenger-rpa">{{ (i18n or {}).get('ov_settings','设置 ›') }}</a>
     </div>
     <div class="ov-kpis">
-      <div class="ov-kpi"><div class="ov-kpi-n" id="ov-messenger-sent">—</div><div class="ov-kpi-l">24h 发送</div></div>
-      <div class="ov-kpi"><div class="ov-kpi-n amber" id="ov-messenger-pending">—</div><div class="ov-kpi-l">待审</div></div>
-      <div class="ov-kpi"><div class="ov-kpi-n red" id="ov-messenger-alerts">—</div><div class="ov-kpi-l">告警</div></div>
-      <div class="ov-kpi"><div class="ov-kpi-n muted" id="ov-messenger-rate">—</div><div class="ov-kpi-l">成功率</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n" id="ov-messenger-sent">—</div><div class="ov-kpi-l">{{ (i18n or {}).get('ov_kpi_24h_sent','24h 发送') }}</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n amber" id="ov-messenger-pending">—</div><div class="ov-kpi-l">{{ (i18n or {}).get('ov_kpi_pending','待审') }}</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n red" id="ov-messenger-alerts">—</div><div class="ov-kpi-l">{{ (i18n or {}).get('ov_kpi_alerts','告警') }}</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n muted" id="ov-messenger-rate">—</div><div class="ov-kpi-l">{{ (i18n or {}).get('ov_kpi_rate','成功率') }}</div></div>
     </div>
     <div class="ov-foot">
       <span><span class="ov-mode" id="ov-messenger-mode">—</span></span>
@@ -420,22 +421,22 @@
       </div>
       <div class="ov-card-title">
         <div class="ov-card-name">WhatsApp <span class="rpa-status-dot neutral" id="ov-dot-whatsapp"></span></div>
-        <div class="ov-card-sub" id="ov-sub-whatsapp">载入中…</div>
+        <div class="ov-card-sub" id="ov-sub-whatsapp">{{ (i18n or {}).get('rpa_loading','载入中…') }}</div>
       </div>
       <div class="ov-ctrl" id="ov-ctrl-whatsapp">
-        <button class="ov-ctrl-btn ok ov-start-btn" title="启动服务" onclick="ovControl('whatsapp','start')">▶ 启动</button>
-        <button class="ov-ctrl-btn danger ov-stop-btn" title="停止服务" onclick="ovControl('whatsapp','stop')" style="display:none">■ 停止</button>
-        <button class="ov-ctrl-btn warn ov-pause-btn" title="暂停 5 分钟" onclick="ovControl('whatsapp','pause',300)" style="display:none">⏸ 暂停</button>
-        <button class="ov-ctrl-btn ok ov-resume-btn" title="立即恢复" onclick="ovControl('whatsapp','resume')" style="display:none">⏵ 恢复</button>
-        <button class="ov-ctrl-btn ov-trigger-btn" title="立即触发一次扫描" onclick="ovControl('whatsapp','trigger')">⚡</button>
+        <button class="ov-ctrl-btn ok ov-start-btn" title="{{ (i18n or {}).get('ov_ctrl_start_title','启动服务') }}" onclick="ovControl('whatsapp','start')">▶ {{ (i18n or {}).get('ov_ctrl_start','启动') }}</button>
+        <button class="ov-ctrl-btn danger ov-stop-btn" title="{{ (i18n or {}).get('ov_ctrl_stop_title','停止服务') }}" onclick="ovControl('whatsapp','stop')" style="display:none">■ {{ (i18n or {}).get('ov_ctrl_stop','停止') }}</button>
+        <button class="ov-ctrl-btn warn ov-pause-btn" title="{{ (i18n or {}).get('ov_ctrl_pause_title','暂停 5 分钟') }}" onclick="ovControl('whatsapp','pause',300)" style="display:none">⏸ {{ (i18n or {}).get('ov_ctrl_pause','暂停') }}</button>
+        <button class="ov-ctrl-btn ok ov-resume-btn" title="{{ (i18n or {}).get('ov_ctrl_resume_title','立即恢复') }}" onclick="ovControl('whatsapp','resume')" style="display:none">⏵ {{ (i18n or {}).get('ov_ctrl_resume','恢复') }}</button>
+        <button class="ov-ctrl-btn ov-trigger-btn" title="{{ (i18n or {}).get('ov_ctrl_trigger_title','立即触发一次扫描') }}" onclick="ovControl('whatsapp','trigger')">⚡</button>
       </div>
-      <a class="ov-card-link" href="/whatsapp-rpa">设置 ›</a>
+      <a class="ov-card-link" href="/whatsapp-rpa">{{ (i18n or {}).get('ov_settings','设置 ›') }}</a>
     </div>
     <div class="ov-kpis">
-      <div class="ov-kpi"><div class="ov-kpi-n" id="ov-whatsapp-sent">—</div><div class="ov-kpi-l">24h 发送</div></div>
-      <div class="ov-kpi"><div class="ov-kpi-n amber" id="ov-whatsapp-pending">—</div><div class="ov-kpi-l">待审</div></div>
-      <div class="ov-kpi"><div class="ov-kpi-n red" id="ov-whatsapp-alerts">—</div><div class="ov-kpi-l">告警</div></div>
-      <div class="ov-kpi"><div class="ov-kpi-n muted" id="ov-whatsapp-rate">—</div><div class="ov-kpi-l">成功率</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n" id="ov-whatsapp-sent">—</div><div class="ov-kpi-l">{{ (i18n or {}).get('ov_kpi_24h_sent','24h 发送') }}</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n amber" id="ov-whatsapp-pending">—</div><div class="ov-kpi-l">{{ (i18n or {}).get('ov_kpi_pending','待审') }}</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n red" id="ov-whatsapp-alerts">—</div><div class="ov-kpi-l">{{ (i18n or {}).get('ov_kpi_alerts','告警') }}</div></div>
+      <div class="ov-kpi"><div class="ov-kpi-n muted" id="ov-whatsapp-rate">—</div><div class="ov-kpi-l">{{ (i18n or {}).get('ov_kpi_rate','成功率') }}</div></div>
     </div>
     <div class="ov-foot">
       <span><span class="ov-mode" id="ov-whatsapp-mode">—</span></span>
@@ -446,27 +447,27 @@
 </div>
 
 <div style="font-size:.68rem;color:var(--t3);padding:.3rem .6rem;margin-top:-.3rem;margin-bottom:.5rem">
-  ℹ️ 以上按钮控制全局服务。设备级平台/人设编排请在下方「📱 设备管理」中操作。
+  {{ (i18n or {}).get('ov_ctrl_hint','ℹ️ 以上按钮控制全局服务。设备级平台/人设编排请在下方「📱 设备管理」中操作。') }}
 </div>
 
 <!-- 跨平台事件 tab -->
 <div class="st-bar">
-  <button class="st-tab active" type="button" data-pane="ov-tab-pending" onclick="rpa.switchTab(this)">跨平台待审 <span id="ov-pending-count" class="cfg-badge warn" style="display:none;margin-left:.4rem"></span></button>
-  <button class="st-tab" type="button" data-pane="ov-tab-alerts" onclick="rpa.switchTab(this)">未确认告警 <span id="ov-alerts-count" class="cfg-badge err" style="display:none;margin-left:.4rem"></span></button>
-  <button class="st-tab" type="button" data-pane="ov-tab-devices" onclick="rpa.switchTab(this);devRefresh()">📱 设备管理 <span id="ov-devices-count" class="cfg-badge" style="display:none;margin-left:.4rem"></span></button>
-  <button class="st-tab" type="button" data-pane="ov-tab-device-stats" onclick="rpa.switchTab(this);devStatsRefresh()">📊 设备统计</button>
-  <button class="st-tab" type="button" data-pane="ov-tab-funnel" onclick="rpa.switchTab(this)">📈 运营漏斗</button>
-  <button class="st-tab" type="button" data-pane="ov-tab-lang" onclick="rpa.switchTab(this);ovLangLoad()">🌍 语言分布</button>
+  <button class="st-tab active" type="button" data-pane="ov-tab-pending" onclick="rpa.switchTab(this)">{{ (i18n or {}).get('ov_tab_pending','跨平台待审') }} <span id="ov-pending-count" class="cfg-badge warn" style="display:none;margin-left:.4rem"></span></button>
+  <button class="st-tab" type="button" data-pane="ov-tab-alerts" onclick="rpa.switchTab(this)">{{ (i18n or {}).get('ov_kpi_unacked','未确认告警') }} <span id="ov-alerts-count" class="cfg-badge err" style="display:none;margin-left:.4rem"></span></button>
+  <button class="st-tab" type="button" data-pane="ov-tab-devices" onclick="rpa.switchTab(this);devRefresh()">📱 {{ (i18n or {}).get('ov_devices','设备管理') }} <span id="ov-devices-count" class="cfg-badge" style="display:none;margin-left:.4rem"></span></button>
+  <button class="st-tab" type="button" data-pane="ov-tab-device-stats" onclick="rpa.switchTab(this);devStatsRefresh()">📊 {{ (i18n or {}).get('ov_devstats','设备统计') }}</button>
+  <button class="st-tab" type="button" data-pane="ov-tab-funnel" onclick="rpa.switchTab(this)">📈 {{ (i18n or {}).get('rpa_fn_title','运营漏斗') }}</button>
+  <button class="st-tab" type="button" data-pane="ov-tab-lang" onclick="rpa.switchTab(this);ovLangLoad()">🌍 {{ (i18n or {}).get('ov_lang','语言分布') }}</button>
 </div>
 
 <div id="ov-tab-pending" class="st-pane active">
   <div class="rpa-card">
     <div class="rpa-card-head">
       <div class="rpa-card-icon amber">⏳</div>
-      <div class="rpa-card-title">最近 5 条 / 平台 · 待审回复</div>
-      <span class="rpa-card-desc">点击下方平台名跳转到详细审批页</span>
+      <div class="rpa-card-title">{{ (i18n or {}).get('ov_pending_card_title','最近 5 条 / 平台 · 待审回复') }}</div>
+      <span class="rpa-card-desc">{{ (i18n or {}).get('ov_pending_card_desc','点击下方平台名跳转到详细审批页') }}</span>
     </div>
-    <div class="ov-list" id="ov-pending-list"><div class="rpa-empty">载入中…</div></div>
+    <div class="ov-list" id="ov-pending-list"><div class="rpa-empty">{{ (i18n or {}).get('rpa_loading','载入中…') }}</div></div>
   </div>
 </div>
 
@@ -474,10 +475,10 @@
   <div class="rpa-card">
     <div class="rpa-card-head">
       <div class="rpa-card-icon red">⚠️</div>
-      <div class="rpa-card-title">未确认告警 · 跨平台</div>
-      <span class="rpa-card-desc">仅 LINE / WhatsApp 维护本地告警表；Messenger 走 Telegram escalation</span>
+      <div class="rpa-card-title">{{ (i18n or {}).get('ov_alerts_card_title','未确认告警 · 跨平台') }}</div>
+      <span class="rpa-card-desc">{{ (i18n or {}).get('ov_alerts_card_desc','仅 LINE / WhatsApp 维护本地告警表；Messenger 走 Telegram escalation') }}</span>
     </div>
-    <div class="ov-list" id="ov-alerts-list"><div class="rpa-empty">载入中…</div></div>
+    <div class="ov-list" id="ov-alerts-list"><div class="rpa-empty">{{ (i18n or {}).get('rpa_loading','载入中…') }}</div></div>
   </div>
 </div>
 
@@ -486,13 +487,13 @@
   <div class="rpa-card">
     <div class="rpa-card-head">
       <div class="rpa-card-icon" style="background:linear-gradient(135deg,#6366f1,#4f46e5)">📱</div>
-      <div class="rpa-card-title">设备管理</div>
-      <span class="rpa-card-desc" id="dev-host-label">主机: —</span>
-      <button class="btn-sec" type="button" onclick="devRefresh()" style="font-size:.75rem;padding:.3rem .65rem;margin-left:auto">↻ 刷新</button>
+      <div class="rpa-card-title">{{ (i18n or {}).get('ov_devices','设备管理') }}</div>
+      <span class="rpa-card-desc" id="dev-host-label">{{ (i18n or {}).get('ov_host_label','主机:') }} —</span>
+      <button class="btn-sec" type="button" onclick="devRefresh()" style="font-size:.75rem;padding:.3rem .65rem;margin-left:auto">↻ {{ (i18n or {}).get('refresh','刷新') }}</button>
     </div>
     <!-- old inline batch bar removed — replaced by sticky floating bar below -->
     <div id="dev-grid" class="dev-grid" style="margin-top:.7rem">
-      <div class="rpa-empty">加载中…</div>
+      <div class="rpa-empty">{{ (i18n or {}).get('rpa_loading','加载中…') }}</div>
     </div>
   </div>
 </div>
@@ -502,45 +503,45 @@
   <div class="rpa-card">
     <div class="rpa-card-head">
       <div class="rpa-card-icon" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9)">📊</div>
-      <div class="rpa-card-title">设备统计 (24h)</div>
-      <span class="rpa-card-desc" id="ds-summary-label">加载中…</span>
+      <div class="rpa-card-title">{{ (i18n or {}).get('ov_devstats_24h','设备统计 (24h)') }}</div>
+      <span class="rpa-card-desc" id="ds-summary-label">{{ (i18n or {}).get('rpa_loading','加载中…') }}</span>
       <select id="ds-hours" onchange="devStatsRefresh()" style="margin-left:auto;padding:.25rem .4rem;font-size:.72rem;border:1px solid var(--bd2);border-radius:4px;background:var(--input);color:var(--t)">
-        <option value="24">24 小时</option>
-        <option value="12">12 小时</option>
-        <option value="6" selected>6 小时</option>
-        <option value="1">1 小时</option>
+        <option value="24">{{ (i18n or {}).get('ov_hours24','24 小时') }}</option>
+        <option value="12">{{ (i18n or {}).get('ov_hours12','12 小时') }}</option>
+        <option value="6" selected>{{ (i18n or {}).get('ov_hours6','6 小时') }}</option>
+        <option value="1">{{ (i18n or {}).get('ov_hours1','1 小时') }}</option>
       </select>
       <button class="btn-sec" type="button" onclick="devStatsRefresh()" style="font-size:.75rem;padding:.3rem .65rem">↻</button>
     </div>
     <!-- 汇总卡片行 -->
     <div id="ds-summary-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.5rem;margin-top:.7rem">
-      <div class="rpa-empty">点击刷新加载统计…</div>
+      <div class="rpa-empty">{{ (i18n or {}).get('ov_ds_click_refresh','点击刷新加载统计…') }}</div>
     </div>
     <!-- 时间序列图表区 -->
     <div id="ds-chart-area" style="margin-top:1rem"></div>
     <!-- 负载均衡分析 -->
     <div id="ds-load-balance" style="margin-top:1rem;padding:.6rem .7rem;background:var(--card);border:1px solid var(--bd);border-radius:6px">
-      <div style="font-size:.75rem;font-weight:600;color:var(--t2);margin-bottom:.4rem">⚖️ 主机负载分析</div>
+      <div style="font-size:.75rem;font-weight:600;color:var(--t2);margin-bottom:.4rem">⚖️ {{ (i18n or {}).get('ov_ds_load_title','主机负载分析') }}</div>
       <div id="ds-lb-hosts" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:.4rem"></div>
       <div id="ds-lb-suggestions" style="margin-top:.4rem"></div>
     </div>
     <!-- 实时事件流 -->
     <div id="ds-events" style="margin-top:1rem;padding:.6rem .7rem;background:var(--card);border:1px solid var(--bd);border-radius:6px">
       <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.4rem">
-        <span style="font-size:.75rem;font-weight:600;color:var(--t2)">🔴 实时事件</span>
-        <span id="ds-sse-status" style="font-size:.6rem;color:var(--t3)">连接中…</span>
+        <span style="font-size:.75rem;font-weight:600;color:var(--t2)">🔴 {{ (i18n or {}).get('ov_ds_realtime_events','实时事件') }}</span>
+        <span id="ds-sse-status" style="font-size:.6rem;color:var(--t3)">{{ (i18n or {}).get('ov_connecting','连接中…') }}</span>
       </div>
       <div id="ds-event-log" style="max-height:120px;overflow-y:auto;font-size:.65rem;font-family:monospace;color:var(--t3)"></div>
     </div>
     <!-- 模板快速应用 -->
     <div style="margin-top:1rem;padding:.6rem .7rem;background:var(--ps);border-radius:6px">
-      <div style="font-size:.75rem;font-weight:600;color:var(--p);margin-bottom:.4rem">设备模板快速应用</div>
+      <div style="font-size:.75rem;font-weight:600;color:var(--p);margin-bottom:.4rem">{{ (i18n or {}).get('ov_ds_tpl_title','设备模板快速应用') }}</div>
       <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
         <select id="ds-template-sel" style="padding:.25rem .4rem;font-size:.72rem;border:1px solid var(--bd2);border-radius:4px;background:var(--input);color:var(--t);min-width:140px">
-          <option value="">选择模板…</option>
+          <option value="">{{ (i18n or {}).get('ov_select_template','选择模板…') }}</option>
         </select>
         <span id="ds-template-desc" style="font-size:.68rem;color:var(--t3)"></span>
-        <button class="btn-sec" onclick="devApplyTemplate()" style="font-size:.72rem;padding:.25rem .6rem;font-weight:600;border-color:var(--p);color:var(--p);margin-left:auto">应用到选中设备</button>
+        <button class="btn-sec" onclick="devApplyTemplate()" style="font-size:.72rem;padding:.25rem .6rem;font-weight:600;border-color:var(--p);color:var(--p);margin-left:auto">{{ (i18n or {}).get('ov_ds_apply_selected','应用到选中设备') }}</button>
       </div>
     </div>
   </div>
@@ -556,12 +557,12 @@
   <div class="rpa-card">
     <div class="rpa-card-head">
       <div class="rpa-card-icon" style="background:linear-gradient(135deg,#0ea5e9,#0284c7)">🌍</div>
-      <div class="rpa-card-title">多平台语言分布</div>
-      <span class="rpa-card-desc" id="ov-lang-summary">WhatsApp（检测/锁定） + Messenger + LINE（7 天回复语言）</span>
-      <button class="btn-sec" type="button" onclick="ovLangLoad()" style="font-size:.75rem;padding:.3rem .65rem;margin-left:auto">↻ 刷新</button>
+      <div class="rpa-card-title">{{ (i18n or {}).get('ov_lang_card_title','多平台语言分布') }}</div>
+      <span class="rpa-card-desc" id="ov-lang-summary">{{ (i18n or {}).get('ov_lang_card_desc','WhatsApp（检测/锁定） + Messenger + LINE（7 天回复语言）') }}</span>
+      <button class="btn-sec" type="button" onclick="ovLangLoad()" style="font-size:.75rem;padding:.3rem .65rem;margin-left:auto">↻ {{ (i18n or {}).get('refresh','刷新') }}</button>
     </div>
     <div id="ov-lang-body" style="margin-top:.8rem">
-      <div class="rpa-empty">点击「🌍 语言分布」标签加载…</div>
+      <div class="rpa-empty">{{ (i18n or {}).get('ov_lang_click_load','点击「🌍 语言分布」标签加载…') }}</div>
     </div>
   </div>
 </div>
@@ -569,20 +570,20 @@
 <script>
 // ── 状态文案 ────────────────────────────────────────────────
 function ovHealthText(p){
-  if(!p.available) return '不可用';
-  if(!p.enabled)   return '未启用（config disabled）';
+  if(!p.available) return window.T('ov_js_unavailable');
+  if(!p.enabled)   return window.T('ov_js_disabled');
   if(p.paused){
     const sec = Math.max(0, Math.round(p.pause_remaining_sec||0));
-    return sec>0 ? `已暂停 (${rpa.fmtDur(sec)}剩余)` : '已暂停';
+    return sec>0 ? window.Tf('ov_js_paused_left',{d:rpa.fmtDur(sec)}) : window.T('ov_js_paused');
   }
-  if(!p.running)        return '已停止';
-  if(p.unacked_alerts)  return '运行中 · 有未确认告警';
-  return '运行中';
+  if(!p.running)        return window.T('ov_js_stopped');
+  if(p.unacked_alerts)  return window.T('ov_js_running_alerts');
+  return window.T('ov_js_running');
 }
 
 // ── 跨平台运行控制 ─────────────────────────────────────────
 async function ovControl(platform, action, seconds){
-  const LABELS = {start:'启动', stop:'停止', pause:'暂停', resume:'恢复', trigger:'触发'};
+  const LABELS = {start:window.T('ov_ctrl_start'), stop:window.T('ov_ctrl_stop'), pause:window.T('ov_ctrl_pause'), resume:window.T('ov_ctrl_resume'), trigger:window.T('ov_js_trigger')};
   try{
     const body = {platform, action};
     if(action === 'pause') body.seconds = seconds || 300;
@@ -593,16 +594,16 @@ async function ovControl(platform, action, seconds){
     });
     const d = await r.json();
     if(!r.ok){
-      rpa.toast((d && d.detail) || `${LABELS[action]}失败（HTTP ${r.status}）`, 'err');
+      rpa.toast((d && d.detail) || window.Tf('ov_js_act_fail_http',{a:LABELS[action],s:r.status}), 'err');
       return;
     }
-    let msg = `${platform} 已${LABELS[action]}`;
-    if(d.auto_started) msg += '（已自动启动服务）';
+    let msg = window.Tf('ov_js_plat_done',{p:platform,a:LABELS[action]});
+    if(d.auto_started) msg += window.T('ov_js_auto_started');
     rpa.toast(msg, 'ok');
     // 立即刷新总览数据
     setTimeout(ovRefresh, 600);
   } catch(e){
-    rpa.toast(`${LABELS[action]}失败：`+e, 'err');
+    rpa.toast(window.Tf('ov_js_act_fail',{a:LABELS[action]})+e, 'err');
   }
 }
 
@@ -653,7 +654,7 @@ function ovApplyCard(p){
     // P14-D: click 跳转到对应平台审批页
     const _platUrl = {'line':'/line-rpa','whatsapp':'/whatsapp-rpa','messenger':'/messenger-rpa','telegram':'/telegram-rpa'};
     if(p.pending_count>0 && _platUrl[k]){
-      pend.style.cursor='pointer'; pend.title=`${p.pending_count} 条待审，点击前往处理`;
+      pend.style.cursor='pointer'; pend.title=window.Tf('ov_js_pending_go',{n:p.pending_count});
       pend.onclick = ()=>{ window.location.href = _platUrl[k]; };
     } else { pend.style.cursor=''; pend.title=''; pend.onclick=null; }
   }
@@ -681,9 +682,9 @@ function ovApplyCard(p){
     const fl = p.force_reply_lang||'';
     if(fl){
       const flag = _OV_LANG_FLAGS[fl]||'🌐';
-      const lockTs = p.last_lang_lock_ts ? ` <span style="font-size:.65rem;color:var(--t3);margin-left:.25rem" title="最近锁定时间">${rpa.ago(p.last_lang_lock_ts)}</span>` : '';
+      const lockTs = p.last_lang_lock_ts ? ` <span style="font-size:.65rem;color:var(--t3);margin-left:.25rem" title="${window.T('ov_js_last_lock_time')}">${rpa.ago(p.last_lang_lock_ts)}</span>` : '';
       langSlot.style.display = '';
-      langSlot.innerHTML = `<span style="font-size:.7rem;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.4);border-radius:5px;padding:.1rem .38rem;color:#818cf8" title="全局语言锁定">🔒 ${flag} ${rpa.esc(fl)}</span>${lockTs}`;
+      langSlot.innerHTML = `<span style="font-size:.7rem;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.4);border-radius:5px;padding:.1rem .38rem;color:#818cf8" title="${window.T('ov_js_global_lang_lock')}">🔒 ${flag} ${rpa.esc(fl)}</span>${lockTs}`;
     } else {
       langSlot.style.display = 'none';
       langSlot.innerHTML = '';
@@ -691,7 +692,7 @@ function ovApplyCard(p){
   }
   const last = document.getElementById('ov-'+k+'-last');
   if(last){
-    last.textContent = p.last_run_ts ? ('最近一次 '+rpa.ago(p.last_run_ts)) : '尚无活动';
+    last.textContent = p.last_run_ts ? (window.T('ov_js_last_once')+rpa.ago(p.last_run_ts)) : window.T('ov_js_no_activity');
   }
 }
 
@@ -707,9 +708,9 @@ function ovRenderPending(items){
   const badge = document.getElementById('ov-pending-count');
   const n = (items && items.length) || 0;
   // Q3: 浏览器 title 跨平台总待审
-  if(window.rpa && window.rpa.notify) window.rpa.notify.setBadge(n, '跨平台待审');
+  if(window.rpa && window.rpa.notify) window.rpa.notify.setBadge(n, window.T('ov_tab_pending'));
   if(n === 0){
-    box.innerHTML = '<div class="rpa-empty">当前所有平台均无待审条目 ✅</div>';
+    box.innerHTML = '<div class="rpa-empty">'+window.T('ov_js_no_pending_all')+'</div>';
     badge.style.display = 'none';
     return;
   }
@@ -735,7 +736,7 @@ function ovRenderAlerts(items){
   const box = document.getElementById('ov-alerts-list');
   const badge = document.getElementById('ov-alerts-count');
   if(!items || items.length===0){
-    box.innerHTML = '<div class="rpa-empty">当前没有未确认告警 ✅</div>';
+    box.innerHTML = '<div class="rpa-empty">'+window.T('ov_js_no_alerts_all')+'</div>';
     badge.style.display = 'none';
     return;
   }
@@ -767,14 +768,14 @@ async function ovLangLoad(force){
   const body = document.getElementById('ov-lang-body');
   const summary = document.getElementById('ov-lang-summary');
   if(!body) return;
-  body.innerHTML = '<div class="rpa-empty">加载中…</div>';
+  body.innerHTML = '<div class="rpa-empty">'+window.T('rpa_loading')+'</div>';
   try{
     // P9-C: fetch dist + trend in parallel
     const [d, tr] = await Promise.all([
       rpa.get('/api/rpa-overview/lang-dist'),
       rpa.get('/api/rpa-overview/lang-trend').catch(() => null),
     ]);
-    if(!d.ok){ body.innerHTML=`<div class="rpa-empty">加载失败</div>`; return; }
+    if(!d.ok){ body.innerHTML=`<div class="rpa-empty">${window.T('ov_js_load_fail')}</div>`; return; }
     _ovLangLoaded = true;
     // P12-C: 同步已知版本，避免 5s 轮询刚载入就误判为"版本变化"
     try { const vr2 = await rpa.get('/api/rpa-overview/lang-dist-version'); if(vr2.ok) _ovLangVersion = vr2.v; } catch(e){}
@@ -782,8 +783,8 @@ async function ovLangLoad(force){
     const total = d.total_chats || 0;
     const platforms = d.platforms || {};
     if(summary) summary.textContent =
-      `共 ${total} 个对话有语言记录 · 平台: ${Object.keys(platforms).join(' + ')||'—'}`;
-    if(!total){ body.innerHTML='<div class="rpa-empty">暂无语言数据</div>'; return; }
+      window.Tf('ov_js_lang_total',{n:total,p:(Object.keys(platforms).join(' + ')||'—')});
+    if(!total){ body.innerHTML='<div class="rpa-empty">'+window.T('ov_js_no_lang_data')+'</div>'; return; }
     const max = Math.max(...Object.values(merged), 1);
     // Per-platform mini tables
     let plHtml = '';
@@ -806,7 +807,7 @@ async function ovLangLoad(force){
       plHtml += '</div>';
     }
     // Merged bar chart
-    let mergedHtml = '<div style="font-size:.78rem;font-weight:600;color:var(--t2);margin:.7rem 0 .3rem">🌍 合并（全平台）</div>';
+    let mergedHtml = '<div style="font-size:.78rem;font-weight:600;color:var(--t2);margin:.7rem 0 .3rem">'+window.T('ov_js_merged_all')+'</div>';
     for(const [lang, cnt] of Object.entries(merged)){
       const flag = _OV_LANG_FLAGS[lang]||'🌐';
       const pct = Math.round(cnt/total*100);
@@ -845,12 +846,12 @@ async function ovLangLoad(force){
         return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H+12}" style="display:block">${bars}${labels}</svg>`;
       }
       sparkHtml = `<div style="margin-top:1rem;border-top:1px solid var(--bd);padding-top:.8rem">
-        <div style="font-size:.78rem;font-weight:600;color:var(--t2);margin-bottom:.55rem">📈 7 天对话趋势</div>
+        <div style="font-size:.78rem;font-weight:600;color:var(--t2);margin-bottom:.55rem">${window.T('ov_js_trend_7d')}</div>
         <div style="display:flex;gap:1.5rem;flex-wrap:wrap">`;
       for(const [pl, vals] of Object.entries(byPl)){
         const total7=vals.reduce((a,b)=>a+b,0);
         sparkHtml+=`<div style="min-width:180px">
-          <div style="font-size:.72rem;color:var(--t2);margin-bottom:.25rem">${_plLabel[pl]||pl} <span style="color:var(--t3);font-weight:400">7天 ${total7} 对话</span></div>
+          <div style="font-size:.72rem;color:var(--t2);margin-bottom:.25rem">${_plLabel[pl]||pl} <span style="color:var(--t3);font-weight:400">${window.Tf('ov_js_days_convos',{n:total7})}</span></div>
           ${_spark(vals, _plColors[pl]||'#6366f1')}
         </div>`;
       }
@@ -865,15 +866,15 @@ async function ovLangLoad(force){
       const parts = Object.entries(locked).filter(([,v])=>v>0)
         .map(([pl,v])=>`<span style="font-size:.75rem;background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.3);border-radius:5px;padding:.1rem .38rem;color:#a5b4fc">🔒 ${_plIcons[pl]||pl} ${v}</span>`).join(' ');
       lockedHtml = `<div style="margin-top:.7rem;padding-top:.6rem;border-top:1px solid var(--bd);display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
-        <span style="font-size:.74rem;color:var(--t3)">对话锁定</span>${parts}
-        <span style="font-size:.72rem;color:var(--t3);margin-left:auto">共 ${totalLocked} 条</span>
+        <span style="font-size:.74rem;color:var(--t3)">${window.T('ov_js_chat_locked')}</span>${parts}
+        <span style="font-size:.72rem;color:var(--t3);margin-left:auto">${window.Tf('ov_js_locked_count',{n:totalLocked})}</span>
       </div>`;
     }
     body.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.2rem;align-items:start">
       <div>${plHtml}</div>
       <div>${mergedHtml}</div>
     </div>${sparkHtml}${lockedHtml}`;
-  }catch(e){ body.innerHTML=`<div class="rpa-empty">错误: ${e}</div>`; }
+  }catch(e){ body.innerHTML=`<div class="rpa-empty">${window.Tf('ov_js_error',{e:e})}</div>`; }
 }
 
 // P12-C: 5s 版本轮询取代 30s 盲刷新 — 版本号不变则不触发重绘
@@ -941,10 +942,10 @@ async function ovRefresh(){
     ovRefreshPreflight();  // N：真号扫码陪聊上线前自检红绿灯（独立拉取）
     ovRefreshDesktopHealth();  // D1c：桌面壳内嵌注入健康（独立拉取）
     ovRefreshDesktopOutbound();  // D4b：受控桌面出站队列（独立拉取）
-    document.getElementById('ov-last').textContent = new Date().toLocaleTimeString('zh-CN',{hour12:false});
+    document.getElementById('ov-last').textContent = window.wsFmtTime(null,{hour12:false});
   }catch(e){
     console.warn('overview refresh failed', e);
-    rpa.toast('刷新失败：'+e, 'err');
+    rpa.toast(window.T('ov_js_refresh_fail')+e, 'err');
   }
 }
 
@@ -954,7 +955,7 @@ async function ovRefreshFleet(){
     const d = await rpa.get('/api/accounts/fleet-health');
     if(!d || !d.ok) return;
     const fl = d.fleet || {}; const lc = d.lifecycle || {};
-    const lightMap = {green:'🟢 健康', amber:'🟡 注意', red:'🔴 风险', unknown:'— 无号'};
+    const lightMap = {green:window.T('ov_js_fleet_green'), amber:window.T('ov_js_fleet_amber'), red:window.T('ov_js_fleet_red'), unknown:window.T('ov_js_fleet_unknown')};
     const el = document.getElementById('ov-fleet-light');
     if(el){
       el.textContent = lightMap[fl.fleet_light] || '—';
@@ -964,6 +965,22 @@ async function ovRefreshFleet(){
     setN('ov-fleet-active', lc.active);
     setN('ov-fleet-warming', lc.warming);
     setN('ov-fleet-risk', (lc.restricted||0)+(lc.banned||0));
+    // P3：身份采集计数（仅当开启且本次运行有采集才显示，避免功能关时占位）
+    const sp = d.self_profile || null;
+    const spCell = document.getElementById('ov-fleet-selfprof-cell');
+    if(spCell){
+      if(sp && (sp.calls||0)>0){
+        const n = document.getElementById('ov-fleet-selfprof');
+        if(n){
+          n.textContent = String((sp.written||0)+(sp.skipped||0));
+          n.className = 'rpa-kpi-n ' + ((sp.errors||0)>0 ? 'red' : 'green');
+        }
+        spCell.title = window.Tf('ov_js_selfprof_detail',{w:sp.written||0,s:sp.skipped||0,d:sp.avatar_downloaded||0,r:sp.avatar_reused||0,e:sp.errors||0});
+        spCell.style.display = '';
+      } else {
+        spCell.style.display = 'none';
+      }
+    }
   }catch(e){ /* 看板非关键路径，静默 */ }
 }
 
@@ -974,8 +991,8 @@ async function ovRefreshPreflight(){
     if(!d || !d.ok) return;
     const el = document.getElementById('ov-preflight-light');
     if(el){
-      const map = {green:'🟢 就绪', yellow:'🟡 可上线', red:'🔴 阻断'};
-      el.textContent = d.applicable ? (map[d.light]||'—') : '未启用';
+      const map = {green:window.T('ov_js_pf_green'), yellow:window.T('ov_js_pf_yellow'), red:window.T('ov_js_pf_red')};
+      el.textContent = d.applicable ? (map[d.light]||'—') : window.T('ov_js_not_enabled');
       el.className = 'rpa-kpi-n ' + (d.light==='green'?'green':d.light==='yellow'?'amber':d.light==='red'?'red':'');
     }
     const det = document.getElementById('ov-preflight-detail');
@@ -997,56 +1014,56 @@ function _ovPpEsc(s){
 async function ovRefreshProactivePreview(){
   var body = document.getElementById('ov-pp-body');
   var st = document.getElementById('ov-pp-status');
-  if(body){ body.textContent = '加载中…'; }
+  if(body){ body.textContent = window.T('rpa_loading'); }
   try{
     var d = await rpa.get('/api/companion/proactive/preview?limit=50');
-    if(!d || !d.ok){ if(body){ body.textContent = '预览不可用'; } return; }
-    if(d.available===false){ if(st){ st.textContent=''; } if(body){ body.textContent = d.message||'未就绪'; } return; }
+    if(!d || !d.ok){ if(body){ body.textContent = window.T('ov_js_preview_unavail'); } return; }
+    if(d.available===false){ if(st){ st.textContent=''; } if(body){ body.textContent = d.message||window.T('ov_js_not_ready'); } return; }
     if(st){
-      var line = (d.enabled?'已启用':'未启用·仅预览') + (d.dry_run?' · dry_run':'')
-        + ' · 扫描'+(d.scanned||0) + ' · 候选'+(d.candidates||0)
-        + ' · 沉默≥'+(d.min_silent_hours||0)+'h'
-        + (d.care_dedup_active?' · 关怀去重on':'');
+      var line = (d.enabled?window.T('ov_js_enabled'):window.T('ov_js_preview_only')) + (d.dry_run?' · dry_run':'')
+        + window.T('ov_js_scanned')+(d.scanned||0) + window.T('ov_js_candidates')+(d.candidates||0)
+        + window.T('ov_js_silent')+(d.min_silent_hours||0)+'h'
+        + (d.care_dedup_active?window.T('ov_js_care_dedup_on'):'');
       try{
         var sm = await rpa.get('/api/companion/proactive/samples?limit=1');
         if(sm && sm.available && sm.stats && sm.stats.rated>0){
-          line += ' · 采样'+sm.stats.total+'·好评率'+Math.round((sm.stats.up_rate||0)*100)+'%';
+          line += window.T('ov_js_sampling')+sm.stats.total+'·'+window.T('ov_js_uprate_word')+''+Math.round((sm.stats.up_rate||0)*100)+'%';
         }
       }catch(e){ /* 统计非关键 */ }
       st.textContent = line;
     }
     var plans = d.plans || [];
-    if(!plans.length){ if(body){ body.innerHTML = '<span style="color:var(--muted)">本轮无候选（无人满足沉默/冷却/安静时段条件）。</span>'; } return; }
+    if(!plans.length){ if(body){ body.innerHTML = '<span style="color:var(--muted)">'+window.T('ov_js_no_candidates')+'</span>'; } return; }
     var rows = plans.map(function(p){
       var send = p.would_send_this_tick ? '🟢' : '⏸';
       var facts = (p.context_facts||[]).join('、');
       var cid = p.conversation_id||'';
       return '<tr style="border-top:1px solid var(--bd)">'
-        + '<td title="'+(p.would_send_this_tick?'本轮会发':'超出每轮上限，顺延')+'">'+send+'</td>'
+        + '<td title="'+(p.would_send_this_tick?window.T('ov_js_will_send'):window.T('ov_js_over_cap'))+'">'+send+'</td>'
         + '<td>'+_ovPpEsc(p.account_id||'')+'</td>'
         + '<td>'+_ovPpEsc(p.chat_key||cid)+'</td>'
         + '<td>'+(p.silent_hours||0)+'h</td>'
         + '<td>'+_ovPpEsc(p.mode||'')+'</td>'
-        + '<td>'+_ovPpEsc(p.fact||'(温和问候)')
-          +(facts?' <span style="color:var(--muted)">（背景：'+_ovPpEsc(facts)+'）</span>':'')+'</td>'
+        + '<td>'+_ovPpEsc(p.fact||window.T('ov_js_gentle_greeting'))
+          +(facts?' <span style="color:var(--muted)">'+window.T('ov_js_bg_prefix')+_ovPpEsc(facts)+window.T('ov_js_bg_suffix')+'</span>':'')+'</td>'
         + '<td><button class="ov-pp-sample" data-cid="'+_ovPpEsc(cid)+'" '
           + 'style="font-size:.7rem;padding:.12rem .5rem;border:1px solid var(--bd);border-radius:5px;background:transparent;color:inherit;cursor:pointer" '
-          + 'title="生成 AI 实际会发的那句话，但不发送（有 token 成本）">试发</button></td>'
+          + 'title="'+window.T('ov_js_sample_title')+'">'+window.T('ov_js_sample_btn')+'</button></td>'
         + '</tr>';
     }).join('');
     body.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:.73rem">'
-      + '<thead><tr style="text-align:left;color:var(--muted)"><th>本轮</th><th>账号</th><th>对端</th><th>沉默</th><th>模式</th><th>话题/背景记忆</th><th></th></tr></thead>'
+      + '<thead><tr style="text-align:left;color:var(--muted)"><th>'+window.T('ov_js_th_round')+'</th><th>'+window.T('ov_js_th_account')+'</th><th>'+window.T('ov_js_th_peer')+'</th><th>'+window.T('ov_js_th_silent')+'</th><th>'+window.T('ov_js_th_mode')+'</th><th>'+window.T('ov_js_th_topic')+'</th><th></th></tr></thead>'
       + '<tbody>'+rows+'</tbody></table>';
     Array.prototype.forEach.call(document.querySelectorAll('#ov-pp-body .ov-pp-sample'), function(b){
       b.addEventListener('click', function(){ ovProactiveSample(b.getAttribute('data-cid'), b); });
     });
-  }catch(e){ if(body){ body.textContent = '预览请求失败'; } }
+  }catch(e){ if(body){ body.textContent = window.T('ov_js_preview_req_fail'); } }
 }
 
 // 试发采样：对某会话生成 AI 实际会发的那句话（不发送），展示在结果区。
 async function ovProactiveSample(cid, btn){
   var out = document.getElementById('ov-pp-sample-out');
-  if(btn){ btn.disabled = true; btn.textContent = '生成中…'; }
+  if(btn){ btn.disabled = true; btn.textContent = window.T('ov_js_generating'); }
   try{
     var res = await fetch('/api/companion/proactive/sample', {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -1058,24 +1075,24 @@ async function ovProactiveSample(cid, btn){
         var sid = d.sample_id;
         var rateBar = (sid!=null)
           ? '<div id="ov-pp-rate" data-sid="'+sid+'" style="margin-top:.45rem;display:flex;gap:.4rem;align-items:center">'
-            + '<button class="ov-pp-up" style="font-size:.72rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:5px;background:transparent;color:inherit;cursor:pointer">👍 好</button>'
-            + '<button class="ov-pp-down" style="font-size:.72rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:5px;background:transparent;color:inherit;cursor:pointer">👎 改</button>'
+            + '<button class="ov-pp-up" style="font-size:.72rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:5px;background:transparent;color:inherit;cursor:pointer">'+window.T('ov_js_rate_good')+'</button>'
+            + '<button class="ov-pp-down" style="font-size:.72rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:5px;background:transparent;color:inherit;cursor:pointer">'+window.T('ov_js_rate_fix')+'</button>'
             + '<span id="ov-pp-rate-msg" style="color:var(--muted);font-size:.72rem"></span></div>'
             + '<div id="ov-pp-edit-wrap" style="display:none;margin-top:.35rem">'
             + '<textarea id="ov-pp-edit" rows="2" style="width:100%;font-size:.78rem;box-sizing:border-box;border:1px solid var(--bd);border-radius:6px;background:var(--card);color:inherit;padding:.35rem"></textarea>'
-            + '<button id="ov-pp-edit-save" style="margin-top:.25rem;font-size:.72rem;padding:.12rem .6rem;border:1px solid var(--bd);border-radius:5px;background:transparent;color:inherit;cursor:pointer">保存改写（记差评）</button></div>'
+            + '<button id="ov-pp-edit-save" style="margin-top:.25rem;font-size:.72rem;padding:.12rem .6rem;border:1px solid var(--bd);border-radius:5px;background:transparent;color:inherit;cursor:pointer">'+window.T('ov_js_save_rewrite')+'</button></div>'
           : '';
         out.innerHTML = '<div style="background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:.5rem .8rem">'
-          + '<div style="color:var(--muted);font-size:.7rem">📝 试发文案（未发送）· '+_ovPpEsc(cid)+'</div>'
+          + '<div style="color:var(--muted);font-size:.7rem">'+window.T('ov_js_sample_text_label')+''+_ovPpEsc(cid)+'</div>'
           + '<div style="margin-top:.25rem;font-size:.84rem;line-height:1.5">'+_ovPpEsc(d.text||'')+'</div>'
           + rateBar + '</div>';
         if(sid!=null){ _ovPpBindRate(sid, d.text||''); }
       }else{
-        out.innerHTML = '<div style="color:var(--muted);font-size:.74rem">未生成：'+_ovPpEsc((d&&d.message)||'不可用')+'</div>';
+        out.innerHTML = '<div style="color:var(--muted);font-size:.74rem">'+window.T('ov_js_not_generated')+''+_ovPpEsc((d&&d.message)||window.T('ov_js_unavailable'))+'</div>';
       }
     }
-  }catch(e){ if(out){ out.textContent = '试发请求失败'; } }
-  if(btn){ btn.disabled = false; btn.textContent = '试发'; }
+  }catch(e){ if(out){ out.textContent = window.T('ov_js_sample_req_fail'); } }
+  if(btn){ btn.disabled = false; btn.textContent = window.T('ov_js_sample_btn'); }
 }
 
 // 绑定 👍/👎 评分回流（差评可附改写文案）。
@@ -1103,33 +1120,33 @@ async function ovProactiveRate(sid, rating, editedText){
       body: JSON.stringify({rating: rating, edited_text: editedText||''})
     });
     var d = await res.json();
-    if(msg){ msg.textContent = (d && d.ok) ? ('已记录 '+(rating==='up'?'👍':'👎')) : ('记录失败：'+((d&&d.message)||'')); }
-  }catch(e){ if(msg){ msg.textContent = '评分请求失败'; } }
+    if(msg){ msg.textContent = (d && d.ok) ? (window.T('ov_js_recorded')+(rating==='up'?'👍':'👎')) : (window.T('ov_js_record_fail')+((d&&d.message)||'')); }
+  }catch(e){ if(msg){ msg.textContent = window.T('ov_js_rate_req_fail'); } }
 }
 
 // 调参建议（只读）：按采样评分给整体判定 + 低分 mode 针对性建议 + 差评改写 few-shot。
-var _OV_PP_VERDICT = {good:'🟢 良好', watch:'🟡 可提升', low:'🔴 偏低', insufficient:'⚪ 样本不足'};
+var _OV_PP_VERDICT = {good:window.T('ov_js_verdict_good'), watch:window.T('ov_js_verdict_watch'), low:window.T('ov_js_verdict_low'), insufficient:window.T('ov_js_verdict_insufficient')};
 async function ovProactiveAdvice(){
   var out = document.getElementById('ov-pp-sample-out');
-  if(out){ out.textContent = '分析中…'; }
+  if(out){ out.textContent = window.T('ov_js_analyzing'); }
   try{
     var d = await rpa.get('/api/companion/proactive/tuning-advice');
-    if(!d || !d.ok || d.available===false){ if(out){ out.textContent = '调参建议不可用（采样存储未就绪）'; } return; }
+    if(!d || !d.ok || d.available===false){ if(out){ out.textContent = window.T('ov_js_advice_unavail'); } return; }
     var a = d.advice || {};
     var ov = a.overall || {};
     var html = '<div style="background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:.55rem .8rem">';
-    html += '<div style="font-weight:600;font-size:.78rem">调参建议 '
-      + (_OV_PP_VERDICT[ov.verdict]||'') + ' <span style="color:var(--muted);font-weight:400">已评 '+(ov.rated||0)
-      + (ov.up_rate!=null?(' · 好评率'+Math.round(ov.up_rate*100)+'%'):'')+'</span></div>';
+    html += '<div style="font-weight:600;font-size:.78rem">'+window.T('ov_pp_advice')+' '
+      + (_OV_PP_VERDICT[ov.verdict]||'') + ' <span style="color:var(--muted);font-weight:400">'+window.T('ov_js_rated_n')+(ov.rated||0)
+      + (ov.up_rate!=null?(' · '+window.T('ov_js_uprate_word')+''+Math.round(ov.up_rate*100)+'%'):'')+'</span></div>';
     (a.suggestions||[]).forEach(function(s){
       html += '<div style="margin-top:.2rem;font-size:.75rem">• '+_ovPpEsc(s)+'</div>';
     });
     var bm = (a.by_mode||[]).filter(function(m){ return (m.suggestions||[]).length; });
     if(bm.length){
-      html += '<div style="margin-top:.4rem;font-size:.74rem;color:var(--muted)">低分 mode 针对性建议：</div>';
+      html += '<div style="margin-top:.4rem;font-size:.74rem;color:var(--muted)">'+window.T('ov_js_low_mode_advice')+'</div>';
       bm.forEach(function(m){
         html += '<div style="margin-top:.15rem;font-size:.74rem"><strong>'+_ovPpEsc(m.mode)
-          +'</strong>（好评率'+(m.up_rate!=null?Math.round(m.up_rate*100)+'%':'—')+'）</div>';
+          +'</strong>'+window.Tf('ov_js_uprate_paren',{r:(m.up_rate!=null?Math.round(m.up_rate*100)+'%':'—')})+'</div>';
         (m.suggestions||[]).forEach(function(s){
           html += '<div style="font-size:.73rem;margin-left:.6rem">– '+_ovPpEsc(s)+'</div>';
         });
@@ -1137,24 +1154,24 @@ async function ovProactiveAdvice(){
     }
     var imp = (a.few_shot && a.few_shot.improved) || [];
     if(imp.length){
-      html += '<div style="margin-top:.4rem;font-size:.74rem;color:var(--muted)">差评改写（可作 few-shot 正样本）：</div>';
+      html += '<div style="margin-top:.4rem;font-size:.74rem;color:var(--muted)">'+window.T('ov_js_rewrite_fewshot')+'</div>';
       imp.forEach(function(e){
-        html += '<div style="margin-top:.15rem;font-size:.73rem"><span style="color:var(--muted)">原：</span>'+_ovPpEsc(e.original||'(空)')
-          +' <span style="color:var(--muted)">→ 改：</span>'+_ovPpEsc(e.better||'')+'</div>';
+        html += '<div style="margin-top:.15rem;font-size:.73rem"><span style="color:var(--muted)">'+window.T('ov_js_original')+'</span>'+_ovPpEsc(e.original||window.T('ov_js_empty'))
+          +' <span style="color:var(--muted)">'+window.T('ov_js_better')+'</span>'+_ovPpEsc(e.better||'')+'</div>';
       });
     }
     html += '</div>';
     if(out){ out.innerHTML = html; }
-  }catch(e){ if(out){ out.textContent = '调参建议请求失败'; } }
+  }catch(e){ if(out){ out.textContent = window.T('ov_js_advice_req_fail'); } }
 }
 
 // ── D1c：桌面注入健康看板 + 失配告警 ──────────────────────────────────────────
 const _DH_STATUS = {
-  ok:                {t:'注入正常',        c:'#3fb950'},
-  mismatch_composer: {t:'输入框失配',      c:'#f85149'},
-  mismatch_bubble:   {t:'气泡失配',        c:'#f85149'},
-  no_chat:           {t:'未登录/未进会话', c:'#d29922'},
-  unsupported:       {t:'无注入档案',      c:'var(--muted)'},
+  ok:                {t:window.T('ov_js_dh_ok'),        c:'#3fb950'},
+  mismatch_composer: {t:window.T('ov_js_dh_composer'),      c:'#f85149'},
+  mismatch_bubble:   {t:window.T('ov_js_dh_bubble'),        c:'#f85149'},
+  no_chat:           {t:window.T('ov_js_dh_nochat'), c:'#d29922'},
+  unsupported:       {t:window.T('ov_js_dh_unsupported'),      c:'var(--muted)'},
 };
 function _dhEsc(s){ return (window.rpa&&rpa.esc)?rpa.esc(s):String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function _dhDur(sec){ sec=Math.floor(sec||0); if(sec<60) return sec+'s'; const m=Math.floor(sec/60); if(m<60) return m+'m'; return Math.floor(m/60)+'h'+(m%60)+'m'; }
@@ -1170,45 +1187,45 @@ async function ovRefreshDesktopHealth(){
     const mismatch = s.mismatch||0;
     const persist = s.persistent_mismatch||0;  // #4：失配持续超阈值的账号数
     if(sum){
-      sum.innerHTML = '共 '+(s.total||0)+' 账号 · 正常 '+(s.ok||0)
-        + (mismatch ? ' · <strong style="color:#f85149">失配 '+mismatch+'</strong>' : '')
-        + (persist ? ' · <strong style="color:#f85149" title="失配已持续超过阈值（疑似官方改版而非抖动）">持续 '+persist+'</strong>' : '');
+      sum.innerHTML = window.T('ov_js_dh_total_pre')+(s.total||0)+window.T('ov_js_dh_acc_ok')+(s.ok||0)
+        + (mismatch ? ' · <strong style="color:#f85149">'+window.T('ov_js_dh_mismatch')+mismatch+'</strong>' : '')
+        + (persist ? ' · <strong style="color:#f85149" title="'+window.T('ov_js_dh_persist_title')+'">'+window.T('ov_js_dh_persist')+persist+'</strong>' : '');
     }
     // #4 告警升级：从「即时失配 0→>0 边沿」升级为「失配持续 N 分钟」——只对**新增持续失配**弹一次，
     // 抖动型一闪而过的失配会自愈、不再打扰运营。
     if(persist>_dhLastPersist && window.rpa && rpa.toast){
-      rpa.toast('桌面注入有 '+persist+' 个账号选择器**持续**失配（疑似官方改版，可热修 selector-profiles）', 'err');
+      rpa.toast(window.Tf('ov_js_dh_persist_toast',{n:persist}), 'err');
     }
     _dhLastPersist = persist;
     if(!accs.length){
-      body.innerHTML = '<span style="color:var(--muted)">暂无桌面注入上报（桌面端未运行 / 未打开会话）。</span>';
+      body.innerHTML = '<span style="color:var(--muted)">'+window.T('ov_js_dh_no_report')+'</span>';
       return;
     }
     body.innerHTML = accs.map(function(a){
-      const st = _DH_STATUS[a.status] || {t:a.status||'未知', c:'var(--muted)'};
-      const stale = a.stale ? ' <span style="color:#d29922" title="超过 90s 未上报，注入可能已停摆">⚠停摆</span>' : '';
+      const st = _DH_STATUS[a.status] || {t:a.status||window.T('ov_js_unknown'), c:'var(--muted)'};
+      const stale = a.stale ? ' <span style="color:#d29922" title="'+window.T('ov_js_dh_stale_title')+'">'+window.T('ov_js_dh_stalled')+'</span>' : '';
       const sel = a.selectors||{};
       const bad = ['composer','bubble','sendBtn','peerTitle'].filter(function(k){ return sel[k]===false; });
       const selNote = (String(a.status||'').indexOf('mismatch')===0 && bad.length)
-        ? ' <span style="color:var(--muted);font-size:.68rem">缺:'+bad.join('/')+'</span>' : '';
+        ? ' <span style="color:var(--muted);font-size:.68rem">'+window.T('ov_js_dh_missing')+bad.join('/')+'</span>' : '';
       // #4：失配持续时长（≥1 分钟标红，提示是「持续」而非「抖动」）
       const ms = a.mismatch_secs||0;
-      const durNote = (ms>0) ? ' <span style="font-size:.68rem;color:'+(ms>=60?'#f85149':'var(--muted)')+'" title="失配已持续时长">持续 '+_dhDur(ms)+'</span>' : '';
-      const gen = a.generic ? ' <span style="color:var(--muted);font-size:.68rem">通用档</span>' : '';
-      const ing = a.can_ingest ? '' : ' <span style="color:var(--muted);font-size:.68rem" title="同步回流未开（选择器校准后可经覆写层打开 canIngest）">回流关</span>';
+      const durNote = (ms>0) ? ' <span style="font-size:.68rem;color:'+(ms>=60?'#f85149':'var(--muted)')+'" title="'+window.T('ov_js_dh_dur_title')+'">'+window.T('ov_js_dh_persist')+_dhDur(ms)+'</span>' : '';
+      const gen = a.generic ? ' <span style="color:var(--muted);font-size:.68rem">'+window.T('ov_js_dh_generic')+'</span>' : '';
+      const ing = a.can_ingest ? '' : ' <span style="color:var(--muted);font-size:.68rem" title="'+window.T('ov_js_dh_ingest_title')+'">'+window.T('ov_js_dh_ingest_off')+'</span>';
       return '<div style="display:flex;justify-content:space-between;gap:.5rem;padding:.2rem 0;border-bottom:1px solid var(--bd)">'
         + '<span>'+_dhEsc(a.platform)+' · '+_dhEsc(a.account_id||'—')+gen+ing+'</span>'
         + '<span style="color:'+st.c+'">'+st.t+selNote+durNote+stale+'</span></div>';
     }).join('');
-  }catch(e){ body.textContent = '桌面注入健康请求失败'; }
+  }catch(e){ body.textContent = window.T('ov_js_dh_req_fail'); }
 }
 
 // ── D4b：受控桌面出站队列看板 ────────────────────────────────────────────────
 const _DOB_STATUS = {
-  pending: {t:'待发',  c:'#d29922'},
-  claimed: {t:'认领中', c:'#58a6ff'},
-  sent:    {t:'已发',  c:'#3fb950'},
-  failed:  {t:'失败',  c:'#f85149'},
+  pending: {t:window.T('ov_js_dob_pending'),  c:'#d29922'},
+  claimed: {t:window.T('ov_js_dob_claimed'), c:'#58a6ff'},
+  sent:    {t:window.T('ov_js_dob_sent'),  c:'#3fb950'},
+  failed:  {t:window.T('ov_js_failed'),  c:'#f85149'},
 };
 let _dobLastFailed = 0;
 async function ovRefreshDesktopOutbound(){
@@ -1222,26 +1239,26 @@ async function ovRefreshDesktopOutbound(){
     const inflight = (s.pending||0)+(s.claimed||0);
     const failed = s.failed||0;
     if(sum){
-      sum.innerHTML = '在途 '+inflight+' · 已发 '+(s.sent||0)
-        + (failed ? ' · <strong style="color:#f85149">失败 '+failed+'</strong>' : '');
+      sum.innerHTML = window.T('ov_js_dob_inflight')+inflight+window.T('ov_js_dob_sent_pre')+(s.sent||0)
+        + (failed ? ' · <strong style="color:#f85149">'+window.T('ov_js_failed_n')+failed+'</strong>' : '');
     }
     // 失败告警：新出现失败时弹一次（去重，避免刷屏）
     if(failed>_dobLastFailed && window.rpa && rpa.toast){
-      rpa.toast('桌面出站队列新增 '+(failed-_dobLastFailed)+' 条失败（DOM 发送失败/被闸门拦截）', 'err');
+      rpa.toast(window.Tf('ov_js_dob_fail_toast',{n:(failed-_dobLastFailed)}), 'err');
     }
     _dobLastFailed = failed;
     if(!recent.length){
-      body.innerHTML = '<span style="color:var(--muted)">暂无出站命令（未开 desktop_bridge / 无 desktop 账号全自动回复）。</span>';
+      body.innerHTML = '<span style="color:var(--muted)">'+window.T('ov_js_dob_no_cmd')+'</span>';
       return;
     }
     body.innerHTML = recent.map(function(it){
-      const st = _DOB_STATUS[it.status] || {t:it.status||'未知', c:'var(--muted)'};
+      const st = _DOB_STATUS[it.status] || {t:it.status||window.T('ov_js_unknown'), c:'var(--muted)'};
       const att = (it.attempts>1) ? ' <span style="color:var(--muted);font-size:.68rem">×'+it.attempts+'</span>' : '';
       return '<div style="display:flex;justify-content:space-between;gap:.5rem;padding:.2rem 0;border-bottom:1px solid var(--bd)">'
         + '<span>'+_dhEsc(it.platform)+' · '+_dhEsc(it.account_id||'—')+' <span style="color:var(--muted);font-size:.68rem">'+_dhEsc(it.preview||'')+'</span></span>'
         + '<span style="color:'+st.c+'">'+st.t+att+'</span></div>';
     }).join('');
-  }catch(e){ body.textContent = '桌面出站队列请求失败'; }
+  }catch(e){ body.textContent = window.T('ov_js_dob_req_fail'); }
 }
 
 let _ovTimer = null;
@@ -1254,7 +1271,7 @@ function ovScheduleRefresh(){
 // 陪伴能力就绪度看板（只读）：分阶段开启「看→校→开」的"看"。
 function _ovCapEsc(s){ return (window.rpa&&rpa.esc)?rpa.esc(s):String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
 function _ovCapBadge(stage){
-  var m={active:['#16a34a','运行'],dry_run:['#d97706','灰度'],blocked:['#dc2626','受阻'],off:['#9ca3af','关']};
+  var m={active:['#16a34a',window.T('ov_js_stage_active')],dry_run:['#d97706',window.T('ov_js_dry')],blocked:['#dc2626',window.T('ov_js_stage_blocked')],off:['#9ca3af',window.T('ov_js_stage_off')]};
   var x=m[stage]||m.off;
   return '<span style="display:inline-block;padding:.03rem .4rem;border-radius:5px;background:'+x[0]+';color:#fff;font-size:.66rem">'+x[1]+'</span>';
 }
@@ -1263,10 +1280,10 @@ async function ovCapDeliveryCalibration(){
   try{
     var d=await rpa.get('/api/companion/capabilities/delivery-calibration');
     if(!d||!d.ok){ el.textContent=''; return; }
-    var v={effective:'🟢真发生效',misconfigured:'🔴开了但发不出',inactive:'⚪未真发(安全默认)'}[d.verdict]||d.verdict;
+    var v={effective:window.T('ov_js_deliver_effective'),misconfigured:window.T('ov_js_deliver_misconfig'),inactive:window.T('ov_js_deliver_inactive')}[d.verdict]||d.verdict;
     var am=d.automation_modes||{}, rec=d.recent||{}, sw=d.switches||{};
-    var line='全自动真发：'+v+' · auto_ai会话 '+(am.auto_ai||0)+' · 安全闸'+(sw.send_gate?'on':'off');
-    if(rec.autosend!=null){ line+=' · 近发'+rec.autosend+'/失败'+(rec.autosend_failed||0); }
+    var line=window.T('ov_js_auto_deliver')+v+window.T('ov_js_auto_ai_sess')+(am.auto_ai||0)+window.T('ov_js_safe_gate')+(sw.send_gate?'on':'off');
+    if(rec.autosend!=null){ line+=window.T('ov_js_recent_send')+rec.autosend+window.T('ov_js_slash_fail')+(rec.autosend_failed||0); }
     if((d.warnings||[]).length){ line+='｜⚠ '+_ovCapEsc(d.warnings.join('；')); }
     el.innerHTML='<span title="'+_ovCapEsc(d.recommendation||'')+'">'+line+'</span>';
   }catch(e){ el.textContent=''; }
@@ -1284,106 +1301,106 @@ function ovCapCalibrate(url){
 }
 // 一键预设档：按风险阶梯整档切换（服务端逐项过护栏，切前自动存快照）。
 async function ovCapPreset(name, label){
-  var WARN={safe_default:'将关闭全部对客外发，仅保留安全栈（急停）。',
-            dry_run_trial:'将开启观测/翻译/worker，主动触达走 dry_run（不真发）。',
-            full_auto:'⚠ 将开启全部能力，包括「全自动真发到客户」。'};
-  if(!confirm('一键切到「'+label+'」？\n'+(WARN[name]||'')+'\n（切换前自动存快照，可回滚）')) return;
+  var WARN={safe_default:window.T('ov_js_warn_safe'),
+            dry_run_trial:window.T('ov_js_warn_dry'),
+            full_auto:window.T('ov_js_warn_full')};
+  if(!confirm(window.Tf('ov_js_preset_confirm',{label:label})+(WARN[name]||'')+window.T('ov_js_preset_confirm2'))) return;
   try{
     var r=await rpa.post('/api/companion/capabilities/preset', {name:name});
     var d=await r.json();
-    if(!d || !d.ok){ alert((d&&d.message)||'切换失败'); return; }
-    var msg='已切到「'+(d.label||name)+'」：生效 '+((d.applied||[]).length)+' 项';
-    if((d.blocked||[]).length){ msg+='\n护栏拦下 '+d.blocked.length+' 项：\n'+d.blocked.map(function(b){return '· '+b.key+'：'+b.reason;}).join('\n'); }
-    if((d.warned||[]).length){ msg+='\n注意：'+d.warned.map(function(w){return w.warn;}).join('；'); }
+    if(!d || !d.ok){ alert((d&&d.message)||window.T('ov_js_switch_fail')); return; }
+    var msg=window.Tf('ov_js_switched_to',{label:(d.label||name),n:((d.applied||[]).length)});
+    if((d.blocked||[]).length){ msg+=window.Tf('ov_js_guard_blocked',{n:d.blocked.length})+d.blocked.map(function(b){return '· '+b.key+'：'+b.reason;}).join('\n'); }
+    if((d.warned||[]).length){ msg+=window.T('ov_js_note_prefix')+d.warned.map(function(w){return w.warn;}).join('；'); }
     alert(msg);
     ovRefreshCapabilities();
-  }catch(e){ alert('请求失败'); }
+  }catch(e){ alert(window.T('ov_js_req_fail')); }
 }
 async function ovCapRollback(){
-  if(!confirm('回滚到上一次一键切换前的状态？')) return;
+  if(!confirm(window.T('ov_js_rollback_confirm'))) return;
   try{
     var r=await rpa.post('/api/companion/capabilities/rollback', {});
     var d=await r.json();
-    if(!d || !d.ok){ alert((d&&d.message)||'回滚失败'); return; }
-    alert('已回滚（还原 '+((d.applied||[]).length)+' 项'+((d.blocked||[]).length?('，'+d.blocked.length+' 项被护栏拦下'):'')+'）');
+    if(!d || !d.ok){ alert((d&&d.message)||window.T('ov_js_rollback_fail')); return; }
+    alert(window.Tf('ov_js_rolled_back',{n:((d.applied||[]).length)})+((d.blocked||[]).length?window.Tf('ov_js_rb_blocked',{n:d.blocked.length}):'')+'）');
     ovRefreshCapabilities();
-  }catch(e){ alert('请求失败'); }
+  }catch(e){ alert(window.T('ov_js_req_fail')); }
 }
 async function ovCapAudit(){
   var el=document.getElementById('ov-cap-audit'); if(!el) return;
   if(el.style.display!=='none'){ el.style.display='none'; return; }
-  el.style.display=''; el.textContent='加载中…';
+  el.style.display=''; el.textContent=window.T('rpa_loading');
   try{
     var d=await rpa.get('/api/companion/capabilities/toggle-audit?limit=20');
-    if(!d || !d.ok || !(d.entries||[]).length){ el.textContent='暂无变更记录'; return; }
-    el.innerHTML='<div style="font-weight:600;margin-bottom:.2rem">最近变更</div>'+d.entries.map(function(e){
-      var t=new Date((e.ts||0)*1000).toLocaleString();
+    if(!d || !d.ok || !(d.entries||[]).length){ el.textContent=window.T('ov_js_no_changes'); return; }
+    el.innerHTML='<div style="font-weight:600;margin-bottom:.2rem">'+window.T('ov_cap_audit')+'</div>'+d.entries.map(function(e){
+      var t=window.wsFmtDateTime(e.ts||0);
       return '<div>'+_ovCapEsc(t)+' · '+_ovCapEsc(e.actor||'')+' · '+_ovCapEsc(e.key||'')+'.'+_ovCapEsc(e.field||'')+'='+(e.value?'on':'off')
         +(e.reason?(' <span style="opacity:.7">['+_ovCapEsc(e.reason)+']</span>'):'')+'</div>';
     }).join('');
-  }catch(e){ el.textContent='加载失败'; }
+  }catch(e){ el.textContent=window.T('ov_js_load_fail'); }
 }
 // 决策信号：真实运营指标 → 该不该往上爬一档（近 7 天）。
 async function ovCapSignals(){
   var el=document.getElementById('ov-cap-signals'); if(!el) return;
   if(el.style.display!=='none'){ el.style.display='none'; return; }
-  el.style.display=''; el.textContent='加载中…';
-  var VC={healthy:['#16a34a','可推进'],caution:['#d97706','待改进'],failing:['#dc2626','出问题'],
-          insufficient:['#9ca3af','样本不足'],idle:['#9ca3af','无活动'],unknown:['#9ca3af','未知'],
-          unavailable:['#9ca3af','不可用']};
+  el.style.display=''; el.textContent=window.T('rpa_loading');
+  var VC={healthy:['#16a34a',window.T('ov_js_vc_healthy')],caution:['#d97706',window.T('ov_js_vc_caution')],failing:['#dc2626',window.T('ov_js_vc_failing')],
+          insufficient:['#9ca3af',window.T('ov_js_vc_insufficient')],idle:['#9ca3af',window.T('ov_js_vc_idle')],unknown:['#9ca3af',window.T('ov_js_unknown')],
+          unavailable:['#9ca3af',window.T('ov_js_unavailable')]};
   function badge(v){var x=VC[v]||VC.unknown;return '<span style="display:inline-block;padding:.03rem .4rem;border-radius:5px;background:'+x[0]+';color:#fff;font-size:.66rem">'+x[1]+'</span>';}
   try{
     var d=await rpa.get('/api/companion/capabilities/signals?window_hours=168');
-    if(!d || !d.ok || !(d.signals||[]).length){ el.textContent='暂无信号'; return; }
+    if(!d || !d.ok || !(d.signals||[]).length){ el.textContent=window.T('ov_js_no_signals'); return; }
     var h=d.headline||{};
-    var head='<div style="margin-bottom:.3rem">头条：'+badge(h.verdict)+' '+_ovCapEsc(h.advice||'')+'</div>';
+    var head='<div style="margin-bottom:.3rem">'+window.T('ov_js_headline')+badge(h.verdict)+' '+_ovCapEsc(h.advice||'')+'</div>';
     var rows=d.signals.map(function(s){
       return '<div style="border-top:1px solid var(--bd);padding:.2rem 0">'+badge(s.verdict)
-        +' <strong>'+_ovCapEsc(s.label)+'</strong>（档'+s.tier+'）：'+_ovCapEsc(s.advice)+'</div>';
+        +' <strong>'+_ovCapEsc(s.label)+'</strong>'+window.Tf('ov_js_tier_paren',{t:s.tier})+''+_ovCapEsc(s.advice)+'</div>';
     }).join('');
-    el.innerHTML='<div style="font-weight:600;margin-bottom:.2rem">决策信号（近 7 天）</div>'+head+rows;
-  }catch(e){ el.textContent='加载失败'; }
+    el.innerHTML='<div style="font-weight:600;margin-bottom:.2rem">'+window.T('ov_js_signals_7d')+'</div>'+head+rows;
+  }catch(e){ el.textContent=window.T('ov_js_load_fail'); }
 }
 // 体检/建议：能力档×信号联动建议 + 一致性体检，可一键执行。
 async function ovCapApplyTarget(rec){
   var t=rec&&rec.target; if(!t||!t.key) return;
-  if(rec.action==='advance' && !confirm('转真发：「'+(rec.label||t.key)+'」将关闭灰度、开始真实发送。确定？')) return;
+  if(rec.action==='advance' && !confirm(window.Tf('ov_js_advance_confirm',{label:(rec.label||t.key)}))) return;
   try{
     var r=await rpa.post('/api/companion/capabilities/toggle', {key:t.key, field:t.field, value:t.value});
     var d=await r.json();
-    if(!d || !d.ok){ alert((d&&d.message)||'执行失败'); return; }
-    if(d.warn){ alert('已生效，但请注意：\n'+d.warn); }
+    if(!d || !d.ok){ alert((d&&d.message)||window.T('ov_js_exec_fail')); return; }
+    if(d.warn){ alert(window.T('ov_js_applied_note')+d.warn); }
     ovRefreshCapabilities(); ovCapAdvice(true);
-  }catch(e){ alert('请求失败'); }
+  }catch(e){ alert(window.T('ov_js_req_fail')); }
 }
 async function ovCapAdvice(forceOpen){
   var el=document.getElementById('ov-cap-advice'); if(!el) return;
   if(!forceOpen && el.style.display!=='none'){ el.style.display='none'; return; }
-  el.style.display=''; el.textContent='加载中…';
-  var AC={advance:['#16a34a','转真发'],downgrade:['#dc2626','降档'],enable:['#2563eb','开启'],
-          fix:['#dc2626','修复'],watch:['#d97706','留意'],hold:['#9ca3af','保持']};
+  el.style.display=''; el.textContent=window.T('rpa_loading');
+  var AC={advance:['#16a34a',window.T('ov_js_go_live')],downgrade:['#dc2626',window.T('ov_js_ac_downgrade')],enable:['#2563eb',window.T('ov_js_enable')],
+          fix:['#dc2626',window.T('ov_js_ac_fix')],watch:['#d97706',window.T('ov_js_ac_watch')],hold:['#9ca3af',window.T('ov_js_ac_hold')]};
   function ab(a){var x=AC[a]||['#9ca3af',a];return '<span style="display:inline-block;padding:.03rem .4rem;border-radius:5px;background:'+x[0]+';color:#fff;font-size:.66rem">'+x[1]+'</span>';}
   try{
     var d=await rpa.get('/api/companion/capabilities/advice?window_hours=168');
-    if(!d || !d.ok){ el.textContent=(d&&d.message)||'不可用'; return; }
+    if(!d || !d.ok){ el.textContent=(d&&d.message)||window.T('ov_js_unavailable'); return; }
     var html='', iss=d.consistency||[];
-    html+='<div style="font-weight:600;margin-bottom:.2rem">⚙ 一致性体检</div>';
-    if(!iss.length){ html+='<div style="color:#16a34a">✓ 配置自洽，无冲突</div>'; }
+    html+='<div style="font-weight:600;margin-bottom:.2rem">'+window.T('ov_js_consistency')+'</div>';
+    if(!iss.length){ html+='<div style="color:#16a34a">'+window.T('ov_js_config_ok')+'</div>'; }
     else{ html+=iss.map(function(i){var c=i.severity==='error'?'#dc2626':'#d97706';return '<div style="color:'+c+'">'+(i.severity==='error'?'■ ':'▲ ')+_ovCapEsc(i.message)+'</div>';}).join(''); }
     var recs=d.recommendations||[];
-    html+='<div style="font-weight:600;margin:.35rem 0 .2rem">建议动作（'+recs.length+'）</div>';
-    if(!recs.length){ html+='<div style="color:var(--muted)">暂无待办</div>'; }
+    html+='<div style="font-weight:600;margin:.35rem 0 .2rem">'+window.Tf('ov_js_rec_actions',{n:recs.length})+'</div>';
+    if(!recs.length){ html+='<div style="color:var(--muted)">'+window.T('ov_js_no_todo')+'</div>'; }
     else{
       html+=recs.map(function(r,idx){
-        var btn=r.target?'<button class="ov-cap-do" data-idx="'+idx+'" style="font-size:.66rem;padding:.06rem .45rem;border:1px solid var(--bd);border-radius:5px;background:transparent;color:inherit;cursor:pointer">一键执行</button>':'';
-        return '<div style="border-top:1px solid var(--bd);padding:.2rem 0">'+ab(r.action)+' <strong>'+_ovCapEsc(r.label)+'</strong>（档'+r.tier+'）：'+_ovCapEsc(r.reason)+' '+btn+'</div>';
+        var btn=r.target?'<button class="ov-cap-do" data-idx="'+idx+'" style="font-size:.66rem;padding:.06rem .45rem;border:1px solid var(--bd);border-radius:5px;background:transparent;color:inherit;cursor:pointer">'+window.T('ov_js_one_click')+'</button>':'';
+        return '<div style="border-top:1px solid var(--bd);padding:.2rem 0">'+ab(r.action)+' <strong>'+_ovCapEsc(r.label)+'</strong>'+window.Tf('ov_js_tier_paren',{t:r.tier})+''+_ovCapEsc(r.reason)+' '+btn+'</div>';
       }).join('');
     }
     el.innerHTML=html;
     Array.prototype.forEach.call(el.querySelectorAll('.ov-cap-do'),function(b){
       b.addEventListener('click',function(){ ovCapApplyTarget(recs[parseInt(b.getAttribute('data-idx'),10)]); });
     });
-  }catch(e){ el.textContent='加载失败'; }
+  }catch(e){ el.textContent=window.T('ov_js_load_fail'); }
 }
 // 分阶段开启「开」：带二次确认地开/关单个能力（护栏在服务端，这里只兜体验）。
 async function ovCapToggle(btn){
@@ -1392,44 +1409,44 @@ async function ovCapToggle(btn){
   var label=btn.getAttribute('data-label')||key;
   var crit=btn.getAttribute('data-crit')==='1', kind=btn.getAttribute('data-kind');
   if(field==='enabled' && val && crit){
-    if(!confirm('⚠ 即将开启「全自动真发到客户」主开关。\n这会让 AI 真往「全自动(auto_ai)」会话的客户自动发消息。\n请先确认：出站安全闸已开、已用校准看过命中/拦截。\n\n确定开启？')) return;
+    if(!confirm(window.T('ov_js_master_confirm'))) return;
   }
   if(field==='enabled' && !val && kind==='safeguard'){
-    if(!confirm('⚠ 即将关闭安全防护「'+label+'」，关闭后移除该护栏。\n确定关闭？')) return;
+    if(!confirm(window.Tf('ov_js_safeguard_confirm',{label:label}))) return;
   }
   btn.disabled=true;
   try{
     var r=await rpa.post('/api/companion/capabilities/toggle', {key:key, field:field, value:val});
     var d=await r.json();
-    if(!d || !d.ok){ alert((d&&d.message)||'操作失败'); btn.disabled=false; return; }
-    if(d.warn){ alert('已生效，但请注意：\n'+d.warn); }
+    if(!d || !d.ok){ alert((d&&d.message)||window.T('ov_js_op_fail')); btn.disabled=false; return; }
+    if(d.warn){ alert(window.T('ov_js_applied_note')+d.warn); }
     ovRefreshCapabilities();
-  }catch(e){ alert('请求失败'); btn.disabled=false; }
+  }catch(e){ alert(window.T('ov_js_req_fail')); btn.disabled=false; }
 }
 async function ovRefreshCapabilities(){
   var body=document.getElementById('ov-cap-body'), st=document.getElementById('ov-cap-status');
-  if(body){ body.textContent='加载中…'; }
+  if(body){ body.textContent=window.T('rpa_loading'); }
   try{
     var d=await rpa.get('/api/companion/capabilities');
-    if(!d||!d.ok||d.available===false){ if(body){ body.textContent=(d&&d.message)||'看板不可用'; } return; }
+    if(!d||!d.ok||d.available===false){ if(body){ body.textContent=(d&&d.message)||window.T('ov_js_board_unavail'); } return; }
     var s=d.summary||{};
     if(st){
-      st.textContent='真发主开关'+(s.master_delivery_on?'🟢已开':'⚪关')
-        +' · 安全栈待开'+((s.safeguards_off||[]).length)
-        +' · 灰度'+((s.dry_running||[]).length)
-        +' · 受阻'+((s.blocked||[]).length);
+      st.textContent=window.T('ov_js_master_switch')+(s.master_delivery_on?window.T('ov_js_on_green'):window.T('ov_js_off_gray'))
+        +window.T('ov_js_safeguards_off')+((s.safeguards_off||[]).length)
+        +window.T('ov_js_dry_pre')+((s.dry_running||[]).length)
+        +window.T('ov_js_blocked_pre')+((s.blocked||[]).length);
     }
     var _tb='font-size:.68rem;padding:.1rem .5rem;border:1px solid var(--bd);border-radius:5px;background:transparent;color:inherit;cursor:pointer';
     var rows=(d.capabilities||[]).map(function(c){
-      var cal=c.calibration?'<a href="#" data-cal="'+_ovCapEsc(c.calibration)+'" class="ov-cap-cal" style="color:var(--p)">去校准</a>':'';
+      var cal=c.calibration?'<a href="#" data-cal="'+_ovCapEsc(c.calibration)+'" class="ov-cap-cal" style="color:var(--p)">'+window.T('ov_js_go_calibrate')+'</a>':'';
       var en=!!c.enabled;
       var act='<button class="ov-cap-tg" data-key="'+_ovCapEsc(c.key)+'" data-field="enabled" data-val="'+(en?'0':'1')
         +'" data-crit="'+(c.critical?'1':'0')+'" data-kind="'+_ovCapEsc(c.kind)+'" data-label="'+_ovCapEsc(c.label)
-        +'" style="'+_tb+'">'+(en?'关闭':'开启')+'</button>';
+        +'" style="'+_tb+'">'+(en?window.T('ov_js_disable'):window.T('ov_js_enable'))+'</button>';
       if(c.dry_run_supported){
         act+=' <button class="ov-cap-tg" data-key="'+_ovCapEsc(c.key)+'" data-field="dry_run" data-val="'+(c.dry_run?'0':'1')
           +'" data-kind="'+_ovCapEsc(c.kind)+'" data-label="'+_ovCapEsc(c.label)
-          +'" style="'+_tb+'" title="灰度=只计划不真发">'+(c.dry_run?'转真发':'灰度')+'</button>';
+          +'" style="'+_tb+'" title="'+window.T('ov_js_dry_title')+'">'+(c.dry_run?window.T('ov_js_go_live'):window.T('ov_js_dry'))+'</button>';
       }
       return '<tr style="border-top:1px solid var(--bd)">'
         +'<td style="color:var(--muted)">'+c.tier+'</td>'
@@ -1441,7 +1458,7 @@ async function ovRefreshCapabilities(){
         +'</tr>';
     }).join('');
     body.innerHTML='<table style="width:100%;border-collapse:collapse;font-size:.72rem">'
-      +'<thead><tr style="text-align:left;color:var(--muted)"><th>档</th><th>能力</th><th>状态</th><th>风险</th><th>建议 / 校准</th><th>操作</th></tr></thead>'
+      +'<thead><tr style="text-align:left;color:var(--muted)"><th>'+window.T('ov_js_th_tier')+'</th><th>'+window.T('ov_js_th_cap')+'</th><th>'+window.T('ov_js_th_status')+'</th><th>'+window.T('ov_js_th_risk')+'</th><th>'+window.T('ov_js_th_advice_cal')+'</th><th>'+window.T('ov_js_th_action')+'</th></tr></thead>'
       +'<tbody>'+rows+'</tbody></table>'
       +'<div id="ov-cap-deliver" style="margin-top:.4rem;color:var(--muted)"></div>';
     Array.prototype.forEach.call(document.querySelectorAll('#ov-cap-body .ov-cap-cal'),function(a){
@@ -1451,7 +1468,7 @@ async function ovRefreshCapabilities(){
       b.addEventListener('click',function(){ ovCapToggle(b); });
     });
     ovCapDeliveryCalibration();   // 最关键的主开关真发校准默认拉一次
-  }catch(e){ if(body){ body.textContent='看板请求失败'; } }
+  }catch(e){ if(body){ body.textContent=window.T('ov_js_board_req_fail'); } }
 }
 
 document.addEventListener('DOMContentLoaded', function(){
@@ -1517,7 +1534,7 @@ document.addEventListener('DOMContentLoaded', function(){
     const q = (gqInp.value||'').trim();
     if(!q){ gqResults.style.display='none'; gqResults.innerHTML=''; return; }
     gqResults.style.display='';
-    gqResults.innerHTML = '<div style="padding:.6rem 1rem;color:var(--t3);font-size:.8rem">检索中…</div>';
+    gqResults.innerHTML = '<div style="padding:.6rem 1rem;color:var(--t3);font-size:.8rem">'+window.T('ov_js_searching')+'</div>';
     const url = '/api/rpa/global-search?q='+encodeURIComponent(q)
               + '&intent='+encodeURIComponent(gqIntent.value||'')
               + '&platforms='+encodeURIComponent(gqPlat.value||'')
@@ -1527,10 +1544,10 @@ document.addEventListener('DOMContentLoaded', function(){
       const bp = (d && d.by_platform) || {};
       const bpLine = Object.entries(bp).map(([k,v])=>`<span class="platform-tag ${k}" style="margin-right:.4rem">${PLATFORM_LABELS[k]||k} ${v}</span>`).join('');
       if(!rs.length){
-        gqResults.innerHTML = '<div style="padding:.6rem 1rem;color:var(--t3);font-size:.8rem">无匹配结果' + (bpLine?'<div style="margin-top:.3rem">'+bpLine+'</div>':'') + '</div>';
+        gqResults.innerHTML = '<div style="padding:.6rem 1rem;color:var(--t3);font-size:.8rem">'+window.T('ov_js_no_match') + (bpLine?'<div style="margin-top:.3rem">'+bpLine+'</div>':'') + '</div>';
         return;
       }
-      gqResults.innerHTML = '<div style="padding:.4rem 1rem;font-size:.72rem;color:var(--t3);border-bottom:1px solid var(--bd);margin-bottom:.3rem">命中分布：'+bpLine+'</div>'
+      gqResults.innerHTML = '<div style="padding:.4rem 1rem;font-size:.72rem;color:var(--t3);border-bottom:1px solid var(--bd);margin-bottom:.3rem">'+window.T('ov_js_hit_dist')+bpLine+'</div>'
         + rs.map((r,i)=>{
           const p = r.platform || '';
           const ck = r.chat_key || '';
@@ -1549,7 +1566,7 @@ document.addEventListener('DOMContentLoaded', function(){
           </div>`;
         }).join('');
     }).catch(()=>{
-      gqResults.innerHTML = '<div style="padding:.6rem 1rem;color:#dc2626;font-size:.8rem">检索失败</div>';
+      gqResults.innerHTML = '<div style="padding:.6rem 1rem;color:#dc2626;font-size:.8rem">'+window.T('ov_js_search_fail')+'</div>';
     });
   }
   window.__ovOpen = function(apiBase, chatKey){
@@ -1579,37 +1596,37 @@ document.addEventListener('DOMContentLoaded', function(){
     const detail = (body && (body.detail || body.error)) || '';
     if(status === 413){
       const cap = resp.headers.get('X-Body-Limit') || (body && body.max_body_bytes);
-      const capMB = cap ? (Number(cap) / (1024*1024)).toFixed(2) + ' MB' : '上限';
-      return `⚠ 提交内容超出 ${capMB}，请删减后再保存（${detail}）`;
+      const capMB = cap ? (Number(cap) / (1024*1024)).toFixed(2) + ' MB' : window.T('ov_js_cap_limit');
+      return window.Tf('ov_js_err_413',{cap:capMB,detail:detail});
     }
     if(status === 429){
       const ra = resp.headers.get('Retry-After');
-      return `⚠ 操作过于频繁，请 ${ra ? ra + ' 秒' : '稍'}后重试（${detail}）`;
+      return window.Tf('ov_js_err_429',{wait:(ra ? ra + window.T('ov_js_sec_unit') : window.T('ov_js_a_moment')),detail:detail});
     }
     if(status === 400 || status === 422){
-      return `保存失败：${detail || '请求格式不合法'}`;
+      return window.Tf('ov_js_save_fail_fmt',{detail:(detail || window.T('ov_js_invalid_fmt'))});
     }
     if(status === 401 || status === 403){
-      return `权限不足（${status}）：${detail}`;
+      return window.Tf('ov_js_no_perm',{status:status,detail:detail});
     }
-    return `保存失败（HTTP ${status}）：${detail || '未知'}`;
+    return window.Tf('ov_js_save_fail_http',{status:status,detail:(detail || window.T('ov_js_unknown'))});
   }
   function itRefreshMeta(){
     fetch('/api/rpa/intent-tags').then(r=>r.json()).then(d=>{
       if(!d || !d.ok) return;
-      const txt = `${d.category_count} 类 · ${d.keyword_count} 关键词 · ${d.yaml_exists?'✓ 文件存在':'⚠ 用内置默认'}`;
+      const txt = window.Tf('ov_js_meta_fmt',{c:d.category_count,k:d.keyword_count,f:(d.yaml_exists?window.T('ov_js_file_exists'):window.T('ov_js_builtin_default'))});
       if(itMeta) itMeta.textContent = txt;
       if(itSummary) itSummary.textContent = txt;
     }).catch(()=>{});
   }
   function itLoadFile(){
-    itStatus('载入中…');
+    itStatus(window.T('rpa_loading'));
     fetch('/api/rpa/intent-tags/raw').then(r=>r.text()).then(t=>{
       if(itTextarea) itTextarea.value = t || '';
       itLoaded = true;
-      itStatus('✓ 已载入文件原文', '#16a34a');
+      itStatus(window.T('ov_js_loaded_raw'), '#16a34a');
       itRefreshMeta();
-    }).catch(()=>{ itStatus('载入失败', '#dc2626'); });
+    }).catch(()=>{ itStatus(window.T('ov_js_load_fail'), '#dc2626'); });
   }
   // 首次展开时延迟加载
   if(itPanel){
@@ -1618,14 +1635,14 @@ document.addEventListener('DOMContentLoaded', function(){
     });
     document.getElementById('ov-it-load')?.addEventListener('click', itLoadFile);
     document.getElementById('ov-it-reload')?.addEventListener('click', ()=>{
-      itStatus('正在 reload…');
+      itStatus(window.T('ov_js_reloading'));
       fetch('/api/rpa/intent-tags/reload', {method:'POST'})
         .then(r=>r.json()).then(d=>{
           if(d && d.ok){
-            itStatus(`✓ 已 reload · ${d.category_count} 类 · ${d.keyword_count} 关键词 (Δ ${d.delta>=0?'+':''}${d.delta})`, '#16a34a');
+            itStatus(window.Tf('ov_js_reloaded_fmt',{c:d.category_count,k:d.keyword_count,d:(d.delta>=0?'+':'')+d.delta}), '#16a34a');
             itRefreshMeta();
-          } else { itStatus('reload 失败', '#dc2626'); }
-        }).catch(e=>{ itStatus('reload 失败：'+e, '#dc2626'); });
+          } else { itStatus(window.T('ov_js_reload_fail'), '#dc2626'); }
+        }).catch(e=>{ itStatus(window.T('ov_js_reload_fail_e')+e, '#dc2626'); });
     });
     // P17-B: 渲染 diff 结果到面板
     const diffPane = document.getElementById('ov-it-diff-pane');
@@ -1636,15 +1653,15 @@ document.addEventListener('DOMContentLoaded', function(){
       const redSpan = (kw)=>`<span style="background:rgba(239,68,68,.15);color:#dc2626;padding:.05rem .35rem;border-radius:4px;margin-right:.2rem;font-family:monospace">-${esc(kw)}</span>`;
       const lines = [`<div style="margin-bottom:.4rem"><strong>📋 ${esc(d.summary)}</strong></div>`];
       if(d.added_tags && d.added_tags.length){
-        lines.push(`<div style="margin:.25rem 0"><strong style="color:#16a34a">+ 新增类别：</strong> ${d.added_tags.map(esc).join(', ')}</div>`);
+        lines.push(`<div style="margin:.25rem 0"><strong style="color:#16a34a">${window.T('ov_js_added_cats')}</strong> ${d.added_tags.map(esc).join(', ')}</div>`);
       }
       if(d.removed_tags && d.removed_tags.length){
-        lines.push(`<div style="margin:.25rem 0"><strong style="color:#dc2626">- 删除类别：</strong> ${d.removed_tags.map(esc).join(', ')}</div>`);
+        lines.push(`<div style="margin:.25rem 0"><strong style="color:#dc2626">${window.T('ov_js_removed_cats')}</strong> ${d.removed_tags.map(esc).join(', ')}</div>`);
       }
       const changed = d.changed_tags || {};
       const changedKeys = Object.keys(changed);
       if(changedKeys.length){
-        lines.push('<div style="margin-top:.4rem;font-weight:600">变更明细：</div>');
+        lines.push('<div style="margin-top:.4rem;font-weight:600">'+window.T('ov_js_change_detail')+'</div>');
         changedKeys.forEach(k=>{
           const v = changed[k];
           const segs = [];
@@ -1655,10 +1672,10 @@ document.addEventListener('DOMContentLoaded', function(){
       }
       // P18-D: reorder-only tags (content same, order changed)
       if(d.reordered_tags && d.reordered_tags.length){
-        lines.push(`<div style="margin:.25rem 0;color:#b45309"><strong>⇅ 仅顺序变化：</strong> ${d.reordered_tags.map(esc).join(', ')} <span style="font-size:.7rem;color:var(--t3)">(影响匹配优先级)</span></div>`);
+        lines.push(`<div style="margin:.25rem 0;color:#b45309"><strong>${window.T('ov_js_reorder_only')}</strong> ${d.reordered_tags.map(esc).join(', ')} <span style="font-size:.7rem;color:var(--t3)">${window.T('ov_js_reorder_note')}</span></div>`);
       }
       if(!d.added_tags?.length && !d.removed_tags?.length && !changedKeys.length && !(d.reordered_tags||[]).length){
-        lines.push('<div style="color:var(--t3)">（与当前运行时字典完全一致）</div>');
+        lines.push('<div style="color:var(--t3)">'+window.T('ov_js_no_diff')+'</div>');
       }
       diffPane.innerHTML = lines.join('');
       diffPane.style.display = '';
@@ -1671,17 +1688,17 @@ document.addEventListener('DOMContentLoaded', function(){
     }
     document.getElementById('ov-it-diff')?.addEventListener('click', ()=>{
       const content = (itTextarea && itTextarea.value) || '';
-      if(!content.trim()){ itStatus('内容为空', '#dc2626'); return; }
-      itStatus('计算 diff…');
+      if(!content.trim()){ itStatus(window.T('ov_js_empty_content'), '#dc2626'); return; }
+      itStatus(window.T('ov_js_calc_diff'));
       fetchDiff(content).then(({status, body})=>{
         if(status === 200 && body.ok){
           renderDiff(body);
           itStatus('✓ ' + body.summary, '#16a34a');
         } else {
           if(diffPane) diffPane.style.display = 'none';
-          itStatus('diff 失败：' + (body && (body.detail||body.error) || '未知'), '#dc2626');
+          itStatus(window.T('ov_js_diff_fail_pre') + (body && (body.detail||body.error) || window.T('ov_js_unknown')), '#dc2626');
         }
-      }).catch(e=>{ itStatus('diff 失败：'+e, '#dc2626'); });
+      }).catch(e=>{ itStatus(window.T('ov_js_diff_fail_pre')+e, '#dc2626'); });
     });
 
     // P18-C: 实时 lint（输入防抖 600ms）— 只显示状态条 summary，不展开 diffPane
@@ -1706,7 +1723,7 @@ document.addEventListener('DOMContentLoaded', function(){
             if(status === 200 && body.ok){
               itStatus('📋 ' + body.summary, body.summary.includes('+0 kw / -0 kw') ? 'var(--t3)' : '#0ea5e9');
             } else {
-              itStatus('⚠ ' + (body && (body.detail||body.error) || '语法错'), '#dc2626');
+              itStatus('⚠ ' + (body && (body.detail||body.error) || window.T('ov_js_syntax_err')), '#dc2626');
             }
           }).catch(err=>{
             if(err && err.name === 'AbortError') return;  // 静默忽略取消
@@ -1720,21 +1737,21 @@ document.addEventListener('DOMContentLoaded', function(){
     function renderBackups(list){
       if(!bakPane) return;
       if(!list || !list.length){
-        bakPane.innerHTML = '<div style="color:var(--t3)">（暂无备份）</div>';
+        bakPane.innerHTML = '<div style="color:var(--t3)">'+window.T('ov_js_no_backups')+'</div>';
         bakPane.style.display = '';
         return;
       }
       const esc = (s)=>String(s).replace(/[<>&"]/g,(c)=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'})[c]);
-      const fmt = (ts)=> ts ? new Date(ts*1000).toLocaleString() : '—';
-      bakPane.innerHTML = '<div style="margin-bottom:.35rem;font-weight:600">最近 ' + list.length + ' 份备份（先预览再恢复）：</div>'
+      const fmt = (ts)=> ts ? window.wsFmtDateTime(ts) : '—';
+      bakPane.innerHTML = '<div style="margin-bottom:.35rem;font-weight:600">'+window.Tf('ov_js_backups_head',{n:list.length})+'</div>'
         + list.map(b=>(
           `<div style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;border-top:1px solid var(--bd)">
             <span style="font-family:monospace;font-size:.7rem;color:var(--t2)">${esc(b.filename)}</span>
             <span style="font-size:.7rem;color:var(--t3)">${fmt(b.mtime)}</span>
             <span style="font-size:.7rem;color:var(--t3)">${b.size} B</span>
             <span style="flex:1"></span>
-            <button class="btn-sec ov-it-bak-preview" data-fn="${esc(b.filename)}" style="font-size:.7rem;padding:.2rem .55rem" title="dry-run：只看会变什么，不实际恢复">👁 预览</button>
-            <button class="btn-sec ov-it-bak-restore" data-fn="${esc(b.filename)}" style="font-size:.7rem;padding:.2rem .55rem">恢复此版</button>
+            <button class="btn-sec ov-it-bak-preview" data-fn="${esc(b.filename)}" style="font-size:.7rem;padding:.2rem .55rem" title="${window.T('ov_js_bak_preview_title')}">${window.T('ov_js_preview_btn')}</button>
+            <button class="btn-sec ov-it-bak-restore" data-fn="${esc(b.filename)}" style="font-size:.7rem;padding:.2rem .55rem">${window.T('ov_js_restore_this')}</button>
           </div>`
         )).join('');
       bakPane.style.display = '';
@@ -1742,7 +1759,7 @@ document.addEventListener('DOMContentLoaded', function(){
       bakPane.querySelectorAll('.ov-it-bak-preview').forEach(btn=>{
         btn.addEventListener('click', ()=>{
           const fn = btn.getAttribute('data-fn');
-          itStatus('预览中…');
+          itStatus(window.T('ov_js_previewing'));
           fetch('/api/rpa/intent-tags/restore', {
             method:'POST', headers:{'Content-Type':'application/json'},
             body: JSON.stringify({filename: fn, dry_run: true})
@@ -1750,75 +1767,75 @@ document.addEventListener('DOMContentLoaded', function(){
             .then(({status, body})=>{
               if(status === 200 && body.ok){
                 renderDiff(body);
-                itStatus(`✓ 预览 ${fn} · ${body.summary}`, '#0ea5e9');
+                itStatus(window.Tf('ov_js_preview_ok',{fn:fn,s:body.summary}), '#0ea5e9');
               } else {
-                itStatus('预览失败：' + (body && (body.detail||body.error) || '未知'), '#dc2626');
+                itStatus(window.T('ov_js_preview_fail_pre') + (body && (body.detail||body.error) || window.T('ov_js_unknown')), '#dc2626');
               }
-            }).catch(e=>{ itStatus('预览失败：'+e, '#dc2626'); });
+            }).catch(e=>{ itStatus(window.T('ov_js_preview_fail_pre')+e, '#dc2626'); });
         });
       });
       bakPane.querySelectorAll('.ov-it-bak-restore').forEach(btn=>{
         btn.addEventListener('click', ()=>{
           const fn = btn.getAttribute('data-fn');
-          if(!confirm(`将用 ${fn} 覆盖当前 yaml（同时会再生成一份新备份）。继续？`)) return;
-          itStatus('恢复中…');
+          if(!confirm(window.Tf('ov_js_restore_confirm',{fn:fn}))) return;
+          itStatus(window.T('ov_js_restoring'));
           fetch('/api/rpa/intent-tags/restore', {
             method:'POST', headers:{'Content-Type':'application/json'},
             body: JSON.stringify({filename: fn})
           }).then(r=>r.json().then(d=>({status:r.status, body:d})))
             .then(({status, body})=>{
               if(status === 200 && body.ok){
-                itStatus(`✓ 已恢复 · ${body.category_count} 类 · ${body.keyword_count} 关键词`, '#16a34a');
+                itStatus(window.Tf('ov_js_restored_fmt',{c:body.category_count,k:body.keyword_count}), '#16a34a');
                 itRefreshMeta();
                 itLoadFile();
                 bakPane.style.display = 'none';
               } else {
-                itStatus('恢复失败：' + (body && (body.detail||body.error) || '未知'), '#dc2626');
+                itStatus(window.T('ov_js_restore_fail_pre') + (body && (body.detail||body.error) || window.T('ov_js_unknown')), '#dc2626');
               }
-            }).catch(e=>{ itStatus('恢复失败：'+e, '#dc2626'); });
+            }).catch(e=>{ itStatus(window.T('ov_js_restore_fail_pre')+e, '#dc2626'); });
         });
       });
     }
     document.getElementById('ov-it-restore')?.addEventListener('click', ()=>{
-      itStatus('载入备份列表…');
+      itStatus(window.T('ov_js_load_baklist'));
       fetch('/api/rpa/intent-tags/backups').then(r=>r.json()).then(d=>{
         if(d && d.ok){
           renderBackups(d.backups || []);
           itStatus('');
-        } else { itStatus('载入失败', '#dc2626'); }
-      }).catch(e=>{ itStatus('载入失败：'+e, '#dc2626'); });
+        } else { itStatus(window.T('ov_js_load_fail'), '#dc2626'); }
+      }).catch(e=>{ itStatus(window.T('ov_js_load_fail_e')+e, '#dc2626'); });
     });
 
     document.getElementById('ov-it-save')?.addEventListener('click', ()=>{
       const content = (itTextarea && itTextarea.value) || '';
-      if(!content.trim()){ itStatus('内容为空', '#dc2626'); return; }
+      if(!content.trim()){ itStatus(window.T('ov_js_empty_content'), '#dc2626'); return; }
       // P17-B: 保存前先做 diff，附在 confirm 里
-      itStatus('计算 diff…');
+      itStatus(window.T('ov_js_calc_diff'));
       fetchDiff(content).then(({status, body})=>{
         if(status !== 200 || !body.ok){
-          itStatus('校验失败：' + (body && (body.detail||body.error) || '未知'), '#dc2626');
+          itStatus(window.T('ov_js_validate_fail_pre') + (body && (body.detail||body.error) || window.T('ov_js_unknown')), '#dc2626');
           return;
         }
         renderDiff(body);
-        if(!confirm(`即将保存：${body.summary}\n\n旧版会备份。继续？`)) {
-          itStatus('已取消', 'var(--t3)');
+        if(!confirm(window.Tf('ov_js_save_confirm',{s:body.summary}))) {
+          itStatus(window.T('ov_js_canceled'), 'var(--t3)');
           return;
         }
-        itStatus('保存中…');
+        itStatus(window.T('ov_js_saving'));
         fetch('/api/rpa/intent-tags', {
           method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({content: content})
         }).then(r=>r.json().then(d=>({resp:r, body:d})))
           .then(({resp, body})=>{
             if(resp.status === 200 && body.ok){
-              itStatus(`✓ 已保存 · ${body.category_count} 类 · ${body.keyword_count} 关键词 · 备份: ${body.backup_path||'(无旧文件)'}`, '#16a34a');
+              itStatus(window.Tf('ov_js_saved_fmt',{c:body.category_count,k:body.keyword_count,b:(body.backup_path||window.T('ov_js_no_old_file'))}), '#16a34a');
               itRefreshMeta();
             } else {
               // P27-B: 413/429/4xx 友好提示（含 X-Body-Limit / Retry-After）
               itStatus(itFormatErr(resp, body), '#dc2626');
             }
-          }).catch(e=>{ itStatus('保存失败：'+e, '#dc2626'); });
-      }).catch(e=>{ itStatus('diff 失败：'+e, '#dc2626'); });
+          }).catch(e=>{ itStatus(window.T('ov_js_save_fail_e')+e, '#dc2626'); });
+      }).catch(e=>{ itStatus(window.T('ov_js_diff_fail_pre')+e, '#dc2626'); });
     });
     // 页面初次打开：异步取一下 meta（不展开 textarea）
     itRefreshMeta();
@@ -1868,11 +1885,11 @@ function devPlatTags(dev){
     if(pn) t+=' <span style="opacity:.7;font-size:.6rem">· '+_esc(pn)+'</span>';
     tags.push('<span class="dev-plat-tag whatsapp">'+t+'</span>');
   }
-  return tags.join('')||'<span style="font-size:.7rem;color:var(--t3)">未分配平台</span>';
+  return tags.join('')||'<span style="font-size:.7rem;color:var(--t3)">'+window.T('ov_js_no_platform')+'</span>';
 }
 
 function devRenderCoordStatus(coord){
-  if(!coord) return '<div style="margin-top:.35rem"><span class="dev-unregistered-tag" style="background:rgba(99,110,123,.15);color:var(--t3);border-color:rgba(99,110,123,.3)">○ 未运行</span></div>';
+  if(!coord) return '<div style="margin-top:.35rem"><span class="dev-unregistered-tag" style="background:rgba(99,110,123,.15);color:var(--t3);border-color:rgba(99,110,123,.3)">'+window.T('ov_js_not_running')+'</span></div>';
   const pHtml = (coord.platforms||[]).map(p=>{
     const dotCls = p.circuit_open?'circuit-open':'online';
     const stepTxt = p.last_step||'idle';
@@ -1886,18 +1903,18 @@ function devRenderCoordStatus(coord){
         const title = `${h.step||'?'} ${h.ok?'✓':'✗'} badge:${h.badge??'-'}`;
         return `<span title="${_esc(title)}" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${color};cursor:help"></span>`;
       }).join('');
-      histHtml = `<div style="display:flex;gap:2px;margin-top:2px;align-items:center" title="最近 ${history.length} 次运行（左=最新）">${dots}</div>`;
+      histHtml = `<div style="display:flex;gap:2px;margin-top:2px;align-items:center" title="${window.Tf('ov_js_recent_runs_newest',{n:history.length})}">${dots}</div>`;
     }
     return `<div style="display:flex;align-items:center;gap:.3rem;font-size:.68rem;color:var(--t2);flex-wrap:wrap">
       <span class="dev-status-dot ${dotCls}"></span>
       <span class="dev-plat-tag ${p.type}">${p.type}</span>
       <span>${_esc(stepTxt)}${failTxt}</span>
-      <span style="color:var(--t2);margin-left:auto">${p.total_replies||0} 回复</span>
+      <span style="color:var(--t2);margin-left:auto">${p.total_replies||0} ${window.T('ov_js_replies_unit')}</span>
       ${histHtml}
     </div>`;
   }).join('');
-  const ago = coord.last_run_ago_sec!=null?rpa.fmtDur(coord.last_run_ago_sec)+' 前':'—';
-  return `<div class="dev-card-status"><span class="dev-status-dot online"></span><span style="color:#2dd4bf;font-weight:600">运行中</span><span style="color:var(--t2);margin-left:.5rem">周期: ${coord.cycle_count||0} · 最近: ${ago}</span></div>`
+  const ago = coord.last_run_ago_sec!=null?rpa.fmtDur(coord.last_run_ago_sec)+window.T('ov_js_ago_suffix'):'—';
+  return `<div class="dev-card-status"><span class="dev-status-dot online"></span><span style="color:#2dd4bf;font-weight:600">${window.T('ov_js_running_now')}</span><span style="color:var(--t2);margin-left:.5rem">${window.Tf('ov_js_cycle_recent',{c:(coord.cycle_count||0),ago:ago})}</span></div>`
     +pHtml;
 }
 
@@ -1925,12 +1942,12 @@ function _devMiniStats(coord){
     const ht = h.ok ? 12 : 6;
     return `<div class="dev-mini-spark-bar" style="height:${ht}px;background:${color}"></div>`;
   }).join('');
-  const sparkHtml = sparkBars ? `<div class="dev-mini-spark" title="最近 ${recent.length} 次运行">${sparkBars}</div>` : '';
+  const sparkHtml = sparkBars ? `<div class="dev-mini-spark" title="${window.Tf('ov_js_recent_runs',{n:recent.length})}">${sparkBars}</div>` : '';
 
   return `<div class="dev-mini-stats">
-    <div class="dev-mini-stat"><div class="dev-mini-stat-n ${rateCls}">${rate}%</div><div class="dev-mini-stat-l">成功率</div></div>
-    <div class="dev-mini-stat"><div class="dev-mini-stat-n" style="color:var(--t)">${totalReplies}</div><div class="dev-mini-stat-l">回复</div></div>
-    <div class="dev-mini-stat"><div class="dev-mini-stat-n" style="color:var(--t)">${coord.cycle_count||0}</div><div class="dev-mini-stat-l">周期</div></div>
+    <div class="dev-mini-stat"><div class="dev-mini-stat-n ${rateCls}">${rate}%</div><div class="dev-mini-stat-l">${window.T('ov_js_success_rate')}</div></div>
+    <div class="dev-mini-stat"><div class="dev-mini-stat-n" style="color:var(--t)">${totalReplies}</div><div class="dev-mini-stat-l">${window.T('ov_js_replies_label')}</div></div>
+    <div class="dev-mini-stat"><div class="dev-mini-stat-n" style="color:var(--t)">${coord.cycle_count||0}</div><div class="dev-mini-stat-l">${window.T('ov_js_cycles_label')}</div></div>
   </div>${sparkHtml}`;
 }
 
@@ -1956,35 +1973,35 @@ function devCtxAction(el, action){
     const editBtn = card.querySelector('.dev-edit-form');
     if(editBtn){ editBtn.style.display = editBtn.style.display==='none'?'':'none'; }
   } else if(action==='copy-serial'){
-    navigator.clipboard?.writeText(serial).then(()=>rpa.toast('已复制 Serial','ok')).catch(()=>{});
+    navigator.clipboard?.writeText(serial).then(()=>rpa.toast(window.T('ov_js_copied_serial'),'ok')).catch(()=>{});
   } else if(action==='stats'){
     // 切到统计 tab
     const statsTab = document.querySelector('[data-pane="ov-tab-device-stats"]');
     if(statsTab){ statsTab.click(); devStatsRefresh(); }
   } else if(action==='trigger'){
     // 触发设备上所有平台
-    rpa.toast(`触发 ${serial.slice(0,8)} 扫描…`);
+    rpa.toast(window.Tf('ov_js_trigger_scan',{s:serial.slice(0,8)}));
     ['messenger','line','whatsapp'].forEach(p=>{ try{ovControl(p,'trigger');}catch(e){} });
   }
 }
 
 async function devAutoDetect(serial){
-  rpa.toast(`🔍 正在扫描 ${serial.slice(0,8)} 的 app…`);
+  rpa.toast(window.Tf('ov_js_scanning_app',{s:serial.slice(0,8)}));
   try{
     const r = await fetch(`/api/rpa-overview/registry/${encodeURIComponent(serial)}/auto-detect`,
       {method:'POST', headers:{'Content-Type':'application/json'}});
     const d = await r.json();
-    if(!r.ok){ rpa.toast((d&&d.detail)||'检测失败','err'); return; }
+    if(!r.ok){ rpa.toast((d&&d.detail)||window.T('ov_js_detect_fail'),'err'); return; }
     if(!Object.keys(d.detected||{}).length){
-      rpa.toast(d.message||'未检测到已安装的聊天 app','warn'); return;
+      rpa.toast(d.message||window.T('ov_js_no_app_found'),'warn'); return;
     }
     const found = Object.entries(d.detected).map(([p,v])=>`${p}=${v.account_id}${v.account_name?'('+v.account_name+')':''}`).join(' · ');
-    let msg = `✅ 检测到: ${found}`;
-    if(d.reload?.action) msg += ` · Coordinator ${d.reload.action==='rebuilt'?'已热重建':'已创建'}`;
+    let msg = window.Tf('ov_js_detected',{found:found});
+    if(d.reload?.action) msg += (' · Coordinator '+(d.reload.action==='rebuilt'?window.T('ov_js_hot_rebuilt'):window.T('ov_js_created')));
     rpa.toast(msg,'ok');
     setTimeout(devRefresh, 800);
   }catch(e){
-    rpa.toast('检测失败: '+e,'err');
+    rpa.toast(window.T('ov_js_detect_fail_e')+e,'err');
   }
 }
 
@@ -2024,14 +2041,14 @@ function devRenderCard(dev, coordMap, source){
   // S4-C: context menu — show for all registered devices (incl. remote)
   if(source!=='unregistered'){
     html += `<div class="dev-ctx-wrap">
-      <button class="dev-ctx-btn" onclick="devCtxToggle(this)" title="操作菜单">⋮</button>
+      <button class="dev-ctx-btn" onclick="devCtxToggle(this)" title="${window.T('ov_js_actions_menu')}">⋮</button>
       <div class="dev-ctx-menu">
-        <div class="dev-ctx-item" onclick="devCtxAction(this,'auto-detect')">🔍 自动检测 App</div>
-        <div class="dev-ctx-item" onclick="devCtxAction(this,'edit')">✏️ 编排平台/人设</div>
-        <div class="dev-ctx-item" onclick="devCtxAction(this,'trigger')">⚡ 触发扫描</div>
-        <div class="dev-ctx-item" onclick="devCtxAction(this,'stats')">📊 查看统计</div>
+        <div class="dev-ctx-item" onclick="devCtxAction(this,'auto-detect')">${window.T('ov_js_ctx_autodetect')}</div>
+        <div class="dev-ctx-item" onclick="devCtxAction(this,'edit')">${window.T('ov_js_ctx_orchestrate')}</div>
+        <div class="dev-ctx-item" onclick="devCtxAction(this,'trigger')">${window.T('ov_js_ctx_trigger')}</div>
+        <div class="dev-ctx-item" onclick="devCtxAction(this,'stats')">${window.T('ov_js_ctx_stats')}</div>
         <div class="dev-ctx-sep"></div>
-        <div class="dev-ctx-item" onclick="devCtxAction(this,'copy-serial')">📋 复制 Serial</div>
+        <div class="dev-ctx-item" onclick="devCtxAction(this,'copy-serial')">${window.T('ov_js_ctx_copy_serial')}</div>
       </div>
     </div>`;
   }
@@ -2039,26 +2056,26 @@ function devRenderCard(dev, coordMap, source){
 
   if(source==='remote'){
     html += `<div class="dev-card-platforms">${devPlatTags(dev)}</div>`;
-    html += `<div style="margin-top:.5rem"><span class="dev-remote-tag">⚡ 远程管理</span></div>`;
+    html += `<div style="margin-top:.5rem"><span class="dev-remote-tag">${window.T('ov_js_remote_mgmt')}</span></div>`;
     html += `<div class="dev-edit-form" style="display:none;margin-top:.5rem;padding-top:.5rem;border-top:1px solid var(--bd)">
       <div class="dev-orch-grid">
         ${_devPlatRow('messenger','MSG',dev)}
         ${_devPlatRow('line','LINE',dev)}
         ${_devPlatRow('whatsapp','WA',dev)}
       </div>
-      <div style="font-size:.62rem;color:var(--t3);margin-top:.3rem">ℹ️ Telegram 运行在本机，无需设备分配</div>
+      <div style="font-size:.62rem;color:var(--t3);margin-top:.3rem">${window.T('ov_js_tg_local_note')}</div>
       <div style="display:flex;gap:.4rem;margin-top:.4rem">
-        <button class="btn-sec" onclick="devSavePlatforms(this,'${sEsc}')" style="font-size:.7rem;padding:.25rem .6rem;font-weight:600;border-color:var(--p);color:var(--p)">💾 保存并重建</button>
-        <button class="btn-sec" onclick="devToggleEdit(this)" style="font-size:.7rem;padding:.25rem .6rem">取消</button>
+        <button class="btn-sec" onclick="devSavePlatforms(this,'${sEsc}')" style="font-size:.7rem;padding:.25rem .6rem;font-weight:600;border-color:var(--p);color:var(--p)">${window.T('ov_js_save_rebuild')}</button>
+        <button class="btn-sec" onclick="devToggleEdit(this)" style="font-size:.7rem;padding:.25rem .6rem">${window.T('ov_js_cancel')}</button>
         <span class="dev-edit-msg" style="font-size:.68rem;color:var(--t2);align-self:center;margin-left:.3rem"></span>
       </div>
     </div>`;
   } else if(source==='unregistered'){
     html += `<div class="dev-register-form">
-      <input type="text" placeholder="简码(如Q4N)" data-field="label" style="width:70px">
-      <input type="text" placeholder="分组(如主控)" data-field="group_name" style="width:70px" value="${_esc(_lastHostName||'')}">
-      <input type="number" placeholder="编号" data-field="number" style="width:55px">
-      <button onclick="devRegister(this,'${sEsc}')">注册</button>
+      <input type="text" placeholder="${window.T('ov_js_ph_shortcode')}" data-field="label" style="width:70px">
+      <input type="text" placeholder="${window.T('ov_js_ph_group')}" data-field="group_name" style="width:70px" value="${_esc(_lastHostName||'')}">
+      <input type="number" placeholder="${window.T('ov_js_ph_number')}" data-field="number" style="width:55px">
+      <button onclick="devRegister(this,'${sEsc}')">${window.T('ov_js_register_btn')}</button>
     </div>`;
   } else {
     html += `<div class="dev-card-platforms">${devPlatTags(dev)}</div>`;
@@ -2070,8 +2087,8 @@ function devRenderCard(dev, coordMap, source){
         ${_devPlatRow('whatsapp','WA',dev)}
       </div>
       <div style="display:flex;gap:.4rem;margin-top:.5rem">
-        <button class="btn-sec" onclick="devSavePlatforms(this,'${sEsc}')" style="font-size:.7rem;padding:.25rem .6rem;font-weight:600;border-color:var(--p);color:var(--p)">💾 保存并重建</button>
-        <button class="btn-sec" onclick="devToggleEdit(this)" style="font-size:.7rem;padding:.25rem .6rem">取消</button>
+        <button class="btn-sec" onclick="devSavePlatforms(this,'${sEsc}')" style="font-size:.7rem;padding:.25rem .6rem;font-weight:600;border-color:var(--p);color:var(--p)">${window.T('ov_js_save_rebuild')}</button>
+        <button class="btn-sec" onclick="devToggleEdit(this)" style="font-size:.7rem;padding:.25rem .6rem">${window.T('ov_js_cancel')}</button>
         <span class="dev-edit-msg" style="font-size:.68rem;color:var(--t2);align-self:center;margin-left:.3rem"></span>
       </div>
     </div>`;
@@ -2094,7 +2111,7 @@ async function _loadPersonas(){
   // Populate batch persona select
   const sel=document.getElementById('dev-fb-persona');
   if(sel&&_personasCache.length){
-    let h='<option value="">人设不变</option>';
+    let h='<option value="">'+window.T('ov_js_persona_keep')+'</option>';
     for(const p of _personasCache) h+=`<option value="${_esc(p.id)}">${_esc(p.name||p.id)}</option>`;
     sel.innerHTML=h;
   }
@@ -2102,7 +2119,7 @@ async function _loadPersonas(){
 }
 function _personaOptions(selectedId){
   const list=_personasCache||[];
-  let h=`<option value="">— 默认人设 —</option>`;
+  let h=`<option value="">${window.T('ov_js_default_persona')}</option>`;
   for(const p of list){
     const sel=(p.id===selectedId)?'selected':'';
     h+=`<option value="${_esc(p.id)}" ${sel}>${_esc(p.name||p.id)}</option>`;
@@ -2111,7 +2128,7 @@ function _personaOptions(selectedId){
 }
 async function devRefresh(){
   if(!_devGrid) return;
-  _devGrid.innerHTML='<div class="rpa-empty">加载中…</div>';
+  _devGrid.innerHTML='<div class="rpa-empty">'+window.T('rpa_loading')+'</div>';
   try{
     const [devData, regData] = await Promise.all([
       rpa.get('/api/rpa-overview/devices'),
@@ -2129,7 +2146,7 @@ async function devRefresh(){
       // hotplug devices
       const hp = devData.hotplug||{};
       _lastHostName = hp.host_name||'';
-      if(_devHostLabel) _devHostLabel.textContent = '主机: '+(hp.host_name||'全部');
+      if(_devHostLabel) _devHostLabel.textContent = window.T('ov_js_host_prefix')+(hp.host_name||window.T('ov_js_all'));
       for(const c of (hp.managed_devices||[])){
         coordMap[c.serial]=c;
       }
@@ -2156,7 +2173,7 @@ async function devRefresh(){
     // 按 group_name 分组
     const groups = {};
     for(const d of regDevices){
-      const g = d.group_name||'(未分组)';
+      const g = d.group_name||window.T('ov_js_ungrouped');
       if(!groups[g]) groups[g]=[];
       groups[g].push(d);
     }
@@ -2173,7 +2190,7 @@ async function devRefresh(){
     for(const g of groupOrder){
       const isMyGroup = !myHost || g===myHost;
       if(groupOrder.length>1){
-        html += `<div class="dev-group-header">${_esc(g)}${isMyGroup?' (本机)':' (远程)'}</div>`;
+        html += `<div class="dev-group-header">${_esc(g)}${isMyGroup?window.T('ov_js_local_tag'):window.T('ov_js_remote_tag')}</div>`;
       }
       for(const d of groups[g]){
         if(isMyGroup){
@@ -2191,7 +2208,7 @@ async function devRefresh(){
     if((unreg||[]).length){
       const unregFiltered = unreg.filter(s=>!regMap[s]);
       if(unregFiltered.length){
-        if(groupOrder.length>1||totalDevices>0) html += `<div class="dev-group-header">⚠ 未注册在线设备</div>`;
+        if(groupOrder.length>1||totalDevices>0) html += `<div class="dev-group-header">${window.T('ov_js_unreg_online')}</div>`;
         for(const s of unregFiltered){
           html += devRenderCard({serial:s}, coordMap, 'unregistered');
           totalDevices++;
@@ -2199,7 +2216,7 @@ async function devRefresh(){
       }
     }
 
-    if(!html) html='<div class="rpa-empty">无设备数据</div>';
+    if(!html) html='<div class="rpa-empty">'+window.T('ov_js_no_devices')+'</div>';
     _devGrid.innerHTML=html;
 
     if(_devCountBadge){
@@ -2208,7 +2225,7 @@ async function devRefresh(){
       _devCountBadge.style.display=totalDevices>0?'inline-flex':'none';
     }
   }catch(e){
-    _devGrid.innerHTML='<div class="rpa-empty" style="color:#dc2626">加载失败: '+_esc(String(e))+'</div>';
+    _devGrid.innerHTML='<div class="rpa-empty" style="color:#dc2626">'+window.T('ov_js_load_fail_e2')+_esc(String(e))+'</div>';
   }
 }
 
@@ -2252,34 +2269,34 @@ async function devSavePlatforms(btn, serial){
   });
   try{
     btn.disabled=true;
-    btn.textContent='保存中…';
+    btn.textContent=window.T('ov_js_saving');
     if(msg) msg.textContent='';
     const r=await fetch('/api/rpa-overview/registry',{
       method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)
     });
     const d=await r.json();
     if(!r.ok){
-      if(msg) msg.textContent=(d&&d.detail)||'保存失败';
+      if(msg) msg.textContent=(d&&d.detail)||window.T('ov_js_save_fail');
       if(msg) msg.style.color='#f85149';
       return;
     }
-    let toast = `✅ 编排已保存`;
+    let toast = window.T('ov_js_orch_saved');
     if(d.reload && d.reload.ok){
       const act = d.reload.action;
-      if(act==='rebuilt') toast += ' · Coordinator 已热重建';
-      else if(act==='created') toast += ' · Coordinator 已创建';
-      else if(act==='no_platforms') toast += ' · 无平台（已停止）';
+      if(act==='rebuilt') toast += ' · Coordinator '+window.T('ov_js_hot_rebuilt');
+      else if(act==='created') toast += ' · Coordinator '+window.T('ov_js_created');
+      else if(act==='no_platforms') toast += ' · '+window.T('ov_js_no_platforms_stopped');
     } else if(d.reload && d.reload.error){
-      toast += ` · 重建失败: ${d.reload.error}`;
+      toast += (' · '+window.Tf('ov_js_rebuild_fail',{e:d.reload.error}));
     }
     rpa.toast(toast,'ok');
     form.style.display='none';
     setTimeout(devRefresh, 600);
   }catch(e){
-    if(msg){ msg.textContent='保存失败：'+e; msg.style.color='#f85149'; }
+    if(msg){ msg.textContent=window.T('ov_js_save_fail_e')+e; msg.style.color='#f85149'; }
   }finally{
     btn.disabled=false;
-    btn.textContent='💾 保存并重建';
+    btn.textContent=window.T('ov_js_save_rebuild');
   }
 }
 
@@ -2296,7 +2313,7 @@ function devSelChanged(){
     if(n>0){ fb.classList.add('visible'); } else { fb.classList.remove('visible'); }
   }
   const fbc=_getFbCount();
-  if(fbc) fbc.textContent = n+' 台选中';
+  if(fbc) fbc.textContent = window.Tf('ov_js_n_selected',{n:n});
 }
 
 function devBatchClear(){
@@ -2319,41 +2336,41 @@ let _batchBusy=false;
 async function _batchPost(fields, label){
   if(_batchBusy) return;
   const serials=_batchSerials();
-  if(!serials.length){rpa.toast('请先选择设备','err');return;}
+  if(!serials.length){rpa.toast(window.T('ov_js_select_devices_first'),'err');return;}
   _batchBusy=true;
   // disable all batch buttons
   const btns=document.querySelectorAll('#dev-float-bar .fb-btn');
   btns.forEach(b=>{b.disabled=true;b.style.opacity='.5'});
-  rpa.toast('处理中…');
+  rpa.toast(window.T('ov_js_processing'));
   try{
     const r=await fetch('/api/registry/batch',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({serials,fields})
     });
     const d=await r.json();
-    if(!r.ok){rpa.toast((d&&d.detail)||'操作失败','err');return;}
+    if(!r.ok){rpa.toast((d&&d.detail)||window.T('ov_js_op_fail'),'err');return;}
     const reloadOk=(d.reloads||[]).filter(x=>x.ok).length;
-    rpa.toast(`${label} ${d.count} 台 · ${reloadOk} 台已重建`,'ok');
+    rpa.toast(window.Tf('ov_js_batch_done',{label:label,n:d.count,r:reloadOk}),'ok');
     devBatchClear();
     setTimeout(devRefresh,600);
-  }catch(e){ rpa.toast('操作失败：'+e,'err'); }
+  }catch(e){ rpa.toast(window.T('ov_js_op_fail_e')+e,'err'); }
   finally{ _batchBusy=false; btns.forEach(b=>{b.disabled=false;b.style.opacity=''}); }
 }
 async function devBatchApplyPersona(){
   const pid=document.getElementById('dev-fb-persona')?.value||'';
-  if(!pid){rpa.toast('请先选择人设','err');return;}
+  if(!pid){rpa.toast(window.T('ov_js_select_persona_first'),'err');return;}
   const plats=_batchPlats();
-  if(!plats.length){rpa.toast('请勾选要应用的平台','err');return;}
+  if(!plats.length){rpa.toast(window.T('ov_js_check_apply_plats'),'err');return;}
   const fields={};
   for(const p of plats) fields['persona_'+p]=pid;
-  await _batchPost(fields,'✅ 人设已切换');
+  await _batchPost(fields,window.T('ov_js_persona_switched'));
 }
 async function devBatchClearPersona(){
   const plats=_batchPlats();
-  if(!plats.length){rpa.toast('请勾选要清除的平台','err');return;}
+  if(!plats.length){rpa.toast(window.T('ov_js_check_clear_plats'),'err');return;}
   const fields={};
   for(const p of plats) fields['persona_'+p]='';
-  await _batchPost(fields,'🗑 人设已清除');
+  await _batchPost(fields,window.T('ov_js_persona_cleared'));
 }
 
 async function devRegister(btn, serial){
@@ -2367,19 +2384,19 @@ async function devRegister(btn, serial){
   });
   try{
     btn.disabled=true;
-    btn.textContent='注册中…';
+    btn.textContent=window.T('ov_js_registering');
     const r=await fetch('/api/rpa-overview/registry',{
       method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)
     });
     const d=await r.json();
-    if(!r.ok){rpa.toast((d&&d.detail)||'注册失败','err');return;}
-    rpa.toast(`设备 ${serial.slice(0,8)} 注册成功，下次扫描将自动纳管`,'ok');
+    if(!r.ok){rpa.toast((d&&d.detail)||window.T('ov_js_register_fail'),'err');return;}
+    rpa.toast(window.Tf('ov_js_register_ok',{s:serial.slice(0,8)}),'ok');
     setTimeout(devRefresh,500);
   }catch(e){
-    rpa.toast('注册失败：'+e,'err');
+    rpa.toast(window.T('ov_js_register_fail_e')+e,'err');
   }finally{
     btn.disabled=false;
-    btn.textContent='注册';
+    btn.textContent=window.T('ov_js_register_btn');
   }
 }
 
@@ -2404,13 +2421,13 @@ async function devStatsRefresh(){
 
     const summaries = statsD.summaries || [];
     const lbl = document.getElementById('ds-summary-label');
-    if(lbl) lbl.textContent = `${summaries.length} 台设备`;
+    if(lbl) lbl.textContent = window.Tf('ov_js_n_devices',{n:summaries.length});
 
     const container = document.getElementById('ds-summary-cards');
     if(!container) return;
 
     if(!summaries.length){
-      container.innerHTML = '<div class="rpa-empty">暂无统计数据（设备需运行后才有数据）</div>';
+      container.innerHTML = '<div class="rpa-empty">'+window.T('ov_js_no_stats_data')+'</div>';
       return;
     }
 
@@ -2422,8 +2439,8 @@ async function devStatsRefresh(){
         const pColor = psr >= 90 ? '#3fb950' : psr >= 70 ? '#e3b341' : '#f85149';
         return `<div style="display:flex;justify-content:space-between;font-size:.65rem;color:var(--t2);padding:2px 0">
           <span class="dev-plat-tag ${p.platform}">${p.platform}</span>
-          <span>成功 <b style="color:${pColor}">${psr}%</b></span>
-          <span>回复 ${p.total_replies}</span>
+          <span>${window.T('ov_js_succ_label')} <b style="color:${pColor}">${psr}%</b></span>
+          <span>${window.T('ov_js_replies_label')} ${p.total_replies}</span>
           <span>${p.avg_elapsed_ms}ms</span>
         </div>`;
       }).join('');
@@ -2434,12 +2451,12 @@ async function devStatsRefresh(){
       return `<div style="border:1px solid var(--bd);border-radius:8px;padding:.6rem;background:var(--input)">
         <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.4rem">
           <b style="font-size:.78rem;color:var(--t)">${_esc(s.serial?.slice(0,8)||'?')}</b>
-          <span style="font-size:.65rem;color:var(--t3);margin-left:auto">${s.total_runs||0} 次</span>
+          <span style="font-size:.65rem;color:var(--t3);margin-left:auto">${s.total_runs||0} ${window.T('ov_js_times_unit')}</span>
         </div>
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.3rem;margin-bottom:.4rem">
-          <div class="dev-stat"><div class="dev-stat-n" style="color:${srColor}">${sr}%</div><div class="dev-stat-l">成功率</div></div>
-          <div class="dev-stat"><div class="dev-stat-n">${s.total_replies||0}</div><div class="dev-stat-l">回复</div></div>
-          <div class="dev-stat"><div class="dev-stat-n">${s.total_runs||0}</div><div class="dev-stat-l">运行</div></div>
+          <div class="dev-stat"><div class="dev-stat-n" style="color:${srColor}">${sr}%</div><div class="dev-stat-l">${window.T('ov_js_success_rate')}</div></div>
+          <div class="dev-stat"><div class="dev-stat-n">${s.total_replies||0}</div><div class="dev-stat-l">${window.T('ov_js_replies_label')}</div></div>
+          <div class="dev-stat"><div class="dev-stat-n">${s.total_runs||0}</div><div class="dev-stat-l">${window.T('ov_js_runs_label')}</div></div>
         </div>
         ${barHtml}
         ${pHtml}
@@ -2454,7 +2471,7 @@ async function devStatsRefresh(){
 
   }catch(e){
     console.error('devStatsRefresh error:', e);
-    rpa.toast('统计加载失败: '+e, 'err');
+    rpa.toast(window.T('ov_js_stats_load_fail')+e, 'err');
   }
 }
 
@@ -2468,7 +2485,7 @@ async function _renderLoadBalance(){
 
     const hosts = d.hosts || [];
     if(!hosts.length){
-      hostsEl.innerHTML = '<span style="font-size:.68rem;color:var(--t3)">无主机数据</span>';
+      hostsEl.innerHTML = '<span style="font-size:.68rem;color:var(--t3)">'+window.T('ov_js_no_host_data')+'</span>';
       if(sugEl) sugEl.innerHTML = '';
       return;
     }
@@ -2480,14 +2497,14 @@ async function _renderLoadBalance(){
                     h.load_score > (d.avg_load_score||1)*1.1 ? '#e3b341' : '#3fb950';
       return `<div style="border:1px solid var(--bd);border-radius:6px;padding:.4rem;background:var(--input)">
         <div style="font-size:.7rem;font-weight:600;color:var(--t)">${_esc(h.host)}</div>
-        <div style="font-size:.6rem;color:var(--t3)">${h.device_count} 设备 · ${h.total_runs_24h} 次运行</div>
+        <div style="font-size:.6rem;color:var(--t3)">${window.Tf('ov_js_dev_runs',{d:h.device_count,r:h.total_runs_24h})}</div>
         <div style="display:flex;align-items:center;gap:4px;margin-top:3px">
           <div style="flex:1;height:5px;background:var(--bd);border-radius:3px;overflow:hidden">
             <div style="width:${pct}%;height:100%;background:${color};border-radius:3px"></div>
           </div>
           <span style="font-size:.6rem;color:${color};font-weight:600">${h.load_score}</span>
         </div>
-        <div style="font-size:.58rem;color:var(--t3)">失败率 ${h.fail_rate_pct}%</div>
+        <div style="font-size:.58rem;color:var(--t3)">${window.T('ov_js_fail_rate')} ${h.fail_rate_pct}%</div>
       </div>`;
     }).join('');
 
@@ -2498,7 +2515,7 @@ async function _renderLoadBalance(){
           `<div style="font-size:.68rem;color:#e3b341;padding:3px 0">⚠️ ${_esc(s.action)} — ${_esc(s.reason)}</div>`
         ).join('');
       } else {
-        sugEl.innerHTML = '<div style="font-size:.65rem;color:#3fb950">✅ 各主机负载均衡</div>';
+        sugEl.innerHTML = '<div style="font-size:.65rem;color:#3fb950">'+window.T('ov_js_load_balanced')+'</div>';
       }
     }
   }catch(e){
@@ -2537,7 +2554,7 @@ async function _renderChartArea(summaries, hours){
   );
   const results = await Promise.all(fetches);
 
-  let chartsHtml = '<div style="font-size:.75rem;font-weight:600;color:var(--t2);margin-bottom:.4rem">时间序列（5min 粒度）</div>';
+  let chartsHtml = '<div style="font-size:.75rem;font-weight:600;color:var(--t2);margin-bottom:.4rem">'+window.T('ov_js_timeseries')+'</div>';
   chartsHtml += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:.6rem">';
 
   results.forEach((r, i)=>{
@@ -2587,7 +2604,7 @@ function _renderSparkSvg(platform, buckets){
 function _renderTemplateSelect(){
   const sel = document.getElementById('ds-template-sel');
   if(!sel) return;
-  sel.innerHTML = '<option value="">选择模板…</option>';
+  sel.innerHTML = '<option value="">'+window.T('ov_js_select_template')+'</option>';
   _dsTemplates.forEach(t=>{
     sel.innerHTML += `<option value="${_esc(t.name)}">${_esc(t.name)} — ${_esc(t.description||'')}</option>`;
   });
@@ -2605,8 +2622,8 @@ async function devApplyTemplate(){
   const checked = document.querySelectorAll('.dev-sel:checked');
   const serials = Array.from(checked).map(cb=>cb.getAttribute('data-serial')).filter(Boolean);
 
-  if(!serials.length){ rpa.toast('请先在 📱 设备管理 tab 勾选设备','err'); return; }
-  if(!tplName){ rpa.toast('请选择一个模板','err'); return; }
+  if(!serials.length){ rpa.toast(window.T('ov_js_select_in_devtab'),'err'); return; }
+  if(!tplName){ rpa.toast(window.T('ov_js_select_a_template'),'err'); return; }
 
   try{
     const r = await fetch('/api/registry/apply-template',{
@@ -2614,12 +2631,12 @@ async function devApplyTemplate(){
       body: JSON.stringify({serials, template_name: tplName}),
     });
     const d = await r.json();
-    if(!r.ok){ rpa.toast((d&&d.detail)||'应用模板失败','err'); return; }
+    if(!r.ok){ rpa.toast((d&&d.detail)||window.T('ov_js_apply_tpl_fail'),'err'); return; }
     const reloadOk = (d.reloads||[]).filter(x=>x.ok).length;
-    rpa.toast(`模板 "${tplName}" 应用到 ${d.count} 台设备，${reloadOk} 台已热重建`,'ok');
+    rpa.toast(window.Tf('ov_js_tpl_applied',{name:tplName,n:d.count,r:reloadOk}),'ok');
     setTimeout(devStatsRefresh, 600);
   }catch(e){
-    rpa.toast('应用模板失败: '+e, 'err');
+    rpa.toast(window.T('ov_js_apply_tpl_fail_e')+e, 'err');
   }
 }
 
@@ -2637,7 +2654,7 @@ function initSSE(){
     _evtSource = new EventSource('/api/rpa-overview/events');
     _evtSource.onopen = function(){
       const s = document.getElementById('ds-sse-status');
-      if(s) s.textContent = '已连接';
+      if(s) s.textContent = window.T('ov_js_connected');
       if(s) s.style.color = '#3fb950';
     };
     _evtSource.onmessage = function(e){
@@ -2648,7 +2665,7 @@ function initSSE(){
     };
     _evtSource.onerror = function(){
       const s = document.getElementById('ds-sse-status');
-      if(s){ s.textContent = '重连中…'; s.style.color = '#e3b341'; }
+      if(s){ s.textContent = window.T('ov_js_reconnecting'); s.style.color = '#e3b341'; }
     };
   }catch(ex){
     console.warn('SSE init failed:', ex);
@@ -2658,7 +2675,7 @@ function initSSE(){
 function _handleSSEvent(evt){
   const type = evt.type;
   const d = evt.data || {};
-  const ts = evt.ts ? new Date(evt.ts*1000).toLocaleTimeString() : '';
+  const ts = evt.ts ? window.wsFmtTime(evt.ts) : '';
 
   // 写入事件日志
   const icons = {circuit_open:'⚠️',recovery:'✅',device_online:'📱',device_offline:'📴'};
@@ -2670,13 +2687,13 @@ function _handleSSEvent(evt){
 
   // toast 通知
   if(type === 'circuit_open'){
-    rpa.toast(`⚠️ 熔断: ${(d.serial||'?').slice(0,8)} ${d.platform} 连续失败 ${d.consecutive_fail}`, 'err');
+    rpa.toast(window.Tf('ov_js_evt_circuit',{s:(d.serial||'?').slice(0,8),p:d.platform,n:d.consecutive_fail}), 'err');
   } else if(type === 'recovery'){
-    rpa.toast(`✅ 恢复: ${(d.serial||'?').slice(0,8)} ${d.platform}`, 'ok');
+    rpa.toast(window.Tf('ov_js_evt_recovery',{s:(d.serial||'?').slice(0,8),p:d.platform}), 'ok');
   } else if(type === 'device_online'){
-    rpa.toast(`📱 上线: ${(d.serial||'?').slice(0,8)} ${d.label||''} [${(d.platforms||[]).join(',')}]`, 'ok');
+    rpa.toast(window.Tf('ov_js_evt_online',{s:(d.serial||'?').slice(0,8),label:(d.label||''),plats:(d.platforms||[]).join(',')}), 'ok');
   } else if(type === 'device_offline'){
-    rpa.toast(`📴 离线: ${(d.serial||'?').slice(0,8)}`, 'err');
+    rpa.toast(window.Tf('ov_js_evt_offline',{s:(d.serial||'?').slice(0,8)}), 'err');
   }
 
   // 自动刷新
@@ -2704,19 +2721,19 @@ document.addEventListener('click', function(e){
 
 <!-- S4-A: Sticky floating batch bar -->
 <div id="dev-float-bar" class="dev-float-bar">
-  <span class="fb-count" id="dev-fb-count">0 台选中</span>
+  <span class="fb-count" id="dev-fb-count">{{ (i18n or {}).get('ov_fb_count_init','0 台选中') }}</span>
   <div class="fb-sep"></div>
-  <span style="font-size:.72rem;color:var(--t2)">平台:</span>
+  <span style="font-size:.72rem;color:var(--t2)">{{ (i18n or {}).get('ov_fb_platform','平台:') }}</span>
   <label class="fb-cb-label"><input type="checkbox" class="fb-plat-cb" value="messenger" checked> MSG</label>
   <label class="fb-cb-label"><input type="checkbox" class="fb-plat-cb" value="line" checked> LINE</label>
   <label class="fb-cb-label"><input type="checkbox" class="fb-plat-cb" value="whatsapp" checked> WA</label>
   <div class="fb-sep"></div>
-  <span style="font-size:.72rem;color:var(--t2)">切换人设:</span>
-  <select class="fb-input" id="dev-fb-persona" style="min-width:120px"><option value="">— 选择人设 —</option></select>
-  <button class="fb-btn primary" onclick="devBatchApplyPersona()">应用</button>
-  <button class="fb-btn ghost" onclick="devBatchClearPersona()" style="color:#f87171;border-color:#f87171">清除人设</button>
+  <span style="font-size:.72rem;color:var(--t2)">{{ (i18n or {}).get('ov_fb_switch_persona','切换人设:') }}</span>
+  <select class="fb-input" id="dev-fb-persona" style="min-width:120px"><option value="">{{ (i18n or {}).get('ov_select_persona','— 选择人设 —') }}</option></select>
+  <button class="fb-btn primary" onclick="devBatchApplyPersona()">{{ (i18n or {}).get('ov_apply','应用') }}</button>
+  <button class="fb-btn ghost" onclick="devBatchClearPersona()" style="color:#f87171;border-color:#f87171">{{ (i18n or {}).get('ov_fb_clear_persona','清除人设') }}</button>
   <div class="fb-sep"></div>
-  <button class="fb-btn ghost" onclick="devSelectAll()">全选</button>
-  <button class="fb-btn ghost" onclick="devBatchClear()">取消选择</button>
+  <button class="fb-btn ghost" onclick="devSelectAll()">{{ (i18n or {}).get('ov_select_all','全选') }}</button>
+  <button class="fb-btn ghost" onclick="devBatchClear()">{{ (i18n or {}).get('ov_deselect','取消选择') }}</button>
 </div>
 {% endblock %}

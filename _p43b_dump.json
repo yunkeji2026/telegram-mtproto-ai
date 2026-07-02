@@ -1,0 +1,618 @@
+[
+ {
+  "body": "保存 messenger_rpa 配置失败",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "profiles 必须是数组",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "profile 必须是对象",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "profile.id 不能为空",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "profile.id 重复: {pid}",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": true,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "default profile 不存在: {default_id}",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": true,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "body 必须是对象",
+  "kind": "httpexc",
+  "count": 13,
+  "is_f": false,
+  "field": null,
+  "match": "err.rpa.body_must_be_object"
+ },
+ {
+  "body": "不允许的字段: {bad}",
+  "kind": "httpexc",
+  "count": 4,
+  "is_f": true,
+  "field": null,
+  "match": "err.rpa.disallowed_fields"
+ },
+ {
+  "body": "{k} 必须是对象",
+  "kind": "httpexc",
+  "count": 2,
+  "is_f": true,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "{k} 必须是字符串或数组",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": true,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "reply_profiles 必须是对象",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "策略运行状态读取失败: {type(ex).__name__}",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": true,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "messenger_rpa state_store 未注入",
+  "kind": "httpexc",
+  "count": 5,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "text 不能为空",
+  "kind": "httpexc",
+  "count": 2,
+  "is_f": false,
+  "field": null,
+  "match": "err.set.text_required"
+ },
+ {
+  "body": "策略模拟失败: {type(ex).__name__}: {ex}",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": true,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "status 不合法",
+  "kind": "httpexc",
+  "count": 2,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "id 不能为空",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "persona 已存在: {new_id}",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": true,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "action 只能是 disable / enable / delete / set_default",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "action 只能是 retry 或 cancel",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "该审计记录缺少可回滚的人设配置",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "该审计记录缺少账号回滚数据",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "该审计记录缺少会话回滚数据",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "该审计记录缺少任务回滚数据",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "暂不支持回滚任务状态: {status}",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": true,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "暂不支持该审计类型回滚",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "mobile_auto.api_base 未配置",
+  "kind": "httpexc",
+  "count": 3,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "不允许打开的 package: {package}",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": true,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "不支持的 mobile-auto 操作: {action}",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": true,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "accounts 必须是数组",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "未知 account: {aid}",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": true,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "reply_profile_id 不存在: {persona}",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": true,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "path 必填",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "音频文件不存在",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "ASR 测试失败: {type(exc).__name__}: {exc}",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": true,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "text 必填",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "试听文本最多 500 字",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "TTS 试听失败: {type(exc).__name__}: {exc}",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": true,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "state_store 未注入",
+  "kind": "httpexc",
+  "count": 17,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "chat_key 为空",
+  "kind": "httpexc",
+  "count": 3,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "line_status 不合法",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "priority 不合法",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "next_followup_at 必须是时间戳数字",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "state_store 不支持 handoff",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "reply_text 不能为空",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "仅 pending 审批支持 Suggest More",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "SkillManager 未注入",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "Suggest More 超时 (>45s)",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "action 必须是 approve 或 reject",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "ids 解析结果为空（或过滤后无匹配）",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "llm_cost.dump 失败: {ex}",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": true,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "service 未注入",
+  "kind": "httpexc",
+  "count": 11,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "account_registry 未初始化",
+  "kind": "httpexc",
+  "count": 2,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "未知 account: {account_id}",
+  "kind": "httpexc",
+  "count": 8,
+  "is_f": true,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "trigger 失败: {ex}",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": true,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "send-to 失败: {ex}",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": true,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "body 必须是 JSON 对象",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "chat_name 必填",
+  "kind": "httpexc",
+  "count": 2,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "runner 初始化失败: {ex}",
+  "kind": "httpexc",
+  "count": 3,
+  "is_f": true,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "list_skipped_chats 失败: {ex}",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": true,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "list_replays 失败: {ex}",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": true,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "zip 参数必填",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "service 未构建",
+  "kind": "httpexc",
+  "count": 4,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "service.calibrate_now 不可用",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "bot.db 不存在: {db}",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": true,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "messenger_rpa.adb_serial 未配置",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "accounts_health 不可用",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "health check 失败: {type(ex).__name__}:{ex}",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": true,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "chat_names 必须是数组",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "bindings 必须是数组",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "Messenger RPA 服务未启动",
+  "kind": "httpexc",
+  "count": 5,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "chat_key 必填",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "limit 必须为整数",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": false,
+  "field": null,
+  "match": "err.rpa.limit_must_be_int"
+ },
+ {
+  "body": "send_queue item {item_id} 不存在",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": true,
+  "field": null,
+  "match": "err.rpa.queue_item_not_found"
+ },
+ {
+  "body": "item {item_id} 不可取消（不存在或已非 queued 状态）",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": true,
+  "field": null,
+  "match": "err.rpa.queue_item_not_cancelable"
+ },
+ {
+  "body": "不支持的语言代码: {lang}。支持: {sorted(_VALID_LANGS)}",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": true,
+  "field": null,
+  "match": null
+ },
+ {
+  "body": "写入失败: {e}",
+  "kind": "httpexc",
+  "count": 1,
+  "is_f": true,
+  "field": null,
+  "match": null
+ }
+]

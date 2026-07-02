@@ -50,8 +50,8 @@ templates.env.filters["display_model"] = _display_model
 
 # Jinja2 global: site_name — dynamically set from domain pack display_name
 # Default to generic name; overridden in create_app() when domain pack loads
-templates.env.globals["site_name"] = "华灵科技客户转化聊天系统"
-templates.env.globals["site_name_short"] = "华灵科技"
+templates.env.globals["site_name"] = "无界科技 · 智聊"
+templates.env.globals["site_name_short"] = "无界科技"
 
 # ── /api/human-escalation/schedule-status 短时缓存（减轻 is_within + 粗估重复计算）──
 _SCHEDULE_STATUS_LOCK = threading.Lock()
@@ -141,8 +141,15 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
                               get_license_manager().status())
             templates.env.globals["site_name"] = _b["site_name"]
             templates.env.globals["site_name_short"] = _b["site_name_short"]
+            templates.env.globals["company_name"] = _b["company_name"]
+            templates.env.globals["product_name"] = _b["product_name"]
+            templates.env.globals["sidebar_name"] = _b["sidebar_name"]
+            templates.env.globals["brand_login_line"] = _b["login_line"]
             templates.env.globals["brand_primary_color"] = _b["primary_color"]
             templates.env.globals["brand_logo_url"] = _b["logo_url"]
+            templates.env.globals["brand_mark_url"] = _b["brand_mark_url"]
+            templates.env.globals["product_icon_url"] = _b["product_icon_url"]
+            templates.env.globals["brand_hub_url"] = _b.get("brand_hub_url", "")
             templates.env.globals["brand_login_subtitle"] = _b["login_subtitle"]
             templates.env.globals["show_powered_by"] = _b["show_powered_by"]
             templates.env.globals["powered_by_text"] = _b["powered_by_text"]
@@ -208,10 +215,17 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
 
     @app.get("/manifest.webmanifest", include_in_schema=False)
     async def _pwa_manifest():
-        return _FileResponse(
-            str(_pwa_dir / "manifest.webmanifest"),
-            media_type="application/manifest+json",
-        )
+        from fastapi.responses import JSONResponse
+        from src.utils.branding import get_branding, pwa_manifest
+
+        lic = None
+        try:
+            from src.licensing import get_license_manager
+            lic = get_license_manager().status()
+        except Exception:
+            pass
+        brand = get_branding(getattr(config_manager, "config", None) or {}, lic)
+        return JSONResponse(pwa_manifest(brand))
     app.state.kb_conflict_checkers = []
     app.state.intent_display_names_extra = {}
     app.state.config_manager = config_manager
@@ -593,6 +607,14 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
     async def set_lang(request: Request, lang: str = "zh"):
         resp = RedirectResponse(request.headers.get("referer", "/"), status_code=303)
         resp.set_cookie("ui_lang", lang, max_age=365 * 86400)
+        # 语言跟人走：登录用户切换语言时落库个人偏好，下次任意设备登录自动套用。
+        if lang in ("zh", "en"):
+            try:
+                _uname = request.session.get("username", "")
+                if _uname:
+                    user_store.set_lang(_uname, lang)
+            except Exception:
+                pass  # 落库失败不挡切换（cookie 已生效）
         return resp
 
     @app.get("/set_ui_mode")
@@ -979,7 +1001,7 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
     async def templates_page(request: Request, _=Depends(_page_auth)):
         data = config_manager.get_dynamic_templates_config() or {}
         return templates.TemplateResponse(request, "templates.html", {
-            "templates": data, "msg": ""
+            "templates": data, "msg": "", "msg_ok": True
         })
 
     @app.post("/templates/update")
@@ -1006,7 +1028,8 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
             return {"ok": ok, "msg": f"已保存 {key}" if ok else f"保存失败: {msg}"}
         return templates.TemplateResponse(request, "templates.html", {
             "templates": data,
-            "msg": f"已保存 {key}" if ok else f"保存失败: {msg}"
+            "msg": f"已保存 {key}" if ok else f"保存失败: {msg}",
+            "msg_ok": ok,
         })
 
     # ── AI 策略管理 ───────────────────────────────────────────
@@ -1875,7 +1898,7 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
 
     @app.get("/import", response_class=HTMLResponse)
     async def import_page(request: Request, _=Depends(_page_auth)):
-        return templates.TemplateResponse(request, "import.html", {"msg": ""})
+        return templates.TemplateResponse(request, "import.html", {"msg": "", "msg_ok": True})
 
     def _deep_merge(base: dict, incoming: dict) -> dict:
         """
@@ -1900,7 +1923,7 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         """
         if not file.filename.endswith(".zip"):
             return templates.TemplateResponse(request, "import.html", {
-                "msg": "请上传 .zip 文件", "import_mode": mode})
+                "msg": "请上传 .zip 文件", "import_mode": mode, "msg_ok": False})
         cfg_dir = config_manager.config_path.parent
         content = await file.read()
         restored = []
@@ -1938,10 +1961,10 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
                     restored.append(name)
         except zipfile.BadZipFile:
             return templates.TemplateResponse(request, "import.html", {
-                "msg": "ZIP 文件损坏", "import_mode": mode})
+                "msg": "ZIP 文件损坏", "import_mode": mode, "msg_ok": False})
         except yaml.YAMLError as ye:
             return templates.TemplateResponse(request, "import.html", {
-                "msg": f"YAML 格式错误: {ye}", "import_mode": mode})
+                "msg": f"YAML 格式错误: {ye}", "import_mode": mode, "msg_ok": False})
         if restored:
             config_manager.invalidate_templates_cache()
             config_manager.invalidate_exchange_rates_cache()
@@ -1957,7 +1980,7 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         else:
             msg = f"已导入 {len(restored)} 个文件: {', '.join(restored)}" if restored else "ZIP 中无可识别的配置文件"
         return templates.TemplateResponse(request, "import.html", {
-            "msg": msg, "import_mode": mode})
+            "msg": msg, "import_mode": mode, "msg_ok": bool(restored)})
 
 
     # ═══════════════════════════════════════════════════════════════════
@@ -2794,6 +2817,16 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         import logging as _log_vr
 
         _log_vr.getLogger("admin").debug("Voice TTS 路由注册跳过", exc_info=True)
+
+    # ── 实时共情语音通话网关（WebSocket，默认关：realtime_voice.enabled）──
+    try:
+        from src.web.routes.voice_live_routes import register_voice_live_routes
+
+        register_voice_live_routes(app, api_auth=_api_auth, config_manager=config_manager)
+    except Exception:
+        import logging as _log_rv
+
+        _log_rv.getLogger("admin").debug("实时语音通话路由注册跳过", exc_info=True)
 
     # ── Telegram 帐号设置页 ────────────────────────────────────
     try:

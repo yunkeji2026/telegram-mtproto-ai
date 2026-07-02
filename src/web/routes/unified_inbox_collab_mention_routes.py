@@ -29,6 +29,7 @@ from src.web.routes.unified_inbox_context import (
     _mention_context_for_conv,
 )
 from src.web.routes.unified_inbox_services import _inbox_store
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +87,7 @@ def register_collab_mention_routes(app, *, api_auth, config_manager) -> None:
         api_auth(request)
         store = _inbox_store(request)
         if store is None:
-            return {"ok": False, "error": "inbox_store 不可用"}
+            return {"ok": False, "error": tr(request, "err.svc.inbox_not_ready")}
         notes = store.list_conv_notes(conversation_id, limit=limit)
         return {"ok": True, "notes": notes, "count": len(notes)}
 
@@ -101,11 +102,11 @@ def register_collab_mention_routes(app, *, api_auth, config_manager) -> None:
         body_data = await request.json()
         text = str(body_data.get("body", "")).strip()
         if not text:
-            raise HTTPException(422, "body 不能为空")
+            raise HTTPException(422, tr(request, "err.ws.field_required", field="body"))
         mentions = [str(m) for m in (body_data.get("mentions") or []) if str(m).strip()]
         store = _inbox_store(request)
         if store is None:
-            raise HTTPException(503, "inbox_store 不可用")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
         # P48：高流失 + 高阶段自动抄送主管（若尚未 @）
         auto_cc_applied: List[Dict[str, Any]] = []
         try:
@@ -180,14 +181,14 @@ def register_collab_mention_routes(app, *, api_auth, config_manager) -> None:
         body_data = await request.json()
         text = str(body_data.get("body", "")).strip()
         if not text:
-            raise HTTPException(422, "body 不能为空")
+            raise HTTPException(422, tr(request, "err.ws.field_required", field="body"))
         store = _inbox_store(request)
         if store is None:
-            raise HTTPException(503, "inbox_store 不可用")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
         agent_id = str(request.session.get("user_name") or "")
         ok = store.edit_conv_note(note_id, text, agent_id=agent_id)
         if not ok:
-            raise HTTPException(404, "注解不存在")
+            raise HTTPException(404, tr(request, "err.ws.annotation_not_found"))
         return {"ok": True, "note_id": note_id}
 
     @app.delete("/api/workspace/conv/{conversation_id}/notes/{note_id}")
@@ -197,9 +198,9 @@ def register_collab_mention_routes(app, *, api_auth, config_manager) -> None:
         """V1：删除注解。"""
         store = _inbox_store(request)
         if store is None:
-            raise HTTPException(503, "inbox_store 不可用")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
         agent_id = str(request.session.get("user_name") or "")
         ok = store.delete_conv_note(note_id, agent_id=agent_id)
         if not ok:
-            raise HTTPException(404, "注解不存在")
+            raise HTTPException(404, tr(request, "err.ws.annotation_not_found"))
         return {"ok": True, "note_id": note_id}

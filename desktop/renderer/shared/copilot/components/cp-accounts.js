@@ -17,8 +17,12 @@
     PLAT_NAME[p.id] = p.name;
     PLAT_ICON[p.id] = p.icon;
   });
-  const MODE_LABEL = { protocol: "协议多开", web: "网页扫码", device: "真机/模拟器", desktop: "桌面网页" };
-  const STATUS_LABEL = { online: "在线", offline: "离线", pending: "待登录", unknown: "未知" };
+  const MODE_KEY = { protocol: "cp.acct.mode.protocol", web: "cp.acct.mode.web", device: "cp.acct.mode.device", desktop: "cp.acct.mode.desktop" };
+  const STATUS_KEY = { online: "cp.acct.status.online", offline: "cp.acct.status.offline", pending: "cp.acct.status.pending", unknown: "cp.acct.status.unknown" };
+  function T(key, vars) {
+    const f = root.CopilotShared && root.CopilotShared.t;
+    return f ? f(key, vars) : key;
+  }
 
   const CSS = `
     :host { display:block; font-size:var(--cp-fs,13px); color:var(--cp-text,#1e293b); }
@@ -34,9 +38,17 @@
     button.primary { background:var(--cp-accent,#4f46e5); color:#fff; border-color:transparent; }
     button.danger { color:var(--cp-danger,#dc2626); border-color:var(--cp-danger,#dc2626); }
     button:disabled { opacity:.5; cursor:default; }
-    .row { display:flex; align-items:center; gap:6px; padding:6px 4px; border-bottom:1px solid var(--cp-border,#eef2f7); flex-wrap:wrap; }
+    .row { display:flex; align-items:center; gap:8px; padding:7px 4px 7px 8px; border-left:3px solid var(--row-accent,transparent); border-bottom:1px solid var(--cp-border,#eef2f7); flex-wrap:wrap; }
     .row:last-child { border-bottom:0; }
-    .row .ic { font-size:16px; }
+    .row .ic { font-size:16px; display:inline-flex; align-items:center; line-height:0; }
+    /* 身份化头像：账号色渐变底 + 字首 + 平台品牌角标（同平台共享品牌左强调，账号靠头像区分） */
+    .row .av { position:relative; flex-shrink:0; width:34px; height:34px; border-radius:50%;
+               display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700;
+               font-size:14px; line-height:1; box-shadow:0 1px 2px rgba(0,0,0,.2); user-select:none; }
+    .row .av .b { position:absolute; right:-3px; bottom:-3px; width:15px; height:15px; border-radius:50%;
+               background:var(--cp-surface,#fff); display:flex; align-items:center; justify-content:center;
+               line-height:0; box-shadow:0 0 0 1.5px var(--cp-surface,#fff); }
+    .row .av .b svg { width:13px; height:13px; display:block; border-radius:2px; }
     .row .meta { flex:1; min-width:120px; }
     .row .label { font-weight:600; }
     .row .sub { font-size:var(--cp-fs-tiny,11px); color:var(--cp-text-dim,#64748b); }
@@ -77,7 +89,7 @@
       super();
       this.attachShadow({ mode: "open" });
       this.shadowRoot.innerHTML =
-        `<style>${CSS}</style><div class="wrap"><div class="empty">加载中…</div></div>`;
+        `<style>${CSS}</style><div class="wrap"><div class="empty">${T("cp.common.loading")}</div></div>`;
       this._client = null;
       this._poll = null; // 登录轮询计时器
       this._login = null; // {platform, login_id}
@@ -104,7 +116,7 @@
       try {
         d = await this._client.listAccounts();
       } catch (e) {
-        this._wrap().innerHTML = '<div class="err">账号列表加载失败</div>';
+        this._wrap().innerHTML = `<div class="err">${this._esc(T("cp.acct.list_err"))}</div>`;
         return;
       }
       const accs = (d && d.accounts) || [];
@@ -114,44 +126,77 @@
     _render(accs) {
       this._accounts = accs || [];
       const rows = accs.map((a) => this._rowHtml(a)).join("") ||
-        '<div class="empty">暂无账号，点「添加账号」扫码登录</div>';
+        `<div class="empty">${this._esc(T("cp.acct.empty"))}</div>`;
       this._wrap().innerHTML =
-        `<div class="head"><span class="t">账号管理</span>` +
-        `<button data-act="health">体检</button>` +
-        `<button data-act="settings">设置</button>` +
-        `<button data-act="webhooks">告警渠道</button>` +
-        `<button data-act="audit">日志</button>` +
-        `<button data-act="refresh">刷新</button>` +
-        `<button class="primary" data-act="add">添加账号</button></div>` +
+        `<div class="head"><span class="t">${this._esc(T("cp.acct.title"))}</span>` +
+        `<button data-act="health">${this._esc(T("cp.acct.health"))}</button>` +
+        `<button data-act="settings">${this._esc(T("cp.acct.settings"))}</button>` +
+        `<button data-act="webhooks">${this._esc(T("cp.acct.webhooks"))}</button>` +
+        `<button data-act="audit">${this._esc(T("cp.acct.audit_btn"))}</button>` +
+        `<button data-act="refresh">${this._esc(T("cp.common.refresh"))}</button>` +
+        `<button class="primary" data-act="add">${this._esc(T("cp.acct.add"))}</button></div>` +
         `<div class="list">${rows}</div>` +
         `<div class="form"></div>`;
     }
 
+    _grad(seed) {
+      const G = [["#60a5fa", "#2563eb"], ["#38bdf8", "#0284c7"], ["#34d399", "#059669"],
+        ["#a78bfa", "#7c3aed"], ["#f472b6", "#db2777"], ["#fbbf24", "#d97706"],
+        ["#22d3ee", "#0891b2"], ["#818cf8", "#4f46e5"], ["#fb7185", "#e11d48"],
+        ["#2dd4bf", "#0d9488"], ["#c084fc", "#9333ea"], ["#4ade80", "#16a34a"]];
+      const s = String(seed || "?"); let h = 0;
+      for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+      const g = G[h % G.length];
+      return "linear-gradient(135deg," + g[0] + " 0%," + g[1] + " 100%)";
+    }
+
+    _selfName(a) {
+      return a.self_name || (a.self_username ? "@" + a.self_username : "");
+    }
+
+    _avatarHtml(a) {
+      const nm = PLAT_NAME[a.platform] || a.platform || "?";
+      const badge = (window.platformIconSVG) ? window.platformIconSVG(a.platform, { size: 13, inlineDefs: true }) : "";
+      const badgeHtml = badge ? `<span class="b">${badge}</span>` : "";
+      // P1：有真头像用真图，否则回落渐变字首
+      if (a.self_avatar) {
+        return `<span class="av" style="background:var(--cp-surface-2,#f1f5f9)">` +
+          `<img src="${this._esc(a.self_avatar)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.remove()">` +
+          badgeHtml + `</span>`;
+      }
+      let ini = String(a.label || this._selfName(a) || "").trim().charAt(0) || String(nm).charAt(0);
+      ini = ini.toUpperCase();
+      return `<span class="av" style="background:${this._grad(a.platform + ":" + a.account_id)}"><span>${this._esc(ini)}</span>` +
+        badgeHtml + `</span>`;
+    }
+
     _rowHtml(a) {
-      const icon = PLAT_ICON[a.platform] || "💬";
+      const accent = (window.platformBrandColor) ? window.platformBrandColor(a.platform) : "transparent";
       const st = a.running ? "online" : (a.status || "unknown");
       const stCls = st === "online" ? "on" : (st === "pending" ? "pending" : "off");
-      const stTxt = STATUS_LABEL[st] || st;
-      const mode = MODE_LABEL[a.mode] || a.mode || "";
+      const stTxt = STATUS_KEY[st] ? T(STATUS_KEY[st]) : st;
+      const mode = MODE_KEY[a.mode] ? T(MODE_KEY[a.mode]) : (a.mode || "");
       // 仅 protocol 号可由编排器启停 + 切 7×24 自动回复（web/device 由各自宿主或手机负责）
       const p = this._esc(a.platform);
       const id = this._esc(a.account_id);
       const ctrl = a.mode === "protocol"
-        ? `<button data-act="toggle-auto" class="${a.auto_reply ? "primary" : ""}" data-p="${p}" data-a="${id}" data-v="${a.auto_reply ? "1" : "0"}">${a.auto_reply ? "自动:开" : "自动:关"}</button>` +
-          `<button data-act="adv" data-p="${p}" data-a="${id}">高级</button>` +
-          `<button data-act="start" data-p="${p}" data-a="${id}">启动</button>` +
-          `<button data-act="stop" data-p="${p}" data-a="${id}">停止</button>`
+        ? `<button data-act="toggle-auto" class="${a.auto_reply ? "primary" : ""}" data-p="${p}" data-a="${id}" data-v="${a.auto_reply ? "1" : "0"}">${this._esc(a.auto_reply ? T("cp.acct.auto_on") : T("cp.acct.auto_off"))}</button>` +
+          `<button data-act="adv" data-p="${p}" data-a="${id}">${this._esc(T("cp.acct.adv"))}</button>` +
+          `<button data-act="start" data-p="${p}" data-a="${id}">${this._esc(T("cp.acct.start"))}</button>` +
+          `<button data-act="stop" data-p="${p}" data-a="${id}">${this._esc(T("cp.acct.stop"))}</button>`
         : "";
       const q = a.auto_reply_quota;
       let quotaTxt = "";
       if (q && a.auto_reply) {
         quotaTxt = q.circuit_open
-          ? " · 熔断中"
-          : ` · 今日 ${q.day_used}/${q.day_limit || "∞"}`;
+          ? T("cp.acct.circuit_suffix")
+          : T("cp.acct.today_suffix", { used: q.day_used, limit: q.day_limit || "∞" });
       }
-      return `<div class="row"><span class="ic">${icon}</span>` +
-        `<div class="meta"><div class="label">${this._esc(a.label || a.account_id)}</div>` +
-        `<div class="sub">${this._esc(a.platform)} · ${this._esc(a.account_id)}${mode ? " · " + this._esc(mode) : ""}${this._esc(quotaTxt)}</div></div>` +
+      const disp = a.label || this._selfName(a) || a.account_id;
+      const subId = a.self_username ? "@" + a.self_username : a.account_id;
+      return `<div class="row" style="--row-accent:${this._esc(accent)}">${this._avatarHtml(a)}` +
+        `<div class="meta"><div class="label">${this._esc(disp)}</div>` +
+        `<div class="sub">${this._esc(a.platform)} · ${this._esc(subId)}${mode ? " · " + this._esc(mode) : ""}${this._esc(quotaTxt)}</div></div>` +
         `<span class="badge ${stCls}">${this._esc(stTxt)}</span>${ctrl}</div>`;
     }
 
@@ -193,20 +238,21 @@
       if (!form) return;
       const v = (x) => (x == null ? "" : x);
       const ck = (x) => (x ? "checked" : "");
+      const gph = this._esc(T("cp.common.global"));
       form.innerHTML =
         `<div class="add" data-p="${this._esc(platform)}" data-a="${this._esc(account_id)}">` +
-        `<div class="sub">账号专属覆盖（留空＝沿用全局）：${this._esc(a.label || account_id)}</div>` +
-        `<div class="field"><label>每小时</label><input class="o-hourly" type="number" placeholder="全局" value="${this._esc(v(rate.hourly))}"/>` +
-        `<label>每天</label><input class="o-daily" type="number" placeholder="全局" value="${this._esc(v(rate.daily))}"/></div>` +
-        `<div class="field"><label>营业时段</label><input type="checkbox" class="o-hen" ${ck(hrs.enabled)} style="flex:0"/>` +
+        `<div class="sub">${this._esc(T("cp.acct.ov_title", { label: a.label || account_id }))}</div>` +
+        `<div class="field"><label>${this._esc(T("cp.acct.hourly"))}</label><input class="o-hourly" type="number" placeholder="${gph}" value="${this._esc(v(rate.hourly))}"/>` +
+        `<label>${this._esc(T("cp.acct.daily"))}</label><input class="o-daily" type="number" placeholder="${gph}" value="${this._esc(v(rate.daily))}"/></div>` +
+        `<div class="field"><label>${this._esc(T("cp.acct.hours"))}</label><input type="checkbox" class="o-hen" ${ck(hrs.enabled)} style="flex:0"/>` +
         `<input class="o-hst" placeholder="09:00" value="${this._esc(v(hrs.start))}" style="max-width:64px"/>–` +
         `<input class="o-hed" placeholder="23:00" value="${this._esc(v(hrs.end))}" style="max-width:64px"/></div>` +
-        `<div class="field"><label>延迟秒</label><input class="o-dmin" type="number" placeholder="全局" value="${this._esc(v(dl.min_sec))}"/>–` +
-        `<input class="o-dmax" type="number" placeholder="全局" value="${this._esc(v(dl.max_sec))}"/></div>` +
+        `<div class="field"><label>${this._esc(T("cp.acct.delay_sec"))}</label><input class="o-dmin" type="number" placeholder="${gph}" value="${this._esc(v(dl.min_sec))}"/>–` +
+        `<input class="o-dmax" type="number" placeholder="${gph}" value="${this._esc(v(dl.max_sec))}"/></div>` +
         `<div class="field" style="justify-content:flex-end;gap:8px">` +
-        `<button data-act="reset-override" class="danger">清除覆盖</button>` +
-        `<button data-act="cancel-add">取消</button>` +
-        `<button class="primary" data-act="save-override">保存</button></div>` +
+        `<button data-act="reset-override" class="danger">${this._esc(T("cp.acct.clear_ov"))}</button>` +
+        `<button data-act="cancel-add">${this._esc(T("cp.common.cancel"))}</button>` +
+        `<button class="primary" data-act="save-override">${this._esc(T("cp.common.save"))}</button></div>` +
         `<div class="o-msg sub"></div></div>`;
     }
 
@@ -241,12 +287,12 @@
       try {
         const d = await this._client.setAccountOverride({ platform, account_id, override });
         if (msg) {
-          msg.textContent = (d && d.ok) ? "已保存 ✓，刷新生效" : "保存失败";
+          msg.textContent = (d && d.ok) ? T("cp.acct.saved_refresh") : T("cp.common.save_fail");
           msg.style.color = (d && d.ok) ? "#2f9e6e" : "var(--cp-danger,#dc2626)";
         }
         setTimeout(() => this.reload(), 700);
       } catch (e) {
-        if (msg) { msg.textContent = "保存失败"; msg.style.color = "var(--cp-danger,#dc2626)"; }
+        if (msg) { msg.textContent = T("cp.common.save_fail"); msg.style.color = "var(--cp-danger,#dc2626)"; }
         el.disabled = false;
       }
     }
@@ -287,47 +333,44 @@
     }
 
     _auditRowHtml(it) {
-      const REASON = {
-        ok: "已发", high_risk: "高风险转人工", empty_reply: "空回复转人工",
-        generate_error: "生成失败", send_error: "发送失败",
-        quota_hour: "超小时配额", quota_day: "超每日配额",
-        circuit_open: "熔断中", off_hours: "营业时段外",
-      };
       const HANDOFF = ["high_risk", "empty_reply", "generate_error", "send_error",
         "quota_hour", "quota_day", "circuit_open", "off_hours"];
       const sent = it.decision === "sent";
       const cls = sent ? "sent" : (HANDOFF.indexOf(it.reason) >= 0 ? "handoff" : "");
-      const rt = REASON[it.reason] || it.reason || "";
+      const reasonKey = "cp.acct.reason." + (it.reason || "");
+      const rt = it.reason ? (T(reasonKey) === reasonKey ? it.reason : T(reasonKey)) : "";
       const t = it.ts ? new Date(it.ts * 1000).toLocaleTimeString() : "";
       const inb = this._esc(String(it.inbound || "").slice(0, 80));
       const rep = this._esc(String(it.reply || "").slice(0, 120));
       return `<div class="it"><div class="hd"><span class="rb ${cls}">${this._esc(rt)}</span>` +
         `<span>${this._esc(it.platform)}·${this._esc(it.account_id)}</span>` +
         `<span style="flex:1"></span><span>${this._esc(t)}</span></div>` +
-        `<div class="tx">客户：${inb}${rep ? "\nAI：" + rep : ""}</div></div>`;
+        `<div class="tx">${this._esc(T("cp.acct.cust_pfx"))}${inb}${rep ? "\n" + this._esc(T("cp.acct.ai_pfx")) + rep : ""}</div></div>`;
     }
 
     async _renderAudit() {
       this._stopPoll();
       const form = this.shadowRoot.querySelector(".form");
       if (!form || !this._client || !this._client.autoReplyAudit) return;
-      form.innerHTML = '<div class="audit"><div class="sum">加载中…</div></div>';
+      form.innerHTML = `<div class="audit"><div class="sum">${this._esc(T("cp.common.loading"))}</div></div>`;
       let d;
       try {
         d = await this._client.autoReplyAudit({ limit: 50 });
       } catch (e) {
-        form.innerHTML = '<div class="audit"><div class="err">日志加载失败</div></div>';
+        form.innerHTML = `<div class="audit"><div class="err">${this._esc(T("cp.acct.audit_err"))}</div></div>`;
         return;
       }
       const items = (d && d.items) || [];
       const st = (d && d.stats) || {};
       const gOn = !!(d && d.global_enabled);
       const rows = items.map((it) => this._auditRowHtml(it)).join("") ||
-        '<div class="empty">暂无自动回复记录</div>';
-      const sum = `全局闸门：${gOn ? "开" : "关"} · 近24h 已发 ${st.sent || 0} / 跳过 ${st.skipped || 0}`;
+        `<div class="empty">${this._esc(T("cp.acct.audit_empty"))}</div>`;
+      const sum = T("cp.acct.audit_sum", {
+        on: gOn ? T("cp.common.on") : T("cp.common.off"), sent: st.sent || 0, skipped: st.skipped || 0,
+      });
       form.innerHTML = `<div class="audit"><div class="sum">${this._esc(sum)}` +
-        `<span class="live" title="实时">● LIVE</span>` +
-        `<button data-act="cancel-add">关闭</button></div>` +
+        `<span class="live" title="${this._esc(T("cp.acct.live_title"))}">● LIVE</span>` +
+        `<button data-act="cancel-add">${this._esc(T("cp.common.close"))}</button></div>` +
         `<div class="audit-list">${rows}</div></div>`;
       this._startAuditLive();
     }
@@ -388,56 +431,56 @@
       this._stopPoll(); this._stopAuditLive();
       const form = this.shadowRoot.querySelector(".form");
       if (!form || !this._client || !this._client.autoReplyHealth) return;
-      form.innerHTML = '<div class="audit"><div class="sum">体检中…</div></div>';
+      form.innerHTML = `<div class="audit"><div class="sum">${this._esc(T("cp.acct.health_ing"))}</div></div>`;
       let h;
       try {
         h = await this._client.autoReplyHealth();
       } catch (e) {
-        form.innerHTML = '<div class="audit"><div class="err">体检失败</div></div>';
+        form.innerHTML = `<div class="audit"><div class="err">${this._esc(T("cp.acct.health_err"))}</div></div>`;
         return;
       }
       if (!h || h.ok === false) {
-        form.innerHTML = '<div class="audit"><div class="err">体检失败</div></div>';
+        form.innerHTML = `<div class="audit"><div class="err">${this._esc(T("cp.acct.health_err"))}</div></div>`;
         return;
       }
       const acc = h.accounts || {}, lim = h.limits || {}, st = h.stats_24h || {};
       const okBadge = h.healthy
-        ? '<span class="rb sent">健康</span>'
-        : `<span class="rb handoff">${(h.warnings || []).length} 项告警</span>`;
+        ? `<span class="rb sent">${this._esc(T("cp.acct.healthy"))}</span>`
+        : `<span class="rb handoff">${this._esc(T("cp.acct.warns", { n: (h.warnings || []).length }))}</span>`;
       const line = (k, v) => `<div class="hd"><span>${this._esc(k)}</span><span style="flex:1"></span><span>${this._esc(v)}</span></div>`;
       const warns = (h.warnings || []).map(
         (w) => `<div class="tx" style="color:var(--cp-danger,#dc2626)">⚠ ${this._esc(w)}</div>`).join("");
       const changes = (h.recent_changes || []).map((c) => {
         const t = c.ts ? new Date(c.ts * 1000).toLocaleString() : "";
-        const tgt = c.scope === "global" ? "全局"
+        const tgt = c.scope === "global" ? T("cp.common.global")
           : `${this._esc(c.platform || "")}:${this._esc(c.account_id || "")}`;
         const ch = (c.changes || []).map(
-          (x) => `${this._esc(x.key)}: ${this._esc(JSON.stringify(x.old))}→${this._esc(JSON.stringify(x.new))}`).join("；");
+          (x) => `${this._esc(x.key)}: ${this._esc(JSON.stringify(x.old))}→${this._esc(JSON.stringify(x.new))}`).join("; ");
         return `<div class="it"><div class="hd"><span class="rb">${this._esc(c.scope || "")}</span>` +
           `<span>${tgt}</span><span style="flex:1"></span><span>${this._esc(c.actor || "")} ${this._esc(t)}</span></div>` +
           `<div class="tx">${ch}</div></div>`;
-      }).join("") || '<div class="empty">暂无变更记录</div>';
+      }).join("") || `<div class="empty">${this._esc(T("cp.acct.no_changes"))}</div>`;
       form.innerHTML =
-        `<div class="audit"><div class="sum">运维体检 ${okBadge}` +
-        `<button data-act="cancel-add">关闭</button></div>` +
+        `<div class="audit"><div class="sum">${this._esc(T("cp.acct.health_title"))} ${okBadge}` +
+        `<button data-act="cancel-add">${this._esc(T("cp.common.close"))}</button></div>` +
         `<div class="it">` +
-        line("全局闸门", h.global_enabled ? "开" : "关") +
-        line("SkillManager", h.skill_manager_ready ? "就绪" : "未就绪") +
-        line("告警 webhook", h.webhook_alert_configured ? "已配置" : "未配置") +
-        line("开启自动回复账号", `${acc.auto_reply_on || 0}（协议号 ${acc.protocol || 0}）`) +
-        line("熔断中", (h.circuit_open || []).length ? (h.circuit_open || []).join(", ") : "无") +
-        line("全局配额", `${lim.hourly || "∞"}/时 · ${lim.daily || "∞"}/天`) +
-        line("近24h", `已发 ${st.sent || 0} / 跳过 ${st.skipped || 0}`) +
+        line(T("cp.acct.l_gate"), h.global_enabled ? T("cp.common.on") : T("cp.common.off")) +
+        line("SkillManager", h.skill_manager_ready ? T("cp.acct.ready") : T("cp.acct.not_ready")) +
+        line(T("cp.acct.l_webhook"), h.webhook_alert_configured ? T("cp.acct.configured") : T("cp.acct.not_configured")) +
+        line(T("cp.acct.l_auto_on"), `${acc.auto_reply_on || 0}${T("cp.acct.protocol_count", { n: acc.protocol || 0 })}`) +
+        line(T("cp.acct.l_circuit"), (h.circuit_open || []).length ? (h.circuit_open || []).join(", ") : T("cp.common.none")) +
+        line(T("cp.acct.l_quota"), T("cp.acct.quota_fmt", { hourly: lim.hourly || "∞", daily: lim.daily || "∞" })) +
+        line(T("cp.acct.l_24h"), T("cp.acct.sent_skipped", { sent: st.sent || 0, skipped: st.skipped || 0 })) +
         `</div>` +
         (warns ? `<div class="it">${warns}</div>` : "") +
-        `<div class="sub" style="margin-top:8px">最近配置变更</div>${changes}</div>`;
+        `<div class="sub" style="margin-top:8px">${this._esc(T("cp.acct.recent_changes"))}</div>${changes}</div>`;
     }
 
     async _renderWebhooks() {
       this._stopPoll(); this._stopAuditLive();
       const form = this.shadowRoot.querySelector(".form");
       if (!form || !this._client || !this._client.autoReplyWebhooks) return;
-      form.innerHTML = '<div class="add"><div class="sub">加载告警渠道…</div></div>';
+      form.innerHTML = `<div class="add"><div class="sub">${this._esc(T("cp.acct.wh_loading"))}</div></div>`;
       let list = [];
       try {
         const d = await this._client.autoReplyWebhooks();
@@ -446,13 +489,13 @@
       const rows = list.map((w, i) => this._whRowHtml(w, i)).join("");
       form.innerHTML =
         `<div class="add">` +
-        `<div class="sub">告警渠道（自动回复熔断/配额耗尽 → 推送到 Telegram/WhatsApp/Messenger）</div>` +
-        `<div class="wh-list">${rows || '<div class="empty">暂无渠道，点下方「新增」</div>'}</div>` +
+        `<div class="sub">${this._esc(T("cp.acct.wh_desc"))}</div>` +
+        `<div class="wh-list">${rows || `<div class="empty">${this._esc(T("cp.acct.wh_empty"))}</div>`}</div>` +
         `<div class="field" style="justify-content:space-between;gap:8px">` +
-        `<button data-act="wh-add">+ 新增渠道</button>` +
+        `<button data-act="wh-add">${this._esc(T("cp.acct.wh_add"))}</button>` +
         `<span style="flex:1"></span>` +
-        `<button data-act="cancel-add">取消</button>` +
-        `<button class="primary" data-act="wh-save">保存全部</button></div>` +
+        `<button data-act="cancel-add">${this._esc(T("cp.common.cancel"))}</button>` +
+        `<button class="primary" data-act="wh-save">${this._esc(T("cp.acct.wh_save_all"))}</button></div>` +
         `<div class="wh-msg sub"></div></div>`;
     }
 
@@ -462,16 +505,16 @@
       const fmt = w.format || "telegram";
       const fopt = (v, label) => `<option value="${v}"${fmt === v ? " selected" : ""}>${label}</option>`;
       const evs = (w.events || ["autoreply_alert"]).join(",");
-      const tokenPh = w.token_set ? "已设置（留空不改）" : "token / access_token";
+      const tokenPh = w.token_set ? T("cp.acct.token_set") : T("cp.acct.token_ph");
       return `<div class="wh-it" data-i="${i}" style="border:1px solid var(--cp-border,#eef2f7);border-radius:8px;padding:6px;margin-bottom:6px">` +
-        `<div class="field"><input class="w-name" placeholder="名称" value="${e(w.name)}" style="max-width:120px"/>` +
-        `<select class="w-fmt">${fopt("telegram", "Telegram")}${fopt("whatsapp", "WhatsApp")}${fopt("messenger", "Messenger")}${fopt("json", "通用JSON")}</select>` +
-        `<label style="flex:0"><input type="checkbox" class="w-en" ${w.enabled === false ? "" : "checked"}/>启用</label>` +
-        `<span style="flex:1"></span><button data-act="wh-test">测试</button><button data-act="wh-del">删除</button></div>` +
+        `<div class="field"><input class="w-name" placeholder="${e(T("cp.acct.wh_name_ph"))}" value="${e(w.name)}" style="max-width:120px"/>` +
+        `<select class="w-fmt">${fopt("telegram", "Telegram")}${fopt("whatsapp", "WhatsApp")}${fopt("messenger", "Messenger")}${fopt("json", T("cp.acct.wh_json"))}</select>` +
+        `<label style="flex:0"><input type="checkbox" class="w-en" ${w.enabled === false ? "" : "checked"}/>${e(T("cp.common.enable"))}</label>` +
+        `<span style="flex:1"></span><button data-act="wh-test">${e(T("cp.common.test"))}</button><button data-act="wh-del">${e(T("cp.common.delete"))}</button></div>` +
         `<div class="field"><input class="w-token" placeholder="${e(tokenPh)}" value="" style="flex:1"/></div>` +
-        `<div class="field"><input class="w-target" placeholder="chat_id / 收件号 / PSID" value="${e(w.target)}" style="flex:1"/></div>` +
-        `<div class="field"><input class="w-url" placeholder="url（whatsapp 必填；tg/messenger 可留空）" value="${e(w.url)}" style="flex:1"/></div>` +
-        `<div class="field"><input class="w-events" placeholder="事件别名(逗号)" value="${e(evs)}" style="flex:1"/></div>` +
+        `<div class="field"><input class="w-target" placeholder="${e(T("cp.acct.wh_target_ph"))}" value="${e(w.target)}" style="flex:1"/></div>` +
+        `<div class="field"><input class="w-url" placeholder="${e(T("cp.acct.wh_url_ph"))}" value="${e(w.url)}" style="flex:1"/></div>` +
+        `<div class="field"><input class="w-events" placeholder="${e(T("cp.acct.wh_events_ph"))}" value="${e(evs)}" style="flex:1"/></div>` +
         `</div>`;
     }
 
@@ -516,11 +559,11 @@
       try {
         const d = await this._client.setAutoReplyWebhooks(this._whCollect());
         if (msg) {
-          msg.textContent = (d && d.ok) ? `已保存 ${d.count} 条 ✓` : "保存失败";
+          msg.textContent = (d && d.ok) ? T("cp.acct.wh_saved", { count: d.count }) : T("cp.common.save_fail");
           msg.style.color = (d && d.ok) ? "#2f9e6e" : "var(--cp-danger,#dc2626)";
         }
       } catch (e) {
-        if (msg) { msg.textContent = "保存失败"; msg.style.color = "var(--cp-danger,#dc2626)"; }
+        if (msg) { msg.textContent = T("cp.common.save_fail"); msg.style.color = "var(--cp-danger,#dc2626)"; }
       }
       el.disabled = false;
     }
@@ -538,16 +581,16 @@
         events: events.length ? events : ["autoreply_alert"],
       };
       el.disabled = true;
-      if (msg) { msg.textContent = "测试发送中…"; msg.style.color = ""; }
+      if (msg) { msg.textContent = T("cp.acct.wh_testing"); msg.style.color = ""; }
       try {
         const d = await this._client.testAutoReplyWebhook({ webhook, index: idx });
         if (msg) {
-          msg.textContent = (d && d.ok) ? "测试发送成功 ✓（请到目标查看）"
-            : `测试失败：${(d && d.error) || "目标拒绝/不可达"}`;
+          msg.textContent = (d && d.ok) ? T("cp.acct.wh_test_ok")
+            : T("cp.acct.wh_test_fail", { err: (d && d.error) || T("cp.acct.wh_unreachable") });
           msg.style.color = (d && d.ok) ? "#2f9e6e" : "var(--cp-danger,#dc2626)";
         }
       } catch (e) {
-        if (msg) { msg.textContent = "测试失败"; msg.style.color = "var(--cp-danger,#dc2626)"; }
+        if (msg) { msg.textContent = T("cp.acct.wh_test_fail_simple"); msg.style.color = "var(--cp-danger,#dc2626)"; }
       }
       el.disabled = false;
     }
@@ -556,7 +599,7 @@
       this._stopPoll(); this._stopAuditLive();
       const form = this.shadowRoot.querySelector(".form");
       if (!form || !this._client || !this._client.autoReplyConfig) return;
-      form.innerHTML = '<div class="add"><div class="field">加载中…</div></div>';
+      form.innerHTML = `<div class="add"><div class="field">${this._esc(T("cp.common.loading"))}</div></div>`;
       let s = {};
       try {
         const d = await this._client.autoReplyConfig();
@@ -566,21 +609,21 @@
       const ck = (v) => (v ? "checked" : "");
       form.innerHTML =
         `<div class="add">` +
-        `<div class="field"><label>总开关</label><input type="checkbox" class="c-enabled" ${ck(s.enabled)} style="flex:0"/>` +
-        `<span class="sub">全局自动回复闸门（与账号开关双闸门）</span></div>` +
-        `<div class="field"><label>每小时</label><input class="c-hourly" type="number" value="${this._esc(rate.hourly != null ? rate.hourly : 30)}"/>` +
-        `<label>每天</label><input class="c-daily" type="number" value="${this._esc(rate.daily != null ? rate.daily : 200)}"/></div>` +
-        `<div class="field"><label>熔断阈值</label><input class="c-bth" type="number" value="${this._esc(brk.threshold != null ? brk.threshold : 5)}"/>` +
-        `<label>冷却秒</label><input class="c-bcd" type="number" value="${this._esc(brk.cooldown_sec != null ? brk.cooldown_sec : 300)}"/></div>` +
-        `<div class="field"><label>营业时段</label><input type="checkbox" class="c-hen" ${ck(hrs.enabled)} style="flex:0"/>` +
+        `<div class="field"><label>${this._esc(T("cp.acct.s_master"))}</label><input type="checkbox" class="c-enabled" ${ck(s.enabled)} style="flex:0"/>` +
+        `<span class="sub">${this._esc(T("cp.acct.s_master_hint"))}</span></div>` +
+        `<div class="field"><label>${this._esc(T("cp.acct.hourly"))}</label><input class="c-hourly" type="number" value="${this._esc(rate.hourly != null ? rate.hourly : 30)}"/>` +
+        `<label>${this._esc(T("cp.acct.daily"))}</label><input class="c-daily" type="number" value="${this._esc(rate.daily != null ? rate.daily : 200)}"/></div>` +
+        `<div class="field"><label>${this._esc(T("cp.acct.s_breaker_th"))}</label><input class="c-bth" type="number" value="${this._esc(brk.threshold != null ? brk.threshold : 5)}"/>` +
+        `<label>${this._esc(T("cp.acct.s_cooldown"))}</label><input class="c-bcd" type="number" value="${this._esc(brk.cooldown_sec != null ? brk.cooldown_sec : 300)}"/></div>` +
+        `<div class="field"><label>${this._esc(T("cp.acct.hours"))}</label><input type="checkbox" class="c-hen" ${ck(hrs.enabled)} style="flex:0"/>` +
         `<input class="c-hst" value="${this._esc(hrs.start || "09:00")}" style="max-width:64px"/>–` +
         `<input class="c-hed" value="${this._esc(hrs.end || "23:00")}" style="max-width:64px"/>` +
-        `<label style="flex:0 0 auto">时区</label><input class="c-htz" type="number" value="${this._esc(hrs.tz_offset != null ? hrs.tz_offset : 8)}" style="max-width:54px"/></div>` +
-        `<div class="field"><label>延迟秒</label><input class="c-dmin" type="number" value="${this._esc(dl.min_sec != null ? dl.min_sec : 0)}"/>–` +
+        `<label style="flex:0 0 auto">${this._esc(T("cp.acct.s_tz"))}</label><input class="c-htz" type="number" value="${this._esc(hrs.tz_offset != null ? hrs.tz_offset : 8)}" style="max-width:54px"/></div>` +
+        `<div class="field"><label>${this._esc(T("cp.acct.delay_sec"))}</label><input class="c-dmin" type="number" value="${this._esc(dl.min_sec != null ? dl.min_sec : 0)}"/>–` +
         `<input class="c-dmax" type="number" value="${this._esc(dl.max_sec != null ? dl.max_sec : 0)}"/></div>` +
         `<div class="field" style="justify-content:flex-end;gap:8px">` +
-        `<button data-act="cancel-add">取消</button>` +
-        `<button class="primary" data-act="save-config">保存</button></div>` +
+        `<button data-act="cancel-add">${this._esc(T("cp.common.cancel"))}</button>` +
+        `<button class="primary" data-act="save-config">${this._esc(T("cp.common.save"))}</button></div>` +
         `<div class="c-msg sub"></div></div>`;
     }
 
@@ -604,11 +647,11 @@
       try {
         const d = await this._client.setAutoReplyConfig(patch);
         if (msg) {
-          msg.textContent = (d && d.ok) ? "已保存 ✓" : "保存失败";
+          msg.textContent = (d && d.ok) ? T("cp.acct.saved") : T("cp.common.save_fail");
           msg.style.color = (d && d.ok) ? "#2f9e6e" : "var(--cp-danger,#dc2626)";
         }
       } catch (e) {
-        if (msg) { msg.textContent = "保存失败"; msg.style.color = "var(--cp-danger,#dc2626)"; }
+        if (msg) { msg.textContent = T("cp.common.save_fail"); msg.style.color = "var(--cp-danger,#dc2626)"; }
       }
       el.disabled = false;
     }
@@ -619,12 +662,12 @@
       const form = this.shadowRoot.querySelector(".form");
       form.innerHTML =
         `<div class="add">` +
-        `<div class="field"><label>平台</label><select class="f-plat">${opts}</select></div>` +
-        `<div class="field"><label>方式</label><select class="f-mode"><option value="">默认</option></select></div>` +
-        `<div class="field"><label>备注</label><input class="f-label" placeholder="可选，如「主号」" /></div>` +
+        `<div class="field"><label>${this._esc(T("cp.acct.f_platform"))}</label><select class="f-plat">${opts}</select></div>` +
+        `<div class="field"><label>${this._esc(T("cp.acct.f_mode"))}</label><select class="f-mode"><option value="">${this._esc(T("cp.common.default"))}</option></select></div>` +
+        `<div class="field"><label>${this._esc(T("cp.acct.f_label"))}</label><input class="f-label" placeholder="${this._esc(T("cp.acct.f_label_ph"))}" /></div>` +
         `<div class="field" style="justify-content:flex-end;gap:8px">` +
-        `<button data-act="cancel-add">取消</button>` +
-        `<button class="primary" data-act="start-login">开始登录</button></div>` +
+        `<button data-act="cancel-add">${this._esc(T("cp.common.cancel"))}</button>` +
+        `<button class="primary" data-act="start-login">${this._esc(T("cp.acct.start_login"))}</button></div>` +
         `<div class="qr"></div></div>`;
       const platSel = form.querySelector(".f-plat");
       platSel.addEventListener("change", () => this._loadModes());
@@ -636,13 +679,13 @@
       if (!form) return;
       const platform = form.querySelector(".f-plat").value;
       const modeSel = form.querySelector(".f-mode");
-      modeSel.innerHTML = '<option value="">默认</option>';
+      modeSel.innerHTML = `<option value="">${this._esc(T("cp.common.default"))}</option>`;
       try {
         const d = await this._client.getPlatformModes({ platform });
         (d && d.modes || []).forEach((m) => {
           const o = document.createElement("option");
           o.value = m.mode;
-          o.textContent = (m.label || m.mode) + (m.recommended ? "（推荐）" : "") + (m.available === false ? "（未启用）" : "");
+          o.textContent = (m.label || m.mode) + (m.recommended ? T("cp.acct.recommended") : "") + (m.available === false ? T("cp.acct.not_enabled") : "");
           if (m.available === false) o.disabled = true;
           modeSel.appendChild(o);
         });
@@ -656,16 +699,16 @@
       const mode = form.querySelector(".f-mode").value;
       const label = form.querySelector(".f-label").value;
       const qr = form.querySelector(".qr");
-      qr.innerHTML = '<div class="inst">正在请求登录二维码…</div>';
+      qr.innerHTML = `<div class="inst">${this._esc(T("cp.acct.qr_requesting"))}</div>`;
       let d;
       try {
         d = await this._client.startLogin({ platform, mode, label });
       } catch (e) {
-        qr.innerHTML = '<div class="st fail">登录请求失败</div>';
+        qr.innerHTML = `<div class="st fail">${this._esc(T("cp.acct.login_req_fail"))}</div>`;
         return;
       }
       if (!d || d.ok === false) {
-        qr.innerHTML = `<div class="st fail">${this._esc((d && d.detail) || "无法发起登录")}</div>`;
+        qr.innerHTML = `<div class="st fail">${this._esc((d && d.detail) || T("cp.acct.login_cannot"))}</div>`;
         return;
       }
       this._login = { platform, login_id: d.login_id };
@@ -676,9 +719,9 @@
     _paintQr(qr, d) {
       const img = d.qr_image
         ? `<img src="${this._esc(d.qr_image)}" alt="QR" />`
-        : (d.qr_url ? `<div class="inst">登录链接：${this._esc(d.qr_url)}</div>` : "");
+        : (d.qr_url ? `<div class="inst">${this._esc(T("cp.acct.login_link", { url: d.qr_url }))}</div>` : "");
       const inst = d.instruction ? `<div class="inst">${this._esc(d.instruction)}</div>` : "";
-      qr.innerHTML = `${img}${inst}<div class="st">等待扫码确认…</div>`;
+      qr.innerHTML = `${img}${inst}<div class="st">${this._esc(T("cp.acct.qr_waiting"))}</div>`;
     }
 
     _startPoll(qr) {
@@ -698,11 +741,11 @@
         const stEl = qr.querySelector(".st");
         if (st === "authorized") {
           this._stopPoll();
-          if (stEl) { stEl.textContent = "登录成功 ✓"; stEl.className = "st ok"; }
+          if (stEl) { stEl.textContent = T("cp.acct.login_ok"); stEl.className = "st ok"; }
           setTimeout(() => this.reload(), 1000);
         } else if (st === "failed" || st === "expired") {
           this._stopPoll();
-          if (stEl) { stEl.textContent = st === "expired" ? "二维码已过期，请重试" : "登录失败"; stEl.className = "st fail"; }
+          if (stEl) { stEl.textContent = st === "expired" ? T("cp.acct.qr_expired") : T("cp.acct.login_fail"); stEl.className = "st fail"; }
         }
       }, 2500);
     }

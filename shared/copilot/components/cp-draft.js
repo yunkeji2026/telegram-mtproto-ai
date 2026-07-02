@@ -14,13 +14,13 @@
   const Base = root.CopilotShared && root.CopilotShared.CpPanelBase;
   if (!Base) { console.error("cp-draft: CpPanelBase 未加载"); return; }
 
-  // 语种统一用中文名显示，与后台翻译栏保持同一套（顺序/数量一致）
+  // 语种与后台翻译栏保持同一套（顺序/数量一致）；标签经 i18n 词典按 UI 语言显示
   const LANGS = [
-    ["", "跟随人设/客户"], ["zh", "中文"], ["en", "英语"], ["th", "泰语"],
-    ["vi", "越南语"], ["id", "印尼语"], ["ja", "日语"],
-    ["ko", "韩语"], ["ru", "俄语"], ["es", "西班牙语"], ["pt", "葡萄牙语"],
+    ["", "cp.lang.follow"], ["zh", "cp.lang.zh"], ["en", "cp.lang.en"], ["th", "cp.lang.th"],
+    ["vi", "cp.lang.vi"], ["id", "cp.lang.id"], ["ja", "cp.lang.ja"],
+    ["ko", "cp.lang.ko"], ["ru", "cp.lang.ru"], ["es", "cp.lang.es"], ["pt", "cp.lang.pt"],
   ];
-  const TIER = { chat_binding: "会话绑定", account_profile: "账号人设", domain: "域默认", default: "兜底" };
+  const TIER = { chat_binding: "cp.draft.tier_chat_binding", account_profile: "cp.draft.tier_account_profile", domain: "cp.draft.tier_domain", default: "cp.draft.tier_default" };
 
   class CpDraft extends Base {
     constructor() {
@@ -36,7 +36,7 @@
         if (p) this._updatePinState();
       });
     }
-    emptyText() { return "选中会话后可生成回复草稿"; }
+    emptyText() { return this.t("cp.draft.empty"); }
     styles() {
       return `
       .ctl { display:flex; flex-direction:column; gap:var(--cp-gap-sm,6px); align-items:stretch; }
@@ -89,30 +89,30 @@
       }
       this._draft = null;
       const lang = this._loadLang();
-      const opts = LANGS.map(([v, l]) =>
-        `<option value="${v}"${v === lang ? " selected" : ""}>${this.esc(l)}</option>`).join("");
+      const opts = LANGS.map(([v, k]) =>
+        `<option value="${v}"${v === lang ? " selected" : ""}>${this.esc(this.t(k))}</option>`).join("");
       const wantPersona = this.hasAttribute("persona");
       const wantContrast = this.hasAttribute("contrast");
       let personaRow = "";
       if (wantPersona) {
         personaRow =
-          `<div class="prow"><label>人设</label>` +
-          `<select data-role="persona"><option value="">默认（按后台绑定）</option></select>` +
-          `<button class="pin" data-act="pin" title="把当前人设钉到后台（该会话全端生效，含 RPA 自动回复）">📌</button></div>` +
+          `<div class="prow"><label>${this.esc(this.t("cp.draft.persona_label"))}</label>` +
+          `<select data-role="persona"><option value="">${this.esc(this.t("cp.draft.persona_default"))}</option></select>` +
+          `<button class="pin" data-act="pin" title="${this.esc(this.t("cp.draft.pin_title"))}">📌</button></div>` +
           `<div class="psrc" data-role="psrc"></div>`;
       }
       let contrastRow = "";
       if (wantContrast) {
         const cl = this._loadContrast();
         const copts = LANGS.filter(([v]) => v !== "")
-          .map(([v, l]) => `<option value="${v}"${v === cl ? " selected" : ""}>${this.esc(l)}</option>`).join("");
-        contrastRow = `<select data-role="contrast"><option value="">不对比</option>${copts}</select>`;
+          .map(([v, k]) => `<option value="${v}"${v === cl ? " selected" : ""}>${this.esc(this.t(k))}</option>`).join("");
+        contrastRow = `<select data-role="contrast"><option value="">${this.esc(this.t("cp.draft.no_contrast"))}</option>${copts}</select>`;
       }
       this._render(
         personaRow +
         `<div class="ctl"><select data-role="lang">${opts}</select>` +
         contrastRow +
-        `<button class="gen" data-act="gen">生成草稿</button></div>` +
+        `<button class="gen" data-act="gen">${this.esc(this.t("cp.draft.gen_btn"))}</button></div>` +
         `<div class="slot"></div>`
       );
       if (wantPersona) this._loadPersonas();
@@ -140,7 +140,7 @@
     _contrastKey() { return "cp_contrastlang:" + (this._ctx && this._ctx.conversationId || ""); }
     _loadContrast() { try { return localStorage.getItem(this._contrastKey()) || ""; } catch (e) { return ""; } }
     _saveContrast(v) { try { if (v) localStorage.setItem(this._contrastKey(), v); else localStorage.removeItem(this._contrastKey()); } catch (e) {} }
-    _langLabel(code) { const f = LANGS.find(([v]) => v === code); return f ? f[1] : code; }
+    _langLabel(code) { const f = LANGS.find(([v]) => v === code); return f ? this.t(f[1]) : code; }
 
     async _loadPersonas() {
       const sel = this.shadowRoot.querySelector('select[data-role="persona"]');
@@ -159,10 +159,10 @@
         const bd = (b && b.bindings && ck) ? b.bindings[ck] : null;
         bound = bd ? (bd.id || "") : "";
       } catch (e) {}
-      let h = '<option value="">默认（按后台绑定）</option>';
+      let h = `<option value="">${this.esc(this.t("cp.draft.persona_default"))}</option>`;
       summary.forEach((p) => {
         const id = (p && p.id) || "";
-        const nm = p && p.role ? `${p.name}（${p.role}）` : ((p && (p.name || p.id)) || id);
+        const nm = p && p.role ? `${p.name} (${p.role})` : ((p && (p.name || p.id)) || id);
         h += `<option value="${this.esc(id)}"${id === bound ? " selected" : ""}>${this.esc(nm)}</option>`;
       });
       sel.innerHTML = h;
@@ -174,7 +174,7 @@
       const pin = this.shadowRoot.querySelector("button.pin");
       const src = this.shadowRoot.querySelector('[data-role="psrc"]');
       if (pin && sel) pin.classList.toggle("on", !!sel.value);
-      if (src && sel) src.textContent = sel.value ? "已钉到后台 · 全端（含 RPA）生效" : "未钉绑 · 跟随账号/域默认";
+      if (src && sel) src.textContent = sel.value ? this.t("cp.draft.pinned") : this.t("cp.draft.unpinned");
     }
 
     async _pinPersona() {
@@ -243,14 +243,17 @@
 
     _guardBanner(g, which) {
       const esc = (s) => this.esc(s);
+      const sep = this.t("cp.common.list_sep");
       const cls = g.risk === "high" ? "high" : g.risk === "medium" ? "medium" : "low";
-      const msg = g.risk === "high" ? "⛔ 高风险（支付/密码/账号安全）"
-        : g.risk === "medium" ? "⚠ 中风险，请人工确认" : "✓ 未见敏感词";
-      const hits = (g.hits || []).map((h) => esc(h.term)).join("、");
-      const rob = (g.robotic || []).length ? " · 机器措辞：" + (g.robotic || []).map(esc).join("、") : "";
+      const msg = g.risk === "high" ? this.t("cp.draft.guard_high")
+        : g.risk === "medium" ? this.t("cp.draft.guard_medium") : this.t("cp.draft.guard_low");
+      const hits = (g.hits || []).map((h) => esc(h.term)).join(sep); // 词条已转义
+      const hitPfx = hits ? this.t("cp.draft.hit_pfx", { hits }) : "";
+      const rob = (g.robotic || []).length
+        ? this.t("cp.draft.robotic_pfx", { list: (g.robotic || []).map(esc).join(sep) }) : "";
       const force = g.block
-        ? `<button class="force" data-act="send-force" data-which="${esc(which)}">确认无误，仍要发送</button>` : "";
-      return `<div class="guard ${cls}">${msg}${hits ? " · 命中：" + hits : ""}${rob}${force}</div>`;
+        ? `<button class="force" data-act="send-force" data-which="${esc(which)}">${this.esc(this.t("cp.draft.send_force"))}</button>` : "";
+      return `<div class="guard ${cls}">${msg}${hitPfx}${rob}${force}</div>`;
     }
 
     _emitSend(text, which, risk) {
@@ -271,10 +274,10 @@
       const s = (text || "").trim();
       if (!ta) return;
       if (!s) { ta.value = ""; ta.disabled = false; return; }
-      ta.disabled = true; ta.value = "翻译中…";
+      ta.disabled = true; ta.value = this.t("cp.draft.translating");
       let r;
       try { r = await this._client.translate({ text: s, target_lang: lang }); } catch (e) { r = null; }
-      ta.value = (r && r.ok && r.text) ? r.text : "翻译失败";
+      ta.value = (r && r.ok && r.text) ? r.text : this.t("cp.draft.translate_fail");
       ta.disabled = false;
     }
 
@@ -316,7 +319,7 @@
       const sel = this.shadowRoot.querySelector('select[data-role="lang"]');
       const lang = sel ? sel.value : "";
       const slot = this._slot();
-      if (slot) slot.innerHTML = '<div class="empty">生成中…</div>';
+      if (slot) slot.innerHTML = `<div class="empty">${this.esc(this.t("cp.draft.generating"))}</div>`;
       const token = ++this._genToken;
 
       // 上下文来源:宿主可注入 messagesProvider(桌面=webview 实时消息,未必落后端 inbox);
@@ -335,7 +338,7 @@
         .filter((m) => m.text);
       if (token !== this._genToken) return;
       if (!messages.length) {
-        if (slot) slot.innerHTML = '<div class="err">无对话上下文,无法生成</div>';
+        if (slot) slot.innerHTML = `<div class="err">${this.esc(this.t("cp.draft.no_context"))}</div>`;
         return;
       }
 
@@ -349,7 +352,7 @@
       } catch (e) { r = null; }
       if (token !== this._genToken) return;
       if (!r || !r.ok || !r.reply) {
-        if (slot) slot.innerHTML = `<div class="err">${this.esc((r && r.detail) || "生成失败")}</div>`;
+        if (slot) slot.innerHTML = `<div class="err">${this.esc((r && r.detail) || this.t("cp.draft.gen_fail"))}</div>`;
         return;
       }
       this._draft = r;
@@ -364,10 +367,11 @@
       const esc = (s) => this.esc(s);
       const slot = this._slot();
       if (!slot) return;
-      const tierLbl = TIER[r.persona_tier] || r.persona_tier || "";
+      const tierKey = TIER[r.persona_tier];
+      const tierLbl = tierKey ? this.t(tierKey) : (r.persona_tier || "");
       const badges =
         (r.persona ? `<span class="bdg">🎭 ${esc(r.persona)}${tierLbl ? " · " + esc(tierLbl) : ""}</span>` : "") +
-        (r.intent ? `<span class="bdg intent">意图 ${esc(r.intent)}</span>` : "");
+        (r.intent ? `<span class="bdg intent">${esc(this.t("cp.draft.intent"))} ${esc(r.intent)}</span>` : "");
       // —— 对比语言路径(桌面：reply/contrast 双块可编辑 + send-pick) ——
       const wantContrast = this.hasAttribute("contrast");
       const contrastSel = this.shadowRoot.querySelector('select[data-role="contrast"]');
@@ -386,18 +390,18 @@
             `<textarea data-role="reply-ta" rows="4">${esc(replyText)}</textarea></div>` +
           `<div class="lblock" data-block="contrast">` +
             `<div class="lhead"><input type="radio" name="${nm}" data-pick="contrast"><span>${esc(this._langLabel(contrastLang))}</span></div>` +
-            `<textarea data-role="contrast-ta" rows="4">翻译中…</textarea></div>` +
+            `<textarea data-role="contrast-ta" rows="4">${esc(this.t("cp.draft.translating"))}</textarea></div>` +
           `<div class="acts">` +
-            `<button class="primary" data-act="fill-pick">填入输入框</button>` +
-            `<button class="send" data-act="send-pick">填入并发送</button>` +
+            `<button class="primary" data-act="fill-pick">${esc(this.t("cp.draft.fill"))}</button>` +
+            `<button class="send" data-act="send-pick">${esc(this.t("cp.draft.fill_send"))}</button>` +
           `</div><div class="guardbox"></div></div>`;
         this._wireContrast(replyText, contrastLang);
         return;
       }
       // —— 默认路径(后台/无对比)：保持与原行为一致 ——
       const translated = r.translated
-        ? `<div class="tr"><div class="tl">译文</div>${esc(r.translated)}` +
-          `<div class="acts"><button data-act="fill" data-which="translated">填入译文</button></div></div>` : "";
+        ? `<div class="tr"><div class="tl">${esc(this.t("cp.draft.translation"))}</div>${esc(r.translated)}` +
+          `<div class="acts"><button data-act="fill" data-which="translated">${esc(this.t("cp.draft.fill_translated"))}</button></div></div>` : "";
       // 发送默认用客户可读文本:有译文发译文,否则发原文
       const sendWhich = r.translated ? "translated" : "reply";
       slot.innerHTML =
@@ -405,8 +409,8 @@
         (badges ? `<div class="badges">${badges}</div>` : "") +
         `<div class="reply">${esc(r.reply)}</div>` +
         `<div class="acts">` +
-        `<button class="primary" data-act="fill" data-which="reply">填入输入框</button>` +
-        `<button class="send" data-act="send" data-which="${sendWhich}">填入并发送</button>` +
+        `<button class="primary" data-act="fill" data-which="reply">${esc(this.t("cp.draft.fill"))}</button>` +
+        `<button class="send" data-act="send" data-which="${sendWhich}">${esc(this.t("cp.draft.fill_send"))}</button>` +
         `</div>` +
         translated +
         `<div class="guardbox"></div>` +

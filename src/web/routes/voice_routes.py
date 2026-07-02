@@ -24,6 +24,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -97,11 +98,14 @@ def register_voice_routes(app, api_auth, config_manager=None):
             raw_cfg = config_manager.config or {}
 
         try:
-            from src.ai.persona_voice import resolve_voice_cfg
-            voice_cfg = resolve_voice_cfg(persona_id, raw_cfg)
+            from src.ai.persona_voice import resolve_effective_voice_context
+            voice_ctx = resolve_effective_voice_context(
+                raw_cfg, persona_id=persona_id, text=text)
+            voice_cfg = voice_ctx.get("voice_cfg") or {}
         except Exception as ex:
             logger.warning("[voice/tts-test] resolve_voice_cfg failed: %s", ex)
             voice_cfg = {}
+            voice_ctx = {"persona_id": persona_id or "", "persona_source": "error", "emotion": None}
 
         # Apply caller override (allows previewing unsaved UI settings)
         if isinstance(cfg_override, dict):
@@ -125,7 +129,8 @@ def register_voice_routes(app, api_auth, config_manager=None):
             # Override out path so we control filename
             import asyncio as _aio
             result = await _aio.wait_for(
-                tts.synthesize(text, timeout_sec=45.0),
+                tts.synthesize(
+                    text, timeout_sec=45.0, emotion=voice_ctx.get("emotion")),
                 timeout=50.0,
             )
         except Exception as ex:
@@ -151,12 +156,24 @@ def register_voice_routes(app, api_auth, config_manager=None):
         return {
             "ok": True,
             "url": file_url,
+            "audio_url": file_url,
             "filename": preview_path.name,
             "duration_sec": result.duration_sec,
             "provider": result.provider,
             "voice": result.voice,
             "format": result.format,
             "bytes": preview_path.stat().st_size if preview_path.is_file() else 0,
+            "voice_meta": {
+                "persona_id": voice_ctx.get("persona_id") or "",
+                "persona_source": voice_ctx.get("persona_source") or "",
+                "provider": result.provider,
+                "voice": result.voice,
+                "emotion": (
+                    getattr(voice_ctx.get("emotion"), "emotion", "")
+                    if voice_ctx.get("emotion") else ""
+                ),
+                "fallback_from": (result.extra or {}).get("fallback_from", ""),
+            },
         }
 
     @app.get("/api/voice/profiles")
@@ -172,7 +189,7 @@ def register_voice_routes(app, api_auth, config_manager=None):
             raw_cfg = config_manager.config or {}
         from src.ai.persona_voice import resolve_voice_cfg
 
-        clone_backends = {"voice_clone_command", "coqui_http"}
+        clone_backends = {"voice_clone_command", "coqui_http", "voice_clone_lan"}
 
         def _describe(cfg: Dict[str, Any]) -> Dict[str, Any]:
             vp = cfg.get("voice_profile") if isinstance(cfg.get("voice_profile"), dict) else {}
@@ -200,6 +217,81 @@ def register_voice_routes(app, api_auth, config_manager=None):
         except Exception as ex:  # noqa: BLE001
             logger.warning("[voice/profiles] persona enumerate failed: %s", ex)
         return {"ok": True, "default": default_desc, "profiles": profiles}
+
+    @app.get("/api/voice/persona-audit")
+    async def api_voice_persona_audit(request: Request, _=Depends(api_auth)):
+        """语音「体检」：对每个人设跑**与真实发送同一决策函数**的 voice context 解析，
+        暴露实际会用到的 后端/音色/情绪基调/克隆就绪度，并标记是否误继承了全局克隆
+        参考音（clone_bleed）。ops 面板用它一眼看清「谁有独立声音、谁还在裸默认」。
+
+        返回：{ok, default, personas:[{persona_id,name,backend,voice,format,emotion,
+               is_clone,ready,clone_bleed,source}], summary:{total,voiced,clone_ready,bleed}}
+        """
+        raw_cfg: Dict[str, Any] = {}
+        if config_manager and hasattr(config_manager, "config"):
+            raw_cfg = config_manager.config or {}
+        from src.ai.persona_voice import resolve_effective_voice_context
+
+        clone_backends = {"voice_clone_command", "coqui_http", "voice_clone_lan"}
+        global_ref = ""
+        try:
+            _gvp = (((raw_cfg.get("telegram") or {}).get("voice_reply") or {})
+                    .get("voice_profile") or {})
+            global_ref = str(_gvp.get("reference_audio_path") or "").strip()
+        except Exception:
+            global_ref = ""
+
+        def _row(persona_id, name, ctx):
+            vc = ctx.get("voice_cfg") or {}
+            vp = vc.get("voice_profile") if isinstance(vc.get("voice_profile"), dict) else {}
+            backend = str(vc.get("backend") or "edge_tts").lower()
+            voice = str(vc.get("voice") or vp.get("speaker_id") or "")
+            emo = ctx.get("emotion")
+            is_clone = backend in clone_backends
+            ready = True
+            if is_clone:
+                ref = str(vp.get("reference_audio_path") or "").strip()
+                ready = bool(vp.get("owner_consent")) and bool(ref)
+            ref_used = str(vp.get("reference_audio_path") or "").strip()
+            # A persona that is *not* the global default but reuses the global
+            # clone's reference audio = misconfiguration (every persona sounds the same).
+            clone_bleed = bool(global_ref) and ref_used == global_ref and bool(persona_id)
+            return {
+                "persona_id": persona_id or "",
+                "name": name or persona_id or "",
+                "backend": backend,
+                "voice": voice,
+                "format": str(vc.get("format") or ""),
+                "emotion": getattr(emo, "emotion", "") if emo else "",
+                "is_clone": is_clone,
+                "ready": ready,
+                "clone_bleed": clone_bleed,
+                "source": ctx.get("persona_source") or "",
+            }
+
+        default_row = _row(
+            None, "（全局默认）", resolve_effective_voice_context(raw_cfg))
+        personas = []
+        try:
+            from src.utils.persona_manager import PersonaManager
+            pm = PersonaManager.get_instance()
+            for s in pm.list_profiles_summary():
+                pid = s.get("id")
+                ctx = resolve_effective_voice_context(raw_cfg, persona_id=pid)
+                personas.append(_row(pid, s.get("name"), ctx))
+        except Exception as ex:  # noqa: BLE001
+            logger.warning("[voice/persona-audit] enumerate failed: %s", ex)
+        return {
+            "ok": True,
+            "default": default_row,
+            "personas": personas,
+            "summary": {
+                "total": len(personas),
+                "voiced": sum(1 for p in personas if p["voice"]),
+                "clone_ready": sum(1 for p in personas if p["is_clone"] and p["ready"]),
+                "bleed": sum(1 for p in personas if p["clone_bleed"]),
+            },
+        }
 
     def _dashscope_creds() -> tuple:
         """从 config 取 DashScope 凭据（messenger_rpa.voice_output 优先）；空则由 enroll 走 env/secret。"""
@@ -255,23 +347,23 @@ def register_voice_routes(app, api_auth, config_manager=None):
         language_type = str(form.get("language_type") or "Japanese").strip() or "Japanese"
         reference_text = str(form.get("reference_text") or "").strip()
         if upload is None or not getattr(upload, "filename", ""):
-            raise HTTPException(400, "file（参考音频）必填")
+            raise HTTPException(400, tr(request, "err.voice.ref_file_required"))
         if not persona_id:
-            raise HTTPException(400, "persona_id 必填")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="persona_id"))
         if not preferred_name:
-            raise HTTPException(400, "preferred_name 必填")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="preferred_name"))
 
         from src.utils.persona_manager import PersonaManager
         pm = PersonaManager.get_instance()
         persona = pm.get_persona_by_id(persona_id)
         if persona is None:
-            raise HTTPException(404, f"人设 {persona_id} 不存在")
+            raise HTTPException(404, tr(request, "err.voice.persona_not_found", persona_id=persona_id))
 
         data = await upload.read()
         if not data:
-            raise HTTPException(400, "空文件")
+            raise HTTPException(400, tr(request, "err.inbox.empty_file"))
         if len(data) > 15 * 1024 * 1024:
-            raise HTTPException(413, "参考音频过大（上限 15MB）")
+            raise HTTPException(413, tr(request, "err.voice.ref_too_large"))
 
         api_key, cfg_region = _dashscope_creds()
         region = region_in or cfg_region or "intl"
@@ -285,7 +377,7 @@ def register_voice_routes(app, api_auth, config_manager=None):
         try:
             audio_path.write_bytes(data)
         except Exception as ex:  # noqa: BLE001
-            raise HTTPException(500, f"参考音频落盘失败: {ex}")
+            raise HTTPException(500, tr(request, "err.voice.ref_save_failed", err=ex))
 
         # ── 局域网优先：LAN 克隆主机在线则零样本登记（不烧云端配额）──
         raw_full_cfg: Dict[str, Any] = {}
@@ -384,7 +476,7 @@ def register_voice_routes(app, api_auth, config_manager=None):
         pm = PersonaManager.get_instance()
         persona = pm.get_persona_by_id(persona_id)
         if persona is None:
-            raise HTTPException(404, f"人设 {persona_id} 不存在")
+            raise HTTPException(404, tr(request, "err.voice.persona_not_found", persona_id=persona_id))
         vp = persona.get("voice_profile")
         if not isinstance(vp, dict):
             return {"ok": True, "persona_id": persona_id, "changed": False}
@@ -422,18 +514,18 @@ def register_voice_routes(app, api_auth, config_manager=None):
         src_id = str((body or {}).get("from_persona_id") or "").strip()
         dst_id = str((body or {}).get("to_persona_id") or "").strip()
         if not src_id or not dst_id:
-            raise HTTPException(400, "from_persona_id 与 to_persona_id 均必填")
+            raise HTTPException(400, tr(request, "err.voice.from_to_persona_required"))
         if src_id == dst_id:
-            raise HTTPException(400, "源与目标人设相同")
+            raise HTTPException(400, tr(request, "err.voice.src_dst_same"))
         from src.ai.voice_enroll import copy_voice_profile
         from src.utils.persona_manager import PersonaManager
         pm = PersonaManager.get_instance()
         src = pm.get_persona_by_id(src_id)
         dst = pm.get_persona_by_id(dst_id)
         if src is None:
-            raise HTTPException(404, f"源人设 {src_id} 不存在")
+            raise HTTPException(404, tr(request, "err.voice.src_persona_not_found", src_id=src_id))
         if dst is None:
-            raise HTTPException(404, f"目标人设 {dst_id} 不存在")
+            raise HTTPException(404, tr(request, "err.voice.dst_persona_not_found", dst_id=dst_id))
         if not isinstance(src.get("voice_profile"), dict):
             return {"ok": False, "reason": "source_has_no_voice",
                     "message": f"源人设 {src_id} 未绑定音色"}
@@ -497,7 +589,7 @@ def register_voice_routes(app, api_auth, config_manager=None):
         voice = str((body or {}).get("voice") or "").strip()
         force = bool((body or {}).get("force"))
         if not voice:
-            raise HTTPException(400, "voice 必填")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="voice"))
         from src.ai.voice_enroll import collect_local_voice_refs, delete_cloned_voice, purge_guard
         local_refs = collect_local_voice_refs(_local_persona_voice_rows())
         guard = purge_guard(voice, local_refs, force=force)
@@ -623,6 +715,56 @@ def register_voice_routes(app, api_auth, config_manager=None):
         except Exception as e:
             return {"ok": False, "error": str(e)[:200]}
         return {"ok": True, **stats}
+
+    # ── 本机 IndexTTS2 随主程序启停（coupled 模式）状态 + 开关 ─────────────────
+    @app.get("/api/voice/local-tts/status")
+    async def api_local_tts_status(request: Request, _=Depends(api_auth)):
+        """Return local IndexTTS2 supervisor health + config snapshot."""
+        sup = getattr(request.app.state, "local_tts_supervisor", None)
+        cfg = (config_manager.config or {}) if config_manager else {}
+        mcc = cfg.get("minicpm_clone") or {}
+        la = mcc.get("local_autostart") or {}
+        snap = sup.status_snapshot() if sup is not None else {}
+        return {
+            "ok": True,
+            "configured_enabled": bool(la.get("enabled")),
+            "stop_with_app": bool(la.get("stop_with_app", True)),
+            "minicpm_base_url": str(mcc.get("base_url") or ""),
+            **snap,
+        }
+
+    @app.post("/api/voice/local-tts/toggle")
+    async def api_local_tts_toggle(request: Request, _=Depends(api_auth)):
+        """Toggle ``minicpm_clone.local_autostart.enabled`` (overlay) + runtime start/stop.
+
+        Body: ``{enabled: bool}``. Writes ``config.local.yaml`` and applies immediately
+        when ``local_tts_supervisor`` is mounted on ``app.state``.
+        """
+        try:
+            body: Dict[str, Any] = await request.json()
+        except Exception:
+            raise HTTPException(400, "invalid JSON body")
+        if "enabled" not in body:
+            raise HTTPException(400, "enabled is required")
+        enabled = bool(body.get("enabled"))
+        if config_manager is None or not hasattr(config_manager, "set_overlay_flag"):
+            return {"ok": False, "error": "config overlay unavailable"}
+        ok, msg = config_manager.set_overlay_flag(
+            "minicpm_clone.local_autostart.enabled", enabled)
+        sup = getattr(request.app.state, "local_tts_supervisor", None)
+        runtime: Dict[str, Any] = {}
+        snap: Dict[str, Any] = {}
+        if sup is not None:
+            sup.reload_from_config(config_manager.config.get("minicpm_clone") or {})
+            runtime = await sup.apply_enabled(enabled)
+            snap = sup.status_snapshot()
+        return {
+            "ok": ok,
+            "message": msg,
+            **runtime,
+            **snap,
+            "enabled": enabled,  # authoritative after toggle (snap may still reflect pre-stop state)
+        }
 
     @app.get("/admin/tts-dashboard")
     async def admin_tts_dashboard(request: Request):

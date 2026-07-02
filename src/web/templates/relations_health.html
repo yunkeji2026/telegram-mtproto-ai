@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}流失预警 · {{ site_name|default('华灵科技客户转化聊天系统') }}{% endblock %}
-{% block page_title %}流失预警{% endblock %}
+{% block title %}{{ (i18n or {}).get('rh_s001', "流失预警 ·") }} {{ product_name|default((i18n or {}).get('brand.product', '智聊')) }}{% endblock %}
+{% block page_title %}{{ (i18n or {}).get('relations_health', "流失预警") }}{% endblock %}
 {% block head %}
 <style>
 .rh-summary{display:flex;flex-wrap:wrap;gap:.6rem;margin-bottom:.9rem;font-size:.82rem}
@@ -53,35 +53,35 @@
 <div class="card fa">
   <h2>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-    流失预警榜
-    <span style="font-size:.75rem;font-weight:400;color:var(--t2);margin-left:.4rem">谁在降温 · 该唤醒谁 · 发现→生成话术→发送闭环</span>
+    {{ (i18n or {}).get('rh_s002', "流失预警榜") }}
+    <span style="font-size:.75rem;font-weight:400;color:var(--t2);margin-left:.4rem">{{ (i18n or {}).get('rh_s003', "谁在降温 · 该唤醒谁 · 发现") }}→{{ (i18n or {}).get('rh_s004', "生成话术") }}→{{ (i18n or {}).get('rh_s005', "发送闭环") }}</span>
   </h2>
   <div class="rh-summary" id="rh-summary"></div>
   <div class="rh-filters">
     <div class="f-grp">
-      <label class="f-lb">风险等级</label>
+      <label class="f-lb">{{ (i18n or {}).get('ap_s087', "风险等级") }}</label>
       <select id="rh-risk" class="f-input" style="width:130px">
-        <option value="">全部</option>
-        <option value="critical">危机</option>
-        <option value="at_risk">风险</option>
-        <option value="watch">观察</option>
-        <option value="healthy">健康</option>
+        <option value="">{{ (i18n or {}).get('rpa_all', "全部") }}</option>
+        <option value="critical">{{ (i18n or {}).get('rh_s006', "危机") }}</option>
+        <option value="at_risk">{{ (i18n or {}).get('ov_js_th_risk', "风险") }}</option>
+        <option value="watch">{{ (i18n or {}).get('rh_s007', "观察") }}</option>
+        <option value="healthy">{{ (i18n or {}).get('db_js_018', "健康") }}</option>
       </select>
     </div>
-    <div class="f-grp"><label class="f-lb">最低亲密度</label><input type="number" id="rh-minintim" value="0" min="0" max="100" class="f-input" style="width:100px"></div>
-    <div class="f-grp"><label class="f-lb">榜单条数</label><input type="number" id="rh-limit" value="30" min="1" max="100" class="f-input" style="width:90px"></div>
-    <button type="button" class="btn btn-p" onclick="rhLoad()">刷新</button>
+    <div class="f-grp"><label class="f-lb">{{ (i18n or {}).get('rh_s008', "最低亲密度") }}</label><input type="number" id="rh-minintim" value="0" min="0" max="100" class="f-input" style="width:100px"></div>
+    <div class="f-grp"><label class="f-lb">{{ (i18n or {}).get('rh_s009', "榜单条数") }}</label><input type="number" id="rh-limit" value="30" min="1" max="100" class="f-input" style="width:90px"></div>
+    <button type="button" class="btn btn-p" onclick="rhLoad()">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
   </div>
   <p id="rh-status" style="font-size:.8rem;color:var(--t2);margin-bottom:.6rem"></p>
   <details class="rh-backfill" id="rh-backfill">
-    <summary>跨域归档诊断 · contact_id 回填命中率</summary>
+    <summary>{{ (i18n or {}).get('rh_s010', "跨域归档诊断 ·") }} contact_id {{ (i18n or {}).get('rh_s011', "回填命中率") }}</summary>
     <div class="rh-bf-body">
-      <span id="rh-bf-status" style="font-size:.78rem;color:var(--t2)">加载中…</span>
+      <span id="rh-bf-status" style="font-size:.78rem;color:var(--t2)">{{ (i18n or {}).get('dash.loading', "加载中…") }}</span>
       <div class="rh-bf-actions">
-        <label class="f-lb" style="margin:0 .3rem 0 .6rem">扫描上限</label>
+        <label class="f-lb" style="margin:0 .3rem 0 .6rem">{{ (i18n or {}).get('rh_s012', "扫描上限") }}</label>
         <input type="number" id="rh-bf-limit" value="200" min="1" max="2000" class="f-input" style="width:90px">
-        <button type="button" class="btn" onclick="rhBackfill(true)">评估(dry-run)</button>
-        <button type="button" class="btn btn-p" onclick="rhBackfill(false)">执行回填</button>
+        <button type="button" class="btn" onclick="rhBackfill(true)">{{ (i18n or {}).get('as_js054', "评估") }}(dry-run)</button>
+        <button type="button" class="btn btn-p" onclick="rhBackfill(false)">{{ (i18n or {}).get('rh_s013', "执行回填") }}</button>
       </div>
     </div>
   </details>
@@ -89,34 +89,34 @@
     <table class="rh-table">
       <thead>
         <tr>
-          <th style="width:50px">健康</th>
-          <th style="width:60px">等级</th>
-          <th style="width:64px">亲密度</th>
-          <th style="width:72px">沉默天</th>
-          <th style="width:76px">情绪</th>
-          <th style="width:80px">流失</th>
-          <th style="width:96px">付费</th>
-          <th>风险原因</th>
-          <th style="min-width:130px">建议动作</th>
+          <th style="width:50px">{{ (i18n or {}).get('db_js_018', "健康") }}</th>
+          <th style="width:60px">{{ (i18n or {}).get('ap_s023', "等级") }}</th>
+          <th style="width:64px">{{ (i18n or {}).get('wa_js_083', "亲密度") }}</th>
+          <th style="width:72px">{{ (i18n or {}).get('rh_s014', "沉默天") }}</th>
+          <th style="width:76px">{{ (i18n or {}).get('inbox.ai.sentiment', "情绪") }}</th>
+          <th style="width:80px">{{ (i18n or {}).get('dash.stage.LOST', "流失") }}</th>
+          <th style="width:96px">{{ (i18n or {}).get('rh_s015', "付费") }}</th>
+          <th>{{ (i18n or {}).get('rh_s016', "风险原因") }}</th>
+          <th style="min-width:130px">{{ (i18n or {}).get('rh_s017', "建议动作") }}</th>
           <th style="min-width:170px">journey</th>
-          <th style="width:110px">操作</th>
+          <th style="width:110px">{{ (i18n or {}).get('ov_js_th_action', "操作") }}</th>
         </tr>
       </thead>
-      <tbody id="rh-body"><tr><td colspan="11" style="padding:2rem;color:var(--t3)">加载中…</td></tr></tbody>
+      <tbody id="rh-body"><tr><td colspan="11" style="padding:2rem;color:var(--t3)">{{ (i18n or {}).get('dash.loading', "加载中…") }}</td></tr></tbody>
     </table>
   </div>
 </div>
 
 <div class="rh-modal-bg" id="rh-modal-bg" onclick="if(event.target===this)rhCloseModal()">
   <div class="rh-modal" role="dialog">
-    <h3>重逢开场草稿</h3>
+    <h3>{{ (i18n or {}).get('rh_s018', "重逢开场草稿") }}</h3>
     <div class="rh-modal-meta" id="rh-modal-meta"></div>
     <div class="rh-modal-meta" id="rh-modal-inbox" style="display:none"></div>
-    <textarea id="rh-modal-draft" placeholder="生成中…"></textarea>
+    <textarea id="rh-modal-draft" placeholder="{{ (i18n or {}).get('ov_js_generating', '生成中…') }}"></textarea>
     <div class="rh-modal-actions">
-      <button type="button" class="btn" onclick="rhCloseModal()">关闭</button>
-      <button type="button" class="btn" id="rh-copy-btn" onclick="rhCopy()">复制</button>
-      <button type="button" class="btn btn-p" id="rh-sent-btn" onclick="rhMarkSent()">标记已发</button>
+      <button type="button" class="btn" onclick="rhCloseModal()">{{ (i18n or {}).get('close', "关闭") }}</button>
+      <button type="button" class="btn" id="rh-copy-btn" onclick="rhCopy()">{{ (i18n or {}).get('wa_js_098', "复制") }}</button>
+      <button type="button" class="btn btn-p" id="rh-sent-btn" onclick="rhMarkSent()">{{ (i18n or {}).get('as_s071', "标记已发") }}</button>
     </div>
   </div>
 </div>
@@ -124,10 +124,10 @@
 <script>
 let _rhPendingJid = null;
 function esc(s){return String(s||'').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
-function rlBadge(rl){return '<span class="badge-rl '+esc(rl)+'">'+({critical:'危机',at_risk:'风险',watch:'观察',healthy:'健康'}[rl]||esc(rl))+'</span>';}
+function rlBadge(rl){return '<span class="badge-rl '+esc(rl)+'">'+({critical:window.T('rh_s006'),at_risk:window.T('ov_js_th_risk'),watch:window.T('rh_s007'),healthy:window.T('db_js_018')}[rl]||esc(rl))+'</span>';}
 function trendBadge(t){
   if(!t)return '<span style="color:var(--t3)">—</span>';
-  var lbl={rising:'恶化↑',falling:'好转↓',stable:'平稳→'}[t]||esc(t);
+  var lbl={rising:window.T('rh_js001')+'↑',falling:window.T('rh_js002')+'↓',stable:window.T('rh_js003')+'→'}[t]||esc(t);
   return '<span class="badge-trend '+esc(t)+'">'+lbl+'</span>';
 }
 function churnCell(ib){
@@ -139,12 +139,12 @@ function payCell(mb){
   var out='';
   if(mb.is_payer){
     var rd=mb.recent_days||30;
-    var tip='累计付费(LTV) · 近'+rd+'天 '+esc(mb.currency||'')+' '+(mb.ltv_recent||0);
+    var tip=window.T('rh_js004')+rd+window.T('wa_s158')+' '+esc(mb.currency||'')+' '+(mb.ltv_recent||0);
     out+='<span class="badge-pay" title="'+tip+'">'+esc(mb.currency||'')+' '+(mb.ltv||0)+'</span>';
     if(mb.lapsed){
-      out+='<span class="badge-lapsed" title="历史付费但近'+rd+'天无付费">掉付费</span>';
+      out+='<span class="badge-lapsed" title="'+window.T('rh_js005')+rd+window.T('rh_js006')+'">'+window.T('rh_js007')+'</span>';
     }else if((mb.ltv_recent||0)>0){
-      out+='<span class="badge-recent" title="近'+rd+'天活跃付费">+'+(mb.ltv_recent||0)+'</span>';
+      out+='<span class="badge-recent" title="'+window.T('em_js013')+rd+window.T('rh_js008')+'">+'+(mb.ltv_recent||0)+'</span>';
     }
   }
   if(mb.is_member && mb.tier && mb.tier!=='free'){
@@ -160,13 +160,13 @@ async function rhLoad(){
   const body=document.getElementById('rh-body');
   const st=document.getElementById('rh-status');
   const sum=document.getElementById('rh-summary');
-  st.textContent='加载中…';
+  st.textContent=window.T('dash.loading');
   body.innerHTML='<tr><td colspan="11" style="padding:2rem">…</td></tr>';
   try{
     const q=new URLSearchParams({limit:String(limit),min_intimacy:String(minIntim),scan:'400'});
     if(risk)q.set('risk',risk);
     const res=await fetch('/api/relations/health-board?'+q.toString());
-    if(!res.ok){st.textContent='错误 '+res.status;return;}
+    if(!res.ok){st.textContent=window.T('ln_js_036')+' '+res.status;return;}
     const d=await res.json();
     const items=d.items||[];
     const var_n=items.filter(function(x){return x.value_at_risk;}).length;
@@ -174,22 +174,22 @@ async function rhLoad(){
     const payvar_n=items.filter(function(x){var m=x.monetization;return m&&(m.is_payer||m.is_member)&&(x.risk_level==='at_risk'||x.risk_level==='critical');}).length;
     const lapsed_n=items.filter(function(x){var m=x.monetization;return m&&m.lapsed;}).length;
     sum.innerHTML=
-      '<div class="rh-pill">扫描 <strong>'+(d.scanned||0)+'</strong> 段关系</div>'+
-      '<div class="rh-pill">榜单 <strong>'+items.length+'</strong> 条</div>'+
-      '<div class="rh-pill"'+(var_n?' style="background:rgba(239,68,68,.12)"':'')+'>高价值流失 <strong>'+var_n+'</strong></div>'+
-      '<div class="rh-pill"'+(pay_n?' style="background:rgba(16,185,129,.12)"':'')+'>付费用户 <strong>'+pay_n+'</strong></div>'+
-      '<div class="rh-pill"'+(payvar_n?' style="background:rgba(168,85,247,.12)"':'')+'>付费流失 <strong>'+payvar_n+'</strong></div>'+
-      '<div class="rh-pill"'+(lapsed_n?' style="background:rgba(239,68,68,.12)"':'')+'>掉付费 <strong>'+lapsed_n+'</strong></div>';
-    var sortDesc=d.payer_sort_priority?'付费流失置顶 + ':'';
-    sortDesc+='高价值流失优先 + 健康分升序';
-    if(d.inbox_sort_tiebreak)sortDesc+=' + inbox 情绪/流失 tie-break';
-    st.textContent='按「'+sortDesc+'」排序';
-    if(!items.length){body.innerHTML='<tr><td colspan="11" style="padding:2rem;color:var(--t3)">无记录</td></tr>';return;}
+      '<div class="rh-pill">'+window.T('as_s057')+' <strong>'+(d.scanned||0)+'</strong> '+window.T('rh_js009')+'</div>'+
+      '<div class="rh-pill">'+window.T('rh_js010')+' <strong>'+items.length+'</strong> '+window.T('dash.items')+'</div>'+
+      '<div class="rh-pill"'+(var_n?' style="background:rgba(239,68,68,.12)"':'')+'>'+window.T('rh_js011')+' <strong>'+var_n+'</strong></div>'+
+      '<div class="rh-pill"'+(pay_n?' style="background:rgba(16,185,129,.12)"':'')+'>'+window.T('rh_js012')+' <strong>'+pay_n+'</strong></div>'+
+      '<div class="rh-pill"'+(payvar_n?' style="background:rgba(168,85,247,.12)"':'')+'>'+window.T('rh_js013')+' <strong>'+payvar_n+'</strong></div>'+
+      '<div class="rh-pill"'+(lapsed_n?' style="background:rgba(239,68,68,.12)"':'')+'>'+window.T('rh_js007')+' <strong>'+lapsed_n+'</strong></div>';
+    var sortDesc=d.payer_sort_priority?window.T('rh_js014')+' + ':'';
+    sortDesc+=window.T('rh_js015')+' + '+window.T('rh_js016');
+    if(d.inbox_sort_tiebreak)sortDesc+=' + inbox '+window.T('rh_js017')+' tie-break';
+    st.textContent=window.T('set_s243')+' "'+sortDesc+'" '+window.T('lr_s013');
+    if(!items.length){body.innerHTML='<tr><td colspan="11" style="padding:2rem;color:var(--t3)">'+window.T('em_js001')+'</td></tr>';return;}
     body.innerHTML=items.map(function(it){
       var ib=it.inbox||null;
       var canDraft=(it.action==='reactivate'||it.action==='schedule_care'||it.risk_level==='at_risk'||it.risk_level==='critical');
       var op=canDraft
-        ? '<button type="button" class="rh-act" data-jid="'+esc(it.journey_id)+'" onclick="rhDraft(this)">生成话术</button>'
+        ? '<button type="button" class="rh-act" data-jid="'+esc(it.journey_id)+'" onclick="rhDraft(this)">'+window.T('rh_s004')+'</button>'
         : '<span style="color:var(--t3);font-size:.72rem">—</span>';
       var mb=it.monetization||null;
       // 付费用户正流失 = 最该挽留：紫色高亮（盖过普通 var 红条）
@@ -198,23 +198,23 @@ async function rhLoad(){
       return '<tr class="'+rowCls+'">'+
         '<td><strong>'+it.score+'</strong></td>'+
         '<td><span class="badge-grade">'+esc(it.grade)+'</span></td>'+
-        '<td>'+(it.intimacy_score!=null?it.intimacy_score:'—')+(it.bond_name?' <span style="font-size:.7rem;color:var(--t2)" title="关系等级 Lv'+it.bond_level+(it.bond_progress!=null?' · 进度'+Math.round(it.bond_progress*100)+'%':'')+'">'+esc(it.bond_name)+'</span>':'')+'</td>'+
+        '<td>'+(it.intimacy_score!=null?it.intimacy_score:'—')+(it.bond_name?' <span style="font-size:.7rem;color:var(--t2)" title="'+window.T('rh_js018')+' Lv'+it.bond_level+(it.bond_progress!=null?' · '+window.T('msg_js_2013')+Math.round(it.bond_progress*100)+'%':'')+'">'+esc(it.bond_name)+'</span>':'')+'</td>'+
         '<td>'+(it.days_since_last_msg!=null?it.days_since_last_msg:'∞')+'</td>'+
         '<td>'+trendBadge(ib?ib.emotion_trend:'')+'</td>'+
         '<td>'+churnCell(ib)+'</td>'+
         '<td>'+payCell(mb)+'</td>'+
-        '<td class="rh-reasons">'+(it.reasons||[]).map(esc).join('；')+(it.value_at_risk?'<span class="badge-var">高价值</span>':'')+(payAtRisk?'<span class="badge-var" style="background:rgba(168,85,247,.16);color:#a855f7">付费流失</span>':'')+'</td>'+
+        '<td class="rh-reasons">'+(it.reasons||[]).map(esc).join('; ')+(it.value_at_risk?'<span class="badge-var">'+window.T('msg_s110')+'</span>':'')+(payAtRisk?'<span class="badge-var" style="background:rgba(168,85,247,.16);color:#a855f7">'+window.T('rh_js013')+'</span>':'')+'</td>'+
         '<td>'+rlBadge(it.risk_level)+' <span style="font-size:.74rem;color:var(--t2)">'+esc(it.action_hint)+'</span></td>'+
         '<td class="mono">'+esc(it.journey_id)+'</td>'+
         '<td>'+op+'</td></tr>';
     }).join('');
-  }catch(e){st.textContent='请求失败: '+e;}
+  }catch(e){st.textContent=window.T('ov_js_req_fail')+': '+e;}
 }
 
 async function rhDraft(el){
   const jid=el.getAttribute('data-jid');
   _rhPendingJid=jid;
-  document.getElementById('rh-modal-meta').textContent='journey '+jid+' · 生成中…';
+  document.getElementById('rh-modal-meta').textContent='journey '+jid+' · '+window.T('ov_js_generating');
   document.getElementById('rh-modal-draft').value='';
   document.getElementById('rh-sent-btn').disabled=true;
   var ibx=document.getElementById('rh-modal-inbox');ibx.style.display='none';ibx.textContent='';
@@ -225,18 +225,18 @@ async function rhDraft(el){
     var parts=[];
     var ib=d.inbox;
     if(ib){
-      var trend={rising:'情绪恶化↑',falling:'情绪好转↓',stable:'情绪平稳→'}[ib.emotion_trend]||'';
+      var trend={rising:window.T('rh_js019')+'↑',falling:window.T('rh_js020')+'↓',stable:window.T('rh_js021')+'→'}[ib.emotion_trend]||'';
       if(trend)parts.push(trend);
-      if(ib.churn_risk)parts.push('流失风险:'+esc(ib.churn_risk));
-      if(ib.last_intent)parts.push('意图:'+esc(ib.last_intent));
-      if(ib.summary)parts.push('摘要:'+esc(ib.summary));
+      if(ib.churn_risk)parts.push(window.T('rh_js022')+':'+esc(ib.churn_risk));
+      if(ib.last_intent)parts.push(window.T('inbox.ai.intent')+':'+esc(ib.last_intent));
+      if(ib.summary)parts.push(window.T('rpa_js_summary')+':'+esc(ib.summary));
     }
     var mb=d.monetization;
     if(mb&&(mb.is_payer||mb.is_member)){
-      var seg='💎 付费用户';
+      var seg='💎 '+window.T('rh_js012');
       if(mb.is_payer)seg+=' · LTV '+esc(mb.currency||'')+' '+(mb.ltv||0);
-      if(mb.is_payer)seg+=' · 近'+(mb.recent_days||30)+'天 '+esc(mb.currency||'')+' '+(mb.ltv_recent||0);
-      if(mb.lapsed)seg+=' · ⚠️掉付费';
+      if(mb.is_payer)seg+=' · '+window.T('em_js013')+(mb.recent_days||30)+window.T('wa_s158')+' '+esc(mb.currency||'')+' '+(mb.ltv_recent||0);
+      if(mb.lapsed)seg+=' · ⚠️'+window.T('rh_js007');
       if(mb.is_member&&mb.tier&&mb.tier!=='free')seg+=' · '+esc(mb.tier);
       parts.unshift(seg);
     }
@@ -244,7 +244,7 @@ async function rhDraft(el){
     var bd=d.bond;
     if(bd&&bd.level){
       var bseg='💞 '+esc(bd.name)+' Lv'+bd.level;
-      if(!bd.is_max&&bd.progress!=null)bseg+='（进度'+Math.round(bd.progress*100)+'%）';
+      if(!bd.is_max&&bd.progress!=null)bseg+=' ('+window.T('msg_js_2013')+Math.round(bd.progress*100)+'%)';
       if(bd.milestones&&bd.milestones.length)bseg+=' · '+esc(bd.milestones[bd.milestones.length-1].label);
       parts.unshift(bseg);
     }
@@ -253,16 +253,16 @@ async function rhDraft(el){
   try{
     const res=await fetch('/api/reactivation/'+encodeURIComponent(jid)+'/draft-reunion',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
     if(!res.ok){
-      document.getElementById('rh-modal-meta').textContent='生成失败 '+res.status+'（需 ai_client + reactivation 已接线）';
+      document.getElementById('rh-modal-meta').textContent=window.T('dash.task_fail_generic')+' '+res.status+' ('+window.T('tg_s074')+' ai_client + reactivation '+window.T('rh_js023');
       return;
     }
     const d=await res.json();
     document.getElementById('rh-modal-draft').value=d.draft_text||'';
     document.getElementById('rh-modal-meta').textContent=
-      '亲密度 '+(d.intimacy_score!=null?Math.round(d.intimacy_score):'?')+
-      ' · 沉默 '+(d.silent_days||0)+' 天 · '+(d.funnel_stage||'')+' · 语言 '+(d.draft_lang||'');
+      window.T('wa_js_083')+' '+(d.intimacy_score!=null?Math.round(d.intimacy_score):'?')+
+      ' · '+window.T('ov_js_th_silent')+' '+(d.silent_days||0)+' '+window.T('rh_js024')+' '+(d.funnel_stage||'')+' · '+window.T('draft.q.lang_match')+' '+(d.draft_lang||'');
     document.getElementById('rh-sent-btn').disabled=false;
-  }catch(e){document.getElementById('rh-modal-meta').textContent='请求失败: '+e;}
+  }catch(e){document.getElementById('rh-modal-meta').textContent=window.T('ov_js_req_fail')+': '+e;}
 }
 
 function rhCloseModal(){_rhPendingJid=null;document.getElementById('rh-modal-bg').classList.remove('open');}
@@ -275,18 +275,18 @@ async function rhMarkSent(){
   const btn=document.getElementById('rh-sent-btn');btn.disabled=true;
   try{
     const res=await fetch('/api/reactivation/'+encodeURIComponent(_rhPendingJid)+'/mark-sent',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
-    if(!res.ok){alert('标记失败 '+res.status);return;}
+    if(!res.ok){alert(window.T('inbox.conv.mark_fail')+' '+res.status);return;}
     rhCloseModal();rhLoad();
   }catch(e){alert(e);}finally{btn.disabled=false;}
 }
 
 function rhRenderBackfill(r){
   var el=document.getElementById('rh-bf-status');
-  if(!r){el.textContent='尚未运行回填（可点「评估」预演命中率）';return;}
-  var trig=r.trigger==='startup'?'启动自动':'手动';
+  if(!r){el.textContent=window.T('rh_js025')+' '+window.T('rh_js026')+' '+window.T('rh_js027');return;}
+  var trig=r.trigger==='startup'?window.T('rh_js028'):window.T('ov_manual');
   var pct=Math.round((r.hit_rate||0)*100);
-  el.innerHTML='最近一次（'+trig+(r.dry_run?' · dry-run':'')+'）：扫描 <strong>'+(r.scanned||0)+
-    '</strong> · 命中 <strong>'+(r.resolved||0)+'</strong>（'+pct+'%）· 写回 <strong>'+(r.written||0)+'</strong>';
+  el.innerHTML=window.T('rh_js029')+' ('+trig+(r.dry_run?' · dry-run':'')+'): '+window.T('as_s057')+' <strong>'+(r.scanned||0)+
+    '</strong> · '+window.T('db_js_094')+' <strong>'+(r.resolved||0)+'</strong> ('+pct+'%) · '+window.T('rh_js030')+' <strong>'+(r.written||0)+'</strong>';
 }
 async function rhBackfillStatus(){
   try{
@@ -299,15 +299,15 @@ async function rhBackfillStatus(){
 async function rhBackfill(dryRun){
   var el=document.getElementById('rh-bf-status');
   var lim=document.getElementById('rh-bf-limit').value||200;
-  if(!dryRun && !confirm('确认对最多 '+lim+' 条历史会话写回 contact_id？建议先 dry-run 评估。'))return;
-  el.textContent=dryRun?'评估中…':'回填中…';
+  if(!dryRun && !confirm(window.T('rh_js031')+' '+lim+' '+window.T('rh_js032')+' contact_id? '+window.T('rh_js033')))return;
+  el.textContent=dryRun?window.T('rh_js034'):window.T('rh_js035');
   try{
     const q=new URLSearchParams({dry_run:String(dryRun),limit:String(lim)});
     const res=await fetch('/api/relations/backfill-run?'+q.toString(),{method:'POST'});
-    if(!res.ok){el.textContent='失败 '+res.status;return;}
+    if(!res.ok){el.textContent=window.T('rpa_js_st_failed')+' '+res.status;return;}
     const d=await res.json();
     rhRenderBackfill(d.result);
-  }catch(e){el.textContent='请求失败: '+e;}
+  }catch(e){el.textContent=window.T('ov_js_req_fail')+': '+e;}
 }
 document.addEventListener('DOMContentLoaded',function(){rhLoad();rhBackfillStatus();});
 </script>

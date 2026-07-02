@@ -329,8 +329,11 @@ async def test_send_photo_mirrors_and_records(monkeypatch):
     s._emit_inbox = lambda **kw: emitted.update(kw)
 
     assert await s.send_photo(7, "/p.png", "看我新裙子") is True
-    # 坐席台镜像：带 [图片] 前缀 + 配文，方向 out
-    assert emitted == {"chat_id": 7, "text": "[图片] 看我新裙子", "direction": "out"}
+    # 坐席台镜像：带 [图片] 前缀 + 配文，方向 out；msg_id 供回显去重（mock 客户端无 id→空串）
+    assert emitted["chat_id"] == 7
+    assert emitted["text"] == "[图片] 看我新裙子"
+    assert emitted["direction"] == "out"
+    assert emitted.get("msg_id") == ""
     # contacts 记账：外发互动计入 IntimacyEngine（mutuality）
     assert recorded["dir"] == "out" and recorded["prev"] == "[图片] 看我新裙子"
     assert recorded["chat"] == 7 and recorded["acc"] == "a"

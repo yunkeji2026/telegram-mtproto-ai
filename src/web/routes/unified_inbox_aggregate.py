@@ -75,6 +75,11 @@ def _ingest_thread_best_effort(request: Request, chat: Optional[Dict[str, Any]],
     store = _inbox_store(request)
     if store is None or not chat or not messages:
         return
+    # Store-backed chat rows already came from InboxStore. Their `messages` field is
+    # only a preview rebuilt from `last_text` and lacks platform_msg_id/direction
+    # fidelity; writing it back creates fake `:h:` inbound duplicates.
+    if chat.get("from_store"):
+        return
     try:
         ingest_thread(store, chat, messages)
     except Exception:
@@ -209,6 +214,7 @@ def _chats_for_listing(request: Request, limit: int = 30) -> List[Dict[str, Any]
 
 def _thread_messages_from_store(
     request: Request, conversation_id: str, limit: int = 50,
+    before_ts: Optional[float] = None,
 ) -> Optional[List[Dict[str, Any]]]:
     """A1 读路径收尾：从 InboxStore 读会话历史（持久事实源），映射回 thread 消息形状。
 
@@ -218,7 +224,9 @@ def _thread_messages_from_store(
     if store is None:
         return None
     try:
-        rows = store.list_recent_messages(conversation_id, limit=limit)
+        rows = store.list_recent_messages(
+            conversation_id, limit=limit, before_ts=before_ts,
+        )
     except Exception:
         logger.debug("store thread 读取失败（已忽略）", exc_info=True)
         return None

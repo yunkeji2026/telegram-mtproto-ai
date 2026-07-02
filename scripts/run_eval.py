@@ -60,11 +60,15 @@ from src.eval.crisis_resource_eval import (
 from src.eval.emotion_intensity_eval import (
     evaluate_intensity_grading, format_intensity_report,
 )
+from src.eval.voice_language_eval import (
+    evaluate_voice_language, format_voice_language_report,
+)
 from src.eval.dataset import (
     load_confidence_samples, load_crisis_resource_scenarios,
     load_crisis_response_scenarios, load_crisis_samples,
     load_emotion_samples, load_extract_samples, load_intensity_orders,
     load_memory_scenarios, load_persona_samples, load_proactive_guard_scenarios,
+    load_voice_lang_samples,
 )
 from src.eval.intent_eval import (
     compare_predictors, evaluate_intent, format_compare, format_report,
@@ -178,7 +182,19 @@ def main(argv=None) -> int:
                     help="危机资源保障评测（severe 补热线不重复）")
     ap.add_argument("--crisis-overview", action="store_true",
                     help="危机安全总览（L/O 主动抑制 + J 响应闭环 + Q 资源保障 串联回归）")
+    ap.add_argument("--voice-language", action="store_true",
+                    help="语音合成语言一致性评测（合成语言随文本语种，防中文声纹念英文）")
     args = ap.parse_args(argv)
+
+    if args.voice_language:
+        samples = load_voice_lang_samples(
+            args.dataset or "config/eval/voice_language_samples.yaml")
+        report = evaluate_voice_language(samples)
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(format_voice_language_report(report))
+        return 0 if report["passed"] else 1
 
     if args.crisis_overview:
         from src.eval.crisis_safety_overview import (

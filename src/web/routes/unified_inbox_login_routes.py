@@ -31,6 +31,7 @@ from src.integrations.platform_login import (
 )
 from src.integrations.proxy_pool import get_proxy_pool
 from src.web.routes.unified_inbox_aggregate import _INBOX_ADAPTERS
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +107,7 @@ def register_platform_login_routes(app, *, api_auth, config_manager=None) -> Non
         api_auth(request)
         platform = str(platform or "").lower()
         if platform not in SUPPORTED_PLATFORMS:
-            return {"ok": False, "detail": f"不支持的平台: {platform}"}
+            return {"ok": False, "detail": tr(request, "err.login.platform_unsupported", platform=platform)}
         _ensure_login_providers()
         platform_cfg = _platform_login_cfg().get(platform, {}) or {}
         return {"ok": True, "platform": platform, "modes": list_modes(platform, platform_cfg)}
@@ -115,12 +116,12 @@ def register_platform_login_routes(app, *, api_auth, config_manager=None) -> Non
     async def api_platform_login_start(platform: str, request: Request):
         api_auth(request)
         if not _platform_login_enabled():
-            return {"ok": False, "detail": "扫码登录功能未启用（platform_login.enabled）"}
+            return {"ok": False, "detail": tr(request, "err.login.disabled")}
         platform = str(platform or "").lower()
         if platform not in SUPPORTED_PLATFORMS:
-            return {"ok": False, "detail": f"不支持的平台: {platform}"}
+            return {"ok": False, "detail": tr(request, "err.login.platform_unsupported", platform=platform)}
         if platform == "web":
-            return {"ok": False, "detail": "网页客服为服务端原生渠道，无需扫码登录。"}
+            return {"ok": False, "detail": tr(request, "err.login.web_native")}
         body: Dict[str, Any] = {}
         try:
             body = await request.json()
@@ -141,7 +142,7 @@ def register_platform_login_routes(app, *, api_auth, config_manager=None) -> Non
             mode = next((m["mode"] for m in modes if m["recommended"]),
                         modes[0]["mode"] if modes else "device")
         if not mode_available(platform, mode):
-            return {"ok": False, "detail": f"{platform} 的「{mode}」登录方式暂未启用"}
+            return {"ok": False, "detail": tr(request, "err.login.mode_unavailable", platform=platform, mode=mode)}
 
         status_map = status_via_adapters(request, _INBOX_ADAPTERS)
         baseline = online_account_keys(status_map, platform)
@@ -225,7 +226,7 @@ def register_platform_login_routes(app, *, api_auth, config_manager=None) -> Non
         platform = str(platform or "").lower()
         sess = get_login_manager().get(login_id)
         if sess is None:
-            return {"ok": True, "status": "expired", "detail": "登录会话不存在或已过期"}
+            return {"ok": True, "status": "expired", "detail": tr(request, "err.login.session_expired")}
         if sess.status in ("authorized", "failed"):
             return {"ok": True, "status": sess.status, "detail": sess.detail}
         if sess.is_expired():

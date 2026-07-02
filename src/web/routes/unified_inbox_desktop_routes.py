@@ -25,6 +25,7 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.responses import Response
 
 from src.inbox.persona_reply import generate_persona_reply, normalize_history
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +111,7 @@ def register_desktop_routes(app, *, api_auth) -> None:
         # 归一对话历史（OpenAI 风格）+ 取最后一条入站消息作为「待回复」
         history, last_inbound = normalize_history(msgs)
         if not last_inbound:
-            return {"ok": False, "detail": "无可用对话上下文"}
+            return {"ok": False, "detail": tr(request, "err.ws.no_conversation_context")}
 
         # 人设化回复走单一事实源（persona_reply.generate_persona_reply）：
         # 与收件箱全自动草稿 / 协议自动回复同一条产线，避免逻辑分叉。
@@ -175,14 +176,14 @@ def register_desktop_routes(app, *, api_auth) -> None:
             body = {}
         store = getattr(request.app.state, "inbox_store", None)
         if store is None:
-            raise HTTPException(503, "inbox store 未就绪")
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
         platform = str((body or {}).get("platform") or "").lower()
         account_id = str((body or {}).get("account_id") or "")
         chat_key = str((body or {}).get("chat_key") or "")
         if not platform or not account_id:
-            raise HTTPException(400, "platform / account_id 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="platform / account_id"))
         if not chat_key:
-            raise HTTPException(400, "chat_key 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="chat_key"))
         try:
             from src.integrations.account_registry import get_account_registry
             reg = get_account_registry()
@@ -363,7 +364,7 @@ def register_desktop_routes(app, *, api_auth) -> None:
         except Exception:
             limit = 20
         if not platform or not account_id:
-            raise HTTPException(400, "platform / account_id 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="platform / account_id"))
         from src.inbox.desktop_outbound import get_desktop_outbound_queue
         items = get_desktop_outbound_queue().pull(
             platform, account_id, chat_key=chat_key, limit=limit)
@@ -466,7 +467,7 @@ def register_desktop_routes(app, *, api_auth) -> None:
         except Exception:
             item_id = 0
         if not item_id:
-            raise HTTPException(400, "id 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="id"))
         ok = bool((body or {}).get("ok", True))
         error = str((body or {}).get("error") or "")
         from src.inbox.desktop_outbound import get_desktop_outbound_queue
@@ -513,7 +514,7 @@ def register_desktop_routes(app, *, api_auth) -> None:
                 return q.retry(iid)
             if action == "edit":
                 return q.edit(iid, text, ai_suggestion=ai_suggestion, source=source)
-            raise HTTPException(400, "未知 action：" + action)
+            raise HTTPException(400, tr(request, "err.ws.unknown_action") + action)
 
         # 批量（P3：全部放行 / 全部拦截）——ids 给定时逐条执行，返回成功条数。
         if isinstance(ids_raw, list) and ids_raw:
@@ -528,7 +529,7 @@ def register_desktop_routes(app, *, api_auth) -> None:
             return {"ok": True, "applied": applied, "action": action, "batch": True}
 
         if not item_id:
-            raise HTTPException(400, "id 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="id"))
         return {"ok": True, "applied": _apply(item_id), "action": action}
 
     @app.post("/api/desktop/outbound/rewrite")
@@ -550,11 +551,11 @@ def register_desktop_routes(app, *, api_auth) -> None:
         except Exception:
             item_id = 0
         if not item_id:
-            raise HTTPException(400, "id 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="id"))
         from src.inbox.desktop_outbound import get_desktop_outbound_queue
         cmd = get_desktop_outbound_queue().get(item_id)
         if not cmd:
-            return {"ok": False, "detail": "命令不存在或已清理"}
+            return {"ok": False, "detail": tr(request, "err.ws.command_not_found")}
         platform = str(cmd.get("platform") or "")
         account_id = str(cmd.get("account_id") or "")
         chat_key = str(cmd.get("chat_key") or "")
@@ -573,7 +574,7 @@ def register_desktop_routes(app, *, api_auth) -> None:
                 logger.debug("[desktop] rewrite 取会话上下文失败", exc_info=True)
         if not last_inbound:
             return {"ok": False,
-                    "detail": "无客户会话上下文（inbox 未启用或该会话无入站消息），无法重写"}
+                    "detail": tr(request, "err.ws.no_customer_context")}
 
         out = await generate_persona_reply(
             app=request.app, platform=platform, chat_key=chat_key,

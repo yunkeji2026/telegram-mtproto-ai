@@ -16,6 +16,49 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 
+# Fields that pin a *specific* cloned/reference voice. When a persona switches
+# to a different backend (e.g. a public neural voice via edge_tts), these must
+# NOT leak from the inherited global clone profile — otherwise every persona
+# would reuse the operator's own ``my_voice`` reference audio / consent flags.
+_CLONE_BLEED_KEYS = (
+    "reference_audio_path", "reference_text", "command_args", "command_template",
+    "command_timeout_sec", "voice", "speaker_id", "voice_profile_json_path",
+    "base_url", "model", "clone_path", "source", "language",
+)
+
+
+def _merge_voice_profile(merged: Dict[str, Any], vp: Dict[str, Any]) -> None:
+    """Apply a persona ``voice_profile`` on top of an already merged voice cfg.
+
+    If the persona explicitly selects a *different* backend than the inherited
+    one, clone-specific fields are dropped first so a public neural voice does
+    not accidentally reuse the global clone's reference audio / consent flags.
+    """
+    if not isinstance(vp, dict):
+        return
+    # Ignore empty UI placeholders such as {backend:"", voice:""}.
+    if not any(vp.get(k) for k in (
+        "enabled", "backend", "voice", "speaker_id", "reference_audio_path",
+    )):
+        return
+    base_vp = dict(merged.get("voice_profile") or {})
+    new_backend = str(vp.get("backend") or "").strip().lower()
+    old_backend = str(base_vp.get("backend") or "").strip().lower()
+    if new_backend and old_backend and new_backend != old_backend:
+        for k in _CLONE_BLEED_KEYS:
+            base_vp.pop(k, None)
+        # Public/cloud neural backends carry no clone consent/enable semantics.
+        if new_backend in ("edge_tts", "openai", "elevenlabs"):
+            base_vp.pop("enabled", None)
+            base_vp.pop("owner_consent", None)
+    base_vp.update(vp)
+    merged["voice_profile"] = base_vp
+    # Persona may also override top-level TTS fields.
+    for k in ("backend", "voice", "model", "format"):
+        if vp.get(k):
+            merged[k] = vp[k]
+
+
 def resolve_voice_cfg(
     persona_id: Optional[str],
     full_config: Dict[str, Any],
@@ -46,7 +89,7 @@ def resolve_voice_cfg(
             if v is not None:
                 merged[k] = v
 
-        # ── Layer 2 (highest): per-persona voice_profile ──
+        # ── Layer 2: config.yaml per-persona voice_profile ──
         if persona_id:
             personas_cfg = full_config.get("personas") or {}
             profiles = personas_cfg.get("profiles") or []
@@ -58,20 +101,30 @@ def resolve_voice_cfg(
                 vp = p.get("voice_profile")
                 if not isinstance(vp, dict):
                     break
-                # Merge voice_profile sub-dict
-                base_vp = dict(merged.get("voice_profile") or {})
-                base_vp.update(vp)
-                merged["voice_profile"] = base_vp
-                # Persona may also override top-level TTS fields
-                for k in ("backend", "voice", "model", "format"):
-                    if vp.get(k):
-                        merged[k] = vp[k]
+                _merge_voice_profile(merged, vp)
                 break
+
+        # ── Layer 3 (highest): runtime PersonaManager profiles ──
+        # Web voice enrollment persists into profiles_runtime.yaml via PersonaManager,
+        # not config.yaml. Read it here so "登记成功" immediately affects TTS sends.
+        if persona_id:
+            try:
+                from src.utils.persona_manager import PersonaManager
+                p_rt = PersonaManager.get_instance().get_persona_by_id(str(persona_id))
+                if isinstance(p_rt, dict):
+                    _merge_voice_profile(merged, p_rt.get("voice_profile") or {})
+            except Exception:
+                pass
 
         # ── 注入全局局域网克隆配置，让 TTSPipeline 实现「LAN 优先 → 云端兜底」──
         vcl = full_config.get("voice_clone_lan")
         if isinstance(vcl, dict) and vcl:
             merged["voice_clone_lan"] = dict(vcl)
+
+        # ── 注入 MiniCPM-o 情感克隆主机配置（backend=minicpm_clone 时消费；异步语音消息）──
+        mcc = full_config.get("minicpm_clone")
+        if isinstance(mcc, dict) and mcc:
+            merged["minicpm_clone"] = dict(mcc)
 
         # ── 注入全局 ElevenLabs 配置（付费情感旗舰档，backend=elevenlabs 时消费）──
         el = full_config.get("elevenlabs")
@@ -130,6 +183,7 @@ def resolve_emotion_for_send(
     chat_key: Optional[str] = None,
     intent: Optional[str] = None,
     csat: Optional[float] = None,
+    persona: Optional[Dict[str, Any]] = None,
 ) -> Any:
     """P4：合成前的共享情感接缝（sender / voice_autosend / unified_inbox 共用）。
 
@@ -158,9 +212,131 @@ def resolve_emotion_for_send(
         from src.ai.voice_emotion import derive_emotion
         return derive_emotion(
             intent=intent, rel_stage=rel_stage, csat=csat,
-            text=text, default=default)
+            text=text, default=default, persona=persona)
     except Exception:
         return None
+
+
+def resolve_effective_voice_context(
+    full_config: Dict[str, Any],
+    *,
+    persona_id: Optional[str] = None,
+    chat_key: Optional[str] = None,
+    account_persona_id: Optional[str] = None,
+    contact_key: Optional[str] = None,
+    platform: str = "telegram",
+    account_id: Optional[str] = None,
+    text: str = "",
+    intent: Optional[str] = None,
+    csat: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Resolve the actual persona, voice config, and emotion used for one send.
+
+    This is the shared decision point for manual inbox voice, Telegram auto voice,
+    and System Z autosend voice. ``persona_id`` is an explicit UI/operator choice;
+    otherwise we fall back to chat binding, then account persona, then defaults.
+    """
+    cfg = full_config or {}
+    resolved_persona: Dict[str, Any] = {}
+    resolved_id = str(persona_id or "").strip()
+    source = "explicit" if resolved_id else "fallback"
+    try:
+        from src.utils.persona_manager import PersonaManager
+        pm = PersonaManager.get_instance()
+        if resolved_id:
+            p = pm.get_persona_by_id(resolved_id)
+            if isinstance(p, dict):
+                resolved_persona = p
+        else:
+            p, tier = pm.get_persona_with_tier(
+                str(chat_key or ""), str(account_persona_id or ""))
+            if isinstance(p, dict):
+                resolved_persona = p
+                resolved_id = str(p.get("id") or "").strip()
+                source = str(tier or source)
+    except Exception:
+        resolved_persona = {}
+
+    voice_cfg = resolve_voice_cfg_for_contact(
+        resolved_id or None, cfg, contact_key=contact_key)
+    # Inline/snapshot bindings can carry a voice_profile without an id. Merge it
+    # directly so legacy chat bindings still get their own voice.
+    if isinstance(resolved_persona, dict):
+        _merge_voice_profile(voice_cfg, resolved_persona.get("voice_profile") or {})
+
+    # The pinned emotion baseline lives on the *resolved* voice_profile (which an
+    # inline binding inherits from its profile by id). Surface it to the emotion
+    # layer so the auto-reply path honors the same baseline as explicit selection.
+    emo_persona = dict(resolved_persona) if isinstance(resolved_persona, dict) else {}
+    vp_eff = voice_cfg.get("voice_profile")
+    if isinstance(vp_eff, dict) and vp_eff.get("emotion") and not (
+        (emo_persona.get("voice_profile") or {}).get("emotion")
+    ):
+        _evp = dict(emo_persona.get("voice_profile") or {})
+        _evp["emotion"] = vp_eff["emotion"]
+        emo_persona["voice_profile"] = _evp
+
+    emotion = resolve_emotion_for_send(
+        voice_cfg, text, platform=platform, account_id=account_id,
+        chat_key=chat_key or contact_key, intent=intent, csat=csat,
+        persona=emo_persona or None,
+    )
+    return {
+        "persona_id": resolved_id,
+        "persona": resolved_persona,
+        "persona_source": source,
+        "voice_cfg": voice_cfg,
+        "emotion": emotion,
+    }
+
+
+def resolve_account_persona_id(
+    full_config: Dict[str, Any],
+    platform: str,
+    account_id: str,
+    *,
+    registry: Any = None,
+) -> str:
+    """Resolve the effective account-level persona id for a platform account.
+
+    Single source of truth for "which persona does this account speak as",
+    shared by autosend-voice gating and auto-draft enrichment so both agree.
+
+    Priority (highest → lowest):
+      1. registry ``meta.persona_id``   — explicit singular binding
+      2. registry ``meta.persona_ids[0]`` — plural list written by
+         ``TelegramAccountRegistry.sync_to_account_registry`` (config sync)
+      3. ``config[platform].persona_ids[0]`` — static config default
+
+    Fixes the plural/singular mismatch root cause: sync writes ``persona_ids``
+    (list) but callers historically read ``persona_id`` (scalar) → empty
+    ``_real_pid`` → voice grey-list allowlist mis-blocks → "发语音却只收到文字".
+    Best-effort: any lookup failure degrades to the next tier, never raises.
+    """
+    cfg = full_config or {}
+    try:
+        if registry is None:
+            from src.integrations.account_registry import get_account_registry
+            registry = get_account_registry()
+        row = registry.get(platform, account_id) or {}
+        meta = row.get("meta") or {}
+        pid = str(meta.get("persona_id") or "").strip()
+        if pid:
+            return pid
+        _pids = meta.get("persona_ids") or []
+        if _pids:
+            pid = str((_pids[0] if _pids else "") or "").strip()
+            if pid:
+                return pid
+    except Exception:
+        pass
+    try:
+        _dpids = (cfg.get(platform, {}) or {}).get("persona_ids") or []
+        if _dpids:
+            return str((_dpids[0] if _dpids else "") or "").strip()
+    except Exception:
+        pass
+    return ""
 
 
 def get_voice_profile_for_persona(
