@@ -267,6 +267,16 @@ Thumbs.db
 *.backup
 *.old
 *_recovered.py
+# 不规则后缀的配置/DB 备份（含密钥或运行时数据，绝不入库）——
+# 如 config/config.yaml.bak_preBeatrice、config/inbox.db-shm.bak_dedup2_20260629
+config/*.yaml.bak*
+config/*.yml.bak*
+*.db.bak*
+*.db-shm.bak*
+*.db-wal.bak*
+*.sqlite.bak*
+# 一次性登录/会话 HTML 转储（可能含敏感会话数据）
+login_dump*.html
 
 # 密钥文件
 *.pem
