@@ -225,6 +225,26 @@ def test_all_stages_classified_into_exactly_one_bucket():
             )
 
 
+def test_every_stage_has_display_label():
+    """展示标签完备性：每个 STAGE_* 必须在 FUNNEL_STAGE_LABELS 有标签，否则 UI 显示原始阶段码。
+
+    与 test_funnel_stage_labels_parity_backend_vs_frontend（FE==BE）合起来 →
+    新增阶段必须**同时**补后端标签 + 前端标签，闭合「加了阶段忘配文案」的漏。
+    """
+    from src.web.routes.unified_inbox_helpers import FUNNEL_STAGE_LABELS
+
+    all_stages = _all_stage_values()
+    missing = all_stages - set(FUNNEL_STAGE_LABELS)
+    assert not missing, (
+        f"以下 STAGE_* 无展示标签（UI 会显示原始阶段码）：{sorted(missing)}\n"
+        "请在 src/web/routes/unified_inbox_helpers.FUNNEL_STAGE_LABELS 补标签"
+    )
+    stray = set(FUNNEL_STAGE_LABELS) - all_stages
+    assert not stray, (
+        f"FUNNEL_STAGE_LABELS 含非法阶段键（打错/已删阶段的残留标签）：{sorted(stray)}"
+    )
+
+
 def _iter_eq_string_boolchains(tree):
     """产出 (node, frozenset[str]) —— `x=='A' or x=='B' ...` 这类全为 `==字符串常量` 的 Or 链。
 
