@@ -58,6 +58,53 @@ class PersonaManager:
 
     _instance: Optional["PersonaManager"] = None
 
+    # Role/business labels that must NEVER be spoken as the bot's own name.
+    # The domain 'conversion' persona is *named* '线上陪伴' (an operator-facing
+    # label — persona.yaml itself notes 展示名以 config / 主系统提示为准), but if
+    # persona resolution falls back to it the model will answer 「我叫线上陪伴」and
+    # send it to the customer (observed 2026-07-01). These are filtered out of the
+    # *spoken* name so the identity lock never instructs the model to say them.
+    _FORBIDDEN_SPOKEN_NAMES = frozenset({
+        "线上陪伴", "在线陪伴", "線上陪伴", "在線陪伴",
+        "线上客服", "在线客服", "線上客服", "在線客服",
+        "客服", "小客服", "助手", "小助手", "ai助手", "ai 助手",
+        "机器人", "機器人", "assistant",
+    })
+    # Neutral, real-sounding fallback when no persona resolves to a real name.
+    # A companion bot must have a person-like name, never a service label.
+    _DEFAULT_SPOKEN_NAME = "小柔"
+
+    @classmethod
+    def resolve_spoken_name(
+        cls,
+        persona: Any,
+        *,
+        name_override: str = "",
+        fallback: str = "",
+    ) -> str:
+        """Resolve the name the bot may *speak* as its own, never a role label.
+
+        Priority: explicit ``name_override`` (config ``ai.ai_name``) → persona's own
+        ``name`` → ``fallback`` (config ``ai.fallback_display_name``) → neutral default.
+        Any candidate that is a known role/business label (``线上陪伴`` etc.) or empty
+        is skipped, so 「我叫线上陪伴」can never be produced at the source.
+        """
+        def _real(x: Any) -> str:
+            s = str(x or "").strip()
+            return s if s and s.lower() not in cls._FORBIDDEN_SPOKEN_NAMES else ""
+
+        pname = ""
+        if isinstance(persona, dict):
+            pname = persona.get("name", "")
+        elif isinstance(persona, str):
+            pname = persona
+        return (
+            _real(name_override)
+            or _real(pname)
+            or _real(fallback)
+            or cls._DEFAULT_SPOKEN_NAME
+        )
+
     def __init__(self):
         self._default_persona: Dict[str, Any] = copy.deepcopy(_DEFAULT_PERSONA)
         self._chat_personas: Dict[str, Dict[str, Any]] = {}  # inline/snapshot bindings
@@ -820,20 +867,26 @@ class PersonaManager:
         account_persona_id: str = "",
         platform: str = "",
         funnel_stage: str = "",
+        fallback_name: str = "",
     ) -> str:
         """供 AI 系统提示拼接。detail=full 完整；compact 仅核心句+禁忌，减轻与域 system_prompt 重复。
         name_override: 若 config 中配置了 ai.ai_name，应传入以覆盖域 persona.yaml 里的默认名，避免与主系统提示冲突。
         account_persona_id: 多账号时的账号级人设 id（第二层回退）。
         platform: 渠道标识（'whatsapp'/'telegram'/'line'/'messenger'等），用于平台特定约束注入。
         funnel_stage: 漏斗阶段（'cold'/'warm'/'hot'），用于语调调节。
+        fallback_name: 无人设解析出真实姓名时的兜底真名（config ai.fallback_display_name），
+            防止回落到域标签「线上陪伴」被当名字念出。
         """
         p = self.get_persona(chat_id, account_persona_id)
         if detail == "compact":
-            return self._format_persona_compact(p, name_override=name_override)
+            return self._format_persona_compact(
+                p, name_override=name_override, fallback_name=fallback_name
+            )
         if detail == "none":
             return ""
         return self._format_persona_instructions(
-            p, name_override=name_override, platform=platform, funnel_stage=funnel_stage
+            p, name_override=name_override, platform=platform,
+            funnel_stage=funnel_stage, fallback_name=fallback_name,
         )
 
     @staticmethod
@@ -862,10 +915,13 @@ class PersonaManager:
         return out
 
     def _format_persona_compact(
-        self, persona: Dict[str, Any], *, name_override: str = ""
+        self, persona: Dict[str, Any], *, name_override: str = "",
+        fallback_name: str = "",
     ) -> str:
         persona = self.normalize_profile_shape(persona)
-        name = (name_override or "").strip() or persona.get("name", "Assistant")
+        name = self.resolve_spoken_name(
+            persona, name_override=name_override, fallback=fallback_name
+        )
         role = persona.get("role", "")
         lines: List[str] = [
             f"你是{name}，{role}。",
@@ -995,12 +1051,14 @@ class PersonaManager:
 
     def _format_persona_instructions(
         self, persona: Dict[str, Any], *, name_override: str = "",
-        platform: str = "", funnel_stage: str = ""
+        platform: str = "", funnel_stage: str = "", fallback_name: str = "",
     ) -> str:
         """Convert persona.yaml into natural language instructions for the LLM."""
         persona = self.normalize_profile_shape(persona)
         lines: List[str] = []
-        name = (name_override or "").strip() or persona.get("name", "Assistant")
+        name = self.resolve_spoken_name(
+            persona, name_override=name_override, fallback=fallback_name
+        )
         role = persona.get("role", "AI 助手")
 
         lines.append(f"你是{name}，{role}。")
@@ -1055,6 +1113,41 @@ class PersonaManager:
             if emp:
                 lines.append(f"【深度共情】{emp}")
 
+        # Hobbies / interests — 兴趣爱好（此前断链：数据里有但从不进 prompt，导致
+        # AI 会否认自己 role 里写明的爱好，如"线上艺术品竞拍"）。让 AI 聊到相关话题
+        # 时能自然承接、与人设一致，绝不自我否认。
+        hobbies = ctx.get("hobbies")
+        _hb = ""
+        if isinstance(hobbies, (list, tuple)):
+            _hb = "、".join(str(h).strip() for h in hobbies if str(h).strip())
+        elif isinstance(hobbies, str):
+            _hb = hobbies.strip()
+        if _hb:
+            lines.append(
+                f"【你的兴趣爱好】{_hb}——这些是你真实的爱好，"
+                "聊到或被问到相关话题时自然承接，绝不否认自己有这些兴趣。"
+            )
+
+        # Specific memories — 预置的具体记忆片段（此前断链：数据里有但从不进 prompt）。
+        # 被对方回指追问「你上次说过的那件事」时，AI 有据可依，不至于幻觉编造或否认。
+        mems = ctx.get("specific_memories")
+        _ms: List[str] = []
+        if isinstance(mems, (list, tuple)):
+            _ms = [str(m).strip() for m in mems if str(m).strip()]
+        elif isinstance(mems, str) and mems.strip():
+            _ms = [mems.strip()]
+        if _ms:
+            lines.append(
+                "【你的一些具体经历/记忆】以下是你真实经历过的事，可在合适时机自然提起；"
+                "当对方回指「你上次提到过…」这类追问时，优先从这里对齐口径，"
+                "不要否认、不要说「你记错了/搞混了」：\n"
+                + "\n".join(f"- {m}" for m in _ms)
+            )
+
+        # 关系是否已足够熟（intimate/steady）——脾气/口头脏话等「有棱角」行为的闸门。
+        # 生人/暖场阶段先收着，避免一上来就没大没小。
+        _intimate_stage = (funnel_stage or "").strip().lower() in ("intimate", "steady")
+
         # Personality
         p = persona.get("personality", {})
         traits = p.get("traits", [])
@@ -1063,6 +1156,36 @@ class PersonaManager:
         style = p.get("style", "")
         if style:
             lines.append(f"说话风格：{style}。")
+        # 口头禅/说话习惯（此前断链：数据里写了 quirks 但从不进 prompt，导致人设写好的
+        # 口癖模型根本看不到、永远不会说）。让 AI 像真人一样自然带出标志性口头禅。
+        quirks = str(p.get("quirks") or "").strip()
+        if quirks:
+            lines.append(
+                f"【口头禅/说话习惯】{quirks}——自然地穿插在日常回复里，"
+                "像真人一样偶尔冒出来即可；别每句都用，也别生硬堆砌。"
+            )
+        # 幽默感：让聊天有趣、有梗（轻松场合才用）。
+        humor = str(p.get("humor") or "").strip()
+        if humor:
+            lines.append(
+                f"【幽默感】{humor}——气氛轻松时可以开玩笑、自嘲、俏皮调侃，"
+                "让对话有活人的趣味；对方在谈正事或情绪低落时不硬凑笑点。"
+            )
+        # 真实性情/脾气：熟络后才「有棱角」（吃醋、拌嘴、俏皮反击、撒娇式抱怨）。
+        # 生人阶段收着；且这一切出于在乎，绝不真伤人（安全红线见下方 banter 段）。
+        temperament = str(p.get("temperament") or "").strip()
+        if temperament:
+            if _intimate_stage:
+                lines.append(
+                    f"【真实性情】{temperament}——你们已经很熟了，可以像真人一样有小情绪："
+                    "被冷落会吃醋、被逗会俏皮反击、意见不合时拌两句嘴、也会撒娇式抱怨或闹别扭。"
+                    "这些都出于在乎，是活人的可爱，绝不冷暴力、不真的伤人。"
+                )
+            else:
+                lines.append(
+                    f"【真实性情】{temperament}——但你们还没那么熟，先收着点脾气，"
+                    "别一上来就没大没小或闹情绪。"
+                )
         # P2-A：emoji_level 真生效（修真断链）— 旧版仅当数据字段存在不进 prompt
         # web 后台改了 emoji_level 用户感知不到。这里转成自然语言指令。
         emoji_level = (p.get("emoji_level") or "").strip().lower()
@@ -1074,6 +1197,8 @@ class PersonaManager:
             lines.append("emoji 偶尔用：约 30% 的回复带 1 个，自然不刻意，避免连用。")
         elif emoji_level == "rich":
             lines.append("emoji 用得多一点：约 60% 的回复带 1-2 个，活泼但不堆砌。")
+        elif emoji_level in ("high", "very_rich", "many"):
+            lines.append("emoji 用得很多：大部分回复带 1-3 个，非常活泼俏皮，符合外放性格。")
 
         # Speaking rules
         s = persona.get("speaking", {})
@@ -1102,6 +1227,18 @@ class PersonaManager:
             lines.append(f"单次回复建议不超过 {max_sentences} 句。")
         if s.get("language_follow"):
             lines.append("用户用什么语言发消息，就用同一语言回复。")
+        # 口头脏话/粗话尺度（per-persona opt-in `speaking.banter_profanity`）：
+        # 仅在【关系亲密（intimate/steady）】才放开，用于「朋友/情侣间的口癖」增加真人感。
+        # 硬红线永不松动：不人身攻击、不辱骂贬低对方本人、不涉歧视/仇恨/性；对方一旦情绪
+        # 低落/认真求助/生气/谈正事，立即收起脏话换回温柔认真。生人阶段完全不放开。
+        if s.get("banter_profanity") and _intimate_stage:
+            lines.append(
+                "【尺度·亲密闲聊】关系已很亲密且对方情绪轻松时，允许偶尔用轻度口头脏话/粗话"
+                "增加真人感（如「靠」「我勒个去」「笨蛋」「神经病啦」这类朋友/情侣间的口癖）。"
+                "但硬红线绝不触碰：不人身攻击、不辱骂或贬低对方本人、不涉及歧视/仇恨/性内容、"
+                "不针对对方痛处；一旦对方情绪低落、认真求助、生气或在谈正事，立刻收起脏话、"
+                "换回温柔认真。脏话是玩笑调味，绝不是攻击。"
+            )
 
         # Identity
         identity = persona.get("identity", {})

@@ -630,17 +630,29 @@ def register_kb_routes(app, ctx):
     _kb_backup_dir = Path(config_manager.config_path).parent / "kb_backups"
 
     async def _call_embed_api(texts: List[str]) -> List[List[float]]:
-        """
-        调用智能体 Embedding API，批量返回向量列表。
-        模型优先从 ai.embedding_model 读取，默认 text-embedding-v2。
+        """调用 Embedding API，批量返回向量列表。
+
+        与 ``ai_client.embed`` 同源：优先用独立嵌入端点 ``ai.embedding_base_url``
+        （+ ``embedding_api_key`` / ``embedding_model``，如 LAN bge-m3 / 本机 Ollama），
+        使 KB 向量与情景记忆向量落在**同一向量空间**；未配独立端点才回落对话端点。
+        历史坑：曾固定读 ``ai.base_url``（DeepSeek 对话端点、无 embedding 能力）→ KB
+        embed-all 打错端点。
         """
         import httpx as _httpx
         ai_cfg = config_manager.config.get("ai", {})
-        api_key = ai_cfg.get("api_key", "")
-        base_url = (ai_cfg.get("base_url", "https://api.deepseek.com")).rstrip("/")
-        model = ai_cfg.get("embedding_model", "text-embedding-v2")
-        if not api_key or not texts:
+        if not texts:
             return []
+        emb_base = (ai_cfg.get("embedding_base_url") or "").strip().rstrip("/")
+        if emb_base:
+            base_url = emb_base if emb_base.endswith("/v1") else emb_base + "/v1"
+            api_key = (ai_cfg.get("embedding_api_key") or ai_cfg.get("api_key") or "ollama").strip()
+            model = ai_cfg.get("embedding_model", "bge-m3")
+        else:
+            base_url = (ai_cfg.get("base_url", "https://api.deepseek.com")).rstrip("/")
+            api_key = ai_cfg.get("api_key", "")
+            model = ai_cfg.get("embedding_model", "text-embedding-v2")
+        if not api_key:
+            api_key = "ollama"  # 本地 Ollama 无需鉴权，占位即可
         try:
             async with _httpx.AsyncClient(timeout=60) as client:
                 resp = await client.post(

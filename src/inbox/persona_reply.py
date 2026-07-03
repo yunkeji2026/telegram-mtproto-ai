@@ -20,7 +20,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +159,8 @@ async def generate_persona_reply(
     media_type: str = "",
     media_ref: str = "",
     media_desc: str = "",
+    conversation_id: str = "",
+    peer_audio_emotion: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """人设化智能回复（单一事实源）。
 
@@ -234,6 +236,8 @@ async def generate_persona_reply(
                     media_type=media_type,
                     media_ref=media_ref,
                     media_desc=media_desc,
+                    conversation_id=conversation_id,
+                    peer_audio_emotion=peer_audio_emotion,
                 )
                 if _res and (_res.get("reply") or "").strip():
                     reply = _res["reply"]

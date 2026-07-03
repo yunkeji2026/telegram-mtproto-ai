@@ -248,3 +248,125 @@ def test_stats_reset():
     assert set(st) == {"calls", "written", "skipped",
                        "avatar_downloaded", "avatar_reused", "errors"}
     assert all(v == 0 for v in st.values())
+
+
+# ── P4: dict / pushname 抽取（多平台通用） ────────────────────────────────────
+
+def test_extract_from_dict_pushname():
+    # WhatsApp Baileys 只给单一 pushname（dict 形态）
+    assert sp.extract_self_profile({"pushname": "小雨"}) == {"self_name": "小雨"}
+
+
+def test_extract_from_dict_name_and_username():
+    got = sp.extract_self_profile({"name": "Lin Xiaoyu", "username": "@linxy"})
+    assert got == {"self_name": "Lin Xiaoyu", "self_username": "linxy"}
+
+
+def test_extract_display_name_alias():
+    # LINE displayName / Messenger name 走同一 name 别名回落
+    assert sp.extract_self_profile({"display_name": "阿龙"}) == {"self_name": "阿龙"}
+
+
+# ── P4: enrich_from_fields（通用富集入口） ────────────────────────────────────
+
+async def test_enrich_from_fields_disabled_short_circuits(monkeypatch):
+    reg = _FakeRegistry()
+    monkeypatch.setattr("src.integrations.account_registry.get_account_registry",
+                        lambda *a, **k: reg)
+    got = await sp.enrich_from_fields("whatsapp", "wa1", name="小雨", config={})
+    assert got == {}
+    assert reg.upserts == []
+
+
+async def test_enrich_from_fields_writes_name_and_avatar_url(monkeypatch):
+    reg = _FakeRegistry(existing_meta={"baileys_login_id": "L1"})
+    monkeypatch.setattr("src.integrations.account_registry.get_account_registry",
+                        lambda *a, **k: reg)
+    cfg = {"accounts": {"self_profile": {"enabled": True}}}
+    got = await sp.enrich_from_fields(
+        "whatsapp", "wa1", name="小雨", avatar_url="https://x/pic.jpg", config=cfg)
+    assert got["self_name"] == "小雨"
+    assert got["self_avatar"] == "https://x/pic.jpg"   # 远端直链，不本地下载
+    _, _, written = reg.upserts[0]
+    assert written["baileys_login_id"] == "L1"          # 既有字段保住
+    assert written["self_name"] == "小雨"
+
+
+async def test_enrich_from_fields_empty_is_noop(monkeypatch):
+    reg = _FakeRegistry()
+    monkeypatch.setattr("src.integrations.account_registry.get_account_registry",
+                        lambda *a, **k: reg)
+    cfg = {"accounts": {"self_profile": {"enabled": True}}}
+    got = await sp.enrich_from_fields("whatsapp", "wa1", name="", config=cfg)
+    assert got == {}
+    assert reg.upserts == []
+
+
+async def test_enrich_from_fields_idempotent_skip(monkeypatch):
+    reg = _FakeRegistry(existing_meta={"self_name": "小雨"})
+    monkeypatch.setattr("src.integrations.account_registry.get_account_registry",
+                        lambda *a, **k: reg)
+    cfg = {"accounts": {"self_profile": {"enabled": True}}}
+    got = await sp.enrich_from_fields("whatsapp", "wa1", name="小雨", config=cfg)
+    assert got == {"self_name": "小雨"}
+    assert reg.upserts == []   # 无变化 → 零写入
+
+
+# ── P4: cleanup_avatar（账号移除回收） ────────────────────────────────────────
+
+def test_cleanup_avatar_deletes_file(tmp_path):
+    fn = sp._safe_avatar_filename("telegram", "123")
+    f = tmp_path / fn
+    f.write_bytes(b"img")
+    assert f.exists()
+    assert sp.cleanup_avatar("telegram", "123", avatar_dir=str(tmp_path)) is True
+    assert not f.exists()
+
+
+def test_cleanup_avatar_missing_file_ok(tmp_path):
+    # 无头像文件也算成功（幂等，删无可删）
+    assert sp.cleanup_avatar("telegram", "nope", avatar_dir=str(tmp_path)) is True
+
+
+# ── P5: sweep_orphan_avatars（孤儿清扫） ──────────────────────────────────────
+
+def test_sweep_removes_only_orphans(tmp_path):
+    keep = tmp_path / sp._safe_avatar_filename("telegram", "123")
+    orphan = tmp_path / sp._safe_avatar_filename("whatsapp", "gone")
+    keep.write_bytes(b"a")
+    orphan.write_bytes(b"b")
+    # known 用 (platform, account_id) 元组集合
+    res = sp.sweep_orphan_avatars({("telegram", "123")}, avatar_dir=str(tmp_path))
+    assert res == {"scanned": 2, "removed": 1}
+    assert keep.exists()          # 活跃账号头像保留
+    assert not orphan.exists()    # 孤儿删除
+
+
+def test_sweep_accepts_filename_keys(tmp_path):
+    f = tmp_path / sp._safe_avatar_filename("telegram", "123")
+    f.write_bytes(b"a")
+    # known 用文件名基（含/不含 .jpg 都可）
+    res = sp.sweep_orphan_avatars({"self_telegram_123"}, avatar_dir=str(tmp_path))
+    assert res["removed"] == 0 and f.exists()
+
+
+def test_sweep_missing_dir_noop():
+    res = sp.sweep_orphan_avatars({("telegram", "1")}, avatar_dir="/no/such/dir/xyz")
+    assert res == {"scanned": 0, "removed": 0}
+
+
+def test_sweep_empty_known_removes_all(tmp_path):
+    (tmp_path / sp._safe_avatar_filename("telegram", "1")).write_bytes(b"a")
+    (tmp_path / sp._safe_avatar_filename("line", "2")).write_bytes(b"b")
+    res = sp.sweep_orphan_avatars(set(), avatar_dir=str(tmp_path))
+    assert res == {"scanned": 2, "removed": 2}
+
+
+# ── P4: Prometheus dump ───────────────────────────────────────────────────────
+
+def test_dump_self_profile_prom():
+    sp.reset_self_profile_stats()
+    txt = sp.dump_self_profile_prom()
+    assert "# TYPE account_self_profile_total counter" in txt
+    assert 'account_self_profile_total{op="written"} 0' in txt
+    assert 'account_self_profile_total{op="avatar_downloaded"} 0' in txt

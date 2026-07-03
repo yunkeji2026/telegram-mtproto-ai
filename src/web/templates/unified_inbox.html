@@ -67,14 +67,15 @@
 <script>window.CP_LANG = (window.WS_LANG === 'en') ? 'en' : 'zh';</script>
 <script src="/copilot/i18n/cp-i18n.js?v=20260701"></script>
 <script src="/copilot/client/copilot-client.js?v=20260611b"></script>
-<script src="/copilot/components/cp-panel-base.js?v=20260611"></script>
+<script src="/copilot/sidebar-chrome.js?v=20260706"></script>
+<script src="/copilot/components/cp-panel-base.js?v=20260702"></script>
 <script src="/copilot/components/cp-rel-stage.js?v=20260611"></script>
 <script src="/copilot/components/cp-next-actions.js?v=20260611"></script>
 <script src="/copilot/components/cp-script.js?v=20260611"></script>
 <script src="/copilot/components/cp-persona.js?v=20260611"></script>
 <script src="/copilot/components/cp-collab.js?v=20260611"></script>
 <script src="/copilot/components/cp-chain-exec.js?v=20260611"></script>
-<script src="/copilot/components/cp-draft.js?v=20260611"></script>
+<script src="/copilot/components/cp-draft.js?v=20260704"></script>
 <script src="/copilot/components/cp-voice.js?v=20260611b"></script>
 {% endblock %}
 {% block content %}
@@ -226,7 +227,11 @@
 .list-header.compact{padding:8px 14px 6px;}
 .list-header.compact .list-header-compact{display:flex;}
 .list-header.compact .list-header-body{max-height:0;overflow:hidden;opacity:0;margin:0;padding:0;pointer-events:none;}
-.list-header-body{transition:max-height .28s ease,opacity .2s ease,margin .2s ease;}
+/* 只淡入淡出，不动画 max-height：展开态 max-height 为 none，浏览器无法在 0↔none 间插值，
+   会渲染一帧错位画面(闪动)。高度/边距瞬时切换(不产生 none 插值故无闪)，靠 opacity 平滑过渡。
+   注：body 内的筛选下拉(ftab-more-menu/tag-filter-dropdown/msg-search-overlay)为绝对定位，
+   故不能对本容器用 overflow:hidden+固定 max-height 做手风琴动画(会裁掉下拉)。 */
+.list-header-body{transition:opacity .18s ease;}
 .lhc-pills{display:flex;gap:4px;margin-left:auto;margin-right:4px;}
 .lhc-pill{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;cursor:pointer;border:1px solid transparent;white-space:nowrap;}
 .lhc-pill .lhc-x{cursor:pointer;opacity:.6;font-size:11px;line-height:1;padding:0 1px;margin-left:1px;}
@@ -308,6 +313,8 @@
 /* SLA 超时不再用整条红/橙左竖线（太抢眼）；紧急度由 .sla-chip 角标承载，列表保持整洁。 */
 .conv-item.sla-warn,.conv-item.sla-crit{border-left:none;}
 .conv-avatar{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#fff;flex-shrink:0;position:relative;text-transform:uppercase;}
+/* P4：真实头像懒加载覆盖层——加载成功盖住渐变底+首字母；失败/无图则移除露出底层 */
+.conv-avatar .ava-img,.chat-header-avatar .ava-img,.ident-hero-ava .ava-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%;opacity:0;transition:opacity .2s;}
 .conv-avatar-badge{position:absolute;bottom:0;right:0;width:16px;height:16px;border-radius:50%;border:2px solid #fff;overflow:hidden;background:#fff;display:flex;align-items:center;justify-content:center;line-height:0;}
 .conv-body{flex:1;min-width:0;}
 .conv-name{font-size:13px;font-weight:600;color:var(--text-main);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -351,7 +358,7 @@
 
 /* Header */
 .chat-header{background:var(--bg-panel);border-bottom:1px solid var(--border);padding:10px 18px;display:flex;align-items:center;gap:10px;flex-shrink:0;}
-.chat-header-avatar{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff;flex-shrink:0;text-transform:uppercase;}
+.chat-header-avatar{position:relative;width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff;flex-shrink:0;text-transform:uppercase;}
 .chat-header-info{flex:1;min-width:0;}
 .chat-header-name{font-size:15px;font-weight:700;color:var(--text-main);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .chat-header-sub{font-size:11px;color:var(--text-sub);margin-top:1px;}
@@ -422,8 +429,27 @@
 .msg-bubble{max-width:68%;padding:9px 13px;border-radius:16px;font-size:13px;line-height:1.55;word-break:break-word;box-shadow:0 1px 2px rgba(15,23,42,.06);}
 .msg-row.in .msg-bubble{background:var(--bubble-in);color:var(--text-main);border:1px solid var(--border);border-bottom-left-radius:4px;}
 .msg-row.out .msg-bubble{background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;border-bottom-right-radius:4px;box-shadow:0 2px 6px rgba(37,99,235,.22);}
+/* P4-2 引用回复条（气泡内正文上方）：左竖线 + 发言人 + 摘要单行省略 */
+.msg-quote{border-left:3px solid rgba(59,130,246,.6);padding:2px 8px;margin-bottom:5px;border-radius:4px;background:rgba(15,23,42,.05);font-size:12px;line-height:1.4;display:flex;flex-direction:column;gap:1px;overflow:hidden;}
+.msg-quote-sender{font-weight:700;color:var(--accent);font-size:11px;}
+.msg-quote-text{color:var(--text-tiny);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}
+.msg-row.out .msg-quote{border-left-color:rgba(255,255,255,.7);background:rgba(255,255,255,.15);}
+.msg-row.out .msg-quote-sender{color:#fff;}
+.msg-row.out .msg-quote-text{color:rgba(255,255,255,.9);}
+/* P4-3 表情回应 chips：贴气泡下沿，微上移做「叠在气泡边」的观感 */
+.msg-reactions{display:flex;gap:3px;flex-wrap:wrap;margin-top:-6px;margin-bottom:2px;padding:0 4px;}
+.msg-row.out .msg-reactions{justify-content:flex-end;}
+.react-chip{display:inline-flex;align-items:center;gap:2px;background:var(--bubble-in,#fff);border:1px solid var(--border);border-radius:11px;padding:1px 6px;font-size:12px;line-height:1.4;box-shadow:0 1px 2px rgba(15,23,42,.08);}
+.react-n{font-size:10px;color:var(--text-tiny);font-weight:600;}
 .msg-ts{font-size:10px;color:var(--text-tiny);margin-top:3px;}
 .msg-row.out .msg-ts{text-align:right;color:var(--text-tiny);}
+/* P4-4 已读回执：出站气泡时间戳旁的投递勾（sent=单勾/delivered=双勾/read=蓝双勾） */
+.msg-tick{margin-left:3px;font-weight:700;letter-spacing:-2px;}
+.msg-tick.read{color:#38bdf8;}
+/* P4-6A 编辑/撤回：撤回气泡灰化斜体；已编辑小标记 */
+.msg-bubble-revoked{background:var(--bubble-in,#f1f5f9)!important;color:var(--text-tiny)!important;border:1px dashed var(--border)!important;box-shadow:none!important;}
+.msg-revoked{font-style:italic;opacity:.75;}
+.msg-edited{font-size:9px;color:var(--text-tiny);margin-left:4px;opacity:.8;}
 .msg-translation{margin-top:6px;padding-top:6px;border-top:1px dashed rgba(100,116,139,.3);color:var(--text-sub);font-size:12px;line-height:1.55;}
 .msg-translation::before{content:'';display:inline-block;width:11px;height:11px;margin-right:4px;vertical-align:-1px;background:currentColor;opacity:.6;-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M3 12h18'/%3E%3Cpath d='M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18z'/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M3 12h18'/%3E%3Cpath d='M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18z'/%3E%3C/svg%3E") center/contain no-repeat;}
 /* 发出气泡(蓝底)内的译文/分隔线改用白系，保证文字与气泡有足够对比 */
@@ -435,6 +461,13 @@
 .msg-tools{margin-top:3px;display:flex;gap:5px;}
 .tiny-btn{border:1px solid var(--btn-border);background:var(--bg-elev);border-radius:6px;padding:4px 9px;font-size:11px;color:var(--text-sub);cursor:pointer;white-space:nowrap;transition:background .12s,border-color .12s,color .12s;}
 .tiny-btn:hover{background:var(--bg-soft);border-color:var(--accent);color:var(--accent);}
+/* P1: 通讯录 / 好友名单行 */
+.contact-row{display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--line-soft,rgba(0,0,0,.04));transition:background .1s;}
+.contact-row:hover{background:var(--bg-soft);}
+.contact-ava{position:relative;flex:0 0 auto;width:34px;height:34px;border-radius:50%;background:var(--accent,#25d366);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px;overflow:hidden;}
+.contact-ava img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .2s;}
+.contact-nm{font-size:13px;font-weight:600;color:var(--text-main);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.contact-sub{font-size:12px;color:var(--text-tiny);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 /* P0：单条翻译按钮做成醒目的绿色描边，提示「可点击翻译」 */
 .tiny-btn.xl-btn{border-color:var(--xl-trbtn-border);background:var(--xl-trbtn-bg);color:var(--xl-trbtn-text);font-weight:600;display:inline-flex;align-items:center;gap:4px;}
 .tiny-btn.xl-btn:hover{border-color:var(--xl-trbtn-text);filter:brightness(1.06);}
@@ -482,6 +515,25 @@
 /* 弹层内双向翻译条改为竖向铺开、去渐变背景以贴合白底弹层 */
 .rt-pop .xlate-bar{background:transparent;border:0;padding:0;gap:8px;}
 .reply-preview{margin-top:7px;border:1px solid var(--xl-info-border);background:var(--xl-info-bg);border-radius:8px;padding:8px;font-size:12px;color:var(--xl-info-text);white-space:pre-wrap;display:none;}
+/* P4-5B 引用回复条 + 气泡表情选择器 */
+.quote-reply-bar{margin-top:7px;display:flex;align-items:center;gap:8px;border-left:3px solid #2563eb;background:var(--bubble-in,#f1f5f9);border-radius:6px;padding:6px 8px;}
+.quote-reply-bar .qrb-body{flex:1;min-width:0;font-size:12px;line-height:1.4;overflow:hidden;}
+.quote-reply-bar .qrb-sender{color:#2563eb;font-weight:600;margin-right:6px;}
+.quote-reply-bar .qrb-text{color:var(--text-tiny);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-block;max-width:100%;vertical-align:bottom;}
+.quote-reply-bar .qrb-x{border:none;background:transparent;color:var(--text-tiny);font-size:18px;line-height:1;cursor:pointer;padding:0 4px;}
+.edit-mode-bar{border-left-color:#f59e0b;background:rgba(245,158,11,.12);}
+.edit-mode-bar .qrb-sender{color:#b45309;}
+.media-preview-bar{border-left-color:#0f9d75;background:rgba(15,157,117,.10);}
+.media-preview-bar .qrb-sender{color:#0f766e;}
+.media-preview-bar.sending{opacity:.7;}
+.media-preview-bar.failed{border-left-color:#ef4444;background:rgba(239,68,68,.10);}
+.mpb-status{color:#ef4444;font-size:11px;margin-left:8px;white-space:nowrap;}
+.mpb-thumb{width:40px;height:40px;object-fit:cover;border-radius:6px;flex:none;}
+.mpb-icon{font-size:24px;line-height:1;flex:none;}
+.msg-area.drag-over{outline:2px dashed #0f9d75;outline-offset:-4px;background:rgba(15,157,117,.04);}
+.react-picker{position:absolute;z-index:50;display:flex;gap:2px;background:var(--bubble-in,#fff);border:1px solid var(--border);border-radius:16px;padding:3px 6px;box-shadow:0 4px 14px rgba(15,23,42,.18);}
+.react-picker span{cursor:pointer;font-size:17px;line-height:1;padding:2px;border-radius:8px;transition:transform .1s;}
+.react-picker span:hover{transform:scale(1.25);}
 .voice-preview{margin-top:7px;border:1px solid var(--xl-teal-border);background:var(--xl-teal-bg);border-radius:8px;padding:8px;font-size:12px;color:var(--xl-teal-text);display:none;}
 
 /* P55: 实时双向翻译控制条 */
@@ -643,6 +695,8 @@
 .draft-panel-hdr{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--tk-brand);font-weight:600;margin-bottom:6px;}
 .draft-card-mini{border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--bg-elev);margin-bottom:6px;font-size:12px;}
 .draft-card-mini .risk{font-size:10px;font-weight:700;border-radius:6px;padding:1px 6px;margin-right:6px;}
+.draft-card-mini .unsent-badge{font-size:10px;font-weight:700;border-radius:6px;padding:1px 6px;background:rgba(217,119,6,.16);color:#b45309;border:1px solid rgba(217,119,6,.35);white-space:nowrap;cursor:help;}
+:root[data-cp-theme="dark"] .draft-card-mini .unsent-badge{background:rgba(245,158,11,.18);color:#fbbf24;border-color:rgba(245,158,11,.4);}
 .risk-low{background:rgba(16,185,129,.14);color:var(--tk-ok-ink);} .risk-medium{background:rgba(245,158,11,.16);color:var(--tk-warn-ink);} .risk-high{background:rgba(225,29,72,.14);color:var(--tk-danger-ink);} .risk-unknown{background:var(--bg-soft);color:var(--tk-text-muted);}
 .draft-text-mini{color:var(--text-main);line-height:1.45;margin:4px 0;}
 .draft-peer-mini{font-size:11px;color:var(--text-sub);background:var(--bg-soft);border-left:3px solid #cbd5e1;padding:4px 6px;border-radius:3px;margin-bottom:4px;white-space:pre-wrap;}
@@ -652,13 +706,19 @@
 .btn-approve:disabled,.btn-reject:disabled{opacity:.5;cursor:not-allowed;}
 
 /* 右侧业务助手侧栏（与桌面端 copilot 同源组件，默认选中会话后展开） */
-.info-sidebar{width:300px;flex-shrink:0;border-left:1px solid var(--border);background:var(--bg-panel);display:none;flex-direction:column;overflow:hidden;}
+.info-sidebar{width:300px;min-width:280px;max-width:480px;flex-shrink:0;border-left:1px solid var(--border);background:var(--bg-panel);display:none;flex-direction:column;overflow:hidden;position:relative;}
 .info-sidebar.show{display:flex;}
+.ws-sidebar-resize{position:absolute;left:0;top:0;bottom:0;width:5px;cursor:col-resize;z-index:3;touch-action:none;}
+.ws-sidebar-resize:hover,.ws-sidebar-resize.dragging{background:color-mix(in srgb,var(--accent) 28%,transparent);}
 .ws-cp-head{padding:10px 14px;font-size:14px;font-weight:700;color:var(--text-main);border-bottom:1px solid var(--border);flex-shrink:0;background:var(--bg-soft);}
 .ws-cp-tabs{display:flex;gap:4px;padding:8px 12px 0;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--bg-panel);}
-.ws-cp-tab{flex:1;font:inherit;font-size:12px;cursor:pointer;padding:6px 0;border:none;background:transparent;color:var(--text-sub);border-bottom:2px solid transparent;transition:color .15s,border-color .15s;white-space:nowrap;}
+.ws-cp-tab{flex:1;font:inherit;font-size:12px;cursor:pointer;padding:6px 0;border:none;background:transparent;color:var(--text-sub);border-bottom:2px solid transparent;transition:color .15s,border-color .15s;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;gap:2px;min-width:0;}
 .ws-cp-tab:hover{color:var(--text-main);}
 .ws-cp-tab.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:600;}
+.ws-cp-tab-badge{font-size:9px;font-weight:700;padding:0 5px;border-radius:999px;background:var(--red);color:#fff;line-height:1.55;flex-shrink:0;}
+.ws-cp-tab-badge:empty{display:none;}
+.ws-cp-tab-badge.warn{background:var(--warn);}
+.ws-cp-tab-badge.accent{background:color-mix(in srgb,var(--accent) 85%,#fff);}
 .ws-cp-body{flex:1;overflow-y:auto;scrollbar-width:thin;}
 .ws-cp-sec{display:none;padding:12px 12px 16px;}
 .ws-cp-sec.active{display:block;}
@@ -671,6 +731,59 @@
 .info-row{display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;}
 .info-label{color:var(--text-sub);}
 .info-val{color:var(--text-main);font-weight:500;text-align:right;max-width:60%;word-break:break-word;}
+/* F2：资料面板顶部「身份英雄卡」——头像(渐变首字母兜底 + 真实头像懒覆盖) + 昵称 + 平台角标 */
+.ident-hero{display:flex;align-items:center;gap:10px;padding:0 0 10px;margin-bottom:8px;border-bottom:1px solid var(--border);}
+.ident-hero-ava{position:relative;width:48px;height:48px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:#fff;flex-shrink:0;text-transform:uppercase;}
+.ident-hero-badge{position:absolute;bottom:-2px;right:-2px;width:18px;height:18px;border-radius:50%;border:2px solid var(--bg-panel);background:var(--bg-panel);display:flex;align-items:center;justify-content:center;line-height:0;overflow:hidden;}
+.ident-hero-meta{min-width:0;flex:1;}
+.ident-hero-name{font-size:15px;font-weight:700;color:var(--text-main);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ident-hero-sub{font-size:12px;color:var(--text-sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ident-hero-hint{font-size:11px;color:var(--text-tiny);margin-top:2px;display:inline-flex;align-items:center;gap:3px;}
+
+/* ===== 方案1：AI 英雄卡 + 统一可折叠卡片（业务助手侧栏） ===== */
+/* 折叠卡通用外观：卡头(可点，事件委托切换)/标题/状态 pill/chevron/卡体 */
+.cp-card{border:1px solid var(--border);border-radius:10px;background:var(--bg-panel);margin-bottom:10px;overflow:hidden;}
+.cp-card-hd{display:flex;align-items:center;gap:8px;width:100%;padding:9px 12px;background:var(--bg-soft);border:0;cursor:pointer;font:inherit;text-align:left;color:var(--text-main);transition:background .12s;}
+.cp-card-hd:hover{background:var(--bg-elev);}
+.cp-card-ttl{flex:1;min-width:0;font-size:12px;font-weight:700;color:var(--text-main);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-flex;align-items:center;gap:0;}
+.cp-card-pill{flex-shrink:0;font-size:10px;font-weight:600;color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);border-radius:999px;padding:1px 8px;line-height:1.6;}
+.cp-card-pill:empty{display:none;}
+.cp-card-pill.pill-accent{color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);}
+.cp-card-pill.pill-ok{color:var(--green);background:color-mix(in srgb,var(--green) 14%,transparent);}
+.cp-card-pill.pill-warn{color:var(--warn);background:color-mix(in srgb,var(--warn) 16%,transparent);}
+.cp-card-pill.pill-danger{color:var(--red);background:color-mix(in srgb,var(--red) 14%,transparent);}
+.cp-card-pill.cp-pill-link{cursor:pointer;}
+.cp-card-pill.cp-pill-link:hover{filter:brightness(1.1);}
+.cp-card-ic,.ws-cp-tab-ic{display:inline-flex;align-items:center;vertical-align:middle;margin-right:5px;color:var(--text-sub);opacity:.88;flex-shrink:0;}
+.cp-hero .cp-card-ic{color:var(--accent);opacity:1;}
+.cp-card-chev{flex-shrink:0;width:7px;height:7px;border-right:2px solid var(--text-tiny);border-bottom:2px solid var(--text-tiny);transform:rotate(45deg);transition:transform .18s;margin-right:1px;}
+.cp-card.collapsed .cp-card-chev{transform:rotate(-45deg);}
+.cp-card-bd{padding:10px 12px;}
+.cp-card.collapsed .cp-card-bd{display:none;}
+/* 跨 tab 常驻卡（英雄卡）在侧栏内左右留白，与 tab 内卡片对齐 */
+#cp-hero{margin:10px 12px 0;flex-shrink:0;}
+/* AI 英雄卡：accent 描边 + 轻底，作为「AI 给你的答案」视觉主角，跨 tab 常驻 */
+.cp-hero{border:1px solid var(--accent);border-left:3px solid var(--accent);border-radius:10px;background:color-mix(in srgb,var(--accent) 7%,var(--bg-panel));overflow:hidden;}
+.cp-hero .cp-card-hd{background:transparent;}
+.cp-hero .cp-card-ttl{color:var(--accent);}
+.cp-hero .cp-card-chev{border-color:var(--accent);}
+.cp-hero.collapsed .cp-card-bd{display:none;}
+.cp-hero-rel{font-size:12px;color:var(--text-sub);padding:2px 12px 8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.cp-hero-rel:empty{display:none;}
+.cp-hero-rel .hr-ic{display:inline-flex;color:var(--accent);opacity:.9;}
+.cp-hero-rel .hr-stage{font-weight:700;color:var(--accent);}
+.cp-hero-rel .hr-next{color:var(--text-tiny);}
+/* 把 NBA 组件外框压平融入英雄卡（组件外观由 CSS 变量控制，置为透明/无内边距） */
+.cp-hero-nba{display:block;padding:0 10px 10px;--cp-surface:transparent;--cp-border:transparent;--cp-gap:0;--cp-radius:0;}
+/* 会话运维卡（方案C 的 conv-ops 收拢为默认折叠卡，省纵向） */
+#conv-ops .cp-card-bd{display:flex;flex-direction:column;gap:8px;}
+#conv-ops .claim-hdr-btn{width:100%;justify-content:center;}
+#conv-ops .auto-safety-bar{padding:6px 9px;border:1px solid rgba(15,157,117,.30);border-radius:9px;margin:0;}
+.conv-ops-tags{display:flex;flex-direction:column;gap:5px;}
+.conv-ops-lbl{font-size:11px;font-weight:600;color:var(--text-sub);}
+.conv-ops-actions{display:flex;gap:6px;}
+.convops-btn{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:6px 10px;font-size:12px;}
+.convops-btn .co-ico{font-size:13px;line-height:1;}
 
 /* ===== 账号管理抽屉 ===== */
 .drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:200;display:none;backdrop-filter:blur(1px);}
@@ -704,11 +817,15 @@
 .status-dot.off{background:var(--red);}
 .status-dot.warn{background:var(--warn);}
 .acct-detail{font-size:11px;color:var(--text-sub);line-height:1.6;}
-.acct-actions{display:flex;gap:6px;margin-top:8px;}
-.acct-btn{padding:4px 10px;border-radius:7px;font-size:11px;cursor:pointer;border:1px solid var(--border);background:var(--bg-elev);color:var(--text-sub);}
+.acct-actions{display:flex;gap:6px;margin-top:8px;flex-wrap:nowrap;align-items:stretch;}
+.acct-btn{flex:1 1 0;min-width:0;padding:5px 6px;border-radius:7px;font-size:11px;line-height:1.4;cursor:pointer;border:1px solid var(--border);background:var(--bg-elev);color:var(--text-sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center;transition:border-color .15s,color .15s,background .15s;}
 .acct-btn:hover{border-color:var(--accent);color:var(--accent);}
 .acct-btn.reconnect{border-color:rgba(225,29,72,.4);color:var(--red);background:rgba(225,29,72,.1);}
 .acct-btn.reconnect:hover{background:rgba(225,29,72,.18);}
+/* 危机操作（登出/删除）压成图标按钮：固定宽、不占正文空间，保证操作条单行不换行 */
+.acct-btn.icon{flex:0 0 auto;width:30px;padding:5px 0;font-size:14px;line-height:1;}
+.acct-btn.danger{border-color:rgba(225,29,72,.35);color:var(--red);}
+.acct-btn.danger:hover{border-color:var(--red);color:var(--red);background:rgba(225,29,72,.12);}
 /* ===== 连接中心（按平台分组） ===== */
 .acct-plat-group{margin-bottom:18px;}
 .acct-plat-header{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
@@ -772,7 +889,7 @@
 .switch input:checked + .slider{background:#16a34a;}
 .switch input:checked + .slider::before{transform:translateX(18px);}
 /* 账号池编排器状态条 */
-.orch-banner{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 11px;margin-bottom:12px;border:1px solid var(--border);border-radius:10px;background:linear-gradient(90deg,#f0f9ff,#fff);font-size:12px;color:var(--text-main);font-weight:600;}
+.orch-banner{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 11px;margin-bottom:12px;border:1px solid var(--border);border-radius:10px;background:linear-gradient(90deg,rgba(59,130,246,.10),var(--bg-panel));font-size:12px;color:var(--text-main);font-weight:600;}
 .orch-chip{font-size:11px;font-weight:700;padding:2px 8px;border-radius:9px;background:var(--bg-soft);color:var(--text-sub);}
 .orch-chip.ok{background:rgba(16,185,129,.14);color:var(--tk-ok-ink);}
 .orch-chip.err{background:rgba(225,29,72,.14);color:var(--tk-danger-ink);}
@@ -782,6 +899,7 @@
 @keyframes spin{to{transform:rotate(360deg);}}
 .plat-icon-badge{font-size:11px;color:#fff;border-radius:4px;padding:1px 5px;font-weight:600;}
 .plat-hdr-badge{display:inline-flex;align-items:center;gap:4px;vertical-align:middle;font-weight:600;}
+.hdr-uname{color:var(--text-sub);font-weight:500;opacity:.85;}
 .nav-plat-ic{display:flex;align-items:center;justify-content:center;line-height:0;}
 .bi-telegram{background:#2BA5E0;}.bi-line{background:#00C300;}.bi-messenger{background:#0084FF;}.bi-whatsapp{background:#25D366;}.bi-web{background:var(--accent);}
 .tooltip{position:absolute;left:68px;background:#1e293b;color:#fff;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;z-index:100;pointer-events:none;opacity:0;transition:opacity .15s;}
@@ -1104,6 +1222,8 @@
         <span id="total-badge" style="font-size:12px;color:var(--text-tiny);font-weight:400;"></span>
         <!-- P23: 多选切换按钮 -->
         <button class="batch-toggle" id="batch-toggle-btn" onclick="toggleBatchMode()" title="多选批量操作" data-i18n-title="inbox.batch.toggle_t"><svg class="ui-ic" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><span data-i18n="inbox.batch.toggle">多选</span></button>
+        <!-- P1: 通讯录 / 好友名单切换按钮 -->
+        <button class="batch-toggle" id="contacts-toggle-btn" onclick="toggleContactsPanel()" title="通讯录 / 好友名单" data-i18n-title="inbox.contacts.toggle"><svg class="ui-ic" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span data-i18n="inbox.contacts.toggle">通讯录</span></button>
       </div>
       <!-- P55: 今日数据计数条（P1：点击即快捷筛选） -->
       <div class="today-strip loading" id="today-strip">
@@ -1158,6 +1278,17 @@
     <!-- P0: 账号/人格切换条（同平台 ≥2 账号时显示，按 account_id 分流） -->
     <div class="account-chips" id="account-chips" style="display:none;"></div>
 
+    <!-- P1: 通讯录 / 好友名单面板（协议号地址簿；默认隐藏，与会话列表互斥显示） -->
+    <div class="contacts-panel" id="contacts-panel" style="display:none;flex-direction:column;min-height:0;flex:1;overflow:hidden;">
+      <div style="padding:8px 10px;display:flex;gap:6px;align-items:center;border-bottom:1px solid var(--line-soft,#eee);">
+        <select id="contacts-acct-select" onchange="loadContactsList(this.value)" style="flex:0 0 auto;max-width:140px;font-size:12px;" title="账号" data-i18n-title="inbox.contacts.account"></select>
+        <input id="contacts-search" class="search-input" style="flex:1;min-width:0;" placeholder="搜索联系人/号码" data-i18n-placeholder="inbox.contacts.search" oninput="_filterContacts(this.value)">
+        <button class="btn-mini" onclick="syncGroups()" title="同步群聊到群组动态" data-i18n-title="inbox.contacts.sync_groups">👥</button>
+      </div>
+      <div id="contacts-count" style="padding:4px 10px;font-size:12px;color:var(--text-tiny);"></div>
+      <div id="contacts-list" style="flex:1;overflow-y:auto;padding-bottom:8px;"></div>
+    </div>
+
     <div class="conv-items" id="conv-items">
       <div class="empty-list"><span class="spin"></span><span style="margin-top:8px;font-size:13px;" data-i18n="inbox.skel.loading">加载中…</span></div>
     </div>
@@ -1189,17 +1320,15 @@
       <!-- 移动端返回按钮 -->
       <div class="back-btn-mobile" onclick="closeMobileChat()" data-i18n="inbox.back_mobile">← 返回会话列表</div>
 
-      <!-- 顶部 header -->
+      <!-- 顶部 header（方案 C：极简单行——头像+名字+平台 / 档位 / 待审 / 助手；
+           标签·认领·自动运行·搁置·归档等会话运维项统一收进右侧业务助手「会话」分区 #conv-ops） -->
       <div class="chat-header" id="chat-header">
         <div class="chat-header-avatar" id="hdr-avatar"></div>
         <div class="chat-header-info">
           <div class="chat-header-name" id="hdr-name"></div>
           <div class="chat-header-sub" id="hdr-sub"></div>
-          <!-- 标签行 -->
-          <div class="hdr-tags-row" id="hdr-tags-row" style="position:relative;"></div>
         </div>
         <div class="chat-header-acts">
-          <button class="hdr-btn claim-hdr-btn" id="claim-hdr-btn" style="display:none;"></button>
           <select class="mode-select" id="mode-select" onchange="setMode(this.value)" title="AI 自动化档位（唯一入口）：手动 / AI出草稿我审 / AI出多选我挑 / 全自动（AI自动发，命中风控转人工）" data-i18n-title="inbox.mode.select_t">
             <option value="manual" data-i18n="inbox.mode.manual">🙋 手动</option>
             <option value="review" selected data-i18n="inbox.mode.review">📝 AI草稿·我审</option>
@@ -1208,19 +1337,7 @@
           </select>
           <button class="hdr-btn" id="ai-toggle-btn" onclick="toggleAiDraft()" style="display:none;" title="待审 AI 草稿队列（仅「AI草稿/多选」档显示，人工审批后发送）" data-i18n-title="inbox.ai.pending_t"><span data-i18n="inbox.ai.pending">📝 待审</span><span id="ai-pending-badge" style="display:none;margin-left:4px;background:#ef4444;color:#fff;border-radius:9px;font-size:10px;font-weight:700;padding:0 5px;">0</span></button>
           <button class="hdr-btn" id="info-toggle-btn" onclick="toggleInfoSidebar()" title="业务助手（AI回复/洞察/客户档案）" data-i18n-title="inbox.assist_t"><svg class="rt-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="14" y1="3" x2="14" y2="21"/></svg><span data-i18n="inbox.assist">助手</span></button>
-          <button class="archive-btn" id="snooze-btn" onclick="snoozeConv()" title="稍后处理（搁置）" data-i18n-title="inbox.snooze.btn_t">⏰</button>
-          <button class="archive-btn" id="archive-btn" onclick="toggleArchive()" title="归档会话" data-i18n-title="inbox.archive_conv_t">📦</button>
         </div>
-      </div>
-
-      <!-- B-1：全自动安全条（仅 auto_ai 档显示；暂停=B-4 回到上次人工档） -->
-      <div class="auto-safety-bar" id="auto-safety-bar">
-        <span class="asb-dot"></span>
-        <span class="asb-label" data-i18n="inbox.asb.running">🚀 全自动运行中</span>
-        <span class="asb-stats" id="auto-safety-stats"></span>
-        <span class="asb-spacer"></span>
-        <button type="button" class="asb-btn" onclick="_openAutoLog()" title="查看本会话今日自动发送与拦截记录" data-i18n="inbox.asb.log" data-i18n-title="inbox.asb.log_t">记录</button>
-        <button type="button" class="asb-btn asb-pause" onclick="pauseAutoMode()" title="暂停全自动，回到上次使用的人工档位" data-i18n="inbox.asb.pause" data-i18n-title="inbox.asb.pause_t">暂停</button>
       </div>
 
       <!-- Claim banner -->
@@ -1265,6 +1382,23 @@
           <!-- 回复输入栏 -->
           <div class="reply-bar-wrap">
             <div id="reply-preview" class="reply-preview"></div>
+            <!-- P4-5B 引用回复：选中要引用的消息后，此条显示在输入框上方 -->
+            <div id="quote-reply-bar" class="quote-reply-bar" style="display:none;">
+              <div class="qrb-body"><span class="qrb-sender" id="qrb-sender"></span><span class="qrb-text" id="qrb-text"></span></div>
+              <button class="qrb-x" onclick="_cancelReply()" title="取消引用" data-i18n-title="inbox.act.cancel_reply" aria-label="cancel reply">×</button>
+            </div>
+            <!-- P4-6C 编辑态：点「编辑」后原文回填输入框，此条显示在上方（Esc 取消） -->
+            <div id="edit-mode-bar" class="quote-reply-bar edit-mode-bar" style="display:none;">
+              <div class="qrb-body"><span class="qrb-sender" data-i18n="inbox.act.editing">正在编辑</span><span class="qrb-text" id="emb-text"></span></div>
+              <button class="qrb-x" onclick="_cancelEdit()" title="取消编辑" data-i18n-title="inbox.act.cancel_edit" aria-label="cancel edit">×</button>
+            </div>
+            <!-- P4-7+ 媒体预览：选/拖/粘贴文件后先在此预览，输入框内容作 caption，点发送确认 -->
+            <div id="media-preview-bar" class="quote-reply-bar media-preview-bar" style="display:none;">
+              <img id="mpb-thumb" class="mpb-thumb" alt="" style="display:none;">
+              <span id="mpb-icon" class="mpb-icon" style="display:none;">📄</span>
+              <div class="qrb-body"><span class="qrb-sender" id="mpb-name"></span><span class="qrb-text" id="mpb-meta"></span></div>
+              <button class="qrb-x" onclick="_cancelMedia()" title="取消发送媒体" data-i18n-title="inbox.media.cancel" aria-label="cancel media">×</button>
+            </div>
             <div id="voice-preview" class="voice-preview"></div>
             <!-- P26: / 命令面板 -->
             <div class="slash-panel" id="slash-panel">
@@ -1449,12 +1583,26 @@
 
         <!-- 业务助手侧栏（与桌面右栏同源 shared/copilot 组件） -->
         <div class="info-sidebar" id="info-sidebar">
+          <div class="ws-sidebar-resize" id="ws-sidebar-resize" title="拖动调节宽度" data-i18n-title="inbox.sidebar.resize_t"></div>
           <div class="ws-cp-head" style="display:flex;align-items:center;gap:6px;"><span data-i18n="inbox.cp.title">业务助手</span><span id="ws-cp-app-toggle" title="切换统一 App（与桌面 🧪 同源 /copilot/app.html，单一前端 App）" data-i18n-title="inbox.cp.app_toggle_t" onclick="wsToggleApp()" style="cursor:pointer;margin-left:auto;font-size:13px;opacity:.6;user-select:none;">🧪</span></div>
           <div class="ws-cp-tabs" id="ws-cp-tabs">
-            <button type="button" class="ws-cp-tab active" data-tab="reply" data-i18n="inbox.cp.tab.reply">💬 回复</button>
-            <button type="button" class="ws-cp-tab" data-tab="insight" data-i18n="inbox.cp.tab.insight">🧠 洞察</button>
-            <button type="button" class="ws-cp-tab" data-tab="customer" data-i18n="inbox.cp.tab.customer">👤 客户</button>
+            <button type="button" class="ws-cp-tab active" data-tab="reply"><span class="ws-cp-tab-ic" data-cp-ic="msg"></span><span data-i18n="inbox.cp.tab.reply">回复台</span><span class="ws-cp-tab-badge" id="ws-cp-tab-badge-reply"></span></button>
+            <button type="button" class="ws-cp-tab" data-tab="customer"><span class="ws-cp-tab-ic" data-cp-ic="heart"></span><span data-i18n="inbox.cp.tab.customer">客户&关系</span><span class="ws-cp-tab-badge" id="ws-cp-tab-badge-customer"></span></button>
+            <button type="button" class="ws-cp-tab" data-tab="tools"><span class="ws-cp-tab-ic" data-cp-ic="link"></span><span data-i18n="inbox.cp.tab.tools">工具箱</span><span class="ws-cp-tab-badge" id="ws-cp-tab-badge-tools"></span></button>
           </div>
+          <!-- 方案1：AI 英雄卡（跨 tab 常驻）——把最值钱的「下一步建议 + 关系阶段一句话」提到眼前。
+               这里物理承载真正的 <cp-next-actions>（从原「洞察」tab 迁来，单实例去重、click→回填自动生效）。 -->
+          <section class="cp-hero" id="cp-hero" data-cp-card="hero">
+            <button type="button" class="cp-card-hd" data-cp-toggle="hero">
+              <span class="cp-card-ttl"><span class="cp-card-ic" data-cp-ic="zap"></span><span data-i18n="inbox.hero.title">AI 下一步</span></span>
+              <span class="cp-card-pill" id="cpp-hero"></span>
+              <span class="cp-card-chev" aria-hidden="true"></span>
+            </button>
+            <div class="cp-card-bd" style="padding:0;">
+              <div class="cp-hero-rel" id="cp-hero-rel"></div>
+              <cp-next-actions id="ws-cp-nba" class="cp-hero-nba"></cp-next-actions>
+            </div>
+          </section>
           <!-- 单一前端 App（iframe 同源加载 /copilot/app.html）：与桌面壳 🧪 共用一份业务 UI。
                默认隐藏，仅当 ?app=1 或 localStorage('ws_use_app')==='1' 时启用（可回退，零删除现有面板）。 -->
           <div class="ws-cp-appwrap" id="ws-cp-appwrap" hidden style="flex:1;min-height:0;">
@@ -1463,54 +1611,136 @@
           </div>
           <div class="ws-cp-body" id="ws-cp-body">
             <div class="ws-cp-sec active" data-tab="reply">
-              <h4 data-i18n="inbox.cp.h.ai_reply">✨ AI 回复</h4>
-              <cp-draft id="ws-cp-draft"></cp-draft>
-              <h4 data-i18n="inbox.cp.h.voice">🎙️ 语音克隆 / 发送</h4>
-              <cp-voice id="ws-cp-voice"></cp-voice>
-              <h4 data-i18n="inbox.cp.h.persona">🎭 人设绑定</h4>
-              <cp-persona id="ws-cp-persona"></cp-persona>
-              <h4 data-i18n="inbox.cp.h.script">🎬 剧本话题</h4>
-              <cp-script id="ws-cp-script"></cp-script>
-            </div>
-            <div class="ws-cp-sec" data-tab="insight">
-              <h4 data-i18n="inbox.cp.h.rel_stage">💞 关系阶段</h4>
-              <cp-rel-stage id="ws-cp-relstage"></cp-rel-stage>
-              <h4 data-i18n="inbox.cp.h.collab">🤝 协作上下文</h4>
-              <cp-collab id="ws-cp-collab"></cp-collab>
-              <h4 data-i18n="inbox.cp.h.nba">⚡ 下一步建议</h4>
-              <cp-next-actions id="ws-cp-nba"></cp-next-actions>
-              <h4 data-i18n="inbox.cp.h.chain">🔗 工作链执行</h4>
-              <cp-chain-exec id="ws-cp-chain"></cp-chain-exec>
-              <div class="info-section" style="border:0;padding:0;margin-top:8px;">
-                <div class="info-section-title" data-i18n="inbox.cp.h.ai_analysis">🧠 AI 对话分析</div>
-                <div id="ai-analysis-rows"><span style="font-size:11px;color:var(--text-tiny);" data-i18n="inbox.cp.ai_hint">展开助手后自动分析</span></div>
-              </div>
+              <section class="cp-card" data-cp-card="draft">
+                <button type="button" class="cp-card-hd" data-cp-toggle="draft">
+                  <span class="cp-card-ttl"><span class="cp-card-ic" data-cp-ic="spark"></span><span data-i18n="inbox.cp.h.ai_reply">AI 回复</span></span>
+                  <span class="cp-card-pill" id="cpp-draft"></span>
+                  <span class="cp-card-chev" aria-hidden="true"></span>
+                </button>
+                <div class="cp-card-bd"><cp-draft id="ws-cp-draft"></cp-draft></div>
+              </section>
+              <section class="cp-card collapsed" data-cp-card="voice">
+                <button type="button" class="cp-card-hd" data-cp-toggle="voice">
+                  <span class="cp-card-ttl"><span class="cp-card-ic" data-cp-ic="mic"></span><span data-i18n="inbox.cp.h.voice">语音克隆 / 发送</span></span>
+                  <span class="cp-card-chev" aria-hidden="true"></span>
+                </button>
+                <div class="cp-card-bd"><cp-voice id="ws-cp-voice"></cp-voice></div>
+              </section>
+              <section class="cp-card collapsed" data-cp-card="persona">
+                <button type="button" class="cp-card-hd" data-cp-toggle="persona">
+                  <span class="cp-card-ttl"><span class="cp-card-ic" data-cp-ic="user"></span><span data-i18n="inbox.cp.h.persona">人设绑定</span></span>
+                  <span class="cp-card-pill" id="cpp-persona"></span>
+                  <span class="cp-card-chev" aria-hidden="true"></span>
+                </button>
+                <div class="cp-card-bd"><cp-persona id="ws-cp-persona"></cp-persona></div>
+              </section>
+              <section class="cp-card collapsed" data-cp-card="script">
+                <button type="button" class="cp-card-hd" data-cp-toggle="script">
+                  <span class="cp-card-ttl"><span class="cp-card-ic" data-cp-ic="film"></span><span data-i18n="inbox.cp.h.script">剧本话题</span></span>
+                  <span class="cp-card-pill" id="cpp-script"></span>
+                  <span class="cp-card-chev" aria-hidden="true"></span>
+                </button>
+                <div class="cp-card-bd"><cp-script id="ws-cp-script"></cp-script></div>
+              </section>
             </div>
             <div class="ws-cp-sec" data-tab="customer">
-              <div class="info-section" style="border:0;padding:0;">
-                <div class="info-section-title" data-i18n="inbox.cp.h.cust_info">客户信息</div>
-                <div id="cust-info-rows"></div>
-              </div>
-              <div class="info-section" style="border:0;padding:0;margin-top:8px;">
-                <div class="info-section-title" data-i18n="inbox.cp.h.journey">旅程阶段</div>
-                <div id="journey-info"></div>
-              </div>
-              <div class="notes-section" id="notes-section" style="margin-top:8px;">
-                <div class="notes-section-title">
-                  <span data-i18n="inbox.cp.h.notes">📝 内部注解</span>
-                  <span id="notes-count" style="font-weight:400;color:#9ca3af;"></span>
+              <section class="cp-card" data-cp-card="custinfo">
+                <button type="button" class="cp-card-hd" data-cp-toggle="custinfo">
+                  <span class="cp-card-ttl"><span class="cp-card-ic" data-cp-ic="user"></span><span data-i18n="inbox.cp.h.cust_info">客户信息</span></span>
+                  <span class="cp-card-chev" aria-hidden="true"></span>
+                </button>
+                <div class="cp-card-bd"><div id="cust-info-rows"></div></div>
+              </section>
+              <section class="cp-card collapsed" data-cp-card="relstage">
+                <button type="button" class="cp-card-hd" data-cp-toggle="relstage">
+                  <span class="cp-card-ttl"><span class="cp-card-ic" data-cp-ic="heart"></span><span data-i18n="inbox.cp.h.rel_stage">关系阶段</span></span>
+                  <span class="cp-card-pill" id="cpp-relstage"></span>
+                  <span class="cp-card-chev" aria-hidden="true"></span>
+                </button>
+                <div class="cp-card-bd"><cp-rel-stage id="ws-cp-relstage"></cp-rel-stage></div>
+              </section>
+              <section class="cp-card collapsed" data-cp-card="journey">
+                <button type="button" class="cp-card-hd" data-cp-toggle="journey">
+                  <span class="cp-card-ttl"><span class="cp-card-ic" data-cp-ic="route"></span><span data-i18n="inbox.cp.h.journey">旅程阶段</span></span>
+                  <span class="cp-card-pill" id="cpp-journey"></span>
+                  <span class="cp-card-chev" aria-hidden="true"></span>
+                </button>
+                <div class="cp-card-bd"><div id="journey-info"></div></div>
+              </section>
+              <section class="cp-card collapsed" data-cp-card="collab">
+                <button type="button" class="cp-card-hd" data-cp-toggle="collab">
+                  <span class="cp-card-ttl"><span class="cp-card-ic" data-cp-ic="users"></span><span data-i18n="inbox.cp.h.collab">协作上下文</span></span>
+                  <span class="cp-card-pill" id="cpp-collab"></span>
+                  <span class="cp-card-chev" aria-hidden="true"></span>
+                </button>
+                <div class="cp-card-bd"><cp-collab id="ws-cp-collab"></cp-collab></div>
+              </section>
+              <section class="cp-card collapsed" data-cp-card="notes">
+                <button type="button" class="cp-card-hd" data-cp-toggle="notes">
+                  <span class="cp-card-ttl"><span class="cp-card-ic" data-cp-ic="edit"></span><span data-i18n="inbox.cp.h.notes">内部注解</span></span>
+                  <span class="cp-card-pill" id="notes-count"></span>
+                  <span class="cp-card-chev" aria-hidden="true"></span>
+                </button>
+                <div class="cp-card-bd">
+                  <div class="notes-section" id="notes-section">
+                    <div id="notes-list" style="max-height:220px;overflow-y:auto;margin-bottom:6px;"></div>
+                    <div class="mention-suggest">
+                      <div class="mention-suggest-panel" id="mention-suggest-panel"></div>
+                      <div class="mention-suggest-hint" id="mention-suggest-hint" style="display:none;"></div>
+                      <textarea class="note-input" id="note-input" placeholder="添加内部注解…输入 @ 提及同事" data-i18n-placeholder="inbox.cp.note_ph" rows="2"
+                        onkeydown="_noteKey(event)" oninput="_onNoteInput()" onblur="setTimeout(function(){_hideMentionSuggest();},200)"></textarea>
+                    </div>
+                    <div style="display:flex;justify-content:flex-end;margin-top:4px;">
+                      <button class="note-send-btn" onclick="_submitNote()" data-i18n="inbox.cp.note_add">添加注解</button>
+                    </div>
+                  </div>
                 </div>
-                <div id="notes-list" style="max-height:220px;overflow-y:auto;margin-bottom:6px;"></div>
-                <div class="mention-suggest">
-                  <div class="mention-suggest-panel" id="mention-suggest-panel"></div>
-                  <div class="mention-suggest-hint" id="mention-suggest-hint" style="display:none;"></div>
-                  <textarea class="note-input" id="note-input" placeholder="添加内部注解…输入 @ 提及同事" data-i18n-placeholder="inbox.cp.note_ph" rows="2"
-                    onkeydown="_noteKey(event)" oninput="_onNoteInput()" onblur="setTimeout(function(){_hideMentionSuggest();},200)"></textarea>
+              </section>
+            </div>
+            <div class="ws-cp-sec" data-tab="tools">
+              <!-- 方案 C：会话运维迁入工具箱 tab -->
+              <section class="cp-card collapsed" id="conv-ops" data-cp-card="convops">
+                <button type="button" class="cp-card-hd" data-cp-toggle="convops">
+                  <span class="cp-card-ttl"><span class="cp-card-ic" data-cp-ic="folder"></span><span data-i18n="inbox.convops.title">会话</span></span>
+                  <span class="cp-card-pill" id="convops-pill"></span>
+                  <span class="cp-card-chev" aria-hidden="true"></span>
+                </button>
+                <div class="cp-card-bd">
+                  <button class="hdr-btn claim-hdr-btn" id="claim-hdr-btn" style="display:none;"></button>
+                  <div class="auto-safety-bar" id="auto-safety-bar">
+                    <span class="asb-dot"></span>
+                    <span class="asb-label" data-i18n="inbox.asb.running">🚀 全自动运行中</span>
+                    <span class="asb-stats" id="auto-safety-stats"></span>
+                    <span class="asb-spacer"></span>
+                    <button type="button" class="asb-btn" onclick="_openAutoLog()" title="查看本会话今日自动发送与拦截记录" data-i18n="inbox.asb.log" data-i18n-title="inbox.asb.log_t">记录</button>
+                    <button type="button" class="asb-btn asb-pause" onclick="pauseAutoMode()" title="暂停全自动，回到上次使用的人工档位" data-i18n="inbox.asb.pause" data-i18n-title="inbox.asb.pause_t">暂停</button>
+                  </div>
+                  <div class="conv-ops-tags">
+                    <span class="conv-ops-lbl"><span class="cp-card-ic" data-cp-ic="tag"></span><span data-i18n="inbox.convops.tags">标签</span></span>
+                    <div class="hdr-tags-row" id="hdr-tags-row" style="position:relative;"></div>
+                  </div>
+                  <div class="conv-ops-actions">
+                    <button class="archive-btn convops-btn" id="snooze-btn" onclick="snoozeConv()" title="稍后处理（搁置）" data-i18n-title="inbox.snooze.btn_t"><span class="co-ico">⏰</span><span data-i18n="inbox.snooze.btn_short">搁置</span></button>
+                    <button class="archive-btn convops-btn" id="archive-btn" onclick="toggleArchive()" title="归档会话" data-i18n-title="inbox.archive_conv_t"><span class="co-ico">📦</span><span data-i18n="inbox.conv.archive_short">归档</span></button>
+                  </div>
                 </div>
-                <div style="display:flex;justify-content:flex-end;margin-top:4px;">
-                  <button class="note-send-btn" onclick="_submitNote()" data-i18n="inbox.cp.note_add">添加注解</button>
-                </div>
-              </div>
+              </section>
+              <section class="cp-card collapsed" data-cp-card="chain">
+                <button type="button" class="cp-card-hd" data-cp-toggle="chain">
+                  <span class="cp-card-ttl"><span class="cp-card-ic" data-cp-ic="link"></span><span data-i18n="inbox.cp.h.chain">工作链执行</span></span>
+                  <span class="cp-card-pill" id="cpp-chain"></span>
+                  <span class="cp-card-chev" aria-hidden="true"></span>
+                </button>
+                <div class="cp-card-bd"><cp-chain-exec id="ws-cp-chain"></cp-chain-exec></div>
+              </section>
+              <section class="cp-card collapsed" data-cp-card="analysis">
+                <button type="button" class="cp-card-hd" data-cp-toggle="analysis">
+                  <span class="cp-card-ttl"><span class="cp-card-ic" data-cp-ic="brain"></span><span data-i18n="inbox.cp.h.ai_analysis">AI 对话分析</span></span>
+                  <span class="cp-card-pill" id="cpp-analysis"></span>
+                  <span class="cp-card-chev" aria-hidden="true"></span>
+                </button>
+                <div class="cp-card-bd"><div id="ai-analysis-rows"><span style="font-size:11px;color:var(--text-tiny);" data-i18n="inbox.cp.ai_hint">展开助手后自动分析</span></div></div>
+              </section>
             </div>
           </div>
           <!-- 兼容旧版内联处理器（隐藏，由共享组件接管展示） -->
@@ -1673,6 +1903,8 @@ let accountOnlineOnly=false;    // P2: 切换条「仅在线」精简开关
 let selectedChat=null, selectedKey=null;
 let threadMsgs=[], pollTimer=null, pollFast=false;
 let _threadHasMore=false, _threadOldestTs=null, _threadLoadingOlder=false;
+let _pullingPhone=false;   // P1: 正在向手机补拉更早历史
+let _contactsMode=false, _contactsData=[];  // P1: 通讯录面板状态
 let _outXlPending=null; // P55: 发送前译文待确认 {orig, translated}
 let claimMap={}, claimRenewTimer=null;
 let aiDraftOn=false, infoOn=false;
@@ -2111,7 +2343,11 @@ function _bindListHeaderScroll(){
     requestAnimationFrame(function(){
       ticking=false;
       if(document.activeElement && document.activeElement.id==='search-input') return;
-      const compact=el.scrollTop>48;
+      // 迟滞去抖：单阈值(>48)在临界点附近会随微小滚动反复收起/展开，
+      // 展开动画(max-height/opacity)与紧凑条来回叠加 → 面板抖动+多重重叠。
+      // 用死区[24,72]：展开态须划过 72 才收起，收起态须回到 24 以内才展开。
+      const y=el.scrollTop;
+      const compact = _listHdrCompact ? (y>24) : (y>72);
       if(compact!==_listHdrCompact){
         _listHdrCompact=compact;
         hdr.classList.toggle('compact',compact);
@@ -2547,7 +2783,16 @@ var _UIIC={
   users:'<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
   mic:'<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/>',
   clip:'<path d="M21 12.5 12.5 21a4.5 4.5 0 0 1-6.4-6.4L14 6.7a3 3 0 0 1 4.3 4.3l-7.8 7.8a1.5 1.5 0 0 1-2.1-2.1l7.1-7.1"/>',
-  globe:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18z"/>'
+  globe:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18z"/>',
+  spark:'<path d="M11 3l1.7 4.6L17 9l-4.3 1.4L11 15l-1.7-4.6L5 9l4.3-1.4L11 3z"/>',
+  zap:'<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+  heart:'<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/>',
+  link:'<path d="M10 13a5 5 0 0 0 7.5 0l2-2a5 5 0 0 0-7.1-7.1l-1.3 1.3"/><path d="M14 11a5 5 0 0 0-7.5 0l-2 2a5 5 0 0 0 7.1 7.1l1.3-1.3"/>',
+  brain:'<path d="M9.5 2A5.5 5.5 0 0 0 4 7.5c0 1.9.9 3.6 2.3 4.7L6 22h12l-.3-9.8A5.5 5.5 0 0 0 14.5 2 5.5 5.5 0 0 0 9.5 2z"/>',
+  folder:'<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
+  film:'<rect x="2" y="2" width="20" height="20" rx="2.5"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/>',
+  edit:'<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>',
+  route:'<circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7H11a3.5 3.5 0 0 1 0-7H4"/>'
 };
 function uiIcon(name,size,cls){
   var p=_UIIC[name]; if(!p) return '';
@@ -2617,7 +2862,7 @@ function _buildConvItemDom(c, isSel){
   const checked = _batchSelected.has(cid);
   div.innerHTML=`
     <input type="checkbox" class="conv-checkbox" ${checked?'checked':''} onclick="event.stopPropagation();_toggleBatchItem('${esc(cid)}',this.checked)">
-    <div class="conv-avatar" style="background:${avbg};">${init}
+    <div class="conv-avatar" style="background:${avbg};">${init}${_waAvatarImg(c)}
       <div class="conv-avatar-badge">${platIcon(c.platform,16)}</div>
     </div>
     <div class="conv-body">
@@ -3068,6 +3313,7 @@ function selectChat(key){
   const cc=document.getElementById('chat-content');
   cc.style.display='flex';
   renderChatHeader(c);
+  _maybeResolvePeer(c);   // Telegram「一排数字」私聊：按需惰性补真实昵称/username/电话（自愈回填）
   document.getElementById('msg-area').innerHTML='<div style="text-align:center;color:var(--text-tiny);padding:20px;"><span class="spin"></span></div>';
   document.getElementById('draft-panel').classList.remove('show');
   document.getElementById('draft-panel-items').innerHTML='';
@@ -3096,7 +3342,20 @@ function selectChat(key){
   _hideCopilot();                 // P42：切换会话关闭副驾
   _loadSendCaps(c);               // 媒体/语音直发能力探测 → 事先置灰按钮
   _applyReadOnly(c);              // 已移除账号会话：只读，禁用发送
+  _clearPeerTyping();             // P4-5A：切换会话先清掉上一会话的「对方正在输入」
+  _subscribePresence(c);          // P4-5A：订阅对端 presence（WhatsApp 私聊）
   startAdaptivePoll(); // 切换会话立即进入快轮询模式
+}
+
+/* P4-5A：打开 WhatsApp 私聊时订阅对端在线/输入状态（best-effort，仅协议号有效）。 */
+function _subscribePresence(c){
+  try{
+    if(!c || c.platform!=='whatsapp' || c.chat_type==='group' || !c.chat_key) return;
+    fetch('/api/platforms/whatsapp/'+encodeURIComponent(c.account_id||'default')+'/subscribe-presence',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({chat_key:c.chat_key,chat_type:c.chat_type||''})
+    }).catch(()=>{});
+  }catch(_){}
 }
 
 /* 只读会话（账号已从系统移除）：禁用发送框/按钮/工具条，给出明确说明；
@@ -3163,25 +3422,112 @@ function _clearUnread(c){
   }
 }
 
+// 真实头像懒加载 <img>（native loading=lazy 天然节流；失败/无图 onerror 自移除，
+// 露出底层渐变+首字母）。取图优先级：
+//   ① 已落库的**稳定** avatar_url（/static 或平台永久 URL）——直接用，零回源；
+//      但 messenger 的 avatar_url 是会过期的 scontent/fbcdn 直链（带 oh/oe token）→ 跳过它，
+//      改走 ② 的代理（Node 返回轮询最新直链、Python 下载落 /static 稳定托管）；
+//      （LINE 也走 ①：入站时 getContactsV2 顺带取到稳定 obs 直链已落库 avatar_url，直接渲染）；
+//   ② 有头像代理端点的平台（whatsapp / telegram / messenger）——懒加载按需回源（滚动进视口
+//      才请求，防批量拉头像触发平台限流；whatsapp 群走 @g.us 需带 chat_type=group）；
+//   ③ 其余无直链无端点的平台 → 空串，回落渐变首字母头像。
+const _AVATAR_PROXY_PLATFORMS = {whatsapp:1, telegram:1, messenger:1};
+function _peerAvatarImg(c){
+  if(!c) return '';
+  const pl=c.platform||'';
+  // messenger 落库的是会过期的 scontent 直链 → 不直接用（过期后 404 变空头像），强制走代理端点
+  const storedOk = c.avatar_url && !(pl==='messenger' && /(?:fbcdn|scontent)/i.test(c.avatar_url));
+  if(storedOk){
+    return `<img class="ava-img" loading="lazy" src="${esc(c.avatar_url)}" alt="" onload="this.style.opacity=1" onerror="this.remove()">`;
+  }
+  if(!_AVATAR_PROXY_PLATFORMS[pl]) return '';
+  const ck=c.chat_key||''; if(!ck) return '';
+  const grp=(pl==='whatsapp'&&(c.chat_type==='group'||(typeof isGroupConv==='function'&&isGroupConv(c))))
+    ? '&chat_type=group' : '';
+  const url=`/api/platforms/${enc(pl)}/${enc(c.account_id||'default')}/avatar?chat_key=${enc(ck)}${grp}`;
+  return `<img class="ava-img" loading="lazy" src="${url}" alt="" onload="this.style.opacity=1" onerror="this.remove()">`;
+}
+// 兼容旧名（历史调用点 _waAvatarImg）：现已泛化为全平台 peer 头像。
+function _waAvatarImg(c){ return _peerAvatarImg(c); }
+
+/* ===== Telegram 数字 id 惰性补名（自愈式回填，覆盖存量+未来） ===== */
+const _peerResolveTried=new Set();  // 本会话已尝试解析的 peer（convKey），避免重复请求
+function _looksNumericName(c){
+  // 昵称缺失 / 就是裸 chat_key（一排数字）→ 判定为「未解析」，需要补真实身份
+  const nm=(c&&c.name!=null)?String(c.name).trim():'';
+  const ck=(c&&c.chat_key!=null)?String(c.chat_key).trim():'';
+  if(!nm) return true;
+  if(nm===ck) return true;
+  return /^\d+$/.test(nm);
+}
+/* F3：把外部来源（如 /thread 返回的 store 侧 chat）的身份字段「向上合并」进当前会话对象 c——
+   仅升级、绝不用空值/更差值覆盖：昵称仅当来源是真实昵称（非空/非裸数字/非等于 chat_key）且 c 仍为
+   未解析态时替换；username/phone 仅在 c 缺失时补；avatar_url 有更优直链即换。返回是否有变化。 */
+function _mergePeerIdentity(c, src){
+  if(!c||!src) return false;
+  let changed=false;
+  if(src.name){
+    const s=String(src.name).trim();
+    const inReal = s && s!==String(c.chat_key||'').trim() && !/^\d+$/.test(s);
+    if(inReal && _looksNumericName(c)){ c.name=src.name; changed=true; }
+  }
+  if(src.username && !c.username){ c.username=src.username; changed=true; }
+  if(src.phone && !c.phone){ c.phone=src.phone; changed=true; }
+  if(src.avatar_url && src.avatar_url!==c.avatar_url){ c.avatar_url=src.avatar_url; changed=true; }
+  return changed;
+}
+
+/* 打开会话时：若是「一排数字」或缺 username 的 Telegram 私聊，按需向后端解析 peer 身份，
+   成功则原地更新会话对象并刷新列表行/头部/资料面板/副驾（仍是当前会话时）。每 peer 每会话仅一次。 */
+function _maybeResolvePeer(c){
+  try{
+    if(!c||c.platform!=='telegram'||!c.chat_key) return;
+    if(c.chat_type==='group'||c.chat_type==='channel') return;
+    if(!_looksNumericName(c)&&c.username) return;   // 已有真名且有 username → 无需解析
+    const k=convKey(c);
+    if(_peerResolveTried.has(k)) return;
+    _peerResolveTried.add(k);
+    fetch(`/api/platforms/telegram/${enc(c.account_id||'default')}/resolve-peer?chat_key=${enc(c.chat_key)}`)
+      .then(r=>r.ok?r.json():null)
+      .then(d=>{
+        if(!d||!d.ok) return;
+        let changed=false;
+        if(d.name&&_looksNumericName(c)){ c.name=d.name; changed=true; }
+        if(d.username&&!c.username){ c.username=d.username; changed=true; }
+        if(d.phone&&!c.phone){ c.phone=d.phone; changed=true; }
+        if(!changed) return;
+        try{ renderConvList(); }catch(_){}
+        if(selectedChat&&convKey(selectedChat)===k){
+          try{ renderChatHeader(c); }catch(_){}
+          try{ loadInfoSidebar(c); }catch(_){}
+          try{ syncWsCopilot(c); }catch(_){}
+        }
+      }).catch(()=>{});
+  }catch(_){}
+}
+
 function renderChatHeader(c){
   // P3+: 头像用与列表同款「每联系人渐变」（同一 seed → 列表/头部同色，视觉连贯）；平台身份见下方 hdr-sub 徽标
   const avbg=_avatarGrad(c.name||c.chat_key||c.conversation_id||convKey(c));
-  document.getElementById('hdr-avatar').style.background=avbg;
-  document.getElementById('hdr-avatar').textContent=avatarInitial(c.name);
+  const hdrAva=document.getElementById('hdr-avatar');
+  hdrAva.style.background=avbg;
+  hdrAva.innerHTML=esc(avatarInitial(c.name))+_waAvatarImg(c);
   document.getElementById('hdr-name').textContent=c.name||c.chat_key||window.T('dash.unknown');
   const roBadge=(c.read_only||c.can_send===false)
     ? ` <span style="font-size:10px;color:#b91c1c;background:#fee2e2;border-radius:4px;padding:1px 5px;" title="${window.T('inbox.hdr.removed_t')}">${window.T('inbox.hdr.removed')}</span>`
     : '';
+  const unameH=c.username?` <span class="hdr-uname">@${esc(c.username)}</span>`:'';
   document.getElementById('hdr-sub').innerHTML=
     `<span class="plat-hdr-badge">${platIcon(c.platform,15)}<span>${platName(c.platform)}</span></span>`+
-    ` ${c.account_label||c.account_id||''}`+roBadge;
+    ` ${c.account_label||c.account_id||''}`+unameH+roBadge;
   _renderHdrTags(c);
-  // 归档按钮状态
+  // 归档按钮状态（方案 C：图标在 .co-ico 子节点，保留静态文字标签）
   const ab=document.getElementById('archive-btn');
   if(ab){
     ab.classList.toggle('archived', !!c.archived);
     ab.title=c.archived?window.T('inbox.conv.unarchive'):window.T('inbox.archive_conv_t');
-    ab.textContent=c.archived?'📤':'📦';
+    const abi=ab.querySelector('.co-ico'); const abIco=c.archived?'📤':'📦';
+    if(abi) abi.textContent=abIco; else ab.textContent=abIco;
   }
   // 搁置按钮状态（P0-companion）：已搁置=💤+点击取消；未搁置=⏰+点击选时长
   const sb=document.getElementById('snooze-btn');
@@ -3192,8 +3538,22 @@ function renderChatHeader(c){
       const rem=fmtWait(Math.max(0, c.snooze_until - Date.now()/1000));
       sb.title=rem?window.Tf('inbox.snooze.state_t',{t:rem}):window.T('inbox.snooze.cancel_t');
     } else { sb.title=window.T('inbox.snooze.btn_t'); }
-    sb.textContent=sn?'💤':'⏰';
+    const sbi=sb.querySelector('.co-ico'); const sbIco=sn?'💤':'⏰';
+    if(sbi) sbi.textContent=sbIco; else sb.textContent=sbIco;
   }
+  // 方案1+4a：会话卡折叠时的一眼摘要 pill（标签 / 搁置 / 归档，语义色）
+  _setConvopsPill(c);
+}
+function _setConvopsPill(c){
+  var bits=[], tone='';
+  if(!c) return;
+  var tn=((c.conv_tags)||[]).length;
+  if(tn){ bits.push(window.Tf('inbox.pill.tags_n',{n:tn})); tone='accent'; }
+  if(_isSnoozed(c)){ bits.push(window.T('inbox.pill.snoozed')); tone='warn'; }
+  if(c.archived){ bits.push(window.T('inbox.pill.archived')); if(!tone) tone='accent'; }
+  var txt=bits.join(' · ');
+  var jmp=txt?{card:'convops',tab:'tools',titleKey:'inbox.pill.jump_convops_t'}:null;
+  _setCpPill('convops-pill', txt, tone, jmp);
 }
 
 function convKey(c){ return `${c.platform}:${c.account_id||'default'}:${c.chat_key}`; }
@@ -3260,13 +3620,18 @@ async function loadThread(c,silent=false){
   if(!silent){
     area.innerHTML=`<div style="text-align:center;padding:20px;"><span class="spin"></span></div>`;
   }
+  // 超时兜底：请求最多等 15s；若服务刚重启/网络抖动导致请求被掐断，不再永久转圈，
+  // 而是显示"加载超时 + 重试按钮"（根治过去"永久 spinner、只能手动刷新"的假死）。
+  const _ctrl = (typeof AbortController!=='undefined') ? new AbortController() : null;
+  const _to = setTimeout(()=>{ try{ _ctrl && _ctrl.abort(); }catch(_e){} }, 15000);
   try{
     const u=`/api/unified-inbox/thread?platform=${enc(c.platform)}&account_id=${enc(c.account_id||'default')}&chat_key=${enc(c.chat_key)}&limit=100`;
-    const r=await fetch(u);
+    const r=await fetch(u, _ctrl?{signal:_ctrl.signal}:{});
+    clearTimeout(_to);
     const d=await r.json().catch(()=>({ok:false,detail:window.T('inbox.err.not_json')}));
     if(!r.ok||!d.ok){
       if(!silent){
-        area.innerHTML=`<div class="empty-list"><div class="empty-list-icon">⚠️</div><div>${window.T('inbox.skel.thread_fail')}</div><div style="font-size:12px;color:var(--text-tiny);margin-top:6px;">${esc(d.detail||d.message||('HTTP '+r.status))}</div></div>`;
+        area.innerHTML=`<div class="empty-list"><div class="empty-list-icon">⚠️</div><div>${window.T('inbox.skel.thread_fail')}</div><div style="font-size:12px;color:var(--text-tiny);margin-top:6px;">${esc(d.detail||d.message||('HTTP '+r.status))}</div><div style="margin-top:12px;"><button class="btn" onclick="reloadThread()">${window.T('inbox.skel.retry')}</button></div></div>`;
       }
       console.warn('loadThread bad response', r.status, d);
       return;
@@ -3281,6 +3646,18 @@ async function loadThread(c,silent=false){
       const confirmed=threadMsgs.some(m=>m.text===opt.text&&m.direction==='out'&&Math.abs((m.ts||0)-(opt.ts||0))<10);
       if(!confirmed) threadMsgs.push(opt);
     });
+    // F3：把 /thread 返回的最新 chat 身份合并回会话对象（store 侧可能已比列表行更全），
+    // 打开即见最新昵称/头像，不必等列表下一轮刷新。仅升级不覆盖；有变化才重绘。
+    try{
+      if(d.chat && _mergePeerIdentity(c, d.chat)){
+        try{ renderConvList(); }catch(_){}
+        if(selectedChat && convKey(selectedChat)===convKey(c)){
+          try{ renderChatHeader(c); }catch(_){}
+          try{ loadInfoSidebar(c); }catch(_){}
+          try{ syncWsCopilot(c); }catch(_){}
+        }
+      }
+    }catch(_){}
     renderMessages(c, threadMsgs, {silent});
     if(_xlateIn) _autoTranslateInbound(); // P55: 入站自动翻译
     // Phase 17: 初次加载（非静默）时自动触发 KB 推送（延迟300ms，等消息先渲染）
@@ -3289,13 +3666,20 @@ async function loadThread(c,silent=false){
       _kbAutoTimer=setTimeout(()=>_autoKbSuggest(c), 300);
     }
   }catch(e){
+    clearTimeout(_to);
     console.warn('loadThread error',e);
     if(!silent){
-      area.innerHTML=`<div class="empty-list"><div class="empty-list-icon">⚠️</div><div>${window.T('inbox.skel.thread_fail')}</div><div style="font-size:12px;color:var(--text-tiny);margin-top:6px;">${esc(e&&e.message?e.message:e)}</div></div>`;
+      const _isAbort = e && (e.name==='AbortError');
+      const _title = _isAbort ? window.T('inbox.skel.thread_timeout') : window.T('inbox.skel.thread_fail');
+      const _detail = _isAbort ? '' : `<div style="font-size:12px;color:var(--text-tiny);margin-top:6px;">${esc(e&&e.message?e.message:e)}</div>`;
+      area.innerHTML=`<div class="empty-list"><div class="empty-list-icon">⚠️</div><div>${_title}</div>${_detail}<div style="margin-top:12px;"><button class="btn" onclick="reloadThread()">${window.T('inbox.skel.retry')}</button></div></div>`;
     }
   }
   startAdaptivePoll();
 }
+
+// 线程加载失败/超时时的重试入口（挂 window 供内联 onclick 可达；重试当前选中会话）。
+window.reloadThread=function(){ if(typeof selectedChat!=='undefined' && selectedChat){ loadThread(selectedChat); } };
 
 async function loadOlderThread(){
   if(!selectedChat||!_threadHasMore||!_threadOldestTs||_threadLoadingOlder) return;
@@ -3326,6 +3710,160 @@ async function loadOlderThread(){
     _threadLoadingOlder=false;
     renderMessages(selectedChat, threadMsgs, {silent:true, preserveTop:true});
   }
+}
+
+/* ===== P1: 从手机按需拉取更早历史（WhatsApp 协议号） ===== */
+async function loadFromPhone(){
+  const c=selectedChat;
+  if(!c || _pullingPhone || (c.platform||'')!=='whatsapp') return;
+  _pullingPhone=true;
+  renderMessages(c, threadMsgs, {silent:true, preserveTop:true});
+  try{
+    const r=await fetch(`/api/platforms/whatsapp/${enc(c.account_id||'default')}/history`,
+      {method:'POST',headers:{'Content-Type':'application/json'},
+       body:JSON.stringify({chat_key:c.chat_key, count:50})});
+    const d=await r.json().catch(()=>({ok:false}));
+    if(d && d.ok===false && d.reason==='no_anchor'){
+      _toast(window.T('inbox.thread.pull_none'), '#b45309');
+    }else{
+      _toast(window.T('inbox.thread.pull_requested'));
+    }
+  }catch(e){ console.warn('loadFromPhone error', e); }
+  // 手机端历史异步经 messaging-history.set 回流落库，稍候刷新即见
+  setTimeout(()=>{
+    _pullingPhone=false;
+    if(selectedChat===c){ loadThread(c, true); }
+  }, 2800);
+}
+
+/* ===== P1: 通讯录 / 好友名单面板 ===== */
+async function toggleContactsPanel(){
+  _contactsMode=!_contactsMode;
+  const panel=document.getElementById('contacts-panel');
+  const convs=document.getElementById('conv-items');
+  const grp=document.getElementById('group-section');
+  const btn=document.getElementById('contacts-toggle-btn');
+  if(_contactsMode){
+    if(panel) panel.style.display='flex';
+    if(convs) convs.style.display='none';
+    if(grp) grp.style.display='none';
+    if(btn) btn.classList.add('active');
+    await _initContactsAccounts();
+  }else{
+    if(panel) panel.style.display='none';
+    if(convs) convs.style.display='';
+    if(btn) btn.classList.remove('active');
+    applyFilters();   // 复原会话/群组列表
+  }
+}
+
+async function _initContactsAccounts(){
+  const sel=document.getElementById('contacts-acct-select');
+  const cntEl=document.getElementById('contacts-count');
+  const listEl=document.getElementById('contacts-list');
+  if(!sel) return;
+  let accts=[];
+  try{
+    const r=await fetch('/api/accounts');
+    const d=await r.json().catch(()=>({}));
+    accts=(d.accounts||[]).filter(a=>(a.platform==='whatsapp' && (a.mode==='protocol'||!a.mode)))
+      .map(a=>({account_id:a.account_id, label:a.label||a.account_id}));
+  }catch(_){}
+  if(!accts.length){
+    // 回落：从已加载会话推断 whatsapp 账号
+    const seen={};
+    (allChats||[]).forEach(c=>{ if((c.platform||'')==='whatsapp'){ seen[c.account_id||'default']=1; } });
+    accts=Object.keys(seen).map(a=>({account_id:a, label:a}));
+  }
+  if(!accts.length){
+    sel.innerHTML='';
+    if(cntEl) cntEl.textContent=window.T('inbox.contacts.no_account');
+    if(listEl) listEl.innerHTML='';
+    return;
+  }
+  sel.innerHTML=accts.map(a=>`<option value="${esc(a.account_id)}">${esc(a.label)}</option>`).join('');
+  const pref=(accountFilter!=='all' && accts.some(a=>a.account_id===accountFilter))
+    ? accountFilter : accts[0].account_id;
+  sel.value=pref;
+  await loadContactsList(pref);
+}
+
+async function loadContactsList(accountId){
+  const listEl=document.getElementById('contacts-list');
+  if(!accountId || !listEl) return;
+  const s=document.getElementById('contacts-search'); if(s) s.value='';
+  listEl.innerHTML=`<div class="empty-list"><span class="spin"></span></div>`;
+  try{
+    const r=await fetch(`/api/platforms/whatsapp/${enc(accountId)}/contacts?limit=2000`);
+    const d=await r.json().catch(()=>({ok:false}));
+    _contactsData=(d.contacts||[]).map(x=>Object.assign({}, x, {_acct:accountId}));
+    _renderContacts(_contactsData);
+  }catch(_){
+    listEl.innerHTML=`<div class="empty-list">${window.T('inbox.contacts.load_fail')}</div>`;
+  }
+}
+
+function _renderContacts(rows){
+  const listEl=document.getElementById('contacts-list');
+  const cntEl=document.getElementById('contacts-count');
+  if(cntEl) cntEl.textContent=window.Tf('inbox.contacts.count',{n:rows.length});
+  if(!listEl) return;
+  if(!rows.length){
+    listEl.innerHTML=`<div class="empty-list">${window.T('inbox.contacts.empty')}</div>`;
+    return;
+  }
+  listEl.innerHTML=rows.map(c=>{
+    const nm=c.name||c.notify_name||c.chat_key;
+    const sub=(c.name||c.notify_name)?c.chat_key:'';
+    const ini=esc((nm||'?').trim().slice(0,1).toUpperCase());
+    // 头像懒加载：native loading=lazy 只在滚动进视口才回源（天然节流，防批量拉头像触发速率限制）；
+    // 无头像/加载失败 → 移除 <img>，露出底层首字母头像。
+    const avaUrl=`/api/platforms/whatsapp/${enc(c._acct)}/avatar?chat_key=${enc(c.chat_key)}`;
+    return `<div class="contact-row" onclick="_contactStartChat('${esc(c._acct)}','${esc(c.chat_key)}','${esc(nm)}')" title="${window.T('inbox.contacts.start_chat')}">
+      <div class="contact-ava">${ini}<img loading="lazy" src="${avaUrl}" alt="" onload="this.style.opacity=1" onerror="this.remove()"></div>
+      <div style="min-width:0;flex:1;">
+        <div class="contact-nm">${esc(nm)}</div>
+        <div class="contact-sub">${esc(sub)}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function _filterContacts(q){
+  q=(q||'').trim().toLowerCase();
+  if(!q){ _renderContacts(_contactsData); return; }
+  _renderContacts(_contactsData.filter(c=>
+    (c.name||'').toLowerCase().includes(q) ||
+    (c.notify_name||'').toLowerCase().includes(q) ||
+    (c.chat_key||'').includes(q)));
+}
+
+function _contactStartChat(accountId, chatKey, name){
+  _contactsMode=false;
+  const panel=document.getElementById('contacts-panel'); if(panel) panel.style.display='none';
+  const convs=document.getElementById('conv-items'); if(convs) convs.style.display='';
+  const btn=document.getElementById('contacts-toggle-btn'); if(btn) btn.classList.remove('active');
+  if(window.__desktopOpenConversation){
+    window.__desktopOpenConversation({platform:'whatsapp', account_id:accountId,
+                                      chat_key:chatKey, name:name});
+  }
+}
+
+// P3：手动把「所在群」回填成群组动态（老号重连后新入群，或想立即刷新时）
+async function syncGroups(){
+  const sel=document.getElementById('contacts-acct-select');
+  const acct=sel&&sel.value; if(!acct){ _toast(window.T('inbox.contacts.no_account')); return; }
+  _toast(window.T('inbox.contacts.sync_groups_running'));
+  try{
+    const r=await fetch(`/api/platforms/whatsapp/${enc(acct)}/sync-groups`,{method:'POST'});
+    const d=await r.json().catch(()=>({ok:false}));
+    if(d&&d.ok){
+      _toast(window.Tf('inbox.contacts.sync_groups_done',{n:d.groups||0}));
+      if(typeof loadChats==='function') setTimeout(loadChats,1500);
+    }else{
+      _toast(window.T('inbox.contacts.sync_groups_fail'));
+    }
+  }catch(_){ _toast(window.T('inbox.contacts.sync_groups_fail')); }
 }
 
 /* ===== Phase 13: 媒体消息渲染 ===== */
@@ -4629,6 +5167,17 @@ document.addEventListener('click', function(e){
 // 避免「每条消息显示两次」。归一：去所有空白 + 小写（对 CJK 无副作用）。
 function _normTxt(s){ return String(s==null?'':s).replace(/\s+/g,'').toLowerCase(); }
 function _meaningfulXlate(orig, xl){ if(!xl) return false; return _normTxt(orig)!==_normTxt(xl); }
+// P4-4 已读回执：出站消息投递状态 → 勾（read=蓝双勾/delivered=灰双勾/sent=单勾/其他空）
+function _deliveryTick(status){
+  const s=String(status||'');
+  if(s==='read') return `<span class="msg-tick read" title="${window.T('inbox.msg.receipt_read')}">\u2713\u2713</span>`;
+  if(s==='delivered') return `<span class="msg-tick" title="${window.T('inbox.msg.receipt_delivered')}">\u2713\u2713</span>`;
+  if(s==='sent') return `<span class="msg-tick" title="${window.T('inbox.msg.receipt_sent')}">\u2713</span>`;
+  return '';
+}
+// P4-8：WhatsApp 编辑/撤回时间窗（秒）——超窗前端即不挂对应按钮（客户端启发式，最终以 WA 为准）
+const _WA_EDIT_WINDOW_SEC=15*60;          // 编辑约 15 分钟
+const _WA_REVOKE_WINDOW_SEC=2*24*3600;    // 撤回(删给所有人)约 2 天
 function renderMessages(c, msgs, opts={}){
   const el=document.getElementById('msg-area');
   // 智能滚动：记录当前是否已在底部（阈值 60px）
@@ -4646,6 +5195,14 @@ function renderMessages(c, msgs, opts={}){
     html+=`<div style="text-align:center;margin:2px 0 10px;">
       <button class="tiny-btn" onclick="loadOlderThread()" ${_threadLoadingOlder?'disabled':''}>
         ${_threadLoadingOlder?window.T('inbox.skel.loading'):window.T('inbox.skel.load_older')}
+      </button>
+    </div>`;
+  }
+  // P1：WhatsApp 协议号——本地记录见底后可向手机补拉更早历史（fetchMessageHistory）
+  if(selectedChat && (selectedChat.platform||'')==='whatsapp' && !_threadHasMore){
+    html+=`<div style="text-align:center;margin:2px 0 10px;">
+      <button class="tiny-btn" onclick="loadFromPhone()" ${_pullingPhone?'disabled':''}>
+        ${_pullingPhone?window.T('inbox.thread.pulling'):window.T('inbox.thread.load_from_phone')}
       </button>
     </div>`;
   }
@@ -4692,10 +5249,40 @@ function renderMessages(c, msgs, opts={}){
     const mediaHtml=_renderMediaContent(m);
     const textBody=m.text?`<span>${esc(m.text)}</span>`:'';
     const bubbleContent=mediaHtml||textBody||`<span style="opacity:.6">${window.T('inbox.msg.placeholder')}</span>`;
-    html+=`<div class="msg-row ${isOut?'out':'in'}" id="msg-${esc(m.message_id||m._optimistic||'')}" data-mid="${esc(m.message_id||'')}">
-      <div class="msg-bubble"${optClass}${failClass}>${bubbleContent}${optStatus}${xlate}${_outSub}</div>
-      <div class="msg-ts">${ts}${m._failed?`<span style="color:#ef4444;margin-left:4px;">${window.T('inbox.msg.send_failed')}</span>`:''}</div>
-      ${tools}
+    // P4-2 引用回复条：被引用消息摘要（发言人 + 文本），渲染在气泡正文上方
+    const _rtxt=m.reply_to_text||'';
+    const quoteBar=_rtxt?`<div class="msg-quote">${m.reply_to_sender?`<span class="msg-quote-sender">${esc(m.reply_to_sender)}</span>`:''}<span class="msg-quote-text">${esc(_rtxt)}</span></div>`:'';
+    // P4-3 表情回应 chips：聚合的 [{emoji,count}]，>1 显计数
+    const _reacts=Array.isArray(m.reactions)?m.reactions:[];
+    const reactHtml=_reacts.length?`<div class="msg-reactions">${_reacts.map(r=>`<span class="react-chip">${esc(r.emoji)}${r.count>1?`<span class="react-n">${r.count}</span>`:''}</span>`).join('')}</div>`:'';
+    // P4-4 已读回执：出站消息按 status 显投递勾（read=蓝双勾/delivered=灰双勾/sent=单勾）
+    const _tick=(isOut&&!m._optimistic&&!m._failed)?_deliveryTick(m.status):'';
+    // P4-5B 双向富交互：WhatsApp 消息（有 wamid）挂「表情回应 + 引用回复」动作
+    const _isWa=selectedChat&&selectedChat.platform==='whatsapp';
+    const _pmid=m.platform_msg_id||'';
+    // P4-6A 撤回：气泡置灰「已撤回」，屏蔽正文/译文/引用/表情/动作；已编辑：时间戳旁标记
+    const _revoked=!!m.revoked;
+    const _bubbleInner=_revoked
+      ? `<span class="msg-revoked">${window.T('inbox.msg.revoked')}</span>`
+      : `${quoteBar}${bubbleContent}${optStatus}${xlate}${_outSub}`;
+    const _reactOut=_revoked?'':reactHtml;
+    const _editedMark=(m.edited&&!_revoked)?`<span class="msg-edited">${window.T('inbox.msg.edited')}</span>`:'';
+    // 出站自己消息额外挂「编辑 / 撤回」（P4-6B）；P4-8 时间窗护栏：WhatsApp 编辑约 15 分钟、
+    // 撤回(删给所有人)约 2 天，超窗即不挂对应按钮（对齐官方端，减少注定失败的往返）。
+    const _msgAgeSec=m.ts?(Date.now()/1000-Number(m.ts)):0;
+    const _canEdit=(_msgAgeSec<=_WA_EDIT_WINDOW_SEC);
+    const _canRevoke=(_msgAgeSec<=_WA_REVOKE_WINDOW_SEC);
+    const _ownOps=isOut?`
+      ${_canEdit?`<button class="tiny-btn" onclick="editOwnMsg('${esc(_pmid)}')" title="${window.T('inbox.act.edit')}">✏️</button>`:''}
+      ${_canRevoke?`<button class="tiny-btn" onclick="revokeOwnMsg('${esc(_pmid)}')" title="${window.T('inbox.act.revoke')}">🗑️</button>`:''}`:'';
+    const waActions=(!_revoked&&_isWa&&_pmid&&!m._optimistic&&!m._failed)?`<div class="msg-tools">
+      <button class="tiny-btn" onclick="reactPick(event,'${esc(_pmid)}',${isOut?1:0})" title="${window.T('inbox.act.react')}">😊</button>
+      <button class="tiny-btn" onclick="replyToMsg('${esc(_pmid)}')" title="${window.T('inbox.act.reply')}">↩</button>${_ownOps}
+    </div>`:'';
+    html+=`<div class="msg-row ${isOut?'out':'in'}" id="msg-${esc(m.message_id||m._optimistic||'')}" data-mid="${esc(m.message_id||'')}" data-pmid="${esc(_pmid)}">
+      <div class="msg-bubble${_revoked?' msg-bubble-revoked':''}"${optClass}${failClass}>${_bubbleInner}</div>${_reactOut}
+      <div class="msg-ts">${ts}${_editedMark}${_tick}${m._failed?`<span style="color:#ef4444;margin-left:4px;">${window.T('inbox.msg.send_failed')}</span>${m._retryBody?`<button class="tiny-btn" style="margin-left:6px;padding:0 6px;height:18px;line-height:16px;" onclick="resendFailed('${esc(m.message_id||'')}')">${window.T('inbox.msg.resend')}</button>`:''}`:''}</div>
+      ${_revoked?'':tools}${waActions}
     </div>`;
   });
   el.innerHTML=html;
@@ -4706,45 +5293,123 @@ function renderMessages(c, msgs, opts={}){
 
 /* ===== 发送消息（乐观 UI）===== */
 let _sendSeq=0; // 防止乱序
-// M6⑥：发送媒体（图片/语音/视频/文件）——仅协议多开账号支持，其它平台后端返回 501
-async function sendMediaFile(input){
-  const f=input&&input.files&&input.files[0];
-  input.value='';  // 复位，便于连发同名文件
-  if(!f){ return; }
+// M6⑥/P4-7+：媒体发送——选/拖/粘贴文件后先暂存预览（输入框作 caption），点发送再上传。
+// 仅协议多开账号支持，其它平台后端返回 501。
+let _pendingMedia=null;   // {file, url}
+function _fmtBytes(n){ n=Number(n)||0; if(n<1024) return n+' B'; if(n<1048576) return (n/1024).toFixed(1)+' KB'; return (n/1048576).toFixed(1)+' MB'; }
+function _mediaIconFor(t){ t=String(t||''); if(t.indexOf('audio/')===0) return '🎵'; if(t.indexOf('video/')===0) return '🎬'; return '📄'; }
+function _stageMedia(file){
+  if(!file) return;
   if(!selectedChat){ _toast(window.T('inbox.toast.select_first'),'#b45309'); return; }
-  if(f.size>25*1024*1024){ _toast(window.T('inbox.media.too_large'),'#dc2626'); return; }
-  const cap=(document.getElementById('reply-ta').value||'').trim();
+  if(file.size>25*1024*1024){ _toast(window.T('inbox.media.too_large'),'#dc2626'); return; }
+  _cancelMedia();  // 清掉上一个暂存（含 objectURL 回收）
+  const url=(file.type&&file.type.indexOf('image/')===0)?URL.createObjectURL(file):'';
+  _pendingMedia={file, url};
+  const bar=document.getElementById('media-preview-bar');
+  const thumb=document.getElementById('mpb-thumb');
+  const icon=document.getElementById('mpb-icon');
+  if(url){ thumb.src=url; thumb.style.display='block'; if(icon) icon.style.display='none'; }
+  else { if(icon){ icon.textContent=_mediaIconFor(file.type); icon.style.display='inline-block'; } if(thumb) thumb.style.display='none'; }
+  document.getElementById('mpb-name').textContent=file.name||window.T('inbox.media.file_default');
+  document.getElementById('mpb-meta').textContent=_fmtBytes(file.size);
+  if(bar) bar.style.display='flex';
+  const ta=document.getElementById('reply-ta'); if(ta) ta.focus();
+}
+function _cancelMedia(){
+  if(_pendingMedia&&_pendingMedia.url){ try{ URL.revokeObjectURL(_pendingMedia.url); }catch(_){} }
+  _pendingMedia=null;
+  const bar=document.getElementById('media-preview-bar'); if(bar){ bar.style.display='none'; bar.classList.remove('failed','sending'); }
+  const thumb=document.getElementById('mpb-thumb'); if(thumb){ thumb.src=''; thumb.style.display='none'; }
+  const st=document.getElementById('mpb-status'); if(st) st.textContent='';
+}
+// P4-10：媒体发送失败——保留暂存 File，预览条转红提示，点发送即原样重试。
+function _mediaFailUi(){
+  const bar=document.getElementById('media-preview-bar');
+  if(!bar) return;
+  bar.classList.remove('sending'); bar.classList.add('failed');
+  let st=document.getElementById('mpb-status');
+  if(!st){
+    const body=bar.querySelector('.qrb-body');
+    if(body){ st=document.createElement('span'); st.id='mpb-status'; st.className='mpb-status'; body.appendChild(st); }
+  }
+  if(st) st.textContent=window.T('inbox.media.retry_hint');
+}
+function sendMediaFile(input){
+  const f=input&&input.files&&input.files[0];
+  input.value='';  // 复位，便于连选同名文件
+  if(f) _stageMedia(f);
+}
+let _mediaSending=false;
+async function _doSendMedia(caption){
+  const pm=_pendingMedia;
+  if(!pm||!pm.file||!selectedChat) return;
+  if(_mediaSending) return;   // 防重复提交（上传在途时再点发送）
+  _mediaSending=true;
+  const f=pm.file;
   const fd=new FormData();
   fd.append('platform', selectedChat.platform);
   fd.append('account_id', selectedChat.account_id||'default');
   fd.append('chat_key', selectedChat.chat_key);
-  fd.append('caption', cap);
+  fd.append('caption', caption||'');
   fd.append('file', f);
+  const bar=document.getElementById('media-preview-bar');
+  if(bar){ bar.classList.remove('failed'); bar.classList.add('sending'); }
+  const st0=document.getElementById('mpb-status'); if(st0) st0.textContent='';
   _toast(window.Tf('inbox.media.sending',{name:f.name}),'#2563eb');
   try{
     const r=await fetch('/api/unified-inbox/send-media',{method:'POST',body:fd});
     const d=await r.json().catch(()=>({}));
     if(r.ok&&d.ok){
-      document.getElementById('reply-ta').value='';
+      _cancelMedia();   // 成功才清暂存 + 回收 objectURL
+      const ta=document.getElementById('reply-ta'); if(ta) ta.value='';
       _toast(window.T('inbox.media.sent'),'#0f9d75');
       await loadThread(selectedChat,true);
       await loadChats();
     } else if(r.status===501){
       // 仅 protocol 多开且在线账号支持从收件箱直接发媒体
+      _mediaFailUi();
       _toast(window.T('inbox.media.unsupported'),'#b45309');
     } else {
+      _mediaFailUi();
       _toast('❌ '+((d&&d.detail)||(d&&d.message)||window.Tf('inbox.media.send_fail_status',{status:r.status})),'#dc2626');
     }
-  }catch(_){ _toast(window.T('inbox.media.send_fail_net'),'#dc2626'); }
+  }catch(_){ _mediaFailUi(); _toast(window.T('inbox.media.send_fail_net'),'#dc2626'); }
+  _mediaSending=false;
+}
+
+/* P4-7+ 媒体预览「取消」：隐藏并复位预览条与文件选择器（预览流程未启用时点击也安全，不影响即时发送路径）。 */
+function _cancelMedia(){
+  var bar=document.getElementById('media-preview-bar');
+  if(bar) bar.style.display='none';
+  var thumb=document.getElementById('mpb-thumb');
+  if(thumb){ thumb.style.display='none'; thumb.removeAttribute('src'); }
+  var icon=document.getElementById('mpb-icon'); if(icon) icon.style.display='none';
+  var fi=document.getElementById('send-media-file'); if(fi) fi.value='';
 }
 
 async function sendMsg(){
   const ta=document.getElementById('reply-ta');
   let text=ta.value.trim();
+  // P4-7+ 待发媒体优先：允许空 caption；输入框内容作为 caption 一并发送
+  if(_pendingMedia && _pendingMedia.file){
+    if(!selectedChat) return;
+    if(selectedChat.read_only || selectedChat.can_send===false){
+      _toast(window.T('inbox.acct.removed_readonly'),'#dc2626'); return;
+    }
+    await _doSendMedia(text);
+    return;
+  }
   if(!text||!selectedChat) return;
   // 只读会话（账号已从系统移除）：仅可查看历史，禁止发送
   if(selectedChat.read_only || selectedChat.can_send===false){
     _toast(window.T('inbox.acct.removed_readonly'),'#dc2626'); return;
+  }
+  // P4-6C 编辑态：走「保存编辑」而非新发（对端同步「已编辑」）
+  if(_editTarget && _editTarget.id){
+    const _pid=_editTarget.id, _orig=_editTarget.orig;
+    _cancelEdit();                    // 清编辑条 + 复位输入框/按钮
+    if(text!==_orig){ await _doMessageOp(_pid,'edit',text); }
+    return;
   }
   const btn=document.getElementById('send-btn');
 
@@ -4808,6 +5473,8 @@ async function sendMsg(){
       text: text,
     };
     if(_serverXlate) body.target_lang=_outLang;   // P0：一击直发让后端翻译（含 'auto'）
+    // P4-5B 引用回复：携带被引用消息上下文（发送后清除引用条）
+    if(_replyTarget && _replyTarget.id){ body.reply_to=_replyTarget; _cancelReply(); }
     if(_copilotApplyMeta && _copilotApplyMeta.text){
       var m=_copilotApplyMeta;
       var match='edit';
@@ -4818,6 +5485,8 @@ async function sendMsg(){
         trigger:m.trigger||'', stage:m.stage||'', match:match
       };
     }
+    // P4-9：把本次发送 body 挂到乐观气泡，供失败后「一键重发」原样重放
+    optMsg._retryBody=body;
     const r=await fetch('/api/unified-inbox/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const d=await r.json();
     if(d.ok){
@@ -4837,23 +5506,50 @@ async function sendMsg(){
       await loadThread(selectedChat,true);
       await loadChats();
     } else {
-      // 失败：把乐观消息标为"发送失败"
+      // 失败：把乐观消息标为"发送失败"（保留 _retryBody，气泡上出「重发」按钮，不再回灌输入框避免重复发）
       const idx=threadMsgs.findIndex(m=>m.message_id===optId);
       if(idx>=0){ threadMsgs[idx]._optimistic=false; threadMsgs[idx]._failed=true; }
       renderMessages(selectedChat, threadMsgs, {silent:true});
       showHint(window.Tf('inbox.toast.send_fail',{msg:(d.detail||d.error||window.T('dash.unknown'))}));
-      ta.value=text; // 恢复输入
     }
   }catch(e){
     const idx=threadMsgs.findIndex(m=>m.message_id===optId);
     if(idx>=0){ threadMsgs[idx]._optimistic=false; threadMsgs[idx]._failed=true; }
     renderMessages(selectedChat, threadMsgs, {silent:true});
     showHint(window.T('inbox.net_err_retry'));
-    ta.value=text;
   }
   btn.disabled=false;
   btn.textContent=window.T('inbox.send');
   ta.focus();
+}
+
+// P4-9：失败气泡一键重发——原样重放当初的发送 body（含引用/翻译参数），成功即并入真实线程。
+async function resendFailed(optId){
+  const idx=threadMsgs.findIndex(m=>m.message_id===optId);
+  if(idx<0) return;
+  const body=threadMsgs[idx]._retryBody;
+  if(!body || !selectedChat){ return; }
+  threadMsgs[idx]._failed=false; threadMsgs[idx]._optimistic=true;
+  renderMessages(selectedChat, threadMsgs, {silent:true});
+  try{
+    const r=await fetch('/api/unified-inbox/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await r.json();
+    if(d&&d.ok){
+      threadMsgs=threadMsgs.filter(m=>m.message_id!==optId);
+      await loadThread(selectedChat,true);
+      await loadChats();
+    } else {
+      const i2=threadMsgs.findIndex(m=>m.message_id===optId);
+      if(i2>=0){ threadMsgs[i2]._optimistic=false; threadMsgs[i2]._failed=true; }
+      renderMessages(selectedChat, threadMsgs, {silent:true});
+      showHint(window.Tf('inbox.toast.send_fail',{msg:(d.detail||d.error||window.T('dash.unknown'))}));
+    }
+  }catch(e){
+    const i2=threadMsgs.findIndex(m=>m.message_id===optId);
+    if(i2>=0){ threadMsgs[i2]._optimistic=false; threadMsgs[i2]._failed=true; }
+    renderMessages(selectedChat, threadMsgs, {silent:true});
+    showHint(window.T('inbox.net_err_retry'));
+  }
 }
 
 function showHint(msg){ document.getElementById('reply-hint').textContent=msg; setTimeout(()=>document.getElementById('reply-hint').textContent='',4000); }
@@ -4875,6 +5571,10 @@ function onTextareaKey(e){
     if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); _applySlashItem(_slashIdx); return; }
     if(e.key==='Escape'){ _showSlashPanel(false); return; }
   }
+  // P4-6C：编辑态下 Esc 取消编辑
+  if(e.key==='Escape' && _editTarget){ e.preventDefault(); _cancelEdit(); return; }
+  // P4-7+：有待发媒体时 Esc 取消
+  if(e.key==='Escape' && _pendingMedia){ e.preventDefault(); _cancelMedia(); return; }
   if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg();return;}
   // 打字状态：防抖 1s 后停止，最多每 3s 发一次 typing 事件
   if(selectedChat && !_typingActive){
@@ -4903,6 +5603,31 @@ function _showTypingIndicator(agentName){
   el.insertAdjacentElement('afterend', div);
   clearTimeout(_typingDisplayTimer);
   _typingDisplayTimer=setTimeout(()=>{ const d=document.getElementById('typing-banner'); if(d) d.remove(); }, 4000);
+}
+
+/* P4-5A：对端（客户）正在输入/录音 — 会话头下方绿色提示条，自动过期。 */
+let _peerTypingTimer=null;
+function _showPeerTyping(recording){
+  const el=document.getElementById('claim-banner');
+  if(!el) return;
+  let div=document.getElementById('peer-typing-banner');
+  if(!div){
+    div=document.createElement('div');
+    div.id='peer-typing-banner';
+    div.style.cssText='padding:5px 18px;background:#f0fdf4;border-bottom:1px solid #bbf7d0;font-size:11px;color:#15803d;display:flex;align-items:center;gap:5px;';
+    el.insertAdjacentElement('afterend', div);
+  }
+  const dots='<span style="display:inline-flex;gap:2px;">'+'<span style="width:4px;height:4px;border-radius:50%;background:#15803d;animation:typingDot .8s infinite;"></span>'.repeat(3)+'</span>';
+  div.innerHTML=dots+' '+(recording?window.T('inbox.peer_recording'):window.T('inbox.peer_typing'));
+  clearTimeout(_peerTypingTimer);
+  // composing 会周期性重发；对端停止后 WhatsApp 发 paused/available（→_clearPeerTyping）；
+  // 兜底 6s 无新 composing 自动消失，防「停了还挂着」。
+  _peerTypingTimer=setTimeout(()=>{ _clearPeerTyping(); }, 6000);
+}
+function _clearPeerTyping(){
+  clearTimeout(_peerTypingTimer);
+  const d=document.getElementById('peer-typing-banner');
+  if(d) d.remove();
 }
 
 /* ===== 模式选择 / 全自动安全条（B-4 + B-1） ===== */
@@ -5071,6 +5796,7 @@ async function loadDrafts(c){
       return `<div class="draft-card-mini">
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
           <span class="risk ${riskClass}">${esc(dr.autopilot_level||'?')}</span>
+          <span class="unsent-badge" title="${esc(window.T('inbox.draft_mini.unsent_t'))}">${esc(window.T('inbox.draft_mini.unsent'))}</span>
           <span style="font-size:11px;color:var(--text-sub);">${esc(dr.peer_name||dr.chat_name||'')}</span>
         </div>
         ${dr.peer_last_text?`<div class="draft-peer-mini">${esc(dr.peer_last_text)}</div>`:''}
@@ -5108,8 +5834,224 @@ function useDraftText(txt){
 }
 
 /* ===== 业务助手右栏（与桌面 copilot 同源 shared/copilot） ===== */
-var _wsCpClient=null, _wsCpTab='reply';
+var _wsCpClient=null, _wsCpTab='reply', _wsCpCid='', _wsCpCtx=null;
+var _wsCpTabCtrl=null;
 var _WS_CP_IDS=['draft','voice','persona','script','relstage','collab','nba','chain'];
+
+/* ===== 方案1：可折叠卡片（默认态 + localStorage 记忆 + 懒加载） =====
+   默认展开：hero(英雄卡) / draft(AI回复) / custinfo(客户信息)；其余默认折叠。
+   懒加载：折叠的卡不取数（cp 组件暂存 _pendingCtx，AI 对话分析 LLM 亦门控），
+   首次展开再拉最新；显著降低首屏请求（详见 syncWsCopilot / _cpOnCardExpand / _refreshWsCpComponent）。 */
+var _CP_CARDS_KEY='ws_cp_cards_v1';
+var _CP_CARD_DEF_COLLAPSED={convops:1,voice:1,persona:1,script:1,relstage:1,collab:1,chain:1,analysis:1,journey:1,notes:1};
+/* 组件 suffix → 所属折叠卡（NBA 承载于英雄卡 hero）。用于「懒加载」按卡展开态决定是否取数。 */
+var _CP_ID_CARD={draft:'draft',voice:'voice',persona:'persona',script:'script',relstage:'relstage',collab:'collab',nba:'hero',chain:'chain'};
+/* 展开某卡时：把折叠期暂存的会话上下文补喂给其组件（触发取数），
+   并触发该卡的非组件取数（hero 关系摘要 / analysis 的 AI 分析 LLM 调用）。 */
+function _cpOnCardExpand(cardName){
+  Object.keys(_CP_ID_CARD).forEach(function(s){
+    if(_CP_ID_CARD[s]!==cardName) return;
+    var el=document.getElementById('ws-cp-'+s);
+    if(el && el._pendingCtx){ var c=el._pendingCtx; el._pendingCtx=null; el.context=c; }
+  });
+  if(cardName==='hero') _renderHeroRel();
+  if(cardName==='analysis' && infoOn && selectedChat && typeof _loadAiAnalysis==='function') _loadAiAnalysis(selectedChat);
+}
+/* 折叠卡状态/切换核心复用共享 sidebar-chrome.createCardController（与桌面壳同源单一实现）；
+   onExpand 保留网页侧懒取数细节。缺共享模块时回落本地实现（不阻断）。 */
+var _wsCardCtrl=(function(){
+  var sc=window.CopilotShared&&window.CopilotShared.sidebarChrome;
+  if(sc&&sc.createCardController) return sc.createCardController({storageKey:_CP_CARDS_KEY,defaultCollapsed:_CP_CARD_DEF_COLLAPSED,onExpand:function(n){ _cpOnCardExpand(n); }});
+  return null;
+})();
+function _cpCardState(){
+  if(_wsCardCtrl) return _wsCardCtrl.readState();
+  try{ return JSON.parse(localStorage.getItem(_CP_CARDS_KEY)||'{}')||{}; }catch(_){ return {}; }
+}
+function _cpCardCollapsed(name){
+  if(_wsCardCtrl) return _wsCardCtrl.isCollapsed(name);
+  var st=_cpCardState(); return (name in st)?!!st[name]:!!_CP_CARD_DEF_COLLAPSED[name];
+}
+function _applyCpCards(){
+  if(_wsCardCtrl){ _wsCardCtrl.apply(); return; }
+  document.querySelectorAll('[data-cp-card]').forEach(function(card){
+    card.classList.toggle('collapsed', _cpCardCollapsed(card.getAttribute('data-cp-card')));
+  });
+}
+function _toggleCpCard(name){
+  if(_wsCardCtrl){ _wsCardCtrl.toggle(name); return; }
+  var card=document.querySelector('[data-cp-card="'+name+'"]'); if(!card) return;
+  var nowCollapsed=!card.classList.contains('collapsed');
+  card.classList.toggle('collapsed', nowCollapsed);
+  var st=_cpCardState(); st[name]=nowCollapsed?1:0;
+  try{ localStorage.setItem(_CP_CARDS_KEY, JSON.stringify(st)); }catch(_){}
+  if(!nowCollapsed) _cpOnCardExpand(name);
+}
+/* 卡头状态 pill：组件 cp-data-loaded → 折叠态也能一眼读懂面板内容 */
+var _CP_PILL_BY_PANEL={'ws-cp-draft':'cpp-draft','ws-cp-persona':'cpp-persona','ws-cp-script':'cpp-script',
+  'ws-cp-relstage':'cpp-relstage','ws-cp-collab':'cpp-collab','ws-cp-chain':'cpp-chain','ws-cp-nba':'cpp-hero'};
+var _CP_PILL_IDS=['cpp-hero','cpp-draft','cpp-persona','cpp-script','cpp-relstage','cpp-collab','cpp-chain','cpp-analysis','cpp-journey'];
+var _CP_PILL_TONES=['pill-accent','pill-ok','pill-warn','pill-danger'];
+/* 可点击 pill → 展开目标卡（折叠态快速跳转） */
+var _CP_PILL_JUMPS={'cpp-hero':{card:'relstage',tab:'customer',titleKey:'inbox.pill.jump_rel_t'},
+  'cpp-analysis':{card:'analysis',tab:'tools',titleKey:'inbox.pill.jump_analysis_t'}};
+function _setCpPill(pillId, text, tone, jumpOverride){
+  var el=document.getElementById(pillId); if(!el) return;
+  el.textContent=text||'';
+  _CP_PILL_TONES.forEach(function(c){ el.classList.remove(c); });
+  el.classList.remove('cp-pill-link');
+  el.removeAttribute('data-cp-jump');
+  el.removeAttribute('data-cp-tab');
+  el.removeAttribute('title');
+  if(text && tone) el.classList.add('pill-'+tone);
+  var jmp=jumpOverride||_CP_PILL_JUMPS[pillId];
+  if(text && jmp){
+    el.classList.add('cp-pill-link');
+    el.setAttribute('data-cp-jump', jmp.card||'');
+    el.setAttribute('data-cp-tab', jmp.tab||'');
+    if(jmp.titleKey) el.title=window.T(jmp.titleKey);
+  }
+  if(pillId==='cpp-analysis'||pillId==='cpp-chain'||pillId==='convops-pill') _updateToolsTabBadge();
+  if(pillId==='cpp-relstage') _updateCustomerTabBadge();
+  if(pillId==='cpp-draft') _updateReplyTabBadge();
+}
+function _updateReplyTabBadge(){
+  var el=document.getElementById('ws-cp-tab-badge-reply'); if(!el) return;
+  var dr=document.getElementById('cpp-draft');
+  var text='', tone='';
+  if(dr&&dr.textContent&&dr.classList.contains('pill-danger')) text=dr.textContent;
+  else if(dr&&dr.textContent&&dr.classList.contains('pill-warn')){ text=dr.textContent; tone='warn'; }
+  var sc=window.CopilotShared&&window.CopilotShared.sidebarChrome;
+  if(sc&&sc.applyTabBadge) sc.applyTabBadge(el,text,tone);
+  else{ if(text.length>14) text=text.slice(0,14)+'…'; el.textContent=text; el.className='ws-cp-tab-badge'+(tone?' '+tone:''); }
+}
+function _updateCustomerTabBadge(){
+  var el=document.getElementById('ws-cp-tab-badge-customer'); if(!el) return;
+  var rs=document.getElementById('cpp-relstage');
+  var text='', tone='';
+  if(rs&&rs.textContent&&rs.classList.contains('pill-danger')) text=rs.textContent;
+  else if(rs&&rs.textContent&&rs.classList.contains('pill-warn')){ text=rs.textContent; tone='warn'; }
+  var sc=window.CopilotShared&&window.CopilotShared.sidebarChrome;
+  if(sc&&sc.applyTabBadge) sc.applyTabBadge(el,text,tone);
+  else{ if(text.length>14) text=text.slice(0,14)+'…'; el.textContent=text; el.className='ws-cp-tab-badge'+(tone?' '+tone:''); }
+}
+function _updateToolsTabBadge(){
+  var el=document.getElementById('ws-cp-tab-badge-tools'); if(!el) return;
+  var ap=document.getElementById('cpp-analysis');
+  var cp=document.getElementById('cpp-chain');
+  var cop=document.getElementById('convops-pill');
+  var text='', tone='';
+  if(ap&&ap.textContent&&ap.classList.contains('pill-danger')) text=ap.textContent;
+  else if(ap&&ap.textContent&&ap.classList.contains('pill-warn')){ text=ap.textContent; tone='warn'; }
+  else if(cp&&cp.textContent&&cp.classList.contains('pill-danger')) text=cp.textContent;
+  else if(cop&&cop.textContent&&cop.classList.contains('pill-warn')){ text=window.T('inbox.pill.snoozed'); tone='warn'; }
+  var sc=window.CopilotShared&&window.CopilotShared.sidebarChrome;
+  if(sc&&sc.applyTabBadge) sc.applyTabBadge(el,text,tone);
+  else{ el.textContent=text; el.className='ws-cp-tab-badge'+(tone?' '+tone:''); }
+}
+function _clearCpPills(){
+  _CP_PILL_IDS.forEach(function(id){ _setCpPill(id,''); });
+}
+function _pillMetaFromCpLoaded(det){
+  var sc=window.CopilotShared&&window.CopilotShared.sidebarChrome;
+  if(sc&&sc.pillMetaFromCpLoaded){
+    return sc.pillMetaFromCpLoaded(det,{t:window.T,tf:window.Tf});
+  }
+  return {text:'',tone:''};
+}
+function _updateCpCardPill(det){
+  var pillId=_CP_PILL_BY_PANEL[det.panelId]; if(!pillId) return;
+  var m=_pillMetaFromCpLoaded(det);
+  _setCpPill(pillId, m.text, m.tone, m.jump||null);
+}
+function _analysisPillMeta(ai){
+  if(!ai||!Object.keys(ai).length) return {text:'',tone:''};
+  var tone='accent', text='';
+  if(ai.risk_level){
+    text=String(ai.risk_level).toUpperCase();
+    tone=(ai.risk_level==='high')?'danger':((ai.risk_level==='medium')?'warn':'ok');
+  }else{
+    var sig=(ai.risk_signals||[])[0];
+    if(sig&&sig.label){ text=sig.label.length>12?sig.label.slice(0,12)+'…':sig.label; tone='warn'; }
+    else if(ai.intent){ text=ai.intent.length>14?ai.intent.slice(0,14)+'…':ai.intent; }
+  }
+  return {text:text,tone:text?tone:''};
+}
+/* 点击 pill 跳转：展开目标卡 + 切 tab + 滚入视口 */
+function _cpExpandAndScroll(cardName, tab){
+  if(tab && typeof setWsCpTab==='function' && _wsCpTab!==tab) setWsCpTab(tab);
+  var card=document.querySelector('[data-cp-card="'+cardName+'"]');
+  if(!card) return;
+  if(card.classList.contains('collapsed')) _toggleCpCard(cardName);
+  else _cpOnCardExpand(cardName);
+  try{ card.scrollIntoView({behavior:'smooth',block:'nearest'}); }catch(_){}
+}
+function _decorateCpCardIcons(){
+  document.querySelectorAll('[data-cp-ic]').forEach(function(sp){
+    if(sp.__icDone) return; sp.__icDone=1;
+    var ic=uiIcon(sp.getAttribute('data-cp-ic'),14);
+    if(ic) sp.innerHTML=ic;
+  });
+}
+/* AI 对话分析缓存：同会话 + 同末条入站消息 → 重复展开不重跑 LLM（内存 + sessionStorage 双层，30min TTL） */
+var _AI_CACHE_SS_KEY='ws_ai_analysis_v1';
+var _AI_CACHE_TTL_MS=30*60*1000;
+var _aiAnalysisCache={ cid:'', inKey:'', html:'', pill:{text:'',tone:''}, ts:0 };
+function _aiAnalysisInKey(){
+  var m=(typeof threadMsgs!=='undefined'?threadMsgs:[]).filter(function(x){return x.direction==='in';}).pop();
+  return m?String(m.id||'')+'|'+String(m.text||'').slice(0,96):'';
+}
+function _aiCacheFresh(entry){
+  if(!entry||!entry.ts) return false;
+  return (Date.now()-entry.ts)<=_AI_CACHE_TTL_MS;
+}
+function _aiCacheFromSession(cid, inKey){
+  try{
+    var raw=sessionStorage.getItem(_AI_CACHE_SS_KEY);
+    if(!raw) return null;
+    var o=JSON.parse(raw);
+    if(o && o.cid===cid && o.inKey===inKey){
+      if(!_aiCacheFresh(o)){ sessionStorage.removeItem(_AI_CACHE_SS_KEY); return null; }
+      return o;
+    }
+  }catch(_){}
+  return null;
+}
+function _aiCacheSave(cid, inKey, html, pill){
+  var ts=Date.now();
+  _aiAnalysisCache={ cid:cid, inKey:inKey, html:html, pill:pill||{text:'',tone:''}, ts:ts };
+  try{ sessionStorage.setItem(_AI_CACHE_SS_KEY, JSON.stringify(_aiAnalysisCache)); }catch(_){}
+}
+function _invalidateAiAnalysisCache(){
+  _aiAnalysisCache={ cid:'', inKey:'', html:'', pill:{text:'',tone:''}, ts:0 };
+  try{ sessionStorage.removeItem(_AI_CACHE_SS_KEY); }catch(_){}
+  _setCpPill('cpp-analysis','');
+}
+function _restoreAiAnalysisCache(entry){
+  var rows=document.getElementById('ai-analysis-rows');
+  if(rows && entry.html) rows.innerHTML=entry.html;
+  if(entry.pill && entry.pill.text) _setCpPill('cpp-analysis', entry.pill.text, entry.pill.tone);
+}
+/* 英雄卡关系阶段一句话摘要（轻量取数，独立于折叠的详细面板；异常静默不阻断） */
+async function _renderHeroRel(){
+  var el=document.getElementById('cp-hero-rel'); if(!el) return;
+  if(_cpCardCollapsed('hero')){ el.textContent=''; return; }   // 英雄卡折叠时不取数（懒加载）
+  if(!_wsCpCid||!_wsCpClient){ el.textContent=''; return; }
+  var _cid=_wsCpCid;   // 捕获发起时会话，await 后若已切走则丢弃过期响应（防串会话）
+  try{
+    var d=await _wsCpClient.getRelStage({conversationId:_cid});
+    if(_cid!==_wsCpCid) return;
+    if(!d||d.ok===false){ el.textContent=window.T('inbox.hero.rel_na'); return; }
+    var stage=d.display_stage_label||d.stage_label||'—';
+    var pct=Math.max(0,Math.min(100,Math.round(d.progress_pct||0)));
+    var html='<span class="hr-ic">'+uiIcon('heart',12)+'</span><span class="hr-stage">'+esc(stage)+'</span><span>· '+pct+'%</span>';
+    if(d.next_stage_label) html+='<span class="hr-next">→ '+esc(d.next_stage_label)+'</span>';
+    el.innerHTML=html;
+    /* NBA 未加载时，用关系摘要填充英雄卡 pill（折叠态也能扫读） */
+    var hp=document.getElementById('cpp-hero');
+    if(hp && !hp.textContent) _setCpPill('cpp-hero', stage+' · '+pct+'%', 'accent');
+  }catch(_){ el.textContent=window.T('inbox.hero.rel_na'); }
+}
 
 /* ===== 单一前端 App 模式（与桌面壳 🧪 同源 /copilot/app.html）=====
    开发一处（shared/copilot/app.html + 组件）→ 网页与桌面两端同源同款。
@@ -5125,6 +6067,9 @@ function _wsEnableApp(){
   if(!wrap||!f) return;
   var body=document.getElementById('ws-cp-body'); if(body) body.style.display='none';
   var tabs=document.getElementById('ws-cp-tabs'); if(tabs) tabs.style.display='none';
+  // 方案1：单一前端 App 模式下，隐藏跨 tab 常驻的英雄卡与会话卡，避免与 iframe 叠加。
+  var hero=document.getElementById('cp-hero'); if(hero) hero.style.display='none';
+  var co=document.getElementById('conv-ops'); if(co) co.style.display='none';
   wrap.hidden=false;
   // 同源 → cookie 自动鉴权，无需注入 token；theme 跟随本页有效主题，避免「一黑一白」；lang 跟随宿主 UI 语言。
   if(!f.getAttribute('src')){
@@ -5146,20 +6091,46 @@ try{ document.addEventListener('DOMContentLoaded', function(){
   if(WS_USE_APP) _wsEnableApp();
 }); }catch(_){ }
 
+// P4-7+：粘贴图片 / 拖拽文件到消息区 → 暂存进媒体预览（复用 _stageMedia）
+try{ document.addEventListener('DOMContentLoaded', function(){
+  var ta=document.getElementById('reply-ta');
+  if(ta){ ta.addEventListener('paste', function(e){
+    var items=(e.clipboardData&&e.clipboardData.items)||[];
+    for(var i=0;i<items.length;i++){
+      if(items[i].kind==='file'){ var f=items[i].getAsFile(); if(f){ e.preventDefault(); _stageMedia(f); break; } }
+    }
+  }); }
+  var area=document.getElementById('msg-area');
+  if(area){
+    ['dragover','dragenter'].forEach(function(ev){ area.addEventListener(ev,function(e){ e.preventDefault(); area.classList.add('drag-over'); }); });
+    ['dragleave','dragend'].forEach(function(ev){ area.addEventListener(ev,function(e){ area.classList.remove('drag-over'); }); });
+    area.addEventListener('drop', function(e){
+      e.preventDefault(); area.classList.remove('drag-over');
+      var files=(e.dataTransfer&&e.dataTransfer.files)||[];
+      if(files.length){ _stageMedia(files[0]); }
+    });
+  }
+}); }catch(_){ }
+
 function _refreshWsCpComponent(suffix){
   var el=document.getElementById('ws-cp-'+suffix);
-  if(el&&typeof el.refresh==='function') el.refresh();
+  if(!el||typeof el.refresh!=='function') return;
+  // 懒加载：折叠态不刷新（省请求），改标记为待取；展开时再拉最新（含刚发生的联动变更）。
+  if(_cpCardCollapsed(_CP_ID_CARD[suffix]||suffix)){ if(_wsCpCtx) el._pendingCtx=_wsCpCtx; return; }
+  el.refresh();
 }
 
+function _maybeLoadAiAnalysis(){
+  if(_wsCpTab==='tools'&&infoOn&&selectedChat&&!_cpCardCollapsed('analysis')&&typeof _loadAiAnalysis==='function') _loadAiAnalysis(selectedChat);
+}
 function setWsCpTab(tab){
-  _wsCpTab=tab||'reply';
-  document.querySelectorAll('.ws-cp-tab').forEach(function(b){
-    b.classList.toggle('active', b.dataset.tab===_wsCpTab);
-  });
-  document.querySelectorAll('.ws-cp-sec').forEach(function(sec){
-    sec.classList.toggle('active', sec.dataset.tab===_wsCpTab);
-  });
-  if(_wsCpTab==='insight'&&infoOn&&selectedChat) _loadAiAnalysis(selectedChat);
+  if(_wsCpTabCtrl){ _wsCpTabCtrl.setTab(tab); return; }
+  var sc=window.CopilotShared&&window.CopilotShared.sidebarChrome;
+  _wsCpTab=sc&&sc.normalizeTab?sc.normalizeTab(tab):(tab||'reply');
+  document.querySelectorAll('.ws-cp-tab').forEach(function(b){ b.classList.toggle('active', b.dataset.tab===_wsCpTab); });
+  document.querySelectorAll('.ws-cp-sec').forEach(function(sec){ sec.classList.toggle('active', sec.dataset.tab===_wsCpTab); });
+  if(sc&&sc.storeTab) sc.storeTab(_wsCpTab);
+  _maybeLoadAiAnalysis();
 }
 
 function initWsCopilot(){
@@ -5179,9 +6150,38 @@ function initWsCopilot(){
         : [];
     };
   }
-  document.querySelectorAll('.ws-cp-tab').forEach(function(btn){
-    btn.addEventListener('click', function(){ setWsCpTab(btn.dataset.tab); });
-  });
+  var sc=window.CopilotShared&&window.CopilotShared.sidebarChrome;
+  if(sc){
+    _wsCpTabCtrl=sc.createTabController({
+      tabSelector:'.ws-cp-tab',
+      sectionSelector:'.ws-cp-sec',
+      onChange:function(t){ _wsCpTab=t; _maybeLoadAiAnalysis(); }
+    });
+    _wsCpTabCtrl.bindClick();
+    _wsCpTab=_wsCpTabCtrl.restore();
+    sc.createResizeController({ panel:'info-sidebar', handle:'ws-sidebar-resize', defaultWidth:300 }).init();
+    sc.bindTabHotkeys({ setTab:setWsCpTab, isEnabled:function(){ return !!infoOn; } });
+  }else{
+    document.querySelectorAll('.ws-cp-tab').forEach(function(btn){
+      btn.addEventListener('click', function(){ setWsCpTab(btn.dataset.tab); });
+    });
+  }
+  // 方案1：可折叠卡片——事件委托挂在侧栏（静态父节点），点卡头即切换并记忆，无内联 handler（门禁安全）。
+  var _sb=document.getElementById('info-sidebar');
+  if(_sb && !_sb.__cpCardBound){
+    _sb.__cpCardBound=1;
+    _sb.addEventListener('click', function(e){
+      var pill=e.target.closest('.cp-card-pill.cp-pill-link');
+      if(pill){
+        e.preventDefault(); e.stopPropagation();
+        _cpExpandAndScroll(pill.getAttribute('data-cp-jump')||'', pill.getAttribute('data-cp-tab')||'');
+        return;
+      }
+      var t=e.target.closest('[data-cp-toggle]'); if(!t) return;
+      _toggleCpCard(t.getAttribute('data-cp-toggle'));
+    });
+  }
+  _applyCpCards();
   var rel=document.getElementById('ws-cp-relstage');
   if(rel){
     rel.addEventListener('cp-rel-changed', function(ev){
@@ -5193,6 +6193,7 @@ function initWsCopilot(){
       _refreshWsCpComponent('script');
       _refreshWsCpComponent('collab');
       _refreshWsCpComponent('nba');
+      _renderHeroRel();
     });
   }
   document.addEventListener('cp-fill', function(e){
@@ -5211,7 +6212,17 @@ function initWsCopilot(){
   document.addEventListener('cp-action-done', function(){
     _refreshWsCpComponent('relstage');
     _refreshWsCpComponent('chain');
+    _renderHeroRel();
   });
+  /* 卡头 pill：组件取数/生成完成后刷新折叠态摘要（事件委托，无内联 handler） */
+  if(!document.__cpPillBound){
+    document.__cpPillBound=1;
+    document.addEventListener('cp-data-loaded', function(e){ _updateCpCardPill((e&&e.detail)||{}); });
+  }
+  _decorateCpCardIcons();
+  _updateToolsTabBadge();
+  _updateCustomerTabBadge();
+  _updateReplyTabBadge();
 }
 
 function syncWsCopilot(c){
@@ -5221,6 +6232,7 @@ function syncWsCopilot(c){
   if(WS_USE_APP){
     _wsAppCtx={type:'cp-context', conversationId:cid, chatKey:c.chat_key, platform:c.platform, accountId:c.account_id,
       customer:{ platform:c.platform, account_id:c.account_id, account_label:c.account_label||'', chat_key:c.chat_key,
+        name:c.name||'', username:c.username||'', phone:c.phone||'', avatar_url:c.avatar_url||'',
         funnel_stage:(typeof FUNNEL!=='undefined'&&FUNNEL[c.funnel_stage])||c.funnel_stage||'',
         contact_id:c.contact_id||'', summary:c._summary||'' }};
     _wsEnableApp();
@@ -5240,23 +6252,64 @@ function syncWsCopilot(c){
     platform:c.platform,
     accountId:c.account_id,
   };
+  _wsCpCtx=ctx;   // 记住当前会话上下文，供折叠卡展开时补喂 / 联动刷新时按需取数
+  _clearCpPills();
+  _invalidateAiAnalysisCache();
+  // 方案1·懒加载：仅「展开」的卡立即取数；「折叠」的卡暂存上下文，待首次展开再取（省首屏请求）。
   _WS_CP_IDS.forEach(function(s){
     var el=document.getElementById('ws-cp-'+s);
-    if(el) el.context=ctx;
+    if(!el) return;
+    if(_cpCardCollapsed(_CP_ID_CARD[s]||s)){ el._pendingCtx=ctx; }
+    else { el._pendingCtx=null; el.context=ctx; }
   });
+  _wsCpCid=cid;
+  _renderHeroRel();
   infoOn=true;
   var sb=document.getElementById('info-sidebar');
   var btn=document.getElementById('info-toggle-btn');
   if(sb) sb.classList.add('show');
   if(btn) btn.classList.add('active');
-  if(_wsCpTab==='insight') _loadAiAnalysis(c);
+  if(_wsCpTab==='tools'&&!_cpCardCollapsed('analysis')) _loadAiAnalysis(c);
+}
+
+/* 电话脱敏：保留国家码/前段与末 2 位，中间打码（一眼可辨又不外泄完整号）。 */
+function _maskPhone(p){
+  var s=String(p||'').trim(); if(!s) return '';
+  var plus=s.charAt(0)==='+'?'+':''; var d=s.replace(/[^0-9]/g,'');
+  if(d.length<=4) return plus+d;
+  var head=d.slice(0,Math.min(3,d.length-2)); var tail=d.slice(-2);
+  return plus+head+'****'+tail;
+}
+
+/* F2：资料面板「身份英雄卡」——平台无关的统一渲染器。吃 {name,chat_key,platform,avatar_url,
+   username,account_*}，复用列表/会话头同一 _peerAvatarImg（懒代理 + onerror 回落首字母），
+   四端一致。无真实昵称（仅数字号）→ 显示账号标识 + 「待获取」提示，直答「无法识别用户」。*/
+function _renderIdentityHero(c){
+  if(!c) return '';
+  const nm=c.name||'';
+  const shown=nm||c.chat_key||'-';
+  const avbg=_avatarGrad(c.name||c.chat_key||c.conversation_id||'');
+  const sub=c.username?`<div class="ident-hero-sub">@${esc(c.username)}</div>`:'';
+  const hint=nm?'':`<div class="ident-hero-hint">${uiIcon('clock',10)}${window.T('inbox.info.name_pending')}</div>`;
+  return `<div class="ident-hero">
+    <div class="ident-hero-ava" style="background:${avbg};">${esc(avatarInitial(c.name||c.chat_key))}${_peerAvatarImg(c)}
+      <div class="ident-hero-badge">${platIcon(c.platform,14)}</div>
+    </div>
+    <div class="ident-hero-meta">
+      <div class="ident-hero-name">${esc(shown)}</div>
+      ${sub}${hint}
+    </div>
+  </div>`;
 }
 
 /* ===== 信息侧栏 ===== */
 async function loadInfoSidebar(c){
-  // 基础字段
+  // 身份画像：英雄卡（头像+昵称+@username+待获取提示）置顶，其下补 电话/平台/账号/标识 明细。
   const rows=document.getElementById('cust-info-rows');
+  const _phone=c.phone?`<div class="info-row"><span class="info-label">${window.T('inbox.info.phone')}</span><span class="info-val">${esc(_maskPhone(c.phone))}</span></div>`:'';
   rows.innerHTML=`
+    ${_renderIdentityHero(c)}
+    ${_phone}
     <div class="info-row"><span class="info-label">${window.T('inbox.info.platform')}</span><span class="info-val">${platName(c.platform)}</span></div>
     <div class="info-row"><span class="info-label">${window.T('inbox.info.account')}</span><span class="info-val">${esc(c.account_label||c.account_id||'-')}</span></div>
     <div class="info-row"><span class="info-label">${window.T('inbox.info.identifier')}</span><span class="info-val" style="font-size:10px;">${esc(c.chat_key||'-')}</span></div>
@@ -5277,9 +6330,11 @@ async function loadInfoSidebar(c){
          <button class="rel-act-btn" onclick="markConversion('CONVERTED')" title="${window.T('inbox.journey.mark_converted_t')}">${window.T('inbox.journey.mark_converted')}</button>
        </div>` : '';
   ji.innerHTML=_stageHtml+_markBtns;
+  var jp=document.getElementById('cpp-journey');
+  if(jp) jp.textContent=c.funnel_stage?(FUNNEL[c.funnel_stage]||c.funnel_stage):'';
 
-  // 若侧栏打开，自动触发 AI 分析
-  if(infoOn) _loadAiAnalysis(c);
+  // 若侧栏打开且「AI 对话分析」卡为展开态，才触发（懒加载，省 LLM 调用）
+  if(infoOn && !_cpCardCollapsed('analysis')) _loadAiAnalysis(c);
 }
 
 // 阶段 E：人工标记成交/转化，推进客户旅程至漏斗终点
@@ -5307,20 +6362,38 @@ async function markConversion(stage){
 }
 
 async function _loadAiAnalysis(c){
-  document.getElementById('ai-analysis-rows').innerHTML='<div style="font-size:11px;color:var(--text-tiny);">'+window.T('inbox.ai.analyzing')+'</div>';
+  var rows=document.getElementById('ai-analysis-rows');
+  if(!rows) return;
+  var cid=(c&&c.conversation_id)||'';
+  var inKey=_aiAnalysisInKey();
+  if(cid && _aiAnalysisCache.cid===cid && _aiAnalysisCache.inKey===inKey && _aiAnalysisCache.html){
+    if(_aiCacheFresh(_aiAnalysisCache)){ _restoreAiAnalysisCache(_aiAnalysisCache); return; }
+    _invalidateAiAnalysisCache();
+  }
+  var ss=cid ? _aiCacheFromSession(cid, inKey) : null;
+  if(ss && ss.html){
+    _aiCacheSave(ss.cid, ss.inKey, ss.html, ss.pill);
+    _restoreAiAnalysisCache(ss);
+    return;
+  }
+  rows.innerHTML='<div style="font-size:11px;color:var(--text-tiny);">'+window.T('inbox.ai.analyzing')+'</div>';
   try{
     const lastIn=threadMsgs.filter(m=>m.direction==='in').pop();
     if(!lastIn||!lastIn.text){ document.getElementById('ai-analysis-rows').innerHTML='<div style="font-size:11px;color:var(--text-tiny);">'+window.T('inbox.ai.no_inbound')+'</div>'; return; }
     const r=await fetch('/api/unified-inbox/analyze',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({text:lastIn.text, messages:threadMsgs.slice(-8), chat:c})});
     const d=await r.json();
-    if(d.ok) renderInfoSidebarAI(d.analysis||{});
-  }catch(_){ document.getElementById('ai-analysis-rows').innerHTML=''; }
+    if(d.ok){
+      renderInfoSidebarAI(d.analysis||{});
+      var apm=_analysisPillMeta(d.analysis||{});
+      _aiCacheSave(cid, _aiAnalysisInKey(), rows.innerHTML, apm);
+    }
+  }catch(_){ rows.innerHTML=''; }
 }
 
 function renderInfoSidebarAI(ai){
   const el=document.getElementById('ai-analysis-rows');
-  if(!ai||!Object.keys(ai).length){ el.innerHTML='<div style="font-size:11px;color:var(--text-tiny);">'+window.T('inbox.ai.no_analysis')+'</div>'; return; }
+  if(!ai||!Object.keys(ai).length){ el.innerHTML='<div style="font-size:11px;color:var(--text-tiny);">'+window.T('inbox.ai.no_analysis')+'</div>'; _setCpPill('cpp-analysis',''); return; }
   const RISK_COLOR={high:'var(--red)',medium:'var(--warn)',low:'var(--green)'};
   const RISK_SIGNAL_COLOR={price_negotiation:'#f59e0b',complaint:'#ef4444',churn_intent:'#ef4444',comparison_shopping:'#6366f1',urgency:'#f97316',escalation_intent:'#dc2626'};
   // P33：语种标签
@@ -5375,6 +6448,8 @@ function renderInfoSidebarAI(ai){
     ${summaryHtml}
     ${tieredHtml}
   `;
+  var apm=_analysisPillMeta(ai);
+  _setCpPill('cpp-analysis', apm.text, apm.tone);
   // P37：加载并渲染下一步动作
   _loadNextActions();
 }
@@ -5412,7 +6487,7 @@ function toggleInfoSidebar(){
   const sb=document.getElementById('info-sidebar');
   sb.classList.toggle('show',infoOn);
   document.getElementById('info-toggle-btn').classList.toggle('active',infoOn);
-  if(infoOn && selectedChat && threadMsgs.length) _loadAiAnalysis(selectedChat);
+  if(infoOn && selectedChat && threadMsgs.length && !_cpCardCollapsed('analysis')) _loadAiAnalysis(selectedChat);
 }
 
 /* ===== Claim ===== */
@@ -6849,6 +7924,99 @@ function quoteMsg(text){
   ta.focus();
 }
 
+/* ===== P4-5B 双向富交互：坐席引用回复 + 表情回应 ===== */
+let _replyTarget=null;   // {id, from_me, participant, text, sender}
+function _msgByPmid(pmid){
+  try{ return (threadMsgs||[]).find(x=>String(x.platform_msg_id||'')===String(pmid)); }catch(_){ return null; }
+}
+function replyToMsg(pmid){
+  const m=_msgByPmid(pmid);
+  if(!m) return;
+  const isOut=(m.direction==='out');
+  const txt=(m.text||_mediaKind(m)||'').toString().slice(0,120);
+  const sender=isOut?window.T('inbox.act.you'):((selectedChat&&selectedChat.name)||'');
+  _replyTarget={ id:String(pmid), from_me:isOut, participant:'', text:txt, sender:sender };
+  const bar=document.getElementById('quote-reply-bar');
+  if(bar){
+    document.getElementById('qrb-sender').textContent=sender;
+    document.getElementById('qrb-text').textContent=txt;
+    bar.style.display='flex';
+  }
+  const ta=document.getElementById('reply-ta'); if(ta) ta.focus();
+}
+function _cancelReply(){
+  _replyTarget=null;
+  const bar=document.getElementById('quote-reply-bar'); if(bar) bar.style.display='none';
+}
+const _REACT_EMOJIS=['👍','❤️','😂','😮','😢','🙏'];
+function reactPick(ev, pmid, isOut){
+  try{ ev.stopPropagation(); }catch(_){}
+  document.querySelectorAll('.react-picker').forEach(p=>p.remove());
+  const pick=document.createElement('div');
+  pick.className='react-picker';
+  pick.innerHTML=_REACT_EMOJIS.map(e=>`<span onclick="doReact('${esc(pmid)}',${isOut?1:0},'${e}')">${e}</span>`).join('');
+  document.body.appendChild(pick);
+  const r=ev.target.getBoundingClientRect();
+  pick.style.left=Math.max(6,Math.min(window.innerWidth-pick.offsetWidth-6,r.left))+'px';
+  pick.style.top=(r.top-pick.offsetHeight-6+window.scrollY)+'px';
+  setTimeout(()=>{ document.addEventListener('click',function _c(){ pick.remove(); document.removeEventListener('click',_c); },{once:true}); },0);
+}
+async function doReact(pmid, isOut, emoji){
+  document.querySelectorAll('.react-picker').forEach(p=>p.remove());
+  if(!selectedChat||selectedChat.platform!=='whatsapp') return;
+  try{
+    const r=await fetch('/api/platforms/whatsapp/'+encodeURIComponent(selectedChat.account_id||'default')+'/react',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({chat_key:selectedChat.chat_key,target_id:String(pmid),emoji:emoji,
+        from_me:!!isOut,chat_type:selectedChat.chat_type||''})
+    });
+    const d=await r.json();
+    if(d&&d.ok){ loadThread(selectedChat,true); }
+    else { _toast(window.T('inbox.act.react_fail'),'#dc2626'); }
+  }catch(_){ _toast(window.T('inbox.act.react_fail'),'#dc2626'); }
+}
+let _editTarget=null;    // {id, orig} — P4-6C 编辑态
+function editOwnMsg(pmid){
+  const m=_msgByPmid(pmid); if(!m) return;
+  if(_replyTarget) _cancelReply();           // 编辑与引用互斥
+  const cur=(m.text||'').toString();
+  _editTarget={ id:String(pmid), orig:cur };
+  const bar=document.getElementById('edit-mode-bar');
+  if(bar){
+    const t=document.getElementById('emb-text'); if(t) t.textContent=cur.slice(0,120);
+    bar.style.display='flex';
+  }
+  const ta=document.getElementById('reply-ta');
+  if(ta){ ta.value=cur; ta.focus(); try{ ta.setSelectionRange(cur.length,cur.length); }catch(_){} }
+  const btn=document.getElementById('send-btn'); if(btn) btn.textContent=window.T('inbox.act.save_edit');
+}
+function _cancelEdit(){
+  if(!_editTarget) return;
+  _editTarget=null;
+  const bar=document.getElementById('edit-mode-bar'); if(bar) bar.style.display='none';
+  const ta=document.getElementById('reply-ta'); if(ta) ta.value='';
+  const btn=document.getElementById('send-btn'); if(btn) btn.textContent=window.T('inbox.send');
+}
+async function revokeOwnMsg(pmid){
+  if(!window.confirm(window.T('inbox.act.revoke_confirm'))) return;
+  await _doMessageOp(pmid,'revoke','');
+}
+async function _doMessageOp(pmid, op, text){
+  if(!selectedChat||selectedChat.platform!=='whatsapp') return;
+  const failKey=(op==='edit')?'inbox.act.edit_fail':'inbox.act.revoke_fail';
+  try{
+    const r=await fetch('/api/platforms/whatsapp/'+encodeURIComponent(selectedChat.account_id||'default')+'/message-op',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({chat_key:selectedChat.chat_key,target_id:String(pmid),op:op,
+        text:text||'',chat_type:selectedChat.chat_type||''})
+    });
+    const d=await r.json();
+    if(d&&d.ok){ loadThread(selectedChat,true); }
+    else { _toast(window.T(failKey),'#dc2626'); }
+  }catch(_){ _toast(window.T(failKey),'#dc2626'); }
+}
+Object.assign(window,{replyToMsg,_cancelReply,reactPick,doReact,editOwnMsg,_cancelEdit,revokeOwnMsg,_doMessageOp});
+
 /* ===== 快捷回复模板面板 ===== */
 let qrOpen=false;
 function toggleQrPanel(){
@@ -6939,14 +8107,17 @@ function renderDrawerAccounts(){
         const ord=_acctOrdinal[`${pl}:${aid}`];
         // P1 真实身份：自身昵称/用户名（后端 self_*）；仍以用户显式起的 label 为最高优先
         const selfName=a.self_name||(a.self_username?('@'+a.self_username):'');
-        // 标题：昵称(label) > 真实昵称/用户名 > 主账号 > 账号N（脱敏号见副行/悬浮）
-        const pName=a.label||selfName||((aid==='default')?window.T('inbox.acct.main'):_acctShort(pl,aid));
+        // label 若只是平台通用名（如适配器默认的 "Telegram"）视为「没起名」，
+        // 让真实昵称(Beatrice)优先显示；仅用户显式起的个性名才盖过真实昵称。
+        const realLabel=(a.label && a.label!==platName(pl))?a.label:'';
+        // 标题：个性名(label) > 真实昵称/用户名 > 主账号 > 账号N（脱敏号见副行/悬浮）
+        const pName=realLabel||selfName||((aid==='default')?window.T('inbox.acct.main'):_acctShort(pl,aid));
         // 头像字首：显示名首字 / 默认号=平台首字母 / 其余=稳定序号；有真头像则用真图
-        const avGlyph=(a.label||selfName)?(a.label||selfName):((aid==='default')?platName(pl):(ord?String(ord):platName(pl)));
+        const avGlyph=(realLabel||selfName)||((aid==='default')?platName(pl):(ord?String(ord):platName(pl)));
         // 副行：有用户名显示 @username，否则脱敏账号号
         const subLine=a.self_username?('@'+a.self_username):_maskAcctId(a.account_id||'-');
-        // 未命名判定：既无 label 也无真实身份才提示「起个昵称」
-        const unnamed=!a.label && !selfName;
+        // 未命名判定：既无个性名也无真实身份才提示「起个昵称」
+        const unnamed=!realLabel && !selfName;
         html+=`<div class="acct-card" style="--acct-accent:${platColor(pl)};">
           <div class="acct-card-head">
             ${_acctAvatar(pl,aid,avGlyph,42,a.self_avatar||'')}
@@ -6966,6 +8137,8 @@ function renderDrawerAccounts(){
             }
             <button class="acct-btn" onclick="renameAcct('${esc(pl)}','${esc(a.account_id||'')}')">${window.T('inbox.acct.rename')}</button>
             <button class="acct-btn" onclick="viewAcctChats('${esc(pl)}')">${window.T('inbox.acct.view_chats')}</button>
+            ${on?`<button class="acct-btn icon danger" title="${esc(window.T('inbox.acct.logout'))}" onclick="logoutAcct('${esc(pl)}','${esc(aid)}')">🚪</button>`:''}
+            <button class="acct-btn icon danger" title="${esc(window.T('inbox.acct.remove'))}" onclick="removeAcct('${esc(pl)}','${esc(aid)}')">🗑️</button>
           </div>
         </div>`;
       });
@@ -7027,11 +8200,48 @@ function viewAcctChats(pl){
   closeDrawer();
   setPlatFilter(pl);
 }
+// 登出账号：断开连接 + 通知平台解除关联 + 清会话凭据（保留账号记录，可重新扫码登录）
+async function logoutAcct(pl,aid){
+  const nm=(accountMeta[`${pl}:${aid}`]||{}).label||_acctShort(pl,aid);
+  const ok=await _appConfirm(window.Tf('inbox.acct.logout_confirm',{name:nm}),
+    {title:window.T('inbox.acct.logout_title'),icon:'🚪',tone:'danger',okText:window.T('inbox.acct.logout')});
+  if(!ok) return;
+  try{
+    const r=await fetch(`/api/accounts/${enc(pl)}/${enc(aid)}/logout`,{method:'POST'});
+    const d=await r.json();
+    if(!d.ok) throw new Error('logout failed');
+    _toast(window.T('inbox.acct.logout_ok'),'#16a34a');
+    await loadChats(); renderDrawerAccounts();
+  }catch(_){ _toast(window.T('inbox.acct.logout_fail'),'#dc2626'); }
+}
+// 删除账号：登出 + 从账号池移除（软删，回收自身头像）。二次确认防误删。
+async function removeAcct(pl,aid){
+  const nm=(accountMeta[`${pl}:${aid}`]||{}).label||_acctShort(pl,aid);
+  const ok=await _appConfirm(window.Tf('inbox.acct.remove_confirm',{name:nm}),
+    {title:window.T('inbox.acct.remove_title'),icon:'🗑️',tone:'danger',okText:window.T('inbox.acct.remove')});
+  if(!ok) return;
+  try{
+    const r=await fetch(`/api/accounts/${enc(pl)}/${enc(aid)}/remove`,{method:'POST'});
+    const d=await r.json();
+    if(!d.ok) throw new Error('remove failed');
+    _toast(window.T('inbox.acct.remove_ok'),'#16a34a');
+    await loadChats(); renderDrawerAccounts();
+  }catch(_){ _toast(window.T('inbox.acct.remove_fail'),'#dc2626'); }
+}
 
 /* ===== 扫码连接（多方式并存 · 无限扫码：每平台可重复打开新增账号） ===== */
 let _connectPlat=null, _connectAcct='', _connectMode='', _connectLoginId=null, _connectPollTimer=null;
+// 登录已授权成功标志：授权后关闭弹窗/返回不得再 cancel（cancel 在协议侧=logout，会把刚扫的号登出）
+let _connectAuthorized=false;
+// 仅在「登录尚未授权成功」时才 cancel（放弃未完成的登录）；已授权则保留连接，绝不 logout
+function _cancelPendingLogin(){
+  if(_connectLoginId && !_connectAuthorized){
+    fetch(`/api/platforms/${enc(_connectPlat)}/login/${enc(_connectLoginId)}/cancel`,{method:'POST'}).catch(()=>{});
+  }
+  _connectLoginId=null;
+}
 function openConnect(pl, acctId){
-  _connectPlat=pl; _connectAcct=acctId||''; _connectMode='';
+  _connectPlat=pl; _connectAcct=acctId||''; _connectMode=''; _connectAuthorized=false;
   const modal=document.getElementById('connect-modal');
   document.getElementById('connect-plat-icon').innerHTML=platIcon(pl,40);
   document.getElementById('connect-plat-icon').style.background='transparent';
@@ -7058,10 +8268,7 @@ function _showQrView(){
 }
 function backToModeSelect(){
   if(_connectPollTimer){ clearInterval(_connectPollTimer); _connectPollTimer=null; }
-  if(_connectLoginId){
-    fetch(`/api/platforms/${enc(_connectPlat)}/login/${enc(_connectLoginId)}/cancel`,{method:'POST'}).catch(()=>{});
-    _connectLoginId=null;
-  }
+  _cancelPendingLogin();
   _showModeView();
 }
 async function loadConnectModes(){
@@ -7172,18 +8379,12 @@ function confirmConfigAndScan(){
 }
 function backToConfig(){
   if(_connectPollTimer){ clearInterval(_connectPollTimer); _connectPollTimer=null; }
-  if(_connectLoginId){
-    fetch(`/api/platforms/${enc(_connectPlat)}/login/${enc(_connectLoginId)}/cancel`,{method:'POST'}).catch(()=>{});
-    _connectLoginId=null;
-  }
+  _cancelPendingLogin();
   _showConfigView();
 }
 function closeConnect(){
   if(_connectPollTimer){ clearInterval(_connectPollTimer); _connectPollTimer=null; }
-  if(_connectLoginId){
-    fetch(`/api/platforms/${enc(_connectPlat)}/login/${enc(_connectLoginId)}/cancel`,{method:'POST'}).catch(()=>{});
-  }
-  _connectLoginId=null;
+  _cancelPendingLogin();
   document.getElementById('connect-modal').classList.remove('show');
 }
 function restartConnect(){ startConnect(); }
@@ -7201,6 +8402,7 @@ function _setConnectQr(dataOrUrl){
 async function startConnect(){
   if(_connectPollTimer){ clearInterval(_connectPollTimer); _connectPollTimer=null; }
   _connectLoginId=null;
+  _connectAuthorized=false;
   _setConnectQr(null);
   document.getElementById('connect-qr-mask').innerHTML='<span class="spin"></span><span>'+window.T('inbox.connect.qr_gen')+'</span>';
   _setConnectState('pending',window.T('inbox.connect.st_prep'),window.T('inbox.connect.hint_prep'));
@@ -7240,6 +8442,7 @@ async function pollConnect(){
     if(d.qr_image && (st==='pending'||st==='scanned')){ _setConnectQr(d.qr_image); }
     if(st==='scanned'){ _setConnectState('scanned',window.T('inbox.connect.st_scanned'),window.T('inbox.connect.hint_scanned')); }
     else if(st==='authorized'){
+      _connectAuthorized=true; // 标记已授权：关闭弹窗时绝不 cancel/logout 这个已上线的号
       _setConnectState('ok',window.T('inbox.connect.st_ok'),window.T('inbox.connect.hint_ok'));
       if(_connectPollTimer){ clearInterval(_connectPollTimer); _connectPollTimer=null; }
       await loadChats(); renderDrawerAccounts();
@@ -7308,6 +8511,19 @@ function initSSE(){
           (data.conversation_id===selectedChat.conversation_id || data.conversation_id===convKey(selectedChat)) &&
           data.agent_id !== MY_AGENT().id){
           _showTypingIndicator(data.agent_name||data.agent_id||window.T('inbox.notes.agent_default'));
+        }
+      } else if(t==='peer_typing'){
+        // P4-5A：对端（客户）在输入 — 仅当前会话匹配才显示；停止/切走即清除
+        if(selectedChat && data.conversation_id &&
+          (data.conversation_id===selectedChat.conversation_id || data.conversation_id===convKey(selectedChat))){
+          if(data.typing){ _showPeerTyping(!!data.recording); }
+          else { _clearPeerTyping(); }
+        }
+      } else if(t==='message_op'){
+        // P4-6A：消息被编辑/撤回 → 当前会话即时重载线程（撤回置灰 / 已编辑改文）
+        if(selectedChat && data.conversation_id &&
+          (data.conversation_id===selectedChat.conversation_id || data.conversation_id===convKey(selectedChat))){
+          loadThread(selectedChat, true);
         }
       } else if(t==='conv_note'){
         // P25/P45：协作注解 + 阶段上下文
@@ -7430,6 +8646,7 @@ function _patchChatInList(data){
   if('mentioned' in data) c.mentioned = !!data.mentioned; // 若推送带@我 标记则同步（前端据此置顶/提醒）
   // 若是当前打开的对话，不增加未读
   if(!wasSelected) c.unread = (c.unread||0)+1;
+  else if(data.preview || data.ts) _invalidateAiAnalysisCache();   // 当前会话有新活动 → 分析缓存失效
   // 移到顶部
   allChats.splice(idx,1);
   allChats.unshift(c);
@@ -7559,7 +8776,7 @@ Object.assign(window, {
   // 会话头 / 移动端
   closeMobileChat, toggleAiDraft, toggleInfoSidebar, toggleArchive, snoozeConv, unsnoozeConv, setMode, pauseAutoMode,
   // 发送 / 回复区
-  sendMsg, sendMediaFile, genAiReply, genVoiceReply, sendVoiceReply, _onVoicePersonaChange,
+  sendMsg, resendFailed, sendMediaFile, _cancelMedia, genAiReply, genVoiceReply, sendVoiceReply, _onVoicePersonaChange,
   toggleVoiceEnroll, submitVoiceEnroll, unbindVoice, submitVoiceRebind,
   loadVoiceReconcile, purgeOrphanVoices, purgeVoice, toggleQrPanel,
   toggleVoiceCfg, toggleXlatePop, _xlateQuickOn, _xlateOff, _openSlash, _focusRightVoice,
@@ -7591,7 +8808,7 @@ Object.assign(window, {
   releaseClaim, takeClaim,
   // 账号切换条 / 账号抽屉 / 连接中心
   setAccountFilter, toggleAccountOnlineOnly, renameAcct,
-  refreshAcct, reconnectAcct, viewAcctChats,
+  refreshAcct, reconnectAcct, viewAcctChats, logoutAcct, removeAcct,
   openConnect, closeConnect, restartConnect,
   chooseMode, backToModeSelect, backToConfig,
   onProxyToggle, onFpToggle, toggleAddProxy, submitAddProxy, previewFingerprint,
@@ -7606,6 +8823,8 @@ Object.assign(window, {
   onTextareaKey, _onReplyInput, _onSearchFocus, toggleFtabMore,
   // 批量勾选 / 删除已存视图 / 加载更早消息 / 群提示关闭
   _toggleBatchItem, _deleteView, loadOlderThread, dismissGroupHint,
+  // P1: 通讯录面板 / 从手机拉取更早历史
+  toggleContactsPanel, loadContactsList, _filterContacts, _contactStartChat, loadFromPhone, syncGroups,
   // 标签输入建议/键控 / 知识库引用 / 清会话偏好引擎
   _showTagSuggestions, _tagInputKey, _quoteKbEntry, _clearConvPrefEngine,
   // 注解 @提及 输入（键控/输入/失焦隐藏）
@@ -7630,6 +8849,11 @@ Object.assign(window, {
     const m = msg.match(/([A-Za-z_$][\w$]*)\s+is not defined/);
     const fn = m ? '（' + m[1] + '）' : '';
     try{ _toast(window.T('inbox.fallback.unavailable') + fn, '#dc2626'); }catch(_){}
+    // 可观测化：beacon 到后端计数（哪页哪函数点崩），只送消毒字段，绝不阻塞
+    try{
+      const body = JSON.stringify({page: location.pathname, fn: (m?m[1]:''), type: (err && err.name) || 'ReferenceError'});
+      navigator.sendBeacon('/api/telemetry/frontend-error', new Blob([body], {type:'application/json'}));
+    }catch(_){}
   });
 })();
 

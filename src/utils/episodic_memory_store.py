@@ -73,6 +73,31 @@ class EpisodicMemoryStore:
             self._conn.commit()
             logger.info("episodic_memory: added column embedding")
 
+    def _ensure_embedding_meta_columns(self) -> None:
+        """记录每条向量的来源模型名与维度（``embedding_model`` / ``embedding_dim``）。
+
+        换 embedding 模型＝换向量空间：历史坑是 nomic(768) 与 bge-m3(1024) 混存，余弦对
+        不等长向量本应判 0，一旦有代码 min() 截断就会算出假相似度。有了模型/维度标注，可
+        精准识别并清理/重嵌异维度旧向量（``... WHERE embedding_dim <> ?``），不再靠 blob
+        字节长度反推。旧行默认空/0＝未知（不影响既有行为）。
+        """
+        cur = self._conn.execute("PRAGMA table_info(episodic_memory)")
+        cols = [str(r[1]) for r in cur.fetchall()]
+        changed = False
+        if "embedding_model" not in cols:
+            self._conn.execute(
+                "ALTER TABLE episodic_memory ADD COLUMN embedding_model TEXT NOT NULL DEFAULT ''"
+            )
+            changed = True
+        if "embedding_dim" not in cols:
+            self._conn.execute(
+                "ALTER TABLE episodic_memory ADD COLUMN embedding_dim INTEGER NOT NULL DEFAULT 0"
+            )
+            changed = True
+        if changed:
+            self._conn.commit()
+            logger.info("episodic_memory: added embedding_model/embedding_dim columns")
+
     def _ensure_consolidation_columns(self) -> None:
         """R3：分层巩固所需列（写入即定权 + 复发计数 + 分层），向后兼容 ALTER。"""
         cur = self._conn.execute("PRAGMA table_info(episodic_memory)")
@@ -119,6 +144,7 @@ class EpisodicMemoryStore:
         self._conn.executescript(self._DDL)
         self._conn.commit()
         self._ensure_embedding_column()
+        self._ensure_embedding_meta_columns()
         self._ensure_consolidation_columns()
         self._ensure_source_column()
 
@@ -134,6 +160,7 @@ class EpisodicMemoryStore:
         category: str = "general",
         embedding_blob: Optional[bytes] = None,
         source: str = "user_stated",
+        embedding_model: str = "",
     ) -> Optional[int]:
         """Insert one fact; returns new row id, or None if duplicate / failed.
 
@@ -152,11 +179,15 @@ class EpisodicMemoryStore:
         now = time.time()
         sal = self._compute_salience(c)
         try:
+            _emb_dim = (len(embedding_blob) // 4) if embedding_blob else 0
+            _emb_model = (embedding_model or "") if embedding_blob else ""
             cur = self._conn.execute(
                 "INSERT INTO episodic_memory (user_id, content, content_hash, category,"
-                " created_at, embedding, salience, tier, hits, last_seen, source)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, 'raw', 1, ?, ?)",
-                (user_id, c, h, (category or "general")[:32], now, embedding_blob, sal, now, src),
+                " created_at, embedding, embedding_model, embedding_dim,"
+                " salience, tier, hits, last_seen, source)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'raw', 1, ?, ?)",
+                (user_id, c, h, (category or "general")[:32], now, embedding_blob,
+                 _emb_model, _emb_dim, sal, now, src),
             )
             self._conn.commit()
             return int(cur.lastrowid) if cur.lastrowid else None
@@ -268,13 +299,17 @@ class EpisodicMemoryStore:
         except Exception:
             return None
 
-    def update_embedding(self, row_id: int, embedding_blob: bytes) -> bool:
+    def update_embedding(
+        self, row_id: int, embedding_blob: bytes, embedding_model: str = ""
+    ) -> bool:
         if not embedding_blob:
             return False
         try:
+            dim = len(embedding_blob) // 4  # float32 → 每维 4 字节
             cur = self._conn.execute(
-                "UPDATE episodic_memory SET embedding = ? WHERE id = ?",
-                (embedding_blob, int(row_id)),
+                "UPDATE episodic_memory SET embedding = ?, embedding_model = ?,"
+                " embedding_dim = ? WHERE id = ?",
+                (embedding_blob, (embedding_model or ""), dim, int(row_id)),
             )
             self._conn.commit()
             return int(cur.rowcount or 0) > 0
@@ -512,6 +547,8 @@ class EpisodicMemoryStore:
                 if items[j]["id"] in used:
                     continue
                 b = items[j]["nvec"]
+                if len(a) != len(b):
+                    continue  # 混维向量（换模型遗留）不可比，跳过避免假聚类误并
                 dot = 0.0
                 for x, y in zip(a, b):
                     dot += x * y
@@ -1003,16 +1040,21 @@ class EpisodicMemoryStore:
         return int(cur.rowcount or 0) > 0
 
     def fetch_rows_missing_embedding(
-        self, limit: int = 20, memory_key_prefix: str = ""
+        self, limit: int = 20, memory_key_prefix: str = "", force: bool = False
     ) -> List[Tuple[int, str, str]]:
-        """Rows (id, memory_key, content) needing vector backfill. Optional filter on user_id."""
+        """Rows (id, memory_key, content) needing vector backfill. Optional filter on user_id.
+
+        ``force=True`` 返回**所有**行（不只缺向量的）——换 embedding 模型后旧向量维度/空间
+        与新模型不兼容，须靠 force 重跑全量重嵌。``cond`` 为内部常量，无 SQL 注入面。
+        """
         limit = max(1, min(int(limit or 20), 200))
         p = (memory_key_prefix or "").strip()
+        cond = "1=1" if force else "(embedding IS NULL OR length(embedding) < 8)"
         if p:
             rows = self._conn.execute(
-                """
+                f"""
                 SELECT id, user_id, content FROM episodic_memory
-                WHERE (embedding IS NULL OR length(embedding) < 8)
+                WHERE {cond}
                   AND user_id LIKE ?
                 ORDER BY created_at DESC
                 LIMIT ?
@@ -1021,9 +1063,9 @@ class EpisodicMemoryStore:
             ).fetchall()
         else:
             rows = self._conn.execute(
-                """
+                f"""
                 SELECT id, user_id, content FROM episodic_memory
-                WHERE embedding IS NULL OR length(embedding) < 8
+                WHERE {cond}
                 ORDER BY created_at DESC
                 LIMIT ?
                 """,

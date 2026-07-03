@@ -235,7 +235,7 @@ def test_episodic_backfill_calls_skill_manager(episodic_app_and_client):
     assert r.json().get("ok") is True
     assert r.json().get("updated") == 2
     sm.episodic_backfill_embeddings.assert_awaited_once_with(
-        8, memory_key_prefix="abc"
+        8, memory_key_prefix="abc", force=False
     )
 
 

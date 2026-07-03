@@ -218,7 +218,7 @@ if (hourlyData.length > 0) {
     data: {
       labels,
       datasets: [{
-        label: window.T('analytics_event_vol','事件量'), data: counts,
+        label: window.T('analytics_event_vol'), data: counts,
         borderColor: '#5b7cf6', backgroundColor: 'rgba(91,124,246,.12)',
         tension: .4, fill: true, pointRadius: 3, borderWidth: 2
       }]
@@ -241,7 +241,7 @@ if (respDist && respDist.count > 0) {
   const rc = new Chart(document.getElementById('resp-chart'), {
     type: 'bar',
     data: {
-      labels: ['P50', 'P90', 'P99', window.T('analytics_avg','平均')],
+      labels: ['P50', 'P90', 'P99', window.T('analytics_avg')],
       datasets: [{
         label: 'ms', data: [respDist.p50, respDist.p90, respDist.p99, respDist.avg],
         backgroundColor: ['rgba(91,124,246,.7)','rgba(139,92,246,.7)','rgba(239,68,68,.7)','rgba(16,185,129,.7)'],
@@ -266,7 +266,7 @@ function updateCd() {
 function togglePause() {
   paused = !paused;
   const b = document.getElementById('pause-btn');
-  b.textContent = paused ? window.T('analytics_resume','继续') : window.T('analytics_pause','暂停');
+  b.textContent = paused ? window.T('analytics_resume') : window.T('analytics_pause');
   b.style.background = paused ? 'var(--rs)' : 'var(--as)';
   b.style.color = paused ? 'var(--red)' : 'var(--amber)';
 }
@@ -290,7 +290,7 @@ async function copilotAsk() {
   const btn = document.getElementById('copilot-btn');
   ansEl.style.display = 'block';
   metaEl.style.display = 'none';
-  ansEl.textContent = window.T('analytics_cp_querying','正在查询…');
+  ansEl.textContent = window.T('analytics_cp_querying');
   btn.disabled = true;
   try {
     const res = await fetch('/api/copilot/query', {
@@ -300,7 +300,7 @@ async function copilotAsk() {
     });
     const d = await res.json();
     if (d.ok) {
-      ansEl.textContent = d.answer || window.T('analytics_cp_no_answer','（无回答）');
+      ansEl.textContent = d.answer || window.T('analytics_cp_no_answer');
       metaEl.style.display = 'block';
       metaEl.textContent = window.Tf('analytics_cp_meta', { src: (d.data_sources||[]).join(', '), ms: d.total_ms });
     } else {

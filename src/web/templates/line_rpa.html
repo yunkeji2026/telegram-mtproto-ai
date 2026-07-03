@@ -712,15 +712,19 @@ async function loadLineRpa(){
 
     const s24=d.stats_24h||{}, s1=d.stats_1h||{};
     document.getElementById('lr-kpi-sent').textContent=s24.sent||0;
-    document.getElementById('lr-kpi-sent-foot').textContent=window.T('ln_js_016')+' '+(s24.total||0)+' '+window.T('ov_js_times_unit');
+    // *-foot 副标签当前未在 markup 中（CSS .kpi-foot 已备，后续可补）。此前这里直接 .textContent=
+    // 对 null 赋值 → 整个 updateKpi 在此抛错、被外层 try/catch 吞掉 → 其后 ok%/avg/1h KPI 静默不更新。
+    // 改 null 安全：元素在就填、不在就跳过，保证后续 KPI 一定更新。补上 markup 后自动生效。
+    const _lrFoot=(id,txt)=>{const el=document.getElementById(id);if(el)el.textContent=txt;};
+    _lrFoot('lr-kpi-sent-foot',window.T('ln_js_016')+' '+(s24.total||0)+' '+window.T('ov_js_times_unit'));
     const okEl=document.getElementById('lr-kpi-ok');
     okEl.textContent=(s24.ok_rate||0)+'%';
     okEl.classList.remove('green','amber','red');
     okEl.classList.add(s24.ok_rate>=95?'green':s24.ok_rate>=70?'amber':'red');
-    document.getElementById('lr-kpi-ok-foot').textContent=(s24.ok||0)+'/'+(s24.total||0);
+    _lrFoot('lr-kpi-ok-foot',(s24.ok||0)+'/'+(s24.total||0));
     document.getElementById('lr-kpi-avg').textContent=Math.round(s24.avg_send_ms||0);
     document.getElementById('lr-kpi-1h').textContent=s1.total||0;
-    document.getElementById('lr-kpi-1h-foot').textContent=(s1.sent||0)+' '+window.T('ln_s003');
+    _lrFoot('lr-kpi-1h-foot',(s1.sent||0)+' '+window.T('ln_s003'));
 
     document.getElementById('lr-tick-hint').textContent=
       window.T('ln_js_017')+': '+((s1.steps||[]).map(s=>s.step+'×'+s.count).slice(0,3).join(' · ')||window.T('msg_js_1232'));

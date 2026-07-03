@@ -102,10 +102,15 @@ body { font-family: "Segoe UI", system-ui, sans-serif; background: #17212b; colo
 /* ── P2 业务右栏（浅色，与后台 /workspace 统一）──────────────────────
    配色对齐后台：面板 #fff · 边框 #e5e7eb · 文字 #111827/#6b7280 · 主色 #3b82f6。 */
 #copilot {
-  width: 320px; flex-shrink: 0; background: #ffffff; border-left: 1px solid #e5e7eb;
-  display: flex; flex-direction: column; transition: width .15s ease;
+  width: 320px; min-width: 280px; max-width: 480px; flex-shrink: 0; background: #ffffff; border-left: 1px solid #e5e7eb;
+  display: flex; flex-direction: column; transition: width .15s ease; position: relative;
 }
-#copilot.collapsed { width: 36px; }
+#copilot.collapsed { width: 36px; min-width: 36px; max-width: 36px; }
+.cp-sidebar-resize {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 5px; cursor: col-resize; z-index: 3; touch-action: none;
+}
+.cp-sidebar-resize:hover, .cp-sidebar-resize.dragging { background: rgba(59, 130, 246, .28); }
+#copilot.collapsed .cp-sidebar-resize { display: none; }
 #copilot.collapsed .cp-body, #copilot.collapsed #cp-title { display: none; }
 /* 保留 cp-hidden 类供特殊场景手动折叠整栏；默认始终显示业务助手 */
 #copilot.cp-hidden { display: none !important; }
@@ -132,20 +137,46 @@ body { font-family: "Segoe UI", system-ui, sans-serif; background: #17212b; colo
 }
 .cp-tab:hover { color: #111827; }
 .cp-tab.active { color: #3b82f6; border-bottom-color: #3b82f6; font-weight: 600; }
+.cp-tab-badge { font-size: 9px; font-weight: 700; padding: 0 5px; border-radius: 999px; background: #ef4444; color: #fff; line-height: 1.55; margin-left: 3px; vertical-align: middle; }
+.cp-tab-badge:empty { display: none; }
+.cp-tab-badge.warn { background: #f59e0b; }
+.cp-tab-badge.accent { background: #6366f1; }
 #copilot.collapsed .cp-tabs { display: none; }
 .cp-body { flex: 1; overflow-y: auto; padding: 10px 12px; }
 .cp-empty { color: #9ca3af; font-size: 12px; text-align: center; padding: 30px 8px; line-height: 1.6; }
-.cp-sec { margin-bottom: 16px; }
-.cp-sec h4 { font-size: 11px; color: #9ca3af; margin-bottom: 6px; text-transform: uppercase; letter-spacing: .04em; font-weight: 700; }
+.cp-sec { margin-bottom: 0; }
 .cp-voice-note { font-size: 11px; color: #9ca3af; margin: 6px 0 0; line-height: 1.4; }
-.cp-card {
+/* 内容盒（AI 分析结果 / 客户档案）：原 .cp-card 语义，改名 .cp-box，让出 .cp-card 给折叠外壳 */
+.cp-box {
   background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 10px;
   font-size: 13px; line-height: 1.5; color: #111827; white-space: pre-wrap; word-break: break-word;
 }
-.cp-card .tag {
+.cp-box .tag {
   display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 10px;
   background: #eff6ff; color: #2563eb; margin: 0 4px 4px 0;
 }
+/* ===== 可折叠卡片（与网页 unified_inbox 同款：卡头图标+标题+状态 pill+chevron） ===== */
+.cp-card { border: 1px solid #e5e7eb; border-radius: 10px; background: #fff; margin-bottom: 10px; overflow: hidden; }
+.cp-card-hd {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 12px;
+  background: #f8fafc; border: 0; cursor: pointer; font: inherit; text-align: left; color: #111827; transition: background .12s;
+}
+.cp-card-hd:hover { background: #eef2f7; }
+.cp-card-ttl {
+  flex: 1; min-width: 0; font-size: 12px; font-weight: 700; color: #111827;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-flex; align-items: center;
+}
+.cp-card-ic { display: inline-flex; align-items: center; vertical-align: middle; margin-right: 5px; color: #6b7280; opacity: .88; flex-shrink: 0; }
+.cp-card-pill { flex-shrink: 0; font-size: 10px; font-weight: 600; color: #3b82f6; background: rgba(59,130,246,.12); border-radius: 999px; padding: 1px 8px; line-height: 1.6; }
+.cp-card-pill:empty { display: none; }
+.cp-card-pill.pill-accent { color: #3b82f6; background: rgba(59,130,246,.12); }
+.cp-card-pill.pill-ok { color: #16a34a; background: rgba(22,163,74,.14); }
+.cp-card-pill.pill-warn { color: #d97706; background: rgba(217,119,6,.16); }
+.cp-card-pill.pill-danger { color: #dc2626; background: rgba(220,38,38,.14); }
+.cp-card-chev { flex-shrink: 0; width: 7px; height: 7px; border-right: 2px solid #9ca3af; border-bottom: 2px solid #9ca3af; transform: rotate(45deg); transition: transform .18s; margin-right: 1px; }
+.cp-card.collapsed .cp-card-chev { transform: rotate(-45deg); }
+.cp-card-bd { padding: 10px 12px; }
+.cp-card.collapsed .cp-card-bd { display: none; }
 .cp-persona-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
 .cp-persona-row label { font-size: 12px; color: #6b7280; flex: 0 0 auto; }
 .cp-persona-row select {
@@ -251,8 +282,8 @@ body { font-family: "Segoe UI", system-ui, sans-serif; background: #17212b; colo
 /* 分析：摘要块 + 语义 chip */
 .cp-summary { margin-bottom: 8px; color: #374151; }
 .cp-chips { display: flex; gap: 5px; flex-wrap: wrap; }
-.cp-card .tag.danger { background: #fee2e2; color: #dc2626; }
-.cp-card .tag.warn { background: #fef3c7; color: #d97706; }
+.cp-box .tag.danger { background: #fee2e2; color: #dc2626; }
+.cp-box .tag.warn { background: #fef3c7; color: #d97706; }
 
 /* 填入/复制成功的轻量 toast */
 #cp-toast {
@@ -274,7 +305,13 @@ body { font-family: "Segoe UI", system-ui, sans-serif; background: #17212b; colo
 .cp-tab { color: #8a9bb0; }
 .cp-tab:hover { color: #e6edf3; }
 #cp-appframe { background: #17212b; }
-.cp-card { background: #222c3a; border-color: #2b3947; color: #e6edf3; }
+.cp-box { background: #222c3a; border-color: #2b3947; color: #e6edf3; }
+.cp-card { background: #222c3a; border-color: #2b3947; }
+.cp-card-hd { background: #1f2836; color: #e6edf3; }
+.cp-card-hd:hover { background: #26313f; }
+.cp-card-ttl { color: #e6edf3; }
+.cp-card-ic { color: #8a9bb0; }
+.cp-card-chev { border-color: #5b6b7d; }
 .cp-persona-row label { color: #8a9bb0; }
 .cp-persona-row select,
 .cp-search input,

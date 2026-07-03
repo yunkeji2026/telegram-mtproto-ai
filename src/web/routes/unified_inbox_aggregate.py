@@ -19,7 +19,7 @@ from fastapi import Request
 
 from src.inbox.channel_adapters import collect_chats_via_adapters, default_inbox_adapters
 from src.inbox.ingest import ingest_collected_chats, ingest_thread
-from src.inbox.normalizer import store_message_to_obj, store_row_to_chat
+from src.inbox.normalizer import name_is_real, store_message_to_obj, store_row_to_chat
 from src.web.routes.unified_inbox_helpers import AUTOMATION_MODES
 from src.web.routes.unified_inbox_services import _automation_store, _inbox_store
 
@@ -190,13 +190,90 @@ def _collect_chats_from_store(
     return out
 
 
+def _apply_store_identity(chat: Dict[str, Any], row: Dict[str, Any]) -> List[str]:
+    """把 store 行的身份列「仅补空 / 仅升级」到 live chat dict（原地修改）。
+
+    返回**本次实际补齐的字段名列表**（``name``/``username``/``phone``/``avatar``，空列表=无变化，
+    供 F5 回读观测按字段计数）：
+    - ``name``：仅当 live 名不是真名（空/裸数字/等于 chat_key）且 store ``display_name`` 是真名时替换；
+    - ``username``/``phone``/``avatar_url``：仅当 live 该字段缺失时补。绝不覆盖 live 已有的真名/值。
+    """
+    upgraded: List[str] = []
+    ck = chat.get("chat_key")
+    disp = str(row.get("display_name") or "").strip()
+    if disp and name_is_real(disp, ck) and not name_is_real(chat.get("name"), ck):
+        chat["name"] = disp
+        upgraded.append("name")
+    for fld in ("username", "phone", "avatar_url"):
+        val = str(row.get(fld) or "").strip()
+        if val and not str(chat.get(fld) or "").strip():
+            chat[fld] = val
+            upgraded.append("avatar" if fld == "avatar_url" else fld)
+    return upgraded
+
+
+# F5：回读补齐观测去重集——同一 conversation_id 每进程只记一次首补（避免轮询/开会话重复计数
+# 把 rows 撑爆），bounded 防内存无界（超上限后新会话不再记，是采样 gauge 而非精确总量）。
+_READBACK_SEEN: set = set()
+_READBACK_SEEN_MAX = 5000
+
+
+def _record_readback(platform: str, cid: str, fields: List[str]) -> None:
+    """记一次「live 行被 store 身份回读补齐」（按 conversation_id 去重 + bounded + best-effort）。"""
+    try:
+        if not cid or not fields or cid in _READBACK_SEEN:
+            return
+        if len(_READBACK_SEEN) >= _READBACK_SEEN_MAX:
+            return  # 超上限：新会话不再记（内存保护），已记的仍去重
+        _READBACK_SEEN.add(cid)
+        from src.web.peer_identity_stats import get_peer_identity_stats
+        get_peer_identity_stats().record_readback(platform, fields)
+    except Exception:
+        logger.debug("[identity] readback 观测记录失败（已忽略）", exc_info=True)
+
+
+def _overlay_store_identity(
+    request: Request, chats: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """F4：给实时聚合的 live 行用 store 已持久的身份列做「仅补空 / 仅升级」富集（原地）。
+
+    背景：``read_from_store=false`` 时列表走实时聚合，多数 RPA 适配器只给 name（甚至裸 id），
+    而 side-effect ingest 早已把 username/phone/avatar_url + 更优 display_name 落进 store
+    ——"库里有、live 没喂出来"。本函数把它们补回 live 行，闭合审计发现的最后一个数据流缺口。
+    身份已齐（有真名 + username + 头像）的行不查库（零 IO）；store 不可用/无匹配 → 原样返回；绝不抛。
+    ``read_from_store=true`` 路径不经此（本就读 store）。
+    """
+    if not chats:
+        return chats
+    store = _inbox_store(request)
+    if store is None:
+        return chats
+    for c in chats:
+        try:
+            if (name_is_real(c.get("name"), c.get("chat_key"))
+                    and str(c.get("username") or "").strip()
+                    and str(c.get("avatar_url") or "").strip()):
+                continue  # 文字身份 + 头像都已具备 → 无需回库
+            cid = str(c.get("conversation_id") or "")
+            if not cid:
+                continue
+            row = store.get_conversation(cid)
+            if row:
+                upgraded = _apply_store_identity(c, row)
+                if upgraded:
+                    _record_readback(str(c.get("platform") or ""), cid, upgraded)
+        except Exception:
+            logger.debug("[identity] live 行 store 身份富集失败（已忽略）", exc_info=True)
+    return chats
+
+
 def _chats_for_listing(request: Request, limit: int = 30) -> List[Dict[str, Any]]:
     """收件箱列表数据源（A1 灰度）：
 
     - 始终先跑实时聚合 `_collect_all_chats`（同时旁路 ingest 进 store，保持 store 新鲜）；
     - flag 开 + store 可用：列表改用 store-backed 视图（跨平台/跨重启持久），
       实时聚合的副作用（ingest）已经发生；
-    - 否则：返回实时聚合结果（原行为，零变化）。
+    - 否则：返回实时聚合结果，并用 store 已持久身份「仅补空」富集（F4，闭合 live 模式身份缺口）。
     """
     live = _collect_all_chats(request, limit=limit)
     if _read_from_store_enabled(request):
@@ -209,7 +286,7 @@ def _chats_for_listing(request: Request, limit: int = 30) -> List[Dict[str, Any]
         stored = _collect_chats_from_store(request, limit=limit, label_map=label_map)
         if stored is not None:
             return stored
-    return live
+    return _overlay_store_identity(request, live)
 
 
 def _thread_messages_from_store(

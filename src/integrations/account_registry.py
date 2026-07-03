@@ -188,6 +188,12 @@ class AccountRegistry:
 
     def remove(self, platform: str, account_id: str) -> None:
         self.set_status(platform, account_id, "removed")
+        # P4：账号移除时顺手回收其自身头像文件，防静态目录膨胀（best-effort，无硬依赖）
+        try:
+            from src.integrations.account_self_profile import cleanup_avatar
+            cleanup_avatar(platform, account_id)
+        except Exception:
+            pass
 
 
 _registry: Optional[AccountRegistry] = None

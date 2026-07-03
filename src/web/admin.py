@@ -2679,6 +2679,7 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
             register_agent_perf_routes,
             register_export_route,
             register_metrics_route,
+            register_telemetry_route,
             register_report_route,
             register_broadcast_route,
             register_leaderboard_route,
@@ -2697,6 +2698,8 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         register_export_route(app, api_auth=_api_auth)
         # L1: metrics API（Prometheus 兼容，主管专属）
         register_metrics_route(app, api_auth=_api_auth)
+        # 前端 dead-click 运行时错误上报（任意登录用户可写；读出并入 metrics）
+        register_telemetry_route(app, api_auth=_api_auth)
         # P59: 术语库管理控制台 API（主管专属）
         register_glossary_route(app, api_auth=_api_auth)
         # M2: report API（工作日报/周报，主管专属）

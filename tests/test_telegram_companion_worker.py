@@ -219,6 +219,29 @@ async def test_worker_send_stop_status(monkeypatch):
         reset_companion_context()
 
 
+async def test_worker_send_returns_real_msg_id(monkeypatch):
+    """P4-4：client 暴露 send_message_return_id 时，worker.send 回带真实 message.id
+    （供已读回执双勾精确绑定）；缺该方法则优雅回落只回 bool、id 为空。"""
+    from src.integrations.telegram_companion_worker import TelegramCompanionWorker
+
+    class _CliWithId:
+        async def send_message_return_id(self, chat_id, text):
+            return True, "9911"
+
+    class _CliLegacy:
+        async def send_message(self, chat_id, text):
+            return True
+
+    w = TelegramCompanionWorker({"account_id": "u1", "meta": {}}, {})
+    w.client = _CliWithId()
+    res = await w.send("12345", "hi")
+    assert res == {"delivered": True, "message_id": "9911"}
+
+    w.client = _CliLegacy()
+    res2 = await w.send("12345", "hi")
+    assert res2 == {"delivered": True, "message_id": ""}
+
+
 # ── A 线 initialize/start 改造 ───────────────────────────────────────────────
 
 async def test_initialize_session_string_skips_phone(monkeypatch):

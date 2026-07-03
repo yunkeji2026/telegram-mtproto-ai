@@ -1,0 +1,20 @@
+{
+  "name": "messenger-web-login-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Messenger 网页模式（隔离浏览器 + 官方 messenger.com）登录微服务 — 为 telegram-mtproto-ai 提供网页扫码/账密登录与多账号收发，功能对齐官方网页版",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "postinstall": "playwright install chromium"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "pino": "^9.0.0",
+    "playwright": "^1.47.0"
+  }
+}

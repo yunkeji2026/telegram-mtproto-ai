@@ -146,3 +146,58 @@ async def test_manual_start_stop_restart(registry):
     assert o._managed[key].state == "stopped"
     assert await o.restart_account(key) is True
     assert o._managed[key].state == "running"
+
+
+class FakeSendWorker(FakeWorker):
+    """带 send 的假 worker：记录收到的 reply_to（P4-5B 引用回复透传测试）。"""
+    def __init__(self, account, config):
+        super().__init__(account, config)
+        self.sent = []
+
+    async def send(self, chat_key, text, *, reply_to=None):
+        self.sent.append({"chat_key": chat_key, "text": text, "reply_to": reply_to})
+        return {"delivered": True, "message_id": "WAMID_REPLY_1"}
+
+
+async def test_send_threads_reply_to_and_writes_source(registry, monkeypatch):
+    """orch.send 携 reply_to → worker 收到 kwarg，且出站回写带 source.reply_to。"""
+    orch._WORKER_FACTORIES.pop("telegram:protocol", None)
+    orch.register_worker("telegram", "protocol",
+                         lambda a, c: FakeSendWorker(a, c))
+    registry.upsert("telegram", "1", mode="protocol", status="online")
+    o = AccountOrchestrator(registry=registry)
+    await o.sync()
+    w = FakeSendWorker.last
+    captured = {}
+    import src.integrations.protocol_bridge as pb
+    monkeypatch.setattr(pb, "emit_incoming", lambda msg: captured.update(msg))
+
+    reply_to = {"id": "WAMID_ORIG", "from_me": False,
+                "text": "原始消息", "sender": "客户"}
+    res = await o.send("telegram", "1", "639111", "引用回复内容",
+                       reply_to=reply_to)
+    assert res.get("delivered") is True
+    # worker 收到了 reply_to kwarg
+    assert w.sent and w.sent[-1]["reply_to"] == reply_to
+    # 出站回写带上 source.reply_to（本端气泡也能渲染引用条）
+    assert captured.get("source", {}).get("reply_to", {}).get("id") == "WAMID_ORIG"
+    assert captured["source"]["reply_to"]["text"] == "原始消息"
+    orch._WORKER_FACTORIES.pop("telegram:protocol", None)
+
+
+async def test_send_without_reply_to_no_source(registry, monkeypatch):
+    """普通发送（无 reply_to）→ 出站回写不带 source（向后兼容）。"""
+    orch._WORKER_FACTORIES.pop("telegram:protocol", None)
+    orch.register_worker("telegram", "protocol",
+                         lambda a, c: FakeSendWorker(a, c))
+    registry.upsert("telegram", "1", mode="protocol", status="online")
+    o = AccountOrchestrator(registry=registry)
+    await o.sync()
+    w = FakeSendWorker.last
+    captured = {}
+    import src.integrations.protocol_bridge as pb
+    monkeypatch.setattr(pb, "emit_incoming", lambda msg: captured.update(msg))
+    await o.send("telegram", "1", "639111", "普通消息")
+    assert w.sent[-1]["reply_to"] is None
+    assert "source" not in captured or not captured.get("source")
+    orch._WORKER_FACTORIES.pop("telegram:protocol", None)

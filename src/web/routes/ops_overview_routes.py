@@ -320,6 +320,29 @@ def register_ops_overview_routes(app, ctx) -> None:
             logger.debug("translation-confidence-trend 读取失败（已忽略）", exc_info=True)
             return {"ok": True, "enabled": False, "days": []}
 
+    @app.get("/api/admin/identity-health-trend")
+    async def api_identity_health_trend(request: Request, days: int = 7):
+        """F1：近 N 天会话身份健康（入站 raw% / 头像 empty%·hit%）按日聚合（供看板 sparkline）。
+
+        未开启趋势落库（inbox.identity.trend_log=false）→ enabled:false + 空序列，前端据此
+        隐藏曲线、仅显示当下快照（D 的瞬时值）。
+        """
+        api_auth(request)
+        try:
+            from src.web.identity_trend_store import get_identity_trend_store
+            store = get_identity_trend_store()
+            if store is None:
+                return {"ok": True, "enabled": False, "days": []}
+            span = int(days or 7)
+            try:
+                store.prune()
+            except Exception:
+                logger.debug("identity_trend prune 失败（已忽略）", exc_info=True)
+            return {"ok": True, "enabled": True, "days": store.daily(days=span)}
+        except Exception:
+            logger.debug("identity-health-trend 读取失败（已忽略）", exc_info=True)
+            return {"ok": True, "enabled": False, "days": []}
+
     @app.get("/api/admin/realtime-voice-trend")
     async def api_realtime_voice_trend(request: Request, days: int = 7):
         """E 线：近 N 天实时语音接通率/健康率按日聚合（供看板 sparkline）。

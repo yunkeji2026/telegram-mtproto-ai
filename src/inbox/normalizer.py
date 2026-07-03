@@ -32,6 +32,22 @@ def conv_id(platform: str, account_id: str, chat_key: str) -> str:
     return f"{platform}:{account_id}:{chat_key}"
 
 
+def name_is_real(name: Any, chat_key: Any) -> bool:
+    """显名是否「真实昵称」——非空、非等于裸 chat_key、非纯数字（Telegram 数字号）。
+
+    跨层一致的「一眼能认出是谁」判定：入站身份分类 / 资料面板就绪度观测（F3）/
+    实时列表 store 身份富集（F4）共用同一口径，避免各处各判、口径漂移。纯函数。
+    """
+    nm = str(name or "").strip()
+    if not nm:
+        return False
+    if nm == str(chat_key or "").strip():
+        return False
+    if nm.isdigit():
+        return False
+    return True
+
+
 # 会话类型归一（私聊 / 群组 / 频道）。用于「群组不进升级告警、改走群组动态」分流。
 # 群/超级群/广播群统一归为 ``group``；频道单列 ``channel``；其余（含未知）回落 ``private``，
 # 因为告警侧对未知保守按私聊处理（宁可多提醒一个私聊，不可漏一个真客户）。
@@ -216,15 +232,25 @@ def normalize_chat(
     unread: Any = 0,
     source: Optional[Dict[str, Any]] = None,
     chat_type: str = "",
+    username: str = "",
+    phone: str = "",
+    avatar_url: str = "",
 ) -> Dict[str, Any]:
     """把一条平台会话归一为统一 chat dict。
 
     ``chat_type`` 留空则按平台/source 自动推断（private/group/channel），
     供下游「群组不进升级告警、改走群组动态」分流。
+
+    ``username`` / ``phone`` / ``avatar_url``：peer 真实身份画像（缺省空，可从
+    ``source`` 兜底）；落库后列表/头部/客户信息面板统一读出，替代「一排数字 id」。
     """
     msg = message_obj(text=last_msg, ts=last_ts, direction="in", source=source)
     ctype = (str(chat_type).strip().lower()
              or infer_chat_type(platform, chat_key, source))
+    src = source if isinstance(source, dict) else {}
+    _username = str(username or src.get("username") or "").lstrip("@")
+    _phone = str(phone or src.get("phone") or "")
+    _avatar = str(avatar_url or src.get("avatar_url") or "")
     return {
         "platform": platform,
         "platform_name": platform_name,
@@ -233,6 +259,9 @@ def normalize_chat(
         "chat_key": chat_key,
         "conversation_id": conv_id(platform, account_id, chat_key),
         "name": name,
+        "username": _username,
+        "phone": _phone,
+        "avatar_url": _avatar,
         "chat_type": ctype,
         "last_msg": last_msg,
         "last_ts": last_ts or 0,
@@ -296,6 +325,11 @@ def store_row_to_chat(
         "chat_key": chat_key,
         "conversation_id": cid,
         "name": str(row.get("display_name") or chat_key),
+        # peer 身份画像（列表/头部/客户信息面板读出，替代裸 chat_key）
+        "username": str(row.get("username") or ""),
+        "phone": str(row.get("phone") or ""),
+        "avatar_url": str(row.get("avatar_url") or ""),
+        "first_seen": row.get("first_seen") or 0,
         "chat_type": str(row.get("chat_type") or "")
         or infer_chat_type(platform, chat_key),
         "last_msg": last_text,
@@ -348,9 +382,40 @@ def store_message_to_obj(row: Dict[str, Any]) -> Dict[str, Any]:
         "ts": row.get("ts") or 0,
         "media_type": str(row.get("media_type") or ""),
         "media_ref": str(row.get("media_ref") or ""),
+        # P4-2 引用回复：被引用消息摘要（缺省空=无引用），供前端渲染引用条
+        "reply_to_id": str(row.get("reply_to_id") or ""),
+        "reply_to_text": str(row.get("reply_to_text") or ""),
+        "reply_to_sender": str(row.get("reply_to_sender") or ""),
+        # P4-3 表情回应：{sender:emoji} 聚合成 [{emoji,count}]（按计数降序），供气泡渲染 chips
+        "reactions": _aggregate_reactions(row.get("reactions_json")),
+        # P4-4 已读回执：出站消息投递状态（''/sent/delivered/read）
+        "status": str(row.get("status") or ""),
+        # P4-6A 编辑/撤回：撤回=气泡置灰「已撤回」；编辑=标「已编辑」
+        "revoked": bool(row.get("revoked") or 0),
+        "edited": bool(row.get("edited") or 0),
         "source": {},
         "from_store": True,
     }
+
+
+def _aggregate_reactions(reactions_json: Any) -> List[Dict[str, Any]]:
+    """把 messages.reactions_json（{sender:emoji}）聚合为 [{emoji,count}]（计数降序）。"""
+    if not reactions_json:
+        return []
+    try:
+        import json as _json
+        d = _json.loads(reactions_json) if isinstance(reactions_json, str) else reactions_json
+    except Exception:
+        return []
+    if not isinstance(d, dict) or not d:
+        return []
+    counts: Dict[str, int] = {}
+    for emoji in d.values():
+        e = str(emoji or "").strip()
+        if e:
+            counts[e] = counts.get(e, 0) + 1
+    return [{"emoji": e, "count": n}
+            for e, n in sorted(counts.items(), key=lambda kv: -kv[1])]
 
 
 def candidate_messages_from_source(source: Dict[str, Any]) -> List[Dict[str, Any]]:

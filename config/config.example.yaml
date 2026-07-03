@@ -1187,6 +1187,9 @@ companion:
   #   - gate 开 + 未拥有 exclusive_album + 免费额度用尽 → 软付费引导（驱动相册解锁）；
   #   - 准入 → provider 出图（人设一致 + 强制 SFW），有受管媒体 worker 则经编排器发出，否则退回文字陪伴。
   # 默认全关；provider.backend=disabled 时即使 enabled 也只走「文字兜底/付费引导」（不接真模型零行为）。
+  # 【两条回复链均已接】① A 线原生客户端 process_message（直发）；② 统一收件箱「全自动 autosend」
+  #   （inbox.l2_autosend：客户要图时在发语音/文本之前先出图经 orch.send_media 发出，成功即跳过语音/文本；
+  #   见 src/inbox/image_autosend.py，指标在 /api/drafts/autosend-status 的 image 段）。两条都受本块开关约束。
   selfie:
     enabled: false
     free_daily: 1              # gate 开时每日免费张数（勾引），超额走 exclusive_album 付费引导；gate 关则不限
@@ -1199,16 +1202,29 @@ companion:
     style: ""                  # 出图风格附加（如 "soft daylight, cozy room, candid"）
     scene_hint: ""             # 场景提示（如 "sitting by the window with a coffee"）
     caption: ""                # 出图配文（空=用内置人设化默认文案）
+    # 【Stage B 对话上下文「按需生图」】对方要"对话里提到的东西"的照片（如"你煮的面拍张照给我看"）：
+    #   从聊天上下文抽主体 → 组生图 prompt(关键词) → text2img 出图发出（物体图，不带人设的脸）。
+    #   仅在接了真出图后端(provider.backend=openai/command)时生效；album 无法凭空生成任意图 → 交普通回复。
+    contextual_images: false             # 总开关（默认关；开需真出图后端）
+    contextual_images_llm_prompt: false  # true=用 LLM 把 prompt 提炼得更准（heuristic 抽主体不稳时），失败回落 heuristic
+    contextual_caption: ""               # 上下文图配文（空=内置默认"拍好啦，给你看～"）
     provider:
       enabled: false
-      backend: disabled        # disabled | openai | command
-      model: gpt-image-1       # openai images 模型（gpt-image-1 默认；亦支持 dall-e-3）
+      backend: disabled        # disabled | album | openai | command
+      # 【backend=album，做「人设照片」推荐】不出图，从预制相册随机挑一张发——同一张脸最一致、
+      #   零 API 费、最像真人。把该人设的照片（.jpg/.png/.webp/.gif）放进 album_dir/；
+      #   多人设可分册：album_dir/<persona_id 或 name>/（命中则优先该子目录，否则用根目录）。
+      #   连发会尽量避开上一张。空相册 → 优雅退回文字陪伴（不报错）。
+      # 【backend=openai/command】album_dir 里的图会兼当 img2img「锁脸基础图」——生成的人设自拍
+      #   以它为参考保持同一张脸（放 1~几张该人设定妆照即可）。上下文物体图不使用基础图。
+      album_dir: config/persona_albums
+      model: gpt-image-1       # 【backend=openai】images 模型（gpt-image-1 默认；亦支持 dall-e-3）
       size: "1024x1024"
       quality: ""              # 可选 gpt-image-1: low|medium|high|auto（空=模型默认）
       api_key: ""              # 必须是真 OpenAI key（gpt-image-1/dall-e 出图；勿用 DeepSeek 等 ai.api_key）
       base_url: ""             # 自建/代理 images 网关时填（兼容 b64 或 url 返回）
       request_timeout_sec: 60  # 单次出图请求超时
-      # 本地推理（ComfyUI/SD 脚本）：占位 {prompt} {out}
+      # 【backend=command】本地推理（ComfyUI/SD 脚本）：占位 {prompt} {out}
       # command_args: [python, tools/sd_infer.py, --prompt, "{prompt}", --out, "{out}"]
       out_dir: tmp_selfies
   story:
@@ -1546,6 +1562,17 @@ inbox:
   #   crit = 红色严重（变红加粗、计入"严重超时"）；首响达标率以 warn 为准。
   sla_warn_sec: 1800                  # 默认 30 分钟
   sla_crit_sec: 7200                  # 默认 2 小时
+
+  # ── F1 会话身份健康「按日趋势落库」（默认关）────────────────────────
+  # PeerIdentityStats 是进程内累计（重启归零，只看当下 raw%/empty% 快照）。开启后
+  # 每次入站身份分类（named/backfilled/raw）与头像端点结局（hit/empty/total）按日增量
+  # upsert 到 config/identity_trend.db，ops 看板经 /api/admin/identity-health-trend 画近 N 天
+  #   • 入站裸 id 率（raw%，WhatsApp/Messenger）  • 头像空率（empty%，WA/Messenger/Telegram）
+  # 7 天 sparkline——回答「补名/抓头像的改动有没有见效」。关闭时旁路写入恒 no-op（零开销）。
+  # 只存日期+计数，绝不记录任何会话内容/id。
+  identity:
+    trend_log: false                  # true = 开启按日趋势落库
+    trend_retention_days: 90          # 旧日聚合保留天数（读端点顺手 prune）
 
   # ── 告警分流：群组/频道不进升级 & SLA 告警 ──────────────────────
   # 群组/频道消息不抢回复时效，若也走升级告警会把真正要抢的私聊客户淹没在噪声里。

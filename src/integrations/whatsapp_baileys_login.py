@@ -106,6 +106,17 @@ def make_provider(config: Dict[str, Any]):
                         meta={"baileys_login_id": login_id})
                 except Exception:  # noqa: BLE001
                     logger.debug("[wa_baileys] 注册表写入失败", exc_info=True)
+                # P4 身份化：Baileys 微服务若在 status 里回传 pushname/name → 富集自身昵称
+                # （前向兼容：字段缺失则 enrich 内部无有效字段直接 no-op；flag 默认关）
+                try:
+                    from src.integrations.account_self_profile import enrich_from_fields
+                    await enrich_from_fields(
+                        "whatsapp", aid,
+                        name=str(res.get("pushname") or res.get("name") or ""),
+                        avatar_url=str(res.get("avatar_url") or res.get("profile_pic_url") or ""),
+                        config=config)
+                except Exception:  # noqa: BLE001
+                    logger.debug("[wa_baileys] self_profile 富集失败（忽略）", exc_info=True)
             return {"status": st, "account_id": aid,
                     "detail": str(res.get("detail") or ""),
                     "qr_image": str(res.get("qr_image") or "")}

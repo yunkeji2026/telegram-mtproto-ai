@@ -187,6 +187,53 @@ def scan_routes_response_cjk() -> dict[str, int]:
     return out
 
 
+# window.T( / window.Tf( 首参手扫器——供「裸键解析」门禁用。
+# 比朴素正则更正确：正确处理跨行调用、字面量里的转义引号（\' \"），并把模板字面量(``)
+# 与拼接键(`'p.'+code`)判为**动态**（运行时才成形，静态无法校验→跳过）。
+# 与门禁 test_template_window_t_keys_resolve 同源：门禁扫「静态键必在译表」，此函数是其唯一取键口径。
+_RE_WINDOW_T_OPEN = re.compile(r"window\.Tf?\(")
+
+
+def iter_window_t_calls(text: str):
+    """产出 ``(key, is_dynamic)``：扫描每个 ``window.T(`` / ``window.Tf(`` 调用的首参。
+
+    - 首参非字符串字面量（变量/表达式）→ 跳过（本就动态，无静态键可校验）。
+    - 首参是 ``'..'`` / ``".."`` 且其后紧跟 ``+``（跨空白/换行）→ ``is_dynamic=True``（拼接前缀键）。
+    - 首参是模板字面量 `` `..` `` → ``is_dynamic=True``（可能内插）。
+    - 其余 → ``is_dynamic=False``（静态键，须在译表存在）。
+    """
+    n = len(text)
+    for m in _RE_WINDOW_T_OPEN.finditer(text):
+        i = m.end()
+        while i < n and text[i] in " \t\r\n":
+            i += 1
+        if i >= n:
+            continue
+        q = text[i]
+        if q not in "'\"`":
+            continue  # 首参非字面量 → 动态，无静态键
+        j = i + 1
+        buf: list[str] = []
+        while j < n:
+            c = text[j]
+            if c == "\\" and j + 1 < n:      # 转义：吞下被转义字符，不当作收尾引号
+                buf.append(text[j + 1]); j += 2; continue
+            if c == q:
+                break
+            buf.append(c); j += 1
+        key = "".join(buf)
+        k = j + 1
+        while k < n and text[k] in " \t\r\n":
+            k += 1
+        nxt = text[k] if k < n else ""
+        yield key, (q == "`" or nxt == "+")
+
+
+def window_t_static_keys(text: str) -> set[str]:
+    """``window.T/Tf`` 调用里的**静态**首参键集合（动态拼接/模板字面量已排除）。"""
+    return {k for k, dyn in iter_window_t_calls(text) if not dyn}
+
+
 def _iter_used_keys(text: str):
     """产出模板里用到的所有 i18n key（data-i18n 锚点 + JS 的 T() 调用）。"""
     for m in _RE_DATA_I18N.finditer(text):

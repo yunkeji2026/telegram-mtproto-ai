@@ -577,6 +577,38 @@ _MIGRATIONS = [
         ts              REAL NOT NULL DEFAULT 0
     )""",
     "CREATE INDEX IF NOT EXISTS idx_ui_event ON ui_event_log(event, source, ts)",
+    # P0（协议接入补全·好友名单）：平台原始通讯录镜像。刻意与 CRM 的 contacts
+    # （已跟进客户档案）分开——此表只是「账号地址簿」的只读镜像，用途：
+    #   (1) 好友名单展示（贴近官方客户端）；(2) 入站/占位会话把裸号码补成通讯录名。
+    # 按 (platform, account_id, chat_key) 唯一；不参与 CRM 跟进/亲密度，避免污染主流程。
+    """CREATE TABLE IF NOT EXISTS protocol_contacts (
+        platform     TEXT NOT NULL,
+        account_id   TEXT NOT NULL,
+        chat_key     TEXT NOT NULL,
+        name         TEXT NOT NULL DEFAULT '',
+        notify_name  TEXT NOT NULL DEFAULT '',
+        updated_at   REAL NOT NULL DEFAULT 0,
+        PRIMARY KEY (platform, account_id, chat_key)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_proto_contacts_acct ON protocol_contacts(platform, account_id)",
+    # P4-2 引用回复：messages 增被引用消息的 id/文本摘要/发言人（纯加法，缺省空=无引用）
+    "ALTER TABLE messages ADD COLUMN reply_to_id TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE messages ADD COLUMN reply_to_text TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE messages ADD COLUMN reply_to_sender TEXT NOT NULL DEFAULT ''",
+    # P4-3 表情回应：messages 上挂 {sender: emoji} JSON（按 sender 键，天然处理改/撤）
+    "ALTER TABLE messages ADD COLUMN reactions_json TEXT NOT NULL DEFAULT '{}'",
+    # P4-4 已读回执：出站消息投递状态（''/sent/delivered/read；仅出站有意义，单调升级）
+    "ALTER TABLE messages ADD COLUMN status TEXT NOT NULL DEFAULT ''",
+    # P4-6A 编辑/撤回：撤回=对端删除给所有人（气泡置灰）；编辑=正文被改（标「已编辑」）
+    "ALTER TABLE messages ADD COLUMN revoked INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE messages ADD COLUMN edited INTEGER NOT NULL DEFAULT 0",
+    # 身份画像（真实昵称/头像/资料面板）：会话上补 peer 身份列，替代「一排数字 id」。
+    # 纯加法、缺省空；ingest 时**空值不覆盖已存非空值**（见 ingest_batch 的 ON CONFLICT），
+    # 使一次采集到的真实昵称/头像稳定留存、不被后续空名冲掉。
+    "ALTER TABLE conversations ADD COLUMN username   TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE conversations ADD COLUMN phone      TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE conversations ADD COLUMN avatar_url TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE conversations ADD COLUMN first_seen REAL NOT NULL DEFAULT 0",
 ]
 
 
@@ -707,10 +739,21 @@ class InboxStore:
                 INSERT INTO conversations
                     (conversation_id, platform, account_id, chat_key, contact_id,
                      display_name, language, chat_type, last_text, last_ts, unread,
+                     username, phone, avatar_url, first_seen,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(conversation_id) DO UPDATE SET
-                    display_name = excluded.display_name,
+                    -- 昵称优先级覆盖：真实昵称（非空且不等于裸 chat_key）随时更新；
+                    -- 但**绝不**用空名/裸号码把已存的真实昵称冲掉——只有当现值本身还是
+                    -- 空/裸号码时才用来兜底。修「采到真名后被后续空名覆盖回数字 id」。
+                    display_name = CASE
+                        WHEN excluded.display_name != ''
+                             AND excluded.display_name != excluded.chat_key
+                            THEN excluded.display_name
+                        WHEN conversations.display_name = ''
+                             OR conversations.display_name = conversations.chat_key
+                            THEN excluded.display_name
+                        ELSE conversations.display_name END,
                     language = CASE WHEN excluded.language != 'unknown'
                                     THEN excluded.language ELSE conversations.language END,
                     chat_type = CASE WHEN excluded.chat_type != 'private'
@@ -721,13 +764,26 @@ class InboxStore:
                     unread = excluded.unread,
                     contact_id = CASE WHEN excluded.contact_id != ''
                                       THEN excluded.contact_id ELSE conversations.contact_id END,
+                    -- 身份画像：仅在带来非空值时更新（空值不覆盖已采集到的真实身份）
+                    username   = CASE WHEN excluded.username   != ''
+                                      THEN excluded.username   ELSE conversations.username END,
+                    phone      = CASE WHEN excluded.phone      != ''
+                                      THEN excluded.phone      ELSE conversations.phone END,
+                    avatar_url = CASE WHEN excluded.avatar_url != ''
+                                      THEN excluded.avatar_url ELSE conversations.avatar_url END,
+                    -- 首次接触：单调保最早（现值>0 则保留，否则用新值兜底）
+                    first_seen = CASE WHEN conversations.first_seen > 0
+                                      THEN conversations.first_seen ELSE excluded.first_seen END,
                     updated_at = excluded.updated_at
                 """,
                 (
                     conv.conversation_id, conv.platform, conv.account_id, conv.chat_key,
                     conv.contact_id, conv.display_name, conv.language,
                     (conv.chat_type or "private"), conv.last_text,
-                    float(conv.last_ts or 0), int(conv.unread or 0), now, now,
+                    float(conv.last_ts or 0), int(conv.unread or 0),
+                    conv.username, conv.phone, conv.avatar_url,
+                    (float(conv.first_seen or 0) or now),
+                    now, now,
                 ),
             )
             self._conn.commit()
@@ -768,10 +824,21 @@ class InboxStore:
                 INSERT INTO conversations
                     (conversation_id, platform, account_id, chat_key, contact_id,
                      display_name, language, chat_type, last_text, last_ts, unread,
+                     username, phone, avatar_url, first_seen,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(conversation_id) DO UPDATE SET
-                    display_name = excluded.display_name,
+                    -- 昵称优先级覆盖：真实昵称（非空且不等于裸 chat_key）随时更新；
+                    -- 但**绝不**用空名/裸号码把已存的真实昵称冲掉——只有当现值本身还是
+                    -- 空/裸号码时才用来兜底。修「采到真名后被后续空名覆盖回数字 id」。
+                    display_name = CASE
+                        WHEN excluded.display_name != ''
+                             AND excluded.display_name != excluded.chat_key
+                            THEN excluded.display_name
+                        WHEN conversations.display_name = ''
+                             OR conversations.display_name = conversations.chat_key
+                            THEN excluded.display_name
+                        ELSE conversations.display_name END,
                     language = CASE WHEN excluded.language != 'unknown'
                                     THEN excluded.language ELSE conversations.language END,
                     chat_type = CASE WHEN excluded.chat_type != 'private'
@@ -782,13 +849,26 @@ class InboxStore:
                     unread = excluded.unread,
                     contact_id = CASE WHEN excluded.contact_id != ''
                                       THEN excluded.contact_id ELSE conversations.contact_id END,
+                    -- 身份画像：仅在带来非空值时更新（空值不覆盖已采集到的真实身份）
+                    username   = CASE WHEN excluded.username   != ''
+                                      THEN excluded.username   ELSE conversations.username END,
+                    phone      = CASE WHEN excluded.phone      != ''
+                                      THEN excluded.phone      ELSE conversations.phone END,
+                    avatar_url = CASE WHEN excluded.avatar_url != ''
+                                      THEN excluded.avatar_url ELSE conversations.avatar_url END,
+                    -- 首次接触：单调保最早（现值>0 则保留，否则用新值兜底）
+                    first_seen = CASE WHEN conversations.first_seen > 0
+                                      THEN conversations.first_seen ELSE excluded.first_seen END,
                     updated_at = excluded.updated_at
                 """,
                 (
                     conv.conversation_id, conv.platform, conv.account_id, conv.chat_key,
                     conv.contact_id, conv.display_name, conv.language,
                     (conv.chat_type or "private"), conv.last_text,
-                    float(conv.last_ts or 0), int(conv.unread or 0), now, now,
+                    float(conv.last_ts or 0), int(conv.unread or 0),
+                    conv.username, conv.phone, conv.avatar_url,
+                    (float(conv.first_seen or 0) or now),
+                    now, now,
                 ),
             )
             for msg in msgs or []:
@@ -831,19 +911,143 @@ class InboxStore:
                     INSERT OR IGNORE INTO messages
                         (message_id, conversation_id, platform_msg_id, direction, text,
                          original_text, translated_text, source_lang, target_lang,
-                         media_type, media_ref, ts, ingested_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         media_type, media_ref, ts, ingested_at,
+                         reply_to_id, reply_to_text, reply_to_sender)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         mid, msg.conversation_id, str(msg.platform_msg_id or ""), msg.direction,
                         msg.text, msg.original_text or msg.text, msg.translated_text,
                         msg.source_lang, msg.target_lang, msg.media_type, msg.media_ref,
                         float(msg.ts or 0), now,
+                        str(msg.reply_to_id or ""), str(msg.reply_to_text or ""),
+                        str(msg.reply_to_sender or ""),
                     ),
                 )
                 inserted += 1 if cur.rowcount > 0 else 0
             self._conn.commit()
         return inserted
+
+    # ── P0：协议通讯录（好友名单）+ 会话列表占位 ──────────────────────────
+
+    def upsert_protocol_contacts(
+        self, platform: str, account_id: str, rows: List[Dict[str, Any]],
+    ) -> int:
+        """批量写入平台通讯录（好友名单）。返回处理条数。
+
+        附带补名：把已存在会话里仍是「裸号码」(display_name 空或 == chat_key) 的
+        display_name 用通讯录名补齐——**不覆盖**已有真名（贴近官方「显示联系人备注名」）。
+        """
+        platform = str(platform or "").lower()
+        account_id = str(account_id or "")
+        if not platform or not account_id or not rows:
+            return 0
+        now = self._now()
+        n = 0
+        with self._lock:
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                ck = str(r.get("jid") or r.get("chat_key") or "").strip()
+                if not ck:
+                    continue
+                name = str(r.get("name") or "").strip()
+                notify = str(r.get("notify") or r.get("notify_name") or "").strip()
+                self._conn.execute(
+                    """INSERT INTO protocol_contacts
+                         (platform, account_id, chat_key, name, notify_name, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(platform, account_id, chat_key) DO UPDATE SET
+                         name = CASE WHEN excluded.name != '' THEN excluded.name
+                                     ELSE protocol_contacts.name END,
+                         notify_name = CASE WHEN excluded.notify_name != ''
+                                            THEN excluded.notify_name
+                                            ELSE protocol_contacts.notify_name END,
+                         updated_at = excluded.updated_at""",
+                    (platform, account_id, ck, name, notify, now),
+                )
+                n += 1
+                disp = name or notify
+                if disp:
+                    cid = f"{platform}:{account_id}:{ck}"
+                    self._conn.execute(
+                        """UPDATE conversations SET display_name=?, updated_at=?
+                             WHERE conversation_id=?
+                               AND (display_name='' OR display_name=chat_key)""",
+                        (disp, now, cid),
+                    )
+            self._conn.commit()
+        return n
+
+    def list_protocol_contacts(
+        self, platform: str, account_id: str, *, limit: int = 1000,
+    ) -> List[Dict[str, Any]]:
+        """读取某账号的通讯录（好友名单）。有名字的排前，便于展示。"""
+        platform = str(platform or "").lower()
+        account_id = str(account_id or "")
+        limit = max(1, min(5000, int(limit or 1000)))
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT chat_key, name, notify_name, updated_at
+                     FROM protocol_contacts
+                    WHERE platform=? AND account_id=?
+                    ORDER BY (name != '') DESC, name, chat_key LIMIT ?""",
+                (platform, account_id, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_protocol_contact_name(
+        self, platform: str, account_id: str, chat_key: str,
+    ) -> str:
+        """按号码反查通讯录名（name 优先、其次 notify_name）；无则空串。"""
+        platform = str(platform or "").lower()
+        account_id = str(account_id or "")
+        chat_key = str(chat_key or "")
+        if not (platform and account_id and chat_key):
+            return ""
+        with self._lock:
+            row = self._conn.execute(
+                """SELECT name, notify_name FROM protocol_contacts
+                    WHERE platform=? AND account_id=? AND chat_key=?""",
+                (platform, account_id, chat_key),
+            ).fetchone()
+        if not row:
+            return ""
+        return str(row["name"] or row["notify_name"] or "")
+
+    def upsert_protocol_chats(
+        self, platform: str, account_id: str, rows: List[Dict[str, Any]],
+    ) -> int:
+        """把平台会话列表建成会话占位（无消息也可见，贴近官方全量会话列表）。
+
+        已存在会话仅在更「新」时更新 last_ts/预览（见 upsert_conversation 的 MAX 语义）；
+        display_name 优先用平台会话名 → 通讯录名 → 裸号码。返回处理条数。
+        """
+        platform = str(platform or "").lower()
+        account_id = str(account_id or "")
+        if not platform or not account_id or not rows:
+            return 0
+        n = 0
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            ck = str(r.get("jid") or r.get("chat_key") or "").strip()
+            if not ck:
+                continue
+            name = (str(r.get("name") or "").strip()
+                    or self.get_protocol_contact_name(platform, account_id, ck)
+                    or ck)
+            # P2：群会话占位 chat_type=group（分流「群组动态」，不刷 SLA）
+            ctype = "group" if bool(r.get("is_group")) else "private"
+            conv = InboxConversation(
+                conversation_id=f"{platform}:{account_id}:{ck}",
+                platform=platform, account_id=account_id, chat_key=ck,
+                display_name=name, last_ts=float(r.get("ts") or 0),
+                unread=int(r.get("unread") or 0), chat_type=ctype,
+            )
+            self.upsert_conversation(conv)
+            n += 1
+        return n
 
     # ── 读取（unified_inbox 路由调用）──────────────────────────
 
@@ -944,6 +1148,58 @@ class InboxStore:
             ).fetchone()
         return dict(row) if row else None
 
+    def update_conversation_identity(
+        self,
+        conversation_id: str,
+        *,
+        display_name: Optional[str] = None,
+        username: Optional[str] = None,
+        phone: Optional[str] = None,
+        avatar_url: Optional[str] = None,
+    ) -> bool:
+        """回填/更新会话 peer 身份（真实昵称 / username / 电话 / 头像 URL）。
+
+        仅更新显式传入（非 None）的字段；``display_name`` 沿用与 ingest 同口径的
+        优先级护栏——真实昵称（非空且不等于裸 chat_key）才落，且不用空/裸号码把已存
+        真名冲掉。供两处复用：头像懒加载落地后回写 ``avatar_url``、peer 身份惰性解析
+        （把「一排数字 id」的历史会话按需补成真实昵称/username）。返回是否更新到行。
+        """
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            return False
+        sets: List[str] = []
+        params: List[Any] = []
+        if display_name is not None and str(display_name).strip():
+            dn = str(display_name).strip()
+            # 只有真实昵称才覆盖；否则仅在现值为空/裸号码时兜底
+            sets.append(
+                "display_name = CASE WHEN ? != chat_key THEN ? "
+                "WHEN display_name = '' OR display_name = chat_key THEN ? "
+                "ELSE display_name END"
+            )
+            params.extend([dn, dn, dn])
+        if username is not None and str(username).strip():
+            sets.append("username = ?")
+            params.append(str(username).strip())
+        if phone is not None and str(phone).strip():
+            sets.append("phone = ?")
+            params.append(str(phone).strip())
+        if avatar_url is not None and str(avatar_url).strip():
+            sets.append("avatar_url = ?")
+            params.append(str(avatar_url).strip())
+        if not sets:
+            return False
+        sets.append("updated_at = ?")
+        params.append(self._now())
+        params.append(cid)
+        with self._lock:
+            cur = self._conn.execute(
+                f"UPDATE conversations SET {', '.join(sets)} WHERE conversation_id = ?",
+                params,
+            )
+            self._conn.commit()
+        return cur.rowcount > 0
+
     def list_conversation_ids_for_contact(self, contact_id: str) -> List[str]:
         """Q 延伸：按 contact_id 反查已归档的 inbox 会话 id（ingest 回写后命中）。"""
         cid = str(contact_id or "").strip()
@@ -1039,6 +1295,169 @@ class InboxStore:
                 (conversation_id, limit),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def get_oldest_message(self, conversation_id: str) -> Optional[Dict[str, Any]]:
+        """P1：取会话最旧一条**带平台消息 id**的消息（作为拉更早历史的锚点）。
+
+        协议号按需回填(fetchMessageHistory)需要 oldest 消息的 (platform_msg_id/wamid,
+        ts, direction)；无带 id 的消息（纯 RPA/占位会话）→ None，调用方据此放弃拉取。
+        """
+        if not conversation_id:
+            return None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT platform_msg_id, ts, direction FROM messages "
+                "WHERE conversation_id = ? AND platform_msg_id != '' "
+                "ORDER BY ts ASC LIMIT 1",
+                (conversation_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def set_reaction(
+        self, conversation_id: str, platform_msg_id: str, sender: str, emoji: str,
+    ) -> bool:
+        """P4-3：给某条消息（按 platform_msg_id 定位）记一个表情回应。
+
+        按 ``sender`` 键存于 messages.reactions_json（{sender: emoji}）——同一人再反应即替换、
+        空 emoji（WhatsApp 撤销反应）即删除，天然幂等。目标消息未落库（更早历史未同步）→
+        返回 False，调用方忽略即可（best-effort，绝不建空消息）。
+        """
+        if not conversation_id or not platform_msg_id:
+            return False
+        sender = str(sender or "me")
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT message_id, reactions_json FROM messages "
+                "WHERE conversation_id = ? AND platform_msg_id = ? LIMIT 1",
+                (conversation_id, str(platform_msg_id)),
+            ).fetchone()
+            if row is None:
+                return False
+            try:
+                d = json.loads(row["reactions_json"] or "{}")
+                if not isinstance(d, dict):
+                    d = {}
+            except Exception:
+                d = {}
+            if emoji:
+                d[sender] = str(emoji)
+            else:
+                d.pop(sender, None)
+            self._conn.execute(
+                "UPDATE messages SET reactions_json = ? WHERE message_id = ?",
+                (json.dumps(d, ensure_ascii=False), row["message_id"]),
+            )
+            self._conn.commit()
+        return True
+
+    _STATUS_RANK = {"": 0, "sent": 1, "delivered": 2, "read": 3}
+
+    def set_message_status(
+        self, conversation_id: str, platform_msg_id: str, status: str,
+    ) -> bool:
+        """P4-4：更新出站消息投递状态（按 platform_msg_id 定位）。
+
+        **单调升级**：只在新状态等级更高时写（read>delivered>sent），防回执乱序把
+        「已读」降回「送达」。目标消息未落库 → False（best-effort，不建空消息）。
+        """
+        status = str(status or "").strip().lower()
+        rank = self._STATUS_RANK.get(status, 0)
+        if not conversation_id or not platform_msg_id or rank <= 0:
+            return False
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT message_id, status FROM messages "
+                "WHERE conversation_id = ? AND platform_msg_id = ? LIMIT 1",
+                (conversation_id, str(platform_msg_id)),
+            ).fetchone()
+            if row is None:
+                return False
+            cur_rank = self._STATUS_RANK.get(str(row["status"] or ""), 0)
+            if rank <= cur_rank:
+                return True  # 已是同级或更高，幂等成功
+            self._conn.execute(
+                "UPDATE messages SET status = ? WHERE message_id = ?",
+                (status, row["message_id"]),
+            )
+            self._conn.commit()
+        return True
+
+    def mark_message_revoked(
+        self, conversation_id: str, platform_msg_id: str,
+    ) -> bool:
+        """P4-6A：把某条消息标为已撤回（对端「删除给所有人」）。
+
+        按 conversation_id + platform_msg_id 定位；目标未落库 → False（不建空消息）。
+        幂等：已撤回再撤回仍返回 True。
+        """
+        if not conversation_id or not platform_msg_id:
+            return False
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT message_id FROM messages "
+                "WHERE conversation_id = ? AND platform_msg_id = ? LIMIT 1",
+                (conversation_id, str(platform_msg_id)),
+            ).fetchone()
+            if row is None:
+                return False
+            self._conn.execute(
+                "UPDATE messages SET revoked = 1 WHERE message_id = ?",
+                (row["message_id"],),
+            )
+            self._conn.commit()
+        return True
+
+    def apply_message_edit(
+        self, conversation_id: str, platform_msg_id: str, new_text: str,
+    ) -> bool:
+        """P4-6A：应用一次消息编辑（正文改写 + 标记 edited=1）。
+
+        按 conversation_id + platform_msg_id 定位；目标未落库 / 新正文为空 → False。
+        译文缓存清空（旧译对应旧原文，避免错配；下次可重译）。
+        """
+        new_text = str(new_text or "")
+        if not conversation_id or not platform_msg_id or not new_text:
+            return False
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT message_id FROM messages "
+                "WHERE conversation_id = ? AND platform_msg_id = ? LIMIT 1",
+                (conversation_id, str(platform_msg_id)),
+            ).fetchone()
+            if row is None:
+                return False
+            self._conn.execute(
+                "UPDATE messages SET text = ?, translated_text = '', edited = 1 "
+                "WHERE message_id = ?",
+                (new_text, row["message_id"]),
+            )
+            self._conn.commit()
+        return True
+
+    def mark_outbound_read_upto(
+        self, conversation_id: str, max_platform_msg_id: int,
+    ) -> int:
+        """P4-4（Telegram）：``UpdateReadHistoryOutbox`` 上报对端已读到 ``max_id`` →
+        把该会话所有**出站**消息中 platform_msg_id（数字）≤ max_id 且尚未 read 的
+        一次性升级为 read。返回实际更新条数（best-effort，非数字 id 自动跳过）。
+        """
+        try:
+            max_id = int(max_platform_msg_id)
+        except (TypeError, ValueError):
+            return 0
+        if not conversation_id or max_id <= 0:
+            return 0
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE messages SET status = 'read' "
+                "WHERE conversation_id = ? AND direction = 'out' "
+                "AND status != 'read' "
+                "AND platform_msg_id GLOB '[0-9]*' "
+                "AND CAST(platform_msg_id AS INTEGER) <= ?",
+                (conversation_id, max_id),
+            )
+            self._conn.commit()
+            return int(cur.rowcount or 0)
 
     def list_recent_messages(
         self,

@@ -86,6 +86,16 @@ def register_platform_login_routes(app, *, api_auth, config_manager=None) -> Non
             _wa_reg(cfg)
         except Exception:
             logger.debug("注册 whatsapp baileys provider 失败", exc_info=True)
+        try:
+            from src.integrations.messenger_web_login import maybe_register as _mg_reg
+            _mg_reg(cfg)
+        except Exception:
+            logger.debug("注册 messenger web provider 失败", exc_info=True)
+        try:
+            from src.integrations.line_protocol_login import maybe_register as _ln_reg
+            _ln_reg(cfg)
+        except Exception:
+            logger.debug("注册 line protocol provider 失败", exc_info=True)
 
     def _persist_login_account(platform: str, account_id: str, sess: Any) -> None:
         """登录成功后把账号 + mode + 代理 + 指纹 + 备注落库，并把代理标记为已分配。"""

@@ -30,6 +30,13 @@ class InboxConversation:
     unread: int = 0
     contact_id: str = ""
     chat_type: str = "private"  # private / group / channel（群组不进升级告警）
+    # 身份画像（真实昵称/头像/资料面板用）：跨平台采集 peer 真实身份，
+    # 落库后列表/头部/客户信息面板统一读出，替代「一排数字 id」。
+    # 均为纯加法可选字段，缺省空——空值绝不覆盖已存的非空值（见 store.ingest_batch）。
+    username: str = ""      # @handle（Telegram username / 平台公开标识）
+    phone: str = ""         # 电话号（若平台可得；展示时脱敏）
+    avatar_url: str = ""    # 已落地头像的可加载 URL（/static/... 或平台代理端点）
+    first_seen: float = 0.0  # 首次接触时间戳（0=未知，入库时取 created_at）
 
 
 @dataclass
@@ -47,6 +54,10 @@ class InboxMessage:
     media_type: str = ""
     media_ref: str = ""
     ts: float = 0.0
+    # P4-2 引用回复：被引用消息的平台 id / 文本摘要 / 发言人（群内），用于气泡上方渲染引用条
+    reply_to_id: str = ""
+    reply_to_text: str = ""
+    reply_to_sender: str = ""
 
 
 @dataclass

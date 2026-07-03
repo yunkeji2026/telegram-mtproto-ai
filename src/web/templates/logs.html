@@ -207,10 +207,10 @@ function togglePause() {
   const btn = document.getElementById('pause-btn');
   const dot = document.getElementById('live-dot');
   const lbl = document.getElementById('live-label');
-  btn.querySelector('span') && (btn.querySelector('span').textContent = paused ? window.T('logs_resume','继续') : window.T('logs_pause','暂停'));
-  btn.lastChild.textContent = ' ' + (paused ? window.T('logs_resume','继续') : window.T('logs_pause','暂停'));
+  btn.querySelector('span') && (btn.querySelector('span').textContent = paused ? window.T('logs_resume') : window.T('logs_pause'));
+  btn.lastChild.textContent = ' ' + (paused ? window.T('logs_resume') : window.T('logs_pause'));
   dot.classList.toggle('paused', paused);
-  lbl.textContent = paused ? window.T('logs_paused','已暂停') : window.T('logs_live','实时流');
+  lbl.textContent = paused ? window.T('logs_paused') : window.T('logs_live');
 }
 
 function clearLogs() {
@@ -245,7 +245,7 @@ function connect() {
   es.onopen = () => {
     _retryDelay = 2000; _retryCount = 0;
     document.getElementById('live-dot').classList.remove('paused');
-    document.getElementById('live-label').textContent = window.T('logs_live','实时流');
+    document.getElementById('live-label').textContent = window.T('logs_live');
   };
   es.onmessage = e => {
     if (e.data === 'ping') return; // heartbeat, ignore

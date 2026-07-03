@@ -110,10 +110,15 @@ def derive_emotion(
     text: Optional[str] = None,
     default: str = "warm",
     persona: Optional[Dict[str, Any]] = None,
+    peer_audio_emotion: Optional[Dict[str, Any]] = None,
 ) -> EmotionSpec:
     """从会话上下文派生情绪。任何脏输入都安全退化。
 
-    优先级：CSAT 极差 → 共情；intent 命中；文本线索；关系阶段微调；最后 ``default``。
+    优先级：CSAT 极差 → **对方声学语气**（听到难过/生气/恐惧就共情/安抚/沉稳回应）
+    → intent 命中 → 文本线索 → 关系阶段微调 → 最后 ``default``。
+
+    ``peer_audio_emotion``：上一条客户语音的音频情绪 dict（见 speech_emotion.map_audio_emotion），
+    让「听到的语气」驱动「说出的语气」——**回应式**而非镜像（对方难过→我们温柔而非跟着难过）。
     """
     # 1) CSAT 极差（强信号）→ 共情安抚，盖过其他
     try:
@@ -123,6 +128,22 @@ def derive_emotion(
         pass
 
     emo: Optional[str] = None
+
+    # 1.5) 对方声学语气（强信号，仅高置信生效）→ 回应式情绪。放在 intent/文本线索之前，
+    # 因为「听到的真实语气」比「文字里的关键词」更贴近对方当下状态。
+    if isinstance(peer_audio_emotion, dict) and peer_audio_emotion.get("confident"):
+        try:
+            from src.ai.speech_emotion import peer_emotion_to_reply
+            _reply_emo = peer_emotion_to_reply(
+                peer_audio_emotion.get("raw_label"),
+                peer_audio_emotion.get("score") or 0.0,
+                min_confidence=0.5,
+            )
+            if _reply_emo in EMOTIONS and _reply_emo != "neutral":
+                _pace = "slow" if _reply_emo in ("empathetic", "calm") else "normal"
+                return EmotionSpec(_reply_emo, intensity=0.78, pace=_pace)
+        except Exception:
+            pass
 
     # 2) intent 子串匹配
     it = str(intent or "").strip().lower()

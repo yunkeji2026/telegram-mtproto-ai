@@ -396,6 +396,7 @@
             `<button class="send" data-act="send-pick">${esc(this.t("cp.draft.fill_send"))}</button>` +
           `</div><div class="guardbox"></div></div>`;
         this._wireContrast(replyText, contrastLang);
+        this._preflightGuardForPill(r);
         return;
       }
       // —— 默认路径(后台/无对比)：保持与原行为一致 ——
@@ -415,6 +416,36 @@
         translated +
         `<div class="guardbox"></div>` +
         `</div>`;
+      this._preflightGuardForPill(r);
+    }
+
+    async _preflightGuardForPill(r) {
+      this._emitDraftLoaded(r, null);
+      const text = (this._reqLang && r && r.translated) ? r.translated : (r && r.reply) || "";
+      if (!text) return;
+      let g = null;
+      try { g = await this._client.guardCheck({ text }); } catch (e) { g = null; }
+      if (g && g.ok) {
+        const box = this.shadowRoot.querySelector(".guardbox");
+        const which = (this._reqLang && r && r.translated) ? "translated" : "reply";
+        if (box) box.innerHTML = this._guardBanner(g, which);
+      }
+      if (g && g.risk) this._emitDraftLoaded(r, g);
+    }
+
+    _emitDraftLoaded(r, guard) {
+      const data = {
+        generated: true,
+        persona: (r && r.persona) || "",
+        intent: (r && r.intent) || "",
+      };
+      if (guard && guard.risk) data.guardRisk = guard.risk;
+      if (guard && guard.block) data.guardBlock = !!guard.block;
+      this.emit("cp-data-loaded", {
+        panelId: this.id || "",
+        ok: true,
+        data,
+      });
     }
   }
 

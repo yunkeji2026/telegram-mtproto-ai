@@ -18,8 +18,12 @@ def test_list_modes_defaults():
     assert tg["web"]["available"] is False
 
     line = {m["mode"]: m for m in pl.list_modes("line")}
-    assert set(line) == {"device"}
-    assert line["device"]["recommended"] is True
+    # M7：LINE 新增 protocol(okline) 方式，默认推荐 protocol；device 仍内置可用
+    assert set(line) == {"protocol", "device"}
+    assert line["protocol"]["recommended"] is True
+    assert line["device"]["available"] is True
+    # 未注册 provider 时 protocol 默认不可用（灰显「未启用」）
+    assert line["protocol"]["available"] is False
 
 
 def test_list_modes_config_override():

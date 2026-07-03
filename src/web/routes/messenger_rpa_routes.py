@@ -39,6 +39,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
+from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +96,7 @@ def _dict_cfg(value: Any) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _save_messenger_cfg(config_manager: Any, mr_cfg: Dict[str, Any]) -> None:
+def _save_messenger_cfg(request, config_manager: Any, mr_cfg: Dict[str, Any]) -> None:
     root = getattr(config_manager, "config", None)
     if not isinstance(root, dict):
         root = {}
@@ -103,7 +104,7 @@ def _save_messenger_cfg(config_manager: Any, mr_cfg: Dict[str, Any]) -> None:
     root["messenger_rpa"] = mr_cfg
     ok = config_manager.save()
     if ok is False:
-        raise HTTPException(500, "保存 messenger_rpa 配置失败")
+        raise HTTPException(500, tr(request, "err.rpa.save_config_failed"))
 
 
 def _refresh_service_runtime(request: Request, mr_cfg: Dict[str, Any]) -> None:
@@ -125,29 +126,29 @@ def _refresh_service_runtime(request: Request, mr_cfg: Dict[str, Any]) -> None:
         logger.debug("messenger_rpa runtime config refresh failed", exc_info=True)
 
 
-def _normalize_profiles(payload: Dict[str, Any]) -> Dict[str, Any]:
+def _normalize_profiles(request, payload: Dict[str, Any]) -> Dict[str, Any]:
     default_id = str(payload.get("default") or "").strip()
     profiles = payload.get("profiles") or []
     if not isinstance(profiles, list):
-        raise HTTPException(400, "profiles 必须是数组")
+        raise HTTPException(400, tr(request, "err.rpa.must_be_array", field="profiles"))
     seen = set()
     clean: List[Dict[str, Any]] = []
     for raw in profiles:
         if not isinstance(raw, dict):
-            raise HTTPException(400, "profile 必须是对象")
+            raise HTTPException(400, tr(request, "err.rpa.must_be_object", field="profile"))
         item = copy.deepcopy(raw)
         pid = str(item.get("id") or item.get("name") or "").strip()
         if not pid:
-            raise HTTPException(400, "profile.id 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="profile.id"))
         if pid in seen:
-            raise HTTPException(400, f"profile.id 重复: {pid}")
+            raise HTTPException(400, tr(request, "err.rpa.profile_id_duplicate", pid=pid))
         seen.add(pid)
         item["id"] = pid
         lang = str(item.get("language") or "auto").strip() or "auto"
         item["language"] = lang
         clean.append(item)
     if default_id and default_id not in seen:
-        raise HTTPException(400, f"default profile 不存在: {default_id}")
+        raise HTTPException(400, tr(request, "err.rpa.default_profile_not_found", default_id=default_id))
     if not default_id and clean:
         default_id = str(clean[0]["id"])
     return {"default": default_id, "profiles": clean}
@@ -1318,7 +1319,7 @@ def register_messenger_rpa_routes(
         except Exception:
             raise HTTPException(400, "invalid json body")
         if not isinstance(body, dict):
-            raise HTTPException(400, "body 必须是对象")
+            raise HTTPException(400, tr(request, "err.rpa.body_must_be_object"))
         allowed = {
             "enabled", "autostart", "reply_mode", "max_inbox_per_run",
             "run_once_target_names", "target_chat_names", "test_target_names",
@@ -1345,12 +1346,12 @@ def register_messenger_rpa_routes(
         }
         bad = [k for k in body.keys() if k not in allowed]
         if bad:
-            raise HTTPException(400, f"不允许的字段: {bad}")
+            raise HTTPException(400, tr(request, "err.rpa.disallowed_fields", bad=bad))
         mr_cfg = copy.deepcopy(_messenger_cfg(config_manager))
         for k, v in body.items():
             if k in dict_merge_keys:
                 if not isinstance(v, dict):
-                    raise HTTPException(400, f"{k} 必须是对象")
+                    raise HTTPException(400, tr(request, "err.rpa.must_be_object", field=k))
                 cur = mr_cfg.get(k) if isinstance(mr_cfg.get(k), dict) else {}
                 merged = copy.deepcopy(cur)
                 for lk, lv in v.items():
@@ -1367,7 +1368,7 @@ def register_messenger_rpa_routes(
                 elif isinstance(v, list):
                     mr_cfg[k] = [str(x).strip() for x in v if str(x or "").strip()]
                 else:
-                    raise HTTPException(400, f"{k} 必须是字符串或数组")
+                    raise HTTPException(400, tr(request, "err.rpa.must_be_str_or_array", field=k))
             elif k == "run_once_start_mode":
                 mode = str(v or "").strip().lower()
                 if mode not in ("smart_current_thread", "force_chats"):
@@ -1378,7 +1379,7 @@ def register_messenger_rpa_routes(
                 mr_cfg[k] = mode
             else:
                 mr_cfg[k] = v
-        _save_messenger_cfg(config_manager, mr_cfg)
+        _save_messenger_cfg(request, config_manager, mr_cfg)
         _refresh_service_runtime(request, mr_cfg)
         return {"ok": True, "updated_keys": list(body.keys())}
 
@@ -1399,14 +1400,14 @@ def register_messenger_rpa_routes(
         except Exception:
             raise HTTPException(400, "invalid json body")
         if not isinstance(body, dict):
-            raise HTTPException(400, "body 必须是对象")
+            raise HTTPException(400, tr(request, "err.rpa.body_must_be_object"))
         rp_body = body.get("reply_profiles", body)
         if not isinstance(rp_body, dict):
-            raise HTTPException(400, "reply_profiles 必须是对象")
-        normalized = _normalize_profiles(rp_body)
+            raise HTTPException(400, tr(request, "err.rpa.must_be_object", field="reply_profiles"))
+        normalized = _normalize_profiles(request, rp_body)
         mr_cfg = copy.deepcopy(_messenger_cfg(config_manager))
         mr_cfg["reply_profiles"] = normalized
-        _save_messenger_cfg(config_manager, mr_cfg)
+        _save_messenger_cfg(request, config_manager, mr_cfg)
         _refresh_service_runtime(request, mr_cfg)
         return {"ok": True, "reply_profiles": normalized}
 
@@ -1458,7 +1459,7 @@ def register_messenger_rpa_routes(
             )
         except Exception as ex:
             logger.exception("strategy runtime query failed")
-            raise HTTPException(500, f"策略运行状态读取失败: {type(ex).__name__}")
+            raise HTTPException(500, tr(request, "err.rpa.strategy_status_read_failed", err=type(ex).__name__))
         for j in jobs:
             try:
                 incoming = (
@@ -1527,16 +1528,16 @@ def register_messenger_rpa_routes(
         api_auth(request)
         store = _get_store(request)
         if store is None:
-            raise HTTPException(503, "messenger_rpa state_store 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="messenger_rpa state_store"))
         try:
             body = await request.json()
         except Exception:
             raise HTTPException(400, "invalid json body")
         if not isinstance(body, dict):
-            raise HTTPException(400, "body 必须是对象")
+            raise HTTPException(400, tr(request, "err.rpa.body_must_be_object"))
         text = str(body.get("text") or "").strip()
         if not text:
-            raise HTTPException(400, "text 不能为空")
+            raise HTTPException(400, tr(request, "err.set.text_required"))
         customer_id = str(
             body.get("customer_id") or body.get("chat_key") or "simulated_customer"
         ).strip()
@@ -1556,7 +1557,7 @@ def register_messenger_rpa_routes(
             )
         except Exception as ex:
             logger.exception("strategy simulate failed")
-            raise HTTPException(500, f"策略模拟失败: {type(ex).__name__}: {ex}")
+            raise HTTPException(500, tr(request, "err.rpa.strategy_sim_failed", err=f"{type(ex).__name__}: {ex}"))
 
     @app.patch("/api/messenger-rpa/strategy/accounts/{account_id}")
     async def api_msgr_strategy_account_update(request: Request, account_id: str):
@@ -1564,13 +1565,13 @@ def register_messenger_rpa_routes(
         api_auth(request)
         store = _get_store(request)
         if store is None:
-            raise HTTPException(503, "messenger_rpa state_store 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="messenger_rpa state_store"))
         try:
             body = await request.json()
         except Exception:
             raise HTTPException(400, "invalid json body")
         if not isinstance(body, dict):
-            raise HTTPException(400, "body 必须是对象")
+            raise HTTPException(400, tr(request, "err.rpa.body_must_be_object"))
         accounts = store.list_strategy_accounts()
         cur = next((a for a in accounts if str(a.get("account_id")) == account_id), None)
         if cur is None:
@@ -1586,7 +1587,7 @@ def register_messenger_rpa_routes(
 
         status = str(body.get("status", cur.get("status") or "active")).strip()
         if status not in {"active", "warming", "limited", "disabled", "blocked"}:
-            raise HTTPException(400, "status 不合法")
+            raise HTTPException(400, tr(request, "err.rpa.invalid_field", field="status"))
         store.upsert_strategy_account(
             account_id=account_id,
             label=str(body.get("label", cur.get("label") or "")),
@@ -1619,16 +1620,16 @@ def register_messenger_rpa_routes(
         except Exception:
             raise HTTPException(400, "invalid json body")
         if not isinstance(body, dict):
-            raise HTTPException(400, "body 必须是对象")
+            raise HTTPException(400, tr(request, "err.rpa.body_must_be_object"))
         action = str(body.get("action") or "create").strip()
         new_id = str(body.get("id") or body.get("persona_id") or "").strip()
         if not new_id:
-            raise HTTPException(400, "id 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="id"))
         mr_cfg = copy.deepcopy(_messenger_cfg(config_manager))
         rp = copy.deepcopy(_dict_cfg(mr_cfg.get("reply_profiles")))
         profiles = rp.get("profiles") if isinstance(rp.get("profiles"), list) else []
         if any(isinstance(p, dict) and str(p.get("id") or "") == new_id for p in profiles):
-            raise HTTPException(400, f"persona 已存在: {new_id}")
+            raise HTTPException(400, tr(request, "err.rpa.persona_exists", new_id=new_id))
         if action == "copy":
             source_id = str(body.get("source_id") or "").strip()
             src = next((p for p in profiles if isinstance(p, dict) and str(p.get("id") or "") == source_id), None)
@@ -1655,10 +1656,10 @@ def register_messenger_rpa_routes(
         rp["profiles"] = profiles
         if not rp.get("default"):
             rp["default"] = new_id
-        normalized = _normalize_profiles(rp)
+        normalized = _normalize_profiles(request, rp)
         before = copy.deepcopy(mr_cfg.get("reply_profiles") or {})
         mr_cfg["reply_profiles"] = normalized
-        _save_messenger_cfg(config_manager, mr_cfg)
+        _save_messenger_cfg(request, config_manager, mr_cfg)
         _refresh_service_runtime(request, mr_cfg)
         store = _get_store(request)
         if store is not None and hasattr(store, "append_strategy_audit"):
@@ -1680,7 +1681,7 @@ def register_messenger_rpa_routes(
         except Exception:
             raise HTTPException(400, "invalid json body")
         if not isinstance(body, dict):
-            raise HTTPException(400, "body 必须是对象")
+            raise HTTPException(400, tr(request, "err.rpa.body_must_be_object"))
         mr_cfg = copy.deepcopy(_messenger_cfg(config_manager))
         rp = copy.deepcopy(_dict_cfg(mr_cfg.get("reply_profiles")))
         profiles = rp.get("profiles") if isinstance(rp.get("profiles"), list) else []
@@ -1725,10 +1726,10 @@ def register_messenger_rpa_routes(
         item["persona"] = persona
         profiles[idx] = item
         rp["profiles"] = profiles
-        normalized = _normalize_profiles(rp)
+        normalized = _normalize_profiles(request, rp)
         before_profiles = copy.deepcopy(mr_cfg.get("reply_profiles") or {})
         mr_cfg["reply_profiles"] = normalized
-        _save_messenger_cfg(config_manager, mr_cfg)
+        _save_messenger_cfg(request, config_manager, mr_cfg)
         _refresh_service_runtime(request, mr_cfg)
         store = _get_store(request)
         if store is not None and hasattr(store, "upsert_persona"):
@@ -1767,7 +1768,7 @@ def register_messenger_rpa_routes(
     ):
         api_auth(request)
         if action not in {"disable", "enable", "delete", "set_default"}:
-            raise HTTPException(400, "action 只能是 disable / enable / delete / set_default")
+            raise HTTPException(400, tr(request, "err.rpa.action_profile_ops"))
         mr_cfg = copy.deepcopy(_messenger_cfg(config_manager))
         rp = copy.deepcopy(_dict_cfg(mr_cfg.get("reply_profiles")))
         profiles = rp.get("profiles") if isinstance(rp.get("profiles"), list) else []
@@ -1784,9 +1785,9 @@ def register_messenger_rpa_routes(
         else:
             profiles[idx]["status"] = "disabled" if action == "disable" else "active"
         rp["profiles"] = profiles
-        normalized = _normalize_profiles(rp) if profiles else {"default": "", "profiles": []}
+        normalized = _normalize_profiles(request, rp) if profiles else {"default": "", "profiles": []}
         mr_cfg["reply_profiles"] = normalized
-        _save_messenger_cfg(config_manager, mr_cfg)
+        _save_messenger_cfg(request, config_manager, mr_cfg)
         _refresh_service_runtime(request, mr_cfg)
         store = _get_store(request)
         if store is not None and hasattr(store, "append_strategy_audit"):
@@ -1806,13 +1807,13 @@ def register_messenger_rpa_routes(
         api_auth(request)
         store = _get_store(request)
         if store is None:
-            raise HTTPException(503, "messenger_rpa state_store 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="messenger_rpa state_store"))
         try:
             body = await request.json()
         except Exception:
             raise HTTPException(400, "invalid json body")
         if not isinstance(body, dict):
-            raise HTTPException(400, "body 必须是对象")
+            raise HTTPException(400, tr(request, "err.rpa.body_must_be_object"))
         cur = store.get_conversation_state(customer_id)
         if not cur:
             raise HTTPException(404, "conversation state not found")
@@ -1859,7 +1860,7 @@ def register_messenger_rpa_routes(
         api_auth(request)
         store = _get_store(request)
         if store is None:
-            raise HTTPException(503, "messenger_rpa state_store 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="messenger_rpa state_store"))
         before_job = (
             store.get_auto_run_job(job_id)
             if hasattr(store, "get_auto_run_job") else {}
@@ -1869,7 +1870,7 @@ def register_messenger_rpa_routes(
         elif action == "cancel":
             ok = store.cancel_auto_run_job(job_id)
         else:
-            raise HTTPException(400, "action 只能是 retry 或 cancel")
+            raise HTTPException(400, tr(request, "err.rpa.action_retry_cancel"))
         if not ok:
             raise HTTPException(404, "job not found")
         if hasattr(store, "append_strategy_audit"):
@@ -1890,7 +1891,7 @@ def register_messenger_rpa_routes(
         api_auth(request)
         store = _get_store(request)
         if store is None or not hasattr(store, "get_strategy_audit"):
-            raise HTTPException(503, "messenger_rpa state_store 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="messenger_rpa state_store"))
         rec = store.get_strategy_audit(int(audit_id))
         if not rec:
             raise HTTPException(404, "audit not found")
@@ -1902,8 +1903,8 @@ def register_messenger_rpa_routes(
             mr_cfg = copy.deepcopy(_messenger_cfg(config_manager))
             if action in {"persona.update", "persona.create", "persona.copy"}:
                 if not isinstance(before.get("profiles"), list):
-                    raise HTTPException(400, "该审计记录缺少可回滚的人设配置")
-                mr_cfg["reply_profiles"] = _normalize_profiles(before)
+                    raise HTTPException(400, tr(request, "err.rpa.audit_no_persona_rollback"))
+                mr_cfg["reply_profiles"] = _normalize_profiles(request, before)
             else:
                 rp = copy.deepcopy(_dict_cfg(mr_cfg.get("reply_profiles")))
                 profiles = rp.get("profiles") if isinstance(rp.get("profiles"), list) else []
@@ -1921,12 +1922,12 @@ def register_messenger_rpa_routes(
                 rp["profiles"] = profiles
                 if not rp.get("default") and profiles:
                     rp["default"] = str((profiles[0] or {}).get("id") or "")
-                mr_cfg["reply_profiles"] = _normalize_profiles(rp) if profiles else {"default": "", "profiles": []}
-            _save_messenger_cfg(config_manager, mr_cfg)
+                mr_cfg["reply_profiles"] = _normalize_profiles(request, rp) if profiles else {"default": "", "profiles": []}
+            _save_messenger_cfg(request, config_manager, mr_cfg)
             _refresh_service_runtime(request, mr_cfg)
         elif target_type == "account":
             if not before:
-                raise HTTPException(400, "该审计记录缺少账号回滚数据")
+                raise HTTPException(400, tr(request, "err.rpa.audit_no_account_rollback"))
             store.upsert_strategy_account(
                 account_id=target_id,
                 label=str(before.get("label") or ""),
@@ -1942,7 +1943,7 @@ def register_messenger_rpa_routes(
             )
         elif target_type == "conversation":
             if not before:
-                raise HTTPException(400, "该审计记录缺少会话回滚数据")
+                raise HTTPException(400, tr(request, "err.rpa.audit_no_chat_rollback"))
             store.update_conversation_state(
                 target_id,
                 chat_key=str(before.get("chat_key") or ""),
@@ -1959,7 +1960,7 @@ def register_messenger_rpa_routes(
             )
         elif target_type == "job":
             if not before:
-                raise HTTPException(400, "该审计记录缺少任务回滚数据")
+                raise HTTPException(400, tr(request, "err.rpa.audit_no_task_rollback"))
             status = str(before.get("status") or "pending")
             if status == "pending":
                 store.retry_auto_run_job(target_id, run_after=float(before.get("run_after") or time.time()))
@@ -1968,9 +1969,9 @@ def register_messenger_rpa_routes(
             elif status == "failed":
                 store.mark_auto_run_job_failed(target_id, before.get("last_error") or "rollback")
             else:
-                raise HTTPException(400, f"暂不支持回滚任务状态: {status}")
+                raise HTTPException(400, tr(request, "err.rpa.rollback_task_status_unsupported", status=status))
         else:
-            raise HTTPException(400, "暂不支持该审计类型回滚")
+            raise HTTPException(400, tr(request, "err.rpa.rollback_audit_type_unsupported"))
         if hasattr(store, "append_strategy_audit"):
             store.append_strategy_audit(
                 action="audit.rollback",
@@ -2002,7 +2003,7 @@ def register_messenger_rpa_routes(
         mr_cfg = _messenger_cfg(config_manager)
         base = _mobile_auto_api_base(mr_cfg)
         if not base:
-            raise HTTPException(503, "mobile_auto.api_base 未配置")
+            raise HTTPException(503, tr(request, "err.rpa.config_missing", name="mobile_auto.api_base"))
         q = urllib.parse.urlencode({
             "mode": str(mode or "grid"),
             "max_h": max(120, min(int(max_h or 360), 900)),
@@ -2042,7 +2043,7 @@ def register_messenger_rpa_routes(
         mr_cfg = _messenger_cfg(config_manager)
         base = _mobile_auto_api_base(mr_cfg)
         if not base:
-            raise HTTPException(503, "mobile_auto.api_base 未配置")
+            raise HTTPException(503, tr(request, "err.rpa.config_missing", name="mobile_auto.api_base"))
         q = urllib.parse.urlencode({
             "mode": str(mode or "grid"),
             "max_h": max(120, min(int(max_h or 360), 900)),
@@ -2084,13 +2085,13 @@ def register_messenger_rpa_routes(
         except Exception:
             body = {}
         if not isinstance(body, dict):
-            raise HTTPException(400, "body 必须是对象")
+            raise HTTPException(400, tr(request, "err.rpa.body_must_be_object"))
         action = str(body.get("action") or "").strip()
         is_cluster = bool(body.get("is_cluster"))
         mr_cfg = _messenger_cfg(config_manager)
         base = _mobile_auto_api_base(mr_cfg)
         if not base:
-            raise HTTPException(503, "mobile_auto.api_base 未配置")
+            raise HTTPException(503, tr(request, "err.rpa.config_missing", name="mobile_auto.api_base"))
 
         quoted = urllib.parse.quote(device_id, safe="")
         def input_path(kind: str) -> str:
@@ -2154,7 +2155,7 @@ def register_messenger_rpa_routes(
             package = str(body.get("package") or "com.facebook.orca").strip()
             allowed_packages = {"com.facebook.orca", "com.facebook.katana"}
             if package not in allowed_packages:
-                raise HTTPException(400, f"不允许打开的 package: {package}")
+                raise HTTPException(400, tr(request, "err.rpa.package_not_allowed", package=package))
             if is_cluster:
                 path = f"/cluster/devices/{quoted}/shell"
                 payload = {
@@ -2167,7 +2168,7 @@ def register_messenger_rpa_routes(
                 path = f"/devices/{quoted}/open-app"
                 payload = {"package": package}
         else:
-            raise HTTPException(400, f"不支持的 mobile-auto 操作: {action}")
+            raise HTTPException(400, tr(request, "err.rpa.mobile_auto_op_unsupported", action=action))
 
         try:
             result = _mobile_auto_post_json(base, path, payload)
@@ -2196,10 +2197,10 @@ def register_messenger_rpa_routes(
         except Exception:
             raise HTTPException(400, "invalid json body")
         if not isinstance(body, dict):
-            raise HTTPException(400, "body 必须是对象")
+            raise HTTPException(400, tr(request, "err.rpa.body_must_be_object"))
         updates = body.get("accounts") or []
         if not isinstance(updates, list):
-            raise HTTPException(400, "accounts 必须是数组")
+            raise HTTPException(400, tr(request, "err.rpa.must_be_array", field="accounts"))
         mr_cfg = copy.deepcopy(_messenger_cfg(config_manager))
         accounts = mr_cfg.get("accounts") or []
         if not isinstance(accounts, list):
@@ -2225,15 +2226,15 @@ def register_messenger_rpa_routes(
                 continue
             aid = str(raw.get("id") or raw.get("account_id") or "").strip()
             if not aid or aid not in by_id:
-                raise HTTPException(400, f"未知 account: {aid}")
+                raise HTTPException(400, tr(request, "err.rpa.unknown_account", account_id=aid))
             item = by_id[aid]
             bad = [k for k in raw.keys() if k not in safe_fields and k not in ("id", "account_id")]
             if bad:
-                raise HTTPException(400, f"不允许的字段: {bad}")
+                raise HTTPException(400, tr(request, "err.rpa.disallowed_fields", bad=bad))
             has_persona_field = "reply_profile_id" in raw or "persona_id" in raw
             persona = str(raw.get("reply_profile_id") or raw.get("persona_id") or "").strip()
             if persona and profile_ids and persona not in profile_ids:
-                raise HTTPException(400, f"reply_profile_id 不存在: {persona}")
+                raise HTTPException(400, tr(request, "err.rpa.reply_profile_not_found", persona=persona))
             for k in safe_fields:
                 if k in raw:
                     item[k] = raw[k]
@@ -2242,7 +2243,7 @@ def register_messenger_rpa_routes(
                 item.pop("persona_id", None)
             changed.append(aid)
         mr_cfg["accounts"] = accounts
-        _save_messenger_cfg(config_manager, mr_cfg)
+        _save_messenger_cfg(request, config_manager, mr_cfg)
         _refresh_service_runtime(request, mr_cfg)
         snap = _mobile_auto_snapshot(config_manager)
         snap["ok"] = True
@@ -2303,7 +2304,7 @@ def register_messenger_rpa_routes(
         except Exception:
             raise HTTPException(400, "invalid json body")
         if not isinstance(body, dict):
-            raise HTTPException(400, "body 必须是对象")
+            raise HTTPException(400, tr(request, "err.rpa.body_must_be_object"))
         allowed = {
             "media_handling_policy", "media_include_links",
             "media_deep_understand", "voice_input", "voice_output",
@@ -2311,12 +2312,12 @@ def register_messenger_rpa_routes(
         }
         bad = [k for k in body.keys() if k not in allowed]
         if bad:
-            raise HTTPException(400, f"不允许的字段: {bad}")
+            raise HTTPException(400, tr(request, "err.rpa.disallowed_fields", bad=bad))
         mr_cfg = copy.deepcopy(_messenger_cfg(config_manager))
         for k, v in body.items():
             if k in ("media_deep_understand", "voice_input", "voice_output", "emoji_policy"):
                 if not isinstance(v, dict):
-                    raise HTTPException(400, f"{k} 必须是对象")
+                    raise HTTPException(400, tr(request, "err.rpa.must_be_object", field=k))
                 cur = mr_cfg.get(k) if isinstance(mr_cfg.get(k), dict) else {}
                 merged = copy.deepcopy(cur)
                 merged.update(v)
@@ -2331,7 +2332,7 @@ def register_messenger_rpa_routes(
                 mr_cfg[k] = merged
             else:
                 mr_cfg[k] = v
-        _save_messenger_cfg(config_manager, mr_cfg)
+        _save_messenger_cfg(request, config_manager, mr_cfg)
         try:
             from src.ai.audio_pipeline import reset_audio_pipeline
             reset_audio_pipeline()
@@ -2355,10 +2356,10 @@ def register_messenger_rpa_routes(
             raise HTTPException(400, "invalid json body")
         path = str((body or {}).get("path") or "").strip()
         if not path:
-            raise HTTPException(400, "path 必填")
+            raise HTTPException(400, tr(request, "err.rpa.field_required", field="path"))
         p = Path(path)
         if not p.exists() or not p.is_file():
-            raise HTTPException(404, "音频文件不存在")
+            raise HTTPException(404, tr(request, "err.rpa.audio_file_not_found"))
         mr_cfg = _messenger_cfg(config_manager)
         vi = _dict_cfg(mr_cfg.get("voice_input"))
         ap_cfg = _dict_cfg(vi.get("audio_pipeline")) or _dict_cfg(
@@ -2376,7 +2377,7 @@ def register_messenger_rpa_routes(
             )
             return {"ok": rv.ok, "result": rv.__dict__}
         except Exception as exc:
-            raise HTTPException(500, f"ASR 测试失败: {type(exc).__name__}: {exc}")
+            raise HTTPException(500, tr(request, "err.rpa.asr_test_failed", err=f"{type(exc).__name__}: {exc}"))
 
     @app.post("/api/messenger-rpa/media/tts-test")
     async def api_msgr_media_tts_test(request: Request):
@@ -2388,9 +2389,9 @@ def register_messenger_rpa_routes(
             raise HTTPException(400, "invalid json body")
         text = str((body or {}).get("text") or "").strip()
         if not text:
-            raise HTTPException(400, "text 必填")
+            raise HTTPException(400, tr(request, "err.rpa.field_required", field="text"))
         if len(text) > 500:
-            raise HTTPException(400, "试听文本最多 500 字")
+            raise HTTPException(400, tr(request, "err.rpa.preview_text_too_long"))
         mr_cfg = _messenger_cfg(config_manager)
         vo_cfg = _dict_cfg(mr_cfg.get("voice_output"))
         vo_cfg["enabled"] = True
@@ -2405,7 +2406,7 @@ def register_messenger_rpa_routes(
             )
             return {"ok": rv.ok, "result": rv.__dict__}
         except Exception as exc:
-            raise HTTPException(500, f"TTS 试听失败: {type(exc).__name__}: {exc}")
+            raise HTTPException(500, tr(request, "err.rpa.tts_preview_failed", err=f"{type(exc).__name__}: {exc}"))
 
     @app.get("/api/messenger-rpa/leads")
     def api_msgr_leads(request: Request, limit: int = 100):
@@ -2413,7 +2414,7 @@ def register_messenger_rpa_routes(
         api_auth(request)
         stores = _iter_account_stores(request, config_manager)
         if not stores:
-            raise HTTPException(503, "state_store 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="state_store"))
         cfg = _messenger_cfg(config_manager)
         reply_profiles = _dict_cfg(cfg.get("reply_profiles"))
         contexts = _load_bot_contexts(
@@ -2543,14 +2544,14 @@ def register_messenger_rpa_routes(
         """Customer handoff dossier for human operators."""
         api_auth(request)
         if not chat_key:
-            raise HTTPException(400, "chat_key 为空")
+            raise HTTPException(400, tr(request, "err.rpa.chat_key_required"))
         cfg = _messenger_cfg(config_manager)
         reply_profiles = _dict_cfg(cfg.get("reply_profiles"))
         bindings = _binding_index(config_manager)
         account_id = _account_id_from_chat_key(chat_key, "")
         store, selected = _store_info_for_chat_key(request, chat_key, config_manager)
         if store is None:
-            raise HTTPException(503, "state_store 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="state_store"))
         st = {}
         if store is not None and hasattr(store, "get_chat_state"):
             st = store.get_chat_state(chat_key) or {}
@@ -2652,13 +2653,13 @@ def register_messenger_rpa_routes(
         """Persist human-operator follow-up state for a lead."""
         api_auth(request)
         if not chat_key:
-            raise HTTPException(400, "chat_key 为空")
+            raise HTTPException(400, tr(request, "err.rpa.chat_key_required"))
         try:
             body = await request.json()
         except Exception:
             raise HTTPException(400, "invalid json body")
         if not isinstance(body, dict):
-            raise HTTPException(400, "body 必须是对象")
+            raise HTTPException(400, tr(request, "err.rpa.body_must_be_object"))
         allowed = {
             "owner",
             "status",
@@ -2671,16 +2672,16 @@ def register_messenger_rpa_routes(
         }
         bad = [k for k in body.keys() if k not in allowed]
         if bad:
-            raise HTTPException(400, f"不允许的字段: {bad}")
+            raise HTTPException(400, tr(request, "err.rpa.disallowed_fields", bad=bad))
         if "status" in body and str(body.get("status") or "") not in _HANDOFF_STATUSES:
-            raise HTTPException(400, "status 不合法")
+            raise HTTPException(400, tr(request, "err.rpa.invalid_field", field="status"))
         if (
             "line_status" in body
             and str(body.get("line_status") or "") not in _LINE_HANDOFF_STATUSES
         ):
-            raise HTTPException(400, "line_status 不合法")
+            raise HTTPException(400, tr(request, "err.rpa.invalid_field", field="line_status"))
         if "priority" in body and str(body.get("priority") or "") not in _HANDOFF_PRIORITIES:
-            raise HTTPException(400, "priority 不合法")
+            raise HTTPException(400, tr(request, "err.rpa.invalid_field", field="priority"))
         next_followup_at = None
         if "next_followup_at" in body:
             raw = body.get("next_followup_at")
@@ -2690,10 +2691,10 @@ def register_messenger_rpa_routes(
                 try:
                     next_followup_at = max(0.0, float(raw))
                 except Exception:
-                    raise HTTPException(400, "next_followup_at 必须是时间戳数字")
+                    raise HTTPException(400, tr(request, "err.rpa.next_followup_timestamp"))
         store, selected = _store_info_for_chat_key(request, chat_key, config_manager)
         if store is None or not hasattr(store, "upsert_handoff"):
-            raise HTTPException(503, "state_store 不支持 handoff")
+            raise HTTPException(503, tr(request, "err.rpa.state_store_no_handoff"))
         account_id = _account_id_from_chat_key(
             chat_key,
             str(selected.get("account_id") or ""),
@@ -2720,7 +2721,7 @@ def register_messenger_rpa_routes(
         api_auth(request)
         store = _get_store(request)
         if store is None:
-            raise HTTPException(503, "state_store 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="state_store"))
         return {"runs": store.recent_runs(limit=int(limit or 50))}
 
     # ── P8-2: 聊天历史分析 ────────────────────────────────
@@ -2788,7 +2789,7 @@ def register_messenger_rpa_routes(
         api_auth(request)
         store = _get_store(request)
         if store is None:
-            raise HTTPException(503, "state_store 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="state_store"))
         norm_status: Optional[str] = (
             None if status in ("", "all", "any") else status
         )
@@ -2808,7 +2809,7 @@ def register_messenger_rpa_routes(
         api_auth(request)
         store = _get_store(request)
         if store is None:
-            raise HTTPException(503, "state_store 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="state_store"))
         item = store.get_approval(int(approval_id))
         if not item:
             raise HTTPException(404, f"approval #{approval_id} not found")
@@ -2822,7 +2823,7 @@ def register_messenger_rpa_routes(
         store = _get_store(request)
         svc = _get_service(request)
         if store is None:
-            raise HTTPException(503, "state_store 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="state_store"))
         body: Dict[str, Any] = {}
         try:
             body = await request.json()
@@ -2872,7 +2873,7 @@ def register_messenger_rpa_routes(
         api_auth(request)
         store = _get_store(request)
         if store is None:
-            raise HTTPException(503, "state_store 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="state_store"))
         body: Dict[str, Any] = {}
         try:
             body = await request.json()
@@ -2880,7 +2881,7 @@ def register_messenger_rpa_routes(
             body = {}
         new_text = str(body.get("reply_text") or "").strip()
         if not new_text:
-            raise HTTPException(400, "reply_text 不能为空")
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="reply_text"))
         ok = store.update_approval_reply(int(approval_id), reply_text=new_text)
         if not ok:
             raise HTTPException(
@@ -2900,12 +2901,12 @@ def register_messenger_rpa_routes(
         api_auth(request)
         store = _get_store(request)
         if store is None:
-            raise HTTPException(503, "state_store 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="state_store"))
         item = store.get_approval(int(approval_id))
         if not item:
             raise HTTPException(404, f"approval #{approval_id} not found")
         if item.get("status") != "pending":
-            raise HTTPException(409, "仅 pending 审批支持 Suggest More")
+            raise HTTPException(409, tr(request, "err.rpa.suggest_more_pending_only"))
 
         # 反向调用 SkillManager：不污染实际 conversation_history
         sm = getattr(request.app.state, "skill_manager", None)
@@ -2914,7 +2915,7 @@ def register_messenger_rpa_routes(
             tg = getattr(request.app.state, "telegram_client", None)
             sm = getattr(tg, "skill_manager", None) if tg else None
         if sm is None:
-            raise HTTPException(503, "SkillManager 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="SkillManager"))
 
         import asyncio
         import uuid as _uuid
@@ -2948,7 +2949,7 @@ def register_messenger_rpa_routes(
                 timeout=45.0,
             )
         except asyncio.TimeoutError:
-            raise HTTPException(504, "Suggest More 超时 (>45s)")
+            raise HTTPException(504, tr(request, "err.rpa.suggest_more_timeout"))
         except Exception as ex:
             logger.exception("Suggest More 异常")
             raise HTTPException(
@@ -2992,14 +2993,14 @@ def register_messenger_rpa_routes(
         store = _get_store(request)
         svc = _get_service(request)
         if store is None:
-            raise HTTPException(503, "state_store 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="state_store"))
         try:
             body = await request.json()
         except Exception:
             body = {}
         action = str(body.get("action") or "").strip().lower()
         if action not in ("approve", "reject"):
-            raise HTTPException(400, "action 必须是 approve 或 reject")
+            raise HTTPException(400, tr(request, "err.rpa.action_approve_or_reject"))
         decided_by = str(body.get("decided_by") or "web") or "web"
         note = str(body.get("note") or "")
         reason = str(body.get("reason") or "manual").strip().lower()
@@ -3045,7 +3046,7 @@ def register_messenger_rpa_routes(
 
         ids = sorted(ids_set)[:100]  # 单次最多 100 条
         if not ids:
-            raise HTTPException(400, "ids 解析结果为空（或过滤后无匹配）")
+            raise HTTPException(400, tr(request, "err.rpa.ids_empty"))
 
         # ★ dry_run：仅返回预览
         if dry_run:
@@ -3470,10 +3471,28 @@ def register_messenger_rpa_routes(
             body += get_voice_synth_stats().dump_prom()
         except Exception:
             pass
+        # ★ 音频情绪识别（SER）用量（total/ok/unavailable/by-emotion）
+        try:
+            from src.ai.speech_emotion_stats import get_speech_emotion_stats
+            body += get_speech_emotion_stats().dump_prom()
+        except Exception:
+            pass
+        # ★ 深度人设用量（巩固/画像/内部梗/经历/未收尾话题/回指）
+        try:
+            from src.companion.deep_persona_stats import get_deep_persona_stats
+            body += get_deep_persona_stats().dump_prom()
+        except Exception:
+            pass
         # ★ P58：附上通用 provider 用量（OCR/ASR 等）
         try:
             from src.ai.provider_stats import all_provider_prom
             body += all_provider_prom()
+        except Exception:
+            pass
+        # ★ P4：附上账号自身资料采集计数（写入/跳过/头像下载·复用/异常）
+        try:
+            from src.integrations.account_self_profile import dump_self_profile_prom
+            body += dump_self_profile_prom()
         except Exception:
             pass
         return PlainTextResponse(
@@ -3490,7 +3509,7 @@ def register_messenger_rpa_routes(
             from src.ai.llm_cost import get_llm_cost
             return get_llm_cost().dump()
         except Exception as ex:
-            raise HTTPException(500, f"llm_cost.dump 失败: {ex}")
+            raise HTTPException(500, tr(request, "err.rpa.op_failed", op="llm_cost.dump", err=ex))
 
     # ── P2-3：A/B persona 指标 ──────────────────────
     @app.get("/api/messenger-rpa/variants/stats")
@@ -3499,7 +3518,7 @@ def register_messenger_rpa_routes(
         api_auth(request)
         store = _get_store(request)
         if store is None:
-            raise HTTPException(503, "state_store 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="state_store"))
         cfg = (config_manager.config or {}).get("messenger_rpa", {}) or {}
         exp = cfg.get("persona_experiment") or {}
         out = store.variant_stats()
@@ -3518,10 +3537,10 @@ def register_messenger_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "service 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="service"))
         reg = getattr(svc, "_account_registry", None)
         if reg is None:
-            raise HTTPException(503, "account_registry 未初始化")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_initialized", dep="account_registry"))
         return reg.stats()
 
     # ── P6-1：按账号精确触发 ─────────────────────────
@@ -3531,15 +3550,15 @@ def register_messenger_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "service 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="service"))
         reg = getattr(svc, "_account_registry", None)
         if reg is None or reg.get(account_id) is None:
-            raise HTTPException(404, f"未知 account: {account_id}")
+            raise HTTPException(404, tr(request, "err.rpa.unknown_account", account_id=account_id))
         try:
             r = await svc.trigger_once(account_id=account_id)
             return {"ok": True, "account_id": account_id, "result": r}
         except Exception as ex:
-            raise HTTPException(500, f"trigger 失败: {ex}")
+            raise HTTPException(500, tr(request, "err.rpa.op_failed", op="trigger", err=ex))
 
     @app.post("/api/messenger-rpa/accounts/{account_id}/send-to")
     async def api_msgr_account_send_to(request: Request, account_id: str):
@@ -3550,10 +3569,10 @@ def register_messenger_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "service 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="service"))
         reg = getattr(svc, "_account_registry", None)
         if reg is None or reg.get(account_id) is None:
-            raise HTTPException(404, f"未知 account: {account_id}")
+            raise HTTPException(404, tr(request, "err.rpa.unknown_account", account_id=account_id))
         body: Dict[str, Any] = {}
         try:
             body = await request.json()
@@ -3581,7 +3600,7 @@ def register_messenger_rpa_routes(
             )
             return {"ok": bool(r.get("ok")), "account_id": account_id, "result": r}
         except Exception as ex:
-            raise HTTPException(500, f"send-to 失败: {ex}")
+            raise HTTPException(500, tr(request, "err.rpa.op_failed", op="send-to", err=ex))
 
     # ── P1-E2：紧急停发（运营舆情应急一键灭火）─────────────
     @app.post("/api/messenger-rpa/accounts/{account_id}/chats/emergency_stop")
@@ -3612,21 +3631,21 @@ def register_messenger_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "service 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="service"))
         reg = getattr(svc, "_account_registry", None)
         if reg is None:
-            raise HTTPException(503, "account_registry 未初始化")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_initialized", dep="account_registry"))
         if reg.get(account_id) is None:
-            raise HTTPException(404, f"未知 account: {account_id}")
+            raise HTTPException(404, tr(request, "err.rpa.unknown_account", account_id=account_id))
         try:
             body = await request.json()
         except Exception:
             body = {}
         if not isinstance(body, dict):
-            raise HTTPException(400, "body 必须是 JSON 对象")
+            raise HTTPException(400, tr(request, "err.rpa.body_must_be_json_object"))
         chat_name = str(body.get("chat_name") or "").strip()
         if not chat_name:
-            raise HTTPException(400, "chat_name 必填")
+            raise HTTPException(400, tr(request, "err.rpa.field_required", field="chat_name"))
         reason = str(body.get("reason") or "emergency_stop").strip()
         try:
             self_skip_sec = float(body.get("self_skip_sec", 1800) or 0)
@@ -3635,7 +3654,7 @@ def register_messenger_rpa_routes(
         try:
             runner = svc._get_or_create_runner(account_id)
         except Exception as ex:
-            raise HTTPException(500, f"runner 初始化失败: {ex}")
+            raise HTTPException(500, tr(request, "err.rpa.runner_init_failed", err=ex))
         chat_key = f"{runner._chat_key_prefix}:{chat_name}"
         try:
             runner._state.add_skipped_chat(
@@ -3689,10 +3708,10 @@ def register_messenger_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "service 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="service"))
         reg = getattr(svc, "_account_registry", None)
         if reg is None or reg.get(account_id) is None:
-            raise HTTPException(404, f"未知 account: {account_id}")
+            raise HTTPException(404, tr(request, "err.rpa.unknown_account", account_id=account_id))
         # body / query 都接受
         chat_name = ""
         try:
@@ -3706,11 +3725,11 @@ def register_messenger_rpa_routes(
                 request.query_params.get("chat_name") or "",
             ).strip()
         if not chat_name:
-            raise HTTPException(400, "chat_name 必填")
+            raise HTTPException(400, tr(request, "err.rpa.field_required", field="chat_name"))
         try:
             runner = svc._get_or_create_runner(account_id)
         except Exception as ex:
-            raise HTTPException(500, f"runner 初始化失败: {ex}")
+            raise HTTPException(500, tr(request, "err.rpa.runner_init_failed", err=ex))
         chat_key = f"{runner._chat_key_prefix}:{chat_name}"
         removed_bl = False
         cleared_ss = False
@@ -3748,14 +3767,14 @@ def register_messenger_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "service 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="service"))
         reg = getattr(svc, "_account_registry", None)
         if reg is None or reg.get(account_id) is None:
-            raise HTTPException(404, f"未知 account: {account_id}")
+            raise HTTPException(404, tr(request, "err.rpa.unknown_account", account_id=account_id))
         try:
             runner = svc._get_or_create_runner(account_id)
         except Exception as ex:
-            raise HTTPException(500, f"runner 初始化失败: {ex}")
+            raise HTTPException(500, tr(request, "err.rpa.runner_init_failed", err=ex))
         try:
             limit = int(request.query_params.get("limit") or 100)
         except (TypeError, ValueError):
@@ -3763,7 +3782,7 @@ def register_messenger_rpa_routes(
         try:
             rows = runner._state.list_skipped_chats(limit=limit)
         except Exception as ex:
-            raise HTTPException(500, f"list_skipped_chats 失败: {ex}")
+            raise HTTPException(500, tr(request, "err.rpa.op_failed", op="list_skipped_chats", err=ex))
         return {
             "ok": True,
             "account_id": account_id,
@@ -3778,7 +3797,7 @@ def register_messenger_rpa_routes(
         api_auth(request)
         store = _get_store(request)
         if store is None:
-            raise HTTPException(503, "state_store 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="state_store"))
         return store.credit_stats()
 
     @app.post("/api/messenger-rpa/credits/{chat_key}/reset")
@@ -3787,7 +3806,7 @@ def register_messenger_rpa_routes(
         api_auth(request)
         store = _get_store(request)
         if store is None:
-            raise HTTPException(503, "state_store 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="state_store"))
         cur = store.get_credit(chat_key)
         delta = 100 - int(cur.get("credit", 100))
         r = store.adjust_credit(chat_key, delta, reason="manual_reset")
@@ -3803,7 +3822,7 @@ def register_messenger_rpa_routes(
             from src.integrations.messenger_rpa.replay import list_replays
             items, base = list_replays(cfg, limit=max(1, min(int(limit), 500)))
         except Exception as ex:
-            raise HTTPException(500, f"list_replays 失败: {ex}")
+            raise HTTPException(500, tr(request, "err.rpa.op_failed", op="list_replays", err=ex))
         return {"base_dir": str(base), "total": len(items), "items": items}
 
     # ── P4-6：Replay Rerun (脱机重跑 LLM) ───────────
@@ -3823,7 +3842,7 @@ def register_messenger_rpa_routes(
             body = {}
         zip_arg = str(body.get("zip") or "").strip()
         if not zip_arg:
-            raise HTTPException(400, "zip 参数必填")
+            raise HTTPException(400, tr(request, "err.rpa.field_required", field="zip"))
         try:
             from src.integrations.messenger_rpa.replay import rerun_from_zip
             result = await rerun_from_zip(
@@ -3864,7 +3883,7 @@ def register_messenger_rpa_routes(
         api_auth(request)
         store = _get_store(request)
         if store is None:
-            raise HTTPException(503, "state_store 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="state_store"))
         body: Dict[str, Any] = {}
         try:
             body = await request.json()
@@ -3908,7 +3927,7 @@ def register_messenger_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "service 未构建")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_built", dep="service"))
         # 若 loop 没跑，先 force_start 再 trigger
         auto_started = False
         if hasattr(svc, "is_running") and not svc.is_running:
@@ -3926,7 +3945,7 @@ def register_messenger_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "service 未构建")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_built", dep="service"))
         body: Dict[str, Any] = {}
         try:
             body = await request.json()
@@ -3944,7 +3963,7 @@ def register_messenger_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "service 未构建")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_built", dep="service"))
         svc.resume()
         return {"ok": True}
 
@@ -3988,9 +4007,9 @@ def register_messenger_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "service 未构建")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_built", dep="service"))
         if not hasattr(svc, "calibrate_now"):
-            raise HTTPException(501, "service.calibrate_now 不可用")
+            raise HTTPException(501, tr(request, "err.rpa.calibrate_not_available"))
         try:
             r = await svc.calibrate_now()
             return {"ok": bool(r.get("ok")), "result": r}
@@ -4013,7 +4032,7 @@ def register_messenger_rpa_routes(
         """
         api_auth(request)
         if not chat_key:
-            raise HTTPException(400, "chat_key 为空")
+            raise HTTPException(400, tr(request, "err.rpa.chat_key_required"))
         # bot.db 位置随 skill_manager
         try:
             import json
@@ -4023,7 +4042,7 @@ def register_messenger_rpa_routes(
             cfg_dir = Path(config_manager.config_path).parent
             db = cfg_dir / "bot.db"
             if not db.exists():
-                raise HTTPException(404, f"bot.db 不存在: {db}")
+                raise HTTPException(404, tr(request, "err.rpa.bot_db_not_found", db=db))
             c = sqlite3.connect(str(db))
             c.row_factory = sqlite3.Row
             row = c.execute(
@@ -4079,7 +4098,7 @@ def register_messenger_rpa_routes(
         cfg = (config_manager.config or {}).get("messenger_rpa", {}) or {}
         serial = (cfg.get("adb_serial") or "").strip()
         if not serial:
-            raise HTTPException(400, "messenger_rpa.adb_serial 未配置")
+            raise HTTPException(400, tr(request, "err.rpa.config_missing", name="messenger_rpa.adb_serial"))
         ime = (
             cfg.get("adb_keyboard_ime")
             or "com.android.adbkeyboard/.AdbIME"
@@ -4110,15 +4129,15 @@ def register_messenger_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "service 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="service"))
         if not hasattr(svc, "accounts_health"):
-            raise HTTPException(501, "accounts_health 不可用")
+            raise HTTPException(501, tr(request, "err.rpa.accounts_health_unavailable"))
         try:
             result = await svc.accounts_health(deep=bool(deep))
             return result
         except Exception as ex:
             logger.exception("accounts_health 异常")
-            raise HTTPException(500, f"health check 失败: {type(ex).__name__}:{ex}")
+            raise HTTPException(500, tr(request, "err.rpa.op_failed", op="health check", err=f"{type(ex).__name__}:{ex}"))
 
     # ── 账号级暂停 ──────────────────────────────────
     @app.post("/api/messenger-rpa/accounts/{account_id}/pause")
@@ -4130,10 +4149,10 @@ def register_messenger_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "service 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="service"))
         reg = getattr(svc, "_account_registry", None)
         if reg is None or reg.get(account_id) is None:
-            raise HTTPException(404, f"未知 account: {account_id}")
+            raise HTTPException(404, tr(request, "err.rpa.unknown_account", account_id=account_id))
         body: Dict[str, Any] = {}
         try:
             body = await request.json()
@@ -4150,10 +4169,10 @@ def register_messenger_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "service 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="service"))
         reg = getattr(svc, "_account_registry", None)
         if reg is None or reg.get(account_id) is None:
-            raise HTTPException(404, f"未知 account: {account_id}")
+            raise HTTPException(404, tr(request, "err.rpa.unknown_account", account_id=account_id))
         svc.resume_account(account_id)
         return {"ok": True, "account_id": account_id}
 
@@ -4166,10 +4185,10 @@ def register_messenger_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "service 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="service"))
         reg = getattr(svc, "_account_registry", None)
         if reg is None or reg.get(account_id) is None:
-            raise HTTPException(404, f"未知 account: {account_id}")
+            raise HTTPException(404, tr(request, "err.rpa.unknown_account", account_id=account_id))
         svc.clear_account_ui_unsafe(account_id)
         return {"ok": True, "account_id": account_id}
 
@@ -4349,7 +4368,7 @@ def register_messenger_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "service 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="service"))
         return svc.coordinator_snapshot()
 
     # ── B2: per-chat persona binding API ──
@@ -4361,7 +4380,7 @@ def register_messenger_rpa_routes(
         api_auth(request)
         store = _get_store(request)
         if store is None:
-            raise HTTPException(503, "state_store 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="state_store"))
         account_id = str(request.query_params.get("account_id") or "").strip()
         try:
             bindings = store.list_chat_persona_overrides(account_id=account_id)
@@ -4378,13 +4397,13 @@ def register_messenger_rpa_routes(
         api_auth(request)
         store = _get_store(request)
         if store is None:
-            raise HTTPException(503, "state_store 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="state_store"))
         try:
             body = await request.json()
         except Exception:
             raise HTTPException(400, "invalid json body")
         if not isinstance(body, dict):
-            raise HTTPException(400, "body 必须是对象")
+            raise HTTPException(400, tr(request, "err.rpa.body_must_be_object"))
         reply_profile_id = str(body.get("reply_profile_id") or "").strip()
         if not reply_profile_id:
             raise HTTPException(400, "reply_profile_id is required")
@@ -4419,7 +4438,7 @@ def register_messenger_rpa_routes(
         api_auth(request)
         store = _get_store(request)
         if store is None:
-            raise HTTPException(503, "state_store 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="state_store"))
         account_id = str(request.query_params.get("account_id") or "").strip()
         try:
             removed = store.remove_chat_persona_override(
@@ -4450,13 +4469,13 @@ def register_messenger_rpa_routes(
         api_auth(request)
         store = _get_store(request)
         if store is None:
-            raise HTTPException(503, "state_store 未注入")
+            raise HTTPException(503, tr(request, "err.rpa.dep_not_injected", dep="state_store"))
         try:
             body = await request.json()
         except Exception:
             raise HTTPException(400, "invalid json body")
         if not isinstance(body, dict):
-            raise HTTPException(400, "body 必须是对象")
+            raise HTTPException(400, tr(request, "err.rpa.body_must_be_object"))
         bindings = body.get("bindings")
         if not bindings and body.get("chat_names"):
             # 快捷模式：所有 chat 用同一 profile_id
@@ -4467,7 +4486,7 @@ def register_messenger_rpa_routes(
                 raise HTTPException(400, "reply_profile_id is required in shortcut mode")
             chat_names = body.get("chat_names") or []
             if not isinstance(chat_names, list):
-                raise HTTPException(400, "chat_names 必须是数组")
+                raise HTTPException(400, tr(request, "err.rpa.must_be_array", field="chat_names"))
             bindings = [
                 {
                     "chat_name": str(n).strip(),
@@ -4478,7 +4497,7 @@ def register_messenger_rpa_routes(
                 for n in chat_names if str(n).strip()
             ]
         if not isinstance(bindings, list):
-            raise HTTPException(400, "bindings 必须是数组")
+            raise HTTPException(400, tr(request, "err.rpa.must_be_array", field="bindings"))
         try:
             n = store.batch_upsert_chat_persona_overrides(
                 bindings, bound_by="web_admin",
@@ -4515,7 +4534,7 @@ def register_messenger_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "Messenger RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="Messenger"))
         try:
             body = await request.json()
         except Exception:
@@ -4524,9 +4543,9 @@ def register_messenger_rpa_routes(
         peer_name = (body.get("peer_name") or "").strip()
         text = (body.get("text") or "").strip()
         if not chat_key:
-            raise HTTPException(400, "chat_key 必填")
+            raise HTTPException(400, tr(request, "err.rpa.chat_key_required"))
         if not text:
-            raise HTTPException(400, "text 不能为空")
+            raise HTTPException(400, tr(request, "err.set.text_required"))
         try:
             actor = request.session.get("username", "web_admin")
         except Exception:
@@ -4548,12 +4567,12 @@ def register_messenger_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "Messenger RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="Messenger"))
         try:
             limit = int(request.query_params.get("limit", 30))
             include_done = request.query_params.get("include_done", "0") not in ("0", "false", "")
         except ValueError:
-            raise HTTPException(400, "limit 必须为整数")
+            raise HTTPException(400, tr(request, "err.rpa.limit_must_be_int"))
         items = svc.list_send_queue(limit=limit, include_done=include_done)
         return {"items": items, "count": len(items)}
 
@@ -4563,10 +4582,10 @@ def register_messenger_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "Messenger RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="Messenger"))
         item = svc.get_send_queue_item(item_id)
         if item is None:
-            raise HTTPException(404, f"send_queue item {item_id} 不存在")
+            raise HTTPException(404, tr(request, "err.rpa.queue_item_not_found", item_id=item_id))
         return item
 
     @app.post("/api/messenger-rpa/send-queue/{item_id}/cancel")
@@ -4575,10 +4594,10 @@ def register_messenger_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "Messenger RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="Messenger"))
         ok = svc.cancel_send_queue_item(item_id)
         if not ok:
-            raise HTTPException(409, f"item {item_id} 不可取消（不存在或已非 queued 状态）")
+            raise HTTPException(409, tr(request, "err.rpa.queue_item_not_cancelable", item_id=item_id))
         try:
             actor = request.session.get("username", "web_admin")
         except Exception:
@@ -4600,7 +4619,7 @@ def register_messenger_rpa_routes(
         api_auth(request)
         svc = _get_service(request)
         if svc is None:
-            raise HTTPException(503, "Messenger RPA 服务未启动")
+            raise HTTPException(503, tr(request, "err.rpa.service_not_started", platform="Messenger"))
         try:
             body = await request.json()
         except Exception:
@@ -4616,12 +4635,12 @@ def register_messenger_rpa_routes(
             "hi", "it", "pt", "nl", "pl", "tr", "cs", "hu",
         }
         if lang and lang not in _VALID_LANGS:
-            raise HTTPException(400, f"不支持的语言代码: {lang}。支持: {sorted(_VALID_LANGS)}")
+            raise HTTPException(400, tr(request, "err.rpa.lang_unsupported", lang=lang, langs=sorted(_VALID_LANGS)))
 
         try:
             svc.state_store.set_forced_lang(chat_key, lang or None)
         except Exception as e:
-            raise HTTPException(500, f"写入失败: {e}")
+            raise HTTPException(500, tr(request, "err.rpa.write_failed", err=e))
 
         # P7-B / P8-C: 立即同步 _context_store
         # 锁定时：写入新 lang；解除时：清空 reply_lang，下次消息循环重新检测

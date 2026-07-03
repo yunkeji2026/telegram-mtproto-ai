@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import re
 import shlex
 import subprocess
 import threading
@@ -22,6 +23,40 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+
+# emoji / 图形符号（合成前剔除——克隆 TTS(如 IndexTTS2) 遇 emoji 可能停读/截断，且 emoji
+# 本就不该被朗读）。覆盖主要 emoji 平面 + 杂项符号 + 区域指示符 + 变体选择符。
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F300-\U0001FAFF"
+    "\U00002600-\U000027BF"
+    "\U0001F000-\U0001F0FF"
+    "\U0001F1E6-\U0001F1FF"
+    "\U0000FE00-\U0000FE0F"
+    "\U00002B00-\U00002BFF"
+    "\U00002190-\U000021FF"
+    "]+",
+    flags=re.UNICODE,
+)
+
+
+def clean_text_for_tts(text: str) -> str:
+    """合成前文本清洗：剔除 emoji + 把换行/多空白合并为单个停顿。
+
+    根治「语音念到一半就断」：多行回复(含 emoji/换行，如 "煮面🍜\\n\\n你呢?")送到
+    IndexTTS2 时，模型常在换行或 emoji 处停止，产出**不完整音频**。这里统一把换行折成
+    「，」自然停顿、剔除 emoji，让整段连续合成到底。纯函数、防御式（空/异常回落原文）。
+    """
+    try:
+        t = _EMOJI_RE.sub("", str(text or ""))
+        t = re.sub(r"[ \t]*\r?\n[ \t]*", "，", t)  # 换行 → 逗号停顿（不再被当作结束）
+        t = re.sub(r"[ \t]{2,}", " ", t)
+        t = re.sub(r"[，,]{2,}", "，", t)
+        t = re.sub(r"\s+([，。！？,.!?])", r"\1", t)
+        return t.strip().strip("，,").strip()
+    except Exception:
+        return str(text or "").strip()
 
 
 # ── 不可达主机短路缓存 ───────────────────────────────────────────────────────
@@ -287,7 +322,10 @@ class TTSPipeline:
         """
         from src.ai.voice_emotion import NEUTRAL, coerce_emotion, derive_emotion
 
-        text_s = str(text or "")
+        # 合成前清洗：剔除 emoji + 换行折成停顿，防克隆 TTS 在换行/emoji 处截断音频
+        # （「语音念一半就断」的根因）。清洗后为空则回落原文，绝不把空文本送合成。
+        _cleaned = clean_text_for_tts(text)
+        text_s = _cleaned if _cleaned else str(text or "")
         if emotion is not None:
             spec = coerce_emotion(emotion)
         elif self.emotion_enabled:

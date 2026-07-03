@@ -515,11 +515,12 @@ rpa.analytics = {
           };
           results.innerHTML = '<div class="rpa-search-results">' + rs.map(function(r){
             const ck = r.chat_key || '';
-            const ckEsc = ck.replace(/'/g,"\\'");
             const intentTag = (r.intent_tag && r.intent_tag !== 'general')
               ? ' <span style="font-size:.65rem;padding:1px 6px;border-radius:6px;background:rgba(99,102,241,.15);color:#a5b4fc">'+rpa.esc(r.intent_tag)+'</span>'
               : '';
-            const click = onPick ? ('onclick="(window.__rpaPick_'+opts.inputId+')(\''+ckEsc+'\')" style="cursor:pointer"') : '';
+            // 用 data 属性 + 事件委托（见 init 处），不再拼 inline onclick 调
+            // window.__rpaPick_<inputId>——inputId 含连字符时 dot 访问会被解析成减法
+            const click = onPick ? ('data-rpa-ck="'+rpa.esc(ck)+'" style="cursor:pointer"') : '';
             return '<div class="rpa-search-row" '+click+'>'
               + '<div style="font-size:.7rem;color:var(--t3,#94a3b8);margin-bottom:.15rem">'
               +   rpa.esc(ck) + ' · ' + rpa.ago(r.ts) + intentTag
@@ -535,7 +536,14 @@ rpa.analytics = {
           if(btn){ btn.addEventListener('click', doSearch); }
         });
     };
-    if(onPick){ window['__rpaPick_'+opts.inputId] = onPick; }
+    if(onPick){
+      // 事件委托：结果容器常驻，一次绑定处理所有动态行；比「按 inputId 拼全局
+      // 函数名 + inline onclick dot 访问」健壮（连字符 inputId 不再被当减法）
+      results.addEventListener('click', function(e){
+        const row = e.target.closest('.rpa-search-row[data-rpa-ck]');
+        if(row){ onPick(row.getAttribute('data-rpa-ck')); }
+      });
+    }
     inp.addEventListener('input', function(){
       clearTimeout(timer); timer = setTimeout(doSearch, 380);
     });
@@ -918,6 +926,11 @@ rpa.renderHero = function(spec){
     const m = msg.match(/([A-Za-z_$][\w$]*)\s+is not defined/);
     const fn = m ? '（' + m[1] + '）' : '';
     try{ rpa.toast(window.T('inbox.fallback.unavailable') + fn, 'err'); }catch(_){}
+    // 可观测化：beacon 到后端计数（哪页哪函数点崩），只送消毒字段，绝不阻塞
+    try{
+      const body = JSON.stringify({page: location.pathname, fn: (m?m[1]:''), type: (err && err.name) || 'ReferenceError'});
+      navigator.sendBeacon('/api/telemetry/frontend-error', new Blob([body], {type:'application/json'}));
+    }catch(_){}
   });
 })();
 

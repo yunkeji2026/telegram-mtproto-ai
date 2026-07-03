@@ -73,8 +73,8 @@ async function loadCases() {
     if (!cases.length) {
       var _sm=document.documentElement.getAttribute('data-ui-mode')==='simple';
       el.innerHTML = _sm
-        ? '<div class="empty" style="padding:3rem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48" style="opacity:.3;margin-bottom:.5rem"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><p style="font-size:.95rem;font-weight:600;color:var(--green)">' + window.T('cases_empty_title','当前没有待处理的案例') + '</p><p style="font-size:.82rem;color:var(--t3);margin-top:.3rem">' + window.T('cases_empty_hint','系统每 30 秒自动检查新案例，也可以点击「刷新」手动检查') + '</p></div>'
-        : '<div class="empty" style="padding:3rem"><p>' + window.T('cases_empty_full','暂无活跃 Case') + '</p></div>';
+        ? '<div class="empty" style="padding:3rem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48" style="opacity:.3;margin-bottom:.5rem"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><p style="font-size:.95rem;font-weight:600;color:var(--green)">' + window.T('cases_empty_title') + '</p><p style="font-size:.82rem;color:var(--t3);margin-top:.3rem">' + window.T('cases_empty_hint') + '</p></div>'
+        : '<div class="empty" style="padding:3rem"><p>' + window.T('cases_empty_full') + '</p></div>';
       return;
     }
 
@@ -84,9 +84,9 @@ async function loadCases() {
       const satW = Math.max(5, Math.min(100, c.satisfaction));
       const chain = (c.intent_chain || []).map(i => '<span class="chain-step">' + i + '</span>').join('<span class="chain-arrow">→</span>');
       const badges = [
-        c.at_risk ? '<span class="badge badge-risk">⚠ ' + window.T('cases_risk','高风险') + '</span>' : '',
-        c.escalation ? '<span class="badge badge-esc">' + window.T('cases_escalated','已升级') + '</span>' : '',
-        c.closed ? '<span class="badge badge-closed">' + window.T('cases_closed','已结案') + '</span>' : '',
+        c.at_risk ? '<span class="badge badge-risk">⚠ ' + window.T('cases_risk') + '</span>' : '',
+        c.escalation ? '<span class="badge badge-esc">' + window.T('cases_escalated') + '</span>' : '',
+        c.closed ? '<span class="badge badge-closed">' + window.T('cases_closed') + '</span>' : '',
         c.pattern ? '<span class="badge badge-pattern">' + c.pattern_desc + '</span>' : '',
       ].filter(Boolean).join(' ');
       const ts = c.last_active ? window.wsFmtDateTime(c.last_active) : '-';
@@ -96,29 +96,29 @@ async function loadCases() {
         + '<span style="margin-left:auto;font-size:.72rem;color:var(--t3)">' + ts + '</span>'
         + '</div>'
         + '<div style="font-size:.78rem;color:var(--t2)">'
-        + '<span data-help="satisfaction">' + window.T('cases_satisfaction','满意度') + '</span>: <strong style="color:' + satColor + '">' + c.satisfaction + '</strong>/100'
+        + '<span data-help="satisfaction">' + window.T('cases_satisfaction') + '</span>: <strong style="color:' + satColor + '">' + c.satisfaction + '</strong>/100'
         + '<span class="sat-bar"><span class="sat-fill" style="width:' + satW + '%;background:' + satColor + '"></span></span>'
-        + ' · ' + window.T('cases_consecutive','连续追问') + ': ' + c.consecutive_same
-        + ' · ' + window.T('cases_user','用户') + ': ' + (c.user_id || '-').slice(-8)
-        + (c.chat_title ? ' · ' + window.T('cases_group','群') + ': ' + c.chat_title : '')
+        + ' · ' + window.T('cases_consecutive') + ': ' + c.consecutive_same
+        + ' · ' + window.T('cases_user') + ': ' + (c.user_id || '-').slice(-8)
+        + (c.chat_title ? ' · ' + window.T('cases_group') + ': ' + c.chat_title : '')
         + '</div>'
         + (chain ? '<div class="case-chain">' + chain + '</div>' : '')
-        + '<div class="case-msg"><strong>' + window.T('cases_user','用户') + ':</strong> ' + (c.last_message || '-') + '</div>'
+        + '<div class="case-msg"><strong>' + window.T('cases_user') + ':</strong> ' + (c.last_message || '-') + '</div>'
         + '<div class="case-msg"><strong>AI:</strong> ' + (c.last_reply || '-') + '</div>'
-        + (c.note ? '<div class="case-msg" style="color:var(--p)"><strong>' + window.T('cases_note','备注') + ':</strong> ' + c.note + '</div>' : '')
+        + (c.note ? '<div class="case-msg" style="color:var(--p)"><strong>' + window.T('cases_note') + ':</strong> ' + c.note + '</div>' : '')
         + (c.closed ? '' :
            '<div class="case-actions">'
-           + '<input class="input case-note-input" id="note-' + c.case_id + '" placeholder="' + window.T('cases_note_ph','添加备注…') + '" value="' + (c.note || '') + '" />'
-           + '<button class="btn btn-xs" data-help="btn_save" onclick="saveNote(\'' + c.case_id + '\')">' + window.T('cases_save_note','保存备注') + '</button>'
-           + '<button class="btn btn-xs" data-help="close_case" style="background:var(--green);color:#fff" onclick="closeCase(\'' + c.case_id + '\')">' + window.T('cases_close','结案') + '</button>'
+           + '<input class="input case-note-input" id="note-' + c.case_id + '" placeholder="' + window.T('cases_note_ph') + '" value="' + (c.note || '') + '" />'
+           + '<button class="btn btn-xs" data-help="btn_save" onclick="saveNote(\'' + c.case_id + '\')">' + window.T('cases_save_note') + '</button>'
+           + '<button class="btn btn-xs" data-help="close_case" style="background:var(--green);color:#fff" onclick="closeCase(\'' + c.case_id + '\')">' + window.T('cases_close') + '</button>'
            + '</div>')
         + '</div>';
     }).join('');
   } catch (e) {
     var _sm2=document.documentElement.getAttribute('data-ui-mode')==='simple';
     el.innerHTML = _sm2
-      ? '<div class="empty" style="padding:2.5rem"><p style="font-size:.95rem;font-weight:600;color:var(--red)">' + window.T('cases_load_fail','加载失败') + '</p><p style="font-size:.82rem;color:var(--t3);margin-top:.3rem">' + window.T('cases_load_fail_hint','请稍后点击「刷新」重试。如果问题持续，请联系技术支持。') + '</p></div>'
-      : '<div class="empty" style="padding:2rem"><p>' + window.T('cases_load_fail','加载失败') + ': ' + e + '</p></div>';
+      ? '<div class="empty" style="padding:2.5rem"><p style="font-size:.95rem;font-weight:600;color:var(--red)">' + window.T('cases_load_fail') + '</p><p style="font-size:.82rem;color:var(--t3);margin-top:.3rem">' + window.T('cases_load_fail_hint') + '</p></div>'
+      : '<div class="empty" style="padding:2rem"><p>' + window.T('cases_load_fail') + ': ' + e + '</p></div>';
   }
 }
 
@@ -132,7 +132,7 @@ async function saveNote(cid) {
 }
 
 async function closeCase(cid) {
-  const res = prompt(window.T('cases_close_prompt','请输入结案说明（可为空）：'));
+  const res = prompt(window.T('cases_close_prompt'));
   if (res === null) return;
   await fetch('/api/cases/' + cid + '/close', {
     method: 'POST', headers: {'Content-Type': 'application/json'},

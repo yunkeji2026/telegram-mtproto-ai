@@ -237,31 +237,98 @@ class OpenAITranscriber(VoiceTranscriber):
             self.logger.error(f"OpenAI转录失败: {e}")
             return None
 
+class FallbackTranscriber(VoiceTranscriber):
+    """主/备转录级联：主转录器返空或抛错 → 自动回落下一个（绝不阻塞理解链）。
+
+    典型用法：主 = Qwen3-ASR（方言/口音强，OpenAI 兼容本机端点），
+    备 = faster_whisper（本机常驻、离线可用）。主机不可达/超时/返空时无缝回落，
+    使「换更强 ASR」不引入「服务一挂全链崩」的单点风险。
+    """
+
+    def __init__(self, config: Dict[str, Any], transcribers):
+        super().__init__(config)
+        self._chain = [t for t in transcribers if t is not None]
+        _names = " → ".join(t.__class__.__name__ for t in self._chain) or "(空)"
+        self.logger.info(f"级联转录服务初始化: {_names}")
+
+    async def transcribe_voice_message(
+        self, voice_file_path: str, language: str = "zh"
+    ) -> Optional[str]:
+        last_err: Optional[Exception] = None
+        for idx, t in enumerate(self._chain):
+            try:
+                text = await t.transcribe_voice_message(voice_file_path, language)
+            except Exception as e:  # noqa: BLE001 - 逐级兜底，绝不抛给理解链
+                last_err = e
+                self.logger.warning(
+                    f"转录器 {t.__class__.__name__} 异常，尝试回落下一级: {e}"
+                )
+                continue
+            if text:
+                return text
+            self.logger.warning(
+                f"转录器 {t.__class__.__name__} 返空，尝试回落下一级"
+            )
+        if last_err is not None:
+            self.logger.error(f"全部转录器失败，最后错误: {last_err}")
+        return None
+
+    async def _transcribe_impl(
+        self, voice_file_path: str, language: str
+    ) -> Optional[str]:  # pragma: no cover - 级联已重写公有方法
+        return None
+
+
 class VoiceTranscriberFactory:
     """语音转录服务工厂"""
-    
+
     @staticmethod
-    def create_transcriber(config: Dict[str, Any]) -> VoiceTranscriber:
-        """
-        创建语音转录服务实例
-        
-        Args:
-            config: 语音识别配置
-            
-        Returns:
-            语音转录服务实例
-        """
-        provider = config.get('provider', 'whisper_local')
-        
-        if provider == 'whisper_local':
-            return WhisperLocalTranscriber(config)
+    def _create_one(config: Dict[str, Any]) -> VoiceTranscriber:
+        """按 provider 建单个转录器（不含级联）。"""
+        provider = str(config.get('provider', 'whisper_local')).strip().lower()
+
+        # qwen3_asr / funasr 等本机 OpenAI 兼容 ASR 服务复用 OpenAI 转录器
+        # （契约相同：POST {base_url}/audio/transcriptions），仅换 base_url/model。
+        if provider in ('openai', 'qwen3_asr', 'funasr', 'openai_compatible'):
+            return OpenAITranscriber(config)
         elif provider == 'faster_whisper':
             return FasterWhisperTranscriber(config)
-        elif provider == 'openai':
-            return OpenAITranscriber(config)
+        elif provider == 'whisper_local':
+            return WhisperLocalTranscriber(config)
         else:
             # 默认使用本地Whisper
             return WhisperLocalTranscriber(config)
+
+    @staticmethod
+    def create_transcriber(config: Dict[str, Any]) -> VoiceTranscriber:
+        """
+        创建语音转录服务实例。
+
+        若配置含 ``fallback``（dict 或 dict 列表），构建「主转录器 → 备转录器」级联，
+        主机不可达/返空时自动回落（见 FallbackTranscriber）。
+
+        Args:
+            config: 语音识别配置
+
+        Returns:
+            语音转录服务实例
+        """
+        primary = VoiceTranscriberFactory._create_one(config)
+
+        fb = config.get('fallback')
+        if not fb:
+            return primary
+
+        fb_list = fb if isinstance(fb, list) else [fb]
+        chain = [primary]
+        for fb_cfg in fb_list:
+            if not isinstance(fb_cfg, dict):
+                continue
+            # 备用转录器继承主配置的公共项（temp_dir/max_file_size 等）后再覆盖
+            merged = {**config, **fb_cfg}
+            merged.pop('fallback', None)
+            chain.append(VoiceTranscriberFactory._create_one(merged))
+        return FallbackTranscriber(config, chain)
 
 # 简易测试函数
 async def test_voice_transcription():

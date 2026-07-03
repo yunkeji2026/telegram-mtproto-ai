@@ -291,7 +291,8 @@ class _FakeSMUnified(_FakeSM):
     async def generate_inbox_draft(self, *, text, chat_key, platform,
                                    history=None, persona_id="", reply_lang="",
                                    risk_level="", media_type="", media_ref="",
-                                   media_desc=""):
+                                   media_desc="", channel="inbox",
+                                   conversation_id="", peer_audio_emotion=None):
         self.inbox_draft_calls.append({
             "text": text, "chat_key": chat_key, "platform": platform,
             "persona_id": persona_id, "reply_lang": reply_lang,

@@ -43,7 +43,7 @@ MODE_DESC: Dict[str, str] = {
 DEFAULT_PLATFORM_MODES: Dict[str, Dict[str, Any]] = {
     "telegram": {"modes": ["protocol", "web", "device"], "default": "protocol"},
     "whatsapp": {"modes": ["protocol", "web", "device"], "default": "protocol"},
-    "line": {"modes": ["device"], "default": "device"},
+    "line": {"modes": ["protocol", "device"], "default": "protocol"},
     "messenger": {"modes": ["web", "device"], "default": "web"},
     "web": {"modes": [], "default": ""},
 }

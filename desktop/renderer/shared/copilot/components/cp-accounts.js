@@ -120,6 +120,8 @@
         return;
       }
       const accs = (d && d.accounts) || [];
+      // P5：脱敏开关随 /api/accounts 下发（缺省 true，与 web 端口径一致）
+      this._maskPhone = !(d && d.mask_phone === false);
       this._render(accs);
     }
 
@@ -152,6 +154,17 @@
 
     _selfName(a) {
       return a.self_name || (a.self_username ? "@" + a.self_username : "");
+    }
+
+    _maskId(id) {
+      // 显示层脱敏手机号（前3+****+后3），与 web 端一致；不改真实 account_id（动作仍用原值）
+      // P5：受 mask_phone 开关约束（默认开），关闭则原样显示号码
+      const s = String(id == null ? "" : id);
+      const m = s.match(/^(\+?)(\d{7,})$/);
+      if (m && this._maskPhone !== false) {
+        const d = m[2]; return m[1] + d.slice(0, 3) + "****" + d.slice(-3);
+      }
+      return s;
     }
 
     _avatarHtml(a) {
@@ -192,8 +205,8 @@
           ? T("cp.acct.circuit_suffix")
           : T("cp.acct.today_suffix", { used: q.day_used, limit: q.day_limit || "∞" });
       }
-      const disp = a.label || this._selfName(a) || a.account_id;
-      const subId = a.self_username ? "@" + a.self_username : a.account_id;
+      const disp = a.label || this._selfName(a) || this._maskId(a.account_id);
+      const subId = a.self_username ? "@" + a.self_username : this._maskId(a.account_id);
       return `<div class="row" style="--row-accent:${this._esc(accent)}">${this._avatarHtml(a)}` +
         `<div class="meta"><div class="label">${this._esc(disp)}</div>` +
         `<div class="sub">${this._esc(a.platform)} · ${this._esc(subId)}${mode ? " · " + this._esc(mode) : ""}${this._esc(quotaTxt)}</div></div>` +

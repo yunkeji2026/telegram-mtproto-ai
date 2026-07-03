@@ -542,7 +542,7 @@ function resolveAccounts(cfg) {
 const Copilot = {
   ctx: null, // {platform, chat_key, name, messages, webview}
   tplLoaded: false,
-  activeTab: "reply", // reply | insight | customer
+  activeTab: "reply", // reply | customer | tools
   chatActive: false,
   // 全自动托管：当前会话收到客户消息 → 生成 → 过风控 → 自动发（默认关）
   autopilot: { on: false, busy: false, lastSendAt: 0, handled: {} },
@@ -553,6 +553,63 @@ const AUTO_COOLDOWN_MS = 6000; // 两次自动发的最小间隔，防刷屏
 const AUTO_DELAY_MIN_MS = 2000; // 发送前拟人延迟下限
 const AUTO_DELAY_MAX_MS = 4000; // 发送前拟人延迟上限
 
+// 与网页 unified_inbox 共用 sidebar-chrome（shared/copilot/sidebar-chrome.js）
+const _sc = () => (window.CopilotShared && window.CopilotShared.sidebarChrome) || {};
+let _desktopTabBadges = null;
+
+// 可折叠卡片：与网页 unified_inbox 同源（sidebar-chrome.createCardController）。
+// 默认折叠集（draft/nba/profile 默认展开）；组件 id → 所属卡（懒取数按卡展开态决定是否喂 context）。
+const _CP_CARD_DEF_COLLAPSED = { voice: 1, script: 1, kb: 1, tpl: 1, relstage: 1, collab: 1, chain: 1, analysis: 1 };
+const _CP_CARD_OF = { "cp-relstage": "relstage", "cp-nba": "nba", "cp-script": "script", "cp-collab": "collab", "cp-chain": "chain", "cp-voice": "voice" };
+let _cpCardCtrl = null;
+function _cpCardCollapsed(name) {
+  return _cpCardCtrl ? _cpCardCtrl.isCollapsed(name) : !!_CP_CARD_DEF_COLLAPSED[name];
+}
+// 展开某卡：把折叠期暂存的会话上下文补喂给该卡组件（触发取数），与网页 _cpOnCardExpand 同口径
+function _cpOnCardExpand(cardName) {
+  Object.keys(_CP_CARD_OF).forEach((id) => {
+    if (_CP_CARD_OF[id] !== cardName) return;
+    const el = $(id);
+    if (el && el._pendingCtx) { const c = el._pendingCtx; el._pendingCtx = null; el.context = c; }
+  });
+}
+// 卡组件 context：折叠则暂存 _pendingCtx（懒加载），展开则立即喂。
+// 无控制器（共享模块缺失）时回落为直接喂 context，保持旧行为不阻断。
+function _feedCardComponent(id, ctx) {
+  const el = $(id);
+  if (!el) return;
+  const cardName = _CP_CARD_OF[id];
+  if (_cpCardCtrl && cardName && _cpCardCtrl.isCollapsed(cardName)) el._pendingCtx = ctx;
+  else el.context = ctx;
+}
+// 卡头状态 pill：组件 cp-data-loaded → 折叠态也能一眼读懂面板内容（复用共享 pillMetaFromCpLoaded）
+const _CP_PILL_BY_PANEL = { "cp-draft": "cpp-draft", "cp-relstage": "cpp-relstage", "cp-collab": "cpp-collab", "cp-chain": "cpp-chain", "cp-script": "cpp-script", "cp-nba": "cpp-nba" };
+const _CP_PILL_TONES = ["pill-accent", "pill-ok", "pill-warn", "pill-danger"];
+function _deskPillT(key, vars) {
+  const m = {
+    "inbox.pill.guard_high": "高风险", "inbox.pill.guard_medium": "中风险", "inbox.pill.draft_ready": "已生成",
+    "inbox.pill.chain_failed": "{n} 失败", "inbox.pill.chain_running": "{n} 运行中", "inbox.pill.topics": "{n} 话题",
+  };
+  let s = m[key] || key;
+  if (vars) Object.keys(vars).forEach((p) => { s = s.split("{" + p + "}").join(String(vars[p])); });
+  return s;
+}
+function _setCardPill(pillId, text, tone) {
+  const el = $(pillId);
+  if (!el) return;
+  el.textContent = text || "";
+  _CP_PILL_TONES.forEach((c) => el.classList.remove(c));
+  if (text && tone) el.classList.add("pill-" + tone);
+}
+function _updateCardPill(det) {
+  const pillId = _CP_PILL_BY_PANEL[det && det.panelId];
+  if (!pillId) return;
+  const sc = _sc();
+  if (!sc.pillMetaFromCpLoaded) return;
+  const m = sc.pillMetaFromCpLoaded(det, { t: _deskPillT, tf: _deskPillT });
+  _setCardPill(pillId, m.text, m.tone);
+}
+
 // 右栏分区按 tab 显隐（仅在有会话时）。把"一长条 5 段"改为分组,避免滚到底。
 function renderSections() {
   document.querySelectorAll(".cp-sec[data-tab]").forEach((sec) => {
@@ -561,9 +618,11 @@ function renderSections() {
 }
 
 function setTab(tab) {
-  Copilot.activeTab = tab;
-  document.querySelectorAll(".cp-tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+  const sc = _sc();
+  Copilot.activeTab = sc.normalizeTab ? sc.normalizeTab(tab) : tab;
+  document.querySelectorAll(".cp-tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === Copilot.activeTab));
   renderSections();
+  if (sc.storeTab) sc.storeTab(Copilot.activeTab);
 }
 
 function $(id) {
@@ -579,6 +638,56 @@ function initCopilot() {
   document.querySelectorAll(".cp-tab").forEach((b) => {
     b.addEventListener("click", () => setTab(b.dataset.tab));
   });
+  const sc = _sc();
+  if (sc.createResizeController) {
+    sc.createResizeController({
+      panel: "copilot",
+      handle: "cp-sidebar-resize",
+      defaultWidth: 320,
+      hideWhenCollapsed: () => $("copilot") && $("copilot").classList.contains("collapsed"),
+    }).init();
+  }
+  if (sc.readStoredTab) Copilot.activeTab = sc.readStoredTab(Copilot.activeTab);
+  renderSections();
+  document.querySelectorAll(".cp-tab").forEach((b) => {
+    b.classList.toggle("active", b.dataset.tab === Copilot.activeTab);
+  });
+  if (sc.bindTabHotkeys) {
+    sc.bindTabHotkeys({
+      setTab,
+      isEnabled: () => Copilot.chatActive,
+    });
+  }
+  // 可折叠卡片：状态记忆 + 展开懒取数 + 卡头图标/pill（与网页 unified_inbox 同源）
+  if (sc.createCardController) {
+    _cpCardCtrl = sc.createCardController({
+      defaultCollapsed: _CP_CARD_DEF_COLLAPSED,
+      onExpand: _cpOnCardExpand,
+    });
+    _cpCardCtrl.bindClicks("copilot");
+    _cpCardCtrl.apply();
+  }
+  if (sc.decorateCardIcons) sc.decorateCardIcons(document, 14);
+  document.addEventListener("cp-data-loaded", (e) => _updateCardPill((e && e.detail) || {}));
+  if (sc.initDesktopTabBadges) {
+    _desktopTabBadges = sc.initDesktopTabBadges({
+      badgeReply: "cp-tab-badge-reply",
+      badgeCustomer: "cp-tab-badge-customer",
+      badgeTools: "cp-tab-badge-tools",
+      snoozedLabel: "搁置中",
+      translate: (key, vars) => {
+        const m = {
+          "inbox.pill.guard_high": "高风险",
+          "inbox.pill.guard_medium": "中风险",
+          "inbox.pill.chain_failed": "{n} 失败",
+          "inbox.pill.chain_running": "{n} 运行中",
+        };
+        let s = m[key] || key;
+        if (vars) Object.keys(vars).forEach((p) => { s = s.split("{" + p + "}").join(String(vars[p])); });
+        return s;
+      },
+    });
+  }
   // 关系阶段动作(确认进阶/降级/回暖/对齐)完成后:刷新档案,联动后续可在此扩展
   const relEl = $("cp-relstage");
   if (relEl) {
@@ -1120,8 +1229,8 @@ function onActiveChat(payload, webview) {
     conversationId: window.CopilotShared.conversationId(payload.platform, _accId, payload.chat_key),
   } : null;
   const cpVoice = $("cp-voice");
-  if (cpVoice && _cpCtx) cpVoice.context = _cpCtx;
-  // 草稿/人设/回复语言/对比语言统一由 <cp-draft persona contrast pin> 承载（两端同源）
+  if (cpVoice && _cpCtx) _feedCardComponent("cp-voice", _cpCtx); // 语音卡默认折叠 → 懒取数
+  // 草稿/人设/回复语言/对比语言统一由 <cp-draft persona contrast pin> 承载（两端同源；草稿卡默认展开）
   const cpDraft = $("cp-draft");
   if (cpDraft && _cpCtx && "context" in cpDraft) cpDraft.context = _cpCtx;
 
@@ -1417,7 +1526,10 @@ async function loadRelStage() {
     const client = copilotClient();
     ["cp-relstage", "cp-nba", "cp-script", "cp-collab", "cp-chain"].forEach((id) => {
       const el = $(id);
-      if (el) { el.client = client; el.context = { conversationId: cid }; }
+      if (!el) return;
+      el.client = client;
+      // 懒取数：折叠卡暂存 _pendingCtx，展开时（_cpOnCardExpand）再喂 context 触发取数
+      _feedCardComponent(id, { conversationId: cid });
     });
   } catch (e) {
     console.log(`[panel] 会话面板 失败: ${e}`);

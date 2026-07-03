@@ -591,10 +591,24 @@ def build_emotional_context_block(
                 # 连击计数(R8)误增 / 误升级。
                 user_context["_wellbeing_crisis_level"] = _sig["level"]
                 user_context["_wellbeing_crisis_category"] = _sig.get("category", "")
-                if _sig["level"] != "none":
+                # 音频声学困扰联动（保守）：上条语音高置信 sad/fearful → 至少抬到 elevated
+                # （更共情、可带资源），但**绝不伪造 severe**（自伤/轻生须文字明确命中）；
+                # 只升不降，文字已 elevated/severe 时不动。
+                try:
+                    from src.ai.speech_emotion import audio_distress_level
+                    if audio_distress_level(
+                        user_context.get("_peer_audio_emotion")
+                    ) == "elevated" and user_context["_wellbeing_crisis_level"] == "none":
+                        user_context["_wellbeing_crisis_level"] = "elevated"
+                        user_context["_wellbeing_crisis_category"] = "audio_distress"
+                except Exception:
+                    pass
+                if user_context["_wellbeing_crisis_level"] != "none":
                     logger.warning(
                         "[wellbeing] 危机信号 level=%s category=%s matched=%s",
-                        _sig["level"], _sig["category"], _sig["matched"][:3],
+                        user_context["_wellbeing_crisis_level"],
+                        user_context["_wellbeing_crisis_category"],
+                        _sig["matched"][:3],
                     )
         except Exception:
             logger.debug("wellbeing_guard inject skipped", exc_info=True)

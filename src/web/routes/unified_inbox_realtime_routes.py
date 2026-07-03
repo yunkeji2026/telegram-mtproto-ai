@@ -47,6 +47,8 @@ _SSE_EVENT_TYPES = frozenset({
     "draft_sla_breach",
     "draft_reassigned",
     "typing",
+    "peer_typing",
+    "message_op",
     "anomaly_alert",
     "sla_alert",
     "conv_note",

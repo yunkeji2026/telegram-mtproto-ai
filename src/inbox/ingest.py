@@ -75,6 +75,8 @@ def _msg_from_obj(
     if not media_type and not media_ref:
         from .normalizer import extract_media
         media_type, media_ref = extract_media(src)
+    # P4-2 引用回复：从 source.reply_to 抽被引用消息摘要（上游 Node/RPA 带则有）
+    rt = src.get("reply_to") if isinstance(src.get("reply_to"), dict) else {}
     return InboxMessage(
         conversation_id=conversation_id,
         platform_msg_id=pid,
@@ -86,6 +88,9 @@ def _msg_from_obj(
         media_type=media_type,
         media_ref=media_ref,
         ts=float(m.get("ts") or 0),
+        reply_to_id=str(rt.get("id") or ""),
+        reply_to_text=str(rt.get("text") or ""),
+        reply_to_sender=str(rt.get("sender") or ""),
     )
 
 
@@ -101,6 +106,10 @@ def _conv_from_chat(chat: Dict[str, Any]) -> InboxConversation:
         last_ts=float(chat.get("last_ts") or 0),
         unread=int(chat.get("unread") or 0),
         chat_type=str(chat.get("chat_type") or "private"),
+        # peer 身份画像（normalize_chat 已归一；空值不覆盖已存真名/头像，见 store.ingest_batch）
+        username=str(chat.get("username") or ""),
+        phone=str(chat.get("phone") or ""),
+        avatar_url=str(chat.get("avatar_url") or ""),
     )
 
 
@@ -223,17 +232,143 @@ def ingest_collected_chats(
                             _emo_intensity = float(_emo.get("primary_intensity") or -1.0)
                     except Exception:
                         logger.debug("analyze_emotion 强度计算失败", exc_info=True)
+                    # 音频声学情绪融合：若该条语音带 SER 结果（lm["audio_emotion"]），
+                    # 与文字情绪按 fuse_emotion 规则合成（言不由衷时以声学为准），
+                    # 写更准的 last_emotion / last_emotion_intensity。无音频 → 原样文字。
+                    _emo_label = str(_analysis.get("emotion") or "")
+                    try:
+                        _audio_emo = lm.get("audio_emotion") if isinstance(lm, dict) else None
+                        if _audio_emo:
+                            from src.ai.emotion_fusion import fuse_emotion
+                            _fused = fuse_emotion(
+                                text_label=_emo_label,
+                                text_intensity=_emo_intensity,
+                                audio_emo=_audio_emo,
+                            )
+                            if _fused.get("label"):
+                                _emo_label = _fused["label"]
+                            _fi = _fused.get("intensity")
+                            if isinstance(_fi, (int, float)) and _fi >= 0:
+                                _emo_intensity = float(_fi)
+                    except Exception:
+                        logger.debug("音频情绪融合失败（回落文字情绪）", exc_info=True)
                     store.update_conv_meta(
                         conv.conversation_id,
                         platform=conv.platform,
                         intent=str(_analysis.get("intent") or ""),
-                        emotion=str(_analysis.get("emotion") or ""),
+                        emotion=_emo_label,
                         risk=str(_analysis.get("risk_level") or "low"),
                         contact_id=contact_id,
                         emotion_intensity=_emo_intensity,
                     )
                 except Exception:
                     logger.debug("update_conv_meta 失败", exc_info=True)
+
+                # 深度人设 · 运行期累积（L4 经历式记忆 + L2 未收尾话题）。best-effort，
+                # 仅当 deep_persona store 已初始化（=master flag 开、ai_client 已建库）才写；
+                # 关则 store=None 直接跳过（零开销、零行为变更）。只存消毒后的短摘要。
+                try:
+                    from src.companion.deep_persona_store import get_deep_persona_store
+                    _dp_store = get_deep_persona_store()
+                    if _dp_store is not None and msg_text:
+                        from src.companion.deep_persona_stats import get_deep_persona_stats
+                        _dp_stats = get_deep_persona_stats()
+                        _cid = conv.conversation_id
+                        _txt = msg_text.strip()
+                        _snip = _txt[:40]
+                        _lbl = str(locals().get("_emo_label") or "")
+                        _inten = float(locals().get("_emo_intensity") or -1.0)
+                        # L4：情绪浓的实质消息 → 记成"带情感的经历"（记故事而非事实）
+                        if _inten >= 0.5 and len(_txt) >= 8:
+                            # E1：semantic_recall 开且 embedder 就绪 → 顺手缓存事件向量（off 回复热路）
+                            _e_emb = None
+                            try:
+                                from src.companion.deep_persona_runtime import (
+                                    get_embedder, semantic_recall_enabled)
+                                if semantic_recall_enabled():
+                                    _emb_fn = get_embedder()
+                                    if _emb_fn is not None:
+                                        _e_emb = _emb_fn(_snip)
+                            except Exception:
+                                _e_emb = None
+                            _dp_store.add_experiential(
+                                _cid, _snip, emotion=_lbl, salience=_inten, emb=_e_emb)
+                            _dp_stats.incr("experiential_added")
+                        # L2：提到计划/将来/悬念 → open loop，供日后"不问就回指"
+                        import re as _re_dp
+                        if len(_txt) >= 6 and _re_dp.search(
+                            r"(打算|准备|下周|下个月|明天|计划|考虑|想去|等我|回头|之后|以后|面试|复查|结果出来)",
+                            _txt,
+                        ):
+                            _dp_store.add_open_loop(
+                                _cid, _snip, salience=max(_inten, 0.3))
+                            _dp_stats.incr("open_loops_added")
+                        # E3（默认关）：记人设自身跨会话「见闻」话题（去标识聚合，只存话题词+计数）
+                        try:
+                            from src.companion.deep_persona_runtime import self_memory_enabled
+                            if self_memory_enabled() and len(_txt) >= 4:
+                                from src.companion.persona_self_memory import (
+                                    get_persona_self_memory, extract_self_topic)
+                                from src.utils.persona_manager import PersonaManager
+                                _psm = get_persona_self_memory("config/deep_persona.db")
+                                _p2, _ = PersonaManager.get_instance().get_persona_with_tier(
+                                    _cid, "")
+                                _pid2 = str((_p2 or {}).get("id") or "") if _p2 else ""
+                                _tp = extract_self_topic(_txt)
+                                if _psm is not None and _pid2 and _tp:
+                                    _psm.record_topic(_pid2, _tp)
+                        except Exception:
+                            logger.debug("deep_persona self_memory 记录失败（忽略）", exc_info=True)
+                        # L2：后续消息回应了旧话题 → 自动收尾，避免反复追问同一件事
+                        try:
+                            from src.companion.deep_persona import find_resolved_loops
+                            _loops = _dp_store.get_open_loops(_cid)
+                            for _rt in find_resolved_loops(_loops, _txt):
+                                _dp_store.resolve_open_loop(_cid, _rt)
+                                _dp_stats.incr("loops_resolved")
+                        except Exception:
+                            pass
+                        # 机会式巩固（节流 15min/会话）：关系画像 L5 + 内部梗
+                        try:
+                            if _dp_store.due_for_consolidation(_cid):
+                                from src.companion.deep_persona import (
+                                    run_deep_persona_consolidation)
+                                # C4 漂移守卫：解析当前人设传入，画像命中硬禁项则拒写
+                                _persona = None
+                                try:
+                                    from src.utils.persona_manager import PersonaManager
+                                    _persona, _ = PersonaManager.get_instance(
+                                    ).get_persona_with_tier(_cid, "")
+                                except Exception:
+                                    _persona = None
+                                # E2：llm_refine 开且 LLM 就绪 → 传 llm_fn 精修画像（off 热路）
+                                _llm_fn = None
+                                _emb_fn2 = None
+                                try:
+                                    from src.companion.deep_persona_runtime import (
+                                        get_llm, llm_refine_enabled,
+                                        get_embedder, semantic_recall_enabled)
+                                    if llm_refine_enabled():
+                                        _llm_fn = get_llm()
+                                    # G2：语义开时传 embedder 批量回填历史事件向量（off 热路）
+                                    if semantic_recall_enabled():
+                                        _emb_fn2 = get_embedder()
+                                except Exception:
+                                    _llm_fn = None
+                                _r = run_deep_persona_consolidation(
+                                    store, _dp_store, _cid, persona=_persona,
+                                    llm_fn=_llm_fn, embedder=_emb_fn2)
+                                _dp_stats.incr("consolidations")
+                                if _r.get("profile"):
+                                    _dp_stats.incr("profiles_built")
+                                if _r.get("jokes"):
+                                    _dp_stats.incr("jokes_detected", int(_r["jokes"]))
+                                if _r.get("drift"):
+                                    _dp_stats.incr("drift_blocked")
+                        except Exception:
+                            logger.debug("deep_persona 巩固失败（忽略）", exc_info=True)
+                except Exception:
+                    logger.debug("deep_persona 运行期累积失败（忽略）", exc_info=True)
 
                 # R3：检测 CSAT 问卷回复（1-5 纯数字，会话正在等待问卷）
                 try:

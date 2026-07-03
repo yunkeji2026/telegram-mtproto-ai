@@ -798,6 +798,20 @@ class SkillManager(LoggerMixin):
                 self._context_store.flush(user_id_str)
                 return _selfie_reply or None
 
+            # Stage B：对话上下文「按需生图」（"你煮的面拍张照给我看"——对话里提到的东西）。
+            # 返回字符串=短路；""=图已发出不再补文字；None=非要图/未开/无真出图后端。
+            try:
+                _ctx_img_reply = await self._handle_contextual_image_request(
+                    text, user_id_str, user_context, _chat_id
+                )
+            except Exception:
+                _ctx_img_reply = None
+                self.logger.debug("contextual image request skipped", exc_info=True)
+            if _ctx_img_reply is not None:
+                self._context_store.mark_dirty(user_id_str)
+                self._context_store.flush(user_id_str)
+                return _ctx_img_reply or None
+
             # 2. 冷却
             if not self._check_cooldown(text, user_id_str, chat_id=_chat_id):
                 self.logger.warning(f"{log_prefix}用户 {user_id_str} 处于冷却期，跳过回�")
@@ -1013,6 +1027,11 @@ class SkillManager(LoggerMixin):
                     else:
                         _detected_lang = _prev_lang
                 user_context['reply_lang'] = _detected_lang
+
+            # 携带上条语音的声学情绪（SER）→ 供情感上下文/危机联动/出站语气共用。
+            _pae = context.get("_peer_audio_emotion") if context else None
+            if _pae:
+                user_context["_peer_audio_emotion"] = _pae
 
             # 4. Intent recognition + domain hook override
             text_stripped = text.strip()
@@ -1858,6 +1877,8 @@ class SkillManager(LoggerMixin):
         media_type: str = "",
         media_ref: str = "",
         media_desc: str = "",
+        conversation_id: str = "",
+        peer_audio_emotion: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """收件箱草稿生成的「统一规则引擎」（单一事实源）。
 
@@ -1927,6 +1948,14 @@ class SkillManager(LoggerMixin):
             user_context["account_persona_id"] = str(persona_id)
         if platform:
             user_context["platform"] = platform
+        # 让 autodraft 路径也带上会话身份：chat_id 供人设解析（cid=— 修复 + 支持 chat 绑定），
+        # conversation_id 供深度人设 store 层（与 ingest 写入同键，解锁关系画像/回指/经历/语义召回）。
+        if chat_key:
+            user_context["chat_id"] = str(chat_key)
+        if conversation_id:
+            user_context["conversation_id"] = str(conversation_id)
+        if peer_audio_emotion:
+            user_context["_peer_audio_emotion"] = peer_audio_emotion
         if reply_lang:
             # 收件箱已是语言决策单一事实源 → 锁定，避免引擎二次猜测
             user_context["reply_lang"] = reply_lang
@@ -2576,14 +2605,13 @@ class SkillManager(LoggerMixin):
 
     @staticmethod
     def _cosine_sim(a: List[float], b: List[float]) -> float:
-        if not a or not b:
-            return 0.0
-        n = min(len(a), len(b))
-        if n == 0:
+        # 维度不一致（如换 embedding 模型后新旧向量混存：nomic 768 vs bge-m3 1024）直接判 0，
+        # 绝不 min() 截断——截断会拿两个不同向量空间的前 N 维算出「看似合理」的假相似度，
+        # 使防复读误判/漏判。与 episodic_vector.cosine_similarity 同口径（不等长→0）。
+        if not a or not b or len(a) != len(b):
             return 0.0
         dot = na = nb = 0.0
-        for i in range(n):
-            x = a[i]; y = b[i]
+        for x, y in zip(a, b):
             dot += x * y; na += x * x; nb += y * y
         if na <= 0 or nb <= 0:
             return 0.0
@@ -2738,46 +2766,112 @@ class SkillManager(LoggerMixin):
         except Exception:
             return ""
 
+    def _forbidden_self_names(self) -> set:
+        """Names the bot must never speak as its *own* (role labels, not real names).
+
+        The domain persona's display name (domain ``conversion`` → ``线上陪伴``) is an
+        operator-facing label, explicitly **not** a spoken name (see ``persona.yaml``:
+        「展示名以 config ai.ai_name / 主系统提示为准」). When the account persona fails
+        to resolve, the reply engine falls back to this domain persona and the model
+        happily answers 「我叫线上陪伴」— which then gets sent to the customer (observed
+        2026-07-01 on conv ``8921664288``). This floor guarantees such role labels are
+        neutralized regardless of whether a real persona name is available.
+
+        Returns a set of lowercased forbidden self-name tokens.
+        """
+        names = {
+            "线上陪伴", "在线陪伴", "線上陪伴",
+            "线上客服", "在线客服", "線上客服",
+            "客服", "小客服", "助手", "小助手", "ai助手", "机器人",
+        }
+        try:
+            from src.utils.persona_manager import PersonaManager
+            dp = getattr(PersonaManager.get_instance(), "_domain_persona", None) or {}
+            dn = str(dp.get("name") or "").strip()
+            if dn:
+                names.add(dn)
+        except Exception:
+            pass
+        return {n.lower() for n in names if n}
+
     def _sanitize_assistant_reply(self, reply: str, user_context: Dict[str, Any]) -> str:
-        """Strip wrong self-name claims from a bot reply before storing to history.
+        """Strip wrong / forbidden self-name claims before storing to history.
 
         Prevents self-reinforcing hallucination (bot says wrong name once → sees it in
-        history → keeps repeating). Patterns covered:
-          "我叫X"    "我的名字是X"    "我是X" (only when X is a short name-like token)
-          "My name is X"   "I'm X" (when X is a single capitalized name)
+        history → keeps repeating) and identity leaks of the domain role label.
 
-        If X != persona_name, replace X with persona_name. If persona_name unavailable,
-        leave reply untouched (graceful degrade).
+        Two passes:
+          1. **Name-declaration rewrite** — only when a real persona name is resolved:
+             「我叫X」「我的名字是/叫X」「My name is X / I'm X」 → replace X with the
+             correct persona name (unless it already matches).
+          2. **Forbidden self-name floor** — works even with no resolved name:
+             「我叫/我是/叫我/我就是 <role-label>」 (e.g. 线上陪伴/客服) is rewritten to the
+             persona name when available, otherwise the whole false claim is dropped.
+             This is the safety net for the 「我叫线上陪伴」leak when the account persona
+             failed to resolve.
         """
         if not reply or not isinstance(reply, str):
-            return reply
-        correct = self._get_persona_name_for_context(user_context)
-        if not correct:
             return reply
 
         import re as _re
 
-        def _zh_repl(m):
-            prefix = m.group(1)
-            claimed = m.group(2).strip()
-            if claimed == correct:
-                return m.group(0)
-            return f"{prefix}{correct}"
+        correct = self._get_persona_name_for_context(user_context)
+        forbidden = self._forbidden_self_names()
+        if correct:
+            forbidden.discard(correct.lower())
 
-        out = _re.sub(r"(我叫)([^\s，。！？,.\!\?\n]{1,8})", _zh_repl, reply)
-        out = _re.sub(r"(我的名字(?:是|叫))([^\s，。！？,.\!\?\n]{1,8})", _zh_repl, out)
+        out = reply
 
-        def _en_repl(m):
-            prefix = m.group(1)
-            claimed = m.group(2).strip()
-            if claimed.lower() == correct.lower():
-                return m.group(0)
-            return f"{prefix}{correct}"
+        # ---- Pass 1: name-declaration rewrite (needs a correct name to substitute) ----
+        if correct:
+            def _zh_repl(m):
+                prefix = m.group(1)
+                claimed = m.group(2).strip()
+                # already correct (allow a trailing particle like 呀/啦 to survive)
+                if claimed == correct or claimed.startswith(correct):
+                    return m.group(0)
+                return f"{prefix}{correct}"
 
-        out = _re.sub(
-            r"(?i)(my name is\s+|i['' ]?m\s+|i am\s+)([A-Z][a-zA-Z]{1,15})",
-            _en_repl, out,
-        )
+            out = _re.sub(r"(我叫)([^\s，。！？,.\!\?\n]{1,8})", _zh_repl, out)
+            out = _re.sub(r"(我的名字(?:是|叫))([^\s，。！？,.\!\?\n]{1,8})", _zh_repl, out)
+
+            def _en_repl(m):
+                prefix = m.group(1)
+                claimed = m.group(2).strip()
+                if claimed.lower() == correct.lower() or claimed.lower().startswith(correct.lower()):
+                    return m.group(0)
+                return f"{prefix}{correct}"
+
+            out = _re.sub(
+                r"(?i)(my name is\s+|i['' ]?m\s+|i am\s+)([A-Z][a-zA-Z]{1,15})",
+                _en_repl, out,
+            )
+
+        # ---- Pass 2: forbidden self-name floor (works even without a correct name) ----
+        # Only fires when the claimed token is a known role label, so it cannot corrupt
+        # legitimate sentences like 「我是说真的」/「我是学生」.
+        if forbidden:
+            _alt = "|".join(
+                _re.escape(f) for f in sorted(forbidden, key=len, reverse=True)
+            )
+            _pat = _re.compile(
+                r"(我就是|我叫|我是|叫我|我的名字(?:是|叫))"
+                r"(?:" + _alt + r")"
+                r"([呀啊哦喔啦呢的。，,！!？?~\s]|$)",
+                _re.IGNORECASE,
+            )
+
+            def _forbid_repl(m):
+                prefix = m.group(1)
+                tail = m.group(2)
+                if correct:
+                    return f"{prefix}{correct}{tail}"
+                return ""  # no name to offer → drop the false claim entirely
+
+            out = _re.sub(_pat, _forbid_repl, out)
+            # tidy any leading punctuation left behind by a stripped claim
+            out = _re.sub(r"^[\s，,。、~]+", "", out)
+
         return out
 
     def _sanitize_history_name_claims(
@@ -3034,6 +3128,14 @@ class SkillManager(LoggerMixin):
             return True
         return bool((mcfg.get("consolidation") or {}).get("semantic_dedup"))
 
+    def _current_embedding_model(self) -> str:
+        """当前 embedding 模型名（落库标注 episodic_memory.embedding_model 列，便于换模型后
+        识别/清理异维度旧向量）。取 ai_client 实际生效的嵌入模型；取不到返回空串。"""
+        try:
+            return str(getattr(self.ai_client, "_embedding_model", "") or "")
+        except Exception:
+            return ""
+
     async def _episodic_patch_embedding(self, row_id: Optional[int], fact_text: str) -> None:
         if not row_id or not self._episodic_store:
             return
@@ -3047,7 +3149,9 @@ class SkillManager(LoggerMixin):
 
             vecs = await self.ai_client.embed([ft[:500]])
             if vecs and vecs[0]:
-                self._episodic_store.update_embedding(row_id, vec_to_blob(vecs[0]))
+                self._episodic_store.update_embedding(
+                    row_id, vec_to_blob(vecs[0]), self._current_embedding_model()
+                )
         except Exception as _e:
             self.logger.debug("episodic_patch_embedding id=%s: %s", row_id, _e)
 
@@ -3552,13 +3656,71 @@ class SkillManager(LoggerMixin):
                 )
             except Exception:
                 _pref = "story"
-            return select_proactive_topic(
+            _topic = select_proactive_topic(
                 facts, silent_hours=silent_hours, stage=stage,
                 intimacy=intimacy, min_silent_hours=min_silent_hours,
                 prefer_category=_pref,
             )
+            # C2：无记忆话题可回访时，用人设自己的生活片段主动分享近况（更像真人在过日子）。
+            if not str((_topic or {}).get("mode") or ""):
+                _life = self._life_beat_opener(contact_key or key, gate=_gate)
+                if _life:
+                    _life["silent_hours"] = round(float(silent_hours or 0.0), 1)
+                    try:
+                        from src.companion.deep_persona_stats import get_deep_persona_stats
+                        get_deep_persona_stats().incr("life_shares")
+                    except Exception:
+                        pass
+                    return _life
+            return _topic
         except Exception:
             return empty
+
+    def _life_beat_opener(self, contact_key: str, *, gate: str = "") -> Dict[str, Any]:
+        """C2：解析当前人设 → 生成"生活线主动分享"开场（deep_persona.life_line 开才生效）。"""
+        try:
+            _cfg = self.config.config if hasattr(self.config, "config") else (
+                self.config if isinstance(self.config, dict) else {})
+            _dp = (_cfg.get("companion", {}) or {}).get("deep_persona", {})
+            if not (isinstance(_dp, dict) and _dp.get("enabled") and _dp.get("life_line")):
+                return {}
+            from src.utils.persona_manager import PersonaManager
+            from src.companion.deep_persona import (
+                build_life_beat_opener, life_share_allowed, life_share_time_ok)
+            from datetime import datetime as _dt
+            pm = PersonaManager.get_instance()
+            persona, _ = pm.get_persona_with_tier(str(contact_key or ""), "")
+            if not isinstance(persona, dict) or not persona:
+                return {}
+            _now = _dt.now()
+            # E5 时段闸：静默时段（默认深夜/清晨 0-8 点）不主动分享
+            _qs = int(_dp.get("life_share_quiet_start_hour", 0) or 0)
+            _qe = int(_dp.get("life_share_quiet_end_hour", 8) or 8)
+            if not life_share_time_ok(_now, quiet_start_hour=_qs, quiet_end_hour=_qe):
+                return {}
+            # D2 反打扰：按频次/间隔闸门，避免"天天主动汇报生活"
+            try:
+                from src.companion.deep_persona_store import get_deep_persona_store
+                _st = get_deep_persona_store()
+                _cid = str(contact_key or "")
+                if _st is not None and _cid:
+                    _mpw = int(_dp.get("life_share_max_per_week", 2) or 2)
+                    _gap = float(_dp.get("life_share_min_gap_hours", 48) or 48)
+                    if not life_share_allowed(
+                        _st.get_life_shares(_cid), _now,
+                        max_per_week=_mpw, min_gap_hours=_gap,
+                    ):
+                        return {}
+                    _op = build_life_beat_opener(persona, _now, gate=gate)
+                    if _op:
+                        _st.record_life_share(_cid)
+                    return _op
+            except Exception:
+                pass
+            return build_life_beat_opener(persona, _now, gate=gate)
+        except Exception:
+            self.logger.debug("life_beat opener 解析失败（忽略）", exc_info=True)
+            return {}
 
     def build_ritual_opener(
         self,
@@ -3903,9 +4065,12 @@ class SkillManager(LoggerMixin):
             return empty
 
     async def episodic_backfill_embeddings(
-        self, limit: int = 20, memory_key_prefix: str = ""
+        self, limit: int = 20, memory_key_prefix: str = "", force: bool = False
     ) -> Dict[str, Any]:
-        """Admin: fill missing episodic row embeddings (vector search). Batches via embed_with_fallback."""
+        """Admin: fill episodic row embeddings (vector search). Batches via embed_with_fallback.
+
+        ``force=True`` 重嵌**所有**行（换 embedding 模型后重建全量向量用），否则只补缺失的。
+        """
         if not self._episodic_store or not self.ai_client:
             return {"ok": False, "error": "no_store"}
         mvec = (self._memory_cfg or {}).get("vector") or {}
@@ -3932,7 +4097,7 @@ class SkillManager(LoggerMixin):
                 }
             lim = min(lim, rem)
         rows = self._episodic_store.fetch_rows_missing_embedding(
-            lim, memory_key_prefix=memory_key_prefix
+            lim, memory_key_prefix=memory_key_prefix, force=force
         )
         if not rows:
             return {"ok": True, "processed": 0, "updated": 0}
@@ -3988,9 +4153,12 @@ class SkillManager(LoggerMixin):
         except Exception:
             pass
 
+        _emb_model = self._current_embedding_model()
         for i, (rid, _) in enumerate(work):
             vec = vecs[i] if i < len(vecs) else None
-            if vec and self._episodic_store.update_embedding(rid, vec_to_blob(vec)):
+            if vec and self._episodic_store.update_embedding(
+                rid, vec_to_blob(vec), _emb_model
+            ):
                 updated += 1
             elif ms:
                 ms.record_embed_fail()
@@ -4294,12 +4462,24 @@ class SkillManager(LoggerMixin):
                       or f"这是刚拍的，给你看～ 喜欢{persona_name}吗？😊")
         if will_generate and cap > 0:
             self._get_selfie_cap(cap).record_sent(1)
+        # album 后端按人设分册挑图 + 尽量避开上一张（连发不重复）；其它后端忽略这两参。
+        _album_key = self._selfie_album_key(user_context)
+        _avoid = str(user_context.get("_selfie_last_img") or "")
+        # openai/command 后端：拿相册里一张当"锁脸基础图"(img2img)，让生成的自拍保持同一张脸。
+        _base = ""
         try:
-            res = await provider.generate(prompt)
+            if str(getattr(provider, "backend", "")).lower() in ("openai", "command"):
+                _base = provider.reference_image(_album_key)
+        except Exception:
+            _base = ""
+        try:
+            res = await provider.generate(prompt, album_key=_album_key,
+                                          avoid_path=_avoid, base_image=_base)
         except Exception:
             res = None
             self.logger.debug("selfie generate error", exc_info=True)
         if res is not None and getattr(res, "ok", False):
+            user_context["_selfie_last_img"] = getattr(res, "image_path", "") or ""
             sent = await self._try_send_selfie_media(
                 user_context, chat_id, res.image_path, caption)
             if decision.get("used_free"):
@@ -4313,6 +4493,81 @@ class SkillManager(LoggerMixin):
             user_context["_selfie_used"] = free_used + 1
         return (f"{persona_name}现在不太方便拍照呢，不过我一直在这儿陪你～"
                 f"想我了的话，多跟我说说话好不好？")
+
+    async def _handle_contextual_image_request(
+        self, text: str, user_id_str: str, user_context: Dict[str, Any], chat_id: Any,
+    ) -> Optional[str]:
+        """Stage B：对话上下文「按需生图」——对方要"你煮的面"这类**对话里提到的东西**的照片。
+
+        与自拍(Stage A)分工：这里只处理物体/场景图（非人设肖像）。仅在开 ``contextual_images``
+        且接了**真出图后端**(openai/command——album 无法凭空生成任意图)时生效；否则返回 None，
+        交由普通回复自然带过（不硬答）。返回 ""=图已发出不再补文字；None=非要图/未开/无后端/失败。
+        """
+        scfg = self._selfie_cfg()
+        if not scfg.get("enabled", False) or not scfg.get("contextual_images", False):
+            return None
+        from src.ai.companion_selfie import get_selfie_provider
+        from src.ai.contextual_image import (
+            build_llm_prompt_refine_instruction,
+            plan_contextual_image,
+        )
+        history = user_context.get("_conversation_history") or []
+        plan = plan_contextual_image(text, history, style=str(scfg.get("style") or ""))
+        if not plan:
+            return None
+        provider = get_selfie_provider(scfg.get("provider") or {})
+        will_generate = bool(getattr(provider, "enabled", False)) and \
+            str(getattr(provider, "backend", "")).lower() not in ("", "disabled", "album")
+        if not will_generate:
+            # 没接真出图后端(或只有 album 预制相册)：无法凭空生成"你煮的面" → 交普通文字回复。
+            return None
+        try:
+            bond = int(self._bond_level_from_context(user_context))
+        except Exception:
+            bond = 0
+        if bond < int(scfg.get("min_bond_level", 0) or 0):
+            return None
+        # 全局出图预算 cap（护 API 账单，与自拍共用同一份跟踪器）。
+        cap = int(scfg.get("daily_global_cap", 0) or 0)
+        if cap > 0 and self._get_selfie_cap(cap).would_exceed(1):
+            self.logger.info("contextual image daily_global_cap=%d 已达上限，软兜底", cap)
+            return None
+        prompt = str(plan.get("prompt") or "")
+        # 可选：用 LLM 把 prompt 提炼得更准（heuristic 抽主体不稳时）。失败/超时回落 heuristic。
+        if scfg.get("contextual_images_llm_prompt", False) and getattr(self, "ai_client", None):
+            try:
+                instruction = build_llm_prompt_refine_instruction(text, history)
+                refined = str(await self.ai_client.chat(instruction) or "").strip().strip('"').strip()
+                if refined and len(refined) <= 400:
+                    prompt = refined
+            except Exception:
+                self.logger.debug("contextual prompt LLM refine skipped", exc_info=True)
+        if not prompt.strip():
+            return None
+        if cap > 0:
+            self._get_selfie_cap(cap).record_sent(1)
+        caption = str(scfg.get("contextual_caption") or "") or "拍好啦，给你看～😊"
+        try:
+            res = await provider.generate(prompt)  # 物体图走 text2img，不带人设的脸
+        except Exception:
+            res = None
+            self.logger.debug("contextual image generate error", exc_info=True)
+        if res is not None and getattr(res, "ok", False):
+            sent = await self._try_send_selfie_media(
+                user_context, chat_id, res.image_path, caption)
+            if sent:
+                return ""  # 图已发出，不再补文字
+        return None  # 出图/发送失败 → 交普通回复自然带过
+
+    def _selfie_album_key(self, user_context: Dict[str, Any]) -> str:
+        """album 后端分册键：多人设时用 persona id/name 选 ``album_dir/<key>`` 子目录；缺则空（用根目录）。"""
+        try:
+            p = self._selfie_persona_for_prompt(user_context)
+            if isinstance(p, dict):
+                return str(p.get("id") or p.get("persona_id") or p.get("name") or "").strip()
+            return str(p or "").strip()
+        except Exception:
+            return ""
 
     def _selfie_persona_for_prompt(self, user_context: Dict[str, Any]) -> Any:
         """取出图用 persona（dict 含 name/appearance 等）；拿不到则回 name 字符串/空。"""

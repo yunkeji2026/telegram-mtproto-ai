@@ -41,6 +41,25 @@ def test_detect_negative(t):
     assert detect_selfie_request(t) is False
 
 
+@pytest.mark.parametrize("t", [
+    "那你發個照片給我看看啊",     # 繁体「发个照片」（简体 marker 匹配不到）
+    "想看看妳長什麼樣",
+    "傳張自拍來",                 # 含「自拍」
+    "拍個照片給我看",
+])
+def test_detect_positive_traditional(t):
+    assert detect_selfie_request(t) is True
+
+
+@pytest.mark.parametrize("t", [
+    "你煮的肯定很好吃,可以拍個照片給我看一下嗎?",  # 要「你煮的」食物图 → 属上下文要图，非人设自拍
+    "你做的蛋糕拍张照给我看看",
+    "你买的裙子拍张照片",
+])
+def test_detect_object_photo_not_selfie(t):
+    assert detect_selfie_request(t) is False
+
+
 # ── 提示词构造 ──────────────────────────────────────────────────────────
 
 def test_build_prompt_uses_persona_appearance_and_sfw():
@@ -150,6 +169,79 @@ def test_singleton_reuse_and_reset():
     reset_selfie_provider()
     c = get_selfie_provider({})
     assert c is not a
+
+
+# ── album 后端（预制相册随机挑发，做「人设照片」最一致/零 API 费） ────────────
+
+@pytest.mark.asyncio
+async def test_album_backend_picks_existing_image(tmp_path):
+    d = tmp_path / "album"
+    d.mkdir()
+    img = d / "a.jpg"
+    img.write_bytes(b"\x89PNG x")
+    p = SelfieProvider({"enabled": True, "backend": "album", "album_dir": str(d)})
+    res = await p.generate("ignored prompt for album")
+    assert res.ok is True
+    assert res.image_path == str(img)
+    assert res.provider == "album"
+    assert res.extra.get("album_size") == 1
+
+
+@pytest.mark.asyncio
+async def test_album_backend_empty_dir_soft_fails(tmp_path):
+    p = SelfieProvider({"enabled": True, "backend": "album",
+                        "album_dir": str(tmp_path / "nope")})
+    res = await p.generate("x")
+    assert res.ok is False
+    assert res.error == "album_empty"  # 空相册 → 软失败（调用方退回文字），不抛
+
+
+@pytest.mark.asyncio
+async def test_album_backend_avoids_repeat_when_possible(tmp_path):
+    d = tmp_path / "album"
+    d.mkdir()
+    (d / "a.jpg").write_bytes(b"a")
+    (d / "b.png").write_bytes(b"b")
+    p = SelfieProvider({"enabled": True, "backend": "album", "album_dir": str(d)})
+    first = (await p.generate("x")).image_path
+    # 传 avoid_path=first → 两张图时必挑另一张（连发不重复）
+    second = (await p.generate("x", avoid_path=first)).image_path
+    assert second != first
+
+
+@pytest.mark.asyncio
+async def test_album_backend_persona_subdir_preferred(tmp_path):
+    base = tmp_path / "album"
+    base.mkdir()
+    (base / "root.jpg").write_bytes(b"r")
+    sub = base / "xiaorou"
+    sub.mkdir()
+    (sub / "s.jpg").write_bytes(b"s")
+    p = SelfieProvider({"enabled": True, "backend": "album", "album_dir": str(base)})
+    res = await p.generate("x", album_key="xiaorou")
+    assert res.image_path == str(sub / "s.jpg")  # 命中分册子目录，不用根目录
+
+
+@pytest.mark.asyncio
+async def test_album_backend_ignores_non_images(tmp_path):
+    d = tmp_path / "album"
+    d.mkdir()
+    (d / "notes.txt").write_text("not an image", encoding="utf-8")
+    p = SelfieProvider({"enabled": True, "backend": "album", "album_dir": str(d)})
+    res = await p.generate("x")
+    assert res.ok is False and res.error == "album_empty"  # .txt 不算图片
+
+
+@pytest.mark.asyncio
+async def test_album_key_blocks_path_traversal(tmp_path):
+    base = tmp_path / "album"
+    base.mkdir()
+    (base / "safe.jpg").write_bytes(b"s")
+    p = SelfieProvider({"enabled": True, "backend": "album", "album_dir": str(base)})
+    # 恶意 album_key 里的路径分隔符/.. 被清洗 → 回落根目录，绝不逃出 album_dir
+    res = await p.generate("x", album_key="../../etc")
+    assert res.ok is True
+    assert res.image_path == str(base / "safe.jpg")
 
 
 # ── openai images 后端（注入假 client，无网络） ──────────────────────────
@@ -287,3 +379,102 @@ async def test_openai_generate_soft_fails_on_client_error(monkeypatch, tmp_path)
     res = await p.generate("a prompt")
     assert res.ok is False  # 绝不抛，软失败退回
     assert "api down" in res.error
+
+
+# ── 基础图 img2img（openai images.edit / command {base}，锁人设一致性） ──────
+
+class _FakeClientEdit:
+    """同时带 images.generate 与 images.edit 的假 client（记录走了哪条）。"""
+    def __init__(self, items):
+        self._items = items
+        self.edit_called = False
+        self.generate_called = False
+        self.last_kwargs = None
+        outer = self
+
+        class _Images:
+            def generate(self, **kwargs):
+                outer.generate_called = True
+                outer.last_kwargs = kwargs
+                return _FakeResp(outer._items)
+
+            def edit(self, **kwargs):
+                outer.edit_called = True
+                outer.last_kwargs = kwargs
+                return _FakeResp(outer._items)
+
+        self.images = _Images()
+
+
+@pytest.mark.asyncio
+async def test_generate_img2img_uses_edit_endpoint(tmp_path, monkeypatch):
+    base = tmp_path / "ref.png"
+    base.write_bytes(b"\x89PNG ref-face")
+    p = SelfieProvider({"enabled": True, "backend": "openai", "api_key": "k",
+                        "model": "gpt-image-1", "out_dir": str(tmp_path / "out")})
+    raw = b"\x89PNG edited"
+    client = _FakeClientEdit([_FakeItem(b64_json=_b64.b64encode(raw).decode())])
+    monkeypatch.setattr(p, "_make_openai_client", lambda: client)
+    res = await p.generate("same woman, now cooking", base_image=str(base))
+    assert res.ok is True
+    assert client.edit_called is True and client.generate_called is False  # 有基础图→走 edit
+    assert res.extra.get("img2img") is True
+    from pathlib import Path as _P
+    assert _P(res.image_path).read_bytes() == raw
+
+
+@pytest.mark.asyncio
+async def test_generate_text2img_when_no_base(tmp_path, monkeypatch):
+    p = SelfieProvider({"enabled": True, "backend": "openai", "api_key": "k",
+                        "model": "gpt-image-1", "out_dir": str(tmp_path / "out")})
+    client = _FakeClientEdit([_FakeItem(b64_json=_b64.b64encode(b"x").decode())])
+    monkeypatch.setattr(p, "_make_openai_client", lambda: client)
+    res = await p.generate("a portrait")  # 无基础图 → text2img
+    assert res.ok is True
+    assert client.generate_called is True and client.edit_called is False
+    assert res.extra.get("img2img") is False
+
+
+@pytest.mark.asyncio
+async def test_generate_ignores_missing_base_file(tmp_path, monkeypatch):
+    p = SelfieProvider({"enabled": True, "backend": "openai", "api_key": "k",
+                        "model": "gpt-image-1", "out_dir": str(tmp_path / "out")})
+    client = _FakeClientEdit([_FakeItem(b64_json=_b64.b64encode(b"x").decode())])
+    monkeypatch.setattr(p, "_make_openai_client", lambda: client)
+    res = await p.generate("a portrait", base_image=str(tmp_path / "nope.png"))
+    assert res.ok is True
+    # 基础图路径不存在 → 回退 text2img（不因坏参数崩）
+    assert client.generate_called is True and client.edit_called is False
+
+
+def test_reference_image_from_album(tmp_path):
+    d = tmp_path / "album"
+    d.mkdir()
+    (d / "ref.jpg").write_bytes(b"r")
+    p = SelfieProvider({"enabled": True, "backend": "openai", "album_dir": str(d)})
+    assert p.reference_image() == str(d / "ref.jpg")
+    p2 = SelfieProvider({"enabled": True, "backend": "openai",
+                         "album_dir": str(tmp_path / "empty")})
+    assert p2.reference_image() == ""  # 无相册 → 空（skill 层据此回退 text2img）
+
+
+@pytest.mark.asyncio
+async def test_command_backend_receives_base_placeholder(tmp_path):
+    import sys
+    # 脚本把 {base} 写进输出，断言基础图路径被正确透传给本地推理脚本
+    script = tmp_path / "fake_img2img.py"
+    script.write_text(
+        "import sys\n"
+        "out, base = sys.argv[1], sys.argv[2]\n"
+        "open(out,'wb').write(b'PNG:'+base.encode())\n",
+        encoding="utf-8")
+    base = tmp_path / "ref.png"
+    base.write_bytes(b"ref")
+    p = SelfieProvider({
+        "enabled": True, "backend": "command", "out_dir": str(tmp_path / "out"),
+        "command_args": [sys.executable, str(script), "{out}", "{base}"],
+    })
+    res = await p.generate("a prompt", base_image=str(base))
+    assert res.ok is True
+    from pathlib import Path as _P
+    assert str(base) in _P(res.image_path).read_bytes().decode()

@@ -152,6 +152,12 @@ class TelegramCompanionWorker:
             target = int(chat_key)
         except (TypeError, ValueError):
             target = chat_key
+        # P4-4：取回真实 message.id，让编排器出站回写带 id → 已读回执（双勾）可精确绑定该行。
+        # A 线 TelegramClient 暴露 send_message_return_id；缺失（旧壳）时优雅回落只回 bool。
+        _fn = getattr(self.client, "send_message_return_id", None)
+        if _fn is not None:
+            ok, mid = await _fn(target, text)
+            return {"delivered": bool(ok), "message_id": str(mid or "")}
         ok = await self.client.send_message(target, text)
         return {"delivered": bool(ok), "message_id": ""}
 

@@ -132,3 +132,55 @@ async def test_episodic_backfill_daily_budget_blocks(tmp_path):
     assert out["ok"] is False
     assert out["error"] == "daily_embed_budget_exceeded"
     ai.embed_with_fallback.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_episodic_backfill_force_reembeds_existing(tmp_path):
+    """force=True 重嵌**已有向量**的行（换 embedding 模型后重建全量向量的能力）。"""
+    db = tmp_path / "force.db"
+    cm = await _make_cm(
+        tmp_path,
+        {"enabled": True, "db_path": str(db), "vector": {"enabled": True}},
+    )
+    ai = MagicMock()
+
+    async def _ewf(texts):
+        return [[0.05] * 16 for _ in texts]
+
+    ai.embed_with_fallback = AsyncMock(side_effect=_ewf)
+    sm = SkillManager(cm, ai)
+    sm._episodic_store.add_fact("u1", "强制重嵌的第一条事实内容")
+    sm._episodic_store.add_fact("u1", "强制重嵌的第二条事实内容")
+
+    out1 = await sm.episodic_backfill_embeddings(limit=10)
+    assert out1["updated"] == 2
+    # 不带 force：两条都已有向量 → 无待补
+    out2 = await sm.episodic_backfill_embeddings(limit=10)
+    assert out2["processed"] == 0
+    # force=True：无视已有向量，全量重嵌
+    out3 = await sm.episodic_backfill_embeddings(limit=10, force=True)
+    assert out3["processed"] == 2
+    assert out3["updated"] == 2
+
+
+@pytest.mark.asyncio
+async def test_update_embedding_records_model_and_dim(tmp_path):
+    """update_embedding 落库 embedding_model 名与自动推算的 embedding_dim 维度。"""
+    from src.utils.episodic_vector import vec_to_blob
+
+    cm = await _make_cm(
+        tmp_path,
+        {"enabled": True, "db_path": str(tmp_path / "meta.db"), "vector": {"enabled": True}},
+    )
+    sm = SkillManager(cm, MagicMock())
+    store = sm._episodic_store
+    rid = store.add_fact("u1", "记录模型与维度的事实内容")
+    assert rid
+    blob = vec_to_blob([0.1] * 1024)  # 模拟 bge-m3 1024 维
+    assert store.update_embedding(rid, blob, "bge-m3") is True
+    row = store._conn.execute(
+        "SELECT embedding_model, embedding_dim FROM episodic_memory WHERE id=?",
+        (rid,),
+    ).fetchone()
+    assert row[0] == "bge-m3"
+    assert row[1] == 1024

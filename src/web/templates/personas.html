@@ -723,29 +723,13 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
       <span class="summary-hint">{{ (i18n or {}).get('psn_master_only','（主帐号专属）') }}</span>
     </summary>
     <div style="margin-top:.9rem">
-      <div class="ps-row" style="align-items:flex-end">
-        <div class="field-row" style="flex:1">
-          <label>{{ (i18n or {}).get('psn_import_mode','导入模式') }}</label>
-          <select id="import-mode">
-            <option value="merge">{{ (i18n or {}).get('psn_merge_opt','Merge — 合并（保留现有，新增/覆盖）') }}</option>
-            <option value="replace">{{ (i18n or {}).get('psn_replace_opt','Replace — 全量替换（先清空）') }}</option>
-          </select>
-        </div>
-        <div style="display:flex;gap:.45rem;margin-bottom:.9rem;flex-wrap:wrap">
-          {# exportProfiles()/importProfiles() 从未定义（哑按钮，点击抛 ReferenceError）→ 移除。
-             真正可用的「批量导入人设」在上方 #import-panel（_parseImport/_executeImport）。 #}
-          <button class="btn btn-sm" id="sync-config-btn" onclick="syncToConfig()"
-            title="{{ (i18n or {}).get('psn_sync_to_yaml_t','将当前运营人设推送到 personas.yaml（可 git 追踪）') }}"
-            style="background:rgba(59,130,246,.1);border-color:rgba(59,130,246,.3);color:#3b82f6">⭐ {{ (i18n or {}).get('psn_sync_to_yaml','同步到 personas.yaml') }}</button>
-        </div>
-      </div>
-      <div class="field-row">
-        <label>{{ (i18n or {}).get('psn_json_data_lbl','JSON 数据（粘贴后点导入，或点导出后自动填充）') }}</label>
-        <textarea id="import-json" rows="4" style="font-family:monospace;font-size:.78rem"
-          placeholder='[{"id":"my_profile","name":"Alice","role":"..."}]'></textarea>
-      </div>
-      <div id="import-status" class="tts-status"></div>
-      <div id="sync-config-status" class="tts-status"></div>
+      {# 导出/导入 JSON 的哑按钮（exportProfiles/importProfiles，从未定义）已删；随之移除只服务它们的
+         导入模式下拉与 JSON 文本框——后者的 id=import-json/import-status 与上方真面板 #import-panel 重复
+         （getElementById 只命中第一个 → DOM id 碰撞）。真正可用的批量导入见 #import-panel。此卡保留「同步到 yaml」。 #}
+      <button class="btn btn-sm" id="sync-config-btn" onclick="syncToConfig()"
+        title="{{ (i18n or {}).get('psn_sync_to_yaml_t','将当前运营人设推送到 personas.yaml（可 git 追踪）') }}"
+        style="background:rgba(59,130,246,.1);border-color:rgba(59,130,246,.3);color:#3b82f6">⭐ {{ (i18n or {}).get('psn_sync_to_yaml','同步到 personas.yaml') }}</button>
+      <div id="sync-config-status" class="tts-status" style="margin-top:.6rem"></div>
     </div>
   </details>
   {% endif %}
@@ -2021,39 +2005,6 @@ async function syncToConfig() {
     st.textContent = window.T('psn_js_031') + e; st.className = 'tts-status err';
   } finally {
     if (btn) btn.disabled = false;
-  }
-}
-
-async function previewTTS() {
-  const st = document.getElementById('tts-status');
-  const player = document.getElementById('tts-player');
-  const text = document.getElementById('vp-preview-text').value.trim();
-  if (!text) { st.textContent = window.T('psn_js_097'); st.className = 'tts-status err'; return; }
-  st.textContent = window.T('psn_js_098'); st.className = 'tts-status';
-  player.style.display = 'none';
-  try {
-    const r = await fetch('/api/voice/tts-test', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({
-        text: text,
-        format: document.getElementById('vp-backend').value === 'openai' ? 'mp3' : 'mp3',
-        voice: document.getElementById('vp-voice').value.trim() || undefined,
-      })
-    });
-    const d = await r.json();
-    if (d.ok) {
-      st.textContent = window.T('psn_js_099') + (d.duration_sec ? d.duration_sec.toFixed(1) + 's' : '') + '，' + d.provider + '）';
-      st.className = 'tts-status ok';
-      player.src = d.url;
-      player.style.display = 'block';
-      player.play().catch(() => {});
-    } else {
-      st.textContent = window.T('psn_js_100') + (d.error || window.T('psn_js_101'));
-      st.className = 'tts-status err';
-    }
-  } catch(e) {
-    st.textContent = window.T('psn_js_031') + e; st.className = 'tts-status err';
   }
 }
 

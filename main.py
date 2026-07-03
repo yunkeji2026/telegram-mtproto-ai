@@ -1049,6 +1049,135 @@ class AIChatAssistant:
                                                     platform, account_id)
                                             return _ok
 
+                                        async def _try_autosend_image(
+                                            platform, account_id, chat_key, text
+                                        ) -> bool:
+                                            """全自动「按需发图」（gated, 默认关）：客户最近一条在要照片时，
+                                            按人设自拍(相册/生图)或对话物体图(生图)出一张，经 orch.send_media
+                                            发出。返回 True=已作为图片发出（跳过语音/文本）；False=未发→回落。
+                                            一处生效全平台（telegram/whatsapp/messenger/line/ig）。"""
+                                            _cfg = _assistant_ref.config.config or {}
+                                            from src.inbox.image_autosend import (
+                                                resolve_image_autosend_cfg, plan_autosend_image,
+                                                stage_image_file, record_image_sent,
+                                                record_image_fallback,
+                                            )
+                                            _scfg = resolve_image_autosend_cfg(_cfg)
+                                            if not _scfg.get("enabled", False):
+                                                return False
+                                            # 反双发：仅对**编排器管理**且支持发媒体的账号发图（与语音同口径）。
+                                            from src.integrations.account_orchestrator import (
+                                                get_orchestrator as _go,
+                                            )
+                                            _orch = _go(_cfg)
+                                            if not _orch.owns_media(platform, account_id):
+                                                return False
+                                            # 客户最近一条入站文本（判要图）+ 近窗口历史（上下文抽主体）。
+                                            _peer_text = ""
+                                            _history: list = []
+                                            try:
+                                                from src.inbox.normalizer import conv_id as _cidf
+                                                _st = getattr(_assistant_ref, "inbox_store", None)
+                                                if _st is None:
+                                                    return False
+                                                _cid = _cidf(platform, account_id, chat_key)
+                                                _recent = _st.list_recent_messages(
+                                                    _cid, limit=12) or []
+                                                for _m in _recent:
+                                                    _t = str(_m.get("text") or "")
+                                                    if _t:
+                                                        _history.append({
+                                                            "role": "user" if str(
+                                                                _m.get("direction") or "in") == "in"
+                                                            else "assistant",
+                                                            "content": _t})
+                                                for _m in reversed(_recent):
+                                                    if (str(_m.get("direction") or "in") == "in"
+                                                            and str(_m.get("text") or "")):
+                                                        _peer_text = str(_m.get("text"))
+                                                        break
+                                            except Exception:
+                                                return False
+                                            if not _peer_text:
+                                                return False
+                                            _directive = plan_autosend_image(
+                                                _peer_text, _history, _scfg)
+                                            if not _directive:
+                                                return False
+                                            # 账号级人设（相册分册 / 出图 prompt 来源），与语音同口径解析。
+                                            from src.ai.persona_voice import (
+                                                resolve_account_persona_id as _rapi,
+                                            )
+                                            _pid = _rapi(_cfg, platform, account_id)
+                                            _real_pid = _pid
+                                            try:
+                                                from src.ai.persona_voice import (
+                                                    resolve_effective_voice_context as _revc,
+                                                )
+                                                _ctx0 = _revc(
+                                                    _cfg, persona_id=_pid or None,
+                                                    account_persona_id=_pid or None,
+                                                    chat_key=str(chat_key),
+                                                    contact_key=str(chat_key),
+                                                    platform=platform, account_id=account_id)
+                                                _real_pid = str(
+                                                    _ctx0.get("persona_id") or _pid or "")
+                                            except Exception:
+                                                _real_pid = _pid
+                                            # 物体图可选 LLM 精炼 prompt（heuristic 抽主体不稳时）。
+                                            _refine = None
+                                            _ai = getattr(_assistant_ref, "ai_client", None)
+                                            if (_directive.get("kind") == "object"
+                                                    and _scfg.get("contextual_images_llm_prompt", False)
+                                                    and _ai is not None):
+                                                async def _refine():
+                                                    from src.ai.contextual_image import (
+                                                        build_llm_prompt_refine_instruction as _bi,
+                                                    )
+                                                    return await _ai.chat(
+                                                        _bi(_peer_text, _history))
+                                            _staged = await stage_image_file(
+                                                _cfg, platform, account_id, _real_pid,
+                                                _directive, llm_refine=_refine)
+                                            if not _staged:
+                                                record_image_fallback("stage_failed")
+                                                return False
+                                            _local, _url, _kind = _staged
+                                            # 配文：自拍用 caption / 物体图用 contextual_caption；都缺
+                                            # 则用 AI 本条回复文本当配文（把"口头答应"变成图的配文）。
+                                            if _kind == "object":
+                                                _cap = str(_scfg.get("contextual_caption") or "")
+                                            else:
+                                                _cap = str(_scfg.get("caption") or "")
+                                            _cap = _cap or str(text or "")
+
+                                            async def _icoro():
+                                                return await _orch.send_media(
+                                                    platform, account_id, chat_key,
+                                                    media_path=_local, media_url=_url,
+                                                    media_type="image", caption=_cap,
+                                                    inbox_text=("[图片] " + _cap).strip())
+
+                                            _wl = getattr(_assistant_ref, "_web_loop", None)
+                                            if _wl is not None and _wl.is_running():
+                                                _if = asyncio.run_coroutine_threadsafe(_icoro(), _wl)
+                                                _ires = await asyncio.wrap_future(_if)
+                                            else:
+                                                _ires = await _icoro()
+                                            _ok = bool(
+                                                isinstance(_ires, dict) and _ires.get("delivered"))
+                                            if _ok:
+                                                record_image_sent(_kind)
+                                                _assistant_ref.logger.info(
+                                                    "[autosend image] 已发图 platform=%s acct=%s kind=%s",
+                                                    platform, account_id, _kind)
+                                            else:
+                                                record_image_fallback("deliver_failed")
+                                                _assistant_ref.logger.info(
+                                                    "[autosend image] 投递失败回落 platform=%s acct=%s",
+                                                    platform, account_id)
+                                            return _ok
+
                                         def _is_desktop_account(platform, account_id) -> bool:
                                             """会话账号是否为内嵌「桌面/扩展」模式（无服务端 worker）。"""
                                             try:
@@ -1063,6 +1192,16 @@ class AIChatAssistant:
                                         async def _autosend_deliver(
                                             platform, account_id, chat_key, text
                                         ):
+                                            # 全自动「按需发图」优先（gated）：对方在要照片时先出图发出，
+                                            # 成功即作为图片发出、跳过语音/文本；未启用/不满足/失败 → 继续走语音/文本。
+                                            try:
+                                                if await _try_autosend_image(
+                                                    platform, account_id, chat_key, text
+                                                ):
+                                                    return {"ok": True, "delivered_as": "image"}
+                                            except Exception:
+                                                _assistant_ref.logger.debug(
+                                                    "[autosend image] 失败，回落语音/文本", exc_info=True)
                                             # 全自动语音优先（gated）：成功即作为语音发出；
                                             # 未启用/不满足/失败 → 回落到下面的文本投递（零行为变更）。
                                             try:
@@ -1392,6 +1531,7 @@ class AIChatAssistant:
                                         history, last = normalize_history(msgs)
                                         if not last:
                                             last = str(text or "")
+                                        _peer_audio_emotion = None  # 语音声学情绪（SER）
                                         if (
                                             _peer_media_type in ("image", "photo", "sticker")
                                             and _peer_media_ref
@@ -1463,10 +1603,59 @@ class AIChatAssistant:
                                                             "[语音]", "[媒体]", "",
                                                         ):
                                                             last = _peer_media_desc
+                                                        # 修复 history 与转录不一致：把历史末条用户
+                                                        #「[语音]」占位补成转录文本，避免语言切换误判。
+                                                        for _hm in reversed(history or []):
+                                                            if isinstance(_hm, dict) and _hm.get(
+                                                                "role") == "user":
+                                                                if str(_hm.get("content") or "").strip() in (
+                                                                    "[语音]", "[媒体]", ""):
+                                                                    _hm["content"] = _peer_media_desc
+                                                                break
                                                         self.logger.info(
                                                             "[AutoDraft] 语音转录补全: %s",
                                                             _peer_media_desc[:80],
                                                         )
+                                                        # 音频情绪识别（SER）：从声学语气听情绪，
+                                                        # 与原生 TG 路径对齐（best-effort，软降级）。
+                                                        try:
+                                                            _se_cfg = (self.config.get(
+                                                                'speech_emotion', {}) or {})
+                                                            if _se_cfg.get('enabled'):
+                                                                from src.ai.speech_emotion import (
+                                                                    get_speech_emotion_recognizer)
+                                                                from src.ai.speech_emotion_stats import (
+                                                                    get_speech_emotion_stats)
+                                                                _ser = get_speech_emotion_recognizer(
+                                                                    _se_cfg)
+                                                                _sres = await _ser.recognize_async(
+                                                                    str(_voice_path))
+                                                                _mc = float(_se_cfg.get(
+                                                                    'min_confidence', 0.5) or 0.5)
+                                                                _peer_audio_emotion = (
+                                                                    _sres.as_emotion_dict(
+                                                                        min_confidence=_mc))
+                                                                get_speech_emotion_stats().record(
+                                                                    ok=_sres.ok,
+                                                                    emotion=_sres.emotion,
+                                                                    confident=bool(
+                                                                        _peer_audio_emotion and
+                                                                        _peer_audio_emotion.get(
+                                                                            'confident')))
+                                                                if _peer_audio_emotion and \
+                                                                        _peer_audio_emotion.get(
+                                                                            'confident'):
+                                                                    self.logger.info(
+                                                                        "[AutoDraft] 声学情绪: %s "
+                                                                        "score=%.2f",
+                                                                        _peer_audio_emotion.get(
+                                                                            'raw_label'),
+                                                                        _peer_audio_emotion.get(
+                                                                            'score') or 0.0)
+                                                        except Exception:
+                                                            self.logger.debug(
+                                                                "[AutoDraft] 音频情绪识别失败",
+                                                                exc_info=True)
                                                         # 转录回写入站消息行：坐席台/时间线即时看到
                                                         # 「对方说了什么」而非空白/[语音]占位（转录已在
                                                         # 此异步路径完成，回写零额外成本、不阻塞主循环、
@@ -1528,6 +1717,8 @@ class AIChatAssistant:
                                             media_type=_peer_media_type,
                                             media_ref=_peer_media_ref,
                                             media_desc=_peer_media_desc,
+                                            conversation_id=cid,
+                                            peer_audio_emotion=_peer_audio_emotion,
                                         )
                                         if out.get("ok") and out.get("reply"):
                                             done = draft_svc.enrich_draft(
@@ -2013,6 +2204,8 @@ class AIChatAssistant:
                 # ★ S：翻译置信度低置信率/切换率按日落库（供看板画 7 天 sparkline；默认关）
                 self._maybe_init_translation_trend_log()
                 self._maybe_init_realtime_voice_trend_log()
+                # ★ F1：会话身份健康（入站 raw% / 头像 empty%）按日落库（默认关）
+                self._maybe_init_identity_trend_log()
 
                 # ★ Q 延伸：ingest 回写 contact_id（默认关）
                 self._maybe_wire_ingest_contact_writeback()
@@ -2424,6 +2617,34 @@ class AIChatAssistant:
                     _cs.get("trend_retention_days", 90))
         except Exception:
             self.logger.warning("翻译置信度趋势落库初始化失败（已忽略）", exc_info=True)
+
+    def _maybe_init_identity_trend_log(self) -> None:
+        """F1：按 ``inbox.identity.trend_log`` 装配会话身份健康日聚合落库（默认关）。
+
+        开启后 ``_record_ingest_identity`` / ``_record_avatar`` 旁路把入站 named/backfilled/raw
+        与头像 hit/empty/total 写入 ``identity_trend.db``，ops 看板经
+        ``/api/admin/identity-health-trend`` 读近 N 天 raw%/empty% sparkline。关闭时
+        ``record_identity_trend`` 恒 no-op。
+        """
+        try:
+            _inbox = (self.config.config.get("inbox") or {})
+            _ident = (_inbox.get("identity") or {})
+            if not _ident.get("trend_log", False):
+                self.logger.info("会话身份趋势落库未启用（inbox.identity.trend_log=false）")
+                return
+            from src.web.identity_trend_store import configure_identity_trend_store
+            _cfg_dir = Path(self.config.config_path).parent
+            store = configure_identity_trend_store(
+                enabled=True,
+                db_path=_cfg_dir / "identity_trend.db",
+                retention_days=float(_ident.get("trend_retention_days", 90)),
+            )
+            if store is not None:
+                self.logger.info(
+                    "✅ 会话身份趋势落库已就绪（retention=%sd）",
+                    _ident.get("trend_retention_days", 90))
+        except Exception:
+            self.logger.warning("会话身份趋势落库初始化失败（已忽略）", exc_info=True)
 
     def _maybe_init_realtime_voice_trend_log(self) -> None:
         """E 线：按 ``realtime_voice.trend_log`` 装配实时语音按日聚合落库（默认关）。

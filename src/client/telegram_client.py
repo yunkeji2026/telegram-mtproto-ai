@@ -117,6 +117,26 @@ def _normalize_message_text(raw: Any) -> str:
         return "".join(c if ord(c) < 0x10000 else "\ufffd" for c in s)
 
 
+# 入站视频/GIF 自动下载的体积上限（超限只落占位「[视频]」不下载，防大文件拖垮收件箱/磁盘）。
+# 20MB 覆盖绝大多数手机拍摄短视频；配置 telegram.inbound_video_max_bytes 可覆盖。
+_INBOUND_VIDEO_MAX_BYTES = 20 * 1024 * 1024
+
+
+def _has_ingestable_media(message: Any) -> bool:
+    """消息是否含可入站内容：文本/标题 + 语音/音频/图片/文件 + 视频/视频圆点/GIF/贴纸。
+
+    注意：视频/视频圆点/GIF/贴纸历史上被入口过滤漏掉 → 对方发来的视频在入口即被丢弃、
+    统一收件箱完全看不到。此处集中判定，供私聊/群聊实时 handler 与轮询兜底共用。
+    """
+    return bool(
+        getattr(message, "text", None) or getattr(message, "caption", None)
+        or getattr(message, "voice", None) or getattr(message, "audio", None)
+        or getattr(message, "photo", None) or getattr(message, "document", None)
+        or getattr(message, "video", None) or getattr(message, "video_note", None)
+        or getattr(message, "animation", None) or getattr(message, "sticker", None)
+    )
+
+
 class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
     """Telegram MTProto客户端"""
     
@@ -639,10 +659,10 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                 process_private = tg_cfg.get("process_private", True)
 
                 if process_private:
-                    if message.text or message.caption or message.voice or message.audio or message.photo or message.document:
+                    if _has_ingestable_media(message):
                         await self._process_message(message)
                     else:
-                        self.logger.debug("忽略非文本/语音/图片私聊消息: %s", message.chat.id)
+                        self.logger.debug("忽略无可入站内容的私聊消息: %s", message.chat.id)
                 else:
                     reject_msg = tg_cfg.get(
                         "private_reject_message",
@@ -717,9 +737,9 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                         self.logger.info("[群消息] 跳过: 限流 user=%s chat=%s reason=%s", uid, message.chat.id, reason)
                         return
 
-                # 检查是否需要处理此消息类型
-                if not (message.text or message.caption or message.voice or message.audio or message.photo or message.document):
-                    self.logger.info("[群消息] 跳过: 无文本/图/语音 chat_id=%s title=%s", chat_id, getattr(message.chat, 'title', ''))
+                # 检查是否需要处理此消息类型（含视频/视频圆点/GIF/贴纸，防被静默丢弃）
+                if not _has_ingestable_media(message):
+                    self.logger.info("[群消息] 跳过: 无可入站内容 chat_id=%s title=%s", chat_id, getattr(message.chat, 'title', ''))
                     return
                 
                 # P0: 不处理自己发送的消息（避免自我循环）
@@ -770,6 +790,38 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             except Exception as e:
                 self.logger.error(f"处理群组消息失败: {e}")
         
+        # P4-4 已读回执：companion 镜像开启时，注册原始更新处理器——对端读了我们发的消息
+        # （UpdateReadHistoryOutbox / 频道版）→ 把镜像进收件箱的出站消息升级为「已读」，
+        # 前端出站气泡即显示蓝色双勾。standalone（mirror 关）不注册，零影响。
+        if getattr(self, "_mirror_inbox", False):
+            try:
+                from pyrogram.handlers import RawUpdateHandler
+                from pyrogram import raw as _raw
+
+                _acct = getattr(self, "account_id", "default")
+
+                async def _on_read_receipt(_client, update, _users, _chats):
+                    try:
+                        from src.integrations.protocol_bridge import (
+                            report_read_upto, tg_peer_to_chat_key,
+                        )
+                        if isinstance(update, _raw.types.UpdateReadHistoryOutbox):
+                            ck = tg_peer_to_chat_key(getattr(update, "peer", None))
+                            if ck:
+                                report_read_upto("telegram", _acct, ck,
+                                                 getattr(update, "max_id", 0))
+                        elif isinstance(update, _raw.types.UpdateReadChannelOutbox):
+                            chid = getattr(update, "channel_id", None)
+                            if chid is not None:
+                                report_read_upto("telegram", _acct, f"-100{int(chid)}",
+                                                 getattr(update, "max_id", 0))
+                    except Exception:
+                        self.logger.debug("[mirror] 已读回执处理失败", exc_info=True)
+
+                self.client.add_handler(RawUpdateHandler(_on_read_receipt))
+            except Exception:
+                self.logger.debug("[mirror] 注册已读回执处理器失败", exc_info=True)
+
         _tg = self.config.get_telegram_config()
         self.logger.info(
             "消息处理器已设置 - 私聊=%s, 群组=%s (动态开关，保存即生效)",
@@ -1120,9 +1172,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                     continue
                 if getattr(from_user, "is_bot", False):
                     continue
-                if not (getattr(msg, "text", None) or getattr(msg, "caption", None)
-                        or getattr(msg, "voice", None) or getattr(msg, "audio", None)
-                        or getattr(msg, "photo", None) or getattr(msg, "document", None)):
+                if not _has_ingestable_media(msg):
                     continue
                 mdate = getattr(msg, "date", None)
                 mts = mdate.timestamp() if (mdate and hasattr(mdate, "timestamp")) else 0
@@ -1180,6 +1230,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             image_ocr_text = None  # 带图时的 OCR 结果，会传给 AI 以保持话术与图一致
             
             # 处理语音消息
+            _peer_audio_emotion = None      # 声学情绪（SER），供出站情感声 + 情绪落库融合
             if not text and (message.voice or message.audio):
                 if self.voice_transcriber:
                     try:
@@ -1204,7 +1255,41 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                                 else:
                                     text = "[语音消息 - 转录失败或无内容]"
                                     self.logger.warning("语音转录返回空结果")
-                                
+
+                                # 2b. 音频情绪识别（SER）：从声学语气听出情绪（best-effort，
+                                # 软降级；即使转录失败也能识别，纯情绪信号）。绝不阻塞主链路。
+                                try:
+                                    _se_cfg = (
+                                        self.config.get('speech_emotion', {})
+                                        if hasattr(self.config, 'get') else {}
+                                    )
+                                    if _se_cfg.get('enabled'):
+                                        from src.ai.speech_emotion import (
+                                            get_speech_emotion_recognizer)
+                                        from src.ai.speech_emotion_stats import (
+                                            get_speech_emotion_stats)
+                                        _ser = get_speech_emotion_recognizer(_se_cfg)
+                                        _res = await _ser.recognize_async(str(voice_file))
+                                        _min_conf = float(
+                                            _se_cfg.get('min_confidence', 0.5) or 0.5)
+                                        _peer_audio_emotion = _res.as_emotion_dict(
+                                            min_confidence=_min_conf)
+                                        get_speech_emotion_stats().record(
+                                            ok=_res.ok, emotion=_res.emotion,
+                                            confident=bool(
+                                                _peer_audio_emotion
+                                                and _peer_audio_emotion.get('confident')),
+                                        )
+                                        if _peer_audio_emotion and _peer_audio_emotion.get(
+                                                'confident'):
+                                            self.logger.info(
+                                                "[speech_emotion] 声学情绪: %s score=%.2f",
+                                                _peer_audio_emotion.get('raw_label'),
+                                                _peer_audio_emotion.get('score') or 0.0)
+                                except Exception:
+                                    self.logger.debug(
+                                        "音频情绪识别失败（忽略）", exc_info=True)
+
                                 # 3. 清理临时文件
                                 try:
                                     voice_file.unlink(missing_ok=True)
@@ -1309,6 +1394,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                     'image_ocr_text': image_ocr_text,
                     '_trigger_path': getattr(message, '_trigger_path', None),
                     '_is_voice_msg': bool(message.voice or message.audio),
+                    '_peer_audio_emotion': _peer_audio_emotion,
                 }
                 try:
                     self.message_queue.put_nowait(msg_data)
@@ -1365,7 +1451,8 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
 
     def _emit_inbox(self, *, chat_id: Any, text: str, direction: str,
                     name: str = "", msg_id: str = "",
-                    media_type: str = "", media_ref: str = "") -> None:
+                    media_type: str = "", media_ref: str = "",
+                    username: str = "", phone: str = "") -> None:
         """N4b：companion 运行时把 A 线收/发的消息镜像进统一收件箱（坐席台可见）。
 
         默认关（``self._mirror_inbox`` False）→ standalone main.py 零影响。仅 emit 到
@@ -1387,6 +1474,8 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                 direction=direction,
                 media_type=media_type,
                 media_ref=media_ref,
+                username=username or "",
+                phone=phone or "",
             ))
         except Exception:
             try:
@@ -1411,8 +1500,36 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             _ocr = str(message_data.get("image_ocr_text") or "").strip()
             if getattr(message, "sticker", None):
                 _media_type = "sticker"
-            elif getattr(message, "animation", None):
-                _media_type = "gif"
+                # 静态贴纸(.webp)下载后前端按 <img> 展示；下载失败退回占位「[贴纸]」。
+                try:
+                    from src.integrations.protocol_bridge import download_tg_media
+                    _mt, _mr = await download_tg_media(
+                        message, getattr(self, "account_id", "default"),
+                    )
+                    if _mr:
+                        _media_ref = _mr
+                except Exception:
+                    pass
+            elif (
+                getattr(message, "video", None)
+                or getattr(message, "video_note", None)
+                or getattr(message, "animation", None)
+            ):
+                # 视频 / 视频圆点 / GIF(animation 实为 mp4) → 统一按 video 下载渲染。
+                # 加体积上限：超限只保留类型落占位「[视频]」不下载，防大文件拖垮收件箱/磁盘。
+                _media_type = "video"
+                try:
+                    from src.integrations.protocol_bridge import download_tg_media
+                    _mt, _mr = await download_tg_media(
+                        message, getattr(self, "account_id", "default"),
+                        max_bytes=_INBOUND_VIDEO_MAX_BYTES,
+                    )
+                    if _mt:
+                        _media_type = _mt
+                    if _mr:
+                        _media_ref = _mr
+                except Exception:
+                    pass
             elif getattr(message, "photo", None) or (
                 getattr(message, "document", None)
                 and getattr(getattr(message, "document", None), "mime_type", "")
@@ -1443,12 +1560,31 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                         pass
             if _ocr and _media_type == "image" and "[图片内容]" not in (text or ""):
                 text = f"[图片内容] {_ocr}"
+            # 会话显示名优先用对方真实昵称（first + last），无则回落 @username，
+            # 再无才留空（前端回落脱敏号）——修「名单里显示数字 id 而非真人昵称」。
+            # 同时采集 @username / 电话，落库到会话身份列（客户信息面板/头部显示）。
+            _peer = getattr(message, 'from_user', None)
+            _peer_name = ''
+            _peer_username = ''
+            _peer_phone = ''
+            if _peer is not None:
+                _peer_name = ((getattr(_peer, 'first_name', '') or '') + ' '
+                              + (getattr(_peer, 'last_name', '') or '')).strip()
+                _peer_username = str(getattr(_peer, 'username', '') or '').lstrip('@')
+                _peer_phone = str(getattr(_peer, 'phone_number', '')
+                                  or getattr(_peer, 'phone', '') or '')
+                if not _peer_name:
+                    _peer_name = ('@' + _peer_username) if _peer_username else ''
+            if not _peer_name:
+                _peer_name = str(message_data.get('username') or '')
             self._emit_inbox(
                 chat_id=chat_id, text=text, direction="in",
-                name=str(message_data.get('username') or ''),
+                name=_peer_name,
                 msg_id=str(getattr(message, 'id', '') or ''),
                 media_type=_media_type,
                 media_ref=_media_ref,
+                username=_peer_username,
+                phone=_peer_phone,
             )
 
             _es_cnt, _es_key = 0, ""
@@ -1593,6 +1729,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                 'media_ref': _media_ref,
                 'media_desc': image_ocr_text or "",
                 '_current_user_message_for_lang': ai_text,
+                '_peer_audio_emotion': message_data.get('_peer_audio_emotion'),
                 # N 线 核心1：复用共享 companion_context.route_persona_id（A/B 同一套 3-tier 路由）
                 'account_persona_id': _route_persona_id(
                     getattr(self, 'account_persona_ids', None), _chat_type_str
@@ -1708,7 +1845,8 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             if reply_final:
                 try:
                     _voice_sent = await self._maybe_send_voice_reply(
-                        message, reply_final, is_peer_voice=_is_voice_msg
+                        message, reply_final, is_peer_voice=_is_voice_msg,
+                        peer_audio_emotion=message_data.get('_peer_audio_emotion'),
                     )
                 except Exception as _ve:
                     self.logger.warning("[voice_reply] probe failed: %s", _ve)

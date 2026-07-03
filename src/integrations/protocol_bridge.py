@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import secrets
 import time
 from pathlib import Path
@@ -137,12 +138,42 @@ def tg_media_meta(message: Any) -> Optional[Tuple[str, str]]:
     return None
 
 
-async def download_tg_media(message: Any, account_id: str) -> Tuple[str, str]:
-    """下载 pyrogram 媒体到 static 目录，返回 (media_type, media_url)；无媒体/失败返回 ('','')。"""
+def tg_media_file_size(message: Any) -> int:
+    """尽力取 pyrogram 媒体对象的 ``file_size``（字节）；取不到返回 0（未知→不拦截）。"""
+    for attr in ("video", "video_note", "animation", "document",
+                 "audio", "voice", "photo", "sticker"):
+        obj = getattr(message, attr, None)
+        if obj is not None:
+            try:
+                return int(getattr(obj, "file_size", 0) or 0)
+            except (TypeError, ValueError):
+                return 0
+    return 0
+
+
+async def download_tg_media(
+    message: Any, account_id: str, *, max_bytes: int = 0,
+) -> Tuple[str, str]:
+    """下载 pyrogram 媒体到 static 目录，返回 (media_type, media_url)。
+
+    - 无媒体：返回 ``('', '')``。
+    - ``max_bytes > 0`` 且媒体体积已知并超限：返回 ``(kind, '')``——保留类型让调用方
+      落占位（如「[视频]」），但**不下载**大文件，避免大视频拖垮收件箱/磁盘。
+      体积未知（file_size 缺失）时不拦截，照常尝试下载（向后兼容）。
+    - 下载失败：返回 ``('', '')``（与历史行为一致）。
+    """
     meta = tg_media_meta(message)
     if not meta:
         return "", ""
     kind, ext = meta
+    if max_bytes and max_bytes > 0:
+        size = tg_media_file_size(message)
+        if size and size > max_bytes:
+            logger.info(
+                "[protocol_bridge] tg 媒体超上限跳过下载 kind=%s size=%s max=%s",
+                kind, size, max_bytes,
+            )
+            return kind, ""
     try:
         mid = str(getattr(message, "id", "") or "") or secrets.token_hex(6)
         dest, url = media_paths("telegram", f"{account_id}_{mid}", ext)
@@ -192,6 +223,70 @@ def emit_incoming(msg: Dict[str, Any]) -> None:
         logger.debug("[protocol_bridge] sink 落库失败", exc_info=True)
 
 
+# ── P4-4 已读回执（协议号在本进程内直接回写 messages.status，无需 HTTP） ──────────
+#   worker 收到平台回执/发送成功后调用，走 store 的单调升级写入，前端轮询即见勾变化。
+
+def report_message_status(
+    platform: str, account_id: str, chat_key: str, msg_id: str, status: str,
+) -> bool:
+    """把单条出站消息的投递状态（sent/delivered/read）单调升级写入收件箱。
+
+    best-effort：store 未注册 / 目标消息未落库 / 任何异常都静默返回 False，绝不外泄。
+    """
+    if not (chat_key and msg_id and status):
+        return False
+    store = get_inbox_store()
+    if store is None:
+        return False
+    try:
+        return bool(store.set_message_status(
+            f"{str(platform).lower()}:{account_id}:{chat_key}", str(msg_id), status))
+    except Exception:
+        logger.debug("[protocol_bridge] 回执落库失败", exc_info=True)
+        return False
+
+
+def report_read_upto(
+    platform: str, account_id: str, chat_key: str, max_id: Any,
+) -> int:
+    """对端「已读到 max_id」→ 把该会话所有 platform_msg_id ≤ max_id 的出站消息升级为 read。
+
+    Telegram 的 ``UpdateReadHistoryOutbox`` 语义（对端把你发的消息读到某条为止）。
+    best-effort：返回更新条数，异常/未就绪返回 0。
+    """
+    if not chat_key:
+        return 0
+    store = get_inbox_store()
+    if store is None:
+        return 0
+    try:
+        return int(store.mark_outbound_read_upto(
+            f"{str(platform).lower()}:{account_id}:{chat_key}", max_id))
+    except Exception:
+        logger.debug("[protocol_bridge] 批量已读落库失败", exc_info=True)
+        return 0
+
+
+def tg_peer_to_chat_key(peer: Any) -> str:
+    """把 pyrogram raw Peer（``PeerUser``/``PeerChat``/``PeerChannel``）归一为收件箱 chat_key
+    （= pyrogram ``chat.id`` 的字符串形态：用户正数 / 群负数 / 频道 -100 前缀）。
+
+    仅用 getattr 探测字段，无需导入 pyrogram（便于单测传 duck-typed 对象）。无法解析返回 ''。
+    """
+    if peer is None:
+        return ""
+    uid = getattr(peer, "user_id", None)
+    if uid is not None:
+        return str(uid)
+    cid = getattr(peer, "chat_id", None)
+    if cid is not None:
+        return str(-int(cid))
+    chid = getattr(peer, "channel_id", None)
+    if chid is not None:
+        return f"-100{int(chid)}"
+    return ""
+
+
 # ── Phase 3：protocol 自动回复 hook（与入站 sink 分离，async，可不挂）──────────
 #   worker 收到入站消息 → 已 emit_incoming 落库后 → maybe_auto_reply(payload)。
 #   web 层在启动时 register_reply_hook(build_reply_hook(app))；默认全局/账号双闸门皆关。
@@ -239,17 +334,45 @@ def ingest_incoming(
     source: Optional[Dict[str, Any]] = None,
     media_type: str = "",
     media_ref: str = "",
+    chat_type: str = "",
+    reply_to: Optional[Dict[str, Any]] = None,
+    username: str = "",
+    phone: str = "",
+    avatar_url: str = "",
 ) -> Optional[str]:
     """把一条 protocol 消息落库到统一收件箱。返回 conversation_id（失败返回 None）。
 
     M6④：携带 ``media_type`` / ``media_ref``（已下载好的 /static URL 或本地路径）。
     媒体消息即使无文本也会落库为一条消息（会话预览用占位符如「[图片]」，但消息正文仍为空，
     不污染 auto-draft）。
+
+    P4-2：``reply_to``={id,text,sender} 携带被引用消息摘要，落 messages.reply_to_*，
+    供 thread 渲染引用条（缺省 None=普通消息）。
+
+    身份画像：``username`` / ``phone`` / ``avatar_url`` 落库到会话身份列（列表/头部/
+    客户信息面板显示真实昵称与头像）。号码补名收口于此——``name`` 空或就是裸 chat_key 时，
+    用已同步的通讯录名（``protocol_contacts``）兜底，使**所有入站路径**（HTTP 桥 + 进程内
+    sink）一致地把裸号码补成真人名，而非仅 HTTP 桥。
     """
     if store is None or not chat_key:
         return None
     platform = str(platform or "").lower()
+    # 号码补名（收口到唯一落库入口，覆盖进程内 sink 与 HTTP 桥）：无来显名或来显名
+    # 就是裸号码 → 用已同步通讯录名补齐（好友名单同步后即贴近官方客户端体验）。
+    if not name or name == str(chat_key):
+        try:
+            _cn = store.get_protocol_contact_name(platform, str(account_id), str(chat_key))
+            if _cn:
+                name = _cn
+        except Exception:
+            logger.debug("[protocol_bridge] 号码补名失败", exc_info=True)
     src: Dict[str, Any] = dict(source or {})
+    if isinstance(reply_to, dict) and (reply_to.get("id") or reply_to.get("text")):
+        src["reply_to"] = {
+            "id": str(reply_to.get("id") or ""),
+            "text": str(reply_to.get("text") or ""),
+            "sender": str(reply_to.get("sender") or ""),
+        }
     if msg_id:
         src.setdefault("message_id", str(msg_id))
         if platform == "telegram":
@@ -257,6 +380,9 @@ def ingest_incoming(
         elif platform == "whatsapp":
             src.setdefault("wamid", str(msg_id))
     has_media = bool(media_type or media_ref)
+    # P2 群聊：chat_type=group 让会话分流到「群组动态」（不进 SLA/自动回复/auto-draft）
+    if chat_type:
+        src.setdefault("chat_type", str(chat_type))
     chat = normalize_chat(
         platform=platform,
         platform_name=PLATFORM_DISPLAY.get(platform, platform.title()),
@@ -264,6 +390,9 @@ def ingest_incoming(
         chat_key=str(chat_key), name=name or str(chat_key),
         last_msg=text, last_ts=ts or 0,
         unread=1 if direction == "in" else 0, source=src,
+        chat_type=str(chat_type or ""),
+        username=str(username or ""), phone=str(phone or ""),
+        avatar_url=str(avatar_url or ""),
     )
     if direction == "out":
         m = message_obj(text=text, ts=ts or 0, direction="out",
@@ -290,22 +419,82 @@ def make_message(
     *, platform: str, account_id: str, chat_key: str, text: str,
     name: str = "", ts: float = 0, msg_id: str = "", direction: str = "in",
     media_type: str = "", media_ref: str = "",
+    username: str = "", phone: str = "", avatar_url: str = "",
     source: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """构造给 ``emit_incoming`` 的标准消息 dict。
 
     ``source``：上游平台原始字段（如 LINE 的 ``{"chat_type": "group"|"room"|"user"}``），
     会透传给落库时的 ``infer_chat_type``，让群组/房间正确分流到「群组动态」而非 SLA 告警。
+
+    ``username`` / ``phone`` / ``avatar_url``：peer 真实身份画像（缺省空）。经 sink
+    ``ingest_incoming(store, **m)`` 落库到会话身份列，供列表/头部/客户信息面板显示真实
+    昵称与头像，替代「一排数字 id」。均为纯加法可选键——旧调用方不传即空、行为不变。
     """
     msg: Dict[str, Any] = {
         "platform": platform, "account_id": account_id, "chat_key": chat_key,
         "name": name, "text": text, "ts": ts or time.time(),
         "msg_id": msg_id, "direction": direction,
         "media_type": media_type, "media_ref": media_ref,
+        "username": username, "phone": phone, "avatar_url": avatar_url,
     }
     if source:
         msg["source"] = dict(source)
     return msg
+
+
+_WA_PHONE_RE = re.compile(r"^\d{6,20}$")  # WhatsApp 私聊 chat_key 即 E.164 裸号（6~20 位）
+
+
+def enrich_ingest_identity(
+    platform: str, chat_key: str, name: str = "",
+    chat_type: str = "", contact_name: str = "",
+) -> Dict[str, str]:
+    """入站身份归一（跨平台，纯函数便于单测）——WhatsApp/Messenger 等经 HTTP ingest 的号共用。
+
+    定 display_name / phone，并给出分类 ``outcome`` 供观测（量化各平台「一排数字」残留）：
+
+    - **display_name**：来显名是真名（非空且 != chat_key）→ 用之（``named``）；否则用**已同步
+      通讯录名**补齐（``backfilled``）；仍取不到 → 空串，调用方回落裸 ``chat_key``（``raw``＝用户
+      最初抱怨的「一排数字」）。全程 no-clobber 友好——空串交给 store 的 CASE 护栏不覆盖已有真名。
+    - **phone**：WhatsApp **私聊**的 ``chat_key`` 即 E.164 裸号 → 补进 ``phone``（资料面板可显
+      号码，补齐 Telegram 之外平台的信息面板）；群聊 / 其他平台 → 空。
+
+    入参 ``contact_name`` 由调用方（有 store 的路由）查好传入，保持本函数纯净、可离线单测。
+    """
+    platform = str(platform or "").strip().lower()
+    chat_key = str(chat_key or "").strip()
+    name = str(name or "").strip()
+    contact_name = str(contact_name or "").strip()
+    is_group = str(chat_type or "").strip().lower() == "group"
+    if name and name != chat_key:
+        display_name, outcome = name, "named"
+    elif contact_name and contact_name != chat_key:
+        display_name, outcome = contact_name, "backfilled"
+    else:
+        display_name, outcome = "", "raw"
+    phone = chat_key if (platform == "whatsapp" and not is_group
+                         and _WA_PHONE_RE.match(chat_key)) else ""
+    return {"display_name": display_name, "phone": phone, "outcome": outcome}
+
+
+def tg_peer_identity(peer: Any) -> Dict[str, str]:
+    """从 pyrogram Chat/User（``message.chat``/``from_user``）抽取真实身份画像。
+
+    返回 ``{"name", "username", "phone"}``（均字符串，缺省空）。仅用 getattr（无需导入
+    pyrogram，单测可传 duck-typed 对象）。name 组装优先级：群/频道标题 → 名(first+last)
+    → @username → 空（交由调用方回落裸 id）。修「私聊显示数字 id 而非真人昵称」。
+    """
+    if peer is None:
+        return {"name": "", "username": "", "phone": ""}
+    title = str(getattr(peer, "title", "") or "").strip()
+    first = str(getattr(peer, "first_name", "") or "").strip()
+    last = str(getattr(peer, "last_name", "") or "").strip()
+    username = str(getattr(peer, "username", "") or "").strip().lstrip("@")
+    phone = str(getattr(peer, "phone_number", "") or getattr(peer, "phone", "") or "").strip()
+    full = (first + " " + last).strip()
+    name = title or full or (("@" + username) if username else "")
+    return {"name": name, "username": username, "phone": phone}
 
 
 def tg_message_payload(
@@ -314,13 +503,16 @@ def tg_message_payload(
     """把一条 pyrogram Message 归一为 ``emit_incoming`` 的消息 dict（仅用 getattr，无需导入 pyrogram）。
 
     实时消息处理器与历史回填共用，单测可传任意 duck-typed 对象。返回 None 表示无法解析。
+
+    会话身份取自 ``message.chat``（私聊即对端本人，群/频道即群名）——组装 first+last 全名、
+    ``@username``、电话，落库后列表/头部/客户信息面板显示真实昵称，替代裸 chat_id。
     """
     chat = getattr(message, "chat", None)
     chat_id = getattr(chat, "id", None)
     if chat_id is None:
         return None
-    name = (getattr(chat, "title", None) or getattr(chat, "first_name", None)
-            or str(chat_id))
+    ident = tg_peer_identity(chat)
+    name = ident["name"] or str(chat_id)
     text = getattr(message, "text", None) or getattr(message, "caption", None) or ""
     date = getattr(message, "date", None)
     ts = date.timestamp() if hasattr(date, "timestamp") else 0
@@ -330,6 +522,7 @@ def tg_message_payload(
         msg_id=str(getattr(message, "id", "") or ""),
         direction="out" if getattr(message, "outgoing", False) else "in",
         media_type=media_type, media_ref=media_ref,
+        username=ident["username"], phone=ident["phone"],
     )
 
 

@@ -201,6 +201,27 @@ tmp_voice_replies/
 voice_samples/
 tools/voice_samples/
 
+# 声纹克隆参考音频（PII/版权：真人声样本，如 lin_xiaoyu.wav / liu_dehua.wav / 刘德华声音台词.wma）
+config/voice_refs/*.wav
+config/voice_refs/*.wma
+config/voice_refs/*.mp3
+config/voice_refs/*.m4a
+!config/voice_refs/.gitkeep
+*.wma
+
+# 账号自身/联系人头像（运行时下载的真实头像 = PII，勿入库）
+src/web/static/persona_avatars/
+
+# Messenger web 登录调试转储（截图/DOM/请求 dump 可能含 session token/PII）
+services/messenger-web/_*.png
+services/messenger-web/_*.json
+services/*/_*.png
+services/*/_dom_dump.json
+services/*/_requests_dump.json
+
+# scripts 下临时脚本（一次性，非入库）
+scripts/_tmp_*.py
+
 # ML 模型完整目录（whisper 等大权重，216M 级别）
 models/
 

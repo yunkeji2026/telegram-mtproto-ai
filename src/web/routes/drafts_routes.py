@@ -144,6 +144,11 @@ def register_drafts_routes(app, *, api_auth):
         except Exception:
             pass
         try:
+            from src.inbox.image_autosend import metrics_snapshot as _ims
+            snap["image"] = _ims()  # 全自动发图：sent/fallback/last_reason/last_kind
+        except Exception:
+            pass
+        try:
             # 统一草稿引擎规则栈生效观测（记忆/情感/陪伴/慢思考/守卫/重试命中）
             from src.monitoring.metrics_store import get_metrics_store
             snap["draft_pipeline"] = get_metrics_store().get_inbox_draft_metrics()
@@ -680,6 +685,39 @@ def register_metrics_route(app, *, api_auth):
         except Exception:
             pass
 
+        # 音频情绪识别（SER）观测：从声学语气听出的情绪分布 + 模型可用性（软降级次数）
+        try:
+            from src.ai.speech_emotion_stats import get_speech_emotion_stats
+            metrics["speech_emotion"] = get_speech_emotion_stats().dump()
+        except Exception:
+            pass
+
+        # 深度人设观测：巩固/画像/内部梗/经历/未收尾话题/回指 累计（真人感"长出来"的证据）
+        try:
+            from src.companion.deep_persona_stats import get_deep_persona_stats
+            _dpm = get_deep_persona_stats().dump()
+            # G1：合入 embedder 命中率/延迟（语义召回"值不值"的量化）
+            try:
+                from src.companion.deep_persona_runtime import embedder_stats
+                _dpm["embedder"] = embedder_stats()
+            except Exception:
+                pass
+            # 趋势快照（默认关 trend_log）：机会式 upsert 当天累计 → 供 7 天 sparkline / AB
+            try:
+                from src.companion.deep_persona_runtime import trend_log_enabled
+                if trend_log_enabled():
+                    from src.companion.deep_persona_trend import (
+                        get_deep_persona_trend, flatten_stats_for_trend)
+                    _tr = get_deep_persona_trend("config/deep_persona.db")
+                    if _tr is not None:
+                        _tr.upsert_today(flatten_stats_for_trend(_dpm))
+                        _dpm["trend_7d"] = _tr.read_recent(7)
+            except Exception:
+                pass
+            metrics["deep_persona"] = _dpm
+        except Exception:
+            pass
+
         # 实时语音通话观测（发起/接通率/时长/挂断原因/主机健康/显存生命周期）
         try:
             from src.ai.realtime_voice_stats import get_realtime_voice_stats
@@ -693,6 +731,20 @@ def register_metrics_route(app, *, api_auth):
             ap = all_provider_stats()
             if ap:
                 metrics["providers"] = ap
+        except Exception:
+            pass
+
+        # 前端「哑按钮」运行时错误观测（dead-click 守卫 beacon 累计；哪页哪函数点崩、多频）
+        try:
+            from src.web.frontend_error_stats import get_frontend_error_stats
+            metrics["frontend_errors"] = get_frontend_error_stats().dump()
+        except Exception:
+            pass
+
+        # 会话 peer 身份「惰性解析/自愈补名」观测（数字号 healed 了多少 / 缓存命中 / 取不到）
+        try:
+            from src.web.peer_identity_stats import get_peer_identity_stats
+            metrics["peer_identity"] = get_peer_identity_stats().dump()
         except Exception:
             pass
 
@@ -783,9 +835,52 @@ def register_metrics_route(app, *, api_auth):
             except Exception:
                 pass
 
+            # 前端「哑按钮」运行时错误（by page / by fn / by type）
+            try:
+                from src.web.frontend_error_stats import get_frontend_error_stats
+                buf.write(get_frontend_error_stats().dump_prom())
+            except Exception:
+                pass
+
+            # 会话 peer 身份自愈补名（by source × outcome）
+            try:
+                from src.web.peer_identity_stats import get_peer_identity_stats
+                buf.write(get_peer_identity_stats().dump_prom())
+            except Exception:
+                pass
+
             return PlainTextResponse(buf.getvalue(), media_type="text/plain; version=0.0.4")
 
         return {"ok": True, **metrics}
+
+
+def register_telemetry_route(app, *, api_auth):
+    """前端「哑按钮」运行时错误上报（任意登录用户可写，不限主管）。
+
+    POST /api/telemetry/frontend-error  body: {page, fn, type}
+    dead-click 守卫（unified_inbox + _rpa_shared_scripts）捕获 ReferenceError 后 beacon 到此，
+    经 FrontendErrorStats 累计，读出走 /api/workspace/metrics.frontend_errors（主管专属）。
+    只收计数用的三个消毒字段，绝不落原文/堆栈；任何异常都吞掉返回 ok，绝不影响前端。
+    """
+    from fastapi import Depends
+
+    @app.post("/api/telemetry/frontend-error")
+    async def api_frontend_error(request: Request, _=Depends(api_auth)):
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if isinstance(body, dict):
+            try:
+                from src.web.frontend_error_stats import get_frontend_error_stats
+                get_frontend_error_stats().record(
+                    page=str(body.get("page") or ""),
+                    fn=str(body.get("fn") or ""),
+                    etype=str(body.get("type") or ""),
+                )
+            except Exception:
+                pass
+        return {"ok": True}
 
 
 def register_glossary_route(app, *, api_auth):

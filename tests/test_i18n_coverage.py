@@ -7,11 +7,18 @@
 import pytest
 
 from scripts.i18n_scan import (
+    _TPL_DIR,
     _count_untagged_cjk,
     _iter_used_keys,
     _strip_comments,
     scan_workspace_i18n,
 )
+
+# 全部后台模板（递归，含 ops/ 等子目录；供「window.T 键解析」全库门禁参数化，
+# 覆盖收录页 + 非收录页 + 子目录页）。用相对 POSIX 路径作参数 id，失败即定位到文件。
+_ALL_TEMPLATE_HTML = tuple(sorted(
+    p.relative_to(_TPL_DIR).as_posix() for p in _TPL_DIR.rglob("*.html")
+))
 
 
 def test_strip_comments_removes_comment_cjk_keeps_strings():
@@ -441,7 +448,9 @@ _SCRIPT_CJK_ZERO_PAGES = ("personas.html", "_rpa_shared_funnel.html", "_rpa_shar
                           # P33b：实时语音试拨页 JS 层零裸 CJK（rvc_js_*/rvc_tf_*；_toneLabel 中文正则用 \\u 转义）。
                           "voice_call.html",
                           # ③-S15：帮助页 JS 层零裸 CJK（hp_js_copied 复制 toast）。
-                          "help.html")
+                          "help.html",
+                          # P43c：前端存量核查补收口——三页去掉 window.T 冗余中文兜底（键 zh/en 均已在册）。
+                          "cases.html", "logs.html", "analytics.html")
 
 
 @pytest.mark.parametrize("name", _SCRIPT_CJK_ZERO_PAGES)
@@ -463,6 +472,49 @@ def test_sealed_pages_no_cjk_in_own_scripts(name):
         f"{name} 自有 <script> 残留 {len(leaks)} 处裸 CJK（应改用 window.T/Tf 键，禁中文 fallback）:\n"
         + "\n".join(f"  - ...{c}..." for c in leaks[:15])
     )
+
+
+@pytest.mark.parametrize("name", _ALL_TEMPLATE_HTML)
+def test_template_window_t_keys_resolve(name):
+    """P43e：**全库**模板里 ``window.T('k')`` / ``window.Tf('k', …)`` 引用的**静态**键必须在译表存在，
+    否则 ``window.T`` 回落显示裸键名（如曾经的 ``sa_js001`` / ``im_js001`` 直接把 key 露给用户）。
+
+    P43d 只护 56 张收录页；本门禁扩到 ``templates/**/*.html`` 全量（含非收录页、ops/ 子目录），
+    把「键即唯一真相」从收录页推广到全站。取键走 :func:`window_t_static_keys`（正确处理跨行调用/
+    转义引号，并把 ``'p.'+code`` 拼接键与模板字面量判为动态跳过——运行时才成形）。当前全库 0 缺失 → 零门禁。
+    """
+    from scripts.i18n_scan import window_t_static_keys
+    from src.web.web_i18n import get_translations
+
+    zh = get_translations("zh")
+    src = (_TPL_DIR / name).read_text(encoding="utf-8")
+    missing = sorted(k for k in window_t_static_keys(src) if k not in zh)
+    assert not missing, (
+        f"{name} 里 window.T/Tf 引用了译表中不存在的静态键（会把裸 key 显示给用户，"
+        f"请在 web_i18n.py 补 zh/en）: {missing}"
+    )
+
+
+def test_window_t_static_keys_extractor_semantics():
+    """P43f：门禁自身取键口径 :func:`window_t_static_keys` 的正确性回归——
+    门禁是前端裸键的安全网，网眼逻辑（跨行/转义/拼接/模板字面量）必须自带回归，否则漏检无人知。"""
+    from scripts.i18n_scan import iter_window_t_calls, window_t_static_keys
+
+    src = (
+        "window.T('static_one');\n"
+        "window.Tf('static_two', {a:1});\n"
+        "window.T(\n  'multiline_key'\n);\n"           # 跨行首参
+        "window.T('dash.lang.' + code);\n"              # 拼接前缀 → 动态
+        "window.T(  'concat_nl'\n  + x);\n"             # 跨行 + 拼接 → 动态
+        "window.T(`tpl_${x}`);\n"                        # 模板字面量 → 动态
+        "window.T(keyVar);\n"                            # 变量首参 → 跳过
+        "window.T('has\\'esc');\n"                       # 转义引号 → 键含单引号
+    )
+    static = window_t_static_keys(src)
+    assert static == {"static_one", "static_two", "multiline_key", "has'esc"}, static
+
+    dynamic = {k for k, dyn in iter_window_t_calls(src) if dyn}
+    assert dynamic == {"dash.lang.", "concat_nl", "tpl_${x}"}, dynamic
 
 
 def test_sealed_templates_no_legacy_date_formatters():
@@ -518,6 +570,33 @@ def test_en_values_no_cjk_structural_punctuation():
     assert not offenders, (
         "以下 EN 译文含 CJK 结构标点（应改用 ASCII 标点或重写为完整英文句，疑似机器粘接/照抄中文）:\n"
         + "\n".join(f"  {k} = {v!r}" for k, v in list(offenders.items())[:20])
+    )
+
+
+def test_i18n_placeholders_avoid_reserved_names():
+    """P43c：任何译文里的 ``{placeholder}`` 不得叫 ``request`` / ``key`` / ``default``——
+    这三个是 :func:`tr` 的形参名。历史教训：``err.rpa.config_missing`` 曾用 ``{key}``，
+    施工出的 ``tr(request, key, ...)`` 在**运行时**直接 ``TypeError: got multiple values for 'key'``
+    （不只是测试挂）。tr 现已把这三个形参改为位置限定（``/``）兜底，但从**源头**禁用这些占位符名
+    才是根治：既避免 ``t()``/其它 ``.format`` 路径踩坑，也让键值自解释。实测当前全表 0 命中 → 常驻零门禁。
+    """
+    import re as _re
+    from src.web.web_i18n import get_translations
+
+    reserved = {"request", "key", "default"}
+    # 抓形如 {name} / {name:spec} / {name!r} 的合法 format 字段名（跳过 {intent: ...} 这类字面花括号也无妨：intent 非保留名）
+    ph = _re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)[}:!]")
+    offenders = {}
+    for lang in ("zh", "en"):
+        for k, v in get_translations(lang).items():
+            if not isinstance(v, str):
+                continue
+            bad = {name for name in ph.findall(v) if name in reserved}
+            if bad:
+                offenders.setdefault(k, set()).update(bad)
+    assert not offenders, (
+        "以下键的译文占位符与 tr 形参撞名（改用 name/field/err 等非保留名）:\n"
+        + "\n".join(f"  {k}: {sorted(names)}" for k, names in list(offenders.items())[:20])
     )
 
 
@@ -1006,7 +1085,9 @@ def test_tr_localizes_by_request_lang():
     # 无 state / None → 回落默认 zh，不抛
     assert tr(None, "err.kb.csv_empty") == "CSV 内容为空"
     # 未知键回落 default，再回落键名
-    assert tr(en_req, "err.kb.__nope__", default="X") == "X"
+    assert tr(en_req, "err.kb.__nope__", "X") == "X"  # default 位置限定（positional-only）
+    # positional-only 防御：占位符名即便叫 key/default/request，以 kwarg 传入也落进 **fmt，不与形参撞名抛 TypeError
+    assert tr(en_req, "err.kb.__nope__", None, key="z", request="w", default="d") == "err.kb.__nope__"
     assert tr(en_req, "err.kb.__nope__") == "err.kb.__nope__"
     # 占位符格式化（异常吞掉不抛）
     assert tr(en_req, "err.kb.ai_call_failed", err="boom") == "AI call failed: boom"
@@ -1056,6 +1137,19 @@ def test_tr_localizes_by_request_lang():
     assert tr(en_req, "err.ec.tools_disabled") == "E-commerce tools are not enabled"
     assert tr(zh_req, "err.tg.save_config_failed") == "保存配置失败"
     assert tr(en_req, "err.ca.event_not_found") == "Event not found or crisis audit is not enabled"
+    # P43b：messenger_rpa——{dep}/{field}/{key} 参数化归一 + 复用 op_failed/service_not_started
+    assert tr(zh_req, "err.rpa.dep_not_injected", dep="state_store") == "state_store 未注入"
+    assert tr(en_req, "err.rpa.dep_not_injected", dep="messenger_rpa state_store") == \
+        "messenger_rpa state_store not injected"
+    assert tr(zh_req, "err.rpa.must_be_array", field="profiles") == "profiles 必须是数组"
+    assert tr(en_req, "err.rpa.invalid_field", field="status") == "status is invalid"
+    assert tr(zh_req, "err.rpa.unknown_account", account_id="a1") == "未知 account: a1"
+    assert tr(en_req, "err.rpa.config_missing", name="mobile_auto.api_base") == \
+        "mobile_auto.api_base is not configured"
+    assert tr(zh_req, "err.rpa.field_required", field="path") == "path 必填"
+    assert tr(en_req, "err.rpa.op_failed", op="trigger", err="boom") == "trigger failed: boom"
+    assert tr(zh_req, "err.rpa.service_not_started", platform="Messenger") == "Messenger RPA 服务未启动"
+    assert tr(en_req, "err.rpa.suggest_more_timeout") == "Suggest More timed out (>45s)"
 
 
 def test_routeconv_apply_map_and_import():
@@ -1164,15 +1258,69 @@ def test_routeconv_draft_coverage_surfaces_gaps():
     assert len(cov["uncovered"]) == 1 and "未知 action" in cov["uncovered"][0][1]
 
 
+_SCOPE_SRC = (
+    "def _save(cfg):\n"                                   # 模块级 helper：无 request
+    '    raise HTTPException(500, tr(request, "err.x.save"))\n'
+    "\n"
+    "def register(app):\n"
+    "    async def handler(request):\n"                   # handler：有 request
+    '        raise HTTPException(400, tr(request, "err.x.bad"))\n'
+    "        def _inner():\n"                             # 嵌套在 handler 内：request 经闭包可见
+    '            raise HTTPException(500, tr(request, "err.x.inner"))\n'
+)
+
+
+def test_routeconv_verify_request_scope_flags_requestless_funcs():
+    """P43d：事后核对——tr(request,…) 落在无 request 作用域（模块级 helper）被点名；
+    handler（形参含 request）及其嵌套函数（经闭包可见 request）内的调用**不**误报。"""
+    from scripts.i18n_routeconv import verify_request_scope
+
+    bad = verify_request_scope(_SCOPE_SRC)
+    assert bad == [2]  # 仅模块级 _save 的 tr（L2）不安全；handler L6 与闭包 _inner L8 均安全
+
+
+def test_routeconv_scope_precheck_and_convert_skips_unsafe():
+    """P43d：事前拦截——scope_precheck 圈出会写进无 request 作用域的映射；convert_file(scope_check=True)
+    跳过并 scope_skipped 点名（不动源码），仅对安全片段施工，从源头杜绝运行时 NameError。"""
+    import tempfile
+    from pathlib import Path
+    from scripts.i18n_routeconv import scope_precheck, convert_file
+
+    src = (
+        "def _save(cfg):\n"
+        '    raise HTTPException(500, "保存失败")\n'      # 无 request 作用域 → 施工会造 NameError
+        "\n"
+        "def register(app):\n"
+        "    async def handler(request):\n"
+        '        raise HTTPException(400, "参数缺失")\n'   # 有 request → 安全
+    )
+    mapping = {
+        'HTTPException(500, "保存失败")': 'HTTPException(500, tr(request, "err.x.save"))',
+        'HTTPException(400, "参数缺失")': 'HTTPException(400, tr(request, "err.x.bad"))',
+    }
+    unsafe = scope_precheck(src, mapping)
+    assert [u["old"] for u in unsafe] == ['HTTPException(500, "保存失败")']
+
+    with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False, encoding="utf-8") as fh:
+        fh.write(src)
+        tmp = fh.name
+    res = convert_file(tmp, mapping, scope_check=True)
+    assert res["scope_skipped"] == ['HTTPException(500, "保存失败")']  # 无 request 的被剔除
+    assert res["scope_bad"] == []                                       # 施工后无遗留隐患
+    out = Path(tmp).read_text(encoding="utf-8")
+    assert '_save(cfg):\n    raise HTTPException(500, "保存失败")' in out  # helper 原样未动
+    assert 'tr(request, "err.x.bad")' in out                              # 安全片段已施工
+
+
 def test_routeconv_coverage_report_sorted():
     """P42：全库覆盖率报表——每行含 file/ledger/covered/ratio，按 ratio 升序（最需人工的在前）。"""
     from scripts.i18n_routeconv import coverage_report
     from src.web.web_i18n import get_translations
 
+    # P43b 起全部 routes 已收口 → 报表可为空（=清扫完成）；非空时校验排序/行结构不变量。
     rows = coverage_report(get_translations("zh"))
-    assert rows, "应至少有若干仍含硬编码中文的路由文件"
     ratios = [r["ratio"] for r in rows]
-    assert ratios == sorted(ratios)  # 升序
+    assert ratios == sorted(ratios)  # 升序（空列表天然有序）
     for r in rows:
         assert set(r) >= {"file", "ledger", "covered", "ratio"} and r["ledger"] > 0
 
@@ -1184,8 +1332,8 @@ def test_routeconv_coverage_report_sorted():
 #   · 任何文件低于基线（localize 了却没更新账本）→ 也失败，逼迫把天花板调低（只减不增）。
 # 已收口(=0)的文件显式登记为 0，作为「回潮即点名」的密封线。P36/P37 逐族下降至此。
 _ROUTE_CJK_CEILINGS = {
-    "messenger_rpa_routes.py": 147,
     # ── 已收口（sealed=0）──
+    "messenger_rpa_routes.py": 0,         # P43b（{dep}/{field}/{key} 参数化 + 复用 op_failed/service_not_started）
     "kb_routes.py": 0,                    # P36
     "unified_inbox_send_routes.py": 0,    # P37
     "unified_inbox_login_routes.py": 0,   # P37

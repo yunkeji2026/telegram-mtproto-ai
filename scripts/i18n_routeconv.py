@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 from typing import Dict, List, Mapping, Tuple
@@ -244,32 +245,135 @@ def build_draft_map(entries, key_for=None) -> Tuple[Dict[str, str], List[dict], 
     return mapping, pending, fstrings
 
 
+def _func_args(node) -> set:
+    a = node.args
+    return {x.arg for x in (a.posonlyargs + a.args + a.kwonlyargs)} | \
+           ({a.vararg.arg} if a.vararg else set()) | \
+           ({a.kwarg.arg} if a.kwarg else set())
+
+
+def verify_request_scope(text: str) -> List[int]:
+    """AST 校验（**事后**）：任一含 ``tr(request, …)`` 调用的函数，其（含外层闭包）形参须有
+    ``request``，否则运行时 ``NameError``。返回违规调用的行号列表（空=安全）。
+
+    这是「事后核对」——施工完再验；根治靠 :func:`scope_precheck` 的「事前拦截」。
+    """
+    bad: List[int] = []
+
+    def _walk(node, has_request):
+        cur = has_request
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            cur = has_request or ("request" in _func_args(node))
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.Call):
+                f = child.func
+                if isinstance(f, ast.Name) and f.id == "tr" and child.args:
+                    a0 = child.args[0]
+                    if isinstance(a0, ast.Name) and a0.id == "request" and not cur:
+                        bad.append(getattr(child, "lineno", -1))
+            _walk(child, cur)
+
+    _walk(ast.parse(text), False)
+    return bad
+
+
+def _request_scope_by_line(text: str) -> Dict[int, bool]:
+    """行号 → 该行所在（最内层）函数是否有 ``request`` 在作用域内。
+
+    外层函数先铺、内层函数覆盖其子区间：闭包里没显式接 ``request`` 的内层 helper 即为 False，
+    与运行时可见性一致。模块级行不入表（默认按 False = 无 request）。
+    """
+    line_has: Dict[int, bool] = {}
+
+    def _assign(node, has):
+        start = getattr(node, "lineno", None)
+        end = getattr(node, "end_lineno", start)
+        if start is None:
+            return
+        for ln in range(start, (end or start) + 1):
+            line_has[ln] = has
+
+    def _walk(node, has):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                child_has = has or ("request" in _func_args(child))
+                _assign(child, child_has)      # 先按本函数铺满其整段
+                _walk(child, child_has)         # 再让嵌套函数覆盖各自子区间
+            else:
+                _walk(child, has)
+
+    _walk(ast.parse(text), False)
+    return line_has
+
+
+def scope_precheck(text: str, mapping: Mapping[str, str]) -> List[dict]:
+    """P43d：**事前**作用域拦截——在替换前，对每条会写出 ``tr(request, …)`` 的映射，
+    定位其 ``old`` 片段所在行，若该行所在函数**无 request 在作用域**（如模块级/闭包 helper），
+    判为 unsafe。返回 ``[{old, lineno, new}]``（空=可安全施工）。
+
+    根治 P40/P42/P43 反复踩的「tr 下沉到无 request 的 helper → 运行时 NameError」：
+    施工器据此可跳过并点名这些片段（见 :func:`convert_file` 的 ``scope_check``），
+    逼调用方先把 ``request`` 穿进 helper 再施工，而非事后回改。
+    """
+    line_has = _request_scope_by_line(text)
+    lines = text.splitlines()
+    unsafe: List[dict] = []
+    for old, new in mapping.items():
+        if "tr(request" not in new:
+            continue
+        for i, ln in enumerate(lines, 1):
+            if old in ln and not line_has.get(i, False):
+                unsafe.append({"old": old, "lineno": i, "new": new})
+    return unsafe
+
+
 def convert_file(
     path,
     mapping: Mapping[str, str],
     *,
     import_line: str = _DEFAULT_IMPORT,
     write: bool = True,
+    scope_check: bool = True,
 ) -> dict:
     """把 ``mapping`` 套用到单个路由文件，并确保 tr import 存在。
 
     返回报告 dict：``report``（逐条命中次数）、``unmatched``（0 命中的 old）、
-    ``total_replaced``、``import_added``、``changed``。
+    ``total_replaced``、``import_added``、``changed``、``scope_skipped``（默认 []）。
+
+    ``scope_check=True``（P43e 起为**缺省**）：施工**前**跑 :func:`scope_precheck`，把落在无 ``request``
+    作用域的映射剔除（**不动源码**）并列入 ``scope_skipped`` + 追加 ``scope_bad``（事后核对，
+    正常应为 []）——从源头杜绝 tr(request) 写进无 request 的 helper。缺省即安全，勿轻易传 ``False``；
+    仅当映射确定不含 ``tr(request,…)``（纯 ascii/无请求级本地化）时才有必要关掉。
     """
     p = Path(path)
     text = p.read_text(encoding="utf-8")
-    new, report = apply_map(text, mapping)
+    applied: Mapping[str, str] = mapping
+    scope_skipped: List[str] = []
+    if scope_check:
+        unsafe = scope_precheck(text, mapping)
+        if unsafe:
+            skip = {u["old"] for u in unsafe}
+            applied = {k: v for k, v in mapping.items() if k not in skip}
+            scope_skipped = sorted(skip)
+    new, report = apply_map(text, applied)
     new, added = ensure_import(new, import_line)
     changed = new != text
     if write and changed:
         p.write_text(new, encoding="utf-8")
-    return {
+    out = {
         "report": report,
         "unmatched": sorted(k for k, v in report.items() if v == 0),
         "total_replaced": sum(report.values()),
         "import_added": added,
         "changed": changed,
+        "scope_skipped": scope_skipped,
     }
+    if scope_check:
+        try:
+            out["scope_bad"] = verify_request_scope(new)
+        except SyntaxError:
+            out["scope_bad"] = [-1]
+    return out
 
 
 def coverage_report(zh_dict: Mapping[str, str], *, fields=None) -> List[dict]:
@@ -298,9 +402,20 @@ def _main(argv=None) -> int:
                     help="打印 draft 施工器覆盖率（ratio<1 时点名圈不进的账本行）")
     ap.add_argument("--coverage-all", action="store_true",
                     help="全库覆盖率报表：对所有待清 routes 文件按 ratio 升序列出，选靶分流用")
+    ap.add_argument("--verify-scope", metavar="ROUTE_FILE",
+                    help="事后核对：打印该文件中落在无 request 作用域的 tr(request,…) 调用行号（应为空）")
     args = ap.parse_args(argv)
-    if not (args.suggest or args.coverage or args.coverage_all):
-        ap.error("需要 --suggest / --coverage / --coverage-all")
+    if not (args.suggest or args.coverage or args.coverage_all or args.verify_scope):
+        ap.error("需要 --suggest / --coverage / --coverage-all / --verify-scope")
+
+    if args.verify_scope:
+        bad = verify_request_scope(Path(args.verify_scope).read_text(encoding="utf-8"))
+        if bad:
+            print(f"[routeconv] {args.verify_scope}: {len(bad)} tr(request,…) 在无 request 作用域: {bad}")
+            return 1
+        print(f"[routeconv] {args.verify_scope}: scope OK（全部 tr(request,…) 均在 request 可见处）")
+        return 0
+
     from src.web.web_i18n import get_translations
 
     if args.coverage_all:

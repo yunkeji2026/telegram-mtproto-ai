@@ -14,10 +14,14 @@ curation 用 body→spec：``"key"`` 或 ``("key", {fmt_name: 源码表达式串
 """
 from __future__ import annotations
 
-import ast
 from pathlib import Path
 
-from scripts.i18n_routeconv import build_draft_map, convert_file, draft_map
+from scripts.i18n_routeconv import (
+    build_draft_map,
+    convert_file,
+    draft_map,
+    verify_request_scope as _verify_request_scope,  # P43d：规范实现已上移到 i18n_routeconv
+)
 from src.web.web_i18n import get_translations
 
 ROUTES = Path("src/web/routes")
@@ -85,34 +89,6 @@ _JOBS = (
     ("line_rpa_routes.py", LINE),
     ("whatsapp_rpa_routes.py", WA),
 )
-
-
-def _verify_request_scope(text: str) -> list:
-    """AST 校验：任一含 tr(request,…) 调用的函数，其（含外层）形参须有 request。"""
-    tree = ast.parse(text)
-    bad = []
-
-    def _args_of(node):
-        a = node.args
-        return {x.arg for x in (a.posonlyargs + a.args + a.kwonlyargs)} | \
-               ({a.vararg.arg} if a.vararg else set()) | \
-               ({a.kwarg.arg} if a.kwarg else set())
-
-    def _walk(node, scope_has_request):
-        has_req = scope_has_request
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            has_req = scope_has_request or ("request" in _args_of(node))
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, ast.Call):
-                f = child.func
-                if isinstance(f, ast.Name) and f.id == "tr" and child.args:
-                    a0 = child.args[0]
-                    if isinstance(a0, ast.Name) and a0.id == "request" and not has_req:
-                        bad.append(getattr(child, "lineno", -1))
-            _walk(child, has_req)
-
-    _walk(tree, False)
-    return bad
 
 
 def main() -> int:

@@ -17,8 +17,9 @@ services、sla、channel_adapters.status_via_adapters、normalizer、inbound_tra
 from __future__ import annotations
 
 import logging
+import asyncio
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException, Request
 
@@ -27,6 +28,7 @@ from src.inbox.normalizer import (
     candidate_messages_from_source,
     conv_id,
     message_obj,
+    name_is_real,
 )
 from src.web.routes.unified_inbox_aggregate import (
     _INBOX_ADAPTERS,
@@ -35,6 +37,7 @@ from src.web.routes.unified_inbox_aggregate import (
     _enrich_outbound_originals,
     _ingest_thread_best_effort,
     _is_protocol_account,
+    _overlay_store_identity,
     _read_from_store_enabled,
     _store_conv_as_chat,
     _thread_messages_from_store,
@@ -49,6 +52,37 @@ from src.web.routes.unified_inbox_sla import _sla_cfg
 from src.web.web_i18n import tr
 
 logger = logging.getLogger(__name__)
+
+# ── F3：资料面板就绪度观测（打开会话时按平台记文字身份完整度）──────────────
+# 去重集：同一 conversation_id 每进程只记一次（避免自适应轮询/加载更早重复计数把 opens 撑爆），
+# bounded 防内存无界（超上限后新会话不再记，仅内存保护——是采样 gauge 而非精确总量）。
+_PANEL_SEEN: set = set()
+_PANEL_SEEN_MAX = 5000
+
+
+_name_is_real = name_is_real   # 兼容别名（口径已上移到 normalizer.name_is_real，F3/F4 共用）
+
+
+def _record_panel_identity(chat: Optional[Dict[str, Any]]) -> None:
+    """打开会话时记一次资料面板文字身份完整度（去重 + best-effort，绝不影响主流程）。"""
+    if not chat:
+        return
+    try:
+        cid = str(chat.get("conversation_id") or "")
+        if not cid or cid in _PANEL_SEEN:
+            return
+        if len(_PANEL_SEEN) >= _PANEL_SEEN_MAX:
+            return  # 超上限：新会话不再记（内存保护），已记的仍去重
+        _PANEL_SEEN.add(cid)
+        from src.web.peer_identity_stats import get_peer_identity_stats
+        get_peer_identity_stats().record_panel(
+            str(chat.get("platform") or ""),
+            has_name=_name_is_real(chat.get("name"), chat.get("chat_key")),
+            has_username=bool(str(chat.get("username") or "").strip()),
+            has_phone=bool(str(chat.get("phone") or "").strip()),
+        )
+    except Exception:
+        logger.debug("[panel] 资料面板就绪度记录失败（已忽略）", exc_info=True)
 
 
 def _merge_orchestrator_status(
@@ -113,14 +147,20 @@ def _merge_orchestrator_status(
                     existing["label"] = label_map[key]
 
         # 收尾：对所有 platform_status 条目（含未经编排器的 A 线 default）统一用
-        # 注册表 label 覆盖，确保改名对每个号都即时反映到对话栏 / 切换条。
+        # 注册表 label / self_* 覆盖，确保改名 + 真实身份对每个号都即时反映。
+        # 关键：适配器可能用裸平台名当 key（如 telegram 适配器 key="telegram"，
+        # account_id="default"），而 label_map/profile_map 用 "平台:账号" 组合键，
+        # 故这里以条目自身 platform+account_id 派生查找键（回落到字典 key），防漏配。
         for k, v in platform_status.items():
             if not isinstance(v, dict):
                 continue
-            if label_map.get(k):
-                v["label"] = label_map[k]
-            if profile_map.get(k):
-                for _sk, _sv in profile_map[k].items():
+            pkey = f"{v.get('platform') or ''}:{v.get('account_id') or ''}"
+            lk = pkey if label_map.get(pkey) else k
+            pk = pkey if profile_map.get(pkey) else k
+            if label_map.get(lk):
+                v["label"] = label_map[lk]
+            if profile_map.get(pk):
+                for _sk, _sv in profile_map[pk].items():
                     v[_sk] = _sv
     except Exception:
         logger.debug("[chats] 并入编排器账号状态失败", exc_info=True)
@@ -256,75 +296,102 @@ def register_read_routes(app, *, api_auth, config_manager=None) -> None:
         limit = max(1, min(500, int(limit or 50)))
         before = float(before_ts or 0) or None
 
-        chats = _collect_all_chats(request, limit=100)
-        target = next(
-            (
-                c for c in chats
-                if c.get("platform") == platform
-                and str(c.get("account_id") or "default") == account_id
-                and str(c.get("chat_key") or "") == chat_key
-            ),
-            None,
-        )
-
-        messages: List[Dict[str, Any]] = []
-        if platform == "telegram" and before is None:
-            client = _get_telegram_client(request)
-            recent = getattr(client, "_recent_messages", None) if client is not None else []
-            for idx, m in enumerate(list(recent or [])[-limit:]):
-                if str(m.get("chat_id") or "") != chat_key:
-                    continue
-                messages.append(message_obj(
-                    text=m.get("text") or "",
-                    ts=m.get("ts") or 0,
-                    direction="out" if m.get("is_self") else "in",
-                    message_id=str(m.get("id") or m.get("message_id") or idx),
-                    source=m,
-                ))
-
-        if not messages and target:
-            messages = candidate_messages_from_source(target.get("source") or {})
-        if not messages and target:
-            messages = list(target.get("messages") or [])
-
-        _ingest_thread_best_effort(request, target, messages)
-
         cid = conv_id(platform, account_id, chat_key)
-        out_msgs = messages[-limit:]
-        store_preferred = (
-            _read_from_store_enabled(request)
-            or bool(target and target.get("from_store"))
-            or _is_protocol_account(request, platform, account_id)
+        # 性能修复（根治「加载超时」）：**无条件先按 cid 直读持久层**——只要库里有该会话
+        # 历史，就走这条快路(毫秒级)，**跳过**昂贵的全平台 live 聚合（_collect_all_chats
+        # 遍历所有适配器 + telegram get_dialogs(100) + 写库，机器负载高时会拖到十几秒→前端
+        # 超时）。不再依赖注册表 protocol 判定（该判定失败时旧逻辑会误落慢路径）。
+        # 库为空（冷启/纯 live 账号首次）才回落下方完整 live 路径，保证不丢历史、行为兼容。
+        target: Optional[Dict[str, Any]] = None
+        out_msgs: List[Dict[str, Any]] = []
+        _fast = _thread_messages_from_store(
+            request, cid, limit=limit, before_ts=before,
         )
-        if store_preferred:
-            stored_msgs = _thread_messages_from_store(
-                request, cid, limit=limit, before_ts=before,
+        if _fast:
+            out_msgs = _fast
+            target = _store_conv_as_chat(request, cid)
+
+        if not out_msgs:
+            chats = _collect_all_chats(request, limit=100)
+            target = next(
+                (
+                    c for c in chats
+                    if c.get("platform") == platform
+                    and str(c.get("account_id") or "default") == account_id
+                    and str(c.get("chat_key") or "") == chat_key
+                ),
+                None,
             )
-            if stored_msgs:
-                out_msgs = stored_msgs
-            if target is None:
-                target = _store_conv_as_chat(request, cid)
-        elif not out_msgs:
-            stored_msgs = _thread_messages_from_store(request, cid, limit=limit)
-            if stored_msgs:
-                out_msgs = stored_msgs
-            if target is None:
-                target = _store_conv_as_chat(request, cid)
+            messages: List[Dict[str, Any]] = []
+            if platform == "telegram" and before is None:
+                client = _get_telegram_client(request)
+                recent = getattr(client, "_recent_messages", None) if client is not None else []
+                for idx, m in enumerate(list(recent or [])[-limit:]):
+                    if str(m.get("chat_id") or "") != chat_key:
+                        continue
+                    messages.append(message_obj(
+                        text=m.get("text") or "",
+                        ts=m.get("ts") or 0,
+                        direction="out" if m.get("is_self") else "in",
+                        message_id=str(m.get("id") or m.get("message_id") or idx),
+                        source=m,
+                    ))
+            if not messages and target:
+                messages = candidate_messages_from_source(target.get("source") or {})
+            if not messages and target:
+                messages = list(target.get("messages") or [])
+            _ingest_thread_best_effort(request, target, messages)
+            out_msgs = messages[-limit:]
+            store_preferred = (
+                _read_from_store_enabled(request)
+                or bool(target and target.get("from_store"))
+                or _is_protocol_account(request, platform, account_id)
+            )
+            if store_preferred:
+                stored_msgs = _thread_messages_from_store(
+                    request, cid, limit=limit, before_ts=before,
+                )
+                if stored_msgs:
+                    out_msgs = stored_msgs
+                if target is None:
+                    target = _store_conv_as_chat(request, cid)
+            elif not out_msgs:
+                stored_msgs = _thread_messages_from_store(request, cid, limit=limit)
+                if stored_msgs:
+                    out_msgs = stored_msgs
+                if target is None:
+                    target = _store_conv_as_chat(request, cid)
 
         translate_stats: Dict[str, Any] = {"enabled": False}
         try:
             from src.workspace.inbound_translate import enrich_inbound_translations
-            out_msgs, translate_stats = await enrich_inbound_translations(
-                request,
-                out_msgs,
-                conversation_id=cid,
-                config_manager=config_manager,
-                translation_svc=_get_translation_service(request),
+            # 硬超时兜底：入站翻译无引擎时会逐条走 LLM(deepseek)，8 条可能 >20s 拖垮 /thread。
+            # 限时 6s——译到多少算多少（已译的会缓存，下次打开命中），超时即返回原文，
+            # **绝不让加载卡死**。这是 /thread「加载超时」的直接根治。
+            out_msgs, translate_stats = await asyncio.wait_for(
+                enrich_inbound_translations(
+                    request,
+                    out_msgs,
+                    conversation_id=cid,
+                    config_manager=config_manager,
+                    translation_svc=_get_translation_service(request),
+                ),
+                timeout=6.0,
             )
+        except asyncio.TimeoutError:
+            logger.info("入站自动翻译超时(>6s)，本次返回原文（已译部分下次命中缓存）")
         except Exception:
             logger.debug("入站自动翻译失败（已忽略）", exc_info=True)
 
         _enrich_outbound_originals(request, cid, out_msgs)
+
+        # F4：live 模式下 target 来自实时聚合（身份常为空），用 store 已持久身份「仅补空」富集，
+        # 使 d.chat 携带最新昵称/头像 → 与前端 _mergePeerIdentity（F3）在 live 模式下也能合成。
+        # store-backed 的 target（from_store）本就带身份，跳过避免多余回库。
+        if target and not target.get("from_store"):
+            _overlay_store_identity(request, [target])
+
+        _record_panel_identity(target)   # F3：打开会话→记资料面板文字身份就绪度（去重）
 
         return {
             "ok": True,

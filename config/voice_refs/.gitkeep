@@ -1,0 +1,2 @@
+# 声纹克隆参考音频目录。实际 .wav/.wma 为 PII/版权，不入库（见 .gitignore）。
+# 部署时按 config 各人设 voice_profile.reference_audio_path 放置对应音频文件。

@@ -553,12 +553,15 @@ def status_via_adapters(
 
 async def send_via_adapters(
     request: Any, platform: str, account_id: str, chat_key: str, text: str,
-    adapters: List[ChannelAdapter],
+    adapters: List[ChannelAdapter], *, reply_to: Any = None,
 ) -> Dict[str, Any]:
     """按 platform 路由到对应适配器投递；未知平台抛 ChannelSendError(400)。
 
     M6①：protocol 多账号优先——若编排器拥有该 (platform, account_id) 的运行中 worker，
     直接经 worker 发送（多开账号各自独立连接），否则回落到平台适配器（RPA/单连接）。
+
+    P4-5B：``reply_to``={id,from_me,participant,text} 携带原生引用回复上下文，仅经编排器
+    worker 的协议发送路径生效（WhatsApp）；RPA/官方 API 适配器不支持则忽略（向后兼容）。
     """
     platform = str(platform or "").lower()
     try:
@@ -566,7 +569,8 @@ async def send_via_adapters(
         orch = get_orchestrator()
         if orch.owns(platform, account_id):
             try:
-                return await orch.send(platform, account_id, chat_key, text)
+                return await orch.send(
+                    platform, account_id, chat_key, text, reply_to=reply_to)
             except ChannelSendError:
                 raise
             except Exception as ex:  # noqa: BLE001

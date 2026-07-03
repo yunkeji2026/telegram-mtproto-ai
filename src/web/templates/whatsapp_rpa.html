@@ -784,9 +784,9 @@
       <span class="rpa-card-sub" style="margin-left:auto;font-size:.72rem;color:var(--t3)">30 {{ (i18n or {}).get('wa_s144', "天内全文") }} + {{ (i18n or {}).get('wa_s145', "意图过滤") }}</span>
     </div>
     <div style="display:flex;gap:.55rem;align-items:center;flex-wrap:wrap;padding:.2rem 0 .5rem">
-      <input id="wa-hist-q" type="text" placeholder="🔍 {{ (i18n or {}).get('wa_s146', '检索聊天关键词…') }}"
+      <input id="wa-ops-hist-q" type="text" placeholder="🔍 {{ (i18n or {}).get('wa_s146', '检索聊天关键词…') }}"
              style="flex:1;min-width:220px;padding:.5rem .75rem;background:var(--input);border:1px solid var(--bd2);border-radius:7px;font-size:.85rem;color:var(--t)">
-      <select id="wa-hist-q-intent" style="padding:.5rem .65rem;background:var(--input);border:1px solid var(--bd2);border-radius:7px;font-size:.8rem;color:var(--t2)">
+      <select id="wa-ops-hist-q-intent" style="padding:.5rem .65rem;background:var(--input);border:1px solid var(--bd2);border-radius:7px;font-size:.8rem;color:var(--t2)">
         <option value="">{{ (i18n or {}).get('ov_all_intents', "全部意图") }}</option>
         <option value="purchase">{{ (i18n or {}).get('rpa_intent_purchase', "购买") }}</option>
         <option value="support">{{ (i18n or {}).get('rpa_intent_support', "售后") }}</option>
@@ -795,7 +795,7 @@
         <option value="general">{{ (i18n or {}).get('rpa_intent_general', "通用") }}</option>
       </select>
     </div>
-    <div id="wa-hist-results" style="display:none;max-height:360px;overflow-y:auto;border-top:1px solid var(--bd)"></div>
+    <div id="wa-ops-hist-results" style="display:none;max-height:360px;overflow-y:auto;border-top:1px solid var(--bd)"></div>
   </div>
 
   <!-- P11-B: 意图分布 -->
@@ -2247,7 +2247,9 @@ if(document.getElementById('pane-wa-ops')?.classList.contains('active')){ waEnsu
 // P11-B: 历史检索 + 意图分布（共享组件工厂）
 if(window.rpa && window.rpa.analytics){
   rpa.analytics.initSearch({
-    inputId:'wa-hist-q', resultId:'wa-hist-results',
+    // 运维 pane 的历史检索用独立 id（wa-ops-hist-*），避免与「对话」pane 的 P7-A 内联检索
+    // （wa-hist-q/wa-hist-results）撞 DOM id——两 pane 同在 DOM，getElementById 只命中第一个。
+    inputId:'wa-ops-hist-q', resultId:'wa-ops-hist-results',
     apiBase:'/api/whatsapp-rpa', days:30, limit:30,
     onPick:function(ck){
       // P10-A: 打开通用会话抽屉

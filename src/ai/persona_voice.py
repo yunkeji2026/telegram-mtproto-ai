@@ -184,6 +184,7 @@ def resolve_emotion_for_send(
     intent: Optional[str] = None,
     csat: Optional[float] = None,
     persona: Optional[Dict[str, Any]] = None,
+    peer_audio_emotion: Optional[Dict[str, Any]] = None,
 ) -> Any:
     """P4：合成前的共享情感接缝（sender / voice_autosend / unified_inbox 共用）。
 
@@ -212,7 +213,8 @@ def resolve_emotion_for_send(
         from src.ai.voice_emotion import derive_emotion
         return derive_emotion(
             intent=intent, rel_stage=rel_stage, csat=csat,
-            text=text, default=default, persona=persona)
+            text=text, default=default, persona=persona,
+            peer_audio_emotion=peer_audio_emotion)
     except Exception:
         return None
 
@@ -229,12 +231,16 @@ def resolve_effective_voice_context(
     text: str = "",
     intent: Optional[str] = None,
     csat: Optional[float] = None,
+    peer_audio_emotion: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Resolve the actual persona, voice config, and emotion used for one send.
 
     This is the shared decision point for manual inbox voice, Telegram auto voice,
     and System Z autosend voice. ``persona_id`` is an explicit UI/operator choice;
     otherwise we fall back to chat binding, then account persona, then defaults.
+
+    ``peer_audio_emotion``：上一条客户语音的声学情绪（见 speech_emotion），让出站情感声
+    回应「听到的语气」。未提供 → 行为不变。
     """
     cfg = full_config or {}
     resolved_persona: Dict[str, Any] = {}
@@ -279,7 +285,7 @@ def resolve_effective_voice_context(
     emotion = resolve_emotion_for_send(
         voice_cfg, text, platform=platform, account_id=account_id,
         chat_key=chat_key or contact_key, intent=intent, csat=csat,
-        persona=emo_persona or None,
+        persona=emo_persona or None, peer_audio_emotion=peer_audio_emotion,
     )
     return {
         "persona_id": resolved_id,

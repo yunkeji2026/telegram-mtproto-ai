@@ -317,6 +317,13 @@ class TelegramSenderMixin:
             if _emit is not None:
                 _emit(chat_id=chat_id, text=preview, direction="out",
                       msg_id=str(msg_id or ""))
+                # P4-4：镜像出站即置「已发送」（单勾）；对端读后由 UpdateReadHistoryOutbox
+                # 回执升级为「已读」（蓝色双勾）。仅 companion 镜像开启且带真实 id 时生效。
+                if getattr(self, "_mirror_inbox", False) and msg_id:
+                    from src.integrations.protocol_bridge import report_message_status
+                    report_message_status(
+                        "telegram", getattr(self, "account_id", "default"),
+                        str(chat_id), str(msg_id), "sent")
         except Exception:
             pass
         try:
@@ -376,25 +383,27 @@ class TelegramSenderMixin:
             except Exception:
                 pass
 
-    async def send_message(self, chat_id: int, text: str) -> bool:
-        """A 线主动外发文本（主动问候/唤醒/关怀/编排器受管 worker 都经此）。
+    async def _send_text_guarded(self, chat_id: int, text: str):
+        """A 线外发文本核心：过发送前护栏 + 节流 + 记账，返回 ``(ok, sent_message)``。
 
-        Stage M：此前是裸 Pyrogram 调用，绕过 Kill-Switch/反封号/节流——成为旁路风控缺口
-        （主动问候经 CompanionWorker.send→本方法 直发）。现统一走与 ``_send_reply`` 同一套发送前
-        护栏 + 节流 + 记账。**不**做出站镜像（避免与编排器中心化收件箱回写重复镜像）。
+        - ``ok``：是否成功送出（过护栏且未抛；与旧 ``send_message`` 的 bool 语义一致）。
+        - ``sent_message``：底层 ``client.send_message`` 的返回（真实 pyrogram 为 ``Message``，
+          可取 ``.id``；测试桩/无返回时为 None）。
+
+        **不**做出站镜像（避免与编排器中心化收件箱回写重复镜像）。
         """
         try:
             # 统一发送前护栏：G1 Kill-Switch + N 线反封号闸门（与 _send_reply/send_photo 共用）
             if self._presend_blocked():
-                return False
+                return False, None
             await self._presend_pace()
             if not self.client:
                 self.logger.error("客户端未初始化")
-                return False
-            await self.client.send_message(chat_id, text)
+                return False, None
+            _sent = await self.client.send_message(chat_id, text)
             self._postsend_record_count()
             self.logger.info("已发送消息到 %s: %s...", chat_id, text[:50])
-            return True
+            return True, _sent
         except Exception as e:
             self.logger.error("发送消息失败: %s", e)
             # G2 封号信号自动急停：风控错误 → 分级处置（退避/暂停/封禁），best-effort
@@ -403,7 +412,28 @@ class TelegramSenderMixin:
                 _g2("telegram", getattr(self, "account_id", "default"), e)
             except Exception:
                 pass
-            return False
+            return False, None
+
+    async def send_message(self, chat_id: int, text: str) -> bool:
+        """A 线主动外发文本（主动问候/唤醒/关怀/编排器受管 worker 都经此）。
+
+        Stage M：此前是裸 Pyrogram 调用，绕过 Kill-Switch/反封号/节流——成为旁路风控缺口
+        （主动问候经 CompanionWorker.send→本方法 直发）。现统一走与 ``_send_reply`` 同一套发送前
+        护栏 + 节流 + 记账。**不**做出站镜像（避免与编排器中心化收件箱回写重复镜像）。
+        """
+        ok, _ = await self._send_text_guarded(chat_id, text)
+        return ok
+
+    async def send_message_return_id(self, chat_id: int, text: str):
+        """同 ``send_message``，但回传 ``(ok, msg_id)``——``msg_id`` 为发出的**真实**
+        ``message.id``（无则空串）。
+
+        P4-4：供 companion worker 把已读回执（``UpdateReadHistoryOutbox``）精确绑定到
+        对应出站消息行；旧 ``send_message`` 只回 bool、丢弃了 id，导致 companion 手动发送的
+        消息无法显示双勾。best-effort：失败/被拦 → ``(False, "")``。
+        """
+        ok, _sent = await self._send_text_guarded(chat_id, text)
+        return ok, (str(getattr(_sent, "id", "") or "") if ok else "")
 
     async def send_photo(self, chat_id: Any, photo_path: str,
                          caption: str = "") -> bool:
@@ -559,6 +589,7 @@ class TelegramSenderMixin:
         reply_text: str,
         *,
         is_peer_voice: bool = False,
+        peer_audio_emotion: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """Try to send a TTS voice note for *reply_text*.
 
@@ -635,7 +666,8 @@ class TelegramSenderMixin:
             voice_ctx = resolve_effective_voice_context(
                 raw_cfg, chat_key=_contact_key, account_persona_id=_acc_pid,
                 contact_key=_contact_key, platform="telegram",
-                account_id=getattr(self, "account_id", None), text=clean_text)
+                account_id=getattr(self, "account_id", None), text=clean_text,
+                peer_audio_emotion=peer_audio_emotion)
             voice_cfg = voice_ctx.get("voice_cfg") or {}
             voice_cfg["enabled"] = True
 

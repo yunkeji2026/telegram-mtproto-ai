@@ -120,6 +120,31 @@
   </section>
 
   <section>
+    <h2>{{ (i18n or {}).get('ov2_s_se', "🎧 音频情绪（从对方语音的声学语气听出情绪）") }}</h2>
+    <div class="grid" id="speechEmoKpis"></div>
+    <div id="speechEmoByEmotion"><div class="empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
+  </section>
+
+  <section>
+    <h2>{{ (i18n or {}).get('ov2_s_dp', "🧬 深度人设（真人感能力长出来的证据）") }}</h2>
+    <div class="grid" id="deepPersonaKpis"></div>
+    <div id="deepPersonaHint"><div class="empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
+  </section>
+
+  <section>
+    <h2>🖱️ {{ (i18n or {}).get('ov2_s_fe', "前端哑按钮错误（运行时 ReferenceError 观测）") }}</h2>
+    <div class="grid" id="feErrKpis"></div>
+    <div id="feErrDetail"><div class="empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
+  </section>
+
+  <section>
+    <h2>🪪 {{ (i18n or {}).get('ov2_s_pid', "会话身份自愈（数字号自动补真实昵称）") }}</h2>
+    <div class="grid" id="pidKpis"></div>
+    <div id="pidDetail"><div class="empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
+    <div id="identityTrend" style="margin-top:10px;"></div>
+  </section>
+
+  <section>
     <h2>🧬 {{ (i18n or {}).get('ov2_s_localtts', "本机情感克隆 IndexTTS2（随主程序启停）") }}</h2>
     <div class="grid" id="localTtsKpis"></div>
     <div id="localTtsDetail" style="margin-top:8px;">
@@ -966,6 +991,324 @@ async function loadVoiceSynthLang(){
   }
 }
 
+// 🎧 音频情绪卡片：读 /api/workspace/metrics 的 speech_emotion（从声学语气听出的情绪分布 + 可用性）。
+async function loadSpeechEmotion(){
+  var kp = document.getElementById('speechEmoKpis');
+  var bl = document.getElementById('speechEmoByEmotion');
+  if(!kp || !bl) return;
+  try{
+    const r = await fetch('/api/workspace/metrics', {credentials:'same-origin'});
+    if(r.status === 403){ kp.innerHTML=''; bl.innerHTML='<div class="empty">'+window.T('ov2_js037')+'</div>'; return; }
+    const d = await r.json();
+    var se = d.speech_emotion || null;
+    if(!se || !(Number(se.total)||0)){
+      kp.innerHTML=''; bl.innerHTML='<div class="empty">'+window.T('ov2_js_se_empty')+'</div>'; return;
+    }
+    var total = Number(se.total)||0;
+    var confident = Number(se.confident)||0;
+    var unavail = Number(se.unavailable)||0;
+    var upct = ((Number(se.unavailable_rate)||0)*100).toFixed(1);
+    var kpis = [
+      {label:window.T('ov2_js_se_total'), value:fmt(total)},
+      {label:window.T('ov2_js_se_confident'), value:fmt(confident)},
+      {label:window.T('ov2_js_se_unavail'), value:fmt(unavail)+' ('+upct+'%)'},
+    ];
+    kp.innerHTML = kpis.map(function(c){
+      return '<div class="kpi"><div class="muted" style="font-size:12px;">'+c.label+
+        '</div><div style="font-size:20px;font-weight:600;margin-top:4px;">'+c.value+'</div></div>';
+    }).join('');
+    var byEmo = se.by_emotion || {};
+    var emos = Object.keys(byEmo);
+    if(emos.length){
+      var rows = emos.map(function(k){
+        return '<tr><td>'+k+'</td><td>'+byEmo[k]+'</td></tr>';
+      }).join('');
+      bl.innerHTML = '<table><tr><th>'+window.T('ov2_js_se_emotion')+'</th><th>'+window.T('mo_s044')+'</th></tr>'+rows+'</table>';
+    }else{
+      bl.innerHTML = '<div class="empty">'+window.T('ov2_js_se_empty')+'</div>';
+    }
+  }catch(e){
+    bl.innerHTML = '<div class="empty">'+window.T('ln_js_033')+e+'</div>';
+  }
+}
+
+// 🧬 深度人设卡片：读 /api/workspace/metrics 的 deep_persona（巩固/画像/内部梗/回指等累计）。
+async function loadDeepPersona(){
+  var kp = document.getElementById('deepPersonaKpis');
+  var hint = document.getElementById('deepPersonaHint');
+  if(!kp || !hint) return;
+  try{
+    const r = await fetch('/api/workspace/metrics', {credentials:'same-origin'});
+    if(r.status === 403){ kp.innerHTML=''; hint.innerHTML='<div class="empty">'+window.T('ov2_js037')+'</div>'; return; }
+    const d = await r.json();
+    var dp = d.deep_persona || null;
+    var total = dp ? ((Number(dp.profiles_built)||0)+(Number(dp.jokes_detected)||0)+(Number(dp.experiential_added)||0)+(Number(dp.callbacks_emitted)||0)) : 0;
+    if(!dp || total === 0){
+      kp.innerHTML=''; hint.innerHTML='<div class="empty">'+window.T('ov2_js_dp_empty')+'</div>'; return;
+    }
+    var kpis = [
+      {label:window.T('ov2_js_dp_profiles'), value:fmt(Number(dp.profiles_built)||0)},
+      {label:window.T('ov2_js_dp_jokes'), value:fmt(Number(dp.jokes_detected)||0)},
+      {label:window.T('ov2_js_dp_exp'), value:fmt(Number(dp.experiential_added)||0)},
+      {label:window.T('ov2_js_dp_loops'), value:fmt(Number(dp.open_loops_added)||0)},
+      {label:window.T('ov2_js_dp_callbacks'), value:fmt(Number(dp.callbacks_emitted)||0)},
+      {label:window.T('ov2_js_dp_life'), value:fmt(Number(dp.life_shares)||0)},
+      {label:window.T('ov2_js_dp_drift'), value:fmt(Number(dp.drift_blocked)||0)},
+    ];
+    kp.innerHTML = kpis.map(function(c){
+      return '<div class="kpi"><div class="muted" style="font-size:12px;">'+c.label+
+        '</div><div style="font-size:20px;font-weight:600;margin-top:4px;">'+c.value+'</div></div>';
+    }).join('');
+    var emb = dp.embedder || null;
+    if(emb && (Number(emb.calls)||0) > 0){
+      hint.innerHTML = '<div class="muted" style="font-size:12px;">'+
+        window.Tf('ov2_js_dp_emb', {calls:fmt(Number(emb.calls)||0), hits:fmt(Number(emb.cache_hits)||0),
+          fail:fmt(Number(emb.failures)||0), lat:(Number(emb.avg_latency_ms)||0)})+'</div>';
+    } else { hint.innerHTML = ''; }
+  }catch(e){
+    hint.innerHTML = '<div class="empty">'+window.T('ln_js_033')+e+'</div>';
+  }
+}
+
+// 🖱️ 前端哑按钮错误卡片：读 /api/workspace/metrics 的 frontend_errors（dead-click 守卫 beacon 累计）。
+async function loadFrontendErrors(){
+  var kp = document.getElementById('feErrKpis');
+  var dv = document.getElementById('feErrDetail');
+  if(!kp || !dv) return;
+  try{
+    const r = await fetch('/api/workspace/metrics', {credentials:'same-origin'});
+    if(r.status === 403){ kp.innerHTML=''; dv.innerHTML='<div class="empty">'+window.T('ov2_js037')+'</div>'; return; }
+    const d = await r.json();
+    var fe = d.frontend_errors || null;
+    if(!fe || !(Number(fe.total)||0)){
+      kp.innerHTML=''; dv.innerHTML='<div class="empty">'+window.T('ov2_js_fe_none')+'</div>'; return;
+    }
+    var byType = fe.by_type || {};
+    var typeStr = Object.keys(byType).map(function(k){ return k+' '+byType[k]; }).join(' · ') || '—';
+    var kpis = [
+      {label:window.T('ov2_js_fe_total'), value:fmt(Number(fe.total)||0)},
+      {label:window.T('ov2_js_fe_types'), value:typeStr},
+    ];
+    kp.innerHTML = kpis.map(function(c){
+      return '<div class="kpi"><div class="muted" style="font-size:12px;">'+c.label+
+        '</div><div style="font-size:20px;font-weight:600;margin-top:4px;">'+c.value+'</div></div>';
+    }).join('');
+    // fn/page 键由后端消毒（仅标识符 / path 安全字符），无 HTML 元字符，可直接拼接。
+    function topRows(obj){
+      return Object.keys(obj).slice(0,8).map(function(k){
+        return '<tr><td>'+k+'</td><td>'+obj[k]+'</td></tr>';
+      }).join('') || '<tr><td colspan="2" class="muted">—</td></tr>';
+    }
+    var byPage = fe.by_page || {}, byFn = fe.by_fn || {};
+    dv.innerHTML =
+      '<div style="display:flex;gap:16px;flex-wrap:wrap;">'
+      + '<div style="flex:1;min-width:220px;"><div class="muted" style="font-size:12px;margin-bottom:4px;">'+window.T('ov2_js_fe_by_page')+'</div>'
+      +   '<table><tr><th>'+window.T('ov2_js_fe_col_page')+'</th><th>'+window.T('ov2_js_fe_col_count')+'</th></tr>'+topRows(byPage)+'</table></div>'
+      + '<div style="flex:1;min-width:220px;"><div class="muted" style="font-size:12px;margin-bottom:4px;">'+window.T('ov2_js_fe_by_fn')+'</div>'
+      +   '<table><tr><th>'+window.T('ov2_js_fe_col_fn')+'</th><th>'+window.T('ov2_js_fe_col_count')+'</th></tr>'+topRows(byFn)+'</table></div>'
+      + '</div>'
+      + '<div class="muted" style="font-size:12px;margin-top:8px;">'+window.T('ov2_js_fe_hint')+'</div>';
+  }catch(e){
+    dv.innerHTML = '<div class="empty">'+window.T('ln_js_033')+e+'</div>';
+  }
+}
+
+// 🪪 会话身份自愈卡片：读 /api/workspace/metrics 的 peer_identity（数字号补真实昵称的证据）。
+async function loadPeerIdentity(){
+  var kp = document.getElementById('pidKpis');
+  var dv = document.getElementById('pidDetail');
+  if(!kp || !dv) return;
+  try{
+    const r = await fetch('/api/workspace/metrics', {credentials:'same-origin'});
+    if(r.status === 403){ kp.innerHTML=''; dv.innerHTML='<div class="empty">'+window.T('ov2_js037')+'</div>'; return; }
+    const d = await r.json();
+    var pi = d.peer_identity || null;
+    var totAll = pi ? ((Number(pi.total)||0)+(Number((pi.routing||{}).total)||0)+(Number((pi.ingest||{}).total)||0)+(Number((pi.avatar||{}).total)||0)+(Number((pi.panel||{}).opens)||0)+(Number((pi.readback||{}).rows)||0)) : 0;
+    if(!pi || !totAll){
+      kp.innerHTML=''; dv.innerHTML='<div class="empty">'+window.T('ov2_js_pid_none')+'</div>'; return;
+    }
+    var kpis = [
+      {label:window.T('ov2_js_pid_resolved'), value:fmt(Number(pi.resolved)||0)},
+      {label:window.T('ov2_js_pid_cache'), value:fmt(Number(pi.cache_hits)||0)},
+      {label:window.T('ov2_js_pid_miss'), value:fmt(Number(pi.misses)||0)},
+      {label:window.T('ov2_js_pid_unavail'), value:fmt(Number(pi.unavailable)||0)},
+    ];
+    kp.innerHTML = kpis.map(function(c){
+      return '<div class="kpi"><div class="muted" style="font-size:12px;">'+c.label+
+        '</div><div style="font-size:20px;font-weight:600;margin-top:4px;">'+c.value+'</div></div>';
+    }).join('');
+    var srcLabels = {tg_open:window.T('ov2_js_pid_src_tg_open'),
+                     tg_avatar:window.T('ov2_js_pid_src_tg_avatar'),
+                     line:window.T('ov2_js_pid_src_line')};
+    var by = pi.by_source || {};
+    function srcRow(src){
+      var o = by[src] || {};
+      var tot = (Number(o.resolved)||0)+(Number(o.cache_hit)||0)+(Number(o.miss)||0)+(Number(o.unavailable)||0);
+      if(!tot) return '';
+      return '<tr><td>'+srcLabels[src]+'</td><td>'+(Number(o.resolved)||0)+'</td><td>'
+        +(Number(o.cache_hit)||0)+'</td><td>'+(Number(o.miss)||0)+'</td><td>'+(Number(o.unavailable)||0)+'</td></tr>';
+    }
+    var rows = ['tg_open','tg_avatar','line'].map(srcRow).join('') || '<tr><td colspan="5" class="muted">—</td></tr>';
+    // 多账号 client 路由（命中 worker / 回落主 client / 无 client + 按账号，暴露降级账号）
+    function escA(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    var rt = pi.routing || {};
+    var rtTot = Number(rt.total)||0;
+    var rtHtml = '';
+    if(rtTot){
+      var w=Number(rt.worker)||0, fb=Number(rt.fallback)||0, nn=Number(rt.none)||0;
+      var share = Math.round(w*100/rtTot);
+      var byAcct = rt.by_account || {};
+      var acctRows = Object.keys(byAcct).sort().map(function(a){
+        var o = byAcct[a]||{};
+        var aw=Number(o.worker)||0, af=Number(o.fallback)||0, an=Number(o.none)||0;
+        var degraded = (aw===0 && (af+an)>0);   // 只在回落/无 client 有数 → 疑似 worker 掉线
+        return '<tr'+(degraded?' style="color:var(--danger,#c0392b);font-weight:600;"':'')+'><td>'
+          +(degraded?'⚠️ ':'')+escA(a)+'</td><td>'+aw+'</td><td>'+af+'</td><td>'+an+'</td></tr>';
+      }).join('');
+      rtHtml =
+        '<div class="muted" style="font-size:12px;margin:12px 0 4px;">'+window.T('ov2_js_pid_routing')+'：'
+        + window.T('ov2_js_pid_rt_worker')+' '+fmt(w)+' · '+window.T('ov2_js_pid_rt_fallback')+' '+fmt(fb)
+        + ' · '+window.T('ov2_js_pid_rt_none')+' '+fmt(nn)+' （'+window.T('ov2_js_pid_rt_share')+' '+share+'%）</div>'
+        + (acctRows ? ('<table><tr><th>'+window.T('ov2_js_pid_rt_col_acct')+'</th><th>'+window.T('ov2_js_pid_rt_worker')
+            +'</th><th>'+window.T('ov2_js_pid_rt_fallback')+'</th><th>'+window.T('ov2_js_pid_rt_none')+'</th></tr>'
+            + acctRows + '</table>') : '')
+        + '<div class="muted" style="font-size:12px;margin-top:6px;">'+window.T('ov2_js_pid_rt_hint')+'</div>';
+    }
+    // 入站身份分类（WhatsApp/Messenger 等经 HTTP ingest 的号：named/backfilled/raw 按平台）
+    var ing = pi.ingest || {};
+    var ingTot = Number(ing.total)||0;
+    var ingHtml = '';
+    if(ingTot){
+      var byP = ing.by_platform || {};
+      var pRows = Object.keys(byP).sort().map(function(p){
+        var o = byP[p]||{};
+        var nmd=Number(o.named)||0, bf=Number(o.backfilled)||0, raw=Number(o.raw)||0;
+        var t = nmd+bf+raw;
+        var rawPct = t ? Math.round(raw*100/t) : 0;
+        var warn = (raw>0 && rawPct>=30);   // 该平台 ≥30% 仍是裸 id → 标红（名字捕获有盲区）
+        return '<tr'+(warn?' style="color:var(--danger,#c0392b);font-weight:600;"':'')+'><td>'
+          +(warn?'⚠️ ':'')+escA(p)+'</td><td>'+nmd+'</td><td>'+bf+'</td><td>'+raw+'</td><td>'+rawPct+'%</td></tr>';
+      }).join('');
+      ingHtml =
+        '<div class="muted" style="font-size:12px;margin:12px 0 4px;">'+window.T('ov2_js_pid_ingest')+'：'
+        + window.T('ov2_js_pid_ing_named')+' '+fmt(Number(ing.named)||0)+' · '+window.T('ov2_js_pid_ing_backfilled')
+        + ' '+fmt(Number(ing.backfilled)||0)+' · '+window.T('ov2_js_pid_ing_raw')+' '+fmt(Number(ing.raw)||0)+'</div>'
+        + (pRows ? ('<table><tr><th>'+window.T('ov2_js_pid_ing_col_plat')+'</th><th>'+window.T('ov2_js_pid_ing_named')
+            +'</th><th>'+window.T('ov2_js_pid_ing_backfilled')+'</th><th>'+window.T('ov2_js_pid_ing_raw')
+            +'</th><th>'+window.T('ov2_js_pid_ing_rawpct')+'</th></tr>'+pRows+'</table>') : '')
+        + '<div class="muted" style="font-size:12px;margin-top:6px;">'+window.T('ov2_js_pid_ing_hint')+'</div>';
+    }
+    // 头像代理命中（cache_hit/fetched/empty/error/neg_hit 按平台；empty 高企＝抓取盲区）
+    var av = pi.avatar || {};
+    var avTot = Number(av.total)||0;
+    var avHtml = '';
+    if(avTot){
+      var byA = av.by_platform || {};
+      var aRows = Object.keys(byA).sort().map(function(p){
+        var o = byA[p]||{};
+        var ch=Number(o.cache_hit)||0, ft=Number(o.fetched)||0, em=Number(o.empty)||0,
+            er=Number(o.error)||0, ng=Number(o.neg_hit)||0;
+        var t = ch+ft+em+er+ng;
+        var hitPct = t ? Math.round((ch+ft)*100/t) : 0;   // 真正拿到图（缓存或回源）占比
+        var emPct = t ? Math.round(em*100/t) : 0;
+        var warn = (em>0 && emPct>=30);   // 空占比高 → 抓取盲区（选择器失配/未开轮询）
+        return '<tr'+(warn?' style="color:var(--danger,#c0392b);font-weight:600;"':'')+'><td>'
+          +(warn?'⚠️ ':'')+escA(p)+'</td><td>'+ch+'</td><td>'+ft+'</td><td>'+em+'</td><td>'+er
+          +'</td><td>'+ng+'</td><td>'+hitPct+'%</td></tr>';
+      }).join('');
+      avHtml =
+        '<div class="muted" style="font-size:12px;margin:12px 0 4px;">'+window.T('ov2_js_pid_avatar')+'：'
+        + window.T('ov2_js_pid_av_cache')+' '+fmt(Number(av.cache_hit)||0)+' · '+window.T('ov2_js_pid_av_fetched')
+        + ' '+fmt(Number(av.fetched)||0)+' · '+window.T('ov2_js_pid_av_empty')+' '+fmt(Number(av.empty)||0)+'</div>'
+        + (aRows ? ('<table><tr><th>'+window.T('ov2_js_pid_ing_col_plat')+'</th><th>'+window.T('ov2_js_pid_av_cache')
+            +'</th><th>'+window.T('ov2_js_pid_av_fetched')+'</th><th>'+window.T('ov2_js_pid_av_empty')
+            +'</th><th>'+window.T('ov2_js_pid_av_error')+'</th><th>'+window.T('ov2_js_pid_av_neg')
+            +'</th><th>'+window.T('ov2_js_pid_av_hitpct')+'</th></tr>'+aRows+'</table>') : '')
+        + '<div class="muted" style="font-size:12px;margin-top:6px;">'+window.T('ov2_js_pid_av_hint')+'</div>';
+    }
+    // F3：资料面板就绪度（坐席打开会话时，文字身份完整度；name/opens=打开即可辨识占比）
+    var pn = pi.panel || {};
+    var pnOpens = Number(pn.opens)||0;
+    var pnHtml = '';
+    if(pnOpens){
+      var byPn = pn.by_platform || {};
+      var pRows = Object.keys(byPn).sort().map(function(p){
+        var o = byPn[p]||{};
+        var op=Number(o.opens)||0, nm=Number(o.name)||0, un=Number(o.username)||0, ph=Number(o.phone)||0;
+        var namePct = op ? Math.round(nm*100/op) : 0;
+        var warn = (op>0 && namePct<70);   // 打开的会话里 <70% 有真名 → 面板常显数字号，需查补名链路
+        return '<tr'+(warn?' style="color:var(--danger,#c0392b);font-weight:600;"':'')+'><td>'
+          +(warn?'⚠️ ':'')+escA(p)+'</td><td>'+op+'</td><td>'+nm+' ('+namePct+'%)</td><td>'+un+'</td><td>'+ph+'</td></tr>';
+      }).join('');
+      var totNamePct = pnOpens ? Math.round((Number(pn.name)||0)*100/pnOpens) : 0;
+      pnHtml =
+        '<div class="muted" style="font-size:12px;margin:12px 0 4px;">'+window.T('ov2_js_pid_panel')+'：'
+        + window.T('ov2_js_pid_pn_opens')+' '+fmt(pnOpens)+' · '+window.T('ov2_js_pid_pn_named')+' '+totNamePct+'%</div>'
+        + (pRows ? ('<table><tr><th>'+window.T('ov2_js_pid_ing_col_plat')+'</th><th>'+window.T('ov2_js_pid_pn_opens')
+            +'</th><th>'+window.T('ov2_js_pid_pn_named')+'</th><th>'+window.T('ov2_js_pid_pn_uname')
+            +'</th><th>'+window.T('ov2_js_pid_pn_phone')+'</th></tr>'+pRows+'</table>') : '')
+        + '<div class="muted" style="font-size:12px;margin-top:6px;">'+window.T('ov2_js_pid_pn_hint')+'</div>';
+    }
+    // F5：实时列表回读补齐（read_from_store=false 时，用 store 已持久身份补 live 行的空/裸号）
+    var rb = pi.readback || {};
+    var rbRows = Number(rb.rows)||0;
+    var rbHtml = '';
+    if(rbRows){
+      var byRb = rb.by_platform || {};
+      var rbPRows = Object.keys(byRb).sort().map(function(p){
+        var o = byRb[p]||{};
+        return '<tr><td>'+escA(p)+'</td><td>'+(Number(o.rows)||0)+'</td><td>'+(Number(o.name)||0)+'</td><td>'
+          +(Number(o.username)||0)+'</td><td>'+(Number(o.phone)||0)+'</td><td>'+(Number(o.avatar)||0)+'</td></tr>';
+      }).join('');
+      rbHtml =
+        '<div class="muted" style="font-size:12px;margin:12px 0 4px;">'+window.T('ov2_js_pid_rb')+'：'
+        + window.T('ov2_js_pid_rb_rows')+' '+fmt(rbRows)+' · '+window.T('ov2_js_pid_rb_name')+' '+fmt(Number(rb.name)||0)
+        + ' · '+window.T('ov2_js_pid_rb_avatar')+' '+fmt(Number(rb.avatar)||0)+'</div>'
+        + (rbPRows ? ('<table><tr><th>'+window.T('ov2_js_pid_ing_col_plat')+'</th><th>'+window.T('ov2_js_pid_rb_rows')
+            +'</th><th>'+window.T('ov2_js_pid_rb_name')+'</th><th>'+window.T('ov2_js_pid_rb_uname')
+            +'</th><th>'+window.T('ov2_js_pid_rb_phone')+'</th><th>'+window.T('ov2_js_pid_rb_avatar')+'</th></tr>'+rbPRows+'</table>') : '')
+        + '<div class="muted" style="font-size:12px;margin-top:6px;">'+window.T('ov2_js_pid_rb_hint')+'</div>';
+    }
+    dv.innerHTML =
+      '<div class="muted" style="font-size:12px;margin-bottom:4px;">'+window.T('ov2_js_pid_by_source')+'</div>'
+      + '<table><tr><th>'+window.T('ov2_js_pid_col_source')+'</th><th>'+window.T('ov2_js_pid_resolved')+'</th>'
+      +   '<th>'+window.T('ov2_js_pid_cache')+'</th><th>'+window.T('ov2_js_pid_miss')+'</th><th>'+window.T('ov2_js_pid_unavail')+'</th></tr>'
+      +   rows + '</table>'
+      + '<div class="muted" style="font-size:12px;margin-top:8px;">'+window.T('ov2_js_pid_hint')+'</div>'
+      + rtHtml + ingHtml + avHtml + pnHtml + rbHtml;
+  }catch(e){
+    dv.innerHTML = '<div class="empty">'+window.T('ln_js_033')+e+'</div>';
+  }
+}
+
+// 🪪 身份健康趋势：近 7 天 入站 raw% / 头像 empty% sparkline（读 /api/admin/identity-health-trend）。
+// 默认关（inbox.identity.trend_log）→ 隐藏，仅上面的瞬时快照可见。末日越阈(≥30%) → ⚠️ 提示。
+async function loadIdentityTrend(){
+  var el = document.getElementById('identityTrend');
+  if(!el) return;
+  try{
+    const r = await fetch('/api/admin/identity-health-trend?days=7', {credentials:'same-origin'});
+    const d = await r.json();
+    if(!d.enabled){ el.innerHTML=''; return; }  // 未开趋势落库 → 静默隐藏（不占位）
+    var days = d.days || [];
+    if(days.length < 2){ el.innerHTML=''; return; }
+    var rawRate = days.map(function(x){ return (Number(x.raw_rate)||0)*100; });
+    var emptyRate = days.map(function(x){ return (Number(x.empty_rate)||0)*100; });
+    var labels = days.map(function(x){
+      return (x.day||'')+': '+window.T('ov2_js_pid_tr_raw')+' '+((Number(x.raw_rate)||0)*100).toFixed(1)+'%'
+        + ' · '+window.T('ov2_js_pid_tr_empty')+' '+((Number(x.empty_rate)||0)*100).toFixed(1)+'%';
+    });
+    var lastRaw = rawRate[rawRate.length-1]||0, lastEmpty = emptyRate[emptyRate.length-1]||0;
+    var warn = (lastRaw>=30 || lastEmpty>=30)
+      ? '<span style="color:var(--danger,#c0392b);font-weight:600;"> ⚠️ '+window.T('ov2_js_pid_tr_warn')+'</span>'
+      : '';
+    el.innerHTML = '<div class="muted" style="font-size:12px;margin-bottom:4px;">'
+      + window.T('ov2_js_pid_tr_title')+warn+'</div>'
+      + sparkline(rawRate, {labels:labels, color:'#c0392b', w:300})
+      + ' '+sparkline(emptyRate, {labels:labels, color:'#e67e22', w:300});
+  }catch(e){ el.innerHTML=''; }
+}
+
 // 📞 实时语音通话卡片：metrics（通话观测）+ engine/status（显存生命周期）合一。
 var _rtvPending = null;   // null | "load" | "unload"
 
@@ -1405,7 +1748,7 @@ async function toggleLocalTts(on){
 }
 
 if(CAN_MANAGE_OPS){ var _rb=document.getElementById('recheckBtn'); if(_rb) _rb.style.display=''; }
-function refreshAll(){ loadOverview(); loadIncidents(); loadReport(); loadTTS(); loadTTSTrend(); loadAiSafety(); loadSlaBacklog(); loadTranslationEngines(); loadXlateTrend(); loadVoiceSynthLang(); loadLocalTts(); loadRealtimeVoice(); loadRtvTrend(); refreshRealtimeVoiceAlertBadge(); }
+function refreshAll(){ loadOverview(); loadIncidents(); loadReport(); loadTTS(); loadTTSTrend(); loadAiSafety(); loadSlaBacklog(); loadTranslationEngines(); loadXlateTrend(); loadVoiceSynthLang(); loadSpeechEmotion(); loadDeepPersona(); loadFrontendErrors(); loadPeerIdentity(); loadIdentityTrend(); loadLocalTts(); loadRealtimeVoice(); loadRtvTrend(); refreshRealtimeVoiceAlertBadge(); }
 function _onRtvOpsRefresh(){
   loadRealtimeVoice(); loadRtvTrend(); loadRtvAlertCalibrate(false); refreshRealtimeVoiceAlertBadge();
 }

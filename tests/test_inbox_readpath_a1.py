@@ -10,6 +10,9 @@
 
 from __future__ import annotations
 
+import types
+
+import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
@@ -209,6 +212,206 @@ def test_chats_live_store_equivalence(tmp_path):
         ls = (lr.get("last_message") or {}).get("text", "")
         ss = (sr.get("last_message") or {}).get("text", "")
         assert ss == ls, f"{cid} last_message.text 不等: live={ls!r} store={ss!r}"
+    store.close()
+
+
+# ── F4：live 列表 store 身份「仅补空/仅升级」富集 ─────────────────
+
+def _fake_req(store):
+    """最小 request 桩：仅暴露 request.app.state.inbox_store（_inbox_store 读取点）。"""
+    return types.SimpleNamespace(
+        app=types.SimpleNamespace(state=types.SimpleNamespace(inbox_store=store)))
+
+
+@pytest.fixture(autouse=True)
+def _reset_readback_state():
+    """F5：清进程级回读观测（去重集 + 计数单例），使各用例互不串扰、可断言精确计数。"""
+    from src.web.peer_identity_stats import get_peer_identity_stats
+    from src.web.routes.unified_inbox_aggregate import _READBACK_SEEN
+    _READBACK_SEEN.clear()
+    get_peer_identity_stats().reset()
+    yield
+    _READBACK_SEEN.clear()
+    get_peer_identity_stats().reset()
+
+
+def test_apply_store_identity_upgrades_and_fills():
+    from src.web.routes.unified_inbox_aggregate import _apply_store_identity
+    chat = {"chat_key": "123", "name": "123",  # 裸数字名 = 非真名
+            "username": "", "phone": "", "avatar_url": ""}
+    row = {"display_name": "林小雨", "username": "lin",
+           "phone": "+639171234567", "avatar_url": "https://cdn/x.jpg"}
+    # 返回本次补齐的字段列表（avatar_url → "avatar"），供 F5 观测按字段计数
+    assert set(_apply_store_identity(chat, row)) == {"name", "username", "phone", "avatar"}
+    assert chat["name"] == "林小雨"          # 裸号→真名 升级
+    assert chat["username"] == "lin"
+    assert chat["phone"] == "+639171234567"
+    assert chat["avatar_url"] == "https://cdn/x.jpg"
+
+
+def test_apply_store_identity_never_clobbers_real_name_or_existing_values():
+    from src.web.routes.unified_inbox_aggregate import _apply_store_identity
+    chat = {"chat_key": "123", "name": "Real Name",
+            "username": "keep", "phone": "", "avatar_url": "live://a"}
+    row = {"display_name": "Other", "username": "other",
+           "phone": "+63", "avatar_url": "store://b"}
+    upgraded = _apply_store_identity(chat, row)
+    assert chat["name"] == "Real Name"       # 已是真名 → 不覆盖
+    assert chat["username"] == "keep"        # 已有值 → 不覆盖
+    assert chat["avatar_url"] == "live://a"  # 已有值 → 不覆盖
+    assert chat["phone"] == "+63"            # 仅补空
+    assert upgraded == ["phone"]             # 只补了 phone
+
+
+def test_apply_store_identity_store_raw_name_not_used():
+    from src.web.routes.unified_inbox_aggregate import _apply_store_identity
+    chat = {"chat_key": "123", "name": "123",
+            "username": "", "phone": "", "avatar_url": ""}
+    row = {"display_name": "123", "username": "", "phone": "", "avatar_url": ""}
+    assert _apply_store_identity(chat, row) == []   # 无补齐
+    assert chat["name"] == "123"             # store 也是裸号 → 不升级
+
+
+def test_overlay_store_identity_fills_from_store(tmp_path):
+    from src.web.routes.unified_inbox_aggregate import _overlay_store_identity
+    store = InboxStore(tmp_path / "i.db")
+    cid = "line:line-a:room"
+    # 模拟 side-effect ingest 早前已抓到富身份（username/头像/电话）
+    ingest_collected_chats(store, [{
+        "conversation_id": cid, "platform": "line", "account_id": "line-a",
+        "chat_key": "room", "name": "林小雨", "username": "lin",
+        "phone": "+639171234567", "avatar_url": "https://cdn/x.jpg",
+        "last_msg": "hi", "last_ts": 10,
+    }])
+    # live 行只有裸 chat_key 名、无 username/头像（多数 RPA 适配器的贫身份）
+    live = [{"conversation_id": cid, "platform": "line", "account_id": "line-a",
+             "chat_key": "room", "name": "room",
+             "username": "", "phone": "", "avatar_url": ""}]
+    out = _overlay_store_identity(_fake_req(store), live)
+    assert out is live                        # 原地修改
+    assert live[0]["name"] == "林小雨"
+    assert live[0]["username"] == "lin"
+    assert live[0]["phone"] == "+639171234567"
+    assert live[0]["avatar_url"] == "https://cdn/x.jpg"
+    store.close()
+
+
+def test_overlay_store_identity_no_store_is_noop():
+    from src.web.routes.unified_inbox_aggregate import _overlay_store_identity
+    live = [{"conversation_id": "x", "chat_key": "r", "name": "r",
+             "username": "", "phone": "", "avatar_url": ""}]
+    out = _overlay_store_identity(_fake_req(None), live)
+    assert out is live and live[0]["name"] == "r"   # store 缺失 → 原样返回
+
+
+def test_overlay_store_identity_skips_db_when_live_complete():
+    """身份已齐（真名 + username + 头像）的行不查库（零 IO）。"""
+    from src.web.routes.unified_inbox_aggregate import _overlay_store_identity
+
+    class _Counting:
+        def __init__(self):
+            self.calls = 0
+
+        def get_conversation(self, cid):
+            self.calls += 1
+            return None
+
+    store = _Counting()
+    live = [{"conversation_id": "line:a:r", "chat_key": "r", "name": "Ann",
+             "username": "ann", "phone": "", "avatar_url": "https://x"}]
+    _overlay_store_identity(_fake_req(store), live)
+    assert store.calls == 0                   # 完整身份 → 不回库
+
+
+def test_chats_live_mode_overlays_store_identity(tmp_path):
+    """F4 端到端：read_from_store=false 下 /chats 仍用 store 已持久身份补空。
+
+    live 适配器（LineSvc）只给 name、无 username/头像/电话；store 有 → 返回行补齐。
+    依赖 conversations upsert 的「空值不覆盖」护栏：live 旁路 ingest（贫身份）不会清掉
+    store 已有的 username/avatar，overlay 才能补回。"""
+    store = InboxStore(tmp_path / "inbox.db")
+    cid = "line:line-a:line-room"
+    ingest_collected_chats(store, [{
+        "conversation_id": cid, "platform": "line", "account_id": "line-a",
+        "chat_key": "line-room", "name": "Line User", "username": "lineuser",
+        "phone": "+639171234567", "avatar_url": "https://cdn/l.jpg",
+        "last_msg": "こんにちは", "last_ts": 100,
+    }])
+    c = _client(inbox_store=store, read_from_store=False)
+    chats = c.get("/api/unified-inbox/chats?limit=10").json()["chats"]
+    row = next(r for r in chats if r["conversation_id"] == cid)
+    assert not row.get("from_store")          # 仍是 live 行（未切 store-backed）
+    assert row["username"] == "lineuser"      # F4 从 store 补上
+    assert row["avatar_url"] == "https://cdn/l.jpg"
+    assert row["phone"] == "+639171234567"
+    store.close()
+
+
+def test_overlay_records_readback_deduped(tmp_path):
+    """F5：回读补齐落观测——按平台记补了哪些字段；同一会话跨多次 overlay 只计一次（去重）。"""
+    from src.web.peer_identity_stats import get_peer_identity_stats
+    from src.web.routes.unified_inbox_aggregate import _overlay_store_identity
+    store = InboxStore(tmp_path / "i.db")
+    cid = "line:line-a:rb-room"
+    ingest_collected_chats(store, [{
+        "conversation_id": cid, "platform": "line", "account_id": "line-a",
+        "chat_key": "rb-room", "name": "林小雨", "username": "lin",
+        "phone": "+63", "avatar_url": "https://c/x.jpg", "last_msg": "hi", "last_ts": 10,
+    }])
+    req = _fake_req(store)
+
+    def _poor():
+        return [{"conversation_id": cid, "platform": "line", "account_id": "line-a",
+                 "chat_key": "rb-room", "name": "rb-room",
+                 "username": "", "phone": "", "avatar_url": ""}]
+
+    _overlay_store_identity(req, _poor())
+    _overlay_store_identity(req, _poor())     # 同 cid 第二次 → 去重不再计
+    rb = get_peer_identity_stats().dump()["readback"]
+    assert rb["rows"] == 1                     # 去重：一个会话只记一次
+    assert rb["name"] == 1 and rb["username"] == 1
+    assert rb["phone"] == 1 and rb["avatar"] == 1
+    assert rb["by_platform"]["line"]["rows"] == 1
+
+
+def test_overlay_no_readback_when_nothing_upgraded(tmp_path):
+    """live 已有真名+username+头像（无可补）→ 快路径跳过、不记 readback。"""
+    from src.web.peer_identity_stats import get_peer_identity_stats
+    from src.web.routes.unified_inbox_aggregate import _overlay_store_identity
+    store = InboxStore(tmp_path / "i.db")
+    cid = "line:line-a:full-room"
+    ingest_collected_chats(store, [{
+        "conversation_id": cid, "platform": "line", "account_id": "line-a",
+        "chat_key": "full-room", "name": "Ann", "username": "ann",
+        "avatar_url": "https://c/a.jpg", "last_msg": "hi", "last_ts": 10,
+    }])
+    live = [{"conversation_id": cid, "platform": "line", "account_id": "line-a",
+             "chat_key": "full-room", "name": "Ann", "username": "ann",
+             "phone": "", "avatar_url": "https://c/a.jpg"}]
+    _overlay_store_identity(_fake_req(store), live)
+    assert get_peer_identity_stats().dump()["readback"]["rows"] == 0
+    store.close()
+
+
+def test_thread_live_config_target_carries_store_identity(tmp_path):
+    """F4×F3 组合：read_from_store=false 下 /thread 的 d.chat 携带 store 已持久身份
+    （username/头像）→ 前端 _mergePeerIdentity 在 live 模式也能把最新身份合成进会话。
+
+    live telegram 源只给 user_name（无 username/头像）；store 有 → target 补齐后返回。"""
+    store = InboxStore(tmp_path / "i.db")
+    cid = "telegram:default:tg-room"
+    ingest_collected_chats(store, [{
+        "conversation_id": cid, "platform": "telegram", "account_id": "default",
+        "chat_key": "tg-room", "name": "TG User", "username": "tguser",
+        "avatar_url": "/static/peer_avatars/tg.jpg", "last_msg": "你好", "last_ts": 130,
+    }])
+    app = _thread_client(read_from_store=False)   # live 模式
+    app.state.inbox_store = store
+    c = TestClient(app)
+    data = c.get("/api/unified-inbox/thread?platform=telegram&chat_key=tg-room").json()
+    assert data["ok"] is True and data["chat"] is not None
+    assert data["chat"]["username"] == "tguser"       # d.chat 带上 store 身份
+    assert data["chat"]["avatar_url"] == "/static/peer_avatars/tg.jpg"
     store.close()
 
 

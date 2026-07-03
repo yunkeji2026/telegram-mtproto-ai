@@ -59,9 +59,30 @@
                    border-bottom: 1px solid var(--cp-border, #e2e8f0); font-size: 12px; }
     .cp-cust-row .k { color: var(--cp-text-dim, #64748b); }
     .cp-cust-row .v { color: var(--cp-text, #1e293b); text-align: right; word-break: break-all; }
+    /* 可折叠卡片（与网页 unified_inbox 同款；核心逻辑复用 sidebar-chrome.createCardController） */
+    .cp-card { border: 1px solid var(--cp-border, #e2e8f0); border-radius: 10px; background: var(--cp-surface, #fff); overflow: hidden; }
+    .cp-card-hd { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 12px;
+                  background: var(--cp-bg-soft, #f1f5f9); border: 0; cursor: pointer; font: inherit; text-align: left;
+                  color: var(--cp-text, #1e293b); transition: background .12s; }
+    .cp-card-hd:hover { filter: brightness(0.98); }
+    .cp-card-ttl { flex: 1; min-width: 0; font-size: 12px; font-weight: 700; color: var(--cp-text, #1e293b);
+                   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-flex; align-items: center; }
+    .cp-card-ic { display: inline-flex; align-items: center; vertical-align: middle; margin-right: 5px; color: var(--cp-text-dim, #64748b); opacity: .88; flex-shrink: 0; }
+    .cp-card-pill { flex-shrink: 0; font-size: 10px; font-weight: 600; color: var(--cp-accent, #6366f1);
+                    background: rgba(99,102,241,.12); border-radius: 999px; padding: 1px 8px; line-height: 1.6; }
+    .cp-card-pill:empty { display: none; }
+    .cp-card-pill.pill-ok { color: #16a34a; background: rgba(22,163,74,.14); }
+    .cp-card-pill.pill-warn { color: #d97706; background: rgba(217,119,6,.16); }
+    .cp-card-pill.pill-danger { color: #dc2626; background: rgba(220,38,38,.14); }
+    .cp-card-chev { flex-shrink: 0; width: 7px; height: 7px; border-right: 2px solid var(--cp-text-tiny, #94a3b8);
+                    border-bottom: 2px solid var(--cp-text-tiny, #94a3b8); transform: rotate(45deg); transition: transform .18s; margin-right: 1px; }
+    .cp-card.collapsed .cp-card-chev { transform: rotate(-45deg); }
+    .cp-card-bd { padding: 10px 12px; }
+    .cp-card.collapsed .cp-card-bd { display: none; }
   </style>
   <script src="/copilot/i18n/cp-i18n.js"></script>
   <script src="/copilot/client/copilot-client.js"></script>
+  <script src="/copilot/sidebar-chrome.js"></script>
   <script src="/copilot/components/cp-panel-base.js"></script>
   <script src="/copilot/components/cp-rel-stage.js"></script>
   <script src="/copilot/components/cp-next-actions.js"></script>
@@ -75,9 +96,9 @@
 </head>
 <body>
   <div class="cp-tabs" id="cp-tabs" hidden>
-    <button type="button" class="cp-tab active" data-tab="reply" data-cp-i18n="cp.app.tab_reply">💬 回复</button>
-    <button type="button" class="cp-tab" data-tab="insight" data-cp-i18n="cp.app.tab_insight">🧠 洞察</button>
-    <button type="button" class="cp-tab" data-tab="customer" data-cp-i18n="cp.app.tab_customer">👤 客户</button>
+    <button type="button" class="cp-tab active" data-tab="reply" data-cp-i18n="cp.app.tab_reply">回复台</button>
+    <button type="button" class="cp-tab" data-tab="customer" data-cp-i18n="cp.app.tab_customer">客户&关系</button>
+    <button type="button" class="cp-tab" data-tab="tools" data-cp-i18n="cp.app.tab_tools">工具箱</button>
   </div>
   <div class="cp-app" id="cp-app">
     <h4 data-cp-i18n="cp.app.h_accounts">👥 账号管理</h4>
@@ -93,37 +114,87 @@
         </label>
         <span class="cp-auto-status" id="autopilot-status" data-cp-i18n="cp.app.auto_off">已关闭</span>
       </div>
-      <h4 data-cp-i18n="cp.app.h_draft">✨ 回复草稿</h4>
-      <cp-draft id="draft" persona contrast pin></cp-draft>
-      <h4 data-cp-i18n="cp.app.h_voice">🎙️ 语音克隆</h4>
-      <cp-voice id="voice"></cp-voice>
-      <h4 data-cp-i18n="cp.app.h_persona">🎭 人设绑定</h4>
-      <cp-persona id="persona"></cp-persona>
-      <h4 data-cp-i18n="cp.app.h_script">🎬 剧本话题</h4>
-      <cp-script id="script"></cp-script>
+      <section class="cp-card" data-cp-card="draft">
+        <button type="button" class="cp-card-hd" data-cp-toggle="draft">
+          <span class="cp-card-ttl"><span class="cp-card-ic" data-cp-ic="spark"></span><span data-cp-i18n="cp.app.h_draft">回复草稿</span></span>
+          <span class="cp-card-pill" id="cpp-draft"></span><span class="cp-card-chev" aria-hidden="true"></span>
+        </button>
+        <div class="cp-card-bd"><cp-draft id="draft" persona contrast pin></cp-draft></div>
+      </section>
+      <section class="cp-card collapsed" data-cp-card="voice">
+        <button type="button" class="cp-card-hd" data-cp-toggle="voice">
+          <span class="cp-card-ttl"><span class="cp-card-ic" data-cp-ic="mic"></span><span data-cp-i18n="cp.app.h_voice">语音克隆</span></span>
+          <span class="cp-card-chev" aria-hidden="true"></span>
+        </button>
+        <div class="cp-card-bd"><cp-voice id="voice"></cp-voice></div>
+      </section>
+      <section class="cp-card collapsed" data-cp-card="persona">
+        <button type="button" class="cp-card-hd" data-cp-toggle="persona">
+          <span class="cp-card-ttl"><span class="cp-card-ic" data-cp-ic="user"></span><span data-cp-i18n="cp.app.h_persona">人设绑定</span></span>
+          <span class="cp-card-pill" id="cpp-persona"></span><span class="cp-card-chev" aria-hidden="true"></span>
+        </button>
+        <div class="cp-card-bd"><cp-persona id="persona"></cp-persona></div>
+      </section>
+      <section class="cp-card collapsed" data-cp-card="script">
+        <button type="button" class="cp-card-hd" data-cp-toggle="script">
+          <span class="cp-card-ttl"><span class="cp-card-ic" data-cp-ic="film"></span><span data-cp-i18n="cp.app.h_script">剧本话题</span></span>
+          <span class="cp-card-pill" id="cpp-script"></span><span class="cp-card-chev" aria-hidden="true"></span>
+        </button>
+        <div class="cp-card-bd"><cp-script id="script"></cp-script></div>
+      </section>
     </div>
 
-    <!-- 🧠 洞察 -->
-    <div class="cp-sec" data-tab="insight" id="sec-insight">
-      <h4 data-cp-i18n="cp.app.h_rel">💞 关系阶段</h4>
-      <cp-rel-stage id="relstage"></cp-rel-stage>
-      <h4 data-cp-i18n="cp.app.h_collab">🤝 协作上下文</h4>
-      <cp-collab id="collab"></cp-collab>
-      <h4 data-cp-i18n="cp.app.h_nba">⚡ 下一步建议</h4>
-      <cp-next-actions id="nba"></cp-next-actions>
-      <h4 data-cp-i18n="cp.app.h_chain">🔗 工作链执行</h4>
-      <cp-chain-exec id="chain"></cp-chain-exec>
-      <h4 data-cp-i18n="cp.app.h_analyze">🧠 AI 对话分析</h4>
-      <div>
-        <button type="button" class="cp-analyze-btn" id="analyze-btn" data-cp-i18n="cp.app.analyze_btn">分析当前对话</button>
-        <div class="cp-analyze-box" id="analyze-box" style="margin-top:6px;"></div>
-      </div>
-    </div>
-
-    <!-- 👤 客户 -->
+    <!-- 客户&关系 -->
     <div class="cp-sec" data-tab="customer" id="sec-customer">
-      <h4 data-cp-i18n="cp.app.h_customer">👤 客户档案</h4>
-      <div id="customer-box" class="cp-analyze-box"></div>
+      <section class="cp-card" data-cp-card="customer">
+        <button type="button" class="cp-card-hd" data-cp-toggle="customer">
+          <span class="cp-card-ttl"><span class="cp-card-ic" data-cp-ic="user"></span><span data-cp-i18n="cp.app.h_customer">客户档案</span></span>
+          <span class="cp-card-chev" aria-hidden="true"></span>
+        </button>
+        <div class="cp-card-bd"><div id="customer-box" class="cp-analyze-box"></div></div>
+      </section>
+      <section class="cp-card collapsed" data-cp-card="relstage">
+        <button type="button" class="cp-card-hd" data-cp-toggle="relstage">
+          <span class="cp-card-ttl"><span class="cp-card-ic" data-cp-ic="heart"></span><span data-cp-i18n="cp.app.h_rel">关系阶段</span></span>
+          <span class="cp-card-pill" id="cpp-relstage"></span><span class="cp-card-chev" aria-hidden="true"></span>
+        </button>
+        <div class="cp-card-bd"><cp-rel-stage id="relstage"></cp-rel-stage></div>
+      </section>
+      <section class="cp-card collapsed" data-cp-card="collab">
+        <button type="button" class="cp-card-hd" data-cp-toggle="collab">
+          <span class="cp-card-ttl"><span class="cp-card-ic" data-cp-ic="users"></span><span data-cp-i18n="cp.app.h_collab">协作上下文</span></span>
+          <span class="cp-card-pill" id="cpp-collab"></span><span class="cp-card-chev" aria-hidden="true"></span>
+        </button>
+        <div class="cp-card-bd"><cp-collab id="collab"></cp-collab></div>
+      </section>
+    </div>
+
+    <!-- 工具箱 -->
+    <div class="cp-sec" data-tab="tools" id="sec-tools">
+      <section class="cp-card" data-cp-card="nba">
+        <button type="button" class="cp-card-hd" data-cp-toggle="nba">
+          <span class="cp-card-ttl"><span class="cp-card-ic" data-cp-ic="zap"></span><span data-cp-i18n="cp.app.h_nba">下一步建议</span></span>
+          <span class="cp-card-pill" id="cpp-nba"></span><span class="cp-card-chev" aria-hidden="true"></span>
+        </button>
+        <div class="cp-card-bd"><cp-next-actions id="nba"></cp-next-actions></div>
+      </section>
+      <section class="cp-card collapsed" data-cp-card="chain">
+        <button type="button" class="cp-card-hd" data-cp-toggle="chain">
+          <span class="cp-card-ttl"><span class="cp-card-ic" data-cp-ic="link"></span><span data-cp-i18n="cp.app.h_chain">工作链执行</span></span>
+          <span class="cp-card-pill" id="cpp-chain"></span><span class="cp-card-chev" aria-hidden="true"></span>
+        </button>
+        <div class="cp-card-bd"><cp-chain-exec id="chain"></cp-chain-exec></div>
+      </section>
+      <section class="cp-card" data-cp-card="analysis">
+        <button type="button" class="cp-card-hd" data-cp-toggle="analysis">
+          <span class="cp-card-ttl"><span class="cp-card-ic" data-cp-ic="brain"></span><span data-cp-i18n="cp.app.h_analyze">AI 对话分析</span></span>
+          <span class="cp-card-chev" aria-hidden="true"></span>
+        </button>
+        <div class="cp-card-bd">
+          <button type="button" class="cp-analyze-btn" id="analyze-btn" data-cp-i18n="cp.app.analyze_btn">分析当前对话</button>
+          <div class="cp-analyze-box" id="analyze-box" style="margin-top:6px;"></div>
+        </div>
+      </section>
     </div>
   </div>
   <script>
@@ -158,22 +229,57 @@
         });
 
       var CURRENT = null; // 当前会话上下文
-      var activeTab = "reply";
-
-      // ── tab 切换 ──
+      var sc = (window.CopilotShared && window.CopilotShared.sidebarChrome) || {};
+      var tabCtrl = sc.createTabController ? sc.createTabController({
+        tabSelector: ".cp-tab",
+        sectionSelector: ".cp-sec",
+        onChange: function (tab) {
+          if (tab === "tools" && CURRENT) runAnalyze();
+          if (tab === "customer" && CURRENT) renderCustomer();
+        },
+      }) : null;
       function setTab(tab) {
-        activeTab = tab || "reply";
+        if (tabCtrl) return tabCtrl.setTab(tab);
+        var active = sc.normalizeTab ? sc.normalizeTab(tab) : tab || "reply";
         Array.prototype.forEach.call(document.querySelectorAll(".cp-tab"), function (b) {
-          b.classList.toggle("active", b.dataset.tab === activeTab);
+          b.classList.toggle("active", b.dataset.tab === active);
         });
         Array.prototype.forEach.call(document.querySelectorAll(".cp-sec"), function (s) {
-          s.classList.toggle("active", s.dataset.tab === activeTab);
+          s.classList.toggle("active", s.dataset.tab === active);
         });
-        if (activeTab === "insight" && CURRENT) runAnalyze();
-        if (activeTab === "customer" && CURRENT) renderCustomer();
+        if (active === "tools" && CURRENT) runAnalyze();
+        if (active === "customer" && CURRENT) renderCustomer();
+        return active;
       }
-      Array.prototype.forEach.call(document.querySelectorAll(".cp-tab"), function (b) {
-        b.addEventListener("click", function () { setTab(b.dataset.tab); });
+      if (tabCtrl) tabCtrl.bindClick();
+
+      // ── 可折叠卡片：折叠态记忆 + 卡头图标/pill（与网页 unified_inbox 同源 sidebar-chrome.createCardController）──
+      var cardCtrl = sc.createCardController ? sc.createCardController({
+        storageKey: "cp_app_cards_v1",
+        defaultCollapsed: { voice: 1, persona: 1, script: 1, relstage: 1, collab: 1, chain: 1 },
+      }) : null;
+      if (cardCtrl) { cardCtrl.bindClicks(document.getElementById("cp-app")); cardCtrl.apply(); }
+      if (sc.decorateCardIcons) sc.decorateCardIcons(document, 14);
+      var PILL_BY_PANEL = { draft: "cpp-draft", relstage: "cpp-relstage", collab: "cpp-collab", nba: "cpp-nba", chain: "cpp-chain", script: "cpp-script", persona: "cpp-persona" };
+      var PILL_TONES = ["pill-accent", "pill-ok", "pill-warn", "pill-danger"];
+      function pillT(key, vars) {
+        var zh = { guard_high: "高风险", guard_medium: "中风险", draft_ready: "已生成", chain_failed: "{n} 失败", chain_running: "{n} 运行中", topics: "{n} 话题" };
+        var en = { guard_high: "High risk", guard_medium: "Med risk", draft_ready: "Ready", chain_failed: "{n} failed", chain_running: "{n} running", topics: "{n} topics" };
+        var k = String(key).replace("inbox.pill.", "");
+        var s = (LANG === "en" ? en : zh)[k] || key;
+        if (vars) Object.keys(vars).forEach(function (p) { s = s.split("{" + p + "}").join(String(vars[p])); });
+        return s;
+      }
+      document.addEventListener("cp-data-loaded", function (e) {
+        var det = (e && e.detail) || {};
+        var pid = PILL_BY_PANEL[det.panelId];
+        if (!pid || !sc.pillMetaFromCpLoaded) return;
+        var m = sc.pillMetaFromCpLoaded(det, { t: pillT, tf: pillT });
+        var pel = document.getElementById(pid);
+        if (!pel) return;
+        pel.textContent = m.text || "";
+        PILL_TONES.forEach(function (c) { pel.classList.remove(c); });
+        if (m.text && m.tone) pel.classList.add("pill-" + m.tone);
       });
 
       // chat_key 回退:conversation_id = platform:account:chat_key,取第 2 个冒号后整体
@@ -301,16 +407,27 @@
         });
       }
 
+      // 电话脱敏（与工作台侧栏同口径:保留前段与末 2 位,中间打码）
+      function _cpMaskPhone(p) {
+        var s = String(p || "").trim(); if (!s) return "";
+        var plus = s.charAt(0) === "+" ? "+" : ""; var d = s.replace(/[^0-9]/g, "");
+        if (d.length <= 4) return plus + d;
+        return plus + d.slice(0, Math.min(3, d.length - 2)) + "****" + d.slice(-2);
+      }
+
       // ── 客户档案:宿主可在 cp-context.customer 里带字段,否则用 cid 基础信息 ──
+      // 身份画像(真实昵称/@username/电话)置顶,替代「一排数字 id」,一眼识别客户。
       function renderCustomer() {
         var box = document.getElementById("customer-box");
         if (!box || !CURRENT) return;
         var cu = CURRENT.customer || {};
-        var rows = [
-          [T("cp.app.c_platform"), cu.platform || CURRENT.platform || "-"],
-          [T("cp.app.c_account"), cu.account_label || cu.account_id || CURRENT.accountId || "-"],
-          [T("cp.app.c_id"), cu.chat_key || CURRENT.chatKey || "-"],
-        ];
+        var rows = [];
+        if (cu.name) rows.push([T("cp.app.c_nickname"), cu.name]);
+        if (cu.username) rows.push([T("cp.app.c_username"), "@" + cu.username]);
+        if (cu.phone) rows.push([T("cp.app.c_phone"), _cpMaskPhone(cu.phone)]);
+        rows.push([T("cp.app.c_platform"), cu.platform || CURRENT.platform || "-"]);
+        rows.push([T("cp.app.c_account"), cu.account_label || cu.account_id || CURRENT.accountId || "-"]);
+        rows.push([T("cp.app.c_id"), cu.chat_key || CURRENT.chatKey || "-"]);
         if (cu.funnel_stage) rows.push([T("cp.app.c_funnel"), cu.funnel_stage]);
         if (cu.contact_id) rows.push(["CRM", cu.contact_id]);
         var html = rows.map(function (r) {
@@ -339,8 +456,8 @@
         if (caps.autopilot) setAutoUi(!!ctx.autopilotOn);
         var panelCtx = { conversationId: cid, chatKey: ck, platform: CURRENT.platform, accountId: CURRENT.accountId };
         panels.forEach(function (el) { if (el) el.context = panelCtx; });
-        if (activeTab === "insight") runAnalyze();
-        if (activeTab === "customer") renderCustomer();
+        if (tabCtrl && tabCtrl.getTab() === "tools") runAnalyze();
+        if (tabCtrl && tabCtrl.getTab() === "customer") renderCustomer();
         if (!document.querySelector(".cp-sec.active")) setTab("reply");
       }
 
@@ -377,7 +494,8 @@
       });
 
       // 告知宿主壳:App 就绪,可以开始喂 context
-      setTab("reply");
+      if (tabCtrl) tabCtrl.restore();
+      else setTab("reply");
       post("cp-ready");
     })();
   </script>

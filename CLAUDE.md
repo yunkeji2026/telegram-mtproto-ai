@@ -53,9 +53,12 @@ cd desktop && npm test
 预期：全绿（health-panel 看板模型 / 出站行 / 待审 FIFO / 拦截 chips / SLA / fingerprint / launcher 等）。
 
 **前端「哑按钮」门禁**（内联 `on*="fn()"` 引用的函数必须①有定义 ②全局作用域可达；防 `setMode`/`saveConfig`
-那类「定义了但在 IIFE 内没挂 window」→ 点了抛 ReferenceError 静默无反应）：
+那类「定义了但在 IIFE 内没挂 window」→ 点了抛 ReferenceError 静默无反应）+ **重复 DOM id 门禁**
+（同页两个 `id="x"` → getElementById 只命中第一个、第二个元素静默失效）+ **孤儿 DOM 引用门禁**
+（`getElementById('x').prop` 直接解引用但 `id="x"` 全站不存在 → null.prop 必崩）+ **动态点属性拼接门禁**
+（字符串里 `X.name'+var` 拼点属性名，var 含连字符时被当减法 → ReferenceError）：
 ```bash
-python -m pytest tests/test_inbox_inline_handlers_exported.py tests/test_rpa_inline_handlers_exposed.py -q --tb=line
+python -m pytest tests/test_inbox_inline_handlers_exported.py tests/test_rpa_inline_handlers_exposed.py tests/test_template_unique_ids.py tests/test_template_orphan_refs.py tests/test_template_dynamic_dot_access.py -q --tb=line
 ```
 预期：全绿。扫描/作用域分析共享核心在 `tests/_inline_handler_scan.py`——会**跳过字符串/模板字面量/注释/正则**
 的掩码器算括号深度，可靠区分「IIFE 内定义（不可达除非挂 window）」vs「顶层全局定义（可达）」，任意架构零假阳性；
@@ -65,7 +68,36 @@ python -m pytest tests/test_inbox_inline_handlers_exported.py tests/test_rpa_inl
 `exportProfiles`/`importProfiles`（遗留重复卡，真面板是 `#import-panel`）已直接删除。`_PENDING_ORPHANS`（记录
 「引用了未定义函数」这类需产品决策的真 bug，CI 保绿+债务可见）当前为空；`test_pending_orphans_are_still_broken` 防其过期。运行时另有兜底守卫（`unified_inbox` 内 `_wireDeadClickGuard`
 + `_rpa_shared_scripts.html` 覆盖 4 个 RPA 页）捕获 ReferenceError 弹红条（附函数名便于上报），
-补静态门禁扫不到的「运行时才由 innerHTML 拼出的 handler」盲区。
+补静态门禁扫不到的「运行时才由 innerHTML 拼出的 handler」盲区。`referenced()` 会剔除生成期字符串拼接段
+`'+helper()+'`（如 `bodyId`/`esc` 只在拼 HTML 时求值、运行时 handler 不调用），只抓真正运行时执行的调用，避免逼着无谓暴露。
+**该运行时守卫已可观测化**：捕获后除弹红条，还 `navigator.sendBeacon` 到 `POST /api/telemetry/frontend-error`
+（任意登录用户可写，只送消毒后的 `{page, fn, type}`——绝不送原文/查询串/堆栈），后端 `src/web/frontend_error_stats.py`
+（进程级单例，风格对齐 `outbound_translation_stats`，distinct key 有上限防刷量撑爆）按 page/fn/type 累计，
+经 `dump()`→`/api/workspace/metrics.frontend_errors`、`dump_prom()`→Prometheus（`frontend_errors_total` +
+`..._by_{page,fn,type}_total`）观测「哪页哪函数点崩、多频」，闭合「测不到→线上也能被发现」。
+ops-overview 新增「🖱️ 前端哑按钮错误」卡（`ov2_s_fe`/`ov2_js_fe_*` 键，中英齐备）展示总数/按类型 + 按页/按函数
+Top8（无错=显示健康空态）。门禁 `tests/test_frontend_error_stats.py`（计数/消毒/上限/端到端 beacon→metrics）。
+重复 id 门禁（`tests/test_template_unique_ids.py`）只看静态字面 id（跳过 `<script>`/HTML+Jinja 注释/`{{}}`{% %}`/拼接 id）；
+已修 `dashboard`(bm-quality 串味)/`knowledge`(批量翻译按钮)/`personas`(遗留导入卡去重)/`base`(setBadge 改
+querySelectorAll 同时刷桌面+移动两套导航 badge)/`whatsapp`(「对话」pane 的 P7-A 内联检索与「运维」pane 的
+P11-B 共享组件检索原共用 `wa-hist-q/results`、两 pane 同在 DOM 撞车 → P11-B 换独立 `wa-ops-hist-*`，两套各自工作)；
+`_ACCEPTED_DUP_IDS`（响应式镜像/互斥 Jinja 分支=假阳性）附原因登记，`_PENDING_DUP_IDS`（真 bug 待决策）当前为空，
+`test_dup_id_allowlist_not_stale` 防两表过期。
+孤儿引用门禁（`tests/test_template_orphan_refs.py`）**只守高置信必崩的窄不变量**——`getElementById('x').prop`/`$('x').prop`
+（结果立即解引用）而 `id="x"` 全站（含 `<script>` innerHTML 生成 / `el.id=` / `setAttribute` / base+partial 跨文件）
+都没有；**刻意放过防御式引用**（`?.`/`|| fallback`/`if(!p)return`，那些容忍缺失不崩，宽口径会假阳）。已修
+`line_rpa`（`lr-kpi-*-foot` 直接赋值 null → 被 try 吞成 ok%/avg/1h KPI 静默不更新；改 null 安全）；
+personas 的 `previewTTS` 死代码（从不被调用、引用不存在的 `vp-*`，真编辑器用 `pe-vp-*`）已删除、其 5 个
+仅此处用的 `psn_js_097..101` i18n 键一并回收，门禁强度恢复。`_PENDING_ORPHAN_REFS` 现仅剩 unified_inbox
+未落地的声纹登记内联面板 `ve-*`（一整套 window 暴露 + `inbox.voice.*`，且已有出货副驾组件 `cp-voice.js` 走
+同源 API；「落地内联面板 or 判定被取代后移除」属产品决策，如实追踪），`test_pending_orphan_refs_still_orphan` 防过期。
+动态点属性拼接门禁（`tests/test_template_dynamic_dot_access.py`）抓「字符串里点访问+拼接扩展标识符」（`X.name'+var`
+这种把代码当串拼、按变量拼点属性名的 code-gen 陷阱；普通手写 `a.b` 不会紧跟 `'+` 故不误伤）。已修
+`_rpa_shared_scripts.html::initSearch`：原按 `inputId` 拼 `(window.__rpaPick_'+inputId+')(...)` inline onclick，
+三个 RPA 调用方 inputId 全含连字符（`wa-ops-hist-q`/`lr-hist-q`/`mr-hist-q`）→ `window.__rpaPick_wa-ops-hist-q`
+被解析成减法 → 点搜索结果开会话抽屉在 LINE/Messenger/WhatsApp 三页全坏（且触发 dead-click 红条兜底）；
+改**事件委托 + `data-rpa-ck` 属性**（结果容器一次绑定处理所有动态行，彻底去掉「每输入框全局函数+dot 访问」脆弱模式）。
+`_ALLOWLIST`（良性命中，如字面量以 `.ext` 结尾再拼变量的文件名串）当前为空，`test_allowlist_not_stale` 防过期。
 
 **陪伴能力「分阶段开启」主线**（看→校→开→观测→纠偏 闭环；纯函数 core 在 `src/companion/`，
 路由 `src/web/routes/companion_capability_routes.py` 挂 `/api/companion/capabilities*`，
@@ -165,6 +197,31 @@ python -m pytest tests/test_faq_resolution_gate.py tests/test_translation_qualit
   （中文回复仍 zh=行为不变；英文/他语回复由默认 zh 纠正，防按中文音系发音 garble；无法判定/空→回落账号默认）。
   覆盖 autosend / 原生 voice_reply / 手动坐席三条链路同一瓶颈。纯函数常驻门禁 `tests/test_voice_language_eval.py`。
   CLI：`python -m scripts.run_eval --voice-language [--json]`。阈值 `AITR_VOICE_LANG_ACC_TARGET`(默认 1.0)。
+
+### i18n 施工约定（后台路由 CJK 收口 + 前端裸键）
+
+后台 API 的 `detail`/`error` 文案前端 verbatim 直显 → 硬编码中文会漏给英文用户。收口靠请求级
+`tr(request, key, default=None, /, **fmt)`（`src/web/web_i18n.py`），从 `request.state.ui_lang`
+取语言出译文。**所有后台 routes 现已收口至 0 CJK**，靠 ratchet 门禁 `test_route_response_cjk_ledger_ratchet`
+（`_ROUTE_CJK_CEILINGS` 为**非增天花板**，新增硬编码中文即红）守住。
+
+**新路由族批量收口标准流程**（工具 `scripts/i18n_routeconv.py`）：
+1. `python -m scripts.i18n_routeconv --coverage-all` 选靶（ratio=1.0 可一把过；<1.0 差集是硬骨头）。
+2. `--suggest ROUTE_FILE` 出键匹配建议（reuse 现有键 / new 新键）；优先复用 `err.svc.*` / `err.rpa.*` /
+   `err.ws.field_required` 等共享词汇，参数化（`{field}`/`{name}`/`{dep}`）而非造同义新键。
+3. driver 里 **`convert_file` 的 `scope_check` 现为缺省 `True`**（P43e；勿轻易传 `False`）：施工**前**跑
+   `scope_precheck` 剔除落在无 `request` 作用域的映射（不动源码、列 `scope_skipped`），从源头杜绝
+   `tr(request,…)` 写进无 `request` 的 helper 而运行时 `NameError`。**任何 helper 若要调 `tr` 必须把
+   `request` 收进形参**并改所有调用点。
+4. 事后 `--verify-scope ROUTE_FILE` 复核（应空）；在 web_i18n.py 补齐 zh/en 两套键。
+
+**两条硬护栏**（勿踩）：
+- 占位符名**不得**叫 `request`/`key`/`default`（会与 `tr` 形参撞名；`tr` 已用位置限定 `/` 兜底，
+  另有门禁 `test_i18n_placeholders_avoid_reserved_names` 从源头禁用）。历史坑：`err.rpa.config_missing`
+  曾用 `{key}` → 改 `{name}`。
+- 新键必须 zh+en 双语补全。前端 `window.T('key')` **不留中文兜底**（回落只显裸键名）；每个**静态**
+  `window.T`/`Tf` 键必须在 web_i18n.py 存在，由全库门禁 `test_template_window_t_keys_resolve`
+  （`templates/**/*.html` 递归 63 页，零缺失）守住。CLI 键覆盖自检见 `tests/test_i18n_coverage.py`。
 
 ### Feature flag 约定
 

@@ -468,7 +468,8 @@
   <div class="kb-toolbar">
     <span style="font-size:.83rem;color:var(--t2)">{{ (i18n or {}).get('kb_s080', "待审核") }} <strong id="trans-pending-count">0</strong> {{ (i18n or {}).get('dash.items', "条") }}</span>
     <button class="btn btn-s btn-sm" onclick="loadTranslations()">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>
-    <button class="btn btn-p btn-sm" id="btn-batch-trans" onclick="batchTranslate()">{{ (i18n or {}).get('kb_s023', "批量翻译") }}</button>
+    {# 主工具栏已有 id=btn-batch-trans（batchTranslate() 禁用/进度只认第一个）；此处去重 id 避免 DOM 碰撞，onclick 照常触发 #}
+    <button class="btn btn-p btn-sm" onclick="batchTranslate()">{{ (i18n or {}).get('kb_s023', "批量翻译") }}</button>
     <button class="btn btn-p btn-sm" onclick="confirmAllTrans()" id="btn-confirm-all">{{ (i18n or {}).get('wa_s023', "全部确认") }}</button>
   </div>
   <!-- 批量翻译进度条（SSE实时更新） -->

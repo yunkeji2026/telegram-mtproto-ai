@@ -68,19 +68,32 @@ def self_avatar_enabled(config: Optional[Dict[str, Any]]) -> bool:
 
 # ── 纯函数（可单测） ─────────────────────────────────────────────────────────
 
+def _getf(obj: Any, *keys: str) -> Any:
+    """从对象（getattr）或 dict（get）取首个非空字段——兼容各平台不同数据形态。"""
+    for k in keys:
+        v = obj.get(k) if isinstance(obj, dict) else getattr(obj, k, None)
+        if v:
+            return v
+    return None
+
+
 def extract_self_profile(user: Any) -> Dict[str, str]:
-    """从鸭子类型 user 对象（pyrogram/telethon User 或任意有同名属性者）抽取自身资料。
+    """从鸭子类型 user（对象或 dict）抽取自身资料，兼容各平台字段命名。
 
     返回仅含**非空**键的 dict：``self_name`` / ``self_username``。
-    - name = "first last"（去空白）；都空则回落 @username；再空则空串（键不返回）。
+    - name = "first last"（Telegram）；无则回落 ``name``/``pushname``/``display_name``
+      （WhatsApp/LINE/Messenger）；再无则回落 @username。
     - username 去掉可能的前导 @。
     """
     if user is None:
         return {}
-    first = str(getattr(user, "first_name", "") or "").strip()
-    last = str(getattr(user, "last_name", "") or "").strip()
-    username = str(getattr(user, "username", "") or "").strip().lstrip("@")
+    first = str(_getf(user, "first_name") or "").strip()
+    last = str(_getf(user, "last_name") or "").strip()
+    username = str(_getf(user, "username") or "").strip().lstrip("@")
     name = (first + " " + last).strip()
+    if not name:
+        # 只给单一显示名的平台（WA pushname / LINE displayName / Messenger name）
+        name = str(_getf(user, "name", "pushname", "display_name") or "").strip()
     if not name:
         name = username  # 无姓名的号（bot/隐私）回落用户名当显示名
     out: Dict[str, str] = {}
@@ -191,35 +204,140 @@ async def enrich_from_user(
         profile = extract_self_profile(user)
         from src.integrations.account_registry import get_account_registry
         reg = get_account_registry()
-        existing = reg.get(platform, account_id) or {}
-        existing_meta = existing.get("meta") or {}
-        new_fid = ""  # 本次确认的头像指纹（写库时持久化，供下次变更检测）
+        existing_meta = (reg.get(platform, account_id) or {}).get("meta") or {}
+        extra: Dict[str, Any] = {}
         if self_avatar_enabled(config) and client is not None:
             fid = photo_file_ref(user)
             if fid and not avatar_needs_refresh(existing_meta, fid) \
                     and existing_meta.get("self_avatar"):
                 # 头像未变 → 复用既有 URL，不重下（省带宽 + 保幂等）
                 profile["self_avatar"] = str(existing_meta["self_avatar"])
-                new_fid = fid
+                extra["self_avatar_fid"] = fid
                 _bump("avatar_reused")
             elif fid and await _download_avatar(
                     client, fid, platform, account_id, avatar_dir):
                 profile["self_avatar"] = build_avatar_url(platform, account_id, fid)
-                new_fid = fid
+                extra["self_avatar_fid"] = fid
                 _bump("avatar_downloaded")
-        if not profile:
-            return {}
-        merged = merge_self_profile_meta(existing_meta, profile)
-        if new_fid:
-            merged["self_avatar_fid"] = new_fid  # 内部指纹，不外泄
-        # 幂等优化：self_*（含头像指纹）与既有一致则跳过写库（避免每启动白写 + bump updated_at）
-        if merged == existing_meta:
-            _bump("skipped")
-            return profile
-        reg.upsert(platform, account_id, meta=merged)
-        _bump("written")
-        return profile
+        return _write_profile(platform, account_id, profile, existing_meta, extra)
     except Exception:  # noqa: BLE001
         _bump("errors")
         logger.debug("[self_profile] 富集失败（忽略）", exc_info=True)
         return {}
+
+
+async def enrich_from_fields(
+    platform: str,
+    account_id: str,
+    *,
+    name: str = "",
+    username: str = "",
+    avatar_url: str = "",
+    config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, str]:
+    """通用富集入口（供 WhatsApp/LINE/Messenger 等已知自身昵称的适配器直接喂字段）。
+
+    与 ``enrich_from_user`` 共用同一 read-merge-write + 计数管道。``avatar_url`` 为远端
+    头像直链（这些平台无需本地下载，直接存 URL）。flag 关/无有效字段 → 空 dict，绝不抛。
+    """
+    if not self_profile_enabled(config):
+        return {}
+    _bump("calls")
+    try:
+        profile = extract_self_profile(
+            {"name": name, "username": username})
+        if avatar_url:
+            profile["self_avatar"] = str(avatar_url)
+        if not profile:
+            return {}
+        from src.integrations.account_registry import get_account_registry
+        reg = get_account_registry()
+        existing_meta = (reg.get(platform, account_id) or {}).get("meta") or {}
+        return _write_profile(platform, account_id, profile, existing_meta)
+    except Exception:  # noqa: BLE001
+        _bump("errors")
+        logger.debug("[self_profile] enrich_from_fields 失败（忽略）", exc_info=True)
+        return {}
+
+
+def _write_profile(
+    platform: str, account_id: str, profile: Dict[str, str],
+    existing_meta: Dict[str, Any], extra_meta: Optional[Dict[str, Any]] = None,
+) -> Dict[str, str]:
+    """read-merge-write 收尾：合并 self_* + 内部字段，幂等跳过，写库并计数。"""
+    if not profile:
+        return {}
+    merged = merge_self_profile_meta(existing_meta, profile)
+    for k, v in (extra_meta or {}).items():
+        if v:
+            merged[k] = v
+    # 幂等优化：与既有一致则跳过写库（避免每启动白写 + bump updated_at）
+    if merged == existing_meta:
+        _bump("skipped")
+        return profile
+    from src.integrations.account_registry import get_account_registry
+    get_account_registry().upsert(platform, account_id, meta=merged)
+    _bump("written")
+    return profile
+
+
+def cleanup_avatar(
+    platform: str, account_id: str, avatar_dir: str = _DEFAULT_AVATAR_DIR
+) -> bool:
+    """账号移除时回收其自身头像文件（best-effort）。删除成功/无文件返回 True，异常 False。"""
+    try:
+        f = Path(avatar_dir) / _safe_avatar_filename(platform, account_id)
+        if f.exists():
+            f.unlink()
+        return True
+    except Exception:  # noqa: BLE001
+        logger.debug("[self_profile] 头像回收失败（忽略）", exc_info=True)
+        return False
+
+
+def sweep_orphan_avatars(
+    known_keys: Any, avatar_dir: str = _DEFAULT_AVATAR_DIR
+) -> Dict[str, int]:
+    """清扫孤儿头像：删除 self_*.jpg 中「注册表已无对应活跃账号」的残留文件。
+
+    ``known_keys``：当前活跃账号的 ``self_<platform>_<account_id>`` 文件名基（不含 .jpg）
+    集合，或形如 ``{(platform, account_id), ...}`` 的元组集合（自动换算文件名）。
+    补 ``remove()`` 之外的漏网（如直接删库行、迁移遗留）。best-effort，绝不抛。
+
+    返回 ``{"scanned": n, "removed": m}``。
+    """
+    result = {"scanned": 0, "removed": 0}
+    try:
+        keep: set = set()
+        for k in (known_keys or set()):
+            if isinstance(k, (tuple, list)) and len(k) == 2:
+                keep.add(_safe_avatar_filename(str(k[0]), str(k[1])))
+            else:
+                s = str(k)
+                keep.add(s if s.endswith(".jpg") else f"{s}.jpg")
+        d = Path(avatar_dir)
+        if not d.is_dir():
+            return result
+        for f in d.glob("self_*.jpg"):
+            result["scanned"] += 1
+            if f.name not in keep:
+                try:
+                    f.unlink()
+                    result["removed"] += 1
+                except Exception:  # noqa: BLE001
+                    logger.debug("[self_profile] 孤儿头像删除失败 %s", f.name, exc_info=True)
+    except Exception:  # noqa: BLE001
+        logger.debug("[self_profile] 孤儿头像清扫失败（忽略）", exc_info=True)
+    return result
+
+
+def dump_self_profile_prom() -> str:
+    """Prometheus exposition：account_self_profile_<key>_total（供外部监控采集健康）。"""
+    st = get_self_profile_stats()
+    lines = [
+        "# HELP account_self_profile_total 账号自身资料采集计数（进程内，自启动累计）",
+        "# TYPE account_self_profile_total counter",
+    ]
+    for k, v in st.items():
+        lines.append(f'account_self_profile_total{{op="{k}"}} {int(v)}')
+    return "\n".join(lines) + "\n"

@@ -459,7 +459,8 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
       </div>
     </details>
     <!-- ★ O·P 联动质量看板 -->
-    <details id="bm-quality" style="margin-top:.5rem;font-size:.73rem">
+    <!-- 此 details 原用了与上方防复读观测那个 div 相同的元素 id（碰撞，JS getElementById 只命中前者）→ 已改名 -->
+    <details id="bm-proactive-quality" style="margin-top:.5rem;font-size:.73rem">
       <summary style="cursor:pointer;color:var(--t2);user-select:none">
         {{ (i18n or {}).get('db_s029', "主动消息质量") }}（care + {{ (i18n or {}).get('db_s030', "唤醒）") }} <span id="bm-q-rate" style="color:var(--t3)">(–)</span>
         <button class="btn btn-s btn-xs" style="margin-left:.6rem;padding:.1rem .5rem;font-size:.65rem" onclick="event.preventDefault();loadQualityOverview()">{{ (i18n or {}).get('dash.refresh', "刷新") }}</button>

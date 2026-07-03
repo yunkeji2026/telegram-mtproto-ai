@@ -217,16 +217,19 @@ def register_episodic_identity_routes(app, ctx) -> None:
 
     @app.post("/api/episodic-memory/backfill")
     async def api_episodic_memory_backfill(
-        request: Request, limit: int = 20, prefix: str = ""
+        request: Request, limit: int = 20, prefix: str = "", force: bool = False
     ):
-        """为缺失向量的情景记忆行补全 embedding（限流：单次最多 100 条；可选 prefix 筛选 memory_key）。"""
+        """为情景记忆行补全 embedding（限流：单次最多 100 条；可选 prefix 筛选 memory_key）。
+
+        ``force=1`` 重嵌**所有**行（换 embedding 模型后重建全量向量用），否则只补缺失向量的行。
+        """
         _api_write("episodic_memory")(request)
         if not telegram_client or not getattr(telegram_client, "skill_manager", None):
             raise HTTPException(status_code=503, detail=tr(request, "err.epi.bot_not_ready"))
         sm = telegram_client.skill_manager
         lim = max(1, min(int(limit or 20), 100))
         pre = (prefix or "")[:120]
-        out = await sm.episodic_backfill_embeddings(lim, memory_key_prefix=pre)
+        out = await sm.episodic_backfill_embeddings(lim, memory_key_prefix=pre, force=bool(force))
         if out.get("ok") is False:
             err = str(out.get("error") or "")
             if err == "vector_disabled":

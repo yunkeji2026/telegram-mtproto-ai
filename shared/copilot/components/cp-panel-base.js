@@ -83,10 +83,23 @@
       this.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true, detail: detail || {} }));
     }
 
+    /* 宿主侧卡头 pill / 懒观测：refresh 各终态统一派发 cp-data-loaded（bubbles+composed）。 */
+    _notifyLoaded(state) {
+      this.emit("cp-data-loaded", Object.assign({
+        panelId: this.id || "",
+        data: this._d,
+        ok: false,
+        empty: false,
+        error: false,
+      }, state || {}));
+    }
+
     async refresh() {
       const ctx = this._ctx;
       if (!this._client || !ctx || !ctx.conversationId) {
+        this._d = null;
         this._render(`<div class="empty">${this._escStatic(this.emptyText())}</div>`);
+        this._notifyLoaded({ ok: false, empty: true });
         return;
       }
       this._render(`<div class="empty">${this._escStatic(this.t("cp.common.loading"))}</div>`);
@@ -95,17 +108,24 @@
       try {
         d = await this.fetchData(ctx);
       } catch (e) {
-        if (token === this._reqToken) this._render(`<div class="err">${this._escStatic(this.errText())}</div>`);
+        if (token === this._reqToken) {
+          this._d = null;
+          this._render(`<div class="err">${this._escStatic(this.errText())}</div>`);
+          this._notifyLoaded({ ok: false, error: true });
+        }
         return;
       }
       if (token !== this._reqToken) return; // 已切换会话,丢弃过期响应
       if (!d || d.ok === false) {
+        this._d = d || null;
         this._render(`<div class="empty">${this._escStatic(this.emptyDataText())}</div>`);
+        this._notifyLoaded({ ok: false, empty: true, data: d || null });
         return;
       }
       this._d = d;
       const html = this.renderData(d);
       this._render(html || `<div class="empty">${this._escStatic(this.emptyDataText())}</div>`);
+      this._notifyLoaded({ ok: true, empty: !html });
     }
   }
 

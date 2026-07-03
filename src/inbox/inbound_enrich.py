@@ -86,8 +86,15 @@ def build_language_switch_hint(
     """近几轮用户语系与本轮不同 → 提示模型像真人一样自然跟上（不解释规则）。"""
     from src.ai.translation_service import detect_language
 
-    cur = (current_lang or detect_language(current_text) or "").strip()
+    # 本条到底是什么语种，以**当前文本实际检测**为准——不能只信传入的 current_lang
+    # （那是 reply_lang，可能被上一轮锁成 en 等而与本条文本矛盾）。否则会出现"用户明明
+    # 说中文，却被提示'突然换成英语啦'"的误判（真机语音场景实测复现）。
+    text_lang = (detect_language(current_text) or "").strip()
+    cur = text_lang if (text_lang and text_lang != "unknown") else (current_lang or "").strip()
     if not cur or cur in ("unknown", "zh"):
+        return ""
+    # 一致性护栏：传入 current_lang 与文本实际语种矛盾时，以文本为准（文本已非 zh/unknown）。
+    if text_lang and text_lang != "unknown" and text_lang != cur:
         return ""
     prev_langs: List[str] = []
     for m in reversed(history or []):

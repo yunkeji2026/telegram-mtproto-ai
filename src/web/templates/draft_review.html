@@ -1065,11 +1065,11 @@ window.kbArchive = function(draftId, btn){
 
 /* 全局暴露：本块整体在 IIFE 内，内联 on*="fn()" 在全局作用域求值，未暴露即抛 ReferenceError（哑按钮）。
    以下均为被内联 handler 引用的 IIFE 内裸 function（此前整页内联控件基本失效）。
-   （bodyId 是拼 HTML 时用的生成期辅助，一并挂出无害。）常驻门禁见 tests/test_rpa_inline_handlers_exposed.py。 */
+   常驻门禁见 tests/test_rpa_inline_handlers_exposed.py。 */
 Object.assign(window, {
   setFilter, toggleEdit, resolve, resolveWithTranslation, bulkAct, clearSel,
   forceOverride, applyTpl, tplSearch, tplLang, toggleTpl, toggleCtx, toggleTrans,
-  toggleCopilot, toggleProfile, triggerBulkAutosend, _confirmFact, _trackKbClick, bodyId,
+  toggleCopilot, toggleProfile, triggerBulkAutosend, _confirmFact, _trackKbClick,
 });
 })();
 </script>

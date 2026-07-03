@@ -27,11 +27,13 @@ class _SM:
     _selfie_cfg = _SMcls._selfie_cfg
     _monetization_gate_enabled = _SMcls._monetization_gate_enabled
     _handle_selfie_request = _SMcls._handle_selfie_request
+    _handle_contextual_image_request = _SMcls._handle_contextual_image_request
     _record_selfie_event = _SMcls._record_selfie_event
     _get_selfie_cap = _SMcls._get_selfie_cap
     _selfie_upsell_text = _SMcls._selfie_upsell_text
     _try_send_selfie_media = _SMcls._try_send_selfie_media
     _selfie_persona_for_prompt = _SMcls._selfie_persona_for_prompt
+    _selfie_album_key = _SMcls._selfie_album_key
     _get_persona_name_for_context = _SMcls._get_persona_name_for_context
     _bond_level_from_context = _SMcls._bond_level_from_context
     _effective_intimacy = _SMcls._effective_intimacy
@@ -456,5 +458,80 @@ async def test_allow_direct_send_returns_empty_when_photo_sent(monkeypatch):
         out = await sm._handle_selfie_request("发张照片", "u1", ctx, 999)
         assert out == ""  # 媒体已发出 → 空串(不再补普通文字回复)
         assert sent["path"] == "/tmp/fake.png"
+    finally:
+        cs.reset_selfie_provider()
+
+
+# ── Stage B：对话上下文「按需生图」接线（"你煮的面拍张照给我看"） ────────────
+
+_CTX_ON = {"enabled": True, "contextual_images": True, "min_bond_level": 0,
+           "provider": {"enabled": True, "backend": "openai"}}
+
+
+@pytest.mark.asyncio
+async def test_ctx_image_disabled_returns_none():
+    sm = _SM(selfie_cfg={"enabled": True})  # contextual_images 缺省关
+    out = await sm._handle_contextual_image_request(
+        "你煮的面拍张照给我看", "u1",
+        {"intimacy_score": 60, "_conversation_history": []}, "c1")
+    assert out is None
+
+
+@pytest.mark.asyncio
+async def test_ctx_image_not_a_request_returns_none():
+    from src.ai import companion_selfie as cs
+    cs.reset_selfie_provider()
+    try:
+        sm = _SM(selfie_cfg=_CTX_ON)
+        out = await sm._handle_contextual_image_request(
+            "今天天气真好", "u1", {"intimacy_score": 60}, "c1")
+        assert out is None
+    finally:
+        cs.reset_selfie_provider()
+
+
+@pytest.mark.asyncio
+async def test_ctx_image_album_backend_defers_to_text():
+    from src.ai import companion_selfie as cs
+    cs.reset_selfie_provider()
+    try:
+        # album 后端无法凭空生成"你煮的面" → 交普通回复(None)，不硬答
+        sm = _SM(selfie_cfg=dict(_CTX_ON,
+                                 provider={"enabled": True, "backend": "album"}))
+        out = await sm._handle_contextual_image_request(
+            "你煮的面拍张照给我看", "u1",
+            {"intimacy_score": 60, "_conversation_history": []}, "c1")
+        assert out is None
+    finally:
+        cs.reset_selfie_provider()
+
+
+@pytest.mark.asyncio
+async def test_ctx_image_generates_from_context_and_sends(monkeypatch):
+    from src.ai import companion_selfie as cs
+    cs.reset_selfie_provider()
+    prov = cs.get_selfie_provider({"enabled": True, "backend": "openai"})
+
+    async def _gen(prompt, **kw):
+        assert "noodles" in prompt  # 从上下文"我刚煮了面"抽出的主体进了 prompt
+        assert not kw.get("base_image")  # 物体图 text2img，不带人设的脸
+        return cs.SelfieResult(ok=True, image_path="/tmp/noodles.png", provider="openai")
+
+    monkeypatch.setattr(prov, "generate", _gen)
+    sent = {}
+
+    async def _fake_send(chat_id, path, caption):
+        sent["args"] = (chat_id, path, caption)
+        return True
+
+    try:
+        sm = _SM(selfie_cfg=_CTX_ON)
+        ctx = {"intimacy_score": 60,
+               "_conversation_history": [{"role": "assistant", "content": "我刚煮了面"}],
+               "_send_photo_to_chat": _fake_send}
+        out = await sm._handle_contextual_image_request(
+            "你煮的拍张照给我看嗎", "u1", ctx, 12345)
+        assert out == ""  # 图已发出 → 空串
+        assert sent["args"][1] == "/tmp/noodles.png"
     finally:
         cs.reset_selfie_provider()

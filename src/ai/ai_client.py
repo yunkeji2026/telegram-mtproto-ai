@@ -41,6 +41,13 @@ class AIClient(LoggerMixin):
             config: 配置管理器实例
         """
         self.config = config
+        # 深度人设 E1/E2 运行期依赖注入：用主配置定型同步 embedder/LLM（懒建，best-effort）。
+        try:
+            from src.companion.deep_persona_runtime import configure_from_config
+            configure_from_config(config.config if hasattr(config, "config") else (
+                config if isinstance(config, dict) else {}))
+        except Exception:
+            pass
         self.client = None  # genai.Client
         self._oa_client = None  # AsyncOpenAI（Ollama / OpenAI 兼容）
         self._oa_embed_client = None  # 可选：仅用于 embedding（如 DeepSeek 对话 + Ollama 向量）
@@ -839,7 +846,12 @@ class AIClient(LoggerMixin):
         if not reply or not expected_lang:
             return False
         if expected_lang == "zh":
-            return False
+            # 目标中文却回成英文（真机 bug：中文会话里模型窜英文、且旧守卫对 zh 直接放行
+            # → 从不纠正）。保守判定：几乎无中文(cjk<=2) 且拉丁字母成句(>=12)才算不符，
+            # 避免误伤「哈哈ok啦」这类正常中英混说。
+            cjk = len(re.findall(r"[\u4e00-\u9fff]", reply))
+            letters = len(re.findall(r"[A-Za-z]", reply))
+            return cjk <= 2 and letters >= 12
 
         if expected_lang == "ja":
             kana = len(re.findall(r"[\u3040-\u309F\u30A0-\u30FF]", reply))
@@ -882,11 +894,15 @@ class AIClient(LoggerMixin):
         if not reply or not context:
             return reply
         _rl = context.get("reply_lang")
-        if not _rl or _rl == "zh" or context.get("_skip_lang_guard"):
+        if not _rl or context.get("_skip_lang_guard"):
             return reply
+        if _rl == "zh":
+            # 目标中文：仅当回复明显是英文(几乎无中文)才纠正，否则放行（零误伤中英混说）。
+            if not self._reply_lang_mismatch(reply, "zh"):
+                return reply
         # ja/ko: Japanese uses lots of kanji so the CJK-ratio check is unreliable.
         # Instead, trigger only when the reply has NO kana at all (clearly Chinese).
-        if _rl in ("ja", "ko"):
+        elif _rl in ("ja", "ko"):
             kana = len(re.findall(r"[\u3040-\u309F\u30A0-\u30FF]", reply))
             cjk = len(re.findall(r"[\u4e00-\u9fff]", reply))
             if not (kana == 0 and cjk > 8):
@@ -990,6 +1006,8 @@ class AIClient(LoggerMixin):
         if _pbd not in ("none", "full", "compact"):
             _pbd = "full"
         _name_ov = "" if _suppress_global_identity else (ai_cfg_pre.get("ai_name") or "").strip()
+        # 无人设解析出真名时的兜底真名（防回落到域标签「线上陪伴」被当名字念出）
+        _fallback_name = (ai_cfg_pre.get("fallback_display_name") or "").strip()
         try:
             from src.utils.persona_manager import PersonaManager
 
@@ -1005,14 +1023,92 @@ class AIClient(LoggerMixin):
                 account_persona_id=_p_acc_pid,
                 platform=_p_platform,
                 funnel_stage=_p_funnel,
+                fallback_name=_fallback_name,
             )
             if _p_block:
                 parts.append("【后台人设定位 · 须遵守】\n" + _p_block)
             _p_resolved, _p_tier = _pm.get_persona_with_tier(_p_cid, _p_acc_pid)
             _p_name = _p_resolved.get("name", "?")
-            # ★ 传给 context，让 _build_context_prompt 能做名字锁定
-            if context is not None and _p_name and _p_name != "?":
-                context["_resolved_persona_name"] = _p_name
+            # ★ 传给 context，让 _build_context_prompt 能做名字锁定；名字锁定必须用
+            #   「可对外说的名字」——绝不锁到域标签「线上陪伴」，否则被问名字必答该标签。
+            _p_spoken = _pm.resolve_spoken_name(
+                _p_resolved, name_override=_name_ov, fallback=_fallback_name
+            )
+            if context is not None and _p_spoken:
+                context["_resolved_persona_name"] = _p_spoken
+            # 深度人设增强（5 层：生活线/关系画像+回指/口味/内部梗/经历式记忆/拟人细节）——
+            # 默认关，master flag `companion.deep_persona.enabled` 灰度；best-effort 绝不阻塞。
+            try:
+                _dp_cfg = (
+                    ((self.config.config or {}).get("companion", {}) or {}).get(
+                        "deep_persona", {}) if self.config else {}
+                )
+                if isinstance(_dp_cfg, dict) and _dp_cfg.get("enabled"):
+                    import random as _rnd
+                    from datetime import datetime as _dt
+                    from src.companion.deep_persona import build_deep_persona_block
+                    _dctx: Dict[str, Any] = {"callback_roll": _rnd.random()}
+                    _crisis = str((context or {}).get("_wellbeing_crisis_level", "") or "")
+                    _dctx["suppress_callbacks"] = _crisis in ("elevated", "severe")
+                    # C1：当前用户消息作为经历召回的相关性查询（情感×时近×相关加权）
+                    _dctx["query_text"] = str(
+                        (context or {}).get("_current_user_message_for_lang", "") or "")
+                    try:
+                        from src.companion.deep_persona_store import get_deep_persona_store
+                        _store = get_deep_persona_store("config/deep_persona.db")
+                        # 深度人设 store 键：优先 conversation_id（与 ingest 写入同键），
+                        # 回落 chat_id。解决 autodraft 路径 store 层读不到数据的问题。
+                        _store_cid = str((context or {}).get("conversation_id", "") or "") or _p_cid
+                        if _store is not None and _store_cid:
+                            _dctx["relationship_profile"] = _store.get_relationship_profile(_store_cid)
+                            _dctx["inside_jokes"] = _store.get_inside_jokes(_store_cid)
+                            _dctx["experiential_events"] = _store.get_experiential(_store_cid)
+                            _dctx["open_loops"] = _store.get_open_loops(_store_cid)
+                    except Exception:
+                        self.logger.debug("[deep_persona] store 读取失败（忽略）", exc_info=True)
+                    # E3（默认关）：人设自身跨会话「见闻」话题（去标识聚合）注入
+                    try:
+                        if _dp_cfg.get("self_memory"):
+                            from src.companion.persona_self_memory import (
+                                get_persona_self_memory)
+                            _psm = get_persona_self_memory("config/deep_persona.db")
+                            _pid_sm = str(_p_acc_pid or (_p_resolved.get("id") if isinstance(
+                                _p_resolved, dict) else "") or "")
+                            if _psm is not None and _pid_sm:
+                                _dctx["self_topics"] = _psm.top_topics(_pid_sm)
+                    except Exception:
+                        self.logger.debug("[deep_persona] self_memory 读取失败（忽略）", exc_info=True)
+                    # E1 点火（默认关）：semantic_recall 开时，embed 当前消息一次 → 用缓存事件
+                    # 向量构造语义 sim_fn，让经历召回按语义相关（缺 embedder/向量自动回落字面）。
+                    try:
+                        if _dp_cfg.get("semantic_recall") and _dctx.get("query_text"):
+                            _evs = _dctx.get("experiential_events") or []
+                            _emap = {str(e.get("what") or ""): e.get("emb")
+                                     for e in _evs if e.get("emb")}
+                            if _emap:
+                                from src.companion.deep_persona_runtime import get_embedder
+                                _emb = get_embedder()
+                                _qv = _emb(_dctx["query_text"]) if _emb else None
+                                if _qv:
+                                    from src.companion.deep_persona import make_embedding_sim_fn
+                                    _dctx["experiential_sim_fn"] = make_embedding_sim_fn(_qv, _emap)
+                    except Exception:
+                        self.logger.debug("[deep_persona] 语义 sim 构造失败（回落字面）", exc_info=True)
+                    _dp_block = build_deep_persona_block(
+                        _p_resolved, now=_dt.now(), cfg=_dp_cfg, stage=_p_funnel,
+                        deep_ctx=_dctx, imperfection_roll=_rnd.random(),
+                    )
+                    if _dp_block:
+                        parts.append(_dp_block)
+                        if "后来怎么样了" in _dp_block:
+                            try:
+                                from src.companion.deep_persona_stats import (
+                                    get_deep_persona_stats)
+                                get_deep_persona_stats().incr("callbacks_emitted")
+                            except Exception:
+                                pass
+            except Exception:
+                self.logger.debug("[deep_persona] 增强块拼装失败（忽略）", exc_info=True)
             _req_id = str((context or {}).get("request_id", "") or "")
             if _p_tier in ("chat_binding", "account_profile"):
                 self.logger.info(

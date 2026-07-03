@@ -100,6 +100,13 @@ def test_scanner_self_check():
     assert {"waRefreshAll", "onSearch", "foo"} <= ref
     assert "if" not in ref and "value" not in ref
 
+    # 生成期拼接：'+helper()+' 段是拼 HTML 时即时求值（结果被拼进字面量），运行时 handler 不调用它 →
+    # 应只抓真正运行时执行的 tplSearch，不抓 bodyId/esc（否则会逼着无谓暴露生成期辅助）。
+    gen = "x.innerHTML='<i oninput=\"tplSearch(this,\\''+bodyId(row)+'\\',\\''+esc(id)+'\\')\">'"
+    gref = scan.referenced(gen)
+    assert "tplSearch" in gref
+    assert "bodyId" not in gref and "esc" not in gref
+
     html = (
         "<script>(function(){\n"
         "  function iifeLocal(){}\n"

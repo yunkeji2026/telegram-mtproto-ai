@@ -147,9 +147,14 @@ def register_send_routes(app, *, api_auth, page_auth) -> None:
 
         # A2 写路径收尾：发送收敛到各渠道适配器（与 collect/status 对称）。
         # 跨切面（坐席首响归属打点）统一留在路由，按 result.conversation_id 归属。
+        # P4-5B 引用回复：body.reply_to={id,from_me,participant,text,sender} → 原生引用发送
+        _reply_to = body.get("reply_to")
+        if not isinstance(_reply_to, dict) or not _reply_to.get("id"):
+            _reply_to = None
         try:
             result = await send_via_adapters(
                 request, platform, account_id, chat_key, text, _INBOX_ADAPTERS,
+                reply_to=_reply_to,
             )
         except ChannelSendError as ex:
             raise HTTPException(ex.status_code, ex.detail)

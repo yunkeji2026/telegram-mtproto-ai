@@ -10,6 +10,7 @@ import logging
 import os
 import tempfile
 import time
+import types
 
 import pytest
 
@@ -239,3 +240,43 @@ async def test_send_message_failure_returns_false(monkeypatch):
     s = _text_sender(_TextCli(fail=True))
     monkeypatch.setattr(s, "_presend_blocked", lambda: False)
     assert await s.send_message(7, "hi") is False  # RPC 抛 → False、不冒泡
+
+
+class _MsgTextCli:
+    """底层 send_message 返回带 .id 的 Message（贴近真实 pyrogram）。"""
+    def __init__(self, mid=4242):
+        self._mid = mid
+        self.calls = []
+
+    async def send_message(self, chat_id, text):
+        self.calls.append((chat_id, text))
+        return types.SimpleNamespace(id=self._mid)
+
+
+@pytest.mark.asyncio
+async def test_send_message_return_id_success(monkeypatch):
+    """P4-4：send_message_return_id 成功 → (True, 真实 id 字符串)。"""
+    s = _text_sender(_MsgTextCli(mid=7788))
+    monkeypatch.setattr(s, "_presend_blocked", lambda: False)
+    ok, mid = await s.send_message_return_id(7, "hi")
+    assert ok is True and mid == "7788"
+
+
+@pytest.mark.asyncio
+async def test_send_message_return_id_blocked(monkeypatch):
+    """被护栏拦 → (False, "")，且不真发。"""
+    cli = _MsgTextCli()
+    s = _text_sender(cli)
+    monkeypatch.setattr(s, "_presend_blocked", lambda: True)
+    ok, mid = await s.send_message_return_id(7, "hi")
+    assert ok is False and mid == ""
+    assert cli.calls == []
+
+
+@pytest.mark.asyncio
+async def test_send_message_return_id_no_message_object(monkeypatch):
+    """底层桩返回 None（无 Message）→ ok=True 但 id 空串，绝不抛。"""
+    s = _text_sender(_TextCli())
+    monkeypatch.setattr(s, "_presend_blocked", lambda: False)
+    ok, mid = await s.send_message_return_id(7, "hi")
+    assert ok is True and mid == ""

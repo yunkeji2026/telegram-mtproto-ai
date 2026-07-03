@@ -966,10 +966,14 @@ window.addEventListener('resize',function(){
 /* Nav badges — fetch counts once on load */
 (function(){
   function setBadge(id,n){
-    var el=document.getElementById(id);
-    if(!el)return;
-    if(n>0){el.textContent=n>99?'99+':n;el.classList.add('has-count')}
-    else{el.classList.remove('has-count')}
+    // 桌面侧栏 + 移动抽屉是两套镜像导航、共用同一 badge id；getElementById 只会命中第一个（桌面），
+    // 移动那套 badge 永不更新。用 querySelectorAll('[id=..]') 取全部同 id 元素，两套一起刷。
+    var els=document.querySelectorAll('[id="'+id+'"]');
+    if(!els.length)return;
+    els.forEach(function(el){
+      if(n>0){el.textContent=n>99?'99+':n;el.classList.add('has-count')}
+      else{el.classList.remove('has-count')}
+    });
   }
   fetch('/api/cases/active',{credentials:'same-origin'}).then(r=>r.json()).then(d=>{
     var open=0;

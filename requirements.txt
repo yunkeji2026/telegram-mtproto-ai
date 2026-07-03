@@ -42,6 +42,11 @@ python-docx>=1.1.0
 openpyxl>=3.1.0
 pdfminer.six>=20221105
 
+# 可选：LINE 协议模式（okline 逆向库，经 LINE Chrome 扩展网关直连；默认关，
+# 仅当 platform_login.line.protocol_enabled=true 时需要）。非官方库、违反 LINE ToS、
+# 有封号风险；请配套一号一指纹一代理 + 养号。缺失时 LINE「协议」方式灰显、主进程零影响。
+# okline>=2.7.0
+
 # 可选：本地数据库支持
 # aiosqlite>=0.19.0
 

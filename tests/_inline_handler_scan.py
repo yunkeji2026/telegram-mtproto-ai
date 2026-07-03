@@ -36,6 +36,11 @@ _HANDLER_ATTR = re.compile(r"""\son[a-z]+\s*=\s*"([^"]*)\"""", re.IGNORECASE)
 _HANDLER_ATTR_SQ = re.compile(r"""\son[a-z]+\s*=\s*'([^']*)'""", re.IGNORECASE)
 _CALL = re.compile(r"(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(")
 _INTERP = re.compile(r"\$\{[^}]*\}")
+# JS 字符串拼接段：内联 handler 若写在生成期模板串里（innerHTML+='<i onclick="fn(\''+helper()+'\')">'），
+# 被 `'+ ... +'` / `"+ ... +"` 夹住的是**生成期即时求值**的表达式（结果被拼进字面量），
+# 运行时 handler 并不调用它们（如 bodyId/esc 只算 id/转义串）。剥掉这些段只留真正运行时执行的调用。
+_CONCAT_SQ = re.compile(r"'\s*\+.*?\+\s*'")
+_CONCAT_DQ = re.compile(r'"\s*\+.*?\+\s*"')
 _SCRIPT = re.compile(r"<script\b([^>]*)>(.*?)</script>", re.IGNORECASE | re.DOTALL)
 
 
@@ -50,6 +55,8 @@ def referenced(html: str) -> set:
     names = set()
     for m in list(_HANDLER_ATTR.finditer(html)) + list(_HANDLER_ATTR_SQ.finditer(html)):
         body = _INTERP.sub("", m.group(1))
+        body = _CONCAT_SQ.sub("", body)
+        body = _CONCAT_DQ.sub("", body)
         for c in _CALL.finditer(body):
             fn = c.group(1)
             if fn in _KEYWORDS or fn in BUILTINS:

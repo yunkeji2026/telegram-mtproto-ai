@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import types
+from pathlib import Path
 
 from src.inbox.store import InboxStore
 from src.integrations import account_orchestrator as ao
@@ -340,9 +341,54 @@ def test_ingest_incoming_media_only_uses_placeholder(tmp_path):
 def test_tg_media_meta():
     assert pb.tg_media_meta(types.SimpleNamespace(photo=object())) == ("image", ".jpg")
     assert pb.tg_media_meta(types.SimpleNamespace(voice=object())) == ("voice", ".ogg")
+    assert pb.tg_media_meta(types.SimpleNamespace(video=object())) == ("video", ".mp4")
     doc = types.SimpleNamespace(document=types.SimpleNamespace(file_name="x.pdf"))
     assert pb.tg_media_meta(doc) == ("document", ".pdf")
     assert pb.tg_media_meta(types.SimpleNamespace()) is None
+
+
+def test_tg_media_file_size_reads_media_object():
+    assert pb.tg_media_file_size(
+        types.SimpleNamespace(video=types.SimpleNamespace(file_size=1234))) == 1234
+    # 无媒体 / 无 file_size → 0（未知体积，不拦截下载）
+    assert pb.tg_media_file_size(types.SimpleNamespace()) == 0
+    assert pb.tg_media_file_size(
+        types.SimpleNamespace(photo=types.SimpleNamespace())) == 0
+
+
+async def test_download_tg_media_skips_oversized_video(tmp_path, monkeypatch):
+    """超 max_bytes 的视频：保留类型 'video' 但不下载（url 空 → 前端落占位「[视频]」）。"""
+    monkeypatch.setattr(pb, "protocol_media_root", lambda: tmp_path / "pm")
+    called = {"download": False}
+
+    async def _boom(**kwargs):
+        called["download"] = True
+        return kwargs.get("file_name") or ""
+
+    big = types.SimpleNamespace(
+        video=types.SimpleNamespace(file_size=50 * 1024 * 1024),
+        id="9", download=_boom,
+    )
+    kind, url = await pb.download_tg_media(big, "acc1", max_bytes=20 * 1024 * 1024)
+    assert kind == "video"
+    assert url == ""
+    assert called["download"] is False
+
+
+async def test_download_tg_media_downloads_within_limit(tmp_path, monkeypatch):
+    """未超限（含体积未知）→ 照常下载，返回 /static URL（向后兼容）。"""
+    monkeypatch.setattr(pb, "protocol_media_root", lambda: tmp_path / "pm")
+
+    async def _ok(file_name=None, **kwargs):
+        Path(file_name).write_bytes(b"x")
+        return file_name
+
+    small = types.SimpleNamespace(
+        video=types.SimpleNamespace(file_size=1024), id="10", download=_ok,
+    )
+    kind, url = await pb.download_tg_media(small, "acc1", max_bytes=20 * 1024 * 1024)
+    assert kind == "video"
+    assert url == "/static/protocol_media/telegram/acc1_10.mp4"
 
 
 def test_tg_message_payload_carries_media():
