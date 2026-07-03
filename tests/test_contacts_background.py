@@ -73,6 +73,69 @@ class TestStartStopIdempotent:
                 sub.close()
         asyncio.run(scenario())
 
+    def test_intimacy_refresh_starts_with_interval_and_engine(self, tmp_path):
+        """interval>0 且 intimacy_engine 就绪时启动 intimacy-refresh 后台任务。"""
+        async def scenario():
+            sub = bootstrap_contacts_subsystem(
+                _cfg(tmp_path / "c.db",
+                     decay_interval_minutes=0,
+                     kpi_alert_interval_minutes=0,
+                     intimacy_refresh_interval_minutes=5), CFG_DIR)
+            try:
+                assert sub.intimacy_engine is not None
+                sub.start_background_tasks()
+                names = {t.get_name() for t in sub._bg_tasks}
+                assert "contacts-intimacy-refresh" in names
+            finally:
+                sub.close()
+        asyncio.run(scenario())
+
+    def test_health_exposes_intimacy_refresh_block(self, tmp_path):
+        """health() 暴露 intimacy_refresh 可观测块：enabled / 运行快照 / 积压 gauge。"""
+        sub = bootstrap_contacts_subsystem(
+            _cfg(tmp_path / "c.db",
+                 intimacy_refresh_interval_minutes=360,
+                 intimacy_refresh_stale_hours=24), CFG_DIR)
+        try:
+            h = sub.health()["intimacy_refresh"]
+            assert h["enabled"] is True            # interval>0 且引擎就绪
+            assert h["interval_minutes"] == 360
+            assert h["runs"] == 0 and h["last_count"] == 0
+            assert h["stale_backlog"] == 0         # 空库无积压
+        finally:
+            sub.close()
+
+    def test_intimacy_refresh_loop_updates_health_stats(self, tmp_path):
+        """跑一轮 intimacy_refresh loop 后，health 快照应反映 runs/last_run_ts。"""
+        async def scenario():
+            sub = bootstrap_contacts_subsystem(
+                _cfg(tmp_path / "c.db",
+                     intimacy_refresh_interval_minutes=360), CFG_DIR)
+            try:
+                task = asyncio.create_task(
+                    sub._intimacy_refresh_loop(interval_sec=1))
+                await asyncio.sleep(1.4)   # 前置 sleep min(90,1)=1，跑到一轮
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                st = sub.health()["intimacy_refresh"]
+                assert st["runs"] >= 1
+                assert st["last_run_ts"] > 0
+            finally:
+                sub.close()
+        asyncio.run(scenario())
+
+    def test_health_intimacy_refresh_disabled_when_interval_zero(self, tmp_path):
+        sub = bootstrap_contacts_subsystem(_cfg(tmp_path / "c.db"), CFG_DIR)
+        try:
+            h = sub.health()["intimacy_refresh"]
+            assert h["enabled"] is False
+            assert h["interval_minutes"] == 0
+        finally:
+            sub.close()
+
     def test_start_without_running_loop_logs_and_skips(self, tmp_path):
         """没有 running loop 时（同步语境）start 应静默跳过，不抛。"""
         sub = bootstrap_contacts_subsystem(

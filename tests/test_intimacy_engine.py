@@ -234,3 +234,92 @@ class TestSilenceDecay:
         )
         bd = eng.compute_intimacy(ctx.journey.journey_id)
         assert "silence_decay" in bd.contributions
+
+
+class TestRefreshStaleJourneys:
+    """沉默衰减「物化」：把 compute 的 live 衰减周期性写回 stored intimacy_score 列，
+    修「沉默 journey 无 msg_in → stored 列冻结高分 → reactivation 反复捞死号」。"""
+
+    def _active_journey(self, store, gw, external_id, *, start):
+        ctx = gw.on_peer_seen(
+            channel=CHANNEL_MESSENGER, account_id="a", external_id=external_id)
+        jid = ctx.journey.journey_id
+        pattern = []
+        for d in range(3):
+            for k in range(4):
+                pattern.append(("msg_in", d * 86400 + k * 60))
+                pattern.append(("msg_out", d * 86400 + k * 60 + 30))
+        _fake_events(store, jid, pattern, start_ts=start)
+        return jid
+
+    def test_materializes_decay_into_stored_column(self, env):
+        store, gw, eng = env
+        start = 1_700_000_000
+        jid = self._active_journey(store, gw, "fb_stale", start=start)
+        last_active = start + 2 * 86400 + 300
+        eng.refresh_journey_intimacy(jid, now=last_active)
+        s0 = store.get_journey(jid).intimacy_score
+        assert s0 > 0
+        assert store.get_journey(jid).intimacy_updated_at == last_active
+
+        # 60 天沉默后物化衰减
+        now2 = last_active + 60 * 86400
+        assert eng.refresh_stale_journeys(now=now2, stale_after_s=3600) == 1
+        j = store.get_journey(jid)
+        assert j.intimacy_score < s0            # 衰减已写回 stored 列
+        assert j.intimacy_updated_at == now2
+
+    def test_skips_fresh_and_never_computed(self, env):
+        store, gw, eng = env
+        start = 1_700_000_000
+        # fresh：刚 refresh，intimacy_updated_at=start 未过期
+        jid = self._active_journey(store, gw, "fb_fresh", start=start)
+        eng.refresh_journey_intimacy(jid, now=start)
+        # never-computed：on_peer_seen 默认 intimacy_score=0 / intimacy_updated_at=0
+        gw.on_peer_seen(channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_zero")
+
+        # cutoff = (start+10) - 3600 < start → fresh 不过期；zero 的 updated_at=0 被排除
+        assert eng.refresh_stale_journeys(now=start + 10, stale_after_s=3600) == 0
+
+    def test_idempotent_within_stale_window(self, env):
+        store, gw, eng = env
+        start = 1_700_000_000
+        jid = self._active_journey(store, gw, "fb_x", start=start)
+        eng.refresh_journey_intimacy(jid, now=start + 100)
+        now2 = start + 100 + 10 * 86400
+        assert eng.refresh_stale_journeys(now=now2, stale_after_s=3600) == 1
+        # 刚写回 → intimacy_updated_at=now2 未过期，同一时刻再扫为 0
+        assert eng.refresh_stale_journeys(now=now2, stale_after_s=3600) == 0
+
+    def test_limit_caps_per_iteration(self, env):
+        store, gw, eng = env
+        start = 1_700_000_000
+        for i in range(3):
+            jid = self._active_journey(store, gw, f"fb_{i}", start=start)
+            eng.refresh_journey_intimacy(jid, now=start)
+        now2 = start + 30 * 86400
+        # 单轮上限 2 → 先刷 2 个，剩 1 个下轮再刷
+        assert eng.refresh_stale_journeys(now=now2, stale_after_s=3600, limit=2) == 2
+        assert eng.refresh_stale_journeys(now=now2, stale_after_s=3600, limit=2) == 1
+
+    def test_count_stale_matches_refresh_filter(self, env):
+        store, gw, eng = env
+        start = 1_700_000_000
+        for i in range(3):
+            jid = self._active_journey(store, gw, f"fb_{i}", start=start)
+            eng.refresh_journey_intimacy(jid, now=start)
+        now2 = start + 30 * 86400
+        # gauge 不受 limit 截断、不写库：3 个全过期
+        assert eng.count_stale_journeys(now=now2, stale_after_s=3600) == 3
+        # 刷掉 2 个（limit=2）→ 积压降到 1
+        assert eng.refresh_stale_journeys(now=now2, stale_after_s=3600, limit=2) == 2
+        assert eng.count_stale_journeys(now=now2, stale_after_s=3600) == 1
+
+    def test_count_stale_excludes_fresh_and_zero(self, env):
+        store, gw, eng = env
+        start = 1_700_000_000
+        jid = self._active_journey(store, gw, "fb_fresh", start=start)
+        eng.refresh_journey_intimacy(jid, now=start)
+        gw.on_peer_seen(channel=CHANNEL_MESSENGER, account_id="a", external_id="fb_zero")
+        # fresh 未过期 + zero 的 updated_at=0 → 积压 0
+        assert eng.count_stale_journeys(now=start + 10, stale_after_s=3600) == 0

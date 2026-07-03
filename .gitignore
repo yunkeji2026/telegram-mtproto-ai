@@ -285,6 +285,7 @@ Thumbs.db
 
 # 备份文件
 *.bak
+*.bak_*
 *.backup
 *.old
 *_recovered.py

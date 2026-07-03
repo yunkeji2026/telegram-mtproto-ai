@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -55,6 +56,10 @@ class ContactsSubsystem:
     config_snapshot: Dict[str, Any] = None   # 启动时的配置，Web 可查
     # W4-定时：后台 asyncio 任务集合（start_background_tasks 后填充）
     _bg_tasks: list = field(default_factory=list)
+    # intimacy_refresh 循环活动快照（运营可经 health() 观测「在跑、刷了几个」）
+    _intimacy_refresh_stats: Dict[str, Any] = field(default_factory=lambda: {
+        "runs": 0, "last_run_ts": 0, "last_count": 0, "total_refreshed": 0,
+    })
 
     def close(self) -> None:
         self.stop_background_tasks()
@@ -165,6 +170,29 @@ class ContactsSubsystem:
                 "contacts 后台任务：kpi_alert 每 %d 分钟跑一次", kpi_min)
         else:
             logger.info("contacts 后台任务：kpi_alert_interval_minutes=0，已禁用")
+
+        # 沉默衰减物化：周期性把 compute 的 live 衰减写回 stored intimacy_score，
+        # 让 reactivation 候选门槛（按 stored 列筛）不再被「冻结高分的死号」污染。
+        # 默认 0=关（遵循「新行为 opt-in」约定）；需有 intimacy_engine 才有意义。
+        try:
+            intim_min = int(cfg.get("intimacy_refresh_interval_minutes", 0) or 0)
+        except (TypeError, ValueError):
+            intim_min = 0
+        if intim_min > 0 and self.intimacy_engine is not None:
+            t3 = loop.create_task(
+                self._intimacy_refresh_loop(interval_sec=intim_min * 60),
+                name="contacts-intimacy-refresh",
+            )
+            self._bg_tasks.append(t3)
+            logger.info(
+                "contacts 后台任务：intimacy_refresh 每 %d 分钟跑一次", intim_min)
+        elif intim_min > 0:
+            logger.info(
+                "contacts 后台任务：intimacy_refresh_interval_minutes>0 但无 "
+                "intimacy_engine，已跳过")
+        else:
+            logger.info(
+                "contacts 后台任务：intimacy_refresh_interval_minutes=0，已禁用")
 
     def stop_background_tasks(self) -> None:
         for t in list(self._bg_tasks):
@@ -278,6 +306,50 @@ class ContactsSubsystem:
             except asyncio.CancelledError:
                 return
 
+    async def _intimacy_refresh_loop(self, *, interval_sec: int) -> None:
+        # 启动后延迟 90s 再跑（让 decay/首屏先过，且和 decay loop 错峰）
+        try:
+            await asyncio.sleep(min(90, interval_sec))
+        except asyncio.CancelledError:
+            return
+        cfg = self.config_snapshot or {}
+        try:
+            stale_hours = float(cfg.get("intimacy_refresh_stale_hours", 24) or 24)
+        except (TypeError, ValueError):
+            stale_hours = 24.0
+        try:
+            limit = int(cfg.get("intimacy_refresh_limit", 200) or 200)
+        except (TypeError, ValueError):
+            limit = 200
+        stale_after_s = int(stale_hours * 3600)
+        while True:
+            try:
+                count = await asyncio.to_thread(
+                    self.intimacy_engine.refresh_stale_journeys,
+                    stale_after_s=stale_after_s,
+                    limit=limit,
+                )
+                st = self._intimacy_refresh_stats
+                st["runs"] += 1
+                st["last_run_ts"] = int(time.time())
+                st["last_count"] = int(count)
+                st["total_refreshed"] += int(count)
+                if count > 0:
+                    logger.info(
+                        "contacts intimacy_refresh 迭代完成：物化衰减 %d 个 journey",
+                        count)
+                else:
+                    logger.debug("contacts intimacy_refresh 空跑（0 个）")
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                logger.warning(
+                    "contacts intimacy_refresh 异常（继续跑下一轮）", exc_info=True)
+            try:
+                await asyncio.sleep(interval_sec)
+            except asyncio.CancelledError:
+                return
+
     def health(self) -> Dict[str, Any]:
         """各可选服务是否就绪 + 触发异常的原因（启动时抓下来）。运营能看。"""
         return {
@@ -290,9 +362,40 @@ class ContactsSubsystem:
                 "readiness_scorer": self.readiness_scorer is not None,
                 "reactivation": self.reactivation is not None,
             },
+            "intimacy_refresh": self._intimacy_refresh_health(),
             "config_snapshot": dict(self.config_snapshot or {}),
             "db_path": str(getattr(self.store, "_db_path", "")),
         }
+
+    def _intimacy_refresh_health(self) -> Dict[str, Any]:
+        """intimacy_refresh 物化循环可观测块：是否启用 + 运行快照 + 当前积压。
+
+        ``stale_backlog`` 用与循环同一 ``stale_hours`` 实时数 DB（不写库、不受 limit
+        截断）：若 ``enabled`` 且 backlog 长期 > ``limit``，说明单轮刷不完，应调大
+        ``intimacy_refresh_interval_minutes`` 或 ``intimacy_refresh_limit``。
+        """
+        cfg = self.config_snapshot or {}
+        try:
+            interval_min = int(cfg.get("intimacy_refresh_interval_minutes", 0) or 0)
+        except (TypeError, ValueError):
+            interval_min = 0
+        enabled = interval_min > 0 and self.intimacy_engine is not None
+        out: Dict[str, Any] = {
+            "enabled": enabled,
+            "interval_minutes": interval_min,
+            **dict(self._intimacy_refresh_stats),
+        }
+        if self.intimacy_engine is not None:
+            try:
+                stale_hours = float(cfg.get("intimacy_refresh_stale_hours", 24) or 24)
+            except (TypeError, ValueError):
+                stale_hours = 24.0
+            try:
+                out["stale_backlog"] = self.intimacy_engine.count_stale_journeys(
+                    stale_after_s=int(stale_hours * 3600))
+            except Exception:
+                out["stale_backlog"] = None
+        return out
 
 
 def bootstrap_contacts_subsystem(

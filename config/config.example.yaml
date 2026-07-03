@@ -1789,6 +1789,12 @@ contacts:
   min_silent_days: 3                 # reactivation 最少沉默天数
   min_intimacy_for_reactivation: 40  # reactivation 的最低亲密度
   reactivation_cooldown_days: 7      # 再次 reactivation 的冷却
+  # 沉默衰减「物化」后台循环：把 compute 的 live 衰减写回 stored intimacy_score 列，
+  # 让 reactivation 候选门槛（按 stored 列 >= min_intimacy 筛）不被「冻结高分的死号」污染。
+  # 默认 0=关（新行为 opt-in）；>0 时每 N 分钟扫一次过期 journey 重算写回。需 intimacy 引擎就绪。
+  intimacy_refresh_interval_minutes: 0   # 0=关；建议开则 360（6h）
+  intimacy_refresh_stale_hours: 24       # intimacy_updated_at 超此小时数视为「过期」才重算
+  intimacy_refresh_limit: 200            # 单轮最多重算多少个 journey（给后台写入设上限）
   scripts_path: config/handoff_scripts.yaml
   compliance_path: config/handoff_compliance.yaml
   default_line_id: "@our_line"       # 回退用 LINE id

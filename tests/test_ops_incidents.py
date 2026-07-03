@@ -5,6 +5,8 @@ import types
 from src.inbox.health_watchdog import HealthWatchdog
 from src.inbox.store import InboxStore
 
+# MetricsStore 单例隔离由 conftest 的 autouse _reset_metrics_store_singleton 统一兜底。
+
 
 # ── E2：store incidents ──────────────────────────────────────────────────
 

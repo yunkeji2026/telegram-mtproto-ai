@@ -32,9 +32,9 @@ def validate_phone_number(phone_number: str) -> bool:
     return bool(re.match(pattern, phone_number))
 
 
-def validate_claude-4.6-oups-high_api_key(api_key: str) -> bool:
-    """验证claude-4.6-oups-high API密钥格式"""
-    # claude-4.6-oups-high API密钥通常以'sk-'开头
+def validate_ai_api_key(api_key: str) -> bool:
+    """验证 AI API 密钥格式"""
+    # AI provider 的 API 密钥通常以 'sk-' 开头
     return api_key.startswith('sk-') and len(api_key) > 10
 
 
@@ -78,13 +78,13 @@ def validate_all_credentials(credentials: dict) -> dict:
             results['valid'] = False
             results['errors'].append('手机号格式错误，应以+开头，如+8612345678900')
     
-    # 检查claude-4.6-oups-high API密钥
-    if 'claude-4.6-oups-high_api_key' in credentials:
-        is_valid = validate_claude-4.6-oups-high_api_key(credentials['claude-4.6-oups-high_api_key'])
-        results['details']['claude-4.6-oups-high_api_key'] = is_valid
+    # 检查 AI API 密钥
+    if 'ai_api_key' in credentials:
+        is_valid = validate_ai_api_key(credentials['ai_api_key'])
+        results['details']['ai_api_key'] = is_valid
         if not is_valid:
             results['valid'] = False
-            results['errors'].append('claude-4.6-oups-high API密钥格式错误，应以sk-开头')
+            results['errors'].append('AI API 密钥格式错误，应以 sk- 开头')
     
     return results
 
@@ -121,9 +121,7 @@ def parse_credentials_from_text(text: str) -> dict:
             elif 'phone' in key or 'phone_number' in key:
                 credentials['phone_number'] = value
             elif 'api_key' in key or 'apikey' in key:
-                credentials['claude-4.6-oups-high_api_key'] = value
-            elif 'claude-4.6-oups-high' in key:
-                credentials['claude-4.6-oups-high_api_key'] = value
+                credentials['ai_api_key'] = value
     
     return credentials
 
@@ -141,7 +139,7 @@ def main():
                 'telegram_api_id': sys.argv[1],
                 'telegram_api_hash': sys.argv[2],
                 'phone_number': sys.argv[3],
-                'claude-4.6-oups-high_api_key': sys.argv[4]
+                'ai_api_key': sys.argv[4]
             }
         else:
             print("用法: python validate_credentials.py <api_id> <api_hash> <phone> <api_key>")

@@ -60,7 +60,7 @@ if [ -n "${GH_TOKEN:-}" ] && command -v curl >/dev/null 2>&1; then
     "https://api.github.com/repos/$PR79_REPO/issues/$PR79_NUM/comments" \
     | grep -c '"id"' 2>/dev/null)
   tg_open_prs=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
-    "https://api.github.com/repos/victor2025PH/telegram-mtproto-ai/pulls?state=open" \
+    "https://api.github.com/repos/yunkeji2026/telegram-mtproto-ai/pulls?state=open" \
     | grep -c '"number"' 2>/dev/null)
   echo "[gh] PR #79 ($pr79_state) comments=$pr79_count  | TG open PRs=$tg_open_prs"
 else

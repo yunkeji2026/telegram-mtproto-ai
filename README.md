@@ -1,6 +1,6 @@
 # telegram-mtproto-ai
 
-[![tests](https://github.com/victor2025PH/telegram-mtproto-ai/actions/workflows/tests.yml/badge.svg)](https://github.com/victor2025PH/telegram-mtproto-ai/actions/workflows/tests.yml)
+[![tests](https://github.com/yunkeji2026/telegram-mtproto-ai/actions/workflows/tests.yml/badge.svg)](https://github.com/yunkeji2026/telegram-mtproto-ai/actions/workflows/tests.yml)
 
 多平台 AI 客服主骨架：contacts/handoff 跨平台客户通讯 + Telegram/LINE/Messenger RPA runner + 知识库回复 + Web 后台 + observability。
 
