@@ -68,6 +68,26 @@ def seat_exceeded(status: Any, active_agents: int) -> bool:
     return int(active_agents or 0) > seats
 
 
+def quota_exceeded(state: str, used: Any, included: Any) -> bool:
+    """字符额度是否已用尽（P0-4 纯函数，供 quota_store 强制层调用）。
+
+    - ``included<=0``（未配额度/不限）→ 恒 False；
+    - 仅对「有有效授权」状态（active/grace）计算——unlicensed/expired/invalid
+      各有自己的 gating 语义（社区模式无额度概念；过期由只读锁处理），不在此重复拦；
+    - ``used >= included`` 即用尽（额度按「已交付字符」累计，扣减在成功后记账）。
+    """
+    if str(state or "") not in ("active", "grace"):
+        return False
+    try:
+        inc = int(included or 0)
+        u = int(used or 0)
+    except (TypeError, ValueError):
+        return False
+    if inc <= 0:
+        return False
+    return u >= inc
+
+
 def seat_block_on_online(status: Any, online_agent_ids: Any, agent_id: str) -> bool:
     """坐席 ``agent_id`` 将「上线」时是否应被席位限制拦截（纯函数，供 presence 端点用）。
 

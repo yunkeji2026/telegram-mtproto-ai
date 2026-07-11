@@ -49,6 +49,7 @@ _BASELINE = """
 /api/admin/reliability	GET
 /api/admin/license	GET
 /api/admin/license/reload	POST
+/api/admin/license/activate	POST
 /api/admin/tts-cleanup	POST
 /api/admin/tts-stats	GET
 /api/ai-studio/summary	GET

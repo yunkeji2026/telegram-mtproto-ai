@@ -60,6 +60,53 @@ def _account_removed(platform: str, account_id: str) -> bool:
         return False
 
 
+def _rpa_auto_voice_enabled(request: Request, platform: str, account_id: str) -> bool:
+    """RPA 会话是否配置了**设备端**语音输出（``voice_output.enabled``）。
+
+    P0-6/C9：LINE/WhatsApp/Messenger 的语音由 RPA 在手机上经 voice_output 自动发出，
+    坐席不能从收件箱输入区直发。此探测供 send-caps 标注「仅自动语音」，把语音按钮的
+    禁用理由说清楚。best-effort：任何异常按 False（回落笼统「不支持」提示）。
+    """
+    try:
+        st = request.app.state
+        if platform == "line":
+            svcs = list(getattr(st, "line_rpa_services", None) or [])
+            single = getattr(st, "line_rpa_service", None)
+        elif platform == "whatsapp":
+            svcs = list(getattr(st, "whatsapp_rpa_services", None) or [])
+            single = getattr(st, "whatsapp_rpa_service", None)
+        elif platform == "messenger":
+            svcs = list(getattr(st, "messenger_rpa_services", None) or [])
+            single = getattr(st, "messenger_rpa_service", None)
+        else:
+            return False
+        if not svcs and single is not None:
+            svcs = [single]
+        if not svcs:
+            return False
+        # 优先精确匹配账号，匹配不到（如 messenger 单例多账号）退到全部扫描
+        match = [s for s in svcs
+                 if str(getattr(s, "account_id", "default")) == account_id] or svcs
+        for svc in match:
+            cfg = getattr(svc, "_merged_cfg", None) or getattr(svc, "_cfg", None) or {}
+            if not isinstance(cfg, dict):
+                continue
+            vo = cfg.get("voice_output") or {}
+            if isinstance(vo, dict) and vo.get("enabled"):
+                return True
+            # messenger 多账号：voice_output 可嵌在 accounts[] 里
+            for acct in (cfg.get("accounts") or []):
+                if not isinstance(acct, dict):
+                    continue
+                avo = acct.get("voice_output") or {}
+                if isinstance(avo, dict) and avo.get("enabled"):
+                    return True
+        return False
+    except Exception:
+        logger.debug("send-caps voice_output 探测失败（按 False）", exc_info=True)
+        return False
+
+
 def register_send_routes(app, *, api_auth, page_auth) -> None:
     """挂载文本/媒体/语音发送 + 直发能力探测端点。"""
 
@@ -296,6 +343,12 @@ def register_send_routes(app, *, api_auth, page_auth) -> None:
         if not orch.owns_media(platform, account_id):
             raise HTTPException(501, tr(request, "err.inbox.voice_unsupported"))
 
+        # P0-4/C3：字符额度用尽且 licensing.enforce 开 → 402 + i18n（明确错误码，
+        # 而非让 TTS 深处报一串英文 code）。闸门在 TTSPipeline 内还有兜底。
+        from src.licensing.quota_store import check_license_quota
+        if not check_license_quota()["allowed"]:
+            raise HTTPException(402, tr(request, "err.lic.chars_exhausted"))
+
         # 解析语音配置（含声音克隆 voice_profile），允许调用方临时覆盖
         cm = getattr(request.app.state, "config_manager", None)
         raw_cfg = (getattr(cm, "config", None) or {}) if cm else {}
@@ -393,18 +446,30 @@ def register_send_routes(app, *, api_auth, page_auth) -> None:
 
         供前端事先置灰媒体/语音按钮 + tooltip 说明，把「点了才撞 501」改为「事先可知」。
         探测失败一律按「不支持」处理（保守，点击仍有 501 兜底）。
+
+        P0-6/C9：``can_media``/``can_voice`` 分开判定（当前同经 worker.send_media 直发、
+        口径一致；分字段是为能力分叉时零改契约），另返回 ``voice_mode``：
+        - ``composer``  坐席可从输入区直发语音；
+        - ``auto_only`` RPA 会话配置了设备端 ``voice_output``——AI 自动语音在手机上发出，
+          坐席**不能**在此直发（前端应标注「仅自动语音」而非笼统禁用）；
+        - ``none``      无任何语音能力。
         """
         api_auth(request)
         plat = str(platform or "").lower()
         acc = str(account_id or "default")
-        can = False
+        can_media = False
+        can_voice = False
         try:
             from src.integrations.account_orchestrator import get_orchestrator
-            can = bool(get_orchestrator().owns_media(plat, acc))
+            can_media = bool(get_orchestrator().owns_media(plat, acc))
+            can_voice = can_media
         except Exception:
             logger.debug("send-caps 探测失败（按不支持处理）", exc_info=True)
-            can = False
+        voice_mode = "composer" if can_voice else "none"
+        if not can_voice and _rpa_auto_voice_enabled(request, plat, acc):
+            voice_mode = "auto_only"
         return {
             "ok": True, "platform": plat, "account_id": acc,
-            "can_media": can, "can_voice": can,
+            "can_media": can_media, "can_voice": can_voice,
+            "voice_mode": voice_mode,
         }
