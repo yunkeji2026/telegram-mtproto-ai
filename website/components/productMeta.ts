@@ -22,3 +22,12 @@ export const PRODUCT_ANCHOR: Record<ProductKey, string> = {
   lingox: "#autochat",
   chatx: "#autochat",
 };
+
+// 拥有独立落地页的产品线（zh 路径；en 为 /en 前缀）。矩阵卡片优先跳落地页，
+// 没有落地页的产品仍回退到首页锚点。
+export const PRODUCT_LANDING: Partial<Record<ProductKey, string>> = {
+  voicex: "/voice",
+  facex: "/face",
+  livex: "/face",
+  lingox: "/interpreting",
+};

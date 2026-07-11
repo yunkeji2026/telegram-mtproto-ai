@@ -1,28 +1,10 @@
 "use client";
 
-import {
-  Quote,
-  Star,
-  Send,
-  MessageSquare,
-  Phone,
-  MessageCircle,
-  Gamepad2,
-  Camera,
-  LucideIcon,
-} from "lucide-react";
+import { Quote, Star } from "lucide-react";
 import { useLang } from "./LanguageContext";
 import Reveal from "./fx/Reveal";
 import CountUp from "./fx/CountUp";
-
-const BRAND: Record<string, { color: string; Icon: LucideIcon }> = {
-  Telegram: { color: "#229ED9", Icon: Send },
-  LINE: { color: "#06C755", Icon: MessageSquare },
-  WhatsApp: { color: "#25D366", Icon: Phone },
-  Messenger: { color: "#0084FF", Icon: MessageCircle },
-  Discord: { color: "#5865F2", Icon: Gamepad2 },
-  Instagram: { color: "#E1306C", Icon: Camera },
-};
+import { BrandGlyph, BRAND_BG } from "./brandIcons";
 
 export default function TrustBar() {
   const { t } = useLang();
@@ -35,26 +17,22 @@ export default function TrustBar() {
           {t.trust.platformsLabel}
         </p>
         <div className="mt-6 flex flex-wrap items-center justify-center gap-3 md:gap-4">
-          {t.trust.platforms.map((p) => {
-            const b = BRAND[p] ?? { color: "#64748b", Icon: MessageCircle };
-            const Icon = b.Icon;
-            return (
-              <div
-                key={p}
-                className="group flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 transition hover:border-white/20 hover:bg-white/[0.06]"
+          {t.trust.platforms.map((p) => (
+            <div
+              key={p}
+              className="group flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 transition hover:border-white/20 hover:bg-white/[0.06]"
+            >
+              <span
+                className="grid h-8 w-8 place-items-center rounded-lg text-white transition group-hover:scale-110"
+                style={{ background: BRAND_BG[p] ?? "#64748b" }}
               >
-                <span
-                  className="grid h-8 w-8 place-items-center rounded-lg text-white transition group-hover:scale-110"
-                  style={{ background: b.color }}
-                >
-                  <Icon className="h-4 w-4" />
-                </span>
-                <span className="text-sm font-medium text-slate-300 transition group-hover:text-white">
-                  {p}
-                </span>
-              </div>
-            );
-          })}
+                <BrandGlyph name={p} className="h-[18px] w-[18px]" />
+              </span>
+              <span className="text-sm font-medium text-slate-300 transition group-hover:text-white">
+                {p}
+              </span>
+            </div>
+          ))}
         </div>
 
         {/* stats */}

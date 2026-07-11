@@ -117,6 +117,24 @@ def _apply_plan(cm, config, modes, plan, *, actor, reason) -> dict:
     return {"applied": applied, "blocked": blocked, "warned": warned}
 
 
+def _apply_extra_flags(cm, flags, *, actor, reason) -> dict:
+    """把注册表外原生 config 路径直写 overlay（如金丝雀开关）。
+
+    路径只来自 ``capability_presets`` 的白名单声明（预设 extras / 快照 extra_flags），
+    非用户任意输入，故不过 ``check_toggle``；逐条审计，失败不中断。
+    """
+    applied, failed = [], []
+    for path, value in (flags or {}).items():
+        ok, msg = cm.set_overlay_flag(path, value)
+        if ok:
+            _audit_toggle(cm, actor=actor, key=path, field="raw", value=value,
+                          path=path, reason=reason)
+            applied.append({"path": path, "value": value})
+        else:
+            failed.append({"path": path, "value": value, "reason": msg})
+    return {"extras_applied": applied, "extras_failed": failed}
+
+
 def _collect_status(state, config):
     from src.companion.capability_status import collect_capability_status
     runtime = {dep: (getattr(state, attr, None) is not None)
@@ -408,7 +426,8 @@ def register_companion_capability_routes(app, *, api_auth) -> None:
         body: {name: safe_default|dry_run_trial|full_auto, actor?}。
         """
         from src.companion.capability_presets import (
-            PRESETS, build_preset_plan, capture_snapshot,
+            PRESETS, build_preset_plan, capture_extra_flags, capture_snapshot,
+            preset_extras,
         )
         from src.companion.capability_status import collect_capability_status
 
@@ -437,17 +456,23 @@ def register_companion_capability_routes(app, *, api_auth) -> None:
             except Exception:
                 logger.debug("all_automation_modes 失败", exc_info=True)
 
-        # 切换前存快照（best-effort，供 rollback）
+        # 切换前存快照（best-effort，供 rollback；extra_flags 覆盖金丝雀等注册表外路径）
         try:
             sp = _snapshot_path(cm)
             if sp is not None:
                 snap = {"ts": round(time.time(), 3), "actor": actor,
-                        "applied_preset": name, "snapshot": capture_snapshot(config)}
+                        "applied_preset": name, "snapshot": capture_snapshot(config),
+                        "extra_flags": capture_extra_flags(config)}
                 sp.write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
         except Exception:
             logger.debug("存快照失败（忽略）", exc_info=True)
 
         result = _apply_plan(cm, config, modes, plan, actor=actor, reason=f"preset:{name}")
+        extras = preset_extras(name)
+        if extras:
+            result.update(_apply_extra_flags(
+                cm, {e["path"]: e["value"] for e in extras},
+                actor=actor, reason=f"preset:{name}"))
         summary = None
         try:
             runtime = {dep: (getattr(state, attr, None) is not None)
@@ -495,6 +520,10 @@ def register_companion_capability_routes(app, *, api_auth) -> None:
                 logger.debug("all_automation_modes 失败", exc_info=True)
 
         result = _apply_plan(cm, config, modes, plan, actor=actor, reason="rollback")
+        extra_flags = (blob or {}).get("extra_flags") or {}
+        if isinstance(extra_flags, dict) and extra_flags:
+            result.update(_apply_extra_flags(cm, extra_flags,
+                                             actor=actor, reason="rollback"))
         summary = None
         try:
             runtime = {dep: (getattr(state, attr, None) is not None)

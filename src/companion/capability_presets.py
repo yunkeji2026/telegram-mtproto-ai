@@ -3,13 +3,20 @@
 把"沿风险阶梯整档切换"算成确定性意图列表（intentions），由路由层逐条过同一套护栏
 （``capability_toggle.check_toggle``）后落 overlay。本模块零副作用、可单测。
 
-三档预设（对应爬到阶梯第几层）：
+四档预设（对应爬到阶梯第几层）：
   - ``safe_default``  安全默认：仅 tier0 安全栈开，其余全关（含真发/语音/主动触达）= 急停档。
   - ``dry_run_trial`` 灰度试运行：安全栈+翻译+观测+worker 开，主动触达走 dry_run，**不真发**。
+  - ``nurture_mode``  养号模式：dry_run_trial 底座 + send-gate 预热爬坡 + 金丝雀白名单预先武装
+    （``extras`` 落 ``ops.canary.enabled=true`` / ``mode=manual``；之后开真发时只有
+    ``ops.canary.pinned_accounts`` 白名单账号真发，其余 hold——放量爆炸半径受控）。
   - ``full_auto``     全量真发：全部开（deliver 仍受 auto_ai 双重 opt-in 护栏约束）。
 
-回滚：apply 预设前先 ``capture_snapshot`` 当前各档值，rollback 时 ``snapshot_to_plan`` 还原
-（同样逐条过护栏，条件变了的项会被如实拦下并报告）。
+``extras``：能力注册表之外的原生 config 路径（如金丝雀开关），由路由层直接写 overlay。
+只允许来自本注册表的白名单路径（非用户任意输入），不过 ``check_toggle`` 护栏。
+
+回滚：apply 预设前先 ``capture_snapshot`` 当前各档值 + ``capture_extra_flags`` 抓 extras 路径
+现值，rollback 时 ``snapshot_to_plan`` 还原（同样逐条过护栏，条件变了的项会被如实拦下并报告），
+extras 路径按快照原值直写还原。
 """
 
 from __future__ import annotations
@@ -45,6 +52,25 @@ PRESETS: Dict[str, Dict[str, Any]] = {
             "multiplatform_deferred": "on", "voice_autosend": "off",
             "realtime_voice": "off",
         },
+    },
+    "nurture_mode": {
+        "label": "养号模式（send-gate 预热爬坡 + 金丝雀白名单，主动触达 dry_run 不真发）",
+        "states": {
+            # dry_run_trial 底座：观测/翻译/worker 开，deliver 关，主动触达只演练
+            "persona_guard": "on", "empathy_strategy": "on", "wellbeing": "on",
+            "companion_send_gate": "on",   # 预热爬坡：warmup_start_cap→target_cap + 红灯拒发
+            "auto_translate_inbound": "on", "quality_trend": "on",
+            "l2_autosend_worker": "on", "l2_autosend_deliver": "off",
+            "proactive_topic": "dry_run", "proactive_care": "dry_run",
+            "multiplatform_deferred": "on", "voice_autosend": "off",
+            "realtime_voice": "off",
+        },
+        # 金丝雀预先武装（manual=白名单模式）：现在不影响任何发送（deliver 本就关），
+        # 未来开真发时只放行 ops.canary.pinned_accounts，其余账号 hold。
+        "extras": [
+            {"path": "ops.canary.enabled", "value": True},
+            {"path": "ops.canary.mode", "value": "manual"},
+        ],
     },
     "full_auto": {
         "label": "全量真发（全部开；真发仍受 auto_ai 双重 opt-in 护栏）",
@@ -113,6 +139,26 @@ def build_preset_plan(name: str) -> Optional[List[Dict[str, Any]]]:
     return _order(plan)
 
 
+def preset_extras(name: str) -> List[Dict[str, Any]]:
+    """预设的注册表外原生 config 意图（白名单，来自 PRESETS 声明，非用户输入）。"""
+    spec = PRESETS.get(name) or {}
+    return [dict(e) for e in (spec.get("extras") or [])]
+
+
+# extras 路径的「缺省语义值」：快照抓取时 config 未显式配置也能落一个确定值，
+# 保证 rollback 直写还原是确定性的（写缺省值 == 行为不变）。
+EXTRA_FLAG_DEFAULTS: Dict[str, Any] = {
+    "ops.canary.enabled": False,
+    "ops.canary.mode": "manual",
+}
+
+
+def capture_extra_flags(config: Any) -> Dict[str, Any]:
+    """抓取所有预设 extras 路径的当前值（缺省按 EXTRA_FLAG_DEFAULTS），供回滚还原。"""
+    return {path: _dig(config, path, default)
+            for path, default in EXTRA_FLAG_DEFAULTS.items()}
+
+
 def capture_snapshot(config: Any) -> Dict[str, Dict[str, bool]]:
     """抓取当前所有能力的 enabled/dry_run 值，供回滚还原。"""
     snap: Dict[str, Dict[str, bool]] = {}
@@ -138,5 +184,6 @@ def snapshot_to_plan(snapshot: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]
 
 
 __all__ = [
-    "PRESETS", "build_preset_plan", "capture_snapshot", "snapshot_to_plan",
+    "PRESETS", "EXTRA_FLAG_DEFAULTS", "build_preset_plan", "preset_extras",
+    "capture_extra_flags", "capture_snapshot", "snapshot_to_plan",
 ]

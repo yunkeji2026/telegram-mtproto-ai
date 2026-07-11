@@ -1,0 +1,11 @@
+{
+  "key": "memory",
+  "label": {
+    "zh": "记忆召回（关键词 vs 向量）",
+    "en": "Memory recall (kw vs vector)"
+  },
+  "cmd": "python -m scripts.run_eval --memory --json",
+  "status": "skipped",
+  "note": "[info] embedding providers: openai_compat=no local_st(installed=yes, optin=no) [note] 记忆召回评测需真实嵌入（配 embedding endpoint 或 AITR_EMBED_LOCAL=1）。当前不可用，跳过。",
+  "generated_at": "2026-07-11T10:27:52+0800"
+}

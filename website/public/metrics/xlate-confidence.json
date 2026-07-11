@@ -1,0 +1,22 @@
+{
+  "key": "xlate-confidence",
+  "label": {
+    "zh": "译文置信度 scorer",
+    "en": "Translation confidence scorer"
+  },
+  "cmd": "python -m scripts.run_eval --xlate-confidence --json",
+  "status": "pass",
+  "report": {
+    "summary": {
+      "total": 8,
+      "accuracy": 1.0,
+      "good_min": 0.6,
+      "bad_max": 0.3,
+      "separable": true
+    },
+    "threshold": 0.5,
+    "acc_target": 0.9,
+    "passed": true
+  },
+  "generated_at": "2026-07-11T10:27:52+0800"
+}

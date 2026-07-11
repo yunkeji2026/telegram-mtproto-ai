@@ -1,0 +1,24 @@
+{
+  "key": "persona",
+  "label": {
+    "zh": "人设一致性（客服腔/AI 自曝零漏抓）",
+    "en": "Persona consistency"
+  },
+  "cmd": "python -m scripts.run_eval --persona --json",
+  "status": "pass",
+  "report": {
+    "summary": {
+      "total": 8,
+      "violations_expected": 5,
+      "violations_caught": 5,
+      "recall": 1.0,
+      "precision": 1.0,
+      "false_positives": 0,
+      "sanitize_bugs": 0
+    },
+    "recall_target": 1.0,
+    "max_false_positive": 0,
+    "passed": true
+  },
+  "generated_at": "2026-07-11T10:27:52+0800"
+}

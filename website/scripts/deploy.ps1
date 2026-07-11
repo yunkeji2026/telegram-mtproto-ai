@@ -1,4 +1,4 @@
-<#
+﻿<#
   华灵网站 · 本地一键部署 (Windows / PowerShell)
   流程: 打包 website/ -> SCP 上传(部署包 + deploy.sh) -> 服务器侧 deploy.sh 原子部署 -> 公网体检
   绝不在脚本中存放密码：从 $env:VPS_PASS 读取，缺失则安全提示输入(SecureString)。
@@ -15,7 +15,7 @@
   依赖: 本机 tar(Win10 自带) + Posh-SSH 模块(Install-Module Posh-SSH)
 #>
 param(
-  [string]$VpsHost      = $(if ($env:VPS_HOST) { $env:VPS_HOST } else { '165.154.203.182' }),
+  [string]$VpsHost      = $(if ($env:VPS_HOST) { $env:VPS_HOST } else { '165.154.233.121' }),
   [string]$User         = $(if ($env:VPS_USER) { $env:VPS_USER } else { 'ubuntu' }),
   [string]$RemoteDir    = '/home/ubuntu',
   [string]$SiteUrl      = $(if ($env:SITE_URL) { $env:SITE_URL } else { 'https://usdt2026.cc' }),
