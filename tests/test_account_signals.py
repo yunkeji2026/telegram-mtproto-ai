@@ -168,7 +168,9 @@ def test_unified_counter_feeds_signals_and_gate():
 
     reset_autoreply_limiter()
     try:
-        lim = get_autoreply_limiter({})
+        # persist=false：本用例测「内存统一计数器」语义，不落 DB（保持测试 hermetic）
+        _cfg_nopersist = {"protocol_autoreply": {"rate": {"persist": False}}}
+        lim = get_autoreply_limiter(_cfg_nopersist)
         assert isinstance(lim, AutoReplyLimiter)
         key = "telegram:acct_unified"
         # 新号当天预热上限 = start_cap(2)；A 线连发 3 条记入同一计数器
@@ -198,7 +200,9 @@ def test_shared_send_limiter_returns_singleton():
     try:
         from src.client.sender import TelegramSenderMixin
         obj = TelegramSenderMixin.__new__(TelegramSenderMixin)
-        lim = obj._shared_send_limiter({})
-        assert lim is get_autoreply_limiter({})
+        # persist=false：仅验单例身份，不在测试期创建真实 config/account_sends.db
+        _cfg = {"protocol_autoreply": {"rate": {"persist": False}}}
+        lim = obj._shared_send_limiter(_cfg)
+        assert lim is get_autoreply_limiter(_cfg)
     finally:
         reset_autoreply_limiter()

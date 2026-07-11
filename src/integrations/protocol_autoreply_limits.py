@@ -12,13 +12,78 @@
 
 from __future__ import annotations
 
+import logging
+import sqlite3
 import threading
 import time
 from collections import defaultdict, deque
+from pathlib import Path
 from typing import Any, Deque, Dict, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 _HOUR = 3600.0
 _DAY = 86400.0
+
+_SEND_DDL = """
+CREATE TABLE IF NOT EXISTS account_sends (
+    account_key TEXT NOT NULL,
+    ts          REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_account_sends_key_ts
+    ON account_sends(account_key, ts);
+"""
+
+
+class SendCountStore:
+    """按账号的发送时间戳持久化（让 send-gate 日/时配额**跨进程重启存活**）。
+
+    背景：``AutoReplyLimiter`` 原本纯内存计数，服务一重启 ``sends_today`` 即归零 →
+    「日配额」实为「本进程生命周期配额」，频繁重启时形同虚设（真号安全洞）。本存储把
+    每次实际发送落 SQLite，日/时窗口计数改为查库，重启后仍反映真实 24h 量。
+
+    线程安全（check_same_thread=False + 自带锁，与仓内其它 store 一致）；启动与周期
+    清理 >2 天的陈旧行（配额只看 24h，留 48h 冗余即可，表恒小）。绝不抛给调用方——
+    任何 IO 异常由上层 limiter 捕获后降级回内存，**永不阻断发送**。
+    """
+
+    def __init__(self, db_path: Any) -> None:
+        self._db_path = Path(db_path)
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False, timeout=10)
+        self._lock = threading.Lock()
+        self._writes = 0
+        with self._lock:
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.executescript(_SEND_DDL)
+            self._conn.commit()
+            self._prune_locked(time.time() - 2 * _DAY)
+
+    def record(self, account_key: str, ts: float) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO account_sends (account_key, ts) VALUES (?, ?)",
+                (str(account_key), float(ts)),
+            )
+            self._conn.commit()
+            self._writes += 1
+            if self._writes % 100 == 0:      # 摊还清理，热路径零额外开销
+                self._prune_locked(time.time() - 2 * _DAY)
+
+    def count_since(self, account_key: str, since_ts: float) -> int:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM account_sends WHERE account_key=? AND ts>=?",
+                (str(account_key), float(since_ts)),
+            ).fetchone()
+        return int((row[0] if row else 0) or 0)
+
+    def _prune_locked(self, before_ts: float) -> None:
+        try:
+            self._conn.execute("DELETE FROM account_sends WHERE ts<?", (float(before_ts),))
+            self._conn.commit()
+        except Exception:
+            logger.debug("[send-count] prune 失败（忽略）", exc_info=True)
 
 
 class AutoReplyLimiter:
@@ -27,6 +92,7 @@ class AutoReplyLimiter:
     def __init__(
         self, *, hourly: int = 30, daily: int = 200,
         breaker_threshold: int = 5, breaker_cooldown: float = 300.0,
+        store: Optional["SendCountStore"] = None,
     ) -> None:
         self.hourly = int(hourly or 0)
         self.daily = int(daily or 0)
@@ -36,6 +102,24 @@ class AutoReplyLimiter:
         self._fails: Dict[str, int] = defaultdict(int)
         self._open_until: Dict[str, float] = {}
         self._lock = threading.Lock()
+        # 可选持久化：跨重启存活的日/时计数（None=纯内存，保持旧行为，零破坏）。
+        self._store = store
+
+    def _counts(self, account_key: str, now: float) -> Tuple[int, int]:
+        """返回 (hour_used, day_used)。有持久化 store → 查库（跨重启真值）；
+        否则用内存 deque（旧行为）。store 查询异常 → 降级内存（守卫绝不因 IO 卡死发送）。"""
+        if self._store is not None:
+            try:
+                hour = self._store.count_since(account_key, now - _HOUR)
+                day = self._store.count_since(account_key, now - _DAY)
+                return hour, day
+            except Exception:
+                logger.debug("[limiter] store 计数失败，降级内存", exc_info=True)
+        dq = self._sends.get(account_key)
+        if dq is None:
+            return 0, 0
+        self._prune(dq, now)
+        return sum(1 for t in dq if t >= now - _HOUR), len(dq)
 
     def configure(
         self, *, hourly: Optional[int] = None, daily: Optional[int] = None,
@@ -73,10 +157,7 @@ class AutoReplyLimiter:
             ou = self._open_until.get(account_key, 0.0)
             if ou and now < ou:
                 return False, "circuit_open"
-            dq = self._sends[account_key]
-            self._prune(dq, now)
-            day = len(dq)
-            hour = sum(1 for t in dq if t >= now - _HOUR)
+            hour, day = self._counts(account_key, now)
             if h_limit and hour >= h_limit:
                 return False, "quota_hour"
             if d_limit and day >= d_limit:
@@ -86,7 +167,13 @@ class AutoReplyLimiter:
     def record_sent(self, account_key: str, now: Optional[float] = None) -> None:
         now = now if now is not None else time.time()
         with self._lock:
-            self._sends[account_key].append(now)
+            self._sends[account_key].append(now)   # 内存态仍维护（store 缺失时的兜底）
+        # 持久化在锁外（避免 DB IO 占内存锁）；失败不影响内存计数
+        if self._store is not None:
+            try:
+                self._store.record(account_key, now)
+            except Exception:
+                logger.debug("[limiter] store.record 失败（内存已记）", exc_info=True)
 
     def record_success(self, account_key: str) -> None:
         """成功 → 清失败计数 + 闭合断路器。"""
@@ -115,13 +202,7 @@ class AutoReplyLimiter:
         h_limit = self.hourly if hourly is None else int(hourly or 0)
         d_limit = self.daily if daily is None else int(daily or 0)
         with self._lock:
-            dq = self._sends.get(account_key)
-            if dq is not None:
-                self._prune(dq, now)
-                day = len(dq)
-                hour = sum(1 for t in dq if t >= now - _HOUR)
-            else:
-                day = hour = 0
+            hour, day = self._counts(account_key, now)
             ou = self._open_until.get(account_key, 0.0)
             open_now = bool(ou and now < ou)
             return {
@@ -137,7 +218,12 @@ _limiter_lock = threading.Lock()
 
 
 def get_autoreply_limiter(cfg: Optional[Dict[str, Any]] = None) -> AutoReplyLimiter:
-    """进程内单例。首次调用按 ``config.protocol_autoreply.{rate,breaker}`` 取阈值。"""
+    """进程内单例。首次调用按 ``config.protocol_autoreply.{rate,breaker}`` 取阈值。
+
+    默认接持久化 ``SendCountStore``（``config/account_sends.db``）→ send-gate 日/时配额
+    跨重启存活；建库失败自动降级纯内存（旧行为，绝不阻断启动）。``protocol_autoreply.rate.
+    persist=false`` 可显式关闭持久化。
+    """
     global _limiter
     if _limiter is None:
         with _limiter_lock:
@@ -145,11 +231,21 @@ def get_autoreply_limiter(cfg: Optional[Dict[str, Any]] = None) -> AutoReplyLimi
                 pa = (cfg or {}).get("protocol_autoreply") or {}
                 rate = pa.get("rate") or {}
                 brk = pa.get("breaker") or {}
+                store = None
+                if rate.get("persist", True):
+                    try:
+                        store = SendCountStore(
+                            str(rate.get("db_path") or "config/account_sends.db"))
+                    except Exception:
+                        logger.warning(
+                            "[limiter] SendCountStore 建库失败，降级纯内存计数", exc_info=True)
+                        store = None
                 _limiter = AutoReplyLimiter(
                     hourly=rate.get("hourly", 30),
                     daily=rate.get("daily", 200),
                     breaker_threshold=brk.get("threshold", 5),
                     breaker_cooldown=brk.get("cooldown_sec", 300),
+                    store=store,
                 )
     return _limiter
 

@@ -5,7 +5,9 @@ from __future__ import annotations
 import pytest
 
 from src.integrations import protocol_autoreply as pa
-from src.integrations.protocol_autoreply_limits import AutoReplyLimiter
+from src.integrations.protocol_autoreply_limits import (
+    AutoReplyLimiter, SendCountStore,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -72,6 +74,76 @@ def test_snapshot():
     assert s["hour_used"] == 2 and s["hour_limit"] == 10
     assert s["day_used"] == 2 and s["day_limit"] == 50
     assert s["circuit_open"] is False
+
+
+# ── 持久化 SendCountStore：send-gate 日配额跨重启存活 ────────────────────────
+
+def test_persist_day_count_survives_restart(tmp_path):
+    """核心不变量：限流器实例重建（模拟进程重启）后，日计数从持久化 store 恢复，
+    而非归零——修复「重启即重置日配额」的真号安全洞。
+
+    用接近真实的时间戳（构造时按真实 wall-clock 清理 >2 天陈旧行，故测试数据须在窗内）。
+    """
+    import time as _t
+    base = _t.time()
+    db = tmp_path / "account_sends.db"
+    k = "telegram:8244899900"
+    lim1 = AutoReplyLimiter(hourly=0, daily=3, store=SendCountStore(db))
+    lim1.record_sent(k, now=base)
+    lim1.record_sent(k, now=base + 1)
+    lim1.record_sent(k, now=base + 2)
+    assert lim1.allow(k, now=base + 3) == (False, "quota_day")   # 已达 3
+    # 模拟重启：新 store 指向同一 db + 新 limiter 实例（内存 deque 为空）
+    lim2 = AutoReplyLimiter(hourly=0, daily=3, store=SendCountStore(db))
+    assert lim2.snapshot(k, now=base + 4)["day_used"] == 3       # 从库恢复，非 0
+    assert lim2.allow(k, now=base + 4) == (False, "quota_day")   # 仍拦，未因重启放水
+
+
+def test_persist_hour_window_slides(tmp_path):
+    import time as _t
+    base = _t.time()
+    db = tmp_path / "account_sends.db"
+    k = "telegram:1"
+    lim = AutoReplyLimiter(hourly=1, daily=100, store=SendCountStore(db))
+    lim.record_sent(k, now=base)
+    assert lim.allow(k, now=base + 1)[1] == "quota_hour"
+    assert lim.allow(k, now=base + 3601)[0] is True          # 旧记录滑出小时窗（查库同样滑动）
+
+
+def test_persist_prunes_stale_rows(tmp_path):
+    """>2 天陈旧行清理：不影响 24h 计数，表恒小。"""
+    db = tmp_path / "account_sends.db"
+    store = SendCountStore(db)
+    k = "telegram:1"
+    now = 1_000_000.0
+    store.record(k, now - 3 * 86400)     # 3 天前
+    store.record(k, now - 100)           # 刚刚
+    assert store.count_since(k, now - 86400) == 1   # 24h 内只 1 条
+    store._prune_locked(now - 2 * 86400)
+    assert store.count_since(k, 0) == 1             # 陈旧行已清
+
+
+def test_store_failure_falls_back_to_memory(tmp_path, monkeypatch):
+    """store 查询抛错 → 降级内存计数，绝不因 IO 卡死发送。"""
+    db = tmp_path / "account_sends.db"
+    lim = AutoReplyLimiter(hourly=0, daily=2, store=SendCountStore(db))
+    k = "telegram:1"
+    lim.record_sent(k, now=1000)   # 内存 deque + store 都记了
+
+    def _boom(*a, **kw):
+        raise RuntimeError("db locked")
+    monkeypatch.setattr(lim._store, "count_since", _boom)
+    # store 挂 → _counts 降级读内存 deque（仍有 1 条）
+    assert lim.snapshot(k, now=1001)["day_used"] == 1
+
+
+def test_no_store_keeps_legacy_memory_behavior():
+    """不传 store → 纯内存（旧行为，零破坏）。"""
+    lim = AutoReplyLimiter(hourly=0, daily=2)
+    k = "telegram:1"
+    lim.record_sent(k, now=1000)
+    lim.record_sent(k, now=1001)
+    assert lim.allow(k, now=1002) == (False, "quota_day")
 
 
 # ── 与 run_autoreply 集成 ─────────────────────────────────────────────────
