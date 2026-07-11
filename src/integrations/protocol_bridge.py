@@ -339,6 +339,10 @@ def ingest_incoming(
     username: str = "",
     phone: str = "",
     avatar_url: str = "",
+    mentioned: bool = False,
+    mentions: Optional[Any] = None,
+    sender_id: str = "",
+    sender_name: str = "",
 ) -> Optional[str]:
     """把一条 protocol 消息落库到统一收件箱。返回 conversation_id（失败返回 None）。
 
@@ -373,6 +377,32 @@ def ingest_incoming(
             "text": str(reply_to.get("text") or ""),
             "sender": str(reply_to.get("sender") or ""),
         }
+    # P4-11D：群提及明细 [{jid,number}] → 持久前 best-effort 补 name（通讯录名，缺则回落号码），
+    # 落 messages.mentions_json，供气泡把 @号码 渲染成 @名字（离线/列表/引用皆可读）。
+    if isinstance(mentions, (list, tuple)) and mentions:
+        _ml = []
+        for mm in mentions:
+            if not isinstance(mm, dict):
+                continue
+            jid = str(mm.get("jid") or "")
+            num = str(mm.get("number") or (jid.split("@")[0] if jid else "")).strip()
+            nm = str(mm.get("name") or "").strip()
+            if not nm and num:
+                try:
+                    nm = store.get_protocol_contact_name(platform, str(account_id), num) or ""
+                except Exception:
+                    nm = ""
+            if jid or num:
+                _ml.append({"jid": jid, "number": num, "name": nm or num})
+        if _ml:
+            src["mentions"] = _ml
+    # P4-11E：群发言人结构化落库（替代把「发言人：」拼进正文）——消息正文保持干净，
+    # 供气泡上方显示发言人名 + 稳定色。
+    _sender_name = str(sender_name or "").strip()
+    _sender_id = str(sender_id or "").strip()
+    if _sender_id or _sender_name:
+        src["sender_id"] = _sender_id
+        src["sender_name"] = _sender_name
     if msg_id:
         src.setdefault("message_id", str(msg_id))
         if platform == "telegram":
@@ -408,10 +438,21 @@ def ingest_incoming(
         # 会话预览用占位符，但消息正文保持原文（空则不喂 auto-draft）
         if not text:
             chat["last_msg"] = _media_placeholder(media_type)
+    # P4-11E：群入站会话列表预览前缀发言人名（「张三：早上好」，对齐官方群聊列表），
+    # 只改**会话预览** last_msg，不动**消息正文**（气泡正文保持干净，发言人走结构化字段）。
+    if direction == "in" and str(chat_type or "") == "group" and _sender_name:
+        _base = str(chat.get("last_msg") or "")
+        chat["last_msg"] = f"{_sender_name}：{_base}" if _base else _sender_name
     try:
         ingest_collected_chats(store, [chat], publish_events=(direction == "in"))
     except Exception:
         logger.debug("[protocol_bridge] ingest_collected_chats 失败", exc_info=True)
+    # P4-11B：入站群消息 @ 本账号 → 置会话「@我」未读旗标（best-effort，不阻断落库）
+    if direction == "in" and mentioned:
+        try:
+            store.set_conversation_mentioned(str(chat["conversation_id"]), True)
+        except Exception:
+            logger.debug("[protocol_bridge] set_conversation_mentioned 失败", exc_info=True)
     return str(chat["conversation_id"])
 
 

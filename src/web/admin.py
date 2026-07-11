@@ -1057,6 +1057,16 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         import logging as _log_pr
         _log_pr.getLogger("admin").debug("Persona API 路由注册跳过", exc_info=True)
 
+    try:
+        from src.web.routes.persona_media_routes import register_persona_media_routes
+        register_persona_media_routes(
+            app, auth_dep=_api_auth, audit_store=audit_store,
+            config_manager=config_manager
+        )
+    except Exception:
+        import logging as _log_pm
+        _log_pm.getLogger("admin").debug("Persona media 路由注册跳过", exc_info=True)
+
     @app.get("/personas", response_class=HTMLResponse)
     async def personas_page(request: Request, _=Depends(_page_auth)):
         from src.utils.persona_manager import PersonaManager
@@ -2876,5 +2886,3 @@ def _register_domain_routes(app: FastAPI, ctx):
         logging.getLogger("admin").warning(
             "Failed to register domain '%s' web routes: %s", domain_name, e
         )
-
-

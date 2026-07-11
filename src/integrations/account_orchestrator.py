@@ -374,6 +374,7 @@ class AccountOrchestrator:
     async def send(
         self, platform: str, account_id: str, chat_key: str, text: str,
         *, reply_to: Optional[Dict[str, Any]] = None,
+        mentions: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """经受管 worker 发送，并把出站消息回写收件箱线程。
 
@@ -393,12 +394,24 @@ class AccountOrchestrator:
         if not (m is not None and m.state == "running"
                 and m.worker is not None and hasattr(m.worker, "send")):
             raise RuntimeError(f"无可用的运行中 worker: {platform}:{account_id}")
+        # P4-5B reply_to + P4-11 mentions：仅协议 worker 支持这些 kwarg；用逐级降级
+        # 探测其签名（先全带、再退 reply_to、最后裸发），非协议 worker 一律安全回落。
+        _kw: Dict[str, Any] = {}
         if reply_to:
+            _kw["reply_to"] = reply_to
+        if mentions:
+            _kw["mentions"] = mentions
+        if _kw:
             try:
-                res = await m.worker.send(chat_key, text, reply_to=reply_to)
+                res = await m.worker.send(chat_key, text, **_kw)
             except TypeError:
-                # worker 不支持 reply_to kwarg（非协议 worker）→ 退回普通发送
-                res = await m.worker.send(chat_key, text)
+                if reply_to:
+                    try:
+                        res = await m.worker.send(chat_key, text, reply_to=reply_to)
+                    except TypeError:
+                        res = await m.worker.send(chat_key, text)
+                else:
+                    res = await m.worker.send(chat_key, text)
         else:
             res = await m.worker.send(chat_key, text)
         # P0-4：带回平台消息 id(wamid)，让出站回写与 worker 的 fromMe 回显同键去重
@@ -700,6 +713,18 @@ class WhatsAppProtocolWorker:
         from src.integrations.whatsapp_baileys_login import service_base_url
         return service_base_url(self.config)
 
+    def _session_unhealthy(self) -> bool:
+        """Node push 的会话健康登记显示该账号被登出/重连放弃 → 自动发送快速失败
+        （与 MessengerWebWorker 同口径；仅拦自动路径，未上报过 = 不拦）。"""
+        try:
+            from src.integrations.platform_session_health import (
+                get_platform_session_health,
+            )
+            return get_platform_session_health().is_unhealthy(
+                "whatsapp", self.account_id)
+        except Exception:
+            return False
+
     async def start(self) -> None:
         from src.integrations.whatsapp_baileys_login import _post_json
         # 触发 Node 恢复所有持久化 session（幂等）；Node 自身也会在开机时恢复
@@ -710,6 +735,9 @@ class WhatsAppProtocolWorker:
     async def send(self, chat_key: str, text: str,
                    *, reply_to: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         from src.integrations.whatsapp_baileys_login import _post_json
+        if self._session_unhealthy():
+            return {"delivered": False, "blocked": "session_unhealthy",
+                    "error": "whatsapp session unhealthy (logged out / reconnect gave up)"}
         payload: Dict[str, Any] = {"jid": chat_key, "text": text}
         # P4-5B 原生引用回复：把被引用消息 key + 文本摘要下发给 Baileys 的 quoted 选项
         if reply_to and reply_to.get("id"):
@@ -728,6 +756,9 @@ class WhatsAppProtocolWorker:
     async def send_media(self, chat_key: str, *, media_path: str,
                          media_type: str, caption: str = "") -> Dict[str, Any]:
         from src.integrations.whatsapp_baileys_login import _post_json
+        if self._session_unhealthy():
+            return {"delivered": False, "blocked": "session_unhealthy",
+                    "error": "whatsapp session unhealthy (logged out / reconnect gave up)"}
         res = await _post_json(
             f"{self._base()}/accounts/{self.account_id}/send-media",
             {"jid": chat_key, "path": media_path,
@@ -771,6 +802,19 @@ class MessengerWebWorker:
         from src.integrations.messenger_web_login import service_base_url
         return service_base_url(self.config)
 
+    def _session_unhealthy(self) -> bool:
+        """Node push 的会话健康登记显示该账号掉线/需重登 → 自动发送快速失败，
+        免去注定失败的 20-30s DOM 尝试。仅拦**自动路径**（worker/编排器）；
+        人工适配器路径不查此表——即使登记陈旧也不锁死人工操作。"""
+        try:
+            from src.integrations.platform_session_health import (
+                get_platform_session_health,
+            )
+            return get_platform_session_health().is_unhealthy(
+                "messenger", self.account_id)
+        except Exception:
+            return False
+
     async def start(self) -> None:
         from src.integrations.messenger_web_login import _post_json
         # 触发 Node 恢复所有持久化 profile（幂等）；Node 自身也会在开机时恢复
@@ -781,12 +825,61 @@ class MessengerWebWorker:
     async def send(self, chat_key: str, text: str,
                    *, reply_to: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         from src.integrations.messenger_web_login import _post_json
+        if self._session_unhealthy():
+            return {"delivered": False, "blocked": "session_unhealthy",
+                    "error": "messenger session unhealthy (needs manual re-login)"}
+        # Node 侧现以 HTTP 502 + {ok:false, delivered:false} 如实上报「发送未确认」
+        # （composer 未清空＝多半没发出）。_post_json 对非 2xx 抛错 → 归一为未送达，
+        # 绝不把「没发出去」当成功（此前恒 delivered=True → 静默丢消息）。
+        try:
+            res = await _post_json(
+                f"{self._base()}/accounts/{self.account_id}/send",
+                {"jid": chat_key, "text": text},
+            )
+        except Exception as ex:  # noqa: BLE001
+            return {"delivered": False, "error": f"messenger send failed: {ex}"}
+        res = res or {}
+        # 双重口径：ok 或 delivered 任一显式为 False，或 sent 显式为 False，都判未送达。
+        delivered = (res.get("ok", True) is not False
+                     and res.get("delivered", True) is not False
+                     and res.get("sent", True) is not False)
+        # 回读二次确认（P1）：verified=False 表示 Node 发出后回读没锚到我们的气泡
+        # （不定态，为防重发仍按已送达）。留日志观测频率——若常态化说明 DOM 改版。
+        if delivered and res.get("verified") is False:
+            logger.info(
+                "[messenger] 发送已确认（composer 清空）但回读未锚定气泡 "
+                "account=%s chat=%s（按已送达处理）", self.account_id, chat_key)
+        return {"delivered": bool(delivered),
+                "message_id": str(res.get("message_id") or ""),
+                "error": str(res.get("error") or "")}
+
+    async def send_media(self, chat_key: str, *, media_path: str,
+                         media_type: str, caption: str = "") -> Dict[str, Any]:
+        """出站媒体（图片/视频/音频/文件）——与 Telegram 的 send_media 对称。
+
+        Node 与 Python 同机，直接把本地绝对路径 media_path 交给 Node 挂到 composer 发送
+        （无需上传）；语音走 media_type=voice（作为音频文件发出，Messenger 内联可播放）。
+        **本方法存在即被编排器 owns_media 判为 True** → 统一收件箱「图片/语音/视频/文件」
+        按钮对 Messenger 点亮，send_media/send_voice 路由到此。
+        """
+        import os
+        from src.integrations.messenger_web_login import _post_json
+        if self._session_unhealthy():
+            return {"delivered": False, "blocked": "session_unhealthy",
+                    "error": "messenger session unhealthy (needs manual re-login)"}
+        abs_path = os.path.abspath(media_path) if media_path else ""
         res = await _post_json(
-            f"{self._base()}/accounts/{self.account_id}/send",
-            {"jid": chat_key, "text": text},
+            f"{self._base()}/accounts/{self.account_id}/send-media",
+            {"jid": chat_key, "media_path": abs_path,
+             "media_type": str(media_type or ""), "caption": caption},
+            timeout=120.0,
         )
-        return {"delivered": bool((res or {}).get("ok", True)),
-                "message_id": str((res or {}).get("message_id") or "")}
+        res = res or {}
+        delivered = (res.get("ok", True) is not False
+                     and res.get("delivered", True) is not False
+                     and res.get("sent", True) is not False)
+        return {"delivered": bool(delivered),
+                "message_id": str(res.get("message_id") or "")}
 
     async def stop(self) -> None:
         # 不登出（浏览器上下文由 Node 保活）；仅停止 Python 侧监督
@@ -796,8 +889,17 @@ class MessengerWebWorker:
         from src.integrations.messenger_web_login import _get_json
         try:
             res = await _get_json(f"{self._base()}/accounts")
-            ids = {str(a.get("account_id") or "") for a in (res.get("accounts") or [])}
-            return self.account_id in ids
+            for a in (res.get("accounts") or []):
+                if str(a.get("account_id") or "") != self.account_id:
+                    continue
+                # 假健康修复（P0-2）：Node /accounts 现带 logged_in（轮询周期性
+                # pageLoggedIn 复检）。status=authorized 但登录态已丢（cookie 失效
+                # 停在登录页）→ 判不健康，让编排器进入 error/告警，而非带病待命。
+                if a.get("logged_in") is False:
+                    self.detail = "session listed but not logged in (cookie expired?)"
+                    return False
+                return True
+            return False
         except Exception:
             return False
 

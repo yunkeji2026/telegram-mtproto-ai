@@ -335,6 +335,8 @@ def store_row_to_chat(
         "last_msg": last_text,
         "last_ts": row.get("last_ts") or 0,
         "unread": int(row.get("unread") or 0),
+        # P4-11B 群「@我」未读旗标（store-backed 读路径透出；前端据此出 @ 徽标/置顶/提醒）
+        "mentioned": bool(row.get("mentioned_unread") or 0),
         "language": language,
         "last_message": last_msg_obj,
         "messages": [last_msg_obj] if last_msg_obj else [],
@@ -386,6 +388,11 @@ def store_message_to_obj(row: Dict[str, Any]) -> Dict[str, Any]:
         "reply_to_id": str(row.get("reply_to_id") or ""),
         "reply_to_text": str(row.get("reply_to_text") or ""),
         "reply_to_sender": str(row.get("reply_to_sender") or ""),
+        # P4-11D 群提及明细 [{jid,number,name}]（缺省 []=无提及），供气泡 @号码→@名字
+        "mentions": _parse_mentions(row.get("mentions_json")),
+        # P4-11E 群发言人：jid + 名字（缺省空=非群/未知），供气泡上方发言人名+稳定色
+        "sender_id": str(row.get("sender_id") or ""),
+        "sender_name": str(row.get("sender_name") or ""),
         # P4-3 表情回应：{sender:emoji} 聚合成 [{emoji,count}]（按计数降序），供气泡渲染 chips
         "reactions": _aggregate_reactions(row.get("reactions_json")),
         # P4-4 已读回执：出站消息投递状态（''/sent/delivered/read）
@@ -396,6 +403,32 @@ def store_message_to_obj(row: Dict[str, Any]) -> Dict[str, Any]:
         "source": {},
         "from_store": True,
     }
+
+
+def _parse_mentions(mentions_json: Any) -> List[Dict[str, Any]]:
+    """把 messages.mentions_json 解析为 [{jid,number,name}]（非法/空→[]）。P4-11D。"""
+    if not mentions_json:
+        return []
+    try:
+        import json as _json
+        d = _json.loads(mentions_json) if isinstance(mentions_json, str) else mentions_json
+    except Exception:
+        return []
+    if not isinstance(d, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    for it in d:
+        if not isinstance(it, dict):
+            continue
+        num = str(it.get("number") or "")
+        if not num and not it.get("jid"):
+            continue
+        out.append({
+            "jid": str(it.get("jid") or ""),
+            "number": num,
+            "name": str(it.get("name") or num),
+        })
+    return out
 
 
 def _aggregate_reactions(reactions_json: Any) -> List[Dict[str, Any]]:

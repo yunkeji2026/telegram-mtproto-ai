@@ -156,6 +156,9 @@ class TranslationService:
         engines: Optional[list] = None,
         engine_router: Optional[Any] = None,
         min_confidence: float = 0.0,
+        per_lang_order: Optional[Dict[str, Any]] = None,
+        semantic_embed_fn: Optional[Any] = None,
+        semantic_min_similarity: float = 0.65,
     ) -> None:
         self.ai_client = ai_client
         self.default_target_lang = normalize_lang(default_target_lang) or "zh"
@@ -177,10 +180,17 @@ class TranslationService:
         if engine_router is not None:
             self._router = engine_router
         elif engines:
-            self._router = EngineRouter(engines, min_confidence=min_confidence)
+            self._router = EngineRouter(
+                engines, min_confidence=min_confidence,
+                per_lang_order=per_lang_order,
+                semantic_embed_fn=semantic_embed_fn,
+                semantic_min_similarity=semantic_min_similarity)
         else:
             self._router = EngineRouter(
-                [AIEngine(ai_client)], min_confidence=min_confidence)
+                [AIEngine(ai_client)], min_confidence=min_confidence,
+                per_lang_order=per_lang_order,
+                semantic_embed_fn=semantic_embed_fn,
+                semantic_min_similarity=semantic_min_similarity)
 
     def detect_language(self, text: str) -> str:
         return detect_language(text)
@@ -569,4 +579,3 @@ def _clean_translation(text: str) -> str:
         if out.lower().startswith(prefix.lower()):
             out = out[len(prefix):].strip()
     return out
-

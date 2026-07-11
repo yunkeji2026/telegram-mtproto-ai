@@ -59,6 +59,7 @@ _SSE_EVENT_TYPES = frozenset({
     "stage_downgrade",
     "stage_reunion",
     "stage_sync",
+    "orchestrator_worker_alert",
     "workflow_step",
     "workflow_execution_completed",
     "workflow_execution_failed",
@@ -78,6 +79,7 @@ _NOTIF_EVENT_TYPES = frozenset({
     "workflow_execution_cancelled",
     "health_alert",
     "billing_alert",
+    "orchestrator_worker_alert",
     "ops_report",
 })
 

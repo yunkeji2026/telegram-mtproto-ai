@@ -609,6 +609,15 @@ _MIGRATIONS = [
     "ALTER TABLE conversations ADD COLUMN phone      TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE conversations ADD COLUMN avatar_url TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE conversations ADD COLUMN first_seen REAL NOT NULL DEFAULT 0",
+    # P4-11B 群「@我」未读旗标：入站群消息 @ 本账号→置 1，打开会话→清 0（供列表 @ 徽标/置顶/提醒）
+    "ALTER TABLE conversations ADD COLUMN mentioned_unread INTEGER NOT NULL DEFAULT 0",
+    # P4-11D 消息级提及明细：[{jid,number,name}] JSON，随消息持久（离线/列表/引用皆可读，
+    # LID 群按 jid 精确寻址），供气泡把 @号码 渲染成 @名字。纯加法、缺省 '[]'=无提及。
+    "ALTER TABLE messages ADD COLUMN mentions_json TEXT NOT NULL DEFAULT '[]'",
+    # P4-11E 群发言人：结构化存发言人 jid + 名字（替代把「发言人：」拼进正文），供气泡上方
+    # 显示发言人名 + 稳定色（对齐官方群聊读感）。纯加法、缺省空=非群/未知。
+    "ALTER TABLE messages ADD COLUMN sender_id   TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE messages ADD COLUMN sender_name TEXT NOT NULL DEFAULT ''",
 ]
 
 
@@ -912,8 +921,9 @@ class InboxStore:
                         (message_id, conversation_id, platform_msg_id, direction, text,
                          original_text, translated_text, source_lang, target_lang,
                          media_type, media_ref, ts, ingested_at,
-                         reply_to_id, reply_to_text, reply_to_sender)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         reply_to_id, reply_to_text, reply_to_sender, mentions_json,
+                         sender_id, sender_name)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         mid, msg.conversation_id, str(msg.platform_msg_id or ""), msg.direction,
@@ -921,7 +931,8 @@ class InboxStore:
                         msg.source_lang, msg.target_lang, msg.media_type, msg.media_ref,
                         float(msg.ts or 0), now,
                         str(msg.reply_to_id or ""), str(msg.reply_to_text or ""),
-                        str(msg.reply_to_sender or ""),
+                        str(msg.reply_to_sender or ""), str(msg.mentions_json or "[]"),
+                        str(msg.sender_id or ""), str(msg.sender_name or ""),
                     ),
                 )
                 inserted += 1 if cur.rowcount > 0 else 0
@@ -1147,6 +1158,24 @@ class InboxStore:
                 (conversation_id,),
             ).fetchone()
         return dict(row) if row else None
+
+    def set_conversation_mentioned(self, conversation_id: str, flag: bool) -> bool:
+        """P4-11B：设/清会话的「@我」未读旗标（入站群消息 @本账号→True，打开会话→False）。
+
+        幂等；仅在值实际变化时提交，避免无谓写。返回是否更新到行。
+        """
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            return False
+        val = 1 if flag else 0
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE conversations SET mentioned_unread=?, updated_at=? "
+                "WHERE conversation_id=? AND mentioned_unread!=?",
+                (val, self._now(), cid, val),
+            )
+            self._conn.commit()
+        return cur.rowcount > 0
 
     def update_conversation_identity(
         self,

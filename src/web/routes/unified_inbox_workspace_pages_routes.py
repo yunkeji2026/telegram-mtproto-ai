@@ -52,6 +52,10 @@ def register_workspace_pages_routes(
         }
         # P3：账号手机号显示脱敏开关（治理化，默认脱敏=True；演示/隐私可控）
         ctx["mask_account_phone"] = True
+        # P0-5 可见化：平台自动化降级/暂停状态注入页面，收件箱顶部渲染提示条
+        # （坐席能看见「Messenger 已降为人审」，不再疑惑为何不自动回）。
+        ctx["platform_mode_caps"] = {}
+        ctx["platform_draft_skips"] = []
         try:
             if config_manager is not None:
                 _cfg = config_manager.config or {}
@@ -61,6 +65,14 @@ def register_workspace_pages_routes(
                 _sp = (_cfg.get("accounts", {}) or {}).get("self_profile", {}) or {}
                 if "mask_phone" in _sp:
                     ctx["mask_account_phone"] = bool(_sp.get("mask_phone"))
+                _ad = (_cfg.get("inbox", {}) or {}).get("auto_draft", {}) or {}
+                ctx["platform_mode_caps"] = {
+                    str(k).lower(): str(v).lower()
+                    for k, v in (_ad.get("platform_modes") or {}).items()
+                    if str(v or "").strip()
+                }
+                ctx["platform_draft_skips"] = sorted(
+                    str(x).lower() for x in (_ad.get("skip_platforms") or []))
         except Exception:
             pass
         return ctx

@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Protocol, runtime_checkable
 
-from src.inbox.normalizer import normalize_chat, store_row_to_chat
+from src.inbox.normalizer import conv_id, name_is_real, normalize_chat, store_row_to_chat
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +83,83 @@ def _whatsapp_services(request: Any) -> list:
     return [s] if s else []
 
 
+def _writeback_outbound(platform: str, account_id: str, chat_key: str, text: str,
+                        res: Dict[str, Any]) -> None:
+    """把刚发出的消息乐观回写收件箱线程（direction=out），与 ``orch.send`` 同口径。
+
+    为何需要：编排器接管路径发完会 ``emit_incoming`` 回写；**回落到平台适配器**时
+    RPA runner 只写 ContactHooks/状态库、网页号什么都不回写——坐席/客户要等下次轮询才
+    看到这条。Messenger/LINE/WA 回落路径在此补上同一机制。
+
+    去重安全：有 ``message_id`` → 以其为 platform_msg_id；无 id → hash 键乐观落库，
+    日后带 id 的平台回显由 store 跨路径去重护栏收敛。best-effort，绝不影响发送结果。
+    """
+    try:
+        from src.integrations.protocol_bridge import emit_incoming, make_message
+        mid = str(res.get("message_id") or "") if isinstance(res, dict) else ""
+        emit_incoming(make_message(
+            platform=platform, account_id=account_id, chat_key=chat_key,
+            text=text, direction="out", msg_id=mid,
+        ))
+    except Exception:
+        logger.debug("[%s] 出站回写收件箱失败", platform, exc_info=True)
+
+
+def _resolve_peer_name(request: Any, platform: str, account_id: str,
+                       chat_key: str) -> str:
+    """把 chat_key 解析成 RPA 发送队列所需的「显示名」（UI 找人用）。
+
+    先查 inbox_store 会话身份，再回落 chat_key 本身（若像真实昵称）。
+    """
+    store = getattr(request.app.state, "inbox_store", None)
+    if store is not None:
+        try:
+            conv = store.get_conversation(
+                conv_id(platform, account_id, chat_key)) or {}
+            dn = str(conv.get("display_name") or "").strip()
+            if dn and name_is_real(dn, chat_key):
+                return dn
+        except Exception:
+            logger.debug("[%s] 会话名解析(store)失败", platform, exc_info=True)
+    ck = str(chat_key or "").strip()
+    if ck and name_is_real(ck, ck):
+        return ck
+    return ck
+
+
+async def _send_via_rpa_queue(
+    target: Any, platform: str, account_id: str, chat_key: str, text: str, *,
+    request: Any,
+) -> Dict[str, Any]:
+    """RPA 回落发送：真实 service 走 ``enqueue_send``；测试 fake 回落 ``send_to_chat``。"""
+    peer_name = _resolve_peer_name(request, platform, account_id, chat_key)
+    enqueue = getattr(target, "enqueue_send", None)
+    if callable(enqueue):
+        try:
+            item_id = enqueue(chat_key=chat_key, peer_name=peer_name, text=text)
+        except TypeError:
+            item_id = enqueue(chat_key, peer_name, text)
+        except ValueError as ex:
+            raise ChannelSendError(400, str(ex))
+        except Exception as ex:
+            raise ChannelSendError(502, f"{platform} 入队发送失败: {ex}")
+        res = {"delivered": True, "queued": True, "item_id": int(item_id)}
+        _writeback_outbound(platform, account_id, chat_key, text, res)
+        return res
+    sender = getattr(target, "send_to_chat", None)
+    if callable(sender):
+        try:
+            res = await sender(chat_key=chat_key, text=text)
+        except TypeError:
+            res = await sender(chat_key, text)
+        _writeback_outbound(
+            platform, account_id, chat_key, text,
+            res if isinstance(res, dict) else {})
+        return res if isinstance(res, dict) else {"delivered": True}
+    label = {"line": "LINE", "whatsapp": "WhatsApp"}.get(platform, platform)
+    raise ChannelSendError(501, f"{label} 暂不支持主动发送（需启用 approve 模式）")
+
+
 class LineInboxAdapter:
     platform = "line"
 
@@ -141,10 +218,8 @@ class LineInboxAdapter:
             target = svcs[0]
         if target is None:
             raise ChannelSendError(503, "LINE 服务未启用")
-        try:
-            return await target.send_to_chat(chat_key=chat_key, text=text)
-        except AttributeError:
-            raise ChannelSendError(501, "LINE 暂不支持主动发送（需启用 approve 模式）")
+        return await _send_via_rpa_queue(
+            target, "line", account_id, chat_key, text, request=request)
 
 
 class WhatsAppInboxAdapter:
@@ -203,10 +278,8 @@ class WhatsAppInboxAdapter:
             target = svcs[0]
         if target is None:
             raise ChannelSendError(503, "WhatsApp 服务未启用")
-        try:
-            return await target.send_to_chat(chat_key=chat_key, text=text)
-        except AttributeError:
-            raise ChannelSendError(501, "WhatsApp 暂不支持主动发送（需启用 approve 模式）")
+        return await _send_via_rpa_queue(
+            target, "whatsapp", account_id, chat_key, text, request=request)
 
 
 class MessengerInboxAdapter:
@@ -249,15 +322,148 @@ class MessengerInboxAdapter:
 
     async def send(self, request: Any, account_id: str, chat_key: str, text: str
                    ) -> Dict[str, Any]:
+        """向 Messenger 会话投递（编排器未接管时的回落路径）。
+
+        Messenger 有两种后端，收发口径不同，必须分流（否则会把网页会话丢给不存在的
+        手机、或用数字 thread id 当「会话名」在官方 App 里搜不到人）：
+
+        - **网页号（mode=web）**：连接由 :8791 Node 微服务保活，按 thread id 直发
+          （``chat_key`` 即 jid）——与 ``MessengerWebWorker.send`` 同口径。
+        - **RPA/设备号（mode=device）**：ADB 驱动官方 App，需按会话「显示名」找人后发，
+          故先把 ``chat_key`` 解析成真实昵称再调 ``send_to_chat_name_for_account``。
+
+        历史缺陷：此处曾直接 ``msvc.send_to_chat_name(chat_name=chat_key, text=text)``——
+        但 service 无该方法（在 runner 上）、参数名也是 ``reply_text``，任何 Messenger
+        出站都必抛 ``AttributeError``（AutosendWorker 全自动回复因此发不出）。
+        """
+        account_id = str(account_id or "")
+        chat_key = str(chat_key or "")
+        cfg = self._config(request)
+        # 统一护栏（补洞）：编排器发送路径已过 send_blocked，但当编排器不拥有该账号、
+        # 回落到本适配器直发 :8791 网页服务/RPA 时，此前**绕过** Kill-Switch + 反封号闸门
+        # → 三级急停对这条兜底路径失效。此处补上：platform:messenger / account 级急停命中
+        # 即拒发，与编排器路径同口径（返回 blocked，AutosendWorker 记 autosend_failed）。
+        try:
+            from src.integrations.shared.send_guard import send_blocked
+            from src.integrations.account_registry import get_account_registry
+            _blk, _reason = send_blocked(
+                "messenger", account_id, config=cfg, registry=get_account_registry())
+            if _blk:
+                logger.warning(
+                    "[messenger] 发送被护栏拦截 account=%s (%s)", account_id, _reason)
+                raise ChannelSendError(403, f"blocked:{_reason}")
+        except ChannelSendError:
+            raise
+        except Exception:
+            logger.debug("[messenger] send_blocked 护栏检查异常（放行）", exc_info=True)
+        # 分流决策：注册表 mode=web 权威判为网页号；注册表沉默但「只配了网页、无 RPA
+        # service」时也按网页号发（web-only 部署兜底）。
+        prefer_web = self._is_web_mode(account_id) or (
+            getattr(request.app.state, "messenger_rpa_service", None) is None
+        )
+        if prefer_web:
+            from src.integrations.messenger_web_login import web_enabled
+            if web_enabled(cfg):
+                res = await self._send_web(cfg, account_id, chat_key, text)
+                _writeback_outbound("messenger", account_id, chat_key, text, res)
+                return res
+        res = await self._send_rpa(request, account_id, chat_key, text)
+        _writeback_outbound("messenger", account_id, chat_key, text, res)
+        return res
+
+    @staticmethod
+    def _config(request: Any) -> Dict[str, Any]:
+        try:
+            cm = getattr(request.app.state, "config_manager", None)
+            return getattr(cm, "config", None) or {}
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _is_web_mode(account_id: str) -> bool:
+        """注册表里该 Messenger 账号是否登记为网页号（mode=web）。查不到/异常 → False。"""
+        try:
+            from src.integrations.account_registry import get_account_registry
+            row = get_account_registry().get("messenger", account_id) or {}
+            return str(row.get("mode") or "").lower() == "web"
+        except Exception:
+            logger.debug("[messenger] 账号 mode 查询失败", exc_info=True)
+            return False
+
+    async def _send_web(self, cfg: Dict[str, Any], account_id: str,
+                        chat_key: str, text: str) -> Dict[str, Any]:
+        from src.integrations.messenger_web_login import _post_json, service_base_url
+        base = service_base_url(cfg)
+        try:
+            res = await _post_json(
+                f"{base}/accounts/{account_id}/send",
+                {"jid": chat_key, "text": text},
+            )
+        except ChannelSendError:
+            raise
+        except Exception as ex:
+            raise ChannelSendError(503, f"Messenger 网页服务不可达: {ex}")
+        # 未送达判定收严：ok/delivered/sent 任一显式 False 都算失败（防「composer 未清空」
+        # 的静默丢消息被当成功；Node 现也会对该情形回 HTTP 502，双保险）。
+        if isinstance(res, dict) and (
+            res.get("ok") is False
+            or res.get("delivered") is False
+            or res.get("sent") is False
+        ):
+            raise ChannelSendError(
+                502, str(res.get("error") or "Messenger 网页发送失败（未确认送达）"))
+        return {
+            "delivered": True,
+            "message_id": str((res or {}).get("message_id") or ""),
+            "conversation_id": conv_id("messenger", account_id, chat_key),
+        }
+
+    async def _send_rpa(self, request: Any, account_id: str,
+                        chat_key: str, text: str) -> Dict[str, Any]:
         msvc = getattr(request.app.state, "messenger_rpa_service", None)
         if msvc is None:
             raise ChannelSendError(503, "Messenger 服务未启用")
+        sender = getattr(msvc, "send_to_chat_name_for_account", None)
+        if not callable(sender):
+            raise ChannelSendError(501, "Messenger 暂不支持从统一收件箱主动发送")
+        chat_name = self._resolve_chat_name(request, account_id, chat_key) or chat_key
         try:
-            return await msvc.send_to_chat_name(chat_name=chat_key, text=text)
+            r = await sender(account_id, chat_name=chat_name, reply_text=text)
         except ChannelSendError:
             raise
         except Exception as ex:
             raise ChannelSendError(500, str(ex))
+        if isinstance(r, dict) and r.get("ok") is False:
+            raise ChannelSendError(
+                502, str(r.get("error") or r.get("step") or "send failed"))
+        return r if isinstance(r, dict) else {"delivered": True}
+
+    @staticmethod
+    def _resolve_chat_name(request: Any, account_id: str, chat_key: str) -> str:
+        """把数字 thread id 解析成 RPA 找人所需的「显示名」：先查持久层会话身份，
+        再回落待审批清单里带的 name。都无 → 空串（上游回落用 chat_key）。"""
+        store = getattr(request.app.state, "inbox_store", None)
+        if store is not None:
+            try:
+                conv = store.get_conversation(
+                    conv_id("messenger", account_id, chat_key)) or {}
+                dn = str(conv.get("display_name") or "").strip()
+                if dn and name_is_real(dn, chat_key):
+                    return dn
+            except Exception:
+                logger.debug("[messenger] 会话名解析(store)失败", exc_info=True)
+        msvc = getattr(request.app.state, "messenger_rpa_service", None)
+        if msvc is not None and hasattr(msvc, "list_approvals"):
+            try:
+                for r in (msvc.list_approvals(status="pending", limit=50) or []):
+                    if (str(r.get("chat_key") or "") == chat_key
+                            or str(r.get("customer_id") or "") == chat_key):
+                        nm = str(r.get("name") or "").strip()
+                        if nm:
+                            return nm
+            except Exception:
+                logger.debug("[messenger] 会话名解析(approvals)失败", exc_info=True)
+        return ""
 
 
 class TelegramInboxAdapter:
@@ -553,7 +759,7 @@ def status_via_adapters(
 
 async def send_via_adapters(
     request: Any, platform: str, account_id: str, chat_key: str, text: str,
-    adapters: List[ChannelAdapter], *, reply_to: Any = None,
+    adapters: List[ChannelAdapter], *, reply_to: Any = None, mentions: Any = None,
 ) -> Dict[str, Any]:
     """按 platform 路由到对应适配器投递；未知平台抛 ChannelSendError(400)。
 
@@ -568,9 +774,16 @@ async def send_via_adapters(
         from src.integrations.account_orchestrator import get_orchestrator
         orch = get_orchestrator()
         if orch.owns(platform, account_id):
+            _record_send_route(platform, "orchestrator")
             try:
-                return await orch.send(
-                    platform, account_id, chat_key, text, reply_to=reply_to)
+                try:
+                    return await orch.send(
+                        platform, account_id, chat_key, text,
+                        reply_to=reply_to, mentions=mentions)
+                except TypeError:
+                    # 旧签名（无 mentions kwarg）→ 回落，保持向后兼容
+                    return await orch.send(
+                        platform, account_id, chat_key, text, reply_to=reply_to)
             except ChannelSendError:
                 raise
             except Exception as ex:  # noqa: BLE001
@@ -581,5 +794,17 @@ async def send_via_adapters(
         logger.debug("编排器路由不可用，回落平台适配器", exc_info=True)
     for adapter in adapters:
         if getattr(adapter, "platform", "") == platform:
+            # 回落到平台适配器（RPA/单连接/网页微服务）——观测这条兜底路径的触发频率，
+            # 让「编排器漏接」在看板可见（回落率高=该查 worker ownership），而非崩了才知道。
+            _record_send_route(platform, "adapter")
             return await adapter.send(request, account_id, chat_key, text)
     raise ChannelSendError(400, f"不支持的平台: {platform}")
+
+
+def _record_send_route(platform: str, route: str) -> None:
+    """把发送路由去向记进进程级观测（best-effort，绝不影响发送）。"""
+    try:
+        from src.inbox.send_route_stats import get_send_route_stats
+        get_send_route_stats().record(platform, route)
+    except Exception:
+        logger.debug("send-route 观测记录失败", exc_info=True)

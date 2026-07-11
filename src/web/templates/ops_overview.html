@@ -51,6 +51,8 @@
     <a class="refresh" href="/" >← {{ (i18n or {}).get('ov2_s002', "返回仪表盘") }}</a>
   </header>
 
+  <div id="opsAlertBanner" style="display:none;"></div>
+
   <div class="grid" id="kpis"></div>
 
   <section>
@@ -120,6 +122,12 @@
   </section>
 
   <section>
+    <h2>{{ (i18n or {}).get('ov2_s_asr', "🎤 语音转录降级（主 ASR / 回落 / 幻觉丢弃）") }}</h2>
+    <div class="grid" id="asrKpis"></div>
+    <div id="asrDetail"><div class="empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
+  </section>
+
+  <section>
     <h2>{{ (i18n or {}).get('ov2_s_se', "🎧 音频情绪（从对方语音的声学语气听出情绪）") }}</h2>
     <div class="grid" id="speechEmoKpis"></div>
     <div id="speechEmoByEmotion"><div class="empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
@@ -135,6 +143,25 @@
     <h2>🖱️ {{ (i18n or {}).get('ov2_s_fe', "前端哑按钮错误（运行时 ReferenceError 观测）") }}</h2>
     <div class="grid" id="feErrKpis"></div>
     <div id="feErrDetail"><div class="empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
+  </section>
+
+  <section>
+    <h2>📤 {{ (i18n or {}).get('ov2_s_sr', "出站路由（编排器接管 vs 回落适配器）") }}</h2>
+    <div class="grid" id="sendRouteKpis"></div>
+    <div id="sendRouteDetail"><div class="empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
+    <div id="sendRouteTrend" style="margin:10px 0;"></div>
+  </section>
+
+  <section>
+    <h2>🔌 {{ (i18n or {}).get('ov2_s_psess', "平台会话健康（网页号掉线/需重登，worker 主动上报）") }}</h2>
+    <div class="grid" id="psessKpis"></div>
+    <div id="psessDetail"><div class="empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
+  </section>
+
+  <section>
+    <h2>🖼️ {{ (i18n or {}).get('ov2_s_pma', "人设相册（图/视频备货 + 命中）") }}</h2>
+    <div class="grid" id="pmaKpis"></div>
+    <div id="pmaDetail"><div class="empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
   </section>
 
   <section>
@@ -257,6 +284,11 @@ async function loadOverview(){
     if(k.companion_config_light){
       cards.push([window.T('ov2_js016'), '<span class="val">'+dot(k.companion_config_light)+'</span>',
                   window.T('ov2_js017')+' '+fmt(k.companion_config_errors)+' · '+window.T('ov2_js018')+' '+fmt(k.companion_config_warnings)]);
+    }
+    if(k.orchestrator_worker_light){
+      var fbTxt = ((Number(k.send_fallback_rate)||0)*100).toFixed(1)+'%';
+      cards.push([window.T('ov2_js_ow_label'), '<span class="val">'+dot(k.orchestrator_worker_light)+'</span>',
+                  window.T('ov2_js_ow_err')+' '+fmt(k.orchestrator_workers_error)+' · '+window.T('ov2_js_ow_run')+' '+fmt(k.orchestrator_workers_running)+' · '+window.T('ov2_js_ow_fb')+' '+fbTxt]);
     }
     document.getElementById('kpis').innerHTML = cards.map(function(c){
       return '<div class="kpi"><div class="label">'+c[0]+'</div><div class="val">'+c[1]+'</div><div class="sub">'+c[2]+'</div></div>';
@@ -530,15 +562,19 @@ async function loadXlateTrend(){
     }
     var lowRate = days.map(function(x){ return (Number(x.low_conf_rate)||0)*100; });
     var swRate = days.map(function(x){ return (Number(x.switch_rate)||0)*100; });
+    var semRate = days.map(function(x){ return (Number(x.sem_low_rate)||0)*100; });
+    var hasSem = semRate.some(function(v){ return v > 0; });
     var labels = days.map(function(x){
       return (x.day||'')+': '+window.T('ov2_js053')+' '+((Number(x.low_conf_rate)||0)*100).toFixed(1)+'%'+
         ' · '+window.T('ov2_js054')+' '+((Number(x.switch_rate)||0)*100).toFixed(1)+'%'+
+        ' · '+window.T('ov2_js_sem_low')+' '+((Number(x.sem_low_rate)||0)*100).toFixed(1)+'%'+
         ' · '+(x.attempts||0)+window.T('kb_js_174');
     });
     el.innerHTML = '<div class="muted" style="font-size:12px;margin-bottom:4px;">'+
       window.T('ov2_js055')+'</div>'+
       sparkline(lowRate, {labels:labels, color:'#f85149', w:300})+
-      ' '+sparkline(swRate, {labels:labels, color:'#58a6ff', w:300});
+      ' '+sparkline(swRate, {labels:labels, color:'#58a6ff', w:300})+
+      (hasSem ? ' '+sparkline(semRate, {labels:labels, color:'#d29922', w:300}) : '');
   }catch(e){
     el.innerHTML = '<div class="muted" style="font-size:12px;">'+window.T('ov2_js051')+e+'</div>';
   }
@@ -924,11 +960,13 @@ async function loadTranslationEngines(){
     var lowConf = Number(te.low_confidence)||0;
     var switches = Number(te.confidence_switches)||0;
     var fb = Number(te.fallbacks)||0;
+    var semLow = Number(te.semantic_low)||0;
     // 低置信率以「尝试数」为分母（近似，attempts 含全部引擎调用）
     var lowPct = attempts ? ((lowConf/attempts)*100).toFixed(1) : '0.0';
     var kpis = [
       {label:window.T('ov2_js057'), value:fmt(attempts)},
       {label:window.T('ov2_js058'), value:fmt(lowConf)+' ('+lowPct+'%)'},
+      {label:window.T('ov2_js_sem_low'), value:fmt(semLow)},
       {label:window.T('ov2_js059'), value:fmt(switches)},
       {label:window.T('ov2_js060'), value:fmt(fb)},
     ];
@@ -991,6 +1029,49 @@ async function loadVoiceSynthLang(){
   }
 }
 
+// 🎤 语音转录降级卡片：读 /api/workspace/metrics 的 asr（主用/回落/全失败/幻觉丢弃）。
+// 回落率飙高 = 主 ASR（如 Qwen3-ASR）掉线导致全链走弱一档、错字增多——把静默降级变可见。
+async function loadASRDegradation(){
+  var kp = document.getElementById('asrKpis');
+  var dv = document.getElementById('asrDetail');
+  if(!kp || !dv) return;
+  try{
+    const r = await fetch('/api/workspace/metrics', {credentials:'same-origin'});
+    if(r.status === 403){ kp.innerHTML=''; dv.innerHTML='<div class="empty">'+window.T('ov2_js037')+'</div>'; return; }
+    const d = await r.json();
+    var a = d.asr || null;
+    if(!a || !(Number(a.attempts)||0)){
+      kp.innerHTML=''; dv.innerHTML='<div class="empty">'+window.T('ov2_js_asr_empty')+'</div>'; return;
+    }
+    var fbPct = ((Number(a.fallback_rate)||0)*100).toFixed(1);
+    var failPct = ((Number(a.failure_rate)||0)*100).toFixed(1);
+    var kpis = [
+      {label:window.T('ov2_js_asr_attempts'), value:fmt(Number(a.attempts)||0)},
+      {label:window.T('ov2_js_asr_primary'), value:fmt(Number(a.primary_ok)||0)},
+      {label:window.T('ov2_js_asr_fallback'), value:fmt(Number(a.fallback_ok)||0)+' ('+fbPct+'%)'},
+      {label:window.T('ov2_js_asr_failed'), value:fmt(Number(a.all_failed)||0)+' ('+failPct+'%)'},
+      {label:window.T('ov2_js_asr_hallu'), value:fmt(Number(a.hallucination_dropped)||0)},
+    ];
+    kp.innerHTML = kpis.map(function(c){
+      return '<div class="kpi"><div class="muted" style="font-size:12px;">'+c.label+
+        '</div><div style="font-size:20px;font-weight:600;margin-top:4px;">'+c.value+'</div></div>';
+    }).join('');
+    var byProv = a.by_fallback_provider || {};
+    var provs = Object.keys(byProv);
+    var html = '';
+    if(provs.length){
+      var rows = provs.map(function(k){ return '<tr><td>'+k+'</td><td>'+byProv[k]+'</td></tr>'; }).join('');
+      html += '<table><tr><th>'+window.T('ov2_js_asr_prov')+'</th><th>'+window.T('mo_s044')+'</th></tr>'+rows+'</table>';
+    }
+    var degraded = (Number(a.fallback_rate)||0) >= 0.5 || (Number(a.failure_rate)||0) >= 0.2;
+    html += '<div class="muted" style="font-size:12px;margin-top:8px;'+(degraded?'color:#c0392b;':'')+'">'+
+      window.T(degraded ? 'ov2_js_asr_warn' : 'ov2_js_asr_hint')+'</div>';
+    dv.innerHTML = html;
+  }catch(e){
+    dv.innerHTML = '<div class="empty">'+window.T('ln_js_033')+e+'</div>';
+  }
+}
+
 // 🎧 音频情绪卡片：读 /api/workspace/metrics 的 speech_emotion（从声学语气听出的情绪分布 + 可用性）。
 async function loadSpeechEmotion(){
   var kp = document.getElementById('speechEmoKpis');
@@ -1008,10 +1089,14 @@ async function loadSpeechEmotion(){
     var confident = Number(se.confident)||0;
     var unavail = Number(se.unavailable)||0;
     var upct = ((Number(se.unavailable_rate)||0)*100).toFixed(1);
+    var remote = Number(se.remote)||0;
+    var ok = Number(se.ok)||0;
+    var rpct = ok ? ((remote/ok)*100).toFixed(0) : '0';
     var kpis = [
       {label:window.T('ov2_js_se_total'), value:fmt(total)},
       {label:window.T('ov2_js_se_confident'), value:fmt(confident)},
       {label:window.T('ov2_js_se_unavail'), value:fmt(unavail)+' ('+upct+'%)'},
+      {label:window.T('ov2_js_se_remote'), value:fmt(remote)+' ('+rpct+'%)'},
     ];
     kp.innerHTML = kpis.map(function(c){
       return '<div class="kpi"><div class="muted" style="font-size:12px;">'+c.label+
@@ -1108,6 +1193,214 @@ async function loadFrontendErrors(){
       +   '<table><tr><th>'+window.T('ov2_js_fe_col_fn')+'</th><th>'+window.T('ov2_js_fe_col_count')+'</th></tr>'+topRows(byFn)+'</table></div>'
       + '</div>'
       + '<div class="muted" style="font-size:12px;margin-top:8px;">'+window.T('ov2_js_fe_hint')+'</div>';
+  }catch(e){
+    dv.innerHTML = '<div class="empty">'+window.T('ln_js_033')+e+'</div>';
+  }
+}
+
+// 🔌 平台会话健康卡片：读 /api/workspace/metrics 的 platform_sessions（外部 worker 主动 push 的
+// 会话状态登记；unhealthy=掉线/需人工重登，绿色空态=无上报或全部健康）。
+async function loadPlatformSessions(){
+  var kp = document.getElementById('psessKpis');
+  var dv = document.getElementById('psessDetail');
+  if(!kp || !dv) return;
+  try{
+    const r = await fetch('/api/workspace/metrics', {credentials:'same-origin'});
+    if(r.status === 403){ kp.innerHTML=''; dv.innerHTML='<div class="empty">'+window.T('ov2_js037')+'</div>'; return; }
+    const d = await r.json();
+    var ps = d.platform_sessions || null;
+    if(!ps || !(Number(ps.total_events)||0)){
+      kp.innerHTML=''; dv.innerHTML='<div class="empty">'+window.T('ov2_js_ps_none')+'</div>'; return;
+    }
+    var sess = ps.sessions || {};
+    var keys = Object.keys(sess);
+    var unhealthy = ps.unhealthy || [];
+    var kpis = [
+      {label:window.T('ov2_js_ps_total'), value:fmt(Number(ps.total_events)||0)},
+      {label:window.T('ov2_js_ps_sessions'), value:fmt(keys.length)},
+      {label:window.T('ov2_js_ps_unhealthy'),
+       value:(unhealthy.length ? '🔴 ' : '🟢 ') + unhealthy.length},
+    ];
+    kp.innerHTML = kpis.map(function(c){
+      return '<div class="kpi"><div class="muted" style="font-size:12px;">'+c.label+
+        '</div><div style="font-size:20px;font-weight:600;margin-top:4px;">'+c.value+'</div></div>';
+    }).join('');
+    // session 键/status 由后端消毒（仅安全字符），detail 截断后仍可能含任意文本 → 转义。
+    function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    var rows = keys.map(function(k){
+      var o = sess[k]||{};
+      var bad = unhealthy.indexOf(k) >= 0;
+      var dot = bad ? '🔴' : '🟢';
+      var when = tsfmt(o.ts); // 全站统一 wsFmtDateTime（随 UI 语言本地化）
+      // P2 自愈闭环：不健康的 messenger 网页会话给「重新登录」按钮（manage_ops 权限）——
+      // 触发 worker 主机弹交互登录窗，登录成功 worker 自动 push authorized 恢复。
+      // 动态行不用 inline onclick（作用域/拼接陷阱），走容器级事件委托 + data 属性。
+      var act = '';
+      if(bad && CAN_MANAGE_OPS && k.indexOf('messenger:') === 0){
+        act = '<button class="btn" data-psess-relogin="1" data-plat="messenger"'+
+          ' data-lid="'+esc(o.login_id||'')+'" data-acct="'+esc(k.split(':')[1]||'')+'"'+
+          ' style="font-size:12px;padding:2px 10px;">'+window.T('ov2_js_ps_relogin')+'</button>';
+      }
+      return '<tr><td>'+esc(k)+'</td><td>'+dot+' '+esc(o.status||'?')+'</td><td>'+
+        esc((o.detail||'').slice(0,80))+'</td><td class="muted">'+esc(when)+'</td><td>'+act+'</td></tr>';
+    }).join('') || '<tr><td colspan="5" class="muted">—</td></tr>';
+    dv.innerHTML =
+      '<table><tr><th>'+window.T('ov2_js_ps_col_session')+'</th><th>'+window.T('ov2_js_ps_col_status')+
+      '</th><th>'+window.T('ov2_js_ps_col_detail')+'</th><th>'+window.T('ov2_js_ps_col_time')+
+      '</th><th></th></tr>'+rows+'</table>'
+      + '<div class="muted" style="font-size:12px;margin-top:8px;">'+window.T('ov2_js_ps_hint')+'</div>';
+  }catch(e){
+    dv.innerHTML = '<div class="empty">'+window.T('ln_js_033')+e+'</div>';
+  }
+}
+
+// 平台会话「重新登录」：容器级事件委托（动态行零 inline handler）。防连点：进行中禁用按钮。
+(function(){
+  var dv = document.getElementById('psessDetail');
+  if(!dv) return;
+  dv.addEventListener('click', async function(ev){
+    var btn = ev.target && ev.target.closest ? ev.target.closest('[data-psess-relogin]') : null;
+    if(!btn || btn.disabled) return;
+    btn.disabled = true;
+    var old = btn.textContent;
+    btn.textContent = '…';
+    try{
+      const r = await fetch('/api/admin/platform-sessions/relogin', {
+        method:'POST', credentials:'same-origin',
+        headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken()},
+        body: JSON.stringify({ platform: btn.getAttribute('data-plat')||'',
+          login_id: btn.getAttribute('data-lid')||'',
+          account_id: btn.getAttribute('data-acct')||'' })
+      });
+      const d = await r.json().catch(function(){ return {}; });
+      if(r.ok && d && d.ok){
+        btn.textContent = window.T('ov2_js_ps_relogin_ok');
+        setTimeout(loadPlatformSessions, 4000);
+      }else{
+        alert(window.T('ov2_js_ps_relogin_fail')+' '+((d && d.detail) || r.status));
+        btn.disabled = false; btn.textContent = old;
+      }
+    }catch(e){
+      alert(window.T('ov2_js_ps_relogin_fail')+' '+e);
+      btn.disabled = false; btn.textContent = old;
+    }
+  });
+})();
+
+// 📤 出站路由卡片：读 /api/workspace/metrics 的 send_routes（编排器接管 vs 回落适配器；回落率暴露「编排器漏接」）。
+async function loadSendRoutes(){
+  var kp = document.getElementById('sendRouteKpis');
+  var dv = document.getElementById('sendRouteDetail');
+  if(!kp || !dv) return;
+  try{
+    const r = await fetch('/api/workspace/metrics', {credentials:'same-origin'});
+    if(r.status === 403){ kp.innerHTML=''; dv.innerHTML='<div class="empty">'+window.T('ov2_js037')+'</div>'; return; }
+    const d = await r.json();
+    var sr = d.send_routes || null;
+    if(!sr || !(Number(sr.total)||0)){
+      kp.innerHTML=''; dv.innerHTML='<div class="empty">'+window.T('ov2_js_sr_none')+'</div>'; return;
+    }
+    var fbPct = ((Number(sr.fallback_rate)||0)*100).toFixed(1);
+    var kpis = [
+      {label:window.T('ov2_js_sr_total'), value:fmt(Number(sr.total)||0)},
+      {label:window.T('ov2_js_sr_orch'), value:fmt(Number(sr.orchestrator_total)||0)},
+      {label:window.T('ov2_js_sr_adapter'), value:fmt(Number(sr.adapter_total)||0)},
+      {label:window.T('ov2_js_sr_fallback'), value:fbPct+'%'},
+    ];
+    kp.innerHTML = kpis.map(function(c){
+      return '<div class="kpi"><div class="muted" style="font-size:12px;">'+c.label+
+        '</div><div style="font-size:20px;font-weight:600;margin-top:4px;">'+c.value+'</div></div>';
+    }).join('');
+    // platform 键由后端消毒（仅 [a-z0-9_-]），无 HTML 元字符，可直接拼接。回落率按阈值上灯（红>50% 黄>20% 绿）。
+    var byp = sr.by_platform || {};
+    function rateCell(rate){
+      var v = Number(rate)||0;
+      var dot = v>0.5 ? '🔴' : (v>0.2 ? '🟡' : '🟢');
+      return '<td>'+dot+' '+(v*100).toFixed(1)+'%</td>';
+    }
+    var rows = Object.keys(byp).map(function(k){
+      var o = byp[k]||{};
+      return '<tr><td>'+k+'</td><td>'+(Number(o.orchestrator)||0)+'</td><td>'+
+        (Number(o.adapter)||0)+'</td>'+rateCell(o.fallback_rate)+'</tr>';
+    }).join('') || '<tr><td colspan="4" class="muted">—</td></tr>';
+    dv.innerHTML =
+      '<table><tr><th>'+window.T('ov2_js_sr_col_platform')+'</th><th>'+window.T('ov2_js_sr_col_orch')+
+      '</th><th>'+window.T('ov2_js_sr_col_adapter')+'</th><th>'+window.T('ov2_js_sr_col_rate')+'</th></tr>'+rows+'</table>'
+      + '<div class="muted" style="font-size:12px;margin-top:8px;">'+window.T('ov2_js_sr_hint')+'</div>';
+  }catch(e){
+    dv.innerHTML = '<div class="empty">'+window.T('ln_js_033')+e+'</div>';
+  }
+}
+
+// 📤 P8：近 7 天出站回落率曲线：读 /api/admin/send-route-trend（需开启趋势落库）。
+async function loadSendRouteTrend(){
+  var el = document.getElementById('sendRouteTrend');
+  if(!el) return;
+  try{
+    const r = await fetch('/api/admin/send-route-trend?days=7', {credentials:'same-origin'});
+    const d = await r.json();
+    if(!d.enabled){
+      el.innerHTML = '<div class="muted" style="font-size:12px;">'+
+        window.T('ov2_js_sr_trend_off')+' (inbox.send_route.trend_log=true '+window.T('ov2_js047')+'</div>';
+      return;
+    }
+    var days = d.days || [];
+    if(days.length < 2){
+      el.innerHTML = '<div class="muted" style="font-size:12px;">'+window.T('ov2_js048')+'</div>';
+      return;
+    }
+    var fbRate = days.map(function(x){ return (Number(x.fallback_rate)||0)*100; });
+    var labels = days.map(function(x){
+      return (x.day||'')+': '+window.T('ov2_js_sr_fallback')+' '+((Number(x.fallback_rate)||0)*100).toFixed(1)+'%'+
+        ' · '+(x.total||0)+window.T('ov2_js_sr_trend_sends');
+    });
+    el.innerHTML = '<div class="muted" style="font-size:12px;margin-bottom:4px;">'+
+      window.T('ov2_js_sr_trend_title')+'</div>'+
+      sparkline(fbRate, {labels:labels, color:'#f85149', w:300});
+  }catch(e){
+    el.innerHTML = '<div class="muted" style="font-size:12px;">'+window.T('ov2_js051')+e+'</div>';
+  }
+}
+
+// 🖼️ 人设相册卡片：读 /api/workspace/metrics 的 persona_media（图/视频备货 + 命中 Top-N）。
+async function loadPersonaMedia(){
+  var kp = document.getElementById('pmaKpis');
+  var dv = document.getElementById('pmaDetail');
+  if(!kp || !dv) return;
+  try{
+    const r = await fetch('/api/workspace/metrics', {credentials:'same-origin'});
+    if(r.status === 403){ kp.innerHTML=''; dv.innerHTML='<div class="empty">'+window.T('ov2_js037')+'</div>'; return; }
+    const d = await r.json();
+    var pm = d.persona_media || null;
+    if(!pm || !(Number(pm.total)||0)){
+      kp.innerHTML=''; dv.innerHTML='<div class="empty">'+window.T('ov2_js_pma_none')+'</div>'; return;
+    }
+    var kpis = [
+      {label:window.T('ov2_js_pma_items'), value:fmt(Number(pm.total)||0)},
+      {label:window.T('ov2_js_pma_enabled'), value:fmt(Number(pm.enabled)||0)},
+      {label:'🖼 / 🎬', value:(Number(pm.photo)||0)+' / '+(Number(pm.video)||0)},
+      {label:window.T('ov2_js_pma_hits'), value:fmt(Number(pm.total_hits)||0)},
+    ];
+    kp.innerHTML = kpis.map(function(c){
+      return '<div class="kpi"><div class="muted" style="font-size:12px;">'+c.label+
+        '</div><div style="font-size:20px;font-weight:600;margin-top:4px;">'+c.value+'</div></div>';
+    }).join('');
+    var top = pm.top || [];
+    function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+    function rowLabel(it){
+      var cap = String(it.caption||'').trim();
+      if(cap) return esc(cap);
+      var tg = (it.triggers||[]).join(', ');
+      return tg ? esc(tg) : '<span class="muted">—</span>';
+    }
+    var rows = top.map(function(it){
+      var icon = it.media_type==='video' ? '🎬' : '🖼';
+      return '<tr><td>'+icon+' '+rowLabel(it)+'</td><td>'+(Number(it.hits)||0)+'</td></tr>';
+    }).join('') || '<tr><td colspan="2" class="muted">—</td></tr>';
+    dv.innerHTML =
+      '<div class="muted" style="font-size:12px;margin-bottom:4px;">'+window.T('ov2_js_pma_top')+'</div>'
+      + '<table><tr><th>'+window.T('ov2_js_pma_col_media')+'</th><th>'+window.T('ov2_js_pma_col_hits')+'</th></tr>'+rows+'</table>'
+      + '<div class="muted" style="font-size:12px;margin-top:8px;">'+window.T('ov2_js_pma_hint')+'</div>';
   }catch(e){
     dv.innerHTML = '<div class="empty">'+window.T('ln_js_033')+e+'</div>';
   }
@@ -1748,7 +2041,7 @@ async function toggleLocalTts(on){
 }
 
 if(CAN_MANAGE_OPS){ var _rb=document.getElementById('recheckBtn'); if(_rb) _rb.style.display=''; }
-function refreshAll(){ loadOverview(); loadIncidents(); loadReport(); loadTTS(); loadTTSTrend(); loadAiSafety(); loadSlaBacklog(); loadTranslationEngines(); loadXlateTrend(); loadVoiceSynthLang(); loadSpeechEmotion(); loadDeepPersona(); loadFrontendErrors(); loadPeerIdentity(); loadIdentityTrend(); loadLocalTts(); loadRealtimeVoice(); loadRtvTrend(); refreshRealtimeVoiceAlertBadge(); }
+function refreshAll(){ loadOverview(); loadIncidents(); loadReport(); loadTTS(); loadTTSTrend(); loadAiSafety(); loadSlaBacklog(); loadTranslationEngines(); loadXlateTrend(); loadVoiceSynthLang(); loadASRDegradation(); loadSpeechEmotion(); loadDeepPersona(); loadFrontendErrors(); loadPlatformSessions(); loadSendRoutes(); loadSendRouteTrend(); loadPersonaMedia(); loadPeerIdentity(); loadIdentityTrend(); loadLocalTts(); loadRealtimeVoice(); loadRtvTrend(); refreshRealtimeVoiceAlertBadge(); }
 function _onRtvOpsRefresh(){
   loadRealtimeVoice(); loadRtvTrend(); loadRtvAlertCalibrate(false); refreshRealtimeVoiceAlertBadge();
 }
@@ -1758,6 +2051,44 @@ window.addEventListener("storage", function(e){
 window.addEventListener("rtv-ops-refresh", _onRtvOpsRefresh);
 refreshAll();
 setInterval(refreshAll, 60000);
+
+// 📡 P9：实时告警条 — 订阅 SSE，编排器 worker 崩溃/恢复即时弹条（无需等 60s 轮询）。
+// 后端 fn/detail 已消毒（platform:account_id + last_error 截断），此处仍转义防御。
+function _opsEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+function renderOpsWorkerBanner(data){
+  var el = document.getElementById('opsAlertBanner');
+  if(!el) return;
+  if(!data || data.recovered){
+    el.style.display = 'none';
+    el.innerHTML = '';
+    return;
+  }
+  var probs = data.problems || [];
+  var light = String(data.light || 'yellow');
+  var bg = (light === 'red') ? 'var(--red)' : 'var(--yellow)';
+  var icon = (light === 'red') ? '🔴' : '🟡';
+  var rows = probs.slice(0, 6).map(function(p){
+    return '<li>'+_opsEsc(p.name || p.id || '?')+'：'+_opsEsc(p.detail || '')+
+      '（'+window.T('ov2_js_ow_restarts')+' '+(Number(p.restarts)||0)+'）</li>';
+  }).join('');
+  el.style.cssText = 'display:block;margin:0 0 14px;padding:10px 14px;border-radius:8px;'+
+    'background:'+bg+';color:#fff;font-size:13px;';
+  el.innerHTML = '<div style="font-weight:600;margin-bottom:4px;">'+icon+' '+
+    window.T('ov2_js_ow_banner')+' ('+probs.length+')</div>'+
+    '<ul style="margin:4px 0 0;padding-left:18px;">'+rows+'</ul>';
+}
+try{
+  var _opsSse = new EventSource('/api/workspace/stream');
+  _opsSse.onmessage = function(e){
+    if(!e.data) return;
+    var msg; try{ msg = JSON.parse(e.data); }catch(_){ return; }
+    if(msg && msg.type === 'orchestrator_worker_alert'){
+      renderOpsWorkerBanner(msg.data || {});
+      // 同步刷新总灯 + 出站路由卡，让看板与告警条口径一致
+      loadOverview(); loadSendRoutes();
+    }
+  };
+}catch(_){}
 </script>
 </body>
 </html>

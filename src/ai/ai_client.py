@@ -51,8 +51,13 @@ class AIClient(LoggerMixin):
         self.client = None  # genai.Client
         self._oa_client = None  # AsyncOpenAI（Ollama / OpenAI 兼容）
         self._oa_embed_client = None  # 可选：仅用于 embedding（如 DeepSeek 对话 + Ollama 向量）
+        # 嵌入多端点双活（两台 LAN GPU 各跑 bge-m3）：按序尝试，异常端点进短冷却降权
+        # （不剔除）。风格对齐 OllamaMTEngine 的 base_urls。空列表 = 单端点旧行为。
+        self._oa_embed_clients: List[Any] = []   # [(base_url, AsyncOpenAI), ...]
+        self._embed_url_bad_until: Dict[str, float] = {}
         # Embedding 熔断：向量端点（如本地 Ollama）宕机时，避免每条消息都徒劳连接+刷 WARNING。
         # 连续失败达阈值 → 冷却窗口内直接静默降级到关键词召回（记忆/语义检索零阻断）。
+        # 多端点下仅当**全部端点**都失败才计一次 streak（单点抖动由端点冷却吸收）。
         self._embed_fail_streak = 0
         self._embed_unreachable_until = 0.0
         self._use_openai_compat = False
@@ -64,7 +69,7 @@ class AIClient(LoggerMixin):
         self.temperature = 0.7
         self.max_tokens = 1024
         self.timeout = 30
-        
+
         # 性能跟踪
         self.total_calls = 0
         self.total_tokens = 0
@@ -73,14 +78,14 @@ class AIClient(LoggerMixin):
         from src.utils.quality_tracker import QualityTracker
         self._quality_tracker = QualityTracker(config.config if hasattr(config, "config") else {})
         self._config_path = getattr(config, 'config_path', None)
-        
+
         self.max_conversation_history = 10
         # 熔断器：closed → open → half-open → closed/open 三态
         self._cb_window: deque = deque(maxlen=20)
         self._cb_open_until: float = 0.0
         self._cb_half_open: bool = False
         self.logger.info("AI 客户端初始化")
-    
+
     async def initialize(self) -> bool:
         """初始化 AI 客户端"""
         try:
@@ -190,15 +195,30 @@ class AIClient(LoggerMixin):
                 self._ollama_native_base = _root.rstrip("/")
                 self.logger.info("Ollama native /api/chat mode enabled: %s", self._ollama_native_base)
 
-        emb_raw = (ai_config.get("embedding_base_url") or "").strip().rstrip("/")
-        if emb_raw:
-            if not emb_raw.endswith("/v1"):
-                emb_raw = emb_raw + "/v1"
+        # 嵌入端点：embedding_base_urls（列表，双活）优先；否则 embedding_base_url（单端点）。
+        # 其他消费方（KB embed-all / eval provider / readiness）仍读单数键 —— 双活仅覆盖
+        # ai_client.embed()（记忆召回 + 翻译语义闸门等热路）。
+        _emb_cfg = ai_config.get("embedding_base_urls") or ai_config.get("embedding_base_url") or ""
+        if isinstance(_emb_cfg, (list, tuple)):
+            _emb_urls = [str(u or "").strip() for u in _emb_cfg]
+        else:
+            _emb_urls = [u.strip() for u in str(_emb_cfg).split(",")]
+        _emb_urls = [u for u in _emb_urls if u]
+        self._oa_embed_clients = []
+        if _emb_urls:
             emb_key = (ai_config.get("embedding_api_key") or key or "ollama").strip()
             if emb_key == "YOUR_AI_API_KEY":
                 emb_key = "ollama"
-            self._oa_embed_client = AsyncOpenAI(api_key=emb_key, base_url=emb_raw, timeout=float(self.timeout))
-            self.logger.info("Embedding 使用独立 base_url: %s", emb_raw)
+            for _u in _emb_urls:
+                _base = _u.rstrip("/")
+                if not _base.endswith("/v1"):
+                    _base = _base + "/v1"
+                self._oa_embed_clients.append((_base, AsyncOpenAI(
+                    api_key=emb_key, base_url=_base, timeout=float(self.timeout))))
+            self._oa_embed_client = self._oa_embed_clients[0][1]
+            self.logger.info(
+                "Embedding 使用独立端点 x%d: %s", len(self._oa_embed_clients),
+                ", ".join(u for u, _ in self._oa_embed_clients))
 
         test_result = await self._test_openai_connection()
         if not test_result:
@@ -276,7 +296,7 @@ class AIClient(LoggerMixin):
         try:
             if not self.client:
                 return False
-            
+
             response = await self.client.aio.models.generate_content(
                 model=self.model,
                 contents="Say hi in one word.",
@@ -285,7 +305,7 @@ class AIClient(LoggerMixin):
                     thinking_config=types.ThinkingConfig(thinking_budget=0),
                 ),
             )
-            
+
             if response and response.candidates:
                 text = None
                 try:
@@ -1248,7 +1268,7 @@ class AIClient(LoggerMixin):
         防止超长历史导致 prompt 过大。
         """
         contents = []
-        
+
         max_hist = context_rounds_override if context_rounds_override is not None else \
             max(1, getattr(self, "max_conversation_history", 10) or 10)
         if conversation_history:
@@ -1302,7 +1322,7 @@ class AIClient(LoggerMixin):
                         role=role,
                         parts=[types.Part(text=content)]
                     ))
-        
+
         # 添加当前用户消息
         if contents and contents[-1].role == "user":
             prev_text = contents[-1].parts[0].text if contents[-1].parts else ""
@@ -1315,9 +1335,9 @@ class AIClient(LoggerMixin):
                 role="user",
                 parts=[types.Part(text=user_message)]
             ))
-        
+
         return contents
-    
+
     def _build_context_prompt(self, context: Optional[Dict[str, Any]]) -> str:
         """
         构建上下文提示（含关键信息锚定，确保订单号/额度结论不被窗口滚动丢弃）
@@ -1546,17 +1566,17 @@ class AIClient(LoggerMixin):
             prompt_parts.append(
                 "【慢思考规划（内部策略，请自然融入回复，勿逐条复读）】\n" + _slo[:2800]
             )
-        
+
         # 添加意图信息
         intent = context.get('intent')
         if intent:
             prompt_parts.append(f"用户意图: {intent}")
-        
+
         # 添加上一条用户消息（便于理解「之前说过/给过」等）
         last_message = context.get('last_message')
         if last_message:
             prompt_parts.append(f"用户本条消息（当前轮）: {last_message}")
-        
+
         topic_switch = context.get('_topic_switch_hint')
         if topic_switch:
             prompt_parts.append(f"【话题/语境切换——注意】\n{topic_switch}")
@@ -1607,17 +1627,17 @@ class AIClient(LoggerMixin):
                 )
             elif not _is_repeated_msg:
                 prompt_parts.append(f"上次回复: {last_reply}")
-        
+
         # 添加对话阶段
         stage = context.get('stage')
         if stage:
             prompt_parts.append(f"对话阶段: {stage}")
-        
+
         # 用户刚发的图片/截图内容（Vision 或 OCR），仅根据此真实内容回复
         image_ocr_text = context.get('image_ocr_text')
         if image_ocr_text:
             prompt_parts.append(f"用户刚发的图片/截图内容（Vision/OCR）:\n{image_ocr_text[:2000]}")
-        
+
         # 近期群内机器人/通知消息（支付域可参考订单/通道；陪聊域不注入以免模型接工作话）
         recent_bot = context.get('recent_bot_messages')
         if recent_bot and not _is_companion:
@@ -1629,7 +1649,7 @@ class AIClient(LoggerMixin):
                     lines.append(f"[{who}]: {txt[:600]}")
             if lines:
                 prompt_parts.append("近期群内机器人/通知消息（可参考）:\n" + "\n".join(lines))
-        
+
         # 通道实时状态（仅业务域；陪聊域不注入）
         channel_status = ("" if _is_companion else context.get("channel_status_info", "") or "").strip()
         _live_metrics = bool(context.get("_channel_metrics_live_only")) and not _is_companion
@@ -1792,7 +1812,7 @@ class AIClient(LoggerMixin):
 
         if prompt_parts:
             return "上下文信息:\n" + "\n".join([f"- {part}" for part in prompt_parts])
-        
+
         return ""
 
     _LANG_NAMES = {
@@ -2324,7 +2344,7 @@ class AIClient(LoggerMixin):
         except Exception as e:
             self.logger.debug("slow_think_outline failed: %s", e)
         return ""
-    
+
     async def generate_reply_with_intent(
         self,
         user_message: str,
@@ -2355,9 +2375,9 @@ class AIClient(LoggerMixin):
             user_message, enhanced_context,
             conversation_history=conversation_history,
             strategy_overrides=strategy_overrides)
-        
+
         return reply
-    
+
     _INTENT_SUPPLEMENTS = {
         "complaint": (
             "【当前意图：投诉/不满 / Intent: Complaint】用户正在投诉或表达不满。"
@@ -2404,7 +2424,7 @@ class AIClient(LoggerMixin):
                 "Match the user's language."
             )
         return self._INTENT_SUPPLEMENTS.get(intent)
-    
+
     async def should_reply_by_context(
         self,
         previous_message: str,
@@ -2543,7 +2563,7 @@ class AIClient(LoggerMixin):
             "temperature": self.temperature,
             "provider": self._provider,
         }
-    
+
     _EMBED_FAIL_THRESHOLD = 3      # 连续失败达此数 → 熔断
     _EMBED_COOLDOWN_SEC = 120.0    # 熔断冷却窗口（窗口内不再连接，静默降级）
 
@@ -2565,6 +2585,24 @@ class AIClient(LoggerMixin):
             self.logger.debug(
                 "Embedding API 调用失败(第%d次): %s", self._embed_fail_streak, exc)
 
+    _EMBED_URL_COOLDOWN_SEC = 60.0   # 单端点异常后的冷却窗（排序降权，不剔除）
+
+    def _embed_clients_ordered(self) -> List[Any]:
+        """嵌入端点尝试序：健康端点按配置序在前，冷却中的降到队尾（仍保底可试）。
+
+        未配独立嵌入端点 → 回落对话客户端（旧行为，单元素）。返回 [(url, client), ...]。
+        """
+        if not self._oa_embed_clients:
+            return [("chat", self._oa_client)] if self._oa_client else []
+        now = time.monotonic()
+        healthy = [p for p in self._oa_embed_clients
+                   if self._embed_url_bad_until.get(p[0], 0.0) <= now]
+        cooling = [p for p in self._oa_embed_clients if p not in healthy]
+        return healthy + cooling
+
+    def _mark_embed_url_bad(self, url: str) -> None:
+        self._embed_url_bad_until[url] = time.monotonic() + self._EMBED_URL_COOLDOWN_SEC
+
     async def embed(self, texts: List[str]) -> List[List[float]]:
         """
         调用 Gemini Embedding API 获取文本向量。
@@ -2581,21 +2619,28 @@ class AIClient(LoggerMixin):
             _em = (self._embedding_model or "").strip()
             if not _em or _em.lower() in ("none", "off", "disabled"):
                 return []
-            _emb_cli = self._oa_embed_client or self._oa_client
-            if not _emb_cli:
+            _pairs = self._embed_clients_ordered()
+            if not _pairs:
                 return []
-            try:
-                result = await _emb_cli.embeddings.create(
-                    model=self._embedding_model,
-                    input=texts,
-                )
+            _last_exc: Optional[Exception] = None
+            for _url, _emb_cli in _pairs:
+                try:
+                    result = await _emb_cli.embeddings.create(
+                        model=self._embedding_model,
+                        input=texts,
+                    )
+                except Exception as _e:
+                    # 单端点异常 → 冷却降权，立刻试下一端点（双活 failover）
+                    _last_exc = _e
+                    self._mark_embed_url_bad(_url)
+                    continue
                 self._note_embed_success()
                 if result and result.data:
                     return [list(d.embedding) for d in result.data]
                 return []
-            except Exception as _e:
-                self._note_embed_failure(_e)
-                return []
+            # 全部端点失败 → 才计一次全局熔断 streak（单点抖动不触发全局熔断）
+            self._note_embed_failure(_last_exc or RuntimeError("all embedding endpoints failed"))
+            return []
         if not self.client:
             return []
         try:

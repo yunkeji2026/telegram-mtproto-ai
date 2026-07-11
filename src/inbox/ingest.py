@@ -77,6 +77,15 @@ def _msg_from_obj(
         media_type, media_ref = extract_media(src)
     # P4-2 引用回复：从 source.reply_to 抽被引用消息摘要（上游 Node/RPA 带则有）
     rt = src.get("reply_to") if isinstance(src.get("reply_to"), dict) else {}
+    # P4-11D 群提及明细：source.mentions=[{jid,number,name}] → 持久成 JSON 串（缺省 ''）
+    _ml = src.get("mentions") if isinstance(src.get("mentions"), list) else None
+    mentions_json = ""
+    if _ml:
+        import json as _json
+        try:
+            mentions_json = _json.dumps(_ml, ensure_ascii=False)
+        except Exception:
+            mentions_json = ""
     return InboxMessage(
         conversation_id=conversation_id,
         platform_msg_id=pid,
@@ -91,6 +100,10 @@ def _msg_from_obj(
         reply_to_id=str(rt.get("id") or ""),
         reply_to_text=str(rt.get("text") or ""),
         reply_to_sender=str(rt.get("sender") or ""),
+        mentions_json=mentions_json,
+        # P4-11E 群发言人（source.sender_id/sender_name，缺则空）
+        sender_id=str(src.get("sender_id") or ""),
+        sender_name=str(src.get("sender_name") or ""),
     )
 
 

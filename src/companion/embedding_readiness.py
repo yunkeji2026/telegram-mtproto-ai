@@ -28,7 +28,8 @@ def embedding_source_configured(config: Any) -> bool:
     """嵌入源是否「配置齐全」（不打网络，只看 config）。
 
     认可两条真实可用路径（与 ``AIClient.embed`` 实现一致）：
-      1) OpenAI 兼容端点：``ai.embedding_base_url`` 非空 + ``ai.embedding_model`` 非空可用
+      1) OpenAI 兼容端点：``ai.embedding_base_url``（单端点）或 ``ai.embedding_base_urls``
+         （双活列表）非空 + ``ai.embedding_model`` 非空可用
          （Ollama / LM Studio / OpenAI 云均走这条）；
       2) Gemini 原生：``ai.provider == 'gemini'`` + 有 ``embedding_model`` + 有 ``api_key``。
     """
@@ -38,6 +39,9 @@ def embedding_source_configured(config: Any) -> bool:
         return False
     base = str(ai.get("embedding_base_url") or "").strip()
     if base:
+        return True
+    urls = ai.get("embedding_base_urls")
+    if isinstance(urls, (list, tuple)) and any(str(u or "").strip() for u in urls):
         return True
     provider = str(ai.get("provider") or "").strip().lower()
     if provider == "gemini":

@@ -1052,15 +1052,14 @@ class AIChatAssistant:
                                         async def _try_autosend_image(
                                             platform, account_id, chat_key, text
                                         ) -> bool:
-                                            """全自动「按需发图」（gated, 默认关）：客户最近一条在要照片时，
-                                            按人设自拍(相册/生图)或对话物体图(生图)出一张，经 orch.send_media
-                                            发出。返回 True=已作为图片发出（跳过语音/文本）；False=未发→回落。
+                                            """全自动「按需发图」（gated, 默认关）：客户最近一条在要图/命中关键词时，
+                                            优先发人设注册相册(关键词/通用池, 图或视频, 秒发)，否则回落生成
+                                            (自拍相册/openai、物体图 text2img)，经 orch.send_media 发出。返回
+                                            True=已作为图/视频发出（跳过语音/文本）；False=未发→回落。
                                             一处生效全平台（telegram/whatsapp/messenger/line/ig）。"""
                                             _cfg = _assistant_ref.config.config or {}
                                             from src.inbox.image_autosend import (
-                                                resolve_image_autosend_cfg, plan_autosend_image,
-                                                stage_image_file, record_image_sent,
-                                                record_image_fallback,
+                                                resolve_image_autosend_cfg, run_autosend_image,
                                             )
                                             _scfg = resolve_image_autosend_cfg(_cfg)
                                             if not _scfg.get("enabled", False):
@@ -1100,10 +1099,6 @@ class AIChatAssistant:
                                                 return False
                                             if not _peer_text:
                                                 return False
-                                            _directive = plan_autosend_image(
-                                                _peer_text, _history, _scfg)
-                                            if not _directive:
-                                                return False
                                             # 账号级人设（相册分册 / 出图 prompt 来源），与语音同口径解析。
                                             from src.ai.persona_voice import (
                                                 resolve_account_persona_id as _rapi,
@@ -1124,11 +1119,10 @@ class AIChatAssistant:
                                                     _ctx0.get("persona_id") or _pid or "")
                                             except Exception:
                                                 _real_pid = _pid
-                                            # 物体图可选 LLM 精炼 prompt（heuristic 抽主体不稳时）。
+                                            # 物体图可选 LLM 精炼 prompt（heuristic 抽主体不稳时；仅生成回落用到）。
                                             _refine = None
                                             _ai = getattr(_assistant_ref, "ai_client", None)
-                                            if (_directive.get("kind") == "object"
-                                                    and _scfg.get("contextual_images_llm_prompt", False)
+                                            if (_scfg.get("contextual_images_llm_prompt", False)
                                                     and _ai is not None):
                                                 async def _refine():
                                                     from src.ai.contextual_image import (
@@ -1136,47 +1130,31 @@ class AIChatAssistant:
                                                     )
                                                     return await _ai.chat(
                                                         _bi(_peer_text, _history))
-                                            _staged = await stage_image_file(
-                                                _cfg, platform, account_id, _real_pid,
-                                                _directive, llm_refine=_refine)
-                                            if not _staged:
-                                                record_image_fallback("stage_failed")
-                                                return False
-                                            _local, _url, _kind = _staged
-                                            # 配文：自拍用 caption / 物体图用 contextual_caption；都缺
-                                            # 则用 AI 本条回复文本当配文（把"口头答应"变成图的配文）。
-                                            if _kind == "object":
-                                                _cap = str(_scfg.get("contextual_caption") or "")
-                                            else:
-                                                _cap = str(_scfg.get("caption") or "")
-                                            _cap = _cap or str(text or "")
 
-                                            async def _icoro():
-                                                return await _orch.send_media(
-                                                    platform, account_id, chat_key,
-                                                    media_path=_local, media_url=_url,
-                                                    media_type="image", caption=_cap,
-                                                    inbox_text=("[图片] " + _cap).strip())
+                                            # 发送 marshalling：把 orch.send_media 投到 web loop（与语音同口径）。
+                                            async def _send_fn(_mp, _mu, _mt, _cap, _inbox):
+                                                async def _coro():
+                                                    return await _orch.send_media(
+                                                        platform, account_id, chat_key,
+                                                        media_path=_mp, media_url=_mu,
+                                                        media_type=_mt, caption=_cap,
+                                                        inbox_text=_inbox)
+                                                _wl = getattr(_assistant_ref, "_web_loop", None)
+                                                if _wl is not None and _wl.is_running():
+                                                    _f = asyncio.run_coroutine_threadsafe(
+                                                        _coro(), _wl)
+                                                    _res = await asyncio.wrap_future(_f)
+                                                else:
+                                                    _res = await _coro()
+                                                return bool(
+                                                    isinstance(_res, dict)
+                                                    and _res.get("delivered"))
 
-                                            _wl = getattr(_assistant_ref, "_web_loop", None)
-                                            if _wl is not None and _wl.is_running():
-                                                _if = asyncio.run_coroutine_threadsafe(_icoro(), _wl)
-                                                _ires = await asyncio.wrap_future(_if)
-                                            else:
-                                                _ires = await _icoro()
-                                            _ok = bool(
-                                                isinstance(_ires, dict) and _ires.get("delivered"))
-                                            if _ok:
-                                                record_image_sent(_kind)
-                                                _assistant_ref.logger.info(
-                                                    "[autosend image] 已发图 platform=%s acct=%s kind=%s",
-                                                    platform, account_id, _kind)
-                                            else:
-                                                record_image_fallback("deliver_failed")
-                                                _assistant_ref.logger.info(
-                                                    "[autosend image] 投递失败回落 platform=%s acct=%s",
-                                                    platform, account_id)
-                                            return _ok
+                                            return await run_autosend_image(
+                                                _cfg, platform, account_id, chat_key,
+                                                _real_pid, _peer_text, _history,
+                                                send_fn=_send_fn, ai_text=text,
+                                                llm_refine=_refine)
 
                                         def _is_desktop_account(platform, account_id) -> bool:
                                             """会话账号是否为内嵌「桌面/扩展」模式（无服务端 worker）。"""
@@ -1466,6 +1444,15 @@ class AIChatAssistant:
                                 _ad_mode = str(_ad_cfg.get("automation_mode", "auto_ai"))
                                 _ad_min_len = int(_ad_cfg.get("min_text_len", 0))
                                 _ad_skip = set(_ad_cfg.get("skip_platforms", []) or [])
+                                # 平台档位上限（比 skip_platforms 更细）：某平台链路不稳时
+                                # 降级而非全关——如 {messenger: review} 让 Messenger 仍拟稿、
+                                # 强制人审、绝不自动发。空 dict = 不封顶（旧行为）。
+                                _ad_platform_ceilings = {
+                                    str(k).lower(): str(v).lower()
+                                    for k, v in (
+                                        _ad_cfg.get("platform_modes", {}) or {}
+                                    ).items()
+                                }
                                 # 源头止血：群/频道会话默认不入人审草稿队列（默认关=旧行为）。
                                 # 群消息本非 1:1 客服场景，生成 L3/L4 待审草稿只会长期无人处置、
                                 # 反复触发 SLA 铃铛，故提供开关从源头跳过。
@@ -1641,7 +1628,10 @@ class AIChatAssistant:
                                                                     confident=bool(
                                                                         _peer_audio_emotion and
                                                                         _peer_audio_emotion.get(
-                                                                            'confident')))
+                                                                            'confident')),
+                                                                    remote=str(
+                                                                        _sres.model or ''
+                                                                    ).startswith('remote:'))
                                                                 if _peer_audio_emotion and \
                                                                         _peer_audio_emotion.get(
                                                                             'confident'):
@@ -1764,6 +1754,18 @@ class AIChatAssistant:
                                                 mode = explicit
                                     except Exception:
                                         pass
+                                    # 平台档位上限封顶（链路不稳时降级但不停）：如 Messenger 置
+                                    # review → auto_ai 会话被降为 review（仍拟稿、强制人审、不自动发），
+                                    # 坐席显式 manual 仍保持 manual。空配置 = 不封顶（零行为变更）。
+                                    _ceil = _ad_platform_ceilings.get(
+                                        str(conv.get("platform") or "").lower())
+                                    if _ceil:
+                                        try:
+                                            from src.inbox.drafts import cap_automation_mode
+                                            mode = cap_automation_mode(mode, _ceil)
+                                        except Exception:
+                                            self.logger.debug(
+                                                "[AutoDraft] 平台档位封顶失败（忽略）", exc_info=True)
                                     if mode == "manual":
                                         return
                                     draft_id = draft_svc.auto_generate_draft(
@@ -1850,6 +1852,18 @@ class AIChatAssistant:
                                 float(_conf_sw.get("min_confidence", 0.5) or 0.5)
                                 if _conf_sw.get("enabled", False) else 0.0
                             )
+                            # 按目标语引擎覆写（弱语对直走强引擎；只重排 order 内引擎）
+                            _per_lang = (_tr_cfg.get("engines") or {}).get("per_lang_order") or {}
+                            # 在线语义闸门（confidence_switch 的可选进阶；默认关。
+                            # 开启需 confidence_switch.enabled + semantic.enabled + 嵌入端点已配）
+                            _sem_cfg = _conf_sw.get("semantic") or {}
+                            _sem_fn = None
+                            _sem_min = float(_sem_cfg.get("min_similarity", 0.65) or 0.65)
+                            if (_conf_sw.get("enabled", False)
+                                    and _sem_cfg.get("enabled", False)
+                                    and self.ai_client is not None
+                                    and hasattr(self.ai_client, "embed")):
+                                _sem_fn = self.ai_client.embed
                             # 存重建上下文，供 /api/workspace/glossary 热更新复用
                             web_app.state.glossary_store = _gloss_store
                             web_app.state.glossary_config = _cfg_root
@@ -1864,6 +1878,9 @@ class AIChatAssistant:
                                 cost_tracking=bool(_tr_cfg.get("cost_tracking", False)),
                                 engines=_engines,
                                 min_confidence=_min_conf,
+                                per_lang_order=_per_lang,
+                                semantic_embed_fn=_sem_fn,
+                                semantic_min_similarity=_sem_min,
                             )
                             self.logger.info(
                                 "Phase C/P56 服务已预置（意图LLM=%s, 翻译记忆=%s, 引擎=%s, 术语=%d, 保护词=%d）",
@@ -2204,8 +2221,13 @@ class AIChatAssistant:
                 # ★ S：翻译置信度低置信率/切换率按日落库（供看板画 7 天 sparkline；默认关）
                 self._maybe_init_translation_trend_log()
                 self._maybe_init_realtime_voice_trend_log()
+                # ★ P8：出站路由回落率按日落库（供看板画 7 天 sparkline；默认关）
+                self._maybe_init_send_route_trend_log()
                 # ★ F1：会话身份健康（入站 raw% / 头像 empty%）按日落库（默认关）
                 self._maybe_init_identity_trend_log()
+
+                # ★ 每人设「相册/媒体」注册表（图/视频 + 触发词；始终开启，供相册后台/回复链读写）
+                self._init_persona_media_store()
 
                 # ★ Q 延伸：ingest 回写 contact_id（默认关）
                 self._maybe_wire_ingest_contact_writeback()
@@ -2618,6 +2640,22 @@ class AIChatAssistant:
         except Exception:
             self.logger.warning("翻译置信度趋势落库初始化失败（已忽略）", exc_info=True)
 
+    def _init_persona_media_store(self) -> None:
+        """装配每人设「相册/媒体」注册表（DB 落 config/persona_media.db；始终开启）。
+
+        媒体元数据（触发词/配文/权重/关系闸门/命中）落库，文件落 static/persona_albums；
+        相册后台（``/api/personas/{pid}/media*``）与回复链（image_autosend / skill_manager
+        Stage 0）读同一份 store。DB 路径随 config 目录，避免与 :memory: 单测串味。
+        """
+        try:
+            from src.companion.persona_media_store import configure_persona_media_store
+            _cfg_dir = Path(self.config.config_path).parent
+            store = configure_persona_media_store(_cfg_dir / "persona_media.db")
+            if store is not None:
+                self.logger.info("✅ 每人设相册/媒体注册表就绪（persona_media.db）")
+        except Exception:
+            self.logger.warning("每人设相册/媒体注册表初始化失败（已忽略）", exc_info=True)
+
     def _maybe_init_identity_trend_log(self) -> None:
         """F1：按 ``inbox.identity.trend_log`` 装配会话身份健康日聚合落库（默认关）。
 
@@ -2671,6 +2709,33 @@ class AIChatAssistant:
                     rtv.get("trend_retention_days", 90))
         except Exception:
             self.logger.warning("实时语音趋势落库初始化失败（已忽略）", exc_info=True)
+
+    def _maybe_init_send_route_trend_log(self) -> None:
+        """P8：按 ``inbox.send_route.trend_log`` 装配出站路由回落率按日聚合落库（默认关）。
+
+        开启后 watchdog tick 旁路把 ``SendRouteStats`` 的累计增量 upsert
+        ``config/send_route_trend.db``，ops 看板经 ``/api/admin/send-route-trend`` 画近 N 天
+        回落率 sparkline。关闭时 ``sync_send_route_trend_from_stats`` 恒 no-op。
+        """
+        try:
+            _sr = ((self.config.config.get("inbox") or {}).get("send_route") or {})
+            if not _sr.get("trend_log", False):
+                self.logger.info(
+                    "出站路由趋势落库未启用（inbox.send_route.trend_log=false）")
+                return
+            from src.inbox.send_route_trend_store import configure_send_route_trend_store
+            _cfg_dir = Path(self.config.config_path).parent
+            store = configure_send_route_trend_store(
+                enabled=True,
+                db_path=_cfg_dir / "send_route_trend.db",
+                retention_days=float(_sr.get("trend_retention_days", 90)),
+            )
+            if store is not None:
+                self.logger.info(
+                    "✅ 出站路由趋势落库已就绪（retention=%sd）",
+                    _sr.get("trend_retention_days", 90))
+        except Exception:
+            self.logger.warning("出站路由趋势落库初始化失败（已忽略）", exc_info=True)
 
     def _maybe_init_monetization(self, web_app=None) -> None:
         """Phase K2：C 端变现（默认关，monetization.enabled 开）。

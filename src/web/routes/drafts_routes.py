@@ -750,6 +750,13 @@ def register_metrics_route(app, *, api_auth):
         except Exception:
             pass
 
+        # ASR 降级观测（主用/回落/全失败/幻觉丢弃 + 回落率）——主 ASR 掉线导致全链降级=可见
+        try:
+            from src.ai.asr_stats import get_asr_stats
+            metrics["asr"] = get_asr_stats().dump()
+        except Exception:
+            pass
+
         # P58：通用 provider 用量（OCR/ASR 等多模态后端）
         try:
             from src.ai.provider_stats import all_provider_stats
@@ -770,6 +777,31 @@ def register_metrics_route(app, *, api_auth):
         try:
             from src.web.peer_identity_stats import get_peer_identity_stats
             metrics["peer_identity"] = get_peer_identity_stats().dump()
+        except Exception:
+            pass
+
+        # 出站「路由去向」观测（编排器接管 vs 回落适配器；回落率暴露「编排器漏接」）
+        try:
+            from src.inbox.send_route_stats import get_send_route_stats
+            metrics["send_routes"] = get_send_route_stats().dump()
+        except Exception:
+            pass
+
+        # 每人设「相册/媒体」观测（图/视频备货、命中总数、命中 Top-N；备而不发=需配触发词）
+        try:
+            from src.companion.persona_media_store import get_persona_media_store
+            _pms = get_persona_media_store()
+            if _pms is not None:
+                metrics["persona_media"] = _pms.analytics()
+        except Exception:
+            pass
+
+        # 平台会话健康（P0-2：外部 worker push 的会话状态登记；unhealthy=需人工重登）
+        try:
+            from src.integrations.platform_session_health import (
+                get_platform_session_health,
+            )
+            metrics["platform_sessions"] = get_platform_session_health().dump()
         except Exception:
             pass
 
@@ -860,6 +892,13 @@ def register_metrics_route(app, *, api_auth):
             except Exception:
                 pass
 
+            # ASR 降级观测（主用/回落/全失败/幻觉丢弃 + 按回落 provider）
+            try:
+                from src.ai.asr_stats import get_asr_stats
+                buf.write(get_asr_stats().dump_prom())
+            except Exception:
+                pass
+
             # 前端「哑按钮」运行时错误（by page / by fn / by type）
             try:
                 from src.web.frontend_error_stats import get_frontend_error_stats
@@ -873,6 +912,36 @@ def register_metrics_route(app, *, api_auth):
                 buf.write(get_peer_identity_stats().dump_prom())
             except Exception:
                 pass
+
+            # 出站路由去向（orchestrator vs adapter，按平台；回落率）
+            try:
+                from src.inbox.send_route_stats import get_send_route_stats
+                buf.write(get_send_route_stats().dump_prom())
+            except Exception:
+                pass
+
+            # 平台会话健康（events by status + per-session unhealthy gauge）
+            try:
+                from src.integrations.platform_session_health import (
+                    get_platform_session_health,
+                )
+                buf.write(get_platform_session_health().dump_prom())
+            except Exception:
+                pass
+
+            # 每人设相册备货与命中（items/enabled/hits + 按类型）
+            pm = metrics.get("persona_media") or {}
+            if pm:
+                _gauge("ws_persona_media_items", pm.get("total", 0),
+                       "Persona album media items (total)")
+                _gauge("ws_persona_media_enabled", pm.get("enabled", 0),
+                       "Persona album media items enabled")
+                _gauge("ws_persona_media_hits_total", pm.get("total_hits", 0),
+                       "Persona album media send hits (cumulative)")
+                _gauge("ws_persona_media_by_type", pm.get("photo", 0),
+                       "Persona album media items by type", labels='type="photo"')
+                _gauge("ws_persona_media_by_type", pm.get("video", 0),
+                       labels='type="video"')
 
             return PlainTextResponse(buf.getvalue(), media_type="text/plain; version=0.0.4")
 

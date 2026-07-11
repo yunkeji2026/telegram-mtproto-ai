@@ -90,8 +90,12 @@ _EVENT_ALIASES: Dict[str, Dict[str, Any]] = {
     "ai_quality": {"types": {"ai_quality_alert"}, "levels": None},
     # 实时语音通话退化告警（主机健康/接通率/不可达，基于 RealtimeVoiceStats）
     "realtime_voice": {"types": {"realtime_voice_alert"}, "levels": None},
+    # 编排器受管 worker 崩溃告警（某账号 protocol/web worker 进 error 态 → 出站降级）
+    "orchestrator_worker": {"types": {"orchestrator_worker_alert"}, "levels": None},
     # 记忆 key 漂移告警（裸 key 复发 → 记忆对引擎不可见）
     "memory_key_drift": {"types": {"memory_key_drift_alert"}, "levels": None},
+    # 平台会话健康告警（P0-2：外部 worker 会话 needs_login/expired 主动 push → 立即外发）
+    "platform_session": {"types": {"platform_session_alert"}, "levels": None},
 }
 
 # ─── 速率限制 ────────────────────────────────────────────────────────────────
@@ -455,6 +459,62 @@ def _build_message(event_type: str, data: Dict[str, Any]) -> tuple[str, str]:
                 "[📊 查看运营总览](/admin/ops)"
             )
 
+    elif event_type == "orchestrator_worker_alert":
+        if data.get("recovered"):
+            title = "✅ 编排器 worker 已恢复"
+            text = (
+                "**状态**: 受管账号 worker 均已回到运行态\n"
+                "[📊 查看运营总览](/admin/ops)"
+            )
+        else:
+            probs = data.get("problems") or []
+            lines = [
+                f"- {p.get('name', '?')}：{p.get('detail', '')}"
+                f"（重启 {p.get('restarts', 0)} 次）"
+                for p in probs[:5]
+            ]
+            icon = {"red": "🔴", "yellow": "🟡"}.get(str(data.get("light") or ""), "🧰")
+            title = f"{icon} 编排器 worker 告警（{data.get('light') or '异常'}）"
+            text = (
+                f"**掉线 worker**: {len(probs)} 个（协议/网页号收发降级，出站回落适配器）\n"
+                + "\n".join(lines) + "\n"
+                "[📊 查看运营总览](/admin/ops)"
+            )
+
+    elif event_type == "platform_session_alert":
+        plat = str(data.get("platform") or "?")
+        acct = str(data.get("account_id") or "?")
+        if data.get("recovered"):
+            title = f"✅ {plat} 会话已恢复"
+            text = (
+                f"**账号**: {acct}\n"
+                "**状态**: 已重新登录/授权，收发恢复\n"
+                "[📊 查看运营总览](/admin/ops)"
+            )
+        elif data.get("reminder"):
+            st = str(data.get("status") or "异常")
+            down_min = int(data.get("down_minutes") or 0)
+            down_txt = (f"{down_min // 60} 小时 {down_min % 60} 分钟"
+                        if down_min >= 60 else f"{down_min} 分钟")
+            title = f"⏰ {plat} 会话持续掉线（已 {down_txt}）"
+            text = (
+                f"**账号**: {acct}\n"
+                f"**状态**: {st}（掉线告警后仍未恢复）\n"
+                f"**详情**: {str(data.get('detail') or '')[:200]}\n"
+                "该账号仍无法自动收发，请尽快人工重新登录\n"
+                "[📊 查看运营总览](/admin/ops)"
+            )
+        else:
+            st = str(data.get("status") or "异常")
+            title = f"🔌 {plat} 会话掉线（{st}）"
+            text = (
+                f"**账号**: {acct}\n"
+                f"**状态**: {st}\n"
+                f"**详情**: {str(data.get('detail') or '')[:200]}\n"
+                "该账号已无法自动收发，需人工重新登录\n"
+                "[📊 查看运营总览](/admin/ops)"
+            )
+
     elif event_type == "memory_key_drift_alert":
         if data.get("recovered"):
             title = "✅ 记忆 key 漂移已恢复"
@@ -597,8 +657,11 @@ class WebhookNotifier:
             # 匹配 autopilot_level
             if m["levels"] is not None and level not in m["levels"]:
                 continue
-            # 速率限制 key = (name, event_type, draft_id 或空)
-            rate_key = f"{m['name']}:{etype}:{data.get('draft_id','')}"
+            # 速率限制 key = (name, event_type, 判别符)。判别符默认 draft_id；无 draft
+            # 语义的事件可显式带 rate_key（如 platform_session_alert 按 platform:account
+            # 区分——否则多账号同小时掉线只有第一条能发出）。
+            rate_key = (f"{m['name']}:{etype}:"
+                        f"{data.get('draft_id') or data.get('rate_key') or ''}")
             if not self._rate_limiter.allow(rate_key):
                 logger.debug("Webhook 速率限制跳过: %s", rate_key)
                 continue

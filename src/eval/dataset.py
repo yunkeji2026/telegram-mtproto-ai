@@ -26,6 +26,9 @@ class TransSample:
     text: str            # 源文本（默认中文，回译评测用）
     target_lang: str     # 翻译目标语言码（en/ja/ko/...）
     note: str = ""
+    # 显式源语（反向语料 en→zh/ja→zh 用；空=沿用 detect_fn/source_fallback 旧行为）。
+    # 显式声明优先于探测——短句探测易误判（如西语短句被判 en），样本标注是 ground truth。
+    source_lang: str = ""
 
 
 @dataclass
@@ -265,7 +268,8 @@ _SEED_FAQ_SAMPLES: List["FaqSample"] = [
 def load_translation_samples(path: Optional[str] = None) -> List["TransSample"]:
     """加载回译质量评测样本（YAML/JSONL）；path 为空则返回内置种子集。
 
-    YAML/JSONL 每条：``{text: "...", target_lang: "en", note: "..."}``
+    YAML/JSONL 每条：``{text: "...", target_lang: "en", source_lang: "zh", note: "..."}``
+    （``source_lang`` 可选——反向语料 en→zh 等显式标注源语，省略则评测器自行探测/回落。）
     """
     if not path:
         return list(_SEED_TRANS_SAMPLES)
@@ -281,14 +285,16 @@ def load_translation_samples(path: Optional[str] = None) -> List["TransSample"]:
                 d = json.loads(line)
                 out.append(TransSample(text=str(d.get("text", "")),
                                        target_lang=str(d.get("target_lang", "")),
-                                       note=str(d.get("note", ""))))
+                                       note=str(d.get("note", "")),
+                                       source_lang=str(d.get("source_lang", ""))))
         return out
     import yaml
     with open(path, "r", encoding="utf-8") as f:
         rows = yaml.safe_load(f) or []
     return [TransSample(text=str(r.get("text", "")),
                         target_lang=str(r.get("target_lang", "")),
-                        note=str(r.get("note", "")))
+                        note=str(r.get("note", "")),
+                        source_lang=str(r.get("source_lang", "")))
             for r in rows if isinstance(r, dict) and r.get("text") and r.get("target_lang")]
 
 

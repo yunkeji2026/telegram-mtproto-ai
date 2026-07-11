@@ -953,6 +953,7 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
     <button class="dtab active" data-dtab="basic" onclick="switchDTab('basic')">{{ (i18n or {}).get('psn_dtab_basic','基础') }}<span class="ddot" id="ddot-basic"></span></button>
     <button class="dtab" data-dtab="style" onclick="switchDTab('style')">{{ (i18n or {}).get('psn_dtab_style','风格') }}<span class="ddot" id="ddot-style"></span></button>
     <button class="dtab" data-dtab="voice" onclick="switchDTab('voice')">{{ (i18n or {}).get('psn_dtab_voice','语音') }}<span class="ddot" id="ddot-voice"></span></button>
+    <button class="dtab" data-dtab="album" onclick="switchDTab('album')">{{ (i18n or {}).get('psn_dtab_album','相册') }}<span class="ddot" id="ddot-album"></span></button>
     <button class="dtab" data-dtab="preview" onclick="switchDTab('preview')">{{ (i18n or {}).get('psn_dtab_preview','预览') }}<span class="ddot" id="ddot-preview"></span><span class="diff-cnt" id="pe-diff-cnt"></span></button>
   </div>
   <!-- Pane: Basic -->
@@ -1060,6 +1061,45 @@ mark.sh{background:rgba(245,158,11,.28);border-radius:2px;padding:0 1px;color:in
       <div class="pe-panel-body" id="pe-diff-body" style="padding:.5rem 0">{{ (i18n or {}).get('psn_expand','点击展开…') }}</div>
     </details>
   </div>
+  <!-- Pane: Album / Media（图/视频 + 触发词，客户说到就自动发）-->
+  <div class="dpane" id="dpane-album">
+    <div class="pma-panel-hd">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+      {{ (i18n or {}).get('pma_title','相册 / 媒体') }}
+      <span id="pe-album-badge" style="font-size:.66rem;font-weight:400;color:var(--t2);margin-left:.15rem"></span>
+    </div>
+    <div style="font-size:.7rem;color:var(--t2);margin:.15rem 0 .1rem;line-height:1.5">{{ (i18n or {}).get('pma_summary_sub','（图/视频 + 触发词，客户说到就自动发）') }}</div>
+    <div id="pe-album-body">{{ (i18n or {}).get('psn_expand_to_load','点击展开加载…') }}</div>
+  </div>
+  <style>
+    .pma-panel-hd{display:flex;align-items:center;gap:.4rem;font-size:.82rem;font-weight:600;color:var(--t1);margin-top:.1rem}
+    .pma-up,.pma-test{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin:.4rem 0}
+    .pma-in{flex:1;min-width:120px;padding:.3rem .45rem;border:1px solid var(--bd);border-radius:6px;background:var(--bg2);color:var(--t1);font-size:.72rem}
+    .pma-status{font-size:.68rem;color:var(--t2)}
+    .pma-summary{font-size:.68rem;color:var(--t2);margin:.2rem 0;display:flex;gap:.5rem;flex-wrap:wrap}
+    .pma-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(146px,1fr));gap:.5rem;margin:.5rem 0}
+    .pma-card{border:1px solid var(--bd);border-radius:8px;padding:.4rem;background:var(--bg1);display:flex;flex-direction:column;gap:.3rem}
+    .pma-card.pma-off{opacity:.5}
+    .pma-cap-i18n{resize:vertical;min-height:1.5rem;font-family:inherit;line-height:1.3}
+    .pma-thwrap{position:relative}
+    .pma-th{width:100%;height:96px;object-fit:cover;border-radius:6px;background:var(--bg2);display:block}
+    .pma-badge{position:absolute;left:.25rem;top:.25rem;font-size:.6rem;background:rgba(0,0,0,.55);color:#fff;padding:.05rem .3rem;border-radius:4px}
+    .pma-play{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:1.5rem;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.7);pointer-events:none}
+    .pma-dur{position:absolute;right:.25rem;bottom:.25rem;font-size:.6rem;background:rgba(0,0,0,.6);color:#fff;padding:.02rem .28rem;border-radius:4px}
+    .pma-row{display:flex;gap:.35rem;align-items:center;flex-wrap:wrap}
+    .pma-lb{font-size:.64rem;color:var(--t2);display:flex;align-items:center;gap:.15rem}
+    .pma-num{width:46px;padding:.15rem;border:1px solid var(--bd);border-radius:4px;background:var(--bg2);color:var(--t1);font-size:.68rem}
+    .pma-hits{font-size:.64rem;color:var(--t2);flex:1}
+    .pma-empty{font-size:.72rem;color:var(--t2);padding:.6rem;text-align:center;line-height:1.6}
+    .btn-xs{padding:.12rem .4rem;font-size:.64rem}
+    .pma-test-out{width:100%;margin-top:.35rem;font-size:.7rem}
+    .pma-pool{padding:.2rem .4rem;border-radius:5px;display:inline-block}
+    .pma-pool-keyword{background:rgba(34,197,94,.15);color:#16a34a}
+    .pma-pool-generic{background:rgba(59,130,246,.15);color:#2563eb}
+    .pma-pool-none{background:rgba(148,163,184,.15);color:var(--t2)}
+    .pma-cands{margin-top:.3rem;display:flex;gap:.25rem;align-items:center;flex-wrap:wrap}
+    .pma-cand-th{width:40px;height:40px;object-fit:cover;border-radius:4px}
+  </style>
   <!-- Drawer footer -->
   <div class="drawer-foot">
     <div class="drawer-dirty" id="drawer-dirty">● {{ (i18n or {}).get('psn_unsaved_changes','有未保存的修改') }}</div>
@@ -1201,6 +1241,8 @@ function switchDTab(id) {
   const tab  = document.querySelector('.dtab[data-dtab="' + id + '"]');
   if (pane) pane.classList.add('active');
   if (tab)  tab.classList.add('active');
+  // 相册 tab 惰性加载（切到才拉，避免每次开抽屉都请求）；上传/改/删后由 pmaLoad 自刷。
+  if (id === 'album' && !_albumLoaded) { _albumLoaded = true; pmaLoad(); }
 }
 function _markDrawerDirty(e) {
   var d = document.getElementById('drawer-dirty'); if (d) d.classList.add('show');
@@ -1951,14 +1993,216 @@ function _ppTab(which) {
   document.getElementById('pp-compact').style.display = which === 'compact' ? '' : 'none';
 }
 
+// ── 相册 / 媒体（DB 注册相册：图/视频 + 触发词，按需自动发）─────────────────
+// 有独立「相册」tab，惰性加载在 switchDTab('album') 里触发（首次切到才 pmaLoad）。
+let _albumLoaded = false;
+
+function _pmaPid() {
+  var e = document.getElementById('pe-id');
+  return _editingProfileId || (e ? e.value.trim() : '');
+}
+
+function _pmaEsc(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+async function pmaLoad() {
+  const body = document.getElementById('pe-album-body');
+  const pid = _pmaPid();
+  if (!pid || !body) return;
+  body.innerHTML = window.T('pma_loading');
+  try {
+    const r = await fetch('/api/personas/' + encodeURIComponent(pid) + '/media');
+    if (!r.ok) { body.textContent = window.T('pma_load_fail') + r.status; return; }
+    const d = await r.json();
+    _pmaRender(body, d.items || [], d.stats || {});
+    const badge = document.getElementById('pe-album-badge');
+    if (badge) { const t = (d.stats || {}).total || 0; badge.textContent = t ? '(' + t + ')' : ''; }
+  } catch (e) { body.textContent = window.T('pma_load_fail') + e; }
+}
+
+function _pmaRender(body, items, stats) {
+  const uploader =
+    '<div class="pma-up">'
+    + '<input type="file" id="pma-file" multiple accept="image/*,video/*" style="display:none" onchange="pmaUpload()">'
+    + '<input type="text" id="pma-up-trg" class="pma-in" placeholder="' + window.T('pma_triggers_ph') + '">'
+    + '<button class="btn btn-sm btn-primary" onclick="_pmaPick()">＋ ' + window.T('pma_upload_label') + '</button>'
+    + '<span id="pma-up-status" class="pma-status"></span>'
+    + '</div>';
+  const test =
+    '<div class="pma-test">'
+    + '<input type="text" id="pma-test-in" class="pma-in" placeholder="' + window.T('pma_test_ph') + '">'
+    + '<button class="btn btn-sm" onclick="pmaTest()">' + window.T('pma_test_btn') + '</button>'
+    + '<div id="pma-test-out" class="pma-test-out"></div>'
+    + '</div>';
+  let grid, summary = '';
+  if (!items.length) {
+    grid = '<div class="pma-empty">' + window.T('pma_empty') + '</div>';
+  } else {
+    grid = '<div class="pma-grid">' + items.map(_pmaCard).join('') + '</div>';
+    const totalHits = items.reduce((a, it) => a + (it.hits || 0), 0);
+    summary = '<div class="pma-summary"><span>🖼 ' + (stats.photo || 0) + '</span>'
+      + '<span>🎬 ' + (stats.video || 0) + '</span>'
+      + '<span>▶ ' + totalHits + ' ' + window.T('pma_hits') + '</span></div>';
+  }
+  body.innerHTML = uploader + summary + grid + test;
+}
+
+function _pmaDur(ms) {
+  const s = Math.round((ms || 0) / 1000);
+  if (s <= 0) return '';
+  const m = Math.floor(s / 60), r = s % 60;
+  return m + ':' + (r < 10 ? '0' : '') + r;
+}
+
+// 多语配文：DB 存 {en:"Hi", th:"..."}；UI 里以「lang:文案」逐行编辑（按行拆、只切首个冒号，配文含冒号也安全）。
+function _pmaI18nToStr(obj) {
+  return Object.keys(obj || {}).map(function (k) { return k + ':' + obj[k]; }).join('\n');
+}
+function _pmaParseI18n(s) {
+  const out = {};
+  String(s || '').split(/\n/).forEach(function (line) {
+    const i = line.indexOf(':');
+    if (i <= 0) return;
+    const k = line.slice(0, i).trim(), v = line.slice(i + 1).trim();
+    if (k && v) out[k] = v;
+  });
+  return out;
+}
+
+function _pmaCard(it) {
+  const isVid = it.media_type === 'video';
+  const url = _pmaEsc(it.url);
+  let thumb;
+  if (isVid) {
+    // 有封面缩略图（ffmpeg 抽帧）→ 用海报图 + ▶ 覆盖（秒开、不拉全片）；无则回落 <video>。
+    thumb = it.thumb_url
+      ? '<img src="' + _pmaEsc(it.thumb_url) + '" class="pma-th" loading="lazy"><span class="pma-play">▶</span>'
+      : '<video src="' + url + '" class="pma-th" muted preload="metadata"></video><span class="pma-play">▶</span>';
+    const dur = _pmaDur(it.duration_ms);
+    if (dur) thumb += '<span class="pma-dur">' + dur + '</span>';
+  } else {
+    thumb = '<img src="' + url + '" class="pma-th" loading="lazy">';
+  }
+  const badge = '<span class="pma-badge">' + (isVid ? '🎬 ' + window.T('pma_video') : '🖼 ' + window.T('pma_photo')) + '</span>';
+  const trg = (it.triggers || []).join(', ');
+  const mid = _pmaEsc(it.id);
+  return '<div class="pma-card' + (it.enabled ? '' : ' pma-off') + '" data-mid="' + mid + '">'
+    + '<div class="pma-thwrap"><a href="' + url + '" target="_blank" rel="noopener" style="display:block">' + thumb + '</a>' + badge + '</div>'
+    + '<input type="text" class="pma-in pma-trg" value="' + _pmaEsc(trg) + '" placeholder="' + window.T('pma_triggers_ph') + '" title="' + window.T('pma_triggers_label') + '">'
+    + '<input type="text" class="pma-in pma-cap" value="' + _pmaEsc(it.caption) + '" placeholder="' + window.T('pma_caption_label') + '">'
+    + '<textarea class="pma-in pma-cap-i18n" rows="1" placeholder="' + window.T('pma_cap_i18n_ph') + '" title="' + window.T('pma_cap_i18n_label') + '">' + _pmaEsc(_pmaI18nToStr(it.caption_i18n)) + '</textarea>'
+    + '<div class="pma-row">'
+    +   '<label class="pma-lb">' + window.T('pma_weight_label') + '<input type="number" class="pma-num pma-wt" min="1" value="' + (it.weight || 1) + '"></label>'
+    +   '<label class="pma-lb">' + window.T('pma_bond_label') + '<input type="number" class="pma-num pma-bd" min="0" value="' + (it.min_bond_level || 0) + '"></label>'
+    +   '<label class="pma-lb"><input type="checkbox" class="pma-en"' + (it.enabled ? ' checked' : '') + '>' + window.T('pma_enabled_label') + '</label>'
+    + '</div>'
+    + '<div class="pma-row">'
+    +   '<span class="pma-hits">' + window.T('pma_hits') + ' ' + (it.hits || 0) + '</span>'
+    +   '<button class="btn btn-xs btn-primary" onclick="pmaSaveItem(\'' + mid + '\')">' + window.T('pma_save_btn') + '</button>'
+    +   '<button class="btn btn-xs btn-danger" onclick="pmaDeleteItem(\'' + mid + '\')">' + window.T('pma_del_btn') + '</button>'
+    + '</div>'
+    + '</div>';
+}
+
+function _pmaPick() {
+  const f = document.getElementById('pma-file');
+  if (f) f.click();
+}
+
+async function pmaUpload() {
+  const pid = _pmaPid();
+  const inp = document.getElementById('pma-file');
+  const st = document.getElementById('pma-up-status');
+  if (!pid || !inp || !inp.files || !inp.files.length) return;
+  const trgEl = document.getElementById('pma-up-trg');
+  const trg = trgEl ? trgEl.value : '';
+  let ok = 0, fail = 0;
+  for (const f of inp.files) {
+    if (st) st.textContent = window.T('pma_uploading') + ' ' + f.name;
+    const fd = new FormData();
+    fd.append('file', f);
+    if (trg && trg.trim()) fd.append('triggers', trg.trim());
+    try {
+      const r = await fetch('/api/personas/' + encodeURIComponent(pid) + '/media', { method: 'POST', body: fd });
+      if (r.ok) { ok++; } else { fail++; }
+    } catch (e) { fail++; }
+  }
+  inp.value = '';
+  if (st) st.textContent = window.T('pma_upload_ok') + ' ' + ok + (fail ? (' / ' + window.T('pma_upload_fail') + fail) : '');
+  await pmaLoad();
+}
+
+async function pmaSaveItem(mid) {
+  const pid = _pmaPid();
+  const card = document.querySelector('.pma-card[data-mid="' + mid + '"]');
+  if (!pid || !card) return;
+  const getV = (sel) => { const e = card.querySelector(sel); return e ? e.value : ''; };
+  const trgArr = getV('.pma-trg').split(/[,\n，、;；]/).map((s) => s.trim()).filter(Boolean);
+  const enEl = card.querySelector('.pma-en');
+  const payload = {
+    triggers: trgArr,
+    caption: getV('.pma-cap'),
+    caption_i18n: _pmaParseI18n(getV('.pma-cap-i18n')),
+    weight: parseInt(getV('.pma-wt') || '1', 10) || 1,
+    min_bond_level: parseInt(getV('.pma-bd') || '0', 10) || 0,
+    enabled: !!(enEl && enEl.checked),
+  };
+  try {
+    const r = await fetch('/api/personas/' + encodeURIComponent(pid) + '/media/' + encodeURIComponent(mid), {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    if (r.ok) { _toast(window.T('pma_saved'), 'info'); await pmaLoad(); }
+    else { _toast(window.T('pma_save_fail') + r.status, 'err'); }
+  } catch (e) { _toast(window.T('pma_save_fail') + e, 'err'); }
+}
+
+async function pmaDeleteItem(mid) {
+  const pid = _pmaPid();
+  if (!pid || !confirm(window.T('pma_del_confirm'))) return;
+  try {
+    const r = await fetch('/api/personas/' + encodeURIComponent(pid) + '/media/' + encodeURIComponent(mid), { method: 'DELETE' });
+    if (r.ok) { _toast(window.T('pma_deleted'), 'info'); await pmaLoad(); }
+  } catch (e) { _toast(window.T('pma_save_fail') + e, 'err'); }
+}
+
+async function pmaTest() {
+  const pid = _pmaPid();
+  const inp = document.getElementById('pma-test-in');
+  const out = document.getElementById('pma-test-out');
+  if (!pid || !inp || !out) return;
+  out.textContent = '…';
+  try {
+    const r = await fetch('/api/personas/' + encodeURIComponent(pid) + '/media/test', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: inp.value || '' }),
+    });
+    const d = await r.json();
+    let label = window.T('pma_pool_none');
+    if (d.pool === 'keyword') { label = window.T('pma_pool_keyword'); }
+    else if (d.pool === 'generic') { label = window.T('pma_pool_generic'); }
+    let html = '<div class="pma-pool pma-pool-' + _pmaEsc(d.pool) + '">' + label + '</div>';
+    if ((d.candidates || []).length) {
+      html += '<div class="pma-cands">' + window.T('pma_candidates') + ': '
+        + (d.candidates || []).map((c) => '<img src="' + _pmaEsc(c.url) + '" class="pma-cand-th" title="' + _pmaEsc((c.triggers || []).join(', ')) + '">').join('')
+        + '</div>';
+    }
+    out.innerHTML = html;
+  } catch (e) { out.textContent = window.T('pma_test_fail') + e; }
+}
+
 
 function _resetEditorExtras() {
   _bindingsLoaded = false;
   _promptLoaded = false;
+  _albumLoaded = false;
   const bp = document.getElementById('pe-bindings-panel');
   const pp = document.getElementById('pe-prompt-panel');
   if (bp) { bp.removeAttribute('open'); document.getElementById('pe-bindings-body').textContent = window.T('psn_js_089'); document.getElementById('pe-bindings-badge').textContent = ''; }
   if (pp) { pp.removeAttribute('open'); document.getElementById('pe-prompt-body').textContent = window.T('psn_js_089'); }
+  // 相册现为独立 tab（无 details）：切人设时清空内容 + 徽标，下次切到 album tab 惰性重载。
+  const ab = document.getElementById('pe-album-body'); if (ab) ab.textContent = window.T('psn_expand_to_load');
+  const abd = document.getElementById('pe-album-badge'); if (abd) abd.textContent = '';
 }
 
 // ── P7-E: Promote mrpa-imported profile to operator-owned ────

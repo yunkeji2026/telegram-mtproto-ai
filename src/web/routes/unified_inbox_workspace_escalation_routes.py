@@ -239,6 +239,28 @@ def register_workspace_escalation_routes(app, *, api_auth) -> None:
         inbox.clear_snooze(cid)
         return {"ok": True, "conversation_id": cid, "snoozed": False}
 
+    @app.post("/api/workspace/conversation/{conversation_id}/seen-mention")
+    async def api_workspace_conversation_seen_mention(
+        request: Request, conversation_id: str,
+    ):
+        """P4-11B：清除会话的「@我」未读旗标（坐席打开该群会话即视为已看到点名）。
+
+        幂等；共享收件箱语义——任一坐席看过即对全员清除（与未读同口径）。
+        """
+        api_auth(request)
+        inbox = _inbox_store(request)
+        if inbox is None:
+            raise HTTPException(503, tr(request, "err.svc.inbox_not_ready"))
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            raise HTTPException(400, tr(request, "err.ws.field_required", field="conversation_id"))
+        cleared = False
+        try:
+            cleared = inbox.set_conversation_mentioned(cid, False)
+        except Exception:
+            logger.debug("[ws] seen-mention 清除失败", exc_info=True)
+        return {"ok": True, "conversation_id": cid, "cleared": cleared}
+
     @app.get("/api/workspace/snoozed")
     async def api_workspace_snoozed(request: Request):
         """当前搁置中的会话清单（含剩余秒），供「搁置中」视图。任何已认证坐席可读。"""

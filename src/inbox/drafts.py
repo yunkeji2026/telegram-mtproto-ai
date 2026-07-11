@@ -820,6 +820,30 @@ def is_autosend_allowed(risk_level: str, automation_mode: str) -> bool:
     return risk_to_autopilot(risk_level, automation_mode) == "L2"
 
 
+# 自动化档位「激进度」序（越大＝AI 介入越深/越自动）：
+#   manual(不拟稿) < review(拟稿人审) < multi_choice(多选) < auto_ai(低风险自动发)
+_MODE_RANK = {"manual": 0, "review": 1, "multi_choice": 2, "auto_ai": 3}
+
+
+def cap_automation_mode(conv_mode: str, platform_ceiling: Optional[str]) -> str:
+    """按「平台档位上限」封顶会话档位：返回二者中**较不激进**的一个。
+
+    用途：某平台链路不稳时先降级（如 Messenger 置 ``review`` 上限）——``auto_ai`` 会话被
+    降到 ``review``（AI 仍拟稿、强制人审、**绝不自动发**），但坐席显式设为 ``manual`` 的
+    会话仍保持 ``manual``（尊重人工下调）。这是「关闭全自动但保留草稿助攻」的最小机制，
+    优于一刀切 ``skip_platforms``（后者连草稿都不生成）。
+
+    ``platform_ceiling`` 为空/非法 → 不封顶，原样返回 ``conv_mode``（零行为变更）。
+    """
+    cm = str(conv_mode or "review").lower()
+    ceil = str(platform_ceiling or "").lower()
+    if ceil not in _MODE_RANK:
+        return cm
+    if cm not in _MODE_RANK:
+        cm = "review"
+    return cm if _MODE_RANK[cm] <= _MODE_RANK[ceil] else ceil
+
+
 def _row_to_unified(row: Dict[str, Any]) -> UnifiedDraft:
     return UnifiedDraft(
         draft_id=str(row.get("draft_id") or ""),

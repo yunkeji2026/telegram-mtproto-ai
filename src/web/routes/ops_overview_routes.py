@@ -128,10 +128,26 @@ def register_ops_overview_routes(app, ctx) -> None:
         except Exception:
             logger.debug("陪伴能力配置体检聚合失败（已忽略）", exc_info=True)
 
+        orchestrator = None
+        try:
+            from src.integrations.account_orchestrator import get_orchestrator_if_running
+            orch = get_orchestrator_if_running()
+            if orch is not None:
+                orchestrator = orch.status()
+        except Exception:
+            logger.debug("编排器 worker 状态聚合失败（已忽略）", exc_info=True)
+
+        send_routes = None
+        try:
+            from src.inbox.send_route_stats import get_send_route_stats
+            send_routes = get_send_route_stats().dump()
+        except Exception:
+            logger.debug("出站路由统计聚合失败（已忽略）", exc_info=True)
+
         overview = assemble_ops_overview(
             roi=roi, billing=billing, health=health, reliability=reliability,
             auto_claim=auto_claim, open_incidents=open_incidents,
-            companion=companion,
+            companion=companion, orchestrator=orchestrator, send_routes=send_routes,
         )
         # G2：趋势异动标注（AI 发送量 / 处置量）。
         from src.utils.ops_intel import detect_trend_anomaly
@@ -341,6 +357,29 @@ def register_ops_overview_routes(app, ctx) -> None:
             return {"ok": True, "enabled": True, "days": store.daily(days=span)}
         except Exception:
             logger.debug("identity-health-trend 读取失败（已忽略）", exc_info=True)
+            return {"ok": True, "enabled": False, "days": []}
+
+    @app.get("/api/admin/send-route-trend")
+    async def api_send_route_trend(request: Request, days: int = 7):
+        """P8：近 N 天出站回落率（回落适配器 / 总发送）按日聚合（供看板 sparkline）。
+
+        未开启趋势落库（inbox.send_route.trend_log=false）→ enabled:false + 空序列，
+        前端据此隐藏曲线、仅显示当下快照（P2-a 卡片的瞬时值）。
+        """
+        api_auth(request)
+        try:
+            from src.inbox.send_route_trend_store import get_send_route_trend_store
+            store = get_send_route_trend_store()
+            if store is None:
+                return {"ok": True, "enabled": False, "days": []}
+            span = int(days or 7)
+            try:
+                store.prune()
+            except Exception:
+                logger.debug("send_route_trend prune 失败（已忽略）", exc_info=True)
+            return {"ok": True, "enabled": True, "days": store.daily(days=span)}
+        except Exception:
+            logger.debug("send-route-trend 读取失败（已忽略）", exc_info=True)
             return {"ok": True, "enabled": False, "days": []}
 
     @app.get("/api/admin/realtime-voice-trend")
@@ -618,6 +657,62 @@ def register_ops_overview_routes(app, ctx) -> None:
             except Exception:
                 logger.debug("realtime_voice_alert_thresholds 审计写入失败（已忽略）", exc_info=True)
         return {"ok": True, "applied": applied, "enabled": enabled}
+
+    @app.post("/api/admin/platform-sessions/relogin")
+    async def api_platform_session_relogin(request: Request,
+                                           _=Depends(api_write("manage_ops"))):
+        """P2 会话自愈闭环：ops「平台会话健康」卡一键触发人工重登。
+
+        转发给对应平台的 worker 微服务（当前支持 messenger 网页模式）——Node 侧复用
+        同一 profile 重启上下文并打开 30 分钟交互登录窗口（headed 弹窗在 worker 主机上，
+        运营在窗口内完成官方账密/2FA）。登录成功后 worker 主动 push authorized 状态，
+        看板/发送闸自动恢复，account_id 不变无需重绑。
+        """
+        from fastapi import HTTPException
+        from src.web.web_i18n import tr
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        body = body if isinstance(body, dict) else {}
+        platform = str(body.get("platform") or "").strip().lower()
+        ident = (str(body.get("login_id") or "").strip()
+                 or str(body.get("account_id") or "").strip())
+        if not platform:
+            raise HTTPException(400, tr(request, "err.ws.field_required",
+                                        field="platform"))
+        if not ident:
+            raise HTTPException(400, tr(request, "err.ws.field_required",
+                                        field="login_id/account_id"))
+        if platform != "messenger":
+            raise HTTPException(400, tr(request, "err.psess.relogin_unsupported",
+                                        platform=platform))
+        from src.integrations.messenger_web_login import (
+            _post_json,
+            service_base_url,
+        )
+        config = getattr(config_manager, "config", None) or {}
+        try:
+            res = await _post_json(
+                f"{service_base_url(config)}/accounts/{ident}/relogin", {},
+                timeout=60.0)
+        except Exception as ex:  # worker 不可达/profile 不存在等，如实回给运营
+            raise HTTPException(502, tr(request, "err.rpa.op_failed",
+                                        op="relogin", err=str(ex)))
+        if audit_store is not None:
+            try:
+                actor = "api"
+                try:
+                    actor = request.session.get("username", "api")
+                except Exception:
+                    pass  # 无 SessionMiddleware（内部调用）→ 记 api
+                audit_store.log(actor, "platform_session_relogin", "ops", ident,
+                                f"platform={platform}")
+            except Exception:
+                logger.debug("platform_session_relogin 审计写入失败（已忽略）",
+                             exc_info=True)
+        return {"ok": True, "login_id": str((res or {}).get("login_id") or ident),
+                "status": str((res or {}).get("status") or "pending")}
 
     @app.get("/admin/ops", response_class=HTMLResponse)
     async def ops_overview_page(request: Request, _=Depends(page_auth)):

@@ -61,7 +61,7 @@ except ImportError:
             self.from_user = None
             self.chat = None
             self.id = 0
-    
+
     class User:
         """模拟User类"""
         def __init__(self):
@@ -139,12 +139,12 @@ def _has_ingestable_media(message: Any) -> bool:
 
 class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
     """Telegram MTProto客户端"""
-    
+
     def __init__(self, config, skill_manager: SkillManager, ai_client=None,
                  account_cfg: Optional[Dict[str, Any]] = None):
         """
         初始化Telegram客户端
-        
+
         Args:
             config: 配置管理器实例
             skill_manager: Skill管理器实例
@@ -207,34 +207,34 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
         # N 线 N4b（入站镜像）：开启后把本号收/发的消息镜像进统一收件箱（坐席台可见）。
         # 默认关 → standalone main.py 行为不变；companion worker 拉起协议号时置 True。
         self._mirror_inbox: bool = bool(_ov.get('mirror_inbox', False))
-        
+
         # 初始化语音转录服务
         self.voice_transcriber = None
         voice_config = self.config.get('voice_recognition', {})
-        
+
         # 临时目录设置
         self.temp_dir = Path(voice_config.get('temp_dir', './temp/voice'))
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         self.max_file_size = voice_config.get('max_file_size', 16777216)  # 16MB
-        
+
         if voice_config.get('enabled', False) and VOICE_RECOGNITION_AVAILABLE:
             try:
                 self.voice_transcriber = VoiceTranscriberFactory.create_transcriber(voice_config)
                 self.logger.info("语音转录服务初始化成功")
             except Exception as e:
                 self.logger.warning(f"语音转录服务初始化失败: {e}")
-        
+
         # 初始化图片识别服务
         self.image_recognizer = None
         image_config = self.config.get('image_recognition', {})
-        
+
         if image_config.get('enabled', False) and IMAGE_RECOGNITION_AVAILABLE:
             try:
                 self.image_recognizer = ImageRecognizerFactory.create_recognizer(image_config)
                 self.logger.info("图片识别服务初始化成功")
             except Exception as e:
                 self.logger.warning(f"图片识别服务初始化失败: {e}")
-        
+
         # 图像理解（Vision）：请求时 Ollama→智谱链（见 VisionClient.describe_image_with_ollama_zhipu_fallback）
         self.vision_client = None
         vision_config = self.config.get('vision', {})
@@ -251,20 +251,20 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                     )
             except Exception as e:
                 self.logger.warning(f"Vision 配置检查失败: {e}")
-        
+
         # 初始化上下文管理器和情绪增强器
         self.context_manager = None
         self.emotion_enhancer = None
         context_config = self.config.get('context', {})
         emoticons_config = self.config.get('emoticons', {})
-        
+
         # 检查上下文功能是否启用
         if context_config.get('enabled', False) and CONTEXT_AND_EMOTION_AVAILABLE:
             try:
                 # 初始化上下文管理器
                 self.context_manager = ContextManager(config=context_config)
                 self.logger.info("上下文管理器初始化成功")
-                
+
                 # 初始化情绪增强器（仅在启用时）
                 if emoticons_config.get('enabled', True):  # 默认为true
                     self.emotion_enhancer = EmotionEnhancer(config=self.config)
@@ -278,11 +278,11 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                 self.logger.info("上下文或情绪增强功能未启用")
             else:
                 self.logger.info("上下文或情绪增强模块未安装，功能不可用")
-        
+
         # 初始化四层触发决策器
         self.four_layer_trigger = None
         trigger_config = self.config.get('trigger', {})
-        
+
         if trigger_config.get('enabled', False) and FOUR_LAYER_TRIGGER_AVAILABLE:
             try:
                 from src.ai.ai_client import AIClient
@@ -301,7 +301,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                 self.logger.info("四层触发功能未启用")
             else:
                 self.logger.info("四层触发模块未安装，功能不可用")
-        
+
         self._human_escalation = None
         self._human_escalation_store = None
         try:
@@ -315,16 +315,16 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             self.logger.info("人工转接（重复问句）模块已加载")
         except Exception as e:
             self.logger.warning("人工转接模块初始化失败: %s", e)
-        
+
         self.logger.info(f"Telegram客户端初始化: {self.session_name}")
-    
+
     async def initialize(self) -> bool:
         """初始化Telegram客户端"""
         try:
             if not PYROGRAM_AVAILABLE:
                 self.logger.error("pyrogram库未安装，请运行: pip install pyrogram")
                 return False
-            
+
             # 检查 API 凭证：api_id/api_hash 必需；phone 仅在"无既有 session"时必需。
             # N 线 核心4：有 session_string 或已落盘 session 文件 → 视为已授权，免 phone 拉起。
             if not (self.api_id and self.api_hash):
@@ -335,7 +335,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             if not _has_session and not self.phone_number:
                 self.logger.error("Telegram 登录信息不完整：需 phone_number 或已有 session（session_string/会话文件）")
                 return False
-            
+
             # 创建客户端
             _client_kwargs: Dict[str, Any] = dict(
                 name=self.session_name,
@@ -357,14 +357,14 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                     self.proxy_id, _proxy.get("hostname"),
                 )
             self.client = Client(**_client_kwargs)
-            
+
             self.logger.info("Telegram客户端创建成功")
             return True
-            
+
         except Exception as e:
             self.logger.error(f"初始化Telegram客户端失败: {e}")
             return False
-    
+
     def _resolve_proxy(self) -> Optional[Dict[str, Any]]:
         """解析本账号绑定的代理 → pyrogram proxy 配置（无 / 失败 → None）。
 
@@ -401,19 +401,19 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             is_authorized = await self.client.connect()
             if not is_authorized:
                 self.logger.info("需要重新授权登录")
-                
+
                 # 发送验证码
                 sent_code = await self.client.send_code(self.phone_number)
                 self.logger.info(f"验证码已发送到 {self.phone_number}")
-                
+
                 # 这里需要用户输入验证码
                 # 在实际使用中，可以通过其他方式获取验证码
                 phone_code = await self._request_phone_code()
-                
+
                 if not phone_code:
                     self.logger.error("未收到验证码，登录失败")
                     return False
-                
+
                 try:
                     # 使用验证码登录
                     await self.client.sign_in(
@@ -422,7 +422,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                         phone_code=phone_code
                     )
                     self.logger.info("登录成功")
-                    
+
                 except SessionPasswordNeeded:
                     # 需要两步验证密码
                     password = await self._request_2fa_password()
@@ -432,43 +432,43 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                     else:
                         self.logger.error("未提供两步验证密码")
                         return False
-                        
+
                 except (PhoneCodeInvalid, PhoneCodeExpired) as e:
                     self.logger.error(f"验证码错误: {e}")
                     return False
-                    
+
                 except FloodWait as e:
                     self.logger.error(f"触发洪水等待: 需要等待 {e.value} 秒")
                     return False
-                    
+
                 except Unauthorized as e:
                     self.logger.error(f"未授权错误: {e}")
                     return False
-            
+
             # 获取用户信息
             self.user_info = await self.client.get_me()
             self.logger.info(f"登录用户: {self.user_info.first_name} (@{self.user_info.username})")
-            
+
             return True
-            
+
         except Exception as e:
             self.logger.error(f"授权处理失败: {e}")
             return False
-    
+
     async def _request_phone_code(self) -> Optional[str]:
         """
         请求用户输入手机验证码
-        
+
         注意: 验证码有效期只有5分钟，需要快速处理
         """
         self.logger.warning("⚠️ 需要手机验证码，请在Telegram应用中查看")
         self.logger.warning("📱 请检查您的手机短信或Telegram应用")
         self.logger.warning("⏰ 验证码有效期: 5分钟，请快速处理")
-        
+
         # 尝试从文件读取验证码（快速方法）
         import asyncio
         code_file = "code.txt"
-        
+
         # 等待用户输入验证码
         for i in range(30):  # 等待最多30秒
             try:
@@ -484,13 +484,13 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                         return phone_code
             except Exception:
                 pass
-            
+
             # 等待1秒后重试
             await asyncio.sleep(1)
-        
+
         self.logger.error("未收到验证码，登录失败")
         return None
-    
+
     async def _request_2fa_password(self) -> Optional[str]:
         """
         获取两步验证密码。
@@ -530,7 +530,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             "  3. 在项目根目录创建 2fa_password.txt 文件"
         )
         return None
-    
+
     async def start(self, block: bool = True):
         """启动Telegram客户端。
 
@@ -542,17 +542,17 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             if not self.client:
                 self.logger.error("Telegram客户端未初始化")
                 return
-            
+
             self.logger.info("启动Telegram客户端...")
-            
+
             # 处理授权
             if not await self._handle_authorization():
                 self.logger.error("授权失败，无法启动")
                 return
-            
+
             # 设置消息处理器
             self._setup_handlers()
-            
+
             # 启动客户端（含 database is locked 重试）
             max_retries = 3
             for attempt in range(1, max_retries + 1):
@@ -583,7 +583,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             except Exception:
                 self.logger.debug("[self_profile] 富集调度失败（忽略）", exc_info=True)
             self.running = True
-            
+
             asyncio.create_task(self._message_processor())
             # 轮询兜底：当实时 MTProto 推送通道失效（如某些 session/运行时收不到 updateNewMessage）时，
             # 用 RPC（get_dialogs，正常可用）定时拉新进站私聊喂给同一条 _process_message，
@@ -606,16 +606,16 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             except ImportError:
                 while self.running:
                     await asyncio.sleep(1)
-                
+
         except Exception as e:
             self.logger.error(f"启动Telegram客户端失败: {e}")
-    
+
     async def stop(self):
         """停止Telegram客户端"""
         if self.running and self.client:
             self.logger.info("正在停止Telegram客户端...")
             self.running = False
-            
+
             try:
                 await self.client.stop()
                 self.logger.info("Telegram客户端已停止")
@@ -741,7 +741,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                 if not _has_ingestable_media(message):
                     self.logger.info("[群消息] 跳过: 无可入站内容 chat_id=%s title=%s", chat_id, getattr(message.chat, 'title', ''))
                     return
-                
+
                 # P0: 不处理自己发送的消息（避免自我循环）
                 from_user = getattr(message, 'from_user', None)
                 if from_user and self.user_info and getattr(from_user, 'id', None) == self.user_info.id:
@@ -772,7 +772,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                 chat_title = message.chat.title if message.chat.title else "Unknown"
                 username = from_user.username if from_user else "unknown"
                 self.logger.info(f"[群组监控] 收到消息 [{chat_title}/{username}]: {text[:100]}...")
-                
+
                 # 检查是否需要回复（使用异步方法）
                 if not await self._should_reply_to_group_message(message):
                     mode = self.config.get('telegram', {}).get('group_reply', {}).get('mode', 'always')
@@ -783,13 +783,13 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                         text[:50] if text else "(无文本)", mode, "开" if trigger_on else "关"
                     )
                     return
-                
+
                 # 满足条件，处理消息
                 await self._process_message(message)
-                
+
             except Exception as e:
                 self.logger.error(f"处理群组消息失败: {e}")
-        
+
         # P4-4 已读回执：companion 镜像开启时，注册原始更新处理器——对端读了我们发的消息
         # （UpdateReadHistoryOutbox / 频道版）→ 把镜像进收件箱的出站消息升级为「已读」，
         # 前端出站气泡即显示蓝色双勾。standalone（mirror 关）不注册，零影响。
@@ -828,14 +828,14 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             "处理" if _tg.get("process_private", True) else "引导语",
             "开" if _tg.get("process_groups", True) else "关",
         )
-    
+
     async def _download_voice_file(self, message: Message) -> Optional[Path]:
         """
         下载语音消息文件到临时目录
-        
+
         Args:
             message: Telegram消息对象，包含voice或audio属性
-            
+
         Returns:
             下载的文件路径，如果失败返回None
         """
@@ -850,7 +850,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             else:
                 self.logger.error("消息不是语音或音频类型")
                 return None
-            
+
             # 生成临时文件名
             import time
             import uuid
@@ -858,12 +858,12 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             unique_id = str(uuid.uuid4())[:8]
             temp_filename = f"voice_{timestamp}_{unique_id}{file_extension}"
             temp_file_path = self.temp_dir / temp_filename
-            
+
             self.logger.info(f"下载语音文件: {file_id} -> {temp_file_path}")
-            
+
             # 下载文件
             await message.download(file_name=str(temp_file_path))
-            
+
             # 检查文件是否下载成功
             if temp_file_path.exists() and temp_file_path.stat().st_size > 0:
                 file_size = temp_file_path.stat().st_size
@@ -871,24 +871,24 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                     self.logger.warning(f"文件过大: {file_size} bytes > {self.max_file_size} limit")
                     temp_file_path.unlink(missing_ok=True)
                     return None
-                
+
                 self.logger.info(f"语音文件下载成功: {temp_file_path} ({file_size} bytes)")
                 return temp_file_path
             else:
                 self.logger.error("文件下载失败或文件为空")
                 return None
-                
+
         except Exception as e:
             self.logger.error(f"下载语音文件失败: {e}")
             return None
-    
+
     async def _download_image_file(self, message: Message) -> Optional[Path]:
         """
         下载图片消息文件到临时目录
-        
+
         Args:
             message: Telegram消息对象，包含photo或document属性
-            
+
         Returns:
             下载的文件路径，如果失败返回None
         """
@@ -896,7 +896,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             # 确定文件ID和文件类型
             file_id = None
             file_extension = ".jpg"  # 默认扩展名
-            
+
             if message.photo:
                 # 照片消息：Pyrogram 2.x 中 photo 可能是单个 Photo 对象或 PhotoSize 列表，先按单对象取 file_id
                 photo_obj = message.photo
@@ -908,12 +908,12 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                     except (TypeError, ValueError):
                         file_id = getattr(photo_obj[0], 'file_id', None) if photo_obj else None
                 file_extension = ".jpg"
-                
+
             elif message.document:
                 # 文档消息，检查是否是图片
                 document = message.document
                 mime_type = document.mime_type or ""
-                
+
                 # 检查是否是图片文件
                 if mime_type.startswith('image/'):
                     file_id = document.file_id
@@ -934,11 +934,11 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             else:
                 self.logger.error("消息不是图片或文档类型")
                 return None
-            
+
             if not file_id:
                 self.logger.error("无法获取文件ID")
                 return None
-            
+
             # 生成临时文件名
             import time
             import uuid
@@ -946,12 +946,12 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             unique_id = str(uuid.uuid4())[:8]
             temp_filename = f"image_{timestamp}_{unique_id}{file_extension}"
             temp_file_path = self.temp_dir / temp_filename
-            
+
             self.logger.info(f"下载图片文件: {file_id} -> {temp_file_path}")
-            
+
             # 下载文件
             await message.download(file_name=str(temp_file_path))
-            
+
             # 检查文件是否下载成功
             if temp_file_path.exists() and temp_file_path.stat().st_size > 0:
                 file_size = temp_file_path.stat().st_size
@@ -959,17 +959,17 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                     self.logger.warning(f"文件过大: {file_size} bytes > {self.max_file_size} limit")
                     temp_file_path.unlink(missing_ok=True)
                     return None
-                
+
                 self.logger.info(f"图片文件下载成功: {temp_file_path} ({file_size} bytes)")
                 return temp_file_path
             else:
                 self.logger.error("文件下载失败或文件为空")
                 return None
-                
+
         except Exception as e:
             self.logger.error(f"下载图片文件失败: {e}")
             return None
-    
+
     def _vision_usable(self) -> bool:
         """是否可走 Vision（含 Ollama→智谱回退链）。"""
         v = self.config.get("vision", {})
@@ -1018,7 +1018,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             except Exception as e:
                 self.logger.warning(f"OCR 兜底失败: {e}")
         return None
-    
+
     async def _get_recent_bot_messages(self, chat_id: int) -> List[Dict[str, str]]:
         """拉取当前群内近期机器人/通知号消息，供 AI 参考（订单、通道通知等）。"""
         cfg = self.config.get('context', {}).get('bot_sources', {})
@@ -1046,7 +1046,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
         except Exception as e:
             self.logger.warning(f"获取群内机器人消息失败: {e}")
         return out
-    
+
     async def _get_recent_chat_image_ocr(self, chat_id: int, limit: int = 20) -> Optional[str]:
         """
         当用户问「看到订单图了吗」但当前消息无图时：拉取群内最近一条带图消息并 OCR，
@@ -1095,7 +1095,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
         except Exception as e:
             self.logger.warning(f"拉取群内最近图片并 OCR 失败: {e}")
             return None
-    
+
     async def _poll_inbound_loop(self):
         """轮询兜底主循环：定时拉取新进站私聊消息（补实时推送缺失）。
 
@@ -1223,19 +1223,19 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
             user_id = message.from_user.id if message.from_user else 0
             username = message.from_user.username if message.from_user else "unknown"
             chat_title = message.chat.title if hasattr(message.chat, 'title') and message.chat.title else "私聊"
-            
+
             # 获取消息文本（包括caption）；P2 编码防护：统一归一化为安全 str
             raw_text = getattr(message, "text", None) or getattr(message, "caption", None)
             text = _normalize_message_text(raw_text) if raw_text else ""
             image_ocr_text = None  # 带图时的 OCR 结果，会传给 AI 以保持话术与图一致
-            
+
             # 处理语音消息
             _peer_audio_emotion = None      # 声学情绪（SER），供出站情感声 + 情绪落库融合
             if not text and (message.voice or message.audio):
                 if self.voice_transcriber:
                     try:
                         self.logger.info(f"收到语音消息 [{chat_title}/{username}]，开始转录...")
-                        
+
                         # 1. 下载语音文件
                         voice_file = await self._download_voice_file(message)
                         if not voice_file:
@@ -1248,7 +1248,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                                 transcribed_text = await self.voice_transcriber.transcribe_voice_message(
                                     str(voice_file), language
                                 )
-                                
+
                                 if transcribed_text:
                                     text = f"[语音转录] {transcribed_text}"
                                     self.logger.info(f"语音转录成功: {transcribed_text[:100]}...")
@@ -1279,6 +1279,8 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                                             confident=bool(
                                                 _peer_audio_emotion
                                                 and _peer_audio_emotion.get('confident')),
+                                            remote=str(_res.model or '')
+                                            .startswith('remote:'),
                                         )
                                         if _peer_audio_emotion and _peer_audio_emotion.get(
                                                 'confident'):
@@ -1296,7 +1298,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                                     self.logger.debug(f"已清理临时文件: {voice_file}")
                                 except Exception as cleanup_error:
                                     self.logger.warning(f"清理临时文件失败: {cleanup_error}")
-                                    
+
                             except Exception as transcribe_error:
                                 self.logger.error(f"语音转录过程失败: {transcribe_error}")
                                 text = "[语音消息 - 转录过程错误]"
@@ -1305,14 +1307,14 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                                     voice_file.unlink(missing_ok=True)
                                 except Exception:
                                     pass
-                        
+
                     except Exception as e:
                         self.logger.error(f"处理语音消息失败: {e}")
                         text = "[语音消息 - 处理异常]"
                 else:
                     self.logger.info(f"收到语音消息 [{chat_title}/{username}]（语音识别未启用或依赖未安装）")
                     text = "[语音消息 - 识别功能未启用]"
-            
+
             # 有说明文字但带图时：Vision 为主、OCR 兜底，把图内容给 AI
             has_image = bool(message.photo or (message.document and message.document.mime_type and
                                message.document.mime_type.startswith('image/')))
@@ -1334,7 +1336,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                             self.logger.warning(f"带图消息解析异常: {e}")
                 except Exception as e:
                     self.logger.warning(f"带图消息下载/解析异常: {e}")
-            
+
             # 处理图片消息（如果没有文本且不是语音消息）— Vision 为主、OCR 兜底
             if not text and (message.photo or message.document):
                 if self._vision_usable() or self.image_recognizer:
@@ -1378,7 +1380,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                 text = "[贴纸]"
             elif not text and getattr(message, "animation", None):
                 text = "[动态表情]"
-            
+
             if text:
                 self.logger.info(f"收到消息 [{chat_title}/{username}]: {self._log_safe_text(text)}")
                 m = _metrics()
@@ -1406,7 +1408,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                         m2.record_queue_drop()
             else:
                 self.logger.debug(f"忽略非文本/语音消息: {chat_title}/{username}")
-            
+
         except Exception as e:
             self.logger.error(f"处理消息失败: {e}")
             m = _metrics()
@@ -1416,7 +1418,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
     async def _message_processor(self):
         """消息处理任务"""
         self.logger.info("消息处理器已启动")
-        
+
         while self.running:
             try:
                 message_data = await self.message_queue.get()
@@ -1426,7 +1428,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                     m.set_queue_size(self.message_queue.qsize())
                 asyncio.create_task(self._guarded_process(message_data))
                 self.message_queue.task_done()
-                
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -1434,7 +1436,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                 m = _metrics()
                 if m:
                     m.record_error()
-    
+
     async def _guarded_process(self, message_data: Dict[str, Any]):
         """使用 Semaphore 控制并发的消息处理包装器"""
         async with self._process_semaphore:
@@ -1487,7 +1489,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
         """异步处理消息"""
         import time
         start_time = time.time()
-        
+
         try:
             message = message_data['message']
             user_id = message_data['user_id']
@@ -1598,14 +1600,14 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                     )
                 except Exception as ex:
                     self.logger.warning("人工转接计数失败: %s", ex)
-            
+
             # 记录接收时间
             receive_time = time.time()
-            
+
             # 上下文分析（如果启用）
             context_analysis = None
             should_reply = True  # 默认回复
-            
+
             if self.context_manager:
                 try:
                     # 添加上下文消息
@@ -1616,29 +1618,29 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                         text=text,
                         is_ai=False
                     )
-                    
+
                     # 分析上下文
                     context_analysis = self.context_manager.analyze_context(
                         chat_id=chat_id,
                         current_context=text
                     )
-                    
+
                     # 根据上下文分析决定是否需要回复
                     should_reply = context_analysis.get('should_reply', True)
-                    
+
                     if not should_reply:
                         self.logger.info(f"根据上下文分析，不回复此消息: {text[:50]}...")
                         return
-                    
+
                     self.logger.info(
                         f"上下文分析结果 - 情绪: {context_analysis.get('user_emotion', 'unknown')}, "
                         f"主题: {context_analysis.get('conversation_topic', 'unknown')}, "
                         f"优先级: {context_analysis.get('priority', 'normal')}"
                     )
-                    
+
                 except Exception as e:
                     self.logger.warning(f"上下文分析失败: {e}")
-            
+
             # 群内：拉取近期机器人/通知消息，与 OCR 一起供 AI 使用（群聊 id 为负）
             recent_bot_messages = []
             # `_ocr` may be filled above by downloading the mirrored media ref. Do not
@@ -1662,7 +1664,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                             self.logger.info("已使用群内最近一张图 OCR 作为订单上下文")
                         else:
                             self.logger.info("群内最近图 OCR 无结果，AI 将无图上下文回复")
-            
+
             # 群名（用于额度规则：特殊客户/黑名单按群名识别）
             msg = message_data.get('message')
             chat_title = (getattr(msg.chat, 'title', None) or '').strip() if msg and getattr(msg, 'chat', None) else ''
@@ -1751,17 +1753,17 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                 user_id=user_id,
                 context=_sm_context,
             )
-            
+
             # 情绪增强（仅在启用时）
             enhanced_reply = reply_text
             emoticons_config = self.config.get('emoticons', {})
-            
+
             # 检查情绪增强器是否启用且实例存在
             if reply_text and self.emotion_enhancer and emoticons_config.get('enabled', True):
                 try:
                     # 分析消息情绪（独立于上下文）
                     emotion_analysis = self.emotion_enhancer.analyze_message_emotion(text)
-                    
+
                     # 增强回复
                     enhanced_reply = self.emotion_enhancer.enhance_reply(
                         original_reply=reply_text,
@@ -1770,12 +1772,12 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                         message_text=text,
                         chat_id=str(chat_id),
                     )
-                    
+
                     if enhanced_reply != reply_text:
                         self.logger.info(f"情绪增强应用成功: {enhanced_reply[:80]}...")
                     else:
                         self.logger.debug("情绪增强未修改回复内容")
-                        
+
                 except Exception as e:
                     self.logger.warning(f"情绪增强失败: {e}")
                     enhanced_reply = reply_text
@@ -1785,10 +1787,10 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                 enhanced_reply = self._rewrite_companion_helpdesk_ping(
                     enhanced_reply, text
                 )
-            
+
             # 记录处理完成时间
             process_time = time.time()
-            
+
             # 术语后处理：按 config ai.terminology 统一表述后再发送
             reply_final = self._apply_terminology(enhanced_reply) if enhanced_reply else ""
             suffix = ""
@@ -1888,7 +1890,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                     m.record_reply()
                     m.record_response_time_ms(total_time_ms)
                     m.set_queue_size(self.message_queue.qsize())
-                
+
                 # 如果启用了上下文管理器，记录AI回复（存术语校正后的内容）
                 if self.context_manager:
                     try:
@@ -1901,7 +1903,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                         )
                     except Exception as e:
                         self.logger.warning(f"记录AI回复到上下文失败: {e}")
-                
+
                 # 记录响应时间统计
                 total_time = send_time - start_time
                 process_duration = process_time - receive_time
@@ -1948,7 +1950,7 @@ class TelegramClient(TelegramTriggerMixin, TelegramSenderMixin, LoggerMixin):
                         self.logger.warning(
                             "人工转接: 向客服私聊转发用户原话失败: %s", fwd_ex
                         )
-                
+
         except Exception as e:
             self.logger.error(f"异步处理消息失败: {e}")
             m = _metrics()

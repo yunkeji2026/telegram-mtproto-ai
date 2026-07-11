@@ -485,6 +485,54 @@ def find_send_button_center(
     return (l + r) // 2, (t + b) // 2
 
 
+def find_search_entry(
+    xml_bytes: bytes,
+    *,
+    line_pkg: str = "jp.naver.line.android",
+) -> Optional[Tuple[int, int]]:
+    """找聊天列表顶部「搜索」入口坐标（搜索框 / 放大镜图标），多语言 + 跨版本容错。
+
+    用于手动/回落发送时的深列表兜底：滚动扫不到联系人时，走 LINE 内置搜索精确定位。
+    限**顶部区域**匹配，避免命中会话内搜索或其它 "search" 元素。命中优先级：
+      1. resource-id 含 "search"（如 ``jp.naver.line.android:id/search_bar``）。
+      2. content-desc 命中搜索词（Search / 搜索 / 搜尋 / 検索 / 검색）。
+    返回中心点坐标；无命中 → None。纯函数。
+    """
+    _SEARCH_DESCS = ("search", "搜索", "搜尋", "検索", "검색")
+    try:
+        root = ET.fromstring(xml_bytes)
+    except ET.ParseError:
+        return None
+    # 屏幕高度（取根 bounds），搜索入口应落在顶部约 1/3
+    screen_h = 1920
+    for el in root.iter():
+        bb0 = _parse_bounds(el.get("bounds") or "")
+        if bb0 and bb0[0] == 0 and bb0[1] == 0 and bb0[2] > 0 and bb0[3] > 0:
+            screen_h = max(screen_h, bb0[3])
+            break
+    top_zone = max(360, screen_h // 3)
+
+    def _center(bb: Tuple[int, int, int, int]) -> Tuple[int, int]:
+        l, t, r, b = bb
+        return (l + r) // 2, (t + b) // 2
+
+    # 1) resource-id 命中 search（顶部区域）
+    for el in root.iter():
+        rid = (el.get("resource-id") or "").lower()
+        if "search" in rid:
+            bb = _parse_bounds(el.get("bounds") or "")
+            if bb and bb[1] <= top_zone and bb[2] > bb[0]:
+                return _center(bb)
+    # 2) content-desc 命中（顶部区域）
+    for el in root.iter():
+        cdesc = (el.get("content-desc") or "").strip().lower()
+        if cdesc and any(k in cdesc for k in _SEARCH_DESCS):
+            bb = _parse_bounds(el.get("bounds") or "")
+            if bb and bb[1] <= top_zone and bb[2] > bb[0]:
+                return _center(bb)
+    return None
+
+
 def find_accept_button_coords(
     xml_bytes: bytes,
 ) -> List[Tuple[int, int]]:

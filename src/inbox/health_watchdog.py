@@ -177,6 +177,8 @@ class HealthWatchdog:
         self._last_ai_quality_sig: Optional[str] = None
         # 实时语音通话退化告警去抖（主机健康/接通率/不可达，基于 RealtimeVoiceStats）
         self._last_realtime_voice_sig: Optional[str] = None
+        # 编排器受管 worker 崩溃告警去抖（某账号 protocol/web worker 进 error 态）
+        self._last_orch_worker_sig: Optional[str] = None
         # 记忆 key 漂移巡检（裸 key 复发）——结构性数据，独立稀疏节流 + 去抖
         self._last_drift_check_ts: float = 0.0
         self._last_drift_sig: Optional[str] = None
@@ -186,7 +188,9 @@ class HealthWatchdog:
         self.total_draft_quality_alerts: int = 0
         self.total_ai_quality_alerts: int = 0
         self.total_realtime_voice_alerts: int = 0
+        self.total_orchestrator_worker_alerts: int = 0
         self.total_memory_key_drift_alerts: int = 0
+        self.total_platform_session_reminders: int = 0
         self.last_check_ts: float = 0.0
         self.last_light: str = "green"
 
@@ -278,11 +282,36 @@ class HealthWatchdog:
         except Exception:
             logger.debug("实时语音告警巡检异常（已忽略）", exc_info=True)
 
+        # 编排器受管 worker 崩溃巡检（P6）：某账号 worker 进 error 态即主动外发，独立去抖。
+        try:
+            self._check_orchestrator_workers()
+        except Exception:
+            logger.debug("编排器 worker 巡检异常（已忽略）", exc_info=True)
+
+        # 平台会话持续掉线提醒（P4）：worker push 的掉线转移只告警一次，若长时间没人修
+        # 则周期性再提醒（升级式：after_min 首提，之后每 interval_min 一条）。
+        try:
+            self._check_platform_sessions()
+        except Exception:
+            logger.debug("平台会话持续掉线巡检异常（已忽略）", exc_info=True)
+
         # 实时语音趋势落库兜底 sync（旁路漏记时补写当日增量）。
         try:
             self._sync_realtime_voice_trend()
         except Exception:
             logger.debug("实时语音趋势 sync 异常（已忽略）", exc_info=True)
+
+        # 出站路由回落率趋势 sync（P8）：累计计数器的增量按日落库，供看板 7 天曲线。
+        try:
+            self._sync_send_route_trend()
+        except Exception:
+            logger.debug("出站路由趋势 sync 异常（已忽略）", exc_info=True)
+
+        # 出站路由回落率趋势落库 sync（P8：累计计数器的当日增量，默认关时 no-op）。
+        try:
+            self._sync_send_route_trend()
+        except Exception:
+            logger.debug("出站路由趋势 sync 异常（已忽略）", exc_info=True)
 
         # 记忆 key 漂移巡检（裸 key 复发 → 记忆对引擎不可见），稀疏节流 + 独立去抖。
         try:
@@ -670,6 +699,21 @@ class HealthWatchdog:
         except Exception:
             logger.debug("实时语音趋势 sync 失败（已忽略）", exc_info=True)
 
+    def _sync_send_route_trend(self) -> None:
+        """P8：watchdog tick 把出站路由累计计数（SendRouteStats）的增量按日落库。
+
+        默认关（``inbox.send_route.trend_log=false``）→ sync 恒 no-op（store 未装配即静默）。
+        累计计数器口径：sync-from-stats 只写正增量，重启归零后以新基线重启不写负值。
+        """
+        try:
+            from src.inbox.send_route_stats import get_send_route_stats
+            from src.inbox.send_route_trend_store import (
+                sync_send_route_trend_from_stats,
+            )
+            sync_send_route_trend_from_stats(get_send_route_stats().dump())
+        except Exception:
+            logger.debug("出站路由趋势 sync 失败（已忽略）", exc_info=True)
+
     def _emit_realtime_voice_alert(
         self, problems: List[Dict[str, Any]], light: str = "yellow",
     ) -> None:
@@ -710,6 +754,150 @@ class HealthWatchdog:
             logger.info("HealthWatchdog 发出实时语音恢复通知")
         except Exception:
             logger.debug("realtime_voice recovery 发布失败（已忽略）", exc_info=True)
+
+    def _check_platform_sessions(self, *, now: Optional[float] = None) -> None:
+        """平台会话「持续不健康」提醒（P4，闭环 P0-2 的告警时效性）。
+
+        掉线转移告警（session-status 路由发）只发一次；若会话掉线 ``after_min``
+        分钟仍未恢复 → 补一条「还没人修」提醒，之后每 ``interval_min`` 分钟一条。
+        节流状态在 ``PlatformSessionHealth`` 内（恢复自动清零），本方法无自有状态。
+        配置：``health_watchdog.session_stale_remind.{enabled,after_min,interval_min}``
+        （默认开，30min 首提 / 4h 重提；notifier 每小时限流是第二层兜底）。
+        """
+        cfg = getattr(self._config_manager, "config", None) or {}
+        sr = (((cfg.get("health_watchdog") or {}).get("session_stale_remind"))
+              or {}) if isinstance(cfg, dict) else {}
+        if not sr.get("enabled", True):
+            return
+        try:
+            from src.integrations.platform_session_health import (
+                get_platform_session_health,
+            )
+            store = get_platform_session_health()
+        except Exception:
+            return
+        after_sec = max(60.0, float(sr.get("after_min", 30) or 30) * 60.0)
+        interval_sec = max(600.0, float(sr.get("interval_min", 240) or 240) * 60.0)
+        due = store.due_reminders(min_age_sec=after_sec, interval_sec=interval_sec,
+                                  now=now)
+        if not due:
+            return
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            bus = get_event_bus()
+        except Exception:
+            return
+        for key, sess in due.items():
+            plat, _, acct = key.partition(":")
+            down_min = int(float(sess.get("down_sec") or 0) // 60)
+            bus.publish("platform_session_alert", {
+                "platform": plat,
+                "account_id": acct,
+                "login_id": str(sess.get("login_id") or ""),
+                "status": str(sess.get("status") or ""),
+                "detail": str(sess.get("detail") or ""),
+                "reminder": True,
+                "down_minutes": down_min,
+                # 独立限流键：与掉线转移告警分开（30min 首提不被 1h 窗口误吞），
+                # 多账号互不挤占。
+                "rate_key": f"{key}:remind",
+            })
+            self.total_platform_session_reminders += 1
+
+    def _check_orchestrator_workers(self) -> None:
+        """编排器受管 worker 崩溃巡检（P6）：某账号 protocol/web worker 进入 ``error`` 态
+        （编排器退避重试仍未恢复）→ 经 EventBus 主动外发，而非只在 ops 看板可见（P2-b）。
+
+        **自然门控**：编排器未运行/无受管账号即静默（RPA-only、编排器未启用零误报）。
+        去抖：按 ``(worker, severity)`` 签名，仅错误集合/严重度变化时 emit；恢复补发一次。
+        严重度：``restarts>=3`` → red(fail，真实掉线)，否则 yellow(warn，瞬时抖动/重连)。
+        """
+        try:
+            from src.integrations.account_orchestrator import (
+                get_orchestrator_if_running,
+            )
+            from src.utils.ops_overview import orchestrator_worker_problems
+            orch = get_orchestrator_if_running()
+            if orch is None:
+                return
+            status = orch.status()
+        except Exception:
+            return
+        # 无受管账号：若此前报过异常，静默 reconcile 掉遗留 open 事件
+        if int((status or {}).get("total") or 0) <= 0:
+            if self._last_orch_worker_sig:
+                self._emit_orchestrator_worker_recovery()
+                self._last_orch_worker_sig = None
+            return
+
+        problems = orchestrator_worker_problems(status)
+        light = ("red" if any(p["status"] == "fail" for p in problems)
+                 else ("yellow" if problems else "green"))
+        sig = "|".join(sorted(f"{p['id']}:{p['status']}" for p in problems))
+        if problems:
+            if sig != self._last_orch_worker_sig:
+                self._emit_orchestrator_worker_alert(problems, light)
+                self.total_orchestrator_worker_alerts += 1
+            self._last_orch_worker_sig = sig
+        else:
+            if self._last_orch_worker_sig:
+                self._emit_orchestrator_worker_recovery()
+            else:
+                # 进程刚起且当前无异常：静默 reconcile 遗留 open 事件（重启后签名空）
+                inbox = self._inbox()
+                if inbox is not None and hasattr(inbox, "resolve_open_incidents"):
+                    try:
+                        n = inbox.resolve_open_incidents(
+                            kind="orchestrator_worker") or 0
+                        if n:
+                            logger.info(
+                                "HealthWatchdog 启动 reconcile：关闭遗留编排器 worker 事件 %d 条",
+                                n)
+                    except Exception:
+                        logger.debug("编排器 worker 事件 reconcile 失败（已忽略）",
+                                     exc_info=True)
+            self._last_orch_worker_sig = None
+
+    def _emit_orchestrator_worker_alert(
+        self, problems: List[Dict[str, Any]], light: str = "yellow",
+    ) -> None:
+        try:
+            inbox = self._inbox()
+            if inbox is not None and hasattr(inbox, "open_or_update_incident"):
+                inbox.open_or_update_incident(
+                    kind="orchestrator_worker",
+                    signature="|".join(sorted(p["id"] for p in problems)),
+                    light=light,
+                    summary={"problems": len(problems)},
+                    problems=problems,
+                )
+        except Exception:
+            logger.debug("编排器 worker 事件落表失败（已忽略）", exc_info=True)
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            get_event_bus().publish("orchestrator_worker_alert", {
+                "light": light, "problems": problems, "recovered": False,
+            })
+            logger.warning("HealthWatchdog 发出编排器 worker 告警：light=%s %d 项",
+                           light, len(problems))
+        except Exception:
+            logger.debug("orchestrator_worker_alert 发布失败（已忽略）", exc_info=True)
+
+    def _emit_orchestrator_worker_recovery(self) -> None:
+        try:
+            inbox = self._inbox()
+            if inbox is not None and hasattr(inbox, "resolve_open_incidents"):
+                inbox.resolve_open_incidents(kind="orchestrator_worker")
+        except Exception:
+            logger.debug("编排器 worker 事件 resolve 失败（已忽略）", exc_info=True)
+        try:
+            from src.integrations.shared.event_bus import get_event_bus
+            get_event_bus().publish("orchestrator_worker_alert", {
+                "problems": [], "recovered": True,
+            })
+            logger.info("HealthWatchdog 发出编排器 worker 恢复通知")
+        except Exception:
+            logger.debug("orchestrator_worker recovery 发布失败（已忽略）", exc_info=True)
 
     def _skill_manager(self):
         return getattr(getattr(self._app, "state", self._app), "skill_manager", None)
@@ -962,6 +1150,7 @@ class HealthWatchdog:
             "total_draft_quality_alerts": self.total_draft_quality_alerts,
             "total_ai_quality_alerts": self.total_ai_quality_alerts,
             "total_realtime_voice_alerts": self.total_realtime_voice_alerts,
+            "total_orchestrator_worker_alerts": self.total_orchestrator_worker_alerts,
             "total_memory_key_drift_alerts": self.total_memory_key_drift_alerts,
             "total_weekly_reports": self.total_weekly_reports,
             "last_check_ts": self.last_check_ts,

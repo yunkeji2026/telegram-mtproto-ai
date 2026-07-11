@@ -3471,6 +3471,12 @@ def register_messenger_rpa_routes(
             body += get_voice_synth_stats().dump_prom()
         except Exception:
             pass
+        # ★ ASR 降级用量（primary/fallback/all-failed/hallucination-dropped）
+        try:
+            from src.ai.asr_stats import get_asr_stats
+            body += get_asr_stats().dump_prom()
+        except Exception:
+            pass
         # ★ 音频情绪识别（SER）用量（total/ok/unavailable/by-emotion）
         try:
             from src.ai.speech_emotion_stats import get_speech_emotion_stats

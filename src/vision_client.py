@@ -1,13 +1,19 @@
 """
 图像理解客户端：智谱 GLM-4V，或 OpenAI 兼容多模态（Ollama / 本地 Gemma 等）。
 将图片转为文字描述，供下游 AI 生成回复。
+
+多端点双活（``vision.base_urls``，2026-07）：两台 LAN GPU 各备同名 VLM，按序尝试、
+异常端点 60s 冷却降权（模块级状态——VisionClient 实例按调用即建即弃，冷却须跨实例
+生效）。所有消费方（TG/LINE/Messenger/WhatsApp RPA + 图片翻译）都经本类，自动获益。
 """
 
 import asyncio
 import base64
 import logging
+import threading
+import time
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
     from zhipuai import ZhipuAI
@@ -46,11 +52,50 @@ def _zhipu_credentials(global_vision: dict, merged: dict) -> Optional[Dict[str, 
     return None
 
 
+def _vision_base_urls(cfg: dict) -> List[str]:
+    """解析 base_urls（list 或逗号串）∪ base_url，去重保序。"""
+    urls: List[str] = []
+    raw_multi = cfg.get("base_urls")
+    if isinstance(raw_multi, (list, tuple)):
+        urls.extend(str(u or "").strip() for u in raw_multi)
+    elif raw_multi:
+        urls.extend(p.strip() for p in str(raw_multi).split(","))
+    single = str(cfg.get("base_url") or "").strip()
+    if single:
+        urls.append(single)
+    out: List[str] = []
+    for u in urls:
+        u = u.rstrip("/")
+        if not u:
+            continue
+        if not u.endswith("/v1"):
+            u = u + "/v1"
+        if u not in out:
+            out.append(u)
+    return out
+
+
 def _wants_openai_primary(merged: dict) -> bool:
     prov = (merged.get("provider") or "zhipu").strip().lower()
     if prov not in ("openai_compatible", "ollama", "openai", "local"):
         return False
-    return bool((merged.get("base_url") or "").strip())
+    return bool(_vision_base_urls(merged))
+
+
+# 端点级冷却（跨实例共享；VisionClient 每次图片调用即建即弃，实例态存不住）
+_URL_BAD_UNTIL: Dict[str, float] = {}
+_URL_LOCK = threading.Lock()
+_URL_COOLDOWN_SEC = 60.0
+
+
+def _mark_url_bad(url: str) -> None:
+    with _URL_LOCK:
+        _URL_BAD_UNTIL[url] = time.time() + _URL_COOLDOWN_SEC
+
+
+def _url_cooling(url: str) -> bool:
+    with _URL_LOCK:
+        return time.time() < _URL_BAD_UNTIL.get(url, 0.0)
 
 
 def has_any_vision_backend(merged: dict, global_vision: dict) -> bool:
@@ -121,7 +166,8 @@ class VisionClient:
     def __init__(self, config: dict):
         self.config = config
         self._client: Any = None  # ZhipuAI
-        self._oa_sync: Any = None  # OpenAI sync client
+        self._oa_sync: Any = None  # OpenAI sync client（首端点，向后兼容）
+        self._oa_endpoints: List[Tuple[str, Any]] = []  # [(base_url, OpenAI client)]
         self._backend: str = "zhipu"
         self.logger = logging.getLogger(__name__)
 
@@ -140,30 +186,34 @@ class VisionClient:
         if not OPENAI_SYNC_AVAILABLE:
             self.logger.warning("openai 库未安装，Vision(Ollama) 不可用: pip install openai")
             return False
-        raw_base = (self.config.get("base_url") or "").strip().rstrip("/")
-        if not raw_base:
+        urls = _vision_base_urls(self.config)
+        if not urls:
             self.logger.warning(
-                "vision provider=openai_compatible 需要 base_url，例如 http://127.0.0.1:11434/v1"
+                "vision provider=openai_compatible 需要 base_url(s)，例如 http://127.0.0.1:11434/v1"
             )
             return False
-        if not raw_base.endswith("/v1"):
-            raw_base = raw_base + "/v1"
         key = (self.config.get("api_key") or "ollama").strip()
         if key in ("", "YOUR_ZHIPU_API_KEY"):
             key = "ollama"
         timeout = float(self.config.get("timeout", 120))
-        try:
-            self._oa_sync = OpenAI(api_key=key, base_url=raw_base, timeout=timeout)
-            self._backend = "openai"
-            self.logger.info(
-                "Vision(OpenAI 兼容) 初始化成功 base=%s model=%s",
-                raw_base,
-                self.config.get("model", "?"),
-            )
-            return True
-        except Exception as e:
-            self.logger.warning("Vision OpenAI 兼容初始化失败: %s", e)
+        self._oa_endpoints = []
+        for base in urls:
+            try:
+                self._oa_endpoints.append(
+                    (base, OpenAI(api_key=key, base_url=base, timeout=timeout))
+                )
+            except Exception as e:
+                self.logger.warning("Vision 端点 %s 构建失败: %s", base, e)
+        if not self._oa_endpoints:
             return False
+        self._oa_sync = self._oa_endpoints[0][1]
+        self._backend = "openai"
+        self.logger.info(
+            "Vision(OpenAI 兼容) 初始化成功 endpoints=%s model=%s",
+            [u for u, _ in self._oa_endpoints],
+            self.config.get("model", "?"),
+        )
+        return True
 
     def _initialize_zhipu(self) -> bool:
         if not ZHIPU_AVAILABLE:
@@ -191,7 +241,7 @@ class VisionClient:
     def _describe_openai_sync(
         self, image_path: str, prompt: Optional[str] = None
     ) -> Optional[str]:
-        if not self._oa_sync:
+        if not self._oa_endpoints:
             return None
         max_dim = self.config.get("max_image_dim")
         if max_dim is None:
@@ -205,28 +255,35 @@ class VisionClient:
             "请简要描述图中与聊天/文字相关的内容；若是聊天截图，说明最后一条对方消息大意。"
         )
         text_prompt = (prompt or self.config.get("prompt") or default_prompt).strip()
-        try:
-            resp = self._oa_sync.chat.completions.create(
-                model=model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "image_url", "image_url": {"url": data_url}},
-                            {"type": "text", "text": text_prompt},
-                        ],
-                    }
-                ],
-                max_tokens=int(self.config.get("max_tokens") or 300),
-            )
+        # 健康端点在前，冷却中的殿后（全冷却时仍会硬试，避免全灭期彻底不服务）
+        healthy = [(u, c) for u, c in self._oa_endpoints if not _url_cooling(u)]
+        cooling = [(u, c) for u, c in self._oa_endpoints if _url_cooling(u)]
+        for url, cli in healthy + cooling:
+            try:
+                resp = cli.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "image_url", "image_url": {"url": data_url}},
+                                {"type": "text", "text": text_prompt},
+                            ],
+                        }
+                    ],
+                    max_tokens=int(self.config.get("max_tokens") or 300),
+                )
+            except Exception as e:
+                _mark_url_bad(url)
+                self.logger.warning("Vision 端点 %s 调用失败(切换下一端点): %s", url, e)
+                continue
             if resp and getattr(resp, "choices", None) and len(resp.choices) > 0:
                 content = getattr(resp.choices[0].message, "content", None)
                 if content and isinstance(content, str) and content.strip():
                     return content.strip()[:2000]
+            # 端点通但返回空：模型侧空答，换端点大概率同样空 → 保持旧语义直接返回
             return None
-        except Exception as e:
-            self.logger.warning("Ollama/本地多模态 Vision 调用失败: %s", e)
-            return None
+        return None
 
     def _describe_zhipu_sync(
         self, image_path: str, prompt: Optional[str] = None

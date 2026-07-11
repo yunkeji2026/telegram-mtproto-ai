@@ -30,9 +30,15 @@ CREATE TABLE IF NOT EXISTS xlate_trend_daily (
     day       TEXT NOT NULL PRIMARY KEY,
     attempts  INTEGER NOT NULL DEFAULT 0,
     low_conf  INTEGER NOT NULL DEFAULT 0,
-    switches  INTEGER NOT NULL DEFAULT 0
+    switches  INTEGER NOT NULL DEFAULT 0,
+    sem_low   INTEGER NOT NULL DEFAULT 0
 );
 """
+
+# 既有库升级（sem_low 列 2026-07 加入；ALTER 幂等失败即已存在）
+_MIGRATIONS = [
+    "ALTER TABLE xlate_trend_daily ADD COLUMN sem_low INTEGER NOT NULL DEFAULT 0",
+]
 
 
 def _day_str(now: Optional[float] = None) -> str:
@@ -57,27 +63,34 @@ class TranslationTrendStore:
                 self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA busy_timeout=5000")
             self._conn.executescript(_DDL)
+            for mig in _MIGRATIONS:
+                try:
+                    self._conn.execute(mig)
+                except sqlite3.OperationalError:
+                    pass  # 列已存在（新建库走 DDL）
             self._conn.commit()
 
     def add(
         self, *, attempts: int = 0, low_conf: int = 0, switches: int = 0,
-        now: Optional[float] = None,
+        sem_low: int = 0, now: Optional[float] = None,
     ) -> None:
         """把一组增量计入当日聚合。绝不抛。"""
         a, l, s = max(0, int(attempts)), max(0, int(low_conf)), max(0, int(switches))
-        if a == 0 and l == 0 and s == 0:
+        m = max(0, int(sem_low))
+        if a == 0 and l == 0 and s == 0 and m == 0:
             return
         day = _day_str(now)
         try:
             with self._lock:
                 self._conn.execute(
-                    "INSERT INTO xlate_trend_daily (day, attempts, low_conf, switches) "
-                    "VALUES (?, ?, ?, ?) "
+                    "INSERT INTO xlate_trend_daily (day, attempts, low_conf, switches, sem_low) "
+                    "VALUES (?, ?, ?, ?, ?) "
                     "ON CONFLICT(day) DO UPDATE SET "
                     "  attempts = attempts + excluded.attempts, "
                     "  low_conf = low_conf + excluded.low_conf, "
-                    "  switches = switches + excluded.switches",
-                    (day, a, l, s),
+                    "  switches = switches + excluded.switches, "
+                    "  sem_low = sem_low + excluded.sem_low",
+                    (day, a, l, s, m),
                 )
                 self._conn.commit()
         except Exception:
@@ -94,7 +107,7 @@ class TranslationTrendStore:
         try:
             with self._lock:
                 for r in self._conn.execute(
-                    "SELECT day, attempts, low_conf, switches "
+                    "SELECT day, attempts, low_conf, switches, sem_low "
                     "FROM xlate_trend_daily WHERE day >= ? ORDER BY day",
                     (day_keys[0],),
                 ).fetchall():
@@ -109,13 +122,16 @@ class TranslationTrendStore:
             att = int(r["attempts"]) if r else 0
             low = int(r["low_conf"]) if r else 0
             sw = int(r["switches"]) if r else 0
+            sl = int(r["sem_low"]) if r else 0
             out.append({
                 "day": day,
                 "attempts": att,
                 "low_conf": low,
                 "switches": sw,
+                "sem_low": sl,
                 "low_conf_rate": round(low / att, 4) if att else 0.0,
                 "switch_rate": round(sw / att, 4) if att else 0.0,
+                "sem_low_rate": round(sl / att, 4) if att else 0.0,
             })
         return out
 
@@ -170,12 +186,13 @@ def get_translation_trend_store() -> Optional[TranslationTrendStore]:
 
 
 def record_translation_trend(
-    *, attempts: int = 0, low_conf: int = 0, switches: int = 0,
+    *, attempts: int = 0, low_conf: int = 0, switches: int = 0, sem_low: int = 0,
 ) -> None:
     """翻译热路旁路写入：未启用 / 无 store → 立即返回（零开销）。绝不抛。"""
     if not _ENABLED or _STORE is None:
         return
-    _STORE.add(attempts=attempts, low_conf=low_conf, switches=switches)
+    _STORE.add(attempts=attempts, low_conf=low_conf, switches=switches,
+               sem_low=sem_low)
 
 
 def reset_translation_trend_store() -> None:

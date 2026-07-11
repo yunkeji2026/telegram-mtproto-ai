@@ -58,6 +58,11 @@ class InboxMessage:
     reply_to_id: str = ""
     reply_to_text: str = ""
     reply_to_sender: str = ""
+    # P4-11D 群提及明细：JSON 串 [{jid,number,name}]（缺省 '[]'=无提及），供气泡 @号码→@名字
+    mentions_json: str = ""
+    # P4-11E 群发言人：结构化 jid + 名字（缺省空=非群/未知），供气泡上方显示发言人名+稳定色
+    sender_id: str = ""
+    sender_name: str = ""
 
 
 @dataclass

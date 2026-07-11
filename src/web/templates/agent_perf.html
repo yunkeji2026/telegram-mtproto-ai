@@ -747,7 +747,7 @@ window.loadXlateEngines=function(){
       return;
     }
     sumEl.textContent=window.Tf('ap_js_p04',{n:te.total_attempts||0,m:te.fallbacks||0});
-    var lbl={ai:'AI'+window.T('tg_s067'),deepl:'DeepL',google:'Google'};
+    var lbl={ai:'AI'+window.T('tg_s067'),deepl:'DeepL',google:'Google',ollama_mt:'HY-MT'};
     tbody.innerHTML=rows.map(function(r){
       var sr=Math.round((r.success_rate||0)*100);
       var srColor=sr>=95?'#16a34a':sr>=80?'#d97706':'#dc2626';

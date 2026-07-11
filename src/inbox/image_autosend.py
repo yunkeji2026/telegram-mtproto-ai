@@ -21,6 +21,7 @@ import logging
 import os
 import threading
 import time
+from collections import OrderedDict
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -227,8 +228,146 @@ async def stage_image_file(
         return None
 
 
+# ── 注册相册（DB）优先：关键词命中/通用池秒发预制图/视频，零生成成本 ──────────
+# 每会话「上一条发出的注册媒体 id」——加权轮播时避重（bounded LRU，防连发同一张）。
+_LAST_SENT: "OrderedDict[str, str]" = OrderedDict()
+_LAST_SENT_CAP = 4000
+_LAST_SENT_LOCK = threading.Lock()
+
+
+def last_media_sent(conv_key: str) -> str:
+    with _LAST_SENT_LOCK:
+        return _LAST_SENT.get(str(conv_key or ""), "")
+
+
+def note_media_sent(conv_key: str, media_id: str) -> None:
+    if not conv_key or not media_id:
+        return
+    with _LAST_SENT_LOCK:
+        _LAST_SENT[str(conv_key)] = str(media_id)
+        _LAST_SENT.move_to_end(str(conv_key))
+        while len(_LAST_SENT) > _LAST_SENT_CAP:
+            _LAST_SENT.popitem(last=False)
+
+
+def pick_registered_media(
+    config: Dict[str, Any], persona_id: str, peer_text: str, *,
+    avoid_id: str = "", bond_level: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
+    """查该人设注册相册：关键词命中，或（是泛化「要照片/自拍」请求时）通用池。命中返回行 dict。
+
+    关键词触发**独立于** selfie/object 意图——运营给某条视频配 ``跳舞`` 触发词，客户说
+    "给我跳个舞" 就命中，无需它是"自拍/物体图"请求。泛化要图（``detect_selfie_request``）则
+    额外放开无触发词的通用相册池（对齐老"随机挑自拍"）。
+    """
+    scfg = resolve_image_autosend_cfg(config)
+    if not scfg.get("enabled", False):
+        return None
+    try:
+        from src.ai.companion_selfie import detect_selfie_request
+        from src.companion.persona_media import pick_media
+        from src.companion.persona_media_store import get_persona_media_store
+    except Exception:
+        return None
+    store = get_persona_media_store()
+    if store is None:
+        return None
+    generic_ok = bool(detect_selfie_request(str(peer_text or "")))
+    return pick_media(
+        store, str(persona_id or ""), str(peer_text or ""),
+        generic_ok=generic_ok, avoid_id=avoid_id, bond_level=bond_level)
+
+
+def media_caption(row: Optional[Dict[str, Any]], lang: str = "", *, fallback: str = "") -> str:
+    try:
+        from src.companion.persona_media import caption_for
+        return caption_for(row, lang, fallback=fallback)
+    except Exception:
+        return str((row or {}).get("caption") or "").strip() or fallback
+
+
+async def run_autosend_image(
+    config: Dict[str, Any], platform: str, account_id: str, chat_key: str,
+    persona_id: str, peer_text: str, history: Optional[List[Dict[str, Any]]], *,
+    send_fn: Callable[[str, str, str, str, str], Awaitable[bool]],
+    ai_text: str = "", llm_refine: Optional[Callable[[], Awaitable[str]]] = None,
+    conv_key: str = "", lang: str = "",
+) -> bool:
+    """autosend「按需发图」总编排（可单测）：注册相册优先（关键词/通用池，图/视频秒发），
+    否则回落生成（selfie 相册/openai、物体图 text2img）。任一步真发出即返回 True（跳过语音/文本）。
+
+    ``send_fn(media_path, media_url, media_type, caption, inbox_text) -> awaitable[bool]``
+    由调用方提供（负责编排器发送 + 事件循环 marshalling）。
+    """
+    scfg = resolve_image_autosend_cfg(config)
+    if not scfg.get("enabled", False):
+        return False
+    ck = conv_key or f"{platform}:{account_id}:{chat_key}"
+
+    # 1) 注册相册优先（DB）——关键词命中或泛化要图的通用池；图/视频均可，秒发零成本。
+    row = pick_registered_media(config, persona_id, peer_text, avoid_id=last_media_sent(ck))
+    if row:
+        local = str(row.get("file_path") or "")
+        url = str(row.get("url") or "")
+        mt = str(row.get("media_type") or "photo")
+        cap = media_caption(row, lang, fallback="") or str(ai_text or "")
+        if local or url:
+            tag = "[视频] " if mt == "video" else "[图片] "
+            try:
+                ok = bool(await send_fn(local, url, mt, cap, (tag + (cap or "")).strip()))
+            except Exception:
+                logger.debug("[image_autosend] 注册媒体投递异常", exc_info=True)
+                ok = False
+            if ok:
+                note_media_sent(ck, str(row.get("id")))
+                try:
+                    from src.companion.persona_media_store import get_persona_media_store
+                    st = get_persona_media_store()
+                    if st is not None:
+                        st.record_hit(str(row.get("id")))
+                except Exception:
+                    pass
+                record_image_sent(mt)
+                logger.info(
+                    "[autosend image] 已发相册媒体 platform=%s acct=%s type=%s id=%s",
+                    platform, account_id, mt, row.get("id"))
+                return True
+            record_image_fallback("registry_deliver_failed")
+
+    # 2) 回落生成（原有：selfie 相册/openai img2img、物体图 text2img）。
+    directive = plan_autosend_image(peer_text, history, scfg)
+    if not directive:
+        return False
+    staged = await stage_image_file(
+        config, platform, account_id, persona_id, directive, llm_refine=llm_refine)
+    if not staged:
+        record_image_fallback("stage_failed")
+        return False
+    local, url, kind = staged
+    if kind == KIND_OBJECT:
+        cap = str(scfg.get("contextual_caption") or "")
+    else:
+        cap = str(scfg.get("caption") or "")
+    cap = cap or str(ai_text or "")
+    try:
+        ok = bool(await send_fn(local, url, "image", cap, ("[图片] " + (cap or "")).strip()))
+    except Exception:
+        logger.debug("[image_autosend] 生成图投递异常", exc_info=True)
+        ok = False
+    if ok:
+        record_image_sent(kind)
+        logger.info(
+            "[autosend image] 已发图(生成) platform=%s acct=%s kind=%s",
+            platform, account_id, kind)
+    else:
+        record_image_fallback("deliver_failed")
+    return ok
+
+
 __all__ = [
     "KIND_SELFIE", "KIND_OBJECT",
     "resolve_image_autosend_cfg", "plan_autosend_image", "stage_image_file",
+    "pick_registered_media", "media_caption", "run_autosend_image",
+    "last_media_sent", "note_media_sent",
     "record_image_sent", "record_image_fallback", "metrics_snapshot",
 ]

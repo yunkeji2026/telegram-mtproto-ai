@@ -407,6 +407,13 @@ def register_account_routes(app, *, api_auth, config_manager=None) -> None:
         _reply_to = (body or {}).get("reply_to")
         if not isinstance(_reply_to, dict):
             _reply_to = None
+        # P4-11D：群提及明细 [{jid,number}]（Node 从 contextInfo.mentionedJid 归一）
+        _mentions = (body or {}).get("mentions")
+        if not isinstance(_mentions, list):
+            _mentions = None
+        # P4-11E：群发言人结构化字段（Node 从 participant/pushName 归一）
+        _sender_id = str((body or {}).get("sender_id") or "")
+        _sender_name = str((body or {}).get("sender_name") or "")
         _avatar_url = str((body or {}).get("avatar_url") or "")
         # 陌生人「消息请求」策略（Messenger 网页 poller 携带 is_request/request_category）：
         # 产品口径——「可能认识(general)」→ 进收件箱且**人设自动 AI 回**（仍受风险闸门约束，
@@ -445,6 +452,10 @@ def register_account_routes(app, *, api_auth, config_manager=None) -> None:
             reply_to=_reply_to,
             phone=_phone,
             avatar_url=_avatar_url,
+            mentioned=bool((body or {}).get("mentioned")),
+            mentions=_mentions,
+            sender_id=_sender_id,
+            sender_name=_sender_name,
         )
         # 群聊不进自动回复（自动回复面向 1:1）。spam 类陌生人请求只入收件箱、不自动回。
         if direction == "in" and _chat_type != "group" and not _is_spam_request:
@@ -458,6 +469,52 @@ def register_account_routes(app, *, api_auth, config_manager=None) -> None:
                 msg_id=str((body or {}).get("msg_id") or ""),
             ))
         return {"ok": bool(cid), "conversation_id": cid or ""}
+
+    @app.post("/api/internal/protocol/session-status")
+    async def api_protocol_session_status(request: Request):
+        """内部桥（P0-2 会话健康闭环）：外部 worker（messenger-web 等）主动 push 会话
+        状态转移（authorized / needs_login / expired / logged_out / failed）。
+
+        落 ``PlatformSessionHealth`` 登记表（→ workspace metrics / Prometheus / ops 卡），
+        「进入不健康 / 恢复」两类转移经 EventBus 发 ``platform_session_alert``
+        （告警渠道订阅别名 ``platform_session``；notifier 自带每小时限流去重）。
+        """
+        api_auth(request)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        plat = str((body or {}).get("platform") or "").lower()
+        status = str((body or {}).get("status") or "").lower()
+        acct = str((body or {}).get("account_id") or "")
+        login_id = str((body or {}).get("login_id") or "")
+        detail = str((body or {}).get("detail") or "")
+        if not plat or not status:
+            return {"ok": False, "reason": "missing_field"}
+        from src.integrations.platform_session_health import (
+            get_platform_session_health,
+        )
+        trans = get_platform_session_health().record(
+            plat, acct or login_id, status, detail=detail, login_id=login_id)
+        if trans.get("went_unhealthy") or trans.get("recovered"):
+            try:
+                from src.integrations.shared.event_bus import get_event_bus
+                get_event_bus().publish("platform_session_alert", {
+                    "platform": plat,
+                    "account_id": acct or login_id,
+                    "login_id": login_id,
+                    "status": status,
+                    "detail": detail,
+                    "recovered": bool(trans.get("recovered")),
+                    # notifier 限流判别符：多账号同小时先后掉线各自成键，
+                    # 互不挤占每小时一条的窗口。
+                    "rate_key": f"{plat}:{acct or login_id}",
+                })
+            except Exception:
+                logger.debug("[protocol] 会话健康告警发布失败", exc_info=True)
+        return {"ok": True, "changed": bool(trans.get("changed")),
+                "went_unhealthy": bool(trans.get("went_unhealthy")),
+                "recovered": bool(trans.get("recovered"))}
 
     @app.post("/api/internal/protocol/contacts")
     async def api_protocol_contacts(request: Request):
@@ -787,6 +844,52 @@ def register_account_routes(app, *, api_auth, config_manager=None) -> None:
             except Exception:
                 logger.debug("[protocol] message_op 事件发布失败", exc_info=True)
         return {"ok": ok}
+
+    @app.get("/api/platforms/{platform}/{account_id}/group-members")
+    async def api_platform_group_members(platform: str, account_id: str, request: Request):
+        """群成员名单（P4-11，供收件箱 @提及选人面板）。
+
+        query: chat_key=群号(digits)。仅 WhatsApp 协议号；成员名优先用已同步通讯录名，
+        否则回落号码。best-effort——取不到（未在线/非群/无权限）返回空 members。
+        """
+        api_auth(request)
+        platform = str(platform or "").lower()
+        if platform != "whatsapp":
+            return {"ok": False, "reason": "unsupported_platform", "members": []}
+        chat_key = str(request.query_params.get("chat_key") or "").strip()
+        if not chat_key:
+            return {"ok": False, "reason": "missing_chat_key", "members": []}
+        cfg = (config_manager.config if config_manager is not None else {}) or {}
+        from src.integrations.whatsapp_baileys_login import (
+            protocol_enabled as wa_enabled, service_base_url, _get_json,
+        )
+        if not wa_enabled(cfg):
+            return {"ok": False, "reason": "protocol_disabled", "members": []}
+        try:
+            res = await _get_json(
+                f"{service_base_url(cfg)}/accounts/{account_id}/group-members"
+                f"?jid={chat_key}")
+        except Exception:
+            logger.debug("[protocol] 取群成员失败", exc_info=True)
+            return {"ok": False, "reason": "service_error", "members": []}
+        raw = (res or {}).get("members") or []
+        store = getattr(request.app.state, "inbox_store", None)
+        members: List[Dict[str, Any]] = []
+        for m in raw:
+            num = str((m or {}).get("number") or "").strip()
+            if not num:
+                continue
+            name = ""
+            if store is not None:
+                try:
+                    name = store.get_protocol_contact_name(platform, account_id, num)
+                except Exception:
+                    name = ""
+            members.append({"jid": str((m or {}).get("jid") or ""),
+                            "number": num, "name": name or num,
+                            "admin": str((m or {}).get("admin") or "")})
+        return {"ok": bool((res or {}).get("ok", False)),
+                "subject": str((res or {}).get("subject") or ""), "members": members}
 
     @app.get("/api/platforms/{platform}/{account_id}/contacts")
     async def api_platform_contacts(platform: str, account_id: str, request: Request):

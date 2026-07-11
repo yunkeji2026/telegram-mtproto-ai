@@ -1846,7 +1846,11 @@ class LineRpaRunner:
 
     # ── P28：手动发送队列投递 ────────────────────────────────────
     async def run_send_queue_deliveries(self, max_deliver: int = 3) -> Dict[str, Any]:
-        """弹出并投递手动发送队列任务（P28 hook；P29 实现 UI 自动化）。"""
+        """弹出并投递手动/回落发送队列任务（P29：经 ``_handle_queued_send`` 真 UI 投递）。
+
+        每条 pop → ``_handle_queued_send`` 定位联系人并发送；成功 ``mark_send_queue_item(sent)``、
+        失败写 error。供 service._loop 每轮调用（紧随 run_once，故 serial 通常已解析）。
+        """
         out: Dict[str, Any] = {
             "delivered": 0, "failed": 0, "skipped": 0, "details": [],
         }
@@ -1885,12 +1889,147 @@ class LineRpaRunner:
         return out
 
     async def _handle_queued_send(self, item: Dict[str, Any]) -> Dict[str, Any]:
-        """P28 stub — P29 将实现完整的 UI 导航 + 发送逻辑。
+        """P29：手动/回落发送队列单条投递 —— 聊天列表定位联系人 → 点进 → 发送 → 回列表。
+
+        复用 ``run_pending_deliveries`` 同一 Navigator 定位链（goto_chat_list →
+        ``find_chat_row_by_name`` 含 1 次滚动重试 → open_unread_chat → ``_pace_and_send``），
+        避免为「主动发送」另造一套脆弱的 UI 自动化。成功后 outbound 入 ContactHooks +
+        更新 per-chat 状态，与既有回复路径同口径。
+
+        本方法只返回 ``{"ok": bool, "step"/"error"}``；send_queue 行的终态（sent/failed）
+        由调用方 ``run_send_queue_deliveries`` 统一落库。
 
         Returns {"ok": bool, "error": str | None}.
         """
-        # P29-TODO: implement LINE UI navigation and send for chat_key
-        return {"ok": False, "error": "not_implemented_p29"}
+        from src.integrations.line_rpa import chat_list_scanner as cls_mod
+
+        chat_key = str(item.get("chat_key") or "")
+        peer_name = str(item.get("peer_name") or "").strip()
+        text = str(item.get("text") or "").strip()
+        # 定位以「显示名」为准（LINE 列表按名匹配）；缺 peer_name 时回落 chat_key
+        name = peer_name or chat_key
+        if not text:
+            return {"ok": False, "error": "empty_text"}
+        if not name:
+            return {"ok": False, "error": "empty_target"}
+
+        # 设备就绪：run_send_queue_deliveries 紧随 run_once（通常已解析 serial），此处兜底
+        if not self._serial:
+            self._serial = self._resolve_serial()
+        if not self._serial:
+            return {"ok": False, "error": "no_adb_device"}
+
+        nav = self._build_navigator()
+        gl = await nav.goto_chat_list(max_steps=4)
+        if not gl.ok:
+            return {"ok": False, "error": f"nav_chat_list_failed:{gl.reason}"}
+
+        # 列表按名定位（1 次滚动重试），与 pending 投递同口径
+        dump_xml, _ = await nav._dump()  # type: ignore[attr-defined]
+        row = cls_mod.find_chat_row_by_name(dump_xml, name) if dump_xml else None
+        if row is None:
+            await nav.swipe_chat_list_down()
+            dump_xml, _ = await nav._dump()  # type: ignore[attr-defined]
+            row = (cls_mod.find_chat_row_by_name(dump_xml or b"", name)
+                   if dump_xml else None)
+        # 内置搜索兜底：深列表 / 归档会话滚动扫不到时，走 LINE 顶部搜索精确定位
+        if row is None:
+            row = await self._search_locate_row(nav, dump_xml, name)
+        if row is None:
+            return {"ok": False, "error": "chat_not_found"}
+
+        op = await nav.open_unread_chat(row)
+        if not op.ok:
+            await nav.back_to_chat_list()
+            return {"ok": False, "error": f"open_fail:{op.reason}"}
+
+        send_res = await self._pace_and_send(op.xml or b"", text)
+        if not send_res.get("ok"):
+            await nav.back_to_chat_list()
+            return {"ok": False,
+                    "error": f"send_failed:{send_res.get('error') or ''}"[:200]}
+
+        # W4-Runner：outbound 入库（send-queue 分支），与 pending 投递同口径
+        self._emit_contact_message(
+            chat_key=chat_key or name, direction="out", text=text,
+        )
+        if self._state_store is not None:
+            try:
+                self._state_store.update_chat_state(
+                    chat_key or name, last_reply=text[:2000],
+                )
+            except Exception:
+                logger.debug("update_chat_state(send_queue) 失败", exc_info=True)
+        await nav.back_to_chat_list()
+        return {"ok": True, "step": "sent"}
+
+    async def _search_locate_row(
+        self, nav: "Navigator", list_xml: Optional[bytes], name: str,
+    ) -> Optional["UnreadRow"]:
+        """P7：内置搜索兜底——列表滚动扫不到联系人时，走 LINE 顶部搜索精确定位。
+
+        找搜索入口 → 点开 → 输入名字（ADB 键盘，支持 CJK）→ 重扫结果行。找到即返回该行
+        （交由调用方 ``open_unread_chat`` 点进）；找不到则按 BACK 退出搜索、返回 None。
+        best-effort：任一步失败静默回 None，绝不把 runner 卡在搜索态（失败即 BACK 复位）。
+        """
+        from src.integrations.line_rpa import chat_list_scanner as cls_mod
+        if not list_xml:
+            return None
+        line_pkg = str(self._cfg_get("line_package", "jp.naver.line.android"))
+        entry = ui.find_search_entry(list_xml, line_pkg=line_pkg)
+        if entry is None:
+            return None
+        logger.info("[line_rpa] 手动发送：列表未找到 peer=%r，尝试 LINE 内置搜索", name)
+        try:
+            await nav.tap(*entry)
+            await asyncio.sleep(0.6)
+            typed = await self._type_search_query(name)
+            if not typed:
+                await nav.press_back()
+                return None
+            await asyncio.sleep(1.0)
+            results_xml, _ = await nav._dump()  # type: ignore[attr-defined]
+            row = (cls_mod.find_chat_row_by_name(results_xml, name)
+                   if results_xml else None)
+            if row is None:
+                await nav.press_back()  # 退出搜索模式，避免卡在搜索页
+            return row
+        except Exception:
+            logger.debug("[line_rpa] 搜索兜底异常（已忽略）", exc_info=True)
+            try:
+                await nav.press_back()
+            except Exception:
+                pass
+            return None
+
+    async def _type_search_query(self, name: str) -> bool:
+        """把联系人名输入 LINE 搜索框：ASCII 走 input text；CJK 走 ADB 键盘（base64）。"""
+        serial = self._serial
+        if not serial or not name:
+            return False
+
+        def _type() -> bool:
+            try:
+                if name.isascii():
+                    adb.input_text_ascii(serial, name)
+                    return True
+                if bool(self._cfg_get("use_adb_keyboard", True)):
+                    ime = str(self._cfg_get(
+                        "adb_keyboard_ime", "com.android.adbkeyboard/.AdbIME"))
+                    adb.ime_set_adb_keyboard(serial, ime)
+                    adb.wait_for_adb_keyboard_ready(serial)
+                    use_b64 = bool(self._cfg_get("adb_keyboard_prefer_b64", True))
+                    pkg = (self._cfg_get("adb_keyboard_package") or "").strip()
+                    br = adb.adb_keyboard_input_text(
+                        serial, name, use_base64=use_b64, package=pkg or None)
+                    return getattr(br, "returncode", 1) == 0
+                adb.input_text_ascii(serial, name)  # 无键盘时尽力（CJK 可能丢字）
+                return True
+            except Exception:
+                logger.debug("[line_rpa] 搜索输入失败", exc_info=True)
+                return False
+
+        return await asyncio.to_thread(_type)
 
     # ── 自动接受好友申请 ──────────────────────────────────────
     async def maybe_auto_accept_friends(self, max_accept: int = 5) -> Dict[str, Any]:

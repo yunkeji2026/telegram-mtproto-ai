@@ -201,7 +201,7 @@ def should_extract_intent(intent: str, ex_cfg: Dict[str, Any]) -> bool:
 
 class SkillManager(LoggerMixin):
     """Skill管理�?"""
-    
+
     def __init__(self, config, ai_client: AIClient):
         """
         # 初�化Skill管理�?
@@ -218,12 +218,12 @@ class SkillManager(LoggerMixin):
         ttl_days = int(config.config.get("context_store", {}).get("ttl_days", 30)
                        if hasattr(config, "config") else 30)
         self._context_store = ContextStore(db_path=cfg_dir / "bot.db", ttl_days=ttl_days)
-        
+
         # 从配���取��?        skills
         skills_config = config.get_skills_config()
         intent_config = config.get_intent_config()
         templates_config = config.get_templates_config()
-        
+
         # 冷却时间设置
         _cd = skills_config.get('cooldown', {}) or {}
         self.cooldown_per_user = _cd.get('per_user', 60)
@@ -240,14 +240,14 @@ class SkillManager(LoggerMixin):
         self._narrow_reply_cfg: Dict[str, Any] = {}
         if hasattr(config, "config") and isinstance(getattr(config, "config", None), dict):
             self._narrow_reply_cfg = dict((config.config or {}).get("narrow_reply") or {})
-        
+
         # 意图识别配置
         self.intent_keywords = intent_config.get('keywords', {})
         self.intent_patterns = intent_config.get('patterns', {})
-        
+
         # 回�模板
         self.templates = templates_config
-        
+
         # 回�策略系统（从��� YAML 文件加载，支�?mtime ���新）
         self._load_strategies_from_config()
 
@@ -345,7 +345,7 @@ class SkillManager(LoggerMixin):
             if reply:
                 return reply
         return random.choice(self._ai_fallback_replies)
-    
+
     def _load_strategies_from_config(self) -> None:
         """�?config_manager 加载策略配置（独�?YAML 文件，自动迁�?+ mtime ���新）"""
         if hasattr(self.config, 'get_strategies_config'):
@@ -783,6 +783,20 @@ class SkillManager(LoggerMixin):
                 self.logger.debug("growth command skipped", exc_info=True)
             if _growth_reply is not None:
                 return _growth_reply
+
+            # Stage 0：人设注册相册（DB 预制图/视频，按触发词命中即发）。先于生成，秒发零成本。
+            # 返回 ""=媒体已发出不再补文字；None=未命中/未开/发送不可用（交 Stage A/B）。
+            try:
+                _media_reply = await self._handle_persona_media_request(
+                    text, user_id_str, user_context, _chat_id
+                )
+            except Exception:
+                _media_reply = None
+                self.logger.debug("persona media request skipped", exc_info=True)
+            if _media_reply is not None:
+                self._context_store.mark_dirty(user_id_str)
+                self._context_store.flush(user_id_str)
+                return _media_reply or None
 
             # Stage A：形象照/自拍请求（「给我看看你」）。返回字符串=短路（搪塞/付费引导/
             # 出图配文/兜底）；""=媒体已发出不再补文字；None=非请求或功能未开。
@@ -1855,7 +1869,7 @@ class SkillManager(LoggerMixin):
             else:
                 self.logger.info(f"{log_prefix}�€�?{intent} 返回空，不回复（�€查技能�€�辑�?AI ���返回空）")
                 return None
-                
+
         except Exception as e:
             self.logger.error(f"处理消息失败: {e}")
             return None
@@ -2375,10 +2389,10 @@ class SkillManager(LoggerMixin):
     def _recognize_intent(self, text: str) -> str:
         """
         # 识别用户意图
-        
+
         Args:
             # text: 用户消息文本
-            
+
         Returns:
             # 意图名称
         """
@@ -2430,7 +2444,7 @@ class SkillManager(LoggerMixin):
     def _select_skill(self, intent: str, user_context: Dict[str, Any]) -> Optional['Skill']:
         """
         # 选择适合的Skill
-        
+
         Args:
             # intent: 意图名称 user_context: 用户上下�?
         Returns:
@@ -2439,15 +2453,15 @@ class SkillManager(LoggerMixin):
         # 直接匹配意图
         if intent in self.skills:
             return self.skills[intent]
-        
+
         # 尝试回退到默认技能
         default_skills = ['greeting', 'small_talk']
         for skill_name in default_skills:
             if skill_name in self.skills:
                 return self.skills[skill_name]
-        
+
         return None
-    
+
     def _check_cooldown(self, text: str, user_id: str, chat_id: Any = '') -> bool:
         """�€查冷却时间（per_chat_user 替代全局冷却�?"""
         current_time = time.time()
@@ -2499,7 +2513,7 @@ class SkillManager(LoggerMixin):
             return False
 
         return True
-    
+
     @staticmethod
     def _reply_similarity(a: str, b: str) -> float:
         """计算两条回�的字符级 Jaccard 相似度（去标点后的字�?bigram�?"""
@@ -2746,7 +2760,7 @@ class SkillManager(LoggerMixin):
         text_simple = text.lower().strip()
         raw = f"{chat_id}:{text_simple}" if chat_id else text_simple
         return hashlib.md5(raw.encode()).hexdigest()[:8]
-    
+
     def _get_user_context(self, user_id: str) -> Dict[str, Any]:
         """获取或创建用户上下文（持久化�?SQLite�?"""
         return self._context_store.get(user_id)
@@ -4389,6 +4403,74 @@ class SkillManager(LoggerMixin):
         except Exception:
             self.logger.debug("record_selfie_event skipped", exc_info=True)
 
+    async def _handle_persona_media_request(
+        self, text: str, user_id_str: str, user_context: Dict[str, Any], chat_id: Any,
+    ) -> Optional[str]:
+        """Stage 0：人设「注册相册」（DB）——运营在后台预制的图/视频，按触发词命中即发。
+
+        与 Stage A/B（生成）分工：这里发的是**已上传的现成媒体**（秒发、零出图成本、可含视频）。
+        命中语义（见 ``persona_media.pick_media``）：
+          - 条目带触发词且客户文本命中 → 精确发（**独立于**自拍/物体意图，如"跳个舞"→跳舞视频）；
+          - 泛化「要照片/自拍」请求（``detect_selfie_request``）→ 额外放开无触发词的通用相册池。
+        每条目可设 ``min_bond_level`` 关系闸门；命中即 ``record_hit`` + 会话内避重（不连发同一条）。
+        返回 ""=媒体已发出（不再补文字）；None=未命中/未开/发送不可用（交 Stage A/B/文字兜底）。
+        """
+        scfg = self._selfie_cfg()
+        if not scfg.get("enabled", False):
+            return None
+        try:
+            from src.ai.companion_selfie import detect_selfie_request
+            from src.companion.persona_media import caption_for, pick_media
+            from src.companion.persona_media_store import get_persona_media_store
+        except Exception:
+            return None
+        store = get_persona_media_store()
+        if store is None:
+            return None
+        pid = str(user_context.get("account_persona_id")
+                  or self._selfie_album_key(user_context) or "").strip()
+        if not pid:
+            return None
+        generic_ok = bool(detect_selfie_request(text))
+        try:
+            bond = int(self._bond_level_from_context(user_context, chat_id))
+        except Exception:
+            bond = None
+        avoid = str(user_context.get("_persona_media_last") or "")
+        try:
+            row = pick_media(store, pid, text, generic_ok=generic_ok,
+                             avoid_id=avoid, bond_level=bond)
+        except Exception:
+            row = None
+        if not row:
+            return None
+        mt = str(row.get("media_type") or "photo")
+        # 多语配文：优先客户当前消息语种（与后续 reply_lang 同源检测器），回落上一轮 reply_lang。
+        _lang = ""
+        try:
+            if hasattr(self.ai_client, "_detect_message_language"):
+                _lang = self.ai_client._detect_message_language(text) or ""
+        except Exception:
+            _lang = ""
+        if not _lang:
+            _lang = str(user_context.get("reply_lang") or "")
+        cap = caption_for(row, _lang, fallback="") or str(scfg.get("caption") or "")
+        sent = await self._try_send_selfie_media(
+            user_context, chat_id, str(row.get("file_path") or ""), cap,
+            media_type=("video" if mt == "video" else "image"),
+            media_url=str(row.get("url") or ""))
+        if sent:
+            user_context["_persona_media_last"] = str(row.get("id"))
+            try:
+                store.record_hit(str(row.get("id")))
+            except Exception:
+                pass
+            self.logger.info(
+                "[persona_media] 已发注册相册媒体 pid=%s type=%s id=%s",
+                pid, mt, row.get("id"))
+            return ""  # 媒体已发出，短路（不再补文字）
+        return None  # 发送不可用 → 交 Stage A/B/文字
+
     async def _handle_selfie_request(
         self, text: str, user_id_str: str, user_context: Dict[str, Any], chat_id: Any,
     ) -> Optional[str]:
@@ -4606,15 +4688,18 @@ class SkillManager(LoggerMixin):
 
     async def _try_send_selfie_media(
         self, user_context: Dict[str, Any], chat_id: Any,
-        image_path: str, caption: str,
+        image_path: str, caption: str, *,
+        media_type: str = "image", media_url: str = "",
     ) -> bool:
-        """best-effort 发出照片。① 编排器受管媒体 worker（B 线/受管账号）；
-        ② A 线主客户端直发（user_context 注入的 ``_send_photo_to_chat`` 回调）。
+        """best-effort 发出媒体（图/视频）。① 编排器受管媒体 worker（B 线/受管账号）；
+        ② A 线主客户端直发（``_send_photo_to_chat`` / 视频用 ``_send_video_to_chat`` 回调）。
 
         两路都不可用 → False（调用方退回文字陪伴）。任一路成功即 True。
+        ``media_type='video'`` 时经编排器发视频；A 线仅在注入了视频回调时才发，否则 False（回落）。
         """
-        if not image_path:
+        if not image_path and not media_url:
             return False
+        _mt = "video" if str(media_type or "").lower() == "video" else "image"
         # ① 编排器受管媒体 worker（需 platform+account+chat_key 且 owns_media）
         try:
             platform = str(user_context.get("platform") or "").strip()
@@ -4627,15 +4712,20 @@ class SkillManager(LoggerMixin):
                 if orch.owns_media(platform, account_id):
                     await orch.send_media(
                         platform, account_id, chat_key,
-                        media_path=image_path, media_url="", media_type="image",
+                        media_path=image_path, media_url=media_url, media_type=_mt,
                         caption=caption)
                     return True
         except Exception:
             self.logger.debug("selfie orchestrator media send failed", exc_info=True)
-        # ② A 线主客户端直发（Pyrogram send_photo 经回调注入；主平台 Telegram 无受管 worker 时兜底）
+        # ② A 线主客户端直发（Pyrogram 经回调注入；主平台 Telegram 无受管 worker 时兜底）
         try:
+            if _mt == "video":
+                vsender = user_context.get("_send_video_to_chat")
+                if callable(vsender) and image_path:
+                    return bool(await vsender(chat_id, image_path, caption))
+                return False  # A 线未注入视频回调 → 交回落（不误当照片发）
             sender = user_context.get("_send_photo_to_chat")
-            if callable(sender):
+            if callable(sender) and image_path:
                 ok = await sender(chat_id, image_path, caption)
                 return bool(ok)
         except Exception:
@@ -5065,7 +5155,7 @@ class SkillManager(LoggerMixin):
                             chat_id: Any = '', user_msg: str = ''):
         """回�后更新状�?"""
         current_time = time.time()
-        
+
         # Fix D: sanitize reply before persisting (any failure must NOT break the pipeline)
         try:
             _clean_reply = self._sanitize_assistant_reply(reply, user_context)
@@ -5138,10 +5228,10 @@ class SkillManager(LoggerMixin):
         self.global_last_reply_time = current_time
         if chat_id:
             self._chat_user_last_reply[f"{chat_id}_{user_id}"] = current_time
-        
+
         content_hash = self._hash_content(user_context.get('last_message', ''), chat_id)
         self.reply_cache[content_hash] = current_time
-        
+
         # L4: 更新用户画像标�
         self._update_user_profile(user_context, current_time)
 
@@ -5150,11 +5240,11 @@ class SkillManager(LoggerMixin):
 
         # J1: �€测是否需要人工升�?
         self._check_escalation(user_id, user_context, chat_id, current_time)
-        
+
         self._context_store.mark_dirty(user_id)
         if int(current_time) % 5 == 0:
             self._context_store.flush(user_id)
-        
+
         self._cleanup_cache()
 
     # �€�€ H3: 意图链模式��?�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€�€
@@ -5671,7 +5761,7 @@ class SkillManager(LoggerMixin):
         """清理过期的缓存条�?"""
         current_time = time.time()
         expire_time = current_time - 3600
-        
+
         keys_to_remove = [k for k, ts in self.reply_cache.items() if ts < expire_time]
         for key in keys_to_remove:
             del self.reply_cache[key]
@@ -5685,7 +5775,7 @@ class SkillManager(LoggerMixin):
             unlocked = [k for k, v in self._user_locks.items() if not v.locked()]
             for k in unlocked[:100]:
                 del self._user_locks[k]
-    
+
     async def cleanup(self):
         """清理资源"""
         self._context_store.flush_all()

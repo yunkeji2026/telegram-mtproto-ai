@@ -17,7 +17,7 @@ from typing import Any, Dict, Optional
 
 class SpeechEmotionStats:
     __slots__ = ("_lock", "_total", "_ok", "_confident", "_unavailable",
-                 "_by_emotion", "_started_at", "_last_ts")
+                 "_remote", "_by_emotion", "_started_at", "_last_ts")
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -25,12 +25,13 @@ class SpeechEmotionStats:
         self._ok = 0             # 模型成功返回（不含软降级）
         self._confident = 0      # 达到 min_confidence 的有效声学信号
         self._unavailable = 0    # 不可用/加载失败/异常 → 软降级次数
+        self._remote = 0         # 其中走远程 GPU SER（176）成功的次数
         self._by_emotion: Dict[str, int] = {}  # 置信命中的情绪分布 {sad:N, ...}
         self._started_at = time.time()
         self._last_ts = 0.0
 
     def record(self, *, ok: bool, emotion: str = "",
-               confident: bool = False) -> None:
+               confident: bool = False, remote: bool = False) -> None:
         """记一次识别。``emotion`` 为标准英文类名（仅在 confident 时计入分布）。"""
         try:
             emo = str(emotion or "").strip().lower()
@@ -41,6 +42,8 @@ class SpeechEmotionStats:
             self._last_ts = time.time()
             if ok:
                 self._ok += 1
+                if remote:
+                    self._remote += 1
                 if confident and emo:
                     self._confident += 1
                     self._by_emotion[emo] = self._by_emotion.get(emo, 0) + 1
@@ -57,6 +60,7 @@ class SpeechEmotionStats:
                 "ok": int(self._ok),
                 "confident": int(self._confident),
                 "unavailable": int(self._unavailable),
+                "remote": int(self._remote),
                 "unavailable_rate": round(self._unavailable / total, 4) if total else 0,
                 "by_emotion": dict(sorted(self._by_emotion.items())),
             }
@@ -69,6 +73,8 @@ class SpeechEmotionStats:
             "# TYPE speech_emotion_ok_total counter",
             "# HELP speech_emotion_unavailable_total SER calls that soft-degraded",
             "# TYPE speech_emotion_unavailable_total counter",
+            "# HELP speech_emotion_remote_total SER calls served by remote GPU",
+            "# TYPE speech_emotion_remote_total counter",
             "# HELP speech_emotion_by_emotion_total Confident SER hits by emotion",
             "# TYPE speech_emotion_by_emotion_total counter",
         ]
@@ -76,6 +82,7 @@ class SpeechEmotionStats:
             lines.append(f"speech_emotion_total {self._total}")
             lines.append(f"speech_emotion_ok_total {self._ok}")
             lines.append(f"speech_emotion_unavailable_total {self._unavailable}")
+            lines.append(f"speech_emotion_remote_total {self._remote}")
             for emo, n in sorted(self._by_emotion.items()):
                 lines.append(
                     f'speech_emotion_by_emotion_total{{emotion="{_esc(emo)}"}} {int(n)}')
@@ -87,6 +94,7 @@ class SpeechEmotionStats:
             self._ok = 0
             self._confident = 0
             self._unavailable = 0
+            self._remote = 0
             self._by_emotion.clear()
             self._last_ts = 0.0
 

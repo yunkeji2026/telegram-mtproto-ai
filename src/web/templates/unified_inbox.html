@@ -215,6 +215,9 @@
 
 /* ===== 会话列表 ===== */
 .conv-list-panel{display:flex;flex-direction:column;background:var(--bg-panel);border-right:1px solid var(--border);overflow:hidden;}
+/* P0-5：平台自动化降级提示条（服务端注入；amber 语义令牌，日夜自适配） */
+.plat-pause-note{flex-shrink:0;padding:7px 14px;background:rgba(217,119,6,.12);border-bottom:1px solid var(--border);font-size:11px;color:var(--tk-warn-ink);line-height:1.6;}
+.plat-pause-note b{font-weight:700;}
 .list-header{padding:12px 14px 8px;border-bottom:1px solid var(--border);flex-shrink:0;transition:padding .2s ease;}
 .list-title{font-size:15px;font-weight:700;color:var(--text-main);margin-bottom:10px;display:flex;align-items:center;gap:6px;}
 .list-title-main{display:inline-flex;align-items:center;gap:6px;min-width:0;flex:1;}
@@ -1150,6 +1153,16 @@
 /* P26: / 命令面板 */
 .slash-panel{position:absolute;bottom:100%;left:0;right:0;background:var(--bg-elev);border:1px solid var(--border);border-radius:10px 10px 0 0;box-shadow:0 -8px 24px rgba(0,0,0,.12);max-height:280px;overflow-y:auto;z-index:50;display:none;}
 .slash-panel.show{display:block;}
+.mention-panel{position:absolute;bottom:100%;left:0;right:0;background:var(--bg-elev);border:1px solid var(--border);border-radius:10px 10px 0 0;box-shadow:0 -8px 24px rgba(0,0,0,.12);max-height:240px;overflow-y:auto;z-index:50;display:none;}
+.mention-panel.show{display:block;}
+.mention-item{padding:7px 12px;display:flex;justify-content:space-between;gap:10px;cursor:pointer;font-size:13px;align-items:center;}
+.mention-item.active,.mention-item:hover{background:var(--bubble-in,#eff6ff);}
+.mention-item .mn-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.mention-item .mn-num{color:var(--text-tiny);font-size:11px;flex:none;}
+/* P4-11B 群消息气泡内 @提及高亮：用当前文字色 + 加粗下划线，收发气泡（浅/深底）皆清晰 */
+.msg-at{font-weight:700;text-decoration:underline;text-underline-offset:2px;}
+/* P4-11E 群入站气泡发言人名（内联色来自 _speakerColor，每人稳定一色，对齐官方群聊读感）*/
+.msg-speaker{font-size:11px;font-weight:700;line-height:1.2;margin-bottom:2px;}
 .slash-panel-hdr{padding:6px 12px;font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;}
 /* P42: AI 副驾补全 */
 .copilot-panel{position:absolute;bottom:100%;left:0;right:0;background:var(--bg-elev);border:1px solid var(--border);border-radius:10px 10px 0 0;box-shadow:0 -6px 20px rgba(0,0,0,.1);z-index:49;display:none;}
@@ -1203,6 +1216,22 @@
 
   <!-- 中间：会话列表 -->
   <div class="conv-list-panel">
+    {% if platform_mode_caps or platform_draft_skips %}
+    <!-- P0-5 可见化：平台自动化降级/暂停提示（服务端按 inbox.auto_draft 配置注入） -->
+    <div class="plat-pause-note" id="plat-pause-note">
+      {% for p, m in (platform_mode_caps or {}).items() %}
+      <div class="plat-pause-row">⏸️ <b>{{ p|capitalize }}</b>：
+        {%- if m == 'review' %}<span data-i18n="inbox.plat_pause.review">AI 只拟稿，人工审核后发送</span>
+        {%- elif m == 'multi_choice' %}<span data-i18n="inbox.plat_pause.multi">AI 出多选草稿，人工挑选发送</span>
+        {%- elif m == 'manual' %}<span data-i18n="inbox.plat_pause.manual">AI 拟稿已暂停，仅人工回复</span>
+        {%- else %}<span data-i18n="inbox.plat_pause.capped">自动化档位已被平台上限限制</span>
+        {%- endif %}</div>
+      {% endfor %}
+      {% for p in (platform_draft_skips or []) %}
+      <div class="plat-pause-row">⏸️ <b>{{ p|capitalize }}</b>：<span data-i18n="inbox.plat_pause.skipped">自动草稿已停用，仅人工回复</span></div>
+      {% endfor %}
+    </div>
+    {% endif %}
     <!-- Phase 18: 保存视图栏 -->
     <div class="saved-views-bar" id="saved-views-bar"></div>
 
@@ -1408,6 +1437,8 @@
               </div>
               <div id="slash-items"></div>
             </div>
+            <!-- P4-11 群 @提及：群会话里输入 @ 弹成员选择 -->
+            <div class="mention-panel" id="mention-panel"></div>
             <!-- P42: AI 副驾补全面板 -->
             <div class="copilot-panel" id="copilot-panel">
               <div class="copilot-hdr">
@@ -3222,7 +3253,7 @@ function _detectNewGroupMentions(){
     if(!isGroupConv(c) || !c.mentioned) return;
     const key=convKey(c);
     if(_groupMutes.has(key)) return;        // 静音群不提醒
-    if(key===selectedKey) return;           // 正在看的群不提醒
+    if(key===selectedKey){ _clearMention(c); return; }  // 正在看的群：@我 即时清旗标，不提醒
     if(_groupMentionSeen.has(key)) return;  // 已提醒过
     _groupMentionSeen.add(key);
     _toast(window.Tf('inbox.group.mentioned',{name:(c.name||c.chat_key||window.T('inbox.group.fallback_name'))}),'#f97316');
@@ -3326,6 +3357,10 @@ function selectChat(key){
 
   // 清除该会话的未读气泡（打开即视为已读）
   _clearUnread(c);
+  // P4-11B：打开群会话即视为「看到点名」→ 清「@我」旗标（本地即时 + 服务端持久，共享收件箱同口径）
+  _clearMention(c);
+  // P4-11C：惰性拉群成员名单，让消息气泡里的 @号码 显示成 @名字
+  _hydrateGroupMentions(c);
 
   _xlCache.clear();            // P55: 切换会话清空翻译缓存
   _outOrigMap.clear();         // P0: 切换会话清空出向原文映射
@@ -4009,7 +4044,7 @@ function _renderHdrTags(c){
   const addWrap=document.createElement('div');
   addWrap.className='tag-input-wrap';
   addWrap.style.position='relative';
-  addWrap.innerHTML=`<input class="tag-add-input" id="tag-add-input" placeholder="${window.T('inbox.tag.add_ph')}" 
+  addWrap.innerHTML=`<input class="tag-add-input" id="tag-add-input" placeholder="${window.T('inbox.tag.add_ph')}"
     oninput="_showTagSuggestions(this.value)"
     onkeydown="_tagInputKey(event)"
     onfocus="_showTagSuggestions(this.value)">
@@ -4864,12 +4899,95 @@ async function _onReplyInput(val){
     await _loadSlashItems(q);
     _showSlashPanel(true);
     _hideCopilot();
+    _hideMentionPanel();
   } else {
     _showSlashPanel(false);
-    _copilotDebounce(val);  // P42
+    // P4-11 群 @提及：命中 @token 则弹选人面板并抑制 copilot；否则常规 copilot
+    if(_maybeShowMention(val)){ _hideCopilot(); }
+    else { _copilotDebounce(val); }
   }
   // 打字状态（现有逻辑）
   _publishTyping?.();
+}
+
+/* ===== P4-11B 群「@我」旗标清除（打开会话即已看到点名） ===== */
+function _clearMention(c){
+  if(!c || !c.mentioned) return;
+  c.mentioned=false;
+  const idx=allChats.findIndex(ch=>convKey(ch)===convKey(c));
+  if(idx>=0) allChats[idx].mentioned=false;
+  try{ renderGroupSection(); }catch(_){}
+  const cid=c.conversation_id||convKey(c);
+  try{
+    fetch('/api/workspace/conversation/'+encodeURIComponent(cid)+'/seen-mention',
+      {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).catch(()=>{});
+  }catch(_){}
+}
+
+/* ===== P4-11 群 @提及 ===== */
+let _mentionMembers=[], _mentionChatKey='', _mentionActive=false, _mentionIdx=0, _mentionFiltered=[];
+let _mentionPicked=[];   // 本次编辑已选成员的完整 jid（含 @lid / @s.whatsapp.net，随发送透传）
+let _mentionNameMap={};  // P4-11C：当前群 {号码/LID本地部分: 名字}，供入站气泡 @号码→@名字
+function _maybeShowMention(val){
+  if(!selectedChat || selectedChat.platform!=='whatsapp' || (selectedChat.chat_type||'')!=='group'){ _hideMentionPanel(); return false; }
+  const m=/(?:^|\s)@([^\s@]*)$/.exec(val||'');
+  if(!m){ _hideMentionPanel(); return false; }
+  const q=(m[1]||'').toLowerCase();
+  _ensureGroupMembers().then(()=>{ _renderMentionPanel(q); });
+  return true;
+}
+async function _ensureGroupMembers(){
+  const ck=(selectedChat&&selectedChat.chat_key)||'';
+  if(ck && ck===_mentionChatKey && _mentionMembers.length) return;
+  _mentionChatKey=ck; _mentionMembers=[]; _mentionNameMap={};
+  try{
+    const r=await fetch('/api/platforms/whatsapp/'+encodeURIComponent((selectedChat&&selectedChat.account_id)||'default')+'/group-members?chat_key='+encodeURIComponent(ck));
+    const d=await r.json().catch(()=>({}));
+    if(d&&Array.isArray(d.members)){
+      _mentionMembers=d.members;
+      _buildMentionNameMap();
+    }
+  }catch(_){}
+}
+function _buildMentionNameMap(){
+  const m={};
+  for(const mm of _mentionMembers){ if(mm&&mm.number) m[String(mm.number)]=mm.name||mm.number; }
+  _mentionNameMap=m;
+}
+/* P4-11C：打开群会话时惰性拉成员名单建 号码→名字 map；载入后重渲染让 @号码 变 @名字。 */
+function _hydrateGroupMentions(c){
+  if(!c || c.platform!=='whatsapp' || (c.chat_type||'')!=='group') return;
+  _ensureGroupMembers().then(()=>{
+    if(selectedChat && convKey(selectedChat)===convKey(c)
+       && Array.isArray(threadMsgs) && threadMsgs.length){
+      // silent：仅当已在底部才滚，避免向上翻历史时被这次后台重渲染打断
+      try{ renderMessages(selectedChat, threadMsgs, {silent:true}); }catch(_){}
+    }
+  });
+}
+function _renderMentionPanel(q){
+  _mentionFiltered=_mentionMembers.filter(mm=>!q||String(mm.name||'').toLowerCase().includes(q)||String(mm.number||'').includes(q)).slice(0,50);
+  if(_mentionIdx>=_mentionFiltered.length) _mentionIdx=0;
+  _paintMention();
+}
+function _paintMention(){
+  const panel=document.getElementById('mention-panel'); if(!panel) return;
+  if(!_mentionFiltered.length){ _hideMentionPanel(); return; }
+  panel.innerHTML=_mentionFiltered.map((mm,i)=>`<div class="mention-item${i===_mentionIdx?' active':''}" onclick="_pickMention(${i})"><span class="mn-name">${esc(mm.name||mm.number)}</span><span class="mn-num">+${esc(mm.number)}</span></div>`).join('');
+  panel.classList.add('show'); _mentionActive=true;
+}
+function _hideMentionPanel(){
+  const p=document.getElementById('mention-panel'); if(p){ p.classList.remove('show'); p.innerHTML=''; }
+  _mentionActive=false; _mentionIdx=0; _mentionFiltered=[];
+}
+function _pickMention(i){
+  const mm=_mentionFiltered[i]; if(!mm) return;
+  const ta=document.getElementById('reply-ta'); if(!ta) return;
+  // 正文插 @<号码>（收方客户端渲染成名字）；同时记完整 jid 供发送透传（兼容 @lid 群）
+  ta.value=ta.value.replace(/(^|\s)@([^\s@]*)$/, (mt,pre)=>pre+'@'+mm.number+' ');
+  if(mm.jid && _mentionPicked.indexOf(mm.jid)<0) _mentionPicked.push(mm.jid);
+  _hideMentionPanel();
+  ta.focus();
 }
 
 // P42/P49: AI 副驾（阶段 / 工作链 / @mention 联动）
@@ -5178,6 +5296,37 @@ function _deliveryTick(status){
 // P4-8：WhatsApp 编辑/撤回时间窗（秒）——超窗前端即不挂对应按钮（客户端启发式，最终以 WA 为准）
 const _WA_EDIT_WINDOW_SEC=15*60;          // 编辑约 15 分钟
 const _WA_REVOKE_WINDOW_SEC=2*24*3600;    // 撤回(删给所有人)约 2 天
+// P4-11B：群消息气泡里高亮 WhatsApp 原生 @号码 token（纯数字，esc 不影响 → 安全；
+// 名字形态不处理以免破坏 HTML 转义）。入参须为**已 esc** 的文本。
+/* ===== P4-11E 群发言人稳定色（按 jid/名字哈希取色，对齐官方群聊「每人一色」）===== */
+const _SPEAKER_COLORS=['#dc2626','#16a34a','#2563eb','#ea580c','#9333ea','#0891b2',
+  '#c026d3','#65a30d','#0d9488','#d97706','#db2777','#4f46e5'];
+function _speakerColor(key){
+  const s=String(key||'');
+  let h=0; for(let i=0;i<s.length;i++){ h=(h*31+s.charCodeAt(i))>>>0; }
+  return _SPEAKER_COLORS[h%_SPEAKER_COLORS.length];
+}
+function _hlMentions(escText, m){
+  // 名字来源优先级（P4-11D → P4-11C 回落）：
+  //   ① 本消息持久的提及明细 m.mentions（离线可读、LID 群按号码精确对应）
+  //   ② 当前群实时成员名单 _mentionNameMap（打开会话惰性拉取）
+  //   ③ 回落显示号码
+  // 原号码始终保留在 title 悬浮；入参 escText 须已 esc，绝不破坏原始文本转义。
+  const useLive=_mentionChatKey && selectedChat && _mentionChatKey===selectedChat.chat_key;
+  let msgMap=null;
+  if(m && Array.isArray(m.mentions) && m.mentions.length){
+    msgMap={};
+    for(const mm of m.mentions){ if(mm&&mm.number) msgMap[String(mm.number)]=mm.name||mm.number; }
+  }
+  return String(escText).replace(/@(\d{5,})/g,(mt,num)=>{
+    let nm=msgMap?msgMap[num]:'';
+    if(!nm && useLive) nm=_mentionNameMap[num];
+    if(nm && String(nm)!==String(num)){
+      return '<span class="msg-at" title="@'+num+'">@'+esc(nm)+'</span>';
+    }
+    return '<span class="msg-at">@'+num+'</span>';
+  });
+}
 function renderMessages(c, msgs, opts={}){
   const el=document.getElementById('msg-area');
   // 智能滚动：记录当前是否已在底部（阈值 60px）
@@ -5247,7 +5396,11 @@ function renderMessages(c, msgs, opts={}){
     const failClass=m._failed?' style="border:1px solid #fca5a5;"':'';
     // Phase 13：媒体内容渲染
     const mediaHtml=_renderMediaContent(m);
-    const textBody=m.text?`<span>${esc(m.text)}</span>`:'';
+    const _isGrp=selectedChat&&(selectedChat.chat_type||'')==='group';
+    const textBody=m.text?`<span>${_isGrp?_hlMentions(esc(m.text),m):esc(m.text)}</span>`:'';
+    // P4-11E 群入站发言人名（结构化字段；老消息无 sender_* 则不显示，正文里可能仍带旧前缀）
+    const _spkName=(_isGrp&&!isOut)?(m.sender_name||(m.sender_id?String(m.sender_id).split('@')[0]:'')):'';
+    const speakerBar=_spkName?`<div class="msg-speaker" style="color:${_speakerColor(m.sender_id||_spkName)}">${esc(_spkName)}</div>`:'';
     const bubbleContent=mediaHtml||textBody||`<span style="opacity:.6">${window.T('inbox.msg.placeholder')}</span>`;
     // P4-2 引用回复条：被引用消息摘要（发言人 + 文本），渲染在气泡正文上方
     const _rtxt=m.reply_to_text||'';
@@ -5264,7 +5417,7 @@ function renderMessages(c, msgs, opts={}){
     const _revoked=!!m.revoked;
     const _bubbleInner=_revoked
       ? `<span class="msg-revoked">${window.T('inbox.msg.revoked')}</span>`
-      : `${quoteBar}${bubbleContent}${optStatus}${xlate}${_outSub}`;
+      : `${speakerBar}${quoteBar}${bubbleContent}${optStatus}${xlate}${_outSub}`;
     const _reactOut=_revoked?'':reactHtml;
     const _editedMark=(m.edited&&!_revoked)?`<span class="msg-edited">${window.T('inbox.msg.edited')}</span>`:'';
     // 出站自己消息额外挂「编辑 / 撤回」（P4-6B）；P4-8 时间窗护栏：WhatsApp 编辑约 15 分钟、
@@ -5475,6 +5628,8 @@ async function sendMsg(){
     if(_serverXlate) body.target_lang=_outLang;   // P0：一击直发让后端翻译（含 'auto'）
     // P4-5B 引用回复：携带被引用消息上下文（发送后清除引用条）
     if(_replyTarget && _replyTarget.id){ body.reply_to=_replyTarget; _cancelReply(); }
+    // P4-11 群 @提及：透传本次已选成员完整 jid（兼容 @lid 群；Node 亦会从正文 @号码 兜底解析）
+    if(_mentionPicked.length){ body.mentions=_mentionPicked.slice(); _mentionPicked=[]; }
     if(_copilotApplyMeta && _copilotApplyMeta.text){
       var m=_copilotApplyMeta;
       var match='edit';
@@ -5563,6 +5718,13 @@ function onTextareaKey(e){
   }
   if(e.key==='Escape' && document.getElementById('copilot-panel')?.classList.contains('show')){
     _hideCopilot(); return;
+  }
+  // P4-11: 群 @提及面板键盘导航（优先于 slash / 发送）
+  if(_mentionActive){
+    if(e.key==='ArrowDown'){ e.preventDefault(); _mentionIdx=Math.min(_mentionIdx+1,_mentionFiltered.length-1); _paintMention(); return; }
+    if(e.key==='ArrowUp'){ e.preventDefault(); _mentionIdx=Math.max(_mentionIdx-1,0); _paintMention(); return; }
+    if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); _pickMention(_mentionIdx); return; }
+    if(e.key==='Escape'){ e.preventDefault(); _hideMentionPanel(); return; }
   }
   // P26: slash 命令面板键盘导航（优先于其他快捷键）
   if(_slashActive){
@@ -7326,7 +7488,7 @@ function _xlWarnBadge(meta){
   const why=prov==='none'?window.T('inbox.xl.warn_notready'):(prov==='identity'?window.T('inbox.xl.warn_identity'):(meta.error||window.T('inbox.xl.warn_degraded')));
   return `<span class="xl-warn-badge" title="${esc(window.T('inbox.xl.warn_prefix')+why)}">${window.T('inbox.xl.warn_badge')}</span>`;
 }
-const _XL_ENGINE_LABEL={ai:window.T('inbox.xl.eng_ai'),deepl:'DeepL',google:'Google',identity:window.T('inbox.xl.eng_origin'),none:window.T('inbox.xl.eng_off')};
+const _XL_ENGINE_LABEL={ai:window.T('inbox.xl.eng_ai'),deepl:'DeepL',google:'Google',ollama_mt:'HY-MT',identity:window.T('inbox.xl.eng_origin'),none:window.T('inbox.xl.eng_off')};
 function _setXlateEngine(provider){
   const el=document.getElementById('xlate-engine');
   if(el) el.innerHTML='<span class="dot"></span>'+(_XL_ENGINE_LABEL[provider]||provider);
@@ -8776,7 +8938,7 @@ Object.assign(window, {
   // 会话头 / 移动端
   closeMobileChat, toggleAiDraft, toggleInfoSidebar, toggleArchive, snoozeConv, unsnoozeConv, setMode, pauseAutoMode,
   // 发送 / 回复区
-  sendMsg, resendFailed, sendMediaFile, _cancelMedia, genAiReply, genVoiceReply, sendVoiceReply, _onVoicePersonaChange,
+  sendMsg, resendFailed, sendMediaFile, _cancelMedia, _pickMention, genAiReply, genVoiceReply, sendVoiceReply, _onVoicePersonaChange,
   toggleVoiceEnroll, submitVoiceEnroll, unbindVoice, submitVoiceRebind,
   loadVoiceReconcile, purgeOrphanVoices, purgeVoice, toggleQrPanel,
   toggleVoiceCfg, toggleXlatePop, _xlateQuickOn, _xlateOff, _openSlash, _focusRightVoice,

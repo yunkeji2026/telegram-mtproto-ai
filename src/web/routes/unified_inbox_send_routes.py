@@ -151,10 +151,16 @@ def register_send_routes(app, *, api_auth, page_auth) -> None:
         _reply_to = body.get("reply_to")
         if not isinstance(_reply_to, dict) or not _reply_to.get("id"):
             _reply_to = None
+        # P4-11 群 @提及：透传成员完整 jid 列表（仅协议 worker 用；其它平台经签名探测忽略）
+        _mentions = body.get("mentions")
+        if not isinstance(_mentions, list) or not _mentions:
+            _mentions = None
+        else:
+            _mentions = [str(x) for x in _mentions if x]
         try:
             result = await send_via_adapters(
                 request, platform, account_id, chat_key, text, _INBOX_ADAPTERS,
-                reply_to=_reply_to,
+                reply_to=_reply_to, mentions=_mentions,
             )
         except ChannelSendError as ex:
             raise HTTPException(ex.status_code, ex.detail)

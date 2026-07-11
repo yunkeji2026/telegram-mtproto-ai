@@ -269,6 +269,14 @@ def _check_translation(ctx: _Ctx) -> None:
     if "google" in order and _is_placeholder((engines.get("google") or {}).get("api_key")):
         ctx.add(WARN, "translation.engines.google.api_key",
                 "引擎顺序含 google 但未配 api_key，将被自动跳过")
+    if any(n in order for n in ("ollama_mt", "hunyuan_mt", "hymt")):
+        mc = engines.get("ollama_mt") or {}
+        _urls = mc.get("base_urls") or mc.get("base_url") or ""
+        _has_url = bool([u for u in _urls if str(u or "").strip()]
+                        if isinstance(_urls, (list, tuple)) else str(_urls).strip())
+        if not _has_url or not (mc.get("model") or "").strip():
+            ctx.add(WARN, "translation.engines.ollama_mt",
+                    "引擎顺序含 ollama_mt 但缺 base_url(s)/model，将被自动跳过")
 
 
 def _check_voice_recognition(ctx: _Ctx) -> None:

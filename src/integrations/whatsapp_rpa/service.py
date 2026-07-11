@@ -700,7 +700,17 @@ class WhatsAppRpaService:
     # ── P4-B: 手动发送队列 ────────────────────────────────────────────────
 
     def enqueue_send(self, chat_key: str, peer_name: str, text: str) -> int:
-        return self._state.enqueue_send(chat_key=chat_key, peer_name=peer_name, text=text)
+        """入队一条主动发送任务并立即唤醒 runner 进入下一轮（避免等到下一个 interval）。"""
+        item_id = self._state.enqueue_send(
+            chat_key=chat_key, peer_name=peer_name, text=text)
+        # 唤醒 runner 立刻 pop（与 LINE service 对称：入队即触发，降投递延迟）——
+        # _loop 在 asyncio.wait([_trigger_evt.wait(), ...], timeout=interval) 上阻塞，
+        # set() 令其立即返回并处理发送队列，而非空等一个自适应轮询间隔（最长数十秒）。
+        try:
+            self._trigger_evt.set()
+        except Exception:
+            logger.debug("wa enqueue_send 触发唤醒失败（已忽略）", exc_info=True)
+        return item_id
 
     def list_send_queue(self, limit: int = 30, include_done: bool = False) -> list:
         return self._state.list_send_queue(limit=limit, include_done=include_done)

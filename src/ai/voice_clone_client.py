@@ -22,13 +22,16 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import logging
+import re
 import threading
 import time
 import urllib.request
+import wave
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +91,114 @@ def effective_clone_language(text: str, default: str = "zh") -> str:
     return lang
 
 
+# ── 长文本分块合成（防自回归克隆 TTS 长句整段生成时截断/漂移）─────────────────
+# 根因：IndexTTS2 等自回归克隆 TTS 把整段文本内部切「段」后逐段 GPT 生成；单段过长
+# （默认 max_text_tokens_per_segment=120）时其音频可能超 max_mel_tokens(1500) → 该段
+# **中途截断**（"刷手机"念到"刷手"就断）；情感条件(emo_text)还会加剧漂移/串字。客户端
+# 把长回复按句切成 ≤N 字的短块、逐块合成再拼接，保证每块都短到能稳定完整生成——
+# 与后端无关的兜底保证（换任何克隆主机都有效）。短回复（≤N 字）单块直发，零行为变化。
+_SENT_SPLIT_RE = re.compile(r"(?<=[。！？!?…\n；;])")
+_CHUNK_SECONDARY_SEPS = "，,、：: "
+
+
+def _split_sentences_keep(text: str) -> List[str]:
+    """按终止/强停顿标点切句，保留标点（换行也当边界）。空片段剔除。"""
+    parts = _SENT_SPLIT_RE.split(str(text or ""))
+    return [p for p in (x.strip() for x in parts) if p]
+
+
+def _hard_split_long(seg: str, max_chars: int) -> List[str]:
+    """单句仍超长 → 在逗号/顿号/空格等次级边界硬切，无边界则按 max_chars 硬切。"""
+    out: List[str] = []
+    rest = seg.strip()
+    while len(rest) > max_chars:
+        window = rest[:max_chars]
+        cut = -1
+        for sep in _CHUNK_SECONDARY_SEPS:
+            idx = window.rfind(sep)
+            if idx > cut:
+                cut = idx
+        if cut <= 0:
+            cut = max_chars - 1  # 无任何边界 → 硬切（含标点位）
+        out.append(rest[:cut + 1].strip())
+        rest = rest[cut + 1:].strip()
+    if rest:
+        out.append(rest)
+    return [c for c in out if c]
+
+
+def split_text_for_clone(text: str, max_chars: int = 60) -> List[str]:
+    """把长文本切成每块 ≤``max_chars`` 的合成块（供逐块克隆合成后拼接）。
+
+    - ``text`` 空 → ``[]``；``max_chars<=0`` 或文本 ≤max_chars → 单块 ``[text]``
+      （短回复零影响、行为与不切分一致）。
+    - 否则按句切分后**贪心打包**相邻短句到 ≤max_chars；单句超长则二次硬切。
+    纯函数、防御式。
+    """
+    t = str(text or "").strip()
+    if not t:
+        return []
+    if max_chars <= 0 or len(t) <= max_chars:
+        return [t]
+    pieces: List[str] = []
+    for s in _split_sentences_keep(t):
+        if len(s) <= max_chars:
+            pieces.append(s)
+        else:
+            pieces.extend(_hard_split_long(s, max_chars))
+    chunks: List[str] = []
+    cur = ""
+    for p in pieces:
+        if not cur:
+            cur = p
+        elif len(cur) + len(p) <= max_chars:
+            cur += p
+        else:
+            chunks.append(cur)
+            cur = p
+    if cur:
+        chunks.append(cur)
+    return [c.strip() for c in chunks if c.strip()]
+
+
+def concat_wav_bytes(parts: List[bytes], gap_ms: int = 120) -> bytes:
+    """把多段 WAV 字节按序拼接为一段 WAV（块间插 ``gap_ms`` 静音，更自然）。
+
+    各段 (声道/位深/采样率) 必须一致（同一克隆主机同次合成天然一致）；不一致则抛，
+    调用方据此回退整段合成（绝不返回错拼的坏音频）。仅用标准库 wave/io，纯函数。
+    """
+    bufs = [p for p in parts if p]
+    if not bufs:
+        raise RuntimeError("concat_wav_bytes: no parts")
+    if len(bufs) == 1:
+        return bufs[0]
+    params: Optional[Tuple[int, int, int]] = None
+    frames_list: List[bytes] = []
+    for b in bufs:
+        with wave.open(io.BytesIO(b), "rb") as w:
+            cur = (w.getnchannels(), w.getsampwidth(), w.getframerate())
+            frames = w.readframes(w.getnframes())
+        if params is None:
+            params = cur
+        elif cur != params:
+            raise RuntimeError(f"concat_wav_bytes: param mismatch {cur} != {params}")
+        frames_list.append(frames)
+    assert params is not None
+    nch, sw, rate = params
+    gap_frames = max(0, int(rate * (max(0, gap_ms) / 1000.0)))
+    silence = b"\x00" * (gap_frames * nch * sw)
+    out = io.BytesIO()
+    with wave.open(out, "wb") as w:
+        w.setnchannels(nch)
+        w.setsampwidth(sw)
+        w.setframerate(rate)
+        for i, frames in enumerate(frames_list):
+            if i > 0 and silence:
+                w.writeframes(silence)
+            w.writeframes(frames)
+    return out.getvalue()
+
+
 def parse_clone_response(body: bytes) -> bytes:
     """解析克隆合成响应为音频字节（WAV）。
 
@@ -141,6 +252,11 @@ class VoiceCloneClient:
         self.load_path: str = str(cfg.get("load_path") or "/v1/model/load")
         self.auto_load: bool = bool(cfg.get("auto_load", True))
         self.load_cooldown_sec: float = float(cfg.get("load_cooldown_sec") or 60)
+        # 长文本分块合成（防长句整段生成截断/漂移）：文本超 chunk_max_chars 即按句切成
+        # 短块逐块合成后拼接。默认 60 字（约 ≤12s 音频/段，稳在 IndexTTS2 max_mel 上限内）；
+        # 置 0 关闭（退回整段单次合成，旧行为）。块间插 chunk_gap_ms 静音更自然。
+        self.chunk_max_chars: int = int(cfg.get("chunk_max_chars", 60) or 0)
+        self.chunk_gap_ms: int = int(cfg.get("chunk_gap_ms", 120) or 0)
 
     @classmethod
     def from_config(cls, full_config: Dict[str, Any]) -> "VoiceCloneClient":
@@ -282,6 +398,48 @@ class VoiceCloneClient:
             get_voice_synth_stats().record(default_lang=self.language, used_lang=lang)
         except Exception:
             pass
+
+        # 长文本 → 按句切块逐块合成再拼接（防长句整段生成时截断/漂移）；短文本单块直发。
+        chunks = (
+            split_text_for_clone(text, self.chunk_max_chars)
+            if self.chunk_max_chars > 0 else [str(text or "")]
+        )
+        if len(chunks) <= 1:
+            audio = self._request_clone(
+                chunks[0] if chunks else str(text or ""),
+                ref_b64, lang, reference_text, instructions)
+            if not audio:
+                raise RuntimeError("voice_clone_lan: decoded empty audio")
+            Path(out).write_bytes(audio)
+            return
+
+        parts: List[bytes] = []
+        for ch in chunks:
+            a = self._request_clone(ch, ref_b64, lang, reference_text, instructions)
+            if not a:
+                raise RuntimeError("voice_clone_lan: decoded empty audio (chunk)")
+            parts.append(a)
+        try:
+            merged = concat_wav_bytes(parts, gap_ms=self.chunk_gap_ms)
+        except Exception as ex:
+            # 拼接失败（极少见：分段音频格式不一致）→ 回退整段单次合成，绝不返回坏音频。
+            logger.warning(
+                "[voice_clone] 分块拼接失败(%s)，回退整段合成 chunks=%d", ex, len(chunks))
+            audio = self._request_clone(
+                str(text or ""), ref_b64, lang, reference_text, instructions)
+            if not audio:
+                raise RuntimeError("voice_clone_lan: decoded empty audio")
+            Path(out).write_bytes(audio)
+            return
+        Path(out).write_bytes(merged)
+        logger.info("[voice_clone] 分块合成完成：%d 段拼接 (max_chars=%d)",
+                    len(parts), self.chunk_max_chars)
+
+    def _request_clone(
+        self, text: str, ref_b64: str, lang: str,
+        reference_text: str, instructions: str,
+    ) -> bytes:
+        """单次克隆合成请求 → 音频字节（供整段/分块共用）。失败抛异常。"""
         payload = build_clone_payload(
             text=text, reference_audio_b64=ref_b64,
             reference_text=reference_text, language=lang,
@@ -293,10 +451,7 @@ class VoiceCloneClient:
             f"{self.base_url}{self.clone_path}", data=payload, headers=headers)
         with urllib.request.urlopen(req, timeout=self.synth_timeout_sec) as resp:
             body = resp.read()
-        audio = parse_clone_response(body)
-        if not audio:
-            raise RuntimeError("voice_clone_lan: decoded empty audio")
-        Path(out).write_bytes(audio)
+        return parse_clone_response(body)
 
 
 def reset_health_cache() -> None:

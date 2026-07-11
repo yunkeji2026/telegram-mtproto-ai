@@ -240,6 +240,14 @@ class SpeechEmotionRecognizer:
         device: cpu | cuda
         min_confidence: 0.5      # 低于此视为无有效声学信号
         cb_cooldown_sec: 300     # 加载失败后多久不再重试
+        remote:                  # 可选：远程 GPU SER（176 asr_server /v1/audio/emotion）
+          base_url: http://192.168.0.176:8765   # 空=纯本地（旧行为）
+          timeout_sec: 10
+          cb_cooldown_sec: 120   # 远程失败后冷却期内直走本地，绝不反复打死端点
+
+    远程优先、本地兜底：remote.base_url 配置时先试远程（服务端只回 labels/scores
+    原始数组，标签→系统语义的映射仍在本模块单一出口）；远程超时/HTTP 错 → 进冷却
+    并回落**本地 funasr**（现行为），语音链路零阻断。
     """
 
     def __init__(self, cfg: Optional[Dict[str, Any]] = None):
@@ -253,14 +261,28 @@ class SpeechEmotionRecognizer:
         self.min_confidence = float(cfg.get("min_confidence", 0.5) or 0.5)
         self.cb_cooldown_sec = float(cfg.get("cb_cooldown_sec", 300) or 300)
 
+        rem = cfg.get("remote") or {}
+        if not isinstance(rem, dict):
+            rem = {}
+        self.remote_base = str(rem.get("base_url") or "").strip().rstrip("/")
+        self.remote_timeout = float(rem.get("timeout_sec", 10) or 10)
+        self.remote_cb_sec = float(rem.get("cb_cooldown_sec", 120) or 120)
+        self._remote_bad_until: float = 0.0
+        self._post_fn: Any = None   # 测试钩子：(url, path, timeout) -> (status, dict)
+
         self._model: Any = None
         self._lock = threading.Lock()
         self._cb_open_until: float = 0.0
         self._last_error: str = ""
 
+    def _remote_usable(self) -> bool:
+        return bool(self.remote_base) and time.time() >= self._remote_bad_until
+
     def is_available(self) -> bool:
         if not self.enabled or self.backend == "disabled":
             return False
+        if self._remote_usable():
+            return True   # 远程可用时不受本地加载熔断影响
         if self._cb_open_until > 0 and time.time() < self._cb_open_until:
             return False
         return True
@@ -301,8 +323,51 @@ class SpeechEmotionRecognizer:
                                self._last_error, self.cb_cooldown_sec)
                 return False
 
+    def _recognize_remote(self, audio_path: str) -> Optional[SpeechEmotionResult]:
+        """远程 GPU SER。未配置/冷却中/失败 → None（调用方回落本地）。绝不抛。"""
+        if not self._remote_usable():
+            return None
+        url = f"{self.remote_base}/v1/audio/emotion"
+        t0 = time.monotonic()
+        try:
+            if self._post_fn is not None:
+                status, payload = self._post_fn(url, audio_path, self.remote_timeout)
+            else:
+                import os as _os
+
+                import httpx
+                with open(audio_path, "rb") as f:
+                    resp = httpx.post(
+                        url,
+                        files={"file": (_os.path.basename(audio_path), f)},
+                        timeout=self.remote_timeout,
+                    )
+                status, payload = resp.status_code, (
+                    resp.json() if resp.status_code == 200 else {})
+            if status != 200:
+                raise RuntimeError(f"http_{status}")
+            labels = list(payload.get("labels") or [])
+            scores = list(payload.get("scores") or [])
+            emo, score, agg = pick_top_emotion(labels, scores)
+            return SpeechEmotionResult(
+                ok=True, emotion=emo, score=score, all_scores=agg,
+                model=f"remote:{payload.get('model') or ''}",
+                latency_ms=int((time.monotonic() - t0) * 1000),
+            )
+        except Exception as ex:  # noqa: BLE001 - 远程任何失败都回落本地
+            self._remote_bad_until = time.time() + self.remote_cb_sec
+            logger.warning(
+                "[speech_emotion] remote SER failed (%s: %s), fallback to local "
+                "for %.0fs", type(ex).__name__, ex, self.remote_cb_sec)
+            return None
+
     def recognize(self, audio_path: str) -> SpeechEmotionResult:
         """同步识别一个音频文件的情绪。任何异常都软降级为 ok=False（绝不抛）。"""
+        if not self.enabled or self.backend == "disabled":
+            return SpeechEmotionResult(ok=False, error="disabled")
+        remote = self._recognize_remote(audio_path)
+        if remote is not None:
+            return remote
         if not self.is_available():
             return SpeechEmotionResult(ok=False, error=self._last_error or "disabled")
         if not self._load_model():
