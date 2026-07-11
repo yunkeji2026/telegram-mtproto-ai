@@ -3,7 +3,7 @@
 import { useLang } from "./LanguageContext";
 import Reveal from "./fx/Reveal";
 import { BRAND, PRODUCT_ORDER } from "@/lib/brand";
-import { PRODUCT_IMG, PRODUCT_ANCHOR } from "./productMeta";
+import { PRODUCT_IMG, PRODUCT_ANCHOR, PRODUCT_LANDING } from "./productMeta";
 import { track } from "@/lib/track";
 import { ArrowRight, ShieldCheck } from "lucide-react";
 
@@ -52,10 +52,13 @@ export default function ProductMatrix() {
         <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {PRODUCT_ORDER.map((key, idx) => {
             const p = BRAND.products[key];
+            // 有独立落地页的产品线跳落地页（更完整的卖点+真实样片），其余回退首页锚点
+            const landing = PRODUCT_LANDING[key];
+            const href = landing ? (lang === "zh" ? landing : `/en${landing}`) : PRODUCT_ANCHOR[key];
             return (
               <Reveal key={key} delay={idx * 0.05}>
                 <a
-                  href={PRODUCT_ANCHOR[key]}
+                  href={href}
                   onClick={() => track("product_click", { key, where: "matrix" })}
                   className="group relative flex h-full flex-col overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] p-5 transition hover:border-neon-cyan/40 hover:bg-white/[0.05]"
                 >

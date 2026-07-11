@@ -9,15 +9,24 @@ import Magnetic from "./fx/Magnetic";
 import CountUp from "./fx/CountUp";
 import AutoChatDemo from "./AutoChatDemo";
 import { track } from "@/lib/track";
+import { abVariant, abExpose, HERO_CTA_COPY, type AbVariant } from "@/lib/ab";
 
 function suffixOf(v: string) {
   return v.replace(/[0-9.]/g, "");
 }
 
 export default function Hero() {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const reduced = useReducedMotion();
   const [idx, setIdx] = useState(0);
+  // SSR/首帧渲染对照组文案，挂载后按本地分桶切换并记曝光（同访客桶恒定，无闪烁感）
+  const [ctaVariant, setCtaVariant] = useState<AbVariant>("a");
+
+  useEffect(() => {
+    const v = abVariant("hero_cta");
+    setCtaVariant(v);
+    abExpose("hero_cta", v);
+  }, []);
 
   useEffect(() => {
     if (reduced) return;
@@ -38,8 +47,10 @@ export default function Hero() {
           </Reveal>
 
           <Reveal delay={0.05}>
+            {/* whitespace-nowrap: 词组整体换行，避免 CJK 单字孤行（如"统"字单独一行） */}
             <h1 className="mx-auto max-w-xl text-4xl font-bold leading-tight text-white md:text-6xl lg:mx-0">
-              {t.hero.title} <span className="text-gradient">{t.hero.titleAccent}</span>
+              <span className="whitespace-nowrap">{t.hero.title}</span>{" "}
+              <span className="text-gradient whitespace-nowrap">{t.hero.titleAccent}</span>
             </h1>
           </Reveal>
 
@@ -72,10 +83,10 @@ export default function Hero() {
               <Magnetic>
                 <a
                   href="#autochat"
-                  onClick={() => track("cta_click", { where: "hero_primary" })}
+                  onClick={() => track("cta_click", { where: "hero_primary", ab: ctaVariant })}
                   className="group inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-neon-cyan to-neon-violet px-6 py-3 font-medium text-ink-950 transition hover:opacity-90"
                 >
-                  {t.hero.ctaPrimary}
+                  {ctaVariant === "a" ? t.hero.ctaPrimary : HERO_CTA_COPY.b[lang]}
                   <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
                 </a>
               </Magnetic>

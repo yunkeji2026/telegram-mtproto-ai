@@ -20,8 +20,14 @@ function routeLangOf(pathname: string | null): Lang | null {
   return pathname === "/en" || pathname.startsWith("/en/") ? "en" : null;
 }
 
-function isHome(pathname: string | null): boolean {
-  return pathname === "/" || pathname === "/en" || (pathname?.startsWith("/en/") ?? false);
+/** 拥有 zh/en 双路由的营销页根路径（"" = 首页）。落地页/条款页切语言时走 URL 前缀互换，
+ *  保证分享链接与 SEO 语言一致；其余路由（/admin /app 等）仅切换字典。 */
+const DUAL_LOCALE_BASES = new Set(["", "/voice", "/face", "/interpreting", "/privacy", "/terms"]);
+
+function dualLocaleBase(pathname: string | null): string | null {
+  if (!pathname) return null;
+  const base = pathname === "/en" ? "" : pathname.startsWith("/en/") ? pathname.slice(3) : pathname === "/" ? "" : pathname;
+  return DUAL_LOCALE_BASES.has(base) ? base : null;
 }
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
@@ -54,10 +60,11 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
 
   const toggle = () => {
     const next: Lang = lang === "zh" ? "en" : "zh";
-    // On the marketing homepage, reflect locale in the URL (shareable + crawlable).
-    if (isHome(pathname)) {
+    // On dual-locale marketing routes, reflect locale in the URL (shareable + crawlable).
+    const base = dualLocaleBase(pathname);
+    if (base !== null) {
       setLocal("hl-lang", next);
-      router.push(next === "en" ? "/en" : "/");
+      router.push(next === "en" ? `/en${base}` || "/en" : base || "/");
       return;
     }
     setLang(next);
