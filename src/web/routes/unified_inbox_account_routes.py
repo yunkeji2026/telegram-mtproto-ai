@@ -1273,6 +1273,31 @@ def register_account_routes(app, *, api_auth, config_manager=None) -> None:
             logger.debug("[accounts] 孤儿头像清扫失败", exc_info=True)
         return {"ok": True, **overview}
 
+    @app.get("/api/accounts/send-health")
+    async def api_accounts_send_health(request: Request, hours: float = 24.0):
+        """全自动发送安全视图：每号 今日发量/占 cap + 投递成功/失败(含归因) + 健康灯 + 回复率。
+
+        只读，复用 fleet-health 同源信号（注册表 + 持久化 limiter 今日计数）+ draft_audit_log
+        自动发审计 + messages 回复探测。回答「真号自动发到底安不安全」的运营总览。
+        """
+        api_auth(request)
+        cfg = (config_manager.config if config_manager is not None else {}) or {}
+        from src.inbox.send_health import gather_send_health
+        from src.integrations.protocol_autoreply_limits import get_autoreply_limiter
+        from src.integrations.protocol_autoreply_settings import cfg_with_settings
+        store = getattr(request.app.state, "inbox_store", None)
+        if store is None:
+            return {"ok": False, "available": False, "message": "inbox store 未就绪"}
+        try:
+            lim = get_autoreply_limiter(cfg_with_settings(cfg))
+        except Exception:
+            lim = None
+        data = gather_send_health(
+            inbox_store=store, registry=get_account_registry(), limiter=lim,
+            config=cfg, window_hours=max(1.0, min(float(hours or 24), 168.0)),
+        )
+        return {"ok": True, "available": True, **data}
+
     @app.get("/api/accounts/protocol/readiness")
     async def api_protocol_readiness(request: Request):
         """协议栈联调自检：配置/依赖/服务可达性/编排器/入站 sink 的结构化就绪报告。"""

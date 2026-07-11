@@ -442,6 +442,7 @@ _BASELINE = """
 /api/accounts	GET
 /api/accounts/orchestrator	GET
 /api/accounts/fleet-health	GET
+/api/accounts/send-health	GET
 /api/accounts/orchestrator/sync	POST
 /api/accounts/{platform}/{account_id}/start	POST
 /api/accounts/{platform}/{account_id}/stop	POST
