@@ -108,7 +108,7 @@ def _is_desktop_mode(config_obj) -> bool:
 
 class AIChatAssistant:
     """AI聊天助手主类"""
-    
+
     def __init__(self):
         """初始化AI聊天助手"""
         self.config = None
@@ -157,14 +157,14 @@ class AIChatAssistant:
         # 坐席工作台实时化（D5a）：收件箱后台 ingest 轮询任务 + web_app 引用
         self._web_app = None  # type: Optional[Any]  # noqa: F821
         self._inbox_ingest_task = None
-        
+
     async def initialize(self):
         """初始化所有组件"""
         try:
             # 1. 先设置一个临时的控制台日志记录器
             self.logger = setup_logger(log_file=None, console_output=True)
             self.logger.info("开始初始化AI聊天助手...")
-            
+
             # 2. 加载配置
             self.config = ConfigManager()
             await self.config.load()
@@ -180,21 +180,21 @@ class AIChatAssistant:
                 await self.local_tts.start()
             except Exception as ex:
                 self.logger.warning("本机 TTS 托管启动异常（忽略，语音走回落）: %s", ex)
-            
+
             # 3. 根据配置重新配置日志记录器
             log_config = self.config.config.get("logging", {})
             if log_config:
                 log_file = log_config.get("file")
                 log_level = log_config.get("level", "INFO")
                 console_output = log_config.get("console_output", True)
-                
+
                 # 设置日志记录器级别
                 level = getattr(logging, log_level.upper(), logging.INFO)
                 self.logger.setLevel(level)
-                
+
                 # 重新配置日志记录器
                 self.logger.handlers.clear()
-                
+
                 # 控制台处理器（强制 UTF-8，避免 GBK 编码 emoji 失败）
                 if console_output:
                     _utf8_stdout = open(sys.stdout.fileno(), mode='w',
@@ -208,7 +208,7 @@ class AIChatAssistant:
                     )
                     console_handler.setFormatter(console_formatter)
                     self.logger.addHandler(console_handler)
-                
+
                 # 文件处理器（RotatingFileHandler 自动轮转）
                 if log_file:
                     os.makedirs(os.path.dirname(log_file), exist_ok=True)
@@ -247,14 +247,14 @@ class AIChatAssistant:
                             root_logger.addHandler(file_handler)
                     except Exception:
                         pass
-                
+
                 self.logger.info(f"日志已重新配置: level={log_level}, file={log_file}")
-            
+
             # 3. 初始化AI客户端
             self.ai_client = AIClient(self.config)
             await self.ai_client.initialize()
             self.logger.info("AI客户端初始化成功")
-            
+
             # 4. 初始化Skill管理器
             self.skill_manager = SkillManager(self.config, self.ai_client)
             await self.skill_manager.initialize()
@@ -270,7 +270,7 @@ class AIChatAssistant:
                 )
             except Exception as _ctx_ex:
                 self.logger.debug("companion runtime 上下文注入失败: %s", _ctx_ex)
-            
+
             # 5. 初始化Telegram客户端（支持多账号并行）
             try:
                 from src.client.telegram_account_registry import TelegramAccountRegistry
@@ -347,7 +347,7 @@ class AIChatAssistant:
                 self.logger.info(
                     "Telegram 客户端初始化完成（%d 个账号）", len(self.telegram_clients)
                 )
-            
+
             self.logger.info("✅ AI聊天助手初始化完成")
 
             # C0-1 授权状态（只读提示，不阻断启动）
@@ -2052,11 +2052,11 @@ class AIChatAssistant:
                 except Exception as ex:
                     self.logger.warning(f"监控 API 启动跳过: {ex}")
             return True
-            
+
         except Exception as e:
             self.logger.error(f"初始化失败: {e}")
             return False
-    
+
     async def start(self):
         """启动AI聊天助手"""
         if not self.running:
@@ -2233,14 +2233,14 @@ class AIChatAssistant:
                 # 保持运行直到收到停止信号
                 while self.running:
                     await asyncio.sleep(1)
-                    
+
             except KeyboardInterrupt:
                 self.logger.info("收到中断信号，正在关闭...")
             except Exception as e:
                 self.logger.error(f"运行错误: {e}")
             finally:
                 await self.stop()
-    
+
     def _maybe_start_inbox_ingest_loop(self) -> None:
         """D5a：启动收件箱后台 ingest 轮询循环。
 
@@ -3799,7 +3799,7 @@ class AIChatAssistant:
                         self.logger.info("上下文快照已保存")
                     except Exception as e:
                         self.logger.warning("上下文快照保存失败: %s", e)
-            
+
             for _lsvc in self.line_rpa_services:
                 try:
                     await _lsvc.stop()
@@ -3884,10 +3884,10 @@ class AIChatAssistant:
 
             if self.telegram_client:
                 await self.telegram_client.stop()
-            
+
             if self.skill_manager:
                 await self.skill_manager.cleanup()
-            
+
             if self.ai_client:
                 await self.ai_client.cleanup()
 
@@ -3905,113 +3905,38 @@ class AIChatAssistant:
                 self.logger.warning("Web 管理后台停止异常: %s", ex)
 
             self.logger.info("✅ AI聊天助手已停止")
-    
+
     def _setup_signal_handlers(self):
         """设置信号处理"""
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
-    
+
     def _signal_handler(self, signum, frame):
         """信号处理函数"""
         self.logger.info(f"收到信号 {signum}, 正在关闭...")
         asyncio.create_task(self.stop())
 
 
-def run_config_check(config_path: str = None) -> int:
-    """``python main.py --check`` 干跑模式：仅加载并体检配置，不启动任何服务。
-
-    返回进程退出码（有 error 级问题 → 1，否则 0），便于 CI / 部署脚本 gate。
-    """
-    import yaml
-
-    from src.utils.config_check import check_config, format_report, has_errors
-    from src.utils.config_manager import ConfigManager
-
-    cm = ConfigManager(config_path)
-    path = cm.config_path
-    if not Path(path).exists():
-        print(f"✗ 配置文件不存在: {path}")
-        print("  → 复制 config/config.example.yaml 为 config/config.yaml 并填写")
-        return 1
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            config = yaml.safe_load(f)
-    except yaml.YAMLError as exc:
-        print(f"✗ YAML 解析失败: {path}\n  → {exc}")
-        return 1
-
-    print(f"配置文件: {path}")
-    issues = check_config(config, config_path=path)
-    print(format_report(issues, config=config if isinstance(config, dict) else None))
-    return 1 if has_errors(issues) else 0
-
-
-def run_init(preset: str, config_path: str = None, set_pairs=None, force: bool = False) -> int:
-    """``python main.py --init [PRESET]`` 场景预设脚手架。
-
-    无 PRESET → 列出可用预设并退出；有 PRESET → 生成 config.yaml + 跑自检闭环。
-    """
-    from src.utils.config_init import (
-        describe_preset,
-        list_presets,
-        parse_set_args,
-        scaffold_config,
-    )
-    from src.utils.config_check import format_report, has_errors
-    from src.utils.config_manager import ConfigManager
-
-    presets = list_presets()
-    if not preset:
-        print("可用场景预设（python main.py --init <名称>）:")
-        for name in presets:
-            desc = describe_preset(name)
-            print(f"  - {name:<12} {desc}")
-        if not presets:
-            print("  （config/presets/ 下暂无预设）")
-        return 0
-
-    if preset not in presets:
-        print(f"✗ 未知预设: {preset}；可用: {', '.join(presets) or '（无）'}")
-        return 1
-
-    dest = Path(config_path) if config_path else ConfigManager().config_path
-    if str(dest).endswith("config.example.yaml"):
-        # 默认路径在 config.yaml 不存在时会回落 example；--init 应写 config.yaml
-        dest = Path(dest).parent / "config.yaml"
-
-    overrides = parse_set_args(set_pairs)
-    # 交互补填关键空位（仅 TTY；非交互/CI 走 --set）
-    if sys.stdin.isatty():
-        if "ai.api_key" not in overrides:
-            ans = input("AI api_key（回车跳过，稍后手填）: ").strip()
-            if ans:
-                overrides["ai.api_key"] = ans
-
-    ok, msg, issues = scaffold_config(preset, dest, overrides=overrides, force=force)
-    print(msg)
-    if not ok:
-        return 1
-    print(format_report(issues, config=None))
-    print("\n下一步: 编辑上面文件填好必填项，再运行 `python main.py --check` 复核。")
-    return 1 if has_errors(issues) else 0
+# CLI 入口 --check / --init 已抽取到 src/bootstrap/cli.py（2026-07-11 重构 Stage 1，行为不变）
+from src.bootstrap.cli import run_config_check, run_init
 
 
 async def main():
     """主函数"""
     assistant = AIChatAssistant()
-    
+
     # 初始化
     if not await assistant.initialize():
         print("初始化失败，请检查配置和日志")
         return 1
-    
+
     try:
         # 启动
         await assistant.start()
     except Exception as e:
         logging.error(f"程序运行错误: {e}")
         return 1
-    
+
     return 0
 
 
@@ -4044,7 +3969,7 @@ if __name__ == "__main__":
     # 设置默认事件循环策略（Windows需要）
     if sys.platform == 'win32':
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    
+
     # 运行主程序
     exit_code = asyncio.run(main())
     sys.exit(exit_code)
