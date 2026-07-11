@@ -685,6 +685,19 @@
 .today-stat.wait{background:rgba(245,158,11,.08);}.today-stat.wait .ts-num{color:var(--tk-warn-ink);}
 .today-stat.done{background:rgba(16,185,129,.08);}.today-stat.done .ts-num{color:var(--tk-ok-ink);}
 .today-strip.loading .ts-num{color:transparent;background:linear-gradient(90deg,var(--bg-soft) 25%,var(--border) 50%,var(--bg-soft) 75%);background-size:200% 100%;animation:tsSkel 1.1s ease-in-out infinite;border-radius:4px;min-width:22px;min-height:16px;display:inline-block;}
+/* P1-2: AI 值守姿态（workspace 全局，主管专属）——专家级 autosend 配置收敛成三档一键开关 */
+.standby-bar{display:flex;align-items:center;gap:8px;padding:4px 10px 2px;flex-wrap:wrap;}
+.standby-lbl{font-size:11px;font-weight:700;color:var(--text-sub);white-space:nowrap;}
+.standby-seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--bg-soft);}
+.standby-opt{border:0;background:transparent;color:var(--text-sub);font-size:11px;font-weight:600;padding:4px 10px;cursor:pointer;transition:background .15s,color .15s;border-right:1px solid var(--border);}
+.standby-opt:last-child{border-right:0;}
+.standby-opt:hover{background:var(--bg-hover,rgba(0,0,0,.04));}
+.standby-opt.active[data-mode="off"]{background:var(--text-sub);color:#fff;}
+.standby-opt.active[data-mode="suggest"]{background:var(--tk-brand,#3b82f6);color:#fff;}
+.standby-opt.active[data-mode="watching"]{background:var(--tk-ok-ink,#059669);color:#fff;}
+.standby-opt:disabled{opacity:.5;cursor:progress;}
+.standby-hint{font-size:10px;color:var(--text-tiny);flex:1;min-width:100%;line-height:1.35;}
+.standby-hint.warn{color:var(--tk-warn-ink,#b45309);}
 @keyframes tsSkel{0%{background-position:200% 0}100%{background-position:-200% 0}}
 
 /* AI 草稿面板 (内嵌式，底部浮动可折叠) */
@@ -1270,6 +1283,19 @@
         </div>
       </div>
       <div class="filter-summary" id="filter-summary"></div>
+      {% if is_supervisor %}
+      <!-- P1-2: AI 值守姿态（workspace 全局，主管专属）。与每会话档位(mode-select)正交：
+           这里定 AI 整体姿态，会话档位定单会话让 AI 自动到什么程度；值守中真发仍受双护栏。 -->
+      <div class="standby-bar" id="standby-bar" data-i18n-title="inbox.standby.title_t" title="AI 值守姿态（全局）：关闭 / 仅建议 / 值守中">
+        <span class="standby-lbl" data-i18n="inbox.standby.title">AI 值守</span>
+        <div class="standby-seg" id="standby-seg" role="group">
+          <button type="button" class="standby-opt" data-mode="off" onclick="setStandbyMode('off')" data-i18n="inbox.standby.off">关闭</button>
+          <button type="button" class="standby-opt" data-mode="suggest" onclick="setStandbyMode('suggest')" data-i18n="inbox.standby.suggest">仅建议</button>
+          <button type="button" class="standby-opt" data-mode="watching" onclick="setStandbyMode('watching')" data-i18n="inbox.standby.watching">值守中</button>
+        </div>
+        <span class="standby-hint" id="standby-hint"></span>
+      </div>
+      {% endif %}
       </div><!-- /.list-header-body -->
     </div><!-- /.list-header -->
     <!-- Phase 16: 标签概览 strip -->
@@ -3300,6 +3326,55 @@ function _updateTodayStrip(chats){
   const strip=document.getElementById('today-strip');
   if(strip) strip.classList.remove('loading');
 }
+
+/* ===== P1-2: AI 值守姿态（workspace 全局，主管专属）=====
+   把专家级 autosend 配置（worker+deliver 双 opt-in）收敛成关闭/仅建议/值守中三档一键开关。
+   仅在主管渲染出 #standby-bar 时生效；非主管 DOM 不存在 → 全部函数安全 no-op。 */
+function _standbyBar(){ return document.getElementById('standby-bar'); }
+function _renderStandby(data, requested){
+  var bar=_standbyBar(); if(!bar||!data) return;
+  var mode=data.mode||'off'; var w=data.watching||{};
+  // 请求「值守中」但结果没到（deliver 被双 opt-in 护栏拦）→ 如实显示实际态并给引导
+  var blockedWatch=(requested==='watching' && mode!=='watching');
+  bar.querySelectorAll('.standby-opt').forEach(function(b){
+    b.classList.toggle('active', b.getAttribute('data-mode')===mode); b.disabled=false;
+  });
+  var hint=bar.querySelector('#standby-hint'); if(!hint) return;
+  hint.classList.remove('warn'); var txt='';
+  if(blockedWatch || (mode==='watching' && !(w.auto_ai>0))){
+    txt=window.T('inbox.standby.hint_noauto'); hint.classList.add('warn');
+  } else if(mode==='off'){ txt=window.T('inbox.standby.hint_off'); }
+  else if(mode==='suggest'){ txt=window.T('inbox.standby.hint_suggest'); }
+  else if(mode==='watching'){
+    txt=window.T('inbox.standby.hint_watching');
+    if(!w.send_gate){ txt+=' · '+window.T('inbox.standby.hint_nogate'); hint.classList.add('warn'); }
+  } else { txt=window.T('inbox.standby.hint_custom'); hint.classList.add('warn'); }
+  hint.textContent=txt;
+}
+window.loadStandbyMode=async function(){
+  if(!_standbyBar()) return;
+  try{
+    const r=await fetch('/api/companion/standby');
+    const d=await r.json();
+    if(d&&d.ok) _renderStandby(d);
+  }catch(_){ var h=document.querySelector('#standby-hint'); if(h){ h.textContent=window.T('inbox.standby.hint_err'); } }
+};
+window.setStandbyMode=async function(mode){
+  var bar=_standbyBar(); if(!bar) return;
+  bar.querySelectorAll('.standby-opt').forEach(function(b){ b.disabled=true; });
+  var hint=bar.querySelector('#standby-hint');
+  if(hint){ hint.classList.remove('warn'); hint.textContent=window.T('inbox.standby.switching'); }
+  try{
+    const r=await fetch('/api/companion/standby',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({mode:mode})});
+    const d=await r.json();
+    if(d&&d.ok){ _renderStandby(d, mode); }
+    else if(hint){ hint.classList.add('warn'); hint.textContent=(d&&d.message)||window.T('inbox.standby.hint_err'); bar.querySelectorAll('.standby-opt').forEach(function(b){ b.disabled=false; }); }
+  }catch(_){ if(hint){ hint.classList.add('warn'); hint.textContent=window.T('inbox.standby.hint_err'); } bar.querySelectorAll('.standby-opt').forEach(function(b){ b.disabled=false; }); }
+};
+(function(){ function s(){ if(_standbyBar()) window.loadStandbyMode(); }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',s); else s(); })();
 
 /* ===== 选择对话 ===== */
 function selectChat(key){
@@ -5690,6 +5765,8 @@ async function setMode(mode){
     await fetch('/api/unified-inbox/automation',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({platform:selectedChat.platform,account_id:selectedChat.account_id||'default',chat_key:selectedChat.chat_key,mode})});
   }catch(_){}
+  // P1-2：会话档位变化会改变「值守中」的真发就绪（auto_ai 计数）→ 若主管在场刷新值守提示
+  try{ if(typeof window.loadStandbyMode==='function') window.loadStandbyMode(); }catch(_){}
 }
 /* 自动化档位 UI 联动（方案 A：mode-select 为唯一入口）：
    ①全自动档下拉变绿；②「待审」仅在 AI草稿/多选 档显示；③B-1 安全条仅在全自动档显示。 */

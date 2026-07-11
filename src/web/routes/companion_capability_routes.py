@@ -535,6 +535,119 @@ def register_companion_capability_routes(app, *, api_auth) -> None:
                 "undid_preset": (blob or {}).get("applied_preset"),
                 "summary": summary, **result}
 
+    @app.get("/api/companion/standby")
+    async def api_companion_standby_get(request: Request, _=Depends(api_auth)):
+        """AI 值守当前姿态（收件箱一键开关）：off|suggest|watching|custom + 切「值守中」就绪度。
+
+        只读。``watching`` 段复用 ``check_toggle`` 权威判定告诉 UI：现在切值守中会不会被
+        双重 opt-in 护栏拦下（如无 auto_ai 会话），以及是否裸奔（send-gate 未开）。
+        """
+        from src.companion.delivery_calibration import delivery_calibration
+        from src.companion.standby_mode import infer_standby_mode, standby_options
+        from src.companion.capability_toggle import check_toggle
+
+        state = request.app.state
+        cm = getattr(state, "config_manager", None)
+        config = getattr(cm, "config", None) if cm is not None else None
+        if not isinstance(config, dict):
+            return {"ok": False, "available": False, "message": "config 未就绪"}
+
+        modes = None
+        store = getattr(state, "inbox_store", None)
+        if store is not None:
+            try:
+                modes = store.all_automation_modes()
+            except Exception:
+                logger.debug("all_automation_modes 失败", exc_info=True)
+
+        cal = delivery_calibration(config, modes)
+        chk = check_toggle(config, modes, "l2_autosend_deliver", "enabled", True)
+        return {
+            "ok": True, "available": True,
+            "mode": infer_standby_mode(config),
+            "options": standby_options(),
+            "watching": {
+                "allowed": bool(chk.get("allowed")),
+                "warn": bool(chk.get("warn")),
+                "reason": chk.get("reason") or "",
+                "auto_ai": cal["automation_modes"]["auto_ai"],
+                "worker": cal["switches"]["worker"],
+                "send_gate": cal["switches"]["send_gate"],
+            },
+        }
+
+    @app.post("/api/companion/standby")
+    async def api_companion_standby_set(request: Request, _=Depends(api_auth)):
+        """切换 AI 值守姿态（主管专属）。逐条过同一套护栏 + 写 overlay + 存快照供回滚。
+
+        body: {mode: off|suggest|watching, actor?}。切「值守中」若无 auto_ai 会话/worker 未开，
+        由 ``check_toggle`` 如实拦下 deliver 项（worker 仍会开），并在 blocked 里给出原因。
+        """
+        from src.web.routes.unified_inbox_auth import _require_supervisor
+        from src.companion.standby_mode import (
+            build_standby_plan, infer_standby_mode, is_standby_mode, STANDBY_LABELS,
+        )
+        from src.companion.capability_presets import capture_extra_flags, capture_snapshot
+        from src.companion.delivery_calibration import delivery_calibration
+        from src.companion.capability_toggle import check_toggle
+
+        _require_supervisor(request)  # 全局改 autosend 姿态是主管动作（收件箱对坐席也可见）
+
+        state = request.app.state
+        cm = getattr(state, "config_manager", None)
+        config = getattr(cm, "config", None) if cm is not None else None
+        if cm is None or not isinstance(config, dict) or not hasattr(cm, "set_overlay_flag"):
+            return {"ok": False, "available": False, "message": "config 未就绪"}
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        body = body if isinstance(body, dict) else {}
+        mode = str(body.get("mode") or "").strip()
+        actor = (str(body.get("actor") or "").strip() or "web-admin")
+        plan = build_standby_plan(mode)
+        if plan is None or not is_standby_mode(mode):
+            return {"ok": False, "message": f"未知值守档: {mode}",
+                    "options": [{"mode": m, "label": lbl}
+                                for m, lbl in STANDBY_LABELS.items()]}
+
+        modes = None
+        store = getattr(state, "inbox_store", None)
+        if store is not None:
+            try:
+                modes = store.all_automation_modes()
+            except Exception:
+                logger.debug("all_automation_modes 失败", exc_info=True)
+
+        # 切换前存快照（与预设共用单槽，供 /rollback 统一回滚；标 standby:<mode> 便于审计）
+        try:
+            sp = _snapshot_path(cm)
+            if sp is not None:
+                snap = {"ts": round(time.time(), 3), "actor": actor,
+                        "applied_preset": f"standby:{mode}",
+                        "snapshot": capture_snapshot(config),
+                        "extra_flags": capture_extra_flags(config)}
+                sp.write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
+        except Exception:
+            logger.debug("存快照失败（忽略）", exc_info=True)
+
+        result = _apply_plan(cm, config, modes, plan,
+                             actor=actor, reason=f"standby:{mode}")
+        cal = delivery_calibration(config, modes)
+        chk = check_toggle(config, modes, "l2_autosend_deliver", "enabled", True)
+        return {
+            "ok": True, "requested": mode, "mode": infer_standby_mode(config),
+            "label": STANDBY_LABELS.get(mode, mode),
+            "watching": {
+                "allowed": bool(chk.get("allowed")), "warn": bool(chk.get("warn")),
+                "reason": chk.get("reason") or "",
+                "auto_ai": cal["automation_modes"]["auto_ai"],
+                "worker": cal["switches"]["worker"],
+                "send_gate": cal["switches"]["send_gate"],
+            },
+            **result,
+        }
+
     @app.get("/api/companion/capabilities/signals")
     async def api_companion_capability_signals(
         request: Request, window_hours: float = 168, _=Depends(api_auth),

@@ -626,6 +626,8 @@ _BASELINE = """
 /api/companion/capabilities/toggle-audit	GET
 /api/companion/capabilities/preset	POST
 /api/companion/capabilities/rollback	POST
+/api/companion/standby	GET
+/api/companion/standby	POST
 /api/companion/capabilities/signals	GET
 /api/companion/capabilities/advice	GET
 /api/companion/quality-overview	GET

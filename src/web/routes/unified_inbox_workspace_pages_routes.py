@@ -50,6 +50,8 @@ def register_workspace_pages_routes(
             "funnel_done_stages": _funnel_done_sorted,
             "won_stages": _won_sorted,
         }
+        # P1-2：主管标记（收件箱「AI 值守」姿态开关等主管专属控件的模板级门槛）。
+        ctx["is_supervisor"] = _is_supervisor(request)
         # P3：账号手机号显示脱敏开关（治理化，默认脱敏=True；演示/隐私可控）
         ctx["mask_account_phone"] = True
         try:
