@@ -36,8 +36,8 @@ ALLOWLIST: Dict[str, tuple] = {
     # ── A 线 mixin：发送护栏本体（presend Kill-Switch + 反封号 + 节流 + 记账）──
     "client/sender.py::TelegramSenderMixin._send_reply":
         (GUARDED, "自动回复主路径，_presend_blocked/pace/record/mirror"),
-    "client/sender.py::TelegramSenderMixin.send_message":
-        (GUARDED, "Stage M：主动外发纳入统一发送栈（presend 护栏+节流+记账）"),
+    "client/sender.py::TelegramSenderMixin._send_text_guarded":
+        (GUARDED, "A 线外发文本核心：presend 护栏+节流+记账；send_message/send_message_return_id 均委派至此"),
     "client/sender.py::TelegramSenderMixin.send_photo":
         (GUARDED, "Stage G：形象照直发纳入统一发送栈"),
     # ── 编排器受管 worker：物理发送在 worker，护栏在 orchestrator.send/send_media（Stage M）──
@@ -147,7 +147,7 @@ def test_allowlist_entries_categorized_with_reason():
 def test_companion_send_paths_are_guarded():
     """关键陪伴外发入口必须归类 guarded（主动问候/自动回复/编排器派发）。"""
     must_guarded = [
-        "client/sender.py::TelegramSenderMixin.send_message",
+        "client/sender.py::TelegramSenderMixin._send_text_guarded",
         "client/sender.py::TelegramSenderMixin._send_reply",
         "client/sender.py::TelegramSenderMixin.send_photo",
         "integrations/account_orchestrator.py::TelegramProtocolWorker.send",
