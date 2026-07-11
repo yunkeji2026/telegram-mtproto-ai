@@ -1,0 +1,146 @@
+{
+  "generated_at": "2026-07-11T10:27:52+0800",
+  "counts": {
+    "pass": 12,
+    "fail": 0,
+    "skipped": 3,
+    "error": 0
+  },
+  "evals": [
+    {
+      "key": "persona",
+      "label": {
+        "zh": "人设一致性（客服腔/AI 自曝零漏抓）",
+        "en": "Persona consistency"
+      },
+      "status": "pass",
+      "file": "persona.json"
+    },
+    {
+      "key": "emotion",
+      "label": {
+        "zh": "情绪维度识别准确率",
+        "en": "Emotion dimension accuracy"
+      },
+      "status": "pass",
+      "file": "emotion.json"
+    },
+    {
+      "key": "emotion-intensity",
+      "label": {
+        "zh": "情绪强度分级单调性",
+        "en": "Emotion intensity grading"
+      },
+      "status": "pass",
+      "file": "emotion-intensity.json"
+    },
+    {
+      "key": "crisis",
+      "label": {
+        "zh": "危机识别（severe 召回红线）",
+        "en": "Crisis detection"
+      },
+      "status": "pass",
+      "file": "crisis.json"
+    },
+    {
+      "key": "crisis-response",
+      "label": {
+        "zh": "危机响应闭环（识别→处置）",
+        "en": "Crisis response loop"
+      },
+      "status": "pass",
+      "file": "crisis-response.json"
+    },
+    {
+      "key": "crisis-resource",
+      "label": {
+        "zh": "危机资源保障（热线补发）",
+        "en": "Crisis resource assurance"
+      },
+      "status": "pass",
+      "file": "crisis-resource.json"
+    },
+    {
+      "key": "crisis-overview",
+      "label": {
+        "zh": "危机安全总览（全链合并门禁）",
+        "en": "Crisis safety overview"
+      },
+      "status": "pass",
+      "file": "crisis-overview.json"
+    },
+    {
+      "key": "proactive-guard",
+      "label": {
+        "zh": "主动触达情绪护栏",
+        "en": "Proactive outreach guard"
+      },
+      "status": "pass",
+      "file": "proactive-guard.json"
+    },
+    {
+      "key": "memory-extract",
+      "label": {
+        "zh": "记忆抽取质量（启发式）",
+        "en": "Memory extraction quality"
+      },
+      "status": "pass",
+      "file": "memory-extract.json"
+    },
+    {
+      "key": "voice-language",
+      "label": {
+        "zh": "语音合成语言一致性",
+        "en": "Voice language consistency"
+      },
+      "status": "pass",
+      "file": "voice-language.json"
+    },
+    {
+      "key": "xlate-confidence",
+      "label": {
+        "zh": "译文置信度 scorer",
+        "en": "Translation confidence scorer"
+      },
+      "status": "pass",
+      "file": "xlate-confidence.json"
+    },
+    {
+      "key": "intent",
+      "label": {
+        "zh": "意图识别准确率（规则基线）",
+        "en": "Intent accuracy (rule baseline)"
+      },
+      "status": "pass",
+      "file": "intent.json"
+    },
+    {
+      "key": "translation",
+      "label": {
+        "zh": "翻译回译质量（确定性引擎）",
+        "en": "Back-translation quality"
+      },
+      "status": "skipped",
+      "file": "translation.json"
+    },
+    {
+      "key": "faq",
+      "label": {
+        "zh": "FAQ 自解决率",
+        "en": "FAQ self-resolution rate"
+      },
+      "status": "skipped",
+      "file": "faq.json"
+    },
+    {
+      "key": "memory",
+      "label": {
+        "zh": "记忆召回（关键词 vs 向量）",
+        "en": "Memory recall (kw vs vector)"
+      },
+      "status": "skipped",
+      "file": "memory.json"
+    }
+  ]
+}

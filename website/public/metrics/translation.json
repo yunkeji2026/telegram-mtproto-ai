@@ -1,0 +1,11 @@
+{
+  "key": "translation",
+  "label": {
+    "zh": "翻译回译质量（确定性引擎）",
+    "en": "Back-translation quality"
+  },
+  "cmd": "python -m scripts.run_eval --translation --json",
+  "status": "skipped",
+  "note": "[note] 翻译评测需确定性引擎：在 config.yaml 的 translation.engines.order 里加 deepl/google 并配 api_key。当前无可用确定性引擎，跳过。",
+  "generated_at": "2026-07-11T10:27:52+0800"
+}

@@ -3,7 +3,7 @@ import { SITE_URL } from "@/lib/site";
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const now = new Date();
-  const landing = ["/voice", "/face", "/interpreting"].flatMap((slug) => [
+  const landing = ["/voice", "/face", "/interpreting", "/asset-safe", "/nurture"].flatMap((slug) => [
     { url: `${SITE_URL}${slug}`, lastModified: now, changeFrequency: "weekly" as const, priority: 0.8 },
     { url: `${SITE_URL}/en${slug}`, lastModified: now, changeFrequency: "weekly" as const, priority: 0.7 },
   ]);

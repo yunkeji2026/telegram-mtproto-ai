@@ -1,0 +1,19 @@
+{
+  "key": "crisis-resource",
+  "label": {
+    "zh": "危机资源保障（热线补发）",
+    "en": "Crisis resource assurance"
+  },
+  "cmd": "python -m scripts.run_eval --crisis-resource --json",
+  "status": "pass",
+  "report": {
+    "summary": {
+      "total": 6,
+      "append_recall": 1.0,
+      "false_append": 0,
+      "duplicate": 0
+    },
+    "passed": true
+  },
+  "generated_at": "2026-07-11T10:27:52+0800"
+}

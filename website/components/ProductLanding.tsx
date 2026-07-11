@@ -11,6 +11,8 @@ import {
   AudioLines,
   PlayCircle,
   Home,
+  Database,
+  Sprout,
 } from "lucide-react";
 import { useLang } from "./LanguageContext";
 import Reveal from "./fx/Reveal";
@@ -149,10 +151,37 @@ function DemoBlock({ product }: { product: LandingKey }) {
             </div>
           </div>
         )}
+
+        {/* 无音视频样片的产品线（asset-safe / nurture）：逐条可当场验证的能力清单 */}
+        {(LANDINGS[product].demoBullets?.length ?? 0) > 0 && (
+          <div className="mx-auto max-w-2xl space-y-2.5">
+            {LANDINGS[product].demoBullets!.map((b) => (
+              <div
+                key={b.en}
+                className="flex items-start gap-2.5 rounded-xl border border-white/10 bg-ink-900/50 p-3.5 text-sm leading-relaxed text-slate-300"
+              >
+                <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+                {b[lang]}
+              </div>
+            ))}
+            <div className="flex items-center gap-2 pt-1 text-[11px] text-slate-500">
+              <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-emerald-400/80" />
+              {d.realNote[lang]}
+            </div>
+          </div>
+        )}
       </Reveal>
     </div>
   );
 }
+
+const HERO_ICONS: Record<LandingKey, typeof AudioLines> = {
+  voice: AudioLines,
+  face: PlayCircle,
+  interpreting: Languages,
+  "asset-safe": Database,
+  nurture: Sprout,
+};
 
 export default function ProductLanding({ product }: { product: LandingKey }) {
   const { lang } = useLang();
@@ -167,7 +196,10 @@ export default function ProductLanding({ product }: { product: LandingKey }) {
         <div className="mx-auto max-w-3xl text-center">
           <Reveal>
             <span className="inline-flex items-center gap-1.5 rounded-full border border-neon-cyan/30 bg-neon-cyan/10 px-3.5 py-1 text-xs font-medium text-neon-cyan">
-              {product === "voice" ? <AudioLines className="h-3.5 w-3.5" /> : product === "face" ? <PlayCircle className="h-3.5 w-3.5" /> : <Languages className="h-3.5 w-3.5" />}
+              {(() => {
+                const Icon = HERO_ICONS[product] ?? Languages;
+                return <Icon className="h-3.5 w-3.5" />;
+              })()}
               {L.productLine[lang]}
             </span>
           </Reveal>
@@ -206,7 +238,7 @@ export default function ProductLanding({ product }: { product: LandingKey }) {
                 href="#demo"
                 className="inline-flex items-center gap-2 rounded-full border border-white/15 px-7 py-3 font-medium text-slate-200 transition hover:border-neon-cyan/50 hover:text-white"
               >
-                {lang === "zh" ? "先看真实样片" : "See real samples"}
+                {L.hero.demoCta?.[lang] ?? (lang === "zh" ? "先看真实样片" : "See real samples")}
                 <ArrowDown className="h-4 w-4" />
               </a>
             </div>
