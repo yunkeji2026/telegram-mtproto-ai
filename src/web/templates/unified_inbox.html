@@ -6905,19 +6905,31 @@ const _outOrigMap=new Map();
 function _xlatePrefs(){
   try{ return JSON.parse(localStorage.getItem(_XL_KEY)||'{}'); }catch(_){ return {}; }
 }
+/* P0-3/B7：同语判定（基码比较，zh-cn≍zh）。任一侧空/unknown → false（未知不抑制）。 */
+function _sameLang(a,b){
+  const na=String(a||'').trim().toLowerCase().split('-')[0];
+  const nb=String(b||'').trim().toLowerCase().split('-')[0];
+  if(!na||!nb||na==='unknown'||nb==='unknown') return false;
+  return na===nb;
+}
 function _loadXlateForConv(c){
   const key=c?convKey(c):'';
   const all=_xlatePrefs();
-  // 译文语言优先级（同步初值）：会话级偏好 > 浏览器全局默认 > 内置 zh。
+  // 译文语言优先级（同步初值）：会话级偏好 > 浏览器全局默认 > 按会话语言智能默认。
   // P3：服务端运营默认稍后异步取回，介于「会话级」与「浏览器默认」之间——仅当无会话级 pref 时可覆盖。
-  // 尊重已显式选择（含「不译」）的老用户：会话级 / 浏览器默认存在即用其值，不强塞 zh。
+  // 尊重已显式选择（含「不译」）的老用户：会话级偏好存在即用其值，绝不覆盖。
+  // P0-3/B7 智能默认：非会话级的默认目标语若与会话客户语言同语（如中文会话+默认 zh），
+  // 翻译只会得 identity（不显示还白跑一轮 /translate），→ 该会话默认关；
+  // 客户语言 ≠ 默认目标语（外语会话）才自动开。外语坐席（浏览器默认 en 等）看中文会话不受抑制。
   const convEntry=(key in all)?all[key]:null;
   const hasConvIn=!!(convEntry && Object.prototype.hasOwnProperty.call(convEntry,'in'));
   const bd=all.__default__||{};
   const hasBrowserIn=Object.prototype.hasOwnProperty.call(bd,'in');
   if(hasConvIn) _xlateIn=convEntry.in||'';
-  else if(hasBrowserIn) _xlateIn=bd.in||'';
-  else _xlateIn='zh';
+  else{
+    const _def=hasBrowserIn?(bd.in||''):'zh';
+    _xlateIn=(_def && c && _sameLang(_def,c.language))?'':_def;
+  }
   _xlateOut=(convEntry&&convEntry.out)||bd.out||'';
   _outPreview=!!((convEntry&&convEntry.preview!==undefined)?convEntry.preview:bd.preview);
   const si=document.getElementById('xlate-in'), so=document.getElementById('xlate-out');
@@ -6944,7 +6956,9 @@ async function _loadServerDefaultLang(c){
     const d=await r.json();
     if(selectedChat!==c) return;             // 已切走 → 丢弃过期响应
     if(!_xlServerDefaultApplicable) return;  // 期间用户手改/设过会话级 → 不覆盖
-    const srv=(d&&d.ok&&d.resolved)?String(d.resolved):'';
+    let srv=(d&&d.ok&&d.resolved)?String(d.resolved):'';
+    // P0-3/B7：运营默认与会话客户语言同语（如 zh 默认 × 中文会话）→ identity 白跑，不覆盖
+    if(srv && _sameLang(srv,c.language)) srv='';
     if(srv && srv!==_xlateIn){
       _xlateIn=srv;
       const si=document.getElementById('xlate-in');
@@ -7314,19 +7328,49 @@ async function _doTranslate(text, lang, purpose){
   const out=t.translated_text||t.translated||t.text||'';
   const cached=!!t.cached;
   if(t.provider) _setXlateEngine(t.provider);
-  if(out){ _xlCache.set(ck,out); return {text:out, cached, provider:t.provider||'', ok:t.ok!==false, error:t.error||''}; }
+  if(out){ _xlCache.set(ck,out); return {text:out, cached, provider:t.provider||'', ok:t.ok!==false, error:t.error||'',
+    confidence:(typeof t.confidence==='number'?t.confidence:-1)}; }
   return null;
 }
-/* P0：根据翻译结果元数据判断是否降级（引擎不可用/失败），返回徽章 HTML（否则空串）。 */
+/* P0-2：低置信阈值——与后端 translation_confidence.TIER_LOW(0.5) 同口径；
+   confidence<0 = 未评分（identity/失败/旧数据），不出低置信提示。 */
+const _XL_CONF_LOW=0.5;
+/* P0：根据翻译结果元数据判断是否降级（引擎不可用/失败），返回徽章 HTML（否则空串）。
+   P0-2 扩展：非降级但确定性置信度低（空译/未翻译/错语种/长度异常信号）→ 低置信徽章。
+   降级徽章语义不变且优先（降级本身已含「不可信」信息，不叠加两个徽章）。 */
 function _xlWarnBadge(meta){
   if(!meta) return '';
   const prov=String(meta.provider||'').toLowerCase();
   const degraded=(meta.ok===false)||(meta.error&&meta.error!=='')||prov==='none'||prov==='identity';
-  if(!degraded) return '';
+  if(!degraded){
+    const conf=(typeof meta.confidence==='number')?meta.confidence:-1;
+    if(conf>=0 && conf<_XL_CONF_LOW){
+      return `<span class="xl-warn-badge" title="${esc(window.Tf('inbox.xl.conf_low_t',{score:conf}))}">${window.T('inbox.xl.conf_badge_low')}</span>`;
+    }
+    return '';
+  }
   const why=prov==='none'?window.T('inbox.xl.warn_notready'):(prov==='identity'?window.T('inbox.xl.warn_identity'):(meta.error||window.T('inbox.xl.warn_degraded')));
   return `<span class="xl-warn-badge" title="${esc(window.T('inbox.xl.warn_prefix')+why)}">${window.T('inbox.xl.warn_badge')}</span>`;
 }
 const _XL_ENGINE_LABEL={ai:window.T('inbox.xl.eng_ai'),deepl:'DeepL',google:'Google',identity:window.T('inbox.xl.eng_origin'),none:window.T('inbox.xl.eng_off')};
+/* P0-2：多线路对照候选的置信度徽标（high/mid/low 分档 + 关键信号 tooltip）。
+   分值/分档由后端 translation_confidence 统一产出（compare_translations 每候选附带），
+   前端只渲染；候选无评分（失败行/旧后端）→ 空串不显示。生成期拼 HTML，无内联 handler。 */
+function _xlConfBadge(c){
+  if(!c || typeof c.confidence!=='number' || c.confidence<0) return '';
+  const tier=String(c.confidence_tier||((c.confidence>=0.8)?'high':(c.confidence>=_XL_CONF_LOW?'mid':'low')));
+  const lbl=window.T(tier==='high'?'inbox.xl.conf_high':(tier==='mid'?'inbox.xl.conf_mid':'inbox.xl.conf_low'));
+  const col=tier==='high'?'#16a34a':(tier==='mid'?'#b45309':'#dc2626');
+  const bg=tier==='high'?'rgba(22,163,74,.13)':(tier==='mid'?'rgba(245,158,11,.16)':'rgba(239,68,68,.14)');
+  const sig=c.confidence_signals||{};
+  const parts=[window.Tf('inbox.xl.conf_t',{score:c.confidence})];
+  if(sig.untranslated) parts.push(window.T('inbox.xl.conf_sig_untranslated'));
+  if(typeof sig.script_ratio==='number' && sig.script_ratio<1) parts.push(window.Tf('inbox.xl.conf_sig_script',{ratio:sig.script_ratio}));
+  if(sig.length_ok===false) parts.push(window.Tf('inbox.xl.conf_sig_length',{ratio:sig.length_ratio}));
+  return ' <span class="xl-conf-badge" title="'+esc(parts.join(' · '))
+    +'" style="padding:1px 6px;border-radius:10px;font-size:10px;font-weight:600;background:'+bg+';color:'+col+';white-space:nowrap;">'
+    +esc(lbl)+'</span>';
+}
 function _setXlateEngine(provider){
   const el=document.getElementById('xlate-engine');
   if(el) el.innerHTML='<span class="dot"></span>'+(_XL_ENGINE_LABEL[provider]||provider);
@@ -7365,7 +7409,7 @@ async function _onXlateCompare(){
     row.type='button';
     row.className='xlcompare-opt';
     row.innerHTML='<span class="pick">'+window.T('inbox.xl.cmp_pick')+'</span>'+
-      '<div class="xlcompare-eng">'+(_XL_ENGINE_LABEL[c.engine]||esc(c.engine))+'</div>'+
+      '<div class="xlcompare-eng">'+(_XL_ENGINE_LABEL[c.engine]||esc(c.engine))+_xlConfBadge(c)+'</div>'+
       '<div class="xlcompare-txt">'+esc(c.translated_text)+'</div>';
     row.onclick=()=>{
       if(inp){ inp.value=c.translated_text; inp.focus(); }
@@ -7551,15 +7595,31 @@ async function _translateMsgInto(lang,m){
   }catch(_){}
 }
 // 消息自动批量翻译（开启「译文语言」时）。P2：分批并发 + 最新优先 + 出站双语，控成本与卡顿。
+// P0-3/B6 单一真相源口径（与 src/workspace/inbound_translate.py 模块注释对应）：
+// 后端 /thread enrich = 共享预取 + 唯一持久化写路径（最近 N 条外语入站 → store）；
+// 前端 _xlateIn = 坐席级显示决策 + 补位（后端未覆盖的旧消息滚入视口 / 实时新消息 /
+// 个性化非默认目标语才走 /translate）。_xlNeeds 是去重契约：已带同目标语服务端译文
+// （enrich 写回或 store 直读行）绝不重复请求；两端共用同一 TranslationService 缓存，
+// 残余重叠 = 缓存命中，不产生重复 API 调用。
 const _XL_BATCH=6;   // 单批最大并发，避免长会话切入瞬间几十条串行慢 / 突发打高账单
 // P4-B：判断某条消息在目标语 lang 下是否仍需补译（与下面遍历同口径，供视口懒翻复用）。
 function _xlNeeds(m,lang){
   if(!lang||!m||!m.text) return false;
   if(m.direction==='out'){
     if(lang==='zh' && _outHasOrig(m)) return false; // 已是「实发外语 + 中文原文」双语
-  }else if(m.translated_text && m.translation && typeof m.translation==='object'
-           && m.translation.target_lang===lang){
-    return false;                                    // 服务端已译同语
+  }else{
+    // P0-3/B6：源语==目标语（如中文消息×目标 zh）→ 服务端必回 identity 且不显示，
+    // 省掉整个 /translate 往返（服务端用同一 detect_language，判定口径一致）。
+    if(_sameLang(m.language,lang)) return false;
+    // 服务端已有**真译文**（enrich 写回 / store 直读）→ 绝不重复请求（B6 去重契约）。
+    // 须 _meaningfulXlate 把关：store 行 translated_text 无译文时回落原文占位
+    // （normalizer 形状兼容），不能被当成已译，否则超出 enrich 窗口的旧外语消息
+    // 滚入视口永远得不到补译（前端「补位」职责落空）。
+    if(m.translated_text && m.translation && typeof m.translation==='object'
+       && m.translation.target_lang===lang
+       && _meaningfulXlate(m.text,m.translated_text)){
+      return false;                                  // 服务端已译同语
+    }
   }
   if(m._xlLang===lang && m.translation) return false; // 已译且语言未变
   return true;
@@ -7569,6 +7629,13 @@ function _findThreadMsg(mid){
   for(const m of threadMsgs){ if(String(m.message_id||'')===mid) return m; }
   return null;
 }
+/* P0-3/B8 前端侧成本护栏：目标语引擎矩阵已知为「无可用引擎」→ 抑制**自动**批量补译
+   （每条消息白跑 /translate 只会攒 failed 计数 + 无译文可显示）。矩阵未取回（未知）
+   不抑制；手动「译」按钮 / 多线路对照不受影响。矩阵由 _updateEngineHint 切会话时取回缓存。 */
+function _xlAutoBlocked(lang){
+  const m=_engineMatrixCache.get(lang);
+  return !!(m && m.effective==='none');
+}
 // P4-B：视口懒翻——长会话只翻进入视口（+200px 预取）的消息，其余滚动到再翻，省 token。
 let _xlObserver=null;
 function _ensureXlObserver(){
@@ -7576,7 +7643,7 @@ function _ensureXlObserver(){
   if(!area || !('IntersectionObserver' in window)) return null;
   if(_xlObserver) return _xlObserver;
   _xlObserver=new IntersectionObserver((entries)=>{
-    if(!_xlateIn) return;
+    if(!_xlateIn || _xlAutoBlocked(_xlateIn)) return;
     const lang=_xlateIn, todo=[];
     entries.forEach(en=>{
       if(!en.isIntersecting) return;
@@ -7604,7 +7671,7 @@ function _observePendingMsgs(){
 }
 // 回落整批（无 IntersectionObserver 环境）：分批并发 + 最新优先。
 async function _autoTranslateBatch(){
-  if(!_xlateIn) return;
+  if(!_xlateIn || _xlAutoBlocked(_xlateIn)) return;
   const lang=_xlateIn;
   const pending=threadMsgs.filter(m=>_xlNeeds(m,lang));
   pending.reverse();
@@ -7613,7 +7680,7 @@ async function _autoTranslateBatch(){
   }
 }
 async function _autoTranslateInbound(){
-  if(!_xlateIn) return;
+  if(!_xlateIn || _xlAutoBlocked(_xlateIn)) return;
   _observePendingMsgs();
 }
 

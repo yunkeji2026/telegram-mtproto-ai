@@ -94,6 +94,7 @@ def assemble_ops_overview(
     auto_claim: Optional[Dict[str, Any]] = None,
     open_incidents: Optional[int] = None,
     companion: Optional[Dict[str, Any]] = None,
+    inbound_translation: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """把四路 payload 装配成总览。
 
@@ -104,6 +105,8 @@ def assemble_ops_overview(
         reliability:build_reliability 输出
         auto_claim: 自动认领统计（可选）
         open_incidents: 未关闭运维事件数（E2，可选）
+        inbound_translation: InboxStore.get_inbound_xlate_stats 输出（P0-3/B9 成本护栏
+            观测：入站自动译新译出/失败量 + 客户语言分布，可选）
     """
     roi = roi or {}
     billing = billing or {}
@@ -157,6 +160,9 @@ def assemble_ops_overview(
         "companion_config_light": comp_light,
         "companion_config_errors": int(comp_summary.get("errors") or 0),
         "companion_config_warnings": int(comp_summary.get("warnings") or 0),
+        # P0-3/B9 成本护栏：入站自动译量（窗口内新译出/失败条数，命中缓存不计）
+        "inbound_xlate_translated": int((inbound_translation or {}).get("translated") or 0),
+        "inbound_xlate_failed": int((inbound_translation or {}).get("failed") or 0),
     }
 
     return {
@@ -171,6 +177,7 @@ def assemble_ops_overview(
             "billing": billing,
             "auto_claim": auto_claim or {},
             "companion": companion or {},
+            "inbound_translation": inbound_translation or {},
         },
         "ts": time.time(),
     }

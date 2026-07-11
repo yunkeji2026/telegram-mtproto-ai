@@ -96,4 +96,23 @@ def translation_confidence(source: str, translated: str, target_lang: str) -> fl
     return round(max(0.0, min(1.0, score)), 3)
 
 
-__all__ = ["translation_confidence", "confidence_signals"]
+# P0-2：分档阈值（对外单一真相源：compare 候选卡徽标 / 单条低置信提示共用同一口径）。
+# low 上界 0.5 与 EngineRouter 常用 min_confidence 量级一致：确定性硬错信号才会砸破 0.5。
+TIER_HIGH = 0.8
+TIER_LOW = 0.5
+
+
+def confidence_tier(score: float) -> str:
+    """把 [0,1] 置信分离散成 high/mid/low 三档（前端徽标用，避免各端自造阈值漂移）。"""
+    s = max(0.0, min(1.0, float(score or 0.0)))
+    if s >= TIER_HIGH:
+        return "high"
+    if s >= TIER_LOW:
+        return "mid"
+    return "low"
+
+
+__all__ = [
+    "translation_confidence", "confidence_signals", "confidence_tier",
+    "TIER_HIGH", "TIER_LOW",
+]
