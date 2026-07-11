@@ -213,6 +213,31 @@ export async function GET(req: NextRequest) {
     ctaByWhere[w] = (ctaByWhere[w] ?? 0) + 1;
   }
 
+  // ── A/B 实验汇总：曝光/点击按 variant 分桶，CTR=点击/曝光 ──
+  const abStats: Record<string, Record<string, { expose: number; click: number; ctr: number }>> = {};
+  for (const e of events) {
+    const props = (e.props ?? {}) as Record<string, unknown>;
+    if (e.event === "ab_expose") {
+      const exp = String(props.experiment ?? "?");
+      const v = String(props.variant ?? "?");
+      abStats[exp] ??= {};
+      abStats[exp][v] ??= { expose: 0, click: 0, ctr: 0 };
+      abStats[exp][v].expose += 1;
+    } else if (e.event === "cta_click" && props.ab) {
+      // 目前仅 hero_primary 带 ab 字段；后续实验沿用该口径
+      const exp = "hero_cta";
+      const v = String(props.ab);
+      abStats[exp] ??= {};
+      abStats[exp][v] ??= { expose: 0, click: 0, ctr: 0 };
+      abStats[exp][v].click += 1;
+    }
+  }
+  for (const exp of Object.values(abStats)) {
+    for (const v of Object.values(exp)) {
+      v.ctr = v.expose > 0 ? Number(((v.click / v.expose) * 100).toFixed(2)) : 0;
+    }
+  }
+
   // leads breakdown
   const leadsBySource: Record<string, number> = {};
   const leadsByInterest: Record<string, number> = {};
@@ -337,6 +362,7 @@ export async function GET(req: NextRequest) {
       leads: leads.filter(recent).length,
     },
     ctaByWhere,
+    ab: abStats,
     leadsBySource,
     leadsByInterest,
     leadsByDay,

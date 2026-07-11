@@ -1,11 +1,12 @@
 "use client";
 
 import Image from "next/image";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { useEffect, useState } from "react";
 import { Mic, Video, PhoneOff } from "lucide-react";
 import { useLang } from "./LanguageContext";
 import { useInView } from "@/lib/useInView";
+import InteractiveLines from "./fx/InteractiveLines";
 
 function fmt(s: number) {
   const m = Math.floor(s / 60);
@@ -18,7 +19,6 @@ export default function LiveSwapStage() {
   const reduced = useReducedMotion();
   const { ref, inView } = useInView<HTMLDivElement>();
   const [swapped, setSwapped] = useState(true);
-  const [scanKey, setScanKey] = useState(0);
   const [sec, setSec] = useState(12);
 
   useEffect(() => {
@@ -31,7 +31,6 @@ export default function LiveSwapStage() {
     if (reduced || !inView) return;
     let flip: ReturnType<typeof setTimeout>;
     const id = setInterval(() => {
-      setScanKey((k) => k + 1);
       flip = setTimeout(() => setSwapped((s) => !s), 480);
     }, 3600);
     return () => {
@@ -96,23 +95,8 @@ export default function LiveSwapStage() {
             <span className="absolute -bottom-px -right-px h-3 w-3 border-b-2 border-r-2 border-neon-cyan" />
           </div>
 
-          {/* scan sweep */}
-          {!reduced && (
-            <AnimatePresence>
-              <motion.div
-                key={scanKey}
-                initial={{ top: "-15%", opacity: 0 }}
-                animate={{ top: "115%", opacity: [0, 1, 1, 0] }}
-                transition={{ duration: 1.1, ease: "easeInOut" }}
-                className="pointer-events-none absolute left-0 right-0 h-20"
-              >
-                <div className="h-full w-full bg-gradient-to-b from-transparent via-neon-cyan/25 to-transparent" />
-                <div className="absolute bottom-0 left-0 right-0 h-px bg-neon-cyan shadow-[0_0_10px_rgba(34,211,238,0.9)]" />
-              </motion.div>
-            </AnimatePresence>
-          )}
-
-          <div className="hud-scanlines pointer-events-none absolute inset-0 opacity-30" />
+          {/* tech-feeling background lines, react to cursor */}
+          <InteractiveLines />
 
           {/* "they see: face + voice" chip */}
           <span className="absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full border border-neon-cyan/50 bg-black/50 px-2.5 py-1 text-[11px] font-semibold text-neon-cyan backdrop-blur">

@@ -8,8 +8,10 @@ import Compare from "@/components/Compare";
 import AutoChat from "@/components/AutoChat";
 import TranslateDemo from "@/components/TranslateDemo";
 import RealtimeSwap from "@/components/RealtimeSwap";
+import EngineCapabilities from "@/components/EngineCapabilities";
 import Showcase from "@/components/Showcase";
 import Cases from "@/components/Cases";
+import RealProof from "@/components/RealProof";
 import EngagementModels from "@/components/EngagementModels";
 import Pricing from "@/components/Pricing";
 import OrderSteps from "@/components/OrderSteps";
@@ -35,8 +37,10 @@ export default function SiteHome() {
       <AutoChat />
       <TranslateDemo />
       <RealtimeSwap />
+      <EngineCapabilities />
       <Showcase />
       <Cases />
+      <RealProof />
       <EngagementModels />
       <Pricing />
       <OrderSteps />

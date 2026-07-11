@@ -19,15 +19,25 @@ LOG=/home/ubuntu/health-watchdog.log
 
 now=$(date +%s); ts=$(date '+%F %T')
 
-# Telegram 通知（单行纯文本）。无 token/chat_id 时静默跳过。
+# Telegram 通知（单行纯文本）。收件人 = ALERT_CHAT_ID(env，可多个逗号分隔)
+#   ∪ 网站 /bindadmin 绑定的留资接收人(admin_chats.json)——绑一次，留资推送和运维告警同时生效。
 notify() {
-  local T C
+  local T ids
   T=$(grep -E '^TELEGRAM_BOT_TOKEN=' "$APP_DIR/.env.local" 2>/dev/null | sed -E 's/^[^=]+=//; s/^"//; s/"$//')
-  C=$(grep -E '^ALERT_CHAT_ID='     "$APP_DIR/.env.local" 2>/dev/null | sed -E 's/^[^=]+=//; s/^"//; s/"$//')
-  [ -n "$T" ] && [ -n "$C" ] || return 0
-  curl -s "https://api.telegram.org/bot$T/sendMessage" \
-    --data-urlencode "chat_id=$C" \
-    --data-urlencode "text=$1" >/dev/null 2>&1
+  [ -n "$T" ] || return 0
+  ids=$(grep -E '^ALERT_CHAT_ID=' "$APP_DIR/.env.local" 2>/dev/null | sed -E 's/^[^=]+=//; s/^"//; s/"$//' | tr ',' '\n')
+  if [ -f "$HOME/hualing-leads/admin_chats.json" ]; then
+    ids="$ids
+$(grep -oE '[0-9-]{6,}' "$HOME/hualing-leads/admin_chats.json" 2>/dev/null)"
+  fi
+  ids=$(echo "$ids" | grep -E '^-?[0-9]+$' | sort -u)
+  [ -n "$ids" ] || return 0
+  local c
+  for c in $ids; do
+    curl -s "https://api.telegram.org/bot$T/sendMessage" \
+      --data-urlencode "chat_id=$c" \
+      --data-urlencode "text=$1" >/dev/null 2>&1
+  done
 }
 
 if curl -sf -m 8 "http://127.0.0.1:$CHECK_PORT/api/health" 2>/dev/null | grep -q '"healthy":true'; then
