@@ -291,6 +291,23 @@ class TranslationService:
             self._cache_put(key, mem)  # 回填 L1
             return mem
 
+        # P0-4 字符额度闸门：额度用尽且 licensing.enforce 开 → 阻断本次引擎翻译
+        # （缓存/记忆命中不受影响；调用方按「翻译失败」回落原文，绝不阻断消息投递）。
+        # 结果**不写缓存**——续费/换 key 后应立即恢复。闸门自身异常 → 放行。
+        try:
+            from src.licensing.quota_store import (
+                QUOTA_EXCEEDED_ERROR,
+                check_license_quota,
+            )
+
+            if not check_license_quota()["allowed"]:
+                return TranslationResult(
+                    src_text, src_text, source, target, False,
+                    provider="license", error=QUOTA_EXCEEDED_ERROR,
+                )
+        except Exception:
+            pass
+
         if not self._router.any_available():
             result = TranslationResult(
                 src_text,
@@ -359,6 +376,7 @@ class TranslationService:
         if result.ok:
             self._memory_put(key, result, style, engine=res.engine)
             self._record_cost(src_text, out, source, target)
+            self._record_license_quota(src_text)
         return result
 
     def _memory_get(self, key: str) -> Optional[TranslationResult]:
@@ -394,6 +412,15 @@ class TranslationService:
                 engine=engine or "ai",
                 glossary_ver=self._glossary_version,
             )
+        except Exception:
+            pass
+
+    def _record_license_quota(self, src: str) -> None:
+        """P0-4：成功引擎翻译后按源文字符记账（无额度授权零开销；绝不抛）。"""
+        try:
+            from src.licensing.quota_store import record_license_chars
+
+            record_license_chars("translation", len(src))
         except Exception:
             pass
 

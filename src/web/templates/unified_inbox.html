@@ -1434,7 +1434,9 @@
                   <button class="tiny-btn" id="voice-cfg-btn" onclick="toggleVoiceCfg()" title="发送语音 / 音色选择 / 克隆 / 录入 / 对账" data-i18n-title="inbox.rt.voice_t"><svg class="rt-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></svg><span data-i18n="inbox.rt.voice">语音 ▾</span></button>
                   <div class="rt-pop" id="voice-cfg-pop">
                     <div class="rt-pop-row" style="margin-bottom:8px;">
-                      <button class="tiny-btn rt-primary" id="voice-btn" onclick="genVoiceReply()" title="把输入框文字转成语音并发送" data-i18n-title="inbox.rt.voice_send_t" style="flex:1;"><svg class="rt-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></svg><span data-i18n="inbox.rt.voice_send">发送语音</span></button>
+                      <!-- P0-6/C7：主按钮一键「合成+发送」（send-voice 服务端合成直发）；旁边保留「试听」走 tts-test 预览 -->
+                      <button class="tiny-btn rt-primary" id="voice-btn" onclick="sendVoiceReply()" title="一键：把输入框文字转成语音并直接发送（可先试听）" data-i18n-title="inbox.rt.voice_send_t" style="flex:1;"><svg class="rt-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></svg><span data-i18n="inbox.rt.voice_send">发送语音</span></button>
+                      <button class="tiny-btn" id="voice-preview-btn" onclick="genVoiceReply()" title="先试听合成效果再决定发送（不发送）" data-i18n-title="inbox.rt.voice_preview_t"><span data-i18n="inbox.rt.voice_preview">试听</span></button>
                     </div>
                     <div class="rt-pop-row">
                       <label class="rt-pop-lbl" data-i18n="inbox.rt.tone">音色</label>
@@ -3389,10 +3391,21 @@ function _applySendCaps(caps){
   };
   const okM=!caps||caps.can_media!==false;
   const okV=!caps||caps.can_voice!==false;
+  // P0-6/C9：RPA 会话（voice_mode=auto_only）语音按钮给「仅自动语音」的明确理由，
+  // 而非笼统「不支持」——设备端 voice_output 会自动发语音，坐席只是不能手动直发。
+  const autoOnly=!!(caps&&caps.voice_mode==='auto_only');
   set('send-media-btn', okM, window.T('inbox.rt.media_t'),
       window.T('inbox.caps.no_media'));
   set('voice-btn', okV, window.T('inbox.rt.voice_send_t'),
-      window.T('inbox.caps.no_voice'));
+      autoOnly?window.T('inbox.caps.voice_auto_only'):window.T('inbox.caps.no_voice'));
+  const pv=document.getElementById('voice-preview-btn');
+  if(pv){ // 试听不发送，仅依赖 TTS 服务本身；但会话无语音能力时一并置灰防误解
+    pv.disabled=!okV;
+    pv.style.opacity=okV?'':'.45';
+    pv.style.cursor=okV?'':'not-allowed';
+    if(!okV) pv.title=autoOnly?window.T('inbox.caps.voice_auto_only'):window.T('inbox.caps.no_voice');
+    else pv.title=window.T('inbox.rt.voice_preview_t');
+  }
 }
 async function _loadSendCaps(c){
   _applySendCaps(null);  // 乐观：先按支持渲染
@@ -6622,79 +6635,11 @@ function _onVoicePersonaChange(){
   try{ localStorage.setItem(_VOICE_KEY,JSON.stringify(prefs)); }catch(_){}
 }
 
-/* ===== 声纹自助登记闭环 ===== */
-let _veLoaded=false;
-async function toggleVoiceEnroll(){
-  const p=document.getElementById('voice-enroll-panel');
-  if(!p) return;
-  const show=p.style.display==='none';
-  p.style.display=show?'block':'none';
-  if(show&&!_veLoaded){ _veLoaded=true; await _loadEnrollPersonas(); await loadVoiceReconcile(); }
-}
-async function _loadEnrollPersonas(){
-  const sel=document.getElementById('ve-persona');
-  const rf=document.getElementById('ve-rebind-from');
-  const rt=document.getElementById('ve-rebind-to');
-  try{
-    const r=await fetch('/api/personas/profiles');
-    const d=await r.json();
-    const list=d.summary||[];
-    if(sel){ let h='<option value="">'+window.T('inbox.voice.pick_target')+'</option>'; list.forEach(s=>{ h+=`<option value="${enc(s.id)}">${esc(s.name||s.id)}</option>`; }); sel.innerHTML=h; }
-    // 复用：源限定为已绑定音色（has_voice）的人设；目标可为任意人设
-    if(rf){ let h='<option value="">'+window.T('inbox.voice.src_with_voice')+'</option>'; list.filter(s=>s.has_voice).forEach(s=>{ h+=`<option value="${enc(s.id)}">${esc(s.name||s.id)} 🎤</option>`; }); rf.innerHTML=h; }
-    if(rt){ let h='<option value="">'+window.T('inbox.voice.target_persona')+'</option>'; list.forEach(s=>{ h+=`<option value="${enc(s.id)}">${esc(s.name||s.id)}</option>`; }); rt.innerHTML=h; }
-  }catch(_){ /* 人设列表不可用：保留占位 */ }
-}
-async function _auditionPersona(persona_id, into){
-  // 登记/改绑后自动试听：用样句调 tts-test，确认音色已生效
-  const box=document.getElementById(into);
-  if(!box) return;
-  box.innerHTML='<span style="font-size:11px;color:var(--text-tiny,#94a3b8);">'+window.T('inbox.voice.audition_gen')+'</span>';
-  try{
-    const r=await fetch('/api/voice/tts-test',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({text:window.T('inbox.voice.audition_sample_text'), persona_id: persona_id||undefined})});
-    const d=await r.json();
-    const url=d.audio_url||(d.filename?`/api/voice/tts-file/${enc(d.filename)}`:'');
-    box.innerHTML=url?`${window.T('inbox.voice.audition_play')}<audio controls src="${url}" style="vertical-align:middle;max-width:200px;"></audio>`
-      :'<span style="font-size:11px;color:var(--tk-danger-ink);">'+window.T('inbox.voice.audition_fail')+'</span>';
-  }catch(_){ box.innerHTML='<span style="font-size:11px;color:var(--tk-danger-ink);">'+window.T('inbox.voice.audition_unavailable')+'</span>'; }
-}
-async function submitVoiceEnroll(){
-  const fileEl=document.getElementById('ve-file');
-  const name=(document.getElementById('ve-name').value||'').trim();
-  const persona=(document.getElementById('ve-persona').value||'').trim();
-  const lang=(document.getElementById('ve-lang').value||'Japanese');
-  const hint=document.getElementById('ve-hint');
-  const btn=document.getElementById('ve-submit');
-  if(!fileEl||!fileEl.files||!fileEl.files[0]){ hint.textContent=window.T('inbox.voice.need_ref_audio'); return; }
-  if(!name){ hint.textContent=window.T('inbox.voice.need_name'); return; }
-  if(!persona){ hint.textContent=window.T('inbox.voice.need_target'); return; }
-  const fd=new FormData();
-  fd.append('file',fileEl.files[0]);
-  fd.append('preferred_name',name);
-  fd.append('persona_id',persona);
-  fd.append('language_type',lang);
-  btn.disabled=true; hint.textContent=window.T('inbox.voice.enrolling');
-  try{
-    const r=await fetch('/api/voice/enroll',{method:'POST',body:fd});
-    const d=await r.json();
-    if(d&&d.ok){
-      hint.textContent=window.T('inbox.voice.enroll_ok_refresh');
-      await loadVoiceProfiles();
-      await _loadEnrollPersonas();
-      const sel=document.getElementById('voice-persona');
-      if(sel){ const ok=Array.prototype.some.call(sel.options,o=>o.value===persona&&!o.disabled); if(ok){ sel.value=persona; _onVoicePersonaChange(); } }
-      hint.textContent=window.T('inbox.voice.enroll_ok_selected');
-      _auditionPersona(persona,'ve-audition');
-    }else if(d&&d.reason==='no_api_key'){
-      hint.textContent=window.T('inbox.voice.no_api_key');
-    }else{
-      hint.textContent=window.Tf('inbox.voice.enroll_fail',{err:((d&&d.message)||window.T('inbox.voice.unknown_err'))});
-    }
-  }catch(e){ hint.textContent=window.Tf('inbox.voice.req_fail',{err:e}); }
-  btn.disabled=false;
-}
-
+/* P0-6/C8：原「声纹自助登记闭环」内联面板（toggleVoiceEnroll/submitVoiceEnroll/
+   submitVoiceRebind/loadVoiceReconcile/purgeOrphanVoices/purgeVoice + ve-* 元素）
+   已删除——markup 从未落地、入口按钮不存在＝死代码；同能力由右栏业务助手
+   cp-voice.js（超集，走同源 /api/voice/* API）出货承接（入口 _focusRightVoice）。
+   保留 unbindVoice：仍被语音弹层的 voice-unbind-btn 使用。 */
 async function unbindVoice(){
   const persona=currentVoicePersona();
   if(!persona){ showHint(window.T('inbox.voice.unbind_pick')); return; }
@@ -6710,133 +6655,20 @@ async function unbindVoice(){
       let msg=d.changed===false?window.T('inbox.voice.unbind_no_clone'):window.T('inbox.voice.unbind_ok');
       if(purge){ msg+= d.purged===true?window.T('inbox.voice.purged_ok'):(d.purged===false?window.T('inbox.voice.purged_fail'):''); }
       showHint(msg);
-      await loadVoiceProfiles(); await _loadEnrollPersonas();
+      await loadVoiceProfiles();
     }else{ showHint(window.Tf('inbox.voice.unbind_fail',{err:((d&&d.message)||window.T('inbox.voice.unknown_err'))})); }
   }catch(e){ showHint(window.Tf('inbox.voice.unbind_req_fail',{err:e})); }
 }
 
-async function submitVoiceRebind(){
-  const from=(document.getElementById('ve-rebind-from').value||'').trim();
-  const to=(document.getElementById('ve-rebind-to').value||'').trim();
-  const hint=document.getElementById('ve-rebind-hint');
-  if(!from||!to){ hint.textContent=window.T('inbox.voice.rebind_pick'); return; }
-  if(from===to){ hint.textContent=window.T('inbox.voice.rebind_same'); return; }
-  const btn=document.getElementById('ve-rebind-submit');
-  btn.disabled=true; hint.textContent=window.T('inbox.voice.copying');
-  try{
-    const r=await fetch('/api/voice/rebind',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({from_persona_id:from,to_persona_id:to})});
-    const d=await r.json().catch(()=>({}));
-    if(r.ok&&d.ok){
-      hint.textContent=window.T('inbox.voice.copied');
-      await loadVoiceProfiles(); await _loadEnrollPersonas();
-      _auditionPersona(to,'ve-audition');
-    }else if(d&&d.reason==='source_has_no_voice'){ hint.textContent=window.T('inbox.voice.rebind_no_src');
-    }else{ hint.textContent=window.Tf('inbox.voice.copy_fail',{err:((d&&d.message)||window.T('inbox.voice.unknown_err'))}); }
-  }catch(e){ hint.textContent=window.Tf('inbox.voice.req_fail',{err:e}); }
-  btn.disabled=false;
-}
-
-function _renderReconcileRow(item, kind){
-  const v=String(item.voice||'');
-  const vEsc=esc(v);
-  const vJs=JSON.stringify(v);
-  const refs=(item.personas||[]).map(p=>esc(p.name||p.persona_id)).join(', ')||'-';
-  const rc=item.ref_count!=null?item.ref_count:(item.personas||[]).length;
-  let act='';
-  if(kind==='orphan'){
-    act=`<button class="tiny-btn" onclick="purgeVoice(${vJs},false)">${window.T('inbox.voice.btn_del')}</button>`;
-  }else if(kind==='shared'||kind==='dangling'){
-    act=`<button class="tiny-btn" title="${window.T('inbox.voice.force_del_title')}" onclick="purgeVoice(${vJs},true)">${window.T('inbox.voice.btn_force_del')}</button>`;
-  }
-  return `<tr><td style="padding:2px 4px;max-width:120px;overflow:hidden;text-overflow:ellipsis;" title="${vEsc}">${vEsc}</td>`+
-    `<td style="padding:2px 4px;text-align:center;">${rc}</td>`+
-    `<td style="padding:2px 4px;max-width:140px;overflow:hidden;text-overflow:ellipsis;" title="${refs}">${refs}</td>`+
-    `<td style="padding:2px 4px;text-align:right;">${act}</td></tr>`;
-}
-
-async function loadVoiceReconcile(){
-  const box=document.getElementById('ve-reconcile');
-  const btn=document.getElementById('ve-reconcile-btn');
-  if(!box) return;
-  if(btn){ btn.disabled=true; btn.textContent=window.T('inbox.voice.reconciling'); }
-  box.innerHTML=window.T('inbox.voice.reconcile_loading');
-  try{
-    const r=await fetch('/api/voice/reconcile');
-    const d=await r.json();
-    if(!d.ok&&d.reason==='no_api_key'){
-      const s=d.summary||{};
-      box.innerHTML=`<div style="color:var(--tk-warn-ink);">${window.Tf('inbox.voice.no_key_local_only',{n:(s.local_voice_ids||0)})}</div>`+
-        _renderReconcileSection('dangling',d.dangling||[],window.T('inbox.voice.sec_dangling_local'));
-      return;
-    }
-    if(!d.ok){ box.innerHTML=window.Tf('inbox.voice.reconcile_fail',{err:esc(d.message||d.reason||window.T('inbox.dlang.unknown'))}); return; }
-    window._lastReconcile=d;
-    const s=d.summary||{};
-    let html=`<div style="margin-bottom:4px;">${window.Tf('inbox.voice.reconcile_summary',{cloud:(s.cloud_total||0),local:(s.local_voice_ids||0),orphan:(s.orphan_count||0),shared:(s.shared_count||0),dangling:(s.dangling_count||0)})}</div>`;
-    html+=_renderReconcileSection('orphan',d.orphans||[],window.T('inbox.voice.sec_orphan'));
-    html+=_renderReconcileSection('shared',d.shared||[],window.T('inbox.voice.sec_shared'));
-    html+=_renderReconcileSection('dangling',d.dangling||[],window.T('inbox.voice.sec_dangling'));
-    if(!(d.orphans||[]).length&&!(d.shared||[]).length&&!(d.dangling||[]).length){
-      html+='<div style="color:var(--tk-ok-ink);">'+window.T('inbox.voice.reconcile_ok')+'</div>';
-    }
-    box.innerHTML=html;
-  }catch(e){ box.innerHTML=window.Tf('inbox.voice.req_fail',{err:esc(String(e))}); }
-  if(btn){ btn.disabled=false; btn.textContent=window.T('inbox.voice.refresh_reconcile'); }
-}
-
-function _renderReconcileSection(kind, items, title){
-  if(!items.length) return '';
-  let h=`<div style="font-weight:600;margin:4px 0 2px;">${esc(title)} (${items.length})</div>`+
-    `<table style="width:100%;border-collapse:collapse;font-size:11px;"><thead><tr>`+
-    `<th style="text-align:left;padding:2px 4px;">voice</th><th style="padding:2px 4px;">${window.T('inbox.voice.col_refs')}</th>`+
-    `<th style="text-align:left;padding:2px 4px;">${window.T('inbox.voice.meta_persona')}</th><th></th></tr></thead><tbody>`;
-  items.forEach(it=>{ h+=_renderReconcileRow(it, kind); });
-  return h+'</tbody></table>';
-}
-
-async function purgeOrphanVoices(){
-  const orphans=(window._lastReconcile&&window._lastReconcile.orphans)||[];
-  const n=orphans.length;
-  if(n===0&&!confirm(window.T('inbox.voice.purge_orphan_norefresh'))) return;
-  if(n>0&&!confirm(window.Tf('inbox.voice.purge_orphan_q',{n:n})+'\n'+window.T('inbox.voice.purge_orphan_note'))) return;
-  const btn=document.getElementById('ve-purge-orphans-btn');
-  if(btn){ btn.disabled=true; btn.textContent=window.T('inbox.voice.reclaiming'); }
-  try{
-    const r=await fetch('/api/voice/purge-orphans',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
-    const d=await r.json().catch(()=>({}));
-    if(r.ok&&d.ok){
-      alert(window.Tf('inbox.voice.reclaimed_n',{n:((d.deleted||[]).length)})+(d.failed&&d.failed.length?window.Tf('inbox.voice.reclaim_failed_n',{n:d.failed.length}):'') );
-      await loadVoiceReconcile(); await loadVoiceProfiles(); await _loadEnrollPersonas();
-    }else{ alert(window.Tf('inbox.voice.reclaim_fail',{err:(d.message||d.reason||window.T('inbox.dlang.unknown'))})); }
-  }catch(e){ alert(window.Tf('inbox.voice.req_fail_plain',{err:e})); }
-  if(btn){ btn.disabled=false; btn.textContent=window.T('inbox.voice.btn_reclaim_orphan'); }
-}
-
-async function purgeVoice(voice, force){
-  if(!voice) return;
-  if(force){
-    if(!confirm(window.Tf('inbox.voice.force_del_q',{voice:voice})+'\n'+window.T('inbox.voice.force_del_note'))) return;
-  }else if(!confirm(window.Tf('inbox.voice.del_orphan_q',{voice:voice}))) return;
-  try{
-    const r=await fetch('/api/voice/purge',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({voice, force:!!force})});
-    const d=await r.json().catch(()=>({}));
-    if(r.ok&&d.ok){
-      await loadVoiceReconcile(); await loadVoiceProfiles();
-    }else if(d.reason==='in_use'){
-      alert(window.Tf('inbox.voice.in_use_q',{n:(d.ref_count||'?'),refs:((d.personas||[]).map(p=>p.name||p.persona_id).join(', '))})+'\n'+window.T('inbox.voice.in_use_note'));
-    }else{ alert(window.Tf('inbox.voice.del_fail',{err:(d.message||d.reason||window.T('inbox.dlang.unknown'))})); }
-  }catch(e){ alert(window.Tf('inbox.voice.req_fail_plain',{err:e})); }
-}
-
+/* 试听（P0-6/C7 后为可选路径）：tts-test 本地预览，确认后经预览面板按钮发送 */
 async function genVoiceReply(){
   if(!selectedChat) return;
   const ta=document.getElementById('reply-ta');
   const text=ta.value.trim();
   if(!text){showHint(window.T('inbox.voice.need_text'));return;}
-  const btn=document.getElementById('voice-btn');
-  btn.textContent='⏳'; btn.disabled=true;
+  const btn=document.getElementById('voice-preview-btn')||document.getElementById('voice-btn');
+  const prevHtml=btn?btn.innerHTML:'';
+  if(btn){ btn.textContent='⏳'; btn.disabled=true; }
   try{
     const r=await fetch('/api/voice/tts-test',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({text, persona_id: currentVoicePersona()||undefined})});
@@ -6849,21 +6681,25 @@ async function genVoiceReply(){
         `<div style="margin-top:6px;text-align:right;"><button class="tiny-btn" id="voice-send-btn" onclick="sendVoiceReply()">${window.T('inbox.voice.send_to')}</button></div>`;
       vp.style.display='block';
     } else {
-      showHint(window.T('inbox.voice.gen_fail'));
+      showHint((r.status===402&&d&&d.detail)?d.detail:window.T('inbox.voice.gen_fail'));
     }
   }catch(_){ showHint(window.T('inbox.voice.svc_unavail')); }
-  btn.textContent=window.T('inbox.voice.btn_reset'); btn.disabled=false;
+  if(btn){ btn.innerHTML=prevHtml; btn.disabled=false; }
 }
 
-/* 发送语音：回复文本 →（可声音克隆）TTS → 作为语音消息发给对方。
-   仅协议多开在线账号支持（后端 send-voice，其它平台返回 501）。 */
+/* 发送语音（P0-6/C7 一键主路径）：回复文本 →（可声音克隆）TTS → 作为语音消息直发对方。
+   服务端 send-voice 一次完成合成+发送；「试听」是可选前置。
+   仅协议多开在线账号支持（其它平台返回 501）。 */
 async function sendVoiceReply(){
   if(!selectedChat){ showHint(window.T('inbox.voice.need_chat')); return; }
   const ta=document.getElementById('reply-ta');
   const text=(ta?ta.value:'').trim();
   if(!text){ showHint(window.T('inbox.voice.need_text2')); return; }
   const sb=document.getElementById('voice-send-btn');
+  const vb=document.getElementById('voice-btn');
+  const vbHtml=vb?vb.innerHTML:'';
   if(sb){ sb.textContent=window.T('inbox.msg.sending'); sb.disabled=true; }
+  if(vb){ vb.textContent='⏳'; vb.disabled=true; }
   try{
     const body={
       platform: selectedChat.platform,
@@ -6891,6 +6727,7 @@ async function sendVoiceReply(){
     showHint(window.T('inbox.voice.send_fail_net'));
     if(sb){ sb.textContent=window.T('inbox.voice.send_to'); sb.disabled=false; }
   }
+  if(vb){ vb.innerHTML=vbHtml; vb.disabled=false; }
 }
 
 /* ===== P55: 实时双向翻译 ===== */
@@ -8777,8 +8614,7 @@ Object.assign(window, {
   closeMobileChat, toggleAiDraft, toggleInfoSidebar, toggleArchive, snoozeConv, unsnoozeConv, setMode, pauseAutoMode,
   // 发送 / 回复区
   sendMsg, resendFailed, sendMediaFile, _cancelMedia, genAiReply, genVoiceReply, sendVoiceReply, _onVoicePersonaChange,
-  toggleVoiceEnroll, submitVoiceEnroll, unbindVoice, submitVoiceRebind,
-  loadVoiceReconcile, purgeOrphanVoices, purgeVoice, toggleQrPanel,
+  unbindVoice, toggleQrPanel,
   toggleVoiceCfg, toggleXlatePop, _xlateQuickOn, _xlateOff, _openSlash, _focusRightVoice,
   _onXlateChange, _onXlatePreviewToggle, _onTopLangChange, _onToggleShowXlate, _saveDefaultLang,
   _openDefaultLangMgr, _clearDefaultLangItem,

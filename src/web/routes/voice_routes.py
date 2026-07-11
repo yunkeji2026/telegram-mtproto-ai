@@ -87,6 +87,11 @@ def register_voice_routes(app, api_auth, config_manager=None):
         if len(text) > 400:
             raise HTTPException(400, "text too long (max 400 chars)")
 
+        # P0-4/C3：字符额度用尽且 licensing.enforce 开 → 402 + i18n（试听同样耗额度）
+        from src.licensing.quota_store import check_license_quota
+        if not check_license_quota()["allowed"]:
+            raise HTTPException(402, tr(request, "err.lic.chars_exhausted"))
+
         persona_id: Optional[str] = body.get("persona_id") or None
         fmt_override: Optional[str] = body.get("format") or None
         # Optional: caller passes current UI settings to override saved config

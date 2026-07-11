@@ -57,6 +57,11 @@ def _cmd_issue(args: argparse.Namespace) -> int:
         payload["exp"] = int(time.time()) + int(args.days) * 86400
     if args.lic_id:
         payload["lic_id"] = args.lic_id
+    # P0-4 免费试用（字符额度）：翻译/TTS 合计含量；0/省略 = 不限
+    if args.chars and int(args.chars) > 0:
+        payload["included_chars"] = int(args.chars)
+    if args.trial:
+        payload["trial"] = True
     token = issue_license(payload, priv_hex)
     if args.out:
         Path(args.out).write_text(token, encoding="utf-8")
@@ -86,6 +91,9 @@ def main() -> int:
     i.add_argument("--channels", default="", help="允许渠道，逗号分隔")
     i.add_argument("--features", default="", help="功能位，逗号分隔（如 l4,white_label）")
     i.add_argument("--lic-id", dest="lic_id", default="", help="授权编号")
+    i.add_argument("--chars", default="0",
+                   help="含翻译/TTS 字符额度（0=不限；试用授权配合 --trial 用）")
+    i.add_argument("--trial", action="store_true", help="标记为试用授权")
     i.add_argument("--out", default="", help="授权码输出路径（默认打印）")
     i.set_defaults(func=_cmd_issue)
 
