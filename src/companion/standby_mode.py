@@ -69,7 +69,7 @@ def is_standby_mode(name: str) -> bool:
 
 
 def build_standby_plan(mode: str) -> Optional[List[Dict[str, Any]]]:
-    """姿态名 → 有序意图列表（仅两键）；未知姿态返回 None。
+    """姿态名 → 有序意图列表（只含该档声明的键）；未知姿态返回 None。
 
     复用 presets 的 ``_intentions_for``（含 dry_run 字段归零）+ ``_order``（关先于开、
     critical 主开关压最后），确保与预设/回滚走完全一致的执行序与护栏。
