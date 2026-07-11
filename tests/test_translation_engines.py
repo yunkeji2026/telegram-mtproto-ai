@@ -8,6 +8,7 @@ from src.ai.translation_engines import (
     EngineResult,
     EngineRouter,
     GoogleEngine,
+    OllamaMTEngine,
     apply_glossary_mask,
     build_engines,
     mask_protected,
@@ -135,6 +136,198 @@ def test_build_engines_order_and_default():
     assert [e.name for e in build_engines({}, ai_client=None)] == ["ai"]
 
 
+# ── 本地 Ollama MT 引擎（Hunyuan-MT）──────────────────────────────────────
+def test_ollama_mt_unavailable_without_config():
+    assert OllamaMTEngine("", "").available is False
+    assert OllamaMTEngine("http://h:11434", "").available is False
+    assert OllamaMTEngine("", "m").available is False
+    # base_url+model 齐 → 可用（openai 库在本仓是硬依赖）
+    assert OllamaMTEngine("http://h:11434", "hy-mt2").available is True
+
+
+def test_ollama_mt_supports_target_within_model_card():
+    e = OllamaMTEngine("http://h:11434", "hy-mt2")
+    for lang in ("zh", "en", "ja", "ko", "th", "vi", "id", "km", "ar", "ru"):
+        assert e.supports_target(lang) is True, lang
+    # 模型卡集外（如斯瓦希里语）→ 不支持，router 让位下一引擎
+    assert e.supports_target("sw") is False
+    assert e.supports_target("") is False
+
+
+def test_ollama_mt_prompt_formats_follow_official_card():
+    e = OllamaMTEngine("http://h:11434", "hy-mt2")
+    # zh 相关语对 → 中文指令 + 中文语种名
+    p = e._build_prompt("hello", "en", "zh")
+    assert p.startswith("把下面的文本翻译成中文，不要额外解释。")
+    p = e._build_prompt("你好", "zh", "th")
+    assert "泰语" in p and p.endswith("你好")
+    # 非 zh 语对 → 英文指令 + 英文语种名
+    p = e._build_prompt("hola", "es", "en")
+    assert p.startswith("Translate the following segment into English")
+
+
+@pytest.mark.asyncio
+async def test_ollama_mt_translate_via_fake_client():
+    e = OllamaMTEngine("http://h:11434", "hy-mt2")
+
+    class _Msg:
+        content = "Translation: hi there"
+
+    class _Choice:
+        message = _Msg()
+
+    class _Resp:
+        choices = [_Choice()]
+
+    class _Completions:
+        def __init__(self):
+            self.kwargs = None
+
+        async def create(self, **kw):
+            self.kwargs = kw
+            return _Resp()
+
+    class _Chat:
+        completions = _Completions()
+
+    class _Cli:
+        chat = _Chat()
+
+    e._clients["http://h:11434"] = _Cli()
+    r = await e.translate("你好", source_lang="zh", target_lang="en")
+    assert r.ok and r.engine == "ollama_mt"
+    assert r.text == "hi there"  # _clean_translation 剥掉 "Translation:" 前缀
+    kw = _Cli.chat.completions.kwargs
+    assert kw["model"] == "hy-mt2"
+    assert kw["extra_body"] == {"keep_alive": "30m"}   # 默认防冷启动
+    assert "temperature" not in kw                     # 缺省不传 → 用模型内置采样
+
+
+@pytest.mark.asyncio
+async def test_ollama_mt_unsupported_target_yields_to_next_engine():
+    e = OllamaMTEngine("http://h:11434", "hy-mt2")
+    r = await e.translate("你好", source_lang="zh", target_lang="sw")
+    assert not r.ok and "unsupported_target" in r.error
+    # router 场景：MT 不支持 → 顺移 ai 兜底
+    ai = _FixedEngine("ai", text="habari")
+    res = await EngineRouter([e, ai]).translate("你好", source_lang="zh", target_lang="sw")
+    assert res.ok and res.engine == "ai"
+
+
+def _fake_cli(reply: str = "ok", *, fail: bool = False):
+    """构造最小 AsyncOpenAI 假客户端；fail=True 时 create 抛连接异常。"""
+    class _Msg:
+        content = reply
+
+    class _Choice:
+        message = _Msg()
+
+    class _Resp:
+        choices = [_Choice()]
+
+    class _Completions:
+        def __init__(self):
+            self.calls = 0
+
+        async def create(self, **kw):
+            self.calls += 1
+            if fail:
+                raise ConnectionError("boom")
+            return _Resp()
+
+    class _Chat:
+        def __init__(self):
+            self.completions = _Completions()
+
+    class _Cli:
+        def __init__(self):
+            self.chat = _Chat()
+
+    return _Cli()
+
+
+@pytest.mark.asyncio
+async def test_ollama_mt_dual_endpoint_failover():
+    # 176 挂 → 自动切 140；且 176 进冷却（下次排序降权到队尾）
+    e = OllamaMTEngine(["http://a:11434", "http://b:11434"], "hy-mt2")
+    bad, good = _fake_cli(fail=True), _fake_cli("hello")
+    e._clients["http://a:11434"] = bad
+    e._clients["http://b:11434"] = good
+    r = await e.translate("你好", source_lang="zh", target_lang="en")
+    assert r.ok and r.text == "hello"
+    assert bad.chat.completions.calls == 1 and good.chat.completions.calls == 1
+    # 冷却生效：a 降权到队尾，后续调用直接走 b（a 不再被打）
+    r2 = await e.translate("再见", source_lang="zh", target_lang="en")
+    assert r2.ok and bad.chat.completions.calls == 1
+    assert good.chat.completions.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_ollama_mt_all_endpoints_down_returns_error():
+    e = OllamaMTEngine(["http://a:11434", "http://b:11434"], "hy-mt2")
+    e._clients["http://a:11434"] = _fake_cli(fail=True)
+    e._clients["http://b:11434"] = _fake_cli(fail=True)
+    r = await e.translate("你好", source_lang="zh", target_lang="en")
+    assert not r.ok and "ConnectionError" in r.error
+    # 全端点冷却中仍保底可试（不剔除）：恢复后下一次调用即成功
+    e._clients["http://a:11434"] = _fake_cli("hi again")
+    r2 = await e.translate("你好", source_lang="zh", target_lang="en")
+    assert r2.ok and r2.text == "hi again"
+
+
+def test_ollama_mt_base_url_forms():
+    # 列表 / 逗号分隔字符串 / 单字符串 三种形态等价解析
+    assert OllamaMTEngine(["http://a:1", "http://b:2"], "m")._base_urls == \
+        ["http://a:1", "http://b:2"]
+    assert OllamaMTEngine("http://a:1, http://b:2", "m")._base_urls == \
+        ["http://a:1", "http://b:2"]
+    assert OllamaMTEngine("http://a:1", "m")._base_urls == ["http://a:1"]
+    # _base_url 兼容属性 = 首端点
+    assert OllamaMTEngine(["http://a:1", "http://b:2"], "m")._base_url == "http://a:1"
+
+
+def test_build_engines_with_ollama_mt():
+    cfg = {"engines": {
+        "order": ["ollama_mt", "ai"],
+        "ollama_mt": {"base_url": "http://h:11434", "model": "hy-mt2",
+                      "timeout_sec": 20, "keep_alive": "30m"},
+    }}
+    eng = build_engines(cfg, ai_client=None)
+    assert [e.name for e in eng] == ["ollama_mt", "ai"]
+    assert eng[0].available is True
+    # 缺 model → 构造成功但不可用（router 自动跳过），不影响列表
+    cfg2 = {"engines": {"order": ["ollama_mt"], "ollama_mt": {"base_url": "http://h:11434"}}}
+    eng2 = build_engines(cfg2, ai_client=None)
+    assert eng2[0].name == "ollama_mt" and eng2[0].available is False
+
+
+def test_build_engines_ollama_mt_base_urls_list():
+    # base_urls（双活列表）优先于 base_url
+    cfg = {"engines": {
+        "order": ["ollama_mt"],
+        "ollama_mt": {"base_urls": ["http://a:11434", "http://b:11434"],
+                      "base_url": "http://ignored:1", "model": "hy-mt2"},
+    }}
+    eng = build_engines(cfg, ai_client=None)
+    assert eng[0]._base_urls == ["http://a:11434", "http://b:11434"]
+    assert eng[0].available is True
+
+
+# ── restore 容错硬化（MT 引擎会把〔N〕规范成 [N]/吞边空格）────────────────
+def test_restore_ascii_bracket_and_smart_spacing():
+    m = {"\u30140\u3015": "LINE Pay", "\u30141\u3015": "support team"}
+    # 拉丁语境吞空格 → 智能补空格
+    assert restore_protected("pay using\u30140\u3015today", m) == "pay using LINE Pay today"
+    # CJK 语境 → 不补
+    assert restore_protected("你可以用\u30140\u3015付款", m) == "你可以用LINE Pay付款"
+    # ASCII 化占位符 [N] → 还原
+    assert restore_protected("contact [1] please", m) == "contact support team please"
+    # 全角【N】变体 → 还原
+    assert restore_protected("pay via\u30100\u3011ok", m) == "pay via LINE Pay ok"
+    # mapping 外序号（正文自带 [7]）→ 原样保留
+    assert restore_protected("see [7] footnote", m) == "see [7] footnote"
+
+
 # ── 服务层：多引擎归因 + 保护词端到端 ────────────────────────────────────
 @pytest.mark.asyncio
 async def test_service_uses_router_and_reports_engine():
@@ -243,3 +436,162 @@ async def test_router_records_fallback_on_primary_fail():
         assert "deepl" in names and "ai" in names
     finally:
         stats.reset()
+
+
+# ── 按目标语引擎覆写（per_lang_order：弱语对直走强引擎）────────────────────
+@pytest.mark.asyncio
+async def test_per_lang_order_reroutes_only_listed_lang():
+    mt = _FixedEngine("ollama_mt", text="mt-out")
+    ai = _FixedEngine("ai", text="ai-out")
+    router = EngineRouter([mt, ai], per_lang_order={"hi": ["ai", "ollama_mt"]})
+    # hi → ai 优先（mt 完全不被打）
+    r = await router.translate("你好", source_lang="zh", target_lang="hi")
+    assert r.engine == "ai" and mt.calls == 0
+    # 其他语种 → 默认序不受影响
+    r2 = await router.translate("你好", source_lang="zh", target_lang="en")
+    assert r2.engine == "ollama_mt"
+
+
+@pytest.mark.asyncio
+async def test_per_lang_order_appends_remaining_as_fallback():
+    # 覆写只列了 ai；ai 挂 → 仍能落回默认序里的 mt（覆写不丢兜底）
+    mt = _FixedEngine("ollama_mt", text="mt-out")
+    ai = _FixedEngine("ai", text="", ok=False, error="boom")
+    router = EngineRouter([mt, ai], per_lang_order={"hi": ["ai"]})
+    r = await router.translate("你好", source_lang="zh", target_lang="hi")
+    assert r.ok and r.engine == "ollama_mt"
+
+
+@pytest.mark.asyncio
+async def test_per_lang_order_unknown_engine_ignored():
+    mt = _FixedEngine("ollama_mt", text="mt-out")
+    router = EngineRouter([mt], per_lang_order={"hi": ["nonexistent"]})
+    r = await router.translate("你好", source_lang="zh", target_lang="hi")
+    assert r.ok and r.engine == "ollama_mt"
+
+
+def test_per_lang_order_reflected_in_describe():
+    mt = _FixedEngine("ollama_mt", text="x")
+    ai = _FixedEngine("ai", text="y")
+    router = EngineRouter([mt, ai], per_lang_order={"hi": ["ai"]})
+    m = router.describe("hi")
+    assert m["primary"] == "ai" and m["effective"] == "ai"
+    assert [r["engine"] for r in m["engines"]] == ["ai", "ollama_mt"]
+    # 非覆写语种维持默认
+    m2 = router.describe("en")
+    assert m2["primary"] == "ollama_mt"
+    # 语种码归一：hi-IN 命中 hi 覆写
+    assert router.describe("hi-IN")["primary"] == "ai"
+
+
+# ── 在线语义闸门（confidence_switch 进阶：抓「语言对但意思漂移」）──────────
+def _embed_by_tag(mapping):
+    """按子串命中返回向量的假嵌入器（批量签名，与 ai_client.embed 同形）。"""
+    async def _embed(texts):
+        out = []
+        for t in texts:
+            vec = None
+            for tag, v in mapping.items():
+                if tag in (t or ""):
+                    vec = v
+                    break
+            out.append(vec if vec is not None else [1.0, 0.0])
+        return out
+    return _embed
+
+
+@pytest.mark.asyncio
+async def test_semantic_gate_switches_on_meaning_drift():
+    stats = get_translation_engine_stats()
+    stats.reset()
+    try:
+        # e1 输出「意思漂移」译文（与源文嵌入正交但确定性信号全过）；e2 输出忠实译文
+        e1 = _FixedEngine("ollama_mt", text="the weather is nice today")
+        e2 = _FixedEngine("ai", text="the delivery arrives tomorrow")
+        embed = _embed_by_tag({
+            "明天送达": [1.0, 0.0],                    # 源文
+            "weather": [0.0, 1.0],                     # 漂移译文 → cos=0
+            "delivery": [0.96, 0.28],                  # 忠实译文 → cos≈0.96
+        })
+        router = EngineRouter(
+            [e1, e2], min_confidence=0.5,
+            semantic_embed_fn=embed, semantic_min_similarity=0.7)
+        r = await router.translate("包裹明天送达", source_lang="zh", target_lang="en")
+        assert r.engine == "ai" and "delivery" in r.text
+        d = stats.dump()
+        assert d["semantic_low"] == 1          # e1 被语义闸门拦下
+        assert d["confidence_switches"] == 1   # 且实际发生了切换
+    finally:
+        stats.reset()
+
+
+@pytest.mark.asyncio
+async def test_semantic_gate_fail_open_on_embed_error():
+    # 嵌入端点抖动（抛异常/返空）→ 放行主引擎结果，绝不阻塞
+    # （源文须 ≥4 有效字符，否则触发短文本跳过、走不到 embed）
+    e1 = _FixedEngine("ollama_mt", text="good translation")
+    embed_calls = []
+
+    async def _broken_embed(texts):
+        embed_calls.append(texts)
+        raise ConnectionError("embed down")
+
+    router = EngineRouter(
+        [e1], min_confidence=0.5,
+        semantic_embed_fn=_broken_embed, semantic_min_similarity=0.7)
+    r = await router.translate("你好呀老朋友", source_lang="zh", target_lang="en")
+    assert r.ok and r.engine == "ollama_mt"
+    assert embed_calls   # 确实走到了 embed（而非被短文本跳过）
+
+    async def _empty_embed(texts):
+        return []
+
+    router2 = EngineRouter(
+        [e1], min_confidence=0.5,
+        semantic_embed_fn=_empty_embed, semantic_min_similarity=0.7)
+    r2 = await router2.translate("你好呀老朋友", source_lang="zh", target_lang="en")
+    assert r2.ok and r2.engine == "ollama_mt"
+
+
+@pytest.mark.asyncio
+async def test_semantic_gate_skips_very_short_source():
+    # 超短源文（<4 有效字符，如 "OK"/"哈哈"）：嵌入噪声大、漂移风险≈0 → 直接放行省往返
+    e1 = _FixedEngine("ollama_mt", text="haha")
+    embed_calls = []
+
+    async def _embed(texts):
+        embed_calls.append(texts)
+        return [[1.0, 0.0], [0.0, 1.0]]   # 若被调用会判低相似 → 用调用记录证明没走到
+
+    router = EngineRouter(
+        [e1], min_confidence=0.5,
+        semantic_embed_fn=_embed, semantic_min_similarity=0.7)
+    r = await router.translate("哈哈  ", source_lang="zh", target_lang="en")
+    assert r.ok and r.engine == "ollama_mt"
+    assert embed_calls == []   # 全程未打嵌入端点
+
+
+@pytest.mark.asyncio
+async def test_semantic_gate_all_low_returns_best_candidate():
+    # 两个引擎都语义低 → 返回 (conf, sim) 最高候选，不吐空
+    e1 = _FixedEngine("ollama_mt", text="totally off A")
+    e2 = _FixedEngine("ai", text="slightly better B")
+    embed = _embed_by_tag({
+        "源文": [1.0, 0.0],
+        "off A": [0.0, 1.0],          # cos=0
+        "better B": [0.5, 0.866],     # cos=0.5（仍低于 0.7）
+    })
+    router = EngineRouter(
+        [e1, e2], min_confidence=0.5,
+        semantic_embed_fn=embed, semantic_min_similarity=0.7)
+    r = await router.translate("源文在此", source_lang="zh", target_lang="en")
+    assert r.ok and r.engine == "ai"   # sim 更高者胜出
+
+
+@pytest.mark.asyncio
+async def test_semantic_gate_disabled_keeps_old_behavior():
+    # 未注入 embed fn → 语义闸门不存在，确定性达标即返回（旧行为）
+    e1 = _FixedEngine("ollama_mt", text="anything goes")
+    router = EngineRouter([e1], min_confidence=0.5)
+    r = await router.translate("你好", source_lang="zh", target_lang="en")
+    assert r.ok and r.engine == "ollama_mt"

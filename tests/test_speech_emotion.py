@@ -166,3 +166,91 @@ def test_recognizer_generate_exception_soft_degrade():
     res = r.recognize("x.wav")
     assert res.ok is False
     assert "cuda oom" in res.error
+
+
+# ── 远程 GPU SER（176 asr_server /v1/audio/emotion）─────────────────────
+_REMOTE_CFG = {
+    "enabled": True, "backend": "funasr",
+    "remote": {"base_url": "http://gpu:8765", "timeout_sec": 5,
+               "cb_cooldown_sec": 120},
+}
+
+
+def test_remote_ser_success_maps_client_side():
+    """远程只回 labels/scores 原始数组；标签→系统语义映射仍在客户端单一出口。"""
+    calls = []
+
+    def _fake_post(url, path, timeout):
+        calls.append(url)
+        return 200, {"labels": ["生气/angry", "难过/sad", "中立/neutral"],
+                     "scores": [0.1, 0.7, 0.2], "model": "emotion2vec_plus_large"}
+
+    r = SpeechEmotionRecognizer(_REMOTE_CFG)
+    r._post_fn = _fake_post
+    res = r.recognize("x.wav")
+    assert res.ok is True
+    assert res.emotion == "sad"
+    assert res.model.startswith("remote:")
+    assert calls == ["http://gpu:8765/v1/audio/emotion"]
+    assert r._model is None   # 远程成功 → 本地模型从未加载
+
+
+def test_remote_ser_failure_falls_back_to_local_and_cools_down():
+    class _FakeLocal:
+        def generate(self, *a, **k):
+            return [{"labels": ["开心/happy"], "scores": [0.9]}]
+
+    def _boom(url, path, timeout):
+        raise RuntimeError("connect timeout")
+
+    r = SpeechEmotionRecognizer(_REMOTE_CFG)
+    r._post_fn = _boom
+    r._model = _FakeLocal()
+    res = r.recognize("x.wav")
+    assert res.ok is True
+    assert res.emotion == "happy"          # 回落本地结果
+    assert not res.model.startswith("remote:")
+    assert r._remote_bad_until > 0         # 远程进冷却
+    # 冷却期内第二次识别不再打远程（_post_fn 再 raise 会被计数出来）
+    boom_calls = []
+
+    def _boom2(url, path, timeout):
+        boom_calls.append(url)
+        raise RuntimeError("still down")
+
+    r._post_fn = _boom2
+    assert r.recognize("x.wav").emotion == "happy"
+    assert boom_calls == []
+
+
+def test_remote_ser_http_error_falls_back():
+    def _http500(url, path, timeout):
+        return 500, {}
+
+    class _FakeLocal:
+        def generate(self, *a, **k):
+            return [{"labels": ["中立/neutral"], "scores": [0.8]}]
+
+    r = SpeechEmotionRecognizer(_REMOTE_CFG)
+    r._post_fn = _http500
+    r._model = _FakeLocal()
+    res = r.recognize("x.wav")
+    assert res.ok is True
+    assert res.emotion == "neutral"
+
+
+def test_remote_keeps_available_despite_local_breaker():
+    """本地加载熔断打开时，远程可用仍应 is_available=True（远程不受本地断路器牵连）。"""
+    import time as _t
+    r = SpeechEmotionRecognizer(_REMOTE_CFG)
+    r._cb_open_until = _t.time() + 300     # 本地断路器打开
+    assert r.is_available() is True        # 远程兜住
+    r._remote_bad_until = _t.time() + 120  # 远程也冷却 → 整体不可用
+    assert r.is_available() is False
+
+
+def test_no_remote_config_keeps_legacy_behavior():
+    r = SpeechEmotionRecognizer({"enabled": True, "backend": "funasr"})
+    assert r.remote_base == ""
+    assert r._remote_usable() is False
+    assert r._recognize_remote("x.wav") is None

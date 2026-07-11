@@ -168,7 +168,10 @@ def test_unified_counter_feeds_signals_and_gate():
 
     reset_autoreply_limiter()
     try:
-        lim = get_autoreply_limiter({})
+        # persist=False：默认会写真库 config/account_sends.db（按「今天」聚合），
+        # 同一天重复跑套件时 sends_today 跨进程累计（3→6→9…）→ 假红 + 污染生产库。
+        lim = get_autoreply_limiter(
+            {"protocol_autoreply": {"rate": {"persist": False}}})
         assert isinstance(lim, AutoReplyLimiter)
         key = "telegram:acct_unified"
         # 新号当天预热上限 = start_cap(2)；A 线连发 3 条记入同一计数器

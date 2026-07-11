@@ -26,6 +26,7 @@ _SMcls = __import__(
 class _SM:
     _selfie_cfg = _SMcls._selfie_cfg
     _monetization_gate_enabled = _SMcls._monetization_gate_enabled
+    _handle_persona_media_request = _SMcls._handle_persona_media_request
     _handle_selfie_request = _SMcls._handle_selfie_request
     _handle_contextual_image_request = _SMcls._handle_contextual_image_request
     _record_selfie_event = _SMcls._record_selfie_event
@@ -50,6 +51,17 @@ class _SM:
 
 _ON = {"enabled": True, "free_daily": 1, "min_bond_level": 2,
        "provider": {"enabled": False}}
+
+
+@pytest.fixture()
+def media_store():
+    """隔离的内存版 persona_media store（绝不写 config/persona_media.db）。"""
+    from src.companion.persona_media_store import (
+        configure_persona_media_store, reset_persona_media_store)
+    reset_persona_media_store()
+    st = configure_persona_media_store(":memory:")
+    yield st
+    reset_persona_media_store()
 
 
 @pytest.mark.asyncio
@@ -460,6 +472,96 @@ async def test_allow_direct_send_returns_empty_when_photo_sent(monkeypatch):
         assert sent["path"] == "/tmp/fake.png"
     finally:
         cs.reset_selfie_provider()
+
+
+# ── Stage 0：人设注册相册（DB 预制图/视频，按触发词命中即发） ─────────────────
+
+@pytest.mark.asyncio
+async def test_persona_media_disabled_returns_none(media_store):
+    media_store.add("lin", "photo", "/d/1.jpg", "/static/1.jpg", triggers=["跳舞"])
+    sm = _SM(selfie_cfg={"enabled": False})
+    ctx = {"account_persona_id": "lin", "_send_photo_to_chat": None}
+    out = await sm._handle_persona_media_request("给我跳舞", "u1", ctx, "c1")
+    assert out is None
+
+
+@pytest.mark.asyncio
+async def test_persona_media_keyword_hit_sends_photo(media_store):
+    row = media_store.add("lin", "photo", "/d/dance.jpg", "/static/dance.jpg",
+                          triggers=["跳舞"], caption="看我跳~")
+    sent = {}
+
+    async def _send(chat_id, path, caption):
+        sent.update(chat=chat_id, path=path, cap=caption)
+        return True
+
+    sm = _SM(selfie_cfg=_ON)
+    ctx = {"account_persona_id": "lin", "intimacy_score": 60,
+           "_send_photo_to_chat": _send}
+    out = await sm._handle_persona_media_request("给我跳舞看看", "u1", ctx, 999)
+    assert out == ""  # 已发出 → 短路
+    assert sent["path"] == "/d/dance.jpg" and sent["cap"] == "看我跳~"
+    assert ctx.get("_persona_media_last") == row["id"]
+    assert media_store.get(row["id"])["hits"] == 1  # 命中计数
+
+
+@pytest.mark.asyncio
+async def test_persona_media_no_match_returns_none(media_store):
+    media_store.add("lin", "photo", "/d/1.jpg", "/static/1.jpg", triggers=["跳舞"])
+    sm = _SM(selfie_cfg=_ON)
+    ctx = {"account_persona_id": "lin", "intimacy_score": 60,
+           "_send_photo_to_chat": (lambda *a: True)}
+    # 非要图闲聊 + 无关键词命中 → None（交后续）
+    out = await sm._handle_persona_media_request("今天心情不错", "u1", ctx, 1)
+    assert out is None
+
+
+@pytest.mark.asyncio
+async def test_persona_media_generic_pool_on_selfie_request(media_store):
+    media_store.add("lin", "photo", "/d/p.jpg", "/static/p.jpg")  # 无触发词=通用池
+    sent = {}
+
+    async def _send(chat_id, path, caption):
+        sent["path"] = path
+        return True
+
+    sm = _SM(selfie_cfg=_ON)
+    ctx = {"account_persona_id": "lin", "intimacy_score": 60,
+           "_send_photo_to_chat": _send}
+    out = await sm._handle_persona_media_request("發個照片給我看看嘛", "u1", ctx, 1)
+    assert out == "" and sent["path"] == "/d/p.jpg"
+
+
+@pytest.mark.asyncio
+async def test_persona_media_video_needs_video_callback(media_store):
+    media_store.add("lin", "video", "/d/v.mp4", "/static/v.mp4", triggers=["跳舞"])
+    sm = _SM(selfie_cfg=_ON)
+    # 仅有照片回调 → 视频发不了 → None（不误当照片发，交回落）
+    ctx = {"account_persona_id": "lin", "_send_photo_to_chat": (lambda *a: True)}
+    out = await sm._handle_persona_media_request("给我跳舞视频", "u1", ctx, 1)
+    assert out is None
+    # 注入视频回调 → 发出 → 短路
+    vsent = {}
+
+    async def _vsend(chat_id, path, caption):
+        vsent["path"] = path
+        return True
+
+    ctx2 = {"account_persona_id": "lin", "_send_video_to_chat": _vsend}
+    out2 = await sm._handle_persona_media_request("给我跳舞视频", "u1", ctx2, 1)
+    assert out2 == "" and vsent["path"] == "/d/v.mp4"
+
+
+@pytest.mark.asyncio
+async def test_persona_media_bond_gate(media_store):
+    media_store.add("lin", "photo", "/d/1.jpg", "/static/1.jpg",
+                    triggers=["跳舞"], min_bond_level=5)
+    sm = _SM(selfie_cfg=_ON)
+    # 关系浅（bond<5）→ 条目被闸门挡 → None
+    ctx = {"account_persona_id": "lin", "intimacy_score": 1,
+           "_send_photo_to_chat": (lambda *a: True)}
+    out = await sm._handle_persona_media_request("给我跳舞", "u1", ctx, 1)
+    assert out is None
 
 
 # ── Stage B：对话上下文「按需生图」接线（"你煮的面拍张照给我看"） ────────────

@@ -125,6 +125,43 @@ python -m pytest tests/test_companion_capability_status.py \
 （陪伴回复/reactivation 本就按客户语言生成）即跳过不译，防 garble；任何异常/不可译/译文==原文
 一律回落发原文，**绝不阻塞投递**。
 
+**每人设「相册/媒体」主线**（图/视频备货 + 触发词自动发；DB 注册表 `src/companion/persona_media_store.py`
+＝`config/persona_media.db`，纯函数匹配器 `persona_media.py`，探针 `media_probe.py`，路由
+`persona_media_routes.py` 挂 `/api/personas/{pid}/media*`，UI 在 `personas.html` 相册面板，
+迁移 CLI `scripts/import_persona_albums.py`。详见 `docs/PERSONA_MEDIA_ALBUMS.md`）：
+```bash
+python -m pytest tests/test_persona_media.py tests/test_persona_media_routes.py \
+ tests/test_persona_media_import.py tests/test_media_probe.py \
+ tests/test_selfie_wiring.py tests/test_image_autosend.py -q --tb=line
+```
+预期：全绿。关键不变量：命中相册**优先于**AI 现场出图（两条链 Stage 0：autosend `run_autosend_image` +
+skill_manager `_handle_persona_media_request`）；关键词池独立于自拍/物体意图、通用池仅泛化要图时放开、
+`min_bond_level` 关系闸门、加权轮播+会话内避重；护栏＝扩展名白名单/体积(图10M/视频50M)/视频时长(3min,
+仅 ffprobe 可探时拦)/sha256 去重/路径消毒/viewer 只读/审计(`pmedia_*`)；探针（ffprobe 时长宽高、ffmpeg
+封面、PIL 图宽高）全软失败不阻塞上传；多语配文 `caption_i18n` 随会话语种取文；观测经
+`/api/workspace/metrics.persona_media` + Prometheus `ws_persona_media_*` + ops-overview「🖼️ 人设相册」卡。
+总开关沿用 `companion.selfie.enabled`。
+
+**外部 worker 会话健康 + Messenger 受控降级主线**（2026-07：网页链路不稳的止血与自愈闭环）：
+```bash
+python -m pytest tests/test_messenger_send_semantics.py tests/test_platform_session_health.py \
+ tests/test_platform_session_selfheal.py tests/test_auto_draft_platform_modes.py \
+ tests/test_alert_delivery_e2e.py tests/test_admin_route_inventory.py -q --tb=line
+```
+预期：全绿。链路：messenger-web / whatsapp-baileys(Node) 在登录/掉线/放弃自愈时 POST
+`/api/internal/protocol/session-status` → `src/integrations/platform_session_health.py`
+（进程级登记表）→ 转移告警（EventBus `platform_session_alert`，订阅别名 `platform_session`，
+事件带 `rate_key=platform:acct` 防多账号挤限流窗）→ worker send/send_media 快速失败闸
+（`_session_unhealthy`，仅拦自动路径）→ ops 卡「🔌 平台会话健康」+ 不健康 messenger 行
+「重新登录」按钮（`POST /api/admin/platform-sessions/relogin` → Node `/accounts/:id/relogin`
+同 profile 重启 + 30min 交互窗）。持续掉线由 `HealthWatchdog._check_platform_sessions`
+升级式提醒（`health_watchdog.session_stale_remind`，默认 30min 首提/4h 重提，恢复自动清零）。
+Node 侧不变量：composer 清空 + 回读气泡二次确认（失败标记→502 如实上报；回读不定态按已送达防重发刷屏）；
+崩溃快自愈（退避×5）放弃后仍有 15min 慢重试兜底；WA 意外断线自动重连（修「假在线」）。
+Messenger 自动化档位经 `inbox.auto_draft.platform_modes: {messenger: review}` 封顶
+（`cap_automation_mode`，AI 只拟稿人审后发；恢复全自动删该行重启）。
+messenger-web `start.ps1` 显式 `MSG_RESTORE_ON_BOOT=1`（headed 也开机恢复，解主进程启动顺序依赖）。
+
 **质量评测门禁**（对外可信硬指标，缺资源优雅跳过，纯核心在 `src/eval/`）：
 ```bash
 python -m pytest tests/test_faq_resolution_gate.py tests/test_translation_quality_gate.py \
@@ -135,9 +172,26 @@ python -m pytest tests/test_faq_resolution_gate.py tests/test_translation_qualit
  tests/test_crisis_safety_overview.py tests/test_voice_language_eval.py -q --tb=line
 ```
 - FAQ 自解决率：KB 备货(≥`AITR_FAQ_MIN_ENTRIES`)时强制 ≥`AITR_FAQ_RESOLVE_TARGET`；缺库/夹生库 skip。
-- 翻译回译质量：src→tgt→src 回译相似度近似质量；仅用**确定性引擎(DeepL/Google)**评（可复现、零 LLM 成本），
-  缺 key/未列入 `translation.engines.order` → skip。阈值 `AITR_XLATE_SAMPLE_THRESHOLD`/`AITR_XLATE_PASS_TARGET`。
-  CLI：`python -m scripts.run_eval --translation [--json]`。
+- 翻译回译质量：src→tgt→src 回译相似度近似质量；可评引擎＝**确定性引擎(DeepL/Google)** 或
+ **本地 MT(ollama_mt，评测器强制 temp=0 贪心=可复现)**，均缺 → skip。CLI `--xlate-engine
+ auto|deterministic|ollama_mt|ai`（auto=DeepL/Google→ollama_mt 顺位；ai=DeepSeek 仅横比不进门禁）；
+ evaluator 读 config 时会合并 `config.local.yaml` overlay 并对 Ollama 端点做 /api/show 探针（端点宕/
+ 模型缺→skip 而非全 0 假 FAIL）。本地 MT 实景门禁 opt-in：`AITR_XLATE_LOCAL_MT=1`（CI 默认不依赖
+ 局域网 GPU）。宽语种集 `config/eval/translation_samples_hymt.yaml`（30 样本×17 语）。
+ 阈值 `AITR_XLATE_SAMPLE_THRESHOLD`/`AITR_XLATE_PASS_TARGET`。
+ CLI：`python -m scripts.run_eval --translation [--json]`。
+ **语义轨**（P2）：有嵌入 provider（`embedding_providers.build_embed_fn`，本仓生产=140 bge-m3）时
+ 自动补嵌入余弦 `semantic`；字符轨不合格但语义 ≥ 阈（默认 0.8，`AITR_XLATE_SEM_THRESHOLD` /
+ `--xlate-sem-threshold`）→ 按合格记 `rescued=True`——救「正确的意译」（「九折」→回译「10%的折扣」
+ 字符 0.39/语义 0.84）。阈值 0.8 依 bge-m3 实测校准：意译区 0.84-0.93 / 同域错义区 0.61-0.74 /
+ 跑题区 <0.42，落干净间隔中。嵌入失败软降级纯字符轨，绝不因端点抖动崩评测。`--xlate-semantic off` 关。
+ **交叉回译**（P2）：`--xlate-back-engine same|deterministic|ollama_mt|ai`——同引擎自回译会给
+ 「复读自己措辞」的引擎虚高字符分；正/回向分属两引擎时偏置对称抵消，横比才公平。
+ **周批趋势**：计划任务 `TranslationEvalWeekly`（周六 06:30，`scripts/translation_eval_weekly.ps1`）
+ 跑默认+宽集，`--out-jsonl` 摘要追加 `logs/eval/translation_trend.jsonl`。
+ 2026-07-11 实测基线（宽30样本×17语）：字符轨自回译 HY-MT 0.677 vs DeepSeek 0.750 看似落后，
+ 但**交叉回译+语义轨**下 HY-MT-fwd 0.933 vs DeepSeek-fwd 0.922——字符差距主要是复读偏置+意译压分
+ 假象；语义口径本地 MT 持平略胜（vi/es/ru +0.05~0.07，hi -0.075），两集 100% PASS（语义救回 3 例意译）。
 - 记忆召回质量：真实 `EpisodicMemoryStore` 端到端跑 `get_bullets_for_prompt`，对比关键词 vs 向量融合召回率；
   机制自测用确定性本地嵌入(离线可复现)，真实语义增益需真实嵌入(不可用则 skip)。门禁 `top_k` 默认 3
   （须 < 每场景事实数才鉴别排序；实测 keyword 80% vs vector 100%/+20%）。
@@ -166,6 +220,23 @@ python -m pytest tests/test_faq_resolution_gate.py tests/test_translation_qualit
   `EngineRouter(min_confidence>0)` 在主引擎低置信时自动切换下一引擎择优(都不达标→最高分候选，不阻断)；
   生产开关 `translation.engines.confidence_switch.{enabled,min_confidence}`(默认关=旧行为)。scorer 门禁
   `tests/test_translation_confidence.py`(纯函数常驻)。CLI：`python -m scripts.run_eval --xlate-confidence`。
+- **按语种引擎覆写 + 在线语义闸门**（K2）：`translation.engines.per_lang_order`（如 `{hi: [ai, ollama_mt]}`）
+  把评测实锤的弱语对重排到强引擎优先——只重排 order 内引擎（未知名忽略），覆写外引擎按默认序补尾兜底，
+  其余语种不受影响（hi 三样本 A/B：同 AI 回译口径 MT char=0.757 vs AI 0.884 → 已上线覆写）。
+  `confidence_switch.semantic.{enabled,min_similarity}`（默认关）＝确定性信号的盲区补丁：确定性达标的译文
+  再比对 源/译 跨语言 bge-m3 余弦（走 ai_client.embed，~50ms），低于阈值同低置信处理（切换/择优），
+  嵌入失败/返空一律放行（fail-open 不阻塞）；源文 <4 有效字符（"OK"/"哈哈"类）直接跳过（嵌入噪声大且
+  漂移风险≈0，省一次往返）。阈值 0.65 依宽语料 44 对离线校准：真实译文 min=0.712/p5=0.775，
+  错配内容 max=0.741/p95=0.683（zh→fr/hi 正确译文天然低分 → 阈值再高会误切）。观测：
+  `translation_engine_semantic_low_total`(Prom) / `metrics.translation_engines.semantic_low` / ops 卡「语义闸门拦截」
+  （i18n 键 `ov2_js_sem_low`）。门禁 `tests/test_translation_engines.py`（覆写路由/兜底/describe + 语义切换/fail-open/短文本跳过/全低择优）。
+  **嵌入双活**：`ai.embedding_base_urls`（列表，优先于单数键）= 140+176 双 bge-m3 端点，`ai_client.embed()`
+  按序尝试、异常端点 60s 冷却降权（不剔除）、**全端点失败才计全局熔断 streak**（单点抖动零感知）；
+  其他嵌入消费方（KB embed-all/eval provider/readiness）仍读单数键 `embedding_base_url`（保持 140）。
+  门禁 `tests/test_ai_client_embed_failover.py` + readiness 认列表键（`tests/test_companion_embedding_readiness.py`）。
+- **评测语料双向化**：`TransSample.source_lang` 显式标注源语（优先于探测——短句探测不可靠），反向进站样本
+  （en/ja/ko/th/vi/id/es/ru→zh，12 条）已入宽集 `config/eval/translation_samples_hymt.yaml`（现 44 样本：
+  zh→xx 32 + xx→zh 12；HY-MT 全绿 pass=44/44，语义均分 0.939，xx→zh 方向 char 均分 0.79 高于 zh→xx 0.68）。
 - **主动护栏闭环**（L，情绪安全闸门）：`src/eval/proactive_guard_eval.py` 把所有主动路径共用的
   `proactive_emotion_gate` 当安全不变量回归——**severe 窗口内必 block**(漏判=最脆弱时还推剧情)、窗口外正确退化、
   负面末条→soft、正面/中性不过度沉默。门禁 `tests/test_proactive_guard_eval.py`。CLI：`--proactive-guard`。
@@ -188,8 +259,12 @@ python -m pytest tests/test_faq_resolution_gate.py tests/test_translation_qualit
   早晚安(`build_ritual_opener`)、纪念日/节日(`build_milestone_opener`)、槽位采集(`build_profile_ask_opener`)三条
   ritual 路径——与主动开场(O)同口径走 `proactive_emotion_gate` 强度分级（轻度负面不过度沉默）。
 - **翻译置信度趋势化**（S，P 的时序延伸）：`src/ai/translation_trend_store.py`（仿 `tts_cost_store`，默认关）按日
-  upsert {尝试/低置信/切换}，`/api/admin/translation-confidence-trend` 读近 N 天，ops 看板出低置信率/切换率
-  7 天 sparkline。开关 `translation.engines.confidence_switch.trend_log`；门禁 `tests/test_translation_trend_store.py`。
+  upsert {尝试/低置信/切换/语义闸门 sem_low}（旧库经幂等 ALTER 迁移补列），`/api/admin/translation-confidence-trend`
+  读近 N 天，ops 看板出低置信率/切换率/语义闸门率 7 天 sparkline（语义线仅在有命中时显示）。
+  开关 `translation.engines.confidence_switch.trend_log`；门禁 `tests/test_translation_trend_store.py`。
+  **周批语对拆分**：`evaluate_translation_quality` 的 `summary.by_pair`（`{src->tgt: {n,passed,char_mean,sem_mean}}`）
+  随 `--out-jsonl` 趋势行携带；`scripts/translation_eval_weekly.ps1` 宽语料一周三口径（默认集 + 宽集同引擎 +
+  宽集交叉回译 `--xlate-back-engine ai`，行内 `back_engine` 区分）→ 弱语对该不该进 `per_lang_order` 直接读周数据。
 - **危机安全总览**（T，整条安全链单一入口）：`src/eval/crisis_safety_overview.py` 聚合 L/O(主动抑制)+J(响应闭环)
   +Q(资源保障)为一张总览 + 合并 `passed`（全绿才绿），不引入新逻辑。门禁 `tests/test_crisis_safety_overview.py`，
   CLI：`python -m scripts.run_eval --crisis-overview [--json]`。
@@ -203,6 +278,32 @@ python -m pytest tests/test_faq_resolution_gate.py tests/test_translation_qualit
   （中文回复仍 zh=行为不变；英文/他语回复由默认 zh 纠正，防按中文音系发音 garble；无法判定/空→回落账号默认）。
   覆盖 autosend / 原生 voice_reply / 手动坐席三条链路同一瓶颈。纯函数常驻门禁 `tests/test_voice_language_eval.py`。
   CLI：`python -m scripts.run_eval --voice-language [--json]`。阈值 `AITR_VOICE_LANG_ACC_TARGET`(默认 1.0)。
+- **语音情绪 GPU 化**（SER 远程主路）：176 音频服务（`scripts/asr176/`，与 GPU ASR 同进程同任务）加
+  `POST /v1/audio/emotion`（emotion2vec_plus_large CUDA，warm ~44ms vs 117 CPU plus_base 秒级）；
+  服务端只回 `{labels,scores}` 原始数组，**标签→系统语义映射仍在客户端** `speech_emotion.py` 单一出口。
+  客户端 `speech_emotion.remote.{base_url,timeout_sec,cb_cooldown_sec}`（config.local）＝远程优先，
+  失败进 120s 冷却回落本地 funasr CPU（远程可用时不受本地加载熔断牵连），语音链零阻断。
+  观测：`SpeechEmotionStats.remote` → `speech_emotion_remote_total`(Prom) + ops「🎧 音频情绪」卡
+  「远程 GPU 占比」（键 `ov2_js_se_remote`）。门禁 `tests/test_speech_emotion.py`（远程成功/失败回落/冷却/
+  本地断路器不牵连/无 remote 旧行为）。模型获取教训见 `scripts/asr176/README.md`（176 hub 下载不可靠，
+  117 下载→scp）。
+- **176 音频服务自愈 + 预热**：`AITR_WARMUP`(默认 1) 启动即后台预载 ASR+SER（消重启后 ~15s/~6s 冷启，
+  `/health` 出 `asr_loaded/ser_loaded`）；计划任务 `AITR_ASR_WATCHDOG`(每 5min) 跑 `watchdog_asr.ps1`
+  ——health 8s 无响应经计划任务自动重启（ONSTART 只保开机，白天崩了会静默降级 CPU，看门狗闭环）。
+- **视觉(VLM)双活**（`vision.base_urls`，2026-07）：176(5090,主)+140(4070,备)各备 `qwen2.5vl:7b`，
+  `VisionClient` 多端点按序试、异常端点 60s 冷却降权（**模块级**状态——实例按调用即建即弃）；
+  端点通但空答不切端点（省第二块 GPU），全端点异常仍走旧智谱云兜底。所有消费方
+  （TG/LINE/Messenger/WA RPA + 图片翻译 OCR）经同一类自动获益。`_wants_openai_primary`/
+  `has_any_vision_backend` 认 `base_urls`。门禁 `tests/test_vision_fallback.py`（解析/切换/冷却重排/
+  全冷却硬试/空答不切）。140 冷载实测 130s（timeout 150 覆盖）、热态 ~5s。
+- **166 旧主机引用清理**（网段迁移遗留，2026-07-11）：`messenger_rpa.audio_pipeline` → 176 GPU ASR
+  （同 OpenAI 契约）；`whatsapp_rpa.voice_output` coqui_http→166 改 `minicpm_clone` 本机 IndexTTS2
+  （与 TG voice_reply 同栈，失败回落 edge_tts）；`ai.embedding_base_url` 基线值 192.168.1.43(旧 Wi-Fi)
+  → 192.168.0.140。`faceswap`(166:8000) 无替代主机，已知死配置待产品决策。140 双默认网关经核实
+  metric 已分明（以太网 25 vs WLAN 326，Windows 自动降权），不动网络配置。
+- **翻译趋势周报 CLI**：`python -m scripts.xlate_trend_report [--json]` 把周批 JSONL 按
+  (dataset,engine,back_engine) 分组渲染趋势表 + 最新弱语对 Top-K（sem 升序，n<2 标注），
+  周审读数即可决策 per_lang_order/阈值。门禁 `tests/test_xlate_trend_report.py`。
 
 ### i18n 施工约定（后台路由 CJK 收口 + 前端裸键）
 

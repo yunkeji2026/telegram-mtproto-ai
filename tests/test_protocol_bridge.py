@@ -87,6 +87,126 @@ def test_ingest_incoming_guards(tmp_path):
                               chat_key="1", text="x") is None
 
 
+# ── P4-11B 群「@我」旗标 ───────────────────────────────────────────────────────
+
+def test_ingest_group_mention_sets_flag_and_surfaces(tmp_path):
+    """入站群消息 mentioned=True → 会话置旗标；store_row_to_chat 透出 mentioned=True。"""
+    from src.inbox.normalizer import store_row_to_chat
+    store = InboxStore(tmp_path / "inbox.db")
+    cid = pb.ingest_incoming(
+        store, platform="whatsapp", account_id="a", chat_key="120363000000000001",
+        name="工作群", text="张三：@a 看下", ts=100, msg_id="g1",
+        direction="in", chat_type="group", mentioned=True,
+    )
+    row = store.get_conversation(cid)
+    assert row["mentioned_unread"] == 1
+    assert store_row_to_chat(row)["mentioned"] is True
+
+
+def test_ingest_group_no_mention_leaves_flag_unset(tmp_path):
+    store = InboxStore(tmp_path / "inbox.db")
+    cid = pb.ingest_incoming(
+        store, platform="whatsapp", account_id="a", chat_key="120363000000000002",
+        text="李四：早", ts=100, msg_id="g2", direction="in",
+        chat_type="group", mentioned=False,
+    )
+    assert store.get_conversation(cid)["mentioned_unread"] == 0
+
+
+def test_set_conversation_mentioned_idempotent_and_clear(tmp_path):
+    store = InboxStore(tmp_path / "inbox.db")
+    cid = pb.ingest_incoming(
+        store, platform="whatsapp", account_id="a", chat_key="120363000000000003",
+        text="x", ts=1, msg_id="g3", direction="in", chat_type="group",
+        mentioned=True,
+    )
+    # 已为 1，再置 True 无变化（幂等）
+    assert store.set_conversation_mentioned(cid, True) is False
+    # 清除生效，再清一次无变化
+    assert store.set_conversation_mentioned(cid, False) is True
+    assert store.set_conversation_mentioned(cid, False) is False
+    assert store.get_conversation(cid)["mentioned_unread"] == 0
+
+
+def test_ingest_group_mentions_persist_and_surface(tmp_path):
+    """P4-11D：入站群消息带 mentions=[{jid,number}] → 落 messages.mentions_json；
+    通讯录名补齐；store_message_to_obj 透出 mentions=[{jid,number,name}]。"""
+    from src.inbox.normalizer import store_message_to_obj
+    store = InboxStore(tmp_path / "inbox.db")
+    # 通讯录里有 8613800000000 → 王五（补名来源）
+    store.upsert_protocol_contacts("whatsapp", "a", [
+        {"chat_key": "8613800000000", "name": "王五"},
+    ])
+    cid = pb.ingest_incoming(
+        store, platform="whatsapp", account_id="a", chat_key="120363000000000010",
+        name="项目群", text="张三：@8613800000000 @80398163923197 看下", ts=100,
+        msg_id="gm1", direction="in", chat_type="group", mentioned=True,
+        mentions=[
+            {"jid": "8613800000000@s.whatsapp.net", "number": "8613800000000"},
+            {"jid": "80398163923197@lid", "number": "80398163923197"},
+        ],
+    )
+    rows = store.list_messages(cid)
+    assert rows, "消息应已落库"
+    obj = store_message_to_obj(rows[-1])
+    by_num = {m["number"]: m for m in obj["mentions"]}
+    # 有通讯录名 → 补成真名；LID 无名 → 回落号码
+    assert by_num["8613800000000"]["name"] == "王五"
+    assert by_num["80398163923197"]["name"] == "80398163923197"
+    assert by_num["80398163923197"]["jid"] == "80398163923197@lid"
+
+
+def test_ingest_group_no_mentions_empty_list(tmp_path):
+    """无 mentions → mentions_json 缺省 []，读出 mentions=[]（向后兼容）。"""
+    from src.inbox.normalizer import store_message_to_obj
+    store = InboxStore(tmp_path / "inbox.db")
+    cid = pb.ingest_incoming(
+        store, platform="whatsapp", account_id="a", chat_key="120363000000000011",
+        text="李四：早", ts=100, msg_id="gm2", direction="in", chat_type="group",
+    )
+    rows = store.list_messages(cid)
+    assert rows
+    assert store_message_to_obj(rows[-1])["mentions"] == []
+
+
+def test_ingest_group_sender_persists_clean_text_prefixed_preview(tmp_path):
+    """P4-11E：群入站带 sender_id/sender_name → 消息正文保持干净、结构化落 sender_*，
+    而**会话列表预览**前缀发言人名（对齐官方群聊列表）。"""
+    from src.inbox.normalizer import store_message_to_obj, store_row_to_chat
+    store = InboxStore(tmp_path / "inbox.db")
+    cid = pb.ingest_incoming(
+        store, platform="whatsapp", account_id="a", chat_key="120363000000000020",
+        name="项目群", text="早上好啊", ts=100, msg_id="gs1",
+        direction="in", chat_type="group",
+        sender_id="8613800000000@s.whatsapp.net", sender_name="张三",
+    )
+    rows = store.list_messages(cid)
+    assert rows
+    obj = store_message_to_obj(rows[-1])
+    # 消息正文保持干净（无「张三：」前缀），发言人走结构化字段
+    assert obj["text"] == "早上好啊"
+    assert obj["sender_name"] == "张三"
+    assert obj["sender_id"] == "8613800000000@s.whatsapp.net"
+    # 会话列表预览带发言人前缀
+    chat = store_row_to_chat(store.get_conversation(cid))
+    assert chat["last_msg"] == "张三：早上好啊"
+
+
+def test_ingest_group_no_sender_backward_compatible(tmp_path):
+    """无 sender_* → 正文与预览均不加前缀，sender 字段空（向后兼容）。"""
+    from src.inbox.normalizer import store_message_to_obj, store_row_to_chat
+    store = InboxStore(tmp_path / "inbox.db")
+    cid = pb.ingest_incoming(
+        store, platform="whatsapp", account_id="a", chat_key="120363000000000021",
+        text="hi", ts=100, msg_id="gs2", direction="in", chat_type="group",
+    )
+    rows = store.list_messages(cid)
+    obj = store_message_to_obj(rows[-1])
+    assert obj["text"] == "hi"
+    assert obj["sender_name"] == "" and obj["sender_id"] == ""
+    assert store_row_to_chat(store.get_conversation(cid))["last_msg"] == "hi"
+
+
 # ── sink ────────────────────────────────────────────────────────────────────
 
 def test_emit_incoming_dispatches_to_sink():

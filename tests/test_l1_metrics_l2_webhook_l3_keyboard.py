@@ -111,6 +111,11 @@ class TestL2EventAliases:
         rule = _EVENT_ALIASES["backlog_summary"]
         assert "draft_backlog_summary" in rule["types"]
 
+    def test_orchestrator_worker_alias(self):
+        rule = _EVENT_ALIASES["orchestrator_worker"]
+        assert "orchestrator_worker_alert" in rule["types"]
+        assert rule["levels"] is None
+
 
 class TestL2BuildMessage:
     def test_draft_created_l4(self):
@@ -143,6 +148,21 @@ class TestL2BuildMessage:
         })
         assert "7" in title
         assert "L3=3" in text and "L4=4" in text
+
+    def test_orchestrator_worker_alert(self):
+        title, text = _build_message("orchestrator_worker_alert", {
+            "light": "red",
+            "problems": [
+                {"name": "line/a2", "detail": "adb lost", "restarts": 5},
+            ],
+        })
+        assert "worker" in title.lower() and "🔴" in title
+        assert "line/a2" in text and "adb lost" in text
+
+    def test_orchestrator_worker_recovery(self):
+        title, text = _build_message("orchestrator_worker_alert", {"recovered": True})
+        assert "恢复" in title
+        assert "/admin/ops" in text
 
     def test_unknown_event(self):
         title, text = _build_message("some_new_event", {"foo": "bar"})

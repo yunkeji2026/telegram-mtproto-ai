@@ -42,9 +42,11 @@ _BASELINE = """
 /api/telemetry/frontend-error	POST
 /api/admin/ai-quality-calibrate	GET
 /api/admin/ai-quality-thresholds	POST
+/api/admin/platform-sessions/relogin	POST
 /api/admin/realtime-voice-alert-calibrate	GET
 /api/admin/realtime-voice-alert-thresholds	POST
 /api/admin/realtime-voice-trend	GET
+/api/admin/send-route-trend	GET
 /api/admin/workers/{worker_id}/reset-circuit	POST
 /api/admin/reliability	GET
 /api/admin/license	GET
@@ -366,6 +368,11 @@ _BASELINE = """
 /api/personas/sync-to-config	POST
 /api/personas/tg-account/{account_id}/assign-profile	POST
 /api/personas/wa-account/{account_id}/assign-profile	POST
+/api/personas/{pid}/media	GET
+/api/personas/{pid}/media	POST
+/api/personas/{pid}/media/test	POST
+/api/personas/{pid}/media/{mid}	DELETE
+/api/personas/{pid}/media/{mid}	PATCH
 /api/reactivation/dry-run-feedback	POST
 /api/reactivation/dry-run-samples	GET
 /api/registry/apply-template	POST
@@ -460,6 +467,7 @@ _BASELINE = """
 /api/accounts/auto-reply/stream	GET
 /api/accounts/protocol/readiness	GET
 /api/internal/protocol/ingest	POST
+/api/internal/protocol/session-status	POST
 /api/internal/protocol/contacts	POST
 /api/internal/protocol/chats	POST
 /api/internal/protocol/reaction	POST
@@ -474,6 +482,7 @@ _BASELINE = """
 /api/platforms/{platform}/{account_id}/subscribe-presence	POST
 /api/platforms/{platform}/{account_id}/react	POST
 /api/platforms/{platform}/{account_id}/message-op	POST
+/api/platforms/{platform}/{account_id}/group-members	GET
 /api/unified-inbox/send-media	POST
 /api/unified-inbox/send-voice	POST
 /api/unified-inbox/send-caps	GET
@@ -639,6 +648,7 @@ _BASELINE = """
 /api/workspace/escalations	GET
 /api/workspace/escalations/mine	GET
 /api/workspace/handoff-brief	GET
+/api/workspace/conversation/{conversation_id}/seen-mention	POST
 /api/workspace/conversation/{conversation_id}/snooze	POST
 /api/workspace/conversation/{conversation_id}/unsnooze	POST
 /api/workspace/snoozed	GET

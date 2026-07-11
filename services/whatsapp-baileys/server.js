@@ -37,6 +37,23 @@ const SESSIONS_DIR = process.env.WA_SESSIONS_DIR || path.join(__dirname, "sessio
 const PORT = Number(process.env.PORT || 8790);
 const logger = pino({ level: process.env.LOG_LEVEL || "info" });
 
+// 韧性护栏：Baileys 是社区逆向库，偶发内部 promiseTimeout('Timed Out')/解密异常等会以
+// unhandledRejection/uncaughtException 冒泡；若不接住，整个网关进程会 ~60s 崩一次（app-state
+// resync 超时最典型）。这里统一记录并**不退出**——单账号的瞬时异常不该拖垮多账号常驻服务。
+// 仅对真正致命的启动级错误（如端口占用 EADDRINUSE）保留退出语义。
+process.on("unhandledRejection", (reason) => {
+  logger.warn({ reason: String((reason && reason.message) || reason) },
+    "unhandledRejection swallowed (service stays up)");
+});
+process.on("uncaughtException", (err) => {
+  if (err && (err.code === "EADDRINUSE" || err.code === "EACCES")) {
+    logger.fatal({ err: String(err) }, "fatal listen error, exiting");
+    process.exit(1);
+  }
+  logger.warn({ err: String((err && err.message) || err) },
+    "uncaughtException swallowed (service stays up)");
+});
+
 fs.mkdirSync(SESSIONS_DIR, { recursive: true });
 
 /** login_id -> { sock, status, qrImage, accountId, createdAt } */
@@ -56,6 +73,11 @@ const PY_REACTION_URL = PY_INGEST_URL ? PY_INGEST_URL.replace(/\/ingest$/, "/rea
 const PY_RECEIPT_URL = PY_INGEST_URL ? PY_INGEST_URL.replace(/\/ingest$/, "/receipt") : "";
 const PY_PRESENCE_URL = PY_INGEST_URL ? PY_INGEST_URL.replace(/\/ingest$/, "/presence") : "";
 const PY_MSGOP_URL = PY_INGEST_URL ? PY_INGEST_URL.replace(/\/ingest$/, "/message-op") : "";
+// 会话健康事件上报（对齐 messenger-web 的 P0-2 闭环）：连上/被登出/重连放弃等关键转移
+// 主动 push 给 Python（PlatformSessionHealth → 告警 + 发送闸 + ops 卡）。可用 PY_STATUS_URL
+// 显式覆盖，缺省由 PY_INGEST_URL 推导。best-effort 不抛。
+const PY_STATUS_URL = process.env.PY_STATUS_URL
+  || (PY_INGEST_URL ? PY_INGEST_URL.replace(/\/ingest\s*$/, "/session-status") : "");
 // 同步开关（默认开）：好友名单、会话列表；会话占位上限防洪泛
 const WA_SYNC_CONTACTS = String(process.env.WA_SYNC_CONTACTS ?? "1") !== "0";
 const WA_SYNC_CHATS = String(process.env.WA_SYNC_CHATS ?? "1") !== "0";
@@ -83,6 +105,71 @@ async function postJson(url, payload) {
 /** 把一条 WhatsApp 入站消息 push 到 Python 统一收件箱（best-effort）。 */
 async function postIngest(payload) {
   await postJson(PY_INGEST_URL, payload);
+}
+
+/** 会话健康状态 push（authorized / logged_out / expired）。 */
+async function postStatus(loginId, entry, status, detail) {
+  if (!PY_STATUS_URL) return;
+  await postJson(PY_STATUS_URL, {
+    platform: "whatsapp",
+    account_id: String((entry && entry.accountId) || ""),
+    login_id: String(loginId || ""),
+    status: String(status || ""),
+    detail: String(detail || ""),
+    ts: Math.floor(Date.now() / 1000),
+  });
+}
+
+// ── 断线自动重连（P3 发现的真缺口）────────────────────────────────────────────
+// 此前 connection.close 只处理 restartRequired / loggedOut / 未授权三种；**已授权会话**
+// 因网络中断/服务端踢线（connectionLost/connectionClosed/timedOut 等）掉线时什么都不做——
+// socket 已死但 entry.status 仍是 "authorized"，/accounts 继续上报「在线」→ Python 侧
+// 假健康，出站全部静默失败。这里补上：非 loggedOut 的意外断开走指数退避重连
+// （3s→6s→…→60s，连续 5 次失败才放弃 → 置 expired + push 告警；成功重连自动清零）。
+const _reconnectAttempts = new Map();
+const _RECONNECT_MAX = 5;
+// 快重连放弃后的慢速重试（对齐 messenger-web）：每 WA_RECONNECT_SLOW_RETRY_MS
+// （默认 15min，0=关）给一次全新重连预算——长时间断网恢复后无需重启进程即可自愈。
+const WA_RECONNECT_SLOW_RETRY_MS = Math.max(
+  0, Number(process.env.WA_RECONNECT_SLOW_RETRY_MS ?? 15 * 60 * 1000));
+const _slowRetryTimers = new Map();
+function scheduleSlowRetry(loginId, proxyUrl) {
+  if (!WA_RECONNECT_SLOW_RETRY_MS || _slowRetryTimers.has(loginId)) return;
+  const t = setTimeout(() => {
+    _slowRetryTimers.delete(loginId);
+    const cur = sessions.get(loginId);
+    if (!cur || cur.status === "authorized") return; // 已登出移除/已恢复
+    logger.info({ loginId }, "WA slow-retry: starting a fresh reconnect cycle");
+    _reconnectAttempts.delete(loginId);
+    scheduleReconnect(loginId, proxyUrl);
+  }, WA_RECONNECT_SLOW_RETRY_MS);
+  if (typeof t.unref === "function") t.unref();
+  _slowRetryTimers.set(loginId, t);
+}
+function scheduleReconnect(loginId, proxyUrl) {
+  const rec = _reconnectAttempts.get(loginId) || { count: 0, lastTs: 0 };
+  if (Date.now() - rec.lastTs > 5 * 60 * 1000) rec.count = 0; // 距上次 >5min = 新事件
+  rec.count += 1; rec.lastTs = Date.now();
+  _reconnectAttempts.set(loginId, rec);
+  const entry = sessions.get(loginId);
+  if (rec.count > _RECONNECT_MAX) {
+    logger.error({ loginId, attempts: rec.count },
+      "WA reconnect loop exhausted → giving up (manual re-pair may be needed)");
+    if (entry) entry.status = "expired";
+    postStatus(loginId, entry, "expired",
+      `reconnect failed ${rec.count} times → gave up; check network / re-pair device`)
+      .catch(() => {});
+    scheduleSlowRetry(loginId, proxyUrl); // 不死等：低频再给重连机会
+    return;
+  }
+  const delay = Math.min(3000 * Math.pow(2, rec.count - 1), 60000);
+  logger.warn({ loginId, attempt: rec.count, delayMs: delay },
+    "WA connection closed unexpectedly → scheduling reconnect");
+  setTimeout(() => {
+    if (!sessions.has(loginId)) return; // 已被登出/取消 → 不复活
+    startLogin(loginId, proxyUrl).catch((e) =>
+      logger.error({ e, loginId }, "WA reconnect attempt failed"));
+  }, delay);
 }
 
 /** 归一 jid：仅保留 1:1 个人号（跳过群/广播/状态）。返回裸号码或 null。 */
@@ -299,7 +386,11 @@ function findByAccount(accountId) {
 function toJid(chatKey) {
   const s = String(chatKey || "");
   if (s.includes("@")) return s;
-  return `${s.replace(/[^0-9]/g, "")}@s.whatsapp.net`;
+  const digits = s.replace(/[^0-9]/g, "");
+  // 群 jid 判定：合法个人号是 E.164（≤15 位）；群 id 为 18 位长串，或旧式 <号>-<时间戳> 含连字符。
+  // ≥16 位或带连字符 → @g.us，否则个人 @s.whatsapp.net（发送/媒体路径原只会拼个人后缀，漏群）。
+  if (s.includes("-") || digits.length >= 16) return `${digits}@g.us`;
+  return `${digits}@s.whatsapp.net`;
 }
 
 // 首连历史回填条数（messaging-history.set）；0 关闭
@@ -387,6 +478,59 @@ function extractReplyTo(msg) {
   return { id, text: String(qtext).slice(0, 200), sender };
 }
 
+/** P4-11B：本账号的身份标识集合（号码 + LID 本地部分，去设备后缀），用于「我被 @」判定。 */
+function selfIds(entry) {
+  const ids = new Set();
+  const u = entry && entry.sock && entry.sock.user;
+  for (const raw of [(u && u.id) || "", (u && u.lid) || "", entry && entry.accountId]) {
+    if (!raw) continue;
+    const local = String(raw).split("@")[0].split(":")[0].replace(/[^0-9]/g, "");
+    if (local) ids.add(local);
+  }
+  return ids;
+}
+
+/** P4-11B：抽取一条消息的 mentionedJid 列表（contextInfo 可能挂在任一容器下）。 */
+function extractMentionedJids(msg) {
+  const m = (msg && msg.message) || {};
+  for (const k of Object.keys(m)) {
+    const v = m[k];
+    if (v && typeof v === "object" && v.contextInfo &&
+        Array.isArray(v.contextInfo.mentionedJid)) {
+      return v.contextInfo.mentionedJid.map((x) => String(x));
+    }
+  }
+  return [];
+}
+
+/** P4-11B：这条群消息是否 @ 了本账号（LID / 号码两种寻址都比对本地部分）。 */
+function mentionsMe(entry, msg) {
+  const ids = selfIds(entry);
+  if (!ids.size) return false;
+  for (const j of extractMentionedJids(msg)) {
+    const local = String(j).split("@")[0].split(":")[0].replace(/[^0-9]/g, "");
+    if (local && ids.has(local)) return true;
+  }
+  return false;
+}
+
+/** P4-11D：把一条消息的 mentionedJid 归一为 [{jid,number}]（供收件箱持久化 @号码→@名字）。
+ *  number = jid 本地部分（个人号=E.164；LID 群=LID 本地部分，与正文 @token 同口径）。 */
+function mentionDetails(msg) {
+  const out = [];
+  const seen = new Set();
+  for (const j of extractMentionedJids(msg)) {
+    const jid = String(j || "");
+    if (!jid) continue;
+    const number = jid.split("@")[0].split(":")[0].replace(/[^0-9]/g, "");
+    const key = number || jid;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ jid, number });
+  }
+  return out;
+}
+
 /** 识别 Baileys 媒体类型，返回 {kind, ext} 或 null。 */
 function waMediaMeta(msg) {
   const m = (msg && msg.message) || {};
@@ -440,13 +584,22 @@ async function pushWaMessage(entry, msg, skipEmpty) {
   if (skipEmpty && !text && !media.media_ref) return false;
   const ts = Number(msg.messageTimestamp || 0) || Math.floor(Date.now() / 1000);
   const chatKey = jid.split("@")[0];
+  // P4-11B：仅群内、非自己发的消息才判「我被 @」（供收件箱会话列表 @我 徽标/置顶/提醒）
+  const mentioned = isGroup && !fromMe ? mentionsMe(entry, msg) : false;
+  // P4-11D：群消息（含自己发的回写）携带提及明细 [{jid,number}]，供收件箱持久化 @号码→@名字
+  const mentionList = isGroup ? mentionDetails(msg) : [];
   let name;
+  // P4-11E：群发言人结构化上报（不再把「发言人：」拼进正文）——正文保持干净，
+  // 收件箱据 sender_id/sender_name 在气泡上方显示发言人名 + 稳定色。
+  let senderId = "";
+  let senderName = "";
   if (isGroup) {
-    // 群会话名=群主题；入站正文前缀发言人名，便于坐席看清「谁在群里说话」
+    // 群会话名=群主题
     name = (await groupName(entry, jid)) || chatKey;
-    if (!fromMe && text) {
-      const speaker = msg.pushName || (msg.key && msg.key.participant || "").split("@")[0];
-      if (speaker) text = `${speaker}：${text}`;
+    if (!fromMe) {
+      senderId = String((msg.key && msg.key.participant) || "");
+      senderName = String(msg.pushName || "") ||
+        (senderId.split("@")[0] || "");
     }
   } else {
     // 出站(fromMe)不用自己的 pushName 当会话名（会污染对端会话名）；留空由 Python 按通讯录/号码补
@@ -465,6 +618,10 @@ async function pushWaMessage(entry, msg, skipEmpty) {
     media_type: media.media_type || "",
     media_ref: media.media_ref || "",
     reply_to: replyTo || undefined,
+    mentioned: mentioned || undefined,
+    mentions: mentionList.length ? mentionList : undefined,
+    sender_id: senderId || undefined,
+    sender_name: senderName || undefined,
   });
   return true;
 }
@@ -634,6 +791,10 @@ async function startLogin(loginId, proxyUrl) {
         entry.accountId = "";
       }
       logger.info({ loginId, accountId: entry.accountId }, "WA connected");
+      _reconnectAttempts.delete(loginId); // 连上 → 清零重连退避计数
+      const _srt = _slowRetryTimers.get(loginId); // 已恢复 → 撤掉排队中的慢重试
+      if (_srt) { clearTimeout(_srt); _slowRetryTimers.delete(loginId); }
+      postStatus(loginId, entry, "authorized", "connected").catch(() => {});
       // P0 自愈：恢复的老 session 不会重放初次 contacts.set，(re)连成功后主动补拉一次
       // 通讯录 app-state（幂等，best-effort）——好友名单不必重扫码即可回流。只做一次。
       if (WA_SYNC_CONTACTS && !entry._resynced) {
@@ -658,6 +819,18 @@ async function startLogin(loginId, proxyUrl) {
           logger.error({ e }, "restart failed"));
       } else if (code === DisconnectReason.loggedOut) {
         entry.status = "failed";
+        // 人为登出（/logout、/cancel 会先置 _intentionalLogout 再 sock.logout()）不告警；
+        // 真被设备端解绑/风控登出才 push（需人工重新配对）。
+        if (!entry._intentionalLogout && sessions.get(loginId) === entry) {
+          postStatus(loginId, entry, "logged_out",
+            "WhatsApp reports loggedOut (device unlinked / logged out on phone?); re-pair needed")
+            .catch(() => {});
+        }
+      } else if (entry.status === "authorized") {
+        // 已授权会话意外断开（网络/踢线/超时）→ 自动重连（此前这里什么都不做 = 假在线）。
+        // 会话若已被 /logout 删除则 scheduleReconnect 内部不复活。
+        entry.status = "reconnecting";
+        scheduleReconnect(loginId, entry.proxyUrl);
       } else if (entry.status !== "authorized") {
         entry.status = "expired";
       }
@@ -731,6 +904,7 @@ app.get("/login/:id/status", (req, res) => {
 app.post("/login/:id/cancel", async (req, res) => {
   const entry = sessions.get(req.params.id);
   if (entry) {
+    entry._intentionalLogout = true; // 人为取消 → close 事件不推「被登出」告警
     try {
       if (entry.sock) await entry.sock.logout().catch(() => {});
     } catch (_) {}
@@ -852,8 +1026,18 @@ app.post("/accounts/:id/send", async (req, res) => {
   // P4-5B 引用回复：body.quoted={id,from_me,participant,text} → 带原生引用发送
   const quotedMsg = buildQuoted(jid, req.body && req.body.quoted);
   const sendOpts = quotedMsg ? { quoted: quotedMsg } : undefined;
+  // P4-11 群 @提及：群会话里从正文的 @<号码> token 自动派生 mentionedJid（+ 合并显式 mentions）；
+  // WhatsApp 约定正文须含 @号码、mentions 列全 jid，收方客户端据此把号码渲染成联系人名。
+  const content = { text };
+  if (jid.endsWith("@g.us")) {
+    let mentions = Array.isArray(req.body && req.body.mentions)
+      ? req.body.mentions.map((x) => String(x)) : [];
+    const found = (text.match(/@(\d{5,})/g) || []).map((s) => s.slice(1) + "@s.whatsapp.net");
+    mentions = Array.from(new Set(mentions.concat(found)));
+    if (mentions.length) content.mentions = mentions;
+  }
   try {
-    const sent = await entry.sock.sendMessage(jid, { text }, sendOpts);
+    const sent = await entry.sock.sendMessage(jid, content, sendOpts);
     res.json({ ok: true, message_id: (sent && sent.key && sent.key.id) || "" });
   } catch (e) {
     logger.error({ e }, "send failed");
@@ -918,6 +1102,31 @@ app.post("/accounts/:id/message-op", async (req, res) => {
   }
 });
 
+// P4-11：取群成员名单（供收件箱 @提及选人面板）。jid 传群号(digits)或完整 @g.us。
+app.get("/accounts/:id/group-members", async (req, res) => {
+  const entry = findByAccount(req.params.id);
+  if (!entry || !entry.sock) {
+    return res.status(404).json({ ok: false, error: "account not connected" });
+  }
+  let jid = String((req.query && req.query.jid) || "");
+  if (jid && !jid.includes("@")) jid = jid + "@g.us";
+  if (!jid || !jid.endsWith("@g.us")) {
+    return res.status(400).json({ ok: false, error: "group jid required" });
+  }
+  try {
+    const meta = await entry.sock.groupMetadata(jid);
+    const members = (meta.participants || []).map((p) => ({
+      jid: p.id,
+      number: String(p.id || "").split("@")[0],
+      admin: p.admin || "",
+    }));
+    res.json({ ok: true, subject: meta.subject || "", members });
+  } catch (e) {
+    logger.error({ e }, "group-members failed");
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
 app.post("/accounts/:id/send-media", async (req, res) => {
   const entry = findByAccount(req.params.id);
   if (!entry || !entry.sock) {
@@ -962,6 +1171,7 @@ app.post("/accounts/:id/logout", async (req, res) => {
     if (e.accountId === accountId) { loginId = id; entry = e; break; }
   }
   try {
+    if (entry) entry._intentionalLogout = true; // 运营主动登出 → 不推「被登出」告警
     if (entry && entry.sock) await entry.sock.logout().catch(() => {});
   } catch (_) {}
   if (loginId) sessions.delete(loginId);

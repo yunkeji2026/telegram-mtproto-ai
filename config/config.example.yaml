@@ -15,11 +15,11 @@ telegram:
   # 并入持久注册表 config/account_registry.db，与 QR 扫码登录账号共用同一张表，
   # 供账号编排器/舰队健康视图统一查看。幂等、不破坏 QR 既有登录态（session_string/online）。
   unify_login_registry: false
-  
+
   # 安全设置
   use_test_dc: false              # 是否使用测试服务器
   proxy: null                     # 代理设置，如: {"scheme": "socks5", "hostname": "127.0.0.1", "port": 1080}
-  
+
   # 消息处理设置
   max_workers: 5                  # 并发处理的最大工作线程数
   message_queue_size: 100         # 消息队列大小
@@ -1002,6 +1002,12 @@ ai:
   #   - OpenAI 云：    embedding_base_url: https://api.openai.com  embedding_model: text-embedding-3-small  embedding_api_key: sk-...
   # 留空=不启用嵌入（召回退关键词、去重退 hash）。embedding_api_key 留空时复用上面的 api_key。
   embedding_base_url: ""
+  # 多端点双活（可选，优先于 embedding_base_url）：两台机各跑同名嵌入模型，
+  # ai_client.embed() 按序尝试、异常端点 60s 冷却降权（不剔除）、全端点失败才全局熔断。
+  # 仅覆盖 embed() 热路（记忆召回/翻译语义闸门）；KB embed-all 等批量口仍读单数键。
+  # embedding_base_urls:
+  #   - http://192.168.0.140:11434
+  #   - http://192.168.0.176:11434
   embedding_model: ""
   embedding_api_key: ""
 
@@ -1360,7 +1366,7 @@ skills:
     - complaint    # 投诉处理
     - small_talk   # 闲聊
     - test         # 测试功能
-  
+
   # 技能执行优先级 (数字越小优先级越高)
   priority:
     greeting: 1
@@ -1371,7 +1377,7 @@ skills:
     channel_info: 6
     complaint: 7
     small_talk: 8
-  
+
   # 回复冷却设置 (单位: 秒)
   cooldown:
     per_user: 60      # 同一用户冷却时间
@@ -1390,7 +1396,7 @@ intent:
     complaint: ["投诉", "抱怨", "问题", "不爽", "不满意", "complaint", "issue"]
     small_talk: ["天气", "聊天", "聊会", "有空吗", "无聊", "干吗呢"]
     test: ["测试", "test", "试验", "试试", "camille"]
-  
+
   # 正则表达式模式
   patterns:
     order_query: ["订单\\s*[：:](.*)", "订单号\\s*[：:](.*)"]
@@ -1404,13 +1410,13 @@ templates:
     - "嗯嗯我在～怎么啦？"
     - "在呀，找我呢？"
     - "Hi～在呢"
-  
+
   # 订单查询回复模板
   order_query:
     - "查询订单请提供订单号，我帮您查看状态。"
     - "请告诉我订单号，我来为您查询具体情况。"
     - "订单查询需要您的订单号，方便提供一下吗？"
-  
+
   # 其他模板...
 
 # 日志配置
@@ -1420,7 +1426,7 @@ logging:
   max_size_mb: 10                  # 日志文件最大大小(MB)
   backup_count: 5                  # 备份文件数量
   format: "[{time}] [{level}] {message}"  # 日志格式
-  
+
   # 控制台输出
   console:
     enabled: true
@@ -1431,7 +1437,7 @@ monitoring:
   enabled: true
   metrics_port: 19190              # 监控端口（避免与常见 9090 冲突）
   update_interval: 60              # 更新间隔(秒)
-  
+
   # 监控指标
   track:
     - messages_processed
@@ -1447,18 +1453,18 @@ advanced:
     max_attempts: 3                # 最大重试次数
     backoff_factor: 1.5            # 指数退避因子
     max_delay: 60                  # 最大延迟(秒)
-  
+
   # 缓存设置
   cache:
     enabled: true
     ttl: 300                       # 缓存生存时间(秒)
     max_size: 1000                 # 最大缓存条目数
-  
+
   # 内存限制
   memory:
     max_queue_memory_mb: 100       # 队列最大内存占用(MB)
     gc_threshold: 80               # 垃圾回收阈值(%)
-  
+
   # 健康检查
   health_check:
     interval: 300                  # 健康检查间隔(秒)
@@ -1726,24 +1732,53 @@ translation:
       min_chars: 12                  # 低于此长度不咨询统计层（短文本统计不可靠）
   # P56：多翻译引擎（按 order 故障转移；首个可用且非空者获胜，AI 兜底）
   engines:
-    order: ["ai"]                    # 可选 ai/deepl/google，如 ["deepl", "ai"]
+    order: ["ai"]                    # 可选 ollama_mt/ai/deepl/google，如 ["ollama_mt", "ai"]
     timeout_sec: 8
     deepl:
       api_key: ""                    # 填则启用 DeepL（缺 key 自动跳过）
       pro: false                     # true=api.deepl.com（Pro），false=api-free.deepl.com
     google:
       api_key: ""                    # 填则启用 Google Translate v2（缺 key 自动跳过）
-  # K：引擎置信度智能切换（默认关 → 行为同旧：order 首个非空即返回）。
-  # 开后：主引擎虽产出非空，但若译文置信度（空/未翻译/错语种/长度异常的确定性评分）
-  # 低于 min_confidence，则自动切换 order 里的下一引擎择优；都不达标返回最高分候选（不阻断）。
-  # 仅在多引擎（order≥2）时有意义；会在主引擎低置信时增加一次后备引擎调用。
-  confidence_switch:
-    enabled: false
-    min_confidence: 0.5              # [0,1]，越高越爱切换（更稳但更费后备引擎调用）
-    # S：低置信率/切换率「按日落库」→ ops 看板画近 N 天 sparkline（默认关；开后每次
-    # translate 旁路 upsert 一行到 config/xlate_trend.db，仅元数据计数不存译文）。
-    trend_log: false
-    trend_retention_days: 90
+    # 本地/局域网 Ollama 上的专用 MT 模型（默认适配腾讯 Hunyuan-MT 官方 prompt：
+    # zh↔xx 用中文指令、xx↔xx 用英文指令）。零 API 成本、亚秒延迟；缺 base_url/model
+    # 自动跳过。仅覆盖 Hunyuan-MT 模型卡内语种，集外目标语自动让位下一引擎。
+    ollama_mt:
+      base_url: ""                   # 如 http://192.168.0.176:11434（自动补 /v1）
+      # base_urls:                   # 多端点双活（优先于 base_url）：按序尝试，
+      #   - http://192.168.0.176:11434   # 端点异常进 60s 冷却降权（不剔除），
+      #   - http://192.168.0.140:11434   # 两台 LAN GPU 各跑同名模型即可互备
+      model: ""                      # 如 hy-mt2-7b-official:latest
+      api_key: "ollama"
+      timeout_sec: 10                # 覆盖全局 engines.timeout_sec（冷加载留裕量）
+      keep_alive: "30m"              # Ollama 侧模型常驻时长（防频繁冷启动）
+      max_tokens: 1024
+      # temperature: 0.7             # 缺省不传 → 沿用模型 Modelfile 官方推荐采样
+    # 按目标语引擎覆写（可选）：评测证实某引擎在特定语对显著弱时，把该语对重排到
+    # 强引擎优先；其余语种不受影响。只能重排 order 里已有的引擎（未知名忽略），
+    # 覆写之外的引擎按默认序附加兜底。例：7B 本地 MT 的 hi 明显弱于 LLM →
+    # per_lang_order:
+    #   hi: ["ai", "ollama_mt"]
+    per_lang_order: {}
+    # K：引擎置信度智能切换（默认关 → 行为同旧：order 首个非空即返回）。
+    # 开后：主引擎虽产出非空，但若译文置信度（空/未翻译/错语种/长度异常的确定性评分）
+    # 低于 min_confidence，则自动切换 order 里的下一引擎择优；都不达标返回最高分候选（不阻断）。
+    # 仅在多引擎（order≥2）时有意义；会在主引擎低置信时增加一次后备引擎调用。
+    confidence_switch:
+      enabled: false
+      min_confidence: 0.5            # [0,1]，越高越爱切换（更稳但更费后备引擎调用）
+      # S：低置信率/切换率「按日落库」→ ops 看板画近 N 天 sparkline（默认关；开后每次
+      # translate 旁路 upsert 一行到 config/xlate_trend.db，仅元数据计数不存译文）。
+      trend_log: false
+      trend_retention_days: 90
+      # 在线语义闸门（K 的可选进阶，默认关）：确定性信号只挡「空/未翻译/错语种/长度异常」，
+      # 抓不住「语言对但意思漂移」。开后对确定性达标的译文再比对 源文/译文 跨语言嵌入余弦
+      # （走 ai.embedding_base_url，bge-m3 单次 ~50ms），低于 min_similarity 也触发切换。
+      # 嵌入失败/返空一律放行（fail-open，绝不阻塞翻译）。
+      # 0.65 依 2026-07 宽语料实测校准：真实译文余弦 min=0.712/p5=0.775，
+      # 错配内容 max=0.741/p95=0.683 → 好译文零误伤、意思漂移大部分被抓。
+      semantic:
+        enabled: false
+        min_similarity: 0.65
 
 # ── P61 / C-2：媒体一键翻译（免上传）──────────────────────────────
 # base_dirs：解析平台落库 media_ref → 本进程可读本地文件的白名单根目录；

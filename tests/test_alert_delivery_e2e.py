@@ -151,6 +151,10 @@ _EMITTED_ALERTS = [
      {"light": "red", "problems": [{"name": "DB", "detail": "连接失败"}]}),
     ("reply_risk", "human_reply_risk",
      {"agent_id": "u1", "risk_level": "high", "risk_reasons": ["辱骂"], "text_preview": "..."}),
+    # P0-2：平台会话健康（unified_inbox_account_routes /session-status → 掉线/恢复）
+    ("platform_session", "platform_session_alert",
+     {"platform": "messenger", "account_id": "10008900", "login_id": "msg_x",
+      "status": "needs_login", "detail": "cookies expired", "recovered": False}),
 ]
 
 

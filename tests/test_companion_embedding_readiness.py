@@ -40,6 +40,18 @@ def test_empty_config_is_not_configured():
     assert embedding_source_configured({}) is False
 
 
+def test_configured_via_base_urls_list():
+    """双活列表写法（ai.embedding_base_urls）也应被认可为已配置。"""
+    cfg = {"ai": {"embedding_base_urls": ["http://a:11434", "http://b:11434"],
+                  "embedding_model": "bge-m3"}}
+    assert embedding_source_configured(cfg) is True
+    # 空列表 / 全空串 → 不算配置
+    assert embedding_source_configured(
+        {"ai": {"embedding_base_urls": [], "embedding_model": "bge-m3"}}) is False
+    assert embedding_source_configured(
+        {"ai": {"embedding_base_urls": ["", "  "], "embedding_model": "bge-m3"}}) is False
+
+
 # ── check_embedding_readiness：开关 × 源 的四象限 ────────────────────────────
 def test_enabled_but_unconfigured_is_error_footgun():
     cfg = {"memory": {"vector": {"enabled": True}}, "ai": {}}

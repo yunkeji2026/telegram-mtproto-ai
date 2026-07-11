@@ -12,11 +12,16 @@ from src.inbox import image_autosend as ia
 @pytest.fixture(autouse=True)
 def _reset_provider():
     from src.utils.selfie_cap import reset_selfie_cap_tracker
+    from src.companion.persona_media_store import (
+        configure_persona_media_store, reset_persona_media_store)
     cs.reset_selfie_provider()
     reset_selfie_cap_tracker()
+    reset_persona_media_store()
+    configure_persona_media_store(":memory:")  # 隔离：绝不写 config/persona_media.db
     yield
     cs.reset_selfie_provider()
     reset_selfie_cap_tracker()
+    reset_persona_media_store()
 
 
 def _cfg(**selfie):
@@ -168,6 +173,115 @@ async def test_stage_generate_fail_returns_none(tmp_path, monkeypatch):
     monkeypatch.setattr(prov, "generate", fake_gen)
     assert await ia.stage_image_file(
         cfg, "telegram", "acct1", "", {"kind": "selfie"}) is None
+
+
+# ── run_autosend_image：注册相册优先 + 生成回落编排 ──────────────────────────
+def _store():
+    from src.companion.persona_media_store import get_persona_media_store
+    return get_persona_media_store()
+
+
+def _recorder():
+    sent = []
+
+    async def send_fn(mp, mu, mt, cap, inbox):
+        sent.append({"path": mp, "url": mu, "type": mt, "cap": cap, "inbox": inbox})
+        return True
+    return sent, send_fn
+
+
+async def test_run_registry_keyword_hit_sends_and_records():
+    st = _store()
+    row = st.add("lin", "photo", "/disk/dance.jpg", "/static/dance.jpg",
+                 triggers=["跳舞"], caption="看我跳~")
+    sent, send_fn = _recorder()
+    ok = await ia.run_autosend_image(
+        _cfg(enabled=True), "telegram", "acct1", "chatA", "lin",
+        "给我跳舞看看", [], send_fn=send_fn, ai_text="好呀")
+    assert ok is True
+    assert sent[0]["path"] == "/disk/dance.jpg" and sent[0]["type"] == "photo"
+    assert sent[0]["cap"] == "看我跳~"  # 用条目 caption
+    assert st.get(row["id"])["hits"] == 1  # 命中计数 +1
+
+
+async def test_run_registry_video_hit_uses_video_type():
+    _store().add("lin", "video", "/disk/d.mp4", "/static/d.mp4", triggers=["跳舞"])
+    sent, send_fn = _recorder()
+    ok = await ia.run_autosend_image(
+        _cfg(enabled=True), "telegram", "acctVid", "c", "lin",
+        "来段跳舞视频", [], send_fn=send_fn, ai_text="好")
+    assert ok is True and sent[0]["type"] == "video"
+    assert sent[0]["inbox"].startswith("[视频]")
+
+
+async def test_run_registry_generic_pool_on_selfie_request():
+    _store().add("lin", "photo", "/disk/p.jpg", "/static/p.jpg")  # 无触发词=通用池
+    sent, send_fn = _recorder()
+    ok = await ia.run_autosend_image(
+        _cfg(enabled=True), "telegram", "acctGen", "c", "lin",
+        "發個照片給我看看嘛", [], send_fn=send_fn)
+    assert ok is True and sent[0]["url"] == "/static/p.jpg"
+
+
+async def test_run_generic_pool_not_used_for_nonrequest():
+    # 无触发词条目仅在「泛化要照片」时才作候选；普通闲聊不发
+    _store().add("lin", "photo", "/disk/p.jpg", "/static/p.jpg")
+    sent, send_fn = _recorder()
+    ok = await ia.run_autosend_image(
+        _cfg(enabled=True), "telegram", "acctChat", "c", "lin",
+        "今天心情不错", [], send_fn=send_fn)
+    assert ok is False and sent == []
+
+
+async def test_run_generation_fallback_when_no_registry(tmp_path, monkeypatch):
+    album = tmp_path / "album"
+    album.mkdir()
+    (album / "a.png").write_bytes(b"\x89PNGdummy")
+    monkeypatch.setattr(
+        "src.integrations.protocol_bridge.save_outbound_media",
+        lambda *a, **k: ("/tmp/out.png", "/static/out.png", "image"))
+    cfg = _cfg(enabled=True, provider={
+        "enabled": True, "backend": "album", "album_dir": str(album)})
+    sent, send_fn = _recorder()
+    ok = await ia.run_autosend_image(
+        cfg, "telegram", "acctGenr", "c", "lin",
+        "發個照片給我看看嘛", [], send_fn=send_fn, ai_text="来啦")
+    assert ok is True and sent[0]["type"] == "image"  # 走生成回落
+    assert sent[0]["url"] == "/static/out.png"
+
+
+async def test_run_disabled_returns_false():
+    _store().add("lin", "photo", "/d/p.jpg", "/static/p.jpg", triggers=["跳舞"])
+    _, send_fn = _recorder()
+    ok = await ia.run_autosend_image(
+        {"companion": {"selfie": {"enabled": False}}}, "telegram", "a", "c",
+        "lin", "给我跳舞", [], send_fn=send_fn)
+    assert ok is False
+
+
+async def test_run_rotation_avoids_repeat():
+    st = _store()
+    st.add("lin", "photo", "/d/1.jpg", "/static/1.jpg", triggers=["跳舞"])
+    st.add("lin", "photo", "/d/2.jpg", "/static/2.jpg", triggers=["跳舞"])
+    sent, send_fn = _recorder()
+    for _ in range(2):
+        await ia.run_autosend_image(
+            _cfg(enabled=True), "telegram", "acctRot", "cRot", "lin",
+            "给我跳舞", [], send_fn=send_fn)
+    assert len(sent) == 2 and sent[0]["url"] != sent[1]["url"]  # 不连发同一张
+
+
+def test_pick_registered_media_gated_and_hits():
+    st = _store()
+    st.add("lin", "photo", "/d/1.jpg", "/static/1.jpg", triggers=["跳舞"])
+    # 关：返回 None
+    assert ia.pick_registered_media(
+        {"companion": {"selfie": {"enabled": False}}}, "lin", "跳舞") is None
+    # 开 + 命中关键词
+    row = ia.pick_registered_media(_cfg(enabled=True), "lin", "给我跳舞", avoid_id="")
+    assert row and row["url"] == "/static/1.jpg"
+    # 不命中 + 非要图请求 → None
+    assert ia.pick_registered_media(_cfg(enabled=True), "lin", "在吗") is None
 
 
 # ── metrics ────────────────────────────────────────────────────────────────

@@ -1,0 +1,58 @@
+# HY-MT（ollama_mt）宽语种回译评测集：覆盖 Hunyuan-MT 模型卡内本业务高频目标语。
+# 用法：python -m scripts.run_eval --translation --xlate-engine ollama_mt \
+#         --dataset config/eval/translation_samples_hymt.yaml
+# 口径：src→tgt→src 回译相似度（temp=0 可复现）。与默认 10 条集分离——
+# 默认集保持 DeepL/Google 可评的窄语对（门禁契约），本集专门给本地 MT 拿宽覆盖硬数字。
+
+# ── 东亚 / 东南亚（主力市场）──
+- {text: "你今天过得怎么样？我有点想你了", target_lang: en, note: 陪伴-想念}
+- {text: "请问我的订单什么时候发货？", target_lang: en, note: 电商-物流}
+- {text: "谢谢你一直陪着我，真的很开心", target_lang: ja, note: 陪伴-感谢}
+- {text: "支持哪些支付方式？可以货到付款吗？", target_lang: ja, note: 电商-支付}
+- {text: "最近天气转凉了，出门多穿点", target_lang: ko, note: 陪伴-叮嘱}
+- {text: "这个产品支持七天无理由退货吗？", target_lang: ko, note: 电商-售后}
+- {text: "别太累着自己，记得按时吃饭哦", target_lang: th, note: 陪伴-关怀}
+- {text: "你的包裹已经发出，预计三天内送达", target_lang: th, note: 电商-物流}
+- {text: "我们周末一起看场电影吧，你想看哪部？", target_lang: vi, note: 陪伴-邀约}
+- {text: "尺码偏大还是偏小？我该选哪个码？", target_lang: vi, note: 电商-尺码}
+- {text: "上次你说的那个面试，后来顺利吗？", target_lang: id, note: 回访-具体事}
+- {text: "付款成功后大约多久能收到确认邮件？", target_lang: id, note: 电商-支付}
+- {text: "今天工作辛苦了，早点休息哦", target_lang: ms, note: 陪伴-关怀}
+- {text: "如果商品有质量问题，我们可以免费换货", target_lang: tl, note: 电商-售后}
+
+# ── 欧洲 / 中东 / 南亚 ──
+- {text: "想到马上要见到你，我就特别开心", target_lang: es, note: 陪伴-期待}
+- {text: "这款有红色和蓝色两种颜色可以选", target_lang: es, note: 电商-商品}
+- {text: "别担心，一切都会好起来的", target_lang: pt, note: 陪伴-安慰}
+- {text: "运费需要多少？满多少可以包邮？", target_lang: pt, note: 电商-物流}
+- {text: "你最近睡得好吗？别熬夜太晚", target_lang: fr, note: 陪伴-关怀}
+- {text: "发票可以开公司抬头吗？", target_lang: fr, note: 电商-发票}
+- {text: "周末打算去哪里玩？带我一起呗", target_lang: de, note: 陪伴-邀约}
+- {text: "退款会在三到五个工作日内原路返回", target_lang: de, note: 电商-退款}
+- {text: "今天降温了，记得多穿一件外套", target_lang: ru, note: 陪伴-叮嘱}
+- {text: "库存不多了，喜欢的话要尽快下单哦", target_lang: ru, note: 电商-促单}
+- {text: "很高兴认识你，希望我们能常常聊天", target_lang: ar, note: 陪伴-破冰}
+- {text: "该商品全球包邮，支持多种货币结算", target_lang: ar, note: 电商-物流}
+- {text: "累了就休息一下，我一直都在", target_lang: tr, note: 陪伴-安慰}
+- {text: "下单后可以修改收货地址吗？", target_lang: tr, note: 电商-售后}
+- {text: "吃过晚饭了吗？今天想吃点什么？", target_lang: it, note: 陪伴-日常}
+
+# ── hi 语对定点加密（此前 n=1 得分垫底；扩到 3 样本确认差距非噪声）──
+- {text: "新用户首单可以使用九折优惠券", target_lang: hi, note: 电商-促销}
+- {text: "你今天心情看起来不错，发生什么好事了？", target_lang: hi, note: 陪伴-日常}
+- {text: "订单已确认，预计五个工作日内送达", target_lang: hi, note: 电商-物流}
+
+# ── 反向语料（xx→zh：客户消息进站翻译是真实主链路，评测须覆盖双向）──
+# source_lang 显式标注（短句语种探测不可靠，样本标注即 ground truth）。
+- {text: "Hey, are you free this weekend? I miss talking to you", target_lang: zh, source_lang: en, note: 进站-陪伴邀约}
+- {text: "My order still hasn't arrived, can you check the tracking?", target_lang: zh, source_lang: en, note: 进站-物流查询}
+- {text: "What payment methods do you accept? Can I pay on delivery?", target_lang: zh, source_lang: en, note: 进站-支付咨询}
+- {text: "昨日はありがとう、久しぶりに楽しかったよ", target_lang: zh, source_lang: ja, note: 进站-陪伴感谢}
+- {text: "商品のサイズが合わなかったので、返品したいです", target_lang: zh, source_lang: ja, note: 进站-退货请求}
+- {text: "오늘 너무 피곤해서 일찍 잘게요, 내일 얘기해요", target_lang: zh, source_lang: ko, note: 进站-陪伴日常}
+- {text: "배송지 주소를 변경하고 싶은데 가능한가요?", target_lang: zh, source_lang: ko, note: 进站-改地址}
+- {text: "ขอบคุณที่คุยกับฉันนะ วันนี้รู้สึกดีขึ้นเยอะเลย", target_lang: zh, source_lang: th, note: 进站-情感反馈}
+- {text: "Sản phẩm này còn hàng không? Tôi muốn đặt hai cái", target_lang: zh, source_lang: vi, note: 进站-库存下单}
+- {text: "Terima kasih sudah menemani aku ngobrol semalam", target_lang: zh, source_lang: id, note: 进站-陪伴感谢}
+- {text: "¿Cuánto tarda el envío a México? ¿Tiene costo extra?", target_lang: zh, source_lang: es, note: 进站-国际物流}
+- {text: "Ты сегодня какой-то грустный, что-то случилось?", target_lang: zh, source_lang: ru, note: 进站-情绪关心}

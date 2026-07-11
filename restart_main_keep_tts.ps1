@@ -27,7 +27,7 @@ Start-Process -FilePath "python" `
     -WorkingDirectory $PSScriptRoot `
     -RedirectStandardOutput $out `
     -RedirectStandardError  $err `
-    -NoNewWindow
+    -WindowStyle Hidden
 
 Start-Sleep 6
 $now = Get-CimInstance Win32_Process -Filter "name='python.exe'" |

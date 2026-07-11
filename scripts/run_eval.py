@@ -26,8 +26,8 @@ from src.eval.faq_eval import (
     build_kb_resolver, evaluate_faq, format_faq_report,
 )
 from src.eval.translation_eval import (
-    build_deterministic_evaluator, evaluate_translation_quality,
-    format_translation_report,
+    build_ai_evaluator, build_deterministic_evaluator, build_local_mt_evaluator,
+    evaluate_translation_quality, format_translation_report,
 )
 from src.eval.memory_eval import (
     build_real_embed_fn, compare_recall, evaluate_semantic_dedup,
@@ -139,11 +139,25 @@ def main(argv=None) -> int:
     ap.add_argument("--score-threshold", type=float, default=1.0,
                     help="KB 命中分数阈值(--faq 判定解决)")
     ap.add_argument("--translation", action="store_true",
-                    help="翻译回译质量评测（需配 DeepL/Google 确定性引擎）")
+                    help="翻译回译质量评测（确定性引擎 DeepL/Google 或本地 ollama_mt）")
+    ap.add_argument("--xlate-engine", default="auto",
+                    choices=["auto", "deterministic", "ollama_mt", "ai"],
+                    help="回译评测引擎：auto=DeepL/Google→ollama_mt 顺位；"
+                         "ollama_mt=本地 MT(temp=0 可复现)；ai=主 LLM(非确定+API 成本，仅横比)")
+    ap.add_argument("--xlate-back-engine", default="same",
+                    choices=["same", "deterministic", "ollama_mt", "ai"],
+                    help="回译（tgt→src）引擎：same=与正向同引擎（旧行为）；"
+                         "指定他引擎=交叉回译，消同引擎自洽虚高（横比更公平）")
+    ap.add_argument("--xlate-semantic", default="auto", choices=["auto", "off"],
+                    help="语义轨：auto=有嵌入 provider 就启用（余弦补评+意译获救）；off=纯字符轨")
+    ap.add_argument("--xlate-sem-threshold", type=float, default=0.8,
+                    help="语义获救阈（bge-m3 校准：意译 0.84+/错义 <0.75）")
     ap.add_argument("--xlate-sample-threshold", type=float, default=0.5,
                     help="单样本合格相似度阈(--translation)")
     ap.add_argument("--xlate-pass", type=float, default=0.6,
                     help="回译合格率 PASS 阈值(--translation)")
+    ap.add_argument("--out-jsonl", default="",
+                    help="追加一行评测摘要到 JSONL（定时跑批攒趋势用，--translation）")
     ap.add_argument("--memory", action="store_true",
                     help="记忆召回对比评测（关键词 vs 向量，需 ai_client embed）")
     ap.add_argument("--mem-topk", type=int, default=3,
@@ -336,19 +350,77 @@ def main(argv=None) -> int:
 
     if args.translation:
         import asyncio
-        ev = build_deterministic_evaluator()
-        if ev is None:
-            print("[note] 翻译评测需确定性引擎：在 config.yaml 的 translation.engines.order "
-                  "里加 deepl/google 并配 api_key。当前无可用确定性引擎，跳过。")
+
+        def _build_by_choice(choice: str):
+            """按引擎名装配 (translate_fn, detect_fn, label)；不可用返回 (None,None,'')。"""
+            if choice in ("auto", "deterministic"):
+                ev = build_deterministic_evaluator()
+                if ev is not None:
+                    return ev[0], ev[1], "deepl/google"
+            if choice in ("auto", "ollama_mt"):
+                ev = build_local_mt_evaluator()
+                if ev is not None:
+                    return ev[0], ev[1], "ollama_mt(temp=0)"
+            if choice == "ai":
+                ev = build_ai_evaluator()
+                if ev is not None:
+                    return ev[0], ev[1], "ai(LLM)"
+            return None, None, ""
+
+        translate_fn, detect_fn, engine_label = _build_by_choice(args.xlate_engine)
+        if translate_fn is None:
+            print("[note] 翻译评测无可用引擎（--xlate-engine=%s）：deterministic 需配 "
+                  "DeepL/Google key；ollama_mt 需 translation.engines.ollama_mt 的 "
+                  "base_url/model 且端点可达；ai 需 ai.api_key。跳过。" % args.xlate_engine)
             return 0
-        translate_fn, detect_fn = ev
+        back_fn = None
+        back_label = "same"
+        if args.xlate_back_engine != "same":
+            back_fn, _bd, back_label = _build_by_choice(args.xlate_back_engine)
+            if back_fn is None:
+                print("[note] 交叉回译引擎不可用（--xlate-back-engine=%s），跳过。"
+                      % args.xlate_back_engine)
+                return 0
+        embed_fn = None
+        if args.xlate_semantic == "auto":
+            try:
+                from src.eval.embedding_providers import build_embed_fn
+                from src.eval.translation_eval import _load_config
+                embed_fn = build_embed_fn(_load_config(None))
+            except Exception:
+                embed_fn = None
         samples = load_translation_samples(args.dataset or "config/eval/translation_samples.yaml")
         report = asyncio.run(evaluate_translation_quality(
             translate_fn, samples, detect_fn=detect_fn,
-            per_sample_threshold=args.xlate_sample_threshold, pass_target=args.xlate_pass))
+            per_sample_threshold=args.xlate_sample_threshold, pass_target=args.xlate_pass,
+            back_translate_fn=back_fn, embed_fn=embed_fn,
+            semantic_threshold=args.xlate_sem_threshold))
+        report["engine"] = engine_label
+        report["back_engine"] = back_label
+        report["semantic"] = "on" if embed_fn is not None else "off"
+        if args.out_jsonl:
+            try:
+                import datetime as _dt
+                import os as _os
+                line = {
+                    "ts": _dt.datetime.now().isoformat(timespec="seconds"),
+                    "engine": engine_label, "back_engine": back_label,
+                    "dataset": args.dataset or "config/eval/translation_samples.yaml",
+                    "semantic": report["semantic"],
+                    **report["summary"],
+                    "passed": report["passed"],
+                }
+                _os.makedirs(_os.path.dirname(args.out_jsonl) or ".", exist_ok=True)
+                with open(args.out_jsonl, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(line, ensure_ascii=False) + "\n")
+                print(f"[trend] 已追加 → {args.out_jsonl}")
+            except Exception as ex:  # noqa: BLE001 - 趋势落盘失败不影响评测退出码
+                print(f"[warn] 趋势 JSONL 写入失败: {ex}")
         if args.json:
             print(json.dumps(report, ensure_ascii=False, indent=2))
         else:
+            print(f"[engine] {engine_label}  回译: {back_label}  语义轨: {report['semantic']}  "
+                  f"样本集: {args.dataset or 'config/eval/translation_samples.yaml'}")
             print(format_translation_report(report))
         return 0 if report["passed"] else 1
 

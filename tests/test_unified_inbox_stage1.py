@@ -61,8 +61,9 @@ class MessengerSvc:
             "ts": 120,
         }]
 
-    async def send_to_chat_name(self, chat_name, text):
-        return {"chat_name": chat_name, "text": text}
+    async def send_to_chat_name_for_account(self, account_id, *, chat_name, reply_text):
+        return {"ok": True, "account_id": account_id,
+                "chat_name": chat_name, "reply_text": reply_text}
 
 
 class TelegramClient:

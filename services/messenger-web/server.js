@@ -63,6 +63,28 @@ const MSG_MAX_OPENS = Number(process.env.MSG_MAX_OPENS || 5);
 // 不会接受/移出请求箱；读到全文 → 人设化首复更准；读不到（E2EE 不可读）→ 回落列表预览逻辑
 // （占位=加密横幅非真消息，仍按旧行为跳过，不入库脏数据）。
 const MSG_READ_REQUESTS = String(process.env.MSG_READ_REQUESTS ?? "1") !== "0";
+// 「消息请求」文件夹降载 + 风控退避 -------------------------------------------------
+// 每 N 个基础 tick 才拉一次请求文件夹（此前硬编码 5≈20s；默认调大到 15≈60s，降低对 /requests/
+// 的访问频率——FB 会把高频访问该功能判为「过度使用此功能」并临时封禁）。
+const MSG_REQ_EVERY = Math.max(1, Number(process.env.MSG_REQ_EVERY || 15));
+// 每轮最多进线程读取的「请求」会话数（独立于主收件箱 MSG_MAX_OPENS，默认更低——请求区更敏感）。
+// 置 0 → 不进请求线程读全文，仅用列表预览（不等于关闭请求同步，仍会入库预览）。
+const MSG_MAX_REQ_OPENS = Math.max(0, Number(process.env.MSG_MAX_REQ_OPENS || 2));
+// 检测到 /requests/ 被临时封禁（「你暂时被禁止使用此功能」/ "temporarily blocked"）时的退避冷却：
+// 基础时长（默认 30min），连续命中每次翻倍直到上限（默认 6h）；冷却窗口内完全不导航 /requests/，
+// 冷却结束自动恢复。
+const MSG_REQ_BLOCK_COOLDOWN_MS = Math.max(0, Number(process.env.MSG_REQ_BLOCK_COOLDOWN_MS || 30 * 60 * 1000));
+const MSG_REQ_BLOCK_MAX_MS = Math.max(
+  MSG_REQ_BLOCK_COOLDOWN_MS,
+  Number(process.env.MSG_REQ_BLOCK_MAX_MS || 6 * 60 * 60 * 1000)
+);
+// 入站媒体落地目录（对齐 whatsapp-baileys 的 WA_MEDIA_DIR 模式）：进线程读到媒体气泡时，
+// 用浏览器会话下载并写入 Python 静态目录（同机共享），前端按 /static URL 加载。未配置则不下载
+// 媒体（回落占位文本 [图片]/[视频]…，行为退回纯文本）。默认指向 messenger 静态子目录。
+const MSG_MEDIA_DIR = process.env.MSG_MEDIA_DIR || "";
+const MSG_MEDIA_URL_BASE = (
+  process.env.MSG_MEDIA_URL_BASE || "/static/protocol_media/messenger"
+).replace(/\/+$/, "");
 
 fs.mkdirSync(SESSIONS_DIR, { recursive: true });
 
@@ -103,6 +125,29 @@ function recordInbound(payload) {
 async function postIngest(payload) {
   recordInbound(payload);
   await postJson(PY_INGEST_URL, payload);
+}
+
+// 会话健康事件上报（P0-2 闭环）：登录/掉线/放弃自愈等关键转移主动 push 给 Python，
+// 不再只靠 Python 侧轮询 /accounts 才后知后觉。URL 默认由 PY_INGEST_URL 推导
+// （…/ingest → …/session-status），也可用 PY_STATUS_URL 显式覆盖。best-effort 不抛。
+const PY_STATUS_URL = process.env.PY_STATUS_URL
+  || (PY_INGEST_URL ? PY_INGEST_URL.replace(/\/ingest\s*$/, "/session-status") : "");
+async function postStatus(loginId, entry, status, detail) {
+  if (!PY_STATUS_URL) return;
+  // 掉线/待重登时 entry.accountId 常为空（尚未晋级）→ 尽力从 c_user cookie 补
+  // （登出后 c_user 通常残留），让 Python 侧不健康登记与后续恢复对得上同一账号。
+  let acct = String((entry && entry.accountId) || "");
+  if (!acct && entry && entry.context) {
+    try { acct = await readAccountId(entry.context); } catch (_) { acct = ""; }
+  }
+  await postJson(PY_STATUS_URL, {
+    platform: "messenger",
+    account_id: acct,
+    login_id: String(loginId || ""),
+    status: String(status || ""),
+    detail: String(detail || ""),
+    ts: Math.floor(Date.now() / 1000),
+  });
 }
 
 // ── DOM 选择器集中区（messenger.com 改版时改这里；已按真号联调校准）─────────────
@@ -176,7 +221,9 @@ function parseMsgAria(aria) {
   const s = String(aria).replace(/^\s*Enter\s*[，,]\s*/i, "").trim();
   // 中文：消息由<sender>发送于<time>[：<text>]。注意时间内部用半角冒号(14:44)，正文分隔用
   // **全角冒号「：」** → 用第一个全角冒号切分 时间/正文（不能用半角冒号，否则会切碎 14:44）。
-  let m = s.match(/^消息由(.+?)发送于([\s\S]+)$/);
+  // sender 用 (.*?) 允许**为空**：E2EE 私聊里对端消息常渲染成「消息由发送于<time>：<text>」
+  // （发送者名缺失）——旧的 (.+?) 会整条匹配失败 → 静默丢弃所有对端消息！空发送者视为对端(in)。
+  let m = s.match(/^消息由(.*?)发送于([\s\S]+)$/);
   if (m) {
     const sender = m[1].trim();
     const rest = m[2];
@@ -185,15 +232,14 @@ function parseMsgAria(aria) {
     const text = (idx >= 0 ? rest.slice(idx + 1) : "").trim();
     return { sender, direction: sender === "你" ? "out" : "in", ts, text };
   }
-  // 英文尽力兼容：Message sent by <sender> at <time>[: <text>]（时间内部冒号无空格，
-  // 正文分隔为「: 」冒号+空格 → 用首个「: 」切分）。
-  m = s.match(/^Message sent by (.+?) at (.+?):\s([\s\S]*)$/i);
+  // 英文尽力兼容：Message sent by <sender> at <time>[: <text>]（sender 同样允许空）。
+  m = s.match(/^Message sent by (.*?) at (.+?):\s([\s\S]*)$/i);
   if (m) {
     const sender = m[1].trim();
     return { sender, direction: /^you$/i.test(sender) ? "out" : "in",
       ts: (m[2] || "").trim(), text: (m[3] || "").trim() };
   }
-  m = s.match(/^Message sent by (.+?) at (.+)$/i); // 无正文（媒体）
+  m = s.match(/^Message sent by (.*?) at (.+)$/i); // 无正文（媒体）
   if (m) {
     const sender = m[1].trim();
     return { sender, direction: /^you$/i.test(sender) ? "out" : "in",
@@ -202,8 +248,78 @@ function parseMsgAria(aria) {
   return null;
 }
 
+// 用浏览器会话下载线程里的媒体元素到 MSG_MEDIA_DIR，返回 {media_type, media_ref} 或 {}。
+// scontent CDN 直链用 page.request（带会话 cookie）；blob: 用页内 fetch→base64 回传。
+// 失败/未配置 MSG_MEDIA_DIR → {}（上层回落占位文本，绝不阻断入站）。
+async function downloadThreadMedia(page, media) {
+  if (!media || !media.src || !MSG_MEDIA_DIR) return {};
+  try {
+    let buf = null;
+    if (media.src.startsWith("data:")) {
+      // E2EE 解密后内联的真图：data:[mime][;base64],<payload> → 直接解码，无需网络。
+      const comma = media.src.indexOf(",");
+      if (comma > 0) {
+        const meta = media.src.slice(0, comma);
+        const payload = media.src.slice(comma + 1);
+        buf = /;base64/i.test(meta)
+          ? Buffer.from(payload, "base64")
+          : Buffer.from(decodeURIComponent(payload));
+      }
+    } else if (media.src.startsWith("blob:")) {
+      const b64 = await page.evaluate(async (u) => {
+        try {
+          const r = await fetch(u);
+          const ab = await r.arrayBuffer();
+          let s = ""; const bytes = new Uint8Array(ab);
+          for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+          return btoa(s);
+        } catch (_) { return ""; }
+      }, media.src);
+      if (b64) buf = Buffer.from(b64, "base64");
+    } else {
+      const resp = await page.request.get(media.src, { timeout: 15000 }).catch(() => null);
+      if (resp && resp.ok()) buf = Buffer.from(await resp.body());
+    }
+    if (!buf || !buf.length) return {};
+    // 优先按 data: 的 MIME 定扩展名（图片可能是 png/webp/gif），否则按媒体类型缺省。
+    let ext = media.kind === "image" ? ".jpg"
+      : media.kind === "video" ? ".mp4"
+      : media.kind === "voice" ? ".mp4" : ".bin";
+    if (media.src.startsWith("data:")) {
+      const mm = media.src.slice(0, 40).match(/^data:image\/(png|webp|gif|jpeg|jpg)/i);
+      if (mm) ext = "." + mm[1].toLowerCase().replace("jpeg", "jpg");
+    }
+    const fname = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
+    fs.mkdirSync(MSG_MEDIA_DIR, { recursive: true });
+    fs.writeFileSync(path.join(MSG_MEDIA_DIR, fname), buf);
+    return { media_type: media.kind, media_ref: `${MSG_MEDIA_URL_BASE}/${fname}` };
+  } catch (e) {
+    logger.debug({ e }, "downloadThreadMedia failed");
+    return {};
+  }
+}
+
+// 媒体占位文本（下载失败/未配置目录时回落，至少让 AI/坐席知道「客户发了媒体」，对齐 Telegram）。
+const MEDIA_PLACEHOLDER = { image: "[图片]", video: "[视频]", voice: "[语音]", file: "[文件]" };
+
+// 等线程出现「真实消息」（非加密横幅）再读，防 fresh 导航只抓到「…受端到端加密保护…」占位。
+// 命中一条非横幅的 MSG_ARIA 即返回 true；超时 false（上层可换 /e2ee/t 路径重试或按现状返回）。
+async function waitThreadContent(page, timeoutMs = 3000) {
+  try {
+    await page.waitForFunction(() => {
+      const region = document.querySelector('[role="log"]') || document.body;
+      return Array.from(region.querySelectorAll("[aria-label]"))
+        .map((e) => e.getAttribute("aria-label") || "")
+        .filter((a) => /(消息由.*发送于|Message sent by)/i.test(a))
+        .some((a) => !/端到端加密|end-to-end encrypt|无法显示|can't display/i.test(a));
+    }, { timeout: timeoutMs });
+    return true;
+  } catch (_) { return false; }
+}
+
 // 打开线程读末尾若干条消息（权威）。用专用 readPage（与发送用的 entry.page 隔离，避免互相打断）。
-// 返回按 DOM 顺序的 [{sender,direction,ts,text}]（已过滤无正文的媒体/系统项）。
+// 返回按 DOM 顺序的 [{sender,direction,ts,text,media_type,media_ref}]（含媒体气泡：下载成功带
+// media_ref，失败回落占位文本；纯系统项仍过滤）。
 async function readThreadTail(entry, key) {
   if (!entry || !entry.context) return [];
   try {
@@ -216,23 +332,111 @@ async function readThreadTail(entry, key) {
     const logReady = await page.waitForSelector('[role="log"]', { timeout: 4500 })
       .then(() => true).catch(() => false);
     if (!logReady) return null;
-    await page.waitForTimeout(1000);
-    const labels = await page.evaluate(() => {
+    // 等真实消息渲染（非加密横幅）。E2EE 线程走 /t/ 有时只渲染横幅 → 换 /e2ee/t/ 再试一次。
+    let hasContent = await waitThreadContent(page, 3000);
+    if (!hasContent) {
+      await page.goto(`${MESSENGER_URL}e2ee/t/${key}`, { waitUntil: "domcontentloaded", timeout: 20000 })
+        .catch(() => {});
+      await page.waitForSelector('[role="log"]', { timeout: 4500 }).catch(() => {});
+      hasContent = await waitThreadContent(page, 3000);
+    }
+    await page.waitForTimeout(hasContent ? 400 : 800);
+    // 滚到底 + 等图片解码：E2EE 图片经客户端解密后才以 blob: 挂载，初始是 data: 模糊占位；不等则
+    // 只看到 data: 占位（被跳过）→ 整条媒体消息漏读。滚到底触发懒加载/解密，再等"渲染够大且非
+    // data:"的图片出现（无大图=纯文本线程，立即通过不空等）。
+    try {
+      await page.evaluate(() => {
+        const r = document.querySelector('[role="log"]') || document.scrollingElement || document.body;
+        if (r) r.scrollTop = r.scrollHeight;
+      });
+    } catch (_) {}
+    await page.waitForFunction(() => {
+      const region = document.querySelector('[role="log"]') || document.body;
+      const big = Array.from(region.querySelectorAll("img")).filter((im) => {
+        const rc = im.getBoundingClientRect();
+        return rc.width >= 128 && rc.height >= 128;
+      });
+      if (!big.length) return true; // 无大图 → 纯文本线程，不空等
+      // 大图已解码(自然尺寸就绪)即可读；E2EE 图解密后自然尺寸变大(无论 data:/blob:/scontent)。
+      return big.some((im) => (im.naturalWidth || 0) >= 128);
+    }, { timeout: 3500 }).catch(() => {});
+    // 每条消息取 aria-label + 其气泡容器内的媒体源（图片/视频/音频）。保守取媒体：仅当元素够大
+    // （避免头像/emoji/链接预览缩略图误判为客户媒体）；有文本的气泡不强行贴图（防误贴头像）。
+    const items = await page.evaluate(() => {
       const region = document.querySelector('[role="log"]')
         || document.querySelector('[aria-label*="消息"],[aria-label*="Messages"],[aria-label*="对话"]')
         || document.querySelector('[role="main"]') || document.body;
       const MSG_ARIA = /(消息由.*发送于|Message sent by)/i;
-      return Array.from(region.querySelectorAll('[aria-label]'))
-        .map((e) => e.getAttribute("aria-label") || "")
-        .filter((a) => MSG_ARIA.test(a))
+      const nodes = Array.from(region.querySelectorAll('[aria-label]'))
+        .filter((e) => MSG_ARIA.test(e.getAttribute("aria-label") || ""))
         .slice(-15);
+      return nodes.map((e) => {
+        const aria = e.getAttribute("aria-label") || "";
+        // 上溯到消息行容器（role=row 或最多 4 层父级）再找媒体
+        let box = e;
+        for (let i = 0; i < 4 && box.parentElement; i++) {
+          if (box.getAttribute && box.getAttribute("role") === "row") break;
+          box = box.parentElement;
+        }
+        let media = null;
+        const vid = box.querySelector("video");
+        const aud = box.querySelector("audio");
+        const vSrc = vid && (vid.currentSrc || vid.src
+          || (vid.querySelector("source") && vid.querySelector("source").src));
+        if (vSrc) {
+          media = { kind: "video", src: vSrc };
+        } else if (aud && (aud.currentSrc || aud.src)) {
+          media = { kind: "voice", src: aud.currentSrc || aud.src };
+        } else {
+          // 图片：容器内"渲染够大"的一张（rect 尺寸为主，兼容自然尺寸尚未 load 完）；跳过 data:
+          // 占位与头像/emoji/小图标。E2EE 图解密后为 blob:/scontent，非 data: 才算真图。
+          let best = null, bestArea = 0;
+          for (const img of box.querySelectorAll("img")) {
+            const src = img.currentSrc || img.src || "";
+            if (!src) continue;
+            const natW = img.naturalWidth || 0, natH = img.naturalHeight || 0;
+            // data: 既可能是模糊占位(自然尺寸很小)，也可能是 E2EE 客户端解密后内联的真图(自然尺寸大，
+            // 实测 natW=1080)。仅按"自然尺寸<128"滤掉占位；真图保留。非 data: 一律进尺寸门。
+            if (src.startsWith("data:") && natW < 128) continue;
+            const rc = img.getBoundingClientRect();
+            const w = Math.max(rc.width, natW, img.width || 0);
+            const h = Math.max(rc.height, natH, img.height || 0);
+            const area = w * h;
+            if (w >= 128 && h >= 128 && area > bestArea) { best = src; bestArea = area; }
+          }
+          // 背景图瓦片兜底（部分图片用 div background-image 渲染，非 <img>）
+          if (!best) {
+            for (const el of box.querySelectorAll("div,span,a")) {
+              const rc = el.getBoundingClientRect();
+              if (rc.width < 128 || rc.height < 128) continue;
+              const bg = getComputedStyle(el).backgroundImage || "";
+              const mm = bg.match(/url\(["']?((?:https?:|blob:)[^"')]+)["']?\)/);
+              if (mm) { best = mm[1]; break; }
+            }
+          }
+          if (best) media = { kind: "image", src: best };
+        }
+        return { aria, media };
+      });
     });
     const msgs = [];
-    for (const a of labels) {
-      const p = parseMsgAria(a);
-      if (p && p.text) msgs.push(p); // 只留有正文的消息（媒体/系统项无正文→跳过）
+    for (const it of items) {
+      const p = parseMsgAria(it.aria);
+      if (!p) continue;
+      p.media_type = ""; p.media_ref = "";
+      // 有媒体：文本气泡只在「无正文」时贴媒体（防把带头像的文本消息误标成图片）
+      if (it.media && (!p.text || it.media.kind !== "image")) {
+        const dl = await downloadThreadMedia(page, it.media);
+        if (dl.media_ref) {
+          p.media_type = dl.media_type; p.media_ref = dl.media_ref;
+          if (!p.text) p.text = ""; // 媒体可无正文
+        } else if (!p.text) {
+          p.text = MEDIA_PLACEHOLDER[it.media.kind] || "[媒体]"; // 下载失败→占位
+        }
+      }
+      if (p.text || p.media_ref) msgs.push(p); // 有正文或媒体才留（纯系统项跳过）
     }
-    return msgs; // 数组（可能为空=已读到但无文本消息）
+    return msgs; // 数组（可能为空=已读到但无文本/媒体消息）
   } catch (e) {
     logger.debug({ e, key }, "readThreadTail failed");
     return null; // 硬失败 → 上层不推进 seen，下轮重试
@@ -468,6 +672,9 @@ const REQUESTS_URL = MESSENGER_URL.replace(/\/$/, "") + "/requests/";
 const PREVIEW_PREFIX_RE = /^(未读消息[:：]\s*|Unread message[:：]?\s*)/;
 // 是否抓「垃圾信息」子 tab（FB 判为垃圾的陌生请求）。默认开；置 0 只抓「可能认识」。
 const MSG_SPAM_REQUESTS = String(process.env.MSG_SPAM_REQUESTS ?? "1") !== "0";
+// 每 N 次「请求文件夹轮询」才顺带扫一次「垃圾信息」子 tab（此前每轮都切 tab 往返；切 tab 也是一次
+// 操作，拉稀到每 N 次即可进一步降载）。默认 4；置 0 或关闭 MSG_SPAM_REQUESTS 则不扫 spam。
+const MSG_SPAM_EVERY = Math.max(0, Number(process.env.MSG_SPAM_EVERY ?? 4));
 
 /** 抓当前「消息请求」视图（左栏列表）里的请求行。纯 DOM 提取，绝不抛。
  *  返回 [{key, name, preview, avatar}]。 */
@@ -524,23 +731,52 @@ async function clickRequestTab(page, names) {
   return false;
 }
 
+/** 探测 /requests/ 是否被 FB 临时风控封禁（扳手错误页：「你暂时被禁止使用此功能 / 似乎你过度
+ *  使用了此功能」/ English "You're temporarily blocked … misusing this feature by going too fast"）。
+ *  命中 → 调用方进入退避冷却，停止再导航/切 tab/点开，避免续命甚至加重封禁。绝不抛。
+ *  为降误报：仅当命中文案「且」页面无任何真实请求线程链接时才判封禁（预览恰好含关键词不误伤）。 */
+const REQUESTS_BLOCK_RE = /暂时被禁止使用此功能|过度使用了此功能|暂时被阻止|temporarily blocked|misusing this feature|going too fast/i;
+async function isRequestsBlocked(page) {
+  try {
+    return await page.evaluate((reSrc) => {
+      const re = new RegExp(reSrc, "i");
+      const txt = (document.body && document.body.innerText) || "";
+      if (!re.test(txt)) return false;
+      const hasRows = document.querySelector(
+        'a[href*="/requests/t/"], a[href*="/e2ee/requests/t/"]');
+      return !hasRows;
+    }, REQUESTS_BLOCK_RE.source);
+  } catch (_) {
+    return false;
+  }
+}
+
 /** 读「消息请求」文件夹（陌生人首次来讯），抓两个子 tab：
  *   ①「可能认识」(FB 已滤掉明显垃圾) → category=general（允许人设自动回）；
  *   ②「垃圾信息」                    → category=spam   （只进收件箱、不自动回）。
  *  用专用页签常驻，不打扰主收件箱页。best-effort、绝不抛。 */
-async function readRequests(reqPage) {
+async function readRequests(reqPage, entry = null) {
   try {
     // 每轮都重新 goto（比 SPA reload 更可靠地拉到最新未读）；等请求链接出现或超时兜底。
     await reqPage.goto(REQUESTS_URL, { waitUntil: "domcontentloaded", timeout: 15000 });
     await reqPage.waitForSelector(
       'a[href*="/requests/t/"], a[href*="/e2ee/requests/t/"]',
       { timeout: 4000 }).catch(() => {});
+    // 风控封禁探测（放在等待之后，确保 SPA 已渲染错误页文案）：命中 → 立刻返回 blocked，
+    // 绝不再切 tab / 等待 / 点开，交由调用方进入退避冷却。
+    if (await isRequestsBlocked(reqPage)) {
+      return { blocked: true, rows: [] };
+    }
     await reqPage.waitForTimeout(1200);
     // ① 默认视图＝「可能认识」
     const mayKnow = await scrapeRequestRows(reqPage);
-    // ② 切「垃圾信息」子 tab 抓 spam（就地换列表）；抓完切回，避免详情态残留
+    // ② 切「垃圾信息」子 tab 抓 spam（就地换列表）；抓完切回，避免详情态残留。
+    //    降载：不再每轮都切 tab，改为首轮 + 每 MSG_SPAM_EVERY 次请求轮询才扫一次 spam。
     let spam = [];
-    if (MSG_SPAM_REQUESTS && (await clickRequestTab(reqPage, ["垃圾信息", "Spam"]))) {
+    const pollCount = entry ? (entry._reqPollCount = (entry._reqPollCount || 0) + 1) : 1;
+    const doSpam = MSG_SPAM_REQUESTS && MSG_SPAM_EVERY > 0 &&
+      (pollCount === 1 || pollCount % MSG_SPAM_EVERY === 0);
+    if (doSpam && (await clickRequestTab(reqPage, ["垃圾信息", "Spam"]))) {
       await reqPage.waitForTimeout(1500);
       spam = await scrapeRequestRows(reqPage);
       await clickRequestTab(reqPage, ["可能认识", "You may know"]);
@@ -556,10 +792,10 @@ async function readRequests(reqPage) {
     // spam key 优先归 spam（防同一线程在两 tab 都出现时误判为可自动回）
     for (const r of mayKnow) { if (!spamKeys.has(r.key)) out.push(norm(r, "general")); }
     for (const r of spam) out.push(norm(r, "spam"));
-    return out;
+    return { blocked: false, rows: out };
   } catch (e) {
     logger.debug({ e }, "readRequests failed");
-    return [];
+    return { blocked: false, rows: [] };
   }
 }
 
@@ -574,15 +810,41 @@ async function pollInbound(entry) {
     const firstPass = !entry._baselined;
     // 主收件箱列表（常规会话）
     const convs = await readConversations(entry.page);
-    // 消息请求（陌生人首次来讯，不在主列表）：专用页签常驻 /requests/，每 ~5 轮拉一次降载。
+    // 消息请求（陌生人首次来讯，不在主列表）：专用页签常驻 /requests/，每 MSG_REQ_EVERY 轮拉一次降载。
+    // 命中 FB 风控封禁 → 进入退避冷却（指数增长）；冷却窗口内完全不导航 /requests/，冷却结束自动恢复。
     let requests = [];
     entry._reqTick = (entry._reqTick || 0) + 1;
-    if (MSG_REQUESTS && (firstPass || entry._reqTick % 5 === 0)) {
+    const reqDue = MSG_REQUESTS && (firstPass || entry._reqTick % MSG_REQ_EVERY === 0);
+    const inCooldown = entry._reqBlockedUntil && Date.now() < entry._reqBlockedUntil;
+    if (reqDue && inCooldown) {
+      logger.debug(
+        { accountId: entry.accountId, until: entry._reqBlockedUntil },
+        "requests poll skipped (block cooldown)");
+    } else if (reqDue) {
       try {
         if (!entry.reqPage || entry.reqPage.isClosed()) {
           entry.reqPage = await entry.context.newPage();
         }
-        requests = await readRequests(entry.reqPage);
+        const res = await readRequests(entry.reqPage, entry);
+        if (res.blocked) {
+          entry._reqBlockStreak = (entry._reqBlockStreak || 0) + 1;
+          const cd = Math.min(
+            MSG_REQ_BLOCK_MAX_MS,
+            MSG_REQ_BLOCK_COOLDOWN_MS * Math.pow(2, entry._reqBlockStreak - 1));
+          entry._reqBlockedUntil = Date.now() + cd;
+          logger.warn(
+            { accountId: entry.accountId, cooldownMs: cd, streak: entry._reqBlockStreak },
+            "messenger requests folder temporarily blocked by FB; backing off");
+        } else {
+          requests = res.rows;
+          if (entry._reqBlockStreak) {
+            logger.info(
+              { accountId: entry.accountId },
+              "messenger requests folder recovered; block cooldown cleared");
+          }
+          entry._reqBlockStreak = 0;
+          entry._reqBlockedUntil = 0;
+        }
       } catch (e) { logger.debug({ e }, "requests poll failed"); }
     }
     const all = convs.concat(requests);
@@ -629,8 +891,11 @@ async function pollInbound(entry) {
         // 只在**整段会话的最后一条**是对端消息时才回：若最后一条是本方发出（我们已回过），
         // 绝不回；这也确定性杜绝了「回自己」——本方出站永远不会成为待回的 last。
         const last = tail.length ? tail[tail.length - 1] : null;
-        if (!last || last.direction !== "in" || !last.text) continue;
-        const inSig = `${normPreview(last.text)}|${last.ts}`;
+        // 最后一条须是对端消息，且有正文**或媒体**（媒体气泡可无正文）。
+        if (!last || last.direction !== "in" || (!last.text && !last.media_ref)) continue;
+        // 加密横幅（"…受端到端加密保护…"）非真消息 → 不入库（无媒体时）。
+        if (last.text && !last.media_ref && E2EE_PLACEHOLDER_RE.test(last.text)) continue;
+        const inSig = `${normPreview(last.text)}|${last.media_ref || ""}|${last.ts}`;
         if (entry.lastInboundSig.get(c.key) === inSig) continue; // 该对端消息已上报过
         entry.lastInboundSig.set(c.key, inSig);
         await postIngest({
@@ -639,7 +904,9 @@ async function pollInbound(entry) {
           chat_key: c.key,
           name: last.sender || c.name || "", // 真实发送者（修复把 "在线" 当昵称）
           avatar_url: c.avatar || "",
-          text: last.text, // 未截断全文
+          text: last.text, // 未截断全文（媒体可为空）
+          media_type: last.media_type || "",
+          media_ref: last.media_ref || "",
           ts: Math.floor(Date.now() / 1000),
           msg_id: "",
           direction: "in",
@@ -680,21 +947,23 @@ async function pollInbound(entry) {
         continue;
       }
       const cat = c.category || "general"; // general 可自动回 / spam 仅入收件箱
-      let text = preview, name = c.name || "";
-      if (MSG_READ_THREAD && MSG_READ_REQUESTS) {
-        if (reqOpened >= MSG_MAX_OPENS) continue; // 超额：不推进 seen，下次请求扫描重试
+      let text = preview, name = c.name || "", mType = "", mRef = "";
+      if (MSG_READ_THREAD && MSG_READ_REQUESTS && MSG_MAX_REQ_OPENS > 0) {
+        if (reqOpened >= MSG_MAX_REQ_OPENS) continue; // 超额：不推进 seen，下次请求扫描重试
         reqOpened++;
         const tail = await readThreadTail(entry, c.key);
         if (tail === null) continue; // 读失败→不推进 seen，下轮重试
         const last = tail.length ? tail[tail.length - 1] : null;
-        if (last && last.direction === "in" && last.text) {
+        if (last && last.direction === "in" && (last.text || last.media_ref)) {
           text = last.text; name = last.sender || name; // 未截断全文 + 真实发送者
+          mType = last.media_type || ""; mRef = last.media_ref || ""; // 首讯即媒体
         }
         // 读到空（E2EE 不可读）→ text 保留 preview 回落，交由下方占位判定
       }
       entry.seen.set(c.key, sig);
-      if (!text || E2EE_PLACEHOLDER_RE.test(text)) continue; // 空/加密横幅非真消息 → 不入库
-      const inSig = normPreview(text);
+      // 无正文且无媒体，或仍是加密横幅 → 非真消息，不入库
+      if ((!text && !mRef) || (text && E2EE_PLACEHOLDER_RE.test(text))) continue;
+      const inSig = `${normPreview(text)}|${mRef}`;
       if (entry.lastInboundSig.get(c.key) === inSig) continue; // 该请求正文已上报过
       entry.lastInboundSig.set(c.key, inSig);
       await postIngest({
@@ -704,6 +973,8 @@ async function pollInbound(entry) {
         name, // 真实发送者（进线程读到时更准）
         avatar_url: c.avatar || "",
         text, // 读到→未截断全文；读不到→列表预览
+        media_type: mType,
+        media_ref: mRef,
         ts: Math.floor(Date.now() / 1000),
         msg_id: "",
         direction: "in",
@@ -712,12 +983,25 @@ async function pollInbound(entry) {
       });
     }
     if (firstPass) entry._baselined = true;
-    // 周期性刷新 cookie 快照（xs 会轮换；~每 15 轮≈60s 存一次，保持可 restore）。
+    // 高频刷新 cookie 快照（xs 会轮换）：每 2 轮≈8s 存一次。此前 60s 一次 → 崩溃/被强杀时快照
+    // 常滞后于已轮换的 xs，自愈 restore 灌回过期 xs 即登出。8s 窗口内 xs 几乎不会已失效。
     entry._pollCount = (entry._pollCount || 0) + 1;
-    if (entry._loginId && entry._pollCount % 15 === 0) {
+    if (entry._loginId && entry._pollCount % 2 === 0) {
       await saveCookies(entry._loginId, entry.context);
     }
+    // 轮询健康信号：登录态确认（cookie 未失效）+ 时间戳。用于 Python 侧 healthy() 判活，
+    // 修「cookie 失效但列表仍显示 authorized」的假健康（此前 /accounts 只看 status 字段）。
+    // 每 ~15 轮(≈60s)做一次 pageLoggedIn 复检，避免每轮都跑 DOM 查询。
+    try {
+      if ((entry._pollCount || 0) % 15 === 0) {
+        entry._loggedIn = await pageLoggedIn(entry.page);
+      }
+    } catch (_) { /* 复检失败不改判定，保守留旧值 */ }
+    entry._lastPollOkTs = Date.now();
+    entry._lastPollErr = "";
   } catch (e) {
+    entry._lastPollErr = String((e && e.message) || e || "poll failed");
+    entry._lastPollErrTs = Date.now();
     logger.debug({ e }, "pollInbound failed");
   } finally {
     entry._polling = false;
@@ -767,6 +1051,7 @@ async function promoteIfLoggedIn(loginId, entry) {
     if (!(await pageLoggedIn(entry.page))) return false;
     entry.accountId = await readAccountId(entry.context);
     entry.status = "authorized";
+    entry._loggedIn = true;
     try {
       const prof = await readSelfProfile(entry.page);
       entry.name = prof.name;
@@ -774,8 +1059,12 @@ async function promoteIfLoggedIn(loginId, entry) {
     } catch (_) {}
     logger.info({ loginId, accountId: entry.accountId }, "Messenger connected");
     entry._loginId = loginId;
+    _recoveryAttempts.delete(loginId); // 成功授权 → 清零自愈退避计数
+    const _srt = _slowRetryTimers.get(loginId); // 已恢复 → 撤掉排队中的慢重试
+    if (_srt) { clearTimeout(_srt); _slowRetryTimers.delete(loginId); }
     await saveCookies(loginId, entry.context); // 落盘会话级 cookie，扛住重启
     startPolling(entry);
+    postStatus(loginId, entry, "authorized", "connected").catch(() => {});
     return true;
   } catch (e) {
     logger.debug({ e, loginId }, "promoteIfLoggedIn failed");
@@ -790,34 +1079,77 @@ async function promoteIfLoggedIn(loginId, entry) {
 // 冻着。此处监听 context 'close' 事件：清理旧 entry/定时器 → 延时用 startLogin 重启（复用磁盘
 // profile + 回灌 cookie，通常免重扫）。用 _recovering 防并发重建；_shuttingDown 时不自愈（正常退出）。
 const _recovering = new Set();
+// 自愈退避 + 上限：连续崩溃时用指数退避（3s→6s→12s→24s→48s，封顶 60s），超过 5 次即放弃自愈、
+// 置 expired 并告警——防「崩溃循环无限 3s 重启」既堆 Chromium 又高频重连触发 FB 反自动化登出。
+// 距上次尝试 >5min 视为新事件，计数清零（promoteIfLoggedIn 成功授权后亦清零）。
+const _recoveryAttempts = new Map();
+const _RECOVERY_MAX = 5;
+// 放弃自愈后的慢速重试（P2）：快自愈（3s→60s 退避 ×5 次）放弃后不再是「死等人工」——
+// 每 MSG_RECOVERY_SLOW_RETRY_MS（默认 15min，0=关）安排一次全新自愈周期（计数清零）。
+// 频率足够低：不堆 Chromium、对 FB 只是一次导航（cookie 失效时停在登录页，无登录尝试），
+// 但能自动救回「系统资源暂时耗尽/网络中断恢复」这类过后即愈的场景。人工重登成功会清零一切。
+const MSG_RECOVERY_SLOW_RETRY_MS = Math.max(
+  0, Number(process.env.MSG_RECOVERY_SLOW_RETRY_MS ?? 15 * 60 * 1000));
+const _slowRetryTimers = new Map();
+function scheduleSlowRetry(loginId) {
+  if (!MSG_RECOVERY_SLOW_RETRY_MS || _shuttingDown) return;
+  if (_slowRetryTimers.has(loginId)) return; // 已排队
+  const t = setTimeout(() => {
+    _slowRetryTimers.delete(loginId);
+    if (_shuttingDown) return;
+    const cur = sessions.get(loginId);
+    if (cur && cur.status === "authorized") return; // 期间已恢复（人工登录/自行回来）
+    logger.info({ loginId }, "slow-retry: starting a fresh auto-recovery cycle");
+    _recoveryAttempts.delete(loginId); // 全新退避预算
+    scheduleRecovery(loginId);
+  }, MSG_RECOVERY_SLOW_RETRY_MS);
+  if (typeof t.unref === "function") t.unref();
+  _slowRetryTimers.set(loginId, t);
+}
 function scheduleRecovery(loginId) {
   if (_shuttingDown || _recovering.has(loginId)) return;
+  const now = Date.now();
+  const rec = _recoveryAttempts.get(loginId) || { count: 0, lastTs: 0 };
+  if (now - rec.lastTs > 5 * 60 * 1000) rec.count = 0;
+  rec.count += 1; rec.lastTs = now;
+  _recoveryAttempts.set(loginId, rec);
+  const old0 = sessions.get(loginId);
+  if (rec.count > _RECOVERY_MAX) {
+    logger.error({ loginId, attempts: rec.count },
+      "context crash-loop → GIVING UP auto-recovery (manual re-login needed). "
+      + "Not relaunching to avoid Chromium pile-up / anti-automation logout.");
+    if (old0) { stopPolling(old0); old0.status = "expired"; }
+    postStatus(loginId, old0, "expired",
+      `context crash-loop (${rec.count} attempts) → auto-recovery given up; manual re-login needed`)
+      .catch(() => {});
+    scheduleSlowRetry(loginId); // 不死等人工：低频再给自愈机会
+    return;
+  }
   _recovering.add(loginId);
-  const old = sessions.get(loginId);
-  if (old) { stopPolling(old); sessions.delete(loginId); }
-  logger.warn({ loginId }, "browser context closed unexpectedly → auto-recover in 3s");
+  if (old0) { stopPolling(old0); sessions.delete(loginId); }
+  const delay = Math.min(3000 * Math.pow(2, rec.count - 1), 60000);
+  logger.warn({ loginId, attempt: rec.count, delayMs: delay },
+    "browser context closed unexpectedly → auto-recover");
   setTimeout(async () => {
     try {
       if (_shuttingDown) return;
-      await startLogin(loginId);
+      await startLogin(loginId, "", true);
       logger.info({ loginId }, "context auto-recovered (relaunched from persisted profile)");
     } catch (e) {
       logger.error({ e, loginId }, "context auto-recovery failed");
     } finally {
       _recovering.delete(loginId);
     }
-  }, 3000);
+  }, delay);
 }
 
-async function startLogin(loginId, proxyUrl) {
+async function startLogin(loginId, proxyUrl, isRestore = false) {
   const userDataDir = path.join(SESSIONS_DIR, loginId);
   const context = await chromium.launchPersistentContext(
     userDataDir, launchOptions(proxyUrl));
   // 崩溃自愈：context 意外关闭 → 自动重启（正常退出由 _shuttingDown 拦掉）。
   context.on("close", () => scheduleRecovery(loginId));
   await applyStealth(context);
-  // restore：导航前把上次登录的会话级 cookie（xs/c_user）灌回去，免重扫。
-  await loadCookies(loginId, context);
   const page = context.pages()[0] || (await context.newPage());
 
   const entry = {
@@ -835,21 +1167,46 @@ async function startLogin(loginId, proxyUrl) {
   };
   sessions.set(loginId, entry);
 
+  // profile-first restore：先用持久化 profile 自身的 cookie 导航——它往往已含**最新** xs
+  // （持久化上下文会随浏览器写盘）。仅当 profile 自身未登录时，才回落注入快照 .cookies.json 并重载。
+  // 杜绝「用滞后的快照 xs 覆盖 profile 里更新的会话 → 反被打成过期登出」这条根因。
   try {
     await page.goto(MESSENGER_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
   } catch (e) {
     logger.debug({ e }, "initial goto failed");
   }
+  try {
+    if (!(await pageLoggedIn(page)) && (await loadCookies(loginId, context))) {
+      logger.info({ loginId }, "profile not logged in → injecting cookie snapshot fallback");
+      await page.goto(MESSENGER_URL, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+    }
+  } catch (e) {
+    logger.debug({ e }, "profile-first cookie fallback failed");
+  }
 
   // 后台盯登录状态：登录成功 → 记 accountId、采身份、开轮询。
-  // 窗口 30 分钟（交互登录含扫码/2FA/找窗口耗时，10 分钟偏短易误判 expired）；
-  // 即便超时置 expired，/status 轮询仍会 promoteIfLoggedIn 复检补救，不会「过期即死」。
+  // 交互登录窗口 30 分钟（含扫码/2FA/找窗口）；restore/自愈无人工介入 → 90s 判不出即置 expired
+  // 并**显式告警**（不再静默限 30 分钟；编排器/UI 能立刻看到「需重新登录」）。
+  // 即便超时置 expired，/status 轮询仍会 promoteIfLoggedIn 复检补救（用户手动登录后自动恢复）。
   (async () => {
-    const deadline = Date.now() + 1000 * 60 * 30; // 最多盯 30 分钟
+    // 交互登录 30min；restore/自愈给足人工重登时间 10min，但**一旦确认没自动授权即刻告警**
+    // （编排器/运营即时看到「需重登」），并继续盯到超时——期间人工登录成功即自动 promote。
+    const started = Date.now();
+    const deadline = started + (isRestore ? 1000 * 60 * 10 : 1000 * 60 * 30);
+    let warnedReLogin = false;
     while (sessions.has(loginId) && entry.status !== "authorized" && Date.now() < deadline) {
       try {
         if (await promoteIfLoggedIn(loginId, entry)) break;
         entry.qrImage = await snapshot(page);
+        // 正常自愈通常 2-4s 内就 re-auth；>10s 仍停在登录页 → 判定需人工重登，告警一次（不误报）。
+        if (isRestore && !warnedReLogin && Date.now() - started > 10000) {
+          warnedReLogin = true;
+          logger.warn({ loginId },
+            "restore: not auto-authorized after 10s (cookies expired/invalidated) → "
+            + "MANUAL RE-LOGIN likely required; watching 10min for manual login");
+          postStatus(loginId, entry, "needs_login",
+            "cookies expired/invalidated; manual re-login required").catch(() => {});
+        }
       } catch (e) {
         logger.debug({ e }, "login watch tick failed");
       }
@@ -857,6 +1214,11 @@ async function startLogin(loginId, proxyUrl) {
     }
     if (entry.status !== "authorized" && sessions.has(loginId)) {
       entry.status = "expired";
+      if (isRestore) {
+        logger.warn({ loginId }, "restore/recover watch window ended without auth → status=expired");
+        postStatus(loginId, entry, "expired",
+          "restore watch window ended without auth (manual re-login required)").catch(() => {});
+      }
     }
   })().catch((e) => logger.debug({ e }, "login watcher crashed"));
 
@@ -876,7 +1238,7 @@ async function restoreAll() {
   for (const loginId of dirs) {
     if (sessions.has(loginId)) continue;
     try {
-      await startLogin(loginId);
+      await startLogin(loginId, "", true);
       restored += 1;
     } catch (e) {
       logger.warn({ e, loginId }, "restore session failed");
@@ -920,6 +1282,125 @@ async function verifyComposerCleared(page) {
   }
 }
 
+// 消息行内/行侧的「发送失败」标记（Messenger 在失败气泡下方标注）。仅在**匹配到我们
+// 刚发的那条 out 气泡的行容器内**查找 → 客户消息正文里偶然含这些词不会误伤。
+const SEND_FAIL_MARKER_RE =
+  /(无法发送|未能发送|发送失败|couldn[’']t send|didn[’']t send|failed to send|message failed)/i;
+
+/** 送达二次确认（P1 升级）：composer 清空只是「大概率发出」，这里回读消息区最后几条
+ *  out 气泡，确认我们的文本已渲染为本方消息、且该气泡行内没有「无法发送」失败标记。
+ *  返回 {found, rowFail}：
+ *    found=true, rowFail=false → 确认送达；
+ *    found=true, rowFail=true  → 渲染了但被标失败（确定性失败）；
+ *    found=false               → 超时未见（**不定态**，调用方须按「已发出」处理避免重发刷屏）。 */
+async function readbackLastOutgoing(page, text, timeoutMs = 5000) {
+  const want = normPreview(text).slice(0, 48);
+  if (!want) return { found: false, rowFail: false };
+  const t0 = Date.now();
+  while (true) {
+    try {
+      const probe = await page.evaluate(() => {
+        const region = document.querySelector('[role="log"]') || document.body;
+        const MSG = /(消息由.*发送于|Message sent by)/i;
+        const nodes = Array.from(region.querySelectorAll("[aria-label]"))
+          .filter((e) => MSG.test(e.getAttribute("aria-label") || ""))
+          .slice(-6);
+        return nodes.map((e) => {
+          // 上溯到消息行容器（role=row 或最多 4 层父级），带出行文本供失败标记检测
+          let box = e;
+          for (let i = 0; i < 4 && box.parentElement; i++) {
+            if (box.getAttribute && box.getAttribute("role") === "row") break;
+            box = box.parentElement;
+          }
+          const sib = box.nextElementSibling;
+          return {
+            aria: e.getAttribute("aria-label") || "",
+            rowText: ((box.innerText || "") + " " + ((sib && sib.innerText) || "")).slice(0, 400),
+          };
+        });
+      });
+      for (const it of (probe || []).reverse()) {
+        const p = parseMsgAria(it.aria);
+        if (!p || p.direction !== "out") continue;
+        const got = normPreview(p.text).slice(0, 48);
+        if (got && (got.startsWith(want) || want.startsWith(got))) {
+          return { found: true, rowFail: SEND_FAIL_MARKER_RE.test(it.rowText || "") };
+        }
+      }
+    } catch (_) { /* 探测失败不改判定，重试到超时 */ }
+    if (Date.now() - t0 >= timeoutMs) return { found: false, rowFail: false };
+    await page.waitForTimeout(400);
+  }
+}
+
+/** 轮询等待 composer 清空（发出成功的确定性信号）。发送后 Messenger 通常瞬间清空，
+ *  但慢网/重渲染下可能滞后；轮询避免把「慢」误判成「没发出去」。返回是否已清空。 */
+async function waitComposerCleared(page, timeoutMs = 3000) {
+  const t0 = Date.now();
+  // 首检立即做（成功路径几乎无延迟）；未清空则短间隔重试到超时。
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    if (await verifyComposerCleared(page)) return true;
+    if (Date.now() - t0 >= timeoutMs) return false;
+    await page.waitForTimeout(300);
+  }
+}
+
+/** 从 composer 区选一个最合适的 <input type=file>：视觉媒体(图片/视频)优先挑 accept 含
+ *  image/video 的；音频/文件挑不限制 image 的；都没命中则回落第一个。找不到返回 null。 */
+async function pickFileInput(page, mediaType) {
+  const infos = await page.$$eval('input[type="file"]', (els) =>
+    els.map((el, i) => ({ i, accept: (el.getAttribute("accept") || "").toLowerCase() })));
+  if (!infos.length) return null;
+  const isVisual = /^(image|photo|video)/.test(String(mediaType || ""));
+  let pick = infos.find((x) => isVisual
+    ? (x.accept.includes("image") || x.accept.includes("video"))
+    : (!x.accept || (!x.accept.includes("image") && !x.accept.includes("video"))));
+  if (!pick) pick = infos[0];
+  const handles = await page.$$('input[type="file"]');
+  return handles[pick.i] || handles[0] || null;
+}
+
+/** 等附件预览出现（缩略图旁的「移除」键）再发送，避免回车发空。best-effort（超时也继续）。 */
+async function waitForAttachmentPreview(page, timeoutMs = 8000) {
+  const removeSel = [
+    '[aria-label="移除"]', '[aria-label="删除"]', '[aria-label="移除附件"]',
+    '[aria-label="Remove"]', '[aria-label="Remove attachment"]',
+  ].join(",");
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    if (await page.$(removeSel)) return true;
+    await page.waitForTimeout(400);
+  }
+  return false;
+}
+
+/** 把本地文件挂到 Messenger 输入区并发送（图片/视频/音频/文件通吃）。
+ *  找不到 file input 时先点「附加/添加照片或视频」唤出再重试。 */
+async function attachAndSend(page, mediaPath, mediaType, caption) {
+  let input = await pickFileInput(page, mediaType);
+  if (!input) {
+    for (const s of [
+      '[aria-label="附加文件"]', '[aria-label="选择文件"]', '[aria-label="添加照片或视频"]',
+      '[aria-label="Attach a file"]', '[aria-label="Choose a file to upload"]',
+      '[aria-label="Add photos/videos"]',
+    ]) {
+      const b = await page.$(s);
+      if (b) { await b.click().catch(() => {}); await page.waitForTimeout(600); break; }
+    }
+    input = await pickFileInput(page, mediaType);
+  }
+  if (!input) throw new Error("file input not found");
+  await input.setInputFiles(mediaPath);
+  await waitForAttachmentPreview(page);
+  if (caption) {
+    const box = await page.$(SEL_COMPOSER);
+    if (box) { await box.click(); await box.type(caption, { delay: 20 }); }
+  }
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(2500);
+}
+
 /** 按 accountId 找已授权 session。 */
 function findByAccount(accountId) {
   for (const [, e] of sessions.entries()) {
@@ -943,8 +1424,8 @@ app.get("/debug/requests", async (req, res) => {
   if (!entry || entry.status !== "authorized") return res.status(404).json({ error: "no authorized session" });
   try {
     if (!entry.reqPage || entry.reqPage.isClosed()) entry.reqPage = await entry.context.newPage();
-    const rows = await readRequests(entry.reqPage);
-    res.json({ requests: rows });
+    const rr = await readRequests(entry.reqPage, entry);
+    res.json({ requests: rr.rows, blocked: rr.blocked });
   } catch (e) {
     res.status(500).json({ error: String(e) });
   }
@@ -1105,12 +1586,101 @@ app.get("/debug/tail", async (req, res) => {
   const tail = await readThreadTail(entry, thread);
   let lastIn = null;
   if (Array.isArray(tail)) { for (const m of tail) { if (m.direction === "in") lastIn = m; } }
-  res.json({ readOk: tail !== null, count: Array.isArray(tail) ? tail.length : 0, lastIn, tail });
+  // 诊断：readPage 导航后到底渲染了什么（定位「只抓到加密横幅」的根因）。
+  let probe = null;
+  try {
+    const page = entry.readPage;
+    probe = await page.evaluate(() => {
+      const all = Array.from(document.querySelectorAll("[aria-label]"))
+        .map((e) => e.getAttribute("aria-label") || "");
+      const msgLike = all.filter((a) => /(消息由.*发送于|Message sent by)/i.test(a));
+      return {
+        url: location.href,
+        hasLog: !!document.querySelector('[role="log"]'),
+        rowCount: document.querySelectorAll('div[role="row"]').length,
+        iframeCount: document.querySelectorAll("iframe").length,
+        ariaTotal: all.length,
+        msgLikeCount: msgLike.length,
+        msgSample: msgLike.slice(-6).map((a) => a.slice(0, 60)),
+        imgCount: document.querySelectorAll("img").length,
+        videoCount: document.querySelectorAll("video").length,
+        // 最后一条消息行的图片候选明细（诊断媒体漏读：看 src 前缀/自然尺寸/渲染尺寸）
+        lastRowImgs: (() => {
+          const region2 = document.querySelector('[role="log"]') || document.body;
+          const MSG = /(消息由.*发送于|Message sent by)/i;
+          const nodes = Array.from(region2.querySelectorAll("[aria-label]"))
+            .filter((e) => MSG.test(e.getAttribute("aria-label") || ""));
+          const last = nodes[nodes.length - 1];
+          if (!last) return [];
+          let box = last;
+          for (let i = 0; i < 4 && box.parentElement; i++) {
+            if (box.getAttribute && box.getAttribute("role") === "row") break;
+            box = box.parentElement;
+          }
+          return Array.from(box.querySelectorAll("img")).slice(0, 8).map((im) => {
+            const rc = im.getBoundingClientRect();
+            const src = im.currentSrc || im.src || "";
+            return { src: src.slice(0, 22), natW: im.naturalWidth || 0,
+              rW: Math.round(rc.width), rH: Math.round(rc.height) };
+          });
+        })(),
+      };
+    });
+  } catch (e) { probe = { error: String(e) }; }
+  res.json({ readOk: tail !== null, count: Array.isArray(tail) ? tail.length : 0, lastIn, tail, probe });
 });
 
 app.post("/accounts/restore", async (_req, res) => {
   const restored = await restoreAll();
   res.json({ ok: true, restored });
+});
+
+// 人工重登通道（P2 自愈闭环）：cookie 彻底失效/自愈放弃后，运营从后台一键触发——
+// 复用**同一 profile 目录**重启上下文并打开 30 分钟交互登录窗口（headed 弹窗，运营在
+// 窗口内完成官方账密/2FA）。不新建 loginId → 不堆积孤儿 Chromium profile，登录成功后
+// account_id 不变，编排器/收件箱无需任何重绑。:id 可为 account_id 或 login_id。
+app.post("/accounts/:id/relogin", async (req, res) => {
+  const want = String(req.params.id || "");
+  let loginId = "";
+  // 先按 login_id 直查，再按 account_id 反查（不健康会话多半未 authorized，
+  // findByAccount 只认 authorized → 这里全量扫）。
+  if (sessions.has(want)) {
+    loginId = want;
+  } else {
+    for (const [id, e] of sessions.entries()) {
+      if (String(e.accountId || "") === want) { loginId = id; break; }
+    }
+  }
+  // 内存无会话（崩溃后被清）→ 磁盘 profile 还在也可重登
+  if (!loginId && fs.existsSync(path.join(SESSIONS_DIR, want))) loginId = want;
+  if (!loginId) {
+    return res.status(404).json({ ok: false, error: "no session/profile found for id" });
+  }
+  try {
+    const old = sessions.get(loginId);
+    const proxyUrl = (old && old.proxyUrl) || "";
+    // 压住崩溃自愈竞态：context.close 会触发 scheduleRecovery → 用 _recovering 占位。
+    _recovering.add(loginId);
+    try {
+      if (old) {
+        stopPolling(old);
+        sessions.delete(loginId);
+        try { await old.context.close(); } catch (_) {}
+      }
+      _recoveryAttempts.delete(loginId); // 人工介入 → 自愈放弃计数清零
+      const _t = _slowRetryTimers.get(loginId); // 撤掉排队中的慢重试（人工接管）
+      if (_t) { clearTimeout(_t); _slowRetryTimers.delete(loginId); }
+      const entry = await startLogin(loginId, proxyUrl, false); // 交互窗口 30min
+      try { await entry.page.bringToFront(); } catch (_) {}
+      logger.info({ loginId }, "manual relogin window opened (30min interactive watch)");
+      res.json({ ok: true, login_id: loginId, status: entry.status });
+    } finally {
+      _recovering.delete(loginId);
+    }
+  } catch (e) {
+    logger.error({ e, loginId }, "relogin failed");
+    res.status(500).json({ ok: false, error: String(e) });
+  }
 });
 
 // 优雅关闭端点（Windows 强杀不触发信号处理 → 用它先刷盘再退出，防登录丢失）。
@@ -1170,7 +1740,17 @@ app.post("/login/:id/cancel", async (req, res) => {
 app.get("/accounts", (_req, res) => {
   const accounts = [];
   for (const [id, e] of sessions.entries()) {
-    if (e.status === "authorized") accounts.push({ login_id: id, account_id: e.accountId });
+    if (e.status === "authorized") {
+      accounts.push({
+        login_id: id,
+        account_id: e.accountId,
+        // 健康细节（P0-2）：Python healthy() 据此识别「status 仍 authorized 但登录态已丢/
+        // 轮询早已停摆」的假健康。logged_in 由轮询周期性 pageLoggedIn 复检维护。
+        logged_in: e._loggedIn !== false,
+        last_poll_ok_ts: Math.floor((e._lastPollOkTs || 0) / 1000),
+        last_poll_err: String(e._lastPollErr || ""),
+      });
+    }
   }
   res.json({ accounts });
 });
@@ -1200,18 +1780,118 @@ app.post("/accounts/:id/send", async (req, res) => {
     if (!box) {
       return res.status(500).json({ ok: false, error: "composer not found (thread may need manual accept)" });
     }
-    await box.click();
-    await box.type(text, { delay: 20 });
-    await page.keyboard.press("Enter");
-    await page.waitForTimeout(1000);
-    // 记录自发文本（在 verify 之前、按下 Enter 之后即记）——即使 verify 偶发误判，也确保轮询
-    // 能识别并跳过这条自发消息的回声，杜绝「自己回自己」。
+    // 记录自发文本（在真正尝试发送前即记）——即使后续 verify 偶发误判，也确保轮询能识别
+    // 并跳过这条自发消息的回声，杜绝「自己回自己」。幂等：重试不重复记（recordSent 去重）。
     recordSent(entry, jid, text);
-    // 校验：发送后输入框应清空（未清空多半没发出去）。
-    const sent = await verifyComposerCleared(page);
-    res.json({ ok: true, message_id: "", accepted, sent });
+    // 一次输入+回车+校验清空的原子尝试；返回是否确认发出（composer 清空）。
+    const attemptSend = async () => {
+      await box.click();
+      await box.type(text, { delay: 20 });
+      await page.keyboard.press("Enter");
+      return await waitComposerCleared(page, 3000);
+    };
+    let sent = await attemptSend();
+    // 安全重试一次：composer 未清空＝多半没发出。重试前确认 composer 里确实还是我们要发的
+    // 文本（避免「其实已发出、只是清空滞后」时重复发送造成刷屏）。仍是原文才再发一次。
+    if (!sent) {
+      let stillHasOurText = false;
+      try {
+        const cur = await page.$eval(SEL_COMPOSER,
+          (el) => ((el.innerText || el.textContent || "") + "").trim());
+        stillHasOurText = cur.length > 0 && text.trim().startsWith(cur.slice(0, 8));
+      } catch (_) { stillHasOurText = false; }
+      if (stillHasOurText) {
+        logger.warn({ jid }, "send: composer not cleared → retrying once");
+        sent = await attemptSend();
+      }
+    }
+    // 关键修复：sent=false（未确认发出）必须如实上报为失败，让 Python 侧记 autosend_failed、
+    // 不把「没发出去」的草稿标记为已送达（此前恒 ok:true → 静默丢消息）。
+    if (!sent) {
+      logger.error({ jid }, "send: composer still not cleared after retry → reporting NOT delivered");
+      return res.status(502).json({
+        ok: false, delivered: false, accepted, sent: false,
+        error: "composer not cleared after send (message likely not delivered)",
+      });
+    }
+    // 送达二次确认（P1）：回读消息区，确认我们的文本已渲染成本方气泡且无「无法发送」标记。
+    // - 命中失败标记 → 确定性失败，如实 502（Messenger 不会自动重发失败气泡，重投不刷屏）；
+    // - 回读命中且干净 → verified:true；
+    // - 超时未见（DOM 改版/虚拟列表滚动等）→ **不定态按已发出处理**（composer 已清空），
+    //   verified:false 仅作观测——绝不因回读不确定而触发重发（重复消息比漏发更伤客户体验）。
+    const rb = await readbackLastOutgoing(page, text, 5000);
+    if (rb.found && rb.rowFail) {
+      logger.error({ jid }, "send: bubble rendered with FAIL marker → reporting NOT delivered");
+      return res.status(502).json({
+        ok: false, delivered: false, accepted, sent: false, verified: true,
+        error: "messenger marked the message as failed to send",
+      });
+    }
+    if (!rb.found) {
+      logger.warn({ jid }, "send: composer cleared but readback did not find our bubble "
+        + "(treating as delivered, verified=false)");
+    }
+    res.json({ ok: true, delivered: true, message_id: "", accepted, sent: true,
+      verified: !!rb.found });
   } catch (e) {
     logger.error({ e }, "send failed");
+    res.status(500).json({ ok: false, delivered: false, error: String(e) });
+  }
+});
+
+// M-parity①：出站媒体（图片/视频/音频/文件）——挂本地文件到 composer 发送，使 Messenger 与
+// Telegram 的 send_media 对称。Python 侧 MessengerWebWorker 有 send_media 即被编排器判为
+// owns_media=True → 工作台「图片/语音/视频/文件」按钮对 Messenger 一并点亮。语音走
+// media_type=voice（作为音频文件发出，Messenger 内联可播放）。media_path 为主机本地绝对路径
+// （Node 与 Python 同机，直接 setInputFiles，无需上传）。
+app.post("/accounts/:id/send-media", async (req, res) => {
+  const entry = findByAccount(req.params.id);
+  if (!entry || !entry.page) {
+    return res.status(404).json({ ok: false, error: "account not connected" });
+  }
+  const jid = String((req.body && req.body.jid) || "");
+  const mediaPath = String((req.body && req.body.media_path) || "");
+  const mediaType = String((req.body && req.body.media_type) || "");
+  const caption = String((req.body && req.body.caption) || "");
+  if (!jid || !mediaPath) {
+    return res.status(400).json({ ok: false, error: "jid and media_path required" });
+  }
+  if (!fs.existsSync(mediaPath)) {
+    return res.status(400).json({ ok: false, error: "media_path not found on host" });
+  }
+  try {
+    const page = entry.page;
+    await page.goto(`${MESSENGER_URL}t/${jid}`, {
+      waitUntil: "domcontentloaded", timeout: 20000,
+    });
+    await page.waitForTimeout(2000);
+    const accepted = await clickAcceptRequest(page);
+    if (accepted) await page.waitForTimeout(2000);
+    const box = await page.waitForSelector(SEL_COMPOSER, { timeout: 10000 }).catch(() => null);
+    if (!box) {
+      return res.status(500).json({ ok: false, error: "composer not found (thread may need manual accept)" });
+    }
+    await attachAndSend(page, mediaPath, mediaType, caption);
+    // 记录自发（含 caption）→ 轮询自回声抑制；无 caption 记媒体占位。
+    recordSent(entry, jid, caption || "[媒体]");
+    // 送达二次确认（P1，媒体版）：有 caption 才回读（按文本匹配我们的气泡 + 失败标记）；
+    // 无 caption 的纯媒体无法可靠锚定「我们这条」→ 跳过校验（宁可不定态，不冒误报失败
+    // 触发重发刷屏的险）。命中失败标记 → 如实 502。
+    let verified = false;
+    if (caption) {
+      const rb = await readbackLastOutgoing(page, caption, 5000);
+      if (rb.found && rb.rowFail) {
+        logger.error({ jid }, "send-media: bubble rendered with FAIL marker → NOT delivered");
+        return res.status(502).json({
+          ok: false, delivered: false, accepted, sent: false, verified: true,
+          error: "messenger marked the media message as failed to send",
+        });
+      }
+      verified = !!rb.found;
+    }
+    res.json({ ok: true, message_id: "", accepted, verified });
+  } catch (e) {
+    logger.error({ e }, "send-media failed");
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
@@ -1248,6 +1928,7 @@ app.post("/accounts/:id/logout", async (req, res) => {
   } catch (e) {
     logger.debug({ e }, "logout profile cleanup failed");
   }
+  postStatus(loginId, entry, "logged_out", "logout requested via API").catch(() => {});
   res.json({ ok: true, account_id: accountId });
 });
 
@@ -1270,7 +1951,7 @@ process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 // Windows 下 Stop-Process 走 SIGBREAK；也挂上。
 process.on("SIGBREAK", () => gracefulShutdown("SIGBREAK"));
 
-app.listen(PORT, async () => {
+const _server = app.listen(PORT, async () => {
   logger.info(`Messenger web login service on :${PORT} (sessions: ${SESSIONS_DIR})`);
   // 后台常驻场景（MSG_HEADLESS=1）开机恢复已登录账号。headed 交互登录一般不自动 restore。
   if (String(process.env.MSG_RESTORE_ON_BOOT ?? (HEADLESS ? "1" : "0")) === "1") {
@@ -1281,4 +1962,16 @@ app.listen(PORT, async () => {
       logger.error({ e }, "boot restore failed");
     }
   }
+});
+// 单实例守卫：端口被占 = 已有一个 messenger-web 在跑。第二个实例若继续启动，会对**同一个
+// 持久化 profile** 并发拉起浏览器上下文 → 互抢 userDataDir → 上下文崩溃循环 + Chromium 堆积
+// + cookie 竞争登出（本次联调实测踩中两次）。直接退出，杜绝重复实例。
+_server.on("error", (err) => {
+  if (err && err.code === "EADDRINUSE") {
+    logger.error(`port ${PORT} already in use — another messenger-web instance is running. `
+      + `Exiting to avoid duplicate browser contexts on the same profile (prior crash-loop/logout root cause).`);
+  } else {
+    logger.error({ err }, "http server error → exiting");
+  }
+  process.exit(1);
 });

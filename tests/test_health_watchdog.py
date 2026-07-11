@@ -123,6 +123,107 @@ def test_warn_does_not_alert_by_default(monkeypatch):
     assert wd.last_light == "yellow"
 
 
+# ── P6：编排器受管 worker 崩溃主动告警 ────────────────────────────────────────
+
+def _fake_orch(accounts):
+    by_state = {}
+    for a in accounts:
+        s = a.get("state", "stopped")
+        by_state[s] = by_state.get(s, 0) + 1
+    status = {"total": len(accounts), "by_state": by_state, "accounts": accounts}
+    return types.SimpleNamespace(status=lambda: status)
+
+
+def _patch_bus(monkeypatch):
+    published = []
+    from src.integrations.shared import event_bus as eb
+
+    class _Bus:
+        def publish(self, t, d): published.append((t, d))
+    monkeypatch.setattr(eb, "get_event_bus", lambda: _Bus())
+    return published
+
+
+def _wd(monkeypatch):
+    cm = _CM({"ai": {"provider": "openai", "api_key": "sk-real-123"}})
+    return HealthWatchdog(app=_fake_app(), config_manager=cm, interval_sec=60)
+
+
+def test_orchestrator_worker_alert_emitted_red(monkeypatch):
+    published = _patch_bus(monkeypatch)
+    import src.integrations.account_orchestrator as ao
+    monkeypatch.setattr(ao, "get_orchestrator_if_running", lambda: _fake_orch([
+        {"platform": "line", "account_id": "a2", "state": "error",
+         "restarts": 5, "last_error": "adb lost"},
+    ]))
+    wd = _wd(monkeypatch)
+    wd._check_orchestrator_workers()
+    hits = [d for t, d in published if t == "orchestrator_worker_alert"]
+    assert len(hits) == 1
+    assert hits[0]["recovered"] is False and hits[0]["light"] == "red"  # restarts>=3
+    assert wd.total_orchestrator_worker_alerts == 1
+
+
+def test_orchestrator_worker_alert_dedup(monkeypatch):
+    published = _patch_bus(monkeypatch)
+    import src.integrations.account_orchestrator as ao
+    monkeypatch.setattr(ao, "get_orchestrator_if_running", lambda: _fake_orch([
+        {"platform": "line", "account_id": "a2", "state": "error", "restarts": 5},
+    ]))
+    wd = _wd(monkeypatch)
+    wd._check_orchestrator_workers()
+    wd._check_orchestrator_workers()  # 同签名 → 不重复
+    assert len([1 for t, _ in published if t == "orchestrator_worker_alert"]) == 1
+
+
+def test_orchestrator_worker_recovery(monkeypatch):
+    published = _patch_bus(monkeypatch)
+    import src.integrations.account_orchestrator as ao
+    accounts = [{"platform": "line", "account_id": "a2", "state": "error", "restarts": 5}]
+    monkeypatch.setattr(ao, "get_orchestrator_if_running", lambda: _fake_orch(accounts))
+    wd = _wd(monkeypatch)
+    wd._check_orchestrator_workers()  # 告警
+    # worker 恢复运行
+    monkeypatch.setattr(ao, "get_orchestrator_if_running", lambda: _fake_orch([
+        {"platform": "line", "account_id": "a2", "state": "running"},
+    ]))
+    wd._check_orchestrator_workers()
+    hits = [d for t, d in published if t == "orchestrator_worker_alert"]
+    assert len(hits) == 2
+    assert hits[1]["recovered"] is True
+
+
+def test_orchestrator_worker_no_orchestrator_no_alert(monkeypatch):
+    published = _patch_bus(monkeypatch)
+    import src.integrations.account_orchestrator as ao
+    monkeypatch.setattr(ao, "get_orchestrator_if_running", lambda: None)
+    wd = _wd(monkeypatch)
+    wd._check_orchestrator_workers()
+    assert not [1 for t, _ in published if t == "orchestrator_worker_alert"]
+
+
+def test_orchestrator_worker_transient_is_yellow(monkeypatch):
+    published = _patch_bus(monkeypatch)
+    import src.integrations.account_orchestrator as ao
+    monkeypatch.setattr(ao, "get_orchestrator_if_running", lambda: _fake_orch([
+        {"platform": "line", "account_id": "a2", "state": "error", "restarts": 1},
+    ]))
+    wd = _wd(monkeypatch)
+    wd._check_orchestrator_workers()
+    hits = [d for t, d in published if t == "orchestrator_worker_alert"]
+    assert len(hits) == 1 and hits[0]["light"] == "yellow"  # restarts<3
+
+
+def test_orchestrator_worker_alert_in_sse_whitelists():
+    """P9：worker 告警须在 SSE 流白名单 + 通知中心白名单，否则前端 EventSource 收不到。"""
+    from src.web.routes.unified_inbox_realtime_routes import (
+        _NOTIF_EVENT_TYPES,
+        _SSE_EVENT_TYPES,
+    )
+    assert "orchestrator_worker_alert" in _SSE_EVENT_TYPES
+    assert "orchestrator_worker_alert" in _NOTIF_EVENT_TYPES
+
+
 def test_warn_alerts_when_enabled(monkeypatch):
     published = []
     from src.integrations.shared import event_bus as eb

@@ -27,6 +27,23 @@ from src.contacts.models import CHANNEL_LINE, CHANNEL_WEB
 from src.web.routes.unified_inbox_routes import register_unified_inbox_routes
 
 
+def _freeze_to_local_noon(monkeypatch):
+    """把 ``time.time`` 冻结到「今天本地正午」，消除 SLA/仪表盘「今日=本地午夜起」这类
+    查询在**午夜前后几分钟**的时间脆弱性。
+
+    根因：这些测试用 ``now - offset`` 造「今日进线」事件，但被测路由内部按 ``time.time()``
+    自算本地午夜、只计 ``ts >= midnight`` 的行。当测试恰在午夜后数分钟运行，``now - offset``
+    落回昨天 → 事件被排除出「今日」桶 → 断言失败（曾偶发 3 例）。正午距两侧午夜均 >= 12h，
+    冻结后任何真实运行时刻都稳定；只 patch ``time.time``（保留 localtime/mktime/strftime 真实
+    行为，午夜计算仍正确）。返回冻结值供测试复用。"""
+    import time as _t
+    real = _t.time()
+    lt = _t.localtime(real)
+    noon = _t.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 12, 0, 0, 0, 0, -1))
+    monkeypatch.setattr(_t, "time", lambda: noon)
+    return noon
+
+
 @pytest.fixture()
 def cstore():
     d = tempfile.mkdtemp()
@@ -843,10 +860,11 @@ class TestSlaConfig:
         assert chats["warnc"]["sla_level"] == "warn" and chats["warnc"]["sla_breach"]
         assert chats["critc"]["sla_level"] == "crit"
 
-    def test_dashboard_days_and_frt(self, cstore, gateway):
+    def test_dashboard_days_and_frt(self, cstore, gateway, monkeypatch):
         from src.inbox.store import InboxStore
         from src.inbox.models import InboxConversation, InboxMessage
         import time as _t
+        _freeze_to_local_noon(monkeypatch)   # 消午夜边界脆弱性（见 helper 注释）
         d = tempfile.mkdtemp()
         inbox = InboxStore(Path(d) / "i.db")
         now = _t.time()
@@ -1020,10 +1038,11 @@ class TestSlaDetail:
         # 非法 scope 回落 critical
         assert cli.get("/api/workspace/sla-detail?scope=bogus").json()["scope"] == "critical"
 
-    def test_unresponded_scope(self, cstore, gateway):
+    def test_unresponded_scope(self, cstore, gateway, monkeypatch):
         from src.inbox.store import InboxStore
         from src.inbox.models import InboxConversation, InboxMessage
         import time as _t
+        _freeze_to_local_noon(monkeypatch)   # 消午夜边界脆弱性（见 helper 注释）
         d = tempfile.mkdtemp()
         inbox = InboxStore(Path(d) / "i.db")
         now = _t.time()
@@ -1241,13 +1260,14 @@ class TestResolutionStats:
         rows2 = {r["journey_id"]: r for r in cstore.resolution_stats(1500)}
         assert set(rows2) == {jb}
 
-    def test_dashboard_resolution(self, cstore, gateway):
+    def test_dashboard_resolution(self, cstore, gateway, monkeypatch):
         from src.inbox.store import InboxStore
+        import time as _t
+        _freeze_to_local_noon(monkeypatch)   # 消午夜边界脆弱性（见 helper 注释）
         d = tempfile.mkdtemp()
         a = gateway.on_peer_seen(channel=CHANNEL_WEB, account_id="web",
                                  external_id="res_dash", display_name="A")
         jid = a.journey.journey_id
-        import time as _t
         now = int(_t.time())
         self._ev(cstore, jid, "msg_in", now - 120)
         self._ev(cstore, jid, "handoff_sent", now - 60)

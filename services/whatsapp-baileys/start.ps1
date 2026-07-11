@@ -10,6 +10,8 @@ $root = "D:\workspace\telegram-mtproto-ai"
 $env:PORT = "8790"
 # 入站桥：Baileys 收到的消息 push 进统一收件箱（web 后台 18799）
 $env:PY_INGEST_URL = "http://127.0.0.1:18799/api/internal/protocol/ingest"
+# 会话健康桥：连上/被登出/重连放弃等状态转移主动 push（不配则由 PY_INGEST_URL 自动推导）
+$env:PY_STATUS_URL = "http://127.0.0.1:18799/api/internal/protocol/session-status"
 # ingest endpoint requires Bearer auth (web_admin.auth_token). Must match config.yaml::web_admin.auth_token
 # or inbound pushes are rejected (401) and messages are silently dropped.
 $env:PY_API_TOKEN = "admin"
