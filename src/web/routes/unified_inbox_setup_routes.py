@@ -50,6 +50,54 @@ def _kb_readiness_for(config_manager) -> dict:
         return {"available": False, "is_cold": True, "enabled_entries": 0}
 
 
+def _session_present(request: Request) -> bool:
+    """请求是否携带已登录 session（区别于桌面壳主进程的纯 Bearer 调用）。"""
+    try:
+        if "session" in request.scope:
+            s = request.session
+            return bool(s.get("user_id") or s.get("auth"))
+    except Exception:
+        pass
+    return False
+
+
+def _require_supervisor_or_shell(request: Request) -> None:
+    """AI 凭证端点守卫：session 用户须主管角色；纯 Bearer（桌面壳主进程，
+    api_auth 已验 admin token = master 等价）放行。"""
+    if _session_present(request):
+        _require_supervisor(request)
+
+
+async def reload_ai_runtime(app, config_manager) -> bool:
+    """P0-1：AI 凭证落盘后热重建 AIClient 并换绑运行中服务（best-effort，绝不抛）。
+
+    覆盖：``app.state.ai_client`` / ``translation_service``（含路由内 AIEngine）/
+    ``chat_assistant_service`` / ``skill_manager.ai_client``——即「填 Key → 翻译/智能
+    回复生效」主链路免重启。其余在启动期快照旧 client 的子系统（companion worker 等）
+    仍需重启进程；初始化失败（key 无效/网络不通）时**不换绑**，保持旧 client。
+    返回：新 client 连接自检是否通过（可直接当「翻译就绪」绿灯）。
+    """
+    try:
+        from src.ai.ai_client import AIClient
+        client = AIClient(config_manager)
+        if not bool(await client.initialize()):
+            return False
+        app.state.ai_client = client
+        svc = getattr(app.state, "translation_service", None)
+        if svc is not None and hasattr(svc, "rebind_ai_client"):
+            svc.rebind_ai_client(client)
+        cas = getattr(app.state, "chat_assistant_service", None)
+        if cas is not None and hasattr(cas, "ai_client"):
+            cas.ai_client = client
+        sm = getattr(app.state, "skill_manager", None)
+        if sm is not None and hasattr(sm, "ai_client"):
+            sm.ai_client = client
+        return True
+    except Exception:
+        logger.warning("AI runtime 热重建失败（已忽略；重启后生效）", exc_info=True)
+        return False
+
+
 def register_setup_routes(app, *, api_auth, config_manager=None) -> None:
     """挂载渠道接入向导端点（/api/setup/channels[/{channel}]）。"""
 
@@ -103,6 +151,62 @@ def register_setup_routes(app, *, api_auth, config_manager=None) -> None:
         from src.ops.companion_preflight import build_companion_preflight
         config = getattr(config_manager, "config", None) or {}
         return build_companion_preflight(config)
+
+    @app.get("/api/setup/ai")
+    async def api_setup_ai_status(request: Request):
+        """AI 大模型配置现状（key 打码回显；供首启向导/接入向导预填）。"""
+        api_auth(request)
+        _require_supervisor_or_shell(request)
+        from src.utils.golive import _is_placeholder
+        config = getattr(config_manager, "config", None) or {}
+        ai = config.get("ai") or {}
+        key = str(ai.get("api_key") or "")
+        configured = not _is_placeholder(key)
+        masked = (key[:4] + "…" + key[-4:]) if len(key) > 12 else ("…" if key.strip() else "")
+        return {
+            "ok": True,
+            "configured": configured,
+            "provider": str(ai.get("provider") or ""),
+            "base_url": str(ai.get("base_url") or ""),
+            "model": str(ai.get("model") or ""),
+            "api_key_masked": masked,
+        }
+
+    @app.post("/api/setup/ai-key")
+    async def api_setup_ai_key_save(request: Request):
+        """保存 AI 凭证到 overlay（config.local.yaml）并热重建 AI 运行时（P0-1 A2）。
+
+        写 overlay 而非主 config.yaml：保住注释/结构，密钥不进 git 跟踪文件。
+        成功后返回 ``ai_ready``（新 client 连接自检结果）——即「翻译就绪」绿灯。
+        """
+        api_auth(request)
+        _require_supervisor_or_shell(request)
+        if config_manager is None:
+            return {"ok": False, "detail": tr(request, "err.svc.config_manager_not_ready")}
+        try:
+            body: Dict[str, Any] = await request.json()
+        except Exception:
+            body = {}
+        from src.utils.golive import _is_placeholder
+        api_key = str((body or {}).get("api_key") or "").strip()
+        if _is_placeholder(api_key):
+            return {"ok": False, "detail": tr(request, "err.auth.api_key_required")}
+        values = {
+            "api_key": api_key,
+            "provider": (body or {}).get("provider"),
+            "base_url": (body or {}).get("base_url"),
+            "model": (body or {}).get("model"),
+        }
+        ok, msg = config_manager.save_ai_credentials(values)
+        if not ok:
+            return {"ok": False, "detail": tr(request, "err.setup.ai_save_failed", reason=msg)}
+        ai_ready = await reload_ai_runtime(request.app, config_manager)
+        return {
+            "ok": True,
+            "detail": tr(request, "setup.ai.saved"),
+            "ai_ready": bool(ai_ready),
+            "provider": str(((config_manager.config or {}).get("ai") or {}).get("provider") or ""),
+        }
 
     @app.post("/api/setup/channels/{channel}")
     async def api_setup_channel_save(channel: str, request: Request):

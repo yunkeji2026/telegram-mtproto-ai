@@ -182,6 +182,20 @@ class TranslationService:
             self._router = EngineRouter(
                 [AIEngine(ai_client)], min_confidence=min_confidence)
 
+    def rebind_ai_client(self, ai_client: Any) -> None:
+        """P0-1 首启向导：AI 凭证保存后热替换底层 client（免重启生效）。
+
+        同步换掉路由内 ``AIEngine`` 持有的旧 client（确定性引擎 DeepL/Google 与
+        client 无关，不动）。失败态结果只有短负缓存 TTL，无需清缓存。
+        """
+        self.ai_client = ai_client
+        try:
+            for eng in getattr(self._router, "_engines", []) or []:
+                if getattr(eng, "name", "") == "ai" and hasattr(eng, "_ai"):
+                    eng._ai = ai_client
+        except Exception:
+            pass
+
     def detect_language(self, text: str) -> str:
         return detect_language(text)
 
