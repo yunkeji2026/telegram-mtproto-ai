@@ -43,6 +43,8 @@ class Capability:
     runtime_dep: str = ""           # 依赖的运行时子系统键（app.state 是否挂载）
     critical: bool = False          # 是否「全自动真发」主开关（看板高亮）
     calibration: str = ""           # 开闸前校准端点（"去校准"深链）；空=无专属校准
+    unset_follows_runtime: bool = False  # 三态：flag 未配置时跟随 runtime_dep 可用性
+                                          # （对齐 P0-3 B8「有引擎即默认开」，防看板与运行时相悖）
 
 
 # ── 能力注册表：即「唤醒陪伴栈」的分阶段开启阶梯 ────────────────────────────
@@ -65,8 +67,9 @@ CAPABILITIES: List[Capability] = [
     Capability(
         "auto_translate_inbound", "入站自动翻译", 1, "low", "feature",
         "workspace.auto_translate_inbound.enabled",
-        runtime_dep="translation_service",
-        desc="坐席打开会话时把外语客户消息译为中文展示。仅 API 成本，无对客行为。"),
+        runtime_dep="translation_service", unset_follows_runtime=True,
+        desc="坐席打开会话时把外语客户消息译为中文展示。仅 API 成本，无对客行为。"
+             "P0-3：未显式配置时跟随翻译引擎可用性自动开（有引擎即开）。"),
     Capability(
         "quality_trend", "质量趋势持久化", 1, "low", "feature",
         "companion.quality_trend.enabled", parent_path="companion.enabled",
@@ -156,12 +159,21 @@ def evaluate_capability(
     parent_enabled = True
     if cap.parent_path:
         parent_enabled = bool(_dig(config, cap.parent_path, cap.parent_default))
-    enabled = bool(_dig(config, cap.flag_path, False))
     dry_run = bool(_dig(config, cap.dry_run_path, False)) if cap.dry_run_path else False
 
     # 运行时子系统是否挂载：runtime 为 None=未知(不判 blocked)；显式 False=未挂载
     runtime_known = runtime is not None and cap.runtime_dep != ""
     runtime_ok = bool((runtime or {}).get(cap.runtime_dep)) if runtime_known else None
+
+    # 开关判定。默认：缺失即视为关。
+    # 三态例外（unset_follows_runtime，对齐 P0-3 B8）：flag **未显式配置**时跟随
+    # runtime_dep 可用性——有引擎即默认开，防「运行时按有引擎自动翻但看板显示 off」相悖。
+    _raw_flag = _dig(config, cap.flag_path, None)
+    if cap.unset_follows_runtime and _raw_flag is None:
+        # 未配置 → 跟随运行时（未知则保守按关，与 inbound_translate 无引擎保持关一致）
+        enabled = bool(runtime_ok) if runtime_known else False
+    else:
+        enabled = bool(_raw_flag)
 
     preconditions: List[Dict[str, Any]] = []
     if cap.parent_path:
