@@ -3,7 +3,10 @@ repos:
     hooks:
       - id: web-admin-tests
         name: Web Admin Tests
-        language: python
+        # 2026-07-12 修正：language 从 python 改为 system。原 python 模式下 pre-commit
+        # 建的隔离 venv 无 pytest/fastapi 等应用依赖，pre-push 时报 "No module named
+        # pytest"。system 模式用开发环境（已装全部依赖）跑，才能真正执行 web 回归。
+        language: system
         entry: python -m pytest
         args:
           - tests/test_web_auth.py
