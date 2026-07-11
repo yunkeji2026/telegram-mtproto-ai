@@ -616,6 +616,8 @@ _BASELINE = """
 /api/setup/channels/{channel}	POST
 /api/setup/checklist	GET
 /api/setup/companion-preflight	GET
+/api/setup/ai	GET
+/api/setup/ai-key	POST
 /api/companion/proactive/preview	GET
 /api/companion/capabilities	GET
 /api/companion/capabilities/delivery-calibration	GET

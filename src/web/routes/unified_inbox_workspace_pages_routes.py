@@ -63,6 +63,16 @@ def register_workspace_pages_routes(
                     ctx["mask_account_phone"] = bool(_sp.get("mask_phone"))
         except Exception:
             pass
+        # P0-1 A3：token 直登（桌面默认 admin）绕过 /setup 时 AI Key 仍为空/占位 →
+        # 工作台顶部出可关闭引导条（深链 /workspace/setup#ai）。仅主管可见（能修的人才看到）。
+        ctx["ai_key_missing"] = False
+        try:
+            if config_manager is not None and _is_supervisor(request):
+                from src.utils.golive import _is_placeholder
+                _ai = (config_manager.config or {}).get("ai") or {}
+                ctx["ai_key_missing"] = _is_placeholder(_ai.get("api_key"))
+        except Exception:
+            pass
         return ctx
 
     @app.get("/workspace", response_class=HTMLResponse)

@@ -130,19 +130,24 @@ def register_auth_user_routes(
         if not result:
             raise HTTPException(500, tr(request, "err.auth.create_failed"))
 
-        # 保存 AI 配置（如果提供了）
+        # 保存 AI 配置（如果提供了）——P0-1：写 overlay（config.local.yaml）而非改写主
+        # config.yaml（保住注释/结构，密钥不进 git 跟踪文件），并热重建 AI 运行时免重启。
         if api_key:
-            if not hasattr(config_manager, "config") or config_manager.config is None:
-                config_manager.config = {}
-            if "ai" not in config_manager.config:
-                config_manager.config["ai"] = {}
-            config_manager.config["ai"]["api_key"] = api_key
-            if base_url:
-                config_manager.config["ai"]["base_url"] = base_url
-            if model:
-                config_manager.config["ai"]["model"] = model
             try:
-                config_manager.save()
+                if hasattr(config_manager, "save_ai_credentials"):
+                    config_manager.save_ai_credentials({
+                        "api_key": api_key, "base_url": base_url, "model": model,
+                    })
+                    from src.web.routes.unified_inbox_setup_routes import reload_ai_runtime
+                    await reload_ai_runtime(request.app, config_manager)
+                else:  # 极端回退（老 ConfigManager stub）：仅进程内生效
+                    if not hasattr(config_manager, "config") or config_manager.config is None:
+                        config_manager.config = {}
+                    config_manager.config.setdefault("ai", {})["api_key"] = api_key
+                    if base_url:
+                        config_manager.config["ai"]["base_url"] = base_url
+                    if model:
+                        config_manager.config["ai"]["model"] = model
             except Exception:
                 pass  # AI 配置保存失败不影响主流程
 
