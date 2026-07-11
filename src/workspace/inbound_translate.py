@@ -1,7 +1,23 @@
-"""坐席工作台入站消息自动翻译（Phase 5-3）。
+"""坐席工作台入站消息自动翻译（Phase 5-3 · P0-3 默认策略）。
 
 策略：仅在坐席打开会话（/thread）时按需翻译，避免全量 ingest 时烧 API。
 译文写入 InboxStore.translated_text，跨重启/重开命中缓存。
+
+P0-3 入站译「单一真相源」口径（B6，与 unified_inbox.html 前端约定一致）：
+- **后端 enrich（本模块）= 共享预取 + 唯一持久化写路径**：打开会话时把最近 N 条
+  外语入站消息译到 cfg.target_lang 并写 store，所有坐席 / 跨重启共享；
+- **前端 ``_xlateIn`` = 坐席级显示决策 + 补位**：决定本坐席「要不要看译文 / 看哪种
+  语言」，仅对后端未覆盖的消息（超出 max_per_thread 的旧消息滚入视口、两次加载
+  之间实时到达的新消息、坐席个性化非默认目标语）逐条走 /translate 补译；
+- **去重契约**：前端 ``_xlNeeds`` 对已带同目标语服务端译文的消息绝不重复请求；
+  本模块 ``_overlay_store_translations`` + ``_already_translated`` 对 store 已有
+  译文绝不重复翻译；两端共用同一 TranslationService（L1/L2 缓存），残余重叠 =
+  缓存命中，不产生重复 API 调用。
+
+P0-3 默认翻转（B8）：``enabled`` 未显式配置时不再硬编码 False，而是**跟随引擎
+可用性**——存在可用翻译引擎（配了 key 的 DeepL/Google 或就绪的 AI client）默认开；
+无引擎环境必须保持关，否则每次开会话都空跑攒 failed 计数 + 前端红徽标。
+显式配置 true/false 始终优先于自动判定。
 """
 
 from __future__ import annotations
@@ -14,16 +30,21 @@ from src.ai.translation_service import TranslationService, detect_language, norm
 logger = logging.getLogger(__name__)
 
 _DEFAULT_CFG: Dict[str, Any] = {
-    "enabled": False,
+    "enabled": None,          # B8 三态：None=未配置（跟随引擎可用性）；true/false=显式
     "target_lang": "zh",
     "source_langs": [],       # 空=所有非 target 语言
-    "max_per_thread": 8,      # 单次打开会话最多翻译条数（控成本）
+    "max_per_thread": 5,      # 单次打开会话最多翻译条数（控成本，B9 收紧 8→5）
     "max_chars": 400,         # 超长消息跳过
     "style": "chat",
 }
 
 
 def parse_auto_translate_cfg(config_manager) -> Dict[str, Any]:
+    """解析 workspace.auto_translate_inbound。``enabled`` 为三态：显式 bool / None（未配置）。
+
+    调用方须经 :func:`resolve_auto_translate_enabled` 把三态收敛成最终 bool，
+    不要直接把 ``cfg["enabled"]`` 当 bool 用。
+    """
     cfg = dict(_DEFAULT_CFG)
     try:
         root = (getattr(config_manager, "config", None) or {}) if config_manager else {}
@@ -33,7 +54,8 @@ def parse_auto_translate_cfg(config_manager) -> Dict[str, Any]:
             cfg["enabled"] = bool(raw)
             return cfg
         if isinstance(raw, dict):
-            cfg["enabled"] = bool(raw.get("enabled", cfg["enabled"]))
+            if "enabled" in raw:
+                cfg["enabled"] = bool(raw.get("enabled"))
             if raw.get("target_lang"):
                 cfg["target_lang"] = normalize_lang(str(raw["target_lang"])) or "zh"
             langs = raw.get("source_langs")
@@ -47,10 +69,31 @@ def parse_auto_translate_cfg(config_manager) -> Dict[str, Any]:
             if raw.get("style"):
                 cfg["style"] = str(raw["style"])
     except Exception:
-        logger.debug("parse auto_translate_inbound 失败，用默认关", exc_info=True)
-    cfg["max_per_thread"] = max(1, min(30, int(cfg.get("max_per_thread") or 8)))
+        logger.debug("parse auto_translate_inbound 失败，回落默认（未配置态）", exc_info=True)
+    cfg["max_per_thread"] = max(1, min(30, int(cfg.get("max_per_thread") or 5)))
     cfg["max_chars"] = max(50, min(2000, int(cfg.get("max_chars") or 400)))
     return cfg
+
+
+def resolve_auto_translate_enabled(cfg: Dict[str, Any], engines_available: bool) -> bool:
+    """B8：入站自动译总开关三态解析（纯函数）。
+
+    - 显式 true/false → 以配置为准（运营意志优先，包括「有引擎也要关」）；
+    - 未配置（None）→ 跟随引擎可用性：有可用引擎默认开；**无引擎必须保持关**。
+    """
+    enabled = cfg.get("enabled")
+    if isinstance(enabled, bool):
+        return enabled
+    return bool(engines_available)
+
+
+def _engines_available(translation_svc: Optional[TranslationService]) -> bool:
+    """探测服务是否有任一可用翻译引擎。探不到（异常/无 router）按无引擎处理（保守关）。"""
+    try:
+        router = getattr(translation_svc, "_router", None)
+        return bool(router is not None and router.any_available())
+    except Exception:
+        return False
 
 
 def _lang_matches(src: str, cfg: Dict[str, Any]) -> bool:
@@ -123,15 +166,20 @@ async def enrich_inbound_translations(
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """为入站消息补充译文。返回 (messages, stats)。"""
     cfg = parse_auto_translate_cfg(config_manager)
+    if translation_svc is None:
+        from src.web.routes.unified_inbox_services import _get_translation_service
+        translation_svc = _get_translation_service(request)
+    # B8：未显式配置时跟随引擎可用性（有引擎默认开 / 无引擎必须关，防空跑攒 failed）
+    enabled = resolve_auto_translate_enabled(cfg, _engines_available(translation_svc))
     stats = {
-        "enabled": cfg["enabled"],
+        "enabled": enabled,
         "target_lang": cfg["target_lang"],
         "from_store": 0,
         "translated": 0,
         "skipped": 0,
         "failed": 0,
     }
-    if not cfg["enabled"] or not messages:
+    if not enabled or not messages:
         return messages, stats
 
     target = str(cfg["target_lang"] or "zh")
@@ -142,10 +190,6 @@ async def enrich_inbound_translations(
             stats["from_store"] = _overlay_store_translations(messages, rows, target)
         except Exception:
             logger.debug("overlay store translations 失败", exc_info=True)
-
-    if translation_svc is None:
-        from src.web.routes.unified_inbox_services import _get_translation_service
-        translation_svc = _get_translation_service(request)
 
     # 只处理最近的入站、未译、需译消息
     candidates: List[Dict[str, Any]] = []

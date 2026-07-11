@@ -258,6 +258,11 @@ async function loadOverview(){
       cards.push([window.T('ov2_js016'), '<span class="val">'+dot(k.companion_config_light)+'</span>',
                   window.T('ov2_js017')+' '+fmt(k.companion_config_errors)+' · '+window.T('ov2_js018')+' '+fmt(k.companion_config_warnings)]);
     }
+    // P0-3/B9 成本护栏：入站自动译量（默认按引擎可用性开启后，译量/失败随窗口可见）
+    if((Number(k.inbound_xlate_translated)||0) || (Number(k.inbound_xlate_failed)||0)){
+      cards.push([window.T('ov2_js_ibx_label'), '<span class="val">'+fmt(k.inbound_xlate_translated)+'</span>',
+                  window.T('ov2_js_ibx_fail')+' '+fmt(k.inbound_xlate_failed)]);
+    }
     document.getElementById('kpis').innerHTML = cards.map(function(c){
       return '<div class="kpi"><div class="label">'+c[0]+'</div><div class="val">'+c[1]+'</div><div class="sub">'+c[2]+'</div></div>';
     }).join('');

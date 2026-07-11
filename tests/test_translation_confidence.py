@@ -39,6 +39,21 @@ def test_confidence_signals_shape():
     assert set(sig) >= {"empty", "untranslated", "script_ratio", "length_ok"}
 
 
+def test_confidence_tier_boundaries():
+    # P0-2：分档单一真相源（前端徽标/低置信提示与此同口径），边界含等号
+    from src.ai.translation_confidence import TIER_HIGH, TIER_LOW, confidence_tier
+
+    assert confidence_tier(1.0) == "high"
+    assert confidence_tier(TIER_HIGH) == "high"
+    assert confidence_tier(TIER_HIGH - 0.001) == "mid"
+    assert confidence_tier(TIER_LOW) == "mid"
+    assert confidence_tier(TIER_LOW - 0.001) == "low"
+    assert confidence_tier(0.0) == "low"
+    # 越界/脏输入收敛不炸
+    assert confidence_tier(2.0) == "high"
+    assert confidence_tier(-1.0) == "low"
+
+
 def test_confidence_gate():
     samples = load_confidence_samples("config/eval/translation_confidence_samples.yaml")
     rep = evaluate_confidence(samples)

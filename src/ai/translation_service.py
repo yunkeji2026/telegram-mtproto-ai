@@ -123,6 +123,9 @@ class TranslationResult:
     provider: str = "none"
     cached: bool = False
     error: str = ""
+    # P0-2：确定性译文置信度 [0,1]（translation_confidence 评分）。-1 = 未评分
+    # （identity/失败/空文本等无意义评分的路径），前端据此跳过低置信提示。
+    confidence: float = -1.0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -134,6 +137,7 @@ class TranslationResult:
             "provider": self.provider,
             "cached": self.cached,
             "error": self.error,
+            "confidence": self.confidence,
         }
 
 
@@ -203,7 +207,16 @@ class TranslationService:
         与 ``translate`` 同样应用术语强制 + 品牌词不译保护（mask→译→restore），
         故每条候选都已是「术语合规」的成品。不写缓存/记忆（对照是一次性比较，
         择优后由前端走正常 translate/send 落库，避免把非首选引擎结果污染记忆）。
+
+        P0-2：每条成功候选附带确定性置信度（``confidence`` 分值 + ``confidence_tier``
+        high/mid/low 分档 + ``confidence_signals`` 关键信号），供坐席对照择优时
+        一眼识别「空译/未翻译/错语种/长度异常」的坏候选。失败候选不评分。
         """
+        from src.ai.translation_confidence import (
+            confidence_signals,
+            confidence_tier,
+            translation_confidence,
+        )
         from src.ai.translation_engines import apply_glossary_mask, restore_protected
 
         src_text = str(text or "")
@@ -230,12 +243,19 @@ class TranslationService:
 
         for r in results:
             text_out = restore_protected(r.text, mapping) if (r.ok and r.text) else ""
-            out["candidates"].append({
+            cand: Dict[str, Any] = {
                 "engine": r.engine,
                 "ok": bool(r.ok and text_out),
                 "translated_text": text_out,
                 "error": r.error,
-            })
+            }
+            if cand["ok"]:
+                # 评「原文 vs 还原后成品」（坐席实际看到的候选对），非引擎内部 masked 文本
+                score = translation_confidence(src_text, text_out, target)
+                cand["confidence"] = score
+                cand["confidence_tier"] = confidence_tier(score)
+                cand["confidence_signals"] = confidence_signals(src_text, text_out, target)
+            out["candidates"].append(cand)
         return out
 
     def update_glossary(
@@ -355,6 +375,15 @@ class TranslationService:
             src_text, out or src_text, source, target,
             bool(out), provider=res.engine,
         )
+        if result.ok:
+            # P0-2：成功译文附确定性置信度（经 to_dict 透传到 /translate 响应与
+            # 入站 enrich 的 message.translation，前端低置信给可见提示）。评分
+            # 纯函数零网络；失败/identity 路径保持 -1（未评分）。
+            try:
+                from src.ai.translation_confidence import translation_confidence
+                result.confidence = translation_confidence(src_text, out, target)
+            except Exception:
+                pass
         self._cache_put(key, result)
         if result.ok:
             self._memory_put(key, result, style, engine=res.engine)
@@ -370,7 +399,7 @@ class TranslationService:
             return None
         if not row:
             return None
-        return TranslationResult(
+        result = TranslationResult(
             source_text=str(row.get("source_text") or ""),
             translated_text=str(row.get("translated_text") or ""),
             source_lang=str(row.get("source_lang") or ""),
@@ -378,6 +407,14 @@ class TranslationService:
             ok=True,
             provider=str(row.get("engine") or "ai"),
         )
+        # P0-2：L2 记忆行不持久置信度（确定性评分随取随算，零成本零漂移）
+        try:
+            from src.ai.translation_confidence import translation_confidence
+            result.confidence = translation_confidence(
+                result.source_text, result.translated_text, result.target_lang)
+        except Exception:
+            pass
+        return result
 
     def _memory_put(self, key: str, result: "TranslationResult", style: str,
                     engine: str = "ai") -> None:

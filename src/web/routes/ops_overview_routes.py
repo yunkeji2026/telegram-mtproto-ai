@@ -118,6 +118,14 @@ def register_ops_overview_routes(app, ctx) -> None:
                 auto_claim = inbox.get_auto_claim_stats(time.time() - int(days or 7) * 86400)
             except Exception:
                 logger.debug("自动认领统计失败（已忽略）", exc_info=True)
+        # P0-3/B9：入站自动译量（成本护栏观测——默认翻转后老板一眼看到译量/失败）
+        inbound_translation = None
+        if inbox is not None and hasattr(inbox, "get_inbound_xlate_stats"):
+            try:
+                inbound_translation = inbox.get_inbound_xlate_stats(
+                    time.time() - int(days or 7) * 86400)
+            except Exception:
+                logger.debug("入站翻译量统计失败（已忽略）", exc_info=True)
 
         companion = None
         try:
@@ -131,7 +139,7 @@ def register_ops_overview_routes(app, ctx) -> None:
         overview = assemble_ops_overview(
             roi=roi, billing=billing, health=health, reliability=reliability,
             auto_claim=auto_claim, open_incidents=open_incidents,
-            companion=companion,
+            companion=companion, inbound_translation=inbound_translation,
         )
         # G2：趋势异动标注（AI 发送量 / 处置量）。
         from src.utils.ops_intel import detect_trend_anomaly
