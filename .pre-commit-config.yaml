@@ -33,3 +33,12 @@ repos:
       - id: check-merge-conflict
       - id: debug-statements
         language_version: python3
+      - id: check-added-large-files
+        args: ["--maxkb=2048"]     # 拦截 >2MB 大文件(截图/dump/权重)误入库
+
+  # ── 密钥泄露扫描 (2026-07-11 新增；防 api_key / session / creds 入库) ──
+  # 启用后如需忽略误报，用 .gitleaksignore 或行内 gitleaks:allow
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
