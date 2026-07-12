@@ -76,5 +76,13 @@
     "threshold": 0.85,
     "passed": true
   },
-  "generated_at": "2026-07-11T10:27:52+0800"
+  "headline": {
+    "metric": {
+      "zh": "意图识别准确率",
+      "en": "Intent accuracy"
+    },
+    "value": "100%",
+    "sample": 24
+  },
+  "generated_at": "2026-07-12T17:14:37+0800"
 }

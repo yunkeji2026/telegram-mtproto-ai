@@ -66,6 +66,87 @@ EVALS: List[Dict[str, Any]] = [
 ]
 
 
+def _pct(x: Any) -> Optional[str]:
+    """0-1 浮点 → 百分比串（1.0→'100%'，0.84→'84%'）；非数值 → None。"""
+    try:
+        return f"{round(float(x) * 100)}%"
+    except (TypeError, ValueError):
+        return None
+
+
+def _headline(key: str, report: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """从各 eval 的异构 report 提取**标准化主指标**（口径单一来源，前端只渲染此结果）。
+
+    返回 {metric:{zh,en}, value:str, sample:int|None}；无法提取 → None。
+    每个 key 挑「最能代表该门禁价值」的那个数（安全类优先红线召回/零不安全）。
+    """
+    r = report or {}
+    s = r.get("summary") or {}
+    m = r.get("metrics") or {}
+
+    def out(zh: str, en: str, value: Optional[str], sample: Any = None) -> Optional[Dict[str, Any]]:
+        if not value:
+            return None
+        entry: Dict[str, Any] = {"metric": {"zh": zh, "en": en}, "value": value}
+        try:
+            if sample is not None:
+                entry["sample"] = int(sample)
+        except (TypeError, ValueError):
+            pass
+        return entry
+
+    if key == "persona":
+        return out("违规召回率（客服腔/AI 自曝零漏抓）", "Violation recall (zero leaks)",
+                   _pct(s.get("recall")), s.get("total"))
+    if key == "emotion":
+        return out("情绪维度准确率", "Emotion accuracy", _pct(m.get("accuracy")), m.get("total"))
+    if key == "emotion-intensity":
+        return out("强度分级单调性", "Intensity monotonicity",
+                   _pct(s.get("monotonic_rate")), s.get("total"))
+    if key == "crisis":
+        return out("severe 危机召回（安全红线）", "Severe-crisis recall (red line)",
+                   _pct(s.get("severe_recall")), s.get("total"))
+    if key == "crisis-response":
+        # 终态 0 条不安全输出是最硬红线
+        unsafe = s.get("final_unsafe")
+        val = "0 条" if unsafe == 0 else (str(unsafe) if unsafe is not None else None)
+        return out("终态不安全输出", "Unsafe final outputs",
+                   ("0" if unsafe == 0 else (str(unsafe) if unsafe is not None else None)),
+                   s.get("total"))
+    if key == "crisis-resource":
+        return out("危机资源补发召回", "Resource-assurance recall",
+                   _pct(s.get("append_recall")), s.get("total"))
+    if key == "crisis-overview":
+        lp, lt = s.get("links_passed"), s.get("links_total")
+        val = f"{lp}/{lt}" if lp is not None and lt else None
+        return out("安全链合并门禁", "Safety-chain gates", val, s.get("total_scenarios"))
+    if key == "proactive-guard":
+        return out("severe 窗口抑制召回", "Severe-window suppression recall",
+                   _pct(s.get("severe_block_recall")), s.get("total"))
+    if key == "memory-extract":
+        return out("记忆抽取召回", "Memory-extract recall", _pct(s.get("recall")), s.get("samples"))
+    if key == "voice-language":
+        return out("语音语种一致性", "Voice-language consistency",
+                   _pct(s.get("accuracy")), s.get("total"))
+    if key == "xlate-confidence":
+        return out("置信度判别准确率", "Confidence-scorer accuracy",
+                   _pct(s.get("accuracy")), s.get("total"))
+    if key == "intent":
+        return out("意图识别准确率", "Intent accuracy", _pct(m.get("accuracy")), m.get("total"))
+    if key == "translation":
+        # 回译质量：优先语义均分，回退字符均分（键名随 evaluator 版本，宽松探测）
+        val = s.get("semantic_mean") or s.get("char_mean") or s.get("pass_rate")
+        return out("回译质量均分", "Back-translation quality", _pct(val), s.get("total") or s.get("samples"))
+    if key == "faq":
+        return out("FAQ 自解决率", "FAQ self-resolution", _pct(s.get("resolve_rate") or s.get("rate")),
+                   s.get("total"))
+    if key == "memory":
+        dr = r.get("delta_recall")
+        return out("向量召回增益", "Vector recall gain",
+                   (f"+{_pct(dr)}" if dr is not None else None))
+    return None
+
+
 def _slim(value: Any) -> Any:
     """公开版报告瘦身：保留标量与嵌套 dict 的标量叶子，剥掉列表（逐样本明细）。"""
     if isinstance(value, dict):
@@ -137,6 +218,9 @@ def run_one(spec: Dict[str, Any], *, timeout: float = 300.0) -> Dict[str, Any]:
         status="pass" if (passed and proc.returncode == 0) else "fail",
         report=_slim(report),
     )
+    headline = _headline(spec["key"], report)
+    if headline:
+        entry["headline"] = headline
     return entry
 
 
@@ -180,7 +264,9 @@ def main(argv=None) -> int:
         "generated_at": generated_at,
         "counts": counts,
         "evals": [{"key": e["key"], "label": e["label"], "status": e["status"],
-                   "file": f"{e['key']}.json"} for e in entries],
+                   "file": f"{e['key']}.json",
+                   **({"headline": e["headline"]} if e.get("headline") else {})}
+                  for e in entries],
     }
     (out_dir / "index.json").write_text(
         json.dumps(index, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

@@ -13,5 +13,13 @@
     },
     "passed": true
   },
-  "generated_at": "2026-07-11T10:27:52+0800"
+  "headline": {
+    "metric": {
+      "zh": "强度分级单调性",
+      "en": "Intensity monotonicity"
+    },
+    "value": "100%",
+    "sample": 5
+  },
+  "generated_at": "2026-07-12T17:14:37+0800"
 }

@@ -49,5 +49,13 @@
     "max_false_alarm": 0,
     "passed": true
   },
-  "generated_at": "2026-07-11T10:27:52+0800"
+  "headline": {
+    "metric": {
+      "zh": "severe 危机召回（安全红线）",
+      "en": "Severe-crisis recall (red line)"
+    },
+    "value": "100%",
+    "sample": 7
+  },
+  "generated_at": "2026-07-12T17:14:37+0800"
 }

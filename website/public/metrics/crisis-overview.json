@@ -46,5 +46,13 @@
     },
     "passed": true
   },
-  "generated_at": "2026-07-11T10:27:52+0800"
+  "headline": {
+    "metric": {
+      "zh": "安全链合并门禁",
+      "en": "Safety-chain gates"
+    },
+    "value": "3/3",
+    "sample": 26
+  },
+  "generated_at": "2026-07-12T17:14:37+0800"
 }

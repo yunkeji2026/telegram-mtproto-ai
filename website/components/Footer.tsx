@@ -15,6 +15,7 @@ export default function Footer() {
   const home = zh ? "/" : "/en";
   const landingLinks = [
     { href: zh ? "/download" : "/en/download", label: zh ? "下载桌面端 · 免费试用" : "Download desktop · Free trial" },
+    { href: zh ? "/proof-metrics" : "/en/proof-metrics", label: zh ? "可信指标 · 质量门禁" : "Trust metrics · Quality gates" },
     { href: zh ? "/voice" : "/en/voice", label: zh ? "幻声 · 声音克隆" : "VoiceX · Voice cloning" },
     { href: zh ? "/face" : "/en/face", label: zh ? "幻颜 · 实时换脸" : "FaceX · Live face swap" },
     { href: zh ? "/interpreting" : "/en/interpreting", label: zh ? "通译 · 克隆音同传" : "LingoX · Interpreting" },

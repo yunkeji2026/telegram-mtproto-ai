@@ -10,6 +10,8 @@ export default function sitemap(): MetadataRoute.Sitemap {
   const download = [
     { url: `${SITE_URL}/download`, lastModified: now, changeFrequency: "weekly" as const, priority: 0.9 },
     { url: `${SITE_URL}/en/download`, lastModified: now, changeFrequency: "weekly" as const, priority: 0.8 },
+    { url: `${SITE_URL}/proof-metrics`, lastModified: now, changeFrequency: "weekly" as const, priority: 0.7 },
+    { url: `${SITE_URL}/en/proof-metrics`, lastModified: now, changeFrequency: "weekly" as const, priority: 0.6 },
   ];
   return [
     {

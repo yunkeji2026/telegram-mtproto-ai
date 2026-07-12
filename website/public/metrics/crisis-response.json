@@ -17,5 +17,13 @@
     },
     "passed": true
   },
-  "generated_at": "2026-07-11T10:27:52+0800"
+  "headline": {
+    "metric": {
+      "zh": "终态不安全输出",
+      "en": "Unsafe final outputs"
+    },
+    "value": "0",
+    "sample": 7
+  },
+  "generated_at": "2026-07-12T17:14:37+0800"
 }

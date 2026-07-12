@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-07-11T10:27:52+0800",
+  "generated_at": "2026-07-12T17:14:37+0800",
   "counts": {
     "pass": 12,
     "fail": 0,
-    "skipped": 3,
+    "skipped": 0,
     "error": 0
   },
   "evals": [
@@ -14,7 +14,15 @@
         "en": "Persona consistency"
       },
       "status": "pass",
-      "file": "persona.json"
+      "file": "persona.json",
+      "headline": {
+        "metric": {
+          "zh": "违规召回率（客服腔/AI 自曝零漏抓）",
+          "en": "Violation recall (zero leaks)"
+        },
+        "value": "100%",
+        "sample": 8
+      }
     },
     {
       "key": "emotion",
@@ -23,7 +31,15 @@
         "en": "Emotion dimension accuracy"
       },
       "status": "pass",
-      "file": "emotion.json"
+      "file": "emotion.json",
+      "headline": {
+        "metric": {
+          "zh": "情绪维度准确率",
+          "en": "Emotion accuracy"
+        },
+        "value": "100%",
+        "sample": 13
+      }
     },
     {
       "key": "emotion-intensity",
@@ -32,7 +48,15 @@
         "en": "Emotion intensity grading"
       },
       "status": "pass",
-      "file": "emotion-intensity.json"
+      "file": "emotion-intensity.json",
+      "headline": {
+        "metric": {
+          "zh": "强度分级单调性",
+          "en": "Intensity monotonicity"
+        },
+        "value": "100%",
+        "sample": 5
+      }
     },
     {
       "key": "crisis",
@@ -41,7 +65,15 @@
         "en": "Crisis detection"
       },
       "status": "pass",
-      "file": "crisis.json"
+      "file": "crisis.json",
+      "headline": {
+        "metric": {
+          "zh": "severe 危机召回（安全红线）",
+          "en": "Severe-crisis recall (red line)"
+        },
+        "value": "100%",
+        "sample": 7
+      }
     },
     {
       "key": "crisis-response",
@@ -50,7 +82,15 @@
         "en": "Crisis response loop"
       },
       "status": "pass",
-      "file": "crisis-response.json"
+      "file": "crisis-response.json",
+      "headline": {
+        "metric": {
+          "zh": "终态不安全输出",
+          "en": "Unsafe final outputs"
+        },
+        "value": "0",
+        "sample": 7
+      }
     },
     {
       "key": "crisis-resource",
@@ -59,7 +99,15 @@
         "en": "Crisis resource assurance"
       },
       "status": "pass",
-      "file": "crisis-resource.json"
+      "file": "crisis-resource.json",
+      "headline": {
+        "metric": {
+          "zh": "危机资源补发召回",
+          "en": "Resource-assurance recall"
+        },
+        "value": "100%",
+        "sample": 6
+      }
     },
     {
       "key": "crisis-overview",
@@ -68,7 +116,15 @@
         "en": "Crisis safety overview"
       },
       "status": "pass",
-      "file": "crisis-overview.json"
+      "file": "crisis-overview.json",
+      "headline": {
+        "metric": {
+          "zh": "安全链合并门禁",
+          "en": "Safety-chain gates"
+        },
+        "value": "3/3",
+        "sample": 26
+      }
     },
     {
       "key": "proactive-guard",
@@ -77,7 +133,15 @@
         "en": "Proactive outreach guard"
       },
       "status": "pass",
-      "file": "proactive-guard.json"
+      "file": "proactive-guard.json",
+      "headline": {
+        "metric": {
+          "zh": "severe 窗口抑制召回",
+          "en": "Severe-window suppression recall"
+        },
+        "value": "100%",
+        "sample": 13
+      }
     },
     {
       "key": "memory-extract",
@@ -86,7 +150,15 @@
         "en": "Memory extraction quality"
       },
       "status": "pass",
-      "file": "memory-extract.json"
+      "file": "memory-extract.json",
+      "headline": {
+        "metric": {
+          "zh": "记忆抽取召回",
+          "en": "Memory-extract recall"
+        },
+        "value": "100%",
+        "sample": 10
+      }
     },
     {
       "key": "voice-language",
@@ -95,7 +167,15 @@
         "en": "Voice language consistency"
       },
       "status": "pass",
-      "file": "voice-language.json"
+      "file": "voice-language.json",
+      "headline": {
+        "metric": {
+          "zh": "语音语种一致性",
+          "en": "Voice-language consistency"
+        },
+        "value": "100%",
+        "sample": 12
+      }
     },
     {
       "key": "xlate-confidence",
@@ -104,7 +184,15 @@
         "en": "Translation confidence scorer"
       },
       "status": "pass",
-      "file": "xlate-confidence.json"
+      "file": "xlate-confidence.json",
+      "headline": {
+        "metric": {
+          "zh": "置信度判别准确率",
+          "en": "Confidence-scorer accuracy"
+        },
+        "value": "100%",
+        "sample": 8
+      }
     },
     {
       "key": "intent",
@@ -113,34 +201,15 @@
         "en": "Intent accuracy (rule baseline)"
       },
       "status": "pass",
-      "file": "intent.json"
-    },
-    {
-      "key": "translation",
-      "label": {
-        "zh": "翻译回译质量（确定性引擎）",
-        "en": "Back-translation quality"
-      },
-      "status": "skipped",
-      "file": "translation.json"
-    },
-    {
-      "key": "faq",
-      "label": {
-        "zh": "FAQ 自解决率",
-        "en": "FAQ self-resolution rate"
-      },
-      "status": "skipped",
-      "file": "faq.json"
-    },
-    {
-      "key": "memory",
-      "label": {
-        "zh": "记忆召回（关键词 vs 向量）",
-        "en": "Memory recall (kw vs vector)"
-      },
-      "status": "skipped",
-      "file": "memory.json"
+      "file": "intent.json",
+      "headline": {
+        "metric": {
+          "zh": "意图识别准确率",
+          "en": "Intent accuracy"
+        },
+        "value": "100%",
+        "sample": 24
+      }
     }
   ]
 }

@@ -18,5 +18,13 @@
     "max_false_positive": 0,
     "passed": true
   },
-  "generated_at": "2026-07-11T10:27:52+0800"
+  "headline": {
+    "metric": {
+      "zh": "记忆抽取召回",
+      "en": "Memory-extract recall"
+    },
+    "value": "100%",
+    "sample": 10
+  },
+  "generated_at": "2026-07-12T17:14:37+0800"
 }
