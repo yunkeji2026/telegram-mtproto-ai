@@ -1011,6 +1011,18 @@ ai:
   embedding_model: ""
   embedding_api_key: ""
 
+  # 主对话 LLM 容灾（可选，默认关）：云主模型（如 DeepSeek）不可达或熔断开路时，
+  # 回落到本地 OpenAI 兼容端点（如 LAN Ollama）继续出真话，替代 canned 占位句。
+  # 人设/记忆/上下文照常（复用主链已构建的 messages），语言守卫照常；
+  # 兜底自身失败仍回 canned 占位——行为最差不劣于无兜底。仅 provider=openai_compatible 生效。
+  # fallback:
+  #   enabled: true
+  #   base_url: http://192.168.0.176:11434   # 本地 Ollama
+  #   model: qwen3:30b-a3b-instruct-2507-q4_K_M
+  #   api_key: ollama
+  #   timeout: 120        # 首次载入大模型可到 ~60s，留足；连接失败 5s 快败
+  #   think: false        # qwen3 思考系防慢答；instruct 系无感
+
   # 系统提示词
   system_prompt: |
     你是智能助手小灵，为用户提供友好、专业的客服服务。
@@ -1525,12 +1537,21 @@ workspace:
     sec_per_reply: 180
     cost_per_hour: 0
   # 入站自动翻译：坐席打开会话时，将外语客户消息译为中文展示（默认关，控 API 成本）
+  # 性能架构（2026-07）：打开会话只同步译最新 2 条（≤2.5s），其余交后台任务写库，
+  # 前端轮询下一拍取回；不可译消息（emoji 等）打标后不再重译，失败 10 分钟负缓存。
   auto_translate_inbound:
     enabled: false
     target_lang: zh           # 译成何种语言
     source_langs: []          # 空=所有非 target 语言；例 [en, ja, ko] 仅译英日韩
     max_per_thread: 8         # 每次打开会话最多翻译条数
     max_chars: 400            # 超长消息跳过
+    # 存量消化（默认关）：低频巡检最近活跃会话，闲时把未译存量提前译好落库——
+    # 坐席首开老会话即毫秒级+译文已备好。复用打开会话同一套判定/防重/负缓存。
+    backfill:
+      enabled: false
+      interval_sec: 300       # 巡检间隔（秒）
+      scan_convs: 20          # 每 tick 扫描的最近活跃会话数
+      max_active_convs: 2     # 每 tick 允许实际开工的会话数（控翻译引擎并发）
   # 自动派单（建议接管）：为未认领会话推荐在线坐席，仅产出「建议」不自动锁定，
   # 不改变现有手动 claim 流程（默认关；开启后会话列表 chats[].suggested_agent 出现建议）
   auto_assign:
@@ -1934,6 +1955,13 @@ ops:
     step: 5                            # auto_health 每轮最多扩入的新号数
     hold_hours: 24                     # auto_health 绿灯需连续稳定的小时数（watchdog 用）
     red_rate_threshold: 0.1            # 机群红灯率超此值则不推进扩面
+
+  # ── LAN GPU 显存水位（ops-overview 卡）────────────────────────────
+  # 各 Ollama 主机 /api/ps 聚合（30s TTL），口径=Ollama 管理的模型显存
+  # （非 nvidia-smi 全卡占用）。≥75% warn / ≥90% high。查看：GET /api/admin/gpu-watermark
+  gpu_watermark:
+    enabled: false                     # 默认关；有多台 LAN GPU 时开
+    hosts: []                          # [{name: "176-5090", base_url: "http://192.168.0.176:11434", vram_gb: 32}]
 
 # ── C0-1 离线授权（License）─────────────────────────────────────────
 # 私有化部署的商业化授权。厂商用 Ed25519 私钥签发授权码，产品内置公钥离线验签。

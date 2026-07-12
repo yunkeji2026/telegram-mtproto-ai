@@ -56,3 +56,12 @@
 - {text: "Terima kasih sudah menemani aku ngobrol semalam", target_lang: zh, source_lang: id, note: 进站-陪伴感谢}
 - {text: "¿Cuánto tarda el envío a México? ¿Tiene costo extra?", target_lang: zh, source_lang: es, note: 进站-国际物流}
 - {text: "Ты сегодня какой-то грустный, что-то случилось?", target_lang: zh, source_lang: ru, note: 进站-情绪关心}
+
+# ── 反向语料扩充（2026-07-12 首次周审：ru→zh/id→zh 仅 n=1 噪声大，ar/fr/hi 反向为零；
+# 按弱语对定点补样，下周趋势行可读到 n≥2 的稳定读数）──
+- {text: "Мой заказ ещё не пришёл, подскажите номер отслеживания?", target_lang: zh, source_lang: ru, note: 进站-物流查询}
+- {text: "Спасибо, что выслушал меня вчера, мне стало намного легче", target_lang: zh, source_lang: ru, note: 进站-陪伴感谢}
+- {text: "Ukurannya kekecilan, bisa tukar ke ukuran L?", target_lang: zh, source_lang: id, note: 进站-换码}
+- {text: "متى سيصل طلبي؟ لقد طلبته قبل أسبوع تقريبًا", target_lang: zh, source_lang: ar, note: 进站-物流查询}
+- {text: "Bonjour, la robe est trop petite, je voudrais l'échanger contre une taille M", target_lang: zh, source_lang: fr, note: 进站-换货}
+- {text: "क्या आप बता सकते हैं कि मेरा ऑर्डर कब आएगा?", target_lang: zh, source_lang: hi, note: 进站-物流查询}

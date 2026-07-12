@@ -122,7 +122,7 @@ def test_init_parses_embedding_base_urls(monkeypatch):
     calls = {}
 
     class _FakeAsyncOpenAI:
-        def __init__(self, *, api_key, base_url, timeout):
+        def __init__(self, *, api_key, base_url, timeout, **kw):
             calls.setdefault("urls", []).append(base_url)
 
     import src.ai.ai_client as mod

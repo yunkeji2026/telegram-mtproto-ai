@@ -63,6 +63,13 @@ def _msg_from_obj(
     conversation_id: str, m: Dict[str, Any], *, direction: str = "", platform: str = "",
 ) -> InboxMessage:
     text = str(m.get("text") or "")
+    # 译文净化：message_obj() 会把 translated_text 预填为原文（占位）。原样落库会产生
+    # 大量「translated==text 且 target_lang=''」的假译文行——入站自动翻译把它们判为
+    # 未译，每次打开会话都重译一遍（/thread 6s 超时的元凶之一）。占位值一律存空，
+    # 「已译」语义只由真译文（update_message_translation 回写）承载。
+    translated = str(m.get("translated_text") or "")
+    if translated == text:
+        translated = ""
     # 稳定 message id：从平台原始 source 按白名单提取可信 id（MTProto message.id /
     # WhatsApp wamid 等），让 collect / thread 两条路径对同一条消息产出同一去重键。
     # 取不到（多数 RPA 源）→ 留空，store 回落 hash(text|ts) 内容去重（跨路径仍一致，
@@ -92,7 +99,7 @@ def _msg_from_obj(
         direction=direction or str(m.get("direction") or "in"),
         text=text,
         original_text=str(m.get("original_text") or text),
-        translated_text=str(m.get("translated_text") or ""),
+        translated_text=translated,
         source_lang=str(m.get("language") or "unknown"),
         media_type=media_type,
         media_ref=media_ref,

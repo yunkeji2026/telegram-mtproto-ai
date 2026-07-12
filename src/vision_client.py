@@ -196,11 +196,19 @@ class VisionClient:
         if key in ("", "YOUR_ZHIPU_API_KEY"):
             key = "ollama"
         timeout = float(self.config.get("timeout", 120))
+        # LAN 多端点：连接 5s 快败（防火墙丢包型死主机别吃满整体 timeout），读超时留足
+        # （备端点冷载模型可要 2min+）；SDK 内建重试关掉——重试同一死端点不如立刻切下一个。
+        try:
+            import httpx
+            eff_timeout: Any = httpx.Timeout(timeout, connect=5.0)
+        except Exception:
+            eff_timeout = timeout
         self._oa_endpoints = []
         for base in urls:
             try:
                 self._oa_endpoints.append(
-                    (base, OpenAI(api_key=key, base_url=base, timeout=timeout))
+                    (base, OpenAI(api_key=key, base_url=base,
+                                  timeout=eff_timeout, max_retries=0))
                 )
             except Exception as e:
                 self.logger.warning("Vision 端点 %s 构建失败: %s", base, e)

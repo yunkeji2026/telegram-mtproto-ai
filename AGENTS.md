@@ -304,6 +304,36 @@ python -m pytest tests/test_faq_resolution_gate.py tests/test_translation_qualit
 - **翻译趋势周报 CLI**：`python -m scripts.xlate_trend_report [--json]` 把周批 JSONL 按
   (dataset,engine,back_engine) 分组渲染趋势表 + 最新弱语对 Top-K（sem 升序，n<2 标注），
   周审读数即可决策 per_lang_order/阈值。门禁 `tests/test_xlate_trend_report.py`。
+  首次周审（2026-07-12，44 样本）：交叉回译(back=ai) sem 0.945 vs 自回译 0.939——**自洽虚高未坐实**
+  （交叉口径反而略高，指标可信）；弱语对 zh→ar 0.899 / zh→fr 0.911 / zh→hi 0.923 全过线，
+  **不动 per_lang_order**。反向语料按弱语对补 6 条（ru/id/ar/fr/hi→zh，corpus 44→50），
+  下周趋势行 n≥2 可稳读。周批任务 TranslationEvalWeekly 建于上周六后，首次自动跑在 7/18。
+- **主对话 LLM 容灾**（`ai.fallback`，2026-07-12）：DeepSeek 云不可达（两次尝试失败）或熔断开路时，
+  `AIClient` 回落 176 本地 `qwen3:30b-a3b-instruct`（MoE 3B 激活，热答 ~2-3s）**出真话**，替代
+  canned 占位句；复用主链已构建 messages（人设/记忆/上下文全保留）+ 末位语言钉子（本地小模型
+  易混语），语言守卫照常；兜底自身失败仍回 canned（最差不劣于旧链）。Ollama 端点自动走**原生
+  /api/chat**（/v1 兼容层不认 keep_alive/think——实测被忽略），`keep_alive:30m` 断云期驻留显存
+  （5090 上 18G 与 MT/bge 共存），只有首个用户吃 ~15-27s 冷载。主客户端同轮改为连接 5s 快败 +
+  关 SDK 内建重试（调用方自有 2 次循环），断云→出话从分钟级降至 ~8-20s；熔断开路期 0 主链开销。
+  观测：`/api/bot-metrics.local_llm_fallback{calls,ok}` + dashboard 质量行「本地兜底出话」+
+  llm_cost tier=local_fallback。门禁 `tests/test_ai_client_chat_fallback.py`（主成功不兜底/主挂兜底/
+  开路直兜底/双挂回 canned/原生口选择/配置解析）。演练：死主端点 → 首答 20.3s（含冷载）、次答 8.4s。
+- **176 音频服务健康灯**（2026-07-12）：`collect_health` 周期探自建 GPU 音频服务 `/health`
+  （`audio_probe_target` 纯函数决策：仅 voice_recognition 启用 + OpenAI 兼容 + **私网** base_url 才探，
+  公网云 ASR 无此契约不探防误报；60s TTL 缓存 + 3s 超时），出 `audio` 组件进运行时健康：不可达/
+  模型未装载→**warn 黄灯**（链路自动降级 CPU 属软性），装载齐→ok。挂 → 看板黄灯 + problems 可见，
+  补掉「176 服务挂了只有远端看门狗知道」的主站盲区。门禁 `tests/test_audio_service_health.py`。
+- **断云真流量演习**（2026-07-12 凌晨低峰实施，结论可信）：防火墙封 DeepSeek 出站 → 经
+  `/api/copilot/query`（真 `generate_reply` 全链）打 22 发含 9/10 并发：**22/22 由本地兜底出真话**
+  （热答 4.3-6.8s，并发不塌），熔断走完 closed→open（跳过主链，答复 1.8s）→半开→**探测成功自动闭合**
+  全周期，全程 0 canned。防火墙 RST 场景主链快败 ~2s；真黑洞(丢包)场景每次开路前调用付 ~11.5s
+  → `ai.circuit_breaker.window_size` 经 overlay 降为 10（10 发内 ≥5 失败即熔断，减半慢调用敞口）。
+- **LAN GPU 显存水位卡**（`ops.gpu_watermark`，2026-07-12）：ops-overview 新卡聚合各 Ollama 主机
+  `/api/ps`（`src/utils/gpu_watermark.py` 纯函数 summarize + 30s TTL 探针，路由
+  `/api/admin/gpu-watermark`），口径=Ollama 管理的模型显存（非 nvidia-smi 全卡）；≥75% warn/≥90% high，
+  探不到=unknown（整队取最差不装绿）。「140(12G) 兼任嵌入+视觉备点被同时压上会挤爆」从 SSH 肉眼
+  `ollama ps` 变成看板常驻可见。新子系统默认 enabled:false，本机 overlay 已开（176/140 两主机）。
+  门禁 `tests/test_gpu_watermark.py`；卡片未启用时整卡隐藏。
 
 ### i18n 施工约定（后台路由 CJK 收口 + 前端裸键）
 

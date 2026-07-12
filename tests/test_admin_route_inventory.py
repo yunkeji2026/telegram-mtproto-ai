@@ -46,6 +46,7 @@ _BASELINE = """
 /api/admin/realtime-voice-alert-calibrate	GET
 /api/admin/realtime-voice-alert-thresholds	POST
 /api/admin/realtime-voice-trend	GET
+/api/admin/gpu-watermark	GET
 /api/admin/send-route-trend	GET
 /api/admin/workers/{worker_id}/reset-circuit	POST
 /api/admin/reliability	GET

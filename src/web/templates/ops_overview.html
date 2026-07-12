@@ -171,6 +171,12 @@
     <div id="identityTrend" style="margin-top:10px;"></div>
   </section>
 
+  <section id="gpuWmSection" style="display:none;">
+    <h2>🖥️ {{ (i18n or {}).get('ov2_s_gpuwm', "LAN GPU 显存水位（Ollama 模型占用）") }}</h2>
+    <div class="grid" id="gpuWmKpis"></div>
+    <div id="gpuWmDetail"><div class="empty">{{ (i18n or {}).get('dash.loading', "加载中…") }}</div></div>
+  </section>
+
   <section>
     <h2>🧬 {{ (i18n or {}).get('ov2_s_localtts', "本机情感克隆 IndexTTS2（随主程序启停）") }}</h2>
     <div class="grid" id="localTtsKpis"></div>
@@ -979,8 +985,36 @@ async function loadTranslationEngines(){
       return '<tr><td>'+row.engine+'</td><td>'+row.calls+'</td><td>'+row.ok+'</td><td>'+
         row.fail+'</td><td>'+sr+'%</td><td>'+row.avg_latency_ms+' ms</td></tr>';
     }).join('');
+    // 入站翻译（同步预算 + 后台补译）摘要行：有数据才显示；积压/失败标红提醒
+    var inx = d.inbound_translation || null;
+    var inxHtml = '';
+    if(inx && ((inx.sync_ok+inx.sync_noop+inx.sync_fail+inx.bg_ok+inx.bg_noop+inx.bg_fail+inx.deferred_total)||0) > 0){
+      var rt = inx.runtime || {};
+      var backlog = (Number(rt.bg_convs)||0);
+      var fails = (Number(inx.sync_fail)||0) + (Number(inx.bg_fail)||0);
+      inxHtml = '<div class="muted" style="font-size:12px;margin-top:8px;">'+window.T('ov2_js_in_title')+': '+
+        window.T('ov2_js_in_sync')+' '+fmt(inx.sync_ok)+' · '+
+        window.T('ov2_js_in_bg')+' '+fmt(inx.bg_ok)+' (deferred '+fmt(inx.deferred_total)+') · '+
+        window.T('ov2_js_in_noop')+' '+fmt((Number(inx.sync_noop)||0)+(Number(inx.bg_noop)||0))+' · '+
+        '<span style="'+(fails>0?'color:var(--tk-danger-ink,#dc2626);':'')+'">'+window.T('rpa_js_st_failed')+' '+fmt(fails)+'</span> · '+
+        window.T('ov2_js_in_cooldown')+' '+fmt(inx.skipped_cooldown)+' · '+
+        '<span style="'+(backlog>0?'color:var(--tk-amber-ink,#b45309);':'')+'">'+window.T('ov2_js_in_backlog')+' '+fmt(backlog)+'</span></div>';
+    }
+    // 入站翻译 7 天趋势（store 按日漏斗，跨重启）：≥2 天有数据才画（sparkline 需两点）
+    var itr = (inx && inx.trend_7d) || [];
+    if(itr.length >= 2){
+      var itLabels = itr.map(function(x){
+        return (x.day||'')+': '+window.T('ov2_js_in_sync')+' '+(x.translated||0)+
+          ' · deferred '+(x.deferred||0)+' · '+window.T('rpa_js_st_failed')+' '+(x.failed||0);
+      });
+      inxHtml += '<div style="margin-top:4px;">'+
+        sparkline(itr.map(function(x){ return Number(x.translated)||0; }), {labels:itLabels, color:'#3fb950', w:300})+
+        ' '+sparkline(itr.map(function(x){ return Number(x.deferred)||0; }), {labels:itLabels, color:'#d29922', w:300})+
+        '</div>';
+    }
     pv.innerHTML = '<table><tr><th>'+window.T('tg_s067')+'</th><th>'+window.T('kb_js_120')+'</th><th>'+window.T('ov_js_succ_label')+'</th><th>'+window.T('rpa_js_st_failed')+'</th>'+
       '<th>'+window.T('ov_kpi_rate')+'</th><th>'+window.T('ap_s042')+'</th></tr>'+rows+'</table>'+
+      inxHtml+
       '<div class="muted" style="font-size:12px;margin-top:8px;">'+window.T('ov2_js061')+'='+window.T('ov2_js062')+
       ' ('+window.T('mo_js013')+' translation.engines.confidence_switch); '+window.T('ov2_js063')+' → '+window.T('ov2_js064')+'</div>';
   }catch(e){
@@ -1209,7 +1243,10 @@ async function loadPlatformSessions(){
     if(r.status === 403){ kp.innerHTML=''; dv.innerHTML='<div class="empty">'+window.T('ov2_js037')+'</div>'; return; }
     const d = await r.json();
     var ps = d.platform_sessions || null;
-    if(!ps || !(Number(ps.total_events)||0)){
+    // TG 断网冷却（web 侧观察态：get_chat 超时→账号级冷却）：{account_id: 剩余秒}
+    var tgCd = (ps && ps.tg_cooldown) || {};
+    var tgCdKeys = Object.keys(tgCd);
+    if(!ps || (!(Number(ps.total_events)||0) && !tgCdKeys.length)){
       kp.innerHTML=''; dv.innerHTML='<div class="empty">'+window.T('ov2_js_ps_none')+'</div>'; return;
     }
     var sess = ps.sessions || {};
@@ -1220,6 +1257,8 @@ async function loadPlatformSessions(){
       {label:window.T('ov2_js_ps_sessions'), value:fmt(keys.length)},
       {label:window.T('ov2_js_ps_unhealthy'),
        value:(unhealthy.length ? '🔴 ' : '🟢 ') + unhealthy.length},
+      {label:window.T('ov2_js_ps_tg_cd'),
+       value:(tgCdKeys.length ? '🟡 '+tgCdKeys.length : '🟢 0')},
     ];
     kp.innerHTML = kpis.map(function(c){
       return '<div class="kpi"><div class="muted" style="font-size:12px;">'+c.label+
@@ -1243,7 +1282,13 @@ async function loadPlatformSessions(){
       }
       return '<tr><td>'+esc(k)+'</td><td>'+dot+' '+esc(o.status||'?')+'</td><td>'+
         esc((o.detail||'').slice(0,80))+'</td><td class="muted">'+esc(when)+'</td><td>'+act+'</td></tr>';
-    }).join('') || '<tr><td colspan="5" class="muted">—</td></tr>';
+    }).join('');
+    // TG 断网冷却行（黄点，剩余秒数；到期自动消失，无按钮——恢复由下次 RPC 成功自动解除）
+    rows += tgCdKeys.map(function(a){
+      return '<tr><td>telegram:'+esc(a)+'</td><td>🟡 '+esc(window.T('ov2_js_ps_tg_cd'))+'</td><td>'+
+        esc(String(Math.round(Number(tgCd[a])||0))+'s')+'</td><td class="muted">—</td><td></td></tr>';
+    }).join('');
+    rows = rows || '<tr><td colspan="5" class="muted">—</td></tr>';
     dv.innerHTML =
       '<table><tr><th>'+window.T('ov2_js_ps_col_session')+'</th><th>'+window.T('ov2_js_ps_col_status')+
       '</th><th>'+window.T('ov2_js_ps_col_detail')+'</th><th>'+window.T('ov2_js_ps_col_time')+
@@ -1401,6 +1446,46 @@ async function loadPersonaMedia(){
       '<div class="muted" style="font-size:12px;margin-bottom:4px;">'+window.T('ov2_js_pma_top')+'</div>'
       + '<table><tr><th>'+window.T('ov2_js_pma_col_media')+'</th><th>'+window.T('ov2_js_pma_col_hits')+'</th></tr>'+rows+'</table>'
       + '<div class="muted" style="font-size:12px;margin-top:8px;">'+window.T('ov2_js_pma_hint')+'</div>';
+  }catch(e){
+    dv.innerHTML = '<div class="empty">'+window.T('ln_js_033')+e+'</div>';
+  }
+}
+
+// 🖥️ LAN GPU 显存水位卡：读 /api/admin/gpu-watermark（Ollama /api/ps 聚合，30s TTL）。
+// 「140 兼任嵌入+视觉备点会挤爆」的提前预警；未启用则整卡隐藏。
+async function loadGpuWatermark(){
+  var sec = document.getElementById('gpuWmSection');
+  var kp = document.getElementById('gpuWmKpis');
+  var dv = document.getElementById('gpuWmDetail');
+  if(!sec || !kp || !dv) return;
+  try{
+    const r = await fetch('/api/admin/gpu-watermark', {credentials:'same-origin'});
+    const d = await r.json();
+    if(!d.enabled){ sec.style.display='none'; return; }
+    sec.style.display='';
+    var lvIcon = {ok:'🟢', warn:'🟡', high:'🔴', unknown:'⚪'};
+    var hosts = d.hosts || [];
+    kp.innerHTML = hosts.map(function(h){
+      var v = h.reachable ? (h.used_gb+' / '+h.total_gb+' GB') : window.T('ov2_js_gpuwm_unreach');
+      var pct = (h.used_pct===null||h.used_pct===undefined) ? '' :
+        '<span class="muted" style="font-size:12px;margin-left:6px;">'+h.used_pct+'%</span>';
+      return '<div class="kpi"><div class="muted" style="font-size:12px;">'+(lvIcon[h.level]||'⚪')+' '+h.name+
+        '</div><div style="font-size:20px;font-weight:600;margin-top:4px;">'+v+pct+'</div></div>';
+    }).join('') || '';
+    function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+    var rows = [];
+    hosts.forEach(function(h){
+      (h.models||[]).forEach(function(m){
+        rows.push('<tr><td>'+esc(h.name)+'</td><td>'+esc(m.name)+'</td><td>'+m.size_gb+' GB</td></tr>');
+      });
+      if(!h.reachable){
+        rows.push('<tr><td>'+esc(h.name)+'</td><td colspan="2" class="muted">'+window.T('ov2_js_gpuwm_unreach')+' '+esc(h.error||'')+'</td></tr>');
+      }
+    });
+    dv.innerHTML = rows.length
+      ? '<table><tr><th>'+window.T('ov2_js_gpuwm_col_host')+'</th><th>'+window.T('ov2_js_gpuwm_col_model')+'</th><th>VRAM</th></tr>'+rows.join('')+'</table>'
+        + '<div class="muted" style="font-size:12px;margin-top:8px;">'+window.T('ov2_js_gpuwm_hint')+'</div>'
+      : '<div class="empty">'+window.T('ov2_js_gpuwm_idle')+'</div>';
   }catch(e){
     dv.innerHTML = '<div class="empty">'+window.T('ln_js_033')+e+'</div>';
   }
@@ -2041,7 +2126,7 @@ async function toggleLocalTts(on){
 }
 
 if(CAN_MANAGE_OPS){ var _rb=document.getElementById('recheckBtn'); if(_rb) _rb.style.display=''; }
-function refreshAll(){ loadOverview(); loadIncidents(); loadReport(); loadTTS(); loadTTSTrend(); loadAiSafety(); loadSlaBacklog(); loadTranslationEngines(); loadXlateTrend(); loadVoiceSynthLang(); loadASRDegradation(); loadSpeechEmotion(); loadDeepPersona(); loadFrontendErrors(); loadPlatformSessions(); loadSendRoutes(); loadSendRouteTrend(); loadPersonaMedia(); loadPeerIdentity(); loadIdentityTrend(); loadLocalTts(); loadRealtimeVoice(); loadRtvTrend(); refreshRealtimeVoiceAlertBadge(); }
+function refreshAll(){ loadOverview(); loadIncidents(); loadReport(); loadTTS(); loadTTSTrend(); loadAiSafety(); loadSlaBacklog(); loadTranslationEngines(); loadXlateTrend(); loadVoiceSynthLang(); loadASRDegradation(); loadSpeechEmotion(); loadDeepPersona(); loadFrontendErrors(); loadPlatformSessions(); loadSendRoutes(); loadSendRouteTrend(); loadPersonaMedia(); loadPeerIdentity(); loadIdentityTrend(); loadLocalTts(); loadGpuWatermark(); loadRealtimeVoice(); loadRtvTrend(); refreshRealtimeVoiceAlertBadge(); }
 function _onRtvOpsRefresh(){
   loadRealtimeVoice(); loadRtvTrend(); loadRtvAlertCalibrate(false); refreshRealtimeVoiceAlertBadge();
 }

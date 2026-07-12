@@ -35,6 +35,10 @@ class MetricsStore:
         self._rate_limited_count: int = 0
         self._auto_ban_count: int = 0
         self._fallback_count: int = 0
+        # 主对话 LLM 容灾：本地兜底模型出话次数（calls=尝试，ok=真出话）。
+        # canned 占位句计数在 _fallback_count；本地兜底成功时不会再累 canned。
+        self._local_llm_fb_calls: int = 0
+        self._local_llm_fb_ok: int = 0
         self._truncated_count: int = 0
         self._reply_lengths: deque = deque(maxlen=200)
         self._ai_last_success_at: float = 0
@@ -202,6 +206,13 @@ class MetricsStore:
     def record_fallback_reply(self):
         with self._lock:
             self._fallback_count += 1
+
+    def record_local_llm_fallback(self, ok: bool):
+        """主模型不可达/熔断时本地兜底模型的一次尝试（ok=出了真话）。"""
+        with self._lock:
+            self._local_llm_fb_calls += 1
+            if ok:
+                self._local_llm_fb_ok += 1
 
     def record_truncated_reply(self):
         with self._lock:
@@ -787,6 +798,11 @@ class MetricsStore:
                 "truncated_count": truncated,
                 "truncated_rate_pct": round(truncated / replied * 100, 1),
                 "lang_mismatch_count": self._lang_mismatch_count,
+            },
+            # 主对话 LLM 容灾：本地兜底模型出话情况（云主模型不可达/熔断时）
+            "local_llm_fallback": {
+                "calls": self._local_llm_fb_calls,
+                "ok": self._local_llm_fb_ok,
             },
             "memory": {
                 "slow_think": slow_think,

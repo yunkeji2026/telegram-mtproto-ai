@@ -884,11 +884,13 @@ async function loadBotMetrics(){
     ).join('');
     // quality
     const rq=d.reply_quality||{};
+    const lf=d.local_llm_fallback||{};
     const qEl=document.getElementById('bm-quality');
     qEl.innerHTML=[
       rq.avg_reply_length?`${window.T('db_js_088')} <b>${rq.avg_reply_length}</b> ${window.T('db_js_089')}`:'',
       rq.fallback_count?`${window.T('db_js_090')} <b style="color:var(--amber)">${rq.fallback_count}</b> (${rq.fallback_rate_pct}%)`:'',
       rq.truncated_count?`${window.T('db_js_091')} <b style="color:var(--red)">${rq.truncated_count}</b> (${rq.truncated_rate_pct}%)`:'',
+      lf.calls?`${window.T('db_js_local_llm_fb')} <b style="color:var(--amber)">${lf.ok}/${lf.calls}</b>`:'',
     ].filter(Boolean).join(' · ');
     const mem=d.memory;
     const mEl=document.getElementById('bm-memory');

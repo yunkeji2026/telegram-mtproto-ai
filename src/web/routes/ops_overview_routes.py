@@ -382,6 +382,25 @@ def register_ops_overview_routes(app, ctx) -> None:
             logger.debug("send-route-trend 读取失败（已忽略）", exc_info=True)
             return {"ok": True, "enabled": False, "days": []}
 
+    @app.get("/api/admin/gpu-watermark")
+    async def api_gpu_watermark(request: Request, force: int = 0):
+        """LAN GPU 显存水位：各 Ollama 主机 /api/ps 聚合（30s TTL 缓存）。
+
+        「140 兼任嵌入+视觉备点，被同时压上会挤爆」的提前预警。未启用
+        （ops.gpu_watermark.enabled=false）→ enabled:false，前端隐藏卡。
+        """
+        api_auth(request)
+        try:
+            from src.utils.gpu_watermark import probe_hosts
+            cfg = getattr(config_manager, "config", None) or {}
+            data = await probe_hosts(cfg, force=bool(force))
+            if data is None:
+                return {"ok": True, "enabled": False, "hosts": []}
+            return {"ok": True, "enabled": True, **data}
+        except Exception:
+            logger.debug("gpu-watermark 探测失败（已忽略）", exc_info=True)
+            return {"ok": True, "enabled": False, "hosts": []}
+
     @app.get("/api/admin/realtime-voice-trend")
     async def api_realtime_voice_trend(request: Request, days: int = 7):
         """E 线：近 N 天实时语音接通率/健康率按日聚合（供看板 sparkline）。

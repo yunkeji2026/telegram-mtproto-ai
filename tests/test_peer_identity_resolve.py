@@ -25,11 +25,13 @@ from src.web.routes import unified_inbox_account_routes as R
 
 @pytest.fixture(autouse=True)
 def _clear_peer_cache():
-    """每个用例前后清空进程级 peer 缓存 + 观测计数，避免跨用例串味。"""
+    """每个用例前后清空进程级 peer 缓存 + 断网冷却 + 观测计数，避免跨用例串味。"""
     R._TG_PEER_IDENTITY_CACHE.clear()
+    R._TG_CLIENT_BAD_UNTIL.clear()
     get_peer_identity_stats().reset()
     yield
     R._TG_PEER_IDENTITY_CACHE.clear()
+    R._TG_CLIENT_BAD_UNTIL.clear()
     get_peer_identity_stats().reset()
 
 
@@ -190,6 +192,65 @@ def test_peer_cache_bounded_eviction(monkeypatch):
     assert len(R._TG_PEER_IDENTITY_CACHE) <= 10
     assert ("acct", "14") in R._TG_PEER_IDENTITY_CACHE     # 最新保留
     assert ("acct", "0") not in R._TG_PEER_IDENTITY_CACHE   # 最旧被逐出
+
+
+# ─────────────────────── 断网冷却（get_chat 超时 → 账号级快速失败） ───────────────────────
+
+class _HangPyro:
+    """get_chat 永挂（模拟 pyrogram 断网重连）：等一个不会来的事件。"""
+
+    def __init__(self, loop):
+        self.loop = loop
+        self.calls = 0
+
+    async def get_chat(self, peer):
+        self.calls += 1
+        await asyncio.sleep(3600)
+
+
+def test_resolve_timeout_opens_cooldown_and_fast_fails(tmp_path, bg_loop, monkeypatch):
+    """首个 get_chat 超时 → 开账号冷却；冷却窗内同账号 resolve 秒失败（零 RPC），
+    且不写 per-peer 负缓存（恢复后同 peer 仍可重试）。"""
+    monkeypatch.setattr(R, "_TG_FETCH_TIMEOUT_SEC", 0.2)   # 免等 8s
+    store = InboxStore(tmp_path / "inbox.db")
+    pyro = _HangPyro(bg_loop)
+    tg = _FakeTG(pyro)
+
+    r1 = R.resolve_tg_peer_identity(store, tg, "acct1", "111")
+    assert r1["ok"] is False and r1["reason"] == "resolve_timeout"
+    assert pyro.calls == 1
+    assert R._tg_client_cooling("acct1") is True            # 冷却已开
+    assert ("acct1", "111") not in R._TG_PEER_IDENTITY_CACHE  # 未写 per-peer 负缓存
+
+    r2 = R.resolve_tg_peer_identity(store, tg, "acct1", "222")   # 另一 peer
+    assert r2["ok"] is False and r2["reason"] == "client_cooling"
+    assert pyro.calls == 1                                   # 冷却窗内零新 RPC
+    store.close()
+
+
+def test_resolve_success_clears_cooldown(tmp_path, bg_loop):
+    """冷却窗过期后 RPC 成功 → 冷却解除，后续正常解析。"""
+    store = InboxStore(tmp_path / "inbox.db")
+    tg = _FakeTG(_FakePyro(bg_loop, chat=_FakeChat(first_name="Ann")))
+    # 人工造一个「已过期」的冷却（monotonic 过去时刻）
+    import time as _t
+    R._TG_CLIENT_BAD_UNTIL["acct1"] = _t.monotonic() - 1
+    res = R.resolve_tg_peer_identity(store, tg, "acct1", "333")
+    assert res["ok"] is True and res["name"] == "Ann"
+    assert "acct1" not in R._TG_CLIENT_BAD_UNTIL             # 成功后冷却字典已清
+    store.close()
+
+
+def test_cooldown_is_per_account(tmp_path, bg_loop):
+    """冷却按账号隔离：acct1 冷却中，acct2 不受影响。"""
+    store = InboxStore(tmp_path / "inbox.db")
+    R._mark_tg_client_bad("acct1")
+    tg = _FakeTG(_FakePyro(bg_loop, chat=_FakeChat(first_name="Bob")))
+    r_cool = R.resolve_tg_peer_identity(store, tg, "acct1", "1")
+    assert r_cool["reason"] == "client_cooling"
+    r_ok = R.resolve_tg_peer_identity(store, tg, "acct2", "1")
+    assert r_ok["ok"] is True and r_ok["name"] == "Bob"
+    store.close()
 
 
 # ─────────────────────── LINE 私聊发送者显示名 ───────────────────────

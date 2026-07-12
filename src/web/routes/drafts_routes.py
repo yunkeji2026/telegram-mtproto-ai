@@ -641,6 +641,14 @@ def register_metrics_route(app, *, api_auth):
         except Exception:
             metrics["auto_claim"] = {"running": False}
 
+        # 入站翻译存量消化 worker（默认关；扫描/开工/译出累计）
+        try:
+            bfw = getattr(request.app.state, "inbound_backfill_worker", None)
+            if bfw is not None:
+                metrics["inbound_backfill"] = bfw.status_snapshot()
+        except Exception:
+            pass
+
         # WebhookNotifier (L2)
         try:
             whn = getattr(request.app.state, "webhook_notifier", None)
@@ -700,6 +708,25 @@ def register_metrics_route(app, *, api_auth):
         try:
             from src.ai.outbound_translation_stats import get_outbound_translation_stats
             metrics["outbound_translation"] = get_outbound_translation_stats().dump()
+        except Exception:
+            pass
+
+        # 入站自动翻译（同步预算 + 后台补译）：sync/bg 三态、deferred、负缓存拦截 +
+        # 瞬时 in-flight（后台积压/引擎宕机的工程观测；按日漏斗另见 dashboard translation_inbound）
+        try:
+            from src.ai.inbound_translation_stats import get_inbound_translation_stats
+            from src.workspace.inbound_translate import runtime_snapshot
+            _inx = get_inbound_translation_stats().dump(runtime=runtime_snapshot())
+            # 7 天趋势（store 按日漏斗，跨重启）：进程计数只能看当次运行，
+            # sparkline 需要日粒度 → 顺手从 inbound_xlate_daily 读出附上。
+            try:
+                _ibx_store = getattr(request.app.state, "inbox_store", None)
+                if _ibx_store is not None and hasattr(_ibx_store, "get_inbound_xlate_stats"):
+                    _inx["trend_7d"] = _ibx_store.get_inbound_xlate_stats(
+                        time.time() - 7 * 86400).get("trend", [])
+            except Exception:
+                pass
+            metrics["inbound_translation"] = _inx
         except Exception:
             pass
 
@@ -805,6 +832,19 @@ def register_metrics_route(app, *, api_auth):
         except Exception:
             pass
 
+        # TG 断网冷却（web 侧观察态：get_chat 超时→账号级 60s 冷却）附进同一块——
+        # 与 worker push 的登记表语义不同（这是「正在断网重连」的瞬时信号），
+        # 但用户视角同属「平台会话健康」，ops 卡据此给 telegram 行标「冷却中」。
+        try:
+            from src.web.routes.unified_inbox_account_routes import tg_cooldown_snapshot
+            _cd = tg_cooldown_snapshot()
+            if isinstance(metrics.get("platform_sessions"), dict):
+                metrics["platform_sessions"]["tg_cooldown"] = _cd
+            elif _cd:
+                metrics["platform_sessions"] = {"tg_cooldown": _cd}
+        except Exception:
+            pass
+
         fmt = str(format or "json").lower()
 
         if fmt == "prometheus":
@@ -882,6 +922,13 @@ def register_metrics_route(app, *, api_auth):
             try:
                 from src.ai.outbound_translation_stats import get_outbound_translation_stats
                 buf.write(get_outbound_translation_stats().dump_prom())
+            except Exception:
+                pass
+
+            # 入站自动翻译（同步/后台三态 + deferred + 冷却拦截）
+            try:
+                from src.ai.inbound_translation_stats import get_inbound_translation_stats
+                buf.write(get_inbound_translation_stats().dump_prom())
             except Exception:
                 pass
 

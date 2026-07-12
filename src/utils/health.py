@@ -42,6 +42,7 @@ def build_health(
     workers: Optional[List[Dict[str, Any]]] = None,
     pending_drafts: Optional[int] = None,
     pending_threshold: int = 200,
+    audio_service: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """聚合运行时健康（纯函数）。返回 {ok, light, components, summary, ts}。"""
     comps: List[Dict[str, Any]] = []
@@ -94,6 +95,29 @@ def build_health(
                                f"熔断中{('：' + le) if le else ''}"))
         else:
             comps.append(_comp(f"worker_{wid}", name, "ok", "运行中"))
+
+    # 5.5) LAN GPU 音频服务（ASR/SER）——软性：不可达时链路自动降级本机 CPU 转写，
+    # 不算 fail 只亮黄灯提示「在降级跑」。None = 未配置远端音频服务（不出该组件）。
+    if audio_service is not None:
+        _url = str(audio_service.get("url") or "")
+        if not audio_service.get("reachable"):
+            _err = str(audio_service.get("error") or "")[:60]
+            comps.append(_comp(
+                "audio", "语音服务(ASR/SER)", "warn",
+                f"GPU 音频服务不可达（已降级 CPU 兜底）{_url}{('：' + _err) if _err else ''}"))
+        else:
+            _asr_ok = bool(audio_service.get("asr_loaded"))
+            _ser_need = bool(audio_service.get("ser_expected"))
+            _ser_ok = bool(audio_service.get("ser_loaded"))
+            if _asr_ok and (not _ser_need or _ser_ok):
+                _lat = audio_service.get("latency_ms")
+                comps.append(_comp(
+                    "audio", "语音服务(ASR/SER)", "ok",
+                    f"在线，模型已装载（{int(_lat)}ms）" if _lat is not None else "在线，模型已装载"))
+            else:
+                comps.append(_comp(
+                    "audio", "语音服务(ASR/SER)", "warn",
+                    "在线但模型未装载（预热中或装载失败，首答会慢）"))
 
     # 6) 草稿队列积压——超阈值→warn（提示处理不过来/worker 卡顿）
     if pending_drafts is not None:

@@ -365,9 +365,9 @@ def register_read_routes(app, *, api_auth, config_manager=None) -> None:
         translate_stats: Dict[str, Any] = {"enabled": False}
         try:
             from src.workspace.inbound_translate import enrich_inbound_translations
-            # 硬超时兜底：入站翻译无引擎时会逐条走 LLM(deepseek)，8 条可能 >20s 拖垮 /thread。
-            # 限时 6s——译到多少算多少（已译的会缓存，下次打开命中），超时即返回原文，
-            # **绝不让加载卡死**。这是 /thread「加载超时」的直接根治。
+            # enrich 自带同步预算（最多 2 条 / 2.5s，其余转后台任务写库，前端轮询下一拍
+            # 经 store overlay 取回）——常态毫秒级返回。外层 6s 是最后保险（单条引擎挂死
+            # /store 异常），超时即返回原文，**绝不让加载卡死**。
             out_msgs, translate_stats = await asyncio.wait_for(
                 enrich_inbound_translations(
                     request,

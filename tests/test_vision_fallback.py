@@ -86,7 +86,7 @@ class _FakeOpenAI:
     behaviors: dict = {}
     calls: list = []
 
-    def __init__(self, api_key=None, base_url=None, timeout=None):
+    def __init__(self, api_key=None, base_url=None, timeout=None, **kw):
         self._url = base_url
         outer = self
 

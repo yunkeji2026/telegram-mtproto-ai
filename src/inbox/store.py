@@ -618,6 +618,10 @@ _MIGRATIONS = [
     # 显示发言人名 + 稳定色（对齐官方群聊读感）。纯加法、缺省空=非群/未知。
     "ALTER TABLE messages ADD COLUMN sender_id   TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE messages ADD COLUMN sender_name TEXT NOT NULL DEFAULT ''",
+    # 入站翻译按日漏斗扩列（2026-07 同步预算+后台补译架构配套）：noop=产出==原文打标数
+    # （emoji/不可译，只译一次的证据）、deferred=转后台补译条数（首开消化量/趋势）。
+    "ALTER TABLE inbound_xlate_daily ADD COLUMN noop INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE inbound_xlate_daily ADD COLUMN deferred INTEGER NOT NULL DEFAULT 0",
 ]
 
 
@@ -1913,16 +1917,21 @@ class InboxStore:
         translated: int = 0,
         failed: int = 0,
         by_lang: Optional[Dict[str, int]] = None,
+        noop: int = 0,
+        deferred: int = 0,
     ) -> None:
         """P3：累计一次会话打开的入站翻译结果进「按日」表（客户→坐席）。
 
         translated 为本次**新译出**条数（命中 store 缓存的不计，避免重开重复计数）；
-        by_lang 为这些新译出消息的客户来源语言分布。translated 与 failed 全 0 时不写。
+        by_lang 为这些新译出消息的客户来源语言分布。noop=产出==原文打标数、
+        deferred=转后台补译条数（2026-07 扩列）。全部计数为 0 时不写。
         best-effort，调用方包 try。
         """
         translated = max(0, int(translated or 0))
         failed = max(0, int(failed or 0))
-        if translated <= 0 and failed <= 0:
+        noop = max(0, int(noop or 0))
+        deferred = max(0, int(deferred or 0))
+        if translated <= 0 and failed <= 0 and noop <= 0 and deferred <= 0:
             return
         by_lang = {str(k): int(v) for k, v in (by_lang or {}).items() if int(v) > 0}
         day = time.strftime("%Y-%m-%d", time.localtime(self._now()))
@@ -1932,9 +1941,11 @@ class InboxStore:
             ).fetchone()
             if row is None:
                 self._conn.execute(
-                    """INSERT INTO inbound_xlate_daily (day, translated, failed, by_lang_json)
-                       VALUES (?,?,?,?)""",
-                    (day, translated, failed, json.dumps(by_lang, ensure_ascii=False)),
+                    """INSERT INTO inbound_xlate_daily
+                         (day, translated, failed, by_lang_json, noop, deferred)
+                       VALUES (?,?,?,?,?,?)""",
+                    (day, translated, failed,
+                     json.dumps(by_lang, ensure_ascii=False), noop, deferred),
                 )
             else:
                 try:
@@ -1947,9 +1958,12 @@ class InboxStore:
                     """UPDATE inbound_xlate_daily SET
                          translated = translated + ?,
                          failed = failed + ?,
-                         by_lang_json = ?
+                         by_lang_json = ?,
+                         noop = noop + ?,
+                         deferred = deferred + ?
                        WHERE day = ?""",
-                    (translated, failed, json.dumps(merged, ensure_ascii=False), day),
+                    (translated, failed, json.dumps(merged, ensure_ascii=False),
+                     noop, deferred, day),
                 )
             self._conn.commit()
 
@@ -1958,27 +1972,36 @@ class InboxStore:
         since_day = time.strftime("%Y-%m-%d", time.localtime(since_ts))
         with self._lock:
             rows = self._conn.execute(
-                "SELECT day, translated, failed, by_lang_json"
+                "SELECT day, translated, failed, by_lang_json, noop, deferred"
                 " FROM inbound_xlate_daily WHERE day >= ? ORDER BY day",
                 (since_day,),
             ).fetchall()
-        translated = failed = 0
+        translated = failed = noop = deferred = 0
         by_lang: Dict[str, int] = {}
         trend = []
         for r in rows:
             t = int(r["translated"] or 0)
             translated += t
             failed += int(r["failed"] or 0)
+            noop += int(r["noop"] or 0)
+            deferred += int(r["deferred"] or 0)
             try:
                 bl = json.loads(r["by_lang_json"] or "{}")
             except Exception:
                 bl = {}
             for k, v in bl.items():
                 by_lang[k] = by_lang.get(k, 0) + int(v)
-            trend.append({"day": str(r["day"])[5:], "translated": t})
+            trend.append({
+                "day": str(r["day"])[5:],
+                "translated": t,
+                "failed": int(r["failed"] or 0),
+                "deferred": int(r["deferred"] or 0),
+            })
         return {
             "translated": translated,
             "failed": failed,
+            "noop": noop,
+            "deferred": deferred,
             "by_source_lang": dict(sorted(by_lang.items())),
             "trend": trend,
         }

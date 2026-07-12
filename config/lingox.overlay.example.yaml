@@ -1,0 +1,103 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# 通译 LingoX · 轻量「纯翻译工作台」配置 overlay（示例）
+#
+# 目的：把这套多能力平台裁剪成一个**只做「翻译 + 统一收件箱 + 坐席工作台」**的
+#       轻量产品形态（SKU-A 通译）——关掉 companion 情感陪伴 / RPA 真机自动化 /
+#       换脸 / 语音克隆 / 全自动 AI 回复 等所有重模块，只留「坐席在收件箱里跟客户
+#       跨语言对话，系统提供实时双向翻译 + 术语一致 + 翻译记忆」这一条链。
+#
+# 用法（二选一，与 companion_on.overlay.example.yaml 同机制）：
+#   A) 新起一个纯翻译实例：把本文件内容并入该实例的 config/config.yaml；
+#   B) 叠加 overlay：把本文件段落拷进 config/config.local.yaml（深合并覆盖，不入库）。
+#   ⚠ 本 overlay 面向「新起一个翻译实例」；勿直接叠加到已在跑 payment/conversion
+#     业务的生产实例上（会切 KB/域、关掉其正在用的能力）。
+#
+# 验证（不启动服务的静态校验）：
+#   python scripts/scratch/verify_lingox_overlay.py
+#   期望：翻译/收件箱/工作台=on；companion/各 RPA/语音/换脸/全自动=off。
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── 1. 域：用中性 general 域，不加载 payment/conversion 的 KB/人设/术语 ──
+#    翻译产品不需要支付/获客域的知识库与话术；general 最干净。
+domain: general
+
+# ── 2. Telegram 协议号：保持 example 占位即可（不要填真实 api_id）──
+#    main.py 检测到协议号未真实配置时，会走「跳过协议客户端、纯收件箱/网页翻译」
+#    启动路径（见 main.py 的启动日志），翻译工作台不受影响。
+#    生产要接真实个人号翻译时，另配 telegram/官方 API/协议登录（属 SKU 增强，非 MVP）。
+
+# ── 3. 翻译核心（通译的灵魂，全开）───────────────────────────────
+translation:
+  memory:
+    enabled: true            # 翻译记忆：命中直接回填，省 token + 术语一致（差异化卖点）
+  glossary:
+    enabled: true            # 术语库 + 品牌词不译保护（mask/restore，引擎无关强制）
+    extra_terms: {}          # 部署时按客户行业填，如 {"size":"尺码","refund":"退款"}
+    protect: []              # 品牌/产品名逐字保留，如 ["LINE","WhatsApp","Shopify"]
+  engines:
+    # 本地 MT（Hunyuan-MT，零 API 成本、亚秒延迟）优先，AI 兜底；
+    # 若暂无本地 MT，改成 order: ["ai"] 并配好 ai.* 即可。
+    order: ["ollama_mt", "ai"]
+    timeout_sec: 8
+    ollama_mt:
+      base_url: ""           # 如 http://127.0.0.1:11434（缺则自动跳过，回落 ai）
+      model: ""              # 如 hy-mt2-7b-official:latest
+
+# ── 4. 坐席工作台入站自动翻译（打开会话即见译文，通译核心体验）──────
+workspace:
+  auto_translate_inbound:
+    enabled: true            # ★ 外语客户消息自动译成坐席语言展示（通译招牌功能）
+    target_lang: zh          # 坐席母语（按客户改，如 en）
+    source_langs: []         # 空=所有非目标语；也可限定 [en, ja, ko]
+    max_per_thread: 8
+
+# ── 5. 统一收件箱 + 坐席工作台（保留；但关掉 AI 自动回复相关）────────
+inbox:
+  enabled: true              # 收件箱持久层 + 完整翻译服务挂载点（必须开）
+  read_from_store: true      # 从统一 store 读会话（历史/SLA/多坐席）
+  auto_draft:
+    enabled: false           # ★ 关：翻译产品不做 AI 自动拟稿（避免走 SkillManager 人设产线）
+  l2_autosend:
+    enabled: false           # ★ 关：不做全自动 AI 发送（通译是人工翻译辅助，不是自动客服）
+
+web_admin:
+  enabled: true              # HTTP/工作台总闸（关则无后台）；site_name 可按白标改
+web_chat:
+  enabled: true              # 最零依赖的入站通道：网页 widget 访客进来，坐席翻译着回
+  default_mode: manual       # manual=直接转人工坐席（不 auto_ai 自动回）——翻译辅助定位
+  greeting: "Hi! How can we help you?"
+  title: "Live Support"
+
+# ── 6. 关掉所有重模块（companion / RPA / 设备 / 语音 / 换脸 / 编排）──────
+companion:
+  enabled: false             # 情感陪伴关系栈整体关（翻译产品不需要）
+
+line_rpa:      { enabled: false }
+messenger_rpa: { enabled: false }
+whatsapp_rpa:  { enabled: false }
+device_coordinator: { enabled: false }
+hotplug_watcher:    { enabled: false }   # ★ 探查确认此项默认 true，必须显式关（否则无 RPA 也扫 ADB）
+contacts:      { enabled: false }        # 获客旅程/handoff（智聊 SKU 才用）
+
+realtime_voice:   { enabled: false }     # 实时语音通话
+voice_clone_lan:  { enabled: false }     # 语音克隆后端
+voice_recognition:{ enabled: false }     # 语音转文字（如需语音翻译再单独开）
+
+platform_login:
+  orchestrator_enabled: false            # 账号编排器（协议号多开，翻译 MVP 不需要）
+
+monetization: { enabled: false }         # 陪伴向变现，与翻译无关
+
+# 换脸（faceswap）无 main 启动钩子，且不在本 example；保持不配置即不加载。
+
+# ── 7. 可选：翻译 MVP 期可关的后台巡检（降噪、省资源）────────────────
+health_watchdog: { enabled: false }      # 全自动质量巡检（翻译产品可后置）
+monitoring:      { enabled: false }      # metrics 线程（需要 Prometheus 时再开）
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 说明：companion / RPA 等重模块在 import 层与翻译栈独立（翻译栈几乎纯标准库 +
+# AIClient），本 overlay 通过 feature flag 把它们「关到不加载后台任务」。
+# 已知残留（不影响翻译，属下一步解耦项，见 实施02 文档）：
+#   - AIClient + SkillManager 仍会在启动时初始化（内存占用），运行时靠上述 flag 门控；
+#   - 完整 TranslationService 挂在 inbox.enabled 分支内（本 overlay 已开 inbox，故 OK）。
+# ─────────────────────────────────────────────────────────────────────────────

@@ -1295,6 +1295,27 @@ class AIChatAssistant:
                             except Exception:
                                 self.logger.debug("AutoClaimWorker 启动跳过", exc_info=True)
 
+                            # ── 入站翻译存量消化（低频巡检，默认关）─────────
+                            # workspace.auto_translate_inbound.backfill.enabled=true 开启；
+                            # 闲时把老会话未译存量提前译好落库，坐席首开即毫秒级+译文备好。
+                            # 复用 enrich 同一套判定/防重/负缓存（会话级锁与在线路径互斥）。
+                            try:
+                                from src.workspace.inbound_backfill import (
+                                    InboundXlateBackfillWorker,
+                                )
+                                _bfw = InboundXlateBackfillWorker(
+                                    inbox_store=self.inbox_store,
+                                    config_manager=self.config,
+                                    translation_svc_getter=lambda: getattr(
+                                        web_app.state, "translation_service", None),
+                                )
+                                web_app.state.inbound_backfill_worker = _bfw
+                                asyncio.ensure_future(_bfw.run())
+                                self.logger.info(
+                                    "InboundXlateBackfill 已启动（默认关，按 backfill.enabled 热生效）")
+                            except Exception:
+                                self.logger.debug("InboundXlateBackfill 启动跳过", exc_info=True)
+
                             # ── L2：WebhookNotifier 企业 IM 通知 ──────────────
                             try:
                                 from src.inbox.webhook_notifier import WebhookNotifier

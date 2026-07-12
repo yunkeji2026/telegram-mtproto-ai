@@ -60,6 +60,73 @@ def _pending_drafts(state) -> Optional[int]:
         return None
 
 
+def audio_probe_target(config: Dict[str, Any]) -> str:
+    """决策：该不该探测 LAN GPU 音频服务，探哪个 /health（纯函数）。
+
+    只在 voice_recognition 启用、provider 为 OpenAI 兼容、且 base_url 指向
+    **私网主机**（我们自建的 asr176 服务）时返回探测 URL；公网云 ASR（无 /health
+    契约）返回空串不探，避免误报 warn。
+    """
+    vr = (config.get("voice_recognition") or {}) if isinstance(config, dict) else {}
+    if not vr.get("enabled", False):
+        return ""
+    if str(vr.get("provider") or "").strip().lower() not in ("openai", "openai_compatible"):
+        return ""
+    base = str(vr.get("base_url") or "").strip().rstrip("/")
+    if not base or "://" not in base:
+        return ""
+    host = base.split("://", 1)[1].split("/", 1)[0].split(":", 1)[0]
+    import re as _re
+    private = (
+        host in ("localhost", "127.0.0.1")
+        or host.startswith("192.168.") or host.startswith("10.")
+        or bool(_re.match(r"^172\.(1[6-9]|2\d|3[01])\.", host))
+    )
+    if not private:
+        return ""
+    root = base[:-3] if base.endswith("/v1") else base
+    return root + "/health"
+
+
+# /health 探测 60s TTL 缓存：collect_health 被 watchdog tick + 各看板 API 频繁调用，
+# 不能每次都打网络（探测自带 3s 超时，不可达时会拖慢调用方）。
+_AUDIO_PROBE_CACHE: Dict[str, Any] = {"ts": 0.0, "url": "", "result": None}
+_AUDIO_PROBE_TTL_SEC = 60.0
+
+
+def probe_audio_service(config: Dict[str, Any], *, force: bool = False) -> Optional[Dict[str, Any]]:
+    """探测自建 GPU 音频服务 /health（带 TTL 缓存）。返回 None = 未配置远端音频服务。"""
+    url = audio_probe_target(config)
+    if not url:
+        return None
+    now = time.time()
+    if (not force and _AUDIO_PROBE_CACHE["result"] is not None
+            and _AUDIO_PROBE_CACHE["url"] == url
+            and now - _AUDIO_PROBE_CACHE["ts"] < _AUDIO_PROBE_TTL_SEC):
+        return _AUDIO_PROBE_CACHE["result"]
+    result: Dict[str, Any] = {"url": url, "reachable": False}
+    try:
+        import json as _json
+        import urllib.request
+        t0 = time.time()
+        with urllib.request.urlopen(url, timeout=3) as resp:
+            data = _json.loads(resp.read().decode("utf-8", "replace"))
+        result.update({
+            "reachable": True,
+            "latency_ms": int((time.time() - t0) * 1000),
+            "asr_loaded": bool(data.get("asr_loaded")),
+            "ser_loaded": bool(data.get("ser_loaded")),
+            # /health 报 ser_model 非空 = 服务配置了 SER → ser_loaded 才有意义
+            "ser_expected": bool(str(data.get("ser_model") or "").strip()),
+            "device": str(data.get("device") or ""),
+            "model": str(data.get("model") or ""),
+        })
+    except Exception as e:
+        result["error"] = str(e)[:120]
+    _AUDIO_PROBE_CACHE.update({"ts": now, "url": url, "result": result})
+    return result
+
+
 def collect_health(app, config_manager=None, *, pending_threshold: int = 200) -> Dict[str, Any]:
     """采集运行时健康（route 与 watchdog 共用）。返回 build_health 的结果。"""
     from src.utils.health import build_health, is_placeholder
@@ -93,6 +160,12 @@ def collect_health(app, config_manager=None, *, pending_threshold: int = 200) ->
     except Exception:
         logger.debug("渠道状态读取失败（已忽略）", exc_info=True)
 
+    audio = None
+    try:
+        audio = probe_audio_service(config)
+    except Exception:
+        logger.debug("音频服务探测失败（已忽略）", exc_info=True)
+
     return build_health(
         db_ok=db_ok,
         ai_provider=ai_provider, ai_key_ok=ai_key_ok,
@@ -101,6 +174,7 @@ def collect_health(app, config_manager=None, *, pending_threshold: int = 200) ->
         workers=_collect_workers(state),
         pending_drafts=_pending_drafts(state),
         pending_threshold=pending_threshold,
+        audio_service=audio,
     )
 
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from typing import Any, Dict, List
 
@@ -46,6 +47,57 @@ _TG_PEER_IDENTITY_CACHE: Dict[tuple, tuple] = {}
 _TG_PEER_IDENTITY_TTL_OK = 7 * 86400.0
 _TG_PEER_IDENTITY_TTL_MISS = 3600.0
 _TG_PEER_IDENTITY_CACHE_MAX = 5000  # distinct peer 上限，防内存无界增长
+
+# Telegram client「断网冷却」：get_chat/download_media **超时**（≠业务错误——那是立即失败）
+# 说明 pyrogram 正断网重连；冷却窗内同账号的 resolve/avatar 直接快速失败，不再发 RPC 排队。
+# 修「断网时第一个数字号吃满超时、后续每个可见头像再各吃一次」——现在只有第一个付超时成本。
+# 冷却是账号级、不写 per-peer 负缓存（恢复后同一 peer 仍会重试）；成功一次即清除。
+_TG_CLIENT_BAD_UNTIL: Dict[str, float] = {}
+_TG_CLIENT_COOLDOWN_SEC = 60.0
+# get_chat/头像下载的跨 loop 等待超时。原 15s：正常 RPC 数百 ms，15s 只在断网挂满时才吃到
+# ——把它降到 8s 缩小「首个牺牲者」的等待，同时仍远大于正常延迟（不误伤慢网）。
+_TG_FETCH_TIMEOUT_SEC = 8.0
+
+
+# resolve-peer 端点并发上限：占用的是 starlette 共享线程池（全站 sync 端点共用 ~40 线程），
+# 断网时每个 resolve 挂满 8s，无上限会把池吃空。超限直接快败（best-effort 补名，可重试）。
+_RESOLVE_PEER_SEM = threading.Semaphore(4)
+
+
+def _tg_client_cooling(account_id: str) -> bool:
+    """该账号的 TG client 是否在断网冷却窗内（True=直接快速失败，不发 RPC）。"""
+    until = _TG_CLIENT_BAD_UNTIL.get(str(account_id or ""))
+    if until is None:
+        return False
+    if time.monotonic() >= until:
+        _TG_CLIENT_BAD_UNTIL.pop(str(account_id or ""), None)
+        return False
+    return True
+
+
+def _mark_tg_client_bad(account_id: str) -> None:
+    _TG_CLIENT_BAD_UNTIL[str(account_id or "")] = (
+        time.monotonic() + _TG_CLIENT_COOLDOWN_SEC)
+
+
+def _clear_tg_client_bad(account_id: str) -> None:
+    _TG_CLIENT_BAD_UNTIL.pop(str(account_id or ""), None)
+
+
+def tg_cooldown_snapshot() -> Dict[str, float]:
+    """当前处于断网冷却中的 TG 账号 → 剩余秒数（供 ops「平台会话健康」卡可视化）。
+
+    过期条目顺手清掉；无冷却返回空 dict（前端据此不渲染附加行）。
+    """
+    now = time.monotonic()
+    out: Dict[str, float] = {}
+    for acct in list(_TG_CLIENT_BAD_UNTIL):
+        left = _TG_CLIENT_BAD_UNTIL.get(acct, 0.0) - now
+        if left <= 0:
+            _TG_CLIENT_BAD_UNTIL.pop(acct, None)
+            continue
+        out[acct] = round(left, 1)
+    return out
 
 
 def _cache_tg_peer_identity(cache_key: tuple, result, ts: float) -> None:
@@ -207,6 +259,10 @@ def resolve_tg_peer_identity(store, client, account_id: str,
     ``run_coroutine_threadsafe`` 跨 loop 调度。含进程级正/负缓存、昵称优先级回写（no-clobber）。
     返回 ``{"ok":bool, "name"?, "username"?, "phone"?, "reason"?}``；client 不在线不写缓存。
     结果计入 ``peer_identity_stats``（source=tg_open）供 ops 观测。
+
+    ⚠ 本函数**同步阻塞**（``fut.result(timeout=8)``，pyrogram 断网重连时会挂满超时）——
+    async 上下文调用必须经线程池（见 resolve-peer 端点的 ``run_in_threadpool``），
+    直接调用会把整个 web 事件循环冻结、全站请求排队。
     """
     import asyncio
     chat_key = str(chat_key or "").strip()
@@ -221,6 +277,10 @@ def resolve_tg_peer_identity(store, client, account_id: str,
             _record_peer_identity("tg_open", "cache_hit")
             return {"ok": bool(cached[1]), **(cached[1] or {})}
         _TG_PEER_IDENTITY_CACHE.pop(cache_key, None)  # 过期，重解析
+    if _tg_client_cooling(account_id):
+        # 断网冷却：不发 RPC、不写 per-peer 负缓存（恢复后同 peer 仍会重试）
+        _record_peer_identity("tg_open", "unavailable")
+        return {"ok": False, "reason": "client_cooling"}
     pyro = _extract_pyro(client)
     loop = getattr(pyro, "loop", None)
     if pyro is None or loop is None or not loop.is_running():
@@ -236,12 +296,22 @@ def resolve_tg_peer_identity(store, client, account_id: str,
 
     try:
         fut = asyncio.run_coroutine_threadsafe(_resolve(), loop)
-        chat = fut.result(timeout=15)
+        chat = fut.result(timeout=_TG_FETCH_TIMEOUT_SEC)
+    except TimeoutError:
+        # 超时=pyrogram 断网重连中（业务错误是立即失败，走下面分支）→ 开账号级冷却窗，
+        # 后续 60s 内该账号所有 resolve/avatar 秒失败，不再逐个吃满超时。
+        # 刻意不写 per-peer 负缓存：网络恢复后该 peer 应可立即重试。
+        _mark_tg_client_bad(account_id)
+        logger.debug("[protocol] telegram peer 解析超时（断网冷却 %ss）",
+                     _TG_CLIENT_COOLDOWN_SEC)
+        _record_peer_identity("tg_open", "unavailable")
+        return {"ok": False, "reason": "resolve_timeout"}
     except Exception:
         logger.debug("[protocol] telegram peer 身份解析失败", exc_info=True)
         _cache_tg_peer_identity(cache_key, None, now)
         _record_peer_identity("tg_open", "miss")
         return {"ok": False, "reason": "resolve_failed"}
+    _clear_tg_client_bad(account_id)   # RPC 成功 → 解除冷却（若有）
     from src.integrations.protocol_bridge import tg_peer_identity
     result = _persist_and_cache_tg_identity(
         store, account_id, chat_key, tg_peer_identity(chat), now=now)
@@ -1009,6 +1079,10 @@ def register_account_routes(app, *, api_auth, config_manager=None) -> None:
         if none_marker.exists() and (now - none_marker.stat().st_mtime) < 86400:
             _record_avatar("telegram", "neg_hit")
             raise HTTPException(404, "no avatar")
+        if _tg_client_cooling(account_id):
+            # 断网冷却：不发 RPC 秒失败（不写 .none 负缓存——网络恢复后重渲染即重试）
+            _record_avatar("telegram", "error")
+            raise HTTPException(404, "no avatar")
         pyro = _get_tg_pyro_for_account(request.app, account_id)   # 多账号：受管 worker 优先
         loop = getattr(pyro, "loop", None)
         if pyro is None or loop is None or not loop.is_running():
@@ -1040,7 +1114,17 @@ def register_account_routes(app, *, api_auth, config_manager=None) -> None:
 
         try:
             fut = asyncio.run_coroutine_threadsafe(_dl(), loop)
-            saved = fut.result(timeout=15)
+            # 非阻塞等待：wrap_future + await——此前 fut.result(timeout=15) 会把 web 事件循环
+            # 冻结最长 15s（pyrogram 断网重连时 get_chat 挂死 → 全站请求排队 → 前端 /thread
+            # 15s 超时红屏）。改 await 后等待期间循环照常服务其他请求。
+            saved = await asyncio.wait_for(
+                asyncio.wrap_future(fut), timeout=_TG_FETCH_TIMEOUT_SEC)
+        except (TimeoutError, asyncio.TimeoutError):
+            # 超时=断网重连中 → 开账号级冷却（与 resolve 共用），后续懒加载头像秒失败
+            _mark_tg_client_bad(account_id)
+            _record_avatar("telegram", "error")
+            logger.debug("[protocol] telegram 头像下载超时（断网冷却）")
+            raise HTTPException(404, "no avatar")
         except Exception:
             _record_avatar("telegram", "error")
             logger.debug("[protocol] telegram 头像下载失败", exc_info=True)
@@ -1059,6 +1143,7 @@ def register_account_routes(app, *, api_auth, config_manager=None) -> None:
                                        or _res["phone"]) else "miss")
                 except Exception:
                     logger.debug("[protocol] avatar 顺手补名失败", exc_info=True)
+        _clear_tg_client_bad(account_id)   # RPC 成功 → 解除冷却（若有）
         if not saved or not jpg.exists():
             _record_avatar("telegram", "empty")     # get_chat 成功但无头像
             try:
@@ -1163,7 +1248,22 @@ def register_account_routes(app, *, api_auth, config_manager=None) -> None:
         store = getattr(request.app.state, "inbox_store", None)
         pyro = _get_tg_pyro_for_account(request.app, account_id)
         chat_key = str(request.query_params.get("chat_key") or "").strip()
-        return resolve_tg_peer_identity(store, pyro, account_id, chat_key)
+        # 线程池执行：纯核心内部有 fut.result(timeout=8) 同步等待（跨 loop 取 get_chat 结果），
+        # 直接在 async handler 里调用会把 web 事件循环冻结（pyrogram 断网重连时挂满超时）
+        # → 全站请求排队 → 前端 /thread 15s 超时红屏。丢线程池后循环照常服务其他请求；
+        # 纯核心保持同步签名（单测/复用方零改动）。
+        # 并发上限（防线程池耗尽）：starlette 默认线程池 ~40 线程为全站 sync 端点共用，
+        # 断网时若大量数字号会话同时打开、每个 resolve 挂满 8s，会把池占空拖垮其他端点。
+        # 超上限直接快败（ok:false 不缓存，下次打开重试）——本就是 best-effort 自愈补名。
+        if not _RESOLVE_PEER_SEM.acquire(blocking=False):
+            _record_peer_identity("tg_open", "unavailable")
+            return {"ok": False, "reason": "busy"}
+        try:
+            from starlette.concurrency import run_in_threadpool
+            return await run_in_threadpool(
+                resolve_tg_peer_identity, store, pyro, account_id, chat_key)
+        finally:
+            _RESOLVE_PEER_SEM.release()
 
     def _collect_config_accounts(cfg: Dict[str, Any]) -> List[tuple]:
         """从 config.yaml 抽取各平台声明的账号 → (platform, account_id, mode, label)。

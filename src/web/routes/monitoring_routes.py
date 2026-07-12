@@ -150,6 +150,7 @@ def register_monitoring_routes(app, ctx):
                 "trigger_layers":    snap.get("trigger_layers", {}),
                 "circuit_breaker":   snap.get("circuit_breaker", {}),
                 "reply_quality":     snap.get("reply_quality", {}),
+                "local_llm_fallback": snap.get("local_llm_fallback", {}),
                 "memory":            snap.get("memory", {}),
                 "companion_safe_skip": snap.get("companion_safe_skip", {}),
                 "deferred_queue":    snap.get("deferred_queue", {}),
