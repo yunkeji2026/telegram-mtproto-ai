@@ -5,6 +5,9 @@ enrich_auto_draft(assistant, draft_svc, _ad_app, _ad_store, conv, text, draft_id
 """
 from __future__ import annotations
 
+import asyncio
+from dataclasses import dataclass
+
 
 async def enrich_auto_draft(assistant, draft_svc, _ad_app, _ad_store, conv: dict, text: str, draft_id: str, mode: str) -> None:
     """异步：拉历史 → 人设产线生成正文 → enrich_draft 收尾。
@@ -265,3 +268,79 @@ async def enrich_auto_draft(assistant, draft_svc, _ad_app, _ad_store, conv: dict
             draft_svc.release_enriching_draft(draft_id)
         except Exception:
             pass
+
+
+@dataclass(frozen=True)
+class AutoDraftConfig:
+    """auto_draft 纯配置(从 inbox.auto_draft 读出,不含运行时依赖)。"""
+    mode: str
+    min_len: int
+    skip: set
+    platform_ceilings: dict
+    skip_groups: bool
+    enrich: bool
+
+
+def make_auto_draft_cb(cfg: AutoDraftConfig, draft_svc, store, loop, enrich_fn, logger):
+    """构造入站新消息 -> 自动草稿生成回调(从 main.py initialize() 原样迁出)。
+
+    cfg=纯配置;draft_svc/store/loop/enrich_fn/logger=运行时依赖。
+    返回的回调签名 (conv, text)->None 与 register_new_inbound_cb 契约一致。"""
+    def _auto_draft_cb(conv: dict, text: str) -> None:
+        if conv.get("platform", "") in cfg.skip:
+            return
+        if cfg.skip_groups:
+            try:
+                from src.inbox.ingest import is_group_conversation
+                if is_group_conversation(conv):
+                    return
+            except Exception:
+                pass
+        if cfg.min_len > 0 and len(str(text or "").strip()) < cfg.min_len:
+            return
+        # 每会话档位优先：UI 把会话设为 全自动(auto_ai) 才走自动；
+        # manual 跳过不生成；未显式设置回落全局默认 cfg.mode。
+        # 这让收件箱「🚀 全自动」开关真正决定该会话是否自动回复，
+        # 不再因全局配置对所有会话一刀切。
+        mode = cfg.mode
+        try:
+            cid = str(conv.get("conversation_id") or "")
+            if cid and store is not None:
+                explicit = store.get_automation_mode_if_set(cid)
+                if explicit is not None:
+                    mode = explicit
+        except Exception:
+            pass
+        # 平台档位上限封顶（链路不稳时降级但不停）：如 Messenger 置
+        # review → auto_ai 会话被降为 review（仍拟稿、强制人审、不自动发），
+        # 坐席显式 manual 仍保持 manual。空配置 = 不封顶（零行为变更）。
+        _ceil = cfg.platform_ceilings.get(
+            str(conv.get("platform") or "").lower())
+        if _ceil:
+            try:
+                from src.inbox.drafts import cap_automation_mode
+                mode = cap_automation_mode(mode, _ceil)
+            except Exception:
+                logger.debug(
+                    "[AutoDraft] 平台档位封顶失败（忽略）", exc_info=True)
+        if mode == "manual":
+            return
+        draft_id = draft_svc.auto_generate_draft(
+            conv, text, automation_mode=mode, enrich=cfg.enrich
+        )
+        # enrich：草稿已停泊（enriching），异步走人设产线补全正文
+        if draft_id and cfg.enrich:
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    enrich_fn(conv, text, draft_id, mode),
+                    loop,
+                )
+            except Exception:
+                # 调度失败 → 立即兜底放行，避免卡 enriching
+                logger.debug(
+                    "[AutoDraft] 补全调度失败，兜底放行", exc_info=True)
+                try:
+                    draft_svc.release_enriching_draft(draft_id)
+                except Exception:
+                    pass
+    return _auto_draft_cb

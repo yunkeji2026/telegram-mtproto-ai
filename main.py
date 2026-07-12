@@ -979,64 +979,17 @@ class AIChatAssistant:
                                 from src.inbox.autodraft_helpers import enrich_auto_draft as _enrich_impl
                                 async def _enrich_auto_draft(conv, text, draft_id, mode) -> None:
                                     return await _enrich_impl(self, draft_svc, _ad_app, _ad_store, conv, text, draft_id, mode)
-                                def _auto_draft_cb(conv: dict, text: str) -> None:
-                                    if conv.get("platform", "") in _ad_skip:
-                                        return
-                                    if _ad_skip_groups:
-                                        try:
-                                            from src.inbox.ingest import is_group_conversation
-                                            if is_group_conversation(conv):
-                                                return
-                                        except Exception:
-                                            pass
-                                    if _ad_min_len > 0 and len(str(text or "").strip()) < _ad_min_len:
-                                        return
-                                    # 每会话档位优先：UI 把会话设为 全自动(auto_ai) 才走自动；
-                                    # manual 跳过不生成；未显式设置回落全局默认 _ad_mode。
-                                    # 这让收件箱「🚀 全自动」开关真正决定该会话是否自动回复，
-                                    # 不再因全局配置对所有会话一刀切。
-                                    mode = _ad_mode
-                                    try:
-                                        cid = str(conv.get("conversation_id") or "")
-                                        if cid and _ad_store is not None:
-                                            explicit = _ad_store.get_automation_mode_if_set(cid)
-                                            if explicit is not None:
-                                                mode = explicit
-                                    except Exception:
-                                        pass
-                                    # 平台档位上限封顶（链路不稳时降级但不停）：如 Messenger 置
-                                    # review → auto_ai 会话被降为 review（仍拟稿、强制人审、不自动发），
-                                    # 坐席显式 manual 仍保持 manual。空配置 = 不封顶（零行为变更）。
-                                    _ceil = _ad_platform_ceilings.get(
-                                        str(conv.get("platform") or "").lower())
-                                    if _ceil:
-                                        try:
-                                            from src.inbox.drafts import cap_automation_mode
-                                            mode = cap_automation_mode(mode, _ceil)
-                                        except Exception:
-                                            self.logger.debug(
-                                                "[AutoDraft] 平台档位封顶失败（忽略）", exc_info=True)
-                                    if mode == "manual":
-                                        return
-                                    draft_id = draft_svc.auto_generate_draft(
-                                        conv, text, automation_mode=mode, enrich=_ad_enrich
-                                    )
-                                    # enrich：草稿已停泊（enriching），异步走人设产线补全正文
-                                    if draft_id and _ad_enrich:
-                                        try:
-                                            asyncio.run_coroutine_threadsafe(
-                                                _enrich_auto_draft(conv, text, draft_id, mode),
-                                                _ad_loop,
-                                            )
-                                        except Exception:
-                                            # 调度失败 → 立即兜底放行，避免卡 enriching
-                                            self.logger.debug(
-                                                "[AutoDraft] 补全调度失败，兜底放行", exc_info=True)
-                                            try:
-                                                draft_svc.release_enriching_draft(draft_id)
-                                            except Exception:
-                                                pass
-
+                                from src.inbox.autodraft_helpers import (
+                                    AutoDraftConfig, make_auto_draft_cb,
+                                )
+                                _auto_draft_cb = make_auto_draft_cb(
+                                    AutoDraftConfig(
+                                        mode=_ad_mode, min_len=_ad_min_len, skip=_ad_skip,
+                                        platform_ceilings=_ad_platform_ceilings,
+                                        skip_groups=_ad_skip_groups, enrich=_ad_enrich,
+                                    ),
+                                    draft_svc, _ad_store, _ad_loop, _enrich_auto_draft, self.logger,
+                                )
                                 self.inbox_store.register_new_inbound_cb(_auto_draft_cb)
                                 self.logger.info(
                                     "AutoDraft 已启用（per-conv 优先, 全局默认 mode=%s min_len=%s "
