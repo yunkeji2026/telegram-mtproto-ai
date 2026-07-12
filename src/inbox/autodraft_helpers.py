@@ -344,3 +344,58 @@ def make_auto_draft_cb(cfg: AutoDraftConfig, draft_svc, store, loop, enrich_fn, 
                 except Exception:
                     pass
     return _auto_draft_cb
+
+
+def setup_auto_draft(assistant, draft_svc, web_app):
+    """装配 auto_draft 子系统并注册入站新消息回调(Stage3,从 initialize() 原样迁出)。
+
+    enabled=false 仅记日志返回;否则读配置 -> AutoDraftConfig -> make_auto_draft_cb ->
+    register_new_inbound_cb。web_app 供 enrich 走人设产线时取 telegram_client。"""
+    _ad_cfg = (assistant.config.config or {}).get(
+        "inbox", {}
+    ).get("auto_draft", {}) or {}
+    if _ad_cfg.get("enabled", True):
+        _ad_mode = str(_ad_cfg.get("automation_mode", "auto_ai"))
+        _ad_min_len = int(_ad_cfg.get("min_text_len", 0))
+        _ad_skip = set(_ad_cfg.get("skip_platforms", []) or [])
+        # 平台档位上限（比 skip_platforms 更细）：某平台链路不稳时
+        # 降级而非全关——如 {messenger: review} 让 Messenger 仍拟稿、
+        # 强制人审、绝不自动发。空 dict = 不封顶（旧行为）。
+        _ad_platform_ceilings = {
+            str(k).lower(): str(v).lower()
+            for k, v in (
+                _ad_cfg.get("platform_modes", {}) or {}
+            ).items()
+        }
+        # 源头止血：群/频道会话默认不入人审草稿队列（默认关=旧行为）。
+        # 群消息本非 1:1 客服场景，生成 L3/L4 待审草稿只会长期无人处置、
+        # 反复触发 SLA 铃铛，故提供开关从源头跳过。
+        _ad_skip_groups = bool(_ad_cfg.get("skip_group_chats", False))
+        # Phase 2：自动草稿正文走人设产线（与手动「生成草稿」同源）。
+        # 默认开；关闭则回落旧规则模板（向后兼容）。
+        _ad_enrich = bool(_ad_cfg.get("persona_enrich", True))
+        _ad_store = assistant.inbox_store
+        _ad_app = web_app
+        try:
+            _ad_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            _ad_loop = asyncio.get_event_loop()
+
+        async def _enrich_auto_draft(conv, text, draft_id, mode) -> None:
+            return await enrich_auto_draft(assistant, draft_svc, _ad_app, _ad_store, conv, text, draft_id, mode)
+        _auto_draft_cb = make_auto_draft_cb(
+            AutoDraftConfig(
+                mode=_ad_mode, min_len=_ad_min_len, skip=_ad_skip,
+                platform_ceilings=_ad_platform_ceilings,
+                skip_groups=_ad_skip_groups, enrich=_ad_enrich,
+            ),
+            draft_svc, _ad_store, _ad_loop, _enrich_auto_draft, assistant.logger,
+        )
+        assistant.inbox_store.register_new_inbound_cb(_auto_draft_cb)
+        assistant.logger.info(
+            "AutoDraft 已启用（per-conv 优先, 全局默认 mode=%s min_len=%s "
+            "persona_enrich=%s skip=%s skip_groups=%s）",
+            _ad_mode, _ad_min_len, _ad_enrich, _ad_skip, _ad_skip_groups,
+        )
+    else:
+        assistant.logger.info("AutoDraft 已禁用（auto_draft.enabled=false）")

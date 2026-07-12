@@ -11,6 +11,7 @@ from src.inbox.autodraft_helpers import (
     AutoDraftConfig,
     enrich_auto_draft,
     make_auto_draft_cb,
+    setup_auto_draft,
 )
 
 
@@ -101,3 +102,26 @@ def test_generates_and_schedules_enrich():
         cb({"platform": "tg", "conversation_id": "c1"}, "hello there")
     ds.auto_generate_draft.assert_called_once()
     rct.assert_called_once()
+
+
+def _assistant(auto_draft_cfg):
+    a = MagicMock()
+    a.config.config = {"inbox": {"auto_draft": auto_draft_cfg}}
+    return a
+
+
+def test_setup_auto_draft_enabled_registers_cb():
+    a = _assistant({"enabled": True})
+    with patch(
+        "src.inbox.autodraft_helpers.asyncio.get_running_loop",
+        return_value=MagicMock(),
+    ):
+        setup_auto_draft(a, MagicMock(), MagicMock())
+    a.inbox_store.register_new_inbound_cb.assert_called_once()
+
+
+def test_setup_auto_draft_disabled_skips():
+    a = _assistant({"enabled": False})
+    setup_auto_draft(a, MagicMock(), MagicMock())
+    a.inbox_store.register_new_inbound_cb.assert_not_called()
+    a.logger.info.assert_called()
