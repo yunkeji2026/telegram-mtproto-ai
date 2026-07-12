@@ -1961,40 +1961,10 @@ class AIChatAssistant:
                     server = uvicorn.Server(uvi_config)
                     self._web_server = server
 
-                    # ★ 隔离 web 到独立线程 + 独立 event loop，避免和主 loop 上的
-                    # Telegram/RPA/contacts 后台任务抢占。任何主 loop 上的同步阻塞
-                    # （SQLite 写、BM25 全表扫描）不会再卡 web 请求。
-                    def _run_web_in_thread():
-                        try:
-                            web_loop = asyncio.new_event_loop()
-                            self._web_loop = web_loop
-                            asyncio.set_event_loop(web_loop)
-                            try:
-                                web_loop.run_until_complete(server.serve())
-                            finally:
-                                try:
-                                    web_loop.close()
-                                except Exception:
-                                    pass
-                        except OSError as e:
-                            if is_bind_address_in_use_error(e):
-                                self.logger.warning(
-                                    "Web 管理后台未启动: 端口 %s 已被占用（通常为先前未退出的本程序实例）。"
-                                    "请先结束占用进程: taskkill /F /IM python.exe 或修改 config.yaml 中 web_admin.port",
-                                    web_port,
-                                )
-                            else:
-                                self.logger.warning("Web 管理后台启动失败: %s", e)
-                        except Exception as ex:
-                            self.logger.warning("Web 管理后台启动跳过: %s", ex)
-
-                    web_thread = threading.Thread(
-                        target=_run_web_in_thread,
-                        name="web_admin_thread",
-                        daemon=True,
-                    )
-                    web_thread.start()
-                    self._web_thread = web_thread
+                    # ★ 隔离 web 到独立线程 + 独立 event loop（Stage 2：启动逻辑抽到
+                    # src/bootstrap/web_app.py::start_web_server_thread，行为不变）
+                    from src.bootstrap.web_app import start_web_server_thread
+                    self._web_thread = start_web_server_thread(self, server, web_host, web_port)
                     self.logger.info(
                         "Web 管理后台正在绑定 http://%s:%s（独立线程隔离，避免抢占主 event loop）",
                         web_host,
