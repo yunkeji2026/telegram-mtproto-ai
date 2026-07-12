@@ -219,83 +219,9 @@ class AIChatAssistant:
             except Exception as _ctx_ex:
                 self.logger.debug("companion runtime 上下文注入失败: %s", _ctx_ex)
 
-            # 5. 初始化Telegram客户端（支持多账号并行）
-            try:
-                from src.client.telegram_account_registry import TelegramAccountRegistry
-                tg_raw_cfg = (self.config.config or {}).get("telegram", {})
-                _tg_registry = TelegramAccountRegistry.from_config(tg_raw_cfg)
-            except Exception as _reg_ex:
-                self.logger.warning("TelegramAccountRegistry 构建失败，回退单账号: %s", _reg_ex)
-                _tg_registry = None
-
-            # N5：登录注册统一（默认关）——把 A 线 config 账号并入 B 线持久注册表，
-            # 与 QR 扫码登录共用一张 platform_accounts 表，供编排器/舰队视图看全。
-            # 幂等且不破坏既有 QR 登录态（session_string/online 保留）。
-            if _tg_registry is not None and bool(
-                (tg_raw_cfg or {}).get("unify_login_registry", False)
-            ):
-                try:
-                    from src.integrations.account_registry import get_account_registry
-                    _synced = _tg_registry.sync_to_account_registry(
-                        get_account_registry()
-                    )
-                    self.logger.info(
-                        "[N5] config 账号已并入统一注册表：%s",
-                        ", ".join(_synced) or "（无）",
-                    )
-                except Exception as _sync_ex:
-                    self.logger.warning("[N5] 登录注册统一同步失败（忽略）: %s", _sync_ex)
-
-            # ★ 桌面/自包含可启动：协议号未真实配置（占位 example）或显式桌面模式时，
-            #   跳过 config-Telegram 协议客户端初始化，让「纯收件箱/网页翻译」形态也能开机。
-            #   （QR 扫码登录协议号走 orchestrator，不依赖此 config 账号）
-            _tg_cfg = (self.config.config or {}).get("telegram", {})
-            _desktop_mode = _is_desktop_mode(self.config.config)
-            if _desktop_mode or not _telegram_configured(_tg_cfg):
-                self.telegram_client = None
-                self.telegram_clients = []
-                self.logger.info(
-                    "Telegram 协议号未配置%s，跳过协议客户端初始化；"
-                    "统一收件箱 / 内嵌网页翻译 / RPA / QR 登录不受影响",
-                    "（桌面模式）" if _desktop_mode else "",
-                )
-            else:
-                _primary_ctx = None if _tg_registry is None else _tg_registry.primary()
-                _primary_cfg = _primary_ctx.account_cfg() if _primary_ctx else None
-
-                self.telegram_client = TelegramClient(
-                    config=self.config,
-                    skill_manager=self.skill_manager,
-                    ai_client=self.ai_client,
-                    account_cfg=_primary_cfg,
-                )
-                await self.telegram_client.initialize()
-                self.telegram_clients = [self.telegram_client]
-
-                if _tg_registry is not None and _tg_registry.is_multi_account():
-                    for _ctx in _tg_registry.all_contexts()[1:]:
-                        try:
-                            _tc = TelegramClient(
-                                config=self.config,
-                                skill_manager=self.skill_manager,
-                                ai_client=self.ai_client,
-                                account_cfg=_ctx.account_cfg(),
-                            )
-                            await _tc.initialize()
-                            self.telegram_clients.append(_tc)
-                            self.logger.info(
-                                "Telegram 账号 [%s] 初始化成功", _ctx.account_id
-                            )
-                        except Exception as _tc_ex:
-                            self.logger.warning(
-                                "Telegram 账号 [%s] 初始化失败，跳过: %s",
-                                _ctx.account_id, _tc_ex,
-                            )
-
-                self.logger.info(
-                    "Telegram 客户端初始化完成（%d 个账号）", len(self.telegram_clients)
-                )
-
+            # 5. Telegram 协议客户端(registry + N5 + desktop/client-init)
+            from src.bootstrap.services import setup_telegram_clients
+            await setup_telegram_clients(self)
             self.logger.info("✅ AI聊天助手初始化完成")
 
             # C0-1 授权状态（只读提示，不阻断启动）

@@ -268,3 +268,86 @@ def setup_rpa_services(assistant):
             assistant.whatsapp_rpa_service = assistant.whatsapp_rpa_services[0] if assistant.whatsapp_rpa_services else None
     except Exception as ex:
         assistant.logger.warning("WhatsApp RPA 服务构建跳过: %s", ex)
+
+
+async def setup_telegram_clients(assistant):
+    """装配 config-Telegram 协议客户端(Stage3 专项,从 initialize() 原样迁出):
+    构建账号注册表 -> N5 登录注册统一 -> 桌面/未配置则跳过、否则初始化单/多账号
+    client。设置 assistant.telegram_client / telegram_clients。"""
+    from src.client.telegram_client import TelegramClient
+    from src.bootstrap.env_probe import _is_desktop_mode, _telegram_configured
+    try:
+        from src.client.telegram_account_registry import TelegramAccountRegistry
+        tg_raw_cfg = (assistant.config.config or {}).get("telegram", {})
+        _tg_registry = TelegramAccountRegistry.from_config(tg_raw_cfg)
+    except Exception as _reg_ex:
+        assistant.logger.warning("TelegramAccountRegistry 构建失败，回退单账号: %s", _reg_ex)
+        _tg_registry = None
+
+    # N5：登录注册统一（默认关）——把 A 线 config 账号并入 B 线持久注册表，
+    # 与 QR 扫码登录共用一张 platform_accounts 表，供编排器/舰队视图看全。
+    # 幂等且不破坏既有 QR 登录态（session_string/online 保留）。
+    if _tg_registry is not None and bool(
+        (tg_raw_cfg or {}).get("unify_login_registry", False)
+    ):
+        try:
+            from src.integrations.account_registry import get_account_registry
+            _synced = _tg_registry.sync_to_account_registry(
+                get_account_registry()
+            )
+            assistant.logger.info(
+                "[N5] config 账号已并入统一注册表：%s",
+                ", ".join(_synced) or "（无）",
+            )
+        except Exception as _sync_ex:
+            assistant.logger.warning("[N5] 登录注册统一同步失败（忽略）: %s", _sync_ex)
+
+    # ★ 桌面/自包含可启动：协议号未真实配置（占位 example）或显式桌面模式时，
+    #   跳过 config-Telegram 协议客户端初始化，让「纯收件箱/网页翻译」形态也能开机。
+    #   （QR 扫码登录协议号走 orchestrator，不依赖此 config 账号）
+    _tg_cfg = (assistant.config.config or {}).get("telegram", {})
+    _desktop_mode = _is_desktop_mode(assistant.config.config)
+    if _desktop_mode or not _telegram_configured(_tg_cfg):
+        assistant.telegram_client = None
+        assistant.telegram_clients = []
+        assistant.logger.info(
+            "Telegram 协议号未配置%s，跳过协议客户端初始化；"
+            "统一收件箱 / 内嵌网页翻译 / RPA / QR 登录不受影响",
+            "（桌面模式）" if _desktop_mode else "",
+        )
+    else:
+        _primary_ctx = None if _tg_registry is None else _tg_registry.primary()
+        _primary_cfg = _primary_ctx.account_cfg() if _primary_ctx else None
+
+        assistant.telegram_client = TelegramClient(
+            config=assistant.config,
+            skill_manager=assistant.skill_manager,
+            ai_client=assistant.ai_client,
+            account_cfg=_primary_cfg,
+        )
+        await assistant.telegram_client.initialize()
+        assistant.telegram_clients = [assistant.telegram_client]
+
+        if _tg_registry is not None and _tg_registry.is_multi_account():
+            for _ctx in _tg_registry.all_contexts()[1:]:
+                try:
+                    _tc = TelegramClient(
+                        config=assistant.config,
+                        skill_manager=assistant.skill_manager,
+                        ai_client=assistant.ai_client,
+                        account_cfg=_ctx.account_cfg(),
+                    )
+                    await _tc.initialize()
+                    assistant.telegram_clients.append(_tc)
+                    assistant.logger.info(
+                        "Telegram 账号 [%s] 初始化成功", _ctx.account_id
+                    )
+                except Exception as _tc_ex:
+                    assistant.logger.warning(
+                        "Telegram 账号 [%s] 初始化失败，跳过: %s",
+                        _ctx.account_id, _tc_ex,
+                    )
+
+        assistant.logger.info(
+            "Telegram 客户端初始化完成（%d 个账号）", len(assistant.telegram_clients)
+        )

@@ -3,12 +3,14 @@
 
 setup_contacts_subsystem 主体 113 行、多子系统装配,完整行为需大量 mock;
 此处守护抽取最易回归处:可导入性 + enabled/disabled 两条主路的 self->assistant 改名正确。"""
-from unittest.mock import MagicMock, patch
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.bootstrap.services import (
     setup_contacts_subsystem,
     setup_device_management,
     setup_rpa_services,
+    setup_telegram_clients,
 )
 
 
@@ -77,3 +79,32 @@ def test_line_rpa_enabled_single_account():
         setup_rpa_services(a)
     assert a.line_rpa_service == "LINE_SVC"
     assert "LINE_SVC" in a.line_rpa_services
+
+
+# --- Telegram 专项: 覆盖桌面 smoke 盲区(真实 client 初始化分支) ---
+
+def test_telegram_desktop_skips_client():
+    a = MagicMock()
+    a.config.config = {}
+    with patch("src.bootstrap.env_probe._is_desktop_mode", return_value=True), \
+         patch("src.client.telegram_account_registry.TelegramAccountRegistry.from_config",
+               return_value=None):
+        asyncio.run(setup_telegram_clients(a))
+    assert a.telegram_client is None
+    assert a.telegram_clients == []
+
+
+def test_telegram_real_init_single_account():
+    a = MagicMock()
+    a.config.config = {"telegram": {}}
+    tc = MagicMock()
+    tc.initialize = AsyncMock()
+    with patch("src.bootstrap.env_probe._is_desktop_mode", return_value=False), \
+         patch("src.bootstrap.env_probe._telegram_configured", return_value=True), \
+         patch("src.client.telegram_client.TelegramClient", return_value=tc), \
+         patch("src.client.telegram_account_registry.TelegramAccountRegistry.from_config",
+               return_value=None):
+        asyncio.run(setup_telegram_clients(a))
+    assert a.telegram_client is tc
+    assert a.telegram_clients == [tc]
+    tc.initialize.assert_awaited_once()
