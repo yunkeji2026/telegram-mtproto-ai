@@ -1,4 +1,19 @@
-"""Web 面板多语言 — 翻译字典 v2"""
+"""Web 面板多语言 — 翻译字典 v2
+
+热加载（2026-07，前端开发免重启闭环的最后一块）：本文件是纯数据字典 + 3 个消费函数，
+改键此前必须整进程重启（~30s 全站不可用窗口）。现 ``get_translations``/``t``/``tr``
+入口带 mtime 探测（2s 节流）——文件变化时在 fresh namespace 里 exec 自身源码、原子替换
+``_TRANSLATIONS``。配合模板 auto_reload（admin.py），**模板 + i18n 键的前端改动刷新
+浏览器即生效**。安全性：``_TRANSLATIONS`` 仅本模块函数引用（无外部直接 import 数据）；
+坏保存态（语法错/缺语言）保留旧字典并告警，绝不崩服务；替换是单引用赋值（原子）。
+"""
+
+import logging as _logging
+import threading as _threading
+import time as _time
+from pathlib import Path as _Path
+
+_logger = _logging.getLogger(__name__)
 
 _TRANSLATIONS = {
     "zh": {
@@ -15876,12 +15891,69 @@ _TRANSLATIONS = {
 
 DEFAULT_LANG = "zh"
 
+# ── 热加载状态（见模块 docstring）────────────────────────────────────────────
+_SRC_PATH = _Path(__file__).resolve()
+_RELOAD_LOCK = _threading.Lock()
+# 基线必须在 **import 时**立即记录（import 装载的字典与此刻磁盘一致）——若推迟到
+# 首次调用才记，「启动后、首个请求前」的改动会被当成基线吞掉（曾实测踩中）。
+try:
+    _loaded_mtime: float = _SRC_PATH.stat().st_mtime
+except OSError:
+    _loaded_mtime = 0.0
+_next_check_ts: float = 0.0         # 节流：最多每 2s stat 一次
+_last_err_mtime: float = -1.0       # 坏保存态告警去重（同一 mtime 只报一次）
+
+
+def _maybe_reload() -> None:
+    """mtime 变化时热重载翻译字典（fail-safe：任何异常保留旧字典）。
+
+    快路径（节流窗口内 / mtime 未变）零锁零 IO 开销；仅真变化时锁内 exec 一次
+    （15k 行 ~100ms，替换为原子引用赋值，并发读方要么旧字典要么新字典，无撕裂）。
+    """
+    global _next_check_ts, _loaded_mtime, _last_err_mtime, _TRANSLATIONS
+    now = _time.monotonic()
+    if now < _next_check_ts:
+        return
+    _next_check_ts = now + 2.0
+    try:
+        mtime = _SRC_PATH.stat().st_mtime
+    except OSError:
+        return
+    if mtime == _loaded_mtime:
+        return
+    with _RELOAD_LOCK:
+        if mtime == _loaded_mtime:  # double-check：另一线程已重载
+            return
+        try:
+            # utf-8-sig：编辑器/PowerShell 可能写出带 BOM 的保存态，裸 utf-8 会把
+            # U+FEFF 混进源码首行 → compile SyntaxError → 热加载静默失效
+            src = _SRC_PATH.read_text(encoding="utf-8-sig")
+            ns: dict = {"__file__": str(_SRC_PATH)}
+            exec(compile(src, str(_SRC_PATH), "exec"), ns)  # noqa: S102
+            new = ns.get("_TRANSLATIONS")
+            if isinstance(new, dict) and new.get("zh") and new.get("en"):
+                _TRANSLATIONS = new
+                _loaded_mtime = mtime
+                _logger.info("web_i18n 热重载完成（zh=%d 键, en=%d 键）",
+                             len(new["zh"]), len(new["en"]))
+            else:
+                if mtime != _last_err_mtime:
+                    _last_err_mtime = mtime
+                    _logger.warning("web_i18n 热重载被拒：_TRANSLATIONS 缺 zh/en（保留旧字典）")
+        except Exception as exc:
+            # 语法错误的中间保存态等：保留旧字典，同一 mtime 只报一次，修好后自动重试
+            if mtime != _last_err_mtime:
+                _last_err_mtime = mtime
+                _logger.warning("web_i18n 热重载失败（保留旧字典）: %s", exc)
+
 
 def get_translations(lang: str = "zh") -> dict:
+    _maybe_reload()
     return _TRANSLATIONS.get(lang, _TRANSLATIONS[DEFAULT_LANG])
 
 
 def t(key: str, lang: str = "zh") -> str:
+    _maybe_reload()
     d = _TRANSLATIONS.get(lang, _TRANSLATIONS[DEFAULT_LANG])
     return d.get(key, key)
 
@@ -15899,6 +15971,7 @@ def tr(request, key: str, default: str = None, /, **fmt) -> str:
     以关键字传入时也会落进 ``**fmt`` 而非与本函数形参撞名抛 ``TypeError``。
     另有门禁 ``test_i18n_placeholders_avoid_reserved_names`` 从源头禁用这些占位符名。
     """
+    _maybe_reload()
     lang = DEFAULT_LANG
     try:
         lang = getattr(getattr(request, "state", None), "ui_lang", DEFAULT_LANG) or DEFAULT_LANG
