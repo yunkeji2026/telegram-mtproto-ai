@@ -350,88 +350,9 @@ class AIChatAssistant:
             except Exception:
                 self.logger.debug("startup_advisory metrics 跳过", exc_info=True)
 
-            # LINE RPA 服务（单账号 or 多账号）
-            try:
-                _line_rpa_cfg = self.config.get_line_rpa_config() or {}
-                if isinstance(_line_rpa_cfg, dict) and _line_rpa_cfg.get("enabled"):
-                    from src.integrations.line_rpa.service import LineRpaService
-                    _line_accounts = _line_rpa_cfg.get("accounts") or []
-                    if _line_accounts:
-                        for _acc in _line_accounts:
-                            if not isinstance(_acc, dict) or not _acc.get("enabled", True):
-                                continue
-                            _acc_cfg = {**_line_rpa_cfg, **_acc}
-                            _acc_cfg.pop("accounts", None)
-                            _aid = _acc.get("account_id") or _acc.get("adb_serial", "default")
-                            svc = LineRpaService(
-                                config_manager=self.config,
-                                skill_manager=self.skill_manager,
-                                line_rpa_cfg=_acc_cfg,
-                                account_id=_aid,
-                            )
-                            self.line_rpa_services.append(svc)
-                            self.logger.info("LINE RPA 账号 [%s] 已构建 serial=%s", _aid, _acc.get("adb_serial"))
-                    else:
-                        svc = LineRpaService(
-                            config_manager=self.config,
-                            skill_manager=self.skill_manager,
-                            line_rpa_cfg=_line_rpa_cfg,
-                        )
-                        self.line_rpa_services.append(svc)
-                        self.logger.info("LINE RPA 服务已构建（单账号，autostart 将在 start() 中决定）")
-                    self.line_rpa_service = self.line_rpa_services[0] if self.line_rpa_services else None
-            except Exception as ex:
-                self.logger.warning("LINE RPA 服务构建跳过: %s", ex)
-
-            # Facebook Messenger RPA 服务（可选；主进程托管循环）
-            try:
-                _msgr_cfg = self.config.get_messenger_rpa_config() or {}
-                if isinstance(_msgr_cfg, dict) and _msgr_cfg.get("enabled"):
-                    from src.integrations.messenger_rpa.service import MessengerRpaService
-                    self.messenger_rpa_service = MessengerRpaService(
-                        config_manager=self.config,
-                        skill_manager=self.skill_manager,
-                        messenger_rpa_cfg=_msgr_cfg,
-                    )
-                    self.logger.info(
-                        "Messenger RPA 服务已构建（autostart=%s）",
-                        bool(_msgr_cfg.get("autostart")),
-                    )
-            except Exception as ex:
-                self.logger.warning("Messenger RPA 服务构建跳过: %s", ex)
-
-            # WhatsApp RPA 服务（单账号 or 多账号）
-            try:
-                _wa_cfg = (self.config.config or {}).get("whatsapp_rpa") or {}
-                if isinstance(_wa_cfg, dict) and _wa_cfg.get("enabled"):
-                    from src.integrations.whatsapp_rpa.service import WhatsAppRpaService
-                    _wa_accounts = _wa_cfg.get("accounts") or []
-                    if _wa_accounts:
-                        for _acc in _wa_accounts:
-                            if not isinstance(_acc, dict) or not _acc.get("enabled", True):
-                                continue
-                            _acc_cfg = {**_wa_cfg, **_acc}
-                            _acc_cfg.pop("accounts", None)
-                            _aid = _acc.get("account_id") or _acc.get("adb_serial", "default")
-                            svc = WhatsAppRpaService(
-                                config_manager=self.config,
-                                skill_manager=self.skill_manager,
-                                wa_cfg=_acc_cfg,
-                                account_id=_aid,
-                            )
-                            self.whatsapp_rpa_services.append(svc)
-                            self.logger.info("WhatsApp RPA 账号 [%s] 已构建 serial=%s", _aid, _acc.get("adb_serial"))
-                    else:
-                        svc = WhatsAppRpaService(
-                            config_manager=self.config,
-                            skill_manager=self.skill_manager,
-                            wa_cfg=_wa_cfg,
-                        )
-                        self.whatsapp_rpa_services.append(svc)
-                        self.logger.info("WhatsApp RPA 服务已构建（单账号）")
-                    self.whatsapp_rpa_service = self.whatsapp_rpa_services[0] if self.whatsapp_rpa_services else None
-            except Exception as ex:
-                self.logger.warning("WhatsApp RPA 服务构建跳过: %s", ex)
+            # RPA 服务: LINE / Messenger / WhatsApp
+            from src.bootstrap.services import setup_rpa_services
+            setup_rpa_services(self)
 
             # 设备管理: 协调器 / 注册表 / 热插拔(HotPlug)
             from src.bootstrap.services import setup_device_management

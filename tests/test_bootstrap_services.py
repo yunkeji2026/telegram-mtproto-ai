@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 from src.bootstrap.services import (
     setup_contacts_subsystem,
     setup_device_management,
+    setup_rpa_services,
 )
 
 
@@ -53,3 +54,26 @@ def test_device_coordinator_enabled_builds():
     ):
         setup_device_management(a)
     assert a.device_coordinator_service == "COORD"
+
+
+def test_rpa_all_disabled():
+    a = MagicMock()
+    a.config.get_line_rpa_config.return_value = {}
+    a.config.get_messenger_rpa_config.return_value = {}
+    a.config.config = {}
+    setup_rpa_services(a)  # 三块全跳过,不抛异常
+
+
+def test_line_rpa_enabled_single_account():
+    a = MagicMock()
+    a.line_rpa_services = []
+    a.config.get_line_rpa_config.return_value = {"enabled": True}
+    a.config.get_messenger_rpa_config.return_value = {}
+    a.config.config = {}
+    with patch(
+        "src.integrations.line_rpa.service.LineRpaService",
+        return_value="LINE_SVC",
+    ):
+        setup_rpa_services(a)
+    assert a.line_rpa_service == "LINE_SVC"
+    assert "LINE_SVC" in a.line_rpa_services
