@@ -169,6 +169,47 @@ class TestHotReload:
         cm.check_and_hot_reload()
         assert len(fired) == 1
 
+    def test_reload_preserves_overlay(self, config_dir):
+        """2026-07 修复：热重载后 config.local.yaml 的深合并不得蒸发。
+
+        旧实现只 safe_load 主文件直接赋值 self.config → overlay 里的运营开关
+        （翻译引擎/发送闸门/backfill…）在重载瞬间全部丢失、静默回到主档默认。
+        """
+        import time
+        (config_dir / "config.local.yaml").write_text(
+            yaml.dump({"workspace": {"auto_translate_inbound": {"backfill": {"enabled": True}}}},
+                      allow_unicode=True), encoding="utf-8")
+        mgr = ConfigManager(str(config_dir / "config.yaml"))
+        asyncio.run(mgr.load())
+        assert mgr.config["workspace"]["auto_translate_inbound"]["backfill"]["enabled"] is True
+
+        # 改主文件触发热重载
+        cfg_path = config_dir / "config.yaml"
+        data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+        data["skills"]["poke"] = 1
+        cfg_path.write_text(yaml.dump(data, allow_unicode=True), encoding="utf-8")
+        os.utime(cfg_path, (time.time() + 10, time.time() + 10))
+        mgr._last_hot_reload_check = 0
+        assert mgr.check_and_hot_reload() is True
+        assert mgr.config["skills"]["poke"] == 1
+        # overlay 仍在（修复前此断言失败）
+        assert mgr.config["workspace"]["auto_translate_inbound"]["backfill"]["enabled"] is True
+
+    def test_overlay_change_triggers_reload(self, config_dir):
+        """2026-07 修复：改 overlay（运营开关的正道）也触发热重载（旧实现只看主文件）。"""
+        import time
+        ov = config_dir / "config.local.yaml"
+        ov.write_text(yaml.dump({"skills": {"ov_flag": 1}}, allow_unicode=True), encoding="utf-8")
+        mgr = ConfigManager(str(config_dir / "config.yaml"))
+        asyncio.run(mgr.load())
+        assert mgr.config["skills"]["ov_flag"] == 1
+
+        ov.write_text(yaml.dump({"skills": {"ov_flag": 2}}, allow_unicode=True), encoding="utf-8")
+        os.utime(ov, (time.time() + 10, time.time() + 10))
+        mgr._last_hot_reload_check = 0
+        assert mgr.check_and_hot_reload() is True     # 主文件没变也重载
+        assert mgr.config["skills"]["ov_flag"] == 2   # 新 overlay 值生效
+
 
 class TestWebAdminEnvOverride:
     """AITR_WEB_* / AITR_DESKTOP_MODE 覆盖 web_admin（桌面壳 serve↔talk 强一致）。"""

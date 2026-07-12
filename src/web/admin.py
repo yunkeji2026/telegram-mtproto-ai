@@ -465,6 +465,9 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
                 pass
 
     config_manager.on_reload(_broadcast_config_reload)
+    # 配置热重载后同步刷新品牌 globals：手改 config/config.local.yaml 的 brand 段
+    # 也能免重启生效（设置页保存路径本就即时刷，这里补齐「直改文件」路径）。
+    config_manager.on_reload(_apply_branding_globals)
 
     from src.web.web_i18n import get_translations
 
@@ -473,6 +476,18 @@ def create_app(config_manager, audit_store=None, boot_ts: float = 0,
         lang = request.query_params.get("lang") or request.cookies.get("ui_lang", "zh")
         request.state.ui_lang = lang
         request.state.i18n = get_translations(lang)
+        # 配置热重载检查点：check_and_hot_reload 原本只挂在 Telegram 消息循环——
+        # 没进站消息的静默期改 config/overlay 永不生效。此处补 web 侧触发；
+        # 先做零成本节流预判（窗口内纯内存比较），过窗才丢线程池做文件 IO/解析，
+        # 绝不在事件循环上做同步 yaml load。
+        try:
+            import time as _hr_t
+            if (_hr_t.time() - config_manager._last_hot_reload_check
+                    >= config_manager._hot_reload_interval):
+                from starlette.concurrency import run_in_threadpool
+                await run_in_threadpool(config_manager.check_and_hot_reload)
+        except Exception:
+            pass
         response = await call_next(request)
         return response
 

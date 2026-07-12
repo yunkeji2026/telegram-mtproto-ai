@@ -12,11 +12,11 @@ import logging
 
 class ConfigManager:
     """配置管理器类"""
-    
+
     def __init__(self, config_path: str = None):
         """
         初始化配置管理器
-        
+
         Args:
             config_path: 配置文件路径，如果为None则使用默认路径
         """
@@ -34,10 +34,11 @@ class ConfigManager:
         self._strategies_cache: Optional[Dict[str, Any]] = None
         self._strategies_mtime: float = 0
         self._config_mtime: float = 0
+        self._overlay_loaded_mtime: float = 0  # config.local.yaml 装载基线（热重载双文件监视）
         self._hot_reload_interval: float = 30.0
         self._last_hot_reload_check: float = 0
         self._on_reload_callbacks: list = []
-    
+
     def _get_default_config_path(self) -> Path:
         """获取默认配置文件路径。
 
@@ -125,14 +126,14 @@ class ConfigManager:
                 self.logger.warning("配置不存在且无内置 example，可写目录仍缺 config: %s", target)
         except Exception as exc:
             self.logger.warning("配置播种失败（忽略）: %s", exc)
-    
+
     async def load(self) -> bool:
         """加载配置文件"""
         try:
             if not self.config_path.exists():
                 self.logger.error(f"配置文件不存在: {self.config_path}")
                 return False
-            
+
             with open(self.config_path, 'r', encoding='utf-8') as f:
                 self.config = yaml.safe_load(f) or {}
 
@@ -149,21 +150,22 @@ class ConfigManager:
             # 验证配置
             if not self._validate_config():
                 return False
-            
+
             self._config_mtime = os.path.getmtime(self.config_path)
+            self._overlay_loaded_mtime = self._overlay_mtime()  # 双文件监视基线
             self.logger.info(f"配置文件加载成功: {self.config_path}")
             # P0-1：非阻断启动自检 — 把 error/warn 摘要打到日志，引导修复错配，
             # 但不改变启动成败（严格 gate 走 `python main.py --check`）。
             self._run_startup_self_check()
             return True
-            
+
         except yaml.YAMLError as e:
             self.logger.error(f"配置文件YAML格式错误: {e}")
             return False
         except Exception as e:
             self.logger.error(f"加载配置文件失败: {e}")
             return False
-    
+
     @staticmethod
     def _env_truthy(name: str) -> bool:
         return str(os.environ.get(name) or "").strip().lower() in (
@@ -423,81 +425,81 @@ class ConfigManager:
     def _validate_config(self) -> bool:
         """验证配置文件"""
         required_sections = ['telegram', 'ai', 'skills']
-        
+
         # 检查必需的部分
         for section in required_sections:
             if section not in self.config:
                 self.logger.error(f"配置缺少必需部分: {section}")
                 return False
-        
+
         # 验证Telegram配置
         telegram_config = self.config.get('telegram', {})
         required_telegram_keys = ['api_id', 'api_hash', 'phone_number']
-        
+
         for key in required_telegram_keys:
             if key not in telegram_config:
                 self.logger.error(f"Telegram配置缺少必需键: {key}")
                 return False
-            
+
             value = telegram_config[key]
             if value == f"YOUR_{key.upper()}" or not value:
                 self.logger.error(f"请配置有效的Telegram {key}")
                 return False
-        
+
         # 验证AI配置
         ai_config = self.config.get('ai', {})
         if 'api_key' not in ai_config or ai_config['api_key'] == "YOUR_AI_API_KEY":
             self.logger.error("请配置有效的 AI API 密钥")
             return False
-        
+
         return True
-    
+
     def get(self, key: str, default: Any = None) -> Any:
         """获取配置值，支持点分隔的嵌套键"""
         keys = key.split('.')
         value = self.config
-        
+
         try:
             for k in keys:
                 value = value[k]
             return value
         except (KeyError, TypeError):
             return default
-    
+
     def set(self, key: str, value: Any) -> None:
         """设置配置值，支持点分隔的嵌套键"""
         keys = key.split('.')
         config = self.config
-        
+
         # 遍历到倒数第二个键
         for k in keys[:-1]:
             if k not in config:
                 config[k] = {}
             config = config[k]
-        
+
         # 设置最后一个键的值
         config[keys[-1]] = value
-    
+
     def save(self) -> bool:
         """保存配置到文件"""
         try:
             # 确保配置目录存在
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
-            
+
             with open(self.config_path, 'w', encoding='utf-8') as f:
                 yaml.dump(self.config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
-            
+
             self.logger.info(f"配置已保存到: {self.config_path}")
             return True
-            
+
         except Exception as e:
             self.logger.error(f"保存配置失败: {e}")
             return False
-    
+
     def get_telegram_config(self) -> Dict[str, Any]:
         """获取Telegram配置"""
         return self.config.get('telegram', {})
-    
+
     def get_ai_config(self) -> Dict[str, Any]:
         """获取AI配置"""
         return self.config.get('ai', {})
@@ -513,23 +515,23 @@ class ConfigManager:
     def get_facebook_messenger_config(self) -> Dict[str, Any]:
         """Facebook Page Messenger Webhook（官方 Graph API）；可选，默认空。"""
         return self.config.get("facebook_messenger") or {}
-    
+
     def get_skills_config(self) -> Dict[str, Any]:
         """获取Skills配置"""
         return self.config.get('skills', {})
-    
+
     def get_intent_config(self) -> Dict[str, Any]:
         """获取意图识别配置"""
         return self.config.get('intent', {})
-    
+
     def get_templates_config(self) -> Dict[str, Any]:
         """获取模板配置"""
         return self.config.get('templates', {})
-    
+
     def get_logging_config(self) -> Dict[str, Any]:
         """获取日志配置"""
         return self.config.get('logging', {})
-    
+
     def get_dynamic_templates_config(self) -> Dict[str, Any]:
         """加载动态话术模板配置（config/templates.yaml），支持热更新（按文件 mtime 重载）"""
         templates_file = self.config_path.parent / "templates.yaml"
@@ -556,7 +558,7 @@ class ConfigManager:
         except Exception as e:
             self.logger.warning("加载动态话术模板失败: %s", e)
             return self._templates_cache if self._templates_cache is not None else {}
-    
+
     def get_exchange_rates_config(self) -> Dict[str, Any]:
         """加载动态汇率配置（config/exchange_rates.yaml），支持热更新（按文件 mtime 重载）"""
         exchange_rates_file = self.config_path.parent / "exchange_rates.yaml"
@@ -583,7 +585,7 @@ class ConfigManager:
         except Exception as e:
             self.logger.warning("加载动态汇率配置失败: %s", e)
             return self._exchange_rates_cache if self._exchange_rates_cache is not None else {}
-    
+
     async def reload(self) -> bool:
         """重新加载配置文件"""
         self.config = {}
@@ -633,9 +635,25 @@ class ConfigManager:
         """注册热重载回调。callback() 在配置成功重载后同步调用。"""
         self._on_reload_callbacks.append(callback)
 
+    def _overlay_mtime(self) -> float:
+        """config.local.yaml 的 mtime（不存在 → 0）。"""
+        try:
+            p = self._overlay_path()
+            return os.path.getmtime(p) if p.exists() else 0.0
+        except Exception:
+            return 0.0
+
     def check_and_hot_reload(self) -> bool:
-        """检查 config.yaml 是否修改，若有则热重载（保护不可变字段）。
-        返回 True 表示发生了重载。适合在消息处理主循环中定期调用。"""
+        """检查 config.yaml **或 config.local.yaml** 是否修改，若有则热重载（保护不可变字段）。
+        返回 True 表示发生了重载。适合在消息处理主循环 / web 请求检查点定期调用。
+
+        2026-07 修复两个缺陷：
+        - **overlay 丢失**：旧实现只 safe_load 主文件直接赋值 self.config——config.local.yaml
+          的所有运营开关（翻译引擎双活/发送闸门/backfill…）在热重载瞬间全部蒸发，直到下次
+          重启才恢复。现重载走与 load() 相同路径（主文件 + _merge_overlay + _apply_env_overrides）。
+        - **overlay 盲区**：只监视主文件 mtime——改 overlay（运营开关的正道）不触发重载。
+          现任一文件变化都触发。
+        """
         import time as _t
         now = _t.time()
         if now - self._last_hot_reload_check < self._hot_reload_interval:
@@ -645,7 +663,8 @@ class ConfigManager:
             if not self.config_path.exists():
                 return False
             mtime = os.path.getmtime(self.config_path)
-            if mtime <= self._config_mtime:
+            ov_mtime = self._overlay_mtime()
+            if mtime <= self._config_mtime and ov_mtime <= getattr(self, "_overlay_loaded_mtime", 0.0):
                 return False
             with open(self.config_path, 'r', encoding='utf-8') as f:
                 new_data = yaml.safe_load(f)
@@ -660,14 +679,19 @@ class ConfigManager:
                     new_tg[key] = old_tg[key]
             new_data['telegram'] = new_tg
             self.config = new_data
+            # 与 load() 同路径：overlay 深合并 + env 覆盖（修「热重载丢 overlay」）
+            self._merge_overlay()
+            self._apply_env_overrides()
             self._config_mtime = mtime
+            self._overlay_loaded_mtime = ov_mtime
             self._quota_rules_cache = None
             self._quota_rules_mtime = 0
             self._templates_cache = None
             self._templates_mtime = 0
             self._exchange_rates_cache = None
             self._exchange_rates_mtime = 0
-            self.logger.info("配置热重载完成 (config.yaml mtime=%s)", mtime)
+            self.logger.info("配置热重载完成 (config.yaml mtime=%s overlay mtime=%s)",
+                             mtime, ov_mtime)
             for cb in self._on_reload_callbacks:
                 try:
                     cb()
