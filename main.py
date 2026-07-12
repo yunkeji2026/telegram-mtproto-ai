@@ -118,6 +118,17 @@ class AIChatAssistant:
             except Exception as ex:
                 self.logger.warning("本机 TTS 托管启动异常（忽略，语音走回落）: %s", ex)
 
+            # 2c. AvatarHub 语音预热：对每个配了参考音的人设调 7852 register_spk
+            #     （显著降首句延迟）。后台 daemon 线程 fire-and-forget：服务没起会先经
+            #     计划任务拉起再轮询；任何失败只影响首句延迟，绝不挡启动/主流程。
+            try:
+                from src.ai.avatar_voice import warmup_personas_async
+                if (self.config.config.get("avatar_voice") or {}).get("enabled"):
+                    warmup_personas_async(self.config.config)
+                    self.logger.info("AvatarHub 语音预热已调度（后台）")
+            except Exception as ex:
+                self.logger.warning("AvatarHub 语音预热调度异常（忽略）: %s", ex)
+
             # 3. 根据配置重新配置日志记录器
             log_config = self.config.config.get("logging", {})
             if log_config:
