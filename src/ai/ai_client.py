@@ -63,6 +63,16 @@ class AIClient(LoggerMixin):
         self._use_openai_compat = False
         self._oa_extra_body: Dict[str, Any] = {}  # 透传给 create() 的额外字段（如 think:false）
         self._ollama_native_base: Optional[str] = None  # 非 None 时走原生 /api/chat（绕过 /v1/ think 问题）
+        # 主对话 LLM 容灾（ai.fallback，2026-07）：云主模型（DeepSeek）不可达/熔断开路时，
+        # 回落 LAN GPU 本地模型出真话，替代 canned 占位句 —— 聊天主功能不再单点依赖公网云。
+        self._fb_client: Optional[Any] = None
+        self._fb_model: str = ""
+        self._fb_extra_body: Dict[str, Any] = {}
+        self._fb_native_base: Optional[str] = None  # Ollama 端点走原生 /api/chat（keep_alive/think 才被尊重）
+        self._fb_timeout: float = 90.0
+        self._fb_keep_alive: str = ""
+        self._fb_calls = 0
+        self._fb_ok = 0
         self._provider = "gemini"
         self.system_prompt = ""
         self.model = "gemini-2.5-flash"
@@ -81,6 +91,11 @@ class AIClient(LoggerMixin):
 
         self.max_conversation_history = 10
         # 熔断器：closed → open → half-open → closed/open 三态
+        # （enabled/阈值在 initialize() 按配置覆盖；此处给安全默认，防直构对象缺属性）
+        self._cb_enabled: bool = False
+        self._cb_window_size: int = 20
+        self._cb_fail_threshold: float = 0.5
+        self._cb_open_seconds: int = 60
         self._cb_window: deque = deque(maxlen=20)
         self._cb_open_until: float = 0.0
         self._cb_half_open: bool = False
@@ -180,7 +195,16 @@ class AIClient(LoggerMixin):
         if not raw_base.endswith("/v1"):
             raw_base = raw_base + "/v1"
         key = api_key if api_key and api_key != "YOUR_AI_API_KEY" else "ollama"
-        self._oa_client = AsyncOpenAI(api_key=key, base_url=raw_base, timeout=float(self.timeout))
+        # 连接 5s 快败 + 关 SDK 内建重试：生成调用方（_generate_reply_openai_compat 等）
+        # 自带 2 次重试循环，SDK 再叠 2 次 = 最多 6 连击且断网黑洞时要等满整读超时；
+        # 拆开后「云不可达 → 本地兜底」切换从分钟级降到 ~10s。读超时保持 self.timeout 不变。
+        try:
+            import httpx
+            _oa_to: Any = httpx.Timeout(float(self.timeout), connect=5.0)
+        except Exception:
+            _oa_to = float(self.timeout)
+        self._oa_client = AsyncOpenAI(api_key=key, base_url=raw_base,
+                                      timeout=_oa_to, max_retries=0)
         self._use_openai_compat = True
         self.client = None
         self._oa_extra_body = {}
@@ -219,6 +243,42 @@ class AIClient(LoggerMixin):
             self.logger.info(
                 "Embedding 使用独立端点 x%d: %s", len(self._oa_embed_clients),
                 ", ".join(u for u, _ in self._oa_embed_clients))
+
+        # 本地兜底对话模型（默认关；base_url+model 齐备才启用）。连接 5s 快败：
+        # 兜底只在主链已坏时被调，此刻用户已在等，不能再被死端点吃满长超时。
+        self._fb_client = None
+        self._fb_model = ""
+        self._fb_extra_body = {}
+        self._fb_native_base = None
+        fb_cfg = ai_config.get("fallback") or {}
+        if isinstance(fb_cfg, dict) and fb_cfg.get("enabled") and str(fb_cfg.get("base_url") or "").strip():
+            fb_base = str(fb_cfg.get("base_url")).strip().rstrip("/")
+            if not fb_base.endswith("/v1"):
+                fb_base = fb_base + "/v1"
+            fb_key = str(fb_cfg.get("api_key") or "ollama").strip() or "ollama"
+            self._fb_timeout = float(fb_cfg.get("timeout", 90))
+            try:
+                import httpx
+                _fb_to: Any = httpx.Timeout(self._fb_timeout, connect=5.0)
+            except Exception:
+                _fb_to = self._fb_timeout
+            self._fb_client = AsyncOpenAI(
+                api_key=fb_key, base_url=fb_base, timeout=_fb_to, max_retries=0)
+            self._fb_model = str(fb_cfg.get("model") or "").strip()
+            # 兜底默认按 think:false 处理（qwen3 思考系模型防慢答；instruct 系无感）
+            if fb_cfg.get("think", False) is False:
+                self._fb_extra_body = {"options": {"think": False}}
+            # keep_alive：断云期让兜底模型驻留显存——只有第一个用户吃冷载（实测 ~27s），
+            # 后续热答秒级。Ollama 的 /v1 兼容层**不认** keep_alive/think（实测 0.31 直接忽略），
+            # 故 Ollama 端点（:11434）改走原生 /api/chat（与主链 _ollama_native_chat 同策略）。
+            self._fb_keep_alive = str(fb_cfg.get("keep_alive") or "30m").strip()
+            _fb_root = fb_base[:-3].rstrip("/")
+            if ai_config.get("fallback_native", True) and (":11434" in _fb_root or "/ollama" in _fb_root.lower()):
+                self._fb_native_base = _fb_root
+            self.logger.info(
+                "本地兜底对话模型已配置: %s @ %s（主模型不可达/熔断时启用%s）",
+                self._fb_model or "?", fb_base,
+                "，原生 /api/chat" if self._fb_native_base else "")
 
         test_result = await self._test_openai_connection()
         if not test_result:
@@ -264,6 +324,12 @@ class AIClient(LoggerMixin):
             return False
         except Exception as e:
             self.logger.error(f"AI API 连接测试失败: {e}")
+            try:
+                from src.utils.host_alert import looks_like_key_failure, notify_key_failure
+                if looks_like_key_failure(e):
+                    notify_key_failure(getattr(self, "_provider", None) or "AI", str(e)[:200])
+            except Exception:
+                pass
             return False
 
     async def _ollama_native_chat(
@@ -325,6 +391,12 @@ class AIClient(LoggerMixin):
                 return False
         except Exception as e:
             self.logger.error(f"AI API 连接测试失败: {e}")
+            try:
+                from src.utils.host_alert import looks_like_key_failure, notify_key_failure
+                if looks_like_key_failure(e):
+                    notify_key_failure(getattr(self, "_provider", None) or "AI", str(e)[:200])
+            except Exception:
+                pass
             return False
 
     async def _generate_reply_openai_compat(
@@ -343,12 +415,14 @@ class AIClient(LoggerMixin):
             return self._fallback_reply(_fb_lang)
         if context is not None:
             context["_current_user_message_for_lang"] = user_message
+        _cb_blocked = False
         if self._cb_enabled and self._cb_open_until > 0:
             now = time.time()
             if now < self._cb_open_until:
+                # 开路：跳过主模型。有本地兜底则由下方兜底出真话，否则维持 canned 占位。
+                _cb_blocked = True
                 self.logger.warning("AI 熔断开路中，跳过 API 调用 request_id=%s", (context or {}).get("request_id") or "n/a")
-                return self._fallback_reply(_fb_lang)
-            if not self._cb_half_open:
+            elif not self._cb_half_open:
                 self._cb_half_open = True
                 self.logger.info("AI 熔断进入半开状态，允许一次探测请求")
                 try:
@@ -356,6 +430,8 @@ class AIClient(LoggerMixin):
                     get_metrics_store().set_circuit_breaker_state("half-open", self._cb_open_until)
                 except Exception:
                     pass
+        if _cb_blocked and not (self._fb_client and self._fb_model):
+            return self._fallback_reply(_fb_lang)
 
         so = strategy_overrides or {}
         use_temperature = float(so["temperature"]) if "temperature" in so else self.temperature
@@ -409,6 +485,13 @@ class AIClient(LoggerMixin):
         messages.append({"role": "user", "content": user_message})
 
         request_id = (context or {}).get("request_id", "")
+        if _cb_blocked:
+            # 熔断开路：主模型免打扰（保住冷却窗口语义），直接尝试本地兜底。
+            fb_reply = await self._try_local_fallback_chat(
+                messages, use_temperature, use_max_tokens, context, request_id,
+                skip_quality_check=_skip_quality_check,
+            )
+            return fb_reply if fb_reply else self._fallback_reply(_fb_lang)
         last_error = None
         start_time = time.time()
         for attempt in range(2):
@@ -522,7 +605,153 @@ class AIClient(LoggerMixin):
             self._cb_window.append(False)
             self._maybe_trip_circuit()
         self.logger.error("AI 两次调用均失败, request_id=%s: %s", request_id or "n/a", last_error)
+        fb_reply = await self._try_local_fallback_chat(
+            messages, use_temperature, use_max_tokens, context, request_id,
+            skip_quality_check=_skip_quality_check,
+        )
+        if fb_reply:
+            return fb_reply
         return self._fallback_reply(_fb_lang)
+
+    async def _try_local_fallback_chat(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+        context: Optional[Dict[str, Any]],
+        request_id: str,
+        *,
+        skip_quality_check: bool = False,
+    ) -> Optional[str]:
+        """主对话模型不可达/熔断时，用 LAN 本地模型出真话（替代 canned 占位句）。
+
+        - 复用主链已构建好的 messages（人设/记忆/上下文全保留），只换模型与端点；
+        - 语言守卫照常跑（守卫内部纠偏调用若碰主模型故障会自然放行原文）；
+        - 兜底自身失败返回 None，由调用方回落 canned —— 行为最差不劣于旧链。
+        """
+        if not (self._fb_client and self._fb_model):
+            return None
+        self._fb_calls += 1
+        t0 = time.time()
+        try:
+            fb_messages = list(messages)
+            # 语言钉子：本地小模型比云主模型更易混语（实测 qwen3-30b 中文里冒日文句），
+            # 明确目标语指令收敛之；语言守卫仍在下游兜底。
+            _rl = str((context or {}).get("reply_lang") or "").strip()
+            if _rl:
+                _lang_name = self._LANG_NAMES.get(_rl, _rl)
+                fb_messages.append({
+                    "role": "system",
+                    "content": f"Reply strictly in {_lang_name} only. Never mix in any other language.",
+                })
+            pt = ct = 0
+            if self._fb_native_base:
+                reply, pt, ct = await self._fb_native_chat(
+                    fb_messages, max_tokens=max_tokens, temperature=temperature)
+            else:
+                kw: Dict[str, Any] = dict(
+                    model=self._fb_model,
+                    messages=fb_messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                if self._fb_extra_body:
+                    kw["extra_body"] = self._fb_extra_body
+                resp = await self._fb_client.chat.completions.create(**kw)
+                reply = ""
+                if resp and getattr(resp, "choices", None):
+                    _msg = resp.choices[0].message
+                    reply = (_msg.content or "").strip()
+                    if not reply:
+                        _extra = getattr(_msg, "model_extra", None) or {}
+                        reply = (_extra.get("reasoning") or "").strip()
+                try:
+                    u = resp.usage
+                    if u:
+                        pt = getattr(u, "prompt_tokens", 0) or 0
+                        ct = getattr(u, "completion_tokens", 0) or 0
+                except Exception:
+                    pass
+            if not reply:
+                self.logger.warning("本地兜底模型返回空 request_id=%s", request_id or "n/a")
+                self._record_local_fallback_metric(False)
+                return None
+            elapsed = time.time() - t0
+            self._fb_ok += 1
+            self.total_calls += 1
+            self.total_tokens += pt + ct
+            self.last_call_time = time.time()
+            try:
+                from src.ai.llm_cost import get_llm_cost
+                get_llm_cost().record(
+                    model=str(self._fb_model),
+                    prompt_tokens=pt, completion_tokens=ct,
+                    tier="local_fallback",
+                    account_id=str((context or {}).get("account_id") or "default"),
+                    latency_ms=int(elapsed * 1000),
+                )
+            except Exception:
+                pass
+            self._record_local_fallback_metric(True, latency_ms=elapsed * 1000)
+            self.logger.warning(
+                "主模型不可用 → 本地兜底模型已出话 model=%s elapsed=%.1fs request_id=%s",
+                self._fb_model, elapsed, request_id or "n/a")
+            reply = await self._guard_reply_language(reply, context)
+            if not skip_quality_check:
+                try:
+                    self._quality_tracker.record_call(
+                        prompt_tokens=pt, completion_tokens=ct,
+                        elapsed_ms=int(elapsed * 1000),
+                        reply=reply, request_id=request_id,
+                    )
+                except Exception:
+                    pass
+            return reply
+        except Exception as e:
+            self._record_local_fallback_metric(False)
+            self.logger.warning("本地兜底模型也失败: %s", e)
+            return None
+
+    def _record_local_fallback_metric(self, ok: bool, latency_ms: float = 0.0) -> None:
+        try:
+            from src.monitoring.metrics_store import get_metrics_store
+            _ms = get_metrics_store()
+            _ms.record_local_llm_fallback(ok)
+            if ok and latency_ms > 0:
+                _ms.record_api_call(latency_ms)
+        except Exception:
+            pass
+
+    async def _fb_native_chat(
+        self,
+        messages: List[Dict[str, Any]],
+        *,
+        max_tokens: int,
+        temperature: float,
+    ) -> tuple:
+        """兜底模型走 Ollama 原生 /api/chat：/v1 兼容层不认 keep_alive/think（实测被忽略），
+        原生口才能让兜底模型断云期驻留显存（keep_alive）+ 思考系模型不慢答（think:false）。
+        返回 (content, prompt_tokens, completion_tokens)，风格对齐 _ollama_native_chat。"""
+        import httpx
+        payload: Dict[str, Any] = {
+            "model": self._fb_model,
+            "messages": messages,
+            "stream": False,
+            "think": False,
+            "options": {"num_predict": max_tokens, "temperature": temperature},
+        }
+        if self._fb_keep_alive and self._fb_keep_alive.lower() not in ("0", "off", "none"):
+            payload["keep_alive"] = self._fb_keep_alive
+        _to = httpx.Timeout(self._fb_timeout, connect=5.0)
+        async with httpx.AsyncClient(timeout=_to) as _hc:
+            resp = await _hc.post(f"{self._fb_native_base}/api/chat", json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+        msg = data.get("message") or {}
+        content = (msg.get("content") or "").strip()
+        pt = int(data.get("prompt_eval_count") or 0)
+        ct = int(data.get("eval_count") or 0)
+        return content, pt, ct
 
     def _apply_tier_overrides(
         self,
@@ -782,6 +1011,12 @@ class AIClient(LoggerMixin):
             self._cb_window.append(False)
             self._maybe_trip_circuit()
         self.logger.error("AI 两次调用均失败, request_id=%s: %s", request_id or "n/a", last_error)
+        try:
+            from src.utils.host_alert import looks_like_key_failure, notify_key_failure
+            if looks_like_key_failure(last_error):
+                notify_key_failure(getattr(self, "_provider", None) or "AI", str(last_error)[:200])
+        except Exception:
+            pass
         return self._fallback_reply(_fb_lang)
 
     def _maybe_trip_circuit(self):
@@ -2562,6 +2797,9 @@ class AIClient(LoggerMixin):
             "model": self.model,
             "temperature": self.temperature,
             "provider": self._provider,
+            "local_fallback_model": self._fb_model or None,
+            "local_fallback_calls": self._fb_calls,
+            "local_fallback_ok": self._fb_ok,
         }
 
     _EMBED_FAIL_THRESHOLD = 3      # 连续失败达此数 → 熔断
