@@ -54,7 +54,26 @@ COLLECT_SUBMODULES = ["src", "uvicorn", "pyrogram", "fastapi"]
 COLLECT_ALL = ["uvicorn"]  # uvicorn 的 lifespan/loops/protocols 子模块按字符串加载
 
 # 重量级可选软依赖：默认排除以控包体（缺失时后端对应能力软降级）。
-EXCLUDES = ["whisper", "torch", "torchaudio", "easyocr", "cv2", "matplotlib", "tkinter"]
+#
+# 桌面端定位＝云 AI + 翻译 + 统一收件箱的轻客户端：本地 ASR/向量嵌入/视觉 OCR/
+# 浏览器自动化一律走云或 LAN GPU 服务，故其重依赖不随包分发。经 grep 核验：src 全库
+# 仅 3 处 import 到这些库（sentence_transformers / faster_whisper，且**全部函数内惰性
+# import**），其余（ctranslate2/av/transformers/scipy/sklearn/onnxruntime/numba/llvmlite/
+# pyarrow/pandas/playwright…）都是这两个「根」的传递依赖——排除它们不碰后端启动链，
+# 缺失时对应可选功能在惰性 import 处软降级（已有 try/except）。
+# 保留：numpy（众多库基础依赖）/ jieba（中文分词，KB 可能用）/ PIL（收件箱图片）。
+EXCLUDES = [
+    # 本地 ASR / 音频声学（桌面走云或 LAN GPU faster-whisper 服务，不做本地转写/分析）
+    "whisper", "faster_whisper", "ctranslate2", "av", "librosa", "soundfile",
+    "torch", "torchaudio",
+    # 本地向量嵌入 / ML / 评测（桌面 embedding 走云 API；eval/训练不随桌面分发）
+    "sentence_transformers", "transformers", "tokenizers", "onnxruntime",
+    "scipy", "sklearn", "numba", "llvmlite", "datasets", "pyarrow", "pandas",
+    # 视觉 OCR / 绘图 / GUI（桌面图像走云 Vision；无需本地 OCR/CV/绘图/Tk）
+    "easyocr", "cv2", "matplotlib", "tkinter", "imageio", "imageio_ffmpeg",
+    # 浏览器自动化（桌面端不跑网页抓取 / RPA）
+    "playwright",
+]
 
 
 def _sep() -> str:
