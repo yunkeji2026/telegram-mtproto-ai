@@ -51,6 +51,24 @@ def start_web_server_thread(assistant: Any, server: Any, web_host: str, web_port
     return web_thread
 
 
+def make_api_auth(web_app: Any):
+    """构造 API 鉴权依赖：优先 admin 的 api_auth（登录校验 + 坐席白名单），
+    回退 require_role('line_rpa')。参数带 Request 注解，避免 FastAPI 误判为 query 参数。
+
+    从 initialize() 抽出并去重：原 _drafts_api_auth / _contacts_api_auth 逻辑一致。
+    """
+    from starlette.requests import Request
+
+    def _api_auth(request: Request):
+        _fn = getattr(web_app.state, "api_auth", None)
+        if _fn is not None:
+            _fn(request)
+        elif hasattr(web_app.state, "require_role"):
+            web_app.state.require_role(request, "line_rpa")
+
+    return _api_auth
+
+
 def start_monitoring_thread(assistant: Any):
     """按配置启动监控 API 后台线程（供前端对接）。从 initialize() 原样抽出（行为不变）。
 

@@ -743,19 +743,8 @@ class AIChatAssistant:
                             )
                             web_app.state.draft_service = draft_svc
 
-                            from starlette.requests import Request as _DraftReq
-
-                            def _drafts_api_auth(request: _DraftReq):
-                                # 统一走 admin 的 _api_auth：登录校验 + 坐席(agent)白名单放行
-                                # （/api/drafts 已在 _agent_api_allowed 内）；主管端点由路由内
-                                # _is_supervisor 守卫。回退 require_role 仅为极端兜底。
-                                # 注：参数必须带 Request 注解，否则 FastAPI 会把 request 当作
-                                # 必填 query 参数导致全部 422。
-                                _fn = getattr(web_app.state, "api_auth", None)
-                                if _fn is not None:
-                                    _fn(request)
-                                elif hasattr(web_app.state, "require_role"):
-                                    web_app.state.require_role(request, "line_rpa")
+                            from src.bootstrap.web_app import make_api_auth
+                            _drafts_api_auth = make_api_auth(web_app)
 
                             register_drafts_routes(web_app, api_auth=_drafts_api_auth)
                             self.logger.info("统一草稿层已挂载（/api/drafts）")
@@ -1908,15 +1897,8 @@ class AIChatAssistant:
                                 register_contacts_routes,
                             )
 
-                            from starlette.requests import Request as _Req
-
-                            def _contacts_api_auth(request: _Req):
-                                # 复用 admin 的 _api_auth（登录校验）；回退 require_role 仅兜底。
-                                _fn = getattr(web_app.state, "api_auth", None)
-                                if _fn is not None:
-                                    _fn(request)
-                                elif hasattr(web_app.state, "require_role"):
-                                    web_app.state.require_role(request, "line_rpa")
+                            from src.bootstrap.web_app import make_api_auth
+                            _contacts_api_auth = make_api_auth(web_app)
 
                             register_contacts_routes(
                                 web_app,
