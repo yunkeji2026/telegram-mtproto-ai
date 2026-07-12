@@ -168,6 +168,7 @@ def assemble_ops_overview(
     orchestrator: Optional[Dict[str, Any]] = None,
     send_routes: Optional[Dict[str, Any]] = None,
     inbound_translation: Optional[Dict[str, Any]] = None,
+    license: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """把四路 payload 装配成总览。
 
@@ -183,6 +184,9 @@ def assemble_ops_overview(
         send_routes: SendRouteStats.dump()（出站路由回落率，信息量，可选）
         inbound_translation: InboxStore.get_inbound_xlate_stats 输出（P0-3/B9 成本护栏
             观测：入站自动译新译出/失败量 + 客户语言分布，可选）
+        license: LicenseManager.status().to_dict()（可选，C6 试用运营看板：授权
+            状态 / 套餐 / 到期 / 试用字符额度用量。纯观测——**不参与总览灯**，因为
+            授权是商业状态而非系统健康，用它抬健康灯会对社区版/试用版误报）。
     """
     roi = roi or {}
     billing = billing or {}
@@ -251,6 +255,14 @@ def assemble_ops_overview(
         # P0-3/B9 成本护栏：入站自动译量（窗口内新译出/失败条数，命中缓存不计）
         "inbound_xlate_translated": int((inbound_translation or {}).get("translated") or 0),
         "inbound_xlate_failed": int((inbound_translation or {}).get("failed") or 0),
+        # C6 试用运营看板：授权状态 / 套餐 / 到期 / 试用字符额度（纯观测，不抬灯）
+        "license_state": str((license or {}).get("state") or ""),
+        "license_plan": str((license or {}).get("plan") or ""),
+        "license_trial": bool((license or {}).get("trial") or False),
+        "license_days_left": (license or {}).get("days_left"),
+        "license_included_chars": int(((license or {}).get("quota") or {}).get("included_chars") or 0),
+        "license_used_chars": int(((license or {}).get("quota") or {}).get("used_chars") or 0),
+        "license_remaining_chars": ((license or {}).get("quota") or {}).get("remaining_chars"),
     }
 
     return {
@@ -268,6 +280,7 @@ def assemble_ops_overview(
             "orchestrator": orchestrator or {},
             "send_routes": send_routes,
             "inbound_translation": inbound_translation or {},
+            "license": license or {},
         },
         "ts": time.time(),
     }

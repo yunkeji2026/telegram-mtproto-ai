@@ -152,11 +152,27 @@ def register_ops_overview_routes(app, ctx) -> None:
         except Exception:
             logger.debug("出站路由统计聚合失败（已忽略）", exc_info=True)
 
+        # C6 试用运营看板：授权状态 + 字符额度用量（社区版/无额度 → included_chars=0，卡自隐）
+        license_info = None
+        try:
+            from src.licensing import get_license_manager
+            from src.licensing.quota_store import check_license_quota
+            license_info = get_license_manager().status().to_dict()
+            q = check_license_quota()
+            license_info["quota"] = {
+                "included_chars": q.get("included", 0),
+                "used_chars": q.get("used", 0),
+                "remaining_chars": q.get("remaining"),
+                "exceeded": q.get("exceeded", False),
+            }
+        except Exception:
+            logger.debug("授权状态聚合失败（已忽略）", exc_info=True)
+
         overview = assemble_ops_overview(
             roi=roi, billing=billing, health=health, reliability=reliability,
             auto_claim=auto_claim, open_incidents=open_incidents,
             companion=companion, orchestrator=orchestrator, send_routes=send_routes,
-            inbound_translation=inbound_translation,
+            inbound_translation=inbound_translation, license=license_info,
         )
         # G2：趋势异动标注（AI 发送量 / 处置量）。
         from src.utils.ops_intel import detect_trend_anomaly

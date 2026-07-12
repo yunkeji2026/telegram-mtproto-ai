@@ -276,3 +276,44 @@ def test_assemble_inbound_translation_absent_defaults_zero():
     assert ov["kpis"]["inbound_xlate_translated"] == 0
     assert ov["kpis"]["inbound_xlate_failed"] == 0
     assert ov["sections"]["inbound_translation"] == {}
+
+
+# ── C6：授权/试用运营看板（纯观测，不参与总览灯） ───────────────────────────
+
+def test_assemble_surfaces_license_trial_quota():
+    lic = {
+        "state": "active", "plan": "pro", "trial": True, "days_left": 12,
+        "quota": {"included_chars": 50000, "used_chars": 12000, "remaining_chars": 38000},
+    }
+    ov = assemble_ops_overview(
+        health={"light": "green"}, reliability={"light": "green"}, license=lic,
+    )
+    k = ov["kpis"]
+    assert k["license_state"] == "active"
+    assert k["license_plan"] == "pro"
+    assert k["license_trial"] is True
+    assert k["license_days_left"] == 12
+    assert k["license_included_chars"] == 50000
+    assert k["license_used_chars"] == 12000
+    assert k["license_remaining_chars"] == 38000
+    assert ov["sections"]["license"] is lic
+    # 关键不变量：授权是商业状态，绝不参与系统健康灯
+    assert ov["overall_light"] == "green"
+
+
+def test_assemble_license_expired_does_not_touch_overall_light():
+    lic = {"state": "expired", "plan": "pro", "trial": False,
+           "quota": {"included_chars": 0, "used_chars": 0, "remaining_chars": None}}
+    ov = assemble_ops_overview(
+        health={"light": "green"}, reliability={"light": "green"}, license=lic,
+    )
+    assert ov["kpis"]["license_state"] == "expired"
+    assert ov["overall_light"] == "green"   # 过期是商业事件，不抬健康灯
+
+
+def test_assemble_license_absent_defaults_empty():
+    ov = assemble_ops_overview()
+    assert ov["kpis"]["license_state"] == ""
+    assert ov["kpis"]["license_included_chars"] == 0
+    assert ov["kpis"]["license_remaining_chars"] is None
+    assert ov["sections"]["license"] == {}
