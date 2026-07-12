@@ -1344,6 +1344,8 @@
       <div id="contacts-list" style="flex:1;overflow-y:auto;padding-bottom:8px;"></div>
     </div>
 
+    <!-- 连接状态横幅：轮询 loadChats 失败点亮、成功熄灭（列表数据保留，不清屏） -->
+    <div id="conn-banner" style="display:none;padding:6px 10px;font-size:12px;background:rgba(217,119,6,.14);color:var(--tk-amber-ink,#b45309);border-bottom:1px solid var(--line-soft,#eee);" data-i18n="inbox.conn.reconnecting">⚠ 连接中断，自动重连中…</div>
     <div class="conv-items" id="conv-items">
       <div class="empty-list"><span class="spin"></span><span style="margin-top:8px;font-size:13px;" data-i18n="inbox.skel.loading">加载中…</span></div>
     </div>
@@ -3298,16 +3300,29 @@ function _syncSelectedClass(){
 }
 
 /* ===== 数据加载 ===== */
-function _showListLoadError(msg){
+/* 连接状态横幅：轮询失败点亮（列表数据保留可用），成功熄灭。 */
+function _setConnBanner(on){
+  const b=document.getElementById('conn-banner');
+  if(b) b.style.display=on?'block':'none';
+}
+window.reloadChats=function(){ loadChats(); };   // 供清屏错误态的内联重试按钮（全局可达）
+function _showListLoadError(msg, force){
+  // 自愈优先：已有列表数据时**不清屏**——数据照常可用，只点亮「重连中」横幅，
+  // 5s/20s 自适应轮询本身就是重连循环，恢复后横幅自动熄灭。
+  // force=true（401 session 失效等不可自愈场景）才走清屏错误态。
+  if(allChats.length && !force){ _setConnBanner(true); return; }
   const el=document.getElementById('conv-items');
   _domMap.clear();
-  el.innerHTML=`<div class="empty-list"><div class="empty-list-icon">⚠️</div><div style="font-size:13px;">${esc(msg||window.T('inbox.skel.load_fail'))}</div><button class="tiny-btn" style="margin-top:8px;" onclick="location.reload()">${window.T('inbox.skel.retry')}</button></div>`;
+  el.innerHTML=`<div class="empty-list"><div class="empty-list-icon">⚠️</div><div style="font-size:13px;">${esc(msg||window.T('inbox.skel.load_fail'))}</div><button class="tiny-btn" style="margin-top:8px;" onclick="reloadChats()">${window.T('inbox.skel.retry')}</button></div>`;
 }
 async function loadChats(){
   try{
     const r=await fetch('/api/unified-inbox/chats?limit=60');
     if(!r.ok){
-      _showListLoadError(r.status===401?window.T('inbox.skel.session_expired'):window.T('inbox.skel.load_fail')+' ('+r.status+')');
+      // 401=session 失效：自动重连无意义，清屏提示重新登录（force）
+      _showListLoadError(
+        r.status===401?window.T('inbox.skel.session_expired'):window.T('inbox.skel.load_fail')+' ('+r.status+')',
+        r.status===401);
       return;
     }
     const d=await r.json();
@@ -3315,6 +3330,7 @@ async function loadChats(){
       _showListLoadError(d.detail||d.error||window.T('inbox.skel.load_fail'));
       return;
     }
+    _setConnBanner(false);   // 恢复：熄灭重连横幅
     // 保留当前打开会话的 unread=0 状态（不被服务端覆盖）
     const prevUnreadCleared = new Set(
       allChats.filter(c=>c.unread===0).map(c=>convKey(c))
@@ -3411,6 +3427,7 @@ window.setStandbyMode=async function(mode){
 function selectChat(key){
   const c=allChats.find(c=>convKey(c)===key);
   if(!c) return;
+  _cancelThreadRetry();   // 切换会话：取消上一会话挂起的自动重试
   selectedKey=key; selectedChat=c;
   _syncSelectedClass();   // 即时高亮（含群组动态区项）
   // 通知引擎据此跳过「正在查看的会话」的提示音/弹窗
@@ -3738,15 +3755,39 @@ function _openConvByCid(cid, opts){
 }
 
 /* ===== 线程加载 ===== */
+/* 失败自愈：红屏不再是死状态——自动指数退避重试（2s→4s→…→30s 封顶），服务重启窗口
+   （~30s）结束后无需人工点击即恢复。切换会话/任何一次成功都会取消挂起的重试。 */
+let _threadRetryTimer=null, _threadRetryN=0;
+function _cancelThreadRetry(){
+  if(_threadRetryTimer){ clearTimeout(_threadRetryTimer); _threadRetryTimer=null; }
+  _threadRetryN=0;
+}
+function _scheduleThreadRetry(c){
+  if(_threadRetryTimer) return;                        // 已有挂起重试
+  const delay=Math.min(30000, 2000*Math.pow(2,_threadRetryN));
+  _threadRetryN++;
+  _threadRetryTimer=setTimeout(()=>{
+    _threadRetryTimer=null;
+    // 仅当用户仍停在同一会话才重试（切走由 selectChat 的 cancel 兜底，这里双保险）
+    if(selectedChat && convKey(selectedChat)===convKey(c)) loadThread(c);
+  }, delay);
+  return delay;
+}
+function _threadFailHtml(title, detail, retryInMs){
+  const hint=retryInMs
+    ? `<div style="font-size:12px;color:var(--text-tiny);margin-top:6px;">${window.Tf('inbox.skel.auto_retry',{s:Math.round(retryInMs/1000)})}</div>`
+    : '';
+  return `<div class="empty-list"><div class="empty-list-icon">⚠️</div><div>${title}</div>${detail}${hint}<div style="margin-top:12px;"><button class="btn" onclick="reloadThread()">${window.T('inbox.skel.retry')}</button></div></div>`;
+}
 async function loadThread(c,silent=false){
   const area=document.getElementById('msg-area');
   if(!silent){
     area.innerHTML=`<div style="text-align:center;padding:20px;"><span class="spin"></span></div>`;
   }
-  // 超时兜底：请求最多等 15s；若服务刚重启/网络抖动导致请求被掐断，不再永久转圈，
-  // 而是显示"加载超时 + 重试按钮"（根治过去"永久 spinner、只能手动刷新"的假死）。
+  // 超时兜底：请求最多等 10s（后端 /thread 常态毫秒级、翻译同步预算 ≤2.5s + 6s 硬兜底，
+  // 10s 只在服务重启/网络断时才吃到）；超时不再永久转圈，而是红屏 + **自动退避重连**。
   const _ctrl = (typeof AbortController!=='undefined') ? new AbortController() : null;
-  const _to = setTimeout(()=>{ try{ _ctrl && _ctrl.abort(); }catch(_e){} }, 15000);
+  const _to = setTimeout(()=>{ try{ _ctrl && _ctrl.abort(); }catch(_e){} }, 10000);
   try{
     const u=`/api/unified-inbox/thread?platform=${enc(c.platform)}&account_id=${enc(c.account_id||'default')}&chat_key=${enc(c.chat_key)}&limit=100`;
     const r=await fetch(u, _ctrl?{signal:_ctrl.signal}:{});
@@ -3754,11 +3795,18 @@ async function loadThread(c,silent=false){
     const d=await r.json().catch(()=>({ok:false,detail:window.T('inbox.err.not_json')}));
     if(!r.ok||!d.ok){
       if(!silent){
-        area.innerHTML=`<div class="empty-list"><div class="empty-list-icon">⚠️</div><div>${window.T('inbox.skel.thread_fail')}</div><div style="font-size:12px;color:var(--text-tiny);margin-top:6px;">${esc(d.detail||d.message||('HTTP '+r.status))}</div><div style="margin-top:12px;"><button class="btn" onclick="reloadThread()">${window.T('inbox.skel.retry')}</button></div></div>`;
+        // 4xx（权限/参数）重试无意义不自动重试；5xx/网关类自动退避重连
+        const _retryable = !r.status || r.status>=500;
+        const _in = _retryable ? _scheduleThreadRetry(c) : 0;
+        area.innerHTML=_threadFailHtml(
+          window.T('inbox.skel.thread_fail'),
+          `<div style="font-size:12px;color:var(--text-tiny);margin-top:6px;">${esc(d.detail||d.message||('HTTP '+r.status))}</div>`,
+          _in);
       }
       console.warn('loadThread bad response', r.status, d);
       return;
     }
+    _cancelThreadRetry();   // 成功：取消一切挂起的自动重试
     // 保留乐观消息（还没被服务器确认的临时消息）
     const prevOptimistic=threadMsgs.filter(m=>m._optimistic);
     threadMsgs=d.messages||[];
@@ -3792,17 +3840,23 @@ async function loadThread(c,silent=false){
     clearTimeout(_to);
     console.warn('loadThread error',e);
     if(!silent){
+      // 网络断/超时/服务重启：自动指数退避重连（红屏只是过渡态，不再依赖人工点重试）
+      const _in = _scheduleThreadRetry(c);
       const _isAbort = e && (e.name==='AbortError');
       const _title = _isAbort ? window.T('inbox.skel.thread_timeout') : window.T('inbox.skel.thread_fail');
       const _detail = _isAbort ? '' : `<div style="font-size:12px;color:var(--text-tiny);margin-top:6px;">${esc(e&&e.message?e.message:e)}</div>`;
-      area.innerHTML=`<div class="empty-list"><div class="empty-list-icon">⚠️</div><div>${_title}</div>${_detail}<div style="margin-top:12px;"><button class="btn" onclick="reloadThread()">${window.T('inbox.skel.retry')}</button></div></div>`;
+      area.innerHTML=_threadFailHtml(_title, _detail, _in);
     }
   }
   startAdaptivePoll();
 }
 
 // 线程加载失败/超时时的重试入口（挂 window 供内联 onclick 可达；重试当前选中会话）。
-window.reloadThread=function(){ if(typeof selectedChat!=='undefined' && selectedChat){ loadThread(selectedChat); } };
+// 手动点击视为新一轮：清退避计数，立即发起。
+window.reloadThread=function(){
+  _cancelThreadRetry();
+  if(typeof selectedChat!=='undefined' && selectedChat){ loadThread(selectedChat); }
+};
 
 async function loadOlderThread(){
   if(!selectedChat||!_threadHasMore||!_threadOldestTs||_threadLoadingOlder) return;

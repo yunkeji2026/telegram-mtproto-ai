@@ -714,6 +714,8 @@ _TRANSLATIONS = {
         "inbox.skel.load_older": "加载更早记录",
         "inbox.skel.thread_fail": "聊天记录加载失败",
         "inbox.skel.thread_timeout": "加载超时（可能是网络波动或服务刚重启）",
+        "inbox.skel.auto_retry": "{s} 秒后自动重连…",
+        "inbox.conn.reconnecting": "⚠ 连接中断，自动重连中…",
         # ── P1 按需拉取更早历史（从手机补拉）+ 通讯录/好友名单面板 ──────────
         "inbox.thread.load_from_phone": "从手机拉取更早",
         "inbox.thread.pulling": "拉取中…",
@@ -8634,6 +8636,8 @@ _TRANSLATIONS = {
         "inbox.skel.load_older": "Load earlier messages",
         "inbox.skel.thread_fail": "Failed to load chat history",
         "inbox.skel.thread_timeout": "Load timed out (network hiccup or the service just restarted)",
+        "inbox.skel.auto_retry": "Auto-reconnecting in {s}s\u2026",
+        "inbox.conn.reconnecting": "\u26a0 Connection lost, auto-reconnecting\u2026",
         # ── P1 on-demand older history (pull from phone) + contacts panel ──
         "inbox.thread.load_from_phone": "Pull earlier from phone",
         "inbox.thread.pulling": "Pulling\u2026",
